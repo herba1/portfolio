@@ -18,7 +18,7 @@ export default function StickyFooter({ height = "100svh", children }) {
           className="w-full sticky"
         >
           {children || (
-            <div className="w-full h-full flex flex-col bg-blue-700 justify-end p-16 ">
+            <div className="w-full overflow-clip h-full flex flex-col bg-blue-700 justify-end p-4 ">
               <h1 className="font-serif text-8xl text-white">
                 place your content here
               </h1>
