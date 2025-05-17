@@ -10,7 +10,7 @@ gsap.registerPlugin(ScrollTrigger, SplitText, ScrambleTextPlugin);
 export default function Home() {
   return (
     <div id="content" className=" page__wrapper ">
-      <Navbar></Navbar>
+      <Navbar phoneVisible={false} ctaVisible={true}></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
         <Image
