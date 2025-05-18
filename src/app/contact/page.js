@@ -1,14 +1,30 @@
-
+"use client";
 import Link from "next/link";
+import gsap from "gsap";
+import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
+import { useGSAP } from "@gsap/react";
+import { useRef } from "react";
 
-export default function Contact(){
-    return(
-    <div>
-        <h1 className={`text-7x`}>Contact page</h1>
-        <Link href={`/`} className={`text-7x`}>Home page</Link>
-        
+gsap.registerPlugin(SplitText);
+
+export default function LinkMask() {
+  const container = useRef();
+
+  const { contextSafe } = useGSAP(() => {}, {
+    scope: container,
+    dependencies: null,
+  });
+
+  const onEnter = contextSafe((e) => {});
+
+  const onLeave = contextSafe(() => {});
+
+  return (
+    <div
+      ref={container}
+      className="w-dvw h-dvh flex justify-center items-center"
+    >
+      <button>Hello !</button>
     </div>
-
-    );
-
+  );
 }
