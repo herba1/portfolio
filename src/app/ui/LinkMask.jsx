@@ -8,7 +8,7 @@ import { useRef } from "react";
 
 gsap.registerPlugin(SplitText);
 
-export default function LinkMask({ link = "#", text = "Hello World",className="",textClassName="" }) {
+export default function LinkMask({ href= "#", text = "Hello World",className="",textClassName="",children }) {
   const container = useRef();
   const tl = useRef(null);
 
@@ -47,6 +47,7 @@ export default function LinkMask({ link = "#", text = "Hello World",className=""
     { scope: container, dependencies: null }
   );
 
+
   const onEnter = contextSafe((e) => {
     tl.current.play();
   });
@@ -64,7 +65,7 @@ export default function LinkMask({ link = "#", text = "Hello World",className=""
       onMouseLeave={onLeave}
       className={`LinkMask__container inline-block overflow-clip relative ${className}`}
     >
-      <Link href={link} className="w-full h-full absolute z-10"></Link>
+      <Link href={href} className="w-full h-full left-0 right-0 absolute z-10"></Link>
       <p className={`LinkMask__text ${textClassName}`}>{text}</p>
       <p className={`LinkMask__text--second absolute ${textClassName}`}>{text}</p>
     </div>

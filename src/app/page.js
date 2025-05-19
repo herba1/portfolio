@@ -4,13 +4,20 @@ import Image from "next/image";
 import gsap from "gsap";
 import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
 import Navbar from "./ui/Navbar";
+import { Inter } from "next/font/google";
+import { useRef } from "react";
+
+// If loading a variable font, you don't need to specify the font weight
+const inter = Inter({ subsets: ["latin"] });
 
 gsap.registerPlugin(ScrollTrigger, SplitText, ScrambleTextPlugin);
 
 export default function Home() {
+  const navTrigger = useRef(null);
+
   return (
-    <div id="content" className=" page__wrapper ">
-      <Navbar phoneVisible={false} ctaVisible={true}></Navbar>
+    <div id="content" className={`${inter.className} overflow-x-hidden`}>
+      <Navbar navTriggerElement={navTrigger} phoneVisible={false} ctaVisible={true}></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
         <Image
@@ -29,7 +36,7 @@ export default function Home() {
       </div>
 
       {/* first section */}
-      <div className="main__container navTrigger">
+      <div ref={navTrigger}  className="main__container ">
         <article className="main-content  bg-white flex justify-center items-center h-svh  ">
           <h1 className="text-center text-4xl ">this is some content</h1>
         </article>

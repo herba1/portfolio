@@ -2,15 +2,87 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { X, Menu, Phone, ChevronDown } from "lucide-react";
+import LinkMask from "./LinkMask";
+import { useGSAP } from "@gsap/react";
+import gsap from "gsap";
+import { useLenis } from "@/context/LenisContext";
+import { ScrollTrigger } from "gsap/all";
 
 function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
+  const container = useRef();
+  const menu = useRef();
+  const tl = useRef();
+  const { lenis } = useLenis();
+
+  useEffect(() => {
+    if (menuIsOpen && lenis) {
+      openMenu();
+      lenis.stop();
+    } else if (!menuIsOpen && lenis) {
+      closeMenu();
+      lenis.start();
+    }
+
+    function handleClickOutside(event) {
+      if (menuIsOpen && menu.current && !menu.current.contains(event.target)) {
+        setMenuIsOpen(false);
+      }
+    }
+
+    document.addEventListener("click", handleClickOutside);
+    return () => {
+      document.removeEventListener("click", handleClickOutside);
+    };
+  }, [menuIsOpen]);
+
+  const { contextSafe } = useGSAP(
+    () => {
+      tl.current = gsap.timeline({ paused: true });
+      gsap.set(".nav__menu", {
+        clipPath: "polygon(0 0,100% 0 , 100% 0, 0 0)",
+      });
+      gsap.set(container.current, {
+        opacity: 0,
+        pointerEvents: "none",
+      });
+
+      tl.current
+        .to(
+          container.current,
+          {
+            opacity: 1,
+            pointerEvents: "all",
+          },
+          "tart"
+        )
+        .to(
+          ".nav__menu",
+          {
+            clipPath: "polygon(0 0,100% 0 , 100% 100%, 0 100%)",
+            opacity: 1,
+          },
+          "start"
+        );
+    },
+    { scope: container }
+  );
+
+  const openMenu = contextSafe(() => {
+    tl.current.play();
+  });
+  const closeMenu = contextSafe(() => {
+    tl.current.timeScale(2).reverse();
+  });
+
   return (
     <menu
-      className={` ${
-        menuIsOpen ? " grid " : " hidden "
-      } nav__menu__container transition-all fixed left-0 top-0 w-dvw h-[100vh] bg-black/40 grid  lg:grid-cols-2 sm:p-5 sm:justify-end sm:items-end"`}
+      ref={container}
+      className={` opacity-0 nav__menu__container fixed left-0 top-0 w-dvw h-[100vh] bg-black/40 grid  lg:grid-cols-2 sm:p-5 sm:justify-end sm:items-end"`}
     >
-      <div className=" rounded-sm nav__menu__modal bg-pink-300 h-full w-full lg:col-start-2 lg:w-auto sm:w-[420px]">
+      <div
+        ref={menu}
+        className=" rounded-sm nav__menu opacity-0 bg-pink-300 h-full w-full lg:col-start-2 lg:w-auto sm:w-[420px]"
+      >
         <div
           className={`nav__menu__top h-16 flex items-center justify-between`}
         >
@@ -30,12 +102,11 @@ function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
               }}
               size={48}
               strokeWidth={1}
-              className="text-white"
+              className="text-white "
             ></X>
           </button>
         </div>
-        <div className={`nav__menu__content h-full p-5`}>
-        </div>
+        <div className={`nav__menu__content h-full p-5`}></div>
       </div>
     </menu>
   );
@@ -78,12 +149,63 @@ const LINKS = [
 ];
 
 function NavDropdownLink({ name, link, links }) {
-  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const container = useRef();
+  const tl = useRef();
+  const tlChev = useRef();
+
+  const { contextSafe } = useGSAP(
+    () => {
+      tl.current = gsap.timeline({ paused: true });
+      tlChev.current = gsap.timeline({ paused: true });
+
+      gsap.set(".link__dropdown__container", {
+        clipPath: "polygon(0 0, 100% 0, 100% 0, 0 0)",
+        opacity: 0,
+      });
+
+      tl.current.to(
+        ".link__dropdown__container",
+        {
+          clipPath: "polygon(0 0, 100% 0, 100% 100%, 0 100%)",
+          opacity: 1,
+        },
+        "in"
+      );
+
+      tl.current.to(
+        ".chevron__button",
+        {
+          ease: "power1.inOut",
+          rotate: -180,
+        },
+        "in"
+      );
+    },
+    { scope: container }
+  );
+
+  const toggleDropdown = contextSafe(() => {
+    // Check the progress of the timeline to determine if it's open or closed
+    if (tl.current.progress() > 0 && !tl.current.reversed()) {
+      closeDropdown();
+    } else {
+      openDropdown();
+    }
+  });
+
+  const closeDropdown = contextSafe(() => {
+    tl.current.timeScale(2.5).reverse();
+    tlChev.current.reverse();
+  });
+  const openDropdown = contextSafe(() => {
+    tl.current.play();
+    tlChev.current.play();
+  });
 
   const dropdownLinks = links.map((link) => {
     return (
       <li key={link.name} className="flex flex-col items-stretch">
-        <Link href={`${link.link}`}>{link.name}</Link>
+        <LinkMask text={link.name} href={`${link.link}`}></LinkMask>
       </li>
     );
   });
@@ -91,29 +213,33 @@ function NavDropdownLink({ name, link, links }) {
   return (
     <li>
       <div
+        onMouseLeave={toggleDropdown}
+        onMouseEnter={toggleDropdown}
+        ref={container}
         className="nav__link__dropdown flex justify-center relative min-w-fit  w-full"
-        onMouseOver={(e) => {
-          setDropdownOpen(true);
-        }}
-        onMouseLeave={(e) => {
-          setDropdownOpen(false);
-        }}
       >
-        <Link className="flex justify-center items-center" href={`${link}`}>
-          {name}
-          <ChevronDown
-            className={`${
-              dropdownOpen ? "-rotate-180" : ""
-            } transition-transform`}
-          />
-        </Link>
+        <div className="flex items-center">
+          <LinkMask
+            text={name}
+            className="flex justify-center items-center"
+            href={link}
+          ></LinkMask>
+          <button
+            onClick={toggleDropdown}
+            type="button"
+            className=" cursor-pointer"
+          >
+            <ChevronDown
+              aria-label="toggle dropdown menu"
+              className={`chevron__button`}
+            ></ChevronDown>
+          </button>
+        </div>
         <div
-          className={`link__dropdown__container min-w-[150%] top-full absolute pt-3  ${
-            dropdownOpen ? " block " : " hidden "
-          } `}
+          className={` opacity-0 overflow-hidden path link__dropdown__container min-w-[150%] top-full absolute pt-3   `}
         >
           <ul
-            className={`bg-pink-300 text-left p-3 rounded-md min-w-fit w-full  `}
+            className={`bg-white outline-1 outline-neutral-300 text-black  text-left p-3 rounded-md min-w-fit w-full  `}
           >
             {dropdownLinks}
           </ul>
@@ -139,13 +265,13 @@ function NavLinks() {
     } else {
       return (
         <li key={link.name}>
-          <Link href={link.link}>{link.name}</Link>
+          <LinkMask text={link.name} href={link.link}></LinkMask>
         </li>
       );
     }
   });
   return (
-    <div className=" hidden font-sans  nav__links md:flex text-center items-center">
+    <div className=" hidden font-sans nav__links md:flex text-center items-center">
       <ul className="flex font text-lg items-center gap-5 lg:gap-10 ">
         {links}
       </ul>
@@ -177,21 +303,69 @@ function NavLogo() {
 }
 
 export default function Navbar({
-  triggerRef,
   phoneVisible,
   ctaVisible,
   phone = "559-XXX-XXXX",
+  navTriggerElement,
 }) {
   const navContainer = useRef();
   const [menuIsOpen, setMenuIsOpen] = useState(false);
+  const tl = useRef();
+
+  useEffect(() => {
+    const navTrigger = contextSafe(() => {
+      ScrollTrigger.create({
+        trigger:navTriggerElement.current,
+        markers:true,
+        start:"top top",
+        end:"bottom-=500 top",
+        onToggle:(self)=>{
+          if(self.isActive){
+            navBgShow();
+          }
+          else{
+            navBgHide();
+          }
+        },
+        
+      })
+    });
+    navTrigger();
+  });
+
+  const { contextSafe } = useGSAP(() => {
+      tl.current = gsap.timeline({
+        paused:true,
+      });
+      tl.current
+      .set('.nav__background',{
+        opacity:1,
+        clipPath:'polygon(0 0, 100% 0, 100% 0, 0 0)',
+        rotate:-1,
+      })
+      .to('.nav__background',{
+        duration:0.3,
+        rotate:0,
+        clipPath:'polygon(0 0, 100% 0, 100% 100%, 0 100%)',
+      },'first')
+      .to(navContainer.current,{
+      },'first')
+  }, { scope:navContainer });
+
+  const navBgShow = contextSafe(()=>{
+    tl.current.play();
+  })
+  const navBgHide= contextSafe(()=>{
+    tl.current.reverse();
+  })
 
   return (
     <nav
       ref={navContainer}
-      className=" fixed perspective-midrange w-[100vw] nav__container text-white h-16 flex justify-between items-center p-5 lg:p-12 "
+      className=" fixed perspective-midrange w-[100vw] nav__container text-white h-14 flex justify-between items-center p-3 lg:p-7 "
     >
       {/* nav background */}
-      <div className="nav__background rounded-b-xs    left-0 right-0 h-full -z-10 absolute"></div>
+      <div className="nav__background backdrop-blur-md opacity-0 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>
       <div className="nav__left">
         <NavLogo />
       </div>
