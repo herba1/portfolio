@@ -39,7 +39,7 @@ function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
     () => {
       tl.current = gsap.timeline({ paused: true });
       gsap.set(".nav__menu", {
-        clipPath: "polygon(0 0,100% 0 , 100% 0, 0 0)",
+        clipPath: "polygon(100% 0%,100% 0% , 100% 0%, 100% 0%)",
       });
       gsap.set(container.current, {
         opacity: 0,
@@ -53,12 +53,13 @@ function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
             opacity: 1,
             pointerEvents: "all",
           },
-          "tart"
+          "start"
         )
         .to(
           ".nav__menu",
           {
-            clipPath: "polygon(0 0,100% 0 , 100% 100%, 0 100%)",
+            ease:'power4.out',
+            clipPath: "polygon(0% 0%,100% 0% , 100% 100%, 0% 100%)",
             opacity: 1,
           },
           "start"
@@ -117,7 +118,7 @@ function NavCta() {
     <div className=" flex items-center justify-center order-2">
       <button
         type="button"
-        className=" cursor-pointer outline-2 p-2 rounded-full outline-pink-300 hover:bg-pink-300 hover:scale-105 active:scale-95 active:opacity-90 transition-all "
+        className=" cursor-pointer bg-pink-300 p-2 rounded-full active:scale-95 active:opacity-90 transition-all "
       >
         Call to Action
       </button>
@@ -139,9 +140,9 @@ const LINKS = [
     name: "Dropdown",
     link: "/",
     links: [
-      { name: "you", link: "/" },
-      { name: "cannot", link: "/" },
-      { name: "see!", link: "/" },
+      { name: "Theres", link: "/" },
+      { name: "A Place", link: "/" },
+      { name: "Called Kokomo", link: "/" },
     ],
   },
   { name: "Home", link: "/" },
@@ -239,7 +240,7 @@ function NavDropdownLink({ name, link, links }) {
           className={` opacity-0 overflow-hidden path link__dropdown__container min-w-[150%] top-full absolute pt-3   `}
         >
           <ul
-            className={`bg-white outline-1 outline-neutral-300 text-black  text-left p-3 rounded-md min-w-fit w-full  `}
+            className={`bg-neutral-50 border-1 border-neutral-100  text-black flex flex-col gap-2   text-left p-3 rounded-md min-w-fit w-full  `}
           >
             {dropdownLinks}
           </ul>
@@ -271,8 +272,8 @@ function NavLinks() {
     }
   });
   return (
-    <div className=" hidden font-sans nav__links md:flex text-center items-center">
-      <ul className="flex font text-lg items-center gap-5 lg:gap-10 ">
+    <div className=" hidden  nav__links md:flex text-center items-center">
+      <ul className="flex text-lg items-center gap-5 lg:gap-10 ">
         {links}
       </ul>
     </div>
@@ -316,7 +317,7 @@ export default function Navbar({
     const navTrigger = contextSafe(() => {
       ScrollTrigger.create({
         trigger:navTriggerElement.current,
-        markers:true,
+        markers:false,
         start:"top top",
         end:"bottom-=500 top",
         onToggle:(self)=>{
@@ -341,10 +342,11 @@ export default function Navbar({
       .set('.nav__background',{
         opacity:1,
         clipPath:'polygon(0 0, 100% 0, 100% 0, 0 0)',
-        rotate:-1,
+        skew:-1,
       })
       .to('.nav__background',{
-        duration:0.3,
+        ease:'power2.inOut',
+        duration:1,
         rotate:0,
         clipPath:'polygon(0 0, 100% 0, 100% 100%, 0 100%)',
       },'first')
@@ -365,7 +367,7 @@ export default function Navbar({
       className=" fixed perspective-midrange w-[100vw] nav__container text-white h-14 flex justify-between items-center p-3 lg:p-7 "
     >
       {/* nav background */}
-      <div className="nav__background backdrop-blur-md opacity-0 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>
+      <div className="nav__background  opacity-0 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>
       <div className="nav__left">
         <NavLogo />
       </div>

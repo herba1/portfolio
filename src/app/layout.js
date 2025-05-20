@@ -20,7 +20,7 @@ import { LenisProvider } from "@/context/LenisContext";
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body>
+      <body className=" antialiased text-base tracking-tight font-medium">
         <LenisProvider>
           {children}
         </LenisProvider>

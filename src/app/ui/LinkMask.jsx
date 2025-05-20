@@ -1,4 +1,3 @@
-
 "use client";
 import Link from "next/link";
 import gsap from "gsap";
@@ -8,9 +7,16 @@ import { useRef } from "react";
 
 gsap.registerPlugin(SplitText);
 
-export default function LinkMask({ href= "#", text = "Hello World",className="",textClassName="",children }) {
+export default function LinkMask({
+  href = "#",
+  text = "Hello World",
+  className = "",
+  textClassName = "",
+  children,
+}) {
   const container = useRef();
   const tl = useRef(null);
+  const tlUnder = useRef(null);
 
   const { contextSafe } = useGSAP(
     () => {
@@ -21,6 +27,7 @@ export default function LinkMask({ href= "#", text = "Hello World",className="",
         type: "chars,lines",
       });
       tl.current = gsap.timeline({ paused: true });
+      tlUnder.current = gsap.timeline({ paused: true });
 
       tl.current
         .to(
@@ -42,20 +49,25 @@ export default function LinkMask({ href= "#", text = "Hello World",className="",
             yPercent: -100,
           },
           "start"
-        );
+        )
+        tlUnder.current.to('.LinkMask__underline',{
+          clipPath:'inset(94% 0% 0% 0%)',
+          ease:'power3.out'
+        },"")
     },
     { scope: container, dependencies: null }
   );
 
-
   const onEnter = contextSafe((e) => {
     tl.current.play();
+    tlUnder.current.play();
   });
 
   const onLeave = contextSafe(() => {
     setTimeout(() => {
       tl.current.reverse();
     }, 200);
+    tlUnder.current.timeScale(1.1).reverse();
   });
 
   return (
@@ -63,12 +75,31 @@ export default function LinkMask({ href= "#", text = "Hello World",className="",
       ref={container}
       onMouseOver={onEnter}
       onMouseLeave={onLeave}
-      className={`LinkMask__container inline-block overflow-clip relative ${className}`}
+      className={`LinkMask__container inline-block overflow-visible relative ${className}`}
     >
-      <Link href={href} className="w-full h-full left-0 right-0 absolute z-10"></Link>
-      <p className={`LinkMask__text ${textClassName}`}>{text}</p>
-      <p className={`LinkMask__text--second absolute ${textClassName}`}>{text}</p>
+      <Link
+        href={href}
+        className="w-full h-full left-0 right-0 absolute z-20"
+      ></Link>
+      <div className="inline-block overflow-clip relative z-10">
+        <p
+          className={`LinkMask__text relative ${textClassName}`}
+        >
+          {text}
+        </p>
+        <p
+          className={`LinkMask__text--second absolute ${textClassName}`}
+        >
+          {text}
+        </p>
+      </div>
+        <p
+          className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  bg-white top-1 pointer-events-none ${textClassName}`}
+          style={{clipPath:"inset(94% 100% 0% 0%)"}}
+        >
+          {text}
+          <span></span>
+        </p>
     </div>
   );
 }
-
