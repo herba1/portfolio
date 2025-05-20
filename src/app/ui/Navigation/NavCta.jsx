@@ -1,5 +1,5 @@
 
-function NavCta({text="Call to Action"}) {
+export default function NavCta({text="Call to Action"}) {
   return (
     <div className=" flex items-center justify-center order-2">
       <button

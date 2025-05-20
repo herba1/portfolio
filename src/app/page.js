@@ -17,7 +17,7 @@ export default function Home() {
 
   return (
     <div id="content" className={``}>
-      <Navbar navTriggerElement={navTrigger} phoneVisible={true} ctaVisible={false} className="font-medium"></Navbar>
+      <Navbar navTriggerElement={navTrigger} phoneVisible={false} ctaVisible={false}></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
         <Image
