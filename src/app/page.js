@@ -3,7 +3,7 @@ import StickyFooter from "./ui/StickyFooter";
 import Image from "next/image";
 import gsap from "gsap";
 import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
-import Navbar from "./ui/Navbar";
+import Navbar from "./ui/Navigation/Navbar";
 import { Inter } from "next/font/google";
 import { useRef } from "react";
 
@@ -17,7 +17,7 @@ export default function Home() {
 
   return (
     <div id="content" className={``}>
-      <Navbar navTriggerElement={navTrigger} phoneVisible={false} ctaVisible={true}></Navbar>
+      <Navbar navTriggerElement={navTrigger} phoneVisible={true} ctaVisible={false} className="font-medium"></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
         <Image
