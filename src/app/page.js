@@ -16,7 +16,7 @@ export default function Home() {
   const navTrigger = useRef(null);
 
   return (
-    <div id="content" className={`${inter.className} overflow-x-hidden`}>
+    <div id="content" className={`${inter.className} `}>
       <Navbar navTriggerElement={navTrigger} phoneVisible={false} ctaVisible={true}></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
