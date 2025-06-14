@@ -24,10 +24,10 @@ export default function PageDistort() {
         scaleY:'0',
         ease:'linear',
         scrollTrigger:{
-            trigger:'.distort--center',
-            markers:true,
-            start:'top bottom',
-            end:'top top',
+            trigger:'.distort--top',
+            markers:false,
+            start:'bottom bottom',
+            end:'bottom top',
             scrub:0,
         }
     })
@@ -37,7 +37,7 @@ export default function PageDistort() {
         ease:'linear',
         scrollTrigger:{
             trigger:'.distort--bottom',
-            markers:true,
+            markers:false,
             start:'top bottom',
             end:'bottom top',
             scrub:0,
@@ -57,10 +57,10 @@ export default function PageDistort() {
             <h1>Everything </h1>
             <h1>Will Be Alright</h1>
         </div>
-        <div className="w-full h-svh distort--center bg-white z-10 ">
+        <div className="w-full h-[1000px] distort--center bg-white z-10 ">
             <Image className="object-cover w-full h-full" alt="img"  src={'/sound.png'} width={500} height={500} ></Image>
         </div>
-        <div className={` distort--bottom w-full h-svh  z-0 sticky top-0 origin-top bg-white font-serif flex flex-col justify-center items-center text-8xl  ${averia.className}`}>
+        <div className={` distort--bottom w-full h-svh  z-0  origin-top bg-white font-serif flex flex-col justify-center items-center text-8xl  ${averia.className}`}>
             <h1>Barbara Ann</h1>
             <h1>Take my Hand</h1>
             <h1>You got me Rockin</h1>
