@@ -6,6 +6,7 @@ import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
 import Navbar from "./ui/Navigation/Navbar";
 import { Inter } from "next/font/google";
 import { useRef } from "react";
+import PageDistort from "./ui/PageDistort";
 
 // If loading a variable font, you don't need to specify the font weight
 const inter = Inter({ subsets: ["latin"] });
@@ -17,7 +18,6 @@ export default function Home() {
 
   return (
     <div id="content" className={``}>
-      <Navbar navTriggerElement={navTrigger} phoneVisible={false} ctaVisible={false}></Navbar>
       {/* HERO BG SECTION */}
       <div className="h-svh sticky top-0 -z-10 ">
         <Image
@@ -37,13 +37,11 @@ export default function Home() {
 
       {/* first section */}
       <div ref={navTrigger}  className="main__container ">
-        <article className="main-content  bg-white flex justify-center items-center h-svh  ">
+        <article className="main-content  bg-red-300 flex justify-center items-center h-svh  ">
           <h1 className="text-center text-4xl ">this is some content</h1>
         </article>
-        <article className="main-content  bg-white flex justify-center items-center h-svh  ">
-          <h1 className="text-center text-4xl ">this is some content</h1>
-        </article>
-        <article className="main-content  bg-white flex justify-center items-center h-svh  ">
+        <PageDistort/>
+        <article className="main-content  bg-green-300 flex justify-center items-center h-svh  ">
           <h1 className="text-center text-4xl ">this is some content</h1>
         </article>
       </div>

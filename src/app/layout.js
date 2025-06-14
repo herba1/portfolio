@@ -7,6 +7,7 @@
 // import { ScrollSmoother } from "gsap/ScrollSmoother";
 // import { SplitText } from "gsap/SplitText";
 import { LenisProvider } from "@/context/LenisContext";
+import Navbar from "./ui/Navigation/Navbar";
 
 // // Register all GSAP plugins centrally
 // gsap.registerPlugin(
@@ -22,6 +23,7 @@ export default function RootLayout({ children }) {
     <html lang="en">
       <body className=" antialiased tracking-tight">
         <LenisProvider>
+      <Navbar className="mix-blend-difference" navTriggerElement={null} phoneVisible={false} ctaVisible={false}></Navbar>
           {children}
         </LenisProvider>
       </body>

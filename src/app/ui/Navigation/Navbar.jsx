@@ -23,7 +23,6 @@ export default function Navbar({
   useEffect(() => {
     const navTrigger = contextSafe(() => {
       ScrollTrigger.create({
-        trigger:navTriggerElement.current,
         markers:false,
         start:"top top",
         end:"bottom-=500 top",
@@ -79,7 +78,7 @@ export default function Navbar({
         <NavLogo />
       </div>
       <div className="nav__right gap-5 lg:gap-10 flex">
-        <NavMenuButton setMenuIsOpen={setMenuIsOpen} />
+        <NavMenuButton className={'!hidden'} setMenuIsOpen={setMenuIsOpen} />
         {phoneVisible && <NavPhone />}
         {ctaVisible && <NavCta />}
         <NavLinks />
