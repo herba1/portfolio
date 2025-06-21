@@ -4,6 +4,7 @@ import gsap from "gsap";
 import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
 import { useGSAP } from "@gsap/react";
 import { useRef } from "react";
+import TransitionLink from "../ui/Navigation/TransitionLink";
 
 gsap.registerPlugin(SplitText);
 
@@ -39,8 +40,10 @@ export default function LinkMask() {
   return (
     <div
       ref={container}
-      className="w-dvw h-dvh flex justify-center items-center"
+      className="min-h-[100vh] bg-white  flex justify-center items-center"
     >
+        <TransitionLink href="/">Wouldnt It Be Nice</TransitionLink>
+        <TransitionLink href="/contact">Oh Caroline</TransitionLink>
       <section>
         <h3 className="animate__line--title">one</h3>
         <ul className="animate__line--text">

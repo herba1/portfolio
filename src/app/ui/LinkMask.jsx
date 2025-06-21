@@ -49,25 +49,40 @@ export default function LinkMask({
             yPercent: -100,
           },
           "start"
+        );
+      tlUnder.current
+        .to(
+          ".LinkMask__underline",
+          {
+            clipPath: "inset(96% 0% 0% 0%)",
+            ease: "power3.out",
+            duration: 0.4,
+          },
+          "start"
         )
-        tlUnder.current.to('.LinkMask__underline',{
-          clipPath:'inset(94% 0% 0% 0%)',
-          ease:'power3.out'
-        },"")
+        .to(
+          ".LinkMask__underline",
+          {
+            clipPath: "inset(96% 0% 0% 100%)",
+            ease: "power3.out",
+            duration: 0.4,
+          },
+          "two"
+        );
     },
     { scope: container, dependencies: null }
   );
 
   const onEnter = contextSafe((e) => {
     tl.current.play();
-    tlUnder.current.play();
+    tlUnder.current.tweenFromTo(0, "two");
   });
 
   const onLeave = contextSafe(() => {
     setTimeout(() => {
       tl.current.reverse();
     }, 200);
-    tlUnder.current.timeScale(1.1).reverse();
+    tlUnder.current.play();
   });
 
   return (
@@ -82,24 +97,18 @@ export default function LinkMask({
         className="w-full h-full left-0 right-0 absolute z-20"
       ></Link>
       <div className="inline-block overflow-clip relative z-10">
-        <p
-          className={`LinkMask__text relative ${textClassName}`}
-        >
-          {text}
-        </p>
-        <p
-          className={`LinkMask__text--second absolute ${textClassName}`}
-        >
+        <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>
+        <p className={`LinkMask__text--second absolute ${textClassName}`}>
           {text}
         </p>
       </div>
-        <p
-          className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  bg-white top-1 pointer-events-none ${textClassName}`}
-          style={{clipPath:"inset(94% 100% 0% 0%)"}}
-        >
-          {text}
-          <span></span>
-        </p>
+      <p
+        className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  bg-white top-1 pointer-events-none ${textClassName}`}
+        style={{ clipPath: "inset(96% 100% 0% 0%)" }}
+      >
+        {text}
+        <span></span>
+      </p>
     </div>
   );
 }

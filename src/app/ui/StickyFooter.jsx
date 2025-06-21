@@ -1,8 +1,8 @@
-export default function StickyFooter({ height = "100lvh", children }) {
+export default function StickyFooter({ height = "100lvh", children, className="" }) {
   return (
     <footer
       style={{ height }}
-      className="flex flex-col justify-end relative -z-10 bg-black"
+      className={`flex flex-col justify-end relative  bg-black z-0 ${className}`}
     >
       {/* Double height container */}
       <div
