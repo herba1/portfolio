@@ -10,7 +10,7 @@ export default function Marquee({
   className,
 }) {
   const container = useRef(null);
-  const delta = useRef(1);
+  const delta = useRef(0.05);
   const deltaMultiplier = useRef(0);
   const progress = useRef(0);
   const direction = useRef(1);
@@ -43,7 +43,7 @@ export default function Marquee({
         // Convert scroll velocity to speed multiplier (0-1 range)
         deltaMultiplier.current = gsap.utils.clamp(
           0,
-          1,
+          0.5,
           Math.abs(e.getVelocity() / 1000)
         );
         // Update scroll direction and recalculate container position
@@ -63,7 +63,7 @@ export default function Marquee({
       });
       
       // Increment progress: base speed + scroll-based inertia * direction
-      progress.current += (0.1 + deltaMultiplier.current) * direction.current ;
+      progress.current += (delta.current + deltaMultiplier.current) * direction.current ;
       console.log(progress.current);
       requestAnimationFrame(loop);
     };
