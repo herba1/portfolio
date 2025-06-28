@@ -77,12 +77,16 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
           },
           "start"
         )
-        .to(splits.chars, {
-          yPercent: 0,
-          stagger:0.015,
-          ease: "power3.out",
-          duration: 0.8,
-        },"-=1.1");
+        .to(
+          splits.chars,
+          {
+            yPercent: 0,
+            stagger: 0.015,
+            ease: "power3.out",
+            duration: 0.8,
+          },
+          "-=1.1"
+        );
     },
     { scope: container }
   );
@@ -91,7 +95,11 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
     tl.current.timeScale(1).play();
   });
   const closeMenu = contextSafe(() => {
-    tl.current.timeScale(1.5).reverse().progress(1);
+    if (tl.current.progress()) {
+      tl.current.timeScale(1.5).reverse();
+    } else {
+      tl.current.timeScale(1.5).reverse().progress(1);
+    }
   });
 
   return (
