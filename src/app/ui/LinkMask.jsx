@@ -54,7 +54,7 @@ export default function LinkMask({
         .to(
           ".LinkMask__underline",
           {
-            clipPath: "inset(96% 0% 0% 0%)",
+            clipPath: "inset(95% 0% 0% 0%)",
             ease: "power3.out",
             duration: 0.4,
           },
@@ -63,7 +63,7 @@ export default function LinkMask({
         .to(
           ".LinkMask__underline",
           {
-            clipPath: "inset(96% 0% 0% 100%)",
+            clipPath: "inset(95% 0% 0% 100%)",
             ease: "power3.out",
             duration: 0.4,
           },
@@ -103,8 +103,8 @@ export default function LinkMask({
         </p>
       </div>
       <p
-        className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  bg-white top-1 pointer-events-none ${textClassName}`}
-        style={{ clipPath: "inset(96% 100% 0% 0%)" }}
+        className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  top-1 pointer-events-none bg-dark  `}
+        style={{ clipPath: "inset(95% 100% 0% 0%)" }}
       >
         {text}
         <span></span>

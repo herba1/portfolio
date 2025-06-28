@@ -1,7 +1,7 @@
 import { LenisProvider } from "@/context/LenisContext";
 import Navbar from "./ui/Navigation/Navbar";
 import StickyFooter from "./ui/StickyFooter";
-
+import { inter } from "./fonts";
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
@@ -9,12 +9,12 @@ export default function RootLayout({ children }) {
         <LenisProvider>
           <div className="relative">
             <Navbar
-              className="z-20"
+              className="z-20 "
               phoneVisible={false}
               ctaVisible={false}
             ></Navbar>
-            <div className="z-10 relative">{children}</div>
-            <StickyFooter />
+            <div className={`z-10 relative bg-light `}>{children}</div>
+            {/* <StickyFooter /> */}
           </div>
         </LenisProvider>
       </body>

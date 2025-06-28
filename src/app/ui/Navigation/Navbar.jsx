@@ -8,6 +8,7 @@ import NavMenuButton from "./NavMenuButton";
 import NavPhone from "./NavPhone";
 import NavLinks from "./NavLinks";
 import NavMenu from "./NavMenu";
+import { inter } from "@/app/fonts";
 
 export default function Navbar({
   phoneVisible,
@@ -42,18 +43,18 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={` fixed perspective-midrange w-full  nav__container text-white h-14 flex justify-between items-center p-3 lg:px-12 lg:py-10 ${className}`} 
+      className={` fixed perspective-midrange w-full   nav__container flex justify-between items-center  p-4 md:p-6 ${inter.className} font-medium text-base tracking-body-base ${className}`} 
     >
       {/* nav background */}
-      <div className="nav__background  opacity-100 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>
+      <div className="nav__background  opacity-0 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>
       <div className="nav__left">
         <NavLogo />
       </div>
       <div className="nav__right gap-5 lg:gap-10 flex">
-        <NavMenuButton className={'!hidden'} setMenuIsOpen={setMenuIsOpen} />
+        <NavMenuButton className={''} setMenuIsOpen={setMenuIsOpen} >Menu</NavMenuButton>
         {phoneVisible && <NavPhone />}
         {ctaVisible && <NavCta />}
-        <NavLinks />
+        <NavLinks className />
         <NavMenu
           menuIsOpen={menuIsOpen}
           setMenuIsOpen={setMenuIsOpen}

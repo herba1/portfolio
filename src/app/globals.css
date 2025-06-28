@@ -1,1 +1,10 @@
 @import "tailwindcss";
+
+@theme{
+    --color-dark: #1a1a1a;
+    --color-light: #FCECDD;
+
+    --tracking-body-base:-0.04em;
+    --tracking-heading: -0.01em;
+    --tracking-heading-mobile: -0.03em
+}
