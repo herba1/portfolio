@@ -104,7 +104,7 @@ function HeroTextTop({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[64px] leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center tet-[64px] text-6xl leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -184,7 +184,7 @@ function HeroTextBottom({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[64px] leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center  text-6xl leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
