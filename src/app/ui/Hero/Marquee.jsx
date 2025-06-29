@@ -10,7 +10,7 @@ export default function Marquee({
   className,
 }) {
   const container = useRef(null);
-  const delta = useRef(0.05);
+  const delta = useRef(0.025);
   const deltaMultiplier = useRef(0);
   const progress = useRef(0);
   const direction = useRef(1);
@@ -43,7 +43,7 @@ export default function Marquee({
         // Convert scroll velocity to speed multiplier (0-1 range)
         deltaMultiplier.current = gsap.utils.clamp(
           0,
-          0.5,
+          0.4,
           Math.abs(e.getVelocity() / 1000)
         );
         // Update scroll direction and recalculate container position
@@ -64,17 +64,16 @@ export default function Marquee({
       
       // Increment progress: base speed + scroll-based inertia * direction
       progress.current += (delta.current + deltaMultiplier.current) * direction.current ;
-      console.log(progress.current);
       requestAnimationFrame(loop);
     };
     loop();
   });
 
   return (
-    <div className={` ${className} overflow-x-clip relative w-full`}>
+    <div className={`overflow-x-clip relative w-full flex items-center ${className} `}>
       <span
         ref={container}
-        className={`marquee__item ${instrumentSerif.className} inline-block whitespace-nowrap text-8xl`}
+        className={`marquee__item ${instrumentSerif.className} inline-block whitespace-nowrap `}
       >
         {children}
         {children}

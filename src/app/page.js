@@ -4,6 +4,8 @@ import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
 import { Inter } from "next/font/google";
 import { useRef } from "react";
 import Marquee from "./ui/Hero/Marquee";
+import HeroSection from "./ui/Hero/HeroSection";
+import ImagePixel from "./ui/ImagePixel";
 
 // If loading a variable font, you don't need to specify the font weight
 const inter = Inter({ subsets: ["latin"] });
@@ -14,10 +16,11 @@ export default function Home() {
   const navTrigger = useRef(null);
 
   return (
-    <div id="content" className={` relative`}>
-      <main ref={navTrigger}  className="main__container h-1000">
-        <article className="main-content bg-light    flex justify-center items-center min-h-svh  ">
-          <Marquee></Marquee>
+    <div id="content" className={`relative`}>
+      <main ref={navTrigger} className="main__container h-700">
+        <article className="main-content bg-light flex h-fit min-h-svh items-center justify-center">
+          <HeroSection></HeroSection>
+          {/* <Marquee></Marquee> */}
         </article>
       </main>
     </div>
