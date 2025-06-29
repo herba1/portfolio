@@ -43,7 +43,7 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={` fixed perspective-midrange w-full   nav__container flex justify-between items-center  p-4 md:p-6 ${inter.className} font-medium text-base tracking-body-base ${className}`} 
+      className={`fixed perspective-midrange w-full   nav__container flex justify-between items-center  p-4 md:p-6 ${inter.className} font-medium text-base tracking-body-base ${className}`} 
     >
       {/* nav background */}
       <div className="nav__background  opacity-0 rounded-b-xs  bg-black   left-0 right-0 h-full -z-10 absolute"></div>

@@ -23,7 +23,7 @@ function ParralaxImage({
       gsap.to(".parralax", {
         y: -30,
         scrollTrigger: {
-          scrub: true,
+          scrub: 1.5,
           start: "top top",
         },
       });

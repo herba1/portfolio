@@ -44,7 +44,7 @@ export default function Marquee({
         deltaMultiplier.current = gsap.utils.clamp(
           0,
           0.4,
-          Math.abs(e.getVelocity() / 1000)
+          Math.abs(e.getVelocity() / 5000)
         );
         // Update scroll direction and recalculate container position
         direction.current = e.direction;

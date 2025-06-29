@@ -26,8 +26,14 @@ export function LenisProvider({ children }) {
       smooth: true,
       smoothTouch: false,
       touchMultiplier: 2,
-      // syncTouch:true,
-      // infinite:true,
+      syncTouch:true,
+      infinite:true,
+      onScroll:({scroll})=>{
+        if(scroll<0){
+          lenis.scrollTo(0,{immediate:true});
+        }
+
+      }
     });
 
     setLenis(lenisInstance);

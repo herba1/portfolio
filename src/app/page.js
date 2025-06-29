@@ -6,6 +6,8 @@ import { useRef } from "react";
 import Marquee from "./ui/Hero/Marquee";
 import HeroSection from "./ui/Hero/HeroSection";
 import ImagePixel from "./ui/ImagePixel";
+import PageDistort from "./ui/PageDistort";
+import Portoflio from "./ui/Porotflio/Portoflio";
 
 // If loading a variable font, you don't need to specify the font weight
 const inter = Inter({ subsets: ["latin"] });
@@ -16,13 +18,19 @@ export default function Home() {
   const navTrigger = useRef(null);
 
   return (
-    <div id="content" className={`relative`}>
-      <main ref={navTrigger} className="main__container h-700">
-        <article className="main-content bg-light flex h-fit min-h-svh items-center justify-center">
-          <HeroSection></HeroSection>
-          {/* <Marquee></Marquee> */}
-        </article>
-      </main>
-    </div>
+    <main id="content" className={`relative`}>
+      <div className="hero__container">
+        <HeroSection></HeroSection>
+      </div>
+      <div className="bg-light mx-4 lg:mx-6 min-h-lvh">
+        <Portoflio></Portoflio>
+      </div>
+      <div className="hero__container">
+        <HeroSection></HeroSection>
+      </div>
+      {/* <div className="hero__container">
+        <HeroSection></HeroSection>
+      </div> */}
+    </main>
   );
 }
