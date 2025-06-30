@@ -1,5 +1,43 @@
 import { instrumentSerif, inter } from "@/app/fonts";
 import { ExternalLink, Plus, SquareArrowOutUpRight } from "lucide-react";
+import Image from "next/image";
+import { Splide, SplideSlide, SplideTrack } from "@splidejs/react-splide";
+import "@splidejs/react-splide/css";
+
+function ProjectImages({}) {
+  return (
+    <div className="overflow-clip grid grid-cols-12 gap-4 min-h-fit">
+      <Image
+        src={"/1.png"}
+        className="aspect-video object-cover rounded-2xl col-span-full md:col-span-6 lg:col-span-4 xl:col-span-3 w-full"
+        alt="img"
+        height={300}
+        width={300}
+      ></Image>
+      <Image
+        src={"/2.png"}
+        className="aspect-video object-cover rounded-2xl col-span-full md:col-span-6 lg:col-span-4 xl:col-span-3 w-full"
+        alt="img"
+        height={300}
+        width={300}
+      ></Image>
+      <Image
+        src={"/3.png"}
+        className="aspect-video object-cover rounded-2xl col-span-full md:col-span-6 lg:col-span-4 xl:col-span-3 w-full"
+        alt="img"
+        height={300}
+        width={300}
+      ></Image>
+      <Image
+        src={"/4.png"}
+        className="aspect-video object-cover rounded-2xl col-span-full md:col-span-6 lg:col-span-4 xl:col-span-3 w-full"
+        alt="img"
+        height={300}
+        width={300}
+      ></Image>
+    </div>
+  );
+}
 
 export default function Portoflio() {
   return (
@@ -95,11 +133,24 @@ export default function Portoflio() {
                 </ul>
               </div>
             </div>
-            <div className="content__testimony mx-auto my-6 lg:grid grid-cols-12 gap-6">
-              <p className={`${instrumentSerif.className} col-start-3 max-w-2xl lg:max-w-7xl lg:text-4xl col-span-8 text-2xl text-center tracking-heading leading-tight`}>
-                "Working as Herbart's client to develop my art website was great! He asked clear, detailed questions to gauge my thoughts and preferences, and was able to elaborate if I was uncertain or confused. Herbart was very efficient, and gave many progress updates over the span of the month we worked together. He captured my ideas amazingly, and went above and beyond in areas where I gave him creative freedom. The colors and animations of the website are very aesthetically pleasing just as I was hoping, so I'm happy with the results!"
+            <div className="content__testimony mx-auto my-6 grid-cols-12 gap-6 lg:grid">
+              <p
+                className={`${instrumentSerif.className} tracking-heading col-span-8 col-start-3 max-w-2xl text-center text-2xl leading-tight lg:max-w-7xl lg:text-4xl`}
+              >
+                "Working as Herbart's client to develop my art website was
+                great! He asked clear, detailed questions to gauge my thoughts
+                and preferences, and was able to elaborate if I was uncertain or
+                confused. Herbart was very efficient, and gave many progress
+                updates over the span of the month we worked together. He
+                captured my ideas amazingly, and went above and beyond in areas
+                where I gave him creative freedom. The colors and animations of
+                the website are very aesthetically pleasing just as I was
+                hoping, so I'm happy with the results!"
               </p>
             </div>
+            <section className="gallery">
+              <ProjectImages></ProjectImages>
+            </section>
           </div>
           <div className="border-anim border-dark pointer-events-none absolute top-0 left-0 h-full w-full border-b-2"></div>
         </li>
