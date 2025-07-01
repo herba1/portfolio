@@ -3,7 +3,6 @@ import { instrumentSerif, inter } from "@/app/fonts";
 import { ExternalLink, Plus } from "lucide-react";
 import Image from "next/image";
 import { PortableText } from "next-sanity";
-import { ConfigResolutionError } from "sanity";
 import { urlFor } from "@/sanity/lib/image";
 
 function ProjectHeader({ className = "", data }) {
@@ -52,14 +51,6 @@ function ProjectGallery({ className = "", data }) {
       className={`grid min-h-fit grid-cols-12 gap-4 overflow-clip ${className}`}
     >
       {images}
-      {/* <Image
-        src={"/1.png"}
-        className="col-span-full aspect-video w-full rounded-2xl object-cover md:col-span-6 lg:col-span-4 xl:col-span-3"
-        alt="img"
-        height={300}
-        width={300}
-        // style={{imageRendering:'pixelated'}}
-      ></Image> */}
     </div>
   );
 }
