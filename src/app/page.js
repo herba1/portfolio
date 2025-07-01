@@ -13,7 +13,7 @@ export default function Home() {
         <HeroSection></HeroSection>
       </div>
       <div className="bg-light mx-4 lg:mx-6 min-h-lvh">
-        {/* <Portoflio></Portoflio> */}
+        <Portoflio></Portoflio>
       </div>
       {/* <div className="hero__container">
         <HeroSection></HeroSection>
