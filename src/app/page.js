@@ -15,9 +15,9 @@ export default function Home() {
       <div className="bg-light mx-4 lg:mx-6 min-h-lvh">
         <Portoflio></Portoflio>
       </div>
-      {/* <div className="hero__container">
+      <div className="hero__container">
         <HeroSection></HeroSection>
-      </div> */}
+      </div>
     </main>
   );
 }

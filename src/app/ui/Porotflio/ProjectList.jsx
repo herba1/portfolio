@@ -6,7 +6,8 @@ import { PortableText } from "next-sanity";
 import { urlFor } from "@/sanity/lib/image";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { useRef } from "react";
+import { useRef,useState } from "react";
+import { useLenis } from "@/context/LenisContext";
 
 function ProjectHeader({ className = "", data, onClick }) {
   const { name, year, work } = data;
@@ -14,7 +15,7 @@ function ProjectHeader({ className = "", data, onClick }) {
   return (
     <div
       onClick={onClick}
-      className="text-dark hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 md:grid-cols-12 md:gap-6"
+      className="text-dark  hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] active:px-2.5 hover:px-2 md:grid-cols-12 md:gap-6"
     >
       <h3 className="tracking-body-base col-span-2 md:col-span-4">{name}</h3>
       <h3 className="tracking-body-base hidden md:col-span-4 md:block">
@@ -134,9 +135,10 @@ export function ProjectMetadata({ className = "", data }) {
   );
 }
 
-export function ProjectItem({ className = "", data }) {
+export function ProjectItem({ className = "", data}) {
   const itemContainer = useRef(null);
   const tl = useRef(null);
+  const {lenis} =useLenis();
 
   const { contextSafe } = useGSAP(
     () => {
@@ -152,12 +154,12 @@ export function ProjectItem({ className = "", data }) {
 
       tl.current.to(content, {
         height: "auto",
-        ease: "power4.out",
+        ease: "power4.inOut",
         opacity: 1,
         duration: 0.5,
-        onComplete: () => {
-          console.log("complete");
-        },
+        onComplete:()=>{
+          // console.log(myLenis)
+        }
       });
     },
     { scope: itemContainer.current },
@@ -168,6 +170,7 @@ export function ProjectItem({ className = "", data }) {
       tl.current.reverse();
     } else {
       tl.current.play();
+      lenis.scrollTo(itemContainer.current)
     }
   });
 
@@ -184,8 +187,9 @@ export function ProjectItem({ className = "", data }) {
 }
 
 export function ProjectList({ className = "", data }) {
+  const {isOpen, setIsOpen} = useState(false);
   const items = data.map((item) => {
-    return <ProjectItem key={item.name} data={item}></ProjectItem>;
+    return <ProjectItem  key={item.name} data={item}></ProjectItem>;
   });
 
   return (
