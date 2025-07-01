@@ -1,6 +1,8 @@
+import { getProjects } from "@/app/api/cmsData";
 import { instrumentSerif, inter } from "@/app/fonts";
 import { ExternalLink, Plus} from "lucide-react";
 import Image from "next/image";
+import { ConfigResolutionError } from "sanity";
 
 function ProjectHeader({ className = "", name, year, work }) {
   return (
@@ -114,7 +116,8 @@ export function ProjectMetadata({ className = "", data }) {
   );
 }
 
-export function ProjectItem({ className = "" }) {
+export function ProjectItem({ className = "", data }) {
+  console.log(data);
   return (
     <li className="relative min-h-fit font-medium">
       <ProjectHeader></ProjectHeader>
@@ -124,7 +127,13 @@ export function ProjectItem({ className = "" }) {
   );
 }
 
-export function ProjectList({ className = "" }) {
+export function ProjectList({ className = "",data }) {
+
+  // console.log(data);
+  const items = data.map((item)=>{
+    return(<ProjectItem data={item}></ProjectItem>)
+  })
+
   return (
     <ul className="project__list">
       {/* list header */}
@@ -140,12 +149,15 @@ export function ProjectList({ className = "" }) {
         </h3>
       </li>
       {/* list item generic */}
-      <ProjectItem></ProjectItem>
+      {items}
     </ul>
   );
 }
 
-export default function Portoflio() {
+export default async function Portoflio() {
+  const projects = await getProjects();
+  // console.log(projects)
+
   return (
     <section className="h-fit w-full">
       <h2
@@ -153,7 +165,7 @@ export default function Portoflio() {
       >
         Portoflio
       </h2>
-      <ProjectList></ProjectList>
+      <ProjectList data={projects}></ProjectList>
     </section>
   );
 }

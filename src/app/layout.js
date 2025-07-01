@@ -8,11 +8,11 @@ export default function RootLayout({ children }) {
       <body className=" antialiased tracking-tight">
         <LenisProvider>
           <div className="relative">
-            <Navbar
+            {/* <Navbar
               className="z-20 "
               phoneVisible={false}
               ctaVisible={false}
-            ></Navbar>
+            ></Navbar> */}
             <div className={`z-10 relative bg-light `}>{children}</div>
             {/* <StickyFooter /> */}
           </div>

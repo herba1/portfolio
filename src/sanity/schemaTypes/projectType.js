@@ -18,6 +18,13 @@ export const projectType = defineType({
       validation: Rule => Rule.required()
     }),
     defineField({
+      name: 'completedDate',
+      title: 'Completion Date',
+      type: 'date',
+      validation: Rule => Rule.required(),
+      description: 'When was this project completed? Used for ordering newest first.'
+    }),
+    defineField({
       name: 'work',
       title: 'Work Type',
       type: 'array',
@@ -29,7 +36,6 @@ export const projectType = defineType({
           { title: 'Frontend', value: 'frontend' },
           { title: 'Backend', value: 'backend' },
           { title: 'Full Stack', value: 'fullstack' },
-          { title: 'Mobile', value: 'mobile' },
           { title: 'UI/UX', value: 'uiux' }
         ]
       }
