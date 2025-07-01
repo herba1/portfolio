@@ -165,6 +165,7 @@ export function ProjectItem({ className = "", data, timelines }) {
   );
 
   const handleClick = contextSafe(() => {
+      // lenis.scrollTo('#project__list__header');
     if (tl.current.progress() > 0) {
       tl.current.reverse();
     } else {
@@ -176,7 +177,7 @@ export function ProjectItem({ className = "", data, timelines }) {
       // Then open this one and scroll
       tl.current.play();
       tl.current.eventCallback("onComplete", () => {
-        lenis.scrollTo(itemContainer.current);
+      lenis.scrollTo(itemContainer.current);
       });
     }
   });
@@ -211,7 +212,7 @@ export function ProjectList({ className = "", data }) {
   });
 
   return (
-    <ul className="project__list">
+    <ul className="project__list" id="project__list__header">
       <li className="grid grid-cols-4 gap-4 border-b-2 py-2 md:grid-cols-12 md:gap-6">
         <h3 className="tracking-body-base text-dark/80 font-bold md:col-span-4">
           Name

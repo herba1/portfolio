@@ -26,6 +26,7 @@ export function LenisProvider({ children }) {
       smooth: true,
       smoothTouch: false,
       touchMultiplier: 2,
+      autoResize:true,
       // syncTouch:true,
       // infinite:true,
     });
