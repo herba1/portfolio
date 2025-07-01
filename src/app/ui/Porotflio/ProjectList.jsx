@@ -6,7 +6,7 @@ import { PortableText } from "next-sanity";
 import { urlFor } from "@/sanity/lib/image";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { useRef,useState } from "react";
+import { useRef, useState } from "react";
 import { useLenis } from "@/context/LenisContext";
 
 function ProjectHeader({ className = "", data, onClick }) {
@@ -15,7 +15,7 @@ function ProjectHeader({ className = "", data, onClick }) {
   return (
     <div
       onClick={onClick}
-      className="text-dark  hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] active:px-2.5 hover:px-2 md:grid-cols-12 md:gap-6"
+      className="text-dark hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6"
     >
       <h3 className="tracking-body-base col-span-2 md:col-span-4">{name}</h3>
       <h3 className="tracking-body-base hidden md:col-span-4 md:block">
@@ -135,14 +135,16 @@ export function ProjectMetadata({ className = "", data }) {
   );
 }
 
-export function ProjectItem({ className = "", data}) {
+export function ProjectItem({ className = "", data, timelines }) {
   const itemContainer = useRef(null);
   const tl = useRef(null);
-  const {lenis} =useLenis();
+  const header = useRef(null);
+  const { lenis } = useLenis();
 
   const { contextSafe } = useGSAP(
     () => {
       tl.current = gsap.timeline({ paused: true });
+      timelines.current.push(tl.current);
       const content = itemContainer.current.querySelector(
         ".content__container",
       );
@@ -157,9 +159,6 @@ export function ProjectItem({ className = "", data}) {
         ease: "power4.inOut",
         opacity: 1,
         duration: 0.5,
-        onComplete:()=>{
-          // console.log(myLenis)
-        }
       });
     },
     { scope: itemContainer.current },
@@ -169,14 +168,26 @@ export function ProjectItem({ className = "", data}) {
     if (tl.current.progress() > 0) {
       tl.current.reverse();
     } else {
+      // Close all others first
+      for (let tls of timelines.current) {
+        if (tl.current != tls) tls.reverse();
+      }
+      
+      // Then open this one and scroll
       tl.current.play();
-      lenis.scrollTo(itemContainer.current)
+      tl.current.eventCallback("onComplete", () => {
+        lenis.scrollTo(itemContainer.current);
+      });
     }
   });
 
   return (
     <li ref={itemContainer} className="relative min-h-fit font-medium">
-      <ProjectHeader onClick={handleClick} data={data}></ProjectHeader>
+      <ProjectHeader
+        ref={header}
+        onClick={handleClick}
+        data={data}
+      ></ProjectHeader>
       <ProjectContent
         className="content__container h-0 overflow-clip"
         data={data}
@@ -187,9 +198,16 @@ export function ProjectItem({ className = "", data}) {
 }
 
 export function ProjectList({ className = "", data }) {
-  const {isOpen, setIsOpen} = useState(false);
+  const { isOpen, setIsOpen } = useState(false);
+  const timelines = useRef([]);
   const items = data.map((item) => {
-    return <ProjectItem  key={item.name} data={item}></ProjectItem>;
+    return (
+      <ProjectItem
+        timelines={timelines}
+        key={item.name}
+        data={item}
+      ></ProjectItem>
+    );
   });
 
   return (
