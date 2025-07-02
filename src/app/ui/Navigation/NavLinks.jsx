@@ -19,14 +19,14 @@ export default function NavLinks({className=""}) {
     } else {
       return (
         <li key={link.name}>
-          <LinkMask text={link.name} href={link.link}></LinkMask>
+          <LinkMask  text={link.name} href={link.link}></LinkMask>
         </li>
       );
     }
   });
   return (
-    <div className=" hidden nav__links sm:flex text-center items-center">
-      <ul className={`flex items-center text-dark gap-4 md:gap-6 `}>
+    <div className={`hidden nav__links sm:flex text-center items-center ${className} `} >
+      <ul className={`flex items-center gap-4 md:gap-6 `}>
         {links}
       </ul>
     </div>

@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { X } from "lucide-react";
+import { ExternalLink, X } from "lucide-react";
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import SplitText from "gsap/SplitText";
@@ -18,10 +18,10 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
   useEffect(() => {
     if (menuIsOpen && lenis) {
       openMenu();
-      lenis.stop();
+      // lenis.stop();
     } else if (!menuIsOpen && lenis) {
       closeMenu();
-      lenis.start();
+      // lenis.start();
     }
 
     function handleClickOutside(event) {
@@ -65,7 +65,7 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
             backdropFilter: "blur(5px)",
             pointerEvents: "all",
           },
-          "start"
+          "start",
         )
         .to(
           ".nav__menu",
@@ -75,7 +75,7 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
             opacity: 1,
             duration: 1.2,
           },
-          "start"
+          "start",
         )
         .to(
           splits.chars,
@@ -85,10 +85,10 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
             ease: "power3.out",
             duration: 0.8,
           },
-          "-=1.1"
+          "-=1.1",
         );
     },
-    { scope: container }
+    { scope: container },
   );
 
   const openMenu = contextSafe(() => {
@@ -105,22 +105,22 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
   return (
     <menu
       ref={container}
-      className={` z-10 opacity-0 cursor-not-allowed nav__menu__container fixed left-0 top-0 w-full h-lvh   bg-transparent grid  lg:grid-cols-2 sm:justify-end sm:items-end`}
+      className={`nav__menu__container fixed top-0 left-0 z-10 grid h-lvh w-full cursor-not-allowed bg-transparent opacity-0 sm:items-end sm:justify-end lg:grid-cols-2`}
     >
       <div
         ref={menu}
-        className=" nav__menu opacity-100 cursor-default bg-dark text-light flex flex-col justify-between  h-full  lg:col-start-2 lg:w-auto sm:w-[450px]"
+        className="nav__menu bg-dark text-light flex h-full cursor-default flex-col justify-between opacity-100 sm:w-[450px] lg:col-start-2 lg:w-auto"
       >
-        <div className={`nav__menu__top p-4 flex items-center justify-between`}>
+        <div className={`nav__menu__top flex items-center justify-between p-4`}>
           <Link
             href={"/"}
-            className={`nav__logo font-medium tracking-body-base ${inter.className}`}
+            className={`nav__logo tracking-body-base font-medium ${inter.className}`}
           >
             Herbart Hernandez
           </Link>
           <button
             type="button"
-            className=" touch-manipulation active:scale-90 font-medium tracking-body-base cursor-pointer  transition-all"
+            className="tracking-body-base cursor-pointer touch-manipulation font-medium transition-all active:scale-90"
             onClick={() => {
               setMenuIsOpen(false);
             }}
@@ -129,25 +129,37 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
           </button>
         </div>
         <div
-          className={`nav__menu__content gap-8 grow px-4 pb-4 flex flex-col justify-end`}
+          className={`nav__menu__content flex grow flex-col justify-end gap-8 px-4 pb-4`}
         >
           <ul
-            className={`${instrumentSerif.className} flex flex-col gap-4 tracking-heading-mobile text-8xl `}
+            className={`${instrumentSerif.className} tracking-heading-mobile flex flex-col gap-4 text-8xl`}
           >
             <li>
-              <Link className={` nav__menu__link `} href={"#"}>
+              <a
+                onClick={(e) => {
+                  e.preventDefault();
+                  setMenuIsOpen(false);
+                  lenis.scrollTo("#portfolio",{offset:-80});
+                }}
+                className={`nav__menu__link`}
+                href={"#portfolio"}
+              >
                 Portfolio
-              </Link>
+              </a>
             </li>
             <li>
-              <Link className={` nav__menu__link `} href={"#"}>
+              <a
+                className={`nav__menu__link`}
+                href={"mailto:herbart.dev@gmail.com"}
+              >
                 Contact
-              </Link>
+              </a>
             </li>
-            <li>
-              <Link className={` nav__menu__link `} href={"#"}>
+            <li className="">
+              <a target="_blank" rel="noopener" className={`nav__menu__link relative `} href={"https://www.youtube.com/watch?v=PJP1mXFehww"}>
                 Secret
-              </Link>
+                <ExternalLink className="absolute left-full top-0 z-10"></ExternalLink>
+              </a>
             </li>
           </ul>
           <footer className="flex justify-end">

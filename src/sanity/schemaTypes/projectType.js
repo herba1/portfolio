@@ -31,12 +31,12 @@ export const projectType = defineType({
       of: [{ type: 'string' }],
       options: {
         list: [
-          { title: 'Development', value: 'development' },
-          { title: 'Design', value: 'design' },
-          { title: 'Frontend', value: 'frontend' },
-          { title: 'Backend', value: 'backend' },
-          { title: 'Full Stack', value: 'fullstack' },
-          { title: 'UI/UX', value: 'uiux' }
+          { title: 'Development', value: 'Development' },
+          { title: 'Design', value: 'Design' },
+          { title: 'Frontend', value: 'Frontend' },
+          { title: 'Backend', value: 'Backend' },
+          { title: 'Full Stack', value: 'Fullstack' },
+          { title: 'UI/UX', value: 'UI/UX' }
         ]
       }
     }),
@@ -95,33 +95,17 @@ export const projectType = defineType({
       of: [{ type: 'string' }],
       options: {
         list: [
-          { title: 'React', value: 'react' },
-          { title: 'Next.js', value: 'nextjs' },
-          { title: 'JavaScript', value: 'javascript' },
-          { title: 'TypeScript', value: 'typescript' },
-          { title: 'Node.js', value: 'nodejs' },
-          { title: 'Python', value: 'python' },
-          { title: 'CSS', value: 'css' },
-          { title: 'Tailwind CSS', value: 'tailwindcss' },
-          { title: 'Sanity', value: 'sanity' },
-          { title: 'MongoDB', value: 'mongodb' },
-          { title: 'PostgreSQL', value: 'postgresql' }
-        ]
-      }
-    }),
-    defineField({
-      name: 'services',
-      title: 'Services Provided',
-      type: 'array',
-      of: [{ type: 'string' }],
-      options: {
-        list: [
-          { title: 'Web Development', value: 'web-development' },
-          { title: 'Mobile Development', value: 'mobile-development' },
-          { title: 'UI/UX Design', value: 'ui-ux-design' },
-          { title: 'Consulting', value: 'consulting' },
-          { title: 'Maintenance', value: 'maintenance' },
-          { title: 'API Development', value: 'api-development' }
+          { title: 'React', value: 'React.js' },
+          { title: 'Next.js', value: 'Next.js' },
+          { title: 'JavaScript', value: 'JavaScript' },
+          { title: 'TypeScript', value: 'TypeScript' },
+          { title: 'Node.js', value: 'Node.js' },
+          { title: 'Python', value: 'Python' },
+          { title: 'CSS', value: 'CSS' },
+          { title: 'Tailwind CSS', value: 'Tailwind CSS' },
+          { title: 'Sanity', value: 'Sanity' },
+          { title: 'MongoDB', value: 'MongoDB' },
+          { title: 'PostgreSQL', value: 'PostgreSQL' }
         ]
       }
     }),

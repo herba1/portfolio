@@ -1,11 +1,11 @@
 
 import Link from "next/link";
 
-export default function NavLogo() {
+export default function NavLogo( className="") {
   return (
-    <Link href={"/"} className=" nav__logo">
+    <Link href={"/"} className={`nav__logo ${className}`} >
       {/* logo would go in here */}
-      <h1 className="text-dark">Herbart Hernandez</h1>
+      <h1 className="">Herbart Hernandez</h1>
     </Link>
   );
 }

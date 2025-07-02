@@ -9,6 +9,7 @@ export const LINKS = [
   //     { name: "Called Kokomo", link: "/" },
   //   ],
   // },
-  { name: "Work", link: "#" },
-  { name: "About", link: "#" },
+  { name: "Work", link: "#portfolio" },
+  { name: "Contact", link: "mailto:herbart.dev@gmail.com" },
+  { name: "LinkedIn", link: "https://linkedin.com/in/herbart-hernandez" },
 ]

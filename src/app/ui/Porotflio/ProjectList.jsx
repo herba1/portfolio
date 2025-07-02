@@ -22,7 +22,7 @@ function ProjectHeader({ className = "", data, onClick }) {
         {work.join(", ")}
       </h3>
       <h3 className="tracking-body-base col-start-3 md:col-span-1">{year}</h3>
-      <Plus className="justify-self-end md:col-start-12"></Plus>
+      <Plus className="justify-self-end md:col-start-12 plus"></Plus>
     </div>
   );
 }
@@ -143,6 +143,7 @@ export function ProjectItem({ className = "", data, timelines }) {
 
   const { contextSafe } = useGSAP(
     () => {
+      const plus = itemContainer.current.querySelector('.plus')
       tl.current = gsap.timeline({ paused: true });
       timelines.current.push(tl.current);
       const content = itemContainer.current.querySelector(
@@ -158,26 +159,33 @@ export function ProjectItem({ className = "", data, timelines }) {
         height: "auto",
         ease: "power4.inOut",
         opacity: 1,
-        duration: 0.5,
-      });
+        duration: 0.75,
+      },'start')
+      .to(plus,{
+        rotate:'135deg',
+        ease:'power2.inOut',
+      },'start')
     },
     { scope: itemContainer.current },
   );
 
   const handleClick = contextSafe(() => {
-      // lenis.scrollTo('#project__list__header');
+    // lenis.scrollTo('#project__list__header');
     if (tl.current.progress() > 0) {
       tl.current.reverse();
     } else {
       // Close all others first
+      lenis.stop();
+      lenis.start();
+      lenis.scrollTo('#project__list__header')
       for (let tls of timelines.current) {
         if (tl.current != tls) tls.reverse();
       }
-      
+
       // Then open this one and scroll
       tl.current.play();
       tl.current.eventCallback("onComplete", () => {
-      lenis.scrollTo(itemContainer.current);
+        lenis.scrollTo(itemContainer.current);
       });
     }
   });

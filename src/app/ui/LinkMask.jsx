@@ -4,6 +4,8 @@ import gsap from "gsap";
 import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
 import { useGSAP } from "@gsap/react";
 import { useRef } from "react";
+import { useLenis } from "@/context/LenisContext";
+import Lenis from "lenis";
 
 gsap.registerPlugin(SplitText);
 
@@ -17,6 +19,7 @@ export default function LinkMask({
   const container = useRef();
   const tl = useRef(null);
   const tlUnder = useRef(null);
+  const { lenis } = useLenis();
 
   const { contextSafe } = useGSAP(
     () => {
@@ -38,7 +41,7 @@ export default function LinkMask({
             stagger: 0.025,
             yPercent: -100,
           },
-          "start"
+          "start",
         )
         .to(
           split2.chars,
@@ -48,7 +51,7 @@ export default function LinkMask({
             stagger: 0.025,
             yPercent: -100,
           },
-          "start"
+          "start",
         );
       tlUnder.current
         .to(
@@ -58,7 +61,7 @@ export default function LinkMask({
             ease: "power3.out",
             duration: 0.4,
           },
-          "start"
+          "start",
         )
         .to(
           ".LinkMask__underline",
@@ -67,10 +70,10 @@ export default function LinkMask({
             ease: "power3.out",
             duration: 0.4,
           },
-          "two"
+          "two",
         );
     },
-    { scope: container, dependencies: null }
+    { scope: container, dependencies: null },
   );
 
   const onEnter = contextSafe((e) => {
@@ -90,20 +93,33 @@ export default function LinkMask({
       ref={container}
       onMouseOver={onEnter}
       onMouseLeave={onLeave}
-      className={`LinkMask__container inline-block overflow-visible relative ${className}`}
+      className={`LinkMask__container relative inline-block overflow-visible ${className}`}
     >
-      <Link
-        href={href}
-        className="w-full h-full left-0 right-0 absolute z-20"
-      ></Link>
-      <div className="inline-block overflow-clip relative z-10">
+      {href.charAt(0) === "#" && (
+        <a
+          href={href}
+          className="absolute right-0 left-0 z-20 h-full w-full"
+          onClick={(e) => {
+            e.preventDefault();
+            lenis.scrollTo(href,{offset:-80});
+          }}
+        ></a>
+      )}
+
+      {href.charAt(0) != "#" && (
+        <a
+          href={href}
+          className="absolute right-0 left-0 z-20 h-full w-full"
+        ></a>
+      )}
+      <div className="relative z-10 inline-block overflow-clip">
         <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>
         <p className={`LinkMask__text--second absolute ${textClassName}`}>
           {text}
         </p>
       </div>
       <p
-        className={`w-fit text-transparent absolute LinkMask__underline mix-blend-difference  top-1 pointer-events-none bg-dark  `}
+        className={`LinkMask__underline bg-light pointer-events-none absolute top-1 w-fit text-transparent `}
         style={{ clipPath: "inset(95% 100% 0% 0%)" }}
       >
         {text}
