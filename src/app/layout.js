@@ -4,6 +4,7 @@ import StickyFooter from "./ui/StickyFooter";
 import { inter } from "./fonts";
 import Loading from "./ui/Loading";
 import { description, title } from "./constants";
+import { Analytics } from '@vercel/analytics/react';
 
 export const metadata = {
   title: title,
@@ -47,6 +48,7 @@ export default function RootLayout({ children }) {
             {/* <StickyFooter /> */}
           </div>
         </LenisProvider>
+        <Analytics />
       </body>
     </html>
   );

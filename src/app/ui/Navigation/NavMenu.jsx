@@ -109,7 +109,7 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
     >
       <div
         ref={menu}
-        className="nav__menu bg-dark text-light flex h-full cursor-default flex-col justify-between opacity-100 sm:w-[450px] lg:col-start-2 lg:w-auto"
+        className="nav__menu bg-dark text-light flex h-svh cursor-default flex-col justify-between opacity-100 sm:w-[450px] lg:col-start-2 lg:w-auto"
       >
         <div className={`nav__menu__top flex items-center justify-between p-4`}>
           <Link
@@ -162,8 +162,9 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
               </a>
             </li>
           </ul>
-          <footer className="flex justify-end">
+          <footer className="flex justify-between">
             <span className="nav__menu__link">©herb 2025</span>
+            <a className="nav__menu__link" href="https://www.linkedin.com/in/herbart-hernandez" target="_blank" rel="noopener">LinkedIn</a>
           </footer>
         </div>
       </div>
