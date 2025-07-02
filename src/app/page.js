@@ -12,7 +12,7 @@ export default function Home() {
       <div className="hero__container">
         <HeroSection></HeroSection>
       </div>
-      <div className="bg-light mx-4 lg:mx-6 min-h-[400px]">
+      <div className="bg-light mx-4 my-10 lg:mx-6 min-h-[90svh] md:min-h-[600px]">
         <Portoflio></Portoflio>
       </div>
       <div className="hero__container">

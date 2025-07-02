@@ -15,7 +15,7 @@ function ProjectHeader({ className = "", data, onClick }) {
   return (
     <div
       onClick={onClick}
-      className="text-dark hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6"
+      className={`text-dark hover:bg-dark hover:text-light heading grid grid-cols-4 gap-4 py-2 transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6 ${className}`}
     >
       <h3 className="tracking-body-base col-span-2 md:col-span-4">{name}</h3>
       <h3 className="tracking-body-base hidden md:col-span-4 md:block">
@@ -196,6 +196,7 @@ export function ProjectItem({ className = "", data, timelines }) {
         ref={header}
         onClick={handleClick}
         data={data}
+        className=" hover:cursor-pointer"
       ></ProjectHeader>
       <ProjectContent
         className="content__container h-0 overflow-clip"
