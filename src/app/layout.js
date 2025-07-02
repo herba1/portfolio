@@ -5,6 +5,7 @@ import { inter } from "./fonts";
 import Loading from "./ui/Loading";
 import { description, title } from "./constants";
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 
 export const metadata = {
   title: title,
@@ -53,6 +54,7 @@ export default function RootLayout({ children }) {
           </div>
         </LenisProvider>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
