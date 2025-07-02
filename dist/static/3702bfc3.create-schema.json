@@ -1,0 +1,321 @@
+[
+  {
+    "fields": [
+      {
+        "validation": [
+          {
+            "rules": [
+              {
+                "flag": "presence",
+                "constraint": "required"
+              }
+            ],
+            "level": "error"
+          }
+        ],
+        "name": "name",
+        "type": "string"
+      },
+      {
+        "validation": [
+          {
+            "rules": [
+              {
+                "flag": "presence",
+                "constraint": "required"
+              }
+            ],
+            "level": "error"
+          }
+        ],
+        "name": "year",
+        "type": "string"
+      },
+      {
+        "validation": [
+          {
+            "rules": [
+              {
+                "flag": "presence",
+                "constraint": "required"
+              }
+            ],
+            "level": "error"
+          }
+        ],
+        "description": "When was this project completed? Used for ordering newest first.",
+        "name": "completedDate",
+        "type": "date",
+        "title": "Completion Date"
+      },
+      {
+        "options": {
+          "list": [
+            {
+              "title": "Development",
+              "value": "Development"
+            },
+            {
+              "title": "Design",
+              "value": "Design"
+            },
+            {
+              "title": "Frontend",
+              "value": "Frontend"
+            },
+            {
+              "title": "Backend",
+              "value": "Backend"
+            },
+            {
+              "title": "Full Stack",
+              "value": "Fullstack"
+            },
+            {
+              "title": "UI/UX",
+              "value": "UI/UX"
+            }
+          ]
+        },
+        "of": [
+          {
+            "type": "string"
+          }
+        ],
+        "name": "work",
+        "type": "array",
+        "title": "Work Type"
+      },
+      {
+        "of": [
+          {
+            "marks": {
+              "annotations": [
+                {
+                  "fields": [
+                    {
+                      "validation": [
+                        {
+                          "rules": [
+                            {
+                              "flag": "uri",
+                              "constraint": {
+                                "options": {
+                                  "scheme": [
+                                    "/^http$/",
+                                    "/^https$/"
+                                  ],
+                                  "allowRelative": false,
+                                  "relativeOnly": false,
+                                  "allowCredentials": false
+                                }
+                              }
+                            }
+                          ],
+                          "level": "error"
+                        }
+                      ],
+                      "name": "href",
+                      "type": "url",
+                      "title": "URL"
+                    }
+                  ],
+                  "name": "link",
+                  "type": "object",
+                  "title": "URL"
+                }
+              ],
+              "decorators": [
+                {
+                  "value": "strong",
+                  "title": "Strong"
+                },
+                {
+                  "value": "em",
+                  "title": "Emphasis"
+                },
+                {
+                  "value": "code",
+                  "title": "Code"
+                }
+              ]
+            },
+            "lists": [
+              {
+                "value": "bullet",
+                "title": "Bulleted list"
+              },
+              {
+                "value": "number",
+                "title": "Numbered list"
+              }
+            ],
+            "styles": [
+              {
+                "value": "normal",
+                "title": "Normal"
+              },
+              {
+                "value": "h1",
+                "title": "H1"
+              },
+              {
+                "value": "h2",
+                "title": "H2"
+              },
+              {
+                "value": "h3",
+                "title": "H3"
+              },
+              {
+                "value": "blockquote",
+                "title": "Quote"
+              }
+            ],
+            "of": [],
+            "type": "block"
+          }
+        ],
+        "name": "description",
+        "type": "array"
+      },
+      {
+        "validation": [
+          {
+            "rules": [
+              {
+                "flag": "uri",
+                "constraint": {
+                  "options": {
+                    "scheme": [
+                      "/^http$/",
+                      "/^https$/"
+                    ],
+                    "allowRelative": false,
+                    "relativeOnly": false,
+                    "allowCredentials": false
+                  }
+                }
+              }
+            ],
+            "level": "error"
+          }
+        ],
+        "name": "githubLink",
+        "type": "url",
+        "title": "GitHub Link"
+      },
+      {
+        "validation": [
+          {
+            "rules": [
+              {
+                "flag": "uri",
+                "constraint": {
+                  "options": {
+                    "scheme": [
+                      "/^http$/",
+                      "/^https$/"
+                    ],
+                    "allowRelative": false,
+                    "relativeOnly": false,
+                    "allowCredentials": false
+                  }
+                }
+              }
+            ],
+            "level": "error"
+          }
+        ],
+        "name": "visitLink",
+        "type": "url",
+        "title": "Visit Site Link"
+      },
+      {
+        "options": {
+          "list": [
+            {
+              "title": "React",
+              "value": "React.js"
+            },
+            {
+              "title": "Next.js",
+              "value": "Next.js"
+            },
+            {
+              "title": "JavaScript",
+              "value": "JavaScript"
+            },
+            {
+              "title": "TypeScript",
+              "value": "TypeScript"
+            },
+            {
+              "title": "Node.js",
+              "value": "Node.js"
+            },
+            {
+              "title": "Python",
+              "value": "Python"
+            },
+            {
+              "title": "CSS",
+              "value": "CSS"
+            },
+            {
+              "title": "Tailwind CSS",
+              "value": "Tailwind CSS"
+            },
+            {
+              "title": "Sanity",
+              "value": "Sanity"
+            },
+            {
+              "title": "MongoDB",
+              "value": "MongoDB"
+            },
+            {
+              "title": "PostgreSQL",
+              "value": "PostgreSQL"
+            }
+          ]
+        },
+        "of": [
+          {
+            "type": "string"
+          }
+        ],
+        "name": "tech",
+        "type": "array",
+        "title": "Technologies"
+      },
+      {
+        "name": "testimony",
+        "type": "text",
+        "title": "Client Testimony"
+      },
+      {
+        "of": [
+          {
+            "options": {
+              "hotspot": true
+            },
+            "fields": [
+              {
+                "name": "alt",
+                "type": "string",
+                "title": "Alternative Text"
+              }
+            ],
+            "type": "image"
+          }
+        ],
+        "name": "images",
+        "type": "array",
+        "title": "Project Images"
+      }
+    ],
+    "name": "project",
+    "type": "document"
+  }
+]
