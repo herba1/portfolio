@@ -105,7 +105,11 @@ export const projectType = defineType({
           { title: 'Tailwind CSS', value: 'Tailwind CSS' },
           { title: 'Sanity', value: 'Sanity' },
           { title: 'MongoDB', value: 'MongoDB' },
-          { title: 'PostgreSQL', value: 'PostgreSQL' }
+          { title: 'PostgreSQL', value: 'PostgreSQL' },
+          { title: 'Figma', value: 'Figma' },
+          { title: 'Google Gemini API', value: 'Google Gemini API' },
+          { title: 'Supabase', value: 'Supabase' },
+          { title: 'N/A', value: 'N/A' }
         ]
       }
     }),

@@ -120,11 +120,11 @@ export function ProjectMetadata({ className = "", data }) {
       <ul className="content__metadata flex grid-cols-6 flex-col gap-4 lg:grid">
         <li className="col-span-3 flex flex-col">
           <span className="text-dark/70">Date</span>
-          <span className="">{data.year}</span>
+          <span className="">{data.year&&data.year}</span>
         </li>
         <li className="col-span-3 flex flex-col">
           <span className="text-dark/70">Tech</span>
-          <span className="">{data.tech.join(", ")}</span>
+          <span className="">{data.tech && data.tech.join(", ")}</span>
         </li>
         <li className="col-span-6 flex flex-col">
           <span className="text-dark/70">Work Done</span>
