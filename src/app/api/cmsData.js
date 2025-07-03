@@ -35,7 +35,6 @@ export async function getProjects() {
     },
     alt
   }
-
   }
        `);
   return data;
