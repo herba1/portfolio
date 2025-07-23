@@ -204,9 +204,9 @@ function HeroTextBottom({ children, className }) {
       <span className="hidden md:inline-block">For</span>
       <span className="grid grid-cols-4 overflow-hidden md:inline-block">
         <ParralaxImage
-          src="/3.png"
+          src="/light2.jpeg"
           className="split__item--width-b w-0 asect-[140/125] hidden max-h-20  max-w-30 overflow-hidden rounded-3xl object-cover md:block lg:max-h-26 lg:max-w-36"
-          classNameImage={``}
+          classNameImage={` saturate-150`}
         ></ParralaxImage>
       </span>
       <span className="">Work</span>

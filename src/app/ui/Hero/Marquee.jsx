@@ -7,7 +7,7 @@ import { instrumentSerif } from "@/app/fonts";
 import { useLenis } from "@/context/LenisContext";
 
 export default function Marquee({
-  children = "Developer*Web Designer*Musician*Creative*",
+  children = "Developer*Web Designer*Musician*Creative*Developer*Web Designer*Musician*Creative*",
   className,
 }) {
   const container = useRef(null);
