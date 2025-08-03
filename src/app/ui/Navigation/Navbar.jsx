@@ -25,23 +25,6 @@ export default function Navbar({
       tl.current = gsap.timeline({
         paused: true,
       });
-      tl.current
-        .set(".nav__background", {
-          opacity: 1,
-          clipPath: "polygon(0 0, 100% 0, 100% 0, 0 0)",
-          skew: -1,
-        })
-        .to(
-          ".nav__background",
-          {
-            ease: "power2.inOut",
-            duration: 1,
-            rotate: 0,
-            clipPath: "polygon(0 0, 100% 0, 100% 100%, 0 100%)",
-          },
-          "first",
-        )
-        .to(navContainer.current, {}, "first");
     },
     { scope: navContainer },
   );
@@ -49,10 +32,10 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={`fixed w-full perspective-midrange ${!menuIsOpen ? " " : " "} nav__container flex items-center justify-between p-4 antialiased md:p-6 ${inter.className} tracking-body-base text-base font-medium ${className}`}
+      className={`fixed w-full ${!menuIsOpen ? " " : " "} nav__container flex items-center justify-between p-4 antialiased md:p-6 ${inter.className} tracking-body-base text-base font-medium ${className}`}
     >
       {/* nav background */}
-      <div className="nav__background absolute right-0 left-0 -z-10 h-full rounded-b-xs bg-black opacity-0"></div>
+      <div className="nav__background absolute right-0 left-0 -z-10 h-full w-full bg-light/90 opacity-100 !backdrop-blur-lg sm:hidden"></div>
       <div className="nav__left">
         <NavLogo />
       </div>

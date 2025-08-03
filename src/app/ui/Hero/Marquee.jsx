@@ -60,9 +60,11 @@ export default function Marquee({
         progress.current = 0;
 
       // Apply current progress as transform
-      gsap.set(container.current, {
-        xPercent: progress.current,
-      });
+      // gsap.set(container.current, {
+      //   xPercent: progress.current,
+      // });
+      let setter = gsap.quickSetter(container.current,'xPercent')
+      setter(progress.current);
 
       // Increment progress: base speed + scroll-based inertia * direction
       progress.current +=

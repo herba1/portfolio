@@ -106,6 +106,8 @@ export function ProjectMetadata({ className = "", data }) {
         <a
           className={`flex font-bold ${!data.githubLink && "pointer-events-none opacity-0"}`}
           href={data.githubLink}
+          target="_blank"
+          rel="noreferrer noopener"
         >
           Github <ExternalLink></ExternalLink>
         </a>
@@ -113,6 +115,8 @@ export function ProjectMetadata({ className = "", data }) {
         <a
           className={`flex font-bold ${!data.visitLink && "pointer-events-none opacity-0"}`}
           href={data.visitLink}
+          target="_blank"
+          rel="noreferrer noopener"
         >
           Visit Site <ExternalLink></ExternalLink>
         </a>
@@ -175,9 +179,9 @@ export function ProjectItem({ className = "", data, timelines }) {
       tl.current.reverse();
     } else {
       // Close all others first
-      lenis.stop();
-      lenis.start();
-      lenis.scrollTo('#project__list__header')
+      // lenis.stop();
+      // lenis.start();
+      // lenis.scrollTo('#project__list__header')
       for (let tls of timelines.current) {
         if (tl.current != tls) tls.reverse();
       }
@@ -185,7 +189,7 @@ export function ProjectItem({ className = "", data, timelines }) {
       // Then open this one and scroll
       tl.current.play();
       tl.current.eventCallback("onComplete", () => {
-        lenis.scrollTo(itemContainer.current);
+        // lenis.scrollTo(itemContainer.current);
       });
     }
   });

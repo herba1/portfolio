@@ -1,7 +1,7 @@
 "use client";
 import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useLayoutEffect } from "react";
 import { createContext } from "react";
 import { useLenis } from "@/context/LenisContext";
 
@@ -16,8 +16,9 @@ export default function Loading({ children }) {
   };
   const { contextSafe } = useGSAP(() => {}, { scope: container.current });
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!lenis) return;
+    lenis.scrollTo(0,{immediate:true})
     lenis.stop();
     let anim = contextSafe(() => {
       let t1 = gsap.to(
