@@ -10,7 +10,7 @@ export default async function Portoflio() {
       <h2
         className={`text-dark mb-6 tracking-heading-mobile lg:tracking-heading text-6xl lg:text-8xl ${instrumentSerif.className}`}
       >
-        Portoflio
+        Portfolio
       </h2>
       <ProjectList data={projects}></ProjectList>
     </section>
