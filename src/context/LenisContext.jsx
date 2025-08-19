@@ -6,6 +6,7 @@ import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
 import { SplitText } from "gsap/SplitText";
 import "../app/globals.css" 
+import 'lenis/dist/lenis.css'
 
 // Register GSAP plugins
 gsap.registerPlugin(ScrollTrigger,SplitText);

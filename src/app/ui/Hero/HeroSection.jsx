@@ -14,7 +14,7 @@ function ParralaxImage({
   classNameImage,
   src = "/sound.png",
   alt = "image",
-  size = { width: 250, height: 250 },
+  size = { width: 200, height: 200 },
 }) {
   const container = useRef(null);
 
@@ -112,7 +112,7 @@ function HeroTextTop({ children, className }) {
       <span className="grid grid-cols-4 overflow-hidden md:inline-block">
         <ParralaxImage
           src="/2.png"
-          className="split__item--height col-span-2 col-start-2 h-0 max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
+          className="split__item--height col-span-2 col-start-2  max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
         ></ParralaxImage>
         <ParralaxImage
           src="/2.png"

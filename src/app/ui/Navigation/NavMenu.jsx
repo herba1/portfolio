@@ -105,7 +105,7 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
   return (
     <menu
       ref={container}
-      className={`nav__menu__container fixed top-0 left-0 z-10 grid h-lvh w-full cursor-not-allowed bg-transparent opacity-0 sm:items-end sm:justify-end lg:grid-cols-2`}
+      className={`nav__menu__container fixed top-0 left-0 z-50 grid h-lvh w-full cursor-not-allowed bg-transparent sm:hidden opacity-0 sm:items-end sm:justify-end lg:grid-cols-2`}
     >
       <div
         ref={menu}

@@ -8,14 +8,14 @@ const inter = Inter({ subsets: ["latin"] });
 export default function Home() {
 
   return (
-    <main id="content" className={`relative`}>
-      <div className="hero__container">
+    <main id="content" className={`relative bg-light`}>
+      <div className="hero__container bg-light">
         <HeroSection></HeroSection>
       </div>
       <div className="bg-light mx-4 my-20 lg:mx-6 min-h-[90svh] md:min-h-[600px]">
         <Portoflio></Portoflio>
       </div>
-      <div className="hero__container">
+      <div className="hero__container bg-light">
         <HeroSection></HeroSection>
       </div>
     </main>

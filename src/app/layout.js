@@ -47,17 +47,16 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="overscroll-none tracking-tight antialiased overflow-x-hidden">
+      <body className="overscroll-none relative tracking-tight overflow-x-hidden antialiased ">
         <LenisProvider>
           <Loading>
-            <div className="relative overflow-hidden">
+            <div className="relative z-0 ">
               <Navbar
-                className="text-dark sm:text-light z-20 font-medium sm:font-normal sm:mix-blend-difference"
+                className="text-dark sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
                 phoneVisible={false}
                 ctaVisible={false}
               ></Navbar>
               {children}
-              {/* <StickyFooter /> */}
             </div>
           </Loading>
         </LenisProvider>

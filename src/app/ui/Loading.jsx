@@ -19,7 +19,7 @@ export default function Loading({ children }) {
   useLayoutEffect(() => {
     if (!lenis) return;
     lenis.scrollTo(0,{immediate:true})
-    lenis.stop();
+    // lenis.stop();
     let anim = contextSafe(() => {
       let t1 = gsap.to(
         ".load",
@@ -43,9 +43,7 @@ export default function Loading({ children }) {
           ease:'power4.out',
           duration:0.85,
           onComplete: () => {
-            // t2.revert();
             t2.revert();
-            lenis.start();
             lenis.resize();
           },
         },
@@ -55,9 +53,9 @@ export default function Loading({ children }) {
   }, [lenis]);
 
   return (
-    <div ref={container} className={`bg-light relative z-10 overflow-clip`}>
-      <div className="load bg-dark absolute top-0 left-0 z-50 h-full w-full"></div>
-      <TimelineContext value={gsap.timeline({ paused: true })}>
+    <div ref={container} className={`bg-light relative overflow-clip`}>
+      <div className="load bg-dark  absolute top-0 left-0 z-50 h-full w-full"></div>
+      <TimelineContext value={gsap.timeline({ paused: false})}>
         {children}
       </TimelineContext>
     </div>

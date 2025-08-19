@@ -109,8 +109,8 @@ export default function LinkMask({
       {href.charAt(0) != "#" && (
         <a
           href={href}
-          className="absolute right-0 left-0 z-20 h-full w-full"
-        ></a>
+          className="absolute opacity-0 right-0 left-0 z-20 h-full w-full"
+        >{text}</a>
       )}
       <div className="relative z-10 inline-block overflow-clip">
         <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>
