@@ -95,7 +95,7 @@ function ProjectHeader({ className = "", data, onClick }) {
       }}
       onClick={onClick}
       // className={`text-dark hover:bg-dark justify-items-start hover:text-light heading grid grid-cols-4 gap-4 py-2 w-full transition-all duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6 ${className}`}
-      className={`text-dark heading touch-manipulation hover:text-light transition-[padding color] relative grid w-full grid-cols-4 justify-items-start gap-4 overflow-hidden py-2 duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6 ${className}`}
+      className={`text-dark heading touch-manipulation sm:hover:text-light transition-[padding color] relative grid w-full grid-cols-4 justify-items-start gap-4 overflow-hidden py-2 duration-300 ease-[cubic-bezier(0,1.11,.53,.95)] hover:px-2 active:px-2.5 md:grid-cols-12 md:gap-6 ${className}`}
     >
       <h3 className="tracking-body-base text z-20 col-span-2 text-nowrap md:col-span-4">
         {name}
@@ -123,7 +123,7 @@ function ProjectHeader({ className = "", data, onClick }) {
       ></div>
       <div
         style={{ clipPath: "inset(100%)" }}
-        className="hover__top bg bg-dark absolute top-0 left-0 z-0 h-full w-full"
+        className="hover__top bg bg-dark hidden sm:block absolute top-0 left-0 z-0 h-full w-full"
       ></div>
     </button>
   );
