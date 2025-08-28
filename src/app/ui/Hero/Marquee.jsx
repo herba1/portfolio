@@ -18,40 +18,6 @@ export default function Marquee({
   const { lenis } = useLenis();
 
   const { contextSafe } = useGSAP(() => {
-    // // Handle direction changes and maintain visual continuity
-    // const updateDirection = () => {
-    //   if (direction.current < 0) {
-    //     // Reverse direction: start container at 0%, progress goes 0 to -50
-    //     gsap.set(container.current, { translateX: "0%" });
-    //     if (progress.current > 0) {
-    //       // Translate forward progress to equivalent reverse position
-    //       progress.current = -50 + progress.current;
-    //     }
-    //   } else {
-    //     // Forward direction: start container at -50%, progress goes 0 to 50
-    //     gsap.set(container.current, { translateX: "-50%" });
-    //     if (progress.current < 0) {
-    //       // Translate reverse progress to equivalent forward position
-    //       progress.current = 50 + progress.current;
-    //     }
-    //   }
-    // };
-    // updateDirection();
-
-    // // Track scroll velocity and direction for inertia effect
-    // const scrollTrigger = new ScrollTrigger({
-    //   onUpdate: (e) => {
-    //     // Convert scroll velocity to speed multiplier (0-1 range)
-    //     deltaMultiplier.current = gsap.utils.clamp(
-    //       0,
-    //       0.4,
-    //       Math.abs(e.getVelocity() / 5000),
-    //     );
-    //     // Update scroll direction and recalculate container position
-    //     direction.current = e.direction;
-    //     updateDirection();
-    //   },
-    // });
 
     // Main animation loop
     const loop = () => {
