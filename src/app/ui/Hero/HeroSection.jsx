@@ -54,18 +54,18 @@ function HeroTextTop({ children, className }) {
       tl2.current = gsap.timeline({ paused: true });
 
       //   height ani
-      tl.current.set(".split__item--height", {
-        height: 0,
-      });
+      // tl.current.set(".split__item--height", {
+      //   height: 0,
+      // });
 
-      tl.current.to(
-        ".split__item--height",
-        {
-          height: "auto",
-          ease: "power4.out",
-        },
-        "one",
-      );
+      // tl.current.to(
+      //   ".split__item--height",
+      //   {
+      //     height: "auto",
+      //     ease: "power4.out",
+      //   },
+      //   "one",
+      // );
 
       //   width
       tl2.current.set(".split__item--width", {
@@ -79,6 +79,7 @@ function HeroTextTop({ children, className }) {
             width: "auto",
             ease: "power4.out",
             duration: 0.5,
+
           },
           "one",
         )
@@ -135,19 +136,19 @@ function HeroTextBottom({ children, className }) {
       tl.current = gsap.timeline({});
       tl2.current = gsap.timeline({ paused: true });
 
-      tl.current.set(".split__item--height", {
-        height: 0,
-      });
+      // tl.current.set(".split__item--height", {
+      //   height: 0,
+      // });
 
-      tl.current.to(
-        ".split__item--height",
-        {
-          height: "auto",
-          ease: "power4.out",
-        },
-        "one",
-      );
-      //   width
+      // tl.current.to(
+      //   ".split__item--height",
+      //   {
+      //     height: "auto",
+      //     ease: "power4.out",
+      //   },
+      //   "one",
+      // );
+        // width
       tl2.current.set(".split__item--width-b", {
         width: 0,
       });

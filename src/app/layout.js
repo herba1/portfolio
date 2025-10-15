@@ -47,7 +47,8 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      <body className="overscroll-none relative tracking-tight overflow-x-hidden antialiased ">
+      {/*  */}
+      <body className="overscroll-none overflow-y-hidden  relative tracking-tight overflow-x-hidden antialiased ">
         <LenisProvider>
           <Loading>
             <div className="relative z-0 ">
