@@ -136,18 +136,18 @@ function HeroTextBottom({ children, className }) {
       tl.current = gsap.timeline({});
       tl2.current = gsap.timeline({ paused: true });
 
-      // tl.current.set(".split__item--height", {
-      //   height: 0,
-      // });
+      tl.current.set(".split__item--height", {
+        height: 0,
+      });
 
-      // tl.current.to(
-      //   ".split__item--height",
-      //   {
-      //     height: "auto",
-      //     ease: "power4.out",
-      //   },
-      //   "one",
-      // );
+      tl.current.to(
+        ".split__item--height",
+        {
+          height: "auto",
+          ease: "power4.out",
+        },
+        "one",
+      );
         // width
       tl2.current.set(".split__item--width-b", {
         width: 0,
