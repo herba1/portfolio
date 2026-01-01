@@ -28,6 +28,19 @@ export default function Navbar({
     },
     { scope: navContainer },
   );
+  let msg = "%c All You Need Is Love <3";
+  let styles = [
+    "font-size: 14px",
+    "color: #000000",
+    "font-family: serif",
+    "font-weight: 400",
+    "background: #ffffff",
+    "display: inline-block",
+    "padding: 1rem 3rem",
+    "border: 1px solid rgba(0,0,0,0.5);",
+    "border-radius: 10px;",
+  ].join(";");
+  console.log(msg, styles);
 
   return (
     <nav

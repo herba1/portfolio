@@ -7,7 +7,7 @@ import { instrumentSerif } from "@/app/fonts";
 import { useLenis } from "@/context/LenisContext";
 
 export default function Marquee({
-  children = "Developer*Web Designer*Musician*Creative*Developer*Web Designer*Musician*Creative*",
+  children = "Developer * Web Designer * Musician * Creative * Developer * Web Designer * Musician * Guitarists *",
   className,
 }) {
   const container = useRef(null);
@@ -17,19 +17,14 @@ export default function Marquee({
   const direction = useRef(1);
   const { lenis } = useLenis();
 
-  const { contextSafe } = useGSAP(() => {
-
+  useGSAP(() => {
     // Main animation loop
     const loop = () => {
       // Reset progress when reaching end of either direction
       if (progress.current >= 50 || progress.current <= -50)
         progress.current = 0;
 
-      // Apply current progress as transform
-      // gsap.set(container.current, {
-      //   xPercent: progress.current,
-      // });
-      let setter = gsap.quickSetter(container.current,'xPercent')
+      let setter = gsap.quickSetter(container.current, "xPercent");
       setter(progress.current);
 
       // Increment progress: base speed + scroll-based inertia * direction
@@ -42,8 +37,7 @@ export default function Marquee({
 
   useEffect(() => {
     if (!lenis) return;
-    lenis.on("scroll", (e) => {
-    });
+    // console.log("hello");
     const updateDirection = () => {
       if (direction.current < 0) {
         // Reverse direction: start container at 0%, progress goes 0 to -50
@@ -66,16 +60,16 @@ export default function Marquee({
     // Track scroll velocity and direction for inertia effect
     lenis.on("scroll", (e) => {
       // Convert scroll velocity to speed multiplier (0-1 range)
-      if(lenis.isScrolling === 'smooth'){
-      deltaMultiplier.current = Math.abs(lenis.lastVelocity / 20);
-      // Update scroll direction and recalculate container position
-      if (e.direction != 0) {
-        direction.current = e.direction;
-      }
-      updateDirection();
+      if (lenis.isScrolling === "smooth") {
+        deltaMultiplier.current = Math.abs(lenis.lastVelocity / 20);
+        // Update scroll direction and recalculate container position
+        if (e.direction != 0) {
+          direction.current = e.direction;
+        }
+        updateDirection();
       }
     });
-  });
+  }, [lenis]);
 
   return (
     <div
@@ -83,7 +77,7 @@ export default function Marquee({
     >
       <span
         ref={container}
-        className={`marquee__item ${instrumentSerif.className} inline-block whitespace-nowrap`}
+        className={`marquee__item will-change-transform ${instrumentSerif.className} inline-block whitespace-nowrap`}
       >
         {children}
         {children}

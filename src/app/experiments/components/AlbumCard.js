@@ -4,10 +4,14 @@ import { dataset } from "@/sanity/env";
 import { Album, PauseIcon, PlayIcon } from "lucide-react";
 import { Geist, Play } from "next/font/google";
 import { act, useMemo, useState } from "react";
-import { AnimatePresence, motion, MotionConfig, stagger } from "framer-motion";
-import { track } from "@vercel/analytics/react";
+import {
+  AnimatePresence,
+  LayoutGroup,
+  motion,
+  MotionConfig,
+  stagger,
+} from "framer-motion";
 import useMeasure from "react-use-measure";
-import { set } from "sanity";
 
 const geist = Geist({
   weight: "variable",
@@ -79,7 +83,7 @@ export default function AlbumCard() {
         layout
         animate={{ height: bounds.height }}
         transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
-        className="card__wrapper overflow-clip rounded-xl border-1 border-black/10 shadow-sm inset-shadow-xs"
+        className="card__wrapper overflow-clip rounded-xl border-1 border-black/5 bg-white shadow-sm inset-shadow-sm"
       >
         <motion.div
           ref={ref}
@@ -172,9 +176,9 @@ export default function AlbumCard() {
                       className="card__play__pause grid aspect-square w-11 place-items-center rounded-md will-change-transform"
                       layout
                       layoutId="playPauseButton"
-                      // whileHover={{ scale: 1.1 }}
-                      // whileTap={{ scale: 0.96 }}
-                      // transition={{ type: "spring", duration: 0.35 }}
+                      whileHover={{ scale: 1.1 }}
+                      whileTap={{ scale: 0.96 }}
+                      transition={{ type: "spring", duration: 0.4, bounce: 0 }}
                     >
                       <MotionConfig
                         transition={{
@@ -245,36 +249,43 @@ export default function AlbumCard() {
                   {ALBUM.trackList.map((track, index) => {
                     return (
                       <motion.li
-                        initial={{
-                          opacity: 0,
-                          scale: 0.9,
-                          y: "-10%",
-                        }}
-                        animate={{
-                          opacity: 1,
-                          scale: 1,
-                          y: "0%",
+                        initial={
+                          track != activeTrack && {
+                            opacity: 0,
+                            scale: 0.9,
+                            y: "-10%",
+                          }
+                        }
+                        animate={
+                          track != activeTrack && {
+                            opacity: 1,
+                            scale: 1,
+                            y: "0%",
 
-                          transition: {
-                            delay: index * 0.03,
-                            type: "spring",
-                            bounce: 0,
-                            duration: 0.3,
-                          },
-                        }}
-                        exit={{
-                          opacity: 0,
-                          scale: 0.9,
-                          y: "-10%",
-                          transition: {
-                            delay: (ALBUM.trackList.length - index) * 0.01,
-                            type: "spring",
-                            bounce: 0,
-                            duration: 0.15,
-                          },
-                        }}
-                        key={index}
-                        className="cursor-pointer rounded-lg p-2 hover:bg-black/5"
+                            transition: {
+                              delay: index * 0.03,
+                              type: "spring",
+                              bounce: 0,
+                              duration: 0.3,
+                            },
+                          }
+                        }
+                        exit={
+                          track != activeTrack && {
+                            opacity: 0,
+                            scale: 0.9,
+                            y: "-10%",
+                            transition: {
+                              delay: (ALBUM.trackList.length - index) * 0.01,
+                              type: "spring",
+                              bounce: 0,
+                              duration: 0.15,
+                            },
+                          }
+                        }
+                        layout
+                        key={track.name}
+                        className="rounded-lg p-2 hover:bg-black/5"
                         onClick={() => {
                           if (isPlaying && track === activeTrack) {
                             setIsPlaying(false);
@@ -304,20 +315,21 @@ export default function AlbumCard() {
                             <AnimatePresence mode="popLayout">
                               {track === activeTrack && (
                                 <motion.button
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setIsPlaying(!isPlaying);
-                                  }}
+                                  // onClick={(e) => {
+                                  //   e.stopPropagation();
+                                  //   setIsPlaying(!isPlaying);
+                                  // }}
                                   className="card__play__pause grid aspect-square w-11 place-items-center rounded-md will-change-transform"
-                                  key={"ppBtn2"}
+                                  key={`${track.name}-ppBtn`}
                                   layout
                                   layoutId="playPauseButton"
-                                  // whileHover={{ scale: 1.1 }}
-                                  // whileTap={{ scale: 0.96 }}
-                                  // transition={{
-                                  //   type: "spring",
-                                  //   duration: 0.35,
-                                  // }}
+                                  whileHover={{ scale: 1.1 }}
+                                  whileTap={{ scale: 0.96 }}
+                                  transition={{
+                                    type: "spring",
+                                    duration: 0.4,
+                                    bounce: 0,
+                                  }}
                                 >
                                   <MotionConfig
                                     transition={{
