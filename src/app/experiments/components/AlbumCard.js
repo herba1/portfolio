@@ -87,13 +87,13 @@ export default function AlbumCard() {
       >
         <motion.div
           ref={ref}
-          className="card__container relative flex h-24 min-h-fit w-sm flex-col gap-3 p-3"
+          className="card__container relative flex w-sm flex-col gap-3 p-3"
         >
           <header
             onClick={() => {
               setIsActive(!isActive);
             }}
-            className="card__header relative z-10 flex h-full w-full gap-3"
+            className="card__header relative z-10 flex h-18 w-full gap-3"
           >
             <div className="card__img relative aspect-square h-full w-fit overflow-clip rounded-sm shadow-xs">
               <img
