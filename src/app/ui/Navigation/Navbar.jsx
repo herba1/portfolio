@@ -28,19 +28,6 @@ export default function Navbar({
     },
     { scope: navContainer },
   );
-  let msg = "%c All You Need Is Love <3";
-  let styles = [
-    "font-size: 14px",
-    "color: #000000",
-    "font-family: serif",
-    "font-weight: 400",
-    "background: #ffffff",
-    "display: inline-block",
-    "padding: 1rem 3rem",
-    "border: 1px solid rgba(0,0,0,0.5);",
-    "border-radius: 10px;",
-  ].join(";");
-  console.log(msg, styles);
 
   return (
     <nav
@@ -48,7 +35,7 @@ export default function Navbar({
       className={`fixed w-full z-50 ${!menuIsOpen ? " " : " "} nav__container flex items-center justify-between p-4 antialiased md:p-6 ${inter.className} tracking-body-base text-base font-medium ${className}`}
     >
       {/* nav background */}
-      <div className="nav__background absolute right-0 left-0 -z-10 h-[180%] w-full bg-light/10 mask-[linear-gradient(to_bottom,black_65%,rgba(0,0,0,0.88)_75%,transparent_100%)] opacity-100 backdrop-blur-3xl sm:hidden"></div>
+      <div className="nav__background absolute right-0 left-0 -z-10 h-[180%] w-full bg-linear-to-b from-light to-light/0 mask-[linear-gradient(to_bottom,black_65%,rgba(0,0,0,0.88)_75%,transparent_100%)] opacity-100 backdrop-blur-3xl sm:hidden"></div>
       <div className="nav__left z-50">
         <NavLogo />
       </div>

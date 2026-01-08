@@ -105,7 +105,7 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
   return (
     <menu
       ref={container}
-      className={`nav__menu__container fixed top-0 left-0 z-50 grid h-lvh w-full cursor-not-allowed bg-transparent sm:hidden opacity-0 sm:items-end sm:justify-end lg:grid-cols-2`}
+      className={`nav__menu__container fixed top-0 left-0 z-50 grid h-lvh w-full cursor-not-allowed bg-transparent opacity-0 sm:hidden sm:items-end sm:justify-end lg:grid-cols-2`}
     >
       <div
         ref={menu}
@@ -139,13 +139,24 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
                 onClick={(e) => {
                   e.preventDefault();
                   setMenuIsOpen(false);
-                  lenis.scrollTo("#portfolio",{offset:-80});
+                  lenis.scrollTo("#portfolio", { offset: -80 });
                 }}
                 className={`nav__menu__link`}
                 href={"#portfolio"}
               >
                 Portfolio
               </a>
+            </li>
+            <li
+              onClick={(e) => {
+                e.preventDefault();
+                setMenuIsOpen(false);
+              }}
+              className="text-[22vw]"
+            >
+              <Link className={`nav__menu__link`} href={"/experiments"}>
+                Experiments
+              </Link>
             </li>
             <li>
               <a
@@ -156,15 +167,41 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
               </a>
             </li>
             <li className="">
-              <a target="_blank" rel="noopener" className={`nav__menu__link relative `} href={"https://www.youtube.com/watch?v=PJP1mXFehww"}>
-                Secret
-                <ExternalLink className="absolute left-full top-0 z-10"></ExternalLink>
+              <a
+                target="_blank"
+                rel="noopener"
+                className={`nav__menu__link relative`}
+                href={"https://www.youtube.com/watch?v=PJP1mXFehww"}
+              >
+                Music
               </a>
             </li>
           </ul>
           <footer className="flex justify-between">
-            <span className="nav__menu__link">©herb 2025</span>
-            <a className="nav__menu__link" href="https://www.linkedin.com/in/herbart-hernandez" target="_blank" rel="noopener">LinkedIn</a>
+            <a
+              className="nav__menu__link"
+              href="https://www.x.com/herb_dev"
+              target="_blank"
+              rel="noopener"
+            >
+              X/Twitter
+            </a>
+            <a
+              className="nav__menu__link"
+              href="https://www.github.com/herba1"
+              target="_blank"
+              rel="noopener"
+            >
+              Github
+            </a>
+            <a
+              className="nav__menu__link"
+              href="https://www.linkedin.com/in/herbart-hernandez"
+              target="_blank"
+              rel="noopener"
+            >
+              LinkedIn
+            </a>
           </footer>
         </div>
       </div>

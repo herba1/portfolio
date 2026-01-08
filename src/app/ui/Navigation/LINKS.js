@@ -1,4 +1,3 @@
-
 export const LINKS = [
   // {
   //   name: "Dropdown",
@@ -10,6 +9,9 @@ export const LINKS = [
   //   ],
   // },
   { name: "Work", link: "#portfolio" },
-  { name: "Contact", link: "mailto:herbart.dev@gmail.com" },
+  { name: "Experiments", link: "/experiments" },
   { name: "LinkedIn", link: "https://linkedin.com/in/herbart-hernandez" },
-]
+  { name: "X", link: "https://x.com/herb_dev" },
+  { name: "Github", link: "https://github.com/herba1" },
+  { name: "Contact", link: "mailto:herbart.dev@gmail.com" },
+];

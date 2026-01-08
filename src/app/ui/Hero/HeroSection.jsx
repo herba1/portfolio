@@ -3,11 +3,11 @@ import Image from "next/image";
 import Marquee from "./Marquee";
 
 import { instrumentSerif } from "@/app/fonts";
+import { useState } from "react";
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
-import { useRef } from "react";
-import ScrollTrigger from "gsap/ScrollTrigger";
+import { useEffect, useRef } from "react";
 
 function ParralaxImage({
   className,
@@ -53,20 +53,6 @@ function HeroTextTop({ children, className }) {
       tl.current = gsap.timeline({});
       tl2.current = gsap.timeline({ paused: true });
 
-      //   height ani
-      // tl.current.set(".split__item--height", {
-      //   height: 0,
-      // });
-
-      // tl.current.to(
-      //   ".split__item--height",
-      //   {
-      //     height: "auto",
-      //     ease: "power4.out",
-      //   },
-      //   "one",
-      // );
-
       //   width
       tl2.current.set(".split__item--width", {
         width: 0,
@@ -79,7 +65,6 @@ function HeroTextTop({ children, className }) {
             width: "auto",
             ease: "power4.out",
             duration: 0.5,
-
           },
           "one",
         )
@@ -105,7 +90,7 @@ function HeroTextTop({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center tet-[64px] text-6xl leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading tet-[64px] flex flex-col items-center justify-center text-6xl leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -113,7 +98,7 @@ function HeroTextTop({ children, className }) {
       <span className="grid grid-cols-4 overflow-hidden md:inline-block">
         <ParralaxImage
           src="/2.png"
-          className="split__item--height col-span-2 col-start-2  max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
+          className="split__item--height col-span-2 col-start-2 max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
         ></ParralaxImage>
         <ParralaxImage
           src="/2.png"
@@ -148,7 +133,7 @@ function HeroTextBottom({ children, className }) {
         },
         "one",
       );
-        // width
+      // width
       tl2.current.set(".split__item--width-b", {
         width: 0,
       });
@@ -185,7 +170,7 @@ function HeroTextBottom({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center  text-6xl leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-6xl leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -194,11 +179,11 @@ function HeroTextBottom({ children, className }) {
       <span className="grid grid-cols-4 overflow-hidden md:inline-block">
         <ParralaxImage
           src="/1.png"
-          className="split__item--height col-span-2 col-start-2 h-0 max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
+          className="split__item--height col-span-2 col-start-2 h-[1vh] max-h-24 overflow-hidden rounded-3xl object-cover md:hidden"
         ></ParralaxImage>
         <ParralaxImage
           src="/1.png"
-          className="split__item--width-b w-0 asect-[140/125] hidden max-h-20 max-w-30 overflow-hidden rounded-3xl object-cover md:block lg:max-h-26 lg:max-w-36"
+          className="split__item--width-b asect-[140/125] hidden max-h-20 w-0 max-w-30 overflow-hidden rounded-3xl object-cover md:block lg:max-h-26 lg:max-w-36"
           classNameImage={``}
         ></ParralaxImage>
       </span>
@@ -206,7 +191,7 @@ function HeroTextBottom({ children, className }) {
       <span className="grid grid-cols-4 overflow-hidden md:inline-block">
         <ParralaxImage
           src="/light2.jpeg"
-          className="split__item--width-b w-0 asect-[140/125] hidden max-h-20  max-w-30 overflow-hidden rounded-3xl object-cover md:block lg:max-h-26 lg:max-w-36"
+          className="split__item--width-b asect-[140/125] hidden max-h-20 w-0 max-w-30 overflow-hidden rounded-3xl object-cover md:block lg:max-h-26 lg:max-w-36"
           classNameImage={` saturate-150`}
         ></ParralaxImage>
       </span>
@@ -216,14 +201,34 @@ function HeroTextBottom({ children, className }) {
 }
 
 export default function HeroSection({ children }) {
+  let msg = "%c All You Need Is Love <3";
+  let styles = [
+    "font-size: 14px",
+    "color: #000000",
+    "font-family: serif",
+    "font-weight: 400",
+    "background: #ffffff",
+    "display: inline-block",
+    "padding: 1rem 3rem",
+    "border: 1px solid rgba(0,0,0,0.5);",
+    "border-radius: 10px;",
+  ].join(";");
+  console.log(msg, styles);
+
+  const [hoverTop, setHoverTop] = useState(false);
+  const [hoverBottom, setHoverBottom] = useState(false);
+
   return (
     <section className="flex min-h-svh w-full flex-col items-center justify-center gap-4">
       <div className="relative min-h-fit w-full">
-        <HeroTextTop className={`absolute bottom-full w-full`}></HeroTextTop>
+        <HeroTextTop
+          hover={hoverTop}
+          className={`absolute bottom-full w-full`}
+        ></HeroTextTop>
         <Marquee
-          className={`bg-dark text-light tracking-heading-mobile md:tracking-heading h-fit py-2 text-8xl md:py-3 md:text-9xl`}
+          className={`bg-dark text-light tracking-heading-mobile md:tracking-heading h-fit text-[23vw] md:py-3 md:text-9xl`}
         ></Marquee>
-        <HeroTextBottom className={`absolute top-full w-full`}></HeroTextBottom>
+        <HeroTextBottom className="absolute top-full w-full"></HeroTextBottom>
       </div>
     </section>
   );

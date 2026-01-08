@@ -6,6 +6,9 @@ import Loading from "./ui/Loading";
 import { description, title } from "./constants";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import { Inter } from "next/font/google";
+
+const interFont = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: title,
