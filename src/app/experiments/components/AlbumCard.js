@@ -78,16 +78,16 @@ export default function AlbumCard() {
   // const audioContext = useMemo(() => new AudioContext(), []);
 
   return (
-    <div className={`${geist.className}`}>
+    <div className={`${geist.className} w-full `}>
       <motion.div
         layout
         animate={{ height: bounds.height }}
         transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
-        className="card__wrapper overflow-clip rounded-xl border-1 border-black/5 bg-white shadow-sm inset-shadow-sm"
+        className="card__wrapper overflow-clip rounded-xl border-1 mx-auto border-black/5 w-full max-w-sm min-w-fit bg-white shadow-sm inset-shadow-sm"
       >
         <motion.div
           ref={ref}
-          className="card__container relative flex w-sm flex-col gap-3 p-3"
+          className="card__container relative flex w-full flex-col gap-3 p-3 "
         >
           <header
             onClick={() => {

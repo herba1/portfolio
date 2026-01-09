@@ -25,67 +25,88 @@ export default function LinkMask({
     () => {
       const split1 = SplitText.create(".LinkMask__text", {
         type: "chars,lines",
+        propIndex: true,
+        charsClass: "linkMask__char",
       });
       const split2 = SplitText.create(".LinkMask__text--second", {
         type: "chars,lines",
+        propIndex: true,
+        charsClass: "linkMask__char--secondary",
       });
       tl.current = gsap.timeline({ paused: true });
       tlUnder.current = gsap.timeline({ paused: true });
 
-      tl.current
-        .to(
-          split1.chars,
-          {
-            ease: "power1.inOut",
-            duration: 0.4,
-            stagger: 0.025,
-            yPercent: -100,
-          },
-          "start",
-        )
-        .to(
-          split2.chars,
-          {
-            duration: 0.4,
-            ease: "power1.inOut",
-            stagger: 0.025,
-            yPercent: -100,
-          },
-          "start",
-        );
-      tlUnder.current
-        .to(
-          ".LinkMask__underline",
-          {
-            clipPath: "inset(95% 0% 0% 0%)",
-            ease: "power3.out",
-            duration: 0.4,
-          },
-          "start",
-        )
-        .to(
-          ".LinkMask__underline",
-          {
-            clipPath: "inset(95% 0% 0% 100%)",
-            ease: "power3.out",
-            duration: 0.4,
-          },
-          "two",
-        );
+      // tl.current
+      //   .to(
+      //     split1.chars,
+      //     {
+      //       ease: "power1.inOut",
+      //       duration: 0.4,
+      //       stagger: 0.025,
+      //       yPercent: -100,
+      //     },
+      //     "start",
+      //   )
+      //   .to(
+      //     split2.chars,
+      //     {
+      //       duration: 0.4,
+      //       ease: "power1.inOut",
+      //       stagger: 0.025,
+      //       yPercent: -100,
+      //     },
+      //     "start",
+      //   );
+      // tlUnder.current
+      //   .to(
+      //     ".LinkMask__underline",
+      //     {
+      //       clipPath: "inset(95% 0% 0% 0%)",
+      //       ease: "power3.out",
+      //       duration: 0.4,
+      //     },
+      //     "start",
+      //   )
+      //   .to(
+      //     ".LinkMask__underline",
+      //     {
+      //       clipPath: "inset(95% 0% 0% 100%)",
+      //       ease: "power3.out",
+      //       duration: 0.4,
+      //     },
+      //     "two",
+      //   );
     },
     { scope: container, dependencies: null },
   );
 
   const onEnter = contextSafe((e) => {
-    tl.current.play();
-    tlUnder.current.tweenFromTo(0, "two");
+    // tl.current.play();
+    // tlUnder.current.tweenFromTo(0, "two");
+
+    gsap.fromTo(
+      ".LinkMask__underline",
+      {
+        clipPath: "inset(95% 100% 0% 0%)",
+      },
+      {
+        clipPath: "inset(95% 0% 0% 0%)",
+        ease: "power3.out",
+        duration: 0.4,
+      },
+    );
   });
 
   const onLeave = contextSafe(() => {
-    setTimeout(() => {
-      tl.current.reverse();
-    }, 200);
-    tlUnder.current.play();
+    // setTimeout(() => {
+    //   tl.current.reverse();
+    // }, 200);
+    // tlUnder.current.play();
+    gsap.to(".LinkMask__underline", {
+      clipPath: "inset(95% 0% 0% 100%)",
+      ease: "power3.out",
+      duration: 0.4,
+    });
   });
 
   return (
@@ -101,7 +122,7 @@ export default function LinkMask({
           className="absolute right-0 left-0 z-20 h-full w-full"
           onClick={(e) => {
             e.preventDefault();
-            lenis.scrollTo(href,{offset:-80});
+            lenis.scrollTo(href, { offset: -80 });
           }}
         ></a>
       )}
@@ -109,8 +130,10 @@ export default function LinkMask({
       {href.charAt(0) != "#" && (
         <a
           href={href}
-          className="absolute opacity-0 right-0 left-0 z-20 h-full w-full"
-        >{text}</a>
+          className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
+        >
+          {text}
+        </a>
       )}
       <div className="relative z-10 inline-block overflow-clip">
         <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>
@@ -118,12 +141,12 @@ export default function LinkMask({
           {text}
         </p>
       </div>
+      {/* underline */}
       <p
-        className={`LinkMask__underline bg-light pointer-events-none absolute top-1 w-fit text-transparent `}
+        className={`LinkMask__underline bg-light pointer-events-none absolute top-1 w-fit text-transparent`}
         style={{ clipPath: "inset(95% 100% 0% 0%)" }}
       >
         {text}
-        <span></span>
       </p>
     </div>
   );

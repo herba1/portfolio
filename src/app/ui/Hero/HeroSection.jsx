@@ -50,47 +50,33 @@ function HeroTextTop({ children, className }) {
 
   const { contextSafe } = useGSAP(
     () => {
-      tl.current = gsap.timeline({});
-      tl2.current = gsap.timeline({ paused: true });
-
-      //   width
-      tl2.current.set(".split__item--width", {
-        width: 0,
-      });
-
-      tl2.current
-        .to(
-          ".split__item--width",
-          {
-            width: "auto",
-            ease: "power4.out",
-            duration: 0.5,
-          },
-          "one",
-        )
-        .to(
-          ".split__item--width",
-          {
-            width: 0,
-            ease: "power4.out",
-          },
-          "two",
-        );
+      // tl.current = gsap.timeline({});
+      // tl2.current = gsap.timeline({ paused: true });
     },
     { scope: container.current },
   );
 
   const hoverEnter = contextSafe(() => {
-    tl2.current.tweenFromTo("one", "two");
+    // tl2.current.tweenFromTo("one", "two");
+    gsap.to(".split__item--width", {
+      width: "auto",
+      ease: "power4.out",
+      duration: 0.5,
+    });
   });
   const hoverExit = contextSafe(() => {
-    tl2.current.tweenFromTo("two", "end");
+    // tl2.current.tweenFromTo("two", "end");
+    gsap.to(".split__item--width", {
+      width: "0",
+      ease: "power4.out",
+      duration: 0.5,
+    });
   });
 
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading tet-[64px] flex flex-col items-center justify-center text-6xl leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -115,7 +101,6 @@ function HeroTextBottom({ children, className }) {
   const container = useRef();
   const tl = useRef(null);
   const tl2 = useRef(null);
-
   const { contextSafe } = useGSAP(
     () => {
       tl.current = gsap.timeline({});
@@ -133,44 +118,29 @@ function HeroTextBottom({ children, className }) {
         },
         "one",
       );
-      // width
-      tl2.current.set(".split__item--width-b", {
-        width: 0,
-      });
-
-      tl2.current
-        .to(
-          ".split__item--width-b",
-          {
-            width: "auto",
-            ease: "power4.out",
-            duration: 0.5,
-          },
-          "one",
-        )
-        .to(
-          ".split__item--width-b",
-          {
-            width: 0,
-            ease: "power4.out",
-          },
-          "two",
-        );
     },
     { scope: container.current },
   );
 
   const hoverEnter = contextSafe(() => {
-    tl2.current.tweenFromTo("one", "two");
+    gsap.to(".split__item--width-b", {
+      width: "auto",
+      ease: "power4.out",
+      duration: 0.5,
+    });
   });
   const hoverExit = contextSafe(() => {
-    tl2.current.tweenFromTo("two", "end");
+    gsap.to(".split__item--width-b", {
+      width: "0",
+      ease: "power4.out",
+      duration: 0.5,
+    });
   });
 
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-6xl leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -226,7 +196,7 @@ export default function HeroSection({ children }) {
           className={`absolute bottom-full w-full`}
         ></HeroTextTop>
         <Marquee
-          className={`bg-dark text-light tracking-heading-mobile md:tracking-heading h-fit text-[23vw] md:py-3 md:text-9xl`}
+          className={`bg-dark text-light tracking-heading-mobile md:leading-none md:tracking-heading h-fit text-[23vw] leading-tight md:py-3 md:text-9xl`}
         ></Marquee>
         <HeroTextBottom className="absolute top-full w-full"></HeroTextBottom>
       </div>

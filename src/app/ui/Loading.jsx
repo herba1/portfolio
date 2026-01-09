@@ -21,27 +21,27 @@ export default function Loading({ children }) {
     lenis.scrollTo(0,{immediate:true})
     // lenis.stop();
     let anim = contextSafe(() => {
-      let t1 = gsap.to(
+      gsap.to(
         ".load",
         {
           opacity: 0,
           pointerEvents: "none",
           ease: "power4.out",
-          delay: 0.5,
-          duration: 1,
+          delay: 0.1,
+          duration: 0.5,
         },
         "start",
       );
       let t2 = gsap.fromTo(
         container.current,
         {
-          scale: 1.15,
+          scale: 1.1,
         },
         {
-          delay: 0.8,
+          delay: 0.5,
           scale: 1,
           ease:'power4.out',
-          duration:0.85,
+          duration:1,
           onComplete: () => {
             t2.revert();
             lenis.resize();

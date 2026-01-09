@@ -51,7 +51,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       {/*  */}
-      <body className="relative overflow-x-hidden overflow-y-hidden overscroll-none tracking-tight antialiased">
+      <body className="relative overflow-x-hidden bg-dark overscroll-none tracking-tight antialiased">
         <LenisProvider>
           <Loading>
             <div className="relative z-0">
