@@ -65,23 +65,24 @@
 }
 
 .linkMask__char, .linkMask__char--secondary {
+
+  --stagger: 0.01s;
+
     display: inline-block;
     transform: translateY(0%);
-    transition: transform 0.8s var(--ease-out-quint);
+    transition: transform 0.8s var(--ease-out-quart);
+        transition-delay: calc(var(--char)*var(--stagger));
 }
 
 .LinkMask__container {
 
-    --stagger:0.015s;
-
     &:hover .linkMask__char{
         transform: translateY(-100%);
-        transition-delay: calc(var(--char)*var(--stagger));
     }
 
     &:hover .linkMask__char--secondary{
         transform: translateY(-100%);
-        transition-delay: calc(var(--char)*var(--stagger));
+
     }
 
 
