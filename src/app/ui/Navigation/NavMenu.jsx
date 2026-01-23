@@ -147,16 +147,15 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
                 Portfolio
               </a>
             </li>
-            <li
-              onClick={(e) => {
-                e.preventDefault();
-                setMenuIsOpen(false);
-              }}
-              className="text-[22vw]"
-            >
-              <Link className={`nav__menu__link`} href={"/experiments"}>
+            <li className="text-[22vw]">
+              <a
+                className={`nav__menu__link`}
+                href={"https://x.com/herb_dev"}
+                target="_blank"
+                rel="noopener"
+              >
                 Experiments
-              </Link>
+              </a>
             </li>
             <li>
               <a

@@ -9,7 +9,7 @@ export const LINKS = [
   //   ],
   // },
   { name: "Work", link: "#portfolio" },
-  { name: "Experiments", link: "/experiments" },
+  { name: "Experiments", link: "https://x.com/herb_dev" },
   { name: "LinkedIn", link: "https://linkedin.com/in/herbart-hernandez" },
   { name: "X", link: "https://x.com/herb_dev" },
   { name: "Github", link: "https://github.com/herba1" },
