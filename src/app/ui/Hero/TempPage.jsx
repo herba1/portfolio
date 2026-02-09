@@ -21,7 +21,7 @@ export default function TempPage() {
   const [hoverChar, setHoverChar] = useState("");
 
   useGSAP(
-    () => {
+    (_, contextSafe) => {
       const titleChars = SplitText.create(
         containerRef.current.querySelector(".title"),
         {
@@ -45,10 +45,9 @@ export default function TempPage() {
         },
       );
 
-      company.addEventListener("mouseenter", (e) => {
+      const onCompanyHover = contextSafe(() => {
         gsap.to(desc.chars, {
           color: "red",
-          // scale: 1.1,
           stagger: 0.02,
           ease: "power4.out",
           duration: 0.5,
@@ -56,14 +55,12 @@ export default function TempPage() {
         gsap.to(desc.chars, {
           color: "purple",
           delay: 0.3,
-          // scale: 1.1,
           stagger: 0.02,
           ease: "power4.out",
           duration: 0.5,
         });
         gsap.to(desc.chars, {
           delay: 0.6,
-          // scale: 1,
           stagger: 0.02,
           color: "#0f172b",
           ease: "power4.out",
@@ -71,76 +68,90 @@ export default function TempPage() {
         });
       });
 
+      company.addEventListener("mouseenter", onCompanyHover);
+
       gsap.set(containerRef.current, {
         visibility: "visible",
       });
 
-      gsap.from(titleChars.chars, {
-        opacity: 0,
-        duration: 1,
-        rotateX: -65,
-        yPercent: 100,
-        stagger: {
-          amount: 0.3,
-          from: "start",
-        },
-        ease: "power4.out",
-      });
-
-      gsap.from(".links", {
-        delay: 0.3,
-        stagger: 0.05,
-        opacity: 0,
-        yPercent: 100,
-        duration: 0.8,
-        ease: "power4.out",
-      });
-
-      gsap.from(desc.lines, {
-        opacity: 0,
-        delay: 0.6,
-        duration: 1,
-        yPercent: 100,
-        onStart: () => {
-          company.dispatchEvent(companyHoverEvent);
-        },
-        stagger: {
-          amount: 0.3,
-          from: "start",
-        },
-        ease: "power4.out",
-      });
+      // intro sequence
+      gsap
+        .timeline({ delay: 0.4 })
+        .from(titleChars.chars, {
+          opacity: 0,
+          duration: 1,
+          rotateX: -65,
+          yPercent: 100,
+          stagger: {
+            amount: 0.3,
+            from: "start",
+          },
+          ease: "power4.out",
+        },"start")
+        .from(".links", {
+          delay: 0.3,
+          stagger: 0.05,
+          opacity: 0,
+          yPercent: 100,
+          duration: 0.8,
+          ease: "power4.out",
+        },"start")
+        .from(desc.lines, {
+          opacity: 0,
+          delay: 0.6,
+          duration: 1,
+          yPercent: 100,
+          onStart: () => {
+            company.dispatchEvent(companyHoverEvent);
+          },
+          stagger: {
+            amount: 0.3,
+            from: "start",
+          },
+          ease: "power4.out",
+        },"start");
 
       // hero interaction
+      const charHandlers = [];
+
       titleChars.chars.forEach((char) => {
-        char.addEventListener("mouseenter", (e) => {
-          const index = char.style.getPropertyValue("--char") - 1;
+        const onCharEnter = contextSafe(() => {
           setHoverChar(char.textContent);
           gsap.to(char, {
             paddingLeft: "0.15em",
             paddingRight: "0.15em",
             scale: 1.3,
-            // outline: "1px solid rgba(255, 0, 255, 0.5)",
             rotate: gsap.utils.random(-15, 15),
             duration: 0.5,
             ease: "power4.out",
           });
         });
 
-        char.addEventListener("mouseleave", (e) => {
-          const index = char.style.getPropertyValue("--char") - 1;
+        const onCharLeave = contextSafe(() => {
           setHoverChar("");
           gsap.to(char, {
             paddingLeft: "0em",
             paddingRight: "0em",
             scale: 1,
             rotate: 0,
-            // outline: "1px solid rgba(255, 0, 255, 0)",
             duration: 0.5,
             ease: "power4.out",
           });
         });
+
+        char.addEventListener("mouseenter", onCharEnter);
+        char.addEventListener("mouseleave", onCharLeave);
+
+        charHandlers.push({ char, onCharEnter, onCharLeave });
       });
+
+      return () => {
+        company.removeEventListener("mouseenter", onCompanyHover);
+        charHandlers.forEach(({ char, onCharEnter, onCharLeave }) => {
+          char.removeEventListener("mouseenter", onCharEnter);
+          char.removeEventListener("mouseleave", onCharLeave);
+        });
+      };
     },
     { scope: containerRef, dependencies: [] },
   );
