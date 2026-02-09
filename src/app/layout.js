@@ -51,9 +51,10 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       {/*  */}
-      <body className="relative overflow-x-hidden bg-dark overscroll-none tracking-tight antialiased">
+      <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
         <LenisProvider>
-          <Loading>
+          {children}
+          {/* <Loading>
             <div className="relative z-0">
               <Navbar
                 className="text-dark sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
@@ -62,7 +63,7 @@ export default function RootLayout({ children }) {
               ></Navbar>
               {children}
             </div>
-          </Loading>
+          </Loading> */}
         </LenisProvider>
         <Analytics />
         <SpeedInsights />
