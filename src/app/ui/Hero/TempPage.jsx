@@ -167,9 +167,9 @@ export default function TempPage() {
         {hoverChar}
       </p> */}
       <p className="desc tracking-body-base text-sm text-[#0f172b] opacity-60 md:text-base">
-        Incoming Design Engineer{" "}
-        <a href="https://crowdvolt.com" className="group company">
-          @ CrowdVolt
+        Temporary Portfolio{" "}
+        <a href="#" className="group company">
+          2026
         </a>
       </p>
       <h1
