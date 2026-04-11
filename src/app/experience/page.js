@@ -1,8 +1,8 @@
 import ClientExperience from "./components/ClientExperience";
 
 export const metadata = {
-  title: "Experience | herb.art",
-  description: "Interactive 3D experience",
+  title: "Experience",
+  description: "Interactive 3D gaussian splat experience by Herb.",
 };
 
 export default function ExperiencePage() {

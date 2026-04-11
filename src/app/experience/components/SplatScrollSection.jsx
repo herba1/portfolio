@@ -36,7 +36,9 @@ const easedEdgeFade = (() => {
 function LoadWatcher({ onLoaded }) {
   const { progress } = useProgress();
   useEffect(() => {
-    if (progress === 100) onLoaded();
+    if (progress < 100) return;
+    const id = setTimeout(onLoaded, 0);
+    return () => clearTimeout(id);
   }, [progress, onLoaded]);
   return null;
 }

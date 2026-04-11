@@ -11,24 +11,36 @@ import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 
 export const metadata = {
-  title: title,
+  metadataBase: new URL("https://herb.art"),
+  title: {
+    default: title,
+    template: `%s | ${title}`,
+  },
   description: description,
   keywords: [
     "portfolio",
+    "design engineer",
+    "creative developer",
     "web developer",
     "frontend",
     "fullstack",
     "javascript",
     "react",
     "nextjs",
+    "three.js",
+    "interactive",
   ],
   authors: [{ name: "Herb" }],
   creator: "Herb",
+  alternates: {
+    canonical: "./",
+  },
   openGraph: {
     title: title,
     description: description,
     url: "https://herb.art",
     siteName: "herb.art",
+    locale: "en_US",
     type: "website",
   },
   twitter: {
@@ -39,6 +51,13 @@ export const metadata = {
   robots: {
     index: true,
     follow: true,
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-video-preview": -1,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+    },
   },
 };
 
@@ -47,11 +66,39 @@ export const viewport = {
   initialScale: 1,
 };
 
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "WebSite",
+      "@id": "https://herb.art/#website",
+      url: "https://herb.art",
+      name: "herb.art",
+      description: description,
+      inLanguage: "en-US",
+    },
+    {
+      "@type": "Person",
+      "@id": "https://herb.art/#person",
+      name: "Herb",
+      url: "https://herb.art",
+      jobTitle: "Design Engineer",
+      sameAs: [
+        "https://github.com/herba1",
+      ],
+    },
+  ],
+};
+
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
         <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" />
+        <script
+          type="application/ld+json"
+          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
+        />
       </head>
       <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
         <ConsoleSig />

@@ -6,34 +6,51 @@ import { Splat } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import posthog from "posthog-js";
 
-// Vercel's CDN strips Content-Length when applying brotli compression.
-// Drei's Splat loader requires Content-Length and throws without it.
-// Pre-fetch the file and serve via blob URL which always has Content-Length.
-function useBlobUrl(src) {
-  const [url, setUrl] = useState(null);
+// ---------------------------------------------------------------------------
+// Workaround: Vercel CDN + drei Splat Content-Length mismatch
+// ---------------------------------------------------------------------------
+// Problem:
+//   When a browser sends Accept-Encoding: br, Vercel's CDN compresses the
+//   response with brotli and *strips* the Content-Length header (switches to
+//   chunked transfer). drei's <Splat> loader (Splat.js line ~214) hard-requires
+//   Content-Length to calculate vertex count and throws a raw string
+//   'Failed to get content length' when it's missing. Because it's a string
+//   (not an Error), the upstream handler reads .message → undefined, producing
+//   the cryptic "Could not load /splats/…: undefined" error.
+//
+// Fix:
+//   In production, pre-fetch the .splat file ourselves and create a blob: URL.
+//   Blob URL fetches always include Content-Length per the Fetch spec, so drei's
+//   loader is happy. In dev the Next.js server sends Content-Length normally, so
+//   we pass the original URL through directly (also avoids a React render warning
+//   where blob URLs resolve synchronously and fire Three.js progress events
+//   during Splat's render).
+//
+// Verified 2026-04-11:
+//   curl -sI -H 'Accept-Encoding: br' https://www.herb.art/splats/herb-scan-clean.splat
+//   → content-encoding: br, NO content-length
+//   curl -sI https://www.herb.art/splats/herb-scan-clean.splat
+//   → content-length: 1912768
+// ---------------------------------------------------------------------------
+function useSplatUrl(src) {
+  const needsBlob = process.env.NODE_ENV !== "development";
+  const [url, setUrl] = useState(needsBlob ? null : src);
   useEffect(() => {
+    if (!needsBlob) return;
     let revoke;
-    const t0 = performance.now();
-    console.log("[Splat] fetching", src);
     fetch(src)
       .then((r) => {
-        const cl = r.headers.get("Content-Length");
-        const ce = r.headers.get("Content-Encoding");
-        console.log("[Splat] response", r.status, { contentLength: cl, contentEncoding: ce });
-        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.blob();
       })
       .then((blob) => {
-        console.log("[Splat] blob ready", (blob.size / 1024).toFixed(0) + "KB", "in", (performance.now() - t0).toFixed(0) + "ms");
         const blobUrl = URL.createObjectURL(blob);
         revoke = blobUrl;
         setUrl(blobUrl);
       })
-      .catch((err) => {
-        console.error("[Splat] pre-fetch failed:", err?.message || err);
-      });
+      .catch((err) => console.error("[Splat] fetch failed:", err?.message || err));
     return () => { if (revoke) URL.revokeObjectURL(revoke); };
-  }, [src]);
+  }, [src, needsBlob]);
   return url;
 }
 
@@ -51,7 +68,7 @@ function isTouchDevice() {
 const SPLAT_SRC = "/splats/herb-scan-clean.splat";
 
 export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, isVisible }) {
-  const splatUrl = useBlobUrl(SPLAT_SRC);
+  const splatUrl = useSplatUrl(SPLAT_SRC);
 
   // Pointer parallax (desktop) — tracks mouse across full viewport
   const pointerThetaRef = useRef(0);

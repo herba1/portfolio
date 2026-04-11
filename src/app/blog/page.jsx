@@ -3,7 +3,7 @@ import { spencer } from '@/app/fonts'
 import BlogPostLink from './BlogPostLink'
 
 export const metadata = {
-  title: 'Writing | herb.art',
+  title: 'Writing',
   description: 'Thoughts on web development, creative coding, and design.',
 }
 

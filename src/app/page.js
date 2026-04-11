@@ -2,6 +2,11 @@ import { geist } from "./fonts";
 import TempPage from "./ui/Hero/TempPage";
 import ClientSplatSection from "./experience/components/ClientSplatSection";
 
+export const metadata = {
+  title: "herb.art",
+  description: "and remember to have a nice day",
+};
+
 export default function Home() {
   return (
     <main

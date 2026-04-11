@@ -3,7 +3,10 @@ import createMDX from '@next/mdx'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   pageExtensions: ['js', 'jsx', 'md', 'mdx'],
-  compress: false, // Vercel CDN handles compression; disabling avoids stripping Content-Length
+  // Vercel's CDN compresses at the edge anyway; disabling Next.js-level
+  // compression avoids double-encoding and keeps Content-Length intact for
+  // binary assets like .splat files (see SplatViewer.jsx for full context).
+  compress: false,
   experimental: {
     viewTransition: true,
   },
