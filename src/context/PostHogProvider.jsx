@@ -5,14 +5,22 @@ import { PostHogProvider as PHProvider, usePostHog } from "posthog-js/react";
 import { useEffect, useRef, Suspense } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
 
+// Defer PostHog init to idle — don't compete with hero paint
 if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_POSTHOG_KEY && process.env.NODE_ENV === "production") {
-  posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
-    api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
-    person_profiles: "identified_only",
-    capture_pageview: false,
-    capture_pageleave: true,
-    persistence: "memory",
-  });
+  const initPostHog = () => {
+    posthog.init(process.env.NEXT_PUBLIC_POSTHOG_KEY, {
+      api_host: process.env.NEXT_PUBLIC_POSTHOG_HOST || "https://us.i.posthog.com",
+      person_profiles: "identified_only",
+      capture_pageview: false,
+      capture_pageleave: true,
+      persistence: "memory",
+    });
+  };
+  if ("requestIdleCallback" in window) {
+    requestIdleCallback(initPostHog);
+  } else {
+    setTimeout(initPostHog, 1);
+  }
 }
 
 function PostHogScrollDepth() {

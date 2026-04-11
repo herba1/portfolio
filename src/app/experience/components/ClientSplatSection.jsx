@@ -5,7 +5,12 @@ import SplatErrorBoundary from "./SplatErrorBoundary";
 
 const SplatScrollSection = dynamic(
   () => import("./SplatScrollSection"),
-  { ssr: false }
+  {
+    ssr: false,
+    loading: () => (
+      <div style={{ height: "100lvh", minHeight: "500px", marginTop: "-10vh" }} />
+    ),
+  }
 );
 
 export default function ClientSplatSection() {

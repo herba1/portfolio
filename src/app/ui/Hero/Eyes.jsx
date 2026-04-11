@@ -4,6 +4,7 @@ import { Component, useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import useMeasure from "react-use-measure";
 import { geist } from "@/app/fonts";
+import { useLenis } from "@/context/LenisContext";
 
 /* ─────────────────────────────────────────────────────────
  * HERO EYES — Live visitor presence on the hero
@@ -217,7 +218,7 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
         }
       </AnimatePresence>
       {isSelf && (
-        <div style={{
+        <div className="hidden sm:block" style={{
           position: "absolute",
           bottom: "-12px",
           left: "50%",
@@ -450,17 +451,25 @@ function seeded(str) {
 
 // ── Message Input ──────────────────────────────────────
 
-function MessageInput({ onSend, onTyping, visitorCount }) {
+function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (open) {
-      inputRef.current?.focus();
+      // Save scroll position, pause Lenis, focus without scroll
+      const scrollY = window.scrollY;
+      lenis?.stop();
+      inputRef.current?.focus({ preventScroll: true });
+      // Restore scroll position in case iOS moved it
+      requestAnimationFrame(() => {
+        window.scrollTo(0, scrollY);
+        setTimeout(() => lenis?.start(), 300);
+      });
       onTyping?.();
     }
-  }, [open, onTyping]);
+  }, [open, onTyping, lenis]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -475,6 +484,14 @@ function MessageInput({ onSend, onTyping, visitorCount }) {
     ? "just you"
     : `${visitorCount} here`;
 
+  // Hide on mobile — keyboard interactions are problematic
+  const [isMobile, setIsMobile] = useState(false);
+  useEffect(() => {
+    setIsMobile(window.innerWidth <= 768);
+  }, []);
+
+  if (isMobile) return null;
+
   return (
     <div
       className={`hero-message-input ${geist.className}`}
@@ -487,6 +504,8 @@ function MessageInput({ onSend, onTyping, visitorCount }) {
         pointerEvents: "none",
         transition: "opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
         padding: "2rem 1.5rem 1.25rem",
+        display: "flex",
+        justifyContent: "center",
         background: `linear-gradient(to top,
           rgb(241 245 249 / 0.97) 0%,
           rgb(241 245 249 / 0.95) 15%,
@@ -550,18 +569,33 @@ function MessageInput({ onSend, onTyping, visitorCount }) {
               style={{
                 background: "rgba(0,0,0,0.04)",
                 border: "1px solid rgba(0,0,0,0.08)",
-                borderRadius: "8px",
-                padding: "6px 10px",
-                fontSize: "12px",
+                borderRadius: "10px",
+                padding: "8px 12px",
+                fontSize: "16px",
                 color: "rgba(0,0,0,0.6)",
                 outline: "none",
-                width: "160px",
+                width: "200px",
                 fontFamily: "inherit",
               }}
             />
-            <span style={{ fontSize: "10px", color: "rgba(0,0,0,0.25)" }}>
-              {text.length}/20
-            </span>
+            <button
+              type="submit"
+              style={{
+                background: text.trim() ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.03)",
+                border: "none",
+                borderRadius: "8px",
+                padding: "8px 12px",
+                fontSize: "13px",
+                color: text.trim() ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.2)",
+                cursor: text.trim() ? "pointer" : "default",
+                fontFamily: "inherit",
+                transition: "background 0.15s ease, color 0.15s ease",
+                pointerEvents: "auto",
+                whiteSpace: "nowrap",
+              }}
+            >
+              send
+            </button>
           </motion.form>
         )}
       </AnimatePresence>
@@ -573,6 +607,7 @@ function MessageInput({ onSend, onTyping, visitorCount }) {
 
 function LiveEyesInner({ usePresence }) {
   const { visitors, selfId, sendMessage, sendTyping } = usePresence("hero");
+  const { lenis } = useLenis();
   return (
     <>
       <AnimatePresence>
@@ -588,7 +623,7 @@ function LiveEyesInner({ usePresence }) {
             <motion.div
               key={v.id}
               initial={{ opacity: 0, scale: 0.85 }}
-              animate={{ opacity: isSelf ? 0.8 : 0.65, scale: 1 }}
+              animate={{ opacity: isSelf ? 0.4 : 0.3, scale: 1 }}
               exit={{ opacity: 0, scale: 0.85 }}
               transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
               style={{
@@ -617,7 +652,7 @@ function LiveEyesInner({ usePresence }) {
           );
         })}
       </AnimatePresence>
-      {selfId && <MessageInput onSend={sendMessage} onTyping={sendTyping} visitorCount={visitors.length} />}
+      {selfId && <MessageInput onSend={sendMessage} onTyping={sendTyping} visitorCount={visitors.length} lenis={lenis} />}
     </>
   );
 }

@@ -14,7 +14,7 @@ export default function Home() {
       className={`bg-slate-100 ${geist.className} relative`}
     >
       {/* Hero — full viewport */}
-      <div className="h-dvh">
+      <div className="h-svh">
         <TempPage />
       </div>
       {/* Splat — scrolls in below hero */}

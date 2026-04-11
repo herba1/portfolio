@@ -210,6 +210,7 @@ export default function TempPage() {
       } else {
         clearTimeout(initId);
       }
+      if (rafRef.current) cancelAnimationFrame(rafRef.current);
       clearTimeout(idleTimer.current);
       window.removeEventListener("resize", measure);
     };
@@ -283,11 +284,25 @@ export default function TempPage() {
   return (
     <article
       ref={containerRef}
-      className="relative mx-auto flex h-dvh min-h-fit w-full flex-col items-center justify-center pb-[12vh] text-slate-900 selection:bg-black selection:text-white"
+      className="relative mx-auto flex h-svh min-h-fit w-full flex-col items-center justify-center pb-[12svh] text-slate-900 selection:bg-black selection:text-white"
     >
       <HeroEyes />
       <p
-        className={`hero-sub tracking-body-base text-dark/40 text-sm ${geist.className}`}
+        className={`hero-sub tracking-body-base text-dark text-sm relative z-10 ${geist.className}`}
+        style={{
+          padding: "1.5rem 3rem",
+          background: `radial-gradient(
+            ellipse 100% 120% at center,
+            rgb(241 245 249 / 0.95) 0%,
+            rgb(241 245 249 / 0.9) 15%,
+            rgb(241 245 249 / 0.75) 30%,
+            rgb(241 245 249 / 0.5) 45%,
+            rgb(241 245 249 / 0.25) 60%,
+            rgb(241 245 249 / 0.1) 75%,
+            rgb(241 245 249 / 0.03) 88%,
+            transparent 100%
+          )`,
+        }}
       >
         design engineer @ <a href="https://crowdvolt.com" target="_blank" rel="noopener noreferrer">crowdvolt</a>
       </p>

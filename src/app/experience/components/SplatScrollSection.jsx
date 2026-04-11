@@ -52,10 +52,12 @@ export default function SplatScrollSection() {
 
     const triggers = [];
 
+    const isMobile = window.innerWidth <= 768;
+
     // Parallax: starts higher, settles down
     const tween = gsap.fromTo(
       canvasWrapRef.current,
-      { yPercent: -50 },
+      { yPercent: isMobile ? -45 : -50 },
       {
         yPercent: 0,
         ease: "none",
@@ -63,7 +65,7 @@ export default function SplatScrollSection() {
           trigger: sectionRef.current,
           start: "top bottom",
           end: "top 30%",
-          scrub: 0.3,
+          scrub: isMobile ? true : 0.3,
         },
       }
     );
@@ -75,7 +77,7 @@ export default function SplatScrollSection() {
         trigger: sectionRef.current,
         start: "top bottom",
         end: "bottom bottom",
-        scrub: 0.5,
+        scrub: isMobile ? true : 0.5,
         onUpdate: (self) => {
           scrollProgressRef.current = self.progress;
           invalidateRef.current?.();
@@ -227,6 +229,17 @@ export default function SplatScrollSection() {
         style={{
           "--mask-size": "var(--mask-collapsed)",
         }}
+        onPointerDown={(e) => {
+          if (!expanded) return;
+          canvasWrapRef.current._tapStart = { x: e.clientX, y: e.clientY };
+        }}
+        onPointerUp={(e) => {
+          if (!expanded || !canvasWrapRef.current._tapStart) return;
+          const dx = Math.abs(e.clientX - canvasWrapRef.current._tapStart.x);
+          const dy = Math.abs(e.clientY - canvasWrapRef.current._tapStart.y);
+          canvasWrapRef.current._tapStart = null;
+          if (dx < 8 && dy < 8) handleCollapse();
+        }}
       >
         <Canvas
           frameloop={isVisible ? "always" : "never"}
@@ -260,22 +273,7 @@ export default function SplatScrollSection() {
       {!expanded && loaded && (
         <div className="splat-click-target" onClick={handleExpand} />
       )}
-      {/* Expanded: click anywhere (that isn't a drag) to collapse */}
-      {expanded && (
-        <div
-          className="splat-collapse-target"
-          onPointerDown={(e) => {
-            e.currentTarget.dataset.startX = e.clientX;
-            e.currentTarget.dataset.startY = e.clientY;
-          }}
-          onPointerUp={(e) => {
-            const dx = Math.abs(e.clientX - Number(e.currentTarget.dataset.startX));
-            const dy = Math.abs(e.clientY - Number(e.currentTarget.dataset.startY));
-            // Only collapse on tap, not drag (threshold 8px)
-            if (dx < 8 && dy < 8) handleCollapse();
-          }}
-        />
-      )}
+      {/* Expanded: tap canvas to collapse (drag still orbits) */}
       <style>{`
         .splat-section {
           --mask-collapsed: 55vmin;
@@ -363,13 +361,6 @@ export default function SplatScrollSection() {
           cursor: pointer;
           pointer-events: auto;
           z-index: 2;
-        }
-        .splat-collapse-target {
-          position: fixed;
-          inset: 0;
-          z-index: 9998;
-          pointer-events: auto;
-          cursor: pointer;
         }
       `}</style>
     </section>

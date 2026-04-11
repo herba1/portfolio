@@ -1,10 +1,5 @@
 "use client";
 import Link from "next/link";
-import gsap from "gsap";
-import { SplitText } from "gsap/SplitText";
-import { useGSAP } from "@gsap/react";
-import { useRef } from "react";
-import { useLenis } from "@/context/LenisContext";
 import posthog from "posthog-js";
 
 export default function LinkMask({
@@ -12,156 +7,24 @@ export default function LinkMask({
   text = "Hello World",
   className = "",
   textClassName = "",
-  children,
 }) {
-  const container = useRef();
-  const tl = useRef(null);
-  const tlUnder = useRef(null);
-  const { lenis } = useLenis();
-
-  const { contextSafe } = useGSAP(
-    () => {
-      const split1 = SplitText.create(".LinkMask__text", {
-        type: "chars,lines",
-        propIndex: true,
-        charsClass: "linkMask__char",
-      });
-      const split2 = SplitText.create(".LinkMask__text--second", {
-        type: "chars,lines",
-        propIndex: true,
-        charsClass: "linkMask__char--secondary",
-      });
-      tl.current = gsap.timeline({ paused: true });
-      tlUnder.current = gsap.timeline({ paused: true });
-
-      // tl.current
-      //   .to(
-      //     split1.chars,
-      //     {
-      //       ease: "power1.inOut",
-      //       duration: 0.4,
-      //       stagger: 0.025,
-      //       yPercent: -100,
-      //     },
-      //     "start",
-      //   )
-      //   .to(
-      //     split2.chars,
-      //     {
-      //       duration: 0.4,
-      //       ease: "power1.inOut",
-      //       stagger: 0.025,
-      //       yPercent: -100,
-      //     },
-      //     "start",
-      //   );
-      // tlUnder.current
-      //   .to(
-      //     ".LinkMask__underline",
-      //     {
-      //       clipPath: "inset(95% 0% 0% 0%)",
-      //       ease: "power3.out",
-      //       duration: 0.4,
-      //     },
-      //     "start",
-      //   )
-      //   .to(
-      //     ".LinkMask__underline",
-      //     {
-      //       clipPath: "inset(95% 0% 0% 100%)",
-      //       ease: "power3.out",
-      //       duration: 0.4,
-      //     },
-      //     "two",
-      //   );
-    },
-    { scope: container, dependencies: null },
-  );
-
-  const onEnter = contextSafe((e) => {
-    // tl.current.play();
-    // tlUnder.current.tweenFromTo(0, "two");
-
-    gsap.fromTo(
-      ".LinkMask__underline",
-      {
-        clipPath: "inset(95% 100% 0% 0%)",
-      },
-      {
-        clipPath: "inset(95% 0% 0% 0%)",
-        ease: "power3.out",
-        duration: 0.4,
-      },
-    );
-  });
-
-  const onLeave = contextSafe(() => {
-    // setTimeout(() => {
-    //   tl.current.reverse();
-    // }, 200);
-    // tlUnder.current.play();
-    gsap.to(".LinkMask__underline", {
-      clipPath: "inset(95% 0% 0% 100%)",
-      ease: "power3.out",
-      duration: 0.4,
-    });
-  });
+  const isInternal = href.startsWith("/");
+  const Component = isInternal ? Link : "a";
 
   return (
-    <div
-      ref={container}
-      onMouseOver={onEnter}
-      onMouseLeave={onLeave}
-      className={`LinkMask__container relative inline-block overflow-visible ${className}`}
+    <Component
+      href={href}
+      className={`LinkMask relative inline-block ${className}`}
+      onClick={() => {
+        if (isInternal) {
+          document.documentElement.classList.add("navigating");
+          setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
+        }
+        posthog.capture("link_clicked", { href, text });
+      }}
+      {...(!isInternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
     >
-      {href.charAt(0) === "#" && (
-        <a
-          href={href}
-          className="absolute right-0 left-0 z-20 h-full w-full"
-          onClick={(e) => {
-            e.preventDefault();
-            posthog.capture("link_clicked", { href, text });
-            lenis.scrollTo(href, { offset: -80 });
-          }}
-        ></a>
-      )}
-
-      {href.charAt(0) != "#" && (
-        href.startsWith("/") ? (
-          <Link
-            href={href}
-            className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
-            onClick={() => {
-              document.documentElement.classList.add("navigating");
-              setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
-              posthog.capture("link_clicked", { href, text });
-            }}
-          >
-            {text}
-          </Link>
-        ) : (
-          <a
-            href={href}
-            className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
-            onClick={() => posthog.capture("link_clicked", { href, text })}
-          >
-            {text}
-          </a>
-        )
-      )}
-      <div className="relative z-10 inline-block overflow-clip">
-        <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>
-        <p className={`LinkMask__text--second absolute ${textClassName}`}>
-          {text}
-        </p>
-      </div>
-      {/* underline */}
-      <p
-        className={`LinkMask__underline bg-dark pointer-events-none absolute top-1 w-fit text-transparent`}
-        style={{ clipPath: "inset(95% 100% 0% 0%)" }}
-      >
-        {text}
-      </p>
-    </div>
+      <span className={`LinkMask__text ${textClassName}`}>{text}</span>
+    </Component>
   );
 }

@@ -125,7 +125,7 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
       : 1 - Math.pow(-2 * t + 2, 5) / 2;
     const currentRadius = cameraStart + (cameraRadius - cameraStart) * eased;
 
-    const BASE_THETA = Math.PI * 0.39;
+    const BASE_THETA = Math.PI / 6; // 30°
     let theta = BASE_THETA;
     let phi = 0;
     const damping = 0.15;

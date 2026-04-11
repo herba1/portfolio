@@ -11,26 +11,22 @@
 @keyframes page-exit {
   from {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0px);
+    transform: translateY(0);
   }
   to {
     opacity: 0;
-    transform: translateY(-3%) scale(0.97);
-    filter: blur(4px);
+    transform: translateY(-2%);
   }
 }
 
 @keyframes page-enter {
   from {
     opacity: 0;
-    transform: translateY(3%) scale(1.02);
-    filter: blur(4px);
+    transform: translateY(2%);
   }
   to {
     opacity: 1;
-    transform: translateY(0) scale(1);
-    filter: blur(0px);
+    transform: translateY(0);
   }
 }
 
@@ -42,8 +38,8 @@
   --vt-page-enter: none;
 }
 :root.navigating {
-  --vt-page-exit: page-exit 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  --vt-page-enter: page-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  --vt-page-exit: page-exit 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  --vt-page-enter: page-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
 ::view-transition-old(page-content) {
@@ -141,7 +137,7 @@
   bottom: 0;
   right: 0;
   z-index: 100;
-  display: flex;
+  display: none;
   align-items: center;
   gap: 0.35rem;
   padding: 1rem 1.5rem;
@@ -150,6 +146,11 @@
   mix-blend-mode: difference;
   transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
   view-transition-name: footer-clock;
+}
+@media (min-width: 768px) {
+  .footer-clock {
+    display: flex;
+  }
 }
 
 .footer-clock__time {
@@ -409,38 +410,34 @@
   }
 }
 
-.linkMask__char, .linkMask__char--secondary {
-
-  --stagger: 0.01s;
-
-    display: inline-block;
-    transform: translateY(0%);
-    transition: transform 0.8s var(--ease-out-quart);
-        transition-delay: calc(var(--char)*var(--stagger));
+/* ── LinkMask underline ── */
+.LinkMask {
+  text-decoration: none;
+  position: relative;
+  display: inline-block;
+}
+.LinkMask::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 1px;
+  background: currentColor;
+  opacity: 0.4;
+  transform: scaleX(0);
+  transform-origin: right center;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+.LinkMask:hover::after {
+  transform: scaleX(1);
+  transform-origin: left center;
 }
 
-.LinkMask__container {
-
-    &:hover .linkMask__char{
-        transform: translateY(-100%);
-    }
-
-    &:hover .linkMask__char--secondary{
-        transform: translateY(-100%);
-    }
-}
-
-/* During navigation, kill all LinkMask transitions so
-   view transition snapshots a clean, non-animating state */
-html.navigating .linkMask__char,
-html.navigating .linkMask__char--secondary {
+/* During navigation, kill LinkMask transitions */
+html.navigating .LinkMask::after {
   transition-duration: 0s !important;
-  transition-delay: 0s !important;
-}
-
-html.navigating .LinkMask__underline {
-  animation-duration: 0s !important;
-  clip-path: inset(95% 100% 0% 0%) !important;
+  transform: scaleX(0) !important;
 }
 
 

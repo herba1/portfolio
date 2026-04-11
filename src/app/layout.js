@@ -65,6 +65,7 @@ export const metadata = {
 export const viewport = {
   width: "device-width",
   initialScale: 1,
+  interactiveWidget: "resizes-visual",
 };
 
 const jsonLd = {
@@ -95,7 +96,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" />
+        {/* Splat loads on scroll via dynamic import — no prefetch needed */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}

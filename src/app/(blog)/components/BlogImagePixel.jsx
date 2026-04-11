@@ -34,8 +34,12 @@ export function BlogImagePixel({
   const paintingRef = useRef(false)
   const lastPosRef = useRef(null)
 
+  const [isTouch, setIsTouch] = useState(false)
+
   useEffect(() => {
-    isTouchRef.current = 'ontouchstart' in window
+    const touch = 'ontouchstart' in window || navigator.maxTouchPoints > 0
+    isTouchRef.current = touch
+    setIsTouch(touch)
   }, [])
 
   useEffect(() => {
@@ -161,6 +165,67 @@ export function BlogImagePixel({
     lastPosRef.current = { x, y }
   }, [])
 
+  // Mobile: auto-reveal sweep that repeats while visible
+  useEffect(() => {
+    if (!isTouch || !imageLoaded) return
+    const container = containerRef.current
+    if (!container) return
+
+    let sweepTimeout = null
+    let sweepInterval = null
+    let visible = false
+
+    function runSweep() {
+      const rect = container.getBoundingClientRect()
+      const w = rect.width
+      const h = rect.height
+      const steps = 30
+      let step = 0
+      // Randomize sweep path each time
+      const startY = 0.2 + Math.random() * 0.3
+      const curve = 0.3 + Math.random() * 0.2
+      const reverse = Math.random() > 0.5
+
+      sweepInterval = setInterval(() => {
+        if (step >= steps) {
+          clearInterval(sweepInterval)
+          sweepInterval = null
+          // Schedule next sweep
+          if (visible) {
+            sweepTimeout = setTimeout(runSweep, 3000 + Math.random() * 2000)
+          }
+          return
+        }
+        const t = step / steps
+        const tx = reverse ? 1 - t : t
+        const x = w * (0.1 + tx * 0.8)
+        const y = h * (startY + Math.sin(t * Math.PI) * curve)
+        trailRef.current.push({ x, y, alpha: 1 })
+        step++
+      }, 50)
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        visible = entry.isIntersecting
+        if (visible && !sweepInterval) {
+          runSweep()
+        } else if (!visible) {
+          clearTimeout(sweepTimeout)
+          clearInterval(sweepInterval)
+          sweepInterval = null
+        }
+      },
+      { threshold: 0.4 }
+    )
+    observer.observe(container)
+    return () => {
+      observer.disconnect()
+      clearTimeout(sweepTimeout)
+      clearInterval(sweepInterval)
+    }
+  }, [isTouch, imageLoaded])
+
   // Desktop: auto on pointer move (no click needed)
   const onPointerMove = useCallback((e) => {
     if (isTouchRef.current && !paintingRef.current) return
@@ -192,12 +257,12 @@ export function BlogImagePixel({
       <div
         ref={containerRef}
         className="relative overflow-hidden rounded-2xl select-none"
-        style={{ touchAction: 'none' }}
-        onPointerMove={onPointerMove}
-        onPointerDown={onPointerDown}
-        onPointerUp={onPointerUp}
-        onPointerLeave={onPointerLeave}
-        onPointerEnter={onPointerEnter}
+        style={{ touchAction: isTouch ? 'auto' : 'none' }}
+        onPointerMove={isTouch ? undefined : onPointerMove}
+        onPointerDown={isTouch ? undefined : onPointerDown}
+        onPointerUp={isTouch ? undefined : onPointerUp}
+        onPointerLeave={isTouch ? undefined : onPointerLeave}
+        onPointerEnter={isTouch ? undefined : onPointerEnter}
       >
         <Image
           ref={imgRef}

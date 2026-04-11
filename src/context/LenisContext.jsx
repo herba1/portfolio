@@ -1,15 +1,8 @@
 // src/context/LenisContext.jsx
 "use client";
 import { createContext, useContext, useEffect, useState, useRef } from "react";
-import Lenis from "lenis";
-import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { SplitText } from "gsap/SplitText";
-import "../app/globals.css" 
+import "../app/globals.css"
 import 'lenis/dist/lenis.css'
-
-// Register GSAP plugins
-gsap.registerPlugin(ScrollTrigger,SplitText);
 
 const LenisContext = createContext({
   lenis: null,
@@ -17,37 +10,48 @@ const LenisContext = createContext({
 
 export function LenisProvider({ children }) {
   const [lenis, setLenis] = useState(null);
-  const reqIdRef = useRef(null);
 
   useEffect(() => {
-    const lenisInstance = new Lenis({
-      // duration: 1.2,
-      // easing: (t) => Math.min(1, 1.001 - Math.pow(2, -10 * t)),
-      direction: 'vertical',
-      smooth: true,
-      smoothTouch: false,
-      // touchMultiplier: 2,
-      autoResize:true,
-      syncTouch:false,
-      infinite:false,
+    // Defer until after view transitions settle (~600ms)
+    const delayId = setTimeout(() => {
+    Promise.all([
+      import("lenis"),
+      import("gsap"),
+      import("gsap/ScrollTrigger"),
+      import("gsap/SplitText"),
+    ]).then(([LenisMod, gsapMod, ScrollTriggerMod, SplitTextMod]) => {
+      const Lenis = LenisMod.default;
+      const gsap = gsapMod.gsap;
+      const ScrollTrigger = ScrollTriggerMod.ScrollTrigger;
+      const SplitText = SplitTextMod.SplitText;
+
+      gsap.registerPlugin(ScrollTrigger, SplitText);
+
+      const lenisInstance = new Lenis({
+        direction: 'vertical',
+        smooth: true,
+        smoothTouch: false,
+        autoResize: true,
+        syncTouch: false,
+        infinite: false,
+      });
+
+      setLenis(lenisInstance);
+
+      lenisInstance.on('scroll', ScrollTrigger.update);
+      gsap.ticker.add((time) => {
+        lenisInstance.raf(time * 1000);
+      });
+      gsap.ticker.lagSmoothing(0);
     });
-
-    setLenis(lenisInstance);
-
-    // Connect Lenis to ScrollTrigger
-    lenisInstance.on('scroll', ScrollTrigger.update);
-
-    // Add Lenis raf to GSAP's ticker
-    gsap.ticker.add((time) => {
-      lenisInstance.raf(time * 1000);
-    });
-
-    // Disable lag smoothing in GSAP
-    gsap.ticker.lagSmoothing(0);
+    }, 100); // Small delay — let first paint happen
 
     return () => {
-      lenisInstance.destroy();
-      gsap.ticker.remove(lenisInstance.raf);
+      clearTimeout(delayId);
+      setLenis((prev) => {
+        prev?.destroy();
+        return null;
+      });
     };
   }, []);
 
