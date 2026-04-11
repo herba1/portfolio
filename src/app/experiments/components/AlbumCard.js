@@ -1,8 +1,8 @@
 "use client";
 
 import { PauseIcon, PlayIcon } from "lucide-react";
-import { Geist, Play } from "next/font/google";
-import { act, useMemo, useState } from "react";
+import { Geist } from "next/font/google";
+import { useMemo, useState } from "react";
 import {
   AnimatePresence,
   LayoutGroup,

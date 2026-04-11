@@ -24,7 +24,10 @@ const LETTERS = [...'herbart']
 
 export default function NavLogo({ className = '' }) {
   return (
-    <Link href="/" className={`nav__logo block ${className}`}>
+    <Link href="/" className={`nav__logo block ${className}`} onClick={() => {
+      document.documentElement.classList.add("navigating");
+      setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
+    }}>
       <svg
         viewBox="0 0 68 22"
         width={68}

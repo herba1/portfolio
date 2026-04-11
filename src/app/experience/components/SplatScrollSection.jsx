@@ -11,8 +11,9 @@ import DreamyEffect from "./PixelMaskEffect";
 
 gsap.registerPlugin(ScrollTrigger);
 
-// Eased gradient edge fade — ease-in-out sine curve across 12 stops
-function easedEdgeFade(fadePercent = 8) {
+// Eased gradient edge fade — computed once at module level
+const easedEdgeFade = (() => {
+  const fadePercent = 8;
   const steps = 12;
   const stops = [];
   for (let i = 0; i <= steps; i++) {
@@ -30,7 +31,7 @@ function easedEdgeFade(fadePercent = 8) {
     stops.push(`rgba(0,0,0,${(1 - eased).toFixed(3)}) ${pos.toFixed(1)}%`);
   }
   return stops.join(", ");
-}
+})();
 
 function LoadWatcher({ onLoaded }) {
   const { progress } = useProgress();
@@ -123,9 +124,12 @@ export default function SplatScrollSection() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handleLoaded = useCallback(() => setLoaded(true), []);
+  const handleLoaded = useCallback(() => {
+    console.log('[SplatScrollSection] splat loaded', Date.now());
+    setLoaded(true);
+  }, []);
 
-  const edgeFade = easedEdgeFade();
+  const edgeFade = easedEdgeFade;
 
   return (
     <section
@@ -138,6 +142,7 @@ export default function SplatScrollSection() {
         paddingBottom: "30vh",
         position: "relative",
         zIndex: 1,
+        contain: "layout style",
       }}
     >
       <Leva hidden={!debug} collapsed />

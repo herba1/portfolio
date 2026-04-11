@@ -14,12 +14,15 @@ export const instrumentSerif = Instrument_Serif({
 
 export const spencer = localFont({
     src: '../../public/spencer-regular-webfont.woff2',
+    display: 'swap',
 })
 
 export const spencerOutlined = localFont({
     src: '../../public/spencer-outlined-webfont.woff2',
+    display: 'swap',
 })
 
 export const lastik = localFont({
     src: '../../public/lastikfont.otf',
+    display: 'swap',
 })

@@ -2,13 +2,15 @@ import { ViewTransition } from "react";
 import { LenisProvider } from "@/context/LenisContext";
 import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
-import Curtain from "./ui/Curtain";
+
 import StickyFooter from "./ui/StickyFooter";
 import { geist } from "./fonts";
 import Loading from "./ui/Loading";
 import { description, title } from "./constants";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
+import DebugTransitions from "./ui/DebugTransitions";
+import FooterClock from "./ui/FooterClock";
 
 export const metadata = {
   title: title,
@@ -54,7 +56,7 @@ export default function RootLayout({ children }) {
         <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" crossOrigin="anonymous" />
       </head>
       <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
-        <Curtain />
+        <DebugTransitions />
         <PostHogProvider>
           <LenisProvider>
             <Navbar
@@ -77,6 +79,7 @@ export default function RootLayout({ children }) {
             </Loading> */}
           </LenisProvider>
         </PostHogProvider>
+        <FooterClock />
         <Analytics />
         <SpeedInsights />
       </body>

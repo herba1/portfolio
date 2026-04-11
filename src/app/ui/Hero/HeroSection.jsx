@@ -3,7 +3,6 @@ import Image from "next/image";
 import Marquee from "./Marquee";
 
 import { instrumentSerif } from "@/app/fonts";
-import { useState } from "react";
 
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
@@ -185,14 +184,11 @@ export default function HeroSection({ children }) {
   ].join(";");
   console.log(msg, styles);
 
-  const [hoverTop, setHoverTop] = useState(false);
-  const [hoverBottom, setHoverBottom] = useState(false);
-
   return (
     <section className="flex min-h-svh w-full flex-col items-center justify-center gap-4">
       <div className="relative min-h-fit w-full">
         <HeroTextTop
-          hover={hoverTop}
+          hover={false}
           className={`absolute bottom-full w-full`}
         ></HeroTextTop>
         <Marquee

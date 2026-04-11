@@ -2,7 +2,6 @@
 
 import { spencer, geist } from "@/app/fonts";
 import { useRef, useCallback, useEffect } from "react";
-import { motion } from "motion/react";
 import posthog from "posthog-js";
 
 function seeded(i) {
@@ -135,12 +134,31 @@ export default function TempPage() {
     return best;
   }, []);
 
-  // measure on mount + idle hint
+  // DEBUG: track mount/unmount
   useEffect(() => {
-    const init = setTimeout(() => {
+    console.log("[TempPage] mounted", Date.now());
+    return () => console.log("[TempPage] unmounted", Date.now());
+  }, []);
+
+  // Defer interaction setup until after intro animation (~1s)
+  // Uses requestIdleCallback where available, falls back to setTimeout
+  useEffect(() => {
+    const deferSetup = (cb) => {
+      if ("requestIdleCallback" in window) {
+        return window.requestIdleCallback(cb, { timeout: 2000 });
+      }
+      return setTimeout(cb, 1200);
+    };
+
+    const initId = deferSetup(() => {
+      // Clear CSS animations so JS transforms can take over
+      charsRef.current.forEach((el) => {
+        if (el) el.style.animation = "none";
+      });
+
       measure();
 
-      // idle hint: big obvious pull after 1.5s, then explode
+      // idle hint after interaction is ready
       idleTimer.current = setTimeout(() => {
         if (hasInteracted.current) return;
         const count = velocities.current.length;
@@ -185,12 +203,16 @@ export default function TempPage() {
 
         if (!rafRef.current) rafRef.current = requestAnimationFrame(animLoop);
         requestAnimationFrame(fakeDrag);
-      }, 2000);
-    }, 300);
+      }, 3000);
+    });
 
     window.addEventListener("resize", measure);
     return () => {
-      clearTimeout(init);
+      if ("cancelIdleCallback" in window) {
+        window.cancelIdleCallback(initId);
+      } else {
+        clearTimeout(initId);
+      }
       clearTimeout(idleTimer.current);
       window.removeEventListener("resize", measure);
     };
@@ -244,6 +266,10 @@ export default function TempPage() {
   const onPointerDown = useCallback((e) => {
     if (!hasInteracted.current) {
       posthog.capture("hero_text_first_pull");
+      // Clear CSS animations on first interaction so JS can control transforms
+      charsRef.current.forEach((el) => {
+        if (el) el.style.animation = "none";
+      });
     }
     hasInteracted.current = true;
     if (idleTimer.current) clearTimeout(idleTimer.current);
@@ -260,18 +286,15 @@ export default function TempPage() {
   return (
     <article
       ref={containerRef}
-      className="relative mx-auto flex h-dvh min-h-fit w-full flex-col items-center justify-center text-slate-900 selection:bg-black selection:text-white"
+      className="relative mx-auto flex h-dvh min-h-fit w-full flex-col items-center justify-center pb-[12vh] text-slate-900 selection:bg-black selection:text-white"
     >
-      <motion.p
-        className={`tracking-body-base text-dark/40 text-sm ${geist.className}`}
-        initial={{ opacity: 0, y: 8 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, delay: 0.8, ease: [0.16, 1, 0.3, 1] }}
+      <p
+        className={`hero-sub tracking-body-base text-dark/40 text-sm ${geist.className}`}
       >
-        design engineer @ crowdvolt
-      </motion.p>
+        design engineer @ <a href="https://crowdvolt.com" target="_blank" rel="noopener noreferrer">crowdvolt</a>
+      </p>
 
-      <div
+      {/* <div
         className="touch-none mt-2"
         onPointerDown={onPointerDown}
       >
@@ -283,26 +306,24 @@ export default function TempPage() {
               return <span key={i} className="blog-ch-space" />;
             }
             const idx = ci++;
-            const delay = 0.05 + ORDER[idx] * 0.035;
+            const delay = (0.05 + ORDER[idx] * 0.035).toFixed(3);
+            const rotate = (seeded(idx) * 14 - 7).toFixed(1);
             return (
-              <motion.span
+              <span
                 key={i}
                 className="hero-ch"
                 ref={(el) => { charsRef.current[idx] = el; }}
-                initial={{ opacity: 0, scale: 0.3, y: 20, rotate: seeded(idx) * 20 - 10 }}
-                animate={{ opacity: 1, scale: 1, y: 0, rotate: 0 }}
-                transition={{
-                  duration: 0.5,
-                  delay,
-                  ease: [0.22, 1, 0.36, 1],
+                style={{
+                  "--ch-d": `${delay}s`,
+                  "--ch-r": rotate,
                 }}
               >
                 {ch}
-              </motion.span>
+              </span>
             );
           })}
         </h1>
-      </div>
+      </div> */}
     </article>
   );
 }

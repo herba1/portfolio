@@ -40,6 +40,10 @@ export default function NavMenu({ menuIsOpen, setMenuIsOpen }) {
               key={link.name}
               href={link.link}
               onClick={() => {
+                if (isInternal) {
+                  document.documentElement.classList.add("navigating");
+                  setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
+                }
                 posthog.capture("nav_link_clicked", { link: link.name.toLowerCase() });
                 setMenuIsOpen(false);
               }}

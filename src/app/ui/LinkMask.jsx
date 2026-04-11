@@ -1,14 +1,11 @@
 "use client";
 import Link from "next/link";
 import gsap from "gsap";
-import { ScrollTrigger, SplitText, ScrambleTextPlugin } from "gsap/all";
+import { SplitText } from "gsap/SplitText";
 import { useGSAP } from "@gsap/react";
 import { useRef } from "react";
 import { useLenis } from "@/context/LenisContext";
-import Lenis from "lenis";
 import posthog from "posthog-js";
-
-gsap.registerPlugin(SplitText);
 
 export default function LinkMask({
   href = "#",
@@ -130,13 +127,27 @@ export default function LinkMask({
       )}
 
       {href.charAt(0) != "#" && (
-        <a
-          href={href}
-          className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
-          onClick={() => posthog.capture("link_clicked", { href, text })}
-        >
-          {text}
-        </a>
+        href.startsWith("/") ? (
+          <Link
+            href={href}
+            className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
+            onClick={() => {
+              document.documentElement.classList.add("navigating");
+              setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
+              posthog.capture("link_clicked", { href, text });
+            }}
+          >
+            {text}
+          </Link>
+        ) : (
+          <a
+            href={href}
+            className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
+            onClick={() => posthog.capture("link_clicked", { href, text })}
+          >
+            {text}
+          </a>
+        )
       )}
       <div className="relative z-10 inline-block overflow-clip">
         <p className={`LinkMask__text relative ${textClassName}`}>{text}</p>

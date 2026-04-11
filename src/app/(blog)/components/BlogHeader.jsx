@@ -1,5 +1,5 @@
 import { spencer } from '@/app/fonts'
-import Link from 'next/link'
+import TransitionLink from '@/app/ui/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
 
 function seeded(i) {
@@ -30,13 +30,13 @@ export default function BlogHeader({ title, date, tags }) {
 
   return (
     <header className="mb-10">
-      <Link
+      <TransitionLink
         href="/blog"
         className="blog-header-back tracking-body-base text-dark/50 hover:text-dark mb-6 inline-flex items-center gap-1 text-sm transition-colors"
       >
         <ArrowLeft size={14} />
         Back to writing
-      </Link>
+      </TransitionLink>
       <time className="blog-header-date tracking-body-base text-dark/50 block text-sm">
         {new Date(date).toLocaleDateString('en-US', {
           year: 'numeric',

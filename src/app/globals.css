@@ -34,13 +34,24 @@
   }
 }
 
-::view-transition-old(page-content) {
-  animation: page-exit 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  mix-blend-mode: normal;
+/* View transition animation controlled via custom properties on :root.
+   Default: none (prevents Suspense-triggered flashes on load).
+   Set to real animations by adding .navigating class to <html>. */
+:root {
+  --vt-page-exit: none;
+  --vt-page-enter: none;
+}
+:root.navigating {
+  --vt-page-exit: page-exit 0.35s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  --vt-page-enter: page-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
 }
 
+::view-transition-old(page-content) {
+  animation: var(--vt-page-exit);
+  mix-blend-mode: normal;
+}
 ::view-transition-new(page-content) {
-  animation: page-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: var(--vt-page-enter);
   mix-blend-mode: normal;
 }
 
@@ -65,11 +76,6 @@
   animation: none;
 }
 
-/* skip enter animation on initial page load (no old snapshot exists yet) */
-::view-transition-new(page-content):only-child {
-  animation: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-old(page-content),
   ::view-transition-new(page-content) {
@@ -77,27 +83,165 @@
   }
 }
 
-/* — First-load curtain ——————————————————————— */
-@keyframes curtain-out {
-  0%   { opacity: 1; }
-  100% { opacity: 0; visibility: hidden; }
+/* ─────────────────────────────────────────────
+ * HERO ENTRANCE — CSS-driven, off main thread
+ * ───────────────────────────────────────────── */
+
+/* Hero uses a smooth three-phase entrance:
+   transparent + small + rotated → visible + small → full scale + settled
+   Bounce curve gives overshoot on the scale-up. */
+@keyframes hero-ch-in {
+  0% {
+    color: transparent;
+    transform: scale(0.3) rotate(calc(var(--ch-r, 0) * 1deg));
+  }
+  25% {
+    color: inherit;
+    transform: scale(0.3) rotate(calc(var(--ch-r, 0) * 0.6deg));
+  }
+  100% {
+    color: inherit;
+    transform: scale(1) rotate(0deg);
+  }
 }
 
-.curtain {
-  position: fixed;
-  inset: 0;
-  z-index: 9999;
-  background: #f1f5f9;
-  opacity: 1;
-  pointer-events: none;
-}
-
-.curtain.reveal {
-  animation: curtain-out 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+.hero-ch {
+  display: inline-block;
+  color: transparent;
+  transform: scale(0.3);
+  transform-origin: center center;
+  will-change: transform, color;
+  animation: hero-ch-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) var(--ch-d, 0s) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .curtain.reveal { animation-duration: 0s; }
+  .hero-ch,
+  .hero-sub {
+    animation: none !important;
+    color: inherit !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+ * FOOTER CLOCK
+ * ───────────────────────────────────────────── */
+
+.footer-clock {
+  position: fixed;
+  bottom: 0;
+  right: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 1rem 1.5rem;
+  opacity: 0;
+  animation: nav-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards;
+}
+
+.footer-clock__time {
+  font-variant-numeric: tabular-nums;
+}
+
+.footer-clock__sep {
+  opacity: 0.4;
+}
+
+.clock-icon {
+  opacity: 0.7;
+}
+
+
+/* Digit swap animation */
+.clock-digit-wrap {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  vertical-align: top;
+}
+
+.clock-digit {
+  display: inline-block;
+}
+
+@keyframes digit-in {
+  from {
+    opacity: 0;
+    transform: translateY(100%);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes digit-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+.clock-digit--in {
+  animation: digit-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+.clock-digit--out {
+  position: absolute;
+  left: 0;
+  top: 0;
+  animation: digit-out 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .footer-clock {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+  .clock-digit--in,
+  .clock-digit--out {
+    animation: none !important;
+    opacity: 1 !important;
+  }
+}
+
+@media (max-width: 640px) {
+  .footer-clock {
+    padding: 0.75rem 1rem;
+  }
+}
+
+/* ─────────────────────────────────────────────
+ * NAV ENTRANCE — fade + slide down
+ * ───────────────────────────────────────────── */
+
+@keyframes nav-in {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.nav__container {
+  opacity: 0;
+  animation: nav-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__container {
+    animation: none !important;
+    opacity: 1 !important;
+  }
 }
 
 @theme {
