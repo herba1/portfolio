@@ -1,0 +1,227 @@
+import BlogHeader from '../components/BlogHeader'
+
+export const metadata = {
+  title: 'Component Test | herb.art',
+  description: 'A comprehensive test of every MDX component available in the blog.',
+}
+
+<BlogHeader
+  title="Component Test"
+  date="2026-04-10"
+  tags={['test', 'components', 'mdx']}
+/>
+
+<article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-blue-500 prose-code:before:content-[''] prose-code:after:content-['']">
+
+<Lead>
+  This post tests every MDX component available in the blog. Use it as a reference
+  for what you can do inside any post.
+</Lead>
+
+<Divider label="Typography" />
+
+## Headings
+
+### Third-level heading
+
+#### Fourth-level heading
+
+Regular body text with **bold**, *italic*, ~~strikethrough~~, and `inline code`. Links work like [this one](/blog) for internal routes, and [this one](https://github.com) for external sites (opens in new tab automatically).
+
+<Label>Mono Label</Label>
+
+The `Label` component renders monospace, uppercase, tracked-out text — useful for dates, categories, or meta annotations in the Shopify editorial style.
+
+<Aside>
+  An aside is a subtle, italicized note offset with a thin left border. Good for
+  tangential thoughts that don't deserve a full callout.
+</Aside>
+
+### Lists
+
+- First item with some detail
+- Second item — **bold parts** work inline
+- Third item with `code` inline
+
+1. Ordered list item one
+2. Ordered list item two
+3. Ordered list item three
+
+<Divider label="Callouts" />
+
+## Callout Variants
+
+<Callout type="note" title="Note">
+  The default callout. Use it for general annotations or side-notes.
+</Callout>
+
+<Callout type="info" title="Info">
+  Highlights useful information — tips, best practices, things worth knowing.
+</Callout>
+
+<Callout type="warning" title="Warning">
+  Flags something the reader should be careful about. Not an error, but worth attention.
+</Callout>
+
+<Callout type="error" title="Error">
+  Something went wrong or is critically important to avoid.
+</Callout>
+
+<Callout type="success" title="Success">
+  Confirms something worked, or highlights a positive outcome.
+</Callout>
+
+<Divider label="Quotes" />
+
+## Pull Quotes
+
+<Quote author="Dieter Rams">
+  Good design is as little design as possible.
+</Quote>
+
+<Quote author="Frank Chimero" source="The Shape of Design">
+  People ignore design that ignores people.
+</Quote>
+
+<Divider label="Buttons & Badges" />
+
+## Buttons
+
+The depth-style buttons from the portfolio, available in three variants:
+
+<div className="not-prose my-8 flex flex-wrap gap-3">
+  <LinkButton href="https://github.com">Primary</LinkButton>
+  <LinkButton href="https://github.com" variant="dark">Dark</LinkButton>
+  <LinkButton href="https://github.com" variant="outline">Outline</LinkButton>
+</div>
+
+## Badges
+
+Inline labels for tagging and categorization:
+
+<div className="not-prose my-6 flex flex-wrap gap-2">
+  <Badge>Default</Badge>
+  <Badge color="blue">React</Badge>
+  <Badge color="green">Stable</Badge>
+  <Badge color="amber">Beta</Badge>
+  <Badge color="red">Breaking</Badge>
+</div>
+
+<Divider label="Code" />
+
+## Code Blocks
+
+Syntax-highlighted with `rehype-pretty-code` at build time — no client JS:
+
+```jsx
+function useScrollReveal(ref) {
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          entry.target.classList.add('revealed')
+          observer.unobserve(entry.target)
+        }
+      },
+      { threshold: 0.15 },
+    )
+    observer.observe(ref.current)
+    return () => observer.disconnect()
+  }, [ref])
+}
+```
+
+```css
+/* Spring-bouncy easing — peak overshoot at 1.12 */
+.card {
+  transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1),
+              box-shadow 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.card:hover  { transform: scale(1.015); box-shadow: 0 12px 31px rgba(0,0,0,0.12); }
+.card:active { transform: scale(0.97); }
+```
+
+```bash
+# Quick deploy
+npm run build && vercel --prod
+```
+
+Inline code: `const x = 42` renders inside paragraphs naturally.
+
+<Divider label="Media" />
+
+## Images
+
+Use `BlogImage` for images with captions and proper `next/image` optimization:
+
+{/* <BlogImage src="/blog/images/example.png" alt="Example" caption="A captioned image with next/image optimization" /> */}
+
+## Video Embed
+
+YouTube embeds are responsive 16:9 iframes with lazy loading:
+
+<YouTube id="dQw4w9WgXcQ" title="Test video embed" />
+
+## Short-Form Video
+
+The `Video` component handles direct video files — defaults to muted + looping for short-form content:
+
+{/* <Video src="/blog/videos/demo.mp4" caption="A short demo clip" /> */}
+
+## Audio
+
+Native audio player for clips, podcasts, or sound bites:
+
+{/* <Audio src="/blog/audio/clip.mp3" title="Beat Sketch" caption="Early draft — 30 seconds" /> */}
+
+<Divider label="Layout" />
+
+## Dividers
+
+The `Divider` component has two modes:
+
+**With label** (like the ones used throughout this post) — a thin line with centered mono text.
+
+**Without label** — a clean horizontal rule:
+
+<Divider />
+
+## Breaking Out of Prose
+
+Wrap content in `not-prose` to escape the typography styles and use raw Tailwind:
+
+<div className="not-prose my-10 grid grid-cols-1 gap-4 md:grid-cols-3">
+  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-dark text-lg font-semibold">Card One</p>
+    <p className="text-dark/50 mt-1 text-sm">Scale on hover, spring on press. Squircle corners when supported.</p>
+  </div>
+  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-dark text-lg font-semibold">Card Two</p>
+    <p className="text-dark/50 mt-1 text-sm">Shadow paired with scale for depth. The Shopify pattern.</p>
+  </div>
+  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-dark text-lg font-semibold">Card Three</p>
+    <p className="text-dark/50 mt-1 text-sm">Use `not-prose` for custom layouts inside any post.</p>
+  </div>
+</div>
+
+<Divider label="Reference" />
+
+## Full Component List
+
+| Component | Props | Description |
+|-----------|-------|-------------|
+| `BlogImage` | `src, alt, width, height, caption, priority` | next/image with figure + caption |
+| `YouTube` | `id, title` | Responsive 16:9 iframe |
+| `Video` | `src, poster, caption, autoPlay, loop, muted` | Direct video player |
+| `Audio` | `src, title, caption` | Native audio player |
+| `Callout` | `type, title, children` | Alert box (note/info/warning/error/success) |
+| `Quote` | `author, source, children` | Pull quote with serif font |
+| `LinkButton` | `href, variant, children` | Depth-style button (primary/dark/outline) |
+| `Label` | `children, className` | Mono uppercase meta text |
+| `Lead` | `children` | Intro paragraph, larger text |
+| `Divider` | `label` | Horizontal rule, optional centered label |
+| `Badge` | `children, color` | Inline pill (default/blue/green/amber/red) |
+| `Aside` | `children` | Subtle italicized side note |
+
+</article>

@@ -6,6 +6,7 @@ import { useGSAP } from "@gsap/react";
 import { useRef } from "react";
 import { useLenis } from "@/context/LenisContext";
 import Lenis from "lenis";
+import posthog from "posthog-js";
 
 gsap.registerPlugin(SplitText);
 
@@ -122,6 +123,7 @@ export default function LinkMask({
           className="absolute right-0 left-0 z-20 h-full w-full"
           onClick={(e) => {
             e.preventDefault();
+            posthog.capture("link_clicked", { href, text });
             lenis.scrollTo(href, { offset: -80 });
           }}
         ></a>
@@ -131,6 +133,7 @@ export default function LinkMask({
         <a
           href={href}
           className="absolute right-0 left-0 z-20 h-full w-full opacity-0"
+          onClick={() => posthog.capture("link_clicked", { href, text })}
         >
           {text}
         </a>

@@ -1,209 +1,56 @@
 "use client";
+
 import { useEffect, useRef } from "react";
 import Link from "next/link";
-import { ExternalLink, X } from "lucide-react";
-import { useGSAP } from "@gsap/react";
-import gsap from "gsap";
-import SplitText from "gsap/SplitText";
-import { useLenis } from "@/context/LenisContext";
-import { instrumentSerif, inter } from "@/app/fonts";
-import LinkMask from "../LinkMask";
+import { geist } from "@/app/fonts";
+import { LINKS } from "./LINKS";
+import posthog from "posthog-js";
 
-export default function NavMenu({ menuIsOpen, setMenuIsOpen, children }) {
-  const container = useRef();
-  const menu = useRef();
-  const tl = useRef();
-  const { lenis } = useLenis();
+export default function NavMenu({ menuIsOpen, setMenuIsOpen }) {
+  const menuRef = useRef();
 
   useEffect(() => {
-    if (menuIsOpen && lenis) {
-      openMenu();
-      // lenis.stop();
-    } else if (!menuIsOpen && lenis) {
-      closeMenu();
-      // lenis.start();
-    }
-
-    function handleClickOutside(event) {
-      if (menuIsOpen && menu.current && !menu.current.contains(event.target)) {
+    if (!menuIsOpen) return;
+    function handleClick(e) {
+      if (menuRef.current && !menuRef.current.contains(e.target)) {
         setMenuIsOpen(false);
       }
     }
-
-    document.addEventListener("click", handleClickOutside);
-    return () => {
-      document.removeEventListener("click", handleClickOutside);
-    };
-  }, [menuIsOpen]);
-
-  const { contextSafe } = useGSAP(
-    () => {
-      let splits = new SplitText(".nav__menu__link", {
-        type: "chars, lines",
-        mask: "lines",
-      });
-
-      tl.current = gsap.timeline({ paused: true });
-
-      gsap.set(splits.chars, {
-        yPercent: 100,
-      });
-      gsap.set(".nav__menu", {
-        clipPath: "circle(0% at 95% 5%)",
-      });
-      gsap.set(container.current, {
-        opacity: 1,
-        pointerEvents: "none",
-        backdropFilter: "blur(0px)",
-      });
-
-      tl.current
-        .to(
-          container.current,
-          {
-            // opacity: 1,
-            backdropFilter: "blur(5px)",
-            pointerEvents: "all",
-          },
-          "start",
-        )
-        .to(
-          ".nav__menu",
-          {
-            ease: "power4.out",
-            clipPath: "circle(150% at 95% 5%)",
-            opacity: 1,
-            duration: 1.2,
-          },
-          "start",
-        )
-        .to(
-          splits.chars,
-          {
-            yPercent: 0,
-            stagger: 0.015,
-            ease: "power3.out",
-            duration: 0.8,
-          },
-          "-=1.1",
-        );
-    },
-    { scope: container },
-  );
-
-  const openMenu = contextSafe(() => {
-    tl.current.timeScale(1).play();
-  });
-  const closeMenu = contextSafe(() => {
-    if (tl.current.progress()) {
-      tl.current.timeScale(1.5).reverse();
-    } else {
-      tl.current.timeScale(1.5).reverse().progress(1);
-    }
-  });
+    document.addEventListener("pointerdown", handleClick);
+    return () => document.removeEventListener("pointerdown", handleClick);
+  }, [menuIsOpen, setMenuIsOpen]);
 
   return (
-    <menu
-      ref={container}
-      className={`nav__menu__container fixed top-0 left-0 z-50 grid h-lvh w-full cursor-not-allowed bg-transparent opacity-0 sm:hidden sm:items-end sm:justify-end lg:grid-cols-2`}
+    <div
+      ref={menuRef}
+      className={`sm:hidden fixed top-12 right-4 z-50 transition-all duration-200 ease-out-quart ${
+        menuIsOpen
+          ? "opacity-100 scale-100 translate-y-0"
+          : "opacity-0 scale-95 -translate-y-2 pointer-events-none"
+      }`}
     >
-      <div
-        ref={menu}
-        className="nav__menu bg-dark text-light flex h-svh cursor-default flex-col justify-between opacity-100 sm:w-[450px] lg:col-start-2 lg:w-auto"
+      <nav
+        className={`flex flex-col items-end gap-1 ${geist.className}`}
       >
-        <div className={`nav__menu__top flex items-center justify-between p-4`}>
-          <Link
-            href={"/"}
-            className={`nav__logo tracking-body-base font-medium ${inter.className}`}
-          >
-            Herbart Hernandez
-          </Link>
-          <button
-            type="button"
-            className="tracking-body-base cursor-pointer touch-manipulation font-medium transition-all active:scale-90"
-            onClick={() => {
-              setMenuIsOpen(false);
-            }}
-          >
-            Close
-          </button>
-        </div>
-        <div
-          className={`nav__menu__content flex grow flex-col justify-end gap-8 px-4 pb-4`}
-        >
-          <ul
-            className={`${instrumentSerif.className} tracking-heading-mobile flex flex-col gap-4 text-8xl`}
-          >
-            <li>
-              <a
-                onClick={(e) => {
-                  e.preventDefault();
-                  setMenuIsOpen(false);
-                  lenis.scrollTo("#portfolio", { offset: -80 });
-                }}
-                className={`nav__menu__link`}
-                href={"#portfolio"}
-              >
-                Portfolio
-              </a>
-            </li>
-            <li className="text-[22vw]">
-              <a
-                className={`nav__menu__link`}
-                href={"https://x.com/herb_dev"}
-                target="_blank"
-                rel="noopener"
-              >
-                Experiments
-              </a>
-            </li>
-            <li>
-              <a
-                className={`nav__menu__link`}
-                href={"mailto:herbart.dev@gmail.com"}
-              >
-                Contact
-              </a>
-            </li>
-            <li className="">
-              <a
-                target="_blank"
-                rel="noopener"
-                className={`nav__menu__link relative`}
-                href={"https://www.youtube.com/watch?v=PJP1mXFehww"}
-              >
-                Music
-              </a>
-            </li>
-          </ul>
-          <footer className="flex justify-between">
-            <a
-              className="nav__menu__link"
-              href="https://www.x.com/herb_dev"
-              target="_blank"
-              rel="noopener"
+        {LINKS.map((link) => {
+          const isInternal = link.link.startsWith("/");
+          const Component = isInternal ? Link : "a";
+          return (
+            <Component
+              key={link.name}
+              href={link.link}
+              onClick={() => {
+                posthog.capture("nav_link_clicked", { link: link.name.toLowerCase() });
+                setMenuIsOpen(false);
+              }}
+              className="text-dark/70 hover:text-dark tracking-body-base px-1 py-1 text-sm transition-colors"
+              {...(!isInternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
             >
-              X/Twitter
-            </a>
-            <a
-              className="nav__menu__link"
-              href="https://www.github.com/herba1"
-              target="_blank"
-              rel="noopener"
-            >
-              Github
-            </a>
-            <a
-              className="nav__menu__link"
-              href="https://www.linkedin.com/in/herbart-hernandez"
-              target="_blank"
-              rel="noopener"
-            >
-              LinkedIn
-            </a>
-          </footer>
-        </div>
-      </div>
-    </menu>
+              {link.name}
+            </Component>
+          );
+        })}
+      </nav>
+    </div>
   );
 }

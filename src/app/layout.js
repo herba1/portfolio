@@ -1,14 +1,14 @@
+import { ViewTransition } from "react";
 import { LenisProvider } from "@/context/LenisContext";
+import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
+import Curtain from "./ui/Curtain";
 import StickyFooter from "./ui/StickyFooter";
-import { inter } from "./fonts";
+import { geist } from "./fonts";
 import Loading from "./ui/Loading";
 import { description, title } from "./constants";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { Inter } from "next/font/google";
-
-const interFont = Inter({ subsets: ["latin"] });
 
 export const metadata = {
   title: title,
@@ -50,21 +50,33 @@ export const viewport = {
 export default function RootLayout({ children }) {
   return (
     <html lang="en">
-      {/*  */}
+      <head>
+        <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" crossOrigin="anonymous" />
+      </head>
       <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
-        <LenisProvider>
-          {children}
-          {/* <Loading>
-            <div className="relative z-0">
-              <Navbar
-                className="text-dark sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
-                phoneVisible={false}
-                ctaVisible={false}
-              ></Navbar>
+        <Curtain />
+        <PostHogProvider>
+          <LenisProvider>
+            <Navbar
+              className="text-dark z-50 font-medium"
+              phoneVisible={false}
+              ctaVisible={false}
+            />
+            <ViewTransition name="page-content">
               {children}
-            </div>
-          </Loading> */}
-        </LenisProvider>
+            </ViewTransition>
+            {/* <Loading>
+              <div className="relative z-0">
+                <Navbar
+                  className="text-dark sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
+                  phoneVisible={false}
+                  ctaVisible={false}
+                ></Navbar>
+                {children}
+              </div>
+            </Loading> */}
+          </LenisProvider>
+        </PostHogProvider>
         <Analytics />
         <SpeedInsights />
       </body>

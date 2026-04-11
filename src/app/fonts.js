@@ -1,7 +1,7 @@
-import { Inter, Instrument_Serif } from "next/font/google";
+import { Instrument_Serif, Geist } from "next/font/google";
 import localFont from "next/font/local";
 
-export const inter = Inter({
+export const geist = Geist({
     subsets:['latin'],
     display:'swap',
 })
@@ -9,6 +9,7 @@ export const inter = Inter({
 export const instrumentSerif = Instrument_Serif({
     subsets:['latin'],
     weight: ['400'],
+    style: ['normal', 'italic'],
 })
 
 export const spencer = localFont({

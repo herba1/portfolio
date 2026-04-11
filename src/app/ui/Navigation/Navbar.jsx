@@ -8,7 +8,7 @@ import NavMenuButton from "./NavMenuButton";
 import NavPhone from "./NavPhone";
 import NavLinks from "./NavLinks";
 import NavMenu from "./NavMenu";
-import { inter } from "@/app/fonts";
+import { geist } from "@/app/fonts";
 
 export default function Navbar({
   phoneVisible,
@@ -32,10 +32,8 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={`fixed w-full z-50 ${!menuIsOpen ? " " : " "} nav__container flex items-center justify-between p-4 antialiased md:p-6 ${inter.className} tracking-body-base text-base font-medium ${className}`}
+      className={`fixed w-full z-50 nav__container flex items-center justify-between p-4 antialiased md:p-6 ${geist.className} tracking-body-base text-base font-medium ${className}`}
     >
-      {/* nav background */}
-      <div className="nav__background absolute right-0 left-0 -z-10 h-[180%] w-full bg-linear-to-b from-light to-light/0 mask-[linear-gradient(to_bottom,black_65%,rgba(0,0,0,0.88)_75%,transparent_100%)] opacity-100 backdrop-blur-3xl sm:hidden"></div>
       <div className="nav__left z-50">
         <NavLogo />
       </div>

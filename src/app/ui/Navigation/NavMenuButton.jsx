@@ -1,9 +1,11 @@
 import { Menu } from "lucide-react";
+import posthog from "posthog-js";
 
 export default function NavMenuButton({ setMenuIsOpen, className,children }) {
   return (
     <button
       onClick={() => {
+        posthog.capture("nav_menu_opened");
         setMenuIsOpen(true);
       }}
       type="button"

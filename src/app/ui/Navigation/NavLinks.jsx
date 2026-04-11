@@ -1,5 +1,5 @@
 
-import { inter } from "@/app/fonts";
+import { geist } from "@/app/fonts";
 import LinkMask from "../LinkMask";
 import {LINKS} from "./LINKS";
 import NavDropdownLink from "./NavDropdownLink";

@@ -1,7 +1,6 @@
 "use client";
 
-import { dataset } from "@/sanity/env";
-import { Album, PauseIcon, PlayIcon } from "lucide-react";
+import { PauseIcon, PlayIcon } from "lucide-react";
 import { Geist, Play } from "next/font/google";
 import { act, useMemo, useState } from "react";
 import {
@@ -12,6 +11,7 @@ import {
   stagger,
 } from "framer-motion";
 import useMeasure from "react-use-measure";
+import posthog from "posthog-js";
 
 const geist = Geist({
   weight: "variable",
@@ -91,6 +91,7 @@ export default function AlbumCard() {
         >
           <header
             onClick={() => {
+              posthog.capture("experiment_album_toggled", { expanded: !isActive });
               setIsActive(!isActive);
             }}
             className="card__header relative z-10 flex h-18 w-full gap-3"
@@ -170,6 +171,7 @@ export default function AlbumCard() {
                           setIsPlaying(true);
                           setActiveTrack(ALBUM.trackList[0]);
                         }
+                        posthog.capture("experiment_play_pause", { playing: !isPlaying, track: activeTrack?.name || ALBUM.trackList[0].name });
                         setIsPlaying(!isPlaying);
                       }}
                       key={"ppBtn"}
@@ -288,9 +290,11 @@ export default function AlbumCard() {
                         className="rounded-lg p-2 hover:bg-black/5"
                         onClick={() => {
                           if (isPlaying && track === activeTrack) {
+                            posthog.capture("experiment_track_paused", { track: track.name });
                             setIsPlaying(false);
                             return;
                           }
+                          posthog.capture("experiment_track_played", { track: track.name, artist: track.artist });
                           setActiveTrack(track);
                           setIsPlaying(true);
                         }}

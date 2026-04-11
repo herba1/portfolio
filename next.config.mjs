@@ -1,15 +1,20 @@
+import createMDX from '@next/mdx'
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  images: {
-    remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'cdn.sanity.io',
-        port: '',
-        pathname: '/images/**',
-      },
+  pageExtensions: ['js', 'jsx', 'md', 'mdx'],
+  experimental: {
+    viewTransition: true,
+  },
+}
+
+const withMDX = createMDX({
+  options: {
+    remarkPlugins: ['remark-gfm'],
+    rehypePlugins: [
+      ['rehype-pretty-code', { theme: 'github-dark', keepBackground: true }],
     ],
   },
-};
+})
 
-export default nextConfig;
+export default withMDX(nextConfig)
