@@ -1,3 +1,3 @@
-export const title = "herbart.dev"
+export const title = "herb.art"
 
-export const description = "Welcome to my portfolio - a showcase of creative web development with beautiful animations and interactive experiences. Explore my work and see how I bring ideas to life through code."
+export const description = "build and be creative"

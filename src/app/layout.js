@@ -22,13 +22,13 @@ export const metadata = {
     "react",
     "nextjs",
   ],
-  authors: [{ name: "herbart.dev" }],
-  creator: "herbart.dev",
+  authors: [{ name: "Herb" }],
+  creator: "Herb",
   openGraph: {
     title: title,
     description: description,
-    url: "https://herbart.dev",
-    siteName: "herbart.dev",
+    url: "https://herb.art",
+    siteName: "herb.art",
     type: "website",
   },
   twitter: {
