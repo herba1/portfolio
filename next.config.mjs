@@ -3,6 +3,7 @@ import createMDX from '@next/mdx'
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   pageExtensions: ['js', 'jsx', 'md', 'mdx'],
+  compress: false, // Vercel CDN handles compression; disabling avoids stripping Content-Length
   experimental: {
     viewTransition: true,
   },

@@ -16,13 +16,22 @@ export default class SplatErrorBoundary extends Component {
 
   componentDidCatch(error, info) {
     const msg = error?.message || String(error);
-    console.warn(`[SplatErrorBoundary] 3D scene failed (attempt ${this.state.retries + 1}/${MAX_RETRIES + 1}):`, msg);
+    const attempt = this.state.retries + 1;
+    const componentStack = info?.componentStack?.split("\n").slice(0, 4).join("\n");
+    console.error(
+      `[SplatErrorBoundary] 3D scene failed (attempt ${attempt}/${MAX_RETRIES + 1}):\n` +
+      `  error: ${msg}\n` +
+      `  type: ${error?.constructor?.name || typeof error}\n` +
+      `  stack: ${componentStack || "n/a"}`
+    );
 
     if (this.state.retries < MAX_RETRIES) {
-      // Retry after a short delay — Vercel CDN often succeeds on subsequent requests
       setTimeout(() => {
+        console.log(`[SplatErrorBoundary] retrying (${attempt + 1}/${MAX_RETRIES + 1})…`);
         this.setState((s) => ({ hasError: false, retries: s.retries + 1 }));
       }, 1500);
+    } else {
+      console.error("[SplatErrorBoundary] all retries exhausted, giving up");
     }
   }
 

@@ -6,6 +6,37 @@ import { Splat } from "@react-three/drei";
 import { useControls, folder } from "leva";
 import posthog from "posthog-js";
 
+// Vercel's CDN strips Content-Length when applying brotli compression.
+// Drei's Splat loader requires Content-Length and throws without it.
+// Pre-fetch the file and serve via blob URL which always has Content-Length.
+function useBlobUrl(src) {
+  const [url, setUrl] = useState(null);
+  useEffect(() => {
+    let revoke;
+    const t0 = performance.now();
+    console.log("[Splat] fetching", src);
+    fetch(src)
+      .then((r) => {
+        const cl = r.headers.get("Content-Length");
+        const ce = r.headers.get("Content-Encoding");
+        console.log("[Splat] response", r.status, { contentLength: cl, contentEncoding: ce });
+        if (!r.ok) throw new Error(`HTTP ${r.status} ${r.statusText}`);
+        return r.blob();
+      })
+      .then((blob) => {
+        console.log("[Splat] blob ready", (blob.size / 1024).toFixed(0) + "KB", "in", (performance.now() - t0).toFixed(0) + "ms");
+        const blobUrl = URL.createObjectURL(blob);
+        revoke = blobUrl;
+        setUrl(blobUrl);
+      })
+      .catch((err) => {
+        console.error("[Splat] pre-fetch failed:", err?.message || err);
+      });
+    return () => { if (revoke) URL.revokeObjectURL(revoke); };
+  }, [src]);
+  return url;
+}
+
 function isIOS() {
   if (typeof navigator === "undefined") return false;
   return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
@@ -17,7 +48,11 @@ function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
+const SPLAT_SRC = "/splats/herb-scan-clean.splat";
+
 export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, isVisible }) {
+  const splatUrl = useBlobUrl(SPLAT_SRC);
+
   // Pointer parallax (desktop) — tracks mouse across full viewport
   const pointerThetaRef = useRef(0);
   const pointerPhiRef = useRef(0);
@@ -164,9 +199,11 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
     camera.lookAt(0, 0, 0);
   });
 
+  if (!splatUrl) return null;
+
   return (
     <Splat
-      src="/splats/herb-scan-clean.splat"
+      src={splatUrl}
       scale={splatScale}
       position={[0, 0, 0]}
       toneMapped={false}
