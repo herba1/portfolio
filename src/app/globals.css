@@ -70,6 +70,14 @@
   animation: none;
 }
 
+::view-transition-group(footer-clock) {
+  animation: none;
+}
+::view-transition-old(footer-clock),
+::view-transition-new(footer-clock) {
+  animation: none;
+}
+
 /* disable the default root cross-fade so only our named transitions run */
 ::view-transition-old(root),
 ::view-transition-new(root) {
@@ -132,13 +140,16 @@
   position: fixed;
   bottom: 0;
   right: 0;
-  z-index: 40;
+  z-index: 100;
   display: flex;
   align-items: center;
   gap: 0.35rem;
   padding: 1rem 1.5rem;
   opacity: 0;
   animation: nav-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards;
+  mix-blend-mode: difference;
+  transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  view-transition-name: footer-clock;
 }
 
 .footer-clock__time {
@@ -235,6 +246,16 @@
 .nav__container {
   opacity: 0;
   animation: nav-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
+  transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Immersive mode — nav/footer/message fade out */
+.splat-immersive .nav__container,
+.splat-immersive .footer-clock,
+.splat-immersive .hero-message-input {
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: translateY(0) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -605,6 +626,41 @@ html.navigating .LinkMask__underline {
   100% { opacity: 1; transform: scale(1) translateY(0); }
 }
 
+/* — BlogImage: blur glow behind image ————————— */
+
+.blog-image-wrap {
+  isolation: isolate;
+}
+
+.blog-image-glow {
+  position: absolute;
+  inset: 4%;
+  z-index: 0;
+  background-size: cover;
+  background-position: center;
+  border-radius: 1.5rem;
+  filter: blur(40px) saturate(1.6);
+  opacity: 0;
+  transform: scale(1.05);
+  will-change: transform, opacity;
+  animation:
+    blog-glow-in   0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards,
+    blog-glow-morph 8s   ease-in-out                   1.1s infinite;
+}
+
+@keyframes blog-glow-in {
+  0%   { opacity: 0; transform: scale(1.1); }
+  100% { opacity: 0.5; transform: scale(1.05); }
+}
+
+@keyframes blog-glow-morph {
+  0%   { transform: scale(1.05) translate(0, 0); }
+  25%  { transform: scale(1.08) translate(2px, -3px); }
+  50%  { transform: scale(1.04) translate(-1px, 2px); }
+  75%  { transform: scale(1.07) translate(-2px, -1px); }
+  100% { transform: scale(1.05) translate(0, 0); }
+}
+
 /* — Blog list: staggered post items ——————————— */
 @keyframes blog-list-in {
   0%   { opacity: 0; transform: translateY(20px); }
@@ -680,6 +736,7 @@ html.navigating .LinkMask__underline {
   .blog-figure,
   .blog-list-item,
   .blog-ch,
+  .blog-image-glow,
   .hero-ch,
   .hero-title-wrap,
   .hero-sub {
@@ -688,4 +745,54 @@ html.navigating .LinkMask__underline {
     opacity: 1 !important;
     transform: none !important;
   }
+
+  .blog-image-glow {
+    opacity: 0.4 !important;
+    filter: blur(40px) saturate(1.6);
+    transform: scale(1.05) !important;
+  }
+}
+
+/* ─────────────────────────────────────────────
+ * Studio editor tokens
+ * ───────────────────────────────────────────── */
+
+.studio {
+  --studio-bg:        #0d0d0d;
+  --studio-surface:   #111111;
+  --studio-text:      rgba(255,255,255,0.9);
+  --studio-text-2:    rgba(255,255,255,0.50);
+  --studio-text-3:    rgba(255,255,255,0.25);
+  --studio-text-4:    rgba(255,255,255,0.12);
+  --studio-border:    rgba(255,255,255,0.06);
+  --studio-hover:     rgba(255,255,255,0.04);
+  --studio-active:    rgba(255,255,255,0.06);
+}
+
+.studio-palette-btn {
+  color: var(--studio-text-3);
+  border: 1px solid transparent;
+  transition: color 0.3s, border-color 0.3s, background 0.3s;
+}
+.studio-palette-btn:hover,
+.studio-palette-btn:focus-visible {
+  color: var(--studio-text-2);
+  border-color: var(--studio-border);
+  background: var(--studio-hover);
+}
+.studio-palette-btn:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+.studio-light {
+  --studio-bg:        #f1f5f9;
+  --studio-surface:   #ffffff;
+  --studio-text:      #0f0f0f;
+  --studio-text-2:    rgba(0,0,0,0.60);
+  --studio-text-3:    rgba(0,0,0,0.40);
+  --studio-text-4:    rgba(0,0,0,0.20);
+  --studio-border:    rgba(0,0,0,0.10);
+  --studio-hover:     rgba(0,0,0,0.04);
+  --studio-active:    rgba(0,0,0,0.06);
 }

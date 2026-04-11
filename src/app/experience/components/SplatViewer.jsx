@@ -3,34 +3,10 @@
 import { useRef, useEffect, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Splat } from "@react-three/drei";
-import { useControls, folder } from "leva";
 import posthog from "posthog-js";
 
 // ---------------------------------------------------------------------------
 // Workaround: Vercel CDN + drei Splat Content-Length mismatch
-// ---------------------------------------------------------------------------
-// Problem:
-//   When a browser sends Accept-Encoding: br, Vercel's CDN compresses the
-//   response with brotli and *strips* the Content-Length header (switches to
-//   chunked transfer). drei's <Splat> loader (Splat.js line ~214) hard-requires
-//   Content-Length to calculate vertex count and throws a raw string
-//   'Failed to get content length' when it's missing. Because it's a string
-//   (not an Error), the upstream handler reads .message → undefined, producing
-//   the cryptic "Could not load /splats/…: undefined" error.
-//
-// Fix:
-//   In production, pre-fetch the .splat file ourselves and create a blob: URL.
-//   Blob URL fetches always include Content-Length per the Fetch spec, so drei's
-//   loader is happy. In dev the Next.js server sends Content-Length normally, so
-//   we pass the original URL through directly (also avoids a React render warning
-//   where blob URLs resolve synchronously and fire Three.js progress events
-//   during Splat's render).
-//
-// Verified 2026-04-11:
-//   curl -sI -H 'Accept-Encoding: br' https://www.herb.art/splats/herb-scan-clean.splat
-//   → content-encoding: br, NO content-length
-//   curl -sI https://www.herb.art/splats/herb-scan-clean.splat
-//   → content-length: 1912768
 // ---------------------------------------------------------------------------
 function useSplatUrl(src) {
   const needsBlob = process.env.NODE_ENV !== "development";
@@ -54,12 +30,6 @@ function useSplatUrl(src) {
   return url;
 }
 
-function isIOS() {
-  if (typeof navigator === "undefined") return false;
-  return /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-}
-
 function isTouchDevice() {
   if (typeof window === "undefined") return false;
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
@@ -67,7 +37,7 @@ function isTouchDevice() {
 
 const SPLAT_SRC = "/splats/herb-scan-clean.splat";
 
-export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, isVisible }) {
+export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, isVisible, maskProgressRef }) {
   const splatUrl = useSplatUrl(SPLAT_SRC);
 
   // Pointer parallax (desktop) — tracks mouse across full viewport
@@ -75,12 +45,7 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
   const pointerPhiRef = useRef(0);
   const mouseRef = useRef({ x: 0, y: 0 }); // normalized -1 to 1
 
-  // Gyro rotation (Android)
-  const gyroThetaRef = useRef(0);
-  const gyroPhiRef = useRef(0);
-  const [useGyro, setUseGyro] = useState(false);
-
-  // Touch drag fallback (iOS)
+  // Touch drag (mobile — only active when expanded)
   const touchThetaRef = useRef(0);
   const touchPhiRef = useRef(0);
   const isDraggingRef = useRef(false);
@@ -88,27 +53,14 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
 
   const { gl } = useThree();
 
-  const {
-    cameraRadius,
-    cameraStart,
-    splatScale,
-    alphaTest,
-  } = useControls(
-    "Experience",
-    {
-      Camera: folder({
-        cameraRadius: { value: 2, min: 0.5, max: 20, step: 0.1 },
-        cameraStart: { value: 8, min: 2, max: 20, step: 0.5 },
-      }),
-      Splat: folder({
-        splatScale: { value: 1, min: 0.1, max: 5, step: 0.1 },
-        alphaTest: { value: 0.1, min: 0, max: 1, step: 0.01 },
-      }),
-    },
-    { collapsed: true }
-  );
+  const cameraRadius = 2;
+  const cameraStart = 8;
+  const fovCollapsed = 86;
+  const fovExpanded = 50;
+  const splatScale = 1;
+  const alphaTest = 0.1;
 
-  // Global mouse tracking (viewport-based, not canvas-based)
+  // Global mouse tracking (desktop only)
   useEffect(() => {
     if (isTouchDevice()) return;
     const handler = (e) => {
@@ -119,29 +71,13 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
     return () => window.removeEventListener("mousemove", handler);
   }, []);
 
-  // track device interaction mode once
+  // Track device interaction mode once
   useEffect(() => {
-    const mode = isIOS() ? "touch_ios" : isTouchDevice() ? "touch_android" : "desktop";
+    const mode = isTouchDevice() ? "touch" : "desktop";
     posthog.capture("3d_interaction_mode", { mode });
   }, []);
 
-  // Gyroscope (non-iOS touch devices)
-  useEffect(() => {
-    if (!isTouchDevice() || isIOS()) return;
-
-    const handler = (e) => {
-      // beta = front-back tilt (-180 to 180), gamma = left-right (-90 to 90)
-      const maxAngle = Math.PI / 6;
-      if (e.gamma !== null) gyroThetaRef.current = (e.gamma / 90) * maxAngle;
-      if (e.beta !== null) gyroPhiRef.current = ((e.beta - 45) / 90) * maxAngle * 0.5;
-    };
-
-    window.addEventListener("deviceorientation", handler);
-    setUseGyro(true);
-    return () => window.removeEventListener("deviceorientation", handler);
-  }, []);
-
-  // Touch drag — full orbit, no clamping
+  // Touch drag — only when expanded (maskProgress > 0.5)
   useEffect(() => {
     if (!isTouchDevice()) return;
 
@@ -150,6 +86,8 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
 
     const onTouchStart = (e) => {
       if (e.touches.length !== 1) return;
+      // Only allow drag when expanded
+      if ((maskProgressRef?.current ?? 0) < 0.5) return;
       isDraggingRef.current = true;
       lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
     };
@@ -158,7 +96,6 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
       if (!isDraggingRef.current || e.touches.length !== 1) return;
       const dx = (e.touches[0].clientX - lastTouchRef.current.x) / window.innerWidth;
       const dy = (e.touches[0].clientY - lastTouchRef.current.y) / window.innerHeight;
-      // Accumulate — no clamping, full 360° orbit
       touchThetaRef.current -= dx * dragSpeed;
       touchPhiRef.current += dy * dragSpeed;
       lastTouchRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -175,7 +112,7 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
       canvas.removeEventListener("touchmove", onTouchMove);
       canvas.removeEventListener("touchend", onTouchEnd);
     };
-  }, [gl]);
+  }, [gl, maskProgressRef]);
 
   useFrame(({ camera }) => {
     if (reducedMotion || !isVisible) return;
@@ -188,17 +125,15 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
       : 1 - Math.pow(-2 * t + 2, 5) / 2;
     const currentRadius = cameraStart + (cameraRadius - cameraStart) * eased;
 
-    // Rotation source: pointer (desktop), gyro (Android), touch drag (iOS)
-    // Base offset: 90° around Y axis
-    const BASE_THETA = Math.PI / 2;
+    const BASE_THETA = Math.PI * 0.39;
     let theta = BASE_THETA;
     let phi = 0;
     const damping = 0.15;
 
     if (isTouchDevice()) {
-      // Mobile: drag for full orbit + optional gyro tilt on top
-      pointerThetaRef.current += (touchThetaRef.current + (useGyro ? gyroThetaRef.current : 0) - pointerThetaRef.current) * damping;
-      pointerPhiRef.current += (touchPhiRef.current + (useGyro ? gyroPhiRef.current : 0) - pointerPhiRef.current) * damping;
+      // Mobile: touch drag only (when expanded)
+      pointerThetaRef.current += (touchThetaRef.current - pointerThetaRef.current) * damping;
+      pointerPhiRef.current += (touchPhiRef.current - pointerPhiRef.current) * damping;
       theta = BASE_THETA + pointerThetaRef.current;
       phi = pointerPhiRef.current;
     } else {
@@ -214,6 +149,12 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
     camera.position.y = currentRadius * Math.sin(phi);
     camera.position.z = currentRadius * Math.cos(theta) * Math.cos(phi);
     camera.lookAt(0, 0, 0);
+
+    // FOV driven by expand state
+    const maskP = maskProgressRef?.current ?? 0;
+    const targetFov = fovCollapsed + (fovExpanded - fovCollapsed) * maskP;
+    camera.fov += (targetFov - camera.fov) * 0.15;
+    camera.updateProjectionMatrix();
   });
 
   if (!splatUrl) return null;

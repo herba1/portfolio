@@ -1,6 +1,6 @@
 export const posts = [
   {
-    slug: 'on-feel',
+    slug: 'start',
     title: 'The Beginning',
     description: 'Moved to NYC over a month ago. Joined a sick company. Inspired to make music again.',
     date: '2026-04-10',

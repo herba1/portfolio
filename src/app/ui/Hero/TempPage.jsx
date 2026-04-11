@@ -3,6 +3,9 @@
 import { spencer, geist } from "@/app/fonts";
 import { useRef, useCallback, useEffect } from "react";
 import posthog from "posthog-js";
+import dynamic from "next/dynamic";
+
+const HeroEyes = dynamic(() => import("./Eyes"), { ssr: false });
 
 function seeded(i) {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
@@ -282,6 +285,7 @@ export default function TempPage() {
       ref={containerRef}
       className="relative mx-auto flex h-dvh min-h-fit w-full flex-col items-center justify-center pb-[12vh] text-slate-900 selection:bg-black selection:text-white"
     >
+      <HeroEyes />
       <p
         className={`hero-sub tracking-body-base text-dark/40 text-sm ${geist.className}`}
       >

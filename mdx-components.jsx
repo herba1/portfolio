@@ -10,6 +10,9 @@ import { Lead } from '@/app/(blog)/components/Lead'
 import { Divider } from '@/app/(blog)/components/Divider'
 import { Badge } from '@/app/(blog)/components/Badge'
 import { Aside } from '@/app/(blog)/components/Aside'
+import BlogHeader from '@/app/(blog)/components/BlogHeader'
+import { BlogImageDepth } from '@/app/(blog)/components/BlogImageDepth'
+import { BlogImagePixel } from '@/app/(blog)/components/BlogImagePixel'
 import Link from 'next/link'
 import Image from 'next/image'
 
@@ -51,6 +54,9 @@ export function useMDXComponents(components) {
     Divider,
     Badge,
     Aside,
+    BlogHeader,
+    BlogImageDepth,
+    BlogImagePixel,
     ...components,
   }
 }

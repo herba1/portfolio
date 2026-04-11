@@ -65,6 +65,7 @@ function ClockIcon({ hours, minutes }) {
       viewBox="0 0 22 22"
       fill="none"
       className="clock-icon"
+      style={{ opacity: 0.85 }}
     >
       <circle
         cx="11"
@@ -127,7 +128,7 @@ export default function FooterClock() {
   if (!time) return null;
 
   return (
-    <div className={`footer-clock tracking-body-base text-dark/40 text-sm ${geist.className}`}>
+    <div className={`footer-clock tracking-body-base text-white text-sm ${geist.className}`}>
       <span className="footer-clock__location">New York, NY</span>
       <span className="footer-clock__sep">/</span>
       <ClockIcon hours={time.hours} minutes={time.minutes} />

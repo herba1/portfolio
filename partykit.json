@@ -1,0 +1,5 @@
+{
+  "name": "herb-art-presence",
+  "main": "party/presence.ts",
+  "compatibilityDate": "2024-09-01"
+}

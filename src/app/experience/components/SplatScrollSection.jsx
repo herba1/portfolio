@@ -1,37 +1,16 @@
 "use client";
 
-import { Canvas, invalidate } from "@react-three/fiber";
+import { Canvas } from "@react-three/fiber";
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useProgress } from "@react-three/drei";
-import { Leva } from "leva";
 import { gsap } from "gsap";
 import { ScrollTrigger } from "gsap/ScrollTrigger";
+import { useLenis } from "@/context/LenisContext";
+import posthog from "posthog-js";
 import SplatViewer from "./SplatViewer";
 import DreamyEffect from "./PixelMaskEffect";
 
 gsap.registerPlugin(ScrollTrigger);
-
-// Eased gradient edge fade — computed once at module level
-const easedEdgeFade = (() => {
-  const fadePercent = 8;
-  const steps = 12;
-  const stops = [];
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const eased = -(Math.cos(Math.PI * t) - 1) / 2;
-    const pos = t * fadePercent;
-    stops.push(`rgba(0,0,0,${eased.toFixed(3)}) ${pos.toFixed(1)}%`);
-  }
-  stops.push(`black ${fadePercent}%`);
-  stops.push(`black ${100 - fadePercent}%`);
-  for (let i = 0; i <= steps; i++) {
-    const t = i / steps;
-    const eased = -(Math.cos(Math.PI * t) - 1) / 2;
-    const pos = (100 - fadePercent) + t * fadePercent;
-    stops.push(`rgba(0,0,0,${(1 - eased).toFixed(3)}) ${pos.toFixed(1)}%`);
-  }
-  return stops.join(", ");
-})();
 
 function LoadWatcher({ onLoaded }) {
   const { progress } = useProgress();
@@ -47,10 +26,15 @@ export default function SplatScrollSection() {
   const sectionRef = useRef(null);
   const canvasWrapRef = useRef(null);
   const scrollProgressRef = useRef(0);
+  const maskProgressRef = useRef(0); // 0 = collapsed, 1 = expanded
   const invalidateRef = useRef(null);
   const [loaded, setLoaded] = useState(false);
   const [debug, setDebug] = useState(false);
   const [isVisible, setIsVisible] = useState(false);
+  const [expanded, setExpanded] = useState(false);
+  const animatingRef = useRef(false);
+  const expandTweenRef = useRef(null);
+  const { lenis } = useLenis();
 
   // Pause rendering when off-screen
   useEffect(() => {
@@ -71,7 +55,7 @@ export default function SplatScrollSection() {
     // Parallax: starts higher, settles down
     const tween = gsap.fromTo(
       canvasWrapRef.current,
-      { yPercent: -40 },
+      { yPercent: -50 },
       {
         yPercent: 0,
         ease: "none",
@@ -94,24 +78,12 @@ export default function SplatScrollSection() {
         scrub: 0.5,
         onUpdate: (self) => {
           scrollProgressRef.current = self.progress;
-          // Trigger a render when scroll changes
           invalidateRef.current?.();
         },
       })
     );
 
     return () => triggers.forEach((t) => t.kill());
-  }, []);
-
-  // On mobile, prevent scroll when touching canvas
-  useEffect(() => {
-    const wrap = canvasWrapRef.current;
-    if (!wrap) return;
-    const preventScroll = (e) => {
-      if (e.touches && e.touches.length === 1) e.preventDefault();
-    };
-    wrap.addEventListener("touchmove", preventScroll, { passive: false });
-    return () => wrap.removeEventListener("touchmove", preventScroll);
   }, []);
 
   // Ctrl+G debug panel
@@ -126,46 +98,134 @@ export default function SplatScrollSection() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handleLoaded = useCallback(() => setLoaded(true), []);
+  const handleLoaded = useCallback(() => {
+    setLoaded(true);
+    posthog.capture("3d_scene_loaded");
+  }, []);
 
-  const edgeFade = easedEdgeFade;
+  // Set initial mask size in pixels so GSAP has a concrete starting value
+  useEffect(() => {
+    if (!canvasWrapRef.current) return;
+    const setSize = () => {
+      if (expanded) return;
+      const vw = window.innerWidth;
+      const size = vw <= 768
+        ? `${vw - 32}px`
+        : `${Math.min(vw, window.innerHeight) * 0.55}px`;
+      canvasWrapRef.current.style.setProperty("--mask-size", size);
+    };
+    setSize();
+    window.addEventListener("resize", setSize);
+    return () => window.removeEventListener("resize", setSize);
+  }, [expanded]);
+
+  // Compute mask sizes in pixels for reliable GSAP tweening
+  const getCollapsedSize = useCallback(() => {
+    const vw = window.innerWidth;
+    if (vw <= 768) return `${vw - 32}px`;
+    const vmin = Math.min(vw, window.innerHeight);
+    return `${vmin * 0.55}px`;
+  }, []);
+
+  const getExpandedSize = useCallback(() => {
+    // Just big enough to cover viewport with fade overshoot
+    const vmax = Math.max(window.innerWidth, window.innerHeight);
+    return `${vmax * 2.5}px`;
+  }, []);
+
+  const handleExpand = useCallback(() => {
+    if (!loaded || expanded || animatingRef.current) return;
+    animatingRef.current = true;
+    posthog.capture("3d_scene_expanded");
+    // Strip animation fills so opacity transitions can work
+    document.querySelectorAll(".nav__container, .footer-clock").forEach((el) => {
+      el.style.animation = "none";
+      el.style.opacity = "1";
+    });
+    // Let the browser apply the above, then add class to trigger transition
+    requestAnimationFrame(() => {
+      document.documentElement.classList.add("splat-immersive");
+    });
+
+    // Scroll to bottom so the scene is centered, then lock
+    lenis?.scrollTo("bottom", { duration: 0.8, lock: true });
+    setTimeout(() => lenis?.stop(), 850);
+
+    expandTweenRef.current?.kill();
+    const tl = gsap.timeline({
+      onComplete: () => {
+        setExpanded(true);
+        animatingRef.current = false;
+      },
+    });
+    tl.to(canvasWrapRef.current, {
+      "--mask-size": getExpandedSize(),
+      duration: 0.8,
+      ease: "power3.inOut",
+    }, 0);
+    tl.to(maskProgressRef, {
+      current: 1,
+      duration: 0.8,
+      ease: "power3.inOut",
+    }, 0);
+    expandTweenRef.current = tl;
+  }, [loaded, expanded, lenis, getExpandedSize]);
+
+  const handleCollapse = useCallback(() => {
+    if (!expanded || animatingRef.current) return;
+    animatingRef.current = true;
+    posthog.capture("3d_scene_collapsed");
+
+    const collapsedSize = getCollapsedSize();
+
+    expandTweenRef.current?.kill();
+    const tl = gsap.timeline({
+      onComplete: () => {
+        canvasWrapRef.current.style.setProperty("--mask-size", collapsedSize);
+        setExpanded(false);
+        animatingRef.current = false;
+        document.documentElement.classList.remove("splat-immersive");
+        // Restore opacity (transition will animate it back to 1 via removing the class)
+        lenis?.start();
+      },
+    });
+    tl.to(canvasWrapRef.current, {
+      "--mask-size": collapsedSize,
+      duration: 0.8,
+      ease: "power3.inOut",
+    }, 0);
+    tl.to(maskProgressRef, {
+      current: 0,
+      duration: 0.8,
+      ease: "power3.inOut",
+    }, 0);
+    expandTweenRef.current = tl;
+  }, [expanded, lenis, getCollapsedSize]);
+
+  // ESC to close
+  useEffect(() => {
+    if (!expanded) return;
+    const handler = (e) => {
+      if (e.key === "Escape") handleCollapse();
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [expanded, handleCollapse]);
 
   return (
+    <>
     <section
       ref={sectionRef}
-      style={{
-        display: "flex",
-        justifyContent: "center",
-        marginTop: "-15vh",
-        paddingTop: "5vh",
-        paddingBottom: "30vh",
-        position: "relative",
-        zIndex: 1,
-        contain: "layout style",
-      }}
+      className="splat-section"
+      data-expanded={expanded || undefined}
     >
-      <Leva hidden={!debug} collapsed />
       <div
         ref={canvasWrapRef}
         className="splat-canvas-wrap"
         data-loaded={loaded || undefined}
+        data-expanded={expanded || undefined}
         style={{
-          width: "min(55vh, 55vw)",
-          height: "min(55vh, 55vw)",
-          borderRadius: "40px",
-          overflow: "hidden",
-          willChange: "transform",
-          touchAction: "none",
-          maskImage: [
-            `linear-gradient(to right, ${edgeFade})`,
-            `linear-gradient(to bottom, ${edgeFade})`,
-          ].join(", "),
-          WebkitMaskImage: [
-            `linear-gradient(to right, ${edgeFade})`,
-            `linear-gradient(to bottom, ${edgeFade})`,
-          ].join(", "),
-          maskComposite: "intersect",
-          WebkitMaskComposite: "destination-in",
+          "--mask-size": "var(--mask-collapsed)",
         }}
       >
         <Canvas
@@ -174,7 +234,7 @@ export default function SplatScrollSection() {
           camera={{ position: [0, 0, 8], fov: 50, near: 0.1, far: 100 }}
           gl={{ antialias: false, powerPreference: "high-performance" }}
           dpr={[1, 1.5]}
-          style={{ width: "100%", height: "100%", background: "transparent" }}
+          style={{ width: "100%", height: "100%" }}
           onCreated={(state) => {
             invalidateRef.current = state.invalidate;
           }}
@@ -186,6 +246,7 @@ export default function SplatScrollSection() {
               loaded={loaded}
               scrollProgressRef={scrollProgressRef}
               isVisible={isVisible}
+              maskProgressRef={maskProgressRef}
             />
             <DreamyEffect
               active={loaded}
@@ -195,22 +256,123 @@ export default function SplatScrollSection() {
           </Suspense>
         </Canvas>
       </div>
+      {/* Collapsed: centered click target to expand */}
+      {!expanded && loaded && (
+        <div className="splat-click-target" onClick={handleExpand} />
+      )}
+      {/* Expanded: click anywhere (that isn't a drag) to collapse */}
+      {expanded && (
+        <div
+          className="splat-collapse-target"
+          onPointerDown={(e) => {
+            e.currentTarget.dataset.startX = e.clientX;
+            e.currentTarget.dataset.startY = e.clientY;
+          }}
+          onPointerUp={(e) => {
+            const dx = Math.abs(e.clientX - Number(e.currentTarget.dataset.startX));
+            const dy = Math.abs(e.clientY - Number(e.currentTarget.dataset.startY));
+            // Only collapse on tap, not drag (threshold 8px)
+            if (dx < 8 && dy < 8) handleCollapse();
+          }}
+        />
+      )}
       <style>{`
+        .splat-section {
+          --mask-collapsed: 55vmin;
+          position: relative;
+          z-index: 1;
+          margin-top: -10vh;
+          contain: layout style;
+          pointer-events: none;
+        }
+        @media (max-width: 768px) {
+          .splat-section {
+            --mask-collapsed: calc(100vw - 32px);
+          }
+        }
+        .splat-section[data-expanded] {
+          z-index: 9999;
+        }
         .splat-canvas-wrap {
+          width: 100%;
+          height: 100lvh;
+          min-height: 500px;
+          position: relative;
           opacity: 0;
           transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+          will-change: transform;
+          /* CSS mask: two intersecting eased gradients form a soft-edged square */
+          /* Organic ease-in-out fade — denser stops near edges for natural falloff */
+          mask-image:
+            linear-gradient(to right,
+              rgba(0,0,0,0) 0%, rgba(0,0,0,0.03) 2%, rgba(0,0,0,0.1) 4%,
+              rgba(0,0,0,0.25) 6%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0.75) 10%,
+              rgba(0,0,0,0.9) 12%, rgba(0,0,0,1) 15%,
+              rgba(0,0,0,1) 85%,
+              rgba(0,0,0,0.9) 88%, rgba(0,0,0,0.75) 90%,
+              rgba(0,0,0,0.5) 92%, rgba(0,0,0,0.25) 94%, rgba(0,0,0,0.1) 96%,
+              rgba(0,0,0,0.03) 98%, rgba(0,0,0,0) 100%
+            ),
+            linear-gradient(to bottom,
+              rgba(0,0,0,0) 0%, rgba(0,0,0,0.03) 2%, rgba(0,0,0,0.1) 4%,
+              rgba(0,0,0,0.25) 6%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0.75) 10%,
+              rgba(0,0,0,0.9) 12%, rgba(0,0,0,1) 15%,
+              rgba(0,0,0,1) 85%,
+              rgba(0,0,0,0.9) 88%, rgba(0,0,0,0.75) 90%,
+              rgba(0,0,0,0.5) 92%, rgba(0,0,0,0.25) 94%, rgba(0,0,0,0.1) 96%,
+              rgba(0,0,0,0.03) 98%, rgba(0,0,0,0) 100%
+            );
+          -webkit-mask-image:
+            linear-gradient(to right,
+              rgba(0,0,0,0) 0%, rgba(0,0,0,0.03) 2%, rgba(0,0,0,0.1) 4%,
+              rgba(0,0,0,0.25) 6%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0.75) 10%,
+              rgba(0,0,0,0.9) 12%, rgba(0,0,0,1) 15%,
+              rgba(0,0,0,1) 85%,
+              rgba(0,0,0,0.9) 88%, rgba(0,0,0,0.75) 90%,
+              rgba(0,0,0,0.5) 92%, rgba(0,0,0,0.25) 94%, rgba(0,0,0,0.1) 96%,
+              rgba(0,0,0,0.03) 98%, rgba(0,0,0,0) 100%
+            ),
+            linear-gradient(to bottom,
+              rgba(0,0,0,0) 0%, rgba(0,0,0,0.03) 2%, rgba(0,0,0,0.1) 4%,
+              rgba(0,0,0,0.25) 6%, rgba(0,0,0,0.5) 8%, rgba(0,0,0,0.75) 10%,
+              rgba(0,0,0,0.9) 12%, rgba(0,0,0,1) 15%,
+              rgba(0,0,0,1) 85%,
+              rgba(0,0,0,0.9) 88%, rgba(0,0,0,0.75) 90%,
+              rgba(0,0,0,0.5) 92%, rgba(0,0,0,0.25) 94%, rgba(0,0,0,0.1) 96%,
+              rgba(0,0,0,0.03) 98%, rgba(0,0,0,0) 100%
+            );
+          mask-composite: intersect;
+          -webkit-mask-composite: destination-in;
+          mask-size: var(--mask-size) var(--mask-size);
+          -webkit-mask-size: var(--mask-size) var(--mask-size);
+          mask-position: center;
+          -webkit-mask-position: center;
+          mask-repeat: no-repeat;
+          -webkit-mask-repeat: no-repeat;
         }
         .splat-canvas-wrap[data-loaded] {
           opacity: 1;
         }
-        @media (max-width: 768px) {
-          .splat-canvas-wrap {
-            width: calc(100vw - 32px) !important;
-            height: calc(100vw - 32px) !important;
-            border-radius: 24px !important;
-          }
+        .splat-click-target {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          transform: translate(-50%, -50%);
+          width: var(--mask-collapsed);
+          height: var(--mask-collapsed);
+          cursor: pointer;
+          pointer-events: auto;
+          z-index: 2;
+        }
+        .splat-collapse-target {
+          position: fixed;
+          inset: 0;
+          z-index: 9998;
+          pointer-events: auto;
+          cursor: pointer;
         }
       `}</style>
     </section>
+    </>
   );
 }

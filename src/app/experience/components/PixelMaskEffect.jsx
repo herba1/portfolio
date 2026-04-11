@@ -8,7 +8,6 @@ import {
   Vignette,
   DepthOfField,
 } from "@react-three/postprocessing";
-import { useControls, folder } from "leva";
 
 // Pixelation steps — scroll progress maps to these discrete values
 // Scroll 0% = fully pixelated (200), scroll 100% = clear (0)
@@ -18,27 +17,11 @@ export default function DreamyEffect({ active, scrollProgressRef, isVisible }) {
   const pixelRef = useRef();
   const lastStepRef = useRef(0);
 
-  const {
-    vignetteDarkness,
-    vignetteOffset,
-    dofFocusDistance,
-    dofFocalLength,
-    dofBokehScale,
-  } = useControls(
-    "Dreamy",
-    {
-      Vignette: folder({
-        vignetteDarkness: { value: 0.7, min: 0, max: 1.5, step: 0.05 },
-        vignetteOffset: { value: 0.2, min: 0, max: 1, step: 0.05 },
-      }),
-      "Depth of Field": folder({
-        dofFocusDistance: { value: 0.005, min: 0, max: 0.1, step: 0.001 },
-        dofFocalLength: { value: 0.02, min: 0.001, max: 0.2, step: 0.001 },
-        dofBokehScale: { value: 3, min: 0, max: 10, step: 0.1 },
-      }),
-    },
-    { collapsed: true }
-  );
+  const vignetteDarkness = 0.7;
+  const vignetteOffset = 0.2;
+  const dofFocusDistance = 0.005;
+  const dofFocalLength = 0.02;
+  const dofBokehScale = 3;
 
   useFrame(() => {
     if (!active || !pixelRef.current || !isVisible) return;

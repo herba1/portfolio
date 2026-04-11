@@ -2,6 +2,9 @@
 
 # dependencies
 /node_modules
+
+# partykit local dev state
+.partykit/
 /.pnp
 .pnp.*
 .yarn/*

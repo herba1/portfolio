@@ -10,16 +10,24 @@ export function BlogImage({
 }) {
   return (
     <figure className="blog-figure my-8">
-      <Image
-        src={src}
-        alt={alt || caption || ''}
-        width={width}
-        height={height}
-        priority={priority}
-        className="w-full rounded-lg"
-      />
+      <div className="blog-image-wrap relative">
+        {/* Animated blur blobs behind the image */}
+        <div
+          className="blog-image-glow"
+          style={{ backgroundImage: `url(${src})` }}
+          aria-hidden="true"
+        />
+        <Image
+          src={src}
+          alt={alt || caption || ''}
+          width={width}
+          height={height}
+          priority={priority}
+          className="relative z-[1] w-full rounded-2xl"
+        />
+      </div>
       {caption && (
-        <figcaption className="mt-2 text-center text-sm text-dark/50">
+        <figcaption className="mt-3 text-center text-sm text-dark/50">
           {caption}
         </figcaption>
       )}
