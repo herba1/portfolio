@@ -51,7 +51,7 @@ export default function RootLayout({ children }) {
   return (
     <html lang="en">
       <head>
-        <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" crossOrigin="anonymous" />
+        <link rel="prefetch" href="/splats/herb-scan-clean.splat" as="fetch" />
       </head>
       <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
         <ConsoleSig />
