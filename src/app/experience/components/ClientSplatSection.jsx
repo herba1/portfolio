@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import SplatErrorBoundary from "./SplatErrorBoundary";
 
 const SplatScrollSection = dynamic(
   () => import("./SplatScrollSection"),
@@ -8,5 +9,9 @@ const SplatScrollSection = dynamic(
 );
 
 export default function ClientSplatSection() {
-  return <SplatScrollSection />;
+  return (
+    <SplatErrorBoundary>
+      <SplatScrollSection />
+    </SplatErrorBoundary>
+  );
 }

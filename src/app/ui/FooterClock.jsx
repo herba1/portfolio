@@ -104,21 +104,27 @@ function ClockIcon({ hours, minutes }) {
 }
 
 export default function FooterClock() {
-  const [time, setTime] = useState(() => formatTime(getEST()));
+  const [time, setTime] = useState(null);
 
   useEffect(() => {
     const tick = () => setTime(formatTime(getEST()));
+    // Initial render on client
+    tick();
     // Sync to the next minute boundary
     const now = getEST();
     const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    let interval;
     const firstTick = setTimeout(() => {
       tick();
-      // Then tick every 60s
-      const interval = setInterval(tick, 60_000);
-      return () => clearInterval(interval);
+      interval = setInterval(tick, 60_000);
     }, msUntilNextMinute);
-    return () => clearTimeout(firstTick);
+    return () => {
+      clearTimeout(firstTick);
+      clearInterval(interval);
+    };
   }, []);
+
+  if (!time) return null;
 
   return (
     <div className={`footer-clock tracking-body-base text-dark/40 text-sm ${geist.className}`}>

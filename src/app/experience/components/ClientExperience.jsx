@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import SplatErrorBoundary from "./SplatErrorBoundary";
 
 const ExperienceScene = dynamic(
   () => import("./ExperienceScene"),
@@ -8,5 +9,9 @@ const ExperienceScene = dynamic(
 );
 
 export default function ClientExperience() {
-  return <ExperienceScene />;
+  return (
+    <SplatErrorBoundary>
+      <ExperienceScene />
+    </SplatErrorBoundary>
+  );
 }

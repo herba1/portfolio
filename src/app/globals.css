@@ -266,8 +266,12 @@
   --ease-in-out-expo: cubic-bezier(1, 0, 0, 1);
   --ease-in-out-circ: cubic-bezier(.785, .135, .15, .86);
 
+  /* — Color tokens ——————————————————————————— */
   --color-dark: #1a1a1a;
-  --color-light: #fcecdd;
+  --color-light: #f1f5f9;       /* slate-100, matches body bg */
+  --color-muted: #64748b;       /* slate-500, secondary text */
+  --color-border: #e2e8f0;      /* slate-200, borders/dividers */
+  --color-accent: #3b82f6;      /* blue-500, interactive accent */
 
   --text-6xl: 64px;
 
@@ -324,8 +328,20 @@
 
     &:hover .linkMask__char--secondary{
         transform: translateY(-100%);
-
     }
+}
+
+/* During navigation, kill all LinkMask transitions so
+   view transition snapshots a clean, non-animating state */
+html.navigating .linkMask__char,
+html.navigating .linkMask__char--secondary {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
+}
+
+html.navigating .LinkMask__underline {
+  animation-duration: 0s !important;
+  clip-path: inset(95% 100% 0% 0%) !important;
 }
 
 

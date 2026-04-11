@@ -157,7 +157,7 @@ export default function LinkMask({
       </div>
       {/* underline */}
       <p
-        className={`LinkMask__underline bg-light pointer-events-none absolute top-1 w-fit text-transparent`}
+        className={`LinkMask__underline bg-dark pointer-events-none absolute top-1 w-fit text-transparent`}
         style={{ clipPath: "inset(95% 100% 0% 0%)" }}
       >
         {text}
