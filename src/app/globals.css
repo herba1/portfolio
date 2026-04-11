@@ -244,6 +244,84 @@
   }
 }
 
+/* ─────────────────────────────────────────────
+ * NAV CONTACT GROUP — mail icon triggers reveal
+ * ───────────────────────────────────────────── */
+
+.nav__contact-group {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* 44px minimum touch target via pseudo-element */
+.nav__toggle-btn::after {
+  content: "";
+  position: absolute;
+  inset: -15px;
+  min-width: 44px;
+  min-height: 44px;
+}
+
+.nav__contact-links {
+  display: flex;
+  align-items: center;
+  clip-path: inset(0 0 0 100%);
+  /* Exit: ease-out-quart, 20% faster */
+  transition: clip-path 500ms cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+/* Enter: ease-out-quart */
+.nav__contact-group.is-open .nav__contact-links {
+  clip-path: inset(0 0 0 0);
+  transition: clip-path 800ms cubic-bezier(0.165, 0.84, 0.44, 1);
+}
+
+/* Individual link stagger — slide in from right + fade */
+.nav__link--secondary {
+  white-space: nowrap;
+  padding-left: 1rem;
+  opacity: 0;
+  transform: translateX(8px);
+  transition:
+    opacity 250ms cubic-bezier(0.165, 0.84, 0.44, 1),
+    transform 300ms cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition-delay: 0ms;
+}
+
+.nav__contact-group.is-open .nav__link--secondary {
+  opacity: 1;
+  transform: translateX(0);
+  /* Stagger: last item (closest to +) appears first, ripples outward left */
+  transition-delay: calc((4 - var(--link-i, 0)) * 60ms + 150ms);
+}
+
+/* Exit: reverse stagger, faster */
+.nav__contact-group:not(.is-open) .nav__link--secondary {
+  transition:
+    opacity 150ms cubic-bezier(0.165, 0.84, 0.44, 1),
+    transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition-delay: calc(var(--link-i, 0) * 30ms);
+}
+
+@media (min-width: 768px) {
+  .nav__link--secondary {
+    padding-left: 1.5rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav__contact-links {
+    clip-path: none !important;
+    transition: none !important;
+  }
+  .nav__link--secondary {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
 @theme {
   --ease-in-quad: cubic-bezier(.55, .085, .68, .53);
   --ease-in-cubic: cubic-bezier(.550, .055, .675, .19);

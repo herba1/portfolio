@@ -42,7 +42,6 @@ export default function TransitionLink({ href = "/", children }) {
     e.preventDefault();
     if (href === pathName) return;
     tl.current.play();
-    console.log("handleClick");
   });
 
   const pushRouter = () => {

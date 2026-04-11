@@ -124,10 +124,7 @@ export default function SplatScrollSection() {
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  const handleLoaded = useCallback(() => {
-    console.log('[SplatScrollSection] splat loaded', Date.now());
-    setLoaded(true);
-  }, []);
+  const handleLoaded = useCallback(() => setLoaded(true), []);
 
   const edgeFade = easedEdgeFade;
 

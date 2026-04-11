@@ -134,12 +134,6 @@ export default function TempPage() {
     return best;
   }, []);
 
-  // DEBUG: track mount/unmount
-  useEffect(() => {
-    console.log("[TempPage] mounted", Date.now());
-    return () => console.log("[TempPage] unmounted", Date.now());
-  }, []);
-
   // Defer interaction setup until after intro animation (~1s)
   // Uses requestIdleCallback where available, falls back to setTimeout
   useEffect(() => {
