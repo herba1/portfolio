@@ -269,9 +269,22 @@ export default function SplatScrollSection() {
           </Suspense>
         </Canvas>
       </div>
-      {/* Collapsed: centered click target to expand */}
-      {!expanded && loaded && (
-        <div className="splat-click-target" onClick={handleExpand} />
+      {/* Click target + tap hint (stays in DOM for exit animation) */}
+      {loaded && (
+        <div
+          className="splat-click-target"
+          data-hiding={expanded || undefined}
+          onClick={!expanded ? handleExpand : undefined}
+        >
+          {/* Outer: handles fade in + fade out */}
+          <div className="splat-tap-wrap" aria-hidden="true">
+            {/* Inner: ambient pulse loop */}
+            <svg viewBox="0 0 40 40" fill="none" className="splat-tap-anim">
+              <circle cx="20" cy="20" r="16" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5" />
+              <circle cx="20" cy="20" r="6" fill="currentColor" fillOpacity="0.25" />
+            </svg>
+          </div>
+        </div>
       )}
       {/* Expanded: tap canvas to collapse (drag still orbits) */}
       <style>{`
@@ -361,6 +374,73 @@ export default function SplatScrollSection() {
           cursor: pointer;
           pointer-events: auto;
           z-index: 2;
+        }
+
+        /* Outer wrapper: positioned center, handles opacity for entry + exit */
+        .splat-tap-wrap {
+          position: absolute;
+          top: 50%;
+          left: 50%;
+          width: 40px;
+          height: 40px;
+          color: rgba(255,255,255,0.7);
+          transform-origin: center;
+          /* Entry: fade + scale in */
+          opacity: 0;
+          animation: splatWrapEnter 0.25s cubic-bezier(0.22, 1, 0.36, 1) 0.8s forwards;
+        }
+
+        /* Inner SVG: ambient pulse loop, independent of wrapper */
+        .splat-tap-anim {
+          width: 100%;
+          height: 100%;
+          animation: splatPulse 1.4s ease-in-out 1.05s infinite;
+        }
+
+        /* Hover: pause the pulse */
+        .splat-click-target:hover .splat-tap-anim {
+          animation-play-state: paused;
+        }
+
+        /* Scene expanding: fade out the wrapper */
+        .splat-click-target[data-hiding] {
+          pointer-events: none;
+        }
+        .splat-click-target[data-hiding] .splat-tap-wrap {
+          animation: splatWrapExit 0.2s ease-out forwards;
+        }
+        .splat-click-target[data-hiding] .splat-tap-anim {
+          animation-play-state: paused;
+        }
+
+        /* Wrapper entry */
+        @keyframes splatWrapEnter {
+          0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+          100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        }
+
+        /* Wrapper exit */
+        @keyframes splatWrapExit {
+          0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          100% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+        }
+
+        /* Ambient press-release pulse */
+        @keyframes splatPulse {
+          0%   { transform: scale(1); opacity: 1; }
+          12%  { transform: scale(0.8); opacity: 0.85; }
+          24%  { transform: scale(1.08); opacity: 1; }
+          40%  { transform: scale(1); opacity: 0.65; }
+          100% { transform: scale(1); opacity: 1; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .splat-tap-wrap {
+            animation: splatWrapEnter 0.25s ease 0.5s forwards;
+          }
+          .splat-tap-anim {
+            animation: none;
+          }
         }
       `}</style>
     </section>

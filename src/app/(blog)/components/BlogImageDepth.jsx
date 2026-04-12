@@ -10,19 +10,18 @@ const SHINE_OPACITY = 0.12
 export function BlogImageDepth({
   src,
   alt,
-  width = 800,
-  height = 450,
   caption,
   priority = false,
 }) {
   const containerRef = useRef(null)
   const rafRef = useRef(null)
   const [style, setStyle] = useState({
-    transform: 'perspective(800px) rotateX(0deg) rotateY(0deg)',
+    transform: 'rotateX(0deg) rotateY(0deg)',
     boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
   })
   const [shineStyle, setShineStyle] = useState({ opacity: 0 })
   const [hovering, setHovering] = useState(false)
+  const [aspect, setAspect] = useState(null)
 
   const handleMouseMove = useCallback((e) => {
     if (rafRef.current) return
@@ -41,7 +40,7 @@ export function BlogImageDepth({
       const shadowY = y * SHADOW_SHIFT + 10
 
       setStyle({
-        transform: `perspective(800px) rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`,
+        transform: `rotateX(${rotateX}deg) rotateY(${rotateY}deg) scale(1.02)`,
         boxShadow: `${shadowX}px ${shadowY}px 40px rgba(0,0,0,0.18), 0 0 0 1px rgba(0,0,0,0.04)`,
       })
 
@@ -62,46 +61,55 @@ export function BlogImageDepth({
     if (rafRef.current) cancelAnimationFrame(rafRef.current)
     rafRef.current = null
     setStyle({
-      transform: 'perspective(800px) rotateX(0deg) rotateY(0deg) scale(1)',
+      transform: 'rotateX(0deg) rotateY(0deg) scale(1)',
       boxShadow: '0 8px 30px rgba(0,0,0,0.12)',
     })
     setShineStyle({ opacity: 0 })
   }, [])
 
   return (
-    <figure className="blog-figure my-8">
+    <figure className="not-prose blog-figure my-8">
+      {/* Outer: stable hitbox — never transforms, handles all mouse events */}
       <div
         ref={containerRef}
         onMouseMove={handleMouseMove}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="relative overflow-hidden rounded-2xl"
-        style={{
-          ...style,
-          transformStyle: 'preserve-3d',
-          transition: hovering
-            ? 'transform 0.1s ease-out, box-shadow 0.2s ease-out'
-            : 'transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.5s cubic-bezier(0.165, 0.84, 0.44, 1)',
-          willChange: 'transform',
-        }}
+        className="relative"
+        style={{ perspective: '800px' }}
       >
-        <Image
-          src={src}
-          alt={alt || caption || ''}
-          width={width}
-          height={height}
-          priority={priority}
-          className="pointer-events-none block w-full select-none"
-        />
-
-        {/* Specular shine overlay */}
+        {/* Inner: transforms + clips */}
         <div
-          className="pointer-events-none absolute inset-0 rounded-2xl"
+          className="relative overflow-hidden rounded-2xl"
           style={{
-            ...shineStyle,
-            transition: hovering ? 'opacity 0.15s ease-out' : 'opacity 0.5s ease-out',
+            ...style,
+            aspectRatio: aspect || undefined,
+            transformStyle: 'preserve-3d',
+            transition: hovering
+              ? 'transform 0.1s ease-out, box-shadow 0.2s ease-out'
+              : 'transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.5s cubic-bezier(0.165, 0.84, 0.44, 1)',
+            willChange: 'transform',
           }}
-        />
+        >
+          <Image
+            src={src}
+            alt={alt || caption || ''}
+            fill
+            sizes="(max-width: 768px) 100vw, 768px"
+            priority={priority}
+            className="pointer-events-none m-0 object-cover select-none"
+            onLoad={(e) => setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)}
+          />
+
+          {/* Specular shine overlay */}
+          <div
+            className="pointer-events-none absolute inset-0 rounded-2xl"
+            style={{
+              ...shineStyle,
+              transition: hovering ? 'opacity 0.15s ease-out' : 'opacity 0.5s ease-out',
+            }}
+          />
+        </div>
       </div>
 
       {caption && (

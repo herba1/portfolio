@@ -18,8 +18,6 @@ function quantize(alpha) {
 export function BlogImagePixel({
   src,
   alt,
-  width = 800,
-  height = 450,
   caption,
   priority = false,
 }) {
@@ -30,6 +28,7 @@ export function BlogImagePixel({
   const rafRef = useRef(null)
   const trailRef = useRef([])
   const [imageLoaded, setImageLoaded] = useState(false)
+  const [aspect, setAspect] = useState(null)
   const isTouchRef = useRef(false)
   const paintingRef = useRef(false)
   const lastPosRef = useRef(null)
@@ -253,11 +252,11 @@ export function BlogImagePixel({
   }, [])
 
   return (
-    <figure className="blog-figure my-8">
+    <figure className="not-prose blog-figure my-8">
       <div
         ref={containerRef}
         className="relative overflow-hidden rounded-2xl select-none"
-        style={{ touchAction: isTouch ? 'auto' : 'none' }}
+        style={{ touchAction: isTouch ? 'auto' : 'none', aspectRatio: aspect || undefined }}
         onPointerMove={isTouch ? undefined : onPointerMove}
         onPointerDown={isTouch ? undefined : onPointerDown}
         onPointerUp={isTouch ? undefined : onPointerUp}
@@ -268,11 +267,14 @@ export function BlogImagePixel({
           ref={imgRef}
           src={src}
           alt={alt || caption || ''}
-          width={width}
-          height={height}
+          fill
+          sizes="(max-width: 768px) 100vw, 768px"
           priority={priority}
-          className="pointer-events-none block w-full rounded-2xl"
-          onLoad={() => setImageLoaded(true)}
+          className="pointer-events-none m-0 object-cover"
+          onLoad={(e) => {
+            setAspect(e.currentTarget.naturalWidth / e.currentTarget.naturalHeight)
+            setImageLoaded(true)
+          }}
         />
         <canvas
           ref={canvasRef}
