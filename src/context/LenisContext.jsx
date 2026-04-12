@@ -44,7 +44,7 @@ export function LenisProvider({ children }) {
       });
       gsap.ticker.lagSmoothing(0);
     });
-    }, 100); // Small delay — let first paint happen
+    }, 500); // Defer until after LCP — let first paint settle
 
     return () => {
       clearTimeout(delayId);

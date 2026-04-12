@@ -1,8 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
-import { useGSAP } from "@gsap/react";
-import gsap from "gsap";
-import { ScrollTrigger } from "gsap/all";
+import { useRef, useState } from "react";
 import NavLogo from "./NavLogo";
 import NavMenuButton from "./NavMenuButton";
 import NavPhone from "./NavPhone";
@@ -18,16 +15,6 @@ export default function Navbar({
 }) {
   const navContainer = useRef();
   const [menuIsOpen, setMenuIsOpen] = useState(false);
-  const tl = useRef();
-
-  const { contextSafe } = useGSAP(
-    () => {
-      tl.current = gsap.timeline({
-        paused: true,
-      });
-    },
-    { scope: navContainer },
-  );
 
   return (
     <nav
