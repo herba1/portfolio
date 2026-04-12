@@ -1,33 +1,36 @@
-# Portfolio
+# herb.art
 
-A minimal portfolio showcasing projects and case studies with smooth animations and interactions.
+my portfolio. a playground for interactions, animations, and weird ideas — built in public, always evolving.
 
-## About
+**[herb.art](https://herb.art)**
 
-- Interactive animations
-- Expandable Case studies
-- Responsive design optimized for all devices
-- Content management through Sanity CMS
+## what's in here
 
-## Tech Stack
+- **draggable hero text** — each letter responds to pointer drags with spring physics and string constraints. goes into an idle demo if you leave it alone
+- **multiplayer eyes** — real-time visitor presence via partykit. you can see other people looking around
+- **3d gaussian splat** — an actual 3d scan of me, scroll-triggered with a masked reveal that expands on click
+- **pixel trail images** — hover over blog images and they pixelate under your cursor with stepped decay
+- **3d parallax images** — blog images that tilt and shine based on mouse position
+- **view transitions** — native css view transitions between pages, navbar and footer persist
+- **glitchy 404** — character-by-character reveal animation on the not found page
+- **live clock** — est time in the footer, always ticking
+- **dev-only mdx studio** — hidden editor at `/~studio` for writing blog posts (dev mode only, invisible in prod)
 
-- **Next.js 15** - React framework with App Router
-- **React 19** - Latest React features
-- **GSAP** -  Animations
-- **Sanity** - Headless CMS for project data
-- **Tailwind CSS** - Utility-first styling
-- **Lenis** - Smoooooth scrolling
-- **Vercel** - Deployment and analytics
+## stack
 
-## Design
+next.js 15, react 19, tailwind 4, gsap, lenis, three.js, framer motion, mdx, partykit, posthog
 
-View the design process and wireframes on [Figma](https://www.figma.com/design/aMB9Sin0FzIYcfdTM5RVmB/Personal-Portfolio-2?node-id=0-1&t=cpVbNPFK5vSebREA-1).
-
-## Development
+## run it
 
 ```bash
+git clone https://github.com/herba1/portfolio.git
+cd portfolio
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) to view the site locally.
+open [localhost:3000](http://localhost:3000)
+
+## build in public
+
+this is an ongoing project — features get added, experiments get tried, things break and get fixed. the repo is open source so feel free to poke around, steal patterns, or open an issue if something catches your eye.
