@@ -4,6 +4,7 @@ import localFont from "next/font/local";
 export const geist = Geist({
     subsets:['latin'],
     display:'swap',
+    variable: '--font-geist',
 })
 
 export const instrumentSerif = Instrument_Serif({
@@ -11,6 +12,7 @@ export const instrumentSerif = Instrument_Serif({
     weight: ['400'],
     style: ['normal', 'italic'],
     display: 'swap',
+    variable: '--font-instrument-serif',
 })
 
 export const spencer = localFont({

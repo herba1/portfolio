@@ -28,6 +28,8 @@ const CHARS = [...NAME];
 const NON_SPACE = CHARS.filter((c) => c !== " ").length;
 const ORDER = shuffledOrder(NON_SPACE);
 const MAX_PULL = 120;
+const HOLD_THRESHOLD = 0.85; // fraction of MAX_PULL to count as "maxed"
+const HOLD_TIME = 800; // ms you must hold at max before explosion arms
 
 export default function TempPage() {
   const containerRef = useRef(null);
@@ -42,6 +44,12 @@ export default function TempPage() {
   const velocities = useRef([]);
   const hasInteracted = useRef(false);
   const idleTimer = useRef(null);
+  const maxHeldSince = useRef(0); // timestamp when pull first hit threshold
+  const explosionArmed = useRef(false);
+  const exploded = useRef(false);
+  const reassembling = useRef(false); // gentle fade-back phase
+  const reassembleStart = useRef(0); // timestamp when reassembly began
+  const reassembleTimer = useRef(null);
 
   const measure = useCallback(() => {
     const chars = charsRef.current.filter(Boolean);
@@ -72,6 +80,18 @@ export default function TempPage() {
       const clampedPull = Math.min(pullDist, MAX_PULL);
       const pullDir = pullDist > 0 ? { x: dx / pullDist, y: dy / pullDist } : { x: 0, y: 0 };
 
+      // track how long user has been holding at max pull
+      const atMax = pullDist >= MAX_PULL * HOLD_THRESHOLD;
+      if (atMax) {
+        if (!maxHeldSince.current) maxHeldSince.current = performance.now();
+        if (performance.now() - maxHeldSince.current >= HOLD_TIME) {
+          explosionArmed.current = true;
+        }
+      } else {
+        maxHeldSince.current = 0;
+        explosionArmed.current = false;
+      }
+
       for (let i = 0; i < count; i++) {
         const stringDist = Math.abs(i - grabIndex.current);
         const influence = Math.exp(-stringDist * 0.35);
@@ -80,24 +100,70 @@ export default function TempPage() {
       }
     }
 
+    // reassembly: staggered fade-in over ~1s, no physics
+    if (reassembling.current) {
+      const elapsed = performance.now() - reassembleStart.current;
+      const duration = 900;
+      let allDone = true;
+
+      for (let i = 0; i < count; i++) {
+        const el = chars[i];
+        if (!el) continue;
+        // stagger: each char starts fading in at a slightly different time
+        const stagger = (seeded(i * 5 + 2) * 0.4) * duration;
+        const t = Math.min(Math.max((elapsed - stagger) / (duration * 0.6), 0), 1);
+        // smooth ease-out
+        const ease = 1 - Math.pow(1 - t, 3);
+
+        pos[i].x = 0;
+        pos[i].y = 0;
+        vels[i].x = 0;
+        vels[i].y = 0;
+        el.style.transform = ease < 1 ? `scale(${(0.9 + ease * 0.1).toFixed(3)})` : "";
+        el.style.opacity = ease.toFixed(2);
+
+        if (t < 1) allDone = false;
+      }
+
+      if (allDone) {
+        reassembling.current = false;
+        for (let i = 0; i < count; i++) {
+          const el = chars[i];
+          if (el) { el.style.transform = ""; el.style.opacity = ""; }
+        }
+        rafRef.current = null;
+      } else {
+        rafRef.current = requestAnimationFrame(animLoop);
+      }
+      return;
+    }
+
     for (let i = 0; i < count; i++) {
       const el = chars[i];
       if (!el) continue;
 
-      const fx = (targets[i].x - pos[i].x) * 0.12;
-      const fy = (targets[i].y - pos[i].y) * 0.12;
+      if (exploded.current) {
+        // free-flying: gravity pulls down, light air drag
+        vels[i].y += 1.2;
+        vels[i].x *= 0.98;
+        vels[i].y *= 0.98;
+      } else {
+        // spring back toward target
+        const fx = (targets[i].x - pos[i].x) * 0.12;
+        const fy = (targets[i].y - pos[i].y) * 0.12;
 
-      vels[i].x = (vels[i].x + fx) * 0.82;
-      vels[i].y = (vels[i].y + fy) * 0.82;
+        vels[i].x = (vels[i].x + fx) * 0.82;
+        vels[i].y = (vels[i].y + fy) * 0.82;
 
-      const nearOrigin = Math.abs(pos[i].x) < 2 && Math.abs(pos[i].y) < 2;
-      if (nearOrigin && Math.abs(vels[i].x) < 0.1) vels[i].x = 0;
-      if (nearOrigin && Math.abs(vels[i].y) < 0.1) vels[i].y = 0;
+        const nearOrigin = Math.abs(pos[i].x) < 2 && Math.abs(pos[i].y) < 2;
+        if (nearOrigin && Math.abs(vels[i].x) < 0.1) vels[i].x = 0;
+        if (nearOrigin && Math.abs(vels[i].y) < 0.1) vels[i].y = 0;
+      }
 
       pos[i].x += vels[i].x;
       pos[i].y += vels[i].y;
 
-      if (!dragging.current && Math.abs(pos[i].x) < 0.2 && Math.abs(pos[i].y) < 0.2 &&
+      if (!dragging.current && !exploded.current && Math.abs(pos[i].x) < 0.2 && Math.abs(pos[i].y) < 0.2 &&
           vels[i].x === 0 && vels[i].y === 0) {
         pos[i].x = 0;
         pos[i].y = 0;
@@ -107,11 +173,17 @@ export default function TempPage() {
       const squeeze = Math.min(pullAmount / MAX_PULL, 1);
       const scaleY = 1 - squeeze * 0.15;
       const scaleX = 1 + squeeze * 0.05;
+      const rotation = exploded.current ? vels[i].x * 2 : 0;
 
       if (pos[i].x === 0 && pos[i].y === 0) {
         el.style.transform = "";
+        el.style.opacity = "";
       } else {
-        el.style.transform = `translate(${pos[i].x.toFixed(1)}px, ${pos[i].y.toFixed(1)}px) scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)})`;
+        el.style.transform = `translate(${pos[i].x.toFixed(1)}px, ${pos[i].y.toFixed(1)}px) scale(${scaleX.toFixed(3)}, ${scaleY.toFixed(3)}) rotate(${rotation.toFixed(1)}deg)`;
+        if (exploded.current) {
+          const dist = Math.sqrt(pos[i].x * pos[i].x + pos[i].y * pos[i].y);
+          el.style.opacity = Math.max(0, 1 - dist / 600).toFixed(2);
+        }
       }
 
       if (pos[i].x !== 0 || pos[i].y !== 0) {
@@ -212,6 +284,7 @@ export default function TempPage() {
       }
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
       clearTimeout(idleTimer.current);
+      clearTimeout(reassembleTimer.current);
       window.removeEventListener("resize", measure);
     };
   }, [measure, animLoop]);
@@ -233,7 +306,27 @@ export default function TempPage() {
       const pullDist = Math.sqrt(dx * dx + dy * dy);
       const intensity = Math.min(pullDist / MAX_PULL, 1);
 
-      if (intensity > 0.4) {
+      if (explosionArmed.current) {
+        // BOOM — full explosion, characters scatter everywhere
+        exploded.current = true;
+        const vels = velocities.current;
+        const count = vels.length;
+        for (let i = 0; i < count; i++) {
+          const angle = (seeded(i * 11 + 3) * 2 - 1) * Math.PI;
+          const force = 15 + seeded(i * 7 + 17) * 30;
+          vels[i].x += Math.cos(angle) * force;
+          vels[i].y += Math.sin(angle) * force - 10; // upward bias
+        }
+
+        // after scattering, transition to gentle fade-back
+        clearTimeout(reassembleTimer.current);
+        reassembleTimer.current = setTimeout(() => {
+          exploded.current = false;
+          reassembling.current = true;
+          reassembleStart.current = performance.now();
+          if (!rafRef.current) rafRef.current = requestAnimationFrame(animLoop);
+        }, 1800);
+      } else if (intensity > 0.4) {
         const vels = velocities.current;
         const count = vels.length;
         const baseAngle = Math.atan2(-dy, -dx);
@@ -251,6 +344,8 @@ export default function TempPage() {
 
       dragging.current = false;
       grabIndex.current = -1;
+      maxHeldSince.current = 0;
+      explosionArmed.current = false;
     };
 
     window.addEventListener("pointermove", onMove);
@@ -271,6 +366,8 @@ export default function TempPage() {
     }
     hasInteracted.current = true;
     if (idleTimer.current) clearTimeout(idleTimer.current);
+    // don't allow dragging while exploded or reassembling
+    if (exploded.current || reassembling.current) return;
     measure();
     dragging.current = true;
     pointer.current = { x: e.clientX, y: e.clientY };
@@ -307,12 +404,14 @@ export default function TempPage() {
         design engineer @ <a href="https://crowdvolt.com" target="_blank" rel="noopener noreferrer">crowdvolt</a>
       </p>
 
-      {/* <div
-        className="touch-none mt-2"
+      {/*
+      <div
+        className="touch-none relative z-20 mt-2"
         onPointerDown={onPointerDown}
       >
         <h1
-          className={`text-dark cursor-grab text-6xl text-[15vw] tracking-normal will-change-transform select-none active:cursor-grabbing md:text-8xl ${spencer.className}`}
+          className={`text-dark cursor-grab text-6xl text-[15vw] leading-[1.3] tracking-normal will-change-transform select-none active:cursor-grabbing md:text-8xl ${spencer.className}`}
+          style={{ paddingBottom: "0.15em" }}
         >
           {CHARS.map((ch, i) => {
             if (ch === " ") {
@@ -336,7 +435,8 @@ export default function TempPage() {
             );
           })}
         </h1>
-      </div> */}
+      </div>
+      */}
     </article>
   );
 }

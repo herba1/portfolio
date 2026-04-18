@@ -91,42 +91,7 @@
  * HERO ENTRANCE — CSS-driven, off main thread
  * ───────────────────────────────────────────── */
 
-/* Hero uses a smooth three-phase entrance:
-   transparent + small + rotated → visible + small → full scale + settled
-   Bounce curve gives overshoot on the scale-up. */
-@keyframes hero-ch-in {
-  0% {
-    color: transparent;
-    transform: scale(0.3) rotate(calc(var(--ch-r, 0) * 1deg));
-  }
-  25% {
-    color: inherit;
-    transform: scale(0.3) rotate(calc(var(--ch-r, 0) * 0.6deg));
-  }
-  100% {
-    color: inherit;
-    transform: scale(1) rotate(0deg);
-  }
-}
-
-.hero-ch {
-  display: inline-block;
-  color: transparent;
-  transform: scale(0.3);
-  transform-origin: center center;
-  will-change: transform, color;
-  animation: hero-ch-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) var(--ch-d, 0s) both;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .hero-ch,
-  .hero-sub {
-    animation: none !important;
-    color: inherit !important;
-    opacity: 1 !important;
-    transform: none !important;
-  }
-}
+/* Hero character intro animation removed — drag interaction handles transforms */
 
 /* ─────────────────────────────────────────────
  * FOOTER CLOCK

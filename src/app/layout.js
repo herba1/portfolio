@@ -4,7 +4,7 @@ import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
 
 import StickyFooter from "./ui/StickyFooter";
-import { geist } from "./fonts";
+import { geist, instrumentSerif } from "./fonts";
 import Loading from "./ui/Loading";
 import { description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
@@ -94,7 +94,7 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
+    <html lang="en" className={`${geist.variable} ${instrumentSerif.variable}`}>
       <head>
         {/* Splat loads on scroll via dynamic import — no prefetch needed */}
         <script
