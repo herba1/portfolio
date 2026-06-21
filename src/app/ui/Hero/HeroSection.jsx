@@ -2,8 +2,6 @@
 import Image from "next/image";
 import Marquee from "./Marquee";
 
-import { instrumentSerif } from "@/app/fonts";
-
 import { useGSAP } from "@gsap/react";
 import gsap from "gsap";
 import { useEffect, useRef } from "react";
@@ -75,7 +73,7 @@ function HeroTextTop({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` font-bold tracking-tighter flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pb-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -139,7 +137,7 @@ function HeroTextBottom({ children, className }) {
   return (
     <div
       ref={container}
-      className={` ${instrumentSerif.className} tracking-heading-mobile lg:tracking-heading flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
+      className={` font-bold tracking-tighter flex flex-col items-center justify-center text-[15vw] leading-tight md:flex-row md:gap-2 md:pt-6 lg:gap-4 lg:text-8xl ${className}`}
       onMouseEnter={hoverEnter}
       onMouseLeave={hoverExit}
     >
@@ -178,7 +176,7 @@ export default function HeroSection({ children }) {
           className={`absolute bottom-full w-full`}
         ></HeroTextTop>
         <Marquee
-          className={`bg-dark text-light tracking-heading-mobile md:leading-none md:tracking-heading h-fit text-[23vw] leading-tight md:py-3 md:text-9xl`}
+          className={`bg-dark text-light md:leading-none h-fit text-[23vw] leading-tight md:py-3 md:text-9xl`}
         ></Marquee>
         <HeroTextBottom className="absolute top-full w-full"></HeroTextBottom>
       </div>

@@ -3,7 +3,6 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import ScrollTrigger from "gsap/ScrollTrigger";
 import { useEffect, useRef } from "react";
-import { instrumentSerif } from "@/app/fonts";
 import { useLenis } from "@/context/LenisContext";
 
 export default function Marquee({
@@ -77,7 +76,7 @@ export default function Marquee({
     >
       <span
         ref={container}
-        className={`marquee__item will-change-transform ${instrumentSerif.className} inline-block whitespace-nowrap`}
+        className={`marquee__item will-change-transform font-bold tracking-tighter inline-block whitespace-nowrap`}
       >
         {children}
         {children}

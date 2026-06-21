@@ -1,0 +1,15 @@
+DSEG Font Family
+================
+Files: DSEG7Classic-Bold.woff2, DSEG14Classic-Bold.woff2
+
+Copyright (c) 2017-2020, Keshikan (https://www.keshikan.net),
+with Reserved Font Name "DSEG".
+
+Licensed under the SIL Open Font License, Version 1.1.
+The full license text is available at: https://scripts.sil.org/OFL
+Project home: https://github.com/keshikan/DSEG
+
+This is an attribution stub (the upstream LICENSE file could not be fetched
+automatically at install time). The OFL permits embedding/bundling these fonts
+in this site, including commercial use. Replace this file with the upstream
+LICENSE-OFL text if you want the complete license bundled.

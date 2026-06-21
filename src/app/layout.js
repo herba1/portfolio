@@ -2,9 +2,11 @@ import { ViewTransition } from "react";
 import { LenisProvider } from "@/context/LenisContext";
 import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
+import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
+import MobileMenuShell from "./ui/Navigation/MobileMenuShell";
 
 import StickyFooter from "./ui/StickyFooter";
-import { geist, instrumentSerif } from "./fonts";
+import { geist } from "./fonts";
 import Loading from "./ui/Loading";
 import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
@@ -130,8 +132,15 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${geist.variable} ${instrumentSerif.variable}`}>
+    <html lang="en" className={`${geist.variable}`}>
       <head>
+        {/* Adobe Fonts (Typekit). Preconnect warms the CSS host + the font
+            host (p.typekit.net serves the actual woff2 via CORS). The
+            `precedence` prop opts the stylesheet into React's resource
+            manager so Next preloads, hoists, and dedupes it. */}
+        <link rel="preconnect" href="https://use.typekit.net" crossOrigin="anonymous" />
+        <link rel="preconnect" href="https://p.typekit.net" crossOrigin="anonymous" />
+        <link rel="stylesheet" href="https://use.typekit.net/psc2klr.css" precedence="default" />
         {/* Splat loads on scroll via dynamic import — no prefetch needed */}
         <script
           type="application/ld+json"
@@ -143,14 +152,18 @@ export default function RootLayout({ children }) {
         <ConsoleSig />
         <PostHogProvider>
           <LenisProvider>
-            <Navbar
-              className="text-dark z-50 font-medium"
-              phoneVisible={false}
-              ctaVisible={false}
-            />
-            <ViewTransition name="page-content">
-              {children}
-            </ViewTransition>
+            <MobileMenuProvider>
+              <Navbar
+                className="text-dark z-50 font-medium"
+                phoneVisible={false}
+                ctaVisible={false}
+              />
+              <MobileMenuShell>
+                <ViewTransition name="page-content">
+                  {children}
+                </ViewTransition>
+              </MobileMenuShell>
+            </MobileMenuProvider>
             {/* <Loading>
               <div className="relative z-0">
                 <Navbar

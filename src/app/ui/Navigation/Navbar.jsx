@@ -1,10 +1,9 @@
 "use client";
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import NavLogo from "./NavLogo";
 import NavMenuButton from "./NavMenuButton";
 import NavPhone from "./NavPhone";
 import NavLinks from "./NavLinks";
-import NavMenu from "./NavMenu";
 import { geist } from "@/app/fonts";
 
 export default function Navbar({
@@ -14,7 +13,6 @@ export default function Navbar({
   className = "",
 }) {
   const navContainer = useRef();
-  const [menuIsOpen, setMenuIsOpen] = useState(false);
 
   return (
     <nav
@@ -25,16 +23,10 @@ export default function Navbar({
         <NavLogo />
       </div>
       <div className="nav__right flex gap-5 lg:gap-10">
-        <NavMenuButton className={""} setMenuIsOpen={setMenuIsOpen}>
-          Menu
-        </NavMenuButton>
+        <NavMenuButton>Menu</NavMenuButton>
         {phoneVisible && <NavPhone />}
         {ctaVisible && <NavCta />}
         <NavLinks className="z-50" />
-        <NavMenu
-          menuIsOpen={menuIsOpen}
-          setMenuIsOpen={setMenuIsOpen}
-        ></NavMenu>
       </div>
     </nav>
   );

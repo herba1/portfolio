@@ -1,18 +1,22 @@
-import { Menu } from "lucide-react";
-import posthog from "posthog-js";
+"use client";
 
-export default function NavMenuButton({ setMenuIsOpen, className,children }) {
+import posthog from "posthog-js";
+import { useMobileMenu } from "./MobileMenuContext";
+
+export default function NavMenuButton({ className = "", children }) {
+  const { open, toggle } = useMobileMenu();
   return (
     <button
       onClick={() => {
         posthog.capture("nav_menu_toggled");
-        setMenuIsOpen((prev) => !prev);
+        toggle();
       }}
       type="button"
-      className={` touch-manipulation active:scale-95 active:scale-y-90 transition-all cursor-pointer  nav__button--open sm:hidden order-4 ${className} `}
+      aria-expanded={open}
+      aria-label={open ? "Close menu" : "Open menu"}
+      className={`touch-manipulation active:scale-95 transition-transform cursor-pointer nav__button--open sm:hidden order-4 ${className}`}
     >
-      {/* <Menu className=" " strokeWidth={2}>{children}</Menu> */}
-      {children}
+      {open ? "Close" : children}
     </button>
   );
 }

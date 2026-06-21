@@ -1,4 +1,3 @@
-import { spencer } from '@/app/fonts'
 import TransitionLink from '@/app/ui/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
 
@@ -65,7 +64,7 @@ export default function BlogHeader({ title, date, tags, description }) {
         })}
       </time>
       <h1
-        className={`text-dark mt-2 text-4xl md:text-5xl ${spencer.className}`}
+        className={`text-dark mt-2 text-4xl font-bold tracking-tighter md:text-5xl`}
       >
         {chars.map((ch, i) => {
           if (ch === ' ') {

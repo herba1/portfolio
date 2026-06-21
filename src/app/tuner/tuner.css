@@ -1,0 +1,277 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   Instrument tuner — a quiet typographic page with a living waveform.
+   One screen, no scroll. No rules, grids, boxes, dividers, all-caps micro-
+   labels or faded text — composition is space + solid type. A vertical audio
+   waveform (Waveform.jsx, the site's bar style flipped 90°) streams down a
+   centred, max-width column; the note + figures rest in the lower band.
+   Helvetica Neue, light slate paper, solid black ink + green when in tune.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.tuner {
+  --paper: #f1f5f9;
+  --ink: #15161a;
+  --muted: #8b9199; /* solid (NOT low-opacity) — only for inactive affordances */
+  --good: #1c8f4e;
+  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--paper);
+  color: var(--ink);
+  font-family: var(--font-sans, "Helvetica Neue", Helvetica, Arial, sans-serif);
+  view-transition-name: none;
+}
+.tuner *,
+.tuner *::before,
+.tuner *::after {
+  view-transition-name: none;
+}
+
+/* ── Vertical waveform history: centred, max-width, full screen height ──── */
+.wave {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  color: var(--ink);
+  transition: color 0.4s var(--ease);
+  animation: wave-in 0.5s var(--ease) both;
+}
+.wave.is-intune {
+  color: var(--good);
+}
+/* the group that translates continuously (smooth scroll, no per-row stepping) */
+.wave__inner {
+  position: absolute;
+  inset: 0;
+  will-change: transform;
+}
+.wave__bar {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-radius: 999px;
+  background: currentColor;
+  transform: scaleX(0.01);
+  transform-origin: center;
+  will-change: transform;
+}
+.wave.is-intune .wave__bar {
+  box-shadow: 0 0 5px rgba(28, 143, 78, 0.4);
+}
+@keyframes wave-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/* ── Foreground UI ────────────────────────────────────────────────────── */
+.tuner__ui {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  padding: clamp(1.25rem, 3.5vw, 3rem);
+}
+
+/* readout — anchored to the bottom, sits in front of the full-height wave */
+.tuner__readout {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.9rem, 2.6vh, 1.7rem);
+}
+
+.tuner__note-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: clamp(1rem, 4vw, 3rem);
+  flex-wrap: wrap;
+}
+.tuner__note-main {
+  display: flex;
+  align-items: flex-end;
+  min-width: 0;
+}
+
+.tuner__note {
+  display: flex;
+  align-items: flex-start;
+  line-height: 0.74;
+}
+.tuner__letter {
+  font-size: clamp(4.5rem, 19vh, 13rem);
+  font-weight: 700;
+  letter-spacing: -0.05em;
+}
+.tuner__note-sup {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.1em;
+  margin-top: 0.12em;
+  font-weight: 700;
+  line-height: 1;
+}
+.tuner__sharp,
+.tuner__oct {
+  font-size: clamp(1.4rem, 6vh, 3.2rem);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* the tuner needle — centred on screen; slides left (flat) / right (sharp) */
+.tuner__meter-wrap {
+  display: flex;
+  justify-content: center;
+}
+.meter {
+  position: relative;
+  width: min(520px, 70vw);
+  height: clamp(46px, 8vh, 72px);
+}
+.meter__center {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--muted);
+}
+.meter__needle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 999px;
+  transform: translateX(-50%);
+  background: var(--muted);
+  transition: background 0.3s var(--ease);
+}
+.meter.is-active .meter__needle {
+  background: var(--ink);
+}
+.meter.is-intune .meter__needle {
+  background: var(--good);
+  box-shadow: 0 0 0 5px rgba(28, 143, 78, 0.14);
+}
+
+/* idle / mic gate — solid prompt in the note slot */
+.tuner__gate {
+  border: 0;
+  margin: 0;
+  padding: 0 0 0.4rem;
+  background: transparent;
+  color: var(--ink);
+  font-family: inherit;
+  font-size: clamp(1.5rem, 5vw, 2.6rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-align: left;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.tuner__gate:disabled {
+  cursor: default;
+}
+
+/* figures — plain solid-ink numbers, no labels, no caps */
+.tuner__figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: clamp(1.25rem, 5vw, 3rem);
+  font-size: clamp(1rem, 3vw, 1.5rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+
+/* controls — plain type, state by solid colour (active ink / inactive muted) */
+.tuner__controls {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 1rem 2rem;
+  flex-wrap: wrap;
+}
+.tuner__select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+}
+.tuner__select select {
+  appearance: none;
+  -webkit-appearance: none;
+  font: inherit;
+  font-size: clamp(1rem, 2.4vw, 1.3rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0 1.3em 0 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.tuner__select::after {
+  content: "";
+  position: absolute;
+  right: 0.15em;
+  top: 45%;
+  width: 0.42em;
+  height: 0.42em;
+  border-right: 2px solid var(--ink);
+  border-bottom: 2px solid var(--ink);
+  transform: translateY(-50%) rotate(45deg);
+  pointer-events: none;
+}
+.tuner__modes {
+  display: inline-flex;
+  gap: 1.1rem;
+}
+.tuner__mode {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  font: inherit;
+  font-size: clamp(1rem, 2.4vw, 1.3rem);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--muted);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.tuner__mode:hover {
+  color: var(--ink);
+}
+.tuner__mode.is-active {
+  color: var(--ink);
+}
+
+/* ── Narrow screens ───────────────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .tuner__note-row {
+    align-items: flex-end;
+  }
+  .meter {
+    min-width: 140px;
+  }
+}
+
+/* ── Reduced motion ───────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .wave {
+    animation: none;
+    clip-path: none;
+  }
+}

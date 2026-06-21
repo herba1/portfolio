@@ -1,7 +1,6 @@
 "use client";
 
 import { PauseIcon, PlayIcon } from "lucide-react";
-import { Geist } from "next/font/google";
 import { useMemo, useState } from "react";
 import {
   AnimatePresence,
@@ -13,10 +12,7 @@ import {
 import useMeasure from "react-use-measure";
 import posthog from "posthog-js";
 
-const geist = Geist({
-  weight: "variable",
-  subsets: ["latin"],
-});
+import { sans as geist } from "@/app/fonts";
 
 const ALBUM = {
   name: "Chiquito",

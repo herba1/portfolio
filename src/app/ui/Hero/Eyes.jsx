@@ -165,7 +165,7 @@ function SpeechBubble({ message }) {
           background: "rgba(0,0,0,0.08)",
           borderRadius: "6px",
           color: "rgba(0,0,0,0.7)",
-          fontFamily: "var(--font-geist-sans, system-ui)",
+          fontFamily: "var(--font-sans, system-ui)",
         }}
       >
         {displayedText || "\u00A0"}
@@ -227,7 +227,7 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
           fontSize: "8px",
           color: "rgba(0,0,0,0.25)",
           whiteSpace: "nowrap",
-          fontFamily: "var(--font-geist-sans, system-ui)",
+          fontFamily: "var(--font-sans, system-ui)",
         }}>
           you
         </div>

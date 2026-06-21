@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { usePathname } from "next/navigation";
 import { geist } from "@/app/fonts";
 
 function getEST() {
@@ -106,6 +107,9 @@ function ClockIcon({ hours, minutes }) {
 
 export default function FooterClock() {
   const [time, setTime] = useState(null);
+  const pathname = usePathname();
+  // The covers grid has its own bottom-right minimap; the clock would overlap it.
+  const hidden = pathname?.startsWith("/covers");
 
   useEffect(() => {
     const tick = () => setTime(formatTime(getEST()));
@@ -125,7 +129,7 @@ export default function FooterClock() {
     };
   }, []);
 
-  if (!time) return null;
+  if (!time || hidden) return null;
 
   return (
     <div className={`footer-clock tracking-body-base text-white text-sm ${geist.className}`}>

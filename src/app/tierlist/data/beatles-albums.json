@@ -1,0 +1,118 @@
+{
+  "title": "Beatles Albums",
+  "subtitle": "",
+  "description": "ROLL UP FOR THE MYSTERY TOUR",
+  "tiers": [
+    {
+      "id": "s",
+      "label": "S",
+      "color": "#e26d6d"
+    },
+    {
+      "id": "a",
+      "label": "A",
+      "color": "#e2966d"
+    },
+    {
+      "id": "b",
+      "label": "B",
+      "color": "#e2c46d"
+    },
+    {
+      "id": "c",
+      "label": "C",
+      "color": "#a8c47e"
+    },
+    {
+      "id": "d",
+      "label": "D",
+      "color": "#7ea8c4"
+    }
+  ],
+  "items": [
+    {
+      "id": "3631f2c4-045d-467a-8577-26ea3a85ff8f",
+      "src": "/tierlist/images/image-mqobqy63.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "8dfd6848-68a7-498f-a757-a4037cc5cbcb",
+      "src": "/tierlist/images/image-mqobqcj7.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "b1146ba3-b224-433e-a5d4-45f938bda7b6",
+      "src": "/tierlist/images/image-mqobqsi0.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "5eb5317d-1ec8-4aed-b170-0d0663fd2f5a",
+      "src": "/tierlist/images/image-mqobq3h6.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "b33d45db-b726-4ecd-8481-aab4d53c4ad6",
+      "src": "/tierlist/images/image-mqobp3e9.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "7ad05f3b-838a-4e8a-9b35-53e1af1d90a7",
+      "src": "/tierlist/images/image-mqobqo2d.webp",
+      "label": "",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "39b6ab8b-4e46-4793-ac58-9915b01ba74d",
+      "src": "/tierlist/images/image-mqobqjlb.webp",
+      "label": "",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "438ace5c-11f7-4bf9-8709-b621812aefd3",
+      "src": "/tierlist/images/image-mqobr6yd.webp",
+      "label": "",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "82728973-8d79-4600-9613-325270e444d7",
+      "src": "/tierlist/images/image-mqobrb2l.webp",
+      "label": "",
+      "note": "",
+      "tier": "b"
+    },
+    {
+      "id": "16c93b7e-f5fe-4b79-9c21-d70070d0f182",
+      "src": "/tierlist/images/image-mqobq8nt.webp",
+      "label": "",
+      "note": "",
+      "tier": "b"
+    },
+    {
+      "id": "36271612-41ba-4136-a276-4b51b439d7d6",
+      "src": "/tierlist/images/image-mqobph1p.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    },
+    {
+      "id": "ea1f1a9c-d363-4904-872b-df723a0d7186",
+      "src": "/tierlist/images/image-mqobr1f7.webp",
+      "label": "",
+      "note": "",
+      "tier": "a"
+    }
+  ]
+}

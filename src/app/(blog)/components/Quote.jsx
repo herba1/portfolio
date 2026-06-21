@@ -1,11 +1,9 @@
-import { spencer } from '@/app/fonts'
-
 export function Quote({ children, author, source }) {
   return (
     <figure className="my-10">
       <div className="blog-quote-border border-l-2 border-dark/15 pl-6">
         <blockquote
-          className={`blog-quote-text text-dark text-2xl leading-snug md:text-3xl ${spencer.className}`}
+          className={`blog-quote-text text-dark text-2xl font-bold tracking-tight leading-snug md:text-3xl`}
         >
           {children}
         </blockquote>

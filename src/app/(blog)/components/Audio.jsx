@@ -1,36 +1,15 @@
 'use client'
 
 import { useRef, useState, useEffect, useCallback } from 'react'
-import { motion, useMotionValue, useTransform, animate } from 'motion/react'
+import { motion } from 'motion/react'
 import { geist } from '@/app/fonts'
+import PlayPauseIcon from '@/app/ui/PlayPauseIcon'
+import Waveform from '@/app/ui/Waveform'
 
-const BAR_COUNT = 80
-
-/* ─────────────────────────────────────────────
- * Play/Pause — two filled paths, 4 points each.
- * Play triangle splits into left-half + right-point.
- * Pause: two rectangles. Same vertex count = clean morph.
- * Whole SVG rotates 90deg during morph + blur pulse.
- *
- * Waveform drag:
- *   Pointer down → drag → pointer up
- *   Bars near drag point stretch vertically (scaleY)
- *   Gaussian falloff from drag position
- *   Progress follows drag in real time
- * ───────────────────────────────────────────── */
+const BAR_COUNT = 40
 
 // stiffness/damping/mass for direct control — no visualDuration ambiguity
-const SPRING = { type: 'spring', stiffness: 500, damping: 30, mass: 0.5 }
 const SPRING_PRESS = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
-
-// Play triangle — two halves (4 points each, same vertex count = clean morph)
-// Both halves share the seam at x=9 so no gap appears during morph
-const PLAY_L = 'M 4 2 L 9 5.5 L 9 10.5 L 4 14 Z'
-const PLAY_R = 'M 9 5.5 L 13.5 8 L 13.5 8 L 9 10.5 Z'
-
-// Pause bars — two filled rects, same 4 vertices
-const PAUSE_L = 'M 3 3 L 6.5 3 L 6.5 13 L 3 13 Z'
-const PAUSE_R = 'M 9.5 3 L 13 3 L 13 13 L 9.5 13 Z'
 
 function seededBars(count) {
   const bars = []
@@ -53,28 +32,26 @@ function formatTime(s) {
 
 export function Audio({ src, title, caption }) {
   const audioRef = useRef(null)
-  const waveRef = useRef(null)
+  const scrubbingRef = useRef(false)
+  const resumeRef = useRef(false)
   const [playing, setPlaying] = useState(false)
   const [progress, setProgress] = useState(0)
   const [duration, setDuration] = useState(0)
   const [currentTime, setCurrentTime] = useState(0)
-  const [hasInteracted, setHasInteracted] = useState(false)
-  const [dragging, setDragging] = useState(false)
-  const [dragX, setDragX] = useState(-1) // 0–1 normalized, -1 = not dragging
-  const [iconRotation, setIconRotation] = useState(0)
   const bars = useRef(seededBars(BAR_COUNT)).current
 
   useEffect(() => {
     const audio = audioRef.current
     if (!audio) return
     const onTime = () => {
-      if (!dragging) {
-        setCurrentTime(audio.currentTime)
-        setProgress(audio.duration ? audio.currentTime / audio.duration : 0)
-      }
+      // While scrubbing the playhead is driven optimistically by onSeek; the
+      // throttled element time lags, so don't let timeupdate snap it back.
+      if (scrubbingRef.current) return
+      setCurrentTime(audio.currentTime)
+      setProgress(audio.duration ? audio.currentTime / audio.duration : 0)
     }
     const onMeta = () => setDuration(audio.duration)
-    const onEnd = () => { setPlaying(false); setHasInteracted(true); setIconRotation(r => r - 90) }
+    const onEnd = () => setPlaying(false)
     audio.addEventListener('timeupdate', onTime)
     audio.addEventListener('loadedmetadata', onMeta)
     audio.addEventListener('ended', onEnd)
@@ -83,60 +60,41 @@ export function Audio({ src, title, caption }) {
       audio.removeEventListener('loadedmetadata', onMeta)
       audio.removeEventListener('ended', onEnd)
     }
-  }, [dragging])
+  }, [])
 
   const toggle = useCallback(() => {
     const audio = audioRef.current
     if (!audio) return
     if (playing) {
       audio.pause()
-      setIconRotation(r => r - 90)
     } else {
       audio.play()
-      setIconRotation(r => r + 90)
     }
     setPlaying(!playing)
-    setHasInteracted(true)
   }, [playing])
 
-  // — drag handlers —
-  const getX = (e) => {
-    const rect = waveRef.current.getBoundingClientRect()
-    return Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-  }
-
-  const onPointerDown = useCallback((e) => {
-    e.preventDefault()
-    waveRef.current.setPointerCapture(e.pointerId)
-    setDragging(true)
-    setHasInteracted(true)
-    const x = getX(e)
-    setDragX(x)
-    setProgress(x)
-    if (audioRef.current.duration) {
-      audioRef.current.currentTime = x * audioRef.current.duration
-    }
+  // Waveform reports a target time in seconds; scrub the (paused) element to
+  // match. Pausing for the scrub means re-seeking never glitches the audio.
+  const onSeek = useCallback((seconds) => {
+    const audio = audioRef.current
+    if (!audio || !audio.duration) return
+    audio.currentTime = seconds
+    setCurrentTime(seconds)
+    setProgress(seconds / audio.duration)
   }, [])
 
-  const onPointerMove = useCallback((e) => {
-    if (!dragging) return
-    const x = getX(e)
-    setDragX(x)
-    setProgress(x)
-    setCurrentTime(x * (audioRef.current.duration || 0))
-  }, [dragging])
-
-  const onPointerUp = useCallback((e) => {
-    if (!dragging) return
-    setDragging(false)
-    setDragX(-1)
-    const x = getX(e)
-    if (audioRef.current.duration) {
-      audioRef.current.currentTime = x * audioRef.current.duration
-    }
-  }, [dragging])
-
-  const expanded = playing || hasInteracted
+  const scrubStart = useCallback(() => {
+    scrubbingRef.current = true
+    const audio = audioRef.current
+    resumeRef.current = !!audio && !audio.paused
+    if (audio) audio.pause()
+  }, [])
+  const scrubEnd = useCallback(() => {
+    scrubbingRef.current = false
+    const audio = audioRef.current
+    if (audio && resumeRef.current) audio.play()
+    resumeRef.current = false
+  }, [])
 
   return (
     <figure className={`my-8 ${geist.className}`}>
@@ -152,31 +110,7 @@ export function Audio({ src, title, caption }) {
           transition={SPRING_PRESS}
           aria-label={playing ? 'Pause' : 'Play'}
         >
-          <motion.svg
-            width="16" height="16" viewBox="0 0 16 16"
-            fill="white"
-            initial={false}
-            animate={{
-              rotate: iconRotation,
-              filter: ['blur(0px)', 'blur(2px)', 'blur(0px)'],
-            }}
-            transition={{
-              rotate: { type: 'spring', stiffness: 400, damping: 25, mass: 0.4 },
-              filter: { duration: 0.2, times: [0, 0.4, 1] },
-            }}
-            style={{ transformOrigin: '50% 50%' }}
-          >
-            <motion.path
-              initial={false}
-              animate={{ d: playing ? PAUSE_L : PLAY_L }}
-              transition={SPRING}
-            />
-            <motion.path
-              initial={false}
-              animate={{ d: playing ? PAUSE_R : PLAY_R }}
-              transition={SPRING}
-            />
-          </motion.svg>
+          <PlayPauseIcon playing={playing} size={16} />
         </motion.button>
 
         {/* waveform card */}
@@ -192,67 +126,17 @@ export function Audio({ src, title, caption }) {
             </span>
           </div>
 
-          {/* waveform — draggable, bars stretch near pointer */}
-          <div
-            ref={waveRef}
-            onPointerDown={onPointerDown}
-            onPointerMove={onPointerMove}
-            onPointerUp={onPointerUp}
-            className="relative flex h-8 cursor-pointer items-center select-none touch-none"
-            style={{ gap: '0.5px' }}
-            role="slider"
-            aria-valuenow={Math.round(progress * 100)}
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-label="Audio progress"
-          >
-            {bars.map((h, i) => {
-              const pct = i / BAR_COUNT
-              const active = pct < progress
-              const targetH = expanded ? h * 100 : 8
-
-              // proximity stretch during drag
-              let scaleY = 1
-              if (dragging && dragX >= 0) {
-                const dist = Math.abs(pct - dragX)
-                // gaussian falloff — bars within ~8% of drag point stretch
-                const influence = Math.exp(-(dist * dist) / (2 * 0.03 * 0.03))
-                scaleY = 1 + influence * 0.5
-              }
-
-              const delay = expanded
-                ? i * 0.004
-                : (BAR_COUNT - i) * 0.003
-
-              return (
-                <motion.div
-                  key={i}
-                  className="flex-1 origin-center rounded-full"
-                  initial={false}
-                  animate={{
-                    height: `${targetH}%`,
-                    backgroundColor: active ? '#1a1a1a' : 'rgba(26,26,26,0.12)',
-                    scaleY,
-                    scaleX: dragging && dragX >= 0
-                      ? 1 - Math.exp(-((pct - dragX) ** 2) / (2 * 0.03 * 0.03)) * 0.4
-                      : 1,
-                  }}
-                  transition={{
-                    height: {
-                      type: 'spring',
-                      stiffness: 400,
-                      damping: expanded ? 20 : 30,
-                      mass: 0.4,
-                      delay: dragging ? 0 : delay,
-                    },
-                    backgroundColor: { duration: 0.06 },
-                    scaleY: { type: 'spring', stiffness: 600, damping: 20, mass: 0.3 },
-                    scaleX: { type: 'spring', stiffness: 600, damping: 20, mass: 0.3 },
-                  }}
-                />
-              )
-            })}
-          </div>
+          {/* shared, rubber-band-overscroll waveform primitive */}
+          <Waveform
+            peaks={bars}
+            progress={progress}
+            duration={duration}
+            onSeek={onSeek}
+            onScrubStart={scrubStart}
+            onScrubEnd={scrubEnd}
+            height={32}
+            idleColor="rgba(26,26,26,0.12)"
+          />
         </div>
       </div>
 

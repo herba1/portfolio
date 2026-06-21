@@ -1,0 +1,65 @@
+/* ─────────────────────────────────────────────
+ * INTRO — real-gravity projectile sim
+ *
+ * Motion is computed in JS (see physics.js) and blitted into each object's
+ * `transform` once per frame. CSS here is purely the look. Colors come from the
+ * site design-system tokens (--color-light / --color-border / --color-dark).
+ * ───────────────────────────────────────────── */
+
+.intro-stage {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  /* slate-100 → slate-200, multi-stop (eased via color-mix), token-based —
+     matches the site body bg instead of an invented palette */
+  background:
+    radial-gradient(120% 95% at 50% 4%,
+      var(--color-light) 0%,
+      color-mix(in oklab, var(--color-light), var(--color-border) 45%) 52%,
+      var(--color-border) 100%);
+}
+
+/* faint vignette to seat the objects on a surface (derived from --color-dark) */
+.intro-stage::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(110% 80% at 50% 42%,
+    transparent 58%,
+    color-mix(in srgb, var(--color-dark) 8%, transparent) 100%);
+  z-index: 60;
+}
+
+/* The object: an emoji glyph. left/top are 0; JS sets translate + rotate +
+   scale every frame. transform-origin centre so scaling stays anchored. */
+.intro-obj {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: var(--z, 20);
+  line-height: 1;
+  user-select: none;
+  -webkit-user-select: none;
+  opacity: 0; /* hidden until its first launch */
+  will-change: transform;
+  transform-origin: center;
+  backface-visibility: hidden;
+  /* soft contact shadow so the emoji reads as a physical object on the surface */
+  filter: drop-shadow(0 calc(2px + var(--z, 20) * 0.12px)
+                      calc(4px + var(--z, 20) * 0.3px)
+                      color-mix(in srgb, var(--color-dark) 22%, transparent));
+}
+
+/* — Caption ——————————————————————————————————————————————————— */
+.intro-caption {
+  position: absolute;
+  left: 50%;
+  bottom: 6vh;
+  transform: translateX(-50%);
+  z-index: 70;
+  text-align: center;
+  color: var(--color-muted);
+  pointer-events: none;
+}

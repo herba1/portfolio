@@ -3,12 +3,15 @@
 import { useState, useCallback } from "react";
 import LinkMask from "../LinkMask";
 import MailIcon from "./MailIcon";
-import { LINKS } from "./LINKS";
+import { LINKS, DEV_LINKS } from "./LINKS";
+import { useIsDev } from "./useIsDev";
 
 export default function NavLinks({className=""}) {
 
-  const primaryLinks = LINKS.filter((l) => l.primary);
-  const secondaryLinks = LINKS.filter((l) => !l.primary);
+  const isDev = useIsDev();
+  const allLinks = isDev ? [...LINKS, ...DEV_LINKS] : LINKS;
+  const primaryLinks = allLinks.filter((l) => l.primary);
+  const secondaryLinks = allLinks.filter((l) => !l.primary);
   const [open, setOpen] = useState(false);
 
   const toggle = useCallback(() => setOpen((o) => !o), []);
@@ -20,7 +23,7 @@ export default function NavLinks({className=""}) {
         <div className="nav__contact-links">
           {secondaryLinks.map((link, i) => (
             <span key={link.name} className="nav__link--secondary" style={{ "--link-i": i }}>
-              <LinkMask text={link.name} href={link.link} />
+              <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-amber-600" : ""} />
             </span>
           ))}
         </div>
@@ -37,7 +40,7 @@ export default function NavLinks({className=""}) {
       <ul className="flex items-center">
         {primaryLinks.map((link) => (
           <li key={link.name} className="ml-4 md:ml-6">
-            <LinkMask text={link.name} href={link.link} />
+            <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-amber-600" : ""} />
           </li>
         ))}
       </ul>

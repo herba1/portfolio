@@ -1,0 +1,841 @@
+/* ===========================================================================
+   Covers — infinite grid experience
+   Light + airy on the homepage's slate-100 (#f1f5f9 / #1a1a1a). Cool, not warm.
+   =========================================================================== */
+
+.cv-root {
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  color: #1a1a1a;
+  touch-action: none;
+  overscroll-behavior: none;
+  user-select: none;
+  -webkit-user-select: none;
+  font-family: var(--font-geist), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  letter-spacing: -0.02em;
+  /* clean slate-100 wash (matches the homepage body); the focused cover hue is
+     layered on top via .cv-tint so it can never break this base. */
+  background:
+    radial-gradient(
+      125vmax 95vmax at 50% 4%,
+      #f8fafc 0%,
+      #f1f5f9 48%,
+      #e9edf3 100%
+    ),
+    #f1f5f9;
+}
+
+/* focus-hue glow — the hue comes from --cv-focus (set inline per focused cover
+   on .cv-root); registering it as an animatable <color> lets the glow ease
+   between covers instead of hard-cutting as the centered tile drifts. */
+@property --cv-focus {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #cbd5e1;
+}
+
+.cv-tint {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: radial-gradient(92vmax 72vmax at 50% 6%, var(--cv-focus) 0%, transparent 62%);
+  transition: opacity 0.9s ease, --cv-focus 0.8s ease;
+}
+
+.cv-canvas {
+  position: absolute !important;
+  inset: 0;
+  z-index: 1;
+  touch-action: none;
+  cursor: grab;
+}
+.cv-canvas:active {
+  cursor: grabbing;
+}
+
+/* Leva dev panel — lifted above the global navbar (portaled to <body>) */
+.cv-leva {
+  position: relative;
+  z-index: 9999;
+}
+
+/* blurred + white-fading screen edges (masked to the edges only) so the grid
+   melts into the warm page — the homepage's soft blur/white-fade language. */
+.cv-edge-fade {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  pointer-events: none;
+  /* gentle slate-fade vignette only — no blur */
+  background: radial-gradient(
+    132% 124% at 50% 46%,
+    transparent 0%,
+    transparent 66%,
+    rgba(241, 245, 249, 0.34) 81%,
+    rgba(237, 242, 247, 0.72) 92%,
+    #f1f5f9 100%
+  );
+}
+
+/* ── HUD ─────────────────────────────────────────────────────────────────── */
+.cv-hud {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  pointer-events: none;
+}
+
+.cv-focus {
+  position: absolute;
+  left: 50%;
+  bottom: 0;
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  /* held hidden until the grid's reveal arms, then rises in with a soft
+     overshoot — see .cv-hud.is-ready below. */
+  opacity: 0;
+  transform: translate(-50%, 18px);
+  transition:
+    opacity 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+/* iOS-notch backing: a faint plate that rises from the bottom edge, rounded on
+   top and flaring outward into the edge via two concave "ears" (the ::before/
+   ::after masks). Sized to the text, so it stays a notch at any title width. */
+.cv-focus-title {
+  --plate: #e2e8f0; /* slate-200 — a darker secondary surface, distinct from the slate-100 page */
+  --ear: 18px; /* concave flare radius */
+  position: relative;
+  box-sizing: border-box;
+  display: flex;
+  justify-content: center;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  font-weight: var(--font-weight-bold);
+  font-size: 30px;
+  line-height: 1;
+  letter-spacing: var(--tracking-tighter);
+  color: #1a1a1a;
+  padding: 16px 30px 18px;
+  background: var(--plate);
+  border-radius: 22px 22px 0 0;
+  /* recessed, tactile depth: soft inner shade up top + a crisp 1px highlight
+     along the rounded edge so the notch reads as a carved surface. */
+  box-shadow:
+    inset 0 2px 6px rgba(15, 23, 42, 0.13),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  /* width is measured + set in JS so the notch morphs to the new title;
+     contain: layout keeps the reflow cheap (no clipping — the ears live
+     outside the box). */
+  will-change: width;
+  contain: layout;
+  transition: width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+}
+/* squish layer: holds the horizontal scale that condenses an over-wide title to
+   fit the screen (set in JS) — kept separate from the text so the scaleX never
+   collides with the swap animation's transform. */
+.cv-focus-squish {
+  display: inline-block;
+  transform-origin: center center;
+  will-change: transform;
+}
+/* the text lives on its own layer so it can fade/swap without the plate — the
+   notch reshapes; the words crossfade, disconnected. */
+.cv-focus-text {
+  display: inline-block;
+  white-space: nowrap;
+  animation: cv-text-swap 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes cv-text-swap {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: translateY(0);
+  }
+}
+.cv-focus-title::before,
+.cv-focus-title::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  width: var(--ear);
+  height: var(--ear);
+  background: var(--plate);
+}
+.cv-focus-title::before {
+  right: 100%;
+  -webkit-mask: radial-gradient(circle var(--ear) at top left, #0000 98%, #000 100%);
+  mask: radial-gradient(circle var(--ear) at top left, #0000 98%, #000 100%);
+}
+.cv-focus-title::after {
+  left: 100%;
+  -webkit-mask: radial-gradient(circle var(--ear) at top right, #0000 98%, #000 100%);
+  mask: radial-gradient(circle var(--ear) at top right, #0000 98%, #000 100%);
+}
+/* mobile: scale the notch with the viewport and never let it exceed the screen.
+   The JS squish (scaleX on .cv-focus-squish) condenses any title still too wide
+   to fit, so it stays one line with no ellipsis. */
+@media (max-width: 640px) {
+  .cv-focus-title {
+    font-size: clamp(16px, 6.4vw, 30px);
+    max-width: calc(100svw - 24px);
+  }
+}
+/* ── HUD staggered reveal ──────────────────────────────────────────────────
+   Everything in the HUD stays hidden until <div class="cv-hud is-ready"> — the
+   grid sets that once its album art is loaded and the tile sweep arms. Then the
+   name rises first, the minimap follows. transition-delay does the stagger. */
+.cv-hud.is-ready .cv-focus {
+  opacity: 1;
+  transform: translateX(-50%);
+  transition-delay: 0.1s;
+}
+.cv-hud.is-ready .cv-minimap-wrap {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
+  transition-delay: 0.24s;
+}
+
+/* ── type chips ──────────────────────────────────────────────────────────── */
+.cv-type {
+  font-size: 10px;
+  font-weight: var(--font-weight-normal);
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid rgba(26, 26, 26, 0.14);
+  background: rgba(255, 255, 255, 0.5);
+  backdrop-filter: blur(8px);
+  color: #475569;
+}
+.cv-type--video {
+  color: #2563a8;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: rgba(59, 130, 246, 0.08);
+}
+.cv-type--audio {
+  color: #8a4caa;
+  border-color: rgba(160, 90, 200, 0.35);
+  background: rgba(160, 90, 200, 0.08);
+}
+.cv-type--silent {
+  color: #64748b;
+}
+
+/* ── player (large centered media card + floating overlay controls) ─────── */
+.cv-player {
+  position: fixed;
+  inset: 0;
+  z-index: 10000; /* above the navbar + Leva */
+  display: grid;
+  place-items: center;
+  padding: 2.5vmin;
+}
+.cv-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background: rgba(15, 18, 24, 0.5);
+  backdrop-filter: blur(8px) saturate(1.05);
+  -webkit-backdrop-filter: blur(8px) saturate(1.05);
+}
+.cv-stage {
+  position: fixed; /* box + radius + shadow all animated by motion */
+  z-index: 2;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  will-change: width, height, left, top;
+}
+/* hi-res layer (or, later, the <video>) that crossfades over the thumbnail */
+.cv-stage-hi {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.cv-controls {
+  grid-area: 1 / 1;
+  position: relative;
+  z-index: 3;
+  width: min(95vw, calc(95vh * 16 / 9));
+  aspect-ratio: 16 / 9;
+  max-width: 95vw;
+  max-height: 95vh;
+}
+/* soft legibility scrims, top + bottom */
+.cv-stage::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 34%;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(18, 16, 14, 0.3) 0%, rgba(18, 16, 14, 0) 100%);
+}
+.cv-stage::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 44%;
+  pointer-events: none;
+  background: linear-gradient(0deg, rgba(18, 16, 14, 0.44) 0%, rgba(18, 16, 14, 0) 100%);
+}
+
+.cv-top {
+  position: absolute;
+  inset: 0 0 auto 0;
+  z-index: 3;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 26px 28px;
+  pointer-events: none; /* clicks fall through to the media (play toggle) */
+}
+.cv-top-titles {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cv-title {
+  margin: 0;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  font-weight: var(--font-weight-bold);
+  font-size: 34px;
+  line-height: 1;
+  letter-spacing: var(--tracking-tighter);
+  color: #fff;
+  text-shadow: 0 1px 26px rgba(0, 0, 0, 0.4);
+}
+.cv-sub {
+  margin: 0;
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.cv-close {
+  pointer-events: auto;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cv-close:hover {
+  background: rgba(255, 255, 255, 0.3);
+  transform: scale(1.08);
+}
+
+/* center play — covers the media (click toggles), fades out while playing */
+.cv-center-play {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+}
+.cv-center-play span {
+  display: grid;
+  place-items: center;
+  width: 86px;
+  height: 86px;
+  border-radius: 999px;
+  color: #1a1a1a;
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.5);
+  transition: transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+}
+.cv-center-play:hover span {
+  transform: scale(1.07) !important;
+}
+
+/* floating glass control bar */
+.cv-bar {
+  position: absolute;
+  left: 50%;
+  bottom: 26px;
+  transform: translateX(-50%);
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: min(680px, calc(100% - 36px));
+  padding: 11px 16px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  backdrop-filter: blur(18px) saturate(1.3);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.5);
+}
+.cv-icon {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  cursor: pointer;
+  transition: background 0.2s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cv-icon:hover {
+  background: rgba(255, 255, 255, 0.26);
+}
+.cv-icon:active {
+  transform: scale(0.92);
+}
+.cv-icon:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cv-time {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: rgba(255, 255, 255, 0.85);
+  min-width: 34px;
+  text-align: center;
+}
+.cv-scrub {
+  position: relative;
+  flex: 1;
+  height: 5px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.26);
+  cursor: pointer;
+}
+.cv-scrub-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 999px;
+  background: #fff;
+}
+.cv-scrub-thumb {
+  position: absolute;
+  top: 50%;
+  width: 13px;
+  height: 13px;
+  border-radius: 999px;
+  background: #fff;
+  transform: translate(-50%, -50%);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+}
+.cv-bar .cv-type {
+  flex: none;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.16);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+/* ── toast ───────────────────────────────────────────────────────────────── */
+.cv-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 88px;
+  transform: translateX(-50%);
+  z-index: 10001;
+  padding: 10px 18px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: var(--font-weight-normal);
+  color: #1a1a1a;
+  background: rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(26, 26, 26, 0.1);
+  backdrop-filter: blur(12px);
+  box-shadow: 0 16px 44px -18px rgba(26, 26, 26, 0.4);
+  animation: cv-toast-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes cv-toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 10px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-toast {
+    animation-duration: 0.001s;
+  }
+  .cv-focus,
+  .cv-minimap-wrap {
+    transition-duration: 0.001s;
+  }
+}
+
+/* ── music active-state (art left + waveform/lyrics panel) ──────────────── */
+.cv-music-art {
+  position: fixed;
+  z-index: 2;
+  overflow: hidden;
+  background-size: cover;
+  background-position: center;
+  will-change: width, height, left, top;
+}
+.cv-music-art-hi {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+.cv-music-panel {
+  position: fixed;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  color: #1a1a1a;
+  overflow: hidden; /* so content clips (not reflows) as the panel collapses into its tile on close */
+}
+.cv-music-card {
+  position: fixed;
+  z-index: 1;
+  overflow: hidden;
+  background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
+  border: 1px solid rgba(26, 26, 26, 0.06);
+  /* shadow is animated by motion so it fades out on close */
+}
+.cv-music-close {
+  position: fixed;
+  z-index: 4;
+  color: #1a1a1a;
+  /* bare X — no disc, no border, no fill. Just the glyph (the 38px box stays for
+     a comfortable tap target). */
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+.cv-music-close:hover {
+  background: none;
+  color: #000;
+}
+.cv-music-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 48px;
+}
+.cv-music-title {
+  margin: 0;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  font-weight: var(--font-weight-bold);
+  font-size: clamp(26px, 3.4vw, 40px);
+  line-height: 1.05;
+  letter-spacing: var(--tracking-tighter);
+  color: #1a1a1a;
+}
+.cv-music-artist {
+  margin: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  color: #64748b;
+}
+.cv-music-avatar {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  object-fit: cover;
+  background: rgba(26, 26, 26, 0.06);
+}
+.cv-music-rank {
+  margin: 5px 0 0;
+  font-size: 11px;
+  font-weight: var(--font-weight-normal);
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #64748b;
+}
+.cv-music-controls {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.cv-play-btn {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  color: #fff;
+  background: #1a1a1a;
+  border: none;
+  cursor: pointer;
+  /* Sits flush against the panel's clipped left edge — scale from the left so
+     the hover/press grows into the gap instead of getting sliced off. */
+  transform-origin: left center;
+  transition:
+    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
+    opacity 0.2s ease;
+}
+.cv-play-btn:hover {
+  transform: scale(1.06);
+}
+.cv-play-btn:active {
+  transform: scale(0.94);
+}
+.cv-play-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.cv-wave {
+  flex: 1;
+  min-width: 0;
+  height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  cursor: pointer;
+  touch-action: none;
+}
+.cv-wave-bar {
+  flex: 1;
+  min-width: 0;
+  border-radius: 999px;
+  transform-origin: center;
+  background: rgba(26, 26, 26, 0.14);
+}
+.cv-music-time {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: #64748b;
+  min-width: 78px;
+  text-align: right;
+}
+.cv-music-lyricwrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* loading ⇄ loaded crossfade stage. Both layers are absolutely pinned to the
+   stage so the scroller gets a DEFINITE height (inset:0) — the only reliable way
+   to make an overflow container actually scroll, independent of the flex chain
+   above it. */
+.cv-lyrics-stage {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+}
+.cv-lyrics-content {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  transition: opacity 0.45s ease;
+}
+.cv-lyrics-loader {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition: opacity 0.45s ease;
+}
+.cv-lyrics-content.is-off,
+.cv-lyrics-loader.is-off {
+  opacity: 0;
+  pointer-events: none;
+}
+.cv-lyrics-content.is-on,
+.cv-lyrics-loader.is-on {
+  opacity: 1;
+}
+
+@keyframes cv-lyric-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+.cv-lyrics {
+  position: absolute; /* definite height (inset) → guaranteed scroll; also the offsetParent for proximity math */
+  inset: 0;
+  overflow-y: auto;
+  overflow-x: hidden; /* the enlarged centre line scales rightward — don't spawn a scrollbar */
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y; /* allow vertical touch scroll inside the modal */
+  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
+  scrollbar-width: none;
+  overscroll-behavior: contain;
+}
+.cv-lyrics::-webkit-scrollbar {
+  display: none;
+}
+.cv-lyrics-pad {
+  flex: none;
+}
+.cv-lyrics--note {
+  display: flex;
+  align-items: center;
+  color: #1a1a1a;
+  font-size: 14px;
+}
+.cv-lyric {
+  margin: 0;
+  padding: 5px 0;
+  font-size: 16px;
+  font-weight: var(--font-weight-normal);
+  line-height: 1.3;
+  color: #1a1a1a;
+  transform-origin: left center;
+  transform: scale(var(--ls, 1));
+  opacity: var(--lo, 1);
+  transition:
+    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.22s ease;
+  will-change: transform, opacity;
+}
+.cv-lyric-in {
+  display: inline-block;
+  animation: cv-lyric-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation-delay: calc(var(--i, 0) * 0.04s);
+}
+.cv-spotify-link {
+  flex: none;
+  align-self: flex-start;
+  font-size: 13px;
+  font-weight: var(--font-weight-normal);
+  color: #fff;
+  text-decoration: none;
+  padding: 9px 18px;
+  background: #1a1a1a;
+  border: none;
+  transition:
+    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
+    background 0.2s ease;
+}
+.cv-spotify-link:hover {
+  background: #282828;
+}
+.cv-spotify-link:active {
+  transform: scale(0.96);
+}
+
+/* mobile (stacked) — lighter player, tidier panel. No lyrics here, so the panel
+   is just title / artist / player / Spotify; the link drops to the bottom and
+   the controls breathe with a shorter waveform + smaller time. */
+@media (max-width: 819px) {
+  .cv-music-panel {
+    gap: 14px;
+    /* a long (two- or three-line) title can outgrow the fixed panel band — let
+       it scroll inside the panel rather than clip at the card's bottom edge.
+       overscroll-behavior keeps the scroll from leaking to the grid behind. */
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-y;
+    overscroll-behavior: contain;
+    scrollbar-width: none;
+  }
+  .cv-music-panel::-webkit-scrollbar {
+    display: none;
+  }
+  .cv-music-controls.is-stacked {
+    gap: 12px;
+  }
+  .cv-music-controls.is-stacked .cv-wave {
+    height: 40px;
+  }
+  .cv-music-controls.is-stacked .cv-music-time {
+    min-width: 58px;
+    font-size: 11px;
+  }
+  .cv-music-controls.is-stacked .cv-play-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .cv-spotify-link {
+    margin-top: auto;
+  }
+}
+
+/* ── minimap ────────────────────────────────────────────────────────────── */
+/* Wrapper owns positioning + the staggered entrance, so the entrance opacity
+   never collides with the minimap's own hover-opacity transition (nested
+   opacity just multiplies). Hidden until .cv-hud.is-ready (above). */
+.cv-minimap-wrap {
+  position: absolute;
+  right: 22px;
+  bottom: 22px;
+  z-index: 11;
+  pointer-events: none;
+  opacity: 0;
+  transform: translateY(20px);
+  transition:
+    opacity 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+.cv-minimap {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  grid-auto-rows: 1fr;
+  gap: 3px;
+  width: 134px;
+  aspect-ratio: 6 / 5;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.5);
+  border: 1px solid rgba(26, 26, 26, 0.1);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  box-shadow: 0 10px 30px -14px rgba(26, 26, 26, 0.35);
+  opacity: 0.5;
+  transition: opacity 0.25s ease;
+}
+.cv-minimap:hover {
+  opacity: 1;
+}
+.cv-mm-cell {
+  border: none;
+  padding: 0;
+  border-radius: 3px;
+  background-color: rgba(26, 26, 26, 0.12);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  outline: 0 solid transparent;
+  transition:
+    outline-width 0.16s ease,
+    transform 0.16s ease;
+}
+.cv-mm-cell:hover {
+  transform: scale(1.14);
+}
+.cv-mm-cell.is-here {
+  outline: 2px solid #1a1a1a;
+  outline-offset: 1px;
+}

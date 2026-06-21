@@ -66,6 +66,15 @@
   animation: none;
 }
 
+/* While a view transition runs, the navbar is replaced by a static snapshot.
+   Freeze the live logo letters for that window so their animation phase still
+   matches the snapshot when it lifts — otherwise the letters visibly "jump" as
+   the live element resumes mid-fidget. The snapshot is captured at click time,
+   exactly when .navigating is added, so the pause lines up with the frozen frame. */
+:root.navigating .nl {
+  animation-play-state: paused;
+}
+
 ::view-transition-group(footer-clock) {
   animation: none;
 }
@@ -215,6 +224,26 @@
   transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
+/* Mobile Menu/Close toggle — strip default button chrome so it reads as
+   plain nav text (no border, no background, no focus box). */
+.nav__button--open {
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  border: none;
+  margin: 0;
+  padding: 0;
+  font: inherit;
+  letter-spacing: inherit;
+  color: inherit;
+  line-height: 1;
+}
+.nav__button--open:focus-visible {
+  outline: 2px solid rgba(15, 23, 42, 0.4);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
 /* Immersive mode — nav/footer/message fade out */
 .splat-immersive .nav__container,
 .splat-immersive .footer-clock,
@@ -338,11 +367,55 @@
   --color-border: #e2e8f0;      /* slate-200, borders/dividers */
   --color-accent: #3b82f6;      /* blue-500, interactive accent */
 
+  /* — Typeface ——————————————————————————————————
+   * Site font: Adobe Fonts "Helvetica Neue LT Pro" (Typekit kit
+   * psc2klr, loaded via <link> in layout.js). This token is the single
+   * source of truth — it drives the `font-sans` utility, Tailwind's
+   * base font, and the `.font-sans-base` helper used by components. */
+  --font-sans: "helvetica-neue-lt-pro", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+
+  /* Two-weight system — Helvetica Neue carries the whole site on just
+   * Regular (400) + Bold (700); the in-between weights read muddy. These
+   * overrides collapse the Tailwind weight utilities onto the two we keep,
+   * so every `font-medium`/`font-light` renders regular and `font-semibold`
+   * renders bold, with no per-component className changes. */
+  --font-weight-light: 400;
+  --font-weight-medium: 400;
+  --font-weight-semibold: 700;
+
+  /* Display tracking for large bold headings (hero / marquee / page titles).
+   * Tightened per Herb's call — sits just shy of Tailwind's -0.05em default. */
+  --tracking-tighter: -0.04em;
+
   --text-6xl: 64px;
 
   --tracking-body-base: -0.04em;
   --tracking-heading: -0.01em;
-  --tracking-heading-mobile: -0.03em;
+  --tracking-heading-mobile: -0.015em;
+}
+
+/* Helvetica Neue LT Pro is the site-wide default. Apply at the root so
+   every element inherits it unless explicitly overridden.
+   `font-synthesis: none` forbids the browser from faking weights/italics —
+   we only ever render the real Typekit masters (Regular 400 + Bold 700),
+   never a synthesized faux-bold. */
+html {
+  font-family: var(--font-sans);
+  font-synthesis: none;
+}
+
+/* Back-compat alias: existing CSS still references var(--font-geist)
+   (prose headings, tuner.css, covers.css). Point it at the sans token
+   so those resolve to Helvetica with no per-file edits. */
+:root {
+  --font-geist: var(--font-sans);
+}
+
+/* Helper class consumed by components via the `sans` font helper
+   (see fonts.js). Keeps the next/font-style `.className` call sites
+   working while routing them to the token. */
+.font-sans-base {
+  font-family: var(--font-sans);
 }
 
 /* Webkit browsers (Chrome, Safari, Edge) */
@@ -351,7 +424,7 @@
 }
 
 ::-webkit-scrollbar-track {
-  background: #fcecdd;
+  background: #f1f5f9; /* slate-100, matches homepage bg */
 }
 
 ::-webkit-scrollbar-thumb {
@@ -366,7 +439,7 @@
 /* Firefox */
 * {
   scrollbar-width: thin; /* or 'auto' or 'none' */
-  scrollbar-color: #1a1a1a #fcecdd; /* thumb track */
+  scrollbar-color: #1a1a1a #f1f5f9; /* thumb track */
 }
 
 @supports (scrollbar-width: none) {
@@ -433,7 +506,7 @@ html.navigating .LinkMask::after {
 
 /* ─────────────────────────────────────────────
  * BLOG PROSE OVERRIDES
- * h2/h3/h4 in prose use Instrument Serif italic
+ * h2/h3/h4 in prose use Geist sans, bold, tight
  * ───────────────────────────────────────────── */
 
 /* readable body text: 18px, 1.7 line-height, relaxed tracking */
@@ -451,9 +524,9 @@ html.navigating .LinkMask::after {
 .prose h2,
 .prose h3,
 .prose h4 {
-  font-family: "Instrument Serif", serif;
-  font-style: italic;
-  letter-spacing: -0.01em;
+  font-family: var(--font-geist), system-ui, sans-serif;
+  font-weight: 700;
+  letter-spacing: -0.015em;
 }
 
 .prose pre {
@@ -757,4 +830,281 @@ html.navigating .LinkMask::after {
   --studio-border:    rgba(0,0,0,0.10);
   --studio-hover:     rgba(0,0,0,0.04);
   --studio-active:    rgba(0,0,0,0.06);
+}
+
+/* ─────────────────────────────────────────────
+ * TIER LIST
+ * ───────────────────────────────────────────── */
+
+/* Soft staggered fade-up for rows + header on first paint */
+@keyframes tl-fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.tl-fade {
+  animation: tl-fade-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+/* gentle cascade down the rows */
+.tl-fade:nth-child(2) { animation-delay: 0.04s; }
+.tl-fade:nth-child(3) { animation-delay: 0.08s; }
+.tl-fade:nth-child(4) { animation-delay: 0.12s; }
+.tl-fade:nth-child(5) { animation-delay: 0.16s; }
+.tl-fade:nth-child(6) { animation-delay: 0.20s; }
+
+/* Tactile item — lifts slightly on hover */
+.tl-item {
+  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.tl-item:hover {
+  transform: translateY(-2px) scale(1.03);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+}
+
+/* Editor: draggable item being picked up */
+.tl-edit-item {
+  cursor: grab;
+  touch-action: none;
+  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
+              opacity 0.18s ease;
+}
+.tl-edit-item:active { cursor: grabbing; }
+.tl-edit-item.is-dragging {
+  opacity: 0.4;
+  transform: scale(0.92);
+}
+
+/* Editor: a row/zone being hovered during a drag */
+.tl-dropzone {
+  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+}
+.tl-dropzone.is-over {
+  background-color: rgba(59, 130, 246, 0.08);
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+/* Full-screen drop veil when files are dragged over the editor */
+.tl-file-veil {
+  animation: tl-fade-up 0.2s ease both;
+}
+
+/* Index hover preview — a small stack of item thumbs that fan out like
+ * polaroids when you hover the list row. Transforms set inline per index
+ * (--rest stacked, --hov fanned). */
+.tl-pol-stack {
+  position: relative;
+  width: 3.25rem;
+  height: 3.25rem;
+}
+.tl-pol {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  transform: var(--rest);
+  transform-origin: bottom center;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.42s ease;
+  transition-delay: var(--d, 0ms);
+}
+.tl-pol img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.tl-row:hover .tl-pol {
+  transform: var(--hov);
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-fade,
+  .tl-file-veil { animation: none !important; }
+  .tl-item,
+  .tl-edit-item { transition: none !important; }
+  .tl-pol { transition: none !important; }
+  .tl-row:hover .tl-pol { transform: var(--rest); }
+}
+
+/* Blog index hover preview — a post's images fan out like polaroids when its
+ * row is hovered. Same mechanic as .tl-pol, but the hover state is driven by
+ * the surrounding post link (.group). Transforms set inline per index. */
+.blog-pol-stack {
+  position: relative;
+  width: 3.25rem;
+  height: 3.25rem;
+}
+.blog-pol {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  transform: var(--rest);
+  transform-origin: bottom center;
+  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.42s ease;
+  transition-delay: var(--d, 0ms);
+}
+.blog-pol img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.group:hover .blog-pol {
+  transform: var(--hov);
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blog-pol { transition: none !important; }
+  .group:hover .blog-pol { transform: var(--rest); }
+}
+
+/* ─────────────────────────────────────────────
+ * MOBILE NAV — push-down sheet
+ *
+ * Tapping Menu pushes the page straight down, revealing the
+ * full-width link rows behind it. The menu is transparent when
+ * closed (so it never covers the page); the card only gets its
+ * lifted stacking + transform while open. Mobile only.
+ * ───────────────────────────────────────────── */
+
+.mobile-menu {
+  display: none;
+}
+
+@media (max-width: 639px) {
+  .page-card {
+    background: #f1f5f9; /* slate-100 — matches body so the card reads solid */
+    min-height: 100vh;
+    will-change: transform;
+    transition:
+      transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+      border-radius 0.5s cubic-bezier(0.16, 1, 0.3, 1),
+      box-shadow 0.5s ease;
+  }
+  .page-card.is-open {
+    position: relative;
+    z-index: 40; /* above the menu (30), below the navbar (50) */
+    transform-origin: center top;
+    transform: translateY(52vh) scale(0.97);
+    border-top-left-radius: 22px;
+    border-top-right-radius: 22px;
+    overflow: hidden;
+    cursor: pointer;
+    box-shadow: 0 -2px 14px -6px rgba(0, 0, 0, 0.12);
+  }
+  .page-card.is-open * {
+    pointer-events: none !important;
+  }
+
+  .mobile-menu {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    padding-top: 84px;
+    /* Keep all content inside the visible band — the page card slides down
+       to ~52vh, so anything below that is hidden behind it. */
+    padding-bottom: 50vh;
+    background: #e6e9ef;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.35s ease;
+  }
+  .mobile-menu.is-open {
+    opacity: 1;
+    pointer-events: auto;
+  }
+
+  .mobile-menu__list {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+  }
+
+  .mobile-menu__link {
+    display: block;
+    width: 100%;
+    padding: 8px 28px;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    line-height: 1.18;
+    color: #0f172a;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: color 0.15s ease, background-color 0.15s ease;
+  }
+  .mobile-menu__link:active {
+    background: rgba(15, 23, 42, 0.06);
+  }
+  .mobile-menu__link.is-dev {
+    font-size: 17px;
+    font-weight: 700;
+    color: #d97706;
+  }
+
+  /* Social icons — right-aligned row pinned to the bottom of the visible
+     band (margin-top:auto pushes it down; padding-bottom on .mobile-menu
+     keeps it clear of the page card). */
+  .mobile-menu__social {
+    margin-top: auto;
+    display: flex;
+    justify-content: flex-end;
+    align-items: center;
+    gap: 22px;
+    padding: 0 28px;
+  }
+  .mobile-menu__social-link {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #0f172a;
+    opacity: 0;
+    transform: translateY(-10px);
+    transition: opacity 0.15s ease, transform 0.15s ease;
+    /* 44px touch target without bloating the visual gap */
+    padding: 11px;
+    margin: -11px;
+  }
+  .mobile-menu__social-link:active {
+    transform: scale(0.9);
+  }
+
+  .mobile-menu.is-open .mobile-menu__link,
+  .mobile-menu.is-open .mobile-menu__social-link {
+    animation: mm-link-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+    animation-delay: calc(0.1s + var(--i) * 0.04s);
+  }
+
+  @keyframes mm-link-in {
+    from { opacity: 0; transform: translateY(-10px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+}
+
+@media (max-width: 639px) and (prefers-reduced-motion: reduce) {
+  .mobile-menu__link,
+  .mobile-menu.is-open .mobile-menu__link {
+    animation: none;
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Leva dev panel — sits top-right by default and gets in the way. Drop every
+   Leva panel to the bottom-left, out of the way. Two selectors because the
+   intro/tuner pages use the auto-mounted singleton (portaled to #leva__root)
+   while the covers page renders a standalone <Leva> inline inside .cv-leva. */
+#leva__root > div,
+.cv-leva > div {
+  top: auto !important;
+  right: auto !important;
+  bottom: 12px !important;
+  left: 12px !important;
 }

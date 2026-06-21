@@ -1,0 +1,62 @@
+{
+  "title": "NYC FOOD",
+  "subtitle": "",
+  "description": "",
+  "tiers": [
+    {
+      "id": "s",
+      "label": "S",
+      "color": "#e26d6d"
+    },
+    {
+      "id": "a",
+      "label": "A",
+      "color": "#e2966d"
+    },
+    {
+      "id": "b",
+      "label": "B",
+      "color": "#e2c46d"
+    },
+    {
+      "id": "c",
+      "label": "C",
+      "color": "#a8c47e"
+    },
+    {
+      "id": "d",
+      "label": "OVERRATED",
+      "color": "#7ea8c4"
+    }
+  ],
+  "items": [
+    {
+      "id": "83de5df1-58a9-4dfc-812f-2930fda3347e",
+      "src": "/tierlist/images/image-mqobkh80.webp",
+      "label": "PANDA",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "b944fa69-47ee-4fcb-8641-c25931539a5a",
+      "src": "/tierlist/images/screenshot-2026-06-21-at-5-48-10-pm-mqobivns.webp",
+      "label": "HAZELNUT GELATO (S TIER)",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "f6840662-1085-4230-8de3-d6a3c491fd66",
+      "src": "/tierlist/images/screenshot-2026-06-21-at-5-48-59-pm-mqobjwug.webp",
+      "label": "FIG JAM BACON GOATED",
+      "note": "",
+      "tier": "s"
+    },
+    {
+      "id": "21cb8e11-9684-4be5-ad89-da071ceb2d68",
+      "src": "/tierlist/images/image-mqobli25.webp",
+      "label": "SUSHI (OVERRATED)",
+      "note": "",
+      "tier": "d"
+    }
+  ]
+}

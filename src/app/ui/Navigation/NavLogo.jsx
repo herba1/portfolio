@@ -5,22 +5,41 @@ import Link from 'next/link'
 /* ─────────────────────────────────────────────
  * "herbart" nav logo
  *
- * Each letter has ONE combined idle keyframe
- * (not 3 separate ones) for smooth compositing.
- * Multiple waypoints per cycle create organic,
- * loopy motion — drift, tilt, scale, all in
- * a single transform per frame.
+ * Each letter is its own little creature with a
+ * distinct motion signature — not 7 variations of
+ * the same drift. Personality comes from THREE
+ * things working together:
  *
- * Middle letters (b, a) get a slow 3D rotateY
- * spin via a separate keyframe (no conflict
- * since it uses a wrapper <g>).
+ *   1. the keyframe shape   (what it does)
+ *   2. transform-origin     (where it pivots from)
+ *   3. rest rhythm + speed  (when / how often)
+ *
+ *   h  jumper   — anticipate, leap, land-squash   (origin: bottom)
+ *   e  wiggler  — side-to-side shimmy + roll
+ *   r  twitcher — nervous bursts, long calm
+ *   b  spinner  — occasional 3D barrel-roll
+ *   a  breather — continuous squash & stretch     (origin: bottom)
+ *   r  swinger  — damped pendulum                 (origin: top)
+ *   t  wobbler  — teeters left/right, nearly tips  (origin: bottom)
+ *
+ * Different cycle lengths keep them out of sync, so
+ * the word never "pulses" as one block — letters act
+ * up independently, the way a crowd fidgets.
  *
  * Agentation curves:
- *   Snap:   cubic-bezier(0.22, 1, 0.36, 1)
- *   Bounce: cubic-bezier(0.34, 1.56, 0.64, 1)
+ *   Bounce:  cubic-bezier(0.34, 1.56, 0.64, 1)  (entry + hover)
+ *   In-out:  cubic-bezier(0.7, 0, 0.3, 1)       (all idle loops, --ease)
  * ───────────────────────────────────────────── */
 
-const LETTERS = [...'herbart']
+const LETTERS = [
+  { ch: 'h', idle: 'nl-jump',   dur: 2.4, origin: 'bottom center' },
+  { ch: 'e', idle: 'nl-wiggle', dur: 1.8, origin: 'center center' },
+  { ch: 'r', idle: 'nl-twitch', dur: 3.0, origin: 'center center' },
+  { ch: 'b', idle: 'nl-spin',   dur: 3.2, origin: 'center center' },
+  { ch: 'a', idle: 'nl-squash', dur: 2.0, origin: 'bottom center' },
+  { ch: 'r', idle: 'nl-sway',   dur: 2.4, origin: 'top center'    },
+  { ch: 't', idle: 'nl-wobble', dur: 2.6, origin: 'bottom center' },
+]
 
 export default function NavLogo({ className = '' }) {
   return (
@@ -33,20 +52,25 @@ export default function NavLogo({ className = '' }) {
         width={68}
         height={22}
         fill="currentColor"
-        className="overflow-visible"
+        className="overflow-visible nl-svg"
         aria-label="herbart"
       >
         <style>{`
           .nl {
             font-size: 14px;
-            font-weight: 500;
+            font-weight: 400;
             opacity: 0;
             transform-box: fill-box;
-            transform-origin: center center;
+            transform-origin: var(--origin, center center);
+            /* custom symmetric in-out — slow at the extremes, quick
+               through the middle, so every move darts then settles
+               instead of mushily floating. tune this one value to
+               re-feel every letter at once. */
+            --ease: cubic-bezier(0.7, 0, 0.3, 1);
             will-change: transform, opacity;
             animation:
               nl-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) var(--d) forwards,
-              var(--idle) var(--dur) ease-in-out var(--id) infinite;
+              var(--idle) var(--dur) var(--ease) var(--id) infinite;
           }
 
           @keyframes nl-in {
@@ -54,87 +78,110 @@ export default function NavLogo({ className = '' }) {
             to   { opacity: 1; transform: none; }
           }
 
-          /* 7 unique idle loops — one per letter */
-
-          @keyframes nl-0 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1); }
-            15%  { transform: translateY(-1.2px) rotate(-2deg) scale(1.02); }
-            35%  { transform: translateY(0.5px) rotate(1.5deg) scale(0.98); }
-            55%  { transform: translateY(-0.8px) rotate(-1deg) scale(1.01); }
-            75%  { transform: translateY(0.3px) rotate(2deg) scale(0.99); }
-            100% { transform: translateY(0) rotate(0deg) scale(1); }
+          /* ── h · the jumper ──────────────────────────
+             squash to anticipate, stretch into the leap,
+             flatten hard on landing, settle. origin sits
+             on the baseline so it never floats. */
+          @keyframes nl-jump {
+            0%   { transform: translateY(0)     scaleX(1)    scaleY(1);    }
+            8%   { transform: translateY(0.5px) scaleX(1.12) scaleY(0.84); }
+            24%  { transform: translateY(-3.2px) scaleX(0.92) scaleY(1.14); }
+            36%  { transform: translateY(-3.4px) scaleX(0.96) scaleY(1.06); }
+            50%  { transform: translateY(0)     scaleX(1.16) scaleY(0.8);  }
+            60%  { transform: translateY(0)     scaleX(0.97) scaleY(1.05); }
+            70%  { transform: translateY(0)     scaleX(1)    scaleY(1);    }
+            100% { transform: translateY(0)     scaleX(1)    scaleY(1);    }
           }
 
-          @keyframes nl-1 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1); }
-            20%  { transform: translateY(1px) rotate(2.5deg) scale(1.03); }
-            40%  { transform: translateY(-1.5px) rotate(-1deg) scale(0.97); }
-            60%  { transform: translateY(0.6px) rotate(1.8deg) scale(1.01); }
-            80%  { transform: translateY(-0.4px) rotate(-2deg) scale(1); }
-            100% { transform: translateY(0) rotate(0deg) scale(1); }
+          /* ── e · the wiggler ─────────────────────────
+             can't sit still — shimmies horizontally with
+             a little roll, amplitude decaying out. */
+          @keyframes nl-wiggle {
+            0%   { transform: translateX(0)      rotate(0deg);    }
+            15%  { transform: translateX(-1.6px) rotate(-4deg);   }
+            30%  { transform: translateX(1.6px)  rotate(4deg);    }
+            45%  { transform: translateX(-1.2px) rotate(-3deg);   }
+            60%  { transform: translateX(0.9px)  rotate(2deg);    }
+            74%  { transform: translateX(-0.4px) rotate(-1deg);   }
+            85%  { transform: translateX(0)      rotate(0deg);    }
+            100% { transform: translateX(0)      rotate(0deg);    }
           }
 
-          @keyframes nl-2 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1); }
-            18%  { transform: translateY(-1.6px) rotate(3deg) scale(0.96); }
-            42%  { transform: translateY(0.8px) rotate(-2deg) scale(1.04); }
-            65%  { transform: translateY(-0.5px) rotate(1deg) scale(0.99); }
-            85%  { transform: translateY(1.1px) rotate(-1.5deg) scale(1.02); }
-            100% { transform: translateY(0) rotate(0deg) scale(1); }
+          /* ── r · the twitcher ────────────────────────
+             nervous energy: two quick stutter-bursts with
+             a long dead-still stretch between them. */
+          @keyframes nl-twitch {
+            0%   { transform: translate(0,0)            rotate(0deg);    }
+            4%   { transform: translate(0.4px,-0.5px)   rotate(3deg);    }
+            8%   { transform: translate(-0.4px,0.2px)   rotate(-2.5deg); }
+            12%  { transform: translate(0.3px,-0.2px)   rotate(1.5deg);  }
+            16%  { transform: translate(0,0)            rotate(0deg);    }
+            58%  { transform: translate(0,0)            rotate(0deg);    }
+            62%  { transform: translate(-0.5px,-0.4px)  rotate(-3deg);   }
+            66%  { transform: translate(0.5px,0.2px)    rotate(2.5deg);  }
+            70%  { transform: translate(-0.2px,0)       rotate(-1deg);   }
+            74%  { transform: translate(0,0)            rotate(0deg);    }
+            100% { transform: translate(0,0)            rotate(0deg);    }
           }
 
-          @keyframes nl-3 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1) rotateY(0deg); }
-            25%  { transform: translateY(0.7px) rotate(-1.5deg) scale(1.02) rotateY(12deg); }
-            50%  { transform: translateY(-1px) rotate(2deg) scale(0.98) rotateY(0deg); }
-            75%  { transform: translateY(0.4px) rotate(-0.8deg) scale(1.01) rotateY(-8deg); }
-            100% { transform: translateY(0) rotate(0deg) scale(1) rotateY(0deg); }
+          /* ── b · the spinner ─────────────────────────
+             show-off: sits still, then does one clean 3D
+             barrel-roll. perspective gives it real depth
+             instead of a flat horizontal squash. */
+          @keyframes nl-spin {
+            0%   { transform: perspective(100px) rotateY(0deg);   }
+            42%  { transform: perspective(100px) rotateY(0deg);   }
+            72%  { transform: perspective(100px) rotateY(360deg); }
+            100% { transform: perspective(100px) rotateY(360deg); }
           }
 
-          @keyframes nl-4 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1) rotateX(0deg); }
-            22%  { transform: translateY(-1.3px) rotate(2.5deg) scale(0.97) rotateX(8deg); }
-            48%  { transform: translateY(1.1px) rotate(-1.8deg) scale(1.03) rotateX(-5deg); }
-            70%  { transform: translateY(-0.6px) rotate(1deg) scale(0.99) rotateX(3deg); }
-            100% { transform: translateY(0) rotate(0deg) scale(1) rotateX(0deg); }
+          /* ── a · the breather ────────────────────────
+             calm and alive — a slow continuous squash &
+             stretch, no rest. origin on baseline so it
+             "sits" while it breathes. */
+          @keyframes nl-squash {
+            0%   { transform: scaleX(1)    scaleY(1);    }
+            25%  { transform: scaleX(0.9)  scaleY(1.1);  }
+            50%  { transform: scaleX(1.12) scaleY(0.88); }
+            75%  { transform: scaleX(0.96) scaleY(1.04); }
+            100% { transform: scaleX(1)    scaleY(1);    }
           }
 
-          @keyframes nl-5 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1); }
-            17%  { transform: translateY(1.4px) rotate(-3deg) scale(1.04); }
-            38%  { transform: translateY(-0.9px) rotate(2deg) scale(0.96); }
-            58%  { transform: translateY(0.5px) rotate(-1.2deg) scale(1.02); }
-            82%  { transform: translateY(-1.1px) rotate(1.8deg) scale(0.98); }
-            100% { transform: translateY(0) rotate(0deg) scale(1); }
+          /* ── r · the swinger ─────────────────────────
+             hinged at the top like it's hanging from a
+             string; swings and settles (damped). */
+          @keyframes nl-sway {
+            0%   { transform: rotate(0deg);    }
+            20%  { transform: rotate(8deg);    }
+            44%  { transform: rotate(-6.5deg); }
+            64%  { transform: rotate(4deg);    }
+            82%  { transform: rotate(-2deg);   }
+            100% { transform: rotate(0deg);    }
           }
 
-          @keyframes nl-6 {
-            0%   { transform: translateY(0) rotate(0deg) scale(1); }
-            20%  { transform: translateY(-0.9px) rotate(2deg) scale(1.03); }
-            45%  { transform: translateY(1.3px) rotate(-2.5deg) scale(0.97); }
-            68%  { transform: translateY(-0.4px) rotate(1.5deg) scale(1.01); }
-            88%  { transform: translateY(0.7px) rotate(-1deg) scale(0.99); }
-            100% { transform: translateY(0) rotate(0deg) scale(1); }
+          /* ── t · the wobbler ─────────────────────────
+             top-heavy drunk: teeters way over one way,
+             catches itself, lurches the other. pivots on
+             the baseline like a bowling pin. */
+          @keyframes nl-wobble {
+            0%   { transform: rotate(0deg)  translateX(0);     }
+            16%  { transform: rotate(9deg)  translateX(1px);   }
+            30%  { transform: rotate(5deg)  translateX(0.6px); }
+            50%  { transform: rotate(-8deg) translateX(-1px);  }
+            64%  { transform: rotate(-4deg) translateX(-0.6px);}
+            80%  { transform: rotate(3deg)  translateX(0.3px); }
+            100% { transform: rotate(0deg)  translateX(0);     }
           }
 
-          /* hover */
-          svg:hover .nl {
-            animation-play-state: running, paused;
-            transition: transform 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
-            transform: translateY(-2px) rotate(var(--hr)) scale(1.08);
-          }
 
           @media (prefers-reduced-motion: reduce) {
-            .nl { animation: none !important; opacity: 1 !important; }
+            .nl { animation: none !important; opacity: 1 !important; transform: none !important; }
           }
         `}</style>
 
-        {LETTERS.map((ch, i) => {
-          const entryDelay = 0.15 + i * 0.05;
-          const idleDelay = entryDelay + 0.5;
-          // each letter: different cycle duration (3.5–6s) for async feel
-          const durations = [4.2, 3.6, 5.1, 4.8, 3.9, 5.5, 4.0];
-          const hoverRot = (i % 2 === 0 ? -1 : 1) * (2 + i * 0.7);
+        {LETTERS.map(({ ch, idle, dur, origin }, i) => {
+          const entryDelay = 0.15 + i * 0.05
+          const idleDelay = entryDelay + 0.4
 
           return (
             <text
@@ -145,9 +192,9 @@ export default function NavLogo({ className = '' }) {
               style={{
                 '--d': `${entryDelay.toFixed(2)}s`,
                 '--id': `${idleDelay.toFixed(2)}s`,
-                '--idle': `nl-${i}`,
-                '--dur': `${durations[i]}s`,
-                '--hr': `${hoverRot.toFixed(1)}deg`,
+                '--idle': idle,
+                '--dur': `${dur}s`,
+                '--origin': origin,
               }}
             >
               {ch}
