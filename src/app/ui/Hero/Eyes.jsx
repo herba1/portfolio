@@ -3,6 +3,7 @@
 import { Component, useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
 import useMeasure from "react-use-measure";
+import { MessageCircle, Send, X } from "lucide-react";
 import { geist } from "@/app/fonts";
 import { useLenis } from "@/context/LenisContext";
 
@@ -449,6 +450,232 @@ function seeded(str) {
   return (Math.abs(h) % 1000) / 1000;
 }
 
+// ── Mobile Message Input (FAB → expanding bar) ─────────
+//
+// On mobile we can't use the centered desktop bar — the on-screen
+// keyboard reflows the viewport and fights Lenis. Instead we anchor a
+// small button to the bottom-right that morphs into a type+send bar,
+// and use the VisualViewport API to float it just above the keyboard.
+
+function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
+  const [open, setOpen] = useState(false);
+  const [text, setText] = useState("");
+  const [kbOffset, setKbOffset] = useState(0);
+  const inputRef = useRef(null);
+
+  // Float the bar above the on-screen keyboard.
+  useEffect(() => {
+    if (!open) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const offset = window.innerHeight - vv.height - vv.offsetTop;
+      setKbOffset(Math.max(0, offset));
+    };
+    update();
+    vv.addEventListener("resize", update);
+    vv.addEventListener("scroll", update);
+    return () => {
+      vv.removeEventListener("resize", update);
+      vv.removeEventListener("scroll", update);
+    };
+  }, [open]);
+
+  // Pause smooth scroll + focus the field while the bar is open.
+  useEffect(() => {
+    if (!open) {
+      lenis?.start();
+      setKbOffset(0);
+      return;
+    }
+    lenis?.stop();
+    const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 60);
+    onTyping?.();
+    return () => clearTimeout(t);
+  }, [open, onTyping, lenis]);
+
+  const close = () => {
+    setText("");
+    setOpen(false);
+    inputRef.current?.blur();
+  };
+
+  const handleSubmit = (e) => {
+    e?.preventDefault();
+    const msg = text.trim().slice(0, 20);
+    if (!msg) {
+      close();
+      return;
+    }
+    onSend(msg);
+    setText("");
+    setOpen(false);
+    inputRef.current?.blur();
+  };
+
+  const hasText = !!text.trim();
+
+  return (
+    <div
+      className={geist.className}
+      style={{
+        position: "fixed",
+        right: "1rem",
+        left: open ? "1rem" : "auto",
+        bottom: `calc(env(safe-area-inset-bottom, 0px) + 1rem + ${kbOffset}px)`,
+        zIndex: 50,
+        display: "flex",
+        justifyContent: "flex-end",
+        pointerEvents: "none",
+        transition: "bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+      }}
+    >
+      <AnimatePresence mode="wait" initial={false}>
+        {!open ? (
+          <motion.button
+            key="fab"
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label="Say something"
+            initial={{ opacity: 0, scale: 0.6 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.6 }}
+            transition={{ type: "spring", visualDuration: 0.3, bounce: 0.35 }}
+            style={{
+              pointerEvents: "auto",
+              position: "relative",
+              width: "44px",
+              height: "44px",
+              borderRadius: "50%",
+              border: "1px solid rgba(0,0,0,0.08)",
+              background: "rgba(241,245,249,0.85)",
+              backdropFilter: "blur(8px)",
+              WebkitBackdropFilter: "blur(8px)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: "rgba(0,0,0,0.5)",
+              boxShadow: "0 4px 14px rgba(0,0,0,0.08)",
+              cursor: "pointer",
+            }}
+          >
+            <MessageCircle size={20} strokeWidth={1.75} />
+            {visitorCount > 1 && (
+              <span
+                style={{
+                  position: "absolute",
+                  top: "-2px",
+                  right: "-2px",
+                  minWidth: "16px",
+                  height: "16px",
+                  padding: "0 4px",
+                  borderRadius: "8px",
+                  background: "rgba(0,0,0,0.55)",
+                  color: "rgba(255,255,255,0.95)",
+                  fontSize: "9px",
+                  lineHeight: "16px",
+                  fontWeight: 600,
+                  textAlign: "center",
+                  fontFamily: "inherit",
+                }}
+              >
+                {visitorCount}
+              </span>
+            )}
+          </motion.button>
+        ) : (
+          <motion.form
+            key="bar"
+            onSubmit={handleSubmit}
+            initial={{ opacity: 0, scale: 0.9, y: 8 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.9, y: 8 }}
+            transition={{ type: "spring", visualDuration: 0.25, bounce: 0.2 }}
+            style={{
+              pointerEvents: "auto",
+              display: "flex",
+              alignItems: "center",
+              gap: "6px",
+              width: "100%",
+              background: "rgba(241,245,249,0.92)",
+              backdropFilter: "blur(10px)",
+              WebkitBackdropFilter: "blur(10px)",
+              border: "1px solid rgba(0,0,0,0.08)",
+              borderRadius: "14px",
+              padding: "6px 6px 6px 14px",
+              boxShadow: "0 6px 20px rgba(0,0,0,0.1)",
+            }}
+          >
+            <input
+              ref={inputRef}
+              type="text"
+              value={text}
+              onChange={(e) => setText(e.target.value.slice(0, 20))}
+              onKeyDown={(e) => { if (e.key === "Escape") close(); }}
+              placeholder="say something..."
+              maxLength={20}
+              enterKeyHint="send"
+              autoComplete="off"
+              autoCapitalize="none"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                background: "none",
+                border: "none",
+                outline: "none",
+                fontSize: "16px", // 16px avoids iOS focus-zoom
+                color: "rgba(0,0,0,0.7)",
+                fontFamily: "inherit",
+              }}
+            />
+            <button
+              type="button"
+              onClick={close}
+              aria-label="Close"
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "32px",
+                height: "32px",
+                borderRadius: "9px",
+                border: "none",
+                background: "transparent",
+                color: "rgba(0,0,0,0.3)",
+                cursor: "pointer",
+              }}
+            >
+              <X size={16} strokeWidth={2} />
+            </button>
+            <button
+              type="submit"
+              aria-label="Send"
+              disabled={!hasText}
+              style={{
+                flexShrink: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                width: "32px",
+                height: "32px",
+                borderRadius: "9px",
+                border: "none",
+                background: hasText ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.03)",
+                color: hasText ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.2)",
+                cursor: hasText ? "pointer" : "default",
+                transition: "background 0.15s ease, color 0.15s ease",
+              }}
+            >
+              <Send size={15} strokeWidth={2} />
+            </button>
+          </motion.form>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 // ── Message Input ──────────────────────────────────────
 
 function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
@@ -484,13 +711,26 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
     ? "just you"
     : `${visitorCount} here`;
 
-  // Hide on mobile — keyboard interactions are problematic
+  // On mobile, swap the centered bar for a bottom-right FAB that
+  // expands into a type+send bar (keyboard-aware via VisualViewport).
   const [isMobile, setIsMobile] = useState(false);
   useEffect(() => {
-    setIsMobile(window.innerWidth <= 768);
+    const check = () => setIsMobile(window.innerWidth <= 768);
+    check();
+    window.addEventListener("resize", check);
+    return () => window.removeEventListener("resize", check);
   }, []);
 
-  if (isMobile) return null;
+  if (isMobile) {
+    return (
+      <MobileMessageInput
+        onSend={onSend}
+        onTyping={onTyping}
+        visitorCount={visitorCount}
+        lenis={lenis}
+      />
+    );
+  }
 
   return (
     <div
