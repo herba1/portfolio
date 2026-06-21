@@ -240,7 +240,7 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
         data-stim={stim || undefined}
       >
         <style>{`
-          .hero-eyes { pointer-events: none; }
+          .hero-eyes { pointer-events: none; overflow: visible; }
 
           .hero-eyes--${id} .eye-left {
             opacity: 0;
