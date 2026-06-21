@@ -23,12 +23,6 @@ export default function sitemap() {
       changeFrequency: 'weekly',
       priority: 0.8,
     },
-    {
-      url: 'https://herb.art/experience',
-      lastModified: new Date(),
-      changeFrequency: 'monthly',
-      priority: 0.6,
-    },
     ...blogEntries,
   ]
 }

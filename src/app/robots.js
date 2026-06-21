@@ -4,7 +4,7 @@ export default function robots() {
       {
         userAgent: "*",
         allow: "/",
-        disallow: ["/api/", "/_next/"],
+        disallow: ["/api/", "/_next/", "/~studio"],
       },
     ],
     sitemap: "https://herb.art/sitemap.xml",

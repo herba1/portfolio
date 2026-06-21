@@ -1,12 +1,25 @@
 export const metadata = {
   title: 'The Beginning',
   description: 'Moving to NYC, joining a sick company, and documenting the journey.',
+  alternates: {
+    canonical: '/start',
+  },
+  openGraph: {
+    type: 'article',
+    title: 'The Beginning',
+    description: 'Moving to NYC, joining a sick company, and documenting the journey.',
+    url: 'https://herb.art/start',
+    publishedTime: '2026-04-10T00:00:00.000Z',
+    authors: ['Herb'],
+    tags: ['life'],
+  },
 }
 
 <BlogHeader
   title="The Beginning"
   date="2026-04-10"
   tags={['life']}
+  description="Moving to NYC, joining a sick company, and documenting the journey."
 />
 
 <article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-blue-500 prose-code:before:content-[''] prose-code:after:content-['']">

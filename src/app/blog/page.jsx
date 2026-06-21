@@ -5,6 +5,15 @@ import BlogPostLink from './BlogPostLink'
 export const metadata = {
   title: 'Writing',
   description: 'Thoughts on web development, creative coding, and design.',
+  alternates: {
+    canonical: '/blog',
+  },
+  openGraph: {
+    type: 'website',
+    title: 'Writing',
+    description: 'Thoughts on web development, creative coding, and design.',
+    url: 'https://herb.art/blog',
+  },
 }
 
 export default function BlogIndex() {

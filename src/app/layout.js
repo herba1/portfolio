@@ -6,7 +6,7 @@ import Navbar from "./ui/Navigation/Navbar";
 import StickyFooter from "./ui/StickyFooter";
 import { geist, instrumentSerif } from "./fonts";
 import Loading from "./ui/Loading";
-import { description, title } from "./constants";
+import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 import AnimatedFavicon from "./ui/AnimatedFavicon";
@@ -18,10 +18,13 @@ export const metadata = {
     template: `%s | ${title}`,
   },
   description: description,
+  applicationName: "herb.art",
   keywords: [
+    "Herb",
     "portfolio",
     "design engineer",
     "creative developer",
+    "creative technologist",
     "web developer",
     "frontend",
     "fullstack",
@@ -29,10 +32,20 @@ export const metadata = {
     "react",
     "nextjs",
     "three.js",
+    "webgl",
+    "gaussian splatting",
     "interactive",
+    "motion design",
   ],
-  authors: [{ name: "Herb" }],
-  creator: "Herb",
+  authors: [{ name: author, url: "https://herb.art" }],
+  creator: author,
+  publisher: author,
+  category: "technology",
+  formatDetection: {
+    email: false,
+    address: false,
+    telephone: false,
+  },
   alternates: {
     canonical: "./",
   },
@@ -48,6 +61,13 @@ export const metadata = {
     card: "summary_large_image",
     title: title,
     description: description,
+    site: "@herb_dev",
+    creator: "@herb_dev",
+  },
+  appleWebApp: {
+    capable: true,
+    title: "herb.art",
+    statusBarStyle: "default",
   },
   robots: {
     index: true,
@@ -78,15 +98,31 @@ const jsonLd = {
       name: "herb.art",
       description: description,
       inLanguage: "en-US",
+      publisher: { "@id": "https://herb.art/#person" },
     },
     {
       "@type": "Person",
       "@id": "https://herb.art/#person",
-      name: "Herb",
+      name: author,
       url: "https://herb.art",
+      image: "https://herb.art/opengraph-image.png",
       jobTitle: "Design Engineer",
+      description: description,
+      knowsAbout: [
+        "Web Development",
+        "Creative Coding",
+        "Design Engineering",
+        "React",
+        "Next.js",
+        "Three.js",
+        "WebGL",
+        "Motion Design",
+      ],
+      email: "mailto:hi@herb.art",
       sameAs: [
         "https://github.com/herba1",
+        "https://x.com/herb_dev",
+        "https://linkedin.com/in/herbart-hernandez",
       ],
     },
   ],
