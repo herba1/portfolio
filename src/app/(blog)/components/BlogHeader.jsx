@@ -22,14 +22,34 @@ function shuffledOrder(count) {
   return order
 }
 
-export default function BlogHeader({ title, date, tags }) {
+export default function BlogHeader({ title, date, tags, description }) {
   const chars = [...title]
   const nonSpaceCount = chars.filter((c) => c !== ' ').length
   const order = shuffledOrder(nonSpaceCount)
   let ci = 0
 
+  // BlogPosting structured data so search engines can render rich article
+  // results (headline, publish date, author, keywords) for every post.
+  const articleLd = {
+    '@context': 'https://schema.org',
+    '@type': 'BlogPosting',
+    headline: title,
+    ...(description ? { description } : {}),
+    datePublished: new Date(date).toISOString(),
+    dateModified: new Date(date).toISOString(),
+    image: 'https://herb.art/opengraph-image.png',
+    inLanguage: 'en-US',
+    ...(tags && tags.length ? { keywords: tags.join(', ') } : {}),
+    author: { '@id': 'https://herb.art/#person' },
+    publisher: { '@id': 'https://herb.art/#person' },
+  }
+
   return (
     <header className="mb-10">
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
+      />
       <TransitionLink
         href="/blog"
         className="blog-header-back tracking-body-base text-dark/50 hover:text-dark mb-6 inline-flex items-center gap-1 text-sm transition-colors"

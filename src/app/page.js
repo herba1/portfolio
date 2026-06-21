@@ -1,10 +1,10 @@
 import { geist } from "./fonts";
 import TempPage from "./ui/Hero/TempPage";
 import ClientSplatSection from "./experience/components/ClientSplatSection";
+import { description } from "./constants";
 
 export const metadata = {
-  title: "herb.art",
-  description: "and remember to have a nice day",
+  description,
 };
 
 export default function Home() {
