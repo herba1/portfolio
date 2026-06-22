@@ -16,10 +16,6 @@ export default function LinkMask({
       href={href}
       className={`LinkMask relative inline-block ${className}`}
       onClick={() => {
-        if (isInternal) {
-          document.documentElement.classList.add("navigating");
-          setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
-        }
         posthog.capture("link_clicked", { href, text });
       }}
       {...(!isInternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}

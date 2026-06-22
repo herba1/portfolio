@@ -1,5 +1,5 @@
 export const LINKS = [
-  { name: "Covers", link: "/covers", primary: true },
+  { name: "Top Songs", link: "/covers", primary: true },
   { name: "Writing", link: "/blog", primary: true },
   { name: "Tier List", link: "/tierlist", primary: true },
   { name: "Tuner", link: "/tuner", primary: true },

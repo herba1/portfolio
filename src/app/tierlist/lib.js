@@ -43,7 +43,13 @@ export async function listTierlists() {
         description: data.description || '',
         tiers: data.tiers || [],
         count: (data.items || []).length,
-        covers: (data.items || []).slice(0, 5).map((i) => i.src),
+        // Keep the item id alongside the src so the index thumbnail and the
+        // detail-page tile can share a `view-transition-name` and morph between
+        // each other on navigation. Only the first 3 (shown in the fan) matter.
+        covers: (data.items || [])
+          .filter((i) => i.src)
+          .slice(0, 3)
+          .map((i) => ({ src: i.src, id: i.id })),
         rankedCount: ranked.length,
       }
     }),

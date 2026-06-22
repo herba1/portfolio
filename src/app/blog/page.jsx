@@ -25,7 +25,7 @@ export default function BlogIndex() {
     <div className="bg-slate-100 min-h-dvh">
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <h1
-          className={`text-dark mb-8 text-6xl font-bold tracking-tighter`}
+          className={`text-dark mb-8 text-4xl font-bold tracking-tighter md:text-6xl`}
         >
           {[...'Writing'].map((ch, i) => {
             const s = (v) => Math.sin(v * 127.1 + 311.7) * 43758.5453 % 1
@@ -64,7 +64,7 @@ export default function BlogIndex() {
                           day: 'numeric',
                         })}
                       </time>
-                      <h2 className="tracking-body-base text-dark mt-1 text-2xl font-semibold transition-colors group-hover:text-blue-500">
+                      <h2 className="tracking-body-base text-dark mt-1 text-xl font-semibold transition-colors group-hover:text-blue-500 md:text-2xl">
                         {post.title}
                       </h2>
                       <p className="text-dark/70 tracking-body-base mt-2">

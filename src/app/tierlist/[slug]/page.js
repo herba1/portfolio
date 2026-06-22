@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { listSlugs, readTierlist } from '../lib'
 import TierListView from '../TierListView'
+import { isDevView } from '@/lib/viewMode'
 
 export const dynamic = 'force-static'
 
@@ -21,7 +22,15 @@ export default async function TierListSlugPage({ params }) {
   const data = await readTierlist(slug)
   if (!data) notFound()
 
-  const isDev = process.env.NODE_ENV === 'development'
+  const isDev = isDevView()
+
+  // The index fans out the first 3 items as preview thumbs (see lib.listTierlists).
+  // Tag those same items here so each one morphs from its thumb into its tier
+  // position on the way in — and back on the way out — via view transitions.
+  const coverIds = (data.items || [])
+    .filter((i) => i.src)
+    .slice(0, 3)
+    .map((i) => i.id)
 
   return (
     <div className="flex h-full w-full flex-col">
@@ -56,7 +65,12 @@ export default async function TierListSlugPage({ params }) {
       </div>
 
       <div className="min-h-0 flex-1">
-        <TierListView tiers={data.tiers} items={data.items} />
+        <TierListView
+          tiers={data.tiers}
+          items={data.items}
+          slug={slug}
+          coverIds={coverIds}
+        />
       </div>
     </div>
   )

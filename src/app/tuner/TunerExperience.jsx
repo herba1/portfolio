@@ -11,9 +11,10 @@ import Waveform from "./Waveform";
 import TunerMeter from "./TunerMeter";
 import Controls from "./Controls";
 import TunerDevControls from "./TunerDevControls";
+import { isDevView } from "@/lib/viewMode";
 import "./tuner.css";
 
-const IS_DEV = process.env.NODE_ENV !== "production";
+const IS_DEV = isDevView();
 
 export default function TunerExperience() {
   const [mode, setMode] = useState("auto"); // "auto" | "chromatic"

@@ -6,10 +6,15 @@ import 'lenis/dist/lenis.css'
 
 const LenisContext = createContext({
   lenis: null,
+  scrollTrigger: null,
 });
 
 export function LenisProvider({ children }) {
   const [lenis, setLenis] = useState(null);
+  // Exposed so consumers (e.g. the mobile menu) can freeze/resync scroll-driven
+  // animations while the page is locked. Stored as a function to keep React's
+  // setState from treating the class as an updater.
+  const [scrollTrigger, setScrollTrigger] = useState(null);
 
   useEffect(() => {
     // Defer until after view transitions settle (~600ms)
@@ -37,6 +42,7 @@ export function LenisProvider({ children }) {
       });
 
       setLenis(lenisInstance);
+      setScrollTrigger(() => ScrollTrigger);
 
       lenisInstance.on('scroll', ScrollTrigger.update);
       gsap.ticker.add((time) => {
@@ -56,7 +62,7 @@ export function LenisProvider({ children }) {
   }, []);
 
   return (
-    <LenisContext.Provider value={{ lenis }}>
+    <LenisContext.Provider value={{ lenis, scrollTrigger }}>
       {children}
     </LenisContext.Provider>
   );

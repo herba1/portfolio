@@ -1,5 +1,6 @@
 import { notFound } from 'next/navigation'
 import EditorMount from './EditorMount'
+import { isProdView } from '@/lib/viewMode'
 
 export const metadata = {
   title: 'Tier List · Editor',
@@ -7,8 +8,8 @@ export const metadata = {
 }
 
 export default async function TierListEditPage({ params }) {
-  // Editor only exists in dev — production builds 404 this route.
-  if (process.env.NODE_ENV !== 'development') notFound()
+  // Editor only exists in dev — production (or forced prod view) 404s this route.
+  if (isProdView()) notFound()
   const { slug } = await params
   return <EditorMount slug={slug} />
 }

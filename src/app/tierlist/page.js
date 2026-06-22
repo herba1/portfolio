@@ -1,23 +1,35 @@
 import Link from 'next/link'
 import { listTierlists } from './lib'
 import NewListButton from './NewListButton'
+import { isDevView } from '@/lib/viewMode'
 
 export const dynamic = 'force-static'
 
 // A small stack of item thumbs that fans out (polaroid-style) on row hover.
-function PolaroidStack({ covers }) {
-  const pics = (covers || []).filter(Boolean).slice(0, 3)
+// Desktop (sm+): rests stacked, fans on row hover. Mobile has no hover, so the
+// images render in a permanent side-by-side spread (slightly overlapping +
+// rotated) via the max-width media query in globals.css, keyed off `--off`.
+function PolaroidStack({ covers, slug }) {
+  const pics = (covers || []).filter((c) => c && c.src).slice(0, 3)
   if (!pics.length) return null
   const mid = (pics.length - 1) / 2
   return (
-    <div className="tl-pol-stack hidden shrink-0 sm:block">
-      {pics.map((src, i) => {
+    <div className="tl-pol-stack shrink-0 self-center">
+      {pics.map(({ src, id }, i) => {
         const off = i - mid
         const style = {
+          '--off': off,
           '--rest': `rotate(${off * 5}deg)`,
           '--hov': `rotate(${off * 15}deg) translate(${off * 26}px, ${-9 - (mid - Math.abs(off)) * 3}px)`,
           '--d': `${i * 35}ms`,
-          zIndex: 10 - Math.abs(off),
+          // Ascending so the last thumb sits on top. View-transition groups
+          // paint in DOM order (last on top), so matching the resting stack to
+          // that order means nothing re-stacks when the morph overlay lifts —
+          // which was the "reconcile" flip on the way back to the index.
+          zIndex: i,
+          // Shared name with the matching tile in the detail view: the browser
+          // morphs this thumb into its tier position (and back) across the nav.
+          viewTransitionName: `tl-${slug}-${id}`,
         }
         return (
           <div key={i} className="tl-pol squircle-sm" style={style}>
@@ -32,7 +44,7 @@ function PolaroidStack({ covers }) {
 
 export default async function TierListIndex() {
   const lists = await listTierlists()
-  const isDev = process.env.NODE_ENV === 'development'
+  const isDev = isDevView()
 
   return (
     <div className="h-full w-full overflow-y-auto">
@@ -70,8 +82,8 @@ export default async function TierListIndex() {
                     </div>
 
                     <div className="flex shrink-0 items-center gap-5">
-                      {list.covers?.filter(Boolean).length ? (
-                        <PolaroidStack covers={list.covers} />
+                      {list.covers?.length ? (
+                        <PolaroidStack covers={list.covers} slug={list.slug} />
                       ) : (
                         // fallback for image-less lists: tier color spectrum
                         <div className="squircle-sm hidden h-4 overflow-hidden sm:flex">

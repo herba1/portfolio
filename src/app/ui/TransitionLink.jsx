@@ -7,11 +7,7 @@ export default function TransitionLink({ href, className, children, onClick, ...
     <Link
       href={href}
       className={className}
-      onClick={(e) => {
-        document.documentElement.classList.add("navigating");
-        setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
-        onClick?.(e);
-      }}
+      onClick={onClick}
       {...props}
     >
       {children}

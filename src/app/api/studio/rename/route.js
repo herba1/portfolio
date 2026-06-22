@@ -1,3 +1,4 @@
+import { isProdView } from '@/lib/viewMode'
 import { NextResponse } from 'next/server'
 import fs from 'fs/promises'
 import path from 'path'
@@ -11,7 +12,7 @@ function escapeRegex(str) {
 }
 
 export async function POST(request) {
-  if (process.env.NODE_ENV !== 'development') {
+  if (isProdView()) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

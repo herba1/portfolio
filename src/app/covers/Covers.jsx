@@ -11,6 +11,7 @@ import Minimap from "./Minimap";
 import { makeCoversMeta, setCoverSources } from "./lib/makeCovers";
 import { fetchSpotifyCovers } from "./lib/spotify";
 import { DEFAULTS } from "./lib/config";
+import { isDevView } from "@/lib/viewMode";
 import "./covers.css";
 
 // horizontal padding on .cv-focus-title (covers.css) — added to the measured
@@ -256,9 +257,15 @@ export default function Covers() {
       {mounted &&
         createPortal(
           <>
-            <div className="cv-leva">
-              <Leva collapsed={false} titleBar={{ title: "Covers" }} />
-            </div>
+            {isDevView() ? (
+              <div className="cv-leva">
+                <Leva collapsed={false} titleBar={{ title: "Covers" }} />
+              </div>
+            ) : (
+              // useControls auto-injects Leva's default panel into <body>; render
+              // it hidden in production so it never shows up for real visitors.
+              <Leva hidden />
+            )}
             <CoverPlayer
               cover={player?.cover}
               rect={player?.rect}

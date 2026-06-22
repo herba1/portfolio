@@ -17,6 +17,7 @@
   position: relative;
   height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none; /* no rubber-band / scroll chaining off this screen */
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-sans, "Helvetica Neue", Helvetica, Arial, sans-serif);
@@ -39,6 +40,25 @@
   color: var(--ink);
   transition: color 0.4s var(--ease);
   animation: wave-in 0.5s var(--ease) both;
+
+  /* Soft mask on the waveform layer only: the column leads in at the very top
+     and dissolves out at the bottom instead of hard-clipping against the edge.
+     Multi-stop / eased (never a flat 2-stop fade) so the dissolve reads organic.
+     The bottom band is the longer fade — that's where the readout sits over it. */
+  -webkit-mask-image: var(--wave-mask);
+  mask-image: var(--wave-mask);
+  --wave-mask: linear-gradient(
+    to bottom,
+    transparent 0%,
+    rgba(0, 0, 0, 0.12) 1.5%,
+    rgba(0, 0, 0, 0.55) 3.5%,
+    #000 7%,
+    #000 86%,
+    rgba(0, 0, 0, 0.78) 92%,
+    rgba(0, 0, 0, 0.35) 96.5%,
+    rgba(0, 0, 0, 0.08) 99%,
+    transparent 100%
+  );
 }
 .wave.is-intune {
   color: var(--good);
@@ -265,6 +285,23 @@
   }
   .meter {
     min-width: 140px;
+  }
+  /* Mobile is different: the readout occupies more of the screen, so fade the
+     waveform out earlier and over a longer bottom band — it leads in cleanly at
+     the top and answers softly into the type below rather than cutting off. */
+  .wave {
+    --wave-mask: linear-gradient(
+      to bottom,
+      transparent 0%,
+      rgba(0, 0, 0, 0.1) 2%,
+      rgba(0, 0, 0, 0.5) 4.5%,
+      #000 9%,
+      #000 64%,
+      rgba(0, 0, 0, 0.82) 76%,
+      rgba(0, 0, 0, 0.4) 88%,
+      rgba(0, 0, 0, 0.1) 96%,
+      transparent 100%
+    );
   }
 }
 

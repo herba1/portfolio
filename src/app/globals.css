@@ -30,25 +30,23 @@
   }
 }
 
-/* View transition animation controlled via custom properties on :root.
-   Default: none (prevents Suspense-triggered flashes on load).
-   Set to real animations by adding .navigating class to <html>. */
-:root {
-  --vt-page-exit: none;
-  --vt-page-enter: none;
-}
-:root.navigating {
-  --vt-page-exit: page-exit 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-  --vt-page-enter: page-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-}
-
+/* The transition runs on its own whenever React swaps the page-content
+   layer — no JS class toggling, no timers. The browser drives the whole
+   lifecycle, so a slow/heavy route can never out-race a manual signal. */
 ::view-transition-old(page-content) {
-  animation: var(--vt-page-exit);
+  animation: page-exit 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
   mix-blend-mode: normal;
 }
 ::view-transition-new(page-content) {
-  animation: var(--vt-page-enter);
+  animation: page-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   mix-blend-mode: normal;
+}
+
+/* Skip the enter animation on initial load / when there's no old snapshot to
+   transition from (e.g. a Suspense reveal) — that's the flash we want to avoid,
+   and :only-child catches it without any timing hack. */
+::view-transition-new(page-content):only-child {
+  animation: none;
 }
 
 /* navbar gets its own layer — stays static during page transitions */
@@ -69,9 +67,9 @@
 /* While a view transition runs, the navbar is replaced by a static snapshot.
    Freeze the live logo letters for that window so their animation phase still
    matches the snapshot when it lifts — otherwise the letters visibly "jump" as
-   the live element resumes mid-fidget. The snapshot is captured at click time,
-   exactly when .navigating is added, so the pause lines up with the frozen frame. */
-:root.navigating .nl {
+   the live element resumes mid-fidget. :active-view-transition matches the root
+   for exactly the duration of the transition, so this stays in sync on its own. */
+:root:active-view-transition .nl {
   animation-play-state: paused;
 }
 
@@ -449,10 +447,16 @@ html {
 }
 
 /* ── LinkMask underline ── */
-.LinkMask {
-  text-decoration: none;
-  position: relative;
-  display: inline-block;
+/* Layered as a component so a display utility on the element (e.g.
+ * `inline-flex` on icon + label back-links) can override the default
+ * `inline-block` — otherwise the unlayered rule beats the utility and the
+ * block-display SVG icon drops onto its own line above the text. */
+@layer components {
+  .LinkMask {
+    text-decoration: none;
+    position: relative;
+    display: inline-block;
+  }
 }
 .LinkMask::after {
   content: "";
@@ -472,8 +476,9 @@ html {
   transform-origin: left center;
 }
 
-/* During navigation, kill LinkMask transitions */
-html.navigating .LinkMask::after {
+/* While a view transition runs, kill LinkMask underline transitions so the
+   frozen navbar snapshot doesn't catch a mid-animation underline. */
+:root:active-view-transition .LinkMask::after {
   transition-duration: 0s !important;
   transform: scaleX(0) !important;
 }
@@ -837,9 +842,13 @@ html.navigating .LinkMask::after {
  * ───────────────────────────────────────────── */
 
 /* Soft staggered fade-up for rows + header on first paint */
+/* Opacity-only on purpose: a translateY here offsets the row while the browser
+   snapshots the view-transition morph targets (the fan thumbs / title), so the
+   tiles would land and then "reconcile" up 12px as the row settled. Fading
+   without moving keeps the shared-element morph landing exactly on the stack. */
 @keyframes tl-fade-up {
-  from { opacity: 0; transform: translateY(12px); }
-  to   { opacity: 1; transform: translateY(0); }
+  from { opacity: 0; }
+  to   { opacity: 1; }
 }
 
 .tl-fade {
@@ -919,6 +928,22 @@ html.navigating .LinkMask::after {
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
 }
 
+/* One-time "tug" hint: a row that overflows horizontally nudges its items left
+ * and settles back, signalling the track is scrollable. The .tl-hint class is
+ * added by JS only when the row actually overflows and is scrolled into view;
+ * --hint-delay staggers the rows so they tug in cascade, not all at once. */
+@keyframes tl-scroll-hint {
+  0%   { transform: translateX(0); }
+  18%  { transform: translateX(-22px); }
+  40%  { transform: translateX(-11px); }
+  62%  { transform: translateX(-19px); }
+  100% { transform: translateX(0); }
+}
+.tl-track.tl-hint {
+  animation: tl-scroll-hint 1.5s cubic-bezier(0.22, 1, 0.36, 1) var(--hint-delay, 0s) both;
+  will-change: transform;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .tl-fade,
   .tl-file-veil { animation: none !important; }
@@ -926,6 +951,94 @@ html.navigating .LinkMask::after {
   .tl-edit-item { transition: none !important; }
   .tl-pol { transition: none !important; }
   .tl-row:hover .tl-pol { transform: var(--rest); }
+  .tl-track.tl-hint { animation: none !important; }
+}
+
+/* Tier-list speech bubble. Click a tile → a chat bubble springs open above it,
+ * growing from its tail (bottom centre) and stretching its width to fit the
+ * text. All motion (intro / exit spring + width grow) is driven by Motion in
+ * TierListView.jsx; these rules are just the static look. Rendered in a portal
+ * (position: fixed), centred over the tile via translate(-50%, -100%). */
+.tl-bubble-anchor {
+  position: fixed;
+  z-index: 60;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+.tl-bubble {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  max-width: 78vw;
+  min-height: 2rem;
+  padding: 0.4rem 0.95rem;
+  overflow: hidden;
+  white-space: nowrap;
+  background: #1b1b1b;
+  color: #fff;
+  border-radius: 1rem;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.14);
+}
+
+.tl-bubble-text {
+  display: block;
+  font-size: 0.875rem;
+  line-height: 1.2;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  text-align: center;
+}
+
+/* Off-screen measuring twin — same type metrics, never painted. `pre` keeps
+ * trailing spaces measurable so prefix widths grow when a space is typed. */
+.tl-bubble-measure {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre;
+}
+
+/* Downward tail, centred under the bubble, pointing at the tile. */
+.tl-bubble-tail {
+  position: absolute;
+  bottom: -5px;
+  left: 50%;
+  width: 12px;
+  height: 12px;
+  margin-left: -6px;
+  background: #1b1b1b;
+  border-radius: 0 0 3px 0;
+  transform: rotate(45deg);
+  box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Mobile has no hover, so the fan can't animate open. Render the images as a
+ * permanent side-by-side spread — slightly overlapping and rotated. The hover
+ * selector is overridden too so a tap can't snap the stack into the desktop
+ * fan transform. Keyed off the inline `--off`. */
+@media (max-width: 639px) {
+  .tl-pol-stack {
+    width: 5.5rem;
+    height: 3.25rem;
+  }
+  .tl-pol,
+  .tl-row:hover .tl-pol {
+    width: 2.75rem;
+    height: 2.75rem;
+    inset: auto;
+    top: 50%;
+    left: 50%;
+    transform-origin: center;
+    transform: translate(-50%, -50%)
+      translateX(calc(var(--off) * 1.4rem)) rotate(calc(var(--off) * 7deg));
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+    transition: none;
+  }
 }
 
 /* Blog index hover preview — a post's images fan out like polaroids when its
@@ -962,6 +1075,30 @@ html.navigating .LinkMask::after {
   .group:hover .blog-pol { transform: var(--rest); }
 }
 
+/* Mobile has no hover, so the fan can't animate open. Instead render the
+ * images as a permanent side-by-side spread — slightly overlapping and
+ * rotated. The hover selector is overridden too so a tap can't snap the
+ * stack into the desktop fan transform. Keyed off the inline `--off`. */
+@media (max-width: 639px) {
+  .blog-pol-stack {
+    width: 5.5rem;
+    height: 3.25rem;
+  }
+  .blog-pol,
+  .group:hover .blog-pol {
+    width: 2.75rem;
+    height: 2.75rem;
+    inset: auto;
+    top: 50%;
+    left: 50%;
+    transform-origin: center;
+    transform: translate(-50%, -50%)
+      translateX(calc(var(--off) * 1.4rem)) rotate(calc(var(--off) * 7deg));
+    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+    transition: none;
+  }
+}
+
 /* ─────────────────────────────────────────────
  * MOBILE NAV — push-down sheet
  *
@@ -978,26 +1115,39 @@ html.navigating .LinkMask::after {
 @media (max-width: 639px) {
   .page-card {
     background: #f1f5f9; /* slate-100 — matches body so the card reads solid */
-    min-height: 100vh;
+    min-height: 100dvh; /* dynamic vh: track the visible viewport so a single-
+                           screen page (e.g. the tuner) never overflows by the
+                           collapsing URL-bar's height and becomes scrollable */
     will-change: transform;
     transition:
       transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
       border-radius 0.5s cubic-bezier(0.16, 1, 0.3, 1),
       box-shadow 0.5s ease;
   }
-  .page-card.is-open {
-    position: relative;
+  /* While the menu is open (and through its close animation) the card becomes a
+     fixed, clipped viewport window. Its inner wrapper is shifted up by the
+     scroll captured at open time (inline transform in MobileMenuShell), so the
+     window shows the exact slice you were looking at — letting it slide down to
+     reveal the menu at ANY scroll depth, not just the top of the page. */
+  .page-card.is-active {
+    position: fixed;
+    inset: 0;
+    height: 100dvh;
     z-index: 40; /* above the menu (30), below the navbar (50) */
-    transform-origin: center top;
-    transform: translateY(52vh) scale(0.97);
-    border-top-left-radius: 22px;
-    border-top-right-radius: 22px;
     overflow: hidden;
+    transform-origin: center top;
     cursor: pointer;
-    box-shadow: 0 -2px 14px -6px rgba(0, 0, 0, 0.12);
   }
-  .page-card.is-open * {
+  .page-card.is-active * {
     pointer-events: none !important;
+  }
+  /* The actual reveal: slide the fixed window down to expose the menu behind it.
+     Lives on its own class so removing it (on close) animates back to 0. */
+  .page-card.is-open {
+    transform: translateY(57vh) scale(0.96);
+    border-top-left-radius: 30px;
+    border-top-right-radius: 30px;
+    box-shadow: 0 -8px 28px -8px rgba(0, 0, 0, 0.2);
   }
 
   .mobile-menu {
@@ -1009,16 +1159,27 @@ html.navigating .LinkMask::after {
     z-index: 30;
     padding-top: 84px;
     /* Keep all content inside the visible band — the page card slides down
-       to ~52vh, so anything below that is hidden behind it. */
-    padding-bottom: 50vh;
+       to ~57vh, so anything below that is hidden behind it. */
+    padding-bottom: 45vh;
     background: #e6e9ef;
     opacity: 0;
+    /* visibility:hidden takes the menu fully out of paint once closed, so Safari
+       can't keep a stale composited layer (background + links) leaking through
+       on reopen. Delay the hide until the fade-out finishes so the close still
+       animates; on open it flips to visible immediately (0s delay). */
+    visibility: hidden;
     pointer-events: none;
-    transition: opacity 0.35s ease;
+    transition:
+      opacity 0.35s ease,
+      visibility 0s linear 0.35s;
   }
   .mobile-menu.is-open {
     opacity: 1;
+    visibility: visible;
     pointer-events: auto;
+    transition:
+      opacity 0.35s ease,
+      visibility 0s linear 0s;
   }
 
   .mobile-menu__list {

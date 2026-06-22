@@ -31,22 +31,31 @@ import Link from 'next/link'
  *   In-out:  cubic-bezier(0.7, 0, 0.3, 1)       (all idle loops, --ease)
  * ───────────────────────────────────────────── */
 
+/* `oy` = vertical pivot per letter, as a viewBox-space y:
+ *   top    → cap-top   (~6)   r · the swinger hangs from here
+ *   center → mid-glyph (~11)
+ *   bottom → baseline  (~16)  jumpers / breathers sit here
+ *
+ * We deliberately resolve transform-origin to explicit numbers in
+ * viewBox coordinates (see the map below) instead of the keyword
+ * `center center` + `transform-box: fill-box`. iOS Safari does NOT
+ * reliably honor fill-box on SVG <text>; it falls back to the SVG
+ * default (view-box), where `center center` is the centre of the
+ * whole word — so the `b` was orbiting the word instead of spinning
+ * in place. Numeric viewBox origins resolve identically everywhere. */
 const LETTERS = [
-  { ch: 'h', idle: 'nl-jump',   dur: 2.4, origin: 'bottom center' },
-  { ch: 'e', idle: 'nl-wiggle', dur: 1.8, origin: 'center center' },
-  { ch: 'r', idle: 'nl-twitch', dur: 3.0, origin: 'center center' },
-  { ch: 'b', idle: 'nl-spin',   dur: 3.2, origin: 'center center' },
-  { ch: 'a', idle: 'nl-squash', dur: 2.0, origin: 'bottom center' },
-  { ch: 'r', idle: 'nl-sway',   dur: 2.4, origin: 'top center'    },
-  { ch: 't', idle: 'nl-wobble', dur: 2.6, origin: 'bottom center' },
+  { ch: 'h', idle: 'nl-jump',   dur: 2.4, oy: 16 },
+  { ch: 'e', idle: 'nl-wiggle', dur: 1.8, oy: 11 },
+  { ch: 'r', idle: 'nl-twitch', dur: 3.0, oy: 11 },
+  { ch: 'b', idle: 'nl-spin',   dur: 3.2, oy: 11 },
+  { ch: 'a', idle: 'nl-squash', dur: 2.0, oy: 16 },
+  { ch: 'r', idle: 'nl-sway',   dur: 2.4, oy: 6  },
+  { ch: 't', idle: 'nl-wobble', dur: 2.6, oy: 16 },
 ]
 
 export default function NavLogo({ className = '' }) {
   return (
-    <Link href="/" className={`nav__logo block ${className}`} onClick={() => {
-      document.documentElement.classList.add("navigating");
-      setTimeout(() => document.documentElement.classList.remove("navigating"), 600);
-    }}>
+    <Link href="/" className={`nav__logo block ${className}`}>
       <svg
         viewBox="0 0 68 22"
         width={68}
@@ -60,8 +69,11 @@ export default function NavLogo({ className = '' }) {
             font-size: 14px;
             font-weight: 400;
             opacity: 0;
-            transform-box: fill-box;
-            transform-origin: var(--origin, center center);
+            /* view-box (the SVG default) + an explicit numeric origin in
+               --origin keeps the pivot identical across browsers. Do NOT
+               switch this to fill-box: iOS Safari mishandles it on text. */
+            transform-box: view-box;
+            transform-origin: var(--origin, center);
             /* custom symmetric in-out — slow at the extremes, quick
                through the middle, so every move darts then settles
                instead of mushily floating. tune this one value to
@@ -179,14 +191,19 @@ export default function NavLogo({ className = '' }) {
           }
         `}</style>
 
-        {LETTERS.map(({ ch, idle, dur, origin }, i) => {
+        {LETTERS.map(({ ch, idle, dur, oy }, i) => {
           const entryDelay = 0.15 + i * 0.05
           const idleDelay = entryDelay + 0.4
+
+          // Pivot in viewBox units: glyph left edge + ~half a glyph for the
+          // horizontal centre, and the per-letter vertical anchor (oy).
+          const x = 2 + i * 9.2
+          const originX = (x + 3.5).toFixed(2)
 
           return (
             <text
               key={i}
-              x={2 + i * 9.2}
+              x={x}
               y={16}
               className="nl"
               style={{
@@ -194,7 +211,7 @@ export default function NavLogo({ className = '' }) {
                 '--id': `${idleDelay.toFixed(2)}s`,
                 '--idle': idle,
                 '--dur': `${dur}s`,
-                '--origin': origin,
+                '--origin': `${originX}px ${oy}px`,
               }}
             >
               {ch}

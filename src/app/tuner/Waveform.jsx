@@ -17,8 +17,8 @@ const CONFIG = {
   bars: 110, // how many bars = how much history is on screen
   maxWidth: 340, // px — the column's max width; it's centred on the page
   widthVw: 84, // …but never wider than this % of the viewport on small screens
-  topOffset: 0, // vh — where the column STARTS (0 = very top of the screen)
-  length: 100, // vh — how tall it is (100 = all the way to the bottom)
+  topOffset: 0, // dvh — where the column STARTS (0 = very top of the screen)
+  length: 100, // dvh — how tall it is (100 = all the way to the bottom)
   barThickness: 3, // px — thickness of each horizontal bar
   gain: 1, // loudness multiplier (raise to make it react harder)
   minBar: 0.02, // resting length when silent (0–1) so the centre never empties
@@ -117,8 +117,8 @@ export default function Waveform({ getAnalyser, active, inTune }) {
       className={`wave${inTune ? " is-intune" : ""}`}
       aria-hidden="true"
       style={{
-        top: `${CONFIG.topOffset}vh`,
-        height: `${CONFIG.length}vh`,
+        top: `${CONFIG.topOffset}dvh`,
+        height: `${CONFIG.length}dvh`,
         width: `min(${CONFIG.maxWidth}px, ${CONFIG.widthVw}vw)`,
       }}
     >

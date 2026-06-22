@@ -20,14 +20,6 @@ export default function NavMenu({ open, setOpen }) {
   const socialLinks = links.filter((l) => !l.primary);
 
   const onNavigate = (link) => {
-    const isInternal = link.link.startsWith("/");
-    if (isInternal) {
-      document.documentElement.classList.add("navigating");
-      setTimeout(
-        () => document.documentElement.classList.remove("navigating"),
-        600
-      );
-    }
     posthog.capture("nav_link_clicked", { link: link.name.toLowerCase() });
     setOpen(false);
   };

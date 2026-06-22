@@ -1,7 +1,7 @@
 import Covers from "./Covers";
 
 export const metadata = {
-  title: "Covers",
+  title: "Top Songs",
   description: "An infinite, spring-driven grid of covers.",
 };
 

@@ -1,3 +1,4 @@
+import { isProdView } from '@/lib/viewMode'
 import { NextResponse } from 'next/server'
 import fs from 'fs/promises'
 import path from 'path'
@@ -5,7 +6,7 @@ import path from 'path'
 const SLUG_RE = /^[a-z0-9-]+$/
 
 export async function GET(request) {
-  if (process.env.NODE_ENV !== 'development') {
+  if (isProdView()) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 

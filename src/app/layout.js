@@ -12,6 +12,7 @@ import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 import AnimatedFavicon from "./ui/AnimatedFavicon";
+import IntroSplash from "./ui/IntroSplash";
 
 export const metadata = {
   metadataBase: new URL("https://herb.art"),
@@ -150,6 +151,7 @@ export default function RootLayout({ children }) {
       <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
         <AnimatedFavicon />
         <ConsoleSig />
+        <IntroSplash />
         <PostHogProvider>
           <LenisProvider>
             <MobileMenuProvider>
