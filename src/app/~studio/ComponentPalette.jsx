@@ -60,7 +60,7 @@ function ImageDropdown({ onInsert }) {
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
         transition={spring}
-        className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium tracking-body-base"
+        className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium"
         style={{ color: open ? 'var(--studio-text)' : undefined }}
       >
         <Image size={11} />
@@ -77,7 +77,7 @@ function ImageDropdown({ onInsert }) {
             <button
               key={variant.name}
               onClick={() => { onInsert(variant.snippet); setOpen(false) }}
-              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium tracking-body-base transition-colors duration-150 hover:bg-[var(--studio-hover)]"
+              className="flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium transition-colors duration-150 hover:bg-[var(--studio-hover)]"
               style={{ color: 'var(--studio-text-2)' }}
             >
               <Image size={11} />
@@ -98,7 +98,7 @@ function PaletteButton({ comp, onInsert }) {
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
       transition={spring}
-      className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-[11px] font-medium tracking-body-base"
+      className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium"
       title={`Insert ${comp.name}`}
       aria-label={`Insert ${comp.name}`}
     >
@@ -114,7 +114,7 @@ export default function ComponentPalette({ onInsert }) {
       className="flex items-center gap-1 overflow-x-auto px-4 py-2"
       style={{ borderTop: '1px solid var(--studio-border)', background: 'var(--studio-bg)' }}
     >
-      <span className="mr-2 shrink-0 font-mono text-[9px] tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
+      <span className="mr-2 shrink-0 font-mono text-ui-2xs tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
         Insert
       </span>
 

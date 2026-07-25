@@ -6,13 +6,15 @@ import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
 import MobileMenuShell from "./ui/Navigation/MobileMenuShell";
 
 import StickyFooter from "./ui/StickyFooter";
-import { geist } from "./fonts";
+import { geist, mono } from "./fonts";
 import Loading from "./ui/Loading";
 import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 import AnimatedFavicon from "./ui/AnimatedFavicon";
-import IntroSplash from "./ui/IntroSplash";
+// Emoji intro splash disabled — re-enable by restoring this import and the
+// <IntroSplash /> mount in the body below. Component files are still in ./ui.
+// import IntroSplash from "./ui/IntroSplash";
 
 export const metadata = {
   metadataBase: new URL("https://herb.art"),
@@ -133,30 +135,27 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${geist.variable}`}>
+    <html lang="en" className={`${geist.variable} ${mono.variable}`}>
       <head>
-        {/* Adobe Fonts (Typekit). Preconnect warms the CSS host + the font
-            host (p.typekit.net serves the actual woff2 via CORS). The
-            `precedence` prop opts the stylesheet into React's resource
-            manager so Next preloads, hoists, and dedupes it. */}
-        <link rel="preconnect" href="https://use.typekit.net" crossOrigin="anonymous" />
-        <link rel="preconnect" href="https://p.typekit.net" crossOrigin="anonymous" />
-        <link rel="stylesheet" href="https://use.typekit.net/psc2klr.css" precedence="default" />
+        {/* Geist Sans + Geist Mono are self-hosted by next/font at build
+            time — no third-party font host, no preconnect, no FOUT. */}
         {/* Splat loads on scroll via dynamic import — no prefetch needed */}
         <script
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
       </head>
-      <body className="relative overflow-x-hidden overscroll-none bg-slate-100 tracking-tight antialiased">
+      {/* No global `tracking-*` here — a single letter-spacing value cannot be
+          correct at more than one size. The type scale sets tracking per size;
+          the inherited default for untagged text is set on `body` in globals.css. */}
+      <body className="relative overflow-x-hidden overscroll-none bg-slate-100 antialiased">
         <AnimatedFavicon />
         <ConsoleSig />
-        <IntroSplash />
         <PostHogProvider>
           <LenisProvider>
             <MobileMenuProvider>
               <Navbar
-                className="text-dark z-50 font-medium"
+                className="text-ink z-50 font-medium"
                 phoneVisible={false}
                 ctaVisible={false}
               />
@@ -169,7 +168,7 @@ export default function RootLayout({ children }) {
             {/* <Loading>
               <div className="relative z-0">
                 <Navbar
-                  className="text-dark sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
+                  className="text-ink sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
                   phoneVisible={false}
                   ctaVisible={false}
                 ></Navbar>

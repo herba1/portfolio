@@ -281,14 +281,14 @@ export default function Studio() {
         <div className="flex w-[220px] items-center gap-3 px-4">
           <a
             href="/"
-            className="flex items-center gap-1.5 tracking-body-base text-[12px] transition-colors duration-300 ease-out-quart hover:opacity-70"
+            className="flex items-center gap-1.5 text-ui-sm transition-colors duration-300 ease-out-quart hover:opacity-70"
             style={{ color: 'var(--studio-text-3)' }}
           >
             <ArrowLeft size={12} />
             <span>Back</span>
           </a>
-          <span style={{ color: 'var(--studio-text-4)' }} className="text-[10px]">|</span>
-          <span className={`${spencer.className} text-[13px] italic`} style={{ color: 'var(--studio-text-4)' }}>
+          <span style={{ color: 'var(--studio-text-4)' }} className="text-ui-2xs">|</span>
+          <span className={`${spencer.className} text-ui italic`} style={{ color: 'var(--studio-text-4)' }}>
             studio
           </span>
         </div>
@@ -303,13 +303,13 @@ export default function Studio() {
             >
               <button
                 onClick={() => { setRenameSlug(activeSlug); setRenameOpen(true) }}
-                className="font-mono text-[11px] font-medium transition-colors duration-200 hover:underline"
+                className="font-mono text-ui-xs font-medium transition-colors duration-200 hover:underline"
                 style={{ color: 'var(--studio-text-2)' }}
                 title="Click to rename"
               >
                 {activeSlug}
               </button>
-              <span className="font-mono text-[11px]" style={{ color: 'var(--studio-text-4)' }}>/page.mdx</span>
+              <span className="font-mono text-ui-xs" style={{ color: 'var(--studio-text-4)' }}>/page.mdx</span>
               <AnimatePresence>
                 {dirty && (
                   <motion.span
@@ -323,7 +323,7 @@ export default function Studio() {
               </AnimatePresence>
             </motion.div>
           ) : (
-            <span className="font-mono text-[11px] italic" style={{ color: 'var(--studio-text-4)' }}>
+            <span className="font-mono text-ui-xs italic" style={{ color: 'var(--studio-text-4)' }}>
               No file selected
             </span>
           )}
@@ -340,7 +340,7 @@ export default function Studio() {
                   return next
                 })
               }}
-              className="flex h-7 items-center gap-1 rounded-md px-2 text-[11px] font-mono font-medium tracking-body-base transition-all duration-200"
+              className="flex h-7 items-center gap-1 rounded-md px-2 text-ui-xs font-mono font-medium transition-all duration-200"
               style={{
                 background: vimMode ? 'var(--studio-active)' : 'transparent',
                 color: vimMode ? 'var(--studio-text)' : 'var(--studio-text-3)',
@@ -359,7 +359,7 @@ export default function Studio() {
             >
               <button
                 onClick={() => { setEditorMode('code'); localStorage.setItem('studio-mode', 'code') }}
-                className="flex items-center gap-1 px-2 text-[11px] font-medium tracking-body-base transition-all duration-200"
+                className="flex items-center gap-1 px-2 text-ui-xs font-medium transition-all duration-200"
                 style={{
                   background: editorMode === 'code' ? 'var(--studio-active)' : 'transparent',
                   color: editorMode === 'code' ? 'var(--studio-text)' : 'var(--studio-text-3)',
@@ -370,7 +370,7 @@ export default function Studio() {
               </button>
               <button
                 onClick={() => { setEditorMode('blocks'); localStorage.setItem('studio-mode', 'blocks') }}
-                className="flex items-center gap-1 px-2 text-[11px] font-medium tracking-body-base transition-all duration-200"
+                className="flex items-center gap-1 px-2 text-ui-xs font-medium transition-all duration-200"
                 style={{
                   background: editorMode === 'blocks' ? 'var(--studio-active)' : 'transparent',
                   color: editorMode === 'blocks' ? 'var(--studio-text)' : 'var(--studio-text-3)',
@@ -412,9 +412,7 @@ export default function Studio() {
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
             transition={spring}
-            className={`squircle-sm flex h-7 items-center gap-1.5 px-2.5 text-[11px] font-medium tracking-body-base transition-colors duration-300 ${
-              showPreview ? 'bg-accent/10 text-accent' : ''
-            }`}
+            className={`squircle-sm flex h-7 items-center gap-1.5 px-2.5 text-ui-xs font-medium transition-colors duration-300 ${ showPreview ? 'bg-accent/10 text-accent' : '' }`}
             style={showPreview ? {} : { color: 'var(--studio-text-3)' }}
             title="Toggle preview (⌘\\)"
             aria-label="Toggle preview"
@@ -430,11 +428,7 @@ export default function Studio() {
             whileHover={dirty ? { scale: 1.05 } : {}}
             whileTap={dirty ? { scale: 0.95 } : {}}
             transition={spring}
-            className={`squircle-sm flex h-7 items-center gap-1.5 border px-3 text-[11px] font-medium tracking-body-base transition-all duration-300 ${
-              dirty
-                ? 'border-white/20 bg-linear-to-b from-blue-400 to-blue-500 text-white shadow-md shadow-blue-500/25 inset-shadow-sm inset-shadow-white/20'
-                : ''
-            }`}
+            className={`squircle-sm flex h-7 items-center gap-1.5 border px-3 text-ui-xs font-medium transition-all duration-300 ${ dirty ? 'border-white/20 bg-linear-to-b from-blue-400 to-blue-500 text-white shadow-md shadow-blue-500/25 inset-shadow-sm inset-shadow-white/20' : '' }`}
             style={dirty ? {} : { borderColor: 'var(--studio-border)', color: 'var(--studio-text-4)' }}
             title="Save (⌘S)"
             aria-label="Save"
@@ -497,7 +491,7 @@ export default function Studio() {
                   <p className={`${spencer.className} text-[28px] italic`} style={{ color: 'var(--studio-text-4)' }}>
                     studio
                   </p>
-                  <p className="mt-2 text-[13px] tracking-body-base" style={{ color: 'var(--studio-text-3)' }}>
+                  <p className="mt-2 text-ui" style={{ color: 'var(--studio-text-3)' }}>
                     Select a post or create a new one
                   </p>
                 </div>
@@ -506,7 +500,7 @@ export default function Studio() {
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
                   transition={spring}
-                  className="squircle px-5 py-2.5 text-[12px] font-medium tracking-body-base shadow-sm inset-shadow-sm transition-colors duration-300 hover:opacity-80"
+                  className="squircle px-5 py-2.5 text-ui-sm font-medium shadow-sm inset-shadow-sm transition-colors duration-300 hover:opacity-80"
                   style={{ border: '1px solid var(--studio-border)', background: 'var(--studio-surface)', color: 'var(--studio-text-2)' }}
                 >
                   New Post
@@ -534,7 +528,7 @@ export default function Studio() {
       {/* ── New Post Dialog ── */}
       <StudioDialog open={newPostOpen} onOpenChange={setNewPostOpen} title="New Post">
         <div className="flex flex-col gap-3">
-          <label className="text-[12px] font-medium tracking-body-base" style={{ color: 'var(--studio-text-2)' }}>
+          <label className="text-ui-sm font-medium" style={{ color: 'var(--studio-text-2)' }}>
             Slug
           </label>
           <input
@@ -544,20 +538,20 @@ export default function Studio() {
             onKeyDown={(e) => { if (e.key === 'Enter') confirmNewPost() }}
             placeholder="my-new-post"
             autoFocus
-            className="rounded-lg border px-3 py-2 font-mono text-[13px] outline-none transition-colors duration-200 focus:border-accent"
+            className="rounded-lg border px-3 py-2 font-mono text-ui outline-none transition-colors duration-200 focus:border-accent"
             style={{
               background: 'var(--studio-bg)',
               borderColor: 'var(--studio-border)',
               color: 'var(--studio-text)',
             }}
           />
-          <p className="text-[11px]" style={{ color: 'var(--studio-text-3)' }}>
+          <p className="text-ui-xs" style={{ color: 'var(--studio-text-3)' }}>
             Lowercase letters, numbers, and hyphens only. This becomes the URL path.
           </p>
           <div className="mt-1 flex justify-end gap-2">
             <button
               onClick={() => setNewPostOpen(false)}
-              className="rounded-lg px-3 py-1.5 text-[12px] font-medium tracking-body-base transition-colors duration-200 hover:opacity-70"
+              className="rounded-lg px-3 py-1.5 text-ui-sm font-medium transition-colors duration-200 hover:opacity-70"
               style={{ color: 'var(--studio-text-3)' }}
             >
               Cancel
@@ -568,7 +562,7 @@ export default function Studio() {
               whileTap={{ scale: 0.98 }}
               transition={spring}
               disabled={!newPostSlug.trim()}
-              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-[12px] font-medium tracking-body-base text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
+              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
             >
               Create
             </motion.button>
@@ -579,13 +573,13 @@ export default function Studio() {
       {/* ── Delete Confirmation Dialog ── */}
       <StudioDialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null) }} title="Delete Post">
         <div className="flex flex-col gap-4">
-          <p className="text-[13px] leading-relaxed" style={{ color: 'var(--studio-text-2)' }}>
+          <p className="text-ui leading-relaxed" style={{ color: 'var(--studio-text-2)' }}>
             Are you sure you want to delete <strong style={{ color: 'var(--studio-text)' }}>{deleteTarget}</strong>? This removes the MDX file permanently.
           </p>
           <div className="flex justify-end gap-2">
             <button
               onClick={() => setDeleteTarget(null)}
-              className="rounded-lg px-3 py-1.5 text-[12px] font-medium tracking-body-base transition-colors duration-200 hover:opacity-70"
+              className="rounded-lg px-3 py-1.5 text-ui-sm font-medium transition-colors duration-200 hover:opacity-70"
               style={{ color: 'var(--studio-text-3)' }}
             >
               Cancel
@@ -595,7 +589,7 @@ export default function Studio() {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               transition={spring}
-              className="rounded-lg border border-red-400/30 bg-linear-to-b from-red-400 to-red-500 px-4 py-1.5 text-[12px] font-medium tracking-body-base text-white shadow-sm shadow-red-500/20 inset-shadow-sm inset-shadow-white/20"
+              className="rounded-lg border border-red-400/30 bg-linear-to-b from-red-400 to-red-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-red-500/20 inset-shadow-sm inset-shadow-white/20"
             >
               Delete
             </motion.button>
@@ -606,7 +600,7 @@ export default function Studio() {
       {/* ── Rename Dialog ── */}
       <StudioDialog open={renameOpen} onOpenChange={setRenameOpen} title="Rename Post">
         <div className="flex flex-col gap-3">
-          <label className="text-[12px] font-medium tracking-body-base" style={{ color: 'var(--studio-text-2)' }}>
+          <label className="text-ui-sm font-medium" style={{ color: 'var(--studio-text-2)' }}>
             Slug
           </label>
           <input
@@ -615,20 +609,20 @@ export default function Studio() {
             onChange={(e) => setRenameSlug(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') confirmRename() }}
             autoFocus
-            className="rounded-lg border px-3 py-2 font-mono text-[13px] outline-none transition-colors duration-200 focus:border-accent"
+            className="rounded-lg border px-3 py-2 font-mono text-ui outline-none transition-colors duration-200 focus:border-accent"
             style={{
               background: 'var(--studio-bg)',
               borderColor: 'var(--studio-border)',
               color: 'var(--studio-text)',
             }}
           />
-          <p className="text-[11px]" style={{ color: 'var(--studio-text-3)' }}>
+          <p className="text-ui-xs" style={{ color: 'var(--studio-text-3)' }}>
             This renames the directory and updates posts.js.
           </p>
           <div className="mt-1 flex justify-end gap-2">
             <button
               onClick={() => setRenameOpen(false)}
-              className="rounded-lg px-3 py-1.5 text-[12px] font-medium tracking-body-base transition-colors duration-200 hover:opacity-70"
+              className="rounded-lg px-3 py-1.5 text-ui-sm font-medium transition-colors duration-200 hover:opacity-70"
               style={{ color: 'var(--studio-text-3)' }}
             >
               Cancel
@@ -639,7 +633,7 @@ export default function Studio() {
               whileTap={{ scale: 0.98 }}
               transition={spring}
               disabled={!renameSlug.trim() || renameSlug.trim() === activeSlug}
-              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-[12px] font-medium tracking-body-base text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
+              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
             >
               Rename
             </motion.button>

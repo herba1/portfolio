@@ -66,7 +66,7 @@ export function StudioDialog({ open, onOpenChange, title, children }) {
             {/* Header */}
             <div className="flex items-center justify-between">
               <h2
-                className="text-[15px] font-semibold tracking-body-base"
+                className="text-body font-semibold"
                 style={{ color: 'var(--studio-text)' }}
               >
                 {title}

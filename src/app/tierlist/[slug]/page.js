@@ -38,7 +38,7 @@ export default async function TierListSlugPage({ params }) {
       <div className="tl-fade flex shrink-0 items-center justify-between gap-3 px-4 py-3">
         <Link
           href="/tierlist"
-          className="LinkMask text-dark/50 hover:text-dark inline-flex items-center gap-1.5 text-sm transition-colors"
+          className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-sm transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> All lists
         </Link>
@@ -47,7 +47,7 @@ export default async function TierListSlugPage({ params }) {
             {data.title}
           </h1>
           {data.description ? (
-            <p className="text-dark/50 truncate text-sm" title={data.description}>
+            <p className="text-ink-secondary truncate text-sm" title={data.description}>
               {data.description}
             </p>
           ) : null}
@@ -55,7 +55,7 @@ export default async function TierListSlugPage({ params }) {
         {isDev ? (
           <Link
             href={`/tierlist/${slug}/edit`}
-            className="LinkMask text-dark/70 hover:text-dark text-sm font-medium transition-colors"
+            className="LinkMask text-ink-secondary hover:text-ink text-sm font-medium transition-colors"
           >
             Edit →
           </Link>

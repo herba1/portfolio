@@ -254,20 +254,26 @@ export default function CoversGrid({ config, configRef, apiRef, covers, onFocusC
       for (let k = 0; k < slots.current.length; k++) slots.current[k].idx = -1;
     }
 
-    // O(1) hover: snap pointer to its nearest (brick-offset) cell
-    let hCol = null;
-    let hRow = null;
-    if (input.hovering.current && !input.down.current) {
-      const px = input.pointer.current.x;
-      const py = input.pointer.current.y;
+    // O(1) hit-test: snap a world point to its nearest (brick-offset) cell,
+    // then confirm the point actually landed on the tile and not in the gap.
+    // `half` is the hit box half-extent, so touch can ask for a looser one.
+    const cellAt = (px, py, half) => {
       const r = Math.round((py - off.y) / cellPx);
       const rOff = mod(r, 2) ? cfg.brickOffset * cellPx : 0;
       const c = Math.round((px - off.x - rOff) / cellPx);
       const wx = c * cellPx + off.x + rOff;
       const wy = r * cellPx + off.y;
-      if (Math.abs(px - wx) < cfg.tileSize / 2 && Math.abs(py - wy) < cfg.tileSize / 2) {
-        hCol = c;
-        hRow = r;
+      if (Math.abs(px - wx) < half && Math.abs(py - wy) < half) return { c, r };
+      return null;
+    };
+
+    let hCol = null;
+    let hRow = null;
+    if (input.hovering.current && !input.down.current) {
+      const hit = cellAt(input.pointer.current.x, input.pointer.current.y, cfg.tileSize / 2);
+      if (hit) {
+        hCol = hit.c;
+        hRow = hit.r;
       }
     }
 
@@ -412,16 +418,30 @@ export default function CoversGrid({ config, configRef, apiRef, covers, onFocusC
     }
 
     if (input.tap.current) {
+      const t = input.tap.current;
       input.tap.current = null;
-      if (hCol != null) {
+      // Hit-test the tap from ITS OWN coordinates rather than reusing the hover
+      // cell. Touch has no hover: a tap that holds still fires no pointermove,
+      // so hCol would be stale or null and the cover just wouldn't open. The
+      // release point is always the truth about what was tapped.
+      const cr = gl.domElement.getBoundingClientRect();
+      const tx = t.x - cr.left - cr.width / 2;
+      const ty = -(t.y - cr.top - cr.height / 2);
+      // Fingers are imprecise and the gap between covers is wide, so give touch
+      // a little forgiveness. Safe: the nearest-cell snap has already decided
+      // WHICH cover this is — the box only decides whether it counts as a hit.
+      const half = t.coarse
+        ? Math.min(cfg.tileSize / 2 + 16, cellPx / 2)
+        : cfg.tileSize / 2;
+      const hit = cellAt(tx, ty, half);
+      if (hit) {
         // exact on-screen rect of the clicked tile → the player flips out of it
-        const cr = gl.domElement.getBoundingClientRect();
         const ccx = cr.left + cr.width / 2;
         const ccy = cr.top + cr.height / 2;
         let tileRect = { cx: ccx, cy: ccy, size: cfg.tileSize };
         for (let k = 0; k < poolCount; k++) {
           const s = slots.current[k];
-          if (s && s.col === hCol && s.row === hRow) {
+          if (s && s.col === hit.c && s.row === hit.r) {
             tileRect = {
               cx: ccx + s.posX.x,
               cy: ccy - s.posY.x,
@@ -430,7 +450,7 @@ export default function CoversGrid({ config, configRef, apiRef, covers, onFocusC
             break;
           }
         }
-        onOpen?.(contentIdx(hCol, hRow), tileRect, { col: hCol, row: hRow });
+        onOpen?.(contentIdx(hit.c, hit.r), tileRect, { col: hit.c, row: hit.r });
       }
     }
   });

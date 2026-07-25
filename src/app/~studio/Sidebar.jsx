@@ -65,11 +65,7 @@ function ContextMenu({ x, y, post, onStatusChange, onDelete, onClose }) {
           <button
             key={item.label}
             onClick={item.action}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium tracking-body-base outline-none transition-colors duration-150 ${
-              item.danger
-                ? 'text-red-500 hover:bg-red-500/10'
-                : 'hover:bg-[var(--studio-hover)]'
-            }`}
+            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-red-500 hover:bg-red-500/10' : 'hover:bg-[var(--studio-hover)]' }`}
             style={item.danger ? {} : { color: 'var(--studio-text-2)' }}
           >
             <Icon size={12} />
@@ -133,7 +129,7 @@ export default function Sidebar({
           >
             {/* Header */}
             <div className="flex items-center justify-between px-3 pt-12 pb-3">
-              <span className="font-mono text-[10px] tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
+              <span className="font-mono text-ui-2xs tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
                 Posts
               </span>
               <motion.button
@@ -168,9 +164,7 @@ export default function Sidebar({
                       ease: EASE_OUT_QUART,
                       delay: i * 0.05,
                     }}
-                    className={`group flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left transition-all duration-300 ease-out-quart ${
-                      isActive ? 'rounded-lg' : ''
-                    }`}
+                    className={`group flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left transition-all duration-300 ease-out-quart ${ isActive ? 'rounded-lg' : '' }`}
                     style={{
                       color: isActive ? 'var(--studio-text)' : 'var(--studio-text-3)',
                       background: isActive ? 'var(--studio-active)' : 'transparent',
@@ -182,15 +176,15 @@ export default function Sidebar({
                       style={{ color: isActive ? 'var(--color-accent)' : 'var(--studio-text-4)' }}
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-[12px] leading-tight font-medium tracking-body-base">
+                      <p className="truncate text-ui-sm leading-tight font-medium">
                         {post.title}
                       </p>
                       <div className="mt-0.5 flex items-center gap-1.5">
-                        <span className="font-mono text-[9px]" style={{ color: 'var(--studio-text-4)' }}>
+                        <span className="font-mono text-ui-2xs" style={{ color: 'var(--studio-text-4)' }}>
                           {post.date}
                         </span>
                         <span
-                          className="font-mono text-[9px] uppercase"
+                          className="font-mono text-ui-2xs uppercase"
                           style={{
                             color: post.published ? 'rgb(34 197 94 / 0.7)' : 'var(--studio-text-4)',
                           }}

@@ -1,112 +1,101 @@
-import Link from 'next/link'
+import TransitionLink from '@/app/ui/TransitionLink'
+import GlitchText from '@/app/ui/GlitchText'
+import ImageFan from '@/app/ui/ImageFan'
 import { listTierlists } from './lib'
 import NewListButton from './NewListButton'
 import { isDevView } from '@/lib/viewMode'
 
 export const dynamic = 'force-static'
 
-// A small stack of item thumbs that fans out (polaroid-style) on row hover.
-// Desktop (sm+): rests stacked, fans on row hover. Mobile has no hover, so the
-// images render in a permanent side-by-side spread (slightly overlapping +
-// rotated) via the max-width media query in globals.css, keyed off `--off`.
-function PolaroidStack({ covers, slug }) {
-  const pics = (covers || []).filter((c) => c && c.src).slice(0, 3)
-  if (!pics.length) return null
-  const mid = (pics.length - 1) / 2
-  return (
-    <div className="tl-pol-stack shrink-0 self-center">
-      {pics.map(({ src, id }, i) => {
-        const off = i - mid
-        const style = {
-          '--off': off,
-          '--rest': `rotate(${off * 5}deg)`,
-          '--hov': `rotate(${off * 15}deg) translate(${off * 26}px, ${-9 - (mid - Math.abs(off)) * 3}px)`,
-          '--d': `${i * 35}ms`,
-          // Ascending so the last thumb sits on top. View-transition groups
-          // paint in DOM order (last on top), so matching the resting stack to
-          // that order means nothing re-stacks when the morph overlay lifts —
-          // which was the "reconcile" flip on the way back to the index.
-          zIndex: i,
-          // Shared name with the matching tile in the detail view: the browser
-          // morphs this thumb into its tier position (and back) across the nav.
-          viewTransitionName: `tl-${slug}-${id}`,
-        }
-        return (
-          <div key={i} className="tl-pol squircle-sm" style={style}>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt="" />
-          </div>
-        )
-      })}
-    </div>
-  )
+export const metadata = {
+  title: 'Tier Lists',
+  description: 'Things, ranked.',
+  alternates: {
+    canonical: '/tierlist',
+  },
+  openGraph: {
+    type: 'website',
+    title: 'Tier Lists',
+    description: 'Things, ranked.',
+    url: 'https://herb.art/tierlist',
+  },
 }
 
+// The index is a reading page, not the app view — same shell, type scale, row
+// rhythm and entrance stagger as /blog, so the two indexes feel like one site.
+// The full-height shell lives in [slug]/layout.jsx, where the tier grid needs it.
 export default async function TierListIndex() {
   const lists = await listTierlists()
   const isDev = isDevView()
 
   return (
-    <div className="h-full w-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-3xl px-6 py-12 sm:px-8">
-        <header className="tl-fade mb-8 flex items-end justify-between gap-4">
-          <h1 className="text-5xl font-bold tracking-tighter sm:text-6xl">
-            Tier&nbsp;Lists
+    <div className="bg-slate-100 min-h-dvh">
+      <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
+        <header className="mb-8 flex items-end justify-between gap-4">
+          <h1 className="text-ink text-4xl font-bold tracking-tighter md:text-6xl">
+            <GlitchText text="Tier Lists" />
           </h1>
           {isDev ? <NewListButton /> : null}
         </header>
 
         {lists.length === 0 ? (
-          <p className="text-dark/40">
+          <p className="text-ink-secondary">
             No lists yet.{isDev ? ' Hit “New list” to make one.' : ''}
           </p>
         ) : (
-          <ul className="flex flex-col">
+          <ul className="flex flex-col gap-6">
             {lists.map((list, i) => (
               <li
                 key={list.slug}
-                className="tl-fade"
-                style={{ animationDelay: `${i * 0.04}s` }}
+                className="tl-list-item"
+                style={{ animationDelay: `${0.2 + i * 0.08}s` }}
               >
-                <Link href={`/tierlist/${list.slug}`} className="group block">
-                  <div className="tl-row ease-out-quart flex items-center justify-between gap-5 py-4 transition-transform duration-300 group-hover:translate-x-1">
-                    <div className="min-w-0">
-                      <h2 className="text-dark truncate text-2xl font-semibold transition-colors group-hover:text-blue-500">
+                <TransitionLink
+                  href={`/tierlist/${list.slug}`}
+                  className="group block"
+                >
+                  <article className="border-dark/10 ease-out-quart flex items-center justify-between gap-6 border-b pb-6 transition-transform duration-300 group-hover:translate-x-1">
+                    <div className="min-w-0 flex-1">
+                      <span className="text-ink-secondary text-sm tabular-nums">
+                        {list.rankedCount} of {list.count} ranked
+                      </span>
+                      <h2 className="text-ink mt-1 text-xl font-semibold transition-colors group-hover:text-blue-500 md:text-2xl">
                         {list.title}
                       </h2>
                       {list.description || list.subtitle ? (
-                        <p className="text-dark/45 mt-0.5 truncate text-sm">
+                        <p className="text-ink-secondary mt-2">
                           {list.description || list.subtitle}
                         </p>
                       ) : null}
-                    </div>
-
-                    <div className="flex shrink-0 items-center gap-5">
-                      {list.covers?.length ? (
-                        <PolaroidStack covers={list.covers} slug={list.slug} />
-                      ) : (
-                        // fallback for image-less lists: tier color spectrum
-                        <div className="squircle-sm hidden h-4 overflow-hidden sm:flex">
+                      {/* Occupies the slot a post's tags do on /blog: the list's
+                          own tier palette, so the row still says something at a
+                          glance when there are no cover images. */}
+                      {list.tiers.length ? (
+                        <div className="squircle-sm mt-3 flex h-3.5 w-fit overflow-hidden">
                           {list.tiers.map((t) => (
                             <span
                               key={t.id}
-                              className="h-full w-4"
+                              className="h-full w-3.5"
                               style={{ backgroundColor: t.color }}
                             />
                           ))}
                         </div>
-                      )}
-                      <span className="text-dark/40 text-sm tabular-nums">
-                        {list.rankedCount}/{list.count}
-                      </span>
+                      ) : null}
                     </div>
-                  </div>
-                </Link>
+
+                    {/* Each thumb shares a view-transition name with its tile in
+                        the tier grid, so it flies into place on the way in. */}
+                    <ImageFan
+                      images={list.covers}
+                      sharePrefix={`tl-${list.slug}-`}
+                    />
+                  </article>
+                </TransitionLink>
               </li>
             ))}
           </ul>
         )}
-      </div>
+      </main>
     </div>
   )
 }

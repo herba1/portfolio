@@ -1,9 +1,7 @@
 'use client'
 
-import dynamic from 'next/dynamic'
-
-const TierListEditor = dynamic(() => import('./TierListEditor'), { ssr: false })
+import ClientOnly from '@/app/ui/ClientOnly'
 
 export default function EditorMount({ slug }) {
-  return <TierListEditor slug={slug} />
+  return <ClientOnly load={() => import('./TierListEditor')} slug={slug} />
 }

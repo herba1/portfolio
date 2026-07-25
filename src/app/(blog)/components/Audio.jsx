@@ -117,11 +117,11 @@ export function Audio({ src, title, caption }) {
         <div className="squircle-sm bg-linear-to-b from-white to-slate-50 border-dark/10 shadow-dark/5 inset-shadow-white/80 flex min-w-0 flex-1 flex-col gap-1.5 border p-3 shadow-sm inset-shadow-sm">
           <div className="flex items-center justify-between gap-2">
             {title && (
-              <span className="tracking-body-base text-dark truncate text-xs font-medium">
+              <span className="text-ink truncate text-xs font-medium">
                 {title}
               </span>
             )}
-            <span className="text-dark/30 shrink-0 font-mono text-[10px] tabular-nums">
+            <span className="text-ink-tertiary shrink-0 font-mono text-ui-2xs tabular-nums">
               {formatTime(currentTime)}{duration ? ` / ${formatTime(duration)}` : ''}
             </span>
           </div>
@@ -141,7 +141,7 @@ export function Audio({ src, title, caption }) {
       </div>
 
       {caption && (
-        <figcaption className="text-dark/50 mt-2 text-center text-sm">
+        <figcaption className="text-ink-secondary mt-2 text-center text-sm">
           {caption}
         </figcaption>
       )}

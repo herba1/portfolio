@@ -14,7 +14,7 @@ export function LinkButton({ href, children, variant = 'primary' }) {
       'hover:shadow-lg hover:shadow-slate-900/35',
     ),
     outline: cn(
-      'bg-transparent text-dark border border-dark/15',
+      'bg-transparent text-ink border border-dark/15',
       'shadow-sm hover:shadow-md hover:bg-dark/5',
     ),
   }
@@ -28,7 +28,7 @@ export function LinkButton({ href, children, variant = 'primary' }) {
       {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
       className={cn(
         'squircle inline-block px-6 py-2.5',
-        'tracking-body-base text-center text-sm font-medium',
+        'text-center text-sm font-medium',
         'transition-all duration-300 ease-out-quart',
         'hover:scale-105 active:scale-95',
         styles[variant] || styles.primary,

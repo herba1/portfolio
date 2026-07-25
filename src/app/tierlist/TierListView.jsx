@@ -5,7 +5,7 @@
 // bubble above it that springs open from its tail (bottom-centre) and grows its
 // width to fit the text. Intro + exit handled by AnimatePresence.
 
-import { useState, useRef, useLayoutEffect, useEffect } from 'react'
+import { useState, useRef, useLayoutEffect, useEffect, ViewTransition } from 'react'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 
@@ -96,7 +96,7 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
               className="flex aspect-square h-full shrink-0 items-center justify-center"
               style={{ backgroundColor: tier.color }}
             >
-              <span className="text-[clamp(1.5rem,5vh,3rem)] leading-none font-bold tracking-tight text-black/85">
+              <span className="text-[clamp(1.5rem,5vh,3rem)] leading-none font-bold tracking-tight text-ink">
                 {tier.label}
               </span>
             </div>
@@ -105,16 +105,12 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
             <ScrollRow index={rowIndex}>
               {rowItems.map((item) => {
                 const text = (item.note || item.label || '').trim()
-                const vtName = coverSet.has(item.id)
-                  ? `tl-${slug}-${item.id}`
-                  : undefined
-                return (
+                const tile = (
                   <div
                     key={item.id}
                     onClick={canHover || !text ? undefined : (e) => onTap(e, item)}
                     onMouseEnter={canHover && text ? (e) => show(e, item) : undefined}
                     onMouseLeave={canHover ? () => closeIf(item.id) : undefined}
-                    style={vtName ? { viewTransitionName: vtName } : undefined}
                     className={`tl-item group relative aspect-square h-[82%] shrink-0 overflow-hidden bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)] ring-1 ring-black/5 ${
                       text && !canHover ? 'cursor-pointer' : ''
                     }`}
@@ -127,6 +123,32 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
                       className="h-full w-full object-cover"
                     />
                   </div>
+                )
+
+                // The first few items also appear as the fan thumbs on the
+                // index, so those two elements share a name and the browser
+                // morphs one into the other across the navigation.
+                //
+                // Only `share` is set — `enter`/`exit`/`update` are "none", so
+                // React hands the browser a view-transition-name *only* when
+                // both ends are present in the same navigation. Leaving the
+                // page for anywhere else, the tile stays inside the page
+                // snapshot and travels with it; an always-on name would lift it
+                // out and cross-fade it on its own default timing while the
+                // page slid away underneath. See ImageFan.jsx for the other end.
+                if (!coverSet.has(item.id)) return tile
+
+                return (
+                  <ViewTransition
+                    key={item.id}
+                    name={`tl-${slug}-${item.id}`}
+                    share="tl-share"
+                    enter="none"
+                    exit="none"
+                    update="none"
+                  >
+                    {tile}
+                  </ViewTransition>
                 )
               })}
             </ScrollRow>

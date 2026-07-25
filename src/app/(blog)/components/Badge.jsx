@@ -1,7 +1,7 @@
 import { cn } from '@/lib/utils'
 
 const styles = {
-  default: 'bg-dark/5 text-dark/60',
+  default: 'bg-dark/5 text-ink-secondary',
   blue: 'bg-blue-50 text-blue-600',
   green: 'bg-green-50 text-green-700',
   amber: 'bg-amber-50 text-amber-700',

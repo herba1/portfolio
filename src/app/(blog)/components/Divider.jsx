@@ -3,7 +3,7 @@ export function Divider({ label }) {
     return (
       <div className="my-12 flex items-center gap-4">
         <div className="blog-divider-line bg-dark/10 h-px flex-1 origin-left" />
-        <span className="text-dark/30 font-mono text-xs tracking-widest uppercase">
+        <span className="text-ink-tertiary font-mono text-xs tracking-widest uppercase">
           {label}
         </span>
         <div className="blog-divider-line bg-dark/10 h-px flex-1 origin-right" />

@@ -6,7 +6,7 @@ const styles = {
   warning: 'border-amber-200 bg-linear-to-b from-amber-50 to-amber-100/80 text-amber-900 shadow-amber-200/40 inset-shadow-white/60',
   error: 'border-red-200 bg-linear-to-b from-red-50 to-red-100/80 text-red-900 shadow-red-200/40 inset-shadow-white/60',
   success: 'border-green-200 bg-linear-to-b from-green-50 to-green-100/80 text-green-900 shadow-green-200/40 inset-shadow-white/60',
-  note: 'border-dark/10 bg-linear-to-b from-white to-slate-50 text-dark shadow-dark/5 inset-shadow-white/80',
+  note: 'border-dark/10 bg-linear-to-b from-white to-slate-50 text-ink shadow-dark/5 inset-shadow-white/80',
 }
 
 export function Callout({ type = 'note', title, children }) {
@@ -19,7 +19,7 @@ export function Callout({ type = 'note', title, children }) {
       )}
     >
       {title && (
-        <p className="mb-1.5 text-sm font-semibold tracking-body-base">
+        <p className="mb-1.5 text-sm font-semibold">
           {title}
         </p>
       )}

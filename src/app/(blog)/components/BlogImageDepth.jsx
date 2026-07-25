@@ -113,7 +113,7 @@ export function BlogImageDepth({
       </div>
 
       {caption && (
-        <figcaption className="mt-3 text-center text-sm text-dark/50">
+        <figcaption className="mt-3 text-center text-sm text-ink-secondary">
           {caption}
         </figcaption>
       )}

@@ -4,11 +4,11 @@
    labels or faded text — composition is space + solid type. A vertical audio
    waveform (Waveform.jsx, the site's bar style flipped 90°) streams down a
    centred, max-width column; the note + figures rest in the lower band.
-   Helvetica Neue, light slate paper, solid black ink + green when in tune.
+   Geist, light slate paper, solid black ink + green when in tune.
    ───────────────────────────────────────────────────────────────────────── */
 
 .tuner {
-  --paper: #f1f5f9;
+  --paper: var(--color-surface);
   --ink: #15161a;
   --muted: #8b9199; /* solid (NOT low-opacity) — only for inactive affordances */
   --good: #1c8f4e;
@@ -20,7 +20,7 @@
   overscroll-behavior: none; /* no rubber-band / scroll chaining off this screen */
   background: var(--paper);
   color: var(--ink);
-  font-family: var(--font-sans, "Helvetica Neue", Helvetica, Arial, sans-serif);
+  font-family: var(--font-sans);
   view-transition-name: none;
 }
 .tuner *,

@@ -213,8 +213,8 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
               style={{ background: 'var(--studio-surface)' }}
             >
               <Upload size={24} className="text-accent" />
-              <p className="text-[13px] font-medium tracking-body-base" style={{ color: 'var(--studio-text-2)' }}>Drop to upload</p>
-              <p className="text-[11px]" style={{ color: 'var(--studio-text-3)' }}>Images, videos, or audio</p>
+              <p className="text-ui font-medium" style={{ color: 'var(--studio-text-2)' }}>Drop to upload</p>
+              <p className="text-ui-xs" style={{ color: 'var(--studio-text-3)' }}>Images, videos, or audio</p>
             </motion.div>
           </motion.div>
         )}
@@ -232,7 +232,7 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
             style={{ background: 'var(--studio-surface)', borderColor: 'var(--studio-border)', color: 'var(--studio-text-2)' }}
           >
             <Loader2 size={13} className="animate-spin text-accent" />
-            <span className="text-[11px] font-medium tracking-body-base">Uploading...</span>
+            <span className="text-ui-xs font-medium">Uploading...</span>
           </motion.div>
         )}
       </AnimatePresence>

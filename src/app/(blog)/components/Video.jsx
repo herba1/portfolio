@@ -19,7 +19,7 @@ export function Video({
         className="w-full rounded-lg"
       />
       {caption && (
-        <figcaption className="mt-2 text-center text-sm text-dark/50">
+        <figcaption className="mt-2 text-center text-sm text-ink-secondary">
           {caption}
         </figcaption>
       )}

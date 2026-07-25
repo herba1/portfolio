@@ -358,28 +358,66 @@
   --ease-in-out-expo: cubic-bezier(1, 0, 0, 1);
   --ease-in-out-circ: cubic-bezier(.785, .135, .15, .86);
 
-  /* — Color tokens ——————————————————————————— */
-  --color-dark: #1a1a1a;
-  --color-light: #f1f5f9;       /* slate-100, matches body bg */
-  --color-muted: #64748b;       /* slate-500, secondary text */
-  --color-border: #e2e8f0;      /* slate-200, borders/dividers */
-  --color-accent: #3b82f6;      /* blue-500, interactive accent */
+  /* ─────────────────────────────────────────────────────────────────
+   * COLOR — three tiers, one direction of reference.
+   *
+   *   TIER 1  primitive   raw hex. Declared exactly once. If a value
+   *                       appears twice in this file, that's a bug.
+   *   TIER 2  semantic    role-based. Answers "what is this for?",
+   *                       never "what color is it?".
+   *   alias               historical names, kept so existing call sites
+   *                       keep working. Don't add new uses.
+   *
+   * Nothing outside Tier 2 should reference a Tier 1 token directly.
+   * ───────────────────────────────────────────────────────────────── */
+
+  /* ── Tier 1 · primitives ── */
+  --base-near-black: #1a1a1a;
+  --base-slate-100: #f1f5f9;
+  --base-slate-200: #e2e8f0;
+  --base-slate-400: #94a3b8;
+  --base-slate-500: #64748b;
+  --base-blue-500: #3b82f6;
+
+  /* ── Tier 2 · semantic ── */
+  --color-surface: var(--base-slate-100);  /* page background */
+  --color-border: var(--base-slate-200);   /* borders, dividers */
+  --color-accent: var(--base-blue-500);    /* interactive accent */
+
+  /* ── Aliases · deprecated, do not add new uses ──
+   * `--color-dark` is still the honest name when the near-black is used
+   * as a TINT rather than as ink (bg-dark/5, border-dark/10) — that's a
+   * primitive-at-alpha use and is fine. For text, prefer `text-ink*`. */
+  --color-dark: var(--base-near-black);
+  --color-light: var(--color-surface);
+  --color-muted: var(--base-slate-500);
 
   /* — Typeface ——————————————————————————————————
-   * Site font: Adobe Fonts "Helvetica Neue LT Pro" (Typekit kit
-   * psc2klr, loaded via <link> in layout.js). This token is the single
-   * source of truth — it drives the `font-sans` utility, Tailwind's
-   * base font, and the `.font-sans-base` helper used by components. */
-  --font-sans: "helvetica-neue-lt-pro", "Helvetica Neue", Helvetica, Arial, system-ui, sans-serif;
+   * Geist (Vercel), self-hosted by next/font at build time — see
+   * fonts.js. These tokens are the single source of truth: they drive
+   * the `font-sans` / `font-mono` utilities, Tailwind's base font, and
+   * the `.font-sans-base` helper used by components. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  /* Two-weight system — Helvetica Neue carries the whole site on just
-   * Regular (400) + Bold (700); the in-between weights read muddy. These
-   * overrides collapse the Tailwind weight utilities onto the two we keep,
-   * so every `font-medium`/`font-light` renders regular and `font-semibold`
-   * renders bold, with no per-component className changes. */
-  --font-weight-light: 400;
-  --font-weight-medium: 400;
-  --font-weight-semibold: 700;
+  /* Full weight axis. Geist is a variable font (100–900), so unlike the
+   * previous Typekit Helvetica — which only had Regular and Bold masters
+   * and turned muddy in between — every step here is a real instance.
+   * That unlocks optical weight compensation in the type scale below:
+   * small text gets slightly heavier so its strokes don't evaporate. */
+  --font-weight-light: 300;
+  --font-weight-normal: 400;
+  --font-weight-medium: 500;
+  --font-weight-semibold: 600;
+  --font-weight-bold: 700;
+
+  /* Intermediate steps off the variable axis, for optical correction
+   * rather than hierarchy. Used by the scale, available as utilities
+   * (`font-meta`, `font-body-sm`, `font-emphasis`, `font-strong`). */
+  --font-weight-meta: 440;
+  --font-weight-body-sm: 490;
+  --font-weight-emphasis: 540;
+  --font-weight-strong: 590;
 
   /* Display tracking for large bold headings (hero / marquee / page titles).
    * Tightened per Herb's call — sits just shy of Tailwind's -0.05em default. */
@@ -387,24 +425,232 @@
 
   --text-6xl: 64px;
 
+  /* Kept for back-compat only. Do NOT add new uses: a single tracking value
+   * cannot be correct at more than one size. The scale below sets tracking
+   * per size automatically — that is the replacement. */
   --tracking-body-base: -0.04em;
   --tracking-heading: -0.01em;
   --tracking-heading-mobile: -0.015em;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * TYPE SCALE — tracking is a FUNCTION OF SIZE, never a constant.
+   *
+   * Two regimes, split at 20px:
+   *   • below 20px  → tracking in PX. The optical correction small text
+   *     needs is near-constant, so it must NOT scale with font-size.
+   *   • 20px and up → tracking in EM, so it scales with the type.
+   * Line-height tightens as size grows (1.3 at 11px → 1.02 at 64px):
+   * large type needs proportionally less air than small type.
+   *
+   * WEIGHT is the third function of size. Geist's variable axis lets the
+   * small steps carry slightly more weight so their strokes hold up, and
+   * lets the display steps sit at 600 rather than a heavy 700. Explicit
+   * `font-*` utilities still override these per element.
+   *
+   * Tuned for Geist, which is a tighter, more geometric grotesque than
+   * the previous Helvetica — so the display end needs less negative
+   * tracking than Helvetica did, and the small end sits near zero.
+   * ───────────────────────────────────────────────────────────────── */
+
+  /* Dense UI text — px tracking, optically heavier */
+  --text-ui-2xs: 10px;
+  --text-ui-2xs--line-height: 13px;
+  --text-ui-2xs--letter-spacing: 0px;
+  --text-ui-2xs--font-weight: 500;
+
+  --text-ui-xs: 11px;
+  --text-ui-xs--line-height: 14px;
+  --text-ui-xs--letter-spacing: -0.05px;
+  --text-ui-xs--font-weight: 500;
+
+  --text-ui-sm: 12px;
+  --text-ui-sm--line-height: 16px;
+  --text-ui-sm--letter-spacing: -0.1px;
+  --text-ui-sm--font-weight: 500;
+
+  --text-ui: 13px;
+  --text-ui--line-height: 18px;
+  --text-ui--letter-spacing: -0.1px;
+  --text-ui--font-weight: 490;
+
+  --text-ui-lg: 14px;
+  --text-ui-lg--line-height: 20px;
+  --text-ui-lg--letter-spacing: -0.09px;
+  --text-ui-lg--font-weight: 450;
+
+  /* Body / prose */
+  --text-body: 16px;
+  --text-body--line-height: 24px;
+  --text-body--letter-spacing: -0.18px;
+
+  --text-body-lg: 18px;
+  --text-body-lg--line-height: 28px;
+  --text-body-lg--letter-spacing: -0.2px;
+
+  /* Titles — em tracking, 600 ceiling (700 is reserved for display) */
+  --text-title-sm: 20px;
+  --text-title-sm--line-height: 25px;
+  --text-title-sm--letter-spacing: -0.01em;
+  --text-title-sm--font-weight: 600;
+
+  --text-title: 24px;
+  --text-title--line-height: 29px;
+  --text-title--letter-spacing: -0.015em;
+  --text-title--font-weight: 600;
+
+  --text-title-lg: 32px;
+  --text-title-lg--line-height: 37px;
+  --text-title-lg--letter-spacing: -0.02em;
+  --text-title-lg--font-weight: 600;
+
+  --text-title-xl: 40px;
+  --text-title-xl--line-height: 44px;
+  --text-title-xl--letter-spacing: -0.025em;
+  --text-title-xl--font-weight: 600;
+
+  --text-display: 64px;
+  --text-display--line-height: 1.02;
+  --text-display--letter-spacing: -0.032em;
+  --text-display--font-weight: 600;
+
+  /* Retrofit the stock Tailwind scale with the same size-aware curve, so
+   * every existing `text-sm` / `text-xl` / `text-4xl` call site is corrected
+   * without touching a single component. Values retuned for Geist. */
+  --text-xs--letter-spacing: -0.1px;
+  --text-sm--letter-spacing: -0.09px;
+  --text-base--letter-spacing: -0.18px;
+  --text-lg--letter-spacing: -0.2px;
+  --text-xl--letter-spacing: -0.01em;
+  --text-2xl--letter-spacing: -0.015em;
+  --text-3xl--letter-spacing: -0.018em;
+  --text-4xl--letter-spacing: -0.022em;
+  --text-5xl--letter-spacing: -0.026em;
+  --text-6xl--letter-spacing: -0.032em;
+  --text-7xl--letter-spacing: -0.034em;
+  --text-8xl--letter-spacing: -0.036em;
+  --text-9xl--letter-spacing: -0.038em;
+
+  /* Tailwind pins every size from 5xl up to line-height:1, which flattens
+   * the curve exactly where it should keep tightening — and 1.0 is too
+   * tight for display type that ever wraps to two lines (descenders on
+   * line one meet cap-heights on line two). Continue the curve instead:
+   * 4xl already sits at 1.11, so pick up from there and ease down. */
+  --text-5xl--line-height: 1.06;
+  --text-6xl--line-height: 1.04;
+  --text-7xl--line-height: 1.02;
+  --text-8xl--line-height: 1;
+  --text-9xl--line-height: 0.98;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * INK — solid text colors. Hierarchy comes from a real color step,
+   * never from fading the primary ink with an opacity modifier.
+   * (Faded ink is unreliable over any non-flat surface and reads as
+   * disabled rather than secondary.)
+   * ───────────────────────────────────────────────────────────────── */
+  --color-ink: var(--base-near-black);         /* primary — headlines, anything you must read */
+  --color-ink-secondary: var(--base-slate-500); /* labels, meta, timestamps — the most-used ink */
+  --color-ink-tertiary: var(--base-slate-400);  /* placeholders, de-emphasis */
+
+  /* ─────────────────────────────────────────────────────────────────
+   * OPENTYPE FEATURES
+   *
+   * A font file ships more glyphs than it shows you. Features are named
+   * switches that swap one glyph for another — a different `a`, a `1`
+   * that occupies the same width as every other digit, a real ligature.
+   * They cost nothing (no extra download, no repaint) because the
+   * alternates are already inside the file you loaded.
+   *
+   * Read from the Geist binaries, these are the tags actually present:
+   *   Sans: aalt case ccmp dlig dnom frac liga locl numr ordn pnum
+   *         sinf ss01–ss11 subs sups tnum   (+ kern/mark/mkmk)
+   *   Mono: same minus liga/dlig/pnum/tnum/ss05
+   *
+   * Geist has NO cvXX character variants and NO `zero` tag — it exposes
+   * its alternates as eleven stylistic sets instead:
+   *   ss01 No tail a          ss07 Alt arrows
+   *   ss02 Alt a              ss08 Rounded dot
+   *   ss03 Alt l              ss09 Alt numbers (Mono: non-slashed zero)
+   *   ss04 Alt R              ss10 Alternative enclosing shapes
+   *   ss05 Alt I (Sans only)  ss11 Contextual brand styles (Mono: coding ligatures)
+   *
+   * Baseline below is deliberately conservative: kerning and standard
+   * ligatures only — i.e. render Geist the way it was drawn. (Geist ships
+   * no `calt`, so there is no contextual-alternates switch to set.) The
+   * stylistic sets are opt-in utilities further down so they can be tried
+   * per element rather than imposed site-wide. */
+  --font-features-base: "kern" 1, "liga" 1;
+
+  /* Numeric contexts. `tnum` locks every digit to one advance width so a
+   * changing value doesn't reflow the text around it. */
+  --font-features-numeric: "kern" 1, "tnum" 1;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * RADIUS — derived by algebra from a single seed, so the whole family
+   * moves together if the seed changes. Subtractive at the small end,
+   * which keeps every step soft and never reaches a sharp corner.
+   * ───────────────────────────────────────────────────────────────── */
+  --radius: 0.7rem;                        /* 11.2px seed */
+  --radius-xs: calc(var(--radius) - 6px);  /*  5.2px */
+  --radius-sm: calc(var(--radius) - 4px);  /*  7.2px */
+  --radius-md: calc(var(--radius) - 2px);  /*  9.2px */
+  --radius-lg: var(--radius);              /* 11.2px */
+  --radius-xl: calc(var(--radius) + 4px);  /* 15.2px */
+  --radius-2xl: 1rem;
+  --radius-3xl: 1.5rem;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * ELEVATION — deliberately almost invisible. Separation is carried by
+   * borders and surface steps; shadow is the last resort, not the first.
+   * ───────────────────────────────────────────────────────────────── */
+  --shadow-xs: 0 1px 2px #00000005;
+  --shadow-sm: 0 2px 4px #00000008;
+  --shadow-md: 0 8px 16px #0000000f;
+  --shadow-lg: 0 12px 24px #0000001a;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * MOTION — durations to pair with the easing curves above. Split by
+   * property: transforms move faster than colors.
+   * ───────────────────────────────────────────────────────────────── */
+  --duration-color: 100ms;
+  --duration-press: 120ms;
+  --duration-base: 150ms;
+  --duration-overlay: 200ms;
+  --duration-slow: 300ms;
 }
 
-/* Helvetica Neue LT Pro is the site-wide default. Apply at the root so
-   every element inherits it unless explicitly overridden.
-   `font-synthesis: none` forbids the browser from faking weights/italics —
-   we only ever render the real Typekit masters (Regular 400 + Bold 700),
-   never a synthesized faux-bold. */
+/* Geist is the site-wide default. Applied at the root so every element
+   inherits it unless explicitly overridden.
+   `font-synthesis: none` forbids the browser from faking weights and
+   italics — Geist is variable and ships real instances across 100–900,
+   so a synthesized faux-bold would only ever be worse than the real one.
+   `antialiased` matches how the face was hinted for screen. */
 html {
   font-family: var(--font-sans);
   font-synthesis: none;
+  font-feature-settings: var(--font-features-base);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* KERNING — pair-specific spacing baked into the font (the "Av" / "To"
+   fit), as distinct from tracking, which is a uniform amount added to
+   every gap. Kerning is on by default for most text, but browsers drop
+   it in some cases; `normal` states the intent and survives any element
+   that sets its own font-feature-settings. */
+body {
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures;
+
+  /* Inherited tracking default for text that carries NO size utility.
+     A px value on purpose: it stays a small fixed correction no matter
+     what size a descendant is, and any element with a `text-*` utility
+     overrides it with the right value from the scale. */
+  letter-spacing: var(--text-base--letter-spacing);
 }
 
 /* Back-compat alias: existing CSS still references var(--font-geist)
    (prose headings, tuner.css, covers.css). Point it at the sans token
-   so those resolve to Helvetica with no per-file edits. */
+   so those resolve with no per-file edits. */
 :root {
   --font-geist: var(--font-sans);
 }
@@ -416,17 +662,66 @@ html {
   font-family: var(--font-sans);
 }
 
+/* Any number that sits in a column, or that changes in place (clocks,
+   counters, prices, timers). Locks every digit to the same advance width so
+   the value updates without the surrounding text shifting. */
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--font-features-numeric);
+}
+
+/* ── Geist stylistic sets — opt-in ───────────────────────────────
+ * Each swaps a specific glyph. Try them on an element rather than
+ * site-wide; they change the character of the face.
+ *   .ss-alt-a      single-storey `a`            (ss02)
+ *   .ss-tail-l     `l` with a tail — disambiguates l / I / 1  (ss03)
+ *   .ss-alt-i      `I` with serifs — same purpose             (ss05)
+ *   .ss-alt-g      alternate `G`                              (ss06)
+ *   .ss-alt-nums   alternate figures                          (ss09)
+ *   .ss-legible    ss03 + ss05 together — the pairing worth
+ *                  reaching for on dense UI or anything code-adjacent
+ * ─────────────────────────────────────────────────────────────── */
+.ss-alt-a     { font-feature-settings: var(--font-features-base), "ss02" 1; }
+.ss-tail-l    { font-feature-settings: var(--font-features-base), "ss03" 1; }
+.ss-alt-i     { font-feature-settings: var(--font-features-base), "ss05" 1; }
+.ss-alt-g     { font-feature-settings: var(--font-features-base), "ss06" 1; }
+.ss-alt-nums  { font-feature-settings: var(--font-features-base), "ss09" 1; }
+.ss-legible   { font-feature-settings: var(--font-features-base), "ss03" 1, "ss05" 1; }
+
+/* Geist Mono. Monospace needs no kerning or ligature switches (every
+   glyph is one advance width), so its baseline is simply the family.
+   Its zero is slashed BY DEFAULT — ss09 would turn that off, so we
+   deliberately don't enable it. ss11 adds coding ligatures. */
+.font-mono-base { font-family: var(--font-mono); }
+.ss-code-ligatures { font-feature-settings: "ss11" 1; }
+
+/* Styling ::-webkit-scrollbar (below) opts this site out of macOS overlay
+   scrollbars — every scrollable page reserves a real 8px of layout width for
+   it. Routes that fill the viewport without scrolling the document (a tier
+   list, the 404) therefore have no scrollbar at all, and navigating to one
+   widens the page by 8px: every centred column and the fixed navbar jump
+   sideways. Reserving the gutter unconditionally keeps the content box the
+   same width on every route, so nothing moves.
+
+   Set on both elements on purpose: `overflow-x: hidden` on <body> makes body
+   the viewport-defining element, and the browser reads scrollbar-gutter off
+   whichever of the two that is. */
+html,
+body {
+  scrollbar-gutter: stable;
+}
+
 /* Webkit browsers (Chrome, Safari, Edge) */
 ::-webkit-scrollbar {
   width: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9; /* slate-100, matches homepage bg */
+  background: var(--color-surface); /* slate-100, matches homepage bg */
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #1a1a1a;
+  background: var(--color-dark);
   border-radius: 0px;
 }
 
@@ -437,7 +732,7 @@ html {
 /* Firefox */
 * {
   scrollbar-width: thin; /* or 'auto' or 'none' */
-  scrollbar-color: #1a1a1a #f1f5f9; /* thumb track */
+  scrollbar-color: var(--color-dark) var(--color-surface); /* thumb track */
 }
 
 @supports (scrollbar-width: none) {
@@ -826,7 +1121,7 @@ html {
 }
 
 .studio-light {
-  --studio-bg:        #f1f5f9;
+  --studio-bg:        var(--color-surface);
   --studio-surface:   #ffffff;
   --studio-text:      #0f0f0f;
   --studio-text-2:    rgba(0,0,0,0.60);
@@ -841,6 +1136,37 @@ html {
  * TIER LIST
  * ───────────────────────────────────────────── */
 
+/* Shared-element morph: an index fan thumb ↔ its tile in the tier grid.
+ *
+ * Both ends are wrapped in <ViewTransition name="tl-<slug>-<id>" share="…">,
+ * so React only hands the browser a view-transition-name when BOTH ends are on
+ * screen for the same navigation (index ⇄ that list). Every other navigation
+ * leaves the thumbs unnamed and they travel inside the page-content snapshot
+ * with the rest of the page — see the ViewTransition comment in ImageFan.jsx.
+ *
+ * The morph is timed to the page-content enter so the thumb and the page it is
+ * flying into arrive together; the default 0.25s ease landed early and read as
+ * a separate, detached animation. */
+::view-transition-group(.tl-share) {
+  animation-duration: 0.35s;
+  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+/* Both ends are the same image, so the cross-fade is only there to cover the
+   aspect-ratio change — keep it short and let the morph carry the eye. */
+::view-transition-old(.tl-share),
+::view-transition-new(.tl-share) {
+  animation-duration: 0.2s;
+  animation-timing-function: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(.tl-share),
+  ::view-transition-old(.tl-share),
+  ::view-transition-new(.tl-share) {
+    animation: none !important;
+  }
+}
+
 /* Soft staggered fade-up for rows + header on first paint */
 /* Opacity-only on purpose: a translateY here offsets the row while the browser
    snapshots the view-transition morph targets (the fan thumbs / title), so the
@@ -853,6 +1179,17 @@ html {
 
 .tl-fade {
   animation: tl-fade-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* Index rows. Same duration, easing and stagger as .blog-list-item over on the
+   Writing index — but fading only, without that one's 20px rise.
+   The rise is dropped on purpose: a row's transform is baked into the
+   view-transition group of any fan thumb inside it, so a row still sliding when
+   the browser snapshots the incoming page hands the morph a target 20px below
+   where the thumb actually comes to rest. The tile lands there, the overlay
+   lifts, and it visibly jumps into place. Fading leaves the geometry alone. */
+.tl-list-item {
+  animation: tl-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 /* gentle cascade down the rows */
 .tl-fade:nth-child(2) { animation-delay: 0.04s; }
@@ -899,34 +1236,8 @@ html {
   animation: tl-fade-up 0.2s ease both;
 }
 
-/* Index hover preview — a small stack of item thumbs that fan out like
- * polaroids when you hover the list row. Transforms set inline per index
- * (--rest stacked, --hov fanned). */
-.tl-pol-stack {
-  position: relative;
-  width: 3.25rem;
-  height: 3.25rem;
-}
-.tl-pol {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
-  transform: var(--rest);
-  transform-origin: bottom center;
-  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.42s ease;
-  transition-delay: var(--d, 0ms);
-}
-.tl-pol img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-.tl-row:hover .tl-pol {
-  transform: var(--hov);
-  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
-}
+/* The tier-list index reuses the shared .pol-stack fan (see INDEX ROW PREVIEW
+ * below) — the same component the Writing index uses for a post's images. */
 
 /* One-time "tug" hint: a row that overflows horizontally nudges its items left
  * and settles back, signalling the track is scrollable. The .tl-hint class is
@@ -946,11 +1257,10 @@ html {
 
 @media (prefers-reduced-motion: reduce) {
   .tl-fade,
+  .tl-list-item,
   .tl-file-veil { animation: none !important; }
   .tl-item,
   .tl-edit-item { transition: none !important; }
-  .tl-pol { transition: none !important; }
-  .tl-row:hover .tl-pol { transform: var(--rest); }
   .tl-track.tl-hint { animation: none !important; }
 }
 
@@ -1017,39 +1327,21 @@ html {
   box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.1);
 }
 
-/* Mobile has no hover, so the fan can't animate open. Render the images as a
- * permanent side-by-side spread — slightly overlapping and rotated. The hover
- * selector is overridden too so a tap can't snap the stack into the desktop
- * fan transform. Keyed off the inline `--off`. */
-@media (max-width: 639px) {
-  .tl-pol-stack {
-    width: 5.5rem;
-    height: 3.25rem;
-  }
-  .tl-pol,
-  .tl-row:hover .tl-pol {
-    width: 2.75rem;
-    height: 2.75rem;
-    inset: auto;
-    top: 50%;
-    left: 50%;
-    transform-origin: center;
-    transform: translate(-50%, -50%)
-      translateX(calc(var(--off) * 1.4rem)) rotate(calc(var(--off) * 7deg));
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
-    transition: none;
-  }
-}
-
-/* Blog index hover preview — a post's images fan out like polaroids when its
- * row is hovered. Same mechanic as .tl-pol, but the hover state is driven by
- * the surrounding post link (.group). Transforms set inline per index. */
-.blog-pol-stack {
+/* ─────────────────────────────────────────────
+ * INDEX ROW PREVIEW — the polaroid fan
+ *
+ * One stack of thumbs that fans out when its row is hovered. Shared by every
+ * index page (Writing → a post's images, Tier Lists → a list's first items) so
+ * the two read as the same site. Hover is always driven by the row link's
+ * `.group`; the per-thumb transforms come in inline (--rest stacked, --hov
+ * fanned, --d stagger) from ImageFan.jsx.
+ * ───────────────────────────────────────────── */
+.pol-stack {
   position: relative;
   width: 3.25rem;
   height: 3.25rem;
 }
-.blog-pol {
+.pol {
   position: absolute;
   inset: 0;
   overflow: hidden;
@@ -1059,20 +1351,20 @@ html {
   transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.42s ease;
   transition-delay: var(--d, 0ms);
 }
-.blog-pol img {
+.pol img {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
-.group:hover .blog-pol {
+.group:hover .pol {
   transform: var(--hov);
   box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .blog-pol { transition: none !important; }
-  .group:hover .blog-pol { transform: var(--rest); }
+  .pol { transition: none !important; }
+  .group:hover .pol { transform: var(--rest); }
 }
 
 /* Mobile has no hover, so the fan can't animate open. Instead render the
@@ -1080,12 +1372,12 @@ html {
  * rotated. The hover selector is overridden too so a tap can't snap the
  * stack into the desktop fan transform. Keyed off the inline `--off`. */
 @media (max-width: 639px) {
-  .blog-pol-stack {
+  .pol-stack {
     width: 5.5rem;
     height: 3.25rem;
   }
-  .blog-pol,
-  .group:hover .blog-pol {
+  .pol,
+  .group:hover .pol {
     width: 2.75rem;
     height: 2.75rem;
     inset: auto;
@@ -1114,7 +1406,7 @@ html {
 
 @media (max-width: 639px) {
   .page-card {
-    background: #f1f5f9; /* slate-100 — matches body so the card reads solid */
+    background: var(--color-surface); /* slate-100 — matches body so the card reads solid */
     min-height: 100dvh; /* dynamic vh: track the visible viewport so a single-
                            screen page (e.g. the tuner) never overflows by the
                            collapsing URL-bar's height and becomes scrollable */
@@ -1140,6 +1432,15 @@ html {
   }
   .page-card.is-active * {
     pointer-events: none !important;
+  }
+  /* When the snapshot transform IS applied (scrolled page), this wrapper becomes
+     the containing block for any position:fixed page content. Give it the card's
+     full box so `inset: 0` resolves to the visible window rather than collapsing
+     to zero height — content in normal flow still overflows freely (the card
+     clips), so the snapshot is unaffected. */
+  .page-card.is-active > .page-card-inner {
+    width: 100%;
+    height: 100dvh;
   }
   /* The actual reveal: slide the fixed window down to expose the menu behind it.
      Lives on its own class so removing it (on close) animates back to 0. */

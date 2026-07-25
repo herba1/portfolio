@@ -1,6 +1,6 @@
 "use client";
 
-// The hero of the poster: the detected note set in big Helvetica — a giant
+// The hero of the poster: the detected note set in big Geist — a giant
 // letter with the accidental and octave riding off it. No segmented LCD, no
 // skeuomorphism; pure type on the grid. Shows an em-dash placeholder when idle.
 

@@ -120,10 +120,10 @@ export default function PreviewPane({ content }) {
               transition={{ duration: 0.4, ease: EASE_OUT_QUART }}
               className="squircle border border-red-200 bg-linear-to-b from-red-50 to-red-100/80 p-5 shadow-sm inset-shadow-sm inset-shadow-white/60"
             >
-              <p className="mb-1.5 font-mono text-[10px] font-semibold tracking-widest text-red-500 uppercase">
+              <p className="mb-1.5 font-mono text-ui-2xs font-semibold tracking-widest text-red-500 uppercase">
                 Preview Error
               </p>
-              <pre className="overflow-auto font-mono text-[12px] leading-relaxed whitespace-pre-wrap text-red-700">
+              <pre className="overflow-auto font-mono text-ui-sm leading-relaxed whitespace-pre-wrap text-red-700">
                 {error.message}
               </pre>
             </motion.div>
@@ -142,7 +142,7 @@ export default function PreviewPane({ content }) {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.3 }}
-              className="text-[13px] tracking-body-base text-dark/30 italic"
+              className="text-ui text-ink-tertiary italic"
             >
               Start writing to see a preview...
             </motion.p>

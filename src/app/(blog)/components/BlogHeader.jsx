@@ -51,12 +51,12 @@ export default function BlogHeader({ title, date, tags, description }) {
       />
       <TransitionLink
         href="/blog"
-        className="blog-header-back tracking-body-base text-dark/50 hover:text-dark mb-6 inline-flex items-center gap-1 text-sm transition-colors"
+        className="blog-header-back text-ink-secondary hover:text-ink mb-6 inline-flex items-center gap-1 text-sm transition-colors"
       >
         <ArrowLeft size={14} />
         Back to writing
       </TransitionLink>
-      <time className="blog-header-date tracking-body-base text-dark/50 block text-sm">
+      <time className="blog-header-date text-ink-secondary block text-sm">
         {new Date(date).toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'long',
@@ -64,7 +64,7 @@ export default function BlogHeader({ title, date, tags, description }) {
         })}
       </time>
       <h1
-        className={`text-dark mt-2 text-4xl font-bold tracking-tighter md:text-5xl`}
+        className={`text-ink mt-2 text-4xl font-bold tracking-tighter md:text-5xl`}
       >
         {chars.map((ch, i) => {
           if (ch === ' ') {
@@ -96,7 +96,7 @@ export default function BlogHeader({ title, date, tags, description }) {
           {tags.map((tag) => (
             <span
               key={tag}
-              className="text-dark/50 bg-dark/5 rounded px-2 py-0.5 text-xs"
+              className="text-ink-secondary bg-dark/5 rounded px-2 py-0.5 text-xs"
             >
               {tag}
             </span>

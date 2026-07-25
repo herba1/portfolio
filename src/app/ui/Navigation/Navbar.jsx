@@ -17,7 +17,7 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={`fixed w-full z-50 nav__container flex items-center justify-between p-4 antialiased md:p-6 ${geist.className} tracking-body-base text-base font-medium ${className}`}
+      className={`fixed w-full z-50 nav__container flex items-center justify-between p-4 antialiased md:p-6 ${geist.className} text-base font-medium ${className}`}
     >
       <div className="nav__left z-50">
         <NavLogo />

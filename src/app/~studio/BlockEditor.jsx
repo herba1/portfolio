@@ -125,9 +125,7 @@ function BlockContextMenu({ x, y, blockIndex, totalBlocks, onAction, onClose }) 
           <button
             key={item.action}
             onClick={() => { onAction(item.action); onClose() }}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-[11px] font-medium tracking-body-base outline-none transition-colors duration-150 ${
-              item.danger ? 'text-red-500 hover:bg-red-500/10' : 'hover:bg-[var(--studio-hover)]'
-            }`}
+            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-red-500 hover:bg-red-500/10' : 'hover:bg-[var(--studio-hover)]' }`}
             style={item.danger ? {} : { color: 'var(--studio-text-2)' }}
           >
             <Icon size={12} />
@@ -161,7 +159,7 @@ function ImageVariantSelect({ currentTag, onSwitch }) {
       <button
         onClick={() => setOpen((o) => !o)}
         onPointerDown={(e) => e.stopPropagation()}
-        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[10px] font-medium tracking-body-base transition-colors duration-150 hover:bg-[var(--studio-hover)]"
+        className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-ui-2xs font-medium transition-colors duration-150 hover:bg-[var(--studio-hover)]"
         style={{ color: 'var(--color-accent)' }}
       >
         {current.label}
@@ -177,9 +175,7 @@ function ImageVariantSelect({ currentTag, onSwitch }) {
             <button
               key={variant.tag}
               onClick={() => { onSwitch(variant.tag); setOpen(false) }}
-              className={`flex w-full items-center rounded-md px-2 py-1.5 text-[11px] font-medium tracking-body-base transition-colors duration-150 hover:bg-[var(--studio-hover)] ${
-                variant.tag === currentTag ? 'text-[var(--color-accent)]' : ''
-              }`}
+              className={`flex w-full items-center rounded-md px-2 py-1.5 text-ui-xs font-medium transition-colors duration-150 hover:bg-[var(--studio-hover)] ${ variant.tag === currentTag ? 'text-[var(--color-accent)]' : '' }`}
               style={{ color: variant.tag === currentTag ? undefined : 'var(--studio-text-2)' }}
             >
               {variant.label}
@@ -240,7 +236,7 @@ function BlockItem({ block, index, totalBlocks, onUpdateBlock, onBlockAction }) 
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="text-[10px] font-medium tracking-widest uppercase" style={{ color: 'var(--studio-text-3)' }}>
+          <p className="text-ui-2xs font-medium tracking-widest uppercase" style={{ color: 'var(--studio-text-3)' }}>
             {block.label}
           </p>
           {block.imageVariant && (
@@ -251,7 +247,7 @@ function BlockItem({ block, index, totalBlocks, onUpdateBlock, onBlockAction }) 
           )}
         </div>
         <p
-          className="mt-0.5 truncate font-mono text-[11px] leading-relaxed"
+          className="mt-0.5 truncate font-mono text-ui-xs leading-relaxed"
           style={{ color: 'var(--studio-text-2)' }}
         >
           {preview(block.content)}
@@ -371,7 +367,7 @@ export default function BlockEditor({ value, onChange }) {
       </Reorder.Group>
 
       {blocks.length === 0 && (
-        <p className="py-8 text-center text-[12px] italic" style={{ color: 'var(--studio-text-3)' }}>
+        <p className="py-8 text-center text-ui-sm italic" style={{ color: 'var(--studio-text-3)' }}>
           No blocks to show
         </p>
       )}

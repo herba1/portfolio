@@ -4,7 +4,7 @@ export function Label({ children, className }) {
   return (
     <span
       className={cn(
-        'text-dark/45 inline-block font-mono text-xs tracking-widest uppercase',
+        'text-ink-tertiary inline-block font-mono text-xs tracking-widest uppercase',
         className,
       )}
     >

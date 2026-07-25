@@ -3,9 +3,7 @@
 import { spencer, geist } from "@/app/fonts";
 import { useRef, useCallback, useEffect } from "react";
 import posthog from "posthog-js";
-import dynamic from "next/dynamic";
-
-const HeroEyes = dynamic(() => import("./Eyes"), { ssr: false });
+import ClientOnly from "../ClientOnly";
 
 function seeded(i) {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453;
@@ -383,9 +381,9 @@ export default function TempPage() {
       ref={containerRef}
       className="relative mx-auto flex h-svh min-h-fit w-full flex-col items-center justify-center pb-[12svh] text-slate-900 selection:bg-black selection:text-white"
     >
-      <HeroEyes />
+      <ClientOnly load={() => import("./Eyes")} />
       <p
-        className={`hero-sub tracking-body-base text-dark text-sm relative z-10 ${geist.className}`}
+        className={`hero-sub text-ink text-sm relative z-10 ${geist.className}`}
         style={{
           padding: "1.5rem 3rem",
           background: `radial-gradient(
@@ -410,7 +408,7 @@ export default function TempPage() {
         onPointerDown={onPointerDown}
       >
         <h1
-          className={`text-dark cursor-grab text-6xl text-[15vw] leading-[1.3] tracking-normal will-change-transform select-none active:cursor-grabbing md:text-8xl ${spencer.className}`}
+          className={`text-ink cursor-grab text-6xl text-[15vw] leading-[1.3] tracking-normal will-change-transform select-none active:cursor-grabbing md:text-8xl ${spencer.className}`}
           style={{ paddingBottom: "0.15em" }}
         >
           {CHARS.map((ch, i) => {

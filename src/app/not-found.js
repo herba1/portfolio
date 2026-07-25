@@ -61,13 +61,13 @@ export default function NotFound() {
     <div className={`flex min-h-dvh flex-col items-center justify-center bg-slate-100 px-6 ${geist.className}`}>
       <div className="flex flex-col items-center gap-8 text-center">
         {/* Glitchy 404 in Spencer */}
-        <h1 className={`text-dark text-[clamp(100px,25vw,200px)] leading-none ${spencer.className}`}>
+        <h1 className={`text-ink text-[clamp(100px,25vw,200px)] leading-none ${spencer.className}`}>
           <GlitchText text="404" baseDelay={0.1} />
         </h1>
 
         {/* Subtitle with blog fade-up entrance */}
         <p
-          className="blog-header-date text-dark/40 max-w-xs text-[15px] leading-relaxed tracking-body-base"
+          className="blog-header-date text-ink-tertiary max-w-xs text-body leading-relaxed"
         >
           This page doesn't exist, or it wandered off somewhere.
         </p>
@@ -76,7 +76,7 @@ export default function NotFound() {
         <div className="blog-header-tags">
           <TransitionLink
             href="/"
-            className="squircle inline-flex items-center gap-2 border border-dark/15 bg-linear-to-b from-white to-slate-50 px-6 py-2.5 text-sm font-medium tracking-body-base text-dark/70 shadow-sm inset-shadow-sm inset-shadow-white/80 transition-all duration-300 ease-out-quart hover:scale-105 hover:text-dark active:scale-95"
+            className="squircle inline-flex items-center gap-2 border border-dark/15 bg-linear-to-b from-white to-slate-50 px-6 py-2.5 text-sm font-medium text-ink-secondary shadow-sm inset-shadow-sm inset-shadow-white/80 transition-all duration-300 ease-out-quart hover:scale-105 hover:text-ink active:scale-95"
           >
             <ArrowLeft size={14} />
             Back home
