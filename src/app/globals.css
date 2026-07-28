@@ -608,6 +608,34 @@
   --color-button-primary-bg-hover: var(--color-accent-hover);
   --color-button-primary-fg: var(--color-ink-inverse);
 
+  /* RAISED — the one lit variant. The gradient is LIGHT, not color: a
+     white ramp sits over a normal solid fill, so the fill is still a
+     single token that can transition on hover, and retinting the button
+     never means re-picking gradient stops. */
+  /* Pure light, no hue — the same ramp works over any fill. Stops bunch
+     at the top because that's where a lit surface loses its intensity. */
+  --raised-light: linear-gradient(
+    180deg,
+    rgb(255 255 255 / 0.22) 0%,
+    rgb(255 255 255 / 0.09) 34%,
+    rgb(255 255 255 / 0.02) 68%,
+    transparent 100%
+  );
+
+  --color-button-raised-bg: var(--color-accent);
+  --color-button-raised-bg-hover: var(--color-accent-hover);
+  --color-button-raised-fg: var(--color-ink-inverse);
+  --color-button-raised-border: color-mix(in oklab, var(--brand-600) 45%, transparent);
+  --color-button-raised-highlight: color-mix(in oklab, white 40%, transparent);
+  --color-button-raised-shadow: color-mix(in oklab, var(--brand-600) 32%, transparent);
+
+  --color-button-raised-inverse-bg: var(--color-surface-inverse);
+  --color-button-raised-inverse-bg-hover: var(--neutral-800);
+  --color-button-raised-inverse-fg: var(--color-ink-inverse);
+  --color-button-raised-inverse-border: color-mix(in oklab, black 45%, transparent);
+  --color-button-raised-inverse-highlight: color-mix(in oklab, white 16%, transparent);
+  --color-button-raised-inverse-shadow: color-mix(in oklab, var(--neutral-950) 30%, transparent);
+
   --color-button-secondary-bg: var(--color-surface-raised);
   --color-button-secondary-bg-hover: var(--color-surface-subtle);
   --color-button-secondary-fg: var(--color-ink);
@@ -1306,6 +1334,12 @@ body {
  * Shape is flat and typographic on purpose — solid fills, 1px lines,
  * soft corners. No gradients standing in for light, no inset highlights
  * faking a bevel, no glass. Depth comes from the surface ladder.
+ *
+ * `.btn--raised` is the one deliberate exception, and it stays an
+ * exception: a call to action inside long-form prose has to out-signal a
+ * paragraph of running text, and a flat fill next to a link doesn't. It
+ * is a lit surface, not an object — a gradient and a 1px top highlight,
+ * no bevel, no plastic, no drop shadow pretending the page has depth.
  * ═════════════════════════════════════════════════════════════════════ */
 
 @layer components {
@@ -1348,6 +1382,7 @@ body {
       transform var(--duration-base) var(--ease-overshoot),
       background-color var(--duration-color) linear,
       border-color var(--duration-color) linear,
+      box-shadow var(--duration-color) linear,
       color var(--duration-color) linear;
   }
   .btn:active {
@@ -1379,9 +1414,83 @@ body {
     border-radius: var(--radius-md);
   }
 
+  /* ── Inline size ────────────────────────────────────────────────────
+   * A button sitting inside a sentence is type first and a box second, so
+   * it sizes off the text around it (`em`, not a step on the UI scale) and
+   * keeps its own line-height well under the prose leading — otherwise the
+   * pill inherits 1.75 and towers over the line it lives in.
+   *
+   * The descendant selector is the whole point: a `<LinkButton>` written
+   * mid-paragraph in MDX lands inside a `<p>`, and a block-level one
+   * doesn't, so the two cases separate themselves with nothing for the
+   * author to remember. */
+  .btn--inline,
+  .blog-article :where(p) .btn {
+    padding: 0.125rem 0.5rem; /* 2px / 8px */
+    font-size: 0.9375em;
+    line-height: 1.45;
+    /* The label is part of the sentence, so it takes the sentence's
+       tracking rather than the UI scale's step for its own size. */
+    letter-spacing: inherit;
+    font-weight: var(--font-weight-medium);
+    border-radius: var(--radius-xs);
+    /* Baseline, not middle: the label has to sit on the same line as the
+       words either side of it, not float against their x-height. */
+    vertical-align: baseline;
+  }
+
   .btn--primary {
     background: var(--color-button-primary-bg);
     color: var(--color-button-primary-fg);
+  }
+
+  /* ── Raised ─────────────────────────────────────────────────────────
+   * The fill stays a flat token and the gradient on top is pure light —
+   * a white ramp, no hue of its own. That keeps `background-color` free
+   * to transition on hover (a `background-image` swap can't animate, so a
+   * two-color gradient would jump), and retinting the button is still a
+   * one-token change.
+   *
+   * Four stops, not two. A linear ramp reads as a printed gradient; real
+   * light loses most of its intensity in the first third and then
+   * flattens, so the stops bunch at the top and the last one does almost
+   * nothing.
+   *
+   * The highlight is a 1px inset line at the TOP EDGE ONLY — the lit lip
+   * of the surface. A full inset ring is a bevel, which is the
+   * skeuomorphic version of this and reads as a plastic key. */
+  .btn--raised {
+    background-color: var(--color-button-raised-bg);
+    background-image: var(--raised-light);
+    color: var(--color-button-raised-fg);
+    border-color: var(--color-button-raised-border);
+    box-shadow:
+      inset 0 1px 0 var(--color-button-raised-highlight),
+      0 1px 2px -1px var(--color-button-raised-shadow);
+  }
+  .btn--raised:hover {
+    background-color: var(--color-button-raised-bg-hover);
+  }
+  /* Pressing kills the highlight: the lit lip is what sells the surface as
+     raised, so it goes the moment the surface is pushed in. */
+  .btn--raised:active {
+    box-shadow: inset 0 1px 2px var(--color-button-raised-shadow);
+  }
+
+  .btn--raised-inverse {
+    background-color: var(--color-button-raised-inverse-bg);
+    background-image: var(--raised-light);
+    color: var(--color-button-raised-inverse-fg);
+    border-color: var(--color-button-raised-inverse-border);
+    box-shadow:
+      inset 0 1px 0 var(--color-button-raised-inverse-highlight),
+      0 1px 2px -1px var(--color-button-raised-inverse-shadow);
+  }
+  .btn--raised-inverse:hover {
+    background-color: var(--color-button-raised-inverse-bg-hover);
+  }
+  .btn--raised-inverse:active {
+    box-shadow: inset 0 1px 2px var(--color-button-raised-inverse-shadow);
   }
   .btn--primary:hover {
     background: var(--color-button-primary-bg-hover);

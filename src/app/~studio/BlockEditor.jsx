@@ -3,7 +3,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Reorder, motion, AnimatePresence } from 'motion/react'
 import { EASE_HOVER, SPRING_SETTLE } from '@/lib/motion'
-import { GripVertical, Code, Type, Image, MessageSquareQuote, AlertTriangle, Music, Video, Youtube, Minus, Tag, ChevronDown, Trash2, Copy, ArrowUp, ArrowDown } from 'lucide-react'
+import { GripVertical, Code, Type, Image, MessageSquareQuote, AlertTriangle, Music, Video, Youtube, Minus, Tag, ChevronDown, Trash2, Copy, ArrowUp, ArrowDown, Upload, Loader2 } from 'lucide-react'
+import { isMediaFile, mediaFilesFrom, uploadMedia } from './mediaUpload'
 
 
 const IMAGE_VARIANTS = [
@@ -261,7 +262,10 @@ function BlockItem({ block, index, totalBlocks, onUpdateBlock, onBlockAction }) 
 export default function BlockEditor({ value, onChange }) {
   const [blocks, setBlocks] = useState([])
   const [contextMenu, setContextMenu] = useState(null)
+  const [dragging, setDragging] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const internalChangeRef = useRef(false)
+  const dragCountRef = useRef(0)
 
   useEffect(() => {
     if (internalChangeRef.current) {
@@ -298,6 +302,71 @@ export default function BlockEditor({ value, onChange }) {
       return updated
     })
   }, [onChange])
+
+  // ── Media drop / paste ──
+
+  const appendSnippet = useCallback((snippet) => {
+    setBlocks((prev) => {
+      const updated = [...prev, { id: `b-${nextId++}`, content: snippet, ...detectBlock(snippet) }]
+      internalChangeRef.current = true
+      queueMicrotask(() => onChange(updated.map((b) => b.content).join('\n\n')))
+      return updated
+    })
+  }, [onChange])
+
+  const uploadFiles = useCallback(async (files) => {
+    if (!files.length) return
+    setUploading(true)
+    try {
+      // Sequential so multi-drops land in the order they were dropped
+      for (const file of files) {
+        const snippet = await uploadMedia(file)
+        if (snippet) appendSnippet(snippet)
+      }
+    } catch (err) {
+      console.error('Upload failed:', err)
+    } finally {
+      setUploading(false)
+    }
+  }, [appendSnippet])
+
+  const onDragEnter = useCallback((e) => {
+    if (!e.dataTransfer?.types?.includes('Files')) return
+    e.preventDefault(); dragCountRef.current++; setDragging(true)
+  }, [])
+  const onDragLeave = useCallback((e) => {
+    if (!dragCountRef.current) return
+    e.preventDefault(); dragCountRef.current--; if (dragCountRef.current === 0) setDragging(false)
+  }, [])
+  const onDragOver = useCallback((e) => {
+    if (e.dataTransfer?.types?.includes('Files')) e.preventDefault()
+  }, [])
+  const onDrop = useCallback((e) => {
+    if (!e.dataTransfer?.files?.length) return
+    e.preventDefault(); dragCountRef.current = 0; setDragging(false)
+    uploadFiles(mediaFilesFrom(e.dataTransfer.files))
+  }, [uploadFiles])
+
+  // Block mode has no focused text surface, so listen at the window level —
+  // but stay out of the way when the user is pasting into a real input.
+  useEffect(() => {
+    function onPaste(e) {
+      const t = e.target
+      if (t?.isContentEditable || /^(INPUT|TEXTAREA)$/.test(t?.tagName || '')) return
+      const items = e.clipboardData?.items
+      if (!items) return
+      for (const item of items) {
+        if (item.kind !== 'file') continue
+        const file = item.getAsFile()
+        if (!isMediaFile(file)) continue
+        e.preventDefault()
+        uploadFiles([file])
+        return
+      }
+    }
+    window.addEventListener('paste', onPaste)
+    return () => window.removeEventListener('paste', onPaste)
+  }, [uploadFiles])
 
   const handleBlockAction = useCallback((action, blockId, index, pos) => {
     if (action === 'contextmenu') {
@@ -344,32 +413,82 @@ export default function BlockEditor({ value, onChange }) {
 
   return (
     <div
-      className="h-full overflow-auto px-3 py-4"
+      className="relative h-full overflow-hidden"
       style={{ background: 'var(--studio-bg)' }}
+      onDragEnter={onDragEnter}
+      onDragLeave={onDragLeave}
+      onDragOver={onDragOver}
+      onDrop={onDrop}
     >
-      <Reorder.Group
-        axis="y"
-        values={blocks}
-        onReorder={handleReorder}
-        className="flex flex-col gap-1.5"
-      >
-        {blocks.map((block, i) => (
-          <BlockItem
-            key={block.id}
-            block={block}
-            index={i}
-            totalBlocks={blocks.length}
-            onUpdateBlock={handleUpdateBlock}
-            onBlockAction={handleBlockAction}
-          />
-        ))}
-      </Reorder.Group>
+      <div className="h-full overflow-auto px-3 py-4" data-lenis-prevent>
+        <Reorder.Group
+          axis="y"
+          values={blocks}
+          onReorder={handleReorder}
+          className="flex flex-col gap-1.5"
+        >
+          {blocks.map((block, i) => (
+            <BlockItem
+              key={block.id}
+              block={block}
+              index={i}
+              totalBlocks={blocks.length}
+              onUpdateBlock={handleUpdateBlock}
+              onBlockAction={handleBlockAction}
+            />
+          ))}
+        </Reorder.Group>
 
-      {blocks.length === 0 && (
-        <p className="py-8 text-center text-ui-sm italic" style={{ color: 'var(--studio-text-3)' }}>
-          No blocks to show
-        </p>
-      )}
+        {blocks.length === 0 && (
+          <p className="py-8 text-center text-ui-sm italic" style={{ color: 'var(--studio-text-3)' }}>
+            No blocks to show
+          </p>
+        )}
+      </div>
+
+      {/* Drop overlay */}
+      <AnimatePresence>
+        {dragging && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="absolute inset-0 z-[var(--z-index-nav)] flex items-center justify-center"
+            style={{ background: 'rgba(59,130,246,0.08)', backdropFilter: 'blur(var(--blur-xs))' }}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }}
+              className="flex flex-col items-center gap-3 rounded-2xl border-2 border-dashed border-accent/40 px-10 py-8"
+              style={{ background: 'var(--studio-surface)' }}
+            >
+              <Upload size={24} className="text-accent" />
+              <p className="text-ui font-medium" style={{ color: 'var(--studio-text-2)' }}>Drop to upload</p>
+              <p className="text-ui-xs" style={{ color: 'var(--studio-text-3)' }}>Images, videos, or audio</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Upload progress */}
+      <AnimatePresence>
+        {uploading && (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.2 }}
+            className="absolute bottom-4 left-1/2 z-[var(--z-index-nav)] flex -translate-x-1/2 items-center gap-2 rounded-lg border px-4 py-2 shadow-lg"
+            style={{ background: 'var(--studio-surface)', borderColor: 'var(--studio-border)', color: 'var(--studio-text-2)' }}
+          >
+            <Loader2 size={13} className="animate-spin text-accent" />
+            <span className="text-ui-xs font-medium">Uploading...</span>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Right-click context menu */}
       <AnimatePresence>

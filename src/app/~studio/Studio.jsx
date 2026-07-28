@@ -145,25 +145,47 @@ export default function Studio() {
     setDirty(value !== savedContentRef.current)
   }, [])
 
+  const refreshPosts = useCallback(() => {
+    fetch('/api/studio/posts')
+      .then((r) => r.json())
+      .then(setPosts)
+      .catch(console.error)
+  }, [])
+
   const save = useCallback(async () => {
     if (!activeSlug || saving) return
     setSaving(true)
     try {
-      await fetch('/api/studio/write', {
+      const res = await fetch('/api/studio/write', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug: activeSlug, content }),
       })
-      savedContentRef.current = content
+      const data = await res.json().catch(() => null)
+      if (!res.ok || data?.error) {
+        console.error('Save failed:', data?.error || res.statusText)
+        return
+      }
+      // The write route may rewrite the share-image metadata, so adopt what
+      // actually landed on disk rather than what we sent.
+      const written = typeof data?.content === 'string' ? data.content : content
+      if (written !== content) {
+        setContent(written)
+        setDebouncedContent(written)
+      }
+      savedContentRef.current = written
       setDirty(false)
       setSaved(true)
       setTimeout(() => setSaved(false), 1500)
+      // A brand-new post only exists on disk after this write — pull the list
+      // again so it shows up in the sidebar without a reload.
+      refreshPosts()
     } catch (err) {
       console.error('Save failed:', err)
     } finally {
       setSaving(false)
     }
-  }, [activeSlug, content, saving])
+  }, [activeSlug, content, saving, refreshPosts])
 
   const handleNew = useCallback(() => {
     setNewPostSlug('')
@@ -186,20 +208,18 @@ export default function Studio() {
     editorRef.current?.insertSnippet('\n' + snippet + '\n')
   }, [])
 
-  const refreshPosts = useCallback(() => {
-    fetch('/api/studio/posts')
-      .then((r) => r.json())
-      .then(setPosts)
-      .catch(console.error)
-  }, [])
-
   const handleStatusChange = useCallback(async (slug, published) => {
     try {
-      await fetch('/api/studio/meta', {
+      const res = await fetch('/api/studio/meta', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug, updates: { published } }),
       })
+      const data = await res.json()
+      if (data.error) {
+        console.error('Failed to update status:', data.error)
+        return
+      }
       refreshPosts()
     } catch (err) {
       console.error('Failed to update status:', err)

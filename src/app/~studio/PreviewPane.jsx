@@ -60,6 +60,47 @@ const mdxComponents = {
   BlogImagePixel,
 }
 
+// Remove top-level `import` / `export` statements — client-side evaluate() can't
+// resolve them. Brace-balanced so nested objects (metadata.openGraph, alternates)
+// and multi-line imports are consumed whole; lines are blanked rather than deleted
+// so error line numbers still line up with the editor.
+function stripEsmStatements(source) {
+  const lines = source.split('\n')
+  const out = []
+  let i = 0
+
+  while (i < lines.length) {
+    if (!/^\s*(import|export)\s/.test(lines[i])) {
+      out.push(lines[i])
+      i++
+      continue
+    }
+
+    let depth = 0
+    let quote = null
+
+    do {
+      const line = lines[i]
+      for (let k = 0; k < line.length; k++) {
+        const ch = line[k]
+        if (quote) {
+          if (ch === '\\') k++
+          else if (ch === quote) quote = null
+          continue
+        }
+        if (ch === '"' || ch === "'" || ch === '`') quote = ch
+        else if (ch === '/' && line[k + 1] === '/') break
+        else if (ch === '{' || ch === '[' || ch === '(') depth++
+        else if (ch === '}' || ch === ']' || ch === ')') depth--
+      }
+      out.push('')
+      i++
+    } while (i < lines.length && depth > 0)
+  }
+
+  return out.join('\n')
+}
+
 export default function PreviewPane({ content }) {
   const [MDXContent, setMDXContent] = useState(null)
   const [error, setError] = useState(null)
@@ -80,10 +121,7 @@ export default function PreviewPane({ content }) {
         const { default: remarkGfm } = await import('remark-gfm')
         const runtime = await import('react/jsx-runtime')
 
-        // Strip import statements and export const metadata — they break client evaluate()
-        const cleaned = content
-          .replace(/^import\s+.*$/gm, '')
-          .replace(/^export\s+const\s+metadata\s*=\s*\{[^}]*\}/gm, '')
+        const cleaned = stripEsmStatements(content)
 
         const { default: Component } = await evaluate(cleaned, {
           ...runtime,

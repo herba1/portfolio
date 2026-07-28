@@ -8,16 +8,7 @@ import { markdown, markdownLanguage } from '@codemirror/lang-markdown'
 import { languages } from '@codemirror/language-data'
 import { EditorView } from '@codemirror/view'
 import { vim } from '@replit/codemirror-vim'
-
-function snippetForMedia(mediaType, filePath, fileName) {
-  const name = fileName.replace(/\.[^.]+$/, '').replace(/-[a-z0-9]+$/, '')
-  switch (mediaType) {
-    case 'image': return `<BlogImage src="${filePath}" alt="${name}" caption="" />`
-    case 'video': return `<Video src="${filePath}" caption="" />`
-    case 'audio': return `<Audio src="${filePath}" title="${name}" caption="" />`
-    default: return ''
-  }
-}
+import { isMediaFile, mediaFilesFrom, uploadMedia } from './mediaUpload'
 
 function createTheme(light) {
   const shared = {
@@ -118,17 +109,15 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
 
   const handleCreateEditor = useCallback((view) => { viewRef.current = view }, [])
 
-  const uploadFile = useCallback(async (file) => {
+  const uploadFiles = useCallback(async (files) => {
+    if (!files.length) return
     setUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch('/api/studio/upload', { method: 'POST', body: formData })
-      if (!res.ok) { console.error('Upload failed:', res.statusText); return }
-      const data = await res.json()
-      if (data.error) { console.error('Upload failed:', data.error); return }
-      const snippet = snippetForMedia(data.mediaType, data.path, data.fileName)
-      if (snippet) insertAtCursor('\n' + snippet + '\n')
+      // Sequential so multi-drops land in the order they were dropped
+      for (const file of files) {
+        const snippet = await uploadMedia(file)
+        if (snippet) insertAtCursor('\n' + snippet + '\n')
+      }
     } catch (err) {
       console.error('Upload failed:', err)
     } finally {
@@ -141,23 +130,22 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
   const onDragOver = useCallback((e) => { e.preventDefault() }, [])
   const onDrop = useCallback((e) => {
     e.preventDefault(); dragCountRef.current = 0; setDragging(false)
-    for (const file of e.dataTransfer.files) {
-      if (file.type.startsWith('image/') || file.type.startsWith('video/') || file.type.startsWith('audio/')) uploadFile(file)
-    }
-  }, [uploadFile])
+    uploadFiles(mediaFilesFrom(e.dataTransfer.files))
+  }, [uploadFiles])
 
   // Paste media from clipboard
   const onPaste = useCallback((e) => {
     const items = e.clipboardData?.items
     if (!items) return
     for (const item of items) {
-      if (item.kind === 'file' && (item.type.startsWith('image/') || item.type.startsWith('video/') || item.type.startsWith('audio/'))) {
-        e.preventDefault()
-        uploadFile(item.getAsFile())
-        return
-      }
+      if (item.kind !== 'file') continue
+      const file = item.getAsFile()
+      if (!isMediaFile(file)) continue
+      e.preventDefault()
+      uploadFiles([file])
+      return
     }
-  }, [uploadFile])
+  }, [uploadFiles])
 
   return (
     <div

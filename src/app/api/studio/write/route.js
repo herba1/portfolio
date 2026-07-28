@@ -1,4 +1,5 @@
 import { isProdView } from '@/lib/viewMode'
+import { syncShareImage } from '@/lib/ogImage'
 import { NextResponse } from 'next/server'
 import fs from 'fs/promises'
 import path from 'path'
@@ -32,10 +33,13 @@ export async function POST(request) {
       return NextResponse.json({ error: 'Content must be a string' }, { status: 400 })
     }
 
-    await fs.mkdir(dir, { recursive: true })
-    await fs.writeFile(filePath, body.content, 'utf-8')
+    // Point the share card at the post's first image before writing
+    const content = syncShareImage(body.content)
 
-    return NextResponse.json({ slug, saved: true })
+    await fs.mkdir(dir, { recursive: true })
+    await fs.writeFile(filePath, content, 'utf-8')
+
+    return NextResponse.json({ slug, saved: true, content })
   } catch (error) {
     return NextResponse.json({ error: error.message }, { status: 500 })
   }

@@ -20,4 +20,16 @@ export const posts = [
     images: ['/blog/images/example.png'],
     published: false,
   },
+  {
+    slug: 'fish',
+    title: 'fish',
+    description: 'herb caught a fish',
+    date: '2026-07-28',
+    tags: [],
+    images: [
+      '/blog/images/img-2062-ms49gqso.jpg',
+      '/blog/images/img-2063-ms49m4nw.jpg',
+    ],
+    published: true,
+  },
 ]

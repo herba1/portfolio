@@ -8,6 +8,9 @@ const nextConfig = {
   // compression avoids double-encoding and keeps Content-Length intact for
   // binary assets like .splat files (see SplatViewer.jsx for full context).
   compress: false,
+  // heic-convert pulls in a large wasm build of libheif — keep it out of the
+  // bundle and let Node require it at runtime (studio upload route only).
+  serverExternalPackages: ['heic-convert'],
   experimental: {
     viewTransition: true,
     optimizePackageImports: ['lucide-react', 'motion', 'gsap'],
