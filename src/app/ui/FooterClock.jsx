@@ -132,7 +132,7 @@ export default function FooterClock() {
   if (!time || hidden) return null;
 
   return (
-    <div className={`footer-clock text-white text-sm ${geist.className}`}>
+    <div className={`footer-clock text-ink-inverse text-ui-lg ${geist.className}`}>
       <span className="footer-clock__location">New York, NY</span>
       <span className="footer-clock__sep">/</span>
       <ClockIcon hours={time.hours} minutes={time.minutes} />

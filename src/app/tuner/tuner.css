@@ -7,12 +7,22 @@
    Geist, light slate paper, solid black ink + green when in tune.
    ───────────────────────────────────────────────────────────────────────── */
 
+/* Scoped aliases, all of them pointing at the site tokens. The tuner used
+   to carry its own near-black, its own gray and its own green — three
+   values that were *nearly* the site's and drifted from them. Naming them
+   locally is still worth it (the rules below read better for it), but the
+   values now come from one place.
+
+   Type here stays fluid — clamp() against viewport height, not the
+   discrete scale — because this is one full-bleed screen that must never
+   scroll, so the composition sizes itself to the screen rather than
+   stepping. The WEIGHTS come off the system ladder even so. */
 .tuner {
   --paper: var(--color-surface);
-  --ink: #15161a;
-  --muted: #8b9199; /* solid (NOT low-opacity) — only for inactive affordances */
-  --good: #1c8f4e;
-  --ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --ink: var(--color-ink);
+  --muted: var(--color-ink-tertiary); /* solid (NOT low-opacity) — only for inactive affordances */
+  --good: var(--color-positive);
+  --ease: var(--ease-entrance);
 
   position: relative;
   height: 100dvh;
@@ -34,14 +44,18 @@
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 0;
+  z-index: var(--z-index-base);
   pointer-events: none;
   overflow: hidden;
   color: var(--ink);
-  transition: color 0.4s var(--ease);
-  animation: wave-in 0.5s var(--ease) both;
+  transition: color var(--duration-400) var(--ease);
+  animation: wave-in var(--duration-500) var(--ease) both;
 
-  /* Soft mask on the waveform layer only: the column leads in at the very top
+  /* The #000 / rgba(0,0,0,…) stops here are alpha, not colour: a mask uses
+     only the alpha channel, so the hue is arbitrary and nothing here is a
+     token candidate.
+
+     Soft mask on the waveform layer only: the column leads in at the very top
      and dissolves out at the bottom instead of hard-clipping against the edge.
      Multi-stop / eased (never a flat 2-stop fade) so the dissolve reads organic.
      The bottom band is the longer fade — that's where the readout sits over it. */
@@ -73,14 +87,14 @@
   position: absolute;
   left: 0;
   right: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   background: currentColor;
   transform: scaleX(0.01);
   transform-origin: center;
   will-change: transform;
 }
 .wave.is-intune .wave__bar {
-  box-shadow: 0 0 5px rgba(28, 143, 78, 0.4);
+  box-shadow: 0 0 5px color-mix(in oklab, var(--good) 40%, transparent);
 }
 @keyframes wave-in {
   from {
@@ -94,7 +108,7 @@
 /* ── Foreground UI ────────────────────────────────────────────────────── */
 .tuner__ui {
   position: relative;
-  z-index: 1;
+  z-index: var(--z-index-raised);
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -129,7 +143,7 @@
 }
 .tuner__letter {
   font-size: clamp(4.5rem, 19vh, 13rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.05em;
 }
 .tuner__note-sup {
@@ -138,7 +152,7 @@
   align-items: flex-start;
   gap: 0.1em;
   margin-top: 0.12em;
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   line-height: 1;
 }
 .tuner__sharp,
@@ -172,17 +186,17 @@
   top: 0;
   bottom: 0;
   width: 3px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   transform: translateX(-50%);
   background: var(--muted);
-  transition: background 0.3s var(--ease);
+  transition: background var(--duration-300) var(--ease);
 }
 .meter.is-active .meter__needle {
   background: var(--ink);
 }
 .meter.is-intune .meter__needle {
   background: var(--good);
-  box-shadow: 0 0 0 5px rgba(28, 143, 78, 0.14);
+  box-shadow: 0 0 0 5px color-mix(in oklab, var(--good) 14%, transparent);
 }
 
 /* idle / mic gate — solid prompt in the note slot */
@@ -194,7 +208,7 @@
   color: var(--ink);
   font-family: inherit;
   font-size: clamp(1.5rem, 5vw, 2.6rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.02em;
   text-align: left;
   cursor: pointer;
@@ -210,7 +224,7 @@
   flex-wrap: wrap;
   gap: clamp(1.25rem, 5vw, 3rem);
   font-size: clamp(1rem, 3vw, 1.5rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
   color: var(--ink);
@@ -234,7 +248,7 @@
   -webkit-appearance: none;
   font: inherit;
   font-size: clamp(1rem, 2.4vw, 1.3rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   color: var(--ink);
   cursor: pointer;
@@ -265,11 +279,11 @@
   background: transparent;
   font: inherit;
   font-size: clamp(1rem, 2.4vw, 1.3rem);
-  font-weight: 700;
+  font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   color: var(--muted);
   cursor: pointer;
-  transition: color 0.15s ease;
+  transition: color var(--duration-150) ease;
 }
 .tuner__mode:hover {
   color: var(--ink);

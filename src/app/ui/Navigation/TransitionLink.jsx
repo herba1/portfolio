@@ -53,7 +53,7 @@ export default function TransitionLink({ href = "/", children }) {
     <div ref={container} className="inline-block">
       <div
         // style={{ opacity: 0 }}
-        className=" screen--out w-full h-lvh absolute top-0 left-0 pointer-events-none bg-white"
+        className=" screen--out w-full h-lvh absolute top-0 left-0 pointer-events-none bg-surface-raised"
       ></div>
       <Link onClick={handleClick} href={href}>
         {children}

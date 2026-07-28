@@ -17,16 +17,16 @@ export default function Navbar({
   return (
     <nav
       ref={navContainer}
-      className={`fixed w-full z-50 nav__container flex items-center justify-between p-4 antialiased md:p-6 ${geist.className} text-base font-medium ${className}`}
+      className={`fixed w-full z-[var(--z-index-nav)] nav__container flex items-center justify-between p-4 antialiased md:p-6 ${geist.className} text-body font-medium ${className}`}
     >
-      <div className="nav__left z-50">
+      <div className="nav__left z-[var(--z-index-nav)]">
         <NavLogo />
       </div>
       <div className="nav__right flex gap-5 lg:gap-10">
         <NavMenuButton>Menu</NavMenuButton>
         {phoneVisible && <NavPhone />}
         {ctaVisible && <NavCta />}
-        <NavLinks className="z-50" />
+        <NavLinks className="z-[var(--z-index-nav)]" />
       </div>
     </nav>
   );

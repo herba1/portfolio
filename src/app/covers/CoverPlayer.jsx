@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { motion, AnimatePresence } from "motion/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { motion, AnimatePresence, useIsPresent } from "motion/react";
 import { X } from "lucide-react";
-import { useTrackAudio } from "./useTrackAudio";
 import Waveform from "@/app/ui/Waveform";
 import Lyrics from "./Lyrics";
+import EqBars from "./EqBars";
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
+import SlotNumber from "@/app/ui/SlotNumber";
+import { useAudio, load, toggle, seek, scrubStart, scrubEnd, keyOf } from "./lib/audioEngine";
+import { useArtInk } from "./lib/artInk";
 import { DEFAULTS } from "./lib/config";
 
 // ---------------------------------------------------------------------------
@@ -36,7 +39,26 @@ export default function CoverPlayer({ cover, rect, onClose, onClosed, cornerRadi
 
 function PlayerInner({ cover, rect, onClose, cornerRadius }) {
   const [hiReady, setHiReady] = useState(false);
-  const audio = useTrackAudio(cover.sub, cover.title);
+
+  // Playback lives in the module-level engine, not here — that's what lets the
+  // dock keep the song going once this card unmounts. Opening a cover loads it
+  // and starts it; reopening the one already playing is a no-op.
+  const engine = useAudio();
+  const key = keyOf(cover);
+  // keyed on the track, not the object: the covers array is swapped once when
+  // the Spotify data lands, and that must not restart a track you'd paused.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    load(cover, { autoplay: true });
+  }, [key]);
+  // black or white for the badge on the artwork, measured from the art itself
+  const artInk = useArtInk(cover.index, cover.image);
+  // false the moment the card starts closing — the badge is a plain CSS element
+  // inside the morphing art, so it needs the presence flag to know to fade.
+  const isPresent = useIsPresent();
+  const IDLE = { status: "loading", playing: false, peaks: null, duration: 0, currentTime: 0 };
+  const audio = engine.key === key ? engine : IDLE;
+  const progress = audio.duration ? audio.currentTime / audio.duration : 0;
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -56,23 +78,40 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
     };
   }, [cover.imageLarge, cover.image]);
 
-  const layout = useMemo(playerLayout, []);
+  // The mobile panel is sized to its content, not to leftover space: measure the
+  // stack once it's laid out and feed that back into the geometry. That's what
+  // removes the scroll box entirely — with the panel exactly as tall as what's
+  // in it, there is nothing to scroll and nothing to clip at either edge. The
+  // card animates to the corrected height as part of the same opening morph.
+  const stackRef = useRef(null);
+  const [contentH, setContentH] = useState(null);
+  useLayoutEffect(() => {
+    const el = stackRef.current;
+    if (!el) return;
+    const measure = () => setContentH(Math.ceil(el.offsetHeight));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const layout = useMemo(() => playerLayout(contentH), [contentH]);
   const tile = useMemo(() => tileBox(rect, layout), [rect, layout]);
   if (!layout) return null;
-  const { card, art, panel, stacked } = layout;
+  const { card, art, panel, header, link, stacked } = layout;
 
   // Match the WebGL tile's rounded corners: the shader rounds to a fraction
   // (config.cornerRadius) of the tile's on-screen size, so the morph's tile-end
   // radius must be computed the same way — a fixed px value won't line up.
   const tileRadius = tile.size * cornerRadius;
 
-  const onPlay = () => audio.toggle();
-
   // Close lives in its own line above the art on mobile (not floating over the
   // artwork), pinned to the card's top-right corner on desktop.
   const closePos = stacked
     ? { left: card.left + card.width - 16 - 40, top: card.top + 7 }
-    : { left: card.left + card.width - 46, top: card.top + 12 };
+    // 38px tap target holding an 18px glyph → 10px of slack per side, so back the
+    // box off by that much to land the glyph itself on the card's 24px padding.
+    : { left: card.left + card.width - 24 + 10 - 38, top: card.top + 24 - 10 };
 
   return (
     <motion.div className="cv-player" onPointerDown={onClose}>
@@ -112,6 +151,13 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.4 }}
         />
+        {artInk ? (
+          <EqBars
+            playing={audio.playing}
+            size={18}
+            className={`cv-art-eq is-${artInk}${isPresent ? "" : " is-leaving"}`}
+          />
+        ) : null}
       </motion.div>
 
       {/* close — pinned to the card's top-right */}
@@ -133,13 +179,29 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         <X size={18} />
       </motion.button>
 
+      {/* rank — top-centred on the header line above the art (mobile only). The
+          chart position is the one bit of metadata that isn't the song itself, so
+          it sits apart from the title/artist block rather than under it. */}
+      {stacked && cover.rank ? (
+        <motion.div
+          className="cv-music-toprank"
+          style={{ left: header.left, top: header.top, width: header.width, height: header.height }}
+          initial={{ opacity: 0, y: 8, filter: "blur(8px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          exit={{ opacity: 0, filter: "blur(6px)", transition: { duration: 0.2 } }}
+          transition={{ delay: 0.16, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          <span>
+            #{cover.rank} · {cover.rankLabel}
+          </span>
+        </motion.div>
+      ) : null}
+
       {/* info / waveform / lyrics — staggered + blur-in */}
       <motion.div
         className="cv-music-panel"
         style={{ left: panel.left, top: panel.top, width: panel.width, height: panel.height }}
-        variants={panelV}
-        initial="hidden"
-        animate="show"
         exit={{
           left: tile.left,
           top: tile.top,
@@ -151,8 +213,12 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         }}
         onPointerDown={(e) => e.stopPropagation()}
       >
+        {/* the measured stack. It carries the stagger (not the panel) because the
+            panel's height is derived FROM this element — variants have to
+            propagate from whatever wraps the actual items. */}
+        <motion.div className="cv-music-stack" ref={stackRef} variants={panelV} initial="hidden" animate="show">
         <motion.div className="cv-music-head" variants={itemV}>
-          <h2 className="cv-music-title">{cover.title}</h2>
+          <h2 className="cv-music-title no-orphan">{cover.title}</h2>
           <p className="cv-music-artist">
             {cover.artistImage ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -166,7 +232,8 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
             ) : null}
             <span>{cover.sub}</span>
           </p>
-          {cover.rank ? (
+          {/* on mobile the rank has moved to the header strip above the art */}
+          {cover.rank && !stacked ? (
             <p className="cv-music-rank">
               #{cover.rank} · {cover.rankLabel}
             </p>
@@ -176,37 +243,51 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         <motion.div className={`cv-music-controls${stacked ? " is-stacked" : ""}`} variants={itemV}>
           <button
             className="cv-play-btn"
-            onClick={onPlay}
-            disabled={audio.status !== "ready"}
-            aria-label={audio.playing ? "Pause" : "Play"}
+            onClick={toggle}
+            // "error" stays pressable on purpose: it means this attempt didn't
+            // get the preview, not that there isn't one, and the click retries.
+            disabled={audio.status !== "ready" && audio.status !== "error"}
+            aria-label={audio.status === "error" ? "Retry" : audio.playing ? "Pause" : "Play"}
           >
             <PlayPauseIcon playing={audio.playing} />
           </button>
           <Waveform
             peaks={audio.peaks}
-            progress={audio.progress}
+            progress={progress}
             duration={audio.duration}
-            onSeek={audio.seek}
-            onScrubStart={audio.scrubStart}
-            onScrubEnd={audio.scrubEnd}
+            onSeek={seek}
+            onScrubStart={scrubStart}
+            onScrubEnd={scrubEnd}
             accent={cover.color}
           />
           <span className="cv-music-time">
-            {audio.status === "loading"
-              ? "…"
-              : audio.status === "none"
-                ? "no preview"
-                : `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`}
+            {audio.status === "loading" ? (
+              "…"
+            ) : audio.status === "none" ? (
+              "no preview"
+            ) : audio.status === "error" ? (
+              "retry"
+            ) : (
+              <SlotNumber value={`${fmt(audio.currentTime)} / ${fmt(audio.duration)}`} direction="up" />
+            )}
           </span>
         </motion.div>
 
         {!stacked ? (
           <motion.div className="cv-music-lyricwrap" variants={itemV}>
-            <Lyrics artist={cover.sub} title={cover.title} color={cover.color} />
+            <Lyrics
+              artist={cover.sub}
+              title={cover.title}
+              isrc={cover.isrc}
+              durationSec={cover.durationSec}
+              color={cover.color}
+              previewMs={audio.currentTime * 1000}
+              playing={audio.playing}
+            />
           </motion.div>
         ) : null}
 
-        {cover.url ? (
+        {cover.url && !stacked ? (
           <motion.a
             className="cv-spotify-link squircle-pill"
             href={cover.url}
@@ -217,7 +298,29 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
             Open in Spotify ↗
           </motion.a>
         ) : null}
+        </motion.div>
       </motion.div>
+
+      {/* mobile: the link lives OUTSIDE the panel, on its own reserved band at the
+          card's bottom. Inside the panel's overflow box a long title could always
+          push it out of view — and the panel can't be touch-scrolled back (see
+          the touch-action note in covers.css). Out here it is always reachable. */}
+      {cover.url && stacked ? (
+        <motion.a
+          className="cv-spotify-link squircle-pill cv-spotify-fixed"
+          style={{ left: link.left, top: link.top, height: link.height }}
+          href={cover.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          initial={{ opacity: 0, y: 12, filter: "blur(8px)" }}
+          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          exit={{ opacity: 0, filter: "blur(6px)", transition: { duration: 0.2 } }}
+          transition={{ delay: 0.37, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          onPointerDown={(e) => e.stopPropagation()}
+        >
+          Open in Spotify ↗
+        </motion.a>
+      ) : null}
     </motion.div>
   );
 }
@@ -228,45 +331,72 @@ function fmt(sec) {
 }
 
 // Centered geometry: a card containing art (left) + panel (right); narrow → stacked.
-function playerLayout() {
+// Exported so the grid can shape its click-push field to the card's real
+// footprint — wide + landscape on desktop, narrow + portrait on mobile.
+export function playerLayout(contentH) {
   if (typeof window === "undefined") return null;
   const vw = window.innerWidth;
-  const vh = window.innerHeight;
+  // The VISUAL viewport, not innerHeight: on mobile Safari innerHeight includes
+  // the strip behind the collapsing toolbar, so centring on it pushes the card's
+  // bottom (where the Spotify link sits) underneath the browser chrome.
+  const vh = window.visualViewport?.height || window.innerHeight;
 
   if (vw < 820) {
     const pad = 18;
-    const headerH = 52; // close button gets its own line above the art
-    const margin = 14;
+    const headerH = 52; // close button + rank get their own line above the art
+    const marginTop = 14;
+    const marginBottom = 28; // clears the home indicator / toolbar lip
     const pw = Math.min(vw * 0.94, 460);
     const left = (vw - pw) / 2;
-    // No lyrics on mobile — the panel holds the title (which may wrap to two
-    // lines), artist, rank and the player. Give it a comfortable band that fits
-    // that content without clipping; if a long title overflows, the panel itself
-    // scrolls (see covers.css). The art takes whatever height remains so the
-    // whole card stays within the viewport.
-    const panelH = 224;
-    const maxArt = vh - margin * 2 - headerH - 16 - panelH - pad;
-    const artSize = Math.max(150, Math.min(pw - pad * 2, vh * 0.4, maxArt));
-    const ph = headerH + artSize + 16 + panelH + pad;
-    const top = Math.max(margin, (vh - ph) / 2);
+    // The Spotify link is NOT part of the panel on mobile — it gets its own
+    // reserved band pinned to the card's bottom, where nothing above can push it.
+    const linkH = 38;
+    const linkGap = 16;
+    const gap = 16; // art → panel
+    // The panel is EXACTLY as tall as its measured content (title, artist, and
+    // the transport). Not a band with slack in it: with no leftover space there
+    // is nothing to scroll, nothing to clip at either edge, and no dead gap
+    // between the transport and the link. 200 is the pre-measurement estimate.
+    // artMin is the last-resort floor: on a very short screen the artwork gives
+    // up its size before the card is ever allowed to run off the bottom.
+    const artMin = 100;
+    const chrome = marginTop + marginBottom + headerH + gap + linkGap + linkH + pad;
+    const panelH = Math.max(120, Math.min(contentH || 200, 360, vh - chrome - artMin));
+    // Whatever's left after the card's own chrome goes to the artwork.
+    const avail = vh - marginTop - marginBottom - headerH - gap - panelH - linkGap - linkH - pad;
+    const artSize = Math.max(artMin, Math.min(pw - pad * 2, vh * 0.46, avail));
+    const ph = headerH + artSize + gap + panelH + linkGap + linkH + pad;
+    // Centred, but never so low that the card's bottom edge leaves the visible
+    // viewport — on a short screen it pins to the top margin instead.
+    const top = Math.max(marginTop, Math.min((vh - ph) / 2, vh - marginBottom - ph));
+    const panelTop = top + headerH + artSize + gap;
     return {
       stacked: true,
       card: { left, top, width: pw, height: ph },
       art: { left: left + (pw - artSize) / 2, top: top + headerH, size: artSize },
-      panel: { left: left + pad, top: top + headerH + artSize + 16, width: pw - pad * 2, height: panelH },
+      panel: { left: left + pad, top: panelTop, width: pw - pad * 2, height: panelH },
+      header: { left, top, width: pw, height: headerH },
+      link: { left: left + pad, top: panelTop + panelH + linkGap, height: linkH },
     };
   }
 
+  // One padding value for every card edge the art touches (left, top, bottom).
+  // The card's height is DERIVED from the art rather than capped independently —
+  // otherwise a width-constrained art gets centred in a taller card and the
+  // vertical gap silently grows past the horizontal one.
+  const pad = 24;
+  const gap = 26; // art → panel
   const pw = Math.min(vw * 0.92, 1020);
-  const ph = Math.min(vh * 0.82, 540);
+  const maxH = Math.min(vh * 0.82, 540);
+  const artSize = Math.min(maxH - pad * 2, pw * 0.48);
+  const ph = artSize + pad * 2;
   const left = (vw - pw) / 2;
   const top = (vh - ph) / 2;
-  const artSize = Math.min(ph - 28, pw * 0.48);
   return {
     stacked: false,
     card: { left, top, width: pw, height: ph },
-    art: { left: left + 16, top: top + (ph - artSize) / 2, size: artSize },
-    panel: { left: left + 16 + artSize + 26, top: top + 30, width: pw - 16 - artSize - 26 - 28, height: ph - 60 },
+    art: { left: left + pad, top: top + pad, size: artSize },
+    panel: { left: left + pad + artSize + gap, top: top + pad, width: pw - pad * 2 - artSize - gap, height: artSize },
   };
 }
 

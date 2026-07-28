@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { motion } from 'motion/react'
+import { SPRING_PRESS } from '@/lib/motion'
 import {
   MessageSquareQuote,
   AlertTriangle,
@@ -18,7 +19,6 @@ import {
   ChevronDown,
 } from 'lucide-react'
 
-const spring = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
 
 const IMAGE_VARIANTS = [
   { name: 'Standard', snippet: '<BlogImage src="/blog/images/" alt="" caption="" />' },
@@ -59,7 +59,7 @@ function ImageDropdown({ onInsert }) {
         onClick={() => setOpen((o) => !o)}
         whileHover={{ scale: 1.05 }}
         whileTap={{ scale: 0.95 }}
-        transition={spring}
+        transition={SPRING_PRESS}
         className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium"
         style={{ color: open ? 'var(--studio-text)' : undefined }}
       >
@@ -70,7 +70,7 @@ function ImageDropdown({ onInsert }) {
 
       {open && (
         <div
-          className="absolute bottom-full left-0 z-50 mb-1.5 min-w-[140px] rounded-lg border p-0.5 shadow-lg"
+          className="absolute bottom-full left-0 z-[var(--z-index-nav)] mb-1.5 min-w-[140px] rounded-lg border p-0.5 shadow-lg"
           style={{ background: 'var(--studio-surface)', borderColor: 'var(--studio-border)' }}
         >
           {IMAGE_VARIANTS.map((variant) => (
@@ -97,7 +97,7 @@ function PaletteButton({ comp, onInsert }) {
       onClick={() => onInsert(comp.snippet)}
       whileHover={{ scale: 1.05 }}
       whileTap={{ scale: 0.95 }}
-      transition={spring}
+      transition={SPRING_PRESS}
       className="studio-palette-btn flex shrink-0 items-center gap-1.5 rounded-md px-2.5 py-1.5 text-ui-xs font-medium"
       title={`Insert ${comp.name}`}
       aria-label={`Insert ${comp.name}`}
@@ -114,7 +114,7 @@ export default function ComponentPalette({ onInsert }) {
       className="flex items-center gap-1 overflow-x-auto px-4 py-2"
       style={{ borderTop: '1px solid var(--studio-border)', background: 'var(--studio-bg)' }}
     >
-      <span className="mr-2 shrink-0 font-mono text-ui-2xs tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
+      <span className="mr-2 shrink-0 font-mono text-ui-2xs" style={{ color: 'var(--studio-text-4)' }}>
         Insert
       </span>
 

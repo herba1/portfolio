@@ -70,7 +70,7 @@ export default function MagnetWrapper() {
       onMouseLeave={handleMouseLeave}
     >
       <div ref={itemRef} className="item inline-block w-fit h-fit">
-        <button className="bg-pink-300 p-4 rounded-md">MAGNETIC BUTTON</button>
+        <button className="btn btn--primary btn--lg">MAGNETIC BUTTON</button>
       </div>
     </div>
   );

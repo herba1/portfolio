@@ -34,20 +34,21 @@ export default async function TierListSlugPage({ params }) {
 
   return (
     <div className="flex h-full w-full flex-col">
-      {/* Slim header bar */}
-      <div className="tl-fade flex shrink-0 items-center justify-between gap-3 px-4 py-3">
+      {/* Slim header bar. No morph target lives in here, so it gets the full
+          rise rather than the geometry-safe fade the tier rows use. */}
+      <div className="tl-rise flex shrink-0 items-center justify-between gap-3 px-4 py-3">
         <Link
           href="/tierlist"
-          className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-sm transition-colors"
+          className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-ui-lg transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> All lists
         </Link>
         <div className="min-w-0 px-2 text-center">
-          <h1 className="truncate text-2xl font-bold tracking-tight">
+          <h1 className="text-title truncate">
             {data.title}
           </h1>
           {data.description ? (
-            <p className="text-ink-secondary truncate text-sm" title={data.description}>
+            <p className="text-ink-secondary truncate text-ui-lg" title={data.description}>
               {data.description}
             </p>
           ) : null}
@@ -55,7 +56,7 @@ export default async function TierListSlugPage({ params }) {
         {isDev ? (
           <Link
             href={`/tierlist/${slug}/edit`}
-            className="LinkMask text-ink-secondary hover:text-ink text-sm font-medium transition-colors"
+            className="LinkMask text-ink-secondary hover:text-ink text-ui-lg font-medium transition-colors"
           >
             Edit →
           </Link>

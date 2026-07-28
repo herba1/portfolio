@@ -25,38 +25,38 @@ function createTheme(light) {
     '.cm-content': {
       fontFamily: 'var(--font-geist-mono, "Geist Mono", ui-monospace, monospace)',
       padding: '20px 0',
-      caretColor: '#3b82f6',
+      caretColor: 'var(--color-accent)',
       lineHeight: '1.7',
     },
-    '.cm-cursor': { borderLeftColor: '#3b82f6', borderLeftWidth: '1.5px' },
+    '.cm-cursor': { borderLeftColor: 'var(--color-accent)', borderLeftWidth: '1.5px' },
     '.cm-line': { padding: '0 20px' },
     '.cm-scroller': { overflow: 'auto !important' },
-    '.cm-link': { color: '#3b82f6', textDecoration: 'none' },
+    '.cm-link': { color: 'var(--color-accent)', textDecoration: 'none' },
     '.cm-url': { color: 'rgba(59,130,246,0.5)' },
   }
 
   if (light) {
     return EditorView.theme({
       ...shared,
-      '&': { ...shared['&'], background: '#f8fafc' },
-      '.cm-content': { ...shared['.cm-content'], color: '#1a1a1a' },
-      '.cm-gutters': { background: '#f8fafc', color: 'rgba(0,0,0,0.2)', border: 'none', paddingLeft: '12px', fontSize: '11px' },
+      '&': { ...shared['&'], background: 'var(--color-surface-subtle)' },
+      '.cm-content': { ...shared['.cm-content'], color: 'var(--color-ink)' },
+      '.cm-gutters': { background: 'var(--color-surface-subtle)', color: 'rgba(0,0,0,0.2)', border: 'none', paddingLeft: '12px', fontSize: '11px' },
       '.cm-activeLineGutter': { background: 'transparent', color: 'rgba(0,0,0,0.4)' },
       '.cm-activeLine': { background: 'rgba(0,0,0,0.03)' },
       '.cm-selectionBackground': { background: 'rgba(59,130,246,0.15) !important' },
       '&.cm-focused .cm-selectionBackground': { background: 'rgba(59,130,246,0.2) !important' },
       '.cm-scroller': { ...shared['.cm-scroller'], scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.1) transparent' },
       '.cm-foldGutter': { color: 'rgba(0,0,0,0.15)' },
-      '.cm-header-1': { color: '#1a1a1a', fontWeight: '600' },
-      '.cm-header-2': { color: '#2a2a2a', fontWeight: '600' },
+      '.cm-header-1': { color: 'var(--color-ink)', fontWeight: 'var(--font-weight-semibold)' },
+      '.cm-header-2': { color: 'var(--color-ink-reading)', fontWeight: 'var(--font-weight-semibold)' },
       '.cm-header-3': { color: '#3a3a3a', fontWeight: '500' },
       '.cm-tag': { color: '#0369a1' },
       '.cm-attribute': { color: '#7c3aed' },
-      '.cm-em': { color: '#64748b', fontStyle: 'italic' },
-      '.cm-strong': { color: '#1a1a1a', fontWeight: '600' },
-      '.cm-monospace': { color: '#16a34a' },
+      '.cm-em': { color: 'var(--color-ink-secondary)', fontStyle: 'italic' },
+      '.cm-strong': { color: 'var(--color-ink)', fontWeight: 'var(--font-weight-semibold)' },
+      '.cm-monospace': { color: 'var(--color-positive)' },
       '.cm-matchingBracket': { background: 'rgba(59,130,246,0.1)', outline: '1px solid rgba(59,130,246,0.25)' },
-      '.cm-vim-panel': { background: '#f1f5f9', color: '#1a1a1a', padding: '2px 8px', fontSize: '12px' },
+      '.cm-vim-panel': { background: 'var(--color-surface)', color: 'var(--color-ink)', padding: '2px 8px', fontSize: '12px' },
     }, { dark: false })
   }
 
@@ -201,8 +201,8 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
-            className="absolute inset-0 z-50 flex items-center justify-center"
-            style={{ background: 'rgba(59,130,246,0.08)', backdropFilter: 'blur(2px)' }}
+            className="absolute inset-0 z-[var(--z-index-nav)] flex items-center justify-center"
+            style={{ background: 'rgba(59,130,246,0.08)', backdropFilter: 'blur(var(--blur-xs))' }}
           >
             <motion.div
               initial={{ scale: 0.9, opacity: 0 }}
@@ -228,7 +228,7 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.2 }}
-            className="absolute bottom-4 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-lg border px-4 py-2 shadow-lg"
+            className="absolute bottom-4 left-1/2 z-[var(--z-index-nav)] flex -translate-x-1/2 items-center gap-2 rounded-lg border px-4 py-2 shadow-lg"
             style={{ background: 'var(--studio-surface)', borderColor: 'var(--studio-border)', color: 'var(--studio-text-2)' }}
           >
             <Loader2 size={13} className="animate-spin text-accent" />

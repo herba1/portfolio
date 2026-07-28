@@ -8,7 +8,13 @@
   inset: 0;
   overflow: hidden;
   color: var(--color-dark);
-  touch-action: none;
+  /* NO touch-action here. The browser intersects touch-action down the whole
+     ancestor chain, so `none` on this root silently killed the `pan-y` on the
+     player panel and the lyrics modal — their scrollable content was simply
+     unreachable by finger. The grid's own pan lock lives on .cv-canvas (which
+     is what you actually drag); this element is fixed + overflow:hidden, so it
+     can't scroll on its own anyway, and overscroll-behavior still blocks any
+     rubber-band leaking to the document. */
   overscroll-behavior: none;
   user-select: none;
   -webkit-user-select: none;
@@ -19,9 +25,9 @@
   background:
     radial-gradient(
       125vmax 95vmax at 50% 4%,
-      #f8fafc 0%,
+      var(--neutral-25) 0%,
       var(--color-surface) 48%,
-      #e9edf3 100%
+      var(--neutral-100) 100%
     ),
     var(--color-surface);
 }
@@ -32,22 +38,22 @@
 @property --cv-focus {
   syntax: "<color>";
   inherits: true;
-  initial-value: #cbd5e1;
+  initial-value: #cbd5e1; /* --neutral-300; @property needs a literal */
 }
 
 .cv-tint {
   position: absolute;
   inset: 0;
-  z-index: 0;
+  z-index: var(--z-index-base);
   pointer-events: none;
   background: radial-gradient(92vmax 72vmax at 50% 6%, var(--cv-focus) 0%, transparent 62%);
-  transition: opacity 0.9s ease, --cv-focus 0.8s ease;
+  transition: opacity var(--duration-800) ease, --cv-focus var(--duration-800) ease;
 }
 
 .cv-canvas {
   position: absolute !important;
   inset: 0;
-  z-index: 1;
+  z-index: var(--z-index-raised);
   touch-action: none;
   cursor: grab;
 }
@@ -58,7 +64,7 @@
 /* Leva dev panel — lifted above the global navbar (portaled to <body>) */
 .cv-leva {
   position: relative;
-  z-index: 9999;
+  z-index: var(--z-index-max);
 }
 
 /* blurred + white-fading screen edges (masked to the edges only) so the grid
@@ -66,15 +72,15 @@
 .cv-edge-fade {
   position: absolute;
   inset: 0;
-  z-index: 5;
+  z-index: var(--z-index-raised);
   pointer-events: none;
   /* gentle slate-fade vignette only — no blur */
   background: radial-gradient(
     132% 124% at 50% 46%,
     transparent 0%,
     transparent 66%,
-    rgba(241, 245, 249, 0.34) 81%,
-    rgba(237, 242, 247, 0.72) 92%,
+    color-mix(in oklab, var(--neutral-50) 34%, transparent) 81%,
+    color-mix(in oklab, var(--neutral-100) 72%, transparent) 92%,
     var(--color-surface) 100%
   );
 }
@@ -83,55 +89,72 @@
 .cv-hud {
   position: absolute;
   inset: 0;
-  z-index: 10;
+  z-index: var(--z-index-raised);
   pointer-events: none;
 }
 
 .cv-focus {
+  --plate: var(--color-border); /* slate-200 — a darker secondary surface, distinct from the slate-100 page */
+  --ear: 18px; /* concave flare radius */
   position: absolute;
   left: 50%;
   bottom: 0;
   display: flex;
   align-items: flex-end;
-  gap: 12px;
+  /* no gap — the ramps butt flush against the plate and share its colour, so
+     the three boxes have to read as one piece of material */
   /* held hidden until the grid's reveal arms, then rises in with a soft
      overshoot — see .cv-hud.is-ready below. */
   opacity: 0;
   transform: translate(-50%, 18px);
   transition:
-    opacity 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
-    transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+    opacity var(--duration-800) var(--ease-overshoot),
+    transform var(--duration-800) var(--ease-overshoot);
 }
 /* iOS-notch backing: a faint plate that rises from the bottom edge, rounded on
-   top and flaring outward into the edge via two concave "ears" (the ::before/
-   ::after masks). Sized to the text, so it stays a notch at any title width. */
+   top and flaring outward into the edge via two concave ramps (.cv-focus-ear,
+   siblings). Sized to the text, so it stays a notch at any title width. */
 .cv-focus-title {
-  --plate: var(--color-border); /* slate-200 — a darker secondary surface, distinct from the slate-100 page */
-  --ear: 18px; /* concave flare radius */
   position: relative;
   box-sizing: border-box;
   display: flex;
   justify-content: center;
+  /* the ramps are flex siblings now, so the plate has to refuse to be squeezed
+     by them — its width is the measured one, full stop */
+  flex: none;
   font-family: var(--font-geist), system-ui, sans-serif;
   font-weight: var(--font-weight-bold);
-  font-size: 30px;
+  font-size: var(--text-title-lg);
   line-height: 1;
   letter-spacing: var(--tracking-tighter);
   color: var(--color-dark);
   padding: 16px 30px 18px;
-  background: var(--plate);
-  border-radius: 22px 22px 0 0;
-  /* recessed, tactile depth: soft inner shade up top + a crisp 1px highlight
-     along the rounded edge so the notch reads as a carved surface. */
-  box-shadow:
-    inset 0 2px 6px rgba(15, 23, 42, 0.13),
-    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  border-radius: var(--radius-3xl) var(--radius-3xl) 0 0;
+  /* Recessed, tactile depth. The top rake is a background layer, NOT
+     `inset 0 2px 6px` — an inset shadow rims all four sides, and that rim was
+     what broke: it drew a soft dark edge straight down the plate's flanks,
+     including the bottom 18px where the ramps butt on and there is no edge at
+     all. Painting the rake as a gradient keeps the shading off the flanks, and
+     the flanks get their own rim below, which fades out before the junction. */
+  background:
+    linear-gradient(to bottom, var(--scrim-black-15), #0000 12px),
+    var(--plate);
+  box-shadow: inset 0 1px 0 var(--scrim-white-60);
+  /* Letters are laid out from the plate's left edge and the plate is narrower
+     for a short title, so a title shrinking hard can leave glyphs mid-fade out
+     past its flanks. Clip them. `clip` over `hidden` — no scroll container, no
+     scrollport, and it composes with `contain: layout`. The 30px side padding
+     is the bleed room a letter gets before it disappears. */
+  overflow: clip;
   /* width is measured + set in JS so the notch morphs to the new title;
-     contain: layout keeps the reflow cheap (no clipping — the ears live
-     outside the box). */
+     contain: layout keeps the reflow cheap. */
   will-change: width;
   contain: layout;
-  transition: width 0.42s cubic-bezier(0.22, 1, 0.36, 1);
+  /* MUST match the width transition on .morph (MorphText.css) exactly — same
+     duration, same curve. The title is centred in here, so if the two widths
+     ease at different rates the word slides sideways as the plate reshapes.
+     Matched, the gap either side is constant and only the letters move. */
+  transition: width var(--duration-500) var(--ease-entrance);
 }
 /* squish layer: holds the horizontal scale that condenses an over-wide title to
    fit the screen (set in JS) — kept separate from the text so the scaleX never
@@ -140,44 +163,92 @@
   display: inline-block;
   transform-origin: center center;
   will-change: transform;
+  z-index: 1; /* above the flank rims, which are pseudo-elements of the plate */
 }
-/* the text lives on its own layer so it can fade/swap without the plate — the
-   notch reshapes; the words crossfade, disconnected. */
+/* The title lives on its own layer, disconnected from the plate: the notch
+   reshapes its width while the letters rearrange inside it. Letters the old and
+   new title share keep their DOM node and slide to the new x (compositor-only
+   transform); the rest fade out and in around them. See MorphText.jsx.
+
+   The plate tween (--duration-400) is a touch quicker than the slide so the
+   notch has already found its new shape by the time the letters settle into it. */
 .cv-focus-text {
-  display: inline-block;
-  white-space: nowrap;
-  animation: cv-text-swap 0.36s cubic-bezier(0.22, 1, 0.36, 1) both;
+  --morph-slide: var(--duration-500);
+  --morph-in: var(--duration-300);
+  --morph-out: var(--duration-150);
+  --morph-lead: var(--duration-120);
 }
-@keyframes cv-text-swap {
-  from {
-    opacity: 0;
-    filter: blur(4px);
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    filter: blur(0);
-    transform: translateY(0);
-  }
-}
+/* ── the carved edge, continued ────────────────────────────────────────────
+   The plate's flanks. A soft rim hugging each side, killed off over the bottom
+   --ear — which is exactly where the ramp takes over. Above that line the flank
+   is a real wall and earns a shadow; below it the material runs continuously
+   into the ramp, so there is no edge there to shade, and nothing left to break. */
 .cv-focus-title::before,
 .cv-focus-title::after {
   content: "";
   position: absolute;
+  top: 0;
   bottom: 0;
+  z-index: 0;
+  width: 10px;
+  pointer-events: none;
+  -webkit-mask: linear-gradient(to top, #0000, #000 var(--ear));
+  mask: linear-gradient(to top, #0000, #000 var(--ear));
+}
+.cv-focus-title::before {
+  left: 0;
+  background: linear-gradient(to right, var(--scrim-black-10), #0000);
+}
+.cv-focus-title::after {
+  right: 0;
+  background: linear-gradient(to left, var(--scrim-black-10), #0000);
+}
+
+/* The ramps. Same fill as the plate, with a quarter-circle bitten out of the
+   outer-top corner so each one flares from the plate's base into the screen
+   edge. --ear-x names which corner the bite is centred on, which is the only
+   thing that differs left to right. */
+.cv-focus-ear {
+  position: relative;
+  flex: none;
   width: var(--ear);
   height: var(--ear);
   background: var(--plate);
+  -webkit-mask: radial-gradient(circle var(--ear) at var(--ear-x) top, #0000 98%, #000 100%);
+  mask: radial-gradient(circle var(--ear) at var(--ear-x) top, #0000 98%, #000 100%);
 }
-.cv-focus-title::before {
-  right: 100%;
-  -webkit-mask: radial-gradient(circle var(--ear) at top left, #0000 98%, #000 100%);
-  mask: radial-gradient(circle var(--ear) at top left, #0000 98%, #000 100%);
+.cv-focus-ear--l {
+  --ear-x: left;
 }
-.cv-focus-title::after {
-  left: 100%;
-  -webkit-mask: radial-gradient(circle var(--ear) at top right, #0000 98%, #000 100%);
-  mask: radial-gradient(circle var(--ear) at top right, #0000 98%, #000 100%);
+.cv-focus-ear--r {
+  --ear-x: right;
+}
+/* …and the same carved edge the plate has along its top, followed around the
+   arc: a 1px light line right on the lip with the recess shading just inside
+   it. Both are strongest at the bottom of the arc, where the surface has turned
+   to face straight up like the plate's top edge, and are gone by the top of it,
+   where the arc stands vertical and meets the flank — so the ramp's treatment
+   and the flank rim fade out into the same clean junction from either side. */
+.cv-focus-ear::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      circle calc(var(--ear) + 8px) at var(--ear-x) top,
+      #0000 calc(var(--ear) + 0.2px),
+      var(--scrim-white-60) calc(var(--ear) + 0.5px),
+      var(--scrim-white-60) calc(var(--ear) + 1.1px),
+      #0000 calc(var(--ear) + 1.8px)
+    ),
+    radial-gradient(
+      circle calc(var(--ear) + 8px) at var(--ear-x) top,
+      #0000 calc(var(--ear) + 1.4px),
+      var(--scrim-black-10) calc(var(--ear) + 2.2px),
+      #0000 calc(var(--ear) + 7px)
+    );
+  -webkit-mask: linear-gradient(to bottom, #0000, #000 72%);
+  mask: linear-gradient(to bottom, #0000, #000 72%);
 }
 /* mobile: scale the notch with the viewport and never let it exceed the screen.
    The JS squish (scaleX on .cv-focus-squish) condenses any title still too wide
@@ -195,37 +266,41 @@
 .cv-hud.is-ready .cv-focus {
   opacity: 1;
   transform: translateX(-50%);
-  transition-delay: 0.1s;
+  transition-delay: var(--duration-100);
 }
 .cv-hud.is-ready .cv-minimap-wrap {
   opacity: 1;
   transform: translateY(0);
   pointer-events: auto;
-  transition-delay: 0.24s;
+  transition-delay: var(--duration-250);
 }
+
+/* NOTE: the #000 / #0000 stops in the mask-image gradients below are not
+   colours — a mask reads only the alpha channel, so the hue is arbitrary and
+   there is nothing there to tokenise. */
 
 /* ── type chips ──────────────────────────────────────────────────────────── */
 .cv-type {
-  font-size: 10px;
-  font-weight: var(--font-weight-normal);
-  text-transform: uppercase;
-  letter-spacing: 0.1em;
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--text-ui-sm--font-weight);
   padding: 3px 9px;
-  border-radius: 999px;
-  border: 1px solid rgba(26, 26, 26, 0.14);
-  background: rgba(255, 255, 255, 0.5);
-  backdrop-filter: blur(8px);
-  color: #475569;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--color-line-strong);
+  background: var(--scrim-white-50);
+  backdrop-filter: blur(var(--blur-sm));
+  color: var(--neutral-600);
 }
 .cv-type--video {
-  color: #2563a8;
-  border-color: rgba(59, 130, 246, 0.35);
-  background: rgba(59, 130, 246, 0.08);
+  color: var(--color-media-video-ink);
+  border-color: var(--color-media-video-line);
+  background: var(--color-media-video-tint);
 }
 .cv-type--audio {
-  color: #8a4caa;
-  border-color: rgba(160, 90, 200, 0.35);
-  background: rgba(160, 90, 200, 0.08);
+  color: var(--color-media-audio-ink);
+  border-color: var(--color-media-audio-line);
+  background: var(--color-media-audio-tint);
 }
 .cv-type--silent {
   color: var(--color-muted);
@@ -235,7 +310,7 @@
 .cv-player {
   position: fixed;
   inset: 0;
-  z-index: 10000; /* above the navbar + Leva */
+  z-index: var(--z-index-max); /* above the navbar + Leva */
   display: grid;
   place-items: center;
   padding: 2.5vmin;
@@ -243,14 +318,17 @@
 .cv-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 0;
-  background: rgba(15, 18, 24, 0.5);
-  backdrop-filter: blur(8px) saturate(1.05);
-  -webkit-backdrop-filter: blur(8px) saturate(1.05);
+  z-index: var(--z-index-base);
+  /* the pan lock the root used to hold, applied to the sibling that covers the
+     screen instead — so it can't intersect with the panel's pan-y */
+  touch-action: none;
+  background: var(--scrim-black-50);
+  backdrop-filter: blur(var(--blur-sm)) saturate(1.05);
+  -webkit-backdrop-filter: blur(var(--blur-sm)) saturate(1.05);
 }
 .cv-stage {
   position: fixed; /* box + radius + shadow all animated by motion */
-  z-index: 2;
+  z-index: var(--z-index-raised);
   overflow: hidden;
   background-size: cover;
   background-position: center;
@@ -266,7 +344,7 @@
 .cv-controls {
   grid-area: 1 / 1;
   position: relative;
-  z-index: 3;
+  z-index: var(--z-index-raised);
   width: min(95vw, calc(95vh * 16 / 9));
   aspect-ratio: 16 / 9;
   max-width: 95vw;
@@ -279,7 +357,7 @@
   inset: 0 0 auto 0;
   height: 34%;
   pointer-events: none;
-  background: linear-gradient(180deg, rgba(18, 16, 14, 0.3) 0%, rgba(18, 16, 14, 0) 100%);
+  background: linear-gradient(180deg, var(--scrim-black-30) 0%, transparent 100%);
 }
 .cv-stage::after {
   content: "";
@@ -287,13 +365,13 @@
   inset: auto 0 0 0;
   height: 44%;
   pointer-events: none;
-  background: linear-gradient(0deg, rgba(18, 16, 14, 0.44) 0%, rgba(18, 16, 14, 0) 100%);
+  background: linear-gradient(0deg, var(--scrim-black-40) 0%, transparent 100%);
 }
 
 .cv-top {
   position: absolute;
   inset: 0 0 auto 0;
-  z-index: 3;
+  z-index: var(--z-index-raised);
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
@@ -309,16 +387,16 @@
   margin: 0;
   font-family: var(--font-geist), system-ui, sans-serif;
   font-weight: var(--font-weight-bold);
-  font-size: 34px;
+  font-size: var(--text-title-lg);
   line-height: 1;
   letter-spacing: var(--tracking-tighter);
-  color: #fff;
-  text-shadow: 0 1px 26px rgba(0, 0, 0, 0.4);
+  color: var(--color-ink-inverse);
+  text-shadow: 0 1px 26px var(--scrim-black-40);
 }
 .cv-sub {
   margin: 0;
-  font-size: 13px;
-  color: rgba(255, 255, 255, 0.82);
+  font-size: var(--text-ui);
+  color: var(--scrim-white-85);
 }
 
 .cv-close {
@@ -327,17 +405,17 @@
   place-items: center;
   width: 38px;
   height: 38px;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.16);
-  border: 1px solid rgba(255, 255, 255, 0.28);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
+  border-radius: var(--radius-full);
+  color: var(--color-ink-inverse);
+  background: var(--scrim-white-15);
+  border: 1px solid var(--scrim-white-30);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background var(--duration-200) ease, transform var(--duration-200) var(--ease-overshoot);
 }
 .cv-close:hover {
-  background: rgba(255, 255, 255, 0.3);
+  background: var(--scrim-white-30);
   transform: scale(1.08);
 }
 
@@ -345,7 +423,7 @@
 .cv-center-play {
   position: absolute;
   inset: 0;
-  z-index: 2;
+  z-index: var(--z-index-raised);
   display: grid;
   place-items: center;
   border: none;
@@ -357,13 +435,13 @@
   place-items: center;
   width: 86px;
   height: 86px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   color: var(--color-dark);
-  background: rgba(255, 255, 255, 0.88);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 18px 50px -12px rgba(0, 0, 0, 0.5);
-  transition: transform 0.26s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.3s ease;
+  background: var(--scrim-white-85);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  box-shadow: var(--shadow-float-lg);
+  transition: transform var(--duration-250) var(--ease-overshoot), opacity var(--duration-300) ease;
 }
 .cv-center-play:hover span {
   transform: scale(1.07) !important;
@@ -375,18 +453,18 @@
   left: 50%;
   bottom: 26px;
   transform: translateX(-50%);
-  z-index: 3;
+  z-index: var(--z-index-raised);
   display: flex;
   align-items: center;
   gap: 14px;
   width: min(680px, calc(100% - 36px));
   padding: 11px 16px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.24);
-  backdrop-filter: blur(18px) saturate(1.3);
-  -webkit-backdrop-filter: blur(18px) saturate(1.3);
-  box-shadow: 0 18px 50px -18px rgba(0, 0, 0, 0.5);
+  border-radius: var(--radius-full);
+  background: var(--scrim-white-15);
+  border: 1px solid var(--scrim-white-25);
+  backdrop-filter: blur(var(--blur-lg)) saturate(1.3);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(1.3);
+  box-shadow: var(--shadow-float-lg);
 }
 .cv-icon {
   display: grid;
@@ -394,15 +472,15 @@
   width: 36px;
   height: 36px;
   flex: none;
-  border-radius: 999px;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.14);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-full);
+  color: var(--color-ink-inverse);
+  background: var(--scrim-white-15);
+  border: 1px solid var(--scrim-white-20);
   cursor: pointer;
-  transition: background 0.2s ease, transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: background var(--duration-200) ease, transform var(--duration-200) var(--ease-overshoot);
 }
 .cv-icon:hover {
-  background: rgba(255, 255, 255, 0.26);
+  background: var(--scrim-white-25);
 }
 .cv-icon:active {
   transform: scale(0.92);
@@ -412,9 +490,9 @@
   cursor: default;
 }
 .cv-time {
-  font-size: 12px;
+  font-size: var(--text-ui-sm);
   font-variant-numeric: tabular-nums;
-  color: rgba(255, 255, 255, 0.85);
+  color: var(--scrim-white-85);
   min-width: 34px;
   text-align: center;
 }
@@ -422,31 +500,31 @@
   position: relative;
   flex: 1;
   height: 5px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.26);
+  border-radius: var(--radius-full);
+  background: var(--scrim-white-25);
   cursor: pointer;
 }
 .cv-scrub-fill {
   position: absolute;
   inset: 0 auto 0 0;
-  border-radius: 999px;
-  background: #fff;
+  border-radius: var(--radius-full);
+  background: var(--scrim-white);
 }
 .cv-scrub-thumb {
   position: absolute;
   top: 50%;
   width: 13px;
   height: 13px;
-  border-radius: 999px;
-  background: #fff;
+  border-radius: var(--radius-full);
+  background: var(--scrim-white);
   transform: translate(-50%, -50%);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-md);
 }
 .cv-bar .cv-type {
   flex: none;
-  color: #fff;
-  background: rgba(255, 255, 255, 0.16);
-  border-color: rgba(255, 255, 255, 0.3);
+  color: var(--color-ink-inverse);
+  background: var(--scrim-white-15);
+  border-color: var(--scrim-white-30);
 }
 
 /* ── toast ───────────────────────────────────────────────────────────────── */
@@ -455,17 +533,17 @@
   left: 50%;
   bottom: 88px;
   transform: translateX(-50%);
-  z-index: 10001;
+  z-index: var(--z-index-toast);
   padding: 10px 18px;
-  border-radius: 999px;
-  font-size: 13px;
+  border-radius: var(--radius-full);
+  font-size: var(--text-ui);
   font-weight: var(--font-weight-normal);
   color: var(--color-dark);
-  background: rgba(255, 255, 255, 0.9);
-  border: 1px solid rgba(26, 26, 26, 0.1);
-  backdrop-filter: blur(12px);
-  box-shadow: 0 16px 44px -18px rgba(26, 26, 26, 0.4);
-  animation: cv-toast-in 0.32s cubic-bezier(0.22, 1, 0.36, 1) both;
+  background: var(--scrim-white-85);
+  border: 1px solid color-mix(in oklab, var(--color-ink) 10%, transparent);
+  backdrop-filter: blur(var(--blur-md));
+  box-shadow: var(--shadow-float-lg);
+  animation: cv-toast-in var(--duration-300) var(--ease-entrance) both;
 }
 @keyframes cv-toast-in {
   from {
@@ -486,15 +564,29 @@
   .cv-minimap-wrap {
     transition-duration: 0.001s;
   }
+  /* the canvas push is disabled under reduced motion (see `reduce` in
+     CoversGrid), so the map's mirror of it goes away too — the opened cell
+     still marks itself, it just doesn't travel. */
+  .cv-mm-cell {
+    --mm-x: 0px;
+    --mm-y: 0px;
+    transition-duration: 0.001s;
+    transition-delay: 0ms !important;
+  }
 }
 
 /* ── music active-state (art left + waveform/lyrics panel) ──────────────── */
+/* Local stacking inside .cv-player, all off one token: card (base) → panel →
+   art → close. The art sits ABOVE the panel on purpose: on mobile the panel's
+   scroll box runs up behind the artwork, so content scrolled past the top
+   disappears under the image instead of clipping at a hard padding line. */
 .cv-music-art {
   position: fixed;
-  z-index: 2;
+  z-index: calc(var(--z-index-raised) + 2);
   overflow: hidden;
   background-size: cover;
   background-position: center;
+  touch-action: none;
   will-change: width, height, left, top;
 }
 .cv-music-art-hi {
@@ -505,24 +597,34 @@
 }
 .cv-music-panel {
   position: fixed;
-  z-index: 3;
+  z-index: calc(var(--z-index-raised) + 1);
   display: flex;
   flex-direction: column;
-  gap: 18px;
   color: var(--color-dark);
   overflow: hidden; /* so content clips (not reflows) as the panel collapses into its tile on close */
 }
+/* The measured stack. Holds the column and its gap so the panel's own box can be
+   driven FROM this element's height (see the ResizeObserver in CoverPlayer). */
+.cv-music-stack {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  width: 100%;
+}
 .cv-music-card {
   position: fixed;
-  z-index: 1;
+  z-index: var(--z-index-raised);
   overflow: hidden;
-  background: linear-gradient(180deg, #ffffff 0%, #f6f8fb 100%);
-  border: 1px solid rgba(26, 26, 26, 0.06);
+  touch-action: none;
+  background: linear-gradient(180deg, var(--neutral-0) 0%, var(--neutral-25) 100%);
+  border: 1px solid color-mix(in oklab, var(--color-ink) 6%, transparent);
   /* shadow is animated by motion so it fades out on close */
 }
 .cv-music-close {
   position: fixed;
-  z-index: 4;
+  z-index: calc(var(--z-index-raised) + 3);
   color: var(--color-dark);
   /* bare X — no disc, no border, no fill. Just the glyph (the 38px box stays for
      a comfortable tap target). */
@@ -533,6 +635,30 @@
 .cv-music-close:hover {
   background: none;
   color: #000;
+}
+/* mobile only — the chart position, centred on the header line above the art.
+   Padded clear of the close button so a long label never runs under it. */
+.cv-music-toprank {
+  position: fixed;
+  z-index: calc(var(--z-index-raised) + 3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 0 56px;
+  /* --text-body carries no weight companion in the scale, so an unset weight
+     inherits body's 400 — which reads thin for a lone centred credit floating in
+     white. 590 is the scale's top non-heading emphasis: solid, not a heading. */
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--font-weight-strong);
+  color: var(--color-dark);
+}
+.cv-music-toprank span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .cv-music-head {
   display: flex;
@@ -554,23 +680,26 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--font-weight-emphasis);
   color: var(--color-muted);
 }
 .cv-music-avatar {
   flex: none;
   width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   object-fit: cover;
-  background: rgba(26, 26, 26, 0.06);
+  background: color-mix(in oklab, var(--color-ink) 6%, transparent);
 }
 .cv-music-rank {
   margin: 5px 0 0;
-  font-size: 11px;
-  font-weight: var(--font-weight-normal);
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--text-ui-sm--font-weight);
   color: var(--color-muted);
 }
 .cv-music-controls {
@@ -584,8 +713,8 @@
   place-items: center;
   width: 48px;
   height: 48px;
-  border-radius: 999px;
-  color: #fff;
+  border-radius: var(--radius-full);
+  color: var(--color-ink-inverse);
   background: var(--color-dark);
   border: none;
   cursor: pointer;
@@ -593,8 +722,8 @@
      the hover/press grows into the gap instead of getting sliced off. */
   transform-origin: left center;
   transition:
-    transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1),
-    opacity 0.2s ease;
+    transform var(--duration-200) var(--ease-overshoot),
+    opacity var(--duration-200) ease;
 }
 .cv-play-btn:hover {
   transform: scale(1.06);
@@ -619,17 +748,19 @@
 .cv-wave-bar {
   flex: 1;
   min-width: 0;
-  border-radius: 999px;
+  border-radius: var(--radius-full);
   transform-origin: center;
-  background: rgba(26, 26, 26, 0.14);
+  background: color-mix(in oklab, var(--color-ink) 14%, transparent);
 }
 .cv-music-time {
   flex: none;
-  font-size: 12px;
+  font-size: var(--text-ui-sm);
   font-variant-numeric: tabular-nums;
   color: var(--color-muted);
-  min-width: 78px;
+  /* No min-width: tabular figures already hold the readout steady as it ticks,
+     and a padded box just parks dead space between the waveform and the time. */
   text-align: right;
+  white-space: nowrap;
 }
 .cv-music-lyricwrap {
   flex: 1;
@@ -652,14 +783,14 @@
   inset: 0;
   display: flex;
   flex-direction: column;
-  transition: opacity 0.45s ease;
+  transition: opacity var(--duration-400) ease;
 }
 .cv-lyrics-loader {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
-  transition: opacity 0.45s ease;
+  transition: opacity var(--duration-400) ease;
 }
 .cv-lyrics-content.is-off,
 .cv-lyrics-loader.is-off {
@@ -674,7 +805,7 @@
 @keyframes cv-lyric-in {
   from {
     opacity: 0;
-    filter: blur(6px);
+    filter: blur(var(--blur-sm));
   }
   to {
     opacity: 1;
@@ -703,44 +834,68 @@
   display: flex;
   align-items: center;
   color: var(--color-dark);
-  font-size: 14px;
+  font-size: var(--text-ui-lg);
 }
 .cv-lyric {
   margin: 0;
   padding: 5px 0;
-  font-size: 16px;
+  font-size: var(--text-heading);
   font-weight: var(--font-weight-normal);
-  line-height: 1.3;
+  line-height: var(--text-heading--line-height);
   color: var(--color-dark);
   transform-origin: left center;
   transform: scale(var(--ls, 1));
   opacity: var(--lo, 1);
   transition:
-    transform 0.22s cubic-bezier(0.16, 1, 0.3, 1),
-    opacity 0.22s ease;
+    transform var(--duration-200) var(--ease-entrance),
+    opacity var(--duration-200) ease;
   will-change: transform, opacity;
 }
 .cv-lyric-in {
   display: inline-block;
-  animation: cv-lyric-in 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-  animation-delay: calc(var(--i, 0) * 0.04s);
+  animation: cv-lyric-in var(--duration-500) var(--ease-entrance) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger-sm));
+}
+/* Word-level ink-in on the line being sung. The words array carries its own
+   spaces as timed entries, so pre-wrap is what preserves the original spacing.
+   Both states stay fully legible — the wipe is a shift in ink weight, not a
+   fade from invisible to visible. */
+.cv-lyric-words {
+  white-space: pre-wrap;
+}
+.cv-lyric-w {
+  color: color-mix(in oklab, var(--color-dark) 42%, transparent);
+  transition: color var(--duration-200) var(--ease-entrance);
+}
+.cv-lyric-w.is-sung {
+  color: var(--color-dark);
 }
 .cv-spotify-link {
   flex: none;
   align-self: flex-start;
-  font-size: 13px;
+  font-size: var(--text-ui);
   font-weight: var(--font-weight-normal);
-  color: #fff;
+  color: var(--color-ink-inverse);
   text-decoration: none;
   padding: 9px 18px;
   background: var(--color-dark);
   border: none;
   transition:
-    transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1),
-    background 0.2s ease;
+    transform var(--duration-200) var(--ease-overshoot),
+    background var(--duration-200) ease;
+}
+/* mobile: pinned to its own band at the card's bottom, outside the panel's
+   overflow box — nothing in the panel can push it out of view. */
+.cv-spotify-fixed {
+  position: fixed;
+  z-index: calc(var(--z-index-raised) + 3);
+  display: inline-flex;
+  align-items: center;
+  padding: 0 18px;
+  touch-action: none;
 }
 .cv-spotify-link:hover {
-  background: #282828;
+  background: var(--neutral-800);
 }
 .cv-spotify-link:active {
   transform: scale(0.96);
@@ -750,19 +905,33 @@
    is just title / artist / player / Spotify; the link drops to the bottom and
    the controls breathe with a shorter waveform + smaller time. */
 @media (max-width: 819px) {
-  .cv-music-panel {
-    gap: 14px;
-    /* a long (two- or three-line) title can outgrow the fixed panel band — let
-       it scroll inside the panel rather than clip at the card's bottom edge.
-       overscroll-behavior keeps the scroll from leaking to the grid behind. */
-    overflow-y: auto;
-    -webkit-overflow-scrolling: touch;
-    touch-action: pan-y;
-    overscroll-behavior: contain;
-    scrollbar-width: none;
+  /* NO scrolling here. The panel's height is measured from .cv-music-stack, so
+     the box is always exactly as tall as what's in it — a scroll box could only
+     ever clip an edge, which is what it kept doing.
+
+     `flex: none` is load-bearing: the desktop `flex: 1` would stretch this to the
+     panel it is supposed to be measuring, and the measurement would just report
+     the panel's own height back to itself forever. Here it sizes to content. */
+  .cv-music-stack {
+    flex: none;
+    gap: 12px;
   }
-  .cv-music-panel::-webkit-scrollbar {
-    display: none;
+  /* close sits on its own header line, not over the panel — give the title the
+     full width back so it wraps later (and orphans less). */
+  .cv-music-head {
+    padding-right: 0;
+    gap: 4px;
+  }
+  /* the art is big and square above it; the title needs the weight to hold its
+     own under that mass, so it steps up from the desktop clamp's lower bound.
+     Three lines is the cap — past that the panel would want more height than a
+     short viewport has to give, and something would have to clip. */
+  .cv-music-title {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+    font-size: clamp(30px, 8.4vw, 40px);
   }
   .cv-music-controls.is-stacked {
     gap: 12px;
@@ -771,15 +940,286 @@
     height: 40px;
   }
   .cv-music-controls.is-stacked .cv-music-time {
-    min-width: 58px;
-    font-size: 11px;
+    font-size: var(--text-ui-xs);
   }
   .cv-music-controls.is-stacked .cv-play-btn {
     width: 44px;
     height: 44px;
   }
-  .cv-spotify-link {
-    margin-top: auto;
+}
+
+/* ── the four little lines ──────────────────────────────────────────────────
+   Bass, low-mid, presence, air. audioEngine writes --eq0…--eq3 on this element
+   once a frame and CSS does the rest — no React in the loop.
+
+   Height comes from a symmetric clip rather than scaleY. scaleY squashes the
+   cap along with the bar, so a rounded bar reads as a pointy ellipse when tall
+   and a flat smear when short — the radius changes with every value. `inset()
+   … round` clips an unscaled box, so the caps stay exactly --eq-r at every
+   height. It costs a repaint per frame instead of a pure compositor transform;
+   on four 3×15px bars that is nothing next to shipping distorted caps. */
+.cv-eq {
+  --eq-h: 15px;
+  --eq-w: 3px;
+  --eq-gap: 2px;
+  --eq-r: 1.5px; /* half the bar width — a true half-round cap */
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--eq-gap);
+  width: calc(4 * var(--eq-w) + 3 * var(--eq-gap));
+  height: var(--eq-h);
+}
+.cv-eq i {
+  flex: none;
+  width: var(--eq-w);
+  height: 100%;
+  background: var(--eq-color, var(--color-ink));
+  will-change: clip-path;
+  /* Duration is owned by the engine (--eq-t): 0s while values are landing every
+     frame — easing there would only add lag — and 300ms for the glide back to
+     flat when the music stops. */
+  transition: clip-path var(--eq-t, var(--duration-300)) var(--ease-entrance);
+}
+.cv-eq i:nth-child(1) {
+  clip-path: inset(calc((1 - var(--eq0, 0.16)) * 50%) 0 round var(--eq-r));
+}
+.cv-eq i:nth-child(2) {
+  clip-path: inset(calc((1 - var(--eq1, 0.16)) * 50%) 0 round var(--eq-r));
+}
+.cv-eq i:nth-child(3) {
+  clip-path: inset(calc((1 - var(--eq2, 0.16)) * 50%) 0 round var(--eq-r));
+}
+.cv-eq i:nth-child(4) {
+  clip-path: inset(calc((1 - var(--eq3, 0.16)) * 50%) 0 round var(--eq-r));
+}
+
+/* ── now-playing dock ───────────────────────────────────────────────────────
+   Stays in the world after the big card closes. Bottom-left on desktop (the
+   title notch owns bottom-centre, the minimap bottom-right); a full-width strip
+   riding above the notch on touch, where the minimap is hidden anyway. */
+.cv-dock {
+  position: fixed;
+  left: 22px;
+  bottom: 22px;
+  z-index: var(--z-index-page-card);
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  width: 380px;
+  max-width: calc(100vw - 44px);
+  padding: 8px 10px;
+  overflow: hidden;
+  border-radius: var(--radius-xl);
+  color: var(--color-ink);
+  background: color-mix(in srgb, var(--color-surface-raised) 84%, transparent);
+  border: 1px solid var(--color-line);
+  box-shadow: var(--shadow-float);
+  backdrop-filter: blur(var(--blur-lg)) saturate(1.1);
+  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(1.1);
+  font-family: var(--font-geist), system-ui, sans-serif;
+}
+.cv-dock[data-state="in"] {
+  animation: cv-dock-in var(--duration-400) var(--ease-entrance) both;
+}
+.cv-dock[data-state="out"] {
+  animation: cv-dock-out var(--duration-200) ease-in both;
+  pointer-events: none;
+}
+@keyframes cv-dock-in {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes cv-dock-out {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.98);
+  }
+}
+
+.cv-dock-art {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  background: var(--color-surface-sunken) center / cover no-repeat;
+  transition: transform var(--duration-200) var(--ease-entrance);
+}
+.cv-dock-art:hover {
+  transform: scale(1.07);
+}
+.cv-dock-art:active {
+  transform: scale(0.97);
+}
+
+.cv-dock-meta {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 0;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+}
+.cv-dock-title,
+.cv-dock-artist {
+  max-width: 100%;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.25;
+}
+.cv-dock-title {
+  font-size: var(--text-heading-sm);
+  font-weight: var(--text-heading-sm--font-weight);
+  letter-spacing: -0.012em;
+  color: var(--color-ink);
+}
+.cv-dock-artist {
+  font-size: var(--text-ui);
+  font-weight: var(--text-ui--font-weight);
+  letter-spacing: -0.008em;
+  color: var(--color-ink-secondary);
+}
+
+.cv-dock-play {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  color: var(--color-ink-inverse);
+  background: var(--color-ink);
+  transition: transform var(--duration-120) var(--ease-standard), opacity var(--duration-150) ease;
+}
+.cv-dock-play:hover {
+  transform: scale(1.06);
+}
+.cv-dock-play:active {
+  transform: scale(0.94);
+}
+.cv-dock-play:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.cv-dock-time {
+  flex: none;
+  min-width: 30px;
+  font-size: var(--text-ui-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-secondary);
+}
+.cv-dock-close {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  background: none;
+  color: var(--color-ink-secondary);
+  transition: color var(--duration-150) ease, background var(--duration-150) ease;
+}
+.cv-dock-close:hover {
+  color: var(--color-ink);
+  background: var(--color-surface-sunken);
+}
+
+/* preview position — one compositor transform, driven by --cv-progress */
+.cv-dock-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--color-ink);
+  transform-origin: left center;
+  transform: scaleX(var(--cv-progress, 0));
+  will-change: transform;
+}
+
+/* the four lines, sitting on the artwork's bottom-right corner. Colour is
+   measured from the corner they cover (see lib/artInk.js) — near-black on light
+   art, white on dark — so they hold contrast without a scrim or a shadow
+   propping them up. Held back until the card's morph has landed. */
+.cv-art-eq {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 1;
+  --eq-w: 3px;
+  --eq-gap: 3px;
+  transition: opacity var(--duration-200) ease;
+  /* `backwards`, not `both`: `both` would hold the final keyframe forever, and a
+     running/filling animation outranks everything else in the cascade — the
+     badge would sit at opacity 1 through the close while the rest of the card
+     faded, riding the artwork down to the tile. Backwards still holds the
+     from-state through the delay, then hands control back. */
+  animation: cv-art-eq-in var(--duration-400) var(--ease-entrance) var(--duration-400) backwards;
+}
+/* leaving with the card — drop the animation so the transition owns opacity */
+.cv-art-eq.is-leaving {
+  animation: none;
+  opacity: 0;
+}
+.cv-art-eq.is-ink {
+  --eq-color: var(--color-ink);
+}
+.cv-art-eq.is-paper {
+  --eq-color: #fff;
+}
+@keyframes cv-art-eq-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (hover: none), (max-width: 819px) {
+  .cv-dock {
+    left: 12px;
+    right: 12px;
+    /* clears the title notch, which owns the bottom-centre on touch */
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 84px);
+    width: auto;
+    max-width: none;
+  }
+  .cv-dock-time {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cv-dock[data-state="in"],
+  .cv-dock[data-state="out"] {
+    animation-duration: 0.001s;
+  }
+  .cv-eq i {
+    transition-duration: 0.001s;
   }
 }
 
@@ -791,13 +1231,13 @@
   position: absolute;
   right: 22px;
   bottom: 22px;
-  z-index: 11;
+  z-index: var(--z-index-raised);
   pointer-events: none;
   opacity: 0;
   transform: translateY(20px);
   transition:
-    opacity 0.7s cubic-bezier(0.34, 1.56, 0.64, 1),
-    transform 0.7s cubic-bezier(0.34, 1.56, 0.64, 1);
+    opacity var(--duration-800) var(--ease-overshoot),
+    transform var(--duration-800) var(--ease-overshoot);
 }
 .cv-minimap {
   display: grid;
@@ -807,37 +1247,60 @@
   width: 134px;
   aspect-ratio: 6 / 5;
   padding: 6px;
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.5);
-  border: 1px solid rgba(26, 26, 26, 0.1);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
-  box-shadow: 0 10px 30px -14px rgba(26, 26, 26, 0.35);
+  border-radius: var(--radius-lg);
+  background: var(--scrim-white-50);
+  border: 1px solid color-mix(in oklab, var(--color-ink) 10%, transparent);
+  backdrop-filter: blur(var(--blur-md));
+  -webkit-backdrop-filter: blur(var(--blur-md));
+  box-shadow: var(--shadow-float);
   opacity: 0.5;
-  transition: opacity 0.25s ease;
+  transition: opacity var(--duration-250) ease;
 }
 .cv-minimap:hover {
   opacity: 1;
 }
 .cv-mm-cell {
+  --mm-x: 0px;
+  --mm-y: 0px;
+  --mm-s: 1;
+  --mm-hover: 1;
+  position: relative;
   border: none;
   padding: 0;
-  border-radius: 3px;
-  background-color: rgba(26, 26, 26, 0.12);
+  border-radius: var(--radius-2xs);
+  background-color: color-mix(in oklab, var(--color-ink) 12%, transparent);
   background-size: cover;
   background-position: center;
   cursor: pointer;
   outline: 0 solid transparent;
+  /* push (JS-driven vars) and hover multiply into ONE transform — a separate
+     :hover { transform } rule would replace the shove instead of stacking on it. */
+  transform: translate(var(--mm-x), var(--mm-y)) scale(calc(var(--mm-s) * var(--mm-hover)));
   transition:
-    outline-width 0.16s ease,
-    transform 0.16s ease;
+    outline-width var(--duration-150) ease,
+    transform var(--duration-500) var(--ease-overshoot);
 }
 .cv-mm-cell:hover {
-  transform: scale(1.14);
+  --mm-hover: 1.14;
+  z-index: 2;
+  /* hover has to answer the pointer immediately; the push can afford the long
+     overshoot because it's reacting to a card that takes that long to open. */
+  transition-duration: var(--duration-150);
+  transition-delay: 0ms !important;
 }
 .cv-mm-cell.is-here {
   outline: 2px solid var(--color-dark);
   outline-offset: 1px;
+}
+/* the cover the player grew out of — the map's stand-in for the open card */
+.cv-mm-cell.is-playing {
+  z-index: 3;
+  box-shadow: var(--shadow-float);
+}
+/* the shockwave is the map announcing itself — hold it at full opacity for the
+   ripple instead of making the user hover to see what just happened */
+.cv-minimap.is-open {
+  opacity: 1;
 }
 /* No minimap on touch. It sat bottom-right over the title notch and covered the
    track text, and it rests at opacity .5 waiting for a hover that never comes on
@@ -853,4 +1316,9 @@
   .cv-minimap-wrap {
     display: none;
   }
+}
+/* dev only — clicking a line during playback declares "this is playing now",
+   which is the preview offset in one gesture. See Lyrics.jsx onCalibrate. */
+.cv-lyric.is-tappable {
+  cursor: pointer;
 }

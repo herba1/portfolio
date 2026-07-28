@@ -7,6 +7,10 @@ export default function manifest() {
     description,
     start_url: '/',
     display: 'standalone',
+    /* The one place a literal is unavoidable: the manifest is read by the OS
+       before any CSS exists, so it can't reference a token. Both values are
+       `--neutral-50` (the page surface) — if that primitive ever moves,
+       these two move with it by hand. */
     background_color: '#f1f5f9',
     theme_color: '#f1f5f9',
     icons: [

@@ -1,0 +1,199 @@
+/* ───────────────────────────────────────────────────────────────────────────
+   MorphText — letters the two strings share slide to their new spot; the rest
+   fade out / fade in around them.
+
+   Full API docs live in MorphText.jsx. This file owns the feel.
+
+   Everything here runs on the compositor. A character is two nested spans:
+
+     .morph-c   position — absolutely placed, slides via transform
+     .morph-g   presence — opacity / blur / lift, via a one-shot keyframe
+
+   Splitting them is what lets a letter fade *while* it slides without the two
+   transforms fighting for the same property. JS never touches a frame: it
+   writes --x once per change and the browser interpolates.
+
+   The --morph-* properties below are the public knobs — override them on the
+   host from any stylesheet. JS reads them back off the element to schedule its
+   one cleanup pass, so retuning a duration here retunes the component for real;
+   there is no matching constant to keep in sync on the JS side.
+
+   Element contract (all internal, but here so a consumer can style around it):
+     .morph          host. Explicit px width, eased. `display: inline-block`.
+     .morph-sr       the real string, visually hidden, for screen readers
+     .morph-mirror   offscreen twin used for measurement
+     .morph-flow     plain text, shown only before the first measurement (SSR)
+     .morph-c        one per glyph — position layer
+     .morph-g        inner span — presence layer
+     [data-morph]    per glyph: "stay" | "in" | "out"
+     [data-morphing] on the host: "1" while anything is moving
+     [data-quiet]    on the host: "1" during a silent re-measure
+   ─────────────────────────────────────────────────────────────────────────── */
+
+.morph {
+  /* ── tunables (override per instance) ── */
+  --morph-slide: 520ms; /* shared letter travelling to its new x */
+  --morph-in: 340ms; /* a new letter arriving */
+  --morph-out: 180ms; /* a dropped letter leaving — exits stay faster */
+  --morph-lead: 120ms; /* head start the exits get before the entries land */
+  --morph-step: 8ms; /* per-letter stagger on the slide */
+  --morph-step-in: 14ms; /* per-letter stagger on the entry */
+  --morph-cap: 12; /* stagger stops accumulating after this many letters,
+                      so a long title doesn't turn into a slow wave */
+  --morph-ease: var(--ease-entrance, cubic-bezier(0.16, 1, 0.3, 1));
+  --morph-ease-out: var(--ease-in-quad, cubic-bezier(0.55, 0.085, 0.68, 0.53));
+  --morph-blur: var(--blur-xs, 4px);
+
+  position: relative;
+  display: inline-block;
+  white-space: pre;
+
+  /* The box is only as wide as the string, and the glyphs inside are placed
+     from its left edge — so if a centred parent sees this width SNAP while its
+     own width eases, the whole word jumps sideways by half the difference.
+     Easing it here with the same curve the parent uses cancels that exactly:
+     the gap either side stays constant and only the letters move. */
+  transition: width var(--morph-slide) var(--morph-ease);
+  /* a zero-width space so the box keeps a real line box (and therefore the
+     right height and baseline) even though every glyph is out of flow. */
+}
+.morph::before {
+  content: "\200b";
+}
+
+/* pre-hydration / pre-measure fallback: ordinary text, so SSR markup and the
+   first paint already read correctly. Dropped the moment positions exist. */
+.morph-flow {
+  display: inline-block;
+  white-space: pre;
+}
+
+/* offscreen twin used to measure one string, once. Lives inside .morph so it
+   inherits the exact font, size, weight and tracking — nothing to copy over.
+   width:max-content keeps it from being squeezed by the explicit width we set
+   on the parent from the *previous* measurement. */
+.morph-mirror {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  white-space: pre;
+  visibility: hidden;
+  pointer-events: none;
+}
+.morph-m {
+  display: inline-block;
+}
+
+/* ── position layer ─────────────────────────────────────────────────────── */
+.morph-c {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform: translateX(var(--x));
+  transition: transform var(--morph-slide) var(--morph-ease);
+  transition-delay: calc(min(var(--i, 0), var(--morph-cap)) * var(--morph-step));
+}
+/* promoted only while something is actually moving — a permanent layer per
+   letter would cost us subpixel antialiasing on the resting title. */
+.morph[data-morphing="1"] .morph-c {
+  will-change: transform;
+}
+
+/* ── presence layer ─────────────────────────────────────────────────────── */
+.morph-g {
+  display: inline-block;
+  /* Catches the handoff when an entry animation is removed mid-flight (the text
+     changed again before it finished) — eases to rest instead of popping.
+     OPACITY ONLY, deliberately. Transitioning `filter` too meant that when the
+     animation was dropped at settle, every glyph ran a 340ms blur(0) → none
+     tween: visually a no-op, but a non-`none` filter holds a render surface, so
+     it kept ~35 composited layers alive for a third of a second after every
+     morph had already finished. Snapping blur(0) → none costs nothing to look
+     at and releases them immediately. */
+  transition: opacity var(--morph-in) var(--morph-ease);
+}
+
+.morph-c[data-morph="in"] .morph-g {
+  animation: morph-in var(--morph-in) var(--morph-ease) both;
+  animation-delay: calc(
+    var(--morph-lead) + min(var(--i, 0), var(--morph-cap)) * var(--morph-step-in)
+  );
+}
+.morph-c[data-morph="out"] .morph-g {
+  animation: morph-out var(--morph-out) var(--morph-ease-out) both;
+}
+
+@keyframes morph-in {
+  from {
+    opacity: 0;
+    filter: blur(var(--morph-blur));
+    transform: translateY(0.16em) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+}
+@keyframes morph-out {
+  from {
+    opacity: 1;
+    filter: blur(0);
+    transform: none;
+  }
+  to {
+    opacity: 0;
+    filter: blur(var(--morph-blur));
+    transform: translateY(-0.12em) scale(0.94);
+  }
+}
+
+/* screen readers get the plain string; the glyph layer is decoration */
+.morph-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+/* re-measure after a resize or a webfont swap: new positions, no travel */
+.morph[data-quiet="1"],
+.morph[data-quiet="1"] .morph-c {
+  transition: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .morph-c {
+    transition: none;
+    transition-delay: 0s;
+  }
+  .morph-c[data-morph="in"] .morph-g {
+    animation: morph-fade-in 120ms linear both;
+    animation-delay: 0s;
+  }
+  .morph-c[data-morph="out"] .morph-g {
+    animation: morph-fade-out 120ms linear both;
+  }
+  @keyframes morph-fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes morph-fade-out {
+    from {
+      opacity: 1;
+    }
+    to {
+      opacity: 0;
+    }
+  }
+}

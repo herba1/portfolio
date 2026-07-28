@@ -2,7 +2,7 @@ export default function StickyFooter({ height = "100lvh", children, className=""
   return (
     <footer
       style={{ height }}
-      className={`flex flex-col justify-end relative  bg-black z-0 ${className}`}
+      className={`flex flex-col justify-end relative  bg-surface-inverse z-0 ${className}`}
     >
       {/* Double height container */}
       <div
@@ -18,8 +18,8 @@ export default function StickyFooter({ height = "100lvh", children, className=""
           className="w-full sticky"
         >
           {children || (
-            <div className="w-full overflow-clip h-full flex flex-col bg-pink-400 justify-end p-4 ">
-              <h1 className=" text-8xl text-white">
+            <div className="w-full overflow-clip h-full flex flex-col bg-surface-inverse justify-end p-4 ">
+              <h1 className=" text-8xl text-ink-inverse">
                 place your content here
               </h1>
             </div>

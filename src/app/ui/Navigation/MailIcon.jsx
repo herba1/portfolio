@@ -16,14 +16,14 @@ export default function MailIcon({ open }) {
 
         /* Horizontal bar (always visible) */
         .nav-toggle-h {
-          transition: opacity 150ms ease;
+          transition: opacity var(--duration-150) ease;
         }
 
         /* Vertical bar (rotates to hide for minus) */
         .nav-toggle-v {
           transform-box: fill-box;
           transform-origin: center center;
-          transition: transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
+          transition: transform var(--duration-200) var(--ease-hover);
         }
 
         .nav-toggle-icon.is-open .nav-toggle-v {
@@ -34,7 +34,7 @@ export default function MailIcon({ open }) {
         .nav-toggle-icon:active .nav-toggle-h,
         .nav-toggle-icon:active .nav-toggle-v {
           opacity: 0.5;
-          transition: opacity 100ms ease;
+          transition: opacity var(--duration-100) ease;
         }
 
         @media (prefers-reduced-motion: reduce) {

@@ -1,30 +1,56 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { guessOffsetMs, resolveOffset, writeOverride } from "./lib/lyricOffsets";
 
-// Plain lyrics from lrclib (via our proxy), shown as a free native scroller with
-// a proximity-scaled focus: the line nearest the vertical centre swells to full
-// size + opacity, lines further out shrink and fade (sharp Gaussian peak). Just
-// scroll — nothing is clickable. Loading → loaded crossfades; the spinner never
-// just pops out of existence.
-export default function Lyrics({ artist, title, color = "#1a1a1a" }) {
-  const [lines, setLines] = useState(null); // string[]
+// Lyrics from /api/spotify/lyrics, in one of two modes.
+//
+// SYNCED — the route returned timed lines AND we know where this preview sits
+// inside the recording (see lib/lyricOffsets). The panel then follows playback:
+// the active line rides the focal slot and, when the source gave us word-level
+// timing, each word inks in as it's sung. Scrolling by hand hands control back
+// for a couple of seconds, then the music takes it again.
+//
+// MANUAL — anything else. A free native scroller with a proximity-scaled focus:
+// the line nearest the vertical centre swells to full size + opacity, lines
+// further out shrink and fade (sharp Gaussian peak). This is the safe default,
+// because lyrics that move to the WRONG beat read as broken in a way that
+// lyrics which simply don't move never do.
+//
+// Loading → loaded crossfades; the spinner never just pops out of existence.
+export default function Lyrics({
+  artist,
+  title,
+  isrc,
+  durationSec,
+  color = "#1a1a1a",
+  previewMs = 0,
+  playing = false,
+}) {
+  const [data, setData] = useState(null); // { plain, lines, level }
   const [status, setStatus] = useState("loading"); // loading | ready | none
+  const [nudgeMs, setNudgeMs] = useState(null); // dev calibration, ms
 
   useEffect(() => {
     let alive = true;
     setStatus("loading");
-    setLines(null);
-    if (!title) {
+    setData(null);
+    setNudgeMs(null);
+    if (!title && !isrc) {
       setStatus("none");
       return;
     }
-    fetch(`/api/spotify/lyrics?artist=${encodeURIComponent(artist || "")}&title=${encodeURIComponent(title)}`)
+    // isrc pins the exact recording; artist/title stay as the fallback the route
+    // falls back THROUGH, so a track without an ISRC still resolves the old way.
+    const q = new URLSearchParams({ artist: artist || "", title: title || "" });
+    if (isrc) q.set("isrc", isrc);
+    if (durationSec) q.set("duration", String(durationSec));
+    fetch(`/api/spotify/lyrics?${q}`)
       .then((r) => r.json())
       .then((d) => {
         if (!alive) return;
         if (d.plain) {
-          setLines(d.plain.split("\n").map((t) => t.trim()));
+          setData(d);
           setStatus("ready");
         } else {
           setStatus("none");
@@ -34,7 +60,59 @@ export default function Lyrics({ artist, title, color = "#1a1a1a" }) {
     return () => {
       alive = false;
     };
-  }, [artist, title]);
+  }, [artist, title, isrc, durationSec]);
+
+  // Timed lines are what make sync POSSIBLE; the offset is what makes it TRUE —
+  // and the offset can only be TOLD to us. Deriving it from the audio was tried
+  // twice (loudness envelope, then spectral flux cross-checked against a second
+  // provider's clip) and neither survived: a song's choruses repeat, so a fit
+  // lands on the wrong one of them and looks every bit as confident as a right
+  // one. So the order of trust stops at things a human confirmed — a live nudge,
+  // then a calibrated value. Absent both, the panel scrolls by hand, which is
+  // honest in a way that a drifting highlight is not.
+  const timed = data?.lines?.length ? data.lines : null;
+  const savedOffset = useMemo(() => resolveOffset(isrc), [isrc]);
+  const offsetMs = nudgeMs !== null ? nudgeMs : savedOffset;
+
+  // Click-to-sync: while the preview plays, clicking the line you can hear says
+  // "this is playing now", which is the whole offset in one gesture — no hunting
+  // with arrow keys, and accurate to about as well as you can click.
+  const calibrating = process.env.NODE_ENV !== "production" && !!timed;
+  const onCalibrate = useCallback(
+    (i) => {
+      if (!calibrating || !timed?.[i] || timed[i].start == null) return;
+      const next = Math.max(0, Math.round(timed[i].start - previewMs));
+      setNudgeMs(next);
+      writeOverride(isrc, next);
+      // eslint-disable-next-line no-console
+      console.log(`"${isrc}": ${next},  // ${artist} — ${title}`);
+    },
+    [calibrating, timed, previewMs, isrc, artist, title],
+  );
+  const synced = !!timed && offsetMs !== null;
+  const trackMs = previewMs + (offsetMs || 0);
+
+  const lines = useMemo(() => {
+    if (timed) return timed;
+    return (data?.plain || "").split("\n").map((t) => ({ text: t.trim() }));
+  }, [timed, data]);
+
+  const activeIndex = useMemo(() => {
+    if (!synced) return null;
+    let lo = 0;
+    let hi = timed.length - 1;
+    let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (timed[mid].start <= trackMs) {
+        found = mid;
+        lo = mid + 1;
+      } else hi = mid - 1;
+    }
+    return found;
+  }, [synced, timed, trackMs]);
+
+  useLyricCalibration({ enabled: !!timed, isrc, timed, offsetMs, setNudgeMs, playing });
 
   return (
     <div className="cv-lyrics-stage">
@@ -43,7 +121,13 @@ export default function Lyrics({ artist, title, color = "#1a1a1a" }) {
         {status === "none" ? (
           <div className="cv-lyrics--note">no lyrics found</div>
         ) : status === "ready" ? (
-          <LyricScroller lines={lines} />
+          <LyricScroller
+            lines={lines}
+            activeIndex={activeIndex}
+            trackMs={trackMs}
+            follow={synced && playing}
+            onCalibrate={calibrating ? onCalibrate : null}
+          />
         ) : null}
       </div>
 
@@ -55,8 +139,8 @@ export default function Lyrics({ artist, title, color = "#1a1a1a" }) {
   );
 }
 
-// ── proximity-scaled native scroller ────────────────────────────────────────
-function LyricScroller({ lines }) {
+// ── proximity-scaled scroller, optionally driven by playback ────────────────
+function LyricScroller({ lines, activeIndex, trackMs, follow, onCalibrate }) {
   const scrollRef = useRef(null);
   const lineRefs = useRef([]);
   const rafRef = useRef(0);
@@ -85,9 +169,18 @@ function LyricScroller({ lines }) {
     }
   }, []);
 
-  // Settle-snap: once scrolling stops, glide the nearest line to dead-centre (the
-  // focal slot). Debounced so it never fights an active wheel/drag; once snapped,
-  // the nearest line already sits at centre so it's a no-op and the loop rests.
+  const centreOn = useCallback((el, smooth = true) => {
+    const sc = scrollRef.current;
+    if (!sc || !el) return;
+    const target = el.offsetTop + el.offsetHeight / 2 - sc.clientHeight / 2;
+    if (Math.abs(target - sc.scrollTop) > 1) {
+      sc.scrollTo({ top: target, behavior: smooth ? "smooth" : "auto" });
+    }
+  }, []);
+
+  // Settle-snap: once MANUAL scrolling stops, glide the nearest line to dead-
+  // centre. Debounced so it never fights an active wheel/drag. Under playback the
+  // active line owns the focal slot instead, so this stays out of the way.
   const snapTimer = useRef(0);
   const scheduleSnap = useCallback(() => {
     clearTimeout(snapTimer.current);
@@ -105,20 +198,39 @@ function LyricScroller({ lines }) {
           best = el;
         }
       }
-      if (!best) return;
-      const target = best.offsetTop + best.offsetHeight / 2 - sc.clientHeight / 2;
-      if (Math.abs(target - sc.scrollTop) > 1) sc.scrollTo({ top: target, behavior: "smooth" });
+      centreOn(best);
     }, 130);
+  }, [centreOn]);
+
+  // A hand on the wheel outranks the music, but only briefly — otherwise reading
+  // ahead one line would strand you out of sync for the rest of the song.
+  const holdUntil = useRef(0);
+  const grab = useCallback(() => {
+    holdUntil.current = performance.now() + 2500;
   }, []);
 
   const onScroll = useCallback(() => {
-    scheduleSnap();
+    if (!follow || performance.now() < holdUntil.current) scheduleSnap();
     if (rafRef.current) return;
     rafRef.current = requestAnimationFrame(() => {
       rafRef.current = 0;
       update();
     });
-  }, [update, scheduleSnap]);
+  }, [update, scheduleSnap, follow]);
+
+  // Playback drives the focal slot. Only on a CHANGE of line, so a smooth scroll
+  // is never interrupted by the next frame's identical target.
+  const lastActive = useRef(-1);
+  useEffect(() => {
+    if (!follow || activeIndex == null || activeIndex < 0) {
+      lastActive.current = -1;
+      return;
+    }
+    if (activeIndex === lastActive.current) return;
+    if (performance.now() < holdUntil.current) return;
+    lastActive.current = activeIndex;
+    centreOn(lineRefs.current[activeIndex]);
+  }, [activeIndex, follow, centreOn]);
 
   // Spacers above/below let the first and last lines reach the centre. Keep them
   // honest with the live container height, and re-run the proximity pass.
@@ -156,31 +268,94 @@ function LyricScroller({ lines }) {
     if (!sc) return;
     const onWheel = (e) => {
       e.stopPropagation();
+      grab();
       if (sc.scrollHeight <= sc.clientHeight) return;
       const step = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? sc.clientHeight : 1;
       sc.scrollTop += e.deltaY * step;
       e.preventDefault();
     };
     sc.addEventListener("wheel", onWheel, { passive: false });
-    return () => sc.removeEventListener("wheel", onWheel);
-  }, [lines]);
+    sc.addEventListener("touchstart", grab, { passive: true });
+    sc.addEventListener("pointerdown", grab, { passive: true });
+    return () => {
+      sc.removeEventListener("wheel", onWheel);
+      sc.removeEventListener("touchstart", grab);
+      sc.removeEventListener("pointerdown", grab);
+    };
+  }, [lines, grab]);
 
   return (
     <div ref={scrollRef} className="cv-lyrics" onScroll={onScroll}>
       <div className="cv-lyrics-pad" style={{ height: pad }} />
-      {lines.map((text, i) => (
+      {lines.map((line, i) => (
         <p
           key={i}
           ref={(el) => (lineRefs.current[i] = el)}
-          className="cv-lyric"
+          className={`cv-lyric${activeIndex === i ? " is-active" : ""}${onCalibrate ? " is-tappable" : ""}`}
           style={{ "--i": Math.min(i, 14) }}
+          onClick={onCalibrate ? () => onCalibrate(i) : undefined}
         >
-          <span className="cv-lyric-in">{text || "♪"}</span>
+          <span className="cv-lyric-in">
+            {activeIndex === i && line.words?.length ? (
+              <Sung words={line.words} trackMs={trackMs} />
+            ) : (
+              line.text || "♪"
+            )}
+          </span>
         </p>
       ))}
       <div className="cv-lyrics-pad" style={{ height: pad }} />
     </div>
   );
+}
+
+// Word-level ink-in for the line being sung. The words array carries the spaces
+// between words as their own timed entries, so rendering it verbatim under
+// pre-wrap reproduces the original spacing without any rejoining guesswork.
+function Sung({ words, trackMs }) {
+  return (
+    <span className="cv-lyric-words">
+      {words.map((w, i) => (
+        <span key={i} className={`cv-lyric-w${trackMs >= w.start ? " is-sung" : ""}`}>
+          {w.text}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+// ── dev calibration ────────────────────────────────────────────────────────
+// The preview offset can't be fetched or derived (both were tried and measured),
+// so it gets dialled in by ear, once, and committed to PREVIEW_OFFSETS_MS. This
+// hook is the dial: it seeds from the densest-singing guess, moves on [ and ],
+// and prints a paste-ready line. Compiles out of production entirely.
+function useLyricCalibration({ enabled, isrc, timed, offsetMs, setNudgeMs, playing }) {
+  useEffect(() => {
+    if (process.env.NODE_ENV === "production") return;
+    if (!enabled || !isrc || !timed?.length) return;
+
+    const onKey = (e) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const step = e.shiftKey ? 50 : 250;
+      let next = null;
+      if (e.key === "[") next = (offsetMs ?? guessOffsetMs(timed)) - step;
+      else if (e.key === "]") next = (offsetMs ?? guessOffsetMs(timed)) + step;
+      else if (e.key === "\\") next = guessOffsetMs(timed);
+      else if (e.key === "'") {
+        // eslint-disable-next-line no-console
+        console.log(`"${isrc}": ${Math.round(offsetMs ?? guessOffsetMs(timed))},`);
+        return;
+      } else return;
+
+      e.preventDefault();
+      next = Math.max(0, next);
+      setNudgeMs(next);
+      writeOverride(isrc, next);
+    };
+
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [enabled, isrc, timed, offsetMs, setNudgeMs, playing]);
 }
 
 // ── custom spinner ─────────────────────────────────────────────────────────
@@ -198,16 +373,16 @@ function Spinner({ color = "#1a1a1a" }) {
         .cv-spin circle { transform-box: fill-box; transform-origin: center; }
         .cv-spin-track { opacity: 0.12; }
         .cv-spin-arc-a {
-          animation: cvSpinEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1) both,
-                     cvSpinCW 1.05s linear 0.4s infinite;
+          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) both,
+                     cvSpinCW 1.05s linear var(--duration-400) infinite;
         }
         .cv-spin-arc-b {
           opacity: 0.55;
-          animation: cvSpinEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.07s both,
+          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) 0.07s both,
                      cvSpinCCW 1.7s linear 0.47s infinite;
         }
         .cv-spin-dot {
-          animation: cvSpinEnter 0.4s cubic-bezier(0.22, 1, 0.36, 1) 0.14s both,
+          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) 0.14s both,
                      cvSpinPulse 1.6s ease-in-out 0.54s infinite;
         }
       `}</style>

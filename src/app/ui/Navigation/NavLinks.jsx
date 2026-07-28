@@ -23,7 +23,7 @@ export default function NavLinks({className=""}) {
         <div className="nav__contact-links">
           {secondaryLinks.map((link, i) => (
             <span key={link.name} className="nav__link--secondary" style={{ "--link-i": i }}>
-              <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-amber-600" : ""} />
+              <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-warning" : ""} />
             </span>
           ))}
         </div>
@@ -40,7 +40,7 @@ export default function NavLinks({className=""}) {
       <ul className="flex items-center">
         {primaryLinks.map((link) => (
           <li key={link.name} className="ml-4 md:ml-6">
-            <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-amber-600" : ""} />
+            <LinkMask text={link.name} href={link.link} textClassName={link.dev ? "text-warning" : ""} />
           </li>
         ))}
       </ul>

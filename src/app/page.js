@@ -11,7 +11,7 @@ export default function Home() {
   return (
     <main
       id="content"
-      className={`bg-slate-100 ${geist.className} relative`}
+      className={`bg-surface ${geist.className} relative`}
     >
       {/* Hero — full viewport */}
       <div className="h-svh">

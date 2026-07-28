@@ -1,21 +1,29 @@
 import { cn } from '@/lib/utils'
 
-const styles = {
-  default: 'bg-dark/5 text-ink-secondary',
-  blue: 'bg-blue-50 text-blue-600',
-  green: 'bg-green-50 text-green-700',
-  amber: 'bg-amber-50 text-amber-700',
-  red: 'bg-red-50 text-red-600',
+/* Tones map onto the STATUS ROLES, not onto colors — `success` asks for
+ * the positive role and tracks whatever green the token layer says, so a
+ * palette change never has to come through here.
+ *
+ * The tinted fills behind them use the asymmetric alphas (green 15% /
+ * red 9%), so a positive and a negative badge sit at the same visual
+ * weight instead of the red shouting over the green.
+ *
+ * Color names are kept as aliases so existing MDX posts keep rendering. */
+const TONES = {
+  default: '',
+  accent: 'badge--accent',
+  blue: 'badge--accent',
+  success: 'badge--positive',
+  green: 'badge--positive',
+  warning: 'badge--warning',
+  amber: 'badge--warning',
+  error: 'badge--negative',
+  red: 'badge--negative',
 }
 
 export function Badge({ children, color = 'default' }) {
   return (
-    <span
-      className={cn(
-        'squircle-pill inline-block px-2.5 py-0.5 font-mono text-xs tracking-wide',
-        styles[color] || styles.default,
-      )}
-    >
+    <span className={cn('badge', TONES[color] ?? TONES.default)}>
       {children}
     </span>
   )

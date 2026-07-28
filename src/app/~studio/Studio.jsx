@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { EASE_HOVER, SPRING_PRESS } from '@/lib/motion'
 import { Save, Eye, EyeOff, Loader2, Check, ArrowLeft, Sun, Moon, Columns2, LayoutList } from 'lucide-react'
 import { geist, spencer } from '@/app/fonts'
 import EditorPane from './EditorPane'
@@ -13,8 +14,6 @@ import BlockEditor from './BlockEditor'
 import { StudioDialog } from './StudioDialog'
 
 const DEBOUNCE_MS = 300
-const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1]
-const spring = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
 
 const NEW_POST_TEMPLATE = `import BlogHeader from '../components/BlogHeader'
 
@@ -25,7 +24,7 @@ export const metadata = {
 
 <BlogHeader title="Untitled" date="${new Date().toISOString().slice(0, 10)}" tags={[]} />
 
-<article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-blue-500 prose-code:before:content-[''] prose-code:after:content-['']">
+<article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-accent prose-code:before:content-[''] prose-code:after:content-['']">
 
 Start writing...
 
@@ -274,7 +273,7 @@ export default function Studio() {
       <motion.div
         initial={{ opacity: 0, y: -8 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.5, ease: EASE_OUT_QUART }}
+        transition={{ duration: 0.5, ease: EASE_HOVER }}
         className="flex h-12 shrink-0 items-center"
         style={{ borderBottom: '1px solid var(--studio-border)', background: 'var(--studio-surface)' }}
       >
@@ -298,7 +297,7 @@ export default function Studio() {
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
-              transition={{ duration: 0.3, ease: EASE_OUT_QUART }}
+              transition={{ duration: 0.3, ease: EASE_HOVER }}
               className="flex items-center gap-2"
             >
               <button
@@ -316,8 +315,8 @@ export default function Studio() {
                     initial={{ scale: 0 }}
                     animate={{ scale: 1 }}
                     exit={{ scale: 0 }}
-                    transition={spring}
-                    className="h-1.5 w-1.5 rounded-full bg-amber-400"
+                    transition={SPRING_PRESS}
+                    className="h-1.5 w-1.5 rounded-full bg-warning"
                   />
                 )}
               </AnimatePresence>
@@ -387,7 +386,7 @@ export default function Studio() {
             onClick={toggleLight}
             whileHover={{ scale: 1.1 }}
             whileTap={{ scale: 0.88 }}
-            transition={spring}
+            transition={SPRING_PRESS}
             className="flex h-7 w-7 items-center justify-center rounded-md transition-colors duration-300 hover:opacity-70"
             style={{ color: 'var(--studio-text-3)' }}
             title="Toggle light/dark mode"
@@ -395,11 +394,11 @@ export default function Studio() {
           >
             <AnimatePresence mode="wait">
               {light ? (
-                <motion.span key="moon" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={spring}>
+                <motion.span key="moon" initial={{ rotate: -90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: 90, opacity: 0 }} transition={SPRING_PRESS}>
                   <Moon size={13} />
                 </motion.span>
               ) : (
-                <motion.span key="sun" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }} transition={spring}>
+                <motion.span key="sun" initial={{ rotate: 90, opacity: 0 }} animate={{ rotate: 0, opacity: 1 }} exit={{ rotate: -90, opacity: 0 }} transition={SPRING_PRESS}>
                   <Sun size={13} />
                 </motion.span>
               )}
@@ -411,7 +410,7 @@ export default function Studio() {
             onClick={() => setShowPreview((p) => { const n = !p; localStorage.setItem('studio-preview', String(n)); return n })}
             whileHover={{ scale: 1.05 }}
             whileTap={{ scale: 0.95 }}
-            transition={spring}
+            transition={SPRING_PRESS}
             className={`squircle-sm flex h-7 items-center gap-1.5 px-2.5 text-ui-xs font-medium transition-colors duration-300 ${ showPreview ? 'bg-accent/10 text-accent' : '' }`}
             style={showPreview ? {} : { color: 'var(--studio-text-3)' }}
             title="Toggle preview (⌘\\)"
@@ -427,19 +426,19 @@ export default function Studio() {
             disabled={!dirty || saving}
             whileHover={dirty ? { scale: 1.05 } : {}}
             whileTap={dirty ? { scale: 0.95 } : {}}
-            transition={spring}
-            className={`squircle-sm flex h-7 items-center gap-1.5 border px-3 text-ui-xs font-medium transition-all duration-300 ${ dirty ? 'border-white/20 bg-linear-to-b from-blue-400 to-blue-500 text-white shadow-md shadow-blue-500/25 inset-shadow-sm inset-shadow-white/20' : '' }`}
+            transition={SPRING_PRESS}
+            className={`btn btn--sm h-7 ${dirty ? 'btn--primary' : ''}`}
             style={dirty ? {} : { borderColor: 'var(--studio-border)', color: 'var(--studio-text-4)' }}
             title="Save (⌘S)"
             aria-label="Save"
           >
             <AnimatePresence mode="wait">
               {saving ? (
-                <motion.span key="saving" initial={{ opacity: 0, rotate: -90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: 90 }} transition={spring}>
+                <motion.span key="saving" initial={{ opacity: 0, rotate: -90 }} animate={{ opacity: 1, rotate: 0 }} exit={{ opacity: 0, rotate: 90 }} transition={SPRING_PRESS}>
                   <Loader2 size={12} className="animate-spin" />
                 </motion.span>
               ) : saved ? (
-                <motion.span key="saved" initial={{ opacity: 0, scale: 0.3 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={spring}>
+                <motion.span key="saved" initial={{ opacity: 0, scale: 0.3 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0 }} transition={SPRING_PRESS}>
                   <Check size={12} />
                 </motion.span>
               ) : (
@@ -474,7 +473,7 @@ export default function Studio() {
                 <Loader2 size={18} className="animate-spin" style={{ color: 'var(--studio-text-4)' }} />
               </motion.div>
             ) : activeSlug ? (
-              <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: EASE_OUT_QUART }} className="h-full">
+              <motion.div key="editor" initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.4, ease: EASE_HOVER }} className="h-full">
                 <SplitPane
                   showPreview={showPreview}
                   left={
@@ -486,7 +485,7 @@ export default function Studio() {
                 />
               </motion.div>
             ) : (
-              <motion.div key="empty" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: EASE_OUT_QUART, delay: 0.1 }} className="flex h-full flex-col items-center justify-center gap-6">
+              <motion.div key="empty" initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.6, ease: EASE_HOVER, delay: 0.1 }} className="flex h-full flex-col items-center justify-center gap-6">
                 <div className="text-center">
                   <p className={`${spencer.className} text-[28px] italic`} style={{ color: 'var(--studio-text-4)' }}>
                     studio
@@ -499,7 +498,7 @@ export default function Studio() {
                   onClick={handleNew}
                   whileHover={{ scale: 1.05 }}
                   whileTap={{ scale: 0.95 }}
-                  transition={spring}
+                  transition={SPRING_PRESS}
                   className="squircle px-5 py-2.5 text-ui-sm font-medium shadow-sm inset-shadow-sm transition-colors duration-300 hover:opacity-80"
                   style={{ border: '1px solid var(--studio-border)', background: 'var(--studio-surface)', color: 'var(--studio-text-2)' }}
                 >
@@ -518,7 +517,7 @@ export default function Studio() {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
-            transition={{ duration: 0.3, ease: EASE_OUT_QUART }}
+            transition={{ duration: 0.3, ease: EASE_HOVER }}
           >
             <ComponentPalette onInsert={handleInsert} />
           </motion.div>
@@ -560,9 +559,9 @@ export default function Studio() {
               onClick={confirmNewPost}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              transition={spring}
+              transition={SPRING_PRESS}
               disabled={!newPostSlug.trim()}
-              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
+              className="btn btn--primary"
             >
               Create
             </motion.button>
@@ -588,8 +587,8 @@ export default function Studio() {
               onClick={confirmDelete}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              transition={spring}
-              className="rounded-lg border border-red-400/30 bg-linear-to-b from-red-400 to-red-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-red-500/20 inset-shadow-sm inset-shadow-white/20"
+              transition={SPRING_PRESS}
+              className="btn btn--danger"
             >
               Delete
             </motion.button>
@@ -631,9 +630,9 @@ export default function Studio() {
               onClick={confirmRename}
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
-              transition={spring}
+              transition={SPRING_PRESS}
               disabled={!renameSlug.trim() || renameSlug.trim() === activeSlug}
-              className="rounded-lg border border-white/20 bg-linear-to-b from-blue-400 to-blue-500 px-4 py-1.5 text-ui-sm font-medium text-white shadow-sm shadow-blue-500/20 inset-shadow-sm inset-shadow-white/20 transition-opacity disabled:opacity-40"
+              className="btn btn--primary"
             >
               Rename
             </motion.button>

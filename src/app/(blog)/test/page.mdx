@@ -11,7 +11,7 @@ export const metadata = {
   tags={['test', 'components', 'mdx']}
 />
 
-<article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-blue-500 prose-code:before:content-[''] prose-code:after:content-['']">
+<article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-accent prose-code:before:content-[''] prose-code:after:content-['']">
 
 <Lead>
   This post tests every MDX component available in the blog. Use it as a reference
@@ -134,8 +134,8 @@ function useScrollReveal(ref) {
 ```css
 /* Spring-bouncy easing — peak overshoot at 1.12 */
 .card {
-  transition: transform 0.65s cubic-bezier(0.34, 1.56, 0.64, 1),
-              box-shadow 0.65s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.65s var(--ease-overshoot),
+              box-shadow 0.65s var(--ease-overshoot);
 }
 .card:hover  { transform: scale(1.015); box-shadow: 0 12px 31px rgba(0,0,0,0.12); }
 .card:active { transform: scale(0.97); }
@@ -191,17 +191,17 @@ The `Divider` component has two modes:
 Wrap content in `not-prose` to escape the typography styles and use raw Tailwind:
 
 <div className="not-prose my-10 grid grid-cols-1 gap-4 md:grid-cols-3">
-  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
-    <p className="text-ink text-lg font-semibold">Card One</p>
-    <p className="text-ink-secondary mt-1 text-sm">Scale on hover, spring on press. Squircle corners when supported.</p>
+  <div className="rounded-2xl border border-line bg-surface-raised p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-ink text-heading">Card One</p>
+    <p className="text-ink-secondary mt-1 text-ui-lg">Scale on hover, spring on press. Squircle corners when supported.</p>
   </div>
-  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
-    <p className="text-ink text-lg font-semibold">Card Two</p>
-    <p className="text-ink-secondary mt-1 text-sm">Shadow paired with scale for depth. The Shopify pattern.</p>
+  <div className="rounded-2xl border border-line bg-surface-raised p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-ink text-heading">Card Two</p>
+    <p className="text-ink-secondary mt-1 text-ui-lg">Shadow paired with scale for depth. The Shopify pattern.</p>
   </div>
-  <div className="rounded-2xl border border-dark/10 bg-white p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
-    <p className="text-ink text-lg font-semibold">Card Three</p>
-    <p className="text-ink-secondary mt-1 text-sm">Use `not-prose` for custom layouts inside any post.</p>
+  <div className="rounded-2xl border border-line bg-surface-raised p-6 shadow-sm transition-transform duration-200 ease-out-quart hover:scale-[1.015] active:scale-[0.97]">
+    <p className="text-ink text-heading">Card Three</p>
+    <p className="text-ink-secondary mt-1 text-ui-lg">Use `not-prose` for custom layouts inside any post.</p>
   </div>
 </div>
 

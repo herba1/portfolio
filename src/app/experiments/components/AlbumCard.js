@@ -79,7 +79,7 @@ export default function AlbumCard() {
         layout
         animate={{ height: bounds.height }}
         transition={{ type: "spring", duration: 0.4, bounce: 0.15 }}
-        className="card__wrapper overflow-clip rounded-xl border-1 mx-auto border-black/5 w-full max-w-sm min-w-fit bg-white shadow-sm inset-shadow-sm"
+        className="card__wrapper overflow-clip rounded-xl border-1 mx-auto border-line-subtle w-full max-w-sm min-w-fit bg-surface-raised shadow-sm inset-shadow-sm"
       >
         <motion.div
           ref={ref}
@@ -117,7 +117,7 @@ export default function AlbumCard() {
                             repeat: Infinity,
                             delay: 0,
                           }}
-                          className="h-6 w-2 rounded-full bg-white/70 shadow-2xs backdrop-blur-xs"
+                          className="h-6 w-2 rounded-full bg-surface-raised/70 shadow-2xs backdrop-blur-xs"
                         ></motion.div>
                         <motion.div
                           transition={{
@@ -127,7 +127,7 @@ export default function AlbumCard() {
                             delay: -0.2,
                           }}
                           animate={{ height: ["16px", "32px", "16px"] }}
-                          className="h-6 w-2 rounded-full bg-white/70 shadow-2xs backdrop-blur-xs"
+                          className="h-6 w-2 rounded-full bg-surface-raised/70 shadow-2xs backdrop-blur-xs"
                         ></motion.div>
                         <motion.div
                           transition={{
@@ -137,7 +137,7 @@ export default function AlbumCard() {
                             delay: -0.4,
                           }}
                           animate={{ height: ["16px", "28px", "16px"] }}
-                          className="h-6 w-2 rounded-full bg-white/70 shadow-2xs backdrop-blur-xs"
+                          className="h-6 w-2 rounded-full bg-surface-raised/70 shadow-2xs backdrop-blur-xs"
                         ></motion.div>
                       </MotionConfig>
                     </motion.div>
@@ -148,14 +148,14 @@ export default function AlbumCard() {
             <div className="card__info flex h-full w-full justify-between">
               <div className="card__info__left flex flex-col justify-center leading-none">
                 <span className="flex items-center gap-1">
-                  <p className="text-xs text-neutral-500">
+                  <p className="text-ui-sm text-ink-secondary">
                     {ALBUM.projectType}
                   </p>
-                  <span className="inline-block aspect-square w-1 overflow-clip rounded-full bg-neutral-400"></span>
-                  <p className="text-xs text-neutral-500">{ALBUM.genre}</p>
+                  <span className="inline-block aspect-square w-1 overflow-clip rounded-full bg-ink-tertiary"></span>
+                  <p className="text-ui-sm text-ink-secondary">{ALBUM.genre}</p>
                 </span>
-                <h1 className="text-lg font-bold">{ALBUM.name}</h1>
-                <p className="text-md text-neutral-500">{ALBUM.artist}</p>
+                <h1 className="text-heading">{ALBUM.name}</h1>
+                <p className="text-md text-ink-secondary">{ALBUM.artist}</p>
               </div>
               <div className="card__info__right flex flex-col items-end justify-center leading-none">
                 <AnimatePresence mode="popLayout">
@@ -191,7 +191,7 @@ export default function AlbumCard() {
                               key={isPlaying}
                               initial={{
                                 opacity: 0,
-                                filter: "blur(2px)",
+                                filter: "blur(var(--blur-xs))",
                                 scale: 0.8,
                               }}
                               animate={{
@@ -201,7 +201,7 @@ export default function AlbumCard() {
                               }}
                               exit={{
                                 opacity: 0,
-                                filter: "blur(2px)",
+                                filter: "blur(var(--blur-xs))",
                                 scale: 0.8,
                               }}
                             >
@@ -212,7 +212,7 @@ export default function AlbumCard() {
                               key={isPlaying}
                               initial={{
                                 opacity: 0,
-                                filter: "blur(4px)",
+                                filter: "blur(var(--blur-xs))",
                                 scale: 0.8,
                               }}
                               animate={{
@@ -222,7 +222,7 @@ export default function AlbumCard() {
                               }}
                               exit={{
                                 opacity: 0,
-                                filter: "blur(4px)",
+                                filter: "blur(var(--blur-xs))",
                                 scale: 0.8,
                               }}
                             >
@@ -283,7 +283,7 @@ export default function AlbumCard() {
                         }
                         layout
                         key={track.name}
-                        className="rounded-lg p-2 hover:bg-black/5"
+                        className="rounded-lg p-2 hover:bg-ink/5"
                         onClick={() => {
                           if (isPlaying && track === activeTrack) {
                             posthog.capture("experiment_track_paused", { track: track.name });
@@ -298,7 +298,7 @@ export default function AlbumCard() {
                         <div className="flex w-full justify-between">
                           <span className="flex flex-col">
                             <p className="font-medium">{track.name}</p>
-                            <p className="text-sm text-neutral-500">
+                            <p className="text-ui-lg text-ink-secondary">
                               {track.artist}
                               {track.featuredArtist.map(
                                 (artist) => ", " + artist,
@@ -308,7 +308,7 @@ export default function AlbumCard() {
                           <div className="flex items-center gap-0">
                             <motion.p
                               layout
-                              className="text-sm text-neutral-500"
+                              className="text-ui-lg text-ink-secondary"
                             >
                               {track.trackLength}
                             </motion.p>
@@ -344,7 +344,7 @@ export default function AlbumCard() {
                                           key={isPlaying}
                                           initial={{
                                             opacity: 0,
-                                            filter: "blur(2px)",
+                                            filter: "blur(var(--blur-xs))",
                                             scale: 0.8,
                                           }}
                                           animate={{
@@ -354,7 +354,7 @@ export default function AlbumCard() {
                                           }}
                                           exit={{
                                             opacity: 0,
-                                            filter: "blur(2px)",
+                                            filter: "blur(var(--blur-xs))",
                                             scale: 0.8,
                                           }}
                                         >
@@ -365,7 +365,7 @@ export default function AlbumCard() {
                                           key={isPlaying}
                                           initial={{
                                             opacity: 0,
-                                            filter: "blur(4px)",
+                                            filter: "blur(var(--blur-xs))",
                                             scale: 0.8,
                                           }}
                                           animate={{
@@ -375,7 +375,7 @@ export default function AlbumCard() {
                                           }}
                                           exit={{
                                             opacity: 0,
-                                            filter: "blur(4px)",
+                                            filter: "blur(var(--blur-xs))",
                                             scale: 0.8,
                                           }}
                                         >

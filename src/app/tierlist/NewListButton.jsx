@@ -41,7 +41,7 @@ export default function NewListButton() {
     <button
       onClick={create}
       disabled={busy}
-      className="LinkMask text-ink-secondary hover:text-ink inline-flex shrink-0 items-center gap-1 text-sm font-medium transition-colors disabled:opacity-50"
+      className="btn btn--ghost btn--sm shrink-0"
     >
       {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
       New list

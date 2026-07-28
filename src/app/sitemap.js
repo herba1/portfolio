@@ -17,6 +17,8 @@ export default function sitemap() {
       changeFrequency: 'monthly',
       priority: 1,
     },
+    // /work is dev-only for now — see the gate in src/app/work/page.js. Add
+    // it back here when it launches.
     {
       url: 'https://herb.art/blog',
       lastModified: new Date(),

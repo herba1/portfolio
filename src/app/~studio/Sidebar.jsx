@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { EASE_HOVER, SPRING_PRESS } from '@/lib/motion'
 import { FileText, Plus, ChevronLeft, Circle, Eye, EyeOff, Trash2, ExternalLink } from 'lucide-react'
 import { spencer } from '@/app/fonts'
 
-const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1]
-const spring = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
 
 function ContextMenu({ x, y, post, onStatusChange, onDelete, onClose }) {
   const ref = useRef(null)
@@ -41,8 +40,8 @@ function ContextMenu({ x, y, post, onStatusChange, onDelete, onClose }) {
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.15, ease: EASE_OUT_QUART }}
-      className="fixed z-[99999] min-w-[160px] rounded-xl border p-1 shadow-lg"
+      transition={{ duration: 0.15, ease: EASE_HOVER }}
+      className="fixed z-[var(--z-index-max)] min-w-[160px] rounded-xl border p-1 shadow-lg"
       style={{
         left: x,
         top: y,
@@ -65,7 +64,7 @@ function ContextMenu({ x, y, post, onStatusChange, onDelete, onClose }) {
           <button
             key={item.label}
             onClick={item.action}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-red-500 hover:bg-red-500/10' : 'hover:bg-[var(--studio-hover)]' }`}
+            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-negative hover:bg-negative/10' : 'hover:bg-[var(--studio-hover)]' }`}
             style={item.danger ? {} : { color: 'var(--studio-text-2)' }}
           >
             <Icon size={12} />
@@ -104,14 +103,14 @@ export default function Sidebar({
         onClick={onToggle}
         whileHover={{ scale: 1.1 }}
         whileTap={{ scale: 0.88 }}
-        transition={spring}
+        transition={SPRING_PRESS}
         className="absolute top-3.5 left-3.5 z-20 flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-300 hover:opacity-70"
         style={{ color: 'var(--studio-text-3)' }}
         title={open ? 'Collapse (⌘B)' : 'Expand (⌘B)'}
       >
         <motion.span
           animate={{ rotate: open ? 0 : 180 }}
-          transition={{ duration: 0.3, ease: EASE_OUT_QUART }}
+          transition={{ duration: 0.3, ease: EASE_HOVER }}
         >
           <ChevronLeft size={13} />
         </motion.span>
@@ -123,20 +122,20 @@ export default function Sidebar({
             initial={{ width: 0, opacity: 0 }}
             animate={{ width: 220, opacity: 1 }}
             exit={{ width: 0, opacity: 0 }}
-            transition={{ duration: 0.3, ease: EASE_OUT_QUART }}
+            transition={{ duration: 0.3, ease: EASE_HOVER }}
             className="flex h-full flex-col overflow-hidden"
             style={{ borderRight: '1px solid var(--studio-border)' }}
           >
             {/* Header */}
             <div className="flex items-center justify-between px-3 pt-12 pb-3">
-              <span className="font-mono text-ui-2xs tracking-widest uppercase" style={{ color: 'var(--studio-text-4)' }}>
+              <span className="font-mono text-ui-2xs" style={{ color: 'var(--studio-text-4)' }}>
                 Posts
               </span>
               <motion.button
                 onClick={onNew}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.88 }}
-                transition={spring}
+                transition={SPRING_PRESS}
                 className="flex h-6 w-6 items-center justify-center rounded-md transition-colors duration-300 hover:opacity-70"
                 style={{ color: 'var(--studio-text-3)' }}
                 title="New post"
@@ -161,7 +160,7 @@ export default function Sidebar({
                     animate={{ opacity: 1, x: 0 }}
                     transition={{
                       duration: 0.4,
-                      ease: EASE_OUT_QUART,
+                      ease: EASE_HOVER,
                       delay: i * 0.05,
                     }}
                     className={`group flex w-full cursor-pointer items-center gap-2 px-2.5 py-2 text-left transition-all duration-300 ease-out-quart ${ isActive ? 'rounded-lg' : '' }`}
@@ -184,7 +183,7 @@ export default function Sidebar({
                           {post.date}
                         </span>
                         <span
-                          className="font-mono text-ui-2xs uppercase"
+                          className="font-mono text-ui-2xs"
                           style={{
                             color: post.published ? 'rgb(34 197 94 / 0.7)' : 'var(--studio-text-4)',
                           }}
@@ -197,15 +196,15 @@ export default function Sidebar({
                     {/* Status dot */}
                     <motion.span
                       animate={{ scale: isActive && dirty ? [1, 1.3, 1] : 1 }}
-                      transition={{ duration: 0.6, ease: EASE_OUT_QUART }}
+                      transition={{ duration: 0.6, ease: EASE_HOVER }}
                     >
                       <Circle
                         size={5}
                         className={
                           isActive && dirty
-                            ? 'fill-amber-400 text-amber-400'
+                            ? 'fill-warning text-warning'
                             : post.published
-                              ? 'fill-emerald-500/80 text-emerald-500/80'
+                              ? 'fill-positive text-positive'
                               : ''
                         }
                         style={
@@ -220,7 +219,7 @@ export default function Sidebar({
               })}
 
               {posts.length === 0 && (
-                <p className={`${spencer.className} px-3 py-8 text-center text-sm italic`} style={{ color: 'var(--studio-text-4)' }}>
+                <p className={`${spencer.className} px-3 py-8 text-center text-ui-lg italic`} style={{ color: 'var(--studio-text-4)' }}>
                   No posts yet
                 </p>
               )}

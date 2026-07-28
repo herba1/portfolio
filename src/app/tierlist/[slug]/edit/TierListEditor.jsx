@@ -378,7 +378,7 @@ export default function TierListEditor({ slug }) {
           <p className="mb-4 text-ink-secondary">No tier list named “{slug}”.</p>
           <Link
             href="/tierlist"
-            className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-sm font-medium transition-colors"
+            className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-ui-lg font-medium transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> Back to lists
           </Link>
@@ -396,11 +396,11 @@ export default function TierListEditor({ slug }) {
       onDrop={onRootDrop}
     >
       {/* ── Toolbar ── */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-black/10 px-3 py-2.5">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-2.5">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/tierlist"
-            className="LinkMask text-ink-secondary hover:text-ink inline-flex shrink-0 items-center gap-1.5 text-sm transition-colors"
+            className="LinkMask text-ink-secondary hover:text-ink inline-flex shrink-0 items-center gap-1.5 text-ui-lg transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> Lists
           </Link>
@@ -412,7 +412,7 @@ export default function TierListEditor({ slug }) {
                 markDirty()
               }}
               placeholder="Untitled"
-              className="min-w-0 bg-transparent text-2xl font-bold tracking-tight outline-none placeholder:text-ink-tertiary"
+              className="min-w-0 bg-transparent text-title outline-none placeholder:text-ink-tertiary"
             />
             <input
               value={description}
@@ -421,21 +421,21 @@ export default function TierListEditor({ slug }) {
                 markDirty()
               }}
               placeholder="Add a description — a witty comment…"
-              className="text-ink-secondary min-w-0 bg-transparent text-sm outline-none placeholder:text-ink-tertiary"
+              className="text-ink-secondary min-w-0 bg-transparent text-ui-lg outline-none placeholder:text-ink-tertiary"
             />
           </div>
         </div>
         <div className="flex shrink-0 items-center gap-2">
           <button
             onClick={deleteList}
-            className="LinkMask text-ink-secondary hidden text-sm transition-colors hover:text-[#e26d6d] sm:inline-flex"
+            className="LinkMask text-ink-secondary hidden text-ui-lg transition-colors hover:text-negative sm:inline-flex"
             title="Delete this list"
           >
             Delete
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-sm transition-colors"
+            className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-ui-lg transition-colors"
           >
             {uploading ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -447,7 +447,7 @@ export default function TierListEditor({ slug }) {
           <button
             onClick={save}
             disabled={status === 'saving'}
-            className="LinkMask text-ink hover:text-ink inline-flex items-center gap-1.5 text-sm font-semibold transition-colors disabled:opacity-50"
+            className="LinkMask text-ink hover:text-ink inline-flex items-center gap-1.5 text-ui-lg font-semibold transition-colors disabled:opacity-50"
           >
             {status === 'saving' ? (
               <Loader2 className="h-4 w-4 animate-spin" />
@@ -481,7 +481,7 @@ export default function TierListEditor({ slug }) {
           return (
             <div
               key={tier.id}
-              className="flex min-h-[96px] items-stretch border-b border-black/10"
+              className="flex min-h-[96px] items-stretch border-b border-line"
             >
               {/* Label cell */}
               <div
@@ -491,20 +491,20 @@ export default function TierListEditor({ slug }) {
                 <input
                   value={tier.label}
                   onChange={(e) => updateTier(tier.id, { label: e.target.value })}
-                  className="w-full bg-transparent text-center font-bold tracking-tight text-3xl text-ink outline-none"
+                  className="w-full bg-transparent text-center text-title-lg text-ink outline-none"
                 />
                 <input
                   type="color"
                   value={tier.color}
                   onChange={(e) => updateTier(tier.id, { color: e.target.value })}
                   title="Tier color"
-                  className="squircle-sm h-5 w-8 cursor-pointer border border-black/20 bg-transparent p-0"
+                  className="squircle-sm h-5 w-8 cursor-pointer border border-line-strong bg-transparent p-0"
                 />
               </div>
 
               {/* Drop zone */}
               <div
-                className={`tl-dropzone flex flex-1 items-center gap-1.5 overflow-x-auto bg-white/40 px-2 ${
+                className={`tl-dropzone flex flex-1 items-center gap-1.5 overflow-x-auto bg-surface-raised/40 px-2 ${
                   isOver ? 'is-over' : ''
                 }`}
                 onDragOver={(e) => onZoneDragOver(e, tier.id)}
@@ -523,18 +523,18 @@ export default function TierListEditor({ slug }) {
                   />
                 ))}
                 {rowItems.length === 0 && (
-                  <span className="px-1 text-xs text-ink-tertiary select-none">
+                  <span className="px-1 text-ui-sm text-ink-tertiary select-none">
                     Drop here
                   </span>
                 )}
               </div>
 
               {/* Row controls */}
-              <div className="flex w-10 shrink-0 flex-col items-center justify-center gap-1 border-l border-black/10">
+              <div className="flex w-10 shrink-0 flex-col items-center justify-center gap-1 border-l border-line">
                 <button
                   onClick={() => moveTier(tier.id, -1)}
                   disabled={i === 0}
-                  className="text-ink-tertiary hover:text-black disabled:opacity-20"
+                  className="text-ink-tertiary hover:text-ink disabled:opacity-20"
                   title="Move up"
                 >
                   <ChevronUp className="h-4 w-4" />
@@ -542,7 +542,7 @@ export default function TierListEditor({ slug }) {
                 <button
                   onClick={() => moveTier(tier.id, 1)}
                   disabled={i === tiers.length - 1}
-                  className="text-ink-tertiary hover:text-black disabled:opacity-20"
+                  className="text-ink-tertiary hover:text-ink disabled:opacity-20"
                   title="Move down"
                 >
                   <ChevronDown className="h-4 w-4" />
@@ -552,7 +552,7 @@ export default function TierListEditor({ slug }) {
                     if (window.confirm(`Delete tier "${tier.label}"? Items go back to the tray.`))
                       deleteTier(tier.id)
                   }}
-                  className="text-ink-tertiary hover:text-[#e26d6d]"
+                  className="text-ink-tertiary hover:text-negative"
                   title="Delete tier"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -564,20 +564,20 @@ export default function TierListEditor({ slug }) {
 
         <button
           onClick={addTier}
-          className="flex w-full items-center justify-center gap-1.5 py-3 text-sm text-ink-tertiary transition-colors hover:bg-black/[0.03] hover:text-black"
+          className="flex w-full items-center justify-center gap-1.5 py-3 text-ui-lg text-ink-tertiary transition-colors hover:bg-ink/[0.03] hover:text-ink"
         >
           <Plus className="h-4 w-4" /> Add tier
         </button>
       </div>
 
       {/* ── Tray (unranked) ── */}
-      <div className="shrink-0 border-t border-black/10 bg-white/30 px-3 py-3">
-        <div className="mb-2 flex items-center justify-between text-xs text-ink-tertiary">
-          <span className="tracking-wide uppercase">Tray · {poolItems.length}</span>
+      <div className="shrink-0 border-t border-line bg-surface-raised/30 px-3 py-3">
+        <div className="mb-2 flex items-center justify-between text-ui-sm text-ink-tertiary">
+          <span className="text-ui-sm">Tray · {poolItems.length}</span>
           <span>Paste, drop, or click to add — auto-optimized to WebP</span>
         </div>
         <div
-          className={`tl-dropzone flex min-h-[88px] items-center gap-1.5 overflow-x-auto border border-dashed border-black/15 bg-white/40 px-2 ${
+          className={`tl-dropzone flex min-h-[88px] items-center gap-1.5 overflow-x-auto border border-dashed border-line-strong bg-surface-raised/40 px-2 ${
             overTier === POOL ? 'is-over' : ''
           }`}
           onDragOver={(e) => onZoneDragOver(e, POOL)}
@@ -598,7 +598,7 @@ export default function TierListEditor({ slug }) {
           {poolItems.length === 0 && (
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="flex w-full flex-col items-center gap-1 py-3 text-xs text-ink-tertiary transition-colors hover:text-ink-secondary"
+              className="flex w-full flex-col items-center gap-1 py-3 text-ui-sm text-ink-tertiary transition-colors hover:text-ink-secondary"
             >
               <ImagePlus className="h-5 w-5" />
               Drop or click to add images
@@ -609,10 +609,10 @@ export default function TierListEditor({ slug }) {
 
       {/* ── File-drop veil ── */}
       {fileOver && (
-        <div className="tl-file-veil pointer-events-none fixed inset-0 z-50 grid place-items-center bg-light/85 backdrop-blur-sm">
+        <div className="tl-file-veil pointer-events-none fixed inset-0 z-[var(--z-index-overlay)] grid place-items-center bg-light/85 backdrop-blur-sm">
           <div className="flex flex-col items-center gap-3 text-ink">
             <ImagePlus className="h-10 w-10" />
-            <span className="text-lg font-medium">Drop images — they’ll be optimized to WebP</span>
+            <span className="text-heading">Drop images — they’ll be optimized to WebP</span>
           </div>
         </div>
       )}
@@ -638,7 +638,7 @@ function ItemThumb({
       onDragOver={(e) => onDragOver(e, item)}
       onDoubleClick={() => onEditLabel(item)}
       title="Click for details · drag to rank"
-      className={`tl-edit-item group relative aspect-square h-[76px] shrink-0 cursor-pointer overflow-hidden bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)] ring-1 ring-black/10 ${
+      className={`tl-edit-item group relative aspect-square h-[76px] shrink-0 cursor-pointer overflow-hidden bg-surface-raised shadow-md ring-1 ring-line ${
         dragging ? 'is-dragging' : ''
       }`}
     >
@@ -650,7 +650,7 @@ function ItemThumb({
         className="pointer-events-none h-full w-full object-cover"
       />
       {item.label ? (
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-black/60 px-1.5 py-0.5 text-ui-2xs text-white">
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-ink/60 px-1.5 py-0.5 text-ui-2xs text-ink-inverse">
           {item.label}
         </span>
       ) : null}
@@ -659,7 +659,7 @@ function ItemThumb({
           e.stopPropagation()
           onRemove(item.id)
         }}
-        className="squircle-pill absolute top-0.5 right-0.5 grid h-5 w-5 place-items-center bg-black/60 text-white opacity-0 transition-opacity group-hover:opacity-100"
+        className="squircle-pill absolute top-0.5 right-0.5 grid h-5 w-5 place-items-center bg-ink/60 text-ink-inverse opacity-0 transition-opacity group-hover:opacity-100"
         title="Remove"
       >
         <X className="h-3 w-3" />

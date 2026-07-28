@@ -1,6 +1,8 @@
 'use client'
 
 import Link from 'next/link'
+import { usePathname, useRouter } from 'next/navigation'
+import { useMobileMenu } from './MobileMenuContext'
 
 /* ─────────────────────────────────────────────
  * "herbart" nav logo
@@ -27,8 +29,8 @@ import Link from 'next/link'
  * up independently, the way a crowd fidgets.
  *
  * Agentation curves:
- *   Bounce:  cubic-bezier(0.34, 1.56, 0.64, 1)  (entry + hover)
- *   In-out:  cubic-bezier(0.7, 0, 0.3, 1)       (all idle loops, --ease)
+ *   Bounce:  var(--ease-overshoot)  (entry + hover)
+ *   In-out:  var(--ease-in-out)       (all idle loops, --ease)
  * ───────────────────────────────────────────── */
 
 /* `oy` = vertical pivot per letter, as a viewBox-space y:
@@ -54,8 +56,28 @@ const LETTERS = [
 ]
 
 export default function NavLogo({ className = '' }) {
+  const router = useRouter()
+  const pathname = usePathname()
+  // The navbar sits outside the page card, so on mobile the logo stays tappable
+  // with the menu open — and a tap there is a route change out of an open card,
+  // exactly what the link list has to avoid. Same treatment: let the card land
+  // first, then go. With the menu closed there's nothing to wait for, so the
+  // Link handles the click itself and keeps its prefetch and modifier-key
+  // behaviour intact.
+  const menu = useMobileMenu()
+
+  const onClick = (e) => {
+    if (!menu?.active) return
+    e.preventDefault()
+    if (pathname === '/') {
+      menu.close()
+      return
+    }
+    menu.closeThen(() => router.push('/'))
+  }
+
   return (
-    <Link href="/" className={`nav__logo block ${className}`}>
+    <Link href="/" onClick={onClick} className={`nav__logo block ${className}`}>
       <svg
         viewBox="0 0 68 22"
         width={68}
@@ -78,10 +100,10 @@ export default function NavLogo({ className = '' }) {
                through the middle, so every move darts then settles
                instead of mushily floating. tune this one value to
                re-feel every letter at once. */
-            --ease: cubic-bezier(0.7, 0, 0.3, 1);
+            --ease: var(--ease-in-out);
             will-change: transform, opacity;
             animation:
-              nl-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) var(--d) forwards,
+              nl-in 0.4s var(--ease-overshoot) var(--d) forwards,
               var(--idle) var(--dur) var(--ease) var(--id) infinite;
           }
 

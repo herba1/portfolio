@@ -160,8 +160,8 @@ export default function IntroExperience() {
       )}
 
       <div className="intro-caption">
-        <span className="text-2xl font-bold tracking-tight">intro</span>
-        <span className="ml-2 text-sm opacity-60">
+        <span className="text-title">intro</span>
+        <span className="ml-2 text-ui-lg text-ink-secondary">
           — gravity field engine · {controls.renderer} renderer
         </span>
       </div>

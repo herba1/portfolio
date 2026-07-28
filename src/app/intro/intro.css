@@ -29,7 +29,7 @@
   background: radial-gradient(110% 80% at 50% 42%,
     transparent 58%,
     color-mix(in srgb, var(--color-dark) 8%, transparent) 100%);
-  z-index: 60;
+  z-index: var(--z-index-popover);
 }
 
 /* The object: an emoji glyph. left/top are 0; JS sets translate + rotate +
@@ -58,7 +58,7 @@
   left: 50%;
   bottom: 6vh;
   transform: translateX(-50%);
-  z-index: 70;
+  z-index: var(--z-index-overlay);
   text-align: center;
   color: var(--color-muted);
   pointer-events: none;

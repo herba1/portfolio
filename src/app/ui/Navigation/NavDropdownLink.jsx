@@ -96,7 +96,7 @@ export default function NavDropdownLink({ name, link, links }) {
           className={` opacity-0 overflow-hidden path link__dropdown__container min-w-[150%] top-full absolute pt-3   `}
         >
           <ul
-            className={`bg-neutral-50 border-1 border-neutral-100  text-black flex flex-col gap-2   text-left p-3 rounded-md min-w-fit w-full  `}
+            className={`bg-surface-raised border border-line text-ink shadow-md flex flex-col gap-2   text-left p-3 rounded-md min-w-fit w-full  `}
           >
             {dropdownLinks}
           </ul>

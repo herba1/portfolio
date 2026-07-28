@@ -2,11 +2,10 @@
 
 import { useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { EASE_HOVER, SPRING_PRESS } from '@/lib/motion'
 import { X } from 'lucide-react'
 import { geist } from '@/app/fonts'
 
-const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1]
-const spring = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
 
 export function StudioDialog({ open, onOpenChange, title, children }) {
   const popupRef = useRef(null)
@@ -41,8 +40,8 @@ export function StudioDialog({ open, onOpenChange, title, children }) {
             exit={{ opacity: 0 }}
             transition={{ duration: 0.2 }}
             onClick={() => onOpenChange(false)}
-            className="fixed inset-0 z-[99999] bg-black/20"
-            style={{ backdropFilter: 'blur(2px)' }}
+            className="fixed inset-0 z-[var(--z-index-max)] bg-ink/20"
+            style={{ backdropFilter: 'blur(var(--blur-xs))' }}
           />
 
           {/* Dialog */}
@@ -55,8 +54,8 @@ export function StudioDialog({ open, onOpenChange, title, children }) {
             initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ duration: 0.25, ease: EASE_OUT_QUART }}
-            className={`fixed top-1/2 left-1/2 z-[99999] w-full max-w-[380px] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 shadow-2xl outline-none ${geist.className}`}
+            transition={{ duration: 0.25, ease: EASE_HOVER }}
+            className={`fixed top-1/2 left-1/2 z-[var(--z-index-max)] w-full max-w-[380px] -translate-x-1/2 -translate-y-1/2 rounded-2xl p-6 shadow-2xl outline-none ${geist.className}`}
             style={{
               background: 'var(--studio-surface)',
               border: '1px solid var(--studio-border)',
@@ -75,7 +74,7 @@ export function StudioDialog({ open, onOpenChange, title, children }) {
                 onClick={() => onOpenChange(false)}
                 whileHover={{ scale: 1.1 }}
                 whileTap={{ scale: 0.9 }}
-                transition={spring}
+                transition={SPRING_PRESS}
                 className="flex h-6 w-6 items-center justify-center rounded-md transition-opacity duration-150 hover:opacity-60"
                 style={{ color: 'var(--studio-text-3)' }}
               >

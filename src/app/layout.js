@@ -148,14 +148,14 @@ export default function RootLayout({ children }) {
       {/* No global `tracking-*` here — a single letter-spacing value cannot be
           correct at more than one size. The type scale sets tracking per size;
           the inherited default for untagged text is set on `body` in globals.css. */}
-      <body className="relative overflow-x-hidden overscroll-none bg-slate-100 antialiased">
+      <body className="relative overflow-x-hidden overscroll-none bg-surface antialiased">
         <AnimatedFavicon />
         <ConsoleSig />
         <PostHogProvider>
           <LenisProvider>
             <MobileMenuProvider>
               <Navbar
-                className="text-ink z-50 font-medium"
+                className="text-ink z-[var(--z-index-nav)] font-medium"
                 phoneVisible={false}
                 ctaVisible={false}
               />
@@ -168,7 +168,7 @@ export default function RootLayout({ children }) {
             {/* <Loading>
               <div className="relative z-0">
                 <Navbar
-                  className="text-ink sm:text-light z-50 font-medium sm:font-normal sm:mix-blend-difference"
+                  className="text-ink sm:text-light z-[var(--z-index-nav)] font-medium sm:font-normal sm:mix-blend-difference"
                   phoneVisible={false}
                   ctaVisible={false}
                 ></Navbar>

@@ -19,6 +19,17 @@ const STRETCH_K = 1.9; // >1 → spacing opens up more the closer a bar is to th
 const RECOIL = { type: "spring", stiffness: 620, damping: 17, mass: 0.5 }; // bouncy snap-back
 const FOLLOW = { type: "spring", stiffness: 1100, damping: 48, mass: 0.4 }; // tight live-drag follow
 
+// Played/unplayed is a cross-fade, not a switch. A 30s preview spends ~0.7s per
+// bar, so a 420ms ramp keeps one or two bars mid-tone at any moment: the
+// playhead reads as a soft edge travelling along the wave instead of a row of
+// dots blinking to black. It runs in both directions, so seeking backwards
+// fades the bars back out rather than clearing them in one frame. Colour only —
+// the bars never change opacity, so nothing dims against the panel behind them.
+const INK_FADE = { duration: 0.42, ease: [0.33, 1, 0.68, 1] };
+// Dragging is direct manipulation: the fill has to sit under the finger on the
+// frame it moves, so the scrub gets a much shorter ramp than playback.
+const INK_SCRUB = { duration: 0.12, ease: [0.33, 1, 0.68, 1] };
+
 function rubber(deltaPx) {
   const sign = Math.sign(deltaPx);
   const x = Math.abs(deltaPx);
@@ -33,10 +44,13 @@ export default function Waveform({
   onSeek,
   onScrubStart,
   onScrubEnd,
-  accent = "#9CB6C4",
+  accent = "var(--color-accent)",
   height = 54,
-  playedColor = "#1a1a1a",
-  idleColor = "rgba(26,26,26,0.14)",
+  // These land on `backgroundColor` (a real DOM style, not a canvas
+  // fillStyle), so they can read the tokens directly rather than carrying
+  // their own copy of the ink value.
+  playedColor = "var(--color-ink)",
+  idleColor = "var(--color-line-strong)",
 }) {
   const ref = useRef(null);
   const [dragX, setDragX] = useState(-1); // 0..1, -1 = not dragging
@@ -149,7 +163,7 @@ export default function Waveform({
             }}
             transition={{
               height: { type: "spring", stiffness: 380, damping: 22, mass: 0.4, delay: ready ? i * 0.004 : 0 },
-              backgroundColor: { duration: 0.08 },
+              backgroundColor: dragging ? INK_SCRUB : INK_FADE,
               scaleY: { type: "spring", stiffness: 600, damping: 20, mass: 0.3 },
               x: dragging ? FOLLOW : RECOIL,
             }}

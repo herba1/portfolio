@@ -27,7 +27,7 @@ export function BlogImage({
         />
       </div>
       {caption && (
-        <figcaption className="mt-3 text-center text-sm text-ink-secondary">
+        <figcaption className="mt-3 text-center text-ui-lg text-ink-secondary">
           {caption}
         </figcaption>
       )}

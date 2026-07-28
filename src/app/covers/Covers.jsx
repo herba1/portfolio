@@ -1,16 +1,18 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import useMeasure from "react-use-measure";
 import { Canvas } from "@react-three/fiber";
 import { Leva, useControls, folder, button } from "leva";
 import CoversGrid from "./CoversGrid";
-import CoverPlayer from "./CoverPlayer";
+import CoverPlayer, { playerLayout } from "./CoverPlayer";
+import NowPlaying from "./NowPlaying";
 import Minimap from "./Minimap";
+import MorphText from "@/app/ui/MorphText";
 import { makeCoversMeta, setCoverSources } from "./lib/makeCovers";
 import { fetchSpotifyCovers } from "./lib/spotify";
-import { DEFAULTS } from "./lib/config";
+import { DEFAULTS, REF_VW, responsiveLayout } from "./lib/config";
 import { isDevView } from "@/lib/viewMode";
 import "./covers.css";
 
@@ -48,8 +50,10 @@ export default function Covers() {
   const v = useControls({
     Layout: folder(
       {
-        tileSize: { value: DEFAULTS.tileSize, min: 80, max: 480, step: 1 },
-        gap: { value: DEFAULTS.gap, min: 0, max: 400, step: 1 },
+        // reference values — the composition at REF_VW; the live grid scales
+        // these to the viewport (see responsiveLayout).
+        tileSize: { value: DEFAULTS.tileSize, min: 80, max: 480, step: 1, label: "tileSize @1440" },
+        gap: { value: DEFAULTS.gap, min: 0, max: 400, step: 1, label: "gap @1440" },
         cornerRadius: { value: DEFAULTS.cornerRadius, min: 0, max: 0.5, step: 0.01 },
         brickOffset: { value: DEFAULTS.brickOffset, min: 0, max: 1, step: 0.05 },
       },
@@ -58,9 +62,12 @@ export default function Covers() {
     Motion: folder(
       {
         momentumDamping: { value: DEFAULTS.momentumDamping, min: 0.8, max: 0.99, step: 0.005 },
-        wheelStrength: { value: DEFAULTS.wheelStrength, min: 0, max: 4, step: 0.05 },
+        wheelStrength: { value: DEFAULTS.wheelStrength, min: 0.2, max: 3, step: 0.05 },
+        scrollSmooth: { value: DEFAULTS.scrollSmooth, min: 0, max: 0.35, step: 0.005 },
+        scrollKnee: { value: DEFAULTS.scrollKnee, min: 200, max: 4000, step: 50 },
+        scrollResist: { value: DEFAULTS.scrollResist, min: 0, max: 1, step: 0.01 },
         dragEase: { value: DEFAULTS.dragEase, min: 0.2, max: 2, step: 0.05 },
-        maxSpeed: { value: DEFAULTS.maxSpeed, min: 1000, max: 15000, step: 100 },
+        springTrackSpeed: { value: DEFAULTS.springTrackSpeed, min: 800, max: 12000, step: 100 },
         stopThreshold: { value: DEFAULTS.stopThreshold, min: 0.1, max: 20, step: 0.1 },
       },
       { collapsed: true },
@@ -101,7 +108,7 @@ export default function Covers() {
         popStagger: { value: DEFAULTS.popStagger, min: 0, max: 0.15, step: 0.002 },
         popJitter: { value: DEFAULTS.popJitter, min: 0, max: 2, step: 0.05 },
         popScaleFrom: { value: DEFAULTS.popScaleFrom, min: 0.4, max: 1, step: 0.01 },
-        popRise: { value: DEFAULTS.popRise, min: 0, max: 120, step: 1 },
+        popRise: { value: DEFAULTS.popRise, min: 0, max: 120, step: 1, label: "popRise @1440" },
         popReadyTimeout: { value: DEFAULTS.popReadyTimeout, min: 0.5, max: 8, step: 0.5 },
       },
       { collapsed: false },
@@ -109,7 +116,21 @@ export default function Covers() {
     Depth: folder(
       {
         depthFade: { value: DEFAULTS.depthFade, min: 0, max: 1, step: 0.01 },
+        depthScale: { value: DEFAULTS.depthScale, min: 0, max: 0.5, step: 0.01, label: "depthScale @1440" },
         depthStart: { value: DEFAULTS.depthStart, min: 0, max: 1, step: 0.01 },
+      },
+      { collapsed: true },
+    ),
+    "Click push": folder(
+      {
+        pushStrength: { value: DEFAULTS.pushStrength, min: 0, max: 600, step: 5, label: "pushStrength @1440" },
+        pushAnisotropy: { value: DEFAULTS.pushAnisotropy, min: 0, max: 1.6, step: 0.05 },
+        pushFalloff: { value: DEFAULTS.pushFalloff, min: 0.1, max: 4, step: 0.05 },
+        pushInflate: { value: DEFAULTS.pushInflate, min: 0, max: 2, step: 0.05 },
+        pushScale: { value: DEFAULTS.pushScale, min: 0, max: 0.5, step: 0.01 },
+        pushResponse: { value: DEFAULTS.pushResponse, min: 0.1, max: 1.5, step: 0.01 },
+        pushSpread: { value: DEFAULTS.pushSpread, min: 0, max: 2, step: 0.05 },
+        pushDamping: { value: DEFAULTS.pushDamping, min: 0.3, max: 1, step: 0.01 },
       },
       { collapsed: true },
     ),
@@ -120,10 +141,16 @@ export default function Covers() {
     reducedMotion: { value: DEFAULTS.reducedMotion },
   });
 
-  // merged, frame-fresh config (OR in the OS reduced-motion preference)
+  // merged, frame-fresh config: reference values → viewport-scaled px, then OR
+  // in the OS reduced-motion preference.
+  const vp = useViewport();
   const config = useMemo(
-    () => ({ ...v, reducedMotion: v.reducedMotion || prefersReduced.current }),
-    [v],
+    () => ({
+      ...v,
+      ...responsiveLayout(vp.w, vp.h, v),
+      reducedMotion: v.reducedMotion || prefersReduced.current,
+    }),
+    [v, vp],
   );
   const configRef = useRef(config);
   configRef.current = config;
@@ -158,34 +185,99 @@ export default function Covers() {
   // then the corner / name / minimap stagger in — so nothing shows "not ready".
   const [ready, setReady] = useState(false);
 
-  // The notch plate persists across focus changes and just tweens its width to
-  // fit the new title. react-use-measure (ResizeObserver) tracks the text's
-  // natural width; the plate width is set in px so CSS can transition it (auto
-  // can't animate). The text swaps/fades on its own layer, disconnected.
-  const [textRef, textBounds] = useMeasure();
   const [rootRef, rootBounds] = useMeasure();
+
+  // ── the notch plate ────────────────────────────────────────────────────
+  // The plate persists across focus changes and tweens its width to fit the new
+  // title. MorphText hands us that width during the layout phase, from the same
+  // measurement it uses to place the glyphs (one hidden pass per unique string,
+  // cached) — so the plate reshapes on the very frame the letters start moving,
+  // with no ResizeObserver in the loop.
+  //
+  // It is written STRAIGHT TO THE NODES rather than held in state. Routing a
+  // width through React costs a second full render of this component per title
+  // change, and a render here means R3F reconciling the whole mesh pool — ~110
+  // <mesh> elements, each with a ref callback that detaches and re-attaches —
+  // while the grid is mid-drag at 60fps. Far too much for a number that only
+  // ever lands on two style properties. Same reasoning as the dock's progress
+  // hairline and SlotNumber's digits: DOM writes the compositor can absorb,
+  // kept out of the render path.
+  const plateRef = useRef(null);
+  const squishRef = useRef(null);
+  const textWRef = useRef(0);
+  const vwRef = useRef(0);
+  vwRef.current = rootBounds.width;
 
   // On mobile a long title can outgrow the screen. Rather than ellipsis, condense
   // the text horizontally (scaleX) so it always fits one line, and cap the plate
   // to the viewport. Desktop stays 1:1.
-  const notch = useMemo(() => {
-    const textW = textBounds.width;
-    const vw = rootBounds.width;
-    if (!textW) return { width: undefined, squish: 1 };
+  const applyNotch = useCallback(() => {
+    const plate = plateRef.current;
+    const textW = textWRef.current;
+    if (!plate || !textW) return;
+    const vw = vwRef.current;
     const full = textW + NOTCH_PAD_X;
+    let width = full;
+    let squish = 1;
     if (vw && vw <= NOTCH_MOBILE_BP && full > vw - NOTCH_SIDE_GUTTER) {
       const availText = vw - NOTCH_SIDE_GUTTER - NOTCH_PAD_X;
-      const squish = Math.max(NOTCH_MIN_SQUISH, availText / textW);
-      return { width: Math.ceil(textW * squish + NOTCH_PAD_X), squish };
+      squish = Math.max(NOTCH_MIN_SQUISH, availText / textW);
+      width = textW * squish + NOTCH_PAD_X;
     }
-    return { width: Math.ceil(full), squish: 1 };
-  }, [textBounds.width, rootBounds.width]);
+    plate.style.width = `${Math.ceil(width)}px`;
+    if (squishRef.current) {
+      squishRef.current.style.transform = squish === 1 ? "" : `scaleX(${squish})`;
+    }
+  }, []);
+
+  const onTitleWidth = useCallback(
+    (w) => {
+      textWRef.current = w;
+      applyNotch();
+    },
+    [applyNotch],
+  );
+
+  // the squish depends on the viewport, so refit when that changes too
+  useEffect(() => {
+    applyNotch();
+  }, [rootBounds.width, applyNotch]);
+
+  // ── grid callbacks ─────────────────────────────────────────────────────
+  // Stable identities, because CoversGrid is memoised on them. An inline arrow
+  // here would hand it a new prop on every render of this component and the
+  // memo would never bail out — which is the whole point of it.
+  const onGridReady = useCallback(() => setReady(true), []);
+  const onGridOpen = useCallback(
+    (idx, rect, cell) => {
+      const c = covers[idx];
+      if (c.type === "audio") return; // no player for audio
+      setPlayer({ cover: c, rect });
+      // hide the tile (gap) + freeze, and hand the grid the card box the
+      // player is about to fill so the push matches its real shape
+      apiRef.current?.openCell(cell.col, cell.row, cardBox());
+    },
+    [covers],
+  );
 
   // overlays (Leva / player / toast) portal to <body> so they sit ABOVE the
   // global navbar — inside .cv-root (position:fixed) they're trapped in its
   // stacking context, which renders below the navbar's z-50.
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
+
+  // The Leva panel is a desktop-only tool — on a phone it covers most of the
+  // grid and there's nothing to drag it out of the way with. Keep it to wide,
+  // pointer-driven viewports; everywhere else it stays hidden even in dev.
+  const [panelRoom, setPanelRoom] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 1024px) and (pointer: fine)");
+    const sync = () => setPanelRoom(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  const showPanel = isDevView() && panelRoom;
 
   return (
     <>
@@ -203,11 +295,16 @@ export default function Covers() {
           between covers instead of snapping. */}
       <div className="cv-tint" style={{ opacity: v.bgTint * 0.4 }} />
 
+      {/* premultipliedAlpha MUST stay true (three's default). Standard alpha
+          blending writes premultiplied RGB into the drawing buffer; declaring
+          it straight makes the browser compositor apply alpha a second time, so
+          every antialiased edge pixel lands at ~alpha² — the dark outline that
+          showed up around every tile, skeletons included. */}
       <Canvas
         className="cv-canvas"
         orthographic
         dpr={[1, 2]}
-        gl={{ antialias: true, alpha: true, premultipliedAlpha: false }}
+        gl={{ antialias: true, alpha: true, premultipliedAlpha: true }}
         camera={{ position: [0, 0, 1000], near: 0.1, far: 5000, zoom: 1 }}
       >
         <CoversGrid
@@ -215,14 +312,9 @@ export default function Covers() {
           configRef={configRef}
           apiRef={apiRef}
           covers={covers}
-          onReady={() => setReady(true)}
+          onReady={onGridReady}
           onFocusChange={setFocusIdx}
-          onOpen={(idx, rect, cell) => {
-            const c = covers[idx];
-            if (c.type === "audio") return; // no player for audio
-            setPlayer({ cover: c, rect });
-            apiRef.current?.openCell(cell.col, cell.row); // hide the tile (gap) + freeze
-          }}
+          onOpen={onGridOpen}
         />
       </Canvas>
 
@@ -232,21 +324,22 @@ export default function Covers() {
       {/* HUD */}
       <div className={`cv-hud${ready ? " is-ready" : ""}`}>
         <div className="cv-focus">
-          <div className="cv-focus-title" style={{ width: notch.width }}>
-            <span
-              className="cv-focus-squish"
-              style={notch.squish !== 1 ? { transform: `scaleX(${notch.squish})` } : undefined}
-            >
-              <span className="cv-focus-text" key={focus.index} ref={textRef}>
-                {focus.title}
-              </span>
+          {/* The two concave ramps are siblings of the plate, not its
+              pseudo-elements: the plate has to clip its own text now, and
+              anything living outside its box would be clipped away with it. */}
+          <span className="cv-focus-ear cv-focus-ear--l" aria-hidden="true" />
+          <div ref={plateRef} className="cv-focus-title">
+            <span ref={squishRef} className="cv-focus-squish">
+              <MorphText className="cv-focus-text" text={focus.title} onWidth={onTitleWidth} />
             </span>
           </div>
+          <span className="cv-focus-ear cv-focus-ear--r" aria-hidden="true" />
         </div>
         <div className="cv-minimap-wrap">
           <Minimap
             covers={covers}
             focusIdx={focusIdx}
+            openIdx={player?.cover?.index ?? null}
             onJump={(uc, ur) => apiRef.current?.jumpToCover(uc, ur)}
           />
         </div>
@@ -257,21 +350,31 @@ export default function Covers() {
       {mounted &&
         createPortal(
           <>
-            {isDevView() ? (
+            {showPanel ? (
               <div className="cv-leva">
                 <Leva collapsed={false} titleBar={{ title: "Covers" }} />
               </div>
             ) : (
               // useControls auto-injects Leva's default panel into <body>; render
-              // it hidden in production so it never shows up for real visitors.
+              // it hidden whenever the panel isn't wanted (production, or any
+              // narrow / touch viewport) so it never covers the grid.
               <Leva hidden />
             )}
             <CoverPlayer
               cover={player?.cover}
               rect={player?.rect}
               cornerRadius={config.cornerRadius}
-              onClose={() => setPlayer(null)}
+              onClose={() => {
+                setPlayer(null);
+                apiRef.current?.releasePush(); // neighbours ease back WITH the flip home
+              }}
               onClosed={() => apiRef.current?.closeCell()}
+            />
+            {/* Stays in the world once the card closes — and reopens it, with
+                the card growing out of the dock's little album thumb. */}
+            <NowPlaying
+              hidden={!!player}
+              onExpand={(cover, rect) => setPlayer({ cover, rect })}
             />
             {toast ? <div className="cv-toast">{toast}</div> : null}
           </>,
@@ -279,6 +382,46 @@ export default function Covers() {
         )}
     </>
   );
+}
+
+// Viewport size in CSS px, which is what browser zoom actually changes — zoom
+// out and innerWidth grows, so a width-derived layout scales with it instead of
+// just revealing more tiles. Falls back to the reference width during SSR; the
+// grid only lives inside <Canvas>, which renders nothing server-side, so there
+// is no hydration mismatch to worry about.
+function useViewport() {
+  const [vp, setVp] = useState(() =>
+    typeof window === "undefined"
+      ? { w: REF_VW, h: 900 }
+      : { w: window.innerWidth, h: window.innerHeight },
+  );
+  useEffect(() => {
+    const onResize = () =>
+      setVp((prev) =>
+        prev.w === window.innerWidth && prev.h === window.innerHeight
+          ? prev // same size → same object, so the config memo doesn't churn
+          : { w: window.innerWidth, h: window.innerHeight },
+      );
+    onResize();
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+  return vp;
+}
+
+// The player card, in the grid's world space: origin at the viewport centre,
+// +y up, 1 unit = 1 px. The canvas is a full-viewport fixed layer, so the card's
+// CSS rect converts with a plain recentre — no camera maths needed.
+function cardBox() {
+  const l = playerLayout();
+  if (!l) return null;
+  const { left, top, width, height } = l.card;
+  return {
+    x: left + width / 2 - window.innerWidth / 2,
+    y: window.innerHeight / 2 - (top + height / 2),
+    hx: width / 2,
+    hy: height / 2,
+  };
 }
 
 function copyText(text) {

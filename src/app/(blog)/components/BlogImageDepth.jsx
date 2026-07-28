@@ -86,8 +86,8 @@ export function BlogImageDepth({
             aspectRatio: aspect || undefined,
             transformStyle: 'preserve-3d',
             transition: hovering
-              ? 'transform 0.1s ease-out, box-shadow 0.2s ease-out'
-              : 'transform 0.5s cubic-bezier(0.165, 0.84, 0.44, 1), box-shadow 0.5s cubic-bezier(0.165, 0.84, 0.44, 1)',
+              ? 'transform var(--duration-100) ease-out, box-shadow var(--duration-200) ease-out'
+              : 'transform var(--duration-500) var(--ease-hover), box-shadow var(--duration-500) var(--ease-hover)',
             willChange: 'transform',
           }}
         >
@@ -106,14 +106,14 @@ export function BlogImageDepth({
             className="pointer-events-none absolute inset-0 rounded-2xl"
             style={{
               ...shineStyle,
-              transition: hovering ? 'opacity 0.15s ease-out' : 'opacity 0.5s ease-out',
+              transition: hovering ? 'opacity var(--duration-150) ease-out' : 'opacity var(--duration-500) ease-out',
             }}
           />
         </div>
       </div>
 
       {caption && (
-        <figcaption className="mt-3 text-center text-sm text-ink-secondary">
+        <figcaption className="mt-3 text-center text-ui-lg text-ink-secondary">
           {caption}
         </figcaption>
       )}

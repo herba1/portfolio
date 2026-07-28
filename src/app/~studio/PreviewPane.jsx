@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from 'react'
 import { motion, AnimatePresence } from 'motion/react'
+import { EASE_HOVER, SPRING_PRESS } from '@/lib/motion'
 import { geist } from '@/app/fonts'
 
 // Blog components for MDX rendering
@@ -22,7 +23,6 @@ import { BlogImageDepth } from '@/app/(blog)/components/BlogImageDepth'
 import { BlogImagePixel } from '@/app/(blog)/components/BlogImagePixel'
 import Link from 'next/link'
 
-const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1]
 
 const mdxComponents = {
   a: ({ href, children, ...props }) => {
@@ -106,8 +106,8 @@ export default function PreviewPane({ content }) {
   }, [content])
 
   return (
-    // Mirror the real blog layout exactly: bg-slate-100, min-h-dvh, geist font
-    <div className={`h-full overflow-auto bg-slate-100 ${geist.className}`}>
+    // Mirror the real blog layout exactly: bg-surface, min-h-dvh, geist font
+    <div className={`h-full overflow-auto bg-surface ${geist.className}`}>
       {/* Matches (blog)/layout.jsx: max-w-3xl px-4 pt-24 pb-16 md:px-6 */}
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <AnimatePresence mode="wait">
@@ -117,13 +117,13 @@ export default function PreviewPane({ content }) {
               initial={{ opacity: 0, x: -12 }}
               animate={{ opacity: 1, x: 0 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.4, ease: EASE_OUT_QUART }}
-              className="squircle border border-red-200 bg-linear-to-b from-red-50 to-red-100/80 p-5 shadow-sm inset-shadow-sm inset-shadow-white/60"
+              transition={{ duration: 0.4, ease: EASE_HOVER }}
+              className="squircle border border-negative/25 bg-negative-tint p-5"
             >
-              <p className="mb-1.5 font-mono text-ui-2xs font-semibold tracking-widest text-red-500 uppercase">
+              <p className="mb-1.5 font-mono text-ui-sm text-negative">
                 Preview Error
               </p>
-              <pre className="overflow-auto font-mono text-ui-sm leading-relaxed whitespace-pre-wrap text-red-700">
+              <pre className="overflow-auto font-mono text-ui-sm leading-relaxed whitespace-pre-wrap text-negative-ink">
                 {error.message}
               </pre>
             </motion.div>
@@ -132,7 +132,7 @@ export default function PreviewPane({ content }) {
               key="content"
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, ease: EASE_OUT_QUART }}
+              transition={{ duration: 0.5, ease: EASE_HOVER }}
             >
               <MDXContent components={mdxComponents} />
             </motion.div>

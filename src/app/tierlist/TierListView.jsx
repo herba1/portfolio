@@ -11,6 +11,14 @@ import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 
 const GAP = 12 // px between the tile's top edge and the bubble's tail
 
+// Entrance cascade, in seconds. ROW_STAGGER matches the --stagger-sm token the
+// rest of the site cascades on; tiles run at half that across the row, and stop
+// staggering after TILE_STAGGER_MAX so the tail of a long row doesn't trail the
+// rest of the page.
+const ROW_STAGGER = 0.04
+const TILE_STAGGER = 0.02
+const TILE_STAGGER_MAX = 8
+
 export default function TierListView({ tiers, items, slug, coverIds }) {
   // The items shown as fan-out thumbs on the index get a shared
   // view-transition-name, so the browser morphs each thumb into this tile (and
@@ -86,15 +94,22 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
     <div className="flex h-full w-full flex-col">
       {tiers.map((tier, rowIndex) => {
         const rowItems = items.filter((it) => it.tier === tier.id)
+        // The row cascade. The row element itself gets no entrance at all — a
+        // cover tile sits inside it, and animating either its transform or its
+        // opacity would follow the tile through the morph and spoil the
+        // landing (see the entrance comment in globals.css). The delay is
+        // passed down instead, so the parts that *can* move arrive on the
+        // row's beat while the row itself stays put.
+        const rowDelay = rowIndex * ROW_STAGGER
         return (
           <div
             key={tier.id}
-            className="tl-fade flex min-h-0 flex-1 items-stretch border-b border-black/10 last:border-b-0"
+            className="flex min-h-0 flex-1 items-stretch border-b border-line last:border-b-0"
           >
             {/* Label — square; uniform width since all rows share equal height */}
             <div
-              className="flex aspect-square h-full shrink-0 items-center justify-center"
-              style={{ backgroundColor: tier.color }}
+              className="tl-rise flex aspect-square h-full shrink-0 items-center justify-center"
+              style={{ backgroundColor: tier.color, '--tl-delay': `${rowDelay}s` }}
             >
               <span className="text-[clamp(1.5rem,5vh,3rem)] leading-none font-bold tracking-tight text-ink">
                 {tier.label}
@@ -103,17 +118,29 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
 
             {/* Items */}
             <ScrollRow index={rowIndex}>
-              {rowItems.map((item) => {
+              {rowItems.map((item, i) => {
                 const text = (item.note || item.label || '').trim()
+                // A cover tile is a morph target: it flies in from its fan
+                // thumb, so it must be sitting at its final position both when
+                // the browser measures the incoming page and when the overlay
+                // lifts. Every other tile is free to rise, cascading left to
+                // right off the row's own delay — capped so a long row doesn't
+                // still be arriving seconds later.
+                const isCover = coverSet.has(item.id)
                 const tile = (
                   <div
                     key={item.id}
                     onClick={canHover || !text ? undefined : (e) => onTap(e, item)}
                     onMouseEnter={canHover && text ? (e) => show(e, item) : undefined}
                     onMouseLeave={canHover ? () => closeIf(item.id) : undefined}
-                    className={`tl-item group relative aspect-square h-[82%] shrink-0 overflow-hidden bg-white shadow-[0_2px_8px_rgba(0,0,0,0.12)] ring-1 ring-black/5 ${
-                      text && !canHover ? 'cursor-pointer' : ''
-                    }`}
+                    style={
+                      isCover
+                        ? undefined
+                        : { '--tl-delay': `${rowDelay + Math.min(i, TILE_STAGGER_MAX) * TILE_STAGGER}s` }
+                    }
+                    className={`tl-item group relative aspect-square h-[82%] shrink-0 overflow-hidden bg-surface-raised shadow-md ring-1 ring-line ${
+                      isCover ? '' : 'tl-rise '
+                    }${text && !canHover ? 'cursor-pointer' : ''}`}
                   >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
@@ -136,7 +163,7 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
                 // snapshot and travels with it; an always-on name would lift it
                 // out and cross-fade it on its own default timing while the
                 // page slid away underneath. See ImageFan.jsx for the other end.
-                if (!coverSet.has(item.id)) return tile
+                if (!isCover) return tile
 
                 return (
                   <ViewTransition

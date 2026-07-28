@@ -2,14 +2,13 @@
 
 import { useRef, useState, useEffect, useCallback } from 'react'
 import { motion } from 'motion/react'
+import { SPRING_PRESS } from '@/lib/motion'
 import { geist } from '@/app/fonts'
 import PlayPauseIcon from '@/app/ui/PlayPauseIcon'
 import Waveform from '@/app/ui/Waveform'
 
 const BAR_COUNT = 40
 
-// stiffness/damping/mass for direct control — no visualDuration ambiguity
-const SPRING_PRESS = { type: 'spring', stiffness: 600, damping: 25, mass: 0.3 }
 
 function seededBars(count) {
   const bars = []
@@ -104,7 +103,7 @@ export function Audio({ src, title, caption }) {
         {/* play/pause button */}
         <motion.button
           onClick={toggle}
-          className="bg-dark text-white grid h-12 w-12 shrink-0 place-items-center rounded-full shadow-lg shadow-dark/20"
+          className="bg-surface-inverse text-ink-inverse grid h-12 w-12 shrink-0 place-items-center rounded-full"
           whileHover={{ scale: 1.1 }}
           whileTap={{ scale: 0.88 }}
           transition={SPRING_PRESS}
@@ -114,14 +113,17 @@ export function Audio({ src, title, caption }) {
         </motion.button>
 
         {/* waveform card */}
-        <div className="squircle-sm bg-linear-to-b from-white to-slate-50 border-dark/10 shadow-dark/5 inset-shadow-white/80 flex min-w-0 flex-1 flex-col gap-1.5 border p-3 shadow-sm inset-shadow-sm">
+        {/* A card: one step up the surface ladder plus a 1px line. The
+            gradient + drop shadow + inset highlight it replaces were all
+            doing the same job, three times over. */}
+        <div className="squircle-sm bg-surface-raised border-line flex min-w-0 flex-1 flex-col gap-1.5 border p-3">
           <div className="flex items-center justify-between gap-2">
             {title && (
-              <span className="text-ink truncate text-xs font-medium">
-                {title}
-              </span>
+              <span className="text-ink text-heading-sm truncate">{title}</span>
             )}
-            <span className="text-ink-tertiary shrink-0 font-mono text-ui-2xs tabular-nums">
+            {/* tabular-nums: the elapsed time changes every second and must
+                not shift the layout around it as digits swap. */}
+            <span className="text-ink-secondary shrink-0 font-mono text-ui-sm tabular-nums">
               {formatTime(currentTime)}{duration ? ` / ${formatTime(duration)}` : ''}
             </span>
           </div>
@@ -135,13 +137,13 @@ export function Audio({ src, title, caption }) {
             onScrubStart={scrubStart}
             onScrubEnd={scrubEnd}
             height={32}
-            idleColor="rgba(26,26,26,0.12)"
+            idleColor="var(--color-line-strong)"
           />
         </div>
       </div>
 
       {caption && (
-        <figcaption className="text-ink-secondary mt-2 text-center text-sm">
+        <figcaption className="text-ink-secondary text-ui-lg mt-2 text-center">
           {caption}
         </figcaption>
       )}

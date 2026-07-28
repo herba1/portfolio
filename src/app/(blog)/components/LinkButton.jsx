@@ -1,24 +1,23 @@
 import { cn } from '@/lib/utils'
 import Link from 'next/link'
 
-export function LinkButton({ href, children, variant = 'primary' }) {
-  const styles = {
-    primary: cn(
-      'bg-linear-to-b from-blue-400 to-blue-500 text-white',
-      'border border-white/30 shadow-md inset-shadow-sm shadow-blue-500/30 inset-shadow-white/50',
-      'hover:shadow-lg hover:shadow-blue-500/35',
-    ),
-    dark: cn(
-      'bg-linear-to-b from-slate-800 to-slate-900 text-white',
-      'border border-white/10 shadow-md inset-shadow-sm shadow-slate-900/30 inset-shadow-white/20',
-      'hover:shadow-lg hover:shadow-slate-900/35',
-    ),
-    outline: cn(
-      'bg-transparent text-ink border border-dark/15',
-      'shadow-sm hover:shadow-md hover:bg-dark/5',
-    ),
-  }
+/* Straight off the `.btn` component in globals.css — the box, the type,
+ * the press and the focus ring all come from there, so this file only has
+ * to pick a variant and never names a color.
+ *
+ * The previous version stacked a vertical gradient, a colored drop shadow
+ * and an inset white highlight to fake a lit plastic pill. The system
+ * separates with flat fills and a 1px line instead, so all of that goes.
+ * `outline` is kept as an alias for `secondary` so old call sites work. */
+const VARIANTS = {
+  primary: 'btn--primary',
+  secondary: 'btn--secondary',
+  outline: 'btn--secondary',
+  dark: 'btn--inverse',
+  ghost: 'btn--ghost',
+}
 
+export function LinkButton({ href, children, variant = 'primary' }) {
   const isExternal = href?.startsWith('http')
   const Component = isExternal ? 'a' : Link
 
@@ -26,13 +25,7 @@ export function LinkButton({ href, children, variant = 'primary' }) {
     <Component
       href={href}
       {...(isExternal ? { target: '_blank', rel: 'noopener noreferrer' } : {})}
-      className={cn(
-        'squircle inline-block px-6 py-2.5',
-        'text-center text-sm font-medium',
-        'transition-all duration-300 ease-out-quart',
-        'hover:scale-105 active:scale-95',
-        styles[variant] || styles.primary,
-      )}
+      className={cn('btn btn--lg', VARIANTS[variant] || VARIANTS.primary)}
     >
       {children}
     </Component>

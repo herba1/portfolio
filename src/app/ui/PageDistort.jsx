@@ -52,15 +52,15 @@ export default function PageDistort() {
       ref={containerRef} 
       className="relative min-h-[200vh] flex flex-col "
     >
-        <div className={` distort--top w-full h-svh scale-y-100 z-0 sticky top-0 origin-top bg-white font-serif flex flex-col justify-center items-center text-8xl tracking ${averia.className}`}>
+        <div className={` distort--top w-full h-svh scale-y-100 z-0 sticky top-0 origin-top bg-surface-raised font-serif flex flex-col justify-center items-center text-8xl tracking ${averia.className}`}>
             <h1>Dont Worry Baby</h1>
             <h1>Everything </h1>
             <h1>Will Be Alright</h1>
         </div>
-        <div className="w-full h-[1000px] distort--center bg-white z-10 ">
+        <div className="w-full h-[1000px] distort--center bg-surface-raised z-10 ">
             <Image className="object-cover w-full h-full" alt="img"  src={'/sound.png'} width={500} height={500} ></Image>
         </div>
-        <div className={` distort--bottom w-full h-svh  z-0  origin-top bg-white font-serif flex flex-col justify-center items-center text-8xl  ${averia.className}`}>
+        <div className={` distort--bottom w-full h-svh  z-0  origin-top bg-surface-raised font-serif flex flex-col justify-center items-center text-8xl  ${averia.className}`}>
             <h1>Barbara Ann</h1>
             <h1>Take my Hand</h1>
             <h1>You got me Rockin</h1>

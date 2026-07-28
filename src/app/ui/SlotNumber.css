@@ -1,0 +1,99 @@
+/* ---------------------------------------------------------------------------
+   SlotNumber — an odometer reel for any digit on the site.
+
+   Every column is a static strip of digits that never re-renders; a value
+   change writes one custom property (--slot-d) and the browser transitions the
+   strip's transform. Compositor-only: no layout, no paint, no React diff.
+   Registering --slot-d as a <number> keeps that write off the style-parse path.
+--------------------------------------------------------------------------- */
+
+@property --slot-d {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+.slot {
+  /* tune per usage — every one of these is a knob */
+  --slot-cell: 1.5em; /* window height; the extra room over 1em is what the fade eats */
+  --slot-dur: 520ms;
+  --slot-ease: var(--ease-out-quint, cubic-bezier(0.22, 1, 0.36, 1));
+  --slot-stagger: 30ms; /* least-significant digit leads, carries follow */
+  --slot-fade: 20%; /* height of the top/bottom fade band */
+  /* ascent − (ascent + descent) / 2 for the sans: shifts the masked box so the
+     digits sit on the surrounding text's baseline instead of its box bottom
+     (overflow: hidden moves an inline-flex's baseline to its bottom edge). */
+  --slot-baseline: 0.345em;
+
+  /* Eased, multi-stop fade — a 2-stop ramp bands visibly at this size. */
+  --slot-mask: linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0%,
+    rgba(0, 0, 0, 0.04) calc(var(--slot-fade) * 0.28),
+    rgba(0, 0, 0, 0.18) calc(var(--slot-fade) * 0.46),
+    rgba(0, 0, 0, 0.44) calc(var(--slot-fade) * 0.62),
+    rgba(0, 0, 0, 0.74) calc(var(--slot-fade) * 0.78),
+    rgba(0, 0, 0, 0.94) calc(var(--slot-fade) * 0.9),
+    rgb(0, 0, 0) var(--slot-fade),
+    rgb(0, 0, 0) calc(100% - var(--slot-fade)),
+    rgba(0, 0, 0, 0.94) calc(100% - var(--slot-fade) * 0.9),
+    rgba(0, 0, 0, 0.74) calc(100% - var(--slot-fade) * 0.78),
+    rgba(0, 0, 0, 0.44) calc(100% - var(--slot-fade) * 0.62),
+    rgba(0, 0, 0, 0.18) calc(100% - var(--slot-fade) * 0.46),
+    rgba(0, 0, 0, 0.04) calc(100% - var(--slot-fade) * 0.28),
+    rgba(0, 0, 0, 0) 100%
+  );
+
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  height: var(--slot-cell);
+  line-height: var(--slot-cell);
+  overflow: hidden;
+  font-variant-numeric: tabular-nums;
+  vertical-align: calc(var(--slot-baseline) - var(--slot-cell) / 2);
+  -webkit-mask-image: var(--slot-mask);
+  mask-image: var(--slot-mask);
+}
+
+.slot-col {
+  display: block;
+  flex: none;
+}
+
+.slot-reel {
+  display: block;
+  transform: translate3d(0, calc(var(--slot-d) * var(--slot-cell) * -1), 0);
+  transition: transform var(--slot-dur) var(--slot-ease);
+  transition-delay: calc(var(--slot-i, 0) * var(--slot-stagger));
+  will-change: transform;
+}
+
+.slot-cell {
+  display: block;
+  height: var(--slot-cell);
+  text-align: center;
+}
+
+.slot-sep {
+  display: block;
+  flex: none;
+  height: var(--slot-cell);
+  text-align: center;
+}
+
+/* the readable value — the reels themselves are aria-hidden */
+.slot-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slot-reel {
+    transition: none;
+  }
+}

@@ -13,7 +13,9 @@ export const LINKS = [
 // reachable while building locally. Surfaced only in dev / on localhost via
 // useIsDev — see NavLinks + NavMenu.
 export const DEV_LINKS = [
+  { name: "Work", link: "/work", primary: true, dev: true },
   { name: "Studio", link: "/~studio", primary: true, dev: true },
+  { name: "Work Studio", link: "/~studio/work", primary: true, dev: true },
   { name: "Experiments", link: "/experiments", primary: true, dev: true },
   { name: "Intro", link: "/intro", primary: true, dev: true },
 ];

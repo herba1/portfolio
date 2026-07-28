@@ -1,0 +1,170 @@
+{
+  "title": "Work",
+  "intro": "Interfaces, components and stills. The component tiles are the real thing, mounted live.",
+  "items": [
+    {
+      "id": "album-card",
+      "kind": "component",
+      "span": 1,
+      "title": "Album card",
+      "component": "album-card",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true
+    },
+    {
+      "id": "workspace",
+      "kind": "image",
+      "span": 2,
+      "title": "Workspace",
+      "src": "/blog/images/workspace.jpg",
+      "alt": "A desk with a monitor, keyboard and guitar",
+      "ratio": "3/2",
+      "fit": "cover",
+      "frame": true
+    },
+    {
+      "id": "waveform",
+      "kind": "component",
+      "span": 2,
+      "title": "Waveform",
+      "component": "waveform",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "chiquito",
+      "kind": "image",
+      "span": 1,
+      "title": "Chiquito",
+      "src": "/chiquito.jpg",
+      "alt": "Album artwork",
+      "ratio": "1/1",
+      "fit": "cover",
+      "frame": true
+    },
+    {
+      "id": "note-grid",
+      "kind": "note",
+      "span": 1,
+      "title": "Three columns, natural heights, and a tile can take two of them when it needs to.",
+      "body": "Everything on this page is edited in the studio, not in code.",
+      "frame": false
+    },
+    {
+      "id": "play-pause",
+      "kind": "component",
+      "span": 1,
+      "title": "Play / pause",
+      "component": "play-pause",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "denny-1",
+      "kind": "image",
+      "span": 1,
+      "title": "Denny",
+      "src": "/blog/images/denny-mnul60jh.jpg",
+      "alt": "Photograph",
+      "ratio": "4/5",
+      "fit": "cover",
+      "frame": true
+    },
+    {
+      "id": "glitch",
+      "kind": "component",
+      "span": 1,
+      "title": "Glitch title",
+      "component": "glitch-text",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "light",
+      "kind": "image",
+      "span": 1,
+      "title": "Light study",
+      "src": "/light2.jpeg",
+      "alt": "A study of light",
+      "ratio": "1/1",
+      "fit": "cover",
+      "frame": true
+    },
+    {
+      "id": "image-fan",
+      "kind": "component",
+      "span": 1,
+      "title": "Image fan",
+      "component": "image-fan",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "link-mask",
+      "kind": "component",
+      "span": 1,
+      "title": "Link mask",
+      "component": "link-mask",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "callout",
+      "kind": "component",
+      "span": 1,
+      "title": "Callout",
+      "component": "callout",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "sound",
+      "kind": "image",
+      "span": 1,
+      "title": "Sound",
+      "src": "/sound.png",
+      "alt": "Sound artwork",
+      "ratio": "1/1",
+      "fit": "cover",
+      "frame": true
+    },
+    {
+      "id": "badges",
+      "kind": "component",
+      "span": 1,
+      "title": "Badges",
+      "component": "badges",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "quote",
+      "kind": "component",
+      "span": 1,
+      "title": "Quote",
+      "component": "quote",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true
+    },
+    {
+      "id": "denny-2",
+      "kind": "image",
+      "span": 1,
+      "title": "Denny",
+      "src": "/blog/images/denny-mnulcu22.jpg",
+      "alt": "Photograph",
+      "ratio": "3/4",
+      "fit": "cover",
+      "frame": true
+    }
+  ]
+}

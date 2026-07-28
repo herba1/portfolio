@@ -379,11 +379,11 @@ export default function TempPage() {
   return (
     <article
       ref={containerRef}
-      className="relative mx-auto flex h-svh min-h-fit w-full flex-col items-center justify-center pb-[12svh] text-slate-900 selection:bg-black selection:text-white"
+      className="relative mx-auto flex h-svh min-h-fit w-full flex-col items-center justify-center pb-[12svh] text-ink selection:bg-ink selection:text-ink-inverse"
     >
       <ClientOnly load={() => import("./Eyes")} />
       <p
-        className={`hero-sub text-ink text-sm relative z-10 ${geist.className}`}
+        className={`hero-sub text-ink text-ui-lg relative z-10 ${geist.className}`}
         style={{
           padding: "1.5rem 3rem",
           background: `radial-gradient(

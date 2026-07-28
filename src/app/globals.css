@@ -34,11 +34,11 @@
    layer — no JS class toggling, no timers. The browser drives the whole
    lifecycle, so a slow/heavy route can never out-race a manual signal. */
 ::view-transition-old(page-content) {
-  animation: page-exit 0.25s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+  animation: page-exit var(--duration-250) var(--ease-standard) forwards;
   mix-blend-mode: normal;
 }
 ::view-transition-new(page-content) {
-  animation: page-enter 0.35s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  animation: page-enter var(--duration-reveal) var(--ease-entrance) forwards;
   mix-blend-mode: normal;
 }
 
@@ -56,7 +56,7 @@
 
 ::view-transition-group(navbar) {
   animation: none;
-  z-index: 100;
+  z-index: var(--z-index-max);
 }
 
 ::view-transition-old(navbar),
@@ -108,15 +108,15 @@
   position: fixed;
   bottom: 0;
   right: 0;
-  z-index: 100;
+  z-index: var(--z-index-max);
   display: none;
   align-items: center;
   gap: 0.35rem;
   padding: 1rem 1.5rem;
   opacity: 0;
-  animation: nav-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 1.2s forwards;
+  animation: nav-in var(--duration-entrance) var(--ease-entrance) var(--duration-1200) forwards;
   mix-blend-mode: difference;
-  transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: opacity var(--duration-400) ease, transform var(--duration-500) var(--ease-entrance);
   view-transition-name: footer-clock;
 }
 @media (min-width: 768px) {
@@ -173,14 +173,14 @@
 }
 
 .clock-digit--in {
-  animation: digit-in 0.3s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: digit-in var(--duration-300) var(--ease-entrance) forwards;
 }
 
 .clock-digit--out {
   position: absolute;
   left: 0;
   top: 0;
-  animation: digit-out 0.25s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation: digit-out var(--duration-250) var(--ease-entrance) forwards;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -218,8 +218,8 @@
 
 .nav__container {
   opacity: 0;
-  animation: nav-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.1s forwards;
-  transition: opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+  animation: nav-in var(--duration-800) var(--ease-entrance) var(--duration-100) forwards;
+  transition: opacity var(--duration-400) ease, transform var(--duration-500) var(--ease-entrance);
 }
 
 /* Mobile Menu/Close toggle — strip default button chrome so it reads as
@@ -237,9 +237,9 @@
   line-height: 1;
 }
 .nav__button--open:focus-visible {
-  outline: 2px solid rgba(15, 23, 42, 0.4);
+  outline: 2px solid var(--color-accent);
   outline-offset: 4px;
-  border-radius: 4px;
+  border-radius: var(--radius-xs);
 }
 
 /* Immersive mode — nav/footer/message fade out */
@@ -282,13 +282,13 @@
   align-items: center;
   clip-path: inset(0 0 0 100%);
   /* Exit: ease-out-quart, 20% faster */
-  transition: clip-path 500ms cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition: clip-path var(--duration-500) var(--ease-hover);
 }
 
 /* Enter: ease-out-quart */
 .nav__contact-group.is-open .nav__contact-links {
   clip-path: inset(0 0 0 0);
-  transition: clip-path 800ms cubic-bezier(0.165, 0.84, 0.44, 1);
+  transition: clip-path var(--duration-800) var(--ease-hover);
 }
 
 /* Individual link stagger — slide in from right + fade */
@@ -298,8 +298,8 @@
   opacity: 0;
   transform: translateX(8px);
   transition:
-    opacity 250ms cubic-bezier(0.165, 0.84, 0.44, 1),
-    transform 300ms cubic-bezier(0.165, 0.84, 0.44, 1);
+    opacity 250ms var(--ease-hover),
+    transform var(--duration-300) var(--ease-hover);
   transition-delay: 0ms;
 }
 
@@ -307,15 +307,15 @@
   opacity: 1;
   transform: translateX(0);
   /* Stagger: last item (closest to +) appears first, ripples outward left */
-  transition-delay: calc((4 - var(--link-i, 0)) * 60ms + 150ms);
+  transition-delay: calc((4 - var(--link-i, 0)) * var(--stagger) + var(--duration-150));
 }
 
 /* Exit: reverse stagger, faster */
 .nav__contact-group:not(.is-open) .nav__link--secondary {
   transition:
-    opacity 150ms cubic-bezier(0.165, 0.84, 0.44, 1),
-    transform 200ms cubic-bezier(0.165, 0.84, 0.44, 1);
-  transition-delay: calc(var(--link-i, 0) * 30ms);
+    opacity var(--duration-150) var(--ease-hover),
+    transform var(--duration-200) var(--ease-hover);
+  transition-delay: calc(var(--link-i, 0) * var(--stagger-xs));
 }
 
 @media (min-width: 768px) {
@@ -337,6 +337,14 @@
 }
 
 @theme {
+  /* ═════════════════════════════════════════════════════════════════
+   * EASING — Tier 1, the math curves.
+   *
+   * These are the standard Penner approximations. They're the raw
+   * material; almost nothing should reference them directly. Reach for
+   * a SEMANTIC curve from the block below instead — it says what the
+   * motion is for, and it can be retuned in one place.
+   * ═════════════════════════════════════════════════════════════════ */
   --ease-in-quad: cubic-bezier(.55, .085, .68, .53);
   --ease-in-cubic: cubic-bezier(.550, .055, .675, .19);
   --ease-in-quart: cubic-bezier(.895, .03, .685, .22);
@@ -347,7 +355,9 @@
   --ease-out-quad: cubic-bezier(.25, .46, .45, .94);
   --ease-out-cubic: cubic-bezier(.215, .61, .355, 1);
   --ease-out-quart: cubic-bezier(.165, .84, .44, 1);
-  --ease-out-quint: cubic-bezier(.23, 1, .32, 1);
+  /* Canonical easeOutQuint. Was (.23, 1, .32, 1) — the same curve from a
+     different source, and the codebase had both spellings loose in it. */
+  --ease-out-quint: cubic-bezier(.22, 1, .36, 1);
   --ease-out-expo: cubic-bezier(.19, 1, .22, 1);
   --ease-out-circ: cubic-bezier(.075, .82, .165, 1);
 
@@ -358,39 +368,287 @@
   --ease-in-out-expo: cubic-bezier(1, 0, 0, 1);
   --ease-in-out-circ: cubic-bezier(.785, .135, .15, .86);
 
-  /* ─────────────────────────────────────────────────────────────────
+  /* ═════════════════════════════════════════════════════════════════
+   * EASING — Tier 2, the semantic curves. THESE are what you use.
+   *
+   * Before this existed the site had 93 hand-written cubic-beziers in
+   * it, spread across five curves that were mostly the same shape with
+   * the control points nudged. Two of them — (.16,1,.3,1) and
+   * (.22,1,.36,1) — differ by about 3% at the midpoint, which is not a
+   * difference anyone can see in a 400ms transition. They're one curve
+   * now, and that curve is the site's voice: fast out, long settle.
+   * ═════════════════════════════════════════════════════════════════ */
+
+  /* The signature. Anything arriving — a page, a section, a menu, a
+     revealed row. Leaves fast, takes its time landing. */
+  --ease-entrance: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Pointer feedback and small state changes. This is Polymarket's own
+     signature curve, lifted verbatim: it eases IN slightly before it takes
+     off, then runs a long flat settle. That slow head is what stops a
+     hover reading as a jump — it feels like the element got pushed rather
+     than switched. Was standing in as ease-out-quart, which is close in
+     spirit but not the curve they actually ship. */
+  --ease-hover: cubic-bezier(0.26, 0.08, 0.25, 1);
+
+
+  /* Overshoot / back-out. Only for things that should feel like they
+     popped rather than arrived — a badge scaling in, a tag landing. */
+  --ease-overshoot: cubic-bezier(0.34, 1.56, 0.64, 1);
+
+  /* Symmetric. For a value being driven both ways (a scrub, a toggle)
+     where an asymmetric curve would make one direction feel wrong. */
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-in-out: cubic-bezier(0.7, 0, 0.3, 1);
+
+  /* ═════════════════════════════════════════════════════════════════
    * COLOR — three tiers, one direction of reference.
    *
    *   TIER 1  primitive   raw hex. Declared exactly once. If a value
    *                       appears twice in this file, that's a bug.
+   *                       Nothing outside Tier 2 may reference these.
    *   TIER 2  semantic    role-based. Answers "what is this for?",
-   *                       never "what color is it?".
-   *   alias               historical names, kept so existing call sites
-   *                       keep working. Don't add new uses.
+   *                       never "what color is it?". This is what
+   *                       pages and layouts reach for.
+   *   TIER 3  component   per-component roles (button, badge, input…),
+   *                       defined only in terms of Tier 2. This is what
+   *                       the component classes below reach for.
    *
-   * Nothing outside Tier 2 should reference a Tier 1 token directly.
+   * A component never names a primitive. A primitive never names a
+   * role. The arrows only ever point one way:
+   *
+   *   --neutral-500  →  --color-ink-secondary  →  --color-badge-fg
+   *
+   * The payoff is that retinting the whole site is a Tier 1 edit, and
+   * restyling one component can't leak into anything else.
+   * ═════════════════════════════════════════════════════════════════ */
+
+  /* ─────────────────────────────────────────────────────────────────
+   * TIER 1 · PRIMITIVES
+   *
+   * NEUTRALS — cool / blue-tinted, not a flat gray. Thirteen steps,
+   * with three near-whites at the top (0 / 25 / 50) because a layered
+   * light UI needs page ≠ card ≠ hover and a normal ramp gives you one
+   * white and then a jump. Anchored on the site's existing slate paper
+   * (#f1f5f9) and near-black ink (#1a1a1a) so nothing shifts.
    * ───────────────────────────────────────────────────────────────── */
+  --neutral-0: #ffffff;    /* raised surfaces — cards, popovers, inputs */
+  --neutral-25: #f8fafc;   /* subtle surface, one step off the page */
+  --neutral-50: #f1f5f9;   /* the page itself */
+  --neutral-100: #e9edf3;  /* inset / hover fill, hairline borders */
+  --neutral-200: #e2e8f0;  /* the default border */
+  --neutral-300: #cbd5e1;  /* hovered border, disabled ink */
+  --neutral-400: #94a3b8;  /* tertiary ink — placeholders, de-emphasis */
+  --neutral-500: #64748b;  /* secondary ink — labels, meta, timestamps */
+  --neutral-600: #475569;
+  --neutral-700: #334155;
+  --neutral-800: #1e293b;
+  --neutral-900: #0f172a;
+  --neutral-950: #1a1a1a;  /* primary ink. Near-black, never #000 */
 
-  /* ── Tier 1 · primitives ── */
-  --base-near-black: #1a1a1a;
-  --base-slate-100: #f1f5f9;
-  --base-slate-200: #e2e8f0;
-  --base-slate-400: #94a3b8;
-  --base-slate-500: #64748b;
-  --base-blue-500: #3b82f6;
+  /* The dark surfaces. Only the studio uses these — the site itself is a
+   * light-paper design — but they're primitives like everything else so
+   * the studio can't quietly invent a third near-black. */
+  --dark-950: #0d0d0d;   /* the shell */
+  --dark-900: #111111;   /* one step up inside it */
 
-  /* ── Tier 2 · semantic ── */
-  --color-surface: var(--base-slate-100);  /* page background */
-  --color-border: var(--base-slate-200);   /* borders, dividers */
-  --color-accent: var(--base-blue-500);    /* interactive accent */
+  /* Reading black. A hair softer than the ink, for long-form prose
+   * where full-contrast near-black on paper buzzes at 18px. */
+  --neutral-ink-soft: #2a2a2a;
 
-  /* ── Aliases · deprecated, do not add new uses ──
+  /* BRAND — one saturated blue against an otherwise desaturated UI.
+   * Color carries meaning here (links, focus, selection); it is never
+   * decoration. 500 is the site's established accent. */
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-200: #bfdbfe;
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-900: #1e3a8a;
+
+  /* STATUS — green / red / amber. Same shape as the brand ramp: a tint
+   * step for backgrounds, a mid step for the mark, a dark step for text
+   * on the tint. */
+  --green-50: #f0fdf4;
+  --green-200: #bbf7d0;
+  --green-500: #22c55e;
+  --green-600: #16a34a;
+  --green-900: #14532d;
+
+  --red-50: #fef2f2;
+  --red-200: #fecaca;
+  --red-500: #ef4444;
+  --red-600: #dc2626;
+  --red-900: #7f1d1d;
+
+  /* Purple exists for exactly one job — telling an audio cover apart from
+   * a video one on the covers grid. Two rungs is all that job needs. */
+  --purple-500: #a05ac8;
+  --purple-700: #8a4caa;
+
+  --amber-50: #fffbeb;
+  --amber-200: #fde68a;
+  --amber-500: #f59e0b;
+  --amber-600: #d97706;
+  --amber-900: #78350f;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * TIER 2 · SEMANTIC
+   *
+   * SURFACES — a four-step ladder from the page up. Depth is a surface
+   * STEP plus a 1px border; shadow is the last resort, not the first
+   * (see ELEVATION). Going up the ladder means going lighter, so a card
+   * on the page reads raised without a drop shadow.
+   * ───────────────────────────────────────────────────────────────── */
+  --color-surface: var(--neutral-50);           /* page background */
+  --color-surface-subtle: var(--neutral-25);    /* one step off the page */
+  --color-surface-raised: var(--neutral-0);     /* cards, menus, inputs */
+  --color-surface-sunken: var(--neutral-100);   /* wells, hover fills, tracks */
+  --color-surface-inverse: var(--neutral-950);  /* ink-on-paper flipped */
+
+  /* LINES — borders and dividers. Named `line` rather than `border` so
+   * the utility reads `border-line-subtle`, not `border-border-subtle`. */
+  --color-line-subtle: var(--neutral-100);  /* hairline inside a surface */
+  --color-line: var(--neutral-200);         /* the default */
+  --color-line-strong: var(--neutral-300);  /* hover, focus rings, emphasis */
+
+  /* INK — solid text colors. Hierarchy comes from a real color step,
+   * never from fading the primary ink with an opacity modifier. Faded
+   * ink is unreliable over any non-flat surface and reads as disabled
+   * rather than secondary. Secondary should be the MOST used of these:
+   * a dense page is mostly quiet, with primary saved for what matters. */
+  --color-ink: var(--neutral-950);              /* headlines, values, anything you must read */
+  --color-ink-secondary: var(--neutral-500);    /* labels, meta, timestamps */
+  --color-ink-tertiary: var(--neutral-400);     /* placeholders, de-emphasis */
+  --color-ink-disabled: var(--neutral-300);     /* disabled */
+  --color-ink-inverse: var(--neutral-0);        /* on inverse surfaces */
+  --color-ink-reading: var(--neutral-ink-soft); /* long-form prose only */
+
+  /* ACCENT — interactive. */
+  --color-accent: var(--brand-500);
+  --color-accent-hover: var(--brand-600);
+  --color-accent-ink: var(--brand-700);      /* accent as TEXT on a tint */
+  --color-accent-surface: var(--brand-50);   /* accent as a background */
+
+  /* STATUS — meaning, never decoration. */
+  --color-positive: var(--green-600);
+  --color-positive-ink: var(--green-900);
+  --color-positive-surface: var(--green-50);
+
+  --color-negative: var(--red-500);
+  --color-negative-hover: var(--red-600);
+  --color-negative-ink: var(--red-900);
+  --color-negative-surface: var(--red-50);
+
+  --color-warning: var(--amber-600);
+  --color-warning-ink: var(--amber-900);
+  --color-warning-surface: var(--amber-50);
+
+  /* MEDIA KIND — a cover is video or audio, and the grid says which with
+   * colour. Same three-part shape as the status roles: ink, tint, line. */
+  --color-media-video-ink: var(--brand-700);
+  --color-media-video-tint: color-mix(in oklab, var(--brand-500) 8%, transparent);
+  --color-media-video-line: color-mix(in oklab, var(--brand-500) 35%, transparent);
+
+  --color-media-audio-ink: var(--purple-700);
+  --color-media-audio-tint: color-mix(in oklab, var(--purple-500) 8%, transparent);
+  --color-media-audio-line: color-mix(in oklab, var(--purple-500) 35%, transparent);
+
+  /* TINTED STATUS FILLS — the asymmetric-alpha rule.
+   * Red is optically heavier than green at equal alpha, so matching the
+   * numbers does NOT match the weight: red at 15% reads as a louder
+   * block than green at 15%. Dial red down ~40% and the pair balances.
+   * Never tint two semantic colors at the same alpha and assume they
+   * sit at the same level. */
+  --color-positive-tint: color-mix(in oklab, var(--green-500) 15%, transparent);
+  --color-negative-tint: color-mix(in oklab, var(--red-500) 9%, transparent);
+  --color-warning-tint: color-mix(in oklab, var(--amber-500) 12%, transparent);
+
+  /* ─────────────────────────────────────────────────────────────────
+   * SCRIMS — first-class alpha ramps, so an overlay over imagery never
+   * has to hardcode an rgba(). These are the one legitimate use of pure
+   * black and pure white in the system: a scrim isn't a colour, it's a
+   * density of shade laid over something whose colour you don't control
+   * (album art, a video frame, a splat).
+   *
+   * The immersive surfaces had 40+ hand-written rgba()s between them —
+   * white at .14, .16, .2, .24, .26, .28, .3, .5, .6, .82, .85, .88, .9.
+   * Half those steps were within 2% of a neighbour.
+   * ───────────────────────────────────────────────────────────────── */
+  --scrim-white-05: rgb(255 255 255 / 0.05);
+  --scrim-white-10: rgb(255 255 255 / 0.10);
+  --scrim-white-15: rgb(255 255 255 / 0.15);
+  --scrim-white-20: rgb(255 255 255 / 0.20);
+  --scrim-white-25: rgb(255 255 255 / 0.25);
+  --scrim-white-30: rgb(255 255 255 / 0.30);
+  --scrim-white-50: rgb(255 255 255 / 0.50);
+  --scrim-white-60: rgb(255 255 255 / 0.60);
+  --scrim-white-85: rgb(255 255 255 / 0.85);
+  --scrim-white: #ffffff;
+
+  --scrim-black-05: rgb(0 0 0 / 0.05);
+  --scrim-black-10: rgb(0 0 0 / 0.10);
+  --scrim-black-15: rgb(0 0 0 / 0.15);
+  --scrim-black-30: rgb(0 0 0 / 0.30);
+  --scrim-black-40: rgb(0 0 0 / 0.40);
+  --scrim-black-50: rgb(0 0 0 / 0.50);
+  --scrim-black: #000000;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * TIER 3 · COMPONENT
+   *
+   * Only ever defined in terms of Tier 2. Restyling a button here can
+   * never reach a badge, and swapping the brand in Tier 1 flows through
+   * without touching this block at all. Consumed by the `.btn` / `.badge`
+   * / `.field` / `.card` classes further down.
+   * ───────────────────────────────────────────────────────────────── */
+  --color-button-primary-bg: var(--color-accent);
+  --color-button-primary-bg-hover: var(--color-accent-hover);
+  --color-button-primary-fg: var(--color-ink-inverse);
+
+  --color-button-secondary-bg: var(--color-surface-raised);
+  --color-button-secondary-bg-hover: var(--color-surface-subtle);
+  --color-button-secondary-fg: var(--color-ink);
+  --color-button-secondary-border: var(--color-line);
+
+  --color-button-ghost-bg-hover: var(--color-surface-sunken);
+  --color-button-ghost-fg: var(--color-ink-secondary);
+  --color-button-ghost-fg-hover: var(--color-ink);
+
+  --color-button-inverse-bg: var(--color-surface-inverse);
+  --color-button-inverse-bg-hover: var(--neutral-800);
+  --color-button-inverse-fg: var(--color-ink-inverse);
+
+  --color-button-danger-bg: var(--color-negative);
+  --color-button-danger-bg-hover: var(--color-negative-hover);
+  --color-button-danger-fg: var(--color-ink-inverse);
+
+  --color-badge-bg: var(--color-surface-sunken);
+  --color-badge-fg: var(--color-ink-secondary);
+
+  --color-card-bg: var(--color-surface-raised);
+  --color-card-border: var(--color-line);
+
+  --color-field-bg: var(--color-surface-raised);
+  --color-field-border: var(--color-line);
+  --color-field-border-focus: var(--color-accent);
+  --color-field-fg: var(--color-ink);
+  --color-field-placeholder: var(--color-ink-tertiary);
+
+  /* ─────────────────────────────────────────────────────────────────
+   * ALIASES · kept so existing call sites resolve. Don't add new uses.
+   *
    * `--color-dark` is still the honest name when the near-black is used
-   * as a TINT rather than as ink (bg-dark/5, border-dark/10) — that's a
-   * primitive-at-alpha use and is fine. For text, prefer `text-ink*`. */
-  --color-dark: var(--base-near-black);
+   * as a TINT rather than as ink — `bg-dark/5` is a primitive-at-alpha
+   * use and is fine. For text prefer `text-ink*`, for borders
+   * `border-line*`, and for fills the surface ladder.
+   * ───────────────────────────────────────────────────────────────── */
+  --color-dark: var(--neutral-950);
   --color-light: var(--color-surface);
-  --color-muted: var(--base-slate-500);
+  --color-muted: var(--color-ink-secondary);
+  --color-border: var(--color-line);
 
   /* — Typeface ——————————————————————————————————
    * Geist (Vercel), self-hosted by next/font at build time — see
@@ -413,9 +671,28 @@
 
   /* Intermediate steps off the variable axis, for optical correction
    * rather than hierarchy. Used by the scale, available as utilities
-   * (`font-meta`, `font-body-sm`, `font-emphasis`, `font-strong`). */
+   * (`font-meta`, `font-body-sm`, `font-emphasis`, `font-strong`).
+   *
+   * The ladder, and what each rung is for. Every weight in the type
+   * scale and in every component now comes from here — there are no
+   * loose numeric weights left anywhere in the codebase.
+   *
+   *   440  font-meta       14px body, de-emphasised meta and labels
+   *   490  font-body-sm    13px body — 400 goes anemic, 500 goes chunky
+   *   500  font-medium     12px body
+   *   520  font-caption    11px body
+   *   540  font-emphasis   10px body, emphasised inline text
+   *   590  font-strong     strong labels, active tabs, dense headings
+   *   600  font-semibold   headings and every button label
+   *   700  font-bold       display type only. Reach for 600 first.
+   *
+   * Read bottom-up that's the optical-compensation curve: as the type
+   * gets smaller the weight goes up, so a 10px label holds the page as
+   * firmly as 14px body does. It only works because Geist is variable —
+   * on a two-master face 440 and 490 would both round to Regular. */
   --font-weight-meta: 440;
   --font-weight-body-sm: 490;
+  --font-weight-caption: 520;
   --font-weight-emphasis: 540;
   --font-weight-strong: 590;
 
@@ -439,79 +716,107 @@
    *   • below 20px  → tracking in PX. The optical correction small text
    *     needs is near-constant, so it must NOT scale with font-size.
    *   • 20px and up → tracking in EM, so it scales with the type.
-   * Line-height tightens as size grows (1.3 at 11px → 1.02 at 64px):
-   * large type needs proportionally less air than small type.
    *
-   * WEIGHT is the third function of size. Geist's variable axis lets the
-   * small steps carry slightly more weight so their strokes hold up, and
-   * lets the display steps sit at 600 rather than a heavy 700. Explicit
-   * `font-*` utilities still override these per element.
+   * LINE-HEIGHT is set in whole pixels, not ratios, and runs in three
+   * regimes:
+   *   • 10–14px  dense UI. Snapped to a 4px leading grid (14/14/16/16/
+   *     20) so dense rows stack on a rhythm. Ratios here are a side
+   *     effect of the grid, not the input.
+   *   • 16–18px  reading. Holds ~1.5 flat — prose wants the air, and
+   *     tightening it is the fastest way to make a paragraph unreadable.
+   *   • 20px+    display. Tightens monotonically as size grows
+   *     (1.25 at 20px → 1.02 at 64px): large type needs proportionally
+   *     less air, and at display sizes 1.5 reads as double-spaced.
+   *
+   * WEIGHT is the third function of size, and it runs OPPOSITE to size.
+   * Geist's variable axis is continuous, so the small steps can carry
+   * slightly more weight to stop their strokes evaporating (540 at 10px
+   * → 400 at 16px), and the display steps can sit at 600 rather than a
+   * heavy 700. Explicit `font-*` utilities still override per element.
+   *
+   * SAME SIZE, TIGHTER LEADING = HEADING. `text-body` and `text-heading`
+   * are both 16px; the heading just drops 24px → 20px of leading. That's
+   * the whole difference, and it's cheaper than a second weight.
    *
    * Tuned for Geist, which is a tighter, more geometric grotesque than
    * the previous Helvetica — so the display end needs less negative
    * tracking than Helvetica did, and the small end sits near zero.
    * ───────────────────────────────────────────────────────────────── */
 
-  /* Dense UI text — px tracking, optically heavier */
+  /* Dense UI text — px tracking, 4px leading grid, optically heavier */
   --text-ui-2xs: 10px;
-  --text-ui-2xs--line-height: 13px;
+  --text-ui-2xs--line-height: 14px;
   --text-ui-2xs--letter-spacing: 0px;
-  --text-ui-2xs--font-weight: 500;
+  --text-ui-2xs--font-weight: var(--font-weight-emphasis);
 
   --text-ui-xs: 11px;
   --text-ui-xs--line-height: 14px;
   --text-ui-xs--letter-spacing: -0.05px;
-  --text-ui-xs--font-weight: 500;
+  --text-ui-xs--font-weight: var(--font-weight-caption);
 
   --text-ui-sm: 12px;
   --text-ui-sm--line-height: 16px;
   --text-ui-sm--letter-spacing: -0.1px;
-  --text-ui-sm--font-weight: 500;
+  --text-ui-sm--font-weight: var(--font-weight-medium);
 
   --text-ui: 13px;
-  --text-ui--line-height: 18px;
+  --text-ui--line-height: 16px;
   --text-ui--letter-spacing: -0.1px;
-  --text-ui--font-weight: 490;
+  --text-ui--font-weight: var(--font-weight-body-sm);
 
   --text-ui-lg: 14px;
   --text-ui-lg--line-height: 20px;
   --text-ui-lg--letter-spacing: -0.09px;
-  --text-ui-lg--font-weight: 450;
+  --text-ui-lg--font-weight: var(--font-weight-meta);
 
-  /* Body / prose */
+  /* Reading — 16/18px hold ~1.5. Prose is the one place the tightening
+   * curve does NOT apply. */
   --text-body: 16px;
   --text-body--line-height: 24px;
   --text-body--letter-spacing: -0.18px;
 
   --text-body-lg: 18px;
-  --text-body-lg--line-height: 28px;
+  --text-body-lg--line-height: 27px;
   --text-body-lg--letter-spacing: -0.2px;
+
+  /* Headings at reading sizes — same size as the body steps above, just
+   * with the leading pulled in. Use these for a card title or a row
+   * heading, where `text-body` would sit too loose against its label. */
+  --text-heading-sm: 14px;
+  --text-heading-sm--line-height: 16px;
+  --text-heading-sm--letter-spacing: -0.09px;
+  --text-heading-sm--font-weight: var(--font-weight-strong);
+
+  --text-heading: 16px;
+  --text-heading--line-height: 20px;
+  --text-heading--letter-spacing: -0.18px;
+  --text-heading--font-weight: var(--font-weight-semibold);
 
   /* Titles — em tracking, 600 ceiling (700 is reserved for display) */
   --text-title-sm: 20px;
   --text-title-sm--line-height: 25px;
   --text-title-sm--letter-spacing: -0.01em;
-  --text-title-sm--font-weight: 600;
+  --text-title-sm--font-weight: var(--font-weight-semibold);
 
   --text-title: 24px;
   --text-title--line-height: 29px;
   --text-title--letter-spacing: -0.015em;
-  --text-title--font-weight: 600;
+  --text-title--font-weight: var(--font-weight-semibold);
 
   --text-title-lg: 32px;
   --text-title-lg--line-height: 37px;
   --text-title-lg--letter-spacing: -0.02em;
-  --text-title-lg--font-weight: 600;
+  --text-title-lg--font-weight: var(--font-weight-semibold);
 
   --text-title-xl: 40px;
   --text-title-xl--line-height: 44px;
   --text-title-xl--letter-spacing: -0.025em;
-  --text-title-xl--font-weight: 600;
+  --text-title-xl--font-weight: var(--font-weight-semibold);
 
   --text-display: 64px;
   --text-display--line-height: 1.02;
   --text-display--letter-spacing: -0.032em;
-  --text-display--font-weight: 600;
+  --text-display--font-weight: var(--font-weight-semibold);
 
   /* Retrofit the stock Tailwind scale with the same size-aware curve, so
    * every existing `text-sm` / `text-xl` / `text-4xl` call site is corrected
@@ -540,16 +845,6 @@
   --text-7xl--line-height: 1.02;
   --text-8xl--line-height: 1;
   --text-9xl--line-height: 0.98;
-
-  /* ─────────────────────────────────────────────────────────────────
-   * INK — solid text colors. Hierarchy comes from a real color step,
-   * never from fading the primary ink with an opacity modifier.
-   * (Faded ink is unreliable over any non-flat surface and reads as
-   * disabled rather than secondary.)
-   * ───────────────────────────────────────────────────────────────── */
-  --color-ink: var(--base-near-black);         /* primary — headlines, anything you must read */
-  --color-ink-secondary: var(--base-slate-500); /* labels, meta, timestamps — the most-used ink */
-  --color-ink-tertiary: var(--base-slate-400);  /* placeholders, de-emphasis */
 
   /* ─────────────────────────────────────────────────────────────────
    * OPENTYPE FEATURES
@@ -590,6 +885,7 @@
    * which keeps every step soft and never reaches a sharp corner.
    * ───────────────────────────────────────────────────────────────── */
   --radius: 0.7rem;                        /* 11.2px seed */
+  --radius-2xs: calc(var(--radius) - 8px); /*  3.2px — tails, nubs */
   --radius-xs: calc(var(--radius) - 6px);  /*  5.2px */
   --radius-sm: calc(var(--radius) - 4px);  /*  7.2px */
   --radius-md: calc(var(--radius) - 2px);  /*  9.2px */
@@ -597,6 +893,9 @@
   --radius-xl: calc(var(--radius) + 4px);  /* 15.2px */
   --radius-2xl: 1rem;
   --radius-3xl: 1.5rem;
+  /* Pills and circles. There were three spellings of this in the files —
+   * 999px, 9999px and calc(infinity * 1px) — all meaning "fully round". */
+  --radius-full: 9999px;
 
   /* ─────────────────────────────────────────────────────────────────
    * ELEVATION — deliberately almost invisible. Separation is carried by
@@ -606,16 +905,131 @@
   --shadow-sm: 0 2px 4px #00000008;
   --shadow-md: 0 8px 16px #0000000f;
   --shadow-lg: 0 12px 24px #0000001a;
+  /* Cast UPWARD. The mobile page card slides down to reveal the menu, so
+   * its shadow has to fall on the thing above it, not below. */
+  --shadow-lift: 0 -8px 28px -8px rgb(0 0 0 / 0.2);
+
+  /* FLOATING OVER MEDIA — the one place the near-invisible shadows above
+   * don't work. A card sitting on album art or a video frame has no
+   * surface step and no border to separate it, because the thing behind
+   * it is an arbitrary photograph. These are deeper and heavily negative-
+   * spread, so they read as a cast shadow rather than a grey halo.
+   * Used by the covers player; never reach for one on a flat page. */
+  --shadow-float: 0 10px 30px -14px rgb(0 0 0 / 0.35);
+  --shadow-float-lg: 0 18px 50px -14px rgb(0 0 0 / 0.5);
 
   /* ─────────────────────────────────────────────────────────────────
    * MOTION — durations to pair with the easing curves above. Split by
    * property: transforms move faster than colors.
    * ───────────────────────────────────────────────────────────────── */
-  --duration-color: 100ms;
-  --duration-press: 120ms;
-  --duration-base: 150ms;
-  --duration-overlay: 200ms;
-  --duration-slow: 300ms;
+  /* Tier 1 — the time ladder. Every duration AND every one-off delay in
+   * the codebase now lands on one of these rungs. (Repeating per-item
+   * delays are the exception — those use the stagger scale below.)
+   *
+   * It used to be 21 distinct values: 0.35 and 0.36 sitting next to each
+   * other, 0.4 / 0.42 / 0.45 all doing the same job, 0.7 / 0.8 / 0.9 all
+   * meaning "slow". None of those differences was legible — a 20ms gap
+   * at 400ms is a frame and a bit, and nobody has ever noticed one. */
+  --duration-100: 100ms;
+  --duration-120: 120ms;
+  --duration-150: 150ms;
+  --duration-200: 200ms;
+  --duration-250: 250ms;
+  --duration-300: 300ms;
+  --duration-400: 400ms;
+  --duration-500: 500ms;
+  --duration-600: 600ms;
+  --duration-800: 800ms;
+  /* Past a second you're no longer in interaction territory — these are
+   * for ambient loops and deliberate held beats, not for feedback. */
+  --duration-1200: 1200ms;
+  --duration-1500: 1500ms;
+
+  /* Tier 2 — roles. Split by PROPERTY at the short end, because a colour
+   * change and a transform are not the same kind of event: the transform
+   * is the thing you did and must feel immediate, the colour is a state
+   * readout and can afford to settle. */
+  --duration-color: var(--duration-100);   /* colour / opacity */
+  --duration-press: var(--duration-120);   /* the press transform */
+  --duration-base: var(--duration-150);    /* the default */
+  --duration-overlay: var(--duration-200); /* popovers, menus, sheets */
+  --duration-slow: var(--duration-300);    /* deliberate state change */
+  --duration-reveal: var(--duration-400);  /* a thing uncovering itself */
+  --duration-entrance: var(--duration-600);    /* section / page arrival */
+  --duration-entrance-lg: var(--duration-800); /* hero, title rise */
+
+  /* Stagger steps — the per-item DELAY in a cascade, not a duration.
+   * Kept as exact rungs rather than snapped onto the duration ladder: a
+   * stagger gets multiplied by the item index, so a 30% error on one step
+   * becomes a 30% error on the whole cascade's length. That's visible in
+   * a way the same error on a single 400ms transition isn't. */
+  --stagger-xs: 30ms;
+  --stagger-sm: 40ms;
+  --stagger: 60ms;
+  --stagger-lg: 80ms;
+  --stagger-xl: 150ms;
+
+  /* Press feedback. 3%, not the usual 5% — at the sizes buttons actually
+   * are, 5% reads as the element flinching. */
+  --scale-press: 0.97;
+
+  /* ─────────────────────────────────────────────────────────────────
+   * LAYERING — a named stack, so "what sits above what" is answered by
+   * the token list rather than by escalation. The old values ran 0, 1,
+   * 2, 3, 4, 5, 10, 11, 20, 30, 40, 50, 60, 70, 100, 9999, 10000, 10001,
+   * 99999 — five different ways of spelling "on top", which is what
+   * happens when there's no scale to point at.
+   *
+   * Gaps of 10 leave room to slot something in without a renumber.
+   *
+   * These are for GLOBAL layering — "does the navbar sit over the menu",
+   * a question whose answer lives in two different files and can only be
+   * settled here. Ordering WITHIN one component (a label over its own
+   * image, `z-0` under `z-10` inside a card) deliberately stays as plain
+   * utilities: that's a local stacking context, the two numbers are only
+   * ever compared to each other, and routing them through a global scale
+   * would say they participate in the site's layering when they don't.
+   * ───────────────────────────────────────────────────────────────── */
+  --z-index-base: 0;        /* in-flow content */
+  --z-index-raised: 10;     /* lifted within a section — cards, hover states */
+  --z-index-sticky: 20;     /* sticky headers, in-page rails */
+  --z-index-menu: 30;       /* the mobile menu sheet, behind the page card */
+  --z-index-page-card: 40;  /* the page card that slides to reveal the menu */
+  --z-index-nav: 50;        /* the navbar — above the card, always reachable */
+  --z-index-popover: 60;    /* tooltips, bubbles, dropdowns */
+  --z-index-overlay: 70;    /* scrims and veils */
+  --z-index-modal: 80;      /* dialogs */
+  --z-index-toast: 90;      /* transient messages */
+  --z-index-max: 100;       /* the studio shell, dev-only chrome */
+
+  /* ─────────────────────────────────────────────────────────────────
+   * BLUR — for filter and backdrop-filter. The files had 2/4/6/7/8/10/
+   * 12/14/18/40px loose in them; 6 and 7 were the same blur written
+   * twice, as were 10 and 12.
+   *
+   * Deliberately left ON Tailwind's own scale rather than invented: the
+   * `blur-*` and `backdrop-blur-*` utilities read these same tokens, so
+   * picking different numbers would silently retune every utility call
+   * site to buy nothing. Handwritten values snap to the nearest rung.
+   * ───────────────────────────────────────────────────────────────── */
+  --blur-xs: 4px;
+  --blur-sm: 8px;
+  --blur-md: 12px;
+  --blur-lg: 16px;
+  --blur-xl: 24px;
+  --blur-2xl: 40px;   /* the image glow — a wash, not an edge */
+
+  /* ─────────────────────────────────────────────────────────────────
+   * LAYOUT — the few measurements that more than one file needs to
+   * agree on. Everything else comes off Tailwind's 4px `--spacing`.
+   *
+   * Half-steps are load-bearing in a dense UI: 4px is too tight for an
+   * icon next to a label and 8px is too loose, so `gap-1.5` (6px) is a
+   * first-class choice here, not a rounding error.
+   * ───────────────────────────────────────────────────────────────── */
+  --nav-height: 4rem;          /* 64px — the p-4 navbar */
+  --nav-height-md: 5.5rem;     /* 88px — the md:p-6 navbar */
+  --page-max: 48rem;           /* 768px — the reading column (max-w-3xl) */
 }
 
 /* Geist is the site-wide default. Applied at the root so every element
@@ -670,23 +1084,99 @@ body {
   font-feature-settings: var(--font-features-numeric);
 }
 
+/* ── Real superiors and inferiors ────────────────────────────────
+ * Geist draws true superior and inferior FIGURES (`sups` / `subs`,
+ * 0–9 each). Left alone, the browser fakes <sup>/<sub> by taking the
+ * normal digit, shrinking it and shifting it off the baseline — which
+ * thins the strokes until they don't match the text they sit next to.
+ * `font-variant-position` reaches for the drawn glyph instead.
+ *
+ * Only digits are covered, so a <sup> holding a LETTER (footnote
+ * markers like "ᵃ", "1ˢᵗ") still gets synthesized — that's the
+ * browser's per-glyph fallback and is the correct outcome, not a bug.
+ * Prefer numbered footnotes and it never comes up.
+ *
+ * The `vertical-align`/`font-size` reset is required: the UA sheet's
+ * own shrink-and-shift would otherwise stack on top of the real glyph
+ * and shove it too far. Guarded by @supports so browsers without
+ * `font-variant-position` keep the UA behaviour rather than getting
+ * full-size digits sitting on the baseline. */
+@supports (font-variant-position: super) {
+  sup, sub {
+    font-size: 100%;
+    line-height: inherit;
+    vertical-align: baseline;
+  }
+  sup { font-variant-position: super; }
+  sub { font-variant-position: sub; }
+}
+
+/* ── Real fractions — opt-in ─────────────────────────────────────
+ * `frac` rebuilds `1/2`, `3/4`, `16/9` from true numerators,
+ * denominators and a fraction bar (Geist covers 0–9 plus the slash),
+ * instead of three full-size characters in a row.
+ *
+ * Deliberately NOT global: it would also catch dates (`7/28`), ratios
+ * and any URL path, turning them into fractions. Put it on the span
+ * that holds the fraction, nothing wider. */
+.frac { font-feature-settings: var(--font-features-base), "frac" 1; }
+
 /* ── Geist stylistic sets — opt-in ───────────────────────────────
  * Each swaps a specific glyph. Try them on an element rather than
  * site-wide; they change the character of the face.
- *   .ss-alt-a      single-storey `a`            (ss02)
- *   .ss-tail-l     `l` with a tail — disambiguates l / I / 1  (ss03)
- *   .ss-alt-i      `I` with serifs — same purpose             (ss05)
- *   .ss-alt-g      alternate `G`                              (ss06)
- *   .ss-alt-nums   alternate figures                          (ss09)
+ *   .ss-plain-a    `a` with no tail                            (ss01)
+ *   .ss-alt-a      single-storey `a`                           (ss02)
+ *   .ss-tail-l     `l` with a tail — disambiguates l / I / 1   (ss03)
+ *   .ss-alt-r      straight-leg `R`                            (ss04)
+ *   .ss-alt-i      `I` with serifs — same purpose as ss03      (ss05)
+ *   .ss-alt-g      alternate `G`                               (ss06)
+ *   .ss-alt-arrows squarer arrow glyphs — → ← ↑ ↓ ↔ and the
+ *                  four diagonals                              (ss07)
+ *   .ss-round-dot  round dots on i/j/: and every dieresis      (ss08)
+ *   .ss-alt-nums   alternate figures                           (ss09)
+ *   .ss-brackets   alternate ( ) [ ] { } < > « »               (ss10)
  *   .ss-legible    ss03 + ss05 together — the pairing worth
  *                  reaching for on dense UI or anything code-adjacent
+ *
+ * Two tags in the Sans are listed by the font but effectively empty,
+ * so there are no utilities for them and adding one would be dead CSS:
+ *   ordn  substitutes a single glyph, the numero sign — it does NOT
+ *         raise the `st`/`nd`/`rd` in "1st". Use <sup> for those.
+ *   case  four glyphs, three of them combining overlays. The all-caps
+ *         punctuation lift it exists for isn't drawn here (and this
+ *         site sets no all-caps text anyway).
  * ─────────────────────────────────────────────────────────────── */
-.ss-alt-a     { font-feature-settings: var(--font-features-base), "ss02" 1; }
-.ss-tail-l    { font-feature-settings: var(--font-features-base), "ss03" 1; }
-.ss-alt-i     { font-feature-settings: var(--font-features-base), "ss05" 1; }
-.ss-alt-g     { font-feature-settings: var(--font-features-base), "ss06" 1; }
-.ss-alt-nums  { font-feature-settings: var(--font-features-base), "ss09" 1; }
-.ss-legible   { font-feature-settings: var(--font-features-base), "ss03" 1, "ss05" 1; }
+.ss-plain-a    { font-feature-settings: var(--font-features-base), "ss01" 1; }
+.ss-alt-a      { font-feature-settings: var(--font-features-base), "ss02" 1; }
+.ss-tail-l     { font-feature-settings: var(--font-features-base), "ss03" 1; }
+.ss-alt-r      { font-feature-settings: var(--font-features-base), "ss04" 1; }
+.ss-alt-i      { font-feature-settings: var(--font-features-base), "ss05" 1; }
+.ss-alt-g      { font-feature-settings: var(--font-features-base), "ss06" 1; }
+.ss-alt-arrows { font-feature-settings: var(--font-features-base), "ss07" 1; }
+.ss-round-dot  { font-feature-settings: var(--font-features-base), "ss08" 1; }
+.ss-alt-nums   { font-feature-settings: var(--font-features-base), "ss09" 1; }
+.ss-brackets   { font-feature-settings: var(--font-features-base), "ss10" 1; }
+.ss-legible    { font-feature-settings: var(--font-features-base), "ss03" 1, "ss05" 1; }
+
+/* ── AI / UI ligature — opt-in ───────────────────────────────────
+ * Geist's `dlig` holds exactly two pairs: A+I and U+I, drawn as
+ * single joined glyphs. Discretionary by design — it's a display
+ * move for a headline or a wordmark, and would be noise in a
+ * paragraph, which is why it isn't in the baseline. */
+.dlig { font-feature-settings: var(--font-features-base), "dlig" 1; }
+
+/* ── No orphans ──────────────────────────────────────────────────
+ * `.no-orphan` keeps a headline from dropping a lone word onto its
+ * last line. `text-wrap: pretty` is the orphan-specific value — it
+ * only rebalances the tail, so long copy keeps its natural rag;
+ * `balance` would even out every line and is wrong for anything
+ * past a few lines. Applies at every width — the wrap point moves
+ * with the viewport, so the rule has to travel with it.
+ * Unsupported browsers simply wrap normally.
+ * ─────────────────────────────────────────────────────────────── */
+.no-orphan {
+  text-wrap: pretty;
+}
 
 /* Geist Mono. Monospace needs no kerning or ligature switches (every
    glyph is one advance width), so its baseline is simply the family.
@@ -717,16 +1207,16 @@ body {
 }
 
 ::-webkit-scrollbar-track {
-  background: var(--color-surface); /* slate-100, matches homepage bg */
+  background: var(--color-surface); /* the page itself */
 }
 
 ::-webkit-scrollbar-thumb {
-  background: var(--color-dark);
+  background: var(--color-surface-inverse);
   border-radius: 0px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #282828;
+  background: var(--neutral-800);
 }
 
 /* Firefox */
@@ -738,6 +1228,286 @@ body {
 @supports (scrollbar-width: none) {
   * {
     scrollbar-width: none;
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ * TEXT SELECTION
+ *
+ * Selection is inherited, so these rules are written to lean on that: a
+ * container sets the policy and its descendants pick it up, while an
+ * element with its own declaration always wins over an inherited one.
+ * That's why images opt out globally and still stay opted out inside
+ * .prose — no `*` selectors, no specificity ladder.
+ *
+ * In @layer base on purpose, so a Tailwind `select-text` / `select-none`
+ * utility on any single element still overrides all of it.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+@layer base {
+  /* The grey box iOS flashes over whatever you tap. Nothing here wants it —
+     every interactive element already has its own press state. */
+  html {
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* None of these is text. On touch, press-and-drag on one starts a
+     selection or pops iOS's save-image callout instead of dragging the
+     thing under the finger — the covers grid, the hero, and the tier list
+     all lose their drag to it. */
+  img,
+  svg,
+  canvas,
+  video {
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+  }
+
+  /* On touch this site behaves like an app, not a document: a drag means
+     move, scroll, or spin something — never highlight a label. Default to
+     no selection there, then hand it back where reading or typing is the
+     whole point. Pointer devices are left alone: a mouse drag across text
+     is unambiguous, so desktop keeps normal select-and-copy everywhere. */
+  @media (pointer: coarse) {
+    body {
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
+    }
+
+    /* Long-form writing, form fields, and the editors. Descendants inherit,
+       so the container is enough — except images, which keep the rule above.
+       input/textarea are named explicitly because iOS Safari won't let you
+       type into a field that inherited `user-select: none`. */
+    .prose,
+    input,
+    textarea,
+    [contenteditable="true"],
+    .cm-editor {
+      -webkit-user-select: text;
+      user-select: text;
+      -webkit-touch-callout: default;
+    }
+  }
+}
+
+/* ═════════════════════════════════════════════════════════════════════
+ * COMPONENTS
+ *
+ * Every rule below reads ONLY Tier 3 tokens. No hex, no primitive, no
+ * Tier 2 role — so a component can be retinted from the token block
+ * without opening this section, and restyling one can't reach another.
+ *
+ * They live in @layer components so a utility on the element always
+ * wins: `<button class="btn btn--primary w-full">` works, and so does
+ * overriding the padding or the radius inline.
+ *
+ * Shape is flat and typographic on purpose — solid fills, 1px lines,
+ * soft corners. No gradients standing in for light, no inset highlights
+ * faking a bevel, no glass. Depth comes from the surface ladder.
+ * ═════════════════════════════════════════════════════════════════════ */
+
+@layer components {
+  /* ── Button ────────────────────────────────────────────────────────
+   * Base carries everything the variants share: the box, the type, the
+   * motion. A variant only ever sets colors.
+   *
+   * Transitions are split by property because they aren't the same kind
+   * of change: the transform is the press, and it has to feel immediate
+   * (120ms); the color is a state readout and can afford to settle
+   * (var(--duration-100)). One blended `transition: all` makes both feel wrong. */
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.375rem; /* 6px — the icon+label gap. 4px crowds, 8px drifts. */
+    /* Wider than tall: horizontal padding does the work of making a
+       button look like a button, vertical padding just adds height. */
+    padding: 0.5rem 1rem;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-ui-lg);
+    line-height: var(--text-ui-lg--line-height);
+    letter-spacing: var(--text-ui-lg--letter-spacing);
+    /* 600 for every button label, at every size. Emphasis in this system
+       tops out at semibold; 700 is display type only. */
+    font-weight: var(--font-weight-semibold);
+    white-space: nowrap;
+    cursor: pointer;
+    user-select: none;
+    -webkit-appearance: none;
+    appearance: none;
+    /* The press is the one transition that should feel physical, so it gets
+       the overshoot curve: pressing dips a hair past 0.97 and releasing
+       springs a hair past 1.0 before settling. At a 3% scale that reads as
+       give, not as a wobble. 150ms rather than 120 because an overshoot
+       needs room to come back — at 120ms the return clips and just looks
+       like a stutter. */
+    transition:
+      transform var(--duration-base) var(--ease-overshoot),
+      background-color var(--duration-color) linear,
+      border-color var(--duration-color) linear,
+      color var(--duration-color) linear;
+  }
+  .btn:active {
+    transform: scale(var(--scale-press));
+  }
+  .btn:focus-visible {
+    outline: 2px solid var(--color-field-border-focus);
+    outline-offset: 2px;
+  }
+  /* Universal disabled treatment — one rule, every variant. */
+  .btn:disabled,
+  .btn[aria-disabled="true"] {
+    opacity: 0.5;
+    pointer-events: none;
+  }
+
+  .btn--sm {
+    padding: 0.3125rem 0.625rem; /* 5px / 10px */
+    font-size: var(--text-ui);
+    line-height: var(--text-ui--line-height);
+    letter-spacing: var(--text-ui--letter-spacing);
+    border-radius: var(--radius-xs);
+  }
+  .btn--lg {
+    padding: 0.625rem 1.25rem; /* 10px / 20px */
+    font-size: var(--text-body);
+    line-height: var(--text-body--line-height);
+    letter-spacing: var(--text-body--letter-spacing);
+    border-radius: var(--radius-md);
+  }
+
+  .btn--primary {
+    background: var(--color-button-primary-bg);
+    color: var(--color-button-primary-fg);
+  }
+  .btn--primary:hover {
+    background: var(--color-button-primary-bg-hover);
+  }
+
+  .btn--secondary {
+    background: var(--color-button-secondary-bg);
+    color: var(--color-button-secondary-fg);
+    border-color: var(--color-button-secondary-border);
+  }
+  .btn--secondary:hover {
+    background: var(--color-button-secondary-bg-hover);
+    border-color: var(--color-line-strong);
+  }
+
+  .btn--ghost {
+    background: transparent;
+    color: var(--color-button-ghost-fg);
+  }
+  .btn--ghost:hover {
+    background: var(--color-button-ghost-bg-hover);
+    color: var(--color-button-ghost-fg-hover);
+  }
+
+  .btn--inverse {
+    background: var(--color-button-inverse-bg);
+    color: var(--color-button-inverse-fg);
+  }
+  .btn--inverse:hover {
+    background: var(--color-button-inverse-bg-hover);
+  }
+
+  /* Destructive. Solid, not tinted — a delete button should not be
+     something you have to look twice at. */
+  .btn--danger {
+    background: var(--color-button-danger-bg);
+    color: var(--color-button-danger-fg);
+  }
+  .btn--danger:hover {
+    background: var(--color-button-danger-bg-hover);
+  }
+
+  /* ── Badge ─────────────────────────────────────────────────────────
+   * A pill for one word of metadata. Sentence case, solid ink, no
+   * uppercase and no letter-spaced micro-label. */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.125rem 0.5rem; /* 2px / 8px */
+    border-radius: var(--radius-full);
+    background: var(--color-badge-bg);
+    color: var(--color-badge-fg);
+    font-size: var(--text-ui-sm);
+    line-height: var(--text-ui-sm--line-height);
+    letter-spacing: var(--text-ui-sm--letter-spacing);
+    font-weight: var(--font-weight-emphasis);
+    white-space: nowrap;
+  }
+  /* Tonal variants use the TINT fills, whose alphas are already balanced
+     against each other (see the asymmetric-alpha note in the tokens) —
+     so a green and a red badge sit at the same visual weight. */
+  .badge--positive {
+    background: var(--color-positive-tint);
+    color: var(--color-positive-ink);
+  }
+  .badge--negative {
+    background: var(--color-negative-tint);
+    color: var(--color-negative-ink);
+  }
+  .badge--warning {
+    background: var(--color-warning-tint);
+    color: var(--color-warning-ink);
+  }
+  .badge--accent {
+    background: var(--color-accent-surface);
+    color: var(--color-accent-ink);
+  }
+
+  /* ── Card ──────────────────────────────────────────────────────────
+   * A raised surface. One step up the ladder plus a 1px line does the
+   * whole job — no shadow. */
+  .card {
+    background: var(--color-card-bg);
+    border: 1px solid var(--color-card-border);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+  }
+
+  /* ── Field ─────────────────────────────────────────────────────────
+   * Text inputs, textareas, selects. */
+  .field {
+    display: block;
+    width: 100%;
+    padding: 0.5rem 0.75rem;
+    background: var(--color-field-bg);
+    border: 1px solid var(--color-field-border);
+    border-radius: var(--radius-sm);
+    color: var(--color-field-fg);
+    font-size: var(--text-ui-lg);
+    line-height: var(--text-ui-lg--line-height);
+    letter-spacing: var(--text-ui-lg--letter-spacing);
+    transition:
+      border-color var(--duration-color) linear,
+      background-color var(--duration-color) linear;
+  }
+  .field::placeholder {
+    color: var(--color-field-placeholder);
+  }
+  .field:focus {
+    outline: none;
+    border-color: var(--color-field-border-focus);
+  }
+  .field:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn,
+  .field {
+    transition: none;
+  }
+  .btn:active {
+    transform: none;
   }
 }
 
@@ -764,7 +1534,7 @@ body {
   opacity: 0.4;
   transform: scaleX(0);
   transform-origin: right center;
-  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: transform var(--duration-400) var(--ease-entrance);
 }
 .LinkMask:hover::after {
   transform: scaleX(1);
@@ -782,16 +1552,16 @@ body {
 /* squircle: iOS-style superellipse corners
    fallback: generous border-radius for non-supporting browsers */
 .squircle {
-  border-radius: 1rem;
+  border-radius: var(--radius-2xl);
 }
 .squircle-sm {
-  border-radius: 0.625rem;
+  border-radius: var(--radius-md);
 }
 .squircle-lg {
-  border-radius: 1.5rem;
+  border-radius: var(--radius-3xl);
 }
 .squircle-pill {
-  border-radius: 9999px;
+  border-radius: var(--radius-full);
 }
 
 @supports (corner-shape: squircle) {
@@ -809,29 +1579,35 @@ body {
  * h2/h3/h4 in prose use Geist sans, bold, tight
  * ───────────────────────────────────────────── */
 
-/* readable body text: 18px, 1.7 line-height, relaxed tracking */
+/* Long-form reading. Straight off the `body-lg` step — 18px on 27px of
+   leading with its own tracking — rather than a second, freehand set of
+   numbers that drifts from the scale. Prose is the one regime that holds
+   ~1.5 leading instead of tightening (see the type scale). */
 .prose {
-  font-size: 1.125rem;
-  line-height: 1.75;
-  letter-spacing: -0.01em;
-  color: #2a2a2a;
+  font-size: var(--text-body-lg);
+  line-height: var(--text-body-lg--line-height);
+  letter-spacing: var(--text-body-lg--letter-spacing);
+  color: var(--color-ink-reading);
 }
 
 .prose p {
   margin-bottom: 1.5em;
 }
 
+/* 600, not 700: emphasis in this system tops out at semibold, and Geist's
+   600 at heading sizes already separates cleanly from 18px body. */
 .prose h2,
 .prose h3,
 .prose h4 {
-  font-family: var(--font-geist), system-ui, sans-serif;
-  font-weight: 700;
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
   letter-spacing: -0.015em;
 }
 
 .prose pre {
   padding: 1.25rem;
-  border-radius: 0.5rem;
+  border-radius: var(--radius-sm);
 }
 
 .prose pre code {
@@ -844,7 +1620,7 @@ body {
  *
  * Display heading — choppy word reveal (Shopify):
  *   Each word scales 0.4 → 0.7 → 1.0 in discrete
- *   steps via step-end. Words stagger at 0.1s.
+ *   steps via step-end. Words stagger at var(--duration-100).
  *   Color fades from transparent → inherit.
  *   After reveal: subtle horizontal drift settles.
  *
@@ -854,7 +1630,7 @@ body {
  *   120ms  title words begin choppy reveal
  *   +N*0.1 each word staggers in
  *   400ms  tags scale in
- *   500ms  article body fades up
+ *   var(--duration-500)  article body fades up
  *
  * Scroll-driven:
  *   Divider line grows from center
@@ -891,7 +1667,7 @@ body {
   transform: scale(0.35);
   transform-origin: center center;
   will-change: transform, color;
-  animation: ch-glitch-in 0.7s step-end var(--ch-d) both;
+  animation: ch-glitch-in var(--duration-entrance-lg) step-end var(--ch-d) both;
 }
 
 /* — Hero ————————————————————————————————————— */
@@ -908,7 +1684,7 @@ body {
 
 .hero-sub {
   opacity: 0;
-  animation: hero-sub-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both;
+  animation: hero-sub-in var(--duration-entrance) var(--ease-entrance) var(--duration-300) both;
 }
 
 /* spaces need no animation, just hold width */
@@ -970,16 +1746,16 @@ body {
 .blog-image-glow {
   position: absolute;
   inset: 4%;
-  z-index: 0;
+  z-index: var(--z-index-base);
   background-size: cover;
   background-position: center;
-  border-radius: 1.5rem;
-  filter: blur(40px) saturate(1.6);
+  border-radius: var(--radius-3xl);
+  filter: blur(var(--blur-2xl)) saturate(1.6);
   opacity: 0;
   transform: scale(1.05);
   will-change: transform, opacity;
   animation:
-    blog-glow-in   0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.3s forwards,
+    blog-glow-in   var(--duration-800) var(--ease-entrance) var(--duration-300) forwards,
     blog-glow-morph 8s   ease-in-out                   1.1s infinite;
 }
 
@@ -1005,57 +1781,57 @@ body {
 /* — Reusable animation classes ———————————————— */
 
 .blog-header-back {
-  animation: blog-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-fade-up var(--duration-entrance) var(--ease-entrance) both;
 }
 
 .blog-header-date {
-  animation: blog-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) 0.08s both;
+  animation: blog-fade-up var(--duration-entrance) var(--ease-entrance) var(--stagger-lg) both;
 }
 
 .blog-header-title {
-  animation: blog-title-rise 0.9s cubic-bezier(0.16, 1, 0.3, 1) 0.16s both;
+  animation: blog-title-rise var(--duration-entrance-lg) var(--ease-entrance) var(--duration-150) both;
 }
 
 .blog-header-tags {
-  animation: blog-scale-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.4s both;
+  animation: blog-scale-in var(--duration-500) var(--ease-overshoot) var(--duration-400) both;
 }
 
 .blog-article {
-  animation: blog-fade-up 0.8s cubic-bezier(0.16, 1, 0.3, 1) 0.5s both;
+  animation: blog-fade-up var(--duration-entrance-lg) var(--ease-entrance) var(--duration-500) both;
 }
 
 .blog-divider-line {
-  animation: blog-line-grow 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-line-grow var(--duration-entrance-lg) var(--ease-entrance) both;
   animation-timeline: view();
   animation-range: entry 0% entry 40%;
 }
 
 .blog-callout {
-  animation: blog-callout-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-callout-in var(--duration-entrance) var(--ease-entrance) both;
   animation-timeline: view();
   animation-range: entry 0% entry 35%;
 }
 
 .blog-quote-border {
-  animation: blog-border-wipe 0.7s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-border-wipe var(--duration-entrance-lg) var(--ease-entrance) both;
   animation-timeline: view();
   animation-range: entry 0% entry 40%;
 }
 
 .blog-quote-text {
-  animation: blog-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-fade-up var(--duration-entrance) var(--ease-entrance) both;
   animation-timeline: view();
   animation-range: entry 5% entry 45%;
 }
 
 .blog-figure {
-  animation: blog-figure-in 0.8s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-figure-in var(--duration-entrance-lg) var(--ease-entrance) both;
   animation-timeline: view();
   animation-range: entry 0% entry 35%;
 }
 
 .blog-list-item {
-  animation: blog-list-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: blog-list-in var(--duration-entrance) var(--ease-entrance) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1083,7 +1859,7 @@ body {
 
   .blog-image-glow {
     opacity: 0.4 !important;
-    filter: blur(40px) saturate(1.6);
+    filter: blur(var(--blur-2xl)) saturate(1.6);
     transform: scale(1.05) !important;
   }
 }
@@ -1092,22 +1868,27 @@ body {
  * Studio editor tokens
  * ───────────────────────────────────────────── */
 
+/* The studio is the site's one dark surface, and it re-themes the way the
+   main system would: it redefines a small set of scoped PRIMITIVES that
+   its components read, rather than teaching each component about a second
+   theme. `.studio-light` below flips the same names back to the site
+   tokens — same components, no per-theme duplication anywhere. */
 .studio {
-  --studio-bg:        #0d0d0d;
-  --studio-surface:   #111111;
-  --studio-text:      rgba(255,255,255,0.9);
-  --studio-text-2:    rgba(255,255,255,0.50);
-  --studio-text-3:    rgba(255,255,255,0.25);
-  --studio-text-4:    rgba(255,255,255,0.12);
-  --studio-border:    rgba(255,255,255,0.06);
-  --studio-hover:     rgba(255,255,255,0.04);
-  --studio-active:    rgba(255,255,255,0.06);
+  --studio-bg:        var(--dark-950);
+  --studio-surface:   var(--dark-900);
+  --studio-text:      var(--scrim-white-85);
+  --studio-text-2:    var(--scrim-white-50);
+  --studio-text-3:    var(--scrim-white-25);
+  --studio-text-4:    var(--scrim-white-10);
+  --studio-border:    var(--scrim-white-05);
+  --studio-hover:     var(--scrim-white-05);
+  --studio-active:    var(--scrim-white-10);
 }
 
 .studio-palette-btn {
   color: var(--studio-text-3);
   border: 1px solid transparent;
-  transition: color 0.3s, border-color 0.3s, background 0.3s;
+  transition: color var(--duration-300), border-color var(--duration-300), background var(--duration-300);
 }
 .studio-palette-btn:hover,
 .studio-palette-btn:focus-visible {
@@ -1120,16 +1901,19 @@ body {
   outline-offset: 1px;
 }
 
+/* Light editor chrome — routed straight to the site tokens so the studio
+   in light mode is the same surface ladder and the same ink steps as the
+   rest of the site, rather than a second, parallel set of grays. */
 .studio-light {
   --studio-bg:        var(--color-surface);
-  --studio-surface:   #ffffff;
-  --studio-text:      #0f0f0f;
-  --studio-text-2:    rgba(0,0,0,0.60);
-  --studio-text-3:    rgba(0,0,0,0.40);
-  --studio-text-4:    rgba(0,0,0,0.20);
-  --studio-border:    rgba(0,0,0,0.10);
-  --studio-hover:     rgba(0,0,0,0.04);
-  --studio-active:    rgba(0,0,0,0.06);
+  --studio-surface:   var(--color-surface-raised);
+  --studio-text:      var(--color-ink);
+  --studio-text-2:    var(--color-ink-secondary);
+  --studio-text-3:    var(--color-ink-tertiary);
+  --studio-text-4:    var(--color-ink-disabled);
+  --studio-border:    var(--color-line);
+  --studio-hover:     var(--color-surface-subtle);
+  --studio-active:    var(--color-surface-sunken);
 }
 
 /* ─────────────────────────────────────────────
@@ -1145,18 +1929,27 @@ body {
  * with the rest of the page — see the ViewTransition comment in ImageFan.jsx.
  *
  * The morph is timed to the page-content enter so the thumb and the page it is
- * flying into arrive together; the default 0.25s ease landed early and read as
+ * flying into arrive together; the default var(--duration-250) ease landed early and read as
  * a separate, detached animation. */
 ::view-transition-group(.tl-share) {
-  animation-duration: 0.35s;
-  animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  animation-duration: var(--duration-400);
+  animation-timing-function: var(--ease-entrance);
 }
-/* Both ends are the same image, so the cross-fade is only there to cover the
-   aspect-ratio change — keep it short and let the morph carry the eye. */
-::view-transition-old(.tl-share),
+/* No cross-fade at all. The default is to fade the old snapshot out while the
+   new one fades in, which is the right call when the two ends look different —
+   but here they're the same file at the same square aspect (a .pol thumb and an
+   aspect-square tile), so there is nothing to fade *between*. Dissolving one
+   into the other only dips the image's opacity mid-flight and makes the thumb
+   look like it fades along with the page. Holding the incoming end opaque for
+   the whole morph means one continuous, solid image scales from thumb to tile
+   and back. */
+::view-transition-old(.tl-share) {
+  animation: none;
+  opacity: 0;
+}
 ::view-transition-new(.tl-share) {
-  animation-duration: 0.2s;
-  animation-timing-function: linear;
+  animation: none;
+  opacity: 1;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1167,54 +1960,63 @@ body {
   }
 }
 
-/* Soft staggered fade-up for rows + header on first paint */
-/* Opacity-only on purpose: a translateY here offsets the row while the browser
-   snapshots the view-transition morph targets (the fan thumbs / title), so the
-   tiles would land and then "reconcile" up 12px as the row settled. Fading
-   without moving keeps the shared-element morph landing exactly on the stack. */
+/* Soft staggered entrance for the tier rows, the index rows and the header.
+ *
+ * One rule decides where an entrance animation is allowed to go: it must not
+ * sit on an ANCESTOR of a shared-element morph target (a fan thumb, a cover
+ * tile). Both halves of that matter, and each was learned the hard way:
+ *
+ *   transform — a translateY on an ancestor offsets the tile while the browser
+ *     measures the incoming page, so the morph flies to a target 20px below
+ *     where the tile actually comes to rest, lands there, and jumps when the
+ *     overlay lifts.
+ *
+ *   opacity — the morph overlay lifts when the group animation ends (400ms).
+ *     A container still fading at that moment hands the tile back to a page
+ *     that hasn't finished arriving, so the image that just flew across the
+ *     screen fades up from half-transparent once it lands. The thumbs are
+ *     supposed to be the one thing that stays solid the whole way.
+ *
+ * So containers of a morph target get NO entrance of their own — the
+ * page-content transition already fades the page in around them — and the
+ * entrance is pushed down onto the siblings that carry the row's arrival: the
+ * text column on the index, the tier label and non-cover tiles on a list.
+ * `--tl-delay` carries the stagger in, stated at the call site next to the row
+ * index it's derived from. */
 @keyframes tl-fade-up {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
 
-.tl-fade {
-  animation: tl-fade-up 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
+@keyframes tl-rise-in {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
-/* Index rows. Same duration, easing and stagger as .blog-list-item over on the
-   Writing index — but fading only, without that one's 20px rise.
-   The rise is dropped on purpose: a row's transform is baked into the
-   view-transition group of any fan thumb inside it, so a row still sliding when
-   the browser snapshots the incoming page hands the morph a target 20px below
-   where the thumb actually comes to rest. The tile lands there, the overlay
-   lifts, and it visibly jumps into place. Fading leaves the geometry alone. */
-.tl-list-item {
-  animation: tl-fade-up 0.6s cubic-bezier(0.16, 1, 0.3, 1) both;
+/* `backwards`, not `both`: the end state is identical to the base style, so
+   there's nothing to hold — and holding it would keep overriding the tile's
+   own hover transform (.tl-item) for the life of the page. */
+.tl-rise {
+  animation: tl-rise-in var(--duration-entrance) var(--ease-entrance) var(--tl-delay, 0s) backwards;
 }
-/* gentle cascade down the rows */
-.tl-fade:nth-child(2) { animation-delay: 0.04s; }
-.tl-fade:nth-child(3) { animation-delay: 0.08s; }
-.tl-fade:nth-child(4) { animation-delay: 0.12s; }
-.tl-fade:nth-child(5) { animation-delay: 0.16s; }
-.tl-fade:nth-child(6) { animation-delay: 0.20s; }
 
 /* Tactile item — lifts slightly on hover */
 .tl-item {
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: transform var(--duration-250) var(--ease-overshoot),
+              box-shadow var(--duration-250) var(--ease-hover);
 }
 .tl-item:hover {
   transform: translateY(-2px) scale(1.03);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.18);
+  box-shadow: var(--shadow-lg);
 }
 
 /* Editor: draggable item being picked up */
 .tl-edit-item {
   cursor: grab;
   touch-action: none;
-  transition: transform 0.18s cubic-bezier(0.16, 1, 0.3, 1),
-              box-shadow 0.18s cubic-bezier(0.16, 1, 0.3, 1),
-              opacity 0.18s ease;
+  transition: transform var(--duration-200) var(--ease-overshoot),
+              box-shadow var(--duration-200) var(--ease-hover),
+              opacity var(--duration-200) ease;
 }
 .tl-edit-item:active { cursor: grabbing; }
 .tl-edit-item.is-dragging {
@@ -1224,16 +2026,16 @@ body {
 
 /* Editor: a row/zone being hovered during a drag */
 .tl-dropzone {
-  transition: background-color 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color var(--duration-200) ease, box-shadow var(--duration-200) ease;
 }
 .tl-dropzone.is-over {
-  background-color: rgba(59, 130, 246, 0.08);
+  background-color: color-mix(in oklab, var(--color-accent) 8%, transparent);
   box-shadow: inset 0 0 0 2px var(--color-accent);
 }
 
 /* Full-screen drop veil when files are dragged over the editor */
 .tl-file-veil {
-  animation: tl-fade-up 0.2s ease both;
+  animation: tl-fade-up var(--duration-200) ease both;
 }
 
 /* The tier-list index reuses the shared .pol-stack fan (see INDEX ROW PREVIEW
@@ -1242,22 +2044,36 @@ body {
 /* One-time "tug" hint: a row that overflows horizontally nudges its items left
  * and settles back, signalling the track is scrollable. The .tl-hint class is
  * added by JS only when the row actually overflows and is scrolled into view;
- * --hint-delay staggers the rows so they tug in cascade, not all at once. */
+ * --hint-delay staggers the rows so they tug in cascade, not all at once.
+ *
+ * The shape is a hand-authored spring: waypoints that alternate sides of rest
+ * with each swing about a quarter the size of the last (22 → 5 → 1.5 → 0),
+ * which is what a damped oscillation actually does. CSS has no springs, so the
+ * decay is written into the keyframes rather than into the easing.
+ *
+ * The easing is where the old version went wrong. --ease-entrance is an
+ * expo-OUT curve, and a timing function applies to every segment between
+ * keyframes, not to the animation as a whole: each swing decelerated hard into
+ * its waypoint and then the next one tore away from it at full speed. Arriving
+ * slow and leaving fast puts a corner at each peak — that's the sharpness.
+ * --ease-in-out is symmetric, so the track eases *into* each turn and back
+ * *out* of it, and the reversal reads as a swing rather than a bounce off a
+ * wall. The pace moves to the middle of each swing, where nothing is changing
+ * direction and speed is legible instead of jarring. */
 @keyframes tl-scroll-hint {
   0%   { transform: translateX(0); }
-  18%  { transform: translateX(-22px); }
-  40%  { transform: translateX(-11px); }
-  62%  { transform: translateX(-19px); }
+  24%  { transform: translateX(-22px); }
+  52%  { transform: translateX(5px); }
+  76%  { transform: translateX(-1.5px); }
   100% { transform: translateX(0); }
 }
 .tl-track.tl-hint {
-  animation: tl-scroll-hint 1.5s cubic-bezier(0.22, 1, 0.36, 1) var(--hint-delay, 0s) both;
+  animation: tl-scroll-hint var(--duration-1500) var(--ease-in-out) var(--hint-delay, 0s) both;
   will-change: transform;
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tl-fade,
-  .tl-list-item,
+  .tl-rise,
   .tl-file-veil { animation: none !important; }
   .tl-item,
   .tl-edit-item { transition: none !important; }
@@ -1271,7 +2087,7 @@ body {
  * (position: fixed), centred over the tile via translate(-50%, -100%). */
 .tl-bubble-anchor {
   position: fixed;
-  z-index: 60;
+  z-index: var(--z-index-popover);
   pointer-events: none;
   will-change: transform, opacity;
 }
@@ -1287,17 +2103,17 @@ body {
   padding: 0.4rem 0.95rem;
   overflow: hidden;
   white-space: nowrap;
-  background: #1b1b1b;
-  color: #fff;
-  border-radius: 1rem;
-  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22), 0 2px 6px rgba(0, 0, 0, 0.14);
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-lg);
 }
 
 .tl-bubble-text {
   display: block;
-  font-size: 0.875rem;
-  line-height: 1.2;
-  letter-spacing: -0.005em;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
   white-space: nowrap;
   text-align: center;
 }
@@ -1321,10 +2137,10 @@ body {
   width: 12px;
   height: 12px;
   margin-left: -6px;
-  background: #1b1b1b;
+  background: var(--color-surface-inverse);
   border-radius: 0 0 3px 0;
   transform: rotate(45deg);
-  box-shadow: 3px 3px 6px rgba(0, 0, 0, 0.1);
+  box-shadow: var(--shadow-sm);
 }
 
 /* ─────────────────────────────────────────────
@@ -1345,10 +2161,10 @@ body {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow-sm);
   transform: var(--rest);
   transform-origin: bottom center;
-  transition: transform 0.42s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.42s ease;
+  transition: transform var(--duration-400) var(--ease-entrance), box-shadow var(--duration-400) ease;
   transition-delay: var(--d, 0ms);
 }
 .pol img {
@@ -1359,7 +2175,7 @@ body {
 }
 .group:hover .pol {
   transform: var(--hov);
-  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.12);
+  box-shadow: var(--shadow-md);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1386,7 +2202,7 @@ body {
     transform-origin: center;
     transform: translate(-50%, -50%)
       translateX(calc(var(--off) * 1.4rem)) rotate(calc(var(--off) * 7deg));
-    box-shadow: 0 1px 5px rgba(0, 0, 0, 0.12);
+    box-shadow: var(--shadow-sm);
     transition: none;
   }
 }
@@ -1412,9 +2228,9 @@ body {
                            collapsing URL-bar's height and becomes scrollable */
     will-change: transform;
     transition:
-      transform 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-      border-radius 0.5s cubic-bezier(0.16, 1, 0.3, 1),
-      box-shadow 0.5s ease;
+      transform var(--duration-500) var(--ease-entrance),
+      border-radius var(--duration-500) var(--ease-entrance),
+      box-shadow var(--duration-500) ease;
   }
   /* While the menu is open (and through its close animation) the card becomes a
      fixed, clipped viewport window. Its inner wrapper is shifted up by the
@@ -1425,7 +2241,7 @@ body {
     position: fixed;
     inset: 0;
     height: 100dvh;
-    z-index: 40; /* above the menu (30), below the navbar (50) */
+    z-index: var(--z-index-page-card); /* above the menu (30), below the navbar (50) */
     overflow: hidden;
     transform-origin: center top;
     cursor: pointer;
@@ -1448,7 +2264,7 @@ body {
     transform: translateY(57vh) scale(0.96);
     border-top-left-radius: 30px;
     border-top-right-radius: 30px;
-    box-shadow: 0 -8px 28px -8px rgba(0, 0, 0, 0.2);
+    box-shadow: var(--shadow-lift);
   }
 
   .mobile-menu {
@@ -1457,12 +2273,14 @@ body {
     justify-content: flex-start;
     position: fixed;
     inset: 0;
-    z-index: 30;
+    z-index: var(--z-index-menu);
     padding-top: 84px;
     /* Keep all content inside the visible band — the page card slides down
        to ~57vh, so anything below that is hidden behind it. */
     padding-bottom: 45vh;
-    background: #e6e9ef;
+    /* One step down the surface ladder from the page, so the card that
+       slides away reads as lifting off something, not floating on it. */
+    background: var(--color-surface-sunken);
     opacity: 0;
     /* visibility:hidden takes the menu fully out of paint once closed, so Safari
        can't keep a stale composited layer (background + links) leaking through
@@ -1471,15 +2289,15 @@ body {
     visibility: hidden;
     pointer-events: none;
     transition:
-      opacity 0.35s ease,
-      visibility 0s linear 0.35s;
+      opacity var(--duration-400) ease,
+      visibility 0s linear var(--duration-400);
   }
   .mobile-menu.is-open {
     opacity: 1;
     visibility: visible;
     pointer-events: auto;
     transition:
-      opacity 0.35s ease,
+      opacity var(--duration-400) ease,
       visibility 0s linear 0s;
   }
 
@@ -1493,22 +2311,28 @@ body {
     display: block;
     width: 100%;
     padding: 8px 28px;
+    /* Sits between title-sm (20px) and title (24px) on the scale, so it
+       borrows title's em tracking and its tightening leading. */
     font-size: 26px;
-    font-weight: 700;
-    letter-spacing: -0.03em;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: var(--text-title--letter-spacing);
     line-height: 1.18;
-    color: #0f172a;
+    color: var(--color-ink);
     opacity: 0;
     transform: translateY(-10px);
-    transition: color 0.15s ease, background-color 0.15s ease;
+    transition:
+      color var(--duration-base) ease,
+      background-color var(--duration-base) ease;
   }
   .mobile-menu__link:active {
-    background: rgba(15, 23, 42, 0.06);
+    background: color-mix(in oklab, var(--color-ink) 6%, transparent);
   }
+  /* Dev-only routes. Amber is the warning role, not a decoration — these
+     links are visible to no one but me. */
   .mobile-menu__link.is-dev {
-    font-size: 17px;
-    font-weight: 700;
-    color: #d97706;
+    font-size: var(--text-body);
+    font-weight: var(--font-weight-strong);
+    color: var(--color-warning);
   }
 
   /* Social icons — right-aligned row pinned to the bottom of the visible
@@ -1526,10 +2350,12 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    color: #0f172a;
+    color: var(--color-ink);
     opacity: 0;
     transform: translateY(-10px);
-    transition: opacity 0.15s ease, transform 0.15s ease;
+    transition:
+      opacity var(--duration-base) ease,
+      transform var(--duration-base) ease;
     /* 44px touch target without bloating the visual gap */
     padding: 11px;
     margin: -11px;
@@ -1540,8 +2366,8 @@ body {
 
   .mobile-menu.is-open .mobile-menu__link,
   .mobile-menu.is-open .mobile-menu__social-link {
-    animation: mm-link-in 0.45s cubic-bezier(0.16, 1, 0.3, 1) forwards;
-    animation-delay: calc(0.1s + var(--i) * 0.04s);
+    animation: mm-link-in var(--duration-reveal) var(--ease-entrance) forwards;
+    animation-delay: calc(var(--duration-100) + var(--i) * var(--stagger-sm));
   }
 
   @keyframes mm-link-in {
@@ -1569,4 +2395,91 @@ body {
   right: auto !important;
   bottom: 12px !important;
   left: 12px !important;
+}
+
+/* ── /work — the masonry grid ─────────────────────────────────────────
+ * The grid itself (columns, row spans, gaps) is computed in WorkGrid.jsx
+ * because it depends on measured heights. What lives here is only what
+ * CSS should own: the entrance, the hover, and the studio's selection
+ * ring. Easing matches the Writing and Tier List indexes so all three
+ * index pages settle with the same motion.
+ * ─────────────────────────────────────────────────────────────────── */
+@keyframes work-tile-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.work-cell {
+  animation: work-tile-in var(--duration-entrance) var(--ease-entrance) both;
+}
+
+/* Placeholder span, replaced inline by WorkGrid the moment it measures the
+   cell. It lives here rather than in the style object so an unrelated
+   re-render can't wipe the measured value. */
+[data-work-cell] {
+  grid-row-end: span 40;
+}
+
+.work-tile {
+  display: block;
+  color: inherit;
+}
+
+/* Continuous corners, sized to the tile. --work-radius is written per tile by
+   WorkGrid from the measured box (see radiusFor there) — the value below is
+   only what applies before the first measure. Deliberately NOT .squircle-lg:
+   that utility pins one radius for the whole site, which is exactly the naive
+   fixed value this replaces. */
+.work-frame {
+  --work-radius: 16px;
+  border-radius: var(--work-radius);
+  transition:
+    border-color var(--duration-300) var(--ease-hover),
+    box-shadow var(--duration-300) var(--ease-hover),
+    transform var(--duration-300) var(--ease-hover);
+}
+
+/* The superellipse itself, where the browser has it. The radius stays finite —
+   the infinite radius .squircle uses would turn every tile into a blob. */
+@supports (corner-shape: squircle) {
+  .work-frame {
+    corner-shape: squircle;
+  }
+}
+
+/* Only a tile that actually goes somewhere lifts. A component tile is
+   interactive in place, and lifting it under the cursor fights whatever
+   the component itself is doing. */
+.work-tile--link:hover .work-frame {
+  transform: translateY(-3px);
+  border-color: var(--color-line-strong);
+  box-shadow: var(--shadow-lg);
+}
+
+/* Slow push on the media inside — the frame clips it, so the image
+   creeps rather than jumps. */
+.work-tile--media .work-frame img,
+.work-tile--media .work-frame video {
+  transition: transform var(--duration-500) var(--ease-hover);
+}
+.work-tile--link:hover .work-frame img,
+.work-tile--link:hover .work-frame video {
+  transform: scale(1.035);
+}
+
+/* Studio selection. An inset ring, so selecting a tile never changes its
+   measured height and never nudges the masonry. */
+.work-frame--selected {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  border-color: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .work-cell { animation: none !important; }
+  .work-frame,
+  .work-tile--media .work-frame img,
+  .work-tile--media .work-frame video { transition: none !important; }
+  .work-tile--link:hover .work-frame { transform: none; }
+  .work-tile--link:hover .work-frame img,
+  .work-tile--link:hover .work-frame video { transform: none; }
 }

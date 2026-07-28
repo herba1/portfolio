@@ -2,10 +2,12 @@
 
 import { Component, useEffect, useRef, useState, useCallback } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { EASE_ENTRANCE, DURATION } from '@/lib/motion'
 import useMeasure from "react-use-measure";
 import { MessageCircle, Send, X } from "lucide-react";
 import { geist } from "@/app/fonts";
 import { useLenis } from "@/context/LenisContext";
+import { registerEyes, eyeTrackingSupported, watchEyeTracking, pointerIsLive } from "./eyeTracker";
 
 /* ─────────────────────────────────────────────────────────
  * HERO EYES — Live visitor presence on the hero
@@ -21,6 +23,11 @@ const STIMS = [
   "blink", "wink-left", "wink-right", "nose-look",
   "angry", "look-up", "look-right", "double-blink", "wide-eye",
 ];
+
+/* While the eyes are tracking a cursor they shouldn't also decide to
+ * glance at the ceiling — the two translations stack and the pupil
+ * leaves the socket. Lid and brow stims compose fine, so those stay. */
+const LID_STIMS = ["blink", "wink-left", "wink-right", "angry", "double-blink", "wide-eye"];
 
 // ── Typing Indicator (bouncing dots) ───────────────────
 
@@ -192,11 +199,44 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
   const [stimKey, setStimKey] = useState(0);
   const timeoutRef = useRef(null);
 
+  // Cursor tracking. A shared loop writes these nodes' transforms
+  // directly — no state, so no re-render per frame. The arrays are
+  // stable and filled by callback refs, because a stim remounts the
+  // group the pupils live in and the loop must survive that.
+  const svgRef = useRef(null);
+  const socketNodes = useRef([null, null]).current;
+  const pupilNodes = useRef([null, null]).current;
+
+  // Only subscribe where there is a cursor to follow. On touch this
+  // never runs, no listener is attached, and the eyes keep the CSS-only
+  // idle behaviour they had before tracking existed. Re-checked on
+  // media-query changes rather than once, so toggling reduced motion or
+  // attaching a mouse takes effect without a reload.
+  useEffect(() => {
+    let unsubscribe = null;
+    const sync = () => {
+      const wanted = eyeTrackingSupported();
+      if (wanted && !unsubscribe) {
+        unsubscribe = registerEyes(svgRef.current, socketNodes, pupilNodes);
+      } else if (!wanted && unsubscribe) {
+        unsubscribe();
+        unsubscribe = null;
+      }
+    };
+    sync();
+    const stopWatching = watchEyeTracking(sync);
+    return () => {
+      stopWatching();
+      unsubscribe?.();
+    };
+  }, [socketNodes, pupilNodes]);
+
   useEffect(() => {
     const scheduleNext = () => {
       const delay = 1500 + Math.random() * 3000;
       timeoutRef.current = setTimeout(() => {
-        const pick = STIMS[Math.floor(Math.random() * STIMS.length)];
+        const pool = pointerIsLive() ? LID_STIMS : STIMS;
+        const pick = pool[Math.floor(Math.random() * pool.length)];
         setStim(pick);
         setStimKey((k) => k + 1);
         setTimeout(() => setStim(null), 900);
@@ -233,6 +273,7 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
         </div>
       )}
       <svg
+        ref={svgRef}
         width="52"
         height="26"
         viewBox="0 0 39 19"
@@ -248,16 +289,16 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
             transform-box: fill-box;
             transform-origin: center;
             animation:
-              eyeEnter${id} 0.5s cubic-bezier(0.16, 1, 0.3, 1) var(--entry-delay, 0.6s) forwards,
-              eyeDriftL${id} var(--drift-dur, 8s) ease-in-out var(--drift-delay, 1.2s) infinite;
+              eyeEnter${id} var(--duration-500) var(--ease-entrance) var(--entry-delay, var(--duration-600)) forwards,
+              eyeDriftL${id} var(--drift-dur, 8s) ease-in-out var(--drift-delay, var(--duration-1200)) infinite;
           }
           .hero-eyes--${id} .eye-right {
             opacity: 0;
             transform-box: fill-box;
             transform-origin: center;
             animation:
-              eyeEnter${id} 0.5s cubic-bezier(0.16, 1, 0.3, 1) calc(var(--entry-delay, 0.6s) + 0.1s) forwards,
-              eyeDriftR${id} var(--drift-dur, 8s) ease-in-out var(--drift-delay, 1.2s) infinite;
+              eyeEnter${id} var(--duration-500) var(--ease-entrance) calc(var(--entry-delay, var(--duration-600)) + var(--duration-100)) forwards,
+              eyeDriftR${id} var(--drift-dur, 8s) ease-in-out var(--drift-delay, var(--duration-1200)) infinite;
           }
 
           @keyframes eyeEnter${id} {
@@ -311,43 +352,43 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
 
           .hero-eyes--${id}[data-stim="blink"] .stim-left,
           .hero-eyes--${id}[data-stim="blink"] .stim-right {
-            animation: stimBlink 0.25s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: stimBlink var(--duration-250) var(--ease-entrance);
           }
           .hero-eyes--${id}[data-stim="double-blink"] .stim-left,
           .hero-eyes--${id}[data-stim="double-blink"] .stim-right {
-            animation: stimDoubleBlink 0.5s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: stimDoubleBlink var(--duration-500) var(--ease-entrance);
           }
           .hero-eyes--${id}[data-stim="wink-left"] .stim-left {
-            animation: stimBlink 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation: stimBlink var(--duration-400) var(--ease-overshoot);
           }
           .hero-eyes--${id}[data-stim="wink-right"] .stim-right {
-            animation: stimBlink 0.35s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation: stimBlink var(--duration-400) var(--ease-overshoot);
           }
           .hero-eyes--${id}[data-stim="nose-look"] .pupil-left {
-            animation: stimNoseL 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimNoseL var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="nose-look"] .pupil-right {
-            animation: stimNoseR 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimNoseR var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="angry"] .stim-left,
           .hero-eyes--${id}[data-stim="angry"] .stim-right {
-            animation: stimAngryLid 0.8s cubic-bezier(0.22, 1, 0.36, 1);
+            animation: stimAngryLid var(--duration-800) var(--ease-entrance);
           }
           .hero-eyes--${id}[data-stim="look-up"] .pupil-left {
-            animation: stimLookUpL 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimLookUpL var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="look-up"] .pupil-right {
-            animation: stimLookUpR 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimLookUpR var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="look-right"] .pupil-left {
-            animation: stimLookRightL 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimLookRightL var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="look-right"] .pupil-right {
-            animation: stimLookRightR 0.7s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+            animation: stimLookRightR var(--duration-800) var(--ease-entrance) forwards;
           }
           .hero-eyes--${id}[data-stim="wide-eye"] .stim-left,
           .hero-eyes--${id}[data-stim="wide-eye"] .stim-right {
-            animation: stimWide 0.6s cubic-bezier(0.34, 1.56, 0.64, 1);
+            animation: stimWide var(--duration-600) var(--ease-overshoot);
           }
 
           @keyframes stimBlink {
@@ -413,18 +454,35 @@ function EyePair({ style, id = "eyes", index = 0, message = null, typing = false
           }
         `}</style>
 
+        {/* Four nested groups, each owned by exactly one animator, so
+            nothing has to share a transform property:
+              .eye-*     CSS — entrance + idle drift
+              .socket-*  JS  — cursor lean
+              .stim-*    CSS — blinks, winks, brow stims
+              .track-*   JS  — cursor gaze
+              .pupil-*   CSS — idle micro-wander
+            A CSS animation always beats an inline style, so the two JS
+            layers must sit on elements CSS never animates. */}
         <g className="eye-left">
-          <g className="stim-left" key={`stL-${stimKey}`}>
-            <path className="brow-left" d="M2 7C6.51269 5.69715 9.12068 5.63653 14 7" stroke="black" strokeWidth="1.5" strokeLinecap="round" />
-            <path d="M8 1C11.7118 1 15 4.63766 15 9.5C15 14.3623 11.7118 18 8 18C4.28815 18 1 14.3623 1 9.5C1 4.63766 4.28815 1 8 1Z" stroke="black" strokeWidth="2" />
-            <circle className="pupil-left" cx="8.5" cy="10.5" r="2.5" fill="black" />
+          <g className="socket-left" ref={(n) => { socketNodes[0] = n; }}>
+            <g className="stim-left" key={`stL-${stimKey}`}>
+              <path className="brow-left" d="M2 7C6.51269 5.69715 9.12068 5.63653 14 7" stroke="black" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M8 1C11.7118 1 15 4.63766 15 9.5C15 14.3623 11.7118 18 8 18C4.28815 18 1 14.3623 1 9.5C1 4.63766 4.28815 1 8 1Z" stroke="black" strokeWidth="2" />
+              <g className="track-left" ref={(n) => { pupilNodes[0] = n; }}>
+                <circle className="pupil-left" cx="8.5" cy="10.5" r="2.5" fill="black" />
+              </g>
+            </g>
           </g>
         </g>
         <g className="eye-right">
-          <g className="stim-right" key={`stR-${stimKey}`}>
-            <path className="brow-right" d="M25 7C29.5127 5.69715 32.1207 5.63653 37 7" stroke="black" strokeWidth="1.5" strokeLinecap="round" />
-            <path d="M31 1C34.7118 1 38 4.63766 38 9.5C38 14.3623 34.7118 18 31 18C27.2882 18 24 14.3623 24 9.5C24 4.63766 27.2882 1 31 1Z" stroke="black" strokeWidth="2" />
-            <circle className="pupil-right" cx="31.5" cy="10.5" r="2.5" fill="black" />
+          <g className="socket-right" ref={(n) => { socketNodes[1] = n; }}>
+            <g className="stim-right" key={`stR-${stimKey}`}>
+              <path className="brow-right" d="M25 7C29.5127 5.69715 32.1207 5.63653 37 7" stroke="black" strokeWidth="1.5" strokeLinecap="round" />
+              <path d="M31 1C34.7118 1 38 4.63766 38 9.5C38 14.3623 34.7118 18 31 18C27.2882 18 24 14.3623 24 9.5C24 4.63766 27.2882 1 31 1Z" stroke="black" strokeWidth="2" />
+              <g className="track-right" ref={(n) => { pupilNodes[1] = n; }}>
+                <circle className="pupil-right" cx="31.5" cy="10.5" r="2.5" fill="black" />
+              </g>
+            </g>
           </g>
         </g>
       </svg>
@@ -527,7 +585,7 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
         display: "flex",
         justifyContent: "flex-end",
         pointerEvents: "none",
-        transition: "bottom 0.25s cubic-bezier(0.16, 1, 0.3, 1)",
+        transition: "bottom var(--duration-250) var(--ease-entrance)",
       }}
     >
       <AnimatePresence mode="wait" initial={false}>
@@ -549,8 +607,8 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
               borderRadius: "50%",
               border: "1px solid rgba(0,0,0,0.08)",
               background: "rgba(241,245,249,0.85)",
-              backdropFilter: "blur(8px)",
-              WebkitBackdropFilter: "blur(8px)",
+              backdropFilter: "blur(var(--blur-sm))",
+              WebkitBackdropFilter: "blur(var(--blur-sm))",
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -598,8 +656,8 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
               gap: "6px",
               width: "100%",
               background: "rgba(241,245,249,0.92)",
-              backdropFilter: "blur(10px)",
-              WebkitBackdropFilter: "blur(10px)",
+              backdropFilter: "blur(var(--blur-md))",
+              WebkitBackdropFilter: "blur(var(--blur-md))",
               border: "1px solid rgba(0,0,0,0.08)",
               borderRadius: "14px",
               padding: "6px 6px 6px 14px",
@@ -664,7 +722,7 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
                 background: hasText ? "rgba(0,0,0,0.08)" : "rgba(0,0,0,0.03)",
                 color: hasText ? "rgba(0,0,0,0.6)" : "rgba(0,0,0,0.2)",
                 cursor: hasText ? "pointer" : "default",
-                transition: "background 0.15s ease, color 0.15s ease",
+                transition: "background var(--duration-150) ease, color var(--duration-150) ease",
               }}
             >
               <Send size={15} strokeWidth={2} />
@@ -742,7 +800,7 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
         right: "0",
         zIndex: 50,
         pointerEvents: "none",
-        transition: "opacity 0.4s ease, transform 0.5s cubic-bezier(0.16, 1, 0.3, 1)",
+        transition: "opacity var(--duration-400) ease, transform var(--duration-500) var(--ease-entrance)",
         padding: "2rem 1.5rem 1.25rem",
         display: "flex",
         justifyContent: "center",
@@ -766,7 +824,7 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 4 }}
-            transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+            transition={{ duration: DURATION.overlay, ease: EASE_ENTRANCE }}
             style={{
               background: "none",
               border: "none",
@@ -775,7 +833,7 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
               color: "rgba(0,0,0,0.35)",
               cursor: "pointer",
               fontFamily: "inherit",
-              transition: "color 0.15s ease",
+              transition: "color var(--duration-150) ease",
               display: "flex",
               alignItems: "center",
               gap: "6px",
@@ -829,7 +887,7 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
                 color: text.trim() ? "rgba(0,0,0,0.5)" : "rgba(0,0,0,0.2)",
                 cursor: text.trim() ? "pointer" : "default",
                 fontFamily: "inherit",
-                transition: "background 0.15s ease, color 0.15s ease",
+                transition: "background var(--duration-150) ease, color var(--duration-150) ease",
                 pointerEvents: "auto",
                 whiteSpace: "nowrap",
               }}
@@ -865,7 +923,7 @@ function LiveEyesInner({ usePresence }) {
               initial={{ opacity: 0, scale: 0.85 }}
               animate={{ opacity: isSelf ? 0.4 : 0.3, scale: 1 }}
               exit={{ opacity: 0, scale: 0.85 }}
-              transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+              transition={{ duration: DURATION.reveal, ease: EASE_ENTRANCE }}
               style={{
                 position: "absolute",
                 top: `${v.y * 100}%`,

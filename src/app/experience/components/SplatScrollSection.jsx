@@ -54,10 +54,12 @@ export default function SplatScrollSection() {
 
     const isMobile = window.innerWidth <= 768;
 
-    // Parallax: starts higher, settles down
+    // Parallax: starts higher, settles down.
+    // Mobile uses a shallower offset — the wrap is shorter and sits higher,
+    // so a big offset would drag the scene back under the fold.
     const tween = gsap.fromTo(
       canvasWrapRef.current,
-      { yPercent: isMobile ? -45 : -50 },
+      { yPercent: isMobile ? -20 : -50 },
       {
         yPercent: 0,
         ease: "none",
@@ -278,10 +280,36 @@ export default function SplatScrollSection() {
         >
           {/* Outer: handles fade in + fade out */}
           <div className="splat-tap-wrap" aria-hidden="true">
-            {/* Inner: ambient pulse loop */}
-            <svg viewBox="0 0 40 40" fill="none" className="splat-tap-anim">
-              <circle cx="20" cy="20" r="16" stroke="currentColor" strokeWidth="1.5" strokeOpacity="0.5" />
-              <circle cx="20" cy="20" r="6" fill="currentColor" fillOpacity="0.25" />
+            {/* Inner: looping tap-gesture showcase.
+                110-unit viewBox leaves margin on every side so the hand never clips
+                at the far end of its rest offset. Tap point is (46, 32). */}
+            <svg viewBox="0 0 110 110" fill="none" className="splat-tap-anim">
+              <circle className="splat-ripple" cx="46" cy="32" r="13" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+              <circle className="splat-ripple" style={{ "--ripple-d": "0.11s" }} cx="46" cy="32" r="13" stroke="currentColor" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+              <circle className="splat-tap-dot" cx="46" cy="32" r="4.5" fill="currentColor" />
+              {/* Split-transform: translate, rotate and press-scale each run on
+                  their own track with different timing — that offset is what
+                  reads as organic. The press group scales from the FINGERTIP,
+                  not the bounding-box centre, so the hand pushes into the dot. */}
+              <g className="splat-hand-move">
+                <g className="splat-hand-tilt">
+                  <g className="splat-hand-press">
+                    <g
+                      transform="translate(27.6 27.4) scale(2.3)"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M22 14a8 8 0 0 1-8 8" />
+                      <path d="M18 11v-1a2 2 0 0 0-2-2a2 2 0 0 0-2 2" />
+                      <path d="M14 10V9a2 2 0 0 0-2-2a2 2 0 0 0-2 2v1" />
+                      <path d="M10 9.5V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v10" />
+                      <path d="M18 11a2 2 0 1 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15" />
+                    </g>
+                  </g>
+                </g>
+              </g>
             </svg>
           </div>
         </div>
@@ -291,7 +319,7 @@ export default function SplatScrollSection() {
         .splat-section {
           --mask-collapsed: 55vmin;
           position: relative;
-          z-index: 1;
+          z-index: var(--z-index-raised);
           margin-top: -10vh;
           contain: layout style;
           pointer-events: none;
@@ -299,10 +327,13 @@ export default function SplatScrollSection() {
         @media (max-width: 768px) {
           .splat-section {
             --mask-collapsed: calc(100vw - 32px);
+            /* Pull the scene up so it peeks above the fold on load and centres
+               after ~35vh of scroll, instead of only at the page bottom. */
+            margin-top: -50vh;
           }
         }
         .splat-section[data-expanded] {
-          z-index: 9999;
+          z-index: var(--z-index-max);
         }
         .splat-canvas-wrap {
           width: 100%;
@@ -310,7 +341,7 @@ export default function SplatScrollSection() {
           min-height: 500px;
           position: relative;
           opacity: 0;
-          transition: opacity 1.2s cubic-bezier(0.16, 1, 0.3, 1);
+          transition: opacity var(--duration-1200) var(--ease-entrance);
           will-change: transform;
           /* CSS mask: two intersecting eased gradients form a soft-edged square */
           /* Organic ease-in-out fade — denser stops near edges for natural falloff */
@@ -364,6 +395,13 @@ export default function SplatScrollSection() {
         .splat-canvas-wrap[data-loaded] {
           opacity: 1;
         }
+        @media (max-width: 768px) {
+          .splat-canvas-wrap {
+            /* Shorter wrap = less scroll between hero and scene */
+            height: 85svh;
+            min-height: 420px;
+          }
+        }
         .splat-click-target {
           position: absolute;
           top: 50%;
@@ -373,7 +411,7 @@ export default function SplatScrollSection() {
           height: var(--mask-collapsed);
           cursor: pointer;
           pointer-events: auto;
-          z-index: 2;
+          z-index: var(--z-index-raised);
         }
 
         /* Outer wrapper: positioned center, handles opacity for entry + exit */
@@ -381,24 +419,72 @@ export default function SplatScrollSection() {
           position: absolute;
           top: 50%;
           left: 50%;
-          width: 40px;
-          height: 40px;
-          color: rgba(255,255,255,0.7);
+          width: 92px;
+          height: 92px;
+          color: #fff;
           transform-origin: center;
           /* Entry: fade + scale in */
           opacity: 0;
-          animation: splatWrapEnter 0.25s cubic-bezier(0.22, 1, 0.36, 1) 0.8s forwards;
+          animation: splatWrapEnter var(--duration-250) var(--ease-entrance) var(--duration-800) forwards;
+        }
+        @media (max-width: 768px) {
+          .splat-tap-wrap {
+            width: 116px;
+            height: 116px;
+          }
         }
 
-        /* Inner SVG: ambient pulse loop, independent of wrapper */
+        /* Inner SVG: holds the looping tap showcase */
         .splat-tap-anim {
           width: 100%;
           height: 100%;
-          animation: splatPulse 1.4s ease-in-out 1.05s infinite;
+          /* Legibility over whatever the scene renders behind it */
+          filter: drop-shadow(0 2px 7px rgba(0,0,0,0.4));
         }
 
-        /* Hover: pause the pulse */
-        .splat-click-target:hover .splat-tap-anim {
+        .splat-ripple,
+        .splat-tap-dot,
+        .splat-hand-move,
+        .splat-hand-tilt,
+        .splat-hand-press {
+          transform-box: fill-box;
+          transform-origin: center;
+        }
+
+        /* fill-box excludes stroke, so the hand's box is x 31.81–78.2,
+           y 32.0–78.0 and the fingertip (46, 32) sits at its top edge:
+           30.6% across, 0% down. Scaling from there pushes the finger into
+           the dot instead of shrinking the whole hand toward its middle. */
+        .splat-hand-press {
+          transform-origin: 30.6% 0%;
+        }
+
+        /* One rule, two rings, staggered by --ripple-d */
+        .splat-ripple {
+          opacity: 0;
+          animation: splatRipple 3.2s var(--ease-out-quart)
+            calc(1.05s + var(--ripple-d, 0s)) infinite;
+        }
+        .splat-tap-dot {
+          fill-opacity: 0.72;
+          animation: splatDotPress 3.2s cubic-bezier(0, 0.56, 0.15, 1.01) 1.05s infinite;
+        }
+        .splat-hand-move {
+          animation: splatHandMove 3.2s ease-in-out 1.05s infinite;
+        }
+        .splat-hand-tilt {
+          animation: splatHandTilt 3.2s ease-in-out 1.05s infinite;
+        }
+        .splat-hand-press {
+          animation: splatHandPress 3.2s ease-in-out 1.05s infinite;
+        }
+
+        /* Hover: hold the gesture still */
+        .splat-click-target:hover .splat-ripple,
+        .splat-click-target:hover .splat-tap-dot,
+        .splat-click-target:hover .splat-hand-move,
+        .splat-click-target:hover .splat-hand-tilt,
+        .splat-click-target:hover .splat-hand-press {
           animation-play-state: paused;
         }
 
@@ -407,39 +493,110 @@ export default function SplatScrollSection() {
           pointer-events: none;
         }
         .splat-click-target[data-hiding] .splat-tap-wrap {
-          animation: splatWrapExit 0.2s ease-out forwards;
+          animation: splatWrapExit var(--duration-200) ease-out forwards;
         }
-        .splat-click-target[data-hiding] .splat-tap-anim {
+        .splat-click-target[data-hiding] .splat-ripple,
+        .splat-click-target[data-hiding] .splat-tap-dot,
+        .splat-click-target[data-hiding] .splat-hand-move,
+        .splat-click-target[data-hiding] .splat-hand-tilt,
+        .splat-click-target[data-hiding] .splat-hand-press {
           animation-play-state: paused;
         }
 
-        /* Wrapper entry */
+        /* Wrapper entry. The nudge lands the SVG's tap point (46,32 of 110)
+           on the square's true centre, not the wrap's bounding box centre. */
         @keyframes splatWrapEnter {
-          0%   { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
-          100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+          0%   { opacity: 0; transform: translate(-41.8%, -29.1%) scale(0.3); }
+          60%  { opacity: 1; transform: translate(-41.8%, -29.1%) scale(1.06); }
+          100% { opacity: 1; transform: translate(-41.8%, -29.1%) scale(1); }
         }
 
         /* Wrapper exit */
         @keyframes splatWrapExit {
-          0%   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
-          100% { opacity: 0; transform: translate(-50%, -50%) scale(0.3); }
+          0%   { opacity: 1; transform: translate(-41.8%, -29.1%) scale(1); }
+          100% { opacity: 0; transform: translate(-41.8%, -29.1%) scale(0.3); }
         }
 
-        /* Ambient press-release pulse */
-        @keyframes splatPulse {
-          0%   { transform: scale(1); opacity: 1; }
-          12%  { transform: scale(0.8); opacity: 0.85; }
-          24%  { transform: scale(1.08); opacity: 1; }
-          40%  { transform: scale(1); opacity: 0.65; }
-          100% { transform: scale(1); opacity: 1; }
+        /* Hand: rest → travel most of the way in → small wind-back
+           (the anticipation lands mid-move, not from a dead stop) →
+           strike → drift out and settle. */
+        @keyframes splatHandMove {
+          0%, 10%   { transform: translate(11px, 13px); }
+          22%       { transform: translate(3.5px, 4.2px); }   /* approach */
+          29%       { transform: translate(6.5px, 7.8px); }   /* wind back */
+          36%       { transform: translate(0, 0); }           /* strike */
+          44%       { transform: translate(2px, 2.4px); }
+          54%       { transform: translate(12.5px, 14.8px); }
+          62%       { transform: translate(10.4px, 12.3px); }
+          70%, 100% { transform: translate(11px, 13px); }
+        }
+
+        /* Tilt runs on its own clock — straightens on the approach, cocks
+           back with the anticipation, settles late so the tracks never land
+           on the same frame. */
+        @keyframes splatHandTilt {
+          0%, 10%   { transform: rotate(5deg); }
+          22%       { transform: rotate(2deg); }
+          29%       { transform: rotate(7.5deg); }
+          36%       { transform: rotate(-2deg); }
+          46%       { transform: rotate(0.5deg); }
+          56%       { transform: rotate(6.5deg); }
+          66%       { transform: rotate(4.3deg); }
+          74%, 100% { transform: rotate(5deg); }
+        }
+
+        /* Press: scales from the fingertip. Lifts a touch on the wind-back,
+           then pushes down into the dot on contact. */
+        @keyframes splatHandPress {
+          0%, 20%   { transform: scale(1); }
+          29%       { transform: scale(1.04); }
+          36%       { transform: scale(0.9); }
+          45%       { transform: scale(1.02); }
+          53%       { transform: scale(0.99); }
+          61%, 100% { transform: scale(1); }
+        }
+
+        /* Dot swells slightly as the finger comes in, compresses on contact,
+           then rings down: 1.06 → 0.62 → 1.12 → 0.96 → 1.02 → 1 */
+        @keyframes splatDotPress {
+          0%, 26%   { transform: scale(1); }
+          32%       { transform: scale(1.06); }
+          36%       { transform: scale(0.62); }
+          43%       { transform: scale(1.12); }
+          50%       { transform: scale(0.96); }
+          57%       { transform: scale(1.02); }
+          64%, 100% { transform: scale(1); }
+        }
+
+        /* Ripples fire on contact and stay tight around the dot — a faint
+           halo, not a broadcast. Opacity and transform run as two tracks. */
+        @keyframes splatRipple {
+          0%, 34%   { transform: scale(0.66); opacity: 0; }
+          39%       { transform: scale(0.82); opacity: 0.34; }
+          58%       {                          opacity: 0.16; }
+          76%       { transform: scale(1.38); opacity: 0; }
+          100%      { transform: scale(1.38); opacity: 0; }
         }
 
         @media (prefers-reduced-motion: reduce) {
           .splat-tap-wrap {
-            animation: splatWrapEnter 0.25s ease 0.5s forwards;
+            animation: splatWrapEnter var(--duration-250) ease var(--duration-500) forwards;
           }
-          .splat-tap-anim {
+          .splat-ripple,
+          .splat-tap-dot,
+          .splat-hand-move,
+          .splat-hand-tilt,
+          .splat-hand-press {
             animation: none;
+          }
+          .splat-ripple {
+            opacity: 0.3;
+          }
+          .splat-hand-move {
+            transform: translate(11px, 13px);
+          }
+          .splat-hand-tilt {
+            transform: rotate(5deg);
           }
         }
       `}</style>

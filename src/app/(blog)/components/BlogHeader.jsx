@@ -51,21 +51,21 @@ export default function BlogHeader({ title, date, tags, description }) {
       />
       <TransitionLink
         href="/blog"
-        className="blog-header-back text-ink-secondary hover:text-ink mb-6 inline-flex items-center gap-1 text-sm transition-colors"
+        className="blog-header-back text-ink-secondary hover:text-ink text-ui-lg mb-6 inline-flex items-center gap-1.5 transition-colors"
       >
         <ArrowLeft size={14} />
         Back to writing
       </TransitionLink>
-      <time className="blog-header-date text-ink-secondary block text-sm">
+      <time className="blog-header-date text-ink-secondary text-ui-lg block">
         {new Date(date).toLocaleDateString('en-US', {
           year: 'numeric',
           month: 'long',
           day: 'numeric',
         })}
       </time>
-      <h1
-        className={`text-ink mt-2 text-4xl font-bold tracking-tighter md:text-5xl`}
-      >
+      {/* One step below the index title (which is title-xl → display), so a
+          post reads as sitting inside the section rather than beside it. */}
+      <h1 className="text-ink text-title-lg md:text-title-xl mt-2">
         {chars.map((ch, i) => {
           if (ch === ' ') {
             return <span key={i} className="blog-ch-space" />
@@ -94,10 +94,7 @@ export default function BlogHeader({ title, date, tags, description }) {
       {tags && (
         <div className="blog-header-tags mt-4 flex gap-2">
           {tags.map((tag) => (
-            <span
-              key={tag}
-              className="text-ink-secondary bg-dark/5 rounded px-2 py-0.5 text-xs"
-            >
+            <span key={tag} className="badge">
               {tag}
             </span>
           ))}

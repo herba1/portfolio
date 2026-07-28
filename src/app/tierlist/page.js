@@ -29,10 +29,10 @@ export default async function TierListIndex() {
   const isDev = isDevView()
 
   return (
-    <div className="bg-slate-100 min-h-dvh">
+    <div className="bg-surface min-h-dvh">
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <header className="mb-8 flex items-end justify-between gap-4">
-          <h1 className="text-ink text-4xl font-bold tracking-tighter md:text-6xl">
+          <h1 className="text-ink text-title-xl md:text-display">
             <GlitchText text="Tier Lists" />
           </h1>
           {isDev ? <NewListButton /> : null}
@@ -45,25 +45,34 @@ export default async function TierListIndex() {
         ) : (
           <ul className="flex flex-col gap-6">
             {lists.map((list, i) => (
-              <li
-                key={list.slug}
-                className="tl-list-item"
-                style={{ animationDelay: `${0.2 + i * 0.08}s` }}
-              >
+              // No entrance on the <li>: it wraps the fan, whose thumbs morph
+              // across the navigation, and a container that is still fading
+              // when the morph lands would fade the thumb up with it. The
+              // row's arrival is carried by the text column below.
+              <li key={list.slug}>
                 <TransitionLink
                   href={`/tierlist/${list.slug}`}
                   className="group block"
                 >
-                  <article className="border-dark/10 ease-out-quart flex items-center justify-between gap-6 border-b pb-6 transition-transform duration-300 group-hover:translate-x-1">
-                    <div className="min-w-0 flex-1">
-                      <span className="text-ink-secondary text-sm tabular-nums">
+                  <article className="border-line ease-out-quart flex items-center justify-between gap-6 border-b pb-6 transition-transform duration-300 group-hover:translate-x-1">
+                    {/* The rise lives here rather than on the <li>: the fan
+                        beside this column holds the shared-element morph
+                        targets, and a transform on their ancestor would offset
+                        the geometry the browser measures them against. */}
+                    <div
+                      className="tl-rise min-w-0 flex-1"
+                      style={{ '--tl-delay': `${0.2 + i * 0.08}s` }}
+                    >
+                      {/* tabular-nums so the count doesn't reflow the label
+                          beside it as it changes. */}
+                      <span className="text-ink-secondary text-ui-lg tabular-nums">
                         {list.rankedCount} of {list.count} ranked
                       </span>
-                      <h2 className="text-ink mt-1 text-xl font-semibold transition-colors group-hover:text-blue-500 md:text-2xl">
+                      <h2 className="text-ink text-title-sm md:text-title mt-1 transition-colors group-hover:text-accent">
                         {list.title}
                       </h2>
                       {list.description || list.subtitle ? (
-                        <p className="text-ink-secondary mt-2">
+                        <p className="text-ink-secondary text-body mt-2">
                           {list.description || list.subtitle}
                         </p>
                       ) : null}

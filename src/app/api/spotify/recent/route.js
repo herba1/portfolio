@@ -38,6 +38,12 @@ function mapTrack(tr) {
     image: imgs[1]?.url || imgs[0]?.url || null,
     imageLarge: imgs[0]?.url || imgs[1]?.url || null,
     url: tr.external_urls?.spotify || null,
+    // The recording's identity, not just its name. Lyrics lookups match on this
+    // instead of fuzzy artist+title, which is what lets remasters and obscure
+    // pressings resolve at all — both fields ride along on the full track objects
+    // /me/top/tracks already returns, so they cost nothing to keep.
+    isrc: tr.external_ids?.isrc || null,
+    durationMs: tr.duration_ms || null,
   };
 }
 

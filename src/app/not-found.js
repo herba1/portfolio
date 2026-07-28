@@ -58,7 +58,7 @@ function GlitchText({ text, baseDelay = 0.15 }) {
 
 export default function NotFound() {
   return (
-    <div className={`flex min-h-dvh flex-col items-center justify-center bg-slate-100 px-6 ${geist.className}`}>
+    <div className={`flex min-h-dvh flex-col items-center justify-center bg-surface px-6 ${geist.className}`}>
       <div className="flex flex-col items-center gap-8 text-center">
         {/* Glitchy 404 in Spencer */}
         <h1 className={`text-ink text-[clamp(100px,25vw,200px)] leading-none ${spencer.className}`}>
@@ -67,17 +67,15 @@ export default function NotFound() {
 
         {/* Subtitle with blog fade-up entrance */}
         <p
-          className="blog-header-date text-ink-tertiary max-w-xs text-body leading-relaxed"
+          className="blog-header-date text-ink-secondary max-w-xs text-body"
         >
           This page doesn't exist, or it wandered off somewhere.
         </p>
 
-        {/* Back home — matches LinkButton outline variant */}
+        {/* Same `.btn` as everywhere else — it IS the LinkButton secondary
+            variant now, rather than a copy of it that has to be kept in sync. */}
         <div className="blog-header-tags">
-          <TransitionLink
-            href="/"
-            className="squircle inline-flex items-center gap-2 border border-dark/15 bg-linear-to-b from-white to-slate-50 px-6 py-2.5 text-sm font-medium text-ink-secondary shadow-sm inset-shadow-sm inset-shadow-white/80 transition-all duration-300 ease-out-quart hover:scale-105 hover:text-ink active:scale-95"
-          >
+          <TransitionLink href="/" className="btn btn--lg btn--secondary">
             <ArrowLeft size={14} />
             Back home
           </TransitionLink>

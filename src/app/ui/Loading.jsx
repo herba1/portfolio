@@ -54,7 +54,7 @@ export default function Loading({ children }) {
 
   return (
     <div ref={container} className={`bg-light relative overflow-clip`}>
-      <div className="load bg-dark  absolute top-0 left-0 z-50 h-full w-full"></div>
+      <div className="load bg-dark  absolute top-0 left-0 z-[var(--z-index-nav)] h-full w-full"></div>
       <TimelineContext value={gsap.timeline({ paused: false})}>
         {children}
       </TimelineContext>

@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { Reorder, motion, AnimatePresence } from 'motion/react'
+import { EASE_HOVER, SPRING_SETTLE } from '@/lib/motion'
 import { GripVertical, Code, Type, Image, MessageSquareQuote, AlertTriangle, Music, Video, Youtube, Minus, Tag, ChevronDown, Trash2, Copy, ArrowUp, ArrowDown } from 'lucide-react'
 
-const spring = { type: 'spring', stiffness: 400, damping: 30, mass: 0.5 }
-const EASE_OUT_QUART = [0.165, 0.84, 0.44, 1]
 
 const IMAGE_VARIANTS = [
   { tag: 'BlogImage', label: 'Standard' },
@@ -107,8 +106,8 @@ function BlockContextMenu({ x, y, blockIndex, totalBlocks, onAction, onClose }) 
       initial={{ opacity: 0, scale: 0.95 }}
       animate={{ opacity: 1, scale: 1 }}
       exit={{ opacity: 0, scale: 0.95 }}
-      transition={{ duration: 0.15, ease: EASE_OUT_QUART }}
-      className="fixed z-[99999] min-w-[150px] rounded-xl border p-1 shadow-lg"
+      transition={{ duration: 0.15, ease: EASE_HOVER }}
+      className="fixed z-[var(--z-index-max)] min-w-[150px] rounded-xl border p-1 shadow-lg"
       style={{
         left: x,
         top: y,
@@ -125,7 +124,7 @@ function BlockContextMenu({ x, y, blockIndex, totalBlocks, onAction, onClose }) 
           <button
             key={item.action}
             onClick={() => { onAction(item.action); onClose() }}
-            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-red-500 hover:bg-red-500/10' : 'hover:bg-[var(--studio-hover)]' }`}
+            className={`flex w-full items-center gap-2 rounded-md px-2.5 py-1.5 text-ui-xs font-medium outline-none transition-colors duration-150 ${ item.danger ? 'text-negative hover:bg-negative/10' : 'hover:bg-[var(--studio-hover)]' }`}
             style={item.danger ? {} : { color: 'var(--studio-text-2)' }}
           >
             <Icon size={12} />
@@ -168,7 +167,7 @@ function ImageVariantSelect({ currentTag, onSwitch }) {
 
       {open && (
         <div
-          className="absolute top-full left-0 z-50 mt-1 min-w-[120px] rounded-lg border p-0.5 shadow-lg"
+          className="absolute top-full left-0 z-[var(--z-index-nav)] mt-1 min-w-[120px] rounded-lg border p-0.5 shadow-lg"
           style={{ background: 'var(--studio-surface)', borderColor: 'var(--studio-border)' }}
         >
           {IMAGE_VARIANTS.map((variant) => (
@@ -209,7 +208,7 @@ function BlockItem({ block, index, totalBlocks, onUpdateBlock, onBlockAction }) 
     <Reorder.Item
       value={block}
       layout
-      transition={spring}
+      transition={SPRING_SETTLE}
       onContextMenu={handleContextMenu}
       whileDrag={{
         scale: 1.02,
@@ -236,7 +235,7 @@ function BlockItem({ block, index, totalBlocks, onUpdateBlock, onBlockAction }) 
 
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <p className="text-ui-2xs font-medium tracking-widest uppercase" style={{ color: 'var(--studio-text-3)' }}>
+          <p className="text-ui-2xs font-medium" style={{ color: 'var(--studio-text-3)' }}>
             {block.label}
           </p>
           {block.imageVariant && (
