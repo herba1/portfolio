@@ -6,8 +6,8 @@ export const posts = [
     date: '2026-04-10',
     tags: ['life'],
     images: [
-      '/blog/images/image-mnuoa76w.png',
-      '/blog/images/image-mnuoaayg.png',
+      '/blog/images/image-mnuoa76w.webp',
+      '/blog/images/image-mnuoaayg.webp',
     ],
     published: true,
   },
@@ -27,8 +27,8 @@ export const posts = [
     date: '2026-07-28',
     tags: [],
     images: [
-      '/blog/images/img-2062-ms49gqso.jpg',
-      '/blog/images/img-2063-ms49m4nw.jpg',
+      '/blog/images/img-2062-ms49gqso.webp',
+      '/blog/images/img-2063-ms49m4nw.webp',
     ],
     published: true,
   },
