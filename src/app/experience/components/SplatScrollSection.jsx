@@ -54,12 +54,10 @@ export default function SplatScrollSection() {
 
     const isMobile = window.innerWidth <= 768;
 
-    // Parallax: starts higher, settles down.
-    // Mobile uses a shallower offset — the wrap is shorter and sits higher,
-    // so a big offset would drag the scene back under the fold.
+    // Parallax: starts higher, settles down
     const tween = gsap.fromTo(
       canvasWrapRef.current,
-      { yPercent: isMobile ? -20 : -50 },
+      { yPercent: isMobile ? -45 : -50 },
       {
         yPercent: 0,
         ease: "none",
@@ -327,9 +325,6 @@ export default function SplatScrollSection() {
         @media (max-width: 768px) {
           .splat-section {
             --mask-collapsed: calc(100vw - 32px);
-            /* Pull the scene up so it peeks above the fold on load and centres
-               after ~35vh of scroll, instead of only at the page bottom. */
-            margin-top: -50vh;
           }
         }
         .splat-section[data-expanded] {
@@ -394,13 +389,6 @@ export default function SplatScrollSection() {
         }
         .splat-canvas-wrap[data-loaded] {
           opacity: 1;
-        }
-        @media (max-width: 768px) {
-          .splat-canvas-wrap {
-            /* Shorter wrap = less scroll between hero and scene */
-            height: 85svh;
-            min-height: 420px;
-          }
         }
         .splat-click-target {
           position: absolute;
@@ -479,13 +467,17 @@ export default function SplatScrollSection() {
           animation: splatHandPress 3.2s ease-in-out 1.05s infinite;
         }
 
-        /* Hover: hold the gesture still */
-        .splat-click-target:hover .splat-ripple,
-        .splat-click-target:hover .splat-tap-dot,
-        .splat-click-target:hover .splat-hand-move,
-        .splat-click-target:hover .splat-hand-tilt,
-        .splat-click-target:hover .splat-hand-press {
-          animation-play-state: paused;
+        /* Hover: hold the gesture still. Gated to real hover-capable pointers —
+           on touch devices :hover sticks after a tap on the large click target,
+           which would freeze the loop for the rest of the visit. */
+        @media (hover: hover) {
+          .splat-click-target:hover .splat-ripple,
+          .splat-click-target:hover .splat-tap-dot,
+          .splat-click-target:hover .splat-hand-move,
+          .splat-click-target:hover .splat-hand-tilt,
+          .splat-click-target:hover .splat-hand-press {
+            animation-play-state: paused;
+          }
         }
 
         /* Scene expanding: fade out the wrapper */
