@@ -1,0 +1,779 @@
+/* ═══════════════════════════════════════════════════════════════════
+ * DECK — a scroll-driven 3D stack of album covers.
+ *
+ * ── The construction
+ * This is a deck of cards, built the way a deck of cards actually is:
+ *
+ *   1. Every cover is the same size, at the same place, facing front.
+ *   2. They're separated along Z by a fixed gap (--dk-depth-k) — a stack,
+ *      not a fan. Scrolling slides the whole stack through it.
+ *   3. The WHOLE stack is turned once about Y (--dk-yaw), so you see it
+ *      from the side. That turn is what projects the Z gap onto screen
+ *      X — the slivers are a consequence of the rotation, not of any
+ *      per-card fanning.
+ *   4. A card near the centre translates sideways (+X, in its own
+ *      plane) so it peeks out of the run. That is the ONLY per-card
+ *      motion, and it is X only.
+ *
+ * ── Why the slide is X and nothing else
+ * Under `rotateY(-yaw)`, a local +X translation maps to world
+ * `(cos yaw, 0, +sin yaw)` — right AND toward the camera. So sliding a
+ * card out in its own plane already brings it forward past the covers
+ * in front of it. It needs no Z term to reveal itself, and adding one
+ * is actively wrong: it drives the card through its own neighbours.
+ *
+ * ── Perspective
+ * The camera sits dead centre (`perspective-origin: 50% 50%`) and the
+ * deck is translated in world space to sit low-left of it. That's a
+ * real off-axis view, not a moved vanishing point. The focal length is
+ * long so the projection stays near-orthographic like the reference.
+ *
+ * ── Nothing fades, nothing is outlined
+ * No haze, no depth scrim, no opacity ramp, no edge gradients, no
+ * borders or shadows. A card is the artwork and nothing else. Cards
+ * that pass the camera simply leave the frame and get clipped.
+ *
+ * ── The interaction
+ * JS writes ONE number, `--dk-p` (the fractional index at the front),
+ * onto ONE element. Every card derives its place and its slide from
+ * `--dk-p` in pure calc(). No per-card JS, no per-frame React render.
+ *
+ * Registering these with @property is what makes that affordable: an
+ * unregistered custom property is re-parsed as a token stream on every
+ * descendant every time it changes; a registered <number> is computed
+ * once into an actual number.
+ *
+ * ── Why every registered name carries a `--dk-` prefix
+ * DO NOT SHORTEN THESE. An @property registration is global to the
+ * DOCUMENT, not scoped to the stylesheet that declares it — the moment
+ * this file loads, every element on the page has that name typed.
+ *
+ * These were once bare (`--p`, `--i`, `--d`…) and it silently broke the
+ * navbar. NavLogo animates its letters in from `opacity: 0` with a
+ * per-letter `--d` delay of `0.15s`; `@property --d` typed that name as
+ * <number> site-wide, so `0.15s` became invalid, fell back to the
+ * initial value `0`, and an unitless 0 is not a valid <time> — which
+ * invalidates the whole `animation` shorthand. The letters never
+ * animated in, so the logo simply wasn't there, on this route only.
+ * `--i` did the same quieter damage to every stagger on the site.
+ *
+ * Short names are fine for anything NOT registered (see `.deck` below).
+ * The moment a name goes into an @property block, it is public.
+ *
+ * ── Tuning
+ * Every constant below is a custom property on `.deck`, and the
+ * dev-only Leva panel (DeckControls.jsx) writes straight onto that
+ * element. Nothing in here is hard-coded into JS.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* the one value scroll writes */
+@property --dk-p {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* per-card, set inline once at mount, never touched again */
+@property --dk-i {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* shape morph: 0 = stacked deck, 1 = the spread shape (see [data-shape]) */
+@property --dk-m {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The intro's one channel: hold the deck in the spread shape, then
+ * release it into the stack. It composes rather than overrides — it's
+ * max()'d with the toggle — so pressing Spread mid-intro doesn't fight
+ * it, and its resting value of 0 is exactly the resting state. */
+@property --dk-im {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* the morph value everything actually reads: the toggle, or the intro,
+   whichever is asking for more spread */
+@property --dk-me {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* a card's angle around the ring, when the ring shape is active */
+@property --dk-th {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+/* the card's goal position in the spread shape, blended toward by --dk-m */
+@property --dk-gx {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --dk-gy {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --dk-gz {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --dk-gr {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+/* in-plane tip — the fan's cards standing perpendicular to their curve */
+@property --dk-grz {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+/* size falloff away from the centre card */
+@property --dk-gs {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 1;
+}
+
+/* signed distance from the focused index */
+@property --dk-d {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* proximity to the centre: 1 at the focus, 0 by one card out either
+   side. Squaring keeps it pure CSS — no abs(), no sign(). */
+@property --dk-wf {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
+/* The four values the drag handler needs in order to know which way the
+   run points on screen. Typing them isn't decoration: an UNregistered
+   custom property's computed value is the literal token
+   ("clamp(150px, calc(26 * 1vmin), 340px)"), which JS can't parse. A
+   registered <length>/<angle> resolves at computed-value time, so
+   getComputedStyle hands back "234.4px" / "40deg" and the pointer delta
+   can be projected onto the real axis. */
+@property --dk-w {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
+@property --dk-yaw {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+
+@property --dk-depth-k {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+@property --dk-rise-k {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* The spread shapes' dimensions, typed for the same reason: the drag
+   handler reads them back to work out which way the run points, and an
+   unregistered `calc(var(--dk-w) * 4)` computes to that literal token
+   rather than to a number of pixels. --dk-fan-r is now derived from a
+   sin(), so this is no longer optional. */
+@property --dk-fan-r {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --dk-fan-step {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+@property --dk-ring-r {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+@property --dk-ring-step {
+  syntax: "<angle>";
+  inherits: true;
+  initial-value: 0deg;
+}
+@property --dk-flat-k {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * SCROLL TRACK + TUNING
+ *
+ * All dials live here so one element carries the whole configuration
+ * and `.deck__stage` / `.deck__card` just inherit it.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.deck {
+  position: relative;
+
+  /* ── camera ── */
+  --persp: 3600px;
+  --off-x: -14%;
+  --off-y: 13%;
+  --dk-yaw: 40deg;
+
+  /* ── card ──
+     vmin is the wrong unit on a phone held upright: vmin is the SHORT
+     side, so a 390×844 screen sizes its covers off 390 and then the
+     floor catches them, which is why they came out tiny. --w-min is the
+     mobile size and it's in vw — the axis the deck actually runs along.
+     Leva writes --w-vmin, so the desktop dial still works untouched. */
+  --w-vmin: 44;
+  --w-min: 180px;
+  --dk-w: clamp(var(--w-min), calc(var(--w-vmin) * 1vmin), 560px);
+
+  /* ── one step through the stack, as a fraction of the card ──
+     depth : the gap along Z. Turned by --dk-yaw this is what produces the
+             visible sliver (sin yaw × depth) — the only thing that does.
+     rise  : an in-plane Y nudge, the run's climb. rotateY leaves Y
+             alone, so this is the one offset that costs no depth.   */
+  --dk-depth-k: 0.13;
+  --dk-rise-k: 0.042;
+
+  /* ── the slide-out ──
+     pop  : how far a centred card translates sideways out of the run
+     focus: width of the proximity bell. Bigger = more cards peek.   */
+  --pop-k: 0.55;
+  --focus: 1.15;
+  --pop-ry: -5deg;
+
+  /* ── scroll ──
+     travel : viewport-heights of scroll per card
+     follow : how long the deck takes to catch up to the scroll — this
+              is the mass. 0ms and it's welded to the wheel.
+     ease-follow : the settle. The >1 second control point is the
+              overshoot: the deck coasts a little past where it was
+              headed and comes back, which is what reads as weight. */
+  --travel: 10;
+
+  /* travel-x : viewport-WIDTHS of sideways scroll per card, used only in
+                the phone's horizontal mode. It is the gesture's whole
+                sensitivity dial, and it is set against a real number:
+                one card costs ~26vw of finger, so a comfortable 200px
+                swipe on a 390px screen lands about two covers on and
+                momentum carries a flick further. The old hand-rolled
+                touch projection put one card at ~26 PIXELS, which is
+                where "far too sensitive" came from. */
+  --travel-x: 26;
+
+  --follow: 460ms;
+  --ease-follow: cubic-bezier(0.34, 1.3, 0.64, 1);
+
+  /* NO per-card transition-delay. It was tried and it deadlocks: scroll
+     re-targets these transitions every frame, and re-targeting restarts
+     the delay, so a card with any delay at all never gets past it and
+     simply never moves. Per-card DURATION would be the safe way to get a
+     trail; delay cannot work against a per-frame target. */
+
+  /* ── shape ──
+     m-dur : how long the deck takes to spread / re-stack               */
+  --dk-m: 0;
+  --m-dur: 680ms;
+
+  /* FAN (default spread) — cards standing on a dome.
+     step : angular spacing along the curve
+     gap  : clearance between neighbours, in card widths. 1 = exactly
+            touching, >1 = a real gap. See --dk-fan-r.
+     fall : how fast a card shrinks with distance from the centre
+     min  : the floor it shrinks to                                     */
+  --dk-fan-step: 9deg;
+  --fan-fall: 0.045;
+  --fan-min: 0.4;
+  --fan-gap: 1.06;
+
+  /* The radius is DERIVED, not dialled, so the fan cannot overlap.
+     Each card stands radially on the circle, so neighbours diverge as
+     they rise and their tightest point is where they meet the curve.
+     The chord between two adjacent bases is 2r·sin(step/2); requiring
+     that to clear one card width and solving for r gives:
+
+         r = w · gap / (2 · sin(step / 2))
+
+     Change the step and the radius follows, so the clearance holds at
+     any angle. (The worst pair is the centre card and its neighbour, at
+     1 and ~0.955 scale — mean 0.978w — so measuring against a full w
+     leaves a little margin on top of --fan-gap.) */
+  --dk-fan-r: calc(
+    var(--dk-w) * var(--fan-gap) / (2 * sin(calc(var(--dk-fan-step) / 2)))
+  );
+
+  /* flat carousel: gap as a multiple of the card, >1 = no overlap */
+  --dk-flat-k: 1.12;
+
+  /* ring / donut */
+  --dk-ring-step: 7deg;
+  --dk-ring-r: calc(var(--dk-w) * 4);
+
+  /* ── intro ──
+     dur   : the whole sequence; the fold to the stack starts at 58%
+     rise  : how far below its place each card starts
+     card  : how long one card takes to arrive
+     step  : per-card stagger
+     cap   : stagger stops accumulating past this many cards, so the
+             sequence can't run longer than the cards you can see      */
+  --intro-dur: 2000ms;
+  --intro-rise: 64px;
+  --intro-card: 520ms;
+  --intro-step: 55ms;
+  --intro-cap: 12;
+
+  height: calc(100svh + var(--count, 50) * var(--travel) * 1svh);
+
+  /* the shape morph — one property, every card and the rail read it */
+  transition: --dk-m var(--m-dur) var(--ease-entrance);
+
+  /* The intro. Rests PAUSED on its first frame, which doubles as the
+     cover over first paint — see Deck.jsx. */
+  animation: deck-intro var(--intro-dur) backwards;
+  animation-play-state: paused;
+
+  /* The toggle and the intro both want to open the deck; whichever is
+     asking for more wins. When the intro releases, --dk-im falls back to 0
+     and this is just the toggle again. */
+  --dk-me: max(var(--dk-m), var(--dk-im));
+}
+
+/* Everywhere but the phone this element does not exist as far as layout
+   is concerned, so the stage sticks to `.deck` exactly as it always has.
+   On the phone it becomes the sideways run — see the block below. */
+.deck__track {
+  display: contents;
+}
+
+/* Phones: covers sized off the width, not the short side. 72vw leaves
+   the fan's neighbours peeking in at the edges instead of sitting fully
+   off-screen, which is what makes a one-up carousel read as a carousel.
+   Scoped to narrow widths so a landscape phone keeps the vmin sizing. */
+@media (max-width: 640px) {
+  .deck {
+    --w-min: 72vw;
+    /* less climb and a shallower turn — there's no room for the long
+       diagonal run on a 390px-wide screen */
+    --off-x: -8%;
+    --off-y: 8%;
+    /* The follow transition is a main-thread animation, and every frame
+       of it reruns every mounted card's transform. Settling sooner is
+       the cheapest thing available on a phone. */
+    --follow: 300ms;
+  }
+}
+
+/* ── inside the mobile menu's page card ───────────────────────────────
+   Opening the menu makes `.page-card` position:fixed + overflow:hidden
+   and translates its inner up by the scroll you had, to show the slice
+   you were looking at. Nothing scrolls after that, so `position: sticky`
+   has nothing to stick to: the stage drops to the top of a section
+   several thousand pixels tall and the card shows empty space.
+
+   --snap is that captured scroll, handed in from the menu context. The
+   inner is shifted up by exactly that much, so placing the stage at
+   `top: var(--snap)` lands it back on the visible slice — the same
+   result sticky was producing, arrived at by hand.
+
+   Scoped to widths the phone layout does NOT cover. Below that the deck
+   is one screen tall and scrolls sideways, so the document scroll is
+   always 0, --snap is always 0, and forcing the stage to `absolute`
+   would break the sideways stick for no reason. */
+@media (min-width: 641px) {
+  .page-card.is-active .deck__stage {
+    position: absolute;
+    top: var(--snap, 0px);
+    left: 0;
+    right: 0;
+  }
+}
+
+.deck__stage {
+  position: sticky;
+  top: 0;
+  height: 100svh;
+  overflow: clip;
+  perspective: var(--persp);
+  perspective-origin: 50% 50%;
+  touch-action: pan-y;
+  cursor: grab;
+
+  /* ── THE PHYSICS, AND IT IS ONE LINE ──────────────────────────────
+     `--dk-p` is a registered <number>, and a registered custom property is
+     transitionable. So JS never smooths anything: it writes the raw
+     scroll position, and CSS interpolates it with an overshoot curve.
+     Every card inherits the interpolated value, so the whole deck gets
+     mass from ONE transition on ONE element.
+
+     Scroll re-targets this every frame. A transition re-aimed mid-flight
+     resumes from wherever it currently is, which is exactly an
+     exponential follow — the deck trails the wheel under motion, and
+     when the wheel stops the last transition runs out its overshoot and
+     the stack rocks into place. */
+  transition: --dk-p var(--follow) var(--ease-follow);
+}
+
+/* ── while a hand is actually on it ───────────────────────────────────
+   --follow is mass, and mass is right when the deck is being thrown by
+   a wheel or a flick. It is wrong when you have hold of a card: half a
+   second of lag between the cursor and the artwork under it doesn't read
+   as weight, it reads as the thing refusing to move. Under a direct grab
+   the deck tracks the pointer, and the mass comes back the moment you
+   let go. Set from the drag handler in Deck.jsx. */
+/* ═══════════════════════════════════════════════════════════════════
+ * PHONES — the deck runs on its own sideways overflow.
+ *
+ * The page is exactly one screen tall and the document does not scroll
+ * at all, so the URL bar has nothing to react to and the viewport stops
+ * resizing under you. The gesture is a native horizontal scroll, which
+ * means momentum, friction and rubber-banding come from the platform
+ * rather than from arithmetic in a pointermove handler — and the swipe
+ * finally runs the same direction as the deck.
+ *
+ * Structurally it is the vertical layout turned ninety degrees: a run
+ * wider than the screen, and a stage stuck to its left edge. Every box
+ * is sized in viewport units, NOT percentages — the stage's parent is
+ * the run, which is many screens wide by construction, so a percentage
+ * would measure the stage against the wrong thing entirely.
+ * ═══════════════════════════════════════════════════════════════════ */
+@media (max-width: 640px) {
+  .deck {
+    /* one screen, and nothing for the document to scroll */
+    height: 100svh;
+    overflow-x: auto;
+    overflow-y: hidden;
+    /* keep the bounce, but don't let an overscroll chain out to the
+       document or hand the browser an edge-swipe back-navigation */
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+  }
+
+  .deck::-webkit-scrollbar {
+    display: none;
+  }
+
+  .deck__track {
+    display: block;
+    position: relative;
+    width: calc(100vw + var(--count, 22) * var(--travel-x) * 1vw);
+    height: 100svh;
+  }
+
+  .deck__stage {
+    /* stuck to the left of the scrollport instead of the top of the
+       document — the same trick, rotated */
+    left: 0;
+    width: 100vw;
+    height: 100svh;
+    /* the browser owns the horizontal pan; Deck.jsx stays off touch */
+    touch-action: pan-x;
+    cursor: default;
+  }
+}
+
+.deck__stage[data-drag="1"] {
+  transition-duration: 80ms;
+  transition-timing-function: linear;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck,
+  .deck__stage {
+    transition: none;
+  }
+}
+
+.deck__stage:active {
+  cursor: grabbing;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * THE RAIL — placed and turned once.
+ *
+ * The translate is applied after the rotation (CSS reads outer→inner),
+ * so it moves the deck in screen space: low and left of the camera
+ * axis, leaving the frame's upper right for the run to disappear into.
+ *
+ * Both the yaw and the offset are scaled by (1 − --dk-m): as the deck
+ * spreads, it swings square to the camera and walks back to centre, so
+ * the spread shape is read head-on instead of obliquely.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.deck__rail {
+  position: absolute;
+  inset: 0;
+  transform-style: preserve-3d;
+  transform: translate3d(
+      calc(var(--off-x) * (1 - var(--dk-me))),
+      calc(var(--off-y) * (1 - var(--dk-me))),
+      0
+    )
+    rotateY(calc(var(--dk-yaw) * -1 * (1 - var(--dk-me))));
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * CARDS — the card IS the <img>. No wrapper, no border, no shadow,
+ * no pseudo-elements. Nothing but the artwork.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.deck__card {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: var(--dk-w);
+  height: var(--dk-w);
+  margin: calc(var(--dk-w) / -2) 0 0 calc(var(--dk-w) / -2);
+  display: block;
+  object-fit: cover;
+  backface-visibility: hidden;
+
+  /* Pivot at the BASE, not the centre. This is what makes the fan work:
+     a card tips and shrinks from the point where it stands, so its
+     bottom edge stays welded to the curve at any angle or size. In the
+     stack it costs nothing — a translate is origin-independent, and the
+     focused card's 5° turn just hinges from the table instead of its
+     middle, which if anything is the more honest pivot. */
+  transform-origin: 50% 100%;
+
+  --dk-d: calc(var(--dk-i) - var(--dk-p));
+  --dk-wf: clamp(0, calc(1 - var(--dk-d) * var(--dk-d) / var(--focus)), 1);
+
+  /* ── shape A: the stack ──
+     X — the slide-out. Zero for anything not near the centre.
+     Y — the run's climb.
+     Z — the stack, and ONLY the stack. Nothing pops forward. */
+  --sx: calc(var(--dk-wf) * var(--dk-w) * var(--pop-k));
+  --sy: calc(var(--dk-d) * var(--dk-w) * var(--dk-rise-k) * -1);
+  --sz: calc(var(--dk-d) * var(--dk-w) * var(--dk-depth-k) * -1);
+  --sr: calc(var(--dk-wf) * var(--pop-ry));
+
+  /* ── shape B: the spread — THE FAN (default) ──
+     Cards standing on a dome. A circle of radius --dk-fan-r sits below the
+     centre card's base; each card is placed on it at θ = d × step, then
+     tipped by that same θ so it stands perpendicular to the curve. Left
+     of centre θ is negative, so those cards tip left; right of centre
+     they tip right; the middle one is at θ = 0, upright and unscaled.
+
+     y = r − r·cos θ is what drops the sides: it's the circle's own sag,
+     so every base lands exactly on the arc rather than on a line.
+
+     Neighbours never overlap — the radius is solved for that from the
+     step and --fan-gap. See the --dk-fan-r derivation on `.deck`.
+
+     Size falls off with d², floored by --fan-min. Squaring is deliberate
+     — it keeps this pure CSS with no abs() and no sign().
+
+     --dk-gz is depth for SORTING only (a couple of px per card, squared),
+     so the centre card paints over its neighbours. It's far too small to
+     read as perspective. */
+  --dk-th: calc(var(--dk-d) * var(--dk-fan-step));
+  --dk-gx: calc(sin(var(--dk-th)) * var(--dk-fan-r));
+  --dk-gy: calc(var(--dk-fan-r) - cos(var(--dk-th)) * var(--dk-fan-r));
+  --dk-gz: calc(var(--dk-d) * var(--dk-d) * -2px);
+  --dk-gr: 0deg;
+  --dk-grz: var(--dk-th);
+  --dk-gs: clamp(
+    var(--fan-min),
+    calc(1 - var(--dk-d) * var(--dk-d) * var(--fan-fall)),
+    1
+  );
+
+  /* ── the morph ──
+     A straight lerp per axis. --dk-m rides its own transition on `.deck`,
+     so one button press blends the whole deck from one shape to the
+     other with no second code path and no JS per frame.
+     rotateZ and scale are identity at --dk-m: 0, so the stack is untouched
+     by their presence. */
+  transform: translate3d(
+      calc(var(--sx) + (var(--dk-gx) - var(--sx)) * var(--dk-me)),
+      calc(var(--sy) + (var(--dk-gy) - var(--sy)) * var(--dk-me)),
+      calc(var(--sz) + (var(--dk-gz) - var(--sz)) * var(--dk-me))
+    )
+    rotateY(calc(var(--sr) + (var(--dk-gr) - var(--sr)) * var(--dk-me)))
+    rotateZ(calc(var(--dk-grz) * var(--dk-me)))
+    scale(calc(1 + (var(--dk-gs) - 1) * var(--dk-me)));
+
+  /* The entrance rides the standalone `translate` property, NOT
+     `transform` — the transform above is fully owned by the layout math
+     and cannot be borrowed. `translate` composes outside it (translate →
+     rotate → scale → transform), so a card rises into place without the
+     keyframe having to know or restate where its place is.
+
+     An animation-delay is safe here where a transition-delay was not:
+     an animation fires once and runs its own clock, whereas a
+     transition re-aimed every frame would restart its delay every frame
+     and never move at all. */
+  animation: deck-card-rise var(--intro-card) cubic-bezier(0.16, 1, 0.3, 1)
+    backwards;
+  animation-delay: calc(min(var(--dk-i), var(--intro-cap)) * var(--intro-step));
+  animation-play-state: paused;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * ALTERNATE SPREAD SHAPES
+ *
+ * A shape only has to answer "where does card --dk-d go, which way does it
+ * face, and how big is it". The blend, the timing and the toggle are all
+ * shared, so a new one is a handful of declarations and nothing else.
+ *
+ * `fan` is the default and lives on `.deck__card` above.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* FLAT — one straight row, square to the camera, gapped wider than a
+   card so nothing overlaps. Every card the same size. */
+.deck[data-shape="flat"] .deck__card {
+  --dk-gx: calc(var(--dk-d) * var(--dk-w) * var(--dk-flat-k));
+  --dk-gy: 0px;
+  --dk-gz: 0px;
+  --dk-grz: 0deg;
+  --dk-gs: 1;
+}
+
+/* RING / DONUT — cards on the wall of a vertical cylinder, each turned
+   to face outward along its own radius. The −R on Z puts the front of
+   the ring at the origin rather than its centre, so the focused card
+   lands in the same place it does in every other shape. */
+.deck[data-shape="ring"] .deck__card {
+  --dk-th: calc(var(--dk-d) * var(--dk-ring-step));
+  --dk-gx: calc(sin(var(--dk-th)) * var(--dk-ring-r));
+  --dk-gy: 0px;
+  --dk-gz: calc(cos(var(--dk-th)) * var(--dk-ring-r) - var(--dk-ring-r));
+  --dk-gr: var(--dk-th);
+  --dk-grz: 0deg;
+  --dk-gs: 1;
+}
+
+/* While spread, the deck is being read left-to-right rather than run
+   through — the cursor should say so. */
+.deck[data-spread="1"] .deck__stage {
+  cursor: ew-resize;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * UI — the layout toggle. A wrapper does the positioning so the
+ * button's own `transform` stays free for .btn's press feedback.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+.deck__ui {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: clamp(1.5rem, 5vh, 3rem);
+  z-index: 3;
+  display: grid;
+  place-items: center;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * INTRO — the fan builds itself, then folds into the deck.
+ *
+ * Two animations, and neither of them moves the deck sideways:
+ *
+ *   the CARDS rise into their places, staggered from the centre out —
+ *   this is the whole arrival, and it happens in the fan;
+ *   `.deck` holds the fan open for the first 58% and then folds it
+ *   into the stack over the rest.
+ *
+ * No scroll sweep and no camera dolly. The position stays exactly where
+ * the page's scroll says it is the entire time, so the intro can't feel
+ * like it is racing you and cannot land somewhere you didn't ask for.
+ *
+ * `--dk-im` composes rather than overrides — it's max()'d with the toggle
+ * — so pressing Spread mid-intro just works, and the 100% frame equals
+ * the resting state, which is why no `forwards` is needed and nothing
+ * jumps when the animation releases.
+ *
+ * Both rest PAUSED on frame 0, which doubles as the cover over first
+ * paint — see Deck.jsx.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+@keyframes deck-intro {
+  0% {
+    --dk-im: 1;
+    animation-timing-function: linear;
+  }
+  58% {
+    --dk-im: 1;
+    animation-timing-function: cubic-bezier(0.65, 0, 0.35, 1);
+  }
+  100% {
+    --dk-im: 0;
+  }
+}
+
+@keyframes deck-card-rise {
+  from {
+    translate: 0 var(--intro-rise);
+    opacity: 0;
+  }
+}
+
+@keyframes deck-fade {
+  from {
+    opacity: 0;
+  }
+}
+
+.deck__stage {
+  animation: deck-fade 240ms ease backwards;
+  animation-play-state: paused;
+}
+
+.deck[data-ready="1"],
+.deck[data-ready="1"] .deck__stage,
+.deck[data-ready="1"] .deck__card {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .deck,
+  .deck__stage,
+  .deck__card {
+    animation: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+ * READOUT — SlotNumber rolls the index like an odometer. CSS-transition
+ * based: it runs on change, never per frame.
+ * ═══════════════════════════════════════════════════════════════════ */
+
+/* The only thing that tracks the deck. No title, no artist — a per-card
+   text morph is a lot of DOM churn for a value that can change several
+   times a second, and it was reading as noise. SlotNumber is the whole
+   readout now: one element per digit column, and a change costs a single
+   custom-property write on the columns that actually moved. */
+.deck__count {
+  position: absolute;
+  top: clamp(5.5rem, 12vh, 8rem);
+  right: clamp(1.25rem, 4vw, 3rem);
+  z-index: 2;
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-lg);
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink);
+  pointer-events: none;
+}
+

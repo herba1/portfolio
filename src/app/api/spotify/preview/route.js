@@ -1,6 +1,17 @@
-// GET /api/spotify/preview?artist=…&title=… — best-matching 30s preview via the
-// iTunes Search API, SCORED against the requested artist+title so we don't proxy
-// the wrong song. Streamed same-origin so the client can decode it for a waveform.
+// GET /api/spotify/preview?artist=…&title=… — resolves the best-matching 30s
+// preview via the iTunes Search API, SCORED against the requested artist+title
+// so we never hand back the wrong song.
+//
+// It returns the URL as JSON rather than the audio, and that is the whole point.
+// Apple's preview CDN answers with `access-control-allow-origin: *`, an moov
+// atom at the front of the file, `accept-ranges: bytes` and a year-long
+// max-age — so the browser can stream the media itself, start playing off a
+// prefix, and cache it. Proxying it meant ~1MB travelling twice (Apple → us →
+// client) with nothing audible until the last byte of it landed. This response
+// is a few hundred bytes and caches at the edge.
+//
+// ?stream=1 keeps the old proxy behaviour as a fallback, for the case where
+// direct playback fails on the client (see the engine's error path).
 
 function norm(s) {
   return (s || "")
@@ -41,10 +52,17 @@ function scoreParts(reqArtist, reqTitle, r) {
   return { ts, as, total: ts + as };
 }
 
+// The lookup is worth caching hard and the audio is worth caching harder: a
+// track's preview URL does not change, and neither does the search result for
+// the same artist+title. stale-while-revalidate keeps a slow iTunes day from
+// being the user's problem.
+const CACHE = "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800";
+
 export async function GET(request) {
   const url = new URL(request.url);
   const artist = (url.searchParams.get("artist") || "").trim();
   const title = (url.searchParams.get("title") || "").trim();
+  const stream = url.searchParams.get("stream") === "1";
   if (!title) return new Response("missing title", { status: 400 });
 
   try {
@@ -65,14 +83,32 @@ export async function GET(request) {
     const best = scored.find((s) => s.ts >= 2.5 && s.as >= 1.5);
     if (!best) return new Response("no confident match", { status: 404 });
 
+    // The normal path: hand back the address and let the browser do the rest.
+    if (!stream) {
+      return Response.json(
+        {
+          url: best.r.previewUrl,
+          artist: best.r.artistName,
+          title: best.r.trackName,
+        },
+        { headers: { "Cache-Control": CACHE } },
+      );
+    }
+
     const audio = await fetch(best.r.previewUrl, { cache: "no-store" });
     if (!audio.ok || !audio.body) return new Response("preview fetch failed", { status: 502 });
-    return new Response(audio.body, {
-      headers: {
-        "Content-Type": audio.headers.get("content-type") || "audio/m4a",
-        "Cache-Control": "public, max-age=86400",
-      },
-    });
+    const headers = {
+      "Content-Type": audio.headers.get("content-type") || "audio/m4a",
+      "Cache-Control": CACHE,
+    };
+    // Pass the size through. The bytes are piped byte-for-byte, so upstream's
+    // count is still correct — and without it the client has no denominator,
+    // which is the difference between a preview that loads to "62%" on a slow
+    // connection and one that shows an indefinite spinner. Audio is already
+    // compressed, so nothing downstream re-encodes it and invalidates this.
+    const len = audio.headers.get("content-length");
+    if (len) headers["Content-Length"] = len;
+    return new Response(audio.body, { headers });
   } catch {
     return new Response("error", { status: 500 });
   }

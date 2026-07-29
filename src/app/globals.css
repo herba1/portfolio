@@ -1688,14 +1688,21 @@ body {
  * h2/h3/h4 in prose use Geist sans, bold, tight
  * ───────────────────────────────────────────── */
 
-/* Long-form reading. Straight off the `body-lg` step — 18px on 27px of
+/* Long-form reading. Straight off the `body` step — 16px on 24px of
    leading with its own tracking — rather than a second, freehand set of
    numbers that drifts from the scale. Prose is the one regime that holds
-   ~1.5 leading instead of tightening (see the type scale). */
+   ~1.5 leading instead of tightening (see the type scale).
+
+   16, not 18: the reference sites for this page (benji.org, Polymarket)
+   both set long-form body at 14px, and 18 read as a large-print edition
+   next to them. 16 is one step down the existing scale — no new numbers —
+   and the column narrows to match so the measure stays ~42em, which is
+   what benji's 582px-at-14px column actually is. Size changed; the
+   character count per line did not. */
 .prose {
-  font-size: var(--text-body-lg);
-  line-height: var(--text-body-lg--line-height);
-  letter-spacing: var(--text-body-lg--letter-spacing);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
   color: var(--color-ink-reading);
 }
 
@@ -1704,7 +1711,7 @@ body {
 }
 
 /* 600, not 700: emphasis in this system tops out at semibold, and Geist's
-   600 at heading sizes already separates cleanly from 18px body. */
+   600 at heading sizes already separates cleanly from 16px body. */
 .prose h2,
 .prose h3,
 .prose h4 {
@@ -2518,7 +2525,30 @@ body {
   to   { opacity: 1; transform: none; }
 }
 
+/* A tile is hidden until the grid releases it — see the reveal comment in
+   WorkGrid. Hidden is the DEFAULT here, in the stylesheet, not a class switched
+   on after hydration: a rule that only starts hiding once JS has run paints the
+   server's HTML first and then snatches it back, which is a flash, then a
+   second flash when it fades in again.
+
+   The no-JS escape hatch is the <noscript> block in the /work page, which turns
+   these back on. */
 .work-cell {
+  opacity: 0;
+  /* Belt and braces. `opacity: 0` still paints an (invisible) layer and still
+     lets a half-loaded child flash through any stacking-context trickery of its
+     own; `visibility: hidden` takes the whole subtree out of painting while
+     leaving it in layout, so the grid can still measure it and its images still
+     download. Nothing inside a cell can put a pixel on screen before the grid
+     says so. */
+  visibility: hidden;
+}
+
+/* `both` matters: the fill carries the from-state BACKWARDS over any delay and
+   holds the to-state forwards afterwards, so there is no frame at either end
+   where the tile is painted at its natural opacity. */
+.work-cell[data-in] {
+  visibility: visible;
   animation: work-tile-in var(--duration-entrance) var(--ease-entrance) both;
 }
 
@@ -2533,6 +2563,10 @@ body {
   display: block;
   color: inherit;
 }
+
+/* The component wrapper carries no opacity of its own. There is exactly ONE
+   reveal gate on this page and it lives on the cell — two gates was the
+   two-flash bug. This class stays as the measurement/readiness hook. */
 
 /* Continuous corners, sized to the tile. --work-radius is written per tile by
    WorkGrid from the measured box (see radiusFor there) — the value below is
@@ -2584,7 +2618,7 @@ body {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .work-cell { animation: none !important; }
+  .work-cell[data-in] { animation: none !important; opacity: 1 !important; }
   .work-frame,
   .work-tile--media .work-frame img,
   .work-tile--media .work-frame video { transition: none !important; }

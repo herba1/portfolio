@@ -6,7 +6,7 @@ import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
 import MobileMenuShell from "./ui/Navigation/MobileMenuShell";
 
 import StickyFooter from "./ui/StickyFooter";
-import { geist, mono } from "./fonts";
+import { geist, inter, mono } from "./fonts";
 import Loading from "./ui/Loading";
 import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
@@ -135,7 +135,7 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${geist.variable} ${mono.variable}`}>
+    <html lang="en" className={`${geist.variable} ${mono.variable} ${inter.variable}`}>
       <head>
         {/* Geist Sans + Geist Mono are self-hosted by next/font at build
             time — no third-party font host, no preconnect, no FOUT. */}

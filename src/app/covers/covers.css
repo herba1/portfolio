@@ -1,13 +1,14 @@
 /* ===========================================================================
    Covers — infinite grid experience
-   Light + airy on the homepage's slate-100 (var(--color-surface) / var(--color-dark)). Cool, not warm.
+   Light + airy on the same paper as every other route: var(--color-surface),
+   flat, with var(--color-ink) on top. Cool, not warm.
    =========================================================================== */
 
 .cv-root {
   position: fixed;
   inset: 0;
   overflow: hidden;
-  color: var(--color-dark);
+  color: var(--color-ink);
   /* NO touch-action here. The browser intersects touch-action down the whole
      ancestor chain, so `none` on this root silently killed the `pan-y` on the
      player panel and the lyrics modal — their scrollable content was simply
@@ -20,16 +21,13 @@
   -webkit-user-select: none;
   font-family: var(--font-geist), ui-sans-serif, system-ui, -apple-system, sans-serif;
   letter-spacing: -0.02em;
-  /* clean slate-100 wash (matches the homepage body); the focused cover hue is
+  /* The page surface, flat and unmodified — the SAME token every other root
+     paints (`bg-surface` on <body>, /work, /tierlist, `--paper` in the tuner).
+     This used to be a radial wash that ran neutral-25 in the middle to
+     neutral-100 at the corners, which made this the one route whose paper
+     was a different gray from the rest of the site. The focused cover hue is
      layered on top via .cv-tint so it can never break this base. */
-  background:
-    radial-gradient(
-      125vmax 95vmax at 50% 4%,
-      var(--neutral-25) 0%,
-      var(--color-surface) 48%,
-      var(--neutral-100) 100%
-    ),
-    var(--color-surface);
+  background: var(--color-surface);
 }
 
 /* focus-hue glow — the hue comes from --cv-focus (set inline per focused cover
@@ -67,22 +65,85 @@
   z-index: var(--z-index-max);
 }
 
-/* blurred + white-fading screen edges (masked to the edges only) so the grid
-   melts into the warm page — the homepage's soft blur/white-fade language. */
+/* Screen edges fade so the grid melts into the page rather than getting
+   clipped by the viewport. It fades to ONE colour — var(--color-surface), the
+   same paper .cv-root sits on — so the vignette hides tiles without ever
+   painting a second gray. (It used to pass through neutral-100 on the way out,
+   which read as a dark ring the rest of the site doesn't have.) The stops are
+   eased rather than a straight 2-stop ramp so the falloff has no visible seam. */
 .cv-edge-fade {
   position: absolute;
   inset: 0;
   z-index: var(--z-index-raised);
   pointer-events: none;
-  /* gentle slate-fade vignette only — no blur */
   background: radial-gradient(
     132% 124% at 50% 46%,
     transparent 0%,
     transparent 66%,
-    color-mix(in oklab, var(--neutral-50) 34%, transparent) 81%,
-    color-mix(in oklab, var(--neutral-100) 72%, transparent) 92%,
+    color-mix(in oklab, var(--color-surface) 12%, transparent) 76%,
+    color-mix(in oklab, var(--color-surface) 38%, transparent) 84%,
+    color-mix(in oklab, var(--color-surface) 72%, transparent) 92%,
+    color-mix(in oklab, var(--color-surface) 92%, transparent) 97%,
     var(--color-surface) 100%
   );
+}
+
+/* ── first load ─────────────────────────────────────────────────────────────
+   Centred over the grid while the track list is in flight and the art is still
+   decoding. Deliberately quiet: a ring and one line of plain type on the page's
+   own paper, no panel and no scrim, because the grid behind it is already the
+   right picture — it just isn't finished.
+
+   pointer-events: none is load-bearing. Panning the grid while it fills in is
+   fine and feels alive; it's opening a cover that has to wait, and Covers.jsx
+   gates that directly rather than by parking a blocker over the whole screen. */
+.cv-loader {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: var(--z-index-raised);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  transition:
+    opacity var(--duration-400) var(--ease-standard),
+    transform var(--duration-400) var(--ease-standard);
+}
+.cv-loader[data-state="in"] {
+  opacity: 1;
+}
+/* Leaves upward and slightly small — the grid it was standing in front of is
+   what the eye should land on next, so it gets out of the way rather than
+   dissolving in place. */
+.cv-loader[data-state="out"] {
+  opacity: 0;
+  transform: translate(-50%, calc(-50% - 6px)) scale(0.96);
+}
+.cv-loader-ring {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  transform: rotate(-90deg);
+  animation: cv-spin 900ms linear infinite;
+}
+.cv-loader-track {
+  stroke: var(--color-line);
+  stroke-width: 2.5;
+}
+.cv-loader-arc {
+  stroke: var(--color-ink);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  /* r=15.5 → circumference ≈ 97.4; a quarter of it is the visible arc. */
+  stroke-dasharray: 24 74;
+}
+.cv-loader-label {
+  font-size: var(--text-ui);
+  font-weight: var(--text-ui--font-weight);
+  letter-spacing: var(--text-ui--letter-spacing);
+  color: var(--color-ink);
 }
 
 /* ── HUD ─────────────────────────────────────────────────────────────────── */
@@ -94,7 +155,10 @@
 }
 
 .cv-focus {
-  --plate: var(--color-border); /* slate-200 — a darker secondary surface, distinct from the slate-100 page */
+  /* One step darker than the page so the plate reads as its own surface.
+     This was --color-border (a LINE token) used as a fill; same value,
+     wrong ladder — the primitive is the honest name for it. */
+  --plate: var(--neutral-200);
   --ear: 18px; /* concave flare radius */
   position: absolute;
   left: 50%;
@@ -127,7 +191,7 @@
   font-size: var(--text-title-lg);
   line-height: 1;
   letter-spacing: var(--tracking-tighter);
-  color: var(--color-dark);
+  color: var(--color-ink);
   padding: 16px 30px 18px;
   border-radius: var(--radius-3xl) var(--radius-3xl) 0 0;
   /* Recessed, tactile depth. The top rake is a background layer, NOT
@@ -303,7 +367,7 @@
   background: var(--color-media-audio-tint);
 }
 .cv-type--silent {
-  color: var(--color-muted);
+  color: var(--color-ink-secondary);
 }
 
 /* ── player (large centered media card + floating overlay controls) ─────── */
@@ -436,7 +500,7 @@
   width: 86px;
   height: 86px;
   border-radius: var(--radius-full);
-  color: var(--color-dark);
+  color: var(--color-ink);
   background: var(--scrim-white-85);
   backdrop-filter: blur(var(--blur-md));
   -webkit-backdrop-filter: blur(var(--blur-md));
@@ -538,7 +602,7 @@
   border-radius: var(--radius-full);
   font-size: var(--text-ui);
   font-weight: var(--font-weight-normal);
-  color: var(--color-dark);
+  color: var(--color-ink);
   background: var(--scrim-white-85);
   border: 1px solid color-mix(in oklab, var(--color-ink) 10%, transparent);
   backdrop-filter: blur(var(--blur-md));
@@ -563,6 +627,32 @@
   .cv-focus,
   .cv-minimap-wrap {
     transition-duration: 0.001s;
+  }
+  /* Loading states lose their motion, NOT their meaning. Every one of them is
+     also carried in words ("Loading 42%", "Still loading", "Loading covers") and
+     in a ring that is still drawn — so with the spin and the sweep gone, the
+     information is all still on screen. A determinate ring keeps filling: that
+     isn't decoration, it's the value itself. */
+  .cv-loader,
+  .cv-loader-ring,
+  .cv-transport-ring.is-sweep,
+  .cv-wave-wrap.is-waiting {
+    animation: none;
+    transition: none;
+  }
+  /* The words are the point, not their arrival. */
+  .cv-dock-readout {
+    animation: none;
+  }
+  .cv-transport-ring.is-determinate .cv-transport-arc {
+    transition: none;
+  }
+  /* Without the spin, a quarter-arc parked at an angle reads as a broken dial.
+     Close it into a full hairline circle — present, static, and clearly a ring
+     rather than a fragment. */
+  .cv-loader-arc,
+  .cv-transport-ring.is-sweep .cv-transport-arc {
+    stroke-dasharray: none;
   }
   /* the canvas push is disabled under reduced motion (see `reduce` in
      CoversGrid), so the map's mirror of it goes away too — the opened cell
@@ -600,7 +690,7 @@
   z-index: calc(var(--z-index-raised) + 1);
   display: flex;
   flex-direction: column;
-  color: var(--color-dark);
+  color: var(--color-ink);
   overflow: hidden; /* so content clips (not reflows) as the panel collapses into its tile on close */
 }
 /* The measured stack. Holds the column and its gap so the panel's own box can be
@@ -625,7 +715,7 @@
 .cv-music-close {
   position: fixed;
   z-index: calc(var(--z-index-raised) + 3);
-  color: var(--color-dark);
+  color: var(--color-ink);
   /* bare X — no disc, no border, no fill. Just the glyph (the 38px box stays for
      a comfortable tap target). */
   background: none;
@@ -641,6 +731,9 @@
 .cv-music-toprank {
   position: fixed;
   z-index: calc(var(--z-index-raised) + 3);
+  /* spans the full card width on the same line as the close button, so it must
+     never eat the X's taps — it's a label, nothing here is interactive */
+  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -653,7 +746,7 @@
   line-height: var(--text-body--line-height);
   letter-spacing: var(--text-body--letter-spacing);
   font-weight: var(--font-weight-strong);
-  color: var(--color-dark);
+  color: var(--color-ink);
 }
 .cv-music-toprank span {
   overflow: hidden;
@@ -673,7 +766,7 @@
   font-size: clamp(26px, 3.4vw, 40px);
   line-height: 1.05;
   letter-spacing: var(--tracking-tighter);
-  color: var(--color-dark);
+  color: var(--color-ink);
 }
 .cv-music-artist {
   margin: 0;
@@ -684,15 +777,188 @@
   line-height: var(--text-body--line-height);
   letter-spacing: var(--text-body--letter-spacing);
   font-weight: var(--font-weight-emphasis);
-  color: var(--color-muted);
+  color: var(--color-ink-secondary);
 }
-.cv-music-avatar {
+/* ── artist credit: the photo IS the portrait ───────────────────────────────
+   Spotify ships three renditions of every artist photo and the credit line
+   only ever used the smallest, at 22px. Hovering either half of the credit —
+   the disc or the name — grows that same photo into a 148px portrait.
+
+   ONE element does the whole thing. An earlier pass faded a second, larger
+   card in over the top, and you could see both at once: a small disc sitting
+   beside a big square of the same face. This is a morph instead — the disc
+   travels, un-radiuses and grows into the portrait, and there is only ever one
+   of it on screen. Same square-out-of-square language as the card's own
+   opening morph, so the player speaks one dialect rather than two.
+
+   Three decisions carry it:
+
+   • The photo is absolutely positioned inside a 22px slot that never changes
+     size. That's what lets it grow, and travel, without the name beside it
+     moving a pixel or the panel's measured stack reflowing.
+   • It lands BELOW the credit line rather than growing in place. In place, a
+     148px square goes straight through the artist's own name — the one word
+     you were reading when you pointed at it. Below, the row survives intact
+     and the portrait covers the waveform and the lyrics, which you are
+     demonstrably not looking at.
+   • Real width/height, not a transform scale. A scaled layer is rasterized
+     once and stretched, which softens the face at both ends; laid out at its
+     true size every frame, the browser resamples properly — crisp at 22px,
+     crisp at 148px — and border-radius can actually interpolate, which is the
+     un-radiusing itself. It's one absolutely-positioned box, so the layout it
+     costs is its own and stops there. */
+
+/* ease-out-quint (--ease-out-quint) with a 12% overshoot dialled into y2. The
+   size jump here is ~7×, and the stock --ease-overshoot's 56% on a delta that
+   large reads as rubber rather than as a spring; 12% is a photo settling into
+   its frame. Reversible, unlike a keyframed spring, so leaving is as clean as
+   arriving. */
+.cv-artist {
+  --cv-ease-unfold: cubic-bezier(0.22, 1.12, 0.36, 1);
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  outline: none;
+}
+/* the head paints UNDER its siblings by default (each stack item carries a
+   filter, so each is its own stacking context, resolved in DOM order) — which
+   would bury the portrait behind the waveform it is supposed to sit on. */
+.cv-music-head {
+  position: relative;
+  z-index: 2;
+}
+.cv-artist-slot {
+  position: relative;
   flex: none;
   width: 22px;
   height: 22px;
-  border-radius: var(--radius-full);
-  object-fit: cover;
+}
+.cv-artist-name {
+  transition: color var(--duration-color) var(--ease-hover);
+}
+/* The box that morphs. Deliberately a span and not the image: Tailwind's
+   preflight ships `img, video { max-width: 100% }`, and on an absolutely-
+   positioned image that 100% resolves against its containing block — the 22px
+   slot — so it lands as a hard `max-width: 22px`. Height has no matching clamp,
+   which is why the photo grew tall and stayed narrow. Overriding it on the img
+   works, but only until the next rule that assumes images behave like images;
+   moving the geometry onto an element preflight has no opinion about ends the
+   whole class of problem. The photo simply fills this. */
+.cv-artist-frame {
+  position: absolute;
+  left: 0;
+  top: 0;
+  display: block;
+  width: 22px;
+  height: 22px;
+  /* clips the photo to the corner — the frame owns the shape, not the image */
+  overflow: hidden;
+  /* At rest this is a TRUE circle: 11px is exactly half of 22, and corner-shape
+     is left at its default `round`. Written as a length rather than 50% or
+     --radius-full so the interpolation to the portrait's corner is honest and
+     linear — 9999px would stay pinned at fully-round for most of the morph
+     (the radius is always clamped to half the box) and then square off all at
+     once near the end. */
+  border-radius: 11px;
   background: color-mix(in oklab, var(--color-ink) 6%, transparent);
+  /* never a hit target: grown, it lies over the waveform, and a transparent
+     148px square swallowing scrubs is a worse bug than the hover is a feature.
+     It also lands clear of the pointer (down 32, right 16), so it can't take
+     the hover away from the group that drives it. */
+  pointer-events: none;
+  /* Three transparent layers, matching the hover stack rung for rung: a shadow
+     list only interpolates against a list of the same length, and `none` would
+     make the shadow snap on at frame one instead of arriving with the size. */
+  box-shadow:
+    0 0 0 0 transparent,
+    0 0 0 0 transparent,
+    0 0 0 0 transparent;
+  /* The way back. Still shorter than the 400ms unfold — the entry is the event,
+     the return is tidying — but on ease-out-cubic rather than --ease-hover.
+     --ease-hover is (0.26, 0.08, 0.25, 1): it holds still for a moment, rushes
+     the middle, then crawls a very long tail into rest. On a colour fade that
+     reads as a nice settle; on a 126px collapse it reads as sticky, because the
+     shape is still visibly moving long after the pointer has gone. Ease-out-
+     cubic answers the instant you leave and decelerates evenly into the disc.
+
+     corner-shape rides along so the superellipse relaxes back to a circle
+     instead of snapping at full size — where the browser can interpolate it,
+     that's a smooth un-squircling; where it can't, listing it merely moves the
+     flip to the halfway point, at which the box is small enough for the change
+     to pass unseen. Either way it beats a corner popping at 148px. */
+  transition:
+    width var(--duration-300) var(--ease-out-cubic),
+    height var(--duration-300) var(--ease-out-cubic),
+    top var(--duration-300) var(--ease-out-cubic),
+    left var(--duration-300) var(--ease-out-cubic),
+    border-radius var(--duration-300) var(--ease-out-cubic),
+    corner-shape var(--duration-300) var(--ease-out-cubic),
+    box-shadow var(--duration-250) var(--ease-out-cubic);
+}
+.cv-artist-photo {
+  object-fit: cover;
+}
+
+/* Desktop pointers only. `stacked` (< 820px) puts the panel under a big square
+   of art with no room to grow a portrait into, and a hover reveal on a touch
+   screen is a state you can enter and never leave. */
+@media (hover: hover) and (pointer: fine) and (min-width: 820px) {
+  .cv-artist:hover .cv-artist-frame,
+  .cv-artist:focus-visible .cv-artist-frame {
+    width: 148px;
+    height: 148px;
+    /* Travels on BOTH axes. 22px disc + a 10px gap clears the line it grew out
+       of; the 16px of x carries it off the left margin so it unfolds diagonally
+       out of the disc rather than dropping straight down like a menu. */
+    top: 32px;
+    left: 16px;
+    border-radius: var(--radius-xl);
+    box-shadow:
+      var(--shadow-float-lg),
+      /* a cast picked from the track's own tint — the accent the waveform runs */
+      0 18px 44px -24px color-mix(in oklab, var(--cv-tint, transparent) 60%, transparent),
+      0 0 0 1px color-mix(in oklab, var(--color-ink) 6%, transparent);
+    transition:
+      width var(--duration-400) var(--cv-ease-unfold),
+      height var(--duration-400) var(--cv-ease-unfold),
+      top var(--duration-400) var(--cv-ease-unfold),
+      left var(--duration-400) var(--cv-ease-unfold),
+      border-radius var(--duration-400) var(--cv-ease-unfold),
+      corner-shape var(--duration-400) var(--cv-ease-unfold),
+      box-shadow var(--duration-300) var(--ease-entrance);
+  }
+  /* The squircle belongs to the OPENED state only — the disc it grows out of is
+     a true circle, and a superellipse at 22px would just be a slightly wrong
+     circle. corner-shape doesn't interpolate, so it flips the instant the hover
+     starts; that's the right moment for it to happen, because at 22px a
+     squircle and a circle are the same handful of pixels, whereas flipping it
+     at full size would pop a visible corner. Same @supports treatment the work
+     tiles get — plain radius where the browser hasn't got it. */
+  @supports (corner-shape: squircle) {
+    .cv-artist:hover .cv-artist-frame,
+    .cv-artist:focus-visible .cv-artist-frame {
+      corner-shape: squircle;
+    }
+  }
+  .cv-artist:focus-visible .cv-artist-frame {
+    outline: 2px solid color-mix(in oklab, var(--color-ink) 55%, transparent);
+    outline-offset: 2px;
+  }
+  .cv-artist:hover .cv-artist-name,
+  .cv-artist:focus-visible .cv-artist-name {
+    color: var(--color-ink);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* the portrait still opens, at full size and in place — it just stops
+     travelling to get there. */
+  .cv-artist-frame,
+  .cv-artist:hover .cv-artist-frame,
+  .cv-artist:focus-visible .cv-artist-frame {
+    transition: box-shadow var(--duration-150) ease;
+  }
 }
 .cv-music-rank {
   margin: 5px 0 0;
@@ -700,22 +966,32 @@
   line-height: var(--text-ui-sm--line-height);
   letter-spacing: var(--text-ui-sm--letter-spacing);
   font-weight: var(--text-ui-sm--font-weight);
-  color: var(--color-muted);
+  color: var(--color-ink-secondary);
 }
 .cv-music-controls {
   display: flex;
   align-items: center;
   gap: 14px;
 }
+/* Paint order across the row: the wave is the only thing here that leaves its
+   own box. Pull past either end and the rubber-band splay (see Waveform.jsx)
+   throws bars up to 44px sideways, straight across the button on one side and
+   the clock on the other. DOM order alone doesn't settle it — the bars are
+   transformed, so they paint with the positioned layer and would land on top of
+   the button that comes before them. So the row is layered explicitly: the wave
+   is floor, its neighbours are above it, and an over-pull tucks underneath
+   instead of over. */
 .cv-play-btn {
   flex: none;
+  position: relative;
+  z-index: 1;
   display: grid;
   place-items: center;
   width: 48px;
   height: 48px;
   border-radius: var(--radius-full);
   color: var(--color-ink-inverse);
-  background: var(--color-dark);
+  background: var(--color-surface-inverse);
   border: none;
   cursor: pointer;
   /* Sits flush against the panel's clipped left edge — scale from the left so
@@ -731,10 +1007,115 @@
 .cv-play-btn:active {
   transform: scale(0.94);
 }
+/* Only "no preview" is honestly dead. Every other state is pressable — see
+   Transport.jsx — so this now applies to one case instead of most of them. */
 .cv-play-btn:disabled {
   opacity: 0.4;
   cursor: default;
 }
+
+/* ── transport: the load state, drawn on the button ─────────────────────────
+   A stroked ring concentric with the button rather than a spinner parked next
+   to it: same centre at both sizes, it can show a real fraction, and it rides
+   the button's own hover/press scale because it's a child — one object, not two
+   things that have to be kept in sync.
+
+   It sits INSIDE the fill rather than around it. A halo would be neater, but
+   this button is flush against .cv-music-panel's left edge and that panel is
+   overflow:hidden (it has to be — it clips as the card collapses on close), so
+   anything outside the button's box would come back with a flat side. Inside
+   means the ring is on the dark fill, hence the inverse ink and a scrim track.
+
+   Determinate (content-length known) fills clockwise from 12 o'clock with the
+   actual bytes. Indeterminate sweeps a quarter-arc at constant speed — the one
+   place `linear` is right, since nothing here accelerates toward a destination. */
+.cv-transport {
+  position: relative;
+}
+/* Play and retry occupy the SAME grid cell, so the swap between them is a
+   crossfade in place — nothing about it reaches the layout, and the ring drawn
+   around them never has to move to accommodate a different glyph. */
+.cv-transport-glyph {
+  display: grid;
+  place-items: center;
+}
+.cv-transport-cell {
+  grid-area: 1 / 1;
+  display: grid;
+  place-items: center;
+}
+.cv-transport-ring {
+  position: absolute;
+  inset: 3px;
+  width: auto;
+  height: auto;
+  fill: none;
+  /* -90deg puts 0% at the top; the sweep animation composes onto this. */
+  transform: rotate(-90deg);
+  pointer-events: none;
+}
+.cv-transport-track {
+  stroke: var(--scrim-white-15);
+  stroke-width: 2;
+}
+.cv-transport-arc {
+  stroke: var(--color-ink-inverse);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+/* Progress glides to each new value instead of stepping — the reads arrive in
+   irregular chunks, and an un-eased ring makes a healthy download look jerky. */
+.cv-transport-ring.is-determinate .cv-transport-arc {
+  transition: stroke-dashoffset var(--duration-200) var(--ease-standard);
+}
+.cv-transport-ring.is-sweep {
+  animation: cv-spin 900ms linear infinite;
+}
+/* The intent flag: a solid ring means this load lands playing, a hairline one
+   means you've told it not to. The words say the same thing; this is so the
+   press reads at a glance without them. */
+.cv-transport:not([data-pending]) .cv-transport-arc {
+  stroke: var(--scrim-white-50);
+  stroke-width: 1.5;
+}
+@keyframes cv-spin {
+  to {
+    transform: rotate(270deg);
+  }
+}
+
+/* Nothing to draw yet. A stationary row of stub bars is indistinguishable from
+   a track whose waveform came back flat, so sweep a highlight across them —
+   masked, so it costs no extra element and can't shift anything. */
+.cv-wave-wrap {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  /* Floor of the controls row, and a stacking context — so every bar the
+     over-drag flings sideways is trapped at this level and can't outrank the
+     button or the clock on its way past them. */
+  position: relative;
+  z-index: 0;
+}
+.cv-wave-wrap.is-waiting {
+  -webkit-mask-image: linear-gradient(90deg, #000 40%, #0006 50%, #000 60%);
+  mask-image: linear-gradient(90deg, #000 40%, #0006 50%, #000 60%);
+  -webkit-mask-size: 260% 100%;
+  mask-size: 260% 100%;
+  animation: cv-wave-sweep 1500ms linear infinite;
+}
+@keyframes cv-wave-sweep {
+  from {
+    -webkit-mask-position: 160% 0;
+    mask-position: 160% 0;
+  }
+  to {
+    -webkit-mask-position: -60% 0;
+    mask-position: -60% 0;
+  }
+}
+
 .cv-wave {
   flex: 1;
   min-width: 0;
@@ -754,13 +1135,80 @@
 }
 .cv-music-time {
   flex: none;
+  position: relative;
+  z-index: 1; /* above the wave, so a right-edge over-pull runs under the clock */
+  /* a one-cell grid: the clock and the status line stack in it during a swap */
+  display: grid;
+  justify-items: end;
+  align-items: center;
   font-size: var(--text-ui-sm);
   font-variant-numeric: tabular-nums;
-  color: var(--color-muted);
+  color: var(--color-ink-secondary);
   /* No min-width: tabular figures already hold the readout steady as it ticks,
      and a padded box just parks dead space between the waveform and the time. */
   text-align: right;
   white-space: nowrap;
+}
+
+/* The status line is not a caption on the clock — while it is showing, it IS
+   the readout, and it's the only thing on screen that answers "what is this
+   doing?". Full ink, and coloured by how much it wants attention. */
+.cv-music-time[data-kind="status"],
+.cv-dock-time[data-kind="status"] {
+  color: var(--color-ink);
+}
+/* A failed 30-second preview is not an emergency, and red said it was. The
+   failure is already carried by the two things that can't be mistaken for
+   decoration — the wave lying down flat and the button turning into a retry
+   arrow — so the words go back to plain ink and just name what happened. */
+.cv-music-time[data-status="blocked"],
+.cv-dock-time[data-status="blocked"] {
+  color: var(--color-accent-ink);
+}
+/* The readout is what moves when the line changes; the slot it sits in holds
+   its place. The outgoing and incoming lines share one grid cell, so the slot
+   is as wide as the wider of the two for the length of the crossfade and never
+   collapses — which is what stops the waveform beside it lurching. */
+.cv-music-readout {
+  grid-area: 1 / 1;
+  will-change: transform, opacity;
+}
+/* The ruler (see CoverPlayer): every line the readout can say, all in the same
+   cell, all invisible. It contributes nothing but width — which is the point,
+   since that width is what the waveform's flex:1 is measured against. Laid out
+   like real text, so it is measured like real text.
+   `visibility: hidden` rather than opacity: it keeps the box and drops the node
+   from the accessibility tree as well as from paint. */
+.cv-time-ruler {
+  grid-area: 1 / 1;
+  display: grid;
+  visibility: hidden;
+  pointer-events: none;
+}
+.cv-time-ruler > span {
+  grid-area: 1 / 1;
+  white-space: nowrap;
+}
+.cv-dock-readout {
+  display: inline-block;
+  will-change: transform, opacity;
+}
+/* The dock keeps its CSS state machine (see NowPlaying) — a keyed remount plus
+   one entrance, rather than a presence library for a line of 12px text. */
+.cv-dock-readout {
+  animation: cv-readout-in var(--duration-300) var(--ease-entrance) both;
+}
+@keyframes cv-readout-in {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+    filter: blur(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
 }
 .cv-music-lyricwrap {
   flex: 1;
@@ -833,7 +1281,7 @@
 .cv-lyrics--note {
   display: flex;
   align-items: center;
-  color: var(--color-dark);
+  color: var(--color-ink);
   font-size: var(--text-ui-lg);
 }
 .cv-lyric {
@@ -842,7 +1290,7 @@
   font-size: var(--text-heading);
   font-weight: var(--font-weight-normal);
   line-height: var(--text-heading--line-height);
-  color: var(--color-dark);
+  color: var(--color-ink);
   transform-origin: left center;
   transform: scale(var(--ls, 1));
   opacity: var(--lo, 1);
@@ -864,11 +1312,11 @@
   white-space: pre-wrap;
 }
 .cv-lyric-w {
-  color: color-mix(in oklab, var(--color-dark) 42%, transparent);
+  color: color-mix(in oklab, var(--color-ink) 42%, transparent);
   transition: color var(--duration-200) var(--ease-entrance);
 }
 .cv-lyric-w.is-sung {
-  color: var(--color-dark);
+  color: var(--color-ink);
 }
 .cv-spotify-link {
   flex: none;
@@ -878,7 +1326,7 @@
   color: var(--color-ink-inverse);
   text-decoration: none;
   padding: 9px 18px;
-  background: var(--color-dark);
+  background: var(--color-surface-inverse);
   border: none;
   transition:
     transform var(--duration-200) var(--ease-overshoot),
@@ -1208,8 +1656,15 @@
     width: auto;
     max-width: none;
   }
-  .cv-dock-time {
+  /* The clock is the expendable one. A status is the reason the dock is worth
+     looking at on a phone, so it keeps its place and the title gives up width. */
+  .cv-dock-time[data-kind="clock"] {
     display: none;
+  }
+  .cv-dock-time[data-kind="status"] {
+    min-width: 0;
+    font-size: var(--text-ui-xs);
+    white-space: nowrap;
   }
 }
 
@@ -1289,7 +1744,7 @@
   transition-delay: 0ms !important;
 }
 .cv-mm-cell.is-here {
-  outline: 2px solid var(--color-dark);
+  outline: 2px solid var(--color-ink);
   outline-offset: 1px;
 }
 /* the cover the player grew out of — the map's stand-in for the open card */

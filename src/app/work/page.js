@@ -28,9 +28,11 @@ export const metadata = {
   },
 }
 
-// Wider shell than /blog or /tierlist on purpose — those are reading pages,
-// this is a looking page. Same top rhythm and same GlitchText title so it
-// still lands as the same site.
+// Full bleed, and deliberately so: /blog and /tierlist are reading pages and
+// get a measure, this is a looking page. The horizontal padding is the nav's
+// own `p-4 md:p-6` — the navbar is fixed and full-width, so matching its
+// padding is what puts the page title under the logo and the grid's right
+// edge under the nav links, at every width.
 export default async function WorkPage() {
   if (isProdView()) notFound()
 
@@ -39,20 +41,31 @@ export default async function WorkPage() {
 
   return (
     <div className="bg-surface min-h-dvh">
-      <main className="mx-auto max-w-[1440px] px-4 pt-24 pb-24 md:px-8">
-        <header className="mb-10 flex items-end justify-between gap-6">
-          <div className="min-w-0">
-            <h1 className="text-ink text-title-xl md:text-display">
-              <GlitchText text={data.title || 'Work'} />
-            </h1>
-            {data.intro ? (
-              <p className="text-ink-secondary text-body-lg mt-3 max-w-xl text-balance">
-                {data.intro}
-              </p>
-            ) : null}
-          </div>
+      <main className="px-4 pt-24 pb-24 md:px-6 md:pt-28">
+        {/* Just the title. The tiles are the description — a paragraph
+            explaining them was saying out loud what they already show.
+            (`data.intro` is still in work.json and still editable in the
+            studio; nothing renders it.) */}
+        <header className="mb-8 flex items-end justify-between gap-6 md:mb-10">
+          <h1 className="text-ink text-title-xl md:text-display min-w-0">
+            <GlitchText text={data.title || 'Work'} />
+          </h1>
           {isDevView() ? <EditLink /> : null}
         </header>
+
+        {/* The tiles are hidden in the stylesheet and released by the grid as
+            each becomes ready. Without JS that release never comes, so this
+            hands them straight back — the page degrades to a plain grid of
+            work rather than to nothing at all. */}
+        <noscript>
+          {/* eslint-disable-next-line react/no-danger */}
+          <style
+            dangerouslySetInnerHTML={{
+              __html:
+                '.work-cell{opacity:1!important;visibility:visible!important;animation:none!important}',
+            }}
+          />
+        </noscript>
 
         {items.length === 0 ? (
           <p className="text-ink-secondary text-body">Nothing here yet.</p>

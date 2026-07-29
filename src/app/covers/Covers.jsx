@@ -26,13 +26,31 @@ const NOTCH_MIN_SQUISH = 0.6; // floor so condensed text stays legible
 export default function Covers() {
   // start with placeholders, then swap in recently-played Spotify covers if set up
   const [covers, setCovers] = useState(() => makeCoversMeta());
+  // "loading" until the track list settles either way. It gates BOTH the loader
+  // and opening a cover: a player built on a placeholder can only ever report
+  // failure, and a tile that opens nothing at all is the worst answer of the
+  // three. On a fast connection this is over before the grid has finished
+  // popping in; on a slow one it is the whole first stretch of the page.
+  const [dataState, setDataState] = useState("loading"); // loading | live | placeholder
+  const dataStateRef = useRef(dataState);
+  dataStateRef.current = dataState;
   useEffect(() => {
     let alive = true;
-    fetchSpotifyCovers().then((sp) => {
-      if (!alive || !sp) return;
-      setCoverSources(sp); // tiles load real album art
-      setCovers(sp); // grid + player use the track meta
-    });
+    fetchSpotifyCovers()
+      .then((sp) => {
+        if (!alive) return;
+        if (!sp) {
+          // Spotify isn't configured or didn't answer. The placeholders are all
+          // there is, and they stay openable — "No preview" in the player is a
+          // worse song but a better answer than a tile that ignores the click.
+          setDataState("placeholder");
+          return;
+        }
+        setCoverSources(sp); // tiles load real album art
+        setCovers(sp); // grid + player use the track meta
+        setDataState("live");
+      })
+      .catch(() => alive && setDataState("placeholder"));
     return () => {
       alive = false;
     };
@@ -250,8 +268,11 @@ export default function Covers() {
   const onGridReady = useCallback(() => setReady(true), []);
   const onGridOpen = useCallback(
     (idx, rect, cell) => {
+      // Read through the ref so this callback keeps one identity for the whole
+      // page — CoversGrid is memoised on it, and a new function here means
+      // reconciling the entire mesh pool mid-drag.
+      if (dataStateRef.current === "loading") return; // loader is on screen saying why
       const c = covers[idx];
-      if (c.type === "audio") return; // no player for audio
       setPlayer({ cover: c, rect });
       // hide the tile (gap) + freeze, and hand the grid the card box the
       // player is about to fill so the push matches its real shape
@@ -321,6 +342,11 @@ export default function Covers() {
       {/* blurred, white-fading screen edges — the homepage's soft-edge language */}
       <div className="cv-edge-fade" aria-hidden />
 
+      {/* First load. Until this existed the page opened onto a field of blank
+          slate squares with nothing moving and nothing said — indistinguishable
+          from a grid that had finished loading and found nothing. */}
+      <CoversLoader show={dataState === "loading" || !ready} />
+
       {/* HUD */}
       <div className={`cv-hud${ready ? " is-ready" : ""}`}>
         <div className="cv-focus">
@@ -381,6 +407,35 @@ export default function Covers() {
           document.body,
         )}
     </>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// First-load indicator. A sweeping arc and one line of plain type, centred over
+// the grid — the same ring the transport button draws around itself, so "this
+// is working on it" looks like one idea across the whole route.
+//
+// It never blocks the grid (pointer-events: none): panning around while the art
+// streams in is fine, it's opening a cover that has to wait. It stays mounted
+// after `show` goes false so it can fade rather than vanish, and the sweep is
+// dropped entirely under prefers-reduced-motion (see covers.css) — the words
+// alone still carry the whole message.
+// ---------------------------------------------------------------------------
+function CoversLoader({ show }) {
+  return (
+    <div
+      className="cv-loader"
+      data-state={show ? "in" : "out"}
+      role="status"
+      aria-live="polite"
+      aria-hidden={show ? undefined : true}
+    >
+      <svg className="cv-loader-ring" viewBox="0 0 36 36" aria-hidden="true">
+        <circle className="cv-loader-track" cx="18" cy="18" r="15.5" />
+        <circle className="cv-loader-arc" cx="18" cy="18" r="15.5" />
+      </svg>
+      <span className="cv-loader-label">Loading covers</span>
+    </div>
   );
 }
 

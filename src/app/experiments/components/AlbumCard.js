@@ -191,7 +191,7 @@ export default function AlbumCard() {
                               key={isPlaying}
                               initial={{
                                 opacity: 0,
-                                filter: "blur(var(--blur-xs))",
+                                filter: "blur(4px)",
                                 scale: 0.8,
                               }}
                               animate={{
@@ -201,7 +201,7 @@ export default function AlbumCard() {
                               }}
                               exit={{
                                 opacity: 0,
-                                filter: "blur(var(--blur-xs))",
+                                filter: "blur(4px)",
                                 scale: 0.8,
                               }}
                             >
@@ -212,7 +212,7 @@ export default function AlbumCard() {
                               key={isPlaying}
                               initial={{
                                 opacity: 0,
-                                filter: "blur(var(--blur-xs))",
+                                filter: "blur(4px)",
                                 scale: 0.8,
                               }}
                               animate={{
@@ -222,7 +222,7 @@ export default function AlbumCard() {
                               }}
                               exit={{
                                 opacity: 0,
-                                filter: "blur(var(--blur-xs))",
+                                filter: "blur(4px)",
                                 scale: 0.8,
                               }}
                             >
@@ -344,7 +344,7 @@ export default function AlbumCard() {
                                           key={isPlaying}
                                           initial={{
                                             opacity: 0,
-                                            filter: "blur(var(--blur-xs))",
+                                            filter: "blur(4px)",
                                             scale: 0.8,
                                           }}
                                           animate={{
@@ -354,7 +354,7 @@ export default function AlbumCard() {
                                           }}
                                           exit={{
                                             opacity: 0,
-                                            filter: "blur(var(--blur-xs))",
+                                            filter: "blur(4px)",
                                             scale: 0.8,
                                           }}
                                         >
@@ -365,7 +365,7 @@ export default function AlbumCard() {
                                           key={isPlaying}
                                           initial={{
                                             opacity: 0,
-                                            filter: "blur(var(--blur-xs))",
+                                            filter: "blur(4px)",
                                             scale: 0.8,
                                           }}
                                           animate={{
@@ -375,7 +375,7 @@ export default function AlbumCard() {
                                           }}
                                           exit={{
                                             opacity: 0,
-                                            filter: "blur(var(--blur-xs))",
+                                            filter: "blur(4px)",
                                             scale: 0.8,
                                           }}
                                         >

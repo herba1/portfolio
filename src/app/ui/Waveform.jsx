@@ -30,6 +30,16 @@ const INK_FADE = { duration: 0.42, ease: [0.33, 1, 0.68, 1] };
 // frame it moves, so the scrub gets a much shorter ramp than playback.
 const INK_SCRUB = { duration: 0.12, ease: [0.33, 1, 0.68, 1] };
 
+// `flat` — there is no audio and there isn't going to be. The bars lie down to
+// a hairline, left to right, and that IS the failure notice: the wave is the
+// biggest thing in the row, so it going flat says "nothing came" at a glance
+// and lets the words beside it be one quiet sentence instead of an alarm.
+// Overdamped on purpose — a bounce here would read as playful, and this is the
+// one moment in the player that shouldn't.
+const FLAT_H = 4; // % of the row, i.e. a ~2px line at the default height
+const FLAT_SPREAD = 0.24; // seconds from the first bar lying down to the last
+const FLAT_SPRING = { type: "spring", stiffness: 240, damping: 34, mass: 0.5 };
+
 function rubber(deltaPx) {
   const sign = Math.sign(deltaPx);
   const x = Math.abs(deltaPx);
@@ -46,6 +56,7 @@ export default function Waveform({
   onScrubEnd,
   accent = "var(--color-accent)",
   height = 54,
+  flat = false,
   // These land on `backgroundColor` (a real DOM style, not a canvas
   // fillStyle), so they can read the tokens directly rather than carrying
   // their own copy of the ink value.
@@ -55,7 +66,7 @@ export default function Waveform({
   const ref = useRef(null);
   const [dragX, setDragX] = useState(-1); // 0..1, -1 = not dragging
   const [over, setOver] = useState(0); // signed px the pull edge is past the boundary
-  const ready = !!peaks;
+  const ready = !!peaks && !flat;
   const bars = peaks || EMPTY;
   const n = bars.length;
   const dragging = dragX >= 0;
@@ -101,6 +112,7 @@ export default function Waveform({
       }}
       role="slider"
       aria-label="Seek"
+      aria-disabled={ready ? undefined : true}
       aria-valuenow={Math.round(progress * 100)}
       aria-valuemin={0}
       aria-valuemax={100}
@@ -156,13 +168,15 @@ export default function Waveform({
             }}
             initial={{ height: "10%" }}
             animate={{
-              height: `${Math.max(7, h * 100)}%`,
+              height: flat ? `${FLAT_H}%` : `${Math.max(7, h * 100)}%`,
               backgroundColor: active ? playedColor : idleColor,
               scaleY,
               x,
             }}
             transition={{
-              height: { type: "spring", stiffness: 380, damping: 22, mass: 0.4, delay: ready ? i * 0.004 : 0 },
+              height: flat
+                ? { ...FLAT_SPRING, delay: (i / Math.max(1, n - 1)) * FLAT_SPREAD }
+                : { type: "spring", stiffness: 380, damping: 22, mass: 0.4, delay: ready ? i * 0.004 : 0 },
               backgroundColor: dragging ? INK_SCRUB : INK_FADE,
               scaleY: { type: "spring", stiffness: 600, damping: 20, mass: 0.3 },
               x: dragging ? FOLLOW : RECOIL,

@@ -294,8 +294,9 @@ export default function WorkStudio() {
         </div>
 
         <div className="flex items-center gap-2 px-4">
-          {/* The live grid is always COLUMNS wide. This only lets you sanity
-              check how the same tiles scan stacked in one column. */}
+          {/* A cap on the preview, not the live count — the page itself picks
+              1 or 2 from its own width. This is for sanity-checking how the
+              same tiles scan when they stack. */}
           <div className="flex h-7 overflow-hidden rounded-lg border" style={{ borderColor: 'var(--studio-border)' }}>
             {[1, COLUMNS].map((n) => (
               <button

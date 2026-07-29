@@ -2,12 +2,16 @@
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, useIsPresent } from "motion/react";
+// Aliased deliberately: the hi-res art preloader below calls `new Image()`, the
+// DOM constructor. Importing next/image under its usual name would shadow that
+// and turn a preload into an attempt to construct a React component.
+import NextImage from "next/image";
 import { X } from "lucide-react";
 import Waveform from "@/app/ui/Waveform";
 import Lyrics from "./Lyrics";
 import EqBars from "./EqBars";
-import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 import SlotNumber from "@/app/ui/SlotNumber";
+import { CLOCK_READOUTS, STATUS_READOUTS, TransportButton, transportStatus } from "./Transport";
 import { useAudio, load, toggle, seek, scrubStart, scrubEnd, keyOf } from "./lib/audioEngine";
 import { useArtInk } from "./lib/artInk";
 import { DEFAULTS } from "./lib/config";
@@ -26,6 +30,16 @@ const itemV = {
   hidden: { opacity: 0, y: 12, filter: "blur(8px)" },
   show: { opacity: 1, y: 0, filter: "blur(0px)", transition: { duration: 0.45, ease: [0.16, 1, 0.3, 1] } },
 };
+
+// The readout swaps between a running clock and a word about the load, and it
+// used to do it by replacing a string — so a failure ARRIVED as a line of text
+// appearing out of nothing, in a card where every other element had been given
+// a way in. Same vocabulary as the panel's own entrance, a beat quicker: the
+// old line lifts out, the new one rises in behind it. Keyed on the KIND of
+// readout, not the text, so a ticking percentage refines in place instead of
+// re-animating itself eleven times a second.
+const READ_IN = { duration: 0.3, ease: [0.16, 1, 0.3, 1] };
+const READ_OUT = { duration: 0.16, ease: [0.16, 1, 0.3, 1] };
 
 export default function CoverPlayer({ cover, rect, onClose, onClosed, cornerRadius = DEFAULTS.cornerRadius }) {
   return (
@@ -56,9 +70,30 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
   // false the moment the card starts closing — the badge is a plain CSS element
   // inside the morphing art, so it needs the presence flag to know to fade.
   const isPresent = useIsPresent();
-  const IDLE = { status: "loading", playing: false, peaks: null, duration: 0, currentTime: 0 };
+  // The frame or two before the engine has picked this track up. `pending` is
+  // true because opening a cover asks for playback — so the transport shows the
+  // loading ring immediately rather than a dead-looking play button.
+  const IDLE = {
+    status: "loading",
+    playing: false,
+    peaks: null,
+    duration: 0,
+    currentTime: 0,
+    loaded: null,
+    slow: false,
+    pending: true,
+  };
   const audio = engine.key === key ? engine : IDLE;
   const progress = audio.duration ? audio.currentTime / audio.duration : 0;
+  const statusText = transportStatus(audio);
+  const waveWaiting = !audio.peaks && (audio.status === "loading" || audio.status === "ready");
+  // Nothing is coming — the attempt failed, or there was never a preview. The
+  // wave lies down flat, which is the whole failure notice: it's the widest
+  // thing in the row, so it going quiet says more than a sentence can, and the
+  // words are left free to be one calm line rather than an alarm.
+  const waveFlat = audio.status === "error" || audio.status === "none";
+  const readoutKind = statusText ? audio.status : "clock";
+  const clockText = `${fmt(audio.currentTime)} / ${fmt(audio.duration)}`;
 
   useEffect(() => {
     const onKey = (e) => e.key === "Escape" && onClose();
@@ -190,7 +225,6 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
           animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
           exit={{ opacity: 0, filter: "blur(6px)", transition: { duration: 0.2 } }}
           transition={{ delay: 0.16, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
-          onPointerDown={(e) => e.stopPropagation()}
         >
           <span>
             #{cover.rank} · {cover.rankLabel}
@@ -219,18 +253,50 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         <motion.div className="cv-music-stack" ref={stackRef} variants={panelV} initial="hidden" animate="show">
         <motion.div className="cv-music-head" variants={itemV}>
           <h2 className="cv-music-title no-orphan">{cover.title}</h2>
+          {/* The credit is a hover group, not a static line: on desktop, taking
+              the pointer to either the disc or the name grows the artist's
+              photo itself into a portrait (see covers.css). ONE element does
+              that — the disc IS the portrait, so there is never a small copy
+              sitting next to a big one.
+              It's fed the large rendition wherever it can actually be grown,
+              since the browser downsamples that to 22px far better than it
+              would upscale the thumbnail to 148. On mobile there is no hover,
+              so the thumbnail is all that gets fetched. */}
           <p className="cv-music-artist">
             {cover.artistImage ? (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                className="cv-music-avatar"
-                src={cover.artistImage}
-                alt=""
-                loading="lazy"
-                draggable={false}
-              />
-            ) : null}
-            <span>{cover.sub}</span>
+              <span
+                className="cv-artist"
+                style={{ "--cv-tint": cover.color }}
+                tabIndex={0}
+              >
+                {/* A 22px hole in the line that never changes size, so the name
+                    beside it cannot be shoved sideways by what the photo does. */}
+                <span className="cv-artist-slot">
+                  {/* The morphing box is this SPAN, not the image. Tailwind's
+                      preflight puts `max-width: 100%` on every img, which on an
+                      absolutely-positioned one resolves against its containing
+                      block — so the box could never grow wider than the 22px
+                      slot however the hover rule was written. A span has no such
+                      rule anywhere. The photo just fills whatever the span is. */}
+                  <span className="cv-artist-frame">
+                    <NextImage
+                      className="cv-artist-photo"
+                      src={
+                        (!stacked && cover.artistImageLarge) ||
+                        cover.artistImage
+                      }
+                      alt=""
+                      fill
+                      sizes="148px"
+                      draggable={false}
+                    />
+                  </span>
+                </span>
+                <span className="cv-artist-name">{cover.sub}</span>
+              </span>
+            ) : (
+              <span>{cover.sub}</span>
+            )}
           </p>
           {/* on mobile the rank has moved to the header strip above the art */}
           {cover.rank && !stacked ? (
@@ -241,35 +307,65 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         </motion.div>
 
         <motion.div className={`cv-music-controls${stacked ? " is-stacked" : ""}`} variants={itemV}>
-          <button
-            className="cv-play-btn"
-            onClick={toggle}
-            // "error" stays pressable on purpose: it means this attempt didn't
-            // get the preview, not that there isn't one, and the click retries.
-            disabled={audio.status !== "ready" && audio.status !== "error"}
-            aria-label={audio.status === "error" ? "Retry" : audio.playing ? "Pause" : "Play"}
-          >
-            <PlayPauseIcon playing={audio.playing} />
-          </button>
-          <Waveform
-            peaks={audio.peaks}
-            progress={progress}
-            duration={audio.duration}
-            onSeek={seek}
-            onScrubStart={scrubStart}
-            onScrubEnd={scrubEnd}
-            accent={cover.color}
-          />
-          <span className="cv-music-time">
-            {audio.status === "loading" ? (
-              "…"
-            ) : audio.status === "none" ? (
-              "no preview"
-            ) : audio.status === "error" ? (
-              "retry"
-            ) : (
-              <SlotNumber value={`${fmt(audio.currentTime)} / ${fmt(audio.duration)}`} direction="up" />
-            )}
+          {/* Every non-playing state is pressable and named — see Transport.jsx. */}
+          <TransportButton className="cv-play-btn" audio={audio} onClick={toggle} size={20} />
+          {/* Sweeps while there is nothing to draw yet, so the empty bars read as
+              "the waveform is coming" rather than as a track with no sound in it.
+              Only while something is actually on its way, though — "no preview"
+              and "retry" are settled answers, and a shimmer under either of them
+              would promise a wave that is never going to arrive. */}
+          <div className={`cv-wave-wrap${waveWaiting ? " is-waiting" : ""}`}>
+            <Waveform
+              peaks={audio.peaks}
+              progress={progress}
+              duration={audio.duration}
+              onSeek={seek}
+              onScrubStart={scrubStart}
+              onScrubEnd={scrubEnd}
+              accent={cover.color}
+              flat={waveFlat}
+            />
+          </div>
+          <span className="cv-music-time" data-kind={statusText ? "status" : "clock"} data-status={audio.status}>
+            {/* The slot's width, and nothing else: every line the CURRENT state
+                can show, stacked invisibly in the same grid cell, so the box is
+                as wide as the widest of them and never resizes while that state
+                is up. The waveform beside it is flex:1 and would otherwise be
+                dragged wider or narrower by every word and every digit the
+                percentage gains.
+
+                Scoped to the state rather than to every string in the player —
+                see Transport.jsx. Holding one box big enough for "Loading,
+                paused" meant the clock, which is what's showing essentially all
+                the time, never filled it, and the slack sat in a gap between
+                the wave and the time.
+
+                Deliberately not a hard-coded width: the browser measures the
+                real strings in the real font, so this is correct at both type
+                sizes and stays correct if the copy is edited. */}
+            <span className="cv-time-ruler" aria-hidden="true">
+              {(statusText ? STATUS_READOUTS : CLOCK_READOUTS).map((line) => (
+                <span key={line}>{line}</span>
+              ))}
+              {/* the live clock too, in case a duration ever runs past 9:59 */}
+              {statusText ? null : <span>{clockText}</span>}
+            </span>
+            {/* Not `mode="wait"`: waiting empties the slot for the length of the
+                exit, and the two lines have to overlap for the crossfade to be a
+                crossfade at all. With the ruler holding the box open, nothing
+                either of them does can move the wave. */}
+            <AnimatePresence initial={false}>
+              <motion.span
+                key={readoutKind}
+                className="cv-music-readout"
+                initial={{ opacity: 0, y: 7, filter: "blur(4px)" }}
+                animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+                exit={{ opacity: 0, y: -7, filter: "blur(4px)", transition: READ_OUT }}
+                transition={READ_IN}
+              >
+                {statusText ? statusText : <SlotNumber value={clockText} direction="up" />}
+              </motion.span>
+            </AnimatePresence>
           </span>
         </motion.div>
 

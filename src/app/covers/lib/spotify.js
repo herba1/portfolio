@@ -12,12 +12,29 @@ const TINTS = [
 ];
 
 // Spotify track names carry version cruft — "- Remastered 2009", "(2011 Remaster)",
-// "- Deluxe Edition". Strip it so the grid shows the plain song name, and so the
-// lyrics / preview lookups (which search by title) match more often. Only the
-// clearly-redundant tags go; real variants like "Radio Edit", "Live", "Extended
-// Mix" or a remix credit stay, since those are different recordings.
-const NOISE =
-  /^(?:(?:\d{4}\s+)?(?:digital(?:ly)?\s+)?re-?master(?:ed)?(?:\s+version)?(?:\s+\d{4})?|(?:mono|stereo|single|album)\s+version|(?:deluxe|expanded|remastered)\s+(?:edition|version)|\d+(?:st|nd|rd|th)\s+anniversary\s+(?:edition|remaster(?:ed)?|mix)|bonus\s+track)$/i;
+// "- Deluxe Edition", "- Ultimate Mix". Strip it so the grid shows the plain song
+// name, and so the lyrics / preview lookups (which search by title) match more
+// often. Any trailing mix/remix credit goes too — the grid wants the song title,
+// not the pressing.
+const NOISE = new RegExp(
+  "^(?:" +
+    [
+      // 2009 Remaster / Digitally Remastered / Remastered Version 2011
+      "(?:\\d{4}\\s+)?(?:digital(?:ly)?\\s+)?re-?master(?:ed)?(?:\\s+version)?(?:\\s+\\d{4})?",
+      // Mono Version / Single Version
+      "(?:mono|stereo|single|album)\\s+version",
+      // Deluxe Edition / Expanded Version
+      "(?:deluxe|expanded|remastered)\\s+(?:edition|version)",
+      // 50th Anniversary Edition
+      "\\d+(?:st|nd|rd|th)\\s+anniversary\\s+(?:edition|remaster(?:ed)?|mix)",
+      "bonus\\s+track",
+      // anything ending in a mix credit: Ultimate Mix, 2019 Mix, Extended Mix,
+      // Original Mix, Radio Mix, Steve Aoki Remix, Remix, Mix
+      "(?:.*\\s)?(?:re-?)?mix(?:es|ed)?(?:\\s+\\d{4})?",
+    ].join("|") +
+    ")$",
+  "i",
+);
 
 export function cleanTitle(raw = "") {
   let out = String(raw);
@@ -56,6 +73,8 @@ export async function fetchSpotifyCovers() {
         title: cleanTitle(tr.title),
         sub: tr.artist,
         artistImage: tr.artistImage || null,
+        // the 320 rendition — the player's hover unfolds the portrait to ~148px
+        artistImageLarge: tr.artistImageLarge || tr.artistImage || null,
         type: "track",
         hasAudio: true,
         color: tint,

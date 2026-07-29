@@ -3,6 +3,7 @@ export const LINKS = [
   { name: "Writing", link: "/blog", primary: true },
   { name: "Tier List", link: "/tierlist", primary: true },
   { name: "Tuner", link: "/tuner", primary: true },
+  { name: "Deck", link: "/deck", primary: true },
   { name: "Github", link: "https://github.com/herba1" },
   { name: "X", link: "https://x.com/herb_dev" },
   { name: "LinkedIn", link: "https://linkedin.com/in/herbart-hernandez" },
@@ -18,4 +19,5 @@ export const DEV_LINKS = [
   { name: "Work Studio", link: "/~studio/work", primary: true, dev: true },
   { name: "Experiments", link: "/experiments", primary: true, dev: true },
   { name: "Intro", link: "/intro", primary: true, dev: true },
+  { name: "Isolate", link: "/isolate", primary: true, dev: true },
 ];

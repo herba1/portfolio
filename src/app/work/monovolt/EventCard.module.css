@@ -1,0 +1,481 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * CrowdVolt event card — every Tailwind utility from the source component
+ * translated to plain CSS, value for value.
+ *
+ * Source classes → rules here:
+ *   aspect-[833/500] · rounded-lg / sm:rounded-xl · bg-white/[0.06]
+ *   [clip-path:inset(0_round_0.5rem)] · transition-[transform,opacity]
+ *   duration-300 ease-out · can-hover:group-hover:scale-[1.02]
+ *   tracking-tight (-0.025em) · text-white/60 · text-white/55 · tabular-nums
+ *
+ * The skeleton's shimmer is NOT here — those parts wear the global
+ * `mv-skeleton` class from ./tokens.css. This file only sets their geometry
+ * (and the two spots where the source's radius/opacity differ from the
+ * mv-skeleton defaults).
+ *
+ * Tokens are read with literal fallbacks so the tile renders correctly even
+ * before `.mv-scope` is in scope.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── The tile: card + control row. No background — the tile supplies it. ── */
+.demo {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  width: 100%;
+  font-family: var(--font-inter), Inter, sans-serif;
+  /* Tailwind preflight's html line-height; the skeleton's reserved height
+     depends on it matching the real card's. */
+  line-height: 1.5;
+  color: var(--explore-text, #ffffff);
+}
+
+/* ── Card root ──────────────────────────────────────────────────────────
+ * `group relative z-0 flex h-full w-full flex-col`. Deliberately no lift and
+ * no panel fill on hover — only the image scales inside its clip.
+ * ─────────────────────────────────────────────────────────────────────── */
+.card {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+/* Not in the source (next/link was natively focusable); a role="link" div
+   needs its own visible focus ring. */
+.card:focus-visible {
+  outline: 2px solid var(--explore-accent, #fe5600);
+  outline-offset: 4px;
+  border-radius: 0.5rem;
+}
+
+/* `relative aspect-[833/500] w-full overflow-hidden rounded-lg
+    bg-white/[0.06] [clip-path:inset(0_round_0.5rem)]` — the clip-path is what
+    actually holds the scaled image to the rounded corners in Safari. */
+.imgWrap {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 833 / 500;
+  overflow: hidden;
+  border-radius: 0.5rem;
+  clip-path: inset(0 round 0.5rem);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* `fill object-cover transition-[transform,opacity] duration-300 ease-out` */
+.img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0.5rem;
+  opacity: 0;
+  transition:
+    transform 300ms ease-out,
+    opacity 300ms ease-out;
+  -webkit-user-drag: none;
+  user-select: none;
+}
+
+.imgReady {
+  opacity: 1;
+}
+
+/* `can-hover:group-hover:scale-[1.02]` */
+@media (hover: hover) {
+  .card:hover .img {
+    transform: scale(1.02);
+  }
+}
+
+/* `sm:rounded-xl sm:[clip-path:inset(0_round_0.75rem)]` (sm = 640px) */
+@media (min-width: 640px) {
+  .imgWrap {
+    border-radius: 0.75rem;
+    clip-path: inset(0 round 0.75rem);
+  }
+
+  .img {
+    border-radius: 0.75rem;
+  }
+}
+
+/* ── Heart ──────────────────────────────────────────────────────────────
+ * `absolute right-2 top-2 z-10` around HeartContainer's compact button:
+ * `rounded-full p-1.5 text-white transition-colors duration-200
+ *  hover:bg-white/[0.08]` + a 44×44 tap target from ::before.
+ * ─────────────────────────────────────────────────────────────────────── */
+.heartWrap {
+  position: absolute;
+  right: 8px;
+  top: 8px;
+  z-index: 10;
+}
+
+.heart {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  margin: 0;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: #ffffff;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 200ms ease-out;
+}
+
+/* Keeps a 44×44 tap target regardless of the small visual footprint. */
+.heart::before {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 44px;
+  height: 44px;
+  transform: translate(-50%, -50%);
+}
+
+@media (hover: hover) {
+  .heart:hover {
+    background: rgba(255, 255, 255, 0.08);
+  }
+}
+
+.heart:focus-visible {
+  outline: 2px solid var(--explore-accent, #fe5600);
+  outline-offset: 2px;
+}
+
+.heartIcon {
+  display: block;
+  fill: none;
+  transition:
+    transform 420ms cubic-bezier(0.34, 1.56, 0.64, 1),
+    fill 200ms ease-out,
+    color 200ms ease-out;
+}
+
+/* Press: snap down fast, spring back on release via the overshoot curve above. */
+.heart:active .heartIcon {
+  transform: scale(0.88);
+  transition-duration: 90ms;
+  transition-timing-function: ease-out;
+}
+
+/* Liked: fill with the brand orange and pop once (the class arriving starts
+   the animation; it doesn't replay on unrelated re-renders). */
+.heartOn .heartIcon {
+  fill: var(--explore-accent, #fe5600);
+  color: var(--explore-accent, #fe5600);
+  animation: heart-pop 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes heart-pop {
+  0% {
+    transform: scale(0.88);
+  }
+  45% {
+    transform: scale(1.18);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ── Meta row ───────────────────────────────────────────────────────────
+ * `mt-3 flex min-w-0 flex-row items-center gap-4`
+ * ─────────────────────────────────────────────────────────────────────── */
+.meta {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+/* `flex min-w-0 flex-1 flex-col gap-0.5` */
+.info {
+  display: flex;
+  flex: 1 1 0%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* `truncate font-inter tracking-tight text-[17px] font-semibold text-white` */
+.title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: -0.025em;
+  color: var(--explore-text, #ffffff);
+}
+
+/* `truncate font-inter tracking-tight text-[13px] font-normal text-white/60` */
+.sub {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  color: var(--explore-text-muted, rgba(255, 255, 255, 0.6));
+}
+
+/* `flex shrink-0 flex-col items-end gap-0 text-right tracking-tight text-white` */
+.price {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0;
+  text-align: right;
+  letter-spacing: -0.025em;
+  color: var(--explore-text, #ffffff);
+}
+
+/* `text-[11px] font-medium leading-none text-white/55` */
+.pricePrefix {
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1;
+  color: var(--explore-text-faint, rgba(255, 255, 255, 0.55));
+}
+
+/* `mt-0.5 text-xl font-semibold tabular-nums leading-none` */
+.priceValue {
+  margin-top: 2px;
+  font-size: 20px;
+  font-weight: 600;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Rainbow title treatment ────────────────────────────────────────────
+ * Verbatim from rainbow-text.module.css. A panning gradient clipped to the
+ * glyphs: one-shot sweep on mount (no fill → rests at the base position,
+ * still a full rainbow thanks to the seamless first/last stop); hover is a
+ * smooth transition, not an animation, so it never restarts/jumps.
+ * ─────────────────────────────────────────────────────────────────────── */
+.rainbow {
+  background-image: linear-gradient(
+    90deg,
+    #ff4d4d,
+    #ff9a3d,
+    #ffe14d,
+    #4dd07a,
+    #4db8ff,
+    #9a6bff,
+    #ff4d4d
+  );
+  background-size: 200% auto;
+  background-position: 0% center;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: rainbow-pan 1.8s cubic-bezier(0.22, 1, 0.36, 1);
+  transition: background-position 1.4s ease;
+}
+
+.rainbow:hover {
+  background-position: 200% center;
+}
+
+@keyframes rainbow-pan {
+  from {
+    background-position: 0% center;
+  }
+  to {
+    background-position: 200% center;
+  }
+}
+
+/* ── Skeleton ───────────────────────────────────────────────────────────
+ * Geometry only. `.mv-scope .mv-skeleton` in tokens.css is a two-class
+ * selector, so anything that overrides its background or border-radius has to
+ * out-specify it — hence the doubled class names below. Everything the global
+ * doesn't set (width/height/display) is a plain single class.
+ * ─────────────────────────────────────────────────────────────────────── */
+.skeleton {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+}
+
+/* `cv-skeleton aspect-[833/500] w-full rounded-lg bg-white/[0.06]` */
+.skelImage {
+  width: 100%;
+  aspect-ratio: 833 / 500;
+}
+
+.skeleton .skelImage.skelImage {
+  border-radius: 0.5rem;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+@media (min-width: 640px) {
+  /* `sm:rounded-xl` */
+  .skeleton .skelImage.skelImage {
+    border-radius: 0.75rem;
+  }
+}
+
+/* The strut wrappers: same font-size as the real lines, so the skeleton
+   reserves the identical height. */
+.skelLine17 {
+  font-size: 17px;
+}
+
+.skelLine13 {
+  font-size: 13px;
+}
+
+/* `inline-block align-middle rounded` */
+.skelBar {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.skeleton .skelBar.skelBar {
+  border-radius: 0.25rem;
+}
+
+/* `bg-white/[0.05]` — a touch fainter than the mv-skeleton default. */
+.skeleton .skelFaint.skelFaint {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+/* `h-3.5 w-3/4` */
+.skelTitle {
+  height: 14px;
+  width: 75%;
+}
+
+/* `h-3 w-1/2` */
+.skelSubA {
+  height: 12px;
+  width: 50%;
+}
+
+/* `h-3 w-2/5` */
+.skelSubB {
+  height: 12px;
+  width: 40%;
+}
+
+/* `flex shrink-0 flex-col items-end gap-1` */
+.skelPrice {
+  display: flex;
+  flex-shrink: 0;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
+/* `h-2.5 w-8` */
+.skelPricePrefix {
+  height: 10px;
+  width: 32px;
+}
+
+/* `h-4 w-12` */
+.skelPriceValue {
+  height: 16px;
+  width: 48px;
+}
+
+/* ── Demo controls ──────────────────────────────────────────────────────
+ * Not part of the ported card — the playground's own affordances.
+ * ─────────────────────────────────────────────────────────────────────── */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pill {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 6px 12px;
+  font-family: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  letter-spacing: -0.01em;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 200ms ease-out,
+    transform 200ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@media (hover: hover) {
+  .pill:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+}
+
+.pill:active {
+  transform: scale(0.97);
+  transition-duration: 90ms;
+  transition-timing-function: ease-out;
+}
+
+.pill:focus-visible {
+  outline: 2px solid var(--explore-accent, #fe5600);
+  outline-offset: 2px;
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────────
+ * The cover still fades (opacity only), nothing scales, nothing pans.
+ * The shimmer sweep is already suppressed by tokens.css.
+ * ─────────────────────────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .img {
+    transition: opacity 300ms ease-out;
+  }
+
+  .card:hover .img {
+    transform: none;
+  }
+
+  .heartIcon {
+    transition: fill 200ms ease-out, color 200ms ease-out;
+  }
+
+  .heart:active .heartIcon {
+    transform: none;
+  }
+
+  .heartOn .heartIcon {
+    animation: none;
+  }
+
+  .rainbow {
+    animation: none;
+    transition: none;
+  }
+
+  .pill {
+    transition: background-color 200ms ease-out;
+  }
+
+  .pill:active {
+    transform: none;
+  }
+}

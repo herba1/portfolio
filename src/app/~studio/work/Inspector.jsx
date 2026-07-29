@@ -2,7 +2,7 @@
 
 import { useRef } from 'react'
 import { Upload, Trash2, Copy, ExternalLink } from 'lucide-react'
-import { RATIOS, FITS } from '@/app/work/constants'
+import { ALLOW_FULL_WIDTH, RATIOS, FITS } from '@/app/work/constants'
 import { REGISTRY } from '@/app/work/registry'
 import {
   Field,
@@ -94,13 +94,17 @@ export default function Inspector({
         </div>
       </div>
 
-      <Field label="Width">
-        <Segmented
-          value={item.span}
-          onChange={(v) => onChange({ span: Number(v) })}
-          options={SPANS}
-        />
-      </Field>
+      {/* Every tile is one column while ALLOW_FULL_WIDTH is off, so there is
+          nothing to choose. */}
+      {ALLOW_FULL_WIDTH ? (
+        <Field label="Width">
+          <Segmented
+            value={item.span}
+            onChange={(v) => onChange({ span: Number(v) })}
+            options={SPANS}
+          />
+        </Field>
+      ) : null}
 
       {item.kind === 'component' ? (
         <>
@@ -110,11 +114,20 @@ export default function Inspector({
               onChange={(v) =>
                 onChange({
                   component: v,
-                  span: REGISTRY[v]?.defaultSpan ?? item.span,
                   padded: REGISTRY[v]?.padded ?? true,
                 })
               }
               options={COMPONENT_OPTIONS}
+            />
+          </Field>
+          <Field
+            label="Box"
+            hint="Auto grows with the component. A ratio fixes the tile's height, so a component that opens and closes can't move the grid."
+          >
+            <Select
+              value={item.ratio}
+              onChange={(v) => onChange({ ratio: v })}
+              options={RATIOS}
             />
           </Field>
         </>

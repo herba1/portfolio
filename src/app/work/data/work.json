@@ -1,32 +1,141 @@
 {
   "title": "Work",
-  "intro": "Interfaces, components and stills. The component tiles are the real thing, mounted live.",
+  "intro": "Real interface parts, mounted live \u2014 not screenshots. Ten of them are CrowdVolt's, running on CrowdVolt's own tokens.",
   "items": [
+    {
+      "id": "mv-search",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt search bar",
+      "component": "mv-search",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-hero",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt hero",
+      "component": "mv-hero",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-card",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt event card",
+      "component": "mv-card",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-badges",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt badges",
+      "component": "mv-badges",
+      "ratio": "auto",
+      "padded": true,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-stickers",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt stickers",
+      "component": "mv-stickers",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-nav",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt nav",
+      "component": "mv-nav",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-signup",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt sign-up",
+      "component": "mv-signup",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-home",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt homepage",
+      "component": "mv-home",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-vinyl",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt vinyl",
+      "component": "mv-vinyl",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
+    {
+      "id": "mv-site",
+      "kind": "component",
+      "span": 1,
+      "title": "CrowdVolt \u2014 the site",
+      "component": "mv-site",
+      "ratio": "auto",
+      "padded": false,
+      "frame": true,
+      "background": "#0d0d0d"
+    },
     {
       "id": "album-card",
       "kind": "component",
       "span": 1,
       "title": "Album card",
       "component": "album-card",
-      "ratio": "auto",
+      "ratio": "4/3",
       "padded": false,
       "frame": true
     },
     {
-      "id": "workspace",
-      "kind": "image",
-      "span": 2,
-      "title": "Workspace",
-      "src": "/blog/images/workspace.jpg",
-      "alt": "A desk with a monitor, keyboard and guitar",
-      "ratio": "3/2",
-      "fit": "cover",
+      "id": "audio",
+      "kind": "component",
+      "span": 1,
+      "title": "Audio player",
+      "component": "audio",
+      "ratio": "auto",
+      "padded": true,
       "frame": true
     },
     {
       "id": "waveform",
       "kind": "component",
-      "span": 2,
+      "span": 1,
       "title": "Waveform",
       "component": "waveform",
       "ratio": "auto",
@@ -34,43 +143,23 @@
       "frame": true
     },
     {
-      "id": "chiquito",
-      "kind": "image",
-      "span": 1,
-      "title": "Chiquito",
-      "src": "/chiquito.jpg",
-      "alt": "Album artwork",
-      "ratio": "1/1",
-      "fit": "cover",
-      "frame": true
-    },
-    {
-      "id": "note-grid",
-      "kind": "note",
-      "span": 1,
-      "title": "Three columns, natural heights, and a tile can take two of them when it needs to.",
-      "body": "Everything on this page is edited in the studio, not in code.",
-      "frame": false
-    },
-    {
-      "id": "play-pause",
+      "id": "morph-text",
       "kind": "component",
       "span": 1,
-      "title": "Play / pause",
-      "component": "play-pause",
+      "title": "Morph text",
+      "component": "morph-text",
       "ratio": "auto",
       "padded": true,
       "frame": true
     },
     {
-      "id": "denny-1",
-      "kind": "image",
+      "id": "slot-number",
+      "kind": "component",
       "span": 1,
-      "title": "Denny",
-      "src": "/blog/images/denny-mnul60jh.jpg",
-      "alt": "Photograph",
-      "ratio": "4/5",
-      "fit": "cover",
+      "title": "Slot number",
+      "component": "slot-number",
+      "ratio": "auto",
+      "padded": true,
       "frame": true
     },
     {
@@ -84,14 +173,13 @@
       "frame": true
     },
     {
-      "id": "light",
-      "kind": "image",
+      "id": "play-pause",
+      "kind": "component",
       "span": 1,
-      "title": "Light study",
-      "src": "/light2.jpeg",
-      "alt": "A study of light",
-      "ratio": "1/1",
-      "fit": "cover",
+      "title": "Play / pause",
+      "component": "play-pause",
+      "ratio": "auto",
+      "padded": true,
       "frame": true
     },
     {
@@ -125,17 +213,6 @@
       "frame": true
     },
     {
-      "id": "sound",
-      "kind": "image",
-      "span": 1,
-      "title": "Sound",
-      "src": "/sound.png",
-      "alt": "Sound artwork",
-      "ratio": "1/1",
-      "fit": "cover",
-      "frame": true
-    },
-    {
       "id": "badges",
       "kind": "component",
       "span": 1,
@@ -156,14 +233,13 @@
       "frame": true
     },
     {
-      "id": "denny-2",
-      "kind": "image",
+      "id": "link-button",
+      "kind": "component",
       "span": 1,
-      "title": "Denny",
-      "src": "/blog/images/denny-mnulcu22.jpg",
-      "alt": "Photograph",
-      "ratio": "3/4",
-      "fit": "cover",
+      "title": "Link button",
+      "component": "link-button",
+      "ratio": "auto",
+      "padded": true,
       "frame": true
     }
   ]

@@ -13,11 +13,17 @@
  *   note      — a typographic tile (a statement, a link, a number)
  */
 
-// The grid is two columns at EVERY width — it never reflows to three or
-// collapses to one, so the eye learns one rhythm and keeps it. This is the
-// single source of that number: the layout, the span clamp and the studio's
-// width control all read it from here.
+// Two columns on anything wider than a phone, one below it — and that is the
+// whole ladder. It does not go to three on a wide display: the tiles are
+// playgrounds, and a third column shrinks every one of them to keep a big
+// window busy. The single source of the number.
 export const COLUMNS = 2
+
+// Full-width tiles are OFF. Every tile is one column wide and as tall as its
+// own content — that is the whole layout. A tile that breaks out across the
+// grid is a later problem; while this is false, clampSpan pins every tile to
+// one column no matter what the data says.
+export const ALLOW_FULL_WIDTH = false
 
 export const KINDS = ['component', 'image', 'video', 'note']
 export const FITS = ['cover', 'contain']
@@ -30,10 +36,10 @@ export const RATIOS = ['auto', '1/1', '4/3', '3/4', '16/9', '4/5', '3/2', '2/3']
 const str = (v, fallback = '') => (typeof v === 'string' ? v : fallback)
 const bool = (v, fallback = false) => (typeof v === 'boolean' ? v : fallback)
 
-// A tile is either one column or the full width — there is no third option
-// while COLUMNS is 2. Old data carrying span: 3 clamps down rather than
-// blowing out of the grid.
+// One column per tile while ALLOW_FULL_WIDTH is false. Old data carrying
+// span: 2 or 3 clamps down rather than blowing out of the grid.
 export function clampSpan(v) {
+  if (!ALLOW_FULL_WIDTH) return 1
   const n = Number(v)
   if (!Number.isFinite(n)) return 1
   return Math.min(COLUMNS, Math.max(1, Math.round(n)))

@@ -1,0 +1,394 @@
+/* ============================================================================
+ *  MagicSearchBar — ported from mono-volt (apps/web/app/dev/search-bar).
+ *
+ *  No tweakable values live here — they're ALL in the CONFIG object at the top
+ *  of MagicSearchBar.jsx, injected as CSS custom properties. This file only
+ *  consumes them via var(). Edit CONFIG, not this file.
+ *
+ *  PORT NOTE: the source component carried a lot of its box on Tailwind utility
+ *  classes (`flex h-14 items-center gap-[10px] rounded-full px-4`, `text-black/70`,
+ *  `font-inter text-[16px] tracking-[-0.32px]`…). That repo's Tailwind config does
+ *  not exist here, so every one of those utilities has been folded into the rules
+ *  below — the JSX now references `styles.*` and nothing else. Values are the
+ *  literal px the utilities resolved to (h-14 = 56px, px-4 = 16px, p-1 = 4px,
+ *  rounded-lg = 8px, h-6 = 24px).
+ * ========================================================================== */
+
+.root {
+  position: relative;
+  width: 100%;
+  max-width: 728px;
+}
+
+.bar {
+  position: relative;
+  display: flex;
+  width: 100%;
+  height: 56px;
+  align-items: center;
+  gap: 10px;
+  overflow: hidden;
+  border-radius: 9999px;
+  padding-left: 16px;
+  padding-right: 16px;
+  background: var(--bar-bg);
+  box-shadow: var(--outer-glow);
+  transform: translateY(0) scale(1);
+  transition:
+    box-shadow var(--hover-dur) var(--hover-ease),
+    transform var(--hover-dur) var(--hover-ease);
+}
+
+/* Compact = the docked nav bar variant: a shorter shell, same everything else. */
+.compact .bar {
+  height: 40px;
+}
+
+/* Hover/focus: the bar rises a touch and the halo blooms. (The rainbow itself
+ * recedes — see the .light hover rule below.) */
+.root:hover .bar,
+.root:focus-within .bar {
+  box-shadow: var(--outer-glow-active);
+  transform: translateY(var(--hover-lift)) scale(var(--hover-scale));
+}
+
+/* Compact = the docked nav bar. It stays plain/static on mobile (no rainbow
+ * lights), but keeps the orbiting lights on desktop. Non-compact bars (the
+ * hero, and this playground) always show their lights. */
+.compact .orbit {
+  display: none;
+}
+@media (min-width: 769px) {
+  .compact .orbit {
+    display: block;
+  }
+}
+
+/* Inset ring + dark vignette, painted ABOVE the lights so the edge stays crisp. */
+.edge {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  border-radius: 9999px;
+  pointer-events: none;
+  box-shadow: var(--inner-shadow), inset 0 0 0 1px var(--ring);
+}
+
+/* Holds the orbiting lights and provides the rounded reference box they follow.
+ * The mask makes the layer brighter at the top, dimmer toward the bottom — so a
+ * light dims along the bottom edge and brightens along the top, any phase. */
+.orbit {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  border-radius: 9999px;
+  /* The lights animate forever (offset-path), so confine their continuous
+   * repaints to this layer — `contain` stops the per-frame invalidation from
+   * bubbling into the bar / tile / page, and the filter below already promotes it
+   * to its own compositor layer so the rest of the UI is never re-rastered. */
+  contain: layout paint;
+  /* Blur the whole layer ONCE (not per-light) — one filter pass keeps it smooth.
+   * saturate() mutes the whole palette in one place (cleaner than editing hexes). */
+  filter: blur(var(--light-blur)) saturate(var(--light-saturate));
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 32%,
+    rgba(0, 0, 0, var(--orbit-dim)) 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0%,
+    #000 32%,
+    rgba(0, 0, 0, var(--orbit-dim)) 100%
+  );
+}
+
+/* Each light is a round soft blob riding the pill's perimeter. The path is a
+ * rect() filling the box, rounded to the pill radius — a properly CLOSED loop
+ * (jhey's animated-border technique), so offset-distance 0%→100% with linear
+ * timing returns to the exact start with no seam-jump. A circle blob means
+ * offset-rotate is irrelevant, so there's no rotation-snap at the caps either. */
+.light {
+  position: absolute;
+  width: var(--light-width);
+  height: var(--light-height);
+  border-radius: 9999px;
+  opacity: var(--light-opacity);
+  offset-path: rect(0 100% 100% 0 round var(--track-radius));
+  offset-rotate: 0deg;
+  offset-anchor: 50% 50%;
+  animation: orbit var(--orbit-speed) var(--orbit-ease) infinite;
+  transition: opacity var(--hover-dur) var(--hover-ease);
+}
+
+/* Hover/focus: rainbow fades to --light-opacity-active so the field reads clean. */
+.root:hover .light,
+.root:focus-within .light {
+  opacity: var(--light-opacity-active);
+}
+
+@keyframes orbit {
+  from {
+    offset-distance: 0%;
+  }
+  to {
+    offset-distance: 100%;
+  }
+}
+
+/* ── Contents ─────────────────────────────────────────────────────────────
+ * Everything below the ring sits at z-index 10 so it paints over .orbit (0)
+ * and under .edge (20). */
+
+.icon {
+  position: relative;
+  z-index: 10;
+  flex-shrink: 0;
+  color: rgba(0, 0, 0, 0.7);
+}
+
+/* input + animated placeholder share one box */
+.field {
+  position: relative;
+  z-index: 10;
+  height: 24px;
+  flex: 1 1 0%;
+  min-width: 0;
+}
+
+/* The thumbnail well is an absolute overlay, so the text box has to be told to
+   end before it. Margin, not padding: .input is `position: absolute; inset: 0`
+   inside .field, so padding would not move it. */
+.hasThumbs .field {
+  margin-right: 96px;
+}
+
+.input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-family: var(--font-inter), Inter, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.32px;
+  color: #000;
+  caret-color: #000;
+  outline: none;
+}
+
+/* Default/showcase: the native placeholder is invisible — the animated
+ * .placeholder layer below draws the text instead. */
+.input::placeholder {
+  color: transparent;
+}
+.inputActive::placeholder {
+  color: rgba(0, 0, 0, 0.45);
+}
+
+/* asTrigger: clicks pass through to the parent, which owns the launch. */
+.inputTrigger {
+  pointer-events: none;
+}
+
+/* Animated placeholder: rests hidden (blurred + slid + faded); .placeholderShow
+ * brings it in. So on interaction it blur-fades-slides away instead of just
+ * vanishing, and eases back in on blur. Pointer-events-none so clicks always
+ * land on the real input underneath. */
+.placeholder {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+  font-family: var(--font-inter), Inter, sans-serif;
+  font-size: 16px;
+  font-weight: 400;
+  letter-spacing: -0.32px;
+  color: rgba(0, 0, 0, 0.6);
+  opacity: 0;
+  filter: blur(var(--ph-blur));
+  transform: translateX(var(--ph-slide));
+  transition:
+    opacity var(--ph-dur) var(--ph-ease),
+    filter var(--ph-dur) var(--ph-ease),
+    transform var(--ph-dur) var(--ph-ease);
+}
+.placeholderShow {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateX(0);
+}
+
+/* Fade the right edge so a too-long placeholder (or typed query) dissolves into
+ * the field instead of hard-clipping at a straight edge. A native placeholder
+ * can't be masked on its own, so this rides on the input / placeholder layers. */
+.fadeRight {
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+}
+
+/* Clear button — active mode only, shown once there's a value. */
+.clear {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+  transition: color 150ms;
+}
+/* The source used Tailwind's `can-hover:` variant; this is what it compiles to. */
+@media (hover: hover) {
+  .clear:hover {
+    color: rgba(0, 0, 0, 0.7);
+  }
+}
+
+/* Thumbnails that fan in/out on the right, keyed to the query. */
+.thumbs {
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 16px;
+  z-index: 10;
+  display: flex;
+  width: 96px;
+  align-items: center;
+  justify-content: center;
+}
+.thumbsInner {
+  position: relative;
+  height: 100%;
+  width: 100%;
+}
+.thumb {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  border-radius: 8px;
+  object-fit: cover;
+  box-shadow: 0 4px 8px 0 rgba(0, 0, 0, 0.3);
+}
+
+/* Typing caret after the animated query. */
+.caret {
+  display: inline-block;
+  width: 1.5px;
+  height: 1.05em;
+  margin-left: 1px;
+  vertical-align: -0.15em;
+  background: rgba(0, 0, 0, 0.55);
+  animation: caretBlink 1.1s step-end infinite;
+}
+
+@keyframes caretBlink {
+  0%,
+  49% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+/* ── Playground shell ──────────────────────────────────────────────────────
+ * The tile owns the surface (--explore-bg), so the demo sets no background of
+ * its own — it's dark-on-dark by inheritance. */
+.demo {
+  container-type: inline-size;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-items: center;
+  width: 100%;
+}
+
+/* ── Narrow ────────────────────────────────────────────────────────────────
+ * A tile is a whole phone wide, not a hero band. At 56px tall with 16px type
+ * and a 96px thumbnail well, the bar eats the column: the well leaves ~160px
+ * for a query that is 28 characters long, so the typed line spends most of its
+ * time dissolving into the right-edge mask.
+ *
+ * So below 420px the bar takes the geometry the source already ships for its
+ * docked nav variant — 44px tall, 15px type — and the thumbnail well narrows
+ * to a single card's width. Container units, not viewport: this responds to
+ * the TILE, which is half a window on a laptop and all of one on a phone.
+ * ─────────────────────────────────────────────────────────────────────── */
+@container (max-width: 420px) {
+  .bar {
+    height: 44px;
+    gap: 8px;
+    padding-left: 13px;
+    padding-right: 13px;
+  }
+  .input,
+  .placeholder {
+    font-size: 15px;
+  }
+  .thumbs {
+    right: 12px;
+    width: 64px;
+  }
+  .hasThumbs .field {
+    margin-right: 64px;
+  }
+  /* The three-card phrase fans ±26px around centre, which is wider than the
+     well has left. Scaling the WELL keeps the fan intact and in proportion —
+     each card carries its own transform inline from JS, so the compression has
+     to happen on the parent or it would fight the pop-in. */
+  .thumbsInner {
+    transform: scale(0.66);
+  }
+}
+
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+
+.ctl {
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+  padding: 6px 12px;
+  font-size: 13px;
+  font-family: var(--font-inter), Inter, sans-serif;
+  line-height: 1.2;
+  cursor: pointer;
+  transition: background 150ms;
+}
+@media (hover: hover) {
+  .ctl:hover {
+    background: rgba(255, 255, 255, 0.14);
+  }
+}
+
+/* Honour the OS reduced-motion setting — freeze the loops, drop the rise+grow. */
+@media (prefers-reduced-motion: reduce) {
+  .light,
+  .caret {
+    animation: none;
+  }
+  .root:hover .bar,
+  .root:focus-within .bar {
+    transform: none;
+  }
+}

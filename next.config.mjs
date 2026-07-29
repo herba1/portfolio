@@ -11,6 +11,15 @@ const nextConfig = {
   // heic-convert pulls in a large wasm build of libheif — keep it out of the
   // bundle and let Node require it at runtime (studio upload route only).
   serverExternalPackages: ['heic-convert'],
+  images: {
+    // Spotify serves album art from i.scdn.co and artist portraits from either
+    // that or the newer image-cdn-*.spotifycdn.com hosts, depending on when the
+    // image was uploaded. next/image refuses any host it hasn't been told about.
+    remotePatterns: [
+      { protocol: 'https', hostname: 'i.scdn.co' },
+      { protocol: 'https', hostname: '**.spotifycdn.com' },
+    ],
+  },
   experimental: {
     viewTransition: true,
     optimizePackageImports: ['lucide-react', 'motion', 'gsap'],

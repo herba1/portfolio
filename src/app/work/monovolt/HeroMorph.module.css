@@ -1,0 +1,434 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+ * HeroMorph — CrowdVolt's homepage headline, ported into a playground tile.
+ *
+ * Source: mono-volt/apps/web/app/hero-text/hero-text.css (lines 1–457). The
+ * dev-panel chrome (.ht-panel and friends, 459+) is deliberately NOT ported —
+ * this tile has two pills instead of a Leva-style panel.
+ *
+ * The original was plain global CSS with an `ht-` prefix precisely so it could
+ * be scoped by convention. Here it's a CSS Module, so the prefix is gone and
+ * scoping is real. NOTE: CSS Modules hashes CLASS names only — the attribute
+ * selectors ([data-align], [data-morph-reveal], [data-hover-shimmer]) pass
+ * through untouched, which is why the engine still drives its variants with
+ * data attributes rather than extra classes.
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---- tile shell ----------------------------------------------------------- */
+/* Transparent on purpose: the /work grid tile supplies the dark surface this
+   headline is designed to sit on. The root only owns the size-container that
+   caps the type (see .hero) and the gap down to the controls. */
+.root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  width: 100%;
+  background: transparent;
+}
+
+/* ---- the hero type -------------------------------------------------------- */
+.hero {
+  max-width: 100%;
+  font-family: var(--font-inter), Inter, sans-serif;
+  font-weight: 600;
+  /* Tile-scale type. The source ran a fixed ~77.5px for a full-bleed hero; a
+     tile is a third to a half of a page (~320–720px), so this is the fluid
+     replacement. The container-query cap below is what actually keeps three
+     lines inside a NARROW tile — vw knows the viewport, not the tile. */
+  font-size: clamp(22px, 5.5vw, 40px);
+  line-height: var(--lh);
+  letter-spacing: var(--ls);
+  color: #fff;
+  /* match Figma's rendering: grayscale antialiasing (subpixel on a dark bg
+     renders heavier and throws the apparent spacing off) + real kerning. */
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+  font-feature-settings: "cv11", "calt", "kern";
+  /* Scope reflow from the morphing line to this subtree. */
+  contain: layout style;
+  /* per-char crossfade blur amounts, parameterized so small viewports can drop
+     them to 0 (filter: blur on text repaints main-thread every frame — too
+     heavy on phones). */
+  --char-blur: 3px;
+  --char-blur-soft: 2px;
+}
+
+/* The widest line is line 2 at its longest option ("You're wide awake
+   tonight") — ~11.5em once the -0.07em tracking is applied. 7.4cqi keeps that
+   inside the tile: at a 320px tile the type resolves to ~23.7px → ~272px of
+   ink in a 320px box. Without this a 320px tile inside a 960px viewport would
+   take the 40px ceiling and run ~460px wide. */
+@supports (container-type: inline-size) {
+  .root {
+    container-type: inline-size;
+  }
+  .hero {
+    font-size: clamp(22px, min(5.5vw, 7.4cqi), 40px);
+  }
+}
+
+/* Small screens: drop the per-char crossfade blur (main-thread repaint every
+   frame is too heavy on phones). The colour shimmer + stagger stay — only the
+   blur halo is removed. */
+@media (max-width: 767px) {
+  .hero {
+    --char-blur: 0px;
+    --char-blur-soft: 0px;
+  }
+}
+
+.line {
+  display: block;
+  white-space: nowrap;
+}
+
+/* alignment (data-align on .hero). */
+.hero[data-align="center"] {
+  text-align: center;
+}
+
+/* Centered reveal: reveal the morphing word from its CENTER, not its left edge.
+   In a centered line the morph box's center stays fixed as it grows (the line
+   recenters symmetrically: left edge -Δ/2, right edge +Δ/2 → center unchanged),
+   so a left-anchored reveal (the default) drags the word leftward as the box's
+   left edge moves — that's the slide. Centering the base + overlays on the box
+   center makes the word expand symmetrically about that stable point: no drift.
+   Left-aligned keeps the natural left-anchored, read-left-to-right reveal. */
+.hero[data-align="center"] .morph {
+  text-align: center;
+}
+.hero[data-align="center"] .layer {
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+}
+
+/* ---- the width-morphing segment ------------------------------------------- */
+.morph {
+  position: relative;
+  display: inline-block;
+  vertical-align: baseline;
+  /* Constant trailing slack after the word: cancels the last glyph's negative
+     letter-spacing (so its ink isn't clipped) plus 1.5px of safety. --ls is
+     inherited from .hero. */
+  --morph-pad: calc(max(0px, -1 * var(--ls, -0.07em)) + 1.5px);
+  width: var(--mw, max-content);
+  margin-inline-end: var(--morph-pad);
+  /* NO overflow clip on the inline axis. Clipping the box (overflow-x: clip)
+     pixel-snaps the in-flow base text to the clip rect, while the animating
+     overlay (.layer, absolutely positioned) is NOT snapped — so the word jumps
+     ~2px on every resting↔entering/exiting handoff. Clipping was also what
+     shaved the last glyph on the right (the negative-letter-spacing ink
+     overhangs the box, and overflow-clip-margin is unreliable with x:clip/y:
+     visible). The overlay is out of flow and the box width tweens, so a brief
+     overhang past the box during a grow-morph is harmless; staying `visible` is
+     what keeps the base and overlay pixel-identical AND uncut. The trailing
+     slack above is now purely the gap before the next word/image. */
+  overflow: visible;
+  white-space: nowrap;
+  transition: width var(--morph-dur) var(--morph-ease);
+}
+
+.ghost {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: max-content;
+  white-space: nowrap;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* the in-flow layout anchor (also the visible rest state) */
+.base {
+  display: inline-block;
+  white-space: nowrap;
+}
+.base.isHidden {
+  visibility: hidden;
+}
+
+/* animated text overlays the base, so it never disturbs layout */
+.layer {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: inline-block;
+  width: max-content;
+  white-space: pre;
+  pointer-events: none;
+}
+
+/* words: per-char staggered reveal. Only translateY/opacity/filter animate —
+   never anything that changes horizontal layout, so chars don't shift left/
+   right. A light 3px blur clears as they rise. */
+.char {
+  display: inline-block;
+  white-space: pre;
+}
+/* Compositor hint ONLY on the overlay chars that actually animate — and those
+   overlays mount just for the morph, then unmount, so the hint is released when
+   idle. (Putting will-change on every .char promoted the hundreds of static
+   ghost/base chars too → permanent layer/buffer pressure → the intermittent
+   freeze.) Only transform/opacity are GPU-compositable; color/blur repaint on
+   the main thread regardless, so hinting them buys nothing. */
+.layer .char {
+  /* Promote ONLY via will-change — never with a baked transform (translateZ) or
+     backface-visibility. Those force the glyph onto a pixel-snapped GPU layer
+     that renders ~1-2px off the non-promoted resting base text, so the word
+     visibly jumps as it hands off resting ↔ entering/exiting. will-change alone
+     promotes without snapping the raster. */
+  will-change: transform, opacity;
+}
+
+/* calm ease-out (no overshoot), short rise — the DEFAULT (`rise`) enter. The
+   reveal-style override below only swaps animation-name/duration, so it
+   inherits this easing, `both` fill, and the per-char stagger delay. */
+.layerIn .char {
+  animation: charIn calc(var(--morph-dur) * 0.8) cubic-bezier(0.25, 1, 0.4, 1)
+    both;
+  animation-delay: calc(var(--i) * var(--stagger));
+}
+.layerOut .char {
+  animation: charOut calc(var(--morph-dur) * 0.46) ease-in both;
+  animation-delay: calc(var(--i) * var(--stagger) * 0.5);
+}
+
+/* ---- reveal-style variants (data-morph-reveal on .hero) ------------------- */
+/* Namespaced attribute (data-morph-reveal, not a bare data-reveal) so the hero
+   stays self-contained: CSS Modules scopes classes but NOT attributes, so a
+   generic global `[data-reveal]` utility (e.g. a page's scroll-reveal) could
+   otherwise reach in and pin the whole headline at opacity: 0. */
+/* color shimmer: each char surfaces from near-zero opacity, washes through
+   color A then B then C, and settles to white. The shared stagger turns the
+   wash into a wave that runs across the word. Slightly longer so all three
+   colors register. */
+.hero[data-morph-reveal="shimmer"] .layerIn .char {
+  animation-name: charShimmer;
+  animation-duration: calc(var(--morph-dur) * 1.05);
+}
+/* exit follows the reveal style: shimmer leaves by dissolving in place
+   (opacity + color) rather than the default upward rise. */
+.hero[data-morph-reveal="shimmer"] .layerOut .char {
+  animation-name: charShimmerOut;
+}
+
+@keyframes charIn {
+  from {
+    opacity: 0;
+    transform: translateY(0.26em);
+    filter: blur(var(--char-blur));
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+@keyframes charOut {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-0.22em);
+    filter: blur(var(--char-blur));
+  }
+}
+
+@keyframes charShimmer {
+  0% {
+    opacity: 0;
+    transform: translateY(0.12em);
+    color: rgba(255, 255, 255, 0.04);
+    filter: blur(var(--char-blur-soft));
+  }
+  28% {
+    opacity: 1;
+    color: var(--shimmer-a);
+    filter: blur(0);
+  }
+  /* tight A→B→C band so all three colors blend through the same char */
+  50% {
+    color: var(--shimmer-b);
+  }
+  72% {
+    color: var(--shimmer-c);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0);
+    color: #fff;
+  }
+}
+
+/* shimmer exit: dissolves in place — no rise — washing back through the colors
+   as it fades, the reverse of the enter. */
+@keyframes charShimmerOut {
+  0% {
+    opacity: 1;
+    color: #fff;
+    filter: blur(0);
+  }
+  45% {
+    color: var(--shimmer-c);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(0);
+    color: var(--shimmer-a);
+    filter: blur(var(--char-blur-soft));
+  }
+}
+
+/* ---- subject hover cluster (name + image), hover-reveal image mode -------- */
+.subject {
+  /* one inline cluster so name + image are a single hover target; nowrap keeps
+     them on the same line. */
+  white-space: nowrap;
+  color: inherit;
+  text-decoration: none;
+}
+.subject.hoverable {
+  cursor: pointer;
+}
+
+/* hover shimmer (data-hover-shimmer="on"). Hovering the subject name fires ONE
+   quick smooth wave through the shimmer palette and settles back to white.
+   One-shot (not looping), so it can't "snap off" on hover-out; if you do leave
+   mid-wave, the color transition eases it home. The per-char `--i` stagger
+   makes the wave travel across the word. Re-fires on each hover-in. */
+.hero[data-hover-shimmer="on"] .subject {
+  cursor: pointer;
+}
+.hero[data-hover-shimmer="on"] .subject .base .char {
+  transition: color 0.3s ease;
+}
+.hero[data-hover-shimmer="on"] .subject:hover .base .char {
+  animation: hoverShimmer 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--i) * 26ms);
+}
+@keyframes hoverShimmer {
+  0% {
+    color: #fff;
+  }
+  30% {
+    color: var(--shimmer-a);
+  }
+  55% {
+    color: var(--shimmer-b);
+  }
+  80% {
+    color: var(--shimmer-c);
+  }
+  100% {
+    color: #fff;
+  }
+}
+
+/* ---- the perfectly-inline image ------------------------------------------- */
+.img {
+  display: inline-block;
+  height: var(--img-h);
+  aspect-ratio: 74 / 72.9;
+  width: auto;
+  object-fit: cover;
+  border-radius: var(--img-radius);
+  box-shadow: 0 0 var(--img-shadow) rgba(0, 0, 0, 0.25);
+  /* tunable baseline offset — kept inside the existing line box so it can't
+     bump line-spacing. */
+  vertical-align: var(--img-shift);
+  margin-left: var(--img-gap);
+  /* Cancel the image's layout advance (gap + its own width: height × aspect)
+     so it never feeds the line's centered width — centering stays on the text
+     while the image stays visible, overhanging to the right. */
+  margin-right: calc(-1 * (var(--img-gap) + var(--img-h) * 74 / 72.9));
+  background: #1b1b1e;
+  user-select: none;
+  /* origin on the word side, so it appears to be emitted FROM the end of the
+     word and shoot out into place. */
+  transform-origin: left center;
+  /* rest = sprung in. The slot is never removed, so it glides with the width
+     morph; only its transform/opacity toggle. */
+  opacity: 1;
+  transform: translateX(0) scale(1) rotate(0deg);
+  filter: blur(0);
+  transition: opacity 0.3s cubic-bezier(0.34, 1.56, 0.64, 1),
+    transform 0.46s cubic-bezier(0.34, 1.7, 0.5, 1), filter 0.3s ease-out;
+}
+/* collapses into the word; shoots back out (overshoot spring) on cue */
+.img.isOut {
+  opacity: 0;
+  transform: translateX(-0.42em) scale(0.18) rotate(-12deg);
+  filter: blur(var(--blur));
+  transition: opacity 0.14s ease-in, transform 0.16s ease-in,
+    filter 0.14s ease-in;
+}
+
+/* ---- controls ------------------------------------------------------------- */
+.controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.pill {
+  appearance: none;
+  padding: 6px 12px;
+  border-radius: 9999px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.85);
+  font-family: var(--font-inter), Inter, sans-serif;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: 0;
+  cursor: pointer;
+  transition: background-color 0.15s ease, transform 0.15s ease;
+}
+.pill:hover {
+  background: rgba(255, 255, 255, 0.14);
+}
+.pill:active {
+  transform: scale(0.97);
+}
+
+/* The source's reduce block was written at the specificity of the things it was
+   naming (`.ht-char { animation: none }`, `.ht-inline-img { transition: none }`)
+   — but every rule it needed to beat is more specific:
+     .ht-morph__layer--in .ht-char                      (0,2,0)
+     .ht-hero[data-ht-reveal="shimmer"] … .ht-char      (0,3,0)
+     .ht-hero[data-hover-shimmer="on"] … .ht-char       (0,4,0)
+     .ht-inline-img.is-out                              (0,2,0)
+   so under `reduce` the per-char reveal and the image spring both kept playing.
+   `!important` is the fix rather than a specificity arms race: this is a kill
+   switch, it is scoped to this module's classes, and there is nothing below it
+   that legitimately wants to override a motion preference. */
+@media (prefers-reduced-motion: reduce) {
+  .hero,
+  .line,
+  .morph,
+  .ghost,
+  .base,
+  .layer,
+  .char,
+  .subject,
+  .img,
+  .pill {
+    transition: none !important;
+    animation: none !important;
+  }
+  /* The image still resolves to hidden-until-hover, it just gets there with no
+     spring: opacity is a state, not motion. */
+  .img.isOut {
+    opacity: 0;
+  }
+}

@@ -1,4 +1,17 @@
 import localFont from "next/font/local";
+import { Inter } from "next/font/google";
+
+/* Inter, only for the mono-volt tiles on /work.
+ *
+ * Those tiles are another product's interface shown as itself, so they carry
+ * that product's typeface rather than this site's. It is the same declaration
+ * mono-volt makes in its own layout, so the type metrics match exactly.
+ * Self-hosted by next/font at build time like everything else here. */
+export const inter = Inter({
+    subsets: ["latin"],
+    variable: "--font-inter",
+    display: "swap",
+});
 
 /* ── Primary typeface ─────────────────────────────────────────────
  * Geist (Vercel, OFL — see public/fonts/GEIST-LICENSE.txt), served

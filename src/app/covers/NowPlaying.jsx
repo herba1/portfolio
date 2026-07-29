@@ -2,9 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 import { X } from "lucide-react";
-import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 import SlotNumber from "@/app/ui/SlotNumber";
 import EqBars from "./EqBars";
+import { TransportButton, transportStatus } from "./Transport";
 import { useAudio, toggle, stop, registerVisual } from "./lib/audioEngine";
 
 // ---------------------------------------------------------------------------
@@ -53,8 +53,13 @@ export default function NowPlaying({ hidden = false, onExpand }) {
     onExpand?.(cover, r ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, size: r.width } : null);
   };
 
-  // "error" is a live state, not a dead one — the transport button is the retry.
-  const ready = audio.status === "ready" || audio.status === "error";
+  // The dock says exactly what the card says — one component, one vocabulary,
+  // so a track that is "Still loading" up here can't read as idle down there.
+  const statusText = transportStatus(audio);
+  // Remount the readout when the KIND of thing it says changes (clock → status
+  // → a different status) so CSS can give the new line a way in. Keying on the
+  // text itself would re-run the animation on every tick of a percentage.
+  const readoutKind = statusText ? audio.status : "clock";
 
   return (
     <div
@@ -79,25 +84,15 @@ export default function NowPlaying({ hidden = false, onExpand }) {
 
       <EqBars playing={audio.playing} />
 
-      <button
-        className="cv-dock-play"
-        onClick={toggle}
-        disabled={!ready}
-        aria-label={audio.playing ? "Pause" : "Play"}
-      >
-        <PlayPauseIcon playing={audio.playing} size={16} />
-      </button>
+      <TransportButton className="cv-dock-play" audio={audio} onClick={toggle} size={16} />
 
-      <span className="cv-dock-time">
-        {audio.status === "loading" ? (
-          "…"
-        ) : audio.status === "none" ? (
-          "no preview"
-        ) : audio.status === "error" ? (
-          "retry"
-        ) : (
-          <SlotNumber value={fmt(audio.currentTime)} direction="up" />
-        )}
+      {/* On a narrow screen the running clock is the first thing to go, but the
+          STATUS never is — a phone on a bad connection is exactly where "is it
+          loading or is it stuck?" gets asked. See the mobile rule in covers.css. */}
+      <span className="cv-dock-time" data-kind={statusText ? "status" : "clock"} data-status={audio.status}>
+        <span key={readoutKind} className="cv-dock-readout">
+          {statusText ? statusText : <SlotNumber value={fmt(audio.currentTime)} direction="up" />}
+        </span>
       </span>
 
       <button className="cv-dock-close" onClick={stop} aria-label="Stop">
