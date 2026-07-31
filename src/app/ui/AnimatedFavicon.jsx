@@ -272,9 +272,38 @@ export default function AnimatedFavicon() {
     let lastPaint = 0;
     let painted = { gx: NaN, gy: NaN, key: "" };
 
+    // toBlob snapshots the bitmap synchronously but encodes the PNG off
+    // the main thread — unlike toDataURL, which blocked on the encode.
+    // One encode in flight at a time, latest-wins: a frame that arrives
+    // mid-encode replaces any queued one and is painted from the
+    // completion callback, so the final settled frame is never dropped.
+    let encodeBusy = false;
+    let pendingState = null;
+    let blobUrl = "";
+    let disposed = false;
+
     function paint(s) {
+      if (encodeBusy) {
+        pendingState = s;
+        return;
+      }
       drawFace(ctx, s);
-      link.href = canvas.toDataURL("image/png");
+      encodeBusy = true;
+      canvas.toBlob((blob) => {
+        encodeBusy = false;
+        if (disposed) return;
+        if (blob) {
+          const old = blobUrl;
+          blobUrl = URL.createObjectURL(blob);
+          link.href = blobUrl;
+          if (old) URL.revokeObjectURL(old);
+        }
+        if (pendingState) {
+          const next = pendingState;
+          pendingState = null;
+          paint(next);
+        }
+      }, "image/png");
     }
 
     /**
@@ -492,8 +521,8 @@ export default function AnimatedFavicon() {
         Math.abs(s.gx - painted.gx) > 0.012 ||
         Math.abs(s.gy - painted.gy) > 0.012;
 
-      // toDataURL is the expensive call, not the canvas drawing — so
-      // gate on both "did anything change" and a hard rate floor.
+      // The PNG encode is the expensive part, not the canvas drawing —
+      // so gate on both "did anything change" and a hard rate floor.
       if ((moved || key !== painted.key) && now - lastPaint >= MIN_FRAME_MS) {
         paint(s);
         painted = { gx: s.gx, gy: s.gy, key };
@@ -545,6 +574,8 @@ export default function AnimatedFavicon() {
       if (rafId) cancelAnimationFrame(rafId);
       headObserver.disconnect();
       link.remove();
+      disposed = true;
+      if (blobUrl) URL.revokeObjectURL(blobUrl);
     };
   }, []);
 
