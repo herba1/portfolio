@@ -236,17 +236,17 @@ export default function AnimatedFavicon() {
     link.type = "image/png";
 
     // Next generates an icon link from app/favicon.ico, and React 19
-    // hoists and owns <link> tags — so removing that tag once is not
-    // enough. It can be re-inserted on any re-render, and a static .ico
-    // outranks us the moment it comes back. Hold the claim instead:
-    // strip every icon link that isn't ours, now and whenever one
-    // appears. Converges immediately — our own append triggers the
-    // observer once, finds nothing foreign, and stops.
+    // hoists and owns <link> tags — deleting them corrupts React's head
+    // bookkeeping and crashes the commit on the next soft navigation
+    // (removeChild on a node React thinks is still there → dead router
+    // until a hard refresh). So never touch foreign links. Browsers use
+    // the last matching icon link, so winning just means keeping ours
+    // at the end of <head>. Converges immediately — re-appending our
+    // own node triggers the observer once, finds ours already last,
+    // and stops.
     function claim() {
-      for (const el of document.querySelectorAll('link[rel~="icon"]')) {
-        if (el !== link) el.remove();
-      }
-      if (!link.isConnected) document.head.appendChild(link);
+      const icons = document.querySelectorAll('link[rel~="icon"]');
+      if (icons[icons.length - 1] !== link) document.head.appendChild(link);
     }
 
     claim();
