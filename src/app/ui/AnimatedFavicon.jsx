@@ -235,15 +235,16 @@ export default function AnimatedFavicon() {
     link.rel = "icon";
     link.type = "image/png";
 
-    // Next generates an icon link from app/favicon.ico, and React 19
-    // hoists and owns <link> tags — deleting them corrupts React's head
-    // bookkeeping and crashes the commit on the next soft navigation
+    // favicon.ico lives in public/, not app/, precisely so Next emits
+    // no icon <link> of its own — a static .ico link outranks a data
+    // PNG, and deleting React-owned head tags to get rid of it corrupts
+    // React 19's head bookkeeping and crashes the next soft navigation
     // (removeChild on a node React thinks is still there → dead router
-    // until a hard refresh). So never touch foreign links. Browsers use
-    // the last matching icon link, so winning just means keeping ours
-    // at the end of <head>. Converges immediately — re-appending our
-    // own node triggers the observer once, finds ours already last,
-    // and stops.
+    // until a hard refresh). Linkless browsers fall back to requesting
+    // /favicon.ico by convention, so no-JS visitors and crawlers still
+    // get an icon. Ours only has to exist and stay last; never touch
+    // foreign links. Converges immediately — re-appending our own node
+    // triggers the observer once, finds ours already last, and stops.
     function claim() {
       const icons = document.querySelectorAll('link[rel~="icon"]');
       if (icons[icons.length - 1] !== link) document.head.appendChild(link);
