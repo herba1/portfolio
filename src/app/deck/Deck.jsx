@@ -297,16 +297,43 @@ export default function Deck({ tracks }) {
       }
     };
 
+    // Never read straight off the load event. drawImage on a
+    // freshly-loaded img forces a synchronous JPEG decode, and lazy
+    // covers land in network bursts — several decodes coalescing into
+    // one task is a ~100ms stall in the middle of a drag. decode()
+    // moves the decode off-thread, and the queue spends one read per
+    // frame, so fifty covers cost fifty frames spread flat instead of
+    // a hitch.
+    const queue = [];
+    let rafId = 0;
+    const drain = () => {
+      rafId = 0;
+      const img = queue.shift();
+      if (img) read(img);
+      if (queue.length) rafId = requestAnimationFrame(drain);
+    };
+    const enqueue = (img) => {
+      const push = () => {
+        queue.push(img);
+        if (!rafId) rafId = requestAnimationFrame(drain);
+      };
+      if (img.decode) img.decode().then(push, push);
+      else push();
+    };
+
     for (const img of root.querySelectorAll("img")) {
-      if (img.complete) read(img);
+      if (img.complete) enqueue(img);
       else {
-        const on = () => read(img);
+        const on = () => enqueue(img);
         img.addEventListener("load", on, { once: true });
         off.push(() => img.removeEventListener("load", on));
       }
     }
 
-    return () => off.forEach((fn) => fn());
+    return () => {
+      off.forEach((fn) => fn());
+      if (rafId) cancelAnimationFrame(rafId);
+    };
   }, [cards]);
 
   useEffect(() => {
@@ -352,14 +379,19 @@ export default function Deck({ tracks }) {
     let written = -1;
     let shown = -1;
 
-    // The entire per-frame cost of this component. No rAF, no lerp, no
-    // animation loop: `--dk-p` carries a CSS transition (see deck.css), so
-    // writing the raw scroll position is enough — the browser does the
-    // easing, the overshoot and the settle.
+    // The entire per-frame cost of this component. No lerp, no animation
+    // loop: `--dk-p` carries a CSS transition (see deck.css), so writing
+    // the raw scroll position is enough — the browser does the easing,
+    // the overshoot and the settle.
     //
-    // Runs in the event phase. It reads scroll and then writes a custom
-    // property; the read happens first and the write can't invalidate it,
-    // so there is no forced synchronous layout.
+    // "Read first, then write" only protects a single event. Across
+    // events it inverts: the write dirties style for fifty transformed
+    // cards, and the NEXT event's scroll read pays a forced reflow of
+    // all of them — and a drag drives several scrollTo events per frame,
+    // which is a couple hundred milliseconds of pure layout in one task.
+    // So scroll events only REQUEST a sync, and the read+write pair runs
+    // once per frame in rAF. The transition's follow lag is two orders
+    // of magnitude longer than the frame this defers by.
     const sync = () => {
       const t = position() / span;
       const p = (t < 0 ? 0 : t > 1 ? 1 : t) * last;
@@ -399,10 +431,19 @@ export default function Deck({ tracks }) {
     measure();
     sync();
 
+    let syncRaf = 0;
+    const requestSync = () => {
+      if (syncRaf) return;
+      syncRaf = requestAnimationFrame(() => {
+        syncRaf = 0;
+        sync();
+      });
+    };
+
     // The sideways scroller is the section itself; the vertical one is
     // the document.
     const scroller = hscroll ? trackEl : window;
-    scroller.addEventListener("scroll", sync, { passive: true });
+    scroller.addEventListener("scroll", requestSync, { passive: true });
     window.addEventListener("resize", onResize);
 
     // ── drag ─────────────────────────────────────────────────────────
@@ -654,7 +695,8 @@ export default function Deck({ tracks }) {
     stageEl.addEventListener("pointercancel", onUp);
 
     return () => {
-      scroller.removeEventListener("scroll", sync);
+      scroller.removeEventListener("scroll", requestSync);
+      if (syncRaf) cancelAnimationFrame(syncRaf);
       window.removeEventListener("resize", onResize);
       stageEl.removeEventListener("wheel", onWheel);
       stageEl.removeEventListener("pointerdown", onDown);

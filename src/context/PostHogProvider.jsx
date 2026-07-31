@@ -34,7 +34,13 @@ function PostHogScrollDepth() {
 
   useEffect(() => {
     if (!posthogClient) return;
-    const handler = () => {
+    // scrollY and scrollHeight are layout-forcing reads, and this runs on
+    // every page — reading them per scroll event thrashes layout on any
+    // page that writes styles while scrolling (the deck reflowed all 50
+    // cards per event). One read per frame, via rAF, costs nothing.
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
       if (firedRef.current) return;
       const scrolled = window.scrollY + window.innerHeight;
       const total = document.documentElement.scrollHeight;
@@ -43,8 +49,15 @@ function PostHogScrollDepth() {
         posthogClient.capture("page_bottom_reached", { path: window.location.pathname });
       }
     };
+    const handler = () => {
+      if (firedRef.current || raf) return;
+      raf = requestAnimationFrame(measure);
+    };
     window.addEventListener("scroll", handler, { passive: true });
-    return () => window.removeEventListener("scroll", handler);
+    return () => {
+      window.removeEventListener("scroll", handler);
+      if (raf) cancelAnimationFrame(raf);
+    };
   }, [posthogClient, pathname]);
 
   return null;

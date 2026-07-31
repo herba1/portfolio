@@ -155,10 +155,16 @@ export function getCoverTexture(index, opts = {}) {
     const img = new Image();
     img.crossOrigin = "anonymous";
     img.onload = () => {
-      drawCover(ctx, img, s);
-      // queued, NOT flipped to needsUpdate here — the loop decides which frame
-      // pays for the upload, and opens the load gate when it has.
-      pendingUploads.push({ tex, i });
+      // Neither painted nor flipped to needsUpdate here. drawImage on a
+      // freshly-loaded Image forces a synchronous JPEG decode on the main
+      // thread, and thirty covers landing in network bursts turned that
+      // into ~120ms stalls right as the grid arrives. decode() moves the
+      // decode off-thread; the paint AND the upload then both happen in
+      // drainCoverUploads, where the loop decides which frame pays for
+      // them and opens the load gate when it has.
+      const queue = () => pendingUploads.push({ tex, i, img, ctx, s });
+      if (img.decode) img.decode().then(queue, queue);
+      else queue();
     };
     img.onerror = () => loadedIdx.add(i); // give up waiting; keep slate fill
     img.src = url;
@@ -173,15 +179,18 @@ export function warmCoverTextures(count = COUNT, opts = {}) {
   for (let i = 0; i < count; i++) getCoverTexture(i, opts);
 }
 
-// Push at most `budget` freshly-painted covers to the GPU. initTexture does the
-// upload HERE, on our terms, instead of letting it ambush whichever frame first
-// happens to draw the tile. One per frame is deliberate: a 512² RGBA upload plus
-// its mipmap chain is already a few ms of bandwidth on a phone, so two in one
-// frame is exactly the stall this exists to avoid. Thirty covers therefore cost
-// ~30 frames — half a second, entirely invisible, versus one long hitch.
+// Paint and push at most `budget` freshly-decoded covers to the GPU. The
+// canvas paint (cheap — the image is pre-decoded by then) and initTexture's
+// upload both happen HERE, on our terms, instead of ambushing whichever frame
+// first happens to draw the tile. One per frame is deliberate: a 512² RGBA
+// upload plus its mipmap chain is already a few ms of bandwidth on a phone, so
+// two in one frame is exactly the stall this exists to avoid. Thirty covers
+// therefore cost ~30 frames — half a second, entirely invisible, versus one
+// long hitch.
 export function drainCoverUploads(renderer, budget = 1) {
   for (let n = 0; n < budget && pendingUploads.length; n++) {
-    const { tex, i } = pendingUploads.shift();
+    const { tex, i, img, ctx, s } = pendingUploads.shift();
+    drawCover(ctx, img, s);
     tex.needsUpdate = true;
     try {
       renderer?.initTexture?.(tex);
