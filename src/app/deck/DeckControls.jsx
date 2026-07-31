@@ -37,6 +37,18 @@ export default function DeckControls({ target }) {
       size: { value: 44, min: 12, max: 80, step: 0.5, label: "card (vmin)" },
       depth: { value: 0.13, min: 0.01, max: 0.6, step: 0.005, label: "z gap" },
       rise: { value: 0.042, min: -0.2, max: 0.2, step: 0.002, label: "climb" },
+      // The board's thickness, as a fraction of the card. 0 is the old
+      // zero-thickness plane.
+      thick: {
+        value: 0.022,
+        min: 0,
+        max: 0.12,
+        step: 0.001,
+        label: "thickness",
+      },
+      // How much flat board is laid over the cover's colour. 0 is the
+      // raw ink, 1 is plain stock with no artwork in it at all.
+      wash: { value: 0.1, min: 0, max: 1, step: 0.01, label: "edge wash" },
     }),
     slide: folder({
       pop: { value: 0.55, min: 0, max: 2, step: 0.01, label: "peek (x)" },
@@ -132,6 +144,8 @@ export default function DeckControls({ target }) {
     set("--w-vmin", v.size);
     set("--dk-depth-k", v.depth);
     set("--dk-rise-k", v.rise);
+    set("--dk-thick-k", v.thick);
+    set("--dk-wash", v.wash);
     set("--pop-k", v.pop);
     set("--focus", v.focus);
     set("--pop-ry", `${v.popRy}deg`);

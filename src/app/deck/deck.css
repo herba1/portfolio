@@ -29,9 +29,74 @@
  * long so the projection stays near-orthographic like the reference.
  *
  * ── Nothing fades, nothing is outlined
- * No haze, no depth scrim, no opacity ramp, no edge gradients, no
- * borders or shadows. A card is the artwork and nothing else. Cards
+ * No haze, no depth scrim, no opacity ramp, no borders or shadows. A
+ * card is the artwork and its own printed edge, and nothing else. Cards
  * that pass the camera simply leave the frame and get clipped.
+ *
+ * ── The edge is real, not drawn
+ * The covers used to be zero-thickness planes, which is the one thing
+ * that gave the stack away: at 40° of yaw you are looking straight at
+ * where the board's edge should be. So each card now carries two side
+ * faces — thin strips hinged on its own left and right edges, turned
+ * ±90° about Y and pushed back along local −Z. That is genuinely a
+ * three-sided box: the strip you see is the one whose outward normal
+ * happens to point at the camera, and which one that is falls out of
+ * the geometry rather than out of a rule. Under the stack's yaw it is
+ * always the right face; out in the fan, cards left of centre show
+ * their right edge and cards right of centre show their left, purely
+ * because the perspective diverges around them.
+ *
+ * No top or bottom face. A pure rotateY leaves them exactly edge-on,
+ * and the camera's off-axis tilt here is under 2°, so they would
+ * project to a fifth of a pixel.
+ *
+ * ── And the edge carries the record's colour, but never its image
+ * A grey board edge is a guess at what the object is made of. The real
+ * answer is the cover — so the strips are tinted from it.
+ *
+ * They do NOT paint it. Five versions of this file painted the artwork
+ * onto the edge as a background, and every one of them failed, because a
+ * background can only do three things with the image it is handed and
+ * all three are wrong at six projected pixels:
+ *
+ *   • show a PIECE of it, at 1:1 — the outer few px, the true wrap. Its
+ *     mirror at the seam reads as a duplicate. Re-hinging the face fixes
+ *     the mirror and leaves you six pixels of somebody's photograph,
+ *     which is still just noise.
+ *   • show a piece RESIZED — 9× from 26% across, or the whole cover
+ *     crushed to twenty px at full height. A distorted album cover is
+ *     still legible as an album cover, just a wrong one.
+ *   • show a piece TILED — one column repeated. Identical tiles or not,
+ *     a repeat reads as broken.
+ *
+ * There is no fourth thing a background can do. So the image stops being
+ * painted and starts being READ. Deck.jsx puts each cover through a
+ * 1 × 5 canvas, which is the browser averaging it down to five
+ * horizontal bands, and hands back a five-stop vertical gradient as
+ * `--dk-edge`. That is what the strips paint.
+ *
+ * Nothing about it can be noisy — there is no detail. Nothing can be
+ * distorted — there is no bitmap. Nothing can repeat — a gradient fills
+ * its box exactly once. And nothing can be mirrored, because the colour
+ * varies only down the strip, which the ±90° turn does not touch. Every
+ * failure above is answered by the same change, and the edge is still
+ * literally the colours of the cover in the order they run down it.
+ *
+ * It is also the cheapest of the lot at render time: three gradients,
+ * evaluated once each, on a face whose transform never changes. The blur
+ * that all of this was reaching for is not applied — it is inherent, and
+ * it happened once, in a canvas, before the first frame.
+ *
+ * ── and then some of it is washed out again
+ * --dk-wash lays flat board over that colour. A cut sleeve edge is stock
+ * carrying a CAST of the print, not the print, so the colour wants to be
+ * present and not announced. At 0 the edge is the raw sampled ramp; at 1
+ * it is plain board with no record in it at all.
+ *
+ * The lighting is then a third layer ON TOP, not baked in: a translucent
+ * ramp, bright at the cut edge nearest the camera and falling into shade
+ * at the back. So the hue comes from the record and the form comes from
+ * the light, and neither has to know about the other.
  *
  * ── The interaction
  * JS writes ONE number, `--dk-p` (the fractional index at the front),
@@ -223,6 +288,43 @@
   initial-value: 1;
 }
 
+/* ── the fan's spacing solution (see `--dk-arc` on .deck__card) ──
+   c0    : the |d| where the size falloff bottoms out — the knee of the
+           piecewise integral
+   pitch : radians of arc per card-width of arc length. It is exactly
+           --dk-w / --dk-fan-r, written angularly so the card never has
+           to divide one length by another. */
+@property --dk-fan-c0 {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+@property --dk-fan-pitch {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+/* the two halves of the piecewise split, and the arc position they add
+   up to — registered so each is computed to a number once per card per
+   frame rather than re-parsed as a token stream by every calc that
+   mentions it */
+@property --dk-din {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --dk-dout {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+@property --dk-arc {
+  syntax: "<number>";
+  inherits: false;
+  initial-value: 0;
+}
+
 /* ═══════════════════════════════════════════════════════════════════
  * SCROLL TRACK + TUNING
  *
@@ -256,6 +358,94 @@
              alone, so this is the one offset that costs no depth.   */
   --dk-depth-k: 0.13;
   --dk-rise-k: 0.042;
+
+  /* ── the board ──
+     thick-k : the card's thickness, as a fraction of its width, so it
+               scales with --dk-w like every other length here. A real
+               12" sleeve is nearer 0.008 of its own width; that lands
+               under two pixels at this scale, which reads as a seam
+               rather than as an object. 0.022 is the smallest value
+               that reads as printed board.
+
+     sheen   : the LIGHT on the edge, and only the light. It rides as a
+               translucent layer over the artwork's own ink, so the hue
+               belongs to the record and the form belongs to the lamp.
+               Bright at the cut edge nearest the camera, falling into
+               the stack's shade at the back; the stops sit off centre
+               so the ramp reads as a surface curving away rather than
+               as a fade between two values. `-flip` is the same light
+               for the face that is read back-to-front — see the CARDS
+               block for which is which.
+
+     wash    : how much flat GREY is laid over the sampled colour, 0 to
+               1. This is the taste dial and the only one worth touching,
+               and it is the first thing to reach for if the edges look
+               bleached — it is literally a veil of --neutral-100, so
+               every point of it costs saturation directly. It sat at a
+               third for one version and that was too much on top of the
+               desaturation an average already causes. A tenth leaves the
+               colour reading as the record while still keeping it a
+               printed edge rather than a strip of light. 1 is plain
+               stock with no record in it at all.
+
+     stock   : what an edge is before its cover has been read, and what
+               it stays as if the CDN ever stops answering CORS. It is
+               visible on the tail of a cold load, so it is a believable
+               board rather than a debug colour.                     */
+  --dk-thick-k: 0.022;
+  --dk-thick: calc(var(--dk-w) * var(--dk-thick-k));
+  --dk-wash: 0.1;
+
+  /* A flat layer, expressed as a gradient because that is the only kind
+     of <image> a colour can be. It sits between the sheen and the ink. */
+  --dk-board: linear-gradient(
+    color-mix(
+        in srgb,
+        var(--neutral-100) calc(var(--dk-wash) * 100%),
+        transparent
+      )
+      0%,
+    color-mix(
+        in srgb,
+        var(--neutral-100) calc(var(--dk-wash) * 100%),
+        transparent
+      )
+      100%
+  );
+
+  /* The white is kept to a narrow catch at the very cut rather than a
+     broad highlight. Spread across the strip it acts as a desaturating
+     veil over the sampled colour, which is most of what made the first
+     version of this look bleached; concentrated in the first few percent
+     it reads as the lit corner it is meant to be, and the rest of the
+     face keeps the record's colour. The shade at the back does the
+     opposite and deepens it. */
+  --dk-sheen: linear-gradient(
+    to right,
+    rgb(255 255 255 / 0.42) 0%,
+    rgb(255 255 255 / 0.16) 7%,
+    rgb(255 255 255 / 0.04) 20%,
+    rgb(0 0 0 / 0.06) 46%,
+    rgb(0 0 0 / 0.2) 76%,
+    rgb(0 0 0 / 0.34) 100%
+  );
+  --dk-sheen-flip: linear-gradient(
+    to left,
+    rgb(255 255 255 / 0.42) 0%,
+    rgb(255 255 255 / 0.16) 7%,
+    rgb(255 255 255 / 0.04) 20%,
+    rgb(0 0 0 / 0.06) 46%,
+    rgb(0 0 0 / 0.2) 76%,
+    rgb(0 0 0 / 0.34) 100%
+  );
+
+  --dk-stock: linear-gradient(
+    to right,
+    var(--neutral-0) 0%,
+    var(--neutral-100) 38%,
+    var(--neutral-200) 70%,
+    var(--neutral-300) 100%
+  );
 
   /* ── the slide-out ──
      pop  : how far a centred card translates sideways out of the run
@@ -322,6 +512,18 @@
      leaves a little margin on top of --fan-gap.) */
   --dk-fan-r: calc(
     var(--dk-w) * var(--fan-gap) / (2 * sin(calc(var(--dk-fan-step) / 2)))
+  );
+
+  /* Where the size falloff hits its floor: 1 − fall·d² = min. Past this
+     every card is the same size, so past this the spacing is linear
+     again — this is the knee of the piecewise function. */
+  --dk-fan-c0: calc(sqrt((1 - var(--fan-min)) / var(--fan-fall)));
+
+  /* Radians of arc per card-width of arc length. Substituting the
+     radius above, --dk-w / --dk-fan-r reduces to this exactly, and this
+     form needs no length ÷ length. */
+  --dk-fan-pitch: calc(
+    2 * sin(calc(var(--dk-fan-step) / 2)) / var(--fan-gap)
   );
 
   /* flat carousel: gap as a multiple of the card, >1 = no overlap */
@@ -534,8 +736,48 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- * CARDS — the card IS the <img>. No wrapper, no border, no shadow,
- * no pseudo-elements. Nothing but the artwork.
+ * CARDS — a three-sided box: the artwork, and the two edges of the
+ * board it is printed on.
+ *
+ * `.deck__card` is a bare frame. It owns the size, the place and the
+ * transform, and it paints nothing itself. Inside it sit the artwork
+ * (`.deck__art`, filling the frame at z = 0) and the two side faces
+ * (its own ::before / ::after). No other elements, and nothing per-card
+ * in JS: the two faces carry a STATIC transform, so the whole per-frame
+ * cost is still exactly one transform per card, on the frame.
+ *
+ * ── the side faces, exactly
+ * Take ::after, the right one. It is a strip --dk-thick wide pinned to
+ * the frame's right edge, and it is hinged there (transform-origin
+ * 100% 50%), so its own points run from dx = −thick to dx = 0.
+ *
+ *   rotateY(90deg)          z' = −dx      the strip stands up out of
+ *                                         the card, spanning z 0 → thick
+ *   translateZ(−thick)      z' = −dx − t  and drops back behind it,
+ *                                         spanning −thick → 0
+ *
+ * Both ends stay at x = the card's right edge, so the face is welded to
+ * that edge at every angle and every scale — there is no gap to tune
+ * and nothing to keep in step. Its outward normal comes out as +X, so
+ * `backface-visibility: hidden` shows it exactly when it faces you.
+ * ::before is the mirror: hinged left, rotateY(−90deg), normal −X.
+ *
+ * The sheens follow from the geometry and are easy to get backwards.
+ * After the rotation, ::after's end nearest the camera is its LEFT edge
+ * (dx = −thick lands at z = 0), so its highlight belongs on the left:
+ * `to right`, i.e. --dk-sheen. ::before is the other way about, which is
+ * the only reason there are two sheens instead of one.
+ *
+ * The COLOUR needs none of that analysis, which is the quiet advantage
+ * of it being a vertical gradient: it varies only down the strip, and
+ * the ±90° turn is about Y, so there is no orientation to get wrong and
+ * no mirror to see. Both faces take the same --dk-edge, unmodified.
+ *
+ * ── where --dk-edge comes from
+ * Deck.jsx, once, off the back of the load the cover was going to do
+ * anyway: a 1 × 5 canvas averages the artwork into five bands and those
+ * become the gradient's stops. Nothing per frame, nothing per card at
+ * render time, and no second request — see the note above SAMPLES there.
  * ═══════════════════════════════════════════════════════════════════ */
 
 .deck__card {
@@ -546,8 +788,11 @@
   height: var(--dk-w);
   margin: calc(var(--dk-w) / -2) 0 0 calc(var(--dk-w) / -2);
   display: block;
-  object-fit: cover;
-  backface-visibility: hidden;
+
+  /* The card is a box now, not a plane: its faces have to keep their
+     own depth inside the rail's 3D space rather than being flattened
+     into the card's plane. */
+  transform-style: preserve-3d;
 
   /* Pivot at the BASE, not the centre. This is what makes the fan work:
      a card tips and shrinks from the point where it stands, so its
@@ -571,7 +816,7 @@
 
   /* ── shape B: the spread — THE FAN (default) ──
      Cards standing on a dome. A circle of radius --dk-fan-r sits below the
-     centre card's base; each card is placed on it at θ = d × step, then
+     centre card's base; each card is placed on it at an angle θ, then
      tipped by that same θ so it stands perpendicular to the curve. Left
      of centre θ is negative, so those cards tip left; right of centre
      they tip right; the middle one is at θ = 0, upright and unscaled.
@@ -579,8 +824,9 @@
      y = r − r·cos θ is what drops the sides: it's the circle's own sag,
      so every base lands exactly on the arc rather than on a line.
 
-     Neighbours never overlap — the radius is solved for that from the
-     step and --fan-gap. See the --dk-fan-r derivation on `.deck`.
+     θ is NOT d × step — the step is only the pitch at the centre, and
+     the spacing has to widen and narrow with the cards. See the block
+     below.
 
      Size falls off with d², floored by --fan-min. Squaring is deliberate
      — it keeps this pure CSS with no abs() and no sign().
@@ -588,7 +834,69 @@
      --dk-gz is depth for SORTING only (a couple of px per card, squared),
      so the centre card paints over its neighbours. It's far too small to
      read as perspective. */
-  --dk-th: calc(var(--dk-d) * var(--dk-fan-step));
+  /* ── why the angle is not d × step ──────────────────────────────────
+     Evenly spaced BASES do not give evenly spaced GAPS, because the
+     cards are not the same size. A card at distance d is w·s(d) wide,
+     s(d) = 1 − fall·d², so with a constant angular step the bases march
+     at a constant w·gap while the artwork between them keeps shrinking:
+     the clearance opens up the further out you look. That is the thing
+     that reads as wrong while scrolling — the deck breathes.
+
+     What has to be constant is the clearance, not the step. Put card d
+     at arc length U(d), and the gap between neighbours is
+
+         U(d+1) − U(d) − w·(s(d) + s(d+1)) / 2
+
+     so the requirement is dU/dd = w·s(d) + G — spacing that tracks the
+     local card size, plus a fixed clearance. Integrating gives U, and
+     because s() is clamped at --fan-min the integral is piecewise:
+     quadratic falloff inside |d| < c0, constant size outside it.
+
+     The split is done with clamp() rather than a branch:
+
+         din  = clamp(−c0, d, c0)   the part inside the falloff
+         dout = d − din             0 inside, the overhang outside
+
+     and then, in card widths,
+
+         U = din − fall·din³/3 − fall·din/6 + min·dout + (gap − 1)·d
+             └── ∫s over the curved part ──┘ └ flat ┘  └ clearance ┘
+
+     The −fall·din/6 term is the trapezoid correction, and it is not a
+     fudge factor: the integral is the AREA under s, but the gap is set
+     by s at the two ENDPOINTS, and for a quadratic those differ by
+     exactly fall/6 per step. It is a constant, so subtracting it once
+     turns "consistent" into exact — measured, the clearance is now flat
+     to within a pixel across every card that is on screen.
+
+     One seam remains, and it is worth naming rather than hiding. The
+     correction is Euler–Maclaurin's, which wants s to be smooth, and s
+     has a corner where the clamp bottoms out at |d| = c0 ≈ 3.65. The
+     single step that straddles that corner comes out ~0.03w tight. It
+     is off screen: the fan's radius puts card 3 well past the viewport
+     edge at every size the deck is used at, so the visible run is
+     |d| ≲ 2.5 and the seam lives past it. Smoothing it out would mean
+     a C¹ floor on the size falloff and a quintic in place of the cubic
+     above, which is a lot of arithmetic for a gap nobody can see.
+
+     Arc length becomes an angle through --dk-fan-pitch, and the sag and
+     the tip both keep reading θ, so the dome is unchanged. At d = 0 the
+     pitch is still w·gap per card, which is what it always was, so the
+     centre of the fan looks exactly as it did and only the tail moves.
+     `flat` and `ring` don't need any of this — they override --dk-th
+     and hold --dk-gs at 1, so their gaps were always equal. */
+  --dk-din: clamp(
+    calc(-1 * var(--dk-fan-c0)),
+    var(--dk-d),
+    var(--dk-fan-c0)
+  );
+  --dk-dout: calc(var(--dk-d) - var(--dk-din));
+  --dk-arc: calc(
+    var(--dk-din) - var(--fan-fall) * var(--dk-din) * var(--dk-din) *
+      var(--dk-din) / 3 - var(--fan-fall) * var(--dk-din) / 6 +
+      var(--fan-min) * var(--dk-dout) + (var(--fan-gap) - 1) * var(--dk-d)
+  );
+  --dk-th: calc(var(--dk-arc) * var(--dk-fan-pitch) * 1rad);
   --dk-gx: calc(sin(var(--dk-th)) * var(--dk-fan-r));
   --dk-gy: calc(var(--dk-fan-r) - cos(var(--dk-th)) * var(--dk-fan-r));
   --dk-gz: calc(var(--dk-d) * var(--dk-d) * -2px);
@@ -613,7 +921,16 @@
     )
     rotateY(calc(var(--sr) + (var(--dk-gr) - var(--sr)) * var(--dk-me)))
     rotateZ(calc(var(--dk-grz) * var(--dk-me)))
-    scale(calc(1 + (var(--dk-gs) - 1) * var(--dk-me)));
+    /* scale3d, not scale: a 2D scale leaves Z alone, so a card shrunk to
+       0.4 out at the end of the fan would keep a full-thickness edge and
+       read as 2.5× too chunky. Scaling the third axis with the other two
+       shrinks the board along with the artwork. It costs the stack
+       nothing — at --dk-me: 0 this is identity on all three. */
+    scale3d(
+      calc(1 + (var(--dk-gs) - 1) * var(--dk-me)),
+      calc(1 + (var(--dk-gs) - 1) * var(--dk-me)),
+      calc(1 + (var(--dk-gs) - 1) * var(--dk-me))
+    );
 
   /* The entrance rides the standalone `translate` property, NOT
      `transform` — the transform above is fully owned by the layout math
@@ -624,11 +941,84 @@
      An animation-delay is safe here where a transition-delay was not:
      an animation fires once and runs its own clock, whereas a
      transition re-aimed every frame would restart its delay every frame
-     and never move at all. */
+     and never move at all.
+
+     The keyframe's `opacity` is a grouping property, so for as long as
+     it is under 1 the card is flattened and its edges collapse into its
+     own plane. That is not worth working around: the rise happens in
+     the fan, where the edges are near enough edge-on to be invisible,
+     and every card is back at opacity 1 several hundred ms before the
+     fold to the stack begins. */
   animation: deck-card-rise var(--intro-card) cubic-bezier(0.16, 1, 0.3, 1)
     backwards;
   animation-delay: calc(min(var(--dk-i), var(--intro-cap)) * var(--intro-step));
   animation-play-state: paused;
+}
+
+/* The artwork: the front face, filling the frame at z = 0. It sits
+   exactly where the card used to sit, so nothing about the layout math
+   moved — the box grew backwards, not forwards. */
+.deck__art {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  backface-visibility: hidden;
+}
+
+/* The no-artwork fallback card paints the same value the edges read, so
+   the gradient exists once in the DOM rather than once per face. */
+div.deck__art {
+  background-image: var(--dk-art);
+  background-size: 100% 100%;
+}
+
+/* The two edges of the board. See the derivation above the card rule —
+   each is hinged on the frame's own edge, stood up 90° about Y, and
+   dropped back one thickness so the box extends behind the artwork. */
+.deck__card::before,
+.deck__card::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  height: 100%;
+  width: var(--dk-thick);
+  backface-visibility: hidden;
+  /* The stage owns the pointer; an edge is 4px of hit area that can
+     only ever confuse a grab. */
+  pointer-events: none;
+
+  /* Three layers, top to bottom: light, board, colour. Every one of them
+     is a gradient filling the box exactly once — there is no bitmap in
+     this element at all, so there is nothing to scale, nothing to tile
+     and nothing to crop. See the header. */
+  background-repeat: no-repeat;
+  background-size: auto;
+}
+
+/* left edge — hinged on the card's own left edge, normal −X. Its end
+   nearest the camera is the strip's RIGHT edge, so the highlight goes
+   there: `to left`, i.e. --dk-sheen-flip. */
+.deck__card::before {
+  left: 0;
+  transform-origin: 0 50%;
+  transform: translateZ(calc(var(--dk-thick) * -1)) rotateY(-90deg);
+  background-image:
+    var(--dk-sheen-flip), var(--dk-board), var(--dk-edge, var(--dk-stock));
+}
+
+/* right edge — the mirror of the above, normal +X. Under the stack's yaw
+   this is the one you see, on every card, all the way up the run. Its
+   end nearest the camera is the strip's LEFT edge, so the highlight goes
+   there: `to right`, i.e. --dk-sheen. */
+.deck__card::after {
+  right: 0;
+  transform-origin: 100% 50%;
+  transform: translateZ(calc(var(--dk-thick) * -1)) rotateY(90deg);
+  background-image:
+    var(--dk-sheen), var(--dk-board), var(--dk-edge, var(--dk-stock));
 }
 
 /* ═══════════════════════════════════════════════════════════════════

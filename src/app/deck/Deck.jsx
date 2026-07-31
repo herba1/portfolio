@@ -58,8 +58,83 @@ function fallbackDeck(n) {
       // Eased multi-stop, not a two-stop fade — the midpoints are placed
       // off-centre so the ramp reads as light falling rather than a blend.
       gradient: `linear-gradient(148deg, ${a} 0%, ${b} 38%, ${b} 52%, ${c} 100%)`,
+      // What sampleEdges() works out from a real cover, known up front
+      // for a made-up one: the colour running down the board's edge.
+      edge: `linear-gradient(${a} 10%, ${b} 50%, ${c} 90%)`,
     };
   });
+}
+
+/* ── the edge colour ───────────────────────────────────────────────
+ * The board's edge is lit and shaded in CSS, but its COLOUR has to come
+ * from the record, and that is the one thing a stylesheet cannot work
+ * out for itself.
+ *
+ * Every attempt to make CSS do it failed the same way. A background is
+ * either a piece of the artwork (detail, and at six projected pixels
+ * detail is noise), or the artwork resized to fit (a distorted album
+ * cover, which reads as a mistake), or a small piece tiled (a repeat,
+ * which reads as broken). There is no fourth option, because a
+ * background can only ever paint the image it was given.
+ *
+ * So the image is read instead of painted. Each cover goes through a
+ * 1 × SAMPLES canvas, which asks the browser to average it down to a
+ * single column of five pixels — five horizontal bands of the record,
+ * each one the mean of everything across it. Those five become the
+ * stops of a vertical gradient, and THAT is what the edges paint.
+ *
+ * The result has no detail to be noisy, no scaling to distort, and no
+ * tile to repeat, while still being, quite literally, the colours of the
+ * cover in the order they appear down it. It is also cheaper at render
+ * time than any of the versions it replaces: a gradient, evaluated once.
+ *
+ * It costs nothing at the network either. i.scdn.co answers with
+ * `access-control-allow-origin: *`, so `crossOrigin` makes the canvas
+ * readable without a second request — and if that ever stops being true,
+ * onCoverError below quietly refetches without it and the edges fall
+ * back to plain board.
+ * ─────────────────────────────────────────────────────────────────── */
+
+const SAMPLES = 5;
+
+/* ── putting the colour back ───────────────────────────────────────
+ * An average is a walk toward grey — that is what averaging IS — so a
+ * band read off a whole row of artwork always comes back duller than the
+ * record looks. A sleeve that reads as deep red averages to a dusty
+ * pink, and five dusty bands make an edge that looks washed out even
+ * though every value in it is technically correct.
+ *
+ * So the saturation lost in the mean is put back afterwards, with the
+ * standard luminance-preserving matrix — the same one `filter:
+ * saturate()` applies. Hold the band's brightness, push its channels
+ * away from it.
+ *
+ * Deliberately NOT done as a CSS filter on the faces, which would have
+ * been tempting since the sheen and the board are greys and a saturate()
+ * would leave them alone. A filter is a grouping property: putting one
+ * on an element inside a preserve-3d context asks the browser to render
+ * it to an intermediate image and composite that back in as a plane.
+ * That is a lot of rope, on a hundred faces, for something a multiply
+ * does once before the first frame.
+ * ─────────────────────────────────────────────────────────────────── */
+const SATURATION = 1.65;
+
+function vivid(r, g, b) {
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const up = (c) =>
+    Math.max(0, Math.min(255, Math.round(l + (c - l) * SATURATION)));
+  return `${up(r)} ${up(g)} ${up(b)}`;
+}
+
+// One cover failed to load as a CORS request. The likeliest cause by far
+// is the CDN dropping its ACAO header, and the artwork matters more than
+// the edge colour does — so drop the attribute and fetch it again the
+// ordinary way. The stylesheet's board fallback covers the rest.
+function onCoverError(e) {
+  const img = e.currentTarget;
+  if (!img.crossOrigin) return;
+  img.crossOrigin = null;
+  img.src = img.src;
 }
 
 export default function Deck({ tracks }) {
@@ -174,6 +249,65 @@ export default function Deck({ tracks }) {
     const t = setTimeout(go, 1400);
     return () => clearTimeout(t);
   }, []);
+
+  // ── read each cover down to five colours ─────────────────────────
+  // See the note above SAMPLES. This runs once per cover, off the back
+  // of the load it was going to do anyway, and writes one custom
+  // property on that card's frame — no React state, so none of this
+  // reaches the render path. A card whose cover hasn't loaded yet simply
+  // keeps the board fallback until it does.
+  useEffect(() => {
+    const root = trackRef.current;
+    if (!root) return;
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 1;
+    canvas.height = SAMPLES;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return;
+    ctx.imageSmoothingQuality = "high";
+
+    const off = [];
+
+    const read = (img) => {
+      const frame = img.parentElement;
+      if (!frame || !img.naturalWidth) return;
+      try {
+        // Drawing 300px of cover into one pixel of width is the whole
+        // averaging step — the browser's own downscale filter does it,
+        // and it does it on five bands at once.
+        ctx.clearRect(0, 0, 1, SAMPLES);
+        ctx.drawImage(img, 0, 0, 1, SAMPLES);
+        const { data } = ctx.getImageData(0, 0, 1, SAMPLES);
+
+        // Stops land at each band's CENTRE, not its edge, so the ramp
+        // reads as the colours easing through one another rather than as
+        // five stripes with seams between them.
+        let stops = "";
+        for (let i = 0; i < SAMPLES; i++) {
+          const o = i * 4;
+          const at = (((i + 0.5) / SAMPLES) * 100).toFixed(1);
+          const c = vivid(data[o], data[o + 1], data[o + 2]);
+          stops += `${i ? "," : ""}rgb(${c}) ${at}%`;
+        }
+        frame.style.setProperty("--dk-edge", `linear-gradient(${stops})`);
+      } catch {
+        // A tainted canvas — the CDN stopped answering CORS. Nothing to
+        // do: the stylesheet's board fallback is already correct.
+      }
+    };
+
+    for (const img of root.querySelectorAll("img")) {
+      if (img.complete) read(img);
+      else {
+        const on = () => read(img);
+        img.addEventListener("load", on, { once: true });
+        off.push(() => img.removeEventListener("load", on));
+      }
+    }
+
+    return () => off.forEach((fn) => fn());
+  }, [cards]);
 
   useEffect(() => {
     const trackEl = trackRef.current;
@@ -442,6 +576,78 @@ export default function Deck({ tracks }) {
       pid = null;
     };
 
+    // ── sideways wheel ───────────────────────────────────────────────
+    // A trackpad's two-finger swipe and a mouse's tilt wheel arrive as
+    // deltaX, and nothing on the page consumed it: the deck ran sideways
+    // and the only sideways input did nothing.
+    //
+    // The first attempt at this ran deltaX through the DRAG projection —
+    // a pixel of swipe moving the deck a pixel along its own screen axis
+    // — and it felt wrong next to the vertical scroll, for two reasons
+    // that are worth separating:
+    //
+    //   • WEIGHT. Vertical goes through Lenis, so a notch is smoothed,
+    //     carries momentum and settles. The projected version wrote the
+    //     scroller directly with `immediate`, which is the one thing
+    //     that reads as different no matter how the number is scaled.
+    //   • RATE. Direct manipulation is the right model for a hand that
+    //     is holding a card and the wrong one for a wheel, which is a
+    //     rate input aimed at nothing in particular. The projection also
+    //     made sensitivity depend on the layout: one card is ~420px of
+    //     travel spread and ~35px stacked, so the same flick moved the
+    //     deck twelve times as far in one mode as the other.
+    //
+    // So the wheel no longer knows anything about the deck's geometry.
+    // deltaX is treated exactly as Lenis treats deltaY — same deltaMode
+    // normalisation, same multiplier, same scrollTo with the instance's
+    // own lerp/duration/easing — which makes "one pixel of deltaX" and
+    // "one pixel of deltaY" the same amount of deck, through the same
+    // smoothing. They are not merely tuned to match; it is one path.
+    //
+    // Lenis's own normalisation, from its VirtualScroll: a wheel
+    // reporting LINES rather than pixels (mode 1, some Windows mice) is
+    // worth 100/6 px per line, and PAGES (mode 2) a viewport.
+    const LINE = 100 / 6;
+
+    const onWheel = (e) => {
+      // Vertical is already handled — and handled well. The deck only
+      // claims the axis nothing else was using. A shift-wheel arrives as
+      // deltaX on some browsers and deltaY on others; the dominance test
+      // covers both without having to care which.
+      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+
+      const unit =
+        e.deltaMode === 1 ? LINE : e.deltaMode === 2 ? window.innerWidth : 1;
+      const l = lenisRef.current;
+      const delta = e.deltaX * unit * (l ? l.options.wheelMultiplier : 1);
+
+      e.preventDefault();
+      // Claim the whole event, not just its X. Lenis listens on the
+      // window, so it sees this one after we do, and with the default
+      // vertical gestureOrientation it would take the Y component of the
+      // same diagonal swipe and scroll on top of us — both axes drive
+      // the same deck here, so that reads as the flick counting twice.
+      // This is the flag Lenis sets on itself to mark an event as spent.
+      e.lenisStopPropagation = true;
+
+      // Wheel-right advances, same sign as wheel-down: in both cases the
+      // content moves against the gesture under a fixed viewport.
+      // No lerp/duration/easing passed: scrollTo already defaults each
+      // of them to the instance's own options, so leaving them off is
+      // what guarantees this stays identical to the vertical path rather
+      // than merely a copy of it that can drift.
+      if (l) l.scrollTo(l.targetScroll + delta, { programmatic: false });
+      // Lenis mounts half a second after load. Until it does, the deck
+      // still has to answer the wheel; it just answers it unsmoothed,
+      // exactly as the vertical scroll does in that same window.
+      else window.scrollBy(0, delta);
+    };
+
+    // On a phone the deck IS a native sideways scroller, and that
+    // scroller already answers deltaX.
+    if (!hscroll)
+      stageEl.addEventListener("wheel", onWheel, { passive: false });
+
     stageEl.addEventListener("pointerdown", onDown);
     stageEl.addEventListener("pointermove", onMove);
     stageEl.addEventListener("pointerup", onUp);
@@ -450,6 +656,7 @@ export default function Deck({ tracks }) {
     return () => {
       scroller.removeEventListener("scroll", sync);
       window.removeEventListener("resize", onResize);
+      stageEl.removeEventListener("wheel", onWheel);
       stageEl.removeEventListener("pointerdown", onDown);
       stageEl.removeEventListener("pointermove", onMove);
       stageEl.removeEventListener("pointerup", onUp);
@@ -464,37 +671,63 @@ export default function Deck({ tracks }) {
   //
   // `position: absolute` is inline rather than left to the stylesheet on
   // purpose: it ships with the HTML. If the CSS is even one tick late,
-  // 50 square images would otherwise lay out in normal flow and give the
+  // 50 square frames would otherwise lay out in normal flow and give the
   // document a ~15,000px height before collapsing back.
+  //
+  // The frame is the card's whole DOM contribution beyond the artwork:
+  // the two printed edges are its ::before / ::after, so a card is one
+  // wrapper and one image, and the edges cost no elements and no JS.
+  // See the CARDS block in deck.css for the geometry.
+  //
+  // Nothing here names the cover twice. The edges take their colour from
+  // `--dk-edge`, which is five sampled colours rather than a url, so the
+  // artwork is referenced exactly once — by the <img> — and `loading`
+  // means what it says again.
+  //
+  // A made-up card knows its own --dk-edge up front; a real one is left
+  // to the sampler above and shows plain board until its cover lands.
   const rail = useMemo(
     () => (
       <div className="deck__rail" style={{ position: "absolute", inset: 0 }}>
-        {cards.map((c, i) =>
-          c.image ? (
-            // Plain <img>, not next/image: these are fixed-size square
-            // thumbnails already served at the right size by Spotify's
-            // CDN, so the optimizer would only add a hop.
-            <img
-              key={c.id ?? i}
-              className="deck__card"
-              style={{ "--dk-i": i, position: "absolute" }}
-              src={c.image}
-              alt=""
-              width={300}
-              height={300}
-              draggable={false}
-              decoding="async"
-              loading={i < 24 ? "eager" : "lazy"}
-              fetchPriority={i < 6 ? "high" : "auto"}
-            />
-          ) : (
-            <div
-              key={c.id ?? i}
-              className="deck__card"
-              style={{ "--dk-i": i, position: "absolute", background: c.gradient }}
-            />
-          ),
-        )}
+        {cards.map((c, i) => (
+          <div
+            key={c.id ?? i}
+            className="deck__card"
+            style={{
+              "--dk-i": i,
+              ...(c.image ? null : { "--dk-art": c.gradient }),
+              ...(c.edge ? { "--dk-edge": c.edge } : null),
+              position: "absolute",
+            }}
+          >
+            {c.image ? (
+              // Plain <img>, not next/image: these are fixed-size square
+              // thumbnails already served at the right size by Spotify's
+              // CDN, so the optimizer would only add a hop.
+              //
+              // crossOrigin is what makes the canvas above readable. It
+              // is not an extra request — it is the SAME request, asked
+              // for in CORS mode, which i.scdn.co allows outright.
+              <img
+                className="deck__art"
+                src={c.image}
+                alt=""
+                width={300}
+                height={300}
+                crossOrigin="anonymous"
+                onError={onCoverError}
+                draggable={false}
+                decoding="async"
+                loading={i < 24 ? "eager" : "lazy"}
+                fetchPriority={i < 6 ? "high" : "auto"}
+              />
+            ) : (
+              // No src to give an <img>, so the gradient card paints its
+              // face off --dk-art on the frame.
+              <div className="deck__art" />
+            )}
+          </div>
+        ))}
       </div>
     ),
     [cards],

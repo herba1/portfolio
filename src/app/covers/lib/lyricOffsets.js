@@ -12,20 +12,39 @@
 // recording where the preview begins. A track in here plays fully synced for
 // everyone; a track absent from it falls back to the free manual scroller, which
 // is what the panel did before any of this existed. Wrong sync is worse than no
-// sync, so absence is the safe default and the calibration below never ships a
-// guess to visitors.
+// sync, so absence stays the safe default: nothing is ever guessed into this
+// map, only clicked into it.
+//
+// How a track gets in here: play it, click the line you can hear. In dev that
+// tap is POSTed to /api/covers/lyric-offset, which rewrites the literal below —
+// so the sync is a source change you commit, and production ships it synced for
+// everyone. In production the same tap is kept locally (localStorage) for the
+// visitor who made it, since it's their ear that confirmed it.
 // ---------------------------------------------------------------------------
 
+import { isProdView } from "@/lib/viewMode";
+
 export const PREVIEW_OFFSETS_MS = {
-  // "GBAYE9200070": 61200,
+  "GBAAA0001097": 44621,  // XTC — Then She Appeared
+  "GBAAM0201126": 39189,  // The Police — Spirits In The Material World
+  "GBAAM0201173": 60083,  // The Police — Bring On The Night
+  "GBAAM0201177": 45226,  // The Police — The Bed's Too Big Without You
+  "GBAKW8701068": 45403,  // The La's — Knock Me Down
+  "GBAQT8800001": 43625,  // The La's — There She Goes
+  "GBARL0900654": 47748,  // Lisa Mitchell — Neopolitan Dreams
+  "GBUM72006890": 44229,  // The Beatles — The Long And Winding Road
+  "USNO10480706": 0,  // Sam Phillips — Reflecting Light
+  "USSM11900141": 48030,  // Vampire Weekend — This Life
+  "USSM19902988": 47829,  // Michael Jackson, Paul McCartney — The Girl Is Mine (with Paul McCartney)
+  "USUG10500591": 44918,  // Jack Johnson — Upside Down
 };
 
 const LS_KEY = "cv:lyricOffsets";
 
-// Dev-only overrides live in localStorage so calibrating a track doesn't need a
-// rebuild. Never consulted in production — visitors only ever see the map above.
+// A confirmed tap outranks the shipped map — in every environment. It can only
+// ever have come from someone listening to this exact preview, which is a better
+// source than anything the build could carry.
 export function readOverrides() {
-  if (process.env.NODE_ENV === "production") return {};
   try {
     return JSON.parse(localStorage.getItem(LS_KEY) || "{}");
   } catch {
@@ -34,7 +53,7 @@ export function readOverrides() {
 }
 
 export function writeOverride(isrc, ms) {
-  if (process.env.NODE_ENV === "production" || !isrc) return;
+  if (!isrc) return;
   try {
     const all = readOverrides();
     if (ms === null) delete all[isrc];
@@ -43,6 +62,21 @@ export function writeOverride(isrc, ms) {
   } catch {
     /* private mode — calibration just won't persist */
   }
+}
+
+// Dev only: send a confirmed tap back to this file, so the calibration survives
+// the browser it was made in and ships. Fire-and-forget — a failed write must
+// never disturb playback, and the localStorage override has already taken effect
+// either way.
+export function publishOffset(isrc, ms, note) {
+  if (isProdView() || !isrc || typeof ms !== "number") return;
+  fetch("/api/covers/lyric-offset", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ isrc, ms: Math.round(ms), note: note || "" }),
+  }).catch(() => {
+    /* the override still holds locally */
+  });
 }
 
 export function resolveOffset(isrc) {

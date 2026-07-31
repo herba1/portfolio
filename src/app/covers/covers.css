@@ -1084,6 +1084,32 @@
   }
 }
 
+/* ── waiting / skeleton tokens ──────────────────────────────────────────────
+   The waveform's stub bars and the lyrics skeleton are the same event — "this
+   is on its way" — arriving in two halves of one card. They were drifting
+   apart (two fills, two sweep speeds, two gradients), which read as two
+   unrelated loading states rather than one card filling in. One set of values,
+   consumed by both: same ink, same mask, same 1500ms.
+   The stops stay in #000/#0006 because they are MASK alpha, not colour — the
+   ink they reveal is --cv-skeleton-fill.
+
+   That fill is --color-line-strong, NOT a percentage of ink: the waveform's
+   idle bars are painted by motion as an inline backgroundColor (Waveform.jsx,
+   `idleColor`), so the stylesheet's value for .cv-wave-bar never actually
+   reaches the screen. Matching the CSS rule instead of the inline one is how
+   the skeleton ended up a different, warmer grey than the bars beside it. */
+:root {
+  --cv-skeleton-fill: var(--color-line-strong);
+  --cv-shimmer-mask: linear-gradient(90deg, #000 40%, #0006 50%, #000 60%);
+  --cv-shimmer-size: 260% 100%;
+  --cv-shimmer-from: 160% 0;
+  --cv-shimmer-to: -60% 0;
+  --cv-shimmer-duration: 1500ms;
+  /* the lyric panel's top/bottom fade — shared by the real scroller and its
+     skeleton, so the stack ends the same way before and after the words land */
+  --cv-lyrics-fade: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
+}
+
 /* Nothing to draw yet. A stationary row of stub bars is indistinguishable from
    a track whose waveform came back flat, so sweep a highlight across them —
    masked, so it costs no extra element and can't shift anything. */
@@ -1099,20 +1125,20 @@
   z-index: 0;
 }
 .cv-wave-wrap.is-waiting {
-  -webkit-mask-image: linear-gradient(90deg, #000 40%, #0006 50%, #000 60%);
-  mask-image: linear-gradient(90deg, #000 40%, #0006 50%, #000 60%);
-  -webkit-mask-size: 260% 100%;
-  mask-size: 260% 100%;
-  animation: cv-wave-sweep 1500ms linear infinite;
+  -webkit-mask-image: var(--cv-shimmer-mask);
+  mask-image: var(--cv-shimmer-mask);
+  -webkit-mask-size: var(--cv-shimmer-size);
+  mask-size: var(--cv-shimmer-size);
+  animation: cv-shimmer-sweep var(--cv-shimmer-duration) linear infinite;
 }
-@keyframes cv-wave-sweep {
+@keyframes cv-shimmer-sweep {
   from {
-    -webkit-mask-position: 160% 0;
-    mask-position: 160% 0;
+    -webkit-mask-position: var(--cv-shimmer-from);
+    mask-position: var(--cv-shimmer-from);
   }
   to {
-    -webkit-mask-position: -60% 0;
-    mask-position: -60% 0;
+    -webkit-mask-position: var(--cv-shimmer-to);
+    mask-position: var(--cv-shimmer-to);
   }
 }
 
@@ -1131,7 +1157,7 @@
   min-width: 0;
   border-radius: var(--radius-full);
   transform-origin: center;
-  background: color-mix(in oklab, var(--color-ink) 14%, transparent);
+  background: var(--cv-skeleton-fill);
 }
 .cv-music-time {
   flex: none;
@@ -1233,21 +1259,75 @@
   flex-direction: column;
   transition: opacity var(--duration-400) ease;
 }
-.cv-lyrics-loader {
+/* The layer carries the panel's top/bottom fade; the skeleton inside it carries
+   the shimmer. Two elements, one mask each — rather than one element trying to
+   composite both, which needs mask-composite and puts the sweep through a
+   different code path (and a different look) than the waveform's. */
+.cv-lyrics-sk-layer {
   position: absolute;
   inset: 0;
-  display: grid;
-  place-items: center;
   transition: opacity var(--duration-400) ease;
+  -webkit-mask-image: var(--cv-lyrics-fade);
+  mask-image: var(--cv-lyrics-fade);
 }
 .cv-lyrics-content.is-off,
-.cv-lyrics-loader.is-off {
+.cv-lyrics-sk-layer.is-off {
   opacity: 0;
   pointer-events: none;
 }
 .cv-lyrics-content.is-on,
-.cv-lyrics-loader.is-on {
+.cv-lyrics-sk-layer.is-on {
   opacity: 1;
+}
+
+/* Loading skeleton — the shape of the lyrics before the lyrics. Centred on the
+   focal slot, at the real line pitch, so the crossfade to words is a resolve
+   rather than a swap. The sweep below is the SAME four declarations and the
+   SAME keyframes as .cv-wave-wrap.is-waiting, over the same fill: the two
+   halves of the card are one loading state, so they shimmer as one. */
+.cv-lyrics-skeleton {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
+  -webkit-mask-image: var(--cv-shimmer-mask);
+  mask-image: var(--cv-shimmer-mask);
+  -webkit-mask-size: var(--cv-shimmer-size);
+  mask-size: var(--cv-shimmer-size);
+  animation: cv-shimmer-sweep var(--cv-shimmer-duration) linear infinite;
+}
+/* the row: same box a .cv-lyric occupies (20px line + 5px padding either side)
+   and the same proximity transform, so nothing shifts when the words land */
+.cv-lyric-sk {
+  flex: none;
+  padding: 5px 0;
+  height: var(--text-heading--line-height);
+  transform-origin: left center;
+  transform: scale(var(--ls, 1));
+  opacity: var(--lo, 1);
+}
+.cv-lyric-sk-bar {
+  display: block;
+  width: var(--sw, 70%);
+  height: 12px;
+  margin: 4px 0; /* centres the 12px bar in the 20px line box */
+  /* pill + the exact grey the waveform's idle bars paint, so the two halves of
+     the card are visibly one loading state */
+  border-radius: var(--radius-full);
+  background: var(--cv-skeleton-fill);
+  /* opens from the focal row outward — --i is distance from centre, not index */
+  animation: cv-lyric-in var(--duration-500) var(--ease-entrance) both;
+  animation-delay: calc(var(--i, 0) * var(--stagger-sm));
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-lyrics-skeleton {
+    animation: none;
+  }
+  .cv-lyric-sk-bar {
+    animation: none;
+  }
 }
 
 @keyframes cv-lyric-in {
@@ -1267,8 +1347,8 @@
   overflow-x: hidden; /* the enlarged centre line scales rightward — don't spawn a scrollbar */
   -webkit-overflow-scrolling: touch;
   touch-action: pan-y; /* allow vertical touch scroll inside the modal */
-  -webkit-mask-image: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
-  mask-image: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
+  -webkit-mask-image: var(--cv-lyrics-fade);
+  mask-image: var(--cv-lyrics-fade);
   scrollbar-width: none;
   overscroll-behavior: contain;
 }
@@ -1328,9 +1408,12 @@
   padding: 9px 18px;
   background: var(--color-surface-inverse);
   border: none;
-  transition:
-    transform var(--duration-200) var(--ease-overshoot),
-    background var(--duration-200) ease;
+  /* Transform is deliberately NOT transitioned here: both links are motion
+     elements, so motion owns their inline transform and drives the press scale
+     itself (see TAP in CoverPlayer.jsx). A CSS transition on the same property
+     would only fight the tween motion is already running. */
+  transition: background var(--duration-200) ease;
+  -webkit-tap-highlight-color: transparent;
 }
 /* mobile: pinned to its own band at the card's bottom, outside the panel's
    overflow box — nothing in the panel can push it out of view. */
@@ -1344,9 +1427,6 @@
 }
 .cv-spotify-link:hover {
   background: var(--neutral-800);
-}
-.cv-spotify-link:active {
-  transform: scale(0.96);
 }
 
 /* mobile (stacked) — lighter player, tidier panel. No lyrics here, so the panel
@@ -1772,8 +1852,10 @@
     display: none;
   }
 }
-/* dev only — clicking a line during playback declares "this is playing now",
-   which is the preview offset in one gesture. See Lyrics.jsx onCalibrate. */
+/* Clicking a line during playback declares "this is playing now", which is the
+   preview offset in one gesture. See Lyrics.jsx onCalibrate — live everywhere,
+   not just in dev. */
 .cv-lyric.is-tappable {
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
 }

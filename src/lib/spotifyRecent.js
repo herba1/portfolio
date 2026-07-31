@@ -10,8 +10,13 @@
 // ---------------------------------------------------------------------------
 
 const TOKEN_URL = "https://accounts.spotify.com/api/token";
+// `short_term` is a rolling four-week window, recomputed daily on Spotify's
+// side — the only one of the three ranges that visibly turns over week to week.
+// `medium_term` (six months) was here first and read as frozen: a week of new
+// plays can't move a six-month ranking, so the page never changed. Spotify has
+// no true one-week bucket; this is the closest thing to it.
 const TOP_URL =
-  "https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=medium_term";
+  "https://api.spotify.com/v1/me/top/tracks?limit=50&time_range=short_term";
 const RECENT_URL =
   "https://api.spotify.com/v1/me/player/recently-played?limit=50";
 

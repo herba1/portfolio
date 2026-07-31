@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { guessOffsetMs, resolveOffset, writeOverride } from "./lib/lyricOffsets";
+import { guessOffsetMs, publishOffset, resolveOffset, writeOverride } from "./lib/lyricOffsets";
 
 // Lyrics from /api/spotify/lyrics, in one of two modes.
 //
@@ -17,13 +17,13 @@ import { guessOffsetMs, resolveOffset, writeOverride } from "./lib/lyricOffsets"
 // because lyrics that move to the WRONG beat read as broken in a way that
 // lyrics which simply don't move never do.
 //
-// Loading → loaded crossfades; the spinner never just pops out of existence.
+// Loading → loaded crossfades through a skeleton of the lines themselves, never
+// a spinner: the wait is shaped like the answer.
 export default function Lyrics({
   artist,
   title,
   isrc,
   durationSec,
-  color = "#1a1a1a",
   previewMs = 0,
   playing = false,
 }) {
@@ -77,15 +77,21 @@ export default function Lyrics({
   // Click-to-sync: while the preview plays, clicking the line you can hear says
   // "this is playing now", which is the whole offset in one gesture — no hunting
   // with arrow keys, and accurate to about as well as you can click.
-  const calibrating = process.env.NODE_ENV !== "production" && !!timed;
+  //
+  // Live in EVERY environment, not just dev. It's the one thing that can't be
+  // derived (see lib/lyricOffsets), so the gesture that supplies it shouldn't be
+  // walled off: a visitor who taps the line they're hearing gets that track
+  // synced for the rest of the session (and their next visit, via localStorage).
+  // In dev the same tap is also POSTed to the source map, which is how a track
+  // ends up synced in production for everyone without a second gesture.
+  const calibrating = !!timed;
   const onCalibrate = useCallback(
     (i) => {
       if (!calibrating || !timed?.[i] || timed[i].start == null) return;
       const next = Math.max(0, Math.round(timed[i].start - previewMs));
       setNudgeMs(next);
       writeOverride(isrc, next);
-      // eslint-disable-next-line no-console
-      console.log(`"${isrc}": ${next},  // ${artist} — ${title}`);
+      publishOffset(isrc, next, `${artist} — ${title}`);
     },
     [calibrating, timed, previewMs, isrc, artist, title],
   );
@@ -131,9 +137,14 @@ export default function Lyrics({
         ) : null}
       </div>
 
-      {/* loader overlays on top, crossfades out — never unmounts mid-spin */}
-      <div className={`cv-lyrics-loader ${status === "loading" ? "is-on" : "is-off"}`}>
-        <Spinner color={color} />
+      {/* skeleton overlays on top and crossfades out, so the bars appear to
+          resolve into the words rather than being replaced by them */}
+      <div
+        className={`cv-lyrics-sk-layer ${status === "loading" ? "is-on" : "is-off"}`}
+        role="status"
+        aria-label="Loading lyrics"
+      >
+        <LyricSkeleton />
       </div>
     </div>
   );
@@ -358,38 +369,44 @@ function useLyricCalibration({ enabled, isrc, timed, offsetMs, setNudgeMs, playi
   }, [enabled, isrc, timed, offsetMs, setNudgeMs, playing]);
 }
 
-// ── custom spinner ─────────────────────────────────────────────────────────
-// Vinyl-flavoured: two counter-rotating arcs around a pulsing core. Each part
-// chains a one-shot scale-in into its infinite loop (loop delay = entry length),
-// per the SVG-animation chaining pattern.
-function Spinner({ color = "#1a1a1a" }) {
+// ── loading skeleton ───────────────────────────────────────────────────────
+// A spinner says "wait"; this says "lines are coming, and here is where they
+// will be". Same left edge, same 30px pitch and same focal swell in the middle
+// slot the first sung line takes, so the crossfade reads as the bars resolving
+// into words rather than as one element being swapped for another.
+//
+// Ragged widths, not uniform ones — lyrics are short lines of unequal length,
+// and a stack of identical bars reads as a table. The shimmer is one slow 3s
+// sweep (Polymarket's skeleton rule: calm, so a loading panel never strobes).
+const SK_ROWS = [0.86, 0.62, 0.94, 0.7, 0.5, 0.88, 0.66, 0.8, 0.58];
+const SK_MID = (SK_ROWS.length - 1) / 2;
+// Gentler than the live scroller's SIGMA of 1.05: there, everything but the
+// focal line is meant to recede because you can scroll to it. Here nothing is
+// reachable yet, so every row stays legible as a row.
+const SK_SIGMA = 2.6;
+
+function LyricSkeleton() {
   return (
-    <svg className="cv-spin" width="46" height="46" viewBox="0 0 48 48" fill="none" aria-label="loading lyrics" role="img">
-      <style>{`
-        @keyframes cvSpinEnter { from { opacity: 0; transform: scale(0.55); } to { opacity: 1; transform: scale(1); } }
-        @keyframes cvSpinCW  { to { transform: rotate(360deg); } }
-        @keyframes cvSpinCCW { to { transform: rotate(-360deg); } }
-        @keyframes cvSpinPulse { 0%, 100% { transform: scale(1); opacity: 0.9; } 50% { transform: scale(1.55); opacity: 0.4; } }
-        .cv-spin circle { transform-box: fill-box; transform-origin: center; }
-        .cv-spin-track { opacity: 0.12; }
-        .cv-spin-arc-a {
-          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) both,
-                     cvSpinCW 1.05s linear var(--duration-400) infinite;
-        }
-        .cv-spin-arc-b {
-          opacity: 0.55;
-          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) 0.07s both,
-                     cvSpinCCW 1.7s linear 0.47s infinite;
-        }
-        .cv-spin-dot {
-          animation: cvSpinEnter var(--duration-400) var(--ease-entrance) 0.14s both,
-                     cvSpinPulse 1.6s ease-in-out 0.54s infinite;
-        }
-      `}</style>
-      <circle className="cv-spin-track" cx="24" cy="24" r="18" stroke={color} strokeWidth="2.5" />
-      <circle className="cv-spin-arc-a" cx="24" cy="24" r="18" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="30 200" />
-      <circle className="cv-spin-arc-b" cx="24" cy="24" r="11" stroke={color} strokeWidth="2.5" strokeLinecap="round" strokeDasharray="16 120" />
-      <circle className="cv-spin-dot" cx="24" cy="24" r="2.4" fill={color} />
-    </svg>
+    <div className="cv-lyrics-skeleton" aria-hidden="true">
+      {SK_ROWS.map((w, i) => {
+        const u = (i - SK_MID) / SK_SIGMA;
+        const g = Math.exp(-u * u);
+        return (
+          <div
+            key={i}
+            className="cv-lyric-sk"
+            style={{ "--ls": (0.72 + 0.34 * g).toFixed(3), "--lo": (0.16 + 0.84 * g).toFixed(3) }}
+          >
+            {/* the entry animation rides the BAR, not the row — the row is
+                already spending its opacity on the proximity falloff, and an
+                animation on the same property would win and erase it */}
+            <span
+              className="cv-lyric-sk-bar"
+              style={{ "--sw": `${Math.round(w * 100)}%`, "--i": Math.abs(i - SK_MID) }}
+            />
+          </div>
+        );
+      })}
+    </div>
   );
 }

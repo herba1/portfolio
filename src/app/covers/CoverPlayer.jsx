@@ -41,6 +41,17 @@ const itemV = {
 const READ_IN = { duration: 0.3, ease: [0.16, 1, 0.3, 1] };
 const READ_OUT = { duration: 0.16, ease: [0.16, 1, 0.3, 1] };
 
+// Press feedback for the Spotify link, in JS rather than CSS on purpose. Both
+// links are motion elements whose entrance animates `y` and `filter`, so motion
+// owns an INLINE `transform` on them — and an inline transform beats any
+// stylesheet `:active` rule, which is why the CSS press was never visible and
+// the tap read as nothing but the browser's own highlight. Declaring it as a
+// gesture puts the scale on the same transform motion is already writing.
+// 0.97 and 120ms: a 3% dip, the same press depth Polymarket uses — 5% at this
+// pill's size overshoots into feeling like the button moved rather than gave.
+const TAP = { scale: 0.97 };
+const TAP_T = { type: "tween", duration: 0.12, ease: [0.4, 0, 0.2, 1] };
+
 export default function CoverPlayer({ cover, rect, onClose, onClosed, cornerRadius = DEFAULTS.cornerRadius }) {
   return (
     <AnimatePresence onExitComplete={onClosed}>
@@ -376,7 +387,6 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
               title={cover.title}
               isrc={cover.isrc}
               durationSec={cover.durationSec}
-              color={cover.color}
               previewMs={audio.currentTime * 1000}
               playing={audio.playing}
             />
@@ -390,6 +400,8 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
             target="_blank"
             rel="noopener noreferrer"
             variants={itemV}
+            whileTap={TAP}
+            transition={TAP_T}
           >
             Open in Spotify ↗
           </motion.a>
@@ -409,9 +421,17 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
           target="_blank"
           rel="noopener noreferrer"
           initial={{ opacity: 0, y: 12, filter: "blur(8px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
+          // the entrance carries its own timing INSIDE animate, so the
+          // component-level transition is free to belong to the press
+          animate={{
+            opacity: 1,
+            y: 0,
+            filter: "blur(0px)",
+            transition: { delay: 0.37, duration: 0.45, ease: [0.16, 1, 0.3, 1] },
+          }}
           exit={{ opacity: 0, filter: "blur(6px)", transition: { duration: 0.2 } }}
-          transition={{ delay: 0.37, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          whileTap={TAP}
+          transition={TAP_T}
           onPointerDown={(e) => e.stopPropagation()}
         >
           Open in Spotify ↗
