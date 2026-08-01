@@ -45,12 +45,32 @@
   --pk-neutral-900: #1a1c1f;
   --pk-neutral-950: #0e0f11; /* primary text — near-black, never #000 */
 
+  /* Hairline ink — ALPHA, not a flat grey. A hairline is the one thing in the
+     kit that is always drawn ON TOP of something else: a card scan, a tinted
+     surface, the white plate behind a bookmark, the footer's own stock. A
+     solid #e6e8ea only ever matches the single background it was sampled
+     from, so over a scan it reads as a grey wire laid across the image.
+     Composited over white these land on neutral-100 / 200 / 300 to within a
+     value or two, so nothing on a white surface shifts — everywhere else the
+     line now takes the tint of whatever it sits on.
+     The ink is the cool near-black, never #000, so a hairline stays
+     blue-tinted like every other neutral in the ramp. */
+  --pk-ink-a10: #0e0f111a; /* 10% — the default hairline  ≈ neutral-100 */
+  --pk-ink-a20: #0e0f1133; /* 20% — hover                 ≈ neutral-200 */
+  --pk-ink-a32: #0e0f1152; /* 32% — active / pressed       ≈ neutral-300 */
+
   --pk-green-50: #ecf9f1;
   --pk-green-500: #42c772;
   --pk-green-600: #30a159;
   --pk-red-50: #fcebeb;
   --pk-red-500: #e23939;
   --pk-red-600: #c61d1d;
+  /* PSA's own red, kept separate from the red above. That one is the market
+     signal — a price moving down — and a control painted in it would read as
+     a warning. This is the house colour, deeper and cooler, and it is only
+     ever used where the app is speaking as itself. */
+  --pk-psa-500: #c8102e;
+  --pk-psa-600: #a50d26;
   --pk-amber-50: #fefcea;
   --pk-amber-500: #f8d743;
   --pk-amber-600: #d4ad16;
@@ -83,12 +103,19 @@
   --pk-text-inverse: var(--pk-neutral-0);
   --pk-text-brand: var(--pk-brand-500);
 
-  --pk-border: var(--pk-neutral-100);
-  --pk-border-hover: var(--pk-neutral-200);
-  --pk-border-active: var(--pk-neutral-300);
+  --pk-border: var(--pk-ink-a10);
+  --pk-border-hover: var(--pk-ink-a20);
+  --pk-border-active: var(--pk-ink-a32);
 
   --pk-positive: var(--pk-green-600);
   --pk-negative: var(--pk-red-500);
+
+  /* The house voice. Not a state and not a data colour — the one place the
+     app addresses you directly, which on this surface is the empty
+     collection. Red rather than the brand blue so it cannot be mistaken for
+     a saved bookmark. */
+  --pk-house: var(--pk-psa-500);
+  --pk-house-hover: var(--pk-psa-600);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -111,7 +138,7 @@
      face is drawn as an inner rectangle inset within an outer shell — the
      shell is the chrome we draw, the image is only ever the card itself. */
   --pk-slab-shell: var(--pk-neutral-25);
-  --pk-slab-edge: var(--pk-neutral-200);
+  --pk-slab-edge: var(--pk-ink-a20);
   --pk-slab-face: var(--pk-neutral-25); /* the mat behind an odd-ratio card */
 }
 

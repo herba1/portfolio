@@ -22,10 +22,16 @@
   background: var(--pk-bg);
 }
 
+/* The phone frame's edges, once there is page either side of it. Shadows
+   rather than borders for the same reason the footer hairline is one: a
+   border would sit inside the frame and composite over --pk-bg, so it would
+   read as a grey line the app drew on itself. Outside the box it lands on the
+   page behind, and the seam belongs to both. */
 @media (min-width: 480px) {
   .psa {
-    border-left: 1px solid var(--pk-border);
-    border-right: 1px solid var(--pk-border);
+    box-shadow:
+      -1px 0 0 var(--pk-border),
+      1px 0 0 var(--pk-border);
   }
 }
 
@@ -347,7 +353,15 @@ html[data-psa-vt]::view-transition-new(*) {
    look for. Solid stock with a hairline and the kit's smallest shadow now,
    and handed to the BUTTON as tokens rather than painted here: the miss-tap
    nudge jumps the whole circle, and a background on this wrapper would stay
-   behind while the button left it. */
+   behind while the button left it.
+
+   The plate STOCK stays opaque — that is what gives the glyph its edge — but
+   the hairline around it does not. It is a spread shadow, so it is painted
+   entirely outside the circle, directly on the scan, and a solid grey ring
+   over a photograph reads as a wire. At 10% ink it takes the colour of the
+   card underneath: visible where the scan is light and the plate needs an
+   edge, gone where the scan is dark and the white circle is already all the
+   edge there is. */
 .psa-tile-save {
   position: absolute;
   top: var(--pk-space-1-5);
@@ -471,11 +485,19 @@ html[data-psa-vt]::view-transition-new(*) {
   flex: 0 0 auto;
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
-  border-top: 1px solid var(--pk-border);
+  /* The hairline is a SHADOW, not a border-top. A border is painted inside
+     the element's own box, so the bar's white background composites under it
+     and a translucent line resolves back to flat grey — the alpha buys you
+     nothing. Drawn one pixel ABOVE the box instead, the line lands on
+     whatever is actually up there: the page, or a card diving beneath the bar
+     on its way to a tab, which it now tints instead of clipping against. */
+  box-shadow: 0 -1px 0 var(--pk-border);
   /* SOLID. It was 92% with a 12px backdrop blur, which is invisible in normal
      use — nothing scrolls under a flex sibling — but a card diving beneath the
      bar showed through it as a blurred smear. The footer has to read as a
-     surface with a behind, and you cannot see through a surface. */
+     surface with a behind, and you cannot see through a surface. The hairline
+     above is the one part that is allowed to be translucent, because it is a
+     line drawn ON the seam rather than the surface itself. */
   background: var(--pk-neutral-0);
   padding-bottom: env(safe-area-inset-bottom);
 }
@@ -595,22 +617,168 @@ html[data-psa-vt]::view-transition-new(*) {
   color: var(--pk-text-secondary);
 }
 
-.psa-blank {
+/* An empty collection is mostly room, so the copy sits in the MIDDLE of that
+   room rather than tucked under the title. The title itself does not move:
+   it is the screen's name, and a name that drifts to the centre when the
+   screen is empty and snaps back up when it is not reads as a bug.
+
+   So the panel becomes a column for this one case, the head keeps its
+   natural height at the top, and the blank takes every pixel left over and
+   centres inside it. :has() rather than a flag threaded down from the shell
+   — the panel styles itself off what it is actually holding. The bottom
+   padding goes with it, or the filled box plus the padding would overflow a
+   scrollport that has nothing to scroll. */
+.psa-panel:has(> .psa-blank) {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  gap: var(--pk-space-4);
-  padding: var(--pk-space-6) var(--pk-space-4);
+  padding-bottom: 0;
+}
+
+.psa-blank {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--pk-space-5);
+  /* Optically centred, not mathematically: the tab bar sits under this box,
+     so an even split leaves the copy looking low. The extra bottom padding
+     lifts it by half a nav. */
+  padding: var(--pk-space-6) var(--pk-space-4) calc(var(--pk-space-6) * 2);
+}
+.psa-blank > .psa-cta {
+  flex: none;
 }
 .psa-blank-text {
   color: var(--pk-text-secondary);
   max-width: 30ch;
 }
+
+/* ── The fan ──────────────────────────────────────────────────────────────
+   Three scans dealt into a shallow arc. Grid rather than absolute
+   positioning: every card takes the same single cell, so the stack is
+   exactly one card tall and one card wide no matter what the fan does to
+   them, and the flex column above can centre it without measuring anything.
+
+   The spread is deliberately shallow — 11 degrees and 52px. Wider and it
+   reads as a hand of playing cards; this should read as three cards left on
+   a table, which is what an empty collection is short of.
+   ───────────────────────────────────────────────────────────────────────── */
+.psa-blank-stack {
+  display: grid;
+  place-items: center;
+  flex: none;
+  list-style: none;
+  margin: 0 0 var(--pk-space-1);
+  padding: 0;
+}
+.psa-blank-card {
+  grid-area: 1 / 1;
+  width: 84px;
+  /* Nothing here animates. It is the resting fan, and both the deal-in and
+     the idle float happen on the wrappers inside it. */
+  transform: translateX(var(--x, 0)) translateY(var(--y, 0)) rotate(var(--rot, 0deg))
+    scale(var(--sc, 1));
+}
+.psa-blank-card:nth-child(1) {
+  --x: -52px;
+  --y: 9px;
+  --rot: -11deg;
+  --sc: 0.92;
+  z-index: 0;
+}
+.psa-blank-card:nth-child(2) {
+  --x: 52px;
+  --y: 9px;
+  --rot: 11deg;
+  --sc: 0.92;
+  z-index: 1;
+}
+/* The front card is the only one at full size and the only one near upright,
+   which is what makes it read as in front rather than merely last. */
+.psa-blank-card:nth-child(3) {
+  --rot: -2deg;
+  z-index: 2;
+}
+
+.psa-blank-rise,
+.psa-blank-float {
+  display: block;
+}
+
+/* Dealt, not faded in: each card rises into its slot, the front one last so
+   the stack builds under it. Runs on every arrival at the tab — the panel is
+   keyed on the tab, so this remounts with it. */
+.psa-blank-rise {
+  animation: psa-stack-rise 420ms var(--pk-ease-expo) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes psa-stack-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The idle loop. Three DIFFERENT durations rather than one duration with
+   three delays: equal periods re-sync every cycle and the fan starts
+   breathing as a single object, which is exactly the robotic thing an idle
+   loop is there to avoid. Primes-ish lengths drift against each other and
+   the arrangement never quite repeats.
+
+   Starts after the deal lands — delay = rise delay + rise duration. */
+.psa-blank-float {
+  animation: psa-stack-float 5300ms var(--pk-ease-in-out) infinite;
+  animation-delay: calc(var(--i, 0) * 70ms + 420ms);
+}
+.psa-blank-card:nth-child(2) .psa-blank-float {
+  animation-duration: 6700ms;
+}
+.psa-blank-card:nth-child(3) .psa-blank-float {
+  animation-duration: 5900ms;
+}
+@keyframes psa-stack-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1.4deg);
+  }
+}
+
+/* Lifts each scan off the page and off the card behind it. The hairline is
+   the same box-shadow so a light scan on white still has an edge. */
+.psa-blank-card .slab {
+  box-shadow:
+    0 0 0 1px var(--pk-border),
+    var(--pk-shadow-md);
+}
+
+/* The kit's blanket rule collapses every animation to 0.01ms, which is right
+   for a gesture that has an end state to land on. An ambient loop has none —
+   it is only ever the middle of itself — so it is switched off outright
+   rather than run once, instantly, for no reason. */
+@media (prefers-reduced-motion: reduce) {
+  .psa-blank-float {
+    animation: none;
+  }
+}
+.psa-blank-text > strong {
+  display: block;
+  color: var(--pk-text);
+  font-weight: var(--pk-w-heading);
+}
 .psa-cta {
   padding: var(--pk-space-2-5) var(--pk-space-4);
   border: 0;
   border-radius: var(--pk-radius-lg);
-  background: var(--pk-brand-500);
+  background: var(--pk-house);
   color: var(--pk-text-inverse);
   font: inherit;
   font-size: 14px;
@@ -623,7 +791,7 @@ html[data-psa-vt]::view-transition-new(*) {
     transform var(--pk-dur-press) var(--pk-ease-in-out);
 }
 .psa-cta:hover {
-  background: var(--pk-brand-600);
+  background: var(--pk-house-hover);
 }
 .psa-cta:active {
   transform: scale(0.97);

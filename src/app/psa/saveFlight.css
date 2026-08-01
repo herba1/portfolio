@@ -79,6 +79,80 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
+   WHAT THE TILE LEAVES BEHIND
+
+   Only the scan flies. The caption and the bookmark used to vanish on the
+   commit frame — one frame, while the card they belonged to was still
+   visibly in the air — and a picture leaving properly with its label cut is
+   the one thing on this surface that ever looked like a bug.
+
+   They go two different ways, and the split is not stylistic. The BOOKMARK
+   is inside the art wrapper, so it rides the clone. The CAPTION is below it,
+   outside the box that travels, and it captions the grid SLOT rather than the
+   card — so it stays where it was and comes apart there.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* The caption's freeze-frame, pinned at the box it held. The dissolve itself
+   is measured at the tap and driven by el.animate() from ghostChrome, so
+   there is nothing to declare here but the pinning — and the display.
+
+   A column flex, which is not decoration: the rows were flex ITEMS of
+   `.psa-tile-text` and a flex item is blockified. Dropped into a plain block
+   the player and set lines revert to inline spans, and a single line of text
+   placed by half-leading instead of by stretch is a pixel off — one pixel
+   that only shows because the ghost is sitting exactly where the real one
+   was, in the same frame.
+
+   THE ORIGIN IS THE TOP EDGE, and it is the difference between the caption
+   leaving and the caption coming unmoored. It hangs BELOW the art, so the
+   edge it is attached to is its top one — the side the card just left from.
+   Anchored at the centre it drifts up out of its own middle, which is a
+   caption with nothing holding it; anchored at the top it peels off the card
+   the way it was hung on it. Origin only bites when the scale knob is turned
+   back on, but it is the same reasoning either way, so it is declared here
+   rather than discovered again later. */
+.psa-flight-ghost {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  transform-origin: 0 0;
+  will-change: opacity, transform;
+}
+
+/* A GHOST IS A PHOTOGRAPH, and this is what makes it one.
+
+   The caption it was cut from is live: the price and the delta are SlotNumber
+   reels that may be mid-roll, and re-inserting a cloned node restarts every
+   CSS animation in it from frame zero. Without this, filing a card spawns a
+   copy of its price rolling all its digits again on the way out — the only
+   thing on screen that has nothing to say.
+
+   `transition: none` for the same reason one step down: the kit hangs colour
+   transitions off hover state the clone can never be in, and a clone that
+   inherits one is a caption that changes colour while it dissolves.
+
+   It does not touch the dissolve. That is a Web Animations object, not a CSS
+   animation, and `animation: none` cannot reach it. */
+.psa-flight-ghost,
+.psa-flight-ghost * {
+  animation: none !important;
+  transition: none !important;
+}
+
+/* The bookmark, riding. No offsets and no size: it keeps `.psa-tile-save`'s
+   own rules, and the art element it is dropped into is the same box those
+   were resolved against — same width, same height, same corner inset. Exact
+   by construction rather than by measurement.
+
+   Nothing is frozen here, unlike the ghost. The whole point is that its
+   animations DO run: the clone is born [data-saved], so the fill wipe, the
+   pop and the ring finally play — on a grid tile they never once have, since
+   the attribute would arrive in the commit that unmounts it. */
+.psa-flight-mark {
+  will-change: opacity, transform;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
    GENIE ARC — one block, every feel
 
    The path is two axes on two curves. A circle is (sin t, 1 − cos t), so

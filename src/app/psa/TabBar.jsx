@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
+import { haptic } from "@/lib/haptics";
 import { useSaveFlight } from "./SaveFlight";
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -139,7 +140,10 @@ export default function TabBar({ active, onChange, counts = {}, countNonce, undo
         type="button"
         className="psa-undo"
         data-show={undo?.open || undefined}
-        onClick={undo?.onUndo}
+        onClick={() => {
+          haptic("tap");
+          undo?.onUndo?.();
+        }}
         tabIndex={undo?.open ? 0 : -1}
         aria-hidden={!undo?.open}
         aria-label={
@@ -166,7 +170,14 @@ export default function TabBar({ active, onChange, counts = {}, countNonce, undo
             data-inert={!tab.live || undefined}
             aria-current={isActive ? "page" : undefined}
             disabled={!tab.live}
-            onClick={() => onChange(tab.id)}
+            /* The three inert tabs are `disabled`, so they never reach this —
+               a dead tab stays dead in the hand as well as on screen, which
+               is the honest answer. No "rejected" buzz: a buzz is a response,
+               and these are not responding. */
+            onClick={() => {
+              haptic("tick");
+              onChange(tab.id);
+            }}
           >
             {/* The icon, not the button, is what a card flies at — the button
                 is a fifth of the bar wide and aiming at its centre would land

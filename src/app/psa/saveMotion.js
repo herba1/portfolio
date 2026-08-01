@@ -594,6 +594,56 @@ export const GLOBALS = {
   /* How long the undo stays up. Long enough to notice and reach, short enough
      that it is gone before it becomes furniture. */
   undoMs: 3000,
+
+  /* ── What the tile leaves behind ────────────────────────────────────────
+     Only the SCAN flies. The rest of the tile — the player, the set line, the
+     two figures — belongs to the grid SLOT, and the slot is about to close.
+
+     Unanimated, all of it vanished on the commit frame: one frame, while the
+     card it captions is still visibly in the air. The picture left properly
+     and its label was cut. So the caption is cloned into the flight layer at
+     the boxes it held and slid up out of there, top line first.
+
+     IT HAS TO BEAT THE REFLOW, and that is the entire timing brief. The gap
+     closes over this exact rectangle in `reflowDur`, and the caption is not
+     leaving through empty space — a neighbour is arriving into it. At 240ms
+     plus a 26ms stagger the figures row was still solid while the tile to its
+     right was a third of the way in, and two legible things in one rectangle
+     is the mud. 150ms with a 14ms step puts the whole caption under 180ms,
+     which is inside the reflow's own opening move.
+
+     IT SLIDES, IT DOES NOT SHRINK. A 0.97 scale on 13px type is not motion,
+     it is half a pixel of blur held for the length of the animation — the
+     text goes soft and reads as smearing rather than leaving. The scale knob
+     is kept and defaulted OFF; a translate stays crisp at any size, which is
+     why the lift is what got bigger.
+
+     A photograph, not a copy that keeps living: see .psa-flight-ghost. */
+  chromeDur: 150,
+  chromeEase: "outCubic",
+  chromeStagger: 14,
+  chromeLift: 12,
+  chromeScale: 1,
+
+  /* ── The bookmark ───────────────────────────────────────────────────────
+     Not a ghost — it RIDES. It sits inside the art wrapper, so a copy of it
+     in the flying clone lands pixel-exact with no measuring at all: same
+     class, same-sized box, same corner inset.
+
+     Which recovers the confirmation the save never had. The fill wipe, the
+     pop and the ring are all keyed off [data-saved], and on a tile they never
+     once played — the tile unmounts in the same task the attribute would have
+     arrived in. The clone is born saved, so the bookmark fills as the card
+     leaves, and then goes with it.
+
+     Absolute ms, not a fraction: the icon's own animations are 260ms and
+     380ms, and a window measured against the flight would outrun them on a
+     long variant and cut them in half on a short one. Clamped against the
+     flight so a fast one never lands with the mark still on it. */
+  markDelay: 130,
+  markDur: 230,
+  markEase: "inQuad",
+  markScale: 0.6,
 };
 
 /* Back-compat named exports, so nothing outside has to know about the store. */
@@ -897,6 +947,21 @@ export const GLOBAL_KNOBS = [
       range("landAt", "Counts as landed", 0.4, 1, 0.01, "×dur"),
       range("undoMs", "Undo window", 800, 8000, 100, "ms"),
     ],
+  },
+  {
+    section: "Leaving behind",
+    rows: [
+      range("chromeDur", "Caption slides out", 0, 600, 10, "ms", "Keep this plus the stagger under the gap-close above. Past it the caption is still legible while the next tile is arriving on top of it, which is the muddy one."),
+      { type: "ease", key: "chromeEase", label: "Caption curve" },
+      range("chromeStagger", "Line by line", 0, 90, 2, "ms", "Player, then the set line, then the figures — it unzips from the edge the card left from."),
+      range("chromeLift", "Caption rise", 0, 40, 1, "px"),
+      range("chromeScale", "Caption to", 0.85, 1, 0.005, "×", "Off at 1, and it is meant to be. A scale on 13px type is half a pixel of blur held for the whole animation — the translate is what reads as leaving."),
+      range("markDelay", "Bookmark holds", 0, 600, 10, "ms", "The fill wipe is 260ms and the pop is 380ms. Below those and the card leaves carrying an icon that never finished confirming."),
+      range("markDur", "Bookmark leaves over", 0, 600, 10, "ms"),
+      { type: "ease", key: "markEase", label: "Bookmark curve" },
+      range("markScale", "Bookmark to", 0.2, 1, 0.02, "×"),
+    ],
+    help: "Only the scan flies. Everything else on the tile used to vanish on the commit frame — one frame, while the card was still in the air. The caption is cloned and dissolved where it stood; the bookmark rides the flying card and confirms on the way out.",
   },
 ];
 

@@ -11,6 +11,7 @@ import {
 } from "react";
 import { flushSync } from "react-dom";
 
+import { haptic } from "@/lib/haptics";
 import {
   DEFAULT_VARIANT,
   GLOBALS,
@@ -93,7 +94,16 @@ export function SaveFlightProvider({ children }) {
   const reducedRef = useRef(reduced);
   reducedRef.current = reduced;
 
-  const land = useCallback(() => setLandings((n) => n + 1), []);
+  /* The one haptic worth the whole file. Every variant — arc, path, spring,
+     dive, and the degenerate-geometry bail — funnels through here at the
+     moment the clone reaches the tab, so hanging the note on `land` means the
+     buzz stays welded to the impact no matter which flight ran or how long it
+     took. Firing it at tap time instead would put the feedback a few hundred
+     ms ahead of the thing it is describing. */
+  const land = useCallback(() => {
+    haptic("land");
+    setLandings((n) => n + 1);
+  }, []);
 
   /* The Collection tab registers itself so nothing has to go looking for it in
      the DOM, and so the target survives the tab bar being re-keyed. It is also
@@ -507,7 +517,7 @@ function runFlight({ originEl, target, layer, commit, hit, land, tuning: armed, 
   let arc = isArc(tuning.id);
 
   if (!from.width || !from.height) {
-    flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
+    detach(originEl, layer, commit, globals);
     land();
     hit();
     return;
@@ -607,19 +617,8 @@ function runFlight({ originEl, target, layer, commit, hit, land, tuning: armed, 
   // The bank, on its own clock so it turns WITH the travel rather than after.
   const leanEl = document.createElement("div");
   leanEl.className = "psa-flight-lean";
-  const art = document.createElement("div");
-  art.className = "psa-flight-art";
+  const art = cloneArt(originEl, { globals, dur });
 
-  /* Clone the scan rather than rebuilding it: the image is already decoded and
-     cached, so the copy paints in the same frame and the flying card cannot
-     look different from the one it left. */
-  const source = originEl.querySelector("img");
-  if (source) {
-    const img = document.createElement("img");
-    img.src = source.currentSrc || source.src;
-    img.decoding = "sync";
-    art.appendChild(img);
-  }
   leanEl.appendChild(art);
   liftEl.appendChild(leanEl);
   y.appendChild(liftEl);
@@ -629,7 +628,7 @@ function runFlight({ originEl, target, layer, commit, hit, land, tuning: armed, 
      clone is attached in the same task, so the hole never shows. */
   if (leanPlan) writeLean(leanEl, leanPlan);
 
-  flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
+  detach(originEl, layer, commit, globals);
   layer.appendChild(outer);
 
   let done = false;
@@ -692,7 +691,7 @@ function runPath({ originEl, target, layer, commit, hit, land, tuning, globals }
 
   const leanEl = document.createElement("div");
   leanEl.className = "psa-flight-lean";
-  leanEl.appendChild(cloneArt(originEl));
+  leanEl.appendChild(cloneArt(originEl, { globals, dur }));
   outer.appendChild(leanEl);
 
   /* ONE SAMPLE LOOP FOR BOTH, and it lives in flightPath.js so that /arcs
@@ -716,7 +715,7 @@ function runPath({ originEl, target, layer, commit, hit, land, tuning, globals }
     offset: r.u,
   }));
 
-  flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
+  detach(originEl, layer, commit, globals);
   layer.appendChild(outer);
 
   const run = outer.animate(move, { duration: dur, easing: "linear", fill: "both" });
@@ -774,10 +773,10 @@ function runSpring({ originEl, target, layer, commit, hit, land, tuning, globals
   outer.style.setProperty("--fade-delay", `${settle * tuning.fadeFrom}ms`);
   outer.style.setProperty("--fade-dur", `${settle * (1 - tuning.fadeFrom)}ms`);
 
-  const art = cloneArt(originEl);
+  const art = cloneArt(originEl, { globals, dur: settle });
   outer.appendChild(art);
 
-  flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
+  detach(originEl, layer, commit, globals);
   layer.appendChild(outer);
 
   // ONE progress value, two properties. Nothing to keep in phase.
@@ -897,7 +896,10 @@ function runDive({ originEl, target, layer, commit, hit, land, tuning, globals, 
   fall.style.setProperty("--fall-fade-delay", `${T * fadeAt}ms`);
   fall.style.setProperty("--fall-fade-dur", `${Math.max(1, T * (tuning.fallFrac - fadeAt))}ms`);
   fall.style.setProperty("--scale-origin", `${tuning.scaleOrigin}%`);
-  fall.appendChild(cloneArt(originEl));
+  /* The faller carries the bookmark, and only the faller. The riser is the
+     card coming BACK — it left with a mark on it a third of a second ago and
+     what returns is on its way into the tab, not still confirming. */
+  fall.appendChild(cloneArt(originEl, { globals, dur: fallDur }));
 
   /* ── the riser ───────────────────────────────────────────────────────────
      The BOX is in pixels and it is the landing: the climb ends at −clear and
@@ -1085,7 +1087,7 @@ function runDive({ originEl, target, layer, commit, hit, land, tuning, globals, 
   veil.style.setProperty("--veil-end", `${veilEnd}px`);
   veil.appendChild(rise);
 
-  flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
+  detach(originEl, layer, commit, globals);
   layer.appendChild(fall);
   layer.appendChild(veil);
 
@@ -1117,8 +1119,12 @@ function runDive({ originEl, target, layer, commit, hit, land, tuning, globals, 
 
 /* Clone the scan rather than rebuilding it: the image is already decoded and
    cached, so the copy paints in the same frame and the flying card cannot
-   look different from the one it left. */
-function cloneArt(originEl) {
+   look different from the one it left.
+
+   `mark` is the bookmark's ride — see rideMark. Passed only by the clone the
+   user is actually watching leave: the riser in a dive is a card coming BACK,
+   and its bookmark left with the faller a third of a second ago. */
+function cloneArt(originEl, mark) {
   const art = document.createElement("div");
   art.className = "psa-flight-art";
   const source = originEl.querySelector("img");
@@ -1128,7 +1134,123 @@ function cloneArt(originEl) {
     img.decoding = "sync";
     art.appendChild(img);
   }
+  if (mark) rideMark(art, originEl, mark.globals, mark.dur);
   return art;
+}
+
+/* ── The bookmark rides ───────────────────────────────────────────────────
+   NO MEASURING, and that is not a shortcut — it is why this is exact. The
+   button is positioned against `.psa-tile-art`, and the clone's art element
+   IS that box: same width, same height, same class on the copy, so the same
+   `top`/`right` inset resolves to the same pixels. Measure it and you have
+   introduced a rounding error to solve a problem you did not have.
+
+   It is also the first time the save has ever CONFIRMED. The fill wipe, the
+   pop and the ring all hang off [data-saved], and on a grid tile not one of
+   them has ever played: the attribute would arrive in the same commit that
+   unmounts the tile. The copy is born saved, so the bookmark fills as the
+   card lifts — and then leaves with it rather than being cut.
+
+   `data-touched` and `data-hint` are stripped. The first drives the un-save
+   drain, the second the miss-tap nudge; neither has any business firing on a
+   card that is on its way to the Collection.
+   ───────────────────────────────────────────────────────────────────────── */
+function rideMark(art, originEl, g, dur) {
+  if (!g || !g.markDur) return;
+  const mark = originEl.querySelector(".psa-tile-save");
+  if (!mark) return;
+
+  const copy = mark.cloneNode(true);
+  copy.classList.add("psa-flight-mark");
+  const button = copy.querySelector(".pk-save") ?? copy;
+  button.setAttribute("data-saved", "");
+  button.removeAttribute("data-touched");
+  button.removeAttribute("data-hint");
+  button.tabIndex = -1;
+  art.appendChild(copy);
+
+  /* Clamped against the flight. The window is in real milliseconds because
+     the icon's own animations are, but a 380ms variant would otherwise land
+     with the mark still sitting on it. */
+  const delay = Math.min(g.markDelay, dur * 0.45);
+  const span = Math.min(g.markDur, Math.max(60, dur * 0.85 - delay));
+
+  copy.animate(
+    [
+      { opacity: 1, transform: "scale(1)" },
+      { opacity: 0, transform: `scale(${g.markScale})` },
+    ],
+    { duration: span, delay, easing: easeValue(g.markEase), fill: "forwards" },
+  );
+}
+
+/* ── What the tile leaves behind ──────────────────────────────────────────
+   The caption cannot ride: it sits BELOW the art wrapper, outside the box
+   that flies, and it captions the grid slot rather than the card. So it stays
+   where it was and comes apart there, line by line, while the gap closes over
+   it.
+
+   Cloned rather than animated in place for the same reason the flying card is
+   a clone: `commit` is one flushSync away and the tile will not exist to be
+   animated. Measured BEFORE that commit, which is the only reason the boxes
+   are still true.
+
+   IT HAS TO BEAT THE REFLOW. It is not leaving through empty space — the gap
+   closes over this exact rectangle, and a neighbour is arriving into it. Two
+   legible things in one place is the mud, so the whole caption is out inside
+   the reflow's opening move rather than fading through the middle of it.
+
+   And it SLIDES rather than shrinking. See GLOBALS.chromeScale for why a
+   scale on type this size is blur wearing motion's clothes.
+   ───────────────────────────────────────────────────────────────────────── */
+function ghostChrome(originEl, layer, g) {
+  if (!layer || !g.chromeDur) return;
+  const tile = originEl.closest(".psa-tile");
+  const text = tile?.querySelector(".psa-tile-text");
+  if (!text) return;
+
+  const box = layer.getBoundingClientRect();
+  const ease = easeValue(g.chromeEase);
+  const rows = [...text.children];
+
+  rows.forEach((row, i) => {
+    const r = row.getBoundingClientRect();
+    if (!r.width || !r.height) return;
+
+    const ghost = document.createElement("div");
+    ghost.className = "psa-flight-ghost";
+    ghost.style.left = `${r.left - box.left}px`;
+    ghost.style.top = `${r.top - box.top}px`;
+    ghost.style.width = `${r.width}px`;
+    ghost.style.height = `${r.height}px`;
+    ghost.appendChild(row.cloneNode(true));
+    layer.appendChild(ghost);
+
+    const anim = ghost.animate(
+      [
+        { opacity: 1, transform: "translateY(0) scale(1)" },
+        {
+          opacity: 0,
+          transform: `translateY(${-g.chromeLift}px) scale(${g.chromeScale})`,
+        },
+      ],
+      { duration: g.chromeDur, delay: i * g.chromeStagger, easing: ease, fill: "forwards" },
+    );
+    // Same backstop the clones get: a backgrounded tab pauses WAAPI, so a
+    // ghost waiting on `finished` alone would still be pinned over the grid
+    // when the user came back to it.
+    const drop = () => ghost.remove();
+    anim.finished.then(drop, drop);
+    setTimeout(drop, g.chromeDur + i * g.chromeStagger + 400);
+  });
+}
+
+/* The tile leaves, the grid closes behind it, and everything the tile was
+   wearing is accounted for. One call so all four flights answer to it — a
+   variant that forgot it would be the one that still blinks. */
+function detach(originEl, layer, commit, globals) {
+  ghostChrome(originEl, layer, globals);
+  flipGrid(commit, originEl.closest(".psa-grid"), globals, { forceFlip: true });
 }
 
 /* ── The lean ─────────────────────────────────────────────────────────────

@@ -2,6 +2,8 @@
 
 import { useId, useState } from "react";
 
+import { haptic } from "@/lib/haptics";
+
 /* ─────────────────────────────────────────────────────────────────────────
    SaveButton — the save-to-collection affordance.
 
@@ -48,6 +50,11 @@ export default function SaveButton({
     event.preventDefault();
     event.stopPropagation();
     setTouched(true);
+    /* Asymmetric on purpose, the same way the motion is: a save is the
+       start of something that flies across the screen and lands, so it
+       gets the heavier note and a second one on arrival. Un-saving is
+       over the moment it is tapped and gets one light one. */
+    haptic(saved ? "tap" : "press");
     onToggle?.(!saved);
   }
 

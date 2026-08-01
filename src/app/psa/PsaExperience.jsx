@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
+import { haptic } from "@/lib/haptics";
 import MotionConfig from "./MotionConfig";
 import PsaChrome from "./PsaChrome";
 import { SaveFlightLayer, SaveFlightProvider, flipGrid, useSaveFlight } from "./SaveFlight";
@@ -375,7 +376,10 @@ function Tile({ card, saved, onToggle, index = 0 }) {
      nothing to point at, so it stays still. */
   const [hint, setHint] = useState(0);
   const nudge = () => {
-    if (!saved) setHint((n) => n + 1);
+    if (!saved) {
+      haptic("nudge");
+      setHint((n) => n + 1);
+    }
   };
   /* Clearing on a state flip is what stops a stale hint from firing later:
      miss a card in Search, save it, un-save it, and the attribute would start
@@ -508,7 +512,10 @@ function BrowsePanel({ saved, onToggle, filter, onFilter }) {
   const flight = useSaveFlight();
   const pick = useCallback(
     (id) => {
+      // Before the note, not after: re-tapping the active chip changes
+      // nothing on screen, so it should change nothing in the hand either.
       if (id === filter) return;
+      haptic("tick");
       // exit: the cut cards have nothing carrying them off, so they animate
       // out themselves. A saved card never does — its clone already left.
       if (flight?.flip) flight.flip(() => onFilter(id), undefined, { exit: true });
@@ -579,15 +586,60 @@ function SearchPanel({ saved, onToggle, query, onQuery }) {
 }
 
 /* ── Collection ───────────────────────────────────────────────────────── */
+
+/* The empty state's mark: three real scans rather than a drawn icon. An
+   outlined bookmark would be a picture of the control; this is a picture of
+   what you get for using it, which is the thing worth showing on a screen
+   that is otherwise empty.
+
+   Order is back-left, back-right, front — DOM order is stacking order, so the
+   card that reads as on top is simply last.
+
+   The three are chosen on RATIO, not on fame. A slab is 14/25 and the scans
+   are contained inside it, so a card whose scan is a different shape gets
+   matted — which is right in a grid, where every slab has to be the same box,
+   and wrong here, where the scan is the whole picture and the mat reads as a
+   mistake. The Goudey Ruth is 660×801, near enough square, so it sat in the
+   frame with bars down both sides. Every other scan in the set is between
+   0.536 and 0.565 against a frame of 0.560 — they fill it, edge to edge, as
+   shot. So: Cobb in front, Mathewson and Galvin behind, and Galvin's sepia
+   Old Judge keeps the trio from being three of the same white border.
+
+   Three wrappers, one job each, because they animate on different clocks:
+   the li holds the static fan, .psa-blank-rise deals it in once, and
+   .psa-blank-float loops forever. Stacking them means neither animation has
+   to restate the other's transform. */
+const STACK_IDS = ["oldjudge-galvin", "t206-mathewson", "t206-cobb"];
+const STACK = STACK_IDS.map((id) => CARDS.find((c) => c.id === id)).filter(Boolean);
+
+function BlankStack() {
+  return (
+    <ul className="psa-blank-stack" aria-hidden="true">
+      {STACK.map((card, i) => (
+        <li className="psa-blank-card" key={card.id} style={{ "--i": i }}>
+          <span className="psa-blank-rise">
+            <span className="psa-blank-float">
+              <Slab card={card} sizes="96px" />
+            </span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function CollectionPanel({ cards, total, onToggle, onBrowse }) {
   if (cards.length === 0) {
     return (
       <>
         <PanelHead title="Collection" />
+        {/* The head keeps the top; this box takes the rest of the panel and
+            centres in it. See .psa-panel:has(> .psa-blank) in psa.css. */}
         <div className="psa-blank">
+          <BlankStack />
           <p className="t-body psa-blank-text">
-            Nothing bookmarked yet. Tap the bookmark on any card and it lands
-            here.
+            <strong>Nothing bookmarked yet.</strong>
+            Tap the bookmark on any card and it lands here.
           </p>
           <button type="button" className="psa-cta" onClick={onBrowse}>
             Browse cards
