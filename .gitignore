@@ -48,3 +48,7 @@ next-env.d.ts
 
 # build output
 /dist/
+
+# full-resolution PSA card scans — source material only. The web-sized
+# derivatives that actually ship live in /public/psa (see its CREDITS.md).
+/.psa-original-scans/

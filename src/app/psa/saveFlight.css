@@ -1,0 +1,962 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   The save flight — the card's trip from the grid to the Collection tab.
+
+   Its own file, imported by SaveFlight.jsx, so the whole interaction is one
+   unit: the choreography here, the measuring there.
+
+   There is ONE arc keyframe block. Every arc iteration runs through it and
+   differs only in the custom properties written in from saveMotion.js — the
+   two path easings, the press, the hop, the scale stops, the lean, the pivot,
+   the swallow and fade windows. A new feel is a row of data, not a block of
+   CSS, which is also what lets the config panel retune it live.
+
+   No magic pixels below. Every value is a var.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE LAYER
+
+   No z-index and no transform, so it does NOT create a stacking context —
+   which is the whole point. A clone inside it competes directly with the
+   footer nav's z-index instead of being trapped underneath or above it.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-flight-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* FIVE nested elements, and the nesting IS the animation:
+
+     .psa-flight         owns X travel   ── one easing
+       .psa-flight-y     owns Y travel   ── a different easing
+         .psa-flight-lift  the HOP, superposed on the travel
+           .psa-flight-lean  the BANK, on its own clock
+             .psa-flight-art scale, clip, fade
+
+   Each vertical move gets its own element because they are different motions
+   that must not be averaged into one curve. A card leaving a surface goes UP
+   and then falls; a card going under the footer goes DOWN, comes back up past
+   the bar, then drops in. No single curve rises and descends — but nested
+   translateYs ADD, so each move keeps its own timing, its own easing and its
+   own delay, and the sum is the trajectory. It also means every one of them
+   is a slider instead of a percentage baked into a @keyframes stop.
+
+   Rotation lives on the innermost element so it composes with the translation
+   rather than fighting it: the card banks without its path changing. */
+.psa-flight {
+  position: absolute;
+  z-index: 3;
+  will-change: transform;
+}
+.psa-flight-y,
+.psa-flight-lift,
+.psa-flight-lean,
+.psa-flight-rise-x,
+.psa-flight-rise-up,
+.psa-flight-rise-drop,
+.psa-flight-rise-lean,
+.psa-flight-art {
+  width: 100%;
+  height: 100%;
+  will-change: transform;
+}
+
+/* The corner radius is CONSTANT for the whole flight — the tile's own radius,
+   held from the first frame to the last. It used to morph to 50%, which turned
+   a hundred-year-old lithograph into a token halfway across the screen. The
+   card is a card the entire way; it gets smaller, it never becomes a dot. */
+.psa-flight-art {
+  overflow: hidden;
+  border-radius: var(--pk-radius-md);
+  background: var(--pk-slab-shell);
+}
+.psa-flight-art img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GENIE ARC — one block, every feel
+
+   The path is two axes on two curves. A circle is (sin t, 1 − cos t), so
+   easeOutSine against easeInSine traces a true quarter-ellipse between the
+   two points; swapping them mirrors the bow; both-accelerating reads as being
+   pulled in; both-decelerating reads as being thrown.
+
+   Both axes run the FULL duration, which is load-bearing. An X that saturates
+   early leaves a tail where only Y is moving, and a tail with one axis moving
+   is a vertical drop however curved the first half looked.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* X carries a delay of its own. For the arc that delay is zero and it runs the
+   full duration; for the dive it is parked while the card drops, so the
+   descent is straight down rather than a curve off the bottom of the screen.
+   `backwards` fill holds translateX(0) through the delay. */
+.psa-flight--arc {
+  animation: psa-arc-x var(--x-dur) var(--ease-x) var(--x-delay) both;
+}
+.psa-flight--arc .psa-flight-y {
+  animation: psa-arc-y var(--dur) var(--ease-y) both;
+}
+
+/* The hop. `alternate` with two iterations is the whole trick: the card rises
+   over the first half and returns over the second, and because alternate
+   REVERSES the timing function on the way back, one ease-out curve gives a
+   decelerating rise and an accelerating fall — gravity, from a single line.
+   `both` fill holds it at zero afterwards, so the travel owns the rest. */
+.psa-flight--arc .psa-flight-lift {
+  animation: psa-arc-lift var(--lift-dur) var(--ease-lift) 0s 2 alternate both;
+}
+
+/* THE BANK, ON ITS OWN CLOCK.
+
+   Rotation used to live in the shape keyframes, sharing their stops: zero
+   until 16%, peak at 34%. The travel starts at 0%. So the card moved first
+   and turned afterwards — it dropped, and THEN it rotated, which is the one
+   thing a falling object never does. Nothing tips after it has already gone.
+
+   Splitting it off is the fix, and it is the same fix as everywhere else in
+   this file: a motion that needs its own timing gets its own element. The
+   bank now starts on frame one alongside the travel, and its delay, its
+   duration and its curve are three more sliders instead of two percentages
+   welded to the scale ramp.
+
+   alternate-2 again — out to the peak, back to square — so it arrives level
+   at the tab without a third keyframe, and the return mirrors the curve. */
+.psa-flight--arc .psa-flight-lean {
+  animation: psa-arc-lean var(--lean-dur) var(--ease-lean) var(--lean-delay) 2 alternate both;
+  transform-origin: 50% var(--origin);
+}
+@keyframes psa-arc-lean {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(var(--lean-peak)); }
+}
+
+.psa-flight--arc .psa-flight-art {
+  /* Three timelines on one element, each touching a different property —
+     shape owns transform, swallow owns clip-path, fade owns opacity — so they
+     compose instead of overwriting each other.
+
+     The last two start LATE, with their own delay and duration. `both` fill
+     holds each at its 0% state through its delay, so the card is unclipped
+     and opaque until its window opens. That is what makes swallowFrom and
+     fadeFrom real knobs rather than percentages baked into a keyframe. */
+  animation:
+    psa-arc-shape var(--dur) linear both,
+    psa-arc-swallow var(--swallow-dur) cubic-bezier(0.5, 0, 0.75, 0) var(--swallow-delay) both,
+    psa-arc-fade var(--fade-dur) linear var(--fade-delay) both;
+  /* CENTRE, not the rotation pivot. The flight is measured centre-to-centre,
+     so anything else walks the card off its own target as it shrinks: a 66%
+     pivot at 0.16 arrival scale lands it about 38px below the bookmark.
+     Rotation still gets its low pivot — it is a different element now, which
+     is the entire reason both can be right at once. */
+  transform-origin: 50% var(--scale-origin);
+}
+
+@keyframes psa-arc-x {
+  from { transform: translateX(0); }
+  to   { transform: translateX(var(--fx)); }
+}
+@keyframes psa-arc-y {
+  from { transform: translateY(0); }
+  to   { transform: translateY(var(--fy)); }
+}
+@keyframes psa-arc-lift {
+  from { transform: translateY(0); }
+  to   { transform: translateY(calc(var(--lift) * -1)); }
+}
+
+/* LINEAR on purpose. The stops are already placed where the eye needs them,
+   and layering a second curve over a hand-placed ramp flattens them — that is
+   what made an earlier pass read as "shrink, then fall".
+
+   FRAME ONE IS THE TILE: scale(1), rotate(0), the tile's radius, the tile's
+   box. The clone has to be indistinguishable from what it stands in for, or
+   the flight reads as a second image arriving from somewhere else rather than
+   the card itself leaving. The lean departs from rest like everything else. */
+@keyframes psa-arc-shape {
+  0% {
+    transform: scale(1);
+  }
+  6% {
+    /* THE PRESS. Squashed against the pivot and spread sideways, the way any
+       object loads before it leaves a surface. This is the frame that answers
+       "it just turns and falls, which is not how reality works" — nothing can
+       depart without first being pushed against something. */
+    transform: scale(calc(1 + var(--press) * 0.6), calc(1 - var(--press)));
+  }
+  16% {
+    /* The release. Overshoots past its own size on the way out of the press. */
+    transform: scale(var(--s1));
+  }
+  34% {
+    transform: scale(var(--s2));
+  }
+  68% {
+    transform: scale(var(--s3));
+  }
+  100% {
+    /* Narrower than it is tall on arrival — pulled through a slot rather than
+       scaled down. */
+    transform: scale(calc(var(--end-scale) * var(--end-squash)), var(--end-scale));
+  }
+}
+
+/* Swallowed. The card is eaten from its LEADING edge — the same bottom edge
+   that has been pointing at the tab the whole way — so it goes INTO the
+   bookmark rather than disappearing on top of it. */
+@keyframes psa-arc-swallow {
+  from { clip-path: inset(0 0 0 0); }
+  to   { clip-path: inset(0 0 100% 0); }
+}
+
+/* The fade rides under the clip so the last of it dissolves instead of ending
+   on a hard cut. Both land on the same frame. */
+@keyframes psa-arc-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE DIVE — two clones, not one
+
+   One element could not do this. Making a single card drop, cross to another
+   column under the bar and climb back is three motions on two axes sharing
+   one timeline, and however the overlap is tuned some of the sideways move
+   bleeds into the end of the descent. That is the arc that kept appearing at
+   the bottom of the slide, and no arrangement of one object's timings removes
+   it — the object genuinely has to change columns, and it has one trip to do
+   it in.
+
+   So there are two clones, and each does exactly one thing:
+
+     .psa-flight--fall   starts on the tile, slides STRAIGHT down, shrinking,
+                         and goes behind the bar. One axis. Nothing to bend.
+
+     .psa-flight--rise   born at the Collection column below the screen, at the
+                         size the faller left at. Climbs behind the footer,
+                         shrinking into its box, clears it, drops into the tab.
+
+   The lateral move is not animated at all. It is the gap between where one
+   clone starts and where the other does.
+
+   THEY ARE NEVER ON SCREEN TOGETHER. The riser's timeline waits until the
+   faller's top edge is under the bar — solved per card, in JS, because how
+   long that takes depends on which row the tile was in. Both clones visible at
+   once is the whole difference between one card taking a trip and two cards
+   passing each other.
+   ═══════════════════════════════════════════════════════════════════════ */
+
+/* ── The faller ───────────────────────────────────────────────────────── */
+.psa-flight--fall {
+  /* Behind the nav (which claims 2), in front of the scrolling panel. It
+     never changes: the faller has no business in front of the footer. */
+  z-index: 1;
+}
+.psa-flight--fall .psa-flight-art {
+  animation:
+    psa-fall var(--fall-dur) var(--ease-fall) both,
+    psa-fall-fade var(--fall-fade-dur) linear var(--fall-fade-delay) both;
+  transform-origin: 50% var(--scale-origin);
+}
+@keyframes psa-fall {
+  from { transform: translateY(0) scale(1); }
+  to   { transform: translateY(var(--fall-by)) scale(var(--fall-scale)); }
+}
+@keyframes psa-fall-fade {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+
+/* ── The riser ──────────────────────────────────────────────────────────
+   The stacking swap used to live here. It is on .psa-flight-veil now — the
+   mask there establishes a stacking context, so a z-index on this element
+   cannot see the footer at all. See the veil block below. */
+
+/* The climb and the drop are separate elements because they want different
+   speeds — "comes up not so fast and then drops in" is two durations, and
+   alternate-2 can only give one. Nested translateYs add, so the pair sums to
+   the trajectory while each keeps its own clock.
+
+   They are also exactly cancelling: the climb ends at −clearBy and the drop
+   ends at +clearBy, so the riser finishes at translateY(0) — which is the
+   box it was positioned in, centred on the bookmark. The landing is not
+   animated toward the target, it IS the target. */
+.psa-flight--rise .psa-flight-rise-up {
+  animation: psa-rise-up var(--rise-dur) var(--ease-rise) var(--rise-delay) both;
+}
+.psa-flight--rise .psa-flight-rise-drop {
+  animation: psa-rise-drop var(--drop-dur) var(--ease-drop) var(--drop-delay) both;
+}
+
+/* THE ARC, and only the riser gets one.
+
+   The faller is one axis on one curve on purpose — anything sideways in it
+   bleeds into the end of the descent, which is the reason there are two clones
+   in the first place. The riser is born at the Collection column and lands at
+   the Collection column, so an offset that resolves to zero cannot walk it off
+   its target: it can bend for free.
+
+   Its own element, like every other motion in this file, so X runs on its own
+   curve over its own window. Easing X to zero against the climb's Y is the
+   quarter-ellipse from the genie arc, with none of the path maths. */
+.psa-flight--rise .psa-flight-rise-x {
+  animation: psa-rise-x var(--arc-dur) var(--ease-arc) var(--arc-delay) both;
+}
+@keyframes psa-rise-x {
+  from { transform: translateX(var(--arc-from)); }
+  to   { transform: translateX(0); }
+}
+
+/* THE TILT, which belongs to the arc — same side, same window. Innermost of the
+   transforms so it composes with the three translations instead of bending
+   them: the card banks without its path changing.
+
+   CENTRE pivot, unlike the genie arc's low one. That arc wants the bottom edge
+   to lead through a long turn; this is a 68px card crossing 42px, where a low
+   pivot mostly just swings the card sideways. And it resolves to zero, so the
+   landing is square to the bookmark whatever the peak was. */
+.psa-flight--rise .psa-flight-rise-lean {
+  animation: psa-rise-tilt var(--tilt-dur) var(--ease-tilt) var(--tilt-delay) both;
+  transform-origin: 50% 50%;
+}
+@keyframes psa-rise-tilt {
+  from { transform: rotate(var(--tilt-from)); }
+  to   { transform: rotate(0deg); }
+}
+/* THE SHRINK, and it is the reason the two clones read as one card.
+
+   The riser used to be born at icon size: a full-width card slid away and a
+   24px thumbnail came back, which is not a card arriving, it is a second
+   object. It is now born at the size the faller left at, holds it for the
+   whole climb, and shrinks only over the VISIBLE part of the trip — from the
+   frame it clears the bar to the frame it lands. Shrinking on the way up
+   instead is the same bug in slow motion: all of it happens behind the footer,
+   so what surfaces is a thumbnail again.
+
+   CENTRE pivot. The box is already centred on the bookmark, so anything else
+   walks the card off its own landing as it shrinks. And scale on the ART, not
+   on the box: the box stays the exact landing rectangle, which is what lets
+   arrival be translateY(0) rather than an animation aimed at the target.
+
+   SQUARE CORNERS, and nobody asked for the round ones. `border-radius` is a
+   property of the box, and the box here is 24px wide — so the shared radius,
+   sized for a tile, was already most of the corner before anything moved. Then
+   the scale multiplied it: at the birth size that is a ~50px radius on a 118px
+   card, which is not a rounded card, it is a pill. The radius would have to be
+   counter-scaled frame by frame to hold the tile's own corner, and the riser is
+   small and brief enough that square is simply right. */
+.psa-flight--rise .psa-flight-art {
+  animation:
+    psa-rise-shrink var(--shrink-dur) var(--ease-drop) var(--shrink-delay) both,
+    psa-arc-swallow var(--swallow-dur) cubic-bezier(0.5, 0, 0.75, 0) var(--swallow-delay) both,
+    psa-arc-fade var(--fade-dur) linear var(--fade-delay) both;
+  transform-origin: 50% 50%;
+  border-radius: 0;
+}
+
+/* ── The veil ─────────────────────────────────────────────────────────────
+   A mask on the LAYER, pinned to the BOTTOM OF THE VIEWPORT, and it does not
+   move.
+
+   The riser is born below the bottom edge of the screen and climbs in. The
+   shell's `overflow: hidden` ought to make that a non-event — anything sliding
+   in from off screen is clipped until it is on screen. On Safari it is not:
+   the bottom strip is not opaque, the shell does not own those pixels the way
+   it owns the rest, and so the clip that should be invisible is a hard edge.
+   The card does not slide in, it gets cut off along a line while it does.
+
+   A few pixels of ramp there is the whole fix, and the whole job. It does NOT
+   dim the card over the footer: by the time the riser is up it is up, in front
+   of the bar, at full strength, which is what the climb is for.
+
+   ON THE CARD would have been wrong twice. The card would carry a permanent
+   soft edge — and it is a card at the tile, in the air and on the bookmark —
+   and the softness would travel with it instead of staying at the screen edge,
+   which is where the artefact actually lives.
+
+   Both stops want to stay small. This is taking the edge off a cut, not fading
+   anything in; a long ramp stops reading as an edge and starts reading as the
+   card going translucent.
+
+   THE Z-SWAP LIVES HERE, and it has to. A mask establishes a stacking context,
+   so a z-index on anything inside this element is resolved against its siblings
+   in here and never against the footer. Left on the riser, the swap would have
+   been a silent no-op and the card would have spent the entire flight under the
+   bar.
+
+   The stops come from JS in layer coordinates, because only JS knows how tall
+   the layer actually is. */
+.psa-flight-veil {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  /* OVER THE BAR, ALWAYS. 3 beats the footer's 2 and never changes.
+
+     There was a stacking swap here, solved exactly: invert the climb curve at
+     the Y where the card's top edge crosses the bar and you get the frame it
+     should come forward on. It was still wrong to have. Two things had to agree
+     — the frame the card is DRAWN in front, and the frame it is geometrically
+     PAST the bar — and although both come from the same numbers they do not
+     have to land on the same frame, because a curve evaluated in JS and an
+     animation sampled by the compositor need not round together. One frame out
+     is a card behind the bar when it should be over it: the flicker. No amount
+     of care makes two clocks into one clock.
+
+     Held in front, the question stops existing. The FALLER still goes behind —
+     it has to, the bar swallowing it is the point of the dive — and it never
+     has to come back out, which is why it can be a fixed z-index too. */
+  z-index: 3;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 var(--veil-solid),
+    transparent var(--veil-end)
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    #000 0,
+    #000 var(--veil-solid),
+    transparent var(--veil-end)
+  );
+  /* Deterministic: no tiling below the ramp, and outside the image is
+     transparent rather than a repeat of the gradient. */
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+}
+
+@keyframes psa-rise-up {
+  from { transform: translateY(var(--rise-from)); }
+  to   { transform: translateY(calc(var(--clear-by) * -1)); }
+}
+@keyframes psa-rise-drop {
+  from { transform: translateY(0); }
+  to   { transform: translateY(var(--clear-by)); }
+}
+@keyframes psa-rise-shrink {
+  from { transform: scale(var(--born-scale)); }
+  to   { transform: scale(1); }
+}
+
+/* The stacking swap used to live here, as a one-millisecond animation on a
+   computed delay — z-index cannot be interpolated and a @keyframes percentage
+   cannot be a var, so the switch was expressed as WHEN rather than as a stop.
+   It was correct and it still flickered; see .psa-flight-veil for why timing a
+   z-index against a compositor-driven transform cannot be made reliable. The
+   riser is simply in front now. */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   LAUNCH & FILE
+
+   The card falls away UNDER the nav, holds there, then rises back over it and
+   settles onto the icon. Crossing the bar in both directions is what sells the
+   nav as a solid thing with a behind.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-flight--launch {
+  animation:
+    psa-launch-x var(--dur) cubic-bezier(0.5, 0, 0.28, 1) both,
+    psa-launch-z var(--dur) linear both;
+}
+.psa-flight--launch .psa-flight-y {
+  animation: psa-launch-y var(--dur) linear both;
+}
+.psa-flight--launch .psa-flight-art {
+  animation: psa-launch-art var(--dur) linear both;
+}
+
+@keyframes psa-launch-x {
+  /* Held back while the card drops, so the fall reads as vertical and the
+     sideways travel happens out of sight behind the bar. */
+  0%   { transform: translateX(0); }
+  32%  { transform: translateX(calc(var(--fx) * 0.08)); }
+  100% { transform: translateX(var(--fx)); }
+}
+
+/* Per-keyframe easing, the only way to get a fall that accelerates and a rise
+   that decelerates out of one timeline:
+     0 → 34%   falling away, easeIn (gravity)
+     34 → 60%  hidden behind the bar, holding
+     60 → 100% rising back over it, easeOut into the landing               */
+@keyframes psa-launch-y {
+  0% {
+    transform: translateY(0);
+    animation-timing-function: cubic-bezier(0.55, 0, 0.85, 0.25);
+  }
+  34% {
+    transform: translateY(var(--sink));
+    animation-timing-function: linear;
+  }
+  60% {
+    transform: translateY(var(--sink));
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  88% {
+    transform: translateY(var(--clear));
+    animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  100% {
+    transform: translateY(var(--fy));
+  }
+}
+
+/* Same idea as the arc's under-approach, one keyframe later: in front of the
+   grid the whole time, under the bar the whole time, and only back to the
+   front at 88% — the exact keyframe where Y has it clear above the nav. */
+@keyframes psa-launch-z {
+  0%, 87%   { z-index: 1; }
+  88%, 100% { z-index: 3; }
+}
+
+@keyframes psa-launch-art {
+  0%   { transform: scale(1); opacity: 1; }
+  12%  { transform: scale(1.045); }
+  34%  { transform: scale(var(--drop-scale)); opacity: 1; }
+  60%  { transform: scale(calc(var(--drop-scale) * 0.82)); opacity: 1; }
+  88%  { transform: scale(calc(var(--end-scale) * 1.32)); opacity: 1; }
+  100% { transform: scale(var(--end-scale)); opacity: 0; }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   UNDO
+
+   Sits directly above the Collection tab. The tab bar is a five-column grid
+   and Collection is the middle one, so dead centre is the right place by
+   construction — no measuring, no ref.
+
+   Kept mounted and toggled with an attribute rather than mounted on demand,
+   so it can animate out as well as in.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-undo {
+  position: absolute;
+  bottom: calc(100% + var(--pk-space-2));
+  left: 50%;
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-1-5);
+  padding: var(--pk-space-1) var(--pk-space-2-5) var(--pk-space-1) var(--pk-space-2);
+  border: 0;
+  border-radius: 999px;
+  /* Red, not brand blue. Blue is the colour of every save affordance in the
+     app — the bookmark, the flying card, the count — so an undo in the same
+     blue reads as more of the same action. This one takes the last one back,
+     and it is the only thing on screen with a deadline. */
+  background: var(--pk-red-500);
+  color: var(--pk-text-inverse);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: 0 4px 12px #e2393938;
+  /* Out state. visibility rather than display so the exit can animate, and
+     pointer-events off so a hidden pill never eats a tap on the nav. */
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transform: translate(-50%, 6px) scale(0.92);
+  transition:
+    opacity 140ms var(--pk-ease-in-out),
+    transform 140ms var(--pk-ease-in-out),
+    visibility 0s linear 140ms;
+}
+.psa-undo[data-show] {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transform: translate(-50%, 0) scale(1);
+  /* In on the expo curve and slower than the exit — arriving should be
+     noticed, leaving should not. */
+  transition:
+    opacity 220ms var(--pk-ease-expo),
+    transform 260ms var(--pk-ease-expo),
+    visibility 0s;
+}
+.psa-undo:active {
+  transform: translate(-50%, 0) scale(0.96);
+}
+
+/* A 56x56 HIT AREA WITHOUT A 56x56 PILL. The button is a small capsule and
+   should stay one; the finger needs a target the pill does not need to look
+   like. `inset: 50% auto auto 50%` plus the translate centres it on the pill
+   whatever the label is, and `max()` means it can only ever grow the target,
+   never shrink it. */
+.psa-undo::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: max(56px, 100%);
+  height: max(56px, 100%);
+  transform: translate(-50%, -50%);
+}
+
+/* Both pinned to the pill's own 18px line box. They are different sizes and
+   different display types, so left alone each resolves its own height and
+   `align-items: center` centres two boxes that were never the same height to
+   begin with. One height for both is what puts the label and the reel on a
+   line. */
+/* A 56x56 HIT AREA WITHOUT A 56x56 PILL. The button is a small capsule and
+   should stay one; the finger needs a target the pill does not need to look
+   like. `max()` can only ever grow the target, never shrink it. */
+.psa-undo::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: max(56px, 100%);
+  height: max(56px, 100%);
+  transform: translate(-50%, -50%);
+}
+
+/* Both pinned to the pill's own 18px line box. They are different sizes and
+   different display types, so left alone each resolves its own height and
+   `align-items: center` centres two boxes that were never the same height to
+   begin with. One height for both is what puts the word and the reel on a
+   line. */
+.psa-undo-label,
+.psa-undo-secs {
+  height: 18px;
+}
+
+/* The deadline, in seconds. Lighter than the label so the pill still reads
+   "Undo" first — a weight difference, not an opacity one, so it stays
+   full-strength white.
+
+   FLEX, deliberately. SlotNumber's reel is `overflow: hidden`, which drops an
+   inline box's baseline to its bottom edge, and the component compensates with
+   a negative `vertical-align` — a correction that only applies in an inline
+   formatting context. Left inline here it fires anyway and shoves the digit
+   below the "s". As flex items both the reel and the unit are plain boxes,
+   vertical-align does not apply at all, and centring two 18px boxes in an 18px
+   row puts the digit and the "s" on the same line by construction. */
+.psa-undo-secs {
+  display: inline-flex;
+  align-items: center;
+  font-weight: var(--pk-w-body-sm);
+  font-size: 12px;
+}
+.psa-undo-secs .slot {
+  /* Matched to the pill's line box, so the cell the digit is centred in is the
+     same 18px the label is centred in. */
+  --slot-cell: 18px;
+  height: 18px;
+  line-height: 18px;
+}
+.psa-undo-unit {
+  margin-left: 1px;
+  line-height: 18px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .psa-flight {
+    display: none;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE CONFIG PANEL
+
+   Desktop only, and not because of layout — the phone shell IS the artefact
+   being judged, and a control panel docked beside it on a 390px viewport
+   would be inside the thing it is measuring. On a phone you get the app.
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (max-width: 720px) {
+  /* Doubled class for specificity: this file is imported before psa.css, and
+     a media query adds none of its own. 720 rather than 1000 — a half-width
+     desktop window is still somewhere you tune, and a panel that vanishes
+     when you narrow the window reads as a panel that is not there. */
+  .pk.psa-config {
+    display: none;
+  }
+}
+
+.psa-config-body {
+  max-height: calc(100vh - 72px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* Variant picker. A wrapped row of chips, so the whole set costs about two
+   lines and the sliders start above the fold. */
+.psa-config-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--pk-space-1);
+}
+.psa-config-chip {
+  padding: 3px var(--pk-space-2);
+  border: 1px solid var(--pk-border);
+  border-radius: 999px;
+  background: var(--pk-bg);
+  color: var(--pk-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.1px;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    border-color var(--pk-dur-color) var(--pk-ease-in-out),
+    color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.psa-config-chip:hover {
+  color: var(--pk-text);
+  border-color: var(--pk-border-hover);
+}
+.psa-config-chip[data-on] {
+  border-color: var(--pk-brand-500);
+  background: var(--pk-brand-500);
+  color: var(--pk-text-inverse);
+}
+
+.psa-config-group {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-1);
+  margin-top: var(--pk-space-1);
+}
+.psa-config-group-label {
+  font-size: 11px;
+  line-height: 16px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.08px;
+  color: var(--pk-text-secondary);
+}
+.psa-config-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pk-space-2);
+}
+.psa-config-ms {
+  font-family: var(--pk-font-mono);
+  font-feature-settings: var(--pk-font-features-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: 10px;
+  font-weight: var(--pk-w-meta);
+  color: var(--pk-text-secondary);
+}
+
+/* ── Sections ─────────────────────────────────────────────────────────── */
+.psa-config-sec {
+  border-top: 1px solid var(--pk-border);
+  padding-top: var(--pk-space-2);
+  margin-top: var(--pk-space-2);
+}
+.psa-config-sec > summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pk-space-2);
+  list-style: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.1px;
+}
+.psa-config-sec > summary::-webkit-details-marker {
+  display: none;
+}
+.psa-config-sec > summary::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-right: 1.5px solid var(--pk-text-tertiary);
+  border-bottom: 1.5px solid var(--pk-text-tertiary);
+  transform: rotate(45deg) translate(-1px, -1px);
+  transition: transform var(--pk-dur-press) var(--pk-ease-hover);
+}
+.psa-config-sec[open] > summary::after {
+  transform: rotate(-135deg) translate(-1px, -1px);
+}
+.psa-config-sec-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-2);
+  padding-top: var(--pk-space-2);
+}
+.psa-config-help {
+  margin: 0;
+  font-size: 11px;
+  line-height: 15px;
+  letter-spacing: -0.08px;
+  color: var(--pk-text-secondary);
+}
+
+/* ── A slider row ─────────────────────────────────────────────────────── */
+.psa-knob {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-1);
+}
+.psa-knob-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pk-space-2);
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: -0.1px;
+}
+.psa-knob-label {
+  color: var(--pk-text);
+}
+.psa-knob-value {
+  font-family: var(--pk-font-mono);
+  font-feature-settings: var(--pk-font-features-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: 11px;
+  color: var(--pk-text-secondary);
+}
+.psa-knob[data-dirty] .psa-knob-value {
+  color: var(--pk-brand-500);
+  font-weight: var(--pk-w-strong);
+}
+
+/* A 2px track and a small round thumb, so a column of fifteen of them reads
+   as a list of values rather than fifteen pieces of furniture. */
+.psa-knob input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 14px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.psa-knob input[type="range"]::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--pk-border-hover);
+}
+.psa-knob input[type="range"]::-moz-range-track {
+  height: 2px;
+  border-radius: 999px;
+  background: var(--pk-border-hover);
+}
+.psa-knob input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 11px;
+  height: 11px;
+  margin-top: -4.5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--pk-text);
+  transition: transform var(--pk-dur-press) var(--pk-ease-hover);
+}
+.psa-knob input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--pk-text);
+}
+.psa-knob input[type="range"]:active::-webkit-slider-thumb {
+  transform: scale(1.25);
+}
+.psa-knob[data-dirty] input[type="range"]::-webkit-slider-thumb {
+  background: var(--pk-brand-500);
+}
+.psa-knob[data-dirty] input[type="range"]::-moz-range-thumb {
+  background: var(--pk-brand-500);
+}
+
+/* ── A curve picker ───────────────────────────────────────────────────── */
+.psa-knob select {
+  width: 100%;
+  padding: 3px var(--pk-space-1-5);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-xs);
+  background: var(--pk-surface);
+  color: var(--pk-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  cursor: pointer;
+}
+
+/* ── Panel actions ────────────────────────────────────────────────────── */
+.psa-config-actions {
+  display: flex;
+  gap: var(--pk-space-1-5);
+  margin-top: var(--pk-space-3);
+}
+.psa-config-action {
+  flex: 1 1 0;
+  padding: var(--pk-space-1) var(--pk-space-2);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-sm);
+  background: var(--pk-bg);
+  color: var(--pk-text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    border-color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.psa-config-action:hover {
+  background: var(--pk-surface-hover);
+  border-color: var(--pk-border-hover);
+}
+.psa-config-action:disabled {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PATH FLIGHT
+
+   The trip is one cubic Bézier, sampled and driven through the Web Animations
+   API. Almost nothing is needed here: position and rotation are keyframe lists
+   built in JS, and the only CSS is the two transform origins and the scale,
+   swallow and fade — which never had anything to do with how the card gets
+   there.
+
+   Rotation and position come out of the SAME sample loop at the same `t`, so
+   there is no second timeline to fall out of phase.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-flight--path {
+  will-change: transform;
+}
+
+.psa-flight--path .psa-flight-lean {
+  transform-origin: 50% var(--origin);
+}
+
+/* Identical to the arc's, because scale, swallow and fade never had anything
+   to do with how the card gets there. */
+.psa-flight--path .psa-flight-art {
+  animation:
+    psa-arc-shape var(--dur) linear both,
+    psa-arc-swallow var(--swallow-dur) cubic-bezier(0.5, 0, 0.75, 0) var(--swallow-delay) both,
+    psa-arc-fade var(--fade-dur) linear var(--fade-delay) both;
+  transform-origin: 50% var(--scale-origin);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SPRING FLIGHT — behind the `spring` flag
+
+   Almost nothing here, which is the point. Position and scale are one
+   spring sampled into keyframes; the only CSS is the fade and a centre
+   origin, because scaling about anything else walks the card off the
+   bookmark it was measured against.
+
+   No rotation rule, because there is no rotation.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-flight--spring {
+  will-change: transform;
+}
+.psa-flight--spring .psa-flight-art {
+  animation: psa-arc-fade var(--fade-dur) linear var(--fade-delay) both;
+  transform-origin: 50% 50%;
+}

@@ -1,0 +1,915 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   /psa — collection app.
+
+   An app shell, not a page: fixed to the viewport, one scrolling panel, a
+   footer nav pinned under it. The site's navbar and footer clock are removed
+   for the life of the route by PsaChrome.
+
+   On a desktop monitor the shell stays at phone width and centres, with a
+   rule down each side. Two columns is the settled layout.
+   ───────────────────────────────────────────────────────────────────────── */
+
+.psa {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 430px;
+  margin-inline: auto;
+  overflow: hidden;
+  background: var(--pk-bg);
+}
+
+@media (min-width: 480px) {
+  .psa {
+    border-left: 1px solid var(--pk-border);
+    border-right: 1px solid var(--pk-border);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PANEL + TAB TRANSITION
+
+   16px and 220ms. Small enough that it reads as the same app moving rather
+   than a page changing, and directional so a tap on Profile feels like
+   travelling right and a tap back feels like returning.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* Top inset lives on the head, so a sticky head keeps it while stuck. */
+  padding: 0 0 var(--pk-space-6);
+  scrollbar-width: none;
+  animation: psa-panel-in 220ms var(--pk-ease-expo) both;
+}
+.psa-panel::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes psa-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--dir, 1) * 16px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.psa-panel-head {
+  padding: calc(var(--pk-space-5) + env(safe-area-inset-top)) var(--pk-space-4) 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATUS-BAR SCRIM
+
+   Safari's status bar needs solid ground under the clock and battery, and
+   panels without a sticky head (collection, activity, profile) would
+   otherwise scroll content through the safe area. So: an opaque strip of
+   shell colour, exactly as tall as the inset, with a hard bottom edge — no
+   ramp. On a browser with no safe-area inset it collapses to nothing.
+
+   It sits on the shell, above the head, so it holds still while the head
+   lifts.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-status-scrim {
+  position: absolute;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top);
+  z-index: 7;
+  pointer-events: none;
+  background: var(--pk-bg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COLLAPSING HEAD — scroll-driven
+
+   Title and filter rail share one solid bar pinned to the top of the panel,
+   with a hairline along its bottom edge. Scroll and the bar LIFTS by exactly
+   the rail's height — so the hairline travels up from under the badges to
+   under the title, and the bar reads as collapsing — while the title
+   counter-translates by the same amount to stay pinned, scaling down from its
+   left edge as it goes. The badges ride up under the title's own opaque
+   layer, fading as they pass behind it, and are clipped by the top of the
+   scrollport.
+
+   The lift is 1:1 with the scroll, so the badges appear to move at content
+   speed rather than at some invented rate.
+
+   Nothing here animates a layout property — the bar's height never changes,
+   only transform and opacity. That matters twice over: it stays on the
+   compositor, and it avoids the feedback loop you get when a scroll-driven
+   animation resizes a box inside the scroller it is reading.
+
+   Browsers without scroll timelines (Safari < 26) fall back to the
+   [data-scrolled] attribute the panel sets, which lands the same end state
+   as a 200ms transition instead of tracking the finger.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --psa-collapse: 58px; /* the rail's block height: 16 + 26 chip + 16 */
+  --psa-title-scale: 0.62; /* 24px title → ~15px bar title */
+  --psa-rail-travel: 40px; /* badges are spent before the lift finishes */
+}
+
+/* Solid, twice: once on the bar and once on the title block inside it. No
+   glass — the bar is shell colour straight through, so content passing under
+   it is gone rather than smeared, and the status-bar strip never shifts hue. */
+.psa-head,
+.psa-head .psa-panel-head {
+  background: var(--pk-bg);
+}
+
+.psa-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  will-change: transform;
+}
+
+/* Above the rail, so the badges pass behind its glass rather than through it. */
+.psa-head .psa-panel-head {
+  position: relative;
+  z-index: 1;
+  padding: calc(var(--pk-space-4) + env(safe-area-inset-top)) var(--pk-space-4)
+    var(--pk-space-1-5);
+}
+.psa-head .psa-panel-head > h1 {
+  display: block;
+  transform-origin: left center;
+  will-change: transform;
+}
+
+.psa-rail-fade {
+  position: relative;
+  z-index: 0;
+  transform-origin: left center;
+  will-change: transform, opacity;
+}
+
+/* Hairline as a pseudo-element on the bar's bottom edge: it rides the lift,
+   and appearing costs a paint, never a reflow. */
+.psa-head::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: var(--pk-border);
+  opacity: 0;
+  z-index: 2;
+}
+
+@keyframes psa-head-lift {
+  to {
+    transform: translateY(calc(-1 * var(--psa-collapse)));
+  }
+}
+/* Equal and opposite to the lift, so the title holds its place while the bar
+   travels out from under it. */
+@keyframes psa-title-hold {
+  to {
+    transform: translateY(var(--psa-collapse)) scale(var(--psa-title-scale));
+  }
+}
+@keyframes psa-rail-out {
+  to {
+    transform: translateY(-6px) scale(0.9);
+    opacity: 0;
+  }
+}
+@keyframes psa-hairline-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .psa-head,
+  .psa-head .psa-panel-head > h1,
+  .psa-head::after,
+  .psa-rail-fade {
+    animation-timeline: scroll(nearest block);
+    animation-range: 0 var(--psa-collapse);
+    animation-duration: 1ms; /* ignored on a scroll timeline; syntax needs it */
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+  .psa-head {
+    animation-name: psa-head-lift;
+  }
+  .psa-head .psa-panel-head > h1 {
+    animation-name: psa-title-hold;
+  }
+  .psa-rail-fade {
+    animation-name: psa-rail-out;
+    animation-range: 0 var(--psa-rail-travel);
+  }
+  .psa-head::after {
+    animation-name: psa-hairline-in;
+    animation-range: 0 20px;
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  .psa-head,
+  .psa-head .psa-panel-head > h1,
+  .psa-head::after,
+  .psa-rail-fade {
+    transition:
+      transform 200ms var(--pk-ease-in-out),
+      opacity 200ms var(--pk-ease-in-out);
+  }
+  [data-scrolled] .psa-head {
+    transform: translateY(calc(-1 * var(--psa-collapse)));
+  }
+  [data-scrolled] .psa-head .psa-panel-head > h1 {
+    transform: translateY(var(--psa-collapse)) scale(var(--psa-title-scale));
+  }
+  [data-scrolled] .psa-rail-fade {
+    transform: translateY(-6px) scale(0.9);
+    opacity: 0;
+  }
+  [data-scrolled] .psa-head::after {
+    opacity: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRID — two columns
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-rail {
+  padding: var(--pk-space-4);
+}
+
+.psa-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--pk-space-4);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--pk-space-5) var(--pk-space-3);
+  /* Both the positioning context for the exit layer and a stacking context to
+     keep its negative z-index from escaping into the panel. */
+  position: relative;
+  z-index: 0;
+}
+
+/* ── Where leaving tiles go ───────────────────────────────────────────────
+   A tile cut by a filter is re-parented here and pinned at the box it just
+   left, so it can fade out in place while the survivors slide across it.
+   Behind them, because it is the one that is going. See exitClone.
+
+   `animation: none` matters: re-inserting a detached node restarts its CSS
+   animations, so without this every leaving tile would replay its 320ms
+   mount entrance on the way out. */
+.psa-grid-exit {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.psa-grid-exit > .psa-tile {
+  position: absolute;
+  margin: 0;
+  animation: none;
+}
+
+/* ── The other engine ─────────────────────────────────────────────────────
+   Set while a view transition is running (see viewGrid). Root-level, because
+   the ::view-transition pseudos are children of the document root and cannot
+   be reached from inside .psa.
+
+   Dropping the root NAME is the important line. Every document has an implicit
+   `view-transition-name: root`, so by default the browser snapshots the entire
+   viewport and cross-fades it — the head, the nav, the status scrim and the
+   grid, all as one picture. Take the name away and no root snapshot is made:
+   only the named tiles are captured, everything else keeps rendering live, and
+   the transition costs a handful of small textures instead of a full-screen
+   one.
+
+   One duration across group, old and new. The cross-fade blends with
+   plus-lighter, which reconstructs the original image only while the two
+   opacities are complements — mismatched timings dim a tile through the middle
+   of its own travel. */
+html[data-psa-vt] {
+  view-transition-name: none;
+}
+html[data-psa-vt]::view-transition-group(*),
+html[data-psa-vt]::view-transition-old(*),
+html[data-psa-vt]::view-transition-new(*) {
+  animation-duration: var(--psa-vt-dur, 380ms);
+  animation-timing-function: var(--psa-vt-ease, cubic-bezier(0.26, 0.08, 0.25, 1));
+}
+
+/* The kit's motion-safety block cannot reach these — it is scoped to .pk, and
+   these pseudos hang off the document root. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-psa-vt]::view-transition-group(*),
+  html[data-psa-vt]::view-transition-old(*),
+  html[data-psa-vt]::view-transition-new(*) {
+    animation-duration: 1ms;
+  }
+}
+
+/* Stagger is capped at 8 in the JSX, so the last tile of a long list starts
+   192ms in rather than three seconds in. A stagger that outlives the user's
+   attention stops being a stagger and becomes a queue. */
+.psa-tile {
+  animation: psa-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 24ms);
+}
+
+/* Only a MOUNT gets this. A filter change reflows the same tiles with FLIP
+   rather than re-keying the grid, so the stagger is reserved for a list that
+   genuinely was not there a moment ago. */
+@keyframes psa-tile-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.psa-tile-art {
+  position: relative;
+}
+/* The bookmark's plate. It used to be 88% white over a blur painted on this
+   wrapper, which let the scan read through and cost the icon its edge on a
+   light card — the one control on the surface was the one thing you had to
+   look for. Solid stock with a hairline and the kit's smallest shadow now,
+   and handed to the BUTTON as tokens rather than painted here: the miss-tap
+   nudge jumps the whole circle, and a background on this wrapper would stay
+   behind while the button left it. */
+.psa-tile-save {
+  position: absolute;
+  top: var(--pk-space-1-5);
+  right: var(--pk-space-1-5);
+  --pk-save-bg: var(--pk-neutral-0);
+  --pk-save-plate: 0 0 0 1px var(--pk-border), var(--pk-shadow-sm);
+}
+.psa-tile-text {
+  margin-top: var(--pk-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.psa-tile-player {
+  font-weight: var(--pk-w-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* The second meta line. Secondary ink, not faded type — the colour is solid
+   and the hierarchy comes from hue, so it stays legible at 13px. */
+.psa-tile-set {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.psa-tile-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pk-space-1-5);
+}
+/* The figures are SlotNumber reels, and the kit pins .price/.delta to a fixed
+   line-height in px. A reel needs its line box and its cell to be the same
+   height or every digit sits off-centre in the window, so hand the line-height
+   back to the cell — the kit still owns size, weight and colour. */
+.psa-tile-figures .slot {
+  line-height: var(--slot-cell);
+}
+
+/* ── The tape ─────────────────────────────────────────────────────────────
+   A tick pushes the figure it moved: out on the way up, in on the way down.
+   The direction of the gesture is the signal, so the number never has to
+   change colour to say which way it went — and a scale that starts and ends
+   at 1 costs one composited transform, no layout and no paint.
+
+   The peak and the rebound are custom properties, which is what lets one pair
+   of keyframes serve both directions. React only alternates [data-beat] so
+   the animation restarts; two identical blocks are what make that restart
+   possible, since re-matching the SAME animation-name would leave a running
+   animation exactly where it was — and mid-flight interruption is the normal
+   case here, not the edge.
+
+   Origin is pinned to each figure's own outer edge so a pulse never nudges
+   the number off the line it shares with the other one.                    */
+.psa-fig {
+  /* Same length as SlotNumber's roll (ROLL_MS in PsaExperience.jsx). The
+     gesture and the digits start on one commit and end on one frame; a
+     shorter pulse finishes under a still-turning reel and reads as drift. */
+  --psa-tick-dur: 640ms;
+  --peak: 1.055;
+  --rebound: 0.992;
+  display: inline-flex;
+  transform-origin: left center;
+}
+.psa-fig:last-child {
+  transform-origin: right center;
+}
+/* Down ticks invert the gesture: contract past 1, rebound just over it. */
+.psa-fig[data-dir="down"] {
+  --peak: 0.952;
+  --rebound: 1.007;
+}
+.psa-fig[data-beat="0"] {
+  animation: psa-tick-a var(--psa-tick-dur) var(--pk-ease-hover) both;
+}
+.psa-fig[data-beat="1"] {
+  animation: psa-tick-b var(--psa-tick-dur) var(--pk-ease-hover) both;
+}
+/* Four stops, not two: the overshoot and the settle are what keep this
+   reading as a nudge rather than a pop. */
+@keyframes psa-tick-a {
+  0% {
+    transform: scale(1);
+  }
+  22% {
+    transform: scale(var(--peak));
+  }
+  56% {
+    transform: scale(var(--rebound));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes psa-tick-b {
+  0% {
+    transform: scale(1);
+  }
+  22% {
+    transform: scale(var(--peak));
+  }
+  56% {
+    transform: scale(var(--rebound));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FOOTER NAV
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Positioned with a z-index so the launch variant has something to cross:
+   a flying clone at z-index 1 is behind the nav and at 3 is in front of it,
+   and both are only meaningful because the nav claims 2. */
+.psa-tabbar {
+  position: relative;
+  z-index: 2;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-top: 1px solid var(--pk-border);
+  /* SOLID. It was 92% with a 12px backdrop blur, which is invisible in normal
+     use — nothing scrolls under a flex sibling — but a card diving beneath the
+     bar showed through it as a blurred smear. The footer has to read as a
+     surface with a behind, and you cannot see through a surface. */
+  background: var(--pk-neutral-0);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.psa-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: var(--pk-space-2) var(--pk-space-1) var(--pk-space-2-5);
+  border: 0;
+  background: transparent;
+  color: var(--pk-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+.psa-tab:active {
+  transform: scale(0.94);
+}
+.psa-tab[data-active] {
+  color: var(--pk-text);
+}
+
+.psa-tab-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 24px;
+}
+/* The active icon lifts by 1px and settles. One pixel is enough to register
+   as movement and small enough never to look like a bug. */
+.psa-tab[data-active] .psa-tab-icon {
+  animation: psa-tab-pop 300ms var(--pk-ease-hover);
+}
+@keyframes psa-tab-pop {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-2px) scale(1.1); }
+  70% { transform: translateY(0) scale(0.98); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.psa-tab-label {
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: var(--pk-w-body-xs);
+  letter-spacing: -0.08px;
+}
+
+/* The count. Re-keyed on every save so it re-fires even when the number
+   happens to land on the same value. */
+.psa-tab-count {
+  position: absolute;
+  top: -3px;
+  left: 13px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--pk-brand-500);
+  color: var(--pk-text-inverse);
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: var(--pk-w-heading);
+  text-align: center;
+  animation: psa-count-in 380ms var(--pk-ease-hover) both;
+}
+@keyframes psa-count-in {
+  0% { opacity: 0; transform: scale(0.4); }
+  45% { opacity: 1; transform: scale(1.22); }
+  75% { transform: scale(0.95); }
+  100% { opacity: 1; transform: scale(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SEARCH
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-search {
+  padding: var(--pk-space-4);
+}
+.psa-search-input {
+  width: 100%;
+  padding: var(--pk-space-2-5) var(--pk-space-3-5);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-surface);
+  color: var(--pk-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.09px;
+  transition:
+    border-color var(--pk-dur-color) var(--pk-ease-in-out),
+    background-color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.psa-search-input::placeholder {
+  color: var(--pk-text-secondary);
+}
+.psa-search-input:focus {
+  outline: none;
+  border-color: var(--pk-brand-500);
+  background: var(--pk-bg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COLLECTION
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-summary {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+  margin-top: var(--pk-space-2);
+}
+.psa-summary-label {
+  color: var(--pk-text-secondary);
+}
+
+.psa-blank {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--pk-space-4);
+  padding: var(--pk-space-6) var(--pk-space-4);
+}
+.psa-blank-text {
+  color: var(--pk-text-secondary);
+  max-width: 30ch;
+}
+.psa-cta {
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border: 0;
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-brand-500);
+  color: var(--pk-text-inverse);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.09px;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+.psa-cta:hover {
+  background: var(--pk-brand-600);
+}
+.psa-cta:active {
+  transform: scale(0.97);
+}
+
+.psa-empty {
+  padding: var(--pk-space-6) var(--pk-space-4);
+  color: var(--pk-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ACTIVITY
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-feed {
+  list-style: none;
+  margin: var(--pk-space-4) 0 0;
+  padding: 0;
+}
+.psa-feed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border-bottom: 1px solid var(--pk-border);
+  animation: psa-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 32ms);
+}
+.psa-feed-thumb {
+  flex: 0 0 36px;
+  width: 36px;
+}
+.psa-feed-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.psa-feed-event {
+  font-weight: var(--pk-w-strong);
+}
+.psa-feed-card {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.psa-feed-when {
+  flex: 0 0 auto;
+  color: var(--pk-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PROFILE
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-profile {
+  padding: var(--pk-space-5) var(--pk-space-4) 0;
+}
+.psa-profile-id {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+}
+.psa-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  /* Multi-stop and eased, not a two-stop fade. */
+  background: linear-gradient(
+    152deg,
+    var(--pk-neutral-200) 0%,
+    var(--pk-neutral-100) 38%,
+    var(--pk-neutral-200) 66%,
+    var(--pk-neutral-300) 100%
+  );
+}
+.psa-profile-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.psa-profile-handle {
+  color: var(--pk-text-secondary);
+}
+.psa-profile-stats {
+  margin: var(--pk-space-5) 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--pk-border);
+  padding-top: var(--pk-space-3);
+}
+.psa-profile-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.psa-profile-stats > div + div {
+  padding-left: var(--pk-space-3);
+  border-left: 1px solid var(--pk-border);
+}
+.psa-profile-stats dt {
+  color: var(--pk-text-secondary);
+}
+.psa-profile-stats dd {
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INERT TABS
+
+   Search, Activity and Profile do nothing in this experiment. They read as
+   unavailable through weight and a solid tertiary ink — never through
+   opacity, because faded type is unreadable rather than quiet.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-tab[data-inert] {
+  color: var(--pk-text-tertiary);
+  cursor: default;
+}
+.psa-tab[data-inert]:active {
+  transform: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE HIT
+
+   The Collection icon is struck from above, so it goes DOWN first, then
+   overshoots up, then settles. Getting that order backwards — up first — is
+   what makes most "bounce" feedback read as a wobble instead of an impact.
+   Four stops, hand-authored, on the signature curve.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* The three numbers come off RECOIL in saveMotion.js — SaveFlight writes them
+   onto this element when the tab registers itself as the target, so nothing
+   here is a magic pixel. Fallbacks keep the rule standalone. */
+.psa-tab-icon[data-hit] {
+  animation: psa-recoil var(--recoil-dur, 520ms) var(--pk-ease-hover);
+}
+@keyframes psa-recoil {
+  0%   { transform: translateY(0) scale(1); }
+  16%  { transform: translateY(var(--recoil-depth, 5px)) scale(0.9, 1.08); } /* squashed by the blow */
+  46%  { transform: translateY(var(--recoil-rebound, -3px)) scale(1.06, 0.96); }
+  74%  { transform: translateY(1px) scale(0.99); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* The flight itself — layer, both variants, keyframes — lives in
+   saveFlight.css, imported by SaveFlight.jsx. */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOTION CONFIG
+
+   Outside the phone shell on purpose — a control panel inside the frame
+   would be part of what you are judging.
+   ═══════════════════════════════════════════════════════════════════════ */
+.psa-config {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--pk-space-2);
+  width: min(272px, calc(100vw - 24px));
+}
+.psa-config-toggle {
+  padding: var(--pk-space-1) var(--pk-space-2-5);
+  border: 1px solid var(--pk-border);
+  border-radius: 999px;
+  background: var(--pk-bg);
+  color: var(--pk-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  cursor: pointer;
+}
+.psa-config-toggle:hover {
+  color: var(--pk-text);
+  border-color: var(--pk-border-hover);
+}
+
+.psa-config-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-1);
+  padding: var(--pk-space-3);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-bg);
+  box-shadow: var(--pk-shadow-md);
+}
+.psa-config-title {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.1px;
+  margin-bottom: var(--pk-space-1);
+}
+
+.psa-config-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--pk-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--pk-radius-sm);
+  background: var(--pk-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    border-color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.psa-config-option:hover {
+  background: var(--pk-surface-hover);
+}
+.psa-config-option[data-on] {
+  border-color: var(--pk-brand-500);
+  background: var(--pk-brand-50);
+}
+.psa-config-name {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.1px;
+}
+.psa-config-tech {
+  font-family: var(--pk-font-mono);
+  font-feature-settings: var(--pk-font-features-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--pk-text-secondary);
+}
+.psa-config-note {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: -0.1px;
+  color: var(--pk-text-secondary);
+}
+.psa-config-foot {
+  margin: var(--pk-space-1) 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pk-text-secondary);
+}
+
+/* Bow toggle — only rendered while the arc is armed. */
+.psa-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pk-space-2);
+  margin-top: var(--pk-space-1);
+}
+.psa-config-row-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pk-text-secondary);
+}
+.psa-config-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--pk-radius-sm);
+  background: var(--pk-surface);
+}
+.psa-config-seg button {
+  padding: 2px var(--pk-space-2);
+  border: 0;
+  border-radius: var(--pk-radius-xs);
+  background: transparent;
+  color: var(--pk-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.psa-config-seg button[data-on] {
+  background: var(--pk-bg);
+  color: var(--pk-text);
+}

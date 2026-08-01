@@ -1,0 +1,686 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   PSA KIT — a self-contained design system for /psa.
+
+   This is a deliberate RESET. It does not consume the site's tokens, type
+   scale, or Geist. It is Polymarket's "polykit" architecture (three token
+   tiers, Inter with the full cv-feature string, px type scale with variable
+   weights, 0.7rem radius algebra, near-invisible elevation) applied to a
+   graded-trading-card collection UI.
+
+   Everything is namespaced twice over so nothing can leak:
+     · every custom property is prefixed  --pk-
+     · every rule is scoped under         .pk
+   That means the site's `--color-surface`, `--color-ink`, and the Tailwind
+   @theme block in globals.css are untouched, and Tailwind utilities used
+   outside .pk keep working exactly as before.
+
+   Mobile-first. Every size below is the phone size; there are no desktop
+   breakpoints in this file on purpose.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TIER 1 — PRIMITIVES
+   Raw values. The only tier that would change per theme.
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk {
+  /* Brand — one saturated blue against an otherwise desaturated UI. */
+  --pk-brand-50: #e7edfd;
+  --pk-brand-100: #c4d3fb;
+  --pk-brand-500: #1452f0;
+  --pk-brand-600: #1249d8;
+
+  /* Neutrals — cool / blue-tinted, never a true gray. Three near-whites at
+     the top because a dense UI needs page / surface / hover to be distinct. */
+  --pk-neutral-0: #ffffff;
+  --pk-neutral-25: #f9fafb;
+  --pk-neutral-50: #f4f5f6;
+  --pk-neutral-100: #e6e8ea;
+  --pk-neutral-200: #caced3;
+  --pk-neutral-300: #aeb4bc;
+  --pk-neutral-400: #939aa5;
+  --pk-neutral-500: #77808d;
+  --pk-neutral-600: #5f6772;
+  --pk-neutral-700: #484e56;
+  --pk-neutral-800: #31353a;
+  --pk-neutral-900: #1a1c1f;
+  --pk-neutral-950: #0e0f11; /* primary text — near-black, never #000 */
+
+  --pk-green-50: #ecf9f1;
+  --pk-green-500: #42c772;
+  --pk-green-600: #30a159;
+  --pk-red-50: #fcebeb;
+  --pk-red-500: #e23939;
+  --pk-red-600: #c61d1d;
+  --pk-amber-50: #fefcea;
+  --pk-amber-500: #f8d743;
+  --pk-amber-600: #d4ad16;
+
+  /* Grade colours. PSA's own ladder runs authentic → gem mint; the hue walk
+     from neutral through amber to green encodes that without needing a
+     legend. 10 gets the brand blue because it is the one everybody hunts. */
+  --pk-grade-10: var(--pk-brand-500);
+  --pk-grade-9: var(--pk-green-600);
+  --pk-grade-8: var(--pk-amber-600);
+  --pk-grade-low: var(--pk-neutral-500);
+
+  --pk-radius: 0.7rem; /* 11.2px — the seed for all radius algebra */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TIER 2 — SEMANTIC · role-based, declared once
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk {
+  --pk-bg: var(--pk-neutral-0);
+  --pk-surface: var(--pk-neutral-50);
+  --pk-surface-hover: var(--pk-neutral-100);
+  --pk-elevated: var(--pk-neutral-0);
+
+  /* Only four text roles. Secondary is the most-used one — the page is
+     mostly quiet and primary is reserved for what actually matters. */
+  --pk-text: var(--pk-neutral-950);
+  --pk-text-secondary: var(--pk-neutral-500);
+  --pk-text-tertiary: var(--pk-neutral-300);
+  --pk-text-inverse: var(--pk-neutral-0);
+  --pk-text-brand: var(--pk-brand-500);
+
+  --pk-border: var(--pk-neutral-100);
+  --pk-border-hover: var(--pk-neutral-200);
+  --pk-border-active: var(--pk-neutral-300);
+
+  --pk-positive: var(--pk-green-600);
+  --pk-negative: var(--pk-red-500);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TIER 3 — COMPONENT · declared once, never themed
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk {
+  /* The bookmark is the ONE action on this surface, so it is drawn in primary
+     ink, not the grey a secondary control gets. A 400-grey bookmark reads as
+     chrome sitting on top of the scan; near-black reads as a control. */
+  --pk-save-idle: var(--pk-neutral-950);
+  --pk-save-active: var(--pk-brand-500);
+  --pk-save-bg-hover: var(--pk-neutral-100);
+
+  --pk-chip-bg: var(--pk-neutral-50);
+  --pk-chip-bg-active: var(--pk-neutral-950);
+  --pk-chip-text: var(--pk-text-secondary);
+  --pk-chip-text-active: var(--pk-text-inverse);
+
+  /* The slab. A graded card is a card sealed inside a rigid holder, so the
+     face is drawn as an inner rectangle inset within an outer shell — the
+     shell is the chrome we draw, the image is only ever the card itself. */
+  --pk-slab-shell: var(--pk-neutral-25);
+  --pk-slab-edge: var(--pk-neutral-200);
+  --pk-slab-face: var(--pk-neutral-25); /* the mat behind an odd-ratio card */
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TYPE · SPACING · RADIUS · ELEVATION · MOTION
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk {
+  /* Inter is already loaded by the root layout via next/font (--font-inter),
+     so this costs nothing extra. The feature string is the interesting part:
+       cv01 flat-flag 1 · cv02 open-4 · cv03 open-6 · cv04 open-9
+       cv09 flat-top-3 EXPLICITLY OFF · cv11 single-storey a
+       cv15 alternate TABULAR-figure 1  ← tuned for the 1 in a price column
+     cv15 is why prices in this UI line up as cleanly as they do. */
+  --pk-font: var(--font-inter), Inter, ui-sans-serif, system-ui, sans-serif;
+  --pk-font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
+  --pk-font-features: "liga" 1, "calt" 1, "kern" 1, "cv01" 1, "cv02" 1,
+    "cv03" 1, "cv04" 1, "cv09" 0, "cv11" 1, "cv15" 1;
+
+  /* Mono carries NONE of the above — cv01…cv15 are Inter's character
+     variants and mean nothing in Geist Mono, and `liga` in a monospaced
+     face is where code ligatures come from. Kerning and contextual
+     alternates only, so mono text stops inheriting a string written for a
+     different typeface. */
+  --pk-font-features-mono: "kern" 1, "calt" 1, "liga" 0;
+
+  /* Weight is a continuous axis, not six named steps. As text gets SMALLER
+     it gets HEAVIER — 400 is anemic at 13px and 500 is chunky, so 490. */
+  --pk-w-meta: 440;
+  --pk-w-caption: 450;
+  --pk-w-body-sm: 490;
+  --pk-w-body-xs: 500;
+  --pk-w-emphasis: 540;
+  --pk-w-strong: 590;
+  --pk-w-heading: 600; /* headings + every button label. 700 is never used. */
+
+  /* 4px base, but the half-steps are load-bearing: 6px is the icon+label gap
+     (4px too tight, 8px too loose) and it is the second-most-used value. */
+  --pk-space-0-5: 2px;
+  --pk-space-1: 4px;
+  --pk-space-1-5: 6px;
+  --pk-space-2: 8px;
+  --pk-space-2-5: 10px;
+  --pk-space-3: 12px;
+  --pk-space-3-5: 14px;
+  --pk-space-4: 16px;
+  --pk-space-5: 20px;
+  --pk-space-6: 24px;
+
+  /* Subtractive at the small end, so the steps compress toward zero and no
+     step ever reaches a sharp corner. --pk-radius-sm is the real default. */
+  --pk-radius-xs: calc(var(--pk-radius) - 6px); /*  5.2px */
+  --pk-radius-sm: calc(var(--pk-radius) - 4px); /*  7.2px */
+  --pk-radius-md: calc(var(--pk-radius) - 2px); /*  9.2px */
+  --pk-radius-lg: var(--pk-radius); /* 11.2px */
+  --pk-radius-xl: calc(var(--pk-radius) + 4px); /* 15.2px */
+
+  /* Separation is carried by 1px borders and surface steps. Shadow is a
+     last resort and never exceeds 6% black. */
+  --pk-shadow-sm: 0 1px 2px #00000008;
+  --pk-shadow-md: 0 8px 16px #0000000f;
+
+  /* Fast out, long settle. This is the signature curve — it is what makes
+     the save interaction feel like it lands rather than arrives. */
+  --pk-ease-hover: cubic-bezier(0.26, 0.08, 0.25, 1);
+  --pk-ease-expo: cubic-bezier(0.16, 1, 0.3, 1); /* overlays */
+  --pk-ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --pk-dur: 150ms; /* the dominant duration */
+  --pk-dur-press: 120ms; /* transform */
+  --pk-dur-color: 100ms; /* colour, box-shadow */
+  --pk-dur-overlay: 200ms;
+
+  /* Tobacco-era cards, not modern ones. A T206 is 1.4in × 2.6in — much
+     narrower than the 2.5 × 3.5 everyone assumes — and the scans in
+     /public/psa measure 0.553–0.565 almost to a card. 14/25 = 0.56 sits in
+     the middle of that spread, so eleven of the twelve fill their face
+     edge-to-edge with no visible mat.
+
+     The exception is the 1933 Goudey Ruth at 0.824: gum cards were genuinely
+     shorter and wider than tobacco cards. It mats rather than crops, which
+     is also what a real holder does — slabs are one size whatever is inside. */
+  --pk-card-ratio: 14 / 25;
+}
+
+/* ── Scope root ─────────────────────────────────────────────────────────
+   .pk owns its own background, ink and typeface, and opts every descendant
+   out of the site's shared-element page transition so /psa never tries to
+   morph against another route.                                          */
+.pk {
+  background: var(--pk-bg);
+  color: var(--pk-text);
+  font-family: var(--pk-font);
+
+  /* ── Text features ────────────────────────────────────────────────────
+     The feature string alone is not the whole story. Each of these is a
+     separate switch the browser would otherwise decide for itself:
+
+     · font-kerning        — browsers drop pair kerning at small sizes and
+                             inside some form controls. This is a UI built
+                             almost entirely out of 10–14px labels, which
+                             is exactly the range where it gets dropped.
+     · font-variant-ligatures — `common` for the drawn fi/fl, `contextual`
+                             for Inter's calt. Stated rather than assumed,
+                             since the site's <body> only asks for common.
+     · font-optical-sizing — Inter v4 carries an `opsz` axis; auto lets the
+                             10px tab labels take the wider, more open cut
+                             instead of the display one scaled down.
+     · font-synthesis      — never fake a weight. The weight scale here is
+                             continuous (440…600) and every stop is real.
+     · letter-spacing      — RESET. The site's <body> inherits a tracking
+                             correction measured against Geist; applied to
+                             Inter it is the wrong number, and it reaches
+                             every element in here that carries no `t-*`
+                             class. The scale re-states its own tracking. */
+  font-feature-settings: var(--pk-font-features);
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+  letter-spacing: normal;
+
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  view-transition-name: none;
+}
+.pk *,
+.pk *::before,
+.pk *::after {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+  view-transition-name: none;
+}
+
+/* Form controls do not inherit type at all, so this UI writes `font: inherit`
+   on every button and input. That fixes the family and size — and silently
+   undoes the features, because the `font` SHORTHAND resets
+   font-feature-settings, font-kerning and font-variant-* to their initial
+   values. Since almost every label in here IS a button (the tab bar, the
+   chips, the save control, the config panel), the shorthand was switching
+   the feature string off for most of the visible text. Restated here, at
+   one notch more specificity than the `font: inherit` rules. */
+.pk button,
+.pk input,
+.pk select,
+.pk textarea,
+.pk optgroup {
+  font-feature-settings: var(--pk-font-features);
+  font-kerning: normal;
+  font-variant-ligatures: common-ligatures contextual;
+  font-optical-sizing: auto;
+  font-synthesis: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   TYPE SCALE — sizes in px, not rem. Body and heading share sizes and
+   differ only in leading. Tracking is px below 20px and em at/above it,
+   because below 20px it is a constant optical correction and above it a
+   proportion.
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk .t-body-xs {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: var(--pk-w-body-xs);
+  letter-spacing: -0.1px;
+}
+.pk .t-body-sm {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: var(--pk-w-body-sm);
+  letter-spacing: -0.1px;
+}
+.pk .t-body {
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.09px;
+}
+.pk .t-body-lg {
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: -0.18px;
+}
+.pk .t-head {
+  font-size: 14px;
+  line-height: 16px;
+  letter-spacing: -0.09px;
+}
+.pk .t-head-lg {
+  font-size: 16px;
+  line-height: 20px;
+  letter-spacing: -0.18px;
+}
+.pk .t-head-xl {
+  font-size: 20px;
+  line-height: 24px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.01em;
+}
+.pk .t-head-2xl {
+  font-size: 24px;
+  line-height: 28px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.015em;
+}
+.pk .t-head-3xl {
+  font-size: 32px;
+  line-height: 36px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.01em;
+}
+
+/* Every figure that sits in a column or updates live. slashed-zero so a 0
+   can never be misread as an O in a lot number. */
+.pk .num {
+  font-variant-numeric: tabular-nums slashed-zero;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE SCAN
+   No holder, no border, no label strip. Just the card, cropped to a
+   consistent ratio and rounded. The lithograph has its own printed border
+   and its own type — drawing a second frame around it only argues with what
+   is already there.
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk .slab {
+  position: relative;
+  display: block;
+  width: 100%;
+  border-radius: var(--pk-radius-md);
+  background: var(--pk-slab-shell);
+  overflow: hidden;
+}
+
+.pk .slab-face {
+  position: relative;
+  aspect-ratio: var(--pk-card-ratio);
+  background: var(--pk-slab-face);
+  overflow: hidden;
+}
+/* contain, not cover. A slab is a fixed size and the card inside it is
+   whatever size it is, so an odd-ratio card should mat the way it really
+   would — cropping Ruth's borders off to force a fill would be the one
+   dishonest thing on the page. */
+.pk .slab-face img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* Fallback face for a card with no scan yet. A multi-stop eased wash rather
+   than a flat two-stop fade, so an empty slot still reads as considered. */
+.pk .slab-face--empty {
+  background:
+    linear-gradient(
+      168deg,
+      var(--pk-neutral-100) 0%,
+      var(--pk-neutral-50) 34%,
+      var(--pk-neutral-100) 62%,
+      var(--pk-neutral-200) 100%
+    );
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PRICE + DELTA
+
+   No pills, no tinted backgrounds, no badges. A figure is set in its own
+   colour and nothing else — a filled chip around a number reads as a button
+   you can press, and on a grid of a dozen tiles a dozen chips become the
+   loudest thing on the screen. The grade colours in TIER 1 are still there
+   and cards.js still carries every grade, if a badge ever earns its way back.
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk .price {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.09px;
+  font-variant-numeric: tabular-nums slashed-zero;
+  color: var(--pk-text);
+}
+.pk .delta {
+  font-size: 12px;
+  line-height: 16px;
+  font-weight: var(--pk-w-body-xs);
+  letter-spacing: -0.1px;
+  font-variant-numeric: tabular-nums;
+}
+.pk .delta[data-dir="up"] {
+  color: var(--pk-positive);
+}
+.pk .delta[data-dir="down"] {
+  color: var(--pk-negative);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   CHIPS / FILTER RAIL
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk .chip-rail {
+  display: flex;
+  gap: var(--pk-space-1-5);
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.pk .chip-rail::-webkit-scrollbar {
+  display: none;
+}
+.pk .chip {
+  flex: 0 0 auto;
+  padding: var(--pk-space-1) var(--pk-space-2-5);
+  border: 0;
+  border-radius: 999px;
+  background: var(--pk-chip-bg);
+  color: var(--pk-chip-text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.1px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+.pk .chip:hover {
+  background: var(--pk-surface-hover);
+  color: var(--pk-text);
+}
+.pk .chip:active {
+  transform: scale(0.97);
+}
+.pk .chip[aria-pressed="true"] {
+  background: var(--pk-chip-bg-active);
+  color: var(--pk-chip-text-active);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOTION SAFETY
+   ═══════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  .pk *,
+  .pk *::before,
+  .pk *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SAVE BUTTON  (see SaveButton.jsx)
+
+   Compact by design: 28px of visual footprint, 56px of tap target. The
+   footprint is what lets a row keep title + grade + price + save on one
+   line at 390px, and what lets a two-up grid keep its columns honest.
+   ═══════════════════════════════════════════════════════════════════════ */
+.pk .pk-save {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  /* Square is load-bearing: the button is a circle, so any stretch from a
+     flex or grid parent would render it an ellipse. flex-basis pins the
+     inline axis, align-self pins the block axis, aspect-ratio catches the
+     rest, and min/max clamp anything that still tries to resolve wider. */
+  flex: 0 0 var(--pk-save-size, 28px);
+  align-self: center;
+  justify-self: center;
+  aspect-ratio: 1 / 1;
+  width: var(--pk-save-size, 28px);
+  height: var(--pk-save-size, 28px);
+  min-width: var(--pk-save-size, 28px);
+  min-height: var(--pk-save-size, 28px);
+  max-width: var(--pk-save-size, 28px);
+  max-height: var(--pk-save-size, 28px);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  /* The plate is a variable rather than a wrapper's background, because the
+     jump has to carry the whole circle. Anything painted on a parent would
+     hold still while the button moved inside it. */
+  background: var(--pk-save-bg, transparent);
+  box-shadow: var(--pk-save-plate, none);
+  color: var(--pk-save-idle);
+  cursor: pointer;
+  transition:
+    color var(--pk-dur-color) var(--pk-ease-in-out),
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+
+/* Tap target grows to a 56px minimum without the button occupying 56px of
+   layout. max() rather than a flat 56px so a larger --pk-save-size never
+   ends up with a hitbox smaller than its own visible circle. */
+.pk .pk-save::after {
+  content: "";
+  position: absolute;
+  inset: 50% auto auto 50%;
+  width: max(56px, 100%);
+  height: max(56px, 100%);
+  transform: translate(-50%, -50%);
+}
+
+/* Hover goes TOWARDS the saved colour rather than away from it — idle is
+   already primary ink, so fading it on hover would read as disabling. */
+.pk .pk-save:hover {
+  background: var(--pk-save-bg-hover);
+  color: var(--pk-save-active);
+}
+.pk .pk-save:active {
+  transform: scale(0.92);
+}
+.pk .pk-save:focus-visible {
+  outline: 2px solid var(--pk-brand-500);
+  outline-offset: 2px;
+}
+.pk .pk-save[data-saved] {
+  color: var(--pk-save-active);
+}
+.pk .pk-save[data-saved]:hover {
+  color: var(--pk-save-active);
+}
+
+/* Nudged down a pixel. The glyph's ink is bounded by its flat top edge and
+   its notch, and a notch is a hole — so the shape's geometric centre sits
+   below its optical one and a mathematically centred bookmark reads high.
+   margin rather than a transform, because the pop animation owns transform. */
+.pk .pk-save-icon {
+  position: relative;
+  z-index: 1;
+  margin-top: 1px;
+  overflow: visible;
+}
+
+/* ── The fill wipe ─────────────────────────────────────────────────────
+   view-box resolves transform-origin against the 0 0 24 24 viewBox, so
+   "50% 100%" is the true bottom-centre of the icon regardless of how the
+   path happens to be bounded.                                          */
+.pk .pk-save-wipe {
+  transform-box: view-box;
+  transform-origin: 50% 100%;
+  transform: scaleY(0);
+}
+.pk .pk-save[data-saved] .pk-save-wipe {
+  animation: pk-wipe-in 260ms var(--pk-ease-hover) forwards;
+}
+.pk .pk-save[data-touched]:not([data-saved]) .pk-save-wipe {
+  animation: pk-wipe-out 160ms var(--pk-ease-in-out) forwards;
+}
+
+@keyframes pk-wipe-in {
+  from { transform: scaleY(0); }
+  to   { transform: scaleY(1); }
+}
+@keyframes pk-wipe-out {
+  from { transform: scaleY(1); }
+  to   { transform: scaleY(0); }
+}
+
+/* ── The pop ───────────────────────────────────────────────────────────
+   Four stops, hand-authored, imitating a damped oscillation. A library
+   spring would be smoother and less characterful; the slight snap at 1.14
+   is what makes the save read as a physical commit.                    */
+.pk .pk-save[data-saved] .pk-save-icon {
+  animation: pk-save-pop 380ms var(--pk-ease-hover);
+}
+@keyframes pk-save-pop {
+  0%   { transform: scale(1);    }
+  22%  { transform: scale(0.84); }
+  48%  { transform: scale(1.14); }
+  74%  { transform: scale(0.97); }
+  100% { transform: scale(1);    }
+}
+
+/* ── The ring ──────────────────────────────────────────────────────────
+   Fires once on save and dissolves. Expo-out so it leaves fast and lingers
+   at the edge rather than easing evenly outward.                       */
+.pk .pk-save-ring {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--pk-save-active);
+  opacity: 0;
+  pointer-events: none;
+}
+.pk .pk-save[data-saved] .pk-save-ring {
+  animation: pk-save-ring 460ms var(--pk-ease-expo) forwards;
+}
+@keyframes pk-save-ring {
+  0%   { opacity: 0.55; transform: scale(0.6);  }
+  60%  { opacity: 0.18; transform: scale(1.35); }
+  100% { opacity: 0;    transform: scale(1.6);  }
+}
+
+/* ── The nudge ─────────────────────────────────────────────────────────
+   Fired when a card is tapped anywhere OTHER than the bookmark. The tap is
+   not wrong, it is aimed at the wrong 28px — so nothing happens to the card
+   and the bookmark answers instead: it JUMPS.
+
+   The whole circle jumps, not the glyph inside it. The button is what you
+   are being asked to press, so the button is what has to move — animating
+   the icon alone leaves the target sitting still with something wriggling
+   in the middle of it, which points at the wrong object.
+
+   Crouch, launch, land, one small rebound. No rotation and no expanding
+   ring: a tilt makes the button look knocked rather than eager, and a ring
+   is the save's LANDING gesture — spending it on a miss would say the save
+   already happened.
+
+   COLOUR RUNS ON ITS OWN TRACK. It used to share the jump's keyframes, and
+   that is why it read as a flip rather than a fade: a keyframe timing
+   function applies to every SEGMENT, so the jump's fast-out curve was
+   spending 80% of each colour segment in the first few frames — 125ms of
+   ramp, front-loaded, is a switch. Split out, the tint gets what a colour
+   change actually needs: ease-in-out, a slower ramp, and a HOLD at brand
+   while the button is at the top of its arc, so there is something to look
+   at rather than something to catch. It outlasts the jump by 240ms on
+   purpose — the motion says "here", the colour is what stays long enough to
+   say "this one".
+
+   Two animations, not one, because they need different durations and
+   different curves. They touch different properties, so nothing fights.
+
+   Two identical blocks of each because a second miss has to restart them:
+   React alternates [data-hint] between 0 and 1, and re-matching the same
+   animation-name would leave the running animation exactly where it was.
+
+   The :not([data-saved]) guard is load-bearing rather than decorative: the
+   attribute stays on the button after a miss, so without it the stale hint
+   would out-rank the save pop the moment the bookmark is finally pressed. */
+.pk .pk-save[data-hint="0"]:not([data-saved]) {
+  animation:
+    pk-save-nudge-a 520ms var(--pk-ease-hover),
+    pk-save-tint-a 760ms var(--pk-ease-in-out);
+}
+.pk .pk-save[data-hint="1"]:not([data-saved]) {
+  animation:
+    pk-save-nudge-b 520ms var(--pk-ease-hover),
+    pk-save-tint-b 760ms var(--pk-ease-in-out);
+}
+
+@keyframes pk-save-nudge-a {
+  0%   { transform: translateY(0)    scale(1);    }
+  16%  { transform: translateY(2px)  scale(0.94); }
+  40%  { transform: translateY(-8px) scale(1.06); }
+  64%  { transform: translateY(0)    scale(0.99); }
+  82%  { transform: translateY(-3px) scale(1.02); }
+  100% { transform: translateY(0)    scale(1);    }
+}
+@keyframes pk-save-nudge-b {
+  0%   { transform: translateY(0)    scale(1);    }
+  16%  { transform: translateY(2px)  scale(0.94); }
+  40%  { transform: translateY(-8px) scale(1.06); }
+  64%  { transform: translateY(0)    scale(0.99); }
+  82%  { transform: translateY(-3px) scale(1.02); }
+  100% { transform: translateY(0)    scale(1);    }
+}
+
+/* 0 → 24% ramps up over ~180ms, arriving as the jump peaks. 24 → 58% holds.
+   58 → 100% is a 320ms fade home, slower than the ramp because leaving
+   quietly is what stops the whole thing reading as a blink. */
+@keyframes pk-save-tint-a {
+  0%   { color: var(--pk-save-idle);   }
+  24%  { color: var(--pk-save-active); }
+  58%  { color: var(--pk-save-active); }
+  100% { color: var(--pk-save-idle);   }
+}
+@keyframes pk-save-tint-b {
+  0%   { color: var(--pk-save-idle);   }
+  24%  { color: var(--pk-save-active); }
+  58%  { color: var(--pk-save-active); }
+  100% { color: var(--pk-save-idle);   }
+}
