@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
 import { haptic } from "@/lib/haptics";
@@ -92,45 +92,106 @@ function Icon({ id, active }) {
 }
 
 
-/* The countdown, on the same odometer as every other live figure on the site.
-   A price and a deadline are both numbers that move on their own, and the app
-   already has one way of showing that; a plain digit swapping in place would
-   be the only figure here that does not roll.
-
-   Whole seconds, and the only thing in the pill carrying the deadline. Polled
-   at 100ms so the digit turns close to the boundary rather than up to a second
-   late, but only committed when the whole second does — a same-value setState
-   never reaches the reel. */
 const ROLL = 300;
 
-function UndoSeconds({ ms, nonce, open }) {
-  const [secs, setSecs] = useState(() => Math.ceil(ms / 1000));
+function UndoFill({ duration, nonce, onEnd }) {
+  const fillRef = useRef(null);
 
   useEffect(() => {
-    if (!open) return undefined;
-    const end = performance.now() + ms;
-    const write = () => {
-      // Floored at 1: the pill is gone the moment this would read 0, and a 0
-      // flashing on the way out is a frame of the wrong number.
-      const left = Math.max(1, Math.ceil((end - performance.now()) / 1000));
-      setSecs((prev) => (prev === left ? prev : left));
-    };
-    write();
-    const id = setInterval(write, 100);
-    return () => clearInterval(id);
-  }, [ms, nonce, open]);
+    const fill = fillRef.current;
+    if (!fill) return undefined;
+
+    const animation = fill.animate(
+      [{ width: "100%" }, { width: "0%" }],
+      { duration, easing: "linear", fill: "forwards" },
+    );
+    animation.finished.then(() => onEnd?.()).catch(() => {});
+    return () => animation.cancel();
+  }, [duration, nonce, onEnd]);
 
   return (
-    <span className="psa-undo-secs num" aria-hidden="true">
-      <SlotNumber value={secs} duration={ROLL} stagger={0} direction="down" label="" />
-      <span className="psa-undo-unit">s</span>
+    <span className="psa-undo-track" aria-hidden="true">
+      <span ref={fillRef} className="psa-undo-fill" />
     </span>
   );
 }
 
-export default function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
+/* How many saves are on the stack.
+
+   The offer STACKS — four saves in a row can be walked back four times,
+   newest first — and until now the only place that said so was the button's
+   accessible name. On screen it was one pill that looked exactly the same
+   whether it would undo one card or five, so the second tap was a surprise
+   every time.
+
+   A typographic count rather than a stack of pills behind the pill. Real
+   stacked plies would be a picture of a stack: three ~2px slivers under a
+   capsule that is already only 26px tall, at the exact moment the screen is
+   busy with a card landing. This says the same thing in a glyph, and it says
+   it at the size the rest of the pill is set at.
+
+   It counts DOWN as you tap, on the same reel as the clock beside it, so
+   the pill answers each tap by showing what is left rather than just
+   surviving it. Absent at 1: "×1" is a multiplier that multiplies nothing,
+   and the plain pill already means exactly that. */
+function UndoCount({ count }) {
+  return (
+    <span className="psa-undo-count num" data-show={count > 1 || undefined} aria-hidden="true">
+      <SlotNumber value={count} duration={ROLL} stagger={0} direction="auto" label="" />
+    </span>
+  );
+}
+
+/* The count on the Collection tab.
+
+   It was a plain span, re-keyed on every save so React threw it away and the
+   entrance animation re-fired. That worked, but it made this the one live
+   figure in the app that did not roll — the price, the delta, the collection
+   total and the undo clock all turn, and the number they are all turning
+   about hard-swapped.
+
+   So the badge stays mounted and rolls, and the two jobs are split across
+   two elements because they are two different animations on two different
+   clocks: the wrapper deals the badge in ONCE, when the collection stops
+   being empty, and the badge itself nudges on every save after that.
+
+   Parity, not a key, is what re-fires the nudge. Re-matching the same
+   animation-name leaves a running animation exactly where it is, so there
+   are two identical sets of keyframes and the attribute alternates between
+   them — the same trick the price tape and the miss-tap hint use. A key
+   would remount the reel and cost the roll it exists for. */
+const COUNT_ROLL = 420; // ms — shorter than a price; the badge is 16px
+
+function TabCount({ count, nonce }) {
+  const text = count > 99 ? "99+" : String(count);
+
+  return (
+    <span className="psa-tab-count-in" data-show={count > 0 || undefined} aria-hidden="true">
+      <span className="psa-tab-count num" data-pop={nonce % 2}>
+        <SlotNumber
+          value={text}
+          duration={COUNT_ROLL}
+          stagger={0}
+          direction="auto"
+          label=""
+        />
+      </span>
+    </span>
+  );
+}
+
+function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
   const flight = useSaveFlight();
   const undoMs = undo?.ms ?? 3000;
+
+  /* The stack empties and the pill closes in the same commit, so a count read
+     straight off the live value would drop to nothing and take the "×3" out
+     of a pill that is still on screen fading. Frozen at its last value while
+     the pill is closed, live while it is open — the clock beside it already
+     behaves this way, because its interval stops on the same flag. */
+  const lastCount = useRef(0);
+  if (undo?.open) lastCount.current = undo.count;
+  const stackCount = undo?.open ? undo.count : lastCount.current;
 
   return (
     <nav className="psa-tabbar" aria-label="Sections">
@@ -150,11 +211,12 @@ export default function TabBar({ active, onChange, counts = {}, countNonce, undo
           undo?.count > 1 ? `Undo last save, ${undo.count} stacked` : "Undo last save"
         }
       >
-        {/* The word and the clock. No fill and no shimmer behind them, and no
-            stacked-saves chip beside them — how many are queued still reaches a
-            screen reader through the button's own label. */}
+        {/* The fill uses the same Web Animations engine as the route's FLIP.
+            A nonce change cancels the old drain and starts a fresh linear one;
+            its completion dismisses Undo, so there is still only one clock. */}
+        <UndoFill duration={undoMs} nonce={undo?.nonce} onEnd={undo?.onExpire} />
         <span className="psa-undo-label">Undo</span>
-        <UndoSeconds ms={undoMs} nonce={undo?.nonce} open={!!undo?.open} />
+        <UndoCount count={stackCount} />
       </button>
 
       {TABS.map((tab) => {
@@ -184,15 +246,7 @@ export default function TabBar({ active, onChange, counts = {}, countNonce, undo
                 the card beside the bookmark rather than on it. */}
             <span className="psa-tab-icon" ref={isTarget ? flight?.registerTarget : undefined}>
               <Icon id={tab.id} active={isActive} />
-              {count > 0 && (
-                /* Keyed on the nonce, not the value, so the pop re-fires even
-                   when a save and a removal leave the number where it was.
-                   Keying just this span means the rest of the bar — and the
-                   undo pill, which needs to animate in — never remounts. */
-                <span className="psa-tab-count num" key={countNonce} aria-hidden="true">
-                  {count > 99 ? "99+" : count}
-                </span>
-              )}
+              <TabCount count={count ?? 0} nonce={countNonce} />
             </span>
             <span className="psa-tab-label">{tab.label}</span>
           </button>
@@ -201,3 +255,10 @@ export default function TabBar({ active, onChange, counts = {}, countNonce, undo
     </nav>
   );
 }
+
+/* The bar is deliberately NOT re-keyed by the shell — the undo pill has to
+   animate in and out, which it cannot do if the nav remounts under it. So it
+   sits through every render of the app, including one a second from the tape,
+   and memo is what keeps those from reaching it. Both object props are
+   useMemo'd upstream for exactly this. */
+export default memo(TabBar);

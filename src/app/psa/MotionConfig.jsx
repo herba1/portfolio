@@ -129,7 +129,7 @@ function Section({ spec, values, base, onChange, open }) {
 
 export default function MotionConfig() {
   const flight = useSaveFlight();
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   /* Flagged groups exist in the registry either way — getTuning() must never
      have a hole in it — but they are not OFFERED until the flag is on, so

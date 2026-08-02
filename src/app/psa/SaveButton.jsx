@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { memo, useId, useState } from "react";
 
 import { haptic } from "@/lib/haptics";
 
@@ -34,7 +34,7 @@ import { haptic } from "@/lib/haptics";
 const BOOKMARK =
   "M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z";
 
-export default function SaveButton({
+function SaveButton({
   saved = false,
   onToggle,
   label = "bookmarks",
@@ -98,3 +98,9 @@ export default function SaveButton({
     </button>
   );
 }
+
+/* Memoised: it holds a running wipe, a pop and a ring, and every one of those
+   is CSS driven off attributes — a re-render it did not need is a chance for
+   React to touch a node mid-animation for no reason. Its props are all
+   primitives plus one callback, and every caller hands it a stable one. */
+export default memo(SaveButton);

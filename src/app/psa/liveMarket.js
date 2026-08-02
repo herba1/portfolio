@@ -116,3 +116,39 @@ export function useLiveCard(id) {
   const server = useCallback(() => STATIC.get(id), [id]);
   return useSyncExternalStore(sub, get, server);
 }
+
+/** The live sum of a set of cards — the collection's value.
+
+    Subscribes to exactly the ids handed in, so a collection of three costs
+    three listeners and a tick that moved none of them re-renders nothing.
+    The snapshot is a NUMBER, which is what makes this safe to recompute on
+    every read: React compares snapshots with Object.is, and a sum that did
+    not change compares equal without any caching on our side. */
+export function useLiveTotal(ids) {
+  // The identity of `ids` changes whenever the collection re-renders; the
+  // CONTENT is what the subscription actually depends on.
+  const key = ids.join(",");
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const sub = useCallback(
+    (fn) => {
+      const offs = ids.map((id) => subscribe(id, fn));
+      return () => {
+        for (const off of offs) off();
+      };
+    },
+    [key],
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const get = useCallback(() => sum(ids, state), [key]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const server = useCallback(() => sum(ids, STATIC), [key]);
+
+  return useSyncExternalStore(sub, get, server);
+}
+
+function sum(ids, from) {
+  let total = 0;
+  for (const id of ids) total += (from.get(id) ?? STATIC.get(id))?.price ?? 0;
+  return total;
+}

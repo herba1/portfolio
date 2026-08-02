@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { memo, useEffect } from "react";
 
 import { useLenis } from "@/context/LenisContext";
 
@@ -17,7 +17,7 @@ import { useLenis } from "@/context/LenisContext";
    still want the site's scrolling.
    ───────────────────────────────────────────────────────────────────────── */
 
-export default function PsaChrome({ killLenis = false }) {
+function PsaChrome({ killLenis = false }) {
   const { lenis } = useLenis();
 
   useEffect(() => {
@@ -41,3 +41,8 @@ export default function PsaChrome({ killLenis = false }) {
 
   return null;
 }
+
+/* Renders nothing and its props never change, so a re-render is pure cost —
+   and this one is a context consumer, which means it is woken by the Lenis
+   provider as well as by the app above it. */
+export default memo(PsaChrome);

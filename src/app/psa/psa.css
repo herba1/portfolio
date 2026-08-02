@@ -549,29 +549,90 @@ html[data-psa-vt]::view-transition-new(*) {
   letter-spacing: -0.08px;
 }
 
-/* The count. Re-keyed on every save so it re-fires even when the number
-   happens to land on the same value. */
-.psa-tab-count {
+/* ── The count ────────────────────────────────────────────────────────────
+   Two elements, two animations, two clocks — see TabCount in TabBar.jsx.
+
+   The WRAPPER owns position and the deal-in. It mounts once, when the
+   collection stops being empty, and that is the only time anything should
+   arrive from nothing: scaling from 0.4 on every save would fight the reel
+   underneath it, which is trying to be read while it turns.
+
+   The BADGE owns the pill and the nudge. Every save after the first is a
+   number that changed, not a number that appeared, so it gets a bump off 1
+   rather than a growth out of nothing.
+
+   Nested transforms multiply, so the two never have to know about each
+   other — the deal-in can be mid-flight when the first nudge starts and
+   both still resolve correctly.
+   ───────────────────────────────────────────────────────────────────────── */
+.psa-tab-count-in {
   position: absolute;
   top: -3px;
   left: 13px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(2px) scale(0.55);
+  transition:
+    opacity 180ms var(--pk-ease-in-out),
+    transform 220ms var(--pk-ease-in-out),
+    visibility 0s linear 220ms;
+}
+.psa-tab-count-in[data-show] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 180ms var(--pk-ease-expo),
+    transform 300ms var(--pk-ease-expo),
+    visibility 0s;
+}
+
+.psa-tab-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
   min-width: 16px;
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--pk-brand-500);
+  background: var(--pk-save-active);
   color: var(--pk-text-inverse);
   font-size: 10px;
   line-height: 16px;
   font-weight: var(--pk-w-heading);
-  text-align: center;
-  animation: psa-count-in 380ms var(--pk-ease-hover) both;
 }
-@keyframes psa-count-in {
-  0% { opacity: 0; transform: scale(0.4); }
-  45% { opacity: 1; transform: scale(1.22); }
-  75% { transform: scale(0.95); }
-  100% { opacity: 1; transform: scale(1); }
+/* The reel, pinned to the badge's own 16px line box: the cell a digit is
+   centred in has to be the height the badge is, or the number sits off
+   centre in the pill. Same fix the undo clock needs, same reason. */
+.psa-tab-count .slot {
+  --slot-cell: 16px;
+  /* The fade band is 20% of the cell by default — 3px of a 10px digit, which
+     at this size eats the number rather than softening it. */
+  --slot-fade: 8%;
+  height: 16px;
+  line-height: 16px;
+}
+
+/* Two identical blocks so the attribute can alternate between them and
+   restart the nudge. Off 1 and back to 1: one composited transform, and the
+   pill never leaves the icon it is pinned to. */
+.psa-tab-count[data-pop="0"] {
+  animation: psa-count-pop-a 380ms var(--pk-ease-hover) both;
+}
+.psa-tab-count[data-pop="1"] {
+  animation: psa-count-pop-b 380ms var(--pk-ease-hover) both;
+}
+@keyframes psa-count-pop-a {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.18); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+@keyframes psa-count-pop-b {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.18); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
 }
 
 /* ═══════════════════════════════════════════════════════════════════════
@@ -607,14 +668,152 @@ html[data-psa-vt]::view-transition-new(*) {
 /* ═══════════════════════════════════════════════════════════════════════
    COLLECTION
    ═══════════════════════════════════════════════════════════════════════ */
+/* ONE line, not three. The head was stacking title / count / value, which
+   spent 84px of a 390px screen saying two things — and put the largest
+   figure on the surface third in reading order, under a label describing
+   something else.
+
+   So the value takes the line and the count annotates it from the right
+   edge, which is also the edge every price in the list below is set
+   against. The head now reads down as name, then figure, and across as
+   figure, then how many made it.
+
+   Centred rather than baseline-aligned, and that is not a preference: the
+   total is a reel, the reel is `overflow: hidden`, and an overflow-hidden
+   box reports its BOTTOM edge as its baseline. Aligning to it would hang
+   the count a full cell below the number. Centring two boxes ignores
+   baselines entirely, and the digits are already centred in their own
+   window, so the two land on the same optical line. */
 .psa-summary {
   display: flex;
-  flex-direction: column;
-  gap: var(--pk-space-0-5);
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pk-space-3);
   margin-top: var(--pk-space-2);
 }
 .psa-summary-label {
+  flex: 0 0 auto;
   color: var(--pk-text-secondary);
+}
+/* The total is a reel like every other figure here, so it needs its window
+   and its line box to be the same height — .t-head-xl sets a 24px
+   line-height on the .slot itself and would otherwise sit the digits off
+   centre in their cells. Tighter than the 1.5em default: at 20px that would
+   be a 30px window inside a 24px line, and the head would grow to fit it. */
+.psa-summary .slot {
+  --slot-cell: 1.25em;
+  line-height: var(--slot-cell);
+}
+/* The total is the only figure on this screen that is left-aligned — it hangs
+   off the head's left margin under the card count — so it pulses from its
+   left edge. The default sends a last-child figure right, which here would
+   walk the number off the margin it shares with the title. */
+.psa-summary .psa-fig {
+  transform-origin: left center;
+}
+
+/* ── Rows ─────────────────────────────────────────────────────────────────
+   The collection is a LEDGER. Browse is two columns of scans because the
+   question there is which card this is, and the picture answers it; by the
+   time a card is here it is already yours and the question is what it is
+   worth. So the scan drops to a 40px thumbnail and the figures take the
+   width it gives up.
+
+   That is what fixes the numbers. In a tile, price and delta sit at opposite
+   ends of one line inside a 45vw box — same baseline, but a different
+   horizontal position on every card, so a screen of prices never resolves
+   into a column you can read down. Here they stack against the row's right
+   edge in tabular figures: every price on the same rule, every delta under
+   its own price, and the whole list scans as one column of money.
+
+   Same hairline-per-row treatment as the Activity feed, because they are the
+   same kind of object — a list of records rather than a wall of pictures.
+   ───────────────────────────────────────────────────────────────────────── */
+.psa-rows {
+  list-style: none;
+  margin: var(--pk-space-3) 0 0;
+  padding: 0;
+  /* Positioning context for the exit layer, and a stacking context so its
+     negative z-index cannot escape into the panel. Same contract as
+     .psa-grid — flipGrid pins leaving rows inside whichever of the two it
+     was handed. */
+  position: relative;
+  z-index: 0;
+}
+
+.psa-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border-bottom: 1px solid var(--pk-border);
+  /* A MOUNT entrance only — arriving on the tab. Removing a card reflows the
+     list with FLIP instead, so this never replays for an edit. Slightly
+     slower step than the grid's 24ms: a row is a full-width object and the
+     eye reads a vertical cascade more slowly than a two-column one. */
+  animation: psa-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 28ms);
+}
+
+/* Rows leave the same way tiles do: re-parented into the overlay, pinned at
+   the box they just vacated, faded out while the rest slide up over them. */
+.psa-grid-exit > .psa-row {
+  position: absolute;
+  margin: 0;
+  animation: none;
+}
+
+.psa-row-thumb {
+  flex: 0 0 40px;
+  width: 40px;
+}
+.psa-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.psa-row-player {
+  font-weight: var(--pk-w-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+/* Year, set and grade on one line. The grade is the thing the tile never had
+   room for — secondary ink, so it reads as provenance rather than as another
+   figure competing with the price. */
+.psa-row-meta {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.psa-row-figures {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+/* Same reason as the grid's: the kit pins .price/.delta to a fixed px
+   line-height, and a reel needs its line box and its cell to be the same
+   height or every digit sits off-centre in its window. */
+.psa-row-figures .slot {
+  line-height: var(--slot-cell);
+}
+/* Both figures are stacked against the right edge, so both pulse from it.
+   The default pins the first figure's origin to the LEFT, which is right on
+   the tile — two figures at opposite ends of one line — and wrong here,
+   where a left-origin scale would walk the price off the column. */
+.psa-row-figures .psa-fig {
+  transform-origin: right center;
+}
+
+.psa-row-save {
+  flex: 0 0 auto;
+  display: flex;
 }
 
 /* An empty collection is mostly room, so the copy sits in the MIDDLE of that

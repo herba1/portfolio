@@ -669,60 +669,79 @@
   transform: translate(-50%, -50%);
 }
 
-/* Both pinned to the pill's own 18px line box. They are different sizes and
-   different display types, so left alone each resolves its own height and
-   `align-items: center` centres two boxes that were never the same height to
-   begin with. One height for both is what puts the label and the reel on a
-   line. */
-/* A 56x56 HIT AREA WITHOUT A 56x56 PILL. The button is a small capsule and
-   should stay one; the finger needs a target the pill does not need to look
-   like. `max()` can only ever grow the target, never shrink it. */
-.psa-undo::after {
-  content: "";
+/* The label stays above the drain layer. The stack count is independently
+   positioned at the corner below. */
+.psa-undo-label {
+  position: relative;
+  z-index: 1;
+  height: 18px;
+}
+
+/* The deadline is painted INSIDE the pill. The fixed track owns the outer
+   capsule and clips overflow; Web Animations changes the child's actual width
+   from 100% to 0 beneath the label. No scale distortion and no clip-path
+   interpolation — the shrinking box keeps its own capsule radius. */
+.psa-undo-track {
   position: absolute;
-  inset: 50% auto auto 50%;
-  width: max(56px, 100%);
-  height: max(56px, 100%);
-  transform: translate(-50%, -50%);
+  inset: 0;
+  border-radius: inherit;
+  overflow: hidden;
+  pointer-events: none;
+}
+.psa-undo-fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 100%;
+  border-radius: inherit;
+  background: var(--pk-red-600);
 }
 
-/* Both pinned to the pill's own 18px line box. They are different sizes and
-   different display types, so left alone each resolves its own height and
-   `align-items: center` centres two boxes that were never the same height to
-   begin with. One height for both is what puts the word and the reel on a
-   line. */
-.psa-undo-label,
-.psa-undo-secs {
-  height: 18px;
-}
-
-/* The deadline, in seconds. Lighter than the label so the pill still reads
-   "Undo" first — a weight difference, not an opacity one, so it stays
-   full-strength white.
-
-   FLEX, deliberately. SlotNumber's reel is `overflow: hidden`, which drops an
-   inline box's baseline to its bottom edge, and the component compensates with
-   a negative `vertical-align` — a correction that only applies in an inline
-   formatting context. Left inline here it fires anyway and shoves the digit
-   below the "s". As flex items both the reel and the unit are plain boxes,
-   vertical-align does not apply at all, and centring two 18px boxes in an 18px
-   row puts the digit and the "s" on the same line by construction. */
-.psa-undo-secs {
-  display: inline-flex;
+/* ── The stack depth ──────────────────────────────────────────────────────
+   An attached badge, not a third item in the sentence. White on the red undo
+   pill gives it a clear edge without introducing a second action colour. It
+   stays mounted through 2 → 1 so its reel can move one cell while the badge
+   exits; conditional rendering would make it vanish in the same commit. */
+.psa-undo-count {
+  position: absolute;
+  z-index: 1;
+  top: -6px;
+  right: -6px;
+  display: flex;
   align-items: center;
-  font-weight: var(--pk-w-body-sm);
-  font-size: 12px;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--pk-red-500);
+  border-radius: 999px;
+  background: var(--pk-text-inverse);
+  color: var(--pk-red-600);
+  font-size: 10px;
+  font-weight: var(--pk-w-heading);
+  line-height: 16px;
+  opacity: 0;
+  visibility: hidden;
+  transform: scale(0.55);
+  transform-origin: center;
+  transition:
+    opacity 140ms var(--pk-ease-in-out),
+    transform 180ms var(--pk-ease-in-out),
+    visibility 0s linear 180ms;
 }
-.psa-undo-secs .slot {
-  /* Matched to the pill's line box, so the cell the digit is centred in is the
-     same 18px the label is centred in. */
-  --slot-cell: 18px;
-  height: 18px;
-  line-height: 18px;
+.psa-undo-count[data-show] {
+  opacity: 1;
+  visibility: visible;
+  transform: scale(1);
+  transition:
+    opacity 160ms var(--pk-ease-expo),
+    transform 240ms var(--pk-ease-expo),
+    visibility 0s;
 }
-.psa-undo-unit {
-  margin-left: 1px;
-  line-height: 18px;
+.psa-undo-count .slot {
+  --slot-cell: 16px;
+  --slot-fade: 8%;
+  height: 16px;
+  line-height: 16px;
 }
 
 @media (prefers-reduced-motion: reduce) {

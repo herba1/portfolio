@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
 import { haptic } from "@/lib/haptics";
@@ -12,10 +12,13 @@ import Slab from "./Slab";
 import SaveButton from "./SaveButton";
 import TabBar, { TABS } from "./TabBar";
 import { CARDS, CARD_IMAGES, formatDelta, formatPrice } from "./cards";
-import { useLiveCard } from "./liveMarket";
+import { useLiveCard, useLiveTotal } from "./liveMarket";
+import { useMove } from "./figureMove";
 import { warmImages } from "./warmImages";
 import "./psa-kit.css";
 import "./psa.css";
+
+const SHOW_MOTION_CONFIG = process.env.NODE_ENV === "development";
 
 /* ─────────────────────────────────────────────────────────────────────────
    /psa — the collection app.
@@ -31,6 +34,15 @@ import "./psa.css";
      · the grid staggers in on mount, 24ms apart, capped so a long list never
        turns into a queue. A filter change is a REFLOW, not a new list — it
        FLIPs the tiles it already has instead of playing that stagger again
+     · Collection is the same cards in a different FORMAT — rows, not tiles,
+       because it is a ledger and the figures are what you came for. Taking a
+       card out of it reflows on the same machinery a filter does: the row
+       fades out where it stood and the rest close up over it
+
+   Everything on this surface is memoised, and the props handed to it are
+   stable by construction. The reason is the tape: prices tick a few times a
+   second, so an un-memoised tree would be re-rendering a dozen cards, their
+   scans and the whole footer nav several times a second to move two digits.
    ───────────────────────────────────────────────────────────────────────── */
 
 const FILTERS = [
@@ -48,7 +60,7 @@ export default function PsaExperience() {
   return (
     <SaveFlightProvider>
       <PsaApp />
-      <MotionConfig />
+      {SHOW_MOTION_CONFIG && <MotionConfig />}
     </SaveFlightProvider>
   );
 }
@@ -120,12 +132,14 @@ function PsaApp() {
     },
     [tab],
   );
+  // The empty collection's CTA. Inline, it would be a new function every
+  // render and CollectionPanel's memo would never hold.
+  const goBrowse = useCallback(() => go("browse"), [go]);
 
+  /* The one list every surface below reads. No totals here: the two screens
+     that show one subscribe to the live tape themselves, so a figure can
+     never be a sum of opening prices sitting over a column of live ones. */
   const savedCards = useMemo(() => CARDS.filter((c) => saved.has(c.id)), [saved]);
-  const total = useMemo(
-    () => savedCards.reduce((sum, c) => sum + c.price, 0),
-    [savedCards],
-  );
 
   /* The tab's count LAGS the saved set on purpose. A number that appears while
      the card is still in the air says the save already happened somewhere
@@ -162,9 +176,9 @@ function PsaApp() {
      box at all. So it gets its own entrance and SCALES back into the gap
      rather than materialising in it — see flipGrid. */
   const [undoStack, setUndoStack] = useState([]); // oldest first, pop the end
-  /* Bumped on every raise AND every undo. It is what re-keys the drain bar and
-     the countdown, so both restart from full rather than inheriting whatever
-     was left of the previous card's window. */
+  /* Bumped on every raise AND every undo. It re-keys the drain fill so the
+     single visual/behavioral clock restarts from full rather than inheriting
+     whatever was left of the previous card's window. */
   const [undoNonce, setUndoNonce] = useState(0);
 
   useEffect(() => {
@@ -176,15 +190,9 @@ function PsaApp() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [landings]);
 
-  /* One timer for the whole stack, re-armed by the nonce. Nothing to clear by
-     hand on undo: bumping the nonce tears this effect down and sets it up
-     again, which IS the reset. */
-  useEffect(() => {
-    if (!undoNonce || !undoStack.length) return;
-    const t = setTimeout(() => setUndoStack([]), undoMs);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [undoNonce, undoMs]);
+  /* The fill is the clock. Its animation-end expires the stack, so the visual
+     deadline and the actual offer cannot drift onto two separate timelines. */
+  const expireUndo = useCallback(() => setUndoStack([]), []);
 
   const runUndo = useCallback(() => {
     /* Pop past anything already gone — a card can be un-saved by hand from
@@ -212,6 +220,23 @@ function PsaApp() {
     // Anything still stacked gets a fresh full window, not the leftovers.
     if (rest.length) setUndoNonce((n) => n + 1);
   }, [undoStack, saved, flight]);
+
+  /* Every component below this line is memoised, which only buys anything if
+     the props are stable — an object literal in JSX is a new object on every
+     render and defeats the comparison it is handed to. The tape ticks a few
+     times a second, so "every render" here still means several a second. */
+  const counts = useMemo(() => ({ collection: badge }), [badge]);
+  const undo = useMemo(
+    () => ({
+      open: undoStack.length > 0,
+      count: undoStack.length,
+      ms: undoMs,
+      nonce: undoNonce,
+      onUndo: runUndo,
+      onExpire: expireUndo,
+    }),
+    [undoStack.length, undoMs, undoNonce, runUndo, expireUndo],
+  );
 
   return (
     <div className="pk psa">
@@ -243,15 +268,10 @@ function PsaApp() {
           />
         )}
         {tab === "collection" && (
-          <CollectionPanel
-            cards={savedCards}
-            total={total}
-            onToggle={toggle}
-            onBrowse={() => go("browse")}
-          />
+          <CollectionPanel cards={savedCards} onToggle={toggle} onBrowse={goBrowse} />
         )}
         {tab === "activity" && <ActivityPanel />}
-        {tab === "profile" && <ProfilePanel count={savedCards.length} total={total} />}
+        {tab === "profile" && <ProfilePanel cards={savedCards} />}
       </main>
 
       {/* Solid at the very top so anything passing under the status bar is
@@ -269,15 +289,9 @@ function PsaApp() {
       <TabBar
         active={tab}
         onChange={go}
-        counts={{ collection: badge }}
+        counts={counts}
         countNonce={landings}
-        undo={{
-          open: undoStack.length > 0,
-          count: undoStack.length,
-          ms: undoMs,
-          nonce: undoNonce,
-          onUndo: runUndo,
-        }}
+        undo={undo}
       />
     </div>
   );
@@ -306,33 +320,6 @@ const ROLL_STAGGER = 38; // per-digit carry delay
 // is identical before and after — SlotNumber rebuilds nothing.
 const zeroed = (text) => text.replace(/\d/g, "0");
 
-/* Beat and direction for one figure, derived from the text it actually
-   renders. Two properties matter and both are about staying in sync:
-
-     · the beat advances ONLY when the printed digits change, so a tick that
-       moves the price under the rounding never fires a gesture on a figure
-       that is standing still
-     · the direction is this figure's own, taken from its own value, so the
-       price and the delta are never told to gesture on each other's behalf
-
-   A ref written during render rather than an effect, because the gesture has
-   to be on the element in the same commit that hands SlotNumber its new
-   value — a frame later and the two would visibly separate. */
-function useMove(text, value) {
-  const ref = useRef(null);
-  if (ref.current === null) ref.current = { text, value, beat: 0, dir: 1 };
-  const prev = ref.current;
-  if (text !== prev.text) {
-    ref.current = {
-      text,
-      value,
-      beat: prev.beat + 1,
-      dir: value < prev.value ? -1 : 1,
-    };
-  }
-  return ref.current;
-}
-
 function useRolled(delay) {
   const [rolled, setRolled] = useState(false);
   useEffect(() => {
@@ -342,10 +329,11 @@ function useRolled(delay) {
   return rolled;
 }
 
-function Tile({ card, saved, onToggle, index = 0 }) {
-  const stagger = Math.min(index, 8);
-  const rolled = useRolled(stagger * STAGGER_STEP + ROLL_LEAD);
-  const live = useLiveCard(card.id);
+/* One card's live figures, and the beat each of them is on. Shared by the
+   grid tile and the collection row so both surfaces read the same tape the
+   same way — the only thing that differs between them is the layout. */
+function useFigures(id, rolled) {
+  const live = useLiveCard(id);
 
   const price = rolled ? formatPrice(live.price) : zeroed(formatPrice(live.price));
   const delta = rolled ? formatDelta(live.delta) : zeroed(formatDelta(live.delta));
@@ -356,6 +344,45 @@ function Tile({ card, saved, onToggle, index = 0 }) {
   const priceMove = useMove(price, live.price);
   const deltaMove = useMove(delta, live.delta);
 
+  return { live, price, delta, priceMove, deltaMove };
+}
+
+/* Both figures, in DOM order, for whichever container is holding them. The
+   grid lays them out on one line and the collection stacks them in a column;
+   neither changes what a figure is. */
+const Figures = memo(function Figures({ live, price, delta, priceMove, deltaMove }) {
+  return (
+    <>
+      <Figure move={priceMove}>
+        <SlotNumber
+          className="price"
+          value={price}
+          label={formatPrice(live.price)}
+          direction={priceMove.dir < 0 ? "down" : "up"}
+          duration={ROLL_MS}
+          stagger={ROLL_STAGGER}
+        />
+      </Figure>
+      <Figure move={deltaMove}>
+        <SlotNumber
+          className="delta"
+          data-dir={live.delta >= 0 ? "up" : "down"}
+          value={delta}
+          label={formatDelta(live.delta)}
+          direction={deltaMove.dir < 0 ? "down" : "up"}
+          duration={ROLL_MS}
+          stagger={ROLL_STAGGER}
+        />
+      </Figure>
+    </>
+  );
+});
+
+const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
+  const stagger = Math.min(index, 8);
+  const rolled = useRolled(stagger * STAGGER_STEP + ROLL_LEAD);
+  const figures = useFigures(card.id, rolled);
+
   /* The scan is what travels, so the flight measures the art wrapper rather
      than the tile — including the caption would launch a rectangle with two
      lines of dead space under the picture. Only a SAVE flies; removing a card
@@ -363,10 +390,17 @@ function Tile({ card, saved, onToggle, index = 0 }) {
   const artRef = useRef(null);
   const flight = useSaveFlight();
 
-  const handleToggle = (next) => {
-    if (next && flight) flight.save(artRef.current, () => onToggle(next));
-    else onToggle(next);
-  };
+  /* Stable, so SaveButton's memo holds through a tick that only moved the
+     price. The tile takes (id, next) from its parent rather than a bound
+     closure for the same reason — a closure per card is a new prop per
+     render, and a memo comparing new props every time is just overhead. */
+  const handleToggle = useCallback(
+    (next) => {
+      if (next && flight) flight.save(artRef.current, () => onToggle(card.id, next));
+      else onToggle(card.id, next);
+    },
+    [flight, onToggle, card.id],
+  );
 
   /* Tapping the card is a MISS, not a second way to save. The bookmark is the
      one action on this surface, so a tap that lands anywhere else answers by
@@ -375,12 +409,12 @@ function Tile({ card, saved, onToggle, index = 0 }) {
      see SaveButton for why the attribute alternates. An already-saved card has
      nothing to point at, so it stays still. */
   const [hint, setHint] = useState(0);
-  const nudge = () => {
+  const nudge = useCallback(() => {
     if (!saved) {
       haptic("nudge");
       setHint((n) => n + 1);
     }
-  };
+  }, [saved]);
   /* Clearing on a state flip is what stops a stale hint from firing later:
      miss a card in Search, save it, un-save it, and the attribute would start
      matching again mid-drain and play a nudge nobody asked for. Adjusted
@@ -416,32 +450,12 @@ function Tile({ card, saved, onToggle, index = 0 }) {
           {card.year} {card.set}
         </span>
         <div className="psa-tile-figures">
-          <Figure move={priceMove}>
-            <SlotNumber
-              className="price"
-              value={price}
-              label={formatPrice(live.price)}
-              direction={priceMove.dir < 0 ? "down" : "up"}
-              duration={ROLL_MS}
-              stagger={ROLL_STAGGER}
-            />
-          </Figure>
-          <Figure move={deltaMove}>
-            <SlotNumber
-              className="delta"
-              data-dir={live.delta >= 0 ? "up" : "down"}
-              value={delta}
-              label={formatDelta(live.delta)}
-              direction={deltaMove.dir < 0 ? "down" : "up"}
-              duration={ROLL_MS}
-              stagger={ROLL_STAGGER}
-            />
-          </Figure>
+          <Figures {...figures} />
         </div>
       </div>
     </li>
   );
-}
+});
 
 /* The move gesture: the figure scales out when its digits roll up and in when
    they roll down. Every part of it is CSS — React contributes a direction and
@@ -453,7 +467,7 @@ function Tile({ card, saved, onToggle, index = 0 }) {
    The gesture and the roll are started by the SAME render off the SAME text
    change, run for the same duration, and are interrupted together — which is
    what keeps them locked to each other however fast the tape moves. */
-function Figure({ move, children }) {
+const Figure = memo(function Figure({ move, children }) {
   return (
     <span
       className="psa-fig"
@@ -463,9 +477,9 @@ function Figure({ move, children }) {
       {children}
     </span>
   );
-}
+});
 
-function Grid({ cards, saved, onToggle, stagKey }) {
+const Grid = memo(function Grid({ cards, saved, onToggle, stagKey }) {
   return (
     <ul className="psa-grid" key={stagKey}>
       {cards.map((card, i) => (
@@ -474,24 +488,24 @@ function Grid({ cards, saved, onToggle, stagKey }) {
           card={card}
           index={i}
           saved={saved.has(card.id)}
-          onToggle={(next) => onToggle(card.id, next)}
+          onToggle={onToggle}
         />
       ))}
     </ul>
   );
-}
+});
 
-function PanelHead({ title, children }) {
+const PanelHead = memo(function PanelHead({ title, children }) {
   return (
     <header className="psa-panel-head">
       <h1 className="t-head-2xl">{title}</h1>
       {children}
     </header>
   );
-}
+});
 
 /* ── Browse ───────────────────────────────────────────────────────────── */
-function BrowsePanel({ saved, onToggle, filter, onFilter }) {
+const BrowsePanel = memo(function BrowsePanel({ saved, onToggle, filter, onFilter }) {
   /* Saving FILES a card, whichever variant is armed: the tile leaves Browse
      and the rest close the gap behind it. Un-saving — from Collection or from
      the undo — puts it back, and the grid opens up for it again. */
@@ -552,10 +566,10 @@ function BrowsePanel({ saved, onToggle, filter, onFilter }) {
       <Grid cards={visible} saved={saved} onToggle={onToggle} />
     </>
   );
-}
+});
 
 /* ── Search ───────────────────────────────────────────────────────────── */
-function SearchPanel({ saved, onToggle, query, onQuery }) {
+const SearchPanel = memo(function SearchPanel({ saved, onToggle, query, onQuery }) {
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return CARDS;
@@ -583,7 +597,7 @@ function SearchPanel({ saved, onToggle, query, onQuery }) {
       )}
     </>
   );
-}
+});
 
 /* ── Collection ───────────────────────────────────────────────────────── */
 
@@ -612,7 +626,7 @@ function SearchPanel({ saved, onToggle, query, onQuery }) {
 const STACK_IDS = ["oldjudge-galvin", "t206-mathewson", "t206-cobb"];
 const STACK = STACK_IDS.map((id) => CARDS.find((c) => c.id === id)).filter(Boolean);
 
-function BlankStack() {
+const BlankStack = memo(function BlankStack() {
   return (
     <ul className="psa-blank-stack" aria-hidden="true">
       {STACK.map((card, i) => (
@@ -626,9 +640,91 @@ function BlankStack() {
       ))}
     </ul>
   );
-}
+});
 
-function CollectionPanel({ cards, total, onToggle, onBrowse }) {
+/* ── The row ──────────────────────────────────────────────────────────────
+   Collection is a LEDGER, not a shop window. Browse is two columns of scans
+   because the question there is "which card is this", and the answer is the
+   picture; here the card is already yours and the question is what it is
+   worth, so the scan drops to a 40px thumbnail and the figures take the
+   width the picture gives up.
+
+   The format is what fixes the figures. In a tile, price and delta share one
+   line at opposite ends of a 45vw box, which puts the two numbers on the
+   same baseline but in different columns on every row — nothing lines up
+   with anything and a column of prices cannot be read as a column. In a row
+   they stack into a right-aligned block: every price sits on the same right
+   edge in tabular figures, every delta directly beneath its own price, and
+   the eye can run straight down the column. The row also has room for the
+   grade, which the tile never had anywhere to put.
+   ───────────────────────────────────────────────────────────────────────── */
+const ROW_STAGGER_STEP = 28; // ms — mirrors .psa-row's animation-delay
+
+const CollectionRow = memo(function CollectionRow({ card, onToggle, index = 0 }) {
+  const stagger = Math.min(index, 8);
+  const rolled = useRolled(stagger * ROW_STAGGER_STEP + ROLL_LEAD);
+  const figures = useFigures(card.id, rolled);
+
+  /* Only ever a REMOVAL. Every card on this surface is already saved, so the
+     bookmark has one direction to go and nothing flies anywhere — the flight
+     is for the trip TO here. */
+  const remove = useCallback((next) => onToggle(card.id, next), [onToggle, card.id]);
+
+  return (
+    // data-card-id is what FLIP matches boxes on across the removal — same
+    // contract the grid tiles have, so flipGrid works on this list unchanged.
+    <li className="psa-row" data-card-id={card.id} style={{ "--stagger": stagger }}>
+      <span className="psa-row-thumb">
+        <Slab card={card} sizes="40px" />
+      </span>
+      <span className="psa-row-text">
+        <span className="t-body psa-row-player">{card.player}</span>
+        <span className="t-body-sm psa-row-meta">
+          {card.year} {card.set} · PSA {card.grade}
+        </span>
+      </span>
+      <span className="psa-row-figures">
+        <Figures {...figures} />
+      </span>
+      <span className="psa-row-save">
+        <SaveButton saved onToggle={remove} />
+      </span>
+    </li>
+  );
+});
+
+const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrowse }) {
+  const listRef = useRef(null);
+  const flight = useSaveFlight();
+
+  /* The removal the collection never had. Taking a card out used to re-key
+     the whole list — every remaining card was thrown away and re-mounted, so
+     removing one of eight replayed an eight-card entrance to say that one had
+     gone. Now it REFLOWS, the same way a filter does in Browse: the row that
+     is leaving fades out pinned at the box it just vacated, and the rows
+     below it slide up into the gap.
+
+     exit: true because nothing else is carrying this card off. A save has a
+     flying clone doing that job; an un-save has no courier, so the row has to
+     animate out on its own. See flipGrid. */
+  const remove = useCallback(
+    (id, next) => {
+      const run = () => onToggle(id, next);
+      if (flight?.flip) flight.flip(run, listRef.current, { exit: true });
+      else run();
+    },
+    [flight, onToggle],
+  );
+
+  /* The total rides the same tape the rows do. A static sum sitting over a
+     column of live prices is the one figure on the screen that is wrong, and
+     it is the largest one — so it subscribes to exactly the cards in the
+     list and rolls when they move. */
+  const ids = useMemo(() => cards.map((c) => c.id), [cards]);
+  const total = useLiveTotal(ids);
+  const totalText = formatPrice(total);
+  const totalMove = useMove(totalText, total);
+
   if (cards.length === 0) {
     return (
       <>
@@ -652,22 +748,36 @@ function CollectionPanel({ cards, total, onToggle, onBrowse }) {
   return (
     <>
       <PanelHead title="Collection">
+        {/* Value first in the DOM because it is first on the line — the count
+            is the annotation, so it sits at the right edge the price column
+            below is set against. */}
         <div className="psa-summary">
+          <Figure move={totalMove}>
+            <SlotNumber
+              className="t-head-xl num"
+              value={totalText}
+              label={totalText}
+              direction={totalMove.dir < 0 ? "down" : "up"}
+              duration={ROLL_MS}
+              stagger={ROLL_STAGGER}
+            />
+          </Figure>
           <span className="t-body-sm psa-summary-label">
             {cards.length} card{cards.length === 1 ? "" : "s"}
           </span>
-          <span className="t-head-xl num">{formatPrice(total)}</span>
         </div>
       </PanelHead>
-      <Grid
-        cards={cards}
-        saved={new Set(cards.map((c) => c.id))}
-        onToggle={onToggle}
-        stagKey={`col-${cards.length}`}
-      />
+      {/* No stagKey and no re-key on length: the list must survive a removal
+          for FLIP to have "before" boxes to measure. The stagger is a MOUNT
+          entrance, so it belongs to arriving on the tab, not to editing. */}
+      <ul className="psa-rows" ref={listRef}>
+        {cards.map((card, i) => (
+          <CollectionRow key={card.id} card={card} index={i} onToggle={remove} />
+        ))}
+      </ul>
     </>
   );
-}
+});
 
 /* ── Activity (placeholder surface) ───────────────────────────────────── */
 const FEED = [
@@ -678,7 +788,7 @@ const FEED = [
   { id: "a5", card: CARDS[2], event: "Listed for sale", when: "3d" },
 ];
 
-function ActivityPanel() {
+const ActivityPanel = memo(function ActivityPanel() {
   return (
     <>
       <PanelHead title="Activity" />
@@ -700,10 +810,19 @@ function ActivityPanel() {
       </ul>
     </>
   );
-}
+});
 
 /* ── Profile (placeholder surface) ────────────────────────────────────── */
-function ProfilePanel({ count, total }) {
+/* The surface is a placeholder; the FIGURES on it are not. All three read the
+   same saved set the collection does, off the same live tape — a Value here
+   that disagreed with the total two tabs over would be the app contradicting
+   itself, and "Sets" was a hardcoded 3 that stayed 3 while you held one card. */
+const ProfilePanel = memo(function ProfilePanel({ cards }) {
+  const ids = useMemo(() => cards.map((c) => c.id), [cards]);
+  const total = useLiveTotal(ids);
+  const sets = useMemo(() => new Set(cards.map((c) => c.set)).size, [cards]);
+  const count = cards.length;
+
   return (
     <>
       <PanelHead title="Profile" />
@@ -726,10 +845,10 @@ function ProfilePanel({ count, total }) {
           </div>
           <div>
             <dt className="t-body-sm">Sets</dt>
-            <dd className="t-head-xl num">3</dd>
+            <dd className="t-head-xl num">{sets}</dd>
           </div>
         </dl>
       </div>
     </>
   );
-}
+});

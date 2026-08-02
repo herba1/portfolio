@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
+import { memo, useCallback, useEffect, useState, useSyncExternalStore } from "react";
 
 import { isWarm, subscribeWarm, warmImage } from "./warmImages";
 
@@ -21,7 +21,11 @@ import { isWarm, subscribeWarm, warmImage } from "./warmImages";
 // the whole reason this is a store and not a plain read.
 const COLD = () => false;
 
-export default function Slab({ card, sizes = "40vw" }) {
+/* Memoised on (card, sizes), both of which are stable for the life of a tile
+   — the card objects are module constants. A price tick re-renders the tile
+   several times a second and none of those renders can change the scan, so
+   this is the one component on the surface that should never see them. */
+function Slab({ card, sizes = "40vw" }) {
   const [broken, setBroken] = useState(false);
   const showImage = card.image && !broken;
 
@@ -67,3 +71,5 @@ export default function Slab({ card, sizes = "40vw" }) {
     </div>
   );
 }
+
+export default memo(Slab);

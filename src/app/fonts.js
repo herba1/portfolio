@@ -1,16 +1,32 @@
 import localFont from "next/font/local";
-import { Inter } from "next/font/google";
 
-/* Inter, only for the mono-volt tiles on /work.
+/* Inter — the mono-volt tiles on /work and the whole /psa kit.
  *
- * Those tiles are another product's interface shown as itself, so they carry
- * that product's typeface rather than this site's. It is the same declaration
- * mono-volt makes in its own layout, so the type metrics match exactly.
- * Self-hosted by next/font at build time like everything else here. */
-export const inter = Inter({
-    subsets: ["latin"],
-    variable: "--font-inter",
+ * Both are another product's interface shown as itself, so they carry that
+ * product's typeface rather than this site's.
+ *
+ * Why local and not `next/font/google`: Google's build is stripped the same
+ * way its Geist is. Parsing what it actually serves (Inter 4.001, latin
+ * subset) shows only
+ *   calt ccmp dnom frac locl numr pnum tnum  +  kern mark mkmk
+ * — every character variant (cv01–cv14), every stylistic set, `zero` and
+ * the `opsz` AXIS ITSELF are gone. /psa asks for cv01…cv11, slashed-zero
+ * and `font-optical-sizing: auto`; against Google's file all of that is
+ * inert CSS. The official rsms binary carries the full table:
+ *   aalt calt case ccmp cv01–cv14 dlig ... ss01–ss08 subs sups tnum zero
+ *   axes: opsz 14–32, wght 100–900
+ *
+ * Subset to latin + latin-ext + punctuation/currency/arrows/math with
+ * `--layout-features='*'`, so the feature tables survive the cut: 192 KB
+ * for the upright variable. Italic is not loaded — nothing on this site
+ * sets Inter italic, and `font-synthesis: none` means nothing fakes it. */
+export const inter = localFont({
+    src: "../../public/fonts/Inter-Variable.woff2",
+    weight: "100 900",
+    style: "normal",
     display: "swap",
+    variable: "--font-inter",
+    fallback: ["ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
 });
 
 /* ── Primary typeface ─────────────────────────────────────────────

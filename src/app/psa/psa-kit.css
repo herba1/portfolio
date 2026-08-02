@@ -126,7 +126,7 @@
      ink, not the grey a secondary control gets. A 400-grey bookmark reads as
      chrome sitting on top of the scan; near-black reads as a control. */
   --pk-save-idle: var(--pk-neutral-950);
-  --pk-save-active: var(--pk-brand-500);
+  --pk-save-active: var(--pk-red-500);
   --pk-save-bg-hover: var(--pk-neutral-100);
 
   --pk-chip-bg: var(--pk-neutral-50);
@@ -146,18 +146,31 @@
    TYPE · SPACING · RADIUS · ELEVATION · MOTION
    ═══════════════════════════════════════════════════════════════════════ */
 .pk {
-  /* Inter is already loaded by the root layout via next/font (--font-inter),
-     so this costs nothing extra. The feature string is the interesting part:
-       cv01 flat-flag 1 · cv02 open-4 · cv03 open-6 · cv04 open-9
-       cv09 flat-top-3 EXPLICITLY OFF · cv11 single-storey a
-       cv15 alternate TABULAR-figure 1  ← tuned for the 1 in a price column
-     cv15 is why prices in this UI line up as cleanly as they do. */
+  /* Inter is loaded by the root layout via next/font (--font-inter), served
+     from the OFFICIAL binary rather than Google's — see fonts.js. That is
+     load-bearing here: Google's build ships none of the character variants
+     below, so against it this whole string was inert.
+
+     The feature string, by tag (Inter 4.001 names them itself):
+       cv01 alternate 1 — the flag comes off, the figure narrows. This is
+            the one that matters in a price column, where every row holds
+            a different count of 1s.
+       cv02 open 4 · cv03 open 6 · cv04 open 9 — counters stay open at the
+            10–13px this UI is mostly built from, instead of filling in.
+       cv09 flat-top 3 EXPLICITLY OFF — the round-top 3 is the one that
+            reads as a 3 rather than as a partly-erased 8.
+       cv11 single-storey a
+     `calt` and `kern` are stated rather than assumed; `liga` is Inter's
+     default anyway but survives elements that rewrite the string.
+
+     NOT cv15: Inter's character variants stop at cv14, so asking for it
+     only ever named a tag the font has never had. */
   --pk-font: var(--font-inter), Inter, ui-sans-serif, system-ui, sans-serif;
   --pk-font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, monospace;
   --pk-font-features: "liga" 1, "calt" 1, "kern" 1, "cv01" 1, "cv02" 1,
-    "cv03" 1, "cv04" 1, "cv09" 0, "cv11" 1, "cv15" 1;
+    "cv03" 1, "cv04" 1, "cv09" 0, "cv11" 1;
 
-  /* Mono carries NONE of the above — cv01…cv15 are Inter's character
+  /* Mono carries NONE of the above — cv01…cv14 are Inter's character
      variants and mean nothing in Geist Mono, and `liga` in a monospaced
      face is where code ligatures come from. Kerning and contextual
      alternates only, so mono text stops inheriting a string written for a
