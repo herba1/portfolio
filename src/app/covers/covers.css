@@ -607,7 +607,7 @@
   border: 1px solid color-mix(in oklab, var(--color-ink) 10%, transparent);
   backdrop-filter: blur(var(--blur-md));
   box-shadow: var(--shadow-float-lg);
-  animation: cv-toast-in var(--duration-300) var(--ease-entrance) both;
+  animation: cv-toast-in var(--duration-300) var(--ease-entrance);
 }
 @keyframes cv-toast-in {
   from {
@@ -1123,6 +1123,30 @@
      button or the clock on its way past them. */
   position: relative;
   z-index: 0;
+  padding-left: 48px;
+  margin-left: -48px;
+  padding-right: 16px;
+  margin-right: -16px;
+}
+.cv-wave-wrap:not(.is-waiting) {
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    #000 0,
+    #000 calc(100% - 16px),
+    #000b calc(100% - 12px),
+    #0006 calc(100% - 7px),
+    #0002 calc(100% - 2px),
+    #0000 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    #000 0,
+    #000 calc(100% - 16px),
+    #000b calc(100% - 12px),
+    #0006 calc(100% - 7px),
+    #0002 calc(100% - 2px),
+    #0000 100%
+  );
 }
 .cv-wave-wrap.is-waiting {
   -webkit-mask-image: var(--cv-shimmer-mask);
@@ -1540,11 +1564,9 @@
   overflow: hidden;
   border-radius: var(--radius-xl);
   color: var(--color-ink);
-  background: color-mix(in srgb, var(--color-surface-raised) 84%, transparent);
+  background: var(--color-surface-raised);
   border: 1px solid var(--color-line);
   box-shadow: var(--shadow-float);
-  backdrop-filter: blur(var(--blur-lg)) saturate(1.1);
-  -webkit-backdrop-filter: blur(var(--blur-lg)) saturate(1.1);
   font-family: var(--font-geist), system-ui, sans-serif;
 }
 .cv-dock[data-state="in"] {
