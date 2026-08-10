@@ -1,6 +1,16 @@
 "use client";
 
-import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import {
+  forwardRef,
+  memo,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import "./SlotNumber.css";
 
 // ---------------------------------------------------------------------------
@@ -9,6 +19,10 @@ import "./SlotNumber.css";
 //   <SlotNumber value={12} />
 //   <SlotNumber value="0:14 / 0:29" direction="up" />
 //   <SlotNumber value={n} pad={3} duration={620} stagger={40} />
+//
+//   const slot = useRef(null);
+//   <SlotNumber ref={slot} value="01 / 24" />
+//   slot.current.setValue("07 / 24");
 //
 // The element tree is built once per SHAPE (the string with every digit
 // replaced by "#"), so a ticking value re-renders nothing: React returns the
@@ -37,24 +51,101 @@ const REEL = Array.from({ length: CELLS }, (_, i) => (
   </span>
 ));
 
-function SlotNumber({
-  value,
-  pad = 0,
-  duration = 520,
-  ease,
-  stagger,
-  direction = "auto", // "up" | "down" | "auto" (shortest path)
-  label, // accessible text override
-  className = "",
-  style,
-  ...rest
-}) {
-  let text = value === null || value === undefined ? "" : String(value);
-  if (pad > 0) text = text.padStart(pad, "0");
-  const shape = text.replace(/\d/g, "#");
+const format = (value, pad) => {
+  const text = value === null || value === undefined ? "" : String(value);
+  return pad > 0 ? text.padStart(pad, "0") : text;
+};
+
+const shapeOf = (text) => text.replace(/\d/g, "#");
+
+// Fresh markup already carries the right positions; just adopt them.
+function readColumns(root, shape) {
+  return {
+    shape,
+    items: Array.from(root.querySelectorAll(".slot-reel"), (el) => ({
+      el,
+      pos: Number(el.style.getPropertyValue("--slot-d")) || HOME,
+      order: Number(el.style.getPropertyValue("--slot-i")) || 0,
+      at: 0,
+    })),
+  };
+}
+
+function roll(cols, text, { duration, stagger, direction }) {
+  const now = performance.now();
+  const step = stagger === null || stagger === undefined ? 30 : stagger;
+  const fixed = direction === "up" ? 1 : direction === "down" ? -1 : 0;
+
+  let i = 0;
+  for (const ch of text) {
+    if (!isDigit(ch)) continue;
+    const it = cols.items[i];
+    const d = +ch;
+    i++;
+    if (!it) continue;
+
+    const mod = ((it.pos % 10) + 10) % 10;
+    if (mod === d) continue; // untouched column: not one DOM write
+
+    const up = (d - mod + 10) % 10; // 1…9
+    const down = up - 10; // −9…−1
+    const delta = fixed === 1 ? up : fixed === -1 ? down : up <= 5 ? up : down;
+
+    let base = it.pos;
+    let target = base + delta;
+
+    if (target < 0 || target > MAX) {
+      const rested = now - it.at >= duration + step * it.order;
+      if (rested) {
+        base = HOME + mod;
+        snap(it.el, base);
+        target = base + delta;
+      }
+      // Only reachable when a change interrupts a roll near the strip's end:
+      // flip the direction rather than pop.
+      if (target < 0 || target > MAX) target = base + (delta > 0 ? down : up);
+    }
+
+    it.pos = target;
+    it.at = now;
+    it.el.style.setProperty("--slot-d", target);
+  }
+}
+
+function SlotNumber(
+  {
+    value,
+    pad = 0,
+    duration = 520,
+    ease,
+    stagger,
+    direction = "auto", // "up" | "down" | "auto" (shortest path)
+    label, // accessible text override
+    className = "",
+    style,
+    ...rest
+  },
+  ref,
+) {
+  const propText = format(value, pad);
+
+  const propRef = useRef(propText);
+  const liveRef = useRef(null);
+  const [, rebuild] = useState(0);
+  if (propText !== propRef.current) {
+    propRef.current = propText;
+    liveRef.current = null;
+  }
+
+  const text = liveRef.current ?? propText;
+  const shape = shapeOf(text);
 
   const rootRef = useRef(null);
+  const srRef = useRef(null);
   const colsRef = useRef(null);
+
+  const optsRef = useRef(null);
+  optsRef.current = { duration, stagger, direction, pad, silent: label !== undefined };
 
   // Structure only — rebuilt when a digit is added or a separator moves, never
   // when the digits change. buildTree stamps the current digits inline so the
@@ -65,60 +156,30 @@ function SlotNumber({
   useIso(() => {
     const root = rootRef.current;
     if (!root) return;
-
-    let cols = colsRef.current;
+    const cols = colsRef.current;
     if (!cols || cols.shape !== shape) {
-      // Fresh markup already carries the right positions; just adopt them.
-      const els = root.querySelectorAll(".slot-reel");
-      colsRef.current = {
-        shape,
-        items: Array.from(els, (el) => ({
-          el,
-          pos: Number(el.style.getPropertyValue("--slot-d")) || HOME,
-          order: Number(el.style.getPropertyValue("--slot-i")) || 0,
-          at: 0,
-        })),
-      };
+      colsRef.current = readColumns(root, shape);
       return;
     }
+    roll(cols, text, optsRef.current);
+  }, [text, shape]);
 
-    const now = performance.now();
-    const step = stagger === null || stagger === undefined ? 30 : stagger;
-    const fixed = direction === "up" ? 1 : direction === "down" ? -1 : 0;
+  const setValue = useCallback((next) => {
+    const opts = optsRef.current;
+    const nextText = format(next, opts.pad);
+    if (nextText === (liveRef.current ?? propRef.current)) return;
 
-    let i = 0;
-    for (const ch of text) {
-      if (!isDigit(ch)) continue;
-      const it = cols.items[i];
-      const d = +ch;
-      i++;
-      if (!it) continue;
-
-      const mod = ((it.pos % 10) + 10) % 10;
-      if (mod === d) continue; // untouched column: not one DOM write
-
-      const up = (d - mod + 10) % 10; // 1…9
-      const down = up - 10; // −9…−1
-
-      // At rest and outside the middle band? Rebase first — same digit, same
-      // pixels, but it buys a full ±9 of travel in either direction.
-      let base = it.pos;
-      if (now - it.at >= duration + step * it.order && (base < HOME || base >= HOME + 10)) {
-        base = HOME + mod;
-        snap(it.el, base);
-      }
-
-      const delta = fixed === 1 ? up : fixed === -1 ? down : up <= 5 ? up : down;
-      let target = base + delta;
-      // Only reachable when a change interrupts a roll near the strip's end:
-      // flip the direction rather than pop.
-      if (target < 0 || target > MAX) target = base + (delta > 0 ? down : up);
-
-      it.pos = target;
-      it.at = now;
-      it.el.style.setProperty("--slot-d", target);
+    liveRef.current = nextText;
+    const cols = colsRef.current;
+    if (!cols || cols.shape !== shapeOf(nextText)) {
+      rebuild((n) => n + 1);
+      return;
     }
-  }, [text, shape, direction, duration, stagger]);
+    roll(cols, nextText, opts);
+    if (!opts.silent && srRef.current) srRef.current.textContent = nextText;
+  }, []);
+
+  useImperativeHandle(ref, () => ({ setValue }), [setValue]);
 
   const vars = { "--slot-dur": `${duration}ms` };
   if (ease) vars["--slot-ease"] = ease;
@@ -126,7 +187,9 @@ function SlotNumber({
 
   return (
     <span ref={rootRef} className={`slot ${className}`} style={{ ...vars, ...style }} {...rest}>
-      <span className="slot-sr">{label === undefined ? text : label}</span>
+      <span ref={srRef} className="slot-sr">
+        {label === undefined ? text : label}
+      </span>
       {tree}
     </span>
   );
@@ -170,4 +233,4 @@ function snap(el, v) {
   el.style.transitionDuration = "";
 }
 
-export default memo(SlotNumber);
+export default memo(forwardRef(SlotNumber));

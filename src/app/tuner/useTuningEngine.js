@@ -1,139 +1,197 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMotionValue } from "motion/react";
-import { freqToNote, noteToFreq, centsBetween } from "./pitch/notes";
+import { freqToNote, noteToFreq, centsBetween, formatCents } from "./pitch/notes";
 import { nearestStringInTuning } from "./tunings";
 
-/**
- * The tuning brain. Runs a light RAF that reads the smoothed frequency and:
- *  - picks the current target (string in fixed tunings, nearest semitone in
- *    chromatic), computes signed cents, EMA-smooths it for display;
- *  - drives the needle motion value + shared tuneRef (waveform reads it) +
- *    the root --accent CSS var (so the whole display shifts cyan→amber→green);
- *  - in auto mode, follows your pluck and checks off a string once it holds in
- *    tune for `dwellMs`.
- */
+const CENTS_RANGE = 50;
+const SETTLE_RATE = 0.09;
+const TRACK_RATE = 0.3;
+const IN_TUNE_CENTS = 4;
+const CLOSE_CENTS = 15;
+const PHASE_HOLD_MS = 90;
+
 export default function useTuningEngine({
-  freqRef,
+  pitchRef,
+  subscribe,
+  rootRef,
   mode,
   tuning,
-  a4,
-  selectedIndex,
-  setSelectedIndex,
-  inTuneCents = 5,
-  dwellMs = 600,
+  a4 = 440,
 }) {
   const centsMV = useMotionValue(0);
-  const [target, setTarget] = useState({
-    index: null,
-    label: null,
-    cents: 0,
-    inTune: false,
-    active: false,
+  const letterMV = useMotionValue("–");
+  const accidentalMV = useMotionValue("");
+  const octaveMV = useMotionValue("");
+  const freqTextMV = useMotionValue("—");
+  const centsTextMV = useMotionValue("—");
+  const stringLabelMV = useMotionValue("");
+  const announceMV = useMotionValue("");
+
+  const configRef = useRef(null);
+  configRef.current = { mode, tuning, a4 };
+
+  const displayCentsRef = useRef(0);
+  const stringIndexRef = useRef(0);
+  const phaseRef = useRef("idle");
+  const phaseSinceRef = useRef(0);
+  const textRef = useRef({
+    letter: "–",
+    accidental: "",
+    octave: "",
+    frequency: "—",
+    cents: "—",
+    string: "",
+    announce: "",
   });
-  const [tuned, setTuned] = useState(() => new Set());
 
-  // Latest config for the RAF closure (avoids restarting the loop on change).
-  const cfgRef = useRef(null);
-  cfgRef.current = { mode, tuning, a4, selectedIndex, inTuneCents, dwellMs };
-
-  const dispCentsRef = useRef(0);
-  const dwellStartRef = useRef(0);
-  const lastStateRef = useRef(0);
-  const tunedRef = useRef(tuned);
-  tunedRef.current = tuned;
-  const rafRef = useRef(0);
-
-  // Reset progress when the tuning changes.
   useEffect(() => {
-    setTuned(new Set());
-    dwellStartRef.current = 0;
+    stringIndexRef.current = 0;
   }, [tuning.id]);
 
   useEffect(() => {
-    function frame() {
-      rafRef.current = requestAnimationFrame(frame);
-      const { mode, tuning, a4, selectedIndex, inTuneCents, dwellMs } =
-        cfgRef.current;
-      const freq = freqRef.current;
-      const active = freq != null;
+    const root = rootRef.current;
+    if (root) root.dataset.phase = phaseRef.current;
 
-      let rawCents = dispCentsRef.current;
-      let idx = selectedIndex;
-      let label = null;
+    function frame(now) {
+      const { mode, tuning, a4 } = configRef.current;
+      const pitch = pitchRef.current;
+      const active = (pitch.voiced || pitch.holding) && pitch.frequency > 0;
+      const frequency = pitch.frequency;
+
+      let rawCents = displayCentsRef.current;
+      let note = null;
+      let stringLabel = "";
 
       if (active) {
+        note = freqToNote(frequency, a4);
         if (tuning.type === "chromatic" || mode === "chromatic") {
-          const n = freqToNote(freq, a4);
-          rawCents = n.cents;
-          label = n.label;
-          idx = null;
+          rawCents = note ? note.cents : 0;
         } else {
-          let useIdx;
-          if (mode === "manual" && selectedIndex != null) {
-            useIdx = selectedIndex;
-          } else {
-            const near = nearestStringInTuning(freq, tuning, a4);
-            useIdx = near ? near.index : selectedIndex || 0;
-          }
-          const s = tuning.strings[useIdx];
-          if (s) {
-            rawCents = centsBetween(freq, noteToFreq(s.midi, a4));
-            label = s.label;
-            idx = useIdx;
-            // follow-the-pluck: in auto, track whatever string is being played
-            if (mode === "auto" && useIdx !== selectedIndex) {
-              setSelectedIndex(useIdx);
-            }
+          const nearest = nearestStringInTuning(frequency, tuning, a4);
+          const index = nearest ? nearest.index : stringIndexRef.current;
+          const string = tuning.strings[index];
+          if (string) {
+            stringIndexRef.current = index;
+            rawCents = centsBetween(frequency, noteToFreq(string.midi, a4));
+            stringLabel = string.label;
+          } else if (note) {
+            rawCents = note.cents;
           }
         }
       }
 
-      // EMA smoothing — settle toward 0 when idle so the needle rests centered.
       const clamped = Math.max(-60, Math.min(60, rawCents));
-      const k = active ? 0.25 : 0.08;
-      dispCentsRef.current += ((active ? clamped : 0) - dispCentsRef.current) * k;
-      const disp = dispCentsRef.current;
-      centsMV.set(Math.max(-50, Math.min(50, disp)));
+      const rate = active ? TRACK_RATE : SETTLE_RATE;
+      displayCentsRef.current +=
+        ((active ? clamped : 0) - displayCentsRef.current) * rate;
+      const display = displayCentsRef.current;
 
-      const inTune = active && Math.abs(disp) <= inTuneCents;
+      centsMV.set(
+        Math.round(
+          Math.max(-CENTS_RANGE, Math.min(CENTS_RANGE, display)) * 100
+        ) / 100
+      );
 
-      // Auto-advance: hold in tune for dwellMs → check the string off.
-      if (mode === "auto" && idx != null && tuning.strings.length) {
-        if (inTune) {
-          if (!dwellStartRef.current) dwellStartRef.current = performance.now();
-          else if (
-            performance.now() - dwellStartRef.current >= dwellMs &&
-            !tunedRef.current.has(idx)
-          ) {
-            const next = new Set(tunedRef.current);
-            next.add(idx);
-            setTuned(next);
-          }
-        } else {
-          dwellStartRef.current = 0;
+      const distance = Math.abs(display);
+      const phase = pitch.voiced
+        ? distance <= IN_TUNE_CENTS
+          ? "intune"
+          : distance <= CLOSE_CENTS
+            ? "close"
+            : "off"
+        : pitch.holding
+          ? "holding"
+          : "idle";
+
+      if (phase !== phaseRef.current) {
+        if (now - phaseSinceRef.current >= PHASE_HOLD_MS) {
+          phaseRef.current = phase;
+          phaseSinceRef.current = now;
+          const root = rootRef.current;
+          if (root) root.dataset.phase = phase;
         }
       } else {
-        dwellStartRef.current = 0;
+        phaseSinceRef.current = now;
       }
 
-      // Throttled state mirror for rendering the strip (~16 Hz).
-      const now = performance.now();
-      if (now - lastStateRef.current > 60) {
-        lastStateRef.current = now;
-        setTarget({ index: idx, label, cents: disp, inTune, active });
+      const text = textRef.current;
+      const letter = note ? note.name[0] : "–";
+      const accidental = note && note.isSharp ? "♯" : "";
+      const octave = note ? String(note.octave) : "";
+      const frequencyText = active ? frequency.toFixed(1) : "—";
+      const centsText = active ? formatCents(display) : "—";
+
+      if (letter !== text.letter) {
+        text.letter = letter;
+        letterMV.set(letter);
+      }
+      if (accidental !== text.accidental) {
+        text.accidental = accidental;
+        accidentalMV.set(accidental);
+      }
+      if (octave !== text.octave) {
+        text.octave = octave;
+        octaveMV.set(octave);
+      }
+      if (frequencyText !== text.frequency) {
+        text.frequency = frequencyText;
+        freqTextMV.set(frequencyText);
+      }
+      if (centsText !== text.cents) {
+        text.cents = centsText;
+        centsTextMV.set(centsText);
+      }
+      if (stringLabel !== text.string) {
+        text.string = stringLabel;
+        stringLabelMV.set(stringLabel);
+      }
+
+      const announce = note
+        ? `${note.label}${phaseRef.current === "intune" ? ", in tune" : ""}`
+        : "";
+      if (announce !== text.announce) {
+        text.announce = announce;
+        announceMV.set(announce);
       }
     }
-    rafRef.current = requestAnimationFrame(frame);
-    return () => cancelAnimationFrame(rafRef.current);
-  }, [centsMV, freqRef, setSelectedIndex]);
 
-  return {
+    return subscribe(frame);
+  }, [
+    subscribe,
+    pitchRef,
+    rootRef,
     centsMV,
-    target,
-    tuned,
-    allTuned:
-      tuning.strings.length > 0 && tuned.size === tuning.strings.length,
-  };
+    letterMV,
+    accidentalMV,
+    octaveMV,
+    freqTextMV,
+    centsTextMV,
+    stringLabelMV,
+    announceMV,
+  ]);
+
+  return useMemo(
+    () => ({
+      centsMV,
+      letterMV,
+      accidentalMV,
+      octaveMV,
+      freqTextMV,
+      centsTextMV,
+      stringLabelMV,
+      announceMV,
+    }),
+    [
+      centsMV,
+      letterMV,
+      accidentalMV,
+      octaveMV,
+      freqTextMV,
+      centsTextMV,
+      stringLabelMV,
+      announceMV,
+    ]
+  );
 }

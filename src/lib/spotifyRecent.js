@@ -20,7 +20,7 @@ const TOP_URL =
 const RECENT_URL =
   "https://api.spotify.com/v1/me/player/recently-played?limit=50";
 
-async function getAccessToken() {
+export async function getAccessToken() {
   const id = process.env.SPOTIFY_CLIENT_ID;
   const secret = process.env.SPOTIFY_CLIENT_SECRET;
   const refresh = process.env.SPOTIFY_REFRESH_TOKEN;

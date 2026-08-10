@@ -4,6 +4,8 @@ import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
 import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
 import MobileMenuShell from "./ui/Navigation/MobileMenuShell";
+import DevPalette from "./ui/Navigation/DevPalette";
+import ZenMode from "./ui/ZenMode";
 
 import StickyFooter from "./ui/StickyFooter";
 import { geist, inter, mono } from "./fonts";
@@ -12,6 +14,7 @@ import { author, description, title } from "./constants";
 import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 import AnimatedFavicon from "./ui/AnimatedFavicon";
+import ReactScan from "./ui/ReactScan";
 // Emoji intro splash disabled — re-enable by restoring this import and the
 // <IntroSplash /> mount in the body below. Component files are still in ./ui.
 // import IntroSplash from "./ui/IntroSplash";
@@ -135,7 +138,11 @@ const jsonLd = {
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en" className={`${geist.variable} ${mono.variable} ${inter.variable}`}>
+    <html
+      lang="en"
+      className={`${geist.variable} ${mono.variable} ${inter.variable}`}
+      suppressHydrationWarning
+    >
       <head>
         {/* Geist Sans + Geist Mono are self-hosted by next/font at build
             time — no third-party font host, no preconnect, no FOUT. */}
@@ -144,11 +151,17 @@ export default function RootLayout({ children }) {
           type="application/ld+json"
           dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
         />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `try{if(sessionStorage.getItem("herb:chrome-hidden")==="1")document.documentElement.dataset.chrome="off"}catch(e){}`,
+          }}
+        />
       </head>
       {/* No global `tracking-*` here — a single letter-spacing value cannot be
           correct at more than one size. The type scale sets tracking per size;
           the inherited default for untagged text is set on `body` in globals.css. */}
       <body className="relative overflow-x-hidden overscroll-none bg-surface antialiased">
+        <ReactScan />
         <AnimatedFavicon />
         <ConsoleSig />
         <PostHogProvider>
@@ -164,6 +177,7 @@ export default function RootLayout({ children }) {
                   {children}
                 </ViewTransition>
               </MobileMenuShell>
+              <ZenMode />
             </MobileMenuProvider>
             {/* <Loading>
               <div className="relative z-0">
@@ -178,6 +192,7 @@ export default function RootLayout({ children }) {
           </LenisProvider>
         </PostHogProvider>
         <FooterClock />
+        <DevPalette />
       </body>
     </html>
   );

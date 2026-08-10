@@ -1,21 +1,18 @@
 "use client";
 
-// The hero of the poster: the detected note set in big Geist — a giant
-// letter with the accidental and octave riding off it. No segmented LCD, no
-// skeuomorphism; pure type on the grid. Shows an em-dash placeholder when idle.
+import { memo } from "react";
+import { motion } from "motion/react";
 
-export default function NoteReadout({ note }) {
-  const letter = note ? note.name[0] : "–";
-  const isSharp = note ? note.isSharp : false;
-  const octave = note ? String(note.octave) : "";
-
+function NoteReadout({ letterMV, accidentalMV, octaveMV }) {
   return (
     <div className="tuner__note">
-      <span className="tuner__letter">{letter}</span>
+      <motion.span className="tuner__letter">{letterMV}</motion.span>
       <span className="tuner__note-sup">
-        {isSharp && <span className="tuner__sharp">&#9839;</span>}
-        {octave && <span className="tuner__oct">{octave}</span>}
+        <motion.span className="tuner__sharp">{accidentalMV}</motion.span>
+        <motion.span className="tuner__oct">{octaveMV}</motion.span>
       </span>
     </div>
   );
 }
+
+export default memo(NoteReadout);

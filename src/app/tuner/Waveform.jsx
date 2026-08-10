@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 /* ───────────────────────────────────────────────────────────────────────────
    Vertical waveform HISTORY — a scrolling timeline of how loud you've been.
@@ -29,16 +29,13 @@ const CONFIG = {
 };
 /* ─────────────────────────────────────────────────────────────────────────── */
 
-const RMS_SCALE = 3.4; // maps quiet mic RMS into a usable 0–1 range
 // natural, decelerating open. Swap for another curve to change the feel:
 //   easeOutCubic:  1 - (1-p)^3   ·   easeOutQuart: 1 - (1-p)^4 (snappier)
 const ease = (p) => 1 - (1 - p) * (1 - p) * (1 - p);
 
-export default function Waveform({ getAnalyser, active, inTune }) {
+function Waveform({ pitchRef, subscribe }) {
   const innerRef = useRef(null);
   const barsRef = useRef([]);
-  const activeRef = useRef(active);
-  activeRef.current = active;
 
   useEffect(() => {
     const N = CONFIG.bars;
@@ -50,9 +47,7 @@ export default function Waveform({ getAnalyser, active, inTune }) {
       window.matchMedia &&
       window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-    let raf = 0;
     let t = 0;
-    let buf = null;
     let ema = CONFIG.minBar;
     let scroll = 0; // fractional rows, 0..1, drives the smooth translate
 
@@ -74,19 +69,10 @@ export default function Waveform({ getAnalyser, active, inTune }) {
     }
 
     function record() {
-      const a = activeRef.current;
-      const an = getAnalyser && getAnalyser();
-      let amp;
-      if (an && a) {
-        if (!buf || buf.length !== an.fftSize) buf = new Float32Array(an.fftSize);
-        an.getFloatTimeDomainData(buf);
-        let sum = 0;
-        for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
-        amp = Math.min(1, Math.sqrt(sum / buf.length) * RMS_SCALE * CONFIG.gain);
-      } else {
-        amp = CONFIG.minBar + (0.5 + 0.5 * Math.sin(t)) * 0.05;
-        t += 0.25;
-      }
+      const live = Math.min(1, pitchRef.current.level * CONFIG.gain);
+      const idle = CONFIG.minBar + (0.5 + 0.5 * Math.sin(t)) * 0.05;
+      t += 0.25;
+      const amp = live > idle ? live : idle;
       ema += (amp - ema) * CONFIG.inputSmooth;
       for (let i = COUNT - 1; i > 0; i--) hist[i] = hist[i - 1];
       hist[0] = ema;
@@ -96,25 +82,21 @@ export default function Waveform({ getAnalyser, active, inTune }) {
 
     if (reduce) return;
 
-    function tick() {
-      raf = requestAnimationFrame(tick);
+    return subscribe(() => {
       scroll += CONFIG.scrollSpeed;
       while (scroll >= 1) {
         record();
         scroll -= 1;
       }
       render();
-    }
-
-    raf = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(raf);
-  }, [getAnalyser]);
+    });
+  }, [pitchRef, subscribe]);
 
   const COUNT = CONFIG.bars + 2;
 
   return (
     <div
-      className={`wave${inTune ? " is-intune" : ""}`}
+      className="wave"
       aria-hidden="true"
       style={{
         top: `${CONFIG.topOffset}dvh`,
@@ -139,3 +121,5 @@ export default function Waveform({ getAnalyser, active, inTune }) {
     </div>
   );
 }
+
+export default memo(Waveform);

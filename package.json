@@ -54,6 +54,7 @@
     "eslint-config-next": "^16.2.3",
     "partykit": "^0.0.115",
     "prettier-plugin-tailwindcss": "^0.6.13",
+    "react-scan": "^0.5.7",
     "tailwindcss": "^4",
     "ws": "^8.20.0"
   }

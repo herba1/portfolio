@@ -1,0 +1,152 @@
+.backdrop-page {
+  --backdrop-plate: min(46vh, 78vw);
+  position: fixed;
+  inset: 0;
+  overflow: hidden;
+  background: #08090a;
+  color: #fff;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+.backdrop-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  transition: opacity 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.backdrop-canvas[data-ready="true"] {
+  opacity: 1;
+}
+
+.backdrop-player {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  height: 100%;
+  padding: 3rem 1.5rem;
+  opacity: 0;
+  transform: translateY(8px);
+  transition:
+    opacity 700ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 700ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.backdrop-page[data-ready="true"] .backdrop-player {
+  opacity: 1;
+  transform: none;
+}
+
+.backdrop-artwork {
+  position: relative;
+  width: var(--backdrop-plate);
+  aspect-ratio: 1;
+  border-radius: 6px;
+  box-shadow: 0 20px 25px -15px rgba(0, 0, 0, 0.22);
+}
+
+.backdrop-artwork img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  opacity: 0;
+  transition-property: opacity;
+  transition-timing-function: cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.backdrop-artwork img[data-visible="true"] {
+  opacity: 1;
+}
+
+.backdrop-meta {
+  width: var(--backdrop-plate);
+}
+
+.backdrop-title,
+.backdrop-artist {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backdrop-title {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+}
+
+.backdrop-artist {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  line-height: 1.35;
+  color: #d4d4d6;
+}
+
+.backdrop-track {
+  width: var(--backdrop-plate);
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.backdrop-rail {
+  position: relative;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.32);
+  cursor: pointer;
+}
+
+.backdrop-rail span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: calc(var(--bd-progress, 0) * 100%);
+  border-radius: 2px;
+  background: #fff;
+}
+
+.backdrop-times {
+  display: flex;
+  justify-content: space-between;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  color: #d4d4d6;
+}
+
+.backdrop-transport {
+  display: flex;
+  align-items: center;
+  gap: 2rem;
+  color: #fff;
+}
+
+.backdrop-transport button {
+  display: grid;
+  place-items: center;
+  color: inherit;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .backdrop-canvas,
+  .backdrop-player,
+  .backdrop-artwork img {
+    transition-duration: 1ms;
+  }
+
+  .backdrop-player {
+    transform: none;
+  }
+}

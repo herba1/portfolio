@@ -21,10 +21,12 @@ import "./deck.css";
  *     of the frame, so there is never a forced synchronous layout
  *   • the rAF loop parks itself when the value settles
  *
- * React state changes exactly once per whole-index crossing (~50 times
- * over the entire page) to feed the readout. The card list is memoised
- * against `cards` alone, so those renders never touch the 50 <img>
- * elements — React sees the same element objects and skips them.
+ * React renders NOTHING while the deck moves. The readout is handed to
+ * SlotNumber through its ref, which writes one custom property per digit
+ * column that changed, so a scrub from end to end costs zero renders in
+ * this component and zero in the counter. The card list is memoised
+ * against `cards` alone, so the renders that do happen — the layout
+ * toggle, the media-query resolve — never touch the 50 <img> elements.
  * ─────────────────────────────────────────────────────────────────── */
 
 // Off. The deck runs on the defaults in deck.css; flip this to
@@ -208,7 +210,7 @@ export default function Deck({ tracks }) {
   // in deck.css.
   const { active: menuActive, snapshotY } = useMobileMenu();
 
-  const [active, setActive] = useState(0);
+  const countRef = useRef(null);
 
   // Layout toggle. The value goes out as `--dk-m` on the section, and the
   // CSS transition on `.deck` does the whole morph — this is the only
@@ -399,14 +401,17 @@ export default function Deck({ tracks }) {
       written = p;
       stageEl.style.setProperty("--dk-p", p.toFixed(3));
 
-      // The only React state this whole interaction produces. It tracks
-      // the scroll target rather than the eased value, so the counter
-      // leads the deck by up to --follow. Invisible on a number that
-      // takes 520ms to roll, and it saves reading style back per frame.
+      // The readout is written straight into the odometer, so a scrub
+      // renders nothing at all. It tracks the scroll target rather than the
+      // eased value, so the counter leads the deck by up to --follow.
+      // Invisible on a number that takes 520ms to roll, and it saves
+      // reading style back per frame.
       const r = Math.round(p);
       if (r !== shown) {
         shown = r;
-        setActive(r);
+        countRef.current?.setValue(
+          `${String(r + 1).padStart(2, "0")} / ${count}`,
+        );
       }
     };
 
@@ -804,9 +809,7 @@ export default function Deck({ tracks }) {
             {rail}
 
             <div className="deck__count">
-              <SlotNumber
-                value={`${String(active + 1).padStart(2, "0")} / ${count}`}
-              />
+              <SlotNumber ref={countRef} value={`01 / ${count}`} />
             </div>
 
             <div className="deck__ui" data-deck-ui>

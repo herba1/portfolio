@@ -52,3 +52,7 @@ next-env.d.ts
 # full-resolution PSA card scans — source material only. The web-sized
 # derivatives that actually ship live in /public/psa (see its CREDITS.md).
 /.psa-original-scans/
+
+# local audio experiment assets — not for the public deploy
+public/audio/
+

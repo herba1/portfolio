@@ -1,9 +1,11 @@
 "use client";
 
+import { memo } from "react";
+
 // Idle / permission state: a single solid-ink prompt that turns the mic on.
 // Sits in the note slot; the live note replaces it once listening.
 
-export default function MicGate({ status, onEnable }) {
+function MicGate({ status, onEnable }) {
   const denied = status === "denied" || status === "error";
   const requesting = status === "requesting";
 
@@ -26,3 +28,5 @@ export default function MicGate({ status, onEnable }) {
     </button>
   );
 }
+
+export default memo(MicGate);

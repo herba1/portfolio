@@ -1,0 +1,225 @@
+{
+  "GBAYE0601415": {
+    "title": "The Beatles — Ask Me Why",
+    "fingerprint": "23:I love you 'cause you te",
+    "cast": [
+      {
+        "id": "john",
+        "name": "John",
+        "color": "#2563eb"
+      },
+      {
+        "id": "paul",
+        "name": "Paul",
+        "color": "#dc2626"
+      },
+      {
+        "id": "george",
+        "name": "George",
+        "color": "#16a34a"
+      }
+    ],
+    "lines": {
+      "0": {
+        "singers": [
+          "john"
+        ],
+        "words": {
+          "0": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "1": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "2": [
+            "john",
+            "paul",
+            "george"
+          ]
+        }
+      },
+      "1": {
+        "singers": [
+          "john"
+        ],
+        "words": {
+          "0": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "1": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "2": [
+            "john",
+            "paul",
+            "george"
+          ]
+        }
+      },
+      "2": {
+        "singers": [
+          "john"
+        ]
+      },
+      "3": {
+        "singers": [
+          "john"
+        ]
+      },
+      "4": {
+        "singers": [
+          "john"
+        ],
+        "words": {
+          "0": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "1": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "2": [
+            "john",
+            "paul",
+            "george"
+          ]
+        }
+      },
+      "5": {
+        "singers": [
+          "john"
+        ],
+        "words": {
+          "0": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "1": [
+            "john",
+            "paul",
+            "george"
+          ],
+          "2": [
+            "john",
+            "paul",
+            "george"
+          ]
+        }
+      },
+      "6": {
+        "singers": [
+          "john"
+        ]
+      },
+      "7": {
+        "singers": [
+          "john"
+        ]
+      },
+      "8": {
+        "singers": [
+          "john",
+          "paul"
+        ]
+      },
+      "9": {
+        "singers": [
+          "john"
+        ]
+      },
+      "10": {
+        "singers": [
+          "john"
+        ]
+      },
+      "11": {
+        "singers": [
+          "john"
+        ]
+      },
+      "12": {
+        "singers": [
+          "john"
+        ]
+      },
+      "13": {
+        "singers": [
+          "john"
+        ]
+      },
+      "14": {
+        "singers": [
+          "john"
+        ]
+      },
+      "15": {
+        "singers": [
+          "john"
+        ]
+      },
+      "16": {
+        "singers": [
+          "john"
+        ]
+      },
+      "17": {
+        "singers": [
+          "john"
+        ]
+      },
+      "18": {
+        "singers": [
+          "john"
+        ]
+      },
+      "19": {
+        "singers": [
+          "john"
+        ]
+      },
+      "20": {
+        "singers": [
+          "john"
+        ]
+      },
+      "21": {
+        "singers": [
+          "john"
+        ]
+      },
+      "22": {
+        "singers": [
+          "john"
+        ]
+      }
+    },
+    "secondary": [
+      {
+        "id": "s19505-george",
+        "singer": "george",
+        "text": "",
+        "start": 18699,
+        "end": 22808
+      },
+      {
+        "id": "s19394-paul",
+        "singer": "paul",
+        "text": "",
+        "start": 18768,
+        "end": 22754
+      }
+    ]
+  }
+}

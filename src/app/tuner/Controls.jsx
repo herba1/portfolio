@@ -1,5 +1,6 @@
 "use client";
 
+import { memo } from "react";
 import { TUNING_LIST } from "./tunings";
 
 const MODES = [
@@ -14,7 +15,7 @@ const PRESETS = TUNING_LIST.filter((t) => t.type !== "chromatic");
 // toggle. No labels, no chrome — the values speak for themselves; state is
 // carried by solid colour (active = ink, inactive = muted).
 
-export default function Controls({ mode, setMode, tuningId, setTuningId }) {
+function Controls({ mode, setMode, tuningId, setTuningId }) {
   return (
     <div className="tuner__controls">
       <span className="tuner__select">
@@ -47,3 +48,5 @@ export default function Controls({ mode, setMode, tuningId, setTuningId }) {
     </div>
   );
 }
+
+export default memo(Controls);

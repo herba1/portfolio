@@ -74,7 +74,7 @@
     transparent 100%
   );
 }
-.wave.is-intune {
+.tuner[data-phase="intune"] .wave {
   color: var(--good);
 }
 /* the group that translates continuously (smooth scroll, no per-row stepping) */
@@ -93,7 +93,7 @@
   transform-origin: center;
   will-change: transform;
 }
-.wave.is-intune .wave__bar {
+.tuner[data-phase="intune"] .wave__bar {
   box-shadow: 0 0 5px color-mix(in oklab, var(--good) 40%, transparent);
 }
 @keyframes wave-in {
@@ -189,12 +189,17 @@
   border-radius: var(--radius-full);
   transform: translateX(-50%);
   background: var(--muted);
-  transition: background var(--duration-300) var(--ease);
+  transition:
+    background var(--duration-300) var(--ease),
+    box-shadow var(--duration-300) var(--ease);
 }
-.meter.is-active .meter__needle {
+.tuner[data-phase="holding"] .meter__needle,
+.tuner[data-phase="off"] .meter__needle,
+.tuner[data-phase="close"] .meter__needle,
+.tuner[data-phase="intune"] .meter__needle {
   background: var(--ink);
 }
-.meter.is-intune .meter__needle {
+.tuner[data-phase="intune"] .meter__needle {
   background: var(--good);
   box-shadow: 0 0 0 5px color-mix(in oklab, var(--good) 14%, transparent);
 }

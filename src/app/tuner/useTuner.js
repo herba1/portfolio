@@ -1,160 +1,130 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { detectPitchMPM, createPitchSmoother } from "./pitch/mpm";
+import { createPitchDetector } from "./pitch/detector";
+import { createPitchTracker } from "./pitch/tracker";
+import { buildInputChain, disconnectChain } from "./pitch/filters";
 
-/**
- * Owns the whole audio graph + pitch-detection loop for the tuner.
- *
- * Hot values (freqRef / clarityRef) update at the MPM cadence and are meant to
- * be read inside a consumer's own RAF (waveform, needle) — they do NOT trigger
- * React renders. A throttled mirror (liveFreq / liveClarity) drives the text
- * readout at ~20 Hz so the DSEG display re-renders calmly.
- */
 export default function useTuner({
-  fftSize = 2048,
-  minFrequency = 60,
+  windowSize = 4096,
+  minFrequency = 73,
   maxFrequency = 1400,
-  detectMs = 33, // MPM cadence (~30 Hz)
-  confidenceFloor = 0.8, // reject pitches below this clarity
-  stateMs = 50, // React readout mirror cadence (~20 Hz)
+  detectMs = 33,
 } = {}) {
-  const [status, setStatus] = useState("idle"); // idle|requesting|running|suspended|denied|error
-  const [liveFreq, setLiveFreq] = useState(null);
-  const [liveClarity, setLiveClarity] = useState(0);
+  const [status, setStatus] = useState("idle");
 
   const streamRef = useRef(null);
-  const ctxRef = useRef(null);
+  const contextRef = useRef(null);
   const sourceRef = useRef(null);
-  const gainNodeRef = useRef(null);
+  const chainRef = useRef(null);
   const analyserRef = useRef(null);
-  const rafRef = useRef(0);
-  const timeBufRef = useRef(null);
-  const smootherRef = useRef(null);
+  const detectorRef = useRef(null);
+  const trackerRef = useRef(null);
+  const timeBufferRef = useRef(null);
+  const frameRef = useRef(0);
   const lastDetectRef = useRef(0);
-  const lastStateRef = useRef(0);
   const startingRef = useRef(false);
+  const subscribersRef = useRef(new Set());
 
-  const freqRef = useRef(null); // smoothed Hz | null
-  const clarityRef = useRef(0);
-  const gainRef = useRef(1); // auto-gain factor applied to the input
+  const pitchRef = useRef({
+    frequency: 0,
+    confidence: 0,
+    level: 0,
+    voiced: false,
+    holding: false,
+  });
 
-  // Loop params kept fresh in a ref so changing them never restarts the loop.
-  const paramsRef = useRef(null);
-  paramsRef.current = { minFrequency, maxFrequency, detectMs, confidenceFloor, stateMs };
+  const configRef = useRef(null);
+  configRef.current = { windowSize, minFrequency, maxFrequency, detectMs };
 
-  const getAnalyser = useCallback(() => analyserRef.current, []);
+  const subscribe = useCallback((listener) => {
+    subscribersRef.current.add(listener);
+    return () => subscribersRef.current.delete(listener);
+  }, []);
 
   const loop = useCallback(() => {
-    rafRef.current = requestAnimationFrame(loop);
+    frameRef.current = requestAnimationFrame(loop);
+
     const analyser = analyserRef.current;
-    const buf = timeBufRef.current;
-    const ctx = ctxRef.current;
-    if (!analyser || !buf || !ctx) return;
-
+    const detector = detectorRef.current;
+    const tracker = trackerRef.current;
+    const buffer = timeBufferRef.current;
+    const context = contextRef.current;
     const now = performance.now();
-    const p = paramsRef.current;
-    if (now - lastDetectRef.current < p.detectMs) return;
-    lastDetectRef.current = now;
 
-    analyser.getFloatTimeDomainData(buf);
-
-    // peak of the (already gain-staged) buffer — drives the auto-gain loop
-    let peak = 0;
-    for (let i = 0; i < buf.length; i++) {
-      const a = buf[i] < 0 ? -buf[i] : buf[i];
-      if (a > peak) peak = a;
-    }
-
-    const { frequency, clarity } = detectPitchMPM(buf, ctx.sampleRate, {
-      minFrequency: p.minFrequency,
-      maxFrequency: p.maxFrequency,
-      // low gate: let faint/distant input through to be evaluated; clarity (not
-      // loudness) decides whether it's a real note. The gain stage lifts it.
-      minRms: 0.0022,
-    });
-
-    // ── Auto-gain: pitch is amplitude-invariant, so a quiet/distant signal is
-    // detectable in principle but sits below the gate and looks dead. A GainNode
-    // (source → gain → analyser) lifts a real tone toward a target level. We only
-    // raise gain when a periodic tone is present (clarity-gated), so room hiss
-    // isn't amplified into false notes; on silence the gain eases back to unity.
-    const gainNode = gainNodeRef.current;
-    if (gainNode) {
-      let agc = gainRef.current;
-      if (clarity >= 0.5) {
-        // makeup gain to bring the raw peak (peak / agc) up to ~0.3
-        let ideal = (0.3 * agc) / Math.max(peak, 1e-3);
-        ideal = Math.max(1, Math.min(64, ideal));
-        agc += (ideal - agc) * (ideal > agc ? 0.1 : 0.35); // rise slow, fall fast
-      } else {
-        agc += (1 - agc) * 0.04; // decay toward unity on noise/silence
+    if (analyser && detector && tracker && buffer && context) {
+      const config = configRef.current;
+      if (now - lastDetectRef.current >= config.detectMs) {
+        lastDetectRef.current = now;
+        analyser.getFloatTimeDomainData(buffer);
+        const reading = detector.analyze(
+          buffer,
+          context.sampleRate,
+          config.minFrequency,
+          config.maxFrequency
+        );
+        const next = tracker.update(reading, now);
+        const target = pitchRef.current;
+        target.frequency = next.frequency;
+        target.confidence = next.confidence;
+        target.level = next.level;
+        target.voiced = next.voiced;
+        target.holding = next.holding;
       }
-      gainRef.current = agc;
-      gainNode.gain.value = agc;
     }
 
-    const confident = frequency != null && clarity >= p.confidenceFloor;
-    const smoothed = smootherRef.current.push(confident ? frequency : null);
-    freqRef.current = smoothed;
-    clarityRef.current = confident ? clarity : 0;
-
-    if (now - lastStateRef.current >= p.stateMs) {
-      lastStateRef.current = now;
-      setLiveFreq(smoothed);
-      setLiveClarity(confident ? clarity : 0);
-    }
+    for (const listener of subscribersRef.current) listener(now);
   }, []);
 
   const startLoop = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
+    cancelAnimationFrame(frameRef.current);
     lastDetectRef.current = 0;
-    rafRef.current = requestAnimationFrame(loop);
+    frameRef.current = requestAnimationFrame(loop);
   }, [loop]);
 
   const teardown = useCallback(() => {
-    cancelAnimationFrame(rafRef.current);
-    rafRef.current = 0;
+    cancelAnimationFrame(frameRef.current);
+    frameRef.current = 0;
     try {
       sourceRef.current?.disconnect();
     } catch {}
-    try {
-      gainNodeRef.current?.disconnect();
-    } catch {}
+    disconnectChain(chainRef.current);
     try {
       analyserRef.current?.disconnect();
     } catch {}
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    const ctx = ctxRef.current;
-    if (ctx && ctx.state !== "closed") ctx.close().catch(() => {});
+    streamRef.current?.getTracks().forEach((track) => track.stop());
+    const context = contextRef.current;
+    if (context && context.state !== "closed") context.close().catch(() => {});
     streamRef.current = null;
     sourceRef.current = null;
-    gainNodeRef.current = null;
+    chainRef.current = null;
     analyserRef.current = null;
-    ctxRef.current = null;
-    timeBufRef.current = null;
-    smootherRef.current?.reset();
-    freqRef.current = null;
-    clarityRef.current = 0;
-    gainRef.current = 1;
+    contextRef.current = null;
+    timeBufferRef.current = null;
+    trackerRef.current?.reset();
+    const target = pitchRef.current;
+    target.frequency = 0;
+    target.confidence = 0;
+    target.level = 0;
+    target.voiced = false;
+    target.holding = false;
   }, []);
 
   const enable = useCallback(async () => {
-    // Already running: a click in the "suspended" state just resumes.
-    if (ctxRef.current) {
-      if (ctxRef.current.state === "suspended") {
-        await ctxRef.current.resume().catch(() => {});
-        setStatus(ctxRef.current.state === "running" ? "running" : "suspended");
-        if (!rafRef.current) startLoop();
+    if (contextRef.current) {
+      if (contextRef.current.state === "suspended") {
+        await contextRef.current.resume().catch(() => {});
+        setStatus(contextRef.current.state === "running" ? "running" : "suspended");
+        if (!frameRef.current) startLoop();
       }
       return;
     }
-    if (startingRef.current) return; // dedupe StrictMode / double-clicks
+    if (startingRef.current) return;
     startingRef.current = true;
     setStatus("requesting");
+
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        // Voice DSP wrecks pitch accuracy — turn it all off.
         audio: {
           echoCancellation: false,
           noiseSuppression: false,
@@ -164,85 +134,109 @@ export default function useTuner({
         video: false,
       });
       streamRef.current = stream;
-      const AC = window.AudioContext || window.webkitAudioContext;
-      const ctx = new AC();
-      ctxRef.current = ctx;
-      const source = ctx.createMediaStreamSource(stream);
+
+      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+      const context = new AudioContextClass();
+      contextRef.current = context;
+
+      const config = configRef.current;
+      const source = context.createMediaStreamSource(stream);
       sourceRef.current = source;
-      const gain = ctx.createGain();
-      gain.gain.value = 1;
-      gainNodeRef.current = gain;
-      gainRef.current = 1;
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = fftSize;
+
+      const chain = buildInputChain(context, {
+        lowestFrequency: config.minFrequency,
+        highestFrequency: config.maxFrequency,
+      });
+      chainRef.current = chain;
+
+      const analyser = context.createAnalyser();
+      analyser.fftSize = config.windowSize;
       analyser.smoothingTimeConstant = 0;
       analyserRef.current = analyser;
-      // source → gain → analyser (auto-gain stage). Never to destination.
-      source.connect(gain);
-      gain.connect(analyser);
-      timeBufRef.current = new Float32Array(analyser.fftSize);
-      smootherRef.current = createPitchSmoother({ window: 5, ema: 0.25 });
 
-      await ctx.resume();
-      setStatus(ctx.state === "running" ? "running" : "suspended");
+      source.connect(chain.input);
+      chain.output.connect(analyser);
+
+      timeBufferRef.current = new Float32Array(config.windowSize);
+      detectorRef.current = createPitchDetector(config.windowSize);
+      trackerRef.current = createPitchTracker();
+
+      await context.resume();
+      setStatus(context.state === "running" ? "running" : "suspended");
       startLoop();
-    } catch (err) {
+    } catch (error) {
       teardown();
       const denied =
-        err && (err.name === "NotAllowedError" || err.name === "SecurityError");
+        error &&
+        (error.name === "NotAllowedError" || error.name === "SecurityError");
       setStatus(denied ? "denied" : "error");
     } finally {
       startingRef.current = false;
     }
-  }, [fftSize, startLoop, teardown]);
+  }, [startLoop, teardown]);
 
   const disable = useCallback(() => {
     teardown();
-    setLiveFreq(null);
-    setLiveClarity(0);
     setStatus("idle");
   }, [teardown]);
 
-  // React to fftSize changes (e.g. switching to a bass preset) without a restart.
   useEffect(() => {
     const analyser = analyserRef.current;
-    if (!analyser || analyser.fftSize === fftSize) return;
-    analyser.fftSize = fftSize;
-    timeBufRef.current = new Float32Array(analyser.fftSize);
-    smootherRef.current?.reset();
-  }, [fftSize]);
+    if (!analyser || analyser.fftSize === windowSize) return;
+    analyser.fftSize = windowSize;
+    timeBufferRef.current = new Float32Array(windowSize);
+    detectorRef.current = createPitchDetector(windowSize);
+    trackerRef.current?.reset();
+  }, [windowSize]);
 
-  // Pause cleanly when the tab is hidden; resume on return.
+  useEffect(() => {
+    const context = contextRef.current;
+    const chain = chainRef.current;
+    if (!context || !chain) return;
+    const source = sourceRef.current;
+    const analyser = analyserRef.current;
+    try {
+      source?.disconnect();
+    } catch {}
+    disconnectChain(chain);
+    const next = buildInputChain(context, {
+      lowestFrequency: minFrequency,
+      highestFrequency: maxFrequency,
+    });
+    chainRef.current = next;
+    source?.connect(next.input);
+    if (analyser) next.output.connect(analyser);
+    trackerRef.current?.reset();
+  }, [minFrequency, maxFrequency]);
+
+  useEffect(() => {
+    startLoop();
+    return () => {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = 0;
+    };
+  }, [startLoop]);
+
   useEffect(() => {
     function onVisibility() {
-      const ctx = ctxRef.current;
-      if (!ctx) return;
+      const context = contextRef.current;
       if (document.hidden) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = 0;
-        ctx.suspend().catch(() => {});
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = 0;
+        context?.suspend().catch(() => {});
       } else {
-        ctx.resume().catch(() => {});
-        setStatus(ctx.state === "running" ? "running" : "suspended");
-        if (!rafRef.current) startLoop();
+        if (context) {
+          context.resume().catch(() => {});
+          setStatus(context.state === "running" ? "running" : "suspended");
+        }
+        if (!frameRef.current) startLoop();
       }
     }
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [startLoop]);
 
-  // Release the mic on unmount (the browser recording indicator must turn off).
   useEffect(() => () => teardown(), [teardown]);
 
-  return {
-    status,
-    enabled: status === "running",
-    enable,
-    disable,
-    freqRef,
-    clarityRef,
-    liveFreq,
-    liveClarity,
-    getAnalyser,
-  };
+  return { status, enable, disable, pitchRef, subscribe };
 }

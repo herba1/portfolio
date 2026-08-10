@@ -3,8 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { geist } from "@/app/fonts";
-import { LINKS, DEV_LINKS } from "./LINKS";
-import { useIsDev } from "./useIsDev";
+import { LINKS } from "./LINKS";
 import { useMobileMenu } from "./MobileMenuContext";
 import NavSocialIcon from "./NavSocialIcon";
 import posthog from "posthog-js";
@@ -16,13 +15,11 @@ import posthog from "posthog-js";
    links collapse into a right-aligned icon row pinned near the bottom of
    the visible band (above the pushed-down page card). */
 export default function NavMenu({ open, setOpen }) {
-  const isDev = useIsDev();
   const router = useRouter();
   const pathname = usePathname();
   const { closeThen } = useMobileMenu();
-  const links = isDev ? [...LINKS, ...DEV_LINKS] : LINKS;
-  const mainLinks = links.filter((l) => l.primary);
-  const socialLinks = links.filter((l) => !l.primary);
+  const mainLinks = LINKS.filter((l) => l.primary);
+  const socialLinks = LINKS.filter((l) => !l.primary);
 
   // An in-site route waits for the menu: the card slides back, the scroll
   // returns to where it was, and only then does the router run. Navigating on
@@ -62,7 +59,7 @@ export default function NavMenu({ open, setOpen }) {
               href={link.link}
               tabIndex={open ? 0 : -1}
               onClick={(e) => onNavigate(e, link)}
-              className={`mobile-menu__link ${link.dev ? "is-dev" : ""}`}
+              className="mobile-menu__link"
               style={{ "--i": i }}
               {...(!isInternal
                 ? { target: "_blank", rel: "noopener noreferrer" }
