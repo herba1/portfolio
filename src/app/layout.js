@@ -5,6 +5,7 @@ import Navbar from "./ui/Navigation/Navbar";
 import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
 import MobileMenuShell from "./ui/Navigation/MobileMenuShell";
 import DevPalette from "./ui/Navigation/DevPalette";
+import TypeInspector from "./ui/TypeInspector";
 import ZenMode from "./ui/ZenMode";
 
 import StickyFooter from "./ui/StickyFooter";
@@ -193,6 +194,7 @@ export default function RootLayout({ children }) {
         </PostHogProvider>
         <FooterClock />
         <DevPalette />
+        <TypeInspector />
       </body>
     </html>
   );

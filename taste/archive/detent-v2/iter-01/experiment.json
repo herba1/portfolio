@@ -1,0 +1,38 @@
+{
+  "title": "Evolve Detent",
+  "description": "A rotary knob that keeps the physics of a real dial — flick it and it spins on its own momentum, decelerating step by step until it clicks to rest, leaving a faint motion trail behind the pointer as it goes. Ticks magnify as the pointer sweeps past them, and the readout below rolls through its digits like an odometer instead of jumping.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "manual"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-30T23:38:00.980Z",
+  "ideaId": "ea87b7343d07",
+  "parentSlug": "detent",
+  "tasteVersion": 1,
+  "intent": "Pushes the motion of the loved tactile readout further with real momentum and inertia, so the knob feels like a weighted physical object rather than a 1:1 drag surface.",
+  "source": {
+    "kind": "evolve"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "costUsd": 0.9327628000000001,
+    "turns": 25,
+    "sessionId": "133dfe06-d153-46d4-afe6-51e9f66a3712",
+    "finishedAt": "2026-08-31T00:54:59.906Z",
+    "ok": true
+  },
+  "building": false,
+  "gate": [],
+  "iteration": 1,
+  "iteratedAt": "2026-08-31T00:54:59.906Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T00:54:59.906Z",
+      "costUsd": 0.9327628000000001,
+      "summary": "PASS confirmed, `status: \"candidate\"` set manually in `experiment.json` (the gate script has a pre-existing bug in `scripts/lab-gate.mjs:96-97` that overwrites its own broken→candidate flip with a stale manifest object — outside my folder scope, didn't touch it).\n\n1. Replaced the flat white-line knob with a tapered accent-tipped needle, a multi-stop radial-gradient face, layered shadow, hover lift, a press scale-down while dragging, an accent halo ring on drag, and a breathing energy-glow animation while coasting — plus two fading ghost needles that trail behind the pointer, scaled by live drag/coast velocity, so spinning it fast visibly looks like it's spinning.\n2. The value readout is now a real odometer (`RotaryOdometer.jsx`): each of 3 fixed tabular-nums digit columns rolls vertically to its new digit on a spring-eased 320ms transition instead of swapping text in place.\n3. Ticks now continuously scale and glow based on angular proximity to the current pointer position (stronger while dragging/coasting), so the ring visibly \"focuses\" around wherever the hand points and reacts as it moves, on top of the existing lit-progress fill.\n4. Addressed via 1–3 above — knob, ticks, and rea"
+    }
+  ]
+}

@@ -63,9 +63,9 @@ export default function BlogHeader({ title, date, tags, description }) {
           day: 'numeric',
         })}
       </time>
-      {/* One step below the index title (which is title-xl → display), so a
+      {/* One step below the index title (which is title-sm), so a
           post reads as sitting inside the section rather than beside it. */}
-      <h1 className="text-ink text-title-lg md:text-title-xl mt-2">
+      <h1 className="text-ink text-heading mt-2">
         {chars.map((ch, i) => {
           if (ch === ' ') {
             return <span key={i} className="blog-ch-space" />

@@ -1,0 +1,94 @@
+{
+  "focus": "ui",
+  "githubTopics": [
+    "webgl",
+    "shaders",
+    "threejs",
+    "react-three-fiber",
+    "creative-coding",
+    "generative-art",
+    "gsap",
+    "framer-motion",
+    "react-components",
+    "css-animations"
+  ],
+  "githubMinStars": 40,
+  "githubFrontendCandidates": {
+    "topics": [
+      "cli",
+      "audio",
+      "dataset",
+      "visualization"
+    ],
+    "minStars": 300
+  },
+  "rss": [
+    {
+      "name": "codrops",
+      "url": "https://tympanus.net/codrops/feed/",
+      "tags": [
+        "motion",
+        "interface"
+      ]
+    },
+    {
+      "name": "codepen-picks",
+      "url": "https://codepen.io/picks/feed",
+      "tags": [
+        "css",
+        "motion"
+      ]
+    },
+    {
+      "name": "awwwards",
+      "url": "https://www.awwwards.com/feed/",
+      "tags": [
+        "site",
+        "interface"
+      ]
+    }
+  ],
+  "youtube": [
+    {
+      "name": "yuri-artiukh",
+      "channelId": "UCDo7RTzizoOdPjY8A-xDR7g",
+      "tags": [
+        "webgl",
+        "shaders"
+      ]
+    },
+    {
+      "name": "codrops",
+      "channelId": "UCwMUIF2X0kRL0mF3qHOcdGg",
+      "tags": [
+        "motion",
+        "interface"
+      ]
+    }
+  ],
+  "hnTerms": [
+    "webgl",
+    "shader",
+    "three.js",
+    "generative",
+    "interactive",
+    "visualization"
+  ],
+  "blueskyTerms": [
+    "webgl",
+    "shader",
+    "creative coding",
+    "generative art",
+    "microinteraction"
+  ],
+  "scoutSites": [
+    "mobbin.com",
+    "spottedinprod.com",
+    "tympanus.net/codrops",
+    "godly.website",
+    "x.com",
+    "twitter.com",
+    "layers.to",
+    "dribbble.com/shots/popular/animation"
+  ]
+}

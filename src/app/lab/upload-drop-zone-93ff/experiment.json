@@ -1,0 +1,48 @@
+{
+  "title": "Press Kit Upload",
+  "description": "A batch uploader where each thumbnail depixelates as its upload climbs — 2×2 blocks resolving to 4×4 to 8×8, then dissolving tile by tile against real progress — and the footer is a two-lane schedule rather than a bar: segments sized by how long each file takes, running ones swept and headed, queued ones hatched into the lane the scheduler predicts will free up first. Hover a lane segment and its row lights up. It opens mid-flight, and the video drops its connection at 61%.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Upload"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.733Z",
+  "ideaId": "c5f6981e69ab",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real product surface with every state finished — queued, uploading, failed, retrying, done, empty, disabled — built on one mechanic (the preview resolving with the upload) on a flat light ground, which is the interface work Herb asked for over abstract demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-opus-5",
+    "usage": {
+      "input": 3032728,
+      "output": 44243
+    },
+    "durationMs": 552150,
+    "turns": 31,
+    "sessionId": "4efe81d9-32ff-42bf-ada9-c21b51fc7232",
+    "finishedAt": "2026-08-31T02:46:26.457Z",
+    "ok": true,
+    "polish": null
+  },
+  "building": false,
+  "iteration": 1,
+  "iteratedAt": "2026-08-31T02:46:26.457Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T02:46:26.457Z",
+      "usage": {
+        "input": 3032728,
+        "output": 44243
+      },
+      "durationMs": 552150,
+      "turns": 31,
+      "summary": "1. **Depixelate instead of unblur** — dropped the CSS blur entirely. Each thumbnail's real content (gradient artwork, waveform silhouette, doc rules) is now sampled in JS into an 8×8 pixel grid, quantized into three levels — 2×2 → 4×4 → 8×8 — that snap forward as the upload climbs, then the 64 tiles dissolve one by one against actual progress in a deterministic scatter, so the image resolves out of blocks like a progressive load. Driven by one CSS variable on the parent (`opacity: clamp(0, calc((var(--udz-t) - var(--udz-p)) * 26), 1)`), so 512 tiles cost one attribute write per tick.\n\n2. **Concurrency bar reinvented** — the aggregate progress bar is gone. In its place: a two-lane schedule, one lane per concurrent slot. Each file is a segment sized by how many seconds it takes, so the video visibly dominates; running segments carry a bright leading head and a sweeping accent sheen, done ones sit back at 30% accent as history, the failed one goes red, and queued files are hatched *ghost* segments dropped into whichever lane the scheduler predicts will free up first — a forecast that hardens as it runs. Hovering or tab-focusing a segment desaturates its siblings and lights the matchin"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "title": "Press Kit Upload",
+  "description": "A batch uploader where each file's preview develops out of blur as its ring fills, so progress is something you see rather than only read. It opens mid-flight — one file landed, two climbing — then the video drops its connection at 61%, freezes its ring red, and waits for a retry that rewinds and climbs again.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Upload"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.733Z",
+  "ideaId": "c5f6981e69ab",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real product surface with every state finished — queued, uploading, failed, retrying, done, empty, disabled — built on one mechanic (the preview resolving with the upload) on a flat light ground, which is the interface work Herb asked for over abstract demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "polish": "PASS, no comments left in the diff.\n\n**The five things and what I did about them:**\n\n1. **Row exit was silently dead.** `udz-enter`'s `animation-fill-mode: both` pinned `opacity: 1` and `translateY(0)` forever, and a filling animation beats a transition in the cascade — so `[data-exiting] { opacity: 0 }` never applied and removing a file just squashed the row at full strength, while adding one popped the container open with no height motion. Rebuilt enter and exit as paired animations (`udz-row-open`/`udz-row-close` on the height, `udz-rise`/`udz-fall` on the body), so rows now grow in and fold out on both ends.\n\n2. **The first frame was empty.** Five files sitting at 0%, every thumbnail fully blurred, every ring blank, footer reading `0 of 5 done · 0.0 of 172.3 MB` — the mechanic the piece is about was invisible at load. Seeded it mid-flight: one file landed with its check drawn, two climbing at 44% and 23% with half-developed previews, and the failure now hits ~2s in instead of ~5s.\n\n3. **The right rail shifted on every status change.** The percent unmounted at `done` and the Retry button mounted at `error`, shoving the ring and the close button sideways row by row. Gave that clu",
+    "polishUsage": {
+      "input": 1794811,
+      "output": 31120
+    },
+    "polishedAt": "2026-08-31T02:08:58.038Z"
+  },
+  "building": false
+}

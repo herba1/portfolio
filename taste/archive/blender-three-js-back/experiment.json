@@ -1,0 +1,36 @@
+{
+  "title": "Blender to Three.js and Back: 10 Tips for a Better Workflow",
+  "description": "A practical collection of tips for combining AI, Blender, and Blender MCP to streamline your Three.js workflow.",
+  "tags": [
+    "motion",
+    "interface"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:26:20.973Z",
+  "ideaId": "df62599d7d96",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "From codrops",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "url": "https://tympanus.net/codrops/2026/08/24/blender-to-three-js-and-back-10-tips-for-a-better-workflow/",
+    "license": null,
+    "kind": "harvest",
+    "media": null
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 2922628,
+      "output": 38384
+    },
+    "durationMs": 404770,
+    "turns": 40,
+    "sessionId": "16f780ac-984d-4798-a22e-fb85f8b614db",
+    "finishedAt": "2026-08-31T01:33:07.726Z",
+    "ok": false
+  }
+}

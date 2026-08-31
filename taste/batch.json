@@ -1,0 +1,63 @@
+{
+  "createdAt": "2026-08-31T01:40:26.180Z",
+  "tasteVersion": 1,
+  "ideas": [
+    {
+      "id": "74f7c549ff16",
+      "ts": "2026-08-31T01:40:11.255Z",
+      "kind": "brief",
+      "usedAt": null,
+      "license": null,
+      "media": null,
+      "source": "briefs",
+      "briefId": "inline-table",
+      "url": null,
+      "title": "Inline-editable table",
+      "summary": "A data table where cells edit in place, Tab and arrows move focus, edits show a pending state then commit, with an undo toast that counts down.",
+      "tags": [
+        "ui",
+        "table",
+        "keyboard"
+      ],
+      "score": 3.5
+    },
+    {
+      "id": "b655bad2176b",
+      "ts": "2026-08-31T01:40:26.178Z",
+      "kind": "brief",
+      "usedAt": null,
+      "license": null,
+      "media": null,
+      "source": "briefs",
+      "briefId": "drop-zone",
+      "url": null,
+      "title": "Upload drop zone",
+      "summary": "A drag-and-drop uploader with per-file progress rings, thumbnail previews, retry on failure, and a queue summary line. Simulate uploads with realistic timing.",
+      "tags": [
+        "ui",
+        "upload",
+        "progress"
+      ],
+      "score": 3.46
+    },
+    {
+      "id": "fd04715da610",
+      "ts": "2026-08-31T01:40:26.178Z",
+      "kind": "brief",
+      "usedAt": null,
+      "license": null,
+      "media": null,
+      "source": "briefs",
+      "briefId": "stat-cards",
+      "url": null,
+      "title": "Live stat cards",
+      "summary": "A row of stat cards with sparklines, deltas coloured by direction, numbers that tick live in tabular figures, and a hover that reveals the last 7 points.",
+      "tags": [
+        "ui",
+        "data",
+        "numbers"
+      ],
+      "score": 3.45
+    }
+  ]
+}

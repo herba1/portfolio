@@ -9,6 +9,10 @@
   background: var(--ss-bg);
   color: var(--ss-ink);
   font-family: var(--font-geist-sans), system-ui, sans-serif;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   transition:
     background 450ms cubic-bezier(0.4, 0, 0.2, 1),
     color 450ms cubic-bezier(0.4, 0, 0.2, 1);
@@ -30,6 +34,8 @@
 
 .ss-hint {
   font-size: 0.9375rem;
+  font-weight: var(--font-weight-meta);
+  letter-spacing: -0.13px;
   color: var(--ss-ink-secondary);
 }
 
@@ -65,12 +71,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 1.375rem;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  font-weight: var(--font-weight-semibold);
+  letter-spacing: -0.43px;
   line-height: 1.35;
 }
 
 .ss-pick__artist {
+  font-weight: var(--font-weight-meta);
   color: var(--ss-ink-secondary);
 }
 
@@ -80,7 +87,8 @@
   bottom: 1.5rem;
   padding: 0.5rem 0.875rem;
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: var(--font-weight-medium);
+  letter-spacing: -0.09px;
   color: var(--ss-ink);
   border: 1px solid var(--ss-line);
   border-radius: 8px;

@@ -6,7 +6,19 @@
     "dev": "NODE_OPTIONS='--no-experimental-webstorage' next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint ."
+    "lint": "eslint . && node scripts/check-type-system.mjs",
+    "lint:type": "node scripts/check-type-system.mjs",
+    "check:shaders": "node scripts/check-shaders.mjs",
+    "predev": "node scripts/lab-registry.mjs",
+    "prebuild": "node scripts/lab-registry.mjs",
+    "prelint": "node scripts/lab-registry.mjs",
+    "lab:registry": "node scripts/lab-registry.mjs",
+    "lab:supply": "node scripts/lab-supply.mjs",
+    "lab:generate": "node scripts/lab-generate.mjs",
+    "lab:gate": "node scripts/lab-gate.mjs",
+    "lab:learn": "node scripts/lab-learn.mjs",
+    "lab:cleanup": "node scripts/lab-cleanup.mjs",
+    "lab:run": "node scripts/lab-run.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
@@ -49,6 +61,7 @@
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",
+    "@shaderfrog/glsl-parser": "^7.0.1",
     "@tailwindcss/postcss": "^4",
     "eslint": "^9",
     "eslint-config-next": "^16.2.3",

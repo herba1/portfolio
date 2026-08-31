@@ -1,0 +1,34 @@
+{
+  "title": "Drop Zone",
+  "description": "Files land on the plate and climb a ring toward done, thumbnails riding along for the ones that have them. About one in five stalls out with a reason and waits on a retry, while a line underneath keeps an honest count of the queue.",
+  "tags": [
+    "ui",
+    "upload",
+    "progress"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:40:26.223Z",
+  "ideaId": "b655bad2176b",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "A real product flow with every state a file can be in — dragging, uploading, thumbnailed, failed, retried — matching Herb's preference for finished interface mechanics over abstract demos.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 2315428,
+      "output": 22341
+    },
+    "durationMs": 286631,
+    "turns": 35,
+    "sessionId": "a07a3f99-2ef0-4e09-bd7f-8813e4d3a6e0",
+    "finishedAt": "2026-08-31T01:45:15.199Z",
+    "ok": true
+  }
+}

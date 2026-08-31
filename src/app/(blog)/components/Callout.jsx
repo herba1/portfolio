@@ -32,7 +32,7 @@ export function Callout({ type = 'note', title, children }) {
       {/* `text-heading-sm` is 14px on 16px of leading — the same size as the
           body below it, just with the leading pulled in. That's the whole
           heading treatment; it needs no extra weight utility. */}
-      {title && <p className="text-heading-sm mb-1.5">{title}</p>}
+      {title && <p className="text-heading-sm mb-2">{title}</p>}
       <div className="text-ui-lg [&>p]:m-0">{children}</div>
     </aside>
   )

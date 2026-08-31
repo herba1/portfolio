@@ -1,0 +1,46 @@
+{
+  "title": "Odometer Detent",
+  "description": "A rotary dial that spins on its own momentum and clicks to rest like the real thing. Grabbing it bends and stretches the needle with your pull, the ticks only stand up while you're interacting, and the odometer readout rolls cleanly to its next value instead of freezing mid-digit.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Typography"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T00:38:23.275Z",
+  "ideaId": "fdbd7a4da6f3",
+  "parentSlug": "detent-v2",
+  "tasteVersion": 1,
+  "intent": "Replaces the dead, unreactive knob and static number-swap Herb flagged on Evolve Detent with a dial that visibly answers to touch: a velocity-lit glow ring, ticks that scale and pulse as the mark passes them, and a true odometer roll on the readout.",
+  "building": false,
+  "iteration": 1,
+  "iteratedAt": "2026-08-31T01:12:12.452Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T01:12:12.452Z",
+      "usage": {
+        "input": 948545,
+        "output": 20018
+      },
+      "durationMs": 236870,
+      "turns": 13,
+      "summary": "1. Found and fixed the actual bug: the readout's CSS transition was gated by `data-settling`, cleared by a 280ms timeout shorter than the 320ms transition — so mid-animation the `transition` property vanished and the digit strip froze wherever it was. Now gated by `data-live` (dragging/coasting): instant, untweened snapping while you're actively driving it, and an uninterrupted full-duration animation to the next value everywhere else (release, coast-end, keyboard steps).\n2. The knob mark now bends (skewX) and stretches (scaleY) live while dragging, driven by the tension between your raw pointer angle and the dial's last committed angle (how hard/fast you're pulling) and by radial pull distance from center (how far out you're gripping). Springs back to straight on release.\n3. Ticks now sit short at rest and only extend to full length while `data-active` (dragging, coasting, or settling) is true on the stage — they react to being touched instead of always looking fully stretched.\n\nDONE detent-v2-v2"
+    }
+  ],
+  "source": {
+    "kind": "evolve"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 948545,
+      "output": 20018
+    },
+    "durationMs": 236870,
+    "turns": 13,
+    "sessionId": "7c7cadbb-fa32-41d2-b0f7-799e96dc2f86",
+    "finishedAt": "2026-08-31T01:12:12.452Z",
+    "ok": true
+  }
+}

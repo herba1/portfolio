@@ -111,7 +111,7 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
               className="tl-rise flex aspect-square h-full shrink-0 items-center justify-center"
               style={{ backgroundColor: tier.color, '--tl-delay': `${rowDelay}s` }}
             >
-              <span className="text-[clamp(1.5rem,5vh,3rem)] leading-none font-bold tracking-tight text-ink">
+              <span className="text-[clamp(1.5rem,5vh,3rem)] leading-none font-bold tracking-[var(--text-title-lg--letter-spacing)] text-ink">
                 {tier.label}
               </span>
             </div>

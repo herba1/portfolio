@@ -56,3 +56,11 @@ next-env.d.ts
 # local audio experiment assets — not for the public deploy
 public/audio/
 
+
+# generated from src/app/lab/*/experiment.json
+/src/app/lab/registry.js
+
+# lab runtime state and personal claude config
+/taste/runs/
+.claude/settings.local.json
+.claude/worktrees/

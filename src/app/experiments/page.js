@@ -1,41 +1,17 @@
 import GlitchText from "@/app/ui/GlitchText";
 import TransitionLink from "@/app/ui/TransitionLink";
+import { LAB } from "@/app/lab/registry";
+import { EXPERIMENTS } from "./list";
 
-const EXPERIMENTS = [
-  {
-    slug: "/backdrop",
-    title: "Backdrop",
-    description:
-      "A rebuild of Apple Music's dynamic now-playing backdrop — four rotating copies of the artwork, twisted, blurred and pushed through a saturation lift.",
-    tags: ["WebGL", "Audio"],
-  },
-  {
-    slug: "/song-search",
-    title: "Song Search",
-    description:
-      "A search dock that resolves songs, covers and previews from Apple's catalogue — shown on both a light and a dark ground.",
-    tags: ["Interface"],
-  },
-  {
-    slug: "/deck",
-    title: "Deck",
-    description: "Fifty album covers on a stack you can run through, and fan out.",
-    tags: ["CSS", "Motion"],
-  },
-  {
-    slug: "/psa",
-    title: "PSA",
-    description: "A collection of graded cards, and the interaction for filling it.",
-    tags: ["Motion"],
-  },
-  {
-    slug: "/tuner",
-    title: "Tuner",
-    description:
-      "A configurable instrument tuner — live pitch detection on a glowing glass display.",
-    tags: ["Audio", "DSP"],
-  },
-];
+const SHIPPED_FROM_LAB = LAB.filter((item) => item.status === "shipped").map((item) => ({
+  slug: `/lab/${item.slug}`,
+  title: item.title,
+  description: item.description,
+  tags: item.tags,
+}));
+
+
+const ALL_EXPERIMENTS = [...SHIPPED_FROM_LAB, ...EXPERIMENTS];
 
 export default function ExperimentsIndex() {
   return (
@@ -45,7 +21,7 @@ export default function ExperimentsIndex() {
           <GlitchText text="Experiments" />
         </h1>
         <ul className="flex flex-col gap-6">
-          {EXPERIMENTS.map((experiment, index) => (
+          {ALL_EXPERIMENTS.map((experiment, index) => (
             <li
               key={experiment.slug}
               className="blog-list-item"

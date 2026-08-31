@@ -1,0 +1,26 @@
+{
+  "title": "Detent",
+  "description": "One large knob on an empty page — drag it in a circle and it clicks through detents you feel as a snap in the easing. A ring of ticks lights up in sequence as the value climbs, read out below in tabular figures.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "manual"
+  ],
+  "status": "liked",
+  "createdAt": "2026-08-30T23:32:13.393Z",
+  "ideaId": "acba8e910b4e",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "Tests a tunable, tactile single-object instrument in the Tuner/Ink vein of hand-rolled, presetless controls, on the flat Swiss light palette.",
+  "source": {
+    "kind": "manual"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "costUsd": 0.6442691999999999,
+    "turns": 20,
+    "sessionId": "b3eb2394-dc7b-474b-9b4a-125e115518be",
+    "finishedAt": "2026-08-30T23:36:41.643Z",
+    "ok": true
+  }
+}

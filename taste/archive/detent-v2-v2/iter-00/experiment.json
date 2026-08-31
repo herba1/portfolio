@@ -1,0 +1,27 @@
+{
+  "title": "Odometer Detent",
+  "description": "A rotary dial that spins on its own momentum and clicks to rest like the real thing. The ticks it passes flare and pulse with the turn, and the count below rolls digit by digit like a mechanical odometer.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Typography"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T00:38:23.275Z",
+  "ideaId": "fdbd7a4da6f3",
+  "parentSlug": "detent-v2",
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Replaces the dead, unreactive knob and static number-swap Herb flagged on Evolve Detent with a dial that visibly answers to touch: a velocity-lit glow ring, ticks that scale and pulse as the mark passes them, and a true odometer roll on the readout.",
+  "source": {
+    "kind": "evolve"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "costUsd": 0.8651337999999998,
+    "turns": 21,
+    "sessionId": "e2723ec7-b7b1-45d2-8235-ce14f938b32e",
+    "finishedAt": "2026-08-31T00:43:55.775Z",
+    "ok": true
+  }
+}

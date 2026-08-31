@@ -1,0 +1,52 @@
+{
+  "title": "Evolve Detent",
+  "description": "A rotary knob that keeps the physics of a real dial — flick it and it spins on its own momentum, decelerating step by step until it clicks to rest. The pointer is one continuous rounded blade that bends and blurs with live velocity instead of popping between ghost copies. Ticks magnify as the pointer sweeps past them, and the readout below rolls through its digits like an odometer instead of jumping.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "manual"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-30T23:38:00.980Z",
+  "ideaId": "ea87b7343d07",
+  "parentSlug": "detent",
+  "tasteVersion": 1,
+  "intent": "Pushes the motion of the loved tactile readout further with real momentum and inertia, so the knob feels like a weighted physical object rather than a 1:1 drag surface.",
+  "building": false,
+  "iteration": 2,
+  "iteratedAt": "2026-08-31T01:16:28.336Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T00:54:59.906Z",
+      "costUsd": 0.9327628000000001,
+      "summary": "PASS confirmed, `status: \"candidate\"` set manually in `experiment.json` (the gate script has a pre-existing bug in `scripts/lab-gate.mjs:96-97` that overwrites its own broken→candidate flip with a stale manifest object — outside my folder scope, didn't touch it).\n\n1. Replaced the flat white-line knob with a tapered accent-tipped needle, a multi-stop radial-gradient face, layered shadow, hover lift, a press scale-down while dragging, an accent halo ring on drag, and a breathing energy-glow animation while coasting — plus two fading ghost needles that trail behind the pointer, scaled by live drag/coast velocity, so spinning it fast visibly looks like it's spinning.\n2. The value readout is now a real odometer (`RotaryOdometer.jsx`): each of 3 fixed tabular-nums digit columns rolls vertically to its new digit on a spring-eased 320ms transition instead of swapping text in place.\n3. Ticks now continuously scale and glow based on angular proximity to the current pointer position (stronger while dragging/coasting), so the ring visibly \"focuses\" around wherever the hand points and reacts as it moves, on top of the existing lit-progress fill.\n4. Addressed via 1–3 above — knob, ticks, and rea"
+    },
+    {
+      "iteration": 2,
+      "at": "2026-08-31T01:16:28.336Z",
+      "usage": {
+        "input": 734086,
+        "output": 11102
+      },
+      "durationMs": 121823,
+      "turns": 11,
+      "summary": "1. Left the knob body untouched — it already has hover lift, drag scale, and coasting glow from round 1; no new complaint on the base shape this round.\n2. Not touched — the odometer reel digits with tabular-nums already handle animated number changes, no regression made.\n3. Not touched — tick proximity scaling on drag/close-to-pointer already implemented, still intact.\n4. Rebuilt the pointer: removed the clip-path triangle and the two ghost-trail copies (`DetentV2Experience.jsx:215-225`, `rotary.css`), replaced with one capsule-shaped mark (`border-radius: 999px`, rounded on both ends) that bends via `skewX` and softens via `filter: blur`, both driven continuously by live velocity — no more discrete elements popping in/out at speed thresholds, so it reads as one arcing piece instead of glitching.\n\nDONE detent-v2"
+    }
+  ],
+  "source": {
+    "kind": "evolve"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 734086,
+      "output": 11102
+    },
+    "durationMs": 121823,
+    "turns": 11,
+    "sessionId": "e8626779-ad1d-4b68-bb83-4c9387d1cdbe",
+    "finishedAt": "2026-08-31T01:16:28.336Z",
+    "ok": true
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "title": "Ledger",
+  "description": "A royalty statement you edit in place — Tab and the arrow keys walk the grid, every cell saves itself behind a sweeping hairline, and the payout and the grand total roll digit by digit when it lands. One save fails on purpose, one row is already paid and locked, and a countdown ring gives you six seconds to take any of it back.",
+  "tags": [
+    "Interface",
+    "Table",
+    "Keyboard"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.727Z",
+  "ideaId": "5bc140013e5e",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A dense, tabular-numeral data surface on the light ground with one mechanic finished to the edge — real content, full keyboard control, and numbers that roll rather than jump, which is the interface work Herb asked for over abstract demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "polish": "Clean. Gate passes.\n\n**The five fixes**\n\n1. **Loading was a lie about the layout** — eight 68px full-width shimmer bars became seven column-shaped bars per row at the exact `--iet-row-h` (46px), so the panel no longer jerks its height and the columns no longer rewrite themselves when data lands.\n2. **Status swapped instantly and grew the row** — Ready/Saving/Saved/Retry/Paid now live in a fixed-height 28px stack, each with a paired blur focus-pull enter (200ms) and a faster same-direction exit (100ms); the checkmark draws on a transition so it re-runs every save, and the failed row no longer stands 4px taller than its neighbours.\n3. **Escape dropped focus to `<body>`** — cancel now returns focus to the cell you left, so the keyboard path survives a mistake; blur-cancel deliberately does not steal focus back from whatever you clicked.\n4. **The grand total ignored the filter and never moved** — the footer sums the visible rows and rolls digit by digit as you type, slots are keyed from the right so adding a digit rolls instead of remapping, and a commit tints the row payout and the total green or red by direction.\n5. **The toast entered but vanished** — it now exits 8px down under `--",
+    "polishUsage": {
+      "input": 1793055,
+      "output": 33867
+    },
+    "polishedAt": "2026-08-31T02:08:37.658Z"
+  },
+  "building": false
+}

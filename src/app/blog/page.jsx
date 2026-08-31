@@ -28,7 +28,7 @@ export default function BlogIndex() {
         {/* Two steps off the scale — each brings its own weight, tracking and
             leading, so there's no font-bold / tracking-tighter stack that has
             to be re-guessed at the md breakpoint. */}
-        <h1 className="text-ink text-title-xl md:text-display mb-8">
+        <h1 className="text-ink text-title-sm mb-8">
           <GlitchText text="Writing" />
         </h1>
         {publishedPosts.length === 0 ? (
@@ -51,7 +51,7 @@ export default function BlogIndex() {
                           day: 'numeric',
                         })}
                       </time>
-                      <h2 className="text-ink text-title-sm md:text-title mt-1 transition-colors group-hover:text-accent">
+                      <h2 className="text-ink text-heading mt-1 transition-colors group-hover:text-accent">
                         {post.title}
                       </h2>
                       <p className="text-ink-secondary text-body mt-2">

@@ -838,22 +838,22 @@
   /* Dense UI text — px tracking, 4px leading grid, optically heavier */
   --text-ui-2xs: 10px;
   --text-ui-2xs--line-height: 14px;
-  --text-ui-2xs--letter-spacing: 0px;
+  --text-ui-2xs--letter-spacing: 0.09px;
   --text-ui-2xs--font-weight: var(--font-weight-emphasis);
 
   --text-ui-xs: 11px;
   --text-ui-xs--line-height: 14px;
-  --text-ui-xs--letter-spacing: -0.05px;
+  --text-ui-xs--letter-spacing: 0.04px;
   --text-ui-xs--font-weight: var(--font-weight-caption);
 
   --text-ui-sm: 12px;
   --text-ui-sm--line-height: 16px;
-  --text-ui-sm--letter-spacing: -0.1px;
+  --text-ui-sm--letter-spacing: 0px;
   --text-ui-sm--font-weight: var(--font-weight-medium);
 
   --text-ui: 13px;
   --text-ui--line-height: 16px;
-  --text-ui--letter-spacing: -0.1px;
+  --text-ui--letter-spacing: -0.04px;
   --text-ui--font-weight: var(--font-weight-body-sm);
 
   --text-ui-lg: 14px;
@@ -865,11 +865,11 @@
    * curve does NOT apply. */
   --text-body: 16px;
   --text-body--line-height: 24px;
-  --text-body--letter-spacing: -0.18px;
+  --text-body--letter-spacing: -0.17px;
 
   --text-body-lg: 18px;
   --text-body-lg--line-height: 27px;
-  --text-body-lg--letter-spacing: -0.2px;
+  --text-body-lg--letter-spacing: -0.26px;
 
   /* Headings at reading sizes — same size as the body steps above, just
    * with the leading pulled in. Use these for a card title or a row
@@ -881,51 +881,51 @@
 
   --text-heading: 16px;
   --text-heading--line-height: 20px;
-  --text-heading--letter-spacing: -0.18px;
+  --text-heading--letter-spacing: -0.17px;
   --text-heading--font-weight: var(--font-weight-semibold);
 
   /* Titles — em tracking, 600 ceiling (700 is reserved for display) */
   --text-title-sm: 20px;
   --text-title-sm--line-height: 25px;
-  --text-title-sm--letter-spacing: -0.01em;
+  --text-title-sm--letter-spacing: -0.017em;
   --text-title-sm--font-weight: var(--font-weight-semibold);
 
   --text-title: 24px;
   --text-title--line-height: 29px;
-  --text-title--letter-spacing: -0.015em;
+  --text-title--letter-spacing: -0.022em;
   --text-title--font-weight: var(--font-weight-semibold);
 
   --text-title-lg: 32px;
   --text-title-lg--line-height: 37px;
-  --text-title-lg--letter-spacing: -0.02em;
+  --text-title-lg--letter-spacing: -0.027em;
   --text-title-lg--font-weight: var(--font-weight-semibold);
 
   --text-title-xl: 40px;
   --text-title-xl--line-height: 44px;
-  --text-title-xl--letter-spacing: -0.025em;
+  --text-title-xl--letter-spacing: -0.030em;
   --text-title-xl--font-weight: var(--font-weight-semibold);
 
   --text-display: 64px;
   --text-display--line-height: 1.02;
-  --text-display--letter-spacing: -0.032em;
+  --text-display--letter-spacing: -0.035em;
   --text-display--font-weight: var(--font-weight-semibold);
 
   /* Retrofit the stock Tailwind scale with the same size-aware curve, so
    * every existing `text-sm` / `text-xl` / `text-4xl` call site is corrected
    * without touching a single component. Values retuned for Geist. */
-  --text-xs--letter-spacing: -0.1px;
+  --text-xs--letter-spacing: 0px;
   --text-sm--letter-spacing: -0.09px;
-  --text-base--letter-spacing: -0.18px;
-  --text-lg--letter-spacing: -0.2px;
-  --text-xl--letter-spacing: -0.01em;
-  --text-2xl--letter-spacing: -0.015em;
-  --text-3xl--letter-spacing: -0.018em;
-  --text-4xl--letter-spacing: -0.022em;
-  --text-5xl--letter-spacing: -0.026em;
-  --text-6xl--letter-spacing: -0.032em;
-  --text-7xl--letter-spacing: -0.034em;
-  --text-8xl--letter-spacing: -0.036em;
-  --text-9xl--letter-spacing: -0.038em;
+  --text-base--letter-spacing: -0.17px;
+  --text-lg--letter-spacing: -0.26px;
+  --text-xl--letter-spacing: -0.017em;
+  --text-2xl--letter-spacing: -0.022em;
+  --text-3xl--letter-spacing: -0.026em;
+  --text-4xl--letter-spacing: -0.029em;
+  --text-5xl--letter-spacing: -0.032em;
+  --text-6xl--letter-spacing: -0.034em;
+  --text-7xl--letter-spacing: -0.036em;
+  --text-8xl--letter-spacing: -0.038em;
+  --text-9xl--letter-spacing: -0.039em;
 
   /* Tailwind pins every size from 5xl up to line-height:1, which flattens
    * the curve exactly where it should keep tightening — and 1.0 is too
@@ -1767,11 +1767,18 @@ body {
   font-size: var(--text-body);
   line-height: var(--text-body--line-height);
   letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--font-weight-meta);
   color: var(--color-ink-reading);
 }
 
 .prose p {
-  margin-bottom: 1.5em;
+  margin-bottom: 24px;
+}
+
+.prose strong,
+.prose b {
+  font-weight: var(--font-weight-semibold);
+  color: var(--color-ink);
 }
 
 /* 600, not 700: emphasis in this system tops out at semibold, and Geist's
@@ -1780,19 +1787,28 @@ body {
 .prose h3,
 .prose h4 {
   font-family: var(--font-sans);
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
   font-weight: var(--font-weight-semibold);
   color: var(--color-ink);
-  letter-spacing: -0.015em;
+  text-wrap: balance;
+}
+
+.prose h3,
+.prose h4 {
+  font-weight: var(--font-weight-strong);
 }
 
 .prose pre {
-  padding: 1.25rem;
+  padding: 20px;
   border-radius: var(--radius-sm);
 }
 
 .prose pre code {
   font-size: 0.875rem;
-  line-height: 1.6;
+  line-height: 20px;
+  letter-spacing: -0.09px;
 }
 
 /* ─────────────────────────────────────────────

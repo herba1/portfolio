@@ -1,0 +1,37 @@
+{
+  "title": "Galaxium",
+  "description": "A spiral galaxy of forty thousand stars, spun and lit entirely on the GPU through WebGPU and TSL — arms, bulge and turbulence are all one shader graph, no CPU per-star math. Drag to orbit, scroll to dive toward the core, and it keeps drifting on its own the moment you let go.",
+  "tags": [
+    "WebGL",
+    "WebGPU",
+    "Shaders"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:18:17.668Z",
+  "ideaId": "55f3d0c58015",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "Pairs an instrument-style tuning panel with one strong GPU mechanic and a soft core glow, the optical-halo touch Herb keeps reaching for.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "url": "https://galaxium.app",
+    "license": null,
+    "kind": "harvest",
+    "media": null
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 3220078,
+      "output": 48638
+    },
+    "durationMs": 604790,
+    "turns": 50,
+    "sessionId": "454dd243-1fcc-457b-985c-e00335cca9c2",
+    "finishedAt": "2026-08-31T01:28:25.816Z",
+    "ok": false
+  }
+}

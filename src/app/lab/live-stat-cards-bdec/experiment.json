@@ -1,0 +1,60 @@
+{
+  "title": "Live board",
+  "description": "A settled box-office board for one night at Knockdown Center. The four metrics no longer share a chart: tickets sold is a column of 15-minute buckets that peaks at doors, gross volume is a drawn cumulative curve, sell-through is a capacity bar segmented by ticket tier against the 2,050 seat rule, and refunds is a sparse stem plot that sits empty until the first one lands. Nothing ticks — the ledger of 1,043 orders is finished and steady, so every value on screen is settled and the motion belongs to you. The order tape below carries the whole night; hover, arrow or pin a row and the board rewinds to that order at once — digits roll back, the curve clips to that minute, the columns behind the cursor step down, the capacity segments shrink to the seats sold by then with a marker left at the final level, and each card shows what that single order contributed. Escape or the reading pill in the header returns to final.",
+  "tags": [
+    "UI",
+    "Data",
+    "Numbers"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.735Z",
+  "ideaId": "85996279971e",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real product surface with realistic content and every state built out, serving Herb's preference for dense typographic data UI on a light Swiss ground over abstract visual demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-opus-5",
+    "usage": {
+      "input": 2418242,
+      "output": 56808
+    },
+    "durationMs": 644849,
+    "turns": 42,
+    "sessionId": "c7923b64-f75b-4aa5-a217-0ccee991380a",
+    "finishedAt": "2026-08-31T03:04:15.682Z",
+    "ok": true,
+    "polish": null
+  },
+  "building": false,
+  "gate": [],
+  "iteration": 2,
+  "iteratedAt": "2026-08-31T03:04:15.682Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T02:37:09.616Z",
+      "usage": {
+        "input": 1753901,
+        "output": 40172
+      },
+      "durationMs": 458830,
+      "turns": 22,
+      "summary": "1. **verdict iterate** — rebuilt the board around one strong mechanic instead of four decorative cards: the **order tape** is now the source of truth. `statFeed.js` replaced the random walk with a deterministic ledger of real orders (buyer, tier, seats, amount, channel, refunds); every card value is a fold of that ledger, so the numbers have a cause. New `Tape.jsx` renders the live tape below the cards — each arriving order slides the list down, fades in blurred at the top, and washes the cards it touched with an accent gradient before the digits roll. Hover or arrow through any row and the entire board rewinds to that order: values, deltas, a crosshair on all four sparklines, and a \"+$126 this order\" contribution pill. While you read, the tape **holds** — new sales queue behind an \"3 orders waiting\" pill and flush back in one blurred catch-up when you leave. Click pins a row, Escape resumes, arrows/Home/End walk the tape with roving tabindex. Cards became display surfaces (all interaction lives in one place); kept the rolling digits, delta chips, conveyor sparkline, loading skeletons, box-office stale/reconnect, empty refunds card, pause toggle, live region, mobile collapse and re"
+    },
+    {
+      "iteration": 2,
+      "at": "2026-08-31T03:04:15.682Z",
+      "usage": {
+        "input": 2418242,
+        "output": 56808
+      },
+      "durationMs": 644849,
+      "turns": 42,
+      "summary": "Gate: **PASS** (`node scripts/lab-gate.mjs live-stat-cards-bdec`).\n\n1. **verdict iterate (earlier round)** — kept the one mechanic that survived that round and sharpened it: the order tape is still the only instrument, but it now carries the entire 1,043-order ledger in a scrollable dense table with a column header, refund rows struck in red, roving tabindex, arrows/Home/End, click to pin, escape to release — so scrubbing sweeps the cursor across the *whole* night instead of the last twelve minutes.\n2. **verdict iterate** — rebuilt the board as a finished night at Knockdown Center: header carries the show, the sold-of-capacity, the on-sale window and doors; the old live/paused pill became a reading pill that shows `Final` disabled and `Reading 22:14` when held, and returns you to final. Cards lost the flag dots and reconnect theatre and gained a foot line with a real fact each (`peak 21:02, 256 seats`, `average order $107`, `64 seats left of 2,050`, `18 orders, 38 seats`), plus a per-order contribution readout. Skeleton → staggered reveal, empty refunds state and the accent wash all stayed, but the wash now fires from *your* scrub onto the cards that order touched.\n3. **note (same "
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "title": "Call sheet",
+  "description": "A crew roster where every cell edits in place — arrows and Tab move the selection, Enter opens it, and a commit turns pending, flashes, then settles. Undo rides a countdown toast for five seconds before the edit sticks for good.",
+  "tags": [
+    "ui",
+    "table",
+    "keyboard",
+    "forms"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:40:26.215Z",
+  "ideaId": "74f7c549ff16",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "A real spreadsheet-grade interface component — roving-tabindex keyboard grid, optimistic commit states, undoable edits — matching Herb's preference for finished interface mechanics over abstract demos.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 4276660,
+      "output": 50588
+    },
+    "durationMs": 555134,
+    "turns": 45,
+    "sessionId": "87b4f0e1-3248-43e1-9cf2-c5005fd7d823",
+    "finishedAt": "2026-08-31T01:49:43.379Z",
+    "ok": true
+  }
+}

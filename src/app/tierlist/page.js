@@ -32,7 +32,7 @@ export default async function TierListIndex() {
     <div className="bg-surface min-h-dvh">
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <header className="mb-8 flex items-end justify-between gap-4">
-          <h1 className="text-ink text-title-xl md:text-display">
+          <h1 className="text-ink text-title-sm">
             <GlitchText text="Tier Lists" />
           </h1>
           {isDev ? <NewListButton /> : null}
@@ -68,7 +68,7 @@ export default async function TierListIndex() {
                       <span className="text-ink-secondary text-ui-lg tabular-nums">
                         {list.rankedCount} of {list.count} ranked
                       </span>
-                      <h2 className="text-ink text-title-sm md:text-title mt-1 transition-colors group-hover:text-accent">
+                      <h2 className="text-ink text-heading mt-1 transition-colors group-hover:text-accent">
                         {list.title}
                       </h2>
                       {list.description || list.subtitle ? (

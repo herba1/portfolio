@@ -1,0 +1,29 @@
+{
+  "title": "Live board",
+  "description": "Four stat cards on a ticket feed that ticks every few seconds — digits roll on their own strips, the sparkline conveyors one step left, and the delta chip dips as it recolours by direction. Skeletons hand off to a staggered value-chip-sparkline reveal rather than a swap; the sell-through feed drops out, reconnects, and flushes its backlog in one long catch-up slide. Hover the sparkline or pin a card and the last seven readings unfold beneath it, scrubbed by a crosshair with the pointer or with arrow up and down.",
+  "tags": [
+    "UI",
+    "Data",
+    "Numbers"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.735Z",
+  "ideaId": "85996279971e",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real product surface with realistic content and every state built out, serving Herb's preference for dense typographic data UI on a light Swiss ground over abstract visual demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "polish": "The five things that felt unfinished, and what I changed:\n\n1. **The entrance was spent on grey boxes.** Cards blur-staggered in at mount while still skeletons, then at 900ms the real value, chip and sparkline just *appeared*. Added a `lsc-content-in` stagger (value → meta → track, 80ms apart) that fires on the `data-state` flip, so the skeletons hand off into a choreographed reveal; the header now enters too, and the sparkline draw retimed to land with it.\n\n2. **The crosshair latched on anywhere over the card.** `onPointerMove` was on the whole `<button>` and clamped, so hovering the *title* pinned a highlighted row and a permanent cursor line. Moved the pointer handlers onto `.lsc-card__track` — the crosshair now only exists while you're actually over the chart, and clears on leave/cancel.\n\n3. **Keyboard opened the reveal but couldn't touch it.** Arrows only jumped between cards; the seven-point list was inert. Split the mapping: ←/→ move cards, ↑/↓ scrub the crosshair through the points, Home/End jump to the ends, Escape drops the scrub then unpins.\n\n4. **`disabled` made the board unreachable.** Loading and empty cards were real `disabled` buttons, so for the first 900ms Tab skip",
+    "polishUsage": {
+      "input": 2625575,
+      "output": 28443
+    },
+    "polishedAt": "2026-08-31T02:08:06.877Z"
+  },
+  "building": false,
+  "gate": []
+}

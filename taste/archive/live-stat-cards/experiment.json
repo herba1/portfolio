@@ -1,0 +1,34 @@
+{
+  "title": "Live Stat Cards",
+  "description": "Four numbers that breathe — listeners, revenue, requests and error rate ticking on their own clock, each flashing green or red as it moves. Hold on a card and the sparkline gives up its last seven readings.",
+  "tags": [
+    "ui",
+    "data",
+    "numbers"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:45:17.333Z",
+  "ideaId": "fd04715da610",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "A dashboard mechanic finished to the edge — tabular ticking, directional colour, a hover reveal — matching Herb's preference for one interface idea done completely over a kit of half-built parts.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 2697485,
+      "output": 16729
+    },
+    "durationMs": 178093,
+    "turns": 44,
+    "sessionId": "6af4f288-93f1-4149-8471-41f080d48dcb",
+    "finishedAt": "2026-08-31T01:48:17.091Z",
+    "ok": true
+  }
+}

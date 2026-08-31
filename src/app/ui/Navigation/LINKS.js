@@ -21,4 +21,11 @@ export const DEV_LINKS = [
   { name: "Arcs", link: "/arcs", primary: true, dev: true },
   { name: "Album Card", link: "/experiments/album-card", primary: true, dev: true },
   { name: "Ask Me Why", link: "/ask-me-why", primary: true, dev: true },
+  { name: "Bio", link: "/bio", primary: true, dev: true },
+  { name: "Ink", link: "/ink", primary: true, dev: true },
+  { name: "Halftone", link: "/halftone", primary: true, dev: true },
+  { name: "Refract", link: "/refract", primary: true, dev: true },
+  { name: "Taste", link: "/taste", primary: true, dev: true },
+  { name: "Taste Profile", link: "/taste/profile", primary: true, dev: true },
+  { name: "Lab", link: "/lab", primary: true, dev: true },
 ];

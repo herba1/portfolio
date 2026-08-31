@@ -1,0 +1,37 @@
+{
+  "title": "Ripgrep",
+  "description": "A mock repo of Rust, JS and Markdown you can search live — type a pattern and watch matches light up while files under node_modules, target and .git stay skipped, just like a real .gitignore. Every flag you flip rebuilds the actual rg command above the results.",
+  "tags": [
+    "CLI",
+    "Regex",
+    "Interface"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-31T01:18:17.625Z",
+  "ideaId": "729629c182c1",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "A tunable, preset-driven panel in the same vein as Ink and Tuner, demonstrating a real dev tool's mechanic through flat Swiss-poster styling instead of a skeuomorphic terminal skin.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "url": "https://github.com/BurntSushi/ripgrep",
+    "license": "Unlicense",
+    "kind": "frontend-for-repo",
+    "media": null
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "usage": {
+      "input": 3029390,
+      "output": 46121
+    },
+    "durationMs": 477565,
+    "turns": 49,
+    "sessionId": "52156987-142e-4f3a-a690-8cd91e622067",
+    "finishedAt": "2026-08-31T01:26:18.644Z",
+    "ok": false
+  }
+}

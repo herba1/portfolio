@@ -1,0 +1,26 @@
+{
+  "title": "Evolve Detent",
+  "description": "A rotary knob that keeps the physics of a real dial — flick it and it spins on its own momentum, decelerating step by step until it clicks to rest. A ring of ticks lights up as it climbs, read out below in tabular figures.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "manual"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-08-30T23:38:00.980Z",
+  "ideaId": "ea87b7343d07",
+  "parentSlug": "detent",
+  "tasteVersion": 1,
+  "intent": "Pushes the motion of the loved tactile readout further with real momentum and inertia, so the knob feels like a weighted physical object rather than a 1:1 drag surface.",
+  "source": {
+    "kind": "evolve"
+  },
+  "generation": {
+    "model": "claude-sonnet-5",
+    "costUsd": 0.7047164,
+    "turns": 20,
+    "sessionId": "b8708e1b-6de8-44ac-9400-4a579d0b8e9d",
+    "finishedAt": "2026-08-30T23:42:02.460Z",
+    "ok": true
+  }
+}

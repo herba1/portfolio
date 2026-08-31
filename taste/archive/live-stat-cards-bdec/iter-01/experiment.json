@@ -1,0 +1,49 @@
+{
+  "title": "Live board",
+  "description": "A box-office board where the order tape is the source of truth: every ticket that lands slides onto the tape, sweeps the cards it touched with an accent wash, rolls their digits and pushes the sparkline one step. Hover or arrow through a row and the whole board rewinds to that order — values, deltas and a crosshair on every chart — while the tape holds and incoming sales stack behind a waiting pill that flushes them back in one blurred catch-up. Click to pin, escape to resume. Skeletons hand off to a staggered reveal, refunds sit empty until the first one lands, and the box-office feed drops out and reconnects on its own.",
+  "tags": [
+    "UI",
+    "Data",
+    "Numbers"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-08-31T01:53:20.735Z",
+  "ideaId": "85996279971e",
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real product surface with realistic content and every state built out, serving Herb's preference for dense typographic data UI on a light Swiss ground over abstract visual demos.",
+  "source": {
+    "kind": "brief"
+  },
+  "generation": {
+    "model": "claude-opus-5",
+    "usage": {
+      "input": 1753901,
+      "output": 40172
+    },
+    "durationMs": 458830,
+    "turns": 22,
+    "sessionId": "0ecd078f-ca03-4049-8d79-328b24f4c4c9",
+    "finishedAt": "2026-08-31T02:37:09.616Z",
+    "ok": true,
+    "polish": null
+  },
+  "building": false,
+  "gate": [],
+  "iteration": 1,
+  "iteratedAt": "2026-08-31T02:37:09.616Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-08-31T02:37:09.616Z",
+      "usage": {
+        "input": 1753901,
+        "output": 40172
+      },
+      "durationMs": 458830,
+      "turns": 22,
+      "summary": "1. **verdict iterate** — rebuilt the board around one strong mechanic instead of four decorative cards: the **order tape** is now the source of truth. `statFeed.js` replaced the random walk with a deterministic ledger of real orders (buyer, tier, seats, amount, channel, refunds); every card value is a fold of that ledger, so the numbers have a cause. New `Tape.jsx` renders the live tape below the cards — each arriving order slides the list down, fades in blurred at the top, and washes the cards it touched with an accent gradient before the digits roll. Hover or arrow through any row and the entire board rewinds to that order: values, deltas, a crosshair on all four sparklines, and a \"+$126 this order\" contribution pill. While you read, the tape **holds** — new sales queue behind an \"3 orders waiting\" pill and flush back in one blurred catch-up when you leave. Click pins a row, Escape resumes, arrows/Home/End walk the tape with roving tabindex. Cards became display surfaces (all interaction lives in one place); kept the rolling digits, delta chips, conveyor sparkline, loading skeletons, box-office stale/reconnect, empty refunds card, pause toggle, live region, mobile collapse and re"
+    }
+  ]
+}

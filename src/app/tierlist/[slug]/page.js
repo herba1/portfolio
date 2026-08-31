@@ -44,7 +44,7 @@ export default async function TierListSlugPage({ params }) {
           <ArrowLeft className="h-4 w-4" /> All lists
         </Link>
         <div className="min-w-0 px-2 text-center">
-          <h1 className="text-title truncate">
+          <h1 className="text-heading truncate">
             {data.title}
           </h1>
           {data.description ? (

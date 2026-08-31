@@ -396,7 +396,7 @@ export default function TierListEditor({ slug }) {
       onDrop={onRootDrop}
     >
       {/* ── Toolbar ── */}
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-2.5">
+      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Link
             href="/tierlist"
@@ -650,7 +650,7 @@ function ItemThumb({
         className="pointer-events-none h-full w-full object-cover"
       />
       {item.label ? (
-        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-ink/60 px-1.5 py-0.5 text-ui-2xs text-ink-inverse">
+        <span className="pointer-events-none absolute inset-x-0 bottom-0 truncate bg-ink/60 px-1.5 py-1 text-ui-2xs text-ink-inverse">
           {item.label}
         </span>
       ) : null}

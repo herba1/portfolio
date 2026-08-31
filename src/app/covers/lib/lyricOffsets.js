@@ -33,8 +33,12 @@ export const PREVIEW_OFFSETS_MS = {
   "GBAQT8800001": 43625,  // The La's — There She Goes
   "GBARL0900654": 47748,  // Lisa Mitchell — Neopolitan Dreams
   "GBUM72006890": 44229,  // The Beatles — The Long And Winding Road
+  "USKRS0324603": 15050,  // Elliott Smith — Clementine
+  "USKRS0326903": 14817,  // Elliott Smith — Ballad Of Big Nothing
+  "USKRS0326912": 14411,  // Elliott Smith — Say Yes
   "USNO10480706": 0,  // Sam Phillips — Reflecting Light
   "USSM11900141": 48030,  // Vampire Weekend — This Life
+  "USSM16801611": 48175,  // The Millennium — 5 a.m.
   "USSM19902988": 47829,  // Michael Jackson, Paul McCartney — The Girl Is Mine (with Paul McCartney)
   "USUG10500591": 44918,  // Jack Johnson — Upside Down
 };
