@@ -1,7 +1,7 @@
 import TransitionLink from '@/app/ui/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
 import { posts } from '../posts'
-import { absoluteUrl } from '@/lib/seo'
+import { absoluteUrl } from '@/lib/urls'
 import { ID, JsonLd, SITE_IMAGE, breadcrumbNode, graph } from '@/lib/jsonld'
 
 function seeded(i) {

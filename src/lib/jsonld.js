@@ -19,7 +19,7 @@ import {
   siteUrl,
   title as siteName,
 } from "@/app/constants"
-import { absoluteUrl } from "./seo"
+import { absoluteUrl } from "./urls"
 
 export const ID = {
   website: `${siteUrl}/#website`,

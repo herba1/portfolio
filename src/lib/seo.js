@@ -1,4 +1,13 @@
+// Server-side only (reads the filesystem). Components that may reach a
+// client bundle take `absoluteUrl` from lib/urls.js instead.
+
+import { existsSync } from "node:fs"
+import { join } from "node:path"
 import { author, siteUrl, title as siteName, xHandle } from "@/app/constants"
+import { posts } from "@/app/(blog)/posts"
+import { absoluteUrl } from "./urls"
+
+export { absoluteUrl }
 
 // Feed discovery links. Carried by every route's `alternates` because a
 // page-level `alternates` replaces the root's outright — canonical and feeds
@@ -6,15 +15,6 @@ import { author, siteUrl, title as siteName, xHandle } from "@/app/constants"
 export const FEEDS = {
   "application/rss+xml": `${siteUrl}/feed.xml`,
   "application/feed+json": `${siteUrl}/feed.json`,
-}
-
-// Absolute URL for a site path. The home page is `https://herb.art` with no
-// trailing slash — the form every existing canonical, sitemap entry and
-// backlink already uses — so it is special-cased rather than normalised.
-export function absoluteUrl(path = "/") {
-  if (/^https?:\/\//.test(path)) return path
-  if (path === "/" || path === "") return siteUrl
-  return `${siteUrl}${path.startsWith("/") ? path : `/${path}`}`
 }
 
 // The card image for a route: a hand-picked one when given (a post's first
@@ -90,4 +90,29 @@ export function pageMetadata({
     },
     ...(noindex ? { robots: { index: false, follow: false } } : {}),
   }
+}
+
+// A post's metadata, from its registry entry — so the MDX never restates
+// what posts.js already says and the studio's edits reach the <head> too.
+// The card is the 1200×630 JPEG scripts/blog-og.mjs cuts from the first
+// image; the raw photo is the fallback if that hasn't been generated.
+export function postMetadata(slug) {
+  const post = posts.find((p) => p.slug === slug)
+  if (!post) throw new Error(`No post registered for "${slug}" in (blog)/posts.js`)
+  const photo = post.images && post.images[0]
+  const card = photo && existsSync(join(process.cwd(), "public/blog/og", `${slug}.jpg`))
+    ? { url: `/blog/og/${slug}.jpg`, width: 1200, height: 630, alt: post.title, type: "image/jpeg" }
+    : photo
+  return pageMetadata({
+    title: post.title,
+    description: post.description,
+    path: `/${slug}`,
+    type: "article",
+    image: card,
+    publishedTime: new Date(post.date).toISOString(),
+    modifiedTime: new Date(post.updated || post.date).toISOString(),
+    tags: post.tags,
+    noindex: !post.published,
+    openGraph: { section: "Writing" },
+  })
 }

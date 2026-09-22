@@ -1,19 +1,9 @@
 import BlogHeader from '../components/BlogHeader'
+import { postMetadata } from '@/lib/seo'
 
-export const metadata = {
-  title: 'Component Test',
-  description: 'A comprehensive test of every MDX component available in the blog.',
-  // Unpublished (see posts.js) — the route still builds, so keep it out of
-  // search indexes and off the canonical map rather than letting a test page
-  // compete with real posts.
-  robots: { index: false, follow: false },
-  openGraph: {
-    images: ['/blog/images/example.png'],
-  },
-  twitter: {
-    images: ['/blog/images/example.png'],
-  },
-}
+{/* Unpublished in posts.js, so this resolves to noindex — the route still
+    builds, and a test page must not compete with real posts. */}
+export const metadata = postMetadata('test')
 
 <BlogHeader
   slug="test"

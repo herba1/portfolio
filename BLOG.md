@@ -28,37 +28,18 @@ The `(blog)` route group is invisible in the URL — your post renders at `herb.
 }
 ```
 
-The registry feeds the index, the sitemap, `/feed.xml`, `/feed.json`, `/llms.txt` and the post's BlogPosting structured data, so keep it accurate.
+The registry feeds the index, the sitemap, `/feed.xml`, `/feed.json`, `/llms.txt`, the post's `<head>` (via `postMetadata`) and its BlogPosting structured data, so keep it accurate. `npm run blog:og` (also run before every build) cuts a 1200×630 share card from the first image into `public/blog/og/<slug>.jpg` — commit it with the post.
 
 **3. Post template:**
 
 ```mdx
 import BlogHeader from '../components/BlogHeader'
+import { postMetadata } from '@/lib/seo'
 
-export const metadata = {
-  title: 'Your Title',            // the root layout appends " | herb.art"
-  description: 'A short summary.',
-  // No `alternates` here: the root layout's canonical resolves per route and
-  // carries the feed links; a page-level block would replace both.
-  openGraph: {
-    type: 'article',
-    title: 'Your Title',
-    description: 'A short summary.',
-    url: 'https://herb.art/your-slug',
-    publishedTime: '2026-04-15T00:00:00.000Z',
-    authors: ['Herbart Hernandez'],
-    tags: ['topic'],
-    images: ['/blog/images/photo.webp'],
-  },
-  twitter: {
-    card: 'summary_large_image',
-    site: '@herb_dev',
-    creator: '@herb_dev',
-    title: 'Your Title',
-    description: 'A short summary.',
-    images: ['/blog/images/photo.webp'],
-  },
-}
+// Title, description, canonical, article Open Graph, Twitter card and the
+// share image all come from the registry entry — nothing to restate here.
+// An unpublished post resolves to noindex.
+export const metadata = postMetadata('your-slug')
 
 <BlogHeader
   slug="your-slug"
