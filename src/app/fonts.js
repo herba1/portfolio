@@ -71,31 +71,24 @@ export const mono = localFont({
 // Historical name — kept so existing imports/call sites resolve.
 export const geist = sans
 
+// Decorative faces: the 404 page's big numerals and the studio's italics.
+// `preload: false` — every font declared here is otherwise preloaded on every
+// page of the site, and these are never in a first paint.
 export const spencer = localFont({
     src: '../../public/spencer-regular-webfont.woff2',
     display: 'swap',
+    preload: false,
 })
 
 export const spencerOutlined = localFont({
     src: '../../public/spencer-outlined-webfont.woff2',
     display: 'swap',
+    preload: false,
 })
 
-export const lastik = localFont({
-    src: '../../public/lastikfont.otf',
-    display: 'swap',
-})
-
-// Segmented LCD display faces for the tuner (DSEG, SIL OFL).
-// 14-segment renders note letters (incl. ♯), 7-segment renders digits.
-export const dsegFourteen = localFont({
-    src: '../../public/DSEG14Classic-Bold.woff2',
-    display: 'swap',
-    variable: '--font-dseg14',
-})
-
-export const dsegSeven = localFont({
-    src: '../../public/DSEG7Classic-Bold.woff2',
-    display: 'swap',
-    variable: '--font-dseg7',
-})
+// Lastik (public/lastikfont.otf) and the DSEG segmented-display faces
+// (public/DSEG14Classic-Bold.woff2, DSEG7Classic-Bold.woff2, SIL OFL) are
+// not declared here on purpose: nothing in src/ uses them, and a declared
+// font is preloaded on every page whether or not a page ever sets it. The
+// files stay in public/ for when the tuner (or something new) wants them —
+// declare with `preload: false` and scope the variable to that route.

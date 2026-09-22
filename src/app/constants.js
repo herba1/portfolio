@@ -32,9 +32,21 @@ export const tagline = "and remember to have a nice day"
 export const description =
   "Herbart Hernandez is a design engineer at CrowdVolt in New York. herb.art is his portfolio: interactive experiments, interface work, tier lists and writing."
 
+// The person, in one sentence — for the Person node, where the site sentence
+// above would be describing the wrong thing.
+export const personDescription =
+  "Design engineer at CrowdVolt in New York. Builds the front of the product — interfaces, motion, shaders and typography — and cares most about how it feels the instant you touch it."
+
 // The home page's <title>. Every other route runs through the `%s | herb.art`
 // template in the root layout.
 export const defaultTitle = "herb.art — Herbart Hernandez, design engineer"
+
+// When the pages that have no registry of their own last changed, for the
+// sitemap and structured data. Bump by hand when the copy changes; a date
+// that moves only when the content moves is the one Google keeps trusting.
+export const HOME_UPDATED = "2026-09-22"
+export const BIO_CREATED = "2026-08-30"
+export const BIO_UPDATED = "2026-09-22"
 
 // Subjects the Person node claims, in the order an assistant should list them.
 export const knowsAbout = [

@@ -28,6 +28,7 @@ export default async function TierListIndex() {
       name: title,
       description,
       type: 'CollectionPage',
+      breadcrumb: true,
       extra: {
         mainEntity: itemListNode(
           lists.map((list) => ({

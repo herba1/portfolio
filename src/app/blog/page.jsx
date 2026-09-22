@@ -3,7 +3,7 @@ import GlitchText from '@/app/ui/GlitchText'
 import ImageFan from '@/app/ui/ImageFan'
 import BlogPostLink from './BlogPostLink'
 import { absoluteUrl, pageMetadata } from '@/lib/seo'
-import { ID, JsonLd, breadcrumbNode, graph, webPageNode } from '@/lib/jsonld'
+import { ID, JsonLd, breadcrumbNode, graph, personRef, webPageNode } from '@/lib/jsonld'
 
 const title = 'Writing'
 const description =
@@ -25,6 +25,7 @@ export default function BlogIndex() {
       name: title,
       description,
       type: 'CollectionPage',
+      breadcrumb: true,
       extra: { mainEntity: { '@id': ID.blog } },
     }),
     {
@@ -34,7 +35,7 @@ export default function BlogIndex() {
       name: `${title} — herb.art`,
       description,
       inLanguage: 'en-US',
-      author: { '@id': ID.person },
+      author: personRef(),
       publisher: { '@id': ID.person },
       blogPost: publishedPosts.map((post) => ({
         '@type': 'BlogPosting',
@@ -43,8 +44,9 @@ export default function BlogIndex() {
         headline: post.title,
         description: post.description,
         datePublished: new Date(post.date).toISOString(),
+        ...(post.updated ? { dateModified: new Date(post.updated).toISOString() } : {}),
         ...(post.images && post.images[0] ? { image: absoluteUrl(post.images[0]) } : {}),
-        author: { '@id': ID.person },
+        author: personRef(),
       })),
     },
     breadcrumbNode([
@@ -76,11 +78,12 @@ export default function BlogIndex() {
                 <BlogPostLink slug={post.slug}>
                   <article className="border-line flex items-center justify-between gap-6 border-b pb-6 transition-transform duration-300 ease-out-quart group-hover:translate-x-1">
                     <div className="min-w-0 flex-1">
-                      <time className="text-ink-secondary text-ui-lg">
+                      <time dateTime={post.date} className="text-ink-secondary text-ui-lg">
                         {new Date(post.date).toLocaleDateString('en-US', {
                           year: 'numeric',
                           month: 'long',
                           day: 'numeric',
+                          timeZone: 'UTC',
                         })}
                       </time>
                       <h2 className="text-ink text-heading mt-1 transition-colors group-hover:text-accent">

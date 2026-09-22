@@ -4,10 +4,13 @@ import { ArrowLeft } from 'lucide-react'
 import { listSlugs, readTierlist } from '../lib'
 import TierListView from '../TierListView'
 import { isDevView } from '@/lib/viewMode'
-import { pageMetadata } from '@/lib/seo'
+import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { JsonLd, breadcrumbNode, graph, webPageNode } from '@/lib/jsonld'
 
 export const dynamic = 'force-static'
+// Only the lists in data/ exist; anything else is a 404 at the edge, not a
+// render attempt.
+export const dynamicParams = false
 
 export async function generateStaticParams() {
   return (await listSlugs()).map((slug) => ({ slug }))
@@ -48,6 +51,8 @@ export default async function TierListSlugPage({ params }) {
       path: `/tierlist/${slug}`,
       name: data.title || slug,
       description: listDescription(data),
+      ...(data.updated ? { dateModified: data.updated } : {}),
+      breadcrumb: true,
       extra: {
         mainEntity: {
           '@type': 'ItemList',
@@ -58,6 +63,8 @@ export default async function TierListSlugPage({ params }) {
             '@type': 'ListItem',
             position: i + 1,
             name: `${item.label} — tier ${tierRank.get(item.tier).label}`,
+            url: absoluteUrl(`/tierlist/${slug}`),
+            ...(item.src ? { image: absoluteUrl(item.src) } : {}),
           })),
         },
       },

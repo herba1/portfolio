@@ -31,7 +31,7 @@ Contact: ${email}. Elsewhere: GitHub https://github.com/herba1, X https://x.com/
 ## About
 
 ${line("Bio", "/bio", "who Herb is, what he works on, and how to reach him")}
-${line("Home", "/", "the front page: draggable name, live visitor eyes, and a 3D Gaussian splat scan of Herb")}
+${line("Home", "/", "the front page: live visitor eyes, a short introduction, and a 3D Gaussian splat scan of Herb")}
 
 ## Experiments
 

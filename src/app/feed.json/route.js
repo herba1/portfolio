@@ -25,6 +25,9 @@ export function GET() {
       id: absoluteUrl(`/${p.slug}`),
       url: absoluteUrl(`/${p.slug}`),
       title: p.title,
+      // The spec requires content_html or content_text on every item; the
+      // posts' full bodies are MDX with components, so the summary stands in.
+      content_text: p.description,
       summary: p.description,
       date_published: new Date(p.date).toISOString(),
       ...(p.updated ? { date_modified: new Date(p.updated).toISOString() } : {}),

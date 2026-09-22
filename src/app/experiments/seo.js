@@ -1,10 +1,12 @@
 import { EXPERIMENTS } from "./list"
 import { absoluteUrl, pageMetadata } from "@/lib/seo"
-import { ID, JsonLd, breadcrumbNode, graph, webPageNode } from "@/lib/jsonld"
+import { ID, JsonLd, breadcrumbNode, graph, personRef, webPageNode } from "@/lib/jsonld"
 
 // Metadata and structured data for one experiment page, from the same entry
 // the /experiments index renders — one title and one description per piece,
-// wherever it is shown.
+// wherever it is shown. `seoTitle` (a phrase a search matches: "Ink — a
+// relief-print shader in WebGL") is what the <title> and the cards carry;
+// `title` stays the short name the index, breadcrumb and heading show.
 
 export function experimentBySlug(slug) {
   const found = EXPERIMENTS.find((e) => e.slug === slug)
@@ -14,7 +16,12 @@ export function experimentBySlug(slug) {
 
 export function experimentMetadata(slug, overrides = {}) {
   const e = experimentBySlug(slug)
-  return pageMetadata({ title: e.title, description: e.description, path: e.slug, ...overrides })
+  return pageMetadata({
+    title: e.seoTitle || e.title,
+    description: e.description,
+    path: e.slug,
+    ...overrides,
+  })
 }
 
 // For pieces whose interface draws no heading of its own: the page's name
@@ -34,25 +41,31 @@ export function ExperimentHeading({ slug }) {
 export function ExperimentJsonLd({ slug }) {
   const e = experimentBySlug(slug)
   const url = absoluteUrl(e.slug)
+  // CreativeWork, not WebApplication: the software-application types carry a
+  // rich result that demands prices and ratings, and a piece without them
+  // just reports missing fields forever.
   const data = graph(
     webPageNode({
       path: e.slug,
-      name: e.title,
+      name: e.seoTitle || e.title,
       description: e.description,
+      ...(e.date ? { datePublished: e.date } : {}),
+      ...(e.updated || e.date ? { dateModified: e.updated || e.date } : {}),
+      breadcrumb: true,
       extra: {
         keywords: e.tags.join(", "),
         mainEntity: {
-          "@type": "WebApplication",
-          "@id": `${url}#app`,
+          "@type": "CreativeWork",
+          "@id": `${url}#work`,
           name: e.title,
           description: e.description,
           url,
-          applicationCategory: "DesignApplication",
-          operatingSystem: "Web",
-          browserRequirements: "Requires a modern browser; the WebGL pieces need WebGL 2.",
-          isAccessibleForFree: true,
+          genre: "Interactive web experiment",
           keywords: e.tags.join(", "),
-          author: { "@id": ID.person },
+          isAccessibleForFree: true,
+          ...(e.date ? { dateCreated: e.date } : {}),
+          ...(e.updated || e.date ? { dateModified: e.updated || e.date } : {}),
+          author: personRef(),
           creator: { "@id": ID.person },
           inLanguage: "en-US",
         },

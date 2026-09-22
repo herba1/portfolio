@@ -2,7 +2,7 @@ import Image from "next/image";
 import "./bio.css";
 import { pageMetadata } from "@/lib/seo";
 import { ID, JsonLd, breadcrumbNode, graph, personNode, webPageNode } from "@/lib/jsonld";
-import { lastModified } from "@/lib/lastModified";
+import { BIO_CREATED, BIO_UPDATED } from "@/app/constants";
 
 const bioDescription =
   "Herbart Hernandez is a design engineer at CrowdVolt in New York. What he builds, how he thinks about interfaces and typography, and how to reach him.";
@@ -24,9 +24,10 @@ const bioLd = graph(
     name: "Bio — Herbart Hernandez",
     description: bioDescription,
     type: "ProfilePage",
-    // From git at build time: when this file last changed, which is when the
-    // profile last changed. Falls back to the build date without history.
-    dateModified: lastModified("src/app/bio/page.js").toISOString(),
+    // Hand-maintained in constants.js: bump BIO_UPDATED when the copy changes.
+    dateCreated: BIO_CREATED,
+    dateModified: BIO_UPDATED,
+    breadcrumb: true,
     extra: { mainEntity: { "@id": ID.person } },
   }),
   personNode(),
@@ -120,7 +121,7 @@ export default function BioPage() {
             Most of what I make starts as a question about how something should feel
             and ends as a shader, a spring, or forty lines of CSS that took a week. A
             grid of fifty{" "}
-            <a className="bio__link" href="https://herb.art/covers">
+            <a className="bio__link" href="/covers">
               covers
             </a>{" "}
             <Image
@@ -131,7 +132,7 @@ export default function BioPage() {
               height={48}
             />{" "}
             that scrolls forever without dropping a frame. A{" "}
-            <a className="bio__link" href="https://herb.art/tuner">
+            <a className="bio__link" href="/tuner">
               tuner
             </a>{" "}
             <WaveIcon /> that lands on the pitch before you have finished the note.{" "}
@@ -159,20 +160,23 @@ export default function BioPage() {
             the part that <em>never survives a spec</em>.
           </p>
 
+          {/* /work is dev-only until it launches (see work/page.js), so the
+              public trail runs through Experiments and Writing instead. */}
           <p>
             Everything I have shipped sits under{" "}
-            <a className="bio__link" href="https://herb.art/work">
-              Work
-              <ArrowIcon />
-            </a>{" "}
-            and{" "}
-            <a className="bio__link" href="https://herb.art/experiments">
+            <a className="bio__link" href="/experiments">
               Experiments
+              <ArrowIcon />
             </a>{" "}
             <SparkIcon /> — roughly{" "}
             <span className="bio__figures">30</span> pieces since{" "}
             <span className="bio__figures">2019</span>. Some of it is client work.
-            Most of it is me answering a question I had on a Sunday.
+            Most of it is me answering a question I had on a Sunday. The rest turns
+            up as{" "}
+            <a className="bio__link" href="/blog">
+              short posts
+            </a>
+            .
           </p>
 
           <p>

@@ -75,18 +75,17 @@ export const metadata = {
     canonical: "./",
     types: FEEDS,
   },
+  // No title/description/url here on purpose: Next back-fills a card from a
+  // page's own title and description only when the root leaves those absent,
+  // so a route that sets just `title` still gets its own card, never the
+  // home page's. Routes using lib/seo.js carry a complete card regardless.
   openGraph: {
-    title: defaultTitle,
-    description,
-    url: siteUrl,
     siteName: title,
     locale: "en_US",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: defaultTitle,
-    description,
     site: xHandle,
     creator: xHandle,
   },

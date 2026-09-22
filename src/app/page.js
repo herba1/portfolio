@@ -2,7 +2,7 @@ import { geist } from "./fonts";
 import TempPage from "./ui/Hero/TempPage";
 import ClientSplatSection from "./experience/components/ClientSplatSection";
 import HomeIntro from "./ui/HomeIntro";
-import { defaultTitle, description } from "./constants";
+import { HOME_UPDATED, defaultTitle, description } from "./constants";
 import { pageMetadata } from "@/lib/seo";
 import { ID, JsonLd, graph, webPageNode } from "@/lib/jsonld";
 
@@ -28,7 +28,13 @@ const homeLd = graph(
     path: "/",
     name: defaultTitle,
     description,
-    image: "/opengraph-image.png",
+    image: {
+      url: "/opengraph-image.png",
+      width: 1200,
+      height: 630,
+      caption: "herb.art — Herbart Hernandez, design engineer and creative developer building interactive web experiences",
+    },
+    dateModified: HOME_UPDATED,
     extra: { about: { "@id": ID.person }, mainEntity: { "@id": ID.person } },
   }),
 );

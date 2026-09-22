@@ -23,6 +23,7 @@ const indexLd = graph(
     description:
       "Interactive experiments by Herbart Hernandez: shader pieces, motion studies and instrument-like interfaces, each built around one mechanic and tunable in the browser.",
     type: "CollectionPage",
+    breadcrumb: true,
     extra: {
       mainEntity: itemListNode(
         ALL_EXPERIMENTS.map((e) => ({ name: e.title, path: e.slug, description: e.description })),

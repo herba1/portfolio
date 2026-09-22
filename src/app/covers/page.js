@@ -9,7 +9,7 @@ const description =
 export const metadata = pageMetadata({ title, description, path: "/covers" });
 
 const coversLd = graph(
-  webPageNode({ path: "/covers", name: title, description }),
+  webPageNode({ path: "/covers", name: title, description, breadcrumb: true }),
   breadcrumbNode([
     { name: "herb.art", path: "/" },
     { name: title, path: "/covers" },

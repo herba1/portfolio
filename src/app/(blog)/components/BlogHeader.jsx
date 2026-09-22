@@ -2,7 +2,18 @@ import TransitionLink from '@/app/ui/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
 import { posts } from '../posts'
 import { absoluteUrl } from '@/lib/urls'
-import { ID, JsonLd, SITE_IMAGE, breadcrumbNode, graph } from '@/lib/jsonld'
+import { ID, JsonLd, SITE_IMAGE, breadcrumbNode, graph, personRef } from '@/lib/jsonld'
+
+// Dates in the registry are calendar days; render them as such, in UTC, so
+// the visible date, the <time> attribute and the JSON-LD agree on every
+// server and machine. A US-timezone build would otherwise show the day before.
+const formatDay = (date) =>
+  new Date(date).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    timeZone: 'UTC',
+  })
 
 function seeded(i) {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453
@@ -24,21 +35,25 @@ function shuffledOrder(count) {
   return order
 }
 
-export default function BlogHeader({ title, date, tags, description, slug }) {
+export default function BlogHeader({ slug, ...props }) {
+  // The registry entry is the source of truth; props only fill in for a post
+  // that isn't registered yet (the studio's draft template). Matched by slug
+  // when passed, else by title.
+  const post = posts.find((p) => (slug ? p.slug === slug : p.title === props.title))
+  const title = post?.title || props.title
+  const date = post?.date || props.date
+  const tags = post?.tags || props.tags
+  const summary = post?.description || props.description
+
   const chars = [...title]
   const nonSpaceCount = chars.filter((c) => c !== ' ').length
   const order = shuffledOrder(nonSpaceCount)
   let ci = 0
 
-  // The registry entry carries what the header isn't given: the post's own
-  // images (so the article's image is the photo, not the site card) and an
-  // optional `updated` date. Matched by slug when passed, else by title.
-  const post = posts.find((p) => (slug ? p.slug === slug : p.title === title))
   const url = post ? absoluteUrl(`/${post.slug}`) : null
   const images = (post?.images || []).map(absoluteUrl)
   const published = new Date(date).toISOString()
   const modified = post?.updated ? new Date(post.updated).toISOString() : published
-  const summary = description || post?.description
 
   // BlogPosting structured data so search engines can render rich article
   // results (headline, publish date, author, keywords) for every post, and a
@@ -54,7 +69,7 @@ export default function BlogHeader({ title, date, tags, description, slug }) {
       image: images.length ? images : [SITE_IMAGE],
       inLanguage: 'en-US',
       ...(tags && tags.length ? { keywords: tags.join(', ') } : {}),
-      author: { '@id': ID.person },
+      author: personRef(),
       publisher: { '@id': ID.person },
       isPartOf: { '@id': ID.blog },
     },
@@ -77,12 +92,14 @@ export default function BlogHeader({ title, date, tags, description, slug }) {
         <ArrowLeft size={14} />
         Back to writing
       </TransitionLink>
-      <time className="blog-header-date text-ink-secondary text-ui-lg block">
-        {new Date(date).toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric',
-        })}
+      <time dateTime={date} className="blog-header-date text-ink-secondary text-ui-lg block">
+        {formatDay(date)}
+        {post?.updated && post.updated !== date ? (
+          <>
+            {' · updated '}
+            <time dateTime={post.updated}>{formatDay(post.updated)}</time>
+          </>
+        ) : null}
       </time>
       {/* One step below the index title (which is title-sm), so a
           post reads as sitting inside the section rather than beside it. */}

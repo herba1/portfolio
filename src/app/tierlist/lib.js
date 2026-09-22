@@ -41,6 +41,9 @@ export async function listTierlists() {
         title: data.title || slug,
         subtitle: data.subtitle || '',
         description: data.description || '',
+        // Hand-maintained "YYYY-MM-DD" in the JSON — the sitemap's lastmod
+        // and the page's dateModified. Bump it when the ranking changes.
+        updated: data.updated || null,
         tiers: data.tiers || [],
         count: (data.items || []).length,
         // Keep the item id alongside the src so the index thumbnail and the

@@ -28,7 +28,7 @@ everything a search engine or an ai assistant reads about the site comes from on
 - `src/lib/jsonld.js` — schema.org graph: `WebSite` + `Person` + `Organization` once in the root layout, then `ProfilePage` / `BlogPosting` / `CollectionPage` / `WebApplication` / `BreadcrumbList` nodes per page, all linked by `@id`
 - `/og?title=…&description=…` — generated share card for any page without a hand-picked image (`src/app/og/route.js`); the home page keeps `opengraph-image.png`
 - `/robots.txt` — hand-written route so it can carry `Content-Signal` lines; every documented ai crawler is allowed on purpose. `npm run lint:robots` checks it never blocks `/_next/`, the feeds or the cards
-- `/sitemap.xml` — every indexable route with `lastmod` from git, `/llms.txt` — the site summarised for language models, `/feed.xml` + `/feed.json` — the writing
+- `/sitemap.xml` — every indexable route with a hand-maintained `lastmod` (`date`/`updated` in `posts.js` and `experiments/list.js`, `updated` in each tier-list json, `HOME_UPDATED`/`BIO_UPDATED` in `constants.js` — bump when the content changes), `/llms.txt` — the site summarised for language models, `/feed.xml` + `/feed.json` — the writing
 - icons — the tab favicon is drawn live (`AnimatedFavicon`); the same face, still, is served at `/apple-icon`, `/icon-192.png`, `/icon-512.png` and `/icon-maskable-512.png` from `src/lib/face.js`
 - indexnow — `.github/workflows/indexnow.yml` pings bing & co. with the sitemap after each production deploy (`npm run indexnow` by hand)
 - optional env: `NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION` and `NEXT_PUBLIC_BING_SITE_VERIFICATION` render the ownership meta tags for search console / bing webmaster tools

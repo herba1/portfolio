@@ -5,6 +5,13 @@
 // instead of restating them. Search engines and AI assistants then see one
 // entity — Herbart Hernandez, design engineer at CrowdVolt — referenced from
 // every page rather than a slightly different copy on each.
+//
+// Types in use: WebSite, Person, Organization (CrowdVolt only), WebPage and
+// its ProfilePage / CollectionPage subtypes, Blog, BlogPosting,
+// BreadcrumbList, ItemList, CreativeWork, ImageObject, PostalAddress.
+// Not used, on purpose: FAQPage, HowTo, SearchAction (retired), any
+// SoftwareApplication subtype (its rich result demands prices and ratings),
+// AggregateRating/Review, an Organization for herb.art itself.
 
 import {
   author,
@@ -15,9 +22,11 @@ import {
   jobTitle,
   knowsAbout,
   location,
+  personDescription,
   profiles,
   siteUrl,
   title as siteName,
+  xHandle,
 } from "@/app/constants"
 import { absoluteUrl } from "./urls"
 
@@ -30,19 +39,25 @@ export const ID = {
 
 export const SITE_IMAGE = `${siteUrl}/opengraph-image.png`
 
+// An inline reference to the Person: the @id, plus the name and URL that
+// Google's Article guidelines want on an author without following the id.
+export function personRef() {
+  return { "@type": "Person", "@id": ID.person, name: author, url: `${siteUrl}/bio` }
+}
+
 export function personNode() {
   return {
     "@type": "Person",
     "@id": ID.person,
     name: author,
-    alternateName: authorShort,
+    alternateName: [authorShort, xHandle.replace(/^@/, "")],
     givenName: "Herbart",
     familyName: "Hernandez",
     url: siteUrl,
     mainEntityOfPage: `${siteUrl}/bio`,
     jobTitle,
-    description: siteDescription,
-    email: `mailto:${email}`,
+    description: personDescription,
+    email,
     worksFor: { "@id": ID.employer },
     address: {
       "@type": "PostalAddress",
@@ -70,9 +85,12 @@ export function websiteNode() {
     "@id": ID.website,
     url: siteUrl,
     name: siteName,
-    alternateName: `${author} — portfolio`,
+    // Google's site-name feature reads these as the other names the site
+    // goes by, in order of preference.
+    alternateName: [author, authorShort],
     description: siteDescription,
     inLanguage: "en-US",
+    about: { "@id": ID.person },
     author: { "@id": ID.person },
     publisher: { "@id": ID.person },
     copyrightHolder: { "@id": ID.person },
@@ -84,8 +102,23 @@ export function siteGraph() {
   return graph(websiteNode(), personNode(), employerNode())
 }
 
+// `image` may be a path/URL string or { url, width, height, caption }.
+export function imageObject(image) {
+  if (!image) return undefined
+  if (typeof image === "string") return { "@type": "ImageObject", url: absoluteUrl(image) }
+  return {
+    "@type": "ImageObject",
+    url: absoluteUrl(image.url),
+    ...(image.width ? { width: image.width } : {}),
+    ...(image.height ? { height: image.height } : {}),
+    ...(image.caption ? { caption: image.caption } : {}),
+  }
+}
+
 // A page node. `type` is WebPage or one of its subtypes (ProfilePage,
-// CollectionPage, AboutPage…); `extra` is spread last for anything specific.
+// CollectionPage…); `extra` is spread last for anything specific. When the
+// page also emits a breadcrumb trail (breadcrumbNode with the same final
+// path), the two are linked by @id.
 export function webPageNode({
   path,
   name,
@@ -93,7 +126,9 @@ export function webPageNode({
   type = "WebPage",
   image,
   datePublished,
+  dateCreated,
   dateModified,
+  breadcrumb = false,
   extra = {},
 }) {
   const url = absoluteUrl(path)
@@ -106,19 +141,22 @@ export function webPageNode({
     isPartOf: { "@id": ID.website },
     author: { "@id": ID.person },
     inLanguage: "en-US",
-    ...(image
-      ? { primaryImageOfPage: { "@type": "ImageObject", url: absoluteUrl(image) } }
-      : {}),
+    ...(image ? { primaryImageOfPage: imageObject(image) } : {}),
     ...(datePublished ? { datePublished } : {}),
+    ...(dateCreated ? { dateCreated } : {}),
     ...(dateModified ? { dateModified } : {}),
+    ...(breadcrumb ? { breadcrumb: { "@id": `${url}#breadcrumb` } } : {}),
     ...extra,
   }
 }
 
-// Home › Section › Page trail. `items` is [{ name, path }] in order.
+// Home › Section › Page trail. `items` is [{ name, path }] in order; the
+// node's @id hangs off the last item's URL so its WebPage can point at it.
 export function breadcrumbNode(items) {
+  const last = items[items.length - 1]
   return {
     "@type": "BreadcrumbList",
+    "@id": `${absoluteUrl(last.path)}#breadcrumb`,
     itemListElement: items.map((item, i) => ({
       "@type": "ListItem",
       position: i + 1,

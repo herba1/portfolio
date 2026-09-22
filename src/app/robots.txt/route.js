@@ -10,12 +10,17 @@ import { siteUrl } from "../constants.js"
 export const dynamic = "force-static"
 
 // Routes that exist in the build but belong in nobody's index: API handlers,
-// the dev-only studio and lab tooling (they 404 in production anyway), the
-// tier-list editor, the unpublished test post and the component sandbox.
+// the dev-only studio and lab tooling (they 404 in production anyway) and
+// the tier-list editor.
 //
 // Never list here: /_next/ (JS, CSS and the image optimizer — Google renders
 // pages before indexing them, and blocking the bundle blinds it), /og (share
-// cards), /feed.xml, /feed.json, /llms.txt, /opengraph-image.png.
+// cards), /feed.xml, /feed.json, /llms.txt, the icons, /opengraph-image.png.
+//
+// Also NOT here, on purpose: the noindexed pages (/test, /intro, /isolate,
+// /ask-me-why, /experiments/album-card). A noindex only works when the
+// crawler is allowed to fetch the page and read it; a robots-blocked URL can
+// still be indexed bare, from links alone.
 export const DISALLOW = [
   "/api/",
   "/~studio",
@@ -24,8 +29,6 @@ export const DISALLOW = [
   "/work",
   "/arcs",
   "/tierlist/*/edit",
-  "/test",
-  "/experiments/album-card",
 ]
 
 // Decision, on the record: this site wants to be found, read, quoted and
