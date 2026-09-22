@@ -1,0 +1,30 @@
+name: indexnow
+
+# After every successful production deployment (Vercel reports them to GitHub
+# as deployment statuses), ping IndexNow with the live sitemap so Bing and
+# friends recrawl within minutes. Can also be run by hand.
+
+on:
+  deployment_status:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.deployment_status.state == 'success' &&
+       contains(github.event.deployment.environment, 'roduction'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Submit the sitemap's URLs to IndexNow
+        run: node scripts/indexnow.mjs

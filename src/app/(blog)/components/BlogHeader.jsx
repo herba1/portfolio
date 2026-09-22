@@ -1,5 +1,8 @@
 import TransitionLink from '@/app/ui/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
+import { posts } from '../posts'
+import { absoluteUrl } from '@/lib/seo'
+import { ID, JsonLd, SITE_IMAGE, breadcrumbNode, graph } from '@/lib/jsonld'
 
 function seeded(i) {
   const x = Math.sin(i * 127.1 + 311.7) * 43758.5453
@@ -21,34 +24,52 @@ function shuffledOrder(count) {
   return order
 }
 
-export default function BlogHeader({ title, date, tags, description }) {
+export default function BlogHeader({ title, date, tags, description, slug }) {
   const chars = [...title]
   const nonSpaceCount = chars.filter((c) => c !== ' ').length
   const order = shuffledOrder(nonSpaceCount)
   let ci = 0
 
+  // The registry entry carries what the header isn't given: the post's own
+  // images (so the article's image is the photo, not the site card) and an
+  // optional `updated` date. Matched by slug when passed, else by title.
+  const post = posts.find((p) => (slug ? p.slug === slug : p.title === title))
+  const url = post ? absoluteUrl(`/${post.slug}`) : null
+  const images = (post?.images || []).map(absoluteUrl)
+  const published = new Date(date).toISOString()
+  const modified = post?.updated ? new Date(post.updated).toISOString() : published
+  const summary = description || post?.description
+
   // BlogPosting structured data so search engines can render rich article
-  // results (headline, publish date, author, keywords) for every post.
-  const articleLd = {
-    '@context': 'https://schema.org',
-    '@type': 'BlogPosting',
-    headline: title,
-    ...(description ? { description } : {}),
-    datePublished: new Date(date).toISOString(),
-    dateModified: new Date(date).toISOString(),
-    image: 'https://herb.art/opengraph-image.png',
-    inLanguage: 'en-US',
-    ...(tags && tags.length ? { keywords: tags.join(', ') } : {}),
-    author: { '@id': 'https://herb.art/#person' },
-    publisher: { '@id': 'https://herb.art/#person' },
-  }
+  // results (headline, publish date, author, keywords) for every post, and a
+  // breadcrumb trail so the post is placed under Writing.
+  const articleLd = graph(
+    {
+      '@type': 'BlogPosting',
+      ...(url ? { '@id': `${url}#article`, url, mainEntityOfPage: { '@type': 'WebPage', '@id': url } } : {}),
+      headline: title,
+      ...(summary ? { description: summary } : {}),
+      datePublished: published,
+      dateModified: modified,
+      image: images.length ? images : [SITE_IMAGE],
+      inLanguage: 'en-US',
+      ...(tags && tags.length ? { keywords: tags.join(', ') } : {}),
+      author: { '@id': ID.person },
+      publisher: { '@id': ID.person },
+      isPartOf: { '@id': ID.blog },
+    },
+    post
+      ? breadcrumbNode([
+          { name: 'herb.art', path: '/' },
+          { name: 'Writing', path: '/blog' },
+          { name: title, path: `/${post.slug}` },
+        ])
+      : null,
+  )
 
   return (
     <header className="mb-10">
-      <script
-        type="application/ld+json"
-        dangerouslySetInnerHTML={{ __html: JSON.stringify(articleLd) }}
-      />
+      <JsonLd data={articleLd} />
       <TransitionLink
         href="/blog"
         className="blog-header-back text-ink-secondary hover:text-ink text-ui-lg mb-6 inline-flex items-center gap-1.5 transition-colors"
@@ -68,7 +89,7 @@ export default function BlogHeader({ title, date, tags, description }) {
       <h1 className="text-ink text-heading mt-2">
         {chars.map((ch, i) => {
           if (ch === ' ') {
-            return <span key={i} className="blog-ch-space" />
+            return <span key={i} className="blog-ch-space">{' '}</span>
           }
           const idx = ci++
           const r = seeded(idx) * 16 - 8

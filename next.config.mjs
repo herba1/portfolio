@@ -24,6 +24,13 @@ const nextConfig = {
     viewTransition: true,
     optimizePackageImports: ['lucide-react', 'motion', 'gsap'],
   },
+  // Crawlers that get their <head> metadata blocking instead of streamed.
+  // Setting this REPLACES Next's default list, so the default (Google, Bing,
+  // the social unfurlers…) is repeated here, then the AI crawlers and
+  // fetchers are added: none of them run JavaScript, and several read only
+  // what is inside <head> when the response first arrives.
+  htmlLimitedBots:
+    /[\w-]+-Google|Google-[\w-]+|Chrome-Lighthouse|Slurp|DuckDuckBot|baiduspider|yandex|sogou|bitlybot|tumblr|vkShare|quora link preview|redditbot|ia_archiver|Bingbot|BingPreview|applebot|facebookexternalhit|facebookcatalog|Twitterbot|LinkedInBot|Slackbot|Discordbot|WhatsApp|SkypeUriPreview|Yeti|googleweblight|GPTBot|OAI-SearchBot|ChatGPT-User|ClaudeBot|Claude-SearchBot|Claude-User|PerplexityBot|Perplexity-User|DuckAssistBot|Amazonbot|Amzn-SearchBot|Amzn-User|CCBot|MistralAI|Meta-External|Meta-WebIndexer|YouBot|Bluesky|Mastodon|Telegram/i,
   async headers() {
     return [
       {

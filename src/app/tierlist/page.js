@@ -4,22 +4,16 @@ import ImageFan from '@/app/ui/ImageFan'
 import { listTierlists } from './lib'
 import NewListButton from './NewListButton'
 import { isDevView } from '@/lib/viewMode'
+import { pageMetadata } from '@/lib/seo'
+import { JsonLd, breadcrumbNode, graph, itemListNode, webPageNode } from '@/lib/jsonld'
 
 export const dynamic = 'force-static'
 
-export const metadata = {
-  title: 'Tier Lists',
-  description: 'Things, ranked.',
-  alternates: {
-    canonical: '/tierlist',
-  },
-  openGraph: {
-    type: 'website',
-    title: 'Tier Lists',
-    description: 'Things, ranked.',
-    url: 'https://herb.art/tierlist',
-  },
-}
+const title = 'Tier Lists'
+const description =
+  "Things, ranked — Herb's tier lists, from NYC food to Beatles albums, laid out S through F."
+
+export const metadata = pageMetadata({ title, description, path: '/tierlist' })
 
 // The index is a reading page, not the app view — same shell, type scale, row
 // rhythm and entrance stagger as /blog, so the two indexes feel like one site.
@@ -28,8 +22,31 @@ export default async function TierListIndex() {
   const lists = await listTierlists()
   const isDev = isDevView()
 
+  const indexLd = graph(
+    webPageNode({
+      path: '/tierlist',
+      name: title,
+      description,
+      type: 'CollectionPage',
+      extra: {
+        mainEntity: itemListNode(
+          lists.map((list) => ({
+            name: list.title,
+            path: `/tierlist/${list.slug}`,
+            description: list.description || list.subtitle || undefined,
+          })),
+        ),
+      },
+    }),
+    breadcrumbNode([
+      { name: 'herb.art', path: '/' },
+      { name: title, path: '/tierlist' },
+    ]),
+  )
+
   return (
     <div className="bg-surface min-h-dvh">
+      <JsonLd data={indexLd} />
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <header className="mb-8 flex items-end justify-between gap-4">
           <h1 className="text-ink text-title-sm">

@@ -382,8 +382,11 @@ export default function TempPage() {
       className="relative mx-auto flex h-svh min-h-fit w-full flex-col items-center justify-center pb-[12svh] text-ink selection:bg-ink selection:text-ink-inverse"
     >
       <ClientOnly load={() => import("./Eyes")} />
-      <p
-        className={`hero-sub text-ink text-ui-lg relative z-10 ${geist.className}`}
+      {/* The page's one <h1>. The big draggable name below is parked, so the
+          name has to be said somewhere a crawler can read it — here, small,
+          one weight step above the role line under it. */}
+      <div
+        className={`hero-sub text-ink relative z-10 text-center ${geist.className}`}
         style={{
           padding: "1.5rem 3rem",
           background: `radial-gradient(
@@ -399,8 +402,11 @@ export default function TempPage() {
           )`,
         }}
       >
-        design engineer @ <a href="https://crowdvolt.com" target="_blank" rel="noopener noreferrer">crowdvolt</a>
-      </p>
+        <h1 className="text-heading-sm">herbart hernandez</h1>
+        <p className="text-ui-lg">
+          design engineer @ <a href="https://crowdvolt.com" target="_blank" rel="noopener noreferrer">crowdvolt</a>
+        </p>
+      </div>
 
       {/*
       <div

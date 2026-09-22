@@ -2,28 +2,60 @@ import { posts } from '@/app/(blog)/posts'
 import GlitchText from '@/app/ui/GlitchText'
 import ImageFan from '@/app/ui/ImageFan'
 import BlogPostLink from './BlogPostLink'
+import { absoluteUrl, pageMetadata } from '@/lib/seo'
+import { ID, JsonLd, breadcrumbNode, graph, webPageNode } from '@/lib/jsonld'
 
-export const metadata = {
-  title: 'Writing',
-  description: 'Thoughts on web development, creative coding, and design.',
-  alternates: {
-    canonical: '/blog',
-  },
-  openGraph: {
-    type: 'website',
-    title: 'Writing',
-    description: 'Thoughts on web development, creative coding, and design.',
-    url: 'https://herb.art/blog',
-  },
-}
+const title = 'Writing'
+const description =
+  "Posts by Herbart Hernandez — notes from a design engineer in New York on building interfaces, creative coding, music and life."
+
+export const metadata = pageMetadata({ title, description, path: '/blog' })
 
 export default function BlogIndex() {
   const publishedPosts = posts
     .filter((post) => post.published)
     .sort((a, b) => new Date(b.date) - new Date(a.date))
 
+  // The index as a CollectionPage whose main entity is the Blog itself, with
+  // every published post listed under it. Each post's own page carries the
+  // full BlogPosting node (see (blog)/components/BlogHeader.jsx).
+  const blogLd = graph(
+    webPageNode({
+      path: '/blog',
+      name: title,
+      description,
+      type: 'CollectionPage',
+      extra: { mainEntity: { '@id': ID.blog } },
+    }),
+    {
+      '@type': 'Blog',
+      '@id': ID.blog,
+      url: absoluteUrl('/blog'),
+      name: `${title} — herb.art`,
+      description,
+      inLanguage: 'en-US',
+      author: { '@id': ID.person },
+      publisher: { '@id': ID.person },
+      blogPost: publishedPosts.map((post) => ({
+        '@type': 'BlogPosting',
+        '@id': `${absoluteUrl(`/${post.slug}`)}#article`,
+        url: absoluteUrl(`/${post.slug}`),
+        headline: post.title,
+        description: post.description,
+        datePublished: new Date(post.date).toISOString(),
+        ...(post.images && post.images[0] ? { image: absoluteUrl(post.images[0]) } : {}),
+        author: { '@id': ID.person },
+      })),
+    },
+    breadcrumbNode([
+      { name: 'herb.art', path: '/' },
+      { name: title, path: '/blog' },
+    ]),
+  )
+
   return (
     <div className="bg-surface min-h-dvh">
+      <JsonLd data={blogLd} />
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         {/* Two steps off the scale — each brings its own weight, tracking and
             leading, so there's no font-bold / tracking-tighter stack that has

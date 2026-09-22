@@ -1,11 +1,14 @@
 import SongSearch from "./SongSearch";
+import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Song search",
-  description:
-    "A search dock that resolves songs, covers and previews from Apple's catalogue — shown on both a light and a dark ground.",
-};
+export const metadata = experimentMetadata("/song-search");
 
 export default function SongSearchPage() {
-  return <SongSearch />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/song-search" />
+      <ExperimentHeading slug="/song-search" />
+      <SongSearch />
+    </>
+  );
 }

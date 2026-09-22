@@ -22,9 +22,13 @@ The `(blog)` route group is invisible in the URL — your post renders at `herb.
   description: 'A short summary for the listing page.',
   date: '2026-04-15',
   tags: ['topic'],
-  published: true,     // set false to hide from listing
+  images: ['/blog/images/photo.webp'],  // first one is the share image
+  published: true,     // set false to hide from listing, sitemap and feeds
+  // updated: '2026-05-01',  // optional — becomes dateModified everywhere
 }
 ```
+
+The registry feeds the index, the sitemap, `/feed.xml`, `/feed.json`, `/llms.txt` and the post's BlogPosting structured data, so keep it accurate.
 
 **3. Post template:**
 
@@ -32,11 +36,32 @@ The `(blog)` route group is invisible in the URL — your post renders at `herb.
 import BlogHeader from '../components/BlogHeader'
 
 export const metadata = {
-  title: 'Your Title | herb.art',
+  title: 'Your Title',            // the root layout appends " | herb.art"
   description: 'A short summary.',
+  // No `alternates` here: the root layout's canonical resolves per route and
+  // carries the feed links; a page-level block would replace both.
+  openGraph: {
+    type: 'article',
+    title: 'Your Title',
+    description: 'A short summary.',
+    url: 'https://herb.art/your-slug',
+    publishedTime: '2026-04-15T00:00:00.000Z',
+    authors: ['Herbart Hernandez'],
+    tags: ['topic'],
+    images: ['/blog/images/photo.webp'],
+  },
+  twitter: {
+    card: 'summary_large_image',
+    site: '@herb_dev',
+    creator: '@herb_dev',
+    title: 'Your Title',
+    description: 'A short summary.',
+    images: ['/blog/images/photo.webp'],
+  },
 }
 
 <BlogHeader
+  slug="your-slug"
   title="Your Title"
   date="2026-04-15"
   tags={['topic']}

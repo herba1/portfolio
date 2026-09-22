@@ -1,9 +1,6 @@
 export const metadata = {
   title: 'The Beginning',
   description: 'Moving to NYC, joining a sick company, and documenting the journey.',
-  alternates: {
-    canonical: '/start',
-  },
   openGraph: {
     images: ['/blog/images/image-mnuoa76w.webp'],
     type: 'article',
@@ -11,15 +8,21 @@ export const metadata = {
     description: 'Moving to NYC, joining a sick company, and documenting the journey.',
     url: 'https://herb.art/start',
     publishedTime: '2026-04-10T00:00:00.000Z',
-    authors: ['Herb'],
+    authors: ['Herbart Hernandez'],
     tags: ['life'],
   },
   twitter: {
+    card: 'summary_large_image',
+    site: '@herb_dev',
+    creator: '@herb_dev',
+    title: 'The Beginning',
+    description: 'Moving to NYC, joining a sick company, and documenting the journey.',
     images: ['/blog/images/image-mnuoa76w.webp'],
   },
 }
 
 <BlogHeader
+  slug="start"
   title="The Beginning"
   date="2026-04-10"
   tags={['life']}

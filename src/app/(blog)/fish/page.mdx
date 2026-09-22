@@ -1,17 +1,28 @@
 import BlogHeader from '../components/BlogHeader'
 
 export const metadata = {
-  title: 'fish | herb.art',
+  title: 'fish',
   description: 'herb caught a fish',
   openGraph: {
     images: ['/blog/images/img-2062-ms49gqso.webp'],
+    type: 'article',
+    title: 'fish',
+    description: 'herb caught a fish',
+    url: 'https://herb.art/fish',
+    publishedTime: '2026-07-28T00:00:00.000Z',
+    authors: ['Herbart Hernandez'],
   },
   twitter: {
+    card: 'summary_large_image',
+    site: '@herb_dev',
+    creator: '@herb_dev',
+    title: 'fish',
+    description: 'herb caught a fish',
     images: ['/blog/images/img-2062-ms49gqso.webp'],
   },
 }
 
-<BlogHeader title="fish" date="2026-07-28" tags={[]} />
+<BlogHeader slug="fish" title="fish" date="2026-07-28" tags={[]} />
 
 <article className="blog-article prose prose-slate max-w-none prose-headings:tracking-heading-mobile prose-a:text-accent prose-code:before:content-[''] prose-code:after:content-['']">
 

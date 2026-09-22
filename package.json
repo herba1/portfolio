@@ -6,8 +6,10 @@
     "dev": "NODE_OPTIONS='--no-experimental-webstorage' next dev --turbopack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint . && node scripts/check-type-system.mjs",
+    "lint": "eslint . && node scripts/check-type-system.mjs && node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-robots.mjs",
     "lint:type": "node scripts/check-type-system.mjs",
+    "lint:robots": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-robots.mjs",
+    "indexnow": "node scripts/indexnow.mjs",
     "check:shaders": "node scripts/check-shaders.mjs",
     "predev": "node scripts/lab-registry.mjs",
     "prebuild": "node scripts/lab-registry.mjs",
@@ -68,6 +70,7 @@
     "partykit": "^0.0.115",
     "prettier-plugin-tailwindcss": "^0.6.13",
     "react-scan": "^0.5.7",
+    "robots-parser": "^3.0.1",
     "tailwindcss": "^4",
     "ws": "^8.20.0"
   }

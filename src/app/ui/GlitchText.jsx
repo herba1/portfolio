@@ -35,7 +35,10 @@ export default function GlitchText({ text, baseDelay = 0.15 }) {
   return (
     <>
       {chars.map((ch, i) => {
-        if (ch === ' ') return <span key={i} className="blog-ch-space" />
+        // A real space inside the span (kept by `white-space: pre` in the
+        // stylesheet) so the heading's text content reads "Tier Lists", not
+        // "TierLists", to search engines and screen readers.
+        if (ch === ' ') return <span key={i} className="blog-ch-space">{' '}</span>
         const idx = ci++
         return (
           <span

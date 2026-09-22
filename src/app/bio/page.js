@@ -1,10 +1,40 @@
 import Image from "next/image";
 import "./bio.css";
+import { pageMetadata } from "@/lib/seo";
+import { ID, JsonLd, breadcrumbNode, graph, personNode, webPageNode } from "@/lib/jsonld";
+import { lastModified } from "@/lib/lastModified";
 
-export const metadata = {
-  title: "Bio",
-  description: "Design engineer @ CrowdVolt.",
-};
+const bioDescription =
+  "Herbart Hernandez is a design engineer at CrowdVolt in New York. What he builds, how he thinks about interfaces and typography, and how to reach him.";
+
+export const metadata = pageMetadata({
+  title: "Bio — Herbart Hernandez",
+  description: bioDescription,
+  path: "/bio",
+  type: "profile",
+  openGraph: { firstName: "Herbart", lastName: "Hernandez", username: "herb_dev" },
+});
+
+// The page is the Person's profile: a ProfilePage whose main entity is the
+// site-wide Person node, restated here in full so the profile validates on
+// its own and an assistant reading just this page gets the whole record.
+const bioLd = graph(
+  webPageNode({
+    path: "/bio",
+    name: "Bio — Herbart Hernandez",
+    description: bioDescription,
+    type: "ProfilePage",
+    // From git at build time: when this file last changed, which is when the
+    // profile last changed. Falls back to the build date without history.
+    dateModified: lastModified("src/app/bio/page.js").toISOString(),
+    extra: { mainEntity: { "@id": ID.person } },
+  }),
+  personNode(),
+  breadcrumbNode([
+    { name: "herb.art", path: "/" },
+    { name: "Bio", path: "/bio" },
+  ]),
+);
 
 function ArrowIcon() {
   return (
@@ -63,6 +93,7 @@ function SparkIcon() {
 export default function BioPage() {
   return (
     <div className="bio">
+      <JsonLd data={bioLd} />
       <main className="bio__column">
         <header className="bio__head">
           <h1 className="bio__name">Herbart Hernandez</h1>

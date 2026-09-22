@@ -2,6 +2,7 @@ import GlitchText from "@/app/ui/GlitchText";
 import TransitionLink from "@/app/ui/TransitionLink";
 import { LAB } from "@/app/lab/registry";
 import { EXPERIMENTS } from "./list";
+import { JsonLd, breadcrumbNode, graph, itemListNode, webPageNode } from "@/lib/jsonld";
 
 const SHIPPED_FROM_LAB = LAB.filter((item) => item.status === "shipped").map((item) => ({
   slug: `/lab/${item.slug}`,
@@ -13,9 +14,31 @@ const SHIPPED_FROM_LAB = LAB.filter((item) => item.status === "shipped").map((it
 
 const ALL_EXPERIMENTS = [...SHIPPED_FROM_LAB, ...EXPERIMENTS];
 
+// The index as a CollectionPage whose main entity is the ordered list of
+// pieces — the same order the page shows them in.
+const indexLd = graph(
+  webPageNode({
+    path: "/experiments",
+    name: "Experiments",
+    description:
+      "Interactive experiments by Herbart Hernandez: shader pieces, motion studies and instrument-like interfaces, each built around one mechanic and tunable in the browser.",
+    type: "CollectionPage",
+    extra: {
+      mainEntity: itemListNode(
+        ALL_EXPERIMENTS.map((e) => ({ name: e.title, path: e.slug, description: e.description })),
+      ),
+    },
+  }),
+  breadcrumbNode([
+    { name: "herb.art", path: "/" },
+    { name: "Experiments", path: "/experiments" },
+  ]),
+);
+
 export default function ExperimentsIndex() {
   return (
     <div className="bg-surface min-h-dvh">
+      <JsonLd data={indexLd} />
       <main className="mx-auto max-w-3xl px-4 pt-24 pb-16 md:px-6">
         <h1 className="text-ink text-title-xl md:text-display mb-8">
           <GlitchText text="Experiments" />

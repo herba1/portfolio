@@ -3,6 +3,9 @@ export const LINKS = [
   { name: "Writing", link: "/blog", primary: true },
   { name: "Tier List", link: "/tierlist", primary: true },
   { name: "Experiments", link: "/experiments", primary: true },
+  // The one page that says who this is, in words. Linked from every page so
+  // people, search engines and assistants can all find it in one hop.
+  { name: "Bio", link: "/bio", primary: true },
   { name: "Github", link: "https://github.com/herba1" },
   { name: "X", link: "https://x.com/herb_dev" },
   { name: "LinkedIn", link: "https://linkedin.com/in/herbart-hernandez" },
@@ -21,7 +24,6 @@ export const DEV_LINKS = [
   { name: "Arcs", link: "/arcs", primary: true, dev: true },
   { name: "Album Card", link: "/experiments/album-card", primary: true, dev: true },
   { name: "Ask Me Why", link: "/ask-me-why", primary: true, dev: true },
-  { name: "Bio", link: "/bio", primary: true, dev: true },
   { name: "Ink", link: "/ink", primary: true, dev: true },
   { name: "Halftone", link: "/halftone", primary: true, dev: true },
   { name: "Refract", link: "/refract", primary: true, dev: true },

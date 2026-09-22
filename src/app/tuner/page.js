@@ -1,11 +1,14 @@
 import TunerExperience from "./TunerExperience";
+import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Tuner",
-  description:
-    "A configurable instrument tuner — live pitch detection on a glowing glass display.",
-};
+export const metadata = experimentMetadata("/tuner");
 
 export default function TunerPage() {
-  return <TunerExperience />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/tuner" />
+      <ExperimentHeading slug="/tuner" />
+      <TunerExperience />
+    </>
+  );
 }

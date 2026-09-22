@@ -30,7 +30,7 @@ function GlitchText({ text, baseDelay = 0.15 }) {
     <>
       {chars.map((ch, i) => {
         if (ch === ' ') {
-          return <span key={i} className="blog-ch-space" />
+          return <span key={i} className="blog-ch-space">{' '}</span>
         }
         const idx = ci++
         const r = seeded(idx) * 16 - 8

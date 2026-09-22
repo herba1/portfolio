@@ -1,10 +1,13 @@
 import InkExperience from "./InkExperience";
+import { ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Ink",
-  description: "A relief print made of one inked stroke per scanline.",
-};
+export const metadata = experimentMetadata("/ink");
 
 export default function InkPage() {
-  return <InkExperience />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/ink" />
+      <InkExperience />
+    </>
+  );
 }

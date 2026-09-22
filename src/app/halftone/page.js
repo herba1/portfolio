@@ -1,10 +1,13 @@
 import HalftoneExperience from "./HalftoneExperience";
+import { ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Halftone",
-  description: "Three misregistered inks screened onto a warped plate.",
-};
+export const metadata = experimentMetadata("/halftone");
 
 export default function HalftonePage() {
-  return <HalftoneExperience />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/halftone" />
+      <HalftoneExperience />
+    </>
+  );
 }

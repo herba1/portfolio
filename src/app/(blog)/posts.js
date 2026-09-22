@@ -1,3 +1,11 @@
+// The post registry. Everything that lists or describes a post reads from
+// here: the /blog index, the sitemap, the RSS/JSON feeds, llms.txt, and the
+// BlogPosting structured data in BlogHeader (matched by `slug`).
+//
+// Fields: slug, title, description, date (YYYY-MM-DD), tags, images (the
+// first is the share image and the article's lead image), published.
+// Optional `updated` (YYYY-MM-DD) becomes dateModified everywhere — set it
+// when a post is meaningfully revised.
 export const posts = [
   {
     slug: 'start',

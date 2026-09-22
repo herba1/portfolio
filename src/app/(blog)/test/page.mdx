@@ -1,8 +1,12 @@
 import BlogHeader from '../components/BlogHeader'
 
 export const metadata = {
-  title: 'Component Test | herb.art',
+  title: 'Component Test',
   description: 'A comprehensive test of every MDX component available in the blog.',
+  // Unpublished (see posts.js) — the route still builds, so keep it out of
+  // search indexes and off the canonical map rather than letting a test page
+  // compete with real posts.
+  robots: { index: false, follow: false },
   openGraph: {
     images: ['/blog/images/example.png'],
   },
@@ -12,6 +16,7 @@ export const metadata = {
 }
 
 <BlogHeader
+  slug="test"
   title="Component Test"
   date="2026-04-10"
   tags={['test', 'components', 'mdx']}

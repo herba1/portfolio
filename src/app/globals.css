@@ -1883,10 +1883,13 @@ body {
   animation: hero-sub-in var(--duration-entrance) var(--ease-entrance) var(--duration-300) both;
 }
 
-/* spaces need no animation, just hold width */
+/* spaces need no animation, just hold width. The span carries a real space
+   character (kept from collapsing by `pre`) so the heading's text content
+   still contains its word breaks for search engines and assistive tech. */
 .blog-ch-space {
   display: inline-block;
   width: 0.25em;
+  white-space: pre;
 }
 
 /* — Entrance: fade up ————————————————————————— */

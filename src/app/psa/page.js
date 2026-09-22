@@ -1,15 +1,14 @@
 import PreloadScans from "./PreloadScans";
 import PsaExperience from "./PsaExperience";
+import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "PSA",
-  description:
-    "A collection of graded cards, and the interaction for filling it.",
-};
+export const metadata = experimentMetadata("/psa");
 
 export default function PsaPage() {
   return (
     <>
+      <ExperimentJsonLd slug="/psa" />
+      <ExperimentHeading slug="/psa" />
       <PreloadScans />
       <PsaExperience />
     </>

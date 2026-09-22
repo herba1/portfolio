@@ -1,11 +1,14 @@
 import BackdropExperience from "./BackdropExperience";
+import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Backdrop",
-  description:
-    "A rebuild of Apple Music's dynamic now-playing backdrop — four rotating copies of the artwork, twisted, blurred and pushed through a saturation lift.",
-};
+export const metadata = experimentMetadata("/backdrop");
 
 export default function BackdropPage() {
-  return <BackdropExperience />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/backdrop" />
+      <ExperimentHeading slug="/backdrop" />
+      <BackdropExperience />
+    </>
+  );
 }

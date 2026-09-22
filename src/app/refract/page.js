@@ -1,10 +1,13 @@
 import RefractExperience from "./RefractExperience";
+import { ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
-export const metadata = {
-  title: "Refract",
-  description: "A colour gradient bent through a lattice of dispersing lenses.",
-};
+export const metadata = experimentMetadata("/refract");
 
 export default function RefractPage() {
-  return <RefractExperience />;
+  return (
+    <>
+      <ExperimentJsonLd slug="/refract" />
+      <RefractExperience />
+    </>
+  );
 }

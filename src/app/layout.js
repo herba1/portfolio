@@ -11,7 +11,17 @@ import ZenMode from "./ui/ZenMode";
 import StickyFooter from "./ui/StickyFooter";
 import { geist, inter, mono } from "./fonts";
 import Loading from "./ui/Loading";
-import { author, description, title } from "./constants";
+import {
+  author,
+  defaultTitle,
+  description,
+  profiles,
+  siteUrl,
+  title,
+  xHandle,
+} from "./constants";
+import { FEEDS } from "@/lib/seo";
+import { JsonLd, siteGraph } from "@/lib/jsonld";
 import ConsoleSig from "./ui/ConsoleSig";
 import FooterClock from "./ui/FooterClock";
 import AnimatedFavicon from "./ui/AnimatedFavicon";
@@ -20,33 +30,39 @@ import ReactScan from "./ui/ReactScan";
 // <IntroSplash /> mount in the body below. Component files are still in ./ui.
 // import IntroSplash from "./ui/IntroSplash";
 
+// Site-wide defaults. Routes override these through lib/seo.js#pageMetadata,
+// which carries a full card per page — a page-level `openGraph`, `twitter`
+// or `alternates` replaces the block here rather than merging into it.
 export const metadata = {
-  metadataBase: new URL("https://herb.art"),
+  metadataBase: new URL(siteUrl),
   title: {
-    default: title,
+    default: defaultTitle,
     template: `%s | ${title}`,
   },
-  description: description,
-  applicationName: "herb.art",
+  description,
+  applicationName: title,
   keywords: [
+    "Herbart Hernandez",
     "Herb",
-    "portfolio",
+    "herb.art",
     "design engineer",
+    "CrowdVolt",
+    "New York",
+    "portfolio",
     "creative developer",
-    "creative technologist",
-    "web developer",
-    "frontend",
-    "fullstack",
-    "javascript",
-    "react",
-    "nextjs",
-    "three.js",
-    "webgl",
-    "gaussian splatting",
-    "interactive",
+    "front-end engineer",
+    "interaction design",
     "motion design",
+    "typography",
+    "React",
+    "Next.js",
+    "Three.js",
+    "WebGL",
+    "shaders",
+    "Gaussian splatting",
+    "interactive experiments",
   ],
-  authors: [{ name: author, url: "https://herb.art" }],
+  authors: [{ name: author, url: siteUrl }],
   creator: author,
   publisher: author,
   category: "technology",
@@ -57,30 +73,38 @@ export const metadata = {
   },
   alternates: {
     canonical: "./",
+    types: FEEDS,
   },
   openGraph: {
-    title: title,
-    description: description,
-    url: "https://herb.art",
-    siteName: "herb.art",
+    title: defaultTitle,
+    description,
+    url: siteUrl,
+    siteName: title,
     locale: "en_US",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: title,
-    description: description,
-    site: "@herb_dev",
-    creator: "@herb_dev",
+    title: defaultTitle,
+    description,
+    site: xHandle,
+    creator: xHandle,
   },
   appleWebApp: {
     capable: true,
-    title: "herb.art",
+    title,
     statusBarStyle: "default",
   },
+  // Snippet limits on the generic tag as well as Google's, so Bing/Copilot
+  // and the AI engines that read the generic tag get them too. Never add
+  // `noarchive` or `nocache` here: Bing has no robots.txt training token
+  // and reads those two to drop a site from Copilot answers instead.
   robots: {
     index: true,
     follow: true,
+    "max-video-preview": -1,
+    "max-image-preview": "large",
+    "max-snippet": -1,
     googleBot: {
       index: true,
       follow: true,
@@ -89,52 +113,25 @@ export const metadata = {
       "max-snippet": -1,
     },
   },
+  // Search Console / Bing Webmaster ownership tags, only when the tokens are
+  // set in the environment (Vercel project settings). Nothing renders otherwise.
+  verification: {
+    ...(process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION
+      ? { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION }
+      : {}),
+    ...(process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION
+      ? { other: { "msvalidate.01": process.env.NEXT_PUBLIC_BING_SITE_VERIFICATION } }
+      : {}),
+  },
 };
 
 export const viewport = {
   width: "device-width",
   initialScale: 1,
   interactiveWidget: "resizes-visual",
-};
-
-const jsonLd = {
-  "@context": "https://schema.org",
-  "@graph": [
-    {
-      "@type": "WebSite",
-      "@id": "https://herb.art/#website",
-      url: "https://herb.art",
-      name: "herb.art",
-      description: description,
-      inLanguage: "en-US",
-      publisher: { "@id": "https://herb.art/#person" },
-    },
-    {
-      "@type": "Person",
-      "@id": "https://herb.art/#person",
-      name: author,
-      url: "https://herb.art",
-      image: "https://herb.art/opengraph-image.png",
-      jobTitle: "Design Engineer",
-      description: description,
-      knowsAbout: [
-        "Web Development",
-        "Creative Coding",
-        "Design Engineering",
-        "React",
-        "Next.js",
-        "Three.js",
-        "WebGL",
-        "Motion Design",
-      ],
-      email: "mailto:hi@herb.art",
-      sameAs: [
-        "https://github.com/herba1",
-        "https://x.com/herb_dev",
-        "https://linkedin.com/in/herbart-hernandez",
-      ],
-    },
-  ],
+  // `--neutral-50`, the page surface — the same literal the manifest carries.
+  themeColor: "#f1f5f9",
+  colorScheme: "light",
 };
 
 export default function RootLayout({ children }) {
@@ -148,10 +145,15 @@ export default function RootLayout({ children }) {
         {/* Geist Sans + Geist Mono are self-hosted by next/font at build
             time — no third-party font host, no preconnect, no FOUT. */}
         {/* Splat loads on scroll via dynamic import — no prefetch needed */}
-        <script
-          type="application/ld+json"
-          dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }}
-        />
+        {/* WebSite + Person + Organization, once. Pages add their own nodes
+            and point back at these by @id (see lib/jsonld.js). */}
+        <JsonLd data={siteGraph()} />
+        {/* rel="me": the IndieWeb/Mastodon way of saying these profiles and
+            this site are the same person. Cheap, and it lets identity
+            verification (and anyone reconciling entities) tie them together. */}
+        {profiles.map((href) => (
+          <link key={href} rel="me" href={href} />
+        ))}
         <script
           dangerouslySetInnerHTML={{
             __html: `try{if(sessionStorage.getItem("herb:chrome-hidden")==="1")document.documentElement.dataset.chrome="off"}catch(e){}`,
