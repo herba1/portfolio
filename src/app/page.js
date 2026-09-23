@@ -50,11 +50,12 @@ export default function Home() {
       <div className="h-svh">
         <TempPage />
       </div>
-      {/* Splat — scrolls in below hero */}
-      <ClientSplatSection />
-      {/* Who this is, in words — the one part of the page a crawler or an
+      {/* Who this is, in words — visually hidden, read right after the <h1>
+          by screen readers, and the part of the page a crawler or an
           assistant can read without running the hero or the splat. */}
       <HomeIntro />
+      {/* Splat — scrolls in below hero */}
+      <ClientSplatSection />
     </main>
   );
 }
