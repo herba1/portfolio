@@ -23,7 +23,7 @@ Measured on the DAVIS tennis sample (13 frames, 518×294):
 | GPU memory | 13.0 GB | 8.3 GB |
 | CPU render vs input frame | 25.8 dB | 25.8 dB |
 
-The full ~1.9M model splats score 27.9 dB, so the export loses about 2 dB. It is 364k splats and 18 MB. With 25 output times, a 3 s clip takes about 70 s end to end at 10.5 GB.
+The full ~1.9M model splats score 27.9 dB, so the export loses about 2 dB. It is 364k splats and 18 MB. Exports use 25 output times by default (the model predicts the in-between moments). With 13 they crossfade between copies of the subject and look ghosty. A 3 s clip takes about 70 s end to end at 10.5 GB.
 
 Changes from the plan below:
 

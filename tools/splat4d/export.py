@@ -23,7 +23,7 @@ def parse_args():
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--end", type=float, default=None)
     parser.add_argument("--in-frames", type=int, default=13)
-    parser.add_argument("--out-times", type=int, default=None)
+    parser.add_argument("--out-times", type=int, default=25)
     parser.add_argument("--width", type=int, default=518)
     parser.add_argument("--hfov", default="auto")
     parser.add_argument("--duration", type=float, default=None)
