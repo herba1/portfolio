@@ -36,6 +36,7 @@ export const RENDER = {
   near: 0.01,
   far: 200,
   maxDelta: 0.1,
+  lowPass: 0.3,
 };
 
 export const SORT = {
@@ -131,6 +132,13 @@ export function advanceTime(engine, step, duration) {
     engine.direction = 1;
   }
   engine.time = clamp(time, 0, duration);
+}
+
+export function lowPassFor(meta, viewportHeight) {
+  const captureHeight = meta.source?.height;
+  if (!(captureHeight > 0) || !(viewportHeight > 0)) return RENDER.lowPass;
+  const magnification = Math.max(1, viewportHeight / captureHeight);
+  return RENDER.lowPass * magnification * magnification;
 }
 
 export function frameDuration(meta) {

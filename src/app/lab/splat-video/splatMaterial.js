@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { TEXTURE_WIDTH } from "./splatVideoParams";
+import { RENDER, TEXTURE_WIDTH } from "./splatVideoParams";
 
 export const SPLAT_VERTEX = `
 precision highp float;
@@ -17,6 +17,7 @@ uniform vec3 uBoundsMin;
 uniform vec3 uBoundsSize;
 uniform float uCovScale;
 uniform vec2 uViewport;
+uniform float uLowPass;
 
 in float aSplat;
 
@@ -24,7 +25,6 @@ out vec4 vColor;
 out vec2 vPosition;
 
 const int TEXTURE_WIDTH = ${TEXTURE_WIDTH};
-const float LOW_PASS = 0.3;
 const float MAX_AXIS = 1024.0;
 const float MIN_DEPTH = 0.02;
 const float FRUSTUM_GUARD = 1.2;
@@ -85,9 +85,9 @@ void main() {
   mat3 toScreen = jacobian * mat3(modelViewMatrix);
   mat3 projected = toScreen * covariance * transpose(toScreen);
 
-  float a = projected[0][0] + LOW_PASS;
+  float a = projected[0][0] + uLowPass;
   float b = projected[0][1];
-  float c = projected[1][1] + LOW_PASS;
+  float c = projected[1][1] + uLowPass;
   float mid = 0.5 * (a + c);
   float radius = length(vec2(0.5 * (a - c), b));
   float lambda1 = mid + radius;
@@ -99,7 +99,7 @@ void main() {
 
   vec2 axis = abs(b) > 1e-7 ? normalize(vec2(b, lambda1 - a)) : (a >= c ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
   vec2 majorAxis = min(sqrt(2.0 * lambda1), MAX_AXIS) * axis;
-  vec2 minorAxis = min(sqrt(2.0 * lambda2), MAX_AXIS) * vec2(axis.y, -axis.x);
+  vec2 minorAxis = min(sqrt(2.0 * lambda2), MAX_AXIS) * vec2(-axis.y, axis.x);
 
   vec2 offsetPixels = position.x * majorAxis + position.y * minorAxis;
   vec2 ndcCenter = clipCenter.xy / clipCenter.w;
@@ -189,8 +189,10 @@ export function createSplatMaterial(textures, meta) {
       uBoundsSize: { value: new THREE.Vector3(max[0] - min[0], max[1] - min[1], max[2] - min[2]) },
       uCovScale: { value: meta.covScale },
       uViewport: { value: new THREE.Vector2(1, 1) },
+      uLowPass: { value: RENDER.lowPass },
     },
     transparent: true,
+    side: THREE.DoubleSide,
     depthTest: false,
     depthWrite: false,
     blending: THREE.CustomBlending,

@@ -5,7 +5,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import * as THREE from "three";
 
 import { createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
-import { ORBIT, PARALLAX, RENDER, SORT, advanceTime, clamp, frameCursor } from "./splatVideoParams";
+import { ORBIT, PARALLAX, RENDER, SORT, advanceTime, clamp, frameCursor, lowPassFor } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
 
@@ -193,6 +193,7 @@ function SplatField({ clip, engineRef }) {
     uniforms.uBlend.value = cursor.blend;
     state.gl.getDrawingBufferSize(scratch.viewport);
     uniforms.uViewport.value.copy(scratch.viewport);
+    uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
 
     runtime.want({ zRow: [e[2], e[6], e[10], e[14]], ...cursor });
   });
