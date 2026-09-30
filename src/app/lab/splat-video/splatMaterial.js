@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { RENDER, TEXTURE_WIDTH } from "./splatVideoParams";
+import { RENDER, TEXTURE_WIDTH, isFlipbook } from "./splatVideoParams";
 
 export const SPLAT_VERTEX = `
 precision highp float;
@@ -155,7 +155,13 @@ export function createSplatTextures(clip) {
     new THREE.DataTexture(staticPoints, layout.width, layout.staticRows, THREE.RGBAIntegerFormat, THREE.UnsignedShortType),
   );
   staticTexture.internalFormat = "RGBA16UI";
-  const dynamicTexture = new THREE.DataArrayTexture(dynamicPoints, layout.width, layout.dynamicRows, meta.frames);
+  const flipbook = isFlipbook(meta);
+  const dynamicTexture = new THREE.DataArrayTexture(
+    dynamicPoints,
+    flipbook ? 1 : layout.width,
+    layout.dynamicRows,
+    flipbook ? 1 : meta.frames,
+  );
   dynamicTexture.type = THREE.UnsignedShortType;
   integerTexture(dynamicTexture);
   dynamicTexture.internalFormat = "RGBA16UI";
@@ -181,7 +187,7 @@ export function createSplatMaterial(textures, meta) {
       uBase: { value: textures.baseTexture },
       uStatic: { value: textures.staticTexture },
       uDynamic: { value: textures.dynamicTexture },
-      uStaticCount: { value: meta.staticCount },
+      uStaticCount: { value: isFlipbook(meta) ? meta.count : meta.staticCount },
       uFrame0: { value: 0 },
       uFrame1: { value: 0 },
       uBlend: { value: 0 },

@@ -12,10 +12,10 @@ export const SPEEDS = [0.25, 0.5, 1];
 export const DEFAULT_SPEED = 1;
 
 export const ORBIT = {
-  yawLimitDeg: 25,
-  pitchLimitDeg: 12,
-  dollyMin: 0.85,
-  dollyMax: 1.15,
+  yawLimitDeg: 12,
+  pitchLimitDeg: 6,
+  dollyMin: 0.92,
+  dollyMax: 1.08,
   dragDegPerPixel: 0.18,
   wheelDollyPerPixel: 0.0012,
   damping: 7,
@@ -23,8 +23,8 @@ export const ORBIT = {
 };
 
 export const PARALLAX = {
-  yawDeg: 4,
-  pitchDeg: 4,
+  yawDeg: 2.5,
+  pitchDeg: 2,
   idleAfterMs: 1400,
   damping: 2.4,
 };
@@ -110,7 +110,24 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+export function isFlipbook(meta) {
+  return meta.kind === "flipbook";
+}
+
+export function sortCapacity(meta) {
+  if (!isFlipbook(meta)) return meta.count;
+  let largest = 0;
+  for (let f = 0; f < meta.frames; f += 1) {
+    largest = Math.max(largest, meta.frameOffsets[f + 1] - meta.frameOffsets[f]);
+  }
+  return meta.staticCount + largest;
+}
+
 export function frameCursor(time, meta) {
+  if (isFlipbook(meta)) {
+    const frame = clamp(Math.floor(time * meta.fps + 1e-4), 0, meta.frames - 1);
+    return { frame0: frame, frame1: frame, blend: 0 };
+  }
   if (meta.frames < 2 || meta.dynamicCount === 0) return { frame0: 0, frame1: 0, blend: 0 };
   const position = clamp(time / meta.duration, 0, 1) * (meta.frames - 1);
   const frame0 = Math.min(meta.frames - 1, Math.floor(position));
@@ -142,5 +159,6 @@ export function lowPassFor(meta, viewportHeight) {
 }
 
 export function frameDuration(meta) {
+  if (isFlipbook(meta)) return 1 / meta.fps;
   return meta.frames > 1 ? meta.duration / (meta.frames - 1) : meta.duration;
 }

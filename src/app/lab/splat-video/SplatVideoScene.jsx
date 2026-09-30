@@ -5,7 +5,7 @@ import { useEffect, useRef, useSyncExternalStore } from "react";
 import * as THREE from "three";
 
 import { createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
-import { ORBIT, PARALLAX, RENDER, SORT, advanceTime, clamp, frameCursor, lowPassFor } from "./splatVideoParams";
+import { ORBIT, PARALLAX, RENDER, SORT, advanceTime, clamp, frameCursor, lowPassFor, sortCapacity } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
 
@@ -32,7 +32,7 @@ function createRuntime(clip) {
   const { meta, layout } = clip;
   const textures = createSplatTextures(clip);
   const material = createSplatMaterial(textures, meta);
-  const geometry = createSplatGeometry(meta.count);
+  const geometry = createSplatGeometry(sortCapacity(meta));
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
 
@@ -48,6 +48,7 @@ function createRuntime(clip) {
       staticCount: meta.staticCount,
       dynamicCount: meta.dynamicCount,
       layerTexels: layout.layerTexels,
+      frameOffsets: meta.frameOffsets ?? null,
       boundsMin: min,
       boundsSize: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
     },
@@ -74,7 +75,7 @@ function createRuntime(clip) {
     sorter.recycle = attribute.array;
     attribute.array = event.data.order;
     attribute.needsUpdate = true;
-    geometry.instanceCount = meta.count;
+    geometry.instanceCount = event.data.count;
     sorter.inFlight = false;
     send();
   };

@@ -81,7 +81,9 @@ def load_video(args):
     transfer = stream.get("color_transfer", "")
     if transfer in ("arib-std-b67", "smpte2084"):
         log(f"warning: clip is HDR ({transfer}); colors will look washed out. Turn HDR video off and refilm.")
-    times = np.linspace(start, end, args.in_frames)
+    sample_fps = getattr(args, "fps", None)
+    times = np.arange(start, end + 1e-6, 1.0 / sample_fps) if sample_fps else np.linspace(start, end, args.in_frames)
+    count = len(times)
     frames = [decode_frame(args.video, t) for t in times]
     size = target_size(frames[0].width, frames[0].height, args.width)
     processed = []
@@ -107,11 +109,11 @@ def load_video(args):
     fx_px = 0.5 * long_source / math.tan(math.radians(hfov) / 2) * scale
     fxfycxcy = np.array([fx_px / W, fx_px / H, 0.5, 0.5], dtype=np.float32)
     log(f"hfov across the long side: {hfov:.1f} deg ({hfov_source})")
-    log(f"frames: {args.in_frames} from {start:.2f}s to {end:.2f}s, source {frames[0].width}x{frames[0].height} -> {W}x{H}")
-    C2W = np.tile(np.eye(4, dtype=np.float32), (args.in_frames, 1, 1))
-    fxfycxcy = np.tile(fxfycxcy, (args.in_frames, 1))
+    log(f"frames: {count} from {start:.2f}s to {end:.2f}s, source {frames[0].width}x{frames[0].height} -> {W}x{H}")
+    C2W = np.tile(np.eye(4, dtype=np.float32), (count, 1, 1))
+    fxfycxcy = np.tile(fxfycxcy, (count, 1))
     source = {"clip": os.path.basename(args.video), "start": start, "end": end, "hfovDeg": round(hfov, 2)}
-    return images, C2W, fxfycxcy, end - start, source
+    return images, C2W, fxfycxcy, (times[-1] - times[0]) + (1.0 / sample_fps if sample_fps else 0.0), source
 
 
 def load_npz(args):

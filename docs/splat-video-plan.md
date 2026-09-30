@@ -36,6 +36,20 @@ Changes from the plan below:
 - **`tools/splat4d/check.py`** is a numpy EWA splat renderer. It renders an export from the capture camera and compares it with the input frames. This is how the export was checked without a browser.
 - **Player loops by bouncing** (`PLAYBACK.bounce` in `splatVideoParams.js`), so a real clip doesn't jump at the loop point.
 
+### Flipbook mode (the default for Herb's clip)
+
+```bash
+tools/splat4d/flipbook.sh --video ~/Movies/clip.mov --start 0 --end 4 --out public/splats/4d/<name>
+```
+
+Every video frame (15 fps by default) gets its own complete splat set, and the player hard-cuts between them like video frames. Nothing is interpolated, so the subject never crossfades between copies. How it works:
+- MoVieS runs in overlapping windows of 13 frames (3 frames of overlap). Each window's depth scale is matched to the previous window on the shared frames.
+- For each frame, every copy in the window at that frame's exact moment is merged into one solid subject, which is the model's intended output for that moment.
+- Pixels that never move make one shared background, merged across all frames.
+- The moving region is one mask for the whole clip: every pixel that differs from the median frame at any point, with holes closed and filled. Per-frame masks left holes in the parts that barely move, and those faces melted into the averaged background.
+
+On a 3 s, 720p tripod test clip (Xiph's KristenAndSara, local only) at 15 fps: 46 frames, about 4.5 min, 22–23 dB against the video, 2.7M splats and 65 MB. Two people fill half the frame there, so a single person should come out smaller. The format is splat4d v2 (`kind: "flipbook"`): `base.bin` and `points.bin` cover the background followed by every frame's subject, and `frameOffsets` says where each frame starts. Camera limits are now yaw ±12°, pitch ±6° and dolly 0.92–1.08.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.

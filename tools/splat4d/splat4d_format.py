@@ -116,6 +116,47 @@ def write_splat4d(out_dir, meta, scene):
     return sizes
 
 
+def write_flipbook(out_dir, meta, static, frames):
+    os.makedirs(out_dir, exist_ok=True)
+    parts = [static] + frames
+    xyz = np.concatenate([p["xyz"] for p in parts])
+    cov = np.concatenate([p["cov"] for p in parts])
+    low = xyz.min(axis=0).astype(np.float64)
+    high = xyz.max(axis=0).astype(np.float64)
+    cov_scale = pick_cov_scale(cov)
+
+    base = np.empty(cov.shape[0], dtype=BASE_DTYPE)
+    base["cov"] = (cov * cov_scale).astype("<f2")
+    base["rgba"][:, :3] = np.round(np.clip(np.concatenate([p["color"] for p in parts]), 0, 1) * 255).astype(np.uint8)
+    opacity = np.concatenate([p["opacity"] for p in parts])
+    base["rgba"][:, 3] = np.round(np.clip(opacity, 0, 1) * 255).astype(np.uint8)
+    points = position_records(xyz, opacity, low, high)
+
+    sizes = {}
+    for filename, records in (("base.bin", base), ("points.bin", points)):
+        path = os.path.join(out_dir, filename)
+        records.tofile(path)
+        sizes[filename] = os.path.getsize(path)
+
+    offsets = np.concatenate([[0], np.cumsum([f["xyz"].shape[0] for f in frames])]).astype(int)
+    meta = {
+        **meta,
+        "kind": "flipbook",
+        "count": int(cov.shape[0]),
+        "staticCount": int(static["xyz"].shape[0]),
+        "frameOffsets": [int(v) for v in offsets],
+        "bounds": {"min": [float(v) for v in low], "max": [float(v) for v in high]},
+        "covScale": cov_scale,
+    }
+    ordered = {key: meta[key] for key in (
+        "format", "version", "kind", "exportId", "count", "staticCount", "frames", "fps", "duration",
+        "bounds", "covScale", "coords", "camera", "source", "frameOffsets",
+    )}
+    with open(os.path.join(out_dir, "meta.json"), "w") as handle:
+        json.dump(ordered, handle, indent=2)
+    return sizes
+
+
 def write_index(root, name):
     path = os.path.join(root, "index.json")
     try:

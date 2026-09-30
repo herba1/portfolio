@@ -14,9 +14,27 @@ LOW_PASS = 0.3
 CHUNK = 150000
 
 
+def load_flipbook(folder, meta):
+    base = np.fromfile(os.path.join(folder, "base.bin"), dtype=BASE_DTYPE)
+    points = np.fromfile(os.path.join(folder, "points.bin"), dtype=POSITION_DTYPE)
+    if base.size != meta["count"] or points.size != meta["count"]:
+        raise SystemExit(f"record counts base {base.size}, points {points.size} do not match meta.json {meta['count']}")
+    low = np.array(meta["bounds"]["min"])
+    high = np.array(meta["bounds"]["max"])
+    return {
+        "meta": meta,
+        "cov": base["cov"].astype(np.float64) / meta["covScale"],
+        "rgb": base["rgba"][:, :3] / 255.0,
+        "xyz": low + points["xyz"].astype(np.float64) / 65535.0 * (high - low),
+        "opacity": points["opacity"] / 65535.0,
+    }
+
+
 def load_splat4d(folder):
     with open(os.path.join(folder, "meta.json")) as handle:
         meta = json.load(handle)
+    if meta.get("kind") == "flipbook":
+        return load_flipbook(folder, meta)
     base = np.fromfile(os.path.join(folder, "base.bin"), dtype=BASE_DTYPE)
     static = np.fromfile(os.path.join(folder, "static.bin"), dtype=POSITION_DTYPE)
     dynamic = np.fromfile(os.path.join(folder, "dynamic.bin"), dtype=POSITION_DTYPE)
@@ -45,6 +63,12 @@ def load_splat4d(folder):
 
 
 def frame_splats(scene, frame):
+    meta = scene["meta"]
+    if meta.get("kind") == "flipbook":
+        static = meta["staticCount"]
+        offsets = meta["frameOffsets"]
+        rows = np.r_[0:static, static + offsets[frame]:static + offsets[frame + 1]]
+        return scene["xyz"][rows], scene["cov"][rows], scene["rgb"][rows], scene["opacity"][rows]
     xyz = np.concatenate([scene["static_xyz"], scene["dynamic_xyz"][frame]])
     alpha = np.concatenate([scene["static_opacity"], scene["dynamic_opacity"][frame]])
     return xyz, scene["cov"], scene["rgb"], alpha
@@ -122,6 +146,7 @@ def main():
     parser.add_argument("folder")
     parser.add_argument("--frames", default="0")
     parser.add_argument("--cache", default=None)
+    parser.add_argument("--images", default=None)
     args = parser.parse_args()
 
     scene = load_splat4d(args.folder)
@@ -141,6 +166,10 @@ def main():
         image, coverage = render(*frame_splats(scene, frame), fxfycxcy, W, H)
         panels = [image]
         line = f"frame {frame}: coverage median {np.median(coverage):.2f}, below 0.5 on {100 * np.mean(coverage < 0.5):.1f}% of pixels"
+        if args.images:
+            truth = np.load(os.path.expanduser(args.images), mmap_mode="r")[frame].transpose(1, 2, 0)
+            line += f", psnr vs input {psnr(image, truth):.2f} dB"
+            panels.insert(0, truth)
         if cache is not None:
             out_times, in_times = cache["out_times"], cache["in_times"]
             source_frame = int(np.abs(in_times - out_times[frame]).argmin())

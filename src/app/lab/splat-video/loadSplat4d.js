@@ -53,9 +53,19 @@ function validateMeta(meta, clip) {
     throw new Splat4dError(`meta.json for “${clip}” ${why}`, { clip });
   };
   if (!meta || meta.format !== "splat4d") fail("is not a splat4d export.");
-  if (meta.version !== 1) fail(`is version ${meta.version}; this player reads version 1.`);
-  if (!isCount(meta.count) || !isCount(meta.staticCount) || !isCount(meta.dynamicCount)) fail("has invalid counts.");
-  if (meta.count !== meta.staticCount + meta.dynamicCount) fail("has a count that is not static plus dynamic.");
+  if (meta.version === 2) {
+    if (meta.kind !== "flipbook") fail(`has an unknown kind “${meta.kind}”.`);
+    if (!isCount(meta.count) || !isCount(meta.staticCount)) fail("has invalid counts.");
+    if (!(meta.fps > 0)) fail("has no fps.");
+    const offsets = meta.frameOffsets;
+    if (!Array.isArray(offsets) || offsets.length !== meta.frames + 1 || !offsets.every(isCount)) fail("has invalid frameOffsets.");
+    if (meta.staticCount + offsets[offsets.length - 1] !== meta.count) fail("has frameOffsets that do not add up to count.");
+  } else if (meta.version === 1) {
+    if (!isCount(meta.count) || !isCount(meta.staticCount) || !isCount(meta.dynamicCount)) fail("has invalid counts.");
+    if (meta.count !== meta.staticCount + meta.dynamicCount) fail("has a count that is not static plus dynamic.");
+  } else {
+    fail(`is version ${meta.version}; this player reads versions 1 and 2.`);
+  }
   if (meta.count === 0) fail("has no splats.");
   if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
   if (!(meta.duration > 0)) fail("has no duration.");
@@ -148,6 +158,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     throw new Splat4dError(`meta.json for “${clip}” is not valid JSON.`, { clip, missing: true });
   }
   const meta = validateMeta(raw, clip);
+  if (meta.kind === "flipbook") return loadFlipbook(clip, folder, meta, { signal, onProgress });
 
   const baseRows = rowsFor(meta.count);
   const staticRows = rowsFor(meta.staticCount);
@@ -210,5 +221,51 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     staticPoints,
     dynamicPoints,
     layout: { width: TEXTURE_WIDTH, baseRows, staticRows, dynamicRows, layerTexels },
+  };
+}
+
+async function loadFlipbook(clip, folder, meta, { signal, onProgress }) {
+  const rows = rowsFor(meta.count);
+  const base = new Uint32Array(TEXTURE_WIDTH * rows * 4);
+  const points = new Uint16Array(TEXTURE_WIDTH * rows * 4);
+  const expected = { base: meta.count * 16, points: meta.count * 8 };
+  const total = expected.base + expected.points;
+  let loaded = 0;
+  const onChunk = (bytes) => {
+    loaded += bytes;
+    if (onProgress) onProgress(loaded, total);
+  };
+  if (onProgress) onProgress(0, total);
+
+  const version = `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
+  await Promise.all([
+    streamInto({
+      url: `${folder}/base.bin${version}`,
+      name: "base.bin",
+      clip,
+      expected: expected.base,
+      write: linearWriter(new Uint8Array(base.buffer)),
+      signal,
+      onChunk,
+    }),
+    streamInto({
+      url: `${folder}/points.bin${version}`,
+      name: "points.bin",
+      clip,
+      expected: expected.points,
+      write: linearWriter(new Uint8Array(points.buffer)),
+      signal,
+      onChunk,
+    }),
+  ]);
+
+  return {
+    clip,
+    meta: { ...meta, dynamicCount: 0 },
+    bytes: total,
+    base,
+    staticPoints: points,
+    dynamicPoints: new Uint16Array(4),
+    layout: { width: TEXTURE_WIDTH, baseRows: rows, staticRows: rows, dynamicRows: 1, layerTexels: 1 },
   };
 }
