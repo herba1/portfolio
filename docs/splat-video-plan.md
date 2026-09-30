@@ -2,6 +2,44 @@
 
 For the agent running this on Herb's M5 MacBook Pro. Read the whole file before starting. Keep Herb posted in a line or two per phase.
 
+## Status (2026-09-30)
+
+Phases 0–4 are done on Herb's M5 (16 GB). Phase 5 is waiting on a clip.
+
+Run a clip:
+
+```bash
+tools/splat4d/export.sh --video ~/Movies/clip.mov --start 0 --end 4 --out public/splats/4d/<name> --ply-preview
+tools/splat4d/render.sh <name> 0,6,12
+```
+
+Then open `/lab/splat-video?clip=<name>` (the page opens the newest export by default). Re-running `export.sh` with only selection flags changed (`--budget`, `--motion-eps`, voxels…) reuses the cached model outputs in `~/dev/MoVieS/out/<name>/` and takes seconds. Pass `--fresh` to rerun the model. `tools/splat4d/setup.sh` rebuilds the Mac setup from scratch.
+
+Measured on the DAVIS tennis sample (13 frames, 518×294):
+
+| | fp32 | fp16 (default) |
+|---|---|---|
+| Backbone | 51 s | 32 s |
+| GPU memory | 13.0 GB | 8.3 GB |
+| CPU render vs input frame | 25.8 dB | 25.8 dB |
+
+The full ~1.9M model splats score 27.9 dB, so the export loses about 2 dB. It is 364k splats and 18 MB. With 25 output times, a 3 s clip takes about 70 s end to end at 10.5 GB.
+
+Changes from the plan below:
+
+- **No VGGT-1B download.** The MoVieS checkpoint already holds every weight, so the model is built empty (`accelerate.init_empty_weights`) and loaded with `strict=True, assign=True`. That saves 4.8 GB of disk and RAM. Because of this, `--hfov auto` reads the 35 mm-equivalent focal length from the clip metadata. If the clip has none, it uses 65°. Pass `--hfov` to override.
+- **Chunked attention.** Global attention is split into query chunks (`--attention-chunk 1024`), and the DPT heads take 4 frames at a time. Without this, 13 frames swapped the 16 GB Mac to a halt.
+- **fp16 by default.** It matches fp32 in quality.
+- **Static set is merged, not picked.** Copies that land in the same voxel (1.5 px footprint and 10 % depth) become one Gaussian: moment-matched covariance and stacked opacity `1 − ∏(1 − α)`. Picking a single copy left the scene sparse and dark, because each copy's opacity is low (median about 0.15) and the model relies on 13 overlapping copies.
+- **Dynamic set comes from every input frame and is not merged.** Keeping only the reference frame's copies made the subject see-through. Merging trajectories cost 4 dB. `--dynamic-frames N` limits it to N evenly spaced frames, and `--merge-dynamic` turns merging back on. `--extra-dynamic-frames` is gone.
+- **Budget raised to 500k.** When over budget, the dynamic set keeps at most half of it.
+- **`tools/splat4d/check.py`** is a numpy EWA splat renderer. It renders an export from the capture camera and compares it with the input frames. This is how the export was checked without a browser.
+- **Player loops by bouncing** (`PLAYBACK.bounce` in `splatVideoParams.js`), so a real clip doesn't jump at the loop point.
+
+Not verified yet:
+- The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
+- How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
+
 ## Goal
 
 Herb films a short clip with the phone standing still. We turn it into a 3D Gaussian splat scene that **plays like the video** and that you can **nudge the camera around** in the browser (drag, cursor parallax) while it plays. It shows up first as a lab page on herb.art (`/lab/splat-video`). The homepage comes later, after Herb has seen it.

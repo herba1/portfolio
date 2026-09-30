@@ -1,0 +1,20 @@
+{
+  "title": "Splat video",
+  "description": "A clip filmed from a still phone, rebuilt as moving Gaussian splats that play like the video. Drag, scroll or just move the cursor and the camera leans off the lens while it keeps playing.",
+  "tags": [
+    "WebGL",
+    "Player",
+    "Splats"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-09-30T03:11:41.568Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Puts Herb himself on the page as a video you can step into: a real player interface (play, scrub, speed, back to lens) around a custom splat renderer, on the light palette.",
+  "source": {
+    "kind": "manual"
+  },
+  "generation": null
+}
