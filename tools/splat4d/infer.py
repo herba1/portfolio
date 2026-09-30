@@ -135,12 +135,13 @@ def load_model(args):
 
 
 
-def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select):
+def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_count=None):
     device = args.device
     renderer = model.gs_renderer
     F_in, _, H, W = images.shape
     HW = H * W
     times = np.linspace(0, 1, F_in, dtype=np.float32)
+    out_times = np.linspace(0, 1, out_count or F_in, dtype=np.float32)
     fx, fy, cx, cy = fxfycxcy[0] * np.array([W, H, W, H])
 
     def put(array):
@@ -150,7 +151,7 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select):
 
     with torch.inference_mode():
         backbone_outputs, pred_motions, pred_motion_gs = model.backbone(
-            put(images), put(C2W), put(fxfycxcy), put(times), put(times),
+            put(images), put(C2W), put(fxfycxcy), put(times), put(out_times),
             frames_chunk_size=args.frames_chunk,
         )
         depth = renderer.depth_activation(backbone_outputs["depth"].float())
@@ -161,7 +162,7 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select):
         states = []
         reference = None
         motion = None
-        for i in range(F_in):
+        for i in range(out_times.size):
             outputs = dict(backbone_outputs)
             outputs["offset"] = pred_motions[:, i, :, :3].float()
             if pred_motion_gs:
@@ -183,13 +184,17 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select):
     frames = []
     for i, state in enumerate(states):
         xyz = state["xyz"]
+        own = np.zeros(xyz.shape[0], dtype=bool)
+        nearest = int(np.abs(times - out_times[i]).argmin())
+        own[nearest * HW:(nearest + 1) * HW] = True
+        if masks is None:
+            frames.append(select(i, state, xyz[:, 2] > 0, own, motion))
+            continue
         z = np.clip(xyz[:, 2], 1e-6, None)
         px = np.floor(fx * xyz[:, 0] / z + cx).astype(np.int64)
         py = np.floor(fy * xyz[:, 1] / z + cy).astype(np.int64)
         inside = (xyz[:, 2] > 0) & (px >= 0) & (px < W) & (py >= 0) & (py < H)
         in_mask = np.zeros(xyz.shape[0], dtype=bool)
         in_mask[inside] = masks[i][py[inside], px[inside]]
-        own = np.zeros(xyz.shape[0], dtype=bool)
-        own[i * HW:(i + 1) * HW] = True
         frames.append(select(i, state, in_mask, own, motion))
     return frames, depth[0, :, 0].cpu().numpy()

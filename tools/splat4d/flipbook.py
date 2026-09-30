@@ -9,13 +9,13 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from inputs import contact_sheet, load_video, log, save_depth_preview
+from inputs import contact_sheet, load_npz, load_video, log, save_depth_preview
 from select_splats import merge, thin_rows, voxel_keys
 from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -24,7 +24,11 @@ PART_KEYS = ("xyz", "cov", "color", "opacity")
 def parse_args():
     parser = argparse.ArgumentParser(description="Turn a still-camera clip into a splat flipbook: one splat set per video frame")
     parser.add_argument("--movies", default="~/dev/MoVieS")
-    parser.add_argument("--video", required=True)
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--video")
+    source.add_argument("--npz")
+    parser.add_argument("--out-times", type=int, default=25)
+    parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--end", type=float, default=None)
     parser.add_argument("--fps", type=float, default=15.0)
@@ -142,6 +146,26 @@ def load_parts(path, settings):
     return frames, data["depth"]
 
 
+def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
+    settings = repr(sorted((key, getattr(args, key)) for key in MODEL_SETTINGS))
+    if not args.fresh:
+        cached = load_parts(cache_path, settings)
+        if cached is not None:
+            log(f"reusing model outputs from {cache_path} (pass --fresh to rerun the model)")
+            return cached
+
+    from infer import load_model, window_frames
+
+    model, dtype = load_model(args)
+    started = time.time()
+    select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]))
+    frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, None, select, args.out_times)
+    log(f"{len(frames)} moments from {images.shape[0]} input frames in {time.time() - started:.0f}s")
+    del model
+    save_parts(cache_path, settings, frames, depth)
+    return frames, depth
+
+
 def run_windows(args, images, C2W, fxfycxcy, masks, cache_path):
     settings = repr(sorted((key, getattr(args, key)) for key in MODEL_SETTINGS))
     if not args.fresh:
@@ -184,7 +208,11 @@ def main():
     args = parse_args()
     started = time.time()
     args.movies = os.path.abspath(os.path.expanduser(args.movies))
-    args.video = os.path.abspath(os.path.expanduser(args.video))
+    if args.video:
+        args.video = os.path.abspath(os.path.expanduser(args.video))
+    else:
+        candidates = [os.path.expanduser(args.npz), os.path.join(args.movies, args.npz)]
+        args.npz = os.path.abspath(next((p for p in candidates if os.path.exists(p)), candidates[0]))
     args.out = os.path.abspath(args.out)
     name = os.path.basename(args.out.rstrip("/"))
     cache_path = os.path.abspath(os.path.expanduser(args.cache or os.path.join(args.movies, "out", name, "flipbook_outputs.npz")))
@@ -192,19 +220,26 @@ def main():
     os.makedirs(preview_dir, exist_ok=True)
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
-    images, C2W, fxfycxcy, _, source = load_video(args)
-    count, _, H, W = images.shape
-    masks, plate = subject_masks(images, args)
-    mask_sheet(images, masks, os.path.join(preview_dir, "masks.jpg"))
-    Image.fromarray((plate.transpose(1, 2, 0) * 255).astype(np.uint8)).save(os.path.join(preview_dir, "clean_plate.jpg"))
-    log(f"moving region covers {100 * masks.mean():.1f}% of the frame")
-
-    frames, depth = run_windows(args, images, C2W, fxfycxcy, masks, cache_path)
+    if args.npz:
+        args.in_frames = None
+        images, C2W, fxfycxcy, clip_duration, source = load_npz(args)
+        _, _, H, W = images.shape
+        frames, depth = run_posed_clip(args, images, C2W, fxfycxcy, cache_path)
+        count = len(frames)
+        args.fps = count / clip_duration
+    else:
+        images, C2W, fxfycxcy, _, source = load_video(args)
+        count, _, H, W = images.shape
+        masks, plate = subject_masks(images, args)
+        mask_sheet(images, masks, os.path.join(preview_dir, "masks.jpg"))
+        Image.fromarray((plate.transpose(1, 2, 0) * 255).astype(np.uint8)).save(os.path.join(preview_dir, "clean_plate.jpg"))
+        log(f"moving region covers {100 * masks.mean():.1f}% of the frame")
+        frames, depth = run_windows(args, images, C2W, fxfycxcy, masks, cache_path)
     save_depth_preview(depth, os.path.join(preview_dir, "depth.mp4"))
 
     background = {key: np.concatenate([f["background"][key] for f in frames]) for key in PART_KEYS}
     z = background["xyz"][:, 2]
-    keep = z <= np.percentile(z, args.max_depth_pct)
+    keep = z <= (np.percentile(z, args.max_depth_pct) if z.size else 0)
     background = {key: value[keep] for key, value in background.items()}
     fx_px = float(fxfycxcy[0, 0] * W)
     static, stack = merge(
@@ -239,7 +274,8 @@ def main():
     }
     sizes = write_flipbook(args.out, meta, static, per_frame)
     write_index(os.path.dirname(args.out), name)
-    np.save(os.path.join(os.path.dirname(cache_path), "flipbook_images.npy"), images)
+    nearest = np.round(np.linspace(0, images.shape[0] - 1, count)).astype(int)
+    np.save(os.path.join(os.path.dirname(cache_path), "flipbook_images.npy"), images[nearest])
     total = sum(sizes.values())
     log(f"wrote {args.out}: " + ", ".join(f"{k} {v / 1e6:.1f} MB" for k, v in sizes.items()) + f" (total {total / 1e6:.1f} MB)")
     log(f"done in {time.time() - started:.0f}s. open /lab/splat-video?clip={name}")
