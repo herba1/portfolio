@@ -66,6 +66,12 @@
   height: 100dvh;
   padding: 80px 24px 72px;
 }
+/* The timeline grows as tall as its tallest day and scrolls; tiles keep a
+   shape the pieces can actually lay out in at a fifth of the width. */
+.xl-timeline {
+  height: auto;
+  min-height: 100dvh;
+}
 .xl-sheet__head {
   display: flex;
   align-items: baseline;
@@ -119,12 +125,14 @@
   height: 100%;
   display: grid;
   grid-template-columns: 1.05fr 1.6fr 0.95fr 1.1fr;
-  grid-template-rows: repeat(4, minmax(0, 1fr));
+  grid-template-rows: repeat(6, minmax(0, 1fr));
   grid-template-areas:
-    "ink      refract psa backdrop"
-    "ink      refract psa backdrop"
-    "halftone deck    psa tuner"
-    "halftone deck    psa song";
+    "ink      refract psa  backdrop"
+    "ink      refract psa  backdrop"
+    "ink      refract psa  backdrop"
+    "halftone deck    psa  tuner"
+    "halftone deck    song tuner"
+    "halftone deck    song tuner";
   gap: 16px;
 }
 .xl-bento__tile {
@@ -247,11 +255,10 @@
 .xl-timeline__piece {
   display: flex;
   flex-direction: column;
-  flex: 0 1 auto;
-  min-height: 0;
+  flex: none;
 }
 .xl-timeline__frame {
-  aspect-ratio: 4 / 3;
+  aspect-ratio: var(--aspect, 4 / 5);
   min-height: 0;
 }
 .xl-timeline__date {

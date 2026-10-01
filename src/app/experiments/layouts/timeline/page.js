@@ -45,7 +45,7 @@ export default async function TimelineLayout() {
           <div key={col.date} className="xl-timeline__col">
             {[...col.pieces].reverse().map((piece) => (
               <div key={piece.slug} className="xl-timeline__piece">
-                <div className="xl-timeline__frame">
+                <div className="xl-timeline__frame" style={{ "--aspect": Math.min(piece.aspect, 4 / 5) }}>
                   <Piece slug={piece.slug} data={data} />
                 </div>
                 <Link href={piece.slug} className="xl-caption">

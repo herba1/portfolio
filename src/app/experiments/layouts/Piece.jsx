@@ -21,10 +21,6 @@ const COMPONENTS = {
   "/tuner": TunerExperience,
 };
 
-export function hasPiece(slug) {
-  return slug in COMPONENTS;
-}
-
 // `data` carries anything a piece needs fetched on the server (Deck's tracks).
 export default function Piece({ slug, data, className = "" }) {
   const Component = COMPONENTS[slug];
