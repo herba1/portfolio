@@ -129,11 +129,13 @@ export function songsKit(tracks) {
     id: "songs",
     items,
     figures: false,
+    // A heart, outlined, straight on the cover — see the songs rules in psa.css.
+    icon: "heart",
     filters: [],
     tabs: ["collection"],
     copy: {
-      browse: "Add to your bookmarks",
-      library: "Saved",
+      browse: "Add to your likes",
+      library: "Liked",
     },
   };
 }

@@ -5,6 +5,7 @@ import { memo, useEffect, useRef } from "react";
 import SlotNumber from "@/app/ui/SlotNumber";
 import { haptic } from "@/lib/haptics";
 import { useSaveFlight } from "./SaveFlight";
+import { HEART } from "./SaveButton";
 
 /* ─────────────────────────────────────────────────────────────────────────
    TabBar — the footer nav.
@@ -32,7 +33,7 @@ export const TABS = [
   { id: "profile", label: "Profile" },
 ];
 
-function Icon({ id, active }) {
+function Icon({ id, active, glyph }) {
   const common = {
     width: 24,
     height: 24,
@@ -69,7 +70,11 @@ function Icon({ id, active }) {
     return (
       <svg {...common}>
         <path
-          d="M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z"
+          d={
+            glyph === "heart"
+              ? HEART
+              : "M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z"
+          }
           fill={active ? "currentColor" : "none"}
         />
       </svg>
@@ -180,7 +185,7 @@ function TabCount({ count, nonce }) {
   );
 }
 
-function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel, tabs }) {
+function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel, tabs, icon }) {
   const flight = useSaveFlight();
   const undoMs = undo?.ms ?? 3000;
 
@@ -248,7 +253,7 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel,
                 is a fifth of the bar wide and aiming at its centre would land
                 the card beside the bookmark rather than on it. */}
             <span className="psa-tab-icon" ref={isTarget ? flight?.registerTarget : undefined}>
-              <Icon id={tab.id} active={isActive} />
+              <Icon id={tab.id} active={isActive} glyph={icon} />
               <TabCount count={count ?? 0} nonce={countNonce} />
             </span>
             <span className="psa-tab-label">

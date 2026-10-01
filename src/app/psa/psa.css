@@ -1299,3 +1299,26 @@ html[data-psa-vt]::view-transition-new(*) {
 .psa[data-kit="songs"] .slab-face img {
   object-fit: cover;
 }
+
+/* The heart sits straight on the cover: no plate, no hairline. A difference
+   blend on a white glyph inverts whatever art is under it, so the outline
+   reads on a pale sleeve and a black one alike without a backing. Once it is
+   saved the red fill is the signal, so the blend steps aside and lets it be
+   red. */
+.psa[data-kit="songs"] .psa-tile-save {
+  --pk-save-bg: transparent;
+  --pk-save-bg-hover: transparent;
+  --pk-save-plate: none;
+  --pk-save-idle: var(--pk-neutral-0);
+  mix-blend-mode: difference;
+}
+
+.psa[data-kit="songs"] .psa-tile-save:has(.pk-save[data-saved]) {
+  mix-blend-mode: normal;
+}
+
+/* Hover would tint the glyph toward the saved red, which the blend turns
+   cyan. The outline just stays white until it is actually saved. */
+.psa[data-kit="songs"] .psa-tile-save .pk-save:not([data-saved]):hover {
+  color: var(--pk-neutral-0);
+}

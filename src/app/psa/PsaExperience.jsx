@@ -317,6 +317,7 @@ function PsaApp({ embedded }) {
         undo={undo}
         libraryLabel={kit.copy.library}
         tabs={kit.tabs}
+        icon={kit.icon}
       />
     </div>
   );
@@ -416,6 +417,7 @@ const Figures = memo(function Figures({ live, price, delta, priceMove, deltaMove
 });
 
 const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
+  const { icon } = useKit();
   const stagger = Math.min(index, 8);
   const rolled = useRolled(stagger * STAGGER_STEP + ROLL_LEAD);
   const figures = useFigures(card.id, rolled);
@@ -475,7 +477,7 @@ const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
       <div className="psa-tile-art" ref={artRef}>
         <Slab card={card} sizes={TILE_SIZES} />
         <div className="psa-tile-save">
-          <SaveButton saved={saved} onToggle={handleToggle} hint={hint} />
+          <SaveButton saved={saved} onToggle={handleToggle} hint={hint} icon={icon} />
         </div>
       </div>
       <div className="psa-tile-text">
