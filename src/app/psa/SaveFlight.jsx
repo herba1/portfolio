@@ -129,9 +129,13 @@ export function SaveFlightProvider({ children }) {
   }, []);
 
   /* The grid reflow, bound to the live globals — so undo and a filed card
-     close and open on the numbers currently in the panel. */
+     close and open on the numbers currently in the panel. With no list named
+     it is THIS shell's grid, found through the layer it renders: several apps
+     can share a page, and the first .psa-grid in the document may be another
+     copy's. */
   const flip = useCallback((mutate, gridEl, opts) => {
-    flipGrid(mutate, gridEl, globalsRef.current, opts);
+    const grid = gridEl ?? layerRef.current?.closest(".psa")?.querySelector(".psa-grid");
+    flipGrid(mutate, grid, globalsRef.current, opts);
   }, []);
 
   const save = useCallback(
@@ -234,8 +238,10 @@ export function SaveFlightLayer() {
    ───────────────────────────────────────────────────────────────────────── */
 const tiles = (grid) => [...grid.children].filter((el) => el.dataset.cardId);
 
-export function flipGrid(mutate, gridEl, g = GLOBALS, opts = {}) {
-  const grid = gridEl ?? document.querySelector(".psa-grid");
+// No grid (undo fired from a tab without one) is just the mutation. There is
+// no document-wide fallback: on a page holding several apps it would reflow
+// someone else's.
+export function flipGrid(mutate, grid, g = GLOBALS, opts = {}) {
   if (!grid) {
     mutate();
     return;

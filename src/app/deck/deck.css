@@ -125,6 +125,12 @@
  * Short names are fine for anything NOT registered (see `.deck` below).
  * The moment a name goes into an @property block, it is public.
  *
+ * ── The box
+ * The deck fills whatever `.piece-box` it is rendered in and sizes off
+ * that box, never off the window: `cq*` units where a viewport unit would
+ * go, and `@container` where a media query would. `.deck` is its own
+ * scroller inside the box — the document never scrolls for it.
+ *
  * ── Tuning
  * Every constant below is a custom property on `.deck`, and the
  * dev-only Leva panel (DeckControls.jsx) writes straight onto that
@@ -229,7 +235,7 @@
 /* The four values the drag handler needs in order to know which way the
    run points on screen. Typing them isn't decoration: an UNregistered
    custom property's computed value is the literal token
-   ("clamp(150px, calc(26 * 1vmin), 340px)"), which JS can't parse. A
+   ("clamp(150px, calc(26 * 1cqmin), 340px)"), which JS can't parse. A
    registered <length>/<angle> resolves at computed-value time, so
    getComputedStyle hands back "234.4px" / "40deg" and the pointer delta
    can be projected onto the real axis. */
@@ -326,7 +332,7 @@
 }
 
 /* ═══════════════════════════════════════════════════════════════════
- * SCROLL TRACK + TUNING
+ * SCROLLER + TUNING
  *
  * All dials live here so one element carries the whole configuration
  * and `.deck__stage` / `.deck__card` just inherit it.
@@ -335,6 +341,16 @@
 .deck {
   position: relative;
 
+  /* the scrollport — exactly the box, with the run overflowing it */
+  height: 100cqh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  /* A wheel that reaches the end of the deck stops there rather than
+     scrolling the page the box sits on. */
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  outline: none;
+
   /* ── camera ── */
   --persp: 3600px;
   --off-x: -14%;
@@ -342,14 +358,30 @@
   --dk-yaw: 40deg;
 
   /* ── card ──
-     vmin is the wrong unit on a phone held upright: vmin is the SHORT
-     side, so a 390×844 screen sizes its covers off 390 and then the
-     floor catches them, which is why they came out tiny. --w-min is the
-     mobile size and it's in vw — the axis the deck actually runs along.
-     Leva writes --w-vmin, so the desktop dial still works untouched. */
+     cqmin is the wrong unit in a box held upright: cqmin is the SHORT
+     side, so a 390×844 box sizes its covers off 390 and then the floor
+     catches them, which is why they came out tiny. --w-min is the narrow
+     size and it's in cqw — the axis the deck actually runs along. Leva
+     writes --w-vmin (still a count of the short side's hundredths), so
+     the desktop dial works untouched. */
   --w-vmin: 44;
   --w-min: 180px;
-  --dk-w: clamp(var(--w-min), calc(var(--w-vmin) * 1vmin), 560px);
+
+  /* ── fitting a short box ──
+     The front card sits --off-y below centre and the toggle holds the
+     bottom ~80px, so a card can only be as tall as what is left between
+     them: 2 × (50% − 13%) of the box, less twice that 80 and a margin
+     for the perspective, which draws the front card a little larger
+     than its own width. On a full
+     screen this never binds — 900px allows ~500px of card, more than
+     44cqmin asks for — it only catches a short box, where the Spread
+     button would otherwise land on the artwork. */
+  --w-fit: calc(74cqh - 192px);
+  --dk-w: clamp(
+    var(--w-min),
+    min(calc(var(--w-vmin) * 1cqmin), var(--w-fit)),
+    560px
+  );
 
   /* ── one step through the stack, as a fraction of the card ──
      depth : the gap along Z. Turned by --dk-yaw this is what produces the
@@ -455,7 +487,9 @@
   --pop-ry: -5deg;
 
   /* ── scroll ──
-     travel : viewport-heights of scroll per card
+     travel : hundredths of the box's height of scroll per card — with a
+              floor (see --travel-y), so a short box doesn't turn one
+              notch of the wheel into three cards
      follow : how long the deck takes to catch up to the scroll — this
               is the mass. 0ms and it's welded to the wheel.
      ease-follow : the settle. The >1 second control point is the
@@ -463,15 +497,21 @@
               headed and comes back, which is what reads as weight. */
   --travel: 10;
 
-  /* travel-x : viewport-WIDTHS of sideways scroll per card, used only in
-                the phone's horizontal mode. It is the gesture's whole
-                sensitivity dial, and it is set against a real number:
-                one card costs ~26vw of finger, so a comfortable 200px
+  /* travel-x : hundredths of the box's WIDTH of sideways scroll per card,
+                used only in the narrow horizontal mode. It is the
+                gesture's whole sensitivity dial, and it is set against a
+                real number: on a phone the box is the screen, so one
+                card costs ~26% of its width in finger and a comfortable 200px
                 swipe on a 390px screen lands about two covers on and
                 momentum carries a flick further. The old hand-rolled
                 touch projection put one card at ~26 PIXELS, which is
                 where "far too sensitive" came from. */
   --travel-x: 26;
+
+  /* The run's step in pixels, resolved once. The floor only bites in a
+     box shorter than 640px — a full screen is already well over it — and
+     holds a wheel notch to about a card wherever the deck is put. */
+  --travel-y: max(calc(var(--travel) * 1cqh), 64px);
 
   --follow: 460ms;
   --ease-follow: cubic-bezier(0.34, 1.3, 0.64, 1);
@@ -546,8 +586,6 @@
   --intro-step: 55ms;
   --intro-cap: 12;
 
-  height: calc(100svh + var(--count, 50) * var(--travel) * 1svh);
-
   /* the shape morph — one property, every card and the rail read it */
   transition: --dk-m var(--m-dur) var(--ease-entrance);
 
@@ -562,22 +600,28 @@
   --dk-me: max(var(--dk-m), var(--dk-im));
 }
 
-/* Everywhere but the phone this element does not exist as far as layout
-   is concerned, so the stage sticks to `.deck` exactly as it always has.
-   On the phone it becomes the sideways run — see the block below. */
+/* The run: one box tall plus the whole deck's travel. This is what
+   overflows `.deck`, and the stage sticks to the top of the scrollport
+   for the length of it. In a narrow box it turns sideways — see the
+   block below. */
 .deck__track {
-  display: contents;
+  position: relative;
+  height: calc(100cqh + var(--count, 50) * var(--travel-y));
 }
 
-/* Phones: covers sized off the width, not the short side. 72vw leaves
-   the fan's neighbours peeking in at the edges instead of sitting fully
-   off-screen, which is what makes a one-up carousel read as a carousel.
-   Scoped to narrow widths so a landscape phone keeps the vmin sizing. */
-@media (max-width: 640px) {
+/* Narrow boxes: covers sized off the width, not the short side. 72cqw
+   leaves the fan's neighbours peeking in at the edges instead of sitting
+   fully out of the box, which is what makes a one-up carousel read as a
+   carousel. Scoped to narrow widths so a landscape box keeps the cqmin
+   sizing. Same breakpoint as SMALL in Deck.jsx. */
+@container (max-width: 640px) {
   .deck {
-    --w-min: 72vw;
+    /* the same fit as above, against the narrow layout's 8% drop — on a
+       phone the width still decides; in a short tile the height does */
+    --w-fit: calc(84cqh - 192px);
+    --w-min: min(72cqw, var(--w-fit));
     /* less climb and a shallower turn — there's no room for the long
-       diagonal run on a 390px-wide screen */
+       diagonal run in a 390px-wide box */
     --off-x: -8%;
     --off-y: 8%;
     /* The follow transition is a main-thread animation, and every frame
@@ -587,35 +631,13 @@
   }
 }
 
-/* ── inside the mobile menu's page card ───────────────────────────────
-   Opening the menu makes `.page-card` position:fixed + overflow:hidden
-   and translates its inner up by the scroll you had, to show the slice
-   you were looking at. Nothing scrolls after that, so `position: sticky`
-   has nothing to stick to: the stage drops to the top of a section
-   several thousand pixels tall and the card shows empty space.
-
-   --snap is that captured scroll, handed in from the menu context. The
-   inner is shifted up by exactly that much, so placing the stage at
-   `top: var(--snap)` lands it back on the visible slice — the same
-   result sticky was producing, arrived at by hand.
-
-   Scoped to widths the phone layout does NOT cover. Below that the deck
-   is one screen tall and scrolls sideways, so the document scroll is
-   always 0, --snap is always 0, and forcing the stage to `absolute`
-   would break the sideways stick for no reason. */
-@media (min-width: 641px) {
-  .page-card.is-active .deck__stage {
-    position: absolute;
-    top: var(--snap, 0px);
-    left: 0;
-    right: 0;
-  }
-}
-
+/* Stuck to the top of `.deck`'s own scrollport, not the document's — so
+   it holds still inside the mobile menu's fixed page card too, where the
+   document stops scrolling but the deck doesn't. */
 .deck__stage {
   position: sticky;
   top: 0;
-  height: 100svh;
+  height: 100cqh;
   overflow: clip;
   perspective: var(--persp);
   perspective-origin: 50% 50%;
@@ -645,59 +667,62 @@
    the deck tracks the pointer, and the mass comes back the moment you
    let go. Set from the drag handler in Deck.jsx. */
 /* ═══════════════════════════════════════════════════════════════════
- * PHONES — the deck runs on its own sideways overflow.
+ * NARROW BOXES — the deck runs on its own sideways overflow.
  *
- * The page is exactly one screen tall and the document does not scroll
- * at all, so the URL bar has nothing to react to and the viewport stops
- * resizing under you. The gesture is a native horizontal scroll, which
- * means momentum, friction and rubber-banding come from the platform
- * rather than from arithmetic in a pointermove handler — and the swipe
- * finally runs the same direction as the deck.
+ * The gesture is a native horizontal scroll, which means momentum,
+ * friction and rubber-banding come from the platform rather than from
+ * arithmetic in a pointermove handler — and the swipe finally runs the
+ * same direction as the deck.
  *
  * Structurally it is the vertical layout turned ninety degrees: a run
- * wider than the screen, and a stage stuck to its left edge. Every box
- * is sized in viewport units, NOT percentages — the stage's parent is
- * the run, which is many screens wide by construction, so a percentage
- * would measure the stage against the wrong thing entirely.
+ * wider than the box, and a stage stuck to its left edge. Every size is
+ * in container units, NOT percentages — the stage's parent is the run,
+ * which is many boxes wide by construction, so a percentage would
+ * measure the stage against the wrong thing entirely.
  * ═══════════════════════════════════════════════════════════════════ */
-@media (max-width: 640px) {
+@container (max-width: 640px) {
   .deck {
-    /* one screen, and nothing for the document to scroll */
-    height: 100svh;
     overflow-x: auto;
     overflow-y: hidden;
-    /* keep the bounce, but don't let an overscroll chain out to the
-       document or hand the browser an edge-swipe back-navigation */
-    overscroll-behavior-x: contain;
-    scrollbar-width: none;
-  }
-
-  .deck::-webkit-scrollbar {
-    display: none;
   }
 
   .deck__track {
-    display: block;
-    position: relative;
-    width: calc(100vw + var(--count, 22) * var(--travel-x) * 1vw);
-    height: 100svh;
+    width: calc(100cqw + var(--count, 22) * var(--travel-x) * 1cqw);
+    height: 100cqh;
   }
 
   .deck__stage {
-    /* stuck to the left of the scrollport instead of the top of the
-       document — the same trick, rotated */
+    /* stuck to the left of the scrollport instead of the top — the same
+       trick, rotated */
     left: 0;
-    width: 100vw;
-    height: 100svh;
+    width: 100cqw;
+    height: 100cqh;
     /* the browser owns the horizontal pan; Deck.jsx stays off touch */
     touch-action: pan-x;
     cursor: default;
+  }
+
+  /* In a box on someone else's page, a vertical swipe that starts on the
+     deck belongs to that page — the deck has no use for it, and holding
+     it would make every tile a dead spot to scroll past. On its own page
+     it stays held: there the box is the screen, and a vertical pan would
+     only nudge the URL bar. */
+  .deck[data-embedded] {
+    overscroll-behavior-y: auto;
+  }
+
+  .deck[data-embedded] .deck__stage {
+    touch-action: pan-x pan-y;
   }
 }
 
 .deck__stage[data-drag="1"] {
   transition-duration: 80ms;
   transition-timing-function: linear;
+}
+
+.deck::-webkit-scrollbar {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -873,7 +898,7 @@
      correction is Euler–Maclaurin's, which wants s to be smooth, and s
      has a corner where the clamp bottoms out at |d| = c0 ≈ 3.65. The
      single step that straddles that corner comes out ~0.03w tight. It
-     is off screen: the fan's radius puts card 3 well past the viewport
+     is off screen: the fan's radius puts card 3 well past the box's
      edge at every size the deck is used at, so the visible run is
      |d| ≲ 2.5 and the seam lives past it. Smoothing it out would mean
      a C¹ floor on the size falloff and a quintic in place of the cubic
@@ -1070,7 +1095,7 @@ div.deck__art {
   position: absolute;
   left: 0;
   right: 0;
-  bottom: clamp(1.5rem, 5vh, 3rem);
+  bottom: clamp(1.5rem, 5cqh, 3rem);
   z-index: 3;
   display: grid;
   place-items: center;
@@ -1087,7 +1112,7 @@ div.deck__art {
  *   into the stack over the rest.
  *
  * No scroll sweep and no camera dolly. The position stays exactly where
- * the page's scroll says it is the entire time, so the intro can't feel
+ * the deck's scroll says it is the entire time, so the intro can't feel
  * like it is racing you and cannot land somewhere you didn't ask for.
  *
  * `--dk-im` composes rather than overrides — it's max()'d with the toggle
@@ -1157,13 +1182,25 @@ div.deck__art {
    custom-property write on the columns that actually moved. */
 .deck__count {
   position: absolute;
-  top: clamp(5.5rem, 12vh, 8rem);
-  right: clamp(1.25rem, 4vw, 3rem);
+  top: clamp(5.5rem, 12cqh, 8rem);
+  right: clamp(1.25rem, 4cqw, 3rem);
   z-index: 2;
   font-family: var(--font-mono);
   font-size: var(--text-ui-lg);
   font-variant-numeric: tabular-nums;
   color: var(--color-ink);
   pointer-events: none;
+}
+
+/* The top clearance above is the site nav's, on the deck's own page. In
+   a box on someone else's page there is no nav over it, so the readout
+   comes up into the corner — the LEFT one. A box is rarely the
+   viewport's shape, and in a short wide one the run climbs all the way
+   into the top-right corner; the top-left is the one place the deck
+   never reaches, in either layout, at any size. */
+.deck[data-embedded] .deck__count {
+  top: clamp(1.25rem, 4cqh, 3rem);
+  right: auto;
+  left: clamp(1.25rem, 4cqw, 3rem);
 }
 

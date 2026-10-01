@@ -2,8 +2,6 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
-import { useLenis } from "@/context/LenisContext";
-import { useMobileMenu } from "@/app/ui/Navigation/MobileMenuContext";
 import SlotNumber from "@/app/ui/SlotNumber";
 import "./deck.css";
 
@@ -12,11 +10,14 @@ import "./deck.css";
  *
  * Everything geometric (place in the stack, the slide-out, the climb)
  * is computed in CSS from a single inherited custom property, `--dk-p`.
- * This file's only job is to keep `--dk-p` in step with scroll:
+ * This file's only job is to keep `--dk-p` in step with scroll — the
+ * deck's OWN scroll, on an element inside the box it was given. It never
+ * scrolls the document, so it can sit anywhere, any size, any number of
+ * times on one page:
  *
  *   • one `style.setProperty` per frame, on ONE element
  *   • no `getBoundingClientRect` in the hot path — track metrics are
- *     cached and only re-read on resize
+ *     cached and only re-read when the box resizes
  *   • reads (scroll events) and writes (rAF) live in different phases
  *     of the frame, so there is never a forced synchronous layout
  *   • the rAF loop parks itself when the value settles
@@ -26,7 +27,7 @@ import "./deck.css";
  * column that changed, so a scrub from end to end costs zero renders in
  * this component and zero in the counter. The card list is memoised
  * against `cards` alone, so the renders that do happen — the layout
- * toggle, the media-query resolve — never touch the 50 <img> elements.
+ * toggle, the box-size resolve — never touch the 50 <img> elements.
  * ─────────────────────────────────────────────────────────────────── */
 
 // Off. The deck runs on the defaults in deck.css; flip this to
@@ -139,7 +140,14 @@ function onCoverError(e) {
   img.src = img.src;
 }
 
-export default function Deck({ tracks }) {
+// The size of the box the deck was handed, and nothing else. A phone and a
+// 440px tile on the experiments index are the same case: there is no
+// window in here, only the box. (deck.css makes the same call with
+// `@container`, against the same element.)
+const SMALL = 640;
+const WIDE = 900;
+
+export default function Deck({ tracks, embedded = false }) {
   const all = useMemo(
     () => (tracks?.length ? tracks : fallbackDeck(24)),
     [tracks],
@@ -149,66 +157,56 @@ export default function Deck({ tracks }) {
   // Every card recomputes its transform when `--dk-p` changes, so the cost
   // of a frame is linear in how many are mounted — and a phone has an
   // order of magnitude less of everything to spend on it. Well past the
-  // first ~20 the covers are a few px of sliver anyway, so on a small
-  // screen the tail is simply not built. Resolved after mount so SSR
+  // first ~20 the covers are a few px of sliver anyway, so in a small
+  // box the tail is simply not built. Resolved after mount so SSR
   // markup stays identical for every client.
   const [cap, setCap] = useState(0);
   const [wide, setWide] = useState(false);
 
   // ── which way the deck runs ──────────────────────────────────────
-  // On a phone it is a HORIZONTAL scroller: the page is exactly one
-  // screen tall, and the deck runs on its own sideways overflow. That
-  // buys three things at once, none of which is hand-written —
+  // In a narrow box — a phone, a small tile — it is a HORIZONTAL
+  // scroller: the deck runs on its own sideways overflow. That buys two
+  // things at once, neither of which is hand-written —
   //
   //   • the gesture is native, so it has real momentum, friction and
   //     rubber-banding. Nothing tracks a finger better than the
   //     platform's own scroller.
   //   • sideways is the direction the deck actually runs, so the swipe
   //     and the artwork agree.
-  //   • the document never scrolls, so the URL bar has no reason to
-  //     move and the viewport simply stops resizing.
   //
-  // See the media block in deck.css for the other half.
+  // (Either way the document never scrolls — the deck scrolls itself.)
+  // See the @container block in deck.css for the other half.
   const [hscroll, setHscroll] = useState(false);
 
+  const trackRef = useRef(null);
+
+  // Read off the box, not the window: the same breakpoints deck.css
+  // resolves with `@container`, so the JS mode and the CSS layout can
+  // never disagree about which one this is.
   useEffect(() => {
-    const small = window.matchMedia("(max-width: 640px)");
-    const big = window.matchMedia("(min-width: 900px)");
+    const el = trackRef.current;
+    const box = el?.closest(".piece-box") ?? el?.parentElement;
+    if (!box) return;
     const read = () => {
-      setCap(small.matches ? 22 : 0);
-      setHscroll(small.matches);
-      setWide(big.matches);
+      const w = box.clientWidth;
+      const small = w <= SMALL;
+      setCap(small ? 22 : 0);
+      setHscroll(small);
+      setWide(w >= WIDE);
     };
     read();
-    small.addEventListener("change", read);
-    big.addEventListener("change", read);
-    return () => {
-      small.removeEventListener("change", read);
-      big.removeEventListener("change", read);
-    };
+    const ro = new ResizeObserver(read);
+    ro.observe(box);
+    return () => ro.disconnect();
   }, []);
 
   const cards = useMemo(() => (cap ? all.slice(0, cap) : all), [all, cap]);
   const count = cards.length;
 
-  const trackRef = useRef(null);
-  // The sideways run's length, and ONLY used in that mode — on desktop
-  // this element is `display: contents` and has no box at all, so the
-  // desktop measurement still comes off `.deck` exactly as it always did.
+  // The run: as long as the deck's scroll, on whichever axis it runs.
+  // `.deck` is the scrollport, this is what overflows it.
   const innerRef = useRef(null);
   const stageRef = useRef(null);
-  const { lenis } = useLenis();
-  const lenisRef = useRef(null);
-  lenisRef.current = lenis;
-
-  // The mobile menu turns the page into a fixed, clipped card and
-  // translates its contents up by the scroll you had — at which point
-  // nothing scrolls and `position: sticky` has nothing to stick to, so
-  // the stage drops to the top of a several-thousand-pixel section and
-  // the card shows blank. Handing that offset to CSS lets the stage
-  // place itself by hand for the duration. See `.page-card.is-active`
-  // in deck.css.
-  const { active: menuActive, snapshotY } = useMobileMenu();
 
   const countRef = useRef(null);
 
@@ -251,6 +249,13 @@ export default function Deck({ tracks }) {
     const t = setTimeout(go, 1400);
     return () => clearTimeout(t);
   }, []);
+
+  // On its own page the deck is the page, so the keys go to it from the
+  // first press, as they did when it scrolled the document. In a box on
+  // someone else's page it waits to be clicked or tabbed to.
+  useEffect(() => {
+    if (!embedded) trackRef.current?.focus({ preventScroll: true });
+  }, [embedded]);
 
   // ── read each cover down to five colours ─────────────────────────
   // See the note above SAMPLES. This runs once per cover, off the back
@@ -345,38 +350,28 @@ export default function Deck({ tracks }) {
 
     const last = count - 1;
 
-    // Sideways on a phone, down the document everywhere else. The two
-    // differ in exactly three lines — which element scrolls, which axis
-    // it is measured on, and where the scroll event comes from.
-    const runEl = hscroll ? innerRef.current : trackEl;
+    // Sideways in a narrow box, downwards everywhere else. `.deck` is the
+    // scroller either way; the two differ only in which axis the run
+    // overflows it on.
+    const runEl = innerRef.current;
     if (!runEl) return;
 
     // ── cached metrics: measured on mount + resize, never in the loop ──
     //
-    // The span is the stage's own size subtracted from the run's, NOT
-    // `window.innerHeight`. That was the height glitch: both elements are
-    // sized in svh, which is fixed, but innerHeight grows and shrinks by
-    // ~60px every time the mobile URL bar hides or shows. Deriving the
-    // scroll mapping from it meant a drag that nudged the URL bar
-    // silently rescaled the entire deck mid-gesture.
-    //
-    // It is also the more correct number: a sticky stage is stuck for
-    // exactly (runLength − stageLength) of scroll, so this is the real
-    // range rather than an approximation of it.
-    let top = 0;
+    // The span is the stage's own size subtracted from the run's, not a
+    // separately-read box size. Both are sized off the same container, so
+    // the mapping can't drift out from under a gesture — and it is the
+    // more correct number anyway: a sticky stage is stuck for exactly
+    // (runLength − stageLength) of scroll, so this is the real range
+    // rather than an approximation of it.
     let span = 1;
     const measure = () => {
-      if (hscroll) {
-        top = 0;
-        span = Math.max(1, runEl.offsetWidth - stageEl.offsetWidth);
-      } else {
-        top = trackEl.getBoundingClientRect().top + window.scrollY;
-        span = Math.max(1, runEl.offsetHeight - stageEl.offsetHeight);
-      }
+      span = hscroll
+        ? Math.max(1, runEl.offsetWidth - stageEl.offsetWidth)
+        : Math.max(1, runEl.offsetHeight - stageEl.offsetHeight);
     };
 
-    const position = () =>
-      hscroll ? trackEl.scrollLeft : window.scrollY - top;
+    const position = () => (hscroll ? trackEl.scrollLeft : trackEl.scrollTop);
 
     let written = -1;
     let shown = -1;
@@ -415,24 +410,16 @@ export default function Deck({ tracks }) {
       }
     };
 
-    // Only re-measure when the geometry genuinely changed. On a phone the
-    // resize event fires constantly as the URL bar animates, and since
-    // both heights are in svh nothing has actually moved — remeasuring on
-    // every one of those was the second half of the jitter.
-    let lastH = 0;
-    let lastW = 0;
+    // Re-measure only when the geometry genuinely changed: the scrollport
+    // or the run resized. A ResizeObserver reports exactly that and
+    // nothing else, so the URL bar animating on a phone — which used to
+    // fire `resize` constantly while nothing in the deck moved — never
+    // reaches it.
     const onResize = () => {
-      const h = trackEl.offsetHeight;
-      const w = window.innerWidth;
-      if (h === lastH && w === lastW) return;
-      lastH = h;
-      lastW = w;
       measure();
       sync();
     };
 
-    lastH = trackEl.offsetHeight;
-    lastW = window.innerWidth;
     measure();
     sync();
 
@@ -445,11 +432,10 @@ export default function Deck({ tracks }) {
       });
     };
 
-    // The sideways scroller is the section itself; the vertical one is
-    // the document.
-    const scroller = hscroll ? trackEl : window;
-    scroller.addEventListener("scroll", requestSync, { passive: true });
-    window.addEventListener("resize", onResize);
+    trackEl.addEventListener("scroll", requestSync, { passive: true });
+    const ro = new ResizeObserver(onResize);
+    ro.observe(trackEl);
+    ro.observe(runEl);
 
     // ── drag ─────────────────────────────────────────────────────────
     // The old version mapped horizontal drag onto vertical scroll with a
@@ -521,25 +507,16 @@ export default function Deck({ tracks }) {
     // Keeping the remainder here and spending it once it adds up to a
     // whole pixel makes the mapping exact at any card spacing.
     let resid = 0;
-    const scrollBy = (dy, touch) => {
+    const scrollBy = (dy) => {
       resid += dy;
       const step = Math.trunc(resid);
       if (!step) return;
       resid -= step;
 
-      // A mouse on a narrow window is still a drag, and in that mode the
-      // thing that scrolls is the deck, sideways — not the document.
-      if (hscroll) {
-        trackEl.scrollLeft += step;
-        return;
-      }
-
-      // Lenis doesn't smooth touch (syncTouch/smoothTouch are both off), so
-      // on touch the native scroll is the real one and driving it through
-      // Lenis just adds a second writer. Go straight to the window instead.
-      const l = lenisRef.current;
-      if (l && !touch) l.scrollTo(l.targetScroll + step, { immediate: true });
-      else window.scrollBy(0, step);
+      // A hand is direct manipulation, so this is written straight in —
+      // no smoothing between the pointer and the scroller.
+      if (hscroll) trackEl.scrollLeft += step;
+      else trackEl.scrollTop += step;
     };
 
     // ── touch ────────────────────────────────────────────────────────
@@ -609,7 +586,7 @@ export default function Deck({ tracks }) {
       if (axis !== 1) return; // the browser is handling this one
 
       const dp = -(dx * sx + (touch ? 0 : dy) * sy) / len2;
-      scrollBy((dp * span) / last, touch);
+      scrollBy((dp * span) / last);
     };
 
     const onUp = () => {
@@ -622,20 +599,26 @@ export default function Deck({ tracks }) {
       pid = null;
     };
 
-    // ── sideways wheel ───────────────────────────────────────────────
-    // A trackpad's two-finger swipe and a mouse's tilt wheel arrive as
-    // deltaX, and nothing on the page consumed it: the deck ran sideways
-    // and the only sideways input did nothing.
+    // ── the cross wheel ──────────────────────────────────────────────
+    // The deck's scroller runs on ONE axis — down in a roomy box, sideways
+    // in a narrow one — and a wheel on that axis is simply native scroll:
+    // momentum, smoothing and all, from the platform, on `.deck` itself.
+    //
+    // The other axis is the one nothing would consume. Running down, a
+    // trackpad's two-finger swipe and a mouse's tilt wheel arrive as
+    // deltaX; sideways, a plain mouse wheel arrives as deltaY and would
+    // otherwise fall through to the page around the box. Either way the
+    // deck claims it and spends it on its own scroller.
     //
     // The first attempt at this ran deltaX through the DRAG projection —
     // a pixel of swipe moving the deck a pixel along its own screen axis
-    // — and it felt wrong next to the vertical scroll, for two reasons
+    // — and it felt wrong next to the native scroll, for two reasons
     // that are worth separating:
     //
-    //   • WEIGHT. Vertical goes through Lenis, so a notch is smoothed,
-    //     carries momentum and settles. The projected version wrote the
-    //     scroller directly with `immediate`, which is the one thing
-    //     that reads as different no matter how the number is scaled.
+    //   • WEIGHT. Native wheel scroll is smoothed, so a notch eases in
+    //     and settles. The projected version wrote the scroller directly,
+    //     which is the one thing that reads as different no matter how
+    //     the number is scaled.
     //   • RATE. Direct manipulation is the right model for a hand that
     //     is holding a card and the wrong one for a wheel, which is a
     //     rate input aimed at nothing in particular. The projection also
@@ -643,56 +626,57 @@ export default function Deck({ tracks }) {
     //     travel spread and ~35px stacked, so the same flick moved the
     //     deck twelve times as far in one mode as the other.
     //
-    // So the wheel no longer knows anything about the deck's geometry.
-    // deltaX is treated exactly as Lenis treats deltaY — same deltaMode
-    // normalisation, same multiplier, same scrollTo with the instance's
-    // own lerp/duration/easing — which makes "one pixel of deltaX" and
-    // "one pixel of deltaY" the same amount of deck, through the same
-    // smoothing. They are not merely tuned to match; it is one path.
+    // So the wheel knows nothing about the deck's geometry. One pixel of
+    // cross-axis delta is one pixel of the deck's own scroll, handed over
+    // as a smooth scroll — the same amount of deck, eased the same way,
+    // as a pixel on the native axis.
     //
-    // Lenis's own normalisation, from its VirtualScroll: a wheel
-    // reporting LINES rather than pixels (mode 1, some Windows mice) is
-    // worth 100/6 px per line, and PAGES (mode 2) a viewport.
+    // A wheel reporting LINES rather than pixels (mode 1, some Windows
+    // mice) is worth 100/6 px per line, and PAGES (mode 2) one scrollport.
     const LINE = 100 / 6;
 
+    // Smooth scrolls re-aimed every event would each start from wherever
+    // the last one had got to and drop the rest of its distance, so a
+    // fast swipe would come up short. The target accumulates instead, and
+    // is let go once the scroller comes to rest.
+    let target = null;
+    const onScrollEnd = () => {
+      target = null;
+    };
+
     const onWheel = (e) => {
-      // Vertical is already handled — and handled well. The deck only
-      // claims the axis nothing else was using. A shift-wheel arrives as
-      // deltaX on some browsers and deltaY on others; the dominance test
-      // covers both without having to care which.
-      if (Math.abs(e.deltaX) <= Math.abs(e.deltaY)) return;
+      // The native axis is already handled — and handled well. The deck
+      // only claims the axis nothing else was using. A shift-wheel
+      // arrives as deltaX on some browsers and deltaY on others; the
+      // dominance test covers both without having to care which.
+      const across = Math.abs(e.deltaX) > Math.abs(e.deltaY);
+      if (across !== !hscroll) return;
 
-      const unit =
-        e.deltaMode === 1 ? LINE : e.deltaMode === 2 ? window.innerWidth : 1;
-      const l = lenisRef.current;
-      const delta = e.deltaX * unit * (l ? l.options.wheelMultiplier : 1);
+      const raw = hscroll ? e.deltaY : e.deltaX;
+      const page = hscroll ? trackEl.clientWidth : trackEl.clientHeight;
+      const unit = e.deltaMode === 1 ? LINE : e.deltaMode === 2 ? page : 1;
 
+      // Claimed even at either end of the run: the event was aimed at the
+      // deck, and handing the leftover to the page around the box is the
+      // scroll-chaining that `overscroll-behavior` already rules out for
+      // the native axis.
       e.preventDefault();
-      // Claim the whole event, not just its X. Lenis listens on the
-      // window, so it sees this one after we do, and with the default
-      // vertical gestureOrientation it would take the Y component of the
-      // same diagonal swipe and scroll on top of us — both axes drive
-      // the same deck here, so that reads as the flick counting twice.
-      // This is the flag Lenis sets on itself to mark an event as spent.
-      e.lenisStopPropagation = true;
 
       // Wheel-right advances, same sign as wheel-down: in both cases the
       // content moves against the gesture under a fixed viewport.
-      // No lerp/duration/easing passed: scrollTo already defaults each
-      // of them to the instance's own options, so leaving them off is
-      // what guarantees this stays identical to the vertical path rather
-      // than merely a copy of it that can drift.
-      if (l) l.scrollTo(l.targetScroll + delta, { programmatic: false });
-      // Lenis mounts half a second after load. Until it does, the deck
-      // still has to answer the wheel; it just answers it unsmoothed,
-      // exactly as the vertical scroll does in that same window.
-      else window.scrollBy(0, delta);
+      const max = hscroll
+        ? trackEl.scrollWidth - trackEl.clientWidth
+        : trackEl.scrollHeight - trackEl.clientHeight;
+      const from = target ?? position();
+      target = Math.max(0, Math.min(max, from + raw * unit));
+      trackEl.scrollTo({
+        [hscroll ? "left" : "top"]: target,
+        behavior: "smooth",
+      });
     };
 
-    // On a phone the deck IS a native sideways scroller, and that
-    // scroller already answers deltaX.
-    if (!hscroll)
-      stageEl.addEventListener("wheel", onWheel, { passive: false });
+    stageEl.addEventListener("wheel", onWheel, { passive: false });
+    trackEl.addEventListener("scrollend", onScrollEnd);
 
     stageEl.addEventListener("pointerdown", onDown);
     stageEl.addEventListener("pointermove", onMove);
@@ -700,9 +684,10 @@ export default function Deck({ tracks }) {
     stageEl.addEventListener("pointercancel", onUp);
 
     return () => {
-      scroller.removeEventListener("scroll", requestSync);
+      trackEl.removeEventListener("scroll", requestSync);
+      trackEl.removeEventListener("scrollend", onScrollEnd);
       if (syncRaf) cancelAnimationFrame(syncRaf);
-      window.removeEventListener("resize", onResize);
+      ro.disconnect();
       stageEl.removeEventListener("wheel", onWheel);
       stageEl.removeEventListener("pointerdown", onDown);
       stageEl.removeEventListener("pointermove", onMove);
@@ -719,7 +704,7 @@ export default function Deck({ tracks }) {
   // `position: absolute` is inline rather than left to the stylesheet on
   // purpose: it ships with the HTML. If the CSS is even one tick late,
   // 50 square frames would otherwise lay out in normal flow and give the
-  // document a ~15,000px height before collapsing back.
+  // deck a ~15,000px scroll before collapsing back.
   //
   // The frame is the card's whole DOM contribution beyond the artwork:
   // the two printed edges are its ::before / ::after, so a card is one
@@ -791,19 +776,25 @@ export default function Deck({ tracks }) {
         <style>{`.deck,.deck__stage,.deck__card{animation:none}`}</style>
       </noscript>
 
+      {/* The deck's own scroller — the page's smooth-scroll leaves it
+          alone (data-lenis-prevent), and it is focusable so the arrow
+          keys, space and page keys run the stack the way they would a
+          page. */}
       <section
         ref={trackRef}
         className="deck bg-surface"
         data-spread={spread ? "1" : "0"}
+        data-lenis-prevent
+        data-embedded={embedded ? "" : undefined}
+        tabIndex={0}
+        aria-label="Recently played covers"
         style={{
           "--count": count,
           "--dk-m": spread ? 1 : 0,
-          "--snap": menuActive ? `${snapshotY}px` : "0px",
         }}
       >
-        {/* The sideways run's length. `display: contents` everywhere but
-            the phone, so on desktop it has no box and the stage sticks to
-            `.deck` exactly as it did before this element existed. */}
+        {/* The run: taller than the box (or wider, when narrow) by the
+            whole deck's travel. The stage sticks inside it. */}
         <div ref={innerRef} className="deck__track">
           <div ref={stageRef} className="deck__stage">
             {rail}
@@ -827,8 +818,9 @@ export default function Deck({ tracks }) {
       </section>
 
       {/* The panel is wider than a phone and covers the thing it tunes,
-          so it only mounts where there's room for it. */}
-      {DEV && wide ? <DeckControls target={trackRef} /> : null}
+          so it only mounts where there's room for it — and never in a
+          box on someone else's page. */}
+      {DEV && wide && !embedded ? <DeckControls target={trackRef} /> : null}
     </>
   );
 }

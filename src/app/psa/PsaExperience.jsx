@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
 import { haptic } from "@/lib/haptics";
@@ -11,8 +11,8 @@ import { UNDO_MS } from "./saveMotion";
 import Slab from "./Slab";
 import SaveButton from "./SaveButton";
 import TabBar, { TABS } from "./TabBar";
-import { CARDS, CARD_IMAGES, formatDelta, formatPrice } from "./cards";
-import { useLiveCard, useLiveTotal } from "./liveMarket";
+import { CARDS_KIT, songsKit } from "./kits";
+import { registerItems, useLiveCard, useLiveTotal } from "./liveMarket";
 import { useMove } from "./figureMove";
 import { warmImages } from "./warmImages";
 import "./psa-kit.css";
@@ -45,35 +45,56 @@ const SHOW_MOTION_CONFIG = process.env.NODE_ENV === "development";
    scans and the whole footer nav several times a second to move two digits.
    ───────────────────────────────────────────────────────────────────────── */
 
-const FILTERS = [
-  { id: "all", label: "All" },
-  { id: "gem", label: "Gem mint", test: (c) => c.grade === 10 },
-  { id: "t206", label: "T206", test: (c) => c.set.startsWith("T206") },
-  { id: "goudey", label: "Goudey", test: (c) => c.set === "Goudey" },
-  { id: "oldjudge", label: "Old Judge", test: (c) => c.set.startsWith("Old Judge") },
-];
+/* What the app collects comes from a kit (see kits.js): items, chips, copy
+   and the shape of the art. Every surface reads it from context, so the
+   memoised panels below never take it as a prop and never re-render for it. */
+const KitContext = createContext(CARDS_KIT);
+const useKit = () => useContext(KitContext);
 
 /* The provider sits above the shell so the tab bar can register itself as the
    flight target and MotionConfig can read the armed variant, both of which
-   have to happen outside the component that fires the flight. */
-export default function PsaExperience() {
+   have to happen outside the component that fires the flight.
+
+   `kit` picks what is collected — "cards" (the default, graded baseball
+   cards) or "songs", built from `tracks` (Spotify top tracks, with drawn
+   washes standing in when there are none).
+
+   `embedded` is the piece sitting in someone else's page — a tile on the
+   experiments index, a box on the bench. It gets the app and nothing else:
+   no tuning panel, and none of PsaChrome's page-wide work, because the
+   site's nav and Lenis belong to the page around it, and four copies on one
+   page would each be stopping and restarting the same scroller. */
+export default function PsaExperience({ embedded = false, kit = "cards", tracks }) {
+  const value = useMemo(() => {
+    const next = kit === "songs" ? songsKit(tracks) : CARDS_KIT;
+    // Idempotent, and in the render on purpose: the tape's server snapshot has
+    // to hold these figures before the first tile reads them.
+    registerItems(next.items);
+    return next;
+  }, [kit, tracks]);
+
   return (
-    <SaveFlightProvider>
-      <PsaApp />
-      {SHOW_MOTION_CONFIG && <MotionConfig />}
-    </SaveFlightProvider>
+    <KitContext.Provider value={value}>
+      <SaveFlightProvider>
+        <PsaApp embedded={embedded} />
+        {SHOW_MOTION_CONFIG && !embedded && <MotionConfig />}
+      </SaveFlightProvider>
+    </KitContext.Provider>
   );
 }
 
-function PsaApp() {
+function PsaApp({ embedded }) {
+  const kit = useKit();
+  const images = useMemo(() => kit.items.map((c) => c.image).filter(Boolean), [kit]);
+
   // Fetch and decode every scan once, before any filter or tab is touched.
   // An effect rather than the render body: this mutates a module-level map,
   // and a render-phase side effect during hydration is how the decode state
   // used to change under React mid-pass. The bytes are already moving anyway
   // — PreloadScans puts the preload hints in the first HTML response.
   useEffect(() => {
-    warmImages(CARD_IMAGES);
-  }, []);
+    warmImages(images);
+  }, [images]);
 
   const [saved, setSaved] = useState(() => new Set());
   const [tab, setTab] = useState("browse");
@@ -124,13 +145,15 @@ function PsaApp() {
 
   const go = useCallback(
     (next) => {
+      // A kit with one tab has nowhere to go: the tab is only the target.
+      if (kit.tabs.length < 2) return;
       const from = TABS.findIndex((t) => t.id === tab);
       const to = TABS.findIndex((t) => t.id === next);
       setDir(to >= from ? 1 : -1);
       setTab(next);
       setScrolled(false); // the panel remounts at scrollTop 0
     },
-    [tab],
+    [kit, tab],
   );
   // The empty collection's CTA. Inline, it would be a new function every
   // render and CollectionPanel's memo would never hold.
@@ -139,7 +162,7 @@ function PsaApp() {
   /* The one list every surface below reads. No totals here: the two screens
      that show one subscribe to the live tape themselves, so a figure can
      never be a sum of opening prices sitting over a column of live ones. */
-  const savedCards = useMemo(() => CARDS.filter((c) => saved.has(c.id)), [saved]);
+  const savedCards = useMemo(() => kit.items.filter((c) => saved.has(c.id)), [kit, saved]);
 
   /* The tab's count LAGS the saved set on purpose. A number that appears while
      the card is still in the air says the save already happened somewhere
@@ -239,8 +262,8 @@ function PsaApp() {
   );
 
   return (
-    <div className="pk psa">
-      <PsaChrome killLenis />
+    <div className="pk psa" data-kit={kit.id}>
+      {!embedded && <PsaChrome killLenis />}
 
       {/* Keyed on the tab so React remounts and the enter animation runs. */}
       <main
@@ -292,6 +315,9 @@ function PsaApp() {
         counts={counts}
         countNonce={landings}
         undo={undo}
+        libraryLabel={kit.copy.library}
+        tabs={kit.tabs}
+        icon={kit.icon}
       />
     </div>
   );
@@ -320,6 +346,11 @@ const ROLL_STAGGER = 38; // per-digit carry delay
 // is identical before and after — SlotNumber rebuilds nothing.
 const zeroed = (text) => text.replace(/\d/g, "0");
 
+// Half the shell, less the gutters. The shell stops at 430px however wide the
+// box is, so past a phone the scan is ~200px — 45vw would ask a desktop for a
+// 650px file to fill it.
+const TILE_SIZES = "(max-width: 430px) 45vw, 200px";
+
 function useRolled(delay) {
   const [rolled, setRolled] = useState(false);
   useEffect(() => {
@@ -332,10 +363,16 @@ function useRolled(delay) {
 /* One card's live figures, and the beat each of them is on. Shared by the
    grid tile and the collection row so both surfaces read the same tape the
    same way — the only thing that differs between them is the layout. */
-function useFigures(id, rolled) {
-  const live = useLiveCard(id);
+const NO_FIGURES = { price: 0, delta: 0 };
 
-  const price = rolled ? formatPrice(live.price) : zeroed(formatPrice(live.price));
+const BLANK = () => "";
+
+function useFigures(id, rolled) {
+  const { figures: on, formatValue = BLANK, formatDelta = BLANK } = useKit();
+  // A kit without figures never touches the tape — see useLiveCard.
+  const live = useLiveCard(on ? id : null) ?? NO_FIGURES;
+
+  const price = rolled ? formatValue(live.price) : zeroed(formatValue(live.price));
   const delta = rolled ? formatDelta(live.delta) : zeroed(formatDelta(live.delta));
 
   // Each figure keeps its own beat, off its own rendered text. This is the
@@ -344,20 +381,21 @@ function useFigures(id, rolled) {
   const priceMove = useMove(price, live.price);
   const deltaMove = useMove(delta, live.delta);
 
-  return { live, price, delta, priceMove, deltaMove };
+  return on ? { live, price, delta, priceMove, deltaMove } : null;
 }
 
 /* Both figures, in DOM order, for whichever container is holding them. The
    grid lays them out on one line and the collection stacks them in a column;
    neither changes what a figure is. */
 const Figures = memo(function Figures({ live, price, delta, priceMove, deltaMove }) {
+  const { formatValue, formatDelta } = useKit();
   return (
     <>
       <Figure move={priceMove}>
         <SlotNumber
           className="price"
           value={price}
-          label={formatPrice(live.price)}
+          label={formatValue(live.price)}
           direction={priceMove.dir < 0 ? "down" : "up"}
           duration={ROLL_MS}
           stagger={ROLL_STAGGER}
@@ -379,6 +417,7 @@ const Figures = memo(function Figures({ live, price, delta, priceMove, deltaMove
 });
 
 const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
+  const { icon } = useKit();
   const stagger = Math.min(index, 8);
   const rolled = useRolled(stagger * STAGGER_STEP + ROLL_LEAD);
   const figures = useFigures(card.id, rolled);
@@ -436,22 +475,23 @@ const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
       onClick={nudge}
     >
       <div className="psa-tile-art" ref={artRef}>
-        <Slab card={card} sizes="45vw" />
+        <Slab card={card} sizes={TILE_SIZES} />
         <div className="psa-tile-save">
-          <SaveButton saved={saved} onToggle={handleToggle} hint={hint} />
+          <SaveButton saved={saved} onToggle={handleToggle} hint={hint} icon={icon} />
         </div>
       </div>
       <div className="psa-tile-text">
-        <span className="t-body-sm psa-tile-player">{card.player}</span>
+        <span className="t-body-sm psa-tile-player">{card.title}</span>
         {/* Two-line meta: the set line is what stops a grid of portraits from
             being a grid of anonymous portraits. Six T206s share a look, and
-            the year plus set is the cheapest thing that tells them apart. */}
-        <span className="t-body-sm psa-tile-set">
-          {card.year} {card.set}
-        </span>
-        <div className="psa-tile-figures">
-          <Figures {...figures} />
-        </div>
+            the year plus set is the cheapest thing that tells them apart —
+            for a song, the artist does the same job. */}
+        <span className="t-body-sm psa-tile-set">{card.meta}</span>
+        {figures && (
+          <div className="psa-tile-figures">
+            <Figures {...figures} />
+          </div>
+        )}
       </div>
     </li>
   );
@@ -509,11 +549,12 @@ const BrowsePanel = memo(function BrowsePanel({ saved, onToggle, filter, onFilte
   /* Saving FILES a card, whichever variant is armed: the tile leaves Browse
      and the rest close the gap behind it. Un-saving — from Collection or from
      the undo — puts it back, and the grid opens up for it again. */
+  const kit = useKit();
   const visible = useMemo(() => {
-    const spec = FILTERS.find((f) => f.id === filter);
-    const base = spec?.test ? CARDS.filter(spec.test) : CARDS;
+    const spec = kit.filters.find((f) => f.id === filter);
+    const base = spec?.test ? kit.items.filter(spec.test) : kit.items;
     return base.filter((c) => !saved.has(c.id));
-  }, [filter, saved]);
+  }, [kit, filter, saved]);
 
   /* A filter is not a new list, it is the same list with fewer cards in it —
      so it REFLOWS. The grid used to re-key here, which threw away every tile
@@ -546,20 +587,22 @@ const BrowsePanel = memo(function BrowsePanel({ saved, onToggle, filter, onFilte
         {/* Names the control, not the outcome. "Add to your collection" is
             true but leaves the bookmark looking like decoration on the scan;
             the title has to say which 28px to press. */}
-        <PanelHead title="Add to your bookmarks" />
-        <div className="chip-rail psa-rail psa-rail-fade">
-          {FILTERS.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className="chip"
-              aria-pressed={filter === f.id}
-              onClick={() => pick(f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        <PanelHead title={kit.copy.browse} />
+        {kit.filters.length > 0 && (
+          <div className="chip-rail psa-rail psa-rail-fade">
+            {kit.filters.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className="chip"
+                aria-pressed={filter === f.id}
+                onClick={() => pick(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {/* No stagKey: the grid must NOT re-key on a filter, or FLIP has no
           "before" boxes to measure and every tile mounts from scratch. */}
@@ -570,13 +613,12 @@ const BrowsePanel = memo(function BrowsePanel({ saved, onToggle, filter, onFilte
 
 /* ── Search ───────────────────────────────────────────────────────────── */
 const SearchPanel = memo(function SearchPanel({ saved, onToggle, query, onQuery }) {
+  const kit = useKit();
   const results = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return CARDS;
-    return CARDS.filter((c) =>
-      `${c.player} ${c.set} ${c.variant} ${c.year}`.toLowerCase().includes(q),
-    );
-  }, [query]);
+    if (!q) return kit.items;
+    return kit.items.filter((c) => c.search.toLowerCase().includes(q));
+  }, [kit, query]);
 
   return (
     <>
@@ -586,12 +628,14 @@ const SearchPanel = memo(function SearchPanel({ saved, onToggle, query, onQuery 
           className="psa-search-input"
           type="search"
           value={query}
-          placeholder="Player, set or year"
+          placeholder={kit.copy.searchPlaceholder}
           onChange={(e) => onQuery(e.target.value)}
         />
       </div>
       {results.length === 0 ? (
-        <p className="t-body psa-empty">No cards match {query}.</p>
+        <p className="t-body psa-empty">
+          {kit.copy.noMatch} {query}.
+        </p>
       ) : (
         <Grid cards={results} saved={saved} onToggle={onToggle} stagKey={query} />
       )}
@@ -623,13 +667,11 @@ const SearchPanel = memo(function SearchPanel({ saved, onToggle, query, onQuery 
    the li holds the static fan, .psa-blank-rise deals it in once, and
    .psa-blank-float loops forever. Stacking them means neither animation has
    to restate the other's transform. */
-const STACK_IDS = ["oldjudge-galvin", "t206-mathewson", "t206-cobb"];
-const STACK = STACK_IDS.map((id) => CARDS.find((c) => c.id === id)).filter(Boolean);
-
 const BlankStack = memo(function BlankStack() {
+  const { stack } = useKit();
   return (
     <ul className="psa-blank-stack" aria-hidden="true">
-      {STACK.map((card, i) => (
+      {stack.map((card, i) => (
         <li className="psa-blank-card" key={card.id} style={{ "--i": i }}>
           <span className="psa-blank-rise">
             <span className="psa-blank-float">
@@ -650,7 +692,7 @@ const BlankStack = memo(function BlankStack() {
    width the picture gives up.
 
    The format is what fixes the figures. In a tile, price and delta share one
-   line at opposite ends of a 45vw box, which puts the two numbers on the
+   line at opposite ends of a half-width box, which puts the two numbers on the
    same baseline but in different columns on every row — nothing lines up
    with anything and a column of prices cannot be read as a column. In a row
    they stack into a right-aligned block: every price sits on the same right
@@ -678,10 +720,8 @@ const CollectionRow = memo(function CollectionRow({ card, onToggle, index = 0 })
         <Slab card={card} sizes="40px" />
       </span>
       <span className="psa-row-text">
-        <span className="t-body psa-row-player">{card.player}</span>
-        <span className="t-body-sm psa-row-meta">
-          {card.year} {card.set} · PSA {card.grade}
-        </span>
+        <span className="t-body psa-row-player">{card.title}</span>
+        <span className="t-body-sm psa-row-meta">{card.detail}</span>
       </span>
       <span className="psa-row-figures">
         <Figures {...figures} />
@@ -694,6 +734,7 @@ const CollectionRow = memo(function CollectionRow({ card, onToggle, index = 0 })
 });
 
 const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrowse }) {
+  const { copy, formatValue } = useKit();
   const listRef = useRef(null);
   const flight = useSaveFlight();
 
@@ -722,23 +763,23 @@ const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrows
      list and rolls when they move. */
   const ids = useMemo(() => cards.map((c) => c.id), [cards]);
   const total = useLiveTotal(ids);
-  const totalText = formatPrice(total);
+  const totalText = formatValue(total);
   const totalMove = useMove(totalText, total);
 
   if (cards.length === 0) {
     return (
       <>
-        <PanelHead title="Collection" />
+        <PanelHead title={copy.library} />
         {/* The head keeps the top; this box takes the rest of the panel and
             centres in it. See .psa-panel:has(> .psa-blank) in psa.css. */}
         <div className="psa-blank">
           <BlankStack />
           <p className="t-body psa-blank-text">
-            <strong>Nothing bookmarked yet.</strong>
-            Tap the bookmark on any card and it lands here.
+            <strong>{copy.emptyTitle}</strong>
+            {copy.emptyBody}
           </p>
           <button type="button" className="psa-cta" onClick={onBrowse}>
-            Browse cards
+            {copy.cta}
           </button>
         </div>
       </>
@@ -747,7 +788,7 @@ const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrows
 
   return (
     <>
-      <PanelHead title="Collection">
+      <PanelHead title={copy.library}>
         {/* Value first in the DOM because it is first on the line — the count
             is the annotation, so it sits at the right edge the price column
             below is set against. */}
@@ -763,7 +804,7 @@ const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrows
             />
           </Figure>
           <span className="t-body-sm psa-summary-label">
-            {cards.length} card{cards.length === 1 ? "" : "s"}
+            {cards.length} {cards.length === 1 ? copy.one : copy.many}
           </span>
         </div>
       </PanelHead>
@@ -780,29 +821,21 @@ const CollectionPanel = memo(function CollectionPanel({ cards, onToggle, onBrows
 });
 
 /* ── Activity (placeholder surface) ───────────────────────────────────── */
-const FEED = [
-  { id: "a1", card: CARDS[0], event: "Sold at auction", when: "2h" },
-  { id: "a2", card: CARDS[9], event: "New population high", when: "6h" },
-  { id: "a3", card: CARDS[4], event: "Price up 5.7%", when: "1d" },
-  { id: "a4", card: CARDS[6], event: "Graded PSA 10", when: "2d" },
-  { id: "a5", card: CARDS[2], event: "Listed for sale", when: "3d" },
-];
 
 const ActivityPanel = memo(function ActivityPanel() {
+  const { feed } = useKit();
   return (
     <>
       <PanelHead title="Activity" />
       <ul className="psa-feed">
-        {FEED.map((item, i) => (
+        {feed.map((item, i) => (
           <li className="psa-feed-row" key={item.id} style={{ "--stagger": i }}>
             <span className="psa-feed-thumb">
-              <Slab card={item.card} sizes="36px" />
+              <Slab card={item.item} sizes="36px" />
             </span>
             <span className="psa-feed-text">
               <span className="t-body psa-feed-event">{item.event}</span>
-              <span className="t-body-sm psa-feed-card">
-                {item.card.year} {item.card.set} · {item.card.player}
-              </span>
+              <span className="t-body-sm psa-feed-card">{item.item.feedLine}</span>
             </span>
             <span className="t-body-sm psa-feed-when num">{item.when}</span>
           </li>
@@ -818,9 +851,10 @@ const ActivityPanel = memo(function ActivityPanel() {
    that disagreed with the total two tabs over would be the app contradicting
    itself, and "Sets" was a hardcoded 3 that stayed 3 while you held one card. */
 const ProfilePanel = memo(function ProfilePanel({ cards }) {
+  const { copy, formatValue } = useKit();
   const ids = useMemo(() => cards.map((c) => c.id), [cards]);
   const total = useLiveTotal(ids);
-  const sets = useMemo(() => new Set(cards.map((c) => c.set)).size, [cards]);
+  const sets = useMemo(() => new Set(cards.map((c) => c.group)).size, [cards]);
   const count = cards.length;
 
   return (
@@ -831,7 +865,7 @@ const ProfilePanel = memo(function ProfilePanel({ cards }) {
           <span className="psa-avatar" aria-hidden="true" />
           <span className="psa-profile-name">
             <span className="t-head-lg">Herb</span>
-            <span className="t-body-sm psa-profile-handle">Collector since 2019</span>
+            <span className="t-body-sm psa-profile-handle">{copy.since}</span>
           </span>
         </div>
         <dl className="psa-profile-stats">
@@ -840,11 +874,11 @@ const ProfilePanel = memo(function ProfilePanel({ cards }) {
             <dd className="t-head-xl num">{count}</dd>
           </div>
           <div>
-            <dt className="t-body-sm">Value</dt>
-            <dd className="t-head-xl num">{formatPrice(total)}</dd>
+            <dt className="t-body-sm">{copy.valueLabel}</dt>
+            <dd className="t-head-xl num">{formatValue(total)}</dd>
           </div>
           <div>
-            <dt className="t-body-sm">Sets</dt>
+            <dt className="t-body-sm">{copy.groupLabel}</dt>
             <dd className="t-head-xl num">{sets}</dd>
           </div>
         </dl>

@@ -1,4 +1,5 @@
 import BackdropExperience from "./BackdropExperience";
+import PieceBox from "@/app/experiments/PieceBox";
 import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
 export const metadata = experimentMetadata("/backdrop");
@@ -8,7 +9,9 @@ export default function BackdropPage() {
     <>
       <ExperimentJsonLd slug="/backdrop" />
       <ExperimentHeading slug="/backdrop" />
-      <BackdropExperience />
+      <PieceBox viewport>
+        <BackdropExperience />
+      </PieceBox>
     </>
   );
 }

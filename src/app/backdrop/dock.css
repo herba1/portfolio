@@ -116,13 +116,15 @@
   --bd-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
   --bd-ease-hover: cubic-bezier(0.26, 0.08, 0.25, 1);
   --bd-glint: rgba(255, 255, 255, 0.9);
-  position: fixed;
+  /* Pinned to the piece's positioned root, so it sits in whatever box the
+     piece is mounted in rather than on the window. */
+  position: absolute;
   left: 50%;
   bottom: 1.5rem;
   transform: translateX(-50%);
   width: var(--backdrop-plate, 28rem);
-  min-width: min(17rem, calc(100vw - 3rem));
-  max-width: calc(100vw - 3rem);
+  min-width: min(17rem, calc(100cqw - 3rem));
+  max-width: calc(100cqw - 3rem);
   z-index: var(--z-index-popover);
   color: var(--bd-ink);
   transition:

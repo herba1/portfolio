@@ -1,16 +1,24 @@
 /* ─────────────────────────────────────────────────────────────────────────
    /psa — collection app.
 
-   An app shell, not a page: fixed to the viewport, one scrolling panel, a
-   footer nav pinned under it. The site's navbar and footer clock are removed
-   for the life of the route by PsaChrome.
+   An app shell, not a page: it fills the .piece-box it is rendered in, one
+   scrolling panel, a footer nav pinned under it. On its own route that box is
+   the screen, and the site's navbar and footer clock are removed for the life
+   of the route by PsaChrome.
 
-   On a desktop monitor the shell stays at phone width and centres, with a
-   rule down each side. Two columns is the settled layout.
+   In a box wider than a phone the shell stays at phone width and centres,
+   with a rule down each side. Two columns is the settled layout.
    ───────────────────────────────────────────────────────────────────────── */
 
+/* The route's own box is the VISIBLE screen, not the large one. The tab bar
+   sits on the box's bottom edge, and a 100lvh box would park it under mobile
+   Safari's toolbar whenever the toolbar is showing. */
+.psa-page.piece-box--viewport {
+  height: 100dvh;
+}
+
 .psa {
-  position: fixed;
+  position: absolute;
   inset: 0;
   z-index: 60;
   display: flex;
@@ -27,7 +35,7 @@
    border would sit inside the frame and composite over --pk-bg, so it would
    read as a grey line the app drew on itself. Outside the box it lands on the
    page behind, and the seam belongs to both. */
-@media (min-width: 480px) {
+@container (min-width: 480px) {
   .psa {
     box-shadow:
       -1px 0 0 var(--pk-border),
@@ -484,7 +492,7 @@ html[data-psa-vt]::view-transition-new(*) {
   z-index: 2;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--tab-count, 5), minmax(0, 1fr));
   /* The hairline is a SHADOW, not a border-top. A border is painted inside
      the element's own box, so the bar's white background composites under it
      and a translucent line resolves back to flat grey — the alpha buys you
@@ -720,7 +728,7 @@ html[data-psa-vt]::view-transition-new(*) {
    width it gives up.
 
    That is what fixes the numbers. In a tile, price and delta sit at opposite
-   ends of one line inside a 45vw box — same baseline, but a different
+   ends of one line inside a half-width box — same baseline, but a different
    horizontal position on every card, so a screen of prices never resolves
    into a column you can read down. Here they stack against the row's right
    edge in tabular figures: every price on the same rule, every delta under
@@ -1153,7 +1161,7 @@ html[data-psa-vt]::view-transition-new(*) {
   flex-direction: column;
   align-items: flex-end;
   gap: var(--pk-space-2);
-  width: min(272px, calc(100vw - 24px));
+  width: min(272px, calc(100cqw - 24px));
 }
 .psa-config-toggle {
   padding: var(--pk-space-1) var(--pk-space-2-5);
@@ -1279,4 +1287,38 @@ html[data-psa-vt]::view-transition-new(*) {
 .psa-config-seg button[data-on] {
   background: var(--pk-bg);
   color: var(--pk-text);
+}
+
+/* ── Songs kit ──────────────────────────────────────────────────────────
+   Album art is square and meant to be seen edge to edge: no mat, cover not
+   contain. Everything else about the surface is the same app. */
+.psa[data-kit="songs"] {
+  --pk-card-ratio: 1;
+}
+
+.psa[data-kit="songs"] .slab-face img {
+  object-fit: cover;
+}
+
+/* The heart sits straight on the cover: no plate, no hairline. A difference
+   blend on a white glyph inverts whatever art is under it, so the outline
+   reads on a pale sleeve and a black one alike without a backing. Once it is
+   saved the red fill is the signal, so the blend steps aside and lets it be
+   red. */
+.psa[data-kit="songs"] .psa-tile-save {
+  --pk-save-bg: transparent;
+  --pk-save-bg-hover: transparent;
+  --pk-save-plate: none;
+  --pk-save-idle: var(--pk-neutral-0);
+  mix-blend-mode: difference;
+}
+
+.psa[data-kit="songs"] .psa-tile-save:has(.pk-save[data-saved]) {
+  mix-blend-mode: normal;
+}
+
+/* Hover would tint the glyph toward the saved red, which the blend turns
+   cyan. The outline just stays white until it is actually saved. */
+.psa[data-kit="songs"] .psa-tile-save .pk-save:not([data-saved]):hover {
+  color: var(--pk-neutral-0);
 }

@@ -23,7 +23,7 @@ import {
 
 const STORAGE_KEY = "herb:halftone:params";
 
-export default function HalftoneExperience() {
+export default function HalftoneExperience({ embedded = false }) {
   const [params, setParams] = useState(HALFTONE_DEFAULTS);
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
   const [image, setImage] = useState({ src: DEFAULT_IMAGE, label: "cast/paul.webp" });
@@ -32,6 +32,7 @@ export default function HalftoneExperience() {
   const [note, setNote] = useState(null);
   const [source, setSource] = useState({ status: "loading" });
 
+  const pageRef = useRef(null);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -42,8 +43,11 @@ export default function HalftoneExperience() {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
   }, []);
 
+  // The panel starts closed when the piece's box is narrow (a phone, or a
+  // tile on the experiments index) — measured on the box, not the window.
   useEffect(() => {
-    if (window.innerWidth <= 900) setPanelOpen(false);
+    const box = pageRef.current?.closest(".piece-box");
+    if ((box?.clientWidth ?? window.innerWidth) <= 900) setPanelOpen(false);
   }, []);
 
   useEffect(() => {
@@ -171,34 +175,41 @@ export default function HalftoneExperience() {
         ? "could not load that image"
         : "loading…");
 
-  return (
-    <main className="ht-page" data-panel={panelOpen ? "open" : "closed"}>
-      <aside className="ht-panel-slot">
-        <HalftoneControls
-          params={params}
-          activePreset={activePreset}
-          imageLabel={image.label}
-          sourceStatus={sourceStatus}
-          onChange={handleChange}
-          onPreset={handlePreset}
-          onReroll={handleReroll}
-          onReset={handleReset}
-          onSave={handleSave}
-          onPickImage={() => fileInputRef.current?.click()}
-          onCopy={handleCopy}
-          onPaste={handlePaste}
-          note={note}
-          onAutoLevels={handleAutoLevels}
-        />
-      </aside>
+  // Embedded on the experiments index the host page owns <main>.
+  const Root = embedded ? "div" : "main";
 
-      <button
-        type="button"
-        className="ht-panel-toggle"
-        onClick={() => setPanelOpen((open) => !open)}
-      >
-        {panelOpen ? "Hide controls" : "Controls"}
-      </button>
+  return (
+    <Root ref={pageRef} className="ht-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
+      {embedded ? null : (
+        <>
+          <aside className="ht-panel-slot">
+            <HalftoneControls
+              params={params}
+              activePreset={activePreset}
+              imageLabel={image.label}
+              sourceStatus={sourceStatus}
+              onChange={handleChange}
+              onPreset={handlePreset}
+              onReroll={handleReroll}
+              onReset={handleReset}
+              onSave={handleSave}
+              onPickImage={() => fileInputRef.current?.click()}
+              onCopy={handleCopy}
+              onPaste={handlePaste}
+              note={note}
+              onAutoLevels={handleAutoLevels}
+            />
+          </aside>
+
+          <button
+            type="button"
+            className="ht-panel-toggle"
+            onClick={() => setPanelOpen((open) => !open)}
+          >
+            {panelOpen ? "Hide controls" : "Controls"}
+          </button>
+        </>
+      )}
 
       <div
         className="ht-stage"
@@ -227,6 +238,6 @@ export default function HalftoneExperience() {
         className="ht-file"
         onChange={(event) => acceptFile(event.target.files?.[0])}
       />
-    </main>
+    </Root>
   );
 }

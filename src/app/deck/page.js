@@ -1,5 +1,6 @@
 import { getRecentTracks } from "@/lib/spotifyRecent";
 import Deck from "./Deck";
+import PieceBox from "@/app/experiments/PieceBox";
 import { ExperimentHeading, ExperimentJsonLd, experimentMetadata } from "@/app/experiments/seo";
 
 export const metadata = experimentMetadata("/deck");
@@ -13,7 +14,9 @@ export default async function DeckPage() {
     <>
       <ExperimentJsonLd slug="/deck" />
       <ExperimentHeading slug="/deck" />
-      <Deck tracks={tracks} />
+      <PieceBox viewport>
+        <Deck tracks={tracks} />
+      </PieceBox>
     </>
   );
 }

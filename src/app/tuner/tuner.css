@@ -13,10 +13,11 @@
    locally is still worth it (the rules below read better for it), but the
    values now come from one place.
 
-   Type here stays fluid — clamp() against viewport height, not the
-   discrete scale — because this is one full-bleed screen that must never
-   scroll, so the composition sizes itself to the screen rather than
-   stepping. The WEIGHTS come off the system ladder even so. */
+   Type here stays fluid — clamp() against the box it is rendered in
+   (container units: cqw / cqh), not the discrete scale — because this is
+   one full-bleed screen that must never scroll, so the composition sizes
+   itself to its box rather than stepping. The WEIGHTS come off the system
+   ladder even so. */
 .tuner {
   --paper: var(--color-surface);
   --ink: var(--color-ink);
@@ -25,7 +26,7 @@
   --ease: var(--ease-entrance);
 
   position: relative;
-  height: 100dvh;
+  height: 100%;
   overflow: hidden;
   overscroll-behavior: none; /* no rubber-band / scroll chaining off this screen */
   background: var(--paper);
@@ -112,7 +113,7 @@
   height: 100%;
   display: flex;
   flex-direction: column;
-  padding: clamp(1.25rem, 3.5vw, 3rem);
+  padding: clamp(1.25rem, 3.5cqw, 3rem);
 }
 
 /* readout — anchored to the bottom, sits in front of the full-height wave */
@@ -120,14 +121,14 @@
   margin-top: auto;
   display: flex;
   flex-direction: column;
-  gap: clamp(0.9rem, 2.6vh, 1.7rem);
+  gap: clamp(0.9rem, 2.6cqh, 1.7rem);
 }
 
 .tuner__note-row {
   display: flex;
   align-items: flex-end;
   justify-content: space-between;
-  gap: clamp(1rem, 4vw, 3rem);
+  gap: clamp(1rem, 4cqw, 3rem);
   flex-wrap: wrap;
 }
 .tuner__note-main {
@@ -142,7 +143,7 @@
   line-height: 0.74;
 }
 .tuner__letter {
-  font-size: clamp(4.5rem, 19vh, 13rem);
+  font-size: clamp(4.5rem, 19cqh, 13rem);
   font-weight: var(--font-weight-bold);
   letter-spacing: -0.05em;
 }
@@ -157,20 +158,20 @@
 }
 .tuner__sharp,
 .tuner__oct {
-  font-size: clamp(1.4rem, 6vh, 3.2rem);
+  font-size: clamp(1.4rem, 6cqh, 3.2rem);
   font-variant-numeric: tabular-nums;
   color: var(--ink);
 }
 
-/* the tuner needle — centred on screen; slides left (flat) / right (sharp) */
+/* the tuner needle — centred in the box; slides left (flat) / right (sharp) */
 .tuner__meter-wrap {
   display: flex;
   justify-content: center;
 }
 .meter {
   position: relative;
-  width: min(520px, 70vw);
-  height: clamp(46px, 8vh, 72px);
+  width: min(520px, 70cqw);
+  height: clamp(46px, 8cqh, 72px);
 }
 .meter__center {
   position: absolute;
@@ -212,7 +213,7 @@
   background: transparent;
   color: var(--ink);
   font-family: inherit;
-  font-size: clamp(1.5rem, 5vw, 2.6rem);
+  font-size: clamp(1.5rem, 5cqw, 2.6rem);
   font-weight: var(--font-weight-bold);
   letter-spacing: -0.02em;
   text-align: left;
@@ -227,8 +228,8 @@
 .tuner__figures {
   display: flex;
   flex-wrap: wrap;
-  gap: clamp(1.25rem, 5vw, 3rem);
-  font-size: clamp(1rem, 3vw, 1.5rem);
+  gap: clamp(1.25rem, 5cqw, 3rem);
+  font-size: clamp(1rem, 3cqw, 1.5rem);
   font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   font-variant-numeric: tabular-nums;
@@ -252,7 +253,7 @@
   appearance: none;
   -webkit-appearance: none;
   font: inherit;
-  font-size: clamp(1rem, 2.4vw, 1.3rem);
+  font-size: clamp(1rem, 2.4cqw, 1.3rem);
   font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -283,7 +284,7 @@
   padding: 0;
   background: transparent;
   font: inherit;
-  font-size: clamp(1rem, 2.4vw, 1.3rem);
+  font-size: clamp(1rem, 2.4cqw, 1.3rem);
   font-weight: var(--font-weight-bold);
   letter-spacing: -0.01em;
   color: var(--muted);
@@ -297,15 +298,15 @@
   color: var(--ink);
 }
 
-/* ── Narrow screens ───────────────────────────────────────────────────── */
-@media (max-width: 600px) {
+/* ── Narrow boxes ─────────────────────────────────────────────────────── */
+@container (max-width: 600px) {
   .tuner__note-row {
     align-items: flex-end;
   }
   .meter {
     min-width: 140px;
   }
-  /* Mobile is different: the readout occupies more of the screen, so fade the
+  /* Narrow is different: the readout occupies more of the box, so fade the
      waveform out earlier and over a longer bottom band — it leads in cleanly at
      the top and answers softly into the type below rather than cutting off. */
   .wave {
@@ -330,4 +331,12 @@
     animation: none;
     clip-path: none;
   }
+}
+
+/* ── Own page ─────────────────────────────────────────────────────────── */
+/* Standalone, the box is the dynamic viewport rather than the large one: the
+   controls sit at the very bottom and must stay above a mobile browser's
+   toolbar while it is showing. */
+.piece-box--viewport.tuner-box {
+  height: 100dvh;
 }

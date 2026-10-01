@@ -25,7 +25,7 @@ function rememberResults(term, tracks) {
 
 const FILL_ALPHA = 0.92;
 const PANEL_MAX_PX = 336;
-const VIEWPORT_GUTTER_PX = 168;
+const BOX_GUTTER_PX = 168;
 const SLIDE_MS = 380;
 const FADE_LEAD_MS = 130;
 
@@ -146,22 +146,20 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
     const list = listRef.current;
     if (!list) return;
 
+    // The panel's ceiling comes from the piece's box, not the window, so the
+    // results stay inside whatever box the dock is mounted in.
+    const box = containerRef.current?.closest(".piece-box");
     const measure = () => {
-      const limit = Math.max(
-        120,
-        Math.min(PANEL_MAX_PX, window.innerHeight - VIEWPORT_GUTTER_PX),
-      );
+      const room = box ? box.clientHeight : window.innerHeight;
+      const limit = Math.max(120, Math.min(PANEL_MAX_PX, room - BOX_GUTTER_PX));
       setPanelHeight(Math.min(list.scrollHeight, limit));
     };
 
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(list);
-    window.addEventListener("resize", measure);
-    return () => {
-      observer.disconnect();
-      window.removeEventListener("resize", measure);
-    };
+    if (box) observer.observe(box);
+    return () => observer.disconnect();
   }, [tracks]);
 
   useEffect(() => {

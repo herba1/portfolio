@@ -5,6 +5,7 @@ import { memo, useEffect, useRef } from "react";
 import SlotNumber from "@/app/ui/SlotNumber";
 import { haptic } from "@/lib/haptics";
 import { useSaveFlight } from "./SaveFlight";
+import { HEART } from "./SaveButton";
 
 /* ─────────────────────────────────────────────────────────────────────────
    TabBar — the footer nav.
@@ -32,7 +33,7 @@ export const TABS = [
   { id: "profile", label: "Profile" },
 ];
 
-function Icon({ id, active }) {
+function Icon({ id, active, glyph }) {
   const common = {
     width: 24,
     height: 24,
@@ -69,7 +70,11 @@ function Icon({ id, active }) {
     return (
       <svg {...common}>
         <path
-          d="M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z"
+          d={
+            glyph === "heart"
+              ? HEART
+              : "M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z"
+          }
           fill={active ? "currentColor" : "none"}
         />
       </svg>
@@ -180,7 +185,7 @@ function TabCount({ count, nonce }) {
   );
 }
 
-function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
+function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel, tabs, icon }) {
   const flight = useSaveFlight();
   const undoMs = undo?.ms ?? 3000;
 
@@ -189,12 +194,15 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
      of a pill that is still on screen fading. Frozen at its last value while
      the pill is closed, live while it is open — the clock beside it already
      behaves this way, because its interval stops on the same flag. */
+  // A kit can show fewer tabs; Collection, the save target, is always one.
+  const shown = tabs ? TABS.filter((t) => tabs.includes(t.id)) : TABS;
+
   const lastCount = useRef(0);
   if (undo?.open) lastCount.current = undo.count;
   const stackCount = undo?.open ? undo.count : lastCount.current;
 
   return (
-    <nav className="psa-tabbar" aria-label="Sections">
+    <nav className="psa-tabbar" aria-label="Sections" style={{ "--tab-count": shown.length }}>
       {/* Collection is the middle of five columns, so dead centre of the bar
           is exactly above it — no measuring and no ref needed. */}
       <button
@@ -219,7 +227,7 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
         <UndoCount count={stackCount} />
       </button>
 
-      {TABS.map((tab) => {
+      {shown.map((tab) => {
         const isActive = tab.id === active;
         const count = counts[tab.id];
         const isTarget = tab.id === "collection";
@@ -245,10 +253,12 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
                 is a fifth of the bar wide and aiming at its centre would land
                 the card beside the bookmark rather than on it. */}
             <span className="psa-tab-icon" ref={isTarget ? flight?.registerTarget : undefined}>
-              <Icon id={tab.id} active={isActive} />
+              <Icon id={tab.id} active={isActive} glyph={icon} />
               <TabCount count={count ?? 0} nonce={countNonce} />
             </span>
-            <span className="psa-tab-label">{tab.label}</span>
+            <span className="psa-tab-label">
+              {tab.id === "collection" && libraryLabel ? libraryLabel : tab.label}
+            </span>
           </button>
         );
       })}

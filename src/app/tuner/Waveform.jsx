@@ -15,10 +15,10 @@ import { memo, useEffect, useRef } from "react";
 ─────────────────────────────────────────────────────────────────────────── */
 const CONFIG = {
   bars: 110, // how many bars = how much history is on screen
-  maxWidth: 340, // px — the column's max width; it's centred on the page
-  widthVw: 84, // …but never wider than this % of the viewport on small screens
-  topOffset: 0, // dvh — where the column STARTS (0 = very top of the screen)
-  length: 100, // dvh — how tall it is (100 = all the way to the bottom)
+  maxWidth: 340, // px — the column's max width; it's centred in the box
+  widthCqw: 84, // …but never wider than this % of the box in small boxes
+  topOffset: 0, // cqh — where the column STARTS (0 = very top of the box)
+  length: 100, // cqh — how tall it is (100 = all the way to the bottom)
   barThickness: 3, // px — thickness of each horizontal bar
   gain: 1, // loudness multiplier (raise to make it react harder)
   minBar: 0.02, // resting length when silent (0–1) so the centre never empties
@@ -99,9 +99,9 @@ function Waveform({ pitchRef, subscribe }) {
       className="wave"
       aria-hidden="true"
       style={{
-        top: `${CONFIG.topOffset}dvh`,
-        height: `${CONFIG.length}dvh`,
-        width: `min(${CONFIG.maxWidth}px, ${CONFIG.widthVw}vw)`,
+        top: `${CONFIG.topOffset}cqh`,
+        height: `${CONFIG.length}cqh`,
+        width: `min(${CONFIG.maxWidth}px, ${CONFIG.widthCqw}cqw)`,
       }}
     >
       <div className="wave__inner" ref={innerRef}>

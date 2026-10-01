@@ -5,7 +5,9 @@ import BackdropDock from "../backdrop/BackdropDock";
 import { readTone, toneMode } from "../backdrop/tone";
 import "./song-search.css";
 
-export default function SongSearch() {
+// `embedded` changes nothing here: Song Search has no dev or tuning UI to
+// drop — the dock and the ground toggle are the piece.
+export default function SongSearch({ embedded = false }) {
   const [mode, setMode] = useState("dark");
   const [picked, setPicked] = useState(null);
 

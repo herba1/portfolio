@@ -57,7 +57,9 @@ const Figures = memo(function Figures({ freqTextMV, centsTextMV }) {
   );
 });
 
-export default function TunerExperience() {
+// `embedded` renders the tuner as a tile among others: no dev panel, and a
+// plain <div> root, since the host page owns the one <main>.
+export default function TunerExperience({ embedded = false }) {
   const [mode, setMode] = useState("auto");
   const [tuningId, setTuningId] = useState(DEFAULT_TUNING_ID);
   const rootRef = useRef(null);
@@ -76,9 +78,10 @@ export default function TunerExperience() {
   });
 
   const running = status === "running";
+  const Root = embedded ? "div" : "main";
 
   return (
-    <main className="tuner" ref={rootRef}>
+    <Root className="tuner" ref={rootRef}>
       <Waveform pitchRef={pitchRef} subscribe={subscribe} />
 
       <div className="sr-only" role="status" aria-live="polite">
@@ -121,7 +124,7 @@ export default function TunerExperience() {
         </section>
       </div>
 
-      {IS_DEV && <TunerDevControls />}
-    </main>
+      {IS_DEV && !embedded && <TunerDevControls />}
+    </Root>
   );
 }

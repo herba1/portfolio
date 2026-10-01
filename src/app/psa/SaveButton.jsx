@@ -33,6 +33,10 @@ import { haptic } from "@/lib/haptics";
 
 const BOOKMARK =
   "M6.5 3.5 H17.5 A1.5 1.5 0 0 1 19 5 V20.4 L12 16.3 L5 20.4 V5 A1.5 1.5 0 0 1 6.5 3.5 Z";
+// Same 24-unit box, so the wipe, the pop and the ring fit it unchanged.
+export const HEART =
+  "M12 20.3 C11.6 20.3 11.2 20.1 10.9 19.9 C6.6 16.4 3.5 13.6 3.5 9.6 C3.5 6.9 5.6 4.8 8.2 4.8 C9.8 4.8 11.2 5.6 12 6.9 C12.8 5.6 14.2 4.8 15.8 4.8 C18.4 4.8 20.5 6.9 20.5 9.6 C20.5 13.6 17.4 16.4 13.1 19.9 C12.8 20.1 12.4 20.3 12 20.3 Z";
+const GLYPHS = { bookmark: BOOKMARK, heart: HEART };
 
 function SaveButton({
   saved = false,
@@ -40,7 +44,9 @@ function SaveButton({
   label = "bookmarks",
   size = 28,
   hint = 0,
+  icon = "bookmark",
 }) {
+  const glyph = GLYPHS[icon] ?? BOOKMARK;
   const maskId = useId();
   // Distinguishes "never interacted" from "explicitly unsaved" so the drain
   // animation only ever runs after a real un-save, not on first paint.
@@ -85,10 +91,10 @@ function SaveButton({
             <rect className="pk-save-wipe" x="0" y="0" width="24" height="24" fill="#fff" />
           </mask>
         </defs>
-        <path className="pk-save-solid" d={BOOKMARK} fill="currentColor" mask={`url(#${maskId})`} />
+        <path className="pk-save-solid" d={glyph} fill="currentColor" mask={`url(#${maskId})`} />
         <path
           className="pk-save-line"
-          d={BOOKMARK}
+          d={glyph}
           fill="none"
           stroke="currentColor"
           strokeWidth="1.6"

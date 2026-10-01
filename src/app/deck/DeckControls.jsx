@@ -62,7 +62,7 @@ export default function DeckControls({ target }) {
       popRy: { value: -5, min: -30, max: 30, step: 0.5, label: "turn (deg)" },
     }),
     feel: folder({
-      travel: { value: 10, min: 3, max: 60, step: 0.5, label: "svh / card" },
+      travel: { value: 10, min: 3, max: 60, step: 0.5, label: "cqh / card" },
       // The mass. 0 welds the deck to the wheel; higher lets it trail.
       follow: { value: 460, min: 0, max: 1400, step: 10, label: "follow (ms)" },
       // The overshoot control point. 1.0 = pure ease-out, no coast past

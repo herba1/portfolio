@@ -757,9 +757,9 @@
    being judged, and a control panel docked beside it on a 390px viewport
    would be inside the thing it is measuring. On a phone you get the app.
    ═══════════════════════════════════════════════════════════════════════ */
-@media (max-width: 720px) {
+@container (max-width: 720px) {
   /* Doubled class for specificity: this file is imported before psa.css, and
-     a media query adds none of its own. 720 rather than 1000 — a half-width
+     a container query adds none of its own. 720 rather than 1000 — a half-width
      desktop window is still somewhere you tune, and a panel that vanishes
      when you narrow the window reads as a panel that is not there. */
   .pk.psa-config {
@@ -768,7 +768,7 @@
 }
 
 .psa-config-body {
-  max-height: calc(100vh - 72px);
+  max-height: calc(100cqh - 72px);
   overflow-y: auto;
   overscroll-behavior: contain;
 }

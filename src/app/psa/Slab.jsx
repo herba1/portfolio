@@ -22,7 +22,7 @@ import { isWarm, subscribeWarm, warmImage } from "./warmImages";
 const COLD = () => false;
 
 /* Memoised on (card, sizes), both of which are stable for the life of a tile
-   — the card objects are module constants. A price tick re-renders the tile
+   — the items come from the kit, built once per mount. A price tick re-renders the tile
    several times a second and none of those renders can change the scan, so
    this is the one component on the surface that should never see them. */
 function Slab({ card, sizes = "40vw" }) {
@@ -47,7 +47,12 @@ function Slab({ card, sizes = "40vw" }) {
 
   return (
     <div className="slab">
-      <div className={`slab-face${showImage ? "" : " slab-face--empty"}`}>
+      <div
+        className={`slab-face${showImage ? "" : " slab-face--empty"}`}
+        // A kit item with no image may carry its own wash (a song with no
+        // artwork); it paints the empty face instead of the neutral one.
+        style={!showImage && card.art ? { background: card.art } : undefined}
+      >
         {showImage && (
           /* Plain <img>: these are static public-domain scans of a known
              size, so next/image's resizing pipeline buys nothing here and
@@ -59,7 +64,7 @@ function Slab({ card, sizes = "40vw" }) {
              already-decoded bitmap in the same frame the tile mounts. */
           <img
             src={card.image}
-            alt={`${card.year} ${card.set} ${card.player}`}
+            alt={card.alt}
             loading="eager"
             decoding={cached ? "sync" : "async"}
             fetchPriority="high"

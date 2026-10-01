@@ -1,0 +1,207 @@
+/* Experiments — every piece mounted live on one page. These rules decide
+   where the pieces hang and how they arrive; each piece lays itself out. */
+
+.xl-root {
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background: var(--color-surface);
+}
+
+/* Layout switcher — one pill, bottom centre, above every option. */
+.xl-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+.xl-switcher__item {
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--color-ink);
+  transition: background-color var(--duration-150, 150ms) var(--ease-out-quart);
+}
+.xl-switcher__item:hover {
+  background: var(--color-surface-sunken);
+}
+.xl-switcher__item[data-on="true"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+/* ── Sheet ─────────────────────────────── */
+
+.xl-sheet {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 80px 24px 72px;
+}
+.xl-sheet__grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 16px;
+}
+.xl-sheet__cell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.xl-sheet__cell > .piece-box {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+
+@media (max-width: 899px) {
+  .xl-sheet {
+    height: auto;
+    padding: 72px 16px 72px;
+  }
+  .xl-sheet__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: auto;
+    gap: 12px;
+  }
+  .xl-sheet__cell > .piece-box {
+    flex: none;
+    aspect-ratio: 3 / 4;
+  }
+}
+@media (max-width: 599px) {
+  .xl-sheet__grid {
+    grid-template-columns: 1fr;
+  }
+  .xl-sheet__cell > .piece-box {
+    aspect-ratio: 4 / 5;
+  }
+}
+
+/* ── Bento ─────────────────────────────── */
+
+.xl-bento {
+  height: 100dvh;
+  padding: 80px 24px 72px;
+}
+.xl-bento__grid {
+  height: 100%;
+  display: grid;
+  grid-template-columns: 1.05fr 1.6fr 0.95fr 1.1fr;
+  grid-template-rows: repeat(6, minmax(0, 1fr));
+  grid-template-areas:
+    "ink      refract psa  backdrop"
+    "ink      refract psa  backdrop"
+    "ink      refract psa  backdrop"
+    "halftone deck    psa  tuner"
+    "halftone deck    song tuner"
+    "halftone deck    song tuner";
+  gap: 16px;
+}
+.xl-bento__tile {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+.xl-bento__tile > .piece-box {
+  flex: 1;
+  height: auto;
+  min-height: 0;
+}
+@media (max-width: 899px) {
+  .xl-bento {
+    height: auto;
+    padding: 72px 16px 72px;
+  }
+  .xl-bento__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: none;
+    grid-template-areas: none;
+    gap: 12px;
+  }
+  .xl-bento__tile {
+    grid-area: auto !important;
+  }
+  .xl-bento__tile > .piece-box {
+    flex: none;
+    aspect-ratio: 4 / 5;
+  }
+}
+@media (max-width: 599px) {
+  .xl-bento__grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ── Entrance ────────────────────────────
+
+   Every tile tilts up out of the page and settles, in a diagonal wave across
+   the grid — --wave is the tile's row + column, so the sweep runs from the
+   top-left corner to the bottom-right and tiles on one diagonal land
+   together. Transform and opacity only: both run on the compositor, so the
+   entrance holds its frame rate while eight pieces mount, compile shaders
+   and decode art on the main thread underneath it. The resting state is
+   `transform: none`, so nothing stays promoted to a layer once it lands. */
+.xl-tile {
+  transform-origin: 50% 100%;
+  animation: xl-tile-in 900ms var(--ease-out-quint) both;
+  animation-delay: calc(80ms + var(--wave, 0) * 70ms);
+}
+
+@keyframes xl-tile-in {
+  from {
+    opacity: 0;
+    transform: perspective(1600px) translate3d(0, 40px, -80px) rotateX(12deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Stacked, most tiles start below the fold, and a wave timed to the page
+   load would play to nobody. The first screen still arrives on load; every
+   tile past it rides its own entry into view instead. */
+@supports (animation-timeline: view()) {
+  @media (max-width: 899px) {
+    .xl-tile:nth-child(n + 5) {
+      animation-delay: 0s;
+      animation-timeline: view();
+      animation-range: entry 0% entry 80%;
+    }
+  }
+  @media (max-width: 599px) {
+    .xl-tile:nth-child(n + 3) {
+      animation-delay: 0s;
+      animation-timeline: view();
+      animation-range: entry 0% entry 80%;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xl-tile {
+    animation: none;
+  }
+}
+
+/* A piece mounted as a component. */
+.xl-piece {
+  border-radius: var(--radius-xl);
+  background: var(--color-surface-raised);
+  outline: 1px solid var(--color-line);
+}
+.xl-bench {
+  flex: none;
+}
