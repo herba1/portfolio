@@ -12,6 +12,7 @@ import {
   RENDER,
   SORT,
   advanceTime,
+  depthOfField,
   frameCursor,
   hasLensPath,
   isStream,
@@ -19,6 +20,12 @@ import {
   lowPassFor,
   sortCapacity,
 } from "./splatVideoParams";
+
+function applyDepthOfField(uniforms, engine, meta) {
+  const { aperture, focusDepth } = depthOfField(engine, meta);
+  uniforms.uAperture.value = aperture;
+  uniforms.uFocusDepth.value = focusDepth;
+}
 
 function halfStepOf(meta) {
   const { times } = meta;
@@ -187,6 +194,7 @@ function SplatField({ clip, engineRef }) {
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     uniforms.uTime.value = engine.time;
     uniforms.uHalfStep.value = engine.reducedMotion || !Array.isArray(meta.times) ? 0 : halfStepOf(meta);
+    applyDepthOfField(uniforms, engine, meta);
 
     runtime.want({ zRow, ...cursor });
   });
@@ -254,6 +262,7 @@ function StreamField({ clip, engineRef }) {
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
     uniforms.uTime.value = engine.time;
     uniforms.uHalfStep.value = engine.reducedMotion ? 0 : 0.5 / Math.max(1, meta.fps);
+    applyDepthOfField(uniforms, engine, meta);
 
     runtime.want(zRow, moment);
   });

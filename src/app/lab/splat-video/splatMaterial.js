@@ -8,6 +8,8 @@ precision highp int;
 
 uniform vec2 uViewport;
 uniform float uLowPass;
+uniform float uAperture;
+uniform float uFocusDepth;
 
 in float aSplat;
 
@@ -73,6 +75,11 @@ void main() {
   float a = projected[0][0] + uLowPass;
   float b = projected[0][1];
   float c = projected[1][1] + uLowPass;
+  float sharpDeterminant = a * c - b * b;
+  float blur = uAperture * uViewport.y * abs(uFocusDepth * inverseDepth - 1.0);
+  a += blur * blur;
+  c += blur * blur;
+  opacity *= mix(1.0, sqrt(max(sharpDeterminant, 1e-12) / max(a * c - b * b, 1e-12)), 0.5);
   float mid = 0.5 * (a + c);
   float radius = length(vec2(0.5 * (a - c), b));
   float lambda1 = mid + radius;
@@ -302,6 +309,8 @@ export function createSplatMaterial(textures, meta) {
       uHalfStep: { value: 0 },
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
+      uAperture: { value: 0 },
+      uFocusDepth: { value: 1 },
     },
   });
 }
@@ -364,6 +373,8 @@ export function createStreamMaterial(staticPair, staticSet) {
       uHalfStep: { value: 0 },
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
+      uAperture: { value: 0 },
+      uFocusDepth: { value: 1 },
     },
   });
 }

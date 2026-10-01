@@ -66,6 +66,7 @@ export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
   }
 
   const { yaw, pitch, dolly } = stepOrbit(engine, delta, performance.now());
+  engine.view = { yaw, pitch, dolly };
   const distance = meta.camera.pivotDepth * dolly;
   camera.position.set(
     pivot.x + Math.sin(yaw) * Math.cos(pitch) * distance,

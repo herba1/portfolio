@@ -24,6 +24,23 @@ export const ORBIT = {
   resetSnapEpsilon: 1e-4,
 };
 
+export const DEPTH_OF_FIELD = {
+  aperture: 0.006,
+  ease: 1.6,
+};
+
+export function depthOfField(engine, meta) {
+  const view = engine.view;
+  if (!view || engine.reducedMotion) return { aperture: 0, focusDepth: meta.camera.pivotDepth };
+  const yaw = view.yaw / (ORBIT.yawLimitDeg * (Math.PI / 180));
+  const pitch = view.pitch / (ORBIT.pitchLimitDeg * (Math.PI / 180));
+  const offset = clamp(Math.hypot(yaw, pitch), 0, 1);
+  return {
+    aperture: DEPTH_OF_FIELD.aperture * Math.pow(offset, DEPTH_OF_FIELD.ease),
+    focusDepth: meta.camera.pivotDepth * view.dolly,
+  };
+}
+
 export const PARALLAX = {
   yawDeg: 2.5,
   pitchDeg: 2,
