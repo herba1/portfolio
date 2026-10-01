@@ -38,7 +38,8 @@ export default function ZenMode() {
 
   useEffect(() => {
     const root = document.documentElement;
-    if (root.dataset.tastePreview === "1") return;
+    // Framed (taste preview, the experiments layouts): the frame owns chrome.
+    if (root.dataset.tastePreview === "1" || root.dataset.embed === "1") return;
     if (hidden) root.dataset.chrome = "off";
     else delete root.dataset.chrome;
     try {
@@ -93,7 +94,8 @@ export default function ZenMode() {
   useEffect(
     () => () => {
       if (hintTimer.current) clearTimeout(hintTimer.current);
-      if (document.documentElement.dataset.tastePreview !== "1") delete document.documentElement.dataset.chrome;
+      const root = document.documentElement;
+      if (root.dataset.tastePreview !== "1" && root.dataset.embed !== "1") delete root.dataset.chrome;
     },
     [],
   );

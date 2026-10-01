@@ -1,0 +1,337 @@
+/* Experiments — layout prototypes. Every piece runs live in a frame; these
+   rules only decide where the frames hang. */
+
+.xl-root {
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background: var(--color-surface);
+}
+
+/* A scaled live frame. The iframe lays out at desktop width and is shrunk
+   into the box from its top-left corner. */
+.xl-frame {
+  position: relative;
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  outline: 1px solid var(--color-line);
+}
+.xl-frame iframe,
+.xl-board__frame iframe {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border: 0;
+  transform-origin: 0 0;
+  background: var(--color-surface);
+}
+
+.xl-caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 8px;
+}
+.xl-caption:hover .text-ink {
+  color: var(--color-accent);
+}
+
+/* Layout switcher — one pill, bottom centre, above every option. */
+.xl-switcher {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  z-index: 50;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  transform: translateX(-50%);
+  border-radius: 999px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+.xl-switcher__item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--color-ink);
+  transition: background-color var(--duration-150, 150ms) var(--ease-out-quart);
+}
+.xl-switcher__item span {
+  color: var(--color-ink-secondary);
+}
+.xl-switcher__item:hover {
+  background: var(--color-surface-sunken);
+}
+.xl-switcher__item[data-on="true"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+.xl-switcher__item[data-on="true"] span {
+  color: var(--color-ink-inverse);
+}
+
+/* ── A · Sheet ─────────────────────────────── */
+
+.xl-sheet,
+.xl-timeline {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding: 80px 24px 72px;
+}
+.xl-sheet__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 16px;
+}
+.xl-sheet__head h1 {
+  text-wrap: balance;
+}
+.xl-sheet__grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-auto-rows: minmax(0, 1fr);
+  gap: 24px 16px;
+}
+.xl-sheet__cell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.xl-sheet__cell .xl-frame {
+  flex: 1;
+  min-height: 0;
+}
+
+@media (max-width: 899px) {
+  .xl-sheet {
+    height: auto;
+  }
+  .xl-sheet__grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: auto;
+  }
+  .xl-sheet__cell .xl-frame {
+    flex: none;
+    aspect-ratio: 3 / 4;
+  }
+}
+
+/* ── B · Slices ────────────────────────────── */
+
+.xl-slices {
+  display: flex;
+  height: 100dvh;
+  padding: 72px 0 56px;
+}
+.xl-slice {
+  position: relative;
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--color-line);
+  transition: flex-grow 480ms var(--ease-out-quart);
+}
+.xl-slice:last-child {
+  border-right: 0;
+}
+.xl-slices:hover .xl-slice:hover,
+.xl-slices:focus-within .xl-slice:focus-within {
+  flex-grow: 7;
+}
+.xl-slice__window {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+/* True size, centred: the slot shows a real strip of the piece, and opening
+   it never re-lays the piece out — only the window moves. */
+.xl-slice__window iframe {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 1440px;
+  height: 100%;
+  border: 0;
+  transform: translateX(-50%);
+}
+.xl-slice__caption {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 12px 12px;
+  border-top: 1px solid var(--color-line);
+  background: var(--color-surface);
+}
+.xl-slice__caption:hover .text-ink {
+  color: var(--color-accent);
+}
+
+@media (max-width: 899px) {
+  .xl-slices {
+    flex-direction: column;
+  }
+  .xl-slice {
+    border-right: 0;
+    border-bottom: 1px solid var(--color-line);
+  }
+  .xl-slice__window iframe {
+    width: 100%;
+    height: 100dvh;
+    top: 50%;
+    left: 0;
+    transform: translateY(-50%);
+  }
+}
+
+/* ── C · Board ─────────────────────────────── */
+
+.xl-board {
+  position: relative;
+  height: 100dvh;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background-color: var(--color-surface);
+  background-image: radial-gradient(var(--color-line) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+.xl-board[data-dragging="true"] {
+  cursor: grabbing;
+}
+.xl-board__wall {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.xl-board__wall[data-animate="true"] {
+  transition: transform 600ms var(--ease-out-quart);
+}
+.xl-board__frame {
+  position: absolute;
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  outline: 2px solid var(--color-line);
+  cursor: auto;
+}
+.xl-board__label {
+  position: absolute;
+  transform-origin: 0 0;
+  cursor: auto;
+}
+.xl-board__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: zoom-in;
+}
+.xl-board__title:hover .text-ink {
+  color: var(--color-accent);
+}
+.xl-board__fit {
+  position: absolute;
+  top: 80px;
+  right: 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  border-radius: 999px;
+  color: var(--color-ink);
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+.xl-board__fit kbd {
+  font-family: inherit;
+  color: var(--color-ink-secondary);
+}
+
+/* ── D · Timeline ──────────────────────────── */
+
+.xl-timeline__skyline {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
+  gap: 16px;
+  align-items: end;
+}
+.xl-timeline__col {
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 16px;
+  height: 100%;
+  min-height: 0;
+}
+.xl-timeline__piece {
+  display: flex;
+  flex-direction: column;
+  flex: 0 1 auto;
+  min-height: 0;
+}
+.xl-timeline__piece .xl-frame {
+  aspect-ratio: 16 / 10;
+  min-height: 0;
+}
+.xl-timeline__date {
+  align-self: center;
+  padding-top: 4px;
+}
+.xl-timeline__leaders {
+  display: block;
+  width: 100%;
+  height: 48px;
+  overflow: visible;
+}
+.xl-timeline__leaders line {
+  stroke: var(--color-line-strong);
+  stroke-width: 1;
+}
+.xl-timeline__axis {
+  position: relative;
+  height: 32px;
+  border-top: 1px solid var(--color-ink);
+}
+.xl-timeline__month {
+  position: absolute;
+  top: 8px;
+  padding-left: 4px;
+  border-left: 1px solid var(--color-line-strong);
+}
+.xl-timeline__day {
+  position: absolute;
+  top: -4px;
+  width: 8px;
+  height: 8px;
+  margin-left: -4px;
+  border-radius: 50%;
+  background: var(--color-ink);
+}
+
+@media (max-width: 899px) {
+  .xl-timeline {
+    height: auto;
+  }
+  .xl-timeline__skyline {
+    grid-template-columns: 1fr;
+  }
+  .xl-timeline__leaders,
+  .xl-timeline__axis {
+    display: none;
+  }
+}

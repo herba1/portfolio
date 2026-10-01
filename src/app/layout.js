@@ -155,7 +155,7 @@ export default function RootLayout({ children }) {
         ))}
         <script
           dangerouslySetInnerHTML={{
-            __html: `try{if(sessionStorage.getItem("herb:chrome-hidden")==="1")document.documentElement.dataset.chrome="off"}catch(e){}`,
+            __html: `try{var r=document.documentElement;if(window.self!==window.top){r.dataset.embed="1";r.dataset.chrome="off"}else if(sessionStorage.getItem("herb:chrome-hidden")==="1")r.dataset.chrome="off"}catch(e){}`,
           }}
         />
       </head>
