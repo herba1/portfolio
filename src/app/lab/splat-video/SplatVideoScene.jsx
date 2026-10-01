@@ -6,7 +6,14 @@ import * as THREE from "three";
 
 import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSoundClock } from "./soundClock";
-import { createResolvePass, createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
+import {
+  bindMoments,
+  blendMoments,
+  createResolvePass,
+  createSplatGeometry,
+  createSplatMaterial,
+  createSplatTextures,
+} from "./splatMaterial";
 import { createStreamRuntime } from "./splatStream";
 import {
   RENDER,
@@ -15,9 +22,14 @@ import {
   depthOfField,
   frameCursor,
   hasLensPath,
+  holdsMoments,
+  isFlipbook,
   isStream,
   lensMatrix,
   lowPassFor,
+  momentBlend,
+  momentPlan,
+  momentTime,
   sortCapacity,
 } from "./splatVideoParams";
 
@@ -27,23 +39,19 @@ function applyDepthOfField(uniforms, engine, meta) {
   uniforms.uFocusDepth.value = focusDepth;
 }
 
-function halfStepOf(meta) {
-  const { times } = meta;
-  if (times.length < 2) return 0;
-  return (0.5 * (times[times.length - 1] - times[0])) / (times.length - 1);
-}
-
-function sameRequest(a, b) {
-  if (!a || !b) return false;
-  for (let k = 0; k < 4; k += 1) if (Math.abs(a.zRow[k] - b.zRow[k]) > SORT.depthEpsilon) return false;
-  return a.frame0 === b.frame0 && a.frame1 === b.frame1 && Math.abs(a.blend - b.blend) <= SORT.blendEpsilon;
+function covers(sent, wanted) {
+  if (!sent || !wanted) return false;
+  for (let k = 0; k < 4; k += 1) if (Math.abs(sent.zRow[k] - wanted.zRow[k]) > SORT.depthEpsilon) return false;
+  if (wanted.momentA !== undefined) return holdsMoments(sent, wanted);
+  return sent.frame0 === wanted.frame0 && sent.frame1 === wanted.frame1 && Math.abs(sent.blend - wanted.blend) <= SORT.blendEpsilon;
 }
 
 function createRuntime(clip) {
   const { meta, layout } = clip;
   const textures = createSplatTextures(clip);
   const material = createSplatMaterial(textures, meta);
-  const geometry = createSplatGeometry(sortCapacity(meta));
+  const capacity = sortCapacity(meta);
+  const geometry = createSplatGeometry(capacity);
   const mesh = new THREE.Mesh(geometry, material);
   mesh.frustumCulled = false;
 
@@ -60,6 +68,7 @@ function createRuntime(clip) {
       dynamicCount: meta.dynamicCount,
       layerTexels: layout.layerTexels,
       frameOffsets: meta.frameOffsets ?? null,
+      capacity,
       boundsMin: min,
       boundsSize: [max[0] - min[0], max[1] - min[1], max[2] - min[2]],
     },
@@ -67,10 +76,14 @@ function createRuntime(clip) {
   );
 
   const sorter = { inFlight: false, sent: null, wanted: null, recycle: null, disposed: false, id: 0 };
+  const clock = { time: 0, reducedMotion: false };
+  let shown = null;
+
+  const applyBlend = () => blendMoments(material, momentBlend(meta, shown, clock.time, clock.reducedMotion));
 
   const send = () => {
     if (sorter.disposed || sorter.inFlight || !sorter.wanted) return;
-    if (sameRequest(sorter.sent, sorter.wanted)) return;
+    if (covers(sorter.sent, sorter.wanted)) return;
     const request = sorter.wanted;
     const recycle = sorter.recycle;
     sorter.recycle = null;
@@ -81,14 +94,17 @@ function createRuntime(clip) {
   };
 
   worker.onmessage = (event) => {
-    if (sorter.disposed || event.data?.type !== "sorted") return;
+    const reply = event.data;
+    if (sorter.disposed || reply?.type !== "sorted") return;
     const attribute = geometry.getAttribute("aSplat");
     sorter.recycle = attribute.array;
-    attribute.array = event.data.order;
+    attribute.array = reply.order;
     attribute.needsUpdate = true;
-    geometry.instanceCount = event.data.count;
-    if (Array.isArray(meta.times) && meta.times[event.data.frame] !== undefined) {
-      material.uniforms.uMomentTime.value = meta.times[event.data.frame];
+    geometry.instanceCount = reply.count;
+    if (reply.split !== undefined) {
+      shown = { momentA: reply.momentA, momentB: reply.momentB, timeA: momentTime(meta, reply.momentA), timeB: momentTime(meta, reply.momentB) };
+      bindMoments(material, reply, shown.timeA, shown.timeB);
+      applyBlend();
     }
     sorter.inFlight = false;
     send();
@@ -101,6 +117,11 @@ function createRuntime(clip) {
   return {
     mesh,
     material,
+    tick(time, reducedMotion) {
+      clock.time = time;
+      clock.reducedMotion = reducedMotion;
+      applyBlend();
+    },
     want(request) {
       sorter.wanted = request;
       send();
@@ -192,11 +213,11 @@ function SplatField({ clip, engineRef }) {
     uniforms.uBlend.value = cursor.blend;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
-    uniforms.uTime.value = engine.time;
-    uniforms.uHalfStep.value = engine.reducedMotion || !Array.isArray(meta.times) ? 0 : halfStepOf(meta);
+    runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
 
-    runtime.want({ zRow, ...cursor });
+    if (isFlipbook(meta)) runtime.want({ zRow, ...momentPlan(meta, engine.time, { reducedMotion: engine.reducedMotion }) });
+    else runtime.want({ zRow, ...cursor });
   });
 
   useResolvedRender(resolveRef, scratchRef);
@@ -253,18 +274,17 @@ function StreamField({ clip, engineRef }) {
     if (!clocked && engine.playing && !engine.scrubbing && !engine.buffering) {
       advanceTime(engine, delta * engine.speed, meta.duration, false);
     }
-    const moment = frameCursor(engine.time, meta).frame0;
-    engine.buffering = !runtime.focus(moment);
+    const plan = runtime.plan(engine.time, engine.reducedMotion);
+    engine.buffering = !runtime.focus(plan.momentA);
 
     const zRow = aimAndMeasure(state, engine, meta, delta, scratch, group);
     const { uniforms } = runtime.material;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
-    uniforms.uTime.value = engine.time;
-    uniforms.uHalfStep.value = engine.reducedMotion ? 0 : 0.5 / Math.max(1, meta.fps);
+    runtime.tick(engine.time, engine.reducedMotion);
     applyDepthOfField(uniforms, engine, meta);
 
-    runtime.want(zRow, moment);
+    runtime.want(zRow, plan);
   });
 
   useResolvedRender(resolveRef, scratchRef);

@@ -3,12 +3,6 @@ const BUCKETS = 65536;
 let scene = null;
 let stream = null;
 
-function largestFrame(offsets) {
-  let largest = 0;
-  for (let f = 0; f + 1 < offsets.length; f += 1) largest = Math.max(largest, offsets[f + 1] - offsets[f]);
-  return largest;
-}
-
 function sortBuffers(capacity) {
   return {
     capacity,
@@ -21,10 +15,7 @@ function sortBuffers(capacity) {
 
 function init(message) {
   const frameOffsets = message.frameOffsets ?? null;
-  const capacity = frameOffsets
-    ? message.staticCount + largestFrame(frameOffsets)
-    : message.staticCount + message.dynamicCount;
-  const pointCount = frameOffsets ? message.staticCount + frameOffsets[frameOffsets.length - 1] : capacity;
+  const capacity = message.capacity;
   scene = {
     staticPoints: message.staticPoints,
     dynamicPoints: message.dynamicPoints,
@@ -34,7 +25,7 @@ function init(message) {
     boundsMin: message.boundsMin,
     boundsSize: message.boundsSize,
     frameOffsets,
-    staticDepths: new Float32Array(frameOffsets ? pointCount : message.staticCount),
+    staticDepths: new Float32Array(message.staticCount),
     staticRow: null,
     ...sortBuffers(capacity),
   };
@@ -73,24 +64,29 @@ function copyStatic(state) {
   }
 }
 
-function gather(zRow, frame0, frame1, blend) {
-  const { staticPoints, dynamicPoints, staticCount, dynamicCount, layerTexels, frameOffsets, depths, indices } = scene;
+function gatherMoments(zRow, momentA, momentB) {
+  const { staticPoints, staticCount, frameOffsets, depths, indices } = scene;
   const { ax, ay, az, offset } = projection(zRow, scene.boundsMin, scene.boundsSize);
   refreshStaticDepths(scene, zRow, staticPoints, scene.boundsMin, scene.boundsSize);
   copyStatic(scene);
 
-  if (frameOffsets) {
-    const start = staticCount + frameOffsets[frame0];
-    const end = staticCount + frameOffsets[frame0 + 1];
-    let n = staticCount;
-    for (let i = start; i < end; i += 1) {
-      const p = i * 4;
-      depths[n] = ax * staticPoints[p] + ay * staticPoints[p + 1] + az * staticPoints[p + 2] + offset;
-      indices[n] = i;
-      n += 1;
-    }
-    return n;
+  const start = staticCount + frameOffsets[momentA];
+  const end = staticCount + frameOffsets[momentB + 1];
+  let n = staticCount;
+  for (let i = start; i < end; i += 1) {
+    const p = i * 4;
+    depths[n] = ax * staticPoints[p] + ay * staticPoints[p + 1] + az * staticPoints[p + 2] + offset;
+    indices[n] = i;
+    n += 1;
   }
+  return n;
+}
+
+function gatherFrames(zRow, frame0, frame1, blend) {
+  const { staticPoints, dynamicPoints, staticCount, dynamicCount, layerTexels, depths, indices } = scene;
+  const { ax, ay, az, offset } = projection(zRow, scene.boundsMin, scene.boundsSize);
+  refreshStaticDepths(scene, zRow, staticPoints, scene.boundsMin, scene.boundsSize);
+  copyStatic(scene);
 
   const layer0 = frame0 * layerTexels * 4;
   const layer1 = frame1 * layerTexels * 4;
@@ -140,8 +136,16 @@ function backToFront(state, count, recycle) {
   return order;
 }
 
-function sort({ zRow, frame0, frame1, blend, recycle, id }) {
-  const count = gather(zRow, frame0, frame1, blend);
+function sort({ zRow, frame0, frame1, blend, momentA, momentB, recycle, id }) {
+  if (scene.frameOffsets) {
+    const count = gatherMoments(zRow, momentA, momentB);
+    const order = backToFront(scene, count, recycle);
+    const movingStart = scene.staticCount;
+    const split = scene.staticCount + scene.frameOffsets[momentA + 1];
+    self.postMessage({ type: "sorted", id, order, count, momentA, momentB, movingStart, split }, [order.buffer]);
+    return;
+  }
+  const count = gatherFrames(zRow, frame0, frame1, blend);
   const order = backToFront(scene, count, recycle);
   self.postMessage({ type: "sorted", id, order, count, frame: frame0 }, [order.buffer]);
 }
@@ -167,10 +171,10 @@ function dropChunk({ index, token }) {
   if (stream.chunks.get(index)?.token === token) stream.chunks.delete(index);
 }
 
-function sortChunk({ zRow, chunk, token, moment, recycle, id }) {
+function sortChunk({ zRow, chunk, token, momentA, momentB, recycle, id }) {
   const entry = stream.chunks.get(chunk);
   if (!entry || entry.token !== token) {
-    self.postMessage({ type: "sorted", id, order: recycle ?? null, count: 0, chunk, token, moment, missing: true }, recycle ? [recycle.buffer] : []);
+    self.postMessage({ type: "sorted", id, order: recycle ?? null, count: 0, chunk, token, momentA, momentB, missing: true }, recycle ? [recycle.buffer] : []);
     return;
   }
   const { staticCount, depths, indices } = stream;
@@ -179,7 +183,7 @@ function sortChunk({ zRow, chunk, token, moment, recycle, id }) {
 
   const { points, frameOffsets, shared } = entry;
   const { ax, ay, az, offset } = projection(zRow, entry.boundsMin, entry.boundsSize);
-  const end = frameOffsets[moment + 1];
+  const end = frameOffsets[momentB + 1];
   let n = staticCount;
   for (let j = 0; j < shared; j += 1) {
     const p = j * 4;
@@ -187,7 +191,7 @@ function sortChunk({ zRow, chunk, token, moment, recycle, id }) {
     indices[n] = staticCount + j;
     n += 1;
   }
-  for (let j = frameOffsets[moment]; j < end; j += 1) {
+  for (let j = frameOffsets[momentA]; j < end; j += 1) {
     const p = j * 4;
     depths[n] = ax * points[p] + ay * points[p + 1] + az * points[p + 2] + offset;
     indices[n] = staticCount + j;
@@ -195,7 +199,9 @@ function sortChunk({ zRow, chunk, token, moment, recycle, id }) {
   }
 
   const order = backToFront(stream, n, recycle);
-  self.postMessage({ type: "sorted", id, order, count: n, chunk, token, moment }, [order.buffer]);
+  const movingStart = staticCount + shared;
+  const split = staticCount + frameOffsets[momentA + 1];
+  self.postMessage({ type: "sorted", id, order, count: n, chunk, token, momentA, momentB, movingStart, split }, [order.buffer]);
 }
 
 self.onmessage = (event) => {

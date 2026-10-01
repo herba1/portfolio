@@ -94,6 +94,19 @@ export const SORT = {
   blendEpsilon: 1e-3,
 };
 
+export const BLEND = {
+  enabled: true,
+  from: 0,
+  to: 1,
+  snap: 1e-3,
+};
+
+export function blendWeight(progress) {
+  const width = BLEND.to - BLEND.from;
+  const x = width > 0 ? clamp((progress - BLEND.from) / width, 0, 1) : progress >= BLEND.to ? 1 : 0;
+  return x * x * (3 - 2 * x);
+}
+
 export function exportCommand(clip) {
   if (clip === FALLBACK_CLIP) return "node scripts/splat4d-fake.mjs";
   return `tools/splat4d/export.sh --video <clip.mov> --out public/splats/4d/${clip}`;
@@ -191,18 +204,20 @@ export function clipKind(meta) {
   return null;
 }
 
-function largestMoment(offsets) {
+function largestMoments(offsets) {
+  const run = BLEND.enabled ? 2 : 1;
+  const last = offsets.length - 1;
   let largest = 0;
-  for (let m = 0; m + 1 < offsets.length; m += 1) largest = Math.max(largest, offsets[m + 1] - offsets[m]);
+  for (let m = 0; m < last; m += 1) largest = Math.max(largest, offsets[Math.min(m + run, last)] - offsets[m]);
   return largest;
 }
 
 export function sortCapacity(meta) {
   if (isStream(meta)) {
-    return meta.static.count + meta.chunks.reduce((most, chunk) => Math.max(most, (chunk.shared ?? chunk.staticCount ?? 0) + largestMoment(chunk.frameOffsets)), 0);
+    return meta.static.count + meta.chunks.reduce((most, chunk) => Math.max(most, (chunk.shared ?? chunk.staticCount ?? 0) + largestMoments(chunk.frameOffsets)), 0);
   }
   if (!isFlipbook(meta)) return meta.count;
-  return meta.staticCount + largestMoment(meta.frameOffsets);
+  return meta.staticCount + largestMoments(meta.frameOffsets);
 }
 
 function bracketTime(times, time) {
@@ -222,8 +237,12 @@ function nearestTime(times, time) {
   return time - times[low] <= times[high] - time ? low : high;
 }
 
+function hasMomentTimes(meta) {
+  return Array.isArray(meta.times) && meta.times.length === meta.frames && meta.frames > 1;
+}
+
 export function frameCursor(time, meta) {
-  if (Array.isArray(meta.times) && meta.times.length === meta.frames && meta.frames > 1) {
+  if (hasMomentTimes(meta)) {
     const frame = nearestTime(meta.times, time);
     return { frame0: frame, frame1: frame, blend: 0 };
   }
@@ -236,6 +255,58 @@ export function frameCursor(time, meta) {
   const frame0 = Math.min(meta.frames - 1, Math.floor(position));
   const frame1 = Math.min(meta.frames - 1, frame0 + 1);
   return { frame0, frame1, blend: position - frame0 };
+}
+
+export function momentTime(meta, moment) {
+  return hasMomentTimes(meta) ? meta.times[moment] : moment / meta.fps;
+}
+
+function momentStep(meta) {
+  if (hasMomentTimes(meta)) return (meta.times[meta.frames - 1] - meta.times[0]) / (meta.frames - 1);
+  return 1 / meta.fps;
+}
+
+function momentBracket(meta, time) {
+  if (hasMomentTimes(meta)) return bracketTime(meta.times, time);
+  return clamp(Math.floor(time * meta.fps + 1e-4), 0, meta.frames - 1);
+}
+
+const alwaysLinked = () => true;
+
+export function momentPlan(meta, time, { reducedMotion = false, linked = alwaysLinked } = {}) {
+  const a = momentBracket(meta, time);
+  const b = Math.min(a + 1, meta.frames - 1);
+  const timeA = momentTime(meta, a);
+  const interval = momentTime(meta, b) - timeA;
+  if (!BLEND.enabled || reducedMotion || b === a || !(interval > 0) || !linked(a, b)) {
+    const nearest = frameCursor(time, meta).frame0;
+    return { momentA: nearest, momentB: nearest };
+  }
+  const weight = blendWeight((time - timeA) / interval);
+  if (weight <= BLEND.snap) return { momentA: a, momentB: a };
+  if (weight >= 1 - BLEND.snap) return { momentA: b, momentB: b };
+  return { momentA: a, momentB: b };
+}
+
+export function holdsMoments(held, wanted) {
+  const has = (moment) => moment === held.momentA || moment === held.momentB;
+  return has(wanted.momentA) && has(wanted.momentB);
+}
+
+function nearestLap(meta, shown, time) {
+  if (!isStream(meta) || !(meta.duration > 0)) return time;
+  const middle = 0.5 * (shown.timeA + shown.timeB);
+  return time + meta.duration * Math.round((middle - time) / meta.duration);
+}
+
+export function momentBlend(meta, shown, time, reducedMotion) {
+  if (!shown) return { time, weight: 0, glide: 0 };
+  const lap = nearestLap(meta, shown, time);
+  const interval = shown.timeB - shown.timeA;
+  if (!(interval > 0)) return { time: lap, weight: 0, glide: reducedMotion ? 0 : 0.5 * momentStep(meta) };
+  const progress = (lap - shown.timeA) / interval;
+  if (reducedMotion) return { time: lap, weight: progress >= 0.5 ? 1 : 0, glide: 0 };
+  return { time: lap, weight: blendWeight(progress), glide: interval };
 }
 
 export function advanceTime(engine, step, duration, bounce = PLAYBACK.bounce) {

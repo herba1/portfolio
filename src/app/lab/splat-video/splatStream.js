@@ -1,19 +1,19 @@
 import * as THREE from "three";
 
 import { loadStreamChunk } from "./loadSplat4d";
-import { bindStreamChunk, createPairTextures, createSplatGeometry, createStreamMaterial } from "./splatMaterial";
-import { SORT, STREAM, sortCapacity } from "./splatVideoParams";
+import { bindMoments, bindStreamChunk, blendMoments, createPairTextures, createSplatGeometry, createStreamMaterial } from "./splatMaterial";
+import { SORT, STREAM, holdsMoments, momentBlend, momentPlan, momentTime, sortCapacity } from "./splatVideoParams";
 
 function boundsArrays(bounds) {
   const { min, max } = bounds;
   return { boundsMin: min, boundsSize: [max[0] - min[0], max[1] - min[1], max[2] - min[2]] };
 }
 
-function sameRequest(a, b) {
-  if (!a || !b) return false;
-  if (a.chunk !== b.chunk || a.token !== b.token || a.moment !== b.moment) return false;
-  for (let k = 0; k < 4; k += 1) if (Math.abs(a.zRow[k] - b.zRow[k]) > SORT.depthEpsilon) return false;
-  return true;
+function covers(sent, wanted) {
+  if (!sent || !wanted) return false;
+  if (sent.chunk !== wanted.chunk || sent.token !== wanted.token) return false;
+  for (let k = 0; k < 4; k += 1) if (Math.abs(sent.zRow[k] - wanted.zRow[k]) > SORT.depthEpsilon) return false;
+  return holdsMoments(sent, wanted);
 }
 
 function chunkLookup(meta) {
@@ -37,6 +37,7 @@ export function chunkWindow(current, total) {
 export function createStreamRuntime(clip) {
   const { meta } = clip;
   const chunkOf = chunkLookup(meta);
+  const linked = (a, b) => chunkOf[a] === chunkOf[b];
   const capacity = sortCapacity(meta);
   const staticPair = createPairTextures(clip.staticSet);
   const material = createStreamMaterial(staticPair, meta.static);
@@ -56,10 +57,13 @@ export function createStreamRuntime(clip) {
   const retryAt = new Map();
   const uploads = [];
   const sorter = { inFlight: false, sent: null, wanted: null, recycle: null, id: 0 };
+  const clock = { time: 0, reducedMotion: false };
   let disposed = false;
   let nextToken = 1;
   let focusIndex = 0;
   let shown = null;
+
+  const applyBlend = () => blendMoments(material, momentBlend(meta, shown, clock.time, clock.reducedMotion));
 
   const isResident = (entry) => resident.get(entry.index) === entry;
 
@@ -122,7 +126,7 @@ export function createStreamRuntime(clip) {
 
   const send = () => {
     if (disposed || sorter.inFlight || !sorter.wanted) return;
-    if (sameRequest(sorter.sent, sorter.wanted)) return;
+    if (covers(sorter.sent, sorter.wanted)) return;
     const request = sorter.wanted;
     const recycle = sorter.recycle;
     sorter.recycle = null;
@@ -148,9 +152,13 @@ export function createStreamRuntime(clip) {
     attribute.needsUpdate = true;
     geometry.instanceCount = reply.count;
     bindStreamChunk(material, entry.pair, entry.set);
-    material.uniforms.uMomentTime.value = momentTime(meta, entry.set.firstMoment + reply.moment);
+    const { firstMoment } = entry.set;
+    const timeA = momentTime(meta, firstMoment + reply.momentA);
+    const timeB = momentTime(meta, firstMoment + reply.momentB);
+    bindMoments(material, reply, timeA, timeB);
     const previous = shown?.entry;
-    shown = { entry, moment: reply.moment };
+    shown = { entry, momentA: reply.momentA, momentB: reply.momentB, timeA, timeB };
+    applyBlend();
     if (previous && previous !== entry) schedule();
     send();
   };
@@ -165,17 +173,26 @@ export function createStreamRuntime(clip) {
   return {
     mesh,
     material,
+    plan(time, reducedMotion) {
+      return momentPlan(meta, time, { reducedMotion, linked });
+    },
     focus(moment) {
       focusIndex = chunkOf[moment];
       schedule();
       return resident.has(focusIndex);
     },
-    want(zRow, moment) {
-      const entry = resident.get(chunkOf[moment]);
+    tick(time, reducedMotion) {
+      clock.time = time;
+      clock.reducedMotion = reducedMotion;
+      applyBlend();
+    },
+    want(zRow, plan) {
+      const entry = resident.get(chunkOf[plan.momentA]);
       if (entry) {
-        sorter.wanted = { zRow, chunk: entry.index, token: entry.token, moment: moment - entry.set.firstMoment };
+        const { firstMoment } = entry.set;
+        sorter.wanted = { zRow, chunk: entry.index, token: entry.token, momentA: plan.momentA - firstMoment, momentB: plan.momentB - firstMoment };
       } else if (shown && isResident(shown.entry)) {
-        sorter.wanted = { zRow, chunk: shown.entry.index, token: shown.entry.token, moment: shown.moment };
+        sorter.wanted = { zRow, chunk: shown.entry.index, token: shown.entry.token, momentA: shown.momentA, momentB: shown.momentB };
       } else {
         sorter.wanted = null;
       }
@@ -206,9 +223,4 @@ export function createStreamRuntime(clip) {
       material.dispose();
     },
   };
-}
-
-function momentTime(meta, moment) {
-  if (Array.isArray(meta.times) && meta.times[moment] !== undefined) return meta.times[moment];
-  return moment / Math.max(1, meta.fps);
 }

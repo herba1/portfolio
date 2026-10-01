@@ -108,6 +108,26 @@ void main() {
 }
 `;
 
+const MOMENT_BLEND = `
+uniform float uTime;
+uniform int uMovingStart;
+uniform int uSplit;
+uniform float uWeight;
+uniform float uMomentTimeA;
+uniform float uMomentTimeB;
+uniform float uGlideSpan;
+
+float momentPresence(int index, out float glide) {
+  if (index < uMovingStart) {
+    glide = 0.0;
+    return 1.0;
+  }
+  bool later = index >= uSplit;
+  glide = clamp(uTime - (later ? uMomentTimeB : uMomentTimeA), -uGlideSpan, uGlideSpan);
+  return later ? uWeight : 1.0 - uWeight;
+}
+`;
+
 const PLAYBACK_READERS = `
 uniform highp usampler2D uBase;
 uniform highp usampler2D uStatic;
@@ -121,17 +141,17 @@ uniform vec3 uBoundsSize;
 uniform float uCovScale;
 uniform highp sampler2D uVelocity;
 uniform float uGlideOn;
-uniform float uTime;
-uniform float uMomentTime;
-uniform float uHalfStep;
 
 void readPoint(int index, out vec3 center, out float opacity) {
   vec4 point;
   vec3 drift = vec3(0.0);
+  float presence = 1.0;
   if (index < uStaticCount) {
     point = vec4(texelFetch(uStatic, texelFor(index), 0));
-    if (uGlideOn > 0.5) {
-      drift = texelFetch(uVelocity, texelFor(index), 0).xyz * clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
+    float glide;
+    presence = momentPresence(index, glide);
+    if (uGlideOn > 0.5 && glide != 0.0) {
+      drift = texelFetch(uVelocity, texelFor(index), 0).xyz * glide;
     }
   } else {
     ivec2 cell = texelFor(index - uStaticCount);
@@ -140,7 +160,7 @@ void readPoint(int index, out vec3 center, out float opacity) {
     point = mix(fromPoint, toPoint, uBlend);
   }
   center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize + drift;
-  opacity = point.w * UNIT16;
+  opacity = point.w * UNIT16 * presence;
 }
 
 uvec4 readBase(int index, out float covScale) {
@@ -163,12 +183,10 @@ uniform vec3 uChunkBoundsSize;
 uniform float uChunkCovScale;
 uniform highp sampler2D uChunkVelocity;
 uniform float uChunkGlideOn;
-uniform float uTime;
-uniform float uMomentTime;
-uniform float uHalfStep;
 
 void readPoint(int index, out vec3 center, out float opacity) {
   vec4 point;
+  float presence = 1.0;
   if (index < uStaticCount) {
     point = vec4(texelFetch(uStatic, texelFor(index), 0));
     center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize;
@@ -176,11 +194,13 @@ void readPoint(int index, out vec3 center, out float opacity) {
     ivec2 cell = texelFor(index - uStaticCount);
     point = vec4(texelFetch(uChunkPoints, cell, 0));
     center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize;
-    if (uChunkGlideOn > 0.5) {
-      center += texelFetch(uChunkVelocity, cell, 0).xyz * clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
+    float glide;
+    presence = momentPresence(index, glide);
+    if (uChunkGlideOn > 0.5 && glide != 0.0) {
+      center += texelFetch(uChunkVelocity, cell, 0).xyz * glide;
     }
   }
-  opacity = point.w * UNIT16;
+  opacity = point.w * UNIT16 * presence;
 }
 
 uvec4 readBase(int index, out float covScale) {
@@ -193,9 +213,9 @@ uvec4 readBase(int index, out float covScale) {
 }
 `;
 
-export const SPLAT_VERTEX = SPLAT_HEADER + PLAYBACK_READERS + SPLAT_MAIN;
+export const SPLAT_VERTEX = SPLAT_HEADER + MOMENT_BLEND + PLAYBACK_READERS + SPLAT_MAIN;
 
-export const STREAM_VERTEX = SPLAT_HEADER + STREAM_READERS + SPLAT_MAIN;
+export const STREAM_VERTEX = SPLAT_HEADER + MOMENT_BLEND + STREAM_READERS + SPLAT_MAIN;
 
 export const SPLAT_FRAGMENT = `
 precision highp float;
@@ -277,6 +297,33 @@ const SPLAT_MATERIAL = {
   blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
 };
 
+function momentUniforms(movingStart, split) {
+  return {
+    uTime: { value: 0 },
+    uMovingStart: { value: movingStart },
+    uSplit: { value: split },
+    uWeight: { value: 0 },
+    uMomentTimeA: { value: 0 },
+    uMomentTimeB: { value: 0 },
+    uGlideSpan: { value: 0 },
+  };
+}
+
+export function bindMoments(material, reply, timeA, timeB) {
+  const { uniforms } = material;
+  uniforms.uMovingStart.value = reply.movingStart;
+  uniforms.uSplit.value = reply.split;
+  uniforms.uMomentTimeA.value = timeA;
+  uniforms.uMomentTimeB.value = timeB;
+}
+
+export function blendMoments(material, { time, weight, glide }) {
+  const { uniforms } = material;
+  uniforms.uTime.value = time;
+  uniforms.uWeight.value = weight;
+  uniforms.uGlideSpan.value = glide;
+}
+
 function boundsMinOf(bounds) {
   const { min } = bounds;
   return new THREE.Vector3(min[0], min[1], min[2]);
@@ -304,9 +351,7 @@ export function createSplatMaterial(textures, meta) {
       uCovScale: { value: meta.covScale },
       uVelocity: { value: textures.velocityTexture ?? STILL_VELOCITY },
       uGlideOn: { value: textures.velocityTexture ? 1 : 0 },
-      uTime: { value: 0 },
-      uMomentTime: { value: 0 },
-      uHalfStep: { value: 0 },
+      ...momentUniforms(meta.staticCount, meta.count),
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
       uAperture: { value: 0 },
@@ -368,9 +413,7 @@ export function createStreamMaterial(staticPair, staticSet) {
       uChunkCovScale: { value: 1 },
       uChunkVelocity: { value: STILL_VELOCITY },
       uChunkGlideOn: { value: 0 },
-      uTime: { value: 0 },
-      uMomentTime: { value: 0 },
-      uHalfStep: { value: 0 },
+      ...momentUniforms(staticSet.count, staticSet.count),
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
       uAperture: { value: 0 },
