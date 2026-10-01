@@ -17,7 +17,7 @@ from splat4d_format import BASE_DTYPE, covariance_upper, pick_cov_scale, positio
 MOVIES_COMMIT = "77262fa"
 WINDOW_SETTINGS = (
     "video", "start", "end", "window_seconds", "window", "moments_per_second", "width", "hfov", "dtype",
-    "min_opacity", "subject_voxel", "depth_voxel", "static_eps", "velocity",
+    "min_opacity", "subject_voxel", "depth_voxel", "static_eps", "velocity", "still", "diff_threshold", "mask_grow", "mask_close",
 )
 
 
@@ -49,6 +49,10 @@ def parse_args():
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--window-static", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--still", action="store_true")
+    parser.add_argument("--diff-threshold", type=float, default=0.08)
+    parser.add_argument("--mask-grow", type=int, default=4)
+    parser.add_argument("--mask-close", type=int, default=12)
     parser.add_argument("--frames-chunk", type=int, default=4)
     parser.add_argument("--attention-chunk", type=int, default=1024)
     parser.add_argument("--time-chunk", type=int, default=25)
@@ -180,11 +184,22 @@ def main():
     frame_times = np.linspace(args.start, args.start + span, count)
     log(f"{windows} windows of {args.window_seconds:g}s, {count} input frames over {span:.1f}s")
 
+    if args.still:
+        from flipbook import subject_masks
+
+        args.spread = False
+        args.window_static = False
+        args.moments_per_second = step / args.window_seconds
+        masks, _ = subject_masks(images, args)
+        log(f"still camera: moving region covers {100 * masks.mean():.1f}% of the frame, {args.moments_per_second:g} moments per second")
+
     pose_cache = os.path.join(cache_dir, "poses.npz")
     poses_settings = repr(sorted((k, getattr(args, k)) for k in ("video", "start", "end", "window_seconds", "window", "width", "hfov", "dtype")))
     model = None
     cached = np.load(pose_cache) if os.path.exists(pose_cache) and not args.fresh else None
-    if cached is not None and str(cached["settings"]) == poses_settings:
+    if args.still:
+        C2W, depths = np.tile(np.eye(4, dtype=np.float32), (count, 1, 1)), None
+    elif cached is not None and str(cached["settings"]) == poses_settings:
         C2W, depths = cached["C2W"], cached["depths"]
         log("reusing the camera path")
     else:
@@ -209,7 +224,7 @@ def main():
         log(f"camera path: up to {swing:.1f} deg from the first frame")
         np.savez(pose_cache, settings=np.array(poses_settings), C2W=C2W, depths=depths)
 
-    if args.holdout:
+    if args.holdout and not args.still:
         from inputs import cover_resize, decode_frame
         from poses import locate
 
@@ -261,6 +276,7 @@ def main():
 
     input_u = (frame_times - args.start) / span
     camera_matrices = []
+    previous_last = None
 
     for k in range(windows):
         rows = slice(k * step, k * step + args.window)
@@ -273,33 +289,49 @@ def main():
             if model is None:
                 model, dtype = load_model(args)
             window_started = time.time()
-            moving = window_motion(model, dtype, args, images[rows], relative, fxfycxcy[rows])
-            threshold = args.static_eps * float(np.median(moving["depth"]))
-            usable = (moving["opacity"] > args.min_opacity) & (moving["xyz"][:, 2] > 0)
-            region = moving["motion"] >= threshold
-            still = np.flatnonzero(usable & ~region)
-            static_raw = {
-                "xyz": moving["xyz"][still],
-                "cov": covariance_upper(moving["scale"][still], moving["rotation"][still]).astype(np.float32),
-                "color": moving["color"][still], "opacity": moving["opacity"][still],
-            }
-            static_merged, _ = merge(voxel_keys(static_raw["xyz"], fx_px, args.static_voxel, args.depth_voxel),
-                                     static_raw["xyz"], static_raw["cov"].astype(np.float64), static_raw["color"], static_raw["opacity"])
-            frames, window_depth = window_frames(model, dtype, args, images[rows], relative, fxfycxcy[rows], region,
-                                                 selector(args, fx_px), per_window)
-            empty = {key: value[:0].astype(np.float32) for key, value in static_merged.items()}
+            if args.still:
+                frames, window_depth = window_frames(model, dtype, args, images[rows], relative, fxfycxcy[rows], masks[rows],
+                                                     selector(args, fx_px), per_window)
+                background = {key: np.concatenate([f["background"][key] for f in frames[:-1] or frames])
+                              for key in ("xyz", "cov", "color", "opacity")}
+            else:
+                moving = window_motion(model, dtype, args, images[rows], relative, fxfycxcy[rows])
+                threshold = args.static_eps * float(np.median(moving["depth"]))
+                usable = (moving["opacity"] > args.min_opacity) & (moving["xyz"][:, 2] > 0)
+                region = moving["motion"] >= threshold
+                rows_still = np.flatnonzero(usable & ~region)
+                background = {
+                    "xyz": moving["xyz"][rows_still],
+                    "cov": covariance_upper(moving["scale"][rows_still], moving["rotation"][rows_still]).astype(np.float32),
+                    "color": moving["color"][rows_still], "opacity": moving["opacity"][rows_still],
+                }
+                frames, window_depth = window_frames(model, dtype, args, images[rows], relative, fxfycxcy[rows], region,
+                                                     selector(args, fx_px), per_window)
+            merged_background, _ = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+                                         background["xyz"], background["cov"].astype(np.float64),
+                                         background["color"], background["opacity"])
+            empty = {key: value[:0].astype(np.float32) for key, value in merged_background.items()}
             for f in frames:
                 f["background"] = empty
-            frames[0]["background"] = {key: value.astype(np.float32) for key, value in static_merged.items()}
+            frames[0]["background"] = {key: value.astype(np.float32) for key, value in merged_background.items()}
             save_parts(cache_path, settings, frames, window_depth)
             log(f"window {k + 1}/{windows}: {time.time() - window_started:.0f}s")
         else:
             frames, window_depth = cached_parts
             log(f"window {k + 1}/{windows}: reused")
-        reference = depths[rows]
-        valid = (reference > 0) & (window_depth > 0)
-        ratio = float(np.median(reference[valid] / window_depth[valid]))
-        log(f"  model depth rescaled x{ratio:.3f} to the camera path")
+        if args.still:
+            if previous_last is None:
+                ratio = 1.0
+            else:
+                valid = (previous_last > 0) & (window_depth[0] > 0)
+                ratio = float(np.median(previous_last[valid] / window_depth[0][valid]))
+            previous_last = window_depth[-1] * ratio
+            log(f"  depth scale x{ratio:.3f} chained from the previous window")
+        else:
+            reference = depths[rows]
+            valid = (reference > 0) & (window_depth > 0)
+            ratio = float(np.median(reference[valid] / window_depth[valid]))
+            log(f"  model depth rescaled x{ratio:.3f} to the camera path")
 
         static_parts.append(to_world(rescaled(frames[0]["background"], ratio), origin))
         keep = per_window if k == windows - 1 else per_window - 1
