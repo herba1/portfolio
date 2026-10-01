@@ -74,3 +74,44 @@ def estimate_poses(images, depths, fxfycxcy, static_masks=None):
 def rotation_degrees(a, b):
     R = a[:3, :3].T @ b[:3, :3]
     return float(np.degrees(np.arccos(np.clip((np.trace(R) - 1) / 2, -1, 1))))
+
+
+def locate(targets, references, depths, C2W, fxfycxcy, nearest):
+    count, _, H, W = targets.shape
+    K = intrinsics(fxfycxcy[0], W, H)
+    sift = cv2.SIFT_create(nfeatures=4000)
+    matcher = cv2.BFMatcher(cv2.NORM_L2)
+    reference_features = [sift.detectAndCompute(gray(r), None) for r in references]
+    located = np.tile(np.eye(4), (count, 1, 1))
+    for i in range(count):
+        kp_i, des_i = sift.detectAndCompute(gray(targets[i]), None)
+        best = None
+        for j in nearest[i]:
+            kp_j, des_j = reference_features[j]
+            if des_j is None or des_i is None:
+                continue
+            pairs = [m for m, n in (p for p in matcher.knnMatch(des_j, des_i, k=2) if len(p) == 2) if m.distance < RATIO * n.distance]
+            if len(pairs) < MIN_INLIERS:
+                continue
+            source = np.float32([kp_j[m.queryIdx].pt for m in pairs])
+            target = np.float32([kp_i[m.trainIdx].pt for m in pairs])
+            camera_points, z = unproject(source, depths[j], K)
+            valid = z > 0
+            world = (C2W[j][:3, :3] @ camera_points[valid].T).T + C2W[j][:3, 3]
+            ok, rvec, tvec, inliers = cv2.solvePnPRansac(
+                world, target[valid].astype(np.float64), K, None,
+                iterationsCount=2000, reprojectionError=2.0, confidence=0.999, flags=cv2.SOLVEPNP_EPNP,
+            )
+            if not ok or inliers is None or len(inliers) < MIN_INLIERS:
+                continue
+            if best is None or len(inliers) > best[0]:
+                best = (len(inliers), rvec, tvec)
+        if best is None:
+            located[i] = C2W[nearest[i][0]]
+            continue
+        R, _ = cv2.Rodrigues(best[1])
+        W2C = np.eye(4)
+        W2C[:3, :3] = R
+        W2C[:3, 3] = best[2][:, 0]
+        located[i] = np.linalg.inv(W2C)
+    return located.astype(np.float32)

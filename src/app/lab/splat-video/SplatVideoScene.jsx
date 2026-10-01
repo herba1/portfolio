@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
-import { RENDER, SORT, advanceTime, frameCursor, lowPassFor, sortCapacity } from "./splatVideoParams";
+import { RENDER, SORT, advanceTime, frameCursor, hasLensPath, lensMatrix, lowPassFor, sortCapacity } from "./splatVideoParams";
 
 function sameRequest(a, b) {
   if (!a || !b) return false;
@@ -101,6 +101,7 @@ function SplatField({ clip, engineRef }) {
       pivot: new THREE.Vector3(0, 0, -clip.meta.camera.pivotDepth),
       modelView: new THREE.Matrix4(),
       viewport: new THREE.Vector2(),
+      lens: new THREE.Matrix4(),
     };
     return () => {
       group.remove(runtime.mesh);
@@ -123,7 +124,8 @@ function SplatField({ clip, engineRef }) {
     }
 
     const camera = state.camera;
-    aimCamera(camera, engine, meta, delta, scratch.pivot);
+    const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
+    aimCamera(camera, engine, meta, delta, scratch.pivot, base);
     group.updateMatrixWorld();
 
     scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);

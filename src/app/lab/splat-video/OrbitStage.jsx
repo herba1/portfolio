@@ -1,5 +1,6 @@
 "use client";
 
+import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
@@ -51,7 +52,12 @@ function stepOrbit(engine, delta, now) {
   };
 }
 
-export function aimCamera(camera, engine, meta, delta, pivot) {
+const followScratch = {
+  local: new THREE.Matrix4(),
+  scale: new THREE.Vector3(1, 1, 1),
+};
+
+export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
   if (camera.fov !== meta.camera.vfovDeg || camera.near !== RENDER.near || camera.far !== RENDER.far) {
     camera.fov = meta.camera.vfovDeg;
     camera.near = RENDER.near;
@@ -68,6 +74,12 @@ export function aimCamera(camera, engine, meta, delta, pivot) {
   );
   camera.up.set(0, 1, 0);
   camera.lookAt(pivot);
+  if (base) {
+    followScratch.local.compose(camera.position, camera.quaternion, followScratch.scale);
+    followScratch.local.premultiply(base);
+    followScratch.local.decompose(camera.position, camera.quaternion, followScratch.scale);
+    followScratch.scale.set(1, 1, 1);
+  }
   camera.updateMatrixWorld();
 }
 

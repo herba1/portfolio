@@ -15,7 +15,7 @@ from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "npz", "out_times", "spread", "estimate_poses", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -30,6 +30,8 @@ def parse_args():
     parser.add_argument("--out-times", type=int, default=25)
     parser.add_argument("--spread", action="store_true")
     parser.add_argument("--estimate-poses", action="store_true")
+    parser.add_argument("--holdout", action="store_true")
+    parser.add_argument("--view-merge", action="store_true")
     parser.add_argument("--splat-floor", type=float, default=0.5)
     parser.add_argument("--opacity-gain", type=float, default=1.0)
     parser.add_argument("--time-chunk", type=int, default=25)
@@ -58,6 +60,49 @@ def parse_args():
     parser.add_argument("--device", default="mps")
     parser.add_argument("--dtype", default="fp16", choices=["fp32", "fp16", "bf16"])
     return parser.parse_args()
+
+
+def camera_path(C2W, count):
+    from splat4d_format import matrices_to_quaternions
+
+    inputs = np.linspace(0, 1, len(C2W))
+    rotations = matrices_to_quaternions(C2W[:, :3, :3].astype(np.float64))
+    path = []
+    for u in np.linspace(0, 1, count):
+        j = min(len(C2W) - 2, int(np.searchsorted(inputs, u, side="right") - 1))
+        t = (u - inputs[j]) / (inputs[j + 1] - inputs[j])
+        a, b = rotations[j], rotations[j + 1]
+        if np.dot(a, b) < 0:
+            b = -b
+        q = (1 - t) * a + t * b
+        q /= np.linalg.norm(q)
+        w, x, y, z = q
+        R = np.array([
+            [1 - 2 * (y * y + z * z), 2 * (x * y - w * z), 2 * (x * z + w * y)],
+            [2 * (x * y + w * z), 1 - 2 * (x * x + z * z), 2 * (y * z - w * x)],
+            [2 * (x * z - w * y), 2 * (y * z + w * x), 1 - 2 * (x * x + y * y)],
+        ])
+        M = np.eye(4)
+        M[:3, :3] = R
+        M[:3, 3] = (1 - t) * C2W[j][:3, 3] + t * C2W[j + 1][:3, 3]
+        path.append([round(float(v), 6) for v in M.reshape(-1)])
+    return path
+
+
+def held_out_frames(args, source, images):
+    from inputs import cover_resize, decode_frame
+
+    count, _, H, W = images.shape
+    times = np.linspace(source["start"], source["end"], count)
+    held = (times[:-1] + times[1:]) / 2
+    frames = [np.asarray(cover_resize(decode_frame(args.video, t), (W, H))[0], dtype=np.float32) / 255.0 for t in held]
+    span = source["end"] - source["start"]
+    return {
+        "images": np.stack(frames).transpose(0, 3, 1, 2),
+        "u": (held - source["start"]) / span,
+        "C2W": None,
+        "input_u": (times - source["start"]) / span,
+    }
 
 
 def windows_for(count, size, overlap):
@@ -100,14 +145,20 @@ def part_of(state, rows, cov):
     return {"xyz": state["xyz"][rows], "cov": cov, "color": state["color"][rows], "opacity": state["opacity"][rows]}
 
 
-def selector(args, fx_px):
+def selector(args, fx_px, views=None):
+    def keys_for(i, xyz):
+        if views is None:
+            return voxel_keys(xyz, fx_px, args.subject_voxel, args.depth_voxel)
+        W2C = views[i]
+        return voxel_keys(xyz @ W2C[:3, :3].T + W2C[:3, 3], fx_px, args.subject_voxel, args.depth_voxel)
+
     def select(i, state, in_mask, own, motion):
         usable = (state["opacity"] > args.min_opacity) & (state["xyz"][:, 2] > 0)
         subject_rows = np.flatnonzero(usable & in_mask)
         background_rows = np.flatnonzero(usable & own & ~in_mask)
         subject_cov = covariance_upper(state["scale"][subject_rows], state["rotation"][subject_rows])
         subject, _ = merge(
-            voxel_keys(state["xyz"][subject_rows], fx_px, args.subject_voxel, args.depth_voxel),
+            keys_for(i, state["xyz"][subject_rows]),
             state["xyz"][subject_rows], subject_cov, state["color"][subject_rows], state["opacity"][subject_rows],
         ) if subject_rows.size else (part_of(state, subject_rows, subject_cov), 0)
         background_cov = covariance_upper(state["scale"][background_rows], state["rotation"][background_rows])
@@ -162,7 +213,28 @@ def load_parts(path, settings):
     return frames, data["depth"]
 
 
-def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
+def save_holdout(path, holdout, images, C2W, fxfycxcy, model=None, dtype=None, depths=None):
+    if holdout is None:
+        return
+    held_C2W = holdout.get("C2W")
+    if held_C2W is None:
+        from poses import locate
+
+        if depths is None:
+            from infer import window_depths
+
+            depths = window_depths(model, dtype, holdout["args"], images, C2W, fxfycxcy)
+        input_u = holdout["input_u"]
+        nearest = [list(np.argsort(np.abs(input_u - u))[:2]) for u in holdout["u"]]
+        held_C2W = locate(holdout["images"], images, depths, C2W, fxfycxcy, nearest)
+    np.savez(
+        path, images=holdout["images"], u=holdout["u"], C2W=held_C2W, fxfycxcy=fxfycxcy[0],
+        input_images=images, input_u=holdout["input_u"], input_C2W=C2W,
+    )
+    log(f"saved {len(holdout['u'])} held-out frames for evaluation")
+
+
+def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
     settings = repr(sorted((key, getattr(args, key)) for key in MODEL_SETTINGS))
     if not args.fresh:
         cached = load_parts(cache_path, settings)
@@ -174,6 +246,7 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
 
     model, dtype = load_model(args)
     started = time.time()
+    depths = None
     if args.estimate_poses:
         from infer import window_depths
         from poses import estimate_poses, rotation_degrees
@@ -184,7 +257,13 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
         travel = max(float(np.linalg.norm(c[:3, 3])) for c in C2W) / float(np.median(depths))
         log(f"estimated cameras: up to {swing:.1f} deg of turn and {100 * travel:.1f}% of the scene depth of travel")
     np.save(os.path.join(os.path.dirname(cache_path), "cameras.npy"), C2W)
-    select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]))
+    save_holdout(os.path.join(os.path.dirname(cache_path), "holdout.npz"), holdout, images, C2W, fxfycxcy, model, dtype, depths)
+    views = None
+    if args.view_merge:
+        input_u = np.linspace(0, 1, images.shape[0])
+        nearest = [int(np.abs(input_u - u).argmin()) for u in np.linspace(0, 1, args.out_times)]
+        views = [np.linalg.inv(C2W[j]) for j in nearest]
+    select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]), views)
     frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, None, select, args.out_times)
     log(f"{len(frames)} moments from {images.shape[0]} input frames in {time.time() - started:.0f}s")
     del model
@@ -247,16 +326,27 @@ def main():
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
     if args.npz or args.spread:
+        holdout = None
         if args.npz:
             args.in_frames = None
             images, C2W, fxfycxcy, clip_duration, source = load_npz(args)
+            if args.holdout:
+                total = images.shape[0]
+                every = np.arange(total)
+                held, kept = every[1::2], every[0::2]
+                holdout = {"images": images[held], "u": held / (total - 1), "C2W": C2W[held], "input_u": kept / (total - 1)}
+                images, C2W, fxfycxcy = images[kept], C2W[kept], fxfycxcy[kept]
         else:
             args.in_frames = args.window
             sample_fps, args.fps = args.fps, None
             images, C2W, fxfycxcy, clip_duration, source = load_video(args)
             args.fps = sample_fps
+            if args.holdout:
+                holdout = held_out_frames(args, source, images)
+        if holdout is not None:
+            holdout["args"] = args
         _, _, H, W = images.shape
-        frames, depth = run_posed_clip(args, images, C2W, fxfycxcy, cache_path)
+        frames, depth = run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout)
         count = len(frames)
         args.fps = count / clip_duration
     else:
@@ -286,6 +376,8 @@ def main():
     static = finish(static, fx_px, args)
     per_frame = [finish(f["subject"], fx_px, args) for f in frames]
     frame_counts = [p["xyz"].shape[0] for p in per_frame]
+    if sum(frame_counts) + static["xyz"].shape[0] == 0 or not np.isfinite(np.concatenate([p["xyz"] for p in per_frame] + [static["xyz"]])).all():
+        raise SystemExit("the model returned no usable splats (likely out of GPU memory); try a smaller --width, --frames-chunk 2 or --attention-chunk 512, then rerun with --fresh")
     log(f"subject: {sum(frame_counts):,} splats over {count} frames (median {int(np.median(frame_counts)):,} per frame)")
 
     subject_depth = np.concatenate([p["xyz"][:, 2] for p in per_frame]) if sum(frame_counts) else static["xyz"][:, 2]
@@ -305,6 +397,11 @@ def main():
         },
         "source": {**source, "width": W, "height": H, "movies": MOVIES_COMMIT, "window": args.window},
     }
+    cameras_path = os.path.join(os.path.dirname(cache_path), "cameras.npy")
+    if (args.npz or args.spread) and os.path.exists(cameras_path):
+        cameras = np.load(cameras_path)
+        if np.abs(cameras - np.eye(4)[None]).max() > 1e-6:
+            meta["cameras"] = camera_path(cameras, count)
     sizes = write_flipbook(args.out, meta, static, per_frame)
     write_index(os.path.dirname(args.out), name)
     nearest = np.round(np.linspace(0, images.shape[0] - 1, count)).astype(int)

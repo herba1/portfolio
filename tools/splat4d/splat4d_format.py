@@ -150,8 +150,8 @@ def write_flipbook(out_dir, meta, static, frames):
     }
     ordered = {key: meta[key] for key in (
         "format", "version", "kind", "exportId", "count", "staticCount", "frames", "fps", "duration",
-        "bounds", "covScale", "coords", "camera", "source", "frameOffsets",
-    )}
+        "bounds", "covScale", "coords", "camera", "source", "frameOffsets", "cameras",
+    ) if key in meta}
     with open(os.path.join(out_dir, "meta.json"), "w") as handle:
         json.dump(ordered, handle, indent=2)
     return sizes

@@ -1,3 +1,5 @@
+import * as THREE from "three";
+
 export const EXPORTS_ROOT = "/splats/4d";
 export const FALLBACK_CLIP = "fake";
 export const CLIP_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
@@ -191,3 +193,38 @@ export function frameDuration(meta) {
   if (steppedByFps(meta)) return 1 / meta.fps;
   return meta.frames > 1 ? meta.duration / (meta.frames - 1) : meta.duration;
 }
+
+const OPENCV_TO_THREE = new THREE.Matrix4().makeScale(1, -1, -1);
+const lensScratch = {
+  a: new THREE.Matrix4(),
+  b: new THREE.Matrix4(),
+  positionA: new THREE.Vector3(),
+  positionB: new THREE.Vector3(),
+  rotationA: new THREE.Quaternion(),
+  rotationB: new THREE.Quaternion(),
+  scale: new THREE.Vector3(),
+  unit: new THREE.Vector3(1, 1, 1),
+};
+
+function lensAt(meta, index, target) {
+  target.fromArray(meta.cameras[index]).transpose();
+  return target.premultiply(OPENCV_TO_THREE).multiply(OPENCV_TO_THREE);
+}
+
+export function hasLensPath(meta) {
+  return Array.isArray(meta.cameras) && meta.cameras.length > 1 && meta.cameras.every((m) => Array.isArray(m) && m.length === 16);
+}
+
+export function lensMatrix(meta, time, target) {
+  const last = meta.cameras.length - 1;
+  const position = clamp(time / meta.duration, 0, 1) * last;
+  const index = Math.min(last - 1, Math.floor(position));
+  const blend = position - index;
+  const s = lensScratch;
+  lensAt(meta, index, s.a).decompose(s.positionA, s.rotationA, s.scale);
+  lensAt(meta, index + 1, s.b).decompose(s.positionB, s.rotationB, s.scale);
+  s.positionA.lerp(s.positionB, blend);
+  s.rotationA.slerp(s.rotationB, blend);
+  return target.compose(s.positionA, s.rotationA, s.unit);
+}
+

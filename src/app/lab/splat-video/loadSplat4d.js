@@ -1,5 +1,7 @@
 import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
 
+const EVALUATION_PREFIX = "eval-";
+
 const ASSET_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/i;
 
 export class Splat4dError extends Error {
@@ -39,7 +41,7 @@ export async function resolveClip(requested, signal) {
   }
   try {
     const names = await readIndexNames(signal);
-    return names.find((name) => name !== FALLBACK_CLIP) ?? FALLBACK_CLIP;
+    return names.find((name) => name !== FALLBACK_CLIP && !name.startsWith(EVALUATION_PREFIX)) ?? FALLBACK_CLIP;
   } catch (error) {
     if (error?.name === "AbortError") throw error;
     return FALLBACK_CLIP;
@@ -60,7 +62,7 @@ async function readKind(name, signal) {
 export async function listClips(signal) {
   let names;
   try {
-    names = [...new Set(await readIndexNames(signal))];
+    names = [...new Set(await readIndexNames(signal))].filter((name) => !name.startsWith(EVALUATION_PREFIX));
   } catch (error) {
     if (error?.name === "AbortError") throw error;
     return [];
