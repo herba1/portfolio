@@ -122,6 +122,39 @@ Check the clip first: `tools/splat4d/preflight.sh clip.mov`. Aim for green on pa
 - **Audio:** clap once at the start and once at the end. The claps sync audio and video, and later can sync several phones.
 - **The biggest jump after this:** 3–4 phones on tripods 30–40° apart, all filming the same take, synced by the clap. That is a mini version of 4DV.ai's capture rig, and MoVieS already accepts several cameras per moment.
 
+### Round 3 (2026-10-01): research workflow, held-out evaluation, 30 s with audio
+
+A research workflow surveyed the field (four sweeps plus synthesis and two critiques; the plan is in the session log). It found that "the 4D Chinese one" is 4DV.ai (ZJU, FreeTimeGS), captured with 20–70 synced cameras; its player craft is copyable, its multi-view data is not. Nothing on a 16 GB Mac replaces MoVieS, which was trained on 2–13 frames at 518 px.
+
+`evaluate.py` scores exports on frames the model never saw. Held-out DAVIS frames (`flipbook --npz --holdout`: 7 inputs, 6 held out) or between-input video frames with PnP-located cameras give PSNR/SSIM/LPIPS, flicker, holes and sharpness at 10/20° swings, and MB/s. The lucia test clip is 13 stills, so its held-out rows are not valid.
+
+| Change | Result (stroller held-out unless noted) |
+|---|---|
+| World-static split (`--split-static`, default) | 35.3 → 3.6 MB/s, LPIPS 0.238 → 0.193 |
+| Coverage-normalized compositing in the player | the light page no longer hazes partial coverage (about 4 dB of what Herb sees) |
+| Needle clamp (`--ray-clamp 2`, default) | sharpness at a 20° swing 0.94 → 1.19, on-path unchanged |
+| Velocity (`--velocity`) | 7 moments glide 20.56 dB vs snap 19.49 vs 13 moments 20.92 |
+| 616 px input (narrator) | no gain (LPIPS 0.148 vs 0.149), +43% size: rejected |
+| Subject voxel 1.5 / 2.5 | detail vs size trade; 2 stays |
+| Follow the captured camera path | the captured motion becomes the default view |
+| Depth of field off the path | swings soften the parts the footage never saw |
+| Explicit moment times | fixes a cursor running up to one moment ahead |
+
+`longclip.py` (splat4d v3 stream) builds 30 s with audio:
+- 3 s posed windows on one camera path, each rescaled to the path.
+- One shared background for the whole clip.
+- 2 s chunks of moving splats with velocity.
+- `audio.m4a` as the player's master clock, muted autoplay with a Sound button, and a Buffering state.
+
+drummer-30s (public domain, handheld at night): 241 moments, 166 MB (5.5 MB/s), 9 min on the M5. The rebuilt favourites are much smaller: `lucia-v3` is 8 MB (lucia-v2 was 133 MB) and `stroller-v3` is 10.5 MB.
+
+`preflight.py` checks a clip for HDR, lens metadata, audio, exposure drift and real parallax before any GPU time.
+
+Waiting on Herb's OK to download:
+1. DAVIS 480p (833 MB), for real continuous held-out frames.
+2. metalsplat, for per-scene optimisation on the Mac GPU, estimated +1.5–3 dB.
+3. Video-Depth-Anything-Small, for a 30 s depth-video fallback.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
