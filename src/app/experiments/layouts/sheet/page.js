@@ -1,27 +1,18 @@
-import Link from "next/link";
 import Piece from "../Piece";
 import { pieceData } from "../pieceData";
-import { PIECES, shortDate } from "../pieces";
+import { PIECES } from "../pieces";
 
-// B — Contact sheet. A strict grid that fills exactly one screen: every piece
-// at the same size, running, with a caption rule under it like a proof sheet.
+// Sheet. A strict grid that fills exactly one screen: every piece at the
+// same size, running, nothing but the pieces.
 export default async function SheetLayout() {
   const data = await pieceData();
   return (
     <main className="xl-sheet">
-      <header className="xl-sheet__head">
-        <h1 className="text-ink text-title-sm">Experiments</h1>
-        <span className="text-ink-secondary text-ui-lg tabular-nums">{PIECES.length} pieces, all running</span>
-      </header>
+      <h1 className="sr-only">Experiments</h1>
       <ul className="xl-sheet__grid">
         {PIECES.map((piece) => (
-          <li key={piece.slug} className="xl-sheet__cell">
+          <li key={piece.slug} className="xl-sheet__cell" aria-label={piece.title}>
             <Piece slug={piece.slug} data={data} />
-            <Link href={piece.slug} className="xl-caption">
-              <span className="text-ink-secondary text-ui-lg tabular-nums">{piece.index}</span>
-              <span className="text-ink text-heading-sm">{piece.title}</span>
-              <span className="text-ink-secondary text-ui-lg ml-auto tabular-nums">{shortDate(piece.date)}</span>
-            </Link>
           </li>
         ))}
       </ul>

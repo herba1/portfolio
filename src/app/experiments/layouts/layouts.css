@@ -9,17 +9,6 @@
   background: var(--color-surface);
 }
 
-.xl-caption {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  min-width: 0;
-  padding-top: 8px;
-}
-.xl-caption:hover .text-ink {
-  color: var(--color-accent);
-}
-
 /* Layout switcher — one pill, bottom centre, above every option. */
 .xl-switcher {
   position: fixed;
@@ -35,16 +24,10 @@
   box-shadow: 0 0 0 1px var(--color-line);
 }
 .xl-switcher__item {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
   padding: 4px 12px;
   border-radius: 999px;
   color: var(--color-ink);
   transition: background-color var(--duration-150, 150ms) var(--ease-out-quart);
-}
-.xl-switcher__item span {
-  color: var(--color-ink-secondary);
 }
 .xl-switcher__item:hover {
   background: var(--color-surface-sunken);
@@ -53,11 +36,8 @@
   background: var(--color-surface-inverse);
   color: var(--color-ink-inverse);
 }
-.xl-switcher__item[data-on="true"] span {
-  color: var(--color-ink-inverse);
-}
 
-/* ── B · Sheet ─────────────────────────────── */
+/* ── Sheet ─────────────────────────────── */
 
 .xl-sheet {
   display: flex;
@@ -65,23 +45,13 @@
   height: 100dvh;
   padding: 80px 24px 72px;
 }
-.xl-sheet__head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 16px;
-}
-.xl-sheet__head h1 {
-  text-wrap: balance;
-}
 .xl-sheet__grid {
   flex: 1;
   min-height: 0;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   grid-auto-rows: minmax(0, 1fr);
-  gap: 24px 16px;
+  gap: 16px;
 }
 .xl-sheet__cell {
   display: flex;
@@ -108,7 +78,7 @@
   }
 }
 
-/* ── A · Bento ─────────────────────────────── */
+/* ── Bento ─────────────────────────────── */
 
 .xl-bento {
   height: 100dvh;
@@ -139,10 +109,6 @@
   height: auto;
   min-height: 0;
 }
-.xl-caption--top {
-  padding: 0 0 8px;
-}
-
 @media (max-width: 899px) {
   .xl-bento {
     height: auto;

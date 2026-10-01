@@ -12,14 +12,13 @@ export default function Switcher() {
   const pathname = usePathname();
   return (
     <nav className="xl-switcher text-ui-lg" aria-label="Layout options">
-      {OPTIONS.map((option, i) => (
+      {OPTIONS.map((option) => (
         <Link
           key={option.href}
           href={option.href}
           className="xl-switcher__item"
           data-on={pathname === option.href}
         >
-          <span className="tabular-nums">{String.fromCharCode(65 + i)}</span>
           {option.label}
         </Link>
       ))}
