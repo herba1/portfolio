@@ -381,9 +381,11 @@ export class GradientScene {
 
   measure() {
     if (!this.gl || this.gl.isContextLost()) return;
-    const rect = this.canvas.getBoundingClientRect();
-    const width = Math.max(1, Math.round(rect.width));
-    const height = Math.max(1, Math.round(rect.height));
+    // Layout size, not getBoundingClientRect: a transformed ancestor (a tile
+    // tilting in on the experiments index) would otherwise size the buffer
+    // to the projected box, and nothing re-measures once it settles.
+    const width = Math.max(1, this.canvas.clientWidth);
+    const height = Math.max(1, this.canvas.clientHeight);
     if (width === this.cssWidth && height === this.cssHeight) return;
     this.cssWidth = width;
     this.cssHeight = height;

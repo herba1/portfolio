@@ -1,4 +1,4 @@
-import PieceBox from "../PieceBox";
+import Deferred from "./Deferred";
 import InkExperience from "@/app/ink/InkExperience";
 import RefractExperience from "@/app/refract/RefractExperience";
 import HalftoneExperience from "@/app/halftone/HalftoneExperience";
@@ -22,12 +22,15 @@ const COMPONENTS = {
 };
 
 // `data` carries anything a piece needs fetched on the server (Deck's tracks).
-export default function Piece({ slug, data, className = "" }) {
+// `wave` is the tile's step in the entrance; the piece mounts on that beat.
+const MOUNT_STEP = 90; // ms per wave step
+
+export default function Piece({ slug, data, wave = 0, className = "" }) {
   const Component = COMPONENTS[slug];
   if (!Component) return null;
   return (
-    <PieceBox className={`xl-piece ${className}`.trim()}>
+    <Deferred className={`xl-piece ${className}`.trim()} delay={wave * MOUNT_STEP}>
       <Component embedded {...(data?.[slug] ?? {})} />
-    </PieceBox>
+    </Deferred>
   );
 }
