@@ -1,4 +1,6 @@
-import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, TEXTURE_WIDTH } from "./splatVideoParams";
+import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+
+const ASSET_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,127}$/i;
 
 export class Splat4dError extends Error {
   constructor(message, { clip = null, missing = false } = {}) {
@@ -22,22 +24,49 @@ function indexEntries(index) {
   return [];
 }
 
+async function readIndexNames(signal) {
+  const response = await fetch(`${EXPORTS_ROOT}/index.json`, { cache: "no-store", signal });
+  if (!response.ok) return [];
+  return indexEntries(await response.json())
+    .map(entryName)
+    .filter((name) => name && CLIP_NAME_RE.test(name));
+}
+
 export async function resolveClip(requested, signal) {
   if (requested) {
     if (!CLIP_NAME_RE.test(requested)) throw new Splat4dError(`“${requested}” is not a valid clip name.`, { clip: requested });
     return requested;
   }
   try {
-    const response = await fetch(`${EXPORTS_ROOT}/index.json`, { cache: "no-store", signal });
-    if (!response.ok) return FALLBACK_CLIP;
-    const names = indexEntries(await response.json())
-      .map(entryName)
-      .filter((name) => name && CLIP_NAME_RE.test(name));
+    const names = await readIndexNames(signal);
     return names.find((name) => name !== FALLBACK_CLIP) ?? FALLBACK_CLIP;
   } catch (error) {
     if (error?.name === "AbortError") throw error;
     return FALLBACK_CLIP;
   }
+}
+
+async function readKind(name, signal) {
+  try {
+    const response = await fetch(`${EXPORTS_ROOT}/${name}/meta.json`, { cache: "no-store", signal });
+    if (!response.ok) return null;
+    return clipKind(await response.json());
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return null;
+  }
+}
+
+export async function listClips(signal) {
+  let names;
+  try {
+    names = [...new Set(await readIndexNames(signal))];
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+  const kinds = await Promise.all(names.map((name) => readKind(name, signal)));
+  return names.map((name, i) => ({ name, kind: kinds[i] }));
 }
 
 function isCount(value) {
@@ -48,11 +77,52 @@ function isVector(value) {
   return Array.isArray(value) && value.length === 3 && value.every(Number.isFinite);
 }
 
+function isPositiveInteger(value) {
+  return Number.isInteger(value) && value > 0;
+}
+
+function optionalAsset(value, fail, what) {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string" || !ASSET_NAME_RE.test(value)) fail(`has an invalid ${what} file name.`);
+  return value;
+}
+
+function validateRgbd(meta, fail) {
+  if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
+  if (!(meta.fps > 0)) fail("has no fps.");
+  if (!(meta.duration > 0)) fail("has no duration.");
+  if (!(meta.camera?.vfovDeg > 0 && meta.camera.vfovDeg < 170)) fail("has no camera.vfovDeg.");
+  const near = meta.disparity?.max;
+  const far = meta.disparity?.min;
+  if (!Number.isFinite(near) || !Number.isFinite(far) || far < 0 || near <= far) fail("has an invalid disparity range.");
+  const video = optionalAsset(meta.video, fail, "video");
+  if (!video) fail("names no video.");
+  const plate = optionalAsset(meta.plate, fail, "plate");
+  const source = meta.source ?? {};
+  if (!isPositiveInteger(source.width) || !isPositiveInteger(source.height)) fail("has no source size.");
+  const colorAspect = isPositiveInteger(source.colorWidth) && isPositiveInteger(source.colorHeight)
+    ? source.colorWidth / source.colorHeight
+    : source.width / source.height;
+  return {
+    ...meta,
+    count: isCount(meta.count) ? meta.count : 0,
+    video,
+    plate,
+    disparity: { min: far, max: near },
+    camera: {
+      vfovDeg: meta.camera.vfovDeg,
+      aspect: meta.camera.aspect > 0 ? meta.camera.aspect : colorAspect,
+      pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : 2 / (far + near),
+    },
+  };
+}
+
 function validateMeta(meta, clip) {
   const fail = (why) => {
     throw new Splat4dError(`meta.json for “${clip}” ${why}`, { clip });
   };
   if (!meta || meta.format !== "splat4d") fail("is not a splat4d export.");
+  if (meta.version === 2 && meta.kind === "rgbd") return validateRgbd(meta, fail);
   if (meta.version === 2) {
     if (meta.kind !== "flipbook") fail(`has an unknown kind “${meta.kind}”.`);
     if (!isCount(meta.count) || !isCount(meta.staticCount)) fail("has invalid counts.");
@@ -158,6 +228,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     throw new Splat4dError(`meta.json for “${clip}” is not valid JSON.`, { clip, missing: true });
   }
   const meta = validateMeta(raw, clip);
+  if (meta.kind === "rgbd") return loadRgbd(clip, folder, meta, { signal, onProgress });
   if (meta.kind === "flipbook") return loadFlipbook(clip, folder, meta, { signal, onProgress });
 
   const baseRows = rowsFor(meta.count);
@@ -267,5 +338,53 @@ async function loadFlipbook(clip, folder, meta, { signal, onProgress }) {
     staticPoints: points,
     dynamicPoints: new Uint16Array(4),
     layout: { width: TEXTURE_WIDTH, baseRows: rows, staticRows: rows, dynamicRows: 1, layerTexels: 1 },
+  };
+}
+
+async function streamBlob({ url, name, clip, type, signal, onProgress }) {
+  const response = await fetch(url, { signal });
+  if (!response.ok) {
+    throw new Splat4dError(`${name} for “${clip}” answered ${response.status}.`, { clip, missing: response.status === 404 });
+  }
+  const declared = Number(response.headers.get("content-length")) || 0;
+  if (!response.body) {
+    const whole = await response.blob();
+    if (onProgress) onProgress(whole.size, whole.size);
+    return new Blob([whole], { type });
+  }
+  const reader = response.body.getReader();
+  const chunks = [];
+  let received = 0;
+  if (onProgress) onProgress(0, declared);
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+    received += value.length;
+    if (onProgress) onProgress(received, Math.max(declared, received));
+  }
+  if (declared && received !== declared) {
+    throw new Splat4dError(`${name} for “${clip}” ended at ${received} of ${declared} bytes.`, { clip });
+  }
+  if (received === 0) throw new Splat4dError(`${name} for “${clip}” is empty.`, { clip });
+  return new Blob(chunks, { type });
+}
+
+async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
+  const version = `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
+  const video = await streamBlob({
+    url: `${folder}/${meta.video}${version}`,
+    name: meta.video,
+    clip,
+    type: "video/mp4",
+    signal,
+    onProgress,
+  });
+  return {
+    clip,
+    meta,
+    bytes: video.size,
+    video,
+    plateUrl: meta.plate ? `${folder}/${meta.plate}${version}` : null,
   };
 }

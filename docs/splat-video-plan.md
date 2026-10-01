@@ -50,6 +50,24 @@ Every video frame (15 fps by default) gets its own complete splat set, and the p
 
 On a 3 s, 720p tripod test clip (Xiph's KristenAndSara, local only) at 15 fps: 46 frames, about 4.5 min, 22–23 dB against the video, 2.7M splats and 65 MB. Two people fill half the frame there, so a single person should come out smaller. The format is splat4d v2 (`kind: "flipbook"`): `base.bin` and `points.bin` cover the background followed by every frame's subject, and `frameOffsets` says where each frame starts. Camera limits are now yaw ±12°, pitch ±6° and dolly 0.92–1.08.
 
+### Depth video mode
+
+```bash
+tools/splat4d/depthvideo.sh --video ~/Movies/clip.mov --start 0 --end 4 --out public/splats/4d/<name>
+```
+
+This mode doesn't use splats. It makes one H.264 file with the color frame (2× the model width) on top and 8-bit disparity below, plus a still background plate (median color, 80th-percentile depth). The player displaces two grid meshes and tears them at depth jumps (`RGBD.tearRelative` 0.08), and the plate fills in behind. MoVieS only provides depth here, with one output time per window, so a window takes about 6 s. 3 s at 30 fps comes out around 1–2 MB.
+
+### Side by side (3 s clips, still camera)
+
+| Clip | Interpolated | Flipbook | Depth video |
+|---|---|---|---|
+| Johnny (one person talking, 720p) | 61 MB | 43 MB, 24–25 dB | 2.1 MB |
+| Dancers (two dancers, black stage, 4K) | 61 MB | 27 MB, 30–32 dB | 1.3 MB |
+| KristenAndSara (two people talking) | – | 63 MB, 22–23 dB | – |
+
+A sharper flipbook (subject voxel 1.0) on Johnny gained about 1 dB for twice the size (88 MB), so it was dropped. The page has a pill row for switching clips in place.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.

@@ -39,6 +39,21 @@ export const RENDER = {
   lowPass: 0.3,
 };
 
+export const RGBD = {
+  tearRelative: 0.08,
+  plateTearRelative: 0,
+  tearMinLevels: 4,
+  platePushLevels: 2,
+  seekNudgeFrames: 0.25,
+  syncToleranceFrames: 0.5,
+};
+
+export const KIND_LABELS = {
+  rgbd: "Depth video",
+  flipbook: "Flipbook",
+  interpolated: "Interpolated",
+};
+
 export const SORT = {
   depthEpsilon: 1e-5,
   blendEpsilon: 1e-3,
@@ -114,6 +129,20 @@ export function isFlipbook(meta) {
   return meta.kind === "flipbook";
 }
 
+export function isRgbd(meta) {
+  return meta.kind === "rgbd";
+}
+
+export function steppedByFps(meta) {
+  return isFlipbook(meta) || isRgbd(meta);
+}
+
+export function clipKind(meta) {
+  if (meta?.version === 2 && (meta.kind === "rgbd" || meta.kind === "flipbook")) return meta.kind;
+  if (meta?.version === 1) return "interpolated";
+  return null;
+}
+
 export function sortCapacity(meta) {
   if (!isFlipbook(meta)) return meta.count;
   let largest = 0;
@@ -124,7 +153,7 @@ export function sortCapacity(meta) {
 }
 
 export function frameCursor(time, meta) {
-  if (isFlipbook(meta)) {
+  if (steppedByFps(meta)) {
     const frame = clamp(Math.floor(time * meta.fps + 1e-4), 0, meta.frames - 1);
     return { frame0: frame, frame1: frame, blend: 0 };
   }
@@ -159,6 +188,6 @@ export function lowPassFor(meta, viewportHeight) {
 }
 
 export function frameDuration(meta) {
-  if (isFlipbook(meta)) return 1 / meta.fps;
+  if (steppedByFps(meta)) return 1 / meta.fps;
   return meta.frames > 1 ? meta.duration / (meta.frames - 1) : meta.duration;
 }

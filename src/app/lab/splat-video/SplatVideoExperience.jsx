@@ -5,8 +5,9 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "
 
 import ClientOnly from "@/app/ui/ClientOnly";
 
+import SplatVideoClips from "./SplatVideoClips";
 import SplatVideoControls from "./SplatVideoControls";
-import { Splat4dError, loadSplat4d, resolveClip } from "./loadSplat4d";
+import { Splat4dError, listClips, loadSplat4d, resolveClip } from "./loadSplat4d";
 import "./splat-video.css";
 import {
   DEFAULT_SPEED,
@@ -15,6 +16,7 @@ import {
   exportCommand,
   formatBytes,
   formatCount,
+  isRgbd,
   resetOrbit,
 } from "./splatVideoParams";
 
@@ -46,6 +48,19 @@ function isTextEntry(target) {
 function loadingLine(load) {
   if (!load.total) return "Reading meta.json";
   return `${formatBytes(load.received)} of ${formatBytes(load.total)}`;
+}
+
+function loadScene(meta) {
+  return isRgbd(meta) ? () => import("./RgbdScene") : () => import("./SplatVideoScene");
+}
+
+function summaryFor(load) {
+  if (load.status === "error") return "Nothing to play yet";
+  if (load.status !== "ready") return "Moving Gaussian splats you can nudge while they play";
+  const { meta, bytes } = load.data;
+  const size = formatBytes(bytes);
+  if (isRgbd(meta)) return `${load.clip} · depth video · ${meta.frames} frames · ${size}`;
+  return `${load.clip} · ${formatCount(meta.count)} splats · ${meta.frames} frames · ${size}`;
 }
 
 function StageLoading({ load }) {
@@ -108,6 +123,8 @@ export default function SplatVideoExperience() {
   const [scrubbing, setScrubbing] = useState(false);
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [expanded, setExpanded] = useState(false);
+  const [requested, setRequested] = useState(null);
+  const [clips, setClips] = useState([]);
   const engineRef = useRef(createEngine());
 
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, readOnServer);
@@ -122,7 +139,8 @@ export default function SplatVideoExperience() {
       lastShown = received;
       setLoad((previous) => ({ ...previous, received, total }));
     };
-    resolveClip(new URLSearchParams(window.location.search).get("clip"), signal)
+    const wanted = requested ? requested.clip : new URLSearchParams(window.location.search).get("clip");
+    resolveClip(wanted, signal)
       .then((clip) => {
         setLoad({ status: "loading", clip, received: 0, total: 0 });
         return loadSplat4d(clip, { signal, onProgress });
@@ -146,6 +164,14 @@ export default function SplatVideoExperience() {
           message: known ? error.message : "The clip could not be read.",
         });
       });
+    return () => controller.abort();
+  }, [requested]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listClips(controller.signal)
+      .then(setClips)
+      .catch(() => {});
     return () => controller.abort();
   }, []);
 
@@ -193,14 +219,24 @@ export default function SplatVideoExperience() {
     setScrubbing(false);
   }, []);
   const handleToggleExpanded = useCallback(() => setExpanded((value) => !value), []);
+  const handleSelectClip = useCallback(
+    (name) => {
+      if (name === load.clip && load.status !== "error") return;
+      const url = new URL(window.location.href);
+      url.searchParams.set("clip", name);
+      window.history.replaceState(window.history.state, "", url);
+      engineRef.current.scrubbing = false;
+      setScrubbing(false);
+      setPlaying(false);
+      setLoad({ status: "loading", clip: name, received: 0, total: 0 });
+      setRequested({ clip: name });
+    },
+    [load.clip, load.status],
+  );
 
   const meta = ready ? load.data.meta : null;
   const aspect = meta ? meta.camera.aspect : 16 / 9;
-  const summary = ready
-    ? `${load.clip} · ${formatCount(meta.count)} splats · ${meta.frames} frames · ${formatBytes(load.data.bytes)}`
-    : load.status === "error"
-      ? "Nothing to play yet"
-      : "Moving Gaussian splats you can nudge while they play";
+  const summary = summaryFor(load);
 
   return (
     <main
@@ -211,6 +247,7 @@ export default function SplatVideoExperience() {
       <header className="splat-video__head">
         <h1 className="splat-video__title text-title-sm">Splat video</h1>
         <p className="text-ui tabular-nums">{summary}</p>
+        <SplatVideoClips clips={clips} current={load.clip} onSelect={handleSelectClip} />
       </header>
 
       <section
@@ -219,7 +256,8 @@ export default function SplatVideoExperience() {
       >
         {ready ? (
           <ClientOnly
-            load={() => import("./SplatVideoScene")}
+            key={load.clip}
+            load={loadScene(meta)}
             clip={load.data}
             engineRef={engineRef}
             isMobile={isMobile}
