@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, LoaderCircle } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
@@ -12,11 +12,14 @@ import "./splat-video.css";
 import {
   DEFAULT_SPEED,
   RENDER,
+  STREAM,
   createEngine,
   exportCommand,
   formatBytes,
   formatCount,
+  formatDuration,
   isRgbd,
+  isStream,
   resetOrbit,
 } from "./splatVideoParams";
 
@@ -60,6 +63,7 @@ function summaryFor(load) {
   const { meta, bytes } = load.data;
   const size = formatBytes(bytes);
   if (isRgbd(meta)) return `${load.clip} · depth video · ${meta.frames} frames · ${size}`;
+  if (isStream(meta)) return `${load.clip} · ${formatDuration(meta.duration)} · ${meta.frames} moments · streaming`;
   return `${load.clip} · ${formatCount(meta.count)} splats · ${meta.frames} frames · ${size}`;
 }
 
@@ -73,6 +77,42 @@ function StageLoading({ load }) {
       </div>
       <p className="text-ui tabular-nums">{loadingLine(load)}</p>
     </div>
+  );
+}
+
+function StageBuffering({ engineRef }) {
+  const pillRef = useRef(null);
+  const liveRef = useRef(null);
+
+  useEffect(() => {
+    let frame = 0;
+    let since = -1;
+    let shown = false;
+    const tick = (now) => {
+      const engine = engineRef.current;
+      const stalled = engine.buffering || engine.soundWaiting;
+      if (!stalled) since = -1;
+      else if (since < 0) since = now;
+      const show = stalled && now - since >= STREAM.bufferingShowMs;
+      if (show !== shown) {
+        shown = show;
+        if (pillRef.current) pillRef.current.dataset.visible = String(show);
+        if (liveRef.current) liveRef.current.textContent = show ? "Buffering" : "";
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(frame);
+  }, [engineRef]);
+
+  return (
+    <>
+      <div ref={pillRef} className="splat-video__buffering" data-visible="false" aria-hidden="true">
+        <LoaderCircle size={16} strokeWidth={1.75} />
+        <span className="text-ui">Buffering</span>
+      </div>
+      <p ref={liveRef} className="splat-video-sr" role="status" aria-live="polite" />
+    </>
   );
 }
 
@@ -120,6 +160,7 @@ function StageError({ load }) {
 export default function SplatVideoExperience() {
   const [load, setLoad] = useState({ status: "loading", clip: null, received: 0, total: 0 });
   const [playing, setPlaying] = useState(false);
+  const [muted, setMuted] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [expanded, setExpanded] = useState(false);
@@ -150,7 +191,9 @@ export default function SplatVideoExperience() {
         const engine = engineRef.current;
         engine.time = 0;
         engine.direction = 1;
+        engine.muted = true;
         resetOrbit(engine);
+        setMuted(true);
         setPlaying(!window.matchMedia(REDUCED_MOTION).matches);
         setLoad({ status: "ready", clip: data.clip, data });
       })
@@ -184,6 +227,10 @@ export default function SplatVideoExperience() {
   }, [speed]);
 
   useEffect(() => {
+    engineRef.current.muted = muted;
+  }, [muted]);
+
+  useEffect(() => {
     engineRef.current.reducedMotion = reducedMotion;
   }, [reducedMotion]);
 
@@ -193,6 +240,13 @@ export default function SplatVideoExperience() {
 
   const ready = load.status === "ready";
 
+  const togglePlaying = useCallback(() => {
+    const engine = engineRef.current;
+    engine.playing = !engine.playing;
+    engine.sound?.gesture();
+    setPlaying(engine.playing);
+  }, []);
+
   useEffect(() => {
     if (!ready) return undefined;
     const onKeyDown = (event) => {
@@ -201,13 +255,18 @@ export default function SplatVideoExperience() {
       if (isTextEntry(event.target)) return;
       if (event.target instanceof HTMLElement && event.target.closest("button")) return;
       event.preventDefault();
-      setPlaying((value) => !value);
+      togglePlaying();
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [ready]);
+  }, [ready, togglePlaying]);
 
-  const handleTogglePlay = useCallback(() => setPlaying((value) => !value), []);
+  const handleToggleMuted = useCallback(() => {
+    const engine = engineRef.current;
+    engine.muted = !engine.muted;
+    engine.sound?.gesture();
+    setMuted(engine.muted);
+  }, []);
   const handlePause = useCallback(() => setPlaying(false), []);
   const handleBackToLens = useCallback(() => resetOrbit(engineRef.current), []);
   const handleScrubStart = useCallback(() => {
@@ -236,6 +295,7 @@ export default function SplatVideoExperience() {
 
   const meta = ready ? load.data.meta : null;
   const aspect = meta ? meta.camera.aspect : 16 / 9;
+  const streaming = Boolean(meta && isStream(meta));
   const summary = summaryFor(load);
 
   return (
@@ -267,6 +327,7 @@ export default function SplatVideoExperience() {
         ) : (
           <StageLoading load={load} />
         )}
+        {streaming ? <StageBuffering key={load.clip} engineRef={engineRef} /> : null}
       </section>
 
       {ready ? (
@@ -277,7 +338,10 @@ export default function SplatVideoExperience() {
           scrubbing={scrubbing}
           speed={speed}
           expanded={expanded}
-          onTogglePlay={handleTogglePlay}
+          sound={streaming && Boolean(meta.audio)}
+          muted={muted}
+          onToggleMuted={handleToggleMuted}
+          onTogglePlay={togglePlaying}
           onPause={handlePause}
           onSpeed={setSpeed}
           onBackToLens={handleBackToLens}

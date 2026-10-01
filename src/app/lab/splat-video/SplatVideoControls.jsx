@@ -1,6 +1,6 @@
 "use client";
 
-import { Aperture, SlidersHorizontal } from "lucide-react";
+import { Aperture, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
@@ -18,6 +18,9 @@ export default function SplatVideoControls({
   scrubbing,
   speed,
   expanded,
+  sound = false,
+  muted = true,
+  onToggleMuted,
   onTogglePlay,
   onPause,
   onSpeed,
@@ -95,7 +98,7 @@ export default function SplatVideoControls({
   const state = scrubbing ? "scrubbing" : playing ? "playing" : "paused";
 
   return (
-    <div ref={rootRef} className="splat-video-controls" data-state={state} data-expanded={expanded}>
+    <div ref={rootRef} className="splat-video-controls" data-state={state} data-expanded={expanded} data-sound={sound}>
       <div className="splat-video-controls__main">
         <button
           type="button"
@@ -133,6 +136,17 @@ export default function SplatVideoControls({
           <span ref={timeRef}>{formatSeconds(0)}</span>
           <span className="splat-video-controls__of"> / {formatSeconds(meta.duration)}</span>
         </p>
+
+        {sound ? (
+          <button type="button" className="splat-video-controls__sound text-ui" onClick={onToggleMuted}>
+            {muted ? (
+              <VolumeX size={16} strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              <Volume2 size={16} strokeWidth={1.75} aria-hidden="true" />
+            )}
+            <span className="splat-video-controls__sound-label">{muted ? "Unmute" : "Mute"}</span>
+          </button>
+        ) : null}
 
         <button
           type="button"

@@ -55,7 +55,21 @@ export const RGBD = {
 export const KIND_LABELS = {
   rgbd: "Depth video",
   flipbook: "Flipbook",
+  stream: "Stream",
   interpolated: "Interpolated",
+};
+
+export const STREAM = {
+  ahead: 2,
+  behind: 1,
+  parallelFetches: 1,
+  retryMs: 2000,
+  bufferingShowMs: 250,
+};
+
+export const SOUND = {
+  seekTolerance: 0.08,
+  metadataTimeoutMs: 4000,
 };
 
 export const SORT = {
@@ -78,6 +92,10 @@ export function formatSeconds(seconds) {
   return `${safe.toFixed(2)} s`;
 }
 
+export function formatDuration(seconds) {
+  return `${Math.max(0, seconds).toFixed(1)} s`;
+}
+
 export function formatCount(count) {
   if (count >= 1e6) return `${(count / 1e6).toFixed(2)}M`;
   if (count >= 1e3) return `${Math.round(count / 1e3)}k`;
@@ -92,6 +110,10 @@ export function createEngine() {
     speed: DEFAULT_SPEED,
     scrubbing: false,
     reducedMotion: false,
+    buffering: false,
+    soundWaiting: false,
+    muted: true,
+    sound: null,
     orbit: {
       yaw: 0,
       pitch: 0,
@@ -137,26 +159,34 @@ export function isRgbd(meta) {
   return meta.kind === "rgbd";
 }
 
+export function isStream(meta) {
+  return meta.kind === "stream";
+}
+
 export function steppedByFps(meta) {
-  return isFlipbook(meta) || isRgbd(meta);
+  return isFlipbook(meta) || isRgbd(meta) || isStream(meta);
 }
 
 export function clipKind(meta) {
+  if (meta?.version === 3 && meta.kind === "stream") return meta.kind;
   if (meta?.version === 2 && (meta.kind === "rgbd" || meta.kind === "flipbook")) return meta.kind;
   if (meta?.version === 1) return "interpolated";
   return null;
 }
 
-export function sortCapacity(meta) {
-  if (!isFlipbook(meta)) return meta.count;
+function largestMoment(offsets) {
   let largest = 0;
-  for (let f = 0; f < meta.frames; f += 1) {
-    largest = Math.max(largest, meta.frameOffsets[f + 1] - meta.frameOffsets[f]);
-  }
-  return meta.staticCount + largest;
+  for (let m = 0; m + 1 < offsets.length; m += 1) largest = Math.max(largest, offsets[m + 1] - offsets[m]);
+  return largest;
 }
 
-function nearestTime(times, time) {
+export function sortCapacity(meta) {
+  if (isStream(meta)) return meta.static.count + meta.chunks.reduce((most, chunk) => Math.max(most, largestMoment(chunk.frameOffsets)), 0);
+  if (!isFlipbook(meta)) return meta.count;
+  return meta.staticCount + largestMoment(meta.frameOffsets);
+}
+
+function bracketTime(times, time) {
   let low = 0;
   let high = times.length - 1;
   while (high - low > 1) {
@@ -164,6 +194,12 @@ function nearestTime(times, time) {
     if (times[middle] <= time) low = middle;
     else high = middle;
   }
+  return low;
+}
+
+function nearestTime(times, time) {
+  const low = bracketTime(times, time);
+  const high = Math.min(low + 1, times.length - 1);
   return time - times[low] <= times[high] - time ? low : high;
 }
 
@@ -183,8 +219,8 @@ export function frameCursor(time, meta) {
   return { frame0, frame1, blend: position - frame0 };
 }
 
-export function advanceTime(engine, step, duration) {
-  if (!PLAYBACK.bounce) {
+export function advanceTime(engine, step, duration, bounce = PLAYBACK.bounce) {
+  if (!bounce) {
     engine.time = (engine.time + step) % duration;
     return;
   }
@@ -232,9 +268,20 @@ export function hasLensPath(meta) {
   return Array.isArray(meta.cameras) && meta.cameras.length > 1 && meta.cameras.every((m) => Array.isArray(m) && m.length === 16);
 }
 
+function lensPosition(meta, time) {
+  const last = meta.cameras.length - 1;
+  const { times } = meta;
+  if (!Array.isArray(times) || times.length !== meta.cameras.length) return clamp(time / meta.duration, 0, 1) * last;
+  if (time <= times[0]) return 0;
+  if (time >= times[last]) return last;
+  const low = bracketTime(times, time);
+  const span = times[low + 1] - times[low];
+  return low + (span > 0 ? (time - times[low]) / span : 0);
+}
+
 export function lensMatrix(meta, time, target) {
   const last = meta.cameras.length - 1;
-  const position = clamp(time / meta.duration, 0, 1) * last;
+  const position = lensPosition(meta, time);
   const index = Math.min(last - 1, Math.floor(position));
   const blend = position - index;
   const s = lensScratch;

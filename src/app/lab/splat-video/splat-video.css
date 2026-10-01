@@ -411,6 +411,75 @@
   transform: scale(0.97);
 }
 
+.splat-video-controls__sound {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0 6px;
+  height: 36px;
+  padding: 0 14px 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background-color var(--duration-120) var(--ease-hover),
+    border-color var(--duration-120) var(--ease-hover),
+    transform var(--duration-120) var(--ease-hover);
+}
+
+.splat-video-controls__sound:hover {
+  background: var(--color-surface-sunken);
+  border-color: var(--color-line-strong);
+}
+
+.splat-video-controls__sound:active {
+  transform: scale(0.97);
+}
+
+.splat-video__buffering {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  gap: 0 6px;
+  height: 28px;
+  padding: 0 12px 0 8px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  pointer-events: none;
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--duration-150) var(--ease-hover),
+    transform var(--duration-150) var(--ease-hover),
+    visibility 0s linear var(--duration-150);
+}
+
+.splat-video__buffering[data-visible="true"] {
+  visibility: visible;
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity var(--duration-200) var(--ease-entrance),
+    transform var(--duration-200) var(--ease-entrance),
+    visibility 0s;
+}
+
+.splat-video__buffering svg {
+  flex: none;
+  animation: splat-video-spin 900ms linear infinite;
+}
+
 .splat-video-controls__more {
   display: none;
   flex: none;
@@ -438,6 +507,12 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
+}
+
+@keyframes splat-video-spin {
+  to {
+    transform: rotate(1turn);
+  }
 }
 
 @keyframes splat-video-enter {
@@ -485,6 +560,24 @@
     display: grid;
   }
 
+  .splat-video-controls__sound {
+    width: 36px;
+    padding: 0;
+  }
+
+  .splat-video-controls__sound-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .splat-video-controls[data-sound="true"] .splat-video-controls__of {
+    display: none;
+  }
+
   .splat-video-controls__extra {
     display: none;
     justify-content: space-between;
@@ -515,7 +608,8 @@
 
 @media (prefers-reduced-motion: reduce) {
   .splat-video__overlay,
-  .splat-video-controls {
+  .splat-video-controls,
+  .splat-video__buffering svg {
     animation: none;
   }
 

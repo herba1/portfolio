@@ -5,8 +5,20 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
 import OrbitStage, { aimCamera } from "./OrbitStage";
+import { createSoundClock } from "./soundClock";
 import { createResolvePass, createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
-import { RENDER, SORT, advanceTime, frameCursor, hasLensPath, lensMatrix, lowPassFor, sortCapacity } from "./splatVideoParams";
+import { createStreamRuntime } from "./splatStream";
+import {
+  RENDER,
+  SORT,
+  advanceTime,
+  frameCursor,
+  hasLensPath,
+  isStream,
+  lensMatrix,
+  lowPassFor,
+  sortCapacity,
+} from "./splatVideoParams";
 
 function sameRequest(a, b) {
   if (!a || !b) return false;
@@ -87,6 +99,38 @@ function createRuntime(clip) {
   };
 }
 
+function createScratch(meta) {
+  return {
+    pivot: new THREE.Vector3(0, 0, -meta.camera.pivotDepth),
+    modelView: new THREE.Matrix4(),
+    viewport: new THREE.Vector2(),
+    lens: new THREE.Matrix4(),
+  };
+}
+
+function useResolvedRender(resolveRef, scratchRef) {
+  useFrame((state) => {
+    const resolve = resolveRef.current;
+    const scratch = scratchRef.current;
+    if (!resolve || !scratch) {
+      state.gl.render(state.scene, state.camera);
+      return;
+    }
+    resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
+  }, 1);
+}
+
+function aimAndMeasure(state, engine, meta, delta, scratch, group) {
+  const camera = state.camera;
+  const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
+  aimCamera(camera, engine, meta, delta, scratch.pivot, base);
+  group.updateMatrixWorld();
+  scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
+  state.gl.getDrawingBufferSize(scratch.viewport);
+  const e = scratch.modelView.elements;
+  return [e[2], e[6], e[10], e[14]];
+}
+
 function SplatField({ clip, engineRef }) {
   const groupRef = useRef(null);
   const runtimeRef = useRef(null);
@@ -100,12 +144,7 @@ function SplatField({ clip, engineRef }) {
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
     resolveRef.current = resolve;
-    scratchRef.current = {
-      pivot: new THREE.Vector3(0, 0, -clip.meta.camera.pivotDepth),
-      modelView: new THREE.Matrix4(),
-      viewport: new THREE.Vector2(),
-      lens: new THREE.Matrix4(),
-    };
+    scratchRef.current = createScratch(clip.meta);
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
@@ -128,43 +167,94 @@ function SplatField({ clip, engineRef }) {
       advanceTime(engine, delta * engine.speed, meta.duration);
     }
 
-    const camera = state.camera;
-    const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
-    aimCamera(camera, engine, meta, delta, scratch.pivot, base);
-    group.updateMatrixWorld();
-
-    scratch.modelView.multiplyMatrices(camera.matrixWorldInverse, group.matrixWorld);
-    const e = scratch.modelView.elements;
+    const zRow = aimAndMeasure(state, engine, meta, delta, scratch, group);
     const cursor = frameCursor(engine.time, meta);
 
     const { uniforms } = runtime.material;
     uniforms.uFrame0.value = cursor.frame0;
     uniforms.uFrame1.value = cursor.frame1;
     uniforms.uBlend.value = cursor.blend;
-    state.gl.getDrawingBufferSize(scratch.viewport);
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
 
-    runtime.want({ zRow: [e[2], e[6], e[10], e[14]], ...cursor });
+    runtime.want({ zRow, ...cursor });
   });
 
-  useFrame((state) => {
-    const resolve = resolveRef.current;
+  useResolvedRender(resolveRef, scratchRef);
+
+  return <group ref={groupRef} rotation-x={Math.PI} />;
+}
+
+function StreamField({ clip, engineRef }) {
+  const groupRef = useRef(null);
+  const runtimeRef = useRef(null);
+  const resolveRef = useRef(null);
+  const soundRef = useRef(null);
+  const scratchRef = useRef(null);
+
+  useEffect(() => {
+    const group = groupRef.current;
+    const engine = engineRef.current;
+    const runtime = createStreamRuntime(clip);
+    const resolve = createResolvePass();
+    const sound = clip.audioUrl ? createSoundClock(clip.audioUrl, clip.meta.duration) : null;
+    const controls = sound ? { gesture: () => sound.sync(engineRef.current, true) } : null;
+    engine.sound = controls;
+    group.add(runtime.mesh);
+    runtimeRef.current = runtime;
+    resolveRef.current = resolve;
+    soundRef.current = sound;
+    scratchRef.current = createScratch(clip.meta);
+    return () => {
+      group.remove(runtime.mesh);
+      runtime.dispose();
+      resolve.dispose();
+      if (sound) sound.dispose();
+      if (engine.sound === controls) engine.sound = null;
+      engine.buffering = false;
+      engine.soundWaiting = false;
+      runtimeRef.current = null;
+      resolveRef.current = null;
+      soundRef.current = null;
+    };
+  }, [clip, engineRef]);
+
+  useFrame((state, rawDelta) => {
+    const runtime = runtimeRef.current;
     const scratch = scratchRef.current;
-    if (!resolve || !scratch) {
-      state.gl.render(state.scene, state.camera);
-      return;
+    const group = groupRef.current;
+    const engine = engineRef.current;
+    if (!runtime || !scratch || !group || !engine) return;
+    const { meta } = clip;
+    const delta = Math.min(rawDelta, RENDER.maxDelta);
+    runtime.upload(state.gl);
+
+    const sound = soundRef.current;
+    const clocked = sound ? sound.sync(engine) : false;
+    if (!clocked && engine.playing && !engine.scrubbing && !engine.buffering) {
+      advanceTime(engine, delta * engine.speed, meta.duration, false);
     }
-    resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
-  }, 1);
+    const moment = frameCursor(engine.time, meta).frame0;
+    engine.buffering = !runtime.focus(moment);
+
+    const zRow = aimAndMeasure(state, engine, meta, delta, scratch, group);
+    const { uniforms } = runtime.material;
+    uniforms.uViewport.value.copy(scratch.viewport);
+    uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
+
+    runtime.want(zRow, moment);
+  });
+
+  useResolvedRender(resolveRef, scratchRef);
 
   return <group ref={groupRef} rotation-x={Math.PI} />;
 }
 
 export default function SplatVideoScene({ clip, engineRef, isMobile }) {
+  const Field = isStream(clip.meta) ? StreamField : SplatField;
   return (
     <OrbitStage meta={clip.meta} engineRef={engineRef} isMobile={isMobile}>
-      <SplatField clip={clip} engineRef={engineRef} />
+      <Field clip={clip} engineRef={engineRef} />
     </OrbitStage>
   );
 }

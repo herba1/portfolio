@@ -2,20 +2,10 @@ import * as THREE from "three";
 
 import { RENDER, TEXTURE_WIDTH, isFlipbook } from "./splatVideoParams";
 
-export const SPLAT_VERTEX = `
+const SPLAT_HEADER = `
 precision highp float;
 precision highp int;
 
-uniform highp usampler2D uBase;
-uniform highp usampler2D uStatic;
-uniform highp usampler2DArray uDynamic;
-uniform int uStaticCount;
-uniform int uFrame0;
-uniform int uFrame1;
-uniform float uBlend;
-uniform vec3 uBoundsMin;
-uniform vec3 uBoundsSize;
-uniform float uCovScale;
 uniform vec2 uViewport;
 uniform float uLowPass;
 
@@ -28,6 +18,7 @@ const int TEXTURE_WIDTH = ${TEXTURE_WIDTH};
 const float MAX_AXIS = 1024.0;
 const float MIN_DEPTH = 0.02;
 const float FRUSTUM_GUARD = 1.2;
+const float UNIT16 = 1.0 / 65535.0;
 
 ivec2 texelFor(int index) {
   return ivec2(index % TEXTURE_WIDTH, index / TEXTURE_WIDTH);
@@ -38,22 +29,15 @@ void cull() {
   vColor = vec4(0.0);
   vPosition = vec2(0.0);
 }
+`;
 
+const SPLAT_MAIN = `
 void main() {
   int index = int(aSplat + 0.5);
 
-  vec4 point;
-  if (index < uStaticCount) {
-    point = vec4(texelFetch(uStatic, texelFor(index), 0));
-  } else {
-    ivec2 cell = texelFor(index - uStaticCount);
-    vec4 fromPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame0), 0));
-    vec4 toPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame1), 0));
-    point = mix(fromPoint, toPoint, uBlend);
-  }
-
-  vec3 center = uBoundsMin + point.xyz * (1.0 / 65535.0) * uBoundsSize;
-  float opacity = point.w * (1.0 / 65535.0);
+  vec3 center;
+  float opacity;
+  readPoint(index, center, opacity);
 
   vec4 viewCenter = modelViewMatrix * vec4(center, 1.0);
   float depth = -viewCenter.z;
@@ -64,7 +48,8 @@ void main() {
     return;
   }
 
-  uvec4 base = texelFetch(uBase, texelFor(index), 0);
+  float covScale;
+  uvec4 base = readBase(index, covScale);
   vec2 xxXy = unpackHalf2x16(base.x);
   vec2 xzYy = unpackHalf2x16(base.y);
   vec2 yzZz = unpackHalf2x16(base.z);
@@ -72,7 +57,7 @@ void main() {
     xxXy.x, xxXy.y, xzYy.x,
     xxXy.y, xzYy.y, yzZz.x,
     xzYy.x, yzZz.x, yzZz.y
-  ) / uCovScale;
+  ) / covScale;
 
   vec2 focal = vec2(projectionMatrix[0][0], projectionMatrix[1][1]) * 0.5 * uViewport;
   float inverseDepth = 1.0 / depth;
@@ -115,6 +100,77 @@ void main() {
   vPosition = position.xy;
 }
 `;
+
+const PLAYBACK_READERS = `
+uniform highp usampler2D uBase;
+uniform highp usampler2D uStatic;
+uniform highp usampler2DArray uDynamic;
+uniform int uStaticCount;
+uniform int uFrame0;
+uniform int uFrame1;
+uniform float uBlend;
+uniform vec3 uBoundsMin;
+uniform vec3 uBoundsSize;
+uniform float uCovScale;
+
+void readPoint(int index, out vec3 center, out float opacity) {
+  vec4 point;
+  if (index < uStaticCount) {
+    point = vec4(texelFetch(uStatic, texelFor(index), 0));
+  } else {
+    ivec2 cell = texelFor(index - uStaticCount);
+    vec4 fromPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame0), 0));
+    vec4 toPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame1), 0));
+    point = mix(fromPoint, toPoint, uBlend);
+  }
+  center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize;
+  opacity = point.w * UNIT16;
+}
+
+uvec4 readBase(int index, out float covScale) {
+  covScale = uCovScale;
+  return texelFetch(uBase, texelFor(index), 0);
+}
+`;
+
+const STREAM_READERS = `
+uniform highp usampler2D uBase;
+uniform highp usampler2D uStatic;
+uniform highp usampler2D uChunkBase;
+uniform highp usampler2D uChunkPoints;
+uniform int uStaticCount;
+uniform vec3 uBoundsMin;
+uniform vec3 uBoundsSize;
+uniform float uCovScale;
+uniform vec3 uChunkBoundsMin;
+uniform vec3 uChunkBoundsSize;
+uniform float uChunkCovScale;
+
+void readPoint(int index, out vec3 center, out float opacity) {
+  vec4 point;
+  if (index < uStaticCount) {
+    point = vec4(texelFetch(uStatic, texelFor(index), 0));
+    center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize;
+  } else {
+    point = vec4(texelFetch(uChunkPoints, texelFor(index - uStaticCount), 0));
+    center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize;
+  }
+  opacity = point.w * UNIT16;
+}
+
+uvec4 readBase(int index, out float covScale) {
+  if (index < uStaticCount) {
+    covScale = uCovScale;
+    return texelFetch(uBase, texelFor(index), 0);
+  }
+  covScale = uChunkCovScale;
+  return texelFetch(uChunkBase, texelFor(index - uStaticCount), 0);
+}
+`;
+
+export const SPLAT_VERTEX = SPLAT_HEADER + PLAYBACK_READERS + SPLAT_MAIN;
+
+export const STREAM_VERTEX = SPLAT_HEADER + STREAM_READERS + SPLAT_MAIN;
 
 export const SPLAT_FRAGMENT = `
 precision highp float;
@@ -177,12 +233,36 @@ export function createSplatTextures(clip) {
   };
 }
 
+const SPLAT_MATERIAL = {
+  glslVersion: THREE.GLSL3,
+  fragmentShader: SPLAT_FRAGMENT,
+  transparent: true,
+  side: THREE.DoubleSide,
+  depthTest: false,
+  depthWrite: false,
+  blending: THREE.CustomBlending,
+  blendEquation: THREE.AddEquation,
+  blendSrc: THREE.OneFactor,
+  blendDst: THREE.OneMinusSrcAlphaFactor,
+  blendEquationAlpha: THREE.AddEquation,
+  blendSrcAlpha: THREE.OneFactor,
+  blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
+};
+
+function boundsMinOf(bounds) {
+  const { min } = bounds;
+  return new THREE.Vector3(min[0], min[1], min[2]);
+}
+
+function boundsSizeOf(bounds) {
+  const { min, max } = bounds;
+  return new THREE.Vector3(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+}
+
 export function createSplatMaterial(textures, meta) {
-  const { min, max } = meta.bounds;
   return new THREE.ShaderMaterial({
-    glslVersion: THREE.GLSL3,
+    ...SPLAT_MATERIAL,
     vertexShader: SPLAT_VERTEX,
-    fragmentShader: SPLAT_FRAGMENT,
     uniforms: {
       uBase: { value: textures.baseTexture },
       uStatic: { value: textures.staticTexture },
@@ -191,24 +271,64 @@ export function createSplatMaterial(textures, meta) {
       uFrame0: { value: 0 },
       uFrame1: { value: 0 },
       uBlend: { value: 0 },
-      uBoundsMin: { value: new THREE.Vector3(min[0], min[1], min[2]) },
-      uBoundsSize: { value: new THREE.Vector3(max[0] - min[0], max[1] - min[1], max[2] - min[2]) },
+      uBoundsMin: { value: boundsMinOf(meta.bounds) },
+      uBoundsSize: { value: boundsSizeOf(meta.bounds) },
       uCovScale: { value: meta.covScale },
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
     },
-    transparent: true,
-    side: THREE.DoubleSide,
-    depthTest: false,
-    depthWrite: false,
-    blending: THREE.CustomBlending,
-    blendEquation: THREE.AddEquation,
-    blendSrc: THREE.OneFactor,
-    blendDst: THREE.OneMinusSrcAlphaFactor,
-    blendEquationAlpha: THREE.AddEquation,
-    blendSrcAlpha: THREE.OneFactor,
-    blendDstAlpha: THREE.OneMinusSrcAlphaFactor,
   });
+}
+
+export function createPairTextures(set) {
+  const baseTexture = integerTexture(
+    new THREE.DataTexture(set.base, TEXTURE_WIDTH, set.rows, THREE.RGBAIntegerFormat, THREE.UnsignedIntType),
+  );
+  baseTexture.internalFormat = "RGBA32UI";
+  const pointsTexture = integerTexture(
+    new THREE.DataTexture(set.points, TEXTURE_WIDTH, set.rows, THREE.RGBAIntegerFormat, THREE.UnsignedShortType),
+  );
+  pointsTexture.internalFormat = "RGBA16UI";
+  return {
+    baseTexture,
+    pointsTexture,
+    dispose() {
+      baseTexture.dispose();
+      pointsTexture.dispose();
+    },
+  };
+}
+
+export function createStreamMaterial(staticPair, staticSet) {
+  return new THREE.ShaderMaterial({
+    ...SPLAT_MATERIAL,
+    vertexShader: STREAM_VERTEX,
+    uniforms: {
+      uBase: { value: staticPair.baseTexture },
+      uStatic: { value: staticPair.pointsTexture },
+      uChunkBase: { value: staticPair.baseTexture },
+      uChunkPoints: { value: staticPair.pointsTexture },
+      uStaticCount: { value: staticSet.count },
+      uBoundsMin: { value: boundsMinOf(staticSet.bounds) },
+      uBoundsSize: { value: boundsSizeOf(staticSet.bounds) },
+      uCovScale: { value: staticSet.covScale },
+      uChunkBoundsMin: { value: new THREE.Vector3() },
+      uChunkBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
+      uChunkCovScale: { value: 1 },
+      uViewport: { value: new THREE.Vector2(1, 1) },
+      uLowPass: { value: RENDER.lowPass },
+    },
+  });
+}
+
+export function bindStreamChunk(material, pair, set) {
+  const { uniforms } = material;
+  const { min, max } = set.bounds;
+  uniforms.uChunkBase.value = pair.baseTexture;
+  uniforms.uChunkPoints.value = pair.pointsTexture;
+  uniforms.uChunkBoundsMin.value.set(min[0], min[1], min[2]);
+  uniforms.uChunkBoundsSize.value.set(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
+  uniforms.uChunkCovScale.value = set.covScale;
 }
 
 export function createSplatGeometry(count) {

@@ -119,11 +119,80 @@ function validateRgbd(meta, fail) {
   };
 }
 
+function isAscending(values) {
+  return values.every((value, i) => Number.isFinite(value) && (i === 0 || value >= values[i - 1]));
+}
+
+function isOffsets(offsets, moments, count) {
+  return (
+    Array.isArray(offsets) &&
+    offsets.length === moments + 1 &&
+    offsets.every(isCount) &&
+    offsets[0] === 0 &&
+    offsets[moments] === count &&
+    isAscending(offsets)
+  );
+}
+
+function validateSplatSet(set, fail, what) {
+  if (!set || !isCount(set.count)) fail(`has an invalid ${what} count.`);
+  if (set.count === 0) return { count: 0, base: null, points: null, bounds: { min: [0, 0, 0], max: [1, 1, 1] }, covScale: 1 };
+  const base = optionalAsset(set.base, fail, `${what} base`);
+  const points = optionalAsset(set.points, fail, `${what} points`);
+  if (!base || !points) fail(`names no ${what} files.`);
+  if (!isVector(set.bounds?.min) || !isVector(set.bounds?.max)) fail(`has invalid ${what} bounds.`);
+  if (!(set.covScale > 0)) fail(`has an invalid ${what} covScale.`);
+  return { count: set.count, base, points, bounds: { min: set.bounds.min, max: set.bounds.max }, covScale: set.covScale };
+}
+
+function validateStream(meta, fail) {
+  if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
+  if (!(meta.fps > 0)) fail("has no fps.");
+  if (!(meta.duration > 0)) fail("has no duration.");
+  if (!(meta.camera?.vfovDeg > 0 && meta.camera.vfovDeg < 170)) fail("has no camera.vfovDeg.");
+  if (meta.times !== undefined && (!Array.isArray(meta.times) || meta.times.length !== meta.frames || !isAscending(meta.times))) {
+    fail("has invalid times.");
+  }
+  const audio = optionalAsset(meta.audio, fail, "audio");
+  const staticSet = validateSplatSet(meta.static ?? { count: 0 }, fail, "static");
+  if (!Array.isArray(meta.chunks) || meta.chunks.length === 0) fail("has no chunks.");
+  let firstMoment = 0;
+  const chunks = meta.chunks.map((chunk, index) => {
+    const what = `chunk ${index}`;
+    if (!chunk || (chunk.index ?? index) !== index || chunk.firstMoment !== firstMoment) fail(`has ${what} out of order.`);
+    if (!isPositiveInteger(chunk.moments)) fail(`has ${what} with no moments.`);
+    const set = validateSplatSet(chunk, fail, what);
+    if (!isOffsets(chunk.frameOffsets, chunk.moments, set.count)) fail(`has invalid frameOffsets in ${what}.`);
+    firstMoment += chunk.moments;
+    return { ...set, index, firstMoment: chunk.firstMoment, moments: chunk.moments, frameOffsets: chunk.frameOffsets };
+  });
+  if (firstMoment !== meta.frames) fail("has chunks that do not add up to frames.");
+  if (staticSet.count === 0 && chunks.every((chunk) => chunk.count === 0)) fail("has no splats.");
+  const depthSource = staticSet.count > 0 ? staticSet : chunks.find((chunk) => chunk.count > 0);
+  const middleZ = (depthSource.bounds.min[2] + depthSource.bounds.max[2]) / 2;
+  return {
+    ...meta,
+    audio,
+    static: staticSet,
+    staticCount: staticSet.count,
+    chunks,
+    camera: {
+      vfovDeg: meta.camera.vfovDeg,
+      aspect: meta.camera.aspect > 0 ? meta.camera.aspect : 16 / 9,
+      pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : Math.max(0.5, middleZ),
+    },
+  };
+}
+
 function validateMeta(meta, clip) {
   const fail = (why) => {
     throw new Splat4dError(`meta.json for “${clip}” ${why}`, { clip });
   };
   if (!meta || meta.format !== "splat4d") fail("is not a splat4d export.");
+  if (meta.version === 3) {
+    if (meta.kind !== "stream") fail(`has an unknown kind “${meta.kind}”.`);
+    return validateStream(meta, fail);
+  }
   if (meta.version === 2 && meta.kind === "rgbd") return validateRgbd(meta, fail);
   if (meta.version === 2) {
     if (meta.kind !== "flipbook") fail(`has an unknown kind “${meta.kind}”.`);
@@ -136,7 +205,7 @@ function validateMeta(meta, clip) {
     if (!isCount(meta.count) || !isCount(meta.staticCount) || !isCount(meta.dynamicCount)) fail("has invalid counts.");
     if (meta.count !== meta.staticCount + meta.dynamicCount) fail("has a count that is not static plus dynamic.");
   } else {
-    fail(`is version ${meta.version}; this player reads versions 1 and 2.`);
+    fail(`is version ${meta.version}; this player reads versions 1, 2 and 3.`);
   }
   if (meta.count === 0) fail("has no splats.");
   if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
@@ -154,6 +223,10 @@ function validateMeta(meta, clip) {
       pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : Math.max(0.5, (minZ + maxZ) / 2),
     },
   };
+}
+
+function versionQuery(meta) {
+  return `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
 }
 
 function rowsFor(count) {
@@ -230,6 +303,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
     throw new Splat4dError(`meta.json for “${clip}” is not valid JSON.`, { clip, missing: true });
   }
   const meta = validateMeta(raw, clip);
+  if (meta.kind === "stream") return loadStream(clip, folder, meta, { signal, onProgress });
   if (meta.kind === "rgbd") return loadRgbd(clip, folder, meta, { signal, onProgress });
   if (meta.kind === "flipbook") return loadFlipbook(clip, folder, meta, { signal, onProgress });
 
@@ -255,7 +329,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
   };
   if (onProgress) onProgress(0, total);
 
-  const version = `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
+  const version = versionQuery(meta);
   await Promise.all([
     streamInto({
       url: `${folder}/base.bin${version}`,
@@ -310,7 +384,7 @@ async function loadFlipbook(clip, folder, meta, { signal, onProgress }) {
   };
   if (onProgress) onProgress(0, total);
 
-  const version = `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
+  const version = versionQuery(meta);
   await Promise.all([
     streamInto({
       url: `${folder}/base.bin${version}`,
@@ -343,6 +417,70 @@ async function loadFlipbook(clip, folder, meta, { signal, onProgress }) {
   };
 }
 
+async function fetchSplatSet({ folder, version, clip, set, signal, onChunk }) {
+  const rows = rowsFor(set.count);
+  const base = new Uint32Array(TEXTURE_WIDTH * rows * 4);
+  const points = new Uint16Array(TEXTURE_WIDTH * rows * 4);
+  if (set.count > 0) {
+    await Promise.all([
+      streamInto({
+        url: `${folder}/${set.base}${version}`,
+        name: set.base,
+        clip,
+        expected: set.count * 16,
+        write: linearWriter(new Uint8Array(base.buffer)),
+        signal,
+        onChunk,
+      }),
+      streamInto({
+        url: `${folder}/${set.points}${version}`,
+        name: set.points,
+        clip,
+        expected: set.count * 8,
+        write: linearWriter(new Uint8Array(points.buffer)),
+        signal,
+        onChunk,
+      }),
+    ]);
+  }
+  return { count: set.count, rows, base, points };
+}
+
+async function loadStream(clip, folder, meta, { signal, onProgress }) {
+  const version = versionQuery(meta);
+  const first = meta.chunks[0];
+  const total = (meta.static.count + first.count) * 24;
+  let loaded = 0;
+  const onChunk = (bytes) => {
+    loaded += bytes;
+    if (onProgress) onProgress(loaded, total);
+  };
+  if (onProgress) onProgress(0, total);
+  const staticSet = await fetchSplatSet({ folder, version, clip, set: meta.static, signal, onChunk });
+  const firstChunk = await fetchSplatSet({ folder, version, clip, set: first, signal, onChunk });
+  return {
+    clip,
+    meta,
+    bytes: total,
+    folder,
+    version,
+    staticSet,
+    handoff: new Map([[0, firstChunk]]),
+    audioUrl: meta.audio ? `${folder}/${meta.audio}${version}` : null,
+  };
+}
+
+export function loadStreamChunk(stream, index, { signal } = {}) {
+  return fetchSplatSet({
+    folder: stream.folder,
+    version: stream.version,
+    clip: stream.clip,
+    set: stream.meta.chunks[index],
+    signal,
+    onChunk: () => {},
+  });
+}
+
 async function streamBlob({ url, name, clip, type, signal, onProgress }) {
   const response = await fetch(url, { signal });
   if (!response.ok) {
@@ -373,7 +511,7 @@ async function streamBlob({ url, name, clip, type, signal, onProgress }) {
 }
 
 async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
-  const version = `?v=${encodeURIComponent(String(meta.exportId ?? "0"))}`;
+  const version = versionQuery(meta);
   const video = await streamBlob({
     url: `${folder}/${meta.video}${version}`,
     name: meta.video,
