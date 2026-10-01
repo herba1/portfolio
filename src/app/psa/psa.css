@@ -1288,3 +1288,14 @@ html[data-psa-vt]::view-transition-new(*) {
   background: var(--pk-bg);
   color: var(--pk-text);
 }
+
+/* ── Songs kit ──────────────────────────────────────────────────────────
+   Album art is square and meant to be seen edge to edge: no mat, cover not
+   contain. Everything else about the surface is the same app. */
+.psa[data-kit="songs"] {
+  --pk-card-ratio: 1;
+}
+
+.psa[data-kit="songs"] .slab-face img {
+  object-fit: cover;
+}

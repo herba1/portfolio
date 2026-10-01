@@ -2,10 +2,8 @@
 
 import { useCallback, useSyncExternalStore } from "react";
 
-import { CARDS } from "./cards";
-
 /* ─────────────────────────────────────────────────────────────────────────
-   liveMarket — a mocked tape for the /psa grid.
+   liveMarket — a mocked tape for the collection grid.
 
    Shape of the thing: ONE interval for the whole page, a per-card listener
    set, and a random walk that only touches a handful of cards per tick. A
@@ -28,27 +26,45 @@ const MOVERS = 4; // cards touched per tick
 const VOL = 0.016; // per-tick drift, fraction of price
 const PULL = 0.05; // mean reversion toward the opening price
 
-// Opening prices — the deltas stay honest by being measured against these
-// rather than against the previous tick.
-const OPEN = new Map(CARDS.map((c) => [c.id, c.price]));
+/* Items join the tape when a surface registers its kit (registerItems), not
+   at import: what is on the tape is decided by whichever kit is mounted, and
+   two kits on one page share the one interval. Registering is idempotent, so
+   the server pass, the hydration pass and every remount agree.
 
-// The authored values, kept aside and never mutated: this is what SSR and the
-// hydration pass read, so first paint is identical on both sides.
-const STATIC = new Map(
-  CARDS.map((c) => [c.id, { price: c.price, delta: c.delta, move: 0, tick: 0 }]),
-);
-
-const state = new Map(STATIC);
+   OPEN holds the opening values — the deltas stay honest by being measured
+   against these rather than against the previous tick. STATIC holds the
+   authored figures, kept aside and never mutated: it is what SSR and the
+   hydration pass read, so first paint is identical on both sides. */
+const OPEN = new Map();
+const BASE_DELTA = new Map();
+const STATIC = new Map();
+const state = new Map();
 const listeners = new Map();
+
+export function registerItems(items) {
+  for (const item of items) {
+    if (STATIC.has(item.id)) continue;
+    const figures = { price: item.value, delta: item.delta, move: 0, tick: 0 };
+    OPEN.set(item.id, item.value);
+    BASE_DELTA.set(item.id, item.delta);
+    STATIC.set(item.id, figures);
+    state.set(item.id, figures);
+  }
+}
 
 let timer = null;
 let subscribers = 0;
 
 function tick() {
+  // Only items something is watching move — a tick spent on an unseen item
+  // is a tick the visible ones did not get.
+  const live = [...listeners.keys()];
+  if (!live.length) return;
   for (let n = 0; n < MOVERS; n++) {
-    const card = CARDS[(Math.random() * CARDS.length) | 0];
-    const open = OPEN.get(card.id);
-    const prev = state.get(card.id);
+    const id = live[(Math.random() * live.length) | 0];
+    const open = OPEN.get(id);
+    const prev = state.get(id);
+    if (open === undefined || !prev) continue;
 
     // Random walk with a light tether: without the pull a long session drifts
     // somewhere silly, and a marketplace that only ever climbs reads as fake.
@@ -59,15 +75,15 @@ function tick() {
     const price = Math.max(1, prev.price * (1 + pct));
     if (price === prev.price) continue;
 
-    state.set(card.id, {
+    state.set(id, {
       price,
-      delta: card.delta + (price / open - 1) * 100,
+      delta: BASE_DELTA.get(id) + (price / open - 1) * 100,
       move: pct >= 0 ? 1 : -1,
       // Monotonic, and the flash animation keys off its parity — see psa.css.
       tick: prev.tick + 1,
     });
 
-    const set = listeners.get(card.id);
+    const set = listeners.get(id);
     if (set) for (const fn of set) fn();
   }
 }

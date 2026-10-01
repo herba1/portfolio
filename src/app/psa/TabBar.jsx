@@ -180,7 +180,7 @@ function TabCount({ count, nonce }) {
   );
 }
 
-function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
+function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel }) {
   const flight = useSaveFlight();
   const undoMs = undo?.ms ?? 3000;
 
@@ -248,7 +248,9 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo }) {
               <Icon id={tab.id} active={isActive} />
               <TabCount count={count ?? 0} nonce={countNonce} />
             </span>
-            <span className="psa-tab-label">{tab.label}</span>
+            <span className="psa-tab-label">
+              {tab.id === "collection" && libraryLabel ? libraryLabel : tab.label}
+            </span>
           </button>
         );
       })}
