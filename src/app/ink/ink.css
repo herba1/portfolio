@@ -2,7 +2,7 @@
   position: relative;
   display: grid;
   grid-template-columns: var(--ink-panel-w) 1fr;
-  min-height: 100lvh;
+  min-height: 100cqh;
   background: var(--color-surface);
   --ink-panel-w: 304px;
 }
@@ -15,7 +15,7 @@
   position: sticky;
   top: 0;
   z-index: calc(var(--z-index-nav) + 1);
-  height: 100lvh;
+  height: 100cqh;
   overflow: hidden;
   border-right: 1px solid var(--color-line);
   background: var(--color-surface-raised);
@@ -318,9 +318,12 @@
 }
 
 .ink-stage {
+  /* Always the last column, so the plate fills the box when the panel isn't
+     rendered at all (embedded on the experiments index). */
+  grid-column: -2 / -1;
   position: sticky;
   top: 0;
-  height: 100lvh;
+  height: 100cqh;
   overflow: hidden;
 }
 
@@ -353,7 +356,7 @@
   pointer-events: none;
 }
 
-@media (max-width: 900px) {
+@container (max-width: 900px) {
   .ink-page {
     grid-template-columns: 1fr;
     --ink-panel-w: 0px;
@@ -364,7 +367,7 @@
     inset: 0 auto 0 0;
     z-index: 4;
     width: 304px;
-    max-width: 88vw;
+    max-width: 88cqw;
     transform: translateX(0);
     transition: transform var(--duration-250) var(--ease-out-quint);
     box-shadow: 0 0 40px rgb(0 0 0 / 0.08);
@@ -391,15 +394,4 @@
   color: var(--color-ink);
   font-size: var(--text-ui);
   line-height: 1.35;
-}
-
-/* Framed on the experiments index: the plate alone, no tuning panel. */
-:root[data-embed="1"] .ink-page {
-  grid-template-columns: 1fr;
-  --ink-panel-w: 0px;
-}
-
-:root[data-embed="1"] .ink-panel-slot,
-:root[data-embed="1"] .ink-panel-toggle {
-  display: none;
 }

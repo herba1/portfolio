@@ -1,10 +1,12 @@
 import Link from "next/link";
-import LiveFrame from "../LiveFrame";
+import Piece from "../Piece";
+import { pieceData } from "../pieceData";
 import { PIECES, shortDate } from "../pieces";
 
 // B — Contact sheet. A strict grid that fills exactly one screen: every piece
 // at the same size, running, with a caption rule under it like a proof sheet.
-export default function SheetLayout() {
+export default async function SheetLayout() {
+  const data = await pieceData();
   return (
     <main className="xl-sheet">
       <header className="xl-sheet__head">
@@ -14,7 +16,7 @@ export default function SheetLayout() {
       <ul className="xl-sheet__grid">
         {PIECES.map((piece) => (
           <li key={piece.slug} className="xl-sheet__cell">
-            <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
+            <Piece slug={piece.slug} data={data} />
             <Link href={piece.slug} className="xl-caption">
               <span className="text-ink-secondary text-ui-lg tabular-nums">{piece.index}</span>
               <span className="text-ink text-heading-sm">{piece.title}</span>

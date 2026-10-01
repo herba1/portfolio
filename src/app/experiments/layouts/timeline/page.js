@@ -1,5 +1,6 @@
 import Link from "next/link";
-import LiveFrame from "../LiveFrame";
+import Piece from "../Piece";
+import { pieceData } from "../pieceData";
 import { PIECES, shortDate } from "../pieces";
 
 // D — Timeline. Pieces stack up from the day they shipped, so the page reads
@@ -27,7 +28,8 @@ for (let d = new Date(start); d < end; d = new Date(d.getFullYear(), d.getMonth(
 }
 const DAY_COUNT = Math.round(span / DAY);
 
-export default function TimelineLayout() {
+export default async function TimelineLayout() {
+  const data = await pieceData();
   const n = COLUMNS.length;
   return (
     <main className="xl-timeline" style={{ "--cols": n }}>
@@ -43,7 +45,9 @@ export default function TimelineLayout() {
           <div key={col.date} className="xl-timeline__col">
             {[...col.pieces].reverse().map((piece) => (
               <div key={piece.slug} className="xl-timeline__piece">
-                <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
+                <div className="xl-timeline__frame">
+                  <Piece slug={piece.slug} data={data} />
+                </div>
                 <Link href={piece.slug} className="xl-caption">
                   <span className="text-ink text-heading-sm">{piece.title}</span>
                   <span className="text-ink-secondary text-ui-lg ml-auto truncate">{piece.tags.join(", ")}</span>

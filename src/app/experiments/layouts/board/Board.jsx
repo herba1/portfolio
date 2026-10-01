@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import LiveFrame from "../LiveFrame";
+import Piece from "../Piece";
 import { shortDate } from "../pieces";
 
 // The hang, in wall units: a salon wall of four columns, each dropped by a
 // different amount so the tops never line up. A piece's width sets how big it
-// hangs and its own aspect sets the height; the frame renders it at true size
-// once the wall is zoomed in. A wall label sits under each one, set in UI
+// hangs and its own aspect sets the height; the piece lays itself out at that
+// size and the wall's zoom scales it. A wall label sits under each one, set in UI
 // type and enlarged with the wall so it still reads at a fit.
 const COLUMNS = [
   { drop: 0, items: [["/ink", 440], ["/halftone", 480]] },
@@ -65,7 +65,7 @@ function bounds(rects) {
   return { x: x1, y: y1, w: x2 - x1, h: y2 - y1 };
 }
 
-export default function Board({ pieces }) {
+export default function Board({ pieces, data }) {
   const stageRef = useRef(null);
   const [view, setView] = useState(null);
   const [animate, setAnimate] = useState(false);
@@ -96,16 +96,19 @@ export default function Board({ pieces }) {
   }, [fitAll]);
 
   // Wheel pans; ⌘/Ctrl-wheel (and trackpad pinch, which arrives as ctrl) zooms
-  // toward the pointer. Only over the wall — a frame keeps its own wheel.
+  // toward the pointer, anywhere. A plain wheel over a piece is left to it.
   useEffect(() => {
     const el = stageRef.current;
     if (!el) return undefined;
     const onWheel = (e) => {
+      const zoom = e.ctrlKey || e.metaKey;
+      // A plain wheel over a piece belongs to the piece (Deck runs on it).
+      if (!zoom && e.target.closest(".piece-box")) return;
       e.preventDefault();
       setAnimate(false);
       setView((v) => {
         if (!v) return v;
-        if (e.ctrlKey || e.metaKey) {
+        if (zoom) {
           const rect = el.getBoundingClientRect();
           const px = e.clientX - rect.left;
           const py = e.clientY - rect.top;
@@ -129,7 +132,7 @@ export default function Board({ pieces }) {
   }, [fitAll]);
 
   const onPointerDown = (e) => {
-    if (e.button !== 0 || e.target.closest("a, button")) return;
+    if (e.button !== 0 || e.target.closest("a, button, .piece-box")) return;
     drag.current = { id: e.pointerId, x: e.clientX, y: e.clientY };
     e.currentTarget.setPointerCapture(e.pointerId);
     setAnimate(false);
@@ -170,7 +173,7 @@ export default function Board({ pieces }) {
           {rects.map(({ piece, x, y, w, h }) => (
             <div key={piece.slug}>
               <div className="xl-board__frame" style={{ left: x, top: y, width: w, height: h }}>
-                <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
+                <Piece slug={piece.slug} data={data} />
               </div>
               <div
                 className="xl-board__label"

@@ -1,10 +1,12 @@
 import Link from "next/link";
-import LiveFrame from "../LiveFrame";
+import Piece from "../Piece";
+import { pieceData } from "../pieceData";
 import { PIECES } from "../pieces";
 
 // A — Bento. One screen, every piece in a tile cut to its own shape: the
 // phone flow runs the full height, the cover stack and the lens plate get
-// width, the plates stay squarish. Each runs at the size it reads best.
+// width, the plates stay squarish. Each piece is mounted as a component and
+// lays itself out for its tile.
 const AREAS = {
   "/ink": "ink",
   "/refract": "refract",
@@ -16,7 +18,8 @@ const AREAS = {
   "/tuner": "tuner",
 };
 
-export default function BentoLayout() {
+export default async function BentoLayout() {
+  const data = await pieceData();
   return (
     <main className="xl-bento">
       <h1 className="sr-only">Experiments</h1>
@@ -28,7 +31,7 @@ export default function BentoLayout() {
               <span className="text-ink text-heading-sm">{piece.title}</span>
               <span className="text-ink-secondary text-ui-lg ml-auto truncate">{piece.tags.join(", ")}</span>
             </Link>
-            <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
+            <Piece slug={piece.slug} data={data} />
           </li>
         ))}
       </ul>

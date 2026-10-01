@@ -9,23 +9,6 @@
   background: var(--color-surface);
 }
 
-/* A scaled live frame. The iframe lays out at desktop width and is shrunk
-   into the box from its top-left corner. */
-.xl-frame {
-  position: relative;
-  overflow: hidden;
-  background: var(--color-surface-raised);
-  outline: 1px solid var(--color-line);
-}
-.xl-frame iframe {
-  position: absolute;
-  top: 0;
-  left: 0;
-  border: 0;
-  transform-origin: 0 0;
-  background: var(--color-surface);
-}
-
 .xl-caption {
   display: flex;
   align-items: baseline;
@@ -106,8 +89,9 @@
   flex-direction: column;
   min-height: 0;
 }
-.xl-sheet__cell .xl-frame {
+.xl-sheet__cell > .piece-box {
   flex: 1;
+  height: auto;
   min-height: 0;
 }
 
@@ -119,7 +103,7 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
     grid-auto-rows: auto;
   }
-  .xl-sheet__cell .xl-frame {
+  .xl-sheet__cell > .piece-box {
     flex: none;
     aspect-ratio: 3 / 4;
   }
@@ -149,8 +133,9 @@
   min-width: 0;
   min-height: 0;
 }
-.xl-bento__tile .xl-frame {
+.xl-bento__tile > .piece-box {
   flex: 1;
+  height: auto;
   min-height: 0;
 }
 .xl-caption--top {
@@ -169,7 +154,7 @@
   .xl-bento__tile {
     grid-area: auto !important;
   }
-  .xl-bento__tile .xl-frame {
+  .xl-bento__tile > .piece-box {
     flex: none;
     aspect-ratio: 4 / 5;
   }
@@ -205,8 +190,9 @@
   display: flex;
   cursor: auto;
 }
-.xl-board__frame .xl-frame {
+.xl-board__frame > .piece-box {
   flex: 1;
+  height: auto;
 }
 .xl-board__label {
   position: absolute;
@@ -264,7 +250,7 @@
   flex: 0 1 auto;
   min-height: 0;
 }
-.xl-timeline__piece .xl-frame {
+.xl-timeline__frame {
   aspect-ratio: 4 / 3;
   min-height: 0;
 }
@@ -314,4 +300,13 @@
   .xl-timeline__axis {
     display: none;
   }
+}
+
+/* A piece mounted as a component. */
+.xl-piece {
+  background: var(--color-surface-raised);
+  outline: 1px solid var(--color-line);
+}
+.xl-bench {
+  flex: none;
 }

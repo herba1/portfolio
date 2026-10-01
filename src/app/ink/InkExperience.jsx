@@ -17,7 +17,7 @@ import { DEFAULT_IMAGE, DEFAULT_PRESET, INK_DEFAULTS, presetValues, rerollValues
 
 const STORAGE_KEY = "herb:ink:params";
 
-export default function InkExperience() {
+export default function InkExperience({ embedded = false }) {
   const [params, setParams] = useState(INK_DEFAULTS);
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
   const [image, setImage] = useState({ src: DEFAULT_IMAGE, label: "cast/john.webp" });
@@ -26,6 +26,7 @@ export default function InkExperience() {
   const [note, setNote] = useState(null);
   const [source, setSource] = useState({ status: "loading" });
 
+  const pageRef = useRef(null);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -35,8 +36,11 @@ export default function InkExperience() {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
   }, []);
 
+  // The panel starts closed when the piece's box is narrow (a phone, or a
+  // tile on the experiments index) — measured on the box, not the window.
   useEffect(() => {
-    if (window.innerWidth <= 900) setPanelOpen(false);
+    const box = pageRef.current?.closest(".piece-box");
+    if ((box?.clientWidth ?? window.innerWidth) <= 900) setPanelOpen(false);
   }, []);
 
   useEffect(() => {
@@ -151,32 +155,36 @@ export default function InkExperience() {
         : "loading…");
 
   return (
-    <main className="ink-page" data-panel={panelOpen ? "open" : "closed"}>
-      <aside className="ink-panel-slot">
-        <InkControls
-          params={params}
-          activePreset={activePreset}
-          imageLabel={image.label}
-          sourceStatus={sourceStatus}
-          onChange={handleChange}
-          onPreset={handlePreset}
-          onReroll={handleReroll}
-          onReset={handleReset}
-          onSave={handleSave}
-          onPickImage={() => fileInputRef.current?.click()}
-          onCopy={handleCopy}
-          onPaste={handlePaste}
-          note={note}
-        />
-      </aside>
+    <main ref={pageRef} className="ink-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
+      {embedded ? null : (
+        <>
+          <aside className="ink-panel-slot">
+            <InkControls
+              params={params}
+              activePreset={activePreset}
+              imageLabel={image.label}
+              sourceStatus={sourceStatus}
+              onChange={handleChange}
+              onPreset={handlePreset}
+              onReroll={handleReroll}
+              onReset={handleReset}
+              onSave={handleSave}
+              onPickImage={() => fileInputRef.current?.click()}
+              onCopy={handleCopy}
+              onPaste={handlePaste}
+              note={note}
+            />
+          </aside>
 
-      <button
-        type="button"
-        className="ink-panel-toggle"
-        onClick={() => setPanelOpen((open) => !open)}
-      >
-        {panelOpen ? "Hide controls" : "Controls"}
-      </button>
+          <button
+            type="button"
+            className="ink-panel-toggle"
+            onClick={() => setPanelOpen((open) => !open)}
+          >
+            {panelOpen ? "Hide controls" : "Controls"}
+          </button>
+        </>
+      )}
 
       <div
         className="ink-stage"
