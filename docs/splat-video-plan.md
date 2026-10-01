@@ -155,6 +155,31 @@ Waiting on Herb's OK to download:
 2. metalsplat, for per-scene optimisation on the Mac GPU, estimated +1.5–3 dB.
 3. Video-Depth-Anything-Small, for a 30 s depth-video fallback.
 
+### Round 4 (2026-10-01): smoothness, Herb's clip, refinement, camera solvers
+
+Checkpoint tag: `splat-video-checkpoint-1` (before this round).
+
+- **Smooth motion.** Flipbooks and streams crossfade two neighbouring moments, each gliding along its velocity: smoothstep weight, one shared sort, uniforms set with the order. This targets Herb's "still feels like a flip book".
+- **Per-window backgrounds for moving-camera long clips** (see round 3). Still-camera long clips (`longclip --still`) use one shared background from the whole-clip motion mask, 1 s windows and one moment per input frame.
+- **Herb's Photo Booth clip** (`~/dev/splat-clips/herb-photobooth.mov`, 150 s webcam, guitar with audio, lens assumed 70° across):
+  - preflight is red on parallax (6 px), as expected for a webcam;
+  - `herb-flip`: 4 s windowed flipbook at 12 fps with velocity and crossfade, 53 MB;
+  - `herb-depth-30s`: depth video with audio muxed in, 14 MB;
+  - `herb-30s`: still-camera splat stream with audio.
+- **Depth-video plate.** It no longer uses the median of all frames, which kept a ghost of an ever-present subject. It now averages only far pixels (Otsu split on disparity) and inpaints what is never seen (`--plate far`, default).
+- **Refinement with metalsplat** (`refine.py`, MIT; Apple GPU, 36 ms per render plus backward pass for 200k splats). Fitting stroller against all 43 non-held-out frames:
+
+  | Variant | PSNR | SSIM | LPIPS |
+  |---|---|---|---|
+  | none | 20.92 | 0.672 | 0.180 |
+  | colour | 21.08 | 0.630 | 0.260 |
+  | colour + opacity | 21.15 | 0.620 | 0.249 |
+  | all, background frozen | 20.65 | 0.597 | 0.231 |
+
+  PSNR rises a little but the perceptual scores get worse: the fit paints per-splat noise. Not adopted. Two lessons: the training render must use the player's coverage-normalized compositing, and the exact principal point (DAVIS's is about 3 px off centre), now recorded as `camera.intrinsics`.
+- **Camera paths.** The DAVIS npz samples are video frames 0–48 at every 4th frame (2 s), so comparisons against them must use the same span. Over matching spans the essential-matrix rotation tracks the dataset well, and the PnP solver over-turns about 1.2–1.6× on translating clips. `flipbook --poses vggt` uses VGGT-1B (now downloaded) for the cameras and lens before MoVieS loads.
+- **Compression.** gzip gives 1.03–1.1× on splat bins; Morton order plus delta coding gives 1.26× on positions only. Not worth it.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.

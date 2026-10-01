@@ -74,6 +74,8 @@ def skip_vggt_download():
     def untrained(cls, *args, **kwargs):
         return cls(enable_camera=False, enable_track=False)
 
+    if not hasattr(VGGT, "pretrained"):
+        VGGT.pretrained = VGGT.from_pretrained
     VGGT.from_pretrained = classmethod(untrained)
 
 

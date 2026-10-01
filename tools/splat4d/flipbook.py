@@ -15,7 +15,7 @@ from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "split_static", "static_eps", "velocity", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "spread", "estimate_poses", "poses", "holdout", "view_merge", "split_static", "static_eps", "velocity", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -30,6 +30,7 @@ def parse_args():
     parser.add_argument("--out-times", type=int, default=25)
     parser.add_argument("--spread", action="store_true")
     parser.add_argument("--estimate-poses", action="store_true")
+    parser.add_argument("--poses", choices=["pnp", "vggt"], default="pnp")
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--view-merge", action="store_true")
     parser.add_argument("--split-static", action=argparse.BooleanOptionalAction, default=True)
@@ -276,10 +277,23 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
 
     from infer import load_model, window_frames
 
+    if args.poses == "vggt":
+        from poses_vggt import vggt_cameras
+
+        C2W, lens = vggt_cameras(args.movies, images)
+        fxfycxcy = np.tile(np.median(lens, axis=0), (len(images), 1)).astype(np.float32)
+        args.lens_override = fxfycxcy
     model, dtype = load_model(args)
     started = time.time()
     depths = None
-    if args.estimate_poses:
+    if args.poses == "vggt":
+        from infer import window_depths
+        from poses import rotation_degrees
+
+        depths = window_depths(model, dtype, args, images, C2W, fxfycxcy)
+        swing = max(rotation_degrees(C2W[0], c) for c in C2W)
+        log(f"VGGT camera path: up to {swing:.1f} deg of turn")
+    elif args.estimate_poses:
         from infer import window_depths
         from poses import estimate_poses, rotation_degrees
 
@@ -402,6 +416,11 @@ def main():
             holdout["args"] = args
         _, _, H, W = images.shape
         frames, depth = run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout)
+        lens_path = os.path.join(os.path.dirname(cache_path), "lens.npy")
+        if getattr(args, "lens_override", None) is not None:
+            np.save(lens_path, args.lens_override)
+        if args.poses == "vggt" and os.path.exists(lens_path):
+            fxfycxcy = np.load(lens_path)
         count = len(frames)
         args.fps = count / clip_duration
     else:

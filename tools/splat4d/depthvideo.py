@@ -32,6 +32,7 @@ def parse_args():
     parser.add_argument("--hfov", default="auto")
     parser.add_argument("--temporal", type=int, default=1)
     parser.add_argument("--plate-percentile", type=float, default=80.0)
+    parser.add_argument("--plate", choices=["far", "median"], default="far")
     parser.add_argument("--crf", type=int, default=16)
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", required=True)
@@ -91,6 +92,34 @@ def clip_depths(args, images, C2W, fxfycxcy, cache_path):
     return depth
 
 
+def far_plate(colors, depth):
+    disparity = 1.0 / np.clip(depth, 1e-4, None)
+    levels = np.clip(disparity / np.percentile(disparity, 99.5) * 255, 0, 255).astype(np.uint8)
+    split, _ = cv2.threshold(levels.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    far = levels < split
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    far = np.stack([cv2.erode(f.astype(np.uint8), grow) > 0 for f in far])
+    seen = far.any(axis=0)
+    weights = far.astype(np.float32)
+    count = np.maximum(weights.sum(axis=0), 1)
+    plate_depth = (depth * weights).sum(axis=0) / count
+    plate_depth[~seen] = np.median(plate_depth[seen]) if seen.any() else np.median(depth)
+    height, width = colors.shape[1:3]
+    small_far = np.stack([cv2.resize(f.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST) for f in far]).astype(bool)
+    color_weights = small_far[..., None].astype(np.float32)
+    plate_color = ((colors.astype(np.float32) * color_weights).sum(axis=0) / np.maximum(color_weights.sum(axis=0), 1)).astype(np.uint8)
+    hole = (~small_far.any(axis=0)).astype(np.uint8) * 255
+    hole = cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    plate_color = cv2.inpaint(plate_color, hole, 9, cv2.INPAINT_TELEA)
+    depth_hole = cv2.dilate((~seen).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    plate_disparity = 1.0 / np.clip(plate_depth, 1e-4, None)
+    scale = float(plate_disparity.max())
+    filled = cv2.inpaint((plate_disparity / scale * 255).astype(np.uint8), depth_hole, 9, cv2.INPAINT_TELEA)
+    plate_depth = np.where(depth_hole > 0, 1.0 / np.clip(filled.astype(np.float32) / 255 * scale, 1e-4, None), plate_depth)
+    log(f"plate: background seen on {100 * seen.mean():.0f}% of pixels, the rest inpainted")
+    return plate_color, plate_depth.astype(np.float32)
+
+
 def smooth_in_time(depth, radius):
     if radius <= 0:
         return depth
@@ -144,8 +173,11 @@ def main():
 
     depth = smooth_in_time(clip_depths(args, images, C2W, fxfycxcy, cache_path), args.temporal)
     save_depth_preview(depth, os.path.join(preview_dir, "depth.mp4"))
-    plate_depth = np.percentile(depth, args.plate_percentile, axis=0)
-    plate_color = np.median(colors, axis=0).astype(np.uint8)
+    if args.plate == "far":
+        plate_color, plate_depth = far_plate(colors, depth)
+    else:
+        plate_depth = np.percentile(depth, args.plate_percentile, axis=0)
+        plate_color = np.median(colors, axis=0).astype(np.uint8)
 
     disparity = 1.0 / np.clip(depth, 1e-4, None)
     low = float(np.percentile(disparity, 0.5))
