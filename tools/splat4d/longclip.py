@@ -17,7 +17,7 @@ from splat4d_format import BASE_DTYPE, covariance_upper, pick_cov_scale, positio
 MOVIES_COMMIT = "77262fa"
 WINDOW_SETTINGS = (
     "video", "start", "end", "window_seconds", "window", "moments_per_second", "width", "hfov", "dtype",
-    "min_opacity", "subject_voxel", "depth_voxel", "static_eps",
+    "min_opacity", "subject_voxel", "depth_voxel", "static_eps", "velocity",
 )
 
 
@@ -44,6 +44,7 @@ def parse_args():
     parser.add_argument("--ray-clamp", type=float, default=2.0)
     parser.add_argument("--opacity-gain", type=float, default=1.0)
     parser.add_argument("--audio-bitrate", default="128k")
+    parser.add_argument("--velocity", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--fresh", action="store_true")
     parser.add_argument("--frames-chunk", type=int, default=4)
@@ -62,6 +63,8 @@ def parse_args():
 def to_world(part, C2W):
     R, t = C2W[:3, :3].astype(np.float64), C2W[:3, 3].astype(np.float64)
     xyz = part["xyz"].astype(np.float64) @ R.T + t
+    if "velocity" in part:
+        part = {**part, "velocity": (part["velocity"].astype(np.float64) @ R.T).astype(np.float32)}
     xx, xy, xz, yy, yz, zz = (part["cov"][:, i].astype(np.float64) for i in range(6))
     sigma = np.stack([np.stack([xx, xy, xz], 1), np.stack([xy, yy, yz], 1), np.stack([xz, yz, zz], 1)], 1)
     turned = R[None] @ sigma @ R.T[None]
@@ -70,7 +73,10 @@ def to_world(part, C2W):
 
 
 def rescaled(part, ratio):
-    return {**part, "xyz": part["xyz"] * ratio, "cov": part["cov"] * ratio * ratio}
+    moved = {**part, "xyz": part["xyz"] * ratio, "cov": part["cov"] * ratio * ratio}
+    if "velocity" in part:
+        moved["velocity"] = part["velocity"] * ratio
+    return moved
 
 
 def write_records(out_dir, prefix, parts):
@@ -87,13 +93,20 @@ def write_records(out_dir, prefix, parts):
     points = position_records(xyz, opacity, low, high)
     base.tofile(os.path.join(out_dir, f"{prefix}-base.bin"))
     points.tofile(os.path.join(out_dir, f"{prefix}-points.bin"))
-    return {
+    record = {
         "count": int(cov.shape[0]),
         "base": f"{prefix}-base.bin",
         "points": f"{prefix}-points.bin",
         "bounds": {"min": [float(v) for v in low], "max": [float(v) for v in high]},
         "covScale": cov_scale,
-    }, base.nbytes + points.nbytes
+    }
+    size = base.nbytes + points.nbytes
+    if all("velocity" in p for p in parts):
+        velocity = np.concatenate([p["velocity"] for p in parts]).astype("<f2")
+        velocity.tofile(os.path.join(out_dir, f"{prefix}-velocity.bin"))
+        record["velocity"] = f"{prefix}-velocity.bin"
+        size += velocity.nbytes
+    return record, size
 
 
 def extract_audio(args, path, start, duration):
@@ -266,6 +279,8 @@ def main():
             moment_time = (k + u) * args.window_seconds
             camera = camera_at(C2W, input_u, moment_time / span)
             part = to_world(rescaled(frames[i]["subject"], ratio), origin)
+            if "velocity" in part:
+                part["velocity"] = part["velocity"] / args.window_seconds
             if part["xyz"].shape[0]:
                 distance = np.linalg.norm(part["xyz"] - camera[:3, 3], axis=1)
                 part = {key: value[distance <= np.percentile(distance, args.max_depth_pct)] for key, value in part.items()}

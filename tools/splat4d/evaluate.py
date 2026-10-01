@@ -66,8 +66,8 @@ def swung(C2W, pivot_depth, degrees):
     return moved
 
 
-def render_from(scene, moment, C2W, fxfycxcy, W, H):
-    xyz, cov, rgb, alpha = frame_splats(scene, moment)
+def render_from(scene, moment, C2W, fxfycxcy, W, H, dt=0.0):
+    xyz, cov, rgb, alpha = frame_splats(scene, moment, dt)
     xyz, cov = to_camera(xyz, cov, np.linalg.inv(C2W))
     image, coverage = render(xyz, cov, rgb, alpha, fxfycxcy, W, H)
     solid = np.clip((coverage - 0.02) / (0.35 - 0.02), 0, 1)
@@ -99,6 +99,7 @@ def main():
     parser.add_argument("--holdout", required=True)
     parser.add_argument("--label", default=None)
     parser.add_argument("--table", default=None)
+    parser.add_argument("--glide", action="store_true")
     args = parser.parse_args()
 
     scene = load_splat4d(args.folder)
@@ -111,7 +112,8 @@ def main():
     rows, renders, truths = [], [], []
     for image, u, C2W in zip(images, us, cameras):
         moment = moment_for(float(u), meta["frames"])
-        rendered, coverage = render_from(scene, moment, C2W, fxfycxcy, W, H)
+        dt = (float(u) - moment / max(1, meta["frames"] - 1)) * float(meta["duration"]) if args.glide else 0.0
+        rendered, coverage = render_from(scene, moment, C2W, fxfycxcy, W, H, dt)
         truth = image.transpose(1, 2, 0)
         rows.append({
             "u": float(u), "moment": moment,

@@ -21,13 +21,16 @@ def load_flipbook(folder, meta):
         raise SystemExit(f"record counts base {base.size}, points {points.size} do not match meta.json {meta['count']}")
     low = np.array(meta["bounds"]["min"])
     high = np.array(meta["bounds"]["max"])
-    return {
+    scene = {
         "meta": meta,
         "cov": base["cov"].astype(np.float64) / meta["covScale"],
         "rgb": base["rgba"][:, :3] / 255.0,
         "xyz": low + points["xyz"].astype(np.float64) / 65535.0 * (high - low),
         "opacity": points["opacity"] / 65535.0,
     }
+    if meta.get("velocity"):
+        scene["velocity"] = np.fromfile(os.path.join(folder, meta["velocity"]), dtype="<f2").astype(np.float64).reshape(-1, 3)
+    return scene
 
 
 def load_splat4d(folder):
@@ -62,13 +65,16 @@ def load_splat4d(folder):
     }
 
 
-def frame_splats(scene, frame):
+def frame_splats(scene, frame, dt=0.0):
     meta = scene["meta"]
     if meta.get("kind") == "flipbook":
         static = meta["staticCount"]
         offsets = meta["frameOffsets"]
         rows = np.r_[0:static, static + offsets[frame]:static + offsets[frame + 1]]
-        return scene["xyz"][rows], scene["cov"][rows], scene["rgb"][rows], scene["opacity"][rows]
+        xyz = scene["xyz"][rows]
+        if dt and "velocity" in scene:
+            xyz = xyz + scene["velocity"][rows] * dt
+        return xyz, scene["cov"][rows], scene["rgb"][rows], scene["opacity"][rows]
     xyz = np.concatenate([scene["static_xyz"], scene["dynamic_xyz"][frame]])
     alpha = np.concatenate([scene["static_opacity"], scene["dynamic_opacity"][frame]])
     return xyz, scene["cov"], scene["rgb"], alpha

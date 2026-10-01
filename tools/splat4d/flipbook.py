@@ -15,7 +15,7 @@ from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "split_static", "static_eps", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "split_static", "static_eps", "velocity", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -34,6 +34,7 @@ def parse_args():
     parser.add_argument("--view-merge", action="store_true")
     parser.add_argument("--split-static", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--ray-clamp", type=float, default=2.0)
+    parser.add_argument("--velocity", action="store_true")
     parser.add_argument("--static-eps", type=float, default=0.01)
     parser.add_argument("--splat-floor", type=float, default=0.5)
     parser.add_argument("--opacity-gain", type=float, default=1.0)
@@ -144,8 +145,10 @@ def mask_sheet(images, masks, path):
     contact_sheet(tinted[::step], path)
 
 
-def part_of(state, rows, cov):
-    return {"xyz": state["xyz"][rows], "cov": cov, "color": state["color"][rows], "opacity": state["opacity"][rows]}
+def part_of(state, rows, cov, extras=None):
+    part = {"xyz": state["xyz"][rows], "cov": cov, "color": state["color"][rows], "opacity": state["opacity"][rows]}
+    part.update(extras or {})
+    return part
 
 
 def uses_static_split(args):
@@ -164,13 +167,15 @@ def selector(args, fx_px, views=None):
         subject_rows = np.flatnonzero(usable & in_mask)
         background_rows = np.flatnonzero(usable & own & ~in_mask) if not uses_static_split(args) else np.zeros(0, dtype=np.int64)
         subject_cov = covariance_upper(state["scale"][subject_rows], state["rotation"][subject_rows])
+        extras = {"velocity": state["velocity"][subject_rows]} if "velocity" in state else None
         subject, _ = merge(
             keys_for(i, state["xyz"][subject_rows]),
             state["xyz"][subject_rows], subject_cov, state["color"][subject_rows], state["opacity"][subject_rows],
-        ) if subject_rows.size else (part_of(state, subject_rows, subject_cov), 0)
+            extras=extras,
+        ) if subject_rows.size else (part_of(state, subject_rows, subject_cov, extras), 0)
         background_cov = covariance_upper(state["scale"][background_rows], state["rotation"][background_rows])
         return {
-            "subject": {k: subject[k].astype(np.float32) for k in PART_KEYS},
+            "subject": {k: subject[k].astype(np.float32) for k in PART_KEYS + (("velocity",) if extras else ())},
             "background": {k: v.astype(np.float32) for k, v in part_of(state, background_rows, background_cov).items()},
         }
 
@@ -213,7 +218,7 @@ def save_parts(path, settings, frames, depth):
     for kind in ("subject", "background"):
         counts = np.array([f[kind]["xyz"].shape[0] for f in frames])
         arrays[f"{kind}_offsets"] = np.concatenate([[0], np.cumsum(counts)])
-        for key in PART_KEYS:
+        for key in frames[0][kind]:
             arrays[f"{kind}_{key}"] = np.concatenate([f[kind][key] for f in frames])
     np.savez(path, **arrays)
 
@@ -230,9 +235,10 @@ def load_parts(path, settings):
     frames = [{} for _ in range(count)]
     for kind in ("subject", "background"):
         offsets = data[f"{kind}_offsets"]
-        arrays = {key: data[f"{kind}_{key}"] for key in PART_KEYS}
+        keys = [name[len(kind) + 1:] for name in data.files if name.startswith(f"{kind}_") and name != f"{kind}_offsets"]
+        arrays = {key: data[f"{kind}_{key}"] for key in keys}
         for i in range(count):
-            frames[i][kind] = {key: arrays[key][offsets[i]:offsets[i + 1]] for key in PART_KEYS}
+            frames[i][kind] = {key: arrays[key][offsets[i]:offsets[i + 1]] for key in keys}
     return frames, data["depth"]
 
 
@@ -460,6 +466,9 @@ def main():
         meta["times"] = [round(float(u) * meta["duration"], 5) for u in np.linspace(0, 1, count)]
     else:
         meta["times"] = [round(i / args.fps, 5) for i in range(count)]
+    for part in per_frame:
+        if "velocity" in part:
+            part["velocity"] = part["velocity"] / max(meta["duration"], 1e-6)
     sizes = write_flipbook(args.out, meta, static, per_frame)
     write_index(os.path.dirname(args.out), name)
     nearest = np.round(np.linspace(0, images.shape[0] - 1, count)).astype(int)

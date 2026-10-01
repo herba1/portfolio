@@ -165,6 +165,36 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_
 
     frames = []
     first_depth = None
+    wants_velocity = bool(getattr(args, "velocity", False))
+    held = []
+
+    def emit(entry, before, after):
+        i, state = entry
+        if wants_velocity:
+            if before is not None and after is not None:
+                state["velocity"] = (after[1]["xyz"] - before[1]["xyz"]) / (out_times[after[0]] - out_times[before[0]])
+            elif after is not None:
+                state["velocity"] = (after[1]["xyz"] - state["xyz"]) / (out_times[after[0]] - out_times[i])
+            elif before is not None:
+                state["velocity"] = (state["xyz"] - before[1]["xyz"]) / (out_times[i] - out_times[before[0]])
+            else:
+                state["velocity"] = np.zeros_like(state["xyz"])
+        own = np.zeros(HW * F_in, dtype=bool)
+        nearest = int(np.abs(times - out_times[i]).argmin())
+        own[nearest * HW:(nearest + 1) * HW] = True
+        frames.append(select(i, state, region(i, state["xyz"]), own, None))
+
+    def push(entry):
+        held.append(entry)
+        if not wants_velocity:
+            emit(held.pop(), None, None)
+            return
+        if len(held) == 3:
+            emit(held[1], held[0], held[2])
+            held.pop(0)
+        elif len(held) == 2 and held[0][0] == 0:
+            emit(held[0], None, held[1])
+
     for begin in range(0, out_times.size, chunk):
         part = out_times[begin:begin + chunk]
         with torch.inference_mode():
@@ -185,17 +215,15 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_
                 if pred_motion_gs:
                     outputs.update(pred_motion_gs[local])
                 xyz, color, opacity, scale, rotation = activated_attributes(renderer, outputs, xyz_flat)
-                state = {
+                push((i, {
                     "xyz": xyz.cpu().numpy(), "color": color.cpu().numpy(), "opacity": opacity.cpu().numpy(),
                     "scale": scale.cpu().numpy(), "rotation": rotation.cpu().numpy(),
-                }
-                own = np.zeros(HW * F_in, dtype=bool)
-                nearest = int(np.abs(times - out_times[i]).argmin())
-                own[nearest * HW:(nearest + 1) * HW] = True
-                frames.append(select(i, state, region(i, state["xyz"]), own, None))
+                }))
         del backbone_outputs, pred_motions, pred_motion_gs
         if device == "mps":
             torch.mps.empty_cache()
+    if wants_velocity and held:
+        emit(held[-1], held[-2] if len(held) > 1 else None, None)
     return frames, first_depth
 
 

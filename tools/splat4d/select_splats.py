@@ -39,7 +39,7 @@ def stacked_alpha(groups, count, alpha):
     return 1.0 - np.exp(np.bincount(groups, log_transmittance, minlength=count))
 
 
-def merge(keys, xyz, cov, color, alpha, track_xyz=None, track_alpha=None):
+def merge(keys, xyz, cov, color, alpha, track_xyz=None, track_alpha=None, extras=None):
     _, groups, sizes = np.unique(keys, return_inverse=True, return_counts=True)
     count = sizes.size
     weights = np.clip(alpha, 1e-6, None).astype(np.float64)
@@ -55,6 +55,8 @@ def merge(keys, xyz, cov, color, alpha, track_xyz=None, track_alpha=None):
         "color": weighted_mean(groups, count, weights, color.astype(np.float64)).astype(np.float32),
         "opacity": np.minimum(stacked_alpha(groups, count, alpha), MAX_ALPHA).astype(np.float32),
     }
+    for name, values in (extras or {}).items():
+        merged[name] = weighted_mean(groups, count, weights, values.astype(np.float64)).astype(np.float32)
     if track_xyz is not None:
         merged["track_xyz"] = np.stack([
             weighted_mean(groups, count, weights, frame.astype(np.float64)) for frame in track_xyz

@@ -132,8 +132,17 @@ def write_flipbook(out_dir, meta, static, frames):
     base["rgba"][:, 3] = np.round(np.clip(opacity, 0, 1) * 255).astype(np.uint8)
     points = position_records(xyz, opacity, low, high)
 
+    files = [("base.bin", base), ("points.bin", points)]
+    if any("velocity" in f for f in frames):
+        velocity = np.concatenate([p.get("velocity", np.zeros((p["xyz"].shape[0], 3), dtype=np.float32)) for p in parts])
+        files.append(("velocity.bin", velocity.astype("<f2")))
+        meta = {**meta, "velocity": "velocity.bin"}
+    else:
+        stale = os.path.join(out_dir, "velocity.bin")
+        if os.path.exists(stale):
+            os.remove(stale)
     sizes = {}
-    for filename, records in (("base.bin", base), ("points.bin", points)):
+    for filename, records in files:
         path = os.path.join(out_dir, filename)
         records.tofile(path)
         sizes[filename] = os.path.getsize(path)
@@ -150,7 +159,7 @@ def write_flipbook(out_dir, meta, static, frames):
     }
     ordered = {key: meta[key] for key in (
         "format", "version", "kind", "exportId", "count", "staticCount", "frames", "fps", "duration",
-        "bounds", "covScale", "coords", "camera", "source", "frameOffsets", "times", "cameras",
+        "bounds", "covScale", "coords", "camera", "source", "frameOffsets", "times", "cameras", "velocity",
     ) if key in meta}
     with open(os.path.join(out_dir, "meta.json"), "w") as handle:
         json.dump(ordered, handle, indent=2)
