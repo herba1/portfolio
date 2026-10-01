@@ -154,8 +154,11 @@ export default function InkExperience({ embedded = false }) {
         ? "could not load that image"
         : "loading…");
 
+  // Embedded on the experiments index the host page owns <main>.
+  const Root = embedded ? "div" : "main";
+
   return (
-    <main ref={pageRef} className="ink-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
+    <Root ref={pageRef} className="ink-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
       {embedded ? null : (
         <>
           <aside className="ink-panel-slot">
@@ -213,6 +216,6 @@ export default function InkExperience({ embedded = false }) {
         className="ink-file"
         onChange={(event) => acceptFile(event.target.files?.[0])}
       />
-    </main>
+    </Root>
   );
 }

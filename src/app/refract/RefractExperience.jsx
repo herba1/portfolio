@@ -175,8 +175,11 @@ export default function RefractExperience({ embedded = false }) {
         ? "could not load that image"
         : "loading…");
 
+  // Embedded on the experiments index the host page owns <main>.
+  const Root = embedded ? "div" : "main";
+
   return (
-    <main ref={pageRef} className="rf-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
+    <Root ref={pageRef} className="rf-page" data-panel={panelOpen && !embedded ? "open" : "closed"}>
       {embedded ? null : (
         <>
           <aside className="rf-panel-slot">
@@ -235,6 +238,6 @@ export default function RefractExperience({ embedded = false }) {
         className="rf-file"
         onChange={(event) => acceptFile(event.target.files?.[0])}
       />
-    </main>
+    </Root>
   );
 }
