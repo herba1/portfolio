@@ -93,23 +93,28 @@ def clip_depths(args, images, C2W, fxfycxcy, cache_path):
 
 
 def far_plate(colors, depth):
-    disparity = 1.0 / np.clip(depth, 1e-4, None)
-    levels = np.clip(disparity / np.percentile(disparity, 99.5) * 255, 0, 255).astype(np.uint8)
-    split, _ = cv2.threshold(levels.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-    far = levels < split
-    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
-    far = np.stack([cv2.erode(f.astype(np.uint8), grow) > 0 for f in far])
-    seen = far.any(axis=0)
-    weights = far.astype(np.float32)
-    count = np.maximum(weights.sum(axis=0), 1)
-    plate_depth = (depth * weights).sum(axis=0) / count
-    plate_depth[~seen] = np.median(plate_depth[seen]) if seen.any() else np.median(depth)
+    disparity_top = float(np.percentile(1.0 / np.clip(depth[:: max(1, len(depth) // 30)], 1e-4, None), 99.5))
+    sample = np.clip(1.0 / np.clip(depth[:: max(1, len(depth) // 30)], 1e-4, None) / disparity_top * 255, 0, 255).astype(np.uint8)
+    split, _ = cv2.threshold(sample.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    shrink = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     height, width = colors.shape[1:3]
-    small_far = np.stack([cv2.resize(f.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST) for f in far]).astype(bool)
-    color_weights = small_far[..., None].astype(np.float32)
-    plate_color = ((colors.astype(np.float32) * color_weights).sum(axis=0) / np.maximum(color_weights.sum(axis=0), 1)).astype(np.uint8)
-    hole = (~small_far.any(axis=0)).astype(np.uint8) * 255
-    hole = cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
+    depth_sum = np.zeros(depth.shape[1:], dtype=np.float64)
+    depth_count = np.zeros(depth.shape[1:], dtype=np.float64)
+    color_sum = np.zeros((height, width, 3), dtype=np.float64)
+    color_count = np.zeros((height, width), dtype=np.float64)
+    for frame_depth, frame_color in zip(depth, colors):
+        levels = np.clip(1.0 / np.clip(frame_depth, 1e-4, None) / disparity_top * 255, 0, 255).astype(np.uint8)
+        far = cv2.erode((levels < split).astype(np.uint8), shrink)
+        depth_sum += frame_depth * far
+        depth_count += far
+        far_color = cv2.resize(far, (width, height), interpolation=cv2.INTER_NEAREST).astype(np.float64)
+        color_sum += frame_color * far_color[..., None]
+        color_count += far_color
+    seen = depth_count > 0
+    plate_depth = np.where(seen, depth_sum / np.maximum(depth_count, 1), 0.0)
+    plate_depth[~seen] = np.median(plate_depth[seen]) if seen.any() else float(np.median(depth))
+    plate_color = (color_sum / np.maximum(color_count, 1)[..., None]).astype(np.uint8)
+    hole = cv2.dilate((color_count == 0).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7)))
     plate_color = cv2.inpaint(plate_color, hole, 9, cv2.INPAINT_TELEA)
     depth_hole = cv2.dilate((~seen).astype(np.uint8) * 255, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
     plate_disparity = 1.0 / np.clip(plate_depth, 1e-4, None)
