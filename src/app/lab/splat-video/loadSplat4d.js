@@ -406,11 +406,14 @@ async function loadFlipbook(clip, folder, meta, { signal, onProgress }) {
     }),
   ]);
 
+  const velocity = meta.velocity ? await fetchVelocity({ folder, version, clip, set: { velocity: meta.velocity, count: meta.count }, rows, signal }) : null;
+
   return {
     clip,
     meta: { ...meta, dynamicCount: 0 },
     bytes: total,
     base,
+    velocity,
     staticPoints: points,
     dynamicPoints: new Uint16Array(4),
     layout: { width: TEXTURE_WIDTH, baseRows: rows, staticRows: rows, dynamicRows: 1, layerTexels: 1 },

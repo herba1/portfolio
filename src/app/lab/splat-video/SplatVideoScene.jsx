@@ -20,6 +20,12 @@ import {
   sortCapacity,
 } from "./splatVideoParams";
 
+function halfStepOf(meta) {
+  const { times } = meta;
+  if (times.length < 2) return 0;
+  return (0.5 * (times[times.length - 1] - times[0])) / (times.length - 1);
+}
+
 function sameRequest(a, b) {
   if (!a || !b) return false;
   for (let k = 0; k < 4; k += 1) if (Math.abs(a.zRow[k] - b.zRow[k]) > SORT.depthEpsilon) return false;
@@ -74,6 +80,9 @@ function createRuntime(clip) {
     attribute.array = event.data.order;
     attribute.needsUpdate = true;
     geometry.instanceCount = event.data.count;
+    if (Array.isArray(meta.times) && meta.times[event.data.frame] !== undefined) {
+      material.uniforms.uMomentTime.value = meta.times[event.data.frame];
+    }
     sorter.inFlight = false;
     send();
   };
@@ -176,6 +185,8 @@ function SplatField({ clip, engineRef }) {
     uniforms.uBlend.value = cursor.blend;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
+    uniforms.uTime.value = engine.time;
+    uniforms.uHalfStep.value = engine.reducedMotion || !Array.isArray(meta.times) ? 0 : halfStepOf(meta);
 
     runtime.want({ zRow, ...cursor });
   });

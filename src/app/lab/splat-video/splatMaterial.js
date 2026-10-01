@@ -112,18 +112,27 @@ uniform float uBlend;
 uniform vec3 uBoundsMin;
 uniform vec3 uBoundsSize;
 uniform float uCovScale;
+uniform highp sampler2D uVelocity;
+uniform float uGlideOn;
+uniform float uTime;
+uniform float uMomentTime;
+uniform float uHalfStep;
 
 void readPoint(int index, out vec3 center, out float opacity) {
   vec4 point;
+  vec3 drift = vec3(0.0);
   if (index < uStaticCount) {
     point = vec4(texelFetch(uStatic, texelFor(index), 0));
+    if (uGlideOn > 0.5) {
+      drift = texelFetch(uVelocity, texelFor(index), 0).xyz * clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
+    }
   } else {
     ivec2 cell = texelFor(index - uStaticCount);
     vec4 fromPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame0), 0));
     vec4 toPoint = vec4(texelFetch(uDynamic, ivec3(cell, uFrame1), 0));
     point = mix(fromPoint, toPoint, uBlend);
   }
-  center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize;
+  center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize + drift;
   opacity = point.w * UNIT16;
 }
 
@@ -146,6 +155,7 @@ uniform vec3 uChunkBoundsMin;
 uniform vec3 uChunkBoundsSize;
 uniform float uChunkCovScale;
 uniform highp sampler2D uChunkVelocity;
+uniform float uChunkGlideOn;
 uniform float uTime;
 uniform float uMomentTime;
 uniform float uHalfStep;
@@ -158,8 +168,10 @@ void readPoint(int index, out vec3 center, out float opacity) {
   } else {
     ivec2 cell = texelFor(index - uStaticCount);
     point = vec4(texelFetch(uChunkPoints, cell, 0));
-    float glide = clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
-    center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize + texelFetch(uChunkVelocity, cell, 0).xyz * glide;
+    center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize;
+    if (uChunkGlideOn > 0.5) {
+      center += texelFetch(uChunkVelocity, cell, 0).xyz * clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
+    }
   }
   opacity = point.w * UNIT16;
 }
@@ -227,14 +239,17 @@ export function createSplatTextures(clip) {
   dynamicTexture.type = THREE.UnsignedShortType;
   integerTexture(dynamicTexture);
   dynamicTexture.internalFormat = "RGBA16UI";
+  const velocityTexture = clip.velocity ? halfFloatTexture(clip.velocity, layout.width, layout.staticRows) : null;
   return {
     baseTexture,
     staticTexture,
     dynamicTexture,
+    velocityTexture,
     dispose() {
       baseTexture.dispose();
       staticTexture.dispose();
       dynamicTexture.dispose();
+      if (velocityTexture) velocityTexture.dispose();
     },
   };
 }
@@ -280,6 +295,11 @@ export function createSplatMaterial(textures, meta) {
       uBoundsMin: { value: boundsMinOf(meta.bounds) },
       uBoundsSize: { value: boundsSizeOf(meta.bounds) },
       uCovScale: { value: meta.covScale },
+      uVelocity: { value: textures.velocityTexture ?? STILL_VELOCITY },
+      uGlideOn: { value: textures.velocityTexture ? 1 : 0 },
+      uTime: { value: 0 },
+      uMomentTime: { value: 0 },
+      uHalfStep: { value: 0 },
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
     },
@@ -338,6 +358,7 @@ export function createStreamMaterial(staticPair, staticSet) {
       uChunkBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
       uChunkCovScale: { value: 1 },
       uChunkVelocity: { value: STILL_VELOCITY },
+      uChunkGlideOn: { value: 0 },
       uTime: { value: 0 },
       uMomentTime: { value: 0 },
       uHalfStep: { value: 0 },
@@ -356,6 +377,7 @@ export function bindStreamChunk(material, pair, set) {
   uniforms.uChunkBoundsSize.value.set(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
   uniforms.uChunkCovScale.value = set.covScale;
   uniforms.uChunkVelocity.value = pair.velocityTexture ?? STILL_VELOCITY;
+  uniforms.uChunkGlideOn.value = pair.velocityTexture ? 1 : 0;
 }
 
 export function createSplatGeometry(count) {
