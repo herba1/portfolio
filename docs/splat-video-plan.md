@@ -108,6 +108,20 @@ Scores are measured from each frame's own estimated camera (`check.py --cameras`
 - **The camera solver was right all along.** Lucia's real lens is 24.17° (tennis is 34.8°). The estimate over-turned by a constant 1.39×, which is exactly the focal ratio. With the right hfov it reads 11.3° against the dataset's 11.46°. Alternating the depth and pose passes changed nothing. The lens has to be right, so read it from the iPhone metadata or pass `--hfov`.
 - **Output times are processed in chunks** (`--time-chunk 25`), and each moment is merged as it comes out, so 49 moments fit in memory: 84 s on the M5.
 
+### Filming guide v2 (Herb's own clip)
+
+Check the clip first: `tools/splat4d/preflight.sh clip.mov`. Aim for green on parallax.
+
+- **Move sideways, don't pan.** Walk a slow arc around the subject, 0.5–1 m over 3–4 s, at 1.5–3 m distance, keeping the subject centred. Pure rotation (a pan or handheld sway) gives no new viewpoints. The drummer clip looks handheld but reads 1 px of parallax. That arc is the camera range viewers get. Repeat the arc back and forth for 30 s, or have a friend walk it.
+- **Phone settings:**
+  - 1× lens only, so the lens metadata gives the exact field of view.
+  - HDR video off. Auto FPS off. Enhanced stabilization, Action and Cinematic modes off.
+  - Lock focus and exposure (long-press).
+  - 30 fps, 4K or 1080p, landscape.
+- **Light and subject:** bright even light, slow clear motion, textured background, no mirrors or screens.
+- **Audio:** clap once at the start and once at the end. The claps sync audio and video, and later can sync several phones.
+- **The biggest jump after this:** 3–4 phones on tripods 30–40° apart, all filming the same take, synced by the clap. That is a mini version of 4DV.ai's capture rig, and MoVieS already accepts several cameras per moment.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
