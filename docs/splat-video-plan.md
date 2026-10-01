@@ -68,6 +68,29 @@ This mode doesn't use splats. It makes one H.264 file with the color frame (2× 
 
 A sharper flipbook (subject voxel 1.0) on Johnny gained about 1 dB for twice the size (88 MB), so it was dropped. The page has a pill row for switching clips in place.
 
+### Why tennis-flip looks best: the moving camera
+
+`tennis-flip` takes 13 input frames spread over the whole clip in one window, has the model predict 25 moments, and rebuilds each frame whole: no background/subject split. The tennis camera pans and its poses are known, so the model sees the scene from several viewpoints.
+
+Running the same recipe (`flipbook.sh --spread`) on still-camera clips:
+- **Johnny:** ghosts and goes see-through, at 18 dB against 24–25 dB for the windowed flipbook. His head moves too much between 13 samples spread over 3 s, and a still camera adds no new views.
+- **Dancers:** solid, at 27–30 dB.
+
+So the multi-view information from a moving camera is what makes it work.
+
+`--estimate-poses` (`tools/splat4d/poses.py`) recovers the camera path from plain video, with no extra model:
+1. A MoVieS depth pass runs with identity poses.
+2. SIFT matches are found against the previous 1–3 frames.
+3. Each camera is solved with PnP RANSAC against 3D points unprojected from the matched frame's depth.
+
+On tennis it lands within 0.1–0.8° of the dataset rotations over an 18° pan. Lucia (a panning DAVIS clip, fed in as a video):
+- **Known poses:** 99 MB, 19.4 dB at frame 0.
+- **Estimated poses:** 63 MB, 21.6 dB at frame 0, slightly more see-through.
+
+The estimate reports 16° of turn against the dataset's 11.5°. The frame-0 crop and upscale of the test clip may account for part of that.
+
+Filming advice changes accordingly: a slow handheld arc or slide around the subject should beat a tripod.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.

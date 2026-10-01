@@ -15,7 +15,7 @@ from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "npz", "out_times", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "spread", "estimate_poses", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -28,6 +28,8 @@ def parse_args():
     source.add_argument("--video")
     source.add_argument("--npz")
     parser.add_argument("--out-times", type=int, default=25)
+    parser.add_argument("--spread", action="store_true")
+    parser.add_argument("--estimate-poses", action="store_true")
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--end", type=float, default=None)
@@ -158,6 +160,15 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
 
     model, dtype = load_model(args)
     started = time.time()
+    if args.estimate_poses:
+        from infer import window_depths
+        from poses import estimate_poses, rotation_degrees
+
+        depths = window_depths(model, dtype, args, images, C2W, fxfycxcy)
+        C2W = estimate_poses(images, depths, fxfycxcy)
+        swing = max(rotation_degrees(C2W[0], c) for c in C2W)
+        travel = max(float(np.linalg.norm(c[:3, 3])) for c in C2W) / float(np.median(depths))
+        log(f"estimated cameras: up to {swing:.1f} deg of turn and {100 * travel:.1f}% of the scene depth of travel")
     select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]))
     frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, None, select, args.out_times)
     log(f"{len(frames)} moments from {images.shape[0]} input frames in {time.time() - started:.0f}s")
@@ -220,9 +231,15 @@ def main():
     os.makedirs(preview_dir, exist_ok=True)
     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
 
-    if args.npz:
-        args.in_frames = None
-        images, C2W, fxfycxcy, clip_duration, source = load_npz(args)
+    if args.npz or args.spread:
+        if args.npz:
+            args.in_frames = None
+            images, C2W, fxfycxcy, clip_duration, source = load_npz(args)
+        else:
+            args.in_frames = args.window
+            sample_fps, args.fps = args.fps, None
+            images, C2W, fxfycxcy, clip_duration, source = load_video(args)
+            args.fps = sample_fps
         _, _, H, W = images.shape
         frames, depth = run_posed_clip(args, images, C2W, fxfycxcy, cache_path)
         count = len(frames)
