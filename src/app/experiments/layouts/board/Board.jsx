@@ -1,32 +1,63 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import LiveFrame from "../LiveFrame";
 import { shortDate } from "../pieces";
 
-// The hang, in wall units. Every frame lays out at 1280px wide and takes its
-// rect's aspect; `w` sets how big it hangs. A wall label sits under each one,
-// set in ordinary UI type and enlarged with the wall so it reads at a fit.
-const VIRTUAL = 1280;
-const HANG = [
-  { x: 0, y: 0, w: 1280, h: 800 },
-  { x: 1440, y: 0, w: 760, h: 760 },
-  { x: 2360, y: 0, w: 900, h: 560 },
-  { x: 2360, y: 920, w: 640, h: 400 },
-  { x: 0, y: 1160, w: 760, h: 900 },
-  { x: 920, y: 1160, w: 1280, h: 720 },
-  { x: 2360, y: 1680, w: 900, h: 580 },
-  { x: 920, y: 2240, w: 520, h: 360 },
+// The hang, in wall units: a salon wall of four columns, each dropped by a
+// different amount so the tops never line up. A piece's width sets how big it
+// hangs and its own aspect sets the height; the frame renders it at true size
+// once the wall is zoomed in. A wall label sits under each one, set in UI
+// type and enlarged with the wall so it still reads at a fit.
+const COLUMNS = [
+  { drop: 0, items: [["/ink", 440], ["/halftone", 480]] },
+  { drop: 96, items: [["/refract", 620], ["/deck", 620]] },
+  { drop: 32, items: [["/psa", 340], ["/song-search", 440]] },
+  { drop: 144, items: [["/backdrop", 420], ["/tuner", 520]] },
 ];
-const LABEL_GAP = 24;
-const LABEL_H = 140;
-const LABEL_SCALE = 3.5;
+const COLUMN_GAP = 96;
+const ROW_GAP = 72;
+const LABEL_GAP = 16;
+const LABEL_H = 48;
+const LABEL_SCALE = 1.75;
 const PAD = 96;
 const MIN_Z = 0.08;
-const MAX_Z = 1.5;
+const MAX_Z = 2;
 
-function bounds(n) {
-  const rects = HANG.slice(0, n);
+function hang(pieces) {
+  const bySlug = new Map(pieces.map((p) => [p.slug, p]));
+  const placed = new Set();
+  const cols = COLUMNS.map((col) => ({
+    drop: col.drop,
+    items: col.items.filter(([slug]) => bySlug.has(slug)).map(([slug, w]) => {
+      placed.add(slug);
+      return { piece: bySlug.get(slug), w };
+    }),
+  }));
+  // Anything new joins the shortest column at a middling size.
+  const colHeight = (col) =>
+    col.drop + col.items.reduce((sum, { piece, w }) => sum + w / piece.aspect + LABEL_GAP + LABEL_H + ROW_GAP, 0);
+  for (const piece of pieces) {
+    if (placed.has(piece.slug)) continue;
+    cols.reduce((a, b) => (colHeight(b) < colHeight(a) ? b : a)).items.push({ piece, w: 480 });
+  }
+  const out = [];
+  let x = 0;
+  for (const col of cols) {
+    let y = col.drop;
+    const width = Math.max(0, ...col.items.map((it) => it.w));
+    for (const { piece, w } of col.items) {
+      const h = Math.round(w / piece.aspect);
+      out.push({ piece, x: x + (width - w) / 2, y, w, h });
+      y += h + LABEL_GAP + LABEL_H + ROW_GAP;
+    }
+    x += width + COLUMN_GAP;
+  }
+  return out;
+}
+
+function bounds(rects) {
   const x1 = Math.min(...rects.map((r) => r.x));
   const y1 = Math.min(...rects.map((r) => r.y));
   const x2 = Math.max(...rects.map((r) => r.x + r.w));
@@ -54,7 +85,8 @@ export default function Board({ pieces }) {
     });
   }, []);
 
-  const fitAll = useCallback((smooth) => fitTo(bounds(pieces.length), smooth), [fitTo, pieces.length]);
+  const rects = useMemo(() => hang(pieces), [pieces]);
+  const fitAll = useCallback((smooth) => fitTo(bounds(rects), smooth), [fitTo, rects]);
 
   useLayoutEffect(() => {
     fitAll(false);
@@ -135,44 +167,32 @@ export default function Board({ pieces }) {
           data-animate={animate}
           style={{ transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}
         >
-          {pieces.map((piece, i) => {
-            const r = HANG[i % HANG.length];
-            const s = r.w / VIRTUAL;
-            return (
-              <div key={piece.slug}>
-                <div className="xl-board__frame" style={{ left: r.x, top: r.y, width: r.w, height: r.h }}>
-                  <iframe
-                    src={piece.slug}
-                    title={piece.title}
-                    allow="microphone; autoplay; clipboard-write"
-                    style={{ width: VIRTUAL, height: r.h / s, transform: `scale(${s})` }}
-                  />
-                </div>
-                <div
-                  className="xl-board__label"
-                  style={{
-                    left: r.x,
-                    top: r.y + r.h + LABEL_GAP,
-                    width: r.w / LABEL_SCALE,
-                    transform: `scale(${LABEL_SCALE})`,
-                  }}
-                >
-                  <button
-                    type="button"
-                    className="xl-board__title text-heading-sm"
-                    onClick={() => fitTo({ x: r.x, y: r.y, w: r.w, h: r.h + LABEL_GAP + LABEL_H }, true)}
-                  >
-                    <span className="text-ink-secondary tabular-nums">{piece.index}</span>
-                    <span className="text-ink">{piece.title}</span>
-                  </button>
-                  <p className="text-ink-secondary text-ui truncate">
-                    {shortDate(piece.date)} · {piece.tags.join(", ")} ·{" "}
-                    <Link href={piece.slug} className="text-accent">Open</Link>
-                  </p>
-                </div>
+          {rects.map(({ piece, x, y, w, h }) => (
+            <div key={piece.slug}>
+              <div className="xl-board__frame" style={{ left: x, top: y, width: w, height: h }}>
+                <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
               </div>
-            );
-          })}
+              <div
+                className="xl-board__label"
+                style={{ left: x, top: y + h + LABEL_GAP, width: w / LABEL_SCALE, transform: `scale(${LABEL_SCALE})` }}
+              >
+                <button
+                  type="button"
+                  className="xl-board__title text-heading-sm"
+                  onClick={() => fitTo({ x, y, w, h: h + LABEL_GAP + LABEL_H }, true)}
+                >
+                  <span className="text-ink-secondary tabular-nums">{piece.index}</span>
+                  <span className="text-ink">{piece.title}</span>
+                </button>
+                <p className="text-ink-secondary text-ui truncate">
+                  {shortDate(piece.date)} · {piece.tags.join(", ")} ·{" "}
+                  <Link href={piece.slug} className="text-accent">
+                    Open
+                  </Link>
+                </p>
+              </div>
+            </div>
+          ))}
         </div>
       ) : null}
       <button type="button" className="xl-board__fit text-ui-lg" onClick={() => fitAll(true)}>

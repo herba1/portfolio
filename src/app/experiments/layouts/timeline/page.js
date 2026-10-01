@@ -43,7 +43,7 @@ export default function TimelineLayout() {
           <div key={col.date} className="xl-timeline__col">
             {[...col.pieces].reverse().map((piece) => (
               <div key={piece.slug} className="xl-timeline__piece">
-                <LiveFrame src={piece.slug} title={piece.title} />
+                <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
                 <Link href={piece.slug} className="xl-caption">
                   <span className="text-ink text-heading-sm">{piece.title}</span>
                   <span className="text-ink-secondary text-ui-lg ml-auto truncate">{piece.tags.join(", ")}</span>

@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const OPTIONS = [
+  { href: "/experiments/layouts/bento", label: "Bento" },
   { href: "/experiments/layouts/sheet", label: "Sheet" },
-  { href: "/experiments/layouts/slices", label: "Slices" },
   { href: "/experiments/layouts/board", label: "Board" },
   { href: "/experiments/layouts/timeline", label: "Timeline" },
 ];

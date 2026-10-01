@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 
-// A piece running live at a real desktop width, scaled down into whatever box
-// it is given. The frame lays out at `width` px and takes the box's aspect, so
-// the whole piece is visible — nothing cropped, nothing to click through.
-export default function LiveFrame({ src, title, width = 1280, className = "" }) {
+// A piece running live inside a box. The piece lays out at the box's own size
+// whenever the box is at least `base` wide, so its main interaction shows at
+// true scale; a narrower box renders at `base` and scales down to fit. Either
+// way the frame takes the box's aspect — nothing cropped, nothing to open.
+export default function LiveFrame({ src, title, base = 480, className = "" }) {
   const boxRef = useRef(null);
   const [box, setBox] = useState(null);
 
@@ -20,12 +21,13 @@ export default function LiveFrame({ src, title, width = 1280, className = "" }) 
     return () => ro.disconnect();
   }, []);
 
+  const width = box ? Math.max(box.w, base) : 0;
   const scale = box ? box.w / width : 0;
-  const height = box && scale ? box.h / scale : 0;
+  const height = scale ? box.h / scale : 0;
 
   return (
     <div ref={boxRef} className={`xl-frame ${className}`}>
-      {box ? (
+      {box && box.w > 0 ? (
         <iframe
           src={src}
           title={title}

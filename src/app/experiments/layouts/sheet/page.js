@@ -2,7 +2,7 @@ import Link from "next/link";
 import LiveFrame from "../LiveFrame";
 import { PIECES, shortDate } from "../pieces";
 
-// A — Contact sheet. A strict grid that fills exactly one screen: every piece
+// B — Contact sheet. A strict grid that fills exactly one screen: every piece
 // at the same size, running, with a caption rule under it like a proof sheet.
 export default function SheetLayout() {
   return (
@@ -14,7 +14,7 @@ export default function SheetLayout() {
       <ul className="xl-sheet__grid">
         {PIECES.map((piece) => (
           <li key={piece.slug} className="xl-sheet__cell">
-            <LiveFrame src={piece.slug} title={piece.title} />
+            <LiveFrame src={piece.slug} title={piece.title} base={piece.base} />
             <Link href={piece.slug} className="xl-caption">
               <span className="text-ink-secondary text-ui-lg tabular-nums">{piece.index}</span>
               <span className="text-ink text-heading-sm">{piece.title}</span>

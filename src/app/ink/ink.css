@@ -392,3 +392,14 @@
   font-size: var(--text-ui);
   line-height: 1.35;
 }
+
+/* Framed on the experiments index: the plate alone, no tuning panel. */
+:root[data-embed="1"] .ink-page {
+  grid-template-columns: 1fr;
+  --ink-panel-w: 0px;
+}
+
+:root[data-embed="1"] .ink-panel-slot,
+:root[data-embed="1"] .ink-panel-toggle {
+  display: none;
+}
