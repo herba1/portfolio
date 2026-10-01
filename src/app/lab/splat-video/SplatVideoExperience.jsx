@@ -338,7 +338,7 @@ export default function SplatVideoExperience() {
           scrubbing={scrubbing}
           speed={speed}
           expanded={expanded}
-          sound={streaming && Boolean(meta.audio)}
+          sound={(streaming || isRgbd(meta)) && Boolean(meta.audio)}
           muted={muted}
           onToggleMuted={handleToggleMuted}
           onTogglePlay={togglePlaying}

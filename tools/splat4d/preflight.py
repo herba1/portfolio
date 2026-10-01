@@ -51,7 +51,7 @@ def main():
     info = probe(args.video)
     stream = video_stream(info)
     duration = float(info["format"].get("duration") or stream.get("duration"))
-    end = min(args.end if args.end is not None else duration, duration - 0.1)
+    end = min(args.end if args.end is not None else duration, duration - 0.5)
     width, height = int(stream["width"]), int(stream["height"])
     rotation = next((int(d.get("rotation", 0)) for d in stream.get("side_data_list", []) if "rotation" in d), 0)
     if abs(rotation) in (90, 270):

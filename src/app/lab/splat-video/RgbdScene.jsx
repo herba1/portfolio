@@ -102,9 +102,23 @@ function createRuntime(clip) {
     if (drifted && Math.abs(video.currentTime - target) > SEEK_SETTLED) video.currentTime = target;
   };
 
+  const audible = Boolean(meta.audio);
+  const applyMuted = (engine) => {
+    const muted = !audible || engine.muted !== false;
+    if (video.muted !== muted) video.muted = muted;
+  };
+
   return {
     group,
+    gesture(engine) {
+      applyMuted(engine);
+      if (engine.playing && video.paused) {
+        const attempt = video.play();
+        if (attempt) attempt.catch(() => {});
+      }
+    },
     sync(engine, now) {
+      applyMuted(engine);
       if (video.playbackRate !== engine.speed) video.playbackRate = engine.speed;
       const wantPlaying = engine.playing && !engine.scrubbing && !document.hidden;
       if (wantPlaying) {
@@ -147,12 +161,16 @@ function RgbdField({ clip, engineRef }) {
     group.add(runtime.group);
     runtimeRef.current = runtime;
     pivotRef.current = new THREE.Vector3(0, 0, -clip.meta.camera.pivotDepth);
+    const engine = engineRef.current;
+    const sound = { gesture: () => runtime.gesture(engine) };
+    engine.sound = sound;
     return () => {
+      if (engine.sound === sound) engine.sound = null;
       group.remove(runtime.group);
       runtime.dispose();
       runtimeRef.current = null;
     };
-  }, [clip]);
+  }, [clip, engineRef]);
 
   useFrame((state, rawDelta) => {
     const runtime = runtimeRef.current;

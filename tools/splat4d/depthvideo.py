@@ -11,7 +11,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from inputs import load_video, log, save_depth_preview
+from inputs import load_video, log, probe, save_depth_preview
 from splat4d_format import write_index
 
 MOVIES_COMMIT = "77262fa"
@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--temporal", type=int, default=1)
     parser.add_argument("--plate-percentile", type=float, default=80.0)
     parser.add_argument("--crf", type=int, default=16)
+    parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--cache", default=None)
     parser.add_argument("--fresh", action="store_true")
@@ -154,7 +155,20 @@ def main():
     stacked[:, :color_height] = colors
     for i in range(count):
         stacked[i, color_height:] = disparity_bytes(disparity[i], low, high, size)
-    encode(os.path.join(args.out, "rgbd.mp4"), stacked, args.fps, args.crf)
+    silent = os.path.join(args.out, "rgbd-silent.mp4")
+    encode(silent, stacked, args.fps, args.crf)
+    has_audio = any(stream.get("codec_type") == "audio" for stream in probe(args.video)["streams"])
+    final = os.path.join(args.out, "rgbd.mp4")
+    if has_audio and args.audio:
+        subprocess.run(
+            ["ffmpeg", "-v", "error", "-y", "-i", silent, "-ss", f"{source['start']:.4f}", "-t", f"{count / args.fps:.4f}",
+             "-i", args.video, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
+             "-shortest", "-movflags", "+faststart", final],
+            check=True,
+        )
+        os.remove(silent)
+    else:
+        os.replace(silent, final)
     plate = np.concatenate([plate_color, disparity_bytes(1.0 / np.clip(plate_depth, 1e-4, None), low, high, size)])
     Image.fromarray(plate).save(os.path.join(args.out, "plate.png"), optimize=True)
 
@@ -180,6 +194,7 @@ def main():
         "disparity": {"min": low, "max": high},
         "video": "rgbd.mp4",
         "plate": "plate.png",
+        "audio": bool(has_audio and args.audio),
         "source": {**source, "width": W, "height": H, "colorWidth": color_width, "colorHeight": color_height,
                    "movies": MOVIES_COMMIT, "window": args.window},
     }

@@ -210,7 +210,10 @@ def finish(part, fx_px, args, center=None):
 
 
 def scaled(part, ratio):
-    return {**part, "xyz": part["xyz"] * ratio, "cov": part["cov"] * ratio * ratio}
+    moved = {**part, "xyz": part["xyz"] * ratio, "cov": part["cov"] * ratio * ratio}
+    if "velocity" in part:
+        moved["velocity"] = part["velocity"] * ratio
+    return moved
 
 
 def save_parts(path, settings, frames, depth):
@@ -348,9 +351,12 @@ def run_windows(args, images, C2W, fxfycxcy, masks, cache_path):
             current = window_depth[[i - start for i in shared]]
             valid = (previous > 0) & (current > 0)
             ratio = float(np.median(previous[valid] / current[valid]))
+        window_seconds = max(end - start - 1, 1) / args.fps
         for i in range(start, end):
             if frames[i] is None:
                 frames[i] = {kind: scaled(part, ratio) for kind, part in window[i - start].items()}
+                if "velocity" in frames[i]["subject"]:
+                    frames[i]["subject"]["velocity"] = frames[i]["subject"]["velocity"] / window_seconds
                 depth[i] = window_depth[i - start] * ratio
         log(f"window {number}/{len(spans)}: frames {start}-{end - 1}, depth scale x{ratio:.3f}, {time.time() - started:.0f}s")
     del model
@@ -457,6 +463,7 @@ def main():
             "vfovDeg": round(math.degrees(2 * math.atan(0.5 / fy)), 4),
             "aspect": round(W / H, 6),
             "pivotDepth": round(float(np.median(subject_depth)), 6),
+            "intrinsics": [round(float(v), 6) for v in fxfycxcy[0]],
         },
         "source": {**source, "width": W, "height": H, "movies": MOVIES_COMMIT, "window": args.window},
     }
@@ -467,7 +474,7 @@ def main():
     else:
         meta["times"] = [round(i / args.fps, 5) for i in range(count)]
     for part in per_frame:
-        if "velocity" in part:
+        if "velocity" in part and (args.npz or args.spread):
             part["velocity"] = part["velocity"] / max(meta["duration"], 1e-6)
     sizes = write_flipbook(args.out, meta, static, per_frame)
     write_index(os.path.dirname(args.out), name)
