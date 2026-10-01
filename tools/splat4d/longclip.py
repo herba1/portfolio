@@ -375,7 +375,10 @@ def main():
         total_bytes += static_bytes
         log(f"static: {background['xyz'].shape[0]:,} -> {static_record['count']:,} splats (merged ~{stack:.1f}), {static_bytes / 1e6:.1f} MB")
 
-    subject_depth = np.median(depths[depths > 0])
+    if depths is not None:
+        subject_depth = np.median(depths[depths > 0])
+    else:
+        subject_depth = float(np.median(previous_last[previous_last > 0]))
     fy = float(fxfycxcy[0, 1])
     meta = {
         "format": "splat4d",
