@@ -8,6 +8,9 @@ FRAMES="${2:-0}"
 
 cd "$HERE/../.."
 if [ -f "$MOVIES/out/$NAME/flipbook_images.npy" ]; then
+  if [ -f "$MOVIES/out/$NAME/cameras.npy" ]; then
+    exec "$MOVIES/.venv/bin/python" -W ignore "$HERE/check.py" "public/splats/4d/$NAME" --frames "$FRAMES" --images "$MOVIES/out/$NAME/flipbook_images.npy" --cameras "$MOVIES/out/$NAME/cameras.npy"
+  fi
   exec "$MOVIES/.venv/bin/python" -W ignore "$HERE/check.py" "public/splats/4d/$NAME" --frames "$FRAMES" --images "$MOVIES/out/$NAME/flipbook_images.npy"
 fi
 exec "$MOVIES/.venv/bin/python" -W ignore "$HERE/check.py" "public/splats/4d/$NAME" --frames "$FRAMES" --cache "$MOVIES/out/$NAME/model_outputs.npz"

@@ -30,6 +30,9 @@ def parse_args():
     parser.add_argument("--out-times", type=int, default=25)
     parser.add_argument("--spread", action="store_true")
     parser.add_argument("--estimate-poses", action="store_true")
+    parser.add_argument("--splat-floor", type=float, default=0.5)
+    parser.add_argument("--opacity-gain", type=float, default=1.0)
+    parser.add_argument("--time-chunk", type=int, default=25)
     parser.add_argument("--duration", type=float, default=None)
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--end", type=float, default=None)
@@ -116,6 +119,17 @@ def selector(args, fx_px):
     return select
 
 
+def finish(part, fx_px, args):
+    cov = part["cov"].astype(np.float64).copy()
+    if args.splat_floor > 0 and cov.shape[0]:
+        footprint = (args.splat_floor * np.clip(part["xyz"][:, 2], 1e-6, None) / fx_px) ** 2
+        cov[:, [0, 3, 5]] += footprint[:, None]
+    opacity = part["opacity"]
+    if args.opacity_gain != 1.0:
+        opacity = 1.0 - np.power(1.0 - np.clip(opacity, 0.0, 0.995), args.opacity_gain)
+    return {**part, "cov": cov, "opacity": opacity.astype(np.float32)}
+
+
 def scaled(part, ratio):
     return {**part, "xyz": part["xyz"] * ratio, "cov": part["cov"] * ratio * ratio}
 
@@ -169,6 +183,7 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path):
         swing = max(rotation_degrees(C2W[0], c) for c in C2W)
         travel = max(float(np.linalg.norm(c[:3, 3])) for c in C2W) / float(np.median(depths))
         log(f"estimated cameras: up to {swing:.1f} deg of turn and {100 * travel:.1f}% of the scene depth of travel")
+    np.save(os.path.join(os.path.dirname(cache_path), "cameras.npy"), C2W)
     select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]))
     frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, None, select, args.out_times)
     log(f"{len(frames)} moments from {images.shape[0]} input frames in {time.time() - started:.0f}s")
@@ -268,7 +283,8 @@ def main():
         static = {k: v[rows] for k, v in static.items()}
     log(f"background: {keep.sum():,} -> {static['xyz'].shape[0]:,} splats (merged ~{stack:.1f} per splat)")
 
-    per_frame = [f["subject"] for f in frames]
+    static = finish(static, fx_px, args)
+    per_frame = [finish(f["subject"], fx_px, args) for f in frames]
     frame_counts = [p["xyz"].shape[0] for p in per_frame]
     log(f"subject: {sum(frame_counts):,} splats over {count} frames (median {int(np.median(frame_counts)):,} per frame)")
 

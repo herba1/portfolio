@@ -137,6 +137,16 @@ def render(xyz, cov, rgb, alpha, fxfycxcy, W, H):
     return image.reshape(H, W, 3).clip(0, 1), coverage.reshape(H, W)
 
 
+def to_camera(xyz, cov, W2C):
+    R = W2C[:3, :3]
+    moved = xyz @ R.T + W2C[:3, 3]
+    xx, xy, xz, yy, yz, zz = (cov[:, i] for i in range(6))
+    sigma = np.stack([np.stack([xx, xy, xz], 1), np.stack([xy, yy, yz], 1), np.stack([xz, yz, zz], 1)], 1)
+    turned = R[None] @ sigma @ R.T[None]
+    upper = np.stack([turned[:, 0, 0], turned[:, 0, 1], turned[:, 0, 2], turned[:, 1, 1], turned[:, 1, 2], turned[:, 2, 2]], 1)
+    return moved, upper
+
+
 def psnr(a, b):
     return float(10 * np.log10(1.0 / max(np.mean((a - b) ** 2), 1e-12)))
 
@@ -147,6 +157,7 @@ def main():
     parser.add_argument("--frames", default="0")
     parser.add_argument("--cache", default=None)
     parser.add_argument("--images", default=None)
+    parser.add_argument("--cameras", default=None)
     args = parser.parse_args()
 
     scene = load_splat4d(args.folder)
@@ -163,7 +174,12 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
 
     for frame in frames:
-        image, coverage = render(*frame_splats(scene, frame), fxfycxcy, W, H)
+        xyz, cov, rgb, alpha = frame_splats(scene, frame)
+        if args.cameras:
+            cameras = np.load(os.path.expanduser(args.cameras))
+            source_index = int(round(frame * (len(cameras) - 1) / max(1, meta["frames"] - 1)))
+            xyz, cov = to_camera(xyz, cov, np.linalg.inv(cameras[source_index]))
+        image, coverage = render(xyz, cov, rgb, alpha, fxfycxcy, W, H)
         panels = [image]
         line = f"frame {frame}: coverage median {np.median(coverage):.2f}, below 0.5 on {100 * np.mean(coverage < 0.5):.1f}% of pixels"
         if args.images:

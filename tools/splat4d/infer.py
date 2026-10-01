@@ -142,62 +142,59 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_
     HW = H * W
     times = np.linspace(0, 1, F_in, dtype=np.float32)
     out_times = np.linspace(0, 1, out_count or F_in, dtype=np.float32)
+    chunk = max(1, getattr(args, "time_chunk", 25))
     fx, fy, cx, cy = fxfycxcy[0] * np.array([W, H, W, H])
 
     def put(array):
         return torch.from_numpy(array).unsqueeze(0).to(device=device, dtype=dtype)
 
-    from src.utils import unproject_depth
-
-    with torch.inference_mode():
-        backbone_outputs, pred_motions, pred_motion_gs = model.backbone(
-            put(images), put(C2W), put(fxfycxcy), put(times), put(out_times),
-            frames_chunk_size=args.frames_chunk,
-        )
-        depth = renderer.depth_activation(backbone_outputs["depth"].float())
-        C2W_t = torch.from_numpy(C2W).unsqueeze(0).to(depth.device)
-        fxfycxcy_t = torch.from_numpy(fxfycxcy).unsqueeze(0).to(depth.device)
-        xyz_flat = flat(renderer.xyz_activation(unproject_depth(depth.squeeze(2), C2W_t, fxfycxcy_t))).float()
-
-        states = []
-        reference = None
-        motion = None
-        for i in range(out_times.size):
-            outputs = dict(backbone_outputs)
-            outputs["offset"] = pred_motions[:, i, :, :3].float()
-            if pred_motion_gs:
-                outputs.update(pred_motion_gs[i])
-            xyz, color, opacity, scale, rotation = activated_attributes(renderer, outputs, xyz_flat)
-            if reference is None:
-                reference = xyz.clone()
-                motion = torch.zeros(xyz.shape[0], device=xyz.device)
-            motion = torch.maximum(motion, torch.linalg.norm(xyz - reference, dim=1))
-            states.append({
-                "xyz": xyz.cpu().numpy(), "color": color.cpu().numpy(), "opacity": opacity.cpu().numpy(),
-                "scale": scale.cpu().numpy(), "rotation": rotation.cpu().numpy(),
-            })
-        motion = motion.cpu().numpy()
-    del backbone_outputs, pred_motions, pred_motion_gs
-    if device == "mps":
-        torch.mps.empty_cache()
-
-    frames = []
-    for i, state in enumerate(states):
-        xyz = state["xyz"]
-        own = np.zeros(xyz.shape[0], dtype=bool)
-        nearest = int(np.abs(times - out_times[i]).argmin())
-        own[nearest * HW:(nearest + 1) * HW] = True
+    def region(i, xyz):
         if masks is None:
-            frames.append(select(i, state, xyz[:, 2] > 0, own, motion))
-            continue
+            return xyz[:, 2] > 0
         z = np.clip(xyz[:, 2], 1e-6, None)
         px = np.floor(fx * xyz[:, 0] / z + cx).astype(np.int64)
         py = np.floor(fy * xyz[:, 1] / z + cy).astype(np.int64)
         inside = (xyz[:, 2] > 0) & (px >= 0) & (px < W) & (py >= 0) & (py < H)
         in_mask = np.zeros(xyz.shape[0], dtype=bool)
         in_mask[inside] = masks[i][py[inside], px[inside]]
-        frames.append(select(i, state, in_mask, own, motion))
-    return frames, depth[0, :, 0].cpu().numpy()
+        return in_mask
+
+    from src.utils import unproject_depth
+
+    frames = []
+    first_depth = None
+    for begin in range(0, out_times.size, chunk):
+        part = out_times[begin:begin + chunk]
+        with torch.inference_mode():
+            backbone_outputs, pred_motions, pred_motion_gs = model.backbone(
+                put(images), put(C2W), put(fxfycxcy), put(times), put(part),
+                frames_chunk_size=args.frames_chunk,
+            )
+            depth = renderer.depth_activation(backbone_outputs["depth"].float())
+            if first_depth is None:
+                first_depth = depth[0, :, 0].cpu().numpy()
+            C2W_t = torch.from_numpy(C2W).unsqueeze(0).to(depth.device)
+            fxfycxcy_t = torch.from_numpy(fxfycxcy).unsqueeze(0).to(depth.device)
+            xyz_flat = flat(renderer.xyz_activation(unproject_depth(depth.squeeze(2), C2W_t, fxfycxcy_t))).float()
+            for local in range(part.size):
+                i = begin + local
+                outputs = dict(backbone_outputs)
+                outputs["offset"] = pred_motions[:, local, :, :3].float()
+                if pred_motion_gs:
+                    outputs.update(pred_motion_gs[local])
+                xyz, color, opacity, scale, rotation = activated_attributes(renderer, outputs, xyz_flat)
+                state = {
+                    "xyz": xyz.cpu().numpy(), "color": color.cpu().numpy(), "opacity": opacity.cpu().numpy(),
+                    "scale": scale.cpu().numpy(), "rotation": rotation.cpu().numpy(),
+                }
+                own = np.zeros(HW * F_in, dtype=bool)
+                nearest = int(np.abs(times - out_times[i]).argmin())
+                own[nearest * HW:(nearest + 1) * HW] = True
+                frames.append(select(i, state, region(i, state["xyz"]), own, None))
+        del backbone_outputs, pred_motions, pred_motion_gs
+        if device == "mps":
+            torch.mps.empty_cache()
+    return frames, first_depth
 
 
 def window_depths(model, dtype, args, images, C2W, fxfycxcy):

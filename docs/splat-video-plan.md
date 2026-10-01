@@ -91,6 +91,23 @@ The estimate reports 16° of turn against the dataset's 11.5°. The frame-0 crop
 
 Filming advice changes accordingly: a slow handheld arc or slide around the subject should beat a tripod.
 
+### Iterating on lucia-est
+
+Scores are measured from each frame's own estimated camera (`check.py --cameras`), at frames 0, middle and end.
+
+| Variant | dB | Size |
+|---|---|---|
+| lucia-est (hfov 34.8, which is wrong) | 21.6 / 22.3 / 21.7 | 63 MB |
+| `--splat-floor 0.5` | 23.5 / 24.3 / 22.7 | 63 MB |
+| `--splat-floor 0.8` | 23.1 / 23.5 / 21.9 | 63 MB |
+| floor 0.5 + `--opacity-gain 1.5` | 23.3 / 24.1 / 22.5 | 63 MB |
+| `--out-times 49` | same per frame, twice as smooth | 123 MB |
+| **lucia-v2**: hfov 24.17, floor 0.5, 49 moments | **23.6 / 25.0 / 23.1** | 133 MB |
+
+- **The splat floor** adds `(0.5 px · z / fx)²` to each covariance diagonal after the cache. That closes the gaps between sub-pixel splats, so coverage goes from 0.82 to 0.94 and the result scores 2 dB higher. It is now the default.
+- **The camera solver was right all along.** Lucia's real lens is 24.17° (tennis is 34.8°). The estimate over-turned by a constant 1.39×, which is exactly the focal ratio. With the right hfov it reads 11.3° against the dataset's 11.46°. Alternating the depth and pose passes changed nothing. The lens has to be right, so read it from the iPhone metadata or pass `--hfov`.
+- **Output times are processed in chunks** (`--time-chunk 25`), and each moment is merged as it comes out, so 49 moments fit in memory: 84 s on the M5.
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
