@@ -492,7 +492,7 @@ html[data-psa-vt]::view-transition-new(*) {
   z-index: 2;
   flex: 0 0 auto;
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(var(--tab-count, 5), minmax(0, 1fr));
   /* The hairline is a SHADOW, not a border-top. A border is painted inside
      the element's own box, so the bar's white background composites under it
      and a translucent line resolves back to flat grey — the alpha buys you

@@ -127,7 +127,8 @@ function subscribe(id, fn) {
 /** Live figures for one card. Re-renders only this card's tile, only on a
     tick that actually moved it. */
 export function useLiveCard(id) {
-  const sub = useCallback((fn) => subscribe(id, fn), [id]);
+  // A null id is a tile with no figures: it reads nothing and costs nothing.
+  const sub = useCallback((fn) => (id == null ? () => {} : subscribe(id, fn)), [id]);
   const get = useCallback(() => state.get(id) ?? STATIC.get(id), [id]);
   const server = useCallback(() => STATIC.get(id), [id]);
   return useSyncExternalStore(sub, get, server);

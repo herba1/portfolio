@@ -145,13 +145,15 @@ function PsaApp({ embedded }) {
 
   const go = useCallback(
     (next) => {
+      // A kit with one tab has nowhere to go: the tab is only the target.
+      if (kit.tabs.length < 2) return;
       const from = TABS.findIndex((t) => t.id === tab);
       const to = TABS.findIndex((t) => t.id === next);
       setDir(to >= from ? 1 : -1);
       setTab(next);
       setScrolled(false); // the panel remounts at scrollTop 0
     },
-    [tab],
+    [kit, tab],
   );
   // The empty collection's CTA. Inline, it would be a new function every
   // render and CollectionPanel's memo would never hold.
@@ -314,6 +316,7 @@ function PsaApp({ embedded }) {
         countNonce={landings}
         undo={undo}
         libraryLabel={kit.copy.library}
+        tabs={kit.tabs}
       />
     </div>
   );
@@ -359,9 +362,14 @@ function useRolled(delay) {
 /* One card's live figures, and the beat each of them is on. Shared by the
    grid tile and the collection row so both surfaces read the same tape the
    same way — the only thing that differs between them is the layout. */
+const NO_FIGURES = { price: 0, delta: 0 };
+
+const BLANK = () => "";
+
 function useFigures(id, rolled) {
-  const { formatValue, formatDelta } = useKit();
-  const live = useLiveCard(id);
+  const { figures: on, formatValue = BLANK, formatDelta = BLANK } = useKit();
+  // A kit without figures never touches the tape — see useLiveCard.
+  const live = useLiveCard(on ? id : null) ?? NO_FIGURES;
 
   const price = rolled ? formatValue(live.price) : zeroed(formatValue(live.price));
   const delta = rolled ? formatDelta(live.delta) : zeroed(formatDelta(live.delta));
@@ -372,7 +380,7 @@ function useFigures(id, rolled) {
   const priceMove = useMove(price, live.price);
   const deltaMove = useMove(delta, live.delta);
 
-  return { live, price, delta, priceMove, deltaMove };
+  return on ? { live, price, delta, priceMove, deltaMove } : null;
 }
 
 /* Both figures, in DOM order, for whichever container is holding them. The
@@ -477,9 +485,11 @@ const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
             the year plus set is the cheapest thing that tells them apart —
             for a song, the artist does the same job. */}
         <span className="t-body-sm psa-tile-set">{card.meta}</span>
-        <div className="psa-tile-figures">
-          <Figures {...figures} />
-        </div>
+        {figures && (
+          <div className="psa-tile-figures">
+            <Figures {...figures} />
+          </div>
+        )}
       </div>
     </li>
   );
@@ -576,19 +586,21 @@ const BrowsePanel = memo(function BrowsePanel({ saved, onToggle, filter, onFilte
             true but leaves the bookmark looking like decoration on the scan;
             the title has to say which 28px to press. */}
         <PanelHead title={kit.copy.browse} />
-        <div className="chip-rail psa-rail psa-rail-fade">
-          {kit.filters.map((f) => (
-            <button
-              key={f.id}
-              type="button"
-              className="chip"
-              aria-pressed={filter === f.id}
-              onClick={() => pick(f.id)}
-            >
-              {f.label}
-            </button>
-          ))}
-        </div>
+        {kit.filters.length > 0 && (
+          <div className="chip-rail psa-rail psa-rail-fade">
+            {kit.filters.map((f) => (
+              <button
+                key={f.id}
+                type="button"
+                className="chip"
+                aria-pressed={filter === f.id}
+                onClick={() => pick(f.id)}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
       {/* No stagKey: the grid must NOT re-key on a filter, or FLIP has no
           "before" boxes to measure and every tile mounts from scratch. */}

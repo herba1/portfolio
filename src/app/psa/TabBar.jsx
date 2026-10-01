@@ -180,7 +180,7 @@ function TabCount({ count, nonce }) {
   );
 }
 
-function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel }) {
+function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel, tabs }) {
   const flight = useSaveFlight();
   const undoMs = undo?.ms ?? 3000;
 
@@ -189,12 +189,15 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel 
      of a pill that is still on screen fading. Frozen at its last value while
      the pill is closed, live while it is open — the clock beside it already
      behaves this way, because its interval stops on the same flag. */
+  // A kit can show fewer tabs; Collection, the save target, is always one.
+  const shown = tabs ? TABS.filter((t) => tabs.includes(t.id)) : TABS;
+
   const lastCount = useRef(0);
   if (undo?.open) lastCount.current = undo.count;
   const stackCount = undo?.open ? undo.count : lastCount.current;
 
   return (
-    <nav className="psa-tabbar" aria-label="Sections">
+    <nav className="psa-tabbar" aria-label="Sections" style={{ "--tab-count": shown.length }}>
       {/* Collection is the middle of five columns, so dead centre of the bar
           is exactly above it — no measuring and no ref needed. */}
       <button
@@ -219,7 +222,7 @@ function TabBar({ active, onChange, counts = {}, countNonce, undo, libraryLabel 
         <UndoCount count={stackCount} />
       </button>
 
-      {TABS.map((tab) => {
+      {shown.map((tab) => {
         const isActive = tab.id === active;
         const count = counts[tab.id];
         const isTarget = tab.id === "collection";

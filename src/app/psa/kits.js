@@ -10,11 +10,10 @@ import { CARDS, formatDelta, formatPrice } from "./cards";
    else.
 
    Every item is normalised to one shape so no surface has to know which kit
-   it is drawing:
-     id, title, meta (the tile's second line), detail (the ledger row's),
-     feedLine, search, alt, image, art (a wash when there is no image),
-     value + delta (the live figures' opening values), group (what Profile
-     counts distinct of).
+   it is drawing: id, title, meta (the tile's second line), alt, image and
+   art (a wash when there is no image). A kit with the full app adds detail
+   (the ledger row's line), feedLine, search, value + delta (the live
+   figures' opening values) and group (what Profile counts distinct of).
    ───────────────────────────────────────────────────────────────────────── */
 
 /* ── Cards — graded baseball cards, the original /psa ─────────────────── */
@@ -41,6 +40,9 @@ const cardById = byId(CARD_ITEMS);
 export const CARDS_KIT = {
   id: "cards",
   items: CARD_ITEMS,
+  // The whole app: live figures on every tile, five tabs.
+  figures: true,
+  tabs: ["browse", "search", "collection", "activity", "profile"],
   filters: [
     { id: "all", label: "All" },
     { id: "gem", label: "Gem mint", test: (c) => c.grade === 10 },
@@ -77,29 +79,6 @@ export const CARDS_KIT = {
 
 /* ── Songs — bookmarking tracks off a listening history ───────────────── */
 
-/* A stable number per id, so a track's invented figures are the same on the
-   server pass, the hydration pass and every reload. */
-function hash(text) {
-  let h = 2166136261;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  return h >>> 0;
-}
-
-/* Streams, log-uniform between 60K and 60M: most tracks land in the low
-   millions, a few are hits and a few are deep cuts, which is what gives the
-   chips something to split and the column realistic ragging. Invented, like
-   the card prices — they exist to judge the layout, not to state a count. */
-function figures(id) {
-  const h = hash(id);
-  const u = (h % 10007) / 10007;
-  const value = Math.round(60_000 * 1000 ** u);
-  const delta = (((h >>> 14) % 181) - 60) / 10;
-  return { value, delta };
-}
-
 /* Multi-stop washes for tracks with no artwork (Spotify not configured) — the
    same treatment Deck's fallback covers get, so an empty library still reads
    as considered rather than broken. */
@@ -128,17 +107,6 @@ const FALLBACK_SONGS = [
 ].map(([title, artist], i) => ({ id: `fallback-${i}`, title, artist, image: null }));
 
 const LIMIT = 12;
-const HITS = 10_000_000;
-const DEEP = 1_000_000;
-
-function formatCount(value) {
-  if (value >= 1_000_000) {
-    const m = value / 1_000_000;
-    return `${m.toFixed(m >= 10 ? 1 : 2)}M`;
-  }
-  if (value >= 1_000) return `${Math.round(value / 1_000)}K`;
-  return `${value}`;
-}
 
 export function songsKit(tracks) {
   const source = tracks?.length ? tracks.slice(0, LIMIT) : FALLBACK_SONGS;
@@ -148,50 +116,24 @@ export function songsKit(tracks) {
       id,
       title: t.title,
       meta: t.artist,
-      detail: t.artist,
-      feedLine: `${t.title} · ${t.artist}`,
-      search: `${t.title} ${t.artist}`,
       alt: `${t.title} by ${t.artist}`,
       image: t.image || null,
       art: t.image ? null : wash(i),
-      group: t.artist,
-      ...figures(id),
     };
   });
-  const at = (i) => items[i % items.length];
-
+  /* Only the gesture. A song has no price worth rolling and the other four
+     tabs have nothing to say about one, so this kit is the save and nothing
+     around it: the grid, the bookmark, the flight into the one footer target,
+     its count and undo. */
   return {
     id: "songs",
     items,
-    filters: [
-      { id: "all", label: "All" },
-      { id: "rising", label: "Rising", test: (s) => s.delta > 0 },
-      { id: "hits", label: "Hits", test: (s) => s.value >= HITS },
-      { id: "deep", label: "Deep cuts", test: (s) => s.value < DEEP },
-    ],
-    stack: [at(2), at(1), at(0)],
-    feed: [
-      { id: "a1", item: at(0), event: "On repeat this week", when: "2h" },
-      { id: "a2", item: at(3), event: "New in your top songs", when: "6h" },
-      { id: "a3", item: at(1), event: "Streams up 5.7%", when: "1d" },
-      { id: "a4", item: at(5), event: "Added to 3 playlists", when: "2d" },
-      { id: "a5", item: at(2), event: "Saved by a friend", when: "3d" },
-    ],
-    formatValue: formatCount,
-    formatDelta,
+    figures: false,
+    filters: [],
+    tabs: ["collection"],
     copy: {
       browse: "Add to your bookmarks",
-      library: "Library",
-      searchPlaceholder: "Song or artist",
-      noMatch: "No songs match",
-      one: "song",
-      many: "songs",
-      emptyTitle: "Nothing saved yet.",
-      emptyBody: "Tap the bookmark on any song and it lands here.",
-      cta: "Browse songs",
-      since: "Listening since 2019",
-      valueLabel: "Streams",
-      groupLabel: "Artists",
+      library: "Saved",
     },
   };
 }
