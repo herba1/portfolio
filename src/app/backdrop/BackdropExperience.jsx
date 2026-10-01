@@ -38,7 +38,7 @@ function pickSource(element, sources) {
   return sources[0]?.src || "";
 }
 
-export default function BackdropExperience() {
+export default function BackdropExperience({ embedded = false }) {
   const [config, setConfig] = useState(BACKDROP_DEFAULTS);
   const [ready, setReady] = useState(false);
   const [playing, setPlaying] = useState(false);
@@ -46,6 +46,7 @@ export default function BackdropExperience() {
   const [wide, setWide] = useState(false);
   const [plates, setPlates] = useState([{ id: 0, url: FALLBACK_TRACK.artwork, loaded: false }]);
 
+  const pageRef = useRef(null);
   const audioRef = useRef(null);
   const engineRef = useRef(null);
   const railRef = useRef(null);
@@ -87,13 +88,17 @@ export default function BackdropExperience() {
     }
   }, [track]);
 
+  // The tuning panel only fits a wide box — measured on the box, not the
+  // window. Embedded, it never shows, so there is nothing to measure.
   useEffect(() => {
-    const big = window.matchMedia("(min-width: 900px)");
-    const read = () => setWide(big.matches);
+    const box = pageRef.current?.closest(".piece-box");
+    if (embedded || !box) return;
+    const read = () => setWide(box.clientWidth >= 900);
     read();
-    big.addEventListener("change", read);
-    return () => big.removeEventListener("change", read);
-  }, []);
+    const observer = new ResizeObserver(read);
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [embedded]);
 
   const sampler = useCallback(() => engineRef.current?.read() ?? null, []);
   const getLevel = useCallback(() => engineRef.current?.read().level ?? 0, []);
@@ -196,6 +201,7 @@ export default function BackdropExperience() {
 
   return (
     <main
+      ref={pageRef}
       className="backdrop-page"
       data-ready={ready ? "true" : "false"}
     >
@@ -272,7 +278,7 @@ export default function BackdropExperience() {
         onLoadedMetadata={() => engineRef.current?.reseat()}
       />
 
-      {DEV && wide ? (
+      {DEV && wide && !embedded ? (
         <BackdropControls onChange={handleConfig} getLevel={getLevel} />
       ) : null}
     </main>

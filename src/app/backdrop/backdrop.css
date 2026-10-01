@@ -1,6 +1,10 @@
+/* The plate also yields to the meta, rail and transport stacked under it
+   (`--backdrop-chrome`), so a short box shrinks the art rather than clipping
+   the player. */
 .backdrop-page {
-  --backdrop-plate: min(46vh, 78vw);
-  position: fixed;
+  --backdrop-chrome: 18rem;
+  --backdrop-plate: min(46cqh, 78cqw, 100cqh - var(--backdrop-chrome));
+  position: absolute;
   inset: 0;
   overflow: hidden;
   background: #08090a;
@@ -137,6 +141,17 @@
   place-items: center;
   color: inherit;
   cursor: pointer;
+}
+
+@container (max-height: 600px) {
+  .backdrop-page {
+    --backdrop-chrome: 14rem;
+  }
+
+  .backdrop-player {
+    gap: 1rem;
+    padding-block: 1.5rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

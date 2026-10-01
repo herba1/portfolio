@@ -4,10 +4,11 @@
 
    Inside a piece:
    - `100cqw` / `100cqh` stand in for `100vw` / `100vh` (any vw/vh/svh/lvh/dvh).
-   - Size containment makes the box the containing block for fixed-position
-     descendants, so `position: fixed` lands relative to the box. Anything
-     placed from pointer or getBoundingClientRect coordinates must subtract
-     the box's own rect.
+   - Layout containment (set below — `container-type` alone does not)
+     makes the box the containing block for fixed-position descendants, so
+     `position: fixed` lands relative to the box. Anything placed from
+     pointer or getBoundingClientRect coordinates must subtract the box's
+     own rect.
    - Measure the box (ResizeObserver on `el.closest(".piece-box")`), not
      `window.innerWidth` / `innerHeight`.
    - A piece that scrolls owns its scroller inside the box (with
@@ -15,6 +16,7 @@
 .piece-box {
   position: relative;
   container-type: size;
+  contain: layout;
   overflow: hidden;
   width: 100%;
   height: 100%;

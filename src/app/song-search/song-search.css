@@ -3,7 +3,7 @@
   --ss-ink: #f4f4f5;
   --ss-ink-secondary: #b7b8bc;
   --ss-line: rgba(255, 255, 255, 0.12);
-  position: fixed;
+  position: absolute;
   inset: 0;
   overflow: hidden;
   background: var(--ss-bg);
@@ -33,6 +33,7 @@
 }
 
 .ss-hint {
+  text-align: center;
   font-size: 0.9375rem;
   font-weight: var(--font-weight-meta);
   letter-spacing: -0.13px;
@@ -49,7 +50,7 @@
 }
 
 .ss-pick img {
-  width: min(19rem, 62vw, 38vh);
+  width: min(19rem, 62cqw, 38cqh);
   aspect-ratio: 1;
   border-radius: 12px;
   object-fit: cover;
@@ -104,4 +105,18 @@
 
 .ss-toggle:active {
   transform: scale(0.97);
+}
+
+/* A narrow box puts the dock under the toggle; lift the toggle clear of the
+   dock's bar. A short box trims the stage padding so the pick still fits. */
+@container (max-width: 760px) {
+  .ss-toggle {
+    bottom: 5.25rem;
+  }
+}
+
+@container (max-height: 600px) {
+  .ss-stage {
+    padding: 3rem 1.5rem 9rem;
+  }
 }
