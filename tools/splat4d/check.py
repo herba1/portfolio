@@ -33,9 +33,33 @@ def load_flipbook(folder, meta):
     return scene
 
 
+def load_records(folder, record):
+    base = np.fromfile(os.path.join(folder, record["base"]), dtype=BASE_DTYPE)
+    points = np.fromfile(os.path.join(folder, record["points"]), dtype=POSITION_DTYPE)
+    low = np.array(record["bounds"]["min"])
+    high = np.array(record["bounds"]["max"])
+    part = {
+        "cov": base["cov"].astype(np.float64) / record["covScale"],
+        "rgb": base["rgba"][:, :3] / 255.0,
+        "xyz": low + points["xyz"].astype(np.float64) / 65535.0 * (high - low),
+        "opacity": points["opacity"] / 65535.0,
+    }
+    if record.get("velocity"):
+        part["velocity"] = np.fromfile(os.path.join(folder, record["velocity"]), dtype="<f2").astype(np.float64).reshape(-1, 3)
+    return part
+
+
+def load_stream(folder, meta):
+    still = load_records(folder, meta["static"]) if meta["static"].get("count") else {
+        "xyz": np.zeros((0, 3)), "cov": np.zeros((0, 6)), "rgb": np.zeros((0, 3)), "opacity": np.zeros(0)}
+    return {"meta": meta, "static": still, "chunks": [load_records(folder, c) for c in meta["chunks"]]}
+
+
 def load_splat4d(folder):
     with open(os.path.join(folder, "meta.json")) as handle:
         meta = json.load(handle)
+    if meta.get("kind") == "stream":
+        return load_stream(folder, meta)
     if meta.get("kind") == "flipbook":
         return load_flipbook(folder, meta)
     base = np.fromfile(os.path.join(folder, "base.bin"), dtype=BASE_DTYPE)
@@ -67,6 +91,19 @@ def load_splat4d(folder):
 
 def frame_splats(scene, frame, dt=0.0):
     meta = scene["meta"]
+    if meta.get("kind") == "stream":
+        chunk_index = next(i for i, c in enumerate(meta["chunks"]) if c["firstMoment"] <= frame < c["firstMoment"] + c["moments"])
+        chunk = meta["chunks"][chunk_index]
+        offsets = chunk["frameOffsets"]
+        local = frame - chunk["firstMoment"]
+        part = scene["chunks"][chunk_index]
+        rows = np.r_[0:chunk.get("staticCount", 0), offsets[local]:offsets[local + 1]]
+        moving = part["xyz"][rows]
+        if dt and "velocity" in part:
+            moving = moving + part["velocity"][rows] * dt
+        still = scene["static"]
+        return (np.concatenate([still["xyz"], moving]), np.concatenate([still["cov"], part["cov"][rows]]),
+                np.concatenate([still["rgb"], part["rgb"][rows]]), np.concatenate([still["opacity"], part["opacity"][rows]]))
     if meta.get("kind") == "flipbook":
         static = meta["staticCount"]
         offsets = meta["frameOffsets"]

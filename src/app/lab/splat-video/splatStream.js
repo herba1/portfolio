@@ -69,7 +69,7 @@ export function createStreamRuntime(clip) {
     nextToken += 1;
     const points = data.points.slice(0, set.count * 4);
     worker.postMessage(
-      { type: "chunk", index, token: entry.token, points, frameOffsets: set.frameOffsets, ...boundsArrays(set.bounds) },
+      { type: "chunk", index, token: entry.token, points, shared: set.shared ?? 0, frameOffsets: set.frameOffsets, ...boundsArrays(set.bounds) },
       [points.buffer],
     );
     resident.set(index, entry);

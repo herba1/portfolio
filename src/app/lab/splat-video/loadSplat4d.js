@@ -123,12 +123,12 @@ function isAscending(values) {
   return values.every((value, i) => Number.isFinite(value) && (i === 0 || value >= values[i - 1]));
 }
 
-function isOffsets(offsets, moments, count) {
+function isOffsets(offsets, moments, count, start = 0) {
   return (
     Array.isArray(offsets) &&
     offsets.length === moments + 1 &&
     offsets.every(isCount) &&
-    offsets[0] === 0 &&
+    offsets[0] === start &&
     offsets[moments] === count &&
     isAscending(offsets)
   );
@@ -142,7 +142,10 @@ function validateSplatSet(set, fail, what) {
   if (!base || !points) fail(`names no ${what} files.`);
   if (!isVector(set.bounds?.min) || !isVector(set.bounds?.max)) fail(`has invalid ${what} bounds.`);
   if (!(set.covScale > 0)) fail(`has an invalid ${what} covScale.`);
-  return { count: set.count, base, points, bounds: { min: set.bounds.min, max: set.bounds.max }, covScale: set.covScale };
+  const velocity = optionalAsset(set.velocity, fail, `${what} velocity`);
+  const shared = set.staticCount ?? 0;
+  if (!isCount(shared) || shared > set.count) fail(`has an invalid ${what} staticCount.`);
+  return { count: set.count, base, points, velocity, shared, bounds: { min: set.bounds.min, max: set.bounds.max }, covScale: set.covScale };
 }
 
 function validateStream(meta, fail) {
@@ -162,7 +165,7 @@ function validateStream(meta, fail) {
     if (!chunk || (chunk.index ?? index) !== index || chunk.firstMoment !== firstMoment) fail(`has ${what} out of order.`);
     if (!isPositiveInteger(chunk.moments)) fail(`has ${what} with no moments.`);
     const set = validateSplatSet(chunk, fail, what);
-    if (!isOffsets(chunk.frameOffsets, chunk.moments, set.count)) fail(`has invalid frameOffsets in ${what}.`);
+    if (!isOffsets(chunk.frameOffsets, chunk.moments, set.count, set.shared)) fail(`has invalid frameOffsets in ${what}.`);
     firstMoment += chunk.moments;
     return { ...set, index, firstMoment: chunk.firstMoment, moments: chunk.moments, frameOffsets: chunk.frameOffsets };
   });

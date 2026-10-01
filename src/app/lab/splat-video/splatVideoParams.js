@@ -198,7 +198,9 @@ function largestMoment(offsets) {
 }
 
 export function sortCapacity(meta) {
-  if (isStream(meta)) return meta.static.count + meta.chunks.reduce((most, chunk) => Math.max(most, largestMoment(chunk.frameOffsets)), 0);
+  if (isStream(meta)) {
+    return meta.static.count + meta.chunks.reduce((most, chunk) => Math.max(most, (chunk.shared ?? chunk.staticCount ?? 0) + largestMoment(chunk.frameOffsets)), 0);
+  }
   if (!isFlipbook(meta)) return meta.count;
   return meta.staticCount + largestMoment(meta.frameOffsets);
 }

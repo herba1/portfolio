@@ -85,12 +85,26 @@ def sharpness(image, coverage):
     return float(laplacian[covered].var()) if covered.any() else 0.0
 
 
-def moment_for(u, frames):
-    return int(round(u * (frames - 1)))
+def moment_for(u, meta):
+    times = meta.get("times")
+    if times:
+        target = u * float(meta["duration"])
+        moment = int(np.abs(np.array(times) - target).argmin())
+        return moment, target - times[moment]
+    moment = int(round(u * (meta["frames"] - 1)))
+    return moment, (u - moment / max(1, meta["frames"] - 1)) * float(meta["duration"])
+
+
+def splats_per_moment(meta):
+    if meta.get("kind") == "stream":
+        return int(meta["static"]["count"] + sum(c["count"] for c in meta["chunks"]) / max(1, meta["frames"]))
+    if meta.get("kind") == "flipbook":
+        return int(meta["count"] / max(1, meta["frames"]))
+    return int(meta["count"])
 
 
 def total_bytes(folder):
-    return sum(os.path.getsize(os.path.join(folder, f)) for f in os.listdir(folder) if f.endswith((".bin", ".mp4", ".png")))
+    return sum(os.path.getsize(os.path.join(folder, f)) for f in os.listdir(folder) if f.endswith((".bin", ".mp4", ".png", ".m4a")))
 
 
 def main():
@@ -111,8 +125,8 @@ def main():
 
     rows, renders, truths = [], [], []
     for image, u, C2W in zip(images, us, cameras):
-        moment = moment_for(float(u), meta["frames"])
-        dt = (float(u) - moment / max(1, meta["frames"] - 1)) * float(meta["duration"]) if args.glide else 0.0
+        moment, offset = moment_for(float(u), meta)
+        dt = offset if args.glide else 0.0
         rendered, coverage = render_from(scene, moment, C2W, fxfycxcy, W, H, dt)
         truth = image.transpose(1, 2, 0)
         rows.append({
@@ -128,7 +142,7 @@ def main():
     flicker = float(np.mean(render_steps) / max(np.mean(truth_steps), 1e-6)) if render_steps else 1.0
 
     middle = len(cameras) // 2
-    moment = moment_for(float(us[middle]), meta["frames"])
+    moment, _ = moment_for(float(us[middle]), meta)
     pivot_depth = meta["camera"]["pivotDepth"]
     range_rows, range_images = {}, []
     center_image, center_coverage = render_from(scene, moment, cameras[middle], fxfycxcy, W, H)
@@ -154,7 +168,7 @@ def main():
         "flicker": flicker,
         **range_rows,
         "mb_per_second": total_bytes(args.folder) / 1e6 / seconds,
-        "splats_per_moment": int(meta["count"] / max(1, meta["frames"])) if meta.get("kind") == "flipbook" else int(meta["count"]),
+        "splats_per_moment": splats_per_moment(meta),
         "moments": meta["frames"],
         "per_frame": rows,
     }

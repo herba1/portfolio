@@ -47,6 +47,8 @@ def parse_args():
     parser.add_argument("--velocity", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", required=True)
     parser.add_argument("--fresh", action="store_true")
+    parser.add_argument("--holdout", action="store_true")
+    parser.add_argument("--window-static", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--frames-chunk", type=int, default=4)
     parser.add_argument("--attention-chunk", type=int, default=1024)
     parser.add_argument("--time-chunk", type=int, default=25)
@@ -207,6 +209,18 @@ def main():
         log(f"camera path: up to {swing:.1f} deg from the first frame")
         np.savez(pose_cache, settings=np.array(poses_settings), C2W=C2W, depths=depths)
 
+    if args.holdout:
+        from inputs import cover_resize, decode_frame
+        from poses import locate
+
+        picks = [k * step + i for k in range(windows) for i in (3, step - 4)]
+        held_times = [(frame_times[j] + frame_times[j + 1]) / 2 for j in picks]
+        held = np.stack([np.asarray(cover_resize(decode_frame(args.video, t), (W, H))[0], dtype=np.float32) / 255.0 for t in held_times]).transpose(0, 3, 1, 2)
+        held_C2W = locate(held, images, depths, C2W, fxfycxcy, [[j, j + 1] for j in picks])
+        np.savez(os.path.join(cache_dir, "holdout.npz"), images=held, u=(np.array(held_times) - args.start) / span,
+                 C2W=held_C2W, fxfycxcy=fxfycxcy[0])
+        log(f"saved {len(picks)} held-out frames for evaluation")
+
     audio_name = extract_audio(args, os.path.join(args.out, "audio.m4a"), args.start, span)
     log(f"audio: {audio_name or 'none in the clip'}")
 
@@ -229,6 +243,21 @@ def main():
             log(f"chunk {len(chunks) - 1}: moments {first}-{first + len(batch) - 1}, {record['count']:,} splats, {size / 1e6:.1f} MB")
 
     from infer import load_model, window_frames, window_motion
+
+    def write_window_chunk(k):
+        nonlocal total_bytes
+        window_centers = np.array([m[:3, 3] for m in camera_matrices[-len(pending):]])
+        still = finish(static_parts[-1], fx_px, args, window_centers.mean(axis=0))
+        if args.velocity:
+            still["velocity"] = np.zeros((still["xyz"].shape[0], 3), dtype=np.float32)
+        first = len(moment_times) - len(pending)
+        offsets = still["xyz"].shape[0] + np.concatenate([[0], np.cumsum([p["xyz"].shape[0] for p in pending])]).astype(int)
+        record, size = write_records(args.out, f"chunk-{len(chunks):03d}", [still] + pending)
+        chunks.append({"index": len(chunks), "firstMoment": first, "moments": len(pending), **record,
+                       "staticCount": int(still["xyz"].shape[0]), "frameOffsets": [int(v) for v in offsets]})
+        total_bytes += size
+        log(f"chunk {len(chunks) - 1}: window {k + 1}, {still['xyz'].shape[0]:,} still + {record['count'] - still['xyz'].shape[0]:,} moving, {size / 1e6:.1f} MB")
+        pending.clear()
 
     input_u = (frame_times - args.start) / span
     camera_matrices = []
@@ -287,25 +316,32 @@ def main():
             moment_times.append(moment_time)
             camera_matrices.append(camera)
             pending.append(finish(part, fx_px, args, camera[:3, 3]))
-        flush()
+        if args.window_static:
+            write_window_chunk(k)
+        else:
+            flush()
 
-    flush(force=True)
+    if not args.window_static:
+        flush(force=True)
     if model is not None:
         del model
 
     moments = len(moment_times)
     centers = np.array([m[:3, 3] for m in camera_matrices])
 
-    background = {key: np.concatenate([p[key] for p in static_parts]) for key in ("xyz", "cov", "color", "opacity")}
-    static, stack = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
-                          background["xyz"], background["cov"].astype(np.float64), background["color"], background["opacity"])
-    if static["xyz"].shape[0] > args.static_budget:
-        rows = thin_rows(static["xyz"].shape[0], args.static_budget)
-        static = {key: value[rows] for key, value in static.items()}
-    static = finish(static, fx_px, args, centers.mean(axis=0))
-    static_record, static_bytes = write_records(args.out, "static", [static])
-    total_bytes += static_bytes
-    log(f"static: {background['xyz'].shape[0]:,} -> {static_record['count']:,} splats (merged ~{stack:.1f}), {static_bytes / 1e6:.1f} MB")
+    if args.window_static:
+        static_record = {"count": 0}
+    else:
+        background = {key: np.concatenate([p[key] for p in static_parts]) for key in ("xyz", "cov", "color", "opacity")}
+        static, stack = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+                              background["xyz"], background["cov"].astype(np.float64), background["color"], background["opacity"])
+        if static["xyz"].shape[0] > args.static_budget:
+            rows = thin_rows(static["xyz"].shape[0], args.static_budget)
+            static = {key: value[rows] for key, value in static.items()}
+        static = finish(static, fx_px, args, centers.mean(axis=0))
+        static_record, static_bytes = write_records(args.out, "static", [static])
+        total_bytes += static_bytes
+        log(f"static: {background['xyz'].shape[0]:,} -> {static_record['count']:,} splats (merged ~{stack:.1f}), {static_bytes / 1e6:.1f} MB")
 
     subject_depth = np.median(depths[depths > 0])
     fy = float(fxfycxcy[0, 1])

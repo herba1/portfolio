@@ -159,8 +159,8 @@ function initStream(message) {
   };
 }
 
-function addChunk({ index, token, points, frameOffsets, boundsMin, boundsSize }) {
-  stream.chunks.set(index, { token, points, frameOffsets, boundsMin, boundsSize });
+function addChunk({ index, token, points, shared, frameOffsets, boundsMin, boundsSize }) {
+  stream.chunks.set(index, { token, points, shared: shared ?? 0, frameOffsets, boundsMin, boundsSize });
 }
 
 function dropChunk({ index, token }) {
@@ -177,10 +177,16 @@ function sortChunk({ zRow, chunk, token, moment, recycle, id }) {
   refreshStaticDepths(stream, zRow, stream.staticPoints, stream.boundsMin, stream.boundsSize);
   copyStatic(stream);
 
-  const { points, frameOffsets } = entry;
+  const { points, frameOffsets, shared } = entry;
   const { ax, ay, az, offset } = projection(zRow, entry.boundsMin, entry.boundsSize);
   const end = frameOffsets[moment + 1];
   let n = staticCount;
+  for (let j = 0; j < shared; j += 1) {
+    const p = j * 4;
+    depths[n] = ax * points[p] + ay * points[p + 1] + az * points[p + 2] + offset;
+    indices[n] = staticCount + j;
+    n += 1;
+  }
   for (let j = frameOffsets[moment]; j < end; j += 1) {
     const p = j * 4;
     depths[n] = ax * points[p] + ay * points[p + 1] + az * points[p + 2] + offset;
