@@ -57,20 +57,13 @@
   color: var(--color-ink-inverse);
 }
 
-/* ── A · Sheet ─────────────────────────────── */
+/* ── B · Sheet ─────────────────────────────── */
 
-.xl-sheet,
-.xl-timeline {
+.xl-sheet {
   display: flex;
   flex-direction: column;
   height: 100dvh;
   padding: 80px 24px 72px;
-}
-/* The timeline grows as tall as its tallest day and scrolls; tiles keep a
-   shape the pieces can actually lay out in at a fifth of the width. */
-.xl-timeline {
-  height: auto;
-  min-height: 100dvh;
 }
 .xl-sheet__head {
   display: flex;
@@ -168,149 +161,9 @@
   }
 }
 
-/* ── C · Board ─────────────────────────────── */
-
-.xl-board {
-  position: relative;
-  height: 100dvh;
-  overflow: hidden;
-  cursor: grab;
-  touch-action: none;
-  background-color: var(--color-surface);
-  background-image: radial-gradient(var(--color-line) 1px, transparent 1px);
-  background-size: 24px 24px;
-}
-.xl-board[data-dragging="true"] {
-  cursor: grabbing;
-}
-.xl-board__wall {
-  position: absolute;
-  top: 0;
-  left: 0;
-  transform-origin: 0 0;
-  will-change: transform;
-}
-.xl-board__wall[data-animate="true"] {
-  transition: transform 600ms var(--ease-out-quart);
-}
-.xl-board__frame {
-  position: absolute;
-  display: flex;
-  cursor: auto;
-}
-.xl-board__frame > .piece-box {
-  flex: 1;
-  height: auto;
-}
-.xl-board__label {
-  position: absolute;
-  transform-origin: 0 0;
-  cursor: auto;
-}
-.xl-board__title {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  cursor: zoom-in;
-}
-.xl-board__title:hover .text-ink {
-  color: var(--color-accent);
-}
-.xl-board__fit {
-  position: absolute;
-  top: 80px;
-  right: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 4px 12px;
-  border-radius: 999px;
-  color: var(--color-ink);
-  background: var(--color-surface-raised);
-  box-shadow: 0 0 0 1px var(--color-line);
-}
-.xl-board__fit kbd {
-  font-family: inherit;
-  color: var(--color-ink-secondary);
-}
-
-/* ── D · Timeline ──────────────────────────── */
-
-.xl-timeline__skyline {
-  flex: 1;
-  min-height: 0;
-  display: grid;
-  grid-template-columns: repeat(var(--cols), minmax(0, 1fr));
-  gap: 16px;
-  align-items: end;
-}
-.xl-timeline__col {
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-end;
-  gap: 16px;
-  height: 100%;
-  min-height: 0;
-}
-.xl-timeline__piece {
-  display: flex;
-  flex-direction: column;
-  flex: none;
-}
-.xl-timeline__frame {
-  aspect-ratio: var(--aspect, 4 / 5);
-  min-height: 0;
-}
-.xl-timeline__date {
-  align-self: center;
-  padding-top: 4px;
-}
-.xl-timeline__leaders {
-  display: block;
-  width: 100%;
-  height: 48px;
-  overflow: visible;
-}
-.xl-timeline__leaders line {
-  stroke: var(--color-line-strong);
-  stroke-width: 1;
-}
-.xl-timeline__axis {
-  position: relative;
-  height: 32px;
-  border-top: 1px solid var(--color-ink);
-}
-.xl-timeline__month {
-  position: absolute;
-  top: 8px;
-  padding-left: 4px;
-  border-left: 1px solid var(--color-line-strong);
-}
-.xl-timeline__day {
-  position: absolute;
-  top: -4px;
-  width: 8px;
-  height: 8px;
-  margin-left: -4px;
-  border-radius: 50%;
-  background: var(--color-ink);
-}
-
-@media (max-width: 899px) {
-  .xl-timeline {
-    height: auto;
-  }
-  .xl-timeline__skyline {
-    grid-template-columns: 1fr;
-  }
-  .xl-timeline__leaders,
-  .xl-timeline__axis {
-    display: none;
-  }
-}
-
 /* A piece mounted as a component. */
 .xl-piece {
+  border-radius: var(--radius-xl);
   background: var(--color-surface-raised);
   outline: 1px solid var(--color-line);
 }

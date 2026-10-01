@@ -6,8 +6,6 @@ import { usePathname } from "next/navigation";
 const OPTIONS = [
   { href: "/experiments/layouts/bento", label: "Bento" },
   { href: "/experiments/layouts/sheet", label: "Sheet" },
-  { href: "/experiments/layouts/board", label: "Board" },
-  { href: "/experiments/layouts/timeline", label: "Timeline" },
 ];
 
 export default function Switcher() {
