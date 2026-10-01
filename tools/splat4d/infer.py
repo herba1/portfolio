@@ -198,3 +198,24 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_
         in_mask[inside] = masks[i][py[inside], px[inside]]
         frames.append(select(i, state, in_mask, own, motion))
     return frames, depth[0, :, 0].cpu().numpy()
+
+
+def window_depths(model, dtype, args, images, C2W, fxfycxcy):
+    device = args.device
+    renderer = model.gs_renderer
+    F_in = images.shape[0]
+    times = np.linspace(0, 1, F_in, dtype=np.float32)
+
+    def put(array):
+        return torch.from_numpy(array).unsqueeze(0).to(device=device, dtype=dtype)
+
+    with torch.inference_mode():
+        backbone_outputs, _, _ = model.backbone(
+            put(images), put(C2W), put(fxfycxcy), put(times), put(times[:1]),
+            frames_chunk_size=args.frames_chunk,
+        )
+        depth = renderer.depth_activation(backbone_outputs["depth"].float())[0, :, 0].cpu().numpy()
+    del backbone_outputs
+    if device == "mps":
+        torch.mps.empty_cache()
+    return depth

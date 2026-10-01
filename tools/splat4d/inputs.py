@@ -93,6 +93,10 @@ def load_video(args):
         processed.append(np.asarray(cropped, dtype=np.float32) / 255.0)
     images = np.stack(processed).transpose(0, 3, 1, 2)
     W, H = size
+    color_scale = getattr(args, "color_scale", 0)
+    if color_scale:
+        color_size = (W * color_scale, H * color_scale)
+        args.color_frames = np.stack([np.asarray(cover_resize(frame, color_size)[0]) for frame in frames])
     long_source = max(frames[0].width, frames[0].height)
     if args.hfov == "auto":
         f35 = focal_35mm(info)
