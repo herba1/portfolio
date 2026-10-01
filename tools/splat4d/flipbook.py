@@ -148,6 +148,10 @@ def part_of(state, rows, cov):
     return {"xyz": state["xyz"][rows], "cov": cov, "color": state["color"][rows], "opacity": state["opacity"][rows]}
 
 
+def uses_static_split(args):
+    return args.split_static and bool(args.npz or args.spread)
+
+
 def selector(args, fx_px, views=None):
     def keys_for(i, xyz):
         if views is None:
@@ -158,7 +162,7 @@ def selector(args, fx_px, views=None):
     def select(i, state, in_mask, own, motion):
         usable = (state["opacity"] > args.min_opacity) & (state["xyz"][:, 2] > 0)
         subject_rows = np.flatnonzero(usable & in_mask)
-        background_rows = np.flatnonzero(usable & own & ~in_mask) if not args.split_static else np.zeros(0, dtype=np.int64)
+        background_rows = np.flatnonzero(usable & own & ~in_mask) if not uses_static_split(args) else np.zeros(0, dtype=np.int64)
         subject_cov = covariance_upper(state["scale"][subject_rows], state["rotation"][subject_rows])
         subject, _ = merge(
             keys_for(i, state["xyz"][subject_rows]),
@@ -279,7 +283,7 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
     save_holdout(os.path.join(os.path.dirname(cache_path), "holdout.npz"), holdout, images, C2W, fxfycxcy, model, dtype, depths)
     region = None
     static_part = None
-    if args.split_static:
+    if uses_static_split(args):
         from infer import window_motion
 
         moving = window_motion(model, dtype, args, images, C2W, fxfycxcy)
