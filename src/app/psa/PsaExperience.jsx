@@ -55,17 +55,23 @@ const FILTERS = [
 
 /* The provider sits above the shell so the tab bar can register itself as the
    flight target and MotionConfig can read the armed variant, both of which
-   have to happen outside the component that fires the flight. */
-export default function PsaExperience() {
+   have to happen outside the component that fires the flight.
+
+   `embedded` is the piece sitting in someone else's page — a tile on the
+   experiments index, a box on the bench. It gets the app and nothing else:
+   no tuning panel, and none of PsaChrome's page-wide work, because the
+   site's nav and Lenis belong to the page around it, and four copies on one
+   page would each be stopping and restarting the same scroller. */
+export default function PsaExperience({ embedded = false }) {
   return (
     <SaveFlightProvider>
-      <PsaApp />
-      {SHOW_MOTION_CONFIG && <MotionConfig />}
+      <PsaApp embedded={embedded} />
+      {SHOW_MOTION_CONFIG && !embedded && <MotionConfig />}
     </SaveFlightProvider>
   );
 }
 
-function PsaApp() {
+function PsaApp({ embedded }) {
   // Fetch and decode every scan once, before any filter or tab is touched.
   // An effect rather than the render body: this mutates a module-level map,
   // and a render-phase side effect during hydration is how the decode state
@@ -240,7 +246,7 @@ function PsaApp() {
 
   return (
     <div className="pk psa">
-      <PsaChrome killLenis />
+      {!embedded && <PsaChrome killLenis />}
 
       {/* Keyed on the tab so React remounts and the enter animation runs. */}
       <main
@@ -319,6 +325,11 @@ const ROLL_STAGGER = 38; // per-digit carry delay
 // Digits only, so the separators and the sign stay put and the reel structure
 // is identical before and after — SlotNumber rebuilds nothing.
 const zeroed = (text) => text.replace(/\d/g, "0");
+
+// Half the shell, less the gutters. The shell stops at 430px however wide the
+// box is, so past a phone the scan is ~200px — 45vw would ask a desktop for a
+// 650px file to fill it.
+const TILE_SIZES = "(max-width: 430px) 45vw, 200px";
 
 function useRolled(delay) {
   const [rolled, setRolled] = useState(false);
@@ -436,7 +447,7 @@ const Tile = memo(function Tile({ card, saved, onToggle, index = 0 }) {
       onClick={nudge}
     >
       <div className="psa-tile-art" ref={artRef}>
-        <Slab card={card} sizes="45vw" />
+        <Slab card={card} sizes={TILE_SIZES} />
         <div className="psa-tile-save">
           <SaveButton saved={saved} onToggle={handleToggle} hint={hint} />
         </div>
@@ -650,7 +661,7 @@ const BlankStack = memo(function BlankStack() {
    width the picture gives up.
 
    The format is what fixes the figures. In a tile, price and delta share one
-   line at opposite ends of a 45vw box, which puts the two numbers on the
+   line at opposite ends of a half-width box, which puts the two numbers on the
    same baseline but in different columns on every row — nothing lines up
    with anything and a column of prices cannot be read as a column. In a row
    they stack into a right-aligned block: every price sits on the same right
