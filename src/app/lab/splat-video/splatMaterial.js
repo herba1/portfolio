@@ -145,6 +145,10 @@ uniform float uCovScale;
 uniform vec3 uChunkBoundsMin;
 uniform vec3 uChunkBoundsSize;
 uniform float uChunkCovScale;
+uniform highp sampler2D uChunkVelocity;
+uniform float uTime;
+uniform float uMomentTime;
+uniform float uHalfStep;
 
 void readPoint(int index, out vec3 center, out float opacity) {
   vec4 point;
@@ -152,8 +156,10 @@ void readPoint(int index, out vec3 center, out float opacity) {
     point = vec4(texelFetch(uStatic, texelFor(index), 0));
     center = uBoundsMin + point.xyz * UNIT16 * uBoundsSize;
   } else {
-    point = vec4(texelFetch(uChunkPoints, texelFor(index - uStaticCount), 0));
-    center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize;
+    ivec2 cell = texelFor(index - uStaticCount);
+    point = vec4(texelFetch(uChunkPoints, cell, 0));
+    float glide = clamp(uTime - uMomentTime, -uHalfStep, uHalfStep);
+    center = uChunkBoundsMin + point.xyz * UNIT16 * uChunkBoundsSize + texelFetch(uChunkVelocity, cell, 0).xyz * glide;
   }
   opacity = point.w * UNIT16;
 }
@@ -289,15 +295,31 @@ export function createPairTextures(set) {
     new THREE.DataTexture(set.points, TEXTURE_WIDTH, set.rows, THREE.RGBAIntegerFormat, THREE.UnsignedShortType),
   );
   pointsTexture.internalFormat = "RGBA16UI";
+  const velocityTexture = set.velocity ? halfFloatTexture(set.velocity, TEXTURE_WIDTH, set.rows) : null;
   return {
     baseTexture,
     pointsTexture,
+    velocityTexture,
     dispose() {
       baseTexture.dispose();
       pointsTexture.dispose();
+      if (velocityTexture) velocityTexture.dispose();
     },
   };
 }
+
+function halfFloatTexture(data, width, height) {
+  const texture = new THREE.DataTexture(data, width, height, THREE.RGBAFormat, THREE.HalfFloatType);
+  texture.minFilter = THREE.NearestFilter;
+  texture.magFilter = THREE.NearestFilter;
+  texture.generateMipmaps = false;
+  texture.flipY = false;
+  texture.colorSpace = THREE.NoColorSpace;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+const STILL_VELOCITY = halfFloatTexture(new Uint16Array(4), 1, 1);
 
 export function createStreamMaterial(staticPair, staticSet) {
   return new THREE.ShaderMaterial({
@@ -315,6 +337,10 @@ export function createStreamMaterial(staticPair, staticSet) {
       uChunkBoundsMin: { value: new THREE.Vector3() },
       uChunkBoundsSize: { value: new THREE.Vector3(1, 1, 1) },
       uChunkCovScale: { value: 1 },
+      uChunkVelocity: { value: STILL_VELOCITY },
+      uTime: { value: 0 },
+      uMomentTime: { value: 0 },
+      uHalfStep: { value: 0 },
       uViewport: { value: new THREE.Vector2(1, 1) },
       uLowPass: { value: RENDER.lowPass },
     },
@@ -329,6 +355,7 @@ export function bindStreamChunk(material, pair, set) {
   uniforms.uChunkBoundsMin.value.set(min[0], min[1], min[2]);
   uniforms.uChunkBoundsSize.value.set(max[0] - min[0], max[1] - min[1], max[2] - min[2]);
   uniforms.uChunkCovScale.value = set.covScale;
+  uniforms.uChunkVelocity.value = pair.velocityTexture ?? STILL_VELOCITY;
 }
 
 export function createSplatGeometry(count) {

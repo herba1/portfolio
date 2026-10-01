@@ -327,7 +327,7 @@ export default function SplatVideoExperience() {
         ) : (
           <StageLoading load={load} />
         )}
-        {streaming ? <StageBuffering key={load.clip} engineRef={engineRef} /> : null}
+        {streaming ? <StageBuffering key={`${load.clip}-buffering`} engineRef={engineRef} /> : null}
       </section>
 
       {ready ? (

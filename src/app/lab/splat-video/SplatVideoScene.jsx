@@ -241,6 +241,8 @@ function StreamField({ clip, engineRef }) {
     const { uniforms } = runtime.material;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(meta, scratch.viewport.y);
+    uniforms.uTime.value = engine.time;
+    uniforms.uHalfStep.value = engine.reducedMotion ? 0 : 0.5 / Math.max(1, meta.fps);
 
     runtime.want(zRow, moment);
   });

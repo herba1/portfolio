@@ -443,7 +443,24 @@ async function fetchSplatSet({ folder, version, clip, set, signal, onChunk }) {
       }),
     ]);
   }
-  return { count: set.count, rows, base, points };
+  const velocity = set.velocity && set.count > 0 ? await fetchVelocity({ folder, version, clip, set, rows, signal }) : null;
+  return { count: set.count, rows, base, points, velocity };
+}
+
+async function fetchVelocity({ folder, version, clip, set, rows, signal }) {
+  const response = await fetch(`${folder}/${set.velocity}${version}`, { signal });
+  if (!response.ok) throw new Splat4dError(`${set.velocity} for “${clip}” answered ${response.status}.`, { clip });
+  const packed = new Uint16Array(await response.arrayBuffer());
+  if (packed.length !== set.count * 3) {
+    throw new Splat4dError(`${set.velocity} for “${clip}” holds ${packed.length / 3} splats; meta.json expects ${set.count}.`, { clip });
+  }
+  const texels = new Uint16Array(TEXTURE_WIDTH * rows * 4);
+  for (let i = 0; i < set.count; i += 1) {
+    texels[i * 4] = packed[i * 3];
+    texels[i * 4 + 1] = packed[i * 3 + 1];
+    texels[i * 4 + 2] = packed[i * 3 + 2];
+  }
+  return texels;
 }
 
 async function loadStream(clip, folder, meta, { signal, onProgress }) {

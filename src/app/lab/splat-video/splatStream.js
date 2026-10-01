@@ -148,6 +148,7 @@ export function createStreamRuntime(clip) {
     attribute.needsUpdate = true;
     geometry.instanceCount = reply.count;
     bindStreamChunk(material, entry.pair, entry.set);
+    material.uniforms.uMomentTime.value = momentTime(meta, entry.set.firstMoment + reply.moment);
     const previous = shown?.entry;
     shown = { entry, moment: reply.moment };
     if (previous && previous !== entry) schedule();
@@ -205,4 +206,9 @@ export function createStreamRuntime(clip) {
       material.dispose();
     },
   };
+}
+
+function momentTime(meta, moment) {
+  if (Array.isArray(meta.times) && meta.times[moment] !== undefined) return meta.times[moment];
+  return moment / Math.max(1, meta.fps);
 }
