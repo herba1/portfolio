@@ -151,6 +151,8 @@ def window_frames(model, dtype, args, images, C2W, fxfycxcy, masks, select, out_
     def region(i, xyz):
         if masks is None:
             return xyz[:, 2] > 0
+        if masks.ndim == 1:
+            return masks & (xyz[:, 2] > 0)
         z = np.clip(xyz[:, 2], 1e-6, None)
         px = np.floor(fx * xyz[:, 0] / z + cx).astype(np.int64)
         py = np.floor(fy * xyz[:, 1] / z + cy).astype(np.int64)
@@ -216,3 +218,50 @@ def window_depths(model, dtype, args, images, C2W, fxfycxcy):
     if device == "mps":
         torch.mps.empty_cache()
     return depth
+
+
+def window_motion(model, dtype, args, images, C2W, fxfycxcy):
+    device = args.device
+    renderer = model.gs_renderer
+    F_in, _, H, W = images.shape
+    HW = H * W
+    times = np.linspace(0, 1, F_in, dtype=np.float32)
+
+    def put(array):
+        return torch.from_numpy(array).unsqueeze(0).to(device=device, dtype=dtype)
+
+    from src.utils import unproject_depth
+
+    with torch.inference_mode():
+        backbone_outputs, pred_motions, pred_motion_gs = model.backbone(
+            put(images), put(C2W), put(fxfycxcy), put(times), put(times),
+            frames_chunk_size=args.frames_chunk,
+        )
+        depth = renderer.depth_activation(backbone_outputs["depth"].float())
+        C2W_t = torch.from_numpy(C2W).unsqueeze(0).to(depth.device)
+        fxfycxcy_t = torch.from_numpy(fxfycxcy).unsqueeze(0).to(depth.device)
+        xyz_flat = flat(renderer.xyz_activation(unproject_depth(depth.squeeze(2), C2W_t, fxfycxcy_t))).float()
+        own = {name: torch.zeros(F_in * HW, width, device=xyz_flat.device) for name, width in
+               (("xyz", 3), ("color", 3), ("opacity", 1), ("scale", 3), ("rotation", 4))}
+        positions = []
+        for i in range(F_in):
+            outputs = dict(backbone_outputs)
+            outputs["offset"] = pred_motions[:, i, :, :3].float()
+            if pred_motion_gs:
+                outputs.update(pred_motion_gs[i])
+            xyz, color, opacity, scale, rotation = activated_attributes(renderer, outputs, xyz_flat)
+            positions.append(xyz)
+            block = slice(i * HW, (i + 1) * HW)
+            for name, value in (("xyz", xyz), ("color", color), ("opacity", opacity[:, None]), ("scale", scale), ("rotation", rotation)):
+                own[name][block] = value[block]
+        motion = torch.zeros(F_in * HW, device=xyz_flat.device)
+        for xyz in positions:
+            motion = torch.maximum(motion, torch.linalg.norm(xyz - own["xyz"], dim=1))
+        result = {name: value.cpu().numpy() for name, value in own.items()}
+        result["opacity"] = result["opacity"][:, 0]
+        result["motion"] = motion.cpu().numpy()
+        result["depth"] = depth[0, :, 0].cpu().numpy()
+    del backbone_outputs, pred_motions, pred_motion_gs, positions
+    if device == "mps":
+        torch.mps.empty_cache()
+    return result

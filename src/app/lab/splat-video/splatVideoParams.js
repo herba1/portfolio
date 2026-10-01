@@ -39,6 +39,8 @@ export const RENDER = {
   far: 200,
   maxDelta: 0.1,
   lowPass: 0.3,
+  coverageFloor: 0.02,
+  coverageSolid: 0.35,
 };
 
 export const RGBD = {
@@ -154,7 +156,22 @@ export function sortCapacity(meta) {
   return meta.staticCount + largest;
 }
 
+function nearestTime(times, time) {
+  let low = 0;
+  let high = times.length - 1;
+  while (high - low > 1) {
+    const middle = (low + high) >> 1;
+    if (times[middle] <= time) low = middle;
+    else high = middle;
+  }
+  return time - times[low] <= times[high] - time ? low : high;
+}
+
 export function frameCursor(time, meta) {
+  if (Array.isArray(meta.times) && meta.times.length === meta.frames && meta.frames > 1) {
+    const frame = nearestTime(meta.times, time);
+    return { frame0: frame, frame1: frame, blend: 0 };
+  }
   if (steppedByFps(meta)) {
     const frame = clamp(Math.floor(time * meta.fps + 1e-4), 0, meta.frames - 1);
     return { frame0: frame, frame1: frame, blend: 0 };

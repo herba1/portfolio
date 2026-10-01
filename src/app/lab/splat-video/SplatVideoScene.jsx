@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
 import OrbitStage, { aimCamera } from "./OrbitStage";
-import { createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
+import { createResolvePass, createSplatGeometry, createSplatMaterial, createSplatTextures } from "./splatMaterial";
 import { RENDER, SORT, advanceTime, frameCursor, hasLensPath, lensMatrix, lowPassFor, sortCapacity } from "./splatVideoParams";
 
 function sameRequest(a, b) {
@@ -90,13 +90,16 @@ function createRuntime(clip) {
 function SplatField({ clip, engineRef }) {
   const groupRef = useRef(null);
   const runtimeRef = useRef(null);
+  const resolveRef = useRef(null);
   const scratchRef = useRef(null);
 
   useEffect(() => {
     const group = groupRef.current;
     const runtime = createRuntime(clip);
+    const resolve = createResolvePass();
     group.add(runtime.mesh);
     runtimeRef.current = runtime;
+    resolveRef.current = resolve;
     scratchRef.current = {
       pivot: new THREE.Vector3(0, 0, -clip.meta.camera.pivotDepth),
       modelView: new THREE.Matrix4(),
@@ -106,7 +109,9 @@ function SplatField({ clip, engineRef }) {
     return () => {
       group.remove(runtime.mesh);
       runtime.dispose();
+      resolve.dispose();
       runtimeRef.current = null;
+      resolveRef.current = null;
     };
   }, [clip]);
 
@@ -142,6 +147,16 @@ function SplatField({ clip, engineRef }) {
 
     runtime.want({ zRow: [e[2], e[6], e[10], e[14]], ...cursor });
   });
+
+  useFrame((state) => {
+    const resolve = resolveRef.current;
+    const scratch = scratchRef.current;
+    if (!resolve || !scratch) {
+      state.gl.render(state.scene, state.camera);
+      return;
+    }
+    resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
+  }, 1);
 
   return <group ref={groupRef} rotation-x={Math.PI} />;
 }

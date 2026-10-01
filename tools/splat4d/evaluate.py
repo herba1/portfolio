@@ -69,7 +69,20 @@ def swung(C2W, pivot_depth, degrees):
 def render_from(scene, moment, C2W, fxfycxcy, W, H):
     xyz, cov, rgb, alpha = frame_splats(scene, moment)
     xyz, cov = to_camera(xyz, cov, np.linalg.inv(C2W))
-    return render(xyz, cov, rgb, alpha, fxfycxcy, W, H)
+    image, coverage = render(xyz, cov, rgb, alpha, fxfycxcy, W, H)
+    solid = np.clip((coverage - 0.02) / (0.35 - 0.02), 0, 1)
+    solid = solid * solid * (3 - 2 * solid)
+    resolved = np.where(coverage[..., None] > 0.02, image / np.clip(coverage[..., None], 1e-6, None), 0) * solid[..., None]
+    return np.clip(resolved, 0, 1), coverage
+
+
+def sharpness(image, coverage):
+    import cv2
+
+    gray = cv2.cvtColor((image * 255).astype(np.uint8), cv2.COLOR_RGB2GRAY).astype(np.float32)
+    laplacian = cv2.Laplacian(gray, cv2.CV_32F)
+    covered = coverage > 0.9
+    return float(laplacian[covered].var()) if covered.any() else 0.0
 
 
 def moment_for(u, frames):
@@ -116,13 +129,17 @@ def main():
     moment = moment_for(float(us[middle]), meta["frames"])
     pivot_depth = meta["camera"]["pivotDepth"]
     range_rows, range_images = {}, []
+    center_image, center_coverage = render_from(scene, moment, cameras[middle], fxfycxcy, W, H)
+    center_sharpness = max(sharpness(center_image, center_coverage), 1e-6)
     for degrees in SWINGS:
-        holes = []
+        holes, sharp = [], []
         for sign in (-1, 1):
             image, coverage = render_from(scene, moment, swung(cameras[middle], pivot_depth, sign * degrees), fxfycxcy, W, H)
             holes.append(float(np.mean(coverage < HOLE)))
+            sharp.append(sharpness(image, coverage) / center_sharpness)
             range_images.append(image)
         range_rows[f"holes_at_{int(degrees)}deg"] = float(np.mean(holes))
+        range_rows[f"sharpness_at_{int(degrees)}deg"] = float(np.mean(sharp))
 
     seconds = float(meta["duration"])
     summary = {
@@ -152,6 +169,7 @@ def main():
     line = (f"{summary['label']}: psnr {summary['psnr']:.2f}  ssim {summary['ssim']:.3f}  lpips {summary['lpips']:.3f}  "
             f"flicker {summary['flicker']:.2f}  holes {100 * summary['holes']:.1f}%  "
             f"holes@10 {100 * range_rows['holes_at_10deg']:.1f}%  holes@20 {100 * range_rows['holes_at_20deg']:.1f}%  "
+            f"sharp@10 {range_rows['sharpness_at_10deg']:.2f}  sharp@20 {range_rows['sharpness_at_20deg']:.2f}  "
             f"{summary['mb_per_second']:.1f} MB/s  {summary['splats_per_moment']:,} splats/moment")
     print(line, flush=True)
     if args.table:

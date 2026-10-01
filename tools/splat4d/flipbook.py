@@ -15,7 +15,7 @@ from splat4d_format import covariance_upper, write_flipbook, write_index
 
 MOVIES_COMMIT = "77262fa"
 MODEL_SETTINGS = (
-    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
+    "video", "npz", "out_times", "spread", "estimate_poses", "holdout", "view_merge", "split_static", "static_eps", "start", "end", "fps", "window", "overlap", "width", "hfov", "dtype",
     "min_opacity", "diff_threshold", "mask_grow", "mask_close", "subject_voxel", "depth_voxel",
 )
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -32,6 +32,9 @@ def parse_args():
     parser.add_argument("--estimate-poses", action="store_true")
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--view-merge", action="store_true")
+    parser.add_argument("--split-static", action=argparse.BooleanOptionalAction, default=True)
+    parser.add_argument("--ray-clamp", type=float, default=2.0)
+    parser.add_argument("--static-eps", type=float, default=0.01)
     parser.add_argument("--splat-floor", type=float, default=0.5)
     parser.add_argument("--opacity-gain", type=float, default=1.0)
     parser.add_argument("--time-chunk", type=int, default=25)
@@ -155,7 +158,7 @@ def selector(args, fx_px, views=None):
     def select(i, state, in_mask, own, motion):
         usable = (state["opacity"] > args.min_opacity) & (state["xyz"][:, 2] > 0)
         subject_rows = np.flatnonzero(usable & in_mask)
-        background_rows = np.flatnonzero(usable & own & ~in_mask)
+        background_rows = np.flatnonzero(usable & own & ~in_mask) if not args.split_static else np.zeros(0, dtype=np.int64)
         subject_cov = covariance_upper(state["scale"][subject_rows], state["rotation"][subject_rows])
         subject, _ = merge(
             keys_for(i, state["xyz"][subject_rows]),
@@ -170,8 +173,24 @@ def selector(args, fx_px, views=None):
     return select
 
 
-def finish(part, fx_px, args):
+def clamp_along_ray(cov, xyz, center, ratio):
+    rays = xyz - center[None]
+    rays /= np.linalg.norm(rays, axis=1, keepdims=True).clip(1e-9)
+    xx, xy, xz, yy, yz, zz = (cov[:, i] for i in range(6))
+    sigma = np.stack([np.stack([xx, xy, xz], 1), np.stack([xy, yy, yz], 1), np.stack([xz, yz, zz], 1)], 1)
+    along = np.einsum("ni,nij,nj->n", rays, sigma, rays)
+    across = np.clip((np.trace(sigma, axis1=1, axis2=2) - along) / 2, 1e-20, None)
+    target = np.minimum(along, ratio * ratio * across)
+    shrink = np.sqrt(target / np.clip(along, 1e-20, None))
+    A = np.eye(3)[None] + (shrink - 1)[:, None, None] * rays[:, :, None] * rays[:, None, :]
+    clamped = A @ sigma @ A.transpose(0, 2, 1)
+    return np.stack([clamped[:, 0, 0], clamped[:, 0, 1], clamped[:, 0, 2], clamped[:, 1, 1], clamped[:, 1, 2], clamped[:, 2, 2]], 1)
+
+
+def finish(part, fx_px, args, center=None):
     cov = part["cov"].astype(np.float64).copy()
+    if args.ray_clamp > 0 and center is not None and cov.shape[0]:
+        cov = clamp_along_ray(cov, part["xyz"].astype(np.float64), center, args.ray_clamp)
     if args.splat_floor > 0 and cov.shape[0]:
         footprint = (args.splat_floor * np.clip(part["xyz"][:, 2], 1e-6, None) / fx_px) ** 2
         cov[:, [0, 3, 5]] += footprint[:, None]
@@ -258,13 +277,33 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
         log(f"estimated cameras: up to {swing:.1f} deg of turn and {100 * travel:.1f}% of the scene depth of travel")
     np.save(os.path.join(os.path.dirname(cache_path), "cameras.npy"), C2W)
     save_holdout(os.path.join(os.path.dirname(cache_path), "holdout.npz"), holdout, images, C2W, fxfycxcy, model, dtype, depths)
+    region = None
+    static_part = None
+    if args.split_static:
+        from infer import window_motion
+
+        moving = window_motion(model, dtype, args, images, C2W, fxfycxcy)
+        threshold = args.static_eps * float(np.median(moving["depth"]))
+        usable = (moving["opacity"] > args.min_opacity) & (moving["xyz"][:, 2] > 0)
+        region = moving["motion"] >= threshold
+        rows = np.flatnonzero(usable & ~region)
+        static_part = {
+            "xyz": moving["xyz"][rows], "cov": covariance_upper(moving["scale"][rows], moving["rotation"][rows]).astype(np.float32),
+            "color": moving["color"][rows], "opacity": moving["opacity"][rows],
+        }
+        log(f"world-static split: {rows.size:,} still splats, {int((usable & region).sum()):,} moving")
     views = None
     if args.view_merge:
         input_u = np.linspace(0, 1, images.shape[0])
         nearest = [int(np.abs(input_u - u).argmin()) for u in np.linspace(0, 1, args.out_times)]
         views = [np.linalg.inv(C2W[j]) for j in nearest]
     select = selector(args, float(fxfycxcy[0, 0] * images.shape[-1]), views)
-    frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, None, select, args.out_times)
+    frames, depth = window_frames(model, dtype, args, images, C2W, fxfycxcy, region, select, args.out_times)
+    if static_part is not None:
+        empty = {k: v[:0] for k, v in static_part.items()}
+        for f in frames:
+            f["background"] = empty
+        frames[0]["background"] = static_part
     log(f"{len(frames)} moments from {images.shape[0]} input frames in {time.time() - started:.0f}s")
     del model
     save_parts(cache_path, settings, frames, depth)
@@ -373,8 +412,22 @@ def main():
         static = {k: v[rows] for k, v in static.items()}
     log(f"background: {keep.sum():,} -> {static['xyz'].shape[0]:,} splats (merged ~{stack:.1f} per splat)")
 
-    static = finish(static, fx_px, args)
-    per_frame = [finish(f["subject"], fx_px, args) for f in frames]
+    cameras_path = os.path.join(os.path.dirname(cache_path), "cameras.npy")
+    moment_cameras = None
+    if (args.npz or args.spread) and os.path.exists(cameras_path):
+        cameras = np.load(cameras_path)
+        if np.abs(cameras - np.eye(4)[None]).max() > 1e-6:
+            moment_cameras = np.array(camera_path(cameras, count)).reshape(-1, 4, 4)
+    centers = moment_cameras[:, :3, 3] if moment_cameras is not None else np.zeros((count, 3))
+    subjects = []
+    for f in frames:
+        part = f["subject"]
+        if args.npz or args.spread:
+            keep = part["xyz"][:, 2] <= (np.percentile(part["xyz"][:, 2], args.max_depth_pct) if part["xyz"].shape[0] else 0)
+            part = {k: v[keep] for k, v in part.items()}
+        subjects.append(part)
+    static = finish(static, fx_px, args, centers.mean(axis=0))
+    per_frame = [finish(part, fx_px, args, centers[i]) for i, part in enumerate(subjects)]
     frame_counts = [p["xyz"].shape[0] for p in per_frame]
     if sum(frame_counts) + static["xyz"].shape[0] == 0 or not np.isfinite(np.concatenate([p["xyz"] for p in per_frame] + [static["xyz"]])).all():
         raise SystemExit("the model returned no usable splats (likely out of GPU memory); try a smaller --width, --frames-chunk 2 or --attention-chunk 512, then rerun with --fresh")
@@ -397,11 +450,12 @@ def main():
         },
         "source": {**source, "width": W, "height": H, "movies": MOVIES_COMMIT, "window": args.window},
     }
-    cameras_path = os.path.join(os.path.dirname(cache_path), "cameras.npy")
-    if (args.npz or args.spread) and os.path.exists(cameras_path):
-        cameras = np.load(cameras_path)
-        if np.abs(cameras - np.eye(4)[None]).max() > 1e-6:
-            meta["cameras"] = camera_path(cameras, count)
+    if moment_cameras is not None:
+        meta["cameras"] = [[round(float(v), 6) for v in m.reshape(-1)] for m in moment_cameras]
+    if args.npz or args.spread:
+        meta["times"] = [round(float(u) * meta["duration"], 5) for u in np.linspace(0, 1, count)]
+    else:
+        meta["times"] = [round(i / args.fps, 5) for i in range(count)]
     sizes = write_flipbook(args.out, meta, static, per_frame)
     write_index(os.path.dirname(args.out), name)
     nearest = np.round(np.linspace(0, images.shape[0] - 1, count)).astype(int)

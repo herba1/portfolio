@@ -221,3 +221,90 @@ export function createSplatGeometry(count) {
   geometry.instanceCount = 0;
   return geometry;
 }
+
+export const RESOLVE_VERTEX = `
+out vec2 vUv;
+
+void main() {
+  vUv = position.xy * 0.5 + 0.5;
+  gl_Position = vec4(position.xy, 0.0, 1.0);
+}
+`;
+
+export const RESOLVE_FRAGMENT = `
+precision highp float;
+
+uniform sampler2D uSplats;
+uniform float uFloor;
+uniform float uSolid;
+
+in vec2 vUv;
+
+out vec4 fragColor;
+
+void main() {
+  vec4 accumulated = texture(uSplats, vUv);
+  float coverage = accumulated.a;
+  if (coverage < uFloor) discard;
+  vec3 color = accumulated.rgb / coverage;
+  float alpha = smoothstep(uFloor, uSolid, coverage);
+  fragColor = vec4(color * alpha, alpha);
+}
+`;
+
+export function createResolvePass() {
+  const target = new THREE.WebGLRenderTarget(1, 1, {
+    type: THREE.HalfFloatType,
+    format: THREE.RGBAFormat,
+    depthBuffer: false,
+    stencilBuffer: false,
+    minFilter: THREE.NearestFilter,
+    magFilter: THREE.NearestFilter,
+  });
+  const material = new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: RESOLVE_VERTEX,
+    fragmentShader: RESOLVE_FRAGMENT,
+    uniforms: {
+      uSplats: { value: target.texture },
+      uFloor: { value: RENDER.coverageFloor },
+      uSolid: { value: RENDER.coverageSolid },
+    },
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,
+  });
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 3, -1, 0, -1, 3, 0], 3));
+  const quad = new THREE.Mesh(geometry, material);
+  quad.frustumCulled = false;
+  const scene = new THREE.Scene();
+  scene.add(quad);
+  const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+  return {
+    target,
+    render(gl, splatScene, splatCamera, width, height) {
+      if (target.width !== width || target.height !== height) target.setSize(width, height);
+      const previousTarget = gl.getRenderTarget();
+      const previousColor = gl.getClearColor(new THREE.Color());
+      const previousAlpha = gl.getClearAlpha();
+      gl.setRenderTarget(target);
+      gl.setClearColor(0x000000, 0);
+      gl.clear(true, false, false);
+      gl.render(splatScene, splatCamera);
+      gl.setRenderTarget(previousTarget);
+      gl.setClearColor(previousColor, previousAlpha);
+      gl.clear(true, false, false);
+      gl.render(scene, camera);
+    },
+    dispose() {
+      target.dispose();
+      material.dispose();
+      geometry.dispose();
+    },
+  };
+}
