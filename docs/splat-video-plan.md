@@ -180,6 +180,26 @@ Checkpoint tag: `splat-video-checkpoint-1` (before this round).
 - **Camera paths.** The DAVIS npz samples are video frames 0–48 at every 4th frame (2 s), so comparisons against them must use the same span. Over matching spans the essential-matrix rotation tracks the dataset well, and the PnP solver over-turns about 1.2–1.6× on translating clips. `flipbook --poses vggt` uses VGGT-1B (now downloaded) for the cameras and lens before MoVieS loads.
 - **Compression.** gzip gives 1.03–1.1× on splat bins; Morton order plus delta coding gives 1.26× on positions only. Not worth it.
 
+### Round 5 (2026-10-02): finishing pass
+
+- **Still-camera depth anchoring.** Chained window depth on Herb's 30 s webcam clip drifted from 1.27 to 0.24 on the window behind him, about 6×. Depth video, the windowed flipbook and `longclip --still` now anchor every window to the first frame on the far half of the image, so the window reads 1.27 throughout.
+- **Depth-video plate.** Two depth layers (subject against everything behind) replace Otsu and the three-layer split. Herb's plate is now just the room, with inpainting where he always sits.
+- **Crossfade scoring** (`evaluate --blend`, stroller, 7 moments, held-out frames halfway between moments):
+  - snap: 19.37 dB, flicker 0.86
+  - glide: 20.93 dB, flicker 0.84
+  - crossfade: 21.02 dB, flicker 0.81, as good as 13 moments
+  - So still clips now emit half the moments per second (`--moment-stride 2`).
+- **VGGT by default** for spread flipbooks from video (DAVIS stroller, 2 s, 12 real held-out frames):
+
+  | Cameras | Lens | PSNR | SSIM | LPIPS |
+  |---|---|---|---|---|
+  | VGGT, no lens given | 46.8° (dataset 47.2°) | 20.63 | 0.614 | 0.214 |
+  | PnP, given the true lens | – | 20.16 | 0.569 | 0.240 |
+
+  Long clips still use the PnP path.
+- **Three-tier still clips.** One background, the subject's still splats per 1 s window as chunk-shared rows, and only moving splats per moment. herb-30s went from 464 MB to 106 MB (3.5 MB/s, 181 moments) and plays without buffering.
+- **Report:** https://claude.ai/artifact/9GhUwdbD7DBowTd3A7UCBF (private; it has the experiment ledger and figures).
+
 Not verified yet:
 - The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
 - How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
