@@ -1,4 +1,4 @@
-import Deferred from "./Deferred";
+import PieceBox from "../PieceBox";
 import InkExperience from "@/app/ink/InkExperience";
 import RefractExperience from "@/app/refract/RefractExperience";
 import HalftoneExperience from "@/app/halftone/HalftoneExperience";
@@ -22,15 +22,15 @@ const COMPONENTS = {
 };
 
 // `data` carries anything a piece needs fetched on the server (Deck's tracks).
-// `wave` is the tile's step in the entrance; the piece mounts on that beat.
-const MOUNT_STEP = 90; // ms per wave step
-
-export default function Piece({ slug, data, wave = 0, className = "" }) {
+// Every piece renders on the server, so its tile arrives with real content;
+// the expensive half of the WebGL pieces waits for the viewport inside the
+// piece itself (useNearViewport), not here.
+export default function Piece({ slug, data, className = "" }) {
   const Component = COMPONENTS[slug];
   if (!Component) return null;
   return (
-    <Deferred className={`xl-piece ${className}`.trim()} delay={wave * MOUNT_STEP}>
+    <PieceBox className={`xl-piece ${className}`.trim()}>
       <Component embedded {...(data?.[slug] ?? {})} />
-    </Deferred>
+    </PieceBox>
   );
 }

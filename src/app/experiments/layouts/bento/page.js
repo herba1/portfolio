@@ -3,6 +3,11 @@ import { pieceData } from "../pieceData";
 import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
 
+// Static, refreshed hourly: the only server data is the Spotify read, which
+// pieceData caches on the same clock — so the page is served from the edge
+// instead of waiting on Spotify per request.
+export const revalidate = 3600;
+
 // Bento. One screen, every piece in a tile cut to its own shape: the phone
 // flow runs tall, the cover stack and the lens plate get width, the plates
 // stay squarish. No captions — each piece is mounted as a component, lays
@@ -36,7 +41,7 @@ export default async function BentoLayout() {
               "--wave": AREAS[piece.slug]?.wave ?? i,
             }}
           >
-            <Piece slug={piece.slug} data={data} wave={AREAS[piece.slug]?.wave ?? i} />
+            <Piece slug={piece.slug} data={data} />
           </li>
         ))}
       </ul>
