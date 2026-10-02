@@ -2,6 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import { GradientScene } from "./gradientScene";
+import useNearViewport from "@/app/experiments/useNearViewport";
 
 export default function DynamicBackdrop({ artworkURL, config, onReady, sampler }) {
   const canvasRef = useRef(null);
@@ -9,17 +10,22 @@ export default function DynamicBackdrop({ artworkURL, config, onReady, sampler }
   const configRef = useRef(config);
   const readyRef = useRef(onReady);
   const samplerRef = useRef(sampler);
+  const artworkRef = useRef(artworkURL);
+  // The GL context and its frame loop start only near the viewport; the
+  // canvas is transparent until its first frame either way.
+  const near = useNearViewport(canvasRef);
 
+  artworkRef.current = artworkURL;
   configRef.current = config;
   readyRef.current = onReady;
   samplerRef.current = sampler;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !near) return;
 
     const scene = new GradientScene(canvas, {
-      artworkURL,
+      artworkURL: artworkRef.current,
       config: configRef.current,
       sampler: () => samplerRef.current?.() ?? null,
       onReady: () => {
@@ -44,7 +50,7 @@ export default function DynamicBackdrop({ artworkURL, config, onReady, sampler }
       scene.destroy();
       sceneRef.current = null;
     };
-  }, []);
+  }, [near]);
 
   useEffect(() => {
     sceneRef.current?.setArtwork(artworkURL);

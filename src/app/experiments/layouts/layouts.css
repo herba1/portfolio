@@ -155,8 +155,8 @@
    `transform: none`, so nothing stays promoted to a layer once it lands. */
 .xl-tile {
   transform-origin: 50% 100%;
-  animation: xl-tile-in 900ms var(--ease-out-quint) both;
-  animation-delay: calc(80ms + var(--wave, 0) * 70ms);
+  animation: xl-tile-in 760ms var(--ease-out-quint) both;
+  animation-delay: calc(var(--wave, 0) * 60ms);
 }
 
 @keyframes xl-tile-in {

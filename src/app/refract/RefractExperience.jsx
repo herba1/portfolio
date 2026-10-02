@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
+import useNearViewport from "@/app/experiments/useNearViewport";
 import {
   clearStored,
   copyParams,
@@ -23,6 +24,12 @@ import {
 
 const STORAGE_KEY = "herb:refract:params";
 
+// The scene is three.js — the heaviest chunk on any page that carries it.
+// Start fetching it the moment this module evaluates, ahead of hydration,
+// so ClientOnly's import below resolves from a module that is already here.
+const loadScene = () => import("./RefractScene");
+if (typeof window !== "undefined") loadScene();
+
 export default function RefractExperience({ embedded = false }) {
   const [params, setParams] = useState(REFRACT_DEFAULTS);
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
@@ -33,6 +40,8 @@ export default function RefractExperience({ embedded = false }) {
   const [source, setSource] = useState({ status: "loading" });
 
   const pageRef = useRef(null);
+  const stageRef = useRef(null);
+  const near = useNearViewport(stageRef);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -212,6 +221,7 @@ export default function RefractExperience({ embedded = false }) {
       )}
 
       <div
+        ref={stageRef}
         className="rf-stage"
         data-dragging={dragging ? "true" : undefined}
         onDragOver={(event) => {
@@ -221,14 +231,20 @@ export default function RefractExperience({ embedded = false }) {
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
       >
-        <ClientOnly
-          load={() => import("./RefractScene")}
-          fallback={<div className="rf-stage__fallback" />}
-          params={params}
-          imageSrc={image.src}
-          onReady={registerCapture}
-          onSource={handleSource}
-        />
+        {/* The WebGL context comes up only near the viewport — see
+            useNearViewport. Until then the plate is its own fallback. */}
+        {near ? (
+          <ClientOnly
+            load={loadScene}
+            fallback={<div className="rf-stage__fallback" />}
+            params={params}
+            imageSrc={image.src}
+            onReady={registerCapture}
+            onSource={handleSource}
+          />
+        ) : (
+          <div className="rf-stage__fallback" />
+        )}
       </div>
 
       <input
