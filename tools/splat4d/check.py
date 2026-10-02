@@ -250,3 +250,52 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+def moment_rows(scene, moment):
+    meta = scene["meta"]
+    if meta.get("kind") == "flipbook":
+        static = meta["staticCount"]
+        offsets = meta["frameOffsets"]
+        return scene, np.arange(0, static), np.arange(static + offsets[moment], static + offsets[moment + 1])
+    chunk_index = next(i for i, c in enumerate(meta["chunks"]) if c["firstMoment"] <= moment < c["firstMoment"] + c["moments"])
+    chunk = meta["chunks"][chunk_index]
+    local = moment - chunk["firstMoment"]
+    part = scene["chunks"][chunk_index]
+    return part, np.arange(0, chunk.get("staticCount", 0)), np.arange(chunk["frameOffsets"][local], chunk["frameOffsets"][local + 1])
+
+
+def blended_splats(scene, time, ease=lambda f: f * f * (3 - 2 * f)):
+    meta = scene["meta"]
+    times = np.array(meta["times"])
+    a = int(np.clip(np.searchsorted(times, time, side="right") - 1, 0, len(times) - 1))
+    b = min(a + 1, len(times) - 1)
+    if meta.get("kind") == "stream":
+        same_chunk = any(c["firstMoment"] <= a and b < c["firstMoment"] + c["moments"] for c in meta["chunks"])
+        if not same_chunk:
+            b = a
+    if b == a:
+        nearest = int(np.abs(times - time).argmin())
+        a = b = nearest
+    weight = 0.0 if b == a else float(ease(np.clip((time - times[a]) / (times[b] - times[a]), 0, 1)))
+    pieces = []
+
+    def take(source, rows, opacity_scale, dt):
+        if rows.size == 0:
+            return
+        xyz = source["xyz"][rows]
+        if dt and "velocity" in source:
+            xyz = xyz + source["velocity"][rows] * dt
+        pieces.append((xyz, source["cov"][rows], source["rgb"][rows], source["opacity"][rows] * opacity_scale))
+
+    source_a, still_rows, moving_a = moment_rows(scene, a)
+    if meta.get("kind") == "stream" and scene["static"]["xyz"].shape[0]:
+        whole = np.arange(scene["static"]["xyz"].shape[0])
+        take(scene["static"], whole, 1.0, 0.0)
+    take(source_a if meta.get("kind") == "stream" else scene, still_rows, 1.0, 0.0)
+    take(source_a if meta.get("kind") == "stream" else scene, moving_a, 1.0 - weight, time - times[a])
+    if b != a:
+        source_b, _, moving_b = moment_rows(scene, b)
+        take(source_b if meta.get("kind") == "stream" else scene, moving_b, weight, time - times[b])
+    return tuple(np.concatenate([p[i] for p in pieces]) for i in range(4))
+

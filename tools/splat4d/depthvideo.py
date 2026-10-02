@@ -33,6 +33,7 @@ def parse_args():
     parser.add_argument("--temporal", type=int, default=1)
     parser.add_argument("--plate-percentile", type=float, default=80.0)
     parser.add_argument("--plate", choices=["far", "median"], default="far")
+    parser.add_argument("--anchor", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--crf", type=int, default=16)
     parser.add_argument("--audio", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", required=True)
@@ -92,10 +93,19 @@ def clip_depths(args, images, C2W, fxfycxcy, cache_path):
     return depth
 
 
+def depth_layers(depth, groups=3, rounds=50):
+    sample = np.log(np.clip(depth[:: max(1, len(depth) // 30)].reshape(-1), 1e-4, None))
+    centers = np.percentile(sample, np.linspace(10, 90, groups))
+    for _ in range(rounds):
+        labels = np.argmin(np.abs(sample[:, None] - centers[None]), axis=1)
+        centers = np.array([sample[labels == k].mean() if np.any(labels == k) else centers[k] for k in range(groups)])
+    return np.exp(np.sort(centers))
+
+
 def far_plate(colors, depth):
-    disparity_top = float(np.percentile(1.0 / np.clip(depth[:: max(1, len(depth) // 30)], 1e-4, None), 99.5))
-    sample = np.clip(1.0 / np.clip(depth[:: max(1, len(depth) // 30)], 1e-4, None) / disparity_top * 255, 0, 255).astype(np.uint8)
-    split, _ = cv2.threshold(sample.reshape(-1, 1), 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    layers = depth_layers(depth, groups=2)
+    split = float(np.sqrt(layers[0] * layers[1]))
+    log(f"depth layers {', '.join(f'{v:.3f}' for v in layers)}: background is farther than {split:.3f}")
     shrink = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
     height, width = colors.shape[1:3]
     depth_sum = np.zeros(depth.shape[1:], dtype=np.float64)
@@ -103,8 +113,7 @@ def far_plate(colors, depth):
     color_sum = np.zeros((height, width, 3), dtype=np.float64)
     color_count = np.zeros((height, width), dtype=np.float64)
     for frame_depth, frame_color in zip(depth, colors):
-        levels = np.clip(1.0 / np.clip(frame_depth, 1e-4, None) / disparity_top * 255, 0, 255).astype(np.uint8)
-        far = cv2.erode((levels < split).astype(np.uint8), shrink)
+        far = cv2.erode((frame_depth > split).astype(np.uint8), shrink)
         depth_sum += frame_depth * far
         depth_count += far
         far_color = cv2.resize(far, (width, height), interpolation=cv2.INTER_NEAREST).astype(np.float64)
@@ -123,6 +132,15 @@ def far_plate(colors, depth):
     plate_depth = np.where(depth_hole > 0, 1.0 / np.clip(filled.astype(np.float32) / 255 * scale, 1e-4, None), plate_depth)
     log(f"plate: background seen on {100 * seen.mean():.0f}% of pixels, the rest inpainted")
     return plate_color, plate_depth.astype(np.float32)
+
+
+def anchor_to_first(depth):
+    reference = depth[0]
+    anchored = np.empty_like(depth)
+    for i, frame in enumerate(depth):
+        far = frame > np.median(frame)
+        anchored[i] = frame * float(np.median(reference[far] / np.clip(frame[far], 1e-6, None)))
+    return anchored
 
 
 def smooth_in_time(depth, radius):
@@ -176,7 +194,10 @@ def main():
     count, _, H, W = images.shape
     color_height, color_width = colors.shape[1:3]
 
-    depth = smooth_in_time(clip_depths(args, images, C2W, fxfycxcy, cache_path), args.temporal)
+    depth = clip_depths(args, images, C2W, fxfycxcy, cache_path)
+    if args.anchor:
+        depth = anchor_to_first(depth)
+    depth = smooth_in_time(depth, args.temporal)
     save_depth_preview(depth, os.path.join(preview_dir, "depth.mp4"))
     if args.plate == "far":
         plate_color, plate_depth = far_plate(colors, depth)

@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check import frame_splats, load_splat4d, psnr, render, to_camera
+from check import blended_splats, frame_splats, load_splat4d, psnr, render, to_camera
 
 SWINGS = (10.0, 20.0)
 HOLE = 0.5
@@ -66,8 +66,8 @@ def swung(C2W, pivot_depth, degrees):
     return moved
 
 
-def render_from(scene, moment, C2W, fxfycxcy, W, H, dt=0.0):
-    xyz, cov, rgb, alpha = frame_splats(scene, moment, dt)
+def render_from(scene, moment, C2W, fxfycxcy, W, H, dt=0.0, blend_time=None):
+    xyz, cov, rgb, alpha = frame_splats(scene, moment, dt) if blend_time is None else blended_splats(scene, blend_time)
     xyz, cov = to_camera(xyz, cov, np.linalg.inv(C2W))
     image, coverage = render(xyz, cov, rgb, alpha, fxfycxcy, W, H)
     solid = np.clip((coverage - 0.02) / (0.35 - 0.02), 0, 1)
@@ -114,6 +114,7 @@ def main():
     parser.add_argument("--label", default=None)
     parser.add_argument("--table", default=None)
     parser.add_argument("--glide", action="store_true")
+    parser.add_argument("--blend", action="store_true")
     args = parser.parse_args()
 
     scene = load_splat4d(args.folder)
@@ -127,7 +128,8 @@ def main():
     for image, u, C2W in zip(images, us, cameras):
         moment, offset = moment_for(float(u), meta)
         dt = offset if args.glide else 0.0
-        rendered, coverage = render_from(scene, moment, C2W, fxfycxcy, W, H, dt)
+        blend_time = float(u) * float(meta["duration"]) if args.blend else None
+        rendered, coverage = render_from(scene, moment, C2W, fxfycxcy, W, H, dt, blend_time)
         truth = image.transpose(1, 2, 0)
         rows.append({
             "u": float(u), "moment": moment,

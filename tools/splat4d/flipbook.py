@@ -30,7 +30,7 @@ def parse_args():
     parser.add_argument("--out-times", type=int, default=25)
     parser.add_argument("--spread", action="store_true")
     parser.add_argument("--estimate-poses", action="store_true")
-    parser.add_argument("--poses", choices=["pnp", "vggt"], default="pnp")
+    parser.add_argument("--poses", choices=["pnp", "vggt"], default="vggt")
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--view-merge", action="store_true")
     parser.add_argument("--split-static", action=argparse.BooleanOptionalAction, default=True)
@@ -152,8 +152,12 @@ def part_of(state, rows, cov, extras=None):
     return part
 
 
+def uses_vggt(args):
+    return args.poses == "vggt" and bool(args.video) and not args.npz
+
+
 def uses_static_split(args):
-    return args.split_static and bool(args.npz or args.spread)
+    return args.split_static and bool(args.npz or args.spread or getattr(args, "still", False))
 
 
 def selector(args, fx_px, views=None):
@@ -219,7 +223,7 @@ def scaled(part, ratio):
 
 def save_parts(path, settings, frames, depth):
     arrays = {"settings": np.array(settings), "depth": depth}
-    for kind in ("subject", "background"):
+    for kind in [k for k in ("subject", "background", "shared") if k in frames[0]]:
         counts = np.array([f[kind]["xyz"].shape[0] for f in frames])
         arrays[f"{kind}_offsets"] = np.concatenate([[0], np.cumsum(counts)])
         for key in frames[0][kind]:
@@ -237,7 +241,7 @@ def load_parts(path, settings):
         return None
     count = data["subject_offsets"].size - 1
     frames = [{} for _ in range(count)]
-    for kind in ("subject", "background"):
+    for kind in [k for k in ("subject", "background", "shared") if f"{k}_offsets" in data.files]:
         offsets = data[f"{kind}_offsets"]
         keys = [name[len(kind) + 1:] for name in data.files if name.startswith(f"{kind}_") and name != f"{kind}_offsets"]
         arrays = {key: data[f"{kind}_{key}"] for key in keys}
@@ -277,7 +281,7 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
 
     from infer import load_model, window_frames
 
-    if args.poses == "vggt":
+    if uses_vggt(args):
         from poses_vggt import vggt_cameras
 
         C2W, lens = vggt_cameras(args.movies, images)
@@ -286,7 +290,7 @@ def run_posed_clip(args, images, C2W, fxfycxcy, cache_path, holdout=None):
     model, dtype = load_model(args)
     started = time.time()
     depths = None
-    if args.poses == "vggt":
+    if uses_vggt(args):
         from infer import window_depths
         from poses import rotation_degrees
 
@@ -353,18 +357,16 @@ def run_windows(args, images, C2W, fxfycxcy, masks, cache_path):
     frames = [None] * count
     depth = np.zeros((count, H, W), dtype=np.float32)
     spans = windows_for(count, args.window, args.overlap)
+    anchor = None
     for number, (start, end) in enumerate(spans, 1):
         started = time.time()
         window, window_depth = window_frames(
             model, dtype, args, images[start:end], C2W[start:end], fxfycxcy[start:end], masks[start:end], select,
         )
-        shared = [i for i in range(start, end) if frames[i] is not None]
-        ratio = 1.0
-        if shared:
-            previous = depth[shared]
-            current = window_depth[[i - start for i in shared]]
-            valid = (previous > 0) & (current > 0)
-            ratio = float(np.median(previous[valid] / current[valid]))
+        if anchor is None:
+            anchor = window_depth[0]
+        far = window_depth[0] > np.median(window_depth[0])
+        ratio = float(np.median(anchor[far] / np.clip(window_depth[0][far], 1e-6, None)))
         window_seconds = max(end - start - 1, 1) / args.fps
         for i in range(start, end):
             if frames[i] is None:
@@ -372,7 +374,7 @@ def run_windows(args, images, C2W, fxfycxcy, masks, cache_path):
                 if "velocity" in frames[i]["subject"]:
                     frames[i]["subject"]["velocity"] = frames[i]["subject"]["velocity"] / window_seconds
                 depth[i] = window_depth[i - start] * ratio
-        log(f"window {number}/{len(spans)}: frames {start}-{end - 1}, depth scale x{ratio:.3f}, {time.time() - started:.0f}s")
+        log(f"window {number}/{len(spans)}: frames {start}-{end - 1}, depth scale x{ratio:.3f} anchored to the first frame, {time.time() - started:.0f}s")
     del model
     save_parts(cache_path, settings, frames, depth)
     return frames, depth
@@ -419,7 +421,7 @@ def main():
         lens_path = os.path.join(os.path.dirname(cache_path), "lens.npy")
         if getattr(args, "lens_override", None) is not None:
             np.save(lens_path, args.lens_override)
-        if args.poses == "vggt" and os.path.exists(lens_path):
+        if uses_vggt(args) and os.path.exists(lens_path):
             fxfycxcy = np.load(lens_path)
         count = len(frames)
         args.fps = count / clip_duration

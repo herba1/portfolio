@@ -18,6 +18,7 @@ MOVIES_COMMIT = "77262fa"
 WINDOW_SETTINGS = (
     "video", "start", "end", "window_seconds", "window", "moments_per_second", "width", "hfov", "dtype",
     "min_opacity", "subject_voxel", "depth_voxel", "static_eps", "velocity", "still", "diff_threshold", "mask_grow", "mask_close",
+    "tiers",
 )
 
 
@@ -50,6 +51,7 @@ def parse_args():
     parser.add_argument("--holdout", action="store_true")
     parser.add_argument("--window-static", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--still", action="store_true")
+    parser.add_argument("--moment-stride", type=int, default=2)
     parser.add_argument("--diff-threshold", type=float, default=0.08)
     parser.add_argument("--mask-grow", type=int, default=4)
     parser.add_argument("--mask-close", type=int, default=12)
@@ -60,6 +62,7 @@ def parse_args():
     parser.add_argument("--dtype", default="fp16", choices=["fp32", "fp16", "bf16"])
     args = parser.parse_args()
     args.npz = None
+    args.tiers = 3
     args.spread = True
     args.split_static = True
     args.view_merge = False
@@ -189,7 +192,8 @@ def main():
 
         args.spread = False
         args.window_static = False
-        args.moments_per_second = step / args.window_seconds
+        args.split_static = True
+        args.moments_per_second = step / args.window_seconds / args.moment_stride
         masks, _ = subject_masks(images, args)
         log(f"still camera: moving region covers {100 * masks.mean():.1f}% of the frame, {args.moments_per_second:g} moments per second")
 
@@ -259,10 +263,10 @@ def main():
 
     from infer import load_model, window_frames, window_motion
 
-    def write_window_chunk(k):
+    def write_window_chunk(k, shared):
         nonlocal total_bytes
         window_centers = np.array([m[:3, 3] for m in camera_matrices[-len(pending):]])
-        still = finish(static_parts[-1], fx_px, args, window_centers.mean(axis=0))
+        still = finish(shared, fx_px, args, window_centers.mean(axis=0))
         if args.velocity:
             still["velocity"] = np.zeros((still["xyz"].shape[0], 3), dtype=np.float32)
         first = len(moment_times) - len(pending)
@@ -276,7 +280,7 @@ def main():
 
     input_u = (frame_times - args.start) / span
     camera_matrices = []
-    previous_last = None
+    anchor_depth = None
 
     for k in range(windows):
         rows = slice(k * step, k * step + args.window)
@@ -290,10 +294,30 @@ def main():
                 model, dtype = load_model(args)
             window_started = time.time()
             if args.still:
-                frames, window_depth = window_frames(model, dtype, args, images[rows], relative, fxfycxcy[rows], masks[rows],
-                                                     selector(args, fx_px), per_window)
-                background = {key: np.concatenate([f["background"][key] for f in frames[:-1] or frames])
-                              for key in ("xyz", "cov", "color", "opacity")}
+                moving = window_motion(model, dtype, args, images[rows], relative, fxfycxcy[rows])
+                threshold = args.static_eps * float(np.median(moving["depth"]))
+                usable = (moving["opacity"] > args.min_opacity) & (moving["xyz"][:, 2] > 0)
+                inside = masks[rows].reshape(-1)
+                still_here = moving["motion"] < threshold
+
+                def gather(selected):
+                    picked = np.flatnonzero(selected)
+                    return {
+                        "xyz": moving["xyz"][picked],
+                        "cov": covariance_upper(moving["scale"][picked], moving["rotation"][picked]).astype(np.float32),
+                        "color": moving["color"][picked], "opacity": moving["opacity"][picked],
+                    }
+
+                background = gather(usable & ~inside)
+                shared = gather(usable & inside & still_here)
+                frames, window_depth = window_frames(model, dtype, args, images[rows], relative, fxfycxcy[rows],
+                                                     inside & ~still_here, selector(args, fx_px), per_window)
+                merged_shared, _ = merge(voxel_keys(shared["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+                                         shared["xyz"], shared["cov"].astype(np.float64), shared["color"], shared["opacity"])
+                no_shared = {key: value[:0].astype(np.float32) for key, value in merged_shared.items()}
+                for f in frames:
+                    f["shared"] = no_shared
+                frames[0]["shared"] = {key: value.astype(np.float32) for key, value in merged_shared.items()}
             else:
                 moving = window_motion(model, dtype, args, images[rows], relative, fxfycxcy[rows])
                 threshold = args.static_eps * float(np.median(moving["depth"]))
@@ -320,13 +344,11 @@ def main():
             frames, window_depth = cached_parts
             log(f"window {k + 1}/{windows}: reused")
         if args.still:
-            if previous_last is None:
-                ratio = 1.0
-            else:
-                valid = (previous_last > 0) & (window_depth[0] > 0)
-                ratio = float(np.median(previous_last[valid] / window_depth[0][valid]))
-            previous_last = window_depth[-1] * ratio
-            log(f"  depth scale x{ratio:.3f} chained from the previous window")
+            if anchor_depth is None:
+                anchor_depth = window_depth[0]
+            far = window_depth[0] > np.median(window_depth[0])
+            ratio = float(np.median(anchor_depth[far] / np.clip(window_depth[0][far], 1e-6, None)))
+            log(f"  depth scale x{ratio:.3f} anchored to the first frame")
         else:
             reference = depths[rows]
             valid = (reference > 0) & (window_depth > 0)
@@ -348,8 +370,10 @@ def main():
             moment_times.append(moment_time)
             camera_matrices.append(camera)
             pending.append(finish(part, fx_px, args, camera[:3, 3]))
-        if args.window_static:
-            write_window_chunk(k)
+        if args.still and "shared" in frames[0]:
+            write_window_chunk(k, to_world(rescaled(frames[0]["shared"], ratio), origin))
+        elif args.window_static:
+            write_window_chunk(k, static_parts[-1])
         else:
             flush()
 
@@ -361,7 +385,7 @@ def main():
     moments = len(moment_times)
     centers = np.array([m[:3, 3] for m in camera_matrices])
 
-    if args.window_static:
+    if args.window_static and not args.still:
         static_record = {"count": 0}
     else:
         background = {key: np.concatenate([p[key] for p in static_parts]) for key in ("xyz", "cov", "color", "opacity")}
@@ -378,7 +402,7 @@ def main():
     if depths is not None:
         subject_depth = np.median(depths[depths > 0])
     else:
-        subject_depth = float(np.median(previous_last[previous_last > 0]))
+        subject_depth = float(np.median(anchor_depth[masks[0] & (anchor_depth > 0)])) if masks[0].any() else float(np.median(anchor_depth))
     fy = float(fxfycxcy[0, 1])
     meta = {
         "format": "splat4d",
