@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 
-import { SPEEDS, clamp, formatSeconds, frameCursor, frameDuration } from "./splatVideoParams";
+import { SPEEDS, clamp, formatSeconds, frameCursor, steppedFrameTime } from "./splatVideoParams";
 
 function speedLabel(speed) {
   return `${speed}×`;
@@ -64,10 +64,7 @@ export default function SplatVideoControls({
   };
 
   const stepFrames = (direction) => {
-    const step = frameDuration(meta);
-    const position = engineRef.current.time / step;
-    const index = direction > 0 ? Math.floor(position + 1e-4) + 1 : Math.ceil(position - 1e-4) - 1;
-    seek(clamp(index, 0, meta.frames - 1) * step);
+    seek(steppedFrameTime(meta, engineRef.current.time, direction));
   };
 
   const handleScrubKey = (event) => {

@@ -332,9 +332,20 @@ export function lowPassFor(meta, viewportHeight) {
   return RENDER.lowPass * magnification * magnification;
 }
 
-export function frameDuration(meta) {
+function frameDuration(meta) {
   if (steppedByFps(meta)) return 1 / meta.fps;
   return meta.frames > 1 ? meta.duration / (meta.frames - 1) : meta.duration;
+}
+
+export function steppedFrameTime(meta, time, direction) {
+  if (hasMomentTimes(meta)) {
+    const moment = direction > 0 ? bracketTime(meta.times, time + 1e-4) + 1 : bracketTime(meta.times, time - 1e-4);
+    return meta.times[clamp(moment, 0, meta.frames - 1)];
+  }
+  const step = frameDuration(meta);
+  const position = time / step;
+  const index = direction > 0 ? Math.floor(position + 1e-4) + 1 : Math.ceil(position - 1e-4) - 1;
+  return clamp(index, 0, meta.frames - 1) * step;
 }
 
 const OPENCV_TO_THREE = new THREE.Matrix4().makeScale(1, -1, -1);
