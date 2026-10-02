@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
 import useNearViewport from "@/app/experiments/useNearViewport";
+import usePlateDrift from "@/app/experiments/usePlateDrift";
 import {
   clearStored,
   copyParams,
@@ -31,7 +32,9 @@ const loadScene = () => import("./HalftoneScene");
 if (typeof window !== "undefined") loadScene();
 
 export default function HalftoneExperience({ embedded = false }) {
-  const [params, setParams] = useState(HALFTONE_DEFAULTS);
+  // Embedded on the index the plate always fills its tile and shows the
+  // preset, never a config left behind in this browser by the full page.
+  const [params, setParams] = useState(() => (embedded ? { ...HALFTONE_DEFAULTS, fill: 1 } : HALFTONE_DEFAULTS));
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
   const [image, setImage] = useState({ src: DEFAULT_IMAGE, label: "cast/paul.webp" });
   const [panelOpen, setPanelOpen] = useState(true);
@@ -42,6 +45,7 @@ export default function HalftoneExperience({ embedded = false }) {
   const pageRef = useRef(null);
   const stageRef = useRef(null);
   const near = useNearViewport(stageRef);
+  usePlateDrift(stageRef, embedded);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -60,6 +64,7 @@ export default function HalftoneExperience({ embedded = false }) {
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     const saved = loadStored(STORAGE_KEY, HALFTONE_DEFAULTS);
     if (saved) {
       setParams(saved);
@@ -67,6 +72,7 @@ export default function HalftoneExperience({ embedded = false }) {
       setNote("restored your last config");
     }
     restoredRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -223,6 +229,7 @@ export default function HalftoneExperience({ embedded = false }) {
       <div
         ref={stageRef}
         className="ht-stage"
+        data-plate=""
         data-dragging={dragging ? "true" : undefined}
         onDragOver={(event) => {
           event.preventDefault();

@@ -145,6 +145,7 @@ function onCoverError(e) {
 // window in here, only the box. (deck.css makes the same call with
 // `@container`, against the same element.)
 const SMALL = 640;
+const EMBEDDED_CAP = 12; // covers in a narrow tile on someone else's page
 const WIDE = 900;
 
 export default function Deck({ tracks, embedded = false }) {
@@ -176,6 +177,12 @@ export default function Deck({ tracks, embedded = false }) {
   //
   // (Either way the document never scrolls — the deck scrolls itself.)
   // See the @container block in deck.css for the other half.
+  //
+  // Not when embedded. A tile on a page that scrolls vertically is
+  // swiped vertically, so there the deck stays a vertical scroller and
+  // CHAINS: a swipe runs through the covers, and at either end the same
+  // swipe carries on into the page. Twelve covers rather than twenty-two,
+  // so getting past the tile is a few flicks, not a chore.
   const [hscroll, setHscroll] = useState(false);
 
   const trackRef = useRef(null);
@@ -190,15 +197,15 @@ export default function Deck({ tracks, embedded = false }) {
     const read = () => {
       const w = box.clientWidth;
       const small = w <= SMALL;
-      setCap(small ? 22 : 0);
-      setHscroll(small);
+      setCap(small ? (embedded ? EMBEDDED_CAP : 22) : 0);
+      setHscroll(small && !embedded);
       setWide(w >= WIDE);
     };
     read();
     const ro = new ResizeObserver(read);
     ro.observe(box);
     return () => ro.disconnect();
-  }, []);
+  }, [embedded]);
 
   const cards = useMemo(() => (cap ? all.slice(0, cap) : all), [all, cap]);
   const count = cards.length;

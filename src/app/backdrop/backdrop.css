@@ -154,6 +154,49 @@
   }
 }
 
+/* A tile, not a screen. The player was sized for a phone held in the hand,
+   so in a 360px tile on the experiments index it filled the box edge to edge
+   and the backdrop — the point of the piece — was only a rim around it. In a
+   narrow box the art, the type and the transport all step down so the
+   gradient gets the room. */
+@container (max-width: 520px) {
+  .backdrop-page {
+    --backdrop-plate: min(40cqh, 56cqw, 100cqh - var(--backdrop-chrome));
+    --backdrop-chrome: 12rem;
+  }
+
+  .backdrop-player {
+    gap: 1rem;
+    padding: 1.5rem 1rem;
+  }
+
+  .backdrop-title {
+    font-size: 1rem;
+  }
+
+  .backdrop-artist {
+    font-size: 0.9375rem;
+  }
+
+  .backdrop-times {
+    font-size: 0.6875rem;
+  }
+
+  .backdrop-transport {
+    gap: 1.25rem;
+  }
+
+  .backdrop-transport svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .backdrop-transport button:nth-child(3) svg {
+    width: 24px;
+    height: 24px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .backdrop-canvas,
   .backdrop-player,

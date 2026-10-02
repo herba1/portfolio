@@ -129,8 +129,12 @@ export function songsKit(tracks) {
     id: "songs",
     items,
     figures: false,
-    // A heart, outlined, straight on the cover — see the songs rules in psa.css.
+    // A heart, outlined, straight on the cover — see the songs rules in
+    // psa.css. Larger and heavier than the bookmark: it has no plate behind
+    // it, so the stroke alone has to carry it on any sleeve.
     icon: "heart",
+    saveSize: 34,
+    saveStroke: 2.2,
     filters: [],
     tabs: ["collection"],
     copy: {

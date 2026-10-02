@@ -123,12 +123,19 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
     };
   }, [query]);
 
+  /* Closes on a TAP outside, not on any touch outside. On a phone the touch
+     that starts a scroll is a pointerdown too, and with the keyboard up the
+     natural move is to drag the page to see the results — which used to
+     close them. A click only fires for a press that did not turn into a
+     scroll, so dragging leaves the dock open and tapping away still closes
+     it. Capture phase, so a control that stops propagation can't keep it
+     open. */
   useEffect(() => {
-    function onPointerDown(event) {
+    function onClick(event) {
       if (!containerRef.current?.contains(event.target)) setOpen(false);
     }
-    document.addEventListener("pointerdown", onPointerDown);
-    return () => document.removeEventListener("pointerdown", onPointerDown);
+    document.addEventListener("click", onClick, true);
+    return () => document.removeEventListener("click", onClick, true);
   }, []);
 
   useEffect(() => {
@@ -147,11 +154,19 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
     if (!list) return;
 
     // The panel's ceiling comes from the piece's box, not the window, so the
-    // results stay inside whatever box the dock is mounted in.
+    // results stay inside whatever box the dock is mounted in. A box that
+    // is only a tile (shorter than the screen) gives the panel at most half
+    // its height, and a phone keyboard counts too: the visual viewport is
+    // what is actually left to see, so the list never opens taller than it.
     const box = containerRef.current?.closest(".piece-box");
+    const vv = window.visualViewport;
     const measure = () => {
-      const room = box ? box.clientHeight : window.innerHeight;
-      const limit = Math.max(120, Math.min(PANEL_MAX_PX, room - BOX_GUTTER_PX));
+      const boxRoom = box ? box.clientHeight : window.innerHeight;
+      const isTile = box && boxRoom < window.innerHeight * 0.9;
+      const seen = vv ? vv.height : window.innerHeight;
+      const room = Math.min(boxRoom, seen);
+      const cap = isTile ? boxRoom * 0.5 : PANEL_MAX_PX;
+      const limit = Math.max(120, Math.min(PANEL_MAX_PX, cap, room - BOX_GUTTER_PX));
       setPanelHeight(Math.min(list.scrollHeight, limit));
     };
 
@@ -159,7 +174,11 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
     const observer = new ResizeObserver(measure);
     observer.observe(list);
     if (box) observer.observe(box);
-    return () => observer.disconnect();
+    vv?.addEventListener("resize", measure);
+    return () => {
+      observer.disconnect();
+      vv?.removeEventListener("resize", measure);
+    };
   }, [tracks]);
 
   useEffect(() => {

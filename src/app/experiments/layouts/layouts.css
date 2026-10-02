@@ -196,6 +196,53 @@
   }
 }
 
+/* ── Plates that lean ────────────────────
+
+   The shader plates move their finished canvas, never their shader: a
+   transform on the canvas is composited, so the plate leans and parallaxes
+   with zero GPU work and zero re-renders. Scaled up a touch so the moved
+   edge never shows inside the tile. A fine pointer drives --drift-x/y from
+   usePlateDrift and the transition eases it; touch screens, which have
+   nothing to hover, get a parallax on the tile's own scroll through the
+   screen — pure CSS, no listener at all. */
+.xl-tile [data-plate] canvas {
+  transform: translate3d(var(--drift-x, 0px), var(--drift-y, 0px), 0) scale(1.06);
+  transition: transform 900ms var(--ease-out-quint);
+}
+
+@keyframes xl-plate-parallax {
+  from {
+    transform: translate3d(0, -14px, 0) scale(1.06);
+  }
+  to {
+    transform: translate3d(0, 14px, 0) scale(1.06);
+  }
+}
+
+@media (hover: none) {
+  @supports (animation-timeline: view()) {
+    /* A named view timeline on the tile: the canvas sits inside the piece's
+       box, which clips (and so is its own scroll container), and an
+       anonymous view() there would track a box that never scrolls. */
+    .xl-tile {
+      view-timeline: --xl-tile block;
+    }
+    .xl-tile [data-plate] canvas {
+      transition: none;
+      animation: xl-plate-parallax linear both;
+      animation-timeline: --xl-tile;
+    }
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .xl-tile [data-plate] canvas {
+    transform: none;
+    transition: none;
+    animation: none;
+  }
+}
+
 /* A piece mounted as a component. */
 .xl-piece {
   border-radius: var(--radius-xl);

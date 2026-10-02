@@ -681,17 +681,17 @@
  * measure the stage against the wrong thing entirely.
  * ═══════════════════════════════════════════════════════════════════ */
 @container (max-width: 640px) {
-  .deck {
+  .deck:not([data-embedded]) {
     overflow-x: auto;
     overflow-y: hidden;
   }
 
-  .deck__track {
+  .deck:not([data-embedded]) .deck__track {
     width: calc(100cqw + var(--count, 22) * var(--travel-x) * 1cqw);
     height: 100cqh;
   }
 
-  .deck__stage {
+  .deck:not([data-embedded]) .deck__stage {
     /* stuck to the left of the scrollport instead of the top — the same
        trick, rotated */
     left: 0;
@@ -701,19 +701,14 @@
     touch-action: pan-x;
     cursor: default;
   }
+}
 
-  /* In a box on someone else's page, a vertical swipe that starts on the
-     deck belongs to that page — the deck has no use for it, and holding
-     it would make every tile a dead spot to scroll past. On its own page
-     it stays held: there the box is the screen, and a vertical pan would
-     only nudge the URL bar. */
-  .deck[data-embedded] {
-    overscroll-behavior-y: auto;
-  }
-
-  .deck[data-embedded] .deck__stage {
-    touch-action: pan-x pan-y;
-  }
+/* In a box on someone else's page the deck stays vertical even when narrow
+   (see Deck.jsx), and a swipe that reaches either end of it CHAINS into
+   the page — so the tile runs its covers and never becomes a dead spot to
+   scroll past. On its own page the deck still contains its overscroll. */
+.deck[data-embedded] {
+  overscroll-behavior-y: auto;
 }
 
 .deck__stage[data-drag="1"] {
