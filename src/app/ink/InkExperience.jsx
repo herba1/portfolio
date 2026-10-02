@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
 import useNearViewport from "@/app/experiments/useNearViewport";
+import usePlateDrift from "@/app/experiments/usePlateDrift";
 import {
   clearStored,
   copyParams,
@@ -25,7 +26,9 @@ const loadScene = () => import("./InkScene");
 if (typeof window !== "undefined") loadScene();
 
 export default function InkExperience({ embedded = false }) {
-  const [params, setParams] = useState(INK_DEFAULTS);
+  // Embedded on the index the plate always fills its tile and shows the
+  // preset, never a config left behind in this browser by the full page.
+  const [params, setParams] = useState(() => (embedded ? { ...INK_DEFAULTS, fill: 1 } : INK_DEFAULTS));
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
   const [image, setImage] = useState({ src: DEFAULT_IMAGE, label: "cast/john.webp" });
   const [panelOpen, setPanelOpen] = useState(true);
@@ -36,6 +39,7 @@ export default function InkExperience({ embedded = false }) {
   const pageRef = useRef(null);
   const stageRef = useRef(null);
   const near = useNearViewport(stageRef);
+  usePlateDrift(stageRef, embedded);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -53,6 +57,7 @@ export default function InkExperience({ embedded = false }) {
   }, []);
 
   useEffect(() => {
+    if (embedded) return;
     const saved = loadStored(STORAGE_KEY, INK_DEFAULTS);
     if (saved) {
       setParams(saved);
@@ -60,6 +65,7 @@ export default function InkExperience({ embedded = false }) {
       setNote("restored your last config");
     }
     restoredRef.current = true;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -201,6 +207,7 @@ export default function InkExperience({ embedded = false }) {
       <div
         ref={stageRef}
         className="ink-stage"
+        data-plate=""
         data-dragging={dragging ? "true" : undefined}
         onDragOver={(event) => {
           event.preventDefault();

@@ -45,6 +45,7 @@ function SaveButton({
   size = 28,
   hint = 0,
   icon = "bookmark",
+  stroke = 1.6,
 }) {
   const glyph = GLYPHS[icon] ?? BOOKMARK;
   const maskId = useId();
@@ -97,7 +98,7 @@ function SaveButton({
           d={glyph}
           fill="none"
           stroke="currentColor"
-          strokeWidth="1.6"
+          strokeWidth={stroke}
           strokeLinejoin="round"
         />
       </svg>

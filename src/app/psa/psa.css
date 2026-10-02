@@ -1300,25 +1300,52 @@ html[data-psa-vt]::view-transition-new(*) {
   object-fit: cover;
 }
 
-/* The heart sits straight on the cover: no plate, no hairline. A difference
-   blend on a white glyph inverts whatever art is under it, so the outline
-   reads on a pale sleeve and a black one alike without a backing. Once it is
-   saved the red fill is the signal, so the blend steps aside and lets it be
-   red. */
+/* The heart sits straight on the cover: no plate, no hairline. White, with
+   a soft shadow under the stroke — a difference blend inverted mid-tone
+   sleeves to mid grey and the outline all but vanished, where a white line
+   on its own shadow reads on a pale cover and a dark one alike. Red once
+   saved. */
 .psa[data-kit="songs"] .psa-tile-save {
   --pk-save-bg: transparent;
   --pk-save-bg-hover: transparent;
   --pk-save-plate: none;
   --pk-save-idle: var(--pk-neutral-0);
-  mix-blend-mode: difference;
 }
 
-.psa[data-kit="songs"] .psa-tile-save:has(.pk-save[data-saved]) {
-  mix-blend-mode: normal;
+.psa[data-kit="songs"] .psa-tile-save .pk-save-icon {
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.45)) drop-shadow(0 0 6px rgb(0 0 0 / 0.18));
 }
 
-/* Hover would tint the glyph toward the saved red, which the blend turns
-   cyan. The outline just stays white until it is actually saved. */
+/* Hover would tint the glyph toward the saved red before it is saved; on a
+   bare cover that reads as already-liked. White until it actually is. */
 .psa[data-kit="songs"] .psa-tile-save .pk-save:not([data-saved]):hover {
   color: var(--pk-neutral-0);
+}
+
+/* No chip rail in this kit, so there is nothing for the bar to lift away:
+   lifted the full rail height it left the title floating over the grid with
+   no bar behind it. Here the bar only tightens — it rises 12px, and the
+   title rides up WITH it while it shrinks, instead of being held in place
+   above a bar that has gone. */
+.psa[data-kit="songs"] {
+  --psa-collapse: 12px;
+}
+
+@keyframes psa-title-shrink {
+  to {
+    transform: scale(var(--psa-title-scale));
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .psa[data-kit="songs"] .psa-head .psa-panel-head > h1 {
+    animation-name: psa-title-shrink;
+    animation-range: 0 40px;
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  .psa[data-kit="songs"] [data-scrolled] .psa-head .psa-panel-head > h1 {
+    transform: scale(var(--psa-title-scale));
+  }
 }
