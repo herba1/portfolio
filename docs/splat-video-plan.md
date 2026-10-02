@@ -2,9 +2,9 @@
 
 For the agent running this on Herb's M5 MacBook Pro. Read the whole file before starting. Keep Herb posted in a line or two per phase.
 
-## Status (2026-09-30)
+## Status (2026-10-02)
 
-Phases 0–4 are done on Herb's M5 (16 GB). Phase 5 is waiting on a clip.
+Phases 0–5 are done on Herb's M5 (16 GB). Herb's own clip runs as a 30 s splat stream with audio (herb-30s) and as a depth video (herb-depth-30s). Checkpoints are tagged `splat-video-checkpoint-1` to `-3`. Rounds 3–5 below carry the numbers.
 
 Run a clip:
 
@@ -200,9 +200,10 @@ Checkpoint tag: `splat-video-checkpoint-1` (before this round).
 - **Three-tier still clips.** One background, the subject's still splats per 1 s window as chunk-shared rows, and only moving splats per moment. herb-30s went from 464 MB to 106 MB (3.5 MB/s, 181 moments) and plays without buffering.
 - **Report:** https://claude.ai/artifact/9GhUwdbD7DBowTd3A7UCBF (private; it has the experiment ledger and figures).
 
-Not verified yet:
-- The player has not been opened in a browser: `?clip=fake` and `?clip=tennis` are the first things to look at.
-- How MoVieS handles a truly still camera. Every DAVIS sample pans. A panning phone clip fed in as still collapses into a flat, blended scene with almost nothing moving.
+Still open after round 5:
+- **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. The fix is to keep each splat's identity: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).
+- Long clips with a moving camera still use the PnP camera chain, not VGGT.
+- The crossfade has not been checked on a phone.
 
 ## Goal
 
@@ -253,8 +254,36 @@ Verified by reading MoVieS at commit `77262fa`:
 | Fake-data generator | `scripts/splat4d-fake.mjs` | yes |
 | Generated scenes | `public/splats/4d/<name>/` | **no**: add `public/splats/4d/` to `.gitignore` |
 | Player | `src/app/lab/splat-video/` | yes |
+| Source clips (Herb's Photo Booth clip, DAVIS, public-domain test clips, licences) | `~/dev/splat-clips/` | no |
+| Window caches and per-run outputs | `~/dev/MoVieS/out/<name>/` | no |
+| DAVIS npz files with ground-truth poses | `~/dev/MoVieS/resources/DAVIS/` | no |
+| metalsplat (refinement experiment) | `~/dev/metalsplat` | no |
+| Lab report HTML, template and figures | `~/dev/splat-notes/`, published privately at https://claude.ai/artifact/9GhUwdbD7DBowTd3A7UCBF | no (DAVIS imagery stays local) |
+| Clip check workflow | `.claude/workflows/splat-video-runcheck.js`: ask Claude to run the `splat-video-runcheck` workflow; pass clip names as args to check others | yes |
+| Dev server config for the preview pane | `.claude/launch.json` | yes |
 
 Work on a branch, never `main`. Never commit weights, clips or generated scene data.
+
+### Rebuild the favourites
+
+Generated scenes aren't in git, so these commands recreate them. Run them from the repo root. Each scene's `meta.json` records its source clip, time range and lens, so you can check a rebuild against it.
+
+```bash
+tools/splat4d/longclip.sh --video ~/dev/splat-clips/herb-photobooth.mov --start 30 --end 60 --still --window-seconds 1 --hfov 70 --subject-voxel 2 --out public/splats/4d/herb-30s
+tools/splat4d/depthvideo.sh --video ~/dev/splat-clips/herb-photobooth.mov --start 30 --end 60 --hfov 70 --out public/splats/4d/herb-depth-30s
+tools/splat4d/flipbook.sh --video ~/dev/splat-clips/herb-photobooth.mov --start 32 --end 36 --hfov 70 --fps 12 --subject-voxel 2 --velocity --fresh --out public/splats/4d/herb-flip
+tools/splat4d/longclip.sh --video ~/dev/splat-clips/drummer.webm --start 0 --end 30 --holdout --out public/splats/4d/drummer-30s
+tools/splat4d/flipbook.sh --npz resources/DAVIS/stroller.npz --subject-voxel 2 --out-times 25 --velocity --out public/splats/4d/stroller-v3
+tools/splat4d/flipbook.sh --video ~/dev/splat-clips/lucia-13frames.mov --spread --estimate-poses --hfov 24.17 --subject-voxel 2 --out-times 25 --velocity --out public/splats/4d/lucia-v3
+```
+
+| Clip | Build time on the M5 |
+|---|---|
+| herb-30s | about 18 min |
+| drummer-30s | about 9 min |
+| the short clips | a few minutes each |
+
+herb-flip, stroller-v3 and lucia-v3 were built before VGGT became the default camera solver. Add `--poses pnp` to reproduce them exactly.
 
 ## Suggested order
 
