@@ -38,8 +38,10 @@ SECONDS_COVERED="$("$PYTHON" -c "import math, sys; print(max(1, math.floor(float
 echo "$NAME: ${DURATION}s, lens ${HFOV} deg, building ${SECONDS_COVERED}s"
 
 "$HERE/depthvideo.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --hfov "$HFOV" --out "public/splats/4d/$NAME-depth"
+"$HERE/depthvideo_hd.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --hfov "$HFOV" \
+  --depth-cache "$MOVIES/out/$NAME-depth/depth_outputs.npz" --out "public/splats/4d/$NAME-depth"
 "$HERE/longclip.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --still --window-seconds 1 --hfov "$HFOV" --subject-voxel 2 \
   --out "public/splats/4d/$NAME-stream"
 "$HERE/hybrid.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --hfov "$HFOV" \
   --depth-cache "$MOVIES/out/$NAME-depth/depth_outputs.npz" --windows "$MOVIES/out/$NAME-stream" --out "public/splats/4d/$NAME"
-echo "open /lab/splat-video?clip=$NAME"
+echo "open /lab/splat-video?clip=$NAME-depth and /lab/splat-video?clip=$NAME"

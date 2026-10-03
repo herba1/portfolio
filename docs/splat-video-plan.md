@@ -359,6 +359,19 @@ The player's look control is now a Splats | Video switch, since a single toggle 
 
 **LaMa:** the first download attempt (a torchscript file from a third-party GitHub release) was refused by the permission check. After Herb gave permission it is used, as described above.
 
+**Depth video HD** (`tools/splat4d/depthvideo_hd.py`, `kind: "rgbd"` version 2). Herb preferred the plain depth video to both hybrid looks, so it got the hybrid's upgrades:
+- colour at full resolution (1598x1080 for the photobooth clip), stacked over a full-resolution disparity band;
+- the mesh runs at half the colour size; `source.width/height` is the mesh, `colorWidth/colorHeight` the video;
+- scene depth is Depth Anything V2 fitted to MoVieS per frame (15-frame window), with the same motion-gated hold;
+- depth is cut at the Vision matte: inside `alpha > 100` it is the sharp subject depth grown out from an eroded core, outside it is the room grown in from past the matte and blurred (sigma 6);
+- the plate is LaMa-filled, and its depth is the farthest room depth seen at each pixel, so it never pokes through the live surface.
+
+What each fix bought, at the lens and leaned 110 px on herb-depth-hd:
+- the hybrid's `plate_depth` (from MoVieS) sat in front of the per-frame Depth Anything room on 25% of pixels, which showed as grey blotches on the wall; the farthest-room plate brings that to 0.01%;
+- a matte zone at `alpha > 13` grown 2 px carried window light with the head, a white halo when leaning; `alpha > 100` with no growth removes it.
+
+`phone.sh` now writes the HD depth video to `<name>-depth` after the old one, so the HD build replaces it. 30 s is 23.9 MB (0.80 MB/s) and builds in under a minute once mattes and depth are cached.
+
 Still open after round 5:
 - **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. Round 6 sidesteps this with the hybrid clip kind. The identity-preserving fix is still possible: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).
 - Long clips with a moving camera still use the PnP camera chain, not VGGT.
