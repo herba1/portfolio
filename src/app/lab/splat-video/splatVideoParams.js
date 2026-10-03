@@ -81,6 +81,7 @@ export const HYBRID = {
   viewZoom: 1.08,
   pointScale: 3.2,
   depthOffset: 8,
+  mobileGridStride: 2,
 };
 
 export const LOOKS = ["video", "splats"];

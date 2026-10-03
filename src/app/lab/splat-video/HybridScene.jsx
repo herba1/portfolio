@@ -40,13 +40,17 @@ function backgroundClip(clip) {
   };
 }
 
-function createRuntime(clip) {
+function createRuntime(clip, isMobile) {
   const backdrop = backgroundClip(clip);
   const splats = createSplatRuntime(backdrop);
   splats.mesh.layers.set(SPLAT_LAYER);
 
   const { layout } = clip.meta;
-  const geometry = createRgbdGeometry(layout.depth[2], layout.depth[3]);
+  const stride = isMobile ? HYBRID.mobileGridStride : 1;
+  const columns = Math.max(2, Math.round(layout.depth[2] / stride));
+  const rows = Math.max(2, Math.round(layout.depth[3] / stride));
+  const grid = new THREE.Vector2(1 / columns, 1 / rows);
+  const geometry = createRgbdGeometry(columns, rows);
   const subject = new THREE.Group();
   subject.visible = false;
   const clock = createVideoClock(clip.video, clip.meta, {
@@ -54,7 +58,7 @@ function createRuntime(clip) {
       subject.visible = true;
     },
   });
-  const materials = [true, false].map((core) => createLayerMaterial(clock.texture, clip.meta, { core }));
+  const materials = [true, false].map((core) => createLayerMaterial(clock.texture, clip.meta, { core, grid }));
   const surface = new THREE.Group();
   materials.forEach((material, order) => {
     const mesh = new THREE.Mesh(geometry, material);
@@ -64,14 +68,14 @@ function createRuntime(clip) {
     surface.add(mesh);
   });
   subject.add(surface);
-  const depthMaterial = createDepthMaterial(clock.texture, clip.meta);
+  const depthMaterial = createDepthMaterial(clock.texture, clip.meta, grid);
   const depthMesh = new THREE.Mesh(geometry, depthMaterial);
   depthMesh.frustumCulled = false;
   depthMesh.visible = false;
   depthMesh.layers.set(HYBRID.subjectLayer);
   subject.add(depthMesh);
   const pointsGeometry = createPointsGeometry(geometry.getAttribute("aGrid"));
-  const pointsMaterial = createPointsMaterial(clock.texture, clip.meta);
+  const pointsMaterial = createPointsMaterial(clock.texture, clip.meta, grid);
   const points = new THREE.Points(pointsGeometry, pointsMaterial);
   points.frustumCulled = false;
   points.visible = false;
@@ -131,7 +135,7 @@ function useLayeredRender(resolveRef, scratchRef) {
   }, 1);
 }
 
-function HybridField({ clip, engineRef }) {
+function HybridField({ clip, engineRef, isMobile }) {
   const groupRef = useRef(null);
   const runtimeRef = useRef(null);
   const resolveRef = useRef(null);
@@ -140,7 +144,7 @@ function HybridField({ clip, engineRef }) {
   useEffect(() => {
     const group = groupRef.current;
     const engine = engineRef.current;
-    const runtime = createRuntime(clip);
+    const runtime = createRuntime(clip, isMobile);
     const resolve = createResolvePass();
     group.add(runtime.splats.mesh);
     group.add(runtime.subject);
@@ -158,7 +162,7 @@ function HybridField({ clip, engineRef }) {
       runtimeRef.current = null;
       resolveRef.current = null;
     };
-  }, [clip, engineRef]);
+  }, [clip, engineRef, isMobile]);
 
   useFrame((state, rawDelta) => {
     const runtime = runtimeRef.current;
@@ -189,7 +193,7 @@ function HybridField({ clip, engineRef }) {
 export default function HybridScene({ clip, engineRef, isMobile }) {
   return (
     <OrbitStage meta={clip.meta} engineRef={engineRef} isMobile={isMobile}>
-      <HybridField clip={clip} engineRef={engineRef} />
+      <HybridField clip={clip} engineRef={engineRef} isMobile={isMobile} />
     </OrbitStage>
   );
 }

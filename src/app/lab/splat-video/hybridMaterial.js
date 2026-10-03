@@ -175,8 +175,8 @@ function bandTexel(rect) {
   return new THREE.Vector2(1 / Math.max(1, rect[2]), 1 / Math.max(1, rect[3]));
 }
 
-export function createDepthMaterial(texture, meta) {
-  const material = createLayerMaterial(texture, meta, { core: true });
+export function createDepthMaterial(texture, meta, grid) {
+  const material = createLayerMaterial(texture, meta, { core: true, grid });
   material.colorWrite = false;
   material.polygonOffset = true;
   material.polygonOffsetFactor = HYBRID.depthOffset;
@@ -184,7 +184,7 @@ export function createDepthMaterial(texture, meta) {
   return material;
 }
 
-export function createLayerMaterial(texture, meta, { core }) {
+export function createLayerMaterial(texture, meta, { core, grid }) {
   const { layout } = meta;
   const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
   return new THREE.ShaderMaterial({
@@ -199,7 +199,7 @@ export function createLayerMaterial(texture, meta, { core }) {
       uColorTexel: { value: bandTexel(layout.color) },
       uDepthTexel: { value: bandTexel(layout.depth) },
       uAlphaTexel: { value: bandTexel(layout.alpha) },
-      uGridStep: { value: bandTexel(layout.depth) },
+      uGridStep: { value: grid.clone() },
       uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
       uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
       uTearRelative: { value: HYBRID.tearRelative },
@@ -229,7 +229,7 @@ export function createPointsGeometry(grid) {
   return geometry;
 }
 
-export function createPointsMaterial(texture, meta) {
+export function createPointsMaterial(texture, meta, grid) {
   const { layout } = meta;
   const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
   return new THREE.ShaderMaterial({
@@ -244,7 +244,7 @@ export function createPointsMaterial(texture, meta) {
       uColorTexel: { value: bandTexel(layout.color) },
       uDepthTexel: { value: bandTexel(layout.depth) },
       uAlphaTexel: { value: bandTexel(layout.alpha) },
-      uGridStep: { value: bandTexel(layout.depth) },
+      uGridStep: { value: grid.clone() },
       uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
       uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
       uAlphaRamp: { value: new THREE.Vector2(HYBRID.alphaLow, HYBRID.alphaHigh) },
