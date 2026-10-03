@@ -29,14 +29,19 @@ export const DEPTH_OF_FIELD = {
   ease: 1.6,
 };
 
+export function leanAmount(engine) {
+  const view = engine.view;
+  if (!view || engine.reducedMotion) return 0;
+  const yaw = view.yaw / (ORBIT.yawLimitDeg * (Math.PI / 180));
+  const pitch = view.pitch / (ORBIT.pitchLimitDeg * (Math.PI / 180));
+  return clamp(Math.hypot(yaw, pitch), 0, 1);
+}
+
 export function depthOfField(engine, meta) {
   const view = engine.view;
   if (!view || engine.reducedMotion) return { aperture: 0, focusDepth: meta.camera.pivotDepth };
-  const yaw = view.yaw / (ORBIT.yawLimitDeg * (Math.PI / 180));
-  const pitch = view.pitch / (ORBIT.pitchLimitDeg * (Math.PI / 180));
-  const offset = clamp(Math.hypot(yaw, pitch), 0, 1);
   return {
-    aperture: DEPTH_OF_FIELD.aperture * Math.pow(offset, DEPTH_OF_FIELD.ease),
+    aperture: DEPTH_OF_FIELD.aperture * Math.pow(leanAmount(engine), DEPTH_OF_FIELD.ease),
     focusDepth: meta.camera.pivotDepth * view.dolly,
   };
 }
@@ -87,6 +92,7 @@ export const SURFEL = {
   rim: { spread: 0.6, extent: 3, lowPass: 0.3 },
   edgeStretch: 5,
   cone: 0.0001,
+  loosen: { spread: 5.5, opacity: 0.95, extent: 2.5, stride: 3, lift: 0.0008, ease: 0.8 },
 };
 
 export const LOOKS = ["splats", "video"];

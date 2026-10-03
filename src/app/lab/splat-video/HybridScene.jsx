@@ -9,7 +9,7 @@ import { aimAndMeasure, applyDepthOfField, createScratch, createSplatRuntime } f
 import { createLayerMaterial, createSurfelGeometry, createSurfelMaterial } from "./hybridMaterial";
 import { createRgbdGeometry } from "./rgbdMaterial";
 import { createResolvePass } from "./splatMaterial";
-import { HYBRID, RENDER, TEXTURE_WIDTH, clamp, hasLensPath, lensMatrix, lowPassFor, momentPlan } from "./splatVideoParams";
+import { HYBRID, RENDER, SURFEL, TEXTURE_WIDTH, clamp, hasLensPath, leanAmount, lensMatrix, lowPassFor, momentPlan } from "./splatVideoParams";
 import { createVideoClock } from "./videoClock";
 
 const SPLAT_LAYER = 0;
@@ -99,11 +99,15 @@ function createRuntime(clip, isMobile) {
     splats,
     subject,
     clock,
-    show(look, viewport) {
+    show(look, viewport, loosen) {
       const splats = look === "splats";
       surface.visible = !splats;
       surfels.visible = splats;
-      if (splats) surfelMaterials.forEach((material) => material.uniforms.uViewport.value.copy(viewport));
+      if (!splats) return;
+      surfelMaterials.forEach((material) => {
+        material.uniforms.uViewport.value.copy(viewport);
+        material.uniforms.uLoosen.value = loosen;
+      });
     },
     dispose() {
       clock.dispose();
@@ -191,7 +195,7 @@ function HybridField({ clip, engineRef, isMobile }) {
 
     const backdrop = runtime.backdrop.meta;
     const zRow = aimAndMeasure(state, engine, clip.meta, delta, scratch, group);
-    runtime.show(engine.look, scratch.viewport);
+    runtime.show(engine.look, scratch.viewport, Math.pow(leanAmount(engine), SURFEL.loosen.ease));
     const { uniforms } = runtime.splats.material;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(backdrop, scratch.viewport.y);

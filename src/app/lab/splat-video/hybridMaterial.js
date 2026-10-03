@@ -123,9 +123,16 @@ uniform float uLowPass;
 uniform float uSpread;
 uniform float uExtent;
 uniform float uEdgeStretch;
+uniform float uLoosen;
+uniform float uLoosenSpread;
+uniform float uLoosenOpacity;
+uniform float uLoosenExtent;
+uniform int uLoosenStride;
+uniform float uLift;
 
 out vec4 vColor;
 out vec2 vOffset;
+out float vExtent;
 
 const float MIN_DISPARITY = 0.01;
 const float MIN_DEPTH = 0.02;
@@ -150,11 +157,13 @@ void cull() {
   gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
   vColor = vec4(0.0);
   vOffset = vec2(0.0);
+  vExtent = 0.0;
 }
 
 void main() {
   vec2 step = 1.0 / vec2(uGrid);
-  vec2 grid = (vec2(gl_InstanceID % uGrid.x, gl_InstanceID / uGrid.x) + 0.5) * step;
+  ivec2 cell = ivec2(gl_InstanceID % uGrid.x, gl_InstanceID / uGrid.x);
+  vec2 grid = (vec2(cell) + 0.5) * step;
 
   vec2 edges = min(grid, 1.0 - grid);
   float border = smoothstep(0.0, uBorderFeather, min(edges.x, edges.y));
@@ -165,11 +174,20 @@ void main() {
     cull();
     return;
   }
+  float spread = uSpread;
+  float extent = uExtent;
+  float lift = 0.0;
 #else
-  if (alpha >= uCore || alpha < uAlphaCutoff) {
+  bool solid = alpha >= uCore;
+  bool sampled = cell.x % uLoosenStride == 0 && cell.y % uLoosenStride == 0;
+  if ((solid && (uLoosen <= 0.0 || !sampled)) || alpha < uAlphaCutoff) {
     cull();
     return;
   }
+  float spread = solid ? uSpread * mix(1.0, uLoosenSpread, uLoosen) : uSpread;
+  float extent = solid ? uLoosenExtent : uExtent;
+  float lift = uLift * uLoosen;
+  if (solid) alpha *= uLoosen * uLoosenOpacity;
 #endif
 
   vec3 center = pointAt(grid);
@@ -179,7 +197,7 @@ void main() {
   vec3 normal = cross(across, down);
   normal = dot(normal, normal) > 1e-20 ? normalize(normal) : vec3(0.0, 0.0, 1.0);
   float thickness = 0.05 * min(footprint.x, footprint.y);
-  mat3 covariance = uSpread * uSpread * (outerProduct(across, across) + outerProduct(down, down))
+  mat3 covariance = spread * spread * (outerProduct(across, across) + outerProduct(down, down))
     + thickness * thickness * outerProduct(normal, normal);
 
   vec4 viewCenter = modelViewMatrix * vec4(center, 1.0);
@@ -209,10 +227,11 @@ void main() {
   float lambda1 = mid + radius;
   float lambda2 = max(mid - radius, 1e-6);
   vec2 axis = abs(b) > 1e-7 ? normalize(vec2(b, lambda1 - a)) : (a >= c ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
-  vec2 offsetPixels = position.x * uExtent * sqrt(lambda1) * axis + position.y * uExtent * sqrt(lambda2) * vec2(-axis.y, axis.x);
+  vec2 offsetPixels = position.x * extent * sqrt(lambda1) * axis + position.y * extent * sqrt(lambda2) * vec2(-axis.y, axis.x);
 
-  gl_Position = vec4(clipCenter.xy / clipCenter.w + offsetPixels * 2.0 / uViewport, clipCenter.z / clipCenter.w, 1.0);
-  vOffset = position.xy * uExtent;
+  gl_Position = vec4(clipCenter.xy / clipCenter.w + offsetPixels * 2.0 / uViewport, clipCenter.z / clipCenter.w - lift, 1.0);
+  vOffset = position.xy * extent;
+  vExtent = extent;
   vColor = vec4(textureLod(uMap, uColorRect.xy + inside(grid, uColorTexel) * uColorRect.zw, 0.0).rgb, alpha);
 }
 `;
@@ -220,19 +239,19 @@ void main() {
 const SURFEL_FRAGMENT = `
 precision highp float;
 
-uniform float uExtent;
 uniform float uCone;
 
 in vec4 vColor;
 in vec2 vOffset;
+in float vExtent;
 
 out vec4 fragColor;
 
 void main() {
   float radius = dot(vOffset, vOffset);
-  if (radius > uExtent * uExtent) discard;
+  if (radius > vExtent * vExtent) discard;
 #ifdef CORE
-  gl_FragDepth = gl_FragCoord.z + uCone * radius / (uExtent * uExtent);
+  gl_FragDepth = gl_FragCoord.z + uCone * radius / (vExtent * vExtent);
   fragColor = vec4(vColor.rgb, 1.0);
 #else
   float alpha = vColor.a * exp(-0.5 * radius);
@@ -327,6 +346,12 @@ export function createSurfelMaterial(texture, meta, { core, columns, rows }) {
       uExtent: { value: look.extent },
       uEdgeStretch: { value: SURFEL.edgeStretch },
       uCone: { value: SURFEL.cone },
+      uLoosen: { value: 0 },
+      uLoosenSpread: { value: SURFEL.loosen.spread },
+      uLoosenOpacity: { value: SURFEL.loosen.opacity },
+      uLoosenExtent: { value: SURFEL.loosen.extent },
+      uLoosenStride: { value: SURFEL.loosen.stride },
+      uLift: { value: SURFEL.loosen.lift },
     },
     transparent: !core,
     depthTest: true,
