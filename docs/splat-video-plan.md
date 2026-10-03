@@ -307,7 +307,34 @@ tools/splat4d/hybrid.sh --video ~/dev/splat-clips/kristen.webm --start 0 --end 9
 
 **Streaming:** the player loads the 4.5 MB room, then streams `layer.mp4` through the video element with range requests. It is ready in about 0.3 s locally, and shows the buffering pill if the video stalls.
 
-**Blocked:** a LaMa download (a torchscript file from a third-party GitHub release) was refused by the permission check. A generative fill for the plate behind the subject needs Herb's go-ahead.
+**Splat subject (default look).** Herb asked for the person to be splats too, crisp like 4DV. The player now generates one oriented Gaussian surfel per colour pixel (1598x1080, about 1.7M) on the GPU from the video every frame:
+- Each surfel spans the pixel's tangent vectors from neighbouring depth. The shorter one-sided difference is used, clamped at 5x the pixel footprint.
+- It is projected with the same EWA Jacobian as the room splats.
+- Solid pixels draw as opaque elliptical discs. They write depth with a small cone, so each pixel keeps its own colour.
+- The matte edge draws as soft premultiplied Gaussians.
+
+At the lens it is as sharp as the video look. Off-axis it foreshortens like real splats, at 60 fps on the M5. Phones use the depth-band grid.
+
+**Edge matting against the plate.** Within 10 px of the matte edge, pixels that match the plate (max channel difference ramping from 8 to 28) lose alpha. This only applies where the plate was really seen. Window light inside the generous Vision matte no longer floats as white dots on the jaw. Subject PSNR went from 32.20 to 33.50.
+
+**LaMa plate fill.** Allowed by Herb. Big-LaMa runs at 512 px for the never-seen region behind the subject, then is upscaled and blended. At full resolution LaMa smeared the couch; at 512 px the sill, couch back and cushion continue.
+
+**Moving camera (experimental, not shipped).** `hybrid.py` detects window caches made without `--still`. It then:
+- reads `poses.npz`;
+- builds one world background from the per-window splats, with subject splats removed by a majority vote against matte and depth;
+- writes the camera path, so the player places the layer on it.
+
+On the drummer it scored below the drummer-30s stream at the lens, so the clip was not kept:
+
+| | drummer-30s stream | moving hybrid |
+|---|---|---|
+| PSNR | 23.0 | 19.6 |
+| LPIPS | 0.176 | 0.232 |
+| Edge flicker | n/a | 0.19 |
+
+There are two reasons. One background for 30 s of handheld footage blurs, as round 3 already found. And the Vision matte flickers on a night street with several people. Making it work needs per-window backgrounds streamed as chunks, and a tracked matte for a chosen subject (SAM 2).
+
+**LaMa:** the first download attempt (a torchscript file from a third-party GitHub release) was refused by the permission check. After Herb gave permission it is used, as described above.
 
 Still open after round 5:
 - **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. Round 6 sidesteps this with the hybrid clip kind. The identity-preserving fix is still possible: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).

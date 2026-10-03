@@ -9,9 +9,10 @@ import cv2
 import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from check import blended_splats, load_records, load_splat4d, psnr, render
+from check import blended_splats, load_records, load_splat4d, psnr, render, to_camera
 from evaluate import lpips_distance, lpips_model, ssim
 from hybrid import cover_crop
+from longclip import camera_at
 
 PAGE = np.array([0.957, 0.961, 0.969])
 ALPHA_RAMP = (0.08, 0.92)
@@ -95,8 +96,21 @@ def main():
     size = (args.width, int(round(args.width / meta["camera"]["aspect"])))
     fxfycxcy = lens_intrinsics(meta)
     background = load_records(folder, meta["background"])
-    plain, coverage = render(background["xyz"], background["cov"], background["rgb"], background["opacity"], fxfycxcy, size[0], size[1])
-    backdrop = resolve(plain, coverage)
+    cameras = np.array(meta["cameras"]).reshape(-1, 4, 4) if meta.get("cameras") else None
+    camera_times = np.array(meta["times"]) if cameras is not None else None
+
+    def view_from(time):
+        if cameras is None:
+            return np.eye(4)
+        return np.linalg.inv(camera_at(cameras, camera_times / camera_times[-1], time / camera_times[-1]))
+
+    def backdrop_at(time):
+        to_view = view_from(time)
+        xyz, cov = to_camera(background["xyz"], background["cov"], to_view)
+        plain, cover = render(xyz, cov, background["rgb"], background["opacity"], fxfycxcy, size[0], size[1])
+        return resolve(plain, cover)
+
+    still_backdrop = backdrop_at(0.0) if cameras is None else None
     gains = np.array(meta.get("backgroundGain") or [[1.0, 1.0, 1.0]] * meta["frames"])
     baseline = load_splat4d(os.path.abspath(args.baseline)) if args.baseline else None
     model = lpips_model()
@@ -123,11 +137,13 @@ def main():
         truth = source_frame(args.video, source["start"] + time, box, size)
         weight = smooth_alpha(alpha, size)[..., None]
         foreground = cv2.resize(color, size, interpolation=cv2.INTER_AREA).astype(np.float64) / 255.0
+        backdrop = still_backdrop if still_backdrop is not None else backdrop_at(time)
         hybrid = np.clip(foreground * weight + np.clip(backdrop * gains[min(j, len(gains) - 1)], 0, 1) * (1 - weight), 0, 1)
         region = cv2.dilate((weight[..., 0] > 0.05).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))) > 0
         row = {"frame": j, "hybrid": scores(model, hybrid, truth, region)}
         if baseline is not None:
             xyz, cov, rgb, opacity = blended_splats(baseline, time)
+            xyz, cov = to_camera(xyz, cov, view_from(time))
             image, cover = render(xyz, cov, rgb, opacity, fxfycxcy, size[0], size[1])
             row["baseline"] = scores(model, np.clip(resolve(image, cover), 0, 1), truth, region)
         rows.append(row)

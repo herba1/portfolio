@@ -17,7 +17,7 @@ from depthvideo import anchor_to_first, depth_layers
 from check import render
 from flipbook import finish
 from inputs import log, probe, video_stream
-from longclip import write_records
+from longclip import camera_at, rescaled, to_world, write_records
 from matte import make_matte
 from select_splats import merge, voxel_keys
 from splat4d_format import write_index
@@ -40,7 +40,7 @@ def parse_args():
     parser.add_argument("--start", type=float, default=0.0)
     parser.add_argument("--end", type=float, required=True)
     parser.add_argument("--hfov", type=float, required=True)
-    parser.add_argument("--depth-cache", required=True)
+    parser.add_argument("--depth-cache", default=None)
     parser.add_argument("--depth-fps", type=float, default=30.0)
     parser.add_argument("--windows", required=True)
     parser.add_argument("--window-seconds", type=float, default=1.0)
@@ -70,6 +70,8 @@ def parse_args():
     parser.add_argument("--subject-depth", choices=["movies", *DEPTH_MODELS], default="dav2")
     parser.add_argument("--alignment-window", type=int, default=15)
     parser.add_argument("--plate-fill", choices=["lama", "span"], default="lama")
+    parser.add_argument("--subject-margin", type=float, default=0.12)
+    parser.add_argument("--subject-vote", type=float, default=0.5)
     parser.add_argument("--difference-band", type=int, default=10)
     parser.add_argument("--difference-low", type=float, default=8.0)
     parser.add_argument("--difference-high", type=float, default=28.0)
@@ -93,27 +95,36 @@ def saved_settings(path):
 
 
 def check_caches(args):
-    depth = saved_settings(args.depth_cache)
     windows = sorted(glob.glob(os.path.join(args.windows, "window-*.npz")))
     if not windows:
         raise SystemExit(f"no window caches in {args.windows}")
     window = saved_settings(windows[0])
+    moving = not window.get("still")
+    caches = [("window caches", window)]
     problems = []
-    for name, saved in (("depth cache", depth), ("window caches", window)):
+    if moving:
+        args.window_seconds = float(window.get("window_seconds") or args.window_seconds)
+        if not os.path.exists(os.path.join(args.windows, "poses.npz")):
+            problems.append("a moving-camera run needs poses.npz next to the window caches")
+    else:
+        if not args.depth_cache:
+            raise SystemExit("a still-camera run needs --depth-cache from depthvideo.sh")
+        depth = saved_settings(args.depth_cache)
+        caches.append(("depth cache", depth))
+        if abs(float(depth.get("fps") or 0.0) - args.depth_fps) > 1e-3:
+            problems.append(f"depth cache runs at {depth.get('fps')} fps, not --depth-fps {args.depth_fps}")
+        if abs(float(window.get("window_seconds") or 0.0) - args.window_seconds) > 1e-3:
+            problems.append(f"window caches use {window.get('window_seconds')} s windows, not --window-seconds {args.window_seconds}")
+    for name, saved in caches:
         if os.path.abspath(os.path.expanduser(str(saved.get("video")))) != args.video:
             problems.append(f"{name} were made from {saved.get('video')}")
         if abs(float(saved.get("start") or 0.0) - args.start) > 1e-3:
             problems.append(f"{name} start at {saved.get('start')} s, not {args.start} s")
         if saved.get("end") is not None and float(saved["end"]) < args.end - 1e-3:
             problems.append(f"{name} end at {saved['end']} s, before {args.end} s")
-    if abs(float(depth.get("fps") or 0.0) - args.depth_fps) > 1e-3:
-        problems.append(f"depth cache runs at {depth.get('fps')} fps, not --depth-fps {args.depth_fps}")
-    if abs(float(window.get("window_seconds") or 0.0) - args.window_seconds) > 1e-3:
-        problems.append(f"window caches use {window.get('window_seconds')} s windows, not --window-seconds {args.window_seconds}")
-    if not window.get("still"):
-        problems.append("window caches were not made with longclip --still")
     if problems:
         raise SystemExit("caches do not match this run: " + "; ".join(problems))
+    return moving, window
 
 
 def frame_rate(info):
@@ -444,6 +455,42 @@ def window_backgrounds(args, small, fps, tan_half, model_size):
     return merged
 
 
+def moving_background(args, poses, sampled_times, small, fps, tan_half, model_size, window_frames):
+    paths = sorted(glob.glob(os.path.join(args.windows, "window-*.npz")))
+    C2W, depths = poses["C2W"].astype(np.float64), poses["depths"]
+    step = window_frames - 1
+    grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.matte_grow + 1, 2 * args.matte_grow + 1))
+    parts, dropped, used = [], 0, 0
+    for k, path in enumerate(paths):
+        if k * args.window_seconds >= args.end - args.start:
+            break
+        data = np.load(path)
+        rows = np.arange(k * step, min(k * step + window_frames, len(C2W)))
+        window_depth = data["depth"][:rows.size]
+        reference = depths[rows]
+        valid = (reference > 0) & (window_depth > 0)
+        ratio = float(np.median(reference[valid] / window_depth[valid]))
+        part = to_world(rescaled({key: data[f"background_{key}"] for key in PART_KEYS}, ratio), C2W[k * step])
+        on_votes = np.zeros(part["xyz"].shape[0], dtype=np.int32)
+        seen_votes = np.zeros(part["xyz"].shape[0], dtype=np.int32)
+        for r in rows:
+            j = min(small.shape[0] - 1, int(round((sampled_times[r] - args.start) * fps)))
+            subject = cv2.dilate((small[j] > 255 * SUBJECT_LEVEL).astype(np.uint8), grow) > 0
+            to_camera = np.linalg.inv(C2W[r])
+            local = part["xyz"].astype(np.float64) @ to_camera[:3, :3].T + to_camera[:3, 3]
+            u, v, inside = project(local, tan_half, model_size)
+            on_subject = inside & subject[v, u] & (local[:, 2] < depths[r][v, u] * (1.0 + args.subject_margin))
+            on_votes += on_subject
+            seen_votes += inside
+        keep = on_votes < args.subject_vote * np.maximum(seen_votes, 1)
+        dropped += int((~keep).sum())
+        used += 1
+        parts.append({key: value[keep] for key, value in part.items()})
+    merged = {key: np.concatenate([p[key] for p in parts]) for key in PART_KEYS}
+    log(f"background from {used} moving windows: {merged['xyz'].shape[0]:,} splats kept, {dropped:,} dropped on the subject")
+    return merged
+
+
 def coverage(part, tan_half, size):
     fxfycxcy = np.array([0.5 / tan_half[0], 0.5 / tan_half[1], 0.5, 0.5])
     _, covered = render(part["xyz"].astype(np.float64), part["cov"].astype(np.float64), np.zeros((part["xyz"].shape[0], 3)),
@@ -587,7 +634,7 @@ def main():
     started = time.time()
     args.movies = os.path.abspath(os.path.expanduser(args.movies))
     args.video = os.path.abspath(os.path.expanduser(args.video))
-    args.depth_cache = os.path.abspath(os.path.expanduser(args.depth_cache))
+    args.depth_cache = os.path.abspath(os.path.expanduser(args.depth_cache)) if args.depth_cache else None
     args.windows = os.path.abspath(os.path.expanduser(args.windows))
     args.out = os.path.abspath(args.out)
     name = os.path.basename(args.out.rstrip("/"))
@@ -596,7 +643,7 @@ def main():
     os.makedirs(cache_dir, exist_ok=True)
     os.makedirs(preview_dir, exist_ok=True)
 
-    check_caches(args)
+    moving, window_saved = check_caches(args)
     info = probe(args.video)
     stream = video_stream(info)
     source_width, source_height = int(stream["width"]), int(stream["height"])
@@ -606,8 +653,16 @@ def main():
     fps, rate = frame_rate(info)
     count = int(round((args.end - args.start) * fps))
 
-    depth = np.load(args.depth_cache)["depth"]
-    depth = temporal_median(anchor_to_first(depth).astype(np.float32), args.depth_temporal)
+    poses, sampled_times = None, None
+    if moving:
+        poses = np.load(os.path.join(args.windows, "poses.npz"))
+        depth = poses["depths"].astype(np.float32)
+        sampled_times = np.linspace(args.start, args.start + len(glob.glob(os.path.join(args.windows, "window-*.npz"))) * args.window_seconds,
+                                    depth.shape[0])
+        log(f"moving camera: {depth.shape[0]} posed frames over {sampled_times[-1] - sampled_times[0]:.1f} s")
+    else:
+        depth = np.load(args.depth_cache)["depth"]
+        depth = temporal_median(anchor_to_first(depth).astype(np.float32), args.depth_temporal)
     model_size = (depth.shape[2], depth.shape[1])
     aspect = model_size[0] / model_size[1]
     box = cover_crop(source_width, source_height, aspect)
@@ -621,6 +676,8 @@ def main():
         f"frame {layout['width']}x{layout['height']}")
 
     def depth_index(j):
+        if moving:
+            return int(np.abs(sampled_times - (args.start + j / fps)).argmin())
         return min(depth.shape[0] - 1, int(round(j / fps * args.depth_fps)))
 
     def depth_of(j):
@@ -631,7 +688,9 @@ def main():
     band, small, plate, plate_seen = compute_mattes(args, os.path.join(cache_dir, "mattes.npz"), matte_settings, count, box, rate,
                                                     color_size, band_size, model_size, depth_of)
     lama_model = os.path.expanduser(args.lama_model)
-    if args.plate_fill == "lama" and os.path.exists(lama_model):
+    if moving:
+        log("moving camera: no clean plate")
+    elif args.plate_fill == "lama" and os.path.exists(lama_model):
         plate = lama_fill(plate, plate_seen, lama_model, args.lama_width, args.device)
         log(f"filled the never-seen plate with LaMa at {args.lama_width} px")
     else:
@@ -644,29 +703,39 @@ def main():
     for j in (0, count // 2, count - 1):
         Image.fromarray(band[j]).save(os.path.join(preview_dir, f"matte-{j:04d}.png"))
 
-    background = window_backgrounds(args, small, fps, tan_half, model_size)
-    background, stack = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+    if moving:
+        scale = 1.0
+        background = moving_background(args, poses, sampled_times, small, fps, tan_half, model_size, int(window_saved.get("window") or 13))
+        merged, stack = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
                               background["xyz"], background["cov"].astype(np.float64), background["color"], background["opacity"])
-    background = recolor(background, plate, tan_half, args.recolor)
-    covered, nearest = coverage(finish(background, fx_px, args, np.zeros(3)), tan_half, model_size)
-    seen_depth = plate_depth(depth_of, small, count)
-    both = np.isfinite(nearest) & (seen_depth > 0)
-    scale = float(np.median(nearest[both] / seen_depth[both]))
-    log(f"depth video scaled x{scale:.4f} to match the background splats")
+        centers = poses["C2W"][:, :3, 3].astype(np.float64)
+        merged = finish(merged, fx_px, args, centers.mean(axis=0))
+        record, splat_bytes = write_records(args.out, "background", [merged])
+        log(f"background: {background['xyz'].shape[0]:,} -> {record['count']:,} splats (merged ~{stack:.1f}), {splat_bytes / 1e6:.1f} MB")
+    else:
+        background = window_backgrounds(args, small, fps, tan_half, model_size)
+        background, stack = merge(voxel_keys(background["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+                                  background["xyz"], background["cov"].astype(np.float64), background["color"], background["opacity"])
+        background = recolor(background, plate, tan_half, args.recolor)
+        covered, nearest = coverage(finish(background, fx_px, args, np.zeros(3)), tan_half, model_size)
+        seen_depth = plate_depth(depth_of, small, count)
+        both = np.isfinite(nearest) & (seen_depth > 0)
+        scale = float(np.median(nearest[both] / seen_depth[both]))
+        log(f"depth video scaled x{scale:.4f} to match the background splats")
 
-    plate_small = cv2.resize(plate, model_size, interpolation=cv2.INTER_AREA)
-    holes = cv2.dilate((covered < args.solid_coverage).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
-    filler = plate_splats(holes, plate_small, seen_depth * scale, tan_half, model_size)
-    margin = margin_splats(plate_small, seen_depth * scale, tan_half, model_size, args.background_margin)
-    backstop = backstop_splats(plate_small, seen_depth * scale, tan_half, model_size, args.backstop_step, args.backstop_push)
-    log(f"filled {holes.sum():,} thin or empty background pixels from the plate, plus {margin['xyz'].shape[0]:,} past the frame edges")
-    everything = {key: np.concatenate([background[key], filler[key], margin[key]]) for key in PART_KEYS}
-    merged, _ = merge(voxel_keys(everything["xyz"], fx_px, args.static_voxel, args.depth_voxel),
-                      everything["xyz"], everything["cov"].astype(np.float64), everything["color"], everything["opacity"])
-    merged = finish(merged, fx_px, args, np.zeros(3))
-    merged = {key: np.concatenate([merged[key].astype(np.float32), backstop[key].astype(np.float32)]) for key in PART_KEYS}
-    record, splat_bytes = write_records(args.out, "background", [merged])
-    log(f"background: {everything['xyz'].shape[0]:,} -> {record['count']:,} splats (window merge ~{stack:.1f}), {splat_bytes / 1e6:.1f} MB")
+        plate_small = cv2.resize(plate, model_size, interpolation=cv2.INTER_AREA)
+        holes = cv2.dilate((covered < args.solid_coverage).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))) > 0
+        filler = plate_splats(holes, plate_small, seen_depth * scale, tan_half, model_size)
+        margin = margin_splats(plate_small, seen_depth * scale, tan_half, model_size, args.background_margin)
+        backstop = backstop_splats(plate_small, seen_depth * scale, tan_half, model_size, args.backstop_step, args.backstop_push)
+        log(f"filled {holes.sum():,} thin or empty background pixels from the plate, plus {margin['xyz'].shape[0]:,} past the frame edges")
+        everything = {key: np.concatenate([background[key], filler[key], margin[key]]) for key in PART_KEYS}
+        merged, _ = merge(voxel_keys(everything["xyz"], fx_px, args.static_voxel, args.depth_voxel),
+                          everything["xyz"], everything["cov"].astype(np.float64), everything["color"], everything["opacity"])
+        merged = finish(merged, fx_px, args, np.zeros(3))
+        merged = {key: np.concatenate([merged[key].astype(np.float32), backstop[key].astype(np.float32)]) for key in PART_KEYS}
+        record, splat_bytes = write_records(args.out, "background", [merged])
+        log(f"background: {everything['xyz'].shape[0]:,} -> {record['count']:,} splats (window merge ~{stack:.1f}), {splat_bytes / 1e6:.1f} MB")
 
     subject_disparity = []
     for j in range(0, count, max(1, count // 60)):
@@ -698,9 +767,12 @@ def main():
             pivot = float(np.median(1.0 / np.clip(aligned, 1e-3, None)))
             log(f"subject disparity {low:.3f}..{high:.3f} after alignment, pivot depth {pivot:.3f}")
 
-    gains = exposure_gains(args, count, box, rate, small, plate, plate_seen, model_size, args.exposure_window)
-    brightness = gains.mean(axis=1)
-    log(f"background exposure follows the video: gain {brightness.min():.3f}..{brightness.max():.3f}")
+    if moving:
+        gains = np.ones((count, 3))
+    else:
+        gains = exposure_gains(args, count, box, rate, small, plate, plate_seen, model_size, args.exposure_window)
+        brightness = gains.mean(axis=1)
+        log(f"background exposure follows the video: gain {brightness.min():.3f}..{brightness.max():.3f}")
 
     silent = os.path.join(args.out, "layer-silent.mp4")
     encoder = open_encoder(silent, layout, fps, args.crf)
@@ -719,7 +791,8 @@ def main():
     for j, color in enumerate(decode(args.video, args.start, count, box, rate)):
         rough = cv2.resize(band[j].astype(np.float32) / 255.0, color_size, interpolation=cv2.INTER_LINEAR)
         alpha = np.zeros(rough.shape, dtype=np.float32)
-        composite = plate_float.copy()
+        backdrop = color.astype(np.float32) if moving else plate_float
+        composite = backdrop.copy()
         top, bottom, left, right = subject_box(rough, 64, color_size)
         if bottom > top:
             region = (slice(top, bottom), slice(left, right))
@@ -727,17 +800,17 @@ def main():
             guide = cv2.cvtColor(color[region], cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
             alpha[region] = np.clip(guided_filter(guide, rough[region], args.edge_radius, args.edge_eps), 0.0, 1.0)
             lit = np.clip(plate_float[region] * gains[j].astype(np.float32), 0.0, 255.0)
-            if args.difference_band > 0:
+            if args.difference_band > 0 and not moving:
                 patch_alpha = alpha[region]
                 outside = (patch_alpha < 0.5).astype(np.uint8)
                 rim = (cv2.dilate(outside, difference_grow) > 0) & (patch_alpha > 0.0) & plate_seen[region]
                 difference = np.abs(patch - lit).max(axis=2)
                 agree = np.clip((difference - args.difference_low) / (args.difference_high - args.difference_low), 0.0, 1.0)
                 patch_alpha[rim] *= (agree * agree * (3.0 - 2.0 * agree))[rim]
-            subject = unmix(patch, alpha[region], lit, args.unmix_solid) if args.unmix else patch
+            subject = unmix(patch, alpha[region], lit, args.unmix_solid) if args.unmix and not moving else patch
             near = (alpha[region] > 0.01).astype(np.uint8)
             feather = cv2.GaussianBlur(cv2.dilate(near, keep_video).astype(np.float32), (0, 0), 6)[..., None]
-            composite[region] = subject * feather + plate_float[region] * (1.0 - feather)
+            composite[region] = subject * feather + backdrop[region] * (1.0 - feather)
         band_alpha = cv2.resize(alpha, band_size, interpolation=cv2.INTER_AREA)
         band_gray = cv2.cvtColor(cv2.resize(color, band_size, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
         follow = None
@@ -817,7 +890,6 @@ def main():
         "video": "layer.mp4",
         "layout": layout,
         "background": record,
-        "backgroundGain": [[round(float(v), 4) for v in gain] for gain in gains],
         "audio": bool(has_audio and args.audio),
         "source": {
             "clip": os.path.basename(args.video), "start": args.start, "end": args.end, "hfovDeg": args.hfov,
@@ -825,6 +897,11 @@ def main():
             "matte": args.matte, "depthScale": scale, "movies": MOVIES_COMMIT,
         },
     }
+    if moving:
+        meta["times"] = [round(float(t - args.start), 5) for t in sampled_times]
+        meta["cameras"] = [[round(float(v), 6) for v in matrix.reshape(-1)] for matrix in poses["C2W"]]
+    else:
+        meta["backgroundGain"] = [[round(float(v), 4) for v in gain] for gain in gains]
     with open(os.path.join(args.out, "meta.json"), "w") as handle:
         json.dump(meta, handle, indent=2)
     write_index(os.path.dirname(args.out), name)

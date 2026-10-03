@@ -9,10 +9,19 @@ import { aimAndMeasure, applyDepthOfField, createScratch, createSplatRuntime } f
 import { createLayerMaterial, createSurfelGeometry, createSurfelMaterial } from "./hybridMaterial";
 import { createRgbdGeometry } from "./rgbdMaterial";
 import { createResolvePass } from "./splatMaterial";
-import { HYBRID, RENDER, TEXTURE_WIDTH, clamp, lowPassFor, momentPlan } from "./splatVideoParams";
+import { HYBRID, RENDER, TEXTURE_WIDTH, clamp, hasLensPath, lensMatrix, lowPassFor, momentPlan } from "./splatVideoParams";
 import { createVideoClock } from "./videoClock";
 
 const SPLAT_LAYER = 0;
+const OPENCV_FLIP = new THREE.Matrix4().makeScale(1, -1, -1);
+const lensScratch = new THREE.Matrix4();
+
+function placeSubject(subject, meta, time) {
+  if (!hasLensPath(meta)) return;
+  subject.matrixAutoUpdate = false;
+  subject.matrix.copy(OPENCV_FLIP).multiply(lensMatrix(meta, time, lensScratch)).multiply(OPENCV_FLIP);
+  subject.matrixWorldNeedsUpdate = true;
+}
 
 function backgroundClip(clip) {
   const { meta, background } = clip;
@@ -174,6 +183,7 @@ function HybridField({ clip, engineRef, isMobile }) {
     if (!runtime || !scratch || !group || !engine) return;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.clock.sync(engine, performance.now());
+    placeSubject(runtime.subject, clip.meta, engine.time);
     const { video } = runtime.clock;
     engine.buffering = engine.playing && !engine.scrubbing && video.readyState < video.HAVE_FUTURE_DATA;
     applyGain(resolveRef.current, clip.meta, engine.time);
