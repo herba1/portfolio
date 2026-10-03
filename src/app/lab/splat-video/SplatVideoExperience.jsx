@@ -277,7 +277,6 @@ export default function SplatVideoExperience() {
     setMuted(engine.muted);
   }, []);
   const handlePause = useCallback(() => setPlaying(false), []);
-  const handleToggleLook = useCallback(() => setLook((current) => LOOKS[(LOOKS.indexOf(current) + 1) % LOOKS.length]), []);
   const handleBackToLens = useCallback(() => resetOrbit(engineRef.current), []);
   const handleScrubStart = useCallback(() => {
     engineRef.current.scrubbing = true;
@@ -352,7 +351,7 @@ export default function SplatVideoExperience() {
           muted={muted}
           onToggleMuted={handleToggleMuted}
           look={isHybrid(meta) ? look : null}
-          onToggleLook={handleToggleLook}
+          onLook={setLook}
           onTogglePlay={togglePlaying}
           onPause={handlePause}
           onSpeed={setSpeed}

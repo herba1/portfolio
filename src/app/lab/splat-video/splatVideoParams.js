@@ -91,6 +91,11 @@ export const SURFEL = {
 
 export const LOOKS = ["splats", "video"];
 
+export const LOOK_LABELS = {
+  splats: "Splats",
+  video: "Video",
+};
+
 export function viewFov(meta) {
   return meta.camera.viewFovDeg ?? meta.camera.vfovDeg;
 }

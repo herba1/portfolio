@@ -346,6 +346,17 @@ There are two reasons. One background for 30 s of handheld footage blurs, as rou
   - a missing layer video shows the normal error;
   - moving clips pose the subject from the presented video frame (`requestVideoFrameCallback`).
 
+**Phone clips in one command:** `tools/splat4d/phone.sh <video> <name> [start] [end]`. It converts the clip first:
+- trims to the range;
+- tone-maps iPhone HDR (HLG/PQ) to SDR;
+- bakes in rotation;
+- resamples to a constant 30 fps;
+- caps the long side at 1920.
+
+It reads the lens from the original's 35 mm focal-length tag (65 degrees if missing), then runs depthvideo, longclip `--still` and hybrid. The clip lands at `/lab/splat-video?clip=<name>`.
+
+The player's look control is now a Splats | Video switch, since a single toggle naming the other look confused people.
+
 **LaMa:** the first download attempt (a torchscript file from a third-party GitHub release) was refused by the permission check. After Herb gave permission it is used, as described above.
 
 Still open after round 5:
