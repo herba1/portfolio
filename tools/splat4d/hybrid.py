@@ -16,7 +16,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from depthvideo import anchor_to_first, depth_layers
 from check import render
 from flipbook import finish
-from inputs import log, probe, video_stream
+from inputs import DEFAULT_HFOV, focal_35mm, log, probe, video_stream
 from longclip import camera_at, rescaled, to_world, write_records
 from matte import make_matte
 from select_splats import merge, voxel_keys
@@ -25,6 +25,7 @@ from splat4d_format import write_index
 MOVIES_COMMIT = "77262fa"
 BAND_GAP = 8
 MACROBLOCK = 16
+COLOR_LONG_SIDE = 1920
 SUBJECT_LEVEL = 0.5
 PLATE_CLEAR = 0.05
 PART_KEYS = ("xyz", "cov", "color", "opacity")
@@ -94,7 +95,19 @@ def saved_settings(path):
     return dict(ast.literal_eval(str(np.load(path)["settings"])))
 
 
-def check_caches(args):
+def built_hfov(saved, info):
+    value = saved.get("hfov")
+    if value not in (None, "auto"):
+        return float(value)
+    f35 = focal_35mm(info)
+    if not f35:
+        return DEFAULT_HFOV
+    stream = video_stream(info)
+    width, height = int(stream["width"]), int(stream["height"])
+    return math.degrees(2 * math.atan(max(width, height) / math.hypot(width, height) * 21.635 / f35))
+
+
+def check_caches(args, info):
     windows = sorted(glob.glob(os.path.join(args.windows, "window-*.npz")))
     if not windows:
         raise SystemExit(f"no window caches in {args.windows}")
@@ -116,6 +129,8 @@ def check_caches(args):
         if abs(float(window.get("window_seconds") or 0.0) - args.window_seconds) > 1e-3:
             problems.append(f"window caches use {window.get('window_seconds')} s windows, not --window-seconds {args.window_seconds}")
     for name, saved in caches:
+        if abs(built_hfov(saved, info) - args.hfov) > 0.5:
+            problems.append(f"{name} were built with a {built_hfov(saved, info):.1f} deg lens, not --hfov {args.hfov}")
         if os.path.abspath(os.path.expanduser(str(saved.get("video")))) != args.video:
             problems.append(f"{name} were made from {saved.get('video')}")
         if abs(float(saved.get("start") or 0.0) - args.start) > 1e-3:
@@ -202,18 +217,20 @@ def compute_mattes(args, cache_path, settings, count, box, rate, color_size, ban
     plate_count = np.zeros((color_size[1], color_size[0]), dtype=np.float64)
     clear = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (17, 17))
     started = time.time()
-    for j, frame in enumerate(decode(args.video, args.start, count, box, rate)):
+    for j, frame in enumerate(decode(args.video, args.start, count, box, rate, color_size)):
         alpha = model(frame, depth_of(j)) if args.matte == "depth" else model(frame)
         band[j] = np.round(cv2.resize(alpha, band_size, interpolation=cv2.INTER_AREA) * 255).astype(np.uint8)
         small[j] = np.round(cv2.resize(alpha, model_size, interpolation=cv2.INTER_AREA) * 255).astype(np.uint8)
-        empty = cv2.erode((alpha < PLATE_CLEAR).astype(np.uint8), clear).astype(np.float64)
-        reference = plate_sum / np.maximum(plate_count, 1)[..., None]
-        overlap = (empty > 0) & (plate_count > 0) & (reference.min(axis=2) > 20) & (reference.max(axis=2) < 245)
-        gain = np.ones(3)
-        if overlap.sum() > 500:
-            gain = np.array([np.median(frame[..., c][overlap] / reference[..., c][overlap]) for c in range(3)])
-        plate_sum += (frame / gain) * empty[..., None]
-        plate_count += empty
+        if (alpha >= SUBJECT_LEVEL).any():
+            empty = cv2.erode((alpha < PLATE_CLEAR).astype(np.uint8), clear).astype(np.float64)
+            reference = plate_sum / np.maximum(plate_count, 1)[..., None]
+            overlap = (empty > 0) & (plate_count > 0) & (reference.min(axis=2) > 20) & (reference.max(axis=2) < 245)
+            gain = np.ones(3)
+            if overlap.sum() > 500:
+                gain = np.array([np.median(frame[..., c][overlap] / reference[..., c][overlap]) for c in range(3)])
+            if gain.min() > 0.2:
+                plate_sum += (frame / gain) * empty[..., None]
+                plate_count += empty
         if j % 100 == 0:
             log(f"matte {j + 1}/{count}: {time.time() - started:.0f}s")
     seen = plate_count > 0
@@ -316,8 +333,8 @@ def drop_islands(frame, keep_fraction, grow):
     if count <= 2:
         return frame
     areas = stats[1:, cv2.CC_STAT_AREA]
-    region = np.isin(labels, np.flatnonzero(areas >= keep_fraction * areas.max()) + 1)
-    return np.where(region, frame, 0).astype(frame.dtype)
+    dropped = np.isin(labels, np.flatnonzero(areas < keep_fraction * areas.max()) + 1)
+    return np.where(dropped, 0, frame).astype(frame.dtype)
 
 
 def relative_depths(args, cache_path, count, box, rate, band_size):
@@ -643,8 +660,8 @@ def main():
     os.makedirs(cache_dir, exist_ok=True)
     os.makedirs(preview_dir, exist_ok=True)
 
-    moving, window_saved = check_caches(args)
     info = probe(args.video)
+    moving, window_saved = check_caches(args, info)
     stream = video_stream(info)
     source_width, source_height = int(stream["width"]), int(stream["height"])
     rotation = next((int(item["rotation"]) for item in stream.get("side_data_list", []) if "rotation" in item), 0)
@@ -657,8 +674,7 @@ def main():
     if moving:
         poses = np.load(os.path.join(args.windows, "poses.npz"))
         depth = poses["depths"].astype(np.float32)
-        sampled_times = np.linspace(args.start, args.start + len(glob.glob(os.path.join(args.windows, "window-*.npz"))) * args.window_seconds,
-                                    depth.shape[0])
+        sampled_times = args.start + np.arange(depth.shape[0]) * args.window_seconds / (int(window_saved.get("window") or 13) - 1)
         log(f"moving camera: {depth.shape[0]} posed frames over {sampled_times[-1] - sampled_times[0]:.1f} s")
     else:
         depth = np.load(args.depth_cache)["depth"]
@@ -666,7 +682,8 @@ def main():
     model_size = (depth.shape[2], depth.shape[1])
     aspect = model_size[0] / model_size[1]
     box = cover_crop(source_width, source_height, aspect)
-    color_size = (box[2], box[3])
+    color_scale = min(1.0, COLOR_LONG_SIDE / max(box[2], box[3]))
+    color_size = (int(round(box[2] * color_scale)), int(round(box[3] * color_scale)))
     band_size = (int(round(model_size[0] * args.band_scale)), int(round(model_size[1] * args.band_scale)))
     layout = band_layout(color_size, band_size)
     tan_width = math.tan(math.radians(args.hfov) / 2) * box[2] / max(source_width, source_height)
@@ -684,7 +701,7 @@ def main():
         return depth[depth_index(j)]
 
     matte_settings = repr(sorted([(k, getattr(args, k)) for k in ("video", "start", "end", "matte", "matte_size", "band_scale", "depth_cache")]
-                                 + [("rate", rate), ("plate", "exposure-normalized")]))
+                                 + [("rate", rate), ("plate", "skips-empty-and-dark"), ("color", color_size)]))
     band, small, plate, plate_seen = compute_mattes(args, os.path.join(cache_dir, "mattes.npz"), matte_settings, count, box, rate,
                                                     color_size, band_size, model_size, depth_of)
     lama_model = os.path.expanduser(args.lama_model)
@@ -737,8 +754,11 @@ def main():
         record, splat_bytes = write_records(args.out, "background", [merged])
         log(f"background: {everything['xyz'].shape[0]:,} -> {record['count']:,} splats (window merge ~{stack:.1f}), {splat_bytes / 1e6:.1f} MB")
 
+    sample_step = max(1, count // 60)
+    if not (small[::sample_step] > 255 * SUBJECT_LEVEL).any():
+        raise SystemExit("the matte found no subject in this clip; check --start/--end or pick another --matte")
     subject_disparity = []
-    for j in range(0, count, max(1, count // 60)):
+    for j in range(0, count, sample_step):
         inside = small[j] > 255 * SUBJECT_LEVEL
         if inside.any():
             subject_disparity.append(1.0 / (scale * depth_of(j)[inside]))
@@ -788,7 +808,7 @@ def main():
     difference_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.difference_band + 1, 2 * args.difference_band + 1))
     follow = None
     encode_started = time.time()
-    for j, color in enumerate(decode(args.video, args.start, count, box, rate)):
+    for j, color in enumerate(decode(args.video, args.start, count, box, rate, color_size)):
         rough = cv2.resize(band[j].astype(np.float32) / 255.0, color_size, interpolation=cv2.INTER_LINEAR)
         alpha = np.zeros(rough.shape, dtype=np.float32)
         backdrop = color.astype(np.float32) if moving else plate_float
@@ -901,7 +921,7 @@ def main():
         meta["times"] = [round(float(t - args.start), 5) for t in sampled_times]
         meta["cameras"] = [[round(float(v), 6) for v in matrix.reshape(-1)] for matrix in poses["C2W"]]
     else:
-        meta["backgroundGain"] = [[round(float(v), 4) for v in gain] for gain in gains]
+        meta["backgroundGain"] = [[max(round(float(v), 4), 1e-4) for v in gain] for gain in gains]
     with open(os.path.join(args.out, "meta.json"), "w") as handle:
         json.dump(meta, handle, indent=2)
     write_index(os.path.dirname(args.out), name)

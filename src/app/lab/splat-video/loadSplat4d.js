@@ -617,11 +617,16 @@ async function loadHybrid(clip, folder, meta, { signal, onProgress }) {
       if (onProgress) onProgress(loaded, total);
     },
   });
+  const video = `${folder}/${meta.video}${version}`;
+  const probe = await fetch(video, { method: "HEAD", signal });
+  if (!probe.ok) {
+    throw new Splat4dError(`${meta.video} for “${clip}” answered ${probe.status}.`, { clip, missing: probe.status === 404 });
+  }
   return {
     clip,
     meta,
     bytes: total,
     background,
-    video: `${folder}/${meta.video}${version}`,
+    video,
   };
 }

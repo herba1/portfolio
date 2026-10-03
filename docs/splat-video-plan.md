@@ -334,6 +334,18 @@ On the drummer it scored below the drummer-30s stream at the lens, so the clip w
 
 There are two reasons. One background for 30 s of handheld footage blurs, as round 3 already found. And the Vision matte flickers on a night street with several people. Making it work needs per-window backgrounds streamed as chunks, and a tracked matte for a chosen subject (SAM 2).
 
+**Second review round.** 11 defects confirmed with adversarial verification, all fixed:
+- The plate skips frames where the matte found no subject, and frames whose exposure gain is unusable. A one-frame matte dropout used to paint the person into the plate, and a black frame used to make it NaN.
+- `drop_islands` zeroes only the dropped islands.
+- The cache check now compares the lens, so a mismatched `--hfov` is caught.
+- The colour band is capped at 1920 px, so 4K sources stay inside H.264 level 5.2.
+- A clip with no subject fails early with a clear message.
+- Moving-camera times come from the posed frames.
+- In the player:
+  - crossing the 900 px breakpoint no longer rebuilds the clip, and the clock no longer loses its place before metadata arrives;
+  - a missing layer video shows the normal error;
+  - moving clips pose the subject from the presented video frame (`requestVideoFrameCallback`).
+
 **LaMa:** the first download attempt (a torchscript file from a third-party GitHub release) was refused by the permission check. After Herb gave permission it is used, as described above.
 
 Still open after round 5:

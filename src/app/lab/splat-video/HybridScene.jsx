@@ -146,6 +146,7 @@ function useLayeredRender(resolveRef, scratchRef) {
 }
 
 function HybridField({ clip, engineRef, isMobile }) {
+  const mobileAtMountRef = useRef(isMobile);
   const groupRef = useRef(null);
   const runtimeRef = useRef(null);
   const resolveRef = useRef(null);
@@ -154,7 +155,7 @@ function HybridField({ clip, engineRef, isMobile }) {
   useEffect(() => {
     const group = groupRef.current;
     const engine = engineRef.current;
-    const runtime = createRuntime(clip, isMobile);
+    const runtime = createRuntime(clip, mobileAtMountRef.current);
     const resolve = createResolvePass();
     group.add(runtime.splats.mesh);
     group.add(runtime.subject);
@@ -173,7 +174,7 @@ function HybridField({ clip, engineRef, isMobile }) {
       runtimeRef.current = null;
       resolveRef.current = null;
     };
-  }, [clip, engineRef, isMobile]);
+  }, [clip, engineRef]);
 
   useFrame((state, rawDelta) => {
     const runtime = runtimeRef.current;
@@ -183,9 +184,9 @@ function HybridField({ clip, engineRef, isMobile }) {
     if (!runtime || !scratch || !group || !engine) return;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.clock.sync(engine, performance.now());
-    placeSubject(runtime.subject, clip.meta, engine.time);
+    placeSubject(runtime.subject, clip.meta, runtime.clock.frameTime(engine.time));
     const { video } = runtime.clock;
-    engine.buffering = engine.playing && !engine.scrubbing && video.readyState < video.HAVE_FUTURE_DATA;
+    engine.buffering = engine.playing && !engine.scrubbing && !video.error && video.readyState < video.HAVE_FUTURE_DATA;
     applyGain(resolveRef.current, clip.meta, engine.time);
 
     const backdrop = runtime.backdrop.meta;

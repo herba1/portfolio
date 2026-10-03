@@ -46,6 +46,13 @@ export function createVideoClock(source, meta, { onMetadata, onReady } = {}) {
 
   let lastPlayAttempt = -Infinity;
   let wasPlaying = false;
+  let presentedTime = null;
+  let frameCallback = 0;
+  const trackFrame = (_, metadata) => {
+    presentedTime = metadata.mediaTime;
+    frameCallback = video.requestVideoFrameCallback(trackFrame);
+  };
+  if ("requestVideoFrameCallback" in video) frameCallback = video.requestVideoFrameCallback(trackFrame);
   const play = (now) => {
     if (now - lastPlayAttempt < PLAY_RETRY_MS) return;
     lastPlayAttempt = now;
@@ -72,6 +79,9 @@ export function createVideoClock(source, meta, { onMetadata, onReady } = {}) {
   return {
     video,
     texture,
+    frameTime(fallback) {
+      return presentedTime ?? fallback;
+    },
     gesture(engine) {
       applyMuted(engine);
       if (engine.playing && video.paused) {
@@ -81,8 +91,12 @@ export function createVideoClock(source, meta, { onMetadata, onReady } = {}) {
     },
     sync(engine, now) {
       applyMuted(engine);
-      if (video.playbackRate !== engine.speed) video.playbackRate = engine.speed;
       const wantPlaying = engine.playing && !engine.scrubbing && !document.hidden;
+      if (video.readyState < video.HAVE_METADATA) {
+        if (wantPlaying && video.paused) play(now);
+        return;
+      }
+      if (video.playbackRate !== engine.speed) video.playbackRate = engine.speed;
       if (wantPlaying) {
         if (!wasPlaying) seek(engine.time, true);
         wasPlaying = true;
@@ -97,6 +111,7 @@ export function createVideoClock(source, meta, { onMetadata, onReady } = {}) {
       seek(engine.time);
     },
     dispose() {
+      if (frameCallback && "cancelVideoFrameCallback" in video) video.cancelVideoFrameCallback(frameCallback);
       document.removeEventListener("visibilitychange", handleVisibility);
       video.removeEventListener("loadedmetadata", handleMetadata);
       video.removeEventListener("loadeddata", handleData);
