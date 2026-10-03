@@ -69,6 +69,12 @@ def parse_args():
     parser.add_argument("--backstop-push", type=float, default=1.04)
     parser.add_argument("--subject-depth", choices=["movies", *DEPTH_MODELS], default="dav2")
     parser.add_argument("--alignment-window", type=int, default=15)
+    parser.add_argument("--plate-fill", choices=["lama", "span"], default="lama")
+    parser.add_argument("--difference-band", type=int, default=10)
+    parser.add_argument("--difference-low", type=float, default=8.0)
+    parser.add_argument("--difference-high", type=float, default=28.0)
+    parser.add_argument("--lama-model", default="~/dev/MoVieS/resources/lama/big-lama.pt")
+    parser.add_argument("--lama-width", type=int, default=512)
     parser.add_argument("--static-voxel", type=float, default=1.5)
     parser.add_argument("--depth-voxel", type=float, default=0.1)
     parser.add_argument("--ray-clamp", type=float, default=2.0)
@@ -367,6 +373,25 @@ def relative_alignment(relative, band, depth_of, scale, band_size, window):
     return np.stack([np.median(padded[j:j + window], axis=0) for j in range(count)])
 
 
+def lama_fill(plate, seen, model_path, width, device):
+    import torch
+
+    height, full_width = plate.shape[:2]
+    hole = cv2.dilate((~seen).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))).astype(np.float32)
+    if hole.max() == 0:
+        return plate
+    size = (width // 8 * 8, max(8, round(height * width / full_width / 8) * 8))
+    image = cv2.resize(plate.astype(np.float32) / 255.0, size, interpolation=cv2.INTER_AREA)
+    mask = (cv2.resize(hole, size, interpolation=cv2.INTER_AREA) > 0.01).astype(np.float32)
+    model = torch.jit.load(model_path, map_location=device).eval()
+    with torch.no_grad():
+        filled = model(torch.from_numpy(image.transpose(2, 0, 1)[None]).to(device), torch.from_numpy(mask[None, None]).to(device))
+    filled = cv2.resize(filled[0].permute(1, 2, 0).float().cpu().numpy(), (full_width, height), interpolation=cv2.INTER_CUBIC)
+    blend = cv2.GaussianBlur(hole, (0, 0), 3)[..., None]
+    result = plate.astype(np.float32) / 255.0 * (1.0 - blend) + filled * blend
+    return np.round(np.clip(result, 0.0, 1.0) * 255.0).astype(np.uint8)
+
+
 def median_of_three(frames):
     smoothed = frames.copy()
     for j in range(1, frames.shape[0] - 1):
@@ -605,7 +630,13 @@ def main():
                                  + [("rate", rate), ("plate", "exposure-normalized")]))
     band, small, plate, plate_seen = compute_mattes(args, os.path.join(cache_dir, "mattes.npz"), matte_settings, count, box, rate,
                                                     color_size, band_size, model_size, depth_of)
-    plate = np.round(np.clip(span_fill(plate, plate_seen), 0, 255)).astype(np.uint8)
+    lama_model = os.path.expanduser(args.lama_model)
+    if args.plate_fill == "lama" and os.path.exists(lama_model):
+        plate = lama_fill(plate, plate_seen, lama_model, args.lama_width, args.device)
+        log(f"filled the never-seen plate with LaMa at {args.lama_width} px")
+    else:
+        plate = np.round(np.clip(span_fill(plate, plate_seen), 0, 255)).astype(np.uint8)
+        log("filled the never-seen plate row by row")
     if args.matte_temporal:
         band = median_of_three(band)
         small = median_of_three(small)
@@ -682,6 +713,7 @@ def main():
     plate_float = plate.astype(np.float32)
     held_alpha, held_gray, held_level = None, None, None
     island_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.island_reach + 1, 2 * args.island_reach + 1))
+    difference_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.difference_band + 1, 2 * args.difference_band + 1))
     follow = None
     encode_started = time.time()
     for j, color in enumerate(decode(args.video, args.start, count, box, rate)):
@@ -695,6 +727,13 @@ def main():
             guide = cv2.cvtColor(color[region], cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
             alpha[region] = np.clip(guided_filter(guide, rough[region], args.edge_radius, args.edge_eps), 0.0, 1.0)
             lit = np.clip(plate_float[region] * gains[j].astype(np.float32), 0.0, 255.0)
+            if args.difference_band > 0:
+                patch_alpha = alpha[region]
+                outside = (patch_alpha < 0.5).astype(np.uint8)
+                rim = (cv2.dilate(outside, difference_grow) > 0) & (patch_alpha > 0.0) & plate_seen[region]
+                difference = np.abs(patch - lit).max(axis=2)
+                agree = np.clip((difference - args.difference_low) / (args.difference_high - args.difference_low), 0.0, 1.0)
+                patch_alpha[rim] *= (agree * agree * (3.0 - 2.0 * agree))[rim]
             subject = unmix(patch, alpha[region], lit, args.unmix_solid) if args.unmix else patch
             near = (alpha[region] > 0.01).astype(np.uint8)
             feather = cv2.GaussianBlur(cv2.dilate(near, keep_video).astype(np.float32), (0, 0), 6)[..., None]

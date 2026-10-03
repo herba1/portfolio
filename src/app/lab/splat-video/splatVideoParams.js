@@ -79,12 +79,17 @@ export const HYBRID = {
   coreAlpha: 0.98,
   borderFeather: 0.015,
   viewZoom: 1.08,
-  pointScale: 3.2,
-  depthOffset: 8,
   mobileGridStride: 2,
 };
 
-export const LOOKS = ["video", "splats"];
+export const SURFEL = {
+  core: { spread: 1, extent: 0.75, lowPass: 1 },
+  rim: { spread: 0.6, extent: 3, lowPass: 0.3 },
+  edgeStretch: 5,
+  cone: 0.0001,
+};
+
+export const LOOKS = ["splats", "video"];
 
 export function viewFov(meta) {
   return meta.camera.viewFovDeg ?? meta.camera.vfovDeg;

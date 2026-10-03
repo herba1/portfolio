@@ -1,6 +1,6 @@
 {
   "title": "Splat video",
-  "description": "A phone clip you can step into: the room is Gaussian splats, and the person is the original video, frame for frame at 30 fps, cut out with a soft matte and given depth. Drag to lean off the lens; sound, scrub and a splat look for the subject.",
+  "description": "A phone clip you can step into. The room is Gaussian splats, and the person is splats too: one oriented surfel per video pixel, generated on the GPU from the original video every frame at its own frame rate, so it is as sharp as the footage and leans like 3D. Drag to lean; sound, scrub and a video look.",
   "tags": [
     "WebGL",
     "Player",

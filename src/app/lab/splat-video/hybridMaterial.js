@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { HYBRID } from "./splatVideoParams";
+import { HYBRID, SURFEL } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
 const LEVELS = 255;
@@ -100,8 +100,9 @@ void main() {
 }
 `;
 
-const POINT_VERTEX = `
+const SURFEL_VERTEX = `
 precision highp float;
+precision highp int;
 
 uniform sampler2D uMap;
 uniform vec4 uColorRect;
@@ -110,59 +111,134 @@ uniform vec4 uAlphaRect;
 uniform vec2 uColorTexel;
 uniform vec2 uDepthTexel;
 uniform vec2 uAlphaTexel;
-uniform vec2 uGridStep;
+uniform ivec2 uGrid;
 uniform vec2 uTanHalf;
 uniform vec2 uDisparity;
 uniform vec2 uAlphaRamp;
 uniform float uAlphaCutoff;
+uniform float uCore;
 uniform float uBorderFeather;
-uniform float uPixelsPerUnit;
-uniform float uPointScale;
+uniform vec2 uViewport;
+uniform float uLowPass;
+uniform float uSpread;
+uniform float uExtent;
+uniform float uEdgeStretch;
 
-in vec2 aGrid;
-
-out vec3 vColor;
-out float vAlpha;
+out vec4 vColor;
+out vec2 vOffset;
 
 const float MIN_DISPARITY = 0.01;
+const float MIN_DEPTH = 0.02;
 
 vec2 inside(vec2 grid, vec2 texel) {
   return clamp(grid, 0.5 * texel, 1.0 - 0.5 * texel);
 }
 
-void main() {
-  float level = textureLod(uMap, uDepthRect.xy + inside(aGrid, uDepthTexel) * uDepthRect.zw, 0.0).r;
+vec3 pointAt(vec2 grid) {
+  float level = textureLod(uMap, uDepthRect.xy + inside(grid, uDepthTexel) * uDepthRect.zw, 0.0).r;
   float depth = 1.0 / max(mix(uDisparity.x, uDisparity.y, level), MIN_DISPARITY);
-  vec3 point = vec3((aGrid - 0.5) * 2.0 * uTanHalf * depth, depth);
-  vec4 view = modelViewMatrix * vec4(point, 1.0);
-  gl_Position = projectionMatrix * view;
+  return vec3((grid - 0.5) * 2.0 * uTanHalf * depth, depth);
+}
 
-  vec2 edges = min(aGrid, 1.0 - aGrid);
+vec3 shorter(vec3 forward, vec3 backward, float limit) {
+  vec3 tangent = dot(forward, forward) < dot(backward, backward) ? forward : backward;
+  float size = length(tangent);
+  return size > limit ? tangent * (limit / size) : tangent;
+}
+
+void cull() {
+  gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+  vColor = vec4(0.0);
+  vOffset = vec2(0.0);
+}
+
+void main() {
+  vec2 step = 1.0 / vec2(uGrid);
+  vec2 grid = (vec2(gl_InstanceID % uGrid.x, gl_InstanceID / uGrid.x) + 0.5) * step;
+
+  vec2 edges = min(grid, 1.0 - grid);
   float border = smoothstep(0.0, uBorderFeather, min(edges.x, edges.y));
-  float coverage = textureLod(uMap, uAlphaRect.xy + inside(aGrid, uAlphaTexel) * uAlphaRect.zw, 0.0).r;
-  vAlpha = smoothstep(uAlphaRamp.x, uAlphaRamp.y, coverage) * border;
-  vColor = textureLod(uMap, uColorRect.xy + inside(aGrid, uColorTexel) * uColorRect.zw, 0.0).rgb;
+  float coverage = textureLod(uMap, uAlphaRect.xy + inside(grid, uAlphaTexel) * uAlphaRect.zw, 0.0).r;
+  float alpha = smoothstep(uAlphaRamp.x, uAlphaRamp.y, coverage) * border;
+#ifdef CORE
+  if (alpha < uCore) {
+    cull();
+    return;
+  }
+#else
+  if (alpha >= uCore || alpha < uAlphaCutoff) {
+    cull();
+    return;
+  }
+#endif
 
-  float cell = 2.0 * uTanHalf.y * depth * uGridStep.y;
-  gl_PointSize = max(1.0, uPointScale * cell * uPixelsPerUnit / max(-view.z, 1e-4));
-  if (vAlpha < uAlphaCutoff) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
+  vec3 center = pointAt(grid);
+  vec2 footprint = 2.0 * uTanHalf * center.z * step;
+  vec3 across = shorter(pointAt(grid + vec2(step.x, 0.0)) - center, center - pointAt(grid - vec2(step.x, 0.0)), uEdgeStretch * footprint.x);
+  vec3 down = shorter(pointAt(grid + vec2(0.0, step.y)) - center, center - pointAt(grid - vec2(0.0, step.y)), uEdgeStretch * footprint.y);
+  vec3 normal = cross(across, down);
+  normal = dot(normal, normal) > 1e-20 ? normalize(normal) : vec3(0.0, 0.0, 1.0);
+  float thickness = 0.05 * min(footprint.x, footprint.y);
+  mat3 covariance = uSpread * uSpread * (outerProduct(across, across) + outerProduct(down, down))
+    + thickness * thickness * outerProduct(normal, normal);
+
+  vec4 viewCenter = modelViewMatrix * vec4(center, 1.0);
+  float depth = -viewCenter.z;
+  vec4 clipCenter = projectionMatrix * viewCenter;
+  if (depth < MIN_DEPTH) {
+    cull();
+    return;
+  }
+
+  vec2 focal = vec2(projectionMatrix[0][0], projectionMatrix[1][1]) * 0.5 * uViewport;
+  float inverseDepth = 1.0 / depth;
+  float inverseDepth2 = inverseDepth * inverseDepth;
+  mat3 jacobian = mat3(
+    focal.x * inverseDepth, 0.0, 0.0,
+    0.0, focal.y * inverseDepth, 0.0,
+    focal.x * viewCenter.x * inverseDepth2, focal.y * viewCenter.y * inverseDepth2, 0.0
+  );
+  mat3 toScreen = jacobian * mat3(modelViewMatrix);
+  mat3 projected = toScreen * covariance * transpose(toScreen);
+
+  float a = projected[0][0] + uLowPass;
+  float b = projected[0][1];
+  float c = projected[1][1] + uLowPass;
+  float mid = 0.5 * (a + c);
+  float radius = length(vec2(0.5 * (a - c), b));
+  float lambda1 = mid + radius;
+  float lambda2 = max(mid - radius, 1e-6);
+  vec2 axis = abs(b) > 1e-7 ? normalize(vec2(b, lambda1 - a)) : (a >= c ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+  vec2 offsetPixels = position.x * uExtent * sqrt(lambda1) * axis + position.y * uExtent * sqrt(lambda2) * vec2(-axis.y, axis.x);
+
+  gl_Position = vec4(clipCenter.xy / clipCenter.w + offsetPixels * 2.0 / uViewport, clipCenter.z / clipCenter.w, 1.0);
+  vOffset = position.xy * uExtent;
+  vColor = vec4(textureLod(uMap, uColorRect.xy + inside(grid, uColorTexel) * uColorRect.zw, 0.0).rgb, alpha);
 }
 `;
 
-const POINT_FRAGMENT = `
+const SURFEL_FRAGMENT = `
 precision highp float;
 
-in vec3 vColor;
-in float vAlpha;
+uniform float uExtent;
+uniform float uCone;
+
+in vec4 vColor;
+in vec2 vOffset;
 
 out vec4 fragColor;
 
 void main() {
-  vec2 offset = gl_PointCoord * 2.0 - 1.0;
-  float radius = dot(offset, offset);
-  if (radius > 1.0) discard;
-  float alpha = vAlpha * exp(-2.5 * radius);
-  fragColor = vec4(vColor * alpha, alpha);
+  float radius = dot(vOffset, vOffset);
+  if (radius > uExtent * uExtent) discard;
+#ifdef CORE
+  gl_FragDepth = gl_FragCoord.z + uCone * radius / (uExtent * uExtent);
+  fragColor = vec4(vColor.rgb, 1.0);
+#else
+  float alpha = vColor.a * exp(-0.5 * radius);
+  if (alpha < 1.0 / 255.0) discard;
+  fragColor = vec4(vColor.rgb * alpha, alpha);
+#endif
 }
 `;
 
@@ -173,15 +249,6 @@ function normalizedRect(rect, width, height) {
 
 function bandTexel(rect) {
   return new THREE.Vector2(1 / Math.max(1, rect[2]), 1 / Math.max(1, rect[3]));
-}
-
-export function createDepthMaterial(texture, meta, grid) {
-  const material = createLayerMaterial(texture, meta, { core: true, grid });
-  material.colorWrite = false;
-  material.polygonOffset = true;
-  material.polygonOffsetFactor = HYBRID.depthOffset;
-  material.polygonOffsetUnits = HYBRID.depthOffset;
-  return material;
 }
 
 export function createLayerMaterial(texture, meta, { core, grid }) {
@@ -222,20 +289,23 @@ export function createLayerMaterial(texture, meta, { core, grid }) {
   });
 }
 
-export function createPointsGeometry(grid) {
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute("aGrid", grid);
-  geometry.setDrawRange(0, grid.count);
+export function createSurfelGeometry(columns, rows) {
+  const geometry = new THREE.InstancedBufferGeometry();
+  geometry.setAttribute("position", new THREE.Float32BufferAttribute([-1, -1, 0, 1, -1, 0, 1, 1, 0, -1, 1, 0], 3));
+  geometry.setIndex([0, 1, 2, 0, 2, 3]);
+  geometry.instanceCount = columns * rows;
   return geometry;
 }
 
-export function createPointsMaterial(texture, meta, grid) {
+export function createSurfelMaterial(texture, meta, { core, columns, rows }) {
   const { layout } = meta;
   const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
+  const look = core ? SURFEL.core : SURFEL.rim;
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
-    vertexShader: POINT_VERTEX,
-    fragmentShader: POINT_FRAGMENT,
+    vertexShader: SURFEL_VERTEX,
+    fragmentShader: SURFEL_FRAGMENT,
+    defines: core ? { CORE: "" } : {},
     uniforms: {
       uMap: { value: texture },
       uColorRect: { value: normalizedRect(layout.color, layout.width, layout.height) },
@@ -244,19 +314,24 @@ export function createPointsMaterial(texture, meta, grid) {
       uColorTexel: { value: bandTexel(layout.color) },
       uDepthTexel: { value: bandTexel(layout.depth) },
       uAlphaTexel: { value: bandTexel(layout.alpha) },
-      uGridStep: { value: grid.clone() },
+      uGrid: { value: [columns, rows] },
       uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
       uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
       uAlphaRamp: { value: new THREE.Vector2(HYBRID.alphaLow, HYBRID.alphaHigh) },
       uAlphaCutoff: { value: HYBRID.alphaCutoff },
+      uCore: { value: HYBRID.coreAlpha },
       uBorderFeather: { value: HYBRID.borderFeather },
-      uPixelsPerUnit: { value: 1 },
-      uPointScale: { value: HYBRID.pointScale },
+      uViewport: { value: new THREE.Vector2(1, 1) },
+      uLowPass: { value: look.lowPass },
+      uSpread: { value: look.spread },
+      uExtent: { value: look.extent },
+      uEdgeStretch: { value: SURFEL.edgeStretch },
+      uCone: { value: SURFEL.cone },
     },
-    transparent: true,
+    transparent: !core,
     depthTest: true,
-    depthWrite: false,
-    blending: THREE.CustomBlending,
+    depthWrite: core,
+    blending: core ? THREE.NoBlending : THREE.CustomBlending,
     blendEquation: THREE.AddEquation,
     blendSrc: THREE.OneFactor,
     blendDst: THREE.OneMinusSrcAlphaFactor,

@@ -6,7 +6,7 @@ import * as THREE from "three";
 
 import OrbitStage from "./OrbitStage";
 import { aimAndMeasure, applyDepthOfField, createScratch, createSplatRuntime } from "./SplatVideoScene";
-import { createDepthMaterial, createLayerMaterial, createPointsGeometry, createPointsMaterial } from "./hybridMaterial";
+import { createLayerMaterial, createSurfelGeometry, createSurfelMaterial } from "./hybridMaterial";
 import { createRgbdGeometry } from "./rgbdMaterial";
 import { createResolvePass } from "./splatMaterial";
 import { HYBRID, RENDER, TEXTURE_WIDTH, clamp, lowPassFor, momentPlan } from "./splatVideoParams";
@@ -68,38 +68,39 @@ function createRuntime(clip, isMobile) {
     surface.add(mesh);
   });
   subject.add(surface);
-  const depthMaterial = createDepthMaterial(clock.texture, clip.meta, grid);
-  const depthMesh = new THREE.Mesh(geometry, depthMaterial);
-  depthMesh.frustumCulled = false;
-  depthMesh.visible = false;
-  depthMesh.layers.set(HYBRID.subjectLayer);
-  subject.add(depthMesh);
-  const pointsGeometry = createPointsGeometry(geometry.getAttribute("aGrid"));
-  const pointsMaterial = createPointsMaterial(clock.texture, clip.meta, grid);
-  const points = new THREE.Points(pointsGeometry, pointsMaterial);
-  points.frustumCulled = false;
-  points.visible = false;
-  points.layers.set(HYBRID.subjectLayer);
-  subject.add(points);
+  const surfelColumns = isMobile ? columns : clip.meta.layout.color[2];
+  const surfelRows = isMobile ? rows : clip.meta.layout.color[3];
+  const surfelGeometry = createSurfelGeometry(surfelColumns, surfelRows);
+  const surfelMaterials = [true, false].map((core) =>
+    createSurfelMaterial(clock.texture, clip.meta, { core, columns: surfelColumns, rows: surfelRows }),
+  );
+  const surfels = new THREE.Group();
+  surfels.visible = false;
+  surfelMaterials.forEach((material, order) => {
+    const mesh = new THREE.Mesh(surfelGeometry, material);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = order;
+    mesh.layers.set(HYBRID.subjectLayer);
+    surfels.add(mesh);
+  });
+  subject.add(surfels);
 
   return {
     backdrop,
     splats,
     subject,
     clock,
-    show(look, viewportHeight, fovDeg) {
+    show(look, viewport) {
       const splats = look === "splats";
       surface.visible = !splats;
-      depthMesh.visible = splats;
-      points.visible = splats;
-      if (splats) pointsMaterial.uniforms.uPixelsPerUnit.value = viewportHeight / (2 * Math.tan((fovDeg * Math.PI) / 360));
+      surfels.visible = splats;
+      if (splats) surfelMaterials.forEach((material) => material.uniforms.uViewport.value.copy(viewport));
     },
     dispose() {
       clock.dispose();
       materials.forEach((material) => material.dispose());
-      depthMaterial.dispose();
-      pointsMaterial.dispose();
-      pointsGeometry.dispose();
+      surfelMaterials.forEach((material) => material.dispose());
+      surfelGeometry.dispose();
       geometry.dispose();
       splats.dispose();
     },
@@ -179,7 +180,7 @@ function HybridField({ clip, engineRef, isMobile }) {
 
     const backdrop = runtime.backdrop.meta;
     const zRow = aimAndMeasure(state, engine, clip.meta, delta, scratch, group);
-    runtime.show(engine.look, scratch.viewport.y, state.camera.fov);
+    runtime.show(engine.look, scratch.viewport);
     const { uniforms } = runtime.splats.material;
     uniforms.uViewport.value.copy(scratch.viewport);
     uniforms.uLowPass.value = lowPassFor(backdrop, scratch.viewport.y);
