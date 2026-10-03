@@ -221,7 +221,7 @@ def main():
         subprocess.run(
             ["ffmpeg", "-v", "error", "-y", "-i", silent, "-ss", f"{source['start']:.4f}", "-t", f"{count / args.fps:.4f}",
              "-i", args.video, "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-             "-shortest", "-movflags", "+faststart", final],
+             "-movflags", "+faststart", final],
             check=True,
         )
         os.remove(silent)

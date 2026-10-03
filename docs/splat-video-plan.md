@@ -200,8 +200,93 @@ Checkpoint tag: `splat-video-checkpoint-1` (before this round).
 - **Three-tier still clips.** One background, the subject's still splats per 1 s window as chunk-shared rows, and only moving splats per moment. herb-30s went from 464 MB to 106 MB (3.5 MB/s, 181 moments) and plays without buffering.
 - **Report:** https://claude.ai/artifact/9GhUwdbD7DBowTd3A7UCBF (private; it has the experiment ledger and figures).
 
+### Round 6 (2026-10-03): hybrid, the 4DV.ai pass
+
+Herb's verdict on round 5: the splat background is the magic, but the splat subject blurs, ghosts ("phasing in and out of my old frame self") and grows speckled halos. He wants the subject crisp at native frame rate with no in-betweening, and asked how close one video can get to 4DV.ai.
+
+**What 4DV.ai is** (research workflow, 5 areas plus a critic):
+- FreeTimeGS-style Gaussians: each one has a time centre, a velocity and a temporal opacity.
+- Captured with 18-70 synchronised cameras.
+- Played back by a stock WebGL2 PlayCanvas viewer at about 12.5 MB/s.
+
+Their cleanliness comes from the capture, not the renderer. From one webcam, the reachable version is a pixel-sharp subject near the lens over a splat room.
+
+**The hybrid clip kind** (`kind: "hybrid"`, version 3):
+- **Background:** the MoVieS window splats with every splat under the subject removed (per-window matte union), re-coloured from the clean plate. Gaps are filled by:
+  - plate splats wherever rendered coverage falls under 0.5;
+  - an 8% margin past the frame edges;
+  - a low-resolution backstop layer 4% behind everything, so parallax never shows page colour.
+- **Subject:** the original video, one decoded frame per source frame at 29.97 fps. There are no moments, no crossfade and no glide. It is packed in one H.264 atlas:
+  - colour at 1598x1080;
+  - depth and alpha bands at 777x525;
+  - the clip's audio muxed in.
+- **Player:** draws the subject as a depth-displaced mesh in two passes, an opaque core and then a premultiplied rim. It also has:
+  - a splat look that draws the same texels as soft points;
+  - a per-frame background gain, so the room follows Photo Booth's auto-exposure (0.925-1.048);
+  - a 1.08x view zoom and feathered frame borders.
+
+**Matte.** The default is Apple Vision subject lifting (`--matte vision`, via `vision_matte.swift`). It runs at about 15 ms a frame, holds steady, and keeps the guitar as part of the subject. BiRefNet-matting at 1024 px draws finer hair. The combined matte uses Vision as the shape (core eroded 6 px, cleared 12 px outside) with BiRefNet in the band between.
+
+The combined matte flickered twice as much once encoded, so Vision won. After the matte comes:
+- detached islands dropped;
+- a median of three frames;
+- a guided filter against the full-resolution frame;
+- a motion-gated hold that freezes alpha where the video is still.
+
+| Matte, on 30-34 s | Encoded edge flicker | LPIPS |
+|---|---|---|
+| Vision | 0.018 | 0.055 |
+| Combined | 0.040 | 0.058 |
+
+**Edge colour.** The camera is still and the plate is known, so edge pixels are unmixed exactly: F = (I - (1 - a) B) / a. Light from the window no longer rings the hair.
+
+**Depth.** The MoVieS window depth is used:
+- anchored to the first frame;
+- passed through a temporal median of 5 frames;
+- guided-upsampled;
+- filled outward from a core eroded 3 px, so edge vertices never sit between subject and wall;
+- given a motion-gated hold. That brings jitter on static subject pixels from 1.65 to 0.85 levels per frame.
+
+**Plate behind the subject.** It is filled row by row from the room on either side, so window bars and the couch continue. Push-pull and Telea fills both left a visible silhouette.
+
+**Scores** (`tools/splat4d/hybrid_eval.py`, 16 frames of herb-hybrid at 800 px, at the lens against the source):
+
+| | herb-30s splat stream | herb-hybrid (Vision) | herb-hybrid (combined) |
+|---|---|---|---|
+| PSNR | 26.05 | 31.20 | 32.01 |
+| SSIM | 0.892 | 0.943 | 0.952 |
+| LPIPS | 0.100 | 0.067 | 0.064 |
+| PSNR on the subject (matte dilated 8 px) | 24.88 | 32.20 | 33.34 |
+| Static-edge flicker | n/a | 0.017 | 0.035 |
+| Depth jitter, levels per frame | n/a | 0.83 | 0.85 |
+| MB/s | 3.5 | 1.0 | 1.0 |
+
+The combined matte wins single frames, but it flickers twice as much, which is exactly the "phasing" Herb objected to.
+
+Off-axis there is no ground truth. The leash is +-12 degrees of yaw. Checking it in the real player showed a sharp subject and a room that parallaxes correctly. Two artifacts turned up and are now fixed: matte fragments of window glare that floated at the subject's depth, and background cracks showing page colour. A code review with adversarial verification confirmed 12 more defects, all fixed:
+- `-shortest` dropped the last 4 frames in the mux;
+- odd crop widths sheared frames;
+- Splat look points had no depth test;
+- the rim drew twice;
+- a stale seek fired on scrub release;
+- the plate kept an exposure bias;
+- unmeasured frames got gain 1.0;
+- the long-side FOV and rotation were wrong for portrait clips;
+- the cache settings were never checked;
+- plus three smaller ones.
+
+**Rebuild:**
+
+```bash
+tools/splat4d/hybrid.sh --video ~/dev/splat-clips/herb-photobooth.mov --start 30 --end 60 --hfov 70 --depth-cache ~/dev/MoVieS/out/herb-depth-30s/depth_outputs.npz --windows ~/dev/MoVieS/out/herb-30s --out public/splats/4d/herb-hybrid
+```
+
+The two inputs come from earlier steps: `--depth-cache` from `depthvideo.sh`, and `--windows` from `longclip.sh --still`. Vision masks take about 4 minutes and are then cached; the rest of the export takes about 6 minutes. `hybrid.py` refuses caches whose start, end, fps, window length or source clip don't match the run.
+
+**Blocked:** a LaMa download (a torchscript file from a third-party GitHub release) was refused by the permission check. A generative fill for the plate behind the subject needs Herb's go-ahead.
+
 Still open after round 5:
-- **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. The fix is to keep each splat's identity: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).
+- **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. Round 6 sidesteps this with the hybrid clip kind. The identity-preserving fix is still possible: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).
 - Long clips with a moving camera still use the PnP camera chain, not VGGT.
 - The crossfade has not been checked on a phone.
 

@@ -1,6 +1,6 @@
 {
   "title": "Splat video",
-  "description": "A phone clip rebuilt as moving Gaussian splats that play like the video, with sound. Moments crossfade and glide, the camera rides the original path, and dragging leans you off it while depth of field softens what the footage never saw.",
+  "description": "A phone clip you can step into: the room is Gaussian splats, and the person is the original video, frame for frame at 30 fps, cut out with a soft matte and given depth. Drag to lean off the lens; sound, scrub and a splat look for the subject.",
   "tags": [
     "WebGL",
     "Player",
@@ -13,7 +13,7 @@
   "parentSlug": null,
   "parents": null,
   "tasteVersion": 1,
-  "intent": "Puts Herb himself on the page as a video you can step into: 30 s streamed splats with audio as the clock, a still background stored once, and a real player interface (play, scrub, speed, sound, back to lens) on the light palette.",
+  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video, on a real player interface (play, scrub, speed, sound, look, back to lens) on the light palette.",
   "source": {
     "kind": "manual"
   },

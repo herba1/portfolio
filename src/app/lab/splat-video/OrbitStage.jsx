@@ -4,7 +4,7 @@ import * as THREE from "three";
 import { Canvas } from "@react-three/fiber";
 import { useEffect, useRef, useSyncExternalStore } from "react";
 
-import { ORBIT, PARALLAX, RENDER, clamp } from "./splatVideoParams";
+import { ORBIT, PARALLAX, RENDER, clamp, viewFov } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
 
@@ -58,8 +58,9 @@ const followScratch = {
 };
 
 export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
-  if (camera.fov !== meta.camera.vfovDeg || camera.near !== RENDER.near || camera.far !== RENDER.far) {
-    camera.fov = meta.camera.vfovDeg;
+  const fov = viewFov(meta);
+  if (camera.fov !== fov || camera.near !== RENDER.near || camera.far !== RENDER.far) {
+    camera.fov = fov;
     camera.near = RENDER.near;
     camera.far = RENDER.far;
     camera.updateProjectionMatrix();
@@ -187,7 +188,7 @@ export default function OrbitStage({ meta, engineRef, isMobile, children }) {
       <Canvas
         frameloop={hidden ? "never" : "always"}
         dpr={[1, isMobile ? RENDER.mobileDpr : RENDER.desktopDpr]}
-        camera={{ fov: meta.camera.vfovDeg, near: RENDER.near, far: RENDER.far, position: [0, 0, 0] }}
+        camera={{ fov: viewFov(meta), near: RENDER.near, far: RENDER.far, position: [0, 0, 0] }}
         gl={{ antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" }}
         flat
         linear

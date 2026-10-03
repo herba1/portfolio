@@ -69,7 +69,28 @@ export const RGBD = {
   syncToleranceFrames: 0.5,
 };
 
+export const HYBRID = {
+  subjectLayer: 1,
+  tearRelative: 0.08,
+  tearMinLevels: 4,
+  alphaLow: 0.08,
+  alphaHigh: 0.92,
+  alphaCutoff: 0.01,
+  coreAlpha: 0.98,
+  borderFeather: 0.015,
+  viewZoom: 1.08,
+  pointScale: 3.2,
+  depthOffset: 8,
+};
+
+export const LOOKS = ["video", "splats"];
+
+export function viewFov(meta) {
+  return meta.camera.viewFovDeg ?? meta.camera.vfovDeg;
+}
+
 export const KIND_LABELS = {
+  hybrid: "Hybrid",
   rgbd: "Depth video",
   flipbook: "Flipbook",
   stream: "Stream",
@@ -137,6 +158,7 @@ export function createEngine() {
     time: 0,
     direction: 1,
     playing: false,
+    look: LOOKS[0],
     speed: DEFAULT_SPEED,
     scrubbing: false,
     reducedMotion: false,
@@ -193,12 +215,16 @@ export function isStream(meta) {
   return meta.kind === "stream";
 }
 
+export function isHybrid(meta) {
+  return meta.kind === "hybrid";
+}
+
 export function steppedByFps(meta) {
-  return isFlipbook(meta) || isRgbd(meta) || isStream(meta);
+  return isFlipbook(meta) || isRgbd(meta) || isStream(meta) || isHybrid(meta);
 }
 
 export function clipKind(meta) {
-  if (meta?.version === 3 && meta.kind === "stream") return meta.kind;
+  if (meta?.version === 3 && (meta.kind === "stream" || meta.kind === "hybrid")) return meta.kind;
   if (meta?.version === 2 && (meta.kind === "rgbd" || meta.kind === "flipbook")) return meta.kind;
   if (meta?.version === 1) return "interpolated";
   return null;

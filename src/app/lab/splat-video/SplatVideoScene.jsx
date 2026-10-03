@@ -33,7 +33,7 @@ import {
   sortCapacity,
 } from "./splatVideoParams";
 
-function applyDepthOfField(uniforms, engine, meta) {
+export function applyDepthOfField(uniforms, engine, meta) {
   const { aperture, focusDepth } = depthOfField(engine, meta);
   uniforms.uAperture.value = aperture;
   uniforms.uFocusDepth.value = focusDepth;
@@ -46,7 +46,7 @@ function covers(sent, wanted) {
   return sent.frame0 === wanted.frame0 && sent.frame1 === wanted.frame1 && Math.abs(sent.blend - wanted.blend) <= SORT.blendEpsilon;
 }
 
-function createRuntime(clip) {
+export function createSplatRuntime(clip) {
   const { meta, layout } = clip;
   const textures = createSplatTextures(clip);
   const material = createSplatMaterial(textures, meta);
@@ -136,7 +136,7 @@ function createRuntime(clip) {
   };
 }
 
-function createScratch(meta) {
+export function createScratch(meta) {
   return {
     pivot: new THREE.Vector3(0, 0, -meta.camera.pivotDepth),
     modelView: new THREE.Matrix4(),
@@ -157,7 +157,7 @@ function useResolvedRender(resolveRef, scratchRef) {
   }, 1);
 }
 
-function aimAndMeasure(state, engine, meta, delta, scratch, group) {
+export function aimAndMeasure(state, engine, meta, delta, scratch, group) {
   const camera = state.camera;
   const base = hasLensPath(meta) ? lensMatrix(meta, engine.time, scratch.lens) : null;
   aimCamera(camera, engine, meta, delta, scratch.pivot, base);
@@ -176,7 +176,7 @@ function SplatField({ clip, engineRef }) {
 
   useEffect(() => {
     const group = groupRef.current;
-    const runtime = createRuntime(clip);
+    const runtime = createSplatRuntime(clip);
     const resolve = createResolvePass();
     group.add(runtime.mesh);
     runtimeRef.current = runtime;

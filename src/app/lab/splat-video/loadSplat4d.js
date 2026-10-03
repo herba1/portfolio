@@ -1,4 +1,4 @@
-import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, HYBRID, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -187,12 +187,60 @@ function validateStream(meta, fail) {
   };
 }
 
+function isRect(rect, width, height) {
+  return (
+    Array.isArray(rect) &&
+    rect.length === 4 &&
+    rect.every(isCount) &&
+    rect[2] > 0 &&
+    rect[3] > 0 &&
+    rect[0] + rect[2] <= width &&
+    rect[1] + rect[3] <= height
+  );
+}
+
+function validateHybrid(meta, fail) {
+  if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
+  if (!(meta.fps > 0)) fail("has no fps.");
+  if (!(meta.duration > 0)) fail("has no duration.");
+  if (!(meta.camera?.vfovDeg > 0 && meta.camera.vfovDeg < 170)) fail("has no camera.vfovDeg.");
+  const near = meta.disparity?.max;
+  const far = meta.disparity?.min;
+  if (!Number.isFinite(near) || !Number.isFinite(far) || far < 0 || near <= far) fail("has an invalid disparity range.");
+  const video = optionalAsset(meta.video, fail, "video");
+  if (!video) fail("names no video.");
+  const layout = meta.layout ?? {};
+  if (!isPositiveInteger(layout.width) || !isPositiveInteger(layout.height)) fail("has no layout size.");
+  for (const band of ["color", "depth", "alpha"]) {
+    if (!isRect(layout[band], layout.width, layout.height)) fail(`has an invalid ${band} band.`);
+  }
+  const background = validateSplatSet(meta.background ?? { count: 0 }, fail, "background");
+  const gains = meta.backgroundGain;
+  if (gains !== undefined && (!Array.isArray(gains) || !gains.every((gain) => isVector(gain) && gain.every((v) => v > 0)))) {
+    fail("has an invalid backgroundGain.");
+  }
+  return {
+    ...meta,
+    video,
+    layout,
+    background,
+    disparity: { min: far, max: near },
+    camera: {
+      vfovDeg: meta.camera.vfovDeg,
+      viewFovDeg: (2 * Math.atan(Math.tan((meta.camera.vfovDeg * Math.PI) / 360) / HYBRID.viewZoom) * 180) / Math.PI,
+      aspect: meta.camera.aspect > 0 ? meta.camera.aspect : layout.color[2] / layout.color[3],
+      pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : 2 / (far + near),
+    },
+  };
+}
+
 function validateMeta(meta, clip) {
   const fail = (why) => {
     throw new Splat4dError(`meta.json for “${clip}” ${why}`, { clip });
   };
   if (!meta || meta.format !== "splat4d") fail("is not a splat4d export.");
   if (meta.version === 3) {
+    if (meta.kind === "hybrid") return validateHybrid(meta, fail);
     if (meta.kind !== "stream") fail(`has an unknown kind “${meta.kind}”.`);
     return validateStream(meta, fail);
   }
@@ -308,6 +356,7 @@ export async function loadSplat4d(clip, { signal, onProgress } = {}) {
   const meta = validateMeta(raw, clip);
   if (meta.kind === "stream") return loadStream(clip, folder, meta, { signal, onProgress });
   if (meta.kind === "rgbd") return loadRgbd(clip, folder, meta, { signal, onProgress });
+  if (meta.kind === "hybrid") return loadHybrid(clip, folder, meta, { signal, onProgress });
   if (meta.kind === "flipbook") return loadFlipbook(clip, folder, meta, { signal, onProgress });
 
   const baseRows = rowsFor(meta.count);
@@ -549,5 +598,48 @@ async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
     bytes: video.size,
     video,
     plateUrl: meta.plate ? `${folder}/${meta.plate}${version}` : null,
+  };
+}
+
+async function loadHybrid(clip, folder, meta, { signal, onProgress }) {
+  const version = versionQuery(meta);
+  const splatBytes = meta.background.count * 24;
+  let splatsLoaded = 0;
+  let videoLoaded = 0;
+  let videoTotal = 0;
+  const report = () => {
+    if (onProgress) onProgress(splatsLoaded + videoLoaded, splatBytes + videoTotal);
+  };
+  const [background, video] = await Promise.all([
+    fetchSplatSet({
+      folder,
+      version,
+      clip,
+      set: meta.background,
+      signal,
+      onChunk: (bytes) => {
+        splatsLoaded += bytes;
+        report();
+      },
+    }),
+    streamBlob({
+      url: `${folder}/${meta.video}${version}`,
+      name: meta.video,
+      clip,
+      type: "video/mp4",
+      signal,
+      onProgress: (received, total) => {
+        videoLoaded = received;
+        videoTotal = total;
+        report();
+      },
+    }),
+  ]);
+  return {
+    clip,
+    meta,
+    bytes: splatBytes + video.size,
+    background,
+    video,
   };
 }

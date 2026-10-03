@@ -18,6 +18,8 @@ import {
   formatBytes,
   formatCount,
   formatDuration,
+  LOOKS,
+  isHybrid,
   isRgbd,
   isStream,
   resetOrbit,
@@ -54,6 +56,7 @@ function loadingLine(load) {
 }
 
 function loadScene(meta) {
+  if (isHybrid(meta)) return () => import("./HybridScene");
   return isRgbd(meta) ? () => import("./RgbdScene") : () => import("./SplatVideoScene");
 }
 
@@ -63,6 +66,7 @@ function summaryFor(load) {
   const { meta, bytes } = load.data;
   const size = formatBytes(bytes);
   if (isRgbd(meta)) return `${load.clip} · depth video · ${meta.frames} frames · ${size}`;
+  if (isHybrid(meta)) return `${load.clip} · ${formatCount(meta.background.count)} background splats · ${meta.frames} frames · ${size}`;
   if (isStream(meta)) return `${load.clip} · ${formatDuration(meta.duration)} · ${meta.frames} moments · streaming`;
   return `${load.clip} · ${formatCount(meta.count)} splats · ${meta.frames} frames · ${size}`;
 }
@@ -161,6 +165,7 @@ export default function SplatVideoExperience() {
   const [load, setLoad] = useState({ status: "loading", clip: null, received: 0, total: 0 });
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(true);
+  const [look, setLook] = useState(LOOKS[0]);
   const [scrubbing, setScrubbing] = useState(false);
   const [speed, setSpeed] = useState(DEFAULT_SPEED);
   const [expanded, setExpanded] = useState(false);
@@ -231,6 +236,10 @@ export default function SplatVideoExperience() {
   }, [muted]);
 
   useEffect(() => {
+    engineRef.current.look = look;
+  }, [look]);
+
+  useEffect(() => {
     engineRef.current.reducedMotion = reducedMotion;
   }, [reducedMotion]);
 
@@ -268,6 +277,7 @@ export default function SplatVideoExperience() {
     setMuted(engine.muted);
   }, []);
   const handlePause = useCallback(() => setPlaying(false), []);
+  const handleToggleLook = useCallback(() => setLook((current) => LOOKS[(LOOKS.indexOf(current) + 1) % LOOKS.length]), []);
   const handleBackToLens = useCallback(() => resetOrbit(engineRef.current), []);
   const handleScrubStart = useCallback(() => {
     engineRef.current.scrubbing = true;
@@ -338,9 +348,11 @@ export default function SplatVideoExperience() {
           scrubbing={scrubbing}
           speed={speed}
           expanded={expanded}
-          sound={(streaming || isRgbd(meta)) && Boolean(meta.audio)}
+          sound={(streaming || isRgbd(meta) || isHybrid(meta)) && Boolean(meta.audio)}
           muted={muted}
           onToggleMuted={handleToggleMuted}
+          look={isHybrid(meta) ? look : null}
+          onToggleLook={handleToggleLook}
           onTogglePlay={togglePlaying}
           onPause={handlePause}
           onSpeed={setSpeed}

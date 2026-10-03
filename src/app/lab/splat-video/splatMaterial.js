@@ -460,6 +460,7 @@ precision highp float;
 uniform sampler2D uSplats;
 uniform float uFloor;
 uniform float uSolid;
+uniform vec3 uGain;
 
 in vec2 vUv;
 
@@ -469,7 +470,7 @@ void main() {
   vec4 accumulated = texture(uSplats, vUv);
   float coverage = accumulated.a;
   if (coverage < uFloor) discard;
-  vec3 color = accumulated.rgb / coverage;
+  vec3 color = accumulated.rgb / coverage * uGain;
   float alpha = smoothstep(uFloor, uSolid, coverage);
   fragColor = vec4(color * alpha, alpha);
 }
@@ -492,6 +493,7 @@ export function createResolvePass() {
       uSplats: { value: target.texture },
       uFloor: { value: RENDER.coverageFloor },
       uSolid: { value: RENDER.coverageSolid },
+      uGain: { value: new THREE.Vector3(1, 1, 1) },
     },
     transparent: true,
     depthTest: false,
@@ -510,6 +512,7 @@ export function createResolvePass() {
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   return {
     target,
+    uniforms: material.uniforms,
     render(gl, splatScene, splatCamera, width, height) {
       if (target.width !== width || target.height !== height) target.setSize(width, height);
       const previousTarget = gl.getRenderTarget();

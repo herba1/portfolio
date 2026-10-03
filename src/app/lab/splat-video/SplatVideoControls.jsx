@@ -1,6 +1,6 @@
 "use client";
 
-import { Aperture, SlidersHorizontal, Volume2, VolumeX } from "lucide-react";
+import { Aperture, Film, SlidersHorizontal, Sparkles, Volume2, VolumeX } from "lucide-react";
 import { useEffect, useRef } from "react";
 
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
@@ -21,6 +21,8 @@ export default function SplatVideoControls({
   sound = false,
   muted = true,
   onToggleMuted,
+  look = null,
+  onToggleLook,
   onTogglePlay,
   onPause,
   onSpeed,
@@ -176,6 +178,17 @@ export default function SplatVideoControls({
             </button>
           ))}
         </div>
+
+        {look ? (
+          <button type="button" className="splat-video-controls__lens text-ui" onClick={onToggleLook}>
+            {look === "splats" ? (
+              <Film size={16} strokeWidth={1.75} aria-hidden="true" />
+            ) : (
+              <Sparkles size={16} strokeWidth={1.75} aria-hidden="true" />
+            )}
+            {look === "splats" ? "Video look" : "Splat look"}
+          </button>
+        ) : null}
 
         <button type="button" className="splat-video-controls__lens text-ui" onClick={onBackToLens}>
           <Aperture size={16} strokeWidth={1.75} aria-hidden="true" />
