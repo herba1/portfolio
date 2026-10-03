@@ -603,43 +603,25 @@ async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
 
 async function loadHybrid(clip, folder, meta, { signal, onProgress }) {
   const version = versionQuery(meta);
-  const splatBytes = meta.background.count * 24;
-  let splatsLoaded = 0;
-  let videoLoaded = 0;
-  let videoTotal = 0;
-  const report = () => {
-    if (onProgress) onProgress(splatsLoaded + videoLoaded, splatBytes + videoTotal);
-  };
-  const [background, video] = await Promise.all([
-    fetchSplatSet({
-      folder,
-      version,
-      clip,
-      set: meta.background,
-      signal,
-      onChunk: (bytes) => {
-        splatsLoaded += bytes;
-        report();
-      },
-    }),
-    streamBlob({
-      url: `${folder}/${meta.video}${version}`,
-      name: meta.video,
-      clip,
-      type: "video/mp4",
-      signal,
-      onProgress: (received, total) => {
-        videoLoaded = received;
-        videoTotal = total;
-        report();
-      },
-    }),
-  ]);
+  const total = meta.background.count * 24;
+  let loaded = 0;
+  if (onProgress) onProgress(0, total);
+  const background = await fetchSplatSet({
+    folder,
+    version,
+    clip,
+    set: meta.background,
+    signal,
+    onChunk: (bytes) => {
+      loaded += bytes;
+      if (onProgress) onProgress(loaded, total);
+    },
+  });
   return {
     clip,
     meta,
-    bytes: splatBytes + video.size,
+    bytes: total,
     background,
-    video,
+    video: `${folder}/${meta.video}${version}`,
   };
 }

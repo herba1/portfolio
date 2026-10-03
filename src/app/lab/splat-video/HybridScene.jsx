@@ -155,6 +155,7 @@ function HybridField({ clip, engineRef, isMobile }) {
     scratchRef.current = createScratch(clip.meta);
     return () => {
       if (engine.sound === sound) engine.sound = null;
+      engine.buffering = false;
       group.remove(runtime.splats.mesh);
       group.remove(runtime.subject);
       runtime.dispose();
@@ -172,6 +173,8 @@ function HybridField({ clip, engineRef, isMobile }) {
     if (!runtime || !scratch || !group || !engine) return;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.clock.sync(engine, performance.now());
+    const { video } = runtime.clock;
+    engine.buffering = engine.playing && !engine.scrubbing && video.readyState < video.HAVE_FUTURE_DATA;
     applyGain(resolveRef.current, clip.meta, engine.time);
 
     const backdrop = runtime.backdrop.meta;

@@ -6,7 +6,7 @@ import { RGBD, clamp } from "./splatVideoParams";
 const PLAY_RETRY_MS = 1000;
 const SEEK_SETTLED = 1e-3;
 
-function createVideo(objectUrl) {
+function createVideo(source) {
   const video = document.createElement("video");
   video.muted = true;
   video.defaultMuted = true;
@@ -16,14 +16,14 @@ function createVideo(objectUrl) {
   video.preload = "auto";
   video.setAttribute("muted", "");
   video.setAttribute("playsinline", "");
-  video.src = objectUrl;
+  video.src = source;
   video.load();
   return video;
 }
 
-export function createVideoClock(blob, meta, { onMetadata, onReady } = {}) {
-  const objectUrl = URL.createObjectURL(blob);
-  const video = createVideo(objectUrl);
+export function createVideoClock(source, meta, { onMetadata, onReady } = {}) {
+  const objectUrl = typeof source === "string" ? null : URL.createObjectURL(source);
+  const video = createVideo(objectUrl ?? source);
   const texture = prepareStackedTexture(new THREE.VideoTexture(video));
 
   const refreshFrame = () => {
@@ -104,7 +104,7 @@ export function createVideoClock(blob, meta, { onMetadata, onReady } = {}) {
       video.pause();
       video.removeAttribute("src");
       video.load();
-      URL.revokeObjectURL(objectUrl);
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
       texture.dispose();
     },
   };

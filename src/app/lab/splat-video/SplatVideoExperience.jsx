@@ -66,7 +66,7 @@ function summaryFor(load) {
   const { meta, bytes } = load.data;
   const size = formatBytes(bytes);
   if (isRgbd(meta)) return `${load.clip} · depth video · ${meta.frames} frames · ${size}`;
-  if (isHybrid(meta)) return `${load.clip} · ${formatCount(meta.background.count)} background splats · ${meta.frames} frames · ${size}`;
+  if (isHybrid(meta)) return `${load.clip} · ${formatCount(meta.background.count)} background splats · ${meta.frames} frames · video streaming`;
   if (isStream(meta)) return `${load.clip} · ${formatDuration(meta.duration)} · ${meta.frames} moments · streaming`;
   return `${load.clip} · ${formatCount(meta.count)} splats · ${meta.frames} frames · ${size}`;
 }
@@ -337,7 +337,7 @@ export default function SplatVideoExperience() {
         ) : (
           <StageLoading load={load} />
         )}
-        {streaming ? <StageBuffering key={`${load.clip}-buffering`} engineRef={engineRef} /> : null}
+        {streaming || (ready && isHybrid(meta)) ? <StageBuffering key={`${load.clip}-buffering`} engineRef={engineRef} /> : null}
       </section>
 
       {ready ? (
