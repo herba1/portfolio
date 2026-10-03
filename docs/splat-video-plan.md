@@ -284,6 +284,29 @@ tools/splat4d/hybrid.sh --video ~/dev/splat-clips/herb-photobooth.mov --start 30
 
 The two inputs come from earlier steps: `--depth-cache` from `depthvideo.sh`, and `--windows` from `longclip.sh --still`. Vision masks take about 4 minutes and are then cached; the rest of the export takes about 6 minutes. `hybrid.py` refuses caches whose start, end, fps, window length or source clip don't match the run.
 
+**Second clip, no tuning:**
+- **Clip:** `kristen-hybrid`, Xiph's public-domain Kristen and Sara: two people, 1280x720 at 60 fps, 9 s.
+- **Speed:** the hybrid built in 93 s once its caches existed.
+- **Scores against its own splat stream at the lens:**
+  - LPIPS 0.081 against 0.124;
+  - PSNR 25.4 against 23.7 dB;
+  - 27.9 against 23.9 dB on the people.
+- **Clean:** edge flicker is 0.023, and the odd 1269 px crop decodes without shearing now.
+- **Weak spots:**
+  - depth jitter is 1.24 levels per frame, with two moving heads at 60 fps;
+  - the poster's small print stays soft, because splats come from 518 px input;
+  - a faint blue fringe shows where the matte cuts hair against the blue wall.
+
+```bash
+tools/splat4d/depthvideo.sh --video ~/dev/splat-clips/kristen.webm --start 0 --end 10 --hfov 60 --out public/splats/4d/kristen-depth
+tools/splat4d/longclip.sh --video ~/dev/splat-clips/kristen.webm --start 0 --end 10 --still --window-seconds 1 --hfov 60 --subject-voxel 2 --out public/splats/4d/kristen-stream
+tools/splat4d/hybrid.sh --video ~/dev/splat-clips/kristen.webm --start 0 --end 9 --hfov 60 --depth-cache ~/dev/MoVieS/out/kristen-depth/depth_outputs.npz --windows ~/dev/MoVieS/out/kristen-stream --out public/splats/4d/kristen-hybrid
+```
+
+`longclip --still` only writes whole windows, so a 10 s request covers 9 s. hybrid.py's cache check refused `--end 10` for that reason.
+
+**Streaming:** the player loads the 4.5 MB room, then streams `layer.mp4` through the video element with range requests. It is ready in about 0.3 s locally, and shows the buffering pill if the video stalls.
+
 **Blocked:** a LaMa download (a torchscript file from a third-party GitHub release) was refused by the permission check. A generative fill for the plate behind the subject needs Herb's go-ahead.
 
 Still open after round 5:
