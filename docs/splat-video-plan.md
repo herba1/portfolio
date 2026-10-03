@@ -240,12 +240,13 @@ The combined matte flickered twice as much once encoded, so Vision won. After th
 
 **Edge colour.** The camera is still and the plate is known, so edge pixels are unmixed exactly: F = (I - (1 - a) B) / a. Light from the window no longer rings the hair.
 
-**Depth.** The MoVieS window depth is used:
-- anchored to the first frame;
-- passed through a temporal median of 5 frames;
-- guided-upsampled;
-- filled outward from a core eroded 3 px, so edge vertices never sit between subject and wall;
-- given a motion-gated hold. That brings jitter on static subject pixels from 1.65 to 0.85 levels per frame.
+**Depth.** The subject's depth comes from Depth Anything V2 Small (`--subject-depth dav2`; Apache-2.0, from Hugging Face, no remote code), run at 770x518 on MPS in about 40 s for 30 s of video.
+
+That depth is relative and its scale swings frame to frame (fitted gain 0.15-0.27). Each frame is fitted to the MoVieS disparity on the solid subject core with a trimmed least-squares scale and shift, and the fit is median-filtered over 15 frames. Then:
+- the depth is filled outward from a core eroded 3 px, so edge vertices never sit between subject and wall;
+- a motion-gated hold is applied.
+
+On static subject pixels, jitter goes from 0.83 levels per frame with MoVieS depth to 0.69. The guitar, hands, collar and face carry their own relief. `--subject-depth movies` keeps the old path: the anchored MoVieS window depth, a temporal median of 5 frames, guided upsampling.
 
 **Plate behind the subject.** It is filled row by row from the room on either side, so window bars and the couch continue. Push-pull and Telea fills both left a visible silhouette.
 
@@ -258,8 +259,8 @@ The combined matte flickered twice as much once encoded, so Vision won. After th
 | LPIPS | 0.100 | 0.067 | 0.064 |
 | PSNR on the subject (matte dilated 8 px) | 24.88 | 32.20 | 33.34 |
 | Static-edge flicker | n/a | 0.017 | 0.035 |
-| Depth jitter, levels per frame | n/a | 0.83 | 0.85 |
-| MB/s | 3.5 | 1.0 | 1.0 |
+| Depth jitter, levels per frame | n/a | 0.69 (Depth Anything V2) | 0.85 (MoVieS depth) |
+| MB/s | 3.5 | 0.98 | 1.0 |
 
 The combined matte wins single frames, but it flickers twice as much, which is exactly the "phasing" Herb objected to.
 

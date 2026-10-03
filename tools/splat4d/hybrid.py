@@ -28,6 +28,9 @@ MACROBLOCK = 16
 SUBJECT_LEVEL = 0.5
 PLATE_CLEAR = 0.05
 PART_KEYS = ("xyz", "cov", "color", "opacity")
+DEPTH_MODELS = {"dav2": "depth-anything/Depth-Anything-V2-Small-hf"}
+IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], dtype=np.float32)
+IMAGENET_STD = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
 
 def parse_args():
@@ -64,6 +67,8 @@ def parse_args():
     parser.add_argument("--island-reach", type=int, default=6)
     parser.add_argument("--backstop-step", type=int, default=2)
     parser.add_argument("--backstop-push", type=float, default=1.04)
+    parser.add_argument("--subject-depth", choices=["movies", *DEPTH_MODELS], default="dav2")
+    parser.add_argument("--alignment-window", type=int, default=15)
     parser.add_argument("--static-voxel", type=float, default=1.5)
     parser.add_argument("--depth-voxel", type=float, default=0.1)
     parser.add_argument("--ray-clamp", type=float, default=2.0)
@@ -296,6 +301,70 @@ def drop_islands(frame, keep_fraction, grow):
     areas = stats[1:, cv2.CC_STAT_AREA]
     region = np.isin(labels, np.flatnonzero(areas >= keep_fraction * areas.max()) + 1)
     return np.where(region, frame, 0).astype(frame.dtype)
+
+
+def relative_depths(args, cache_path, count, box, rate, band_size):
+    settings = repr([args.video, args.start, args.end, rate, band_size, args.subject_depth])
+    if not args.fresh and os.path.exists(cache_path):
+        data = np.load(cache_path)
+        if str(data["settings"]) == settings:
+            log(f"reusing subject depth from {cache_path}")
+            return data["disparity"]
+    import torch
+    from transformers import AutoModelForDepthEstimation
+
+    model = AutoModelForDepthEstimation.from_pretrained(DEPTH_MODELS[args.subject_depth]).to(args.device).eval()
+    if args.device != "cpu":
+        model = model.half()
+    width = max(14, int(round(band_size[0] / 14)) * 14)
+    height = max(14, int(round(band_size[1] / 14)) * 14)
+    disparity = np.zeros((count, band_size[1], band_size[0]), dtype=np.float16)
+    started = time.time()
+    for j, frame in enumerate(decode(args.video, args.start, count, box, rate, (width, height))):
+        normalized = (frame.astype(np.float32) / 255.0 - IMAGENET_MEAN) / IMAGENET_STD
+        batch = torch.from_numpy(normalized.transpose(2, 0, 1)[None]).to(args.device)
+        if args.device != "cpu":
+            batch = batch.half()
+        with torch.no_grad():
+            predicted = model(pixel_values=batch).predicted_depth[0].float().cpu().numpy()
+        disparity[j] = cv2.resize(predicted, band_size, interpolation=cv2.INTER_LINEAR)
+    np.savez(cache_path, settings=np.array(settings), disparity=disparity)
+    log(f"subject depth from {DEPTH_MODELS[args.subject_depth]} in {time.time() - started:.0f}s")
+    return disparity
+
+
+def fit_relative(relative, reference, solid, trim=2.5):
+    x, y = relative[solid].astype(np.float64), reference[solid].astype(np.float64)
+    if x.size < 200:
+        return None
+    design = np.stack([x, np.ones_like(x)], axis=1)
+    coef = np.linalg.lstsq(design, y, rcond=None)[0]
+    residual = y - design @ coef
+    spread = 1.4826 * np.median(np.abs(residual - np.median(residual)))
+    keep = np.abs(residual) <= trim * max(spread, 1e-9)
+    if keep.sum() >= 200:
+        coef = np.linalg.lstsq(design[keep], y[keep], rcond=None)[0]
+    return coef
+
+
+def relative_alignment(relative, band, depth_of, scale, band_size, window):
+    shrink = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+    count = relative.shape[0]
+    coefficients = np.full((count, 2), np.nan)
+    for j in range(count):
+        solid = cv2.erode((band[j] > 242).astype(np.uint8), shrink) > 0
+        reference = cv2.resize((1.0 / (scale * depth_of(j))).astype(np.float32), band_size, interpolation=cv2.INTER_LINEAR)
+        fitted = fit_relative(relative[j], reference, solid)
+        if fitted is not None:
+            coefficients[j] = fitted
+    measured = ~np.isnan(coefficients[:, 0])
+    if not measured.any():
+        return None
+    index = np.arange(count)
+    coefficients = np.stack([np.interp(index, index[measured], coefficients[measured, c]) for c in range(2)], axis=1)
+    half = window // 2
+    padded = np.concatenate([coefficients[:1].repeat(half, 0), coefficients, coefficients[-1:].repeat(half, 0)])
+    return np.stack([np.median(padded[j:j + window], axis=0) for j in range(count)])
 
 
 def median_of_three(frames):
@@ -580,6 +649,24 @@ def main():
     pivot = float(np.median(1.0 / subject_disparity))
     log(f"subject disparity {low:.3f}..{high:.3f}, pivot depth {pivot:.3f}")
 
+    alignment = None
+    if args.subject_depth != "movies":
+        relative = relative_depths(args, os.path.join(cache_dir, f"{args.subject_depth}.npz"), count, box, rate, band_size)
+        alignment = relative_alignment(relative, band, depth_of, scale, band_size, args.alignment_window)
+        if alignment is None:
+            log("subject depth alignment found no solid subject pixels; keeping the MoVieS depth")
+        else:
+            log(f"subject depth from {args.subject_depth}, fitted to MoVieS per frame: gain {alignment[:, 0].min():.3f}..{alignment[:, 0].max():.3f}")
+            aligned = np.concatenate([
+                (alignment[j, 0] * relative[j].astype(np.float32) + alignment[j, 1])[band[j] > 255 * SUBJECT_LEVEL]
+                for j in range(0, count, max(1, count // 60))
+            ])
+            low, high = np.percentile(aligned, [0.2, 99.8])
+            margin = 0.03 * (high - low)
+            low, high = float(low - margin), float(high + margin)
+            pivot = float(np.median(1.0 / np.clip(aligned, 1e-3, None)))
+            log(f"subject disparity {low:.3f}..{high:.3f} after alignment, pivot depth {pivot:.3f}")
+
     gains = exposure_gains(args, count, box, rate, small, plate, plate_seen, model_size, args.exposure_window)
     brightness = gains.mean(axis=1)
     log(f"background exposure follows the video: gain {brightness.min():.3f}..{brightness.max():.3f}")
@@ -627,8 +714,11 @@ def main():
         frame[cy + ch:dy] = frame[cy + ch - 1]
 
         guide = band_gray / 255.0
-        disparity = (1.0 / (scale * depth_of(j))).astype(np.float32)
-        sharp = guided_upsample(disparity, guide, band_size, args.guide_radius, args.guide_eps)
+        if alignment is None:
+            disparity = (1.0 / (scale * depth_of(j))).astype(np.float32)
+            sharp = guided_upsample(disparity, guide, band_size, args.guide_radius, args.guide_eps)
+        else:
+            sharp = (alignment[j, 0] * relative[j].astype(np.float32) + alignment[j, 1]).astype(np.float32)
         solid = alpha_band > 128
         trusted = cv2.erode(solid.astype(np.uint8), core_shrink) > 0
         sharp = extend_outward(sharp.astype(np.float32), trusted if trusted.any() else solid)
