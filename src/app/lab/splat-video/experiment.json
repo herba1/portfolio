@@ -1,0 +1,21 @@
+{
+  "title": "Splat video",
+  "description": "A phone clip you can step into. The room is Gaussian splats, and the person is splats too: one oriented surfel per video pixel, generated on the GPU from the original video every frame at its own frame rate, so it is as sharp as the footage and leans like 3D. Drag to lean; sound, scrub and a video look.",
+  "tags": [
+    "WebGL",
+    "Player",
+    "Splats",
+    "Audio"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-09-30T03:11:41.568Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video, on a real player interface (play, scrub, speed, sound, look, back to lens) on the light palette.",
+  "source": {
+    "kind": "manual"
+  },
+  "generation": null
+}

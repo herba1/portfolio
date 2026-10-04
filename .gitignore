@@ -64,3 +64,6 @@ public/audio/
 /taste/runs/
 .claude/settings.local.json
 .claude/worktrees/
+
+public/splats/4d/
+__pycache__/
