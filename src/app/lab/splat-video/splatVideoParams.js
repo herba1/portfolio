@@ -29,12 +29,16 @@ export const DEPTH_OF_FIELD = {
   ease: 1.6,
 };
 
-export function leanAmount(engine) {
+export function viewLean(engine) {
   const view = engine.view;
-  if (!view || engine.reducedMotion) return 0;
+  if (!view) return 0;
   const yaw = view.yaw / (ORBIT.yawLimitDeg * (Math.PI / 180));
   const pitch = view.pitch / (ORBIT.pitchLimitDeg * (Math.PI / 180));
   return clamp(Math.hypot(yaw, pitch), 0, 1);
+}
+
+export function leanAmount(engine) {
+  return engine.reducedMotion ? 0 : viewLean(engine);
 }
 
 export function depthOfField(engine, meta) {
@@ -72,7 +76,8 @@ export const RGBD = {
   platePushLevels: 2,
   subjectTearRelative: 0.15,
   subjectBorderFeather: 0.001,
-  layers: { alphaLow: 0.08, alphaHigh: 0.92, coverRadius: 3, coverLow: 0.08, coverHigh: 0.5 },
+  roomGuardRate: 4,
+  layers: { alphaLow: 0.08, alphaHigh: 0.92, coverRadius: 10, coverLow: 0.08, coverHigh: 0.5, shadeRange: 2 },
   seekNudgeFrames: 0.25,
   syncToleranceFrames: 0.5,
 };

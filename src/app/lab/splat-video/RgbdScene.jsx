@@ -14,14 +14,14 @@ import {
   prepareStackedTexture,
   stackedTexel,
 } from "./rgbdMaterial";
-import { RENDER, RGBD, gainAt, leanAmount } from "./splatVideoParams";
+import { RENDER, RGBD, gainAt, viewLean } from "./splatVideoParams";
 import { createVideoClock } from "./videoClock";
 
 function updateRoom(material, meta, engine) {
   if (!material) return;
   const gain = gainAt(meta.plateGain, meta, engine.time);
   if (gain) material.uniforms.uGain.value.set(gain[0], gain[1], gain[2]);
-  material.uniforms.uLean.value = leanAmount(engine);
+  material.uniforms.uLean.value = viewLean(engine);
 }
 
 function createLayeredRuntime(clip, isMobile) {

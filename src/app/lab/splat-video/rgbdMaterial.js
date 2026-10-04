@@ -119,12 +119,16 @@ uniform sampler2D uMap;
 uniform sampler2D uPlate;
 uniform vec4 uColorRect;
 uniform vec4 uAlphaRect;
+uniform vec4 uShadeRect;
 uniform vec2 uColorTexel;
 uniform vec2 uAlphaTexel;
+uniform vec2 uShadeTexel;
 uniform vec2 uPlateTexel;
 uniform vec3 uGain;
+uniform float uShadeRange;
 uniform float uCoverRadius;
 uniform float uLean;
+uniform float uGuardRate;
 uniform vec2 uCoverRamp;
 
 in vec2 vGrid;
@@ -150,11 +154,19 @@ void main() {
   for (int i = 0; i < 8; i++) {
     cover = max(cover, coverAt(vGrid + RING[i] * reach * uAlphaTexel));
     cover = max(cover, coverAt(vGrid + RING[i] * 0.5 * reach * uAlphaTexel));
+    cover = max(cover, coverAt(vGrid + RING[i] * min(reach, 2.0) * uAlphaTexel));
   }
   vec3 live = texture(uMap, uColorRect.xy + inside(vGrid, uColorTexel) * uColorRect.zw).rgb;
   vec2 plateUv = vec2(clamp(vGrid.x, 0.5 * uPlateTexel.x, 1.0 - 0.5 * uPlateTexel.x), clamp(0.5 * vGrid.y, 0.5 * uPlateTexel.y, 0.5 - 0.5 * uPlateTexel.y));
-  vec3 plate = min(texture(uPlate, plateUv).rgb * uGain, vec3(1.0));
-  fragColor = vec4(mix(live, plate, smoothstep(uCoverRamp.x, uCoverRamp.y, cover)), 1.0);
+#ifdef SHADE
+  vec3 gain = texture(uMap, uShadeRect.xy + inside(vGrid, uShadeTexel) * uShadeRect.zw).rgb * uShadeRange;
+#else
+  vec3 gain = uGain;
+#endif
+  vec3 plate = min(texture(uPlate, plateUv).rgb * gain, vec3(1.0));
+  float guard = clamp(uLean * uGuardRate, 0.0, 1.0);
+  float full = mix(uCoverRamp.y, uCoverRamp.x + 0.01, guard);
+  fragColor = vec4(mix(live, plate, smoothstep(uCoverRamp.x, full, cover)), 1.0);
 }
 `;
 
@@ -175,26 +187,32 @@ export function createLayerGrid(layout, isMobile) {
 
 export function createRoomMaterial(texture, plateTexture, meta) {
   const { layout, layers } = meta;
+  const shade = layout.shade ?? layout.alpha;
   const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
   const plateImage = plateTexture.image;
   return new THREE.ShaderMaterial({
     glslVersion: THREE.GLSL3,
     vertexShader: ROOM_VERTEX,
     fragmentShader: ROOM_FRAGMENT,
+    defines: layout.shade ? { SHADE: "" } : {},
     uniforms: {
       uMap: { value: texture },
       uPlate: { value: plateTexture },
       uColorRect: { value: normalizedRect(layout.color, layout.width, layout.height) },
       uAlphaRect: { value: normalizedRect(layout.alpha, layout.width, layout.height) },
+      uShadeRect: { value: normalizedRect(shade, layout.width, layout.height) },
       uColorTexel: { value: bandTexel(layout.color) },
       uAlphaTexel: { value: bandTexel(layout.alpha) },
+      uShadeTexel: { value: bandTexel(shade) },
       uPlateTexel: { value: stackedTexel(plateImage.width, plateImage.height) },
+      uShadeRange: { value: layers.shadeRange },
       uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
       uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
       uLevelShift: { value: -RGBD.platePushLevels / LEVELS },
       uGain: { value: new THREE.Vector3(1, 1, 1) },
       uCoverRadius: { value: layers.coverRadius },
       uLean: { value: 0 },
+      uGuardRate: { value: RGBD.roomGuardRate },
       uCoverRamp: { value: new THREE.Vector2(layers.coverLow, layers.coverHigh) },
     },
     side: THREE.DoubleSide,

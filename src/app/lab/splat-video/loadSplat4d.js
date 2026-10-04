@@ -119,9 +119,10 @@ function validateRgbd(meta, fail) {
   const layers = layered ? { ...RGBD.layers, ...meta.layers } : null;
   if (layered) {
     validateLayout(meta.layout, fail);
+    if (meta.layout.shade !== undefined && !isRect(meta.layout.shade, meta.layout.width, meta.layout.height)) fail("has an invalid shade band.");
     if (!plate) fail("names no plate.");
     if (!isGainList(meta.plateGain)) fail("has an invalid plateGain.");
-    if (!Object.values(layers).every(Number.isFinite) || layers.coverRadius <= 0 || layers.alphaHigh <= layers.alphaLow || layers.coverHigh <= layers.coverLow) {
+    if (!Object.values(layers).every(Number.isFinite) || layers.coverRadius <= 0 || layers.alphaHigh <= layers.alphaLow || layers.coverHigh <= layers.coverLow || layers.shadeRange <= 0) {
       fail("has invalid layers settings.");
     }
   }

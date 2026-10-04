@@ -32,6 +32,7 @@ from hybrid import (
     lama_fill,
     median_of_three,
     open_encoder,
+    push_pull,
     relative_depths,
     round_up,
     span_fill,
@@ -72,13 +73,20 @@ def parse_args():
     parser.add_argument("--alpha-low", type=float, default=0.08)
     parser.add_argument("--alpha-high", type=float, default=0.92)
     parser.add_argument("--cover-high", type=float, default=0.5)
-    parser.add_argument("--cover-radius", type=float, default=3.0)
+    parser.add_argument("--cover-radius", type=float, default=10.0)
+    parser.add_argument("--shade-scale", type=float, default=0.125)
+    parser.add_argument("--shade-blur", type=float, default=1.5)
+    parser.add_argument("--shade-hold", type=float, default=0.6)
     parser.add_argument("--island-fraction", type=float, default=0.05)
     parser.add_argument("--island-reach", type=int, default=6)
     parser.add_argument("--exposure-window", type=int, default=7)
     parser.add_argument("--hold", type=float, default=0.8)
     parser.add_argument("--motion", type=float, default=6.0)
     parser.add_argument("--room-smooth", type=float, default=6.0)
+    parser.add_argument("--subject-close", type=int, default=6)
+    parser.add_argument("--subject-relief", type=float, default=0.12)
+    parser.add_argument("--relief-reach", type=int, default=15)
+    parser.add_argument("--seam-soften", type=float, default=2.0)
     parser.add_argument("--zone-level", type=int, default=100)
     parser.add_argument("--mesh-scale", type=float, default=0.5)
     parser.add_argument("--crf", type=int, default=18)
@@ -115,12 +123,20 @@ def scene_alignment(relative, depth_of, band_size, window, stride):
     return np.stack([np.median(padded[j:j + window], axis=0) for j in range(count)])
 
 
-def layered_disparity(disparity, alpha, smooth, core_shrink, zone_level, background_grow):
+def layered_disparity(disparity, alpha, smooth, core_shrink, zone_level, background_grow, subject_close, relief, relief_grow,
+                      seam_soften):
     core = cv2.erode((alpha > 128).astype(np.uint8), core_shrink) > 0
     room = cv2.dilate((alpha > zone_level).astype(np.uint8), background_grow) == 0
     background = extend_outward(disparity, room) if room.any() else disparity
     background = cv2.GaussianBlur(background, (0, 0), smooth)
-    subject = extend_outward(disparity, core) if core.any() else background
+    closed = cv2.erode(cv2.dilate(disparity, subject_close), subject_close)
+    sunken = closed < background * (1.0 + relief)
+    nearest = cv2.dilate(np.where(core & ~sunken, closed, 0.0).astype(np.float32), relief_grow)
+    closed = np.where(sunken, np.maximum(closed, nearest * (1.0 - relief)), closed)
+    if not core.any():
+        return background.astype(np.float32), background.astype(np.float32)
+    reached = cv2.GaussianBlur(extend_outward(closed.astype(np.float32), core), (0, 0), seam_soften)
+    subject = np.where(core, closed, reached)
     return subject.astype(np.float32), background.astype(np.float32)
 
 
@@ -149,6 +165,21 @@ def refined_alpha(color, rough, lit, seen, args, difference_grow):
     return alpha
 
 
+SHADE_RANGE = 2.0
+
+
+def shade_map(color, plate_float, stored, usable, shade_size, fallback, blur):
+    live = cv2.resize(color.astype(np.float32), shade_size, interpolation=cv2.INTER_AREA)
+    plate = cv2.resize(plate_float, shade_size, interpolation=cv2.INTER_AREA)
+    clear = cv2.resize(((stored < 0.02) & usable).astype(np.float32), shade_size, interpolation=cv2.INTER_AREA)
+    weight = (clear > 0.99).astype(np.float32)
+    if weight.sum() < 16:
+        return np.broadcast_to(np.clip(fallback.astype(np.float32), 0.0, SHADE_RANGE), (*weight.shape, 3)).copy()
+    ratio = np.where(weight[..., None] > 0, live / np.maximum(plate, 8.0), np.clip(fallback.astype(np.float32), 0.0, SHADE_RANGE))
+    filled = push_pull(ratio.astype(np.float32), weight)
+    return np.clip(cv2.GaussianBlur(filled, (0, 0), blur), 0.0, SHADE_RANGE).astype(np.float32)
+
+
 def layer_color(color, stored, lit, args):
     shown = smoothstep(args.alpha_low, args.alpha_high, stored)
     region = region_of(shown, 2)
@@ -170,7 +201,7 @@ def even(value):
     return value - value % 2
 
 
-def layered_layout(color_size, mesh_size):
+def layered_layout(color_size, mesh_size, shade_size):
     color_width, color_height = color_size
     if color_height > color_width:
         alpha_x = round_up(color_width + BAND_GAP, 2)
@@ -181,6 +212,7 @@ def layered_layout(color_size, mesh_size):
             "color": [0, 0, color_width, color_height],
             "alpha": [alpha_x, 0, color_width, color_height],
             "depth": [0, depth_y, mesh_size[0], mesh_size[1]],
+            "shade": [round_up(mesh_size[0] + BAND_GAP, 2), depth_y, shade_size[0], shade_size[1]],
         }
     else:
         alpha_y = round_up(color_height + BAND_GAP, 2)
@@ -191,7 +223,10 @@ def layered_layout(color_size, mesh_size):
             "color": [0, 0, color_width, color_height],
             "alpha": [0, alpha_y, color_width, color_height],
             "depth": [0, depth_y, mesh_size[0], mesh_size[1]],
+            "shade": [round_up(mesh_size[0] + BAND_GAP, 2), depth_y, shade_size[0], shade_size[1]],
         }
+    layout["width"] = max(layout["width"], round_up(layout["shade"][0] + shade_size[0], MACROBLOCK))
+    layout["height"] = max(layout["height"], round_up(layout["shade"][1] + shade_size[1], MACROBLOCK))
     if max(layout["width"], layout["height"]) > MAX_VIDEO_SIDE:
         raise SystemExit(f"the layered frame would be {layout['width']}x{layout['height']}, over {MAX_VIDEO_SIDE} px; lower COLOR_LONG_SIDE")
     return layout
@@ -269,22 +304,26 @@ def main():
 
     width, height = color_size
     mesh_size = (int(round(width * args.mesh_scale)), int(round(height * args.mesh_scale)))
-    layout = layered_layout(color_size, mesh_size)
+    shade_size = (max(8, int(round(width * args.shade_scale))), max(8, int(round(height * args.shade_scale))))
+    layout = layered_layout(color_size, mesh_size, shade_size)
     silent = os.path.join(args.out, "rgbd-silent.mp4")
     encoder = open_encoder(silent, layout, fps, args.crf)
     frame = np.zeros((layout["height"], layout["width"], 3), dtype=np.uint8)
     plate_float = plate.astype(np.float32)
-    held, held_band_gray, held_alpha, held_gray, farthest = None, None, None, None, None
+    usable = seen & (plate.min(axis=2) > 8)
+    held, held_band_gray, held_alpha, held_gray, held_shade, farthest = None, None, None, None, None, None
     core_shrink = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
     background_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+    subject_close = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.subject_close + 1, 2 * args.subject_close + 1))
+    relief_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.relief_reach + 1, 2 * args.relief_reach + 1))
     difference_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * args.difference_band + 1, 2 * args.difference_band + 1))
     island_reach = int(round(args.island_reach / args.mesh_scale))
     island_grow = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * island_reach + 1, 2 * island_reach + 1))
     color_next = layout["alpha"][1] if layout["alpha"][1] > 0 else layout["depth"][1]
     encode_started = time.time()
     for j, color in enumerate(decode(args.video, args.start, count, box, rate, color_size)):
-        lit = np.clip(plate_float * gains[j].astype(np.float32), 0.0, 255.0)
         rough = cv2.resize(band[j].astype(np.float32) / 255.0, color_size, interpolation=cv2.INTER_LINEAR)
+        lit = np.clip(plate_float * gains[j].astype(np.float32), 0.0, 255.0)
         alpha = refined_alpha(color, rough, lit, seen, args, difference_grow)
 
         mesh_gray = cv2.cvtColor(cv2.resize(color, mesh_size, interpolation=cv2.INTER_AREA), cv2.COLOR_RGB2GRAY).astype(np.float32)
@@ -303,15 +342,26 @@ def main():
             disparity = disparity * (1.0 - keep) + held * keep
         held, held_band_gray = disparity, band_gray
         band_alpha = cv2.resize(alpha_band, band_size, interpolation=cv2.INTER_AREA)
-        subject, background = layered_disparity(disparity, band_alpha, args.room_smooth, core_shrink, args.zone_level, background_grow)
+        subject, background = layered_disparity(disparity, band_alpha, args.room_smooth, core_shrink, args.zone_level, background_grow,
+                                                subject_close, args.subject_relief, relief_grow, args.seam_soften)
         drawn = cv2.dilate((band_alpha > 2).astype(np.uint8), background_grow) > 0
         background = np.where(drawn, np.minimum(background, subject), background)
         farthest = background if farthest is None else np.minimum(farthest, background)
         level = np.clip((cv2.resize(subject, mesh_size, interpolation=cv2.INTER_LINEAR) - low) / (high - low), 0.0, 1.0)
 
-        place(frame, layout["color"], layer_color(color, alpha_band.astype(np.float32) / 255.0, lit, args), color_next)
+        stored = alpha_band.astype(np.float32) / 255.0
+        shade = shade_map(color, plate_float, stored, usable, shade_size, gains[j], args.shade_blur)
+        if held_shade is not None:
+            shade = shade * (1.0 - args.shade_hold) + held_shade * args.shade_hold
+        held_shade = shade
+        lit = np.clip(plate_float * cv2.resize(shade, color_size, interpolation=cv2.INTER_LINEAR), 0.0, 255.0)
+        place(frame, layout["color"], layer_color(color, stored, lit, args), color_next)
         place(frame, layout["alpha"], gray(alpha_band), layout["depth"][1])
         place(frame, layout["depth"], gray(np.round(level * 255).astype(np.uint8)), layout["height"])
+        sx, sy, sw, sh = layout["shade"]
+        frame[sy:sy + sh, sx:sx + sw] = np.clip(np.round(shade / SHADE_RANGE * 255.0), 0, 255).astype(np.uint8)
+        frame[sy:sy + sh, sx + sw:] = frame[sy:sy + sh, sx + sw - 1:sx + sw]
+        frame[sy + sh:, sx:] = frame[sy + sh - 1, sx:]
         encoder.stdin.write(frame.tobytes())
         if j % 150 == 0:
             log(f"encode {j + 1}/{count}: {time.time() - encode_started:.0f}s")
@@ -364,7 +414,7 @@ def main():
         "layout": layout,
         "plateGain": [[max(round(float(v), 4), 1e-4) for v in gain] for gain in gains],
         "layers": {"alphaLow": args.alpha_low, "alphaHigh": args.alpha_high, "coverRadius": args.cover_radius,
-                   "coverLow": args.alpha_low, "coverHigh": args.cover_high},
+                   "coverLow": args.alpha_low, "coverHigh": args.cover_high, "shadeRange": SHADE_RANGE},
         "audio": bool(has_audio and args.audio),
         "source": {
             "clip": os.path.basename(args.video), "start": args.start, "end": args.end, "hfovDeg": args.hfov,

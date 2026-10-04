@@ -395,6 +395,30 @@ Results on herb-depth-hd at t = 9.43 s:
 - At the lens: hair wisps survive. Error against the source is 2.72/255 mean, with 8.4k px over 24/255. v2 scored 2.84 and 15.7k px, including a jagged plate ring around the head.
 - 30 s is 25.2 MB (0.84 MB/s) and builds in under 2 minutes with mattes and depth cached.
 
+**First phone clip from a friend (friend-1502, iPhone 15 Pro Max, 4K 24 fps, curly hair, acoustic guitar against a plain yellow wall).**
+
+`phone.sh` now keeps the native frame rate up to 30 fps, so 24 fps is no longer padded with duplicate frames. It also reads ffprobe values without the trailing comma that CSV output adds. That comma had made HDR detection silently fail, so iPhone HDR clips were never tone-mapped.
+
+At the lens the clip was clean. Leaning showed four problems:
+- a pale halo beside the hair, because the plate (the wall with nobody in front) has no shadow and the live wall around the person does;
+- a dark ghost outline of the faintest curls left on the wall;
+- the curl edges stretching into horizontal spikes;
+- shards on the headstock.
+
+Fixes:
+- **Shade band.** A 1/8-resolution per-frame band (`layout.shade`, gain = value / 255 x `layers.shadeRange` 2.0) holds the live-over-plate ratio measured on clear room pixels. It is push-pull filled under the subject, blurred and held over time (0.6). Clipped window pixels count, with a ratio near 1. The exporter's unmix and the player's room both use it, so the revealed wall carries the same shading as the live wall around it.
+- **Lean guard.** The room's cover ring (now up to 10 texels) and the top of its plate ramp scale with the view angle (`viewLean`, which ignores reduced motion), so the room stops showing edge colour once the subject has moved off it. At the lens nothing changes.
+- **Subject depth.** A grey closing fills narrow far pits (curl gaps, between fingers). Core pixels that sit at room depth inside the matte are lifted to within 12% of their nearest real subject neighbour, and real relief, such as a hand over the torso, is left alone. Outside the core the depth is the nearest core value, blurred slightly so the seams between neighbouring sources do not tear.
+
+Tried and dropped:
+- a push-pull fill outside the core: it averaged in body depth, so the hair fringe lagged behind the head as a dark smudge on herb-depth-hd;
+- a flat relief limit: an adversarial review showed it moved a hand-over-torso tear into a ring through the torso.
+
+Results:
+- herb-depth-hd: lens error against the source holds at 2.71/255.
+- Both clips at 12 deg: the wall stays clean, with no halo and only a faint trace of the outer curls.
+- friend-1502-depth: 25 s, 28.7 MB (1.15 MB/s).
+
 Dead ends on the way, all visible in captures:
 - an 8 px plate swap zone drew a white band around the hair at the lens;
 - half-resolution alpha lost the wisps;
