@@ -18,8 +18,10 @@ CLIPS="$HOME/dev/splat-clips"
 NORMAL="$CLIPS/$NAME.mp4"
 mkdir -p "$CLIPS"
 
-TRANSFER="$(ffprobe -v error -select_streams v:0 -show_entries stream=color_transfer -of csv=p=0 "$SOURCE" | head -1)"
-FILTER="fps=30,scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'"
+TRANSFER="$(ffprobe -v error -select_streams v:0 -show_entries stream=color_transfer -of default=nw=1:nk=1 "$SOURCE" | head -1)"
+SOURCE_RATE="$(ffprobe -v error -select_streams v:0 -show_entries stream=r_frame_rate -of default=nw=1:nk=1 "$SOURCE" | head -1)"
+RATE="$("$PYTHON" -c "import sys; n, d = sys.argv[1].split('/'); print(sys.argv[1] if float(n) / float(d) <= 30.5 else 30)" "$SOURCE_RATE")"
+FILTER="fps=$RATE,scale='if(gt(iw,ih),min(1920,iw),-2)':'if(gt(iw,ih),-2,min(1920,ih))'"
 if [ "$TRANSFER" = "arib-std-b67" ] || [ "$TRANSFER" = "smpte2084" ]; then
   FILTER="zscale=t=linear:npl=203,format=gbrpf32le,zscale=p=bt709,tonemap=tonemap=hable:desat=0,zscale=t=bt709:m=bt709:r=tv,$FILTER"
 fi
@@ -35,7 +37,7 @@ ffmpeg -v error -y "${RANGE[@]}" -i "$SOURCE" -vf "$FILTER,format=yuv420p" \
 HFOV="$(cd "$HERE" && "$PYTHON" -c "import sys; from hybrid import built_hfov; from inputs import probe; print(round(built_hfov({'hfov': 'auto'}, probe(sys.argv[1])), 2))" "$SOURCE")"
 DURATION="$(ffprobe -v error -show_entries format=duration -of csv=p=0 "$NORMAL")"
 SECONDS_COVERED="$("$PYTHON" -c "import math, sys; print(max(1, math.floor(float(sys.argv[1]) - 0.15)))" "$DURATION")"
-echo "$NAME: ${DURATION}s, lens ${HFOV} deg, building ${SECONDS_COVERED}s"
+echo "$NAME: ${DURATION}s at ${RATE} fps, lens ${HFOV} deg, building ${SECONDS_COVERED}s"
 
 "$HERE/depthvideo.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --hfov "$HFOV" --out "public/splats/4d/$NAME-depth"
 "$HERE/depthvideo_hd.sh" --video "$NORMAL" --start 0 --end "$SECONDS_COVERED" --hfov "$HFOV" \
