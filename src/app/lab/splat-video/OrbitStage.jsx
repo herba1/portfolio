@@ -85,7 +85,7 @@ export function aimCamera(camera, engine, meta, delta, pivot, base = null) {
   camera.updateMatrixWorld();
 }
 
-export default function OrbitStage({ meta, engineRef, isMobile, children }) {
+export default function OrbitStage({ meta, engineRef, isMobile, antialias = false, children }) {
   const hidden = useDocumentHidden();
   const stageRef = useRef(null);
   const pointersRef = useRef(null);
@@ -189,7 +189,7 @@ export default function OrbitStage({ meta, engineRef, isMobile, children }) {
         frameloop={hidden ? "never" : "always"}
         dpr={[1, isMobile ? RENDER.mobileDpr : RENDER.desktopDpr]}
         camera={{ fov: viewFov(meta), near: RENDER.near, far: RENDER.far, position: [0, 0, 0] }}
-        gl={{ antialias: false, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" }}
+        gl={{ antialias, alpha: true, premultipliedAlpha: true, powerPreference: "high-performance" }}
         flat
         linear
       >

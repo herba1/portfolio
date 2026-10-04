@@ -370,7 +370,36 @@ What each fix bought, at the lens and leaned 110 px on herb-depth-hd:
 - the hybrid's `plate_depth` (from MoVieS) sat in front of the per-frame Depth Anything room on 25% of pixels, which showed as grey blotches on the wall; the farthest-room plate brings that to 0.01%;
 - a matte zone at `alpha > 13` grown 2 px carried window light with the head, a white halo when leaning; `alpha > 100` with no growth removes it.
 
-`phone.sh` now writes the HD depth video to `<name>-depth` after the old one, so the HD build replaces it. 30 s is 23.9 MB (0.80 MB/s) and builds in under a minute once mattes and depth are cached.
+`phone.sh` now writes the HD depth video to `<name>-depth` after the old one, so the HD build replaces it.
+
+**Depth video HD, layered (version 3).** Herb: the old depth video was better at extreme angles; the HD one aliased far worse. Captures at the full 12 deg yaw / 6 deg pitch showed hard stair-stepped silhouettes, 1-px comb streaks, and a jagged-edged pale ghost where the head had been. A diagnosis workflow (four measuring lenses, a design pass and an adversarial critique) found three causes:
+- the tear test checked 4 neighbours, but the grid splits every cell along its top-right/bottom-left diagonal, so sliver triangles across the depth step survived and stretched into streaks (167 at +12 deg against 59 for the old clip);
+- the binary matte cut put every tear on the vertex lattice, and a `discard` is never anti-aliased (the canvas had no MSAA either);
+- the exporter upscaled the matte with nearest-neighbour, so the depth step moved in 2-px blocks.
+
+Tried and dropped:
+- dropping whole torn triangles once stretched, plus 4x MSAA: it scored better in software, but in the browser the hair edge became one-cell serrations, and thin chin/jacket gaps showed the plate;
+- a full-resolution mesh: smoother in one capture, worse in the measured renders.
+
+What shipped is a two-layer soft matte, the same idea as Facebook 3D Photos / SLIDE, reusing the hybrid's subject layer:
+- `rgbd.mp4` holds colour, the alpha matte at full colour size, and the subject's depth at mesh size (799x540) extended out past the matte. Landscape clips stack the three bands; portrait clips put alpha beside colour, so a 1080x1902 phone clip is 2176x2864. The exporter refuses anything over 4096 px. Meta gets `layout`, `plateGain` (per-frame RGB exposure from plate to live, floored above 0) and `layers`;
+- the room is one tear-free sheet on the plate's farthest-room depth, pushed back 2 levels. Inside the subject's drawn zone, the room's disparity is clamped behind the subject's, so a floor can never cover the feet. It shows the live frame mixed toward `plate x plateGain` by `w = smoothstep(alphaLow, coverHigh, cover)`. Cover is the matte at the pixel; as you lean, a ring up to `coverRadius` texels widens it, so the room stops showing edge colour once the subject moves off it;
+- the subject is the hybrid's matte-edged layer (opaque core plus premultiplied rim), with internal tears only above a 15% disparity jump;
+- where the subject draws (alpha above `alphaLow`), the colour band holds `F = (I - p B) / (1 - p)`, with `p = (1 - s) w`, `s` the alpha the player renders, and `B` the lit plate. That solves `s F + (1 - s) ((1 - w) F + w B) = I`, so the lens composite reproduces the frame. The denominator stays near 1 at the faint fringe, so nothing blows up there;
+- both tear tests (depth video and hybrid layer) now also check the cell diagonal. The old clips keep their soft smear with fewer streaks;
+- desktop depth-video canvases get 4x MSAA; phones keep it off and use the half-resolution grid;
+- the loader HEAD-probes the plate. Outputs are written as drafts and swapped in only after the frame-count check.
+
+Results on herb-depth-hd at t = 9.43 s:
+- At 12 deg yaw / 6 deg pitch: smooth matte edges on hair, cheek and jacket, and the window bar continues behind the head. There are no comb streaks, no jagged ghost and no smears.
+- At the lens: hair wisps survive. Error against the source is 2.72/255 mean, with 8.4k px over 24/255. v2 scored 2.84 and 15.7k px, including a jagged plate ring around the head.
+- 30 s is 25.2 MB (0.84 MB/s) and builds in under 2 minutes with mattes and depth cached.
+
+Dead ends on the way, all visible in captures:
+- an 8 px plate swap zone drew a white band around the hair at the lens;
+- half-resolution alpha lost the wisps;
+- unmixing against the plate while the room read the colour band left a dark fringe at the lens and a dotted dark arc on the room;
+- an adversarial review (4 dimensions, verified) found the portrait size, the missing depth margin, the plate failure path, gain floors, flag validation and non-atomic outputs; all are fixed above.
 
 Still open after round 5:
 - **The splat subject still reads as a flipbook.** Each moment is its own merged set of splats, so frames crossfade instead of the same splats moving. Round 6 sidesteps this with the hybrid clip kind. The identity-preserving fix is still possible: per window, keep the subject splats from a few key frames, store their positions at every model output time, and fade each splat's opacity in and out around its own source time. The model already returns identity-aligned positions before the voxel merge (`infer.window_frames`).

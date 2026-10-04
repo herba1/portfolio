@@ -7,9 +7,9 @@ import * as THREE from "three";
 import OrbitStage from "./OrbitStage";
 import { aimAndMeasure, applyDepthOfField, createScratch, createSplatRuntime } from "./SplatVideoScene";
 import { createLayerMaterial, createSurfelGeometry, createSurfelMaterial } from "./hybridMaterial";
-import { createRgbdGeometry } from "./rgbdMaterial";
+import { createLayerGrid } from "./rgbdMaterial";
 import { createResolvePass } from "./splatMaterial";
-import { HYBRID, RENDER, SURFEL, TEXTURE_WIDTH, clamp, hasLensPath, leanAmount, lensMatrix, lowPassFor, momentPlan } from "./splatVideoParams";
+import { HYBRID, RENDER, SURFEL, TEXTURE_WIDTH, gainAt, hasLensPath, leanAmount, lensMatrix, lowPassFor, momentPlan } from "./splatVideoParams";
 import { createVideoClock } from "./videoClock";
 
 const SPLAT_LAYER = 0;
@@ -55,11 +55,7 @@ function createRuntime(clip, isMobile) {
   splats.mesh.layers.set(SPLAT_LAYER);
 
   const { layout } = clip.meta;
-  const stride = isMobile ? HYBRID.mobileGridStride : 1;
-  const columns = Math.max(2, Math.round(layout.depth[2] / stride));
-  const rows = Math.max(2, Math.round(layout.depth[3] / stride));
-  const grid = new THREE.Vector2(1 / columns, 1 / rows);
-  const geometry = createRgbdGeometry(columns, rows);
+  const { columns, rows, grid, geometry } = createLayerGrid(layout, isMobile);
   const subject = new THREE.Group();
   subject.visible = false;
   const clock = createVideoClock(clip.video, clip.meta, {
@@ -121,11 +117,9 @@ function createRuntime(clip, isMobile) {
 }
 
 function applyGain(resolve, meta, time) {
-  const gains = meta.backgroundGain;
-  if (!resolve || !Array.isArray(gains) || gains.length === 0) return;
-  const frame = clamp(Math.floor(time * meta.fps), 0, gains.length - 1);
-  const [red, green, blue] = gains[frame];
-  resolve.uniforms.uGain.value.set(red, green, blue);
+  const gain = gainAt(meta.backgroundGain, meta, time);
+  if (!resolve || !gain) return;
+  resolve.uniforms.uGain.value.set(gain[0], gain[1], gain[2]);
 }
 
 function useLayeredRender(resolveRef, scratchRef) {

@@ -1,5 +1,6 @@
 import * as THREE from "three";
 
+import { bandTexel, normalizedRect } from "./rgbdMaterial";
 import { HYBRID, SURFEL } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
@@ -54,9 +55,13 @@ void main() {
 
   vec2 across = vec2(uGridStep.x, 0.0);
   vec2 down = vec2(0.0, uGridStep.y);
+  vec2 diagonal = vec2(uGridStep.x, -uGridStep.y);
   vTear = max(
-    max(jumpTo(aGrid - across, level, disparity), jumpTo(aGrid + across, level, disparity)),
-    max(jumpTo(aGrid - down, level, disparity), jumpTo(aGrid + down, level, disparity))
+    max(
+      max(jumpTo(aGrid - across, level, disparity), jumpTo(aGrid + across, level, disparity)),
+      max(jumpTo(aGrid - down, level, disparity), jumpTo(aGrid + down, level, disparity))
+    ),
+    max(jumpTo(aGrid - diagonal, level, disparity), jumpTo(aGrid + diagonal, level, disparity))
   );
 }
 `;
@@ -261,16 +266,18 @@ void main() {
 }
 `;
 
-function normalizedRect(rect, width, height) {
-  const [x, y, w, h] = rect;
-  return new THREE.Vector4(x / width, y / height, w / width, h / height);
-}
-
-function bandTexel(rect) {
-  return new THREE.Vector2(1 / Math.max(1, rect[2]), 1 / Math.max(1, rect[3]));
-}
-
-export function createLayerMaterial(texture, meta, { core, grid }) {
+export function createLayerMaterial(
+  texture,
+  meta,
+  {
+    core,
+    grid,
+    tearRelative = HYBRID.tearRelative,
+    borderFeather = HYBRID.borderFeather,
+    alphaLow = HYBRID.alphaLow,
+    alphaHigh = HYBRID.alphaHigh,
+  },
+) {
   const { layout } = meta;
   const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
   return new THREE.ShaderMaterial({
@@ -288,12 +295,12 @@ export function createLayerMaterial(texture, meta, { core, grid }) {
       uGridStep: { value: grid.clone() },
       uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
       uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
-      uTearRelative: { value: HYBRID.tearRelative },
+      uTearRelative: { value: tearRelative },
       uTearMinStep: { value: HYBRID.tearMinLevels / LEVELS },
-      uAlphaRamp: { value: new THREE.Vector2(HYBRID.alphaLow, HYBRID.alphaHigh) },
+      uAlphaRamp: { value: new THREE.Vector2(alphaLow, alphaHigh) },
       uAlphaCutoff: { value: HYBRID.alphaCutoff },
       uCore: { value: HYBRID.coreAlpha },
-      uBorderFeather: { value: HYBRID.borderFeather },
+      uBorderFeather: { value: borderFeather },
     },
     defines: core ? { CORE: "" } : {},
     side: THREE.DoubleSide,

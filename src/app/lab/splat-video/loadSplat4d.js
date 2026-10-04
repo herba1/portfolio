@@ -1,4 +1,4 @@
-import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, HYBRID, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, HYBRID, RGBD, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -89,6 +89,19 @@ function optionalAsset(value, fail, what) {
   return value;
 }
 
+function validateLayout(value, fail) {
+  const layout = value ?? {};
+  if (!isPositiveInteger(layout.width) || !isPositiveInteger(layout.height)) fail("has no layout size.");
+  for (const band of ["color", "depth", "alpha"]) {
+    if (!isRect(layout[band], layout.width, layout.height)) fail(`has an invalid ${band} band.`);
+  }
+  return layout;
+}
+
+function isGainList(gains) {
+  return gains === undefined || (Array.isArray(gains) && gains.every((gain) => isVector(gain) && gain.every((v) => v > 0)));
+}
+
 function validateRgbd(meta, fail) {
   if (!Number.isInteger(meta.frames) || meta.frames < 1) fail("has no frames.");
   if (!(meta.fps > 0)) fail("has no fps.");
@@ -102,6 +115,16 @@ function validateRgbd(meta, fail) {
   const plate = optionalAsset(meta.plate, fail, "plate");
   const source = meta.source ?? {};
   if (!isPositiveInteger(source.width) || !isPositiveInteger(source.height)) fail("has no source size.");
+  const layered = meta.version === 3;
+  const layers = layered ? { ...RGBD.layers, ...meta.layers } : null;
+  if (layered) {
+    validateLayout(meta.layout, fail);
+    if (!plate) fail("names no plate.");
+    if (!isGainList(meta.plateGain)) fail("has an invalid plateGain.");
+    if (!Object.values(layers).every(Number.isFinite) || layers.coverRadius <= 0 || layers.alphaHigh <= layers.alphaLow || layers.coverHigh <= layers.coverLow) {
+      fail("has invalid layers settings.");
+    }
+  }
   const colorAspect = isPositiveInteger(source.colorWidth) && isPositiveInteger(source.colorHeight)
     ? source.colorWidth / source.colorHeight
     : source.width / source.height;
@@ -110,6 +133,7 @@ function validateRgbd(meta, fail) {
     count: isCount(meta.count) ? meta.count : 0,
     video,
     plate,
+    layers,
     disparity: { min: far, max: near },
     camera: {
       vfovDeg: meta.camera.vfovDeg,
@@ -209,16 +233,9 @@ function validateHybrid(meta, fail) {
   if (!Number.isFinite(near) || !Number.isFinite(far) || far < 0 || near <= far) fail("has an invalid disparity range.");
   const video = optionalAsset(meta.video, fail, "video");
   if (!video) fail("names no video.");
-  const layout = meta.layout ?? {};
-  if (!isPositiveInteger(layout.width) || !isPositiveInteger(layout.height)) fail("has no layout size.");
-  for (const band of ["color", "depth", "alpha"]) {
-    if (!isRect(layout[band], layout.width, layout.height)) fail(`has an invalid ${band} band.`);
-  }
+  const layout = validateLayout(meta.layout, fail);
   const background = validateSplatSet(meta.background ?? { count: 0 }, fail, "background");
-  const gains = meta.backgroundGain;
-  if (gains !== undefined && (!Array.isArray(gains) || !gains.every((gain) => isVector(gain) && gain.every((v) => v > 0)))) {
-    fail("has an invalid backgroundGain.");
-  }
+  if (!isGainList(meta.backgroundGain)) fail("has an invalid backgroundGain.");
   return {
     ...meta,
     video,
@@ -241,6 +258,7 @@ function validateMeta(meta, clip) {
   if (!meta || meta.format !== "splat4d") fail("is not a splat4d export.");
   if (meta.version === 3) {
     if (meta.kind === "hybrid") return validateHybrid(meta, fail);
+    if (meta.kind === "rgbd") return validateRgbd(meta, fail);
     if (meta.kind !== "stream") fail(`has an unknown kind “${meta.kind}”.`);
     return validateStream(meta, fail);
   }
@@ -584,6 +602,13 @@ async function streamBlob({ url, name, clip, type, signal, onProgress }) {
 
 async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
   const version = versionQuery(meta);
+  const plateUrl = meta.plate ? `${folder}/${meta.plate}${version}` : null;
+  if (plateUrl && meta.layout) {
+    const probe = await fetch(plateUrl, { method: "HEAD", signal });
+    if (!probe.ok) {
+      throw new Splat4dError(`${meta.plate} for “${clip}” answered ${probe.status}.`, { clip, missing: probe.status === 404 });
+    }
+  }
   const video = await streamBlob({
     url: `${folder}/${meta.video}${version}`,
     name: meta.video,
@@ -597,7 +622,7 @@ async function loadRgbd(clip, folder, meta, { signal, onProgress }) {
     meta,
     bytes: video.size,
     video,
-    plateUrl: meta.plate ? `${folder}/${meta.plate}${version}` : null,
+    plateUrl,
   };
 }
 

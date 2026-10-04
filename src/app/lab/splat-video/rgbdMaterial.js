@@ -1,6 +1,6 @@
 import * as THREE from "three";
 
-import { RGBD } from "./splatVideoParams";
+import { HYBRID, RGBD } from "./splatVideoParams";
 
 const DEG = Math.PI / 180;
 const LEVELS = 255;
@@ -57,9 +57,13 @@ void main() {
   if (uTearRelative > 0.0) {
     vec2 across = vec2(uGridStep.x, 0.0);
     vec2 down = vec2(0.0, uGridStep.y);
+    vec2 diagonal = vec2(uGridStep.x, -uGridStep.y);
     tear = max(
-      max(jumpTo(aGrid - across, level, disparity), jumpTo(aGrid + across, level, disparity)),
-      max(jumpTo(aGrid - down, level, disparity), jumpTo(aGrid + down, level, disparity))
+      max(
+        max(jumpTo(aGrid - across, level, disparity), jumpTo(aGrid + across, level, disparity)),
+        max(jumpTo(aGrid - down, level, disparity), jumpTo(aGrid + down, level, disparity))
+      ),
+      max(jumpTo(aGrid - diagonal, level, disparity), jumpTo(aGrid + diagonal, level, disparity))
     );
   }
   vTear = tear;
@@ -81,6 +85,124 @@ void main() {
   fragColor = vec4(texture(uMap, vColorUv).rgb, 1.0);
 }
 `;
+
+const ROOM_VERTEX = `
+precision highp float;
+
+uniform sampler2D uPlate;
+uniform vec2 uPlateTexel;
+uniform vec2 uTanHalf;
+uniform vec2 uDisparity;
+uniform float uLevelShift;
+
+in vec2 aGrid;
+
+out vec2 vGrid;
+
+const float MIN_DISPARITY = 0.01;
+
+void main() {
+  float s = clamp(aGrid.x, 0.5 * uPlateTexel.x, 1.0 - 0.5 * uPlateTexel.x);
+  float t = clamp(0.5 + 0.5 * aGrid.y, 0.5 + 0.5 * uPlateTexel.y, 1.0 - 0.5 * uPlateTexel.y);
+  float level = clamp(textureLod(uPlate, vec2(s, t), 0.0).r + uLevelShift, 0.0, 1.0);
+  float depth = 1.0 / max(mix(uDisparity.x, uDisparity.y, level), MIN_DISPARITY);
+  vec3 point = vec3((aGrid - 0.5) * 2.0 * uTanHalf * depth, depth);
+  gl_Position = projectionMatrix * modelViewMatrix * vec4(point, 1.0);
+  vGrid = aGrid;
+}
+`;
+
+const ROOM_FRAGMENT = `
+precision highp float;
+
+uniform sampler2D uMap;
+uniform sampler2D uPlate;
+uniform vec4 uColorRect;
+uniform vec4 uAlphaRect;
+uniform vec2 uColorTexel;
+uniform vec2 uAlphaTexel;
+uniform vec2 uPlateTexel;
+uniform vec3 uGain;
+uniform float uCoverRadius;
+uniform float uLean;
+uniform vec2 uCoverRamp;
+
+in vec2 vGrid;
+
+out vec4 fragColor;
+
+const vec2 RING[8] = vec2[8](
+  vec2(1.0, 0.0), vec2(0.7071, 0.7071), vec2(0.0, 1.0), vec2(-0.7071, 0.7071),
+  vec2(-1.0, 0.0), vec2(-0.7071, -0.7071), vec2(0.0, -1.0), vec2(0.7071, -0.7071)
+);
+
+vec2 inside(vec2 grid, vec2 texel) {
+  return clamp(grid, 0.5 * texel, 1.0 - 0.5 * texel);
+}
+
+float coverAt(vec2 grid) {
+  return texture(uMap, uAlphaRect.xy + inside(grid, uAlphaTexel) * uAlphaRect.zw).r;
+}
+
+void main() {
+  float reach = uCoverRadius * uLean;
+  float cover = coverAt(vGrid);
+  for (int i = 0; i < 8; i++) {
+    cover = max(cover, coverAt(vGrid + RING[i] * reach * uAlphaTexel));
+    cover = max(cover, coverAt(vGrid + RING[i] * 0.5 * reach * uAlphaTexel));
+  }
+  vec3 live = texture(uMap, uColorRect.xy + inside(vGrid, uColorTexel) * uColorRect.zw).rgb;
+  vec2 plateUv = vec2(clamp(vGrid.x, 0.5 * uPlateTexel.x, 1.0 - 0.5 * uPlateTexel.x), clamp(0.5 * vGrid.y, 0.5 * uPlateTexel.y, 0.5 - 0.5 * uPlateTexel.y));
+  vec3 plate = min(texture(uPlate, plateUv).rgb * uGain, vec3(1.0));
+  fragColor = vec4(mix(live, plate, smoothstep(uCoverRamp.x, uCoverRamp.y, cover)), 1.0);
+}
+`;
+
+export function normalizedRect(rect, width, height) {
+  return new THREE.Vector4(rect[0] / width, rect[1] / height, rect[2] / width, rect[3] / height);
+}
+
+export function bandTexel(rect) {
+  return stackedTexel(rect[2], rect[3]);
+}
+
+export function createLayerGrid(layout, isMobile) {
+  const stride = isMobile ? HYBRID.mobileGridStride : 1;
+  const columns = Math.max(2, Math.round(layout.depth[2] / stride));
+  const rows = Math.max(2, Math.round(layout.depth[3] / stride));
+  return { columns, rows, grid: new THREE.Vector2(1 / columns, 1 / rows), geometry: createRgbdGeometry(columns, rows) };
+}
+
+export function createRoomMaterial(texture, plateTexture, meta) {
+  const { layout, layers } = meta;
+  const tanVertical = Math.tan((meta.camera.vfovDeg * DEG) / 2);
+  const plateImage = plateTexture.image;
+  return new THREE.ShaderMaterial({
+    glslVersion: THREE.GLSL3,
+    vertexShader: ROOM_VERTEX,
+    fragmentShader: ROOM_FRAGMENT,
+    uniforms: {
+      uMap: { value: texture },
+      uPlate: { value: plateTexture },
+      uColorRect: { value: normalizedRect(layout.color, layout.width, layout.height) },
+      uAlphaRect: { value: normalizedRect(layout.alpha, layout.width, layout.height) },
+      uColorTexel: { value: bandTexel(layout.color) },
+      uAlphaTexel: { value: bandTexel(layout.alpha) },
+      uPlateTexel: { value: stackedTexel(plateImage.width, plateImage.height) },
+      uTanHalf: { value: new THREE.Vector2(tanVertical * meta.camera.aspect, tanVertical) },
+      uDisparity: { value: new THREE.Vector2(meta.disparity.min, meta.disparity.max) },
+      uLevelShift: { value: -RGBD.platePushLevels / LEVELS },
+      uGain: { value: new THREE.Vector3(1, 1, 1) },
+      uCoverRadius: { value: layers.coverRadius },
+      uLean: { value: 0 },
+      uCoverRamp: { value: new THREE.Vector2(layers.coverLow, layers.coverHigh) },
+    },
+    side: THREE.DoubleSide,
+    depthTest: true,
+    depthWrite: true,
+    transparent: false,
+  });
+}
 
 export function prepareStackedTexture(texture) {
   texture.colorSpace = THREE.NoColorSpace;

@@ -70,6 +70,9 @@ export const RGBD = {
   plateTearRelative: 0,
   tearMinLevels: 4,
   platePushLevels: 2,
+  subjectTearRelative: 0.15,
+  subjectBorderFeather: 0.001,
+  layers: { alphaLow: 0.08, alphaHigh: 0.92, coverRadius: 3, coverLow: 0.08, coverHigh: 0.5 },
   seekNudgeFrames: 0.25,
   syncToleranceFrames: 0.5,
 };
@@ -220,6 +223,11 @@ export function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+export function gainAt(gains, meta, time) {
+  if (!Array.isArray(gains) || gains.length === 0) return null;
+  return gains[clamp(Math.floor(time * meta.fps), 0, gains.length - 1)];
+}
+
 export function isFlipbook(meta) {
   return meta.kind === "flipbook";
 }
@@ -241,7 +249,7 @@ export function steppedByFps(meta) {
 }
 
 export function clipKind(meta) {
-  if (meta?.version === 3 && (meta.kind === "stream" || meta.kind === "hybrid")) return meta.kind;
+  if (meta?.version === 3 && (meta.kind === "stream" || meta.kind === "hybrid" || meta.kind === "rgbd")) return meta.kind;
   if (meta?.version === 2 && (meta.kind === "rgbd" || meta.kind === "flipbook")) return meta.kind;
   if (meta?.version === 1) return "interpolated";
   return null;
