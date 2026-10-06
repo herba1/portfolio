@@ -21,7 +21,8 @@
     "lab:gate": "node scripts/lab-gate.mjs",
     "lab:learn": "node scripts/lab-learn.mjs",
     "lab:cleanup": "node scripts/lab-cleanup.mjs",
-    "lab:run": "node scripts/lab-run.mjs"
+    "lab:run": "node scripts/lab-run.mjs",
+    "lyrics:sync": "node --env-file=.env.local --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/sync-lyrics.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",

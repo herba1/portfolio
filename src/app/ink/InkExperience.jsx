@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
 import useNearViewport from "@/app/experiments/useNearViewport";
+import useLivePlate from "@/app/experiments/useLivePlate";
 import usePlateDrift from "@/app/experiments/usePlateDrift";
 import {
   clearStored,
@@ -15,7 +16,7 @@ import {
 
 import InkControls from "./InkControls";
 import "./ink.css";
-import { DEFAULT_IMAGE, DEFAULT_PRESET, INK_DEFAULTS, presetValues, rerollValues } from "./inkParams";
+import { DEFAULT_IMAGE, DEFAULT_PRESET, INK_DEFAULTS, INK_PRESETS, presetValues, rerollValues } from "./inkParams";
 
 const STORAGE_KEY = "herb:ink:params";
 
@@ -40,6 +41,7 @@ export default function InkExperience({ embedded = false }) {
   const stageRef = useRef(null);
   const near = useNearViewport(stageRef);
   usePlateDrift(stageRef, embedded);
+  const shownParams = useLivePlate(params, embedded);
   const captureRef = useRef(null);
   const fileInputRef = useRef(null);
   const objectUrlRef = useRef(null);
@@ -94,6 +96,12 @@ export default function InkExperience({ embedded = false }) {
       offsetY: prev.offsetY,
     }));
   }, []);
+
+  const handleStageClick = useCallback(() => {
+    if (!embedded) return;
+    const at = INK_PRESETS.findIndex((preset) => preset.name === activePreset);
+    handlePreset(INK_PRESETS[(at + 1) % INK_PRESETS.length]);
+  }, [embedded, activePreset, handlePreset]);
 
   const handleReroll = useCallback(() => {
     setActivePreset(null);
@@ -215,6 +223,7 @@ export default function InkExperience({ embedded = false }) {
         }}
         onDragLeave={() => setDragging(false)}
         onDrop={handleDrop}
+        onClick={handleStageClick}
       >
         {/* The WebGL context comes up only near the viewport — see
             useNearViewport. Until then the plate is its own fallback. */}
@@ -222,7 +231,7 @@ export default function InkExperience({ embedded = false }) {
           <ClientOnly
             load={loadScene}
             fallback={<div className="ink-stage__fallback" />}
-            params={params}
+            params={shownParams}
             imageSrc={image.src}
             onReady={registerCapture}
             onSource={handleSource}

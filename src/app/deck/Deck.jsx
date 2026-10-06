@@ -140,6 +140,16 @@ function onCoverError(e) {
   img.src = img.src;
 }
 
+function uniqueByArtwork(tracks) {
+  const seen = new Set();
+  return tracks.filter((track) => {
+    if (!track.image) return true;
+    if (seen.has(track.image)) return false;
+    seen.add(track.image);
+    return true;
+  });
+}
+
 // The size of the box the deck was handed, and nothing else. A phone and a
 // 440px tile on the experiments index are the same case: there is no
 // window in here, only the box. (deck.css makes the same call with
@@ -147,10 +157,15 @@ function onCoverError(e) {
 const SMALL = 640;
 const EMBEDDED_CAP = 12; // covers in a narrow tile on someone else's page
 const WIDE = 900;
+const TAP_SLOP_PX = 6;
+const LOCK_RETRY_MS = 1500;
+const INERTIA_TAU_MS = 240;
+const INERTIA_STOP = 0.015;
+const RELEASE_WINDOW_MS = 90;
 
 export default function Deck({ tracks, embedded = false }) {
   const all = useMemo(
-    () => (tracks?.length ? tracks : fallbackDeck(24)),
+    () => (tracks?.length ? uniqueByArtwork(tracks) : fallbackDeck(24)),
     [tracks],
   );
 
@@ -223,6 +238,8 @@ export default function Deck({ tracks, embedded = false }) {
   const [spread, setSpread] = useState(false);
   const spreadRef = useRef(false);
   spreadRef.current = spread;
+  const embeddedRef = useRef(embedded);
+  embeddedRef.current = embedded;
 
   // ── arm the intro ────────────────────────────────────────────────
   // The deck rests with its animations PAUSED (deck.css), holding frame
@@ -464,6 +481,8 @@ export default function Deck({ tracks, embedded = false }) {
     // changes yaw or spacing, because the values are read back off the
     // element each time a drag starts.
     let dragging = false;
+    let lockBlockedUntil = 0;
+    let travelled = 0;
     let lastX = 0;
     let lastY = 0;
     let pid = null;
@@ -526,6 +545,35 @@ export default function Deck({ tracks, embedded = false }) {
       else trackEl.scrollTop += step;
     };
 
+    let velocity = 0;
+    let inertiaFrame = 0;
+    const stopInertia = () => {
+      cancelAnimationFrame(inertiaFrame);
+      inertiaFrame = 0;
+      velocity = 0;
+    };
+    const startInertia = (initial) => {
+      cancelAnimationFrame(inertiaFrame);
+      velocity = initial;
+      stageEl.dataset.drag = "1";
+      let previous = performance.now();
+      const step = (now) => {
+        const dt = Math.min(48, now - previous);
+        previous = now;
+        velocity *= Math.exp(-dt / INERTIA_TAU_MS);
+        scrollBy(velocity * dt);
+        if (Math.abs(velocity) < INERTIA_STOP) {
+          inertiaFrame = 0;
+          velocity = 0;
+          delete stageEl.dataset.drag;
+          return;
+        }
+        inertiaFrame = requestAnimationFrame(step);
+      };
+      inertiaFrame = requestAnimationFrame(step);
+    };
+    let releaseSamples = [];
+
     // ── touch ────────────────────────────────────────────────────────
     // A finger never reaches this handler on a phone. The deck's sideways
     // overflow IS the gesture there, and the platform scroller is simply
@@ -550,17 +598,30 @@ export default function Deck({ tracks, embedded = false }) {
     let downX = 0;
     let downY = 0;
 
+    const requestLock = () => {
+      if (performance.now() < lockBlockedUntil) return;
+      const ask = (options) => stageEl.requestPointerLock?.(options);
+      Promise.resolve(ask({ unadjustedMovement: true }))
+        .catch((error) => (error?.name === "NotSupportedError" ? ask() : Promise.reject(error)))
+        .catch(() => {
+          lockBlockedUntil = performance.now() + LOCK_RETRY_MS;
+        });
+    };
+
     const onDown = (e) => {
       if (e.pointerType === "mouse" && e.button !== 0) return;
       // the toggle lives inside the stage; a press on it isn't a scrub
       if (e.target.closest?.("[data-deck-ui]")) return;
       // the scroller has this one — see the note above
       if (hscroll && e.pointerType === "touch") return;
+      stopInertia();
+      releaseSamples = [];
       dragging = true;
       touch = e.pointerType === "touch";
       axis = touch ? 0 : 1;
       downX = lastX = e.clientX;
       downY = lastY = e.clientY;
+      travelled = 0;
       pid = e.pointerId;
       resid = 0;
       readAxis();
@@ -572,14 +633,17 @@ export default function Deck({ tracks, embedded = false }) {
       // Touch pointers are implicitly captured by the spec, and taking
       // an explicit capture here is what interferes with native panning.
       if (!touch) stageEl.setPointerCapture(pid);
+      if (embeddedRef.current && !touch) requestLock();
     };
 
     const onMove = (e) => {
       if (!dragging) return;
-      const dx = e.clientX - lastX;
-      const dy = e.clientY - lastY;
+      const pinned = document.pointerLockElement === stageEl;
+      const dx = pinned ? e.movementX : e.clientX - lastX;
+      const dy = pinned ? e.movementY : e.clientY - lastY;
       lastX = e.clientX;
       lastY = e.clientY;
+      travelled += Math.abs(dx) + Math.abs(dy);
 
       if (axis === 0) {
         const tx = e.clientX - downX;
@@ -593,14 +657,33 @@ export default function Deck({ tracks, embedded = false }) {
       if (axis !== 1) return; // the browser is handling this one
 
       const dp = -(dx * sx + (touch ? 0 : dy) * sy) / len2;
-      scrollBy((dp * span) / last);
+      const amount = (dp * span) / last;
+      scrollBy(amount);
+      releaseSamples.push({ at: e.timeStamp, amount });
+      while (releaseSamples.length && e.timeStamp - releaseSamples[0].at > RELEASE_WINDOW_MS)
+        releaseSamples.shift();
     };
 
-    const onUp = () => {
+    const onUp = (e) => {
       if (!dragging) return;
       dragging = false;
+      if (document.pointerLockElement === stageEl) document.exitPointerLock();
+      if (embeddedRef.current && travelled < TAP_SLOP_PX) {
+        setSpread((current) => !current);
+      }
+      const wasOurs = axis === 1;
       axis = 0;
-      delete stageEl.dataset.drag;
+      let release = 0;
+      if (wasOurs && releaseSamples.length > 1) {
+        const first = releaseSamples[0].at;
+        const lastAt = releaseSamples[releaseSamples.length - 1].at;
+        if (e.timeStamp - lastAt < RELEASE_WINDOW_MS) {
+          const travelled = releaseSamples.reduce((sum, sample) => sum + sample.amount, 0);
+          release = travelled / Math.max(16, lastAt - first);
+        }
+      }
+      if (Math.abs(release) > INERTIA_STOP * 4) startInertia(release);
+      else delete stageEl.dataset.drag;
       if (pid !== null && !touch && stageEl.hasPointerCapture(pid))
         stageEl.releasePointerCapture(pid);
       pid = null;
@@ -642,15 +725,6 @@ export default function Deck({ tracks, embedded = false }) {
     // mice) is worth 100/6 px per line, and PAGES (mode 2) one scrollport.
     const LINE = 100 / 6;
 
-    // Smooth scrolls re-aimed every event would each start from wherever
-    // the last one had got to and drop the rest of its distance, so a
-    // fast swipe would come up short. The target accumulates instead, and
-    // is let go once the scroller comes to rest.
-    let target = null;
-    const onScrollEnd = () => {
-      target = null;
-    };
-
     const onWheel = (e) => {
       // The native axis is already handled — and handled well. The deck
       // only claims the axis nothing else was using. A shift-wheel
@@ -663,27 +737,23 @@ export default function Deck({ tracks, embedded = false }) {
       const page = hscroll ? trackEl.clientWidth : trackEl.clientHeight;
       const unit = e.deltaMode === 1 ? LINE : e.deltaMode === 2 ? page : 1;
 
-      // Claimed even at either end of the run: the event was aimed at the
-      // deck, and handing the leftover to the page around the box is the
-      // scroll-chaining that `overscroll-behavior` already rules out for
-      // the native axis.
       e.preventDefault();
 
-      // Wheel-right advances, same sign as wheel-down: in both cases the
-      // content moves against the gesture under a fixed viewport.
-      const max = hscroll
-        ? trackEl.scrollWidth - trackEl.clientWidth
-        : trackEl.scrollHeight - trackEl.clientHeight;
-      const from = target ?? position();
-      target = Math.max(0, Math.min(max, from + raw * unit));
-      trackEl.scrollTo({
-        [hscroll ? "left" : "top"]: target,
-        behavior: "smooth",
-      });
+      const distance = raw * unit;
+      const notched = e.deltaMode !== 0 || (Number.isInteger(raw) && Math.abs(raw) >= 50);
+      if (notched) {
+        startInertia(velocity + distance / INERTIA_TAU_MS);
+      } else {
+        stopInertia();
+        scrollBy(distance);
+      }
     };
 
+    const onLockChange = () => {
+      if (document.pointerLockElement === stageEl && !dragging) document.exitPointerLock();
+    };
+    document.addEventListener("pointerlockchange", onLockChange);
     stageEl.addEventListener("wheel", onWheel, { passive: false });
-    trackEl.addEventListener("scrollend", onScrollEnd);
 
     stageEl.addEventListener("pointerdown", onDown);
     stageEl.addEventListener("pointermove", onMove);
@@ -692,9 +762,11 @@ export default function Deck({ tracks, embedded = false }) {
 
     return () => {
       trackEl.removeEventListener("scroll", requestSync);
-      trackEl.removeEventListener("scrollend", onScrollEnd);
+      stopInertia();
       if (syncRaf) cancelAnimationFrame(syncRaf);
       ro.disconnect();
+      document.removeEventListener("pointerlockchange", onLockChange);
+      if (document.pointerLockElement === stageEl) document.exitPointerLock();
       stageEl.removeEventListener("wheel", onWheel);
       stageEl.removeEventListener("pointerdown", onDown);
       stageEl.removeEventListener("pointermove", onMove);
@@ -791,8 +863,18 @@ export default function Deck({ tracks, embedded = false }) {
         ref={trackRef}
         className="deck bg-surface"
         data-spread={spread ? "1" : "0"}
-        data-lenis-prevent
+        data-lenis-prevent={embedded ? undefined : ""}
         data-embedded={embedded ? "" : undefined}
+        data-plate={embedded ? "" : undefined}
+        data-plate-drag={embedded ? "" : undefined}
+        data-plate-hint={embedded ? (spread ? "Click to stack" : "Click to spread") : undefined}
+        onKeyDown={
+          embedded
+            ? (event) => {
+                if (event.key === "Enter") setSpread((current) => !current);
+              }
+            : undefined
+        }
         tabIndex={0}
         aria-label="Recently played covers"
         style={{
@@ -810,16 +892,18 @@ export default function Deck({ tracks, embedded = false }) {
               <SlotNumber ref={countRef} value={`01 / ${count}`} />
             </div>
 
-            <div className="deck__ui" data-deck-ui>
-              <button
-                type="button"
-                className="btn btn--raised"
-                aria-pressed={spread}
-                onClick={() => setSpread((s) => !s)}
-              >
-                {spread ? "Stack" : "Spread"}
-              </button>
-            </div>
+            {embedded ? null : (
+              <div className="deck__ui" data-deck-ui>
+                <button
+                  type="button"
+                  className="btn btn--raised"
+                  aria-pressed={spread}
+                  onClick={() => setSpread((s) => !s)}
+                >
+                  {spread ? "Stack" : "Spread"}
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </section>

@@ -105,6 +105,7 @@ function makeUniforms() {
 
 function InkPlate({ params, imageSrc, onReady, onSource }) {
   const source = useSourceTexture(imageSrc);
+  const lastLayoutKey = useRef("");
   const { size, viewport, gl, scene, camera } = useThree();
 
   const geometry = useMemo(() => {
@@ -207,6 +208,10 @@ function InkPlate({ params, imageSrc, onReady, onSource }) {
     uniforms.uSuper.value = params.supersample;
 
     gl.render(scene, camera);
+    if (source.status === "ready") gl.domElement.dataset.painted = "1";
+    const layoutKey = `${source.status}|${size.width}|${size.height}|${viewport.dpr}`;
+    if (layoutKey === lastLayoutKey.current) return undefined;
+    lastLayoutKey.current = layoutKey;
     const raf = requestAnimationFrame(() => gl.render(scene, camera));
     return () => cancelAnimationFrame(raf);
   }, [params, source, size, viewport.dpr, uniforms, gl, scene, camera, onSource]);

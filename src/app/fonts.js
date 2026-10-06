@@ -1,6 +1,6 @@
 import localFont from "next/font/local";
 
-/* Inter — the mono-volt tiles on /work and the whole /psa kit.
+/* Inter — the mono-volt tiles on /work and the whole /flyout kit.
  *
  * Both are another product's interface shown as itself, so they carry that
  * product's typeface rather than this site's.
@@ -10,7 +10,7 @@ import localFont from "next/font/local";
  * subset) shows only
  *   calt ccmp dnom frac locl numr pnum tnum  +  kern mark mkmk
  * — every character variant (cv01–cv14), every stylistic set, `zero` and
- * the `opsz` AXIS ITSELF are gone. /psa asks for cv01…cv11, slashed-zero
+ * the `opsz` AXIS ITSELF are gone. /flyout asks for cv01…cv11, slashed-zero
  * and `font-optical-sizing: auto`; against Google's file all of that is
  * inert CSS. The official rsms binary carries the full table:
  *   aalt calt case ccmp cv01–cv14 dlig ... ss01–ss08 subs sups tnum zero

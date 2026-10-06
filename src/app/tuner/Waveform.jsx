@@ -19,7 +19,7 @@ const CONFIG = {
   widthCqw: 84, // …but never wider than this % of the box in small boxes
   topOffset: 0, // cqh — where the column STARTS (0 = very top of the box)
   length: 100, // cqh — how tall it is (100 = all the way to the bottom)
-  barThickness: 3, // px — thickness of each horizontal bar
+  barThickness: 4, // px — thickness of each horizontal bar
   gain: 1, // loudness multiplier (raise to make it react harder)
   minBar: 0.02, // resting length when silent (0–1) so the centre never empties
   flatFloor: 0.008, // hairline width a brand-new bar starts at, before it spreads
@@ -31,16 +31,22 @@ const CONFIG = {
 
 // natural, decelerating open. Swap for another curve to change the feel:
 //   easeOutCubic:  1 - (1-p)^3   ·   easeOutQuart: 1 - (1-p)^4 (snappier)
+const ROW_PITCH = 12;
+const MIN_ROWS = 24;
+
 const ease = (p) => 1 - (1 - p) * (1 - p) * (1 - p);
 
 function Waveform({ pitchRef, subscribe }) {
-  const innerRef = useRef(null);
-  const barsRef = useRef([]);
+  const wrapRef = useRef(null);
+  const canvasRef = useRef(null);
 
   useEffect(() => {
-    const N = CONFIG.bars;
-    const COUNT = N + 2; // +2 spare rows so the top/bottom never show a gap
-    const hist = new Float32Array(COUNT).fill(CONFIG.minBar); // 0 = newest (top)
+    const wrap = wrapRef.current;
+    const canvas = canvasRef.current;
+    const context = canvas.getContext("2d");
+    let N = CONFIG.bars;
+    let COUNT = N + 2;
+    let hist = new Float32Array(COUNT).fill(CONFIG.minBar);
 
     const reduce =
       typeof window !== "undefined" &&
@@ -49,23 +55,44 @@ function Waveform({ pitchRef, subscribe }) {
 
     let t = 0;
     let ema = CONFIG.minBar;
-    let scroll = 0; // fractional rows, 0..1, drives the smooth translate
+    let scroll = 0;
+    let width = 0;
+    let height = 0;
+    let dpr = 1;
+
+    function resize() {
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      width = wrap.clientWidth;
+      height = wrap.clientHeight;
+      const rows = Math.max(MIN_ROWS, Math.round(height / ROW_PITCH));
+      if (rows !== N) {
+        const previous = hist;
+        N = rows;
+        COUNT = N + 2;
+        hist = new Float32Array(COUNT).fill(CONFIG.minBar);
+        hist.set(previous.subarray(0, Math.min(previous.length, COUNT)));
+      }
+      canvas.width = Math.max(1, Math.round(width * dpr));
+      canvas.height = Math.max(1, Math.round(height * dpr));
+    }
 
     function render() {
+      context.setTransform(dpr, 0, 0, dpr, 0, 0);
+      context.clearRect(0, 0, width, height);
+      context.fillStyle = getComputedStyle(wrap).color;
+      const thickness = CONFIG.barThickness;
       const f = CONFIG.flatFloor;
+      context.beginPath();
       for (let i = 0; i < COUNT; i++) {
-        const el = barsRef.current[i];
-        if (!el) continue;
-        // ease the open from the bar's LIVE screen position → smooth, not stepped
         let p = (i - 1 + scroll) / CONFIG.growBars;
         p = p < 0 ? 0 : p > 1 ? 1 : p;
         const g = ease(p);
         const full = hist[i] < CONFIG.minBar ? CONFIG.minBar : hist[i];
-        el.style.transform = `scaleX(${(f + (full - f) * g).toFixed(3)})`;
+        const barWidth = (f + (full - f) * g) * width;
+        const centreY = ((i - 1 + scroll) / N) * height;
+        context.roundRect((width - barWidth) / 2, centreY - thickness / 2, barWidth, thickness, thickness / 2);
       }
-      if (innerRef.current) {
-        innerRef.current.style.transform = `translateY(${((scroll * 100) / N).toFixed(3)}%)`;
-      }
+      context.fill();
     }
 
     function record() {
@@ -78,11 +105,24 @@ function Waveform({ pitchRef, subscribe }) {
       hist[0] = ema;
     }
 
+    resize();
     render();
+    const resizeObserver = new ResizeObserver(() => {
+      resize();
+      render();
+    });
+    resizeObserver.observe(wrap);
 
-    if (reduce) return;
+    if (reduce) return () => resizeObserver.disconnect();
 
-    return subscribe(() => {
+    let onScreen = true;
+    const intersectionObserver = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+    });
+    intersectionObserver.observe(wrap);
+
+    const unsubscribe = subscribe(() => {
+      if (!onScreen) return;
       scroll += CONFIG.scrollSpeed;
       while (scroll >= 1) {
         record();
@@ -90,12 +130,17 @@ function Waveform({ pitchRef, subscribe }) {
       }
       render();
     });
-  }, [pitchRef, subscribe]);
 
-  const COUNT = CONFIG.bars + 2;
+    return () => {
+      resizeObserver.disconnect();
+      intersectionObserver.disconnect();
+      unsubscribe();
+    };
+  }, [pitchRef, subscribe]);
 
   return (
     <div
+      ref={wrapRef}
       className="wave"
       aria-hidden="true"
       style={{
@@ -104,20 +149,7 @@ function Waveform({ pitchRef, subscribe }) {
         width: `min(${CONFIG.maxWidth}px, ${CONFIG.widthCqw}cqw)`,
       }}
     >
-      <div className="wave__inner" ref={innerRef}>
-        {Array.from({ length: COUNT }).map((_, i) => (
-          <span
-            key={i}
-            ref={(el) => (barsRef.current[i] = el)}
-            className="wave__bar"
-            style={{
-              top: `${((i - 1) / CONFIG.bars) * 100}%`,
-              height: CONFIG.barThickness,
-              marginTop: -CONFIG.barThickness / 2,
-            }}
-          />
-        ))}
-      </div>
+      <canvas ref={canvasRef} className="wave__canvas" />
     </div>
   );
 }

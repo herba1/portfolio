@@ -711,6 +711,12 @@
   overscroll-behavior-y: auto;
 }
 
+@media (hover: hover) and (pointer: fine) {
+  .deck[data-embedded] {
+    overflow-y: hidden;
+  }
+}
+
 .deck__stage[data-drag="1"] {
   transition-duration: 80ms;
   transition-timing-function: linear;

@@ -5,13 +5,41 @@ import { createPitchDetector } from "./pitch/detector";
 import { createPitchTracker } from "./pitch/tracker";
 import { buildInputChain, disconnectChain } from "./pitch/filters";
 
+const DEMO_SAMPLE_RATE = 48000;
+const DEMO_NOTE_SECONDS = 2.8;
+const DEMO_HARMONICS = [1, 0.5, 0.25];
+
+function fillDemoBuffer(buffer, demo, nowMs) {
+  const elapsed = (nowMs - demo.startedAt) / 1000;
+  const noteIndex = Math.floor(elapsed / DEMO_NOTE_SECONDS);
+  const sinceAttack = elapsed - noteIndex * DEMO_NOTE_SECONDS;
+  const base = demo.frequencies[noteIndex % demo.frequencies.length];
+  const cents =
+    -32 * Math.exp(-Math.max(0, sinceAttack - 0.35) / 0.7) + Math.sin(sinceAttack * 7) * 1.2;
+  const frequency = base * 2 ** (cents / 1200);
+  const tremolo = 1 + 0.08 * Math.sin(sinceAttack * 11);
+  const amplitude = Math.min(1, sinceAttack / 0.015) * (0.02 + 0.3 * Math.exp(-sinceAttack / 0.55)) * tremolo;
+  const endTime = nowMs / 1000;
+  const length = buffer.length;
+  for (let i = 0; i < length; i++) {
+    const t = endTime - (length - i) / DEMO_SAMPLE_RATE;
+    let sample = 0;
+    for (let h = 0; h < DEMO_HARMONICS.length; h++) {
+      sample += DEMO_HARMONICS[h] * Math.sin(2 * Math.PI * frequency * (h + 1) * t);
+    }
+    buffer[i] = sample * amplitude;
+  }
+}
+
 export default function useTuner({
   windowSize = 4096,
   minFrequency = 73,
   maxFrequency = 1400,
   detectMs = 33,
+  demoFrequencies = null,
+  demoPaused = false,
 } = {}) {
-  const [status, setStatus] = useState("idle");
+  const [status, setStatus] = useState(demoFrequencies?.length ? "running" : "idle");
 
   const streamRef = useRef(null);
   const contextRef = useRef(null);
@@ -22,6 +50,9 @@ export default function useTuner({
   const trackerRef = useRef(null);
   const timeBufferRef = useRef(null);
   const frameRef = useRef(0);
+  const demoRef = useRef(null);
+  const demoPausedRef = useRef(false);
+  demoPausedRef.current = demoPaused;
   const lastDetectRef = useRef(0);
   const startingRef = useRef(false);
   const subscribersRef = useRef(new Set());
@@ -52,7 +83,27 @@ export default function useTuner({
     const context = contextRef.current;
     const now = performance.now();
 
-    if (analyser && detector && tracker && buffer && context) {
+    const demo = demoRef.current;
+    if (demo && detector && tracker && buffer) {
+      const config = configRef.current;
+      if (!demoPausedRef.current && now - lastDetectRef.current >= config.detectMs) {
+        lastDetectRef.current = now;
+        fillDemoBuffer(buffer, demo, now);
+        const reading = detector.analyze(
+          buffer,
+          DEMO_SAMPLE_RATE,
+          config.minFrequency,
+          config.maxFrequency
+        );
+        const next = tracker.update(reading, now);
+        const target = pitchRef.current;
+        target.frequency = next.frequency;
+        target.confidence = next.confidence;
+        target.level = next.level;
+        target.voiced = next.voiced;
+        target.holding = next.holding;
+      }
+    } else if (analyser && detector && tracker && buffer && context) {
       const config = configRef.current;
       if (now - lastDetectRef.current >= config.detectMs) {
         lastDetectRef.current = now;
@@ -235,6 +286,27 @@ export default function useTuner({
     document.addEventListener("visibilitychange", onVisibility);
     return () => document.removeEventListener("visibilitychange", onVisibility);
   }, [startLoop]);
+
+  useEffect(() => {
+    if (!demoFrequencies?.length) return undefined;
+    timeBufferRef.current = new Float32Array(windowSize);
+    detectorRef.current = createPitchDetector(windowSize);
+    trackerRef.current = createPitchTracker();
+    demoRef.current = { frequencies: demoFrequencies, startedAt: performance.now() };
+    setStatus("running");
+    startLoop();
+    return () => {
+      demoRef.current = null;
+      trackerRef.current?.reset();
+      const target = pitchRef.current;
+      target.frequency = 0;
+      target.confidence = 0;
+      target.level = 0;
+      target.voiced = false;
+      target.holding = false;
+      setStatus("idle");
+    };
+  }, [demoFrequencies, windowSize, startLoop]);
 
   useEffect(() => () => teardown(), [teardown]);
 

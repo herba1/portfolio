@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { samplePath, scaleAt } from "@/app/psa/flightPath";
-import { EASES, PATH_KNOBS, PATH_VARIANTS, easeFn } from "@/app/psa/saveMotion";
-import "@/app/psa/psa-kit.css";
+import { samplePath, scaleAt } from "@/app/flyout/flightPath";
+import { EASES, PATH_KNOBS, PATH_VARIANTS, easeFn } from "@/app/flyout/saveMotion";
+import "@/app/flyout/flyout-kit.css";
 import "./arcs.css";
 
 /* ─────────────────────────────────────────────────────────────────────────
@@ -40,7 +40,7 @@ import "./arcs.css";
      WARNINGS      the specific failures we have actually hit, checked for.
    ───────────────────────────────────────────────────────────────────────── */
 
-// The shell being simulated: /psa is a 430px phone with a two-column grid.
+// The shell being simulated: /flyout is a 430px phone with a two-column grid.
 const SHELL = { w: 390, h: 760 };
 const NAV = { h: 64 };
 const PAD = 16;

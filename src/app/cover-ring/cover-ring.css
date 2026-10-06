@@ -1,0 +1,90 @@
+.cr {
+  --cr-thick: calc(var(--cr-card, 160px) * 0.03);
+  --cr-corner: 10px;
+  position: absolute;
+  inset: 0;
+  perspective: 1300px;
+  perspective-origin: 50% 44%;
+  overflow: hidden;
+  cursor: grab;
+  touch-action: none;
+  background: var(--color-surface-subtle);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.cr:active {
+  cursor: grabbing;
+}
+
+.cr__world {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+.cr__card {
+  position: absolute;
+  left: calc(var(--cr-card) / -2);
+  top: calc(var(--cr-card) / -2);
+  width: var(--cr-card);
+  height: var(--cr-card);
+  transform-style: preserve-3d;
+}
+
+.cr__art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--cr-corner);
+  backface-visibility: hidden;
+}
+
+.cr__back {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--cr-corner);
+  transform: translateZ(calc(var(--cr-thick) * -1)) rotateY(180deg);
+  backface-visibility: hidden;
+  filter: saturate(1.25);
+}
+
+.cr__card::before,
+.cr__card::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--cr-corner) * 0.7);
+  width: var(--cr-thick);
+  height: calc(100% - var(--cr-corner) * 1.4);
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+
+.cr__card::before {
+  left: 0;
+  transform-origin: 0 50%;
+  transform: translateZ(calc(var(--cr-thick) * -1)) rotateY(-90deg);
+  background-image:
+    linear-gradient(to left, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.16) 7%, rgb(255 255 255 / 0.04) 20%, rgb(0 0 0 / 0.06) 46%, rgb(0 0 0 / 0.2) 76%, rgb(0 0 0 / 0.34) 100%),
+    var(--cr-edge, linear-gradient(to right, var(--neutral-0), var(--neutral-300)));
+}
+
+.cr__card::after {
+  right: 0;
+  transform-origin: 100% 50%;
+  transform: translateZ(calc(var(--cr-thick) * -1)) rotateY(90deg);
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.16) 7%, rgb(255 255 255 / 0.04) 20%, rgb(0 0 0 / 0.06) 46%, rgb(0 0 0 / 0.2) 76%, rgb(0 0 0 / 0.34) 100%),
+    var(--cr-edge, linear-gradient(to right, var(--neutral-0), var(--neutral-300)));
+}
+
+.cr:not([data-embedded]) {
+  position: relative;
+  min-height: 100dvh;
+}

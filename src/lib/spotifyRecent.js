@@ -20,7 +20,12 @@ const TOP_URL =
 const RECENT_URL =
   "https://api.spotify.com/v1/me/player/recently-played?limit=50";
 
+const TOKEN_MARGIN_MS = 60_000;
+let cachedToken = null;
+let cachedTracks = null;
+
 export async function getAccessToken() {
+  if (cachedToken && cachedToken.expiresAt > Date.now()) return cachedToken.value;
   const id = process.env.SPOTIFY_CLIENT_ID;
   const secret = process.env.SPOTIFY_CLIENT_SECRET;
   const refresh = process.env.SPOTIFY_REFRESH_TOKEN;
@@ -41,7 +46,12 @@ export async function getAccessToken() {
   });
   if (!res.ok) return null;
   const json = await res.json();
-  return json.access_token || null;
+  if (!json.access_token) return null;
+  cachedToken = {
+    value: json.access_token,
+    expiresAt: Date.now() + (json.expires_in || 3600) * 1000 - TOKEN_MARGIN_MS,
+  };
+  return cachedToken.value;
 }
 
 function mapTrack(tr) {
@@ -145,4 +155,13 @@ export async function getRecentTracks() {
   } catch {
     return { tracks: [], mode: null };
   }
+}
+
+export async function getCachedRecentTracks(maxAgeMs = 300_000) {
+  if (cachedTracks && Date.now() - cachedTracks.at < maxAgeMs) return cachedTracks.pending;
+  const pending = getRecentTracks();
+  cachedTracks = { at: Date.now(), pending };
+  const result = await pending;
+  if (!result.tracks.length) cachedTracks = null;
+  return result;
 }

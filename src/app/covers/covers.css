@@ -1425,11 +1425,16 @@
 .cv-spotify-link {
   flex: none;
   align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-size: var(--text-ui);
-  font-weight: var(--font-weight-normal);
+  font-weight: var(--font-weight-strong);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
   color: var(--color-ink-inverse);
   text-decoration: none;
-  padding: 9px 18px;
+  padding: 8px 16px 8px 10px;
   background: var(--color-surface-inverse);
   border: none;
   /* Transform is deliberately NOT transitioned here: both links are motion
@@ -1446,11 +1451,28 @@
   z-index: calc(var(--z-index-raised) + 3);
   display: inline-flex;
   align-items: center;
-  padding: 0 18px;
+  padding: 0 16px 0 10px;
   touch-action: none;
 }
 .cv-spotify-link:hover {
   background: var(--neutral-800);
+}
+.cv-spotify-mark {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  color: currentColor;
+  transition: transform var(--duration-300) cubic-bezier(0.22, 1, 0.36, 1);
+}
+@media (hover: hover) and (pointer: fine) {
+  .cv-spotify-link:hover .cv-spotify-mark {
+    transform: rotate(-14deg) scale(1.08);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-spotify-mark {
+    transition: none;
+  }
 }
 
 /* mobile (stacked) — lighter player, tidier panel. No lyrics here, so the panel
@@ -1880,4 +1902,101 @@
 .cv-lyric.is-tappable {
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
+}
+.cv-live {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  align-items: center;
+  overflow: hidden;
+  -webkit-mask-image: var(--cv-lyrics-fade);
+  mask-image: var(--cv-lyrics-fade);
+}
+.cv-live-track {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  width: 100%;
+  opacity: 0;
+  transition: opacity var(--duration-300) ease;
+}
+.cv-live-track[data-ready="true"] {
+  opacity: 1;
+}
+.cv-live-line {
+  grid-area: 1 / 1;
+  width: 100%;
+  margin: 0;
+  text-align: left;
+  font-size: var(--text-title);
+  font-weight: var(--text-title--font-weight);
+  letter-spacing: var(--live-tracking, var(--text-title--letter-spacing));
+  line-height: var(--text-title--line-height);
+  color: var(--color-ink);
+  text-wrap: balance;
+  overflow-wrap: break-word;
+  min-width: 0;
+  transform-origin: left center;
+  will-change: transform, opacity;
+}
+.cv-live-line.is-tappable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.cv-live-word {
+  display: inline-block;
+  white-space: nowrap;
+  margin-right: 0.3em;
+}
+.cv-live-word:last-child {
+  margin-right: 0;
+}
+.cv-live-char {
+  display: inline-block;
+  color: var(--color-ink);
+  opacity: calc(0.3 + 0.7 * var(--c, 0));
+  transform: perspective(900px)
+    translate3d(
+      0,
+      calc((1 - var(--c, 0)) * var(--rise, 0.3em) - var(--hold-lift, 0em)),
+      calc((var(--c, 0) - 1) * var(--char-depth, 70px) + sin(var(--c, 0) * 3.14159) * var(--char-pop, 36px))
+    )
+    rotateX(calc((var(--c, 0) - 1) * var(--char-tilt, 60deg)))
+    rotateY(calc((1 - var(--c, 0)) * var(--char-spin, 55deg) * var(--spin-dir, 1))) scale(var(--hold-scale, 1));
+  transform-origin: 50% 80%;
+  backface-visibility: hidden;
+  text-shadow:
+    0 0 0.12em rgb(255 255 255 / calc(var(--s, 0) * var(--shimmer-brightness, 2))),
+    0 0 0.45em rgb(255 255 255 / calc(var(--s, 0) * var(--shimmer-brightness, 2) * 0.55));
+}
+@media (prefers-reduced-motion: reduce) {
+  .cv-live-line {
+    filter: none;
+  }
+}
+
+.cv-intro-picker {
+  position: fixed;
+  right: 12px;
+  top: 50%;
+  z-index: var(--z-index-raised);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  transform: translateY(-50%);
+}
+.cv-intro-chip {
+  padding: 4px 12px;
+  border: none;
+  border-radius: 999px;
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+  font-size: var(--text-ui-sm);
+  font-weight: var(--text-ui-sm--font-weight);
+  cursor: pointer;
+}
+.cv-intro-chip[data-active="true"] {
+  background: var(--color-ink);
 }

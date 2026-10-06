@@ -5,8 +5,6 @@ import BackdropDock from "../backdrop/BackdropDock";
 import { readTone, toneMode } from "../backdrop/tone";
 import "./song-search.css";
 
-// `embedded` changes nothing here: Song Search has no dev or tuning UI to
-// drop — the dock and the ground toggle are the piece.
 export default function SongSearch({ embedded = false }) {
   const [mode, setMode] = useState("dark");
   const [picked, setPicked] = useState(null);
@@ -34,18 +32,20 @@ export default function SongSearch({ embedded = false }) {
               <span className="ss-pick__artist">{picked.artist}</span>
             </figcaption>
           </figure>
-        ) : (
+        ) : embedded ? null : (
           <p className="ss-hint">Search a song to load its cover and preview.</p>
         )}
       </div>
 
-      <button
-        type="button"
-        className="ss-toggle"
-        onClick={() => setMode((current) => (current === "dark" ? "light" : "dark"))}
-      >
-        {mode === "dark" ? "Light ground" : "Dark ground"}
-      </button>
+      {embedded ? null : (
+        <button
+          type="button"
+          className="ss-toggle"
+          onClick={() => setMode((current) => (current === "dark" ? "light" : "dark"))}
+        >
+          {mode === "dark" ? "Light ground" : "Dark ground"}
+        </button>
+      )}
 
       <BackdropDock onSelect={setPicked} mode={mode} />
     </main>

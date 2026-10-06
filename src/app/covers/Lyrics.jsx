@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import StageLyrics from "./StageLyrics";
 import { guessOffsetMs, publishOffset, resolveOffset, writeOverride } from "./lib/lyricOffsets";
 
 // Lyrics from /api/spotify/lyrics, in one of two modes.
@@ -72,7 +73,8 @@ export default function Lyrics({
   // honest in a way that a drifting highlight is not.
   const timed = data?.lines?.length ? data.lines : null;
   const savedOffset = useMemo(() => resolveOffset(isrc), [isrc]);
-  const offsetMs = nudgeMs !== null ? nudgeMs : savedOffset;
+  const previewSynced = !!data?.previewSynced;
+  const offsetMs = previewSynced ? 0 : nudgeMs !== null ? nudgeMs : savedOffset;
 
   // Click-to-sync: while the preview plays, clicking the line you can hear says
   // "this is playing now", which is the whole offset in one gesture — no hunting
@@ -84,19 +86,27 @@ export default function Lyrics({
   // synced for the rest of the session (and their next visit, via localStorage).
   // In dev the same tap is also POSTed to the source map, which is how a track
   // ends up synced in production for everyone without a second gesture.
-  const calibrating = !!timed;
+  const calibrating = !!timed && !previewSynced;
+  const previewMsRef = useRef(previewMs);
+  useEffect(() => {
+    previewMsRef.current = previewMs;
+  }, [previewMs]);
   const onCalibrate = useCallback(
     (i) => {
       if (!calibrating || !timed?.[i] || timed[i].start == null) return;
-      const next = Math.max(0, Math.round(timed[i].start - previewMs));
+      const next = Math.max(0, Math.round(timed[i].start - previewMsRef.current));
       setNudgeMs(next);
       writeOverride(isrc, next);
       publishOffset(isrc, next, `${artist} — ${title}`);
     },
-    [calibrating, timed, previewMs, isrc, artist, title],
+    [calibrating, timed, isrc, artist, title],
   );
   const synced = !!timed && offsetMs !== null;
   const trackMs = previewMs + (offsetMs || 0);
+  const clockRef = useRef({ ms: trackMs, at: 0, playing: false });
+  useEffect(() => {
+    clockRef.current = { ms: trackMs, at: performance.now(), playing };
+  }, [trackMs, playing]);
 
   const lines = useMemo(() => {
     if (timed) return timed;
@@ -118,7 +128,7 @@ export default function Lyrics({
     return found;
   }, [synced, timed, trackMs]);
 
-  useLyricCalibration({ enabled: !!timed, isrc, timed, offsetMs, setNudgeMs, playing });
+  useLyricCalibration({ enabled: !!timed && !previewSynced, isrc, timed, offsetMs, setNudgeMs, playing });
 
   return (
     <div className="cv-lyrics-stage">
@@ -126,6 +136,8 @@ export default function Lyrics({
       <div className={`cv-lyrics-content ${status !== "loading" ? "is-on" : "is-off"}`}>
         {status === "none" ? (
           <div className="cv-lyrics--note">no lyrics found</div>
+        ) : status === "ready" && synced ? (
+          <StageLyrics lines={timed} clock={clockRef} onCalibrate={calibrating ? onCalibrate : null} />
         ) : status === "ready" ? (
           <LyricScroller
             lines={lines}

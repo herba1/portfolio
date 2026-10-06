@@ -16,6 +16,9 @@
 // have anything at all, so callers that only render text need no changes; `lines`
 // carries [{ text, start, end, words }] in ms when a timed source answered.
 
+import previewSync from "../../../covers/lib/previewSync.json" with { type: "json" };
+import { previewSyncedLyrics } from "../../../covers/lib/previewSync.js";
+
 const UA = { "User-Agent": "herb.art covers (https://herb.art)" };
 const TIMEOUT = 6000;
 
@@ -132,6 +135,11 @@ function unshout(res) {
   };
 }
 
+function withPreviewSync(res, isrc, rawRequested) {
+  const synced = isrc && !rawRequested ? previewSyncedLyrics(previewSync[isrc], res.plain) : null;
+  return synced || res;
+}
+
 export async function GET(request) {
   const url = new URL(request.url);
   const artist = (url.searchParams.get("artist") || "").trim();
@@ -155,7 +163,7 @@ export async function GET(request) {
         })}`,
       ),
     );
-    if (hit) return Response.json(unshout(hit), { headers: cached });
+    if (hit) return Response.json(withPreviewSync(unshout(hit), isrc, url.searchParams.get("raw") === "1"), { headers: cached });
   }
 
   if (!title) return Response.json(empty);

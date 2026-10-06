@@ -10,7 +10,7 @@ import { useEffect, useState } from "react";
    phone) only brings up the ones you can see or are about to. On a piece's
    own page it is on screen from the first frame, so this resolves on the
    observer's first report and costs nothing. */
-export default function useNearViewport(ref, margin = "25% 0px") {
+export default function useNearViewport(ref, margin = "120% 0px") {
   const [near, setNear] = useState(false);
 
   useEffect(() => {

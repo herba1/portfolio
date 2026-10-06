@@ -1,5 +1,6 @@
 "use client";
 
+import { introFrame, settleToGrid } from "./lib/introStyles";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import * as THREE from "three";
@@ -26,10 +27,13 @@ const MARGIN = 3; // extra rings of tiles kept just outside the viewport (grace)
 
 // Which unique cover lives at an absolute lattice cell. The unique 6×5 set is
 // tiled infinitely, so content repeats — the "duplicate the quadrant" trick.
+const PROXIMITY_RESPONSE = 0.32;
+const PROXIMITY_DAMPING = 0.92;
+
 const contentIdx = (col, row) =>
   (mod(row, GRID_ROWS) * GRID_COLS + mod(col, GRID_COLS)) % COUNT;
 
-function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, onReady }) {
+function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, onReady, onLanded }) {
   const { size, gl } = useThree();
   const input = useGridInput(configRef);
 
@@ -52,6 +56,9 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
   useEffect(() => {
     if (!apiRef) return;
     apiRef.current = {
+      replayIntro: () => {
+        replayRef.current = true;
+      },
       resetView: () => {
         input.offset.current.x = 0;
         input.offset.current.y = 0;
@@ -196,6 +203,11 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
     });
   const slots = useRef([]);
   const t0 = useRef(null);
+  const replayRef = useRef(false);
+  const starsDirty = useRef(true);
+  const introBusy = useRef(true);
+  const interruptAt = useRef(null);
+  const landedFired = useRef(false);
   const readyFired = useRef(false); // fire onReady once, when the reveal arms
   const lastFocus = useRef(-1);
   const stretchX = useRef({ x: 0, v: 0 });
@@ -203,6 +215,7 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
 
   useEffect(() => {
     meshes.current.length = poolCount;
+    const rMax = Math.max(1, Math.hypot(poolCols / 2, poolRows / 2));
     const cI = Math.floor(poolCols / 2);
     const cJ = Math.floor(poolRows / 2);
     slots.current = Array.from({ length: poolCount }, (_, k) => {
@@ -219,16 +232,40 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
         posX: { x: 0, v: 0 },
         posY: { x: 0, v: 0 },
         scale: { x: 0, v: 0 },
-        enter: { x: 0, v: 0 }, // entrance spring: 0 → overshoot → 1 once born
+        enter: { x: 0, v: 0 },
+        prox: { x: 0, v: 0 },
         push: { x: 0, v: 0 }, // click-recoil spring: 0 → 1 while a cover is open
         renderScale: 1, // last drawn scale (hover × entrance × depth) — tap rect
         idx: -1,
         init: false,
         born: false,
         bornDelay: diag, // diagonal step index (× popStagger)
+        bornRadial: Math.hypot(di, dj),
+        bornRadN: Math.hypot(di, dj) / rMax,
+        bornAngle: Math.atan2(dj, di),
+        bornCol: cx,
+        bornColN: cx / Math.max(1, poolCols - 1),
+        bornRowN: (poolRows - 1 - rj) / Math.max(1, poolRows - 1),
+        rowN: (poolRows - 1 - rj) / Math.max(1, poolRows - 1),
+        star: false,
+        starCount: poolCount,
+        loadedAt: null,
+        fanAt: 0,
+        bornRowTop: poolRows - 1 - rj,
+        bornRank: hash01(k * 11.17),
+        ring: k % 2,
+        ringT: Math.floor(k / 2) / Math.ceil(poolCount / 2),
+        jx: hash01(k * 5.31) * 2 - 1,
+        jy: hash01(k * 8.77) * 2 - 1,
+        jr: hash01(k * 2.93) * 2 - 1,
+        rowDir: Math.abs(dj) % 2 === 0 ? 1 : -1,
+        poolCols,
+        poolRows,
+        spinDir: hash01(k * 3.7) > 0.5 ? 1 : -1,
         bornJit: hash01(k * 7.3), // per-tile timing scatter (× popJitter)
       };
     });
+    starsDirty.current = true;
     t0.current = null; // restart the load cascade
   }, [poolCount, poolCols, poolRows]);
 
@@ -237,7 +274,7 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
   useFrame((state, delta) => {
     const cfg = configRef.current;
     // one cover to the GPU per frame, at the top of the frame — see makeCovers
-    drainCoverUploads(gl, 1);
+    drainCoverUploads(gl, t0.current == null ? 6 : 1);
     // Clamped at BOTH ends. The ceiling stops a stalled tab from teleporting the
     // grid on the frame it resumes. The floor matters just as much and is easier
     // to miss: the velocity below divides pan travel by dt, so a zero delta — a
@@ -405,6 +442,36 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
     // so the stagger plays over real images — not blank slate. A timeout is the
     // escape hatch if art never arrives (Spotify off / offline).
     const elapsed = state.clock.elapsedTime;
+    if (replayRef.current) {
+      replayRef.current = false;
+      for (const slot of slots.current) {
+        slot.born = false;
+        slot.loadedAt = null;
+        slot.enter.x = 0;
+        slot.enter.v = 0;
+      }
+      starsDirty.current = true;
+      interruptAt.current = null;
+      introBusy.current = true;
+      t0.current = null;
+    }
+    if (starsDirty.current && slots.current.length) {
+      starsDirty.current = false;
+      const nearest = new Map();
+      for (const slot of slots.current) {
+        const key = contentIdx(slot.col, slot.row);
+        const dist = Math.hypot(slot.col, slot.row);
+        const best = nearest.get(key);
+        if (!best || dist < best.dist) nearest.set(key, { slot, dist });
+      }
+      for (const slot of slots.current) slot.star = false;
+      const ranked = [...nearest.entries()].sort(([a], [b]) => a - b);
+      ranked.forEach(([, { slot }], rank) => {
+        slot.star = true;
+        slot.ringT = rank / ranked.length;
+        slot.starCount = ranked.length;
+      });
+    }
     if (t0.current == null) {
       if (reduce || coversReady() || elapsed > cfg.popReadyTimeout) {
         t0.current = elapsed;
@@ -416,6 +483,13 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
     }
     const armed = t0.current != null;
     const since = armed ? elapsed - t0.current : 0;
+    if (armed && introBusy.current && interruptAt.current == null && (input.down.current || Math.hypot(input.vel.current.x, input.vel.current.y) > 40)) {
+      interruptAt.current = since;
+      for (const slot of slots.current) slot.snap = slot.lastPose || null;
+    }
+    let busy = false;
+    let onScreenTiles = 0;
+    let onScreenLanded = 0;
 
     // corner radius is a live uniform — no texture rebuild when it's dragged
     radiusUniform.current.value = cfg.cornerRadius;
@@ -493,6 +567,7 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
       guard = 0;
       while (slot.posX.x > limX && guard++ < 8) { col -= poolCols; slot.posX.x -= spanX; }
       while (slot.posX.x < -limX && guard++ < 16) { col += poolCols; slot.posX.x += spanX; }
+      if (col !== slot.col || row !== slot.row) slot.snap = null;
       slot.col = col;
       slot.row = row;
 
@@ -569,28 +644,30 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
       // this tile's own image actually being painted (coverLoaded). The second
       // is the hard guarantee — a tile never springs in over a blank slate even
       // if the global ready-timeout armed the clock early.
-      const startDelay =
-        (slot.bornDelay + slot.bornJit * cfg.popJitter) * cfg.popStagger;
-      if (
-        !slot.born &&
-        armed &&
-        (reduce || (since >= startDelay && coverLoaded(idx)))
-      ) {
-        slot.born = true;
+      if (slot.loadedAt == null && armed && coverLoaded(idx)) slot.loadedAt = since;
+      const speed = Math.max(0.05, cfg.popSpeed);
+      let pose = reduce
+        ? null
+        : introFrame(cfg.popStyle, { since, armed, speed, cfg, slot, wx, wy, viewW: state.size.width, viewH: state.size.height });
+      if (pose && interruptAt.current != null) {
+        pose = slot.snap
+          ? settleToGrid(slot.snap, { since, at: interruptAt.current, wx, wy, opacity: pose.opacity })
+          : { x: wx, y: wy, z: 0, scale: 1, q: null, rx: 0, ry: 0, rz: 0, landed: 1, started: true, opacity: pose.opacity };
       }
-      if (reduce || !slot.born) {
-        slot.enter.x = 0;
-        slot.enter.v = 0;
-      } else {
-        stepSpring(slot.enter, 1, dt, cfg.popResponse, cfg.popDamping);
+      if (pose) {
+        slot.lastPose = pose;
+        if (pose.landed < 1) busy = true;
+        if (Math.abs(pose.x) < halfW && Math.abs(pose.y) < halfH && pose.opacity > 0) {
+          onScreenTiles++;
+          if (pose.landed >= 0.9) onScreenLanded++;
+        }
       }
-      const e = reduce ? 1 : slot.enter.x; // 0 → ~1.1 (overshoot) → 1
-      const enterScale = lerp(cfg.popScaleFrom, 1, e);
-      const enterRise = reduce ? 0 : -(1 - e) * cfg.popRise; // rise up, overshoot
-      const enterOpacity = reduce ? 1 : smoothstep(0, 0.45, e); // chases the spring
+      if (!slot.born && armed && (reduce || (pose && pose.started))) slot.born = true;
+      const enterScale = pose ? pose.scale : 1;
+      const enterOpacity = pose ? pose.opacity : 1;
 
       const g = Math.exp(-(dn * dn) / (2 * sigma * sigma)); // 1 centre → 0 far
-      const hovered = !isSource && hCol != null && col === hCol && row === hRow;
+      const hovered = !introBusy.current && !isSource && hCol != null && col === hCol && row === hRow;
 
       // steady-state scale spring tracks ONLY hover + centre bump; the entrance
       // is owned by the envelope, so park the spring at target until revealed.
@@ -612,8 +689,20 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
       // it dims, so it reads as receding instead of just going transparent.
       const distN = clamp(dn / halfDiag, 0, 1);
       const away = smoothstep(cfg.depthStart, 1, distN);
-      const depth = 1 - cfg.depthFade * away;
-      const depthScale = 1 - cfg.depthScale * away;
+      const proxState = slot.prox || (slot.prox = { x: 0, v: 0 });
+      const landing = pose && interruptAt.current == null && pose.landed != null && pose.landed < 0.9995;
+      if (reduce) {
+        proxState.x = away;
+        proxState.v = 0;
+      } else if (landing) {
+        proxState.x = away * pose.landed;
+        proxState.v = 0;
+      } else {
+        stepSpring(proxState, away, dt, PROXIMITY_RESPONSE, PROXIMITY_DAMPING);
+      }
+      const proximity = clamp(proxState.x, 0, 1);
+      const depth = 1 - cfg.depthFade * proximity;
+      const depthScale = 1 - cfg.depthScale * proximity;
 
       const sc = slot.scale.x * enterScale * depthScale;
       // the tile's true on-screen scale this frame, cached so a tap can hand the
@@ -664,11 +753,22 @@ function CoversGrid({ config, configRef, apiRef, covers, onFocusChange, onOpen, 
 
       // apply
       const baseW = cfg.tileSize * Math.max(0.0001, sc * pushShrink);
-      mesh.position.set(wx + pdx, wy + enterRise + pdy, hovered ? 20 : g * 4);
+      const depthKey = pose && pose.landed < 1
+        ? 100 + (pose.order ?? pose.scale * 200) + slot.bornRank * 3
+        : g * 4;
+      mesh.position.set((pose ? pose.x : wx) + pdx, (pose ? pose.y : wy) + pdy, hovered ? depthKey + 20 : depthKey);
+      if (pose && pose.q) mesh.quaternion.set(pose.q[0], pose.q[1], pose.q[2], pose.q[3]);
+      else mesh.rotation.set(pose ? pose.rx : 0, pose ? pose.ry : 0, pose ? pose.rz : 0);
       mesh.scale.set(baseW * tileSX, baseW * tileSY, 1);
-      mesh.renderOrder = hovered ? 10 : g > 0.5 ? 2 : 1;
+      mesh.renderOrder = Math.round(hovered ? depthKey + 20 : depthKey);
       mesh.material.opacity = clamp(depth * enterOpacity, 0, 1);
       mesh.visible = sc > 0.002 && !isSource;
+    }
+
+    introBusy.current = busy;
+    if (armed && !landedFired.current && (reduce || !busy || (onScreenTiles > 0 && onScreenLanded / onScreenTiles >= 0.7))) {
+      landedFired.current = true;
+      onLanded?.();
     }
 
     if (focusIdx !== lastFocus.current) {
@@ -753,6 +853,7 @@ export default memo(
     a.onFocusChange === b.onFocusChange &&
     a.onOpen === b.onOpen &&
     a.onReady === b.onReady &&
+    a.onLanded === b.onLanded &&
     sameConfig(a.config, b.config),
 );
 

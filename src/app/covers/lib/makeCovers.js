@@ -54,9 +54,33 @@ export function makeCoversMeta(count = COUNT) {
 // image URLs; until then there's nothing to load, so tiles keep the slate fill.
 // Swapping disposes the texture cache.
 let SOURCES = null;
+const prefetched = new Map();
+
+function prefetchCoverImages() {
+  prefetched.clear();
+  if (!SOURCES || typeof Image === "undefined") return;
+  for (let i = 0; i < COUNT; i++) {
+    const url = SOURCES[i % SOURCES.length]?.image;
+    if (!url || prefetched.has(url)) continue;
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.decoding = "async";
+    img.fetchPriority = "high";
+    const ready = new Promise((resolve) => {
+      img.onload = () => (img.decode ? img.decode().then(() => resolve(true), () => resolve(true)) : resolve(true));
+      img.onerror = () => resolve(false);
+    });
+    img.src = url;
+    prefetched.set(url, { img, ready });
+  }
+}
+
 export function setCoverSources(arr) {
-  SOURCES = arr && arr.length ? arr : null;
+  const next = arr && arr.length ? arr : null;
+  if (next && SOURCES && next.length === SOURCES.length && next.every((cover, i) => cover.image === SOURCES[i].image)) return;
+  SOURCES = next;
   disposeCoverTextures();
+  prefetchCoverImages();
 }
 const sourceUrl = (i) => (SOURCES ? SOURCES[i % SOURCES.length]?.image : null);
 
@@ -150,26 +174,28 @@ export function getCoverTexture(index, opts = {}) {
   tex.needsUpdate = true;
   texCache.set(key, tex);
 
-  const url = sourceUrl(i); // Spotify album art when configured, else none
+  const url = sourceUrl(i);
   if (url) {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => {
-      // Neither painted nor flipped to needsUpdate here. drawImage on a
-      // freshly-loaded Image forces a synchronous JPEG decode on the main
-      // thread, and thirty covers landing in network bursts turned that
-      // into ~120ms stalls right as the grid arrives. decode() moves the
-      // decode off-thread; the paint AND the upload then both happen in
-      // drainCoverUploads, where the loop decides which frame pays for
-      // them and opens the load gate when it has.
-      const queue = () => pendingUploads.push({ tex, i, img, ctx, s });
-      if (img.decode) img.decode().then(queue, queue);
-      else queue();
-    };
-    img.onerror = () => loadedIdx.add(i); // give up waiting; keep slate fill
-    img.src = url;
+    const cached = prefetched.get(url);
+    if (cached) {
+      cached.ready.then((ok) => {
+        if (texCache.get(key) !== tex) return;
+        if (ok) pendingUploads.push({ tex, i, img: cached.img, ctx, s });
+        else loadedIdx.add(i);
+      });
+    } else {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        const queue = () => pendingUploads.push({ tex, i, img, ctx, s });
+        if (img.decode) img.decode().then(queue, queue);
+        else queue();
+      };
+      img.onerror = () => loadedIdx.add(i);
+      img.src = url;
+    }
   } else {
-    loadedIdx.add(i); // no source to wait on
+    loadedIdx.add(i);
   }
 
   return tex;

@@ -1,6 +1,7 @@
 "use client";
 
-import { memo, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import dynamic from "next/dynamic";
 import { motion } from "motion/react";
 import { DEFAULT_TUNING_ID, getTuning } from "./tunings";
 import { noteToFreq } from "./pitch/notes";
@@ -11,11 +12,11 @@ import NoteReadout from "./NoteReadout";
 import Waveform from "./Waveform";
 import TunerMeter from "./TunerMeter";
 import Controls from "./Controls";
-import TunerDevControls from "./TunerDevControls";
 import { isDevView } from "@/lib/viewMode";
 import "./tuner.css";
 
 const IS_DEV = isDevView();
+const TunerDevControls = dynamic(() => import("./TunerDevControls"), { ssr: false });
 const A4 = 440;
 const LOW_MARGIN = 0.87;
 const HIGH_MARGIN = 4;
@@ -67,7 +68,23 @@ export default function TunerExperience({ embedded = false }) {
   const tuning = getTuning(tuningId);
   const analysis = useMemo(() => analysisFor(tuning, A4), [tuning]);
 
-  const { status, enable, pitchRef, subscribe } = useTuner(analysis);
+  const [onScreen, setOnScreen] = useState(false);
+  useEffect(() => {
+    if (!embedded) return undefined;
+    const observer = new IntersectionObserver(([entry]) => setOnScreen(entry.isIntersecting));
+    observer.observe(rootRef.current);
+    return () => observer.disconnect();
+  }, [embedded]);
+
+  const demoFrequencies = useMemo(
+    () =>
+      embedded && tuning.strings.length
+        ? tuning.strings.map((string) => noteToFreq(string.midi, A4))
+        : null,
+    [embedded, tuning],
+  );
+
+  const { status, enable, pitchRef, subscribe } = useTuner({ ...analysis, demoFrequencies, demoPaused: !onScreen });
   const readouts = useTuningEngine({
     pitchRef,
     subscribe,

@@ -14,7 +14,7 @@ export default function IntroSettle() {
   useEffect(() => {
     let timer = 0;
     const onEnd = (event) => {
-      if (event.animationName !== "xl-tile-in") return;
+      if (event.animationName !== "xl-tile-rise") return;
       clearTimeout(timer);
       timer = setTimeout(() => window.dispatchEvent(new Event("resize")), 60);
     };

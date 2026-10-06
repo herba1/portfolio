@@ -30,7 +30,7 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Physical print and optics as material: relief ink, misregistered inks, glass refraction, paper grain, halos.
 - Tunable pieces with a hand-rolled panel and presets, so the visitor can play (Ink, Refract, Halftone).
 - Flat Swiss typographic layouts on a light ground; the Tuner is the reference for how an instrument-like UI should sit on the page.
-- Motion with weight and consequence: a stack you run through and fan out (Deck), cards that ride and captions that leave (PSA).
+- Motion with weight and consequence: a stack you run through and fan out (Deck), cards that ride and captions that leave (Flyout).
 - Real audio and real data driving visuals (Tuner pitch detection, Backdrop's artwork-driven blur, Song Search resolving the real catalogue).
 
 ## Hates

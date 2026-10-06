@@ -1,7 +1,7 @@
 /* ─────────────────────────────────────────────────────────────────────────
    /arcs — the flight visualiser.
 
-   Reads the psa kit's tokens (psa-kit.css is imported alongside), because it
+   Reads the flyout kit's tokens (flyout-kit.css is imported alongside), because it
    is inspecting that app and should not have a second opinion about ink or
    spacing. A debug view still has to be legible.
    ───────────────────────────────────────────────────────────────────────── */
@@ -382,7 +382,7 @@
   color: var(--pk-text);
 }
 
-/* Sliders, matched to the /psa panel so the two read as one tool. */
+/* Sliders, matched to the /flyout panel so the two read as one tool. */
 .arcs input[type="range"] {
   -webkit-appearance: none;
   appearance: none;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Search } from "lucide-react";
+import SearchGlyph from "./SearchGlyph";
 import { readTone } from "./tone";
 import "./dock.css";
 
@@ -26,6 +26,7 @@ function rememberResults(term, tracks) {
 const FILL_ALPHA = 0.92;
 const PANEL_MAX_PX = 336;
 const BOX_GUTTER_PX = 168;
+const TILE_GUTTER_PX = 24;
 const SLIDE_MS = 380;
 const FADE_LEAD_MS = 130;
 
@@ -165,8 +166,10 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
       const isTile = box && boxRoom < window.innerHeight * 0.9;
       const seen = vv ? vv.height : window.innerHeight;
       const room = Math.min(boxRoom, seen);
-      const cap = isTile ? boxRoom * 0.5 : PANEL_MAX_PX;
-      const limit = Math.max(120, Math.min(PANEL_MAX_PX, cap, room - BOX_GUTTER_PX));
+      const barHeight = containerRef.current?.querySelector(".bd-dock__bar")?.offsetHeight ?? 0;
+      const limit = isTile
+        ? Math.max(120, room - barHeight - TILE_GUTTER_PX * 2)
+        : Math.max(120, Math.min(PANEL_MAX_PX, room - BOX_GUTTER_PX));
       setPanelHeight(Math.min(list.scrollHeight, limit));
     };
 
@@ -261,7 +264,7 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
         </div>
 
         <div className="bd-dock__bar" onPointerDown={() => setPressed(true)}>
-          <Search size={16} strokeWidth={2} aria-hidden="true" />
+          <SearchGlyph busy={busy} mode={mode} />
           <input
             type="text"
             value={query}

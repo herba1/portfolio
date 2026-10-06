@@ -2,6 +2,8 @@ import Piece from "../Piece";
 import { pieceData } from "../pieceData";
 import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
+import ReadyGate from "../ReadyGate";
+import PlateHand from "../PlateHand";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -12,23 +14,26 @@ export const revalidate = 3600;
 // flow runs tall, the cover stack and the lens plate get width, the plates
 // stay squarish. No captions — each piece is mounted as a component, lays
 // itself out for its tile and speaks for itself.
-// Grid area, and the entrance wave: row + column of the tile's top-left
-// cell, so the sweep crosses the bento corner to corner.
+// Grid area, and the entrance order: row band first, then left to right within
+// it, so the tiles drop in like a mosaic filling from the top-left.
 const AREAS = {
-  "/ink": { area: "ink", wave: 0 },
-  "/refract": { area: "refract", wave: 1 },
-  "/halftone": { area: "halftone", wave: 1 },
-  "/psa": { area: "psa", wave: 2 },
-  "/deck": { area: "deck", wave: 2 },
-  "/backdrop": { area: "backdrop", wave: 3 },
-  "/song-search": { area: "song", wave: 3 },
-  "/tuner": { area: "tuner", wave: 4 },
+  "/ink": { area: "ink", wave: 3, dx: -1 },
+  "/refract": { area: "refract", wave: 0, dx: 0 },
+  "/halftone": { area: "halftone", wave: 4, dx: 0 },
+  "/flyout": { area: "flyout", wave: 2, dx: 1 },
+  "/deck": { area: "deck", wave: 6, dx: 0 },
+  "/backdrop": { area: "backdrop", wave: 8, dx: 1 },
+  "/song-search": { area: "song", wave: 9, dx: -1 },
+  "/tuner": { area: "tuner", wave: 10, dx: 0 },
+  "/blobs": { area: "flowers", wave: 11, dx: 0 },
+  "/cover-ring": { area: "ring", wave: 12, dx: -1 },
+  "/ascii-cover": { area: "ascii", wave: 13, dx: 1 },
 };
 
 export default async function BentoLayout() {
   const data = await pieceData();
   return (
-    <main className="xl-bento">
+    <main className="xl-bento" data-gate="">
       <h1 className="sr-only">Experiments</h1>
       <ul className="xl-bento__grid">
         {PIECES.map((piece, i) => (
@@ -39,12 +44,18 @@ export default async function BentoLayout() {
             style={{
               gridArea: AREAS[piece.slug]?.area ?? "auto",
               "--wave": AREAS[piece.slug]?.wave ?? i,
+              "--dx": AREAS[piece.slug]?.dx ?? 0,
             }}
           >
             <Piece slug={piece.slug} data={data} />
           </li>
         ))}
       </ul>
+      <PlateHand />
+      <ReadyGate />
+      <noscript>
+        <style>{".xl-bento[data-gate] .xl-tile{animation-play-state:running!important}"}</style>
+      </noscript>
       <IntroSettle />
     </main>
   );

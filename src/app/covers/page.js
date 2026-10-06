@@ -1,4 +1,7 @@
+import { preconnect, preload } from "react-dom";
 import Covers from "./Covers";
+import { getCachedRecentTracks } from "@/lib/spotifyRecent";
+import { COUNT, GRID_COLS, GRID_ROWS } from "./lib/config";
 import { pageMetadata } from "@/lib/seo";
 import { JsonLd, breadcrumbNode, graph, webPageNode } from "@/lib/jsonld";
 
@@ -16,7 +19,20 @@ const coversLd = graph(
   ]),
 );
 
-export default function Page() {
+const mod = (n, m) => ((n % m) + m) % m;
+const FIRST_VIEW = [-1, 0, 1].flatMap((row) =>
+  [-2, -1, 0, 1, 2].map((col) => (mod(row, GRID_ROWS) * GRID_COLS + mod(col, GRID_COLS)) % COUNT),
+);
+
+export default async function Page() {
+  const { tracks, mode } = await getCachedRecentTracks();
+  if (tracks.length) {
+    preconnect("https://i.scdn.co", { crossOrigin: "anonymous" });
+    for (const index of new Set(FIRST_VIEW)) {
+      const image = tracks[index % tracks.length]?.image;
+      if (image) preload(image, { as: "image", crossOrigin: "anonymous", fetchPriority: "high" });
+    }
+  }
   return (
     <>
       <JsonLd data={coversLd} />
@@ -25,7 +41,7 @@ export default function Page() {
           matching the <title> and description exactly. */}
       <h1 className="sr-only">{title}</h1>
       <p className="sr-only">{description}</p>
-      <Covers />
+      <Covers initialTracks={tracks.length ? tracks : null} initialMode={mode} />
     </>
   );
 }

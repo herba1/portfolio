@@ -89,7 +89,7 @@ function probe() {
   //
   // Reduced motion is not strictly the same preference — there is no
   // prefers-reduced-haptics — but it is the closest signal we have that
-  // someone wants the interface to stop moving, and the PSA surface
+  // someone wants the interface to stop moving, and the Flyout surface
   // already skips the whole flight animation under it. Feedback for an
   // animation that did not play would be feedback for nothing.
   if (window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return SILENT;

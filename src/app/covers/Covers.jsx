@@ -5,13 +5,15 @@ import { createPortal } from "react-dom";
 import useMeasure from "react-use-measure";
 import { Canvas } from "@react-three/fiber";
 import { Leva, useControls, folder, button } from "leva";
+import { STAGE } from "./lib/stageMotion";
+import { INTRO_STYLES } from "./lib/introStyles";
 import CoversGrid from "./CoversGrid";
 import CoverPlayer, { playerLayout } from "./CoverPlayer";
 import NowPlaying from "./NowPlaying";
 import Minimap from "./Minimap";
 import MorphText from "@/app/ui/MorphText";
 import { makeCoversMeta, setCoverSources } from "./lib/makeCovers";
-import { fetchSpotifyCovers } from "./lib/spotify";
+import { coversFromTracks, fetchSpotifyCovers } from "./lib/spotify";
 import { DEFAULTS, REF_VW, responsiveLayout } from "./lib/config";
 import { isDevView } from "@/lib/viewMode";
 import "./covers.css";
@@ -23,18 +25,24 @@ const NOTCH_MOBILE_BP = 640; // matches the covers.css mobile media query
 const NOTCH_SIDE_GUTTER = 24; // min breathing room each side of the notch
 const NOTCH_MIN_SQUISH = 0.6; // floor so condensed text stays legible
 
-export default function Covers() {
+export default function Covers({ initialTracks = null, initialMode = null }) {
   // start with placeholders, then swap in recently-played Spotify covers if set up
-  const [covers, setCovers] = useState(() => makeCoversMeta());
+  const [initialCovers] = useState(() => {
+    const live = coversFromTracks(initialTracks, initialMode);
+    if (live) setCoverSources(live);
+    return live;
+  });
+  const [covers, setCovers] = useState(() => initialCovers || makeCoversMeta());
   // "loading" until the track list settles either way. It gates BOTH the loader
   // and opening a cover: a player built on a placeholder can only ever report
   // failure, and a tile that opens nothing at all is the worst answer of the
   // three. On a fast connection this is over before the grid has finished
   // popping in; on a slow one it is the whole first stretch of the page.
-  const [dataState, setDataState] = useState("loading"); // loading | live | placeholder
+  const [dataState, setDataState] = useState(initialCovers ? "live" : "loading"); // loading | live | placeholder
   const dataStateRef = useRef(dataState);
   dataStateRef.current = dataState;
   useEffect(() => {
+    if (initialCovers) return;
     let alive = true;
     fetchSpotifyCovers()
       .then((sp) => {
@@ -54,7 +62,7 @@ export default function Covers() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [initialCovers]);
 
   // auto-detect reduced motion once
   const prefersReduced = useRef(false);
@@ -127,6 +135,14 @@ export default function Covers() {
         popJitter: { value: DEFAULTS.popJitter, min: 0, max: 2, step: 0.05 },
         popScaleFrom: { value: DEFAULTS.popScaleFrom, min: 0.4, max: 1, step: 0.01 },
         popRise: { value: DEFAULTS.popRise, min: 0, max: 120, step: 1, label: "popRise @1440" },
+        introRadius: { value: DEFAULTS.introRadius, min: 0.15, max: 0.6, step: 0.01 },
+        introTilt: { value: DEFAULTS.introTilt, min: 0, max: 85, step: 1 },
+        introTile: { value: DEFAULTS.introTile, min: 0.5, max: 1.8, step: 0.02 },
+        popSpeed: { value: DEFAULTS.popSpeed, min: 0.1, max: 3, step: 0.05 },
+        warpDepth: { value: DEFAULTS.warpDepth, min: 0, max: 3000, step: 50 },
+        warpFocal: { value: DEFAULTS.warpFocal, min: 200, max: 3000, step: 50 },
+        warpSpin: { value: DEFAULTS.warpSpin, min: 0, max: 180, step: 1 },
+        warpTilt: { value: DEFAULTS.warpTilt, min: 0, max: 90, step: 1 },
         popReadyTimeout: { value: DEFAULTS.popReadyTimeout, min: 0.5, max: 8, step: 0.5 },
       },
       { collapsed: false },
@@ -152,6 +168,22 @@ export default function Covers() {
       },
       { collapsed: true },
     ),
+    Lyrics: folder(
+      {
+        lyricLineGap: { value: STAGE.lineGap, min: 0, max: 0.8, step: 0.01 },
+        lyricFocusWidth: { value: STAGE.focusWidth, min: 0.4, max: 3, step: 0.05 },
+        lyricRestScale: { value: STAGE.restScale, min: 0, max: 0.6, step: 0.01 },
+        lyricRestOpacity: { value: STAGE.restOpacity, min: 0, max: 0.8, step: 0.01 },
+        lyricBlur: { value: STAGE.blur, min: 0, max: 4, step: 0.1 },
+        lyricTracking: { value: STAGE.tracking, min: -0.1, max: 0.05, step: 0.002 },
+        lyricRevealTilt: { value: STAGE.revealTilt, min: 0, max: 90, step: 1 },
+        lyricRevealDepth: { value: STAGE.revealDepth, min: 0, max: 240, step: 2 },
+        lyricRevealSpin: { value: STAGE.revealSpin, min: 0, max: 180, step: 1 },
+        lyricRevealPop: { value: STAGE.revealPop, min: 0, max: 160, step: 2 },
+        lyricRise: { value: STAGE.riseEm, min: 0, max: 0.5, step: 0.01 },
+      },
+      { collapsed: false },
+    ),
     Background: folder(
       { bgTint: { value: DEFAULTS.bgTint, min: 0, max: 1, step: 0.01 } },
       { collapsed: true },
@@ -159,16 +191,34 @@ export default function Covers() {
     reducedMotion: { value: DEFAULTS.reducedMotion },
   });
 
+  useEffect(() => {
+    Object.assign(STAGE, {
+      lineGap: v.lyricLineGap,
+      focusWidth: v.lyricFocusWidth,
+      restScale: v.lyricRestScale,
+      restOpacity: v.lyricRestOpacity,
+      blur: v.lyricBlur,
+      riseEm: v.lyricRise,
+      tracking: v.lyricTracking,
+      revealTilt: v.lyricRevealTilt,
+      revealDepth: v.lyricRevealDepth,
+      revealSpin: v.lyricRevealSpin,
+      revealPop: v.lyricRevealPop,
+    });
+  }, [v.lyricLineGap, v.lyricFocusWidth, v.lyricRestScale, v.lyricRestOpacity, v.lyricBlur, v.lyricRise, v.lyricTracking, v.lyricRevealTilt, v.lyricRevealDepth, v.lyricRevealSpin, v.lyricRevealPop]);
+
   // merged, frame-fresh config: reference values → viewport-scaled px, then OR
   // in the OS reduced-motion preference.
+  const [introStyle, setIntroStyle] = useState(DEFAULTS.popStyle);
   const vp = useViewport();
   const config = useMemo(
     () => ({
       ...v,
       ...responsiveLayout(vp.w, vp.h, v),
       reducedMotion: v.reducedMotion || prefersReduced.current,
+      popStyle: introStyle,
     }),
-    [v, vp],
+    [v, vp, introStyle],
   );
   const configRef = useRef(config);
   configRef.current = config;
@@ -202,6 +252,7 @@ export default function Covers() {
   // HUD holds hidden until the grid signals its reveal has armed (art loaded),
   // then the corner / name / minimap stagger in — so nothing shows "not ready".
   const [ready, setReady] = useState(false);
+  const [landed, setLanded] = useState(false);
 
   const [rootRef, rootBounds] = useMeasure();
 
@@ -266,6 +317,7 @@ export default function Covers() {
   // here would hand it a new prop on every render of this component and the
   // memo would never bail out — which is the whole point of it.
   const onGridReady = useCallback(() => setReady(true), []);
+  const onGridLanded = useCallback(() => setLanded(true), []);
   const onGridOpen = useCallback(
     (idx, rect, cell) => {
       // Read through the ref so this callback keeps one identity for the whole
@@ -299,6 +351,24 @@ export default function Covers() {
     return () => mq.removeEventListener("change", sync);
   }, []);
   const showPanel = isDevView() && panelRoom;
+
+  const playIntro = useCallback((style) => {
+    if (style) setIntroStyle(style);
+    requestAnimationFrame(() => apiRef.current?.replayIntro());
+  }, []);
+
+  useEffect(() => {
+    if (!showPanel) return;
+    const onKey = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
+      if (/^(input|textarea|select)$/i.test(event.target?.tagName || "")) return;
+      if (event.key === "r" || event.key === "R") playIntro();
+      const picked = INTRO_STYLES[Number(event.key) - 1];
+      if (picked) playIntro(picked);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showPanel, playIntro]);
 
   return (
     <>
@@ -334,6 +404,7 @@ export default function Covers() {
           apiRef={apiRef}
           covers={covers}
           onReady={onGridReady}
+          onLanded={onGridLanded}
           onFocusChange={setFocusIdx}
           onOpen={onGridOpen}
         />
@@ -348,7 +419,7 @@ export default function Covers() {
       <CoversLoader show={dataState === "loading" || !ready} />
 
       {/* HUD */}
-      <div className={`cv-hud${ready ? " is-ready" : ""}`}>
+      <div className={`cv-hud${ready && landed ? " is-ready" : ""}`}>
         <div className="cv-focus">
           {/* The two concave ramps are siblings of the plate, not its
               pseudo-elements: the plate has to clip its own text now, and
@@ -376,6 +447,24 @@ export default function Covers() {
       {mounted &&
         createPortal(
           <>
+            {showPanel ? (
+              <div className="cv-intro-picker" role="group" aria-label="Intro animation">
+                {INTRO_STYLES.map((style, i) => (
+                  <button
+                    key={style}
+                    type="button"
+                    className="cv-intro-chip"
+                    data-active={style === introStyle ? "true" : "false"}
+                    onClick={() => playIntro(style)}
+                  >
+                    {i + 1} {style}
+                  </button>
+                ))}
+                <button type="button" className="cv-intro-chip" onClick={() => playIntro()}>
+                  replay
+                </button>
+              </div>
+            ) : null}
             {showPanel ? (
               <div className="cv-leva">
                 <Leva collapsed={false} titleBar={{ title: "Covers" }} />

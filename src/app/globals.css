@@ -2994,3 +2994,21 @@ body {
   .dev-palette__input { transition-duration: 1ms; }
   .dev-palette__list { animation: none; mask-image: none; }
 }
+
+:root {
+  --text-fade-mask: linear-gradient(
+    to right,
+    #000 calc(100% - 2em),
+    rgb(0 0 0 / 0.92) calc(100% - 1.5em),
+    rgb(0 0 0 / 0.62) calc(100% - 1em),
+    rgb(0 0 0 / 0.22) calc(100% - 0.5em),
+    transparent 100%
+  );
+}
+
+.text-fade {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}

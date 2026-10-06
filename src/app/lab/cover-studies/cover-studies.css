@@ -1,0 +1,277 @@
+.cs {
+  min-height: 100dvh;
+  padding: 64px 24px 96px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.cs-bar {
+  position: sticky;
+  top: 56px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 0;
+  background: var(--color-surface);
+}
+
+.cs-grow {
+  flex: 1;
+}
+
+.cs-count {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-ink-secondary);
+}
+
+.cs-lede {
+  max-width: 680px;
+  margin: 0 0 24px;
+  color: var(--color-ink-secondary);
+}
+
+.cs-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 440px), 1fr));
+  gap: 16px;
+}
+
+.cs-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 16px;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+
+.cs-card[data-approved="true"] {
+  box-shadow: 0 0 0 2px var(--color-accent);
+}
+
+.cs-card__head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 4px 4px 0;
+}
+
+.cs-card__note {
+  margin: 0 4px;
+  color: var(--color-ink-secondary);
+}
+
+.cs-badge {
+  color: var(--color-accent-ink);
+}
+
+.cs-stage {
+  position: relative;
+  height: 320px;
+  overflow: hidden;
+  border-radius: 12px;
+  background: var(--color-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+}
+
+.cs-actions {
+  display: flex;
+  gap: 8px;
+  padding: 0 2px 4px;
+}
+
+.cs-btn {
+  appearance: none;
+  border: 0;
+  border-radius: 10px;
+  padding: 4px 12px;
+  cursor: pointer;
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-line);
+  transition:
+    transform 160ms var(--ease-overshoot),
+    background-color 160ms var(--ease-hover);
+}
+
+.cs-btn:active {
+  transform: scale(0.96);
+}
+
+.cs-btn[data-on="true"] {
+  background: var(--color-accent);
+  color: var(--color-ink-inverse);
+  box-shadow: none;
+}
+
+.cs-btn[data-tone="ink"][data-on="true"],
+.cs-btn[data-tone="ink"]:not([data-on]) {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+  box-shadow: none;
+}
+
+.cs-btn[data-tone="ink"][data-on="false"] {
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+
+
+
+
+.cs-seg {
+  display: flex;
+  gap: 4px;
+}
+
+.cs-ring {
+  position: absolute;
+  inset: 0;
+  perspective: 1300px;
+  perspective-origin: 50% 44%;
+  cursor: grab;
+  touch-action: none;
+  overflow: hidden;
+}
+
+.cs-ring:active {
+  cursor: grabbing;
+}
+
+.cs-ring__world {
+  position: absolute;
+  left: 50%;
+  top: 56%;
+  width: 0;
+  height: 0;
+  transform-style: preserve-3d;
+}
+
+.cs-ring__card {
+  position: absolute;
+  left: calc(var(--cs-card) / -2);
+  top: calc(var(--cs-card) / -2);
+  width: var(--cs-card);
+  height: var(--cs-card);
+}
+
+.cs-board {
+  --cs-thick: calc(var(--cs-card, 220px) * var(--cs-thick-k, 0.03));
+  transform-style: preserve-3d;
+}
+
+.cs-board__art {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: var(--cs-corner, 10px);
+  backface-visibility: hidden;
+}
+
+.cs-board__back {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--cs-corner, 10px);
+  transform: translateZ(calc(var(--cs-thick) * -1)) rotateY(180deg);
+  backface-visibility: hidden;
+  background: linear-gradient(135deg, var(--neutral-100), var(--neutral-200));
+}
+
+.cs-ring__back {
+  overflow: hidden;
+}
+
+.cs-ring__back svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cs-board::before,
+.cs-board::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--cs-corner, 10px) * 0.7);
+  width: var(--cs-thick);
+  height: calc(100% - var(--cs-corner, 10px) * 1.4);
+  backface-visibility: hidden;
+  pointer-events: none;
+}
+
+.cs-board::before {
+  left: 0;
+  transform-origin: 0 50%;
+  transform: translateZ(calc(var(--cs-thick) * -1)) rotateY(-90deg);
+  background-image:
+    linear-gradient(to left, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.16) 7%, rgb(255 255 255 / 0.04) 20%, rgb(0 0 0 / 0.06) 46%, rgb(0 0 0 / 0.2) 76%, rgb(0 0 0 / 0.34) 100%),
+    var(--cs-edge, linear-gradient(to right, var(--neutral-0), var(--neutral-300)));
+}
+
+.cs-board::after {
+  right: 0;
+  transform-origin: 100% 50%;
+  transform: translateZ(calc(var(--cs-thick) * -1)) rotateY(90deg);
+  background-image:
+    linear-gradient(to right, rgb(255 255 255 / 0.42) 0%, rgb(255 255 255 / 0.16) 7%, rgb(255 255 255 / 0.04) 20%, rgb(0 0 0 / 0.06) 46%, rgb(0 0 0 / 0.2) 76%, rgb(0 0 0 / 0.34) 100%),
+    var(--cs-edge, linear-gradient(to right, var(--neutral-0), var(--neutral-300)));
+}
+
+.cs-ascii {
+  position: absolute;
+  inset: 0;
+}
+
+.cs-ascii__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.cs-ascii__modes {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.cs-seg {
+  display: flex;
+  gap: 4px;
+}
+
+@media (max-width: 899px) {
+  .cs-stage {
+    height: 280px;
+  }
+}
+
+
+.cs-ascii {
+  position: absolute;
+  inset: 0;
+}
+
+.cs-ascii__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+  font-family: var(--font-mono), ui-monospace, monospace;
+}
+
+.cs-ascii__modes {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}

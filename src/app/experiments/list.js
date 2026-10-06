@@ -9,6 +9,36 @@
 // is the one search engines keep trusting.
 export const EXPERIMENTS = [
   {
+    slug: "/cover-ring",
+    title: "Cover ring",
+    seoTitle: "Cover ring — album covers on a draggable 3D wheel",
+    description:
+      "Real album covers as thick boards on a spinning wheel — drag to turn it, tilt it with the pointer, and the backs open into mesh gradients drawn from each cover's colours.",
+    tags: ["CSS 3D", "Music"],
+    date: "2026-10-05",
+    updated: "2026-10-05",
+  },
+  {
+    slug: "/ascii-cover",
+    title: "ASCII cover",
+    seoTitle: "ASCII cover — album art redrawn in characters",
+    description:
+      "An album cover redrawn as text, one symbol per cell. Click and a ring of the next cover ripples out from your pointer.",
+    tags: ["Canvas", "Music"],
+    date: "2026-10-05",
+    updated: "2026-10-05",
+  },
+  {
+    slug: "/blobs",
+    title: "Flower wall",
+    seoTitle: "Flower wall — a field of soft flowers in WebGL",
+    description:
+      "A wall of soft, shaded flowers tiled across the screen in a shader — honeycomb, meadow, rain and pixel frames you tap through.",
+    tags: ["WebGL", "Shaders"],
+    date: "2026-10-05",
+    updated: "2026-10-05",
+  },
+  {
     slug: "/ink",
     title: "Ink",
     seoTitle: "Ink — a relief-print shader in WebGL",
@@ -68,9 +98,9 @@ export const EXPERIMENTS = [
     updated: "2026-08-10",
   },
   {
-    slug: "/psa",
-    title: "PSA",
-    seoTitle: "PSA — a graded-card collection interaction",
+    slug: "/flyout",
+    title: "Flyout",
+    seoTitle: "Flyout — a graded-card collection interaction",
     description: "A collection of graded cards, and the interaction for filling it.",
     tags: ["Motion"],
     date: "2026-08-01",

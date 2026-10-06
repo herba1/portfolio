@@ -1,0 +1,1357 @@
+/* ─────────────────────────────────────────────────────────────────────────
+   /flyout — collection app.
+
+   An app shell, not a page: it fills the .piece-box it is rendered in, one
+   scrolling panel, a footer nav pinned under it. On its own route that box is
+   the screen, and the site's navbar and footer clock are removed for the life
+   of the route by FlyoutChrome.
+
+   In a box wider than a phone the shell stays at phone width and centres,
+   with a rule down each side. Two columns is the settled layout.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* The route's own box is the VISIBLE screen, not the large one. The tab bar
+   sits on the box's bottom edge, and a 100lvh box would park it under mobile
+   Safari's toolbar whenever the toolbar is showing. */
+.flyout-page.piece-box--viewport {
+  height: 100dvh;
+}
+
+.flyout {
+  position: absolute;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 430px;
+  margin-inline: auto;
+  overflow: hidden;
+  background: var(--pk-bg);
+}
+
+/* The phone frame's edges, once there is page either side of it. Shadows
+   rather than borders for the same reason the footer hairline is one: a
+   border would sit inside the frame and composite over --pk-bg, so it would
+   read as a grey line the app drew on itself. Outside the box it lands on the
+   page behind, and the seam belongs to both. */
+@container (min-width: 480px) {
+  .flyout {
+    box-shadow:
+      -1px 0 0 var(--pk-border),
+      1px 0 0 var(--pk-border);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PANEL + TAB TRANSITION
+
+   16px and 220ms. Small enough that it reads as the same app moving rather
+   than a page changing, and directional so a tap on Profile feels like
+   travelling right and a tap back feels like returning.
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  /* Top inset lives on the head, so a sticky head keeps it while stuck. */
+  padding: 0 0 calc(var(--pk-space-6) + 57px + env(safe-area-inset-bottom));
+  scrollbar-width: none;
+  animation: flyout-panel-in 220ms var(--pk-ease-expo) both;
+}
+.flyout-panel::-webkit-scrollbar {
+  display: none;
+}
+
+@keyframes flyout-panel-in {
+  from {
+    opacity: 0;
+    transform: translateX(calc(var(--dir, 1) * 16px));
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.flyout-panel-head {
+  padding: calc(var(--pk-space-5) + env(safe-area-inset-top)) var(--pk-space-4) 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   STATUS-BAR SCRIM
+
+   Safari's status bar needs solid ground under the clock and battery, and
+   panels without a sticky head (collection, activity, profile) would
+   otherwise scroll content through the safe area. So: an opaque strip of
+   shell colour, exactly as tall as the inset, with a hard bottom edge — no
+   ramp. On a browser with no safe-area inset it collapses to nothing.
+
+   It sits on the shell, above the head, so it holds still while the head
+   lifts.
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-status-scrim {
+  position: absolute;
+  inset: 0 0 auto;
+  height: env(safe-area-inset-top);
+  z-index: 7;
+  pointer-events: none;
+  background: var(--pk-bg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COLLAPSING HEAD — scroll-driven
+
+   Title and filter rail share one solid bar pinned to the top of the panel,
+   with a hairline along its bottom edge. Scroll and the bar LIFTS by exactly
+   the rail's height — so the hairline travels up from under the badges to
+   under the title, and the bar reads as collapsing — while the title
+   counter-translates by the same amount to stay pinned, scaling down from its
+   left edge as it goes. The badges ride up under the title's own opaque
+   layer, fading as they pass behind it, and are clipped by the top of the
+   scrollport.
+
+   The lift is 1:1 with the scroll, so the badges appear to move at content
+   speed rather than at some invented rate.
+
+   Nothing here animates a layout property — the bar's height never changes,
+   only transform and opacity. That matters twice over: it stays on the
+   compositor, and it avoids the feedback loop you get when a scroll-driven
+   animation resizes a box inside the scroller it is reading.
+
+   Browsers without scroll timelines (Safari < 26) fall back to the
+   [data-scrolled] attribute the panel sets, which lands the same end state
+   as a 200ms transition instead of tracking the finger.
+   ═══════════════════════════════════════════════════════════════════════ */
+:root {
+  --flyout-collapse: 58px; /* the rail's block height: 16 + 26 chip + 16 */
+  --flyout-title-scale: 0.62; /* 24px title → ~15px bar title */
+  --flyout-rail-travel: 40px; /* badges are spent before the lift finishes */
+}
+
+/* Solid, twice: once on the bar and once on the title block inside it. No
+   glass — the bar is shell colour straight through, so content passing under
+   it is gone rather than smeared, and the status-bar strip never shifts hue. */
+.flyout-head {
+  background: color-mix(in srgb, var(--pk-bg) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  backdrop-filter: blur(10px) saturate(1.3);
+}
+.flyout-head .flyout-panel-head {
+  background: transparent;
+}
+
+.flyout-head {
+  position: sticky;
+  top: 0;
+  z-index: 6;
+  will-change: transform;
+}
+
+/* Above the rail, so the badges pass behind its glass rather than through it. */
+.flyout-head .flyout-panel-head {
+  position: relative;
+  z-index: 1;
+  padding: calc(var(--pk-space-4) + env(safe-area-inset-top)) var(--pk-space-4)
+    var(--pk-space-1-5);
+}
+.flyout-head .flyout-panel-head > h1 {
+  display: block;
+  transform-origin: left center;
+  will-change: transform;
+}
+
+.flyout-rail-fade {
+  position: relative;
+  z-index: 0;
+  transform-origin: left center;
+  will-change: transform, opacity;
+}
+
+/* Hairline as a pseudo-element on the bar's bottom edge: it rides the lift,
+   and appearing costs a paint, never a reflow. */
+.flyout-head::after {
+  content: "";
+  position: absolute;
+  inset: auto var(--pk-space-4) -1px;
+  height: 1px;
+  background: var(--pk-border);
+  opacity: 0;
+  z-index: 2;
+}
+
+@keyframes flyout-head-lift {
+  to {
+    transform: translateY(calc(-1 * var(--flyout-collapse)));
+  }
+}
+/* Equal and opposite to the lift, so the title holds its place while the bar
+   travels out from under it. */
+@keyframes flyout-title-hold {
+  to {
+    transform: translateY(var(--flyout-collapse)) scale(var(--flyout-title-scale));
+  }
+}
+@keyframes flyout-rail-out {
+  to {
+    transform: translateY(-6px) scale(0.9);
+    opacity: 0;
+  }
+}
+@keyframes flyout-hairline-in {
+  to {
+    opacity: 1;
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .flyout-head,
+  .flyout-head .flyout-panel-head > h1,
+  .flyout-head::after,
+  .flyout-rail-fade {
+    animation-timeline: scroll(nearest block);
+    animation-range: 0 var(--flyout-collapse);
+    animation-duration: 1ms; /* ignored on a scroll timeline; syntax needs it */
+    animation-timing-function: linear;
+    animation-fill-mode: both;
+  }
+  .flyout-head {
+    animation-name: flyout-head-lift;
+  }
+  .flyout-head .flyout-panel-head > h1 {
+    animation-name: flyout-title-hold;
+  }
+  .flyout-rail-fade {
+    animation-name: flyout-rail-out;
+    animation-range: 0 var(--flyout-rail-travel);
+  }
+  .flyout-head::after {
+    animation-name: flyout-hairline-in;
+    animation-range: 0 20px;
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  .flyout-head,
+  .flyout-head .flyout-panel-head > h1,
+  .flyout-head::after,
+  .flyout-rail-fade {
+    transition:
+      transform 200ms var(--pk-ease-in-out),
+      opacity 200ms var(--pk-ease-in-out);
+  }
+  [data-scrolled] .flyout-head {
+    transform: translateY(calc(-1 * var(--flyout-collapse)));
+  }
+  [data-scrolled] .flyout-head .flyout-panel-head > h1 {
+    transform: translateY(var(--flyout-collapse)) scale(var(--flyout-title-scale));
+  }
+  [data-scrolled] .flyout-rail-fade {
+    transform: translateY(-6px) scale(0.9);
+    opacity: 0;
+  }
+  [data-scrolled] .flyout-head::after {
+    opacity: 1;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   GRID — two columns
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-rail {
+  padding: var(--pk-space-4);
+}
+
+.flyout-grid {
+  list-style: none;
+  margin: 0;
+  padding: 0 var(--pk-space-4);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--pk-space-5) var(--pk-space-3);
+  /* Both the positioning context for the exit layer and a stacking context to
+     keep its negative z-index from escaping into the panel. */
+  position: relative;
+  z-index: 0;
+}
+
+/* ── Where leaving tiles go ───────────────────────────────────────────────
+   A tile cut by a filter is re-parented here and pinned at the box it just
+   left, so it can fade out in place while the survivors slide across it.
+   Behind them, because it is the one that is going. See exitClone.
+
+   `animation: none` matters: re-inserting a detached node restarts its CSS
+   animations, so without this every leaving tile would replay its 320ms
+   mount entrance on the way out. */
+.flyout-grid-exit {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+.flyout-grid-exit > .flyout-tile {
+  position: absolute;
+  margin: 0;
+  animation: none;
+}
+
+/* ── The other engine ─────────────────────────────────────────────────────
+   Set while a view transition is running (see viewGrid). Root-level, because
+   the ::view-transition pseudos are children of the document root and cannot
+   be reached from inside .flyout.
+
+   Dropping the root NAME is the important line. Every document has an implicit
+   `view-transition-name: root`, so by default the browser snapshots the entire
+   viewport and cross-fades it — the head, the nav, the status scrim and the
+   grid, all as one picture. Take the name away and no root snapshot is made:
+   only the named tiles are captured, everything else keeps rendering live, and
+   the transition costs a handful of small textures instead of a full-screen
+   one.
+
+   One duration across group, old and new. The cross-fade blends with
+   plus-lighter, which reconstructs the original image only while the two
+   opacities are complements — mismatched timings dim a tile through the middle
+   of its own travel. */
+html[data-flyout-vt] {
+  view-transition-name: none;
+}
+html[data-flyout-vt]::view-transition-group(*),
+html[data-flyout-vt]::view-transition-old(*),
+html[data-flyout-vt]::view-transition-new(*) {
+  animation-duration: var(--flyout-vt-dur, 380ms);
+  animation-timing-function: var(--flyout-vt-ease, cubic-bezier(0.26, 0.08, 0.25, 1));
+}
+
+/* The kit's motion-safety block cannot reach these — it is scoped to .pk, and
+   these pseudos hang off the document root. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-flyout-vt]::view-transition-group(*),
+  html[data-flyout-vt]::view-transition-old(*),
+  html[data-flyout-vt]::view-transition-new(*) {
+    animation-duration: 1ms;
+  }
+}
+
+/* Stagger is capped at 8 in the JSX, so the last tile of a long list starts
+   192ms in rather than three seconds in. A stagger that outlives the user's
+   attention stops being a stagger and becomes a queue. */
+.flyout-tile {
+  animation: flyout-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 24ms);
+}
+
+/* Only a MOUNT gets this. A filter change reflows the same tiles with FLIP
+   rather than re-keying the grid, so the stagger is reserved for a list that
+   genuinely was not there a moment ago. */
+@keyframes flyout-tile-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.flyout-tile-art {
+  position: relative;
+}
+/* The bookmark's plate. It used to be 88% white over a blur painted on this
+   wrapper, which let the scan read through and cost the icon its edge on a
+   light card — the one control on the surface was the one thing you had to
+   look for. Solid stock with a hairline and the kit's smallest shadow now,
+   and handed to the BUTTON as tokens rather than painted here: the miss-tap
+   nudge jumps the whole circle, and a background on this wrapper would stay
+   behind while the button left it.
+
+   The plate STOCK stays opaque — that is what gives the glyph its edge — but
+   the hairline around it does not. It is a spread shadow, so it is painted
+   entirely outside the circle, directly on the scan, and a solid grey ring
+   over a photograph reads as a wire. At 10% ink it takes the colour of the
+   card underneath: visible where the scan is light and the plate needs an
+   edge, gone where the scan is dark and the white circle is already all the
+   edge there is. */
+.flyout-tile-save {
+  position: absolute;
+  top: var(--pk-space-1-5);
+  right: var(--pk-space-1-5);
+  --pk-save-bg: var(--pk-neutral-0);
+  --pk-save-plate: 0 0 0 1px var(--pk-border), var(--pk-shadow-sm);
+}
+.flyout-tile-text {
+  margin-top: var(--pk-space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.flyout-tile-player {
+  font-weight: var(--pk-w-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}
+/* The second meta line. Secondary ink, not faded type — the colour is solid
+   and the hierarchy comes from hue, so it stays legible at 13px. */
+.flyout-tile-set {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}
+.flyout-tile-figures {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--pk-space-1-5);
+}
+/* The figures are SlotNumber reels, and the kit pins .price/.delta to a fixed
+   line-height in px. A reel needs its line box and its cell to be the same
+   height or every digit sits off-centre in the window, so hand the line-height
+   back to the cell — the kit still owns size, weight and colour. */
+.flyout-tile-figures .slot {
+  line-height: var(--slot-cell);
+}
+
+/* ── The tape ─────────────────────────────────────────────────────────────
+   A tick pushes the figure it moved: out on the way up, in on the way down.
+   The direction of the gesture is the signal, so the number never has to
+   change colour to say which way it went — and a scale that starts and ends
+   at 1 costs one composited transform, no layout and no paint.
+
+   The peak and the rebound are custom properties, which is what lets one pair
+   of keyframes serve both directions. React only alternates [data-beat] so
+   the animation restarts; two identical blocks are what make that restart
+   possible, since re-matching the SAME animation-name would leave a running
+   animation exactly where it was — and mid-flight interruption is the normal
+   case here, not the edge.
+
+   Origin is pinned to each figure's own outer edge so a pulse never nudges
+   the number off the line it shares with the other one.                    */
+.flyout-fig {
+  /* Same length as SlotNumber's roll (ROLL_MS in FlyoutExperience.jsx). The
+     gesture and the digits start on one commit and end on one frame; a
+     shorter pulse finishes under a still-turning reel and reads as drift. */
+  --flyout-tick-dur: 640ms;
+  --peak: 1.055;
+  --rebound: 0.992;
+  display: inline-flex;
+  transform-origin: left center;
+}
+.flyout-fig:last-child {
+  transform-origin: right center;
+}
+/* Down ticks invert the gesture: contract past 1, rebound just over it. */
+.flyout-fig[data-dir="down"] {
+  --peak: 0.952;
+  --rebound: 1.007;
+}
+.flyout-fig[data-beat="0"] {
+  animation: flyout-tick-a var(--flyout-tick-dur) var(--pk-ease-hover) both;
+}
+.flyout-fig[data-beat="1"] {
+  animation: flyout-tick-b var(--flyout-tick-dur) var(--pk-ease-hover) both;
+}
+/* Four stops, not two: the overshoot and the settle are what keep this
+   reading as a nudge rather than a pop. */
+@keyframes flyout-tick-a {
+  0% {
+    transform: scale(1);
+  }
+  22% {
+    transform: scale(var(--peak));
+  }
+  56% {
+    transform: scale(var(--rebound));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+@keyframes flyout-tick-b {
+  0% {
+    transform: scale(1);
+  }
+  22% {
+    transform: scale(var(--peak));
+  }
+  56% {
+    transform: scale(var(--rebound));
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   FOOTER NAV
+   ═══════════════════════════════════════════════════════════════════════ */
+/* Positioned with a z-index so the launch variant has something to cross:
+   a flying clone at z-index 1 is behind the nav and at 3 is in front of it,
+   and both are only meaningful because the nav claims 2. */
+.flyout-tabbar {
+  position: absolute;
+  inset: auto 0 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: repeat(var(--tab-count, 5), minmax(0, 1fr));
+  background: color-mix(in srgb, var(--pk-bg) 84%, transparent);
+  -webkit-backdrop-filter: blur(10px) saturate(1.3);
+  backdrop-filter: blur(10px) saturate(1.3);
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.flyout-tabbar::before {
+  content: "";
+  position: absolute;
+  inset: -1px var(--pk-space-4) auto;
+  height: 1px;
+  background: var(--pk-border);
+}
+
+.flyout-tab {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: var(--pk-space-2) var(--pk-space-1) var(--pk-space-2-5);
+  border: 0;
+  background: transparent;
+  color: var(--pk-text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition:
+    color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+.flyout-tab:active {
+  transform: scale(0.94);
+}
+.flyout-tab[data-active] {
+  color: var(--pk-text);
+}
+
+.flyout-tab-icon {
+  position: relative;
+  display: grid;
+  place-items: center;
+  height: 24px;
+}
+/* The active icon lifts by 1px and settles. One pixel is enough to register
+   as movement and small enough never to look like a bug. */
+.flyout-tab[data-active] .flyout-tab-icon {
+  animation: flyout-tab-pop 300ms var(--pk-ease-hover);
+}
+@keyframes flyout-tab-pop {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-2px) scale(1.1); }
+  70% { transform: translateY(0) scale(0.98); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+.flyout-tab-label {
+  font-size: 10px;
+  line-height: 12px;
+  font-weight: var(--pk-w-body-xs);
+  letter-spacing: -0.08px;
+}
+
+/* ── The count ────────────────────────────────────────────────────────────
+   Two elements, two animations, two clocks — see TabCount in TabBar.jsx.
+
+   The WRAPPER owns position and the deal-in. It mounts once, when the
+   collection stops being empty, and that is the only time anything should
+   arrive from nothing: scaling from 0.4 on every save would fight the reel
+   underneath it, which is trying to be read while it turns.
+
+   The BADGE owns the pill and the nudge. Every save after the first is a
+   number that changed, not a number that appeared, so it gets a bump off 1
+   rather than a growth out of nothing.
+
+   Nested transforms multiply, so the two never have to know about each
+   other — the deal-in can be mid-flight when the first nudge starts and
+   both still resolve correctly.
+   ───────────────────────────────────────────────────────────────────────── */
+.flyout-tab-count-in {
+  position: absolute;
+  top: -3px;
+  left: 13px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(2px) scale(0.55);
+  transition:
+    opacity 180ms var(--pk-ease-in-out),
+    transform 220ms var(--pk-ease-in-out),
+    visibility 0s linear 220ms;
+}
+.flyout-tab-count-in[data-show] {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  transition:
+    opacity 180ms var(--pk-ease-expo),
+    transform 300ms var(--pk-ease-expo),
+    visibility 0s;
+}
+
+.flyout-tab-count {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--pk-save-active);
+  color: var(--pk-text-inverse);
+  font-size: 10px;
+  line-height: 16px;
+  font-weight: var(--pk-w-heading);
+}
+/* The reel, pinned to the badge's own 16px line box: the cell a digit is
+   centred in has to be the height the badge is, or the number sits off
+   centre in the pill. Same fix the undo clock needs, same reason. */
+.flyout-tab-count .slot {
+  --slot-cell: 16px;
+  /* The fade band is 20% of the cell by default — 3px of a 10px digit, which
+     at this size eats the number rather than softening it. */
+  --slot-fade: 8%;
+  height: 16px;
+  line-height: 16px;
+}
+
+/* Two identical blocks so the attribute can alternate between them and
+   restart the nudge. Off 1 and back to 1: one composited transform, and the
+   pill never leaves the icon it is pinned to. */
+.flyout-tab-count[data-pop="0"] {
+  animation: flyout-count-pop-a 380ms var(--pk-ease-hover) both;
+}
+.flyout-tab-count[data-pop="1"] {
+  animation: flyout-count-pop-b 380ms var(--pk-ease-hover) both;
+}
+@keyframes flyout-count-pop-a {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.18); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+@keyframes flyout-count-pop-b {
+  0% { transform: scale(1); }
+  38% { transform: scale(1.18); }
+  70% { transform: scale(0.97); }
+  100% { transform: scale(1); }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   SEARCH
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-search {
+  padding: var(--pk-space-4);
+}
+.flyout-search-input {
+  width: 100%;
+  padding: var(--pk-space-2-5) var(--pk-space-3-5);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-surface);
+  color: var(--pk-text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.09px;
+  transition:
+    border-color var(--pk-dur-color) var(--pk-ease-in-out),
+    background-color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.flyout-search-input::placeholder {
+  color: var(--pk-text-secondary);
+}
+.flyout-search-input:focus {
+  outline: none;
+  border-color: var(--pk-brand-500);
+  background: var(--pk-bg);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   COLLECTION
+   ═══════════════════════════════════════════════════════════════════════ */
+/* ONE line, not three. The head was stacking title / count / value, which
+   spent 84px of a 390px screen saying two things — and put the largest
+   figure on the surface third in reading order, under a label describing
+   something else.
+
+   So the value takes the line and the count annotates it from the right
+   edge, which is also the edge every price in the list below is set
+   against. The head now reads down as name, then figure, and across as
+   figure, then how many made it.
+
+   Centred rather than baseline-aligned, and that is not a preference: the
+   total is a reel, the reel is `overflow: hidden`, and an overflow-hidden
+   box reports its BOTTOM edge as its baseline. Aligning to it would hang
+   the count a full cell below the number. Centring two boxes ignores
+   baselines entirely, and the digits are already centred in their own
+   window, so the two land on the same optical line. */
+.flyout-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pk-space-3);
+  margin-top: var(--pk-space-2);
+}
+.flyout-summary-label {
+  flex: 0 0 auto;
+  color: var(--pk-text-secondary);
+}
+/* The total is a reel like every other figure here, so it needs its window
+   and its line box to be the same height — .t-head-xl sets a 24px
+   line-height on the .slot itself and would otherwise sit the digits off
+   centre in their cells. Tighter than the 1.5em default: at 20px that would
+   be a 30px window inside a 24px line, and the head would grow to fit it. */
+.flyout-summary .slot {
+  --slot-cell: 1.25em;
+  line-height: var(--slot-cell);
+}
+/* The total is the only figure on this screen that is left-aligned — it hangs
+   off the head's left margin under the card count — so it pulses from its
+   left edge. The default sends a last-child figure right, which here would
+   walk the number off the margin it shares with the title. */
+.flyout-summary .flyout-fig {
+  transform-origin: left center;
+}
+
+/* ── Rows ─────────────────────────────────────────────────────────────────
+   The collection is a LEDGER. Browse is two columns of scans because the
+   question there is which card this is, and the picture answers it; by the
+   time a card is here it is already yours and the question is what it is
+   worth. So the scan drops to a 40px thumbnail and the figures take the
+   width it gives up.
+
+   That is what fixes the numbers. In a tile, price and delta sit at opposite
+   ends of one line inside a half-width box — same baseline, but a different
+   horizontal position on every card, so a screen of prices never resolves
+   into a column you can read down. Here they stack against the row's right
+   edge in tabular figures: every price on the same rule, every delta under
+   its own price, and the whole list scans as one column of money.
+
+   Same hairline-per-row treatment as the Activity feed, because they are the
+   same kind of object — a list of records rather than a wall of pictures.
+   ───────────────────────────────────────────────────────────────────────── */
+.flyout-rows {
+  list-style: none;
+  margin: var(--pk-space-3) 0 0;
+  padding: 0;
+  /* Positioning context for the exit layer, and a stacking context so its
+     negative z-index cannot escape into the panel. Same contract as
+     .flyout-grid — flipGrid pins leaving rows inside whichever of the two it
+     was handed. */
+  position: relative;
+  z-index: 0;
+}
+
+.flyout-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border-bottom: 1px solid var(--pk-border);
+  /* A MOUNT entrance only — arriving on the tab. Removing a card reflows the
+     list with FLIP instead, so this never replays for an edit. Slightly
+     slower step than the grid's 24ms: a row is a full-width object and the
+     eye reads a vertical cascade more slowly than a two-column one. */
+  animation: flyout-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 28ms);
+}
+
+/* Rows leave the same way tiles do: re-parented into the overlay, pinned at
+   the box they just vacated, faded out while the rest slide up over them. */
+.flyout-grid-exit > .flyout-row {
+  position: absolute;
+  margin: 0;
+  animation: none;
+}
+
+.flyout-row-thumb {
+  flex: 0 0 40px;
+  width: 40px;
+}
+.flyout-row-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.flyout-row-player {
+  font-weight: var(--pk-w-strong);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}
+/* Year, set and grade on one line. The grade is the thing the tile never had
+   room for — secondary ink, so it reads as provenance rather than as another
+   figure competing with the price. */
+.flyout-row-meta {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}
+
+.flyout-row-figures {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 1px;
+}
+/* Same reason as the grid's: the kit pins .price/.delta to a fixed px
+   line-height, and a reel needs its line box and its cell to be the same
+   height or every digit sits off-centre in its window. */
+.flyout-row-figures .slot {
+  line-height: var(--slot-cell);
+}
+/* Both figures are stacked against the right edge, so both pulse from it.
+   The default pins the first figure's origin to the LEFT, which is right on
+   the tile — two figures at opposite ends of one line — and wrong here,
+   where a left-origin scale would walk the price off the column. */
+.flyout-row-figures .flyout-fig {
+  transform-origin: right center;
+}
+
+.flyout-row-save {
+  flex: 0 0 auto;
+  display: flex;
+}
+
+/* An empty collection is mostly room, so the copy sits in the MIDDLE of that
+   room rather than tucked under the title. The title itself does not move:
+   it is the screen's name, and a name that drifts to the centre when the
+   screen is empty and snaps back up when it is not reads as a bug.
+
+   So the panel becomes a column for this one case, the head keeps its
+   natural height at the top, and the blank takes every pixel left over and
+   centres inside it. :has() rather than a flag threaded down from the shell
+   — the panel styles itself off what it is actually holding. The bottom
+   padding goes with it, or the filled box plus the padding would overflow a
+   scrollport that has nothing to scroll. */
+.flyout-panel:has(> .flyout-blank) {
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 0;
+}
+
+.flyout-blank {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: var(--pk-space-5);
+  /* Optically centred, not mathematically: the tab bar sits under this box,
+     so an even split leaves the copy looking low. The extra bottom padding
+     lifts it by half a nav. */
+  padding: var(--pk-space-6) var(--pk-space-4) calc(var(--pk-space-6) * 2);
+}
+.flyout-blank > .flyout-cta {
+  flex: none;
+}
+.flyout-blank-text {
+  color: var(--pk-text-secondary);
+  max-width: 30ch;
+}
+
+/* ── The fan ──────────────────────────────────────────────────────────────
+   Three scans dealt into a shallow arc. Grid rather than absolute
+   positioning: every card takes the same single cell, so the stack is
+   exactly one card tall and one card wide no matter what the fan does to
+   them, and the flex column above can centre it without measuring anything.
+
+   The spread is deliberately shallow — 11 degrees and 52px. Wider and it
+   reads as a hand of playing cards; this should read as three cards left on
+   a table, which is what an empty collection is short of.
+   ───────────────────────────────────────────────────────────────────────── */
+.flyout-blank-stack {
+  display: grid;
+  place-items: center;
+  flex: none;
+  list-style: none;
+  margin: 0 0 var(--pk-space-1);
+  padding: 0;
+}
+.flyout-blank-card {
+  grid-area: 1 / 1;
+  width: 84px;
+  /* Nothing here animates. It is the resting fan, and both the deal-in and
+     the idle float happen on the wrappers inside it. */
+  transform: translateX(var(--x, 0)) translateY(var(--y, 0)) rotate(var(--rot, 0deg))
+    scale(var(--sc, 1));
+}
+.flyout-blank-card:nth-child(1) {
+  --x: -52px;
+  --y: 9px;
+  --rot: -11deg;
+  --sc: 0.92;
+  z-index: 0;
+}
+.flyout-blank-card:nth-child(2) {
+  --x: 52px;
+  --y: 9px;
+  --rot: 11deg;
+  --sc: 0.92;
+  z-index: 1;
+}
+/* The front card is the only one at full size and the only one near upright,
+   which is what makes it read as in front rather than merely last. */
+.flyout-blank-card:nth-child(3) {
+  --rot: -2deg;
+  z-index: 2;
+}
+
+.flyout-blank-rise,
+.flyout-blank-float {
+  display: block;
+}
+
+/* Dealt, not faded in: each card rises into its slot, the front one last so
+   the stack builds under it. Runs on every arrival at the tab — the panel is
+   keyed on the tab, so this remounts with it. */
+.flyout-blank-rise {
+  animation: flyout-stack-rise 420ms var(--pk-ease-expo) both;
+  animation-delay: calc(var(--i, 0) * 70ms);
+}
+@keyframes flyout-stack-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px) scale(0.88);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* The idle loop. Three DIFFERENT durations rather than one duration with
+   three delays: equal periods re-sync every cycle and the fan starts
+   breathing as a single object, which is exactly the robotic thing an idle
+   loop is there to avoid. Primes-ish lengths drift against each other and
+   the arrangement never quite repeats.
+
+   Starts after the deal lands — delay = rise delay + rise duration. */
+.flyout-blank-float {
+  animation: flyout-stack-float 5300ms var(--pk-ease-in-out) infinite;
+  animation-delay: calc(var(--i, 0) * 70ms + 420ms);
+}
+.flyout-blank-card:nth-child(2) .flyout-blank-float {
+  animation-duration: 6700ms;
+}
+.flyout-blank-card:nth-child(3) .flyout-blank-float {
+  animation-duration: 5900ms;
+}
+@keyframes flyout-stack-float {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-6px) rotate(1.4deg);
+  }
+}
+
+/* Lifts each scan off the page and off the card behind it. The hairline is
+   the same box-shadow so a light scan on white still has an edge. */
+.flyout-blank-card .slab {
+  box-shadow:
+    0 0 0 1px var(--pk-border),
+    var(--pk-shadow-md);
+}
+
+/* The kit's blanket rule collapses every animation to 0.01ms, which is right
+   for a gesture that has an end state to land on. An ambient loop has none —
+   it is only ever the middle of itself — so it is switched off outright
+   rather than run once, instantly, for no reason. */
+@media (prefers-reduced-motion: reduce) {
+  .flyout-blank-float {
+    animation: none;
+  }
+}
+.flyout-blank-text > strong {
+  display: block;
+  color: var(--pk-text);
+  font-weight: var(--pk-w-heading);
+}
+.flyout-cta {
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border: 0;
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-house);
+  color: var(--pk-text-inverse);
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.09px;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    transform var(--pk-dur-press) var(--pk-ease-in-out);
+}
+.flyout-cta:hover {
+  background: var(--pk-house-hover);
+}
+.flyout-cta:active {
+  transform: scale(0.97);
+}
+
+.flyout-empty {
+  padding: var(--pk-space-6) var(--pk-space-4);
+  color: var(--pk-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   ACTIVITY
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-feed {
+  list-style: none;
+  margin: var(--pk-space-4) 0 0;
+  padding: 0;
+}
+.flyout-feed-row {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+  padding: var(--pk-space-2-5) var(--pk-space-4);
+  border-bottom: 1px solid var(--pk-border);
+  animation: flyout-tile-in 320ms var(--pk-ease-hover) both;
+  animation-delay: calc(var(--stagger, 0) * 32ms);
+}
+.flyout-feed-thumb {
+  flex: 0 0 36px;
+  width: 36px;
+}
+.flyout-feed-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.flyout-feed-event {
+  font-weight: var(--pk-w-strong);
+}
+.flyout-feed-card {
+  color: var(--pk-text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
+}
+.flyout-feed-when {
+  flex: 0 0 auto;
+  color: var(--pk-text-secondary);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PROFILE
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-profile {
+  padding: var(--pk-space-5) var(--pk-space-4) 0;
+}
+.flyout-profile-id {
+  display: flex;
+  align-items: center;
+  gap: var(--pk-space-3);
+}
+.flyout-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 999px;
+  /* Multi-stop and eased, not a two-stop fade. */
+  background: linear-gradient(
+    152deg,
+    var(--pk-neutral-200) 0%,
+    var(--pk-neutral-100) 38%,
+    var(--pk-neutral-200) 66%,
+    var(--pk-neutral-300) 100%
+  );
+}
+.flyout-profile-name {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.flyout-profile-handle {
+  color: var(--pk-text-secondary);
+}
+.flyout-profile-stats {
+  margin: var(--pk-space-5) 0 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--pk-border);
+  padding-top: var(--pk-space-3);
+}
+.flyout-profile-stats > div {
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-0-5);
+}
+.flyout-profile-stats > div + div {
+  padding-left: var(--pk-space-3);
+  border-left: 1px solid var(--pk-border);
+}
+.flyout-profile-stats dt {
+  color: var(--pk-text-secondary);
+}
+.flyout-profile-stats dd {
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   INERT TABS
+
+   Search, Activity and Profile do nothing in this experiment. They read as
+   unavailable through weight and a solid tertiary ink — never through
+   opacity, because faded type is unreadable rather than quiet.
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-tab[data-inert] {
+  color: var(--pk-text-tertiary);
+  cursor: default;
+}
+.flyout-tab[data-inert]:active {
+  transform: none;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   THE HIT
+
+   The Collection icon is struck from above, so it goes DOWN first, then
+   overshoots up, then settles. Getting that order backwards — up first — is
+   what makes most "bounce" feedback read as a wobble instead of an impact.
+   Four stops, hand-authored, on the signature curve.
+   ═══════════════════════════════════════════════════════════════════════ */
+/* The three numbers come off RECOIL in saveMotion.js — SaveFlight writes them
+   onto this element when the tab registers itself as the target, so nothing
+   here is a magic pixel. Fallbacks keep the rule standalone. */
+.flyout-tab-icon[data-hit] {
+  animation: flyout-recoil var(--recoil-dur, 520ms) var(--pk-ease-hover);
+}
+@keyframes flyout-recoil {
+  0%   { transform: translateY(0) scale(1); }
+  16%  { transform: translateY(var(--recoil-depth, 5px)) scale(0.9, 1.08); } /* squashed by the blow */
+  46%  { transform: translateY(var(--recoil-rebound, -3px)) scale(1.06, 0.96); }
+  74%  { transform: translateY(1px) scale(0.99); }
+  100% { transform: translateY(0) scale(1); }
+}
+
+/* The flight itself — layer, both variants, keyframes — lives in
+   saveFlight.css, imported by SaveFlight.jsx. */
+
+/* ═══════════════════════════════════════════════════════════════════════
+   MOTION CONFIG
+
+   Outside the phone shell on purpose — a control panel inside the frame
+   would be part of what you are judging.
+   ═══════════════════════════════════════════════════════════════════════ */
+.flyout-config {
+  position: fixed;
+  top: 12px;
+  right: 12px;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--pk-space-2);
+  width: min(272px, calc(100cqw - 24px));
+}
+.flyout-config-toggle {
+  padding: var(--pk-space-1) var(--pk-space-2-5);
+  border: 1px solid var(--pk-border);
+  border-radius: 999px;
+  background: var(--pk-bg);
+  color: var(--pk-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  cursor: pointer;
+}
+.flyout-config-toggle:hover {
+  color: var(--pk-text);
+  border-color: var(--pk-border-hover);
+}
+
+.flyout-config-body {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--pk-space-1);
+  padding: var(--pk-space-3);
+  border: 1px solid var(--pk-border);
+  border-radius: var(--pk-radius-lg);
+  background: var(--pk-bg);
+  box-shadow: var(--pk-shadow-md);
+}
+.flyout-config-title {
+  font-size: 13px;
+  line-height: 16px;
+  font-weight: var(--pk-w-heading);
+  letter-spacing: -0.1px;
+  margin-bottom: var(--pk-space-1);
+}
+
+.flyout-config-option {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--pk-space-2);
+  border: 1px solid transparent;
+  border-radius: var(--pk-radius-sm);
+  background: var(--pk-surface);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    border-color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.flyout-config-option:hover {
+  background: var(--pk-surface-hover);
+}
+.flyout-config-option[data-on] {
+  border-color: var(--pk-brand-500);
+  background: var(--pk-brand-50);
+}
+.flyout-config-name {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  letter-spacing: -0.1px;
+}
+.flyout-config-tech {
+  font-family: var(--pk-font-mono);
+  font-feature-settings: var(--pk-font-features-mono);
+  font-variant-numeric: tabular-nums slashed-zero;
+  font-size: 10px;
+  line-height: 14px;
+  color: var(--pk-text-secondary);
+}
+.flyout-config-note {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: -0.1px;
+  color: var(--pk-text-secondary);
+}
+.flyout-config-foot {
+  margin: var(--pk-space-1) 0 0;
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pk-text-secondary);
+}
+
+/* Bow toggle — only rendered while the arc is armed. */
+.flyout-config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--pk-space-2);
+  margin-top: var(--pk-space-1);
+}
+.flyout-config-row-label {
+  font-size: 12px;
+  line-height: 16px;
+  color: var(--pk-text-secondary);
+}
+.flyout-config-seg {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border-radius: var(--pk-radius-sm);
+  background: var(--pk-surface);
+}
+.flyout-config-seg button {
+  padding: 2px var(--pk-space-2);
+  border: 0;
+  border-radius: var(--pk-radius-xs);
+  background: transparent;
+  color: var(--pk-text-secondary);
+  font: inherit;
+  font-size: 12px;
+  line-height: 18px;
+  font-weight: var(--pk-w-strong);
+  cursor: pointer;
+  transition:
+    background-color var(--pk-dur-color) var(--pk-ease-in-out),
+    color var(--pk-dur-color) var(--pk-ease-in-out);
+}
+.flyout-config-seg button[data-on] {
+  background: var(--pk-bg);
+  color: var(--pk-text);
+}
+
+/* ── Songs kit ──────────────────────────────────────────────────────────
+   Album art is square and meant to be seen edge to edge: no mat, cover not
+   contain. Everything else about the surface is the same app. */
+.flyout[data-kit="songs"] {
+  --pk-card-ratio: 1;
+}
+
+.flyout[data-kit="songs"] .slab-face img {
+  object-fit: cover;
+}
+
+/* The heart sits straight on the cover: no plate, no hairline. White, with
+   a soft shadow under the stroke — a difference blend inverted mid-tone
+   sleeves to mid grey and the outline all but vanished, where a white line
+   on its own shadow reads on a pale cover and a dark one alike. Red once
+   saved. */
+.flyout[data-kit="songs"] .flyout-tile-save {
+  --pk-save-bg: transparent;
+  --pk-save-bg-hover: transparent;
+  --pk-save-plate: none;
+  --pk-save-idle: var(--pk-neutral-0);
+}
+
+.flyout[data-kit="songs"] .flyout-tile-save .pk-save-icon {
+  filter: drop-shadow(0 1px 1.5px rgb(0 0 0 / 0.45)) drop-shadow(0 0 6px rgb(0 0 0 / 0.18));
+}
+
+/* Hover would tint the glyph toward the saved red before it is saved; on a
+   bare cover that reads as already-liked. White until it actually is. */
+.flyout[data-kit="songs"] .flyout-tile-save .pk-save:not([data-saved]):hover {
+  color: var(--pk-neutral-0);
+}
+
+/* No chip rail in this kit, so there is nothing for the bar to lift away:
+   lifted the full rail height it left the title floating over the grid with
+   no bar behind it. Here the bar only tightens — it rises 12px, and the
+   title rides up WITH it while it shrinks, instead of being held in place
+   above a bar that has gone. */
+.flyout[data-kit="songs"] {
+  --flyout-collapse: 12px;
+}
+
+@keyframes flyout-title-shrink {
+  to {
+    transform: scale(var(--flyout-title-scale));
+  }
+}
+
+@supports (animation-timeline: scroll()) {
+  .flyout[data-kit="songs"] .flyout-head .flyout-panel-head > h1 {
+    animation-name: flyout-title-shrink;
+    animation-range: 0 40px;
+  }
+}
+
+@supports not (animation-timeline: scroll()) {
+  .flyout[data-kit="songs"] [data-scrolled] .flyout-head .flyout-panel-head > h1 {
+    transform: scale(var(--flyout-title-scale));
+  }
+}

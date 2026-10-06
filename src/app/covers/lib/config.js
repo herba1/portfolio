@@ -105,6 +105,15 @@ export const DEFAULTS = {
   popJitter: 0.5, // per-tile timing scatter (× popStagger) so the line breathes
   popScaleFrom: 0.7, // scale a tile starts at (lower = bigger pop; 1 = no grow)
   popRise: 28, // px the tile rises into place as it springs in
+  introRadius: 0.42,
+  introTilt: 62,
+  introTile: 0.86,
+  popSpeed: 1,
+  popStyle: "warp",
+  warpDepth: 900,
+  warpFocal: 900,
+  warpSpin: 80,
+  warpTilt: 28,
   popReadyTimeout: 8.0, // s safety net to reveal anyway if art never loads
 
   // ── Click push (neighbours recoil from the opened player) ────────────

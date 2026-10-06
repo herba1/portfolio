@@ -1,9 +1,3 @@
-@property --bd-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
 @property --bd-ink {
   syntax: "<color>";
   initial-value: #f4f4f5;
@@ -241,39 +235,6 @@
   -webkit-mask-composite: xor;
 }
 
-.bd-dock__shell[data-busy="true"][data-open="false"]::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  pointer-events: none;
-  background: conic-gradient(
-    from var(--bd-angle),
-    transparent 0deg,
-    transparent 232deg,
-    var(--bd-orbit-tail) 292deg,
-    var(--bd-orbit) 346deg,
-    transparent 360deg
-  );
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
-  mask-composite: exclude;
-  -webkit-mask-composite: xor;
-  animation: bd-orbit 1.4s linear infinite;
-  z-index: 1;
-}
-
-@keyframes bd-orbit {
-  to {
-    --bd-angle: 360deg;
-  }
-}
-
 .bd-dock__panel {
   --bd-panel-fade: 18px;
   overflow-y: auto;
@@ -485,7 +446,8 @@
 .bd-dock__artist {
   min-width: 0;
   overflow: hidden;
-  text-overflow: ellipsis;
+  text-overflow: clip;
+  mask-image: var(--text-fade-mask);
   white-space: nowrap;
 }
 
@@ -520,9 +482,12 @@
     transition-duration: 1ms;
   }
 
-  .bd-dock__shell[data-busy="true"][data-open="false"]::before,
   .bd-dock__shell[data-open="true"][data-busy="true"] .bd-dock__bar::after {
     animation-duration: 4s;
+  }
+
+  .bd-dock__shell[data-busy="true"] .bd-dock__spinner {
+    animation-duration: 3s;
   }
 
   .bd-dock__row[data-active="true"]::after {
@@ -551,4 +516,12 @@
   .bd-dock__bar input {
     font-size: 16px;
   }
+}
+
+.bd-dock__glyph {
+  display: block;
+  width: 28px;
+  height: 28px;
+  margin: -6px;
+  pointer-events: none;
 }

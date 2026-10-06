@@ -1,0 +1,11 @@
+{
+  "title": "Cover studies",
+  "description": "Two studies on your real album covers: a deck-style 3D cover ring and an ASCII cover.",
+  "tags": ["Interface", "Covers", "Motion"],
+  "status": "candidate",
+  "createdAt": "2026-10-05T18:00:00.000Z",
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "Real-artwork studies in the vein of the deck, the likes list and the reactive colour plates, built to be approved or skipped quickly.",
+  "source": { "kind": "manual" }
+}
