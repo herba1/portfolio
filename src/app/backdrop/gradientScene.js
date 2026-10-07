@@ -340,7 +340,9 @@ export class GradientScene {
 
   setVisible(visible) {
     this.visible = visible;
-    if (visible) this.lastTime = 0;
+    if (!visible) return;
+    this.lastTime = 0;
+    if (!this.frameHandle && this.programs) this.frameHandle = requestAnimationFrame(this.tick);
   }
 
   setSampler(sampler) {
@@ -665,8 +667,13 @@ export class GradientScene {
   }
 
   tick(time) {
+    if (!this.visible) {
+      this.frameHandle = 0;
+      this.lastTime = 0;
+      return;
+    }
     this.frameHandle = requestAnimationFrame(this.tick);
-    if (document.hidden || !this.visible) {
+    if (document.hidden) {
       this.lastTime = 0;
       return;
     }

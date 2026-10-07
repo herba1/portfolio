@@ -3,11 +3,16 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import { blobActions } from "./blobActions";
 import { DEFAULTS } from "./blobPresets";
+import createResolutionGovernor from "@/app/experiments/resolutionGovernor";
 
 const MAX_PETALS = 8;
 const LOBES_PER_FLOWER = MAX_PETALS + 1;
 const COLORS_PER_PALETTE = 6;
 const POINTER_IDLE_MS = 2500;
+const PAGE_PIXEL_CAP = 2;
+const EMBEDDED_PIXEL_CAP = 1.5;
+const PIXELATED_PIXEL_CAP = 1.25;
+const MIN_RESOLUTION_SCALE = 0.55;
 const POP_STRENGTH = 5.5;
 const EXIT_MS = 450;
 const PUSH_FADE_RATE = 6;
@@ -916,7 +921,11 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const deviceRatio = window.devicePixelRatio || 1;
-    let pixelRatio = Math.min(deviceRatio, 2);
+    const governor = createResolutionGovernor({ max: 1, min: MIN_RESOLUTION_SCALE });
+    const pixelCapFor = (layoutIndex) =>
+      Math.min(deviceRatio, layoutIndex > 0 ? PIXELATED_PIXEL_CAP : embedded ? EMBEDDED_PIXEL_CAP : PAGE_PIXEL_CAP);
+    let pixelCap = pixelCapFor(0);
+    let pixelRatio = pixelCap;
     let activeLayout = 0;
     const palette = new Float32Array(FLOWERS.length * COLORS_PER_PALETTE * 3);
     const state = createState();
@@ -925,6 +934,7 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
     const light = { x: 0, y: 0 };
     const push = { x: 0, y: 0, strength: 0 };
     let frame = 0;
+    let running = false;
     let bloomStart = null;
     let lastMilliseconds = null;
     let lastScroll = embedded ? 0 : window.scrollY;
@@ -958,7 +968,12 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
       const settings = { ...DEFAULTS, ...configRef.current };
       if (settings.layout !== activeLayout) {
         activeLayout = settings.layout;
-        pixelRatio = Math.min(deviceRatio, activeLayout > 0 ? 1.25 : 2);
+        pixelCap = pixelCapFor(activeLayout);
+        pixelRatio = pixelCap * governor.scale;
+        resize();
+      }
+      if (lastMilliseconds !== null && governor.sample(milliseconds - lastMilliseconds)) {
+        pixelRatio = pixelCap * governor.scale;
         resize();
       }
       const viewWidth = embedded ? canvas.clientWidth : window.innerWidth;
@@ -980,8 +995,8 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
 
       const hovering = !reducedMotion && performance.now() - pointer.lastMove < POINTER_IDLE_MS;
       pointer.active = hovering && latestEvent !== null;
+      const rect = latestEvent !== null ? canvas.getBoundingClientRect() : null;
       if (pointer.active) {
-        const rect = canvas.getBoundingClientRect();
         const targetX = (latestEvent.clientX - rect.left) * pixelRatio;
         const targetY = (latestEvent.clientY - rect.top) * pixelRatio;
         const smoothing = 1 - Math.exp(-deltaSeconds * 14);
@@ -998,21 +1013,20 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
         previousPointer = null;
       }
 
-      const rectNow = canvas.getBoundingClientRect();
       const settled = !exitRef.current.active && bloomSeconds > INTRO_SETTLE_SECONDS;
       const insideCanvas =
-        latestEvent !== null &&
+        rect !== null &&
         !reducedMotion &&
         settled &&
-        latestEvent.clientX >= rectNow.left &&
-        latestEvent.clientX <= rectNow.right &&
-        latestEvent.clientY >= rectNow.top &&
-        latestEvent.clientY <= rectNow.bottom;
+        latestEvent.clientX >= rect.left &&
+        latestEvent.clientX <= rect.right &&
+        latestEvent.clientY >= rect.top &&
+        latestEvent.clientY <= rect.bottom;
       const pushFade = 1 - Math.exp(-deltaSeconds * PUSH_FADE_RATE);
       push.strength = lerp(push.strength, insideCanvas ? 1 : 0, pushFade);
       if (insideCanvas) {
-        const targetX = (latestEvent.clientX - rectNow.left) * pixelRatio;
-        const targetY = (latestEvent.clientY - rectNow.top) * pixelRatio;
+        const targetX = (latestEvent.clientX - rect.left) * pixelRatio;
+        const targetY = (latestEvent.clientY - rect.top) * pixelRatio;
         if (push.strength < 0.03) {
           push.x = targetX;
           push.y = targetY;
@@ -1135,17 +1149,31 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
       frame = requestAnimationFrame(draw);
     };
 
+    const start = () => {
+      if (running) return;
+      running = true;
+      lastMilliseconds = null;
+      frame = requestAnimationFrame(draw);
+    };
+    const stop = () => {
+      running = false;
+      cancelAnimationFrame(frame);
+      frame = 0;
+    };
+
     resize();
-    frame = requestAnimationFrame(draw);
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
+    const visibility = new IntersectionObserver(([entry]) => (entry.isIntersecting ? start() : stop()));
+    visibility.observe(canvas);
     window.addEventListener("pointermove", handleMove);
     if (!embedded) window.addEventListener("pointerdown", pop);
     window.addEventListener("pointerleave", handleLeave);
     if (!embedded) window.addEventListener("dblclick", replay);
 
     return () => {
-      cancelAnimationFrame(frame);
+      stop();
+      visibility.disconnect();
       observer.disconnect();
       window.removeEventListener("pointermove", handleMove);
       window.removeEventListener("pointerdown", pop);

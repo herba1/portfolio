@@ -15,6 +15,7 @@ const SILENCE_RELEASE = 0.08;
 export const FADE_IN = 0.16;
 export const FADE_OUT = 0.22;
 const FADE_TAIL = 0.8;
+const WAKE_EVENTS = ["play", "seeked", "timeupdate", "durationchange", "loadedmetadata", "emptied"];
 
 function clock(seconds) {
   if (!Number.isFinite(seconds)) return "0:00";
@@ -44,9 +45,16 @@ export class BackdropAudio {
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.snapshot = { bands: [0, 0, 0, 0], level: 0 };
 
+    this.lastRatio = "";
     this.frame = this.frame.bind(this);
     this.read = this.read.bind(this);
+    this.wake = this.wake.bind(this);
+    WAKE_EVENTS.forEach((type) => element?.addEventListener(type, this.wake));
     this.frameHandle = requestAnimationFrame(this.frame);
+  }
+
+  wake() {
+    if (!this.frameHandle) this.frameHandle = requestAnimationFrame(this.frame);
   }
 
   connect() {
@@ -86,6 +94,10 @@ export class BackdropAudio {
 
   setProgressTargets(targets) {
     this.targets = targets;
+    this.lastRatio = "";
+    this.lastElapsed = "";
+    this.lastRemaining = "";
+    this.wake();
   }
 
   rampTo(value, seconds) {
@@ -192,7 +204,11 @@ export class BackdropAudio {
     const duration = element.duration;
     const known = Number.isFinite(duration) && duration > 0;
     const ratio = known ? Math.min(1, element.currentTime / duration) : 0;
-    targets.rail?.style.setProperty("--bd-progress", ratio.toFixed(4));
+    const ratioText = ratio.toFixed(4);
+    if (ratioText !== this.lastRatio) {
+      targets.rail?.style.setProperty("--bd-progress", ratioText);
+      this.lastRatio = ratioText;
+    }
 
     const elapsed = clock(element.currentTime);
     if (elapsed !== this.lastElapsed && targets.elapsed) {
@@ -207,7 +223,6 @@ export class BackdropAudio {
   }
 
   frame() {
-    this.frameHandle = requestAnimationFrame(this.frame);
     const element = this.element;
     const live = this.analyser && element && !element.paused && !this.reduced;
     if (live) this.readLevels();
@@ -221,6 +236,8 @@ export class BackdropAudio {
     }
     this.snapshot.level = total / 4;
     this.writeProgress();
+    const silent = !live && (!element || element.paused) && total === 0;
+    this.frameHandle = silent ? 0 : requestAnimationFrame(this.frame);
   }
 
   read() {
@@ -229,6 +246,8 @@ export class BackdropAudio {
 
   destroy() {
     cancelAnimationFrame(this.frameHandle);
+    this.frameHandle = 0;
+    WAKE_EVENTS.forEach((type) => this.element?.removeEventListener(type, this.wake));
     clearTimeout(this.fadeTimer);
     try {
       this.source?.disconnect();

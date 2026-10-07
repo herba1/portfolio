@@ -280,6 +280,12 @@
   }
 }
 
+.xl-tile[data-offscreen] [data-plate] canvas,
+.xl-tile[data-offscreen] .flyout-blank-float,
+.xl-tile[data-offscreen] .bd-dock__bar::after {
+  animation-play-state: paused;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .xl-tile [data-plate] canvas {
     transform: none;

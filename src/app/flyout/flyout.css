@@ -64,6 +64,10 @@
 .flyout-panel::-webkit-scrollbar {
   display: none;
 }
+.flyout[data-embedded] .flyout-panel {
+  overflow-y: hidden;
+  overscroll-behavior: auto;
+}
 
 @keyframes flyout-panel-in {
   from {

@@ -199,6 +199,7 @@ export default function AsciiCover({ covers = [], embedded = false }) {
       }
       ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
       state.side = Math.floor(Math.min(state.width, state.height));
+      if (state.side < 1) return;
       const rowHeight = (state.side / COLUMNS) * CELL_RATIO;
       const rows = Math.floor(state.side / rowHeight);
       state.rowsHeight = rows * rowHeight;

@@ -74,6 +74,10 @@ export default function useTuner({
   }, []);
 
   const loop = useCallback(() => {
+    if (demoRef.current && demoPausedRef.current) {
+      frameRef.current = 0;
+      return;
+    }
     frameRef.current = requestAnimationFrame(loop);
 
     const analyser = analyserRef.current;
@@ -307,6 +311,10 @@ export default function useTuner({
       setStatus("idle");
     };
   }, [demoFrequencies, windowSize, startLoop]);
+
+  useEffect(() => {
+    if (!demoPaused && !frameRef.current && !document.hidden) startLoop();
+  }, [demoPaused, startLoop]);
 
   useEffect(() => () => teardown(), [teardown]);
 

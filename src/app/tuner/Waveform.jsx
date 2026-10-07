@@ -59,9 +59,12 @@ function Waveform({ pitchRef, subscribe }) {
     let width = 0;
     let height = 0;
     let dpr = 1;
+    let ink = "";
+    let inkShifting = false;
 
     function resize() {
       dpr = Math.min(window.devicePixelRatio || 1, 2);
+      ink = getComputedStyle(wrap).color;
       width = wrap.clientWidth;
       height = wrap.clientHeight;
       const rows = Math.max(MIN_ROWS, Math.round(height / ROW_PITCH));
@@ -79,7 +82,8 @@ function Waveform({ pitchRef, subscribe }) {
     function render() {
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
       context.clearRect(0, 0, width, height);
-      context.fillStyle = getComputedStyle(wrap).color;
+      if (inkShifting) ink = getComputedStyle(wrap).color;
+      context.fillStyle = ink;
       const thickness = CONFIG.barThickness;
       const f = CONFIG.flatFloor;
       context.beginPath();
@@ -115,6 +119,18 @@ function Waveform({ pitchRef, subscribe }) {
 
     if (reduce) return () => resizeObserver.disconnect();
 
+    const onInkShiftStart = (event) => {
+      if (event.target === wrap && event.propertyName === "color") inkShifting = true;
+    };
+    const onInkShiftEnd = (event) => {
+      if (event.target !== wrap || event.propertyName !== "color") return;
+      inkShifting = false;
+      ink = getComputedStyle(wrap).color;
+    };
+    wrap.addEventListener("transitionrun", onInkShiftStart);
+    wrap.addEventListener("transitionend", onInkShiftEnd);
+    wrap.addEventListener("transitioncancel", onInkShiftEnd);
+
     let onScreen = true;
     const intersectionObserver = new IntersectionObserver(([entry]) => {
       onScreen = entry.isIntersecting;
@@ -134,6 +150,9 @@ function Waveform({ pitchRef, subscribe }) {
     return () => {
       resizeObserver.disconnect();
       intersectionObserver.disconnect();
+      wrap.removeEventListener("transitionrun", onInkShiftStart);
+      wrap.removeEventListener("transitionend", onInkShiftEnd);
+      wrap.removeEventListener("transitioncancel", onInkShiftEnd);
       unsubscribe();
     };
   }, [pitchRef, subscribe]);

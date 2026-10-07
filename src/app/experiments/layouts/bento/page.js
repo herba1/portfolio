@@ -4,6 +4,7 @@ import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
 import ReadyGate from "../ReadyGate";
 import PlateHand from "../PlateHand";
+import OffscreenPause from "../OffscreenPause";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -53,6 +54,7 @@ export default async function BentoLayout() {
       </ul>
       <PlateHand />
       <ReadyGate />
+      <OffscreenPause />
       <noscript>
         <style>{".xl-bento[data-gate] .xl-tile{animation-play-state:running!important}"}</style>
       </noscript>

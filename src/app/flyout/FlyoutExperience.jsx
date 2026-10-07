@@ -262,7 +262,7 @@ function FlyoutApp({ embedded }) {
   );
 
   return (
-    <div className="pk flyout" data-kit={kit.id}>
+    <div className="pk flyout" data-kit={kit.id} data-embedded={embedded || undefined}>
       {!embedded && <FlyoutChrome killLenis />}
 
       {/* Keyed on the tab so React remounts and the enter animation runs. */}
@@ -270,7 +270,7 @@ function FlyoutApp({ embedded }) {
         className="flyout-panel"
         key={tab}
         style={{ "--dir": dir }}
-        data-lenis-prevent
+        data-lenis-prevent={embedded ? undefined : true}
         data-scrolled={(needsFallback && scrolled) || undefined}
         onScroll={needsFallback ? onScroll : undefined}
       >
