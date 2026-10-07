@@ -10,7 +10,7 @@ function levelFor(progress) {
   return 0;
 }
 
-export function createChopVisuals({ tiles, arts, rings, keys, clock, running }) {
+export function createChopVisuals({ tiles, arts, rings, keys, ticks, clock, running }) {
   const count = tiles.length;
   const active = new Array(count).fill(null);
   const shown = new Int8Array(count).fill(-1);
@@ -18,6 +18,7 @@ export function createChopVisuals({ tiles, arts, rings, keys, clock, running }) 
   const waveFrom = new Int8Array(count);
   const waveDelay = new Float32Array(count);
   const ringShown = new Float32Array(count).fill(-1);
+  const fillShown = new Float32Array(count).fill(-1);
   const beat = new Uint8Array(count);
   const queue = [];
   let waveStart = -1;
@@ -36,6 +37,13 @@ export function createChopVisuals({ tiles, arts, rings, keys, clock, running }) 
     rings[index].style.strokeDasharray = `${progress.toFixed(4)} 2`;
   }
 
+  function sweep(index, progress) {
+    const tick = ticks?.[index];
+    if (!tick || Math.abs(fillShown[index] - progress) < RING_EPSILON) return;
+    fillShown[index] = progress;
+    tick.style.setProperty("--chop-fill", progress.toFixed(4));
+  }
+
   function begin(voice) {
     const index = voice.position;
     active[index] = voice;
@@ -46,14 +54,18 @@ export function createChopVisuals({ tiles, arts, rings, keys, clock, running }) 
     }
     ringShown[index] = -1;
     ring(index, 0);
+    fillShown[index] = -1;
+    sweep(index, 0);
     tiles[index].setAttribute("data-live", "");
     keys[index]?.setAttribute("data-live", "");
+    ticks?.[index]?.setAttribute("data-live", "");
   }
 
   function finish(index) {
     active[index] = null;
     tiles[index].removeAttribute("data-live");
     keys[index]?.removeAttribute("data-live");
+    ticks?.[index]?.removeAttribute("data-live");
   }
 
   function loop() {
@@ -81,6 +93,7 @@ export function createChopVisuals({ tiles, arts, rings, keys, clock, running }) 
         } else {
           show(index, levelFor(progress));
           ring(index, Math.max(0, progress));
+          sweep(index, Math.min(1, Math.max(0, progress)));
           busy = true;
           continue;
         }

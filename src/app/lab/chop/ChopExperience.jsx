@@ -8,6 +8,7 @@ import SlotNumber from "@/app/ui/SlotNumber";
 
 import { artLevels, coverSource, exportPattern, prepareArt } from "./chopArt";
 import { createChopEngine } from "./chopEngine";
+import { coverPalette } from "./chopPalette";
 import { PADS } from "./chopSlicer";
 import { clearTracks, loadTrack, lookupPreview, prefetchTrack } from "./chopTrack";
 import { createChopVisuals } from "./chopVisuals";
@@ -22,6 +23,7 @@ const PAD_CODES = [
   "KeyZ", "KeyX", "KeyC", "KeyV",
 ];
 const PAD_LABELS = ["1", "2", "3", "4", "Q", "W", "E", "R", "A", "S", "D", "F", "Z", "X", "C", "V"];
+const CUES = ["Hold stutters", "Shift reverses", "Enter loops", "← → change cover"];
 const PAD_INDEXES = Array.from({ length: PADS }, (_, index) => index);
 const GAP = 4;
 const OUT_MS = 200;
@@ -78,7 +80,8 @@ const PadGrid = memo(function PadGrid({ gridRef, status, levels }) {
             <div className="chop__art" data-res={CHUNKY_LEVEL} />
           </div>
           <svg className="chop__ring" aria-hidden="true">
-            <rect x="1" y="1" pathLength="1" />
+            <rect className="chop__halo" x="1" y="1" pathLength="1" />
+            <rect className="chop__stroke" x="1" y="1" pathLength="1" />
           </svg>
         </div>
       ))}
@@ -115,10 +118,13 @@ export default function ChopExperience({ covers = [], embedded = false }) {
   const [mode, setMode] = useState("beats");
   const [playing, setPlaying] = useState(false);
   const [gone, setGone] = useState([]);
-  const [remixed, setRemixed] = useState(false);
+  const [moved, setMoved] = useState(0);
+  const [stepMs, setStepMs] = useState(0);
   const [canSave, setCanSave] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
+  const rootRef = useRef(null);
   const gridRef = useRef(null);
+  const barRef = useRef(null);
   const keymapRef = useRef(null);
   const controllerRef = useRef(null);
 
@@ -128,8 +134,9 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     const tiles = Array.from(grid.querySelectorAll("[data-pad]"));
     const swaps = tiles.map((tile) => tile.querySelector(".chop__swap"));
     const arts = tiles.map((tile) => tile.querySelector(".chop__art"));
-    const rings = tiles.map((tile) => tile.querySelector(".chop__ring rect"));
+    const rings = tiles.map((tile) => tile.querySelector(".chop__stroke"));
     const keys = keymapRef.current ? Array.from(keymapRef.current.querySelectorAll("[data-key]")) : [];
+    const ticks = barRef.current ? Array.from(barRef.current.querySelectorAll("[data-tick]")) : [];
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const reduced = () => motionQuery.matches;
     const timers = new Set();
@@ -174,7 +181,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         else if (mode === "stop") visuals.wave(CENTRE, reduced());
       },
     });
-    const visuals = createChopVisuals({ tiles, arts, rings, keys, clock: () => engine.clock(), running: () => engine.live });
+    const visuals = createChopVisuals({ tiles, arts, rings, keys, ticks, clock: () => engine.clock(), running: () => engine.live });
 
     function ringsFrom(origin) {
       let furthest = 0;
@@ -196,10 +203,33 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       if (slice === step) {
         arts[step].style.removeProperty("--chop-sx");
         arts[step].style.removeProperty("--chop-sy");
+        ticks[step]?.removeAttribute("data-moved");
         return;
       }
       arts[step].style.setProperty("--chop-sx", slice % 4);
       arts[step].style.setProperty("--chop-sy", Math.floor(slice / 4));
+      ticks[step]?.setAttribute("data-moved", "");
+    }
+
+    function syncMoved() {
+      let count = 0;
+      for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) count += 1;
+      setMoved(count);
+    }
+
+    function paintColour(palette) {
+      const root = rootRef.current;
+      if (!root) return;
+      if (palette) root.style.setProperty("--chop-hue", palette.hue.toFixed(1));
+      root.dataset.colour = "on";
+      root.style.setProperty("--chop-c", palette ? palette.strength.toFixed(3) : "0");
+    }
+
+    function drainColour() {
+      const root = rootRef.current;
+      if (!root) return;
+      delete root.dataset.colour;
+      root.style.setProperty("--chop-c", "0");
     }
 
     function land(step) {
@@ -219,8 +249,8 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     }
 
     function fly(step, slice, from, at) {
-      setRemixed(true);
       setSlice(step, slice);
+      syncMoved();
       if (reduced() || from === step) {
         if (!reduced()) land(step);
         return;
@@ -265,6 +295,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       levels.forEach((url, level) => grid.style.setProperty(`--chop-art-${level}`, `url("${url}")`));
       currentArt = art;
       setCanSave(Boolean(art?.exportable));
+      paintColour(art?.exportable ? coverPalette(art.image) : null);
     }
 
     function resetSlices() {
@@ -299,6 +330,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         visuals.chunk();
       } else {
         setStatus("loading");
+        drainColour();
         const furthest = ringsFrom(origin);
         swaps.forEach((swap) => {
           swap.dataset.phase = "out";
@@ -316,7 +348,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         resetSlices();
         visuals.chunk();
         setIndex(target);
-        setRemixed(false);
+        setMoved(0);
         const furthest = ringsFrom(origin);
         swaps.forEach((swap) => {
           swap.dataset.phase = "in";
@@ -338,6 +370,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       setStatus(track ? "ready" : "error");
       if (track) {
         setBpm(Math.round(track.bpm));
+        setStepMs(Math.round(track.stepSeconds * 1000));
         setMode(track.mode);
       }
       visuals.wave(first ? CENTRE : origin, reduced());
@@ -373,7 +406,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       const changed = [];
       for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) changed.push(step);
       engine.resetPattern();
-      setRemixed(false);
+      setMoved(0);
       if (!changed.length) return;
       if (reduced()) {
         resetSlices();
@@ -649,15 +682,18 @@ export default function ChopExperience({ covers = [], embedded = false }) {
   }
 
   return (
-    <Root className="chop bg-surface text-ink" data-embedded={embedded || undefined}>
+    <Root ref={rootRef} className="chop bg-surface text-ink" data-embedded={embedded || undefined}>
       <div className="chop__stage">
-        <header className="chop__head">
-          <h1 className="text-title-sm">Chop</h1>
-          <p className="chop__hint text-ui-lg text-ink-secondary">Tap a square and the song plays on from it. Tap others over it and the cover rearranges into your flip.</p>
-        </header>
-
         <div className="chop__pads">
           <PadGrid gridRef={gridRef} status={status} levels={firstLevels} />
+        </div>
+
+        <div className="chop__bar" ref={barRef} aria-hidden="true">
+          {PAD_LABELS.map((label, step) => (
+            <span key={label} className="chop__tick" data-tick={step}>
+              <span className="chop__fill" />
+            </span>
+          ))}
         </div>
 
         <div className="chop__rail" role="group" aria-label="Covers">
@@ -685,7 +721,12 @@ export default function ChopExperience({ covers = [], embedded = false }) {
           })}
         </div>
 
-        <section className="chop__details">
+        <section className="chop__panel">
+          <header className="chop__head">
+            <h1 className="text-title-sm">Chop</h1>
+            <p className="chop__hint text-ui-lg text-ink-secondary">Tap a square and the song plays on from it. Tap others over it and the cover rearranges into your flip.</p>
+          </header>
+
           <div className="chop__song">
             <div className="chop__title">
               <MorphText as="h2" text={cleanTitle(cover.title)} className="text-title" />
@@ -693,13 +734,35 @@ export default function ChopExperience({ covers = [], embedded = false }) {
             <div className="chop__artist text-ui-lg">
               <MorphText text={cover.artist ?? ""} />
             </div>
-            <p className="chop__tempo" data-show={showTempo || undefined} aria-hidden={!showTempo || undefined}>
-              <SlotNumber value={bpm} pad={2} className="chop__bpm text-title-sm" label={`${bpm} beats per minute`} />
-              <span className="text-ui-lg">BPM</span>
-            </p>
             <p className="chop__note text-ui text-ink-secondary" data-show={note ? "" : undefined}>
-              {note || " "}
+              <span>{note || " "}</span>
             </p>
+          </div>
+
+          <div className="chop__stats" data-show={ready || undefined} aria-hidden={!ready || undefined}>
+            {showTempo ? (
+              <div className="chop__stat">
+                <span className="chop__label text-ui text-ink-secondary">Tempo</span>
+                <span className="chop__value">
+                  <SlotNumber value={bpm} pad={2} className="text-title-sm" label={`${bpm} beats per minute`} />
+                  <span className="chop__unit text-ui">BPM</span>
+                </span>
+              </div>
+            ) : null}
+            <div className="chop__stat">
+              <span className="chop__label text-ui text-ink-secondary">Slice</span>
+              <span className="chop__value">
+                <SlotNumber value={stepMs} pad={3} className="text-title-sm" label={`${stepMs} milliseconds per slice`} />
+                <span className="chop__unit text-ui">ms</span>
+              </span>
+            </div>
+            <div className="chop__stat">
+              <span className="chop__label text-ui text-ink-secondary">Moved</span>
+              <span className="chop__value">
+                <SlotNumber value={moved} pad={2} className="text-title-sm" label={`${moved} of 16 squares moved`} />
+                <span className="chop__unit text-ui">of 16</span>
+              </span>
+            </div>
           </div>
 
           <div className="chop__keyboard" aria-hidden="true">
@@ -733,10 +796,10 @@ export default function ChopExperience({ covers = [], embedded = false }) {
                 <PlayGlyph playing={playing} />
                 <MorphText text={playing ? "Stop" : "Loop"} />
               </button>
-              <button type="button" className="chop__button text-ui" disabled={!remixed} onClick={() => controllerRef.current?.restore()}>
+              <button type="button" className="chop__button text-ui" disabled={!moved} onClick={() => controllerRef.current?.restore()}>
                 Restore
               </button>
-              <button type="button" className="chop__button text-ui" disabled={!remixed || !canSave} onClick={() => controllerRef.current?.save()}>
+              <button type="button" className="chop__button text-ui" disabled={!moved || !canSave} onClick={() => controllerRef.current?.save()}>
                 Save PNG
               </button>
             </div>
