@@ -97,7 +97,7 @@ export default function HalftoneControls({
         <p className="ht-panel__sub">Three inks, one warped screen.</p>
       </div>
 
-      <div className="ht-panel__body" data-lenis-prevent>
+      <div className="ht-panel__body" data-scroll-contain>
         <section className="ht-group">
           <h2 className="ht-group__name">Plate</h2>
           <div className="ht-presets">

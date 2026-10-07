@@ -1,0 +1,667 @@
+.filings-page {
+  --filings-paper: #f5f2ea;
+  --filings-ink: #1a1a1a;
+  --filings-side: 288px;
+  --filings-plate-size: max(320px, min(880px, calc(100dvh - 128px), calc(100vw - 392px)));
+
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+
+  display: grid;
+  grid-template-columns: var(--filings-plate-size) var(--filings-side);
+  grid-template-rows: auto auto 1fr;
+  grid-template-areas:
+    "plate head"
+    "plate foot"
+    "plate panel";
+  justify-content: center;
+  align-content: start;
+  gap: 24px 40px;
+  min-height: 100dvh;
+  padding: 96px 32px 32px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.filings-head {
+  grid-area: head;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  animation: filings-rise 600ms var(--ease-entrance) both;
+}
+
+.filings-title {
+  text-wrap: balance;
+}
+
+.filings-frame {
+  grid-area: plate;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  align-self: start;
+}
+
+.filings-plate {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  outline: none;
+}
+
+.filings-plate[data-addable] {
+  cursor: crosshair;
+}
+
+.filings-plate__canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--filings-paper);
+}
+
+.filings-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 200ms cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
+.filings-canvas[data-painted] {
+  opacity: 1;
+}
+
+.filings-magnet {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 72px;
+  height: 28px;
+  will-change: transform;
+  touch-action: none;
+}
+
+.filings-magnet::before {
+  content: "";
+  position: absolute;
+  inset: -8px;
+  border-radius: 999px;
+}
+
+.filings-magnet__body {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid var(--filings-ink);
+  border-radius: 999px;
+  background: var(--filings-paper);
+  cursor: grab;
+  transition:
+    scale 150ms var(--ease-hover),
+    opacity 200ms var(--ease-hover);
+  animation: filings-magnet-in 440ms var(--ease-out-expo) backwards;
+}
+
+.filings-magnet__pole {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  background: var(--filings-ink);
+}
+
+.filings-magnet__body:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filings-magnet__body:hover {
+    scale: 1.04;
+  }
+}
+
+.filings-magnet[data-held] .filings-magnet__body {
+  scale: 0.96;
+  cursor: grabbing;
+  transition-duration: 120ms;
+}
+
+.filings-magnet[data-leaving] .filings-magnet__body {
+  scale: 0.88;
+  opacity: 0.45;
+}
+
+.filings-magnet[data-removing] {
+  pointer-events: none;
+}
+
+.filings-magnet[data-removing] .filings-magnet__body {
+  scale: 0.88;
+  opacity: 0;
+  transition:
+    scale 260ms var(--ease-hover),
+    opacity 260ms var(--ease-hover);
+}
+
+.filings-ghost {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 1;
+  display: none;
+  width: 72px;
+  height: 28px;
+  overflow: hidden;
+  border: 2px solid var(--filings-ink);
+  border-radius: 999px;
+  background: var(--filings-paper);
+  pointer-events: none;
+  opacity: 0;
+  scale: 0.84;
+  filter: blur(4px);
+  transition:
+    opacity 180ms var(--ease-hover),
+    scale 220ms var(--ease-out-expo),
+    filter 180ms var(--ease-hover);
+}
+
+.filings-ghost[data-shown] {
+  opacity: 0.22;
+  scale: 1;
+  filter: blur(0);
+}
+
+.filings-ghost[data-instant] {
+  transition: none;
+}
+
+.filings-ghost__pole {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 50%;
+  background: var(--filings-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filings-ghost {
+    display: block;
+  }
+}
+
+@keyframes filings-magnet-in {
+  0% {
+    transform: scale(0.84);
+    filter: blur(7px);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.02);
+    filter: blur(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+@keyframes filings-rise {
+  0% {
+    transform: translateY(8px);
+    filter: blur(4px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+@keyframes filings-chip-in {
+  0% {
+    transform: scale(0.84);
+    filter: blur(6px);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.02);
+    filter: blur(0);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1);
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+.filings-foot {
+  grid-area: foot;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  animation: filings-rise 600ms var(--ease-entrance) 80ms both;
+}
+
+.filings-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.filings-chip {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background-color: var(--color-surface-sunken);
+  background-image: var(--chip-image);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 0 var(--color-surface),
+    0 0 0 0 var(--color-ink);
+  transition:
+    scale 150ms var(--ease-hover),
+    box-shadow 200ms var(--ease-hover);
+  animation: filings-chip-in 440ms var(--ease-out-expo) backwards;
+  animation-delay: calc(400ms + var(--chip-index) * 40ms);
+}
+
+.filings-chip:not([data-loaded]) {
+  cursor: progress;
+}
+
+.filings-chip[data-pending] {
+  scale: 0.92;
+  cursor: progress;
+}
+
+.filings-chip:disabled {
+  cursor: not-allowed;
+  filter: grayscale(1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filings-chip:not(:disabled):hover {
+    scale: 1.06;
+  }
+}
+
+.filings-chip:active:not(:disabled) {
+  scale: 0.96;
+  transition-duration: 120ms;
+}
+
+.filings-chip[data-active] {
+  box-shadow:
+    0 0 0 2px var(--color-surface),
+    0 0 0 4px var(--color-ink);
+}
+
+.filings-chip:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+.filings-caption {
+  max-width: 100%;
+  min-width: 0;
+  overflow: clip;
+  white-space: nowrap;
+}
+
+.filings-panel-slot {
+  grid-area: panel;
+  align-self: start;
+  animation: filings-rise 600ms var(--ease-entrance) 160ms both;
+}
+
+.filings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 20px;
+  border-radius: var(--radius-lg);
+  background: var(--color-surface-raised);
+}
+
+.filings-panel__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filings-panel__count {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.filings-looks {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.filings-look {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 4px 8px 4px 4px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    scale 120ms var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filings-look:hover {
+    background: var(--color-surface-subtle);
+  }
+}
+
+.filings-look:active {
+  scale: 0.98;
+}
+
+.filings-look[data-active] {
+  background: var(--color-surface-sunken);
+}
+
+.filings-look:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.filings-look__swatch {
+  position: relative;
+  display: block;
+  flex: none;
+  width: 40px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: var(--radius-xs);
+  background: var(--swatch-paper);
+  box-shadow: inset 0 0 0 1px rgb(26 26 26 / 0.08);
+}
+
+.filings-look__filing {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 18px;
+  height: 3px;
+  border-radius: 999px;
+  background: var(--swatch-ink);
+  transition: rotate 380ms cubic-bezier(0.34, 1.3, 0.64, 1);
+}
+
+.filings-look__filing:nth-child(1) {
+  translate: calc(-50% - 8px) calc(-50% - 4px);
+  rotate: 24deg;
+}
+
+.filings-look__filing:nth-child(2) {
+  translate: calc(-50% + 2px) calc(-50% + 4px);
+  rotate: -12deg;
+}
+
+.filings-look__filing:nth-child(3) {
+  translate: calc(-50% + 10px) calc(-50% - 4px);
+  rotate: 64deg;
+}
+
+.filings-look[data-active] .filings-look__filing {
+  rotate: 0deg;
+}
+
+.filings-sliders {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.filings-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.filings-slider__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.filings-slider__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.filings-slider__input {
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: pan-y;
+}
+
+.filings-slider__input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-ink) 0,
+    var(--color-ink) var(--fill),
+    var(--color-surface-sunken) var(--fill),
+    var(--color-surface-sunken) 100%
+  );
+}
+
+.filings-slider__input::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+}
+
+.filings-slider__input::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-ink);
+}
+
+.filings-slider__input::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-ink);
+  box-shadow: 0 0 0 3px var(--color-surface-raised);
+  appearance: none;
+  -webkit-appearance: none;
+  transition: scale 150ms var(--ease-hover);
+}
+
+.filings-slider__input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-ink);
+  box-shadow: 0 0 0 3px var(--color-surface-raised);
+  transition: scale 150ms var(--ease-hover);
+}
+
+.filings-slider__input:active::-webkit-slider-thumb {
+  scale: 1.33;
+}
+
+.filings-slider__input:active::-moz-range-thumb {
+  scale: 1.33;
+}
+
+.filings-slider__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.filings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filings-button {
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    scale 120ms var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .filings-button:hover {
+    background: var(--color-line);
+  }
+}
+
+.filings-button:active {
+  scale: 0.96;
+}
+
+.filings-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.filings-panel-toggle {
+  display: none;
+}
+
+@media (max-width: 899px), (pointer: coarse) {
+  .filings-ghost,
+  .filings-magnet {
+    width: 88px;
+    height: 34px;
+  }
+}
+
+@media (max-width: 899px) {
+  .filings-page {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      "head"
+      "plate"
+      "foot";
+    gap: 20px;
+    padding: 88px 16px 96px;
+  }
+
+  .filings-head,
+  .filings-frame,
+  .filings-foot {
+    justify-self: center;
+    width: min(100%, 560px);
+  }
+
+  .filings-panel-slot {
+    position: fixed;
+    right: 8px;
+    bottom: 64px;
+    left: 8px;
+    z-index: 30;
+    max-height: 64dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-float);
+    animation: none;
+    translate: 0 calc(100% + 80px);
+    transition: translate 300ms var(--ease-entrance);
+  }
+
+  .filings-page[data-panel="open"] .filings-panel-slot {
+    translate: 0 0;
+  }
+
+  .filings-panel-toggle {
+    position: fixed;
+    right: 16px;
+    bottom: 16px;
+    z-index: 31;
+    display: block;
+    padding: 8px 16px;
+    border: 0;
+    border-radius: 999px;
+    background: var(--color-surface-raised);
+    box-shadow: var(--shadow-float);
+    cursor: pointer;
+    transition: scale 120ms var(--ease-hover);
+  }
+
+  .filings-panel-toggle:active {
+    scale: 0.96;
+  }
+}
+
+.filings-page[data-embedded] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100%;
+  padding: 16px;
+}
+
+.filings-page[data-embedded] .filings-frame {
+  width: min(100cqw - 32px, 100cqh - 32px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filings-magnet__body,
+  .filings-chip,
+  .filings-head,
+  .filings-panel-slot {
+    animation: none;
+  }
+
+  .filings-ghost {
+    transition: opacity 120ms linear;
+    scale: 1;
+    filter: none;
+  }
+}

@@ -172,15 +172,8 @@ export default function MotionConfig() {
 
   return (
     /* Carries `pk` itself so it can read the kit's tokens while living
-       outside the phone shell.
-
-       data-lenis-prevent is what makes the panel scrollable at all. /flyout calls
-       lenis.stop(), and a STOPPED Lenis is not a passive one — it keeps its
-       wheel listener and preventDefault()s everything it sees, which is how it
-       holds the page still. Any scroller on the route therefore has to opt out
-       by name or it silently refuses to move, however much it overflows. The
-       app panel already does; this one was the last one that did not. */
-    <aside className="pk flyout-config" data-open={open || undefined} data-lenis-prevent>
+       outside the phone shell. */
+    <aside className="pk flyout-config" data-open={open || undefined} data-scroll-contain>
       <button
         type="button"
         className="flyout-config-toggle"

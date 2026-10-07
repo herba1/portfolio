@@ -96,7 +96,7 @@ export default function InkControls({
         <p className="ink-panel__sub">Relief print, one stroke per line.</p>
       </div>
 
-      <div className="ink-panel__body" data-lenis-prevent>
+      <div className="ink-panel__body" data-scroll-contain>
         <section className="ink-group">
           <h2 className="ink-group__name">Plate</h2>
           <div className="ink-presets">

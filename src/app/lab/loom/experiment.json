@@ -1,0 +1,23 @@
+{
+  "title": "Loom",
+  "description": "An album cover woven from 96 threads each way, in twill, plain or satin. Drag across a row or down a column and its strip of the picture slides like a slot reel, the cloth ripples, and each thread plucks a pentatonic note as it springs home.",
+  "tags": [
+    "Physics",
+    "WebGL",
+    "Audio",
+    "Covers"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One woven cover where pulling a single thread shears the whole cloth and plays it like a harp, with the next record weaving in row by row.",
+  "source": {
+    "kind": "brief",
+    "lens": "physics-toys"
+  },
+  "generation": null,
+  "building": false
+}

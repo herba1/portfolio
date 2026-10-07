@@ -1,0 +1,23 @@
+{
+  "title": "Mobile",
+  "description": "Herb's recently played covers hung as a Calder mobile from one thread — pull a cover and let go, and the arms above see-saw in turn before the whole cascade finds its balance again. Tap a cover and it flies up to the top arm, the sculpture tips under the new weight, and its 30-second preview starts humming down the thread.",
+  "tags": [
+    "Physics",
+    "Covers",
+    "Audio",
+    "Interface"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A physical jukebox: listening order is the balance of the sculpture, so choosing a song is something you feel the whole mobile react to.",
+  "source": {
+    "kind": "brief",
+    "lens": "physics-toys"
+  },
+  "generation": null,
+  "building": false
+}

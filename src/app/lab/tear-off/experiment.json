@@ -1,0 +1,22 @@
+{
+  "title": "Tear-off",
+  "description": "A roll of ticket stubs printed with recently played songs — twist the end one and the perforation unzips hole by hole, yank it and it snaps clean. Every stub you tear off plays that song's preview.",
+  "tags": [
+    "Physics",
+    "Music",
+    "Audio"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One physical mechanic finished to the edge: a perforation that unzips bridge by bridge under your own twist and snaps under a yank, with a real song as the reward for every stub.",
+  "source": {
+    "kind": "brief",
+    "lens": "physics-toys"
+  },
+  "generation": null,
+  "building": false
+}

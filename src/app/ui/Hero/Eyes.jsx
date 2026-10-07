@@ -6,7 +6,6 @@ import { EASE_ENTRANCE, DURATION } from '@/lib/motion'
 import useMeasure from "react-use-measure";
 import { MessageCircle, Send, X } from "lucide-react";
 import { geist } from "@/app/fonts";
-import { useLenis } from "@/context/LenisContext";
 import { registerEyes, eyeTrackingSupported, watchEyeTracking, pointerIsLive } from "./eyeTracker";
 
 /* ─────────────────────────────────────────────────────────
@@ -511,11 +510,11 @@ function seeded(str) {
 // ── Mobile Message Input (FAB → expanding bar) ─────────
 //
 // On mobile we can't use the centered desktop bar — the on-screen
-// keyboard reflows the viewport and fights Lenis. Instead we anchor a
+// keyboard reflows the viewport. Instead we anchor a
 // small button to the bottom-right that morphs into a type+send bar,
 // and use the VisualViewport API to float it just above the keyboard.
 
-function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
+function MobileMessageInput({ onSend, onTyping, visitorCount }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const [kbOffset, setKbOffset] = useState(0);
@@ -539,18 +538,15 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
     };
   }, [open]);
 
-  // Pause smooth scroll + focus the field while the bar is open.
   useEffect(() => {
     if (!open) {
-      lenis?.start();
       setKbOffset(0);
       return;
     }
-    lenis?.stop();
     const t = setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 60);
     onTyping?.();
     return () => clearTimeout(t);
-  }, [open, onTyping, lenis]);
+  }, [open, onTyping]);
 
   const close = () => {
     setText("");
@@ -736,25 +732,19 @@ function MobileMessageInput({ onSend, onTyping, visitorCount, lenis }) {
 
 // ── Message Input ──────────────────────────────────────
 
-function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
+function MessageInput({ onSend, onTyping, visitorCount }) {
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
   const inputRef = useRef(null);
 
   useEffect(() => {
     if (open) {
-      // Save scroll position, pause Lenis, focus without scroll
       const scrollY = window.scrollY;
-      lenis?.stop();
       inputRef.current?.focus({ preventScroll: true });
-      // Restore scroll position in case iOS moved it
-      requestAnimationFrame(() => {
-        window.scrollTo(0, scrollY);
-        setTimeout(() => lenis?.start(), 300);
-      });
+      requestAnimationFrame(() => window.scrollTo(0, scrollY));
       onTyping?.();
     }
-  }, [open, onTyping, lenis]);
+  }, [open, onTyping]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
@@ -785,7 +775,6 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
         onSend={onSend}
         onTyping={onTyping}
         visitorCount={visitorCount}
-        lenis={lenis}
       />
     );
   }
@@ -905,7 +894,6 @@ function MessageInput({ onSend, onTyping, visitorCount, lenis }) {
 
 function LiveEyesInner({ usePresence }) {
   const { visitors, selfId, sendMessage, sendTyping } = usePresence("hero");
-  const { lenis } = useLenis();
   return (
     <>
       <AnimatePresence>
@@ -950,7 +938,7 @@ function LiveEyesInner({ usePresence }) {
           );
         })}
       </AnimatePresence>
-      {selfId && <MessageInput onSend={sendMessage} onTyping={sendTyping} visitorCount={visitors.length} lenis={lenis} />}
+      {selfId && <MessageInput onSend={sendMessage} onTyping={sendTyping} visitorCount={visitors.length} />}
     </>
   );
 }

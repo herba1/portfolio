@@ -314,7 +314,7 @@ function Palette() {
               />
             </div>
 
-            <div ref={listRef} className="dev-palette__list" data-lenis-prevent>
+            <div ref={listRef} className="dev-palette__list" data-scroll-contain>
               {results.map((route, i) => (
                 <Link
                   key={route.link}

@@ -8,7 +8,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { useLenis } from "@/context/LenisContext";
 
 const MobileMenuContext = createContext(null);
 
@@ -27,7 +26,6 @@ export function MobileMenuProvider({ children }) {
   // The scroll position captured the moment the menu opens — the card's inner
   // wrapper is shifted up by this so the fixed window shows your exact slice.
   const [snapshotY, setSnapshotY] = useState(0);
-  const { lenis, scrollTrigger } = useLenis();
   const closeTimer = useRef(null);
   const wasActive = useRef(false);
   // Work parked until the close animation finishes — see closeThen below.
@@ -41,19 +39,7 @@ export function MobileMenuProvider({ children }) {
     // Reopening cancels a close, so anything that close was going to do is
     // abandoned with it — otherwise a tap-then-reopen would navigate later.
     afterClose.current = null;
-    // Lenis owns the scroll, so its value is authoritative — window.scrollY can
-    // lag or read 0 depending on the smoothing. Fall back to it just in case.
-    const y = Math.round(
-      lenis?.actualScroll ?? lenis?.scroll ?? window.scrollY ?? 0
-    );
-    setSnapshotY(y);
-    lenis?.stop();
-    // Freeze every scroll-driven animation (splat parallax, scroll progress…).
-    // Making the card fixed collapses the document to viewport height, which
-    // would otherwise fire a ScrollTrigger resize + scroll-to-0 and snap the
-    // parallax back to progress 0 inside the snapshot. disable(false) leaves the
-    // current transforms exactly as they are, so the frozen frame stays honest.
-    scrollTrigger?.getAll().forEach((st) => st.disable(false));
+    setSnapshotY(Math.round(window.scrollY));
     setActive(true);
     setOpenState(true);
   };
@@ -93,21 +79,7 @@ export function MobileMenuProvider({ children }) {
     wasActive.current = false;
     const y = snapshotY;
 
-    // Re-enable the frozen scroll animations and recompute their geometry first
-    // (refresh() can nudge the scroll while measuring — we override it below).
-    if (scrollTrigger) {
-      scrollTrigger.getAll().forEach((st) => st.enable());
-      scrollTrigger.refresh();
-    }
-
-    // Restore the scroll position LAST so it wins. Order matters: start Lenis
-    // BEFORE hard-setting its position. If we scrollTo while it's stopped and
-    // then start, it resumes from a stale internal 0 and visibly lerps the page
-    // up to the very top. Starting first, then force-setting to `y`, keeps it
-    // pinned. window.scrollTo backs it up at the DOM level.
-    lenis?.start();
-    lenis?.scrollTo(y, { immediate: true, force: true });
-    window.scrollTo(0, y);
+    window.scrollTo({ top: y, behavior: "instant" });
 
     // Anything waiting on the close runs here and not a moment earlier — the
     // card is back in flow and the scroll is where the reader left it, so a
@@ -121,7 +93,7 @@ export function MobileMenuProvider({ children }) {
       afterClose.current = null;
       requestAnimationFrame(() => requestAnimationFrame(run));
     }
-  }, [active, snapshotY, lenis, scrollTrigger]);
+  }, [active, snapshotY]);
 
   useEffect(
     () => () => {

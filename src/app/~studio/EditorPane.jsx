@@ -151,7 +151,7 @@ const EditorPane = forwardRef(function EditorPane({ value, onChange, light, vimM
     <div
       className="relative flex h-full flex-col overflow-hidden"
       style={{ background: 'var(--studio-bg)' }}
-      data-lenis-prevent
+      data-scroll-contain
       onDragEnter={onDragEnter}
       onDragLeave={onDragLeave}
       onDragOver={onDragOver}

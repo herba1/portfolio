@@ -1,0 +1,851 @@
+@property --scorch-fuse {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.scorch {
+  --scorch-ember: #ff6a1a;
+  --scorch-ember-hot: #ffc46b;
+  --scorch-paper: #ece7de;
+  --scorch-plate: min(100% - 328px, max(320px, calc(100dvh - 232px)), 760px);
+  position: relative;
+  min-height: 100dvh;
+  padding: 96px 16px 48px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.scorch[data-embedded] {
+  min-height: 100%;
+  height: 100%;
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+@media (min-width: 768px) {
+  .scorch:not([data-embedded]) {
+    padding-top: 112px;
+  }
+}
+
+.scorch-head {
+  grid-area: head;
+  display: grid;
+  gap: 4px;
+  align-self: start;
+}
+
+.scorch-head h1 {
+  text-wrap: balance;
+}
+
+.scorch-body {
+  max-width: 1120px;
+  margin: 0 auto;
+  display: grid;
+  grid-template-columns: var(--scorch-plate) 280px;
+  justify-content: center;
+  grid-template-rows: auto 1fr;
+  grid-template-areas:
+    "stage head"
+    "stage panel";
+  gap: 24px 48px;
+  align-items: start;
+}
+
+.scorch[data-embedded] .scorch-body {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto;
+  grid-template-areas: "stage";
+}
+
+.scorch-stage {
+  grid-area: stage;
+  min-width: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.scorch-stage__plate,
+.scorch-caption {
+  width: 100%;
+}
+
+.scorch[data-embedded] .scorch-stage__plate,
+.scorch[data-embedded] .scorch-caption {
+  width: min(100%, calc(100cqh - 96px), 760px);
+  justify-self: center;
+}
+
+.scorch-stage__plate {
+  aspect-ratio: 1 / 1;
+}
+
+.scorch-plate {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--scorch-paper);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.scorch-plate--placeholder {
+  touch-action: auto;
+}
+
+.scorch-plate:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 4px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .scorch-plate:not(.scorch-plate--placeholder) {
+    cursor: none;
+  }
+}
+
+.scorch-plate__canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  opacity: 0;
+  transform: scale(0.97);
+  filter: blur(12px);
+  transition:
+    opacity 700ms var(--ease-entrance),
+    transform 900ms var(--ease-entrance),
+    filter 900ms var(--ease-entrance);
+}
+
+.scorch-plate[data-ready] .scorch-plate__canvas {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.scorch-plate__fuse {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 24px;
+  height: 2px;
+  border-radius: 999px;
+  background: rgba(26, 23, 20, 0.08);
+  animation: scorch-fuse 2400ms var(--ease-in-out) infinite;
+  transition: opacity 300ms var(--ease-hover);
+}
+
+.scorch-plate[data-ready] .scorch-plate__fuse {
+  opacity: 0;
+  animation-play-state: paused;
+}
+
+.scorch-plate__fuse-line {
+  position: absolute;
+  left: 0;
+  top: 0;
+  height: 100%;
+  width: calc(var(--scorch-fuse) * 100%);
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    rgba(28, 23, 20, 0.2) 0%,
+    rgba(28, 23, 20, 0.42) 38%,
+    rgba(68, 44, 26, 0.7) 66%,
+    rgba(107, 69, 40, 0.88) 82%,
+    rgb(255, 106, 26) 96%,
+    rgb(255, 196, 107) 100%
+  );
+}
+
+.scorch-plate__fuse-line::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  transform: translate(50%, -50%);
+  background: radial-gradient(
+    circle,
+    rgb(255, 243, 220) 0%,
+    rgb(255, 196, 107) 26%,
+    rgba(255, 106, 26, 0.85) 46%,
+    rgba(255, 106, 26, 0.4) 64%,
+    rgba(255, 106, 26, 0.12) 82%,
+    rgba(255, 106, 26, 0) 100%
+  );
+}
+
+@keyframes scorch-fuse {
+  0% {
+    --scorch-fuse: 0;
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  82% {
+    --scorch-fuse: 1;
+    opacity: 1;
+  }
+  100% {
+    --scorch-fuse: 1;
+    opacity: 0;
+  }
+}
+
+.scorch-plate__still {
+  position: absolute;
+  inset: 0;
+  background-size: cover;
+  background-position: center;
+}
+
+.scorch-plate__error {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  gap: 12px;
+  justify-items: start;
+  padding: 48px 16px 16px;
+  background: linear-gradient(
+    to top,
+    rgba(241, 245, 249, 0.96) 0%,
+    rgba(241, 245, 249, 0.9) 34%,
+    rgba(241, 245, 249, 0.66) 60%,
+    rgba(241, 245, 249, 0.3) 82%,
+    rgba(241, 245, 249, 0) 100%
+  );
+}
+
+.scorch-plate__note {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  text-align: center;
+  text-wrap: balance;
+}
+
+.scorch-ring {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.scorch-ring__svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  opacity: 0;
+}
+
+.scorch-ring__edge,
+.scorch-ring__track,
+.scorch-ring__arc {
+  fill: none;
+}
+
+.scorch-ring__edge {
+  stroke: rgba(26, 23, 20, 0.32);
+  stroke-width: 4;
+}
+
+.scorch-ring__track {
+  stroke: rgb(255, 255, 255);
+  stroke-width: 2;
+}
+
+.scorch-ring__arc {
+  stroke: var(--scorch-ember);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transform: rotate(-90deg);
+  transform-origin: 28px 28px;
+}
+
+.scorch-ring[data-state="charging"] .scorch-ring__svg {
+  animation: scorch-ring-in 320ms var(--ease-entrance) forwards;
+}
+
+.scorch-ring[data-state="charging"] .scorch-ring__arc {
+  animation: scorch-ring-arc 320ms linear forwards;
+}
+
+.scorch-ring[data-state="charging"] .scorch-ring__track {
+  animation: scorch-ring-warm 320ms var(--ease-hover) forwards;
+}
+
+.scorch-ring[data-state="caught"] .scorch-ring__svg {
+  animation: scorch-ring-caught 460ms var(--ease-out-quint) forwards;
+}
+
+.scorch-ring[data-state="caught"] .scorch-ring__arc {
+  stroke: var(--scorch-ember-hot);
+  stroke-dashoffset: 0;
+}
+
+.scorch-ring[data-state="caught"] .scorch-ring__track {
+  stroke: rgb(255, 228, 190);
+}
+
+.scorch-ring[data-state="cancel"] .scorch-ring__svg {
+  animation: scorch-ring-cancel 180ms var(--ease-in-quad) forwards;
+}
+
+@keyframes scorch-ring-in {
+  from {
+    opacity: 0;
+    transform: scale(0.72);
+    filter: blur(3px);
+  }
+  40% {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+}
+
+@keyframes scorch-ring-arc {
+  from {
+    stroke-dashoffset: 1;
+    stroke: var(--scorch-ember);
+  }
+  to {
+    stroke-dashoffset: 0;
+    stroke: var(--scorch-ember-hot);
+  }
+}
+
+@keyframes scorch-ring-warm {
+  from {
+    stroke: rgb(255, 255, 255);
+  }
+  to {
+    stroke: rgb(255, 228, 190);
+  }
+}
+
+@keyframes scorch-ring-caught {
+  from {
+    opacity: 1;
+    transform: scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.9);
+    filter: blur(4px);
+  }
+}
+
+@keyframes scorch-ring-cancel {
+  from {
+    opacity: 0.9;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+}
+
+.scorch-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: var(--cursor-length, 24px);
+  height: 24px;
+  transform-origin: 0 0;
+  pointer-events: none;
+  z-index: 3;
+  transition: width 220ms var(--ease-out-quint);
+}
+
+.scorch-cursor__body {
+  position: absolute;
+  inset: 0;
+  border-radius: 999px;
+  border: 1.5px solid rgb(255, 255, 255);
+  box-shadow:
+    0 0 0 1px rgba(26, 23, 20, 0.28),
+    inset 0 0 0 1px rgba(26, 23, 20, 0.28);
+  opacity: 0;
+  transform: scale(0.6);
+  filter: blur(2px);
+  transition:
+    opacity 160ms var(--ease-hover),
+    transform 220ms var(--ease-entrance),
+    filter 220ms var(--ease-entrance);
+}
+
+.scorch-plate[data-ready][data-hover]:not([data-pressed]) .scorch-cursor__body,
+.scorch-plate[data-ready][data-dragging] .scorch-cursor__body {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+.scorch-cursor__dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  translate: -50% -50%;
+  background: radial-gradient(
+    circle,
+    rgb(255, 214, 150) 0%,
+    rgb(255, 160, 70) 34%,
+    rgb(255, 106, 26) 62%,
+    rgba(255, 106, 26, 0.5) 84%,
+    rgba(255, 106, 26, 0) 100%
+  );
+  transform: scale(calc(0.3 + var(--hunger, 0.5) * 0.9));
+  transition: transform 180ms var(--ease-hover);
+}
+
+.scorch-caption {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.scorch-caption__track {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  animation: scorch-caption-in 420ms var(--ease-entrance) both;
+}
+
+.scorch-caption__track > p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scorch-caption__artist {
+  font-weight: var(--font-weight-meta);
+}
+
+.scorch-caption__burnt {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  transition: opacity 400ms var(--ease-entrance);
+}
+
+.scorch[data-status="loading"] .scorch-caption__burnt {
+  opacity: 0;
+}
+
+@keyframes scorch-caption-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+.scorch-panel {
+  grid-area: panel;
+  min-width: 0;
+}
+
+.scorch-panel__toggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-ink);
+  font-weight: var(--font-weight-strong);
+  cursor: pointer;
+}
+
+.scorch-panel__chevron {
+  width: 8px;
+  height: 8px;
+  border-right: 1.5px solid currentColor;
+  border-bottom: 1.5px solid currentColor;
+  border-radius: 1px;
+  transform: translateY(-2px) rotate(45deg);
+  transition: transform 260ms var(--ease-entrance);
+}
+
+.scorch-panel__toggle[aria-expanded="true"] .scorch-panel__chevron {
+  transform: translateY(2px) rotate(-135deg);
+}
+
+.scorch-panel__body {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 360ms var(--ease-entrance);
+}
+
+.scorch-panel__body[data-open] {
+  grid-template-rows: 1fr;
+}
+
+.scorch-panel__inner {
+  min-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(4px);
+  transition:
+    opacity 240ms var(--ease-hover),
+    filter 320ms var(--ease-entrance);
+}
+
+.scorch-panel__body[data-open] .scorch-panel__inner {
+  opacity: 1;
+  filter: none;
+}
+
+.scorch-controls {
+  display: grid;
+  gap: 24px;
+  padding: 12px 0 4px;
+}
+
+.scorch-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.scorch-chip {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--color-line);
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.scorch-chip:hover {
+  border-color: var(--color-line-strong);
+}
+
+.scorch-chip:active {
+  transform: scale(0.96);
+}
+
+.scorch-chip[data-active] {
+  background: var(--color-surface-inverse);
+  border-color: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.scorch-chip:focus-visible,
+.scorch-action:focus-visible,
+.scorch-panel__toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.scorch-sliders {
+  display: grid;
+  gap: 16px;
+}
+
+.scorch-slider {
+  display: grid;
+  gap: 4px;
+}
+
+.scorch-slider__head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.scorch-slider__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.scorch-slider__input {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.scorch-slider__input:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+.scorch-slider__input::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 999px;
+  background: linear-gradient(
+    to right,
+    var(--color-ink) 0%,
+    var(--color-ink) var(--fill),
+    var(--color-surface-sunken) var(--fill),
+    var(--color-surface-sunken) 100%
+  );
+}
+
+.scorch-slider__input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-ink);
+  transition: transform 120ms var(--ease-hover);
+}
+
+.scorch-slider__input:active::-webkit-slider-thumb {
+  transform: scale(1.34);
+}
+
+.scorch-slider__input::-moz-range-track {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+}
+
+.scorch-slider__input::-moz-range-progress {
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-ink);
+}
+
+.scorch-slider__input::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-ink);
+  transition: transform 120ms var(--ease-hover);
+}
+
+.scorch-slider__input:active::-moz-range-thumb {
+  transform: scale(1.34);
+}
+
+.scorch-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.scorch-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 36px;
+  padding: 0 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-line);
+  background: transparent;
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.scorch-action:hover {
+  background: var(--color-surface-raised);
+  border-color: var(--color-line-strong);
+}
+
+.scorch-action:active {
+  transform: scale(0.98);
+}
+
+.scorch-key {
+  font: inherit;
+  font-size: 0.86em;
+  line-height: 1;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: var(--color-surface-sunken);
+  color: var(--color-ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.scorch-toggle {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: 999px;
+  background: var(--color-surface-sunken);
+  box-shadow: inset 0 0 0 1px var(--color-line-strong);
+  transition: background-color 160ms var(--ease-hover);
+}
+
+.scorch-toggle::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line-strong);
+  transform: translate(2px, 2px);
+  transition: transform 220ms var(--ease-entrance);
+}
+
+.scorch-toggle[data-on] {
+  background: var(--color-ink);
+  box-shadow: none;
+}
+
+.scorch-toggle[data-on]::after {
+  box-shadow: none;
+  transform: translate(14px, 2px);
+}
+
+@media (max-width: 900px) {
+  .scorch-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto;
+    grid-template-areas:
+      "head"
+      "stage"
+      "panel";
+    gap: 24px;
+  }
+
+  .scorch-head {
+    width: min(100%, 560px);
+    margin: 0 auto;
+  }
+
+  .scorch-stage__plate,
+  .scorch-caption {
+    width: min(100%, 560px);
+    justify-self: center;
+  }
+
+  .scorch-panel {
+    position: static;
+    width: min(100%, 560px);
+    margin: 0 auto;
+    border-top: 1px solid var(--color-line);
+    padding-top: 4px;
+  }
+
+  .scorch-panel__toggle {
+    height: 44px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scorch-plate__canvas {
+    transform: none;
+    filter: none;
+    transition: opacity 300ms linear;
+  }
+
+  .scorch-plate__fuse {
+    animation: none;
+    --scorch-fuse: 0.5;
+  }
+
+  .scorch-ring[data-state="charging"] .scorch-ring__svg {
+    animation-name: scorch-ring-show;
+  }
+
+  .scorch-ring[data-state="caught"] .scorch-ring__svg,
+  .scorch-ring[data-state="cancel"] .scorch-ring__svg {
+    animation-name: scorch-ring-fade;
+  }
+
+  .scorch-caption__track {
+    animation: none;
+  }
+
+  .scorch-cursor__body {
+    transition: opacity 160ms linear;
+    transform: none;
+    filter: none;
+  }
+}
+
+@keyframes scorch-ring-fade {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes scorch-ring-show {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 1;
+  }
+}

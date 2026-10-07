@@ -855,15 +855,14 @@ export default function Deck({ tracks, embedded = false }) {
         <style>{`.deck,.deck__stage,.deck__card{animation:none}`}</style>
       </noscript>
 
-      {/* The deck's own scroller — the page's smooth-scroll leaves it
-          alone (data-lenis-prevent), and it is focusable so the arrow
+      {/* The deck's own scroller — it is focusable so the arrow
           keys, space and page keys run the stack the way they would a
           page. */}
       <section
         ref={trackRef}
         className="deck bg-surface"
         data-spread={spread ? "1" : "0"}
-        data-lenis-prevent={embedded ? undefined : ""}
+        data-scroll-contain={embedded ? undefined : ""}
         data-embedded={embedded ? "" : undefined}
         data-plate={embedded ? "" : undefined}
         data-plate-drag={embedded ? "" : undefined}

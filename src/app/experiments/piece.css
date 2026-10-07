@@ -12,7 +12,7 @@
    - Measure the box (ResizeObserver on `el.closest(".piece-box")`), not
      `window.innerWidth` / `innerHeight`.
    - A piece that scrolls owns its scroller inside the box (with
-     `data-lenis-prevent`); it never scrolls the document. */
+     `data-scroll-contain`); it never scrolls the document. */
 .piece-box {
   position: relative;
   container-type: size;

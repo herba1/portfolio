@@ -1,0 +1,23 @@
+{
+  "title": "Thread",
+  "description": "Your Up Next queue strung on one elastic thread, every cover a bead riding it \u2014 swipe a song off and the thread twangs, sending a wave down the rows below while the gap closes and the counts roll. Hold a row to lift it and the thread stretches after it; let go and it plucks a note that rises as the queue gets shorter.",
+  "tags": [
+    "Interface",
+    "Physics",
+    "Covers",
+    "Sound"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A real queue list where removing or reordering a song has a physical, audible consequence travelling through every other row.",
+  "source": {
+    "kind": "brief",
+    "lens": "product-components"
+  },
+  "generation": null,
+  "building": false
+}

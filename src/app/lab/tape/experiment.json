@@ -1,0 +1,23 @@
+{
+  "title": "Tape",
+  "description": "Ask Me Why printed as a strip of ink spectrogram, its words set on the paper where each one is sung. Grab it and the song plays under your hand at the speed you pull, backwards too, and at speed the ink streaks into lines that snap sharp as the motor pulls it back to pitch.",
+  "tags": [
+    "Audio",
+    "WebGL",
+    "Gesture"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A varispeed tape you can hold, where the paper, the printed words and the sound all move with your hand and smear together at speed.",
+  "source": {
+    "kind": "brief",
+    "lens": "product-components"
+  },
+  "generation": null,
+  "building": false,
+  "gate": []
+}

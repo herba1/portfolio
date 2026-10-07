@@ -14,6 +14,9 @@ if (typeof window !== "undefined" && process.env.NEXT_PUBLIC_POSTHOG_KEY && proc
       capture_pageview: false,
       capture_pageleave: true,
       persistence: "memory",
+      session_recording: {
+        captureCanvas: { recordCanvas: false },
+      },
     });
   };
   if ("requestIdleCallback" in window) {

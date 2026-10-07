@@ -1,3 +1,4 @@
+import Image from 'next/image'
 import Shared from './transitions/Shared'
 
 // The little stack of thumbs on an index row that fans out like polaroids when
@@ -11,6 +12,7 @@ import Shared from './transitions/Shared'
 //
 // `images` takes either bare `src` strings or `{ src, id }` objects.
 const MAX = 3
+const THUMB_PX = 52
 
 export default function ImageFan({ images, sharePrefix }) {
   const pics = (images || [])
@@ -40,8 +42,12 @@ export default function ImageFan({ images, sharePrefix }) {
               zIndex: i,
             }}
           >
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt="" />
+            {src.startsWith('/') ? (
+              <Image src={src} alt="" width={THUMB_PX} height={THUMB_PX} sizes={`${THUMB_PX}px`} />
+            ) : (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={src} alt="" loading="lazy" decoding="async" />
+            )}
           </div>
         )
 

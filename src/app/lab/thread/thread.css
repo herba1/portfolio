@@ -1,0 +1,537 @@
+.thread {
+  --thread-ink: var(--color-ink);
+  position: relative;
+  display: flex;
+  min-height: 100dvh;
+  flex-direction: column;
+  align-items: center;
+  padding: 96px 16px 128px;
+  overflow-x: clip;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.thread[data-gesture],
+.thread[data-gesture] * {
+  cursor: grabbing;
+}
+
+.thread-card {
+  position: relative;
+  width: min(440px, 100%);
+  isolation: isolate;
+}
+
+.thread-sheet {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 100%;
+  z-index: 0;
+  border-radius: 16px;
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 0 0 1px var(--color-line-subtle),
+    var(--shadow-sm);
+}
+
+.thread-head {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 20px 20px 4px;
+}
+
+.thread-head__top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.thread-head__title {
+  margin: 0;
+  text-wrap: balance;
+}
+
+.thread-meta {
+  margin: 0;
+  color: var(--color-ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread-count .slot-sr + .slot-col {
+  max-width: 0.72em;
+  transition:
+    max-width 520ms var(--ease-out-quint),
+    opacity 320ms var(--ease-hover);
+}
+
+.thread-count[data-short] .slot-sr + .slot-col {
+  max-width: 0;
+  opacity: 0;
+}
+
+.thread-sound {
+  display: inline-flex;
+  height: 28px;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  padding-inline: 10px 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-surface-sunken);
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.thread-sound:active {
+  transform: scale(0.96);
+}
+
+.thread-sound:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.thread-sound__dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--color-media-audio-ink);
+  transition:
+    transform 260ms var(--ease-overshoot),
+    background-color 200ms var(--ease-hover);
+}
+
+.thread-sound[aria-pressed="false"] .thread-sound__dot {
+  background: var(--color-line-strong);
+  transform: scale(0.67);
+}
+
+.thread-list {
+  position: relative;
+  z-index: 1;
+  isolation: isolate;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.thread-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.thread-rows {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-row {
+  position: absolute;
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 56px;
+  outline: none;
+  pointer-events: none;
+  transition:
+    opacity 420ms var(--ease-entrance),
+    filter 560ms var(--ease-entrance);
+  transition-delay: calc(var(--row-i, 0) * 40ms);
+}
+
+.thread:not([data-phase]) .thread-row {
+  opacity: 0;
+  filter: blur(6px);
+}
+
+.thread-reveal {
+  position: absolute;
+  top: 4px;
+  right: 8px;
+  left: 8px;
+  z-index: 0;
+  display: flex;
+  height: 48px;
+  align-items: center;
+  padding-left: 16px;
+  border-radius: 12px;
+  background: var(--color-negative-tint);
+  pointer-events: none;
+  visibility: hidden;
+  will-change: transform, clip-path;
+  transition: background-color 160ms var(--ease-hover);
+}
+
+.thread-reveal[data-armed="true"] {
+  background: color-mix(in oklab, var(--color-negative) 18%, transparent);
+}
+
+.thread-reveal__label {
+  color: var(--color-negative-ink);
+  transform-origin: left center;
+  transition: transform 260ms var(--ease-overshoot);
+}
+
+.thread-reveal[data-armed="true"] .thread-reveal__label {
+  transform: scale(1.08);
+}
+
+.thread-row__body {
+  position: absolute;
+  top: 0;
+  right: 8px;
+  left: 8px;
+  z-index: 2;
+  height: 56px;
+  border-radius: 12px;
+  cursor: grab;
+  pointer-events: auto;
+  transform-origin: 50% 50%;
+  will-change: transform;
+  transition:
+    background-color 200ms var(--ease-hover),
+    box-shadow 200ms var(--ease-hover);
+}
+
+.thread-row[data-settling] .thread-row__body {
+  z-index: 3;
+}
+
+.thread-row[data-lifted] .thread-row__body {
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 0 0 1px var(--color-line-subtle),
+    var(--shadow-float);
+}
+
+.thread-row:focus-visible .thread-row__body {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.thread-bead {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  width: 36px;
+  height: 36px;
+  overflow: hidden;
+  border-radius: 9999px;
+  background: var(--bead-fill);
+  will-change: transform;
+}
+
+.thread-bead::after {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.08);
+  content: "";
+}
+
+.thread-bead__image {
+  position: absolute;
+  inset: 0;
+  background-position: center;
+  background-size: cover;
+  opacity: 0;
+  filter: blur(6px);
+  transform: scale(0.84);
+}
+
+.thread-bead[data-state="loaded"] .thread-bead__image {
+  animation: thread-pop 440ms var(--ease-out-expo) forwards;
+}
+
+.thread-row__main {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 60px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  will-change: transform;
+}
+
+.thread-row__text {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.thread-row__title,
+.thread-row__meta {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-row__title {
+  color: var(--color-ink);
+  font-weight: var(--font-weight-caption);
+}
+
+.thread-row__meta {
+  color: var(--color-ink-secondary);
+}
+
+.thread-row__index {
+  flex: none;
+  color: var(--color-ink-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread[data-roll-stagger] .thread-row .slot-reel {
+  transition-delay: calc(var(--row-i, 0) * 40ms + var(--slot-i, 0) * var(--slot-stagger));
+}
+
+.thread-handle {
+  display: flex;
+  width: 40px;
+  height: 56px;
+  flex: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  cursor: grab;
+  touch-action: none;
+}
+
+.thread-handle i {
+  display: block;
+  width: 14px;
+  height: 2px;
+  border-radius: 9999px;
+  background: var(--color-line-strong);
+  transition:
+    transform 220ms var(--ease-hover),
+    background-color 200ms var(--ease-hover);
+}
+
+.thread-row[data-lifted] .thread-handle i {
+  background: var(--color-ink);
+}
+
+.thread-row[data-lifted] .thread-handle i:first-child {
+  transform: translateY(-1px);
+}
+
+.thread-row[data-lifted] .thread-handle i:last-child {
+  transform: translateY(1px);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .thread-row__body:hover .thread-handle i {
+    background: var(--color-ink-secondary);
+  }
+
+  .thread-handle:hover i:first-child {
+    transform: translateY(-1px);
+  }
+
+  .thread-handle:hover i:last-child {
+    transform: translateY(1px);
+  }
+
+  .thread-sound:hover {
+    background: var(--color-line);
+  }
+
+  .thread-button:hover,
+  .thread-toast__undo:hover {
+    filter: brightness(1.2);
+  }
+}
+
+.thread-empty {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  left: 64px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  transform-origin: left top;
+  animation: thread-pop 440ms var(--ease-out-expo) 120ms both;
+}
+
+.thread-empty p {
+  margin: 0;
+}
+
+.thread-empty__line {
+  color: var(--color-ink-secondary);
+}
+
+.thread-button {
+  display: inline-flex;
+  height: 32px;
+  align-items: center;
+  margin-top: 12px;
+  padding-inline: 14px;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-hover);
+}
+
+.thread-button:active,
+.thread-toast__undo:active {
+  transform: scale(0.96);
+}
+
+.thread-button:focus-visible,
+.thread-toast__undo:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.thread-dock {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  z-index: 20;
+  display: flex;
+  max-width: calc(100vw - 32px);
+  justify-content: center;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.thread-toast {
+  display: flex;
+  height: 40px;
+  min-width: 0;
+  align-items: center;
+  gap: 12px;
+  padding-inline: 16px 6px;
+  border-radius: 9999px;
+  background: var(--color-surface-inverse);
+  box-shadow: var(--shadow-lg);
+  color: var(--color-ink-inverse);
+  pointer-events: auto;
+  animation: thread-pop 440ms var(--ease-out-expo) both;
+}
+
+.thread-toast__text {
+  min-width: 0;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-toast strong {
+  font-weight: var(--font-weight-caption);
+}
+
+.thread-toast__undo {
+  height: 28px;
+  flex: none;
+  padding-inline: 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.14);
+  color: var(--color-ink-inverse);
+  cursor: pointer;
+  transition: transform 120ms var(--ease-hover);
+}
+
+.thread-hint {
+  display: flex;
+  height: 32px;
+  align-items: center;
+  margin: 0;
+  padding-inline: 14px;
+  border-radius: 9999px;
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 0 0 1px var(--color-line-subtle),
+    var(--shadow-sm);
+  color: var(--color-ink-secondary);
+  white-space: nowrap;
+  animation: thread-pop 440ms var(--ease-out-expo) 600ms both;
+}
+
+@keyframes thread-pop {
+  0% {
+    opacity: 0;
+    filter: blur(7px);
+    transform: scale(0.84);
+  }
+
+  70% {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1.02);
+  }
+
+  100% {
+    opacity: 1;
+    filter: blur(0);
+    transform: scale(1);
+  }
+}
+
+@media (max-width: 640px) {
+  .thread {
+    padding-top: 80px;
+  }
+
+  .thread-head {
+    padding-inline: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-row {
+    transition: opacity 200ms linear;
+  }
+
+  .thread:not([data-phase]) .thread-row {
+    filter: none;
+  }
+
+  .thread-bead[data-state="loaded"] .thread-bead__image {
+    animation: none;
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+
+  .thread-empty,
+  .thread-toast,
+  .thread-hint {
+    animation-duration: 1ms;
+    animation-delay: 0ms;
+  }
+}

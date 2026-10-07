@@ -1,33 +1,35 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useLayoutEffect, useState } from "react";
 import { useFrame, useThree } from "@react-three/fiber";
 import { Splat } from "@react-three/drei";
 import posthog from "posthog-js";
+import { requestSplat } from "./splatSource";
 
-// ---------------------------------------------------------------------------
-// Workaround: Vercel CDN + drei Splat Content-Length mismatch
-// ---------------------------------------------------------------------------
-function useSplatUrl(src) {
-  const needsBlob = process.env.NODE_ENV !== "development";
-  const [url, setUrl] = useState(needsBlob ? null : src);
+function useSplatUrl() {
+  const [url, setUrl] = useState(null);
   useEffect(() => {
-    if (!needsBlob) return;
-    let revoke;
-    fetch(src)
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.blob();
-      })
-      .then((blob) => {
-        const blobUrl = URL.createObjectURL(blob);
-        revoke = blobUrl;
-        setUrl(blobUrl);
+    let cancelled = false;
+    requestSplat()
+      .then((objectUrl) => {
+        if (!cancelled) setUrl(objectUrl);
       })
       .catch((err) => console.error("[Splat] fetch failed:", err?.message || err));
-    return () => { if (revoke) URL.revokeObjectURL(revoke); };
-  }, [src, needsBlob]);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   return url;
+}
+
+function uploadSplatTextures(gl, root) {
+  root?.traverse((object) => {
+    const uniforms = object.material?.uniforms;
+    if (!uniforms) return;
+    for (const { value } of Object.values(uniforms)) {
+      if (value?.isTexture && !gl.properties.get(value).__webglTexture) gl.initTexture(value);
+    }
+  });
 }
 
 function isTouchDevice() {
@@ -35,10 +37,9 @@ function isTouchDevice() {
   return "ontouchstart" in window || navigator.maxTouchPoints > 0;
 }
 
-const SPLAT_SRC = "/splats/herb-scan-clean.splat";
-
 export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, isVisible, maskProgressRef }) {
-  const splatUrl = useSplatUrl(SPLAT_SRC);
+  const splatUrl = useSplatUrl();
+  const splatGroupRef = useRef(null);
 
   // Pointer parallax (desktop) — tracks mouse across full viewport
   const pointerThetaRef = useRef(0);
@@ -52,6 +53,10 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
   const lastTouchRef = useRef({ x: 0, y: 0 });
 
   const { gl } = useThree();
+
+  useLayoutEffect(() => {
+    uploadSplatTextures(gl, splatGroupRef.current);
+  }, [gl, splatUrl]);
 
   const cameraRadius = 2;
   const cameraStart = 8;
@@ -160,13 +165,15 @@ export default function SplatViewer({ reducedMotion, loaded, scrollProgressRef, 
   if (!splatUrl) return null;
 
   return (
-    <Splat
-      src={splatUrl}
-      scale={splatScale}
-      position={[0, 0, 0]}
-      toneMapped={false}
-      alphaTest={alphaTest}
-      chunkSize={50000}
-    />
+    <group ref={splatGroupRef}>
+      <Splat
+        src={splatUrl}
+        scale={splatScale}
+        position={[0, 0, 0]}
+        toneMapped={false}
+        alphaTest={alphaTest}
+        chunkSize={50000}
+      />
+    </group>
   );
 }

@@ -62,8 +62,7 @@ const useKit = () => useContext(KitContext);
    `embedded` is the piece sitting in someone else's page — a tile on the
    experiments index, a box on the bench. It gets the app and nothing else:
    no tuning panel, and none of FlyoutChrome's page-wide work, because the
-   site's nav and Lenis belong to the page around it, and four copies on one
-   page would each be stopping and restarting the same scroller. */
+   site's nav belongs to the page around it. */
 export default function FlyoutExperience({ embedded = false, kit = "cards", tracks }) {
   const value = useMemo(() => {
     const next = kit === "songs" ? songsKit(tracks) : CARDS_KIT;
@@ -263,14 +262,14 @@ function FlyoutApp({ embedded }) {
 
   return (
     <div className="pk flyout" data-kit={kit.id} data-embedded={embedded || undefined}>
-      {!embedded && <FlyoutChrome killLenis />}
+      {!embedded && <FlyoutChrome lockScroll />}
 
       {/* Keyed on the tab so React remounts and the enter animation runs. */}
       <main
         className="flyout-panel"
         key={tab}
         style={{ "--dir": dir }}
-        data-lenis-prevent={embedded ? undefined : true}
+        data-scroll-contain={embedded ? undefined : true}
         data-scrolled={(needsFallback && scrolled) || undefined}
         onScroll={needsFallback ? onScroll : undefined}
       >

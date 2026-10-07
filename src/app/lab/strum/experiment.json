@@ -1,0 +1,22 @@
+{
+  "title": "Strum",
+  "description": "Recently played song titles set as a type scale and strung like a harp — sweep across the lines to strum them, or pull one down and let it twang. Drag the ratio from a major third to a perfect fifth and the waterfall resizes, then rings the new chord down the strings the moment they land.",
+  "tags": [
+    "Audio",
+    "Type",
+    "Canvas"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Make the type law audible: every size is a string, the letters bend and thicken where you pull, and the ratio between sizes is the chord you hear.",
+  "source": {
+    "kind": "brief",
+    "lens": "sound"
+  },
+  "generation": null,
+  "building": false
+}

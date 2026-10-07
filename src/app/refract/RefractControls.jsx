@@ -97,7 +97,7 @@ export default function RefractControls({
         <p className="rf-panel__sub">A gradient bent through a lattice of lenses.</p>
       </div>
 
-      <div className="rf-panel__body" data-lenis-prevent>
+      <div className="rf-panel__body" data-scroll-contain>
         <section className="rf-group">
           <h2 className="rf-group__name">Plate</h2>
           <div className="rf-presets">

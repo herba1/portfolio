@@ -1,0 +1,154 @@
+.stir {
+  --stir-arrive: var(--ease-entrance, cubic-bezier(0.16, 1, 0.3, 1));
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.stir__head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px 24px;
+  padding: 96px 0 8px;
+  padding-inline: 24px;
+}
+
+.stir__titles {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.stir__title {
+  text-wrap: balance;
+  animation: stir-arrive 600ms var(--stir-arrive) both;
+}
+
+.stir__hint {
+  animation: stir-arrive 600ms var(--stir-arrive) 60ms both;
+}
+
+.stir__gauge {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 8px;
+  flex: none;
+  font-family: var(--font-mono);
+  font-weight: var(--stir-gauge-weight, var(--font-weight-meta));
+  transition: font-weight 420ms var(--stir-arrive);
+  animation: stir-arrive 600ms var(--stir-arrive) 120ms both;
+}
+
+.stir__axis {
+  font-weight: var(--font-weight-meta);
+}
+
+.stir__stage {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 280px;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  cursor: crosshair;
+  outline: none;
+}
+
+.stir__stage[data-pressed] {
+  cursor: grabbing;
+}
+
+.stir__stage::after {
+  content: "";
+  position: absolute;
+  inset: 4px 8px;
+  border-radius: 11.2px;
+  box-shadow: inset 0 0 0 2px var(--color-ink);
+  opacity: 0;
+  transform: scale(0.995);
+  transition:
+    opacity 200ms var(--stir-arrive),
+    transform 200ms var(--stir-arrive);
+  pointer-events: none;
+}
+
+.stir__stage:focus-visible::after {
+  opacity: 1;
+  transform: none;
+}
+
+.stir__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+}
+
+.stir__canvas[data-painted] {
+  opacity: 1;
+}
+
+.stir__still {
+  position: absolute;
+  inset: 8px 24px;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+  animation: stir-arrive 600ms var(--stir-arrive) both;
+}
+
+@keyframes stir-arrive {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(4px) scale(0.98);
+  }
+
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@media (max-width: 899px) {
+  .stir__head {
+    padding: 88px 0 8px;
+    padding-inline: 16px;
+  }
+
+  .stir__keys {
+    display: none;
+  }
+
+  .stir__still {
+    inset: 8px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stir__title,
+  .stir__hint,
+  .stir__gauge,
+  .stir__still {
+    animation: none;
+  }
+
+  .stir__gauge,
+  .stir__stage::after {
+    transition: none;
+  }
+}

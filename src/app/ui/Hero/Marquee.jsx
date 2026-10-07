@@ -3,7 +3,8 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import ScrollTrigger from "gsap/ScrollTrigger";
 import { useEffect, useRef } from "react";
-import { useLenis } from "@/context/LenisContext";
+
+const SCROLL_INERTIA_DECAY = 0.94;
 
 export default function Marquee({
   children = "Developer * Web Designer * Musician * Creative * Developer * Web Designer * Musician * Guitarists *",
@@ -14,7 +15,6 @@ export default function Marquee({
   const deltaMultiplier = useRef(0);
   const progress = useRef(0);
   const direction = useRef(1);
-  const { lenis } = useLenis();
 
   useGSAP(() => {
     // Main animation loop
@@ -29,14 +29,13 @@ export default function Marquee({
       // Increment progress: base speed + scroll-based inertia * direction
       progress.current +=
         (delta.current + deltaMultiplier.current) * direction.current;
+      deltaMultiplier.current *= SCROLL_INERTIA_DECAY;
       requestAnimationFrame(loop);
     };
     loop();
   });
 
   useEffect(() => {
-    if (!lenis) return;
-    // console.log("hello");
     const updateDirection = () => {
       if (direction.current < 0) {
         // Reverse direction: start container at 0%, progress goes 0 to -50
@@ -57,18 +56,21 @@ export default function Marquee({
     updateDirection();
 
     // Track scroll velocity and direction for inertia effect
-    lenis.on("scroll", (e) => {
-      // Convert scroll velocity to speed multiplier (0-1 range)
-      if (lenis.isScrolling === "smooth") {
-        deltaMultiplier.current = Math.abs(lenis.lastVelocity / 20);
-        // Update scroll direction and recalculate container position
-        if (e.direction != 0) {
-          direction.current = e.direction;
-        }
-        updateDirection();
-      }
-    });
-  }, [lenis]);
+    let lastY = window.scrollY;
+    let lastTime = performance.now();
+    const onScroll = () => {
+      const now = performance.now();
+      const y = window.scrollY;
+      const pxPerFrame = ((y - lastY) / Math.max(1, now - lastTime)) * 16;
+      lastY = y;
+      lastTime = now;
+      deltaMultiplier.current = Math.abs(pxPerFrame / 20);
+      if (pxPerFrame !== 0) direction.current = Math.sign(pxPerFrame);
+      updateDirection();
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
 
   return (
     <div

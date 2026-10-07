@@ -420,7 +420,7 @@ export default function BlockEditor({ value, onChange }) {
       onDragOver={onDragOver}
       onDrop={onDrop}
     >
-      <div className="h-full overflow-auto px-3 py-4" data-lenis-prevent>
+      <div className="h-full overflow-auto px-3 py-4" data-scroll-contain>
         <Reorder.Group
           axis="y"
           values={blocks}

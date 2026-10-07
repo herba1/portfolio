@@ -1,0 +1,22 @@
+{
+  "title": "Chop",
+  "description": "An album cover cut into sixteen pads, each holding one beat of its real preview — press Loop and the record plays back seamlessly while the cover sharpens square by square. Tap over the loop and your flip splices in on the beat, the squares flying into a scrambled cover you can save.",
+  "tags": [
+    "Web Audio",
+    "Music",
+    "Instrument"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Turn a real album cover into a beat-sliced sampler where the artwork is the pad grid and the remix you play becomes a rearranged cover.",
+  "source": {
+    "kind": "brief",
+    "lens": "sound"
+  },
+  "generation": null,
+  "building": false
+}

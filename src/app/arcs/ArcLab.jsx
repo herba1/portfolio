@@ -307,7 +307,7 @@ export default function ArcLab() {
   };
 
   return (
-    <main className="pk arcs" data-lenis-prevent>
+    <main className="pk arcs" data-scroll-contain>
       <header className="arc-head-bar">
         <h1 className="t-head-xl">Arcs</h1>
         <p className="t-body-sm arc-sub">

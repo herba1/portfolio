@@ -1200,6 +1200,14 @@ body {
   scrollbar-gutter: stable;
 }
 
+html[data-scroll-locked] {
+  overflow: clip;
+}
+
+[data-scroll-contain] {
+  overscroll-behavior: contain;
+}
+
 /* Webkit browsers (Chrome, Safari, Edge) */
 ::-webkit-scrollbar {
   width: 8px;

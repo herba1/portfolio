@@ -1,9 +1,15 @@
 "use client";
 
+import { useEffect } from "react";
 import ClientOnly from "@/app/ui/ClientOnly";
 import SplatErrorBoundary from "./SplatErrorBoundary";
+import { requestSplat } from "./splatSource";
 
 export default function ClientSplatSection() {
+  useEffect(() => {
+    requestSplat().catch(() => {});
+  }, []);
+
   return (
     <SplatErrorBoundary>
       {/* ClientOnly, not next/dynamic — a lazy chunk arriving through Suspense

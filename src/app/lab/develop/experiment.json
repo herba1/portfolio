@@ -1,0 +1,22 @@
+{
+  "title": "Develop",
+  "description": "A blank sheet of photo paper in a tray of developer \u2014 drag through it and John's portrait rises out of the white, shadows first, only where the wave has washed. Rock it again and the midtones breathe in; Next sheet hangs the print on the drying line.",
+  "tags": [
+    "WebGL",
+    "Shaders",
+    "Simulation"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One shallow-water tray simulation drives shadows-first silver development, so the print only exists where the developer has actually been.",
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null,
+  "building": false
+}

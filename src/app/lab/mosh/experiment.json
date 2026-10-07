@@ -1,0 +1,23 @@
+{
+  "title": "Mosh",
+  "description": "Album covers as a broken video stream — swipe across one and its blocks tear into slabs that melt on for seconds in the next record's colours. Tap and the frame snaps clean, block by block, in a diagonal sweep.",
+  "tags": [
+    "WebGL",
+    "Shaders",
+    "Covers",
+    "Interface"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One P-frame datamosh simulator finished to the edge: painted motion vectors that tear then melt, a block-gated residual and a progressive keyframe, on real covers.",
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null,
+  "building": false
+}

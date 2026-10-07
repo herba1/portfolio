@@ -11,7 +11,7 @@ export default function TierListDetailLayout({ children }) {
   return (
     <div
       className="bg-light text-ink flex h-svh w-full flex-col"
-      data-lenis-prevent
+      data-scroll-contain
     >
       {/* clearance for the fixed global navbar */}
       <div className="h-16 shrink-0 md:h-20" />

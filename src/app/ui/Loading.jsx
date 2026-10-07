@@ -3,23 +3,15 @@ import gsap from "gsap";
 import { useGSAP } from "@gsap/react";
 import { useEffect, useRef, useLayoutEffect } from "react";
 import { createContext } from "react";
-import { useLenis } from "@/context/LenisContext";
 
 const TimelineContext = createContext();
 
 export default function Loading({ children }) {
   const container = useRef(null);
-  const { lenis } = useLenis();
-
-  const startLenis = () => {
-    lenis.start();
-  };
   const { contextSafe } = useGSAP(() => {}, { scope: container.current });
 
   useLayoutEffect(() => {
-    if (!lenis) return;
-    lenis.scrollTo(0,{immediate:true})
-    // lenis.stop();
+    window.scrollTo({ top: 0, behavior: "instant" });
     let anim = contextSafe(() => {
       gsap.to(
         ".load",
@@ -44,13 +36,12 @@ export default function Loading({ children }) {
           duration:1,
           onComplete: () => {
             t2.revert();
-            lenis.resize();
           },
         },
       );
     });
     anim();
-  }, [lenis]);
+  }, []);
 
   return (
     <div ref={container} className={`bg-light relative overflow-clip`}>

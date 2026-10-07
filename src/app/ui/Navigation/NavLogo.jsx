@@ -33,18 +33,10 @@ import { useMobileMenu } from './MobileMenuContext'
  *   In-out:  var(--ease-in-out)       (all idle loops, --ease)
  * ───────────────────────────────────────────── */
 
-/* `oy` = vertical pivot per letter, as a viewBox-space y:
+/* `oy` = vertical pivot per letter:
  *   top    → cap-top   (~6)   r · the swinger hangs from here
  *   center → mid-glyph (~11)
- *   bottom → baseline  (~16)  jumpers / breathers sit here
- *
- * We deliberately resolve transform-origin to explicit numbers in
- * viewBox coordinates (see the map below) instead of the keyword
- * `center center` + `transform-box: fill-box`. iOS Safari does NOT
- * reliably honor fill-box on SVG <text>; it falls back to the SVG
- * default (view-box), where `center center` is the centre of the
- * whole word — so the `b` was orbiting the word instead of spinning
- * in place. Numeric viewBox origins resolve identically everywhere. */
+ *   bottom → baseline  (~16)  jumpers / breathers sit here */
 const LETTERS = [
   { ch: 'h', idle: 'nl-jump',   dur: 2.4, oy: 16 },
   { ch: 'e', idle: 'nl-wiggle', dur: 1.8, oy: 11 },
@@ -54,6 +46,8 @@ const LETTERS = [
   { ch: 'r', idle: 'nl-sway',   dur: 2.4, oy: 6  },
   { ch: 't', idle: 'nl-wobble', dur: 2.6, oy: 16 },
 ]
+
+const PIVOT_X = 3.5
 
 export default function NavLogo({ className = '' }) {
   const router = useRouter()
@@ -77,34 +71,39 @@ export default function NavLogo({ className = '' }) {
   }
 
   return (
-    <Link href="/" onClick={onClick} className={`nav__logo block ${className}`}>
-      <svg
-        viewBox="0 0 68 22"
-        width={68}
-        height={22}
-        fill="currentColor"
-        className="overflow-visible nl-svg"
-        aria-label="herbart"
-      >
+    <Link href="/" onClick={onClick} className={`nav__logo block ${className}`} aria-label="herbart">
+      <span className="nl-word" aria-hidden="true">
         <style>{`
-          .nl {
+          .nl-word {
+            position: relative;
+            display: block;
+            width: 68px;
+            height: 22px;
             font-size: 14px;
-            font-weight: 400;
+            font-weight: var(--font-weight-normal);
+            letter-spacing: 0;
+            line-height: 22px;
+          }
+
+          .nl {
+            position: absolute;
+            top: 0;
+            display: block;
             opacity: 0;
-            /* view-box (the SVG default) + an explicit numeric origin in
-               --origin keeps the pivot identical across browsers. Do NOT
-               switch this to fill-box: iOS Safari mishandles it on text. */
-            transform-box: view-box;
+            transform-origin: var(--origin, center);
+            animation: nl-in 0.4s var(--ease-overshoot) var(--d) forwards;
+          }
+
+          .nl-idle {
+            display: block;
             transform-origin: var(--origin, center);
             /* custom symmetric in-out — slow at the extremes, quick
                through the middle, so every move darts then settles
                instead of mushily floating. tune this one value to
                re-feel every letter at once. */
             --ease: var(--ease-in-out);
-            will-change: transform, opacity;
-            animation:
-              nl-in 0.4s var(--ease-overshoot) var(--d) forwards,
-              var(--idle) var(--dur) var(--ease) var(--id) infinite;
+            will-change: transform;
+            animation: var(--idle) var(--dur) var(--ease) var(--id) infinite;
           }
 
           @keyframes nl-in {
@@ -209,7 +208,7 @@ export default function NavLogo({ className = '' }) {
 
 
           @media (prefers-reduced-motion: reduce) {
-            .nl { animation: none !important; opacity: 1 !important; transform: none !important; }
+            .nl, .nl-idle { animation: none !important; opacity: 1 !important; transform: none !important; }
           }
         `}</style>
 
@@ -217,30 +216,32 @@ export default function NavLogo({ className = '' }) {
           const entryDelay = 0.15 + i * 0.05
           const idleDelay = entryDelay + 0.4
 
-          // Pivot in viewBox units: glyph left edge + ~half a glyph for the
-          // horizontal centre, and the per-letter vertical anchor (oy).
-          const x = 2 + i * 9.2
-          const originX = (x + 3.5).toFixed(2)
+          const x = (2 + i * 9.2).toFixed(2)
 
           return (
-            <text
+            <span
               key={i}
-              x={x}
-              y={16}
               className="nl"
               style={{
+                left: `${x}px`,
                 '--d': `${entryDelay.toFixed(2)}s`,
-                '--id': `${idleDelay.toFixed(2)}s`,
-                '--idle': idle,
-                '--dur': `${dur}s`,
-                '--origin': `${originX}px ${oy}px`,
+                '--origin': `${PIVOT_X}px ${oy}px`,
               }}
             >
-              {ch}
-            </text>
+              <span
+                className="nl-idle"
+                style={{
+                  '--id': `${idleDelay.toFixed(2)}s`,
+                  '--idle': idle,
+                  '--dur': `${dur}s`,
+                }}
+              >
+                {ch}
+              </span>
+            </span>
           )
         })}
-      </svg>
+      </span>
     </Link>
   )
 }

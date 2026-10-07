@@ -234,7 +234,7 @@ export default function BackdropDock({ onSelect, mode = "dark" }) {
       >
         <div
           className="bd-dock__panel"
-          data-lenis-prevent=""
+          data-scroll-contain=""
           style={{ height: expanded ? panelHeight : 0 }}
         >
           <ul className="bd-dock__scroll" ref={listRef}>

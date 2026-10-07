@@ -1,5 +1,5 @@
 import { PageTransition } from "./ui/transitions";
-import { LenisProvider } from "@/context/LenisContext";
+import "./globals.css";
 import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
 import { MobileMenuProvider } from "./ui/Navigation/MobileMenuContext";
@@ -167,7 +167,6 @@ export default function RootLayout({ children }) {
         <AnimatedFavicon />
         <ConsoleSig />
         <PostHogProvider>
-          <LenisProvider>
             <MobileMenuProvider>
               <Navbar
                 className="text-ink z-[var(--z-index-nav)] font-medium"
@@ -189,7 +188,6 @@ export default function RootLayout({ children }) {
                 {children}
               </div>
             </Loading> */}
-          </LenisProvider>
         </PostHogProvider>
         <FooterClock />
         <DevPalette />

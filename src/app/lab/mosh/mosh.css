@@ -1,0 +1,729 @@
+.mosh {
+  --mosh-side: 296px;
+  --mosh-gap: 48px;
+  --mosh-plate: max(240px, min(calc(100dvh - 128px), calc(100vw - 64px - var(--mosh-side) - var(--mosh-gap)), 760px));
+
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  min-height: 100dvh;
+  display: grid;
+  place-items: center;
+  padding: 96px 32px 32px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+.mosh[data-embedded] {
+  --mosh-plate: min(88cqh, 88cqw);
+
+  min-height: 0;
+  height: 100%;
+  padding: 0;
+}
+
+.mosh-layout {
+  display: grid;
+  grid-template-columns: var(--mosh-plate) var(--mosh-side);
+  column-gap: var(--mosh-gap);
+  row-gap: 32px;
+  align-items: start;
+}
+
+.mosh[data-embedded] .mosh-layout {
+  grid-template-columns: var(--mosh-plate);
+}
+
+.mosh-stage {
+  position: relative;
+}
+
+.mosh-plate {
+  position: relative;
+  width: var(--mosh-plate);
+  aspect-ratio: 1;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--color-surface-sunken);
+  scale: 0.985;
+  transition:
+    scale 900ms var(--ease-entrance),
+    outline-color 150ms var(--ease-hover);
+  outline: 2px solid transparent;
+  outline-offset: 4px;
+}
+
+.mosh[data-ready="true"] .mosh-plate,
+.mosh-plate[data-failed] {
+  scale: 1;
+}
+
+.mosh-plate:has(.mosh-surface:focus-visible) {
+  outline-color: var(--color-ink);
+}
+
+.mosh-placeholder {
+  position: absolute;
+  inset: 0;
+  background-image: radial-gradient(circle at center, var(--color-line-strong) 0 1.5px, transparent 2px);
+  background-size: calc(var(--mosh-plate) / 40) calc(var(--mosh-plate) / 40);
+  animation: mosh-wait 1400ms var(--ease-in-out) infinite alternate;
+}
+
+.mosh-plate[data-failed] .mosh-placeholder {
+  background: var(--mosh-fallback, none) center / cover no-repeat, var(--color-surface-sunken);
+  animation: none;
+}
+
+.mosh[data-ready="true"] .mosh-placeholder {
+  animation: none;
+  visibility: hidden;
+  transition: visibility 0s linear 200ms;
+}
+
+@keyframes mosh-wait {
+  from {
+    opacity: 0.4;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.mosh-surface {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  cursor: crosshair;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+}
+
+.mosh-surface[data-pressed="true"] {
+  cursor: grabbing;
+}
+
+.mosh-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 160ms var(--ease-hover);
+}
+
+.mosh[data-ready="true"] .mosh-canvas {
+  opacity: 1;
+}
+
+.mosh-ring {
+  position: absolute;
+  left: calc(var(--mosh-block-css, 16px) * -2);
+  top: calc(var(--mosh-block-css, 16px) * -2);
+  width: calc(var(--mosh-block-css, 16px) * 4);
+  aspect-ratio: 1;
+  border: 2px solid var(--color-ink);
+  border-radius: var(--radius-full);
+  box-shadow:
+    0 0 0 1.5px var(--color-surface-raised),
+    inset 0 0 0 1.5px var(--color-surface-raised);
+  scale: 0.84;
+  opacity: 0;
+  filter: blur(4px);
+  pointer-events: none;
+  transition:
+    scale 180ms var(--ease-in-quad),
+    opacity 160ms var(--ease-in-quad),
+    filter 180ms var(--ease-in-quad);
+}
+
+.mosh-ring[data-on="true"] {
+  scale: 1;
+  opacity: 1;
+  filter: blur(0);
+  transition:
+    scale 440ms var(--ease-overshoot),
+    opacity 200ms var(--ease-entrance),
+    filter 300ms var(--ease-entrance);
+}
+
+.mosh-failure {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  padding: 8px 12px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface-raised);
+}
+
+.mosh-side {
+  display: flex;
+  flex-direction: column;
+  row-gap: 24px;
+  min-width: 0;
+}
+
+.mosh-head {
+  display: grid;
+  row-gap: 8px;
+}
+
+.mosh-title {
+  text-wrap: balance;
+}
+
+.mosh-hint {
+  max-width: 34ch;
+  text-wrap: pretty;
+}
+
+.mosh-rise {
+  animation: mosh-rise 600ms var(--ease-entrance) both;
+  animation-delay: calc(var(--rise, 0) * 60ms + 120ms);
+}
+
+@keyframes mosh-rise {
+  from {
+    opacity: 0;
+    translate: 0 8px;
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    translate: 0 0;
+    filter: blur(0);
+  }
+}
+
+.mosh-now {
+  display: grid;
+  row-gap: 4px;
+  min-width: 0;
+}
+
+.mosh-now__title {
+  min-height: 20px;
+  min-width: 0;
+}
+
+.mosh-now__next {
+  display: flex;
+  gap: 0 8px;
+  min-width: 0;
+}
+
+.mosh-now__next-title {
+  flex: 1;
+  min-width: 0;
+  color: var(--color-ink);
+}
+
+.mosh-chips {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, 40px);
+  column-gap: 8px;
+  padding-bottom: 8px;
+  width: max-content;
+}
+
+.mosh-chip {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-xs);
+  background: var(--chip-image) center / cover no-repeat, var(--color-surface-sunken);
+  cursor: pointer;
+  transition: scale 150ms var(--ease-hover);
+  animation: mosh-chip-pop 440ms var(--ease-out-expo) both;
+  animation-delay: calc(var(--chip-order, 0) * 30ms + 260ms);
+}
+
+.mosh-chip:hover {
+  scale: 1.06;
+}
+
+.mosh-chip:active {
+  scale: 0.96;
+  transition-duration: 120ms;
+}
+
+.mosh-chip:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+@keyframes mosh-chip-pop {
+  0% {
+    opacity: 0;
+    scale: 0.84;
+    filter: blur(7px);
+  }
+  70% {
+    opacity: 1;
+    scale: 1.02;
+    filter: blur(0);
+  }
+  100% {
+    opacity: 1;
+    scale: 1;
+    filter: blur(0);
+  }
+}
+
+.mosh-chips__underline {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 40px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-ink);
+  transform: translateX(calc(var(--chip-index, 0) * 48px));
+  transition: transform 300ms var(--ease-entrance);
+}
+
+.mosh-counter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  column-gap: 12px;
+}
+
+.mosh-counter__readout {
+  display: flex;
+  align-items: center;
+  column-gap: 8px;
+}
+
+.mosh-counter__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.mosh-key {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  column-gap: 8px;
+  height: 28px;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--color-line);
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  cursor: pointer;
+  transition:
+    scale 120ms var(--ease-hover),
+    border-color 150ms var(--ease-hover);
+}
+
+.mosh-key:hover {
+  border-color: var(--color-line-strong);
+}
+
+.mosh-key:active {
+  scale: 0.97;
+}
+
+.mosh-key:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+.mosh-key__kbd {
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  padding: 0 8px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+  font-family: inherit;
+  line-height: 1;
+}
+
+@media (pointer: coarse) {
+  .mosh-key {
+    padding-right: 12px;
+  }
+
+  .mosh-key__kbd {
+    display: none;
+  }
+}
+
+.mosh-codec {
+  display: grid;
+  row-gap: 12px;
+  padding-top: 20px;
+  border-top: 1px solid var(--color-line);
+}
+
+.mosh-codec__row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  column-gap: 8px;
+  align-items: center;
+}
+
+.mosh-segments {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(var(--segment-count), minmax(0, 1fr));
+  padding: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+}
+
+.mosh-segments__pill {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc((100% - 8px) / var(--segment-count));
+  border-radius: var(--radius-full);
+  background: var(--color-surface-raised);
+  box-shadow: 0 0 0 1px var(--color-line);
+  transform: translateX(calc(var(--segment-index) * 100%));
+  transition:
+    transform 300ms var(--ease-entrance),
+    opacity 200ms var(--ease-hover),
+    scale 200ms var(--ease-hover);
+}
+
+.mosh-segments[data-matched="false"] .mosh-segments__pill {
+  opacity: 0;
+  scale: 0.9;
+}
+
+.mosh-segments__option {
+  position: relative;
+  padding: 4px 4px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  color: var(--color-ink-secondary);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: color 150ms var(--ease-hover);
+}
+
+.mosh-segments__option[aria-checked="true"],
+.mosh-segments__option:hover {
+  color: var(--color-ink);
+}
+
+.mosh-segments__option:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 0;
+}
+
+.mosh-codec__more {
+  display: inline-flex;
+  align-items: center;
+  column-gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: transparent;
+  cursor: pointer;
+  transition: background-color 150ms var(--ease-hover);
+}
+
+.mosh-codec__more:hover {
+  background: var(--color-surface-sunken);
+}
+
+.mosh-codec__more:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 0;
+}
+
+.mosh-codec__chevron {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  transition: rotate 300ms var(--ease-entrance);
+}
+
+.mosh-codec__chevron::before,
+.mosh-codec__chevron::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  width: 7px;
+  height: 2px;
+  border-radius: var(--radius-full);
+  background: var(--color-ink);
+}
+
+.mosh-codec__chevron::before {
+  left: 0.5px;
+  rotate: 40deg;
+}
+
+.mosh-codec__chevron::after {
+  right: 0.5px;
+  rotate: -40deg;
+}
+
+.mosh-codec[data-open="true"] .mosh-codec__chevron {
+  rotate: 180deg;
+}
+
+.mosh-codec__drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 300ms var(--ease-entrance);
+}
+
+.mosh-codec[data-open="true"] .mosh-codec__drawer {
+  grid-template-rows: 1fr;
+}
+
+.mosh-codec__inner {
+  display: grid;
+  row-gap: 16px;
+  min-height: 0;
+  padding-top: 4px;
+  overflow: hidden;
+  opacity: 0;
+  filter: blur(4px);
+  transition:
+    opacity 200ms var(--ease-hover),
+    filter 300ms var(--ease-entrance);
+}
+
+.mosh-codec[data-open="true"] .mosh-codec__inner {
+  opacity: 1;
+  filter: blur(0);
+}
+
+.mosh-codec__field {
+  display: grid;
+  row-gap: 8px;
+}
+
+.mosh-segments--small {
+  width: 100%;
+}
+
+.mosh-slider {
+  display: grid;
+  row-gap: 4px;
+}
+
+.mosh-slider__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mosh-slider__value {
+  font-variant-numeric: tabular-nums;
+}
+
+.mosh-slider__track {
+  position: relative;
+  height: 16px;
+}
+
+.mosh-slider__track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 6px;
+  height: 4px;
+  border-radius: var(--radius-full);
+  background: var(--color-surface-sunken);
+}
+
+.mosh-slider__fill {
+  position: absolute;
+  left: 0;
+  top: 6px;
+  height: 4px;
+  width: calc(8px + var(--fill, 0) * (100% - 16px));
+  border-radius: var(--radius-full);
+  background: var(--color-ink);
+  pointer-events: none;
+}
+
+.mosh-slider input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.mosh-slider input:focus-visible {
+  outline: none;
+}
+
+.mosh-slider input::-webkit-slider-runnable-track {
+  height: 16px;
+  background: transparent;
+}
+
+.mosh-slider input::-moz-range-track {
+  height: 16px;
+  background: transparent;
+}
+
+.mosh-slider input::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-ink);
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  transition: scale 150ms var(--ease-hover);
+}
+
+.mosh-slider input::-moz-range-thumb {
+  box-sizing: border-box;
+  width: 16px;
+  height: 16px;
+  border: 2px solid var(--color-ink);
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  transition: scale 150ms var(--ease-hover);
+}
+
+.mosh-slider input:active::-webkit-slider-thumb {
+  scale: 1.18;
+}
+
+.mosh-slider input:active::-moz-range-thumb {
+  scale: 1.18;
+}
+
+.mosh-slider input:focus-visible::-webkit-slider-thumb {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+.mosh-slider input:focus-visible::-moz-range-thumb {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+}
+
+.mosh-codec__toggles {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+
+.mosh-switch {
+  display: inline-flex;
+  align-items: center;
+  column-gap: 8px;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mosh-switch:focus-visible {
+  outline: 2px solid var(--color-ink);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+.mosh-switch__track {
+  position: relative;
+  width: 28px;
+  height: 16px;
+  border-radius: var(--radius-full);
+  background: var(--color-line-strong);
+  transition: background-color 200ms var(--ease-hover);
+}
+
+.mosh-switch__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--color-surface-raised);
+  transition: translate 300ms var(--ease-entrance);
+}
+
+.mosh-switch[aria-checked="true"] .mosh-switch__track {
+  background: var(--color-ink);
+}
+
+.mosh-switch[aria-checked="true"] .mosh-switch__knob {
+  translate: 12px 0;
+}
+
+.mosh-reset {
+  justify-self: start;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-decoration: underline;
+  text-decoration-color: var(--color-line-strong);
+  text-underline-offset: 4px;
+  cursor: pointer;
+  transition: text-decoration-color 150ms var(--ease-hover);
+}
+
+.mosh-reset:hover {
+  text-decoration-color: var(--color-ink);
+}
+
+@media (max-width: 899px) {
+  .mosh {
+    --mosh-plate: min(calc(100vw - 32px), 560px);
+
+    place-items: start center;
+    padding: 88px 16px 40px;
+  }
+
+  .mosh-layout {
+    grid-template-columns: var(--mosh-plate);
+    row-gap: 24px;
+  }
+
+  .mosh-side {
+    row-gap: 20px;
+  }
+
+  .mosh-chips {
+    grid-template-columns: repeat(6, 40px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mosh-rise,
+  .mosh-chip,
+  .mosh-placeholder {
+    animation: none;
+  }
+
+  .mosh-plate,
+  .mosh[data-ready="true"] .mosh-plate {
+    scale: 1;
+    transition: none;
+  }
+
+  .mosh-chips__underline,
+  .mosh-segments__pill,
+  .mosh-ring,
+  .mosh-ring[data-on="true"],
+  .mosh-codec__drawer,
+  .mosh-codec__inner {
+    transition-duration: 1ms;
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "title": "Wet ink",
+  "description": "A booking form's signature field on real paper — the pen signs itself, rests at the end, and the ink swells into a bead, wicks out along the fibres and dries into a dark coffee ring. Sign it yourself and it pools where you pause, thins where you flick, and Sign and book lifts a mirrored blotter offprint of whatever is still wet.",
+  "tags": [
+    "Interface",
+    "WebGL",
+    "Forms",
+    "Simulation"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One mechanic finished to the edge: a GPU paper-and-ink simulation inside an ordinary signature field, where pooling, feathering, coffee-ring drying and a blotter offprint all come from the same water and pigment.",
+  "source": {
+    "kind": "brief",
+    "lens": "product-components"
+  },
+  "generation": null,
+  "building": false
+}

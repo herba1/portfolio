@@ -1,0 +1,22 @@
+{
+  "title": "Sand",
+  "description": "An album cover pressed out of coloured sand. Drag across it to crumble grains into a dune on the tray floor and press and hold to pull every one back, or hit next cover to collapse the whole record into strata that leap up and land as the next one.",
+  "tags": [
+    "WebGL",
+    "Simulation",
+    "Music"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One material finished to the edge: a real cover you wear away grain by grain, then watch its settled sand erupt and land as the next record.",
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null,
+  "building": false
+}

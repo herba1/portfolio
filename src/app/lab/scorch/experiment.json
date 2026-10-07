@@ -1,0 +1,23 @@
+{
+  "title": "Scorch",
+  "description": "Your recently played covers stacked like sheets of paper, with each artwork’s own ink as the fuel — hold still until a spot catches and a glowing char line races along the dark type and shapes, leaving pale paper standing as islands. Drag to fan the front or blow it out; at 92% burnt the scraps go and the cover underneath becomes the sheet.",
+  "tags": [
+    "WebGL",
+    "Shaders",
+    "Covers",
+    "Simulation"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "A heat-and-fuel burn sim on the GPU where the cover’s dark ink burns fastest, so lighting the lettering sends a fuse through the artwork and through to the next cover.",
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null,
+  "building": false
+}

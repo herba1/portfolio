@@ -1,4 +1,4 @@
-import { LenisKiller } from './LenisKiller'
+import { ScrollLock } from './ScrollLock'
 import { HideChrome } from './HideChrome'
 
 export const metadata = {
@@ -14,9 +14,9 @@ export default function StudioLayout({ children }) {
     <div
       className="studio fixed inset-0 overflow-hidden bg-[var(--studio-bg)] text-[var(--studio-text)]"
       style={{ zIndex: 99999 }}
-      data-lenis-prevent
+      data-scroll-contain
     >
-      <LenisKiller />
+      <ScrollLock />
       <HideChrome />
       {children}
     </div>

@@ -4,21 +4,29 @@ import { Canvas } from "@react-three/fiber";
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
 import { useProgress } from "@react-three/drei";
 import { gsap } from "gsap";
-import { ScrollTrigger } from "gsap/ScrollTrigger";
-import { useLenis } from "@/context/LenisContext";
+import { lockPageScroll } from "@/lib/pageScroll";
 import posthog from "posthog-js";
 import SplatViewer from "./SplatViewer";
 import DreamyEffect from "./PixelMaskEffect";
 
-gsap.registerPlugin(ScrollTrigger);
+const PROGRESS_SMOOTHING_SECONDS = 0.17;
+const PROGRESS_SETTLED = 1e-4;
+const MOBILE_MAX_WIDTH = 768;
 
 function LoadWatcher({ onLoaded }) {
-  const { progress } = useProgress();
   useEffect(() => {
-    if (progress < 100) return;
-    const id = setTimeout(onLoaded, 0);
-    return () => clearTimeout(id);
-  }, [progress, onLoaded]);
+    let timer = 0;
+    const check = ({ progress }) => {
+      if (progress < 100 || timer) return;
+      timer = setTimeout(onLoaded, 0);
+    };
+    check(useProgress.getState());
+    const unsubscribe = useProgress.subscribe(check);
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, [onLoaded]);
   return null;
 }
 
@@ -34,7 +42,8 @@ export default function SplatScrollSection() {
   const [expanded, setExpanded] = useState(false);
   const animatingRef = useRef(false);
   const expandTweenRef = useRef(null);
-  const { lenis } = useLenis();
+  const releaseScrollRef = useRef(null);
+  const lockTimerRef = useRef(0);
 
   // Pause rendering when off-screen
   useEffect(() => {
@@ -48,44 +57,60 @@ export default function SplatScrollSection() {
   }, []);
 
   useEffect(() => {
-    if (!sectionRef.current || !canvasWrapRef.current) return;
+    const section = sectionRef.current;
+    if (!section) return undefined;
 
-    const triggers = [];
+    const smoothing = window.innerWidth <= MOBILE_MAX_WIDTH ? 0 : PROGRESS_SMOOTHING_SECONDS;
+    let frame = 0;
+    let last = 0;
+    let sectionTop = 0;
+    let sectionHeight = 1;
 
-    const isMobile = window.innerWidth <= 768;
+    const measure = () => {
+      if (section.closest(".page-card.is-active")) return;
+      const rect = section.getBoundingClientRect();
+      sectionTop = rect.top + window.scrollY;
+      sectionHeight = Math.max(1, rect.height);
+    };
 
-    // Parallax: starts higher, settles down
-    const tween = gsap.fromTo(
-      canvasWrapRef.current,
-      { yPercent: isMobile ? -45 : -50 },
-      {
-        yPercent: 0,
-        ease: "none",
-        scrollTrigger: {
-          trigger: sectionRef.current,
-          start: "top bottom",
-          end: "top 30%",
-          scrub: isMobile ? true : 0.3,
-        },
+    const tick = (now) => {
+      frame = 0;
+      if (section.closest(".page-card.is-active")) {
+        last = 0;
+        return;
       }
-    );
-    if (tween.scrollTrigger) triggers.push(tween.scrollTrigger);
+      const target = Math.min(1, Math.max(0, (window.scrollY + window.innerHeight - sectionTop) / sectionHeight));
+      const seconds = last ? (now - last) / 1000 : 1 / 60;
+      last = now;
+      const current = scrollProgressRef.current;
+      const next = smoothing ? current + (target - current) * (1 - Math.exp(-seconds / smoothing)) : target;
+      const settled = Math.abs(target - next) < PROGRESS_SETTLED;
+      scrollProgressRef.current = settled ? target : next;
+      invalidateRef.current?.();
+      if (settled) last = 0;
+      else frame = requestAnimationFrame(tick);
+    };
+    const wake = () => {
+      if (!frame) frame = requestAnimationFrame(tick);
+    };
 
-    // Progress: drives pixelation + camera zoom
-    triggers.push(
-      ScrollTrigger.create({
-        trigger: sectionRef.current,
-        start: "top bottom",
-        end: "bottom bottom",
-        scrub: isMobile ? true : 0.5,
-        onUpdate: (self) => {
-          scrollProgressRef.current = self.progress;
-          invalidateRef.current?.();
-        },
-      })
-    );
+    const remeasure = () => {
+      measure();
+      wake();
+    };
+    const resizeObserver = new ResizeObserver(remeasure);
+    resizeObserver.observe(section);
+    resizeObserver.observe(document.body);
 
-    return () => triggers.forEach((t) => t.kill());
+    remeasure();
+    window.addEventListener("scroll", wake, { passive: true });
+    window.addEventListener("resize", remeasure);
+    return () => {
+      cancelAnimationFrame(frame);
+      resizeObserver.disconnect();
+      window.removeEventListener("scroll", wake);
+      window.removeEventListener("resize", remeasure);
+    };
   }, []);
 
   // Ctrl+G debug panel
@@ -150,8 +175,12 @@ export default function SplatScrollSection() {
     });
 
     // Scroll to bottom so the scene is centered, then lock
-    lenis?.scrollTo("bottom", { duration: 0.8, lock: true });
-    setTimeout(() => lenis?.stop(), 850);
+    window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "smooth" });
+    clearTimeout(lockTimerRef.current);
+    lockTimerRef.current = setTimeout(() => {
+      releaseScrollRef.current?.();
+      releaseScrollRef.current = lockPageScroll();
+    }, 850);
 
     expandTweenRef.current?.kill();
     const tl = gsap.timeline({
@@ -171,7 +200,7 @@ export default function SplatScrollSection() {
       ease: "power3.inOut",
     }, 0);
     expandTweenRef.current = tl;
-  }, [loaded, expanded, lenis, getExpandedSize]);
+  }, [loaded, expanded, getExpandedSize]);
 
   const handleCollapse = useCallback(() => {
     if (!expanded || animatingRef.current) return;
@@ -188,7 +217,9 @@ export default function SplatScrollSection() {
         animatingRef.current = false;
         document.documentElement.classList.remove("splat-immersive");
         // Restore opacity (transition will animate it back to 1 via removing the class)
-        lenis?.start();
+        clearTimeout(lockTimerRef.current);
+        releaseScrollRef.current?.();
+        releaseScrollRef.current = null;
       },
     });
     tl.to(canvasWrapRef.current, {
@@ -202,7 +233,15 @@ export default function SplatScrollSection() {
       ease: "power3.inOut",
     }, 0);
     expandTweenRef.current = tl;
-  }, [expanded, lenis, getCollapsedSize]);
+  }, [expanded, getCollapsedSize]);
+
+  useEffect(
+    () => () => {
+      clearTimeout(lockTimerRef.current);
+      releaseScrollRef.current?.();
+    },
+    [],
+  );
 
   // ESC to close
   useEffect(() => {
@@ -220,6 +259,7 @@ export default function SplatScrollSection() {
       ref={sectionRef}
       className="splat-section"
       data-expanded={expanded || undefined}
+      data-visible={isVisible || undefined}
     >
       <div
         ref={canvasWrapRef}
@@ -329,6 +369,38 @@ export default function SplatScrollSection() {
         }
         .splat-section[data-expanded] {
           z-index: var(--z-index-max);
+        }
+        .splat-section:not([data-visible]) .splat-tap-anim * {
+          animation-play-state: paused;
+        }
+        @keyframes splat-parallax {
+          from {
+            translate: 0 var(--splat-parallax-from);
+          }
+          to {
+            translate: 0 0;
+          }
+        }
+        @supports (animation-timeline: view()) {
+          .splat-section {
+            --splat-parallax-from: calc(max(100lvh, 500px) * -0.5);
+            view-timeline: --splat-section block;
+          }
+          .splat-canvas-wrap,
+          .splat-click-target {
+            animation: splat-parallax linear both;
+            animation-timeline: --splat-section;
+            animation-range: cover 0px cover 70vh;
+          }
+          .page-card.is-active .splat-canvas-wrap,
+          .page-card.is-active .splat-click-target {
+            animation-play-state: paused;
+          }
+        }
+        @media (max-width: 768px) {
+          .splat-section {
+            --splat-parallax-from: calc(max(100lvh, 500px) * -0.45);
+          }
         }
         .splat-canvas-wrap {
           width: 100%;
