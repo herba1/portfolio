@@ -2,99 +2,6 @@
 @plugin "@tailwindcss/typography";
 
 /* ─────────────────────────────────────────────
- * VIEW TRANSITIONS — vertical slide + blur
- *
- * Old page: slides up + blurs + fades out
- * New page: slides up from below + blurs in
- * ───────────────────────────────────────────── */
-
-@keyframes page-exit {
-  from {
-    opacity: 1;
-    transform: translateY(0);
-  }
-  to {
-    opacity: 0;
-    transform: translateY(-2%);
-  }
-}
-
-@keyframes page-enter {
-  from {
-    opacity: 0;
-    transform: translateY(2%);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-/* The transition runs on its own whenever React swaps the page-content
-   layer — no JS class toggling, no timers. The browser drives the whole
-   lifecycle, so a slow/heavy route can never out-race a manual signal. */
-::view-transition-old(page-content) {
-  animation: page-exit var(--duration-250) var(--ease-standard) forwards;
-  mix-blend-mode: normal;
-}
-::view-transition-new(page-content) {
-  animation: page-enter var(--duration-reveal) var(--ease-entrance) forwards;
-  mix-blend-mode: normal;
-}
-
-/* Skip the enter animation on initial load / when there's no old snapshot to
-   transition from (e.g. a Suspense reveal) — that's the flash we want to avoid,
-   and :only-child catches it without any timing hack. */
-::view-transition-new(page-content):only-child {
-  animation: none;
-}
-
-/* navbar gets its own layer — stays static during page transitions */
-.nav__container {
-  view-transition-name: navbar;
-}
-
-::view-transition-group(navbar) {
-  animation: none;
-  z-index: var(--z-index-max);
-}
-
-::view-transition-old(navbar),
-::view-transition-new(navbar) {
-  animation: none;
-}
-
-/* While a view transition runs, the navbar is replaced by a static snapshot.
-   Freeze the live logo letters for that window so their animation phase still
-   matches the snapshot when it lifts — otherwise the letters visibly "jump" as
-   the live element resumes mid-fidget. :active-view-transition matches the root
-   for exactly the duration of the transition, so this stays in sync on its own. */
-:root:active-view-transition .nl {
-  animation-play-state: paused;
-}
-
-::view-transition-group(footer-clock) {
-  animation: none;
-}
-::view-transition-old(footer-clock),
-::view-transition-new(footer-clock) {
-  animation: none;
-}
-
-/* disable the default root cross-fade so only our named transitions run */
-::view-transition-old(root),
-::view-transition-new(root) {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-old(page-content),
-  ::view-transition-new(page-content) {
-    animation: none !important;
-  }
-}
-
-/* ─────────────────────────────────────────────
  * HERO ENTRANCE — CSS-driven, off main thread
  * ───────────────────────────────────────────── */
 
@@ -2033,6 +1940,10 @@ body {
   animation: blog-list-in var(--duration-entrance) var(--ease-entrance) both;
 }
 
+:root:active-view-transition .blog-title-morph {
+  color: var(--color-ink);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .blog-header-back,
   .blog-header-date,
@@ -2119,46 +2030,6 @@ body {
  * TIER LIST
  * ───────────────────────────────────────────── */
 
-/* Shared-element morph: an index fan thumb ↔ its tile in the tier grid.
- *
- * Both ends are wrapped in <ViewTransition name="tl-<slug>-<id>" share="…">,
- * so React only hands the browser a view-transition-name when BOTH ends are on
- * screen for the same navigation (index ⇄ that list). Every other navigation
- * leaves the thumbs unnamed and they travel inside the page-content snapshot
- * with the rest of the page — see the ViewTransition comment in ImageFan.jsx.
- *
- * The morph is timed to the page-content enter so the thumb and the page it is
- * flying into arrive together; the default var(--duration-250) ease landed early and read as
- * a separate, detached animation. */
-::view-transition-group(.tl-share) {
-  animation-duration: var(--duration-400);
-  animation-timing-function: var(--ease-entrance);
-}
-/* No cross-fade at all. The default is to fade the old snapshot out while the
-   new one fades in, which is the right call when the two ends look different —
-   but here they're the same file at the same square aspect (a .pol thumb and an
-   aspect-square tile), so there is nothing to fade *between*. Dissolving one
-   into the other only dips the image's opacity mid-flight and makes the thumb
-   look like it fades along with the page. Holding the incoming end opaque for
-   the whole morph means one continuous, solid image scales from thumb to tile
-   and back. */
-::view-transition-old(.tl-share) {
-  animation: none;
-  opacity: 0;
-}
-::view-transition-new(.tl-share) {
-  animation: none;
-  opacity: 1;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  ::view-transition-group(.tl-share),
-  ::view-transition-old(.tl-share),
-  ::view-transition-new(.tl-share) {
-    animation: none !important;
-  }
-}
-
 /* Soft staggered entrance for the tier rows, the index rows and the header.
  *
  * One rule decides where an entrance animation is allowed to go: it must not
@@ -2177,7 +2048,7 @@ body {
  *     supposed to be the one thing that stays solid the whole way.
  *
  * So containers of a morph target get NO entrance of their own — the
- * page-content transition already fades the page in around them — and the
+ * page transition already fades the page in around them — and the
  * entrance is pushed down onto the siblings that carry the row's arrival: the
  * text column on the index, the tier label and non-cover tiles on a list.
  * `--tl-delay` carries the stagger in, stated at the call site next to the row

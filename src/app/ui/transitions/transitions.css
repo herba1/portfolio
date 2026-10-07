@@ -1,0 +1,137 @@
+@keyframes page-out-up {
+  to {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+@keyframes page-in-up {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@keyframes page-out-down {
+  to {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+}
+
+@keyframes page-in-down {
+  from {
+    opacity: 0;
+    transform: translateY(-16px);
+  }
+}
+
+::view-transition {
+  pointer-events: none;
+}
+
+::view-transition-group(root) {
+  opacity: 1 !important;
+}
+
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+}
+
+::view-transition-old(.page-exit) {
+  animation: page-out-up var(--duration-150) var(--ease-out-quad) both;
+}
+
+::view-transition-new(.page-enter) {
+  animation: page-in-up var(--duration-slow) var(--ease-entrance) var(--duration-120) both;
+}
+
+::view-transition-old(.page-exit-back) {
+  animation: page-out-down var(--duration-150) var(--ease-out-quad) both;
+}
+
+::view-transition-new(.page-enter-back) {
+  animation: page-in-down var(--duration-slow) var(--ease-entrance) var(--duration-120) both;
+}
+
+@keyframes morph-hand-off {
+  60% {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+::view-transition-group(.morph-solid),
+::view-transition-group(.morph-fade),
+::view-transition-group(.morph-handoff) {
+  z-index: 1;
+  animation-duration: var(--duration-reveal);
+  animation-timing-function: var(--ease-entrance);
+}
+
+::view-transition-old(.morph-solid) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(.morph-solid) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-old(.morph-handoff) {
+  animation: morph-hand-off var(--duration-reveal) linear both;
+}
+
+::view-transition-new(.morph-handoff) {
+  animation: none;
+  opacity: 1;
+}
+
+::view-transition-group(.morph-nav) {
+  z-index: calc(var(--z-index-max) + 1);
+  animation-timing-function: var(--ease-in-out-cubic);
+}
+
+.nav__container {
+  view-transition-name: navbar;
+}
+
+::view-transition-group(navbar) {
+  animation: none;
+  z-index: var(--z-index-max);
+}
+
+::view-transition-old(navbar),
+::view-transition-old(footer-clock) {
+  animation: none;
+  opacity: 0;
+}
+
+::view-transition-new(navbar),
+::view-transition-new(footer-clock) {
+  animation: none;
+}
+
+::view-transition-group(footer-clock) {
+  animation: none;
+  z-index: var(--z-index-max);
+}
+
+:root:active-view-transition .nav__container,
+:root:active-view-transition .footer-clock {
+  color: var(--color-ink);
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation-duration: 0s !important;
+    animation-delay: 0s !important;
+  }
+}

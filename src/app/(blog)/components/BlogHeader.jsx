@@ -1,4 +1,6 @@
-import TransitionLink from '@/app/ui/TransitionLink'
+import TransitionLink from '@/app/ui/transitions/TransitionLink'
+import Shared from '@/app/ui/transitions/Shared'
+import { OPEN_DETAIL } from '@/app/ui/transitions/types'
 import { ArrowLeft } from 'lucide-react'
 import { posts } from '../posts'
 import { absoluteUrl } from '@/lib/urls'
@@ -86,6 +88,7 @@ export default function BlogHeader({ slug, ...props }) {
     <header className="mb-10">
       <JsonLd data={articleLd} />
       <TransitionLink
+        back
         href="/blog"
         className="blog-header-back text-ink-secondary hover:text-ink text-ui-lg mb-6 inline-flex items-center gap-1.5 transition-colors"
       >
@@ -104,30 +107,34 @@ export default function BlogHeader({ slug, ...props }) {
       {/* One step below the index title (which is title-sm), so a
           post reads as sitting inside the section rather than beside it. */}
       <h1 className="text-ink text-heading mt-2">
-        {chars.map((ch, i) => {
-          if (ch === ' ') {
-            return <span key={i} className="blog-ch-space">{' '}</span>
-          }
-          const idx = ci++
-          const r = seeded(idx) * 16 - 8
-          const ox = seeded(idx + 30) * 100
-          const oy = seeded(idx + 60) > 0.5 ? 100 : 0
-          const delay = 0.15 + order[idx] * 0.04
-          return (
-            <span
-              key={i}
-              className="blog-ch"
-              style={{
-                '--ch-d': `${delay.toFixed(3)}s`,
-                '--ch-r': r.toFixed(1),
-                '--ch-ox': ox.toFixed(0),
-                '--ch-oy': oy,
-              }}
-            >
-              {ch}
-            </span>
-          )
-        })}
+        <Shared name={`post-title-${post?.slug ?? slug}`} morph="handoff" on={OPEN_DETAIL}>
+          <span className="inline-block">
+            {chars.map((ch, i) => {
+              if (ch === ' ') {
+                return <span key={i} className="blog-ch-space">{' '}</span>
+              }
+              const idx = ci++
+              const r = seeded(idx) * 16 - 8
+              const ox = seeded(idx + 30) * 100
+              const oy = seeded(idx + 60) > 0.5 ? 100 : 0
+              const delay = 0.15 + order[idx] * 0.04
+              return (
+                <span
+                  key={i}
+                  className="blog-ch"
+                  style={{
+                    '--ch-d': `${delay.toFixed(3)}s`,
+                    '--ch-r': r.toFixed(1),
+                    '--ch-ox': ox.toFixed(0),
+                    '--ch-oy': oy,
+                  }}
+                >
+                  {ch}
+                </span>
+              )
+            })}
+          </span>
+        </Shared>
       </h1>
       {tags && (
         <div className="blog-header-tags mt-4 flex gap-2">

@@ -1,4 +1,4 @@
-import Link from 'next/link'
+import TransitionLink from '@/app/ui/transitions/TransitionLink'
 import { notFound } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { listSlugs, readTierlist } from '../lib'
@@ -90,12 +90,13 @@ export default async function TierListSlugPage({ params }) {
       {/* Slim header bar. No morph target lives in here, so it gets the full
           rise rather than the geometry-safe fade the tier rows use. */}
       <div className="tl-rise flex shrink-0 items-center justify-between gap-3 px-4 py-3">
-        <Link
+        <TransitionLink
+          back
           href="/tierlist"
           className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-ui-lg transition-colors"
         >
           <ArrowLeft className="h-4 w-4" /> All lists
-        </Link>
+        </TransitionLink>
         <div className="min-w-0 px-2 text-center">
           <h1 className="text-heading truncate">
             {data.title}
@@ -107,12 +108,12 @@ export default async function TierListSlugPage({ params }) {
           ) : null}
         </div>
         {isDev ? (
-          <Link
+          <TransitionLink
             href={`/tierlist/${slug}/edit`}
             className="LinkMask text-ink-secondary hover:text-ink text-ui-lg font-medium transition-colors"
           >
             Edit →
-          </Link>
+          </TransitionLink>
         ) : (
           <span className="w-16" />
         )}

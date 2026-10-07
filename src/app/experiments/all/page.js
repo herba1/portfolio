@@ -1,5 +1,5 @@
 import GlitchText from "@/app/ui/GlitchText";
-import TransitionLink from "@/app/ui/TransitionLink";
+import TransitionLink from "@/app/ui/transitions/TransitionLink";
 import { LAB } from "@/app/lab/registry";
 import { EXPERIMENTS } from "../list";
 import { JsonLd, breadcrumbNode, graph, itemListNode, webPageNode } from "@/lib/jsonld";

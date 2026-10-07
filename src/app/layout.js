@@ -1,4 +1,4 @@
-import { ViewTransition } from "react";
+import { PageTransition } from "./ui/transitions";
 import { LenisProvider } from "@/context/LenisContext";
 import PostHogProvider from "@/context/PostHogProvider";
 import Navbar from "./ui/Navigation/Navbar";
@@ -175,9 +175,7 @@ export default function RootLayout({ children }) {
                 ctaVisible={false}
               />
               <MobileMenuShell>
-                <ViewTransition name="page-content">
-                  {children}
-                </ViewTransition>
+                <PageTransition>{children}</PageTransition>
               </MobileMenuShell>
               <ZenMode />
             </MobileMenuProvider>

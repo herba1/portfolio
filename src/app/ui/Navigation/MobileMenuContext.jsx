@@ -70,7 +70,7 @@ export function MobileMenuProvider({ children }) {
   // Close, then run `fn` once the card is genuinely back — used by the mobile
   // link list to navigate. It has to wait, because an open card is
   // `position: fixed` with `transform: translateY(57vh) scale(.96)` and
-  // `overflow: hidden`, and the page's <ViewTransition name="page-content">
+  // `overflow: hidden`, and the page's <PageTransition>
   // lives *inside* it. Navigating mid-close hands the browser an outgoing
   // snapshot that is scaled down, pushed off the bottom of the screen and
   // clipped to the card window, which it then cross-fades against a full-size

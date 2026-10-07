@@ -1,11 +1,16 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { usePathname } from "next/navigation";
+import Shared from "../transitions/Shared";
 import LinkMask from "../LinkMask";
 import MailIcon from "./MailIcon";
 import { LINKS } from "./LINKS";
 
+const isActive = (pathname, href) => pathname === href || pathname.startsWith(`${href}/`);
+
 export default function NavLinks({className=""}) {
+  const pathname = usePathname();
 
   const primaryLinks = LINKS.filter((l) => l.primary);
   const secondaryLinks = LINKS.filter((l) => !l.primary);
@@ -36,8 +41,16 @@ export default function NavLinks({className=""}) {
 
       <ul className="flex items-center">
         {primaryLinks.map((link) => (
-          <li key={link.name} className="ml-4 md:ml-6">
+          <li key={link.name} className="relative ml-4 md:ml-6">
             <LinkMask text={link.name} href={link.link} />
+            {isActive(pathname, link.link) && (
+              <Shared name="nav-active" arc={-0.12} className="morph-nav">
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute top-full left-1/2 mt-1 size-1 -translate-x-1/2 rounded-full bg-current"
+                />
+              </Shared>
+            )}
           </li>
         ))}
       </ul>

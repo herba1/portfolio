@@ -1,4 +1,4 @@
-import TransitionLink from '@/app/ui/TransitionLink'
+import TransitionLink from '@/app/ui/transitions/TransitionLink'
 import GlitchText from '@/app/ui/GlitchText'
 import ImageFan from '@/app/ui/ImageFan'
 import { listTierlists } from './lib'

@@ -76,3 +76,7 @@ Every page root sets `font-synthesis: none`, `-webkit-font-smoothing: antialiase
 # Lab — generated experiments
 
 `src/app/lab/<slug>/` holds agent-built candidates; each carries an `experiment.json` manifest (`status`: candidate → liked/rejected → shipped). `scripts/lab-registry.mjs` generates `src/app/lab/registry.js` from the manifests before dev, build and lint; the experiments index and dev links read from it, so never edit those files to register a lab piece. Judge candidates at `/taste` (localhost only); votes, notes, and pointed elements live in `taste/*.jsonl`. `npm run lab:run` builds a batch: supply → generate → gate → learn → cleanup. The build contract is `.claude/skills/lab-build/SKILL.md`; the learned taste is `.claude/skills/taste/SKILL.md`.
+
+# View transitions — use the kit
+
+Page enter/exit and cross-route persistent elements go through `src/app/ui/transitions` (`PageTransition`, `Shared`, `TransitionLink back`). Never put a fixed `view-transition-name` on a page wrapper, and never import `motion/react-animate-view` (it forces linear easing on every view transition site-wide). The contract is `.claude/skills/view-transitions/SKILL.md`.

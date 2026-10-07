@@ -21,7 +21,6 @@ const nextConfig = {
     ],
   },
   experimental: {
-    viewTransition: true,
     optimizePackageImports: ['lucide-react', 'motion', 'gsap'],
   },
   // Crawlers that get their <head> metadata blocking instead of streamed.

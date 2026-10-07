@@ -5,7 +5,8 @@
 // bubble above it that springs open from its tail (bottom-centre) and grows its
 // width to fit the text. Intro + exit handled by AnimatePresence.
 
-import { useState, useRef, useLayoutEffect, useEffect, ViewTransition } from 'react'
+import { useState, useRef, useLayoutEffect, useEffect } from 'react'
+import Shared from '@/app/ui/transitions/Shared'
 import { createPortal } from 'react-dom'
 import { motion, AnimatePresence, useReducedMotion } from 'motion/react'
 
@@ -152,30 +153,12 @@ export default function TierListView({ tiers, items, slug, coverIds }) {
                   </div>
                 )
 
-                // The first few items also appear as the fan thumbs on the
-                // index, so those two elements share a name and the browser
-                // morphs one into the other across the navigation.
-                //
-                // Only `share` is set — `enter`/`exit`/`update` are "none", so
-                // React hands the browser a view-transition-name *only* when
-                // both ends are present in the same navigation. Leaving the
-                // page for anywhere else, the tile stays inside the page
-                // snapshot and travels with it; an always-on name would lift it
-                // out and cross-fade it on its own default timing while the
-                // page slid away underneath. See ImageFan.jsx for the other end.
                 if (!isCover) return tile
 
                 return (
-                  <ViewTransition
-                    key={item.id}
-                    name={`tl-${slug}-${item.id}`}
-                    share="tl-share"
-                    enter="none"
-                    exit="none"
-                    update="none"
-                  >
+                  <Shared key={item.id} name={`tl-${slug}-${item.id}`} arc={0.12}>
                     {tile}
-                  </ViewTransition>
+                  </Shared>
                 )
               })}
             </ScrollRow>

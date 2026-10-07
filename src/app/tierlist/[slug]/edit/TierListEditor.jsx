@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import Link from 'next/link'
+import TransitionLink from '@/app/ui/transitions/TransitionLink'
+import { NAV_BACK } from '@/app/ui/transitions/types'
 import { useRouter } from 'next/navigation'
 import {
   Plus,
@@ -282,7 +283,7 @@ export default function TierListEditor({ slug }) {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ slug, delete: true }),
       })
-      router.push('/tierlist')
+      router.push('/tierlist', { transitionTypes: [NAV_BACK] })
     } catch {
       /* ignore */
     }
@@ -376,12 +377,13 @@ export default function TierListEditor({ slug }) {
       <main className="grid h-full w-full place-items-center">
         <div className="text-center">
           <p className="mb-4 text-ink-secondary">No tier list named “{slug}”.</p>
-          <Link
+          <TransitionLink
+            back
             href="/tierlist"
             className="LinkMask text-ink-secondary hover:text-ink inline-flex items-center gap-1.5 text-ui-lg font-medium transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> Back to lists
-          </Link>
+          </TransitionLink>
         </div>
       </main>
     )
@@ -398,12 +400,13 @@ export default function TierListEditor({ slug }) {
       {/* ── Toolbar ── */}
       <div className="flex shrink-0 items-center justify-between gap-3 border-b border-line px-3 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <Link
+          <TransitionLink
+            back
             href="/tierlist"
             className="LinkMask text-ink-secondary hover:text-ink inline-flex shrink-0 items-center gap-1.5 text-ui-lg transition-colors"
           >
             <ArrowLeft className="h-4 w-4" /> Lists
-          </Link>
+          </TransitionLink>
           <div className="flex min-w-0 flex-col">
             <input
               value={title}

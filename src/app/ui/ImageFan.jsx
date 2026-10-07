@@ -1,4 +1,4 @@
-import { ViewTransition } from 'react'
+import Shared from './transitions/Shared'
 
 // The little stack of thumbs on an index row that fans out like polaroids when
 // the row is hovered. Shared by Writing (a post's images) and Tier Lists (a
@@ -45,32 +45,12 @@ export default function ImageFan({ images, sharePrefix }) {
           </div>
         )
 
-        // Shared-element morph (tier list only): this thumb and the matching
-        // tile in the tier grid carry the same name, so the browser flies one
-        // into the other across the navigation.
-        //
-        // The name is handed to React rather than written as an inline
-        // `view-transition-name`, and that difference is the whole point.
-        // React only applies the name during a transition where BOTH ends are
-        // present — `share` names the paired case, and `enter`/`exit`/`update`
-        // are "none" so every other navigation leaves the element unnamed. An
-        // always-on inline name would lift these thumbs out of the page
-        // snapshot on *every* nav (index → home, or the other lists' thumbs on
-        // the way into one list) and cross-fade them on the browser's default
-        // timing, detached from the page sliding underneath them.
         if (!sharePrefix || !id) return thumb
 
         return (
-          <ViewTransition
-            key={id}
-            name={`${sharePrefix}${id}`}
-            share="tl-share"
-            enter="none"
-            exit="none"
-            update="none"
-          >
+          <Shared key={id} name={`${sharePrefix}${id}`} arc={0.12}>
             {thumb}
-          </ViewTransition>
+          </Shared>
         )
       })}
     </div>

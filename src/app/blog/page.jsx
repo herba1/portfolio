@@ -1,6 +1,8 @@
 import { posts } from '@/app/(blog)/posts'
 import GlitchText from '@/app/ui/GlitchText'
 import ImageFan from '@/app/ui/ImageFan'
+import Shared from '@/app/ui/transitions/Shared'
+import { OPEN_DETAIL } from '@/app/ui/transitions/types'
 import BlogPostLink from './BlogPostLink'
 import { absoluteUrl, pageMetadata } from '@/lib/seo'
 import { ID, JsonLd, breadcrumbNode, graph, personRef, webPageNode } from '@/lib/jsonld'
@@ -87,7 +89,9 @@ export default function BlogIndex() {
                         })}
                       </time>
                       <h2 className="text-ink text-heading mt-1 transition-colors group-hover:text-accent">
-                        {post.title}
+                        <Shared name={`post-title-${post.slug}`} morph="handoff" on={OPEN_DETAIL}>
+                          <span className="blog-title-morph inline-block">{post.title}</span>
+                        </Shared>
                       </h2>
                       <p className="text-ink-secondary text-body mt-2">
                         {post.description}

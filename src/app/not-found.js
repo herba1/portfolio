@@ -1,5 +1,5 @@
 import { spencer, geist } from '@/app/fonts'
-import TransitionLink from '@/app/ui/TransitionLink'
+import TransitionLink from '@/app/ui/transitions/TransitionLink'
 import { ArrowLeft } from 'lucide-react'
 
 function seeded(i) {
@@ -75,7 +75,7 @@ export default function NotFound() {
         {/* Same `.btn` as everywhere else — it IS the LinkButton secondary
             variant now, rather than a copy of it that has to be kept in sync. */}
         <div className="blog-header-tags">
-          <TransitionLink href="/" className="btn btn--lg btn--secondary">
+          <TransitionLink back href="/" className="btn btn--lg btn--secondary">
             <ArrowLeft size={14} />
             Back home
           </TransitionLink>
