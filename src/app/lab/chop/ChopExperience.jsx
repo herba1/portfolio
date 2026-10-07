@@ -23,7 +23,7 @@ const PAD_CODES = [
   "KeyZ", "KeyX", "KeyC", "KeyV",
 ];
 const PAD_LABELS = ["1", "2", "3", "4", "Q", "W", "E", "R", "A", "S", "D", "F", "Z", "X", "C", "V"];
-const CUES = ["Hold stutters", "Shift reverses", "Enter loops", "← → change cover"];
+const CUES = ["Hold repeats", "Shift reverses", "← → change cover"];
 const PAD_INDEXES = Array.from({ length: PADS }, (_, index) => index);
 const GAP = 4;
 const OUT_MS = 200;
@@ -101,24 +101,13 @@ function Switch({ label, on, onToggle }) {
   );
 }
 
-function PlayGlyph({ playing }) {
-  return (
-    <svg className="chop__glyph" data-playing={playing || undefined} viewBox="0 0 12 12" aria-hidden="true">
-      <path className="chop__glyph-play" d="M3.5 2.2 L9.6 6 L3.5 9.8 Z" />
-      <rect className="chop__glyph-stop" x="2.5" y="2.5" width="7" height="7" rx="1.6" />
-    </svg>
-  );
-}
-
 export default function ChopExperience({ covers = [], embedded = false }) {
   const deck = useMemo(() => buildDeck(covers), [covers]);
   const [index, setIndex] = useState(0);
   const [status, setStatus] = useState("loading");
   const [bpm, setBpm] = useState(0);
   const [mode, setMode] = useState("beats");
-  const [playing, setPlaying] = useState(false);
   const [gone, setGone] = useState([]);
-  const [moved, setMoved] = useState(0);
   const [stepMs, setStepMs] = useState(0);
   const [canSave, setCanSave] = useState(false);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
@@ -176,7 +165,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       onVoice: (voice) => visuals.add(voice),
       onRecord: (step, slice, from, at) => fly(step, slice, from, at),
       onTransport: (mode) => {
-        setPlaying(mode === "loop" || mode === "latch");
         if (mode === "loop") visuals.chunk();
         else if (mode === "stop") visuals.wave(CENTRE, reduced());
       },
@@ -209,12 +197,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       arts[step].style.setProperty("--chop-sx", slice % 4);
       arts[step].style.setProperty("--chop-sy", Math.floor(slice / 4));
       ticks[step]?.setAttribute("data-moved", "");
-    }
-
-    function syncMoved() {
-      let count = 0;
-      for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) count += 1;
-      setMoved(count);
     }
 
     function paintColour(palette) {
@@ -250,7 +232,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
 
     function fly(step, slice, from, at) {
       setSlice(step, slice);
-      syncMoved();
       if (reduced() || from === step) {
         if (!reduced()) land(step);
         return;
@@ -348,7 +329,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         resetSlices();
         visuals.chunk();
         setIndex(target);
-        setMoved(0);
         const furthest = ringsFrom(origin);
         swaps.forEach((swap) => {
           swap.dataset.phase = "in";
@@ -406,7 +386,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       const changed = [];
       for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) changed.push(step);
       engine.resetPattern();
-      setMoved(0);
       if (!changed.length) return;
       if (reduced()) {
         resetSlices();
@@ -547,14 +526,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         return;
       }
       if (typing || tag === "INPUT") return;
-      if (event.key === "Enter") {
-        if (tag === "BUTTON" || tag === "A") return;
-        event.preventDefault();
-        toggle();
-      } else if (event.key === "Backspace") {
-        event.preventDefault();
-        restore();
-      } else if (event.key === "ArrowRight") {
+      if (event.key === "ArrowRight") {
         event.preventDefault();
         select(current + 1, { col: 3.5, row: 1.5 }, 1);
       } else if (event.key === "ArrowLeft") {
@@ -660,11 +632,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     setSettings((previous) => ({ ...previous, [key]: !previous[key] }));
   }, []);
 
-  const onSwing = useCallback((event) => {
-    const swing = Number(event.target.value) / 100;
-    setSettings((previous) => ({ ...previous, swing }));
-  }, []);
-
   const cover = deck[index];
   const firstLevels = useMemo(() => artLevels(coverSource(deck[0])), [deck]);
   if (firstLevels[CHUNKY_LEVEL]) preload(firstLevels[CHUNKY_LEVEL], { as: "image", fetchPriority: "high" });
@@ -724,7 +691,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         <section className="chop__panel">
           <header className="chop__head">
             <h1 className="text-title-sm">Chop</h1>
-            <p className="chop__hint text-ui-lg text-ink-secondary">Tap a square and the song plays on from it. Tap others over it and the cover rearranges into your flip.</p>
+            <p className="chop__hint text-ui-lg text-ink-secondary">Every square holds one beat of the song. Tap them, play them, flip it.</p>
           </header>
 
           <div className="chop__song">
@@ -756,13 +723,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
                 <span className="chop__unit text-ui">ms</span>
               </span>
             </div>
-            <div className="chop__stat">
-              <span className="chop__label text-ui text-ink-secondary">Moved</span>
-              <span className="chop__value">
-                <SlotNumber value={moved} pad={2} className="text-title-sm" label={`${moved} of 16 squares moved`} />
-                <span className="chop__unit text-ui">of 16</span>
-              </span>
-            </div>
           </div>
 
           <div className="chop__keyboard" aria-hidden="true">
@@ -774,51 +734,17 @@ export default function ChopExperience({ covers = [], embedded = false }) {
               ))}
             </div>
             <p className="chop__legend font-mono text-ui-sm text-ink-secondary">
-              Hold stutters
+              Hold repeats
               <br />
               Shift reverses
-              <br />
-              Enter loops
               <br />
               ← → change cover
             </p>
           </div>
 
           <div className="chop__controls">
-            <div className="chop__transport">
-              <button
-                type="button"
-                className="chop__button chop__button--play text-ui"
-                disabled={!ready}
-                aria-pressed={playing}
-                onClick={() => controllerRef.current?.toggle()}
-              >
-                <PlayGlyph playing={playing} />
-                <MorphText text={playing ? "Stop" : "Loop"} />
-              </button>
-              <button type="button" className="chop__button text-ui" disabled={!moved} onClick={() => controllerRef.current?.restore()}>
-                Restore
-              </button>
-              <button type="button" className="chop__button text-ui" disabled={!moved || !canSave} onClick={() => controllerRef.current?.save()}>
-                Save PNG
-              </button>
-            </div>
             <div className="chop__settings">
-              <Switch label="Quantise" on={settings.quantise} onToggle={() => toggleSetting("quantise")} />
               <Switch label="Choke" on={settings.choke} onToggle={() => toggleSetting("choke")} />
-              <label className="chop__swing text-ui">
-                Swing
-                <input
-                  className="chop__range"
-                  type="range"
-                  min="0"
-                  max="60"
-                  step="1"
-                  value={Math.round(settings.swing * 100)}
-                  onChange={onSwing}
-                />
-                <span className="chop__percent">{Math.round(settings.swing * 100)}%</span>
-              </label>
             </div>
           </div>
         </section>

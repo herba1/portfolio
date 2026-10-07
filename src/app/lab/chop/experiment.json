@@ -1,6 +1,6 @@
 {
   "title": "Chop",
-  "description": "An album cover cut into sixteen pads, each holding one beat of its real preview. Tap a square and the song plays on from there; tap others over it and they splice in on the beat, flying into a scrambled cover you can save.",
+  "description": "An album cover cut into sixteen pads, each holding one beat of its real preview. Tap and play it like an MPC: hold a pad to repeat it, Shift to reverse it.",
   "tags": [
     "Web Audio",
     "Music",
@@ -12,7 +12,7 @@
   "parentSlug": null,
   "parents": null,
   "tasteVersion": 1,
-  "intent": "Turn a real album cover into a beat-sliced sampler where the artwork is the pad grid and the remix you play becomes a rearranged cover.",
+  "intent": "Turn a real album cover into a free-play beat sampler where the artwork is the pad grid.",
   "source": {
     "kind": "brief",
     "lens": "sound"

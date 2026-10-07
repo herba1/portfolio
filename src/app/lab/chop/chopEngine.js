@@ -17,7 +17,6 @@ const START_LEAD = 0.03;
 const SUSPEND_DELAY_MS = 60;
 const CURVE_POINTS = 33;
 const IDLE_STEPS = 4;
-const ORIGIN_SLACK = 0.25;
 
 function equalPower(rising) {
   const curve = new Float32Array(CURVE_POINTS);
@@ -339,23 +338,6 @@ export function createChopEngine({ onVoice, onRecord, onTransport }) {
     transport.idleAt = time + (IDLE_STEPS - 0.5) * track.stepSeconds;
   }
 
-  function startAuto(position, slice, reverse, when) {
-    const voice = playHit(position, slice, when, { reverse, open: !reverse });
-    const ideal = position * track.stepSeconds;
-    const offset = Math.min(ideal + ORIGIN_SLACK * track.stepSeconds, Math.max(ideal - ORIGIN_SLACK * track.stepSeconds, track.bounds[position] - track.bounds[0]));
-    transport.playing = true;
-    transport.auto = true;
-    transport.origin = when - offset;
-    transport.count = position + 1;
-    transport.nextTime = transport.origin + transport.count * track.stepSeconds;
-    transport.voice = reverse ? null : voice;
-    transport.claim = null;
-    transport.scheduled.clear();
-    transport.scheduled.set(position, voice.segments[0]);
-    idleFrom(when);
-    onTransport?.("auto");
-  }
-
   function endAuto(time) {
     transport.playing = false;
     transport.auto = false;
@@ -372,7 +354,7 @@ export function createChopEngine({ onVoice, onRecord, onTransport }) {
     const slice = pattern[position];
     const now = context.currentTime;
     if (!transport.playing) {
-      startAuto(position, slice, reverse, now);
+      playHit(position, slice, now, { reverse });
       if (held) arm(key, position, slice, reverse, now);
       syncTimer();
       return;
