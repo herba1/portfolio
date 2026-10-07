@@ -6,17 +6,19 @@
     "Shaders",
     "Print"
   ],
-  "status": "candidate",
+  "status": "rejected",
   "createdAt": "2026-10-07T19:44:11.214Z",
   "ideaId": null,
   "parentSlug": null,
-  "parents": null,
   "tasteVersion": 1,
   "intent": "One slit-scan photocopier finished to the edge: the light bar records your hand into the print row by row, the copy waits on the glass until your next touch lifts it into the tray, and copying the copy compounds the distortion.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
   "source": {
     "kind": "brief",
     "lens": "shader-material"
   },
-  "generation": null,
-  "building": false
+  "generation": null
 }

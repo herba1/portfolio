@@ -7,7 +7,6 @@ import MorphText from "@/app/ui/MorphText";
 import SlotNumber from "@/app/ui/SlotNumber";
 
 import { artLevels, coverSource, exportPattern, prepareArt } from "./chopArt";
-import { createChopDemo } from "./chopDemo";
 import { createChopEngine } from "./chopEngine";
 import { coverPalette } from "./chopPalette";
 import { PADS } from "./chopSlicer";
@@ -24,10 +23,8 @@ const PAD_CODES = [
   "KeyZ", "KeyX", "KeyC", "KeyV",
 ];
 const PAD_LABELS = ["1", "2", "3", "4", "Q", "W", "E", "R", "A", "S", "D", "F", "Z", "X", "C", "V"];
+const CUES = ["Hold repeats", "Shift reverses", "← → change cover"];
 const PAD_INDEXES = Array.from({ length: PADS }, (_, index) => index);
-const SHOVE_REACH = 2.3;
-const SHOVE_FORCE = 5;
-const SHOVE_MS = 110;
 const GAP = 4;
 const OUT_MS = 200;
 const IN_MS = 440;
@@ -78,16 +75,7 @@ const PadGrid = memo(function PadGrid({ gridRef, status, levels }) {
       aria-label="Sixteen pads cut from the cover. Keys 1 to 4, Q to R, A to F and Z to V play them."
     >
       {PAD_INDEXES.map((pad) => (
-        <div
-          key={pad}
-          className="chop__tile"
-          data-pad={pad}
-          style={{
-            "--chop-col": pad % 4,
-            "--chop-row": Math.floor(pad / 4),
-            "--chop-ring": Math.round(Math.hypot((pad % 4) - CENTRE.col, Math.floor(pad / 4) - CENTRE.row)),
-          }}
-        >
+        <div key={pad} className="chop__tile" data-pad={pad} style={{ "--chop-col": pad % 4, "--chop-row": Math.floor(pad / 4) }}>
           <div className="chop__swap">
             <div className="chop__art" data-res={CHUNKY_LEVEL} />
           </div>
@@ -95,7 +83,6 @@ const PadGrid = memo(function PadGrid({ gridRef, status, levels }) {
             <rect className="chop__halo" x="1" y="1" pathLength="1" />
             <rect className="chop__stroke" x="1" y="1" pathLength="1" />
           </svg>
-          <span className="chop__num font-mono text-ui-xs" aria-hidden="true" />
         </div>
       ))}
       <svg className="chop__sweep" aria-hidden="true">
@@ -123,7 +110,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
   const [gone, setGone] = useState([]);
   const [stepMs, setStepMs] = useState(0);
   const [canSave, setCanSave] = useState(false);
-  const [moved, setMoved] = useState(0);
   const [settings, setSettings] = useState(DEFAULT_SETTINGS);
   const rootRef = useRef(null);
   const gridRef = useRef(null);
@@ -143,7 +129,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     const motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     const reduced = () => motionQuery.matches;
     const timers = new Set();
-    const shoves = new Map();
     const artCache = new Map();
     const pointers = new Map();
     const downCount = new Uint8Array(PADS);
@@ -157,8 +142,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     let gridRect = null;
     let hoverPad = -1;
     let disposed = false;
-    let touched = false;
-    let demoStep = 0.4;
 
     const wait = (ms) =>
       new Promise((resolve) => {
@@ -180,71 +163,13 @@ export default function ChopExperience({ covers = [], embedded = false }) {
 
     const engine = createChopEngine({
       onVoice: (voice) => visuals.add(voice),
-      onRecord: (step, slice, from, at) => {
-        fly(step, slice, from, at);
-        countMoved();
-      },
+      onRecord: (step, slice, from, at) => fly(step, slice, from, at),
       onTransport: (mode) => {
         if (mode === "loop") visuals.chunk();
         else if (mode === "stop") visuals.wave(CENTRE, reduced());
       },
     });
     const visuals = createChopVisuals({ tiles, arts, rings, keys, ticks, clock: () => engine.clock(), running: () => engine.live });
-    const demo = createChopDemo({
-      tiles,
-      arts,
-      rings,
-      keys,
-      ticks,
-      stepSeconds: () => demoStep,
-      onMove: (step, slice, from) => {
-        engine.pattern[step] = slice;
-        fly(step, slice, from, engine.clock());
-        countMoved();
-      },
-    });
-
-    function countMoved() {
-      let total = 0;
-      for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) total += 1;
-      setMoved(total);
-    }
-
-    function endDemo(origin) {
-      touched = true;
-      if (!demo.live) return;
-      demo.stop();
-      visuals.invalidate();
-      visuals.chunk();
-      visuals.wave(origin ?? CENTRE, reduced());
-    }
-
-    function shove(pad) {
-      const col = pad % 4;
-      const row = Math.floor(pad / 4);
-      tiles.forEach((tile, other) => {
-        if (other === pad) return;
-        const dx = (other % 4) - col;
-        const dy = Math.floor(other / 4) - row;
-        const distance = Math.hypot(dx, dy);
-        if (distance > SHOVE_REACH) return;
-        const force = SHOVE_FORCE / (distance * distance + 0.6);
-        tile.style.setProperty("--chop-px", `${((dx / distance) * force).toFixed(2)}px`);
-        tile.style.setProperty("--chop-py", `${((dy / distance) * force).toFixed(2)}px`);
-        tile.setAttribute("data-shove", "");
-        const pending = shoves.get(other);
-        if (pending) clearTimeout(pending);
-        shoves.set(
-          other,
-          setTimeout(() => {
-            shoves.delete(other);
-            tile.removeAttribute("data-shove");
-            tile.style.removeProperty("--chop-px");
-            tile.style.removeProperty("--chop-py");
-          }, SHOVE_MS),
-        );
-      });
-    }
 
     function ringsFrom(origin) {
       let furthest = 0;
@@ -266,14 +191,11 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       if (slice === step) {
         arts[step].style.removeProperty("--chop-sx");
         arts[step].style.removeProperty("--chop-sy");
-        tiles[step].removeAttribute("data-moved");
         ticks[step]?.removeAttribute("data-moved");
         return;
       }
       arts[step].style.setProperty("--chop-sx", slice % 4);
       arts[step].style.setProperty("--chop-sy", Math.floor(slice / 4));
-      tiles[step].style.setProperty("--chop-slice", slice + 1);
-      tiles[step].setAttribute("data-moved", "");
       ticks[step]?.setAttribute("data-moved", "");
     }
 
@@ -379,11 +301,8 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       const mine = token;
       const stale = () => mine !== token || disposed;
       const cover = deck[target];
-      demo.stop();
-      visuals.invalidate();
       engine.setTrack(null);
       visuals.clear();
-      countMoved();
       prefetchTrack(cover);
       const artPending = getArt(cover);
       let settle = null;
@@ -434,14 +353,7 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         setStepMs(Math.round(track.stepSeconds * 1000));
         setMode(track.mode);
       }
-      if (track && !touched && !reduced()) {
-        demoStep = track.stepSeconds;
-        visuals.chunk();
-        visuals.invalidate();
-        demo.start();
-      } else {
-        visuals.wave(first ? CENTRE : origin, reduced());
-      }
+      visuals.wave(first ? CENTRE : origin, reduced());
       const after = playable(target + 1, 1);
       if (after < 0 || after === target) return;
       const neighbour = deck[after];
@@ -471,21 +383,26 @@ export default function ChopExperience({ covers = [], embedded = false }) {
     }
 
     function restore() {
-      endDemo();
       const changed = [];
-      const home = new Int8Array(PADS).fill(-1);
-      for (let step = 0; step < PADS; step += 1) {
-        if (engine.pattern[step] !== step) changed.push(step);
-        home[engine.pattern[step]] = step;
-      }
+      for (let step = 0; step < PADS; step += 1) if (engine.pattern[step] !== step) changed.push(step);
       engine.resetPattern();
-      countMoved();
       if (!changed.length) return;
       if (reduced()) {
         resetSlices();
         return;
       }
-      changed.forEach((step) => fly(step, step, home[step] < 0 ? step : home[step], engine.clock()));
+      ringsFrom(CENTRE);
+      changed.forEach((step) => {
+        swaps[step].dataset.phase = "out";
+      });
+      const mine = token;
+      wait(OUT_MS + 3 * RING_MS).then(() => {
+        if (mine !== token || disposed) return;
+        changed.forEach((step) => {
+          setSlice(step, engine.pattern[step]);
+          swaps[step].dataset.phase = "in";
+        });
+      });
     }
 
     function save() {
@@ -529,7 +446,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       downCount[pad] += 1;
       tile.setAttribute("data-down", "");
       keys[pad]?.setAttribute("data-down", "");
-      if (!reduced()) shove(pad);
       engine.press(key, pad, reverse);
     }
 
@@ -564,7 +480,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       gridRect = grid.getBoundingClientRect();
       const hit = padAt(event.clientX, event.clientY);
       pointers.set(event.pointerId, hit ? hit.pad : -1);
-      endDemo(hit ? { col: hit.pad % 4, row: Math.floor(hit.pad / 4) } : CENTRE);
       if (hit) pressPad(`p${event.pointerId}`, hit.pad, event.shiftKey, hit.x, hit.y);
       else engine.ensure();
     }
@@ -607,7 +522,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
         if (typing) return;
         event.preventDefault();
         if (event.repeat) return;
-        endDemo({ col: pad % 4, row: Math.floor(pad / 4) });
         pressPad(`k${event.code}`, pad, event.shiftKey);
         return;
       }
@@ -628,7 +542,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
 
     function onVisibility() {
       if (!document.hidden) return;
-      endDemo();
       releaseEverything();
       engine.suspend();
       visuals.clear();
@@ -650,7 +563,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
 
     const visibilityObserver = new IntersectionObserver(([entry]) => {
       if (entry && !entry.isIntersecting) {
-        endDemo();
         releaseEverything();
         engine.stop();
       }
@@ -689,9 +601,6 @@ export default function ChopExperience({ covers = [], embedded = false }) {
       controllerRef.current = null;
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
-      shoves.forEach((id) => clearTimeout(id));
-      shoves.clear();
-      demo.destroy();
       resizeObserver.disconnect();
       visibilityObserver.disconnect();
       grid.removeEventListener("pointerdown", onPointerDown);

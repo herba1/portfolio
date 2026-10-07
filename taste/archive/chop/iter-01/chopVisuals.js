@@ -145,17 +145,11 @@ export function createChopVisuals({ tiles, arts, rings, keys, ticks, clock, runn
     for (let index = 0; index < count; index += 1) if (active[index]) finish(index);
   }
 
-  function invalidate() {
-    shown.fill(-1);
-    ringShown.fill(-1);
-    fillShown.fill(-1);
-  }
-
   function destroy() {
     alive = false;
     if (frame) cancelAnimationFrame(frame);
     frame = 0;
   }
 
-  return { add, chunk, wave, clear, invalidate, destroy, kick };
+  return { add, chunk, wave, clear, destroy, kick };
 }
