@@ -11,7 +11,7 @@ const CHIP_WINDOW_MS = 2200;
 
 const VERDICTS = [
   { key: "dislike", label: "Scrap", hotkey: "X", tone: "dislike", past: "Scrapped" },
-  { key: "iterate", label: "Iterate", hotkey: "R", tone: "continue", past: "Rebuilding" },
+  { key: "iterate", label: "Iterate", hotkey: "R", tone: "continue", past: "Copied" },
   { key: "like", label: "Keep", hotkey: "L", tone: "like", past: "Kept" },
   { key: "skip", label: "Skip", hotkey: "S", tone: "skip", past: "Skipped" },
 ];
@@ -23,9 +23,39 @@ async function api(path, init) {
   return data;
 }
 
-const fmtTokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(n >= 100000 ? 0 : 1)}k` : String(n || 0));
-const fmtClock = (ms) => `${Math.floor(ms / 60000)}:${String(Math.floor((ms % 60000) / 1000)).padStart(2, "0")}`;
-const fmtTime = (iso) => new Date(iso).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+const labRules = (slug) =>
+  `Edit only inside src/app/lab/${slug}/, follow .claude/skills/lab-build/SKILL.md and .claude/skills/taste/SKILL.md, keep its experiment.json status as is, and run node scripts/lab-gate.mjs ${slug} until it prints PASS.`;
+
+function iteratePrompt(item, reasons, feedback, notes) {
+  const lines = [`Iterate on the lab experiment "${item.title}" at src/app/lab/${item.slug}/ (route /lab/${item.slug}).`, ""];
+  if (reasons.length) lines.push(`What's off: ${reasons.join(", ")}.`, "");
+  const pins = feedback.filter((f) => f.kind === "point");
+  if (pins.length) {
+    lines.push("Pinned elements:");
+    pins
+      .slice()
+      .reverse()
+      .forEach((f, i) => {
+        const where = f.point?.selector ? ` (selector: ${f.point.selector})` : "";
+        lines.push(`${i + 1}. ${f.verdict === "love" ? "Love" : "Hate"} · ${summarise(f.point)}${where}${f.note ? ` — "${f.note}"` : ""}`);
+      });
+    lines.push("");
+  }
+  if (notes.length) {
+    lines.push("Notes:");
+    notes
+      .slice()
+      .reverse()
+      .forEach((note) => lines.push(`- ${note.text}`));
+    lines.push("");
+  }
+  if (!reasons.length && !pins.length && !notes.length) lines.push("No specific feedback yet: improve its weakest part.", "");
+  lines.push(labRules(item.slug));
+  return lines.join("\n");
+}
+
+const ideaPrompt = (idea) =>
+  `Build a new lab experiment for herb.art: ${idea}\n\nUse the lab-build contract (.claude/skills/lab-build/SKILL.md) and the taste skill (.claude/skills/taste/SKILL.md). Create it under src/app/lab/<slug>/ with an experiment.json of status "candidate", and run node scripts/lab-gate.mjs <slug> until it prints PASS.`;
 
 function Kbd({ children }) {
   return <span className="taste-kbd">{children}</span>;
@@ -55,12 +85,10 @@ export default function TasteDeck({ tasteVersion }) {
   const [notes, setNotes] = useState([]);
   const [feedback, setFeedback] = useState([]);
   const [draft, setDraft] = useState("");
-  const [asking, setAsking] = useState(false);
   const [lastAction, setLastAction] = useState(null);
   const [error, setError] = useState(null);
-  const [build, setBuild] = useState({ running: false, tail: [], live: null, queue: [], recent: [] });
+  const [handoff, setHandoff] = useState(null);
   const [ideaDraft, setIdeaDraft] = useState("");
-  const [clock, setClock] = useState(0);
 
   const stageRef = useRef(null);
   const frameRef = useRef(null);
@@ -119,40 +147,6 @@ export default function TasteDeck({ tasteVersion }) {
   }, []);
 
   useEffect(() => {
-    const id = window.setInterval(() => setClock(Date.now()), 1000);
-    const first = window.setTimeout(() => setClock(Date.now()), 0);
-    return () => {
-      window.clearInterval(id);
-      window.clearTimeout(first);
-    };
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    let wasRunning = false;
-    let lastLabel = null;
-    const poll = () =>
-      api("/api/taste/run")
-        .then((data) => {
-          if (!alive) return;
-          setBuild(data);
-          if (wasRunning && !data.running) {
-            setLastAction(`Finished ${lastLabel || "build"} — added to your queue, use → to reach it`);
-            reloadQueue();
-          }
-          wasRunning = data.running;
-          if (data.running) lastLabel = data.live?.label;
-        })
-        .catch(() => {});
-    poll();
-    const id = window.setInterval(poll, 5000);
-    return () => {
-      alive = false;
-      window.clearInterval(id);
-    };
-  }, [reloadQueue]);
-
-  useEffect(() => {
     if (!stageRef.current) return undefined;
     const observer = new ResizeObserver(([entry]) => {
       setStage({ width: entry.contentRect.width, height: entry.contentRect.height });
@@ -192,13 +186,13 @@ export default function TasteDeck({ tasteVersion }) {
     if (win) win.postMessage(message, window.location.origin);
   }, []);
 
-  const startBuild = useCallback(async (body, label) => {
+  const handOff = useCallback(async (label, text) => {
+    setHandoff({ label, text });
     try {
-      const data = await api("/api/taste/run", { method: "POST", body: JSON.stringify(body) });
-      setBuild(data);
-      setLastAction(data.queued ? `${label} — queued behind ${data.live?.label}` : `${label} — running, about 4 min`);
-    } catch (err) {
-      setError(err.message);
+      await navigator.clipboard.writeText(text);
+      setLastAction(`Copied ${label} — paste it to Claude`);
+    } catch {
+      setLastAction(`Couldn't reach the clipboard — use Copy on ${label}`);
     }
   }, []);
 
@@ -229,8 +223,7 @@ export default function TasteDeck({ tasteVersion }) {
         advance(at + 1);
         const past = VERDICTS.find((v) => v.key === verdict)?.past || verdict;
         if (verdict === "iterate") {
-          const pins = feedback.filter((f) => f.kind === "point").length;
-          await startBuild({ mode: "iterate", slug: item.slug }, `Rebuilding ${item.title} from ${pins} pin${pins === 1 ? "" : "s"} and ${notes.length} note${notes.length === 1 ? "" : "s"}`);
+          await handOff(`the ${item.title} iterate prompt`, iteratePrompt(item, reasons, feedback, notes));
         } else {
           setLastAction(`${past} ${item.title}${reasons.length ? " · " + reasons.join(", ") : ""}`);
         }
@@ -238,7 +231,7 @@ export default function TasteDeck({ tasteVersion }) {
         setError(err.message);
       }
     },
-    [current, index, viewport, tasteVersion, advance, startBuild, feedback, notes],
+    [current, index, viewport, tasteVersion, advance, handOff, feedback, notes],
   );
 
   const arm = useCallback(
@@ -334,32 +327,18 @@ export default function TasteDeck({ tasteVersion }) {
     [picked, current, viewport, tasteVersion, feedback, postToFrame],
   );
 
-  const submitNote = useCallback(
-    async (ask) => {
-      const text = draft.trim();
-      if (!text) return;
-      setDraft("");
-      const body = JSON.stringify({ text, slug: current?.slug || null, tasteVersion });
-      try {
-        if (ask) {
-          setAsking(true);
-          setLastAction("Asking the agent…");
-          const data = await api("/api/taste/chat", { method: "POST", body });
-          setNotes((n) => [data.note, ...n]);
-          setLastAction(data.note.distilled ? `Agent replied and kept a rule: ${data.note.distilled}` : "Agent replied");
-        } else {
-          const data = await api("/api/taste/note", { method: "POST", body });
-          setNotes((n) => [data.note, ...n]);
-          setLastAction("Note saved");
-        }
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setAsking(false);
-      }
-    },
-    [draft, current, tasteVersion],
-  );
+  const submitNote = useCallback(async () => {
+    const text = draft.trim();
+    if (!text) return;
+    setDraft("");
+    try {
+      const data = await api("/api/taste/note", { method: "POST", body: JSON.stringify({ text, slug: current?.slug || null, tasteVersion }) });
+      setNotes((n) => [data.note, ...n]);
+      setLastAction("Note saved — it goes into the next iterate prompt");
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [draft, current, tasteVersion]);
 
   const handleKey = useCallback(
     (key, { shiftKey = false, preventDefault = () => {} } = {}) => {
@@ -432,17 +411,10 @@ export default function TasteDeck({ tasteVersion }) {
 
   const activeReasons = picked ? picked.reasons : pending ? pending.reasons : preReasons;
   const pins = feedback.filter((f) => f.kind === "point");
-  const elapsed = build.running && build.live?.startedAt && clock ? fmtClock(Math.max(0, clock - new Date(build.live.startedAt).getTime())) : "0:00";
   const lineage = current?.lineage || [];
   const finished = queue && !current;
 
-  const nowHeading = current
-    ? `${index + 1} of ${items.length} · ${current.title}`
-    : build.running
-      ? `Waiting for ${build.live?.label} · ${elapsed}`
-      : queue
-        ? "Nothing to judge"
-        : "Loading…";
+  const nowHeading = current ? `${index + 1} of ${items.length} · ${current.title}` : queue ? "Nothing to judge" : "Loading…";
 
   return (
     <div className="taste bg-surface min-h-dvh">
@@ -488,7 +460,7 @@ export default function TasteDeck({ tasteVersion }) {
                 <div className="text-ink text-title-sm flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <span>{nowHeading}</span>
                   <span className="text-ink-secondary text-body">
-                    {build.running ? "It lands here when done." : finished ? "Build something below." : ""}
+                    {finished ? "Copy an idea prompt below and paste it to Claude." : ""}
                   </span>
                 </div>
               )}
@@ -528,13 +500,6 @@ export default function TasteDeck({ tasteVersion }) {
               ) : null}
               {current?.changelog?.length ? (
                 <p className="text-ink text-ui-lg">Last rebuild: {current.changelog[current.changelog.length - 1].summary.split("\n").find((l) => /^\s*1\./.test(l)) || current.changelog[current.changelog.length - 1].summary.split("\n")[0]}</p>
-              ) : null}
-              {build.running ? (
-                <p className="text-accent-ink text-ui-lg tabular-nums">
-                  Running {build.live?.label} · {elapsed}
-                  {build.building?.length ? ` · now on ${build.building.map((b) => b.title).join(", ")}` : ""}
-                  {build.queue?.length ? ` · then ${build.queue.join(", ")}` : ""}
-                </p>
               ) : null}
               {lastAction ? <p className="text-ink text-ui-lg">Last: {lastAction}</p> : null}
             </div>
@@ -598,13 +563,13 @@ export default function TasteDeck({ tasteVersion }) {
               <textarea
                 ref={noteRef}
                 className="taste-textarea"
-                placeholder="Note · Enter saves · ⌘Enter asks the agent"
+                placeholder="Note · Enter saves it for the next iterate prompt"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
-                    submitNote(e.metaKey || e.ctrlKey);
+                    submitNote();
                   }
                 }}
               />
@@ -628,38 +593,40 @@ export default function TasteDeck({ tasteVersion }) {
               ) : null}
             </div>
 
-            <div className="flex flex-col gap-2">
-              <div className="flex gap-2">
-                <button type="button" className="taste-verdict" disabled={build.running} onClick={() => startBuild({ mode: "batch", count: 3 }, "Building 3 new candidates")}>
-                  Build 3 new
-                </button>
-                <input
-                  className="taste-textarea flex-1"
-                  style={{ minHeight: 36 }}
-                  placeholder="One idea · Enter builds it"
-                  value={ideaDraft}
-                  onChange={(e) => setIdeaDraft(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && ideaDraft.trim().length >= 8) {
-                      e.preventDefault();
-                      startBuild({ mode: "idea", idea: ideaDraft.trim() }, `Building “${ideaDraft.trim().slice(0, 40)}”`);
-                      setIdeaDraft("");
-                      e.target.blur();
-                    }
-                  }}
-                />
+            {handoff ? (
+              <div className="card flex flex-col gap-2 p-4">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-ink text-heading-sm">Paste to Claude</h3>
+                  <button type="button" className="taste-chip" onClick={() => handOff(handoff.label, handoff.text)}>
+                    Copy
+                  </button>
+                </div>
+                <pre className="taste-pre text-ink-secondary max-h-48 overflow-auto whitespace-pre-wrap">{handoff.text}</pre>
               </div>
-              {build.running && !current ? <pre className="taste-pre text-ink-secondary max-h-32 overflow-auto">{build.tail.slice(-6).join("\n")}</pre> : null}
-              <ul className="flex flex-col">
-                {(build.recent || []).map((e) => (
-                  <li key={`${e.at}-${e.text}`} className="text-ink-secondary text-ui-lg flex gap-2 tabular-nums">
-                    <span>{fmtTime(e.at)}</span>
-                    <span className="text-ink">{e.text}</span>
-                  </li>
-                ))}
-              </ul>
-              <p className="text-ink-secondary text-ui tabular-nums">
-                Today {build.usage?.runs || 0} runs · {build.usage?.minutes || 0} min · {fmtTokens((build.usage?.input || 0) + (build.usage?.output || 0))} tokens · Max plan · taste v{tasteVersion} ·{" "}
+            ) : null}
+
+            <div className="flex flex-col gap-2">
+              <input
+                className="taste-textarea"
+                style={{ minHeight: 36 }}
+                placeholder="One idea · Enter copies a build prompt"
+                value={ideaDraft}
+                onChange={(e) => setIdeaDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && ideaDraft.trim().length >= 8) {
+                    e.preventDefault();
+                    handOff(`the “${ideaDraft.trim().slice(0, 40)}” build prompt`, ideaPrompt(ideaDraft.trim()));
+                    setIdeaDraft("");
+                    e.target.blur();
+                  }
+                }}
+              />
+              <p className="text-ink-secondary text-ui">
+                taste v{tasteVersion} ·{" "}
+                <button type="button" className="text-ink hover:text-accent" onClick={reloadQueue}>
+                  reload
+                </button>{" "}
+                ·{" "}
                 <Link href="/taste/profile" className="text-ink hover:text-accent">
                   profile
                 </Link>
