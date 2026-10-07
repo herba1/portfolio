@@ -2,7 +2,7 @@ import createResolutionGovernor from "@/app/experiments/resolutionGovernor";
 
 import { MAX_GLYPHS, MAX_GRABS, MAX_SEGMENTS, TAFFY_BASE } from "./taffyParams";
 import { layoutWord, rasterWord, sampleField } from "./taffyLayout";
-import { createFieldBuilder } from "./taffySdf";
+import { BUILDER_DISPOSED, createFieldBuilder } from "./taffySdf";
 import { TAFFY_FRAGMENT, TAFFY_VERTEX } from "./taffyShader";
 
 const FIELD_BIAS = 0.4;
@@ -18,7 +18,7 @@ const SQUASH_LIMIT = 1.3;
 const TAP_SLOP_PX = 6;
 const KEY_STEP_PX = 24;
 const HOVER_LIFT_PX = 2;
-const INTRO_DELAY_MS = 420;
+const INTRO_DELAY_MS = 120;
 const INTRO_MS = 900;
 const INTRO_SETTLE_MS = 280;
 const MORPH_MS = 800;
@@ -47,6 +47,18 @@ const WHIP_SPEED_LIMIT = 2400;
 const PUDDLE_WIDTH = 0.95;
 const PUDDLE_HEIGHT = 0.24;
 const PUDDLE_SHRINK = 0.6;
+const GRAB_FIELD_EM = 0.16;
+const GRAB_FIELD_TOUCH_EM = 0.2;
+const GRAB_BOX_EM = 0.08;
+const PAPER_CLEAR_EM = 0.3;
+const HAND_LAG = 0.28;
+const LAG_RELAX = 0.6;
+const LAG_ITERATIONS = 3;
+const LURCH_STIFFNESS = 700;
+const LURCH_DAMPING = 34;
+const FREE_HOLD_MS = 110;
+const SNAP_GAP_MS = 90;
+const TENSION_STRETCH = 0.07;
 
 function cubicBezier(x1, y1, x2, y2) {
   const cx = 3 * x1;
@@ -238,6 +250,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
   let wanted = null;
   let queued = null;
   let readyFired = false;
+  let queuedTimer = 0;
   let segmentCount = 0;
 
   const uploadField = (word) => {
@@ -259,7 +272,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
 
   const makeGlyphs = (count) =>
     Array.from({ length: count }, () => ({
-      x: 0, y: 0, vx: 0, vy: 0, leanX: 0, leanY: 0, lift: 0, held: false, stretch: 1, ux: 1, uy: 0, grabVX: 0, grabVY: 0,
+      x: 0, y: 0, vx: 0, vy: 0, leanX: 0, leanY: 0, lift: 0, held: false, stretch: 1, ux: 1, uy: 0, grabVX: 0, grabVY: 0, tension: 0,
     }));
 
   const writeStatic = (target, tiles, places) => {
@@ -497,6 +510,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
   const snapStrand = (grab, strand, now) => {
     strand.state = "snapped";
     strand.snapAt = now;
+    grab.nextSnapAt = now + SNAP_GAP_MS;
     const chordX = (strand.ax + strand.bx) / 2;
     const chordY = (strand.ay + strand.by) / 2;
     const ctrlX = 2 * strand.mx - chordX;
@@ -512,7 +526,15 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
     const impulse = SNAP_IMPULSE_CAPS * current.layout.capH * (reduced ? 0.35 : 1);
     if (strand.bodyA >= 0) shudder(strand.bodyA, -strand.dirX, -strand.dirY, impulse);
     if (grab.kind !== "intro") buzz();
-    if (grab.strands.every((s) => s.state !== "intact")) slip(grab);
+    const severed = grab.strands.every((s) => s.state !== "intact");
+    if (grab.kind === "pointer") {
+      grab.lurching = true;
+      grab.lurchVX = grab.holdVX;
+      grab.lurchVY = grab.holdVY;
+      if (severed) grab.freeAt = now;
+    } else if (severed) {
+      slip(grab);
+    }
   };
 
   const removeGrabOn = (g) => {
@@ -541,6 +563,15 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       lastX: pointerX,
       lastY: pointerY,
       lastT: now,
+      lag: 1,
+      share: 0,
+      lurching: false,
+      lurchVX: 0,
+      lurchVY: 0,
+      holdVX: 0,
+      holdVY: 0,
+      freeAt: 0,
+      nextSnapAt: 0,
       strands: [makeStrand(g, -1), makeStrand(g, 1)],
     };
     grabs.push(grab);
@@ -594,21 +625,95 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
     summarise();
   };
 
-  const hitTest = (px, py, coarse) => {
+  const hitTest = (px, py, touch) => {
     if (!current) return -1;
     const { word, layout } = current;
+    const reach = layout.F * (touch ? GRAB_FIELD_TOUCH_EM : GRAB_FIELD_EM);
+    const inflate = layout.F * GRAB_BOX_EM;
     let best = -1;
-    let bestDistance = coarse ? Math.max(10, layout.F * 0.07) : Math.max(4, layout.F * 0.03);
-    word.glyphs.forEach((glyph, i) => {
+    let bestDistance = Infinity;
+    for (let i = 0; i < word.glyphs.length; i += 1) {
       const place = layout.placed[i];
       const state = glyphs[i];
-      const d = sampleField(word, glyph, layout.a, px - place.penX - state.x, py - place.penY - state.y - state.lift);
-      if (d < bestDistance) {
+      const offsetX = state.x;
+      const offsetY = state.y + state.lift;
+      const d = sampleField(word, word.glyphs[i], layout.a, px - place.penX - offsetX, py - place.penY - offsetY);
+      const inBox =
+        px >= place.left + offsetX - inflate &&
+        px <= place.right + offsetX + inflate &&
+        py >= place.top + offsetY - inflate &&
+        py <= place.bottom + offsetY + inflate;
+      if ((d < reach || inBox) && d < bestDistance) {
         bestDistance = d;
         best = i;
       }
-    });
+    }
     return best;
+  };
+
+  const nearWord = (px, py) => {
+    if (!current) return false;
+    const { layout } = current;
+    const margin = layout.F * PAPER_CLEAR_EM;
+    for (const box of layout.rowBoxes) {
+      if (px >= box.left - margin && px <= box.right + margin && py >= box.top - margin && py <= box.bottom + margin) return true;
+    }
+    return false;
+  };
+
+  const tensionShare = (grab) => {
+    let sum = 0;
+    for (const strand of grab.strands) {
+      if (strand.state !== "intact") continue;
+      measureStrand(strand);
+      const s = Math.min(1, strand.stretch);
+      sum += s * s;
+    }
+    return sum / grab.strands.length;
+  };
+
+  const holdInHand = (grab, glyph, dt) => {
+    const reachX = grab.targetX - grab.startX;
+    const reachY = grab.targetY - grab.startY;
+    if (grab.lurching) {
+      grab.share = tensionShare(grab);
+      grab.lag = 1 - HAND_LAG * grab.share;
+      const goalX = grab.startX + reachX * grab.lag;
+      const goalY = grab.startY + reachY * grab.lag;
+      const damping = reduced ? 2 * Math.sqrt(LURCH_STIFFNESS) : LURCH_DAMPING;
+      const steps = Math.max(1, Math.ceil(dt / PHYSICS_STEP));
+      const h = dt / steps;
+      for (let i = 0; i < steps; i += 1) {
+        grab.lurchVX += (LURCH_STIFFNESS * (goalX - glyph.x) - damping * grab.lurchVX) * h;
+        grab.lurchVY += (LURCH_STIFFNESS * (goalY - glyph.y) - damping * grab.lurchVY) * h;
+        glyph.x += grab.lurchVX * h;
+        glyph.y += grab.lurchVY * h;
+      }
+      grab.holdVX = grab.lurchVX;
+      grab.holdVY = grab.lurchVY;
+      const offset = Math.abs(goalX - glyph.x) + Math.abs(goalY - glyph.y);
+      const speed = Math.abs(grab.lurchVX) + Math.abs(grab.lurchVY);
+      if (offset < 0.5 && speed < 20) {
+        grab.lurching = false;
+        glyph.x = goalX;
+        glyph.y = goalY;
+      }
+      return;
+    }
+    let factor = grab.lag;
+    let share = grab.share;
+    for (let i = 0; i < LAG_ITERATIONS; i += 1) {
+      glyph.x = grab.startX + reachX * factor;
+      glyph.y = grab.startY + reachY * factor;
+      share = tensionShare(grab);
+      factor += (1 - HAND_LAG * share - factor) * LAG_RELAX;
+    }
+    glyph.x = grab.startX + reachX * factor;
+    glyph.y = grab.startY + reachY * factor;
+    grab.lag = factor;
+    grab.share = share;
+    grab.holdVX = grab.vx * factor;
+    grab.holdVY = grab.vy * factor;
   };
 
   const stepSpring = (glyph, dt) => {
@@ -736,7 +841,11 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
     if (queued) {
       const text = queued;
       queued = null;
-      window.setTimeout(() => show(text), 0);
+      if (queuedTimer) window.clearTimeout(queuedTimer);
+      queuedTimer = window.setTimeout(() => {
+        queuedTimer = 0;
+        if (!disposed) show(text);
+      }, 0);
     }
     if (!reduced && current) {
       const kick = SETTLE_IMPULSE_CAPS * current.layout.capH;
@@ -776,12 +885,16 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       const beforeX = glyph.x;
       const beforeY = glyph.y;
       if (grab.kind === "pointer") {
-        glyph.x = grab.targetX;
-        glyph.y = grab.targetY;
         if (now - grab.lastT > 48) {
           const decay = Math.exp((-dt * 1000) / 60);
           grab.vx *= decay;
           grab.vy *= decay;
+        }
+        holdInHand(grab, glyph, dt);
+        if (grab.freeAt && now - grab.freeAt >= FREE_HOLD_MS) {
+          slip(grab);
+          active = true;
+          continue;
         }
       } else {
         const follow = grab.kind === "intro" ? 1 : 1 - Math.exp(-dt * 22);
@@ -798,7 +911,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       for (const strand of grab.strands) {
         if (strand.state !== "intact") continue;
         measureStrand(strand);
-        if (!grab.released && strand.stretch >= 1) snapStrand(grab, strand, now);
+        if (!grab.released && strand.stretch >= 1 && now >= grab.nextSnapAt) snapStrand(grab, strand, now);
         if (strand.state !== "intact" || grab.released || strand.bodyA < 0) continue;
         const tension = Math.min(1, strand.stretch) * reach;
         for (let j = 0; j < glyphs.length; j += 1) {
@@ -834,11 +947,15 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       else glyph.lift = target;
       glyph.grabVX = 0;
       glyph.grabVY = 0;
+      glyph.tension = 0;
     }
     for (const grab of grabs) {
       if (grab.released) continue;
-      glyphs[grab.glyph].grabVX = grab.vx;
-      glyphs[grab.glyph].grabVY = grab.vy;
+      const glyph = glyphs[grab.glyph];
+      const pointerHeld = grab.kind === "pointer";
+      glyph.grabVX = pointerHeld ? grab.holdVX : grab.vx;
+      glyph.grabVY = pointerHeld ? grab.holdVY : grab.vy;
+      glyph.tension = pointerHeld ? grab.share : 0;
     }
 
     const squashRate = 1 - Math.exp(-dt * 28);
@@ -847,10 +964,26 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       const vx = glyph.held ? glyph.grabVX : glyph.vx;
       const vy = glyph.held ? glyph.grabVY : glyph.vy;
       const speed = Math.hypot(vx, vy);
-      const target = reduced ? 1 : 1 + Math.min(SQUASH_LIMIT - 1, speed * SQUASH_PER_SPEED);
-      if (speed > 24) {
-        glyph.ux = vx / speed;
-        glyph.uy = vy / speed;
+      let stretchX = 0;
+      let stretchY = 0;
+      if (!reduced && speed > 24) {
+        const amount = Math.min(SQUASH_LIMIT - 1, speed * SQUASH_PER_SPEED) / speed;
+        stretchX = vx * amount;
+        stretchY = vy * amount;
+      }
+      if (!reduced && glyph.held && glyph.tension > 0) {
+        const reach = Math.hypot(glyph.x, glyph.y);
+        if (reach > 1) {
+          const pull = (TENSION_STRETCH * glyph.tension) / reach;
+          stretchX += glyph.x * pull;
+          stretchY += glyph.y * pull;
+        }
+      }
+      const total = Math.hypot(stretchX, stretchY);
+      const target = 1 + Math.min(SQUASH_LIMIT - 1, total);
+      if (total > 1e-4) {
+        glyph.ux = stretchX / total;
+        glyph.uy = stretchY / total;
       }
       glyph.stretch += (target - glyph.stretch) * squashRate;
       if (Math.abs(glyph.stretch - 1) > 0.002) active = true;
@@ -1093,6 +1226,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
     }
     const job = (async () => {
       await document.fonts?.load?.(`600 100px ${family}`, text).catch(() => null);
+      if (disposed) throw new Error(BUILDER_DISPOSED);
       const probe = document.createElement("canvas").getContext("2d");
       probe.font = `600 100px ${family}`;
       const em = probe.measureText(text).width / 100;
@@ -1101,8 +1235,17 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       const single = Math.min((boxW * 0.7) / Math.max(em, 0.5), boxH * 0.3);
       const stacked = boxW < 640 ? Math.min((boxW * 0.9) / Math.max(em * 0.55, 0.5), boxH * 0.156) : 0;
       const ratio = Math.min(window.devicePixelRatio || 1, dprCap);
-      const word = rasterWord(text, family, Math.min(RASTER_MAX, Math.max(RASTER_MIN, Math.max(single, stacked) * ratio)));
-      const encoded = await builder.build({ alpha: word.alpha, width: word.width, height: word.height, tiles: word.tiles });
+      const rasterSize = Math.min(RASTER_MAX, Math.max(RASTER_MIN, Math.max(single, stacked) * ratio));
+      let word = rasterWord(text, family, rasterSize);
+      let encoded = null;
+      try {
+        encoded = await builder.build({ alpha: word.alpha, width: word.width, height: word.height, tiles: word.tiles });
+      } catch (error) {
+        if (disposed) throw error;
+        word = rasterWord(text, family, rasterSize);
+        encoded = await builder.build({ alpha: word.alpha, width: word.width, height: word.height, tiles: word.tiles });
+      }
+      if (disposed) throw new Error(BUILDER_DISPOSED);
       word.half = encoded.half;
       word.coarse = encoded.coarse;
       word.coarseWidth = encoded.coarseWidth;
@@ -1174,6 +1317,9 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       replaceCurrent(adopt(word), text);
       morph = { start: performance.now(), duration: reduced ? MORPH_REDUCED_MS : MORPH_MS, t: 0 };
       requestFrame();
+    }, (error) => {
+      if (disposed) return;
+      throw error;
     });
   }
 
@@ -1270,7 +1416,7 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       const now = event.timeStamp || performance.now();
       const g = hitTest(x, y, event.pointerType === "touch");
       if (g < 0) {
-        paperPress = { id: event.pointerId, x, y };
+        if (!nearWord(x, y)) paperPress = { id: event.pointerId, x, y };
         return false;
       }
       cancelIntro();
@@ -1361,6 +1507,9 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
       frame = 0;
       if (introTimer) window.clearTimeout(introTimer);
       introTimer = 0;
+      if (queuedTimer) window.clearTimeout(queuedTimer);
+      queuedTimer = 0;
+      queued = null;
       resizeObserver.disconnect();
       intersection.disconnect();
       document.removeEventListener("visibilitychange", handleVisibility);

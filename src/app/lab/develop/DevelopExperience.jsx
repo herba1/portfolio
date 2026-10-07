@@ -32,6 +32,17 @@ const WARM_AHEAD = 2;
 const NO_FAILURES = [];
 
 const TILT_QUERY = "(pointer: coarse)";
+const SHEET_QUERY = "(max-width: 899px)";
+
+function subscribeSheet(callback) {
+  const query = window.matchMedia(SHEET_QUERY);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+}
+
+function readSheet() {
+  return window.matchMedia(SHEET_QUERY).matches;
+}
 
 function subscribeTilt(callback) {
   const query = window.matchMedia(TILT_QUERY);
@@ -90,11 +101,14 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
   const [sourceId, setSourceId] = useState(null);
   const [prints, setPrints] = useState([]);
   const [fogging, setFogging] = useState(false);
+  const [resting, setResting] = useState(false);
   const [failure, setFailure] = useState(null);
   const [stageKey, setStageKey] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
   const [tiltOn, setTiltOn] = useState(false);
   const tiltAvailable = useSyncExternalStore(subscribeTilt, readTilt, readNoTilt);
+  const narrow = useSyncExternalStore(subscribeSheet, readSheet, readNoTilt);
+  const sheetOpen = panelOpen && narrow && !embedded;
 
   const slotRef = useRef(null);
   const apiRef = useRef(null);
@@ -107,6 +121,9 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
   const requestRef = useRef(0);
   const sourceIdRef = useRef(null);
   const stageRef = useRef(null);
+  const panelRef = useRef(null);
+  const panelButtonRef = useRef(null);
+  const returnFocusRef = useRef(false);
   const near = useNearViewport(stageRef);
 
   const source = sources.find((item) => item.id === sourceId) ?? sources[0] ?? allSources[0];
@@ -142,11 +159,41 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
 
   const handlePreset = useCallback((preset) => setParams((current) => applyPreset(current, preset)), [setParams]);
 
-  const handleStats = useCallback(({ seconds, fogging: fog }) => {
+  const handleStats = useCallback(({ seconds, fogging: fog, resting: rest }) => {
     secondsRef.current = seconds;
     slotRef.current?.setValue(formatClock(seconds));
     setFogging(fog);
+    setResting(Boolean(rest));
   }, []);
+
+  const closeSheet = useCallback(() => {
+    returnFocusRef.current = true;
+    setPanelOpen(false);
+  }, []);
+
+  useEffect(() => {
+    if (!sheetOpen) {
+      if (returnFocusRef.current) {
+        returnFocusRef.current = false;
+        panelButtonRef.current?.focus();
+      }
+      return undefined;
+    }
+    const panel = panelRef.current;
+    const frame = requestAnimationFrame(() => {
+      panel?.querySelector(".develop-chip")?.focus();
+    });
+    const handleKey = (event) => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      closeSheet();
+    };
+    document.addEventListener("keydown", handleKey);
+    return () => {
+      cancelAnimationFrame(frame);
+      document.removeEventListener("keydown", handleKey);
+    };
+  }, [sheetOpen, closeSheet]);
 
   const handleApi = useCallback((api) => {
     apiRef.current = api;
@@ -338,19 +385,25 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
       style={paperStyle}
     >
       {embedded ? null : (
-        <aside className="develop-panel" aria-label="Darkroom controls">
+        <aside
+          ref={panelRef}
+          className="develop-panel"
+          aria-label="Darkroom controls"
+          role={sheetOpen ? "dialog" : undefined}
+          aria-modal={sheetOpen ? "true" : undefined}
+        >
           <DevelopControls
             params={params}
             onChange={handleChange}
             onPreset={handlePreset}
             onSave={handleSave}
             onReset={handleReset}
-            onClose={panelOpen ? () => setPanelOpen(false) : null}
+            onClose={panelOpen ? closeSheet : null}
           />
         </aside>
       )}
 
-      <section className="develop-stage">
+      <section className="develop-stage" inert={sheetOpen}>
         {embedded ? null : <DevelopTitle className="develop-head--stage" />}
         <div className="develop-bench">
           {embedded ? null : <NegativeStrip sources={sources} activeId={source.id} onPick={handlePick} />}
@@ -366,7 +419,10 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
                   <SlotNumber ref={slotRef} value="0:00" className="develop-clock text-title-sm" label="Development time" />
                   <span className="develop-readout__labels">
                     <MorphText text={source.label} className="develop-readout__name text-ui" />
-                    <MorphText text={fogging ? "Fogging" : "Developing"} className="develop-readout__status text-ui-sm" />
+                    <MorphText
+                      text={resting ? "Resting" : fogging ? "Fogging" : "Developing"}
+                      className="develop-readout__status text-ui-sm"
+                    />
                   </span>
                 </div>
                 <div className="develop-meta__actions">
@@ -382,6 +438,7 @@ export default function DevelopExperience({ covers = [], embedded = false }) {
                     </button>
                   ) : null}
                   <button
+                    ref={panelButtonRef}
                     type="button"
                     className="develop-button develop-button--panel text-ui"
                     aria-expanded={panelOpen}

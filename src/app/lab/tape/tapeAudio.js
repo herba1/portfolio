@@ -11,7 +11,7 @@ function claimPlayback() {
   }
 }
 
-export function createTapeAudio() {
+export function createTapeAudio(onStateChange) {
   let context = null;
   let master = null;
   let node = null;
@@ -20,6 +20,16 @@ export function createTapeAudio() {
   let moduleUrl = null;
   let pendingLoad = null;
   let destroyed = false;
+
+  const notify = () => {
+    if (!destroyed && onStateChange) onStateChange();
+  };
+
+  const wakeContext = () => {
+    if (context && context.state !== "running" && context.state !== "closed") {
+      context.resume().then(notify, () => null);
+    }
+  };
 
   const flush = () => {
     if (!pendingLoad) return;
@@ -57,14 +67,15 @@ export function createTapeAudio() {
   const ensure = () => {
     if (destroyed) return false;
     if (context) {
-      if (context.state === "suspended") context.resume().catch(() => null);
+      wakeContext();
       return true;
     }
     const Context = window.AudioContext || window.webkitAudioContext;
     if (!Context) return false;
     claimPlayback();
     context = new Context({ latencyHint: "interactive" });
-    context.resume().catch(() => null);
+    context.onstatechange = notify;
+    wakeContext();
     master = context.createGain();
     master.gain.value = 0;
     master.gain.setTargetAtTime(1, context.currentTime, FADE_IN_SECONDS);
@@ -108,11 +119,12 @@ export function createTapeAudio() {
     suspend() {
       if (context && context.state === "running") context.suspend().catch(() => null);
     },
-    resume() {
-      if (context && context.state === "suspended") context.resume().catch(() => null);
-    },
+    resume: wakeContext,
     get started() {
       return Boolean(context);
+    },
+    get running() {
+      return Boolean(context) && context.state === "running";
     },
     get latency() {
       if (!context || context.state !== "running") return 0;
@@ -131,7 +143,10 @@ export function createTapeAudio() {
         processor.disconnect();
       }
       if (master) master.disconnect();
-      if (context) context.close().catch(() => null);
+      if (context) {
+        context.onstatechange = null;
+        context.close().catch(() => null);
+      }
       if (moduleUrl) URL.revokeObjectURL(moduleUrl);
       node = null;
       processor = null;

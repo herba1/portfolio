@@ -12,27 +12,33 @@ const PRESIM_STEP = 1 / 60;
 const INTRO_STEPS = [
   { until: 0.1, x: 0, y: REST_LEAN_Y },
   { until: 0.7, x: -0.11, y: 0.12 },
-  { until: 2.2, x: -0.03, y: -0.03 },
+  { until: 0.95, x: -0.03, y: -0.03 },
+  { until: 1.25, x: -0.02, y: REST_LEAN_Y },
 ];
 const ROCK_LEAN_Y = 0.13;
-const POINTER_REACH = 1.15;
+const POINTER_REACH = 0.5;
 const KEY_LEAN = 0.12;
 const HOVER_LEAN = 0.03;
 const TAP_SLOP_PX = 6;
 const TAP_MS = 260;
 const TAP_HOLD_SECONDS = 0.45;
+const TAP_PRESS_MS = 800;
 const FLICK_WINDOW_MS = 90;
 const FLICK_GAIN = 0.32;
 const ROCK_LEAN = 0.11;
 const DRIFT_PX = 6;
 const ENERGY_TAU = 1.6;
 const SLOW_FRAME_MS = 83;
-const MAX_SLOW_SECONDS = 0.25;
+const MAX_SLOW_SECONDS = 0.6;
 const IDLE_STOP_MS = 8000;
+const LINGER_FRAME_MS = 500;
+const LINGER_SECONDS = 30;
+const LINGER_LIMIT_MS = 120000;
 const STATS_EVERY_SECONDS = 0.4;
 const FOG_SECONDS = 8;
 const SAMPLE_CAPACITY = 16;
 const GYRO_GAIN = 0.8;
+const GYRO_WAKE_RAD = 0.003;
 const MAX_FRAME_SECONDS = 1 / 30;
 const THUMB_WIDTH = 112;
 const THUMB_HEIGHT = 140;
@@ -105,21 +111,23 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     }
 
     engine.setSettings(settingsFrom(initialParamsRef.current));
-    engine.resetSheet(Math.random());
 
     const governor = createResolutionGovernor({ max: 1, min: 0.55 });
     const pixelCap = embedded || coarse ? 1.5 : 2;
     const target = [0, REST_LEAN_Y];
     const samples = new Float64Array(SAMPLE_CAPACITY * 3);
-    const pointer = { active: false, id: -1, x: 0.5, y: 0.5, vx: 0, vy: 0, pressAt: 0, startX: 0, startY: 0, moved: false, rect: null, sampleCount: 0, sampleHead: 0, lastAt: 0 };
+    const pointer = { active: false, id: -1, x: 0.5, y: 0.5, vx: 0, vy: 0, pressAt: 0, holdUntil: 0, startX: 0, startY: 0, moved: false, rect: null, sampleCount: 0, sampleHead: 0, lastAt: 0 };
     const keys = { x: 0, y: 0 };
-    const gyro = { on: false, x: 0, y: 0, baseBeta: null, baseGamma: null };
+    const gyro = { on: false, x: 0, y: 0, wokeX: 0, wokeY: 0, baseBeta: null, baseGamma: null };
     const hover = { on: false, x: 0.5, y: 0.5 };
 
     let cssWidth = 1;
     let cssHeight = 1;
     let raf = 0;
     let timer = 0;
+    let compileRaf = 0;
+    let compiled = false;
+    let resting = false;
     let last = 0;
     let lastInput = performance.now();
     let energy = 1;
@@ -141,11 +149,20 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     const water = () => (reduced ? 0 : 1);
     const runnable = () => ready && visible && onscreen && !disposed;
 
+    let shownResting = false;
+
     const emitStats = (seconds, fogging) => {
-      if (seconds === shownSeconds && fogging === shownFog) return;
+      if (seconds === shownSeconds && fogging === shownFog && resting === shownResting) return;
       shownSeconds = seconds;
       shownFog = fogging;
-      callbacksRef.current.onStats?.({ seconds, fogging });
+      shownResting = resting;
+      callbacksRef.current.onStats?.({ seconds, fogging, resting });
+    };
+
+    const setResting = (next) => {
+      if (resting === next) return;
+      resting = next;
+      emitStats(Math.max(shownSeconds, 0), shownFog);
     };
 
     const takeStats = () => {
@@ -232,8 +249,8 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       paper.style.translate = `${x.toFixed(2)}px ${y.toFixed(2)}px`;
     };
 
-    const later = () => {
-      timer = setTimeout(tick, SLOW_FRAME_MS);
+    const later = (delay) => {
+      timer = setTimeout(tick, delay);
     };
 
     const frame = (now) => {
@@ -252,25 +269,31 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
         pointer.vx *= fade;
         pointer.vy *= fade;
       }
-      engine.setPaddle(pointer.active && !reduced ? 1 : 0, pointer.x, pointer.y, pointer.vx, pointer.vy);
+      const held = pointer.active || now < pointer.holdUntil;
+      engine.setPaddle(pointer.active && !reduced ? 1 : 0, held, pointer.x, pointer.y, pointer.vx, pointer.vy);
 
       const offTarget = Math.abs(engine.lean[0] - target[0]) + Math.abs(engine.lean[1] - target[1]);
-      energy = Math.max(energy * Math.exp(-dt / ENERGY_TAU), engine.motion() * 2, pointer.active ? 1 : 0);
-      const moving = pointer.active || script !== null || gyro.on || keys.x !== 0 || keys.y !== 0 || offTarget > 0.002 || energy > 0.01;
+      energy = Math.max(energy * Math.exp(-dt / ENERGY_TAU), engine.motion() * 2, held ? 1 : 0);
+      const moving = held || engine.pressing || script !== null || keys.x !== 0 || keys.y !== 0 || offTarget > 0.002 || energy > 0.01;
+      const idleFor = now - lastInput;
+      const lingering = !moving && idleFor > IDLE_STOP_MS;
 
-      if (!moving && now - lastInput > IDLE_STOP_MS) {
+      if (lingering && (embedded || peakSeconds >= LINGER_SECONDS || idleFor > LINGER_LIMIT_MS)) {
         if (engine.statsPending) {
-          later();
+          later(SLOW_FRAME_MS);
           return;
         }
         if (!statsSettled) {
           statsSettled = true;
           engine.requestStats();
-          later();
+          later(SLOW_FRAME_MS);
+          return;
         }
+        setResting(true);
         return;
       }
       statsSettled = false;
+      setResting(false);
 
       if (moving) {
         advance(dt, target[0], target[1]);
@@ -290,7 +313,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       writeDrift();
 
       if (moving) raf = requestAnimationFrame(frame);
-      else later();
+      else later(lingering ? LINGER_FRAME_MS : SLOW_FRAME_MS);
     };
 
     const tick = () => {
@@ -319,6 +342,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     const wake = () => {
       lastInput = performance.now();
       energy = 1;
+      setResting(false);
       start();
     };
 
@@ -348,7 +372,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     const setImage = (loaded) => {
       if (disposed || !showImage(loaded)) return;
       if (!ready) {
-        reveal();
+        if (compiled) reveal();
         return;
       }
       engine.render(water());
@@ -356,8 +380,9 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     };
 
     const freshSheet = (loaded) => {
-      if (showImage(loaded) && !ready) {
-        reveal();
+      const changed = showImage(loaded);
+      if (!ready) {
+        if (changed && compiled) reveal();
         return;
       }
       engine.resetSheet(Math.random());
@@ -389,7 +414,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
         freshSheet(loaded);
         return Promise.resolve(null);
       }
-      engine.capture(context, canvas.width, canvas.height);
+      engine.capture(context, canvas.width, canvas.height, water());
       departing.style.translate = paper.style.translate;
       restartAttribute(departing, "state", reduced ? "fading" : "leaving");
       const thumb = document.createElement("canvas");
@@ -409,7 +434,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       sheet.height = canvas.height;
       const context = sheet.getContext("2d");
       if (!context) return;
-      engine.capture(context, canvas.width, canvas.height);
+      engine.capture(context, canvas.width, canvas.height, water());
       sheet.toBlob((file) => {
         if (!file) return;
         const url = URL.createObjectURL(file);
@@ -441,7 +466,10 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       }
       gyro.x = ((event.gamma - gyro.baseGamma) * Math.PI * GYRO_GAIN) / 180;
       gyro.y = ((gyro.baseBeta - event.beta) * Math.PI * GYRO_GAIN) / 180;
-      lastInput = performance.now();
+      if (Math.abs(gyro.x - gyro.wokeX) + Math.abs(gyro.y - gyro.wokeY) <= GYRO_WAKE_RAD) return;
+      gyro.wokeX = gyro.x;
+      gyro.wokeY = gyro.y;
+      wake();
     };
 
     const setGyro = (on) => {
@@ -450,6 +478,8 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       gyro.baseGamma = null;
       gyro.x = 0;
       gyro.y = 0;
+      gyro.wokeX = 0;
+      gyro.wokeY = 0;
       if (on) window.addEventListener("deviceorientation", handleOrientation);
       else window.removeEventListener("deviceorientation", handleOrientation);
       wake();
@@ -489,6 +519,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       pointer.vx = 0;
       pointer.vy = 0;
       pointer.pressAt = now;
+      pointer.holdUntil = 0;
       pointer.lastAt = now;
       pointer.startX = event.clientX;
       pointer.startY = event.clientY;
@@ -560,6 +591,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       if (!pointer.moved && now - pointer.pressAt < TAP_MS) {
         leanToward(pointer.x, pointer.y, POINTER_REACH);
         script = { start: now, steps: [{ until: TAP_HOLD_SECONDS, x: target[0], y: target[1] }] };
+        pointer.holdUntil = now + TAP_PRESS_MS;
       } else if (event.type === "pointerup") {
         const [vx, vy] = releaseVelocity(now);
         engine.kick(vx * FLICK_GAIN, vy * FLICK_GAIN);
@@ -619,6 +651,29 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       if (ready) engine.render(water());
     };
 
+    const awaitPrograms = () => {
+      compileRaf = 0;
+      if (disposed) return;
+      let done = false;
+      try {
+        done = engine.prepare();
+      } catch (error) {
+        if (typeof console !== "undefined") console.error("develop", error);
+        disposed = true;
+        callbacksRef.current.onFailure?.("engine");
+        return;
+      }
+      if (!done) {
+        compileRaf = requestAnimationFrame(awaitPrograms);
+        return;
+      }
+      compiled = true;
+      engine.resetSheet(Math.random());
+      if (shownImage) reveal();
+    };
+
+    compileRaf = requestAnimationFrame(awaitPrograms);
+
     const handleContextLost = (event) => {
       event.preventDefault();
       stop();
@@ -657,6 +712,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     runtimeRef.current = {
       setImage,
       applyParams: (next) => {
+        if (disposed) return;
         engine.setSettings(settingsFrom(next));
         if (ready) engine.render(water());
         wake();
@@ -668,6 +724,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
     return () => {
       disposed = true;
       stop();
+      if (compileRaf) cancelAnimationFrame(compileRaf);
       runtimeRef.current = null;
       callbacksRef.current.onApi?.(null);
       resizeObserver.disconnect();
@@ -719,7 +776,7 @@ export default function DevelopStage({ source, params, embedded = false, onApi, 
       tabIndex={0}
       role="application"
       aria-roledescription="developing tray"
-      aria-label={`${label}. Hold the sheet where the developer should run. Arrow keys tip the tray, space rocks it, enter starts the next sheet.`}
+      aria-label={`${label}. Press the sheet and the developer runs to your finger. Arrow keys tip the tray, space rocks it, enter starts the next sheet.`}
     >
       <div ref={paperRef} className="develop-paper" />
       <canvas ref={departingRef} className="develop-departing" aria-hidden="true" />

@@ -1,5 +1,5 @@
 import { createTapeAudio } from "./tapeAudio";
-import { LOOP_SECONDS } from "./tapeConstants";
+import { CLIP_OFFSET_SECONDS, LOOP_SECONDS } from "./tapeConstants";
 import { loadTape } from "./tapeLoader";
 import { createTapePlate } from "./tapePlate";
 import { TapeTransport } from "./tapeTransport";
@@ -84,13 +84,13 @@ function inkedStart(print, period) {
 export function mountTape(parts, onChange) {
   const { strip, plateHost, wordsLayer, smearBlur, smearFilter, headSvg, headPath, timeSlot, rateSlot, sign, cast } = parts;
   const transport = new TapeTransport();
-  const audio = createTapeAudio();
+  const audio = createTapeAudio(() => syncAudible());
   const canvas = document.createElement("canvas");
   canvas.className = "tape__plate";
   plateHost.appendChild(canvas);
   let plate = null;
   try {
-    plate = createTapePlate(canvas);
+    plate = createTapePlate(canvas, () => measure());
   } catch {
     plate = null;
   }
@@ -171,9 +171,13 @@ export function mountTape(parts, onChange) {
     headX = width * HEAD_FRACTION;
     const scale = Math.min(window.devicePixelRatio || 1, MAX_SCALE) * quality;
     plate?.resize(width, height, scale, { headX, pxPerSecond: pxps, warpRadius: WARP_RADIUS, lane, period });
-    if (drawn) plate?.draw(shownT, shownWarp, reveal, wear, smear);
     layoutLanes();
     for (const item of words) item.x = NaN;
+    if (drawn) {
+      plate?.draw(shownT, shownWarp, reveal, wear, smear);
+      placeWords(shownT, shownWarp);
+      drawHead();
+    }
     wake();
   };
 
@@ -296,7 +300,8 @@ export function mountTape(parts, onChange) {
   };
 
   const showSmear = () => {
-    const sigma = reduced ? 0 : Math.round(smear * BLUR_PER_SMEAR * 4) / 4;
+    const quantised = reduced ? 0 : Math.round(smear * BLUR_PER_SMEAR * 4) / 4;
+    const sigma = quantised >= 1 ? quantised : 0;
     if (sigma === blurShown) return;
     blurShown = sigma;
     if (sigma > 0) {
@@ -350,7 +355,7 @@ export function mountTape(parts, onChange) {
     if (Math.abs(lagGoal - lag) < 1e-5) lag = lagGoal;
 
     const excess = Math.max(0, Math.abs(velocity) - SMEAR_REST);
-    smear = Math.min(SMEAR_CAP, excess * frameInterval * pxps * SMEAR_GAIN);
+    smear = reduced ? 0 : Math.min(SMEAR_CAP, excess * frameInterval * pxps * SMEAR_GAIN);
 
     const t = wrap(transport.position, period);
     shownT = wrap(transport.position - lag, period);
@@ -397,6 +402,15 @@ export function mountTape(parts, onChange) {
     wake();
   };
 
+  function syncAudible() {
+    if (destroyed) return;
+    const running = audio.running;
+    if (running === audible) return;
+    audible = running;
+    emit({ audible: running });
+    wake();
+  }
+
   const enableAudio = () => {
     if (audioStatus === "none") return false;
     if (!audio.ensure()) {
@@ -404,11 +418,7 @@ export function mountTape(parts, onChange) {
       emit({ audio: "none" });
       return false;
     }
-    audio.resume();
-    if (!audible) {
-      audible = true;
-      emit({ audible: true });
-    }
+    syncAudible();
     return true;
   };
 
@@ -445,16 +455,18 @@ export function mountTape(parts, onChange) {
     shuttleTo(next);
   };
 
+  const seekBase = () => (transport.seeking ? transport.seekTarget : transport.position);
+
   const seekBy = (seconds) => {
     if (transport.held) return;
-    transport.seek(transport.position + seconds);
+    transport.seek(seekBase() + seconds);
     wake();
   };
 
   const seekToWord = (node) => {
     const start = Number(node.dataset.start);
     if (!Number.isFinite(start)) return;
-    let delta = start - SEEK_LEAD - wrap(transport.position, period);
+    let delta = start - SEEK_LEAD - wrap(seekBase(), period);
     if (delta > period / 2) delta -= period;
     else if (delta < -period / 2) delta += period;
     seekBy(delta);
@@ -519,7 +531,7 @@ export function mountTape(parts, onChange) {
     const next = Math.round(Math.max(0, 1 - distance / NEAR_RADIUS) * 100) / 100;
     if (next === near) return;
     near = next;
-    strip.style.setProperty("--tape-near", String(next));
+    headSvg.style.setProperty("--tape-near", String(next));
   };
 
   const onLeave = () => sense(Infinity);
@@ -669,7 +681,7 @@ export function mountTape(parts, onChange) {
       plate?.setPrint(result.print);
       audio.load(result.levels, result.sampleRate);
       audioStatus = "ready";
-      emit({ audio: "ready" });
+      emit({ audio: "ready", offset: result.offset });
       measure();
       stageWords();
       beginReveal();
@@ -677,8 +689,9 @@ export function mountTape(parts, onChange) {
     .catch(() => {
       if (destroyed) return;
       audioStatus = "none";
-      emit({ audio: "none" });
+      emit({ audio: "none", offset: CLIP_OFFSET_SECONDS });
       strip.setAttribute("data-bare", "");
+      measure();
       beginReveal();
     });
 

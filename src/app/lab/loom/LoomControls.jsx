@@ -4,7 +4,19 @@ import SlotNumber from "@/app/ui/SlotNumber";
 
 import { PRESETS, SLIDERS, THREADS_MAX, THREADS_MIN, THREADS_STEP, WEAVES } from "./loomParams";
 
+const ROVE_KEYS = { ArrowLeft: -1, ArrowUp: -1, ArrowRight: 1, ArrowDown: 1 };
+
 function Segmented({ label, options, activeIndex, onPick }) {
+  const focusIndex = Math.max(0, activeIndex);
+  const onKeyDown = (event) => {
+    const step = ROVE_KEYS[event.key];
+    if (!step) return;
+    event.preventDefault();
+    const from = activeIndex < 0 ? (step > 0 ? -1 : 0) : activeIndex;
+    const pick = (from + step + options.length) % options.length;
+    onPick(pick);
+    event.currentTarget.querySelectorAll("[role=radio]")[pick]?.focus();
+  };
   return (
     <div className="loom-field">
       <span className="loom-label text-ui text-ink-secondary">{label}</span>
@@ -13,7 +25,8 @@ function Segmented({ label, options, activeIndex, onPick }) {
         role="radiogroup"
         aria-label={label}
         data-empty={activeIndex < 0 ? "1" : undefined}
-        style={{ "--loom-seg-index": Math.max(0, activeIndex), "--loom-seg-count": options.length }}
+        style={{ "--loom-seg-index": focusIndex, "--loom-seg-count": options.length }}
+        onKeyDown={onKeyDown}
       >
         <span className="loom-segments__pill" aria-hidden="true" />
         {options.map((option, optionIndex) => (
@@ -22,6 +35,7 @@ function Segmented({ label, options, activeIndex, onPick }) {
             type="button"
             role="radio"
             aria-checked={optionIndex === activeIndex}
+            tabIndex={optionIndex === focusIndex ? 0 : -1}
             data-active={optionIndex === activeIndex ? "1" : undefined}
             className="loom-segment text-ui"
             onClick={() => onPick(optionIndex)}

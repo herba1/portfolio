@@ -828,6 +828,7 @@
 
   .marble-tools__option {
     min-width: 0;
+    height: 32px;
   }
 
   .marble-panel-slot {

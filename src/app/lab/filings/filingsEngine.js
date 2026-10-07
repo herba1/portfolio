@@ -2,7 +2,7 @@ import createResolutionGovernor from "@/app/experiments/resolutionGovernor";
 
 import { MAX_MAGNETS, filingCount, hexToRgb } from "./filingsParams";
 import { createCanvasRenderer, createGlRenderer } from "./filingsRenderer";
-import { FilingsSim, gridColumns } from "./filingsSim";
+import { FilingsSim, LAG_BINS, LAG_SPAN, gridColumns } from "./filingsSim";
 
 const REGULAR_MAGNET = { width: 72, height: 28 };
 const COMPACT_MAGNET = { width: 88, height: 34 };
@@ -12,7 +12,8 @@ const ROTATE_STEP = Math.PI / 12;
 const MOVE_STEP = 8;
 const MOVE_STEP_LARGE = 32;
 const TAP_SLOP = 6;
-const DOUBLE_TAP_MS = 320;
+const DOUBLE_TAP_MS = 450;
+const DOUBLE_CLICK_MS = 500;
 const DOUBLE_TAP_PX = 28;
 const SHAKE_WINDOW_MS = 450;
 const SHAKE_REVERSALS = 3;
@@ -30,13 +31,19 @@ const LAYOUT_SEED = 1931;
 const WHEEL_NOTCH = 50;
 const GRAIN = 0.035;
 const LANE_REACH_PX = 60;
-const PARTNER_AT_MS = 1800;
-const PARTNER_FLIP_AT_MS = 3400;
+const PARTNER_AT_S = 1.8;
+const PARTNER_FLIP_AT_S = 3.4;
 const PARTNER_SPACING = 0.22;
 const PARTNER_MIN_GAP_PX = 56;
 const PARTNER_MARGIN = 0.07;
 const RELAYOUT_DEBOUNCE_MS = 220;
 const MAGNET_CAPACITY = MAX_MAGNETS * 3;
+const GHOST_REST_MS = 500;
+const GHOST_SLOP_PX = 4;
+const RIPPLE_DELAY = 0.35;
+const LAG_STEP = LAG_SPAN / (LAG_BINS - 1);
+const HISTORY = 160;
+const TURNING_EPSILON = 1e-4;
 
 export const DEFAULT_MAGNETS = [{ id: 1, x: 0.71, y: 0.73, angle: -0.42 }];
 
@@ -81,8 +88,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
 
   const sim = new FilingsSim();
   const governor = createResolutionGovernor({ max: 1, min: 0.6 });
-  const startedAt = performance.now();
-  const clock = (now) => (now - startedAt) / 1000;
+  let simTime = 0;
 
   let size = 0;
   let pixelRatio = 1;
@@ -106,10 +112,14 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
   let twist = null;
   let shakeCooldownUntil = 0;
   let touched = false;
-  let openingTimers = [];
+  let opening = null;
   let relayoutTimer = 0;
   let painted = false;
   let ghostShown = false;
+  let ghostTimer = 0;
+  let ghostResting = false;
+  let ghostRestX = 0;
+  let ghostRestY = 0;
   let hoverRect = null;
   const pointers = new Map();
 
@@ -126,6 +136,13 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     poleX: new Float32Array(MAGNET_CAPACITY * 2),
     poleY: new Float32Array(MAGNET_CAPACITY * 2),
     poleQ: new Float32Array(MAGNET_CAPACITY * 2),
+    livePoleX: new Float32Array(MAGNET_CAPACITY * 2),
+    livePoleY: new Float32Array(MAGNET_CAPACITY * 2),
+    poleOffset: 0,
+    lagTable: new Float32Array(MAGNET_CAPACITY * LAG_BINS),
+    lagPerUnit: RIPPLE_DELAY / LAG_STEP,
+    turning: new Uint8Array(MAGNET_CAPACITY),
+    rippling: false,
     centreCount: 0,
     centreX: new Float32Array(MAGNET_CAPACITY),
     centreY: new Float32Array(MAGNET_CAPACITY),
@@ -158,6 +175,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
       leaving: false,
       removing: false,
       twisting: false,
+      history: { times: new Float64Array(HISTORY), angles: new Float32Array(HISTORY), head: 0, length: 0 },
       snapshot: { id, born, transform: "" },
     };
   };
@@ -221,7 +239,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     return renderer.kind === "canvas" ? Math.round(base / 2) : base;
   };
 
-  const now = () => clock(performance.now());
+  const now = () => simTime;
 
   const spawn = () => {
     if (spawned || !sample || !look || size <= 0) return;
@@ -275,15 +293,65 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
       for (const magnet of magnets) writeMagnet(magnet);
     }
     spawn();
+    if (sizeChanged && spawned) {
+      window.clearTimeout(relayoutTimer);
+      relayoutTimer = window.setTimeout(relayout, RELAYOUT_DEBOUNCE_MS);
+    }
+  };
+
+  const recordAngle = (magnet, time) => {
+    const history = magnet.history;
+    let angle = magnet.angle;
+    if (history.length > 0) {
+      const previous = history.angles[history.head];
+      angle = previous + wrapAngle(angle - previous);
+      history.head = (history.head + 1) % HISTORY;
+    }
+    history.times[history.head] = time;
+    history.angles[history.head] = angle;
+    history.length = Math.min(HISTORY, history.length + 1);
+  };
+
+  const fillLagTable = (magnet, slot, time) => {
+    const { times, angles, head, length } = magnet.history;
+    const base = slot * LAG_BINS;
+    const table = field.lagTable;
+    if (reduced || length === 0) {
+      table.fill(magnet.angle, base, base + LAG_BINS);
+      return 0;
+    }
+    const newest = angles[head];
+    let back = 0;
+    let turning = 0;
+    for (let bin = 0; bin < LAG_BINS; bin += 1) {
+      const at = time - bin * LAG_STEP;
+      while (back + 1 < length && times[(head - back - 1 + HISTORY) % HISTORY] >= at) back += 1;
+      const newer = (head - back + HISTORY) % HISTORY;
+      let value = angles[newer];
+      if (back + 1 < length) {
+        const older = (newer - 1 + HISTORY) % HISTORY;
+        const span = times[newer] - times[older];
+        const fraction = span > 0 ? Math.min(1, Math.max(0, (at - times[older]) / span)) : 1;
+        value = angles[older] + (angles[newer] - angles[older]) * fraction;
+      }
+      table[base + bin] = value;
+      if (Math.abs(value - newest) > TURNING_EPSILON) turning = 1;
+    }
+    return turning;
   };
 
   const buildField = () => {
     const { width, height } = magnetSize();
     const poleOffset = (width / 2 - height / 2) / size;
+    const time = now();
     let poles = 0;
     let centres = 0;
+    let rippling = false;
     for (const magnet of magnets) {
       if (magnet.presence < 0.001 || centres >= MAGNET_CAPACITY) continue;
+      const turning = fillLagTable(magnet, centres, time);
+      field.turning[centres] = turning;
+      if (turning) rippling = true;
       const cos = Math.cos(magnet.angle);
       const sin = Math.sin(magnet.angle);
       field.poleX[poles] = magnet.x + cos * poleOffset;
@@ -300,6 +368,8 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     }
     field.poleCount = poles;
     field.centreCount = centres;
+    field.poleOffset = poleOffset;
+    field.rippling = rippling;
     const core = (height / 2 + 4) / size;
     field.coreSq = core * core;
     const reach = params.field / 100;
@@ -323,7 +393,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
   const omegaN = (Math.PI * 2) / SPRING_DURATION;
   const zeta = 1 - SPRING_BOUNCE;
 
-  const updateMagnets = (dt) => {
+  const updateMagnets = (dt, time) => {
     let busy = false;
     const presenceStep = 1 - Math.exp(-dt * PRESENCE_RATE);
     for (const magnet of magnets) {
@@ -355,6 +425,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
       if (Math.abs(goal - magnet.presence) > 0.004) busy = true;
       else magnet.presence = goal;
       if (magnet.held) busy = true;
+      recordAngle(magnet, time);
       writeMagnet(magnet);
     }
     return busy;
@@ -410,8 +481,10 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     last = stamp;
     const dt = Math.min(1 / 30, Math.max(1 / 240, elapsedMs / 1000));
     if (renderer.kind === "webgl" && governor.sample(elapsedMs)) resize();
-    const time = clock(stamp);
-    let busy = updateMagnets(dt);
+    simTime += dt;
+    const time = simTime;
+    let busy = spawned && advanceOpening(dt);
+    busy = updateMagnets(dt, time) || busy;
     busy = updatePaper(dt) || busy;
     if (spawned) {
       buildField();
@@ -419,13 +492,14 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
       renderer.uploadState(sim);
       busy =
         busy ||
+        field.rippling ||
         activity.maxOmega > ((stamp - wokenAt) / 1000 > QUIET_AFTER_S ? IDLE_OMEGA_QUIET : IDLE_OMEGA) ||
         activity.maxCreep * size > IDLE_CREEP_PX ||
         sim.introBusy(time) ||
         sim.morphBusy(time);
     }
     draw(time);
-    if (busy && visible && onscreen) raf = requestAnimationFrame(frame);
+    if (busy && visible && onscreen && !raf) raf = requestAnimationFrame(frame);
   };
 
   function wake() {
@@ -512,32 +586,43 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     return addMagnet(spot.x, spot.y, anchor.target + (bridged ? 0 : Math.PI));
   };
 
-  const cancelOpening = () => {
-    for (const timer of openingTimers) window.clearTimeout(timer);
-    openingTimers = [];
-  };
-
-  const later = (task, delay) => {
-    openingTimers.push(window.setTimeout(task, delay));
-  };
+  function cancelOpening() {
+    opening = null;
+  }
 
   function startOpening() {
     cancelOpening();
     if (touched || !alive) return;
-    const anchor = liveMagnets()[0];
-    if (!anchor || liveMagnets().length > 1) return;
+    const live = liveMagnets();
+    const anchor = live[0];
+    if (!anchor || live.length > 1) return;
     if (reduced) {
       addPartner(anchor, true);
       return;
     }
-    later(() => {
-      if (!alive || touched || anchor.removing) return;
-      const partner = addPartner(anchor, false);
-      if (!partner) return;
-      later(() => {
-        if (alive && !touched && !partner.removing) flip(partner);
-      }, PARTNER_FLIP_AT_MS - PARTNER_AT_MS);
-    }, PARTNER_AT_MS);
+    opening = { anchor, partner: null, stageTime: 0 };
+  }
+
+  function advanceOpening(dt) {
+    if (!opening) return false;
+    if (touched || !alive || opening.anchor.removing) {
+      cancelOpening();
+      return false;
+    }
+    opening.stageTime += dt;
+    if (!opening.partner && opening.stageTime >= PARTNER_AT_S) {
+      opening.partner = addPartner(opening.anchor, false);
+      if (!opening.partner) {
+        cancelOpening();
+        return false;
+      }
+    }
+    if (opening.partner && opening.stageTime >= PARTNER_FLIP_AT_S) {
+      const partner = opening.partner;
+      cancelOpening();
+      if (!partner.removing) flip(partner);
+    }
+    return true;
   }
 
   const onFirstInput = () => {
@@ -545,7 +630,14 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     cancelOpening();
   };
 
+  function clearGhostTimer() {
+    if (ghostTimer) window.clearTimeout(ghostTimer);
+    ghostTimer = 0;
+  }
+
   function hideGhost(instant) {
+    clearGhostTimer();
+    ghostResting = false;
     if (!ghostShown) return;
     ghostShown = false;
     if (instant) ghost.dataset.instant = "true";
@@ -553,28 +645,39 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     delete ghost.dataset.shown;
   }
 
+  const ghostAllowed = () =>
+    alive && !embedded && spawned && size > 0 && pointers.size === 0 && liveMagnets().length < MAX_MAGNETS;
+
+  const placeGhost = (clientX, clientY) => {
+    if (!hoverRect) hoverRect = plate.getBoundingClientRect();
+    const x = clampToPlate((clientX - hoverRect.left) / size);
+    const y = clampToPlate((clientY - hoverRect.top) / size);
+    ghost.style.transform = magnetTransform(x, y, nextAngle(), size);
+  };
+
+  const showGhost = () => {
+    ghostTimer = 0;
+    if (!ghostResting || !ghostAllowed()) return;
+    placeGhost(ghostRestX, ghostRestY);
+    delete ghost.dataset.instant;
+    ghostShown = true;
+    ghost.dataset.shown = "true";
+  };
+
   const updateGhost = (event) => {
-    const show =
-      !embedded &&
-      spawned &&
-      size > 0 &&
-      event.pointerType === "mouse" &&
-      pointers.size === 0 &&
-      liveMagnets().length < MAX_MAGNETS &&
-      !findMagnet(event.target);
-    if (!show) {
+    if (event.pointerType !== "mouse" || !ghostAllowed() || findMagnet(event.target)) {
       hideGhost(false);
       return;
     }
-    if (!hoverRect) hoverRect = plate.getBoundingClientRect();
-    const x = clampToPlate((event.clientX - hoverRect.left) / size);
-    const y = clampToPlate((event.clientY - hoverRect.top) / size);
-    ghost.style.transform = magnetTransform(x, y, nextAngle(), size);
-    if (!ghostShown) {
-      ghostShown = true;
-      delete ghost.dataset.instant;
-      ghost.dataset.shown = "true";
+    if (ghostResting && Math.hypot(event.clientX - ghostRestX, event.clientY - ghostRestY) <= GHOST_SLOP_PX) {
+      if (ghostShown) placeGhost(event.clientX, event.clientY);
+      return;
     }
+    hideGhost(false);
+    ghostResting = true;
+    ghostRestX = event.clientX;
+    ghostRestY = event.clientY;
+    ghostTimer = window.setTimeout(showGhost, GHOST_REST_MS);
   };
 
   const onPointerHover = (event) => {
@@ -588,6 +691,8 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
 
   const onScroll = () => {
     hoverRect = null;
+    rect = null;
+    hideGhost(false);
   };
 
   const removeMagnet = (magnet) => {
@@ -816,7 +921,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
         callbacks.current.onTapEmpty?.();
       } else if (
         lastTap &&
-        stamp - lastTap.time < DOUBLE_TAP_MS &&
+        stamp - lastTap.time < (event.pointerType === "mouse" ? DOUBLE_CLICK_MS : DOUBLE_TAP_MS) &&
         Math.hypot(event.clientX - lastTap.clientX, event.clientY - lastTap.clientY) < DOUBLE_TAP_PX
       ) {
         lastTap = null;
@@ -1053,6 +1158,7 @@ export function createFilingsEngine({ plate, host, magnetEls, embedded, callback
     dispose() {
       alive = false;
       cancelOpening();
+      clearGhostTimer();
       window.clearTimeout(relayoutTimer);
       if (raf) cancelAnimationFrame(raf);
       raf = 0;

@@ -6,7 +6,7 @@ export const WEAVES = [
 
 export const PRESETS = [
   { id: "silk", label: "Silk", values: { tension: 90, coupling: 5600, damping: 3.5 } },
-  { id: "linen", label: "Linen", values: { tension: 160, coupling: 2400, damping: 7 } },
+  { id: "linen", label: "Linen", values: { tension: 120, coupling: 4800, damping: 4 } },
   { id: "canvas", label: "Canvas", values: { tension: 240, coupling: 800, damping: 15 } },
 ];
 

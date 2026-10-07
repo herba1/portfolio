@@ -1,4 +1,4 @@
-import { DYE_DIFFUSION, PRESSURE_CARRY } from "./stirParams";
+import { DYE_DIFFUSION, DYE_MOVING_SPEED, PRESSURE_CARRY } from "./stirParams";
 
 export function createFluid(cols, rows, cellW, cellH) {
   const count = cols * rows;
@@ -10,6 +10,9 @@ export function createFluid(cols, rows, cellW, cellH) {
   let vNext = new Float32Array(count);
   let dye = new Float32Array(count);
   let dyeNext = new Float32Array(count);
+  const uHat = new Float32Array(count);
+  const vHat = new Float32Array(count);
+  const dyeHat = new Float32Array(count);
   let pressure = new Float32Array(count);
   let pressureNext = new Float32Array(count);
   const divergence = new Float32Array(count);
@@ -51,7 +54,27 @@ export function createFluid(cols, rows, cellW, cellH) {
     return upper + (lower - upper) * fy;
   }
 
-  function splat(px, py, vx, vy, grip, dyeAmount, dyeCap, radius, reach) {
+  function limit(field, x, y, value) {
+    const cx = x < 0 ? 0 : x > lastCol ? lastCol : x;
+    const cy = y < 0 ? 0 : y > lastRow ? lastRow : y;
+    const i0 = cx | 0;
+    const j0 = cy | 0;
+    const i1 = i0 < lastCol ? i0 + 1 : i0;
+    const j1 = j0 < lastRow ? j0 + 1 : j0;
+    const a = field[j0 * cols + i0];
+    const b = field[j0 * cols + i1];
+    const c = field[j1 * cols + i0];
+    const d = field[j1 * cols + i1];
+    let low = a < b ? a : b;
+    let high = a < b ? b : a;
+    if (c < low) low = c;
+    if (c > high) high = c;
+    if (d < low) low = d;
+    if (d > high) high = d;
+    return value < low ? low : value > high ? high : value;
+  }
+
+  function splat(px, py, vx, vy, grip, dyeAmount, dyeCap, radius, reach, dyeRadius = radius) {
     const centreI = px / cellW - 0.5;
     const centreJ = py / cellH - 0.5;
     const spanI = Math.ceil((radius * reach) / cellW);
@@ -62,13 +85,16 @@ export function createFluid(cols, rows, cellW, cellH) {
     const jEnd = Math.min(lastRow, Math.ceil(centreJ + spanJ));
     if (iStart > iEnd || jStart > jEnd) return;
     const inverseRadius = 1 / (radius * radius);
+    const inverseDyeRadius = 1 / (dyeRadius * dyeRadius);
+    const sharedFalloff = dyeRadius === radius;
     for (let j = jStart; j <= jEnd; j += 1) {
       const dy = (j - centreJ) * cellH;
       const dy2 = dy * dy;
       const row = j * cols;
       for (let i = iStart; i <= iEnd; i += 1) {
         const dx = (i - centreI) * cellW;
-        const falloff = Math.exp(-(dx * dx + dy2) * inverseRadius);
+        const squared = dx * dx + dy2;
+        const falloff = Math.exp(-squared * inverseRadius);
         if (falloff < 0.01) continue;
         const k = row + i;
         if (grip > 0) {
@@ -76,7 +102,10 @@ export function createFluid(cols, rows, cellW, cellH) {
           u[k] += (vx - u[k]) * pull;
           v[k] += (vy - v[k]) * pull;
         }
-        if (dyeAmount > 0 && dye[k] < dyeCap) dye[k] += (dyeCap - dye[k]) * Math.min(1, dyeAmount * falloff);
+        if (dyeAmount > 0 && dye[k] < dyeCap) {
+          const dyeFalloff = sharedFalloff ? falloff : Math.exp(-squared * inverseDyeRadius);
+          dye[k] += (dyeCap - dye[k]) * Math.min(1, dyeAmount * dyeFalloff);
+        }
       }
     }
   }
@@ -161,8 +190,22 @@ export function createFluid(cols, rows, cellW, cellH) {
         const k = row + i;
         const x = i - u[k] * stepX;
         const y = j - v[k] * stepY;
-        uNext[k] = sample(u, x, y) * keep;
-        vNext[k] = sample(v, x, y) * keep;
+        uHat[k] = sample(u, x, y);
+        vHat[k] = sample(v, x, y);
+      }
+    }
+    for (let j = 0; j < rows; j += 1) {
+      const row = j * cols;
+      for (let i = 0; i < cols; i += 1) {
+        const k = row + i;
+        const driftX = u[k] * stepX;
+        const driftY = v[k] * stepY;
+        const backX = i + driftX;
+        const backY = j + driftY;
+        const x = i - driftX;
+        const y = j - driftY;
+        uNext[k] = limit(u, x, y, uHat[k] + 0.5 * (u[k] - sample(uHat, backX, backY))) * keep;
+        vNext[k] = limit(v, x, y, vHat[k] + 0.5 * (v[k] - sample(vHat, backX, backY))) * keep;
       }
     }
     let swap = u;
@@ -236,21 +279,39 @@ export function createFluid(cols, rows, cellW, cellH) {
     state.maxSpeed = Math.sqrt(fastest);
   }
 
-  function advectDye(dt, keep, diffusion) {
+  function advectDye(dt, dyeTau, stillShare, diffusion) {
     const stepX = dt / cellW;
     const stepY = dt / cellH;
     const spread = Math.min(1, diffusion * dt);
+    const movingShare = 1 - stillShare;
+    const inverseMoving = 1 / DYE_MOVING_SPEED;
+    const inverseTau = dt / dyeTau;
     let densest = 0;
     for (let j = 0; j < rows; j += 1) {
       const row = j * cols;
       for (let i = 0; i < cols; i += 1) {
         const k = row + i;
-        const carried = sample(dye, i - u[k] * stepX, j - v[k] * stepY);
-        const left = i > 0 ? dye[k - 1] : dye[k];
-        const right = i < lastCol ? dye[k + 1] : dye[k];
-        const up = j > 0 ? dye[k - cols] : dye[k];
-        const down = j < lastRow ? dye[k + cols] : dye[k];
-        const settled = (carried + ((left + right + up + down) * 0.25 - dye[k]) * spread) * keep;
+        dyeHat[k] = sample(dye, i - u[k] * stepX, j - v[k] * stepY);
+      }
+    }
+    for (let j = 0; j < rows; j += 1) {
+      const row = j * cols;
+      for (let i = 0; i < cols; i += 1) {
+        const k = row + i;
+        const centre = dye[k];
+        const flowX = u[k];
+        const flowY = v[k];
+        const driftX = flowX * stepX;
+        const driftY = flowY * stepY;
+        const back = sample(dyeHat, i + driftX, j + driftY);
+        const carried = limit(dye, i - driftX, j - driftY, dyeHat[k] + 0.5 * (centre - back));
+        const left = i > 0 ? dye[k - 1] : centre;
+        const right = i < lastCol ? dye[k + 1] : centre;
+        const up = j > 0 ? dye[k - cols] : centre;
+        const down = j < lastRow ? dye[k + cols] : centre;
+        const motion = Math.sqrt(flowX * flowX + flowY * flowY) * inverseMoving;
+        const keep = Math.exp(-inverseTau / (stillShare + movingShare * (motion < 1 ? motion : 1)));
+        const settled = (carried + ((left + right + up + down) * 0.25 - centre) * spread) * keep;
         const value = settled > 0 ? settled : 0;
         dyeNext[k] = value;
         if (value > densest) densest = value;
@@ -262,13 +323,13 @@ export function createFluid(cols, rows, cellW, cellH) {
     state.maxDye = densest;
   }
 
-  function step(dt, { velocityTau, dyeTau, vorticity, iterations, maxSpeed }) {
+  function step(dt, { velocityTau, dyeTau, dyeStillShare, vorticity, iterations, maxSpeed }) {
     if (vorticity > 0) confine(dt, vorticity);
     advectVelocity(dt, Math.exp(-dt / velocityTau));
     project(iterations);
     subtractGradient(maxSpeed);
     applyKicks();
-    advectDye(dt, Math.exp(-dt / dyeTau), DYE_DIFFUSION);
+    advectDye(dt, dyeTau, dyeStillShare, DYE_DIFFUSION);
   }
 
   function fade(velocityKeep, dyeKeep) {

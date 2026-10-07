@@ -11,6 +11,8 @@ function mountCanvas(host) {
   const canvas = document.createElement("canvas");
   canvas.className = "loom-canvas";
   canvas.tabIndex = 0;
+  canvas.setAttribute("role", "application");
+  canvas.setAttribute("aria-roledescription", "loom");
   canvas.setAttribute("aria-label", CANVAS_LABEL);
   host.appendChild(canvas);
   return canvas;
@@ -76,9 +78,11 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
 
     const onKeyDown = (event) => engine.onKeyDown(event);
     const onBlur = () => engine.onBlur();
+    const onScroll = () => engine.invalidateRect();
     canvas.addEventListener("keydown", onKeyDown);
     canvas.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", sync);
+    window.addEventListener("scroll", onScroll, { passive: true, capture: true });
     sync();
 
     return () => {
@@ -87,6 +91,7 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
       canvas.removeEventListener("keydown", onKeyDown);
       canvas.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", sync);
+      window.removeEventListener("scroll", onScroll, { capture: true });
       latestRef.current.onEngine?.(null);
       engine.destroy();
       canvas.remove();

@@ -28,7 +28,9 @@ const UNIFORMS = [
   "uReveal",
   "uRestWeight",
   "uEntryWeight",
-  "uWeightRange",
+  "uPeakWeight",
+  "uRevealCentre",
+  "uRevealSpan",
   "uRevealSweep",
   "uRevealJitter",
   "uRevealCell",
@@ -77,8 +79,8 @@ function makeTexture(gl, unit, filter) {
   return texture;
 }
 
-function brush(force, grip, dye, cap, size) {
-  return { force, grip, dye, cap, size };
+function brush(force, grip, dye, cap, size, dyeSize = size) {
+  return { force, grip, dye, cap, size, dyeSize };
 }
 
 function wait(ms) {
@@ -123,9 +125,9 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
   canvas.setAttribute("aria-hidden", "true");
   stage.prepend(canvas);
   const atlasCanvas = document.createElement("canvas");
-  const hoverBrush = brush(P.HOVER_FORCE, P.HOVER_GRIP, P.DYE_PER_SPLAT, P.HOVER_DYE_CAP, 1);
-  const pressBrush = brush(P.FORCE, P.PRESS_GRIP, P.DYE_PER_SPLAT * 2, P.PRESS_DYE_CAP, 1);
-  const ghostBrush = brush(P.FORCE, P.PRESS_GRIP, 0, P.PRESS_DYE_CAP, P.GHOST_SIZE);
+  const hoverBrush = brush(P.HOVER_FORCE, P.HOVER_GRIP, P.DYE_PER_SPLAT, P.HOVER_DYE_CAP, 1, P.STROKE_DYE_SIZE);
+  const pressBrush = brush(P.FORCE, P.PRESS_GRIP, P.DYE_PER_SPLAT * 2, P.PRESS_DYE_CAP, 1, P.STROKE_DYE_SIZE);
+  const ghostBrush = brush(P.FORCE, P.PRESS_GRIP, 0, P.PRESS_DYE_CAP, P.GHOST_SIZE, P.GHOST_DYE_SIZE);
   const gustBrush = brush(P.FORCE, P.PRESS_GRIP, 0, P.GUST_DYE_CAP, 1);
   const ghost = { active: false, lifting: false, age: 0, cx: 0, cy: 0, reach: 0 };
   const stirrers = new Map();
@@ -137,6 +139,7 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
   const stepOptions = {
     velocityTau: P.VELOCITY_TAU,
     dyeTau: P.DYE_TAU,
+    dyeStillShare: P.DYE_STILL_SHARE,
     vorticity: 0,
     iterations: P.PRESSURE_ITERATIONS,
     maxSpeed: P.MAX_SPEED,
@@ -188,7 +191,7 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
     gl.uniform1i(uniforms.uDye, 2);
     gl.uniform1f(uniforms.uRestWeight, P.REST_WEIGHT);
     gl.uniform1f(uniforms.uEntryWeight, P.ENTRY_WEIGHT);
-    gl.uniform1f(uniforms.uWeightRange, P.PEAK_WEIGHT - P.REST_WEIGHT);
+    gl.uniform1f(uniforms.uPeakWeight, P.PEAK_WEIGHT);
     gl.uniform1f(uniforms.uRevealSweep, P.REVEAL_SWEEP);
     gl.uniform1f(uniforms.uRevealJitter, P.REVEAL_JITTER);
     gl.uniform1f(uniforms.uRevealCell, P.REVEAL_CELL);
@@ -260,25 +263,28 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
     layout = next;
     const { uniforms } = gpu;
 
-    if (gridChanged || tileChanged || !fluid) {
+    const rebuildGrid = gridChanged || tileChanged || !fluid;
+    if (rebuildGrid || !atlas) {
       const lines = layoutWall(tracks, next.cols, next.rows);
       const glyphs = glyphsOf(lines);
       const nextKey = glyphs.join("");
-      const slots = new Map(glyphs.map((glyph, index) => [glyph, index + 1]));
-      const bytes = new Uint8Array(next.cols * next.rows);
-      lines.forEach((line, row) => {
-        for (let col = 0; col < next.cols; col += 1) bytes[row * next.cols + col] = slots.get(line[col]) ?? 0;
-      });
-      gl.activeTexture(gl.TEXTURE1);
-      gl.bindTexture(gl.TEXTURE_2D, gpu.textTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, next.cols, next.rows, 0, gl.RED, gl.UNSIGNED_BYTE, bytes);
-      fluid = createFluid(next.cols, next.rows, next.cellW, next.cellH);
-      gl.activeTexture(gl.TEXTURE2);
-      gl.bindTexture(gl.TEXTURE_2D, gpu.dyeTexture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, next.cols, next.rows, 0, gl.RED, gl.FLOAT, fluid.dye);
-      for (const gust of gusts) gust.active = false;
-      for (const ring of rings) ring.active = false;
-      endGhost();
+      if (rebuildGrid) {
+        const slots = new Map(glyphs.map((glyph, index) => [glyph, index + 1]));
+        const bytes = new Uint8Array(next.cols * next.rows);
+        lines.forEach((line, row) => {
+          for (let col = 0; col < next.cols; col += 1) bytes[row * next.cols + col] = slots.get(line[col]) ?? 0;
+        });
+        gl.activeTexture(gl.TEXTURE1);
+        gl.bindTexture(gl.TEXTURE_2D, gpu.textTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, next.cols, next.rows, 0, gl.RED, gl.UNSIGNED_BYTE, bytes);
+        fluid = createFluid(next.cols, next.rows, next.cellW, next.cellH);
+        gl.activeTexture(gl.TEXTURE2);
+        gl.bindTexture(gl.TEXTURE_2D, gpu.dyeTexture);
+        gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, next.cols, next.rows, 0, gl.RED, gl.FLOAT, fluid.dye);
+        for (const gust of gusts) gust.active = false;
+        for (const ring of rings) ring.active = false;
+        endGhost();
+      }
       if (tileChanged || nextKey !== glyphKey || !atlas) {
         glyphKey = nextKey;
         atlas = buildAtlas({
@@ -308,6 +314,12 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
       }
     }
 
+    const gridWDev = next.cols * next.cellWDev;
+    const gridHDev = next.rows * next.cellHDev;
+    const revealX = gridWDev * P.GHOST_X;
+    const revealY = gridHDev * P.GHOST_Y;
+    gl.uniform2f(uniforms.uRevealCentre, revealX, revealY);
+    gl.uniform1f(uniforms.uRevealSpan, Math.max(1, Math.hypot(Math.max(revealX, gridWDev - revealX), Math.max(revealY, gridHDev - revealY))));
     gl.viewport(0, 0, next.widthDev, next.heightDev);
     gl.uniform2f(uniforms.uOrigin, next.originXDev, next.originYDev);
     gl.uniform2f(uniforms.uCell, next.cellWDev, next.cellHDev);
@@ -346,6 +358,7 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
 
   function stamp(x0, y0, x1, y1, vx, vy, dt, tool) {
     const radius = layout.radius * tool.size;
+    const dyeRadius = layout.radius * tool.dyeSize;
     const spacing = radius * 0.5;
     const distance = Math.hypot(x1 - x0, y1 - y0);
     const steps = Math.min(48, Math.max(1, Math.ceil(distance / spacing)));
@@ -356,7 +369,7 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
     const forceY = vy * tool.force;
     for (let index = 1; index <= steps; index += 1) {
       const t = index / steps;
-      fluid.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, forceX, forceY, grip, dyeAmount, tool.cap, radius, P.SPLAT_REACH);
+      fluid.splat(x0 + (x1 - x0) * t, y0 + (y1 - y0) * t, forceX, forceY, grip, dyeAmount, tool.cap, radius, P.SPLAT_REACH, dyeRadius);
     }
   }
 
@@ -594,6 +607,7 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
     const simStart = performance.now();
     stepOptions.velocityTau = reduced ? P.REDUCED_VELOCITY_TAU : P.VELOCITY_TAU;
     stepOptions.dyeTau = reduced ? P.REDUCED_DYE_TAU : P.DYE_TAU;
+    stepOptions.dyeStillShare = reduced ? 1 : P.DYE_STILL_SHARE;
     stepOptions.vorticity = reduced ? 0 : P.VORTICITY * layout.lineCss * P.VORTICITY_RATE;
     stepOptions.iterations = iterations;
     fluid.step(dt, stepOptions);
@@ -732,6 +746,8 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
   }
 
   function onKeyDown(event) {
+    const focused = document.activeElement;
+    if (focused && focused !== stage && focused !== document.body) return;
     if (event.defaultPrevented || event.metaKey || event.ctrlKey || event.altKey || typingInto(event.target)) return;
     const side = ARROW_SIDES[event.key];
     if (side) {
@@ -845,12 +861,28 @@ export function createStirWall({ stage, tracks, onWeight, onFail }) {
     observers = [];
   }
 
+  function rebakeFont(loaded) {
+    if (!loaded || destroyed || !gl || contextLost) return;
+    advanceRatio = measureAdvance(atlasCanvas.getContext("2d"), family, P.REST_WEIGHT);
+    glyphKey = "";
+    atlas = null;
+    if (!reduced && (introPending || ghost.active || revealSeconds < P.REVEAL_SECONDS)) {
+      endGhost();
+      fluid?.clear();
+      revealStart = -1;
+      revealSeconds = 0;
+      introPending = true;
+    }
+    scheduleResize();
+  }
+
   async function start() {
     const declared = getComputedStyle(stage).getPropertyValue("--font-geist-mono").trim();
     if (declared) family = `${declared}, ${FALLBACK_FAMILY}`;
-    const fontsReady = document.fonts?.load ? document.fonts.load(`${P.REST_WEIGHT} 20px ${family}`, "Ab0").catch(() => null) : Promise.resolve();
-    await Promise.race([fontsReady, wait(P.FONT_WAIT_MS)]);
+    const fontsReady = document.fonts?.load ? document.fonts.load(`${P.REST_WEIGHT} 20px ${family}`, "Ab0").then(() => true, () => false) : Promise.resolve(true);
+    const fontArrived = await Promise.race([fontsReady, wait(P.FONT_WAIT_MS).then(() => null)]);
     if (destroyed) return;
+    if (fontArrived === null) fontsReady.then(rebakeFont);
     gl = canvas.getContext("webgl2", {
       alpha: false,
       antialias: false,

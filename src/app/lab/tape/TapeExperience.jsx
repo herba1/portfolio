@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 import SlotNumber from "@/app/ui/SlotNumber";
 
 import { CAST, SHUTTLE_CHIPS } from "./tapeConstants";
 import { mountTape } from "./tapeEngine";
-import { fetchTapeWords } from "./tapeLyrics";
+import { clipWords, fetchTapeWords } from "./tapeLyrics";
 import "./tape.css";
 
 const INITIAL_DECK = {
@@ -17,6 +17,7 @@ const INITIAL_DECK = {
   audio: "loading",
   direction: "up",
   worn: false,
+  offset: undefined,
 };
 
 const HEAD_HEIGHT = 280;
@@ -35,7 +36,7 @@ export default function TapeExperience() {
   const castRef = useRef(null);
   const engineRef = useRef(null);
   const [deck, setDeck] = useState(INITIAL_DECK);
-  const [words, setWords] = useState(null);
+  const [lyricWords, setLyricWords] = useState(null);
 
   useEffect(() => {
     const engine = mountTape(
@@ -64,16 +65,22 @@ export default function TapeExperience() {
   useEffect(() => {
     const controller = new AbortController();
     fetchTapeWords(controller.signal)
-      .then(setWords)
+      .then(setLyricWords)
       .catch(() => {
-        if (!controller.signal.aborted) setWords([]);
+        if (!controller.signal.aborted) setLyricWords([]);
       });
     return () => controller.abort();
   }, []);
 
+  const words = useMemo(
+    () => (lyricWords && typeof deck.offset === "number" ? clipWords(lyricWords, deck.offset) : null),
+    [lyricWords, deck.offset],
+  );
+  const laneOpen = deck.offset !== null && (words === null || words.length > 0);
+
   useEffect(() => {
-    engineRef.current?.refreshWords(words === null || words.length > 0);
-  }, [words]);
+    engineRef.current?.refreshWords(laneOpen);
+  }, [words, laneOpen]);
 
   const sounding = deck.playing && (deck.audible || deck.audio === "none");
 

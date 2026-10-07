@@ -46,7 +46,7 @@ export function DevelopTitle({ className }) {
   return (
     <header className={`develop-head ${className}`}>
       <h1 className="develop-head__title text-title-sm">Develop</h1>
-      <p className="develop-head__hint text-ui-lg">Hold the sheet where the developer should run.</p>
+      <p className="develop-head__hint text-ui-lg">Press the sheet and the developer runs to your finger.</p>
     </header>
   );
 }

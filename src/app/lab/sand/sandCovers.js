@@ -29,7 +29,7 @@ function squareCanvas(image) {
   context.imageSmoothingQuality = "high";
   const side = Math.min(image.naturalWidth, image.naturalHeight);
   const sourceX = (image.naturalWidth - side) / 2;
-  const sourceY = (image.naturalHeight - side) / 2;
+  const sourceY = (image.naturalHeight - side) * 0.3;
   context.drawImage(image, sourceX, sourceY, side, side, 0, 0, COVER_TEXTURE_SIZE, COVER_TEXTURE_SIZE);
   context.getImageData(0, 0, 1, 1);
   return canvas;

@@ -18,6 +18,10 @@ const PROBE_EVERY = 20;
 const BEAD_GROW_S = 1.2;
 const INTRO_DELAY_MS = 920;
 const INSTANT_DRY_STEPS = 1600;
+const INSTANT_DRY_PER_FRAME = 160;
+const DESKTOP_SIGNATURE_SCALE = 0.53;
+const NIB_LINGER_MS = 200;
+const GHOST_MS = 340;
 const CLEARED = [0, 0, 0, 0];
 const BLOTTED = [0.1, 0.32, 1, 1];
 
@@ -37,6 +41,14 @@ export default class SignaturePad {
     this.canvas = null;
     this.nib = nib;
     this.nibPlaced = false;
+    this.nibScale = 1;
+    this.introNib = false;
+    this.nibTimer = 0;
+    this.hovering = false;
+    this.pointerAt = { x: 0, y: 0 };
+    this.ghost = null;
+    this.ghostTimer = 0;
+    this.instantDry = 0;
     this.callbacks = callbacks;
     this.reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
@@ -72,8 +84,8 @@ export default class SignaturePad {
     this.inkTarget = hexToLinear("#1d2740");
     this.renderSettings = { ink: new Float32Array(this.inkTarget), paper: hexToLinear(PAPER_HEX), granulation: 0.5, sheen: this.reducedMotion ? 0 : 1 };
     this.stepSettings = { absorb: 1, dry: 1, pin: 0.12, mobility: 0.9, granulation: 0.55 };
-    this.stampSettings = { concentration: 4.2, poolConcentration: 0.09, smear: 0.55, ink: this.inkTarget };
-    this.nibSettings = { min: 0.4, max: 3, contrast: 1, thinAtSpeed: 0.42, base: 0.12, pool: 4, bead: 9, smear: 0.55, pressure: 0.6 };
+    this.stampSettings = { concentration: 3.2, poolConcentration: 0.118, smear: 0.55, ink: this.inkTarget };
+    this.nibSettings = { min: 0.4, max: 3, contrast: 1, thinAtSpeed: 0.42, base: 0.16, pool: 4, bead: 9, smear: 0.55, pressure: 0.6 };
     this.dry = 1;
     this.introTimer = 0;
     this.introPending = false;
@@ -120,7 +132,10 @@ export default class SignaturePad {
     });
     this.intersection.observe(surface);
     this.measure();
-    this.introTimer = window.setTimeout(() => this.playIntro(), this.reducedMotion ? 0 : INTRO_DELAY_MS);
+    this.introTimer = window.setTimeout(() => {
+      this.introTimer = 0;
+      this.playIntro();
+    }, this.reducedMotion ? 0 : INTRO_DELAY_MS);
   }
 
   freshCanvas() {
@@ -182,13 +197,10 @@ export default class SignaturePad {
     if ((jump > 1.5 || jump < 0.67) && !this.userInk && !this.locked && this.inkLength > 0) {
       this.clearNow();
       this.playIntro();
-      return;
-    }
-    if (this.introPending) {
+    } else if (this.introPending) {
       this.playIntro();
-      return;
     }
-    if (!this.raf) this.paint();
+    this.paint();
   }
 
   applyDisplaySize() {
@@ -217,15 +229,90 @@ export default class SignaturePad {
     this.nib.style.transform = `translate3d(${point.x}px, ${point.y}px, 0)`;
   }
 
+  rememberPointer(point) {
+    this.pointerAt.x = point.x;
+    this.pointerAt.y = point.y;
+  }
+
   onPointerEnter(e) {
     this.rect = null;
     if (e.pointerType === "touch" || !this.finePointer) return;
-    this.moveNib(this.local(e));
+    this.hovering = true;
+    const point = this.local(e);
+    this.rememberPointer(point);
+    if (this.introNib) return;
+    this.moveNib(point);
     this.nib?.setAttribute("data-visible", this.locked ? "false" : "true");
   }
 
-  onPointerLeave() {
+  onPointerLeave(e) {
+    if (e.pointerType !== "touch") this.hovering = false;
+    if (this.introNib) return;
     this.nib?.setAttribute("data-visible", "false");
+  }
+
+  showIntroNib() {
+    window.clearTimeout(this.nibTimer);
+    this.nibTimer = 0;
+    this.introNib = true;
+  }
+
+  lingerIntroNib() {
+    if (!this.introNib) return;
+    this.nib?.setAttribute("data-down", "false");
+    window.clearTimeout(this.nibTimer);
+    this.nibTimer = window.setTimeout(() => {
+      this.nibTimer = 0;
+      this.introNib = false;
+      const keep = this.hovering && !this.locked;
+      if (keep) this.moveNib(this.pointerAt);
+      this.nib?.setAttribute("data-visible", keep ? "true" : "false");
+    }, NIB_LINGER_MS);
+  }
+
+  takeNib(isFine) {
+    window.clearTimeout(this.nibTimer);
+    this.nibTimer = 0;
+    this.introNib = false;
+    this.nib?.setAttribute("data-visible", isFine ? "true" : "false");
+  }
+
+  snapshotGhost() {
+    if (!this.canvas || this.lost || !this.host) return;
+    if (!this.ghost) {
+      this.ghost = document.createElement("canvas");
+      this.ghost.className = "wi-ghost";
+      this.ghost.setAttribute("aria-hidden", "true");
+      this.ghost.setAttribute("data-state", "off");
+      this.host.appendChild(this.ghost);
+    }
+    const ghost = this.ghost;
+    const context = ghost.getContext("2d");
+    if (!context) return;
+    this.paint();
+    ghost.width = this.canvas.width;
+    ghost.height = this.canvas.height;
+    context.drawImage(this.canvas, 0, 0);
+    ghost.setAttribute("data-state", "shown");
+    ghost.getBoundingClientRect();
+    ghost.setAttribute("data-state", "lifting");
+    window.clearTimeout(this.ghostTimer);
+    this.ghostTimer = window.setTimeout(() => {
+      this.ghostTimer = 0;
+      ghost.setAttribute("data-state", "off");
+      ghost.width = 1;
+      ghost.height = 1;
+    }, GHOST_MS);
+  }
+
+  liftIntroInk() {
+    this.queueCount = 0;
+    this.snapshotGhost();
+    this.clearNow();
+    if (this.signed) {
+      this.signed = false;
+      this.callbacks.onSigned?.(false);
+    }
   }
 
   onPointerDown(e) {
@@ -233,6 +320,9 @@ export default class SignaturePad {
     if (this.intro.active) this.endIntro();
     if (this.pen.down) return;
     e.preventDefault();
+    this.takeNib(e.pointerType !== "touch" && this.finePointer);
+    this.skipIntroDelay();
+    if (!this.userInk && this.inkLength > 0) this.liftIntroInk();
     this.rect = null;
     this.surface.setPointerCapture(e.pointerId);
     const point = this.local(e);
@@ -245,7 +335,10 @@ export default class SignaturePad {
 
   onPointerMove(e) {
     const point = this.local(e);
-    if (e.pointerType !== "touch") this.moveNib(point);
+    if (e.pointerType !== "touch") {
+      this.rememberPointer(point);
+      if (!this.introNib) this.moveNib(point);
+    }
     if (!this.pen.down || e.pointerId !== this.pen.id) return;
     const isPen = e.pointerType === "pen";
     const samples = typeof e.getCoalescedEvents === "function" ? e.getCoalescedEvents() : null;
@@ -267,7 +360,7 @@ export default class SignaturePad {
 
   nibRadius(shape) {
     const nib = this.nibSettings;
-    return nib.min + (nib.max - nib.min) * Math.min(1.3, Math.max(0, shape));
+    return (nib.min + (nib.max - nib.min) * Math.min(1.3, Math.max(0, shape))) * this.nibScale;
   }
 
   penDown(x, y, t, isPen, pressure) {
@@ -283,8 +376,16 @@ export default class SignaturePad {
     pen.still = 0;
     pen.r = this.nibRadius(pen.shape * this.pressureShape(isPen, pressure));
     pen.lastMoveAt = performance.now();
-    this.enqueue(x, y, x, y, pen.r, pen.r, this.nibSettings.pool * 0.016);
+    this.enqueue(x, y, x, y, pen.r, pen.r, this.poolVolume() * 0.016);
     this.wake();
+  }
+
+  poolVolume() {
+    return this.nibSettings.pool * this.nibScale * this.nibScale;
+  }
+
+  beadReach(seconds) {
+    return this.nibSettings.bead * this.nibScale * Math.sqrt(Math.min(seconds, BEAD_GROW_S));
   }
 
   pressureShape(isPen, pressure) {
@@ -311,7 +412,7 @@ export default class SignaturePad {
     const speedShape = 1 - (1 - nib.thinAtSpeed) * smoothstep(0, 2.4, pen.speed);
     const radius = pen.r + (this.nibRadius(pen.shape * speedShape * this.pressureShape(isPen, pressure)) - pen.r) * 0.45;
     const dwell = (dwellMs / 1000) * Math.min(1, (2 * radius) / dist);
-    this.enqueue(pen.x, pen.y, x, y, pen.r, radius, nib.pool * dwell);
+    this.enqueue(pen.x, pen.y, x, y, pen.r, radius, this.poolVolume() * dwell);
     pen.x = x;
     pen.y = y;
     pen.t = t;
@@ -328,8 +429,8 @@ export default class SignaturePad {
     const target = this.nibRadius(pen.shape * this.pressureShape(pen.isPen, pen.pressure));
     pen.r += (target - pen.r) * (1 - Math.exp(-dt * 6));
     pen.still += dt;
-    const bead = pen.r + this.nibSettings.bead * Math.sqrt(Math.min(pen.still, BEAD_GROW_S));
-    this.enqueue(pen.x, pen.y, pen.x, pen.y, bead, bead, this.nibSettings.pool * dt * Math.exp(-pen.still));
+    const bead = pen.r + this.beadReach(pen.still);
+    this.enqueue(pen.x, pen.y, pen.x, pen.y, bead, bead, this.poolVolume() * dt * Math.exp(-pen.still));
     this.addInk(dt * 40);
   }
 
@@ -337,8 +438,8 @@ export default class SignaturePad {
     const pen = this.pen;
     if (this.intro.instant) {
       const held = Math.max(0, t - pen.t) / 1000;
-      const bead = pen.r + this.nibSettings.bead * Math.sqrt(Math.min(held, BEAD_GROW_S));
-      if (held > 0.03) this.enqueue(pen.x, pen.y, pen.x, pen.y, bead, bead, this.nibSettings.pool * (1 - Math.exp(-held)));
+      const bead = pen.r + this.beadReach(held);
+      if (held > 0.03) this.enqueue(pen.x, pen.y, pen.x, pen.y, bead, bead, this.poolVolume() * (1 - Math.exp(-held)));
     }
     pen.down = false;
     pen.id = -1;
@@ -401,30 +502,39 @@ export default class SignaturePad {
     this.queueCount = 0;
   }
 
+  skipIntroDelay() {
+    if (!this.introTimer && !this.introPending) return;
+    window.clearTimeout(this.introTimer);
+    this.introTimer = 0;
+    this.introPending = false;
+    this.callbacks.onIntroDone?.();
+  }
+
   playIntro() {
+    window.clearTimeout(this.introTimer);
+    this.introTimer = 0;
     if (!this.sim || this.destroyed) return;
     if (!this.cssWidth || this.cssWidth < 120) {
       this.introPending = true;
       return;
     }
     this.introPending = false;
-    const { events } = buildSignature(this.cssWidth, this.cssHeight);
+    const { events, scale } = buildSignature(this.cssWidth, this.cssHeight);
     const intro = this.intro;
     intro.events = events;
     intro.index = 0;
     intro.active = true;
     intro.instant = this.reducedMotion;
     intro.start = this.pausedAt || performance.now();
+    this.nibScale = Math.min(1, Math.max(0.6, scale / DESKTOP_SIGNATURE_SCALE));
     if (intro.instant) {
       this.feedIntro(Infinity);
       this.flush();
-      this.stepSettings.dry = this.dry * this.dryBoost;
-      for (let i = 0; i < INSTANT_DRY_STEPS; i += 1) this.sim.step(SUBSTEP, this.stepSettings);
-      this.wetUntil = 0;
-      this.paint();
+      this.instantDry = INSTANT_DRY_STEPS;
       this.wake();
       return;
     }
+    this.showIntroNib();
     this.wake();
   }
 
@@ -432,14 +542,28 @@ export default class SignaturePad {
     const intro = this.intro;
     const elapsed = now - intro.start;
     const events = intro.events;
+    const instant = intro.instant;
+    let latest = null;
     while (intro.index < events.length && events[intro.index].t <= elapsed) {
       const event = events[intro.index];
       intro.index += 1;
       const stamp = intro.start + event.t;
-      if (event.kind === "down") this.penDown(event.x, event.y, stamp, false, 0.5);
-      else if (event.kind === "move") this.penMove(event.x, event.y, stamp, false, 0.5);
-      else this.penUp(stamp);
+      if (event.kind === "down") {
+        this.penDown(event.x, event.y, stamp, false, 0.5);
+        if (!instant) {
+          this.moveNib(event);
+          this.nib?.setAttribute("data-visible", "true");
+          this.nib?.setAttribute("data-down", "true");
+        }
+      } else if (event.kind === "move") {
+        this.penMove(event.x, event.y, stamp, false, 0.5);
+      } else {
+        this.penUp(stamp);
+        if (!instant) this.nib?.setAttribute("data-down", "false");
+      }
+      latest = event;
     }
+    if (latest && !instant) this.moveNib(latest);
     if (intro.index >= events.length) this.endIntro();
   }
 
@@ -450,6 +574,8 @@ export default class SignaturePad {
     intro.instant = false;
     intro.events = null;
     if (this.pen.down) this.penUp(performance.now());
+    this.nibScale = 1;
+    this.lingerIntroNib();
     this.callbacks.onIntroDone?.();
   }
 
@@ -459,6 +585,7 @@ export default class SignaturePad {
     this.pen.down = false;
     this.queueCount = 0;
     this.inkLength = 0;
+    this.instantDry = 0;
     this.sweep.active = false;
     this.sweep.then = null;
     this.sim.lift(4, 0.01, CLEARED);
@@ -467,11 +594,12 @@ export default class SignaturePad {
 
   clear(then) {
     if (!this.sim || this.sweep.active) return;
-    window.clearTimeout(this.introTimer);
+    this.skipIntroDelay();
     if (this.intro.active) this.endIntro();
     this.pen.down = false;
     this.queueCount = 0;
     this.inkLength = 0;
+    this.instantDry = 0;
     this.userInk = false;
     if (this.signed) {
       this.signed = false;
@@ -570,6 +698,7 @@ export default class SignaturePad {
     if (!this.sim) return;
     this.lost = false;
     this.inkLength = 0;
+    this.instantDry = 0;
     this.water.wet = false;
     if (this.signed && !this.locked) {
       this.signed = false;
@@ -596,7 +725,7 @@ export default class SignaturePad {
 
   sampleGovernor(dt) {
     const governor = this.governor;
-    if (dt > 0.12 || dt <= 0) return;
+    if (dt > 0.12 || dt <= 0 || this.instantDry > 0) return;
     governor.ema = governor.ema * 0.92 + dt * 1000 * 0.08;
     governor.frames += 1;
     if (governor.frames > 40 && governor.ema > 22 && governor.scale > 0.6) {
@@ -620,6 +749,12 @@ export default class SignaturePad {
     this.flush();
     if (this.sweep.active) this.runSweep(now);
     this.stepSettings.dry = this.dry * this.dryBoost;
+    if (this.instantDry > 0) {
+      const batch = Math.min(INSTANT_DRY_PER_FRAME, this.instantDry);
+      for (let i = 0; i < batch; i += 1) this.sim.step(SUBSTEP, this.stepSettings);
+      this.instantDry -= batch;
+      if (!this.instantDry) this.wetUntil = 0;
+    }
     this.accumulator += dt;
     let steps = 0;
     while (this.accumulator >= SUBSTEP && steps < MAX_SUBSTEPS) {
@@ -628,11 +763,11 @@ export default class SignaturePad {
       steps += 1;
     }
     if (steps === MAX_SUBSTEPS) this.accumulator = Math.min(this.accumulator, SUBSTEP);
-    this.paint();
     this.sampleGovernor(dt);
+    this.paint();
     this.probeWater();
     const drying = this.water.wet && now < this.water.deadline;
-    const busy = this.pen.down || this.intro.active || this.sweep.active || drying || now < this.wetUntil;
+    const busy = this.pen.down || this.intro.active || this.sweep.active || this.instantDry > 0 || drying || now < this.wetUntil;
     if (busy && !this.raf && this.visible && this.onscreen && !this.destroyed) this.raf = requestAnimationFrame(this.frame);
   }
 
@@ -640,6 +775,8 @@ export default class SignaturePad {
     this.destroyed = true;
     this.stop();
     window.clearTimeout(this.introTimer);
+    window.clearTimeout(this.nibTimer);
+    window.clearTimeout(this.ghostTimer);
     const surface = this.surface;
     surface.removeEventListener("pointerdown", this.handlers.down);
     surface.removeEventListener("pointermove", this.handlers.move);
@@ -657,5 +794,7 @@ export default class SignaturePad {
     this.sim = null;
     this.canvas?.remove();
     this.canvas = null;
+    this.ghost?.remove();
+    this.ghost = null;
   }
 }

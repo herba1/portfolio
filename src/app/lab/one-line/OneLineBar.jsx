@@ -9,7 +9,18 @@ const AXIS_LOCK_PX = 8;
 const VELOCITY_WINDOW_MS = 90;
 const SAMPLE_CAPACITY = 24;
 const CLICK_SUPPRESS_MS = 320;
-const INTRO_DELAY_MS = 360;
+const INTRO_FALLBACK_MS = 520;
+const INTRO_SETTLE_LEAD_MS = 240;
+
+function introDelay(bar) {
+  const phone = bar.closest(".ol-phone");
+  if (!phone || typeof phone.getAnimations !== "function") return INTRO_FALLBACK_MS;
+  const rise = phone.getAnimations().find((animation) => animation.animationName === "ol-rise");
+  if (!rise || rise.playState !== "running") return 0;
+  const endTime = Number(rise.effect?.getComputedTiming?.().endTime) || 0;
+  const elapsed = Number(rise.currentTime) || 0;
+  return Math.max(0, endTime - INTRO_SETTLE_LEAD_MS - elapsed);
+}
 
 export default function OneLineBar({ active, onSelect }) {
   const barRef = useRef(null);
@@ -71,7 +82,6 @@ export default function OneLineBar({ active, onSelect }) {
       reduced: motionQuery.matches,
     });
     engineRef.current = engine;
-    bar.setAttribute("data-live", "");
 
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[entries.length - 1];
@@ -79,6 +89,18 @@ export default function OneLineBar({ active, onSelect }) {
       engine.resize(box ? box.inlineSize : bar.offsetWidth);
     });
     resizeObserver.observe(bar);
+
+    let densityQuery = null;
+    const onDensity = () => {
+      engine.resize(bar.offsetWidth);
+      armDensity();
+    };
+    const armDensity = () => {
+      densityQuery?.removeEventListener("change", onDensity);
+      densityQuery = window.matchMedia(`(resolution: ${window.devicePixelRatio || 1}dppx)`);
+      densityQuery.addEventListener("change", onDensity);
+    };
+    armDensity();
 
     let onScreen = true;
     let hidden = document.hidden;
@@ -96,7 +118,7 @@ export default function OneLineBar({ active, onSelect }) {
     const onMotion = () => engine.setReduced(motionQuery.matches);
     motionQuery.addEventListener("change", onMotion);
 
-    const introTimer = window.setTimeout(() => engine.startIntro(), INTRO_DELAY_MS);
+    const introTimer = window.setTimeout(() => engine.startIntro(), introDelay(bar));
 
     const gesture = {
       id: -1,
@@ -224,6 +246,7 @@ export default function OneLineBar({ active, onSelect }) {
     return () => {
       window.clearTimeout(introTimer);
       resizeObserver.disconnect();
+      densityQuery?.removeEventListener("change", onDensity);
       intersectionObserver.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       motionQuery.removeEventListener("change", onMotion);
@@ -267,7 +290,7 @@ export default function OneLineBar({ active, onSelect }) {
               height={ICON_PX}
               aria-hidden="true"
             >
-              <path d={icon.path} />
+              <path d={icon.path} pathLength="1" />
             </svg>
             <span
               ref={(node) => {

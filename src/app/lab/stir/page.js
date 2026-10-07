@@ -12,7 +12,6 @@ export const metadata = {
   description: "A wall of Herb's tracklist where bold is a fluid: drag through it and weight swirls through the letters like ink in water.",
 };
 
-const MIN_TRACKS = 3;
 const MAX_TRACKS = 40;
 
 const loadTracks = unstable_cache(
@@ -27,7 +26,6 @@ const loadTracks = unstable_cache(
       seen.add(key);
       tracks.push({ title: track.title, artist: track.artist, durationMs: track.durationMs ?? null });
     }
-    if (tracks.length < MIN_TRACKS) throw new Error("too few tracks");
     return tracks.slice(0, MAX_TRACKS);
   },
   ["stir-tracks"],

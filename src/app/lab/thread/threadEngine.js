@@ -1,6 +1,8 @@
 import {
   CALM_WAVE_DAMPING,
+  SETTLE_WAVE_DAMPING,
   WAVE_DAMPING,
+  WAVE_SPEED,
   addBump,
   addPin,
   addPulse,
@@ -30,20 +32,25 @@ const SPRING_SUBSTEPS = 4;
 
 const SWAY = 0.6;
 const SWAY_CAP = 14;
-const PULL_CAP = 24;
+const PULL_CAP = 14;
 const LEFT_REACH = 52;
 const TENT_HALF = 28;
+const TENT_GROWTH = 0.4;
+const TENT_HALF_MAX = 80;
 const MAX_PLUCK = 42;
 
 const REMOVE_FRACTION = 0.35;
 const FLICK_SPEED = 0.55;
+const RETRACT_SPEED = -0.15;
 const RELEASE_WINDOW_MS = 90;
 const FLY_MS = 260;
 const CALM_FLY_MS = 180;
 const FLY_SCALE = 0.88;
 const CLOSE_DELAY_MS = 70;
+const CLOSE_STAGGER_MS = ((1000 * ROW_HEIGHT) / WAVE_SPEED) * 0.6;
 
 const LONG_PRESS_MS = 220;
+const TOUCH_LONG_PRESS_MS = 380;
 const AXIS_LOCK_PX = 8;
 const LIFT_X = 16;
 const LIFT_SCALE = 1.02;
@@ -56,13 +63,22 @@ const HOVER_BOW = 6;
 const HOVER_SIGMA = 60;
 const BEAD_PROXIMITY = 26;
 
-const INTRO_STAGGER_MS = 40;
-const INTRO_DROP = 24;
-const INTRO_WAVE_DELAY_MS = 300;
+const REVEAL_MS = 520;
+const INTRO_PULSE = 12;
+const INTRO_PULSE_WIDTH = 34;
+const FLY_PULSE_OFFSET = 20;
+const FLY_PULSE_WIDTH = 34;
+const FLY_PULSE_MIN = 14;
+const FLY_PULSE_MAX = 24;
+const INTRO_ROW_DELAY_MS = 80;
+const INTRO_CATCH_UP = 0.25;
 const REFILL_STAGGER_MS = 40;
 const ENTER_DISTANCE = 0.42;
 
-const REST_ENERGY = 0.01;
+const REST_DISPLACEMENT = 0.05;
+const REST_SPEED = 2;
+const SETTLE_PEAK = 1;
+const SHEET_OVERSHOOT = 24;
 const SAMPLE_SLOTS = 8;
 const MAX_BEADS = 32;
 
@@ -71,6 +87,11 @@ const clamp = (value, low, high) => Math.min(high, Math.max(low, value));
 function smoothstep(edge0, edge1, value) {
   const t = clamp((value - edge0) / (edge1 - edge0), 0, 1);
   return t * t * (3 - 2 * t);
+}
+
+function easeOutQuart(t) {
+  const inverse = 1 - t;
+  return 1 - inverse * inverse * inverse * inverse;
 }
 
 function easeOutCubic(t) {
@@ -130,11 +151,13 @@ export function createThreadEngine() {
   let canvas = null;
   let context = null;
   let sheet = null;
+  let head = null;
   let mounted = false;
   let introStarted = false;
-  let introWaveAt = 0;
   let introFrames = 0;
-  let introTimer = 0;
+  let revealStart = -1;
+  let revealProgress = 0;
+  let introPulsePending = false;
   let calm = false;
   let calmQuery = null;
   let resizeObserver = null;
@@ -144,20 +167,25 @@ export function createThreadEngine() {
   let lastTime = 0;
   let stringAwake = false;
   let pendingClose = 0;
+  let pendingCloseIndex = -1;
   let tail = 0;
   let tailVelocity = 0;
   let tailTarget = 0;
   let tailDelayUntil = 0;
   let width = 400;
   let height = 600;
-  let listTop = 0;
+  let listPageX = 0;
+  let listPageY = 0;
+  let pageScrollX = 0;
+  let pageScrollY = 0;
+  let stringPeak = Infinity;
   let dpr = 1;
   let threadInk = "#1a1a1a";
   let gesture = null;
   const hover = { active: false, x: 0, y: 0 };
   let bow = 0;
   let bowY = 0;
-  let lastSheetHeight = -1;
+  let lastSheetOffset = NaN;
   let tailPrimed = false;
   const tailState = { tail: 0, tailVelocity: 0 };
 
@@ -178,6 +206,11 @@ export function createThreadEngine() {
 
   function pluckSound(amplitude) {
     emit("onPluck", amplitude, string.bottom - string.top);
+  }
+
+  function excite() {
+    stringAwake = true;
+    stringPeak = Infinity;
   }
 
   function wake() {
@@ -232,6 +265,7 @@ export function createThreadEngine() {
       written: { y: NaN, slide: NaN, scale: NaN, opacity: NaN, cover: NaN, beadScale: NaN, text: NaN, exposed: -1, revealOpacity: NaN, label: NaN, armed: false },
     };
     if (row.mode === "enter") {
+      li.dataset.late = "true";
       row.opacity = 0;
       row.scale = calm ? 0.98 : FLY_SCALE;
       row.slide = calm ? 0 : width * ENTER_DISTANCE;
@@ -246,9 +280,13 @@ export function createThreadEngine() {
     image.decoding = "async";
     image.src = src;
     row.image = image;
-    const settle = (ok) => {
+    const apply = (ok) => {
       if (row.dead || row.image !== image) return;
       row.bead.dataset.state = ok ? "loaded" : "failed";
+    };
+    const settle = (ok) => {
+      if (row.dead || row.image !== image) return;
+      requestAnimationFrame(() => requestAnimationFrame(() => apply(ok)));
     };
     if (image.decode) image.decode().then(() => settle(true), () => settle(image.complete && image.naturalWidth > 0));
     else {
@@ -272,7 +310,10 @@ export function createThreadEngine() {
     order = ids;
     const time = now();
     const delay = pendingClose;
+    const gapIndex = pendingCloseIndex;
     pendingClose = 0;
+    pendingCloseIndex = -1;
+    let lastDelay = delay;
     let freshCount = 0;
     ids.forEach((id, index) => {
       const row = rows.get(id);
@@ -282,10 +323,8 @@ export function createThreadEngine() {
       if (row.fresh) {
         row.fresh = false;
         row.ty = target;
-        if (row.mode === "intro") {
-          row.y = calm || introStarted ? target : target - INTRO_DROP;
-        } else {
-          row.y = target;
+        row.y = target;
+        if (row.mode !== "intro") {
           row.delayUntil = time + freshCount * REFILL_STAGGER_MS;
           freshCount += 1;
         }
@@ -303,7 +342,12 @@ export function createThreadEngine() {
       }
       if (row.ty !== target) {
         row.ty = target;
-        if (delay && row.mode !== "lift" && row.vy === 0) row.delayUntil = time + delay;
+        if (delay && row.mode !== "lift" && row.vy === 0) {
+          const rowsBelowGap = gapIndex >= 0 ? Math.max(0, index - gapIndex) : 0;
+          const rowDelay = delay + (calm ? 0 : rowsBelowGap * CLOSE_STAGGER_MS);
+          row.delayUntil = time + rowDelay;
+          if (rowDelay > lastDelay) lastDelay = rowDelay;
+        }
       }
     });
     tailTarget = ids.length ? ids.length * ROW_HEIGHT : EMPTY_HEIGHT;
@@ -311,7 +355,7 @@ export function createThreadEngine() {
       tail = tailTarget;
       tailVelocity = 0;
       tailPrimed = true;
-    } else if (delay) tailDelayUntil = time + delay;
+    } else if (delay) tailDelayUntil = time + lastDelay;
     wake();
   }
 
@@ -319,11 +363,15 @@ export function createThreadEngine() {
     if (!list || !canvas) return;
     width = list.clientWidth;
     height = list.clientHeight;
-    listTop = list.offsetTop;
+    pageScrollX = window.scrollX;
+    pageScrollY = window.scrollY;
+    const rect = list.getBoundingClientRect();
+    listPageX = rect.left + pageScrollX;
+    listPageY = rect.top + pageScrollY;
     dpr = Math.min(2, window.devicePixelRatio || 1);
     canvas.width = Math.round(width * dpr);
     canvas.height = Math.round(height * dpr);
-    lastSheetHeight = -1;
+    lastSheetOffset = NaN;
     for (const row of rows.values()) row.written.exposed = -1;
     draw();
     wake();
@@ -348,21 +396,34 @@ export function createThreadEngine() {
     calm = event.matches;
   }
 
+  function onScroll() {
+    pageScrollX = window.scrollX;
+    pageScrollY = window.scrollY;
+  }
+
+  function introClock() {
+    if (!list) return 0;
+    const body = list.querySelector(".thread-row__body");
+    if (!body || !body.getAnimations) return 0;
+    for (const animation of body.getAnimations()) {
+      if (animation.animationName !== "thread-row-drop") continue;
+      const elapsed = Number(animation.currentTime);
+      return Number.isFinite(elapsed) ? elapsed : 0;
+    }
+    return 0;
+  }
+
   function startIntro() {
     introFrames = requestAnimationFrame(() => {
       introFrames = requestAnimationFrame(() => {
         introFrames = 0;
         if (!mounted) return;
         introStarted = true;
-        root.dataset.phase = "live";
-        const time = now();
-        for (const row of rows.values()) {
-          if (row.mode !== "intro") continue;
-          row.mode = "rest";
-          row.delayUntil = calm ? 0 : time + Math.max(0, row.index) * INTRO_STAGGER_MS;
-        }
-        if (!calm) introWaveAt = time + INTRO_WAVE_DELAY_MS;
-        introTimer = window.setTimeout(() => emit("onIntro"), 160);
+        for (const row of rows.values()) if (row.mode === "intro") row.mode = "rest";
+        const behind = clamp(introClock() - INTRO_ROW_DELAY_MS, 0, REVEAL_MS * INTRO_CATCH_UP);
+        revealStart = now() - behind;
+        revealProgress = calm ? 1 : 0;
+        introPulsePending = !calm;
         wake();
       });
     });
@@ -373,6 +434,7 @@ export function createThreadEngine() {
     list = elements.list;
     canvas = elements.canvas;
     sheet = elements.sheet;
+    head = elements.head;
     if (!root || !list || !canvas) return;
     string = createString(NODES_PER_ROW * Math.max(1, elements.capacity) + 1);
     context = canvas.getContext("2d");
@@ -390,8 +452,11 @@ export function createThreadEngine() {
     list.addEventListener("contextmenu", onContextMenu);
     list.addEventListener("mousedown", onMouseDown);
     document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("scroll", onScroll, { passive: true });
     resizeObserver = new ResizeObserver(measure);
     resizeObserver.observe(list);
+    resizeObserver.observe(root);
+    if (head) resizeObserver.observe(head);
     intersectionObserver = new IntersectionObserver((entries) => {
       onscreen = entries[entries.length - 1].isIntersecting;
       if (onscreen) wake();
@@ -412,7 +477,9 @@ export function createThreadEngine() {
     if (introFrames) cancelAnimationFrame(introFrames);
     frame = 0;
     introFrames = 0;
-    window.clearTimeout(introTimer);
+    introPulsePending = false;
+    revealStart = -1;
+    revealProgress = 0;
     if (gesture) window.clearTimeout(gesture.timer);
     gesture = null;
     if (calmQuery) calmQuery.removeEventListener("change", onCalmChange);
@@ -427,11 +494,11 @@ export function createThreadEngine() {
       list.removeEventListener("mousedown", onMouseDown);
     }
     document.removeEventListener("visibilitychange", onVisibility);
+    window.removeEventListener("scroll", onScroll);
     if (resizeObserver) resizeObserver.disconnect();
     if (intersectionObserver) intersectionObserver.disconnect();
     resizeObserver = null;
     intersectionObserver = null;
-    if (root) delete root.dataset.phase;
     if (root) delete root.dataset.gesture;
     context = null;
   }
@@ -486,7 +553,7 @@ export function createThreadEngine() {
       const pending = gesture;
       pending.timer = window.setTimeout(() => {
         if (gesture === pending && pending.kind === "pending") startLift(pending);
-      }, LONG_PRESS_MS);
+      }, event.pointerType === "touch" ? TOUCH_LONG_PRESS_MS : LONG_PRESS_MS);
     }
     wake();
   }
@@ -520,10 +587,9 @@ export function createThreadEngine() {
 
   function onPointerMove(event) {
     if (!gesture && event.pointerType === "mouse") {
-      const rect = list.getBoundingClientRect();
       hover.active = true;
-      hover.x = event.clientX - rect.left;
-      hover.y = event.clientY - rect.top;
+      hover.x = event.clientX + pageScrollX - listPageX;
+      hover.y = event.clientY + pageScrollY - listPageY;
       wake();
       return;
     }
@@ -631,8 +697,10 @@ export function createThreadEngine() {
     const reach = row.gestureDx;
     const pull = sampleString(string, row.y + BEAD_CENTER);
     row.pinned = false;
-    stringAwake = true;
-    if (!cancelled && (reach > width * REMOVE_FRACTION || (velocity > FLICK_SPEED && reach > 16))) {
+    excite();
+    const thrown = reach > width * REMOVE_FRACTION && velocity > RETRACT_SPEED;
+    const flicked = velocity > FLICK_SPEED && reach > 16;
+    if (!cancelled && (thrown || flicked)) {
       fly(row, Math.max(velocity, 0.7), pull);
       return;
     }
@@ -643,10 +711,10 @@ export function createThreadEngine() {
 
   function fly(row, velocity, pull) {
     const beadY = row.y + BEAD_CENTER;
-    const flick = Math.min(20, 4 + velocity * 12);
+    const flick = clamp(FLY_PULSE_MIN + velocity * 8, FLY_PULSE_MIN, FLY_PULSE_MAX);
     const room = Math.max(0, MAX_PLUCK - Math.abs(pull));
-    addBump(string, beadY, Math.min(flick, room), 42);
-    stringAwake = true;
+    addPulse(string, beadY + FLY_PULSE_OFFSET, Math.min(flick, room), FLY_PULSE_WIDTH);
+    excite();
     row.frozenCover = row.coverX;
     row.frozenText = row.textX;
     row.tent = row.threaded ? row.x : 0;
@@ -657,6 +725,7 @@ export function createThreadEngine() {
     row.flyVelocity = velocity;
     row.armed = false;
     pendingClose = CLOSE_DELAY_MS;
+    pendingCloseIndex = row.index;
     if (navigator.vibrate) navigator.vibrate(6);
     pluckSound(Math.abs(pull) + flick);
     emit("onRemove", row.id);
@@ -668,11 +737,12 @@ export function createThreadEngine() {
     row.pinned = false;
     row.ty = rowTop(active.slot);
     row.vy = 0;
-    row.x = row.coverX - sampleString(string, row.y + BEAD_CENTER) - bowAt(row.y + BEAD_CENTER);
+    const beadY = row.y + BEAD_CENTER;
+    row.x = row.coverX - sampleString(string, beadY) - bowAt(beadY) - tentsAt(beadY, row);
     row.vx = 0;
     row.settling = true;
     delete row.li.dataset.lifted;
-    stringAwake = true;
+    excite();
     pluckSound(Math.abs(row.liftX) + 6);
     if (active.slot !== row.index) {
       const next = order.filter((id) => id !== row.id);
@@ -756,7 +826,7 @@ export function createThreadEngine() {
       row.slide = 0;
       row.slideVelocity = 0;
       addBump(string, row.y + BEAD_CENTER, 16, 42);
-      stringAwake = true;
+      excite();
       pluckSound(16);
     }
   }
@@ -768,12 +838,19 @@ export function createThreadEngine() {
     lastTime = time;
     let busy = false;
 
-    if (introWaveAt) {
+    if (revealStart >= 0 && revealProgress < 1) {
       busy = true;
-      if (time >= introWaveAt) {
-        introWaveAt = 0;
-        addPulse(string, string.top + 56, 10, 34);
-        stringAwake = true;
+      const elapsed = clamp((time - revealStart) / REVEAL_MS, 0, 1);
+      revealProgress = elapsed >= 1 ? 1 : easeOutQuart(elapsed);
+    }
+    if (introPulsePending) {
+      busy = true;
+      const firstBead = LIST_PAD_TOP + BEAD_CENTER;
+      const tip = string.top + (string.bottom - string.top) * revealProgress;
+      if (tip >= firstBead) {
+        introPulsePending = false;
+        addPulse(string, firstBead, INTRO_PULSE, INTRO_PULSE_WIDTH);
+        excite();
       }
     }
 
@@ -837,9 +914,11 @@ export function createThreadEngine() {
     }
 
     if (stringAwake || string.pinCount) {
-      const energy = stepString(string, dt, calm ? CALM_WAVE_DAMPING : WAVE_DAMPING);
-      if (energy < REST_ENERGY && !string.pinCount) {
+      const waveDamping = calm ? CALM_WAVE_DAMPING : stringPeak < SETTLE_PEAK && !string.pinCount ? SETTLE_WAVE_DAMPING : WAVE_DAMPING;
+      stringPeak = stepString(string, dt, waveDamping);
+      if (stringPeak < REST_DISPLACEMENT && string.peakSpeed < REST_SPEED && !string.pinCount) {
         clearString(string);
+        stringPeak = Infinity;
         stringAwake = false;
       } else {
         stringAwake = true;
@@ -861,6 +940,12 @@ export function createThreadEngine() {
     }
 
     for (const row of rows.values()) {
+      if (!row.pinned || !row.threaded || row.mode === "fly" || row.mode === "gone") continue;
+      const beadY = row.y + BEAD_CENTER;
+      row.x = row.coverWant - (sampleString(string, beadY) + bowAt(beadY) + tentsAt(beadY, row));
+    }
+
+    for (const row of rows.values()) {
       if (row.mode === "gone") {
         writeRow(row, row.frozenCover, row.frozenText);
         continue;
@@ -876,8 +961,7 @@ export function createThreadEngine() {
         continue;
       }
       const beadY = row.y + BEAD_CENTER;
-      const ride = sampleString(string, beadY) + bowAt(beadY);
-      if (row.pinned) row.x = row.coverWant - ride;
+      const ride = sampleString(string, beadY) + bowAt(beadY) + tentsAt(beadY, row);
       const sway = calm ? 0 : clamp(ride * SWAY, -SWAY_CAP, SWAY_CAP);
       row.coverX = ride + row.x;
       row.textX = row.x + sway + (ride - sway) * row.attach;
@@ -910,10 +994,11 @@ export function createThreadEngine() {
 
   function writeSheet() {
     if (!sheet) return;
-    const next = Math.round((listTop + LIST_PAD_TOP + tail + LIST_PAD_BOTTOM) * 10) / 10;
-    if (next === lastSheetHeight) return;
-    lastSheetHeight = next;
-    sheet.style.height = `${next}px`;
+    const offset = Math.min(SHEET_OVERSHOOT, LIST_PAD_TOP + tail + LIST_PAD_BOTTOM - height);
+    const next = Math.round(offset * 10) / 10;
+    if (next === lastSheetOffset) return;
+    lastSheetOffset = next;
+    sheet.style.transform = `translate3d(0, ${next}px, 0)`;
   }
 
   function writeRow(row, cover, text) {
@@ -975,14 +1060,16 @@ export function createThreadEngine() {
     }
   }
 
-  function tentsAt(y) {
+  function tentsAt(y, skip = null) {
     let total = 0;
     for (const row of rows.values()) {
+      if (row === skip) continue;
       const amplitude = row.mode === "fly" ? row.tent : row.threaded && row.mode !== "gone" ? row.x : 0;
       if (amplitude > -0.01 && amplitude < 0.01) continue;
+      const half = clamp(TENT_HALF + TENT_GROWTH * Math.abs(amplitude), TENT_HALF, TENT_HALF_MAX);
       const distance = Math.abs(y - (row.y + BEAD_CENTER));
-      if (distance >= TENT_HALF) continue;
-      total += amplitude * (1 - distance / TENT_HALF);
+      if (distance >= half) continue;
+      total += amplitude * (0.5 + 0.5 * Math.cos((Math.PI * distance) / half));
     }
     return total;
   }
@@ -1054,6 +1141,17 @@ export function createThreadEngine() {
     const ratio = dpr;
     context.setTransform(ratio, 0, 0, ratio, 0, 0);
     context.clearRect(0, 0, width, height);
+    if (revealProgress <= 0) return;
+    if (revealProgress < 1) {
+      const tipY = top + (bottom - top) * revealProgress;
+      for (let index = 1; index < count; index += 1) {
+        if (pointY[index] < tipY) continue;
+        pointY[index] = tipY;
+        pointX[index] = threadXAt(tipY);
+        count = index + 1;
+        break;
+      }
+    }
     if (count < 2) return;
 
     let length = 0;
@@ -1076,10 +1174,14 @@ export function createThreadEngine() {
       context.bezierCurveTo(c1x, c1y, c2x, c2y, pointX[index + 1], pointY[index + 1]);
     }
     context.stroke();
+    const topKnot = 3 * Math.min(1, revealProgress * 6);
+    const bottomKnot = 3 * smoothstep(0.82, 1, revealProgress);
     context.beginPath();
-    context.arc(THREAD_X, top, 3, 0, Math.PI * 2);
-    context.moveTo(THREAD_X + 3, bottom);
-    context.arc(THREAD_X, bottom, 3, 0, Math.PI * 2);
+    context.arc(THREAD_X, top, topKnot, 0, Math.PI * 2);
+    if (bottomKnot > 0.05) {
+      context.moveTo(THREAD_X + bottomKnot, bottom);
+      context.arc(THREAD_X, bottom, bottomKnot, 0, Math.PI * 2);
+    }
     context.fill();
   }
 
@@ -1097,7 +1199,7 @@ export function createThreadEngine() {
     addBump(string, row.y + BEAD_CENTER, 12 * (direction < 0 ? -1 : 1), 42);
     row.settling = true;
     row.li.dataset.settling = "true";
-    stringAwake = true;
+    excite();
     pluckSound(12);
     wake();
   }

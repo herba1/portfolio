@@ -32,39 +32,40 @@ const PADDLE_MAX_CELLS = 260;
 const STATS_SECONDS_SCALE = 256;
 const STILL_TAU = 0.2;
 const STILL_WET_DEPTH = 0.1;
+const PRESS_DEPTH = 1.6;
+const PRESS_RADIUS = 0.11;
+const PRESS_TAU = 0.04;
 
 function compileShader(gl, type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    const log = gl.getShaderInfoLog(shader);
-    gl.deleteShader(shader);
-    throw new Error(log || "shader failed to compile");
-  }
   return shader;
 }
 
-function linkProgram(gl, vertexShader, fragmentSource) {
+function startProgram(gl, vertexShader, fragmentSource) {
   const fragmentShader = compileShader(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
   gl.attachShader(program, vertexShader);
   gl.attachShader(program, fragmentShader);
   gl.linkProgram(program);
-  gl.detachShader(program, fragmentShader);
-  gl.deleteShader(fragmentShader);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-    const log = gl.getProgramInfoLog(program);
-    gl.deleteProgram(program);
+  return { program, fragmentShader, uniforms: {}, linked: false };
+}
+
+function finishProgram(gl, entry) {
+  if (!gl.getProgramParameter(entry.program, gl.LINK_STATUS)) {
+    const log = gl.getShaderInfoLog(entry.fragmentShader) || gl.getProgramInfoLog(entry.program);
     throw new Error(log || "program failed to link");
   }
-  const uniforms = {};
-  const count = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
+  gl.detachShader(entry.program, entry.fragmentShader);
+  gl.deleteShader(entry.fragmentShader);
+  entry.fragmentShader = null;
+  const count = gl.getProgramParameter(entry.program, gl.ACTIVE_UNIFORMS);
   for (let index = 0; index < count; index += 1) {
-    const info = gl.getActiveUniform(program, index);
-    if (info) uniforms[info.name] = gl.getUniformLocation(program, info.name);
+    const info = gl.getActiveUniform(entry.program, index);
+    if (info) entry.uniforms[info.name] = gl.getUniformLocation(entry.program, info.name);
   }
-  return { program, uniforms };
+  entry.linked = true;
 }
 
 function pickFormats(gl) {
@@ -157,18 +158,21 @@ export function createDevelopEngine(canvas, { gridWidth }) {
   const gridW = gridWidth;
   const gridH = Math.round(gridWidth / PLATE_ASPECT);
 
+  const parallel = gl.getExtension("KHR_parallel_shader_compile");
   const vertexShader = compileShader(gl, gl.VERTEX_SHADER, FULLSCREEN_VERTEX);
   const programs = {
-    cockle: linkProgram(gl, vertexShader, COCKLE_FRAGMENT),
-    reset: linkProgram(gl, vertexShader, RESET_FRAGMENT),
-    flux: linkProgram(gl, vertexShader, FLUX_FRAGMENT),
-    height: linkProgram(gl, vertexShader, HEIGHT_FRAGMENT),
-    develop: linkProgram(gl, vertexShader, DEVELOP_FRAGMENT),
-    field: linkProgram(gl, vertexShader, FIELD_FRAGMENT),
-    stats: linkProgram(gl, vertexShader, STATS_FRAGMENT),
-    still: linkProgram(gl, vertexShader, STILL_FRAGMENT),
-    print: linkProgram(gl, vertexShader, PRINT_FRAGMENT),
+    cockle: startProgram(gl, vertexShader, COCKLE_FRAGMENT),
+    reset: startProgram(gl, vertexShader, RESET_FRAGMENT),
+    flux: startProgram(gl, vertexShader, FLUX_FRAGMENT),
+    height: startProgram(gl, vertexShader, HEIGHT_FRAGMENT),
+    develop: startProgram(gl, vertexShader, DEVELOP_FRAGMENT),
+    field: startProgram(gl, vertexShader, FIELD_FRAGMENT),
+    stats: startProgram(gl, vertexShader, STATS_FRAGMENT),
+    still: startProgram(gl, vertexShader, STILL_FRAGMENT),
+    print: startProgram(gl, vertexShader, PRINT_FRAGMENT),
   };
+  const programList = Object.values(programs);
+  let linked = false;
 
   const flux = createPair(gl, gridW, gridH, formats.vector);
   const height = createPair(gl, gridW, gridH, formats.scalar);
@@ -197,7 +201,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
 
   const lean = [0, REST_LEAN_Y];
   const leanVelocity = [0, 0];
-  const paddle = { on: 0, x: 0.5, y: 0.5, vx: 0, vy: 0 };
+  const paddle = { on: 0, x: 0.5, y: 0.5, vx: 0, vy: 0, press: 0, pressTarget: 0 };
   let sheetSeed = 0.37;
   let fieldDirty = true;
   let platePxW = 1;
@@ -211,6 +215,26 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.uniform1i(location, unit);
+  };
+
+  const prepare = () => {
+    if (linked) return true;
+    if (parallel) {
+      for (const entry of programList) {
+        if (!gl.getProgramParameter(entry.program, parallel.COMPLETION_STATUS_KHR)) return false;
+      }
+    }
+    if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+      throw new Error(gl.getShaderInfoLog(vertexShader) || "vertex shader failed to compile");
+    }
+    for (const entry of programList) finishProgram(gl, entry);
+    linked = true;
+    return true;
+  };
+
+  const easePress = (dt) => {
+    paddle.press += (paddle.pressTarget - paddle.press) * (1 - Math.exp(-dt / PRESS_TAU));
+    if (paddle.pressTarget === 0 && paddle.press < 0.002) paddle.press = 0;
   };
 
   const begin = (program, target) => {
@@ -289,6 +313,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     gl.uniform1f(u.uPaddleOn, paddle.on);
     gl.uniform1f(u.uPaddleRadius, PADDLE_RADIUS);
     gl.uniform1f(u.uPaddleMix, 1 - Math.exp(-dt * PADDLE_RATE));
+    gl.uniform4f(u.uPress, paddle.x, paddle.y, paddle.press, PRESS_RADIUS);
     draw();
     swap(flux);
   };
@@ -328,6 +353,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
 
   const simulate = (dt, targetX, targetY) => {
     stepSpring(dt, targetX, targetY);
+    easePress(dt);
     const substeps = Math.min(MAX_SUBSTEPS, Math.max(1, Math.ceil(dt * SIM_RATE)));
     const subDt = dt / substeps;
     const damp = Math.pow(settings.slosh, subDt * 240);
@@ -344,6 +370,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     lean[1] += (targetY - lean[1]) * follow;
     leanVelocity[0] = 0;
     leanVelocity[1] = 0;
+    easePress(dt);
     const u = begin(programs.still, height.read);
     bindTexture(0, cockle.texture, u.uCockle);
     gl.uniform2f(u.uGrid, gridW, gridH);
@@ -353,6 +380,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     gl.uniform1f(u.uLevel, restLevel());
     gl.uniform1f(u.uMaxShift, MAX_LEAN - REST_LEAN_Y);
     gl.uniform1f(u.uWetDepth, STILL_WET_DEPTH);
+    gl.uniform4f(u.uPress, paddle.x, paddle.y, paddle.press / PRESS_DEPTH, PRESS_RADIUS);
     draw();
     clearTarget(flux.read);
     fieldDirty = true;
@@ -400,6 +428,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     gl.uniform1f(u.uWater, water);
     gl.uniform1f(u.uSeed, sheetSeed * 97);
     gl.uniform1f(u.uHasImage, imageTexture ? 1 : 0);
+    gl.uniform4f(u.uPress, paddle.x, paddle.y, (paddle.press / PRESS_DEPTH) * water, PRESS_RADIUS);
     draw();
   };
 
@@ -463,16 +492,17 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     settings.lith = next.lith;
     hexToRgb(next.paper, paper);
     hexToRgb(next.silver, silver);
-    if (Math.abs(previousDepth - next.depth) > 1e-6 && previousDepth > 0) {
+    if (linked && Math.abs(previousDepth - next.depth) > 1e-6 && previousDepth > 0) {
       runHeight(0, next.depth / previousDepth);
       fieldDirty = true;
     }
   };
 
-  const setPaddle = (on, x, y, vx, vy) => {
+  const setPaddle = (on, pressed, x, y, vx, vy) => {
     const speed = Math.hypot(vx * gridW, vy * gridH);
     const limit = speed > PADDLE_MAX_CELLS ? PADDLE_MAX_CELLS / speed : 1;
     paddle.on = on;
+    paddle.pressTarget = pressed ? PRESS_DEPTH : 0;
     paddle.x = x;
     paddle.y = y;
     paddle.vx = vx * limit;
@@ -493,10 +523,10 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     if (canvas.height !== heightPx) canvas.height = heightPx;
   };
 
-  const capture = (context, width, heightPx) => {
+  const capture = (context, width, heightPx, water) => {
     render(0);
     context.drawImage(canvas, 0, 0, width, heightPx);
-    render(1);
+    render(water);
   };
 
   const motion = () =>
@@ -515,7 +545,10 @@ export function createDevelopEngine(canvas, { gridWidth }) {
       gl.deleteFramebuffer(target.framebuffer);
       gl.deleteTexture(target.texture);
     }
-    for (const program of Object.values(programs)) gl.deleteProgram(program.program);
+    for (const entry of programList) {
+      if (entry.fragmentShader) gl.deleteShader(entry.fragmentShader);
+      gl.deleteProgram(entry.program);
+    }
     gl.deleteShader(vertexShader);
     gl.deleteVertexArray(vao);
     if (imageTexture) gl.deleteTexture(imageTexture);
@@ -525,6 +558,7 @@ export function createDevelopEngine(canvas, { gridWidth }) {
 
   return {
     gl,
+    prepare,
     lean,
     leanVelocity,
     resetSheet,
@@ -545,6 +579,9 @@ export function createDevelopEngine(canvas, { gridWidth }) {
     destroy,
     get hasImage() {
       return Boolean(imageTexture);
+    },
+    get pressing() {
+      return paddle.press > 0;
     },
     get statsPending() {
       return statsFence !== null;

@@ -17,6 +17,7 @@
 
 .counter[data-embedded] .counter-stage {
   height: 100%;
+  touch-action: pan-y;
 }
 
 .counter-stage {
@@ -157,7 +158,7 @@
   flex: none;
   margin-left: auto;
   height: 32px;
-  padding-inline: 14px;
+  padding-inline: 16px;
   border: 0;
   border-radius: 999px;
   background: var(--color-surface-raised);
@@ -170,7 +171,7 @@
   transition:
     opacity 200ms var(--ease-hover),
     filter 200ms var(--ease-hover),
-    transform 300ms var(--ease-overshoot);
+    transform 200ms var(--ease-entrance);
 }
 
 .counter-surface[data-shown] {

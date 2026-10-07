@@ -33,9 +33,8 @@ const LENS_PRESS_BLOCKS = 7.5;
 const TICK_RADIUS_CSS = 0.85;
 const RING_STEP = 20 / 255;
 const RING_RATE = 0.22;
-const TICK_FULL_SPEED = 5;
+const TICK_FULL_SPEED = 4;
 const LUMA_SHARE = 0.6;
-const PAPER = [0.914, 0.929, 0.953];
 
 const INTRO_SWIPE = { from: [0.08, 0.14], via: [0.38, 0.66], to: [0.94, 0.82], seconds: 0.5, gain: 0.24 };
 
@@ -103,11 +102,6 @@ function setFloat(gl, target, name, value) {
 function setVec2(gl, target, name, x, y) {
   const location = target.uniforms[name];
   if (location) gl.uniform2f(location, x, y);
-}
-
-function setVec3(gl, target, name, values) {
-  const location = target.uniforms[name];
-  if (location) gl.uniform3f(location, values[0], values[1], values[2]);
 }
 
 function mipLevels(size) {
@@ -195,6 +189,7 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
   let fieldShow = 0;
   let reveal = reducedMotion ? 1 : 0;
   let revealStart = -1;
+  let holdingCover = !reducedMotion;
 
   let cssSize = 0;
   let deviceRatio = 1;
@@ -437,7 +432,7 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
   function evictTextures() {
     const keep = new Set([target, nextIndex(target)]);
     if (pending >= 0) keep.add(pending);
-    if (!seeded) keep.add(current);
+    if (!seeded || holdingCover) keep.add(current);
     textures.forEach((texture, index) => {
       if (keep.has(index)) return;
       gl.deleteTexture(texture);
@@ -483,6 +478,7 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
     if (!introPlayed) {
       introPlayed = true;
       script = { swipe: INTRO_SWIPE, elapsed: 0, previous: bezierPoint(INTRO_SWIPE, 0, [0, 0]) };
+      afterDrag = true;
       presimRemaining = PRESIM_FRAMES;
     }
     dirty = true;
@@ -892,9 +888,17 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
     setFloat(gl, program, "uLensShow", lensShow);
     setFloat(gl, program, "uFieldShow", fieldShow);
     setFloat(gl, program, "uReveal", reveal);
-    setVec3(gl, program, "uPaper", PAPER);
+    const coverTexture = reveal < 1 ? textures.get(current) : null;
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, coverTexture ?? gpu.blank);
+    setInt(gl, program, "uCover", 2);
+    setFloat(gl, program, "uHasCover", coverTexture ? 1 : 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     dirty = false;
+    if (reveal >= 1 && holdingCover) {
+      holdingCover = false;
+      evictTextures();
+    }
   }
 
   function easeOverlays(dt) {
@@ -996,6 +1000,8 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
 
   requestCover(current);
   requestCover(target);
+  callbacks.onCovers?.({ current, target });
+  callbacks.onFrames?.(0, true);
 
   return {
     bufferSize: size,
@@ -1098,6 +1104,7 @@ export default function createMoshEngine({ canvas, covers, bufferSize, dprCap, r
       if (!playable() || reducedMotion) return;
       const swipe = SWIPES[((index % SWIPES.length) + SWIPES.length) % SWIPES.length];
       script = { swipe, elapsed: 0, previous: bezierPoint(swipe, 0, [0, 0]) };
+      afterDrag = true;
       wake();
     },
     keyframe(index) {

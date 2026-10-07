@@ -19,6 +19,8 @@
 .cm-stage {
   position: absolute;
   inset: 0;
+  z-index: 0;
+  isolation: isolate;
   color: var(--color-ink);
   touch-action: none;
   user-select: none;
@@ -260,6 +262,27 @@
   max-width: 100%;
   overflow: hidden;
   white-space: nowrap;
+}
+
+.cm-player__text[data-clipped] .cm-player__title {
+  -webkit-mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 calc(100% - 48px),
+    rgb(0 0 0 / 0.82) calc(100% - 36px),
+    rgb(0 0 0 / 0.5) calc(100% - 24px),
+    rgb(0 0 0 / 0.18) calc(100% - 10px),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to right,
+    #000 0%,
+    #000 calc(100% - 48px),
+    rgb(0 0 0 / 0.82) calc(100% - 36px),
+    rgb(0 0 0 / 0.5) calc(100% - 24px),
+    rgb(0 0 0 / 0.18) calc(100% - 10px),
+    transparent 100%
+  );
 }
 
 .cm-player__meta {
@@ -517,7 +540,7 @@
   }
 
   .cm-player {
-    max-width: calc(100cqw - 400px);
+    max-width: calc(100cqw - 440px);
   }
 }
 
@@ -534,6 +557,12 @@
     right: 16px;
     bottom: 76px;
     max-width: none;
+  }
+}
+
+@media (max-height: 500px) {
+  .cm-head p {
+    display: none;
   }
 }
 

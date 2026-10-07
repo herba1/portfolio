@@ -137,7 +137,7 @@ void main() {
   float deposit = centre.b;
   float depth = 0.35 + 0.65 * smoothstep(0.1, 0.6, max(highest, water));
   float rim = smoothstep(0.0, 0.1, water) * (1.0 - smoothstep(0.0, 0.06, lowest)) * depth;
-  float evaporation = uDt * uDry * (0.08 + 1.1 * rim + 0.2 * water);
+  float evaporation = uDt * uDry * (0.05 + 0.2 * water + 1.1 * rim * smoothstep(0.18, 0.5, highest));
   water = max(water - evaporation, 0.0);
   float dryness = 1.0 - clamp(water / 0.6, 0.0, 1.0);
   float settle = uDt * (0.08 + 2.4 * dryness * dryness) * mix(1.0, 0.7 + 0.6 * fibre.g, uGranulation);
@@ -202,6 +202,17 @@ float hash(vec2 p) {
   return fract(sin(dot(mod(p, 289.0), vec2(127.1, 311.7))) * 43758.5453);
 }
 
+const vec3 LIGHT_HALFWAY = vec3(-0.358, 0.418, 0.835);
+
+float waterAt(vec2 uv) {
+  return textureLod(uState, uv, 0.0).r * uRange.r;
+}
+
+float smoothedWater(vec2 uv, vec2 texel) {
+  float corners = waterAt(uv + texel) + waterAt(uv - texel) + waterAt(uv + vec2(texel.x, -texel.y)) + waterAt(uv + vec2(-texel.x, texel.y));
+  return 0.4 * waterAt(uv) + 0.15 * corners;
+}
+
 vec3 inkAt(vec2 uv) {
   vec4 tint = texture(uTint, uv);
   vec3 stored = tint.rgb / max(tint.a, 0.001);
@@ -242,18 +253,19 @@ void main() {
 
   vec2 uv = fragment / uResolution;
   vec2 texel = 1.0 / uSimRes;
-  float water = texture(uState, uv).r * uRange.r;
-  float east = texture(uState, uv + vec2(texel.x, 0.0)).r * uRange.r;
-  float west = texture(uState, uv - vec2(texel.x, 0.0)).r * uRange.r;
-  float north = texture(uState, uv + vec2(0.0, texel.y)).r * uRange.r;
-  float south = texture(uState, uv - vec2(0.0, texel.y)).r * uRange.r;
-  vec3 normal = normalize(vec3((west - east) * 4.0, (south - north) * 4.0, 1.0));
-  vec3 halfway = normalize(vec3(-0.6, 0.7, 1.4));
-  float wet = smoothstep(0.02, 0.3, water) * uSheen;
-  float gloss = pow(max(dot(normal, halfway), 0.0), 14.0) * wet;
+  float water = waterAt(uv);
   float bloom = ink * (1.0 - ink) * 4.0 * clamp(water, 0.0, 1.0) * uSheen;
   colour += sqrt(inkAt(uv)) * bloom * 0.07;
-  colour += vec3(gloss * 0.4);
+  float meniscus = smoothstep(0.03, 0.2, water) * uSheen;
+  if (meniscus > 0.0) {
+    float east = smoothedWater(uv + vec2(texel.x, 0.0), texel);
+    float west = smoothedWater(uv - vec2(texel.x, 0.0), texel);
+    float north = smoothedWater(uv + vec2(0.0, texel.y), texel);
+    float south = smoothedWater(uv - vec2(0.0, texel.y), texel);
+    vec3 normal = normalize(vec3((west - east) * 5.0, (south - north) * 5.0, 1.0));
+    float glint = pow(max(dot(normal, LIGHT_HALFWAY), 0.0), 40.0);
+    colour += vec3(glint * 0.5 * meniscus);
+  }
 
   colour = pow(clamp(colour, 0.0, 1.0), vec3(1.0 / 2.2));
   colour += (hash(fragment + 7.0) - 0.5) / 255.0;

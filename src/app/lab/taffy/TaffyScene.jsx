@@ -105,8 +105,17 @@ export default function TaffyScene({
     if (!engine || !entry) return undefined;
     engine.show(entry.title).catch((error) => console.error(error));
     const following = titles[(index + 1) % titles.length];
-    if (!following || following === entry) return undefined;
-    return idle(() => engineRef.current?.prefetch(following.title));
+    const preceding = titles[(index - 1 + titles.length) % titles.length];
+    let cancelPreceding = null;
+    const cancelFollowing = idle(() => {
+      if (following && following !== entry) engineRef.current?.prefetch(following.title);
+      if (!preceding || preceding === entry || preceding === following) return;
+      cancelPreceding = idle(() => engineRef.current?.prefetch(preceding.title));
+    });
+    return () => {
+      cancelFollowing();
+      cancelPreceding?.();
+    };
   }, [titles, index]);
 
   const handlePointerDown = (event) => {

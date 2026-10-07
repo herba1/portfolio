@@ -85,10 +85,34 @@ export function createCrackle() {
     }
   }
 
+  function whoosh() {
+    const at = context.currentTime;
+    const source = context.createBufferSource();
+    source.buffer = noise;
+    const filter = context.createBiquadFilter();
+    filter.type = "lowpass";
+    filter.frequency.setValueAtTime(320, at);
+    filter.frequency.exponentialRampToValueAtTime(2400, at + 0.18);
+    filter.frequency.exponentialRampToValueAtTime(700, at + 0.5);
+    const gain = context.createGain();
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.exponentialRampToValueAtTime(0.16, at + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
+    source.connect(filter);
+    filter.connect(gain);
+    gain.connect(master);
+    source.start(at, Math.random() * 0.4, 0.6);
+    source.onended = () => {
+      source.disconnect();
+      filter.disconnect();
+      gain.disconnect();
+    };
+  }
+
   return {
     wake() {
       if (!context && !build()) return;
-      if (context.state === "suspended") context.resume();
+      if (context.state === "suspended") context.resume().catch(() => {});
       syncTimer();
     },
     setLevel(next) {
@@ -103,27 +127,17 @@ export function createCrackle() {
     },
     catchFire() {
       if (!context || !enabled) return;
-      const at = context.currentTime;
-      const source = context.createBufferSource();
-      source.buffer = noise;
-      const filter = context.createBiquadFilter();
-      filter.type = "lowpass";
-      filter.frequency.setValueAtTime(320, at);
-      filter.frequency.exponentialRampToValueAtTime(2400, at + 0.18);
-      filter.frequency.exponentialRampToValueAtTime(700, at + 0.5);
-      const gain = context.createGain();
-      gain.gain.setValueAtTime(0.0001, at);
-      gain.gain.exponentialRampToValueAtTime(0.16, at + 0.05);
-      gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
-      source.connect(filter);
-      filter.connect(gain);
-      gain.connect(master);
-      source.start(at, Math.random() * 0.4, 0.6);
-      source.onended = () => {
-        source.disconnect();
-        filter.disconnect();
-        gain.disconnect();
-      };
+      if (context.state !== "suspended") {
+        whoosh();
+        return;
+      }
+      const waiting = context;
+      waiting.resume().then(
+        () => {
+          if (context === waiting && enabled) whoosh();
+        },
+        () => {},
+      );
     },
     dispose() {
       if (timer) window.clearInterval(timer);

@@ -11,7 +11,10 @@ import { createPluckSound } from "./threadSound";
 import "./thread.css";
 
 const TOAST_MS = 5200;
-const ROLL_STAGGER_MS = 1400;
+
+function dismissToast(current) {
+  return current && !current.leaving ? { ...current, leaving: true } : current;
+}
 
 function moveItem(list, from, to) {
   const next = list.slice();
@@ -29,12 +32,13 @@ export default function ThreadExperience({ covers }) {
   const [exiting, setExiting] = useState([]);
   const [removed, setRemoved] = useState([]);
   const [toast, setToast] = useState(null);
-  const [ready, setReady] = useState(false);
-  const [rollStagger, setRollStagger] = useState(true);
+  const [toastSeen, setToastSeen] = useState(false);
   const [muted, setMuted] = useState(false);
   const [focusId, setFocusId] = useState(null);
+  const [announcement, setAnnouncement] = useState("");
 
   const rootRef = useRef(null);
+  const headRef = useRef(null);
   const listRef = useRef(null);
   const canvasRef = useRef(null);
   const sheetRef = useRef(null);
@@ -43,6 +47,8 @@ export default function ThreadExperience({ covers }) {
   const mutedRef = useRef(false);
   const orderRef = useRef(order);
   const pendingFocusRef = useRef(null);
+  const refillRef = useRef(null);
+  const refillFocusRef = useRef(false);
   const serialRef = useRef(0);
 
   const getEngine = useCallback(() => {
@@ -69,7 +75,9 @@ export default function ThreadExperience({ covers }) {
       setOrder(next);
       setExiting((list) => (list.includes(id) ? list : [...list, id]));
       setRemoved((stack) => [...stack, { id, index }]);
-      setToast({ id, title: track ? track.title : "Song", serial });
+      setToast({ id, title: track ? track.title : "Song", serial, leaving: false });
+      setToastSeen(true);
+      setAnnouncement(`Removed ${track ? track.title : "song"}. ${next.length} left.`);
     },
     [byId],
   );
@@ -81,20 +89,25 @@ export default function ThreadExperience({ covers }) {
     const next = orderRef.current.slice();
     next.splice(Math.min(last.index, next.length), 0, last.id);
     orderRef.current = next;
+    pendingFocusRef.current = last.id;
     setOrder(next);
     setRemoved(removed.slice(0, -1));
     setExiting((list) => list.filter((id) => id !== last.id));
-    setToast(null);
-  }, [removed, unlockSound]);
+    setToast(dismissToast);
+    const track = byId.get(last.id);
+    setAnnouncement(`Restored ${track ? track.title : "song"}.`);
+  }, [removed, unlockSound, byId]);
 
   const refill = useCallback(() => {
     unlockSound();
     const next = tracks.map((track) => track.id);
     orderRef.current = next;
+    pendingFocusRef.current = next[0] ?? null;
     setOrder(next);
     setRemoved([]);
     setExiting([]);
-    setToast(null);
+    setToast(dismissToast);
+    setAnnouncement(`Queue refilled with ${next.length} songs.`);
   }, [tracks, unlockSound]);
 
   useEffect(() => {
@@ -116,7 +129,6 @@ export default function ThreadExperience({ covers }) {
         pendingFocusRef.current = id;
         setOrder(next);
       },
-      onIntro: () => setReady(true),
       onGesture: unlockSound,
       onTap: (id) => getEngine().focusRow(id),
       onPluck: (amplitude, length) => {
@@ -129,6 +141,7 @@ export default function ThreadExperience({ covers }) {
     const engine = getEngine();
     engine.mount({
       root: rootRef.current,
+      head: headRef.current,
       list: listRef.current,
       canvas: canvasRef.current,
       sheet: sheetRef.current,
@@ -148,17 +161,17 @@ export default function ThreadExperience({ covers }) {
     }
   }, [order, getEngine]);
 
+  const toastSerial = toast && !toast.leaving ? toast.serial : 0;
   useEffect(() => {
-    if (!toast) return undefined;
-    const timer = window.setTimeout(() => setToast(null), TOAST_MS);
+    if (!toastSerial) return undefined;
+    const timer = window.setTimeout(() => setToast((current) => (current && current.serial === toastSerial ? dismissToast(current) : current)), TOAST_MS);
     return () => window.clearTimeout(timer);
-  }, [toast]);
+  }, [toastSerial]);
 
-  useEffect(() => {
-    if (!ready) return undefined;
-    const timer = window.setTimeout(() => setRollStagger(false), ROLL_STAGGER_MS);
-    return () => window.clearTimeout(timer);
-  }, [ready]);
+  const onToastAnimationEnd = useCallback((event) => {
+    if (event.target !== event.currentTarget) return;
+    setToast((current) => (current && current.leaving ? null : current));
+  }, []);
 
   const onFocusRow = useCallback((id) => setFocusId(id), []);
 
@@ -199,10 +212,11 @@ export default function ThreadExperience({ covers }) {
       if (event.key === "Delete" || event.key === "Backspace") {
         event.preventDefault();
         const neighbour = current[index + 1] ?? current[index - 1] ?? null;
-        if (engine.remove(id) && neighbour) {
+        if (!engine.remove(id)) return;
+        if (neighbour) {
           pendingFocusRef.current = neighbour;
           engine.focusRow(neighbour);
-        }
+        } else refillFocusRef.current = true;
       }
     },
     [getEngine, undo, unlockSound],
@@ -210,34 +224,43 @@ export default function ThreadExperience({ covers }) {
 
   const queued = useMemo(() => order.map((id) => byId.get(id)).filter(Boolean), [order, byId]);
   const rows = useMemo(() => {
-    const list = queued.map((track, index) => ({ track, index, live: true }));
-    for (const id of exiting) {
-      if (order.includes(id)) continue;
-      const track = byId.get(id);
-      if (!track) continue;
-      const entry = removed.findLast((item) => item.id === id);
-      list.push({ track, index: entry ? entry.index : 0, live: false });
-    }
+    const list = [];
+    tracks.forEach((track, slot) => {
+      const live = order.indexOf(track.id);
+      if (live >= 0) {
+        list.push({ track, slot, index: live, live: true });
+        return;
+      }
+      if (!exiting.includes(track.id)) return;
+      const entry = removed.findLast((item) => item.id === track.id);
+      list.push({ track, slot, index: entry ? entry.index : slot, live: false });
+    });
     return list;
-  }, [queued, exiting, order, byId, removed]);
+  }, [tracks, order, exiting, removed]);
   const songs = queued.length;
   const minutes = totalMinutes(queued);
   const tabId = order.includes(focusId) ? focusId : order[0];
   const empty = songs === 0;
 
+  useLayoutEffect(() => {
+    if (!empty || !refillFocusRef.current) return;
+    refillFocusRef.current = false;
+    if (refillRef.current) refillRef.current.focus();
+  }, [empty]);
+
   return (
-    <main
-      ref={rootRef}
-      className="thread"
-      onKeyDown={onKeyDown}
-      data-roll-stagger={rollStagger ? "true" : undefined}
-    >
+    <main ref={rootRef} className="thread" onKeyDown={onKeyDown}>
       <noscript>
-        <style>{".thread-row{opacity:1!important;filter:none!important}"}</style>
+        <style>{".thread-bead__image{opacity:1;filter:none;transform:none}"}</style>
       </noscript>
       <section className="thread-card" aria-labelledby="thread-title">
-        <div ref={sheetRef} className="thread-sheet" aria-hidden="true" />
-        <header className="thread-head">
+        <div className="thread-sheet" aria-hidden="true">
+          <div className="thread-sheet__cap" />
+          <div className="thread-sheet__clip">
+            <div ref={sheetRef} className="thread-sheet__body" />
+          </div>
+        </div>
+        <header ref={headRef} className="thread-head">
           <div className="thread-head__top">
             <h1 id="thread-title" className="thread-head__title text-title-sm">
               Up next
@@ -256,12 +279,12 @@ export default function ThreadExperience({ covers }) {
             </button>
           </div>
           <p className="thread-meta text-ui">
-            <span className="thread-count" data-short={(ready ? songs : 0) < 10 ? "true" : undefined}>
-              <SlotNumber value={ready ? songs : 0} pad={2} label={String(songs)} />
+            <span className="thread-count" data-short={songs < 10 ? "true" : undefined}>
+              <SlotNumber value={songs} pad={2} label={String(songs)} />
             </span>{" "}
             {songs === 1 ? "song" : "songs"} ·{" "}
-            <span className="thread-count" data-short={(ready ? minutes : 0) < 10 ? "true" : undefined}>
-              <SlotNumber value={ready ? minutes : 0} pad={2} label={String(minutes)} />
+            <span className="thread-count" data-short={minutes < 10 ? "true" : undefined}>
+              <SlotNumber value={minutes} pad={2} label={String(minutes)} />
             </span>{" "}
             min
           </p>
@@ -269,13 +292,13 @@ export default function ThreadExperience({ covers }) {
         <div ref={listRef} className="thread-list" style={{ height: `${listHeight(capacity)}px` }}>
           <canvas ref={canvasRef} className="thread-canvas" aria-hidden="true" />
           <ol className="thread-rows" aria-label="Up next">
-            {rows.map(({ track, index, live }) => (
+            {rows.map(({ track, slot, index, live }) => (
               <ThreadRow
                 key={track.id}
                 track={track}
+                slot={slot}
                 index={index}
                 total={songs}
-                numbered={ready}
                 tabbable={live && track.id === tabId}
                 register={registerRow}
                 onFocusRow={onFocusRow}
@@ -286,29 +309,41 @@ export default function ThreadExperience({ covers }) {
             <div className="thread-empty">
               <p className="text-heading">Nothing up next</p>
               <p className="thread-empty__line text-ui">The thread is bare.</p>
-              <button type="button" className="thread-button text-ui" onClick={refill}>
+              <button ref={refillRef} type="button" className="thread-button text-ui" onClick={refill}>
                 Refill the queue
               </button>
             </div>
           ) : null}
         </div>
       </section>
-      <div className="thread-dock" aria-live="polite">
+      <div className="thread-dock">
+        <p className="thread-sr" role="status" aria-live="polite">
+          {announcement}
+        </p>
         {toast ? (
-          <div key={toast.serial} className="thread-toast text-ui">
+          <div
+            className="thread-toast text-ui"
+            data-state={toast.leaving ? "leaving" : "shown"}
+            onAnimationEnd={onToastAnimationEnd}
+          >
             <span className="thread-toast__text">
-              Removed <strong>{toast.title}</strong>
+              Removed{" "}
+              <strong key={toast.serial} className="thread-toast__title">
+                {toast.title}
+              </strong>
             </span>
-            <button type="button" className="thread-toast__undo text-ui" onClick={undo}>
+            <button type="button" className="thread-toast__undo text-ui" onClick={undo} tabIndex={toast.leaving ? -1 : 0}>
               Undo
             </button>
           </div>
         ) : (
-          <p key="hint" className="thread-hint text-ui-sm">
-            Swipe a song right to remove it · hold to reorder
+          <p className="thread-hint text-ui-sm" data-return={toastSeen ? "true" : undefined}>
+            <span className="thread-hint__long">Swipe a song right to remove it · hold to reorder</span>
+            <span className="thread-hint__short">Swipe right to remove · hold to reorder</span>
           </p>
         )}
       </div>
     </main>
   );
 }
+

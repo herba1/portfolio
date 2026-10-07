@@ -28,7 +28,12 @@ const SCALE_SPRING = { stiffness: 320, damping: 11 };
 const REST_LENGTH_OMEGA = 12;
 const TUG_OMEGA = 26;
 const TUG_DAMPING_RATIO = 0.42;
-const TUG_PX = 2;
+const TUG_PX = 4;
+const UNPICK_SHARE = 0.18;
+const SNAG_DRIFT = 3;
+const SNAG_CLEARANCE = 0.5;
+const STRAND_WIDTH = 1.5;
+const NEAR_INK_SHARE = 0.6;
 const TUG_REACH = 16;
 const PROJECTION_SECONDS = 0.12;
 const STUB_GAIN = 0.35;
@@ -57,6 +62,16 @@ const WEIGHT_STEPS = Array.from({ length: 101 }, (_, step) => `"wght" ${490 + st
 const COVER_STEPS = Array.from({ length: 101 }, (_, step) => (step / 100).toFixed(2));
 const TUG_STEPS = Array.from({ length: 49 }, (_, step) => `translate3d(0, ${(((step - 8) / 40) * TUG_PX).toFixed(3)}px, 0)`);
 const NEAR_STEPS = Array.from({ length: 49 }, (_, step) => (Math.max(0, step - 8) / 40).toFixed(3));
+const UNPICK_STEPS = Array.from({ length: 49 }, (_, step) => (step > 8 ? (-((step - 8) / 40) * UNPICK_SHARE).toFixed(4) : "0"));
+const ICON_CUM = ICONS.map((icon) => {
+  const cum = new Float32Array(icon.count);
+  for (let index = 1; index < icon.count; index += 1) {
+    const dx = icon.points[index * 2] - icon.points[index * 2 - 2];
+    const dy = icon.points[index * 2 + 1] - icon.points[index * 2 - 1];
+    cum[index] = cum[index - 1] + Math.hypot(dx, dy);
+  }
+  return cum;
+});
 const BELL = Float32Array.from({ length: TRAIN_POINTS }, (_, index) => Math.pow(Math.sin((Math.PI * index) / (TRAIN_POINTS - 1)), 0.5));
 
 function wrapAngle(angle) {
@@ -397,6 +412,13 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
   const ink = readColor(canvas, "--color-ink", "#1a1a1a");
   const [inkR, inkG, inkB] = colorChannels(ink);
   const inkStyle = `rgb(${inkR} ${inkG} ${inkB})`;
+  const [softR, softG, softB] = colorChannels(readColor(canvas, "--color-ink-secondary", "#6b6b6b"));
+  const strandStyles = NEAR_STEPS.map((near) => {
+    const share = Number(near) * NEAR_INK_SHARE;
+    const mix = (soft, strong) => Math.round(soft + (strong - soft) * share);
+    return `rgb(${mix(softR, inkR)} ${mix(softG, inkG)} ${mix(softB, inkB)})`;
+  });
+  const strokes = icons.map((node) => node?.querySelector("path") ?? null);
 
   const state = {
     goal: initial,
@@ -436,6 +458,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
     visible: true,
     railMin: Infinity,
     railMax: -Infinity,
+    origin: -1,
   };
 
   const swapIn = () => {
@@ -480,6 +503,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
     state.resting = true;
     state.intro = false;
     state.pendingSide = 0;
+    state.origin = -1;
   };
 
   const rebuildToward = (goal, stubDir) => {
@@ -553,6 +577,8 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
       if (!node) continue;
       node.style.transform = TUG_STEPS[step];
       node.style.setProperty("--ol-near", NEAR_STEPS[step]);
+      const stroke = strokes[icon];
+      if (stroke) stroke.style.strokeDashoffset = UNPICK_STEPS[step];
     }
   };
 
@@ -562,6 +588,10 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
       if (state.fadeTo >= 0) {
         coverage[state.fadeTo] = 1;
       } else coverage[state.goal] = 1;
+      return;
+    }
+    if (state.introPending || state.intro) {
+      coverage[state.goal] = 1;
       return;
     }
     for (let span = 0; span < track.spanCount; span += 1) {
@@ -617,6 +647,54 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
     strokeTrain(alpha);
   };
 
+  const drawStrand = (icon, step) => {
+    const amount = (step - 8) / 40;
+    const definition = ICONS[icon];
+    const cum = ICON_CUM[icon];
+    const points = definition.points;
+    const unpicked = amount * UNPICK_SHARE * definition.length;
+    if (unpicked < 0.05) return;
+    let end = 1;
+    while (end < definition.count - 1 && cum[end] < unpicked) end += 1;
+    const t = clamp((unpicked - cum[end - 1]) / (cum[end] - cum[end - 1] || 1), 0, 1);
+    const originX = layout.originX[icon];
+    const lift = ICON_TOP + amount * TUG_PX;
+    const anchorX = originX + (points[end * 2 - 2] + (points[end * 2] - points[end * 2 - 2]) * t) * UNIT;
+    const anchorY = lift + (points[end * 2 - 1] + (points[end * 2 + 1] - points[end * 2 - 1]) * t) * UNIT;
+    const freeX = originX + points[0] * UNIT + track.railDir * SNAG_DRIFT * amount;
+    const freeY = RAIL_Y - SNAG_CLEARANCE;
+    const pull = Math.sqrt(amount);
+    context.strokeStyle = strandStyles[step];
+    context.beginPath();
+    for (let index = 0; index <= end; index += 1) {
+      const last = index === end;
+      const share = last ? 1 : cum[index] / unpicked;
+      const x = last ? anchorX : originX + points[index * 2] * UNIT;
+      const y = last ? anchorY : lift + points[index * 2 + 1] * UNIT;
+      const tautX = freeX + (anchorX - freeX) * share;
+      const tautY = freeY + (anchorY - freeY) * share;
+      const drawX = x + (tautX - x) * pull;
+      const drawY = y + (tautY - y) * pull;
+      if (index === 0) context.moveTo(drawX, drawY);
+      else context.lineTo(drawX, drawY);
+    }
+    context.stroke();
+  };
+
+  const drawStrands = () => {
+    let drawn = false;
+    for (let icon = 0; icon < TAB_COUNT; icon += 1) {
+      const step = writtenTug[icon];
+      if (step <= 8) continue;
+      if (!drawn) {
+        context.lineWidth = STRAND_WIDTH;
+        drawn = true;
+      }
+      drawStrand(icon, step);
+    }
+    if (drawn) context.strokeStyle = inkStyle;
+  };
+
   const draw = () => {
     context.setTransform(1, 0, 0, 1, 0, 0);
     context.clearRect(0, 0, canvas.width, canvas.height);
@@ -632,6 +710,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
       } else drawRestIcon(state.goal, 1);
       return;
     }
+    drawStrands();
     const length = state.head - state.tail;
     state.railMin = Infinity;
     state.railMax = -Infinity;
@@ -783,7 +862,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
 
     const omega = TUG_OMEGA;
     for (let icon = 0; icon < TAB_COUNT; icon += 1) {
-      const covered = coverage[icon] > 0 || icon === state.goal || icon === track.target;
+      const covered = coverage[icon] > 0 || icon === state.goal || icon === track.target || icon === state.origin;
       const center = layout.centers[icon];
       const gap = center < state.railMin ? state.railMin - center : center > state.railMax ? center - state.railMax : 0;
       const near = Number.isFinite(state.railMin) ? Math.exp(-((gap / TUG_REACH) * (gap / TUG_REACH))) : 0;
@@ -907,7 +986,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
     const target = state.goal;
     const fromRight = layout.centers[target] < layout.width / 2;
     track.reset();
-    track.push(fromRight ? layout.width + 16 : -16, RAIL_Y);
+    track.push(fromRight ? layout.width : 0, RAIL_Y);
     track.heading = fromRight ? Math.PI : 0;
     routeToGoal(track, layout, target, fromRight ? -1 : 1);
     state.head = 0;
@@ -954,6 +1033,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
       return;
     }
     const fromRest = state.resting && !release;
+    if (goal !== state.goal && !release) state.origin = state.goal;
     let goalTail;
     if (track.target === goal && !track.stub) {
       state.goalHead = track.length;
@@ -997,6 +1077,7 @@ export function createLineTrain({ canvas, icons, labels, initial = 0, reduced = 
     if (state.reduced || !layout.width || state.introPending) return false;
     state.dragging = true;
     state.dragVelocity = 0;
+    if (state.resting) state.origin = state.goal;
     state.headVelocity = 0;
     state.intro = false;
     state.pendingSide = 0;

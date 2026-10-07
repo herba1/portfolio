@@ -136,6 +136,7 @@ export default function ScorchStage({
     const ringOwners = new Map();
     const timers = new Set();
     let rect = plate.getBoundingClientRect();
+    let rectStale = false;
     let hover = { x: 0, y: 0, t: 0 };
     let settleTimer = 0;
     let keyCount = 0;
@@ -153,6 +154,17 @@ export default function ScorchStage({
       window.clearTimeout(id);
       timers.delete(id);
     };
+
+    const markStale = () => {
+      rectStale = true;
+    };
+    const freshRect = () => {
+      if (!rectStale) return;
+      rectStale = false;
+      rect = plate.getBoundingClientRect();
+    };
+    const rectObserver = new ResizeObserver(markStale);
+    rectObserver.observe(plate);
 
     const toUv = (x, y) => [x / Math.max(1, rect.width), 1 - y / Math.max(1, rect.height)];
 
@@ -224,6 +236,7 @@ export default function ScorchStage({
       if (event.button !== undefined && event.button > 0) return;
       wakeSound();
       rect = plate.getBoundingClientRect();
+      rectStale = false;
       try {
         plate.setPointerCapture(event.pointerId);
       } catch {
@@ -257,6 +270,7 @@ export default function ScorchStage({
     };
 
     const handleMove = (event) => {
+      freshRect();
       const pointer = pointers.get(event.pointerId);
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
@@ -302,6 +316,7 @@ export default function ScorchStage({
     const handleUp = (event) => {
       const pointer = pointers.get(event.pointerId);
       if (!pointer) return;
+      wakeSound();
       pointers.delete(event.pointerId);
       cancelLater(pointer.holdTimer);
       cancelLater(pointer.stillTimer);
@@ -318,6 +333,7 @@ export default function ScorchStage({
     const handleEnter = (event) => {
       if (!finePointer || event.pointerType !== "mouse") return;
       rect = plate.getBoundingClientRect();
+      rectStale = false;
       const x = event.clientX - rect.left;
       const y = event.clientY - rect.top;
       hover = { x, y, t: event.timeStamp };
@@ -334,6 +350,7 @@ export default function ScorchStage({
       if (!engine?.isReady()) return;
       wakeSound();
       rect = plate.getBoundingClientRect();
+      rectStale = false;
       const spot = engine.darkestSpot();
       const x = spot.u * rect.width;
       const y = (1 - spot.v) * rect.height;
@@ -352,6 +369,8 @@ export default function ScorchStage({
         later(() => engineRef.current?.release(id), KEY_SOURCE_MS);
       }, HOLD_MS);
     };
+
+    const handleContextMenu = (event) => event.preventDefault();
 
     const handlePlateKey = (event) => {
       if (event.key !== "Enter" && event.key !== " ") return;
@@ -379,6 +398,9 @@ export default function ScorchStage({
     plate.addEventListener("pointerenter", handleEnter);
     plate.addEventListener("pointerleave", handleLeave);
     plate.addEventListener("keydown", handlePlateKey);
+    plate.addEventListener("contextmenu", handleContextMenu);
+    window.addEventListener("scroll", markStale, { passive: true, capture: true });
+    window.addEventListener("resize", markStale, { passive: true });
     if (!embedded) window.addEventListener("keydown", handleWindowKey);
 
     return () => {
@@ -389,7 +411,11 @@ export default function ScorchStage({
       plate.removeEventListener("pointerenter", handleEnter);
       plate.removeEventListener("pointerleave", handleLeave);
       plate.removeEventListener("keydown", handlePlateKey);
+      plate.removeEventListener("contextmenu", handleContextMenu);
       window.removeEventListener("keydown", handleWindowKey);
+      window.removeEventListener("scroll", markStale, { capture: true });
+      window.removeEventListener("resize", markStale);
+      rectObserver.disconnect();
       for (const id of timers) window.clearTimeout(id);
       timers.clear();
     };
@@ -413,9 +439,6 @@ export default function ScorchStage({
       role="button"
       aria-label="Album cover. Hold still on it until it catches, or press Enter to light the darkest ink."
     >
-      <div className="scorch-plate__fuse" aria-hidden="true">
-        <span className="scorch-plate__fuse-line" />
-      </div>
       {RING_SLOTS.map((slot) => (
         <div key={slot} className="scorch-ring" data-state="idle" aria-hidden="true">
           <svg viewBox="0 0 56 56" className="scorch-ring__svg">

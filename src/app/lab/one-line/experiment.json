@@ -1,6 +1,6 @@
 {
   "title": "One line",
-  "description": "A music app tab bar drawn with one ink thread — tap a tab and the line pulls out of the old icon stroke by stroke, runs along the bar thinning under tension, and stitches itself into the new one. Drag along the bar to pull it out by hand and let go; it lands on the nearest tab.",
+  "description": "A music app tab bar drawn with one ink thread that pulls out of the old icon, snags on every icon it passes and stitches itself into the new one. Drag along the bar to pull the line out by hand, then let go and it lands on the nearest tab.",
   "tags": [
     "Interface",
     "Motion",
@@ -12,7 +12,7 @@
   "parentSlug": null,
   "parents": null,
   "tasteVersion": 1,
-  "intent": "Make the tab indicator a single physical thread whose length is conserved, so switching tabs reads as unthreading one icon and stitching the next.",
+  "intent": "Make the tab indicator a single physical thread that catches on the icons it crosses, so switching tabs reads as unpicking one icon and sewing the next.",
   "source": {
     "kind": "brief",
     "lens": "product-components"

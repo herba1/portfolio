@@ -67,28 +67,31 @@
 .mosh-placeholder {
   position: absolute;
   inset: 0;
-  background-image: radial-gradient(circle at center, var(--color-line-strong) 0 1.5px, transparent 2px);
-  background-size: calc(var(--mosh-plate) / 40) calc(var(--mosh-plate) / 40);
-  animation: mosh-wait 1400ms var(--ease-in-out) infinite alternate;
-}
-
-.mosh-plate[data-failed] .mosh-placeholder {
-  background: var(--mosh-fallback, none) center / cover no-repeat, var(--color-surface-sunken);
-  animation: none;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: center;
+  pointer-events: none;
+  user-select: none;
+  animation: mosh-placeholder-in 700ms var(--ease-entrance) both;
 }
 
 .mosh[data-ready="true"] .mosh-placeholder {
-  animation: none;
   visibility: hidden;
-  transition: visibility 0s linear 200ms;
+  transition: visibility 0s linear 240ms;
 }
 
-@keyframes mosh-wait {
+@keyframes mosh-placeholder-in {
   from {
-    opacity: 0.4;
+    opacity: 0;
+    scale: 1.03;
+    filter: blur(12px);
   }
   to {
     opacity: 1;
+    scale: 1;
+    filter: blur(0);
   }
 }
 
@@ -144,7 +147,7 @@
   opacity: 1;
   filter: blur(0);
   transition:
-    scale 440ms var(--ease-overshoot),
+    scale 240ms var(--ease-entrance),
     opacity 200ms var(--ease-entrance),
     filter 300ms var(--ease-entrance);
 }
@@ -263,11 +266,6 @@
     scale: 0.84;
     filter: blur(7px);
   }
-  70% {
-    opacity: 1;
-    scale: 1.02;
-    filter: blur(0);
-  }
   100% {
     opacity: 1;
     scale: 1;
@@ -363,9 +361,8 @@
 
 .mosh-codec__row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  column-gap: 8px;
-  align-items: center;
+  grid-template-columns: minmax(0, 1fr);
+  row-gap: 8px;
 }
 
 .mosh-segments {
@@ -421,6 +418,8 @@
 }
 
 .mosh-codec__more {
+  justify-self: start;
+  margin-left: -12px;
   display: inline-flex;
   align-items: center;
   column-gap: 8px;

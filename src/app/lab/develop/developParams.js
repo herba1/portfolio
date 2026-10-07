@@ -37,9 +37,18 @@ export function applyPreset(current, preset) {
 const listeners = new Set();
 let cached = null;
 
+function clampControls(values) {
+  const next = { ...values };
+  for (const { key, min, max } of DEVELOP_CONTROLS) {
+    const value = Number(next[key]);
+    next[key] = Number.isFinite(value) ? Math.min(max, Math.max(min, value)) : DEVELOP_DEFAULTS[key];
+  }
+  return next;
+}
+
 export function readStoredParams() {
   if (cached) return cached;
-  cached = loadStored(STORAGE_KEY, DEVELOP_DEFAULTS) ?? DEVELOP_DEFAULTS;
+  cached = clampControls(loadStored(STORAGE_KEY, DEVELOP_DEFAULTS) ?? DEVELOP_DEFAULTS);
   return cached;
 }
 

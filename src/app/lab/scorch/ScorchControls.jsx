@@ -53,11 +53,11 @@ export default function ScorchControls({ params, activePreset, soundOn, onPreset
       <div className="scorch-actions">
         <button type="button" className="scorch-action text-ui-lg" onClick={onDouse}>
           <span>Douse</span>
-          <kbd className="scorch-key">Esc</kbd>
+          <kbd className="scorch-key text-ui-sm">Esc</kbd>
         </button>
         <button type="button" className="scorch-action text-ui-lg" onClick={onSkip}>
           <span>Next sheet</span>
-          <kbd className="scorch-key">→</kbd>
+          <kbd className="scorch-key text-ui-sm">→</kbd>
         </button>
         <button type="button" className="scorch-action text-ui-lg" aria-pressed={soundOn} onClick={onSound}>
           <span>Sound</span>

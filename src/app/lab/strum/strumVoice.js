@@ -9,6 +9,9 @@ const PENDING_MAX_LATE_MS = 250;
 const CHIME_ROOT_HZ = 261.63;
 const CHIME_LEVEL = 0.2;
 const CHIME_GAP_SECONDS = 0.045;
+const SYMPATHY_VOICE_LIMIT = 12;
+const SYMPATHY_ATTACK = 0.05;
+const SYMPATHY_PARTIALS = 2;
 
 export function audioSupported() {
   return typeof window !== "undefined" && Boolean(window.AudioContext || window.webkitAudioContext);
@@ -24,11 +27,20 @@ export default class StrumVoice {
     this.muted = false;
     this.wanted = true;
     this.pending = [];
+    this.sessionRefused = false;
     this.flush = this.flush.bind(this);
   }
 
   unlock() {
     if (!audioSupported()) return false;
+    const session = navigator.audioSession;
+    if (session && session.type !== "playback") {
+      try {
+        session.type = "playback";
+      } catch {
+        this.sessionRefused = true;
+      }
+    }
     if (!this.context) {
       const AudioContextClass = window.AudioContext || window.webkitAudioContext;
       const context = new AudioContextClass({ latencyHint: "interactive" });
@@ -110,8 +122,20 @@ export default class StrumVoice {
     }
   }
 
+  get load() {
+    const now = this.context ? this.context.currentTime : 0;
+    while (this.voices.length && this.voices[0].end <= now) this.voices.shift();
+    return this.voices.length;
+  }
+
   pluck(args) {
-    if (!this.context || this.muted || !(args.amplitude > 0.01)) return;
+    if (!this.context || this.muted) return;
+    if (args.sympathetic) {
+      if (this.context.state !== "running" || !(args.amplitude > 0.0005) || this.load > SYMPATHY_VOICE_LIMIT) return;
+      this.play(args);
+      return;
+    }
+    if (!(args.amplitude > 0.01)) return;
     if (this.context.state === "running") {
       this.play(args);
       return;
@@ -127,7 +151,7 @@ export default class StrumVoice {
     this.pluck({ frequency: CHIME_ROOT_HZ * ratio, amplitude: CHIME_LEVEL, position: 0.3, pan: 0.25, delay: CHIME_GAP_SECONDS });
   }
 
-  play({ frequency, amplitude, position, pan = 0, delay = 0 }) {
+  play({ frequency, amplitude, position, pan = 0, delay = 0, sympathetic = false }) {
     const context = this.context;
     const now = context.currentTime;
     this.steal(now);
@@ -137,7 +161,9 @@ export default class StrumVoice {
     const pluckAt = Math.min(0.96, Math.max(0.04, position));
     const denominator = Math.PI * Math.PI * pluckAt * (1 - pluckAt);
     const sustain = Math.min(1.8, Math.max(0.7, (220 / frequency) ** 0.3));
-    const glide = 0.014 * level * level;
+    const glide = sympathetic ? 0 : 0.014 * level * level;
+    const attack = sympathetic ? SYMPATHY_ATTACK : ATTACK;
+    const partials = sympathetic ? SYMPATHY_PARTIALS : PARTIALS;
 
     const voiceGain = context.createGain();
     voiceGain.gain.value = 1;
@@ -154,7 +180,7 @@ export default class StrumVoice {
 
     const sources = [];
     let end = start;
-    for (let harmonic = 1; harmonic <= PARTIALS; harmonic += 1) {
+    for (let harmonic = 1; harmonic <= partials; harmonic += 1) {
       const partialHz = harmonic * frequency * (1 + 0.0003 * harmonic * harmonic);
       if (partialHz > 15000) break;
       const coefficient = Math.abs((2 * Math.sin(harmonic * Math.PI * pluckAt)) / (harmonic * harmonic * denominator));
@@ -167,11 +193,11 @@ export default class StrumVoice {
       oscillator.frequency.setTargetAtTime(partialHz, start, 0.045);
       const gain = context.createGain();
       gain.gain.setValueAtTime(0, start);
-      gain.gain.linearRampToValueAtTime(peak, start + ATTACK);
-      gain.gain.setTargetAtTime(0, start + ATTACK, timeConstant);
+      gain.gain.linearRampToValueAtTime(peak, start + attack);
+      gain.gain.setTargetAtTime(0, start + attack, timeConstant);
       oscillator.connect(gain);
       gain.connect(voiceGain);
-      const stopAt = start + ATTACK + timeConstant * 6;
+      const stopAt = start + attack + timeConstant * 6;
       oscillator.start(start);
       oscillator.stop(stopAt);
       oscillator.onended = () => {
@@ -180,6 +206,20 @@ export default class StrumVoice {
       };
       sources.push(oscillator);
       end = Math.max(end, stopAt);
+    }
+
+    if (sympathetic) {
+      if (!sources.length) {
+        voiceGain.disconnect();
+        if (output !== voiceGain) output.disconnect();
+        return;
+      }
+      sources[0].addEventListener("ended", () => {
+        voiceGain.disconnect();
+        if (output !== voiceGain) output.disconnect();
+      });
+      this.voices.push({ gain: voiceGain, sources, end });
+      return;
     }
 
     const pick = context.createBufferSource();

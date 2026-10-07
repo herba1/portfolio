@@ -147,7 +147,7 @@ export class TapeTransport {
     this.wobble = this.worn
       ? 1 + WOW.depth * Math.sin(2 * Math.PI * WOW.hz * this.clock) + FLUTTER.depth * Math.sin(2 * Math.PI * FLUTTER.hz * this.clock)
       : 1;
-    if (this.mode === HELD && this.wheelHeld && now - this.lastWheelAt > WHEEL_IDLE) this.release(now);
+    if (this.mode === HELD && this.wheelHeld && now - this.lastWheelAt > WHEEL_IDLE) this.release(this.lastWheelAt);
     if (dt <= 0) return;
 
     if (this.mode === HELD) {

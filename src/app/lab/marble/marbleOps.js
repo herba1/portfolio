@@ -10,7 +10,9 @@ export const MAX_OPS = OPS_PER_ROW * OP_ROWS;
 export const COVER_SLOTS = 16;
 export const FACE_CROP = 0.94;
 const STONE_WINDOW_MIN = 0.12;
-const STONE_WINDOW_MAX = 0.18;
+const STONE_WINDOW_MAX = 0.4;
+const TILE_TEXELS = 512;
+const FALLBACK_UNIT_PX = 900;
 
 export const TOOLS = [
   { id: "stylus", label: "Stylus", key: "1", tines: 1, spacing: 0.1 },
@@ -70,58 +72,70 @@ export function seededRandom(seed) {
   };
 }
 
-function plateHalf(aspect) {
+export function plateHalf(aspect) {
   return { halfW: Math.max(aspect, 1) * 0.5, halfH: Math.max(1 / aspect, 1) * 0.5 };
 }
 
-function stoneWindow(windows) {
-  const zoom = STONE_WINDOW_MIN + windows() * (STONE_WINDOW_MAX - STONE_WINDOW_MIN);
-  const reach = 0.5 - zoom * 0.5 - 0.04;
-  return { zoom, x: 0.5 + (windows() * 2 - 1) * reach, y: 0.5 + (windows() * 2 - 1) * reach };
+function sheetHalf(aspect) {
+  const { halfW, halfH } = plateHalf(aspect);
+  const reach = Math.max(halfW, halfH);
+  return { halfW, halfH, reach };
 }
 
-function inkStone(windows, x, y, radius, cover) {
-  const crop = stoneWindow(windows);
-  return makeStone(x, y, radius, cover, crop.x, crop.y, crop.zoom);
+function makeInker(seed, unitPx) {
+  const windows = seededRandom(seed * 1.618 + 0.37);
+  const devicePx = unitPx > 0 ? unitPx : FALLBACK_UNIT_PX;
+  return (x, y, radius, cover) => {
+    const sharp = (2 * radius * devicePx) / TILE_TEXELS;
+    const zoom = Math.min(STONE_WINDOW_MAX, Math.max(STONE_WINDOW_MIN, sharp));
+    const reach = 0.5 - zoom * 0.5 - 0.04;
+    const windowX = 0.5 + (windows() * 2 - 1) * reach;
+    const windowY = 0.5 + (windows() * 2 - 1) * reach;
+    return makeStone(x, y, radius, cover, windowX, windowY, zoom);
+  };
 }
 
-function stoneField(random, windows, halfW, halfH, coverCount, coverage) {
-  const area = (halfW * 2 + 0.2) * (halfH * 2 + 0.2) * coverage;
+function stoneField(random, ink, reach, coverCount, coverage) {
+  const side = reach * 2 + 0.2;
+  const area = side * side * coverage;
   const ops = [];
   let filled = 0;
   let index = 0;
   while (filled < area) {
     const radius = 0.07 + random() * 0.08;
-    const x = (random() * 2 - 1) * (halfW + 0.08);
-    const y = (random() * 2 - 1) * (halfH + 0.08);
-    ops.push(inkStone(windows, x, y, radius, (index * 5 + 1) % coverCount));
+    const x = (random() * 2 - 1) * (reach + 0.08);
+    const y = (random() * 2 - 1) * (reach + 0.08);
+    ops.push(ink(x, y, radius, (index * 5 + 1) % coverCount));
     filled += Math.PI * radius * radius;
     index += 1;
   }
   return ops;
 }
 
-function bouquet({ seed, aspect, coverCount }) {
+function tinesAcross(reach, overscan, spacing) {
+  return Math.ceil((reach * overscan) / spacing) | 1;
+}
+
+function bouquet({ seed, aspect, coverCount, unitPx }) {
   const random = seededRandom(seed);
-  const windows = seededRandom(seed * 1.618 + 0.37);
-  const { halfW, halfH } = plateHalf(aspect);
-  const ops = stoneField(random, windows, halfW, halfH, coverCount, 1.3);
+  const ink = makeInker(seed, unitPx);
+  const { reach } = sheetHalf(aspect);
+  const ops = stoneField(random, ink, reach, coverCount, 1.3);
   const centreX = aspect >= 1 ? -0.1 : 0;
   const centreY = aspect >= 1 ? 0.02 : 0.06;
   const rings = [0.19, 0.16, 0.14, 0.12];
   rings.forEach((radius, index) => ops.push(makeDrop(centreX, centreY, radius, (index + 2) % coverCount)));
   ops.push(makeDrop(centreX, centreY, 0.2, 0));
-  const across = Math.ceil((halfW * 2.4) / 0.2) | 1;
-  ops.push(makeTine(centreX, 0, 0, -1, 0.12, across, 0.2));
+  ops.push(makeTine(centreX, 0, 0, -1, 0.12, tinesAcross(reach, 2.4, 0.2), 0.2));
   ops.push(makeWave(0, 0, 1, 0, 0.022, 0.5, 1.2));
   return ops;
 }
 
-function stone({ seed, aspect, coverCount }) {
+function stone({ seed, aspect, coverCount, unitPx }) {
   const random = seededRandom(seed);
-  const windows = seededRandom(seed * 1.618 + 0.37);
-  const { halfW, halfH } = plateHalf(aspect);
-  const ops = stoneField(random, windows, halfW, halfH, coverCount, 1.1);
+  const ink = makeInker(seed, unitPx);
+  const { halfW, halfH, reach } = sheetHalf(aspect);
+  const ops = stoneField(random, ink, reach, coverCount, 1.1);
   for (let index = 0; index < 5; index += 1) {
     const x = (random() * 2 - 1) * halfW * 0.7;
     const y = (random() * 2 - 1) * halfH * 0.6;
@@ -130,31 +144,31 @@ function stone({ seed, aspect, coverCount }) {
   return ops;
 }
 
-function nonpareil({ seed, aspect, coverCount }) {
+function nonpareil({ seed, aspect, coverCount, unitPx }) {
   const random = seededRandom(seed);
-  const windows = seededRandom(seed * 1.618 + 0.37);
-  const { halfW, halfH } = plateHalf(aspect);
+  const ink = makeInker(seed, unitPx);
+  const { reach } = sheetHalf(aspect);
   const ops = [];
   const step = 0.15;
   let index = 0;
-  for (let y = -halfH; y <= halfH + 0.01; y += step) {
-    for (let x = -halfW + ((Math.round(y / step) & 1) * step) / 2; x <= halfW + 0.01; x += step) {
-      ops.push(inkStone(windows, x + (random() - 0.5) * 0.02, y, 0.092, index % coverCount));
+  for (let y = -reach; y <= reach + 0.01; y += step) {
+    for (let x = -reach + ((Math.round(y / step) & 1) * step) / 2; x <= reach + 0.01; x += step) {
+      ops.push(ink(x + (random() - 0.5) * 0.02, y, 0.092, index % coverCount));
       index += 1;
     }
   }
-  const across = Math.ceil((halfW * 2.2) / 0.12) | 1;
+  const across = tinesAcross(reach, 2.2, 0.12);
   ops.push(makeTine(0, 0, 0, -1, 0.16, across, 0.12));
   ops.push(makeTine(0.06, 0, 0, 1, 0.16, across, 0.12));
-  ops.push(makeTine(0, 0, 0, -1, 0.05, Math.ceil((halfW * 2.2) / 0.03) | 1, 0.03));
+  ops.push(makeTine(0, 0, 0, -1, 0.05, tinesAcross(reach, 2.2, 0.03), 0.03));
   return ops;
 }
 
-function spiral({ seed, aspect, coverCount }) {
+function spiral({ seed, aspect, coverCount, unitPx }) {
   const random = seededRandom(seed);
-  const windows = seededRandom(seed * 1.618 + 0.37);
-  const { halfW, halfH } = plateHalf(aspect);
-  const ops = stoneField(random, windows, halfW, halfH, coverCount, 0.7);
+  const ink = makeInker(seed, unitPx);
+  const { reach } = sheetHalf(aspect);
+  const ops = stoneField(random, ink, reach, coverCount, 0.7);
   const radii = [0.13, 0.12, 0.11, 0.1, 0.09, 0.08, 0.08];
   radii.forEach((radius, index) => ops.push(makeDrop(0, 0, radius, (index + 1) % coverCount)));
   ops.push(makeSwirl(0, 0, 0.12, 2.4));
@@ -163,16 +177,15 @@ function spiral({ seed, aspect, coverCount }) {
   return ops;
 }
 
-function chevron({ seed, aspect, coverCount }) {
+function chevron({ seed, aspect, coverCount, unitPx }) {
   const random = seededRandom(seed);
-  const windows = seededRandom(seed * 1.618 + 0.37);
-  const { halfW, halfH } = plateHalf(aspect);
-  const ops = stoneField(random, windows, halfW, halfH, coverCount, 1.1);
-  const across = Math.ceil((halfH * 2.2) / 0.14) | 1;
+  const ink = makeInker(seed, unitPx);
+  const { reach } = sheetHalf(aspect);
+  const ops = stoneField(random, ink, reach, coverCount, 1.1);
+  const across = tinesAcross(reach, 2.2, 0.14);
   ops.push(makeTine(0, 0, 1, 0, 0.12, across, 0.14));
   ops.push(makeTine(0, 0.07, -1, 0, 0.12, across, 0.14));
-  const fine = Math.ceil((halfW * 2.2) / 0.1) | 1;
-  ops.push(makeTine(0, 0, 0, 1, 0.07, fine, 0.1));
+  ops.push(makeTine(0, 0, 0, 1, 0.07, tinesAcross(reach, 2.2, 0.1), 0.1));
   ops.push(makeWave(0, 0, 1, 0, 0.03, 0.42, random() * 6.28));
   return ops;
 }
@@ -195,5 +208,16 @@ export function fitRecipe(ops, limit) {
 }
 
 export function introLanding(aspect) {
-  return aspect >= 1 ? { x: 0.5, y: -0.08, radius: 0.15 } : { x: 0.05, y: -0.52, radius: 0.15 };
+  const { halfW, halfH } = plateHalf(aspect);
+  const radius = Math.min(0.15, 0.3 * Math.min(halfW, halfH));
+  const margin = radius + 0.05;
+  if (aspect >= 1) return { x: Math.max(0, Math.min(0.5, halfW - margin)), y: -0.08, radius };
+  return { x: 0.05, y: Math.min(0, Math.max(-0.52, -(halfH - margin))), radius };
+}
+
+export function introPull(ops) {
+  for (let index = ops.length - 1; index >= Math.max(0, ops.length - 4); index -= 1) {
+    if (ops[index].type === OP_TINE) return ops[index];
+  }
+  return null;
 }

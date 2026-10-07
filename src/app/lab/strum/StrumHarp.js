@@ -13,7 +13,7 @@ const SWELL_REFERENCE_SIZE = 48;
 const SWELL_FLOOR = 0.45;
 const SWELL_REACH = 0.25;
 const DISPLAY_WEIGHT = 600;
-const BODY_WEIGHT = 460;
+const BODY_WEIGHT = 440;
 const GAMMA = 1.6;
 const ALIAS_HZ = 25;
 const ALIAS_DAMPING = 30;
@@ -21,7 +21,8 @@ const VISUAL_LOW_HZ = 2;
 const VISUAL_HIGH_HZ = 7;
 const VISUAL_LOW_PITCH = 65;
 const VISUAL_OCTAVES = 5;
-const TILT_EPSILON = 0.004;
+const TILT_DEADBAND = 0.01;
+const TILT_STEP = 0.0087;
 const SPRING_STIFFNESS = 170;
 const SPRING_DAMPING = 22;
 const SPRING_STEP = 1 / 240;
@@ -31,6 +32,12 @@ const POP_OUT_MS = 260;
 const INTRO_DELAY_MS = 380;
 const INTRO_GAP_MS = 70;
 const STRUM_GAP_MS = 55;
+const SYMPATHY_DELAY_MS = 35;
+const SYMPATHY_STRENGTH = 0.18;
+const SYMPATHY_LEVEL = 0.1;
+const SYMPATHY_MAX_TERM = 8;
+const SYMPATHY_MAX_PRODUCT = 12;
+const SYMPATHY_CENTS = 12;
 const STRUM_STRENGTH = 0.62;
 const CHORD_DEBOUNCE_MS = 220;
 const CHORD_STRENGTH = 0.45;
@@ -64,6 +71,14 @@ const NARROW_WIDTH = 640;
 const READOUT_BASELINE = 13;
 
 const clamp = (value, low, high) => (value < low ? low : value > high ? high : value);
+const greatestDivisor = (a, b) => (b === 0 ? a : greatestDivisor(b, a % b));
+const SIMPLE_RATIOS = [];
+for (let upper = 1; upper <= SYMPATHY_MAX_TERM; upper += 1) {
+  for (let lower = 1; lower <= SYMPATHY_MAX_TERM; lower += 1) {
+    if (upper * lower > SYMPATHY_MAX_PRODUCT || greatestDivisor(upper, lower) !== 1) continue;
+    SIMPLE_RATIOS.push({ upper, lower, cents: 1200 * Math.log2(upper / lower), consonance: 1 / (upper * lower) });
+  }
+}
 const easeOutCubic = (t) => 1 - (1 - t) ** 3;
 const easeInQuad = (t) => t * t;
 const easeInOutSine = (t) => -(Math.cos(Math.PI * t) - 1) / 2;
@@ -141,6 +156,8 @@ export default class StrumHarp {
     this.onSettle = onSettle;
     this.onRunning = onRunning;
     this.lines = Array.from({ length: MAX_LINES }, (_, index) => makeLine(index, titles[index % Math.max(1, titles.length)] ?? ""));
+    this.consonance = new Float32Array(MAX_LINES * MAX_LINES);
+    this.sympatheticHarmonic = new Uint8Array(MAX_LINES * MAX_LINES);
     this.tune(frequencies);
     this.count = 0;
     this.startY = 0;
@@ -173,7 +190,7 @@ export default class StrumHarp {
     this.envelope = new Float32Array(SAMPLES + 1);
     this.glyphX = new Float32Array(MAX_GLYPHS);
     this.glyphY = new Float32Array(MAX_GLYPHS);
-    this.glyphSlope = new Float32Array(MAX_GLYPHS);
+    this.glyphAngle = new Float32Array(MAX_GLYPHS);
     this.glyphLevel = new Uint8Array(MAX_GLYPHS);
     this.readColours();
     this.family = getComputedStyle(canvas).fontFamily || "sans-serif";
@@ -185,7 +202,10 @@ export default class StrumHarp {
     this.handlePointerLeave = this.handlePointerLeave.bind(this);
     this.handleVisibility = this.handleVisibility.bind(this);
     this.markRectDirty = this.markRectDirty.bind(this);
+    this.handleResolution = this.handleResolution.bind(this);
     this.tick = this.tick.bind(this);
+    this.resolutionQuery = null;
+    this.resolutionValue = 0;
 
     stage.addEventListener("pointerdown", this.handlePointerDown);
     stage.addEventListener("pointermove", this.handlePointerMove);
@@ -206,7 +226,9 @@ export default class StrumHarp {
     });
     this.intersectionObserver.observe(stage);
 
+    this.entrance = this.readEntrance();
     this.resize(true);
+    this.entrance = null;
     this.intro();
 
     if (document.fonts?.ready) {
@@ -226,6 +248,35 @@ export default class StrumHarp {
       line.frequency = frequencies[line.index];
       line.visualHz = visualHzFor(line.frequency);
     }
+    for (const source of this.lines) {
+      for (const responder of this.lines) {
+        const slot = source.index * MAX_LINES + responder.index;
+        let best = 0;
+        let harmonic = 0;
+        if (responder !== source) {
+          const cents = 1200 * Math.log2(responder.frequency / source.frequency);
+          for (const ratio of SIMPLE_RATIOS) {
+            if (Math.abs(cents - ratio.cents) >= SYMPATHY_CENTS || ratio.consonance <= best) continue;
+            best = ratio.consonance;
+            harmonic = ratio.lower;
+          }
+        }
+        this.consonance[slot] = best;
+        this.sympatheticHarmonic[slot] = harmonic;
+      }
+    }
+  }
+
+  readEntrance() {
+    const phases = new Float64Array(MAX_LINES).fill(-1);
+    const rows = this.stage.querySelectorAll(".strum__ghost-type");
+    for (let index = 0; index < Math.min(rows.length, MAX_LINES); index += 1) {
+      const animation = rows[index].getAnimations?.()[0];
+      if (!animation || animation.playState === "finished") continue;
+      const played = Number(animation.currentTime);
+      phases[index] = Number.isFinite(played) ? Math.max(0, played) : 0;
+    }
+    return phases;
   }
 
   readColours() {
@@ -292,13 +343,28 @@ export default class StrumHarp {
     for (const line of this.lines) this.applyTruncation(line);
   }
 
+  watchResolution() {
+    const raw = window.devicePixelRatio || 1;
+    if (this.resolutionQuery && this.resolutionValue === raw) return;
+    this.resolutionQuery?.removeEventListener("change", this.handleResolution);
+    this.resolutionValue = raw;
+    this.resolutionQuery = window.matchMedia(`(resolution: ${raw}dppx)`);
+    this.resolutionQuery.addEventListener("change", this.handleResolution);
+  }
+
+  handleResolution() {
+    this.resize(false);
+  }
+
   resize(initial) {
     const width = this.stage.clientWidth;
     const height = this.stage.clientHeight;
-    if (!initial && width === this.width && height === this.height) return;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.watchResolution();
+    if (!initial && width === this.width && height === this.height && dpr === this.dpr) return;
     this.width = width;
     this.height = height;
-    this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.dpr = dpr;
     this.canvas.width = Math.max(1, Math.round(width * this.dpr));
     this.canvas.height = Math.max(1, Math.round((height + CANVAS_BLEED_TOP + CANVAS_BLEED_BOTTOM) * this.dpr));
     this.currentFont = null;
@@ -341,10 +407,19 @@ export default class StrumHarp {
           line.moving = false;
           line.delay = 0;
           line.weight = restWeightFor(target);
-          line.mode = "in";
-          line.modeAt = now;
-          line.modeDelay = intro ? line.index * POP_IN_STAGGER_MS : appearing * POP_IN_STAGGER_MS + (instant ? 0 : 120);
-          appearing += 1;
+          const played = intro && this.entrance ? this.entrance[line.index] : 0;
+          if (played < 0 || (intro && this.reducedMotion)) {
+            line.mode = "shown";
+            line.alpha = 1;
+            line.scale = 1;
+            line.blur = 0;
+          } else {
+            line.mode = "in";
+            line.modeAt = now - played;
+            line.modeDelay = intro ? line.index * POP_IN_STAGGER_MS : appearing * POP_IN_STAGGER_MS + (instant ? 0 : 120);
+            appearing += 1;
+            this.entranceAt(line, now);
+          }
           this.applyTruncation(line);
           this.onSettle?.(line.index, target);
         } else if (Math.abs(target - line.target) > 1e-6 || instant) {
@@ -394,6 +469,7 @@ export default class StrumHarp {
         line: this.lines[index],
         position: 0.26 + 0.07 * (index % 3),
         strength: 0.46,
+        harmonic: 0,
       });
     }
     this.kick();
@@ -473,6 +549,18 @@ export default class StrumHarp {
     });
   }
 
+  limitAmplitude(line) {
+    let total = 0;
+    for (let harmonic = 1; harmonic <= HARMONICS; harmonic += 1) total += Math.hypot(line.re[harmonic], line.im[harmonic]);
+    const limit = BEND_SHARE * line.band;
+    if (total <= limit) return;
+    const shrink = limit / total;
+    for (let harmonic = 1; harmonic <= HARMONICS; harmonic += 1) {
+      line.re[harmonic] *= shrink;
+      line.im[harmonic] *= shrink;
+    }
+  }
+
   strike(line, position, strength, time) {
     line.lastPluck = time;
     if (this.reducedMotion) {
@@ -482,18 +570,47 @@ export default class StrumHarp {
     }
     const height = strength * PLUCK_SHARE * line.band;
     this.coefficients(line, height, position);
-    let total = 0;
-    for (let harmonic = 1; harmonic <= HARMONICS; harmonic += 1) {
-      line.re[harmonic] += line.mag[harmonic];
-      total += Math.hypot(line.re[harmonic], line.im[harmonic]);
-    }
-    const limit = BEND_SHARE * line.band;
-    if (total > limit) {
-      const shrink = limit / total;
-      for (let harmonic = 1; harmonic <= HARMONICS; harmonic += 1) {
-        line.re[harmonic] *= shrink;
-        line.im[harmonic] *= shrink;
+    for (let harmonic = 1; harmonic <= HARMONICS; harmonic += 1) line.re[harmonic] += line.mag[harmonic];
+    this.limitAmplitude(line);
+    this.kick();
+  }
+
+  resonate(line, harmonic, strength) {
+    if (this.reducedMotion) return;
+    line.re[harmonic] += strength * PLUCK_SHARE * line.band;
+    this.limitAmplitude(line);
+    this.kick();
+  }
+
+  sympathize(source, strength, position, time) {
+    const force = Math.min(1, Math.abs(strength));
+    if (force < 0.05) return;
+    const sign = strength < 0 ? -1 : 1;
+    const touch = 0.4 + 0.6 * force;
+    const row = source.index * MAX_LINES;
+    for (const line of this.lines) {
+      if (line === source || line.held || !this.isPresent(line)) continue;
+      const consonance = this.consonance[row + line.index];
+      if (consonance === 0) continue;
+      const harmonic = this.sympatheticHarmonic[row + line.index];
+      if (harmonic <= HARMONICS) {
+        this.queue.push({
+          due: time + SYMPATHY_DELAY_MS,
+          line,
+          position,
+          strength: sign * SYMPATHY_STRENGTH * Math.sqrt(consonance) * touch,
+          harmonic,
+        });
       }
+      this.onPluck?.({
+        index: line.index,
+        frequency: line.frequency * harmonic,
+        amplitude: SYMPATHY_LEVEL * Math.sqrt(consonance) * touch,
+        position: 0.5,
+        pan: (position - 0.5) * 0.7,
+        delay: SYMPATHY_DELAY_MS / 1000,
+        sympathetic: true,
+      });
     }
     this.kick();
   }
@@ -501,6 +618,7 @@ export default class StrumHarp {
   pluck(line, position, strength, time, delay = 0) {
     this.strike(line, position, strength, time);
     this.emit(line, strength, position, delay);
+    this.sympathize(line, strength, position, time);
   }
 
   pluckLine(index) {
@@ -516,7 +634,7 @@ export default class StrumHarp {
     present.forEach((line, order) => {
       const position = 0.42 + 0.05 * (order % 3);
       const signed = strength * direction;
-      this.queue.push({ due: now + order * gap, line, position, strength: signed });
+      this.queue.push({ due: now + order * gap, line, position, strength: signed, harmonic: 0 });
       this.emit(line, signed, position, (order * gap) / 1000);
     });
     this.kick();
@@ -545,7 +663,10 @@ export default class StrumHarp {
       line.im.fill(0);
       if (strength > 0.04) line.flash = 1;
     }
-    if (strength > 0.04) this.emit(line, strength, line.heldAt, 0);
+    if (strength > 0.04) {
+      this.emit(line, strength, line.heldAt, 0);
+      this.sympathize(line, height < 0 ? -strength : strength, line.heldAt, time);
+    }
     this.kick();
   }
 
@@ -555,7 +676,7 @@ export default class StrumHarp {
     const elapsed = Math.max(1, to.time - from.time);
     const speed = Math.hypot(to.x - from.x, dy) / elapsed;
     if (!pressed && Math.abs(dy) / elapsed < HOVER_MIN_SPEED) return;
-    const strength = clamp(speed * 1.2, pressed ? 0.3 : 0.15, 1) * Math.sign(dy);
+    const strength = clamp(0.12 + 0.42 * Math.log2(1 + speed), pressed ? 0.2 : 0.15, 1) * Math.sign(dy);
     const span = this.x1 - this.x0;
     for (const line of this.lines) {
       if (line.held || !this.isPresent(line)) continue;
@@ -775,31 +896,8 @@ export default class StrumHarp {
       }
 
       if (line.mode === "in") {
-        const elapsed = now - line.modeAt - line.modeDelay;
         busy = true;
-        if (elapsed < 0) {
-          line.alpha = 0;
-          line.scale = this.reducedMotion ? 1 : 0.84;
-          line.blur = this.reducedMotion ? 0 : 6;
-        } else {
-          const t = Math.min(1, elapsed / POP_IN_MS);
-          if (this.reducedMotion) {
-            line.scale = 1;
-            line.blur = 0;
-          } else if (t < 0.62) {
-            line.scale = 0.84 + 0.18 * easeOutCubic(t / 0.62);
-          } else {
-            line.scale = 1.02 - 0.02 * easeInOutSine((t - 0.62) / 0.38);
-          }
-          if (!this.reducedMotion) line.blur = 6 * (1 - easeOutCubic(t));
-          line.alpha = easeOutCubic(Math.min(1, t / 0.55));
-          if (t >= 1) {
-            line.mode = "shown";
-            line.scale = 1;
-            line.blur = 0;
-            line.alpha = 1;
-          }
-        }
+        this.entranceAt(line, now);
       } else if (line.mode === "out") {
         const t = Math.min(1, (now - line.modeAt) / POP_OUT_MS);
         const eased = easeInQuad(t);
@@ -865,6 +963,31 @@ export default class StrumHarp {
       }
     }
     return busy;
+  }
+
+  entranceAt(line, now) {
+    const elapsed = now - line.modeAt - line.modeDelay;
+    if (elapsed < 0) {
+      line.alpha = 0;
+      line.scale = this.reducedMotion ? 1 : 0.84;
+      line.blur = this.reducedMotion ? 0 : 6;
+      return;
+    }
+    const t = Math.min(1, elapsed / POP_IN_MS);
+    if (this.reducedMotion) {
+      line.scale = 1;
+      line.blur = 0;
+    } else {
+      line.scale = t < 0.62 ? 0.84 + 0.18 * easeOutCubic(t / 0.62) : 1.02 - 0.02 * easeInOutSine((t - 0.62) / 0.38);
+      line.blur = 6 * (1 - easeOutCubic(t));
+    }
+    line.alpha = easeOutCubic(Math.min(1, t / 0.55));
+    if (t >= 1) {
+      line.mode = "shown";
+      line.scale = 1;
+      line.blur = 0;
+      line.alpha = 1;
+    }
   }
 
   positionLines() {
@@ -1028,13 +1151,13 @@ export default class StrumHarp {
     this.context.font = font;
   }
 
-  isResting(line) {
-    return !line.moving && !line.held && line.energy === 0 && line.flash === 0 && line.weight === restWeightFor(line.size);
+  canBlit(line) {
+    return !line.held && line.energy === 0 && line.flash === 0 && line.weight === restWeightFor(line.size);
   }
 
   ensureCache(line) {
     const dpr = this.dpr;
-    const size = line.size;
+    const size = line.moving ? line.target : line.size;
     const level = levelFor(line.weight);
     let cache = line.cache;
     if (
@@ -1098,7 +1221,7 @@ export default class StrumHarp {
     const cache = this.ensureCache(line);
     const context = this.context;
     const dpr = this.dpr;
-    const scale = line.scale;
+    const scale = line.scale * (line.size / cache.size);
     const originY = (line.baseline + CANVAS_BLEED_TOP) * dpr;
     const blurred = this.canFilter && line.blur > 0.25;
     context.globalAlpha = line.alpha;
@@ -1126,7 +1249,7 @@ export default class StrumHarp {
     const count = Math.min(MAX_GLYPHS, line.visibleCount + (line.truncated ? 1 : 0));
     const glyphX = this.glyphX;
     const glyphY = this.glyphY;
-    const glyphSlope = this.glyphSlope;
+    const glyphAngle = this.glyphAngle;
     const glyphLevel = this.glyphLevel;
 
     let pen = TEXT_X;
@@ -1137,14 +1260,14 @@ export default class StrumHarp {
       const restAdvance = advanceAt(isEllipsis ? line.ellipsis : line.advances, isEllipsis ? 0 : index * 3, restWeight) * size;
       const centre = pen + restAdvance / 2;
       let y = 0;
-      let slope = 0;
+      let angle = 0;
       let weight = restWeight + flashWeight;
       if (swelling) {
         this.displacementAt(line, clamp((centre - this.x0) / span, 0, 1));
         y = this.sampleY;
         if (tilt) {
-          slope = this.sampleSlope / span;
-          if (Math.abs(slope) < TILT_EPSILON) slope = 0;
+          const exact = Math.atan(this.sampleSlope / span);
+          angle = Math.abs(exact) < TILT_DEADBAND ? 0 : Math.round(exact / TILT_STEP) * TILT_STEP;
         }
         const drive = line.held ? Math.abs(y) : this.sampleEnvelope;
         weight += swell * Math.min(1, drive / reach);
@@ -1153,7 +1276,7 @@ export default class StrumHarp {
       glyphLevel[index] = level;
       glyphX[index] = TEXT_X + (centre - TEXT_X) * scale;
       glyphY[index] = (baseline + y * scale + CANVAS_BLEED_TOP) * dpr;
-      glyphSlope[index] = slope;
+      glyphAngle[index] = angle;
       if (level < lowest) lowest = level;
       if (level > highest) highest = level;
       pen += restAdvance + tracking;
@@ -1174,14 +1297,13 @@ export default class StrumHarp {
           fontReady = true;
         }
         const advance = advanceAt(isEllipsis ? line.ellipsis : line.advances, isEllipsis ? 0 : index * 3, weight) * size;
-        const slope = glyphSlope[index];
+        const angle = glyphAngle[index];
         const x = glyphX[index] * dpr;
-        if (slope === 0) {
+        if (angle === 0) {
           context.setTransform(scale * dpr, 0, 0, scale * dpr, x, glyphY[index]);
         } else {
-          const length = Math.hypot(1, slope);
-          const cos = (scale * dpr) / length;
-          const sin = (slope * scale * dpr) / length;
+          const cos = Math.cos(angle) * scale * dpr;
+          const sin = Math.sin(angle) * scale * dpr;
           context.setTransform(cos, sin, -sin, cos, x, glyphY[index]);
         }
         context.fillText(glyph, -advance / 2, 0);
@@ -1204,7 +1326,7 @@ export default class StrumHarp {
     }
     for (const line of this.lines) {
       if (line.mode === "hidden" || line.alpha <= 0.001) continue;
-      if (this.isResting(line)) this.blitLine(line);
+      if (this.canBlit(line)) this.blitLine(line);
       else this.drawLive(line);
     }
     context.globalAlpha = 1;
@@ -1240,7 +1362,9 @@ export default class StrumHarp {
       const item = this.queue[index];
       if (now < item.due) continue;
       this.queue.splice(index, 1);
-      if (this.isPresent(item.line) && !item.line.held) this.strike(item.line, item.position, item.strength, now);
+      if (!this.isPresent(item.line) || item.line.held) continue;
+      if (item.harmonic) this.resonate(item.line, item.harmonic, item.strength);
+      else this.strike(item.line, item.position, item.strength, now);
     }
     if (this.queue.length) busy = true;
 
@@ -1267,6 +1391,8 @@ export default class StrumHarp {
     this.stage.removeEventListener("pointerenter", this.markRectDirty);
     document.removeEventListener("visibilitychange", this.handleVisibility);
     window.removeEventListener("scroll", this.markRectDirty);
+    this.resolutionQuery?.removeEventListener("change", this.handleResolution);
+    this.resolutionQuery = null;
     this.resizeObserver.disconnect();
     this.intersectionObserver.disconnect();
     for (const line of this.lines) {

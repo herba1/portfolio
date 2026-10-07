@@ -17,7 +17,7 @@
   flex-direction: column;
   gap: 4px;
   margin-bottom: 28px;
-  animation: wi-rise 640ms var(--ease-entrance) both;
+  animation: wi-rise var(--duration-600) var(--ease-entrance) both;
 }
 
 .wi-head h1 {
@@ -38,7 +38,7 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xs);
   padding: 24px 24px 20px;
-  animation: wi-card-in 760ms var(--ease-entrance) 60ms both;
+  animation: wi-card-in var(--duration-800) var(--ease-entrance) 60ms both;
 }
 
 .wi-card__head {
@@ -74,7 +74,7 @@
   gap: 16px;
   padding: 8px 0;
   border-top: 1px solid var(--color-line-subtle);
-  animation: wi-rise 520ms var(--ease-entrance) both;
+  animation: wi-rise var(--duration-500) var(--ease-entrance) both;
   animation-delay: calc(180ms + var(--wi-i, 0) * 40ms);
 }
 
@@ -159,13 +159,42 @@
   opacity: 0;
   filter: blur(6px);
   transition:
-    opacity 900ms cubic-bezier(0.22, 0.61, 0.36, 1),
-    filter 900ms cubic-bezier(0.22, 0.61, 0.36, 1);
+    opacity var(--duration-800) var(--ease-entrance),
+    filter var(--duration-800) var(--ease-entrance);
 }
 
 .wi-field[data-painted="true"] .wi-canvas {
   opacity: 1;
   filter: blur(0);
+}
+
+.wi-ghost {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  visibility: hidden;
+  opacity: 0;
+}
+
+.wi-ghost[data-state="shown"] {
+  visibility: visible;
+  opacity: 1;
+  transition: none;
+}
+
+.wi-ghost[data-state="lifting"] {
+  visibility: visible;
+  opacity: 0;
+  filter: blur(6px);
+  transform: translateY(-4px) scale(1.01);
+  transition:
+    opacity var(--duration-300) var(--ease-out-quad),
+    filter var(--duration-300) var(--ease-entrance),
+    transform var(--duration-300) var(--ease-entrance);
 }
 
 .wi-field__line {
@@ -178,7 +207,7 @@
   background: var(--color-line-strong);
   mix-blend-mode: multiply;
   pointer-events: none;
-  transition: background-color 300ms var(--ease-hover);
+  transition: background-color var(--duration-300) var(--ease-hover);
 }
 
 .wi-field[data-locked="true"] .wi-field__line {
@@ -193,7 +222,7 @@
   color: var(--color-ink-secondary);
   mix-blend-mode: multiply;
   pointer-events: none;
-  transition: color 300ms var(--ease-hover);
+  transition: color var(--duration-300) var(--ease-hover);
 }
 
 .wi-field[data-locked="true"] .wi-field__mark {
@@ -222,10 +251,10 @@
   transform: scale(0.4);
   filter: blur(2px);
   transition:
-    opacity 160ms var(--ease-hover),
-    transform 220ms var(--ease-entrance),
-    filter 220ms var(--ease-entrance),
-    background-color 300ms var(--ease-hover);
+    opacity var(--duration-150) var(--ease-hover),
+    transform var(--duration-200) var(--ease-entrance),
+    filter var(--duration-200) var(--ease-entrance),
+    background-color var(--duration-300) var(--ease-hover);
 }
 
 .wi-nib[data-visible="true"]::before {
@@ -260,13 +289,13 @@
 .wi-blotter[data-stage="in"] {
   visibility: visible;
   transform: translateY(0) scale(1);
-  transition: transform 440ms var(--ease-entrance);
+  transition: transform var(--duration-400) var(--ease-entrance);
 }
 
 .wi-blotter[data-stage="press"] {
   visibility: visible;
   transform: translateY(0) scale(0.985);
-  transition: transform 140ms var(--ease-hover);
+  transition: transform var(--duration-150) var(--ease-hover);
 }
 
 .wi-blotter[data-stage="turn"] {
@@ -278,7 +307,7 @@
 .wi-blotter[data-stage="shown"] {
   visibility: visible;
   transform: translateY(0) scale(1, 1);
-  transition: transform 300ms var(--ease-out-quint);
+  transition: transform var(--duration-300) var(--ease-out-quint);
 }
 
 .wi-blotter[data-stage="out"] {
@@ -287,9 +316,9 @@
   opacity: 0;
   filter: blur(6px);
   transition:
-    transform 640ms var(--ease-in-out),
-    opacity 520ms var(--ease-in-out) 120ms,
-    filter 520ms var(--ease-in-out) 120ms;
+    transform var(--duration-600) var(--ease-in-out),
+    opacity var(--duration-500) var(--ease-in-out) var(--duration-120),
+    filter var(--duration-500) var(--ease-in-out) var(--duration-120);
 }
 
 .wi-blotter__print {
@@ -328,7 +357,7 @@
 
 .wi-status__item {
   white-space: nowrap;
-  animation: wi-focus-in 360ms var(--ease-entrance) both;
+  animation: wi-focus-in var(--duration-400) var(--ease-entrance) both;
 }
 
 .wi-button {
@@ -343,7 +372,7 @@
   transition:
     background-color var(--duration-150) var(--ease-hover),
     color var(--duration-150) var(--ease-hover),
-    transform 120ms var(--ease-hover);
+    transform var(--duration-120) var(--ease-hover);
 }
 
 .wi-button:focus-visible {
@@ -397,7 +426,7 @@
 }
 
 .wi-button--book[data-phase="booked"] {
-  animation: wi-pop 380ms var(--ease-out-quint) both;
+  animation: wi-pop var(--duration-400) var(--ease-out-quint) both;
   background: var(--wi-ink, var(--color-surface-inverse));
 }
 
@@ -408,7 +437,7 @@
   border-radius: var(--radius-xl);
   box-shadow: var(--shadow-xs);
   padding: 20px 16px;
-  animation: wi-card-in 760ms var(--ease-entrance) 180ms both;
+  animation: wi-card-in var(--duration-800) var(--ease-entrance) 180ms both;
 }
 
 .wi-panel__toggle {
@@ -460,7 +489,7 @@
   background: var(--color-surface-raised);
   box-shadow: var(--shadow-xs);
   transform: translateX(calc(var(--wi-pen-index, 0) * 100%));
-  transition: transform 360ms var(--ease-entrance);
+  transition: transform var(--duration-400) var(--ease-entrance);
 }
 
 .wi-pens__option {
@@ -493,8 +522,8 @@
     0 0 0 0 var(--color-surface-raised),
     0 0 0 0 var(--wi-chip);
   transition:
-    box-shadow 220ms var(--ease-entrance),
-    transform 160ms var(--ease-hover);
+    box-shadow var(--duration-200) var(--ease-entrance),
+    transform var(--duration-150) var(--ease-hover);
 }
 
 @media (hover: hover) {
@@ -559,7 +588,7 @@
   width: calc(var(--wi-fill) * (100% - 16px) + 8px);
   border-radius: 999px;
   background: var(--wi-ink, var(--color-ink));
-  transition: background-color 300ms var(--ease-hover);
+  transition: background-color var(--duration-300) var(--ease-hover);
 }
 
 .wi-dial__thumb {
@@ -574,8 +603,8 @@
     0 0 0 1px var(--color-line-strong),
     var(--shadow-xs);
   transition:
-    transform 160ms var(--ease-hover),
-    box-shadow 160ms var(--ease-hover);
+    transform var(--duration-150) var(--ease-hover),
+    box-shadow var(--duration-150) var(--ease-hover);
   pointer-events: none;
 }
 
@@ -688,7 +717,7 @@
   }
 
   .wi-panel__chevron {
-    transition: transform 260ms var(--ease-entrance);
+    transition: transform var(--duration-250) var(--ease-entrance);
   }
 
   .wi-panel[data-open="true"] .wi-panel__chevron {
@@ -697,7 +726,7 @@
 
   .wi-panel__body {
     grid-template-rows: 0fr;
-    transition: grid-template-rows 320ms var(--ease-entrance);
+    transition: grid-template-rows var(--duration-300) var(--ease-entrance);
   }
 
   .wi-panel[data-open="true"] .wi-panel__body {
@@ -750,7 +779,13 @@
 
   .wi-canvas {
     filter: none;
-    transition: opacity 200ms linear;
+    transition: opacity var(--duration-200) linear;
+  }
+
+  .wi-ghost[data-state="lifting"] {
+    filter: none;
+    transform: none;
+    transition: opacity var(--duration-200) linear;
   }
 
   .wi-pens__pill,

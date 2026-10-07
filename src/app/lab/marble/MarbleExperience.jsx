@@ -73,6 +73,7 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
 
   const [edited, setEdited] = useState(null);
   const [activePreset, setActivePreset] = useState(DEFAULT_PRESET);
+  const [activeRecipe, setActiveRecipe] = useState(DEFAULT_PRESET);
   const [tool, setTool] = useState("rake");
   const [nextInk, setNextInk] = useState(1);
   const [highlight, setHighlight] = useState(-1);
@@ -91,7 +92,8 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
   const inkCount = Math.max(1, items.length);
   const ink = items.length ? nextInk % inkCount : 0;
   const nextItem = items[ink];
-  const recipe = MARBLE_PRESETS.find((preset) => preset.name === activePreset)?.recipe ?? "bouquet";
+  const recipe = MARBLE_PRESETS.find((preset) => preset.name === activeRecipe)?.recipe ?? "bouquet";
+  const toolsRef = useRef(null);
 
   const flash = useCallback((message) => {
     setNote(message);
@@ -135,6 +137,7 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
     (preset) => {
       const next = { ...presetValues(preset), paper: params.paper, lag: params.lag, dropSize: params.dropSize, seed: params.seed };
       setActivePreset(preset.name);
+      setActiveRecipe(preset.name);
       commitParams(next);
       apiRef.current?.playPreset(preset.recipe, next.seed);
     },
@@ -142,9 +145,9 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
   );
 
   const handleEmbeddedTap = useCallback(() => {
-    const at = MARBLE_PRESETS.findIndex((preset) => preset.name === activePreset);
+    const at = MARBLE_PRESETS.findIndex((preset) => preset.name === activeRecipe);
     handlePreset(MARBLE_PRESETS[(at + 1) % MARBLE_PRESETS.length]);
-  }, [activePreset, handlePreset]);
+  }, [activeRecipe, handlePreset]);
 
   const handleReroll = useCallback(() => {
     const next = rerollValues(params, Math.random);
@@ -154,6 +157,7 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
 
   const handleReset = useCallback(() => {
     setActivePreset(DEFAULT_PRESET);
+    setActiveRecipe(DEFAULT_PRESET);
     setEdited(MARBLE_DEFAULTS);
     clearStored(STORAGE_KEY);
     apiRef.current?.playPreset("bouquet", MARBLE_DEFAULTS.seed);
@@ -176,6 +180,19 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
     flash("Settings applied");
   }, [commitParams, flash]);
 
+  const handleToolKey = useCallback(
+    (event) => {
+      const at = TOOLS.findIndex((entry) => entry.id === tool);
+      const moves = { ArrowLeft: at - 1, ArrowUp: at - 1, ArrowRight: at + 1, ArrowDown: at + 1, Home: 0, End: TOOLS.length - 1 };
+      if (!(event.key in moves)) return;
+      event.preventDefault();
+      const next = (moves[event.key] + TOOLS.length) % TOOLS.length;
+      setTool(TOOLS[next].id);
+      toolsRef.current?.querySelectorAll('[role="radio"]')[next]?.focus();
+    },
+    [tool],
+  );
+
   const handleSave = useCallback(() => apiRef.current?.save(), []);
   const handleUndo = useCallback(() => apiRef.current?.undo(), []);
   const handleLift = useCallback(() => apiRef.current?.lift(), []);
@@ -197,7 +214,14 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
             <p className="marble-hint text-ui-lg text-ink">Tap to drop a record on the water, drag to comb it into feathers.</p>
           </div>
           <div className="marble-head__tools">
-            <div className="marble-tools" role="radiogroup" aria-label="Tool" style={{ "--tool-index": TOOLS.findIndex((entry) => entry.id === tool) }}>
+            <div
+              ref={toolsRef}
+              className="marble-tools"
+              role="radiogroup"
+              aria-label="Tool"
+              onKeyDown={handleToolKey}
+              style={{ "--tool-index": TOOLS.findIndex((entry) => entry.id === tool) }}
+            >
               <span className="marble-tools__pill" aria-hidden="true" />
               {TOOLS.map((entry) => (
                 <button
@@ -205,6 +229,7 @@ export default function MarbleExperience({ covers = [], embedded = false }) {
                   type="button"
                   role="radio"
                   aria-checked={tool === entry.id}
+                  tabIndex={tool === entry.id ? 0 : -1}
                   className="marble-tools__option text-ui"
                   data-active={tool === entry.id ? "true" : undefined}
                   onClick={() => setTool(entry.id)}

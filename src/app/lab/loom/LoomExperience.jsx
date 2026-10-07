@@ -69,7 +69,7 @@ function pad(value) {
 function isTyping(target) {
   if (!target || !(target instanceof Element)) return false;
   if (target.isContentEditable) return true;
-  return Boolean(target.closest("input, textarea, select"));
+  return Boolean(target.closest("input, textarea, select, [role=radio]"));
 }
 
 export default function LoomExperience({ covers = [] }) {
@@ -83,7 +83,7 @@ export default function LoomExperience({ covers = [] }) {
     reducedStore.snapshot,
     reducedStore.server,
   );
-  const [nav, setNav] = useState({ index: 0, direction: 1 });
+  const [nav, setNav] = useState({ index: 0, direction: 1, turn: 0, leaving: null });
   const [params, setParams] = useState(DEFAULTS);
   const [panelOpen, setPanelOpen] = useState(false);
   const [paintedFor, setPaintedFor] = useState(null);
@@ -128,10 +128,17 @@ export default function LoomExperience({ covers = [] }) {
       setNav((state) => ({
         index: (state.index + direction + count) % count,
         direction,
+        turn: state.turn + 1,
+        leaving: { cover: covers[state.index], direction, turn: state.turn },
       }));
     },
-    [count, primeAudio],
+    [count, covers, primeAudio],
   );
+
+  const dropLeaving = useCallback((event) => {
+    if (event.target !== event.currentTarget) return;
+    setNav((state) => (state.leaving ? { ...state, leaving: null } : state));
+  }, []);
 
   useEffect(() => {
     const onKeyDown = (event) => {
@@ -265,6 +272,22 @@ export default function LoomExperience({ covers = [] }) {
 
       <section className="loom-caption" aria-label="Now woven">
         <div className="loom-track-slot" aria-live="polite">
+          {nav.leaving && !reducedMotion ? (
+            <div
+              className="loom-track loom-track--leaving"
+              key={`leaving-${nav.leaving.turn}`}
+              style={{ "--loom-dir": nav.leaving.direction }}
+              aria-hidden="true"
+              onAnimationEnd={dropLeaving}
+            >
+              <p className="loom-track__title text-heading text-ink">
+                {nav.leaving.cover.title}
+              </p>
+              <p className="loom-track__artist text-ui-lg text-ink-secondary">
+                {nav.leaving.cover.artist}
+              </p>
+            </div>
+          ) : null}
           {cover ? (
             <div
               className="loom-track"
@@ -293,7 +316,7 @@ export default function LoomExperience({ covers = [] }) {
               <span
                 className="loom-chip__thumb"
                 key={previous.id}
-                style={{ backgroundImage: `url("${previous.image}")` }}
+                style={{ backgroundImage: `url("${previous.thumb ?? previous.image}")` }}
               />
             ) : null}
           </button>
@@ -315,7 +338,7 @@ export default function LoomExperience({ covers = [] }) {
               <span
                 className="loom-chip__thumb"
                 key={next.id}
-                style={{ backgroundImage: `url("${next.image}")` }}
+                style={{ backgroundImage: `url("${next.thumb ?? next.image}")` }}
               />
             ) : null}
             <ChevronRight className="loom-chip__icon" aria-hidden="true" />

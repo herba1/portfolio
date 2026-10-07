@@ -1,4 +1,4 @@
-export const REST_WEIGHT = 430;
+export const REST_WEIGHT = 460;
 export const PEAK_WEIGHT = 900;
 export const ENTRY_WEIGHT = 100;
 
@@ -11,11 +11,13 @@ export const WIDE_PX = 1600;
 export const TRACKING_PER_PX = -0.043;
 export const TRACKING_ZERO_PX = 12;
 export const MASTER_FLOOR = 100;
-export const MASTER_STEP_FINE = 47;
-export const MASTER_STEP_COARSE = 94;
+export const MASTER_STEP_FINE = (PEAK_WEIGHT - REST_WEIGHT) / 9;
+export const MASTER_STEP_COARSE = (PEAK_WEIGHT - REST_WEIGHT) / 5;
 
 export const DYE_TAU = 2.4;
-export const VELOCITY_TAU = 1.5;
+export const VELOCITY_TAU = 2;
+export const DYE_STILL_SHARE = 0.45;
+export const DYE_MOVING_SPEED = 150;
 export const REDUCED_DYE_TAU = 1.2;
 export const REDUCED_VELOCITY_TAU = 0.2;
 export const DYE_DIFFUSION = 0.6;
@@ -40,6 +42,7 @@ export const SPLAT_LINES = 2.6;
 export const SPLAT_REACH = 2.2;
 export const PRESS_BLOOM_CAP = 0.45;
 export const PRESS_BLOOM_SIZE = 0.5;
+export const STROKE_DYE_SIZE = 0.8;
 export const FLUSH_SECONDS = 1 / 60;
 
 export const TAP_SLOP_PX = 6;
@@ -68,7 +71,7 @@ export const REVEAL_SWEEP = 0.55;
 export const REVEAL_JITTER = 0.18;
 export const REVEAL_CELL = 0.6;
 export const REVEAL_SECONDS = REVEAL_SWEEP + REVEAL_JITTER + REVEAL_CELL + 0.05;
-export const GHOST_AT = 0.5;
+export const GHOST_AT = 0.7;
 export const GHOST_SECONDS = 0.72;
 export const GHOST_TURN = Math.PI * 2 * 1.12;
 export const GHOST_START_ANGLE = Math.PI;
@@ -78,9 +81,10 @@ export const GHOST_Y = 0.54;
 export const GHOST_SHARE = 0.16;
 export const GHOST_MIN_PX = 72;
 export const GHOST_MAX_PX = 110;
-export const GHOST_OUTER = 1.2;
-export const GHOST_INWARD = 0.5;
+export const GHOST_OUTER = 1.3;
+export const GHOST_INWARD = 0.8;
 export const GHOST_SIZE = 0.8;
+export const GHOST_DYE_SIZE = 0.6;
 export const GHOST_DYE_TAIL = 0.3;
 export const GHOST_DYE_RAMP = 0.75;
 

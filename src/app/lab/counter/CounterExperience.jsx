@@ -48,8 +48,9 @@ export default function CounterExperience({ covers, embedded = false }) {
   const [useFallback, setUseFallback] = useState(false);
   const tracks = useMemo(() => normaliseTracks(useFallback ? FALLBACK_TRACKS : covers), [covers, useFallback]);
   const loaded = useCovers(tracks);
-  const [current, setCurrent] = useState(0);
-  const [canSurface, setCanSurface] = useState(false);
+  const [landing, setLanding] = useState({ trackIndex: 0, number: 1, total: 0, canSurface: false });
+  const current = landing.trackIndex;
+  const canSurface = landing.canSurface;
 
   const stageRef = useRef(null);
   const canvasRef = useRef(null);
@@ -68,10 +69,9 @@ export default function CounterExperience({ covers, embedded = false }) {
       tracks,
       embedded,
       isFallback: Boolean(tracks.isFallback),
-      onLand: ({ trackIndex, total, canSurface: surfaceable }) => {
-        slotRef.current?.setValue(`${pad(trackIndex + 1)} / ${pad(total)}`);
-        setCurrent(trackIndex);
-        setCanSurface(surfaceable);
+      onLand: (next) => {
+        slotRef.current?.setValue(`${pad(next.number)} / ${pad(next.total)}`);
+        setLanding(next);
       },
       onFallback: () => setUseFallback(true),
     });
@@ -134,6 +134,9 @@ export default function CounterExperience({ covers, embedded = false }) {
         <canvas ref={thumbRef} className="counter-thumb" width={THUMB_PX * 2} height={THUMB_PX * 2} aria-hidden="true" />
         <div className="counter-meta">
           <MorphText text={track?.title ?? ""} className="counter-title text-heading-sm" />
+          <p className="sr-only text-ui" aria-live="polite" aria-atomic="true">
+            {landing.total ? `${track?.title ?? ""} by ${track?.artist ?? ""}, ${landing.number} of ${landing.total}` : ""}
+          </p>
           <p className="counter-sub text-ui-lg">
             <SlotNumber ref={slotRef} value={`01 / ${pad(tracks.length)}`} className="counter-index text-ui" />
             <MorphText text={track?.artist ?? ""} className="counter-artist text-ink-secondary" />

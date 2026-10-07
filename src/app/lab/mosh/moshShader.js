@@ -134,7 +134,8 @@ uniform float uLens;
 uniform float uLensShow;
 uniform float uFieldShow;
 uniform float uReveal;
-uniform vec3 uPaper;
+uniform sampler2D uCover;
+uniform float uHasCover;
 in vec2 vUv;
 out vec4 outColor;
 
@@ -188,20 +189,26 @@ void main() {
     ycc = texelFetch(uFrame, texelCell >> level, level).rgb;
   }
   vec3 rgb = decodeYcc(ycc);
-  rgb = revealLocal <= 0.0 ? uPaper : rgb;
+  if (revealLocal <= 0.0 && uHasCover > 0.5) {
+    rgb = textureLod(uCover, vUv, max(0.0, -log2(max(uPxPerTexel, 0.0001)))).rgb;
+  }
 
   vec2 blockCoord = floor(texel / uBlock);
   vec2 center = (blockCoord + 0.5) * uBlock;
   vec4 info = texelFetch(uInfo, ivec2(clamp(blockCoord, vec2(0.0), vec2(uGrid - 1.0))), 0);
   float speed = length(info.xy);
   vec2 heading = speed > 0.001 ? info.xy / speed : vec2(0.0);
-  vec2 tip = center + heading * sqrt(clamp(speed / uTickFull, 0.0, 1.0)) * uBlock * 0.44;
-  float distancePx = segmentDistance(texel, center, tip) * uPxPerTexel;
-  float ink = 1.0 - smoothstep(uTickRadius - 0.7, uTickRadius + 0.7, distancePx);
+  float reach = pow(clamp(speed / uTickFull, 0.0, 1.0), 0.4);
+  vec2 tip = center + heading * reach * uBlock * 0.44;
+  float shaftPx = segmentDistance(texel, center, tip) * uPxPerTexel - uTickRadius;
+  float headRadius = uTickRadius * mix(1.0, 1.9, smoothstep(0.2, 0.6, reach));
+  float headPx = length(texel - tip) * uPxPerTexel - headRadius;
+  float ink = 1.0 - smoothstep(-0.7, 0.7, min(shaftPx, headPx));
 
   float pointerDistance = length(center - uPointer);
   float lens = (1.0 - smoothstep(uLens * 0.45, uLens, pointerDistance)) * uLensShow;
-  float show = max(uFieldShow, lens) * step(0.999, revealLocal);
+  float moving = smoothstep(0.15, 0.5, speed);
+  float show = max(uFieldShow * moving, lens) * smoothstep(0.9, 1.0, revealLocal);
   float blockLuma = texelFetch(uFrame, ivec2(blockCoord), uBlockLevel).r;
   vec3 tickColour = blockLuma > 0.56 ? vec3(0.102) : vec3(0.985, 0.988, 0.992);
   rgb = mix(rgb, tickColour, ink * show);

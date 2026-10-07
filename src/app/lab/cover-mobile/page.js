@@ -13,11 +13,27 @@ export const metadata = {
     "A Calder mobile hung with Herb's recent album covers: pull any cover down and the whole cascade tips, sways and slowly finds its balance again.",
 };
 
-const FALLBACK_COVERS = Array.from({ length: 12 }, (_, index) => ({
+const FALLBACK_CARDS = [
+  ["Honus Wagner", "T206 White Border, 1909"],
+  ["Ty Cobb", "T206 White Border, 1909"],
+  ["Christy Mathewson", "New York Giants, 1909"],
+  ["Cy Young", "Cleveland Naps, 1909"],
+  ["Walter Johnson", "Washington Nationals, 1909"],
+  ["Nap Lajoie", "Cleveland Naps, 1909"],
+  ["Tris Speaker", "Boston Red Sox, 1911"],
+  ["Willie Keeler", "New York Highlanders, 1909"],
+  ["Joe Tinker", "Chicago Cubs, 1909"],
+  ["Babe Ruth", "Goudey Big League, 1933"],
+  ["Pud Galvin", "Old Judge, 1887"],
+  ["King Kelly", "Old Judge, 1889"],
+];
+
+const FALLBACK_COVERS = FALLBACK_CARDS.map(([title, artist], index) => ({
   id: `card-${index + 1}`,
-  title: `Card ${String(index + 1).padStart(2, "0")}`,
-  artist: "Local scans",
+  title,
+  artist,
   image: `/flyout/card-${String(index + 1).padStart(2, "0")}.jpg`,
+  local: true,
 }));
 
 const loadCovers = unstable_cache(

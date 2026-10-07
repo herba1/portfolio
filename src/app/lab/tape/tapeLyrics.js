@@ -1,6 +1,6 @@
 import LYRIC_VOICES from "@/app/covers/lib/lyricVoices.json";
 
-import { CLIP_OFFSET_SECONDS, LOOP_SECONDS, LOOP_START_SECONDS, TRACK } from "./tapeConstants";
+import { LOOP_SECONDS, LOOP_START_SECONDS, TRACK } from "./tapeConstants";
 
 const fingerprintOf = (lines) => `${lines.length}:${(lines[0]?.text || "").slice(0, 24)}`;
 
@@ -27,7 +27,6 @@ export async function fetchTapeWords(signal) {
 
   const voices = LYRIC_VOICES[TRACK.isrc];
   const voiced = voices && voices.fingerprint === fingerprintOf(lines) ? voices.lines || {} : {};
-  const shift = CLIP_OFFSET_SECONDS + LOOP_START_SECONDS;
   const words = [];
 
   lines.forEach((line, lineIndex) => {
@@ -38,14 +37,11 @@ export async function fetchTapeWords(signal) {
     tokens.forEach((word, wordIndex) => {
       const text = String(word.text || "").trim();
       if (!text || typeof word.start !== "number") return;
-      const start = word.start / 1000 - shift;
-      if (start < -0.08 || start > LOOP_SECONDS - 0.2) return;
-      const end = (typeof word.end === "number" ? word.end : word.start + 320) / 1000 - shift;
       const singers = note?.words?.[wordIndex]?.length ? note.words[wordIndex] : lineSingers;
       words.push({
         text,
-        start: Math.max(0, start),
-        end: Math.max(Math.max(0, start) + 0.14, end),
+        start: word.start / 1000,
+        end: (typeof word.end === "number" ? word.end : word.start + 320) / 1000,
         line: lineIndex,
         singers: singers.join(" "),
       });
@@ -53,4 +49,16 @@ export async function fetchTapeWords(signal) {
   });
 
   return words.sort((a, b) => a.start - b.start);
+}
+
+export function clipWords(words, offset) {
+  const shift = offset + LOOP_START_SECONDS;
+  const clipped = [];
+  for (const word of words) {
+    const start = word.start - shift;
+    if (start < -0.08 || start > LOOP_SECONDS - 0.2) continue;
+    const from = Math.max(0, start);
+    clipped.push({ ...word, start: from, end: Math.max(from + 0.14, word.end - shift) });
+  }
+  return clipped;
 }

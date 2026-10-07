@@ -3,7 +3,7 @@ const PROBE_SIZE = 100;
 const WEIGHT_CEILING = 900;
 
 function fontOf(weight, size, family) {
-  return `${weight} ${size}px ${family}`;
+  return `${Math.round(weight)} ${size}px ${family}`;
 }
 
 function ladder(anchor, step, floor) {

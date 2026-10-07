@@ -22,6 +22,8 @@ const HANDOFF = 0.15;
 const HANDOFF_CAP = 0.35;
 const HANDOFF_TAU = 0.09;
 const STRENGTH_SPREAD = 0.6;
+const HINGE_BRIDGES = 2;
+const HINGE_LIMIT = 0.14;
 
 function mulberry(seed) {
   let state = seed >>> 0;
@@ -476,6 +478,8 @@ function measureSeam(world, seam, relativeSpeed, h) {
   world.seamCooldown[seam] = Math.max(0, world.seamCooldown[seam] - h);
   const kickDecay = Math.exp(-h / HANDOFF_TAU);
   const preload = world.seamPreload[seam];
+  const relative = world.a[right] - angle;
+  const hinge = world.seamIntact[seam] <= HINGE_BRIDGES ? Math.abs(Math.atan2(Math.sin(relative), Math.cos(relative))) / HINGE_LIMIT : 0;
   for (let k = 0; k < BRIDGES; k += 1) {
     const q = seam * BRIDGES + k;
     if (world.bridgeBroken[q]) continue;
@@ -500,7 +504,7 @@ function measureSeam(world, seam, relativeSpeed, h) {
     const kick = world.bridgeKick[q] * kickDecay;
     world.bridgeKick[q] = kick;
     const stretch = Math.max(elastic / world.bridgeLimitE[q], geometric / world.bridgeLimitG[q]);
-    const strain = stretch + kick;
+    const strain = stretch + kick + hinge;
     const previousGap = world.bridgeGap[q];
     const previousLoad = world.bridgeLoad[q];
     world.bridgeGap[q] = Math.min(DRAWN_GAP_CAP, geometric);

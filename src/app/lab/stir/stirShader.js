@@ -25,7 +25,9 @@ uniform float uCanvasHeight;
 uniform float uReveal;
 uniform float uRestWeight;
 uniform float uEntryWeight;
-uniform float uWeightRange;
+uniform float uPeakWeight;
+uniform vec2 uRevealCentre;
+uniform float uRevealSpan;
 uniform float uRevealSweep;
 uniform float uRevealJitter;
 uniform float uRevealCell;
@@ -66,11 +68,12 @@ void main() {
       }
 
       float seed = hash21(cell);
-      float arrive = clamp((uReveal - (cell.x / uGrid.x) * uRevealSweep - seed * uRevealJitter) / uRevealCell, 0.0, 1.0);
+      float spread = length((cell + 0.5) * uCell - uRevealCentre) / uRevealSpan;
+      float arrive = clamp((uReveal - spread * uRevealSweep - seed * uRevealJitter) / uRevealCell, 0.0, 1.0);
       float settle = 1.0 - pow(1.0 - arrive, 3.0);
 
       float stir = smoothstep(0.0, 1.0, clamp(dye + ring, 0.0, 1.0));
-      float weight = mix(uEntryWeight, uRestWeight, settle) + uWeightRange * stir;
+      float weight = mix(mix(uEntryWeight, uRestWeight, settle), uPeakWeight, stir);
       float master = clamp((weight - uMasterBase) / uMasterStep, 0.0, uMasters - 1.0);
       float lower = floor(master);
       float upper = min(lower + 1.0, uMasters - 1.0);

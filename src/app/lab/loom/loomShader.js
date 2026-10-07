@@ -17,7 +17,6 @@ uniform sampler2D uNext;
 uniform sampler2D uNextFar;
 uniform vec2 uResolution;
 uniform vec4 uCloth;
-uniform int uWeave;
 uniform vec3 uPointer;
 uniform float uLod;
 uniform float uSuper;
@@ -40,9 +39,14 @@ const float LIFT_FROM = 0.004;
 const float LIFT_TO = 0.03;
 const float RADIUS_LIMIT = 0.49;
 
+int weaveAt(int col) {
+  return int(texelFetch(uState, ivec2(col, 5), 0).r + 0.5);
+}
+
 bool weftOver(int row, int col) {
-  if (uWeave == 0) return ((row + col) & 1) == 0;
-  if (uWeave == 1) return ((row + col) & 3) < 2;
+  int weave = weaveAt(col);
+  if (weave == 0) return ((row + col) & 1) == 0;
+  if (weave == 1) return ((row + col) & 3) < 2;
   return ((col + 3 * row) % 5) != 0;
 }
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { memo, useEffect, useRef } from "react";
 
 import { mountMobile } from "./mobileEngine";
 import { MAX_COUNT, largeArt } from "./mobileParams";
@@ -53,7 +53,7 @@ function handleArtError(event) {
   button.dataset.missing = "true";
 }
 
-export default function MobileStage({
+function MobileStage({
   covers,
   count,
   seed,
@@ -69,6 +69,7 @@ export default function MobileStage({
   const canvasRef = useRef(null);
   const coverRefs = useRef([]);
   const slotsRef = useRef([]);
+  const enteredSeedRef = useRef(null);
   const configRef = useRef({ physics, reducedMotion, embedded, onPromote, onTopTap, onControllerReady });
   const hangable = covers.slice(0, MAX_COUNT);
 
@@ -80,7 +81,21 @@ export default function MobileStage({
     const stage = stageRef.current;
     const canvas = canvasRef.current;
     if (!stage || !canvas) return undefined;
-    const engine = mountMobile({ stage, canvas, covers, count, seed, slotsRef, coverRefs, configRef, playerRef });
+    const engine = mountMobile({
+      stage,
+      canvas,
+      covers,
+      count,
+      seed,
+      slotsRef,
+      coverRefs,
+      configRef,
+      playerRef,
+      entrance: enteredSeedRef.current !== seed,
+      onEntered: () => {
+        enteredSeedRef.current = seed;
+      },
+    });
     return engine.destroy;
   }, [covers, count, seed, playerRef]);
 
@@ -100,7 +115,7 @@ export default function MobileStage({
             data-hung="false"
             data-side="front"
             tabIndex={-1}
-            aria-label={`Play ${cover.title} by ${cover.artist}`}
+            aria-label={`Hang ${cover.title} on top`}
           >
             <span className="cm-cover__face">
               <span className="cm-cover__front">
@@ -124,3 +139,5 @@ export default function MobileStage({
     </div>
   );
 }
+
+export default memo(MobileStage);

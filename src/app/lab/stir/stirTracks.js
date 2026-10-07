@@ -46,7 +46,7 @@ export function tracksFrom(recent) {
     .filter((track) => track?.title && track.artist)
     .map((track) => ({
       title: cleanTitle(track.title),
-      artist: drawable(String(track.artist).split(",")[0]),
+      artist: drawable(track.artist),
       time: clock((track.durationMs ?? 0) / 1000),
     }))
     .filter((track) => track.title && track.artist);

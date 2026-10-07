@@ -1,9 +1,3 @@
-@property --scorch-fuse {
-  syntax: "<number>";
-  inherits: true;
-  initial-value: 0;
-}
-
 .scorch {
   --scorch-ember: #ff6a1a;
   --scorch-ember-hot: #ffc46b;
@@ -86,6 +80,7 @@
 }
 
 .scorch-stage__plate {
+  position: relative;
   aspect-ratio: 1 / 1;
 }
 
@@ -100,6 +95,7 @@
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
   -webkit-tap-highlight-color: transparent;
   outline: none;
 }
@@ -114,7 +110,7 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .scorch-plate:not(.scorch-plate--placeholder) {
+  .scorch-plate[data-ready]:not(.scorch-plate--placeholder) {
     cursor: none;
   }
 }
@@ -140,30 +136,32 @@
   filter: none;
 }
 
-.scorch-plate__fuse {
+.scorch-fuse {
   position: absolute;
   left: 24px;
   right: 24px;
   bottom: 24px;
   height: 2px;
+  pointer-events: none;
+  z-index: 4;
   border-radius: 999px;
   background: rgba(26, 23, 20, 0.08);
-  animation: scorch-fuse 2400ms var(--ease-in-out) infinite;
-  transition: opacity 300ms var(--ease-hover);
+  transition:
+    opacity 360ms var(--ease-hover),
+    filter 360ms var(--ease-hover);
 }
 
-.scorch-plate[data-ready] .scorch-plate__fuse {
+.scorch:not([data-status="loading"]) .scorch-fuse {
   opacity: 0;
-  animation-play-state: paused;
+  filter: blur(2px);
 }
 
-.scorch-plate__fuse-line {
+.scorch-fuse__line {
   position: absolute;
-  left: 0;
-  top: 0;
-  height: 100%;
-  width: calc(var(--scorch-fuse) * 100%);
+  inset: 0;
   border-radius: 999px;
+  transform-origin: left center;
+  transform: scaleX(0);
   background: linear-gradient(
     to right,
     rgba(28, 23, 20, 0.2) 0%,
@@ -173,10 +171,17 @@
     rgb(255, 106, 26) 96%,
     rgb(255, 196, 107) 100%
   );
+  animation: scorch-fuse-line 2400ms var(--ease-in-out) infinite;
 }
 
-.scorch-plate__fuse-line::after {
-  content: "";
+.scorch-fuse__spark {
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  animation: scorch-fuse-spark 2400ms var(--ease-in-out) infinite;
+}
+
+.scorch-fuse__dot {
   position: absolute;
   right: 0;
   top: 50%;
@@ -195,20 +200,43 @@
   );
 }
 
-@keyframes scorch-fuse {
+.scorch:not([data-status="loading"]) .scorch-fuse__line,
+.scorch:not([data-status="loading"]) .scorch-fuse__spark {
+  animation-play-state: paused;
+}
+
+@keyframes scorch-fuse-line {
   0% {
-    --scorch-fuse: 0;
+    transform: scaleX(0);
     opacity: 0;
   }
   8% {
     opacity: 1;
   }
   82% {
-    --scorch-fuse: 1;
+    transform: scaleX(1);
     opacity: 1;
   }
   100% {
-    --scorch-fuse: 1;
+    transform: scaleX(1);
+    opacity: 0;
+  }
+}
+
+@keyframes scorch-fuse-spark {
+  0% {
+    transform: translateX(-100%);
+    opacity: 0;
+  }
+  8% {
+    opacity: 1;
+  }
+  82% {
+    transform: translateX(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(0);
     opacity: 0;
   }
 }
@@ -217,7 +245,7 @@
   position: absolute;
   inset: 0;
   background-size: cover;
-  background-position: center;
+  background-position: center bottom;
 }
 
 .scorch-plate__error {
@@ -231,11 +259,11 @@
   padding: 48px 16px 16px;
   background: linear-gradient(
     to top,
-    rgba(241, 245, 249, 0.96) 0%,
-    rgba(241, 245, 249, 0.9) 34%,
-    rgba(241, 245, 249, 0.66) 60%,
-    rgba(241, 245, 249, 0.3) 82%,
-    rgba(241, 245, 249, 0) 100%
+    color-mix(in srgb, var(--color-surface) 96%, transparent) 0%,
+    color-mix(in srgb, var(--color-surface) 90%, transparent) 34%,
+    color-mix(in srgb, var(--color-surface) 66%, transparent) 60%,
+    color-mix(in srgb, var(--color-surface) 30%, transparent) 82%,
+    color-mix(in srgb, var(--color-surface) 0%, transparent) 100%
   );
 }
 
@@ -519,33 +547,48 @@
   transition: transform 260ms var(--ease-entrance);
 }
 
-.scorch-panel__toggle[aria-expanded="true"] .scorch-panel__chevron {
+.scorch-panel:not([data-choice="closed"]) .scorch-panel__chevron {
   transform: translateY(2px) rotate(-135deg);
 }
 
 .scorch-panel__body {
   display: grid;
-  grid-template-rows: 0fr;
+  grid-template-rows: 1fr;
   transition: grid-template-rows 360ms var(--ease-entrance);
 }
 
-.scorch-panel__body[data-open] {
-  grid-template-rows: 1fr;
+.scorch-panel[data-choice="closed"] .scorch-panel__body {
+  grid-template-rows: 0fr;
 }
 
 .scorch-panel__inner {
   min-height: 0;
   overflow: hidden;
-  opacity: 0;
-  filter: blur(4px);
+  opacity: 1;
+  filter: none;
   transition:
     opacity 240ms var(--ease-hover),
     filter 320ms var(--ease-entrance);
 }
 
-.scorch-panel__body[data-open] .scorch-panel__inner {
-  opacity: 1;
-  filter: none;
+.scorch-panel[data-choice="closed"] .scorch-panel__inner {
+  opacity: 0;
+  filter: blur(4px);
+}
+
+@media (max-width: 900px) {
+  .scorch-panel:not([data-choice]) .scorch-panel__chevron {
+    transform: translateY(-2px) rotate(45deg);
+  }
+
+  .scorch-panel:not([data-choice]) .scorch-panel__body {
+    grid-template-rows: 0fr;
+  }
+
+  .scorch-panel:not([data-choice]) .scorch-panel__inner {
+    opacity: 0;
+    filter: blur(4px);
+  }
 }
 
 .scorch-controls {
@@ -721,10 +764,8 @@
 }
 
 .scorch-key {
-  font: inherit;
-  font-size: 0.86em;
-  line-height: 1;
-  padding: 4px 6px;
+  font-family: inherit;
+  padding: 4px 8px;
   border-radius: 4px;
   background: var(--color-surface-sunken);
   color: var(--color-ink-secondary);
@@ -783,7 +824,7 @@
 
   .scorch-stage__plate,
   .scorch-caption {
-    width: min(100%, 560px);
+    width: min(100%, 560px, max(240px, 100svh - 320px));
     justify-self: center;
   }
 
@@ -800,6 +841,13 @@
   }
 }
 
+@media (max-width: 900px) and (pointer: coarse) {
+  .scorch:not([data-embedded]) .scorch-stage__plate,
+  .scorch:not([data-embedded]) .scorch-caption {
+    width: min(100% - 48px, 560px, max(240px, 100svh - 320px));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .scorch-plate__canvas {
     transform: none;
@@ -807,9 +855,14 @@
     transition: opacity 300ms linear;
   }
 
-  .scorch-plate__fuse {
+  .scorch-fuse__line {
     animation: none;
-    --scorch-fuse: 0.5;
+    transform: scaleX(0.5);
+  }
+
+  .scorch-fuse__spark {
+    animation: none;
+    transform: translateX(-50%);
   }
 
   .scorch-ring[data-state="charging"] .scorch-ring__svg {

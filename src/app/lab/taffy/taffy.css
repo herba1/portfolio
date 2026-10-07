@@ -55,7 +55,7 @@
   pointer-events: none;
   user-select: none;
   -webkit-user-select: none;
-  animation: taffy-focus 520ms var(--ease-entrance) both;
+  animation: taffy-focus 380ms var(--ease-entrance) both;
 }
 
 .taffy[data-ready] .taffy__proxy {
@@ -462,8 +462,8 @@
 
 @keyframes taffy-focus {
   from {
-    opacity: 0.4;
-    filter: blur(14px);
+    opacity: 0.6;
+    filter: blur(8px);
     scale: 0.985;
   }
 }

@@ -2,8 +2,12 @@ const SAMPLE = 64;
 const SPOT_LIMIT = 12;
 const SPOT_SPACING = 0.14;
 const BLUR_RADIUS = 2;
+const QUIET_CORNER = 0.3;
+const QUIET_INSET = 0.06;
+const QUIET_EDGE_PULL = 0.4;
+const QUIET_FALLBACK = { u: 0.12, v: 0.1 };
 
-const fallbackAnalysis = () => ({ lo: 0.1, hi: 0.7, spots: [], fuel: null });
+const fallbackAnalysis = () => ({ lo: 0.1, hi: 0.7, spots: [], quiet: QUIET_FALLBACK, fuel: null });
 
 function rawFuel(red, green, blue) {
   const r = red / 255;
@@ -17,11 +21,13 @@ function rawFuel(red, green, blue) {
 
 export function cropFor(width, height) {
   const side = Math.min(width, height);
+  const sx = (width - side) / 2;
+  const sy = height > width ? height - side : (height - side) / 2;
   return {
-    sx: (width - side) / 2,
-    sy: (height - side) / 2,
+    sx,
+    sy,
     side,
-    uv: [side / width, side / height, (width - side) / 2 / width, (height - side) / 2 / height],
+    uv: [side / width, side / height, sx / width, (height - sy - side) / height],
   };
 }
 
@@ -76,7 +82,26 @@ function analyse(image, crop) {
     if (spots.some((spot) => Math.hypot(spot.u - u, spot.v - v) < SPOT_SPACING)) continue;
     spots.push({ u, v, fuel: entry.value });
   }
-  return { lo, hi, spots, fuel: blurred };
+  return { lo, hi, spots, quiet: quietCorner(blurred), fuel: blurred };
+}
+
+function quietCorner(blurred) {
+  let best = QUIET_FALLBACK;
+  let bestScore = Infinity;
+  for (let y = 0; y < SAMPLE; y += 1) {
+    const v = 1 - (y + 0.5) / SAMPLE;
+    if (v >= QUIET_CORNER || v < QUIET_INSET) continue;
+    for (let x = 0; x < SAMPLE; x += 1) {
+      const u = (x + 0.5) / SAMPLE;
+      if (u >= QUIET_CORNER || u < QUIET_INSET) continue;
+      const score = blurred[y * SAMPLE + x] + QUIET_EDGE_PULL * Math.min(u, v);
+      if (score < bestScore) {
+        bestScore = score;
+        best = { u, v };
+      }
+    }
+  }
+  return best;
 }
 
 export function loadCover(cover) {

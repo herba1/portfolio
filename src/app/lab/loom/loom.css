@@ -144,7 +144,7 @@
 
 .loom-retry {
   height: 32px;
-  padding-inline: 14px;
+  padding-inline: 16px;
   border: 1px solid var(--color-line);
   border-radius: 999px;
   background: var(--color-surface-raised);
@@ -204,7 +204,7 @@
   align-items: center;
   gap: 4px;
   height: 40px;
-  padding-inline: 6px;
+  padding-inline: 4px;
   border: 1px solid var(--color-line);
   border-radius: 999px;
   background: var(--color-surface-raised);
@@ -240,8 +240,8 @@
 
 .loom-chip__thumb {
   display: block;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 999px;
   background-position: center;
   background-size: cover;
@@ -421,8 +421,7 @@
   inset: 0;
   border-radius: 999px;
   background: var(--color-ink);
-  transform: scaleX(var(--loom-fill));
-  transform-origin: left center;
+  clip-path: inset(0 calc((1 - var(--loom-fill)) * 100%) 0 0 round 999px);
 }
 
 .loom-slider__knob {
@@ -473,6 +472,14 @@
   from {
     opacity: 0;
     transform: translateX(calc(var(--loom-dir, 1) * 12px));
+    filter: blur(6px);
+  }
+}
+
+@keyframes loom-caption-out {
+  to {
+    opacity: 0;
+    transform: translateX(calc(var(--loom-dir, 1) * -12px));
     filter: blur(6px);
   }
 }
@@ -570,5 +577,20 @@
 }
 
 .loom-track-slot {
+  position: relative;
   min-height: 44px;
+}
+
+.loom-track--leaving {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  animation: loom-caption-out 200ms var(--ease-in-quad) both;
+}
+
+.loom-track--leaving .loom-track__title,
+.loom-track--leaving .loom-track__artist {
+  animation: none;
 }

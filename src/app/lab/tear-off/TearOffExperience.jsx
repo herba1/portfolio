@@ -46,10 +46,10 @@ export default function TearOffExperience({ covers = [], embedded = false }) {
 
   return (
     <Root className="to-root bg-surface text-ink" data-embedded={embedded ? "" : undefined}>
-      <div ref={stageRef} className="to-stage" role="group" aria-label="Ticket roll" />
       <header className="to-head">
         <h1 className="text-title-sm">Tear-off</h1>
       </header>
+      <div ref={stageRef} className="to-stage" role="group" aria-label="Ticket roll" />
       <footer className="to-chrome">
         <span className="to-count text-ui-lg">
           <SlotNumber value={torn} label={`${torn} torn`} />

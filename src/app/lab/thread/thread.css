@@ -28,16 +28,44 @@
 
 .thread-sheet {
   position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 100%;
+  inset: 0;
   z-index: 0;
-  border-radius: 16px;
+  pointer-events: none;
+}
+
+.thread-sheet__cap,
+.thread-sheet__body {
+  position: absolute;
   background: var(--color-surface-raised);
   box-shadow:
     0 0 0 1px var(--color-line-subtle),
     var(--shadow-sm);
+}
+
+.thread-sheet__cap {
+  top: 0;
+  right: 0;
+  left: 0;
+  height: 32px;
+  border-radius: 16px 16px 0 0;
+}
+
+.thread-sheet__clip {
+  position: absolute;
+  top: 16px;
+  right: -24px;
+  bottom: -40px;
+  left: -24px;
+  overflow: hidden;
+}
+
+.thread-sheet__body {
+  top: -56px;
+  right: 24px;
+  bottom: 40px;
+  left: 24px;
+  border-radius: 16px;
+  will-change: transform;
 }
 
 .thread-head {
@@ -148,6 +176,8 @@
 }
 
 .thread-row {
+  --row-y: calc(12px + var(--row-i, 0) * 56px);
+  --row-delay: calc(80ms + var(--row-i, 0) * 40ms);
   position: absolute;
   top: 0;
   right: 0;
@@ -155,15 +185,6 @@
   height: 56px;
   outline: none;
   pointer-events: none;
-  transition:
-    opacity 420ms var(--ease-entrance),
-    filter 560ms var(--ease-entrance);
-  transition-delay: calc(var(--row-i, 0) * 40ms);
-}
-
-.thread:not([data-phase]) .thread-row {
-  opacity: 0;
-  filter: blur(6px);
 }
 
 .thread-reveal {
@@ -180,6 +201,7 @@
   background: var(--color-negative-tint);
   pointer-events: none;
   visibility: hidden;
+  transform: translate3d(0, var(--row-y), 0);
   will-change: transform, clip-path;
   transition: background-color 160ms var(--ease-hover);
 }
@@ -208,11 +230,26 @@
   border-radius: 12px;
   cursor: grab;
   pointer-events: auto;
+  transform: translate3d(0, var(--row-y), 0);
   transform-origin: 50% 50%;
   will-change: transform;
   transition:
     background-color 200ms var(--ease-hover),
     box-shadow 200ms var(--ease-hover);
+  animation: thread-row-drop 560ms var(--ease-overshoot) var(--row-delay) both;
+  animation-timing-function: linear(0, 0.085, 0.276, 0.498, 0.703, 0.866, 0.98, 1.049, 1.08, 1.085, 1.075, 1.058, 1.039, 1.022, 1.009, 1, 0.995, 0.993, 0.993, 0.994, 0.995, 0.997, 0.998, 0.999, 1);
+}
+
+.thread-bead,
+.thread-row__main {
+  animation: thread-row-reveal 480ms var(--ease-entrance) var(--row-delay) both;
+}
+
+.thread-row[data-late] .thread-row__body,
+.thread-row[data-late] .thread-bead,
+.thread-row[data-late] .thread-row__main,
+.thread-row[data-late] .slot-reel {
+  animation: none;
 }
 
 .thread-row[data-settling] .thread-row__body {
@@ -232,21 +269,38 @@
 
 .thread-bead {
   position: absolute;
-  top: 10px;
+  top: 50%;
   left: 10px;
+  translate: 0 -50%;
   width: 36px;
   height: 36px;
   overflow: hidden;
+  display: grid;
+  place-items: center;
   border-radius: 9999px;
   background: var(--bead-fill);
   will-change: transform;
+}
+
+.thread-bead__mono {
+  color: var(--color-ink);
+  font-variant-numeric: tabular-nums;
+  transition: opacity 240ms var(--ease-entrance);
+}
+
+.thread-bead[data-image] .thread-bead__mono {
+  opacity: 0;
+}
+
+.thread-bead[data-image][data-state="failed"] .thread-bead__mono {
+  opacity: 1;
 }
 
 .thread-bead::after {
   position: absolute;
   inset: 0;
   border-radius: inherit;
-  box-shadow: inset 0 0 0 1px rgb(15 23 42 / 0.08);
+  box-shadow: inset 0 0 0 1px var(--color-line-subtle);
   content: "";
 }
 
@@ -258,10 +312,16 @@
   opacity: 0;
   filter: blur(6px);
   transform: scale(0.84);
+  transition:
+    opacity 320ms var(--ease-entrance),
+    filter 440ms var(--ease-entrance),
+    transform 520ms var(--ease-overshoot);
 }
 
 .thread-bead[data-state="loaded"] .thread-bead__image {
-  animation: thread-pop 440ms var(--ease-out-expo) forwards;
+  opacity: 1;
+  filter: none;
+  transform: none;
 }
 
 .thread-row__main {
@@ -292,7 +352,6 @@
 
 .thread-row__title {
   color: var(--color-ink);
-  font-weight: var(--font-weight-caption);
 }
 
 .thread-row__meta {
@@ -305,8 +364,14 @@
   font-variant-numeric: tabular-nums;
 }
 
-.thread[data-roll-stagger] .thread-row .slot-reel {
-  transition-delay: calc(var(--row-i, 0) * 40ms + var(--slot-i, 0) * var(--slot-stagger));
+.thread-count .slot-reel,
+.thread-row__index .slot-reel {
+  animation: thread-reel-in 760ms var(--ease-out-quint) both;
+  animation-delay: calc(var(--row-delay, 80ms) + 120ms + var(--slot-i, 0) * 60ms);
+}
+
+.thread-count .slot-reel {
+  animation-delay: calc(40ms + var(--slot-i, 0) * 60ms);
 }
 
 .thread-handle {
@@ -439,7 +504,17 @@
   box-shadow: var(--shadow-lg);
   color: var(--color-ink-inverse);
   pointer-events: auto;
+  transform-origin: 50% 100%;
   animation: thread-pop 440ms var(--ease-out-expo) both;
+}
+
+.thread-toast[data-state="leaving"] {
+  pointer-events: none;
+  animation: thread-toast-out 180ms var(--ease-out-cubic) both;
+}
+
+.thread-toast__title {
+  animation: thread-swap 320ms var(--ease-entrance) both;
 }
 
 .thread-toast__text {
@@ -451,7 +526,7 @@
 }
 
 .thread-toast strong {
-  font-weight: var(--font-weight-caption);
+  font-weight: var(--font-weight-strong);
 }
 
 .thread-toast__undo {
@@ -460,7 +535,7 @@
   padding-inline: 12px;
   border: 0;
   border-radius: 9999px;
-  background: rgb(255 255 255 / 0.14);
+  background: var(--color-button-inverse-bg-hover);
   color: var(--color-ink-inverse);
   cursor: pointer;
   transition: transform 120ms var(--ease-hover);
@@ -480,6 +555,88 @@
   color: var(--color-ink-secondary);
   white-space: nowrap;
   animation: thread-pop 440ms var(--ease-out-expo) 600ms both;
+}
+
+.thread-hint__short {
+  display: none;
+}
+
+.thread-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.thread-hint[data-return] {
+  animation-delay: 0ms;
+}
+
+@keyframes thread-row-drop {
+  from {
+    translate: 0 -24px;
+  }
+
+  to {
+    translate: 0 0;
+  }
+}
+
+@keyframes thread-row-reveal {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+  }
+
+  to {
+    opacity: 1;
+    filter: none;
+  }
+}
+
+@keyframes thread-reel-in {
+  from {
+    translate: 0 calc(var(--slot-cell) * 5);
+    opacity: 0;
+  }
+
+  45% {
+    opacity: 1;
+  }
+
+  to {
+    translate: 0 0;
+  }
+}
+
+@keyframes thread-toast-out {
+  from {
+    opacity: 1;
+    filter: none;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    filter: blur(4px);
+    transform: scale(0.96);
+  }
+}
+
+@keyframes thread-swap {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+  }
+
+  to {
+    opacity: 1;
+    filter: none;
+  }
 }
 
 @keyframes thread-pop {
@@ -512,26 +669,49 @@
   }
 }
 
+@media (max-width: 380px) {
+  .thread-hint__long {
+    display: none;
+  }
+
+  .thread-hint__short {
+    display: inline;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .thread-row {
-    transition: opacity 200ms linear;
-  }
-
-  .thread:not([data-phase]) .thread-row {
-    filter: none;
-  }
-
-  .thread-bead[data-state="loaded"] .thread-bead__image {
+  .thread-row__body,
+  .thread-count .slot-reel,
+  .thread-row__index .slot-reel {
     animation: none;
-    opacity: 1;
+  }
+
+  .thread-bead,
+  .thread-row__main {
+    animation: thread-fade 240ms linear both;
+  }
+
+  .thread-bead__image {
     filter: none;
     transform: none;
+    transition: opacity 200ms linear;
   }
 
   .thread-empty,
   .thread-toast,
+  .thread-toast__title,
   .thread-hint {
     animation-duration: 1ms;
     animation-delay: 0ms;
+  }
+}
+
+@keyframes thread-fade {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
   }
 }

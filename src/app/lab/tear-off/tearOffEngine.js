@@ -24,7 +24,7 @@ import {
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 const WIDE_AXIS = (-4 * Math.PI) / 180;
-const NARROW_AXIS = (-14 * Math.PI) / 180;
+const NARROW_AXIS = (-18 * Math.PI) / 180;
 const MAX_STRIP = 6;
 const MAX_STUBS = 8;
 const BODY_CAPACITY = 16;
@@ -41,7 +41,7 @@ const WIND_SPRING = springProgress(420, 0.18);
 const TEAR_SCRIPT_MS = 700;
 const TEASE_SCRIPT_MS = 900;
 const TEASE_TWIST = (3 * Math.PI) / 180;
-const TEASE_RELAX = 0.4;
+const TEASE_RELAX = 0.15;
 const TEASE_RELAX_MS = 260;
 const TEASE_HOLD_S = 0.32;
 const PRESS_PRELOAD = 0.22;
@@ -49,15 +49,33 @@ const COVER_WAIT_MS = 600;
 const FIRST_VISIBLE = 3;
 const FLING_SPIN = 4;
 const SCRIPT_FOLLOW_THROUGH_MS = 90;
-const TEASE_BREAKS = 2;
+const TEASE_BREAKS = 4;
 const ROLL_LINES = 18;
 const LEAVE_MS = 280;
 const STILL_FRAMES = 8;
 const FIRST_NUMBER = 14;
 const INITIAL_TORN = 2;
 const SPIN_LINE_INSET = 6;
+const WIDE_STEPS = [220, 260, 300, 320];
+const NARROW_STEPS = [168, 184, 196];
+const OVER_EXTENDED = 4;
+const SMALL_PILE = 2.4;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+
+function snapDown(value, steps) {
+  let best = steps[0];
+  for (const candidate of steps) if (candidate <= value) best = candidate;
+  return best;
+}
+
+function copyEdge(from, to) {
+  to.broken.set(from.broken);
+  to.gap.set(from.gap);
+  to.load.set(from.load);
+  to.share.set(from.share);
+  to.seed.set(from.seed);
+}
 
 function hashString(text) {
   let hash = 2166136261;
@@ -116,7 +134,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   const pose = { x: 0, y: 0, a: 0 };
   const samples = new Float64Array(48);
   const layout = { width: 0, height: 0, W: 0, H: 0, D: 0, mouthX: 0, mouthY: 0, restEnd: 0, small: false, angle: WIDE_AXIS, ux: 1, uy: 0 };
-  const paths = { fill: "", line: "" };
+  const paths = { fill: "", line: "", torn: "" };
+  const leavingEls = new Set();
 
   let strip = [];
   let stubs = [];
@@ -196,12 +215,11 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   function computeLayout(width, height) {
     const small = width < 640;
     const angle = small ? NARROW_AXIS : WIDE_AXIS;
-    const rawW = small ? clamp(width * 0.44, 168, 196) : clamp((width - 120) / 3.4, 220, 320);
-    const W = Math.round(rawW / 2) * 2;
+    const W = small ? snapDown(width * 0.44, NARROW_STEPS) : snapDown((width - 120) / 3.4, WIDE_STEPS);
     const H = Math.round((W * 0.42) / 4) * 4;
     const D = Math.round(H * 1.12);
     const mouthX = Math.round(small ? Math.max(16, D * 0.36) : Math.min(width * 0.06 + 24, D * 0.55));
-    const mouthY = Math.round(small ? Math.max(176 + H, height * 0.3) : Math.max(184 + H / 2, height * 0.42));
+    const mouthY = Math.round(small ? Math.max(176 + H, height * 0.4) : Math.max(184 + H / 2, height * 0.42));
     const margin = small ? 12 : Math.max(20, width * 0.05);
     Object.assign(layout, {
       width,
@@ -281,13 +299,13 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     }
   }
 
-  function makeTicket({ coverIndex, number, x, y, a, mode }) {
+  function makeTicket({ coverIndex, number, x, y, a, mode, before = null, reuseId = null }) {
     const entry = queue.get(coverIndex);
     const cover = entry?.cover ?? { id: `blank-${number}`, title: "Untitled", artist: "", image: "" };
     const { W, H, small } = layout;
     const body = addBody(world, { x, y, a, halfW: W / 2, halfH: H / 2, mode });
     if (body < 0) return null;
-    const id = `t${(ticketId += 1)}`;
+    const id = reuseId ?? `t${(ticketId += 1)}`;
     const el = div("to-ticket");
     el.dataset.ticket = id;
     el.dataset.kind = mode === FREE ? "stub" : "strip";
@@ -300,7 +318,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const paper = svg("svg", { class: "to-ticket__paper", width: String(W), height: String(H), viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true" });
     const path = svg("path", { class: "to-ticket__fill" });
     const line = svg("path", { class: "to-ticket__line" });
-    paper.append(path, line);
+    const torn = svg("path", { class: "to-ticket__torn" });
+    paper.append(path, line, torn);
     const face = div("to-ticket__face");
     const image = document.createElement("img");
     image.className = "to-ticket__cover";
@@ -339,7 +358,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     face.append(well, text, code);
     inner.append(paper, face);
     el.appendChild(inner);
-    stage.appendChild(el);
+    stage.insertBefore(el, before && before.parentNode === stage ? before : null);
 
     const ticket = {
       id,
@@ -348,6 +367,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       inner,
       path,
       line,
+      torn,
       code,
       number,
       numberLabel,
@@ -445,9 +465,9 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     return { x: layout.mouthX + layout.ux * axial, y: layout.mouthY + layout.uy * axial };
   }
 
-  function clearScene() {
+  function clearScene(keepSound = false) {
     generation += 1;
-    sound.stop();
+    if (!keepSound) sound.stop();
     playingTicket = null;
     tween = null;
     script = null;
@@ -472,35 +492,49 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     world.rail.max = Infinity;
   }
 
-  function buildRoll({ withStubs, firstNumber, firstCover, intro }) {
-    clearScene();
-    const { W, H, restEnd, small, width, height } = layout;
+  function startingPiles() {
+    const { width, height, H, mouthY, small } = layout;
+    if (small) {
+      const floor = height - H * 0.7;
+      return [
+        [width * 0.36, Math.min(floor, mouthY + H * SMALL_PILE), -9],
+        [width * 0.64, Math.min(floor, mouthY + H * (SMALL_PILE + 0.35)), 6],
+      ];
+    }
+    return [
+      [width * 0.62, height - H * 1.05, -8],
+      [width * 0.79, height - H * 0.8, 5],
+    ];
+  }
+
+  function placeStub(record, intro) {
+    const stub = makeTicket({ coverIndex: record.coverIndex, number: record.number, x: record.x, y: record.y, a: record.a, mode: FREE, reuseId: record.id ?? null });
+    if (!stub) return null;
+    if (record.left) copyEdge(record.left, stub.leftEdge);
+    else tearEdge(stub.leftEdge, hashString(`${stub.cover.id}l`));
+    if (record.right) copyEdge(record.right, stub.rightEdge);
+    else tearEdge(stub.rightEdge, hashString(`${stub.cover.id}r`));
+    stub.z = record.z ?? 100 + (stubSequence += 1);
+    world.awake[stub.body] = 0;
+    stubs.push(stub);
+    if (intro && !reducedMotion && record.delay !== undefined) {
+      stub.el.dataset.enter = "";
+      stub.el.style.setProperty("--to-delay", `${record.delay}ms`);
+      stub.el.addEventListener("animationend", () => delete stub.el.dataset.enter, { once: true });
+    }
+    return stub;
+  }
+
+  function buildRoll({ withStubs = false, kept = null, endEdge = null, keepSound = false, firstNumber, firstCover, intro }) {
+    clearScene(keepSound);
+    const { W, restEnd } = layout;
     let cover = queue.usable(firstCover);
+    let records = kept;
     if (withStubs) {
-      const piles = small
-        ? [
-            [width * 0.36, height - H * 1.7, -9],
-            [width * 0.64, height - H * 1.35, 6],
-          ]
-        : [
-            [width * 0.62, height - H * 1.05, -8],
-            [width * 0.79, height - H * 0.8, 5],
-          ];
-      piles.forEach(([x, y, degrees], index) => {
-        const stub = makeTicket({ coverIndex: cover, number: firstNumber - 2 + index, x, y, a: (degrees * Math.PI) / 180, mode: FREE });
+      records = startingPiles().map(([x, y, degrees], index) => {
+        const record = { coverIndex: cover, number: firstNumber - 2 + index, x, y, a: (degrees * Math.PI) / 180, delay: 60 + index * 90 };
         cover = queue.usable(cover + 1);
-        if (!stub) return;
-        tearEdge(stub.leftEdge, hashString(`${stub.cover.id}l`));
-        tearEdge(stub.rightEdge, hashString(`${stub.cover.id}r`));
-        stub.kind = "stub";
-        stub.z = 100 + (stubSequence += 1);
-        world.awake[stub.body] = 0;
-        stubs.push(stub);
-        if (intro && !reducedMotion) {
-          stub.el.dataset.enter = "";
-          stub.el.style.setProperty("--to-delay", `${60 + index * 90}ms`);
-          stub.el.addEventListener("animationend", () => delete stub.el.dataset.enter, { once: true });
-        }
+        return record;
       });
     }
     world.rail.s = 0;
@@ -509,7 +543,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     let number = firstNumber;
     while (built.length < MAX_STRIP) {
       const at = positionAt(center);
-      const ticket = makeTicket({ coverIndex: cover, number, x: at.x, y: at.y, a: layout.angle, mode: RAIL });
+      const before = built.length ? built[built.length - 1].el : stage.querySelector('.to-ticket[data-kind="stub"]');
+      const ticket = makeTicket({ coverIndex: cover, number, x: at.x, y: at.y, a: layout.angle, mode: RAIL, before });
       if (!ticket) break;
       ticket.z = 10 + MAX_STRIP - built.length;
       built.push(ticket);
@@ -523,11 +558,13 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       linkSeam(strip[i], strip[i + 1], hashString(`${strip[i + 1].cover.id}:${strip[i + 1].number}`));
     }
     const end = strip[strip.length - 1];
-    if (end && withStubs) tearEdge(end.rightEdge, hashString(`${end.cover.id}end`));
+    if (end && endEdge) copyEdge(endEdge, end.rightEdge);
+    else if (end && withStubs) tearEdge(end.rightEdge, hashString(`${end.cover.id}end`));
     coverCursor = cover;
     numberCursor = number;
     queue.ensure(coverCursor);
     queue.ensure(coverCursor + 1);
+    if (records) records.forEach((record) => placeStub(record, intro));
     updateTabStops();
     if (intro && !reducedMotion) {
       const start = -(restEnd + W * 0.4);
@@ -567,7 +604,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const axial = axialOf(root) - layout.W;
     const at = positionAt(axial);
     const cover = queue.usable(coverCursor);
-    const ticket = makeTicket({ coverIndex: cover, number: numberCursor, x: at.x, y: at.y, a: layout.angle, mode: RAIL });
+    const ticket = makeTicket({ coverIndex: cover, number: numberCursor, x: at.x, y: at.y, a: layout.angle, mode: RAIL, before: root.el });
     if (!ticket) return false;
     coverCursor = queue.usable(cover + 1);
     numberCursor += 1;
@@ -663,12 +700,18 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     feedPending = false;
     settleStrip();
     if (!strip.length) return;
+    const over = endRight() - layout.restEnd;
+    if (over > OVER_EXTENDED) {
+      startTween(world.rail.s - over, "spring");
+      return;
+    }
     const delta = Math.min(layout.restEnd - endRight(), railLimit() - world.rail.s);
     if (delta > 2) startTween(world.rail.s + delta, "ease");
     else finishFeedFocus();
   }
 
   function startTween(to, kind) {
+    if (tween?.locked) return;
     settleStrip();
     const from = world.rail.s;
     if (reducedMotion) {
@@ -720,7 +763,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
 
   function beginScript(ticket, kind) {
     const index = strip.indexOf(ticket);
-    if (index < 1) return false;
+    if (index < 1 || tween?.locked) return false;
     if (tween) {
       world.rail.driven = false;
       tween = null;
@@ -861,7 +904,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
 
   function scriptedTear() {
     const end = strip[strip.length - 1];
-    if (!end || strip.length < 2 || script || pointer) return;
+    if (!end || strip.length < 2 || script || pointer || tween?.locked) return;
     if (reducedMotion) {
       settleStrip();
       if (end.leftSeam >= 0) breakAll(world, end.leftSeam);
@@ -886,7 +929,9 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const jitterY = (((variation >>> 18) % 1000) / 1000 - 0.5) * H * 0.4;
     return {
       x: clamp(width * (small ? 0.5 : 0.7) + (spread - 1.5) * W * 0.16 + jitterX, W * 0.5, width - W * 0.5),
-      y: clamp(height - H * ((small ? 1.5 : 1) + (spread % 2) * 0.2) + jitterY, layout.mouthY + H * 1.2, height - H * 0.6),
+      y: small
+        ? clamp(layout.mouthY + H * (SMALL_PILE + (spread % 2) * 0.35) + jitterY, layout.mouthY + H * 1.6, height - H * 0.6)
+        : clamp(height - H * (1 + (spread % 2) * 0.2) + jitterY, layout.mouthY + H * 1.2, height - H * 0.6),
       a: (((spread % 2 ? 7 : -6) + (((variation >>> 3) % 9) - 4)) * Math.PI) / 180,
     };
   }
@@ -978,19 +1023,31 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       return;
     }
     ticket.el.dataset.leaving = "";
-    later(() => ticket.el.remove(), LEAVE_MS);
+    leavingEls.add(ticket.el);
+    later(() => {
+      leavingEls.delete(ticket.el);
+      ticket.el.remove();
+    }, LEAVE_MS);
+  }
+
+  function clearPlaying(ticket) {
+    delete ticket.el.dataset.playing;
+    ticket.code.style.setProperty("--to-play", "0");
   }
 
   function startPreview(ticket) {
     if (!soundOn || !interacted) return;
-    if (playingTicket && playingTicket !== ticket) delete playingTicket.el.dataset.playing;
+    if (playingTicket && playingTicket !== ticket) clearPlaying(playingTicket);
     playingTicket = ticket;
     ticket.el.dataset.playing = "";
     ticket.code.style.setProperty("--to-play", "0");
-    sound.play(ticket.id, ticket.cover, () => {
-      delete ticket.el.dataset.playing;
-      ticket.code.style.setProperty("--to-play", "0");
-      if (playingTicket === ticket) playingTicket = null;
+    const key = ticket.id;
+    sound.play(key, ticket.cover, () => {
+      clearPlaying(ticket);
+      if (playingTicket && playingTicket.id === key) {
+        clearPlaying(playingTicket);
+        playingTicket = null;
+      }
     });
     watchProgress();
   }
@@ -1067,6 +1124,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
         paperPaths(W, H, ticket.leftEdge, ticket.rightEdge, ticket.leftSeam >= 0, ticket.rightSeam >= 0, paths);
         ticket.path.setAttribute("d", paths.fill);
         ticket.line.setAttribute("d", paths.line);
+        ticket.torn.setAttribute("d", paths.torn);
       }
     }
     spinRoll();
@@ -1130,6 +1188,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     if (!el || !stage.contains(el)) return;
     const ticket = tickets.find((item) => item.el === el);
     if (!ticket || ticket.leaving) return;
+    if (tween?.locked && ticket.kind === "strip") return;
     interacted = true;
     sound.unlock();
     if (script) {
@@ -1198,6 +1257,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
 
   function onPointerUp(event) {
     if (!pointer || event.pointerId !== pointer.id) return;
+    sound.unlock();
     const { ticket } = pointer;
     const tap = pointer.travelled < TAP_SLOP && event.timeStamp - pointer.downAt < 350 && pointer.tore === count;
     const velocity = releaseVelocity(event.timeStamp);
@@ -1265,7 +1325,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function windBack() {
-    if (script || pointer || !strip.length) return;
+    if (script || pointer || !strip.length || tween?.locked) return;
     const current = endRight();
     const extended = current - layout.restEnd;
     let delta = extended > 4 ? -extended : -layout.W;
@@ -1276,7 +1336,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function feedOne() {
-    if (script || pointer || !strip.length) return;
+    if (script || pointer || !strip.length || tween?.locked) return;
     const current = endRight();
     const room = layout.width / Math.cos(layout.angle) - layout.mouthX - current;
     const delta = Math.min(layout.W, room - 8, railLimit() - world.rail.s);
@@ -1317,7 +1377,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     }
     settleStrip();
     const delta = -(endRight() + layout.W * 0.3);
-    tween = { kind: "ease", from: world.rail.s, to: world.rail.s + delta, start: performance.now(), duration: 620, wind: false, done: rebuild };
+    tween = { kind: "ease", from: world.rail.s, to: world.rail.s + delta, start: performance.now(), duration: 620, wind: false, locked: true, done: rebuild };
     wake();
   }
 
@@ -1354,6 +1414,54 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     wake();
   }
 
+  function keptStubs(previous) {
+    const { bounds } = world;
+    return stubs.map((ticket) => {
+      if (ticket.leftSeam >= 0) detachSeam(ticket.leftSeam);
+      if (ticket.rightSeam >= 0) detachSeam(ticket.rightSeam);
+      bodyPose(world, ticket.body, pose);
+      return {
+        id: ticket.id,
+        coverIndex: ticket.coverIndex,
+        number: ticket.number,
+        x: clamp((pose.x / previous.width) * layout.width, bounds.minX, bounds.maxX),
+        y: clamp((pose.y / previous.height) * layout.height, bounds.minY, bounds.maxY),
+        a: pose.a,
+        z: ticket.z,
+        left: ticket.leftEdge,
+        right: ticket.rightEdge,
+      };
+    });
+  }
+
+  function rebuildKeeping(previous) {
+    const end = strip[strip.length - 1];
+    const playingId = playingTicket && stubs.includes(playingTicket) ? playingTicket.id : null;
+    const stopId = stubStop ? stubStop.id : null;
+    const kept = keptStubs(previous);
+    buildRoll({
+      kept,
+      endEdge: end ? end.rightEdge : null,
+      keepSound: playingId !== null,
+      firstNumber: end ? end.number : numberCursor,
+      firstCover: end ? end.coverIndex : coverCursor,
+      intro: false,
+    });
+    const restoredStop = stubs.find((ticket) => ticket.id === stopId);
+    if (restoredStop) {
+      stubStop = restoredStop;
+      updateTabStops();
+    }
+    const restoredPlay = stubs.find((ticket) => ticket.id === playingId);
+    if (restoredPlay && sound.playing() === playingId) {
+      playingTicket = restoredPlay;
+      restoredPlay.el.dataset.playing = "";
+      watchProgress();
+    } else if (playingId !== null) {
+      sound.stop();
+    }
+  }
+
   function resize(width, height) {
     if (destroyed || width < 1 || height < 1) return;
     const widthChanged = Math.abs(width - layout.width) > 1;
@@ -1363,17 +1471,19 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       updateBounds();
       return;
     }
-    const previous = { W: layout.W, mouthX: layout.mouthX, mouthY: layout.mouthY, restEnd: layout.restEnd };
+    const previous = { W: layout.W, mouthX: layout.mouthX, mouthY: layout.mouthY, restEnd: layout.restEnd, width: layout.width, height: layout.height };
     computeLayout(width, height);
     if (!ready) return;
     if (layout.W === previous.W) {
       reanchor(previous);
       return;
     }
-    const firstCover = interacted ? Math.max(0, coverCursor - strip.length - 2) : 0;
-    buildRoll({ withStubs: true, firstNumber: FIRST_NUMBER, firstCover, intro: !interacted });
-    count = INITIAL_TORN;
-    onCount?.(count);
+    const untouched = !interacted && count === INITIAL_TORN && stubs.length === INITIAL_TORN;
+    if (untouched) {
+      buildRoll({ withStubs: true, firstNumber: FIRST_NUMBER, firstCover: 0, intro: true });
+      return;
+    }
+    rebuildKeeping(previous);
   }
 
   const resizeObserver = new ResizeObserver((entries) => {
@@ -1461,6 +1571,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       queue.dispose();
       for (const ticket of tickets) ticket.el.remove();
       tickets.length = 0;
+      leavingEls.forEach((el) => el.remove());
+      leavingEls.clear();
       roll.remove();
     },
   };

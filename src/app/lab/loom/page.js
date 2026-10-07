@@ -43,12 +43,19 @@ const loadCovers = unstable_cache(
     for (const track of tracks) {
       if (!track.image || seen.has(track.image)) continue;
       seen.add(track.image);
-      covers.push({ id: track.id ?? track.image, title: track.title, artist: track.artist, image: track.image, durationMs: track.durationMs ?? null });
+      covers.push({
+        id: track.id ?? track.image,
+        title: track.title,
+        artist: track.artist,
+        image: track.imageLarge ?? track.image,
+        thumb: track.image,
+        durationMs: track.durationMs ?? null,
+      });
     }
     if (covers.length < 6) throw new Error("too few covers");
     return covers.slice(0, 24);
   },
-  ["loom-covers"],
+  ["loom-covers-large"],
   { revalidate: 3600 },
 );
 

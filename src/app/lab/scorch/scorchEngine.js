@@ -10,13 +10,16 @@ const STATS_EVERY = 20;
 const MAX_SOURCES = 4;
 const MAX_STEPS_PER_FRAME = 16;
 const PRESIM_STEPS_PER_FRAME = 160;
+const PRESIM_STEPS_PER_FRAME_SMALL = 80;
+const INTRO_ID = "intro";
+const CRACKLE_FULL = 0.45;
 const SOURCE_LIFE = 1.4;
 const DOUSE_SECONDS = 0.6;
 const DOUSE_RATE = 6;
 const FINISH_SECONDS = 1.1;
 const SKIP_SECONDS = 0.7;
 const REDUCED_FINISH_SECONDS = 0.45;
-const HEAT_ALIVE = 0.08;
+const HEAT_ALIVE = SIM.thresholdFloor * 0.85;
 const WIND_REST = 0.002;
 const PAPER = [0.925, 0.906, 0.871];
 const LOOKAHEAD = 3;
@@ -78,6 +81,15 @@ function easeOutBack(t) {
   return 1 + c3 * (t - 1) ** 3 + c1 * (t - 1) ** 2;
 }
 
+function smoothstep(edge0, edge1, value) {
+  const t = Math.min(1, Math.max(0, (value - edge0) / (edge1 - edge0)));
+  return t * t * (3 - 2 * t);
+}
+
+function clampUv(value) {
+  return Math.min(0.94, Math.max(0.06, value));
+}
+
 function seedFor(index) {
   const value = Math.sin(index * 91.7 + 13.1) * 43758.5453;
   return (value - Math.floor(value)) * 10;
@@ -127,6 +139,7 @@ export function createScorchEngine(canvas, options) {
   }
 
   const size = gridSize;
+  const presimSteps = size > 256 ? PRESIM_STEPS_PER_FRAME : PRESIM_STEPS_PER_FRAME_SMALL;
   let stateFormat = fullFloat && floatLinear ? gl.RGBA32F : gl.RGBA16F;
   let stateTargets = [makeTarget(gl, size, stateFormat), makeTarget(gl, size, stateFormat)];
   if (stateFormat === gl.RGBA32F && stateTargets.some((target) => !target.complete)) {
@@ -159,6 +172,10 @@ export function createScorchEngine(canvas, options) {
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([236, 231, 222, 255]));
 
   const statsPixels = new Uint8Array(STATS_SIZE * STATS_SIZE * 4);
+  const statsBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+  gl.bufferData(gl.PIXEL_PACK_BUFFER, statsPixels.byteLength, gl.STREAM_READ);
+  gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
   const sourceData = new Float32Array(MAX_SOURCES * 4);
   const sources = [];
   const governor = createResolutionGovernor({ max: 1, min: 0.55 });
@@ -185,10 +202,15 @@ export function createScorchEngine(canvas, options) {
   let finishSeconds = FINISH_SECONDS;
   let finishing = false;
   let douseUntil = -1;
+  let smotherUntil = -1;
+  let statsFence = null;
+  let statsSheet = -1;
+  let idleChecked = false;
   let cssWidth = 1;
   let cssHeight = 1;
   let dpr = 1;
   let spotCursor = 0;
+  let introGuard = false;
   const wind = { x: 0, y: 0, tx: 0, ty: 0, at: [0.5, 0.5], driven: false };
 
   const positionOf = (index) => ((index % coverCount) + coverCount) % coverCount;
@@ -252,6 +274,7 @@ export function createScorchEngine(canvas, options) {
   function trimSlots() {
     const keep = new Set();
     for (let step = 0; step < LOOKAHEAD; step += 1) keep.add(positionOf(sheetIndex + step));
+    if (underIndex >= 0) keep.add(positionOf(underIndex));
     for (const slot of slots.values()) {
       if (keep.has(slot.position) || !slot.texture) continue;
       gl.deleteTexture(slot.texture);
@@ -264,6 +287,7 @@ export function createScorchEngine(canvas, options) {
   function prefetch() {
     const base = sheetIndex < 0 ? current : sheetIndex;
     for (let step = 0; step < LOOKAHEAD; step += 1) request(base + step);
+    if (underIndex >= 0) request(underIndex);
   }
 
   function bindTexture(unit, texture) {
@@ -291,6 +315,7 @@ export function createScorchEngine(canvas, options) {
   function writeFuel() {
     const slot = slotFor(sheetIndex);
     const data = slot.data;
+    if (!data || !slot.texture) return;
     const { program, uniforms } = fuelPass;
     gl.useProgram(program);
     bindTexture(0, slot.texture);
@@ -314,16 +339,16 @@ export function createScorchEngine(canvas, options) {
     for (let index = sources.length - 1; index >= 0; index -= 1) {
       const source = sources[index];
       const age = clock - source.start;
-      const until = Math.min(source.start + SOURCE_LIFE, Math.max(source.start + SIM.sourceHold, source.end));
+      const until = Math.min(source.start + (source.life ?? SOURCE_LIFE), Math.max(source.start + SIM.sourceHold, source.end));
       if (clock > until) {
         sources.splice(index, 1);
         continue;
       }
-      if (count >= MAX_SOURCES) continue;
+      if (age < 0 || count >= MAX_SOURCES) continue;
       const grow = reducedMotion ? 1 : easeOutBack(Math.min(1, age / SIM.sourceGrow));
       sourceData[count * 4] = source.u;
       sourceData[count * 4 + 1] = source.v;
-      sourceData[count * 4 + 2] = Math.max(0, SIM.sourceRadius * grow);
+      sourceData[count * 4 + 2] = Math.max(0, SIM.sourceRadius * source.reach * grow + (source.spread ?? 0) * age);
       sourceData[count * 4 + 3] = SIM.sourceHeat;
       count += 1;
     }
@@ -337,6 +362,10 @@ export function createScorchEngine(canvas, options) {
     gl.useProgram(program);
     const diffusion = SIM.diffusion * params.heatSpread;
     const dousing = clock < douseUntil;
+    const smothering = clock < smotherUntil;
+    let cooling = 0;
+    if (dousing) cooling = DOUSE_RATE;
+    else if (smothering) cooling = DOUSE_RATE * SIM.introSmotherRate;
     gl.uniform1i(uniforms.uState, 0);
     gl.uniform1i(uniforms.uFuel, 1);
     gl.uniform2f(uniforms.uTexel, 1 / size, 1 / size);
@@ -345,7 +374,7 @@ export function createScorchEngine(canvas, options) {
     gl.uniform1f(uniforms.uRateBase, SIM.rateBase);
     gl.uniform1f(uniforms.uRateInk, SIM.rateInk);
     gl.uniform1f(uniforms.uGain, SIM.gain);
-    gl.uniform1f(uniforms.uKeep, Math.exp(-SIM.loss * dt) * (dousing ? Math.exp((-DOUSE_RATE / params.burnRate) * dt) : 1));
+    gl.uniform1f(uniforms.uKeep, Math.exp(-SIM.loss * dt) * Math.exp((-cooling / params.burnRate) * dt));
     gl.uniform1f(uniforms.uThresholdBase, SIM.thresholdBase);
     gl.uniform1f(uniforms.uThresholdFuel, SIM.thresholdFuel);
     gl.uniform1f(uniforms.uThresholdFloor, SIM.thresholdFloor);
@@ -357,6 +386,7 @@ export function createScorchEngine(canvas, options) {
     gl.uniform2f(uniforms.uWindAt, wind.at[0], wind.at[1]);
     gl.uniform1f(uniforms.uWindReach, SIM.windReach);
     gl.uniform1f(uniforms.uWindGlobal, SIM.windGlobal);
+    gl.uniform1f(uniforms.uWindCool, SIM.windCool);
     gl.uniform4fv(uniforms.uSources, sourceData);
     gl.uniform1i(uniforms.uSourceCount, dousing ? 0 : sourceCount);
     bindTexture(1, fuelTarget.texture);
@@ -377,7 +407,8 @@ export function createScorchEngine(canvas, options) {
     drawInto(glowTarget);
   }
 
-  function readStats() {
+  function requestStats() {
+    if (statsFence) return;
     const { program, uniforms } = statsPass;
     gl.useProgram(program);
     bindTexture(0, glowTarget.texture);
@@ -385,8 +416,34 @@ export function createScorchEngine(canvas, options) {
     gl.uniform2f(uniforms.uGlowTexel, 1 / GLOW_SIZE, 1 / GLOW_SIZE);
     drawInto(statsTarget);
     gl.bindFramebuffer(gl.FRAMEBUFFER, statsTarget.framebuffer);
-    gl.readPixels(0, 0, STATS_SIZE, STATS_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, statsPixels);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+    gl.readPixels(0, 0, STATS_SIZE, STATS_SIZE, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    statsSheet = sheetIndex;
+    const fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!fence) {
+      collectStats();
+      return;
+    }
+    statsFence = fence;
+    gl.flush();
+  }
+
+  function pollStats() {
+    if (!statsFence) return;
+    const status = gl.clientWaitSync(statsFence, 0, 0);
+    if (status === gl.TIMEOUT_EXPIRED) return;
+    gl.deleteSync(statsFence);
+    statsFence = null;
+    collectStats();
+  }
+
+  function collectStats() {
+    if (statsSheet !== sheetIndex) return;
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, statsBuffer);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, statsPixels);
+    gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     let burntSum = 0;
     let hottest = 0;
     let heatSum = 0;
@@ -396,11 +453,22 @@ export function createScorchEngine(canvas, options) {
       hottest = Math.max(hottest, statsPixels[index * 4 + 1]);
       heatSum += statsPixels[index * 4 + 2];
     }
+    const hottestHeat = (hottest / 255) * 2;
     burnt = burntSum / cells / 255;
-    heatAlive = (hottest / 255) * 2 > HEAT_ALIVE;
+    heatAlive = hottestHeat > HEAT_ALIVE;
     onBurnt(finishing ? Math.max(burnt, SIM.turnoverAt) : burnt);
-    onActivity(heatSum / cells / 255);
+    onActivity(heatAlive ? (heatSum / cells / 255) * smoothstep(HEAT_ALIVE, CRACKLE_FULL, hottestHeat) : 0);
+    if (introGuard && !finishing && burnt > SIM.introLimit) {
+      introGuard = false;
+      smotherIntro();
+    }
     if (!finishing && burnt >= SIM.turnoverAt) beginFinish(reducedMotion ? REDUCED_FINISH_SECONDS : FINISH_SECONDS);
+  }
+
+  function smotherIntro() {
+    for (let index = sources.length - 1; index >= 0; index -= 1) if (sources[index].id === INTRO_ID) sources.splice(index, 1);
+    smotherUntil = clock + SIM.introSmother;
+    wake();
   }
 
   function render() {
@@ -442,13 +510,21 @@ export function createScorchEngine(canvas, options) {
   }
 
   function turnOver() {
+    const resolved = usableFrom(underIndex);
+    if (resolved !== underIndex) {
+      underIndex = resolved;
+      onSheet(positionOf(sheetIndex), positionOf(underIndex));
+    }
+    if (slotFor(underIndex).status !== "ready") return;
     sheetIndex = underIndex;
     underIndex = usableFrom(sheetIndex + 1);
+    introGuard = false;
     finishing = false;
     finish = 0;
     burnt = 0;
     heatAlive = false;
     douseUntil = -1;
+    smotherUntil = -1;
     wind.x = 0;
     wind.y = 0;
     wind.tx = 0;
@@ -470,31 +546,28 @@ export function createScorchEngine(canvas, options) {
     const sheet = slotFor(first);
     if (sheet.status !== "ready") return;
     const second = usableFrom(first + 1);
-    const under = slotFor(second);
-    if (under.status !== "ready" && under.status !== "failed") return;
+    if (slotFor(second).status !== "ready") return;
     sheetIndex = first;
     underIndex = second;
     clearState();
     writeFuel();
-    const picks = introSpots(sheet.data.spots);
-    for (const pick of picks) sources.push({ id: `intro-${pick.u}`, u: pick.u, v: pick.v, start: clock, end: clock + 0.9 });
+    const quiet = sheet.data.quiet;
+    const settle = clock + SIM.presimSeconds + SIM.introLinger;
+    sources.push({ id: INTRO_ID, u: quiet.u, v: quiet.v, reach: SIM.introReach, spread: SIM.introGrow, start: clock, end: settle, life: Infinity });
+    sources.push({
+      id: INTRO_ID,
+      u: clampUv(quiet.u + SIM.introSecondOffset[0]),
+      v: clampUv(quiet.v + SIM.introSecondOffset[1]),
+      reach: SIM.introSecondReach,
+      spread: SIM.introGrow,
+      start: clock + SIM.introSecondDelay,
+      end: settle + SIM.introSecondDelay * 0.4,
+      life: Infinity,
+    });
+    introGuard = true;
     presimLeft = SIM.presimSeconds;
     ready = true;
     onSheet(positionOf(sheetIndex), positionOf(underIndex));
-  }
-
-  function introSpots(spots) {
-    const lowerLeft = spots.filter((spot) => spot.u < 0.55 && spot.v < 0.55);
-    const pool = lowerLeft.length >= 2 ? lowerLeft : spots;
-    const picks = [];
-    for (const spot of pool) {
-      if (picks.length >= 2) break;
-      if (picks.some((pick) => Math.hypot(pick.u - spot.u, pick.v - spot.v) < 0.16)) continue;
-      picks.push(spot);
-    }
-    if (picks.length === 0) picks.push({ u: 0.22, v: 0.24 }, { u: 0.36, v: 0.13 });
-    if (picks.length === 1) picks.push({ u: Math.min(0.9, picks[0].u + 0.18), v: Math.max(0.1, picks[0].v - 0.12) });
-    return picks;
   }
 
   function updateWind(dt) {
@@ -523,7 +596,7 @@ export function createScorchEngine(canvas, options) {
       wind.driven ||
       Math.hypot(wind.x, wind.y) > WIND_REST ||
       finishing ||
-      clock < douseUntil + 0.2
+      clock < Math.max(douseUntil, smotherUntil) + 0.2
     );
   }
 
@@ -546,7 +619,7 @@ export function createScorchEngine(canvas, options) {
     const stepDt = stepSeconds();
     if (presimLeft > 0) {
       let steps = 0;
-      while (presimLeft > 0 && steps < PRESIM_STEPS_PER_FRAME) {
+      while (presimLeft > 0 && steps < presimSteps) {
         clock += stepDt;
         simulate(stepDt, activeSources());
         presimLeft -= stepDt;
@@ -555,18 +628,18 @@ export function createScorchEngine(canvas, options) {
       writeGlow();
       if (presimLeft <= 0) {
         render();
-        readStats();
+        requestStats();
         onReady();
       }
       schedule();
       return;
     }
 
+    pollStats();
     updateWind(dt);
     if (finishing) {
       finish = Math.min(1, finish + dt / finishSeconds);
-      const under = slotFor(underIndex);
-      if (finish >= 1 && (under.status === "ready" || under.status === "failed")) turnOver();
+      if (finish >= 1) turnOver();
     }
 
     accumulator += dt * params.burnRate;
@@ -582,16 +655,24 @@ export function createScorchEngine(canvas, options) {
     writeGlow();
     render();
     frameCount += 1;
-    if (frameCount % STATS_EVERY === 0) readStats();
+    if (frameCount % STATS_EVERY === 0) requestStats();
     if (governor.sample(elapsed)) {
       applySize();
       render();
     }
-    if (needsFrames()) schedule();
-    else {
-      readStats();
+    if (needsFrames()) {
+      idleChecked = false;
+      schedule();
+    } else if (statsFence) {
+      schedule();
+    } else if (!idleChecked) {
+      idleChecked = true;
+      requestStats();
+      schedule();
+    } else {
+      idleChecked = false;
+      onActivity(0);
       lastTime = 0;
-      if (needsFrames()) schedule();
     }
   }
 
@@ -613,6 +694,16 @@ export function createScorchEngine(canvas, options) {
       canvas.width = width;
       canvas.height = height;
     }
+  }
+
+  function douse() {
+    if (!ready) return;
+    sources.length = 0;
+    douseUntil = clock + DOUSE_SECONDS;
+    wind.driven = false;
+    wind.tx = 0;
+    wind.ty = 0;
+    wake();
   }
 
   function redraw() {
@@ -673,8 +764,11 @@ export function createScorchEngine(canvas, options) {
     ignite(id, u, v) {
       if (!ready || finishing) return false;
       for (let index = sources.length - 1; index >= 0; index -= 1) if (sources[index].id === id) sources.splice(index, 1);
-      sources.push({ id, u, v, start: clock, end: Infinity });
+      sources.push({ id, u, v, reach: 1, start: clock, end: Infinity });
+      introGuard = false;
       douseUntil = -1;
+      smotherUntil = -1;
+      idleChecked = false;
       heatAlive = true;
       wake();
       return true;
@@ -697,6 +791,7 @@ export function createScorchEngine(canvas, options) {
       wind.at[0] = u;
       wind.at[1] = v;
       wind.driven = true;
+      introGuard = false;
       wake();
     },
     calm() {
@@ -705,15 +800,7 @@ export function createScorchEngine(canvas, options) {
       wind.ty = 0;
       wake();
     },
-    douse() {
-      if (!ready) return;
-      sources.length = 0;
-      douseUntil = clock + DOUSE_SECONDS;
-      wind.driven = false;
-      wind.tx = 0;
-      wind.ty = 0;
-      wake();
-    },
+    douse,
     skip() {
       if (!ready || finishing || presimLeft > 0) return;
       beginFinish(reducedMotion ? REDUCED_FINISH_SECONDS : SKIP_SECONDS);
@@ -736,6 +823,9 @@ export function createScorchEngine(canvas, options) {
         gl.deleteFramebuffer(target.framebuffer);
       }
       gl.deleteTexture(blank);
+      if (statsFence) gl.deleteSync(statsFence);
+      statsFence = null;
+      gl.deleteBuffer(statsBuffer);
       for (const pass of [fuelPass, simPass, glowPass, statsPass, displayPass]) gl.deleteProgram(pass.program);
       gl.deleteShader(vertex);
       gl.deleteVertexArray(vao);

@@ -38,5 +38,5 @@ export function largeArt(url) {
 }
 
 export function isLocalScan(cover) {
-  return !cover || cover.artist === "Local scans";
+  return !cover || cover.local === true || (typeof cover.image === "string" && cover.image.startsWith("/flyout/"));
 }

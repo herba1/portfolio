@@ -3,7 +3,7 @@
 import { useEffect, useRef } from "react";
 
 import { EASE, createMarbleEngine, dropBloom } from "./marbleEngine";
-import { OP_DROP, RECIPES, TOOLS, fitRecipe, introLanding, makeDrop, makeSwirl, makeTine } from "./marbleOps";
+import { OP_DROP, RECIPES, TOOLS, fitRecipe, introLanding, introPull, makeDrop, makeSwirl, makeTine } from "./marbleOps";
 
 const TAP_SLOP_PX = 6;
 const TAP_MS = 220;
@@ -12,6 +12,9 @@ const HOLD_BREAK_PX = 12;
 const TOOTH_POOL = 16;
 const PIPETTE_CAP = 0.32;
 const LANDING_DELAY_MS = 500;
+const INTRO_COMB_DELAY_MS = 640;
+const INTRO_COMB_MS = 1400;
+const INTRO_TOOTH_CLEARANCE = 0.03;
 const DROP_MS = 520;
 const SETTLE_BUMP_MS = 300;
 const PULL_MS = 760;
@@ -96,6 +99,9 @@ export default function MarbleScene({
     const coarse = window.matchMedia("(pointer: coarse)").matches;
     const now = () => performance.now();
     let landingTimer = 0;
+    let combTimer = 0;
+    let introComb = null;
+    let landingOp = null;
     let liftTimer = 0;
     let afterWipe = null;
     let printAnimation = null;
@@ -107,7 +113,12 @@ export default function MarbleScene({
         onPainted: () => {
           canvas.dataset.painted = "1";
           latest.current?.onPainted?.();
-          if (!latest.current?.reducedMotion) landingTimer = setTimeout(landIntroDrop, LANDING_DELAY_MS);
+          if (latest.current?.reducedMotion) {
+            rushIntroComb();
+            return;
+          }
+          landingTimer = setTimeout(landIntroDrop, LANDING_DELAY_MS);
+          combTimer = setTimeout(pullIntroComb, LANDING_DELAY_MS + INTRO_COMB_DELAY_MS);
         },
         onChange: (counts) => latest.current?.onCounts?.(counts),
         onError: (error) => latest.current?.onError?.(String(error?.message || error)),
@@ -145,6 +156,8 @@ export default function MarbleScene({
       return { x: event.clientX - rootRect.left, y: event.clientY - rootRect.top };
     };
     const coverCount = () => Math.max(1, Math.min(latest.current.items.length, 16));
+    const dprCap = () => (latest.current.embedded || coarse ? 1.5 : 2);
+    const unitDevicePx = () => unitCss() * Math.min(window.devicePixelRatio || 1, dprCap());
 
     function playDrop(op, duration = DROP_MS) {
       if (reduced()) {
@@ -182,12 +195,82 @@ export default function MarbleScene({
     function landIntroDrop() {
       if (!engineRef.current) return;
       const landing = introLanding(width / Math.max(height, 1));
-      dropAt(landing.x, landing.y, landing.radius, latest.current.nextInk % coverCount());
+      landingOp = dropAt(landing.x, landing.y, landing.radius, latest.current.nextInk % coverCount());
+    }
+
+    function placeIntroTeeth(op, progress) {
+      const unit = unitCss();
+      const reach = op.alpha * op.amount;
+      const acrossX = -op.dy;
+      const acrossY = op.dx;
+      const middle = (op.tines - 1) / 2;
+      const shown = Math.min(op.tines, TOOTH_POOL);
+      const first = Math.floor((op.tines - shown) / 2);
+      const angle = Math.atan2(-op.dy, op.dx);
+      const stretch = 1 + 1.4 * Math.sin(Math.PI * progress);
+      const landed = landingOp && engine.ops.indexOf(landingOp) >= 0 ? landingOp : null;
+      for (let index = 0; index < shown; index += 1) {
+        const offset = (first + index - middle) * op.spacing;
+        const plateX = op.x + op.dx * reach + acrossX * offset;
+        const plateY = op.y + op.dy * reach + acrossY * offset;
+        const covered = landed ? Math.hypot(plateX - landed.x, plateY - landed.y) < landed.radius * landed.amount + INTRO_TOOTH_CLEARANCE : false;
+        const state = covered ? "" : "1";
+        if (teeth[index].dataset.on !== state) teeth[index].dataset.on = state;
+        const x = width / 2 + plateX * unit;
+        const y = height / 2 - plateY * unit;
+        teeth[index].style.transform = `translate3d(${x}px, ${y}px, 0) rotate(${angle}rad) scaleX(${stretch})`;
+      }
+    }
+
+    function pullIntroComb() {
+      combTimer = 0;
+      const comb = introComb;
+      if (!comb || comb.state !== "waiting") return;
+      const op = comb.op;
+      if (engine.ops.indexOf(op) < 0) {
+        introComb = null;
+        return;
+      }
+      comb.state = "pulling";
+      engine.touch(op);
+      placeIntroTeeth(op, 0);
+      engine.animate(
+        op,
+        INTRO_COMB_MS,
+        (progress) => {
+          op.amount = EASE.inOut(progress);
+          if (comb.state === "pulling") placeIntroTeeth(op, progress);
+        },
+        () => {
+          op.amount = 1;
+          if (comb.state === "pulling") showTeeth(0);
+          comb.state = "done";
+          if (introComb === comb) introComb = null;
+        },
+      );
+    }
+
+    function rushIntroComb() {
+      clearTimeout(combTimer);
+      combTimer = 0;
+      const comb = introComb;
+      if (!comb) return;
+      if (comb.state === "waiting") {
+        comb.op.amount = 1;
+        comb.state = "done";
+        introComb = null;
+        engine.touch(comb.op);
+        return;
+      }
+      if (comb.state === "pulling") {
+        comb.state = "rushed";
+        showTeeth(0);
+      }
     }
 
     function recipeOps(name, seed) {
       const recipe = RECIPES[name] ?? RECIPES.bouquet;
-      const ops = recipe({ seed, aspect: width / Math.max(height, 1), coverCount: coverCount() });
+      const ops = recipe({ seed, aspect: width / Math.max(height, 1), coverCount: coverCount(), unitPx: unitDevicePx() });
       return engine.floatTargets ? ops : fitRecipe(ops, FALLBACK_OP_LIMIT);
     }
 
@@ -196,6 +279,11 @@ export default function MarbleScene({
       const { preset: name, params: values } = latest.current;
       const ops = recipeOps(name, values.seed);
       for (const op of ops) op.amount = 1;
+      const pull = reduced() || canvas.dataset.painted ? null : introPull(ops);
+      if (pull) {
+        pull.amount = 0;
+        introComb = { op: pull, state: "waiting" };
+      }
       engine.pushMany(ops);
     }
 
@@ -249,6 +337,7 @@ export default function MarbleScene({
     }
 
     function settleChoreography() {
+      rushIntroComb();
       runAfterWipe();
       finishReplay();
     }
@@ -291,6 +380,7 @@ export default function MarbleScene({
     }
 
     function lift() {
+      rushIntroComb();
       finishReplay();
       cancelGesture();
       slidePrint(LIFT_MS, () => {
@@ -300,6 +390,7 @@ export default function MarbleScene({
     }
 
     function playPreset(name, seed) {
+      rushIntroComb();
       cancelGesture();
       finishReplay();
       const ops = recipeOps(name, seed);
@@ -422,11 +513,13 @@ export default function MarbleScene({
       if (!op) return;
       op.animating = Math.max(0, (op.animating || 1) - 1);
       const from = op.amount;
+      const target = Math.max(from, 1);
       if (!reduced()) {
         engine.animate(op, SETTLE_BUMP_MS, (progress) => {
-          op.amount = from * (1 + 0.03 * Math.sin(Math.PI * progress));
+          op.amount = from + (target - from) * EASE.entrance(progress) + target * 0.03 * Math.sin(Math.PI * progress);
         });
       } else {
+        op.amount = target;
         engine.touch(op);
       }
       latest.current.onDropped?.(gesture.cover);
@@ -726,7 +819,6 @@ export default function MarbleScene({
     root.addEventListener("pointerleave", onPointerLeave);
     root.addEventListener("keydown", onKeyDown);
 
-    const dprCap = () => (latest.current.embedded || coarse ? 1.5 : 2);
     const resizeObserver = new ResizeObserver(([entry]) => {
       const box = entry.contentRect;
       if (box.width < 2 || box.height < 2) return;
@@ -754,6 +846,7 @@ export default function MarbleScene({
     return () => {
       onReady?.(null);
       clearTimeout(landingTimer);
+      clearTimeout(combTimer);
       clearTimeout(liftTimer);
       clearTimeout(gesture.holdTimer);
       printAnimation?.cancel();

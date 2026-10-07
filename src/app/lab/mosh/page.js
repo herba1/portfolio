@@ -32,6 +32,7 @@ const FALLBACK_COVERS = FALLBACK_CARDS.map(([title, artist], index) => ({
   title,
   artist,
   image: `/flyout/card-${String(index + 1).padStart(2, "0")}.jpg`,
+  thumb: `/flyout/card-${String(index + 1).padStart(2, "0")}.jpg`,
 }));
 
 const loadCovers = unstable_cache(
@@ -42,7 +43,7 @@ const loadCovers = unstable_cache(
     for (const track of tracks) {
       if (!track.image || seen.has(track.image)) continue;
       seen.add(track.image);
-      covers.push({ id: track.id ?? track.image, title: track.title, artist: track.artist, image: track.imageLarge ?? track.image, durationMs: track.durationMs ?? null });
+      covers.push({ id: track.id ?? track.image, title: track.title, artist: track.artist, image: track.imageLarge ?? track.image, thumb: track.image, durationMs: track.durationMs ?? null });
     }
     if (covers.length < 6) throw new Error("too few covers");
     return covers.slice(0, 24);
@@ -53,6 +54,7 @@ const loadCovers = unstable_cache(
 
 export default async function MoshPage() {
   if (isProdView() && manifest.status !== "shipped") notFound();
-  const covers = await loadCovers().catch(() => FALLBACK_COVERS);
-  return <MoshExperience covers={covers} />;
+  const loaded = await loadCovers().catch(() => null);
+  if (!loaded) return <MoshExperience covers={FALLBACK_COVERS} source="fallback" />;
+  return <MoshExperience covers={loaded} source="recent" />;
 }

@@ -39,6 +39,10 @@ function nub(edge, k, x, y0, y1, outward) {
   );
 }
 
+function tornNub(edge, k, x, y0, y1, outward) {
+  return `M${fixed(x)} ${fixed(y0)}${nub(edge, k, x, y0, y1, outward)}`;
+}
+
 function bridgeFill(edge, k, x, y0, y1, outward) {
   if (edge.broken[k]) return nub(edge, k, x, y0, y1, outward);
   const reach = Math.min(1.3, edge.gap[k] * REACH);
@@ -81,9 +85,11 @@ export function paperPaths(width, height, left, right, leftAttached, rightAttach
   const r = fixed(radius);
   let fill = `M${r} 0L${fixed(width - radius)} 0A${r} ${r} 0 0 0 ${fixed(width)} ${r}`;
   let line = fill;
+  let torn = "";
   for (let k = 0; k < BRIDGES; k += 1) {
     const top = k * spacing + radius;
     const bottom = (k + 1) * spacing - radius;
+    if (right.broken[k]) torn += tornNub(right, k, width, top, bottom, 1);
     fill += bridgeFill(right, k, width, top, bottom, 1);
     line += bridgeLine(right, k, width, top, bottom, 1, rightAttached);
     const turn =
@@ -99,6 +105,7 @@ export function paperPaths(width, height, left, right, leftAttached, rightAttach
   for (let k = BRIDGES - 1; k >= 0; k -= 1) {
     const bottom = (k + 1) * spacing - radius;
     const top = k * spacing + radius;
+    if (left.broken[k]) torn += tornNub(left, k, 0, bottom, top, -1);
     fill += bridgeFill(left, k, 0, bottom, top, -1);
     line += bridgeLine(left, k, 0, bottom, top, -1, leftAttached);
     const turn = k > 0 ? `${hole(left, k, radius)} 0 ${fixed(k * spacing - radius)}` : `A${r} ${r} 0 0 0 ${r} 0`;
@@ -107,5 +114,6 @@ export function paperPaths(width, height, left, right, leftAttached, rightAttach
   }
   out.fill = `${fill}Z`;
   out.line = line;
+  out.torn = torn;
   return out;
 }

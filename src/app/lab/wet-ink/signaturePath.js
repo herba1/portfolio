@@ -186,5 +186,5 @@ export function buildSignature(width, height) {
     events.push({ kind: "up", t: clock, x: originX + last[0] * scale, y: originY + last[1] * scale });
     if (index < PACED.length - 1) clock += LIFT_MS;
   });
-  return { events, duration: clock };
+  return { events, duration: clock, scale };
 }

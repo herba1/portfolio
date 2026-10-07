@@ -56,17 +56,29 @@ export function rasterWord(text, family, rasterSize) {
   });
   const atlasHeight = cursorY + tileHeight;
 
+  let tileWidthMax = 1;
+  for (const glyph of glyphs) tileWidthMax = Math.max(tileWidthMax, glyph.tile[2]);
   const canvas = document.createElement("canvas");
-  canvas.width = atlasWidth;
-  canvas.height = atlasHeight;
+  canvas.width = tileWidthMax;
+  canvas.height = tileHeight;
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.font = font;
   context.fillStyle = "#000";
   context.textBaseline = "alphabetic";
-  for (const glyph of glyphs) context.fillText(glyph.char, glyph.tile[0] + glyph.ox, glyph.tile[1] + glyph.oy);
-  const rgba = context.getImageData(0, 0, atlasWidth, atlasHeight).data;
   const alpha = new Uint8ClampedArray(atlasWidth * atlasHeight);
-  for (let i = 0; i < alpha.length; i += 1) alpha[i] = rgba[i * 4 + 3];
+  for (const glyph of glyphs) {
+    const [tx, ty, tw, th] = glyph.tile;
+    context.clearRect(0, 0, tw, th);
+    context.fillText(glyph.char, glyph.ox, glyph.oy);
+    const data = context.getImageData(0, 0, tw, th).data;
+    for (let y = 0; y < th; y += 1) {
+      const row = (ty + y) * atlasWidth + tx;
+      const source = y * tw * 4 + 3;
+      for (let x = 0; x < tw; x += 1) alpha[row + x] = data[source + x * 4];
+    }
+  }
+  canvas.width = 0;
+  canvas.height = 0;
 
   return {
     text,
@@ -83,6 +95,7 @@ export function rasterWord(text, family, rasterSize) {
     half: null,
     coarse: null,
     coarseWidth: 0,
+    anchorSets: new Map(),
   };
 }
 
@@ -145,17 +158,9 @@ export function interiorAnchor(word, glyph, a, targetX, targetY) {
   return best || { x: 0, y: 0 };
 }
 
-export function layoutWord(word, boxW, boxH) {
-  const narrow = boxW < 640;
-  const { lines, F } = splitLines(word, boxW, boxH, narrow);
+function placeRows(word, lines, F, boxW, firstBaseline, leading) {
   const a = word.S / F;
-  const capH = word.capEm * F;
   const tracking = trackingAt(F);
-  const leading = F * 1.06;
-  const blockHeight = capH + (lines.length - 1) * leading;
-  const centreY = boxH * (narrow ? 0.4 : 0.42);
-  const firstBaseline = centreY - blockHeight / 2 + capH;
-
   const byTextIndex = new Map(word.glyphs.map((glyph, index) => [glyph.textIndex, index]));
   const placed = word.glyphs.map(() => null);
   const rows = [];
@@ -187,18 +192,26 @@ export function layoutWord(word, boxW, boxH) {
       previous = index;
     }
   });
+  return { placed, rows };
+}
 
-  const stem = STEM_EM * F;
+function nominalAnchors(word, lines) {
+  const key = lines.map(([from, to]) => `${from}-${to}`).join("|");
+  const cached = word.anchorSets?.get(key);
+  if (cached) return cached;
+  const F = word.S;
+  const capH = word.capEm * F;
+  const { placed } = placeRows(word, lines, F, 0, 0, F * 1.06);
   const anchors = placed.map((place, index) => {
     const glyph = word.glyphs[index];
     const toward = (other) => {
       const target = placed[other];
-      return interiorAnchor(word, glyph, a, target.penX + target.centreX - place.penX, target.penY + target.centreY - place.penY);
+      return interiorAnchor(word, glyph, 1, target.penX + target.centreX - place.penX, target.penY + target.centreY - place.penY);
     };
     const root = (side) => ({ x: place.centreX + side * ROOT_SPREAD * (place.right - place.left), y: 0 });
     const rootLeft = root(-1);
     const rootRight = root(1);
-    const toRoot = (point) => interiorAnchor(word, glyph, a, point.x, point.y - capH * 0.08);
+    const toRoot = (point) => interiorAnchor(word, glyph, 1, point.x, point.y - capH * 0.08);
     return {
       left: place.prev >= 0 ? toward(place.prev) : toRoot(rootLeft),
       right: place.next >= 0 ? toward(place.next) : toRoot(rootRight),
@@ -206,11 +219,46 @@ export function layoutWord(word, boxW, boxH) {
       rootRight,
     };
   });
+  word.anchorSets?.set(key, anchors);
+  return anchors;
+}
+
+const scalePoint = (point, k) => ({ x: point.x * k, y: point.y * k });
+
+export function layoutWord(word, boxW, boxH) {
+  const narrow = boxW < 640;
+  const { lines, F } = splitLines(word, boxW, boxH, narrow);
+  const a = word.S / F;
+  const capH = word.capEm * F;
+  const tracking = trackingAt(F);
+  const leading = F * 1.06;
+  const blockHeight = capH + (lines.length - 1) * leading;
+  const centreY = boxH * (narrow ? 0.4 : 0.42);
+  const firstBaseline = centreY - blockHeight / 2 + capH;
+  const { placed, rows } = placeRows(word, lines, F, boxW, firstBaseline, leading);
+
+  const stem = STEM_EM * F;
+  const k = 1 / a;
+  const anchors = nominalAnchors(word, lines).map((set) => ({
+    left: scalePoint(set.left, k),
+    right: scalePoint(set.right, k),
+    rootLeft: scalePoint(set.rootLeft, k),
+    rootRight: scalePoint(set.rootRight, k),
+  }));
+
+  const rowBoxes = rows.map((row) => ({ left: Infinity, right: -Infinity, top: row.baseline - capH, bottom: row.baseline }));
+  for (const place of placed) {
+    const box = rowBoxes[place.line];
+    box.left = Math.min(box.left, place.left);
+    box.right = Math.max(box.right, place.right);
+    box.top = Math.min(box.top, place.top);
+    box.bottom = Math.max(box.bottom, place.bottom);
+  }
 
   let bottom = 0;
   for (const place of placed) bottom = Math.max(bottom, place.penY + Math.max(capH * 0.1, place.bottom - place.penY));
 
-  return { F, a, capH, stem, tracking, placed, anchors, rows, lines: lines.length, bottom, boxW, boxH, narrow };
+  return { F, a, capH, stem, tracking, placed, anchors, rows, rowBoxes, lines: lines.length, bottom, boxW, boxH, narrow };
 }
 
 export function sampleField(word, glyph, a, lx, ly) {

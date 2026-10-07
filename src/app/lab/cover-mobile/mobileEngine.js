@@ -1,6 +1,6 @@
 import { FOLD_ANGLE, buildMobile, mulberry32, pivotsFor, poseStructure } from "./mobileLayout";
 import { createMobileSim } from "./mobileSim";
-import { MAX_COUNT } from "./mobileParams";
+import { MAX_COUNT, isLocalScan } from "./mobileParams";
 
 const ENTRANCE_MS = 1100;
 const ENTRANCE_FOLD = 0.66;
@@ -13,12 +13,20 @@ const TAP_MS = 420;
 const RELEASE_WINDOW_MS = 80;
 const NUDGE = 300;
 const GUST = 1200;
-const EMBED_GUST = 800;
-const EMBED_GUST_MS = 7000;
 const ATTENTION_MS = 30000;
+const DRAUGHT_MIN_MS = 8000;
+const DRAUGHT_SPREAD_MS = 3000;
+const DRAUGHT_GUST = 600;
+const DRAUGHT_GUST_SPREAD = 120;
+const DRAUGHT_TWIST = 0.2;
+const HELD_LAYER = 50;
+const PRESS_LIFT = 0.04;
+const PRESS_KICK = 0.2;
+const REMOUNT_GUST = 520;
 const AMBIENT_TIME = 1.5;
 const SLEEP_ENERGY = 0.5;
 const SLEEP_HOLD = 1.5;
+const YAW_SLEEP = 3e-3;
 const POP_OMEGA = (Math.PI * 2) / 0.42;
 const POP_STIFFNESS = POP_OMEGA * POP_OMEGA;
 const POP_DAMPING = 2 * 0.82 * POP_OMEGA;
@@ -31,7 +39,21 @@ const PIVOT_KNOT = 3;
 const END_KNOT = 1.75;
 const HOOK_KNOT = 2.5;
 const HUM_GAIN = 32;
-const HUM_MAX = 6;
+const HUM_MAX = 5;
+const HUM_ALPHA = 0.3;
+const HUM_FALLOFF = 0.64;
+const HUM_FLOOR = 0.25;
+const HUM_PULSE = 0.6;
+const HUM_PULSE_TIME = 0.18;
+const BEAT_SLOW_TIME = 0.6;
+const BEAT_ONSET = 0.02;
+const BEAT_RELATIVE = 0.15;
+const BEAT_REARM = 0.008;
+const BEAT_GAP = 0.2;
+const BEAT_LIFT = 900;
+const BEAT_LIFT_CAP = 160;
+const BEAT_TWIST = 5;
+const BEAT_TWIST_CAP = 0.5;
 const WIND_WAKE_SPEED = 80;
 
 const ENTRANCE_CURVE = (() => {
@@ -67,11 +89,24 @@ function wrapAngle(value) {
   return Math.atan2(Math.sin(value), Math.cos(value));
 }
 
-function insetsFor(width) {
+function insetsFor(width, height) {
+  if (height < 500) return { top: 64, bottom: 72, side: 16 };
   return width < 640 ? { top: 96, bottom: 172, side: 16 } : { top: 104, bottom: 116, side: 32 };
 }
 
-export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, coverRefs, configRef, playerRef }) {
+export function mountMobile({
+  stage,
+  canvas,
+  covers,
+  count,
+  seed,
+  slotsRef,
+  coverRefs,
+  configRef,
+  playerRef,
+  entrance = true,
+  onEntered,
+}) {
   const context = canvas.getContext("2d");
   const total = Math.min(MAX_COUNT, covers.length);
   const effectiveCount = Math.max(2, Math.min(count, total));
@@ -82,15 +117,19 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
   slotsRef.current = slots;
 
   const random = mulberry32(seed * 7919 + 13);
+  const draughtRandom = mulberry32(seed * 104729 + 71);
   const pose = { x: 0, y: 0, angle: 0, yaw: 0, vx: 0, vy: 0 };
   const target = { x: 0, y: 0, angle: 0, yaw: 0, vx: 0, vy: 0 };
   const ends = { a: { x: 0, y: 0 }, b: { x: 0, y: 0 } };
   const shape = new Float64Array(10);
   const pops = new Float64Array(total);
   const popVelocity = new Float64Array(total);
-  const sides = new Int8Array(total);
+  const popTarget = new Float64Array(total);
+  const sides = new Int8Array(total).fill(-1);
   const layers = new Int16Array(total).fill(-1);
   const flying = new Int8Array(total);
+  const labels = new Array(total).fill("");
+  let threadHops = new Int8Array(0);
   const state = {
     sim: null,
     mobile: null,
@@ -104,10 +143,19 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     flights: [],
     maxSize: 1,
     ambient: configRef.current.reducedMotion ? 0 : 1,
+    pendingEntrance: entrance,
     attentionAt: performance.now(),
     quietFor: 0,
     ink: "#1a1a1a",
     gustDirection: 1,
+    draughtDirection: draughtRandom() < 0.5 ? -1 : 1,
+    pendingAdvance: false,
+    slowLevel: 0,
+    beatArmed: true,
+    beatAt: 0,
+    beatSign: 1,
+    humPulse: 0,
+    humSlot: -1,
   };
   const pointer = {
     id: null,
@@ -126,6 +174,65 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
   };
 
   const elementFor = (coverIndex) => coverRefs.current[coverIndex] ?? null;
+  const shelf = stage.querySelector(".cm-stage__covers");
+
+  const orderTabs = () => {
+    if (!shelf) return;
+    const active = document.activeElement;
+    let expected = shelf.firstElementChild;
+    let inOrder = true;
+    const sequence = slots.slice();
+    for (let coverIndex = 0; coverIndex < total; coverIndex += 1) if (!slots.includes(coverIndex)) sequence.push(coverIndex);
+    for (const coverIndex of sequence) {
+      const element = elementFor(coverIndex);
+      if (!element) continue;
+      if (element !== expected) inOrder = false;
+      expected = element.nextElementSibling;
+    }
+    if (inOrder) return;
+    const canMove = typeof shelf.moveBefore === "function";
+    for (const coverIndex of sequence) {
+      const element = elementFor(coverIndex);
+      if (!element || element.parentNode !== shelf) continue;
+      try {
+        if (canMove) shelf.moveBefore(element, null);
+        else shelf.appendChild(element);
+      } catch {
+        shelf.appendChild(element);
+      }
+    }
+    if (active && shelf.contains(active) && document.activeElement !== active) active.focus({ preventScroll: true });
+  };
+
+  const markEntered = () => {
+    state.pendingEntrance = false;
+    onEntered?.();
+  };
+
+  const labelFor = (coverIndex, slot) => {
+    const cover = covers[coverIndex];
+    const audible = !configRef.current.embedded && !isLocalScan(cover);
+    if (slot === 0) {
+      if (!audible) return `${cover.title} by ${cover.artist}`;
+      const player = playerRef?.current;
+      const playing = Boolean(player?.isPlaying()) && player.currentId() === cover.id;
+      return `${playing ? "Pause" : "Play"} ${cover.title} by ${cover.artist}`;
+    }
+    return audible ? `Hang ${cover.title} on top and play it` : `Hang ${cover.title} on top`;
+  };
+
+  const applyLabel = (coverIndex, slot) => {
+    const element = elementFor(coverIndex);
+    if (!element) return;
+    const label = labelFor(coverIndex, slot);
+    if (labels[coverIndex] === label) return;
+    labels[coverIndex] = label;
+    element.setAttribute("aria-label", label);
+  };
+
+  const syncLabels = () => {
+    for (let slot = 0; slot < slots.length; slot += 1) applyLabel(slots[slot], slot);
+  };
 
   const setSlotLook = (coverIndex, slot) => {
     const element = elementFor(coverIndex);
@@ -133,6 +240,18 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     const inverse = state.maxSize / state.mobile.covers[slot].size;
     element.style.setProperty("--cm-inverse", inverse.toFixed(4));
     element.style.setProperty("--cm-corner", `${CORNER}px`);
+    applyLabel(coverIndex, slot);
+  };
+
+  const playingSlot = () => {
+    const player = playerRef?.current;
+    if (!player?.isPlaying()) return -1;
+    const id = player.currentId();
+    for (let slot = 0; slot < slots.length; slot += 1) {
+      const coverIndex = slots[slot];
+      if (!flying[coverIndex] && covers[coverIndex].id === id) return slot;
+    }
+    return -1;
   };
 
   const resizeCanvas = () => {
@@ -156,8 +275,10 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     }
     state.ink = getComputedStyle(stage).color || state.ink;
     const ids = slots.map((coverIndex) => covers[coverIndex].id);
-    const mobile = buildMobile({ count: slots.length, seed, width, height, ids, insets: insetsFor(width) });
+    const mobile = buildMobile({ count: slots.length, seed, width, height, ids, insets: insetsFor(width, height) });
     const sim = createMobileSim(mobile, random);
+    threadHops = new Int8Array(sim.threadCount);
+    state.humSlot = -1;
     state.mobile = mobile;
     state.sim = sim;
     state.maxSize = mobile.covers[0].size;
@@ -175,6 +296,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
       element.setAttribute("aria-hidden", hung ? "false" : "true");
     }
     slots.forEach((coverIndex, slot) => setSlotLook(coverIndex, slot));
+    orderTabs();
     if (withEntrance && !configRef.current.reducedMotion) {
       const folded = poseStructure(
         mobile.structure,
@@ -193,6 +315,11 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     } else {
       state.entrance = null;
       sim.setPose(mobile.rest);
+      if (state.pendingEntrance) markEntered();
+      else if (!configRef.current.reducedMotion) {
+        state.gustDirection *= -1;
+        sim.blow(state.gustDirection, REMOUNT_GUST);
+      }
     }
   };
 
@@ -271,7 +398,10 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
         flying[flight.coverIndex] = 0;
         setSlotLook(flight.coverIndex, flight.to);
         state.flights.splice(index, 1);
-        if (!state.flights.length) retargetPivots();
+        if (!state.flights.length) {
+          retargetPivots();
+          orderTabs();
+        }
       }
     }
   };
@@ -280,13 +410,14 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     let moving = false;
     const half = dt / 2;
     for (let coverIndex = 0; coverIndex < total; coverIndex += 1) {
-      if (pops[coverIndex] === 0 && popVelocity[coverIndex] === 0) continue;
+      const rest = popTarget[coverIndex];
+      if (pops[coverIndex] === rest && popVelocity[coverIndex] === 0) continue;
       for (let pass = 0; pass < 2; pass += 1) {
-        popVelocity[coverIndex] += (-POP_STIFFNESS * pops[coverIndex] - POP_DAMPING * popVelocity[coverIndex]) * half;
+        popVelocity[coverIndex] += (-POP_STIFFNESS * (pops[coverIndex] - rest) - POP_DAMPING * popVelocity[coverIndex]) * half;
         pops[coverIndex] += popVelocity[coverIndex] * half;
       }
-      if (Math.abs(pops[coverIndex]) < 1e-4 && Math.abs(popVelocity[coverIndex]) < 1e-3) {
-        pops[coverIndex] = 0;
+      if (Math.abs(pops[coverIndex] - rest) < 1e-4 && Math.abs(popVelocity[coverIndex]) < 1e-3) {
+        pops[coverIndex] = rest;
         popVelocity[coverIndex] = 0;
       } else {
         moving = true;
@@ -319,7 +450,11 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     context.lineCap = "round";
     context.lineJoin = "round";
 
-    const humming = level > 0.004 && !state.flights.length;
+    const humSlot = level > 0.004 && !state.flights.length ? playingSlot() : -1;
+    if (humSlot >= 0 && humSlot !== state.humSlot) {
+      sim.threadHopsFrom(humSlot, threadHops);
+      state.humSlot = humSlot;
+    }
     context.lineWidth = THREAD_WIDTH;
     context.beginPath();
     for (let thread = 0; thread < sim.threadCount; thread += 1) {
@@ -348,12 +483,14 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     }
     context.stroke();
 
-    if (humming) {
-      const amplitude = Math.min(HUM_MAX, level * HUM_GAIN) * (0.82 + 0.18 * Math.sin(now * 0.031));
-      context.globalAlpha = 0.16;
+    if (humSlot >= 0) {
+      const strength = Math.min(HUM_MAX, level * HUM_GAIN) * (1 + HUM_PULSE * state.humPulse);
+      context.globalAlpha = HUM_ALPHA;
       context.beginPath();
-      traceHum(0, amplitude);
-      traceHum(sim.coverThreadIndex(0), amplitude * 0.6);
+      for (let thread = 0; thread < sim.threadCount; thread += 1) {
+        const amplitude = strength * HUM_FALLOFF ** threadHops[thread] * (0.82 + 0.18 * Math.sin(now * 0.031 + thread * 1.9));
+        if (amplitude >= HUM_FLOOR) traceHum(thread, amplitude);
+      }
       context.fill();
       context.globalAlpha = 1;
     }
@@ -392,11 +529,12 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
 
   const render = (now, dt, level) => {
     const { sim, mobile } = state;
+    const held = pointer.mode === "grab" ? pointer.coverIndex : -1;
     for (let slot = 0; slot < slots.length; slot += 1) {
       const coverIndex = slots[slot];
       if (flying[coverIndex]) continue;
       sim.coverPose(slot, pose);
-      placeCover(coverIndex, pose.x, pose.y, pose.angle, pose.yaw, mobile.covers[slot].size, 1 + slot);
+      placeCover(coverIndex, pose.x, pose.y, pose.angle, pose.yaw, mobile.covers[slot].size, coverIndex === held ? HELD_LAYER : 1 + slot);
     }
     stepFlights(now, dt);
     drawWires(now, level);
@@ -420,6 +558,27 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     wake();
   };
 
+  const listen = (now, dt, level, playing, reduced) => {
+    const { sim } = state;
+    state.slowLevel += (level - state.slowLevel) * (1 - Math.exp(-dt / BEAT_SLOW_TIME));
+    state.humPulse *= Math.exp(-dt / HUM_PULSE_TIME);
+    if (state.humPulse < 1e-3) state.humPulse = 0;
+    const onset = level - state.slowLevel;
+    if (onset < BEAT_REARM) state.beatArmed = true;
+    const threshold = Math.max(BEAT_ONSET, state.slowLevel * BEAT_RELATIVE);
+    if (!playing || !state.beatArmed || onset <= threshold || now - state.beatAt < BEAT_GAP * 1000) return;
+    if (state.entrance || state.flights.length) return;
+    const slot = playingSlot();
+    if (slot < 0) return;
+    state.beatArmed = false;
+    state.beatAt = now;
+    state.humPulse = 1;
+    if (reduced || sim.grab.body === sim.armCount + slot) return;
+    sim.kick(slot, 0, Math.min(BEAT_LIFT_CAP, onset * BEAT_LIFT), 0);
+    sim.twist(slot, state.beatSign * Math.min(BEAT_TWIST_CAP, onset * BEAT_TWIST));
+    state.beatSign = -state.beatSign;
+  };
+
   function frame(now) {
     state.frame = 0;
     const { sim } = state;
@@ -430,7 +589,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     const player = playerRef?.current;
     const playing = Boolean(player?.isPlaying());
     const attending = playing || now - state.attentionAt < ATTENTION_MS;
-    const ambientTarget = config.reducedMotion ? 0 : attending ? 1 : 0;
+    const ambientTarget = !config.reducedMotion && attending ? 1 : 0;
     state.ambient += (ambientTarget - state.ambient) * (1 - Math.exp(-dt / AMBIENT_TIME));
     if (state.ambient < 0.002 && ambientTarget === 0) state.ambient = 0;
 
@@ -442,27 +601,90 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
       if (progress >= 1) {
         sim.anchor.y = 0;
         state.entrance = null;
+        markEntered();
       }
     } else {
       sim.step(dt, config.physics, { ambient: state.ambient, reduced: config.reducedMotion });
     }
     const popping = stepPops(dt);
     const level = player ? player.level() : 0;
+    listen(now, dt, level, playing, config.reducedMotion);
     render(now, dt, level);
+    if (state.pendingAdvance && !state.entrance && !state.flights.length && pointer.mode !== "grab") {
+      state.pendingAdvance = false;
+      if (!player?.isActive()) promoteNext();
+    }
 
-    const busy = state.entrance || state.flights.length || sim.grab.body >= 0 || popping || state.ambient > 0.002 || level > 0.002;
-    if (!busy && sim.energy() < SLEEP_ENERGY && sim.yawEnergy() < 4e-4) state.quietFor += dt;
+    const busy =
+      state.entrance ||
+      state.flights.length ||
+      sim.grab.body >= 0 ||
+      popping ||
+      state.ambient > 0.002 ||
+      level > 0.002 ||
+      state.humPulse > 0;
+    if (!busy && sim.energy() < SLEEP_ENERGY && sim.yawEnergy() < YAW_SLEEP) state.quietFor += dt;
     else state.quietFor = 0;
     if (state.quietFor > SLEEP_HOLD) return;
     schedule();
   }
 
+  const settleFlights = () => {
+    if (!state.flights.length || !state.sim) return;
+    for (const flight of state.flights) {
+      state.sim.setHookEmpty(flight.from, false);
+      state.sim.setHookEmpty(flight.to, false);
+      flying[flight.coverIndex] = 0;
+      setSlotLook(flight.coverIndex, flight.to);
+    }
+    state.flights.length = 0;
+    retargetPivots();
+    orderTabs();
+  };
+
+  const finishEntrance = () => {
+    if (!state.entrance || !state.sim) return;
+    state.sim.anchor.y = 0;
+    state.sim.setPose(state.mobile.rest);
+    state.entrance = null;
+    markEntered();
+  };
+
+  const followHeld = () => {
+    if (pointer.mode !== "grab" || pointer.slot < 0) return;
+    const coverIndex = slots[pointer.slot];
+    if (coverIndex === pointer.coverIndex) return;
+    elementFor(pointer.coverIndex)?.removeAttribute("data-held");
+    popTarget[pointer.coverIndex] = 0;
+    pointer.coverIndex = coverIndex;
+    popTarget[coverIndex] = PRESS_LIFT;
+    elementFor(coverIndex)?.setAttribute("data-held", "true");
+  };
+
   const promote = (slot) => {
     const { sim } = state;
-    if (!sim || state.entrance || state.flights.length || slot <= 0 || slot >= slots.length) return false;
+    if (!sim || slot <= 0 || slot >= slots.length) return false;
+    if (document.hidden) {
+      finishEntrance();
+      settleFlights();
+    }
+    if (state.entrance || state.flights.length) return false;
+    state.pendingAdvance = false;
     const now = performance.now();
     const rising = slots[slot];
     const falling = slots[0];
+    if (document.hidden) {
+      slots[0] = rising;
+      slots[slot] = falling;
+      setSlotLook(rising, 0);
+      setSlotLook(falling, slot);
+      followHeld();
+      retargetPivots();
+      orderTabs();
+      syncLabels();
+      configRef.current.onPromote?.(covers[rising], rising);
+      return true;
+    }
     const bow = random() < 0.5 ? 1 : -1;
     const reduced = configRef.current.reducedMotion;
     const duration = reduced ? REDUCED_FLIGHT_MS : FLIGHT_MS;
@@ -474,10 +696,26 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     flying[falling] = 1;
     slots[0] = rising;
     slots[slot] = falling;
+    followHeld();
     sim.setHookEmpty(slot, true);
+    syncLabels();
     configRef.current.onPromote?.(covers[rising], rising);
     touch();
     return true;
+  };
+
+  const promoteNext = () => {
+    if (pointer.mode === "grab" || (!document.hidden && (state.entrance || state.flights.length))) {
+      state.pendingAdvance = true;
+      wake();
+      return false;
+    }
+    const current = slots[0];
+    for (let step = 1; step < total; step += 1) {
+      const slot = slots.indexOf((current + step) % total);
+      if (slot > 0) return promote(slot);
+    }
+    return false;
   };
 
   const tap = (slot) => {
@@ -524,7 +762,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
   };
 
   const onPointerDown = (event) => {
-    if (event.button > 0 || !state.sim) return;
+    if (event.button > 0 || !state.sim || pointer.id !== null) return;
     const [x, y] = localPoint(event);
     pointer.lastAt = 0;
     trackVelocity(event, x, y);
@@ -539,6 +777,8 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
       pointer.slot = slot;
       pointer.coverIndex = coverIndex;
       state.sim.startGrab(slot, x, y);
+      popTarget[coverIndex] = PRESS_LIFT;
+      popVelocity[coverIndex] += POP_KICK * PRESS_KICK;
       stage.dataset.grabbing = "true";
       elementFor(coverIndex)?.setAttribute("data-held", "true");
     } else {
@@ -556,9 +796,10 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
 
   const onPointerMove = (event) => {
     if (!state.sim) return;
+    const own = pointer.id === event.pointerId;
+    if (pointer.id !== null && !own) return;
     const [x, y] = localPoint(event);
     trackVelocity(event, x, y);
-    const own = pointer.id === event.pointerId;
     if (own && pointer.mode === "grab") {
       pointer.moved = Math.max(pointer.moved, Math.hypot(x - pointer.downX, y - pointer.downY));
       state.sim.moveGrab(Math.min(state.width + 40, Math.max(-40, x)), Math.min(state.height + 40, Math.max(-40, y)));
@@ -578,6 +819,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     if (pointer.mode === "grab") {
       const fresh = event.timeStamp - pointer.lastAt < RELEASE_WINDOW_MS;
       state.sim?.endGrab(cancelled || !fresh ? 0 : pointer.vx);
+      if (pointer.coverIndex >= 0) popTarget[pointer.coverIndex] = 0;
       elementFor(pointer.coverIndex)?.removeAttribute("data-held");
     }
     delete stage.dataset.grabbing;
@@ -626,10 +868,12 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
 
   const onFocus = () => touch();
 
-  build(true);
+  build(state.pendingEntrance);
   if (state.sim) render(performance.now(), 0, 0);
   configRef.current.onControllerReady?.({
-    promoteNext: () => promote(1),
+    promoteNext,
+    syncLabels,
+    wake: touch,
     gust: (direction = 1) => gust(direction, GUST),
     topCover: () => covers[slots[0]],
   });
@@ -638,7 +882,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     const width = stage.clientWidth;
     const height = stage.clientHeight;
     if (!state.sim || Math.abs(width - state.width) > 1 || Math.abs(height - state.height) > 120) {
-      build(!state.sim);
+      build(state.pendingEntrance);
       if (state.sim) render(performance.now(), 0, 0);
     } else {
       state.height = height;
@@ -668,12 +912,26 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
   };
   document.addEventListener("visibilitychange", onVisibility);
 
-  const embedTimer = window.setInterval(() => {
-    if (!configRef.current.embedded || !state.visible || document.hidden || !state.sim || state.entrance) return;
-    state.sim.blow(state.gustDirection, EMBED_GUST);
-    state.gustDirection *= -1;
+  let draughtTimer = 0;
+  const queueDraught = () => {
+    draughtTimer = window.setTimeout(runDraught, DRAUGHT_MIN_MS + draughtRandom() * DRAUGHT_SPREAD_MS);
+  };
+  function runDraught() {
+    queueDraught();
+    const { sim } = state;
+    if (!sim || configRef.current.reducedMotion || !state.visible || document.hidden) return;
+    if (state.entrance || state.flights.length || pointer.id !== null) return;
+    if (playerRef?.current?.isActive() || performance.now() - state.attentionAt < ATTENTION_MS) return;
+    state.draughtDirection = -state.draughtDirection;
+    sim.blow(state.draughtDirection, DRAUGHT_GUST + draughtRandom() * DRAUGHT_GUST_SPREAD);
+    const turns = 2 + Math.floor(draughtRandom() * 2);
+    for (let turn = 0; turn < turns; turn += 1) {
+      const slot = Math.floor(draughtRandom() * sim.coverCount);
+      sim.twist(slot, (draughtRandom() < 0.5 ? -1 : 1) * DRAUGHT_TWIST);
+    }
     wake();
-  }, EMBED_GUST_MS);
+  }
+  queueDraught();
 
   stage.addEventListener("pointerdown", onPointerDown);
   stage.addEventListener("pointermove", onPointerMove);
@@ -690,7 +948,7 @@ export function mountMobile({ stage, canvas, covers, count, seed, slotsRef, cove
     if (state.frame) cancelAnimationFrame(state.frame);
     state.frame = 0;
     state.sim = null;
-    window.clearInterval(embedTimer);
+    window.clearTimeout(draughtTimer);
     resizeObserver.disconnect();
     intersection.disconnect();
     document.removeEventListener("visibilitychange", onVisibility);

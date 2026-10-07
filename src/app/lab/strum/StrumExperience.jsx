@@ -36,19 +36,11 @@ const HINTS = {
     playing: "Swipe across the lines, or pull one down and let go",
   },
 };
-const COARSE_QUERY = "(pointer: coarse)";
 const LINE_SLOTS = Array.from({ length: MAX_LINES }, (_, index) => index);
 
 const subscribeNothing = () => () => {};
 const readAudioSupport = () => audioSupported();
 const readServerAudioSupport = () => true;
-const subscribeCoarse = (callback) => {
-  const query = window.matchMedia(COARSE_QUERY);
-  query.addEventListener("change", callback);
-  return () => query.removeEventListener("change", callback);
-};
-const readCoarse = () => window.matchMedia(COARSE_QUERY).matches;
-const readServerCoarse = () => false;
 
 function isTypingTarget(target) {
   if (!(target instanceof HTMLElement)) return false;
@@ -107,8 +99,10 @@ const Ghost = memo(function Ghost({ titles }) {
             }}
           >
             <span className="strum__ghost-string" />
-            <span className="strum__ghost-drop" />
-            <span className="strum__ghost-text">{titles[index % Math.max(1, titles.length)]}</span>
+            <span className="strum__ghost-type">
+              <span className="strum__ghost-drop" />
+              <span className="strum__ghost-text">{titles[index % Math.max(1, titles.length)]}</span>
+            </span>
           </div>
         );
       })}
@@ -121,7 +115,6 @@ export default function StrumExperience({ covers }) {
   const [muted, setMuted] = useState(false);
   const [unlocked, setUnlocked] = useState(false);
   const hasAudio = useSyncExternalStore(subscribeNothing, readAudioSupport, readServerAudioSupport);
-  const coarse = useSyncExternalStore(subscribeCoarse, readCoarse, readServerCoarse);
 
   const titles = useMemo(() => pickTitles(covers), [covers]);
   const interval = INTERVALS[intervalIndex];
@@ -222,15 +215,17 @@ export default function StrumExperience({ covers }) {
     voiceRef.current?.chime(INTERVALS[next].ratio);
   }, []);
 
-  const hints = coarse ? HINTS.touch : HINTS.pointer;
-  const hint = !hasAudio || unlocked ? hints.playing : hints.locked;
+  const hintState = !hasAudio || unlocked ? "playing" : "locked";
 
   return (
     <main className="strum bg-surface text-ink">
       <header className="strum__head">
         <div className="strum__titles">
           <h1 className="text-title-sm">Strum</h1>
-          <MorphText className="strum__hint text-ui-lg text-ink-secondary" text={hint} />
+          <span className="strum__hint text-ui-lg text-ink-secondary">
+            <MorphText className="strum__hint-copy" data-hint="pointer" text={HINTS.pointer[hintState]} />
+            <MorphText className="strum__hint-copy" data-hint="touch" text={HINTS.touch[hintState]} />
+          </span>
         </div>
         {hasAudio ? (
           <button

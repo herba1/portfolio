@@ -42,9 +42,11 @@ const MIN_SCALE = 1 / 40;
 const NARROW_MIN_SCALE = 1 / 70;
 const NARROW_PX = 640;
 const RELAXED_MIN_SCALE = 1 / 90;
-const PRIME_COUNT = 3;
-const LOOKAHEAD = 8;
+const PRIME_COUNT = 6;
+const REROOT_PRIME = 3;
 const IDLE_RETRY_MS = 120;
+const IDLE_BUDGET_MS = 12;
+const INTRO_QUIET_MS = 250;
 const WORK_MAX = 1024;
 const SPRITE_MAX = 256;
 const DEPTH = 4;
@@ -54,18 +56,32 @@ const FONT_WAIT_MS = 3000;
 const RUBBER = 0.3;
 const SAMPLE_COUNT = 32;
 const MAX_VELOCITY = 10;
-const REVEAL_FROM = 0.42;
-const REVEAL_TO = 0.72;
-const DISSOLVE_FROM = 0.5;
+const COAST_AFTER_MS = 34;
+const INSTANT_GAP_MAX_MS = 100;
+const TAIL_SPEED = 1.2;
+const TAIL_PEAK = 2.5;
+const TAIL_GAP_MS = 60;
+const TAIL_MIN_EVENTS = 4;
+const FLOOR_INPUT = 0.04;
+const SOFT_HEIGHT = 0.15;
+const ABOVE_MAX = 32;
+const TINT_FADE_MS = 300;
+const BLOOM_MIN = 0.5;
+const BLOOM_MAX = 0.7;
+const PIXELATE_SPAN = 0.1;
+const SHATTER_END = 0.97;
+const CELL_FADE = 0.05;
+const CELL_SHRINK = 0.35;
+const POP_TRAVEL = 0.12;
 const PIXEL_GRIDS = [8, 16, 32];
 
-const DISSOLVE_AT = new Float32Array(64);
+const DISSOLVE_ORDER = new Float32Array(64);
 for (let index = 0; index < 64; index += 1) {
   const column = index % 8;
   const row = (index - column) / 8;
   const radial = Math.hypot(column - 3.5, row - 3.5) / 4.95;
   const noise = Math.abs(Math.sin(index * 12.9898 + 78.233) * 43758.5453) % 1;
-  DISSOLVE_AT[index] = DISSOLVE_FROM + 0.34 * (0.6 * radial + 0.4 * noise);
+  DISSOLVE_ORDER[index] = 0.6 * radial + 0.4 * noise;
 }
 
 const clamp = (value, low, high) => (value < low ? low : value > high ? high : value);
@@ -127,7 +143,8 @@ function prepareCover(item, paper) {
     const vivid = clamp(lum + (value - lum) * VIVID, 0, 255);
     return Math.round(vivid + (paper[index] - vivid) * PAPER_MIX);
   };
-  const tint = `rgb(${channel(item.red, 0)} ${channel(item.green, 1)} ${channel(item.blue, 2)})`;
+  const rgb = [channel(item.red, 0), channel(item.green, 1), channel(item.blue, 2)];
+  const tint = `rgb(${rgb[0]} ${rgb[1]} ${rgb[2]})`;
   const image = item.element;
   const naturalW = image.naturalWidth || image.width || 1;
   const naturalH = image.naturalHeight || image.height || 1;
@@ -150,7 +167,7 @@ function prepareCover(item, paper) {
   } catch {
     cells.fill(tint);
   }
-  return { image, crop, tint, pixels, cells };
+  return { image, crop, tint, rgb, pixels, cells };
 }
 
 export default class CounterStage {
@@ -163,6 +180,7 @@ export default class CounterStage {
     this.paper = DEFAULT_PAPER;
     this.paperColour = `rgb(${DEFAULT_PAPER.join(" ")})`;
     this.embedded = embedded;
+    this.coarse = false;
     this.isFallback = isFallback;
     this.onLand = onLand;
     this.onReady = onReady;
@@ -173,6 +191,9 @@ export default class CounterStage {
     this.scratch = document.createElement("canvas");
     this.width = 0;
     this.height = 0;
+    this.frameW = 0;
+    this.frameH = 0;
+    this.frameOffsetY = 0;
     this.pixelRatio = 1;
     this.family = "";
     this.ink = "#1a1a1a";
@@ -181,6 +202,8 @@ export default class CounterStage {
     this.chain = [];
     this.analysedUpTo = 0;
     this.startIndex = 0;
+    this.rootNumber = 1;
+    this.above = [];
     this.complete = false;
     this.failed = false;
     this.relaxed = false;
@@ -191,6 +214,7 @@ export default class CounterStage {
     this.target = 0;
     this.tween = null;
     this.gestureFrom = 0;
+    this.committed = null;
     this.base = 0;
     this.blendBase = -1;
     this.blendFrom = null;
@@ -207,6 +231,12 @@ export default class CounterStage {
     this.notchAccum = 0;
     this.wheelNotched = false;
     this.freeEvents = 0;
+    this.freePeak = 0;
+    this.freeInput = 0;
+    this.instants = new Float64Array(3);
+    this.tailSign = 0;
+    this.tailDelta = 0;
+    this.tintFade = null;
     this.pointers = new Map();
     this.drag = null;
     this.pinch = null;
@@ -223,7 +253,9 @@ export default class CounterStage {
     this.destroyed = false;
     this.cutting = false;
     this.idleHandle = 0;
+    this.idleRetry = false;
     this.resizeTimer = 0;
+    this.resizePending = false;
     this.timers = new Set();
     this.reduced = false;
     this.resolveCovers = null;
@@ -250,6 +282,7 @@ export default class CounterStage {
     this.paperColour = `rgb(${this.paper.join(" ")})`;
     this.motionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
     this.reduced = this.motionQuery.matches;
+    this.coarse = window.matchMedia("(pointer: coarse)").matches;
     this.motionQuery.addEventListener("change", this.handleMotionPreference);
     this.visible = !document.hidden;
     document.addEventListener("visibilitychange", this.handleVisibility);
@@ -334,9 +367,9 @@ export default class CounterStage {
     this.primeChain(2);
     if (this.failed || this.destroyed) return;
     this.scheduleIdle();
-    await Promise.race([this.coversReady, this.wait(COVER_WAIT_MS)]);
+    await Promise.all([this.primeAhead(PRIME_COUNT), Promise.race([this.coversReady, this.wait(COVER_WAIT_MS)])]);
     if (this.destroyed || this.failed) return;
-    this.primeChain(PRIME_COUNT);
+    this.primeChain(2);
     if (this.failed) return;
     this.ready = true;
     this.base = 0;
@@ -354,20 +387,34 @@ export default class CounterStage {
     this.applyResize();
   }
 
+  async primeAhead(count) {
+    while (!this.destroyed && !this.complete && !this.failed && this.chain.length < count) {
+      this.analyseNext();
+      await this.wait(0);
+    }
+  }
+
   measureBox() {
     const width = Math.max(1, this.root.clientWidth);
     const height = Math.max(1, this.root.clientHeight);
     const cap = this.embedded ? 1.5 : 2;
     const narrow = width < NARROW_PX;
-    this.width = width;
-    this.height = height;
     this.pixelRatio = Math.min(window.devicePixelRatio || 1, cap);
-    this.canvas.width = Math.round(width * this.pixelRatio);
-    this.canvas.height = Math.round(height * this.pixelRatio);
+    this.frameW = width;
+    this.frameH = height;
+    this.fitCanvas(width, height);
     this.fitWidth = narrow ? 0.92 : 0.88;
     this.fitHeight = narrow ? 0.56 : 0.62;
     this.fitCentre = 0.53;
     this.minScale = this.relaxed ? RELAXED_MIN_SCALE : narrow ? NARROW_MIN_SCALE : MIN_SCALE;
+  }
+
+  fitCanvas(width, height) {
+    this.width = width;
+    this.height = height;
+    this.canvas.width = Math.round(width * this.pixelRatio);
+    this.canvas.height = Math.round(height * this.pixelRatio);
+    this.frameOffsetY = (height - this.frameH) / 2;
   }
 
   resetAnalysis(startIndex) {
@@ -389,8 +436,8 @@ export default class CounterStage {
     const track = this.tracks[index];
     let entry = null;
     try {
-      const layout = layoutTitle(track.title, this.measurer, this.width, this.height, this.fitWidth, this.fitHeight, this.fitCentre);
-      const result = analyseLayout(this.scratch, layout, this.family, this.width, this.height, this.minScale);
+      const layout = layoutTitle(track.title, this.measurer, this.frameW, this.frameH, this.fitWidth, this.fitHeight, this.fitCentre);
+      const result = analyseLayout(this.scratch, layout, this.family, this.frameW, this.frameH, this.minScale);
       if (result) entry = { ...result, layout, track, trackIndex: index, sprite: null };
     } catch {
       entry = null;
@@ -417,25 +464,41 @@ export default class CounterStage {
   }
 
   wantsAnalysis() {
-    return !this.complete && !this.failed && this.chain.length < Math.max(0, this.landed) + LOOKAHEAD;
+    return !this.complete && !this.failed;
   }
 
   idleAllowed() {
-    return this.mode === "rest" && !this.introAt && !this.cutting && performance.now() >= this.revealUntil;
+    if (this.mode !== "rest" || this.cutting) return false;
+    const now = performance.now();
+    if (now < this.revealUntil) return false;
+    return !this.introAt || now < this.introAt - INTRO_QUIET_MS;
+  }
+
+  retryIdle() {
+    if (this.idleRetry) return;
+    this.idleRetry = true;
+    this.later(IDLE_RETRY_MS, () => {
+      this.idleRetry = false;
+      this.scheduleIdle();
+    });
   }
 
   scheduleIdle() {
     if (this.idleHandle || this.destroyed || !this.wantsAnalysis()) return;
-    const step = () => {
+    const step = (deadline) => {
       this.idleHandle = 0;
       if (this.destroyed || !this.wantsAnalysis()) return;
       if (!this.idleAllowed()) {
-        if (this.mode === "rest" && !this.introAt) this.later(IDLE_RETRY_MS, () => this.scheduleIdle());
+        if (this.mode !== "tween" && this.mode !== "spring" && this.mode !== "free") this.retryIdle();
         return;
       }
       const wasComplete = this.complete;
-      this.analyseNext();
-      if (this.failed) return;
+      let analysed = 0;
+      while (this.wantsAnalysis() && this.idleAllowed() && (deadline ? deadline.timeRemaining() > IDLE_BUDGET_MS : analysed === 0)) {
+        this.analyseNext();
+        analysed += 1;
+        if (this.failed) return;
+      }
       if (this.complete && !wasComplete) this.requestFrame();
       this.scheduleIdle();
     };
@@ -455,6 +518,10 @@ export default class CounterStage {
 
   setCovers(items) {
     if (!items || !items.length) return;
+    const baseEntry = this.ready ? this.levelAt(this.base) : null;
+    const childEntry = this.ready ? this.levelAt(this.base + 1) : null;
+    const hadBase = !baseEntry || this.covers.has(baseEntry.track.id);
+    const hadChild = !childEntry || this.covers.has(childEntry.track.id);
     let matched = false;
     for (const item of items) {
       if (!item || !item.element || !this.trackIds.has(item.id)) continue;
@@ -468,7 +535,25 @@ export default class CounterStage {
     }
     if (!matched) return;
     this.resolveCovers?.();
+    if (this.ready && !this.reduced) {
+      const now = performance.now();
+      if (!hadBase && this.covers.has(baseEntry.track.id)) this.tintFade = { id: baseEntry.track.id, start: now };
+      if (!hadChild && this.covers.has(childEntry.track.id)) this.pop = { level: this.base, start: now, done: false };
+    }
     this.requestFrame();
+  }
+
+  paperFor(entry, now) {
+    const cover = this.coverFor(entry);
+    if (!cover) return this.paperColour;
+    const fade = this.tintFade;
+    if (!fade || fade.id !== entry.track.id) return cover.tint;
+    const u = (now - fade.start) / TINT_FADE_MS;
+    if (u >= 1) return cover.tint;
+    const eased = smoothstep(0, 1, u);
+    const { paper } = this;
+    const mix = (index) => Math.round(paper[index] + (cover.rgb[index] - paper[index]) * eased);
+    return `rgb(${mix(0)} ${mix(1)} ${mix(2)})`;
   }
 
   levelAt(level) {
@@ -502,10 +587,6 @@ export default class CounterStage {
 
   coverFor(level) {
     return level ? this.covers.get(level.track.id) : null;
-  }
-
-  tintFor(level) {
-    return this.coverFor(level)?.tint ?? this.paperColour;
   }
 
   syncBase() {
@@ -543,7 +624,7 @@ export default class CounterStage {
     const pivotY = from.y + (level.fixed.y - from.y) * blend;
     const originX = pivotX * (1 - sigma);
     const originY = pivotY * (1 - sigma);
-    return { base, f, a: 1 / sigma, tx: -originX / sigma, ty: -originY / sigma };
+    return { base, f, a: 1 / sigma, tx: -originX / sigma, ty: -originY / sigma + this.frameOffsetY };
   }
 
   requestFrame() {
@@ -561,6 +642,7 @@ export default class CounterStage {
     if (this.hover !== this.hoverTarget) return true;
     if (!this.pop.done && this.pop.start <= now) return true;
     if (this.introAt && now >= this.introAt) return true;
+    if (this.tintFade) return true;
     return false;
   }
 
@@ -580,6 +662,7 @@ export default class CounterStage {
       this.hover = u >= 1 ? this.hoverTarget : this.hoverFrom + (this.hoverTarget - this.hoverFrom) * EASE_HOVER(u);
     }
     if (!this.pop.done && now >= this.pop.start + POP_MS) this.pop.done = true;
+    if (this.tintFade && now >= this.tintFade.start + TINT_FADE_MS + 32) this.tintFade = null;
     if (this.introAt && now >= this.introAt && this.mode === "rest") {
       this.introAt = 0;
       this.startTween(this.z + 1, INTRO_MS, now);
@@ -618,26 +701,49 @@ export default class CounterStage {
       this.velocity = 0;
       return;
     }
-    if (this.mode === "free" && now - this.lastWheel > WHEEL_IDLE_MS) {
-      this.velocity = clamp(this.velocity, -FREE_MAX_VELOCITY, FREE_MAX_VELOCITY);
-      this.startSpring(this.commitTarget(this.velocity, this.freeEvents <= 2));
+    if (this.mode !== "free") return;
+    const since = now - this.lastWheel;
+    if (since > COAST_AFTER_MS) {
+      const max = this.maxZ();
+      this.z += this.velocity * dt;
+      this.velocity *= Math.exp(-dt / THROW_TAU);
+      if (this.z < -RUBBER || this.z > max + RUBBER) {
+        this.z = clamp(this.z, -RUBBER, max + RUBBER);
+        this.velocity = 0;
+      } else if (this.z < 0 || this.z > max) {
+        this.velocity *= Math.exp(-dt / 0.06);
+      }
     }
+    if (since > WHEEL_IDLE_MS) this.commitFree(this.freeEvents <= 2);
   }
 
-  commitTarget(velocity, decisive = false) {
+  commitFree(decisive) {
+    this.velocity = clamp(this.velocity, -FREE_MAX_VELOCITY, FREE_MAX_VELOCITY);
+    const committed = Math.abs(this.freeInput) >= FLOOR_INPUT ? this.committed : null;
+    this.startSpring(this.commitTarget(this.velocity, decisive, committed));
+  }
+
+  commitTarget(velocity, decisive = false, committed = null) {
     const { z } = this;
     const travel = z - this.gestureFrom;
     const travelFloor = decisive ? TICK_TRAVEL : TRAVEL_EPSILON;
     const direction = Math.abs(velocity) > DIRECTION_SPEED ? Math.sign(velocity) : Math.abs(travel) > travelFloor ? Math.sign(travel) : 0;
     if (!direction) return this.clampTarget(Math.round(z));
+    let target;
     if (decisive && Math.abs(velocity) <= DIRECTION_SPEED) {
-      return this.clampTarget(direction > 0 ? Math.floor(z + 1e-3) + 1 : Math.ceil(z - 1e-3) - 1);
+      target = direction > 0 ? Math.floor(z + 1e-3) + 1 : Math.ceil(z - 1e-3) - 1;
+    } else {
+      const projected = z + velocity * THROW_TAU;
+      const lead = direction > 0 ? Math.max(z, projected) : Math.min(z, projected);
+      const nearest = Math.round(lead);
+      if (Math.abs(lead - nearest) <= COMMIT_EDGE) target = nearest;
+      else target = direction > 0 ? Math.ceil(lead) : Math.floor(lead);
     }
-    const projected = z + velocity * THROW_TAU;
-    const lead = direction > 0 ? Math.max(z, projected) : Math.min(z, projected);
-    const nearest = Math.round(lead);
-    if (Math.abs(lead - nearest) <= COMMIT_EDGE) return this.clampTarget(nearest);
-    return this.clampTarget(direction > 0 ? Math.ceil(lead) : Math.floor(lead));
+    if (committed !== null && direction === Math.sign(committed - this.gestureFrom)) {
+      const floor = committed + direction;
+      target = direction > 0 ? Math.max(target, floor) : Math.min(target, floor);
+    }
+    return this.clampTarget(target);
   }
 
   settle(target) {
@@ -647,7 +753,12 @@ export default class CounterStage {
     this.tween = null;
     this.syncBase();
     this.land(target, false);
+    this.resumeResize();
     this.scheduleIdle();
+  }
+
+  resumeResize() {
+    if (this.resizePending) this.handleResize();
   }
 
   startSpring(target) {
@@ -696,9 +807,64 @@ export default class CounterStage {
     if (!entry) return;
     this.onLand?.({
       trackIndex: entry.trackIndex,
-      total: this.tracks.length,
-      canSurface: level > 0,
+      number: this.numberAt(level),
+      total: this.countTotal(),
+      canSurface: level > 0 || this.above.length > 0,
     });
+  }
+
+  countTotal() {
+    return this.complete ? Math.max(1, this.chain.length) : this.tracks.length;
+  }
+
+  numberAt(level) {
+    const total = this.countTotal();
+    return ((((this.rootNumber - 1 + level) % total) + total) % total) + 1;
+  }
+
+  reroot(startTrack, rootNumber) {
+    this.resetAnalysis(startTrack);
+    this.rootNumber = rootNumber;
+    this.primeChain(REROOT_PRIME);
+    if (this.failed) return false;
+    this.z = 0;
+    this.velocity = 0;
+    this.mode = "rest";
+    this.tween = null;
+    this.base = 0;
+    this.target = 0;
+    this.blendBase = -1;
+    this.blendFrom = null;
+    this.committed = null;
+    this.tailSign = 0;
+    this.drag = null;
+    this.pinch = null;
+    this.pointers.clear();
+    this.hover = 0;
+    this.hoverTarget = 0;
+    this.root.style.cursor = "";
+    this.pop = { level: 0, start: Infinity, done: true };
+    this.landed = -1;
+    return true;
+  }
+
+  climb() {
+    if (!this.above.length || this.cutting) return;
+    const current = this.levelAt(0);
+    const parentNumber = this.numberAt(-1);
+    const parent = this.above.pop();
+    if (!this.reroot(parent, parentNumber)) return;
+    const child = this.levelAt(1);
+    if (this.reduced || !current || !child || child.trackIndex !== current.trackIndex) {
+      this.cut(0);
+      return;
+    }
+    this.z = 1;
+    this.base = 1;
+    this.target = 1;
+    this.landed = 1;
+    this.pop = { level: 1, start: Infinity, done: true };
+    this.startTween(0, DIVE_MS);
   }
 
   cancelIntro() {
@@ -712,6 +878,10 @@ export default class CounterStage {
     const from = moving ? this.target : delta > 0 ? Math.floor(this.z + 1e-3) : Math.ceil(this.z - 1e-3);
     const to = this.clampTarget(from + delta);
     if (to === from) {
+      if (delta < 0 && from === 0 && !moving && this.above.length) {
+        this.climb();
+        return;
+      }
       if (moving || this.reduced) return;
       this.velocity = Math.sign(delta) * 1.6;
       this.startSpring(from);
@@ -743,6 +913,7 @@ export default class CounterStage {
       delete this.root.dataset.cut;
       this.cutting = false;
       this.land(to, false);
+      this.resumeResize();
     });
   }
 
@@ -789,6 +960,7 @@ export default class CounterStage {
         this.mode = "rest";
         this.syncBase();
         this.requestFrame();
+        this.resumeResize();
         return;
       }
       this.cut(target);
@@ -813,6 +985,10 @@ export default class CounterStage {
     if (!this.ready) return;
     if (event.pointerType === "mouse" && event.button !== 0) return;
     this.cancelIntro();
+    if (this.embedded) {
+      this.drag = event.isPrimary ? { id: event.pointerId, x0: event.clientX, y0: event.clientY, t0: event.timeStamp, shift: event.shiftKey } : null;
+      return;
+    }
     try {
       this.root.setPointerCapture(event.pointerId);
     } catch {
@@ -839,6 +1015,17 @@ export default class CounterStage {
 
   handlePointerMove(event) {
     if (!this.ready) return;
+    if (this.embedded) {
+      const { drag } = this;
+      if (drag && drag.id === event.pointerId) {
+        const dx = event.clientX - drag.x0;
+        const dy = event.clientY - drag.y0;
+        if (dx * dx + dy * dy >= TAP_SLOP_PX * TAP_SLOP_PX) this.drag = null;
+      } else if (event.pointerType === "mouse") {
+        this.updateHover(event);
+      }
+      return;
+    }
     const pointer = this.pointers.get(event.pointerId);
     if (!pointer) {
       if (event.pointerType === "mouse") this.updateHover(event);
@@ -878,6 +1065,13 @@ export default class CounterStage {
   }
 
   handlePointerUp(event) {
+    if (this.embedded) {
+      const { drag } = this;
+      this.drag = null;
+      if (!drag || drag.id !== event.pointerId || event.type !== "pointerup") return;
+      if (event.timeStamp - drag.t0 < TAP_MAX_MS) this.dive(event.shiftKey || drag.shift ? -1 : 1);
+      return;
+    }
     if (!this.pointers.has(event.pointerId)) return;
     this.pointers.delete(event.pointerId);
     if (this.pinch) {
@@ -937,8 +1131,8 @@ export default class CounterStage {
     this.requestFrame();
   }
 
-  stepNotch(event, delta, gap) {
-    const notches = event.deltaMode === 1 ? event.deltaY / NOTCH_LINES : event.deltaMode === 2 ? event.deltaY : delta / NOTCH_PX;
+  stepNotch(deltaMode, rawY, delta, gap) {
+    const notches = deltaMode === 1 ? rawY / NOTCH_LINES : deltaMode === 2 ? rawY : delta / NOTCH_PX;
     const direction = Math.sign(notches);
     if (!direction) return;
     if (gap > NOTCH_GESTURE_MS || Math.sign(this.notchAccum) === -direction) this.notchAccum = 0;
@@ -953,20 +1147,23 @@ export default class CounterStage {
     if (!this.ready) return;
     event.preventDefault();
     this.cancelIntro();
+    const deltaMode = event.deltaMode;
+    const rawY = event.deltaY;
+    const pinching = event.ctrlKey;
     const now = performance.now();
-    let delta = event.deltaY;
-    if (event.deltaMode === 1) delta *= LINE_PX;
-    else if (event.deltaMode === 2) delta *= this.height;
+    let delta = rawY;
+    if (deltaMode === 1) delta *= LINE_PX;
+    else if (deltaMode === 2) delta *= this.height;
     const gap = now - this.lastWheel;
     this.lastWheel = now;
     const level = this.levelAt(this.base);
     if (!level || this.pointers.size) return;
-    const looksNotched = !event.ctrlKey && (event.deltaMode !== 0 || (Math.abs(delta) >= 60 && Number.isInteger(event.deltaY)));
+    const looksNotched = !pinching && (deltaMode !== 0 || (Math.abs(delta) >= 60 && Number.isInteger(rawY)));
     const notched = looksNotched && (gap > 24 || this.wheelNotched);
     this.wheelNotched = notched;
     if (this.reduced) {
       if (gap > 320) this.wheelAccum = 0;
-      this.wheelAccum += event.ctrlKey ? -event.deltaY / 100 / Math.log(1 / level.scale) : notched ? Math.sign(delta) : delta * WHEEL_GAIN;
+      this.wheelAccum += pinching ? -rawY / 100 / Math.log(1 / level.scale) : notched ? Math.sign(delta) : delta * WHEEL_GAIN;
       if (Math.abs(this.wheelAccum) >= 0.35 && !this.cutting) {
         const to = this.clampTarget(Math.round(this.z) + Math.sign(this.wheelAccum));
         this.wheelAccum = 0;
@@ -975,15 +1172,28 @@ export default class CounterStage {
       return;
     }
     if (notched) {
-      this.stepNotch(event, delta, gap);
+      this.tailSign = 0;
+      this.stepNotch(deltaMode, rawY, delta, gap);
       return;
     }
-    let dz = event.ctrlKey ? -event.deltaY / 100 / Math.log(1 / level.scale) : delta * WHEEL_GAIN;
+    if (this.tailSign) {
+      if (!pinching && gap <= TAIL_GAP_MS && Math.sign(delta) === this.tailSign && Math.abs(delta) <= this.tailDelta) {
+        this.tailDelta = Math.abs(delta);
+        return;
+      }
+      this.tailSign = 0;
+    }
+    let dz = pinching ? -rawY / 100 / Math.log(1 / level.scale) : delta * WHEEL_GAIN;
     const entering = this.mode !== "free";
-    const carried = this.mode === "tween" || this.mode === "spring" || (!entering && gap < 100) ? this.velocity : 0;
+    const moving = this.mode === "tween" || this.mode === "spring";
+    const carried = moving || (!entering && gap < INSTANT_GAP_MAX_MS) ? this.velocity : 0;
     if (entering) {
       this.gestureFrom = this.z;
+      this.committed = moving ? this.target : null;
       this.freeEvents = 0;
+      this.freePeak = 0;
+      this.freeInput = 0;
+      this.instants.fill(0);
       this.tween = null;
       this.setHover(false);
     }
@@ -992,11 +1202,28 @@ export default class CounterStage {
     if ((this.z < 0 && dz < 0) || (this.z > max && dz > 0)) dz *= 0.25;
     const previous = this.z;
     this.z = clamp(this.z + dz, -RUBBER, max + RUBBER);
-    const instant = (this.z - previous) / (Math.max(8, gap) / 1000);
+    this.freeInput += this.z - previous;
+    const instant = (this.z - previous) / (clamp(gap, 8, INSTANT_GAP_MAX_MS) / 1000);
     this.velocity = carried * 0.6 + instant * 0.4;
     this.mode = "free";
     this.syncBase();
+    if (!pinching && this.momentumFading(Math.abs(instant))) {
+      this.tailSign = Math.sign(delta);
+      this.tailDelta = Math.abs(delta);
+      this.commitFree(false);
+      return;
+    }
     this.requestFrame();
+  }
+
+  momentumFading(speed) {
+    const { instants } = this;
+    instants[0] = instants[1];
+    instants[1] = instants[2];
+    instants[2] = speed;
+    if (speed > this.freePeak) this.freePeak = speed;
+    if (this.freeEvents < TAIL_MIN_EVENTS || this.freePeak < TAIL_PEAK) return false;
+    return instants[0] > instants[1] && instants[1] > instants[2] && instants[2] < TAIL_SPEED;
   }
 
   handleKeyDown(event) {
@@ -1038,28 +1265,28 @@ export default class CounterStage {
     const width = this.root.clientWidth;
     const height = this.root.clientHeight;
     if (Math.abs(width - this.width) < 1 && Math.abs(height - this.height) < 1) return;
-    const anchorEntry = this.levelAt(Math.max(0, Math.round(this.z)));
+    if (this.coarse && Math.abs(width - this.frameW) < 1 && Math.abs(height - this.frameH) < SOFT_HEIGHT * this.frameH) {
+      this.fitCanvas(width, Math.max(1, height));
+      this.render();
+      return;
+    }
+    if (this.mode !== "rest" || this.cutting || this.pointers.size) {
+      this.resizePending = true;
+      return;
+    }
+    this.resizePending = false;
+    const level = Math.max(0, Math.round(this.z));
+    const anchorEntry = this.levelAt(level);
     const anchor = anchorEntry ? anchorEntry.trackIndex : this.startIndex;
+    const number = this.numberAt(level);
+    for (let above = Math.max(0, level - ABOVE_MAX); above < level; above += 1) {
+      const entry = this.levelAt(above);
+      if (entry) this.above.push(entry.trackIndex);
+    }
+    if (this.above.length > ABOVE_MAX) this.above.splice(0, this.above.length - ABOVE_MAX);
     this.measureBox();
-    this.resetAnalysis(anchor);
-    this.primeChain(PRIME_COUNT);
-    if (this.failed) return;
-    this.z = 0;
-    this.velocity = 0;
-    this.mode = "rest";
-    this.tween = null;
-    this.base = 0;
-    this.target = 0;
-    this.blendFrom = null;
-    this.drag = null;
-    this.pinch = null;
-    this.pointers.clear();
-    this.hover = 0;
-    this.hoverTarget = 0;
-    this.root.style.cursor = "";
-    this.pop = { level: 0, start: Infinity, done: true };
+    if (!this.reroot(anchor, number)) return;
     this.render();
-    this.landed = -1;
     this.land(0, false);
   }
 
@@ -1076,12 +1303,15 @@ export default class CounterStage {
     }
     const now = this.clock || performance.now();
     const progress = Math.max(0, camera.f);
-    const reveal = smoothstep(REVEAL_FROM, REVEAL_TO, progress);
+    const baseEntry = this.levelAt(camera.base);
+    const bloom = this.bloomFor(baseEntry);
+    const shatter = bloom + PIXELATE_SPAN;
+    const reveal = smoothstep(shatter - 0.04, Math.min(SHATTER_END - 0.05, shatter + 0.18), progress);
     let level = camera.base;
     let scale = camera.a;
     let offsetX = camera.tx;
     let offsetY = camera.ty;
-    ctx.fillStyle = this.tintFor(this.levelAt(level));
+    ctx.fillStyle = this.paperFor(baseEntry, now);
     ctx.fillRect(0, 0, width, height);
     ctx.textBaseline = "alphabetic";
     for (let depth = 0; depth < DEPTH; depth += 1) {
@@ -1093,7 +1323,7 @@ export default class CounterStage {
       }
       const child = this.levelAt(level + 1);
       if (child) {
-        if (depth === 0) this.drawLivePorthole(entry, child, scale, offsetX, offsetY, progress, now);
+        if (depth === 0) this.drawLivePorthole(entry, child, scale, offsetX, offsetY, progress, bloom, now);
         else this.drawStillPorthole(entry, child, scale, offsetX, offsetY);
       }
       ctx.fillStyle = this.ink;
@@ -1116,7 +1346,13 @@ export default class CounterStage {
     return clamp((now - pop.start) / POP_MS, 0, 1);
   }
 
-  drawLivePorthole(entry, child, scale, offsetX, offsetY, progress, now) {
+  bloomFor(entry) {
+    if (!entry) return BLOOM_MAX;
+    const fill = Math.min(this.width, this.height) / Math.max(1e-3, 2 * entry.artHalf);
+    return clamp(Math.log(fill) / Math.log(1 / entry.scale), BLOOM_MIN, BLOOM_MAX);
+  }
+
+  drawLivePorthole(entry, child, scale, offsetX, offsetY, progress, bloom, now) {
     const { ctx, width, height, pixelRatio } = this;
     const { box } = entry.porthole;
     const left = offsetX + scale * box.x;
@@ -1149,7 +1385,7 @@ export default class CounterStage {
     const shiftX = (offsetX - viewLeft) * density;
     const shiftY = (offsetY - viewTop) * density;
     let blocky = false;
-    if (cover) blocky = this.paintArt(work, cover, entry, unit, shiftX, shiftY, progress, now);
+    if (cover) blocky = this.paintArt(work, cover, entry, unit, shiftX, shiftY, progress, bloom, now);
     work.globalCompositeOperation = "destination-in";
     work.imageSmoothingEnabled = true;
     work.drawImage(entry.porthole.canvas, box.x * unit + shiftX, box.y * unit + shiftY, box.w * unit, box.h * unit);
@@ -1159,11 +1395,13 @@ export default class CounterStage {
     ctx.imageSmoothingEnabled = true;
   }
 
-  paintArt(work, cover, entry, unit, shiftX, shiftY, progress, now) {
+  paintArt(work, cover, entry, unit, shiftX, shiftY, progress, bloom, now) {
     const popU = this.popProgress(this.base, now);
     const focused = this.hover > 0.5 || this.mode === "press";
-    const popGrid = focused || popU >= 0.75 ? 0 : popU >= 0.5 ? 32 : popU >= 0.25 ? 16 : 8;
-    const diveGrid = progress < 0.12 ? 0 : progress < 0.24 ? 32 : progress < 0.36 ? 16 : 8;
+    const settling = Math.max(popU, progress / POP_TRAVEL);
+    const popGrid = focused || settling >= 0.75 ? 0 : settling >= 0.5 ? 32 : settling >= 0.25 ? 16 : 8;
+    const pixelStep = PIXELATE_SPAN / 3;
+    const diveGrid = progress < bloom ? 0 : progress < bloom + pixelStep ? 32 : progress < bloom + 2 * pixelStep ? 16 : 8;
     const grid = popGrid && diveGrid ? Math.min(popGrid, diveGrid) : popGrid || diveGrid;
     const bump = popU > 0 && popU < 1 ? Math.sin(Math.PI * popU) * Math.pow(1 - popU, 0.6) : 0;
     const zoom = (1 + 0.06 * bump) * (1 + 0.06 * this.hover);
@@ -1171,18 +1409,23 @@ export default class CounterStage {
     const side = half * 2 * unit;
     const x0 = (entry.centre.x - half) * unit + shiftX;
     const y0 = (entry.centre.y - half) * unit + shiftY;
-    if (progress >= DISSOLVE_FROM) {
+    const shatterFrom = bloom + PIXELATE_SPAN;
+    if (progress >= shatterFrom) {
       const cell = side / 8;
+      const spread = Math.max(0, SHATTER_END - CELL_FADE - shatterFrom);
       for (let index = 0; index < 64; index += 1) {
-        const alpha = 1 - clamp((progress - DISSOLVE_AT[index]) * 26, 0, 1);
-        if (alpha <= 0) continue;
+        const fall = clamp((progress - shatterFrom - spread * DISSOLVE_ORDER[index]) / CELL_FADE, 0, 1);
+        if (fall >= 1) continue;
         const column = index % 8;
         const row = (index - column) / 8;
-        const cellLeft = Math.round(x0 + column * cell);
-        const cellTop = Math.round(y0 + row * cell);
-        work.globalAlpha = alpha;
+        const inset = cell * CELL_SHRINK * 0.5 * fall;
+        const cellLeft = Math.round(x0 + column * cell + inset);
+        const cellTop = Math.round(y0 + row * cell + inset);
+        const cellRight = Math.round(x0 + (column + 1) * cell - inset);
+        const cellBottom = Math.round(y0 + (row + 1) * cell - inset);
+        work.globalAlpha = 1 - fall;
         work.fillStyle = cover.cells[index];
-        work.fillRect(cellLeft, cellTop, Math.round(x0 + (column + 1) * cell) - cellLeft, Math.round(y0 + (row + 1) * cell) - cellTop);
+        work.fillRect(cellLeft, cellTop, cellRight - cellLeft, cellBottom - cellTop);
       }
       work.globalAlpha = 1;
       return true;

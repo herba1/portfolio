@@ -15,6 +15,7 @@ const YAW_GAIN = 0.01;
 const YAW_CAP = 36;
 const YAW_STIFFNESS = 1.1;
 const YAW_DAMPING_TIME = 4.2;
+const REST_YAW_DAMPING_SHARE = 0.2;
 const ARM_YAW_STIFFNESS = 0.9;
 const ARM_YAW_LIMIT = 0.9;
 const PIVOT_SLIDE_TIME = 0.22;
@@ -24,10 +25,11 @@ const REACH_SOFT = 0.8;
 const REACH_HARD = 0.92;
 const GRAB_VELOCITY_BLEND = 0.15;
 const GRAB_SPIN_TIME = 0.16;
+const HELD_ARM_SPIN_TIME = 0.04;
 const KNOT_SPIN = 0.6;
 const KNOT_SPIN_TIME = 0.25;
-const KNOT_DRIFT = 30;
-const KNOT_DRIFT_TIME = 0.7;
+const KNOT_DRIFT = 40;
+const KNOT_DRIFT_TIME = 0.8;
 
 export const PHYSICS_DEFAULTS = {
   gravity: 2000,
@@ -308,11 +310,12 @@ export function createMobileSim(mobile, random) {
   let grabForce = Infinity;
 
   const stepYaw = (dt, ambient, reduced) => {
+    const restShare = REST_YAW_DAMPING_SHARE + (1 - REST_YAW_DAMPING_SHARE) * Math.min(1, ambient);
     for (let body = 0; body < bodyCount; body += 1) {
       const isArm = body < armCount;
       const target = ambient * yawReach[body] * Math.sin(clock * yawRate[body] + yawPhase[body]);
       const stiffness = isArm ? ARM_YAW_STIFFNESS : YAW_STIFFNESS;
-      const dampingTime = reduced ? YAW_DAMPING_TIME / 4 : YAW_DAMPING_TIME;
+      const dampingTime = (reduced ? YAW_DAMPING_TIME / 4 : YAW_DAMPING_TIME) * restShare;
       yawVelocity[body] += (-(yaw[body] - target) * stiffness - yawVelocity[body] / dampingTime) * dt;
       yaw[body] += yawVelocity[body] * dt;
       if (isArm) {
@@ -353,9 +356,10 @@ export function createMobileSim(mobile, random) {
     const armLinearKeep = Math.exp(-(h * dampingScale * ARM_DRAG) / params.linearDamping);
     const armAngularKeep = Math.exp(-(h * dampingScale * ARM_DRAG) / params.angularDamping);
     const gravity = params.gravity;
-    const knotSpinKeep = Math.exp(-h / KNOT_SPIN_TIME);
-    const knotDriftKeep = Math.exp(-h / KNOT_DRIFT_TIME);
+    const knotSpinRate = h / KNOT_SPIN_TIME;
+    const knotDriftRate = h / KNOT_DRIFT_TIME;
     const grabSpinKeep = Math.exp(-h / GRAB_SPIN_TIME);
+    const heldArmKeep = Math.exp(-h / HELD_ARM_SPIN_TIME);
     const held = grab.body;
     for (let sub = 0; sub < SUBSTEPS; sub += 1) {
       for (let body = 0; body < bodyCount; body += 1) {
@@ -378,12 +382,16 @@ export function createMobileSim(mobile, random) {
         vx[body] = ((x[body] - prevX[body]) / h) * keepLinear;
         vy[body] = ((y[body] - prevY[body]) / h) * keepLinear;
         omega[body] = ((angle[body] - prevAngle[body]) / h) * (isArm ? armAngularKeep : angularKeep);
-        if (held >= 0) continue;
-        if (Math.abs(omega[body]) < KNOT_SPIN) omega[body] *= knotSpinKeep;
-        if (vx[body] * vx[body] + vy[body] * vy[body] < KNOT_DRIFT * KNOT_DRIFT) {
-          vx[body] *= knotDriftKeep;
-          vy[body] *= knotDriftKeep;
+        if (held >= 0) {
+          if (isArm) omega[body] *= heldArmKeep;
+          continue;
         }
+        const spinShare = omega[body] / KNOT_SPIN;
+        omega[body] *= Math.exp(-knotSpinRate / (1 + spinShare * spinShare));
+        const driftShare = (vx[body] * vx[body] + vy[body] * vy[body]) / (KNOT_DRIFT * KNOT_DRIFT);
+        const driftKeep = Math.exp(-knotDriftRate / (1 + driftShare));
+        vx[body] *= driftKeep;
+        vy[body] *= driftKeep;
       }
       if (held >= 0) {
         vx[held] += (grab.velocityX - vx[held]) * GRAB_VELOCITY_BLEND;
@@ -500,6 +508,10 @@ export function createMobileSim(mobile, random) {
     omega[body] += spin;
   };
 
+  const twist = (slot, spin) => {
+    yawVelocity[armCount + slot] += spin;
+  };
+
   const setHookEmpty = (slot, empty) => {
     const body = armCount + slot;
     const cover = mobile.covers[slot];
@@ -553,7 +565,34 @@ export function createMobileSim(mobile, random) {
     return out;
   };
 
-  const coverThreadIndex = (slot) => (slot < armCount ? 1 + slot * 2 : armCount * 2);
+  const nodeHops = new Int16Array(bodyCount + 1);
+  const relaxHops = (from, to) => {
+    if (nodeHops[from] < 0 || (nodeHops[to] >= 0 && nodeHops[to] <= nodeHops[from] + 1)) return false;
+    nodeHops[to] = nodeHops[from] + 1;
+    return true;
+  };
+
+  const threadHopsFrom = (slot, out) => {
+    const anchorNode = bodyCount;
+    nodeHops.fill(-1);
+    nodeHops[armCount + slot] = 0;
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (let thread = 0; thread < threadCount; thread += 1) {
+        const a = threadA[thread] < 0 ? anchorNode : threadA[thread];
+        const b = threadB[thread];
+        if (relaxHops(a, b)) changed = true;
+        if (relaxHops(b, a)) changed = true;
+      }
+    }
+    for (let thread = 0; thread < threadCount; thread += 1) {
+      const a = threadA[thread] < 0 ? anchorNode : threadA[thread];
+      out[thread] = Math.min(nodeHops[a], nodeHops[threadB[thread]]);
+    }
+    return out;
+  };
+
 
   return {
     mobile,
@@ -593,12 +632,13 @@ export function createMobileSim(mobile, random) {
     blow,
     nudge,
     kick,
+    twist,
     setHookEmpty,
     setPivotTarget,
     coverPose,
     threadEnds,
     armPoint,
     armShape,
-    coverThreadIndex,
+    threadHopsFrom,
   };
 }

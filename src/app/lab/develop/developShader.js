@@ -69,6 +69,7 @@ uniform float uGain;
 uniform float uLevel;
 uniform float uMaxShift;
 uniform float uWetDepth;
+uniform vec4 uPress;
 out vec4 outDepth;
 
 const float STILL_REACH = 0.6;
@@ -88,6 +89,9 @@ void main() {
   float edge = extent * (1.0 - 2.0 * STILL_REACH * strength);
   float along = dot(uv - 0.5, direction);
   float mask = smoothstep(edge - STILL_SOFTNESS, edge + STILL_SOFTNESS, along) * smoothstep(0.02, 0.08, strength);
+  vec2 pressOffset = (uv - uPress.xy) * vec2(0.8, 1.0);
+  float pressShape = clamp(uPress.z, 0.0, 1.0) * exp(-dot(pressOffset, pressOffset) / (uPress.w * uPress.w));
+  mask = max(mask, smoothstep(0.3, 0.7, pressShape));
   outDepth = vec4(max(pool, uWetDepth * mask), 0.0, 0.0, 1.0);
 }
 `;
@@ -108,11 +112,14 @@ uniform vec4 uPaddle;
 uniform float uPaddleOn;
 uniform float uPaddleRadius;
 uniform float uPaddleMix;
+uniform vec4 uPress;
 out vec4 outFlux;
 
 float bedAt(ivec2 cell) {
   vec2 uv = (vec2(cell) + 0.5) / uGrid;
-  return texelFetch(uCockle, cell, 0).r - uGain * (uLean.x * (uv.x - 0.5) * 0.8 + uLean.y * (uv.y - 0.5));
+  vec2 pressOffset = (uv - uPress.xy) * vec2(0.8, 1.0);
+  float well = uPress.z * exp(-dot(pressOffset, pressOffset) / (uPress.w * uPress.w));
+  return texelFetch(uCockle, cell, 0).r - uGain * (uLean.x * (uv.x - 0.5) * 0.8 + uLean.y * (uv.y - 0.5)) - well;
 }
 
 float surfaceAt(ivec2 cell) {
@@ -268,10 +275,12 @@ uniform float uGrain;
 uniform float uWater;
 uniform float uSeed;
 uniform float uHasImage;
+uniform vec4 uPress;
 
 const float DENSITY_MAX = 2.1;
 const float DEVELOP_K = 1.2;
 const float LN10 = 2.302585;
+const float ACUTANCE = 0.5;
 
 float hash21(vec2 p) {
   vec3 q = fract(vec3(p.xyx) * 0.1031);
@@ -307,6 +316,31 @@ vec4 sampleSpline(sampler2D tex, vec2 uv, vec2 size) {
   return mix(mix(d, c, sx), mix(b, a, sx), sy);
 }
 
+vec3 sampleSharp(sampler2D tex, vec2 uv, vec2 size, vec2 gradX, vec2 gradY) {
+  vec2 samplePos = uv * size;
+  vec2 center = floor(samplePos - 0.5) + 0.5;
+  vec2 f = samplePos - center;
+  vec2 w0 = f * (-0.5 + f * (1.0 - 0.5 * f));
+  vec2 w1 = 1.0 + f * f * (-2.5 + 1.5 * f);
+  vec2 w2 = f * (0.5 + f * (2.0 - 1.5 * f));
+  vec2 w3 = f * f * (-0.5 + 0.5 * f);
+  vec2 w12 = w1 + w2;
+  vec2 at0 = (center - 1.0) / size;
+  vec2 at3 = (center + 2.0) / size;
+  vec2 at12 = (center + w2 / w12) / size;
+  vec3 color = vec3(0.0);
+  color += textureGrad(tex, vec2(at0.x, at0.y), gradX, gradY).rgb * w0.x * w0.y;
+  color += textureGrad(tex, vec2(at12.x, at0.y), gradX, gradY).rgb * w12.x * w0.y;
+  color += textureGrad(tex, vec2(at3.x, at0.y), gradX, gradY).rgb * w3.x * w0.y;
+  color += textureGrad(tex, vec2(at0.x, at12.y), gradX, gradY).rgb * w0.x * w12.y;
+  color += textureGrad(tex, vec2(at12.x, at12.y), gradX, gradY).rgb * w12.x * w12.y;
+  color += textureGrad(tex, vec2(at3.x, at12.y), gradX, gradY).rgb * w3.x * w12.y;
+  color += textureGrad(tex, vec2(at0.x, at3.y), gradX, gradY).rgb * w0.x * w3.y;
+  color += textureGrad(tex, vec2(at12.x, at3.y), gradX, gradY).rgb * w12.x * w3.y;
+  color += textureGrad(tex, vec2(at3.x, at3.y), gradX, gradY).rgb * w3.x * w3.y;
+  return clamp(color, 0.0, 1.0);
+}
+
 void main() {
   vec2 cellStep = 1.0 / uGrid;
   float depth = max(sampleSpline(uField, vUv, uGrid).r, 0.0);
@@ -325,7 +359,13 @@ void main() {
   vec2 innerPx = min(inner, 1.0 - inner) * uPlatePx * (1.0 - 2.0 * uBorder);
   float inImage = clamp(min(innerPx.x, innerPx.y) + 0.5, 0.0, 1.0) * uHasImage;
   vec2 imageUv = uCrop.xy + clamp(inner, 0.0, 1.0) * uCrop.zw;
-  float luma = dot(sampleSpline(uImage, imageUv, uImageSize).rgb, vec3(0.2126, 0.7152, 0.0722));
+  vec2 baseImageUv = uCrop.xy + vUv * uCrop.zw;
+  vec2 imageGradX = dFdx(baseImageUv) / (1.0 - 2.0 * uBorder);
+  vec2 imageGradY = dFdy(baseImageUv) / (1.0 - 2.0 * uBorder);
+  vec3 lumaWeights = vec3(0.2126, 0.7152, 0.0722);
+  float luma = dot(sampleSharp(uImage, imageUv, uImageSize, imageGradX, imageGradY), lumaWeights);
+  float lumaSoft = dot(textureLod(uImage, imageUv, log2(max(uImageSize.x * length(imageGradX), 1.0)) + 1.0).rgb, lumaWeights);
+  luma = clamp(luma + (luma - lumaSoft) * ACUTANCE, 0.0, 1.0);
   float tone = clamp((luma - uLevels.x) / max(uLevels.y - uLevels.x, 0.05), 0.0, 1.0);
   tone = mix(1.0, tone, inImage);
   float exposure = 1.0 - tone;
@@ -342,6 +382,12 @@ void main() {
   color *= 1.0 - 0.035 * sheen;
   float tint = wet * (0.02 + 0.035 * smoothstep(0.0, 1.2, depth));
   color *= 1.0 - tint * vec3(0.0, 0.6, 1.6);
+
+  vec2 pressOffset = (vUv - uPress.xy) * vec2(0.8, 1.0);
+  float pressRadius2 = uPress.w * uPress.w;
+  float pressShape = uPress.z * exp(-dot(pressOffset, pressOffset) / pressRadius2);
+  float dimple = -2.0 * pressShape * dot(pressOffset, normalize(vec2(-0.4, 0.6))) / pressRadius2;
+  color *= 1.0 + 0.006 * dimple - 0.02 * pressShape;
 
   vec3 halfway = normalize(normalize(vec3(-0.4, 0.6, 1.0)) + vec3(0.0, 0.0, 1.0));
   vec3 normal = normalize(vec3(-slope * 6.0, 1.0));

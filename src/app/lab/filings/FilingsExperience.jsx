@@ -193,7 +193,7 @@ export default function FilingsExperience({ covers = [], embedded = false }) {
         <header className="filings-head">
           <h1 className="filings-title text-title-sm text-ink">Filings</h1>
           <p className="text-ui-lg text-ink-secondary">
-            Drag the magnet through the cover. Tap it to flip, double-click the
+            Drag a magnet through the cover. Tap one to flip it; double-tap the
             paper for another.
           </p>
         </header>

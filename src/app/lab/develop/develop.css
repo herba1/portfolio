@@ -203,10 +203,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-.develop-row__unit {
-  margin-left: 1px;
-}
-
 .develop-slider {
   --fill: 0.5;
   --track: 4px;
@@ -547,7 +543,7 @@
   overflow: hidden;
   border: 0;
   border-radius: 4px;
-  background-color: #d8d6d1;
+  background-color: var(--color-surface-sunken);
   box-shadow: 0 0 0 1px var(--color-line);
   cursor: pointer;
   transform: translateX(calc(var(--near) * 4px)) scale(calc(1 + var(--near) * 0.14));

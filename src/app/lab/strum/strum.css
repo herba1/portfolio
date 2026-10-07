@@ -37,6 +37,20 @@
   display: block;
 }
 
+.strum__hint-copy[data-hint="touch"] {
+  display: none;
+}
+
+@media (pointer: coarse) {
+  .strum__hint-copy[data-hint="pointer"] {
+    display: none;
+  }
+
+  .strum__hint-copy[data-hint="touch"] {
+    display: inline-block;
+  }
+}
+
 .strum__mute {
   position: relative;
   display: grid;
@@ -84,7 +98,7 @@
 .strum__stage {
   position: relative;
   flex: 1 1 auto;
-  min-height: 360px;
+  min-height: min(360px, calc(100dvh - 288px));
   margin-inline: -16px;
   container-type: inline-size;
   touch-action: none;
@@ -129,16 +143,27 @@
 .strum__ghost-row {
   position: relative;
   flex: none;
-  display: flex;
-  align-items: baseline;
   width: 100%;
   height: var(--strum-band);
-  padding-inline: 16px 140px;
   color: var(--color-ink);
+}
+
+.strum__ghost-type {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: baseline;
+  padding-inline: 16px 140px;
+  transform-origin: 16px var(--strum-drop);
+  animation:
+    strum-ghost-scale 440ms linear var(--strum-delay) both,
+    strum-ghost-blur 440ms cubic-bezier(0.33, 1, 0.68, 1) var(--strum-delay) both,
+    strum-ghost-fade 440ms linear var(--strum-delay) both;
 }
 
 .strum__ghost-string {
   position: absolute;
+  animation: strum-ghost-fade 440ms linear var(--strum-delay) both;
   top: calc(var(--strum-drop) - 0.5px);
   left: 8px;
   right: 8px;
@@ -192,17 +217,44 @@
 
 .strum__stage[data-live="true"] .strum__ghost {
   visibility: hidden;
-  transition: visibility 0s linear 1200ms;
 }
 
-.strum__stage[data-live="true"] .strum__ghost-row {
-  opacity: 0;
-  filter: blur(6px);
-  transition: opacity 240ms var(--ease-in-quad) var(--strum-delay), filter 240ms var(--ease-in-quad) var(--strum-delay);
+@keyframes strum-ghost-scale {
+  0% {
+    transform: scale(0.84);
+    animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  62% {
+    transform: scale(1.02);
+    animation-timing-function: cubic-bezier(0.37, 0, 0.63, 1);
+  }
+  100% {
+    transform: none;
+  }
+}
+
+@keyframes strum-ghost-blur {
+  from {
+    filter: blur(6px);
+  }
+  to {
+    filter: none;
+  }
+}
+
+@keyframes strum-ghost-fade {
+  0% {
+    opacity: 0;
+    animation-timing-function: cubic-bezier(0.33, 1, 0.68, 1);
+  }
+  55%,
+  100% {
+    opacity: 1;
+  }
 }
 
 @container (max-width: 639px) {
-  .strum__ghost-row {
+  .strum__ghost-type {
     padding-inline: 16px 72px;
   }
 }
@@ -341,7 +393,7 @@
   }
 
   .strum__stage {
-    min-height: 420px;
+    min-height: min(420px, calc(100dvh - 296px));
   }
 
   .strum__tuning {
@@ -354,12 +406,31 @@
   }
 }
 
+@media (max-height: 520px) and (orientation: landscape) {
+  .strum__tuning {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+  }
+
+  .strum-ratio {
+    width: min(100%, 360px);
+  }
+
+  .strum__stage {
+    min-height: min(360px, calc(100dvh - 256px));
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
+  .strum__ghost-type,
+  .strum__ghost-string {
+    animation: none;
+  }
+
   .strum__mute-icon,
   .strum__ghost,
   .strum__ghost-row,
-  .strum__stage[data-live="true"] .strum__ghost,
-  .strum__stage[data-live="true"] .strum__ghost-row,
   .strum__readout-inner,
   .strum__readout[data-shown="true"] .strum__readout-inner,
   .strum-ratio__tick,

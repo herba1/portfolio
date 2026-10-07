@@ -154,7 +154,7 @@ function compile(gl, type, source) {
   return shader;
 }
 
-export function createTapePlate(canvas) {
+export function createTapePlate(canvas, onRestored) {
   const gl = canvas.getContext("webgl2", {
     alpha: false,
     antialias: false,
@@ -223,24 +223,30 @@ export function createTapePlate(canvas) {
     event.preventDefault();
     lost = true;
   };
-  const onRestored = () => {
+  const onContextRestored = () => {
     lost = false;
     texture = null;
     vao = null;
     program = null;
     vertex = null;
     fragment = null;
-    build();
+    try {
+      build();
+    } catch {
+      release();
+      return;
+    }
+    if (onRestored) onRestored();
   };
   canvas.addEventListener("webglcontextlost", onLost);
-  canvas.addEventListener("webglcontextrestored", onRestored);
+  canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   try {
     build();
   } catch (error) {
     release();
     canvas.removeEventListener("webglcontextlost", onLost);
-    canvas.removeEventListener("webglcontextrestored", onRestored);
+    canvas.removeEventListener("webglcontextrestored", onContextRestored);
     throw error;
   }
 
@@ -287,7 +293,7 @@ export function createTapePlate(canvas) {
     },
     destroy() {
       canvas.removeEventListener("webglcontextlost", onLost);
-      canvas.removeEventListener("webglcontextrestored", onRestored);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
       release();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     },

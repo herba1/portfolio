@@ -42,12 +42,17 @@ function Plate({ children }) {
 }
 
 function LoadingPlate() {
+  return <Plate />;
+}
+
+function Fuse() {
   return (
-    <Plate>
-      <div className="scorch-plate__fuse" aria-hidden="true">
-        <span className="scorch-plate__fuse-line" />
-      </div>
-    </Plate>
+    <div className="scorch-fuse" aria-hidden="true">
+      <span className="scorch-fuse__line" />
+      <span className="scorch-fuse__spark">
+        <span className="scorch-fuse__dot" />
+      </span>
+    </div>
   );
 }
 
@@ -167,12 +172,13 @@ export default function ScorchExperience({ covers = [], embedded = false }) {
         {embedded ? null : (
           <header className="scorch-head">
             <h1 className="text-title-sm text-ink">Scorch</h1>
-            <p className="text-ui-lg text-ink-secondary">Hold still on the cover until it catches, then drag to fan the fire.</p>
+            <p className="text-ui-lg text-ink-secondary">Hold still on the darkest ink until it catches, then drag to fan the fire.</p>
           </header>
         )}
         <section className="scorch-stage" aria-label="Burning cover">
           <div ref={stageWrapRef} className="scorch-stage__plate">
             {stage}
+            {empty ? null : <Fuse />}
           </div>
           {empty ? null : (
             <div className="scorch-caption">
@@ -190,7 +196,7 @@ export default function ScorchExperience({ covers = [], embedded = false }) {
           )}
         </section>
         {embedded ? null : (
-          <aside className="scorch-panel" aria-label="Paper and fire">
+          <aside className="scorch-panel" aria-label="Paper and fire" data-choice={panelChoice === null ? undefined : panelChoice ? "open" : "closed"}>
             <button
               type="button"
               className="scorch-panel__toggle text-ui-lg"
@@ -200,7 +206,7 @@ export default function ScorchExperience({ covers = [], embedded = false }) {
               <span>Paper and fire</span>
               <span className="scorch-panel__chevron" aria-hidden="true" />
             </button>
-            <div className="scorch-panel__body" data-open={panelOpen ? "1" : undefined}>
+            <div className="scorch-panel__body" inert={!panelOpen}>
               <div className="scorch-panel__inner">
                 <ScorchControls
                   params={params}

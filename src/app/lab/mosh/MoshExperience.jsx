@@ -64,7 +64,7 @@ function captionFor(cover) {
   return cover.artist ? `${cover.title} — ${cover.artist}` : cover.title;
 }
 
-export default function MoshExperience({ covers = [], embedded = false }) {
+export default function MoshExperience({ covers = [], embedded = false, source = "recent" }) {
   const stream = useMemo(() => covers.slice(0, STREAM_LENGTH), [covers]);
   const storedRaw = useSyncExternalStore(subscribeStorage, readStorage, readNothing);
   const reducedMotion = useSyncExternalStore(subscribeMotion, readMotion, readFalse);
@@ -101,6 +101,7 @@ export default function MoshExperience({ covers = [], embedded = false }) {
 
   const handleApi = useCallback((api) => {
     apiRef.current = api;
+    if (!api) setReady(false);
   }, []);
 
   const handleReady = useCallback(() => setReady(true), []);
@@ -170,19 +171,24 @@ export default function MoshExperience({ covers = [], embedded = false }) {
   const label = currentCover
     ? `Datamosh plate showing ${captionFor(currentCover)}. Drag to smear, hold to pin, Space for a keyframe, arrow keys to pan.`
     : "Datamosh plate";
-  const fallbackImage = failure && currentCover ? `url("${currentCover.image}")` : undefined;
 
   return (
     <Root className="mosh" data-embedded={embedded ? "true" : undefined} data-ready={ready ? "true" : "false"}>
       <div className="mosh-layout">
         <div className="mosh-stage">
-          <div
-            ref={plateRef}
-            className="mosh-plate"
-            data-failed={failure ? "true" : undefined}
-            style={fallbackImage ? { "--mosh-fallback": fallbackImage } : undefined}
-          >
-            <div className="mosh-placeholder" aria-hidden="true" />
+          <div ref={plateRef} className="mosh-plate" data-failed={failure ? "true" : undefined}>
+            {currentCover ? (
+              <img
+                className="mosh-placeholder"
+                src={currentCover.image}
+                alt=""
+                aria-hidden="true"
+                crossOrigin="anonymous"
+                decoding="async"
+                fetchPriority="high"
+                draggable={false}
+              />
+            ) : null}
             {near && !failure && stream.length ? (
               <ClientOnly
                 load={loadStage}
@@ -199,7 +205,7 @@ export default function MoshExperience({ covers = [], embedded = false }) {
                 onError={handleError}
               />
             ) : null}
-            {failure ? <p className="mosh-failure text-ui text-ink">This plate needs WebGL2, so here is the cover as it was played.</p> : null}
+            {failure ? <p className="mosh-failure text-ui text-ink">Mosh needs WebGL2. Showing the cover untouched.</p> : null}
           </div>
         </div>
 
@@ -211,7 +217,7 @@ export default function MoshExperience({ covers = [], embedded = false }) {
             </header>
 
             <section className="mosh-now mosh-rise" style={{ "--rise": 1 }} aria-live="polite">
-              <p className="text-ui text-ink-secondary">Now playing</p>
+              <p className="text-ui text-ink-secondary">{source === "fallback" ? "Now showing" : "Now playing"}</p>
               <div className="mosh-now__title text-fade text-ui-lg text-ink">
                 <MorphText text={captionFor(currentCover)} maxSlideEm={6} />
               </div>
@@ -229,7 +235,7 @@ export default function MoshExperience({ covers = [], embedded = false }) {
                   key={cover.id}
                   type="button"
                   className="mosh-chip"
-                  style={{ "--chip-image": `url("${cover.image}")`, "--chip-order": index }}
+                  style={{ "--chip-image": `url("${cover.thumb ?? cover.image}")`, "--chip-order": index }}
                   data-current={index === state.current ? "true" : "false"}
                   data-next={index === state.target ? "true" : "false"}
                   aria-label={`Keyframe to ${captionFor(cover)}`}

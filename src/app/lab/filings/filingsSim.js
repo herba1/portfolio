@@ -5,6 +5,8 @@ export const INTRO_SPAN = 0.55;
 export const MORPH_SPAN = 0.26;
 export const GROW_OVERSHOOT = 1.70158;
 export const MORPH_OVERSHOOT = 1.1;
+export const LAG_BINS = 48;
+export const LAG_SPAN = 0.6;
 
 const JITTER = 0.42;
 const REST_WEIGHT = 0.24;
@@ -352,6 +354,13 @@ export class FilingsSim {
       poleX,
       poleY,
       poleQ,
+      livePoleX,
+      livePoleY,
+      poleOffset,
+      lagTable,
+      lagPerUnit,
+      turning,
+      rippling,
       centreCount,
       centreX,
       centreY,
@@ -381,6 +390,7 @@ export class FilingsSim {
     const since = clock - this.introClock;
     const relax = reduced ? 1 : 1 - Math.exp(-dt * CREEP_RATE);
     const pullCube = pullRadius * pullRadius * pullRadius;
+    const lagLast = LAG_BINS - 1.0001;
     let maxOmega = 0;
     let maxCreep = 0;
 
@@ -388,11 +398,40 @@ export class FilingsSim {
       if (since < introDelay[index]) continue;
       const x = homeX[index];
       const y = homeY[index];
+      if (rippling) {
+        for (let magnet = 0; magnet < centreCount; magnet += 1) {
+          const plus = magnet * 2;
+          if (turning[magnet] === 0) {
+            livePoleX[plus] = poleX[plus];
+            livePoleY[plus] = poleY[plus];
+            livePoleX[plus + 1] = poleX[plus + 1];
+            livePoleY[plus + 1] = poleY[plus + 1];
+            continue;
+          }
+          const cx = centreX[magnet];
+          const cy = centreY[magnet];
+          const dx = x - cx;
+          const dy = y - cy;
+          let lag = Math.sqrt(dx * dx + dy * dy) * lagPerUnit;
+          if (lag > lagLast) lag = lagLast;
+          const bin = lag | 0;
+          const base = magnet * LAG_BINS + bin;
+          const delayed = lagTable[base] + (lagTable[base + 1] - lagTable[base]) * (lag - bin);
+          const ox = Math.cos(delayed) * poleOffset;
+          const oy = Math.sin(delayed) * poleOffset;
+          livePoleX[plus] = cx + ox;
+          livePoleY[plus] = cy + oy;
+          livePoleX[plus + 1] = cx - ox;
+          livePoleY[plus + 1] = cy - oy;
+        }
+      }
+      const sourceX = rippling ? livePoleX : poleX;
+      const sourceY = rippling ? livePoleY : poleY;
       let bx = 0;
       let by = 0;
       for (let pole = 0; pole < poleCount; pole += 1) {
-        const dx = x - poleX[pole];
-        const dy = y - poleY[pole];
+        const dx = x - sourceX[pole];
+        const dy = y - sourceY[pole];
         let r2 = dx * dx + dy * dy;
         if (r2 < coreSq) r2 = coreSq;
         const scale = poleQ[pole] / r2;
@@ -440,8 +479,8 @@ export class FilingsSim {
       let targetY = 0;
       if (creep > 0 && strength > 0.04) {
         for (let pole = 0; pole < poleCount; pole += 1) {
-          const dx = poleX[pole] - x;
-          const dy = poleY[pole] - y;
+          const dx = sourceX[pole] - x;
+          const dy = sourceY[pole] - y;
           const r = Math.sqrt(dx * dx + dy * dy) + 1e-6;
           const reach = r > pullRadius ? r : pullRadius;
           const pull = (pullStrength * pullCube) / (reach * reach * reach * r);
@@ -452,7 +491,7 @@ export class FilingsSim {
           const laneFade = strength > 0.25 ? 1 : (strength - 0.1) / 0.15;
           let psi = 0;
           for (let pole = 0; pole < poleCount; pole += 1) {
-            psi += poleQ[pole] * Math.atan2(y - poleY[pole], x - poleX[pole]);
+            psi += poleQ[pole] * Math.atan2(y - sourceY[pole], x - sourceX[pole]);
           }
           let lane = psi / laneStep;
           lane -= Math.round(lane);

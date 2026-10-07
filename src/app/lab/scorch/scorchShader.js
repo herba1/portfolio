@@ -88,6 +88,7 @@ uniform vec2 uWind;
 uniform vec2 uWindAt;
 uniform float uWindReach;
 uniform float uWindGlobal;
+uniform float uWindCool;
 uniform vec4 uSources[4];
 uniform int uSourceCount;
 
@@ -105,16 +106,26 @@ void main() {
   float around = heatAt(from + vec2(uTexel.x, 0.0)) + heatAt(from - vec2(uTexel.x, 0.0)) + heatAt(from + vec2(0.0, uTexel.y)) + heatAt(from - vec2(0.0, uTexel.y));
   float heat = centre + (around - 4.0 * centre) * uDiffuse;
   float burn = state.r;
+  float burnEast = textureLod(uState, vUv + vec2(uTexel.x, 0.0), 0.0).r;
+  float burnWest = textureLod(uState, vUv - vec2(uTexel.x, 0.0), 0.0).r;
+  float burnNorth = textureLod(uState, vUv + vec2(0.0, uTexel.y), 0.0).r;
+  float burnSouth = textureLod(uState, vUv - vec2(0.0, uTexel.y), 0.0).r;
+  vec2 burnSlope = vec2(burnEast - burnWest, burnNorth - burnSouth);
+  float slopeLength = length(burnSlope);
+  float windAlong = dot(wind, burnSlope / (slopeLength + 1e-5));
+  float headwind = max(0.0, windAlong) * step(1e-3, slopeLength);
+  heat *= exp(-uWindCool * headwind * uDt);
+  float tailwind = step(windAlong, 0.0) * step(1e-3, slopeLength);
   vec4 fuelSample = textureLod(uFuel, vUv, 0.0);
   float fuel = fuelSample.r;
   float threshold = max(uThresholdFloor, uThresholdBase - uThresholdFuel * fuel + uFibre * (fuelSample.g - 0.5));
   threshold += uFuse * step(fuel, 0.04) * 99.0;
   if (heat > threshold && burn < 1.0) {
     float linger = 1.0 - (1.0 - uLinger) * smoothstep(0.55, 0.9, burn);
-    float oxygen = 1.0 + 0.6 * clamp(length(wind) * 2.0, 0.0, 1.0);
+    float oxygen = 1.0 + 0.6 * tailwind * clamp(-windAlong * 2.0, 0.0, 1.0);
     float delta = min(1.0 - burn, max(uMinDelta, (uRateBase + uRateInk * fuel * fuel) * linger * oxygen * uDt));
     burn += delta;
-    heat += uGain * delta;
+    heat += uGain * (0.3 + 0.7 * fuel) * delta;
   }
   for (int index = 0; index < 4; index++) {
     if (index >= uSourceCount) break;
@@ -289,7 +300,7 @@ void main() {
   sheet = mix(sheet, ASH, speck * 0.7);
 
   float flicker = 1.0 + uFlicker * 0.08 * (hash21(floor(uv * 28.0) + floor(uTime * 12.0)) * 2.0 - 1.0);
-  float rim = smoothstep(0.45, 0.85, heat) * smoothstep(0.22, 0.4, b) * (1.0 - smoothstep(0.55, 0.75, b));
+  float rim = smoothstep(0.3, 0.7, heat) * smoothstep(0.22, 0.4, b) * (1.0 - smoothstep(0.55, 0.75, b));
   vec3 ember = min(mix(EMBER_DEEP, EMBER_HOT, smoothstep(0.7, 1.4, heat)) * 1.4 * flicker, vec3(1.0));
   sheet = mix(sheet, ember, clamp(rim * uEmber, 0.0, 1.0));
 
@@ -303,9 +314,10 @@ void main() {
   sheet = mix(sheet, CHAR * 0.6, lip * 0.85);
 
   vec3 under = mix(uPaper, texture(uUnder, uUnderCrop.zw + uv * uUnderCrop.xy).rgb, uUnderReady);
-  float soot = (1.0 - smoothstep(0.7, 0.98, glow.r)) * 0.22;
+  float settle = 1.0 - smoothstep(0.4, 1.0, uFinish);
+  float soot = (1.0 - smoothstep(0.7, 0.98, glow.r)) * 0.22 * settle;
   under *= 1.0 - soot;
-  under += EMBER_DEEP * glowHeat * 0.12;
+  under += EMBER_DEEP * glowHeat * 0.12 * settle;
 
   vec3 colour = mix(sheet, under, hole);
   float grain = hash21(gl_FragCoord.xy + uSeed * 31.0) - 0.5;

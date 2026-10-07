@@ -4,7 +4,7 @@ import { createPluckBank, warpDegree, weftDegree } from "./loomAudio";
 import { LOOM_FRAGMENT, LOOM_VERTEX } from "./loomShader";
 
 const MAX_THREADS = 128;
-const STATE_ROWS = 5;
+const STATE_ROWS = 6;
 const STEP_SECONDS = 1 / 480;
 const MAX_FRAME_SECONDS = 1 / 30;
 const MAX_SUBSTEPS = 16;
@@ -21,6 +21,10 @@ const KEY_PULL = 4.2;
 const IMPULSE_SPREAD = 2.2;
 const LANDING_ZETA = 0.66;
 const LANDING_MS = 1100;
+const LAND_NEAR = 0.03;
+const LAND_SPEED = 0.6;
+const LANDED_OFFSET = 5e-4;
+const LANDED_SPEED = 0.004;
 const REARM_RATIO = 0.6;
 const REARM_DECAY = 1.5;
 const PLUCK_QUIET_MS = 260;
@@ -46,6 +50,9 @@ const SUPERSAMPLE_BELOW_PX = 9;
 const PAGE_DPR_CAP = 2;
 const BLANK_RGB = [233, 237, 243];
 const MAX_GRABS = 10;
+const MAX_SWELLS = MAX_GRABS * 2;
+const PRESS_SWELL = 0.5;
+const NEIGHBOUR_WAIT_MS = 600;
 const REEL_REACH = 2;
 const SLIP_FLOOR = 0.004;
 const RESTORE_WAIT_MS = 2500;
@@ -63,6 +70,7 @@ function createChain() {
     rest: new Float32Array(MAX_THREADS),
     landUntil: new Float64Array(MAX_THREADS),
     armed: new Uint8Array(MAX_THREADS),
+    swung: new Uint8Array(MAX_THREADS),
     armAt: new Float32Array(MAX_THREADS).fill(ARM_WIDTHS),
     peak: new Float32Array(MAX_THREADS),
     quietUntil: new Float64Array(MAX_THREADS),
@@ -80,6 +88,7 @@ function resetChain(chain) {
   chain.heldUntil.fill(0);
   chain.landUntil.fill(0);
   chain.armed.fill(0);
+  chain.swung.fill(0);
   chain.peak.fill(0);
   chain.reel.fill(0);
   chain.popStart.fill(-Infinity);
@@ -269,10 +278,18 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   let lostTimer = 0;
   let slipping = false;
   let grabCount = 0;
-  const grabAxis = new Int8Array(MAX_GRABS);
-  const grabIndex = new Int16Array(MAX_GRABS);
+  const grabAxis = new Int8Array(MAX_SWELLS);
+  const grabIndex = new Int16Array(MAX_SWELLS);
+  const grabLift = new Float32Array(MAX_SWELLS);
+  const grabLocked = new Uint8Array(MAX_SWELLS);
+  const columnWeave = new Float32Array(MAX_THREADS).fill(params.weave);
+  const neighbourTimers = [];
+  let overrideSide = 0;
+  let overrideCover = 0;
+  let overrideReach = 1;
 
   const wrapIndex = (value) => ((value % count) + count) % count;
+  const clampIndex = (value) => Math.min(threads - 1, Math.max(0, Math.floor(value)));
 
   const uploadCover = (entry) => {
     entry.ready = true;
@@ -326,7 +343,8 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     requestCover(current + 1);
     requestCover(current - 1);
     for (const [key, entry] of textures) {
-      if (ringDistance(key, current) > REEL_REACH) {
+      const shown = overrideSide !== 0 && ringDistance(key, overrideCover) <= 1;
+      if (!shown && ringDistance(key, current) > REEL_REACH) {
         if (entry.texture) gl.deleteTexture(entry.texture);
         textures.delete(key);
       }
@@ -336,7 +354,9 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   const textureFor = (coverIndex) => {
     if (!count) return blankTexture;
     const entry = textures.get(wrapIndex(coverIndex));
-    return entry?.ready && entry.texture ? entry.texture : blankTexture;
+    if (entry?.ready && entry.texture) return entry.texture;
+    const home = textures.get(wrapIndex(current));
+    return home?.ready && home.texture ? home.texture : blankTexture;
   };
 
   const resize = () => {
@@ -360,7 +380,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   };
 
   const stepChain = (chain, isWarp, now, frameSeconds) => {
-    const { x, v, acc, pinned, heldUntil, rest, landUntil, armed, armAt, peak, quietUntil, target } = chain;
+    const { x, v, acc, pinned, heldUntil, rest, landUntil, armed, swung, armAt, peak, quietUntil, target } = chain;
     const n = threads;
     for (let i = 0; i < n; i += 1) {
       if (!pinned[i]) continue;
@@ -371,26 +391,33 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     const baseDamping = reducedMotion ? Math.max(damping, criticalDamping) : damping;
     const landingDamping = Math.max(baseDamping, criticalDamping * LANDING_ZETA);
     for (let i = 0; i < n; i += 1) {
-      if (pinned[i]) {
+      if (pinned[i] || heldUntil[i] > now) {
         acc[i] = 0;
         continue;
       }
-      const home = heldUntil[i] > now ? rest[i] : 0;
       const left = i > 0 ? i - 1 : i;
       const right = i < n - 1 ? i + 1 : i;
+      const nearHome = swung[i] && Math.abs(x[i]) < LAND_NEAR && Math.abs(v[i]) < LAND_SPEED;
+      const landing = nearHome || landUntil[i] > now;
       acc[i] =
-        -tension * (x[i] - home) -
-        (landUntil[i] > now ? landingDamping : baseDamping) * v[i] +
+        -tension * x[i] -
+        (landing ? landingDamping : baseDamping) * v[i] +
         coupling * (x[left] + x[right] - 2 * x[i]) +
         RELATIVE_DAMPING * (v[left] + v[right] - 2 * v[i]);
     }
     for (let i = 0; i < n; i += 1) {
       if (pinned[i]) continue;
+      if (heldUntil[i] > now) {
+        x[i] = rest[i];
+        v[i] = 0;
+        continue;
+      }
       v[i] += acc[i] * STEP_SECONDS;
       const before = x[i];
       x[i] = before + v[i] * STEP_SECONDS;
-      if (heldUntil[i] > now) continue;
       const magnitude = Math.abs(x[i]);
+      if (magnitude > LAND_NEAR) swung[i] = 1;
+      else if (swung[i] && magnitude < LANDED_OFFSET && Math.abs(v[i]) < LANDED_SPEED) swung[i] = 0;
       if (magnitude > armAt[i]) {
         armed[i] = 1;
         if (magnitude > peak[i]) peak[i] = magnitude;
@@ -408,6 +435,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     for (let i = 0; i < n; i += 1) {
       if (!pinned[i]) continue;
       const magnitude = Math.abs(x[i]);
+      if (magnitude > LAND_NEAR) swung[i] = 1;
       if (magnitude > ARM_WIDTHS) {
         armed[i] = 1;
         if (magnitude > peak[i]) peak[i] = magnitude;
@@ -415,13 +443,26 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     }
   };
 
+  const pushSwell = (axis, at, lift, locked) => {
+    grabAxis[grabCount] = axis;
+    grabIndex[grabCount] = at;
+    grabLift[grabCount] = lift;
+    grabLocked[grabCount] = locked;
+    grabCount += 1;
+  };
+
   const collectGrabs = () => {
     grabCount = 0;
     for (const grab of grabs.values()) {
-      if (!grab.axis || grabCount >= MAX_GRABS) continue;
-      grabAxis[grabCount] = grab.axis;
-      grabIndex[grabCount] = grab.index;
-      grabCount += 1;
+      if (grab.dead || grabCount > MAX_SWELLS - 2) continue;
+      if (grab.axis) {
+        pushSwell(grab.axis, grab.index, 1, 1);
+        continue;
+      }
+      const inside = grab.cellX >= 0 && grab.cellX < threads && grab.cellY >= 0 && grab.cellY < threads;
+      if (!inside) continue;
+      pushSwell(1, clampIndex(grab.cellY), PRESS_SWELL, 0);
+      pushSwell(2, clampIndex(grab.cellX), PRESS_SWELL, 0);
     }
   };
 
@@ -438,7 +479,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         for (let g = 0; g < grabCount; g += 1) {
           if (grabAxis[g] !== axis) continue;
           const d = (i - grabIndex[g]) / SWELL_SPREAD;
-          lift = Math.max(lift, SWELL_PEAK * Math.exp(-d * d));
+          lift = Math.max(lift, SWELL_PEAK * grabLift[g] * Math.exp(-d * d));
         }
         if (c === 0 && focusRow >= 0) {
           const d = (i - focusRow) / SWELL_SPREAD;
@@ -470,10 +511,12 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     return busy;
   };
 
-  const writeState = () => {
+  const writeState = (now) => {
     const n = threads;
     let slip = 0;
     for (let i = 0; i < n; i += 1) {
+      if (!(warp.popStart[i] > now)) columnWeave[i] = weave;
+      stateData[MAX_THREADS * 5 + i] = columnWeave[i];
       const weftX = weft.x[i];
       const warpX = warp.x[i];
       stateData[i] = weftX;
@@ -494,9 +537,14 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     gl.uniform1i(location, unit);
   };
 
-  const draw = () => {
+  const sideCover = (side, reach) =>
+    overrideSide === side && reach >= overrideReach
+      ? overrideCover + side * (reach - overrideReach)
+      : current + side * reach;
+
+  const draw = (now = performance.now()) => {
     if (destroyed || contextLost || gl.isContextLost()) return;
-    writeState();
+    writeState(now);
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -506,15 +554,14 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, stateTexture);
     gl.uniform1i(uniforms.uState, 0);
-    bindCover(1, uniforms.uPrevFar, current - 2);
-    bindCover(2, uniforms.uPrev, current - 1);
+    bindCover(1, uniforms.uPrevFar, sideCover(-1, 2));
+    bindCover(2, uniforms.uPrev, sideCover(-1, 1));
     bindCover(3, uniforms.uCurrent, current);
-    bindCover(4, uniforms.uNext, current + 1);
-    bindCover(5, uniforms.uNextFar, current + 2);
+    bindCover(4, uniforms.uNext, sideCover(1, 1));
+    bindCover(5, uniforms.uNextFar, sideCover(1, 2));
 
     gl.uniform2f(uniforms.uResolution, canvas.width, canvas.height);
     gl.uniform4f(uniforms.uCloth, originX, originY, clothPx, threads);
-    gl.uniform1i(uniforms.uWeave, weave);
     gl.uniform3f(uniforms.uPointer, pointerCellX, pointerCellY, hover);
     gl.uniform1f(uniforms.uSlip, slipping ? 1 : 0);
     const cellPx = clothPx / threads;
@@ -552,6 +599,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       chain.x.fill(0);
       chain.v.fill(0);
       chain.armed.fill(0);
+      chain.swung.fill(0);
       chain.peak.fill(0);
     }
   };
@@ -603,16 +651,21 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     }
     collectGrabs();
     for (let g = 0; g < grabCount; g += 1) {
+      if (!grabLocked[g]) continue;
       const chain = chains[grabAxis[g] - 1];
       chain.x[grabIndex[g]] = chain.target[grabIndex[g]];
     }
 
     const looksBusy = updateLooks(time, dt);
-    draw();
+    draw(time);
 
     if (!looksBusy && isSettled(time)) {
       settle();
-      draw();
+      if (overrideSide) {
+        overrideSide = 0;
+        keepNeighbours();
+      }
+      draw(time);
       running = false;
       lastTime = 0;
       return;
@@ -629,8 +682,21 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
 
   const startCoverChange = (nextIndex, direction) => {
     const forward = wrapIndex((nextIndex - current) * direction);
-    const steps = forward >= 1 && forward <= REEL_REACH ? forward : 1;
+    const inReach = forward >= 1 && forward <= REEL_REACH;
+    const steps = inReach ? forward : 1;
+    const leavingCover = current;
     current = nextIndex;
+    if (reducedMotion) {
+      overrideSide = 0;
+    } else if (!inReach) {
+      overrideSide = -direction;
+      overrideReach = 1;
+      overrideCover = leavingCover;
+    } else if (overrideSide === -direction && overrideReach + steps <= REEL_REACH) {
+      overrideReach += steps;
+    } else {
+      overrideSide = 0;
+    }
     keepNeighbours();
     if (reducedMotion) {
       draw();
@@ -704,8 +770,6 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   const primeOnGesture = (force = false) => {
     if (force || soundOn) primeAudio();
   };
-
-  const clampIndex = (value) => Math.min(threads - 1, Math.max(0, Math.floor(value)));
 
   const releaseGrab = (grab, withVelocity) => {
     if (!grab.axis) return;
@@ -842,7 +906,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       const col = clampIndex(grab.cellX);
       const inside = grab.cellX >= 0 && grab.cellX < threads && grab.cellY >= 0 && grab.cellY < threads;
       if (inside) {
-        const weftTop = weftOver(weave, row, col);
+        const weftTop = weftOver(Math.round(columnWeave[col]), row, col);
         const sign = (row + col) & 1 ? -1 : 1;
         if (weftTop) pluckThread(false, row, TAP_IMPULSE * sign, 0.55);
         else pluckThread(true, col, TAP_IMPULSE * sign, 0.55);
@@ -937,12 +1001,22 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   canvas.addEventListener("webglcontextrestored", onContextRestored);
 
   keepNeighbours();
-  textures.get(wrapIndex(current))?.promise?.then(() => {
-    if (destroyed) return;
-    coverReady = true;
-    draw();
-    wake();
-  });
+  const neighbourOrTimeout = (coverIndex) =>
+    Promise.race([
+      textures.get(wrapIndex(coverIndex))?.promise,
+      new Promise((resolve) => neighbourTimers.push(setTimeout(resolve, NEIGHBOUR_WAIT_MS))),
+    ]);
+  const homePromise = textures.get(wrapIndex(current))?.promise;
+  if (homePromise) {
+    Promise.all([homePromise, neighbourOrTimeout(current - 1), neighbourOrTimeout(current + 1)]).then(() => {
+      for (const timer of neighbourTimers) clearTimeout(timer);
+      neighbourTimers.length = 0;
+      if (destroyed) return;
+      coverReady = true;
+      draw();
+      wake();
+    });
+  }
 
   const engine = {
     setSize(width, height) {
@@ -1004,6 +1078,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         focusRow = -1;
         resetChain(weft);
         resetChain(warp);
+        columnWeave.fill(next.weave);
         if (!reducedMotion && now - lastThreadsChange > THREADS_REBUILD_GAP_MS) {
           const spread = WARP_POP_SPREAD_MS / threads;
           for (let j = 0; j < threads; j += 1) warp.popStart[j] = now + j * spread;
@@ -1018,9 +1093,14 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       wake();
     },
     primeAudio: primeOnGesture,
+    invalidateRect() {
+      rect = null;
+    },
     destroy() {
       destroyed = true;
       clearTimeout(lostTimer);
+      for (const timer of neighbourTimers) clearTimeout(timer);
+      neighbourTimers.length = 0;
       if (frameId) cancelAnimationFrame(frameId);
       canvas.removeEventListener("pointerdown", onPointerDown);
       canvas.removeEventListener("pointermove", onPointerMove);

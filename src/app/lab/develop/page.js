@@ -9,7 +9,7 @@ import DevelopExperience from "./DevelopExperience";
 
 export const metadata = {
   title: "Develop",
-  description: "A sheet of photo paper in a tray of developer. Hold where you want the developer to run and the print rises out of the white wherever the wave has washed.",
+  description: "A sheet of photo paper in a tray of developer. Press it and the developer runs to your fingertip, so the print rises out of the white wherever you held it.",
 };
 
 const loadCovers = unstable_cache(

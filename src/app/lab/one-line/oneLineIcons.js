@@ -187,6 +187,14 @@ function compileIcon(definition) {
 }
 
 const QUARTER = Math.PI / 2;
+const NECK_ANGLE = 0.5;
+const NECK_REACH = 2.2;
+const NECK_LEAD = 1.8;
+const NECK_DIR_X = Math.sin(QUARTER - NECK_ANGLE);
+const NECK_DIR_Y = Math.cos(QUARTER - NECK_ANGLE);
+const NECK_IN_X = 12 + 4 * Math.cos(QUARTER - NECK_ANGLE);
+const NECK_OUT_X = 12 + 4 * Math.cos(QUARTER + NECK_ANGLE);
+const NECK_Y = 7 + 4 * Math.sin(QUARTER - NECK_ANGLE);
 
 const DEFINITIONS = [
   {
@@ -259,9 +267,9 @@ const DEFINITIONS = [
     segments: [
       ["L", 5, 19, 0],
       ["A", 9, 19, 4, Math.PI, Math.PI + QUARTER],
-      ["C", 10.9, 15, 12, 13.6, 12, 11],
-      ["A", 12, 7, 4, QUARTER, QUARTER - Math.PI * 2],
-      ["C", 12, 13.6, 13.1, 15, 15, 15],
+      ["C", 9 + NECK_REACH, 15, NECK_IN_X - NECK_DIR_X * NECK_LEAD, NECK_Y + NECK_DIR_Y * NECK_LEAD, NECK_IN_X, NECK_Y],
+      ["A", 12, 7, 4, QUARTER - NECK_ANGLE, QUARTER + NECK_ANGLE - Math.PI * 2],
+      ["C", NECK_OUT_X + NECK_DIR_X * NECK_LEAD, NECK_Y + NECK_DIR_Y * NECK_LEAD, 15 - NECK_REACH, 15, 15, 15],
       ["A", 15, 19, 4, -QUARTER, 0],
       ["L", 19, 21, 0],
     ],

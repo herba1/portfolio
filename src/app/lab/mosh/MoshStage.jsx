@@ -125,7 +125,7 @@ export default function MoshStage({ covers, params, embedded, reducedMotion, lab
         return;
       }
       const direction = PAN_KEYS[event.key];
-      if (!direction) return;
+      if (!direction || !onSurface) return;
       event.preventDefault();
       engine.pan(direction[0], direction[1]);
     };

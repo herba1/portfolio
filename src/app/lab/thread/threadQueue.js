@@ -17,15 +17,20 @@ export function formatDuration(durationMs) {
 }
 
 function beadFill(hue) {
-  return [
-    `radial-gradient(circle at 32% 28%`,
-    `oklch(0.9 0.05 ${hue}) 0%`,
-    `oklch(0.84 0.07 ${hue}) 22%`,
-    `oklch(0.77 0.09 ${hue}) 46%`,
-    `oklch(0.71 0.1 ${hue}) 70%`,
-    `oklch(0.67 0.11 ${hue}) 88%`,
-    `oklch(0.65 0.11 ${hue}) 100%)`,
-  ].join(", ");
+  return `oklch(0.86 0.06 ${hue})`;
+}
+
+function monogram(artist) {
+  const words = String(artist || "")
+    .replace(/^the\s+/i, "")
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter(Boolean);
+  if (!words.length) return "";
+  if (words.length === 1) {
+    const [first = "", second = ""] = Array.from(words[0]);
+    return first.toUpperCase() + second.toLowerCase();
+  }
+  return (Array.from(words[0])[0] + Array.from(words[1])[0]).toUpperCase();
 }
 
 export function buildQueue(covers, length = QUEUE_LENGTH) {
@@ -36,7 +41,8 @@ export function buildQueue(covers, length = QUEUE_LENGTH) {
       id: `${index}-${String(cover.id).replace(/[^a-zA-Z0-9_-]/g, "")}`,
       title: cover.title || "Untitled",
       artist: cover.artist || "Unknown artist",
-      image: cover.image,
+      image: cover.image || null,
+      monogram: monogram(cover.artist),
       durationMs,
       duration: formatDuration(durationMs),
       fill: beadFill(seed % 360),

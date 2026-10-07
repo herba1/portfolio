@@ -80,12 +80,39 @@
 .tape__plate-host {
   position: absolute;
   inset: 0;
+  overflow: hidden;
 }
 
 .tape__plate {
   display: block;
   width: 100%;
   height: 100%;
+}
+
+.tape__plate-host::after {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 48%;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--color-surface) 8%, transparent) 16%,
+    color-mix(in srgb, var(--color-surface) 28%, transparent) 32%,
+    color-mix(in srgb, var(--color-surface) 56%, transparent) 50%,
+    color-mix(in srgb, var(--color-surface) 28%, transparent) 68%,
+    color-mix(in srgb, var(--color-surface) 8%, transparent) 84%,
+    transparent 100%
+  );
+  opacity: 0;
+  transform: translateX(-100%);
+  transition: opacity 320ms var(--ease-hover);
+}
+
+.tape__strip:not([data-inked]):not([data-bare]) .tape__plate-host::after {
+  opacity: 1;
+  animation: tape-sheen 1400ms var(--ease-in-out-cubic) 480ms infinite;
 }
 
 .tape__words {
@@ -103,7 +130,6 @@
   white-space: nowrap;
   transform: translate3d(-9999px, 0, 0);
   transform-origin: 0 50%;
-  will-change: transform;
   pointer-events: auto;
   cursor: pointer;
   color: var(--color-ink);
@@ -412,6 +438,15 @@
   }
 }
 
+@keyframes tape-sheen {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(210%);
+  }
+}
+
 @keyframes tape-rise {
   0% {
     opacity: 0;
@@ -463,7 +498,8 @@
 @media (prefers-reduced-motion: reduce) {
   .tape__intro,
   .tape__controls,
-  .tape__word-ink {
+  .tape__word-ink,
+  .tape__strip:not([data-inked]):not([data-bare]) .tape__plate-host::after {
     animation: none;
   }
 

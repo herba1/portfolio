@@ -5,9 +5,12 @@ export const TRACK = {
   durationSec: 147,
 };
 
-export const AUDIO_SOURCES = ["/audio/ask-me-why.opus", "/audio/ask-me-why.m4a"];
+export const AUDIO_SOURCES = [{ url: "/audio/ask-me-why.opus" }, { url: "/audio/ask-me-why.m4a" }, { preview: true }];
 
-export const CLIP_OFFSET_SECONDS = 42.9;
+export const CLIP_OFFSET_SECONDS = 25.6;
+export const CLIP_SECONDS = 30;
+export const CLIP_TOLERANCE_SECONDS = 0.75;
+export const FULL_RECORDING_SECONDS = 60;
 export const LOOP_START_SECONDS = 0.22;
 export const LOOP_SECONDS = 29;
 export const SEAM_SECONDS = 0.12;

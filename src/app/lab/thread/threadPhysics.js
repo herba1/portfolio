@@ -1,5 +1,6 @@
-export const WAVE_SPEED = 1100;
-export const WAVE_DAMPING = 3.6;
+export const WAVE_SPEED = 520;
+export const WAVE_DAMPING = 2.6;
+export const SETTLE_WAVE_DAMPING = 7;
 export const CALM_WAVE_DAMPING = 34;
 
 const MAX_SUBSTEP = 1 / 240;
@@ -18,6 +19,7 @@ export function createString(nodeCount) {
     pinY: new Float64Array(MAX_PINS),
     pinTarget: new Float64Array(MAX_PINS),
     pinCount: 0,
+    peakSpeed: 0,
   };
 }
 
@@ -75,9 +77,16 @@ export function stepString(string, dt, damping) {
   v[0] = 0;
   u[last] = 0;
   v[last] = 0;
-  let energy = 0;
-  for (let index = 1; index < last; index += 1) energy += u[index] * u[index] + v[index] * v[index];
-  return energy;
+  let peak = 0;
+  let peakSpeed = 0;
+  for (let index = 1; index < last; index += 1) {
+    const reach = Math.abs(u[index]);
+    const speed = Math.abs(v[index]);
+    if (reach > peak) peak = reach;
+    if (speed > peakSpeed) peakSpeed = speed;
+  }
+  string.peakSpeed = peakSpeed;
+  return peak;
 }
 
 export function sampleString(string, y) {

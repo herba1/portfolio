@@ -81,7 +81,7 @@
   padding: 0 16px 20px;
 }
 
-.ol-panel[data-phase="enter"] {
+.ol-panel__body[data-enter] {
   animation: ol-panel-in 300ms var(--ease-entrance) both;
 }
 
@@ -126,8 +126,13 @@
 }
 
 .ol-cover__art {
-  background-position: center;
-  background-size: cover;
+  display: block;
+  object-fit: cover;
+  -webkit-user-drag: none;
+}
+
+.ol-cover[data-empty] .ol-cover__art {
+  visibility: hidden;
 }
 
 .ol-cover[data-ready] .ol-cover__pix[data-step="8"] {
@@ -144,6 +149,14 @@
 
 .ol-cover[data-ready] .ol-cover__art {
   animation: ol-on 1ms steps(1, end) calc(var(--ol-i) * 30ms + 240ms) forwards;
+}
+
+.ol-cover[data-ready][data-plain] .ol-cover__pix[data-step] {
+  animation: none;
+}
+
+.ol-cover[data-ready][data-plain] .ol-cover__art {
+  animation: ol-fade 240ms var(--ease-entrance) calc(var(--ol-i) * 30ms) both;
 }
 
 .ol-tile__title,
@@ -210,14 +223,15 @@
     var(--color-ink) calc(clamp(0, var(--ol-near, 0) * 0.6 + var(--ol-hover) * 0.4, 1) * 100%),
     var(--color-ink-secondary)
   );
-  stroke-width: 1.5;
+  stroke-width: 1.2857;
   stroke-linecap: round;
   stroke-linejoin: round;
   transition: --ol-hover 160ms var(--ease-hover);
 }
 
 .ol-tab__icon path {
-  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1.001 2;
+  stroke-dashoffset: 0;
 }
 
 .ol-tab__label {
@@ -233,7 +247,7 @@
   transition: transform 120ms var(--ease-hover);
 }
 
-.ol-bar:not([data-live]) .ol-tab[data-active] .ol-tab__label {
+.ol-tab[data-active] .ol-tab__label {
   --ol-cov: 1;
   font-weight: var(--font-weight-strong);
 }
@@ -276,7 +290,7 @@
 @keyframes ol-panel-in {
   from {
     opacity: 0;
-    transform: translate3d(calc(var(--ol-dir, 1) * 24px), 0, 0);
+    transform: translate3d(calc(var(--ol-enter-dir, 1) * 24px), 0, 0);
   }
   to {
     opacity: 1;
@@ -291,7 +305,7 @@
   }
   to {
     opacity: 0;
-    transform: translate3d(calc(var(--ol-dir, 1) * -24px), 0, 0);
+    transform: translate3d(calc(var(--ol-exit-dir, 1) * -24px), 0, 0);
   }
 }
 
@@ -311,7 +325,7 @@
     animation: none;
   }
 
-  .ol-panel[data-phase="enter"] {
+  .ol-panel__body[data-enter] {
     animation: ol-fade 120ms linear both;
   }
 
@@ -319,11 +333,12 @@
     animation: ol-fade 120ms linear reverse both;
   }
 
-  .ol-cover[data-ready] .ol-cover__pix {
+  .ol-cover[data-ready] .ol-cover__pix[data-step] {
     animation: none;
   }
 
-  .ol-cover[data-ready] .ol-cover__art {
+  .ol-cover[data-ready] .ol-cover__art,
+  .ol-cover[data-ready][data-plain] .ol-cover__art {
     animation: none;
     opacity: 1;
   }

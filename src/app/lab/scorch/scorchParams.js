@@ -35,13 +35,13 @@ export function presetValues(name) {
 export const SCORCH_DEFAULTS = presetValues(DEFAULT_PRESET);
 
 export const SIM = {
-  diffusion: 3.7e-4,
+  diffusion: 2.2e-4,
   rateBase: 0.27,
   rateInk: 6.6,
   gain: 1.3,
   loss: 0.33,
-  thresholdBase: 0.32,
-  thresholdFuel: 0.28,
+  thresholdBase: 0.5,
+  thresholdFuel: 0.4,
   thresholdFloor: 0.07,
   fibreThreshold: 0.08,
   paperFloor: 0.2,
@@ -56,5 +56,15 @@ export const SIM = {
   sourceHold: 0.6,
   sourceHeat: 1,
   turnoverAt: 0.92,
-  presimSeconds: 1.8,
+  presimSeconds: 2.6,
+  introLimit: 0.04,
+  introReach: 1.5,
+  introSecondReach: 1.1,
+  introSecondDelay: 0.7,
+  introSecondOffset: [0.045, 0.03],
+  introGrow: 0.014,
+  introLinger: 0.8,
+  introSmother: 1.2,
+  introSmotherRate: 0.4,
+  windCool: 6,
 };

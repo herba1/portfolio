@@ -13,6 +13,7 @@ import {
   pokeDisc,
   releaseCascade,
   stepGrid,
+  strataHomes,
 } from "./sandGrid";
 import { FLIGHT_FRAGMENT, FLIGHT_VERTEX, GRID_FRAGMENT, GRID_VERTEX } from "./sandShader";
 
@@ -39,7 +40,9 @@ const HOLD_POP_MS = 240;
 const TAP_MS = 260;
 const TAP_SLOP_PX = 6;
 const POKE_PX = 30;
+const POKE_LIFT_PX = 18;
 const POKE_MS = 460;
+const DOUBLE_CLICK_MS = 320;
 
 const FLIGHT_S = 0.7;
 const POP_S = 0.18;
@@ -50,11 +53,11 @@ const AIRBORNE_SCATTER_S = 0.06;
 const HAPTIC_AT = 0.86;
 const FUSE_MS = 340;
 
-const CASCADE_MS = 420;
-const CASCADE_JITTER_MS = 120;
+const CASCADE_MS = 600;
+const CASCADE_JITTER_MS = 16;
 const CASCADE_GRAVITY = 1.6;
 const ERUPT_SETTLED_STEPS = 8;
-const ERUPT_BEAT_MS = 150;
+const ERUPT_BEAT_MS = 240;
 const SETTLE_LIMIT_MS = 2600;
 const COVER_DEADLINE_MS = CASCADE_MS + CASCADE_JITTER_MS + 2500;
 
@@ -63,6 +66,7 @@ const INTRO_MS = 600;
 const INTRO_BRUSH_PX = 44;
 const INTRO_CHANCE = 0.78;
 const LOOSE_REPORT_MS = 120;
+const LANDING_BUCKETS = 48;
 
 const EMPTY_FALLBACK = [248 / 255, 250 / 255, 252 / 255];
 const INK_FALLBACK = [26 / 255, 26 / 255, 26 / 255];
@@ -182,6 +186,8 @@ export default class SandField {
     this.cascade = null;
     this.script = null;
     this.pokeAt = { x: 0, y: 0, radius: 0, start: -Infinity };
+    this.lastMouseTap = -Infinity;
+    this.landingBuckets = new Uint32Array(LANDING_BUCKETS);
     this.brush = { radius: BRUSH_PX, live: 0 };
     this.pointer = {
       id: -1,
@@ -392,6 +398,7 @@ export default class SandField {
     this.flightHomes = new Int32Array(capacity);
     this.flightKeys = new Float64Array(capacity);
     this.homeKeys = new Float64Array(capacity);
+    this.strataHomes = new Uint16Array(capacity);
     this.allocateGpuGrid();
     if (this.current) {
       this.currentCells = sampleCells(this.current, width);
@@ -440,10 +447,14 @@ export default class SandField {
     if (!this.grid || this.destroyed) return;
     if (this.flight) this.finishFlight();
     this.cascade = null;
+    this.setBusy(false);
+    this.resetTray();
+  }
+
+  resetTray() {
     this.script = null;
     this.fuse = null;
     this.simDebt = 0;
-    this.setBusy(false);
     this.buildGrid();
     this.resize();
     this.reportLoose(0, true);
@@ -460,8 +471,8 @@ export default class SandField {
     if (!this.grid || this.destroyed) return;
     const wanted = this.gridWidthFor(this.surface.clientWidth);
     if (Math.abs(wanted - this.grid.width) / this.grid.width > 0.25 && !this.flight && !this.cascade) {
-      this.buildGrid();
-      this.reportLoose(0, true);
+      this.resetTray();
+      return;
     }
     this.resize();
     this.render(performance.now());
@@ -559,8 +570,11 @@ export default class SandField {
     if (event.pointerType !== "mouse") pointer.inside = false;
     const tapped = now - pointer.downTime < TAP_MS && pointer.travel < TAP_SLOP_PX && !pointer.holdDone;
     if (tapped) {
+      const mouse = event.pointerType === "mouse";
+      const repeat = mouse && (event.detail > 1 || now - this.lastMouseTap < DOUBLE_CLICK_MS);
+      if (mouse) this.lastMouseTap = repeat ? -Infinity : now;
       if (this.embedded) this.rebuild(pointer.x, pointer.y);
-      else this.poke(pointer.x, pointer.y);
+      else if (!repeat) this.poke(pointer.x, pointer.y);
     }
     if (!pointer.holdDone) this.setRing("idle", 0);
     this.wake();
@@ -582,6 +596,7 @@ export default class SandField {
 
   handleDoubleClick(event) {
     const [x, y] = this.localPoint(event);
+    this.pokeAt.start = -Infinity;
     this.rebuild(x, y);
   }
 
@@ -643,7 +658,7 @@ export default class SandField {
 
   startScript(path, brushPx, duration) {
     if (!this.grid || this.flight || this.cascade) return;
-    this.script = { path, brushPx, duration, start: performance.now(), lastX: null, lastY: null };
+    this.script = { path, brushPx, duration, start: null, lastX: null, lastY: null };
     this.wake();
   }
 
@@ -674,6 +689,7 @@ export default class SandField {
     const script = this.script;
     if (!script) return;
     const grid = this.grid;
+    if (script.start === null) script.start = now;
     const progress = Math.min(1, (now - script.start) / script.duration);
     const point = bezierPoint(script.path, easeInOutSine(progress), this.scratch);
     const x = point[0] * grid.cover;
@@ -763,7 +779,7 @@ export default class SandField {
     if (!cascade) return;
     const grid = this.grid;
     const elapsed = now - cascade.start;
-    if (releaseCascade(grid, elapsed, CASCADE_MS, CASCADE_JITTER_MS)) {
+    if (!cascade.gathered && releaseCascade(grid, elapsed, CASCADE_MS, CASCADE_JITTER_MS, cascade.phase, this.strataHomes)) {
       this.dirty = true;
       this.stillSteps = 0;
     }
@@ -774,18 +790,60 @@ export default class SandField {
       this.prepareStage(cascade);
       return;
     }
-    if (elapsed < CASCADE_MS + CASCADE_JITTER_MS) return;
+    if (elapsed < CASCADE_MS + CASCADE_JITTER_MS || !cascade.target) return;
     if (!cascade.releasedAt) cascade.releasedAt = now;
-    if (this.stillSteps < ERUPT_SETTLED_STEPS) {
-      cascade.settledAt = 0;
-      if (now - cascade.releasedAt < SETTLE_LIMIT_MS) return;
-    } else if (!cascade.settledAt) {
-      cascade.settledAt = now;
+    if (!cascade.gathered) {
+      const settled = this.stillSteps >= ERUPT_SETTLED_STEPS;
+      if (!settled && now - cascade.releasedAt < SETTLE_LIMIT_MS) return;
+      this.gatherPile(cascade);
+      if (settled) {
+        cascade.settledAt = now;
+        return;
+      }
     }
     if (cascade.settledAt && now - cascade.settledAt < ERUPT_BEAT_MS) return;
-    if (!cascade.target) return;
     this.cascade = null;
     this.erupt(cascade);
+  }
+
+  gatherPile(cascade) {
+    const { cells, glued, width, cover } = this.grid;
+    const fromLight = this.currentCells.light;
+    const grainCells = this.flightCells;
+    const grainHomes = this.flightHomes;
+    const grainKeys = this.flightKeys;
+    const capacity = this.instanceCapacity;
+    let count = 0;
+    let top = Infinity;
+    let bottom = -Infinity;
+    for (let index = 0; index < cells.length && count < capacity; index += 1) {
+      const value = cells[index];
+      const pinned = glued[index] !== 0;
+      if (value === 0 && !pinned) continue;
+      const x0 = index % width;
+      const y0 = (index - x0) / width;
+      const home = value !== 0 ? ((value >>> 8) & 255) * cover + (value & 255) : y0 * cover + x0;
+      grainCells[count] = index;
+      grainHomes[count] = home;
+      grainKeys[count] = fromLight[home] * 16777216 + x0 * 65536 + count;
+      if (value === 0 || !isAirborne(cells, index, width)) {
+        if (y0 < top) top = y0;
+        if (y0 > bottom) bottom = y0;
+      }
+      count += 1;
+      if (value !== 0 && pinned && count < capacity) {
+        grainCells[count] = index;
+        grainHomes[count] = y0 * cover + x0;
+        grainKeys[count] = fromLight[y0 * cover + x0] * 16777216 + x0 * 65536 + count;
+        count += 1;
+      }
+    }
+    grainKeys.subarray(0, count).sort();
+    cascade.gathered = true;
+    cascade.count = count;
+    cascade.top = Number.isFinite(top) ? top : 0;
+    cascade.bottom = Number.isFinite(bottom) ? bottom : 0;
+    this.simDebt = 0;
   }
 
   prepareStage(cascade) {
@@ -817,7 +875,8 @@ export default class SandField {
     const gridX = this.toGridX(x);
     const gridY = this.toGridY(y);
     const radius = POKE_PX / this.cellCss;
-    pokeDisc(this.grid, gridX, gridY, radius, this.random);
+    const lift = Math.max(2, Math.round(POKE_LIFT_PX / this.cellCss));
+    pokeDisc(this.grid, gridX, gridY, radius, lift, this.random);
     this.pokeAt = { x: gridX, y: gridY, radius, start: performance.now() };
     this.dirty = true;
     this.stillSteps = 0;
@@ -927,7 +986,22 @@ export default class SandField {
       });
       return;
     }
-    this.cascade = { start: performance.now(), index, target: null, toCells: null, stage: 0, releasedAt: 0, settledAt: 0 };
+    const phase = this.random.unit() * Math.PI * 2;
+    strataHomes(this.currentCells.light, this.grid.cover, this.strataHomes, this.flightKeys, this.homeKeys, phase);
+    this.cascade = {
+      start: performance.now(),
+      index,
+      target: null,
+      toCells: null,
+      stage: 0,
+      releasedAt: 0,
+      settledAt: 0,
+      phase,
+      gathered: false,
+      count: 0,
+      top: 0,
+      bottom: 0,
+    };
     this.setBusy(true);
     haptic("press");
     this.wake();
@@ -951,35 +1025,9 @@ export default class SandField {
     const toCells = cascade.toCells;
     const grainCells = this.flightCells;
     const grainHomes = this.flightHomes;
-    const grainKeys = this.flightKeys;
-    const capacity = this.instanceCapacity;
-    let count = 0;
-    let top = Infinity;
-    let bottom = -Infinity;
-    for (let index = 0; index < cells.length && count < capacity; index += 1) {
-      const value = cells[index];
-      const pinned = glued[index] !== 0;
-      if (value === 0 && !pinned) continue;
-      const x0 = index % width;
-      const y0 = (index - x0) / width;
-      const home = value !== 0 ? ((value >>> 8) & 255) * cover + (value & 255) : y0 * cover + x0;
-      grainCells[count] = index;
-      grainHomes[count] = home;
-      grainKeys[count] = fromCells.light[home] * 16777216 + x0 * 65536 + count;
-      if (value === 0 || !isAirborne(cells, index, width)) {
-        if (y0 < top) top = y0;
-        if (y0 > bottom) bottom = y0;
-      }
-      count += 1;
-      if (value !== 0 && pinned && count < capacity) {
-        grainCells[count] = index;
-        grainHomes[count] = y0 * cover + x0;
-        grainKeys[count] = fromCells.light[y0 * cover + x0] * 16777216 + x0 * 65536 + count;
-        count += 1;
-      }
-    }
+    const { count, top, bottom } = cascade;
     const homes = cover * cover;
-    const sortedGrains = grainKeys.subarray(0, count).sort();
+    const sortedGrains = this.flightKeys;
     const sortedHomes = this.homeKeys;
     const pairs = Math.min(count, homes);
     const path = this.flightPath;
@@ -1025,8 +1073,21 @@ export default class SandField {
     this.launch(pairs, latest, "next", nextCover, cascade.index);
   }
 
+  bucketLandings(count, latest) {
+    const buckets = this.landingBuckets;
+    const path = this.flightPath;
+    const span = Math.max(latest, 0.001);
+    buckets.fill(0);
+    for (let rank = 0; rank < count; rank += 1) {
+      const bucket = Math.min(LANDING_BUCKETS - 1, Math.floor((path[rank * 6 + 4] / span) * LANDING_BUCKETS));
+      buckets[bucket] += 1;
+    }
+    for (let bucket = 1; bucket < LANDING_BUCKETS; bucket += 1) buckets[bucket] += buckets[bucket - 1];
+  }
+
   launch(count, latest, mode, cover, index) {
     const { gl } = this;
+    this.bucketLandings(count, latest);
     if (count) {
       gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuffer);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.flightPath, 0, count * 6);
@@ -1037,6 +1098,8 @@ export default class SandField {
       start: performance.now(),
       count,
       total: count ? latest + FLIGHT_S + POP_S : 0,
+      latest: Math.max(latest, 0.001),
+      startLoose: this.grid.loose,
       buzzed: false,
       mode,
       cover,
@@ -1055,7 +1118,14 @@ export default class SandField {
       flight.buzzed = true;
       haptic("land");
     }
-    if (elapsed >= flight.total) this.finishFlight();
+    if (elapsed >= flight.total) {
+      this.finishFlight();
+      return;
+    }
+    if (!flight.count) return;
+    const reached = Math.floor(((elapsed - FLIGHT_S) / flight.latest) * LANDING_BUCKETS);
+    const landed = reached <= 0 ? 0 : this.landingBuckets[Math.min(LANDING_BUCKETS, reached) - 1];
+    this.grid.loose = Math.round(flight.startLoose * (1 - landed / flight.count));
   }
 
   finishFlight() {
@@ -1152,7 +1222,7 @@ export default class SandField {
     this.updatePointer(now);
     this.updateScript(now);
     this.updateCascade(now);
-    if (this.flight) this.simDebt = 0;
+    if (this.flight || this.cascade?.gathered) this.simDebt = 0;
     else this.advance(dt);
     this.updateFlight(now);
 

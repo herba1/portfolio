@@ -4,7 +4,7 @@ import { memo, useCallback } from "react";
 
 import SlotNumber from "@/app/ui/SlotNumber";
 
-function ThreadRow({ track, index, total, numbered, tabbable, register, onFocusRow }) {
+function ThreadRow({ track, slot, index, total, tabbable, register, onFocusRow }) {
   const { id, image } = track;
   const attach = useCallback(
     (node) => {
@@ -24,7 +24,7 @@ function ThreadRow({ track, index, total, numbered, tabbable, register, onFocusR
       aria-setsize={total}
       aria-label={`${track.title} by ${track.artist}, ${track.duration}`}
       onFocus={() => onFocusRow(id)}
-      style={{ "--row-i": index }}
+      style={{ "--row-i": slot }}
     >
       <div className="thread-reveal" data-part="reveal" aria-hidden="true">
         <span className="thread-reveal__label text-ui-sm" data-part="label">
@@ -32,17 +32,18 @@ function ThreadRow({ track, index, total, numbered, tabbable, register, onFocusR
         </span>
       </div>
       <div className="thread-row__body" data-part="body">
-        <span className="thread-bead" data-part="bead" style={{ "--bead-fill": track.fill }} aria-hidden="true">
+        <span className="thread-bead" data-part="bead" data-image={image ? "true" : undefined} style={{ "--bead-fill": track.fill }} aria-hidden="true">
+          <span className="thread-bead__mono text-ui-sm">{track.monogram}</span>
           {image ? <span className="thread-bead__image" style={{ backgroundImage: `url(${JSON.stringify(image)})` }} /> : null}
         </span>
         <div className="thread-row__main" data-part="main" aria-hidden="true">
           <div className="thread-row__text">
-            <span className="thread-row__title text-ui-lg">{track.title}</span>
+            <span className="thread-row__title text-heading-sm">{track.title}</span>
             <span className="thread-row__meta text-ui">
               {track.artist} · {track.duration}
             </span>
           </div>
-          <SlotNumber className="thread-row__index text-ui" value={numbered ? index + 1 : 0} pad={2} />
+          <SlotNumber className="thread-row__index text-ui" value={index + 1} pad={2} />
           <span className="thread-handle" data-thread-handle="true">
             <i />
             <i />
