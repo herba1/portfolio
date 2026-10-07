@@ -33,7 +33,7 @@
     "@mdx-js/react": "^3.1.1",
     "@next/mdx": "^16.4.0",
     "@react-three/drei": "^10.7.7",
-    "@react-three/fiber": "^9.6.0",
+    "@react-three/fiber": "^9.8.1",
     "@react-three/postprocessing": "^3.0.4",
     "@replit/codemirror-vim": "^6.3.0",
     "@splidejs/react-splide": "^0.7.12",
