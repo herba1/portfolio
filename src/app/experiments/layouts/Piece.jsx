@@ -1,4 +1,5 @@
 import PieceBox from "../PieceBox";
+import PieceBoundary from "./PieceBoundary";
 import InkExperience from "@/app/ink/InkExperience";
 import RefractExperience from "@/app/refract/RefractExperience";
 import HalftoneExperience from "@/app/halftone/HalftoneExperience";
@@ -36,7 +37,9 @@ export default function Piece({ slug, data, className = "" }) {
   if (!Component) return null;
   return (
     <PieceBox className={`xl-piece ${className}`.trim()}>
-      <Component embedded {...(data?.[slug] ?? {})} />
+      <PieceBoundary slug={slug}>
+        <Component embedded {...(data?.[slug] ?? {})} />
+      </PieceBoundary>
     </PieceBox>
   );
 }

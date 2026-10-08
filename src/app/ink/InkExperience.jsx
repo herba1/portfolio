@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import ClientOnly from "@/app/ui/ClientOnly";
+import { webglAvailable } from "@/lib/webgl";
 import useNearViewport from "@/app/experiments/useNearViewport";
 import useLivePlate from "@/app/experiments/useLivePlate";
 import usePlateDrift from "@/app/experiments/usePlateDrift";
@@ -23,7 +24,9 @@ const STORAGE_KEY = "herb:ink:params";
 // The scene is three.js — the heaviest chunk on any page that carries it.
 // Start fetching it the moment this module evaluates, ahead of hydration,
 // so ClientOnly's import below resolves from a module that is already here.
-const loadScene = () => import("./InkScene");
+// No WebGL (blocklisted, or switched off after a GPU crash): render nothing
+// rather than let three.js throw.
+const loadScene = () => (webglAvailable() ? import("./InkScene") : () => null);
 if (typeof window !== "undefined") loadScene();
 
 export default function InkExperience({ embedded = false }) {

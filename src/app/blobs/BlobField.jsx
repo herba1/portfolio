@@ -13,6 +13,8 @@ const PAGE_PIXEL_CAP = 2;
 const EMBEDDED_PIXEL_CAP = 1.5;
 const PIXELATED_PIXEL_CAP = 1.25;
 const MIN_RESOLUTION_SCALE = 0.55;
+// Just above 1080p at ratio 1, so only larger buffers are cut.
+const MAX_BUFFER_PIXELS = 2_400_000;
 const POP_STRENGTH = 5.5;
 const EXIT_MS = 450;
 const PUSH_FADE_RATE = 6;
@@ -129,15 +131,16 @@ const FLOWERS = [
 
 const SCENE_COUNT = FLOWERS[0].scenes.length;
 
-const VERTEX = `
-attribute vec2 aPosition;
+const VERTEX = `#version 300 es
+in vec2 aPosition;
 void main() {
   gl_Position = vec4(aPosition, 0.0, 1.0);
 }
 `;
 
-const FRAGMENT = `
+const FRAGMENT = `#version 300 es
 precision highp float;
+out vec4 fragColor;
 uniform vec2 uResolution;
 uniform float uTime;
 uniform vec3 uLobe[${FLOWERS.length * LOBES_PER_FLOWER}];
@@ -156,6 +159,16 @@ uniform vec4 uSpace;
 uniform vec4 uSpaceB;
 uniform vec3 uInk;
 uniform float uSubject;
+// Whether the free flowers draw a subject. A separate uniform from uSubject:
+// guarding on uSubject > 0.5 let Direct3D's compiler prove subjectField's
+// mode < 0.5 branch dead inside the unrolled loop, and eliminating it crashed
+// Chrome's GPU process (STATUS_STACK_OVERFLOW) on AMD/Windows.
+uniform float uSubjectOn;
+// Always 0. A loop bound that reads a uniform can't be unrolled, so Direct3D
+// compiles each loop body once instead of pasting it per iteration.
+uniform int uZero;
+// 3 with chromatic aberration (one pass per channel), else 1.
+uniform int uPasses;
 uniform vec4 uLayoutA;
 uniform vec4 uLayoutB;
 uniform vec4 uLayoutC;
@@ -218,7 +231,7 @@ vec4 backdrop(vec2 p) {
 
   vec2 warped = p;
   float reveal = 0.0;
-  for (int f = 0; f < ${FLOWERS.length}; f++) {
+  for (int f = 0; f < ${FLOWERS.length} + uZero; f++) {
     vec3 core = uCore[f];
     float radius = max(core.z, 0.5) * 3.2;
     vec2 d = p - core.xy;
@@ -430,62 +443,14 @@ float tileField(vec2 p, out vec2 winCenter, out float winRadius, out float winTu
   ) - 0.5;
   p += wobble * cellSize * 0.3 * uOrganic.x;
 
-  if (mode > 4.5 && mode < 5.5) {
-    for (int k = 0; k < 5; k++) {
-      float fk = float(k);
-      vec2 anchor = k == 0 ? vec2(0.14, 0.2) : (k == 1 ? vec2(0.95, 0.88) : (k == 2 ? vec2(0.74, 0.18) : (k == 3 ? vec2(0.33, 0.84) : vec2(0.58, 0.5))));
-      float size = k == 0 ? 0.62 : (k == 1 ? 0.5 : (k == 2 ? 0.17 : (k == 3 ? 0.14 : 0.09)));
-      vec2 center = anchor * uResolution + vec2(sin(uTime * 0.2 + fk), cos(uTime * 0.17 + fk * 1.3)) * uResolution.y * 0.02;
-      float radius = size * uResolution.y * introGrow(fk * 0.12) * outroScale(fk * 0.04);
-      float turn = uTime * 0.12 * (mod(fk, 2.0) < 0.5 ? 1.0 : -1.0) + scene * 0.4 + fk;
-      vec2 d = p - center;
-      if (dot(d, d) > radius * radius * 2.6) {
-        continue;
-      }
-      float f = subjectField(p, center, radius, turn, count, uSubject);
-      total += f;
-      if (f > best) {
-        best = f;
-        winCenter = center;
-        winRadius = radius;
-        winTurn = turn;
-        winPalette = mod(fk, 3.0);
-      }
-    }
-    return total;
-  }
-
-  if (mode > 5.5 && mode < 6.5) {
-    float reference = min(uResolution.x, uResolution.y);
-    float ringRadius = reference * 0.34;
-    float small = reference * 0.12;
-    for (int k = 0; k < 13; k++) {
-      float fk = float(k);
-      vec2 center = mid;
-      float radius = small * 1.7;
-      if (k < 12) {
-        float a = fk / 12.0 * 6.2832 + uTime * 0.15 + scene * 0.8;
-        center = mid + vec2(cos(a), sin(a)) * ringRadius * (1.0 + 0.06 * sin(uTime + fk));
-        radius = small * (0.8 + 0.3 * sin(fk * 1.7 + uTime * 0.7));
-      }
-      radius *= introGrow(fk * 0.07) * outroScale(fk * 0.03);
-      float turn = uTime * 0.2 * (mod(fk, 2.0) < 0.5 ? 1.0 : -1.0) + fk * 0.5;
-      vec2 d = p - center;
-      if (dot(d, d) > radius * radius * 2.6) {
-        continue;
-      }
-      float f = subjectField(p, center, radius, turn, count, uSubject);
-      total += f;
-      if (f > best) {
-        best = f;
-        winCenter = center;
-        winRadius = radius;
-        winTurn = turn;
-        winPalette = mod(fk, 3.0);
-      }
-    }
-    return total;
-  }
+  // Three arrangements share one loop and one subjectField call: a scatter of
+  // five, a ring of twelve around a centre, or the 3×3 cells around this
+  // pixel's grid cell. Separate loops each inlined subjectField again, and
+  // Direct3D's compiler took seconds over the result.
+  bool scatter = mode > 4.5 && mode < 5.5;
+  bool ring = mode > 5.5 && mode < 6.5;
+  bool grid = !scatter && !ring;
+  int candidates = scatter ? 5 : (ring ? 13 : 9);
 
   float tilt = scene * 0.12 + (mode > 6.5 ? 0.55 : 0.0);
   float zoom = 1.0 + 0.1 * sin(scene * 1.7);
@@ -493,13 +458,35 @@ float tileField(vec2 p, out vec2 winCenter, out float winRadius, out float winTu
   vec2 lp = rotate2(p - mid, -tilt) / zoom + mid + scroll;
   vec2 pushLp = rotate2(uPush.xy - mid, -tilt) / zoom + mid + scroll;
   vec2 base = floor(lp / cellSize);
-  for (int j = -1; j <= 1; j++) {
-    for (int i = -1; i <= 1; i++) {
-      vec2 cell = base + vec2(float(i), float(j));
-      vec2 center;
-      float radius;
-      float turn;
-      float palette;
+  vec2 sp = grid ? lp : p;
+  float reference = min(uResolution.x, uResolution.y);
+  float ringRadius = reference * 0.34;
+  float small = reference * 0.12;
+
+  for (int k = 0; k < candidates; k++) {
+    float fk = float(k);
+    vec2 center;
+    float radius;
+    float turn;
+    float palette = mod(fk, 3.0);
+    if (scatter) {
+      vec2 anchor = k == 0 ? vec2(0.14, 0.2) : (k == 1 ? vec2(0.95, 0.88) : (k == 2 ? vec2(0.74, 0.18) : (k == 3 ? vec2(0.33, 0.84) : vec2(0.58, 0.5))));
+      float size = k == 0 ? 0.62 : (k == 1 ? 0.5 : (k == 2 ? 0.17 : (k == 3 ? 0.14 : 0.09)));
+      center = anchor * uResolution + vec2(sin(uTime * 0.2 + fk), cos(uTime * 0.17 + fk * 1.3)) * uResolution.y * 0.02;
+      radius = size * uResolution.y * introGrow(fk * 0.12) * outroScale(fk * 0.04);
+      turn = uTime * 0.12 * (mod(fk, 2.0) < 0.5 ? 1.0 : -1.0) + scene * 0.4 + fk;
+    } else if (ring) {
+      center = mid;
+      radius = small * 1.7;
+      if (k < 12) {
+        float a = fk / 12.0 * 6.2832 + uTime * 0.15 + scene * 0.8;
+        center = mid + vec2(cos(a), sin(a)) * ringRadius * (1.0 + 0.06 * sin(uTime + fk));
+        radius = small * (0.8 + 0.3 * sin(fk * 1.7 + uTime * 0.7));
+      }
+      radius *= introGrow(fk * 0.07) * outroScale(fk * 0.03);
+      turn = uTime * 0.2 * (mod(fk, 2.0) < 0.5 ? 1.0 : -1.0) + fk * 0.5;
+    } else {
+      vec2 cell = base + vec2(mod(fk, 3.0) - 1.0, floor(fk / 3.0) - 1.0);
       float present;
       tileElement(cell, mode, center, radius, turn, palette, present);
       if (present < 0.5) {
@@ -508,100 +495,117 @@ float tileField(vec2 p, out vec2 winCenter, out float winRadius, out float winTu
       vec2 away = center - pushLp;
       float pushRadius = cellSize * 1.6;
       center += away * 0.12 * uPush.z * exp(-dot(away, away) / (pushRadius * pushRadius));
-      vec2 d = lp - center;
-      if (dot(d, d) > radius * radius * 2.6) {
-        continue;
-      }
-      float f = subjectField(lp, center, radius, turn, count, uSubject);
-      total += f;
-      if (f > best) {
-        best = f;
-        winCenter = center;
-        winRadius = radius;
-        winTurn = turn;
-        winPalette = palette;
-      }
+    }
+    vec2 d = sp - center;
+    if (dot(d, d) > radius * radius * 2.6) {
+      continue;
+    }
+    float f = subjectField(sp, center, radius, turn, count, uSubject);
+    total += f;
+    if (f > best) {
+      best = f;
+      winCenter = center;
+      winRadius = radius;
+      winTurn = turn;
+      winPalette = palette;
     }
   }
-  winCenter = rotate2((winCenter - mid - scroll) * zoom, tilt) + mid;
-  winRadius *= zoom;
-  winTurn += tilt;
+  if (grid) {
+    winCenter = rotate2((winCenter - mid - scroll) * zoom, tilt) + mid;
+    winRadius *= zoom;
+    winTurn += tilt;
+  }
   return total;
 }
 
-vec4 tiledScene(vec2 p) {
-  float cellSize = uLayoutA.y;
-  vec2 winCenter;
-  float winRadius;
-  float winTurn;
-  float winPalette;
-  float field = tileField(p, winCenter, winRadius, winTurn, winPalette);
-  vec2 ignoredCenter;
-  float ignoredRadius;
-  float ignoredTurn;
-  float ignoredPalette;
-  float e = max(cellSize * 0.012, 1.0);
-  float right = tileField(p + vec2(e, 0.0), ignoredCenter, ignoredRadius, ignoredTurn, ignoredPalette);
-  float down = tileField(p + vec2(0.0, e), ignoredCenter, ignoredRadius, ignoredTurn, ignoredPalette);
-  vec2 slope = vec2(right - field, down - field) / e;
-
-  vec3 rim = winPalette < 0.5 ? uPalette[0] : (winPalette < 1.5 ? uPalette[6] : uPalette[12]);
-  vec3 lime = winPalette < 0.5 ? uPalette[1] : (winPalette < 1.5 ? uPalette[7] : uPalette[13]);
-  vec3 gold = winPalette < 0.5 ? uPalette[2] : (winPalette < 1.5 ? uPalette[8] : uPalette[14]);
-  vec3 amber = winPalette < 0.5 ? uPalette[3] : (winPalette < 1.5 ? uPalette[9] : uPalette[15]);
-  vec3 brown = winPalette < 0.5 ? uPalette[4] : (winPalette < 1.5 ? uPalette[10] : uPalette[16]);
-  vec3 shadeColor = winPalette < 0.5 ? uPalette[5] : (winPalette < 1.5 ? uPalette[11] : uPalette[17]);
-  float coreSize = max(winRadius * 0.4, 0.5);
-  float valleyScale = (uSubject < 1.5 || (uSubject > 3.5 && uSubject < 4.5)) ? 1.0 : 0.0;
-  return shadeField(field, slope, p, p, winCenter, coreSize, winTurn, uLayoutC.y, rim, lime, gold, amber, brown, shadeColor, valleyScale);
+// The tiled layout's field and slope, sampled at the pixel and one step right
+// and down. One loop, so tileField (and the subjectField inside it) is
+// compiled once rather than once per tap.
+float tiledField(vec2 p, out vec2 slope, out vec2 winCenter, out float winRadius, out float winTurn, out float winPalette) {
+  float e = max(uLayoutA.y * 0.012, 1.0);
+  float taps[3];
+  for (int k = 0; k < 3 + uZero; k++) {
+    vec2 offset = k == 1 ? vec2(e, 0.0) : (k == 2 ? vec2(0.0, e) : vec2(0.0));
+    vec2 tapCenter;
+    float tapRadius;
+    float tapTurn;
+    float tapPalette;
+    taps[k] = tileField(p + offset, tapCenter, tapRadius, tapTurn, tapPalette);
+    if (k == 0) {
+      winCenter = tapCenter;
+      winRadius = tapRadius;
+      winTurn = tapTurn;
+      winPalette = tapPalette;
+    }
+  }
+  slope = vec2(taps[1] - taps[0], taps[2] - taps[0]) / e;
+  return taps[0];
 }
 
+// Every layout funnels into one shadeField call: the tiled layout is a single
+// layer, the free flowers are one layer each.
 vec4 flowers(vec2 p) {
-  if (uLayoutA.x > 0.5) {
-    return tiledScene(p);
-  }
+  bool tiled = uLayoutA.x > 0.5;
+  int layers = tiled ? 1 : ${FLOWERS.length} + uZero;
+  float valleyScale = (uSubject < 1.5 || (uSubject > 3.5 && uSubject < 4.5)) ? 1.0 : 0.0;
   vec4 acc = vec4(0.0);
 
-  for (int f = 0; f < ${FLOWERS.length}; f++) {
-    vec3 core = uCore[f];
-    float coreSize = max(core.z, 0.5);
-    vec2 wobble = vec2(
-      valueNoise(p / (coreSize * uOrganic.z) + uTime * 0.35 * uOrganic.y),
-      valueNoise(p / (coreSize * uOrganic.z) + 17.0 - uTime * 0.3 * uOrganic.y)
-    ) - 0.5;
-    vec2 q = p + wobble * coreSize * uOrganic.x;
+  for (int f = 0; f < layers; f++) {
     float field = 0.0;
     vec2 slope = vec2(0.0);
-    if (uSubject > 0.5) {
-      vec3 subject = uSubj[f];
-      float e = max(subject.x * 0.012, 1.0);
-      field = subjectField(q, uCore[f].xy, subject.x, subject.y, subject.z, uSubject);
-      float right = subjectField(q + vec2(e, 0.0), uCore[f].xy, subject.x, subject.y, subject.z, uSubject);
-      float left = subjectField(q - vec2(e, 0.0), uCore[f].xy, subject.x, subject.y, subject.z, uSubject);
-      float down = subjectField(q + vec2(0.0, e), uCore[f].xy, subject.x, subject.y, subject.z, uSubject);
-      float up = subjectField(q - vec2(0.0, e), uCore[f].xy, subject.x, subject.y, subject.z, uSubject);
-      slope = vec2(right - left, down - up) / (2.0 * e);
+    vec2 q = p;
+    vec2 center;
+    float coreSize;
+    float turn;
+    float petals;
+    int palette;
+    if (tiled) {
+      float winRadius;
+      float winPalette;
+      field = tiledField(p, slope, center, winRadius, turn, winPalette);
+      coreSize = max(winRadius * 0.4, 0.5);
+      petals = uLayoutC.y;
+      palette = int(winPalette + 0.5);
     } else {
-      for (int i = 0; i < ${LOBES_PER_FLOWER}; i++) {
-        vec3 lobe = uLobe[f * ${LOBES_PER_FLOWER} + i];
-        if (lobe.z > 0.5) {
-          vec2 d = (q - lobe.xy) / lobe.z;
-          float distanceSquared = max(dot(d, d), 0.0001);
-          float power = pow(distanceSquared, 0.5 * uOrganic.w);
-          float bump = exp(-power);
-          field += bump;
-          slope += -uOrganic.w * power / distanceSquared * d / lobe.z * bump;
+      vec3 core = uCore[f];
+      center = core.xy;
+      coreSize = max(core.z, 0.5);
+      turn = uShape[f].x;
+      petals = uShape[f].y;
+      palette = f;
+      vec2 wobble = vec2(
+        valueNoise(p / (coreSize * uOrganic.z) + uTime * 0.35 * uOrganic.y),
+        valueNoise(p / (coreSize * uOrganic.z) + 17.0 - uTime * 0.3 * uOrganic.y)
+      ) - 0.5;
+      q = p + wobble * coreSize * uOrganic.x;
+      if (uSubjectOn > 0.5) {
+        vec3 subject = uSubj[f];
+        float e = max(subject.x * 0.012, 1.0);
+        // Centre, right, left, down, up in one loop, so subjectField is
+        // compiled once instead of five times.
+        float taps[5];
+        for (int k = 0; k < 5 + uZero; k++) {
+          vec2 offset = k == 1 ? vec2(e, 0.0) : (k == 2 ? vec2(-e, 0.0) : (k == 3 ? vec2(0.0, e) : (k == 4 ? vec2(0.0, -e) : vec2(0.0))));
+          taps[k] = subjectField(q + offset, center, subject.x, subject.y, subject.z, uSubject);
+        }
+        field = taps[0];
+        slope = vec2(taps[1] - taps[2], taps[3] - taps[4]) / (2.0 * e);
+      } else {
+        for (int i = 0; i < ${LOBES_PER_FLOWER} + uZero; i++) {
+          vec3 lobe = uLobe[f * ${LOBES_PER_FLOWER} + i];
+          if (lobe.z > 0.5) {
+            vec2 d = (q - lobe.xy) / lobe.z;
+            float distanceSquared = max(dot(d, d), 0.0001);
+            float power = pow(distanceSquared, 0.5 * uOrganic.w);
+            float bump = exp(-power);
+            field += bump;
+            slope += -uOrganic.w * power / distanceSquared * d / lobe.z * bump;
+          }
         }
       }
     }
-    vec3 rim = uPalette[f * ${COLORS_PER_PALETTE} + 0];
-    vec3 lime = uPalette[f * ${COLORS_PER_PALETTE} + 1];
-    vec3 gold = uPalette[f * ${COLORS_PER_PALETTE} + 2];
-    vec3 amber = uPalette[f * ${COLORS_PER_PALETTE} + 3];
-    vec3 brown = uPalette[f * ${COLORS_PER_PALETTE} + 4];
-    vec3 shadeColor = uPalette[f * ${COLORS_PER_PALETTE} + 5];
-    float valleyScale = (uSubject < 1.5 || (uSubject > 3.5 && uSubject < 4.5)) ? 1.0 : 0.0;
-    vec4 shaded = shadeField(field, slope, q, p, core.xy, coreSize, uShape[f].x, uShape[f].y, rim, lime, gold, amber, brown, shadeColor, valleyScale);
+    int base = palette * ${COLORS_PER_PALETTE};
+    vec4 shaded = shadeField(field, slope, q, p, center, coreSize, turn, petals, uPalette[base], uPalette[base + 1], uPalette[base + 2], uPalette[base + 3], uPalette[base + 4], uPalette[base + 5], valleyScale);
     acc.rgb = shaded.rgb + acc.rgb * (1.0 - shaded.a);
     acc.a = shaded.a + acc.a * (1.0 - shaded.a);
   }
@@ -615,15 +619,19 @@ void main() {
     p = (floor(p / pixelSize) + 0.5) * pixelSize;
   }
 
-  vec4 acc;
+  // One flowers() call in a uniform-bounded loop: three calls were three
+  // full copies of the scene for Direct3D to compile.
+  vec4 acc = vec4(0.0);
   float aberration = uGrade.w;
-  if (aberration > 0.1) {
-    vec4 red = flowers(p + vec2(aberration, 0.0));
-    vec4 green = flowers(p);
-    vec4 blue = flowers(p - vec2(aberration, 0.0));
-    acc = vec4(red.r, green.g, blue.b, max(max(red.a, green.a), blue.a));
-  } else {
-    acc = flowers(p);
+  for (int c = 0; c < uPasses; c++) {
+    float offset = uPasses == 1 ? 0.0 : float(1 - c) * aberration;
+    vec4 layer = flowers(p + vec2(offset, 0.0));
+    if (uPasses == 1) {
+      acc = layer;
+    } else {
+      acc[c] = layer[c];
+      acc.a = max(acc.a, layer.a);
+    }
   }
   vec4 layer = backdrop(p);
   acc = acc + layer * (1.0 - acc.a);
@@ -668,26 +676,37 @@ void main() {
   float body = step(0.002, alpha);
   alpha = clamp(alpha + grain * uGrain.x * body, 0.0, 1.0);
   color = clamp(color + grain * uGrain.x, 0.0, 1.0);
-  gl_FragColor = vec4(color * alpha, alpha);
+  fragColor = vec4(color * alpha, alpha);
 }
 `;
 
+// A lost context fails every compile with an empty log, so only a live
+// context's failure is worth reporting. Either way the caller gets null.
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
   gl.shaderSource(shader, source);
   gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    console.error(gl.getShaderInfoLog(shader));
-  }
-  return shader;
+  if (gl.getShaderParameter(shader, gl.COMPILE_STATUS)) return shader;
+  if (!gl.isContextLost()) console.error(gl.getShaderInfoLog(shader));
+  return null;
 }
 
+// Starts the link and returns the program without waiting on it. On Windows
+// the link is where Direct3D compiles the shader — most of a second the first
+// time — so the draw loop polls `linkDone` instead of blocking the page.
 function buildProgram(gl) {
+  const vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
+  const fragment = compile(gl, gl.FRAGMENT_SHADER, FRAGMENT);
+  if (!vertex || !fragment) return null;
   const program = gl.createProgram();
-  gl.attachShader(program, compile(gl, gl.VERTEX_SHADER, VERTEX));
-  gl.attachShader(program, compile(gl, gl.FRAGMENT_SHADER, FRAGMENT));
+  gl.attachShader(program, vertex);
+  gl.attachShader(program, fragment);
   gl.linkProgram(program);
   return program;
+}
+
+function linkDone(gl, program, parallel) {
+  return !parallel || gl.getProgramParameter(program, parallel.COMPLETION_STATUS_KHR);
 }
 
 function sceneTarget(flower, position) {
@@ -875,18 +894,12 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    const gl = canvas.getContext("webgl", { premultipliedAlpha: true, alpha: true, antialias: false });
-    if (!gl) return undefined;
+    const gl = canvas.getContext("webgl2", { premultipliedAlpha: true, alpha: true, antialias: false });
+    if (!gl || gl.isContextLost()) return undefined;
 
+    const parallel = gl.getExtension("KHR_parallel_shader_compile");
     const program = buildProgram(gl);
-    gl.useProgram(program);
-
-    const buffer = gl.createBuffer();
-    gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-    const position = gl.getAttribLocation(program, "aPosition");
-    gl.enableVertexAttribArray(position);
-    gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+    if (!program) return undefined;
 
     const uniformNames = [
       "uResolution",
@@ -907,6 +920,9 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
       "uSpaceB",
       "uInk",
       "uSubject",
+      "uSubjectOn",
+      "uZero",
+      "uPasses",
       "uSubj",
       "uLayoutA",
       "uLayoutB",
@@ -915,9 +931,25 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
       "uOutro",
       "uPush",
     ];
-    const uniforms = Object.fromEntries(
-      uniformNames.map((name) => [name, gl.getUniformLocation(program, name)]),
-    );
+    // Filled once the link finishes — reading locations before then would
+    // block on it.
+    let uniforms = null;
+    const finishLink = () => {
+      if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+        if (!gl.isContextLost()) console.error(gl.getProgramInfoLog(program));
+        return false;
+      }
+      gl.useProgram(program);
+      const buffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+      const position = gl.getAttribLocation(program, "aPosition");
+      gl.enableVertexAttribArray(position);
+      gl.vertexAttribPointer(position, 2, gl.FLOAT, false, 0, 0);
+      uniforms = Object.fromEntries(uniformNames.map((name) => [name, gl.getUniformLocation(program, name)]));
+      gl.uniform1i(uniforms.uZero, 0);
+      return true;
+    };
 
     const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const deviceRatio = window.devicePixelRatio || 1;
@@ -958,22 +990,35 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
     blobActions.replay = replay;
     restartRef.current = replay;
 
+    // The pixel ratio alone doesn't bound the work: a 4K screen at ratio 2 asks
+    // for ~8M fragments a frame, enough to stall the GPU before the governor
+    // has sampled a single frame. Cap the drawing buffer's area as well.
     const resize = () => {
+      const area = Math.max(1, canvas.clientWidth * canvas.clientHeight);
+      pixelRatio = Math.min(pixelCap * governor.scale, Math.sqrt(MAX_BUFFER_PIXELS / area));
       canvas.width = Math.round(canvas.clientWidth * pixelRatio);
       canvas.height = Math.round(canvas.clientHeight * pixelRatio);
       gl.viewport(0, 0, canvas.width, canvas.height);
     };
 
     const draw = (milliseconds) => {
+      if (!uniforms) {
+        if (!linkDone(gl, program, parallel)) {
+          frame = requestAnimationFrame(draw);
+          return;
+        }
+        if (!finishLink()) {
+          running = false;
+          return;
+        }
+      }
       const settings = { ...DEFAULTS, ...configRef.current };
       if (settings.layout !== activeLayout) {
         activeLayout = settings.layout;
         pixelCap = pixelCapFor(activeLayout);
-        pixelRatio = pixelCap * governor.scale;
         resize();
       }
       if (lastMilliseconds !== null && governor.sample(milliseconds - lastMilliseconds)) {
-        pixelRatio = pixelCap * governor.scale;
         resize();
       }
       const viewWidth = embedded ? canvas.clientWidth : window.innerWidth;
@@ -1116,6 +1161,7 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
         settings.contrast,
         settings.aberration * pixelRatio,
       );
+      gl.uniform1i(uniforms.uPasses, settings.aberration * pixelRatio > 0.1 ? 3 : 1);
       gl.uniform2f(uniforms.uGrain, settings.grain, settings.grainSpeed);
       gl.uniform4f(
         uniforms.uSpace,
@@ -1134,6 +1180,7 @@ export default function BlobField({ config, embedded = false, introKey = 0, exit
       gl.uniform1f(uniforms.uOutro, outro);
       gl.uniform3f(uniforms.uPush, push.x, push.y, push.strength);
       gl.uniform1f(uniforms.uSubject, settings.subject);
+      gl.uniform1f(uniforms.uSubjectOn, settings.subject > 0.5 ? 1 : 0);
       gl.uniform4f(
         uniforms.uLayoutA,
         settings.layout,
