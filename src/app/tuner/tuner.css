@@ -28,7 +28,6 @@
   position: relative;
   height: 100%;
   overflow: hidden;
-  overscroll-behavior: none; /* no rubber-band / scroll chaining off this screen */
   background: var(--paper);
   color: var(--ink);
   font-family: var(--font-sans);
@@ -38,6 +37,14 @@
 .tuner *::before,
 .tuner *::after {
   view-transition-name: none;
+}
+
+/* Only the full-page tuner (rendered as <main>) blocks rubber-band and scroll
+   chaining. Embedded as a tile on /experiments it is a <div>, and the same
+   rule there trapped the wheel: an overflow-hidden box with overscroll-behavior
+   none swallowed the page's scroll whenever the pointer sat over it. */
+main.tuner {
+  overscroll-behavior: none;
 }
 
 /* ── Vertical waveform history: centred, max-width, full screen height ──── */
