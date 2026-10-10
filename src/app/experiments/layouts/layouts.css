@@ -219,23 +219,20 @@
 
 
 
-/* Stacked, most tiles start below the fold, and a wave timed to the page
-   load would play to nobody. The first screen still arrives on load; every
-   tile past it rides its own entry into view instead. */
-@supports (animation-timeline: view()) {
-  @media (max-width: 899px) {
-    .xl-tile:nth-child(n + 5) {
-      animation-delay: 0s;
-      animation-timeline: view();
-      animation-range: entry 0% entry 80%;
-    }
+@media (max-width: 899px) {
+  .xl-tile:nth-child(n + 5) {
+    animation-delay: 0s;
   }
-  @media (max-width: 599px) {
-    .xl-tile:nth-child(n + 3) {
-      animation-delay: 0s;
-      animation-timeline: view();
-      animation-range: entry 0% entry 80%;
-    }
+  .xl-tile:nth-child(n + 5):not([data-seen]) {
+    animation-play-state: paused;
+  }
+}
+@media (max-width: 599px) {
+  .xl-tile:nth-child(n + 3) {
+    animation-delay: 0s;
+  }
+  .xl-tile:nth-child(n + 3):not([data-seen]) {
+    animation-play-state: paused;
   }
 }
 
