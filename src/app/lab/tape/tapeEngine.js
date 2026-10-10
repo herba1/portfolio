@@ -1,6 +1,8 @@
 import { createTapeAudio } from "./tapeAudio";
 import { CLIP_OFFSET_SECONDS, LOOP_SECONDS } from "./tapeConstants";
 import { loadTape } from "./tapeLoader";
+import { TAPE_PX_PER_SECOND, createTapeMachine } from "./tapeMachine";
+import { MACHINE } from "./tapeMachineArt";
 import { createTapePlate } from "./tapePlate";
 import { TapeTransport } from "./tapeTransport";
 
@@ -13,18 +15,14 @@ const HELD_STRAIN_TAU = 0.04;
 const WEAR_RATE = 5;
 const REVEAL_MS = 900;
 const SPIN_DELAY_MS = 160;
-const TAP_SLOP = 6;
 const AXIS_SLOP = 8;
 const LINE_PX = 100 / 6;
 const NOTCH_TAU = 0.24;
 const SEEK_JUMP = 5;
-const SEEK_LEAD = 0.04;
 const MAX_SCALE = 2;
 const MIN_QUALITY = 0.6;
 const COMPACT_WIDTH = 640;
 const HEAD_OVERHANG = 12;
-const WORD_GAP = 10;
-const WORD_TAIL = 0.05;
 const NEAR_RADIUS = 96;
 const HOLD_GRAB_MS = 160;
 const SLOW_RATIO = 1.5;
@@ -32,12 +30,14 @@ const FLOOR_CREEP = 0.03;
 const SMEAR_GAIN = 2;
 const SMEAR_REST = 1.1;
 const SMEAR_CAP = 48;
-const BLUR_PER_SMEAR = 1 / 3;
-const LAG_TAU = 0.08;
-const LAG_LIMIT = 0.25;
+const STEP_LIMIT = 0.25;
+const REEL_DEAD_ZONE = 14;
+const DECK_PEEK = 128;
+const SHORT_STRIP_DECK_PEEK = 80;
+const DECK_OVERHANG = 24;
+const SHORT_STRIP_DECK_OVERHANG = 16;
+const HEAD_CLEARANCE = 64;
 const START_LEAD = 0.08;
-const WORD_DELAY_MIN = 80;
-const WORD_DELAY_SPREAD = 560;
 
 const wrap = (value, period) => ((value % period) + period) % period;
 const clamp = (value, limit) => Math.max(-limit, Math.min(limit, value));
@@ -82,8 +82,10 @@ function inkedStart(print, period) {
 }
 
 export function mountTape(parts, onChange) {
-  const { strip, plateHost, wordsLayer, smearBlur, smearFilter, headSvg, headPath, timeSlot, rateSlot, sign, cast } = parts;
+  const { deck, strip, plateHost, headSvg, headPath, timeSlot, rateSlot, sign, cast, machine } = parts;
   const transport = new TapeTransport();
+  const machineArt = createTapeMachine(machine);
+  const grips = Array.from(machine.querySelectorAll("[data-grip]"));
   const audio = createTapeAudio(() => syncAudible());
   const canvas = document.createElement("canvas");
   canvas.className = "tape__plate";
@@ -104,7 +106,6 @@ export function mountTape(parts, onChange) {
   let height = 0;
   let headX = 0;
   let pxps = 160;
-  let lane = 48;
   let quality = 1;
   let slowFrames = 0;
   let floorInterval = 0;
@@ -118,16 +119,13 @@ export function mountTape(parts, onChange) {
   let strain = 0;
   let wear = 0;
   let smear = 0;
-  let blurShown = 0;
-  let lag = 0;
+  let machineScale = 1;
   let drawn = false;
   let shownT = 0;
   let shownWarp = 0;
   let bendShown = NaN;
   let pathHeight = 0;
   let words = [];
-  let activeIndex = -1;
-  let activeOn = false;
   let singersKey = "";
   let timeText = "0:00.0";
   let rateText = "0.00";
@@ -140,7 +138,6 @@ export function mountTape(parts, onChange) {
   let ticking = false;
   let stripLeft = 0;
   let near = 0;
-  let lyricLane = true;
 
   const emit = (patch) => {
     if (!destroyed) onChange(patch);
@@ -148,73 +145,28 @@ export function mountTape(parts, onChange) {
 
   const castNodes = Array.from(cast.querySelectorAll("[data-cast]"));
 
-  const layoutLanes = () => {
-    const ends = [-Infinity, -Infinity];
-    for (const item of words) {
-      item.width = item.el.offsetWidth;
-      const x = item.start * pxps;
-      let laneIndex = 0;
-      if (x < ends[0] + WORD_GAP) laneIndex = x >= ends[1] + WORD_GAP ? 1 : ends[0] <= ends[1] ? 0 : 1;
-      ends[laneIndex] = x + item.width * 1.08;
-      item.el.dataset.lane = String(laneIndex);
-    }
-  };
-
   const measure = () => {
     width = strip.clientWidth;
     height = strip.clientHeight;
     stripLeft = strip.getBoundingClientRect().left;
     const compact = width < COMPACT_WIDTH;
     pxps = compact ? 120 : 160;
-    lane = lyricLane ? (compact ? 40 : 48) : 8;
     transport.pixelsPerSecond = pxps;
-    headX = width * HEAD_FRACTION;
+    const shortStrip = height < MACHINE.height;
+    const peek = shortStrip ? SHORT_STRIP_DECK_PEEK : DECK_PEEK;
+    const overhang = shortStrip ? SHORT_STRIP_DECK_OVERHANG : DECK_OVERHANG;
+    machineScale = Math.max(0.3, (height + overhang * 2) / MACHINE.height);
+    headX = Math.round(Math.max(width * HEAD_FRACTION, peek + HEAD_CLEARANCE) * 2) / 2;
+    deck.style.setProperty("--tape-machine-scale", String(Math.round(machineScale * 10000) / 10000));
+    deck.style.setProperty("--tape-machine-left", `${Math.round((peek - MACHINE.width * machineScale) * 10) / 10}px`);
+    deck.style.setProperty("--tape-head-x", `${headX}px`);
     const scale = Math.min(window.devicePixelRatio || 1, MAX_SCALE) * quality;
-    plate?.resize(width, height, scale, { headX, pxPerSecond: pxps, warpRadius: WARP_RADIUS, lane, period });
-    layoutLanes();
-    for (const item of words) item.x = NaN;
+    plate?.resize(width, height, scale, { headX, pxPerSecond: pxps, warpRadius: WARP_RADIUS, period });
     if (drawn) {
       plate?.draw(shownT, shownWarp, reveal, wear, smear);
-      placeWords(shownT, shownWarp);
       drawHead();
     }
     wake();
-  };
-
-  const placeWords = (t, warp) => {
-    const half = period / 2;
-    for (const item of words) {
-      let u = item.start - t;
-      if (u > half) u -= period;
-      else if (u < -half) u += period;
-      u *= pxps;
-      if (u + item.width < -headX - 24 || u > width - headX + 24) {
-        if (item.shown) {
-          item.el.style.visibility = "hidden";
-          item.shown = false;
-        }
-        continue;
-      }
-      let x = u;
-      if (warp !== 0) {
-        for (let k = 0; k < 3; k++) {
-          const th = Math.tanh(x / WARP_RADIUS);
-          x -= (x - warp * WARP_RADIUS * th - u) / (1 - warp * (1 - th * th));
-        }
-      }
-      const th = Math.tanh(x / WARP_RADIUS);
-      const stretch = Math.round((1000 / (1 - warp * (1 - th * th)))) / 1000;
-      const left = Math.round((headX + x) * 100) / 100;
-      if (!item.shown) {
-        item.el.style.visibility = "";
-        item.shown = true;
-      }
-      if (left !== item.x || stretch !== item.stretch) {
-        item.x = left;
-        item.stretch = stretch;
-        item.el.style.transform = `translate3d(${left}px, 0, 0) scaleX(${stretch})`;
-      }
-    }
   };
 
   const drawHead = () => {
@@ -227,7 +179,8 @@ export function mountTape(parts, onChange) {
       headSvg.setAttribute("height", String(total));
       headSvg.setAttribute("viewBox", `0 0 40 ${total}`);
     }
-    headPath.setAttribute("d", `M20 4 Q${20 + bend * 2} ${total / 2} 20 ${total - 4}`);
+    const middle = HEAD_OVERHANG + height / 2;
+    headPath.setAttribute("d", `M20 4 Q${20 + bend * 2} ${middle} 20 ${total - 4}`);
   };
 
   const showReadouts = (t) => {
@@ -260,7 +213,7 @@ export function mountTape(parts, onChange) {
     }
   };
 
-  const markActive = (t) => {
+  const markSingers = (t) => {
     let lo = 0;
     let hi = words.length - 1;
     let found = -1;
@@ -270,13 +223,6 @@ export function mountTape(parts, onChange) {
         found = mid;
         lo = mid + 1;
       } else hi = mid - 1;
-    }
-    const on = found >= 0 && t < words[found].end + WORD_TAIL;
-    if (found !== activeIndex || on !== activeOn) {
-      if (activeIndex >= 0 && words[activeIndex]) words[activeIndex].el.removeAttribute("data-on");
-      activeIndex = found;
-      activeOn = on;
-      if (on) words[found].el.setAttribute("data-on", "");
     }
     const source = found >= 0 ? words[found] : words[words.length - 1];
     const singers = source ? source.singers : "john";
@@ -299,28 +245,17 @@ export function mountTape(parts, onChange) {
     }
   };
 
-  const showSmear = () => {
-    const quantised = reduced ? 0 : Math.round(smear * BLUR_PER_SMEAR * 4) / 4;
-    const sigma = quantised >= 1 ? quantised : 0;
-    if (sigma === blurShown) return;
-    blurShown = sigma;
-    if (sigma > 0) {
-      smearBlur.setAttribute("stdDeviation", `${sigma} 0`);
-      wordsLayer.style.filter = `url(#${smearFilter})`;
-    } else {
-      wordsLayer.style.filter = "";
-    }
-  };
-
   const tick = (now) => {
     frame = 0;
     ticking = true;
     const interval = last ? (now - last) / 1000 : 0;
     const dt = Math.min(1 / 30, interval);
+    const travelDt = Math.min(STEP_LIMIT, interval);
     last = now;
     govern(interval);
 
     if (pendingTouch && now - downAt >= HOLD_GRAB_MS) engage(downX, now / 1000);
+    if (reelGrab && !reelGrab.claimed && now - reelGrab.downAt >= HOLD_GRAB_MS) claimReel(now / 1000);
 
     if (spinAt >= 0 && now >= spinAt) {
       spinAt = -1;
@@ -332,7 +267,7 @@ export function mountTape(parts, onChange) {
       }
     }
 
-    transport.step(dt, now / 1000);
+    transport.step(travelDt, now / 1000);
     if (revealStart >= 0) {
       const progress = reduced ? 1 : Math.min(1, (now - revealStart) / REVEAL_MS);
       reveal = 1 - (1 - progress) ** 3;
@@ -350,32 +285,35 @@ export function mountTape(parts, onChange) {
     const warp = pull / (1 + pull);
 
     const velocity = transport.velocity;
-    const lagGoal = transport.held || !audible ? 0 : clamp(audio.latency * velocity, LAG_LIMIT);
-    lag += (lagGoal - lag) * (1 - Math.exp(-dt / LAG_TAU));
-    if (Math.abs(lagGoal - lag) < 1e-5) lag = lagGoal;
-
     const excess = Math.max(0, Math.abs(velocity) - SMEAR_REST);
     smear = reduced ? 0 : Math.min(SMEAR_CAP, excess * frameInterval * pxps * SMEAR_GAIN);
 
-    const t = wrap(transport.position, period);
-    shownT = wrap(transport.position - lag, period);
+    shownT = wrap(transport.position, period);
     shownWarp = warp;
     drawn = true;
     plate?.draw(shownT, warp, reveal, wear, smear);
-    placeWords(shownT, warp);
-    showSmear();
     drawHead();
     showReadouts(shownT);
-    markActive(shownT);
-    if (audible) audio.steer(t, transport.audibleVelocity);
+    markSingers(shownT);
+    const machineBusy = machineArt.update(transport.position, strain, dt);
+    if (audible) {
+      audio.steer(
+        wrap(transport.voicePosition, period),
+        transport.voiceVelocity,
+        transport.voiceTime * 1000,
+        transport.mode,
+        transport.worn,
+        transport.voiceReach,
+      );
+    }
 
     const busy =
       !transport.settled ||
       transport.held ||
       pendingTouch ||
-      lag !== lagGoal ||
+      (reelGrab !== null && !reelGrab.claimed) ||
+      machineBusy ||
       smear > 0 ||
-      blurShown > 0 ||
       spinAt >= 0 ||
       (revealStart >= 0 && reveal < 1) ||
       strain !== strainGoal ||
@@ -463,25 +401,14 @@ export function mountTape(parts, onChange) {
     wake();
   };
 
-  const seekToWord = (node) => {
-    const start = Number(node.dataset.start);
-    if (!Number.isFinite(start)) return;
-    let delta = start - SEEK_LEAD - wrap(seekBase(), period);
-    if (delta > period / 2) delta -= period;
-    else if (delta < -period / 2) delta += period;
-    seekBy(delta);
-  };
-
   let pointerId = null;
+  let reelGrab = null;
   let touch = false;
   let pendingTouch = false;
   let axis = 0;
   let downX = 0;
   let downY = 0;
   let downAt = 0;
-  let lastX = 0;
-  let travel = 0;
-  let downWord = null;
 
   function engage(x, time) {
     pendingTouch = false;
@@ -492,13 +419,9 @@ export function mountTape(parts, onChange) {
   const finish = (event, tapAllowed) => {
     if (pointerId === null) return;
     pendingTouch = false;
-    const steady = travel < TAP_SLOP && Math.abs(event.clientY - downY) < TAP_SLOP;
-    const word = tapAllowed && steady ? downWord : null;
     transport.release(event.timeStamp / 1000);
-    if (word) seekToWord(word);
     if (!touch && strip.hasPointerCapture(pointerId)) strip.releasePointerCapture(pointerId);
     pointerId = null;
-    downWord = null;
     strip.removeAttribute("data-held");
     if (tapAllowed) enableAudio();
     wake();
@@ -506,17 +429,14 @@ export function mountTape(parts, onChange) {
 
   const onDown = (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
-    if (pointerId !== null) return;
+    if (pointerId !== null || reelGrab) return;
     enableAudio();
     pointerId = event.pointerId;
     touch = event.pointerType === "touch";
     axis = touch ? 0 : 1;
     downX = event.clientX;
     downY = event.clientY;
-    lastX = event.clientX;
     downAt = performance.now();
-    travel = 0;
-    downWord = event.target.closest?.("[data-word]") || null;
     if (touch) {
       pendingTouch = true;
     } else {
@@ -539,8 +459,6 @@ export function mountTape(parts, onChange) {
   const onMove = (event) => {
     if (pointerId === null && event.pointerType === "mouse") sense(event.clientX);
     if (event.pointerId !== pointerId) return;
-    travel += Math.abs(event.clientX - lastX);
-    lastX = event.clientX;
     if (axis === 0) {
       const tx = event.clientX - downX;
       const ty = event.clientY - downY;
@@ -552,8 +470,101 @@ export function mountTape(parts, onChange) {
       }
       if (!transport.held) engage(downX, event.timeStamp / 1000);
     }
-    transport.drag(event.clientX, event.timeStamp / 1000);
+    const samples = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [];
+    if (samples.length) for (const sample of samples) transport.drag(sample.clientX, sample.timeStamp / 1000);
+    else transport.drag(event.clientX, event.timeStamp / 1000);
     wake();
+  };
+
+  const reelAngle = (grab, x, y) => Math.atan2(y - grab.cy, x - grab.cx);
+
+  const turnReel = (x, y, time) => {
+    const distance = Math.hypot(x - reelGrab.cx, y - reelGrab.cy);
+    const angle = reelAngle(reelGrab, x, y);
+    let turn = angle - reelGrab.angle;
+    if (turn > Math.PI) turn -= Math.PI * 2;
+    else if (turn < -Math.PI) turn += Math.PI * 2;
+    reelGrab.angle = angle;
+    if (distance < REEL_DEAD_ZONE * machineScale) return;
+    reelGrab.turned += (turn * machineArt.radiusOf(reelGrab.name)) / TAPE_PX_PER_SECOND;
+    transport.drag(-reelGrab.turned * pxps, time);
+  };
+
+  const claimReel = (time) => {
+    reelGrab.claimed = true;
+    reelGrab.angle = reelAngle(reelGrab, reelGrab.lastX, reelGrab.lastY);
+    if (!reelGrab.touch) reelGrab.grip.setPointerCapture(reelGrab.pointerId);
+    transport.grab(0, time);
+    strip.setAttribute("data-held", "");
+    machine.setAttribute("data-held", reelGrab.name);
+  };
+
+  const onReelDown = (event) => {
+    if (event.pointerType === "mouse" && event.button !== 0) return;
+    if (pointerId !== null || reelGrab) return;
+    const touching = event.pointerType === "touch";
+    if (!touching) event.preventDefault();
+    enableAudio();
+    const grip = event.currentTarget;
+    const rect = grip.getBoundingClientRect();
+    reelGrab = {
+      pointerId: event.pointerId,
+      grip,
+      name: grip.dataset.grip,
+      cx: rect.left + rect.width / 2,
+      cy: rect.top + rect.height / 2,
+      angle: 0,
+      turned: 0,
+      touch: touching,
+      claimed: false,
+      downX: event.clientX,
+      downY: event.clientY,
+      downAt: performance.now(),
+      lastX: event.clientX,
+      lastY: event.clientY,
+    };
+    if (!touching) claimReel(event.timeStamp / 1000);
+    wake();
+  };
+
+  const onReelMove = (event) => {
+    if (!reelGrab || event.pointerId !== reelGrab.pointerId) return;
+    if (!reelGrab.claimed) {
+      const tx = event.clientX - reelGrab.downX;
+      const ty = event.clientY - reelGrab.downY;
+      if (tx * tx + ty * ty < AXIS_SLOP * AXIS_SLOP) {
+        reelGrab.lastX = event.clientX;
+        reelGrab.lastY = event.clientY;
+        return;
+      }
+      if (Math.abs(ty) >= Math.abs(tx)) {
+        reelGrab = null;
+        return;
+      }
+      claimReel(event.timeStamp / 1000);
+    }
+    const samples = typeof event.getCoalescedEvents === "function" ? event.getCoalescedEvents() : [];
+    if (samples.length) for (const sample of samples) turnReel(sample.clientX, sample.clientY, sample.timeStamp / 1000);
+    else turnReel(event.clientX, event.clientY, event.timeStamp / 1000);
+    reelGrab.lastX = event.clientX;
+    reelGrab.lastY = event.clientY;
+    wake();
+  };
+
+  const onReelEnd = (event) => {
+    if (!reelGrab || event.pointerId !== reelGrab.pointerId) return;
+    const { grip, claimed } = reelGrab;
+    reelGrab = null;
+    if (!claimed) return;
+    transport.release(event.timeStamp / 1000);
+    if (grip.hasPointerCapture(event.pointerId)) grip.releasePointerCapture(event.pointerId);
+    strip.removeAttribute("data-held");
+    machine.removeAttribute("data-held");
+    wake();
+  };
+
+  const onReelTouchMove = (event) => {
+    if (reelGrab?.claimed && event.cancelable) event.preventDefault();
   };
 
   const onUp = (event) => {
@@ -569,7 +580,7 @@ export function mountTape(parts, onChange) {
     const raw = horizontal ? event.deltaX : event.shiftKey ? event.deltaY : 0;
     if (!raw) return;
     event.preventDefault();
-    if (pointerId !== null) return;
+    if (pointerId !== null || reelGrab) return;
     const unit = event.deltaMode === 1 ? LINE_PX : event.deltaMode === 2 ? width : 1;
     const distance = raw * unit;
     const notched = event.deltaMode !== 0 || (Number.isInteger(raw) && Math.abs(raw) >= 50);
@@ -636,7 +647,7 @@ export function mountTape(parts, onChange) {
     onscreen = entries[entries.length - 1].isIntersecting;
     applyPresence();
   });
-  intersection.observe(strip);
+  intersection.observe(deck);
   const resize = new ResizeObserver(measure);
   resize.observe(strip);
   strip.addEventListener("pointerdown", onDown);
@@ -646,30 +657,17 @@ export function mountTape(parts, onChange) {
   strip.addEventListener("pointerleave", onLeave);
   strip.addEventListener("lostpointercapture", onCancel);
   strip.addEventListener("wheel", onWheel, { passive: false });
+  for (const grip of grips) {
+    grip.addEventListener("pointerdown", onReelDown);
+    grip.addEventListener("pointermove", onReelMove);
+    grip.addEventListener("pointerup", onReelEnd);
+    grip.addEventListener("pointercancel", onReelEnd);
+    grip.addEventListener("lostpointercapture", onReelEnd);
+    grip.addEventListener("touchmove", onReelTouchMove, { passive: false });
+  }
   window.addEventListener("keydown", onKey);
   document.addEventListener("visibilitychange", applyPresence);
   motionQuery.addEventListener("change", onMotion);
-  document.fonts?.ready.then(() => {
-    if (destroyed) return;
-    layoutLanes();
-    for (const item of words) item.x = NaN;
-    wake();
-  });
-
-  const stageWords = () => {
-    placeWords(shownT, shownWarp);
-    const reach = Math.max(headX, width - headX, 1);
-    for (const item of words) {
-      if (!item.shown) {
-        item.el.setAttribute("data-quiet", "");
-        continue;
-      }
-      item.el.removeAttribute("data-quiet");
-      const offset = Math.abs(item.x + item.width / 2 - headX);
-      const delay = Math.round(WORD_DELAY_MIN + WORD_DELAY_SPREAD * Math.min(1, offset / reach));
-      item.el.style.setProperty("--tape-delay", `${delay}ms`);
-    }
-  };
 
   const loader = loadTape();
   loader.promise
@@ -683,7 +681,6 @@ export function mountTape(parts, onChange) {
       audioStatus = "ready";
       emit({ audio: "ready", offset: result.offset });
       measure();
-      stageWords();
       beginReveal();
     })
     .catch(() => {
@@ -705,24 +702,10 @@ export function mountTape(parts, onChange) {
       emit({ worn: on });
       wake();
     },
-    refreshWords(laneOpen) {
-      lyricLane = laneOpen;
-      for (const item of words) item.el.removeAttribute("data-on");
-      words = Array.from(wordsLayer.querySelectorAll("[data-word]"), (el) => ({
-        el,
-        start: Number(el.dataset.start),
-        end: Number(el.dataset.end),
-        singers: el.dataset.singers || "john",
-        width: 0,
-        shown: true,
-        x: NaN,
-        stretch: NaN,
-      }));
-      activeIndex = -1;
-      activeOn = false;
+    setWords(list) {
+      words = list.map((word) => ({ start: word.start, singers: word.singers || "john" }));
       singersKey = "";
-      measure();
-      stageWords();
+      wake();
     },
     destroy() {
       destroyed = true;
@@ -738,6 +721,14 @@ export function mountTape(parts, onChange) {
       strip.removeEventListener("pointerleave", onLeave);
       strip.removeEventListener("lostpointercapture", onCancel);
       strip.removeEventListener("wheel", onWheel);
+      for (const grip of grips) {
+        grip.removeEventListener("pointerdown", onReelDown);
+        grip.removeEventListener("pointermove", onReelMove);
+        grip.removeEventListener("pointerup", onReelEnd);
+        grip.removeEventListener("pointercancel", onReelEnd);
+        grip.removeEventListener("lostpointercapture", onReelEnd);
+        grip.removeEventListener("touchmove", onReelTouchMove);
+      }
       window.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", applyPresence);
       motionQuery.removeEventListener("change", onMotion);

@@ -1,0 +1,110 @@
+.taffy {
+  position: relative;
+  height: 100cqh;
+  overflow: hidden;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.taffy-stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: default;
+}
+
+.taffy[data-embedded] .taffy-stage {
+  touch-action: pan-y;
+}
+
+.taffy-stage[data-hover="glyph"] {
+  cursor: grab;
+}
+
+.taffy-stage[data-hover="bond"] {
+  cursor: pointer;
+}
+
+.taffy-stage[data-grabbing] {
+  cursor: grabbing;
+}
+
+.taffy-stage__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.taffy[data-ready] .taffy-stage__canvas {
+  opacity: 1;
+  visibility: visible;
+  animation: taffy-reveal 300ms var(--ease-entrance) backwards;
+}
+
+.taffy-stage__letters,
+.taffy-stage__grips {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.taffy-stage__letter {
+  position: absolute;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  pointer-events: none;
+  outline: none;
+}
+
+.taffy-stage__grip {
+  position: absolute;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.taffy__fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  padding-inline: 16px;
+  font-size: min(14cqw, 30cqh);
+  font-weight: var(--font-weight-semibold);
+  line-height: normal;
+  letter-spacing: calc(0.516px - 0.043em);
+  text-align: center;
+  text-wrap: balance;
+  animation: taffy-reveal 300ms var(--ease-entrance) backwards;
+}
+
+@keyframes taffy-reveal {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .taffy[data-ready] .taffy-stage__canvas,
+  .taffy__fallback {
+    animation-duration: 150ms;
+    animation-timing-function: linear;
+  }
+}

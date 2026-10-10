@@ -1,0 +1,174 @@
+.ol-root {
+  height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 88px 16px 32px;
+  background: var(--color-surface);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.ol-title {
+  width: min(100%, 440px);
+  margin: 0;
+  padding-inline: 4px;
+  text-wrap: balance;
+  animation: ol-rise 640ms var(--ease-entrance) both;
+}
+
+.ol-stage {
+  position: relative;
+  width: min(100%, 440px);
+  overflow: hidden;
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 0 0 1px var(--color-line-subtle),
+    0 1px 2px color-mix(in oklab, var(--color-ink) 4%, transparent),
+    0 12px 32px -12px color-mix(in oklab, var(--color-ink) 10%, transparent);
+  animation: ol-rise 640ms var(--ease-entrance) 60ms both;
+}
+
+.ol-screen {
+  padding: 24px 20px 20px;
+}
+
+.ol-screen__title {
+  height: 28px;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  overflow: clip;
+  text-wrap: balance;
+}
+
+.ol-root[data-embedded] {
+  position: absolute;
+  inset: 0;
+  height: auto;
+  padding: 16px;
+  overflow: hidden;
+}
+
+.ol-root[data-embedded] .ol-stage {
+  animation: none;
+}
+
+.ol-bar {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  height: 76px;
+  padding-inline: 8px;
+  box-shadow: inset 0 1px 0 var(--color-line-subtle);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ol-bar[data-dragging] {
+  cursor: grabbing;
+}
+
+.ol-tab {
+  position: relative;
+  height: 76px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  outline: none;
+}
+
+.ol-tab:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.ol-tab__icon {
+  position: absolute;
+  top: 12px;
+  left: 50%;
+  margin-left: -12px;
+  overflow: visible;
+  fill: none;
+  stroke: var(--color-ink-tertiary);
+  stroke-width: 1.5px;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.ol-tab[data-active] .ol-tab__icon {
+  stroke: var(--ol-thread, var(--color-ink));
+  stroke-width: 2px;
+}
+
+.ol-bar[data-threaded] .ol-tab__icon {
+  visibility: hidden;
+}
+
+.ol-tab__label {
+  position: absolute;
+  top: 48px;
+  left: 0;
+  right: 0;
+  height: 16px;
+  text-align: center;
+  white-space: nowrap;
+  color: color-mix(in oklab, var(--color-ink) calc(var(--ol-cov, 0) * 100%), var(--color-ink-secondary));
+  font-weight: var(--font-weight-body-sm);
+  transition: transform 120ms var(--ease-hover);
+}
+
+.ol-tab[data-active] .ol-tab__label {
+  --ol-cov: 1;
+  font-weight: var(--font-weight-strong);
+}
+
+.ol-tab:active .ol-tab__label {
+  transform: scale(0.96);
+}
+
+.ol-bar[data-dragging] .ol-tab:active .ol-tab__label {
+  transform: none;
+}
+
+.ol-bar__ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+@keyframes ol-rise {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: translate3d(0, 12px, 0) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ol-title,
+  .ol-stage {
+    animation: none;
+  }
+
+  .ol-tab__label {
+    transition: none;
+  }
+}

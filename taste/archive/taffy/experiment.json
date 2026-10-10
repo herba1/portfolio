@@ -1,0 +1,41 @@
+{
+  "title": "Taffy",
+  "description": "A giant song title in ink that pulls like sugar. Drag any letter out of the word and it drags against your hand while its strands neck to a hair, then lurches toward your finger as each one snaps, pop, pop, and settles home with one small overshoot. Carry a letter over another and a thin bridge of ink starts to merge the two under your finger; let go and they stay joined at rest by a sagging, necked bridge that breaks if you pull hard or tap it. Tap the paper and any bonds pop before the title melts into the next one from your recently played.",
+  "tags": [
+    "Type",
+    "Physics",
+    "WebGL"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One finished mechanic: letters stretch out of a word on sagging, volume-conserving ink strands that neck before they snap, settle home without wobbling, and can be bonded to each other so the strands stay at rest.",
+  "source": {
+    "kind": "brief",
+    "lens": "kinetic-type"
+  },
+  "generation": null,
+  "building": false,
+  "iteration": 3,
+  "iteratedAt": "2026-10-09T19:35:18.703Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-10-09T14:27:30.412Z",
+      "summary": "Retuned every spring by damping ratio instead of raw damping: letters return home at about 0.8 (Taffy 0.80, Mozzarella 0.76, Rubber 0.84) with one small overshoot and no repeat wobble; the panel slider is now Damping ratio 0.60 to 1.00\nCalmed the secondary jiggle: the strand sag, snapped-half tips and elbows, and the post-snap lurch all run at a 0.75 to 0.8 damping ratio, so the snap whip and shudder land once instead of ringing\nNew bonds: drop a held letter onto another letter, or keep holding the thread a snapped letter leaves on your finger and release it on another letter, and the two stay joined at rest by a stretched ink bridge that sags, necks in the middle and fillets into both letters\nBonds behave like the pull strands: pulling either bonded letter hard stretches, necks and snaps the bridge with the usual pop and recoil, the partner leans in while you pull, and a bonded letter cannot slip free until the bridge breaks\nTap a bond to cut it (it thins under the pointer as a hint); thread released over paper recoils into its letter with a bead; target letters lift while you aim; up to four bonds, and the oldest pops when you add a fifth\nKeyboard: arrow a letter onto another and press Enter to bond, Escape lets go without bonding, Delete or Backspace breaks the bonds on the focused letter\nFixed a mouse release that could leave a second quickly grabbed letter stuck in the hand; raised the strand segment budget from 14 to 16\nA full snap ends in a clean break again: the letter slips free and flies home, and a thread only follows your finger when it is already reaching for another letter (or later moves onto one)\nTapping a bond now cuts it even between neighbours: the bridge is hit-tested before the letters unless you press on real ink, the pointer and thinning hint appear over it, and dragging from that spot still pulls the letter\nLive preview bridge: while a held letter is over a target, a half-thickness sagging ink bridge fillets into both letters and grows into the real bond on release; target lift raised to 3% of cap height\nNo preview or bond toward a letter that is already bonded to the one you hold\nBonds pop with the usual snap and retract before the title melts instead of vanishing on the first frame\nResting bridges draw first so a busy multi-touch frame can no longer drop them"
+    },
+    {
+      "iteration": 2,
+      "at": "2026-10-09T17:15:07.865Z",
+      "summary": "Strands keep a consistent width through sudden moves: a fast pull used to let the strand bend point slide past its own ends, folding the curve into a hook the shader drew with a pinched, half-missing middle that refilled once you stopped; the bend now stays between the ends, so no more thin-then-thick pumping (also fixes bridges between stacked lines that sat hooked under heavy sag)\nThickness is one smooth curve of stretch from the moment you grab: strands grip in at full width over 60ms on press instead of starting as a hairline and inflating over the first few pixels of pull, then only ever thin as they stretch; the volume knee is softened so there is no kink\nStrands thin instantly as they stretch but can only thicken gradually, so pointer jitter, the neighbour lean and the post-snap lurch can never pump the width frame to frame\nStrand roots stay embedded while a letter squashes and stretches with speed, so the join no longer necks during a fast move and fattens again as the letter relaxes\nLetting go: released strands never fatten as they retract; they keep their width and thin smoothly to nothing as the letter flies home, and a press and release without pulling fades out over the retract time\nSnapped halves start at exactly the width that was on screen, and resting bonds settle to an exact rest pose so they stay pixel-identical frame to frame"
+    },
+    {
+      "iteration": 3,
+      "at": "2026-10-09T19:35:18.703Z",
+      "summary": "Hover threads ease in instead of popping: the join that fillets a thread into its letters used to appear at full strength on the first frame, so over half the thread showed at once; the thread, its joins and its width now grow from nothing over 220ms with an ease-out\nHover threads ease out instead of vanishing: moving off a letter used to cut its threads in a single frame; they now recede over 240ms with an ease-in-out, and changing your mind mid-way picks up from wherever they are with no restart\nMoving from letter to letter cross-fades the threads gap by gap: the thread both letters share stays put while the far ones fade in and out, instead of the whole hint jumping to the new letter\nPressing a hovered letter grows its strands out of the hover threads at exactly their width and join strength, then grips to full width over the same 60ms; a touch press with no hover grows them from nothing instead of starting at a fixed 15% with a full-strength join\nLetting go: strands recede with an ease-in-out and their joins fade with them, so the last frame no longer drops a web of ink between the letters; if you are still hovering, the hover threads grow back underneath instead of popping in once the strands finish\nGrabbing a letter again while its strands are still retracting carries their width into the new grip instead of deleting them and restarting thin, and snapped halves from the last pull finish retracting instead of disappearing\nBond previews ease in and out over 220 to 240ms with their joins; aiming at a different letter fades the old preview out while the new one grows instead of cutting it, and releasing hands the preview exact width and joins to the new bond instead of restarting at 20%\nThe bond hover thinning eases in and out on the same curves\nCutting a bond no longer fattens its middle on the snap frame: the snapped halves start at the bond visible necked width\nThe thread that follows your finger after a snap grows in over 220ms, its join into the target letter fades with the pull instead of switching on at halfway, losing or changing target slides the tip back instead of jumping it to your finger, and dropping it on paper keeps its neck and bead as it recoils\nSnapped halves and recoiling threads fade their joins over the second half of the retract, so the last frame no longer pops a small bump off the letter\nThe intro grips its strands in over 60ms before the pull starts instead of drawing them at full width on the first frame"
+    }
+  ]
+}

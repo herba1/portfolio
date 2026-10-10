@@ -4,7 +4,10 @@ import { createPluckBank, warpDegree, weftDegree } from "./loomAudio";
 import { LOOM_FRAGMENT, LOOM_VERTEX } from "./loomShader";
 
 const MAX_THREADS = 128;
-const STATE_ROWS = 6;
+const STATE_ROWS = 11;
+const WEAVE_ROW = 4;
+const WEFT_WINDOW_ROW = 5;
+const WARP_WINDOW_ROW = 8;
 const STEP_SECONDS = 1 / 480;
 const MAX_FRAME_SECONDS = 1 / 30;
 const MAX_SUBSTEPS = 16;
@@ -15,7 +18,7 @@ const STAGE_RATIO = 1.16;
 const AXIS_LOCK_PX = 8;
 const RELEASE_WINDOW_MS = 90;
 const RELEASE_STALE_MS = 70;
-const MAX_RELEASE_SPEED = 8;
+const MAX_RELEASE_SPEED = 14;
 const TAP_IMPULSE = 2.4;
 const KEY_PULL = 4.2;
 const IMPULSE_SPREAD = 2.2;
@@ -38,12 +41,33 @@ const HOVER_RATE = 10;
 const HOVER_REACH_CELLS = 3;
 const SETTLE_SPEED = 1e-3;
 const SETTLE_OFFSET = 5e-4;
-const INTRO_STAGGER_MS = 9;
 const INTRO_HOLD_MS = 420;
-const INTRO_AMPLITUDE = 0.15;
+const INTRO_LAPS = 2;
+const INTRO_PULL_MS = 1700;
+const HOME_SPEED = 0.6;
+const TRANSIT_DONE_OFFSET = 1e-3;
+const TRANSIT_DONE_SPEED = 0.02;
+const FLOW_SPEED = 3;
+const DRAG_TICK = 0.25;
+const FLOW_PLUCK_GAP_MS = 38;
+const LANDING_PLUCK_GAP_MS = 90;
+const DRIVE_FROM = 0.18;
+const DRIVE_GAIN = 10;
+const DRIVE_MAX = 4;
+const DRIVE_EASE = 0.1;
+const COAST_FROM = 1;
+const COAST_MAX = 8;
+const COAST_SPREAD = 0.3;
+const GLIDE_CATCH = 1.5;
+const GLIDE_DAMPING = 0.6;
+const GLIDE_REACH = 0.5;
+const GATHER_DRIFT = 0.15;
+const KEY_DRIVE_SPEED = 2.6;
+const KEY_DRIVE_RAMP_MS = 320;
 const COVER_SPREAD_MS = 640;
-const WARP_POP_DELAY_MS = 280;
 const WARP_POP_SPREAD_MS = 420;
+const WARP_RELEASE_DELAY_MS = 170;
+const WARP_RELEASE_SPREAD_MS = 380;
 const THREADS_REBUILD_GAP_MS = 700;
 const COVER_SIZE = 512;
 const SUPERSAMPLE_BELOW_PX = 9;
@@ -56,6 +80,19 @@ const NEIGHBOUR_WAIT_MS = 600;
 const REEL_REACH = 2;
 const SLIP_FLOOR = 0.004;
 const RESTORE_WAIT_MS = 2500;
+const IDLE_RETURN_MS = 3000;
+const IDLE_POLL_MS = 250;
+const CALM_MS = 400;
+const INTRO_REST_MS = 1800;
+const REVEAL_REST_MS = 1400;
+const SWISH_REST_MS = 2400;
+const SWISH_ROW_MS = 1150;
+const SWISH_SPREAD_MS = 680;
+const SWISH_FRONT_POWER = 1.6;
+const SWISH_ORIGINS = [0.5, 0.24, 0.76, 0.5, 0.38, 0.62];
+const SWISH_COLUMN_SPREAD_MS = 360;
+const GATHER_NEAR = 0.25;
+const VISIBLE_MARGIN_CELLS = 2.5;
 
 export const LOST_CONTEXT = "lost-context";
 
@@ -77,7 +114,20 @@ function createChain() {
     swell: new Float32Array(MAX_THREADS).fill(1),
     popStart: new Float64Array(MAX_THREADS).fill(-Infinity),
     thick: new Float32Array(MAX_THREADS).fill(1),
-    reel: new Float32Array(MAX_THREADS),
+    lo: new Float32Array(MAX_THREADS),
+    hi: new Float32Array(MAX_THREADS),
+    shift: new Float32Array(MAX_THREADS),
+    steerDelay: new Float32Array(MAX_THREADS),
+    anchor: new Int32Array(MAX_THREADS),
+    lastDir: new Int8Array(MAX_THREADS),
+    homing: true,
+    locked: false,
+    open: false,
+    glide: false,
+    glideLap: 0,
+    glidePull: 1,
+    steer: false,
+    steerStart: 0,
   };
 }
 
@@ -90,8 +140,69 @@ function resetChain(chain) {
   chain.armed.fill(0);
   chain.swung.fill(0);
   chain.peak.fill(0);
-  chain.reel.fill(0);
+  chain.lo.fill(0);
+  chain.hi.fill(0);
+  chain.shift.fill(0);
+  chain.anchor.fill(0);
+  chain.lastDir.fill(0);
+  chain.homing = true;
+  chain.locked = false;
+  chain.open = false;
+  chain.glide = false;
+  chain.steer = false;
   chain.popStart.fill(-Infinity);
+}
+
+function closeWindow(chain) {
+  chain.lo.fill(0);
+  chain.hi.fill(0);
+  chain.shift.fill(0);
+  chain.open = false;
+}
+
+function reelOnLap(chain, lap) {
+  return Math.min(chain.hi[0], Math.max(chain.lo[0], lap - chain.shift[0]));
+}
+
+function lapShowing(chain, reel, near) {
+  const lo = chain.lo[0];
+  const hi = chain.hi[0];
+  const shift = chain.shift[0];
+  const nearest = Math.round(near);
+  if (lo === hi) return nearest;
+  if (reel <= lo) return Math.max(nearest, -lo - shift);
+  if (reel >= hi) return Math.min(nearest, -hi - shift);
+  return -reel - shift;
+}
+
+function frontReach(u) {
+  return Math.acos(Math.min(1, Math.max(-1, 2 * u - 1))) / Math.PI;
+}
+
+function smoothstep(t) {
+  const clamped = Math.min(1, Math.max(0, t));
+  return clamped * clamped * (3 - 2 * clamped);
+}
+
+function glidePullAt(speed) {
+  const ratio = speed / GLIDE_CATCH;
+  return 1 / (1 + ratio * ratio);
+}
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - (-2 * t + 2) ** 3 / 2;
+}
+
+function easeInOutSine(t) {
+  return (1 - Math.cos(Math.PI * t)) / 2;
+}
+
+function easeInOutSineSlope(t) {
+  return (Math.PI / 2) * Math.sin(Math.PI * t);
+}
+
+function crossedDetent(before, after) {
+  return Math.floor(before) !== Math.floor(after);
 }
 
 function popCurve(t) {
@@ -160,7 +271,7 @@ function loadImage(src) {
   });
 }
 
-export function createLoom({ canvas, covers, index, params, reducedMotion, onPainted, onError }) {
+export function createLoom({ canvas, covers, index, params, reducedMotion, onPainted, onError, onCover }) {
   const gl = canvas.getContext("webgl2", {
     alpha: true,
     premultipliedAlpha: true,
@@ -287,6 +398,16 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   let overrideSide = 0;
   let overrideCover = 0;
   let overrideReach = 1;
+  let introDrive = null;
+  let lastGatedPluck = -Infinity;
+  let keyDrive = null;
+  let swish = null;
+  let swishCount = 0;
+  let aim = 0;
+  let lastInputAt = performance.now();
+  let calmSince = 0;
+  let restUntil = 0;
+  let idleTimer = 0;
 
   const wrapIndex = (value) => ((value % count) + count) % count;
   const clampIndex = (value) => Math.min(threads - 1, Math.max(0, Math.floor(value)));
@@ -368,28 +489,46 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       canvas.height = height;
     }
     clothPx = Math.min(width, height) / STAGE_RATIO;
-    originX = (width - clothPx) / 2;
-    originY = (height - clothPx) / 2;
+    originX = Math.round((width - clothPx) / 2);
+    originY = Math.round((height - clothPx) / 2);
   };
 
-  const pluckFrom = (isWarp, row, strength) => {
+  const pluckFrom = (isWarp, row, strength, at, gapMs) => {
     if (!audio || !soundOn) return;
+    if (gapMs) {
+      if (at - lastGatedPluck < gapMs) return;
+      lastGatedPluck = at;
+    }
     const degree = isWarp ? warpDegree(row, threads) : weftDegree(row, threads);
     const pan = isWarp ? ((row + 0.5) / threads) * 1.4 - 0.7 : 0;
     audio.pluck(degree, isWarp, strength, pan);
   };
 
   const stepChain = (chain, isWarp, now, frameSeconds) => {
-    const { x, v, acc, pinned, heldUntil, rest, landUntil, armed, swung, armAt, peak, quietUntil, target } = chain;
+    const { x, v, acc, pinned, heldUntil, rest, landUntil, armed, swung, armAt, peak, quietUntil, target, anchor, lastDir } =
+      chain;
     const n = threads;
+    const homing = chain.homing;
     for (let i = 0; i < n; i += 1) {
       if (!pinned[i]) continue;
-      v[i] = (target[i] - x[i]) / Math.max(frameSeconds, STEP_SECONDS);
-      x[i] += v[i] * STEP_SECONDS;
+      const before = x[i];
+      v[i] = (target[i] - before) / Math.max(frameSeconds, STEP_SECONDS);
+      x[i] = before + v[i] * STEP_SECONDS;
+      if (crossedDetent(before, x[i]) && now >= quietUntil[i]) {
+        quietUntil[i] = now + 120;
+        pluckFrom(isWarp, i, DRAG_TICK, now, FLOW_PLUCK_GAP_MS);
+      }
     }
     const criticalDamping = 2 * Math.sqrt(tension);
     const baseDamping = reducedMotion ? Math.max(damping, criticalDamping) : damping;
     const landingDamping = Math.max(baseDamping, criticalDamping * LANDING_ZETA);
+    const gliding = !homing && chain.glide;
+    const glideFloor = baseDamping * GLIDE_DAMPING;
+    const glideDamping = glideFloor + (landingDamping - glideFloor) * chain.glidePull;
+    const glideTension = tension * chain.glidePull;
+    const glideLap = chain.glideLap;
+    const steering = chain.steer;
+    const steerSeconds = SWISH_ROW_MS / 1000;
     for (let i = 0; i < n; i += 1) {
       if (pinned[i] || heldUntil[i] > now) {
         acc[i] = 0;
@@ -397,10 +536,32 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       }
       const left = i > 0 ? i - 1 : i;
       const right = i < n - 1 ? i + 1 : i;
-      const nearHome = swung[i] && Math.abs(x[i]) < LAND_NEAR && Math.abs(v[i]) < LAND_SPEED;
+      if (steering) {
+        const progress = (now - chain.steerStart - chain.steerDelay[i]) / SWISH_ROW_MS;
+        const moving = progress > 0 && progress < 1;
+        const goal = progress <= 0 ? 1 : progress >= 1 ? 0 : 1 - easeInOutSine(progress);
+        const goalSpeed = moving ? -easeInOutSineSlope(progress) / steerSeconds : 0;
+        acc[i] =
+          -tension * (x[i] - goal) -
+          landingDamping * (v[i] - goalSpeed) +
+          coupling * (x[left] + x[right] - 2 * x[i]) +
+          RELATIVE_DAMPING * (v[left] + v[right] - 2 * v[i]);
+        continue;
+      }
+      if (gliding) {
+        const drift = Math.max(-GLIDE_REACH, Math.min(GLIDE_REACH, x[i] - glideLap));
+        acc[i] =
+          -glideTension * drift -
+          glideDamping * v[i] +
+          coupling * (x[left] + x[right] - 2 * x[i]) +
+          RELATIVE_DAMPING * (v[left] + v[right] - 2 * v[i]);
+        continue;
+      }
+      const drift = homing ? x[i] : x[i] - Math.round(x[i]);
+      const nearHome = swung[i] && Math.abs(drift) < LAND_NEAR && Math.abs(v[i]) < LAND_SPEED;
       const landing = nearHome || landUntil[i] > now;
       acc[i] =
-        -tension * x[i] -
+        -tension * drift -
         (landing ? landingDamping : baseDamping) * v[i] +
         coupling * (x[left] + x[right] - 2 * x[i]) +
         RELATIVE_DAMPING * (v[left] + v[right] - 2 * v[i]);
@@ -415,18 +576,36 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       v[i] += acc[i] * STEP_SECONDS;
       const before = x[i];
       x[i] = before + v[i] * STEP_SECONDS;
-      const magnitude = Math.abs(x[i]);
+      if (steering) continue;
+      const magnitude = Math.abs(homing ? x[i] : x[i] - Math.round(x[i]));
       if (magnitude > LAND_NEAR) swung[i] = 1;
-      else if (swung[i] && magnitude < LANDED_OFFSET && Math.abs(v[i]) < LANDED_SPEED) swung[i] = 0;
+      else if (swung[i] && magnitude < LANDED_OFFSET && Math.abs(v[i]) < LANDED_SPEED) {
+        swung[i] = 0;
+        lastDir[i] = 0;
+      }
       if (magnitude > armAt[i]) {
         armed[i] = 1;
         if (magnitude > peak[i]) peak[i] = magnitude;
       }
-      if (armed[i] && before * x[i] <= 0 && before !== 0) {
+      if (!crossedDetent(before, x[i])) continue;
+      const direction = x[i] > before ? 1 : -1;
+      const lap = direction > 0 ? Math.floor(x[i]) : Math.floor(before);
+      const reversal = lastDir[i] !== 0 && lastDir[i] !== direction;
+      const freshLap = !homing && lap !== anchor[i];
+      lastDir[i] = direction;
+      if (freshLap && !reversal) {
+        armed[i] = 0;
+        peak[i] = 0;
+        continue;
+      }
+      anchor[i] = lap;
+      if (armed[i]) {
         armed[i] = 0;
         if (now >= quietUntil[i]) {
           quietUntil[i] = now + 120;
-          pluckFrom(isWarp, i, Math.min(1, peak[i] / STRENGTH_WIDTHS));
+          const flow = Math.min(1, FLOW_SPEED / Math.max(Math.abs(v[i]), FLOW_SPEED));
+          const strength = Math.min(1, peak[i] / STRENGTH_WIDTHS) * flow;
+          pluckFrom(isWarp, i, strength, now, freshLap ? LANDING_PLUCK_GAP_MS : 0);
         }
         armAt[i] = Math.max(ARM_WIDTHS, peak[i] * REARM_RATIO);
         peak[i] = 0;
@@ -434,13 +613,159 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     }
     for (let i = 0; i < n; i += 1) {
       if (!pinned[i]) continue;
-      const magnitude = Math.abs(x[i]);
+      const magnitude = Math.abs(homing ? x[i] : x[i] - Math.round(x[i]));
       if (magnitude > LAND_NEAR) swung[i] = 1;
       if (magnitude > ARM_WIDTHS) {
         armed[i] = 1;
         if (magnitude > peak[i]) peak[i] = magnitude;
       }
     }
+  };
+
+  const loosen = (chain) => {
+    if (chain.locked || !chain.homing) return;
+    for (let i = 0; i < threads; i += 1) chain.anchor[i] = Math.round(chain.x[i]);
+    chain.lastDir.fill(0);
+    chain.homing = false;
+  };
+
+  const effectiveDamping = () => {
+    const criticalDamping = 2 * Math.sqrt(tension);
+    return reducedMotion ? Math.max(damping, criticalDamping) : damping;
+  };
+
+  const startGlide = (chain, row, speed) => {
+    if (chain.locked || chain.homing) return;
+    const n = threads;
+    for (let j = 0; j < n; j += 1) if (chain.pinned[j]) return;
+    const magnitude = Math.abs(speed);
+    const share = magnitude > COAST_FROM ? Math.sign(speed) * Math.min(COAST_MAX, magnitude) : 0;
+    const reach = n * COAST_SPREAD;
+    let sum = 0;
+    let sumV = 0;
+    for (let j = 0; j < n; j += 1) {
+      if (share && j !== row && !chain.pinned[j]) {
+        const falloff = (j - row) / reach;
+        chain.v[j] += (share - chain.v[j]) * Math.exp(-falloff * falloff);
+      }
+      sum += chain.x[j];
+      sumV += chain.v[j];
+    }
+    const mean = sum / n;
+    const meanV = sumV / n;
+    const coastLap = Math.round(mean + meanV / (effectiveDamping() * GLIDE_DAMPING));
+    const rowLap = Math.round(chain.x[row]);
+    glideTo(chain, chain.x[row] > mean ? Math.max(coastLap, rowLap) : Math.min(coastLap, rowLap), meanV);
+  };
+
+  const moveCurrent = (delta) => {
+    current = wrapIndex(current + delta);
+    aim -= delta;
+    for (let c = 0; c < 2; c += 1) {
+      const chain = chains[c];
+      for (let i = 0; i < threads; i += 1) {
+        chain.shift[i] += delta;
+        chain.lo[i] -= delta;
+        chain.hi[i] -= delta;
+      }
+    }
+    keepNeighbours();
+    if (!pending) onCover?.(current, Math.sign(delta));
+  };
+
+  const landWindow = (chain) => {
+    const landed = reelOnLap(chain, 0);
+    if (landed) moveCurrent(landed);
+  };
+
+  const meanOf = (chain) => {
+    const n = threads;
+    let sum = 0;
+    let sumV = 0;
+    for (let i = 0; i < n; i += 1) {
+      sum += chain.x[i];
+      sumV += chain.v[i];
+    }
+    return [sum / n, sumV / n];
+  };
+
+  const glideTo = (chain, lap, meanV) => {
+    chain.glideLap = lap;
+    chain.glidePull = glidePullAt(meanV);
+    chain.glide = true;
+  };
+
+  const glideOn = (chain) => {
+    const [mean, meanV] = meanOf(chain);
+    glideTo(chain, Math.round(mean + meanV / (effectiveDamping() * GLIDE_DAMPING)), meanV);
+  };
+
+  const follow = (chain) => {
+    if (!chain.open || chain.locked || chain.steer) return;
+    for (let i = 0; i < threads; i += 1) if (chain.pinned[i]) return;
+    const [mean, meanV] = meanOf(chain);
+    const lap = lapShowing(chain, aim, mean + meanV / (effectiveDamping() * GLIDE_DAMPING));
+    if (chain.homing) {
+      if (lap === 0) return;
+      loosen(chain);
+    }
+    glideTo(chain, lap, meanV);
+  };
+
+  const decide = (chain) => {
+    if (!chain.open || chain.locked || chain.homing) return;
+    let lap = chain.glideLap;
+    if (!chain.glide) {
+      const [mean, meanV] = meanOf(chain);
+      lap = Math.round(mean + meanV / effectiveDamping());
+    }
+    aim = reelOnLap(chain, -lap);
+    follow(chain === weft ? warp : weft);
+  };
+
+  const gatherHome = (chain, now) => {
+    if (chain.homing || chain.steer) return;
+    const n = threads;
+    let fastest = 0;
+    let sum = 0;
+    let sumV = 0;
+    for (let i = 0; i < n; i += 1) {
+      if (chain.pinned[i] || chain.heldUntil[i] > now) return;
+      fastest = Math.max(fastest, Math.abs(chain.v[i]));
+      sum += chain.x[i];
+      sumV += chain.v[i];
+    }
+    const mean = sum / n;
+    const meanV = sumV / n;
+    if (chain.glide) chain.glidePull = glidePullAt(meanV);
+    if (fastest > HOME_SPEED || Math.abs(meanV) > GATHER_DRIFT) return;
+    let home = chain.glide ? chain.glideLap : Math.round(mean + meanV / effectiveDamping());
+    if (chain.open) home = lapShowing(chain, aim, home);
+    if (Math.abs(mean - home) > GATHER_NEAR) {
+      glideTo(chain, home, meanV);
+      return;
+    }
+    if (home) {
+      for (let i = 0; i < n; i += 1) {
+        chain.x[i] -= home;
+        chain.rest[i] -= home;
+        if (chain.open) chain.shift[i] += home;
+      }
+    }
+    chain.glide = false;
+    chain.homing = true;
+    if (chain.open) landWindow(chain);
+  };
+
+  const finishTransit = (chain, now) => {
+    if (!chain.locked) return;
+    const n = threads;
+    for (let i = 0; i < n; i += 1) {
+      if (chain.pinned[i] || chain.heldUntil[i] > now) return;
+      if (Math.abs(chain.x[i]) > TRANSIT_DONE_OFFSET || Math.abs(chain.v[i]) > TRANSIT_DONE_SPEED) return;
+    }
+    closeWindow(chain);
+    chain.locked = false;
   };
 
   const pushSwell = (axis, at, lift, locked) => {
@@ -493,10 +818,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         let presence = 1;
         if (start > -Infinity) {
           const t = (now - start) / POP_MS;
-          if (t >= 0) {
-            chain.reel[i] = 0;
-            presence = POP_FROM + (1 - POP_FROM) * popCurve(t);
-          }
+          if (t >= 0) presence = POP_FROM + (1 - POP_FROM) * popCurve(t);
           if (t >= 1) chain.popStart[i] = -Infinity;
           else busy = true;
         }
@@ -516,14 +838,19 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     let slip = 0;
     for (let i = 0; i < n; i += 1) {
       if (!(warp.popStart[i] > now)) columnWeave[i] = weave;
-      stateData[MAX_THREADS * 5 + i] = columnWeave[i];
+      stateData[MAX_THREADS * WEAVE_ROW + i] = columnWeave[i];
       const weftX = weft.x[i];
       const warpX = warp.x[i];
       stateData[i] = weftX;
       stateData[MAX_THREADS + i] = warpX;
       stateData[MAX_THREADS * 2 + i] = weft.thick[i];
       stateData[MAX_THREADS * 3 + i] = warp.thick[i];
-      stateData[MAX_THREADS * 4 + i] = warp.reel[i];
+      stateData[MAX_THREADS * WEFT_WINDOW_ROW + i] = weft.lo[i];
+      stateData[MAX_THREADS * (WEFT_WINDOW_ROW + 1) + i] = weft.hi[i];
+      stateData[MAX_THREADS * (WEFT_WINDOW_ROW + 2) + i] = weft.shift[i];
+      stateData[MAX_THREADS * WARP_WINDOW_ROW + i] = warp.lo[i];
+      stateData[MAX_THREADS * (WARP_WINDOW_ROW + 1) + i] = warp.hi[i];
+      stateData[MAX_THREADS * (WARP_WINDOW_ROW + 2) + i] = warp.shift[i];
       slip = Math.max(slip, Math.abs(weftX - Math.round(weftX)), Math.abs(warpX - Math.round(warpX)));
     }
     slipping = slip > SLIP_FLOOR;
@@ -582,11 +909,12 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   };
 
   const isSettled = (now) => {
-    if (grabs.size) return false;
+    if (grabs.size || introDrive || keyDrive || swish) return false;
     for (let c = 0; c < 2; c += 1) {
       const chain = chains[c];
+      if (!chain.homing) return false;
       for (let i = 0; i < threads; i += 1) {
-        if (chain.heldUntil[i] > now) return false;
+        if (chain.pinned[i] || chain.heldUntil[i] > now) return false;
         if (Math.abs(chain.v[i]) > SETTLE_SPEED || Math.abs(chain.x[i]) > SETTLE_OFFSET) return false;
       }
     }
@@ -601,31 +929,227 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       chain.armed.fill(0);
       chain.swung.fill(0);
       chain.peak.fill(0);
+      chain.anchor.fill(0);
+      chain.lastDir.fill(0);
+      closeWindow(chain);
+      chain.homing = true;
+      chain.locked = false;
+      chain.glide = false;
+      chain.steer = false;
     }
+    aim = 0;
   };
 
-  const holdCascade = (now, from, to, stagger, offsetFor) => {
-    for (let i = from; i < to; i += 1) {
-      const amount = offsetFor(i);
-      if (amount === null) continue;
-      weft.x[i] = amount;
-      weft.rest[i] = amount;
-      weft.v[i] = 0;
-      weft.heldUntil[i] = now + (i - from) * stagger;
+  const clothResting = (now) => !pending && isSettled(now);
+
+  const idleOn = () => !reducedMotion && count > 1 && active && !destroyed && !contextLost;
+
+  const idleDueAt = () =>
+    calmSince ? Math.max(lastInputAt + IDLE_RETURN_MS, restUntil, calmSince + CALM_MS) : Infinity;
+
+  const canSwish = (time) => {
+    if (!idleOn() || swish || introPending || !coverReady) return false;
+    if (time < idleDueAt() || !clothResting(time)) return false;
+    const entry = textures.get(wrapIndex(current + 1));
+    return Boolean(entry?.ready && entry.texture);
+  };
+
+  const armIdle = () => {
+    clearTimeout(idleTimer);
+    idleTimer = 0;
+    if (!idleOn() || !calmSince) return;
+    const wait = Math.max(IDLE_POLL_MS, idleDueAt() - performance.now());
+    idleTimer = setTimeout(() => {
+      idleTimer = 0;
+      if (canSwish(performance.now())) wake();
+      else armIdle();
+    }, wait);
+  };
+
+  const noteInput = () => {
+    lastInputAt = performance.now();
+  };
+
+  const startSwish = (time) => {
+    settle();
+    if (overrideSide) overrideSide = 0;
+    const n = threads;
+    const origin = SWISH_ORIGINS[swishCount % SWISH_ORIGINS.length] * (n - 1);
+    const reach = Math.max(origin, n - 1 - origin, 1);
+    current = wrapIndex(current + 1);
+    aim = 0;
+    let longest = 0;
+    let rowDelays = 0;
+    for (let i = 0; i < n; i += 1) {
+      weft.steerDelay[i] = SWISH_SPREAD_MS * (Math.abs(i - origin) / reach) ** SWISH_FRONT_POWER;
+      rowDelays += weft.steerDelay[i];
+      longest = Math.max(longest, weft.steerDelay[i]);
     }
+    const columnsFrom = Math.max(0, rowDelays / n - SWISH_COLUMN_SPREAD_MS / 2);
+    for (let j = 0; j < n; j += 1) {
+      warp.steerDelay[j] = columnsFrom + SWISH_COLUMN_SPREAD_MS * frontReach((j + 0.5) / n);
+      longest = Math.max(longest, warp.steerDelay[j]);
+    }
+    for (let c = 0; c < 2; c += 1) {
+      const chain = chains[c];
+      for (let i = 0; i < n; i += 1) {
+        chain.x[i] = 1;
+        chain.target[i] = 1;
+        chain.v[i] = 0;
+        chain.pinned[i] = 0;
+        chain.heldUntil[i] = 0;
+        chain.landUntil[i] = 0;
+        chain.lo[i] = -1;
+        chain.hi[i] = 0;
+        chain.shift[i] = 0;
+        chain.anchor[i] = 1;
+      }
+      chain.open = true;
+      chain.homing = false;
+      chain.locked = false;
+      chain.glide = false;
+      chain.steer = true;
+      chain.steerStart = time;
+    }
+    swish = { start: time, end: time + longest + SWISH_ROW_MS };
+    swishCount += 1;
+    calmSince = 0;
+    keepNeighbours();
+    onCover?.(current, 1);
+  };
+
+  const endSwish = (time) => {
+    swish = null;
+    const n = threads;
+    for (let c = 0; c < 2; c += 1) {
+      const chain = chains[c];
+      for (let i = 0; i < n; i += 1) {
+        chain.target[i] = chain.x[i];
+        chain.landUntil[i] = time + LANDING_MS;
+        chain.quietUntil[i] = time + LANDING_MS;
+        chain.swung[i] = 1;
+      }
+      chain.armed.fill(0);
+      chain.peak.fill(0);
+      chain.anchor.fill(0);
+      chain.lastDir.fill(0);
+      chain.steer = false;
+      chain.homing = true;
+      chain.glide = false;
+    }
+    restUntil = time + SWISH_REST_MS;
+  };
+
+  const driveSwish = (time) => {
+    if (time >= swish.end) endSwish(time);
+  };
+
+  const finishSwishNow = (time) => {
+    swish = null;
+    settle();
+    restUntil = time + SWISH_REST_MS;
+  };
+
+  const stopSwish = () => {
+    if (!swish) return;
+    swish = null;
+    const n = threads;
+    for (let c = 0; c < 2; c += 1) {
+      const chain = chains[c];
+      for (let i = 0; i < n; i += 1) {
+        chain.target[i] = chain.x[i];
+        chain.armed[i] = 0;
+        chain.peak[i] = 0;
+        chain.anchor[i] = Math.round(chain.x[i]);
+        chain.lastDir[i] = 0;
+      }
+      chain.steer = false;
+      chain.homing = false;
+    }
+    glideOn(weft);
+    decide(weft);
+  };
+
+  const interrupt = () => {
+    noteInput();
+    if (swish) stopSwish();
   };
 
   const startIntro = (time) => {
     introPending = false;
     if (reducedMotion) return;
-    const n = threads;
-    const from = Math.round(n * 0.21);
-    const to = Math.round(n * 0.73);
-    const span = to - from;
-    holdCascade(time + INTRO_HOLD_MS, from, to, INTRO_STAGGER_MS * (96 / n), (i) => {
-      const t = (i - from) / span;
-      return INTRO_AMPLITUDE * Math.sin(2 * Math.PI * t) * Math.sin(Math.PI * t) ** 0.35;
-    });
+    const row = Math.floor(threads / 2);
+    if (weft.pinned[row]) return;
+    loosen(weft);
+    weft.glide = false;
+    weft.pinned[row] = 1;
+    weft.target[row] = weft.x[row];
+    introDrive = { row, from: weft.x[row], start: time + INTRO_HOLD_MS };
+  };
+
+  const endIntroDrive = () => {
+    if (!introDrive) return;
+    const { row } = introDrive;
+    introDrive = null;
+    restUntil = performance.now() + INTRO_REST_MS;
+    for (const grab of grabs.values()) if (grab.axis === 1 && grab.index === row) return;
+    weft.pinned[row] = 0;
+    startGlide(weft, row, weft.v[row]);
+    decide(weft);
+  };
+
+  const driveGrabs = (dt) => {
+    for (const grab of grabs.values()) {
+      if (!grab.axis || grab.dead) continue;
+      if (chains[grab.axis - 1].locked) continue;
+      const excess = Math.abs(grab.pull) - DRIVE_FROM;
+      if (excess <= 0) continue;
+      const speed = Math.min(DRIVE_MAX, excess * DRIVE_GAIN) * smoothstep(excess / DRIVE_EASE);
+      grab.driven += Math.sign(grab.pull) * speed * dt;
+      const value = grab.base + grab.pull + grab.driven;
+      chains[grab.axis - 1].target[grab.index] = value;
+      record(grab, performance.now(), value);
+    }
+  };
+
+  const keyDriveSpeed = (time) => KEY_DRIVE_SPEED * smoothstep((time - keyDrive.since) / KEY_DRIVE_RAMP_MS);
+
+  const driveKeys = (time, dt) => {
+    keyDrive.driven += keyDrive.direction * keyDriveSpeed(time) * dt;
+    weft.target[keyDrive.row] = keyDrive.base + keyDrive.driven;
+  };
+
+  const releaseKeyDrive = () => {
+    if (!keyDrive) return;
+    const { row, direction } = keyDrive;
+    const speed = direction * keyDriveSpeed(performance.now());
+    keyDrive = null;
+    weft.pinned[row] = 0;
+    weft.v[row] = speed;
+    startGlide(weft, row, speed);
+    decide(weft);
+    wake();
+  };
+
+  const startKeyDrive = (row, direction) => {
+    if (keyDrive?.row === row && keyDrive.direction === direction) return;
+    releaseKeyDrive();
+    endIntroDrive();
+    if (weft.pinned[row]) return;
+    loosen(weft);
+    weft.glide = false;
+    weft.pinned[row] = 1;
+    weft.heldUntil[row] = 0;
+    weft.target[row] = weft.x[row];
+    keyDrive = { row, direction, base: weft.x[row], driven: 0, since: performance.now() };
+    wake();
+  };
+
+  const driveIntro = (time) => {
+    const { row, from, start } = introDrive;
+    const t = Math.min(1, Math.max(0, (time - start) / INTRO_PULL_MS));
+    weft.target[row] = from + INTRO_LAPS * easeInOutCubic(t);
+    if (t >= 1) endIntroDrive();
   };
 
   const frame = (time) => {
@@ -639,6 +1163,11 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     lastTime = time;
     const dt = Math.min(Math.max(elapsed / 1000, 1 / 240), MAX_FRAME_SECONDS);
     if (governor.sample(elapsed)) resize();
+    if (canSwish(time)) startSwish(time);
+    if (swish) driveSwish(time);
+    if (introDrive) driveIntro(time);
+    if (keyDrive) driveKeys(time, dt);
+    if (grabs.size) driveGrabs(dt);
 
     accumulator = Math.min(accumulator + dt, MAX_SUBSTEPS * STEP_SECONDS);
     let substeps = 0;
@@ -656,8 +1185,16 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       chain.x[grabIndex[g]] = chain.target[grabIndex[g]];
     }
 
+    gatherHome(weft, time);
+    gatherHome(warp, time);
+    finishTransit(weft, time);
+    finishTransit(warp, time);
+
     const looksBusy = updateLooks(time, dt);
     draw(time);
+
+    if (!clothResting(time)) calmSince = 0;
+    else if (!calmSince) calmSince = time;
 
     if (!looksBusy && isSettled(time)) {
       settle();
@@ -668,6 +1205,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       draw(time);
       running = false;
       lastTime = 0;
+      armIdle();
       return;
     }
     frameId = requestAnimationFrame(frame);
@@ -680,7 +1218,68 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     frameId = requestAnimationFrame(frame);
   };
 
+  const rebase = (axis, i, delta) => {
+    if (!delta) return;
+    for (const grab of grabs.values()) if (grab.axis === axis && grab.index === i) grab.base += delta;
+    if (axis === 1 && keyDrive?.row === i) keyDrive.base += delta;
+  };
+
+  const foldLaps = (chain, i) => {
+    const position = chain.pinned[i] ? chain.target[i] : chain.x[i];
+    const margin = VISIBLE_MARGIN_CELLS / threads;
+    const lowLap = Math.floor(-margin - position) - chain.shift[i];
+    const highLap = Math.floor(1 + margin - position) - chain.shift[i];
+    if (highLap < chain.lo[i]) return highLap - chain.lo[i];
+    if (lowLap > chain.hi[i]) return lowLap - chain.hi[i];
+    return 0;
+  };
+
+  const shiftChain = (chain, axis, shift, limit, releaseAt) => {
+    const n = threads;
+    const clampReel = (value) => Math.max(-limit, Math.min(limit, value));
+    if (chain.open) {
+      for (let i = 0; i < n; i += 1) {
+        const lapShift = chain.shift[i];
+        if (!lapShift) continue;
+        chain.x[i] += lapShift;
+        chain.target[i] += lapShift;
+        chain.rest[i] += lapShift;
+        chain.shift[i] = 0;
+        rebase(axis, i, lapShift);
+      }
+      chain.open = false;
+    }
+    for (let i = 0; i < n; i += 1) {
+      const pinned = chain.pinned[i];
+      const before = chain.target[i];
+      if (chain.lo[i] === chain.hi[i]) {
+        const lap = Math.round(pinned ? before : chain.x[i]);
+        chain.x[i] += shift - lap;
+        if (pinned) chain.target[i] = before - lap + shift;
+      } else {
+        const fold = foldLaps(chain, i);
+        chain.x[i] = clampReel(chain.x[i] + fold) + shift;
+        if (pinned) chain.target[i] = clampReel(before + fold) + shift;
+      }
+      if (pinned) rebase(axis, i, chain.target[i] - before);
+    }
+    chain.homing = true;
+    chain.locked = true;
+    chain.glide = false;
+    chain.steer = false;
+    for (let i = 0; i < n; i += 1) {
+      chain.lo[i] = Math.max(-REEL_REACH, Math.min(chain.lo[i] - shift, 0));
+      chain.hi[i] = Math.min(REEL_REACH, Math.max(chain.hi[i] - shift, 0));
+      if (chain.pinned[i]) continue;
+      chain.rest[i] = chain.x[i];
+      chain.heldUntil[i] = releaseAt(i);
+      chain.landUntil[i] = chain.heldUntil[i] + LANDING_MS;
+      chain.v[i] = 0;
+    }
+  };
+
   const startCoverChange = (nextIndex, direction) => {
+    if (swish) stopSwish();
     const forward = wrapIndex((nextIndex - current) * direction);
     const inReach = forward >= 1 && forward <= REEL_REACH;
     const steps = inReach ? forward : 1;
@@ -702,34 +1301,19 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       draw();
       return;
     }
+    endIntroDrive();
+    aim = 0;
     const shift = direction * steps;
-    const limit = REEL_REACH - steps;
-    const clampReel = (value) => Math.max(-limit, Math.min(limit, value));
-    for (const grab of grabs.values()) {
-      if (grab.axis !== 1) continue;
-      const before = weft.target[grab.index];
-      grab.base += clampReel(before) - before + shift;
-    }
     const n = threads;
     const now = performance.now();
-    const stagger = COVER_SPREAD_MS / n;
-    for (let i = 0; i < n; i += 1) {
-      weft.x[i] = clampReel(weft.x[i]) + shift;
-      if (weft.pinned[i]) {
-        weft.target[i] = clampReel(weft.target[i]) + shift;
-        continue;
-      }
-      weft.rest[i] = weft.x[i];
-      weft.heldUntil[i] = now + i * stagger;
-      weft.landUntil[i] = weft.heldUntil[i] + LANDING_MS;
-      weft.v[i] = 0;
-    }
-    const warpStagger = WARP_POP_SPREAD_MS / n;
-    for (let j = 0; j < n; j += 1) {
-      const order = direction > 0 ? j : n - 1 - j;
-      warp.reel[j] = Math.max(-REEL_REACH, Math.min(REEL_REACH, warp.reel[j] - shift));
-      warp.popStart[j] = now + WARP_POP_DELAY_MS + order * warpStagger;
-    }
+    const rowStagger = COVER_SPREAD_MS / n;
+    const columnStagger = WARP_RELEASE_SPREAD_MS / n;
+    shiftChain(weft, 1, shift, REEL_REACH - steps, (i) => now + i * rowStagger);
+    shiftChain(warp, 2, shift, REEL_REACH - steps, (j) => {
+      const order = direction > 0 ? n - 1 - j : j;
+      return now + WARP_RELEASE_DELAY_MS + order * columnStagger;
+    });
+    for (let j = 0; j < n; j += 1) warp.quietUntil[j] = Math.max(warp.quietUntil[j], warp.landUntil[j]);
     wake();
   };
 
@@ -794,12 +1378,18 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         speed = ((lastValue - oldestValue) / span) * 1000;
       }
     }
-    chain.v[i] = Math.max(-MAX_RELEASE_SPEED, Math.min(MAX_RELEASE_SPEED, speed));
+    const releaseSpeed = Math.max(-MAX_RELEASE_SPEED, Math.min(MAX_RELEASE_SPEED, speed));
+    chain.v[i] = releaseSpeed;
     chain.heldUntil[i] = 0;
+    chain.anchor[i] = Math.round(chain.x[i]);
+    chain.lastDir[i] = 0;
+    if (Math.abs(releaseSpeed) > COAST_FROM || grab.driven !== 0) startGlide(chain, i, releaseSpeed);
+    decide(chain);
   };
 
   const kick = (chain, centre, amount, quietUntil) => {
     const reach = Math.ceil(IMPULSE_SPREAD * 3);
+    loosen(chain);
     for (let d = -reach; d <= reach; d += 1) {
       const i = centre + d;
       if (i < 0 || i >= threads || chain.pinned[i]) continue;
@@ -818,11 +1408,14 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
 
   const onPointerDown = (event) => {
     if (event.pointerType === "mouse" && event.button !== 0) return;
+    interrupt();
     rect = canvas.getBoundingClientRect();
     try {
       canvas.setPointerCapture(event.pointerId);
     } catch {}
     ensureAudio();
+    endIntroDrive();
+    releaseKeyDrive();
     const [cellX, cellY] = pointerCell(event.clientX, event.clientY);
     pointerCellX = cellX;
     pointerCellY = cellY;
@@ -837,6 +1430,8 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       axis: 0,
       index: -1,
       base: 0,
+      pull: 0,
+      driven: 0,
       times: new Float64Array(12),
       values: new Float32Array(12),
       head: 0,
@@ -856,10 +1451,15 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
 
   const onPointerMove = (event) => {
     const grab = grabs.get(event.pointerId);
+    if (grab && event.pointerType === "mouse" && event.buttons === 0) {
+      finishPointer(event, true);
+      return;
+    }
     const [cellX, cellY] = pointerCell(event.clientX, event.clientY);
     pointerCellX = cellX;
     pointerCellY = cellY;
     updateHover(event.pointerType, Boolean(grab));
+    if (grab || hoverTarget) noteInput();
     if (grab) {
       const dx = event.clientX - grab.downX;
       const dy = event.clientY - grab.downY;
@@ -875,13 +1475,16 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
           }
         }
         grab.base = chain.x[grab.index];
+        loosen(chain);
+        chain.glide = false;
         chain.pinned[grab.index] = 1;
         chain.heldUntil[grab.index] = 0;
         canvas.dataset.axis = grab.axis === 1 ? "row" : "column";
       }
       if (grab.axis) {
         const chain = chains[grab.axis - 1];
-        const value = grab.base + (grab.axis === 1 ? dx : dy) / clothCss();
+        grab.pull = (grab.axis === 1 ? dx : dy) / clothCss();
+        const value = grab.base + grab.pull + grab.driven;
         chain.target[grab.index] = value;
         record(grab, performance.now(), value);
       }
@@ -935,9 +1538,12 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   };
 
   const onKeyDown = (event) => {
+    const arrow = event.key.startsWith("Arrow");
+    if (arrow || event.key === " " || event.key === "Spacebar") interrupt();
     if (event.key === "ArrowUp" || event.key === "ArrowDown") {
       event.preventDefault();
       ensureAudio();
+      releaseKeyDrive();
       const step = event.key === "ArrowUp" ? -1 : 1;
       focusRow = focusRow < 0 ? Math.floor(threads / 2) : Math.min(threads - 1, Math.max(0, focusRow + step));
       pointerCellY = focusRow + 0.5;
@@ -950,8 +1556,14 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       ensureAudio();
       if (focusRow < 0) focusRow = Math.floor(threads / 2);
       const direction = event.key === "ArrowLeft" ? -1 : 1;
-      kick(weft, focusRow, KEY_PULL * direction, 0);
+      if (event.repeat) startKeyDrive(focusRow, direction);
+      else kick(weft, focusRow, KEY_PULL * direction, 0);
       wake();
+      return;
+    }
+    if (keyDrive && (event.key === "ArrowLeft" || event.key === "ArrowRight")) {
+      event.preventDefault();
+      releaseKeyDrive();
       return;
     }
     if (event.key === " " || event.key === "Spacebar") {
@@ -962,7 +1574,12 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     }
   };
 
+  const onKeyUp = (event) => {
+    if (event.key === "Shift" || event.key === "ArrowLeft" || event.key === "ArrowRight") releaseKeyDrive();
+  };
+
   const onBlur = () => {
+    releaseKeyDrive();
     focusRow = -1;
     wake();
   };
@@ -995,6 +1612,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
   canvas.addEventListener("pointermove", onPointerMove);
   canvas.addEventListener("pointerup", onPointerUp);
   canvas.addEventListener("pointercancel", onPointerCancel);
+  canvas.addEventListener("lostpointercapture", onPointerCancel);
   canvas.addEventListener("pointerleave", onPointerLeave);
   canvas.addEventListener("pointerenter", onPointerEnter);
   canvas.addEventListener("webglcontextlost", onContextLost);
@@ -1030,8 +1648,15 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     setActive(next) {
       active = next;
       if (active) {
+        calmSince = 0;
+        restUntil = Math.max(restUntil, performance.now() + REVEAL_REST_MS);
         wake();
-      } else if (frameId) {
+        return;
+      }
+      clearTimeout(idleTimer);
+      idleTimer = 0;
+      if (swish) finishSwishNow(performance.now());
+      if (frameId) {
         cancelAnimationFrame(frameId);
         frameId = 0;
         running = false;
@@ -1050,6 +1675,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         pending = null;
         return;
       }
+      interrupt();
       const entry = requestCover(target);
       if (entry.ready) {
         pending = null;
@@ -1064,6 +1690,13 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       });
     },
     setParams(next) {
+      const reshaped =
+        next.tension !== tension ||
+        next.coupling !== coupling ||
+        next.damping !== damping ||
+        next.weave !== weave ||
+        next.threads !== threads;
+      if (reshaped) noteInput();
       tension = next.tension;
       coupling = next.coupling;
       damping = next.damping;
@@ -1074,6 +1707,10 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       const now = performance.now();
       if (next.threads !== threads) {
         threads = next.threads;
+        introDrive = null;
+        keyDrive = null;
+        swish = null;
+        aim = 0;
         grabs.clear();
         focusRow = -1;
         resetChain(weft);
@@ -1086,7 +1723,9 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
         lastThreadsChange = now;
         resize();
       } else if (next.weave !== weave && !reducedMotion) {
-        for (let j = 0; j < threads; j += 1) warp.popStart[j] = now + j * (WARP_POP_SPREAD_MS / threads);
+        for (let j = 0; j < threads; j += 1) {
+          warp.popStart[j] = now + j * (WARP_POP_SPREAD_MS / threads);
+        }
       }
       weave = next.weave;
       draw();
@@ -1099,6 +1738,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
     destroy() {
       destroyed = true;
       clearTimeout(lostTimer);
+      clearTimeout(idleTimer);
       for (const timer of neighbourTimers) clearTimeout(timer);
       neighbourTimers.length = 0;
       if (frameId) cancelAnimationFrame(frameId);
@@ -1106,6 +1746,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       canvas.removeEventListener("pointermove", onPointerMove);
       canvas.removeEventListener("pointerup", onPointerUp);
       canvas.removeEventListener("pointercancel", onPointerCancel);
+      canvas.removeEventListener("lostpointercapture", onPointerCancel);
       canvas.removeEventListener("pointerleave", onPointerLeave);
       canvas.removeEventListener("pointerenter", onPointerEnter);
       canvas.removeEventListener("webglcontextlost", onContextLost);
@@ -1122,6 +1763,7 @@ export function createLoom({ canvas, covers, index, params, reducedMotion, onPai
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     },
     onKeyDown,
+    onKeyUp,
     onBlur,
   };
 

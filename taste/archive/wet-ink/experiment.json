@@ -1,0 +1,37 @@
+{
+  "title": "Wet ink",
+  "description": "A wet-ink brush on fibred paper that keeps drawing by itself: an ensō, the word ink, bamboo, mountains under a pooled sun, a breaking wave, a plum branch and Herb’s signature. Each one pools where the brush rests, feathers along the fibres and starts to dry into darker edges, then a sheet of water runs down the paper, re-wets the ink and rinses it off the bottom before the next begins. Take the brush at any moment and it is the same brush: drag slowly and it pools fat, flick and it thins to a hairline; the loop picks up again a few seconds after you let go.",
+  "tags": [
+    "WebGL",
+    "Simulation",
+    "Drawing",
+    "Calligraphy"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One mechanic finished to the edge: a GPU paper-and-ink simulation driven by a self-playing brush, where pressure-shaped strokes, pooling holds, feathering and coffee-ring drying all come from the same water and pigment, and the visitor can take the brush mid-stroke.",
+  "source": {
+    "kind": "brief",
+    "lens": "product-components"
+  },
+  "generation": null,
+  "building": false,
+  "iteration": 2,
+  "iteratedAt": "2026-10-09T16:57:46.821Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-10-09T15:43:35.932Z",
+      "summary": "Dropped the booking card, signature line, Sign and book, blotter offprint and signed stamp; the page is now a title, one large paper sheet and the pen and ink panel\nNew self-playing loop of seven brush pieces (ensō, the word ink, bamboo, mountains with a pooled sun, a wave, a plum branch, Herb's signature) that draw with per-point brush pressure, rest to pool, feather and dry, then wipe and start the next\nEach piece is fitted to the sheet with its own brush scale, paced slower on curves, with start presses, end holds and fast flicked exits\nDrying is measured: the loop waits for the water probe to read dry (9s cap), rests, then sweeps the sheet clear\nTake the brush any time: pressing stops the autopilot mid-stroke or halts a wipe and keeps the wet ink to draw into; the loop resumes 2.6s after you let go\nSeparate autopilot brush dot and visitor nib, so your cursor never disappears while the brush is drawing\nBrush is now the default and first pen; Clear and Next drawing buttons plus Enter and Backspace on the sheet\nLoop timers pause with the frame loop when the tab is hidden or the sheet is offscreen; reduced motion shows each piece pre-dried and holds it longer\nRemoved the offprint shader pass, blotter colour and their render target\nPausing for a hidden tab or an offscreen sheet now shifts the pen clock too, so coming back mid-stroke no longer drops a saturated blot; scripted moves also cap their dwell at 50ms\nTaking the brush gives you the piece’s brush: at least 85% of the current drawing’s brush scale instead of a 1.35 cap\nMouse and finger get pressure from speed, so a slow drag goes fat and pools and a flick goes thin, like the autopilot\nScripted strokes use a steeper pressure curve with a near-zero floor, so flicks and stroke ends taper to a hairline instead of round beads\nLoop spends less time still: it wipes once the deepest water reads under 0.05 (sheen gone), with the dry wait capped at 3.4s, rest 0.9s and gap 0.4s\nBoth dots carry a paper ring so they read over ink; the brush dot travels between strokes on an eased arc instead of teleporting, and stays visible while down\nPhones keep a 4:3 sheet instead of a square, shrinking the area that blocks page scroll\nReduced-motion pre-dry scales its steps per frame by sim area (about 60 instead of 160 on desktop) to avoid GPU hitches\nResizing mid-drawing rescales the remaining strokes, brush scale and pen position to the new sheet, so the rest of the piece lands where the drawn ink went\nBamboo leaves redrawn as two hanging clusters of narrow press-then-flick blades from the upper node and branch; culm drawn a little fuller\nWave redrawn as one breaking wave: a filled face stroke, then the crest curling forward over it, a sea line and three spray beads"
+    },
+    {
+      "iteration": 2,
+      "at": "2026-10-09T16:57:46.821Z",
+      "summary": "Exit is now a water wash instead of a wipe: a wavy, fibre-ragged sheet of water runs down from the top with a bright lip, re-wets the drawing so dried deposit lifts back into the water, bleeds it soft, carries it down in uneven rivulets that dilute as they go, then drains off top to bottom and leaves clean paper (1.6s, its own shader pass)\nClear, Next drawing, Enter and Backspace use the same wash, and pressing the sheet mid-wash stops it and leaves the wet sheet to paint into\nNo visible cursor during the loop: removed the autopilot brush dot, its travel arcs and linger; ink just appears from the brush tip (your own nib still shows when you hover)\nLoop about 1.6x faster: strokes, presses, holds and gaps play 1.8x faster, the dry wait is capped at 1.5s (was 3.4s), rest 350ms (was 900ms), gap 160ms (was 400ms), first piece after 560ms\nBrush feel kept at the faster tempo: scripted strokes run on ink time, so dwell, pooling, bead growth and speed thinning match the old slower strokes\nReduced motion holds each pre-dried piece 3.4s (was 5.2s) and still clears instantly; the 2D fallback rinses by sliding and fading the sheet"
+    }
+  ]
+}

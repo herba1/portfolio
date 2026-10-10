@@ -27,7 +27,6 @@ out vec4 outColor;
 
 const float GAP = 0.12;
 const float FRINGE = 1.5;
-const float SHIFT_REACH = 1.2;
 const float UNDER_SHADE = 0.8;
 const float GROUND_SHADE = 0.78;
 const float GROUND_LIFT = 0.35;
@@ -38,9 +37,15 @@ const float SWELL_GLOW_LIMIT = 0.3;
 const float LIFT_FROM = 0.004;
 const float LIFT_TO = 0.03;
 const float RADIUS_LIMIT = 0.49;
+const float SEAM = 0.045;
+const float SEAM_FADE = 0.03;
+const float TAU = 6.2831853;
+const int WEAVE_ROW = 4;
+const int WEFT_WINDOW_ROW = 5;
+const int WARP_WINDOW_ROW = 8;
 
 int weaveAt(int col) {
-  return int(texelFetch(uState, ivec2(col, 5), 0).r + 0.5);
+  return int(texelFetch(uState, ivec2(col, WEAVE_ROW), 0).r + 0.5);
 }
 
 bool weftOver(int row, int col) {
@@ -88,26 +93,62 @@ vec3 coverAt(float reel, vec2 uv) {
   return textureLod(uCurrent, uv, uLod).rgb;
 }
 
-vec3 weftColour(int row, float clothX, float offset, float count) {
-  float along = clothX - offset;
-  float reel = floor(along);
-  return coverAt(reel, vec2(along - reel, (float(row) + 0.5) / count));
+vec3 windowAt(int index, int base) {
+  return vec3(
+    texelFetch(uState, ivec2(index, base), 0).r,
+    texelFetch(uState, ivec2(index, base + 1), 0).r,
+    texelFetch(uState, ivec2(index, base + 2), 0).r
+  );
 }
 
-vec3 warpColour(int col, float clothY, float offset, float reelShift, float count) {
-  float along = clothY - offset;
-  float reel = floor(along);
-  return coverAt(reel + reelShift, vec2((float(col) + 0.5) / count, along - reel));
+vec3 stripAt(float along, vec3 window, float across, bool upright) {
+  float lap = floor(along);
+  float reel = clamp(lap - window.z, window.x, window.y);
+  float t = along - lap;
+  return coverAt(reel, upright ? vec2(across, t) : vec2(t, across));
+}
+
+float seamWeight(float along, float offset) {
+  float fromSeam = abs(along - floor(along + 0.5));
+  return 0.5 * (1.0 - smoothstep(0.0, SEAM, fromSeam)) * smoothstep(0.0, SEAM_FADE, slip(offset));
+}
+
+vec3 threadColour(float along, vec3 window, float across, bool upright, float offset) {
+  vec3 colour = stripAt(along, window, across, upright);
+  float splice = seamWeight(along, offset);
+  if (splice > 0.001) {
+    float seam = floor(along + 0.5);
+    colour = mix(colour, stripAt(2.0 * seam - along, window, across, upright), splice);
+  }
+  return colour;
+}
+
+vec3 weftColour(int row, float clothX, float offset, float count) {
+  return threadColour(clothX - offset, windowAt(row, WEFT_WINDOW_ROW), (float(row) + 0.5) / count, false, offset);
+}
+
+vec3 warpColour(int col, float clothY, float offset, float count) {
+  return threadColour(clothY - offset, windowAt(col, WARP_WINDOW_ROW), (float(col) + 0.5) / count, true, offset);
+}
+
+float mirrored(float position) {
+  return position < 0.0 ? -position : 2.0 - position;
+}
+
+vec3 fringeColour(int index, float position, float offset, float count, bool upright) {
+  float flow = smoothstep(0.0, SEAM_FADE, slip(offset));
+  vec3 moving = vec3(0.0);
+  if (flow > 0.001) moving = upright ? warpColour(index, position, offset, count) : weftColour(index, position, offset, count);
+  if (flow > 0.999) return moving;
+  float still = mirrored(position);
+  vec3 resting = upright ? warpColour(index, still, offset, count) : weftColour(index, still, offset, count);
+  return mix(resting, moving, flow);
 }
 
 float hoverSwell(float across, float along) {
   float acrossBell = exp(-(across * across) / 3.24);
   float alongBell = exp(-(along * along) / 81.0);
   return 1.0 + HOVER_SWELL * uPointer.z * acrossBell * alongBell;
-}
-
-float fringeShift(float offset, float count) {
-  return SHIFT_REACH * tanh(offset * count / 8.0);
 }
 
 float capsule(float along, float across, float start, float end, float radius) {
@@ -126,7 +167,7 @@ vec3 threadShade(vec3 colour, float across, float radius, float along, float sta
   float roundness = 0.9 + 0.1 * sqrt(max(1.0 - t * t, 0.0));
   float tail = min(along - start, end - along);
   float dive = mix(0.92, 1.0, smoothstep(0.0, 0.45, tail));
-  float twist = sin(6.2831853 * 1.6 * (along - slide - across * 0.577));
+  float twist = sin(TAU * 1.5 * (along - slide - across * 0.577));
   return colour * (roundness * dive + uTwist * twist) * swellGlow(radius);
 }
 
@@ -148,13 +189,13 @@ vec4 weftAbove(vec2 g, int row, int col, int n, float count, float aa, vec3 weft
   float end = float(col + 1);
   for (int k = 1; k <= 4; k++) {
     int c = col - k;
-    if (c < 0) { start = -FRINGE + fringeShift(weftOffset, count); break; }
+    if (c < 0) { start = -FRINGE; break; }
     if (!weftRidesOver(row, c, weftOffset)) break;
     start -= 1.0;
   }
   for (int k = 1; k <= 4; k++) {
     int c = col + k;
-    if (c >= n) { end = count + FRINGE + fringeShift(weftOffset, count); break; }
+    if (c >= n) { end = count + FRINGE; break; }
     if (!weftRidesOver(row, c, weftOffset)) break;
     end += 1.0;
   }
@@ -173,13 +214,13 @@ vec4 warpAbove(vec2 g, int row, int col, int n, float count, float aa, vec3 weft
   float end = float(row + 1);
   for (int k = 1; k <= 4; k++) {
     int r = row - k;
-    if (r < 0) { start = -FRINGE + fringeShift(warpOffset, count); break; }
+    if (r < 0) { start = -FRINGE; break; }
     if (!warpRidesOver(r, col, warpOffset)) break;
     start -= 1.0;
   }
   for (int k = 1; k <= 4; k++) {
     int r = row + k;
-    if (r >= n) { end = count + FRINGE + fringeShift(warpOffset, count); break; }
+    if (r >= n) { end = count + FRINGE; break; }
     if (!warpRidesOver(r, col, warpOffset)) break;
     end += 1.0;
   }
@@ -206,14 +247,13 @@ vec4 shadeAt(vec2 pixel) {
   if (rowIn && !colIn) {
     float offset = weftOffsetAt(row);
     float thick = texelFetch(uState, ivec2(row, 2), 0).r;
-    float shift = fringeShift(offset, count);
-    float start = -FRINGE + shift;
-    float end = count + FRINGE + shift;
+    float start = -FRINGE;
+    float end = count + FRINGE;
     float across = g.y - (float(row) + 0.5);
     float radius = min(baseRadius * thick * hoverSwell(float(row) + 0.5 - uPointer.y, g.x - uPointer.x), RADIUS_LIMIT);
     float sd = capsule(g.x, across, start, end, radius);
     float cover = clamp(0.5 - sd / aa, 0.0, 1.0) * step(0.001, thick);
-    vec3 colour = weftColour(row, clamp(cloth.x, 0.0, 1.0), offset, count);
+    vec3 colour = fringeColour(row, cloth.x, offset, count, false);
     colour = threadShade(colour, across, radius, g.x, start, end, offset * count);
     return vec4(colour, 1.0) * cover;
   }
@@ -221,15 +261,13 @@ vec4 shadeAt(vec2 pixel) {
   if (colIn && !rowIn) {
     float offset = warpOffsetAt(col);
     float thick = texelFetch(uState, ivec2(col, 3), 0).r;
-    float reelShift = texelFetch(uState, ivec2(col, 4), 0).r;
-    float shift = fringeShift(offset, count);
-    float start = -FRINGE + shift;
-    float end = count + FRINGE + shift;
+    float start = -FRINGE;
+    float end = count + FRINGE;
     float across = g.x - (float(col) + 0.5);
     float radius = min(baseRadius * thick * hoverSwell(float(col) + 0.5 - uPointer.x, g.y - uPointer.y), RADIUS_LIMIT);
     float sd = capsule(g.y, across, start, end, radius);
     float cover = clamp(0.5 - sd / aa, 0.0, 1.0) * step(0.001, thick);
-    vec3 colour = warpColour(col, clamp(cloth.y, 0.0, 1.0), offset, reelShift, count);
+    vec3 colour = fringeColour(col, cloth.y, offset, count, true);
     colour = threadShade(colour, across, radius, g.y, start, end, offset * count);
     return vec4(colour, 1.0) * cover;
   }
@@ -238,7 +276,6 @@ vec4 shadeAt(vec2 pixel) {
   float warpOffset = warpOffsetAt(col);
   float weftThick = texelFetch(uState, ivec2(row, 2), 0).r;
   float warpThick = texelFetch(uState, ivec2(col, 3), 0).r;
-  float warpReel = texelFetch(uState, ivec2(col, 4), 0).r;
 
   float weftAcross = g.y - (float(row) + 0.5);
   float warpAcross = g.x - (float(col) + 0.5);
@@ -246,7 +283,7 @@ vec4 shadeAt(vec2 pixel) {
   float warpRadius = min(baseRadius * warpThick * hoverSwell(float(col) + 0.5 - uPointer.x, g.y - uPointer.y), RADIUS_LIMIT);
 
   vec3 weft = weftColour(row, cloth.x, weftOffset, count);
-  vec3 warp = warpColour(col, cloth.y, warpOffset, warpReel, count);
+  vec3 warp = warpColour(col, cloth.y, warpOffset, count);
 
   bool woven = weftOver(row, col);
   float weftTop = woven ? 1.0 : 0.0;

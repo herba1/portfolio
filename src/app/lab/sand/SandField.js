@@ -4,6 +4,7 @@ import { loadCover, sampleCells } from "./sandCovers";
 import {
   LANDED,
   LOOSE,
+  PICTURE,
   createGrid,
   createRandom,
   fillIntact,
@@ -15,6 +16,15 @@ import {
   stepGrid,
   strataHomes,
 } from "./sandGrid";
+import {
+  PATH_STRIDE,
+  REGION_COUNT,
+  createFlightScratch,
+  orderByLanding,
+  regionOf,
+  scheduleLandings,
+} from "./sandFlight";
+import { createMorphScratch, curveOrder, fieldNoise, pictureOrder, planMorph } from "./sandMorph";
 import { FLIGHT_FRAGMENT, FLIGHT_VERTEX, GRID_FRAGMENT, GRID_VERTEX } from "./sandShader";
 
 const TRAY_RATIO = 0.7;
@@ -36,7 +46,7 @@ const LATTICE_BASE = 0.07;
 const HOLD_STILL_PX = 8;
 const HOLD_DELAY_MS = 140;
 const HOLD_FILL_MS = 500;
-const HOLD_POP_MS = 240;
+const HOLD_RELEASE_MS = 380;
 const TAP_MS = 260;
 const TAP_SLOP_PX = 6;
 const POKE_PX = 30;
@@ -44,27 +54,41 @@ const POKE_LIFT_PX = 18;
 const POKE_MS = 460;
 const DOUBLE_CLICK_MS = 320;
 
-const FLIGHT_S = 0.7;
-const POP_S = 0.18;
-const REBUILD_RADIAL_S = 0.25;
-const SCATTER_S = 0.15;
-const ERUPT_DEPTH_S = 0.4;
-const AIRBORNE_SCATTER_S = 0.06;
+const MORPH_FLIGHT_MIN_S = 1.2;
+const MORPH_FLIGHT_RANGE_S = 1.0;
+const HOME_FLIGHT_MIN_S = 1.05;
+const HOME_FLIGHT_RANGE_S = 0.75;
+const REST_S = 0.12;
+const CLUMP_SIZE = 0.075;
+const SWIRL_REACH = 0.03;
+const SWIRL_SIZE = 0.3;
+const FLIGHT_LIFT = 0.06;
+const FLIGHT_SWELL = 0.1;
+const FRONT_NOISE_SIZE = 0.24;
+const LOOSEN_MS = 420;
+const STAGE_DELAY_MS = 900;
+const STAGE_IDLE_TIMEOUT_MS = 2000;
+const STAGE_IDLE_FALLBACK_MS = 32;
+const LOOSEN_WAIT_MS = 1500;
+const CLUMP_TILE = 0.08;
+const CLUMP_WARP = 1.1;
+const CLUMP_COHESION = 0.5;
 const HAPTIC_AT = 0.86;
-const FUSE_MS = 340;
+const FUSE_MS = 900;
 
-const CASCADE_MS = 600;
+const CASCADE_MS = 1000;
 const CASCADE_JITTER_MS = 16;
-const CASCADE_GRAVITY = 1.6;
+const CASCADE_GRAVITY = 1.3;
 const ERUPT_SETTLED_STEPS = 8;
 const ERUPT_BEAT_MS = 240;
 const SETTLE_LIMIT_MS = 2600;
 const COVER_DEADLINE_MS = CASCADE_MS + CASCADE_JITTER_MS + 2500;
 
-const INTRO_DELAY_MS = 400;
-const INTRO_MS = 600;
+const INTRO_DELAY_MS = 1400;
+const INTRO_MS = 1300;
+const CRUMBLE_MS = 600;
 const INTRO_BRUSH_PX = 44;
-const INTRO_CHANCE = 0.78;
+const INTRO_CHANCE = 0.72;
 const LOOSE_REPORT_MS = 120;
 const LANDING_BUCKETS = 48;
 
@@ -76,7 +100,7 @@ const INTRO_PATH = [
   [0.88, 0.4],
 ];
 
-const ATTRIBUTES = { aCorner: 0, aPath: 1, aTiming: 2, aColourFrom: 3, aColourTo: 4 };
+const ATTRIBUTES = { aCorner: 0, aPath: 1, aTiming: 2, aColourFrom: 3, aColourTo: 4, aClump: 5, aClumpTime: 6 };
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -176,14 +200,15 @@ export default class SandField {
     this.coverSlot = 0;
 
     this.grid = null;
-    this.flightPath = null;
-    this.flightColour = null;
+    this.flightData = null;
     this.dirty = true;
     this.stillSteps = 0;
     this.simDebt = 0;
     this.flight = null;
     this.fuse = null;
     this.cascade = null;
+    this.loosen = null;
+    this.staged = null;
     this.script = null;
     this.pokeAt = { x: 0, y: 0, radius: 0, start: -Infinity };
     this.lastMouseTap = -Infinity;
@@ -208,6 +233,7 @@ export default class SandField {
       anchorY: 0,
       anchorTime: 0,
       holdDone: false,
+      shift: false,
     };
     this.ringState = "idle";
     this.ringProgress = -1;
@@ -215,7 +241,6 @@ export default class SandField {
     this.lastLooseReport = 0;
     this.reportedLoose = -1;
     this.busy = false;
-    this.landBeat = 0;
 
     this.frame = 0;
     this.lastFrame = 0;
@@ -224,6 +249,7 @@ export default class SandField {
     this.lost = false;
     this.destroyed = false;
     this.timers = new Set();
+    this.idles = new Set();
 
     this.tick = this.tick.bind(this);
     this.handlePointerDown = this.handlePointerDown.bind(this);
@@ -282,6 +308,7 @@ export default class SandField {
     this.uploadCover(this.coverSlot, first);
     this.callbacks.onCover?.(first, 0);
     this.ensureCover(1);
+    this.scheduleStage();
     if (this.reducedMotion) {
       this.runScriptInstantly(INTRO_PATH, INTRO_BRUSH_PX);
       this.settleInstantly();
@@ -290,7 +317,7 @@ export default class SandField {
     this.render(0);
     this.callbacks.onReady?.();
     this.reportLoose(0, true);
-    if (!this.reducedMotion) this.later(INTRO_DELAY_MS, () => this.startScript(INTRO_PATH, INTRO_BRUSH_PX, INTRO_MS));
+    if (!this.reducedMotion) this.later(INTRO_DELAY_MS, () => this.startIntro());
     this.wake();
   }
 
@@ -357,11 +384,17 @@ export default class SandField {
     this.pathBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuffer);
     gl.enableVertexAttribArray(ATTRIBUTES.aPath);
-    gl.vertexAttribPointer(ATTRIBUTES.aPath, 4, gl.FLOAT, false, 24, 0);
+    gl.vertexAttribPointer(ATTRIBUTES.aPath, 4, gl.FLOAT, false, PATH_STRIDE * 4, 0);
     gl.vertexAttribDivisor(ATTRIBUTES.aPath, 1);
     gl.enableVertexAttribArray(ATTRIBUTES.aTiming);
-    gl.vertexAttribPointer(ATTRIBUTES.aTiming, 2, gl.FLOAT, false, 24, 16);
+    gl.vertexAttribPointer(ATTRIBUTES.aTiming, 3, gl.FLOAT, false, PATH_STRIDE * 4, 16);
     gl.vertexAttribDivisor(ATTRIBUTES.aTiming, 1);
+    gl.enableVertexAttribArray(ATTRIBUTES.aClump);
+    gl.vertexAttribPointer(ATTRIBUTES.aClump, 4, gl.FLOAT, false, PATH_STRIDE * 4, 28);
+    gl.vertexAttribDivisor(ATTRIBUTES.aClump, 1);
+    gl.enableVertexAttribArray(ATTRIBUTES.aClumpTime);
+    gl.vertexAttribPointer(ATTRIBUTES.aClumpTime, 2, gl.FLOAT, false, PATH_STRIDE * 4, 44);
+    gl.vertexAttribDivisor(ATTRIBUTES.aClumpTime, 1);
 
     this.colourBuffer = gl.createBuffer();
     gl.bindBuffer(gl.ARRAY_BUFFER, this.colourBuffer);
@@ -392,13 +425,23 @@ export default class SandField {
     this.grid = createGrid(width, height);
     fillIntact(this.grid);
     const capacity = width * width;
-    this.flightPath = new Float32Array(capacity * 6);
-    this.flightColour = new Uint8Array(capacity * 8);
     this.flightCells = new Int32Array(capacity);
     this.flightHomes = new Int32Array(capacity);
-    this.flightKeys = new Float64Array(capacity);
-    this.homeKeys = new Float64Array(capacity);
+    this.clumpTile = Math.max(4, Math.round(width * CLUMP_TILE));
+    this.clumpAcross = Math.ceil(width / this.clumpTile) + 1;
+    this.clumpDown = Math.ceil(height / this.clumpTile) + 1;
+    this.clumpTiles = this.clumpAcross * this.clumpDown;
+    this.airborneClumps = this.clumpTiles * REGION_COUNT;
+    this.clumpSlots = this.airborneClumps * 2;
+    this.flightData = createFlightScratch(capacity, this.clumpSlots);
+    this.measureClumps(width, height);
+    this.toneKeys = new Float64Array(capacity);
+    this.spotKeys = new Float64Array(capacity);
     this.strataHomes = new Uint16Array(capacity);
+    this.curve = curveOrder(width, height);
+    this.homeOrder = pictureOrder(this.curve, width);
+    this.morph = createMorphScratch(capacity);
+    this.staged = null;
     this.allocateGpuGrid();
     if (this.current) {
       this.currentCells = sampleCells(this.current, width);
@@ -406,6 +449,45 @@ export default class SandField {
     }
     this.dirty = true;
     this.stillSteps = 0;
+  }
+
+  measureClumps(width, height) {
+    const size = this.clumpTile;
+    const across = this.clumpAcross;
+    const down = this.clumpDown;
+    const warp = size * CLUMP_WARP;
+    const tileScale = 1 / size;
+    const noiseScale = 1 / Math.max(4, width * CLUMP_SIZE);
+    const cellTile = new Int32Array(width * height);
+    const cellNoise = new Float32Array(width * height);
+    for (let y = 0; y < height; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const index = y * width + x;
+        const warpedX = x + (fieldNoise(x * tileScale + 17.3, y * tileScale) - 0.5) * warp;
+        const warpedY = y + (fieldNoise(x * tileScale, y * tileScale + 41.9) - 0.5) * warp;
+        const column = Math.min(across - 1, Math.max(0, Math.floor(warpedX / size)));
+        const row = Math.min(down - 1, Math.max(0, Math.floor(warpedY / size)));
+        cellTile[index] = row * across + column;
+        cellNoise[index] = fieldNoise(x * noiseScale, y * noiseScale);
+      }
+    }
+    const coverHash = new Float32Array(width * width);
+    const coverRegion = new Uint8Array(width * width);
+    const frontNoise = new Float32Array(width * width);
+    const frontScale = 1 / Math.max(4, width * FRONT_NOISE_SIZE);
+    for (let y = 0; y < width; y += 1) {
+      for (let x = 0; x < width; x += 1) {
+        const home = y * width + x;
+        coverHash[home] = hashCell(x, y);
+        coverRegion[home] = regionOf(x, y, width);
+        frontNoise[home] = fieldNoise(x * frontScale + 7.1, y * frontScale + 3.7);
+      }
+    }
+    this.cellTile = cellTile;
+    this.cellNoise = cellNoise;
+    this.coverHash = coverHash;
+    this.coverRegion = coverRegion;
+    this.frontNoise = frontNoise;
   }
 
   allocateGpuGrid() {
@@ -417,17 +499,21 @@ export default class SandField {
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, grid.width, grid.height, 0, gl.RED, gl.UNSIGNED_BYTE, grid.glued);
     const capacity = grid.cover * grid.cover;
     gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuffer);
-    gl.bufferData(gl.ARRAY_BUFFER, capacity * 24, gl.DYNAMIC_DRAW);
+    gl.bufferData(gl.ARRAY_BUFFER, capacity * PATH_STRIDE * 4, gl.DYNAMIC_DRAW);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.colourBuffer);
     gl.bufferData(gl.ARRAY_BUFFER, capacity * 8, gl.DYNAMIC_DRAW);
     this.instanceCapacity = capacity;
   }
 
-  uploadCover(slot, cover) {
+  uploadCoverTexture(slot, cover) {
     const { gl } = this;
     gl.bindTexture(gl.TEXTURE_2D, this.coverTextures[slot]);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, cover.canvas);
     gl.generateMipmap(gl.TEXTURE_2D);
+  }
+
+  uploadCover(slot, cover) {
+    this.uploadCoverTexture(slot, cover);
     if (this.grid) {
       const cells = sampleCells(cover, this.grid.cover);
       if (cover === this.current) this.currentCells = cells;
@@ -447,6 +533,8 @@ export default class SandField {
     if (!this.grid || this.destroyed) return;
     if (this.flight) this.finishFlight();
     this.cascade = null;
+    this.loosen = null;
+    this.setRing("idle", 0);
     this.setBusy(false);
     this.resetTray();
   }
@@ -464,13 +552,82 @@ export default class SandField {
     } else {
       this.startScript(INTRO_PATH, INTRO_BRUSH_PX, INTRO_MS);
     }
+    this.scheduleStage();
     this.wake();
+  }
+
+  occupied() {
+    return Boolean(this.flight || this.cascade || this.loosen);
+  }
+
+  whenIdle(run) {
+    if (typeof window.requestIdleCallback !== "function") {
+      this.later(STAGE_IDLE_FALLBACK_MS, run);
+      return;
+    }
+    const id = window.requestIdleCallback(
+      () => {
+        this.idles.delete(id);
+        if (!this.destroyed) run();
+      },
+      { timeout: STAGE_IDLE_TIMEOUT_MS },
+    );
+    this.idles.add(id);
+  }
+
+  scheduleStage() {
+    this.later(STAGE_DELAY_MS, () => this.whenIdle(() => this.stageNext(false)));
+  }
+
+  stageNext(urgent) {
+    if (!this.grid || !this.gl || this.lost || this.destroyed) return;
+    if (!urgent && this.occupied()) return;
+    if (!urgent && this.pointer.down) {
+      this.scheduleStage();
+      return;
+    }
+    const index = this.nextIndex();
+    const cover = this.readyCover(index);
+    if (!cover) {
+      if (urgent) return;
+      this.ensureCover(index).then(() => {
+        if (!this.destroyed && this.readyCover(index)) this.whenIdle(() => this.stageNext(false));
+      });
+      return;
+    }
+    const staged = this.staged;
+    if (!this.stagedMatches(staged, index, cover)) {
+      const slot = 1 - this.coverSlot;
+      this.uploadCoverTexture(slot, cover);
+      this.staged = { index, cover, slot, size: this.grid.cover, cells: null };
+      if (!urgent) this.whenIdle(() => this.stageNext(false));
+      return;
+    }
+    if (staged.cells) return;
+    staged.cells = sampleCells(cover, staged.size);
+    this.uploadCells(staged.slot, staged.cells);
+  }
+
+  stagedMatches(staged, index, cover) {
+    if (!staged || !this.grid) return false;
+    return (
+      staged.index === index &&
+      staged.cover === cover &&
+      staged.slot === 1 - this.coverSlot &&
+      staged.size === this.grid.cover
+    );
+  }
+
+  stagedFor(index) {
+    const staged = this.staged;
+    if (!staged?.cells || !this.stagedMatches(staged, index, staged.cover)) return null;
+    return staged;
   }
 
   handleResize() {
     if (!this.grid || this.destroyed) return;
     const wanted = this.gridWidthFor(this.surface.clientWidth);
-    if (Math.abs(wanted - this.grid.width) / this.grid.width > 0.25 && !this.flight && !this.cascade) {
+    if (Math.abs(wanted - this.grid.width) / this.grid.width > 0.25 && !this.occupied()) {
       this.resetTray();
       return;
     }
@@ -536,6 +693,7 @@ export default class SandField {
     pointer.anchorY = y;
     pointer.anchorTime = now;
     pointer.holdDone = false;
+    pointer.shift = event.shiftKey;
     this.wake();
   }
 
@@ -549,6 +707,7 @@ export default class SandField {
     const elapsed = Math.max(4, now - pointer.moveTime);
     if (pointer.inside) pointer.speed = pointer.speed * 0.55 + (distance / elapsed) * 0.45;
     pointer.type = event.pointerType;
+    pointer.shift = event.shiftKey;
     pointer.travel += distance;
     pointer.x = x;
     pointer.y = y;
@@ -573,7 +732,7 @@ export default class SandField {
       const mouse = event.pointerType === "mouse";
       const repeat = mouse && (event.detail > 1 || now - this.lastMouseTap < DOUBLE_CLICK_MS);
       if (mouse) this.lastMouseTap = repeat ? -Infinity : now;
-      if (this.embedded) this.rebuild(pointer.x, pointer.y);
+      if (this.embedded) this.rebuild(pointer.x);
       else if (!repeat) this.poke(pointer.x, pointer.y);
     }
     if (!pointer.holdDone) this.setRing("idle", 0);
@@ -595,9 +754,9 @@ export default class SandField {
   }
 
   handleDoubleClick(event) {
-    const [x, y] = this.localPoint(event);
+    const [x] = this.localPoint(event);
     this.pokeAt.start = -Infinity;
-    this.rebuild(x, y);
+    this.rebuild(x);
   }
 
   handleContextMenu(event) {
@@ -627,9 +786,16 @@ export default class SandField {
     }
     if (this.flight) this.finishFlight();
     if (this.cascade) this.cascade.stage = 0;
+    if (this.loosen) {
+      this.loosen = null;
+      this.setRing("idle", 0);
+      this.setBusy(false);
+    }
+    this.staged = null;
     this.allocateGpuGrid();
     if (this.current) this.uploadCover(this.coverSlot, this.current);
     this.resize();
+    if (!this.cascade) this.scheduleStage();
     this.wake();
   }
 
@@ -656,8 +822,13 @@ export default class SandField {
     if (this.ring) this.ring.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0)`;
   }
 
+  startIntro() {
+    if (this.pointer.down || !this.grid || this.grid.loose > 0) return;
+    this.startScript(INTRO_PATH, INTRO_BRUSH_PX, INTRO_MS);
+  }
+
   startScript(path, brushPx, duration) {
-    if (!this.grid || this.flight || this.cascade) return;
+    if (!this.grid || this.occupied()) return;
     this.script = { path, brushPx, duration, start: null, lastX: null, lastY: null };
     this.wake();
   }
@@ -725,7 +896,7 @@ export default class SandField {
       pointer.previousY = pointer.y;
       return;
     }
-    const idle = this.flight || this.cascade;
+    const idle = this.occupied();
     if (!idle && pointer.speed > BRUSH_MIN_SPEED) {
       const chance = Math.min(0.9, Math.max(0.1, pointer.speed / BRUSH_FULL_SPEED));
       const radius = BRUSH_PRESSED_PX / this.cellCss;
@@ -766,12 +937,17 @@ export default class SandField {
     this.setRing("hold", progress);
     if (progress >= 1) {
       pointer.holdDone = true;
-      this.setRing("pop", 1);
-      this.later(HOLD_POP_MS, () => {
-        if (this.ringState === "pop") this.setRing("idle", 0);
-      });
-      this.rebuild(pointer.anchorX, pointer.anchorY);
+      if (pointer.shift) this.restore(pointer.anchorX);
+      else this.rebuild(pointer.anchorX);
+      if (!this.loosen?.waiting) this.releaseRing();
     }
+  }
+
+  releaseRing() {
+    this.setRing("release", 1);
+    this.later(HOLD_RELEASE_MS, () => {
+      if (this.ringState === "release") this.setRing("idle", 0);
+    });
   }
 
   updateCascade(now) {
@@ -786,7 +962,7 @@ export default class SandField {
     if (!cascade.target) {
       cascade.target = this.readyCover(cascade.index) ?? (elapsed >= COVER_DEADLINE_MS ? this.current : null);
     }
-    if (cascade.target && cascade.stage < 3) {
+    if (cascade.target && cascade.stage < 2) {
       this.prepareStage(cascade);
       return;
     }
@@ -796,82 +972,80 @@ export default class SandField {
       const settled = this.stillSteps >= ERUPT_SETTLED_STEPS;
       if (!settled && now - cascade.releasedAt < SETTLE_LIMIT_MS) return;
       this.gatherPile(cascade);
-      if (settled) {
-        cascade.settledAt = now;
-        return;
-      }
+      if (settled) cascade.settledAt = now;
+      return;
+    }
+    if (!cascade.plan) cascade.plan = this.createPlan(cascade.count, cascade.toCells, this.grid.width / 2);
+    if (!cascade.plan.ready) {
+      this.stepPlan(cascade.plan);
+      return;
     }
     if (cascade.settledAt && now - cascade.settledAt < ERUPT_BEAT_MS) return;
     this.cascade = null;
     this.erupt(cascade);
   }
 
-  gatherPile(cascade) {
-    const { cells, glued, width, cover } = this.grid;
-    const fromLight = this.currentCells.light;
+  gatherGrains() {
+    const { cells, glued, cover } = this.grid;
+    const curve = this.curve;
     const grainCells = this.flightCells;
     const grainHomes = this.flightHomes;
-    const grainKeys = this.flightKeys;
     const capacity = this.instanceCapacity;
     let count = 0;
-    let top = Infinity;
-    let bottom = -Infinity;
-    for (let index = 0; index < cells.length && count < capacity; index += 1) {
+    for (let rank = 0; rank < curve.length && count < capacity; rank += 1) {
+      const index = curve[rank];
       const value = cells[index];
       const pinned = glued[index] !== 0;
       if (value === 0 && !pinned) continue;
-      const x0 = index % width;
-      const y0 = (index - x0) / width;
-      const home = value !== 0 ? ((value >>> 8) & 255) * cover + (value & 255) : y0 * cover + x0;
-      grainCells[count] = index;
-      grainHomes[count] = home;
-      grainKeys[count] = fromLight[home] * 16777216 + x0 * 65536 + count;
-      if (value === 0 || !isAirborne(cells, index, width)) {
-        if (y0 < top) top = y0;
-        if (y0 > bottom) bottom = y0;
-      }
-      count += 1;
-      if (value !== 0 && pinned && count < capacity) {
+      if (pinned) {
         grainCells[count] = index;
-        grainHomes[count] = y0 * cover + x0;
-        grainKeys[count] = fromLight[y0 * cover + x0] * 16777216 + x0 * 65536 + count;
+        grainHomes[count] = index;
+        count += 1;
+      }
+      if (value !== 0 && count < capacity) {
+        grainCells[count] = index;
+        grainHomes[count] = ((value >>> 8) & 255) * cover + (value & 255);
         count += 1;
       }
     }
-    grainKeys.subarray(0, count).sort();
+    return count;
+  }
+
+  matchGrains(count, toCells) {
+    return planMorph(this.morph, count, this.flightHomes, this.currentCells.tone, this.homeOrder, toCells.tone);
+  }
+
+  gatherPile(cascade) {
+    const count = this.gatherGrains();
+    this.matchGrains(count, cascade.toCells);
     cascade.gathered = true;
     cascade.count = count;
-    cascade.top = Number.isFinite(top) ? top : 0;
-    cascade.bottom = Number.isFinite(bottom) ? bottom : 0;
     this.simDebt = 0;
   }
 
   prepareStage(cascade) {
-    const { gl, grid } = this;
-    const slot = 1 - this.coverSlot;
     const target = cascade.target;
+    const staged = this.staged;
+    const matches = this.stagedMatches(staged, cascade.index, target);
+    if (matches && staged.cells) {
+      cascade.toCells = staged.cells;
+      cascade.stage = 2;
+      return;
+    }
+    if (matches && cascade.stage === 0) cascade.stage = 1;
+    this.staged = null;
+    const slot = 1 - this.coverSlot;
     if (cascade.stage === 0) {
-      gl.bindTexture(gl.TEXTURE_2D, this.coverTextures[slot]);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, target.canvas);
-      gl.generateMipmap(gl.TEXTURE_2D);
-    } else if (cascade.stage === 1) {
-      cascade.toCells = sampleCells(target, grid.cover);
-      this.uploadCells(slot, cascade.toCells);
+      this.uploadCoverTexture(slot, target);
     } else {
-      const { cover } = grid;
-      const light = cascade.toCells.light;
-      const homeKeys = this.homeKeys;
-      const homes = cover * cover;
-      for (let home = 0; home < homes; home += 1) {
-        homeKeys[home] = light[home] * 16777216 + (home % cover) * 65536 + home;
-      }
-      homeKeys.subarray(0, homes).sort();
+      cascade.toCells = sampleCells(target, this.grid.cover);
+      this.uploadCells(slot, cascade.toCells);
     }
     cascade.stage += 1;
   }
 
   poke(x, y) {
-    if (!this.grid || this.flight || this.cascade) return;
+    if (!this.grid || this.occupied()) return;
     const gridX = this.toGridX(x);
     const gridY = this.toGridY(y);
     const radius = POKE_PX / this.cellCss;
@@ -885,7 +1059,7 @@ export default class SandField {
   }
 
   crumble() {
-    if (!this.grid || this.flight || this.cascade) return;
+    if (!this.grid || this.occupied()) return;
     const random = this.random;
     const fromLeft = random.unit() < 0.5;
     const edgeX = fromLeft ? -0.02 : 1.02;
@@ -901,56 +1075,217 @@ export default class SandField {
       this.wake();
       return;
     }
-    this.startScript(path, INTRO_BRUSH_PX, INTRO_MS);
+    this.startScript(path, INTRO_BRUSH_PX, CRUMBLE_MS);
   }
 
-  rebuild(x, y) {
+  nextIndex() {
+    return (this.coverIndex + 1) % this.covers.length;
+  }
+
+  originFor(x) {
+    return x === undefined ? this.grid.width / 2 : this.toGridX(x);
+  }
+
+  canPour() {
     const grid = this.grid;
-    if (!grid || this.flight || this.cascade || grid.loose === 0) return false;
+    return Boolean(grid && !this.occupied() && !this.busy && !this.destroyed && grid.loose > 0);
+  }
+
+  rebuild(x) {
+    if (!this.canPour()) return false;
+    const grid = this.grid;
+    this.script = null;
+    const index = this.nextIndex();
+    if (this.reducedMotion) {
+      this.advanceInstantly(index);
+      return true;
+    }
+    this.ensureCover(index);
+    const originX = this.originFor(x);
+    const staged = this.stagedFor(index);
+    const { glued } = grid;
+    const homes = grid.cover * grid.cover;
+    for (let cell = 0; cell < homes; cell += 1) {
+      if (glued[cell] === PICTURE) glued[cell] = LANDED;
+    }
+    this.fuse = null;
+    this.loosen = { start: performance.now(), originX, index, staged, waiting: !staged, count: 0, plan: null };
+    this.dirty = true;
+    this.setBusy(true);
+    haptic("press");
+    this.wake();
+    return true;
+  }
+
+  restore(x) {
+    if (!this.canPour()) return false;
     this.script = null;
     if (this.reducedMotion) {
-      fillIntact(grid);
+      fillIntact(this.grid);
       this.dirty = true;
-      this.land();
+      this.stillSteps = 0;
       this.reportLoose(performance.now(), true);
       this.wake();
       return true;
     }
-    const originX = x === undefined ? grid.width / 2 : this.toGridX(x);
-    const originY = y === undefined ? grid.height : this.toGridY(y);
-    const reach = Math.max(
-      Math.hypot(originX, originY),
-      Math.hypot(grid.width - originX, originY),
-      Math.hypot(originX, grid.height - originY),
-      Math.hypot(grid.width - originX, grid.height - originY),
-    );
-    const { cells, width } = grid;
-    const path = this.flightPath;
-    const colour = this.flightColour;
+    haptic("press");
+    return this.returnHome(this.originFor(x));
+  }
+
+  updateLoosen(now) {
+    const loosen = this.loosen;
+    if (!loosen) return;
+    if (loosen.waiting) {
+      this.stageNext(true);
+      loosen.staged = this.stagedFor(loosen.index);
+      if (loosen.staged) {
+        loosen.waiting = false;
+        if (this.ringState === "hold") this.releaseRing();
+      } else if (now - loosen.start >= LOOSEN_WAIT_MS) {
+        this.loosen = null;
+        this.fuse = { start: now };
+        if (this.ringState === "hold") this.releaseRing();
+        this.returnHome(loosen.originX);
+        return;
+      }
+    }
+    if (loosen.waiting || now - loosen.start < LOOSEN_MS) return;
+    if (this.stagedFor(loosen.staged.index) !== loosen.staged) {
+      this.loosen = null;
+      this.fuse = { start: now };
+      this.dirty = true;
+      this.setBusy(false);
+      return;
+    }
+    if (!loosen.count) {
+      loosen.count = this.gatherGrains();
+      this.matchGrains(loosen.count, loosen.staged.cells);
+      return;
+    }
+    if (!loosen.plan) loosen.plan = this.createPlan(loosen.count, loosen.staged.cells, loosen.originX);
+    if (!loosen.plan.ready) {
+      this.stepPlan(loosen.plan);
+      return;
+    }
+    this.loosen = null;
+    this.morphInto(loosen);
+  }
+
+  loosenAmount(now) {
+    return easeInOutSine(Math.min(1, Math.max(0, (now - this.loosen.start) / LOOSEN_MS)));
+  }
+
+  morphInto({ staged, plan }) {
+    this.clearTray();
+    this.callbacks.onCover?.(staged.cover, staged.index);
+    this.launch(plan.written, plan.latest, "next", staged.cover, staged.index);
+  }
+
+  createPlan(count, toCells, originX) {
+    return { count, toCells, originX, stage: 0, written: 0, latest: 0, ready: false };
+  }
+
+  stepPlan(plan) {
+    if (plan.stage === 0) {
+      plan.written = this.writeMorphFlight(plan.count, plan.toCells);
+    } else if (plan.stage === 1) {
+      plan.latest = this.scheduleFlight(plan.written, plan.originX, MORPH_FLIGHT_MIN_S, MORPH_FLIGHT_RANGE_S);
+    } else {
+      orderByLanding(this.flightData, plan.written, plan.latest);
+      plan.ready = true;
+    }
+    plan.stage += 1;
+  }
+
+  scheduleFlight(count, originX, shortest, range) {
+    const { width, height, cover } = this.grid;
+    return scheduleLandings(this.flightData, count, {
+      cover,
+      diagonal: Math.hypot(width, height),
+      originX,
+      frontNoise: this.frontNoise,
+      airborneFrom: this.airborneClumps,
+      slots: this.clumpSlots,
+      flightFor: (span) => shortest + range * Math.sqrt(Math.min(1, span)),
+    });
+  }
+
+  clumpOf(index, home, airborne) {
+    return (this.cellTile[index] + (airborne ? this.clumpTiles : 0)) * REGION_COUNT + this.coverRegion[home];
+  }
+
+  writeMorphFlight(count, toCells) {
+    const { cells, width, cover } = this.grid;
+    const targets = this.morph.targets;
+    const grainCells = this.flightCells;
+    const grainHomes = this.flightHomes;
+    const { path, colour, clumps } = this.flightData;
+    const cellNoise = this.cellNoise;
+    const coverHash = this.coverHash;
+    const fromRgba = this.currentCells.rgba;
+    const toRgba = toCells.rgba;
+    let written = 0;
+    for (let grain = 0; grain < count; grain += 1) {
+      const destination = targets[grain];
+      if (destination < 0) continue;
+      const index = grainCells[grain];
+      const x0 = index % width;
+      const homeX = destination % cover;
+      const airborne = cells[index] !== 0 && isAirborne(cells, index, width);
+      clumps[written] = this.clumpOf(index, destination, airborne);
+      const at = written * PATH_STRIDE;
+      path[at] = x0;
+      path[at + 1] = (index - x0) / width;
+      path[at + 2] = homeX;
+      path[at + 3] = (destination - homeX) / cover;
+      path[at + 4] = cellNoise[index];
+      path[at + 5] = coverHash[destination];
+      const source = grainHomes[grain] * 4;
+      const target = destination * 4;
+      const tint = written * 8;
+      colour[tint] = fromRgba[source];
+      colour[tint + 1] = fromRgba[source + 1];
+      colour[tint + 2] = fromRgba[source + 2];
+      colour[tint + 4] = toRgba[target];
+      colour[tint + 5] = toRgba[target + 1];
+      colour[tint + 6] = toRgba[target + 2];
+      written += 1;
+    }
+    return written;
+  }
+
+  clearTray() {
+    const grid = this.grid;
+    grid.cells.fill(0);
+    grid.glued.fill(0);
+    grid.velocity.fill(0);
+    grid.drift.fill(0);
+  }
+
+  returnHome(originX) {
+    const grid = this.grid;
+    const { cells, width, cover } = grid;
+    const { path, colour, clumps } = this.flightData;
+    const cellNoise = this.cellNoise;
+    const coverHash = this.coverHash;
     const rgba = this.currentCells.rgba;
-    const cover = grid.cover;
     let count = 0;
-    let latest = 0;
     for (let index = 0; index < cells.length && count < this.instanceCapacity; index += 1) {
       const value = cells[index];
       if (value >>> 16 !== LOOSE) continue;
       const x0 = index % width;
-      const y0 = (index - x0) / width;
       const homeX = value & 255;
       const homeY = (value >>> 8) & 255;
-      const scatter = hashCell(homeX, homeY);
-      const delay = isAirborne(cells, index, width)
-        ? scatter * AIRBORNE_SCATTER_S
-        : (REBUILD_RADIAL_S * Math.hypot(x0 - originX, y0 - originY)) / reach + scatter * SCATTER_S;
-      if (delay > latest) latest = delay;
-      const at = count * 6;
+      const home = homeY * cover + homeX;
+      clumps[count] = this.clumpOf(index, home, isAirborne(cells, index, width));
+      const at = count * PATH_STRIDE;
       path[at] = x0;
-      path[at + 1] = y0;
+      path[at + 1] = (index - x0) / width;
       path[at + 2] = homeX;
       path[at + 3] = homeY;
-      path[at + 4] = delay;
-      path[at + 5] = scatter;
-      const source = (homeY * cover + homeX) * 4;
+      path[at + 4] = cellNoise[index];
+      path[at + 5] = coverHash[home];
+      const source = home * 4;
       const tint = count * 8;
       colour[tint] = rgba[source];
       colour[tint + 1] = rgba[source + 1];
@@ -962,32 +1297,39 @@ export default class SandField {
       count += 1;
     }
     grid.velocity.fill(0);
+    const latest = this.scheduleFlight(count, originX, HOME_FLIGHT_MIN_S, HOME_FLIGHT_RANGE_S);
+    orderByLanding(this.flightData, count, latest);
     this.launch(count, latest, "rebuild", null, -1);
     return true;
   }
 
+  advanceInstantly(index) {
+    this.setBusy(true);
+    this.ensureCover(index).then((loaded) => {
+      if (this.destroyed || !this.grid) return;
+      const cover = loaded ?? this.current;
+      this.swapCover(cover, index);
+      fillIntact(this.grid);
+      this.dirty = true;
+      this.setBusy(false);
+      this.reportLoose(performance.now(), true);
+      this.scheduleStage();
+      this.wake();
+    });
+  }
+
   next() {
-    if (!this.grid || this.flight || this.cascade || this.busy || this.destroyed) return;
-    const index = (this.coverIndex + 1) % this.covers.length;
+    if (!this.grid || this.occupied() || this.busy || this.destroyed) return;
+    const index = this.nextIndex();
     this.ensureCover(index);
     this.ensureCover(index + 1);
     this.script = null;
     if (this.reducedMotion) {
-      this.setBusy(true);
-      this.ensureCover(index).then((loaded) => {
-        if (this.destroyed || !this.grid) return;
-        const cover = loaded ?? this.current;
-        this.swapCover(cover, index);
-        fillIntact(this.grid);
-        this.dirty = true;
-        this.setBusy(false);
-        this.reportLoose(performance.now(), true);
-        this.wake();
-      });
+      this.advanceInstantly(index);
       return;
     }
     const phase = this.random.unit() * Math.PI * 2;
-    strataHomes(this.currentCells.light, this.grid.cover, this.strataHomes, this.flightKeys, this.homeKeys, phase);
+    strataHomes(this.currentCells.light, this.grid.cover, this.strataHomes, this.toneKeys, this.spotKeys, phase);
     this.cascade = {
       start: performance.now(),
       index,
@@ -998,9 +1340,8 @@ export default class SandField {
       settledAt: 0,
       phase,
       gathered: false,
+      plan: null,
       count: 0,
-      top: 0,
-      bottom: 0,
     };
     this.setBusy(true);
     haptic("press");
@@ -1014,72 +1355,25 @@ export default class SandField {
     this.current = cover;
     this.currentCells = sampleCells(cover, this.grid.cover);
     this.coverIndex = index;
+    this.staged = null;
     this.callbacks.onCover?.(cover, index);
   }
 
   erupt(cascade) {
-    const grid = this.grid;
-    const { cells, glued, width, cover } = grid;
-    const nextCover = cascade.target;
-    const fromCells = this.currentCells;
-    const toCells = cascade.toCells;
-    const grainCells = this.flightCells;
-    const grainHomes = this.flightHomes;
-    const { count, top, bottom } = cascade;
-    const homes = cover * cover;
-    const sortedGrains = this.flightKeys;
-    const sortedHomes = this.homeKeys;
-    const pairs = Math.min(count, homes);
-    const path = this.flightPath;
-    const colour = this.flightColour;
-    const depth = Math.max(1, bottom - top);
-    let latest = 0;
-    for (let rank = 0; rank < pairs; rank += 1) {
-      const grain = sortedGrains[rank] % 65536;
-      const destination = sortedHomes[rank] % 65536;
-      const index = grainCells[grain];
-      const x0 = index % width;
-      const y0 = (index - x0) / width;
-      const fromHome = grainHomes[grain];
-      const homeX = destination % cover;
-      const homeY = (destination - homeX) / cover;
-      const scatter = hashCell(homeX, homeY);
-      const airborne = cells[index] !== 0 && glued[index] === 0 && isAirborne(cells, index, width);
-      const delay = airborne
-        ? scatter * AIRBORNE_SCATTER_S
-        : (ERUPT_DEPTH_S * Math.max(0, y0 - top)) / depth + scatter * SCATTER_S;
-      if (delay > latest) latest = delay;
-      const at = rank * 6;
-      path[at] = x0;
-      path[at + 1] = y0;
-      path[at + 2] = homeX;
-      path[at + 3] = homeY;
-      path[at + 4] = delay;
-      path[at + 5] = scatter;
-      const source = fromHome * 4;
-      const target = destination * 4;
-      const tint = rank * 8;
-      colour[tint] = fromCells.rgba[source];
-      colour[tint + 1] = fromCells.rgba[source + 1];
-      colour[tint + 2] = fromCells.rgba[source + 2];
-      colour[tint + 4] = toCells.rgba[target];
-      colour[tint + 5] = toCells.rgba[target + 1];
-      colour[tint + 6] = toCells.rgba[target + 2];
-    }
-    cells.fill(0);
-    glued.fill(0);
-    grid.velocity.fill(0);
-    this.callbacks.onCover?.(nextCover, cascade.index);
-    this.launch(pairs, latest, "next", nextCover, cascade.index);
+    const { plan } = cascade;
+    this.clearTray();
+    this.callbacks.onCover?.(cascade.target, cascade.index);
+    this.launch(plan.written, plan.latest, "next", cascade.target, cascade.index);
   }
 
   bucketLandings(count, latest) {
     const buckets = this.landingBuckets;
-    const path = this.flightPath;
+    const path = this.flightData.path;
     const span = Math.max(latest, 0.001);
     buckets.fill(0);
     for (let rank = 0; rank < count; rank += 1) {
-      const bucket = Math.min(LANDING_BUCKETS - 1, Math.floor((path[rank * 6 + 4] / span) * LANDING_BUCKETS));
+      const at = rank * PATH_STRIDE;
+      const bucket = Math.min(LANDING_BUCKETS - 1, Math.floor(((path[at + 4] + path[at + 6]) / span) * LANDING_BUCKETS));
       buckets[bucket] += 1;
     }
     for (let bucket = 1; bucket < LANDING_BUCKETS; bucket += 1) buckets[bucket] += buckets[bucket - 1];
@@ -1089,21 +1383,23 @@ export default class SandField {
     const { gl } = this;
     this.bucketLandings(count, latest);
     if (count) {
+      const { path, colour } = this.flightData;
       gl.bindBuffer(gl.ARRAY_BUFFER, this.pathBuffer);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.flightPath, 0, count * 6);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, path, 0, count * PATH_STRIDE);
       gl.bindBuffer(gl.ARRAY_BUFFER, this.colourBuffer);
-      gl.bufferSubData(gl.ARRAY_BUFFER, 0, this.flightColour, 0, count * 8);
+      gl.bufferSubData(gl.ARRAY_BUFFER, 0, colour, 0, count * 8);
     }
     this.flight = {
       start: performance.now(),
       count,
-      total: count ? latest + FLIGHT_S + POP_S : 0,
+      total: count ? latest + REST_S : 0,
       latest: Math.max(latest, 0.001),
       startLoose: this.grid.loose,
       buzzed: false,
       mode,
       cover,
       index,
+      seed: this.random.unit() * 64,
     };
     this.dirty = true;
     this.setBusy(true);
@@ -1123,7 +1419,7 @@ export default class SandField {
       return;
     }
     if (!flight.count) return;
-    const reached = Math.floor(((elapsed - FLIGHT_S) / flight.latest) * LANDING_BUCKETS);
+    const reached = Math.floor((elapsed / flight.latest) * LANDING_BUCKETS);
     const landed = reached <= 0 ? 0 : this.landingBuckets[Math.min(LANDING_BUCKETS, reached) - 1];
     this.grid.loose = Math.round(flight.startLoose * (1 - landed / flight.count));
   }
@@ -1137,14 +1433,15 @@ export default class SandField {
       this.current = flight.cover;
       this.currentCells = sampleCells(flight.cover, this.grid.cover);
       this.coverIndex = flight.index;
+      this.staged = null;
       this.ensureCover(flight.index + 1);
     }
     this.fuseLanded(flight.count);
     this.dirty = true;
     this.stillSteps = 0;
-    this.land();
     this.setBusy(false);
     this.reportLoose(performance.now(), true);
+    this.scheduleStage();
   }
 
   fuseLanded(count) {
@@ -1152,17 +1449,12 @@ export default class SandField {
     fillIntact(grid);
     if (!count) return;
     const { glued, width } = grid;
-    const path = this.flightPath;
+    const path = this.flightData.path;
     for (let rank = 0; rank < count; rank += 1) {
-      const at = rank * 6;
+      const at = rank * PATH_STRIDE;
       glued[path[at + 3] * width + path[at + 2]] = LANDED;
     }
     this.fuse = { start: performance.now() };
-  }
-
-  land() {
-    this.landBeat = 1 - this.landBeat;
-    this.surface.dataset.land = String(this.landBeat);
   }
 
   reportLoose(now, force) {
@@ -1192,6 +1484,7 @@ export default class SandField {
         this.flight ||
         this.fuse ||
         this.cascade ||
+        this.loosen ||
         this.script ||
         pointer.down ||
         this.stillSteps < SETTLE_STEPS ||
@@ -1222,7 +1515,8 @@ export default class SandField {
     this.updatePointer(now);
     this.updateScript(now);
     this.updateCascade(now);
-    if (this.flight || this.cascade?.gathered) this.simDebt = 0;
+    this.updateLoosen(now);
+    if (this.flight || this.cascade?.gathered || this.loosen?.count) this.simDebt = 0;
     else this.advance(dt);
     this.updateFlight(now);
 
@@ -1260,8 +1554,7 @@ export default class SandField {
       this.fuse = null;
       return 0;
     }
-    const remaining = 1 - Math.max(0, progress);
-    return remaining * remaining * remaining;
+    return 1 - easeInOutSine(Math.max(0, progress));
   }
 
   render(now) {
@@ -1298,7 +1591,7 @@ export default class SandField {
     gl.uniform1f(uniforms.uGap, this.gapCells);
     gl.uniform1f(uniforms.uDpr, this.dpr);
     gl.uniform1f(uniforms.uLattice, LATTICE_BASE);
-    gl.uniform1f(uniforms.uFuse, this.fuseAmount(now));
+    gl.uniform1f(uniforms.uFuse, this.loosen ? this.loosenAmount(now) : this.fuseAmount(now));
     gl.uniform3f(uniforms.uEmpty, this.emptyRgb[0], this.emptyRgb[1], this.emptyRgb[2]);
     gl.uniform3f(uniforms.uInk, this.inkRgb[0], this.inkRgb[1], this.inkRgb[2]);
     const pointer = this.pointer;
@@ -1323,8 +1616,12 @@ export default class SandField {
       gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
       gl.uniform2f(flightUniforms.uGrid, grid.width, grid.height);
       gl.uniform1f(flightUniforms.uTime, (now - flight.start) / 1000);
-      gl.uniform1f(flightUniforms.uDuration, FLIGHT_S);
-      gl.uniform1f(flightUniforms.uPop, POP_S);
+      gl.uniform1f(flightUniforms.uLift, FLIGHT_LIFT);
+      gl.uniform1f(flightUniforms.uSwell, FLIGHT_SWELL);
+      gl.uniform1f(flightUniforms.uSwirl, grid.cover * SWIRL_REACH);
+      gl.uniform1f(flightUniforms.uSwirlScale, grid.cover * SWIRL_SIZE);
+      gl.uniform1f(flightUniforms.uSeed, flight.seed);
+      gl.uniform1f(flightUniforms.uCohesion, CLUMP_COHESION);
       gl.uniform1f(flightUniforms.uCellPx, this.cellPx);
       gl.uniform1f(flightUniforms.uGap, this.gapCells);
       gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, flight.count);
@@ -1338,6 +1635,8 @@ export default class SandField {
     this.frame = 0;
     for (const id of this.timers) window.clearTimeout(id);
     this.timers.clear();
+    for (const id of this.idles) window.cancelIdleCallback?.(id);
+    this.idles.clear();
     if (this.torn) return;
     this.torn = true;
     this.destroyed = true;

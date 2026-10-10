@@ -5,7 +5,7 @@ import { useEffect, useRef } from "react";
 import { LOST_CONTEXT, createLoom } from "./loomEngine";
 
 const CANVAS_LABEL =
-  "Woven album cover. Drag across to pull a row, down to pull a column, tap a thread to pluck it. Up and down pick a row, Shift with left or right pulls it, Space plucks.";
+  "Woven album cover. Left alone, the cloth swishes from record to record on its own; any touch takes over. Drag across to pull a row, down to pull a column, hold the pull out to keep the thread looping while the cloth follows, or flick it and let the cloth glide on to the next lap. Tap a thread to pluck it. Up and down pick a row, Shift with left or right pulls it, holding keeps it looping, Space plucks.";
 
 function mountCanvas(host) {
   const canvas = document.createElement("canvas");
@@ -18,13 +18,13 @@ function mountCanvas(host) {
   return canvas;
 }
 
-export default function LoomStage({ covers, index, direction, params, reducedMotion, onPainted, onError, onEngine }) {
+export default function LoomStage({ covers, index, direction, auto, params, reducedMotion, onPainted, onError, onEngine, onCover }) {
   const hostRef = useRef(null);
   const engineRef = useRef(null);
-  const latestRef = useRef({ index, params, onPainted, onError, onEngine });
+  const latestRef = useRef({ index, params, onPainted, onError, onEngine, onCover });
 
   useEffect(() => {
-    latestRef.current = { index, params, onPainted, onError, onEngine };
+    latestRef.current = { index, params, onPainted, onError, onEngine, onCover };
   });
 
   useEffect(() => {
@@ -40,6 +40,7 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
         reducedMotion,
         onPainted: () => latestRef.current.onPainted?.(),
         onError: (kind, message) => latestRef.current.onError?.(kind, message),
+        onCover: (coverIndex, coverDirection) => latestRef.current.onCover?.(coverIndex, coverDirection),
       });
 
     let canvas = mountCanvas(host);
@@ -77,9 +78,11 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
     intersection.observe(canvas);
 
     const onKeyDown = (event) => engine.onKeyDown(event);
+    const onKeyUp = (event) => engine.onKeyUp(event);
     const onBlur = () => engine.onBlur();
     const onScroll = () => engine.invalidateRect();
     canvas.addEventListener("keydown", onKeyDown);
+    canvas.addEventListener("keyup", onKeyUp);
     canvas.addEventListener("blur", onBlur);
     document.addEventListener("visibilitychange", sync);
     window.addEventListener("scroll", onScroll, { passive: true, capture: true });
@@ -89,6 +92,7 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
       resizeObserver.disconnect();
       intersection.disconnect();
       canvas.removeEventListener("keydown", onKeyDown);
+      canvas.removeEventListener("keyup", onKeyUp);
       canvas.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", sync);
       window.removeEventListener("scroll", onScroll, { capture: true });
@@ -100,8 +104,8 @@ export default function LoomStage({ covers, index, direction, params, reducedMot
   }, [covers, reducedMotion]);
 
   useEffect(() => {
-    engineRef.current?.goTo(index, direction);
-  }, [index, direction]);
+    if (!auto) engineRef.current?.goTo(index, direction);
+  }, [index, direction, auto]);
 
   useEffect(() => {
     engineRef.current?.setParams(params);

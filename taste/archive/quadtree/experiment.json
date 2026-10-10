@@ -1,0 +1,24 @@
+{
+  "title": "Quadtree",
+  "description": "Your recently played covers kept as a quadtree of soft rounded tiles — the mosaic parts around your pointer, and the squares under it split towards the real pixels before folding back up once you leave. Press and drag to carve that detail in for good, and click to watch the tree regrow its own structure into the next cover from where you clicked.",
+  "tags": [
+    "WebGL",
+    "Shaders",
+    "Music"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "One mechanic finished to the edge: error-driven quadtree refinement under a lens that parts the tiles like a flat loupe, forgets on a delay, can be carved permanently, and morphs tree to tree between covers.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null
+}

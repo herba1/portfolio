@@ -8,8 +8,11 @@ export async function GET(request) {
   const slug = new URL(request.url).searchParams.get("slug");
   const [notes, votes] = await Promise.all([readNotes(), readVotes()]);
   const filtered = slug ? notes.filter((n) => n.slug === slug) : notes;
-  const feedback = slug ? votes.filter((v) => v.slug === slug && !v.undone).slice(-30).reverse() : [];
-  return NextResponse.json({ notes: filtered.slice(-50).reverse(), feedback });
+  const live = slug ? votes.filter((v) => v.slug === slug && !v.undone) : [];
+  const points = live.filter((v) => v.kind === "point").slice(-200);
+  const verdicts = live.filter((v) => v.kind === "verdict").slice(-20);
+  const feedback = [...points, ...verdicts].sort((a, b) => (a.ts < b.ts ? -1 : 1)).reverse();
+  return NextResponse.json({ notes: filtered.slice(-200).reverse(), feedback });
 }
 
 export async function POST(request) {

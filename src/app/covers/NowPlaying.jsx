@@ -1,31 +1,34 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { X } from "lucide-react";
+import { motion } from "motion/react";
 import SlotNumber from "@/app/ui/SlotNumber";
+import MarqueeText from "@/app/ui/MarqueeText";
 import EqBars from "./EqBars";
-import { TransportButton, transportStatus } from "./Transport";
-import { useAudio, toggle, stop, registerVisual } from "./lib/audioEngine";
+import { TransportButton, useSettledStatus } from "./Transport";
+import { useAudio, toggle, stop } from "./lib/audioEngine";
 
 // ---------------------------------------------------------------------------
 // The dock: a small player that stays in the world. Close the big card and the
-// song keeps going down here — art, name, the four lines, and a hairline that
-// tracks the preview along the bottom edge.
+// song keeps going down here — art, name, and the four lines.
 //
 // Enter/exit is a CSS state machine (data-state="in" | "out"), not a spring
-// library: nothing about a dock sliding 14px needs JS on the main thread. The
-// progress hairline is a scaleX on a CSS variable the engine writes, so it moves
-// every frame while React re-renders roughly ten times a second.
+// library: nothing about a dock sliding 14px needs JS on the main thread.
 // ---------------------------------------------------------------------------
 const EXIT_MS = 220;
+const SWIPE_DISMISS_PX = 96;
+const SWIPE_DISMISS_VELOCITY = 600;
+const DRAG_CLICK_GUARD_PX = 4;
 
-export default function NowPlaying({ hidden = false, onExpand }) {
+export default function NowPlaying({ hidden = false, landing = false, onExpand }) {
   const audio = useAudio();
   const rootRef = useRef(null);
   const artRef = useRef(null);
   const lastCover = useRef(null);
   if (audio.cover) lastCover.current = audio.cover;
   const cover = audio.cover || lastCover.current;
+  const draggedRef = useRef(false);
+  const statusText = useSettledStatus(audio);
 
   const shown = audio.status !== "idle" && !!audio.cover && !hidden;
   const [mounted, setMounted] = useState(shown);
@@ -39,35 +42,58 @@ export default function NowPlaying({ hidden = false, onExpand }) {
     return () => clearTimeout(t);
   }, [shown]);
 
-  // the hairline rides --cv-progress, written straight onto this node
-  useEffect(() => {
-    if (mounted) return registerVisual(rootRef.current);
-  }, [mounted]);
 
   if (!mounted || !cover) return null;
 
   // Grow the big card out of the little album thumb when the dock is expanded —
   // same morph the grid tiles use, just from a different starting box.
   const expand = () => {
-    const r = artRef.current?.getBoundingClientRect();
-    onExpand?.(cover, r ? { cx: r.left + r.width / 2, cy: r.top + r.height / 2, size: r.width } : null);
+    if (draggedRef.current) return;
+    const art = artRef.current;
+    if (!art) {
+      onExpand?.(cover, null);
+      return;
+    }
+    const a = art.getBoundingClientRect();
+    onExpand?.(cover, {
+      cx: a.left + a.width / 2,
+      cy: a.top + a.height / 2,
+      size: a.width,
+      radius: parseFloat(getComputedStyle(art).borderTopLeftRadius) || 0,
+    });
   };
 
   // The dock says exactly what the card says — one component, one vocabulary,
   // so a track that is "Still loading" up here can't read as idle down there.
-  const statusText = transportStatus(audio);
   // Remount the readout when the KIND of thing it says changes (clock → status
   // → a different status) so CSS can give the new line a way in. Keying on the
   // text itself would re-run the animation on every tick of a percentage.
   const readoutKind = statusText ? audio.status : "clock";
 
   return (
-    <div
+    <motion.div
       ref={rootRef}
       className="cv-dock"
       data-state={shown ? "in" : "out"}
+      data-entrance={landing ? "land" : undefined}
       role="region"
       aria-label="Now playing"
+      drag="x"
+      dragConstraints={{ left: 0, right: 0 }}
+      dragElastic={0.9}
+      dragSnapToOrigin
+      onDragStart={() => {
+        draggedRef.current = false;
+      }}
+      onDrag={(_, info) => {
+        if (Math.abs(info.offset.x) > DRAG_CLICK_GUARD_PX) draggedRef.current = true;
+      }}
+      onDragEnd={(_, info) => {
+        if (Math.abs(info.offset.x) > SWIPE_DISMISS_PX || Math.abs(info.velocity.x) > SWIPE_DISMISS_VELOCITY) stop();
+        requestAnimationFrame(() => {
+          draggedRef.current = false;
+        });
+      }}
     >
       <button
         ref={artRef}
@@ -75,32 +101,23 @@ export default function NowPlaying({ hidden = false, onExpand }) {
         style={cover.image ? { backgroundImage: `url(${cover.image})` } : undefined}
         onClick={expand}
         aria-label={`Open ${cover.title}`}
-      />
-
-      <button className="cv-dock-meta" onClick={expand}>
-        <span className="cv-dock-title">{cover.title}</span>
-        <span className="cv-dock-artist">{cover.sub}</span>
+      >
+        <EqBars playing={audio.playing} size={16} className="cv-dock-eq" />
       </button>
 
-      <EqBars playing={audio.playing} />
+      <button className="cv-dock-meta" onClick={expand}>
+        <MarqueeText className="cv-dock-title">{cover.title}</MarqueeText>
+        <MarqueeText className="cv-dock-artist">{cover.sub}</MarqueeText>
+      </button>
 
-      <TransportButton className="cv-dock-play" audio={audio} onClick={toggle} size={16} />
-
-      {/* On a narrow screen the running clock is the first thing to go, but the
-          STATUS never is — a phone on a bad connection is exactly where "is it
-          loading or is it stuck?" gets asked. See the mobile rule in covers.css. */}
       <span className="cv-dock-time" data-kind={statusText ? "status" : "clock"} data-status={audio.status}>
         <span key={readoutKind} className="cv-dock-readout">
           {statusText ? statusText : <SlotNumber value={fmt(audio.currentTime)} direction="up" />}
         </span>
       </span>
 
-      <button className="cv-dock-close" onClick={stop} aria-label="Stop">
-        <X size={15} />
-      </button>
-
-      <span className="cv-dock-line" aria-hidden="true" />
-    </div>
+      <TransportButton className="cv-dock-play" audio={audio} onClick={toggle} size={18} />
+    </motion.div>
   );
 }
 

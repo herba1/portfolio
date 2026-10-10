@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { RotateCw } from "lucide-react";
 import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
@@ -13,9 +14,8 @@ import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 // flaky connection, and each one used to look identical — a dimmed circle and
 // an ellipsis — which is why "I click play and nothing happens" had no answer.
 //
-//   loading  ring fills with the actual bytes downloaded (indeterminate sweep
-//            when the server sends no content-length). Pressing toggles whether
-//            it starts on its own when it lands.
+//   loading  the status line counts the bytes downloaded. Pressing toggles
+//            whether it starts on its own when it lands.
 //   blocked  the browser refused playback without a gesture. Pressing IS the
 //            gesture, so the button is live and says what it wants.
 //   error    this attempt failed. Pressing retries — and the button SAYS so:
@@ -24,9 +24,6 @@ import PlayPauseIcon from "@/app/ui/PlayPauseIcon";
 //   none     the server looked and there is no preview. The one honestly dead
 //            state, and the only one that gets a disabled button.
 // ---------------------------------------------------------------------------
-
-const RING = { r: 15.5, size: 36 }; // viewBox units; scaled by the button's CSS
-const CIRC = 2 * Math.PI * RING.r;
 
 // The glyph swap. In: turns clockwise into place out of nothing. Out: keeps
 // turning, all the way round and away — pressing retry spins the arrow off and
@@ -96,6 +93,23 @@ export const STATUS_READOUTS = [
  * Words for whatever is happening. Sentence case, solid ink, no abbreviation —
  * this is the line that has to answer "is it broken or is it slow?".
  */
+const STATUS_SETTLE_MS = 300;
+
+export function useSettledStatus(audio) {
+  const raw = transportStatus(audio);
+  const [settled, setSettled] = useState(!!raw);
+  useEffect(() => {
+    if (!raw) {
+      setSettled(false);
+      return;
+    }
+    if (settled) return;
+    const timer = setTimeout(() => setSettled(true), STATUS_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [raw, settled]);
+  return raw && settled ? raw : null;
+}
+
 export function transportStatus({ status, loaded, slow, pending, buffering, offline }) {
   if (status === "loading") {
     // A percentage is the strongest possible "it is working": it moves.
@@ -118,17 +132,11 @@ export function transportStatus({ status, loaded, slow, pending, buffering, offl
 }
 
 /**
- * Play / pause with the load state drawn around it. The ring is a stroked
- * circle rather than a separate spinner element so it shares the button's
- * centre exactly at every size, and it animates transform / stroke-dashoffset
- * only — no layout, no paint of the icon underneath.
+ * Play / pause. The load state lives in the status line beside it.
  */
 export function TransportButton({ className = "", audio, onClick, size = 20 }) {
-  const { status, playing, loaded, pending } = audio;
+  const { status, playing, pending } = audio;
   const loading = status === "loading";
-  // A number means a ring that fills; null means we were never told the size,
-  // so it sweeps instead. Both read as "working"; only one can read as "how far".
-  const determinate = loading && typeof loaded === "number";
   // Reduced motion keeps the SWAP (the glyph is information — it is how the
   // button says "retry") and drops only the turning and the scale.
   const reduce = useReducedMotion();
@@ -144,25 +152,6 @@ export function TransportButton({ className = "", audio, onClick, size = 20 }) {
       aria-label={transportLabel(audio)}
       aria-busy={loading || undefined}
     >
-      {loading ? (
-        <svg
-          className={`cv-transport-ring${determinate ? " is-determinate" : " is-sweep"}`}
-          viewBox={`0 0 ${RING.size} ${RING.size}`}
-          aria-hidden="true"
-        >
-          <circle className="cv-transport-track" cx={RING.size / 2} cy={RING.size / 2} r={RING.r} />
-          <circle
-            className="cv-transport-arc"
-            cx={RING.size / 2}
-            cy={RING.size / 2}
-            r={RING.r}
-            strokeDasharray={CIRC}
-            // Determinate: the gap IS the remaining bytes. Sweep: a fixed
-            // quarter-arc that the CSS rotation carries around.
-            strokeDashoffset={determinate ? CIRC * (1 - Math.max(0.02, loaded)) : CIRC * 0.75}
-          />
-        </svg>
-      ) : null}
       {/* Both glyphs share one grid cell, so the swap is a crossfade in place
           rather than anything the layout has to absorb. */}
       <span className="cv-transport-glyph" style={{ width: size, height: size }}>

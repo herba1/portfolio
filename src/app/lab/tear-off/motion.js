@@ -37,6 +37,8 @@ export const easeEntrance = cubicBezier(0.16, 1, 0.3, 1);
 export const easeInOut = cubicBezier(0.7, 0, 0.3, 1);
 export const easeInQuad = cubicBezier(0.55, 0.085, 0.68, 0.53);
 export const easeOutQuint = cubicBezier(0.22, 1, 0.36, 1);
+export const easeOutCubic = cubicBezier(0.33, 1, 0.68, 1);
+export const easeOutQuad = cubicBezier(0.25, 0.46, 0.45, 0.94);
 
 export function springProgress(durationMs, bounce) {
   const zeta = 1 - bounce;

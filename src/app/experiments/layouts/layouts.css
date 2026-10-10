@@ -99,7 +99,7 @@
   min-height: calc(100dvh - 152px);
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  grid-template-rows: repeat(20, minmax(104px, 1fr));
+  grid-template-rows: repeat(35, minmax(104px, 1fr));
   grid-template-areas:
     "refract refract refract refract flyout flyout"
     "refract refract refract refract flyout flyout"
@@ -120,7 +120,22 @@
     "ring ring ring ascii ascii ascii"
     "ring ring ring ascii ascii ascii"
     "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii";
+    "ring ring ring ascii ascii ascii"
+    "counter counter counter counter counter counter"
+    "counter counter counter counter counter counter"
+    "counter counter counter counter counter counter"
+    "counter counter counter counter counter counter"
+    "wetink wetink wetink oneline oneline oneline"
+    "wetink wetink wetink oneline oneline oneline"
+    "wetink wetink wetink oneline oneline oneline"
+    "wetink wetink wetink oneline oneline oneline"
+    "taffy taffy taffy taffy taffy taffy"
+    "taffy taffy taffy taffy taffy taffy"
+    "taffy taffy taffy taffy taffy taffy"
+    "scorch scorch stir stir stir stir"
+    "scorch scorch stir stir stir stir"
+    "scorch scorch stir stir stir stir"
+    "scorch scorch stir stir stir stir";
   gap: 16px;
 }
 .xl-bento__tile {

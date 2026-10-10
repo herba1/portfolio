@@ -1,0 +1,41 @@
+{
+  "title": "Counter",
+  "description": "Your recent song titles set huge, with the next record waiting inside the hole of each o. Scroll, swipe or tap and you fall through the letter: a wheel notch lands the next song in under half a second, the cover floods the screen, then shatters into that album’s paper as the next title lands. Only a runaway fling is reined in.",
+  "tags": [
+    "Type",
+    "Canvas",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "One endless zoom through real song titles where every enclosed letter space is a doorway, and any notch, swipe, flick or tap lands dead square on the next song.",
+  "source": {
+    "kind": "brief",
+    "lens": "kinetic-type"
+  },
+  "generation": null,
+  "building": false,
+  "iteration": 3,
+  "iteratedAt": "2026-10-09T19:19:35.387Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-10-09T14:25:22.709Z",
+      "summary": "Wheel and trackpad travel is speed-capped: at most 3.2 songs per second zooming in and 2.5 zooming out, measured on the live camera, for notches, flicks, ctrl-pinch and the settle spring alike.\nOne wheel burst or trackpad flick commits at most 2 songs in and 1 song out; the camera eases into that limit with a soft 0.4-level wall instead of hitting a stop, then lands square.\nFast notch spinning no longer stacks targets: a new notch only queues once the camera is within reach (2 ahead in, 1 out), so a spun wheel travels steadily at the capped rate.\nNotch dives size their duration so the eased curve never peaks above the cap (one notch in about 1.0s, out about 1.3s); taps, keys and the Surface button keep the 900ms dive.\nMomentum tails after a capped flick are swallowed even when they jitter, while a steady deliberate scroll is recognised after five events and keeps travelling.\nSettle springs never overshoot a capped landing, and coasting velocity follows the real capped motion so release momentum stays physical.\nNotch dives now run a capped velocity profile instead of a stretched ease: they launch on the first frame, ramp to 3.2 songs/s in (2.5 out) over about 120ms, cruise, then ease into the landing over the last 0.4 of a level (one notch in about 0.55s, out about 0.7s), and a retarget carries the live velocity so a spun wheel never restarts from zero.\nA run of large integer wheel deltas arriving under 24ms apart (a hard trackpad or Magic Mouse flick) is reclassified as free scrolling after the second quick event, and a notch is never read mid free-scroll.\nA steady held scroll or pinch moves its burst wall ahead before it bites, so continuous input travels through song after song at the capped rate with no crawl or hitch at each title; the wall and commit only apply to bursts whose deltas are decaying (six-event trend) or far below their peak.\nMomentum-tail suppression tracks a held peak of the tail instead of its minimum, so jittery tails stay swallowed, and slow steady scrolls under 4px resume after about 0.75s instead of being swallowed indefinitely.\nThe free-travel budget is seeded from the real frame interval (one 120Hz frame of budget from rest) and refills in 8 to 25ms slices, and the settle spring after a commit counts travel already made since the last rendered frame, so no single frame exceeds the cap.\nCtrl-pinch now commits at the burst wall like a wheel instead of creeping toward it while the fingers keep moving.\nWheel events with no vertical delta are ignored instead of interrupting a dive.\nCamera untouched: under the caps the approved arc runs at about 0.86 energy zooming in and 0.59 zooming out (it saturates at 4 levels/s), so it reads calmer than at approval; restoring full strength would mean feeding stepAim velocity relative to the cap, left for Herb to OK."
+    },
+    {
+      "iteration": 2,
+      "at": "2026-10-09T16:59:54.954Z",
+      "summary": "Speed caps raised from 3.2 to 7 songs/s zooming in and from 2.5 to 6 out, so the cap only touches runaway flings.\nOne wheel burst, trackpad flick or spun wheel now reaches up to 4 songs in and 3 out (was 2 and 1), so a quick spin of up to 4 notches in or 3 out keeps every notch.\nWheel and trackpad input passes through 1:1 up to 60% of the cap and only eases toward the cap above that, replacing the old curve that shaved travel at every speed.\nCoasting after a scroll is limited only by the cap, not eased, so momentum decays physically instead of braking at high speed.\nA single wheel notch moves on the first frame, peaks around 5.9 songs/s in (5.2 out) and lands in about 0.37s in and 0.42s out (was 0.55s and 0.7s); stacked notches cruise at the cap and still carry live velocity on retarget.\nA lone small wheel tick or trackpad nudge (as a Mac mouse sends) now dives to the next song with the same quick notch curve instead of a slow spring, landing about 0.5s after the tick instead of 1.25s.\nMomentum-tail commit threshold restored to its pre-cap 2.5 songs/s now that real speed can reach it.\nCamera untouched: arcEnergy still reads the real camera velocity, and with the caps above its 4 songs/s saturation, fast zooms reach full arc again (0.92 to 0.99 on hard flicks both ways, matching pre-cap; zoom-out had dropped to about 0.45)."
+    },
+    {
+      "iteration": 3,
+      "at": "2026-10-09T19:19:35.387Z",
+      "summary": "Inside the hole is now one pure function of zoom progress: the next cover sits sharp at rest, crossfades through 32 and 16 blocks into the 8x8 mosaic as it fills the screen, then the blocks fade into that album’s paper. The same depth draws the same frame whether you zoom in or out, how long you waited, or how fast you go.\nRemoved the timed pop (an 8x8 cover that depixelated 0.9s after landing, with a bump) and the second pop grid that re-depixelated during the first 0.1 of every dive and was merged with the dive grid by taking the coarser one. Together they made one dive go coarse, sharp, coarse, and made zooming in and out look different.\nHover and press no longer switch the grid: the cover used to snap from 8x8 to sharp when the hover ease crossed 0.5 and snap back on leave.\nGrid steps crossfade with smoothstep instead of switching at hard thresholds, so a slow drag coarsens continuously and nothing flickers back and forth across a threshold.\nThe art and its blocks are drawn straight onto the screen canvas at device resolution, locked to the cover’s own grid (at most 0.5 device px off, block widths within 1px). This replaces a work canvas that dropped to about 0.7x resolution at desktop sizes and was upscaled with nearest neighbour, which put block edges up to 1.9px off the grid and let them swim as the camera moved. The hole is now cut by a cached paper surround drawn over the art.\nThe next title is uncovered by the dissolving blocks instead of being faded in on top of them. It sits opaque under the mosaic, so it appears exactly in step with the cells, with no translucent glyph overlaps and no coloured ring at the letter’s rim mid-fade.\nOnly one level is drawn inside a hole. Before, the incoming title’s own hole was a blurry 256px sprite with an 8x8 cover, and the titles two and three songs ahead were drawn inside it. Those titles vanished at the moment of landing while the cover swapped to a sharp or 8x8 live version. Now the incoming hole shows exactly what it shows at rest, so landing is seamless.\nCells no longer shrink apart with gaps. Each fades over half the dissolve with a smoothstep, ordered mostly centre-out (75% radial, 25% noise), so the reveal reads as a calm wave from the middle.\nA cover that loads late fades in over 300ms, both its art in the hole and its paper, instead of popping in or setting off a pixel pop."
+    }
+  ]
+}

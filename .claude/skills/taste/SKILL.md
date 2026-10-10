@@ -32,10 +32,20 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Flat Swiss typographic layouts on a light ground; the Tuner is the reference for how an instrument-like UI should sit on the page.
 - Motion with weight and consequence: a stack you run through and fan out (Deck), cards that ride and captions that leave (Flyout).
 - Real audio and real data driving visuals (Tuner pitch detection, Backdrop's artwork-driven blur, Song Search resolving the real catalogue).
+- Fluid, interruptible motion above everything: every move can be grabbed and retargeted mid-flight and still feels smooth. He praised it even on pieces he removed (Mobile: "how fluid and everything is interruptible feels amazing"; Thread: "love the fluidity and interruptibility").
+- Type as a physical material: letters pulled like sugar on ink strands (Taffy, "a banger"), a Geist Mono text wall stirred like fluid (Stir, "I love this text kind of thing"), one pen line threading itself through tab icons (One line, "very very good concept").
+- One clean idea that works like a real component (Scorch: "a beautiful idea and component"; One line).
+- Material realism when it is the subject and he asks for it: paper fibre, print grain and torn perforations (Tear-off, "go for extra realism and texture"), a tape machine whose reels turn with the tape (Tape).
+- Organic camera paths: arcs and a little lag rather than dead-straight point-to-point moves (Counter).
 
 ## Hates
 
-- Skeuomorphic realism: fake glass, fake 3D objects, fake shadows for depth, parallax heroes.
+- Skeuomorphic chrome: fake glass panels, fake 3D UI objects, fake shadows for depth, parallax heroes. Material realism on the subject itself (paper, ink, tape) is a different thing and welcome when he asks for it.
+- Wild, wacky or weird effects, even when the interaction feels good: datamosh glitching (Mosh, "too wacky"), psychedelic marbling of covers (Marble, "a bit too wild for my taste"), quadtree mosaics (Quadtree, "too weird"), iron-filing field lines (Filings, "weird and not that cool"), a darkroom developer tray (Develop, "too tacky"), a harp of type sizes (Strum, "nah").
+- Too much energy: overshoot and bounce beyond a small settle (Taffy, "way too bouncy"), waves and sway that go everywhere (Thread, "just too crazy"). Elegance over excitement.
+- Uncapped speed: zooms and flings that race through content faster than you can read it (Counter, "cap the speed on zoom").
+- Frames that feel unrelated to the site, like a booking form wrapped around a brush (Wet ink).
+- Anything that gets stuck: an action that stops responding after the first go (Scorch, "I keep trying to add more but it's just getting stuck"), or audio that glitches (Tape, "why does the audio sound fucked").
 - All-caps labels, faded low-opacity text, tiny micro-labels that explain what is already visible.
 - Two-stop gradients; anything that reads as a default library demo.
 - Dark-mode-by-default moodiness; the site is light.
@@ -63,4 +73,4 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 
 - How much rich colour does Herb want in shader pieces versus the neutral chrome?
 - Does he prefer pieces that accept his own media (image, audio) over fixed subjects?
-- Sound as an output, not only an input: untested.
+- Sound as an output: Chop (cover pads) and Strum (type harp) were rejected; Tape, where the sound is the song under your hand, is still in play. Sound seems welcome only when it is the real thing, not a synthesised toy.

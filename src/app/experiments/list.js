@@ -9,6 +9,66 @@
 // is the one search engines keep trusting.
 export const EXPERIMENTS = [
   {
+    slug: "/scorch",
+    title: "Scorch",
+    seoTitle: "Scorch — burn through a photo print in WebGL",
+    description:
+      "A real photographic print hanging from its top edge — press to burn and drag to draw the flame, and the dark parts of the photo catch first and run like a fuse. Cut a piece free and it curls and falls away on its own while the rest keeps burning, until the next print shows through underneath.",
+    tags: ["WebGL", "Shaders", "Simulation"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
+    slug: "/stir",
+    title: "Stir",
+    seoTitle: "Stir — a fluid simulation that swirls bold type through a tracklist",
+    description:
+      "My recent tracklist as a wall of monospaced type that drifts like woven cloth, where bold behaves like ink in water — stir it and weight swirls through the letters, tinted by each song's cover, and rides away with them. Swipe along a row and it throws ahead with its neighbours following like threads on a loom, then the cloth settles back into its weave.",
+    tags: ["Type", "Simulation", "WebGL", "Music"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
+    slug: "/taffy",
+    title: "Taffy",
+    seoTitle: "Taffy — stretchy kinetic typography you pull apart in WebGL",
+    description:
+      "A song title set huge in ink that pulls like sugar — grab any letter and it stretches out of the word on strands that neck to a hair and snap, then settles home. Drop it on another letter and the two stay joined by a sagging bridge of ink until you pull it apart or tap the paper for the next title.",
+    tags: ["Type", "WebGL", "Physics"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
+    slug: "/counter",
+    title: "Counter",
+    seoTitle: "Counter — an infinite zoom through song titles",
+    description:
+      "Song titles set huge, each with the next record waiting inside the hole of its o — scroll, swipe or tap and you fall through the letter into the next song. The cover floods the screen, breaks into blocks and dissolves into that album's paper as the next title lands.",
+    tags: ["Type", "Canvas", "Music"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
+    slug: "/one-line",
+    title: "One line",
+    seoTitle: "One line — an animated tab bar drawn by a single thread",
+    description:
+      "A music app's tab bar drawn by one red thread that pulls out of the old icon, runs along the bar and sews itself into the next, tugging each icon as it lands. Hold and drag and the needle stays under your finger, unpicking the old icon as you leave and threading whichever tab you let go on.",
+    tags: ["Canvas", "Interface"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
+    slug: "/wet-ink",
+    title: "Wet ink",
+    seoTitle: "Wet ink — a calligraphy ink simulation in WebGL",
+    description:
+      "A wet-ink brush on fibred paper that keeps drawing by itself — each piece pools where the brush rests, feathers along the fibres and dries dark at its edges before a wash of water rinses it off. Take the brush whenever you like: drag slowly and the ink pools, flick and it thins to a hairline.",
+    tags: ["WebGL", "Simulation"],
+    date: "2026-10-09",
+    updated: "2026-10-09",
+  },
+  {
     slug: "/cover-ring",
     title: "Cover ring",
     seoTitle: "Cover ring — album covers on a draggable 3D wheel",

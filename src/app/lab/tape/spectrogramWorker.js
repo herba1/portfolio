@@ -23,6 +23,7 @@ const MAX_HZ = 5000;
 const TILT_DB_PER_OCTAVE = 3;
 const RANGE_DB = 62;
 const TAPS = 31;
+const PEAK = 0.891;
 
 function buildLoop(samples, sampleRate) {
   const start = Math.min(Math.round(LOOP_START_SECONDS * sampleRate), Math.floor(samples.length / 4));
@@ -35,6 +36,15 @@ function buildLoop(samples, sampleRate) {
     const phase = (i / seam) * Math.PI * 0.5;
     const tail = samples[(start + length + i) % samples.length];
     loop[i] = loop[i] * Math.sin(phase) + tail * Math.cos(phase);
+  }
+  let loudest = 0;
+  for (let i = 0; i < length; i++) {
+    const level = loop[i] < 0 ? -loop[i] : loop[i];
+    if (level > loudest) loudest = level;
+  }
+  if (loudest > 1e-4) {
+    const gain = PEAK / loudest;
+    for (let i = 0; i < length; i++) loop[i] *= gain;
   }
   return loop;
 }

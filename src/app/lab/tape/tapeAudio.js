@@ -2,6 +2,8 @@ import { TAPE_HEAD_SOURCE, TAPE_WORKLET_SOURCE } from "./tapeWorklet";
 
 const FADE_IN_SECONDS = 0.04;
 const LATENCY_LIMIT = 0.3;
+const CLOCK_FOLLOW = 0.02;
+const CLOCK_RESET = 0.08;
 
 function claimPlayback() {
   try {
@@ -20,9 +22,32 @@ export function createTapeAudio(onStateChange) {
   let moduleUrl = null;
   let pendingLoad = null;
   let destroyed = false;
+  let clockOffset = NaN;
 
   const notify = () => {
+    clockOffset = NaN;
     if (!destroyed && onStateChange) onStateChange();
+  };
+
+  const outputDelay = () => {
+    const output = Number.isFinite(context.outputLatency) ? context.outputLatency : 0;
+    const base = Number.isFinite(context.baseLatency) ? context.baseLatency : 0;
+    return Math.min(LATENCY_LIMIT, Math.max(0, output + base));
+  };
+
+  const heardOffset = () => {
+    const stamp = typeof context.getOutputTimestamp === "function" ? context.getOutputTimestamp() : null;
+    if (stamp && stamp.contextTime > 0 && stamp.performanceTime > 0) {
+      return stamp.contextTime - stamp.performanceTime / 1000;
+    }
+    return context.currentTime - outputDelay() - performance.now() / 1000;
+  };
+
+  const contextTimeAt = (performanceMs) => {
+    const sample = heardOffset();
+    if (!Number.isFinite(clockOffset) || Math.abs(sample - clockOffset) > CLOCK_RESET) clockOffset = sample;
+    else clockOffset += (sample - clockOffset) * CLOCK_FOLLOW;
+    return performanceMs / 1000 + clockOffset;
   };
 
   const wakeContext = () => {
@@ -54,7 +79,8 @@ export function createTapeAudio(onStateChange) {
       processor = context.createScriptProcessor(1024, 1, 1);
       processor.onaudioprocess = (event) => {
         const channel = event.outputBuffer.getChannelData(0);
-        dsp.render(channel, channel.length, context.currentTime);
+        const at = Number.isFinite(event.playbackTime) ? event.playbackTime : context.currentTime;
+        dsp.render(channel, channel.length, at);
       };
       processor.connect(master);
       flush();
@@ -111,10 +137,11 @@ export function createTapeAudio(onStateChange) {
       pendingLoad = { levels, sourceRate };
       flush();
     },
-    steer(position, velocity) {
-      if (!context || context.state !== "running") return;
-      if (node) node.port.postMessage({ type: "steer", position, velocity, at: context.currentTime });
-      else if (dsp) dsp.steer(position, velocity, context.currentTime);
+    steer(position, velocity, performanceMs, mode, worn, reach) {
+      if (!context || context.state !== "running" || (!node && !dsp)) return;
+      const at = contextTimeAt(performanceMs);
+      if (node) node.port.postMessage({ type: "steer", position, velocity, at, mode, worn, reach });
+      else dsp.steer(position, velocity, at, mode, worn, reach);
     },
     suspend() {
       if (context && context.state === "running") context.suspend().catch(() => null);
@@ -125,12 +152,6 @@ export function createTapeAudio(onStateChange) {
     },
     get running() {
       return Boolean(context) && context.state === "running";
-    },
-    get latency() {
-      if (!context || context.state !== "running") return 0;
-      const output = Number.isFinite(context.outputLatency) ? context.outputLatency : 0;
-      const base = Number.isFinite(context.baseLatency) ? context.baseLatency : 0;
-      return Math.min(LATENCY_LIMIT, Math.max(0, output + base));
     },
     destroy() {
       destroyed = true;

@@ -113,7 +113,8 @@ export default function SandExperience({ covers, embedded = false }) {
     const onTray = event.target === surfaceRef.current;
     if (event.key === "r" || event.key === "R") {
       event.preventDefault();
-      field.rebuild();
+      if (event.shiftKey) field.restore();
+      else field.rebuild();
     } else if ((event.key === "ArrowRight" || event.key === "n" || event.key === "N") && !ownsArrowKeys(event.target)) {
       event.preventDefault();
       field.next();
@@ -157,7 +158,7 @@ export default function SandExperience({ covers, embedded = false }) {
       <div className="sand__stage">
         <header className="sand__head">
           <h1 className="sand__name text-title-sm">Sand</h1>
-          <p className="sand__hint text-ui text-ink-secondary">Drag across the cover to crumble it. Press and hold to pull it back.</p>
+          <p className="sand__hint text-ui text-ink-secondary">Drag across the cover to crumble it. Press and hold to pour the sand into the next record.</p>
         </header>
         <div
           ref={surfaceRef}
@@ -165,7 +166,7 @@ export default function SandExperience({ covers, embedded = false }) {
           tabIndex={0}
           role="application"
           aria-roledescription="sand tray"
-          aria-label="Album cover made of sand. Drag to crumble, press and hold, double-click or press R to rebuild, C to crumble, right arrow for the next cover."
+          aria-label="Album cover made of sand. Drag to crumble. Press and hold, double-click or press R to pour the sand into the next cover. Shift with hold or R rebuilds this cover. C to crumble, right arrow to collapse into the next cover."
         >
           <div className="sand__placeholder" aria-hidden="true" />
           <svg ref={ringRef} className="sand__ring" viewBox="0 0 48 48" aria-hidden="true" data-state="idle">
@@ -191,10 +192,10 @@ export default function SandExperience({ covers, embedded = false }) {
         <div className="sand__controls">
           <div className="sand__actions">
             <button type="button" className="sand__button text-ui" onClick={handleRebuild} disabled={busy || !hasLoose}>
-              Rebuild
+              Pour into next
             </button>
             <button type="button" className="sand__button text-ui" onClick={handleNext} disabled={busy || phase !== "ready"}>
-              Next cover
+              Collapse into next
             </button>
           </div>
           <div

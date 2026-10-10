@@ -9,7 +9,7 @@ import LoomExperience from "./LoomExperience";
 
 export const metadata = {
   title: "Loom",
-  description: "An album cover woven from 96 threads each way — pull a thread and its strip of the picture slides like a slot reel, the cloth ripples, and it plucks a note as it springs home.",
+  description: "An album cover woven from 96 threads each way. Left alone, the square cloth swishes from record to record in flowing waves. Every thread carries the picture as an endless loop, so pull one from the middle and hold it and it runs forever while the cloth flows after it, plucking a note at every lap.",
 };
 
 const FALLBACK_CARDS = [

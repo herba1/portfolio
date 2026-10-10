@@ -1,0 +1,42 @@
+{
+  "title": "Stir",
+  "description": "My recent tracklist as a wall of monospaced type where bold behaves like ink in water, woven like cloth: every row is an endless strip bleeding off both edges, the whole wall glides one way as one piece, and every few seconds one row pulls ahead while its neighbours follow less and less, so a shear wave ripples through the wall and eases back. Each song carries its cover colour, and whatever you stir rides away with the letters it landed on, so a held finger prints each passing song's ink into a trail. Swipe along a row to throw it and the rows around it follow like threads on a loom before the cloth settles; only true vortex cores draw themselves in tangent strokes.",
+  "tags": [
+    "Type",
+    "Simulation",
+    "WebGL",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "parents": null,
+  "tasteVersion": 1,
+  "intent": "Make weight the only ink on the page: a real stable-fluids simulation swirls boldness through a reflow-free Geist Mono tracklist, so a stir keeps spinning on its own and the wall always stays readable.",
+  "source": {
+    "kind": "brief",
+    "lens": "kinetic-type"
+  },
+  "generation": null,
+  "building": false,
+  "iteration": 3,
+  "iteratedAt": "2026-10-09T17:41:28.000Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-10-09T14:25:36.196Z",
+      "summary": "Second channel: each song's cover colour, sampled client-side and normalised in OKLab to an ink-dark tone (curated print inks as fallback), rides the fluid as premultiplied colour and tints the letters it reaches.\nThe brush soaks up the colour of the song under it, so a drag carries one song's ink into the next; taps, presses, gusts and the intro whorl all deposit their song's colour.\nTrails linger and relax: a slower stain field (about 4s) keeps a soft weight lift and tint after the bold collapses, then fades to plain type.\nVortex as structure: in the strongest cores the letters crossfade into - \\ | / strokes aligned with the flow, drawing a tangent arc around the eye.\nVorticity confinement now only acts where ink is, so the whorl spins while bold is present and the wall actually settles and sleeps (about 11s) instead of churning forever.\nTwo RGBA16F field textures replace the single R16F dye upload; the sim stays near 0.7ms per frame at 164x37 cells.\nFirst paint no longer waits on album covers: GL starts right after the font race and late covers recolour the palette in place.\nThe intro whorl soaks up each song it crosses and its eye sits on the most colourful song within three rows of centre, so the first frame shows a two or three colour stir without any input.\nStroke glyphs only appear in true vortex cores (Okubo-Weiss: rotation must beat strain, with an absolute curl floor of twice the old minimum), so straight drags no longer line their shear edges with dashes.\nStroke direction has hysteresis (switches only 30 degrees past the bin edge in the doubled angle) and the shader crossfades old and new strokes over 120ms instead of spinning like a terminal spinner.\nLetter-to-stroke swap is tight and full-ink (max of the two over a 0.35 to 0.65 core band) with a one-master weight dip, so no greyed double glyphs.\nCover colour now comes from the strongest OKLab hue sector weighted by chroma squared, so multi-hue covers give a clean ink instead of mud; neutral covers still fall back to near-black.\nCovers load as Spotify 64px thumbnails with the 300px image as an error fallback, cutting roughly 1MB on phones.\nThe fluid reuses the curl from vorticity confinement for the core pass instead of recomputing it every frame."
+    },
+    {
+      "iteration": 2,
+      "at": "2026-10-09T17:02:29.778Z",
+      "summary": "The text now moves forever: every row is a seamless looping strip of songs that drifts at about 1.6 characters a second, alternating direction row by row with a slight per-row speed difference so the weave never repeats.\nRows bleed off both edges of the stage, so the wall reads as endless; the first frame is still left-aligned in the gutter and the drift eases in over about two seconds after the reveal.\nBold and cover colour ride with the letters they land on: the fluid carries ink along each row's drift wherever the flow is calm, and follows the stir itself where it is strong.\nHolding the pointer down prints a trail: the well keeps depositing while letters slide through it and soaks up each passing song's colour.\nStrong flow grabs the rows: a swipe or flick along a row throws it up to 8 characters a second (soft-capped), a whorl turns the rows above and below its eye with its rotation, and everything glides back to its drift in about two seconds; a casual hover leaves the rows alone.\nLeft and right arrow currents now also push the rows in their lane; R calms the rows back to cruise along with the ink.\nLetters slide with sub-pixel precision: the glyph atlas is sampled linearly inside each tile, and stroke glyphs and vortex cores are read at each moving glyph's own centre so they stay aligned with the letters.\nWeight and tint are read per row, so neighbouring rows sliding apart never leave half-bold glyphs, and vertical dye diffusion is a quarter of horizontal so bold stays with its row.\nClean letters flow in at the edges: ink that leaves the stage is gone instead of smearing along the wall.\nThe fluid sleeps when quiet while the drift keeps running, so an idle wall costs one small lane upload and a draw per frame; reduced motion keeps the rows still and the loop asleep.\nRows keep their phase across height-only resizes (mobile toolbars), and the hint mentions throwing a row."
+    },
+    {
+      "iteration": 3,
+      "at": "2026-10-09T17:41:28.000Z",
+      "summary": "The alternating marquee is gone: the whole wall now glides one way as a single cloth at about 1.4 characters a second, and every row is still a seamless endless loop.\nLoom shear: every 7.4 seconds a hand pulls one lead row ahead (up to about 4.5 characters a second over 3.2s), and the rows around it follow less and less with a slight delay, so a chevron of displacement ripples outward through the wall.\nRows are coupled like threads (spring and viscous coupling between neighbours plus a light drag), so after each pull the lead eases back while the rest of the cloth catches up; nothing snaps or bounces and no row ever reverses (the slowest dips to about 0.9 characters a second).\nThe lead row wanders: the first pull comes from the centre row about 1.4s after load, then each pull starts a few rows further along a slow sweep across the middle of the wall, so the origin of the wave drifts down and back up.\nSwiping or flicking a row now drags its neighbours the loom way, falling off over about five rows with the same delay, and the cloth glides back to its weave in about two seconds; row grip is a touch stronger so a throw still carries the rows it pulls.\nR calms the cloth: it drops row grip, damps the slip and forgets the stored shear, so the wall goes straight back to the weave.\nThe cloth runs on fixed 240Hz substeps (a few dozen rows, negligible cost), each row moves by the exact distance integrated across them, and the fluid still carries ink at each row's real speed.\nCanvas label and page description now describe the woven cloth."
+    }
+  ]
+}

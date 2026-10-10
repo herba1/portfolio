@@ -2300,6 +2300,7 @@ html[data-scroll-locked] {
 
 @media (max-width: 639px) {
   .page-card {
+    --mobile-menu-drop: calc(84px + var(--mobile-menu-rows, 2) * 48px + 24px + 44px + 32px);
     background: var(--color-surface); /* slate-100 — matches body so the card reads solid */
     min-height: 100dvh; /* dynamic vh: track the visible viewport so a single-
                            screen page (e.g. the tuner) never overflows by the
@@ -2339,7 +2340,7 @@ html[data-scroll-locked] {
   /* The actual reveal: slide the fixed window down to expose the menu behind it.
      Lives on its own class so removing it (on close) animates back to 0. */
   .page-card.is-open {
-    transform: translateY(57vh) scale(0.96);
+    transform: translateY(var(--mobile-menu-drop)) scale(0.96);
     border-top-left-radius: 30px;
     border-top-right-radius: 30px;
     box-shadow: var(--shadow-lift);
@@ -2353,9 +2354,6 @@ html[data-scroll-locked] {
     inset: 0;
     z-index: var(--z-index-menu);
     padding-top: 84px;
-    /* Keep all content inside the visible band — the page card slides down
-       to ~57vh, so anything below that is hidden behind it. */
-    padding-bottom: 45vh;
     /* One step down the surface ladder from the page, so the card that
        slides away reads as lifting off something, not floating on it. */
     background: var(--color-surface-sunken);
@@ -2389,6 +2387,7 @@ html[data-scroll-locked] {
     display: block;
     width: 100%;
     padding: 8px 28px;
+    height: 48px;
     /* Sits between title-sm (20px) and title (24px) on the scale, so it
        borrows title's em tracking and its tightening leading. */
     font-size: 26px;
@@ -2413,11 +2412,8 @@ html[data-scroll-locked] {
     color: var(--color-warning);
   }
 
-  /* Social icons — right-aligned row pinned to the bottom of the visible
-     band (margin-top:auto pushes it down; padding-bottom on .mobile-menu
-     keeps it clear of the page card). */
   .mobile-menu__social {
-    margin-top: auto;
+    margin-top: 24px;
     display: flex;
     justify-content: flex-end;
     align-items: center;

@@ -25,7 +25,7 @@ const NOTCH_MOBILE_BP = 640; // matches the covers.css mobile media query
 const NOTCH_SIDE_GUTTER = 24; // min breathing room each side of the notch
 const NOTCH_MIN_SQUISH = 0.6; // floor so condensed text stays legible
 
-export default function Covers({ initialTracks = null, initialMode = null }) {
+export default function Covers({ initialTracks = null, initialMode = null, tracksPromise = null }) {
   // start with placeholders, then swap in recently-played Spotify covers if set up
   const [initialCovers] = useState(() => {
     const live = coversFromTracks(initialTracks, initialMode);
@@ -44,7 +44,10 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
   useEffect(() => {
     if (initialCovers) return;
     let alive = true;
-    fetchSpotifyCovers()
+    const coversSource = tracksPromise
+      ? Promise.resolve(tracksPromise).then(({ tracks, mode }) => coversFromTracks(tracks, mode))
+      : fetchSpotifyCovers();
+    coversSource
       .then((sp) => {
         if (!alive) return;
         if (!sp) {
@@ -62,7 +65,7 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
     return () => {
       alive = false;
     };
-  }, [initialCovers]);
+  }, [initialCovers, tracksPromise]);
 
   // auto-detect reduced motion once
   const prefersReduced = useRef(false);
@@ -173,7 +176,7 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
         lyricLineGap: { value: STAGE.lineGap, min: 0, max: 0.8, step: 0.01 },
         lyricFocusWidth: { value: STAGE.focusWidth, min: 0.4, max: 3, step: 0.05 },
         lyricRestScale: { value: STAGE.restScale, min: 0, max: 0.6, step: 0.01 },
-        lyricRestOpacity: { value: STAGE.restOpacity, min: 0, max: 0.8, step: 0.01 },
+        lyricRestOpacity: { value: STAGE.restOpacity, min: 0, max: 1, step: 0.01 },
         lyricBlur: { value: STAGE.blur, min: 0, max: 4, step: 0.1 },
         lyricTracking: { value: STAGE.tracking, min: -0.1, max: 0.05, step: 0.002 },
         lyricRevealTilt: { value: STAGE.revealTilt, min: 0, max: 90, step: 1 },
@@ -247,6 +250,7 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
   // ── focus + player state ───────────────────────────────────────────────
   const [focusIdx, setFocusIdx] = useState(0);
   const [player, setPlayer] = useState(null); // { cover, rect }
+  const [dockLanding, setDockLanding] = useState(false);
   const focus = covers[focusIdx] ?? covers[0];
 
   // HUD holds hidden until the grid signals its reveal has armed (art loaded),
@@ -478,8 +482,10 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
             <CoverPlayer
               cover={player?.cover}
               rect={player?.rect}
+              fromDock={!!player?.fromDock}
               cornerRadius={config.cornerRadius}
               onClose={() => {
+                setDockLanding(!!player?.fromDock);
                 setPlayer(null);
                 apiRef.current?.releasePush(); // neighbours ease back WITH the flip home
               }}
@@ -489,7 +495,11 @@ export default function Covers({ initialTracks = null, initialMode = null }) {
                 the card growing out of the dock's little album thumb. */}
             <NowPlaying
               hidden={!!player}
-              onExpand={(cover, rect) => setPlayer({ cover, rect })}
+              landing={dockLanding}
+              onExpand={(cover, rect) => {
+                setDockLanding(false);
+                setPlayer({ cover, rect, fromDock: true });
+              }}
             />
             {toast ? <div className="cv-toast">{toast}</div> : null}
           </>,

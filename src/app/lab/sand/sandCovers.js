@@ -65,6 +65,7 @@ export function sampleCells(cover, size) {
   const { data } = context.getImageData(0, 0, size, size);
   const rgba = new Uint8Array(size * size * 4);
   const light = new Uint8Array(size * size);
+  const tone = new Uint8Array(size * size * 3);
   let red = 0;
   let green = 0;
   let blue = 0;
@@ -85,6 +86,13 @@ export function sampleCells(cover, size) {
       rgba[at + 2] = Math.max(0, Math.min(255, (grey + (b - grey) * SAND_SATURATION) * shade));
       rgba[at + 3] = 255;
       light[cell] = Math.min(255, grey);
+      const sandRed = rgba[at];
+      const sandGreen = rgba[at + 1];
+      const sandBlue = rgba[at + 2];
+      const toneAt = cell * 3;
+      tone[toneAt] = Math.min(255, 0.2126 * sandRed + 0.7152 * sandGreen + 0.0722 * sandBlue);
+      tone[toneAt + 1] = Math.max(0, Math.min(255, (sandRed - sandGreen) / 2 + 128));
+      tone[toneAt + 2] = Math.max(0, Math.min(255, ((sandRed + sandGreen) / 2 - sandBlue) / 2 + 128));
     }
   }
   const count = size * size;
@@ -92,6 +100,7 @@ export function sampleCells(cover, size) {
     size,
     rgba,
     light,
+    tone,
     average: [Math.round(red / count), Math.round(green / count), Math.round(blue / count)],
   };
   cover.cells.set(size, sample);

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import "./taste.css";
 
@@ -10,10 +10,8 @@ const VIEWPORTS = [1280, 768, 390];
 const CHIP_WINDOW_MS = 2200;
 
 const VERDICTS = [
-  { key: "dislike", label: "Scrap", hotkey: "X", tone: "dislike", past: "Scrapped" },
-  { key: "iterate", label: "Iterate", hotkey: "R", tone: "continue", past: "Copied" },
+  { key: "dislike", label: "Remove", hotkey: "X", tone: "dislike", past: "Removed" },
   { key: "like", label: "Keep", hotkey: "L", tone: "like", past: "Kept" },
-  { key: "skip", label: "Skip", hotkey: "S", tone: "skip", past: "Skipped" },
 ];
 
 async function api(path, init) {
@@ -23,39 +21,150 @@ async function api(path, init) {
   return data;
 }
 
-const labRules = (slug) =>
-  `Edit only inside src/app/lab/${slug}/, follow .claude/skills/lab-build/SKILL.md and .claude/skills/taste/SKILL.md, keep its experiment.json status as is, and run node scripts/lab-gate.mjs ${slug} until it prints PASS.`;
+const BATCH_KEY = "herb:taste:review";
+const DRAFTS_KEY = "herb:taste:drafts";
+const GENERAL = { slug: "", title: "General" };
 
-function iteratePrompt(item, reasons, feedback, notes) {
-  const lines = [`Iterate on the lab experiment "${item.title}" at src/app/lab/${item.slug}/ (route /lab/${item.slug}).`, ""];
-  if (reasons.length) lines.push(`What's off: ${reasons.join(", ")}.`, "");
+const ITERATE_RULES = [
+  "For every piece under Iterate: edit only inside its own src/app/lab/<slug>/ folder, follow .claude/skills/lab-build/SKILL.md and .claude/skills/taste/SKILL.md, keep its experiment.json status as is, and run node scripts/lab-gate.mjs <slug> until it prints PASS.",
+  'When a piece is done, add 1 to "iteration" in its experiment.json, set "iteratedAt" to the current ISO time, and append { "iteration", "at", "summary" } to "changelog" so it comes back to /taste for a fresh verdict.',
+  "The pieces are independent, so work on them in parallel if you can.",
+];
+
+function mergeEntry(batch, item, change, at) {
+  const index = batch.findIndex((e) => e.slug === item.slug);
+  const base =
+    index >= 0
+      ? batch[index]
+      : { slug: item.slug, title: item.title, iteratedAt: item.iteratedAt || null, since: at, verdict: null, reasons: [], hates: 0, loves: 0, notes: 0, texts: [] };
+  const patch = typeof change === "function" ? change(base) : change;
+  const entry = { ...base, ...patch };
+  return index >= 0 ? batch.map((e, i) => (i === index ? entry : e)) : [...batch, entry];
+}
+
+const isEmpty = (e) => !e.verdict && !e.reasons?.length && !e.hates && !e.loves && !e.notes && !e.texts?.length;
+const signature = (e) => JSON.stringify({ ...e, since: null });
+
+function pinLine(f, i, tag) {
+  const where = f.point?.selector ? ` (selector: ${f.point.selector})` : "";
+  const why = f.reasons?.length ? ` · ${f.reasons.join(", ")}` : "";
+  return `${i + 1}. ${f.verdict === "love" ? "Love" : "Hate"} · ${summarise(f.point)}${where}${why}${f.note ? ` — "${f.note}"` : ""}${tag(f.ts)}`;
+}
+
+function feedbackLines(entry, feedback, notes) {
+  const tag = (ts) => (entry.iteratedAt && ts && ts < entry.iteratedAt ? " (from an earlier review: confirm it is really fixed)" : "");
+  const lines = [];
   const pins = feedback.filter((f) => f.kind === "point");
   if (pins.length) {
     lines.push("Pinned elements:");
     pins
       .slice()
       .reverse()
-      .forEach((f, i) => {
-        const where = f.point?.selector ? ` (selector: ${f.point.selector})` : "";
-        lines.push(`${i + 1}. ${f.verdict === "love" ? "Love" : "Hate"} · ${summarise(f.point)}${where}${f.note ? ` — "${f.note}"` : ""}`);
-      });
-    lines.push("");
+      .forEach((f, i) => lines.push(pinLine(f, i, tag)));
   }
   if (notes.length) {
     lines.push("Notes:");
     notes
       .slice()
       .reverse()
-      .forEach((note) => lines.push(`- ${note.text}`));
+      .forEach((note) => lines.push(`- ${note.text}${tag(note.ts)}`));
+  }
+  return lines;
+}
+
+function sessionFeedback(section) {
+  const since = section.entry.since || "";
+  return {
+    pins: section.feedback.filter((f) => f.kind === "point" && f.ts >= since),
+    notes: section.notes.filter((n) => n.ts >= since),
+  };
+}
+
+function reviewPrompt(sections) {
+  const general = sections.filter((s) => !s.entry.slug && s.entry.texts?.length);
+  const pieces = sections.filter((s) => s.entry.slug);
+  const needsWork = (s) =>
+    s.entry.verdict === "like" ? s.entry.hates > 0 || s.entry.notes > 0 : s.entry.reasons.length > 0 || s.entry.hates > 0 || s.entry.loves > 0 || s.entry.notes > 0;
+  const removed = pieces.filter((s) => s.entry.verdict === "dislike");
+  const iterate = pieces.filter((s) => s.entry.verdict !== "dislike" && needsWork(s));
+  const keptAsIs = pieces.filter((s) => s.entry.verdict === "like" && !needsWork(s));
+  const count = removed.length + iterate.length + keptAsIs.length;
+  const lines = [`My review of ${count} lab piece${count === 1 ? "" : "s"} from /taste. Work through every section.`, ""];
+  if (general.length) {
+    lines.push("# General notes");
+    general.forEach((s) => s.entry.texts.forEach((text) => lines.push(`- ${text}`)));
     lines.push("");
   }
-  if (!reasons.length && !pins.length && !notes.length) lines.push("No specific feedback yet: improve its weakest part.", "");
-  lines.push(labRules(item.slug));
-  return lines.join("\n");
+  if (removed.length) {
+    lines.push("# Remove");
+    removed.forEach((s) => {
+      lines.push(`- ${s.entry.title} · src/app/lab/${s.entry.slug}/${s.entry.reasons.length ? ` · ${s.entry.reasons.join(", ")}` : ""}`);
+      const now = sessionFeedback(s);
+      now.pins.forEach((f, i) => lines.push(`  ${pinLine(f, i, () => "")}`));
+      now.notes.forEach((n) => lines.push(`  - ${n.text}`));
+    });
+    lines.push(
+      "Copy each folder into taste/archive/<slug>/, delete it from src/app/lab, then run node scripts/lab-registry.mjs once.",
+      "Read the reasons, pins and notes on the removed pieces and fold any lasting lesson into the Hates in .claude/skills/taste/SKILL.md.",
+      "",
+    );
+  }
+  if (iterate.length) {
+    lines.push("# Iterate");
+    iterate.forEach((s) => {
+      const kept = s.entry.verdict === "like";
+      lines.push("", `## ${s.entry.title} · src/app/lab/${s.entry.slug}/ (route /lab/${s.entry.slug}) · ${kept ? "kept, improve it" : "no verdict yet, improve it"}`);
+      lines.push("Address every item; keep everything I did not mention, and keep every Love exactly as it is.");
+      if (s.entry.reasons.length) lines.push(`${kept ? "Tagged" : "What's off"}: ${s.entry.reasons.join(", ")}.`);
+      lines.push(...feedbackLines(s.entry, s.feedback, s.notes));
+    });
+    lines.push("", ...ITERATE_RULES, "");
+  }
+  if (keptAsIs.length) {
+    lines.push("# Kept as is", "No changes needed:");
+    keptAsIs.forEach((s) => {
+      lines.push(`- ${s.entry.title}${s.entry.reasons.length ? ` · tagged ${s.entry.reasons.join(", ")}` : ""}`);
+      sessionFeedback(s).pins.forEach((f, i) => lines.push(`  ${pinLine(f, i, () => "")}`));
+    });
+  }
+  return { text: lines.join("\n").trim(), count: count + general.length };
+}
+
+function describeEntry(entry) {
+  const pins = (entry.hates || 0) + (entry.loves || 0);
+  const notes = (entry.notes || 0) + (entry.texts?.length || 0);
+  const bits = [entry.verdict === "like" ? "kept" : entry.verdict === "dislike" ? "removed" : null];
+  if (pins) bits.push(`${pins} pin${pins === 1 ? "" : "s"}`);
+  if (notes) bits.push(`${notes} note${notes === 1 ? "" : "s"}`);
+  if (!pins && !notes && entry.reasons?.length) bits.push(entry.reasons.join(", "));
+  return `${entry.title} ${bits.filter(Boolean).join(", ")}`.trim();
 }
 
 const ideaPrompt = (idea) =>
   `Build a new lab experiment for herb.art: ${idea}\n\nUse the lab-build contract (.claude/skills/lab-build/SKILL.md) and the taste skill (.claude/skills/taste/SKILL.md). Create it under src/app/lab/<slug>/ with an experiment.json of status "candidate", and run node scripts/lab-gate.mjs <slug> until it prints PASS.`;
+
+async function copyText(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const field = document.createElement("textarea");
+    field.value = text;
+    field.setAttribute("readonly", "");
+    field.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+    document.body.append(field);
+    field.focus();
+    field.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch {
+      copied = false;
+    }
+    field.remove();
+    return copied;
+  }
+}
 
 function Kbd({ children }) {
   return <span className="taste-kbd">{children}</span>;
@@ -84,11 +193,15 @@ export default function TasteDeck({ tasteVersion }) {
   const [picked, setPicked] = useState(null);
   const [notes, setNotes] = useState([]);
   const [feedback, setFeedback] = useState([]);
-  const [draft, setDraft] = useState("");
+  const [drafts, setDrafts] = useState({});
   const [lastAction, setLastAction] = useState(null);
   const [error, setError] = useState(null);
   const [handoff, setHandoff] = useState(null);
   const [ideaDraft, setIdeaDraft] = useState("");
+  const [batch, setBatch] = useState([]);
+  const [copyState, setCopyState] = useState(null);
+  const copyTimer = useRef(null);
+  const batchRestored = useRef(false);
 
   const stageRef = useRef(null);
   const frameRef = useRef(null);
@@ -100,7 +213,7 @@ export default function TasteDeck({ tasteVersion }) {
   const sessionRef = useRef("");
   const positionRef = useRef({ slug: null, index: 0 });
 
-  const items = queue?.items || [];
+  const items = useMemo(() => queue?.items || [], [queue]);
   const current = items[index] || null;
   const next = items[index + 1] || null;
 
@@ -147,6 +260,41 @@ export default function TasteDeck({ tasteVersion }) {
   }, []);
 
   useEffect(() => {
+    let alive = true;
+    Promise.resolve().then(() => {
+      if (!alive) return;
+      try {
+        const saved = JSON.parse(window.localStorage.getItem(BATCH_KEY) || "[]");
+        if (Array.isArray(saved)) setBatch(saved.filter((e) => e && typeof e.slug === "string" && !isEmpty(e)));
+        const savedDrafts = JSON.parse(window.localStorage.getItem(DRAFTS_KEY) || "{}");
+        if (savedDrafts && typeof savedDrafts === "object") setDrafts(savedDrafts);
+      } catch {}
+      batchRestored.current = true;
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!batchRestored.current) return;
+    try {
+      window.localStorage.setItem(BATCH_KEY, JSON.stringify(batch));
+    } catch {}
+  }, [batch]);
+
+  useEffect(() => {
+    if (!batchRestored.current) return;
+    try {
+      window.localStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
+    } catch {}
+  }, [drafts]);
+
+  const touch = useCallback((item, change, at = new Date().toISOString()) => {
+    setBatch((b) => mergeEntry(b, item, change, at).filter((e) => !isEmpty(e)));
+  }, []);
+
+  useEffect(() => {
     if (!stageRef.current) return undefined;
     const observer = new ResizeObserver(([entry]) => {
       setStage({ width: entry.contentRect.width, height: entry.contentRect.height });
@@ -188,20 +336,22 @@ export default function TasteDeck({ tasteVersion }) {
 
   const handOff = useCallback(async (label, text) => {
     setHandoff({ label, text });
-    try {
-      await navigator.clipboard.writeText(text);
-      setLastAction(`Copied ${label} — paste it to Claude`);
-    } catch {
-      setLastAction(`Couldn't reach the clipboard — use Copy on ${label}`);
-    }
+    const copied = await copyText(text);
+    setLastAction(copied ? `Copied ${label} — paste it to Claude` : `Couldn't reach the clipboard — use Copy on ${label}`);
+    setCopyState(copied ? "copied" : "failed");
+    window.clearTimeout(copyTimer.current);
+    copyTimer.current = window.setTimeout(() => setCopyState(null), 2600);
+    return copied;
   }, []);
 
+  useEffect(() => () => window.clearTimeout(copyTimer.current), []);
+
   const commit = useCallback(
-    async (verdict, reasons) => {
+    async (verdict, reasons, { stay = false } = {}) => {
       window.clearTimeout(timerRef.current);
       pendingRef.current = null;
       setPending(null);
-      if (!current) return;
+      if (!current) return false;
       const item = current;
       const at = index;
       try {
@@ -220,27 +370,94 @@ export default function TasteDeck({ tasteVersion }) {
           }),
         });
         setHistory((h) => [...h, { id: data.record.id, index: at, item }]);
-        advance(at + 1);
+        touch(item, { verdict, reasons });
+        if (!stay) advance(at + 1);
         const past = VERDICTS.find((v) => v.key === verdict)?.past || verdict;
-        if (verdict === "iterate") {
-          await handOff(`the ${item.title} iterate prompt`, iteratePrompt(item, reasons, feedback, notes));
-        } else {
-          setLastAction(`${past} ${item.title}${reasons.length ? " · " + reasons.join(", ") : ""}`);
-        }
+        setLastAction(`${past} ${item.title}${reasons.length ? " · " + reasons.join(", ") : ""}`);
+        return true;
       } catch (err) {
         setError(err.message);
+        return false;
       }
     },
-    [current, index, viewport, tasteVersion, advance, handOff, feedback, notes],
+    [current, index, viewport, tasteVersion, advance, touch],
   );
+
+  const settleArmed = useCallback(() => {
+    const armed = pendingRef.current;
+    if (armed) return commit(armed.verdict, armed.reasons, { stay: true });
+    return Promise.resolve(true);
+  }, [commit]);
+
+  const saveNote = useCallback(
+    async (slug, raw) => {
+      const text = raw.trim();
+      if (!text) return null;
+      const startedAt = new Date().toISOString();
+      const data = await api("/api/taste/note", { method: "POST", body: JSON.stringify({ text, slug: slug || null, tasteVersion }) });
+      setDrafts((d) => {
+        const rest = { ...d };
+        delete rest[slug];
+        return rest;
+      });
+      if (slug && slug === current?.slug) setNotes((n) => [data.note, ...n]);
+      const item = slug ? items.find((i) => i.slug === slug) || { slug, title: slug } : GENERAL;
+      const change = slug ? (entry) => ({ notes: (entry.notes || 0) + 1 }) : (entry) => ({ texts: [...(entry.texts || []), text] });
+      touch(item, change, startedAt);
+      return { item, change };
+    },
+    [current, items, tasteVersion, touch],
+  );
+
+  const copyReview = useCallback(async () => {
+    const armed = pendingRef.current;
+    const stamp = new Date().toISOString();
+    let entries = batch;
+    if (armed && current) {
+      const saved = await commit(armed.verdict, armed.reasons, { stay: true });
+      if (!saved) return;
+      entries = mergeEntry(entries, current, { verdict: armed.verdict, reasons: armed.reasons }, stamp);
+    }
+    try {
+      for (const [slug, text] of Object.entries(drafts)) {
+        const saved = await saveNote(slug, text);
+        if (saved) entries = mergeEntry(entries, saved.item, saved.change, stamp);
+      }
+    } catch (err) {
+      setError(err.message);
+      return;
+    }
+    entries = entries.filter((e) => !isEmpty(e));
+    if (!entries.length) {
+      setLastAction("Nothing to copy yet: keep, remove, pin or note a piece first");
+      return;
+    }
+    try {
+      const sections = await Promise.all(
+        entries.map(async (entry) => {
+          if (!entry.slug) return { entry, feedback: [], notes: [] };
+          const data = await api(`/api/taste/note?slug=${entry.slug}`);
+          return { entry, feedback: data.feedback || [], notes: data.notes || [] };
+        }),
+      );
+      const { text, count } = reviewPrompt(sections);
+      if (!count) {
+        setLastAction("Nothing to copy yet: keep, remove, pin or note a piece first");
+        return;
+      }
+      const copied = await handOff(`the review of ${count} item${count === 1 ? "" : "s"}`, text);
+      if (!copied) return;
+      const sent = new Set(entries.map(signature));
+      setBatch((b) => b.filter((e) => !sent.has(signature(e))));
+      setHistory([]);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [batch, current, commit, handOff, drafts, saveNote]);
 
   const arm = useCallback(
     (verdict) => {
       if (!current) return;
-      if (verdict === "skip" || verdict === "iterate") {
-        commit(verdict, pendingRef.current?.reasons || preReasons);
-        return;
-      }
       const reasons = pendingRef.current?.verdict === verdict ? pendingRef.current.reasons : preReasons;
       const nextPending = { verdict, reasons, since: Date.now() };
       pendingRef.current = nextPending;
@@ -270,9 +487,11 @@ export default function TasteDeck({ tasteVersion }) {
         timerRef.current = window.setTimeout(() => commit(nextPending.verdict, pendingRef.current?.reasons || []), CHIP_WINDOW_MS);
         return;
       }
-      setPreReasons((prev) => (prev.includes(reason) ? prev.filter((r) => r !== reason) : [...prev, reason]));
+      const reasons = preReasons.includes(reason) ? preReasons.filter((r) => r !== reason) : [...preReasons, reason];
+      setPreReasons(reasons);
+      if (current) touch(current, { reasons });
     },
-    [picked, commit],
+    [picked, commit, preReasons, current, touch],
   );
 
   const undo = useCallback(async () => {
@@ -281,25 +500,26 @@ export default function TasteDeck({ tasteVersion }) {
     try {
       await api(`/api/taste/vote?id=${last.id}`, { method: "DELETE" });
       setHistory((h) => h.slice(0, -1));
+      touch(last.item, { verdict: null });
       advance(last.index);
       setLastAction(`Undid the verdict on ${last.item.title}`);
     } catch (err) {
       setError(err.message);
     }
-  }, [history, advance]);
+  }, [history, advance, touch]);
 
   const togglePoint = useCallback(() => {
-    setPointing((on) => {
-      postToFrame({ type: "taste:point", on: !on });
-      return !on;
-    });
-  }, [postToFrame]);
+    if (!pointing) settleArmed();
+    postToFrame({ type: "taste:point", on: !pointing });
+    setPointing(!pointing);
+  }, [pointing, postToFrame, settleArmed]);
 
   const savePoint = useCallback(
     async (verdictOverride) => {
       const verdict = verdictOverride || picked?.verdict;
       if (!picked || !verdict || !current) return;
       try {
+        const startedAt = new Date().toISOString();
         const data = await api("/api/taste/vote", {
           method: "POST",
           body: JSON.stringify({
@@ -315,6 +535,8 @@ export default function TasteDeck({ tasteVersion }) {
         });
         const n = feedback.filter((f) => f.kind === "point").length + 1;
         setFeedback((f) => [{ ...data.record }, ...f]);
+        const counter = verdict === "love" ? "loves" : "hates";
+        touch(current, (entry) => ({ [counter]: (entry[counter] || 0) + 1 }), startedAt);
         postToFrame({ type: "taste:mark", n, verdict });
         setLastAction(`Pin #${n} saved · ${verdict} · ${summarise(picked.element)}`);
         setPicked(null);
@@ -324,21 +546,20 @@ export default function TasteDeck({ tasteVersion }) {
         setError(err.message);
       }
     },
-    [picked, current, viewport, tasteVersion, feedback, postToFrame],
+    [picked, current, viewport, tasteVersion, feedback, postToFrame, touch],
   );
 
+  const draftKey = current?.slug || "";
+  const draft = drafts[draftKey] || "";
+
   const submitNote = useCallback(async () => {
-    const text = draft.trim();
-    if (!text) return;
-    setDraft("");
     try {
-      const data = await api("/api/taste/note", { method: "POST", body: JSON.stringify({ text, slug: current?.slug || null, tasteVersion }) });
-      setNotes((n) => [data.note, ...n]);
-      setLastAction("Note saved — it goes into the next iterate prompt");
+      const saved = await saveNote(draftKey, drafts[draftKey] || "");
+      if (saved) setLastAction(`Comment saved on ${saved.item.title} — it goes into the review copy`);
     } catch (err) {
       setError(err.message);
     }
-  }, [draft, current, tasteVersion]);
+  }, [draftKey, drafts, saveNote]);
 
   const handleKey = useCallback(
     (key, { shiftKey = false, preventDefault = () => {} } = {}) => {
@@ -356,15 +577,17 @@ export default function TasteDeck({ tasteVersion }) {
         undo();
         return;
       }
+      if (k === "c") {
+        copyReview();
+        return;
+      }
       if (!current) return;
       if (/^[1-8]$/.test(k)) {
         toggleReason(REASONS[Number(k) - 1]);
         return;
       }
       if (k === "x") arm("dislike");
-      else if (k === "r") arm("iterate");
       else if (k === "l") arm("like");
-      else if (k === "s") arm("skip");
       else if (k === "enter" && pendingRef.current) commit(pendingRef.current.verdict, pendingRef.current.reasons);
       else if (k === "arrowright" || k === "j") advance(Math.min(items.length - 1, index + 1));
       else if (k === "arrowleft" || k === "k") advance(Math.max(0, index - 1));
@@ -375,7 +598,7 @@ export default function TasteDeck({ tasteVersion }) {
         noteRef.current?.focus();
       } else if (k === "escape" && pointing) togglePoint();
     },
-    [picked, current, pointing, arm, commit, undo, toggleReason, togglePoint, savePoint, advance, items.length, index],
+    [picked, current, pointing, arm, commit, copyReview, undo, toggleReason, togglePoint, savePoint, advance, items.length, index],
   );
 
   useEffect(() => {
@@ -393,6 +616,7 @@ export default function TasteDeck({ tasteVersion }) {
       const data = event.data;
       if (!data || typeof data !== "object") return;
       if (data.type === "taste:picked") {
+        settleArmed();
         setPicked({ element: data.element, verdict: null, reasons: [], note: "" });
         setPointing(false);
         postToFrame({ type: "taste:point", on: false });
@@ -407,11 +631,10 @@ export default function TasteDeck({ tasteVersion }) {
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("message", onMessage);
     };
-  }, [handleKey, pointing, postToFrame]);
+  }, [handleKey, pointing, postToFrame, settleArmed]);
 
   const activeReasons = picked ? picked.reasons : pending ? pending.reasons : preReasons;
   const pins = feedback.filter((f) => f.kind === "point");
-  const lineage = current?.lineage || [];
   const finished = queue && !current;
 
   const nowHeading = current ? `${index + 1} of ${items.length} · ${current.title}` : queue ? "Nothing to judge" : "Loading…";
@@ -430,17 +653,12 @@ export default function TasteDeck({ tasteVersion }) {
 
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_352px]">
           <section className="flex flex-col gap-2">
-            <div className="text-ui-lg flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                {VIEWPORTS.map((width) => (
-                  <button key={width} type="button" className="taste-chip" data-on={viewport === width} onClick={() => setViewport(width)}>
-                    {width}
-                  </button>
-                ))}
-              </div>
-              <button type="button" className="taste-chip" data-on={pointing} onClick={togglePoint}>
-                <Kbd>P</Kbd> {pointing ? "click a part · ↑↓ bigger/smaller · Esc" : "pin a part"}
-              </button>
+            <div className="text-ui-lg flex items-center gap-2">
+              {VIEWPORTS.map((width) => (
+                <button key={width} type="button" className="taste-chip" data-on={viewport === width} onClick={() => setViewport(width)}>
+                  {width}
+                </button>
+              ))}
             </div>
             <div ref={stageRef} className="taste-stage h-[76vh] min-h-[480px]">
               {current ? (
@@ -460,7 +678,7 @@ export default function TasteDeck({ tasteVersion }) {
                 <div className="text-ink text-title-sm flex h-full flex-col items-center justify-center gap-2 px-6 text-center">
                   <span>{nowHeading}</span>
                   <span className="text-ink-secondary text-body">
-                    {finished ? "Copy an idea prompt below and paste it to Claude." : ""}
+                    {finished ? (batch.length ? "Press C to copy your review and paste it to Claude." : "Copy an idea prompt below and paste it to Claude.") : ""}
                   </span>
                 </div>
               )}
@@ -489,14 +707,6 @@ export default function TasteDeck({ tasteVersion }) {
                     </button>
                   ))}
                 </div>
-              ) : null}
-              {current ? (
-                <p className="text-ink-secondary text-ui-lg">
-                  {lineage.length > 1 ? lineage.map((l, i) => (i === lineage.length - 1 ? "this" : l.title)).join(" → ") + " · " : ""}
-                  {current.iteration ? `rebuilt ${current.iteration}× · ` : "first version · "}
-                  {current.recheck ? "consistency check · " : ""}
-                  {current.status}
-                </p>
               ) : null}
               {current?.changelog?.length ? (
                 <p className="text-ink text-ui-lg">Last rebuild: {current.changelog[current.changelog.length - 1].summary.split("\n").find((l) => /^\s*1\./.test(l)) || current.changelog[current.changelog.length - 1].summary.split("\n")[0]}</p>
@@ -548,6 +758,27 @@ export default function TasteDeck({ tasteVersion }) {
                     <Kbd>{v.hotkey}</Kbd> {v.label}
                   </button>
                 ))}
+                <button type="button" className="taste-verdict col-span-2" data-tone="continue" data-armed={pointing} disabled={!current} onClick={togglePoint}>
+                  <Kbd>P</Kbd> {pointing ? "Click a part · ↑↓ bigger/smaller · Esc" : "Point at a part"}
+                </button>
+                <button type="button" className="taste-verdict col-span-2" data-tone="continue" data-armed={batch.length > 0} onClick={copyReview}>
+                  <Kbd>C</Kbd>{" "}
+                  {copyState === "copied"
+                    ? "Copied · paste it to Claude"
+                    : copyState === "failed"
+                      ? "Copy failed · use Copy below"
+                      : `Copy review${batch.length ? ` · ${batch.length} piece${batch.length === 1 ? "" : "s"}` : ""}`}
+                </button>
+                {batch.length ? (
+                  <p className="text-ink-secondary text-ui col-span-2">
+                    {batch.map(describeEntry).join(" · ")} ·{" "}
+                    <button type="button" className="text-ink hover:text-accent" onClick={() => {
+                        if (window.confirm("Clear everything in this review without copying it?")) setBatch([]);
+                      }}>
+                      clear
+                    </button>
+                  </p>
+                ) : null}
               </div>
             )}
 
@@ -562,10 +793,14 @@ export default function TasteDeck({ tasteVersion }) {
             <div className="flex flex-col gap-2">
               <textarea
                 ref={noteRef}
+                onFocus={settleArmed}
                 className="taste-textarea"
-                placeholder="Note · Enter saves it for the next iterate prompt"
+                placeholder={current ? `Comment on ${current.title} · it stays with this piece` : "General comment · it goes into the review copy"}
                 value={draft}
-                onChange={(e) => setDraft(e.target.value)}
+                onChange={(e) => {
+                  const value = e.target.value;
+                  setDrafts((d) => ({ ...d, [draftKey]: value }));
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -634,7 +869,7 @@ export default function TasteDeck({ tasteVersion }) {
             </div>
 
             <p className="text-ink-secondary text-ui">
-              <Kbd>←</Kbd><Kbd>→</Kbd> switch · <Kbd>Z</Kbd> undo · <Kbd>D</Kbd> width · <Kbd>N</Kbd> note · <Kbd>Esc</Kbd> cancel
+              <Kbd>←</Kbd><Kbd>→</Kbd> switch · <Kbd>C</Kbd> copy prompt · <Kbd>Z</Kbd> undo · <Kbd>D</Kbd> width · <Kbd>N</Kbd> note · <Kbd>Esc</Kbd> cancel
             </p>
           </aside>
         </div>

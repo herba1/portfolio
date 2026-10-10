@@ -116,7 +116,9 @@ async function attachArtistImages(tracks, auth) {
   }
 }
 
-export async function getRecentTracks() {
+const UNAUTHORIZED = 401;
+
+export async function getRecentTracks({ retried = false } = {}) {
   try {
     const token = await getAccessToken();
     if (!token) return { tracks: [], mode: null };
@@ -127,6 +129,10 @@ export async function getRecentTracks() {
 
     // most played (already ordered by rank + unique)
     const top = await fetch(TOP_URL, { headers: auth, cache: "no-store" });
+    if (top.status === UNAUTHORIZED && !retried) {
+      cachedToken = null;
+      return getRecentTracks({ retried: true });
+    }
     if (top.ok) {
       const d = await top.json();
       tracks = (d.items || []).map(mapTrack).filter(Boolean);
@@ -157,11 +163,22 @@ export async function getRecentTracks() {
   }
 }
 
-export async function getCachedRecentTracks(maxAgeMs = 300_000) {
+const RECENT_TRACKS_MAX_AGE_MS = 300_000;
+
+export async function getCachedRecentTracks(maxAgeMs = RECENT_TRACKS_MAX_AGE_MS) {
   if (cachedTracks && Date.now() - cachedTracks.at < maxAgeMs) return cachedTracks.pending;
-  const pending = getRecentTracks();
-  cachedTracks = { at: Date.now(), pending };
-  const result = await pending;
-  if (!result.tracks.length) cachedTracks = null;
+  const entry = { at: Date.now(), pending: getRecentTracks(), settled: null };
+  cachedTracks = entry;
+  const result = await entry.pending;
+  if (!result.tracks.length) {
+    if (cachedTracks === entry) cachedTracks = null;
+  } else {
+    entry.settled = result;
+  }
   return result;
+}
+
+export function readSettledRecentTracks(maxAgeMs = RECENT_TRACKS_MAX_AGE_MS) {
+  if (!cachedTracks?.settled || Date.now() - cachedTracks.at >= maxAgeMs) return null;
+  return cachedTracks.settled;
 }

@@ -1,0 +1,99 @@
+@property --marquee-fade-start {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --marquee-fade-end {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 0px;
+}
+
+.marquee-text {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.marquee-text-inner {
+  display: inline-block;
+}
+
+.marquee-text[data-overflow] {
+  --marquee-fade: 16px;
+  --marquee-fade-end: var(--marquee-fade);
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--marquee-fade-start),
+    #000 calc(100% - var(--marquee-fade-end)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent 0,
+    #000 var(--marquee-fade-start),
+    #000 calc(100% - var(--marquee-fade-end)),
+    transparent 100%
+  );
+  animation: marquee-fade var(--marquee-cycle) infinite;
+}
+.marquee-text[data-overflow] .marquee-text-inner {
+  will-change: transform;
+  animation: marquee-shift var(--marquee-cycle) infinite;
+}
+
+@keyframes marquee-shift {
+  0%,
+  20% {
+    transform: translateX(0);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  50%,
+  70% {
+    transform: translateX(var(--marquee-shift));
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  100% {
+    transform: translateX(0);
+  }
+}
+
+@keyframes marquee-fade {
+  0%,
+  20% {
+    --marquee-fade-start: 0px;
+    --marquee-fade-end: var(--marquee-fade);
+    animation-timing-function: ease-out;
+  }
+  26%,
+  44% {
+    --marquee-fade-start: var(--marquee-fade);
+    --marquee-fade-end: var(--marquee-fade);
+    animation-timing-function: ease-in;
+  }
+  50%,
+  70% {
+    --marquee-fade-start: var(--marquee-fade);
+    --marquee-fade-end: 0px;
+    animation-timing-function: ease-out;
+  }
+  76%,
+  94% {
+    --marquee-fade-start: var(--marquee-fade);
+    --marquee-fade-end: var(--marquee-fade);
+    animation-timing-function: ease-in;
+  }
+  100% {
+    --marquee-fade-start: 0px;
+    --marquee-fade-end: var(--marquee-fade);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marquee-text[data-overflow],
+  .marquee-text[data-overflow] .marquee-text-inner {
+    animation: none;
+  }
+}

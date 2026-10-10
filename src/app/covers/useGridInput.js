@@ -98,6 +98,7 @@ export function useGridInput(configRef) {
       const r = rect.current;
       if (r) {
         hovering.current =
+          el.contains(e.target) &&
           e.clientX >= r.left && e.clientX <= r.right &&
           e.clientY >= r.top && e.clientY <= r.bottom;
         toWorld(e.clientX, e.clientY);
@@ -159,6 +160,10 @@ export function useGridInput(configRef) {
     // loop spends the whole lot on the next one — no cap on how much may arrive,
     // and nothing left over to drain late. 1:1 with the gesture; the only thing
     // between it and the grid is the pan's single smoothing constant.
+    const onLeave = () => {
+      hovering.current = false;
+    };
+
     const onWheel = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -175,6 +180,7 @@ export function useGridInput(configRef) {
     };
 
     el.addEventListener("pointerdown", onDown);
+    el.addEventListener("pointerleave", onLeave);
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onCancel);
@@ -185,6 +191,7 @@ export function useGridInput(configRef) {
     return () => {
       el.removeEventListener("pointerdown", onDown);
       window.removeEventListener("pointermove", onMove);
+      el.removeEventListener("pointerleave", onLeave);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onCancel);
       el.removeEventListener("wheel", onWheel);

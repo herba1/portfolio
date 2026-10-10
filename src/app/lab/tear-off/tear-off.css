@@ -30,7 +30,8 @@
   z-index: 2000;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  align-items: flex-start;
+  gap: 12px;
   max-width: 360px;
   pointer-events: none;
 }
@@ -40,20 +41,17 @@
 }
 
 .to-chrome {
-  position: absolute;
-  left: 32px;
-  bottom: 32px;
-  z-index: 2000;
   display: flex;
   align-items: center;
   gap: 8px;
+  pointer-events: auto;
 }
 
 .to-count {
   display: inline-flex;
   align-items: baseline;
   gap: 4px;
-  padding-inline: 4px 12px;
+  padding-inline: 0 8px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -79,8 +77,13 @@
     transform 120ms var(--ease-hover);
 }
 
-.to-button:active {
+.to-button:active:not(:disabled) {
   transform: scale(0.96);
+}
+
+.to-button:disabled {
+  cursor: default;
+  color: var(--color-ink-disabled);
 }
 
 .to-button:focus-visible {
@@ -100,10 +103,18 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .to-button:hover {
+  .to-button:hover:not(:disabled) {
     background: var(--color-surface-subtle);
     border-color: var(--color-line-strong);
   }
+}
+
+.to-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+  pointer-events: none;
 }
 
 .to-roll {
@@ -127,12 +138,17 @@
 
 .to-roll__body {
   fill: var(--color-surface-raised);
-  stroke: var(--color-ink);
-  stroke-width: 1.25;
+  stroke: color-mix(in oklab, var(--color-ink) 30%, transparent);
+  stroke-width: 1;
+}
+
+.to-roll__texture,
+.to-roll__shade {
+  stroke: none;
 }
 
 .to-roll__line {
-  stroke: color-mix(in oklab, var(--color-ink) 42%, transparent);
+  stroke: color-mix(in oklab, var(--color-ink) 22%, transparent);
   stroke-linecap: round;
 }
 
@@ -158,18 +174,29 @@
   position: relative;
   width: 100%;
   height: 100%;
-  transition: transform 120ms var(--ease-hover);
+  isolation: isolate;
 }
 
-.to-ticket[data-held][data-kind="stub"] .to-ticket__body {
-  transform: scale(1.02);
+.to-ticket__shadow {
+  position: absolute;
+  left: 0;
+  top: 0;
+  overflow: visible;
+  visibility: hidden;
+  pointer-events: none;
+  fill: color-mix(in oklab, var(--color-ink) 88%, var(--to-spot));
+  transform-origin: 0 50%;
+  will-change: transform, opacity;
 }
 
 .to-ticket[data-enter] .to-ticket__body {
   animation: to-pop 560ms var(--ease-entrance) var(--to-delay, 0ms) backwards;
 }
 
-.to-ticket[data-leaving] {
+.to-ticket[data-leaving],
+.to-ticket[data-reader="catch"],
+.to-ticket[data-reader="draw"],
+.to-ticket[data-reader="eject"] {
   pointer-events: none;
 }
 
@@ -191,27 +218,57 @@
   shape-rendering: geometricPrecision;
 }
 
+.to-ticket__paper--top {
+  pointer-events: none;
+}
+
+.to-ticket__contact {
+  fill: var(--color-ink);
+  opacity: 0.08;
+}
+
 .to-ticket__fill {
   fill: var(--to-tint);
   stroke: none;
   transition: fill 480ms var(--ease-hover);
 }
 
+.to-ticket__texture,
+.to-ticket__tooth,
+.to-ticket__curl {
+  stroke: none;
+}
+
 .to-ticket__line {
   fill: none;
-  stroke: color-mix(in oklab, var(--color-ink) 18%, transparent);
+  stroke: color-mix(in oklab, var(--color-ink) 14%, transparent);
   stroke-width: 1;
   stroke-linecap: round;
   stroke-linejoin: round;
   transition: stroke 150ms var(--ease-hover);
 }
 
-.to-ticket__torn {
+.to-ticket__core {
   fill: none;
-  stroke: var(--color-ink);
-  stroke-width: 1.25;
+  stroke: color-mix(in oklab, var(--to-tint) 60%, #fff);
+  stroke-width: 1.2;
   stroke-linecap: round;
   stroke-linejoin: round;
+}
+
+.to-ticket__torn {
+  fill: none;
+  stroke: color-mix(in oklab, var(--color-ink) 26%, transparent);
+  stroke-width: 0.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.to-ticket__fibres {
+  fill: none;
+  stroke: color-mix(in oklab, var(--to-tint), var(--color-ink) 16%);
+  stroke-width: 0.4;
+  stroke-linecap: round;
 }
 
 .to-ticket:focus-visible .to-ticket__line {
@@ -226,7 +283,8 @@
   gap: 12px;
   padding: 12px;
   pointer-events: none;
-  color: var(--color-ink);
+  color: color-mix(in oklab, var(--color-ink) 92%, var(--to-spot));
+  mix-blend-mode: multiply;
 }
 
 .to-ticket__well {
@@ -245,7 +303,7 @@
   height: 100%;
   object-fit: cover;
   opacity: 0;
-  filter: blur(8px);
+  filter: blur(8px) saturate(0.97);
   scale: 1.08;
   -webkit-user-drag: none;
   transition:
@@ -256,11 +314,12 @@
 
 .to-ticket__cover[data-loaded] {
   opacity: 1;
-  filter: blur(0);
+  filter: blur(0) saturate(0.97);
   scale: 1;
 }
 
 .to-ticket__text {
+  text-shadow: 0 0 0.3px color-mix(in oklab, currentColor 20%, transparent);
   display: flex;
   flex: 1;
   flex-direction: column;
@@ -321,15 +380,200 @@
   fill: var(--color-ink);
 }
 
-.to-ticket__bars--play {
-  fill: var(--color-media-audio-ink);
-  clip-path: inset(0 0 calc((1 - var(--to-play, 0)) * 100%) 0);
-  opacity: 0;
+.to-player {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(32px + env(safe-area-inset-bottom, 0px));
+  z-index: 1;
+  width: min(440px, calc(100% - 64px));
+  margin-inline: auto;
+  border-radius: 16px;
+  background: var(--color-surface-raised);
+  box-shadow: inset 0 0 0 1px var(--color-line);
+  animation: to-player-in 640ms var(--ease-entrance) 240ms backwards;
+}
+
+.to-player__mouth {
+  position: absolute;
+  top: -2px;
+  left: 0;
+  right: 0;
+  width: var(--to-mouth, 232px);
+  height: 4px;
+  margin-inline: auto;
+  border-radius: 2px;
+  background: color-mix(in oklab, var(--color-ink) 86%, var(--color-surface-raised));
+  pointer-events: none;
+  transition:
+    background-color 150ms var(--ease-hover),
+    transform 220ms var(--ease-out-quint),
+    width 320ms var(--ease-out-quint);
+}
+
+.to-player__mouth[data-armed] {
+  background: var(--color-accent);
+  transform: scaleY(1.5);
+}
+
+.to-player__sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+.to-player__body {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+}
+
+.to-player__art {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--color-surface-sunken);
+}
+
+.to-player__cover {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  -webkit-user-drag: none;
+  animation: to-player-swap 420ms var(--ease-out-quint) backwards;
+}
+
+.to-player__info {
+  display: grid;
+  flex: 1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 16px 16px 8px;
+  column-gap: 12px;
+  min-width: 0;
+}
+
+.to-player__title,
+.to-player__artist {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  -webkit-mask-image: var(--text-fade-mask);
+  mask-image: var(--text-fade-mask);
+  animation: to-player-swap 420ms var(--ease-out-quint) backwards;
+}
+
+.to-player__title {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+.to-player__artist {
+  grid-column: 1;
+  grid-row: 2;
+  animation-delay: 40ms;
+}
+
+.to-player__time {
+  display: inline-flex;
+  grid-column: 2;
+  grid-row: 2;
+  align-items: center;
+  justify-content: flex-end;
+  height: 16px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
   transition: opacity 200ms var(--ease-hover);
 }
 
-.to-ticket[data-playing] .to-ticket__bars--play {
+.to-player__clock {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.to-player__note {
+  display: none;
+}
+
+.to-player__track {
+  position: relative;
+  grid-column: 1 / -1;
+  grid-row: 3;
+  align-self: center;
+  height: 2px;
+  overflow: hidden;
+  border-radius: 1px;
+  background: var(--color-surface-sunken);
+  transition: opacity 200ms var(--ease-hover);
+}
+
+.to-player__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--color-ink);
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  will-change: transform;
+}
+
+.to-player:not([data-status="playing"]) .to-player__fill {
+  transition: transform 320ms var(--ease-out-quint);
+}
+
+.to-player__track::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--color-ink) 0%, transparent) 0%,
+    color-mix(in oklab, var(--color-ink) 4%, transparent) 18%,
+    color-mix(in oklab, var(--color-ink) 14%, transparent) 34%,
+    color-mix(in oklab, var(--color-ink) 30%, transparent) 50%,
+    color-mix(in oklab, var(--color-ink) 14%, transparent) 66%,
+    color-mix(in oklab, var(--color-ink) 4%, transparent) 82%,
+    color-mix(in oklab, var(--color-ink) 0%, transparent) 100%
+  );
+  transition: opacity 200ms var(--ease-hover);
+}
+
+.to-player[data-status="loading"] .to-player__track::after {
   opacity: 1;
+  animation: to-shimmer 1100ms var(--ease-in-out) infinite;
+}
+
+.to-player[data-status="empty"] .to-player__time,
+.to-player[data-status="empty"] .to-player__track,
+.to-player[data-status="none"] .to-player__track {
+  opacity: 0;
+}
+
+.to-player[data-status="empty"] .to-player__artist {
+  grid-column: 1 / -1;
+}
+
+.to-player[data-status="none"] .to-player__clock {
+  display: none;
+}
+
+.to-player[data-status="none"] .to-player__note {
+  display: inline;
+}
+
+.to-player__controls {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
 }
 
 .to-stage[data-size="sm"] .to-ticket__face {
@@ -391,6 +635,39 @@
   }
 }
 
+@keyframes to-player-in {
+  0% {
+    filter: blur(6px);
+    opacity: 0;
+  }
+  100% {
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+@keyframes to-player-swap {
+  0% {
+    transform: translateY(4px);
+    filter: blur(4px);
+    opacity: 0;
+  }
+  100% {
+    transform: translateY(0);
+    filter: blur(0);
+    opacity: 1;
+  }
+}
+
+@keyframes to-shimmer {
+  0% {
+    transform: translateX(-100%);
+  }
+  100% {
+    transform: translateX(100%);
+  }
+}
+
 @keyframes to-icon-in {
   0% {
     transform: scale(0.84);
@@ -411,17 +688,31 @@
     right: 16px;
   }
 
-  .to-chrome {
-    left: 16px;
-    bottom: 16px;
+  .to-player {
+    bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+    width: min(440px, calc(100% - 32px));
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .to-ticket[data-enter] .to-ticket__body,
   .to-roll__svg,
-  .to-button__icon {
+  .to-button__icon,
+  .to-player,
+  .to-player__cover,
+  .to-player__title,
+  .to-player__artist {
     animation: none;
+  }
+
+  .to-player[data-status="loading"] .to-player__track::after {
+    animation: none;
+    transform: translateX(-30%);
+  }
+
+  .to-player__mouth,
+  .to-player__fill {
+    transition: none;
   }
 
   .to-ticket__body,

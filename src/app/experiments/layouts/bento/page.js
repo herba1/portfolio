@@ -29,6 +29,12 @@ const AREAS = {
   "/blobs": { area: "flowers", wave: 11, dx: 0 },
   "/cover-ring": { area: "ring", wave: 12, dx: -1 },
   "/ascii-cover": { area: "ascii", wave: 13, dx: 1 },
+  "/wet-ink": { area: "wetink", wave: 15, dx: -1 },
+  "/one-line": { area: "oneline", wave: 16, dx: 1 },
+  "/counter": { area: "counter", wave: 14, dx: 0 },
+  "/taffy": { area: "taffy", wave: 17, dx: 0 },
+  "/scorch": { area: "scorch", wave: 18, dx: -1 },
+  "/stir": { area: "stir", wave: 19, dx: 1 },
 };
 
 export default async function BentoLayout() {

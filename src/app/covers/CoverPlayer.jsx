@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { motion, AnimatePresence, useIsPresent } from "motion/react";
+import { motion, AnimatePresence, useDragControls, useIsPresent } from "motion/react";
 // Aliased deliberately: the hi-res art preloader below calls `new Image()`, the
 // DOM constructor. Importing next/image under its usual name would shadow that
 // and turn a preload into an attempt to construct a React component.
@@ -11,9 +11,10 @@ import Waveform from "@/app/ui/Waveform";
 import Lyrics from "./Lyrics";
 import EqBars from "./EqBars";
 import SlotNumber from "@/app/ui/SlotNumber";
-import { CLOCK_READOUTS, STATUS_READOUTS, TransportButton, transportStatus } from "./Transport";
+import { CLOCK_READOUTS, STATUS_READOUTS, TransportButton, useSettledStatus } from "./Transport";
 import { useAudio, load, toggle, seek, scrubStart, scrubEnd, keyOf } from "./lib/audioEngine";
 import { useArtInk } from "./lib/artInk";
+import { useArtPalette } from "./lib/artPalette";
 import { DEFAULTS } from "./lib/config";
 
 // ---------------------------------------------------------------------------
@@ -24,6 +25,11 @@ import { DEFAULTS } from "./lib/config";
 // puts the close button on its own line above a larger, viewport-filling art).
 // ---------------------------------------------------------------------------
 const MORPH = { duration: 0.5, ease: [0.16, 1, 0.3, 1] };
+const LAND_FADE = { delay: 0.28, duration: 0.22, ease: "easeOut" };
+const CARD_SHADOW = "0 46px 110px -44px rgba(26,26,26,0.5)";
+const CARD_SHADOW_NONE = "0 46px 110px -44px rgba(26,26,26,0)";
+const SHADOW_SETTLE = { delay: MORPH.duration, duration: 0.3, ease: "easeOut" };
+const SHADOW_LIFT = { duration: 0.04, ease: "easeOut" };
 
 const panelV = { hidden: {}, show: { transition: { delayChildren: 0.16, staggerChildren: 0.07 } } };
 const itemV = {
@@ -52,17 +58,21 @@ const READ_OUT = { duration: 0.16, ease: [0.16, 1, 0.3, 1] };
 const TAP = { scale: 0.97 };
 const TAP_T = { type: "tween", duration: 0.12, ease: [0.4, 0, 0.2, 1] };
 
-export default function CoverPlayer({ cover, rect, onClose, onClosed, cornerRadius = DEFAULTS.cornerRadius }) {
+export default function CoverPlayer({ cover, rect, fromDock = false, onClose, onClosed, cornerRadius = DEFAULTS.cornerRadius }) {
   return (
     <AnimatePresence onExitComplete={onClosed}>
       {cover ? (
-        <PlayerInner key={cover.index} cover={cover} rect={rect} onClose={onClose} cornerRadius={cornerRadius} />
+        <PlayerInner key={cover.index} cover={cover} rect={rect} fromDock={fromDock} onClose={onClose} cornerRadius={cornerRadius} />
       ) : null}
     </AnimatePresence>
   );
 }
 
-function PlayerInner({ cover, rect, onClose, cornerRadius }) {
+const MOBILE_WAVE_BARS = 24;
+const SHEET_DISMISS_PX = 96;
+const SHEET_DISMISS_VELOCITY = 600;
+
+function PlayerInner({ cover, rect, fromDock, onClose, cornerRadius }) {
   const [hiReady, setHiReady] = useState(false);
 
   // Playback lives in the module-level engine, not here — that's what lets the
@@ -78,6 +88,7 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
   }, [key]);
   // black or white for the badge on the artwork, measured from the art itself
   const artInk = useArtInk(cover.index, cover.image);
+  const rankInk = useArtPalette(cover.image, cover.index);
   // false the moment the card starts closing — the badge is a plain CSS element
   // inside the morphing art, so it needs the presence flag to know to fade.
   const isPresent = useIsPresent();
@@ -96,8 +107,7 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
   };
   const audio = engine.key === key ? engine : IDLE;
   const progress = audio.duration ? audio.currentTime / audio.duration : 0;
-  const statusText = transportStatus(audio);
-  const waveWaiting = !audio.peaks && (audio.status === "loading" || audio.status === "ready");
+  const statusText = useSettledStatus(audio);
   // Nothing is coming — the attempt failed, or there was never a preview. The
   // wave lies down flat, which is the whole failure notice: it's the widest
   // thing in the row, so it going quiet says more than a sentence can, and the
@@ -141,6 +151,11 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
     return () => ro.disconnect();
   }, []);
 
+  const sheetDrag = useDragControls();
+  const startSheetDrag = (e) => {
+    e.stopPropagation();
+    if (layout?.stacked) sheetDrag.start(e);
+  };
   const layout = useMemo(() => playerLayout(contentH), [contentH]);
   const tile = useMemo(() => tileBox(rect, layout), [rect, layout]);
   if (!layout) return null;
@@ -149,15 +164,12 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
   // Match the WebGL tile's rounded corners: the shader rounds to a fraction
   // (config.cornerRadius) of the tile's on-screen size, so the morph's tile-end
   // radius must be computed the same way — a fixed px value won't line up.
-  const tileRadius = tile.size * cornerRadius;
+  const tileRadius = rect?.radius ?? tile.size * cornerRadius;
+  const cardOrigin = { left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, boxShadow: CARD_SHADOW_NONE };
 
   // Close lives in its own line above the art on mobile (not floating over the
   // artwork), pinned to the card's top-right corner on desktop.
-  const closePos = stacked
-    ? { left: card.left + card.width - 16 - 40, top: card.top + 7 }
-    // 38px tap target holding an 18px glyph → 10px of slack per side, so back the
-    // box off by that much to land the glyph itself on the card's 24px padding.
-    : { left: card.left + card.width - 24 + 10 - 38, top: card.top + 24 - 10 };
+  const closePos = { left: card.left + card.width - 24 + 10 - 38, top: card.top + 24 - 10 };
 
   return (
     <motion.div className="cv-player" onPointerDown={onClose}>
@@ -169,13 +181,31 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         transition={{ duration: 0.32 }}
       />
 
+      <motion.div
+        className="cv-player-sheet"
+        drag={stacked ? "y" : false}
+        dragControls={sheetDrag}
+        dragListener={false}
+        dragConstraints={{ top: 0, bottom: 0 }}
+        dragElastic={{ top: 0.04, bottom: 0.9 }}
+        dragTransition={{ bounceStiffness: 500, bounceDamping: 40 }}
+        onDragEnd={(_, info) => {
+          if (info.offset.y > SHEET_DISMISS_PX || info.velocity.y > SHEET_DISMISS_VELOCITY) onClose();
+        }}
+        exit={{ y: 0, transition: MORPH }}
+      >
+
       {/* glass card — grows out of the tile, hugging the art */}
       <motion.div
         className="cv-music-card"
-        initial={{ left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, boxShadow: "0 12px 30px -18px rgba(26,26,26,0.28)" }}
-        animate={{ left: card.left, top: card.top, width: card.width, height: card.height, borderRadius: 24, boxShadow: "0 46px 110px -44px rgba(26,26,26,0.5)" }}
-        exit={{ left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, boxShadow: "0 12px 30px -18px rgba(26,26,26,0.28)" }}
-        transition={MORPH}
+        initial={cardOrigin}
+        animate={{ left: card.left, top: card.top, width: card.width, height: card.height, borderRadius: 24, boxShadow: CARD_SHADOW }}
+        exit={
+          fromDock
+            ? { ...cardOrigin, opacity: 0, transition: { ...MORPH, opacity: LAND_FADE, boxShadow: SHADOW_LIFT } }
+            : { ...cardOrigin, transition: { ...MORPH, boxShadow: SHADOW_LIFT } }
+        }
+        transition={{ ...MORPH, boxShadow: SHADOW_SETTLE }}
         onPointerDown={(e) => e.stopPropagation()}
       />
 
@@ -185,9 +215,13 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         style={cover.image ? { backgroundImage: `url(${cover.image})` } : undefined}
         initial={{ left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, filter: "blur(7px)" }}
         animate={{ left: art.left, top: art.top, width: art.size, height: art.size, borderRadius: 14, filter: "blur(0px)" }}
-        exit={{ left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, filter: "blur(0px)" }}
+        exit={
+          fromDock
+            ? { left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, filter: "blur(0px)", opacity: 0, transition: { ...MORPH, opacity: LAND_FADE } }
+            : { left: tile.left, top: tile.top, width: tile.size, height: tile.size, borderRadius: tileRadius, filter: "blur(0px)" }
+        }
         transition={MORPH}
-        onPointerDown={(e) => e.stopPropagation()}
+        onPointerDown={startSheetDrag}
       >
         <motion.div
           className="cv-music-art-hi"
@@ -197,6 +231,15 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.4 }}
         />
+        {cover.rank ? (
+          <span
+            className={`cv-rank-pill${rankInk ? " is-inked" : ""}${isPresent ? "" : " is-leaving"}`}
+            style={rankInk ? { "--rank-bg": rankInk.bg, "--rank-fg": rankInk.fg } : undefined}
+            aria-label={`${cover.rankLabel}, number ${cover.rank}`}
+          >
+            No. {cover.rank}
+          </span>
+        ) : null}
         {artInk ? (
           <EqBars
             playing={audio.playing}
@@ -206,42 +249,41 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
         ) : null}
       </motion.div>
 
-      {/* close — pinned to the card's top-right */}
-      <motion.button
-        className="cv-close cv-music-close"
-        style={closePos}
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        exit={{
-          left: tile.left + tile.size - 40,
-          top: tile.top + 8,
-          opacity: 0,
-          transition: { ...MORPH, opacity: { duration: 0.2 } },
-        }}
-        transition={{ delay: 0.2, duration: 0.2 }}
-        onClick={onClose}
-        aria-label="Close"
-      >
-        <X size={18} />
-      </motion.button>
-
-      {/* rank — top-centred on the header line above the art (mobile only). The
-          chart position is the one bit of metadata that isn't the song itself, so
-          it sits apart from the title/artist block rather than under it. */}
-      {stacked && cover.rank ? (
+      {stacked ? (
         <motion.div
-          className="cv-music-toprank"
+          className="cv-sheet-handle"
           style={{ left: header.left, top: header.top, width: header.width, height: header.height }}
-          initial={{ opacity: 0, y: 8, filter: "blur(8px)" }}
-          animate={{ opacity: 1, y: 0, filter: "blur(0px)" }}
-          exit={{ opacity: 0, filter: "blur(6px)", transition: { duration: 0.2 } }}
-          transition={{ delay: 0.16, duration: 0.45, ease: [0.16, 1, 0.3, 1] }}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0, transition: { duration: 0.15 } }}
+          transition={{ delay: 0.2, duration: 0.2 }}
+          onPointerDown={startSheetDrag}
+          role="button"
+          aria-label="Close"
+          tabIndex={0}
+          onKeyDown={(e) => (e.key === "Enter" || e.key === " ") && onClose()}
         >
-          <span>
-            #{cover.rank} · {cover.rankLabel}
-          </span>
+          <span />
         </motion.div>
-      ) : null}
+      ) : (
+        <motion.button
+          className="cv-close cv-music-close"
+          style={closePos}
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{
+            left: tile.left + tile.size - 40,
+            top: tile.top + 8,
+            opacity: 0,
+            transition: { ...MORPH, opacity: { duration: 0.2 } },
+          }}
+          transition={{ delay: 0.2, duration: 0.2 }}
+          onClick={onClose}
+          aria-label="Close"
+        >
+          <X size={18} />
+        </motion.button>
+      )}
 
       {/* info / waveform / lyrics — staggered + blur-in */}
       <motion.div
@@ -309,23 +351,12 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
               <span>{cover.sub}</span>
             )}
           </p>
-          {/* on mobile the rank has moved to the header strip above the art */}
-          {cover.rank && !stacked ? (
-            <p className="cv-music-rank">
-              #{cover.rank} · {cover.rankLabel}
-            </p>
-          ) : null}
         </motion.div>
 
         <motion.div className={`cv-music-controls${stacked ? " is-stacked" : ""}`} variants={itemV}>
           {/* Every non-playing state is pressable and named — see Transport.jsx. */}
           <TransportButton className="cv-play-btn" audio={audio} onClick={toggle} size={20} />
-          {/* Sweeps while there is nothing to draw yet, so the empty bars read as
-              "the waveform is coming" rather than as a track with no sound in it.
-              Only while something is actually on its way, though — "no preview"
-              and "retry" are settled answers, and a shimmer under either of them
-              would promise a wave that is never going to arrive. */}
-          <div className={`cv-wave-wrap${waveWaiting ? " is-waiting" : ""}`}>
+          <div className="cv-wave-wrap">
             <Waveform
               peaks={audio.peaks}
               progress={progress}
@@ -335,6 +366,8 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
               onScrubEnd={scrubEnd}
               accent={cover.color}
               flat={waveFlat}
+              barCount={stacked ? MOBILE_WAVE_BARS : undefined}
+              barGap={stacked ? 4 : 2}
             />
           </div>
           <span className="cv-music-time" data-kind={statusText ? "status" : "clock"} data-status={audio.status}>
@@ -439,6 +472,7 @@ function PlayerInner({ cover, rect, onClose, cornerRadius }) {
           <span>Spotify</span>
         </motion.a>
       ) : null}
+      </motion.div>
     </motion.div>
   );
 }
@@ -472,7 +506,7 @@ export function playerLayout(contentH) {
 
   if (vw < 820) {
     const pad = 18;
-    const headerH = 52; // close button + rank get their own line above the art
+    const headerH = 28;
     const marginTop = 14;
     const marginBottom = 28; // clears the home indicator / toolbar lip
     const pw = Math.min(vw * 0.94, 460);

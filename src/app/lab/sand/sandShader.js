@@ -106,56 +106,102 @@ void main() {
 
 export const FLIGHT_VERTEX = `#version 300 es
 precision highp float;
+precision highp int;
 in vec2 aCorner;
 in vec4 aPath;
-in vec2 aTiming;
+in vec3 aTiming;
 in vec3 aColourFrom;
 in vec3 aColourTo;
+in vec4 aClump;
+in vec2 aClumpTime;
 uniform vec2 uGrid;
 uniform float uTime;
-uniform float uDuration;
-uniform float uPop;
+uniform float uCohesion;
 uniform float uCellPx;
+uniform float uSwirl;
+uniform float uSwirlScale;
+uniform float uSeed;
+uniform float uLift;
+uniform float uSwell;
 out vec2 vLocal;
 out vec3 vColour;
 out float vPixel;
 
-float easeOutBack(float t) {
-  float u = t - 1.0;
-  return 1.0 + 2.2 * u * u * u + 1.2 * u * u;
+const float PI = 3.14159265;
+
+float settle(float t) {
+  float x = pow(t, 0.8);
+  return x * x * (3.0 - 2.0 * x);
 }
 
-float easeOutCubic(float t) {
-  float u = 1.0 - t;
-  return 1.0 - u * u * u;
+vec2 latticeGradient(vec2 corner) {
+  uvec2 q = uvec2(ivec2(corner) + ivec2(8192));
+  uint h = (q.x * 1597334677u) ^ (q.y * 3812015801u);
+  h = (h ^ (h >> 16u)) * 2246822519u;
+  h ^= h >> 13u;
+  float angle = float(h & 65535u) * (6.28318530 / 65536.0);
+  return vec2(cos(angle), sin(angle));
+}
+
+vec3 gradientNoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * f * (f * (f * 6.0 - 15.0) + 10.0);
+  vec2 du = 30.0 * f * f * (f * (f - 2.0) + 1.0);
+  vec2 ga = latticeGradient(i);
+  vec2 gb = latticeGradient(i + vec2(1.0, 0.0));
+  vec2 gc = latticeGradient(i + vec2(0.0, 1.0));
+  vec2 gd = latticeGradient(i + vec2(1.0, 1.0));
+  float va = dot(ga, f);
+  float vb = dot(gb, f - vec2(1.0, 0.0));
+  float vc = dot(gc, f - vec2(0.0, 1.0));
+  float vd = dot(gd, f - vec2(1.0, 1.0));
+  float value = va + u.x * (vb - va) + u.y * (vc - va) + u.x * u.y * (va - vb - vc + vd);
+  vec2 slope = ga + u.x * (gb - ga) + u.y * (gc - ga) + u.x * u.y * (ga - gb - gc + gd)
+    + du * (u.yx * (va - vb - vc + vd) + vec2(vb, vc) - va);
+  return vec3(value, slope);
+}
+
+vec2 curlFlow(vec2 p) {
+  vec3 broad = gradientNoise(p);
+  vec3 fine = gradientNoise(p * 2.07 + vec2(31.7, 11.3));
+  return vec2(broad.z, -broad.y) + 0.45 * vec2(fine.z, -fine.y);
 }
 
 void main() {
-  float since = uTime - aTiming.x;
-  float t = clamp(since / uDuration, 0.0, 1.0);
-  float travel = easeOutBack(t);
+  float clumpT = clamp((uTime - aClumpTime.x) / max(aClumpTime.y, 0.001), 0.0, 1.0);
+  float releaseT = clamp((uTime - aTiming.x) / max(aTiming.z, 0.001), 0.0, 1.0);
+  float lands = aTiming.x + aTiming.z;
+  float journey = clamp((uTime - aClumpTime.x) / max(lands - aClumpTime.x, 0.001), 0.0, 1.0);
   vec2 from = aPath.xy + 0.5;
   vec2 to = aPath.zw + 0.5;
-  vec2 delta = to - from;
-  float span = length(delta);
-  float arc = clamp(travel, 0.0, 1.0);
-  vec2 position = from + delta * travel;
-  position.y -= 0.18 * span * 4.0 * arc * (1.0 - arc);
+  vec2 clumpFrom = aClump.xy + 0.5;
+  vec2 clumpTo = aClump.zw + 0.5;
+  float span = length(clumpTo - clumpFrom);
 
-  float airborne = sin(3.14159265 * t);
-  float scale = mix(1.0 + 0.22 * airborne, 0.84, smoothstep(0.72, 1.0, t));
-  float landed = clamp((since - uDuration) / uPop, 0.0, 1.0);
-  if (landed > 0.0) {
-    scale = landed < 0.55
-      ? mix(0.84, 1.02, easeOutCubic(landed / 0.55))
-      : mix(1.02, 1.0, smoothstep(0.0, 1.0, (landed - 0.55) / 0.45));
-  }
+  float travel = settle(clumpT);
+  float aloft = sin(PI * clumpT);
+  aloft *= aloft;
+  vec2 centre = mix(clumpFrom, clumpTo, travel);
+  centre.y -= uLift * span * 4.0 * travel * (1.0 - travel);
+  vec2 carried = centre + (from - clumpFrom) * (1.0 - uCohesion * aloft);
 
+  float release = settle(releaseT);
+  vec2 position = mix(carried, to, release);
+  position.y -= uLift * length(to - carried) * 4.0 * release * (1.0 - release);
+
+  float sink = sin(PI * release);
+  float sway = aloft * (1.0 - release) + 0.5 * sink * sink;
+  vec2 field = position / uSwirlScale + vec2(uSeed, uSeed * 0.61 + uTime * 0.12);
+  float reach = uSwirl * (0.35 + 0.65 * smoothstep(0.0, uGrid.x * 0.6, span));
+  position += curlFlow(field) * reach * sway;
+
+  float scale = 1.0 + uSwell * aloft * (1.0 - release);
   vec2 world = position + aCorner * scale;
   vLocal = aCorner;
   vPixel = 1.0 / max(uCellPx * scale, 0.5);
   float shift = aTiming.y * 0.12 - 0.06;
-  vColour = mix(aColourFrom, aColourTo, smoothstep(0.08 + shift, 0.86 + shift, t));
+  vColour = mix(aColourFrom, aColourTo, smoothstep(0.14 + shift, 0.86 + shift, journey));
   gl_Position = vec4(world.x / uGrid.x * 2.0 - 1.0, 1.0 - world.y / uGrid.y * 2.0, 0.0, 1.0);
 }
 `;

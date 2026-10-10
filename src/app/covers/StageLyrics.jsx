@@ -226,6 +226,9 @@ function StageLyrics({ lines, clock, onCalibrate }) {
       const nextNode = nodesRef.current.get(lineIndex);
       if (previousNode) previousNode.dataset.active = "false";
       if (nextNode) nextNode.dataset.active = "true";
+      for (const [index, node] of nodesRef.current) {
+        node.dataset.state = index < lineIndex ? "past" : index === lineIndex ? "current" : "upcoming";
+      }
       const next = lineIndex < 0 ? Math.max(0, firstTimedRef.current) : lineIndex;
       const leap = previous < 0 ? Infinity : Math.abs(next - previous);
       if (reduced || leap > 4) position.jump(next);

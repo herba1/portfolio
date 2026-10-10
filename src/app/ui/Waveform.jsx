@@ -11,7 +11,7 @@ import { motion } from "motion/react";
 //
 // Self-contained: all layout-critical styling is inline so this works anywhere
 // (the covers route also themes it via .cv-wave / .cv-wave-bar in covers.css).
-const EMPTY = Array.from({ length: 40 }, () => 0.14);
+const EMPTY = Array.from({ length: 40 }, () => 0.3);
 
 // Rubber-band overscroll tuning.
 const MAX_OVER = 44; // px the pull edge can travel past the boundary
@@ -47,6 +47,15 @@ function rubber(deltaPx) {
   return sign * MAX_OVER * (1 - 1 / (x / MAX_OVER + 1));
 }
 
+function poolPeaks(peaks, count) {
+  if (peaks.length <= count) return peaks;
+  return Array.from({ length: count }, (_, i) => {
+    const start = Math.floor((i * peaks.length) / count);
+    const end = Math.floor(((i + 1) * peaks.length) / count);
+    return Math.max(...peaks.slice(start, end));
+  });
+}
+
 export default function Waveform({
   peaks,
   progress = 0,
@@ -62,12 +71,14 @@ export default function Waveform({
   // their own copy of the ink value.
   playedColor = "var(--color-ink)",
   idleColor = "var(--color-line-strong)",
+  barCount,
+  barGap = 2,
 }) {
   const ref = useRef(null);
   const [dragX, setDragX] = useState(-1); // 0..1, -1 = not dragging
   const [over, setOver] = useState(0); // signed px the pull edge is past the boundary
   const ready = !!peaks && !flat;
-  const bars = peaks || EMPTY;
+  const bars = barCount ? poolPeaks(peaks || EMPTY, barCount) : peaks || EMPTY;
   const n = bars.length;
   const dragging = dragX >= 0;
 
@@ -106,7 +117,7 @@ export default function Waveform({
         flex: 1,
         minWidth: 0,
         height,
-        gap: 2,
+        gap: barGap,
         cursor: "pointer",
         touchAction: "none",
       }}
@@ -139,11 +150,12 @@ export default function Waveform({
         const active = pct <= (dragging ? dragX : progress);
 
         // vertical stretch — gaussian falloff around the drag point
+        const heightPct = flat ? FLAT_H : Math.max(7, h * 100);
         let scaleY = 1;
         if (dragX >= 0) {
           const d = pct - dragX;
           const inf = Math.exp(-(d * d) / (2 * 0.03 * 0.03));
-          scaleY = 1 + inf * 0.6;
+          scaleY = Math.min(1 + inf * 0.6, 100 / heightPct);
         }
 
         // horizontal accordion — the edge OPPOSITE the pull stays pinned, each
@@ -168,7 +180,7 @@ export default function Waveform({
             }}
             initial={{ height: "10%" }}
             animate={{
-              height: flat ? `${FLAT_H}%` : `${Math.max(7, h * 100)}%`,
+              height: `${heightPct}%`,
               backgroundColor: active ? playedColor : idleColor,
               scaleY,
               x,

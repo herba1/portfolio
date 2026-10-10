@@ -20,6 +20,8 @@ import { guessOffsetMs, publishOffset, resolveOffset, writeOverride } from "./li
 //
 // Loading → loaded crossfades through a skeleton of the lines themselves, never
 // a spinner: the wait is shaped like the answer.
+const SETTLE_AFTER_OPEN_MS = 540;
+
 export default function Lyrics({
   artist,
   title,
@@ -31,6 +33,12 @@ export default function Lyrics({
   const [data, setData] = useState(null); // { plain, lines, level }
   const [status, setStatus] = useState("loading"); // loading | ready | none
   const [nudgeMs, setNudgeMs] = useState(null); // dev calibration, ms
+  const [settled, setSettled] = useState(false);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setSettled(true), SETTLE_AFTER_OPEN_MS);
+    return () => clearTimeout(timer);
+  }, []);
 
   useEffect(() => {
     let alive = true;
@@ -130,15 +138,17 @@ export default function Lyrics({
 
   useLyricCalibration({ enabled: !!timed && !previewSynced, isrc, timed, offsetMs, setNudgeMs, playing });
 
+  const shownStatus = settled ? status : "loading";
+
   return (
     <div className="cv-lyrics-stage">
       {/* content sits in-flow (so the scroller gets a real flex height) */}
-      <div className={`cv-lyrics-content ${status !== "loading" ? "is-on" : "is-off"}`}>
-        {status === "none" ? (
+      <div className={`cv-lyrics-content ${shownStatus !== "loading" ? "is-on" : "is-off"}`}>
+        {shownStatus === "none" ? (
           <div className="cv-lyrics--note">no lyrics found</div>
-        ) : status === "ready" && synced ? (
+        ) : shownStatus === "ready" && synced ? (
           <StageLyrics lines={timed} clock={clockRef} onCalibrate={calibrating ? onCalibrate : null} />
-        ) : status === "ready" ? (
+        ) : shownStatus === "ready" ? (
           <LyricScroller
             lines={lines}
             activeIndex={activeIndex}
@@ -152,7 +162,7 @@ export default function Lyrics({
       {/* skeleton overlays on top and crossfades out, so the bars appear to
           resolve into the words rather than being replaced by them */}
       <div
-        className={`cv-lyrics-sk-layer ${status === "loading" ? "is-on" : "is-off"}`}
+        className={`cv-lyrics-sk-layer ${shownStatus === "loading" ? "is-on" : "is-off"}`}
         role="status"
         aria-label="Loading lyrics"
       >

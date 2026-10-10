@@ -1,7 +1,7 @@
 const HAND_SMOOTHING = 30;
 const CATCH_RATE = 9;
 const RELEASE_WINDOW = 0.09;
-const SAMPLE_SLOTS = 24;
+const SAMPLE_SLOTS = 256;
 const FLING_LIMIT = 8;
 const SEEK_LIMIT = 12;
 const SEEK_STIFFNESS = 22;
@@ -10,6 +10,10 @@ const SPIN_UP = { rate: 9, torque: 4 };
 const SPIN_DOWN = { rate: 5, torque: 1.3 };
 const WOW = { depth: 0.006, hz: 0.7 };
 const FLUTTER = { depth: 0.0025, hz: 6.1 };
+const SUBSTEP = 1 / 240;
+const HAND_DELAY = 0.032;
+const HAND_GAP = 0.08;
+const HAND_WINDOW = 0.024;
 
 const FREE = 0;
 const HELD = 1;
@@ -41,6 +45,10 @@ export class TapeTransport {
     this.samplePositions = new Float64Array(SAMPLE_SLOTS);
     this.sampleCount = 0;
     this.sampleHead = 0;
+    this.voicePosition = 0;
+    this.voiceVelocity = 0;
+    this.voiceTime = 0;
+    this.voiceReach = NaN;
   }
 
   get held() {
@@ -76,6 +84,44 @@ export class TapeTransport {
     this.samplePositions[this.sampleHead] = position;
     this.sampleHead = (this.sampleHead + 1) % SAMPLE_SLOTS;
     this.sampleCount = Math.min(SAMPLE_SLOTS, this.sampleCount + 1);
+  }
+
+  pathAt(time) {
+    if (this.sampleCount === 0) return this.handTarget();
+    const newest = (this.sampleHead - 1 + SAMPLE_SLOTS) % SAMPLE_SLOTS;
+    if (time >= this.sampleTimes[newest]) return this.samplePositions[newest];
+    let later = newest;
+    for (let i = 1; i < this.sampleCount; i++) {
+      const slot = (newest - i + SAMPLE_SLOTS) % SAMPLE_SLOTS;
+      const at = this.sampleTimes[slot];
+      if (at <= time) {
+        const span = this.sampleTimes[later] - at;
+        if (span <= 1e-4 || span > HAND_GAP) return this.samplePositions[later];
+        return this.samplePositions[slot] + ((this.samplePositions[later] - this.samplePositions[slot]) * (time - at)) / span;
+      }
+      later = slot;
+    }
+    return this.samplePositions[later];
+  }
+
+  voice(now) {
+    if (this.mode !== HELD) {
+      this.voiceTime = now;
+      this.voicePosition = this.position;
+      this.voiceVelocity = this.audibleVelocity;
+      this.voiceReach = NaN;
+      return;
+    }
+    const time = now - HAND_DELAY;
+    const position = this.pathAt(time);
+    const ahead = this.pathAt(time + HAND_WINDOW / 2);
+    const behind = this.pathAt(time - HAND_WINDOW / 2);
+    const newest = this.sampleCount ? this.sampleTimes[(this.sampleHead - 1 + SAMPLE_SLOTS) % SAMPLE_SLOTS] : time;
+    const reach = Math.min(HAND_DELAY, Math.max(0, newest - time));
+    this.voiceTime = time;
+    this.voicePosition = position + this.skidOffset;
+    this.voiceVelocity = (ahead - behind) / HAND_WINDOW + this.skidVelocity;
+    this.voiceReach = this.pathAt(time + reach) - position + this.skidVelocity * reach;
   }
 
   grab(x, time) {
@@ -143,22 +189,36 @@ export class TapeTransport {
   }
 
   step(dt, now) {
-    this.clock += dt;
-    this.wobble = this.worn
-      ? 1 + WOW.depth * Math.sin(2 * Math.PI * WOW.hz * this.clock) + FLUTTER.depth * Math.sin(2 * Math.PI * FLUTTER.hz * this.clock)
-      : 1;
     if (this.mode === HELD && this.wheelHeld && now - this.lastWheelAt > WHEEL_IDLE) this.release(this.lastWheelAt);
-    if (dt <= 0) return;
+    if (dt <= 0) {
+      this.voice(now);
+      return;
+    }
 
     if (this.mode === HELD) {
+      this.clock += dt;
+      this.wobble = 1;
       this.skidVelocity *= Math.exp(-CATCH_RATE * dt);
       this.skidOffset += this.skidVelocity * dt;
       const next = this.handTarget() + this.skidOffset;
       const instant = (next - this.position) / dt;
       this.velocity += (instant - this.velocity) * (1 - Math.exp(-HAND_SMOOTHING * dt));
       this.position = next;
+      this.voice(now);
       return;
     }
+
+    const steps = Math.max(1, Math.ceil(dt / SUBSTEP));
+    const slice = dt / steps;
+    for (let i = 0; i < steps; i++) this.advance(slice);
+    this.voice(now);
+  }
+
+  advance(dt) {
+    this.clock += dt;
+    this.wobble = this.worn
+      ? 1 + WOW.depth * Math.sin(2 * Math.PI * WOW.hz * this.clock) + FLUTTER.depth * Math.sin(2 * Math.PI * FLUTTER.hz * this.clock)
+      : 1;
 
     if (this.mode === SEEK) {
       const offset = this.seekTarget - this.position;

@@ -17,14 +17,6 @@ const smoothstep = (e, x) => {
   const t = clamp01(x / e);
   return t * t * (3 - 2 * t);
 };
-// shortest distance on a torus: the world tiles infinitely, so column 0 and
-// column 5 are neighbours out there. Wrapping keeps the ripple symmetric
-// instead of dying against the map's arbitrary edges.
-const wrap = (d, n) => {
-  const m = ((d % n) + n) % n;
-  return m > n / 2 ? m - n : m;
-};
-
 // Overview of the unique cover set with a "you are here" marker (the focused
 // cover). Click a cell to ease the infinite grid onto the nearest instance.
 export default function Minimap({ covers, focusIdx, openIdx, onJump }) {
@@ -42,8 +34,8 @@ export default function Minimap({ covers, focusIdx, openIdx, onJump }) {
         let s = 1;
         let delay = 0;
         if (open) {
-          const dx = wrap(uc - open.c, GRID_COLS);
-          const dy = wrap(ur - open.r, GRID_ROWS);
+          const dx = uc - open.c;
+          const dy = ur - open.r;
           const d = Math.hypot(dx, dy);
           if (d < 0.001) {
             s = MM_OPEN_SCALE;

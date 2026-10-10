@@ -83,7 +83,7 @@ export default function LoomExperience({ covers = [] }) {
     reducedStore.snapshot,
     reducedStore.server,
   );
-  const [nav, setNav] = useState({ index: 0, direction: 1, turn: 0, leaving: null });
+  const [nav, setNav] = useState({ index: 0, direction: 1, turn: 0, auto: false, leaving: null });
   const [params, setParams] = useState(DEFAULTS);
   const [panelOpen, setPanelOpen] = useState(false);
   const [paintedFor, setPaintedFor] = useState(null);
@@ -129,10 +129,28 @@ export default function LoomExperience({ covers = [] }) {
         index: (state.index + direction + count) % count,
         direction,
         turn: state.turn + 1,
+        auto: false,
         leaving: { cover: covers[state.index], direction, turn: state.turn },
       }));
     },
     [count, covers, primeAudio],
+  );
+
+  const onCover = useCallback(
+    (index, direction) => {
+      setNav((state) =>
+        state.index === index
+          ? state
+          : {
+              index,
+              direction,
+              turn: state.turn + 1,
+              auto: true,
+              leaving: { cover: covers[state.index], direction, turn: state.turn },
+            },
+      );
+    },
+    [covers],
   );
 
   const dropLeaving = useCallback((event) => {
@@ -151,6 +169,7 @@ export default function LoomExperience({ covers = [] }) {
       )
         return;
       if (isTyping(event.target)) return;
+      if (event.repeat && (event.key === "ArrowLeft" || event.key === "ArrowRight")) return;
       if (event.key === "ArrowLeft") {
         event.preventDefault();
         go(-1);
@@ -214,7 +233,7 @@ export default function LoomExperience({ covers = [] }) {
       <header className="loom-head">
         <h1 className="loom-title text-title-sm text-ink">Loom</h1>
         <p className="loom-hint text-ui-lg text-ink-secondary">
-          Pull a thread. Across for a row, down for a column.
+          Pull a thread across or down. Hold it out and it loops, flick it and it glides, leave it and it weaves through every record.
         </p>
       </header>
 
@@ -239,11 +258,13 @@ export default function LoomExperience({ covers = [] }) {
               covers={covers}
               index={nav.index}
               direction={nav.direction}
+              auto={nav.auto}
               params={stageParams}
               reducedMotion={reducedMotion}
               onPainted={onPainted}
               onError={onError}
               onEngine={onEngine}
+              onCover={onCover}
             />
           </div>
         ) : null}
@@ -271,7 +292,7 @@ export default function LoomExperience({ covers = [] }) {
       </div>
 
       <section className="loom-caption" aria-label="Now woven">
-        <div className="loom-track-slot" aria-live="polite">
+        <div className="loom-track-slot" aria-live={nav.auto ? "off" : "polite"}>
           {nav.leaving && !reducedMotion ? (
             <div
               className="loom-track loom-track--leaving"

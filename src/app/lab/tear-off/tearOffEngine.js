@@ -1,5 +1,7 @@
 import { createCoverQueue } from "./coverQueue";
-import { easeEntrance, easeInOut, easeInQuad, springProgress } from "./motion";
+import { easeEntrance, easeInOut, easeInQuad, easeOutCubic, easeOutQuad, easeOutQuint, springProgress } from "./motion";
+import { GRAIN_SIZE, paperGrain } from "./paperGrain";
+import { createPreviewDeck } from "./previewDeck";
 import { createTearSound } from "./tearSound";
 import { createEdge, paperPaths } from "./ticketPaper";
 import {
@@ -27,7 +29,7 @@ const WIDE_AXIS = (-4 * Math.PI) / 180;
 const NARROW_AXIS = (-18 * Math.PI) / 180;
 const MAX_STRIP = 6;
 const MAX_STUBS = 8;
-const BODY_CAPACITY = 16;
+const BODY_CAPACITY = 20;
 const SEAM_CAPACITY = 24;
 const STRIP_HAND = 2e-4;
 const STUB_HAND = 1e-6;
@@ -60,6 +62,88 @@ const WIDE_STEPS = [220, 260, 300, 320];
 const NARROW_STEPS = [168, 184, 196];
 const OVER_EXTENDED = 4;
 const SMALL_PILE = 2.4;
+const GRAIN_HALF = GRAIN_SIZE / 2;
+const GRAIN_TURNS = ["", `rotate(90 ${GRAIN_HALF} ${GRAIN_HALF})`, `rotate(180 ${GRAIN_HALF} ${GRAIN_HALF})`, `translate(${GRAIN_SIZE} 0) scale(-1 1)`];
+const TOOTH_SALT = 0x9e3779b9;
+const ROLL_GRAIN_SEED = 0x2f6b1d;
+const ROLL_SHADE_STOPS = [
+  [0, "var(--color-ink)", 0.2],
+  [0.04, "var(--color-ink)", 0.13],
+  [0.1, "var(--color-ink)", 0.06],
+  [0.18, "var(--color-ink)", 0.015],
+  [0.26, "#fff", 0.1],
+  [0.35, "#fff", 0.26],
+  [0.43, "#fff", 0.16],
+  [0.52, "#fff", 0.04],
+  [0.62, "var(--color-ink)", 0],
+  [0.74, "var(--color-ink)", 0.035],
+  [0.85, "var(--color-ink)", 0.09],
+  [0.94, "var(--color-ink)", 0.16],
+  [1, "var(--color-ink)", 0.24],
+];
+const CURL_STOPS = [
+  [0, "var(--color-ink)", 0.07],
+  [0.05, "var(--color-ink)", 0.04],
+  [0.16, "var(--color-ink)", 0.012],
+  [0.34, "var(--color-ink)", 0],
+  [0.62, "#fff", 0],
+  [0.84, "#fff", 0.04],
+  [0.95, "#fff", 0.08],
+  [1, "#fff", 0.05],
+];
+const FALLBACK_TINT = "rgb(246 246 243)";
+const FALLBACK_SPOT = "rgb(128 120 112)";
+const LIFT_RISE_TAU = 0.07;
+const LIFT_FALL_TAU = 0.16;
+const LIFT_EPSILON = 0.003;
+const LIFT_TILT = 3.5;
+const LIFT_PERSPECTIVE = 720;
+const LIFT_SHADOW_X = 2;
+const LIFT_SHADOW_Y = 6;
+const LIFT_SHADOW_BLUR = 8;
+const LIFT_SHADOW_OPACITY = 0.12;
+const LIFT_SHADOW_GROW = 0.02;
+const STUB_LIFT_SCALE = 0.022;
+const HELD_LIFT = 0.35;
+const STRAIN_LIFT = 0.45;
+const TORN_LIFT = 0.4;
+const RESTING_CURL = 0.2;
+const CONTACT_BLUR = 0.6;
+const CONTACT_OFFSET = "translate(0.25 0.6)";
+const INK_SOFTNESS = 0.12;
+const FLIGHT_LIFT = 0.7;
+const FLIGHT_SPEED = 1600;
+const MOUTH_SLACK = 12;
+const FLOOR_GAP = 20;
+const MAGNET_RX = 0.75;
+const MAGNET_RY = 1.3;
+const MAGNET_CORE = 0.3;
+const MAGNET_PULL = 0.94;
+const MAGNET_TURN = 16;
+const MAGNET_TRAVEL = 28;
+const ARM_RADIUS = 0.6;
+const SEAT_MIN_MS = 90;
+const SEAT_MAX_MS = 520;
+const SEAT_MS_PER_PX = 0.5;
+const CARRY_LIFT = 0.55;
+const CARRY_DISTANCE = 360;
+const WAIT_LIFT = 0.3;
+const CATCH_DEPTH = 0.12;
+const CATCH_MS = 120;
+const WAIT_CATCH_MS = 240;
+const DRAW_DELAY_MS = 70;
+const DRAW_MS = 540;
+const DRAW_OVERRUN = 4;
+const EJECT_MS = 640;
+const SWAP_EJECT_MS = 440;
+const EJECT_MIN_MS = 220;
+const EJECT_CLEAR = 6;
+const TOSS_X = 280;
+const TOSS_Y = 360;
+const TOSS_SPIN = 0.8;
+const SET_DOWN_X = 200;
+const SET_DOWN_Y = 220;
+const CLIP_BLEED = 48;
 
 const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
 
@@ -117,6 +201,25 @@ function svg(tag, attributes) {
   return node;
 }
 
+function grainTransform(seed) {
+  const turn = GRAIN_TURNS[(seed >>> 16) & 3];
+  return `translate(${seed % GRAIN_SIZE} ${(seed >>> 8) % GRAIN_SIZE})${turn ? ` ${turn}` : ""}`;
+}
+
+function grainPattern(id, seed, href) {
+  const pattern = svg("pattern", {
+    id,
+    patternUnits: "userSpaceOnUse",
+    width: String(GRAIN_SIZE),
+    height: String(GRAIN_SIZE),
+    patternTransform: grainTransform(seed),
+  });
+  const image = svg("image", { width: String(GRAIN_SIZE), height: String(GRAIN_SIZE), preserveAspectRatio: "none" });
+  if (href) image.setAttribute("href", href);
+  pattern.appendChild(image);
+  return { pattern, image };
+}
+
 function div(className, text) {
   const node = document.createElement("div");
   node.className = className;
@@ -124,17 +227,20 @@ function div(className, text) {
   return node;
 }
 
-export function createTearOff(stage, { covers, onCount, reducedMotion: initialReduced = false }) {
+export function createTearOff(stage, { covers, onCount, onDeck, onTime, mouth: mouthEl = null, reducedMotion: initialReduced = false }) {
   const world = createWorld(BODY_CAPACITY, SEAM_CAPACITY);
   const queue = createCoverQueue(covers);
   const sound = createTearSound();
+  const deck = createPreviewDeck(onDeckStatus);
   const byBody = new Array(BODY_CAPACITY).fill(null);
   const tickets = [];
   const timers = new Set();
   const pose = { x: 0, y: 0, a: 0 };
   const samples = new Float64Array(48);
-  const layout = { width: 0, height: 0, W: 0, H: 0, D: 0, mouthX: 0, mouthY: 0, restEnd: 0, small: false, angle: WIDE_AXIS, ux: 1, uy: 0 };
-  const paths = { fill: "", line: "", torn: "" };
+  const layout = { width: 0, height: 0, W: 0, H: 0, D: 0, mouthX: 0, mouthY: 0, restEnd: 0, small: false, angle: WIDE_AXIS, ux: 1, uy: 0, floor: 0 };
+  const mouth = { x: 0, y: 0 };
+  const reader = { inside: null, feeding: null, ejecting: [], current: null, armed: false };
+  const paths = { fill: "", line: "", torn: "", fibres: "" };
   const leavingEls = new Set();
 
   let strip = [];
@@ -156,10 +262,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   let ready = false;
   let feedPending = false;
   let focusAfterFeed = false;
-  let soundOn = true;
   let reducedMotion = initialReduced;
-  let playingTicket = null;
-  let progressFrame = 0;
+  let timeFrame = 0;
   let stubStop = null;
   let lastRollS = Number.NaN;
   let ticketId = 0;
@@ -168,10 +272,37 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   let pendingTicks = 0;
   let pendingSpeed = 0;
 
+  const uid = `to-${hashString(String(Math.random())).toString(36)}`;
+  let grainUrls = null;
+  let paperId = 0;
+  const defsSvg = svg("svg", { class: "to-defs", width: "0", height: "0", "aria-hidden": "true", focusable: "false" });
+  const sharedDefs = svg("defs", {});
+  const rollGrain = grainPattern(`${uid}-roll-paper`, ROLL_GRAIN_SEED, null);
+  const rollShade = svg("linearGradient", { id: `${uid}-roll-shade`, x1: "0", y1: "0", x2: "1", y2: "0" });
+  for (const [offset, color, alpha] of ROLL_SHADE_STOPS) {
+    rollShade.appendChild(svg("stop", { offset: String(offset), style: `stop-color: ${color}; stop-opacity: ${alpha}` }));
+  }
+  sharedDefs.append(rollGrain.pattern, rollShade);
+  const curlGradient = svg("linearGradient", { id: `${uid}-curl`, x1: "0", y1: "0", x2: "1", y2: "0" });
+  for (const [offset, color, alpha] of CURL_STOPS) {
+    curlGradient.appendChild(svg("stop", { offset: String(offset), style: `stop-color: ${color}; stop-opacity: ${alpha}` }));
+  }
+  const contactFilter = svg("filter", { id: `${uid}-contact`, x: "-5%", y: "-10%", width: "110%", height: "130%" });
+  contactFilter.appendChild(svg("feGaussianBlur", { stdDeviation: String(CONTACT_BLUR) }));
+  const liftFilter = svg("filter", { id: `${uid}-lift`, x: "-25%", y: "-50%", width: "150%", height: "200%" });
+  liftFilter.appendChild(svg("feGaussianBlur", { stdDeviation: String(LIFT_SHADOW_BLUR) }));
+  const inkFilter = svg("filter", { id: `${uid}-ink`, x: "-20%", y: "-2%", width: "140%", height: "104%" });
+  inkFilter.appendChild(svg("feGaussianBlur", { stdDeviation: String(INK_SOFTNESS) }));
+  sharedDefs.append(curlGradient, contactFilter, liftFilter, inkFilter);
+  defsSvg.appendChild(sharedDefs);
+  stage.appendChild(defsSvg);
+
   const roll = div("to-roll");
   roll.setAttribute("aria-hidden", "true");
   const rollSvg = svg("svg", { class: "to-roll__svg" });
   const rollRect = svg("rect", { class: "to-roll__body" });
+  const rollTexture = svg("rect", { class: "to-roll__texture", fill: `url(#${rollGrain.pattern.id})` });
+  const rollShadeRect = svg("rect", { class: "to-roll__shade", fill: `url(#${rollShade.id})` });
   const rollLines = [];
   for (let i = 0; i < ROLL_LINES; i += 1) {
     const line = svg("line", { class: "to-roll__line" });
@@ -184,9 +315,19 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   rollLines.forEach((line) => rollLineGroup.appendChild(line));
   const rollDefs = svg("defs", {});
   rollDefs.appendChild(rollClip);
-  rollSvg.append(rollDefs, rollRect, rollLineGroup);
+  rollSvg.append(rollDefs, rollRect, rollTexture, rollShadeRect, rollLineGroup);
   roll.appendChild(rollSvg);
   stage.appendChild(roll);
+
+  paperGrain().then((urls) => {
+    if (destroyed || !urls) return;
+    grainUrls = urls;
+    rollGrain.image.setAttribute("href", urls.paper);
+    for (const ticket of tickets) {
+      ticket.paperImage.setAttribute("href", urls.paper);
+      ticket.toothImage.setAttribute("href", urls.tooth);
+    }
+  });
 
   function later(callback, ms) {
     const id = setTimeout(() => {
@@ -219,7 +360,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const H = Math.round((W * 0.42) / 4) * 4;
     const D = Math.round(H * 1.12);
     const mouthX = Math.round(small ? Math.max(16, D * 0.36) : Math.min(width * 0.06 + 24, D * 0.55));
-    const mouthY = Math.round(small ? Math.max(176 + H, height * 0.4) : Math.max(184 + H / 2, height * 0.42));
+    const mouthY = Math.round(small ? Math.max(184 + H, height * 0.4) : Math.max(208 + H / 2, height * 0.42));
     const margin = small ? 12 : Math.max(20, width * 0.05);
     Object.assign(layout, {
       width,
@@ -237,18 +378,50 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     });
     world.rail.ux = layout.ux;
     world.rail.uy = layout.uy;
-    updateBounds();
     stage.dataset.size = small ? "sm" : "lg";
     stage.style.setProperty("--to-w", `${W}px`);
     stage.style.setProperty("--to-h", `${H}px`);
+    measureMouth();
+    updateBounds();
     drawRoll();
+  }
+
+  function measureMouth() {
+    const { width, height, W, H } = layout;
+    mouth.x = width / 2;
+    mouth.y = height - 80;
+    if (mouthEl) {
+      mouthEl.style.setProperty("--to-mouth", `${W + MOUTH_SLACK}px`);
+      const box = mouthEl.getBoundingClientRect();
+      const frame = stage.getBoundingClientRect();
+      if (box.width > 0) {
+        mouth.x = box.left + box.width / 2 - frame.left;
+        mouth.y = box.top + box.height / 2 - frame.top;
+      }
+    }
+    layout.floor = mouth.y - H / 2 - FLOOR_GAP;
+  }
+
+  function dockY() {
+    return mouth.y - layout.H / 2;
   }
 
   function updateBounds() {
     world.bounds.minX = layout.W * 0.12;
     world.bounds.maxX = layout.width - layout.W * 0.12;
     world.bounds.minY = 64 + layout.H * 0.2;
-    world.bounds.maxY = layout.height - layout.H * 0.4;
+    world.bounds.maxY = Math.max(world.bounds.minY, dockY());
+  }
+
+  function liftOffPlayer() {
+    const limit = world.bounds.maxY;
+    for (const ticket of stubs) {
+      const body = ticket.body;
+      if (world.y[body] <= limit) continue;
+      world.y[body] = limit;
+      world.py[body] = limit;
+      world.vy[body] = Math.min(0, world.vy[body]);
+    }
   }
 
   function drawRoll() {
@@ -264,6 +437,10 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     rollRect.setAttribute("width", String(D));
     rollRect.setAttribute("height", String(half * 2));
     rollRect.setAttribute("rx", "12");
+    for (const attribute of ["x", "y", "width", "height", "rx"]) {
+      rollTexture.setAttribute(attribute, rollRect.getAttribute(attribute));
+      rollShadeRect.setAttribute(attribute, rollRect.getAttribute(attribute));
+    }
     rollClipRect.setAttribute("x", String(-D + SPIN_LINE_INSET));
     rollClipRect.setAttribute("y", String(-half + SPIN_LINE_INSET));
     rollClipRect.setAttribute("width", String(D - SPIN_LINE_INSET * 2));
@@ -311,15 +488,36 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     el.dataset.kind = mode === FREE ? "stub" : "strip";
     el.style.width = `${W}px`;
     el.style.height = `${H}px`;
-    el.style.setProperty("--to-tint", entry?.tint ?? "rgb(246 246 243)");
+    const paperSeed = hashString(`${id}:${cover.id}:${number}`);
+    const paperKey = `${uid}-p${(paperId += 1)}`;
+    el.style.setProperty("--to-tint", entry?.tint ?? FALLBACK_TINT);
+    el.style.setProperty("--to-spot", entry?.spot ?? FALLBACK_SPOT);
     el.tabIndex = -1;
     el.setAttribute("role", "button");
     const inner = div("to-ticket__body");
-    const paper = svg("svg", { class: "to-ticket__paper", width: String(W), height: String(H), viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true" });
-    const path = svg("path", { class: "to-ticket__fill" });
+    const paperBox = { width: String(W), height: String(H), viewBox: `0 0 ${W} ${H}`, "aria-hidden": "true" };
+    const outline = svg("path", { id: `${paperKey}-outline` });
+    const outlineRef = `#${outline.id}`;
+    const paperGrainPattern = grainPattern(`${paperKey}-paper`, paperSeed, grainUrls?.paper);
+    const toothGrainPattern = grainPattern(`${paperKey}-tooth`, (paperSeed ^ TOOTH_SALT) >>> 0, grainUrls?.tooth);
+    const paperDefs = svg("defs", {});
+    paperDefs.append(outline, paperGrainPattern.pattern, toothGrainPattern.pattern);
+    const shadow = svg("svg", { class: "to-ticket__shadow", ...paperBox });
+    shadow.appendChild(svg("use", { href: outlineRef, filter: `url(#${uid}-lift)` }));
+    const paper = svg("svg", { class: "to-ticket__paper", ...paperBox });
+    const contact = svg("use", { href: outlineRef, class: "to-ticket__contact", filter: `url(#${uid}-contact)`, transform: CONTACT_OFFSET });
+    const path = svg("use", { href: outlineRef, class: "to-ticket__fill" });
+    const texture = svg("use", { href: outlineRef, class: "to-ticket__texture", fill: `url(#${paperGrainPattern.pattern.id})` });
+    paper.append(paperDefs, contact, path, texture);
+    const overlay = svg("svg", { class: "to-ticket__paper to-ticket__paper--top", ...paperBox });
+    const tooth = svg("use", { href: outlineRef, class: "to-ticket__tooth", fill: `url(#${toothGrainPattern.pattern.id})` });
+    const curl = svg("use", { href: outlineRef, class: "to-ticket__curl", fill: `url(#${uid}-curl)` });
+    curl.style.opacity = "0";
     const line = svg("path", { class: "to-ticket__line" });
+    const core = svg("path", { class: "to-ticket__core" });
     const torn = svg("path", { class: "to-ticket__torn" });
-    paper.append(path, line, torn);
+    const fibres = svg("path", { class: "to-ticket__fibres" });
+    overlay.append(tooth, curl, line, core, torn, fibres);
     const face = div("to-ticket__face");
     const image = document.createElement("img");
     image.className = "to-ticket__cover";
@@ -351,13 +549,12 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const code = div("to-ticket__code");
     const bars = barcodePath(hashString(String(cover.id)), codeWidth, codeHeight);
     const ink = svg("svg", { class: "to-ticket__bars", width: String(codeWidth), height: String(codeHeight), viewBox: `0 0 ${codeWidth} ${codeHeight}`, "aria-hidden": "true" });
-    ink.appendChild(svg("path", { d: bars }));
-    const play = svg("svg", { class: "to-ticket__bars to-ticket__bars--play", width: String(codeWidth), height: String(codeHeight), viewBox: `0 0 ${codeWidth} ${codeHeight}`, "aria-hidden": "true" });
-    play.appendChild(svg("path", { d: bars }));
-    code.append(ink, play);
+    ink.appendChild(svg("path", { d: bars, filter: `url(#${uid}-ink)` }));
+    code.append(ink);
     face.append(well, text, code);
-    inner.append(paper, face);
-    el.appendChild(inner);
+    inner.append(paper, face, overlay);
+    el.append(shadow, inner);
+    el.style.transform = `translate3d(${(x - W / 2).toFixed(2)}px, ${(y - H / 2).toFixed(2)}px, 0) rotate(${a.toFixed(5)}rad)`;
     stage.insertBefore(el, before && before.parentNode === stage ? before : null);
 
     const ticket = {
@@ -365,10 +562,24 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       body,
       el,
       inner,
-      path,
+      shadow,
+      outline,
+      paperImage: paperGrainPattern.image,
+      toothImage: toothGrainPattern.image,
+      curl,
       line,
+      core,
       torn,
+      fibres,
       code,
+      paperSeed,
+      lift: 0,
+      curlLevel: 0,
+      tilt: 0,
+      liftApplied: 0,
+      curlApplied: 0,
+      tiltApplied: 0,
+      layered: false,
       number,
       numberLabel,
       coverIndex,
@@ -387,6 +598,9 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       z: 0,
       zApplied: -1,
       leaving: false,
+      reader: null,
+      carry: 0,
+      clip: "",
     };
     byBody[body] = ticket;
     tickets.push(ticket);
@@ -396,6 +610,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       queue.ensure(coverIndex).then((loaded) => {
         if (destroyed || built !== generation || !loaded) return;
         el.style.setProperty("--to-tint", loaded.tint);
+        el.style.setProperty("--to-spot", loaded.spot);
       });
     }
     labelTicket(ticket);
@@ -407,7 +622,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const name = `${numberLabel}, ${cover.title}${cover.artist ? ` by ${cover.artist}` : ""}`;
     ticket.el.setAttribute(
       "aria-label",
-      ticket.kind === "strip" ? `${name}. Enter tears it off, Backspace winds the roll back.` : `${name}. Torn stub. Enter plays a preview, arrow keys move through the pile.`,
+      ticket.kind === "strip" ? `${name}. Enter tears it off, Backspace winds the roll back.` : `${name}. Torn stub. Enter feeds it into the reader, arrow keys move through the pile.`,
     );
   }
 
@@ -465,10 +680,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     return { x: layout.mouthX + layout.ux * axial, y: layout.mouthY + layout.uy * axial };
   }
 
-  function clearScene(keepSound = false) {
+  function clearScene() {
     generation += 1;
-    if (!keepSound) sound.stop();
-    playingTicket = null;
     tween = null;
     script = null;
     pointer = null;
@@ -493,17 +706,18 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function startingPiles() {
-    const { width, height, H, mouthY, small } = layout;
+    const { width, W, H, mouthY, small, floor } = layout;
     if (small) {
-      const floor = height - H * 0.7;
       return [
         [width * 0.36, Math.min(floor, mouthY + H * SMALL_PILE), -9],
         [width * 0.64, Math.min(floor, mouthY + H * (SMALL_PILE + 0.35)), 6],
       ];
     }
+    const first = clamp(Math.max(width * 0.62, mouth.x + W * 0.85), W * 0.55, width - W * 0.55);
+    const second = clamp(Math.max(width * 0.79, first + W * 0.6), W * 0.55, width - W * 0.55);
     return [
-      [width * 0.62, height - H * 1.05, -8],
-      [width * 0.79, height - H * 0.8, 5],
+      [first, floor - H * 0.25, -8],
+      [second, floor, 5],
     ];
   }
 
@@ -525,8 +739,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     return stub;
   }
 
-  function buildRoll({ withStubs = false, kept = null, endEdge = null, keepSound = false, firstNumber, firstCover, intro }) {
-    clearScene(keepSound);
+  function buildRoll({ withStubs = false, kept = null, endEdge = null, firstNumber, firstCover, intro }) {
+    clearScene();
     const { W, restEnd } = layout;
     let cover = queue.usable(firstCover);
     let records = kept;
@@ -636,10 +850,6 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function discardTicket(ticket) {
-    if (playingTicket === ticket) {
-      sound.stop();
-      playingTicket = null;
-    }
     removeBody(world, ticket.body);
     byBody[ticket.body] = null;
     const index = tickets.indexOf(ticket);
@@ -923,15 +1133,16 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function pilePoint(variation = 0) {
-    const { width, height, H, W, small } = layout;
+    const { width, H, W, small, floor } = layout;
     const spread = stubs.length % 4;
     const jitterX = (((variation >>> 8) % 1000) / 1000 - 0.5) * W * 0.3;
     const jitterY = (((variation >>> 18) % 1000) / 1000 - 0.5) * H * 0.4;
+    const base = small ? width * 0.5 : Math.max(width * 0.7, mouth.x + W * 0.95);
     return {
-      x: clamp(width * (small ? 0.5 : 0.7) + (spread - 1.5) * W * 0.16 + jitterX, W * 0.5, width - W * 0.5),
+      x: clamp(base + (spread - 1.5) * W * 0.16 + jitterX, W * 0.5, width - W * 0.5),
       y: small
-        ? clamp(layout.mouthY + H * (SMALL_PILE + (spread % 2) * 0.35) + jitterY, layout.mouthY + H * 1.6, height - H * 0.6)
-        : clamp(height - H * (1 + (spread % 2) * 0.2) + jitterY, layout.mouthY + H * 1.2, height - H * 0.6),
+        ? clamp(layout.mouthY + H * (SMALL_PILE + (spread % 2) * 0.35) + jitterY, layout.mouthY + H * 1.6, floor)
+        : clamp(floor - H * (spread % 2) * 0.2 + jitterY, layout.mouthY + H * 1.2, floor),
       a: (((spread % 2 ? 7 : -6) + (((variation >>> 3) % 9) - 4)) * Math.PI) / 180,
     };
   }
@@ -990,7 +1201,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     stubStop = right;
     count += freed.length;
     onCount?.(count);
-    startPreview(right);
+    deck.prefetch(right.cover);
     trimStubs();
     updateTabStops();
     feedPending = true;
@@ -1009,15 +1220,15 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   function leave(ticket) {
     if (ticket.leftSeam >= 0) detachSeam(ticket.leftSeam);
     if (ticket.rightSeam >= 0) detachSeam(ticket.rightSeam);
-    if (playingTicket === ticket) {
-      sound.stop();
-      playingTicket = null;
-    }
     removeBody(world, ticket.body);
     byBody[ticket.body] = null;
     const index = tickets.indexOf(ticket);
     if (index >= 0) tickets.splice(index, 1);
     ticket.leaving = true;
+    ticket.inner.style.transform = "";
+    ticket.inner.style.transformOrigin = "";
+    ticket.inner.style.willChange = "";
+    ticket.shadow.style.visibility = "hidden";
     if (reducedMotion) {
       ticket.el.remove();
       return;
@@ -1030,56 +1241,485 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     }, LEAVE_MS);
   }
 
-  function clearPlaying(ticket) {
-    delete ticket.el.dataset.playing;
-    ticket.code.style.setProperty("--to-play", "0");
-  }
-
-  function startPreview(ticket) {
-    if (!soundOn || !interacted) return;
-    if (playingTicket && playingTicket !== ticket) clearPlaying(playingTicket);
-    playingTicket = ticket;
-    ticket.el.dataset.playing = "";
-    ticket.code.style.setProperty("--to-play", "0");
-    const key = ticket.id;
-    sound.play(key, ticket.cover, () => {
-      clearPlaying(ticket);
-      if (playingTicket && playingTicket.id === key) {
-        clearPlaying(playingTicket);
-        playingTicket = null;
-      }
-    });
-    watchProgress();
-  }
-
-  function trackProgress() {
-    progressFrame = 0;
-    if (destroyed || !playingTicket || !visible || !onscreen) return;
-    const progress = sound.progress(playingTicket.id);
-    if (progress >= 0) playingTicket.code.style.setProperty("--to-play", progress.toFixed(4));
-    progressFrame = requestAnimationFrame(trackProgress);
-  }
-
-  function watchProgress() {
-    if (progressFrame || destroyed || !playingTicket || !visible || !onscreen) return;
-    progressFrame = requestAnimationFrame(trackProgress);
-  }
-
-  function stopWatchingProgress() {
-    if (!progressFrame) return;
-    cancelAnimationFrame(progressFrame);
-    progressFrame = 0;
-  }
-
-  function togglePreview(ticket) {
-    if (playingTicket === ticket) {
-      sound.stop();
+  function onDeckStatus({ key, status }) {
+    if (destroyed) return;
+    const current = reader.current;
+    if (key === null) {
+      if (!current) announce("empty");
+    } else if (current && current.id === key) {
+      announce(status);
+    } else {
       return;
     }
-    startPreview(ticket);
+    pushTime();
+    watchTime();
   }
 
-  function render() {
+  function announce(status) {
+    if (!onDeck) return;
+    const current = reader.current;
+    if (!current) {
+      onDeck({ id: null, cover: null, status: "empty" });
+      return;
+    }
+    const { cover } = current;
+    onDeck({ id: current.id, cover: { title: cover.title || "Untitled", artist: cover.artist || "", image: cover.image || "" }, status });
+  }
+
+  function pushTime() {
+    if (!onTime) return;
+    const { current, duration } = deck.time();
+    onTime(current, duration);
+  }
+
+  function timeLoop() {
+    timeFrame = 0;
+    if (destroyed || !visible) return;
+    pushTime();
+    if (deck.status() === "playing") timeFrame = requestAnimationFrame(timeLoop);
+  }
+
+  function watchTime() {
+    if (timeFrame || destroyed || !visible || deck.status() !== "playing") return;
+    timeFrame = requestAnimationFrame(timeLoop);
+  }
+
+  function stopTime() {
+    if (!timeFrame) return;
+    cancelAnimationFrame(timeFrame);
+    timeFrame = 0;
+  }
+
+  function setArmed(next) {
+    if (reader.armed === next) return;
+    reader.armed = next;
+    if (mouthEl) {
+      if (next) mouthEl.dataset.armed = "";
+      else delete mouthEl.dataset.armed;
+    }
+    if (next) sound.detent();
+  }
+
+  function aimHand() {
+    if (!pointer) return;
+    if (pointer.ticket.kind !== "stub") {
+      moveHand(world, pointer.x, pointer.y);
+      return;
+    }
+    const { W, H } = layout;
+    const body = pointer.ticket.body;
+    const hand = world.hand;
+    const angle = world.a[body];
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+    const freeX = pointer.x - (hand.lx * cos - hand.ly * sin);
+    const freeY = pointer.y - (hand.lx * sin + hand.ly * cos);
+    const bodyReach = Math.hypot((freeX - mouth.x) / (W * MAGNET_RX), (freeY - dockY()) / (H * MAGNET_RY));
+    const handReach = Math.hypot((pointer.x - hand.lx - mouth.x) / (W * MAGNET_RX), (pointer.y - hand.ly - dockY()) / (H * MAGNET_RY));
+    const reach = Math.min(bodyReach, handReach);
+    const gain = Math.min(1, pointer.travelled / MAGNET_TRAVEL);
+    const closeness = clamp((1 - reach) / (1 - MAGNET_CORE), 0, 1);
+    const magnet = closeness * closeness * (3 - 2 * closeness) * gain;
+    pointer.magnet = magnet;
+    const pull = magnet * MAGNET_PULL;
+    const handX = pointer.x + (mouth.x + hand.lx - pointer.x) * pull;
+    const handY = pointer.y + (dockY() + hand.ly - pointer.y) * pull;
+    const overshoot = handY - (hand.lx * sin + hand.ly * cos) - world.bounds.maxY;
+    moveHand(world, handX, overshoot > 0 ? handY - overshoot : handY);
+    setArmed(gain >= 1 && reach < ARM_RADIUS);
+  }
+
+  function guideHeld(dt) {
+    if (!pointer || pointer.ticket.kind !== "stub") {
+      setArmed(false);
+      return;
+    }
+    aimHand();
+    const magnet = pointer.magnet;
+    if (magnet <= 0) return;
+    const body = pointer.ticket.body;
+    const turn = Math.atan2(Math.sin(-world.a[body]), Math.cos(-world.a[body]));
+    const share = 1 - Math.exp(-dt * MAGNET_TURN * magnet);
+    world.a[body] += turn * share;
+    world.va[body] *= 1 - share;
+  }
+
+  function setPose(ticket, x, y, a) {
+    const body = ticket.body;
+    world.x[body] = x;
+    world.px[body] = x;
+    world.y[body] = y;
+    world.py[body] = y;
+    world.a[body] = a;
+    world.pa[body] = a;
+    world.vx[body] = 0;
+    world.vy[body] = 0;
+    world.va[body] = 0;
+    world.awake[body] = 0;
+  }
+
+  function clipTicket(ticket, y) {
+    const { W, H } = layout;
+    const shown = mouth.y - (y - H / 2);
+    let clip = "";
+    if (shown < H + CLIP_BLEED) {
+      const edge = Math.max(0, shown).toFixed(2);
+      clip = `polygon(${-CLIP_BLEED}px ${-CLIP_BLEED}px, ${W + CLIP_BLEED}px ${-CLIP_BLEED}px, ${W + CLIP_BLEED}px ${edge}px, ${-CLIP_BLEED}px ${edge}px)`;
+    }
+    if (clip === ticket.clip) return;
+    ticket.clip = clip;
+    ticket.el.style.clipPath = clip;
+  }
+
+  function clearClip(ticket) {
+    if (!ticket.clip) return;
+    ticket.clip = "";
+    ticket.el.style.clipPath = "";
+  }
+
+  function markReader(ticket, phase) {
+    ticket.reader.phase = phase;
+    ticket.el.dataset.reader = phase;
+  }
+
+  function leaveReader(ticket) {
+    ticket.reader = null;
+    delete ticket.el.dataset.reader;
+    clearClip(ticket);
+    ticket.carry = 0;
+  }
+
+  function mouthBusy() {
+    if (reader.inside) return true;
+    const base = dockY();
+    return reader.ejecting.some((ticket) => world.y[ticket.body] > base);
+  }
+
+  function tossSide(ticket) {
+    if (!layout.small) return mouth.x > layout.width * 0.7 ? -1 : 1;
+    return hashString(ticket.id) & 1 ? 1 : -1;
+  }
+
+  function returnToTable(ticket, vx, vy, va) {
+    const body = ticket.body;
+    world.awake[body] = 1;
+    world.rest[body] = 0;
+    world.vx[body] = vx;
+    world.vy[body] = vy;
+    world.va[body] = va;
+    ticket.z = 100 + (stubSequence += 1);
+    if (!stubs.includes(ticket)) stubs.push(ticket);
+    labelTicket(ticket);
+    trimStubs();
+    updateTabStops();
+    wake();
+  }
+
+  function forgetCurrent(ticket) {
+    if (!reader.current || reader.current.id !== ticket.id) return;
+    reader.current = null;
+    deck.eject();
+  }
+
+  function feed(ticket) {
+    if (destroyed || ticket.reader || ticket.kind !== "stub" || ticket.leaving) return;
+    const body = ticket.body;
+    if (!world.alive[body] || byBody[body] !== ticket) return;
+    const index = stubs.indexOf(ticket);
+    if (index >= 0) stubs.splice(index, 1);
+    if (world.hand.body === body) release(world);
+    const hadFocus = document.activeElement === ticket.el;
+    const previous = reader.feeding;
+    reader.feeding = null;
+    if (previous) {
+      const phase = previous.reader.phase;
+      if (phase === "seat" || phase === "wait") setDown(previous);
+      else startEject(previous, world.y[previous.body] - dockY(), SWAP_EJECT_MS);
+    }
+    if (reader.inside) ejectInside(SWAP_EJECT_MS);
+    bodyPose(world, body, pose);
+    const distance = Math.hypot(mouth.x - pose.x, dockY() - pose.y);
+    ticket.reader = {
+      phase: "seat",
+      start: performance.now(),
+      duration: reducedMotion || distance < 0.5 ? 0 : clamp(SEAT_MIN_MS + distance * SEAT_MS_PER_PX, SEAT_MIN_MS, SEAT_MAX_MS),
+      fromX: pose.x,
+      fromY: pose.y,
+      fromA: pose.a,
+      turn: -Math.atan2(Math.sin(pose.a), Math.cos(pose.a)),
+      offset: mouthBusy() ? -WAIT_LIFT * layout.H : 0,
+      catchFrom: 0,
+    };
+    ticket.el.dataset.reader = "seat";
+    ticket.carry = reducedMotion ? 0 : clamp(distance / CARRY_DISTANCE, 0.12, 1) * CARRY_LIFT;
+    ticket.z = 1000;
+    setPose(ticket, pose.x, pose.y, pose.a);
+    reader.feeding = ticket;
+    reader.current = { id: ticket.id, cover: ticket.cover };
+    deck.load(ticket.id, ticket.cover);
+    if (stubStop === ticket) stubStop = null;
+    updateTabStops();
+    if (hadFocus) (stubStop ?? strip[strip.length - 1])?.el.focus({ preventScroll: true });
+    wake();
+  }
+
+  function abortFeed(ticket) {
+    if (reader.feeding === ticket) reader.feeding = null;
+    leaveReader(ticket);
+    world.awake[ticket.body] = 1;
+    if (!stubs.includes(ticket)) stubs.push(ticket);
+    forgetCurrent(ticket);
+    updateTabStops();
+  }
+
+  function setDown(ticket) {
+    if (reader.feeding === ticket) reader.feeding = null;
+    leaveReader(ticket);
+    const side = tossSide(ticket);
+    returnToTable(ticket, side * SET_DOWN_X, -SET_DOWN_Y, side * TOSS_SPIN * 0.5);
+  }
+
+  function beginCatch(ticket, now) {
+    const state = ticket.reader;
+    state.catchFrom = state.offset;
+    state.start = now;
+    state.duration = reducedMotion ? 0 : state.offset < -1 ? WAIT_CATCH_MS : CATCH_MS;
+    ticket.carry = 0;
+    markReader(ticket, "catch");
+  }
+
+  function beginDraw(ticket, now) {
+    const state = ticket.reader;
+    state.start = now + (reducedMotion ? 0 : DRAW_DELAY_MS);
+    state.duration = reducedMotion ? 0 : DRAW_MS;
+    markReader(ticket, "draw");
+    sound.clunk();
+    sound.rollers(state.duration, reducedMotion ? 0 : DRAW_DELAY_MS);
+  }
+
+  function finishFeed(ticket) {
+    if (reader.feeding === ticket) reader.feeding = null;
+    ticket.reader = null;
+    reader.inside = { id: ticket.id, coverIndex: ticket.coverIndex, number: ticket.number, left: ticket.leftEdge, right: ticket.rightEdge };
+    discardTicket(ticket);
+    deck.start(ticket.id);
+    sound.seat();
+    updateTabStops();
+  }
+
+  function stepFeed(ticket, now) {
+    const state = ticket.reader;
+    const { H } = layout;
+    const base = dockY();
+    const progress = state.duration > 0 ? clamp((now - state.start) / state.duration, 0, 1) : 1;
+    let x = mouth.x;
+    let y = base;
+    let a = 0;
+    if (state.phase === "seat") {
+      const eased = easeOutQuint(progress);
+      x = state.fromX + (mouth.x - state.fromX) * eased;
+      y = state.fromY + (base + state.offset - state.fromY) * eased;
+      a = progress >= 1 ? 0 : state.fromA + state.turn * eased;
+      if (progress >= 1) {
+        if (mouthBusy()) markReader(ticket, "wait");
+        else beginCatch(ticket, now);
+      }
+    } else if (state.phase === "wait") {
+      y = base + state.offset;
+      if (!mouthBusy()) beginCatch(ticket, now);
+    } else if (state.phase === "catch") {
+      y = base + state.catchFrom + (CATCH_DEPTH * H - state.catchFrom) * easeOutQuad(progress);
+      if (progress >= 1) beginDraw(ticket, now);
+    } else {
+      y = base + CATCH_DEPTH * H + (H + DRAW_OVERRUN - CATCH_DEPTH * H) * easeInOut(progress);
+      if (progress >= 1) {
+        finishFeed(ticket);
+        return;
+      }
+    }
+    setPose(ticket, x, y, a);
+    clipTicket(ticket, y);
+  }
+
+  function ejectInside(pace = EJECT_MS) {
+    const record = reader.inside;
+    reader.inside = null;
+    if (!record) return;
+    forgetCurrent(record);
+    const from = layout.H + DRAW_OVERRUN;
+    const ticket = makeTicket({ coverIndex: record.coverIndex, number: record.number, x: mouth.x, y: dockY() + from, a: 0, mode: FREE, reuseId: record.id });
+    if (!ticket) return;
+    copyEdge(record.left, ticket.leftEdge);
+    copyEdge(record.right, ticket.rightEdge);
+    ticket.dirty = true;
+    ticket.z = 100 + (stubSequence += 1);
+    startEject(ticket, from, pace);
+  }
+
+  function startEject(ticket, fromOffset, pace = EJECT_MS) {
+    const travel = fromOffset + EJECT_CLEAR;
+    const full = layout.H + DRAW_OVERRUN + EJECT_CLEAR;
+    ticket.reader = {
+      phase: "eject",
+      start: performance.now(),
+      duration: reducedMotion ? 0 : Math.max(EJECT_MIN_MS, pace * clamp(travel / full, 0, 1)),
+      fromOffset,
+      side: tossSide(ticket),
+    };
+    ticket.el.dataset.reader = "eject";
+    ticket.carry = 0;
+    setPose(ticket, mouth.x, dockY() + fromOffset, 0);
+    clipTicket(ticket, dockY() + fromOffset);
+    if (!reader.ejecting.includes(ticket)) reader.ejecting.push(ticket);
+    sound.rollers(ticket.reader.duration * 0.7);
+    wake();
+  }
+
+  function stepEject(ticket, now) {
+    const state = ticket.reader;
+    const progress = state.duration > 0 ? clamp((now - state.start) / state.duration, 0, 1) : 1;
+    const y = dockY() + state.fromOffset + (-EJECT_CLEAR - state.fromOffset) * easeOutCubic(progress);
+    setPose(ticket, mouth.x, y, 0);
+    clipTicket(ticket, y);
+    if (progress >= 1) releaseEjected(ticket);
+  }
+
+  function releaseEjected(ticket) {
+    const index = reader.ejecting.indexOf(ticket);
+    if (index >= 0) reader.ejecting.splice(index, 1);
+    const side = ticket.reader?.side ?? 1;
+    leaveReader(ticket);
+    const variation = hashString(`${ticket.id}:toss:${stubSequence}`);
+    const spread = 0.85 + (((variation >>> 8) % 1000) / 1000) * 0.3;
+    returnToTable(ticket, side * TOSS_X * spread, -TOSS_Y * spread, side * TOSS_SPIN * spread);
+  }
+
+  function updateReader(now) {
+    for (let i = reader.ejecting.length - 1; i >= 0; i -= 1) stepEject(reader.ejecting[i], now);
+    if (reader.feeding) stepFeed(reader.feeding, now);
+  }
+
+  function settleReader() {
+    for (const ticket of [...reader.ejecting]) releaseEjected(ticket);
+    if (reader.feeding) finishFeed(reader.feeding);
+  }
+
+  function ejectReader() {
+    if (!ready || destroyed) return;
+    const feeding = reader.feeding;
+    if (feeding) {
+      reader.feeding = null;
+      const phase = feeding.reader.phase;
+      if (phase === "seat" || phase === "wait") setDown(feeding);
+      else startEject(feeding, world.y[feeding.body] - dockY());
+      forgetCurrent(feeding);
+    } else if (reader.inside) {
+      ejectInside();
+    }
+    if (reader.current) {
+      reader.current = null;
+      deck.eject();
+    }
+    wake();
+  }
+
+  function togglePlayback() {
+    if (destroyed || !reader.current) return;
+    sound.unlock();
+    deck.toggle();
+    pushTime();
+    watchTime();
+  }
+
+  function stripLevel(ticket, held) {
+    const seam = ticket.leftSeam;
+    if (seam < 0 || !world.seamAlive[seam]) return 0;
+    let broken = 0;
+    let strain = 0;
+    for (let k = 0; k < BRIDGES; k += 1) {
+      const q = seam * BRIDGES + k;
+      if (world.bridgeBroken[q]) broken += 1;
+      else strain = Math.max(strain, world.bridgeLoad[q]);
+    }
+    const torn = broken / BRIDGES;
+    if (held) return Math.min(1, HELD_LIFT + STRAIN_LIFT * strain + TORN_LIFT * torn);
+    return torn * RESTING_CURL;
+  }
+
+  function approach(current, target, dt) {
+    const gap = target - current;
+    if (Math.abs(gap) <= LIFT_EPSILON) return target;
+    return current + gap * (1 - Math.exp(-dt / (gap > 0 ? LIFT_RISE_TAU : LIFT_FALL_TAU)));
+  }
+
+  function applyLift(ticket, angle) {
+    const { lift, curlLevel, tilt, shadow, inner, curl } = ticket;
+    ticket.liftApplied = lift;
+    ticket.curlApplied = curlLevel;
+    ticket.tiltApplied = tilt;
+    if (lift > 0) {
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+      const worldX = LIFT_SHADOW_X * lift;
+      const worldY = LIFT_SHADOW_Y * lift;
+      const localX = worldX * cos + worldY * sin;
+      const localY = -worldX * sin + worldY * cos;
+      shadow.style.visibility = "visible";
+      shadow.style.opacity = (LIFT_SHADOW_OPACITY * Math.min(1, lift * 1.4)).toFixed(3);
+      shadow.style.transform = `translate(${localX.toFixed(2)}px, ${localY.toFixed(2)}px) scale(${(1 + LIFT_SHADOW_GROW * lift).toFixed(4)})`;
+    } else {
+      shadow.style.visibility = "hidden";
+    }
+    const degrees = reducedMotion ? 0 : tilt * LIFT_TILT;
+    const scale = ticket.kind === "stub" ? 1 + STUB_LIFT_SCALE * lift : 1;
+    let transform = "";
+    if (degrees > 0.01) {
+      if (ticket.kind === "strip") inner.style.transformOrigin = "0 50%";
+      transform = `perspective(${LIFT_PERSPECTIVE}px) rotateY(${(-degrees).toFixed(3)}deg)`;
+    }
+    if (scale > 1.0005) transform += `${transform ? " " : ""}scale(${scale.toFixed(4)})`;
+    inner.style.transform = transform;
+    curl.style.opacity = curlLevel > 0 ? curlLevel.toFixed(3) : "0";
+  }
+
+  function setLayered(ticket, layered) {
+    if (ticket.layered === layered) return;
+    ticket.layered = layered;
+    ticket.inner.style.willChange = layered ? "transform" : "";
+  }
+
+  function updateLift(ticket, dt, angle, moved) {
+    const body = ticket.body;
+    const held = world.hand.body === body;
+    let liftTarget;
+    let curlTarget;
+    if (ticket.kind === "stub") {
+      const speed = Math.hypot(world.vx[body], world.vy[body]);
+      liftTarget = Math.max(ticket.carry, held ? 1 : world.awake[body] ? Math.min(FLIGHT_LIFT, speed / FLIGHT_SPEED) : 0);
+      curlTarget = 0;
+    } else {
+      liftTarget = stripLevel(ticket, held);
+      curlTarget = liftTarget;
+    }
+    const tiltTarget = held && ticket.rightSeam < 0 ? curlTarget : 0;
+    ticket.lift = approach(ticket.lift, liftTarget, dt);
+    ticket.curlLevel = approach(ticket.curlLevel, curlTarget, dt);
+    ticket.tilt = approach(ticket.tilt, tiltTarget, dt);
+    const changed =
+      Math.abs(ticket.lift - ticket.liftApplied) > LIFT_EPSILON ||
+      Math.abs(ticket.curlLevel - ticket.curlApplied) > LIFT_EPSILON ||
+      Math.abs(ticket.tilt - ticket.tiltApplied) > LIFT_EPSILON ||
+      (ticket.lift === 0 && ticket.liftApplied !== 0) ||
+      (ticket.curlLevel === 0 && ticket.curlApplied !== 0) ||
+      (ticket.tilt === 0 && ticket.tiltApplied !== 0) ||
+      (moved && ticket.lift > 0);
+    const settled = ticket.lift === liftTarget && ticket.curlLevel === curlTarget && ticket.tilt === tiltTarget;
+    setLayered(ticket, !settled || held);
+    if (changed) applyLift(ticket, angle);
+    return settled;
+  }
+
+  function render(dt) {
     for (let seam = 0; seam < SEAM_CAPACITY; seam += 1) {
       if (!world.seamAlive[seam] || !world.seamDirty[seam]) continue;
       world.seamDirty[seam] = 0;
@@ -1113,6 +1753,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
         }
       }
       if (ticket.moving) anyMoving = true;
+      if (!updateLift(ticket, dt, pose.a, moved)) anyMoving = true;
       if (ticket.z !== ticket.zApplied) {
         ticket.zApplied = ticket.z;
         ticket.el.style.zIndex = String(ticket.z);
@@ -1121,10 +1762,12 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
         ticket.dirty = false;
         if (ticket.leftSeam >= 0) copySeam(ticket.leftEdge, ticket.leftSeam, false);
         if (ticket.rightSeam >= 0) copySeam(ticket.rightEdge, ticket.rightSeam, true);
-        paperPaths(W, H, ticket.leftEdge, ticket.rightEdge, ticket.leftSeam >= 0, ticket.rightSeam >= 0, paths);
-        ticket.path.setAttribute("d", paths.fill);
+        paperPaths(W, H, ticket.leftEdge, ticket.rightEdge, ticket.leftSeam >= 0, ticket.rightSeam >= 0, ticket.paperSeed, paths);
+        ticket.outline.setAttribute("d", paths.fill);
         ticket.line.setAttribute("d", paths.line);
+        ticket.core.setAttribute("d", paths.torn);
         ticket.torn.setAttribute("d", paths.torn);
+        ticket.fibres.setAttribute("d", paths.fibres);
       }
     }
     spinRoll();
@@ -1138,14 +1781,25 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     last = now;
     updateTween(now);
     updateScript(now, dt);
+    guideHeld(dt);
+    updateReader(now);
     const awake = step(world, dt);
     handleEvents();
     flushTicks();
     settleFollowers();
     maintainRoll();
-    const moving = render();
+    const moving = render(dt);
     const busy =
-      awake || moving || world.hand.body >= 0 || tween || script || pendingTicks > 0 || feedPending || Math.abs(world.rail.v) > 0.01;
+      awake ||
+      moving ||
+      world.hand.body >= 0 ||
+      tween ||
+      script ||
+      pendingTicks > 0 ||
+      feedPending ||
+      reader.feeding ||
+      reader.ejecting.length > 0 ||
+      Math.abs(world.rail.v) > 0.01;
     if (busy) frame = requestAnimationFrame(tick);
   }
 
@@ -1189,8 +1843,13 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const ticket = tickets.find((item) => item.el === el);
     if (!ticket || ticket.leaving) return;
     if (tween?.locked && ticket.kind === "strip") return;
+    if (ticket.reader) {
+      if (ticket.reader.phase !== "seat" && ticket.reader.phase !== "wait") return;
+      abortFeed(ticket);
+    }
     interacted = true;
     sound.unlock();
+    deck.prime();
     if (script) {
       if (script.kind !== "tease") return;
       const teased = script.seam;
@@ -1210,8 +1869,13 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       travelled: 0,
       tore: count,
       preloaded: -1,
+      x: 0,
+      y: 0,
+      magnet: 0,
     };
     const point = stagePoint(event);
+    pointer.x = point.x;
+    pointer.y = point.y;
     samples.fill(0);
     pushSample(event.timeStamp, point.x, point.y);
     if (ticket.el.dataset.enter !== undefined) delete ticket.el.dataset.enter;
@@ -1220,6 +1884,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       ticket.z = 1000;
       bodyPose(world, ticket.body, pose);
       ticket.inner.style.transformOrigin = `${(world.hand.lx + layout.W / 2).toFixed(1)}px ${(world.hand.ly + layout.H / 2).toFixed(1)}px`;
+      deck.prefetch(ticket.cover);
     } else {
       const index = strip.indexOf(ticket);
       if (tween) {
@@ -1235,7 +1900,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
         pointer.preloaded = ticket.leftSeam;
         setPreload(world, ticket.leftSeam, PRESS_PRELOAD);
       }
-      sound.prefetch(ticket.cover);
+      deck.prefetch(ticket.cover);
     }
     ticket.el.dataset.held = "";
     try {
@@ -1251,36 +1916,43 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const point = stagePoint(event);
     pointer.travelled = Math.max(pointer.travelled, Math.hypot(event.clientX - pointer.downX, event.clientY - pointer.downY));
     pushSample(event.timeStamp, point.x, point.y);
-    moveHand(world, point.x, point.y);
+    pointer.x = point.x;
+    pointer.y = point.y;
+    aimHand();
     wake();
   }
 
   function onPointerUp(event) {
     if (!pointer || event.pointerId !== pointer.id) return;
     sound.unlock();
+    deck.prime();
     const { ticket } = pointer;
     const tap = pointer.travelled < TAP_SLOP && event.timeStamp - pointer.downAt < 350 && pointer.tore === count;
+    const armed = ticket.kind === "stub" && reader.armed;
     const velocity = releaseVelocity(event.timeStamp);
     if (pointer.preloaded >= 0) setPreload(world, pointer.preloaded, 0);
     pointer = null;
+    setArmed(false);
     delete ticket.el.dataset.held;
     if (ticket.el.hasPointerCapture?.(event.pointerId)) ticket.el.releasePointerCapture(event.pointerId);
     const body = ticket.body;
     release(world);
     if (world.alive[body] && world.mode[body] === FREE && byBody[body] === ticket) {
-      if (!tap) {
-        world.vx[body] = velocity.x;
-        world.vy[body] = velocity.y;
-        world.va[body] = clamp(world.va[body], -MAX_SPIN, MAX_SPIN);
+      if (ticket.kind === "stub" && (armed || tap)) {
+        feed(ticket);
+      } else {
+        if (!tap) {
+          world.vx[body] = velocity.x;
+          world.vy[body] = velocity.y;
+          world.va[body] = clamp(world.va[body], -MAX_SPIN, MAX_SPIN);
+        }
+        world.awake[body] = 1;
+        ticket.z = 100 + (stubSequence += 1);
       }
-      world.awake[body] = 1;
-      ticket.z = 100 + (stubSequence += 1);
-      if (tap && ticket.kind === "stub") togglePreview(ticket);
     } else if (ticket.kind === "strip") {
       ticket.z = 10 + MAX_STRIP;
       feedPending = true;
     }
-    sound.resumePending();
     if (feedPending) runFeed();
     wake();
   }
@@ -1289,16 +1961,17 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const el = event.target.closest?.("[data-ticket]");
     if (!el || !ready) return;
     const ticket = tickets.find((item) => item.el === el);
-    if (!ticket) return;
+    if (!ticket || ticket.reader) return;
     interacted = true;
     sound.unlock();
     if (event.key === "Enter" || event.key === " ") {
       event.preventDefault();
+      deck.prime();
       if (ticket.kind === "strip" && ticket === strip[strip.length - 1]) {
         focusAfterFeed = true;
         scriptedTear();
       } else if (ticket.kind === "stub") {
-        togglePreview(ticket);
+        feed(ticket);
       }
       return;
     }
@@ -1348,7 +2021,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   function newRoll() {
     if (!ready) return;
     const firstCover = maxCover + 1;
-    sound.stop();
+    settleReader();
     script = null;
     pointer = null;
     release(world);
@@ -1435,14 +2108,13 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   }
 
   function rebuildKeeping(previous) {
+    settleReader();
     const end = strip[strip.length - 1];
-    const playingId = playingTicket && stubs.includes(playingTicket) ? playingTicket.id : null;
     const stopId = stubStop ? stubStop.id : null;
     const kept = keptStubs(previous);
     buildRoll({
       kept,
       endEdge: end ? end.rightEdge : null,
-      keepSound: playingId !== null,
       firstNumber: end ? end.number : numberCursor,
       firstCover: end ? end.coverIndex : coverCursor,
       intro: false,
@@ -1452,14 +2124,6 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       stubStop = restoredStop;
       updateTabStops();
     }
-    const restoredPlay = stubs.find((ticket) => ticket.id === playingId);
-    if (restoredPlay && sound.playing() === playingId) {
-      playingTicket = restoredPlay;
-      restoredPlay.el.dataset.playing = "";
-      watchProgress();
-    } else if (playingId !== null) {
-      sound.stop();
-    }
   }
 
   function resize(width, height) {
@@ -1468,7 +2132,10 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
     const heightChanged = Math.abs(height - layout.height) > 120;
     if (!widthChanged && !heightChanged) {
       layout.height = height;
+      measureMouth();
       updateBounds();
+      liftOffPlayer();
+      wake();
       return;
     }
     const previous = { W: layout.W, mouthX: layout.mouthX, mouthY: layout.mouthY, restEnd: layout.restEnd, width: layout.width, height: layout.height };
@@ -1478,7 +2145,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       reanchor(previous);
       return;
     }
-    const untouched = !interacted && count === INITIAL_TORN && stubs.length === INITIAL_TORN;
+    const untouched = !interacted && count === INITIAL_TORN && stubs.length === INITIAL_TORN && !reader.inside && !reader.feeding;
     if (untouched) {
       buildRoll({ withStubs: true, firstNumber: FIRST_NUMBER, firstCover: 0, intro: true });
       return;
@@ -1497,7 +2164,7 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
   });
 
   function pauseLoops() {
-    stopWatchingProgress();
+    stopTime();
     if (!frame) return;
     cancelAnimationFrame(frame);
     frame = 0;
@@ -1505,7 +2172,8 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
 
   function resumeLoops() {
     wake();
-    watchProgress();
+    pushTime();
+    watchTime();
   }
 
   const intersection = new IntersectionObserver((entries) => {
@@ -1539,22 +2207,19 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
 
   return {
     setSound(next) {
-      soundOn = next;
       sound.setEnabled(next);
-      if (!next && playingTicket) {
-        delete playingTicket.el.dataset.playing;
-        playingTicket = null;
-        stopWatchingProgress();
-      }
+      deck.setMuted(!next);
     },
     setReducedMotion(next) {
       reducedMotion = next;
     },
     newRoll,
+    eject: ejectReader,
+    togglePlayback,
     destroy() {
       destroyed = true;
       cancelAnimationFrame(frame);
-      stopWatchingProgress();
+      stopTime();
       clearTimeout(resizeTimer);
       timers.forEach((id) => clearTimeout(id));
       timers.clear();
@@ -1568,12 +2233,15 @@ export function createTearOff(stage, { covers, onCount, reducedMotion: initialRe
       stage.removeEventListener("keydown", onKeyDown);
       document.removeEventListener("visibilitychange", onVisibility);
       sound.destroy();
+      deck.destroy();
+      if (mouthEl) delete mouthEl.dataset.armed;
       queue.dispose();
       for (const ticket of tickets) ticket.el.remove();
       tickets.length = 0;
       leavingEls.forEach((el) => el.remove());
       leavingEls.clear();
       roll.remove();
+      defsSvg.remove();
     },
   };
 }

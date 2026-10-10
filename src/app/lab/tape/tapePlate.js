@@ -21,17 +21,18 @@ uniform float uWarp;
 uniform float uWarpRadius;
 uniform float uReveal;
 uniform float uWear;
-uniform float uLane;
 uniform float uHasPrint;
 uniform float uSmear;
 out vec4 fragColor;
 
-const vec3 PAPER = vec3(0.973, 0.980, 0.988);
-const vec3 MIST = vec3(0.886, 0.910, 0.941);
-const vec3 SLATE = vec3(0.580, 0.639, 0.722);
-const vec3 DEEP = vec3(0.200, 0.255, 0.333);
-const vec3 INK = vec3(0.102, 0.102, 0.102);
-const vec3 SUNKEN = vec3(0.914, 0.929, 0.953);
+const vec3 OXIDE_SHADE = vec3(0.098, 0.071, 0.059);
+const vec3 OXIDE = vec3(0.157, 0.114, 0.090);
+const vec3 OXIDE_LIT = vec3(0.208, 0.153, 0.122);
+const vec3 SIGNAL = vec3(0.306, 0.231, 0.184);
+const vec3 SLIT = vec3(0.400, 0.337, 0.294);
+const vec3 SHEEN = vec3(0.945, 0.890, 0.835);
+const vec3 SCRAPE = vec3(0.357, 0.286, 0.239);
+const vec3 TICK = vec3(0.478, 0.404, 0.353);
 
 float hash21(vec2 p) {
   p = fract(p * vec2(123.34, 456.21));
@@ -50,11 +51,22 @@ float valueNoise(vec2 p) {
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-vec3 inkRamp(float d) {
-  vec3 col = mix(PAPER, MIST, smoothstep(0.0, 0.25, d));
-  col = mix(col, SLATE, smoothstep(0.25, 0.5, d));
-  col = mix(col, DEEP, smoothstep(0.5, 0.75, d));
-  return mix(col, INK, smoothstep(0.75, 1.0, d));
+float loopNoise(vec2 p, float span) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float x0 = mod(i.x, span);
+  float x1 = mod(i.x + 1.0, span);
+  float a = hash21(vec2(x0, i.y));
+  float b = hash21(vec2(x1, i.y));
+  float c = hash21(vec2(x0, i.y + 1.0));
+  float d = hash21(vec2(x1, i.y + 1.0));
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+float bell(float x, float centre, float width) {
+  float t = (x - centre) / width;
+  return exp(-t * t);
 }
 
 float readPrint(float seconds, float bin) {
@@ -71,28 +83,62 @@ float inkOf(float level) {
 }
 
 void main() {
-  vec2 frag = vec2(gl_FragCoord.x, uResolution.y - gl_FragCoord.y);
-  vec2 point = frag;
+  vec2 point = vec2(gl_FragCoord.x, uResolution.y - gl_FragCoord.y);
 
   float dx = point.x - uHeadX;
   float paper = dx - uWarp * uWarpRadius * tanh(dx / uWarpRadius);
   float seconds = uPosition + paper / uPxPerSecond;
-  float paperX = mod(seconds, uPeriod) * uPxPerSecond / uScale;
-  vec2 fibre = vec2(paperX, point.y / uScale);
+  float looped = mod(seconds, uPeriod);
+  float turn = looped / uPeriod;
+  float paperX = looped * uPxPerSecond / uScale;
+  float cssY = point.y / uScale;
+  float cssH = uResolution.y / uScale;
+  float across = point.y / uResolution.y;
   float smearCss = uSmear / uScale;
   float streak = 1.0 + smearCss * 0.3;
   float still = 1.0 - smoothstep(0.0, 24.0, smearCss);
 
-  float top = uLane + 4.0 * uScale;
-  float bottom = uResolution.y - 18.0 * uScale;
+  vec3 col = mix(OXIDE, OXIDE_LIT, 0.6 * bell(across, 0.26, 0.24));
+  float lower = smoothstep(0.5, 1.0, across);
+  col = mix(col, OXIDE_SHADE, 0.5 * lower * lower);
+
+  float coat = loopNoise(vec2(turn * 13.0, cssY * 0.21), 13.0) - 0.5;
+  float lines = loopNoise(vec2(turn * 41.0, cssY * 0.9), 41.0) - 0.5;
+  float grain = hash21(floor(vec2(paperX / streak, cssY) * uScale)) - 0.5;
+  col *= 1.0 + coat * 0.07 + lines * 0.06 + grain * 0.05 * mix(0.35, 1.0, still);
+
+  float ripple = loopNoise(vec2(turn * 17.0, 1.5), 17.0) - 0.5;
+  float flutter = loopNoise(vec2(turn * 53.0, 4.5), 53.0) - 0.5;
+  float gloss = loopNoise(vec2(turn * 7.0, 9.5), 7.0);
+  float tension = abs(uWarp) * bell(dx, 0.0, uWarpRadius);
+  float pool = bell(point.x / uResolution.x, 0.56, 0.62);
+  float crest = 0.33 + ripple * 0.12 + flutter * 0.035 - tension * 0.1;
+  float sheen = bell(across, crest, 0.11 + 0.05 * gloss) * (0.55 + 0.45 * gloss);
+  sheen += 0.3 * bell(across, 0.8 - ripple * 0.06, 0.07);
+  sheen *= pool * (1.0 + 2.2 * tension) * (1.0 - 0.55 * uWear);
+
+  float edge = min(cssY, cssH - cssY);
+  float slit = 1.0 - smoothstep(0.4, 2.2, edge);
+  float curl = 1.0 - smoothstep(0.0, 12.0, edge);
+  float upper = 1.0 - step(0.5, across);
+  col = mix(col, SLIT, slit * mix(0.7, 0.85, upper));
+  col += SHEEN * curl * curl * mix(0.025, 0.05, upper);
+
+  float top = 14.0 * uScale;
+  float bottom = uResolution.y - 22.0 * uScale;
   float fy = (bottom - point.y) / (bottom - top);
-  float inside = smoothstep(-1.5 * uScale, 0.5 * uScale, point.y - top) * smoothstep(-1.5 * uScale, 0.5 * uScale, bottom - point.y);
+  float inside = smoothstep(top - 4.0 * uScale, top + 10.0 * uScale, point.y) * (1.0 - smoothstep(bottom - 10.0 * uScale, bottom + 4.0 * uScale, point.y));
 
   float density = 0.0;
+  float reliefX = 0.0;
+  float reliefY = 0.0;
   if (uHasPrint > 0.5) {
     float bin = clamp(fy, 0.0, 1.0) * uLayout.z;
+    float binsPerPx = uLayout.z * uScale / (bottom - top);
+    float secondsPerPx = uScale / uPxPerSecond;
+    float level = inkOf(readPrint(seconds, bin));
     if (uSmear > 0.5) {
-      float jitter = hash21(frag + 11.0) - 0.5;
+      float jitter = hash21(point + 11.0) - 0.5;
       float total = 0.0;
       for (int tap = 0; tap < 5; tap++) {
         float along = (float(tap) + 0.5 + jitter) / 5.0 - 0.5;
@@ -100,45 +146,46 @@ void main() {
       }
       density = total / 5.0;
     } else {
-      density = inkOf(readPrint(seconds, bin));
+      density = level;
+    }
+    if (still > 0.01) {
+      reliefX = (inkOf(readPrint(seconds + 1.5 * secondsPerPx, bin)) - level) / 1.5;
+      reliefY = (inkOf(readPrint(seconds, bin - 1.5 * binsPerPx)) - level) / 1.5;
     }
   }
-  float grain = valueNoise(vec2(fibre.x * 0.18 / streak, fibre.y * 1.4)) - 0.5;
-  float speck = (hash21(floor(fibre * 1.5)) - 0.5) * still;
-  density += grain * mix(0.16, 0.08, still) * density + speck * 0.22 * density * (1.0 - density);
 
   float row = floor(point.y / (1.5 * uScale));
   float rowSeed = hash21(vec2(row, 7.0));
   float scratch = step(1.0 - 0.07 * uWear, rowSeed) * smoothstep(0.3, 0.7, valueNoise(vec2(paperX * 0.03 / streak, row)));
-  float blotch = 0.78 + 0.22 * valueNoise(fibre * vec2(0.02, 0.08));
-  density *= mix(1.0, blotch, uWear) * (1.0 - 0.8 * scratch);
+  float blotch = 0.78 + 0.22 * valueNoise(vec2(paperX, cssY) * vec2(0.02, 0.08));
+  float kept = mix(1.0, blotch, uWear) * (1.0 - 0.8 * scratch);
 
   float reach = max(uHeadX, uResolution.x - uHeadX) + 160.0 * uScale;
   float front = uReveal * (reach + 48.0 * uScale) - 48.0 * uScale;
   float ragged = (valueNoise(vec2(point.y / (7.0 * uScale), dx / (28.0 * uScale))) - 0.5) * 48.0 * uScale;
   float spread = abs(dx) + ragged;
-  float paperShown = 1.0 - smoothstep(front - 28.0 * uScale, front, spread);
-  float inkShown = 1.0 - smoothstep(front - 112.0 * uScale, front - 20.0 * uScale, spread);
-  density = clamp(density, 0.0, 1.0) * inside * inkShown;
+  float printShown = 1.0 - smoothstep(front - 112.0 * uScale, front - 20.0 * uScale, spread);
+  float mask = inside * printShown * kept;
+  density = clamp(density, 0.0, 1.0) * mask;
+  float relief = clamp((0.4 * reliefX + 0.9 * reliefY) * mask * still * 2.4, -1.0, 1.0);
 
-  vec3 col = inkRamp(density);
-  col -= grain * 0.014 * (1.0 - density);
+  col = mix(col, SIGNAL, density * 0.5);
+  col += SHEEN * sheen * (0.09 + 0.11 * density);
+  col += SHEEN * relief * (0.035 + 0.12 * sheen);
+  col = mix(col, SCRAPE, scratch * 0.45);
 
   float tickY = uResolution.y - 9.0 * uScale;
-  float wrapped = mod(seconds, uPeriod);
-  float whole = floor(wrapped + 0.5);
-  float near = (wrapped - whole) * uPxPerSecond;
+  float whole = floor(looped + 0.5);
+  float near = (looped - whole) * uPxPerSecond;
   float major = 1.0 - step(0.5, mod(mod(whole, uPeriod) + 0.25, 5.0));
-  float radius = mix(1.25, 2.25, major) * uScale;
+  float halfLength = mix(1.5, 3.0, major) * uScale;
   float stretched = max(abs(near) - uSmear * 0.5, 0.0);
-  float ring = length(vec2(stretched, point.y - tickY)) - radius;
-  float tick = (1.0 - smoothstep(-0.75, 0.75, ring)) * inkShown * mix(0.72, 1.0, still);
-  col = mix(col, mix(SLATE, DEEP, major), tick);
-
-  col = mix(SUNKEN, col, paperShown);
+  float ring = length(vec2(stretched, max(abs(point.y - tickY) - halfLength, 0.0))) - 0.75 * uScale;
+  float tick = (1.0 - smoothstep(-0.75, 0.75, ring)) * printShown * mix(0.6, 1.0, still);
+  col = mix(col, TICK, tick * mix(0.45, 0.7, major));
 
   col += (hash21(gl_FragCoord.xy + fract(uPosition)) - 0.5) / 255.0;
-  fragColor = vec4(col, 1.0);
+  fragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }
 `;
 
@@ -173,7 +220,7 @@ export function createTapePlate(canvas, onRestored) {
   let uniforms = {};
   let print = null;
   let lost = false;
-  const layout = { width: 1, height: 1, scale: 1, headX: 0, pxPerSecond: 160, warpRadius: 110, lane: 48, period: 29 };
+  const layout = { width: 1, height: 1, scale: 1, headX: 0, pxPerSecond: 160, warpRadius: 110, period: 29 };
 
   const build = () => {
     vertex = compile(gl, gl.VERTEX_SHADER, VERTEX);
@@ -286,7 +333,6 @@ export function createTapePlate(canvas, onRestored) {
       gl.uniform1f(uniforms.uWarpRadius, layout.warpRadius * s);
       gl.uniform1f(uniforms.uReveal, reveal);
       gl.uniform1f(uniforms.uWear, wear);
-      gl.uniform1f(uniforms.uLane, layout.lane * s);
       gl.uniform1f(uniforms.uHasPrint, print ? 1 : 0);
       gl.uniform1f(uniforms.uSmear, smear * s);
       gl.drawArrays(gl.TRIANGLES, 0, 3);

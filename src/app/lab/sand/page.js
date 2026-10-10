@@ -10,7 +10,7 @@ import { FALLBACK_COVERS } from "./sandParams";
 
 export const metadata = {
   title: "Sand",
-  description: "An album cover pressed out of coloured sand — rub it to crumble the grains into a dune, hold still to pull every grain back home.",
+  description: "An album cover pressed out of coloured sand. Rub it into a dune, then hold to pour every grain into the next record.",
 };
 
 const loadCovers = unstable_cache(

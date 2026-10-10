@@ -5,6 +5,8 @@ const FAILED = 3;
 const SAMPLE = 6;
 const WHITE_MIX = 0.8;
 const FALLBACK_TINT = "rgb(246 246 243)";
+const FALLBACK_SPOT = "rgb(128 120 112)";
+const SPOT_PEAK = 150;
 
 function tintOf(image) {
   const canvas = document.createElement("canvas");
@@ -32,11 +34,13 @@ function tintOf(image) {
     }
   }
   const mix = (channel) => Math.round(channel * (1 - WHITE_MIX) + 255 * WHITE_MIX);
-  return `rgb(${mix(red)} ${mix(green)} ${mix(blue)})`;
+  const deepen = SPOT_PEAK / Math.max(1, red, green, blue);
+  const spot = (channel) => Math.round(channel * deepen);
+  return { tint: `rgb(${mix(red)} ${mix(green)} ${mix(blue)})`, spot: `rgb(${spot(red)} ${spot(green)} ${spot(blue)})` };
 }
 
 export function createCoverQueue(covers) {
-  const entries = covers.map((cover) => ({ cover, status: IDLE, tint: FALLBACK_TINT, promise: null }));
+  const entries = covers.map((cover) => ({ cover, status: IDLE, tint: FALLBACK_TINT, spot: FALLBACK_SPOT, promise: null }));
   let alive = true;
 
   const wrap = (index) => ((index % entries.length) + entries.length) % entries.length;
@@ -54,9 +58,12 @@ export function createCoverQueue(covers) {
         if (!alive) return resolve(entry);
         if (ok) {
           try {
-            entry.tint = tintOf(image);
+            const colors = tintOf(image);
+            entry.tint = colors.tint;
+            entry.spot = colors.spot;
           } catch {
             entry.tint = FALLBACK_TINT;
+            entry.spot = FALLBACK_SPOT;
           }
           entry.status = READY;
         } else {

@@ -10,6 +10,12 @@ import FlyoutExperience from "@/app/flyout/FlyoutExperience";
 import TunerExperience from "@/app/tuner/TunerExperience";
 import CoverRing from "@/app/cover-ring/CoverRing";
 import AsciiCover from "@/app/ascii-cover/AsciiCover";
+import WetInkExperience from "@/app/wet-ink/WetInkExperience";
+import OneLineExperience from "@/app/one-line/OneLineExperience";
+import CounterExperience from "@/app/counter/CounterExperience";
+import TaffyExperience from "@/app/taffy/TaffyExperience";
+import ScorchExperience from "@/app/scorch/ScorchExperience";
+import StirExperience from "@/app/stir/StirExperience";
 import BlobPiece from "@/app/blobs/BlobPiece";
 
 // Every piece, as a component, keyed by its route. Each fills the box it is
@@ -26,6 +32,12 @@ const COMPONENTS = {
   "/blobs": BlobPiece,
   "/cover-ring": CoverRing,
   "/ascii-cover": AsciiCover,
+  "/wet-ink": WetInkExperience,
+  "/one-line": OneLineExperience,
+  "/counter": CounterExperience,
+  "/taffy": TaffyExperience,
+  "/scorch": ScorchExperience,
+  "/stir": StirExperience,
 };
 
 // `data` carries anything a piece needs fetched on the server (Deck's tracks).

@@ -635,23 +635,14 @@
      isn't decoration, it's the value itself. */
   .cv-loader,
   .cv-loader-ring,
-  .cv-transport-ring.is-sweep,
-  .cv-wave-wrap.is-waiting {
-    animation: none;
-    transition: none;
-  }
   /* The words are the point, not their arrival. */
   .cv-dock-readout {
     animation: none;
   }
-  .cv-transport-ring.is-determinate .cv-transport-arc {
-    transition: none;
-  }
   /* Without the spin, a quarter-arc parked at an angle reads as a broken dial.
      Close it into a full hairline circle — present, static, and clearly a ring
      rather than a fragment. */
-  .cv-loader-arc,
-  .cv-transport-ring.is-sweep .cv-transport-arc {
+  .cv-loader-arc {
     stroke-dasharray: none;
   }
   /* the canvas push is disabled under reduced motion (see `reduce` in
@@ -726,32 +717,25 @@
   background: none;
   color: #000;
 }
-/* mobile only — the chart position, centred on the header line above the art.
-   Padded clear of the close button so a long label never runs under it. */
-.cv-music-toprank {
+.cv-player-sheet {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-index-raised);
+}
+.cv-sheet-handle {
   position: fixed;
   z-index: calc(var(--z-index-raised) + 3);
-  /* spans the full card width on the same line as the close button, so it must
-     never eat the X's taps — it's a label, nothing here is interactive */
-  pointer-events: none;
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  padding: 0 56px;
-  /* --text-body carries no weight companion in the scale, so an unset weight
-     inherits body's 400 — which reads thin for a lone centred credit floating in
-     white. 590 is the scale's top non-heading emphasis: solid, not a heading. */
-  font-size: var(--text-body);
-  line-height: var(--text-body--line-height);
-  letter-spacing: var(--text-body--letter-spacing);
-  font-weight: var(--font-weight-strong);
-  color: var(--color-ink);
+  cursor: grab;
+  touch-action: none;
 }
-.cv-music-toprank span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.cv-sheet-handle span {
+  width: 36px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--color-line-strong);
 }
 .cv-music-head {
   display: flex;
@@ -763,9 +747,9 @@
   margin: 0;
   font-family: var(--font-geist), system-ui, sans-serif;
   font-weight: var(--font-weight-bold);
-  font-size: clamp(26px, 3.4vw, 40px);
+  font-size: clamp(24px, 2.8vw, 32px);
   line-height: 1.05;
-  letter-spacing: var(--tracking-tighter);
+  letter-spacing: var(--text-title-lg--letter-spacing);
   color: var(--color-ink);
 }
 .cv-music-artist {
@@ -960,14 +944,6 @@
     transition: box-shadow var(--duration-150) ease;
   }
 }
-.cv-music-rank {
-  margin: 5px 0 0;
-  font-size: var(--text-ui-sm);
-  line-height: var(--text-ui-sm--line-height);
-  letter-spacing: var(--text-ui-sm--letter-spacing);
-  font-weight: var(--text-ui-sm--font-weight);
-  color: var(--color-ink-secondary);
-}
 .cv-music-controls {
   display: flex;
   align-items: center;
@@ -1014,27 +990,11 @@
   cursor: default;
 }
 
-/* ── transport: the load state, drawn on the button ─────────────────────────
-   A stroked ring concentric with the button rather than a spinner parked next
-   to it: same centre at both sizes, it can show a real fraction, and it rides
-   the button's own hover/press scale because it's a child — one object, not two
-   things that have to be kept in sync.
-
-   It sits INSIDE the fill rather than around it. A halo would be neater, but
-   this button is flush against .cv-music-panel's left edge and that panel is
-   overflow:hidden (it has to be — it clips as the card collapses on close), so
-   anything outside the button's box would come back with a flat side. Inside
-   means the ring is on the dark fill, hence the inverse ink and a scrim track.
-
-   Determinate (content-length known) fills clockwise from 12 o'clock with the
-   actual bytes. Indeterminate sweeps a quarter-arc at constant speed — the one
-   place `linear` is right, since nothing here accelerates toward a destination. */
 .cv-transport {
   position: relative;
 }
 /* Play and retry occupy the SAME grid cell, so the swap between them is a
-   crossfade in place — nothing about it reaches the layout, and the ring drawn
-   around them never has to move to accommodate a different glyph. */
+   crossfade in place — nothing about it reaches the layout. */
 .cv-transport-glyph {
   display: grid;
   place-items: center;
@@ -1043,40 +1003,6 @@
   grid-area: 1 / 1;
   display: grid;
   place-items: center;
-}
-.cv-transport-ring {
-  position: absolute;
-  inset: 3px;
-  width: auto;
-  height: auto;
-  fill: none;
-  /* -90deg puts 0% at the top; the sweep animation composes onto this. */
-  transform: rotate(-90deg);
-  pointer-events: none;
-}
-.cv-transport-track {
-  stroke: var(--scrim-white-15);
-  stroke-width: 2;
-}
-.cv-transport-arc {
-  stroke: var(--color-ink-inverse);
-  stroke-width: 2;
-  stroke-linecap: round;
-}
-/* Progress glides to each new value instead of stepping — the reads arrive in
-   irregular chunks, and an un-eased ring makes a healthy download look jerky. */
-.cv-transport-ring.is-determinate .cv-transport-arc {
-  transition: stroke-dashoffset var(--duration-200) var(--ease-standard);
-}
-.cv-transport-ring.is-sweep {
-  animation: cv-spin 900ms linear infinite;
-}
-/* The intent flag: a solid ring means this load lands playing, a hairline one
-   means you've told it not to. The words say the same thing; this is so the
-   press reads at a glance without them. */
-.cv-transport:not([data-pending]) .cv-transport-arc {
-  stroke: var(--scrim-white-50);
-  stroke-width: 1.5;
 }
 @keyframes cv-spin {
   to {
@@ -1110,9 +1036,6 @@
   --cv-lyrics-fade: linear-gradient(180deg, transparent 0, #000 16%, #000 84%, transparent 100%);
 }
 
-/* Nothing to draw yet. A stationary row of stub bars is indistinguishable from
-   a track whose waveform came back flat, so sweep a highlight across them —
-   masked, so it costs no extra element and can't shift anything. */
 .cv-wave-wrap {
   flex: 1;
   min-width: 0;
@@ -1128,7 +1051,7 @@
   padding-right: 16px;
   margin-right: -16px;
 }
-.cv-wave-wrap:not(.is-waiting) {
+.cv-wave-wrap {
   -webkit-mask-image: linear-gradient(
     90deg,
     #000 0,
@@ -1147,13 +1070,6 @@
     #0002 calc(100% - 2px),
     #0000 100%
   );
-}
-.cv-wave-wrap.is-waiting {
-  -webkit-mask-image: var(--cv-shimmer-mask);
-  mask-image: var(--cv-shimmer-mask);
-  -webkit-mask-size: var(--cv-shimmer-size);
-  mask-size: var(--cv-shimmer-size);
-  animation: cv-shimmer-sweep var(--cv-shimmer-duration) linear infinite;
 }
 @keyframes cv-shimmer-sweep {
   from {
@@ -1505,7 +1421,7 @@
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
     overflow: hidden;
-    font-size: clamp(30px, 8.4vw, 40px);
+    font-size: clamp(24px, 6.8vw, 30px);
   }
   .cv-music-controls.is-stacked {
     gap: 12px;
@@ -1574,15 +1490,15 @@
    riding above the notch on touch, where the minimap is hidden anyway. */
 .cv-dock {
   position: fixed;
-  left: 22px;
-  bottom: 22px;
+  left: 24px;
+  bottom: 24px;
   z-index: var(--z-index-page-card);
   display: flex;
   align-items: center;
-  gap: 11px;
-  width: 380px;
-  max-width: calc(100vw - 44px);
-  padding: 8px 10px;
+  gap: 12px;
+  width: 360px;
+  max-width: calc(100vw - 48px);
+  padding: 8px 12px 8px 8px;
   overflow: hidden;
   border-radius: var(--radius-xl);
   color: var(--color-ink);
@@ -1590,9 +1506,26 @@
   border: 1px solid var(--color-line);
   box-shadow: var(--shadow-float);
   font-family: var(--font-geist), system-ui, sans-serif;
+  cursor: grab;
+  touch-action: pan-y;
+  user-select: none;
+}
+.cv-dock:active {
+  cursor: grabbing;
 }
 .cv-dock[data-state="in"] {
   animation: cv-dock-in var(--duration-400) var(--ease-entrance) both;
+}
+.cv-dock[data-state="in"][data-entrance="land"] {
+  animation: cv-dock-land var(--duration-250) ease-out var(--duration-150) both;
+}
+@keyframes cv-dock-land {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 .cv-dock[data-state="out"] {
   animation: cv-dock-out var(--duration-200) ease-in both;
@@ -1601,24 +1534,29 @@
 @keyframes cv-dock-in {
   from {
     opacity: 0;
-    transform: translateY(16px) scale(0.97);
+    translate: 0 16px;
+    scale: 0.97;
   }
   to {
     opacity: 1;
-    transform: none;
+    translate: 0 0;
+    scale: 1;
   }
 }
 @keyframes cv-dock-out {
   to {
     opacity: 0;
-    transform: translateY(10px) scale(0.98);
+    translate: 0 8px;
+    scale: 0.98;
   }
 }
 
 .cv-dock-art {
+  position: relative;
   flex: none;
-  width: 40px;
-  height: 40px;
+  width: 48px;
+  height: 48px;
+  overflow: hidden;
   padding: 0;
   border: none;
   border-radius: var(--radius-md);
@@ -1627,10 +1565,26 @@
   transition: transform var(--duration-200) var(--ease-entrance);
 }
 .cv-dock-art:hover {
-  transform: scale(1.07);
+  transform: scale(1.05);
 }
 .cv-dock-art:active {
   transform: scale(0.97);
+}
+.cv-dock-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--scrim-black-50);
+}
+.cv-dock-eq {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  margin: auto;
+  --eq-w: 3px;
+  --eq-r: 1.5px;
+  --eq-color: #fff;
+  animation: cv-art-eq-in var(--duration-400) var(--ease-entrance) backwards;
 }
 
 .cv-dock-meta {
@@ -1639,7 +1593,6 @@
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 1px;
   padding: 0;
   border: none;
   background: none;
@@ -1648,22 +1601,20 @@
 }
 .cv-dock-title,
 .cv-dock-artist {
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  line-height: 1.25;
+  width: 100%;
 }
 .cv-dock-title {
-  font-size: var(--text-heading-sm);
-  font-weight: var(--text-heading-sm--font-weight);
-  letter-spacing: -0.012em;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-strong);
   color: var(--color-ink);
 }
 .cv-dock-artist {
   font-size: var(--text-ui);
-  font-weight: var(--text-ui--font-weight);
-  letter-spacing: -0.008em;
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
   color: var(--color-ink-secondary);
 }
 
@@ -1673,18 +1624,20 @@
   place-items: center;
   width: 32px;
   height: 32px;
+  margin-right: -8px;
+  padding: 0;
   border: none;
   border-radius: var(--radius-full);
   cursor: pointer;
-  color: var(--color-ink-inverse);
-  background: var(--color-ink);
+  color: var(--color-ink);
+  background: none;
   transition: transform var(--duration-120) var(--ease-standard), opacity var(--duration-150) ease;
 }
 .cv-dock-play:hover {
-  transform: scale(1.06);
+  transform: scale(1.08);
 }
 .cv-dock-play:active {
-  transform: scale(0.94);
+  transform: scale(0.92);
 }
 .cv-dock-play:disabled {
   opacity: 0.4;
@@ -1693,47 +1646,59 @@
 
 .cv-dock-time {
   flex: none;
-  min-width: 30px;
+  min-width: 32px;
   font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--font-weight-meta);
   font-variant-numeric: tabular-nums;
+  text-align: right;
   color: var(--color-ink-secondary);
-}
-.cv-dock-close {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: none;
-  border-radius: var(--radius-full);
-  cursor: pointer;
-  background: none;
-  color: var(--color-ink-secondary);
-  transition: color var(--duration-150) ease, background var(--duration-150) ease;
-}
-.cv-dock-close:hover {
-  color: var(--color-ink);
-  background: var(--color-surface-sunken);
 }
 
-/* preview position — one compositor transform, driven by --cv-progress */
-.cv-dock-line {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 2px;
-  background: var(--color-ink);
-  transform-origin: left center;
-  transform: scaleX(var(--cv-progress, 0));
-  will-change: transform;
-}
 
 /* the four lines, sitting on the artwork's bottom-right corner. Colour is
    measured from the corner they cover (see lib/artInk.js) — near-black on light
    art, white on dark — so they hold contrast without a scrim or a shadow
    propping them up. Held back until the card's morph has landed. */
+.cv-rank-pill {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: var(--radius-full);
+  background: var(--rank-bg, var(--color-surface-inverse));
+  color: var(--rank-fg, var(--color-ink-inverse));
+  font-size: var(--text-ui-sm);
+  line-height: 1;
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--font-weight-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  opacity: 0;
+  transition:
+    opacity var(--duration-200) ease,
+    background-color var(--duration-200) ease,
+    color var(--duration-200) ease;
+}
+.cv-rank-pill.is-inked {
+  opacity: 1;
+  animation: cv-art-eq-in var(--duration-400) var(--ease-entrance) var(--duration-400) backwards;
+}
+.cv-rank-pill.is-leaving {
+  animation: none;
+  opacity: 0;
+}
+@media (min-width: 820px) {
+  .cv-rank-pill {
+    top: 16px;
+    left: 16px;
+  }
+}
 .cv-art-eq {
   position: absolute;
   right: 14px;
@@ -1969,6 +1934,17 @@
   text-shadow:
     0 0 0.12em rgb(255 255 255 / calc(var(--s, 0) * var(--shimmer-brightness, 2))),
     0 0 0.45em rgb(255 255 255 / calc(var(--s, 0) * var(--shimmer-brightness, 2) * 0.55));
+}
+.cv-live-line:not([data-state="current"]) .cv-live-char {
+  transition:
+    opacity var(--duration-400) ease,
+    transform var(--duration-400) var(--ease-entrance);
+}
+.cv-live-line[data-state="past"] .cv-live-char {
+  opacity: 1;
+}
+.cv-live-line[data-state="upcoming"] .cv-live-char {
+  opacity: 0.3;
 }
 @media (prefers-reduced-motion: reduce) {
   .cv-live-line {

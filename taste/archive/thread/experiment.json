@@ -1,0 +1,31 @@
+{
+  "title": "Thread",
+  "description": "Your Up Next queue strung on one elastic thread, every cover a bead riding it. Swipe a song off and the thread lets go with a soft ripple that runs down the rows below and settles quickly while the gap closes and the counts roll. Hold a row to lift it and the thread leans after it; let go and it plucks a note that rises as the queue gets shorter.",
+  "tags": [
+    "Interface",
+    "Physics",
+    "Covers",
+    "Sound"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "A real queue list where removing or reordering a song has a physical, audible consequence travelling through every other row.",
+  "building": false,
+  "iteration": 1,
+  "iteratedAt": "2026-10-09T15:45:11.626Z",
+  "changelog": [
+    {
+      "iteration": 1,
+      "at": "2026-10-09T14:27:17.218Z",
+      "summary": "Halved wave amplitudes: drag pull cap 14 to 7px, flick pulse 14-24 to 7-12px, total pluck cap 42 to 21px, intro pulse, refill hook-on and keyboard nudge bumps all halved\nHalved row text sway (0.6 to 0.3 of the thread, cap 14 to 6px) and the hover bow (6 to 3px)\nNarrowed the tent the dragged bead pulls through its neighbours, roughly halving how far adjacent covers are dragged sideways\nHalved the lift lean (16 to 10px base, tighter follow range) so a held row and its thread drift less\nRaised wave damping 2.6 to 4.4 and the settle damping 7 to 12 so the ripple reaches the rows below then dies within about a second\nRaised row, bead and sheet spring damping 24 to 30 so gaps close and beads return with only a small settle instead of a bounce\nCalmer flick-to-dismiss: 340ms flight instead of 260ms, gentler launch speed, shrink 0.88 to 0.95, earlier softer fade, and the thread lets go over 70ms instead of snapping in 35ms\nCapped the velocity a released bead inherits (3 to 1.5px/ms) and halved the hand-off when an undone or refilled row hooks back on\nRescaled pluck loudness to the smaller motion so the sound stays as before\nFlick-to-dismiss now leaves at the finger's speed: release velocity sets the flight time (220 to 340ms) instead of being capped, so there is no brake on release and slow pushes still glide out over 340ms\nSettle damping 12 to 5.5 so the last lean no longer creeps for seconds; the thread is straight and the frame loop idles about 2.5s sooner after each swipe\nRemove panel fades over the first half of the flight, so no pink wash or label shows through the row sliding into the gap\nDrop pluck restored to its old loudness at the smaller lift lean\nPage metadata description now describes the soft ripple instead of a twang"
+    }
+  ],
+  "source": {
+    "kind": "brief",
+    "lens": "product-components"
+  },
+  "generation": null
+}

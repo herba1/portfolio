@@ -38,5 +38,5 @@ export async function pieceData() {
   const tracks = variedTracks(allTracks);
   // Flyout's machinery collects songs on the index — the same top tracks.
   const covers = tracks.slice(0, 12);
-  return { "/deck": { tracks }, "/flyout": { kit: "songs", tracks }, "/cover-ring": { covers }, "/ascii-cover": { covers } };
+  return { "/deck": { tracks }, "/flyout": { kit: "songs", tracks }, "/cover-ring": { covers }, "/ascii-cover": { covers }, "/counter": { covers }, "/one-line": { tracks: tracks.slice(0, 24) }, "/taffy": { covers: tracks }, "/stir": { recent: tracks } };
 }

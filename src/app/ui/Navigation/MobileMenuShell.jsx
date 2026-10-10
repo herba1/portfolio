@@ -2,6 +2,9 @@
 
 import { useMobileMenu } from "./MobileMenuContext";
 import NavMenu from "./NavMenu";
+import { LINKS } from "./LINKS";
+
+const MENU_ROWS = LINKS.filter((l) => l.primary).length;
 
 /* Wraps the page. On mobile, opening the menu pushes the page card straight
    down (CSS .page-card.is-open), revealing the link list behind it. Tapping
@@ -15,6 +18,7 @@ export default function MobileMenuShell({ children }) {
         className={`page-card ${active ? "is-active" : ""} ${open ? "is-open" : ""}`}
         onClick={active ? () => setOpen(false) : undefined}
         aria-hidden={open ? "true" : undefined}
+        style={{ "--mobile-menu-rows": MENU_ROWS }}
       >
         {/* While the card is the fixed viewport window, shift the content up by
             the captured scroll so it shows the exact slice you were looking at

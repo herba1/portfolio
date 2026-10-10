@@ -1224,15 +1224,29 @@ export function stop() {
 //   RMS, not peak   — peak is pinned by the limiter on basically every block;
 //                     RMS still tracks how dense the block actually is.
 //   dB, not linear  — loudness is logarithmic, and so is the eye.
-//   p5…p95, not 0…max — normalise across the range the track actually occupies.
-//
-// The percentile window is what does the real work, and it's also the risky
-// part: on a track with genuinely no dynamics it would stretch noise into
-// invented structure. MIN_SPAN_DB is the guard — below that the window stops
-// expanding and a flat track is allowed to look flat.
+//   level + rank      — half the height is loudness from p10 up to the loudest
+//                     block, half is the block's rank within the track. Level
+//                     keeps a quiet intro low; rank keeps a brickwalled body
+//                     from flattening into identical bars.
 // ---------------------------------------------------------------------------
 const MIN_SPAN_DB = 7; // narrowest window worth stretching across
-const BAR_FLOOR = 0.1; // quietest block still reads as a stub, never a gap
+const BAR_FLOOR = 0.2;
+const LEVEL_FLOOR_PERCENTILE = 0.1;
+const LEVEL_WEIGHT = 0.45;
+const SHAPE_GAMMA = 1.15;
+
+function rankWithTies(values) {
+  const order = values.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+  const ranks = new Array(values.length);
+  for (let start = 0; start < order.length; ) {
+    let end = start;
+    while (end + 1 < order.length && order[end + 1][0] === order[start][0]) end++;
+    const shared = (start + end) / 2;
+    for (let k = start; k <= end; k++) ranks[order[k][1]] = shared;
+    start = end + 1;
+  }
+  return ranks;
+}
 
 function computePeaks(buf, n) {
   const chans = Math.min(2, buf.numberOfChannels);
@@ -1253,14 +1267,15 @@ function computePeaks(buf, n) {
   }
 
   const sorted = [...db].sort((a, b) => a - b);
-  const at = (q) => sorted[Math.min(n - 1, Math.max(0, Math.round(q * (n - 1))))];
-  let lo = at(0.05);
-  let hi = at(0.95);
-  if (hi - lo < MIN_SPAN_DB) {
-    const mid = (hi + lo) / 2;
-    lo = mid - MIN_SPAN_DB / 2;
-    hi = mid + MIN_SPAN_DB / 2;
-  }
+  const lo = sorted[Math.round(LEVEL_FLOOR_PERCENTILE * (n - 1))];
+  const hi = Math.max(sorted[n - 1], lo + MIN_SPAN_DB);
+  const rankOf = rankWithTies(db);
 
-  return db.map((v) => BAR_FLOOR + (1 - BAR_FLOOR) * Math.min(1, Math.max(0, (v - lo) / (hi - lo))));
+  const shaped = db.map((v, i) => {
+    const level = Math.min(1, Math.max(0, (v - lo) / (hi - lo)));
+    const rank = n > 1 ? rankOf[i] / (n - 1) : 1;
+    return Math.pow(LEVEL_WEIGHT * level + (1 - LEVEL_WEIGHT) * rank, SHAPE_GAMMA);
+  });
+  const tallest = Math.max(...shaped) || 1;
+  return shaped.map((h) => BAR_FLOOR + (1 - BAR_FLOOR) * (h / tallest));
 }

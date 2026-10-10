@@ -9,7 +9,7 @@ import TearOffExperience from "./TearOffExperience";
 
 export const metadata = {
   title: "Tear-off",
-  description: "A roll of ticket stubs printed with Herb's recently played songs. Twist one and the perforation unzips hole by hole; yank it and it snaps clean.",
+  description: "A roll of ticket stubs printed with Herb's recently played songs. Twist one and the perforation unzips hole by hole, yank it and it snaps clean, then feed the stub into the reader to hear it.",
 };
 
 const FALLBACK_TITLES = [

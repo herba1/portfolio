@@ -1,0 +1,25 @@
+{
+  "title": "Marble",
+  "description": "This week's records dropped on water like Turkish marbling ink, over a ground of stones cut from each cover's own colour, and the first thing you see is a comb pulled straight through a whole album into a razor-sharp feather. Drag back the other way and the feather un-pulls exactly, because every pixel is solved backwards through every drop and pull.",
+  "tags": [
+    "WebGL",
+    "Shaders",
+    "Music",
+    "Gesture"
+  ],
+  "status": "rejected",
+  "createdAt": "2026-10-07T19:44:11.214Z",
+  "ideaId": null,
+  "parentSlug": null,
+  "tasteVersion": 1,
+  "intent": "One exact marbling mechanic, finished to the edge: real album covers as inks, area-preserving drops, and analytic tines you can pull and un-pull without the image ever going soft.",
+  "building": false,
+  "iteration": 0,
+  "iteratedAt": null,
+  "changelog": [],
+  "source": {
+    "kind": "brief",
+    "lens": "shader-material"
+  },
+  "generation": null
+}

@@ -40,8 +40,10 @@
   grid-column: 2;
   grid-row: 1 / span 3;
   align-self: center;
+  flex: none;
   width: var(--loom-stage);
   height: var(--loom-stage);
+  aspect-ratio: 1;
 }
 
 .loom-blank {
@@ -510,7 +512,7 @@
 @media (max-width: 899px) {
   .loom {
     --loom-gutter: 16px;
-    --loom-stage: min(calc(100vw - 16px), 560px);
+    --loom-stage: max(280px, min(calc(100vw - 16px), calc(100dvh - 176px), 560px));
     display: flex;
     flex-direction: column;
     align-items: center;

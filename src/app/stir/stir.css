@@ -1,0 +1,105 @@
+.stir {
+  position: relative;
+  height: 100cqh;
+  overflow: hidden;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.stir__stage {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  cursor: crosshair;
+  outline: none;
+}
+
+.stir[data-embedded] .stir__stage {
+  touch-action: pan-y;
+}
+
+.stir__stage[data-pressed] {
+  cursor: grabbing;
+}
+
+.stir__stage::after {
+  content: "";
+  position: absolute;
+  inset: 4px 8px;
+  border-radius: 11.2px;
+  box-shadow: inset 0 0 0 2px var(--color-ink);
+  opacity: 0;
+  transition: opacity 200ms var(--ease-entrance);
+  pointer-events: none;
+}
+
+.stir__stage:focus-visible::after {
+  opacity: 1;
+}
+
+.stir__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.stir__canvas[data-painted] {
+  opacity: 1;
+  visibility: visible;
+}
+
+.stir__canvas[data-painted="fade"] {
+  animation: stir-reveal 300ms var(--ease-entrance) backwards;
+}
+
+.stir__still {
+  position: absolute;
+  inset: 8px 24px;
+  margin: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  white-space: pre-wrap;
+  word-break: break-all;
+  animation: stir-reveal 300ms var(--ease-entrance) backwards;
+}
+
+@keyframes stir-reveal {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@container (max-width: 899px) {
+  .stir__still {
+    inset: 8px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stir__canvas[data-painted="fade"],
+  .stir__still {
+    animation-duration: 150ms;
+    animation-timing-function: linear;
+  }
+
+  .stir__stage::after {
+    transition: none;
+  }
+}
