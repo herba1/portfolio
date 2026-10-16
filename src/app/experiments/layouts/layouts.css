@@ -158,6 +158,10 @@
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* Offscreen tiles skip style, layout and paint entirely. Every tile's size
+     comes from the grid, so nothing reflows when one wakes up. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 440px;
 }
 .xl-bento__tile > .piece-box {
   flex: 1;
