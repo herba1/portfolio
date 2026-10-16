@@ -1,0 +1,10 @@
+{
+  "title": "Embroidery",
+  "description": "A Beatles portrait embroidered on linen with one continuous thread. Pull the loose end and the stitches pop out in order while the thread heaps below; let go and it sews itself back.",
+  "tags": ["Physics", "Material", "Canvas"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One thread, one path: a stippled portrait sewn as a single tour that you can unpick by hand and watch re-stitch itself.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://herb.art/one-line", "https://www.cs.ubc.ca/labs/imager/tr/2002/secord2002b/secord.2002b.pdf", "https://www.cgl.uwaterloo.ca/csk/projects/tsp/"]
+}
