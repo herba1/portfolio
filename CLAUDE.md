@@ -67,7 +67,7 @@ Every page root sets `font-synthesis: none`, `-webkit-font-smoothing: antialiase
 
 ## Enforced paths
 
-`src/app/tierlist`, `src/app/blog`, `src/app/(blog)`, `src/app/song-search`, `src/app/bio` fail the check. Everywhere else reports as warnings — fix them as you touch them, and add the directory to `ENFORCED` in `scripts/check-type-system.mjs` once it is clean.
+`src/app/tierlist`, `src/app/blog`, `src/app/(blog)`, `src/app/song-search`, `src/app/bio`, `src/app/splats` fail the check. Everywhere else reports as warnings — fix them as you touch them, and add the directory to `ENFORCED` in `scripts/check-type-system.mjs` once it is clean.
 
 ## Exception on file
 
@@ -80,3 +80,7 @@ Every page root sets `font-synthesis: none`, `-webkit-font-smoothing: antialiase
 # View transitions — use the kit
 
 Page enter/exit and cross-route persistent elements go through `src/app/ui/transitions` (`PageTransition`, `Shared`, `TransitionLink back`). Never put a fixed `view-transition-name` on a page wrapper, and never import `motion/react-animate-view` (it forces linear easing on every view transition site-wide). The contract is `.claude/skills/view-transitions/SKILL.md`.
+
+# Splats — use the stage
+
+Splats on `/splats` and its articles go through `src/app/splats/stage` (one persistent Spark canvas; pages place splats with `<SplatAnchor actor slot>`). Never mount a second canvas or an R3F `<Canvas>` per card. The contract is `.claude/skills/splat-stage/SKILL.md`.
