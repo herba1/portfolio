@@ -1,0 +1,13 @@
+{
+  "title": "Crumple",
+  "description": "Beatles portraits printed on glossy photo paper arrive as crumpled balls on a pale felt table. Throw one into the others, or tap it and it lifts toward you and unfolds flat, its creases left as a lit relief your pointer rakes light across.",
+  "tags": ["WebGL", "Physics", "Paper"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One paper mechanic finished to the edge: a procedural crumple that folds a print along its own crease network into a ball and back, so the flat print keeps every fold it has been through.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://tympanus.net/codrops/2026/09/19/crumbled-paper-houdini-vat-threejs/",
+    "https://tympanus.net/Demos/PaperCrumble/"
+  ]
+}
