@@ -1,0 +1,15 @@
+{
+  "title": "Memo",
+  "description": "A voice memo on a phone. Record and a live waveform scrolls in past the head; stop and it zooms out to the whole take. Drag the trim handles, which rubber-band past the ends, scrub through the take, and commit the trim.",
+  "tags": ["Interface", "Motion", "Media"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T14:00:00.000Z",
+  "intent": "One waveform that is live while recording, then becomes the trim and scrub surface without ever being replaced.",
+  "tile": { "cols": 2, "rows": 5 },
+  "sources": [
+    "https://support.apple.com/guide/iphone/voice-memos (Apple Voice Memos)",
+    "https://github.com/pmndrs/use-gesture (rubber band)",
+    "https://github.com/nathangitter/fluid-interfaces",
+    "https://benji.org/liveline"
+  ]
+}
