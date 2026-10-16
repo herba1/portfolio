@@ -1,0 +1,10 @@
+{
+  "title": "Iris",
+  "description": "Nine black anodised aperture blades over a club ceiling of bulbs. Turn the ring from f/1.4 to f/16 and the lights fall from nine-sided bokeh discs into 18-point stars while the scene sharpens and the exposure keeps up.",
+  "tags": ["WebGL", "Optics", "Club"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One optical object finished to the edge: a real nine-blade iris whose opening is the shape of every bokeh disc and the source of every diffraction spike in the photo behind it.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://kinoria.studio"]
+}
