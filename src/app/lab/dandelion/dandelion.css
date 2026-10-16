@@ -1,0 +1,443 @@
+.dandelion {
+  --dandelion-paper: #f4eee2;
+  --dandelion-paper-deep: #ebe2d0;
+  --dandelion-ink: #2a251f;
+  --dandelion-ink-soft: #5f574b;
+  --dandelion-rule: rgb(42 37 31 / 0.12);
+  --dandelion-tray: rgb(250 247 240 / 0.78);
+  --dandelion-wash: rgb(42 37 31 / 0.06);
+  --dandelion-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --dandelion-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --dandelion-serif-weight: 430;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  container-type: size;
+  color: var(--dandelion-ink);
+  background:
+    radial-gradient(
+      130% 100% at 50% 44%,
+      var(--dandelion-paper) 0%,
+      var(--dandelion-paper) 46%,
+      color-mix(in oklab, var(--dandelion-paper) 82%, var(--dandelion-paper-deep)) 66%,
+      color-mix(in oklab, var(--dandelion-paper) 45%, var(--dandelion-paper-deep)) 84%,
+      var(--dandelion-paper-deep) 100%
+    );
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.dandelion::before,
+.dandelion::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+}
+
+.dandelion::before {
+  opacity: 0.55;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='240' height='240'><filter id='g'><feTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.56  0 0 0 0 0.49  0 0 0 0 0.38  0 0 0 0.15 0'/></filter><rect width='100%' height='100%' filter='url(%23g)'/></svg>");
+}
+
+.dandelion::after {
+  opacity: 0.16;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='420' height='420'><filter id='f'><feTurbulence type='fractalNoise' baseFrequency='0.012 0.32' numOctaves='2' seed='7' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.6  0 0 0 0 0.52  0 0 0 0 0.4  0 0 0 0.5 -0.18'/></filter><rect width='100%' height='100%' filter='url(%23f)'/></svg>");
+  background-size: 420px 420px;
+  transform: rotate(-8deg) scale(1.3);
+}
+
+.dandelion__surface {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: crosshair;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.dandelion[data-embedded] .dandelion__surface {
+  touch-action: pan-y;
+}
+
+.dandelion__surface:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  pointer-events: none;
+}
+
+.dandelion__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  filter: blur(6px);
+  transition:
+    opacity 900ms var(--dandelion-ease),
+    filter 1200ms var(--dandelion-ease);
+}
+
+.dandelion[data-phase="ready"] .dandelion__canvas {
+  opacity: 1;
+  filter: none;
+}
+
+.dandelion:not([data-embedded]) .dandelion__canvas {
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, transparent 52px, black 96px);
+  mask-image: linear-gradient(to bottom, transparent 0, transparent 52px, black 96px);
+}
+
+.dandelion__head {
+  position: absolute;
+  z-index: 2;
+  top: 88px;
+  left: 32px;
+  max-width: 260px;
+  pointer-events: none;
+}
+
+.dandelion__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.dandelion__lede {
+  margin: 4px 0 0;
+  color: var(--dandelion-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.dandelion__lede em {
+  font-family: var(--dandelion-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--dandelion-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--dandelion-ink);
+}
+
+.dandelion__bar {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.dandelion__bar > * {
+  pointer-events: auto;
+}
+
+.dandelion__faces,
+.dandelion__mic {
+  height: 44px;
+  border-radius: 999px;
+  background: var(--dandelion-tray);
+  box-shadow:
+    inset 0 0 0 1px var(--dandelion-rule),
+    0 1px 2px rgb(60 44 24 / 0.06),
+    0 12px 28px -16px rgb(60 44 24 / 0.4);
+  backdrop-filter: blur(12px) saturate(1.1);
+  -webkit-backdrop-filter: blur(12px) saturate(1.1);
+}
+
+.dandelion__faces {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 4px;
+}
+
+.dandelion__face {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--dandelion-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms var(--dandelion-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.dandelion__face[aria-checked="true"] {
+  background: var(--dandelion-ink);
+  color: var(--dandelion-paper);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .dandelion__face[aria-checked="false"]:hover,
+  .dandelion__mic:not(:disabled):hover {
+    background-color: color-mix(in oklab, var(--dandelion-tray) 70%, var(--dandelion-paper-deep));
+  }
+}
+
+.dandelion__face:active,
+.dandelion__mic:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+.dandelion__face:focus-visible,
+.dandelion__mic:focus-visible,
+.dandelion__ask button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.dandelion__thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  filter: grayscale(1) sepia(0.35) contrast(1.05);
+  box-shadow: 0 0 0 1px rgb(42 37 31 / 0.18);
+}
+
+.dandelion__mic {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 16px 0 14px;
+  border: 0;
+  color: var(--dandelion-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  transition:
+    background-color 160ms ease,
+    color 160ms ease,
+    transform 160ms var(--dandelion-ease);
+}
+
+.dandelion__mic:disabled {
+  cursor: default;
+  color: var(--dandelion-ink-soft);
+}
+
+.dandelion__mic[data-blowing] {
+  background: var(--dandelion-ink);
+  color: var(--dandelion-paper);
+}
+
+.dandelion__mic-icon {
+  flex: none;
+}
+
+.dandelion__mic[data-blowing] .dandelion__mic-icon {
+  animation: dandelion-breathe 1.4s ease-in-out infinite;
+}
+
+@keyframes dandelion-breathe {
+  50% {
+    transform: scale(1.18);
+  }
+}
+
+.dandelion__ask {
+  position: absolute;
+  z-index: 3;
+  left: 50%;
+  bottom: 88px;
+  width: min(360px, calc(100% - 32px));
+  padding: 16px;
+  border-radius: 16px;
+  background: color-mix(in oklab, var(--dandelion-paper) 60%, white);
+  box-shadow:
+    inset 0 0 0 1px var(--dandelion-rule),
+    0 16px 40px -20px rgb(60 44 24 / 0.45);
+  transform: translateX(-50%);
+  animation: dandelion-rise 240ms var(--dandelion-ease);
+}
+
+@keyframes dandelion-rise {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 8px);
+  }
+}
+
+.dandelion__ask-text {
+  margin: 0;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.dandelion__ask-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.dandelion__ask button {
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+}
+
+.dandelion__ask-yes {
+  background: var(--dandelion-ink);
+  color: var(--dandelion-paper);
+}
+
+.dandelion__ask-no {
+  background: var(--dandelion-wash);
+  color: var(--dandelion-ink);
+}
+
+.dandelion__note {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 84px;
+  margin: 0;
+  color: var(--dandelion-ink-soft);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-align: center;
+  text-wrap: balance;
+  pointer-events: none;
+}
+
+.dandelion__error {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--dandelion-ink-soft);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+}
+
+.dandelion[data-embedded] .dandelion__bar {
+  left: auto;
+  right: 12px;
+  bottom: 12px;
+}
+
+.dandelion[data-embedded] .dandelion__faces {
+  height: 36px;
+}
+
+.dandelion[data-embedded] .dandelion__face {
+  height: 28px;
+  padding: 0 4px;
+}
+
+.dandelion[data-embedded] .dandelion__name {
+  display: none;
+}
+
+@container (max-width: 639px) {
+  .dandelion__head {
+    top: 80px;
+    left: 16px;
+    right: 16px;
+  }
+
+  .dandelion__bar {
+    bottom: 20px;
+  }
+
+  .dandelion__ask {
+    bottom: 76px;
+  }
+
+  .dandelion__note {
+    bottom: 72px;
+  }
+}
+
+@container (max-width: 420px) {
+  .dandelion__name {
+    display: none;
+  }
+
+  .dandelion__face {
+    padding: 0 8px;
+  }
+
+  .dandelion__face[aria-checked="true"] {
+    padding: 0 14px 0 8px;
+  }
+
+  .dandelion__face[aria-checked="true"] .dandelion__name {
+    display: inline;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dandelion__canvas {
+    filter: none;
+    transition: opacity 300ms linear;
+  }
+
+  .dandelion__mic[data-blowing] .dandelion__mic-icon,
+  .dandelion__ask {
+    animation: none;
+  }
+}
