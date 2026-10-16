@@ -1,0 +1,191 @@
+.mirrorball-root {
+  --mirrorball-ground: rgb(9 8 8);
+  --mirrorball-ink: rgb(218 211 200);
+  --mirrorball-ink-secondary: rgb(196 189 180);
+  --mirrorball-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --mirrorball-serif-weight: 430;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--mirrorball-ground);
+  color: var(--mirrorball-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  color-scheme: dark;
+}
+
+.mirrorball-root[data-embedded] {
+  min-height: 100%;
+}
+
+.mirrorball-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  cursor: grab;
+}
+
+.mirrorball-root[data-grabbing] .mirrorball-canvas {
+  cursor: grabbing;
+}
+
+.mirrorball-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.mirrorball-head {
+  position: absolute;
+  top: 96px;
+  left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 272px;
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+
+.mirrorball-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.mirrorball-lede {
+  margin: 0;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.mirrorball-lede em {
+  font-family: var(--mirrorball-serif);
+  font-size: 1.07em;
+  font-style: italic;
+  font-weight: var(--mirrorball-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+}
+
+.mirrorball-gels {
+  position: absolute;
+  left: 48px;
+  bottom: 40px;
+  z-index: 2;
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.05);
+  box-shadow:
+    inset 0 0 0 1px rgb(255 255 255 / 0.08),
+    0 8px 24px -8px rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.mirrorball-gel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px 16px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--mirrorball-ink-secondary);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease-hover),
+    color 160ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.mirrorball-gel:active {
+  transform: scale(0.96);
+}
+
+.mirrorball-gel:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.mirrorball-gel[aria-checked="true"] {
+  background: rgb(255 255 255 / 0.1);
+  color: var(--mirrorball-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .mirrorball-gel:hover {
+    color: var(--mirrorball-ink);
+  }
+}
+
+.mirrorball-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 9999px;
+  background: var(--mirrorball-swatch);
+  box-shadow: 0 0 8px 1px var(--mirrorball-swatch);
+}
+
+.mirrorball-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--mirrorball-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+@container (max-width: 640px) {
+  .mirrorball-head {
+    top: 84px;
+    left: 16px;
+    right: 16px;
+    max-width: 320px;
+    gap: 4px;
+  }
+
+  .mirrorball-gels {
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mirrorball-gel {
+    transition: none;
+  }
+}

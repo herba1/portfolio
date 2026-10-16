@@ -1,0 +1,10 @@
+{
+  "title": "Mirrorball",
+  "description": "A mirrorball in a dark club at 2am, every tile holding a fragment of the room. Throw it into a spin and real specks of light sweep the walls and this page's own words, stretching into ellipses as they graze.",
+  "tags": ["WebGL", "Light", "Club"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One optical object finished to the edge: each facet is a real mirror, so the specks are computed reflections of one spotlight, not decoration.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://www.igloo.inc"]
+}
