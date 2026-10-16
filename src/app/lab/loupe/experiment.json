@@ -1,0 +1,15 @@
+{
+  "title": "Loupe",
+  "description": "A 1909 baseball card on the desk and a collector's loupe in your hand. Turn the glass up from 2× to 40× and the photo comes apart into what it really is: CMYK rosettes slightly out of register, ink bleeding into paper fibre, and a crease that cracked the print.",
+  "tags": ["WebGL", "Print", "Cards"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One optical object finished to the edge: real glass over a real print, where magnification turns a picture into the physical ink it is made of.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://marijanapav.com/stamps",
+    "https://tympanus.net/codrops/2026/06/09/building-an-interactive-digital-stamp-collection-with-shaders-postcards-and-playful-inspection/",
+    "https://tympanus.net/Tutorials/PointerSquareLensDistortion",
+    "https://kube.io/blog/liquid-glass-css-svg/"
+  ]
+}

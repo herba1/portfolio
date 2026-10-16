@@ -1,0 +1,10 @@
+{
+  "title": "Sticker Peel",
+  "description": "A used LP from a record shop, still wearing its price sticker. Peel any sticker from its edge: it curls back over a moving fold, the glue pulls into strands that thin and snap, and the sleeve keeps the residue.",
+  "tags": ["WebGL", "Material", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One tactile act finished to the edge: a sticker that peels like paper and glue, not like a UI layer",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://chrome.dev/html-in-canvas/demos/webgl-book-curl.html", "https://herb.art/taffy"]
+}
