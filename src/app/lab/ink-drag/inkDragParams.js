@@ -1,0 +1,58 @@
+export const DEFAULT_WORD = "Side A";
+export const MAX_WORD = 12;
+
+export const PAPER = [0.937, 0.906, 0.842];
+
+export const INKS = [
+  {
+    id: "letterpress",
+    label: "Letterpress",
+    note: "Oil black, slow to dry",
+    tau: 0.17,
+    viscosity: 0.22,
+    transferSlow: 0.74,
+    transferFast: 0.56,
+    level: 0.06,
+    dryThin: 0.38,
+    dryThick: 0.12,
+    rewet: 1.4,
+    gloss: 0.9,
+    gain: 1,
+    ink: [0.034, 0.031, 0.029],
+    thin: [0.9, 0.84, 0.76],
+  },
+  {
+    id: "sumi",
+    label: "Sumi",
+    note: "Watery, matte, quick",
+    tau: 0.2,
+    viscosity: 0.42,
+    transferSlow: 0.78,
+    transferFast: 0.66,
+    level: 0.22,
+    dryThin: 0.5,
+    dryThick: 0.2,
+    rewet: 1.1,
+    gloss: 0.42,
+    gain: 0.94,
+    ink: [0.045, 0.048, 0.056],
+    thin: [0.84, 0.86, 0.9],
+  },
+  {
+    id: "enamel",
+    label: "Enamel",
+    note: "Thick, glossy, pools",
+    tau: 0.13,
+    viscosity: 0.14,
+    transferSlow: 0.8,
+    transferFast: 0.7,
+    level: 0.03,
+    dryThin: 0.28,
+    dryThick: 0.09,
+    rewet: 1.8,
+    gloss: 1.65,
+    gain: 1.08,
+    ink: [0.028, 0.026, 0.026],
+    thin: [0.88, 0.82, 0.74],
+  },
+];

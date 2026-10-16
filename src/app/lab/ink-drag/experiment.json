@@ -1,0 +1,21 @@
+{
+  "title": "Ink Drag",
+  "description": "A giant word printed in wet black ink on cream letterpress paper: drag through it and the ink smears along your path, thick and soft when slow, thin streaks when fast. A few seconds after you stop, the sheen fades and the smear dries for good; set your own word or pull a fresh sheet.",
+  "tags": [
+    "WebGL",
+    "Type",
+    "Simulation"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "Type as matter: wet ink you push with a fingertip, with real body, sheen and a drying clock that makes every smear permanent.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://tympanus.net/codrops/2026/09/24/custom-shaped-cursor-trail/",
+    "https://tympanus.net/Demos/CustomShapedCursorTrail/",
+    "https://herb.art/taffy"
+  ]
+}
