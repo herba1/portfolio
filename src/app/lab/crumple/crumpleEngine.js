@@ -287,7 +287,8 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
   const bounds = { minX: -1, maxX: 1, minZ: -1, maxZ: 1, hx: 1, hz: 1, footX: 0.5, footZ: 0.5 };
   const lampDefault = new THREE.Vector3();
   const lampTarget = new THREE.Vector3();
-  const pointer = { id: -1, x: 0, y: 0, sx: 0, sy: 0, inside: false, down: false, sheet: -1, grabbed: false, onPrint: false, time: 0, target: new THREE.Vector3(), cursor: "" };
+  const pointer = { id: -1, x: 0, y: 0, sx: 0, sy: 0, inside: false, down: false, sheet: -1, grabbed: false, onPrint: false, time: 0, target: new THREE.Vector3(), trail: [], cursor: "" };
+  const holdHit = new THREE.Vector3();
   let width = 1;
   let height = 1;
   let raf = 0;
@@ -548,7 +549,7 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
       const vz = s.pos.z - s.prev.z;
       s.prev.copy(s.pos);
       if (s.held) {
-        const f = 1 - Math.exp(-dt * 26);
+        const f = 1 - Math.exp(-dt * 34);
         let mx = (pointer.target.x - s.pos.x) * f;
         let my = (pointer.target.y - s.pos.y) * f;
         let mz = (pointer.target.z - s.pos.z) * f;
@@ -802,13 +803,21 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
           best = { sheet: s, print: true };
         }
       } else {
+        const hits = raycaster.intersectObjects(s.meshes, false);
+        if (hits.length) {
+          if (hits[0].distance < bestD) {
+            bestD = hits[0].distance;
+            best = { sheet: s, print: false };
+          }
+          continue;
+        }
         const c = s.group.position;
         const oc = tmp.subVectors(raycaster.ray.origin, c);
         const b = oc.dot(raycaster.ray.direction);
-        const cc = oc.lengthSq() - R * R * 1.1;
+        const cc = oc.lengthSq() - R * R * 1.3;
         const disc = b * b - cc;
         if (disc < 0) continue;
-        const d = -b - Math.sqrt(disc);
+        const d = -b - Math.sqrt(disc) + R;
         if (d > 0 && d < bestD) {
           bestD = d;
           best = { sheet: s, print: false };
@@ -821,6 +830,59 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
   function aimLamp() {
     const hit = raycaster.ray.intersectPlane(lampPlane, tmp);
     if (hit) lampTarget.set(hit.x + 0.06, LIFT + 0.5, hit.z + 0.08);
+  }
+
+  function track(e) {
+    if (!raycaster.ray.intersectPlane(holdPlane, holdHit)) return;
+    const trail = pointer.trail;
+    trail.push([e.timeStamp, holdHit.x, holdHit.z]);
+    while (trail.length > 2 && e.timeStamp - trail[0][0] > 240) trail.shift();
+  }
+
+  function grab(s) {
+    pointer.grabbed = true;
+    s.held = true;
+    s.asleep = false;
+    s.still = 0;
+    wakeAll();
+  }
+
+  function aimHold() {
+    raycaster.ray.intersectPlane(holdPlane, pointer.target);
+    pointer.target.x = Math.min(bounds.maxX, Math.max(bounds.minX, pointer.target.x));
+    pointer.target.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, pointer.target.z));
+  }
+
+  function fling(s, now) {
+    const trail = pointer.trail;
+    let ref = null;
+    for (let i = 0; i < trail.length - 1; i += 1) {
+      if (now - trail[i][0] <= 110) {
+        ref = trail[i];
+        break;
+      }
+    }
+    if (!ref && trail.length > 1) ref = trail[trail.length - 2];
+    const end = trail[trail.length - 1];
+    let vx = 0;
+    let vz = 0;
+    if (ref && end) {
+      const span = Math.max(0.016, (now - ref[0]) / 1000);
+      vx = ((end[1] - ref[1]) / span) * 0.9;
+      vz = ((end[2] - ref[2]) / span) * 0.9;
+    }
+    const sp = Math.hypot(vx, vz);
+    if (sp > MAX_SPEED) {
+      vx *= MAX_SPEED / sp;
+      vz *= MAX_SPEED / sp;
+    }
+    const vy = Math.min(1.4, Math.hypot(vx, vz) * 0.16);
+    s.prev.set(s.pos.x - vx * STEP, s.pos.y - vy * STEP, s.pos.z - vz * STEP);
+    tmp.set(vx, 0, vz);
+    s.w.crossVectors(up, tmp).multiplyScalar(0.6 / R);
+    s.held = false;
+    s.asleep = false;
+    s.still = 0;
   }
 
   function setCursor(c) {
@@ -842,6 +904,8 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
     pointer.sheet = hit ? hit.sheet.index : -1;
     pointer.onPrint = Boolean(hit?.print);
     pointer.grabbed = false;
+    pointer.trail.length = 0;
+    if (hit && !hit.print) track(e);
     canvas.setPointerCapture?.(e.pointerId);
     if (hit && !hit.print && hit.sheet.mode === "ball") e.preventDefault();
     wake();
@@ -854,17 +918,10 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
     if (pointer.down && e.pointerId === pointer.id) {
       const s = sheets[pointer.sheet];
       const moved = Math.hypot(e.clientX - pointer.sx, e.clientY - pointer.sy);
-      if (s && !pointer.onPrint && s.mode === "ball" && !pointer.grabbed && moved > TAP_PX) {
-        pointer.grabbed = true;
-        s.held = true;
-        s.asleep = false;
-        s.still = 0;
-        wakeAll();
-      }
+      if (s && !pointer.onPrint) track(e);
+      if (s && !pointer.onPrint && s.mode === "ball" && !pointer.grabbed && moved > TAP_PX) grab(s);
       if (pointer.grabbed) {
-        raycaster.ray.intersectPlane(holdPlane, pointer.target);
-        pointer.target.x = Math.min(bounds.maxX, Math.max(bounds.minX, pointer.target.x));
-        pointer.target.z = Math.min(bounds.maxZ, Math.max(bounds.minZ, pointer.target.z));
+        aimHold();
         setCursor("grabbing");
       }
     } else if (e.pointerType === "mouse") {
@@ -877,10 +934,21 @@ export async function createCrumple({ host, root, embedded, reduced, onOpen, ins
   function onUp(e) {
     if (e.pointerId !== pointer.id) return;
     const s = sheets[pointer.sheet];
-    const tap = !pointer.grabbed && Math.hypot(e.clientX - pointer.sx, e.clientY - pointer.sy) <= TAP_PX && e.type === "pointerup";
+    const moved = Math.hypot(e.clientX - pointer.sx, e.clientY - pointer.sy);
+    const tap = !pointer.grabbed && moved <= TAP_PX && e.type === "pointerup";
+    if (s && !pointer.onPrint && !pointer.grabbed && s.mode === "ball" && moved > TAP_PX && e.type === "pointerup") {
+      setNdc(e);
+      grab(s);
+    }
     if (pointer.grabbed && s) {
-      s.held = false;
-      s.asleep = false;
+      if (e.type === "pointerup") {
+        setNdc(e);
+        track(e);
+        fling(s, e.timeStamp);
+      } else {
+        s.held = false;
+        s.asleep = false;
+      }
     } else if (tap) {
       if (s && !pointer.onPrint && (s.mode === "ball" || s.mode === "closing")) openSheet(s.index);
       else if (s && pointer.onPrint) closeOpen();
