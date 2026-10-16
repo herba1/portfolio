@@ -2,7 +2,6 @@ import Piece from "../Piece";
 import { pieceData } from "../pieceData";
 import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
-import ReadyGate from "../ReadyGate";
 import PlateHand from "../PlateHand";
 import OffscreenPause from "../OffscreenPause";
 
@@ -37,16 +36,20 @@ const AREAS = {
   "/stir": { area: "stir", wave: 19, dx: 1 },
 };
 
+const PLACED = PIECES.filter((piece) => AREAS[piece.slug]);
+const STUDIES = PIECES.filter((piece) => !AREAS[piece.slug]);
+
 export default async function BentoLayout() {
   const data = await pieceData();
   return (
-    <main className="xl-bento" data-gate="">
+    <main className="xl-bento">
       <h1 className="sr-only">Experiments</h1>
       <ul className="xl-bento__grid">
-        {PIECES.map((piece, i) => (
+        {PLACED.map((piece, i) => (
           <li
             key={piece.slug}
             className="xl-bento__tile xl-tile"
+            data-slug={piece.slug}
             aria-label={piece.title}
             style={{
               gridArea: AREAS[piece.slug]?.area ?? "auto",
@@ -54,16 +57,27 @@ export default async function BentoLayout() {
               "--dx": AREAS[piece.slug]?.dx ?? 0,
             }}
           >
-            <Piece slug={piece.slug} data={data} />
+            <Piece slug={piece.slug} data={data} title={piece.title} priority={(AREAS[piece.slug]?.wave ?? 99) < 5} />
           </li>
         ))}
       </ul>
+      {STUDIES.length ? (
+        <ul className="xl-bento__grid xl-bento__grid--studies">
+          {STUDIES.map((piece) => (
+            <li
+              key={piece.slug}
+              className="xl-bento__tile xl-tile xl-tile--study"
+              data-slug={piece.slug}
+              aria-label={piece.title}
+              style={{ "--cols": piece.tile?.cols ?? 2, "--rows": piece.tile?.rows ?? 4 }}
+            >
+              <Piece slug={piece.slug} data={data} title={piece.title} />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <PlateHand />
-      <ReadyGate />
       <OffscreenPause />
-      <noscript>
-        <style>{".xl-bento[data-gate] .xl-tile{animation-play-state:running!important}"}</style>
-      </noscript>
       <IntroSettle />
     </main>
   );

@@ -4,6 +4,7 @@ import { join } from "node:path";
 const ROOT = process.cwd();
 const LAB = join(ROOT, "src/app/lab");
 const OUT = join(LAB, "registry.js");
+const PIECES_OUT = join(LAB, "pieces.js");
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}$/;
 const STATUSES = new Set(["candidate", "liked", "rejected", "shipped", "broken"]);
 
@@ -30,13 +31,26 @@ for (const entry of entries) {
     status: STATUSES.has(data.status) ? data.status : "candidate",
     createdAt: typeof data.createdAt === "string" ? data.createdAt : "",
     parentSlug: typeof data.parentSlug === "string" ? data.parentSlug : null,
+    tile: data.tile && typeof data.tile === "object" ? { cols: Number(data.tile.cols) || 2, rows: Number(data.tile.rows) || 4 } : null,
+    embeddable: existsSync(join(LAB, entry.name, "Piece.jsx")),
   });
 }
 
 items.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-const source = `export const LAB = ${JSON.stringify(items, null, 2)};\n`;
+const source = `export const LAB = ${JSON.stringify(
+  items.map(({ embeddable, ...item }) => item),
+  null,
+  2,
+)};\n`;
 const previous = existsSync(OUT) ? readFileSync(OUT, "utf-8") : null;
 if (previous !== source) writeFileSync(OUT, source);
+
+const embedded = items.filter((item) => item.status === "shipped" && item.embeddable);
+const piecesSource = `export const LAB_PIECES = {\n${embedded
+  .map((item) => `  ${JSON.stringify(item.slug)}: () => import("./${item.slug}/Piece"),\n`)
+  .join("")}};\n`;
+const previousPieces = existsSync(PIECES_OUT) ? readFileSync(PIECES_OUT, "utf-8") : null;
+if (previousPieces !== piecesSource) writeFileSync(PIECES_OUT, piecesSource);
 
 console.log(`lab registry: ${items.length} experiment(s)`);
