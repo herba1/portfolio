@@ -1,0 +1,10 @@
+{
+  "title": "Needle",
+  "description": "A turntable seen from above with a real record under your hand. Scratch it forwards and backwards, let go and the platter pulls it back up to 33⅓, or lift the tonearm and drop it anywhere on the grooves to cue.",
+  "tags": ["WebGL", "Audio", "Vinyl"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One music object finished to the edge: the record is the transport, so the hand on the vinyl is the playhead, and the grooves you can see are the beat you hear.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://codepen.io/pimskie/pen/bGjMdxV"]
+}
