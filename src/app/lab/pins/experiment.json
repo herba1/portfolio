@@ -1,0 +1,14 @@
+{
+  "title": "Pin Art",
+  "description": "Twenty thousand steel pins in a clear acrylic frame, with John Lennon pressed into them in relief under a raking light. Press from behind to push a hand print out of the steel, and tilt the toy to let the pins clatter back flat.",
+  "tags": ["WebGL", "Simulation", "Material"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One physical toy finished to the edge: real pins that slide with friction, stay where you push them, cast long shadows across each other, and only let go when gravity asks.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Pin_Art",
+    "https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping",
+    "https://www.khronos.org/opengl/wiki/Sampler_(GLSL)#Shadow_samplers"
+  ]
+}
