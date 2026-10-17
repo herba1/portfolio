@@ -1,0 +1,13 @@
+{
+  "title": "Crate",
+  "description": "A wooden crate of worn LP sleeves seen from just above. Drag or scroll to flip them forward one after another, and pull a sleeve up out of the crate to slide its record half out.",
+  "tags": ["WebGL", "Music", "Physical"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One record-shop gesture finished to the edge: real cardboard sleeves with weight, ring wear and gloss that tip under your hand, and a black record with its own groove sheen that slides out when you lift one.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://github.com/risq/cratedigger",
+    "https://tympanus.net/codrops/2026/06/09/building-an-interactive-digital-stamp-collection-with-shaders-postcards-and-playful-inspection/"
+  ]
+}
