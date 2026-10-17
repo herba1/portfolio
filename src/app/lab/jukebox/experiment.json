@@ -1,0 +1,14 @@
+{
+  "title": "Jukebox",
+  "description": "A close look into the glass dome of a 1950s jukebox, twenty 45s standing in chrome cradles. Punch a code and the carousel ratchets round, the gripper lays the record on the platter and the needle drops; punch another mid-way and the whole rig turns around without a snap.",
+  "tags": ["WebGL", "Mechanical", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One real mechanism finished to the edge: a select-o-matic carousel, gripper, platter and tone arm that are all driven by one interruptible plan, so every code you punch is answered by chrome and vinyl actually moving.",
+  "tile": { "cols": 4, "rows": 5 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Seeburg_Corporation",
+    "https://en.wikipedia.org/wiki/Wurlitzer_jukebox",
+    "https://tympanus.net/codrops/tag/three-js/"
+  ]
+}
