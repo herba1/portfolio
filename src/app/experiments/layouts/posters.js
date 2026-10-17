@@ -20,6 +20,311 @@ export const POSTERS = {
     "width": 454,
     "height": 344
   },
+  "/lab/amorph": {
+    "src": "/posters/experiments/lab--amorph.webp?v=R4OG868w",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/ascii-bust": {
+    "src": "/posters/experiments/lab--ascii-bust.webp?v=hpG0rMan",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/cassette": {
+    "src": "/posters/experiments/lab--cassette.webp?v=6r5AWHkO",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/checklist": {
+    "src": "/posters/experiments/lab--checklist.webp?v=5DRfGczv",
+    "width": 453,
+    "height": 704
+  },
+  "/lab/clip-tabs": {
+    "src": "/posters/experiments/lab--clip-tabs.webp?v=rZ_L12Q5",
+    "width": 688,
+    "height": 464
+  },
+  "/lab/crate": {
+    "src": "/posters/experiments/lab--crate.webp?v=lkn0tgrB",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/crumple": {
+    "src": "/posters/experiments/lab--crumple.webp?v=mPx2Wtd_",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/dandelion": {
+    "src": "/posters/experiments/lab--dandelion.webp?v=owLrG8RI",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/directional-tabs": {
+    "src": "/posters/experiments/lab--directional-tabs.webp?v=dk3nahym",
+    "width": 453,
+    "height": 704
+  },
+  "/lab/dust": {
+    "src": "/posters/experiments/lab--dust.webp?v=NSNBYg5L",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/embroidery": {
+    "src": "/posters/experiments/lab--embroidery.webp?v=ZDNrE_Lg",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/erase": {
+    "src": "/posters/experiments/lab--erase.webp?v=Wyr3-zwC",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/film-leader": {
+    "src": "/posters/experiments/lab--film-leader.webp?v=2AAAAAAA",
+    "width": 688,
+    "height": 464
+  },
+  "/lab/fog": {
+    "src": "/posters/experiments/lab--fog.webp?v=2pjHSp0v",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/ghost-setlist": {
+    "src": "/posters/experiments/lab--ghost-setlist.webp?v=SuYJoLk8",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/groove": {
+    "src": "/posters/experiments/lab--groove.webp?v=UBMgAA4v",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/ice": {
+    "src": "/posters/experiments/lab--ice.webp?v=DGmVVr2K",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/icon-morph": {
+    "src": "/posters/experiments/lab--icon-morph.webp?v=gFrti7dB",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/ink-drag": {
+    "src": "/posters/experiments/lab--ink-drag.webp?v=pWpMhCoX",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/iris": {
+    "src": "/posters/experiments/lab--iris.webp?v=DiC0bBBA",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/jukebox": {
+    "src": "/posters/experiments/lab--jukebox.webp?v=AAAAAAfK",
+    "width": 922,
+    "height": 584
+  },
+  "/lab/lathe": {
+    "src": "/posters/experiments/lab--lathe.webp?v=ZBqffBIu",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/lenticular": {
+    "src": "/posters/experiments/lab--lenticular.webp?v=FlAfUrpN",
+    "width": 453,
+    "height": 464
+  },
+  "/lab/letterpress": {
+    "src": "/posters/experiments/lab--letterpress.webp?v=AS9G-xvc",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/light-table": {
+    "src": "/posters/experiments/lab--light-table.webp?v=CAGFTAAA",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/long-exposure": {
+    "src": "/posters/experiments/lab--long-exposure.webp?v=L0zAUHws",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/loupe": {
+    "src": "/posters/experiments/lab--loupe.webp?v=KS-CEpyU",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/louvres": {
+    "src": "/posters/experiments/lab--louvres.webp?v=cIH6tHNo",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/lyric-loom": {
+    "src": "/posters/experiments/lab--lyric-loom.webp?v=AAAAAAAA",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/minimap": {
+    "src": "/posters/experiments/lab--minimap.webp?v=iRx_AtG4",
+    "width": 453,
+    "height": 584
+  },
+  "/lab/mirrorball": {
+    "src": "/posters/experiments/lab--mirrorball.webp?v=ka-grq3q",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/morph-toolbar": {
+    "src": "/posters/experiments/lab--morph-toolbar.webp?v=zS8AvwtZ",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/needle": {
+    "src": "/posters/experiments/lab--needle.webp?v=HP4uXI_f",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/oklch-picker": {
+    "src": "/posters/experiments/lab--oklch-picker.webp?v=nZMPhAAA",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/origami": {
+    "src": "/posters/experiments/lab--origami.webp?v=guPfQdRh",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/patch-bay": {
+    "src": "/posters/experiments/lab--patch-bay.webp?v=ItOPGsSW",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/photo-booth": {
+    "src": "/posters/experiments/lab--photo-booth.webp?v=VcS5dtMD",
+    "width": 688,
+    "height": 704
+  },
+  "/lab/pins": {
+    "src": "/posters/experiments/lab--pins.webp?v=HCX3CKFS",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/plate-pull": {
+    "src": "/posters/experiments/lab--plate-pull.webp?v=YFCo4AH8",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/rain": {
+    "src": "/posters/experiments/lab--rain.webp?v=9EqbEBye",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/raking-light": {
+    "src": "/posters/experiments/lab--raking-light.webp?v=vUFMQHzH",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/rangefinder": {
+    "src": "/posters/experiments/lab--rangefinder.webp?v=qh3nBwzp",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/receipt": {
+    "src": "/posters/experiments/lab--receipt.webp?v=iTtOzo2u",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/refractor": {
+    "src": "/posters/experiments/lab--refractor.webp?v=egApCXAq",
+    "width": 453,
+    "height": 464
+  },
+  "/lab/riffle": {
+    "src": "/posters/experiments/lab--riffle.webp?v=3Y6-DZqI",
+    "width": 688,
+    "height": 464
+  },
+  "/lab/riso": {
+    "src": "/posters/experiments/lab--riso.webp?v=AAe2Plac",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/sandtable": {
+    "src": "/posters/experiments/lab--sandtable.webp?v=4RPBodAD",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/scoreboard": {
+    "src": "/posters/experiments/lab--scoreboard.webp?v=13nINwV_",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/shredder": {
+    "src": "/posters/experiments/lab--shredder.webp?v=HdUeAF2H",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/splice": {
+    "src": "/posters/experiments/lab--splice.webp?v=M5hHlYCl",
+    "width": 688,
+    "height": 464
+  },
+  "/lab/split-flap": {
+    "src": "/posters/experiments/lab--split-flap.webp?v=75KHB8QB",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/sticker-peel": {
+    "src": "/posters/experiments/lab--sticker-peel.webp?v=t-pYKXQA",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/strobe": {
+    "src": "/posters/experiments/lab--strobe.webp?v=AAZP4eGH",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/thermochromic": {
+    "src": "/posters/experiments/lab--thermochromic.webp?v=7AX0oEPv",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/thumb-scrubber": {
+    "src": "/posters/experiments/lab--thumb-scrubber.webp?v=AAAAAAAA",
+    "width": 922,
+    "height": 464
+  },
+  "/lab/typewriter": {
+    "src": "/posters/experiments/lab--typewriter.webp?v=Pq0CtL9G",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/voice-memo": {
+    "src": "/posters/experiments/lab--voice-memo.webp?v=_Skbu7-Q",
+    "width": 453,
+    "height": 584
+  },
+  "/lab/voxel": {
+    "src": "/posters/experiments/lab--voxel.webp?v=WoM8FW99",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/wax-pack": {
+    "src": "/posters/experiments/lab--wax-pack.webp?v=32E-ge8_",
+    "width": 688,
+    "height": 584
+  },
+  "/lab/weighted-reading": {
+    "src": "/posters/experiments/lab--weighted-reading.webp?v=d0_AsqV2",
+    "width": 453,
+    "height": 584
+  },
+  "/lab/word-lookup": {
+    "src": "/posters/experiments/lab--word-lookup.webp?v=0KjYMNn0",
+    "width": 688,
+    "height": 584
+  },
   "/refract": {
     "src": "/posters/experiments/refract.webp?v=-sytw9H3",
     "width": 923,
