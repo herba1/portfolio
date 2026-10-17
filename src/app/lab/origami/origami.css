@@ -1,0 +1,232 @@
+.origami-root {
+  --origami-felt: rgb(29 32 29);
+  --origami-ink: rgb(240 235 224);
+  --origami-ink-secondary: rgb(176 172 160);
+  --origami-line: rgb(240 235 224 / 0.16);
+  --origami-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --origami-serif-weight: 430;
+  --origami-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--origami-felt);
+  color: var(--origami-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.origami-root[data-embedded] {
+  min-height: 100%;
+}
+
+.origami-stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+}
+
+.origami-stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.origami-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  filter: blur(6px);
+  transition:
+    opacity 640ms var(--ease-entrance),
+    filter 640ms var(--ease-entrance);
+}
+
+.origami-root[data-embedded] .origami-canvas {
+  touch-action: pan-y;
+}
+
+.origami-root[data-status="ready"] .origami-canvas {
+  opacity: 1;
+  filter: none;
+}
+
+.origami-root[data-over] .origami-canvas {
+  cursor: grab;
+}
+
+.origami-root[data-grabbing] .origami-canvas {
+  cursor: grabbing;
+}
+
+.origami-vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(
+    ellipse 70% 74% at 50% 52%,
+    rgb(8 9 8 / 0) 0%,
+    rgb(8 9 8 / 0) 46%,
+    rgb(8 9 8 / 0.06) 60%,
+    rgb(8 9 8 / 0.16) 74%,
+    rgb(8 9 8 / 0.3) 88%,
+    rgb(8 9 8 / 0.42) 100%
+  );
+}
+
+.origami-head {
+  position: absolute;
+  top: 96px;
+  left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 232px;
+  pointer-events: none;
+}
+
+.origami-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.origami-hint {
+  margin: 0;
+  color: var(--origami-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.origami-hint em {
+  font-family: var(--origami-serif);
+  font-size: 1.07em;
+  font-style: italic;
+  font-weight: var(--origami-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--origami-ink);
+}
+
+.origami-hint-touch {
+  display: none;
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .origami-hint-fine {
+    display: none;
+  }
+
+  .origami-hint-touch {
+    display: inline;
+  }
+}
+
+.origami-button {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin-top: 4px;
+  padding-inline: 14px;
+  border: 1px solid var(--origami-line);
+  border-radius: 9999px;
+  background: rgb(240 235 224 / 0.06);
+  color: var(--origami-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.origami-button:active {
+  transform: scale(0.96);
+}
+
+.origami-button:disabled {
+  cursor: default;
+}
+
+.origami-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .origami-button:not(:disabled):hover {
+    background: rgb(240 235 224 / 0.12);
+    border-color: rgb(240 235 224 / 0.28);
+  }
+}
+
+.origami-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.origami-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--origami-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+@container (max-width: 899px) {
+  .origami-head {
+    top: 84px;
+    left: 16px;
+    right: 16px;
+    max-width: 400px;
+    gap: 4px;
+  }
+
+  .origami-button {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .origami-canvas {
+    filter: none;
+    transition: opacity 200ms linear;
+  }
+
+  .origami-button {
+    transition: none;
+  }
+}
