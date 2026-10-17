@@ -1,0 +1,126 @@
+.louvres {
+  --louvres-ground: #e7e2d9;
+  --louvres-ink: #1d1c1a;
+  --louvres-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --louvres-serif-weight: 430;
+  --louvres-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--louvres-ground);
+  color: var(--louvres-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.louvres__wall {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  cursor: grab;
+}
+
+.louvres__wall[data-pressed] {
+  cursor: grabbing;
+}
+
+.louvres[data-embedded] .louvres__wall {
+  touch-action: pan-y;
+}
+
+.louvres__wall:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  pointer-events: none;
+}
+
+.louvres__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 900ms var(--louvres-ease);
+}
+
+.louvres[data-ready] .louvres__canvas {
+  opacity: 1;
+}
+
+.louvres__fallback {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 75%;
+  object-fit: cover;
+  opacity: 0;
+  transition: opacity 600ms ease;
+  pointer-events: none;
+}
+
+.louvres[data-fallback] .louvres__fallback {
+  opacity: 1;
+}
+
+.louvres__head {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: max(24px, min(40px, 4cqh));
+  pointer-events: none;
+}
+
+.louvres__title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: 20px;
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+}
+
+.louvres__lede {
+  max-width: 340px;
+  margin: 4px 0 0;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.louvres__lede em {
+  font-family: var(--louvres-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--louvres-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+}
+
+@container (max-width: 599px) {
+  .louvres__head {
+    left: 16px;
+    right: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .louvres__canvas,
+  .louvres__fallback {
+    transition: none;
+  }
+}
