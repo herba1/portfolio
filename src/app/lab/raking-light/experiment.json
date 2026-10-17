@@ -1,0 +1,17 @@
+{
+  "title": "Raking Light",
+  "description": "An old baseball card on a dark desk and a lamp in your hand, held low to the surface. Move it and the light rakes across the card, so every crease, worn corner, fingerprint and ridge of ink throws a long shadow away from the bulb.",
+  "tags": ["WebGL", "Light", "Cards"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One light finished to the edge: a real point lamp grazing a height field, so the card's physical history only appears when you bring the light down to it.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://www.metmuseum.org/perspectives/raking-light",
+    "https://www.getty.edu/conservation/publications_resources/newsletters/",
+    "https://culturalheritageimaging.org/Technologies/RTI/",
+    "https://learnopengl.com/Advanced-Lighting/Normal-Mapping",
+    "https://iquilezles.org/articles/rmshadows/",
+    "https://www.loc.gov/pictures/collection/bbc/"
+  ]
+}
