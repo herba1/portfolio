@@ -1,0 +1,22 @@
+{
+  "title": "Lyric Loom",
+  "description": "A cloth woven from printed cotton tapes, every thread a line from a late-night set. Pull it and the threads stretch toward your hand row by row, the weave opening onto warm light behind; let go and it settles back, or flick it and a ripple runs through.",
+  "tags": [
+    "WebGL",
+    "Physics",
+    "Type",
+    "Textile"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "Type as woven material: real over-under interlacing of lyric tapes on spring chains with mass, so a pull opens the cloth onto backlight and a flick travels through it.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://herb.art/experiments",
+    "https://en.wikipedia.org/wiki/Plain_weave",
+    "https://en.wikipedia.org/wiki/Twill"
+  ]
+}
