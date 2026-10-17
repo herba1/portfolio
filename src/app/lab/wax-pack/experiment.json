@@ -1,0 +1,24 @@
+{
+  "title": "Wax Pack",
+  "description": "A sealed 1980s wax pack of baseball cards with a slab of stale gum inside. Tear it open along your own path, flick the cards out across the table, and turn any card over to read its back.",
+  "tags": [
+    "WebGL",
+    "Material",
+    "Paper"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One tactile ritual finished to the edge: waxed paper that tears with a fibrous edge and keeps its creases, then cards with real weight that slide and settle.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Baseball_card",
+    "https://www.loc.gov/collections/baseball-cards/",
+    "https://www.ryanjuckett.com/damped-springs/",
+    "https://chrome.dev/html-in-canvas/demos/webgl-book-curl.html",
+    "https://herb.art/tear-off",
+    "https://herb.art/deck"
+  ]
+}
