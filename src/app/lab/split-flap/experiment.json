@@ -1,0 +1,10 @@
+{
+  "title": "Split Flap",
+  "description": "Tonight's setlist on a departure board, built flap by flap. Click a track to put it on and every changed letter rolls through the drum to its new place; drag a row to reorder, or type to rename one.",
+  "tags": ["Mechanical", "Type", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One clean physical mechanism finished to the edge: every character is a pair of real flaps on a hinge, and the ripple comes from each cell stepping through its drum in order.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://herb.art/counter", "https://en.wikipedia.org/wiki/Split-flap_display"]
+}
