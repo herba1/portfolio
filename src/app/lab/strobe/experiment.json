@@ -1,0 +1,10 @@
+{
+  "title": "Strobe",
+  "description": "A heavy direct-drive turntable seen low at the platter's edge, its machined strobe dots lit by a flickering neon lamp. Ride the weighted pitch fader into its centre detent and the 33 row freezes dead still while the others crawl, with the record's pitch following the platter.",
+  "tags": ["WebGL", "Audio", "Vinyl"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One optical instrument finished to the edge: the strobe dots are sampled at the lamp's real flash times, so the stillness you chase with the fader is the same stroboscopic beat a DJ reads off a real deck.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://en.wikipedia.org/wiki/Technics_SL-1200", "https://en.wikipedia.org/wiki/Stroboscopic_effect"]
+}
