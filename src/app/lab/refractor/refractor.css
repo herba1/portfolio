@@ -1,0 +1,285 @@
+.refractor {
+  --refractor-ground: rgb(236 234 230);
+  --refractor-tray: var(--color-surface-raised);
+  --refractor-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --refractor-serif-weight: 430;
+  --refractor-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--refractor-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.refractor__stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  outline: none;
+  cursor: grab;
+}
+
+.refractor__stage:active {
+  cursor: grabbing;
+}
+
+.refractor__stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.refractor__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 700ms var(--refractor-ease);
+}
+
+.refractor[data-ready] .refractor__canvas {
+  opacity: 1;
+}
+
+.refractor__head {
+  position: absolute;
+  top: 88px;
+  left: 24px;
+  max-width: min(340px, calc(100cqw - 48px));
+  pointer-events: none;
+}
+
+.refractor__title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: 20px;
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+}
+
+.refractor__lede {
+  margin: 4px 0 0;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--color-ink-secondary);
+  text-wrap: pretty;
+}
+
+.refractor__lede em {
+  font-family: var(--refractor-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--refractor-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+.refractor__foot {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 12px;
+  row-gap: 8px;
+}
+
+.refractor__tray {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 48px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--refractor-tray);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 24px -8px rgb(0 0 0 / 0.18);
+}
+
+.refractor__foil,
+.refractor__card {
+  display: flex;
+  align-items: center;
+  height: 40px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 160ms var(--refractor-ease);
+}
+
+.refractor__foil {
+  gap: 8px;
+  padding: 0 12px 0 8px;
+}
+
+.refractor__card {
+  justify-content: center;
+  width: 40px;
+  padding: 0;
+}
+
+.refractor__foil:hover,
+.refractor__card:hover {
+  background: var(--color-surface-sunken);
+}
+
+.refractor__foil:focus-visible,
+.refractor__card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 0;
+}
+
+.refractor__foil[aria-checked="true"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.refractor__card[aria-checked="true"] {
+  background: var(--color-surface-sunken);
+}
+
+.refractor__chip {
+  position: relative;
+  display: block;
+  width: 16px;
+  height: 20px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: conic-gradient(
+    from 210deg at 40% 30%,
+    rgb(196 198 204),
+    rgb(232 214 238),
+    rgb(206 226 246),
+    rgb(212 240 222),
+    rgb(244 238 206),
+    rgb(244 214 210),
+    rgb(196 198 204)
+  );
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14);
+}
+
+.refractor__foil[data-foil="atomic"] .refractor__chip::after,
+.refractor__foil[data-foil="prism"] .refractor__chip::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.refractor__foil[data-foil="atomic"] .refractor__chip::after {
+  background:
+    linear-gradient(118deg, transparent 46%, rgb(0 0 0 / 0.28) 48%, transparent 50%),
+    linear-gradient(32deg, transparent 58%, rgb(0 0 0 / 0.24) 60%, transparent 62%),
+    linear-gradient(74deg, transparent 22%, rgb(0 0 0 / 0.2) 24%, transparent 26%);
+}
+
+.refractor__foil[data-foil="prism"] .refractor__chip::after {
+  background:
+    repeating-linear-gradient(60deg, transparent 0 5px, rgb(0 0 0 / 0.2) 5px 6px),
+    repeating-linear-gradient(-60deg, transparent 0 5px, rgb(0 0 0 / 0.2) 5px 6px),
+    repeating-linear-gradient(0deg, transparent 0 5px, rgb(0 0 0 / 0.16) 5px 6px);
+}
+
+.refractor__foil-name {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+}
+
+.refractor__thumb {
+  display: block;
+  width: 20px;
+  height: 32px;
+  object-fit: cover;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);
+  transform: rotate(-4deg);
+  transition: transform 260ms var(--refractor-ease);
+}
+
+.refractor__card[aria-checked="true"] .refractor__thumb {
+  transform: rotate(0deg) scale(1.08);
+}
+
+.refractor__motion {
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--refractor-tray);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 24px -8px rgb(0 0 0 / 0.18);
+}
+
+.refractor__motion:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.refractor__motion[data-state="on"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.refractor__motion:disabled {
+  cursor: default;
+}
+
+.refractor__fallback {
+  display: none;
+}
+
+.refractor[data-fallback] .refractor__fallback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  height: min(64cqh, 110cqw);
+  width: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 16px 40px -12px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -52%);
+}
+
+@container (max-width: 640px) {
+  .refractor__head {
+    left: 16px;
+  }
+
+  .refractor__foot {
+    bottom: 16px;
+  }
+
+  .refractor__foil {
+    padding: 0 10px 0 8px;
+  }
+}

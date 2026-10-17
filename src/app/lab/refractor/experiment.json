@@ -1,0 +1,24 @@
+{
+  "title": "Refractor",
+  "description": "A 1909 card reprinted on chrome and slipped into a penny sleeve. Tilt it and a diffraction grating splits the light into rainbow bands across the border and sky while the player stays matte ink; flick it and it spins with weight.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Cards"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One optical material finished to the edge: a real grating equation drives the rainbow, so the colour comes from the angle between the light, the foil grooves and your eye, masked from the printed photo by a chrome map generated from the card art itself.",
+  "tile": {
+    "cols": 2,
+    "rows": 4
+  },
+  "sources": [
+    "https://github.com/simeydotme/pokemon-cards-css",
+    "https://poke-holo.simey.me/",
+    "https://hover-tilt.simey.me/bespoke/credit-cards/",
+    "https://feedbagel.com/post/creating-foil-sticker-effects-with-custom-threejs-shaders",
+    "https://developer.nvidia.com/gpugems/GPUGems/gpugems_ch08.html",
+    "https://github.com/ektogamat/threejs-holographic-material"
+  ]
+}
