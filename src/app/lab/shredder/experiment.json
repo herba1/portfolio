@@ -1,0 +1,13 @@
+{
+  "title": "Shredder",
+  "description": "A glossy landscape print half fed into a strip-cut shredder, its cut strips hanging below in curls and twists. Feed it through, then comb the strips straight: where neighbours line up edge to edge they fuse back into a whole print, but it is the next photograph.",
+  "tags": ["WebGL", "Physics", "Paper"],
+  "status": "shipped",
+  "createdAt": "2026-10-16T18:00:00.000Z",
+  "intent": "One paper mechanic finished to the edge: a print cut into two dozen weighty ribbons with their own curl and twist, and a comb that pulls them back into line until they heal into another picture.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://tympanus.net/codrops/2026/05/19/80s-business-tech-seamless-scene-transitions-inside-shader-ses-scroll-driven-webgpu-pipeline/",
+    "https://herb.art/lab/tear-off"
+  ]
+}
