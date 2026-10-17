@@ -930,33 +930,6 @@ export async function createVoxel({ host, root, embedded, reduced, onState }) {
   render();
   report();
   root.setAttribute("data-ready", "");
-  if (new URLSearchParams(window.location.search).has("probe")) {
-    root.voxelProbe = {
-      advance(seconds, draw = true) {
-        const steps = Math.round(seconds * 60);
-        const t0 = performance.now();
-        let busy = false;
-        for (let k = 0; k < steps; k += 1) {
-          clock += 1 / 60;
-          busy = update(1 / 60);
-        }
-        const ms = (performance.now() - t0) / Math.max(1, steps);
-        if (draw) render();
-        report();
-        return { clock, ms, busy, out: outCount, size: pile.size };
-      },
-      callHome() {
-        pending.home = true;
-      },
-      heapScreen() {
-        tmp.set(heap.x, 0.3, heap.z).project(camera);
-        return [(tmp.x + 1) / 2, (1 - tmp.y) / 2];
-      },
-      tap(x, z) {
-        pending.ripple = { x, z };
-      },
-    };
-  }
 
   return {
     setActive(on) {
