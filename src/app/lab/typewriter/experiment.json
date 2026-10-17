@@ -1,0 +1,15 @@
+{
+  "title": "Typewriter",
+  "description": "Liner notes on a 1960s typebar typewriter, seen close from above the platen. Every key swings its typebar into the ribbon and bites the cream bond with its own worn, uneven ink; Return throws the carriage home and rolls the platen.",
+  "tags": ["WebGL", "Print", "Type"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One machine finished to the edge: real strikes on real paper, where every letter lands a little differently because the typeface is worn, and the carriage moves with the weight of a steel frame.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Typewriter",
+    "https://en.wikipedia.org/wiki/Olivetti_Lettera_22",
+    "https://www.iquilezles.org/articles/morenoise/",
+    "https://webaudio.github.io/web-audio-api/"
+  ]
+}
