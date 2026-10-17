@@ -1,0 +1,281 @@
+.ghost-setlist {
+  --ghost-setlist-ground: rgb(14 10 9);
+  --ghost-setlist-ink: rgb(246 236 226);
+  --ghost-setlist-ink-soft: rgb(222 206 192);
+  --ghost-setlist-hair: rgb(255 236 220 / 0.14);
+  --ghost-setlist-wash: rgb(255 236 220 / 0.08);
+  --ghost-setlist-neon: rgb(255 128 96);
+  --ghost-setlist-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --ghost-setlist-serif-weight: 430;
+  --ghost-setlist-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: var(--ghost-setlist-ground);
+  color: var(--ghost-setlist-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.ghost-setlist-stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ghost-setlist[data-embedded] .ghost-setlist-stage {
+  touch-action: pan-y;
+}
+
+.ghost-setlist[data-grabbing] .ghost-setlist-stage {
+  cursor: grabbing;
+}
+
+.ghost-setlist-stage:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  pointer-events: none;
+}
+
+.ghost-setlist-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 900ms var(--ghost-setlist-ease);
+}
+
+.ghost-setlist[data-ready] .ghost-setlist-canvas {
+  opacity: 1;
+}
+
+.ghost-setlist-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.ghost-setlist-head {
+  position: absolute;
+  top: 96px;
+  left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 300px;
+  pointer-events: none;
+}
+
+.ghost-setlist-title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--text-heading--font-weight);
+  text-wrap: balance;
+}
+
+.ghost-setlist-lede {
+  margin: 0;
+  color: var(--ghost-setlist-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.ghost-setlist-lede em {
+  font-family: var(--ghost-setlist-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--ghost-setlist-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--ghost-setlist-ink);
+}
+
+.ghost-setlist-rail {
+  position: absolute;
+  left: 36px;
+  bottom: 32px;
+  z-index: 2;
+}
+
+.ghost-setlist-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ghost-setlist-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ghost-setlist-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-150) var(--ease-hover),
+    transform var(--duration-150) var(--ghost-setlist-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ghost-setlist-row:active {
+  transform: scale(0.97);
+}
+
+.ghost-setlist-row:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 0;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ghost-setlist-row:hover {
+    background: var(--ghost-setlist-wash);
+  }
+}
+
+.ghost-setlist-row[aria-current="true"] {
+  font-weight: var(--font-weight-strong);
+}
+
+.ghost-setlist-num {
+  position: relative;
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-xs);
+  line-height: var(--text-ui-xs--line-height);
+  letter-spacing: var(--text-ui-xs--letter-spacing);
+  font-weight: var(--text-ui-xs--font-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+.ghost-setlist-row[aria-current="true"] .ghost-setlist-num::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -10px;
+  width: 4px;
+  height: 4px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--ghost-setlist-neon);
+  box-shadow:
+    0 0 4px var(--ghost-setlist-neon),
+    0 0 12px var(--ghost-setlist-neon);
+}
+
+.ghost-setlist-encore {
+  display: inline-flex;
+  align-items: center;
+  height: 16px;
+  padding: 0 6px;
+  border-radius: 9999px;
+  box-shadow: inset 0 0 0 1px var(--ghost-setlist-hair);
+  font-size: var(--text-ui-2xs);
+  line-height: 1;
+  letter-spacing: var(--text-ui-2xs--letter-spacing);
+  font-weight: var(--text-ui-2xs--font-weight);
+}
+
+.ghost-setlist-count {
+  position: absolute;
+  right: 40px;
+  bottom: 36px;
+  z-index: 2;
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+.ghost-setlist-count-of {
+  font-weight: var(--font-weight-meta);
+  color: var(--ghost-setlist-ink-soft);
+}
+
+.ghost-setlist-fallback {
+  position: absolute;
+  inset: 0;
+  display: none;
+  place-items: center;
+  margin: 0;
+  color: var(--ghost-setlist-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+.ghost-setlist[data-failed] .ghost-setlist-fallback {
+  display: grid;
+}
+
+@container (max-width: 899px) {
+  .ghost-setlist-head {
+    top: 84px;
+    left: 16px;
+    right: 16px;
+    max-width: 360px;
+  }
+
+  .ghost-setlist-rail {
+    display: none;
+  }
+
+  .ghost-setlist-count {
+    right: auto;
+    left: 50%;
+    bottom: 24px;
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ghost-setlist-canvas,
+  .ghost-setlist-row {
+    transition: none;
+  }
+}

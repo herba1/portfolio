@@ -1,0 +1,21 @@
+{
+  "title": "Ghost Setlist",
+  "description": "Tonight's setlist as neon tube lettering riding an S-curve along a dark wall. Flick through it and every song leaves cooling outline afterimages behind it like a long exposure, then lands solid and warm, glowing on the wall and in the glossy floor.",
+  "tags": [
+    "WebGL",
+    "Type",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One kinetic type mechanic finished to the edge: a title on a path whose speed is drawn as long-exposure neon ghosts, collapsing into a single lit tube when it settles.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://tympanus.net/codrops/2020/06/02/kinetic-typography-with-three-js/",
+    "https://en.wikipedia.org/wiki/Neon_sign",
+    "https://en.wikipedia.org/wiki/Long-exposure_photography"
+  ]
+}
