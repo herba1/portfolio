@@ -1,0 +1,15 @@
+{
+  "title": "Letterpress",
+  "description": "A tabletop platen press with a song title set in wood type. Roll ink onto the type with the brayer, pull the heavy lever to bite the forme into thick cotton paper, and every print that peels off the type lands on the stack a little different.",
+  "tags": ["WebGL", "Print", "Type"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One print process finished to the edge: real wood type, real ink film and a real impression, where how you roll and how hard you pull decide what the sheet looks like.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://letterpresscommons.com/",
+    "https://woodtype.org/",
+    "https://www.briarpress.org/",
+    "https://threejs.org/docs/#api/en/materials/MeshPhysicalMaterial"
+  ]
+}
