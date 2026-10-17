@@ -1,0 +1,15 @@
+{
+  "title": "On Ice",
+  "description": "A record frozen in a clear block of ice on a slate table. Hold your cursor on the ice to melt a glossy hollow into it; meltwater runs down the faces and pools on the slate, and once you reach the record it slides free.",
+  "tags": ["WebGL", "Optics", "Simulation"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One physical material finished to the edge: real refracting ice with trapped bubbles and fractures that only your warmth can open.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://tympanus.net/codrops/2021/10/27/creating-the-effect-of-transparent-glass-and-plastic-in-three-js/",
+    "https://blog.maximeheckel.com/posts/refraction-dispersion-and-other-shader-light-effects/",
+    "https://iquilezles.org/articles/distfunctions/",
+    "https://developer.nvidia.com/gpugems/gpugems2/part-iii-high-quality-rendering/chapter-20-fast-third-order-texture-filtering"
+  ]
+}
