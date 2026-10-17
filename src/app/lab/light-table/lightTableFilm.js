@@ -160,8 +160,8 @@ export const LAYOUTS = [
     loupe: [70, 34],
     pieces: {
       negA: [90, 34, -1.6],
-      negB: [90, 268, 1.6],
-      chrome: [150, 172, 86],
+      negB: [90, 262, 1.6],
+      chrome: [146, 168, 86],
       louis: [38, 94, -7],
       crowd: [128, 90, 5],
       tunnel: [63, 167, -6],
