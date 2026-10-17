@@ -1,0 +1,127 @@
+.riffle {
+  --riffle-ground: rgb(236 234 230);
+  --riffle-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --riffle-serif-weight: 430;
+  --riffle-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--riffle-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.riffle__stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.riffle[data-embedded] .riffle__stage {
+  touch-action: pan-y;
+}
+
+.riffle__stage[data-over] {
+  cursor: grab;
+}
+
+.riffle__stage[data-grabbing] {
+  cursor: grabbing;
+}
+
+.riffle__stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.riffle__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 700ms var(--riffle-ease);
+}
+
+.riffle[data-ready] .riffle__canvas {
+  opacity: 1;
+}
+
+.riffle__head {
+  position: absolute;
+  top: 88px;
+  left: 48px;
+  max-width: min(360px, calc(100cqw - 32px));
+  pointer-events: none;
+}
+
+.riffle__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.riffle__lede {
+  margin: 4px 0 0;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  color: var(--color-ink-secondary);
+  text-wrap: pretty;
+}
+
+.riffle__lede em {
+  font-family: var(--riffle-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--riffle-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+.riffle__live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.riffle__fallback {
+  display: none;
+}
+
+.riffle[data-fallback] .riffle__fallback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  height: min(64cqh, 110cqw);
+  aspect-ratio: 660 / 1188;
+  background: url("/flyout/card-09.jpg") center / cover no-repeat;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 16px 40px -12px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -50%) rotate(-2deg);
+}
+
+@container (max-width: 640px) {
+  .riffle__head {
+    top: 80px;
+    left: 16px;
+  }
+}
