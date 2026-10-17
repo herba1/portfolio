@@ -1,0 +1,15 @@
+{
+  "title": "Splice",
+  "description": "A quarter-inch tape splicing block with the playback head beside it. Rock the tape across the head to find the beat, press the razor into the 45° slot, butt reel B against your cut and rub a splicing tab down, then play it: the beat jumps exactly where you cut.",
+  "tags": ["WebGL", "Audio", "Tape"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One editing ritual finished to the edge: the tape is the timeline, the razor is the edit, and the sound you hear is whatever oxide is crossing the head gap, so a diagonal cut really crossfades.",
+  "tile": { "cols": 3, "rows": 4 },
+  "sources": [
+    "https://tapeop.com/tutorials/11/intro-analog-tape-splicing-and-editing-and-tape-loops/",
+    "https://www.muzines.co.uk/articles/tape-editing-techniques/2840",
+    "https://canonbase.eu/w/images/d/de/Edit-All-Tape-Splicer-Manual.pdf",
+    "https://herb.art/lab/needle"
+  ]
+}
