@@ -1,0 +1,21 @@
+{
+  "title": "Fog",
+  "description": "A cold window pane over a landscape at dusk. Hold to breathe a warm bloom of condensation onto the glass, write in it with your finger, and watch the strokes bead, drip and evaporate; breathe again and the old writing comes back as a ghost.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Simulation"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One quiet physical ritual finished to the edge: breath condensing on cold glass, a finger writing through it, water gathering and running, and the whole thing evaporating from the edges inward.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Breath_figure",
+    "https://www.shadertoy.com/view/ltffzl",
+    "https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/"
+  ]
+}

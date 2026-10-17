@@ -1,0 +1,326 @@
+.fog {
+  --fog-ground: #15171a;
+  --fog-ink: #f6f6f4;
+  --fog-tray: rgb(20 22 26 / 0.46);
+  --fog-hair: rgb(255 255 255 / 0.14);
+  --fog-hair-strong: rgb(255 255 255 / 0.62);
+  --fog-wash: rgb(255 255 255 / 0.1);
+  --fog-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --fog-serif-weight: 430;
+  --fog-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--fog-ground);
+  color: var(--fog-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.fog__glass {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+}
+
+.fog[data-embedded] .fog__glass {
+  touch-action: pan-y;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fog__glass {
+    cursor: none;
+  }
+}
+
+.fog__glass:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  pointer-events: none;
+}
+
+.fog__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 1200ms var(--fog-ease);
+}
+
+.fog[data-ready] .fog__canvas {
+  opacity: 1;
+}
+
+.fog__fallback {
+  position: absolute;
+  inset: -24px;
+  width: calc(100% + 48px);
+  height: calc(100% + 48px);
+  object-fit: cover;
+  filter: blur(14px) saturate(0.8) brightness(0.9);
+  opacity: 0;
+  transition: opacity 600ms ease;
+  pointer-events: none;
+}
+
+.fog[data-fallback] .fog__fallback {
+  opacity: 1;
+}
+
+.fog__cursor {
+  position: absolute;
+  top: -16px;
+  left: -16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  box-shadow:
+    inset 0 0 0 1px var(--fog-hair-strong),
+    0 0 0 1px rgb(0 0 0 / 0.08);
+  pointer-events: none;
+  opacity: 0;
+  transition:
+    opacity var(--duration-200) ease,
+    box-shadow 400ms var(--fog-ease);
+  will-change: transform;
+}
+
+.fog__cursor[data-shown] {
+  opacity: 1;
+}
+
+.fog__glass[data-breathing] .fog__cursor {
+  opacity: 0;
+  transition-duration: 600ms;
+}
+
+@media (hover: none) {
+  .fog__cursor {
+    display: none;
+  }
+}
+
+.fog__head {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  padding: 88px 24px 48px;
+  pointer-events: none;
+  background: linear-gradient(
+    to bottom,
+    rgb(10 10 12 / 0.46) 0%,
+    rgb(10 10 12 / 0.32) 35%,
+    rgb(10 10 12 / 0.14) 65%,
+    rgb(10 10 12 / 0.04) 85%,
+    rgb(10 10 12 / 0) 100%
+  );
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.35);
+}
+
+.fog__title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: 20px;
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+}
+
+.fog__lede {
+  max-width: 360px;
+  margin: 4px 0 0;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.fog__lede em {
+  font-family: var(--fog-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--fog-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+}
+
+.fog__bar {
+  position: absolute;
+  left: 50%;
+  bottom: max(24px, min(40px, 4cqh));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 32px);
+  transform: translateX(-50%);
+}
+
+.fog__scenes,
+.fog__mic {
+  display: flex;
+  align-items: center;
+  height: 44px;
+  padding: 4px;
+  border-radius: 999px;
+  background: var(--fog-tray);
+  box-shadow:
+    inset 0 0 0 1px var(--fog-hair),
+    0 1px 2px rgb(0 0 0 / 0.12),
+    0 12px 32px -12px rgb(0 0 0 / 0.5);
+  backdrop-filter: blur(16px) saturate(1.2);
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+}
+
+.fog__scenes {
+  gap: 2px;
+}
+
+.fog__scene {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 8px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fog-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-150) ease,
+    color var(--duration-150) ease,
+    transform var(--duration-150) var(--fog-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fog__scene[aria-checked="true"] {
+  background: var(--fog-ink);
+  color: #17191c;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .fog__scene[aria-checked="false"]:hover,
+  .fog__mic:hover {
+    background-color: rgb(40 42 48 / 0.56);
+  }
+}
+
+.fog__scene:active,
+.fog__mic:active {
+  transform: scale(0.96);
+}
+
+.fog__scene:focus-visible,
+.fog__mic:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.fog__thumb {
+  display: block;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.2);
+}
+
+.fog__mic {
+  gap: 8px;
+  padding: 4px 16px 4px 14px;
+  border: 0;
+  color: var(--fog-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-150) ease,
+    color var(--duration-150) ease,
+    transform var(--duration-150) var(--fog-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.fog__mic[aria-pressed="true"] {
+  background: var(--fog-ink);
+  color: #17191c;
+}
+
+.fog__mic[data-state="blocked"] {
+  cursor: default;
+}
+
+.fog[data-embedded] .fog__bar {
+  left: auto;
+  right: 16px;
+  bottom: 16px;
+  transform: none;
+}
+
+.fog[data-embedded] .fog__scene-name {
+  display: none;
+}
+
+.fog[data-embedded] .fog__scene {
+  padding: 0 8px;
+}
+
+@container (max-width: 899px) {
+  .fog__head {
+    padding: 84px 16px 40px;
+  }
+
+  .fog__mic-label {
+    display: none;
+  }
+
+  .fog__mic {
+    width: 44px;
+    padding: 4px;
+    justify-content: center;
+  }
+}
+
+@container (max-width: 420px) {
+  .fog__scene-name {
+    display: none;
+  }
+
+  .fog__scene {
+    padding: 0 8px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .fog__canvas,
+  .fog__cursor,
+  .fog__scene,
+  .fog__mic {
+    transition: none;
+  }
+}
