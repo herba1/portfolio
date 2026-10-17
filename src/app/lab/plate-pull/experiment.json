@@ -1,0 +1,10 @@
+{
+  "title": "Linocut Pull",
+  "description": "A linocut of a DJ, inked on the bench under a sheet of Japanese paper. Peel the sheet back by its corner: a slow pull prints rich and solid, a fast one comes out starved and speckled, and the block keeps the ghost.",
+  "tags": ["WebGL", "Print", "Club"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One printmaking act finished to the edge: the pull, where how fast your hand lifts the paper decides how much ink it takes from the block.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": ["https://chrome.dev/html-in-canvas/demos/webgl-book-curl.html", "https://en.wikipedia.org/wiki/Linocut", "https://herb.art/taffy"]
+}
