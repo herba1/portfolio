@@ -1,0 +1,16 @@
+{
+  "title": "Film Leader",
+  "description": "A 35mm canister on a light table. Pull the leader and a strip of colour negative unspools with its curl memory, sprocket holes and edge print, then curls slowly back when you let go.",
+  "tags": ["WebGL", "Film", "Physics"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One physical material finished to the edge: real acetate negative with an orange mask, backlit by a light table, that you draw out of the canister by hand until the end of the roll is light-struck.",
+  "tile": { "cols": 3, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/135_film",
+    "https://en.wikipedia.org/wiki/DX_encoding",
+    "https://en.wikipedia.org/wiki/Film_perforations",
+    "https://en.wikipedia.org/wiki/Light_leak",
+    "https://matthias-research.github.io/pages/publications/posBasedDyn.pdf"
+  ]
+}
