@@ -1,0 +1,14 @@
+{
+  "title": "Long Exposure",
+  "description": "A camera's live view of a dark club. Hold to open the shutter and drag to paint glowstick trails that burn into the exposure; let go and the developed photo drops into a stack of prints.",
+  "tags": ["WebGL", "Photography", "Club"],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One photographic process finished to the edge: a real bulb exposure where light adds up, cores burn white, the room slowly emerges and the sensor grows noisy the longer you hold.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    "https://tympanus.net/codrops/tag/webgl/",
+    "https://en.wikipedia.org/wiki/Long-exposure_photography",
+    "https://en.wikipedia.org/wiki/Light_painting"
+  ]
+}
