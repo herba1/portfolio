@@ -16,16 +16,11 @@ uniform float uAspect;
 
 vec3 gradeScene(vec2 uv) {
   vec2 c = clamp(uv, vec2(0.002), vec2(0.998));
-  float g = texture(uPhoto, c).r;
-  g = clamp(g, 0.0, 1.0);
-  float lift = g * g * (3.0 - 2.0 * g);
-  vec3 shadow = vec3(0.30, 0.42, 0.78);
-  vec3 high = vec3(1.0, 0.86, 0.80);
-  vec3 tone = mix(shadow, high, smoothstep(0.25, 0.85, g));
-  float hot = max(0.0, g - 0.74) * 3.2;
-  float tintX = smoothstep(0.0, 1.0, c.x);
-  vec3 glowTint = mix(vec3(1.0, 0.38, 0.72), vec3(0.42, 0.62, 1.0), tintX);
-  return tone * mix(g, lift, 0.4) + glowTint * hot * hot;
+  vec3 g = texture(uPhoto, c).rgb;
+  vec3 lin = pow(g, vec3(2.0));
+  float l = dot(lin, vec3(0.3, 0.55, 0.15));
+  vec3 graded = mix(vec3(l), lin, 0.85) * vec3(0.92, 0.96, 1.08);
+  return graded * 1.5;
 }
 
 vec3 lampLight(vec2 uv) {
@@ -143,8 +138,9 @@ void main() {
   float h = vLocal.y;
   float core = lineProfile(s, h, vLen, vSigma);
   float halo = lineProfile(s, h, vLen, vSigma * 2.8);
+  float bloom = lineProfile(s, h, vLen, vSigma * 7.0);
   vec3 coreColor = mix(vColor, vec3(1.0, 0.97, 0.92), 0.35);
-  vec3 c = vEnergy * (coreColor * core + vColor * halo * 0.22);
+  vec3 c = vEnergy * (coreColor * core + vColor * halo * 0.22 + vColor * vColor * bloom * 0.12);
   outColor = vec4(max(c, vec3(0.0)), 1.0);
 }
 `;

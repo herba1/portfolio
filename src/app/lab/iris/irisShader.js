@@ -66,6 +66,7 @@ out float vSpikeAmp;
 out float vSpikeLen;
 out float vSeed;
 out float vTint;
+out float vHue;
 
 float cocOf(float d) {
   return clamp((d - uFocus) / 0.72, 0.0, 1.0);
@@ -90,6 +91,7 @@ void main() {
   vSpikeLen = len;
   vSeed = aExtra.y;
   vTint = aExtra.z;
+  vHue = aExtra.w;
   if (distC > uOpenVis + half_) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
@@ -111,6 +113,7 @@ in float vSpikeAmp;
 in float vSpikeLen;
 in float vSeed;
 in float vTint;
+in float vHue;
 
 uniform float uRot;
 uniform float uCat;
@@ -134,7 +137,9 @@ float aperture(vec2 q) {
 void main() {
   vec2 d = vLocal;
   float r = length(d);
-  vec3 warm = mix(vec3(1.0, 0.8, 0.58), vec3(1.0, 0.9, 0.78), vTint);
+  vec3 warm = mix(vec3(1.0, 0.7, 0.42), vec3(1.0, 0.84, 0.64), vTint);
+  warm = mix(warm, vec3(1.0, 0.52, 0.5), step(0.5, vHue) * step(vHue, 1.5));
+  warm = mix(warm, vec3(0.62, 0.78, 1.0), step(1.5, vHue));
   vec3 col = vec3(0.0);
 
   float coc = max(vCoc, 0.001);

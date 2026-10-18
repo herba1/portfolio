@@ -1,850 +1,519 @@
-import { PHOTOS, backprintCanvas, fibreCanvas, labelCanvas, loadImage, photoCanvas } from "./shredderArt";
-import { mat4, program, imageTexture, roundedBox } from "./shredderGL";
-import { BG_FS, BG_VS, DEPTH_FS, DEPTH_VS, PAPER_FS, PAPER_VS, SOLID_FS, SOLID_VS } from "./shredderShader";
-import { EXIT_Y, FLOOR_Y, INNER, K, L_BITE, L_MAX, L_REST, N, PITCH, PRINT_H, PRINT_W, V_FEED, createSim, stripX } from "./shredderSim";
+import { drawBinBack, drawBinFront, drawButton, drawHeadBack, drawHeadFront, geometry } from "./shredderBody";
 
-const THETA = (16 * Math.PI) / 180;
-const D = [0, Math.cos(THETA), -Math.sin(THETA)];
-const NT = [0, Math.sin(THETA), Math.cos(THETA)];
-const SLOT_X = 0.79;
-const BUTTON = [0.8, -0.08];
-const MACHINE_Z = 0.2;
-const SHADOW = 1024;
-const STEP = 1 / 120;
-const V_HEAL = 0.36;
-const LIGHT = (() => {
-  const v = [-0.3, 1, 0.42];
-  const l = Math.hypot(...v);
-  return v.map((c) => c / l);
-})();
-const EYE = [0, 1.5, 5.7];
-const AT = [0, -0.4, 0];
-const FLOATS = 10;
-const PRINT_ROWS = 14;
-const MAX_VERTS = N * (K + 2) * 2 + N * PRINT_ROWS * 6 + 64;
-const SEED = 4127;
-const METAL = [0.7, 0.702, 0.698];
-const WALL = [0.894, 0.89, 0.878];
-const GROUND = [0.872, 0.866, 0.852];
+const SEG = 8;
+const GRAVITY = 1400;
 
-const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const easeOut = (t) => 1 - Math.pow(1 - t, 3);
 
-function hexToRgb(value, fallback) {
-  const m = /^#?([0-9a-f]{6})$/i.exec(value.trim());
-  if (!m) return fallback;
-  const n = parseInt(m[1], 16);
-  return [((n >> 16) & 255) / 255, ((n >> 8) & 255) / 255, (n & 255) / 255];
+function loadImage(src) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
-export async function createShredder({ root, canvas, embedded, reduced, insets, onStatus, onPhoto }) {
-  const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, premultipliedAlpha: false, preserveDrawingBuffer: false, powerPreference: "high-performance" });
-  if (!gl) throw new Error("webgl2");
-
-  const mono = getComputedStyle(document.documentElement).getPropertyValue("--font-mono").trim();
-  try {
-    await document.fonts.load(`500 15px ${mono || "monospace"}`);
-  } catch {}
-  const images = await Promise.all(PHOTOS.map((p) => loadImage(p.src)));
-
-  const depthProg = program(gl, DEPTH_VS, DEPTH_FS);
-  const bgProg = program(gl, BG_VS, BG_FS);
-  const solidProg = program(gl, SOLID_VS, SOLID_FS);
-  const paperProg = program(gl, PAPER_VS, PAPER_FS);
-
-  const photoTex = images.map((img, i) => imageTexture(gl, photoCanvas(img, PHOTOS[i])));
-  const fibreTex = imageTexture(gl, fibreCanvas(), { repeat: true });
-  const labelTex = imageTexture(gl, labelCanvas());
-  const backTex = imageTexture(gl, backprintCanvas(), { repeat: true });
-
-  const fuseTex = gl.createTexture();
-  const fuseBytes = new Uint8Array(N * K);
-  gl.bindTexture(gl.TEXTURE_2D, fuseTex);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, K, N, 0, gl.RED, gl.UNSIGNED_BYTE, fuseBytes);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-
-  const shadowTex = gl.createTexture();
-  gl.bindTexture(gl.TEXTURE_2D, shadowTex);
-  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.DEPTH_COMPONENT24, SHADOW, SHADOW);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_MODE, gl.COMPARE_REF_TO_TEXTURE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_COMPARE_FUNC, gl.LEQUAL);
-  const shadowFbo = gl.createFramebuffer();
-  gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFbo);
-  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, shadowTex, 0);
-  gl.drawBuffers([gl.NONE]);
-  gl.readBuffer(gl.NONE);
-  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-  const solid = { verts: [], idx: [] };
-  const X = [1, 0, 0];
-  const Y = [0, 1, 0];
-  const Z = [0, 0, 1];
-  roundedBox(solid, { hx: 0.98, ha: 0.08, hb: MACHINE_Z, r: 0.04, re: 0.035, center: [0, -0.08, 0], X, A: Y, B: Z, part: 0 });
-  const postH = (-0.16 - FLOOR_Y) / 2;
-  for (const sx of [-1, 1]) {
-    roundedBox(solid, { hx: 0.026, ha: postH, hb: 0.03, r: 0.012, re: 0.012, center: [sx * 0.9, FLOOR_Y + postH, 0], X, A: Y, B: Z, part: 2 });
-    roundedBox(solid, { hx: 0.09, ha: 0.011, hb: 0.15, r: 0.009, re: 0.02, center: [sx * 0.9, FLOOR_Y + 0.011, 0], X, A: Y, B: Z, part: 2 });
+function createSound() {
+  let ctx = null;
+  let motor = null;
+  function ensure() {
+    if (ctx) return ctx;
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    ctx = new AC();
+    return ctx;
   }
-  const solidVao = gl.createVertexArray();
-  gl.bindVertexArray(solidVao);
-  const solidVbo = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, solidVbo);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(solid.verts), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 28, 0);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 28, 12);
-  gl.enableVertexAttribArray(2);
-  gl.vertexAttribPointer(2, 1, gl.FLOAT, false, 28, 24);
-  const solidIbo = gl.createBuffer();
-  gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, solidIbo);
-  gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(solid.idx), gl.STATIC_DRAW);
-  const solidCount = solid.idx.length;
-  gl.bindVertexArray(null);
-
-  const bgVao = gl.createVertexArray();
-  gl.bindVertexArray(bgVao);
-  const bgVbo = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, bgVbo);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-  gl.bindVertexArray(null);
-
-  const paperData = new Float32Array(MAX_VERTS * FLOATS);
-  const paperVao = gl.createVertexArray();
-  gl.bindVertexArray(paperVao);
-  const paperVbo = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, paperVbo);
-  gl.bufferData(gl.ARRAY_BUFFER, paperData.byteLength, gl.DYNAMIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, FLOATS * 4, 0);
-  gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 3, gl.FLOAT, false, FLOATS * 4, 12);
-  gl.enableVertexAttribArray(2);
-  gl.vertexAttribPointer(2, 4, gl.FLOAT, false, FLOATS * 4, 24);
-  gl.bindVertexArray(null);
-
-  const accent = hexToRgb(getComputedStyle(document.documentElement).getPropertyValue("--brand-500") || "", [0.231, 0.51, 0.965]);
-  const lightView = mat4.lookAt([LIGHT[0] * 6, -0.45 + LIGHT[1] * 6, LIGHT[2] * 6], [0, -0.45, 0], [0, 1, 0]);
-  const lightVP = (() => {
-    const box = [];
-    for (const x of [-1.3, 1.3]) for (const y of [FLOOR_Y, 1]) for (const z of [-0.9, 0.9]) box.push([x, y, z]);
-    const v = [0, 0, 0, 0];
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    let minZ = Infinity;
-    let maxZ = -Infinity;
-    for (const p of box) {
-      mat4.apply(lightView, p[0], p[1], p[2], v);
-      minX = Math.min(minX, v[0]);
-      maxX = Math.max(maxX, v[0]);
-      minY = Math.min(minY, v[1]);
-      maxY = Math.max(maxY, v[1]);
-      minZ = Math.min(minZ, v[2]);
-      maxZ = Math.max(maxZ, v[2]);
-    }
-    return mat4.mul(mat4.ortho(minX, maxX, minY, maxY, -maxZ - 0.5, -minZ + 0.5), lightView);
-  })();
-
-  const sim = createSim(SEED);
-  sim.state.reduced = reduced;
-
-  let photo = 0;
-  let width = 1;
-  let height = 1;
-  let dpr = 1;
-  let view = null;
-  let proj = null;
-  let vp = null;
-  let invVP = null;
-  let raf = 0;
-  let active = false;
-  let destroyed = false;
-  let lastTs = 0;
-  let acc = 0;
-  let calm = 0;
-  let motorV = 0;
-  let led = 0;
-  let press = 0;
-  let lifted = 0;
-  let feedTarget = 0;
-  let hoverPrint = false;
-  let healWait = 0;
-  let healing = false;
-  let hold = false;
-  let keyHold = false;
-  let pointer = null;
-  let combScript = null;
-  let fuseDirty = true;
-  let lastStatus = "";
-  const shake = [0, 0, 0];
-  const v4 = [0, 0, 0, 0];
-
-  const project = (x, y, z, out) => {
-    mat4.apply(vp, x, y, z, v4);
-    const w = Math.abs(v4[3]) > 1e-6 ? v4[3] : 1e-6;
-    out[0] = (v4[0] / w * 0.5 + 0.5) * width;
-    out[1] = (1 - (v4[1] / w * 0.5 + 0.5)) * height;
-    return out;
+  function noiseBuffer() {
+    const len = ctx.sampleRate;
+    const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i += 1) d[i] = Math.random() * 2 - 1;
+    return buf;
+  }
+  return {
+    wake() {
+      const c = ensure();
+      if (c && c.state === "suspended") c.resume();
+    },
+    tick() {
+      if (!ctx || ctx.state !== "running") return;
+      const t = ctx.currentTime;
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.type = "square";
+      o.frequency.value = 1800;
+      g.gain.setValueAtTime(0.03, t);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.03);
+      o.connect(g).connect(ctx.destination);
+      o.start(t);
+      o.stop(t + 0.04);
+    },
+    start() {
+      if (!ctx || ctx.state !== "running" || motor) return;
+      const t = ctx.currentTime;
+      const out = ctx.createGain();
+      out.gain.setValueAtTime(0, t);
+      out.gain.linearRampToValueAtTime(1, t + 0.12);
+      out.connect(ctx.destination);
+      const o = ctx.createOscillator();
+      o.type = "sawtooth";
+      o.frequency.setValueAtTime(70, t);
+      o.frequency.linearRampToValueAtTime(96, t + 0.25);
+      const lp = ctx.createBiquadFilter();
+      lp.type = "lowpass";
+      lp.frequency.value = 380;
+      const og = ctx.createGain();
+      og.gain.value = 0.035;
+      o.connect(lp).connect(og).connect(out);
+      const n = ctx.createBufferSource();
+      n.buffer = noiseBuffer();
+      n.loop = true;
+      const bp = ctx.createBiquadFilter();
+      bp.type = "bandpass";
+      bp.frequency.value = 2600;
+      bp.Q.value = 0.9;
+      const ng = ctx.createGain();
+      ng.gain.value = 0.012;
+      const lfo = ctx.createOscillator();
+      lfo.frequency.value = 28;
+      const lfoGain = ctx.createGain();
+      lfoGain.gain.value = 0.009;
+      lfo.connect(lfoGain).connect(ng.gain);
+      n.connect(bp).connect(ng).connect(out);
+      o.start(t);
+      n.start(t);
+      lfo.start(t);
+      motor = { out, nodes: [o, n, lfo] };
+    },
+    stop() {
+      if (!ctx || !motor) return;
+      const t = ctx.currentTime;
+      motor.out.gain.cancelScheduledValues(t);
+      motor.out.gain.setValueAtTime(motor.out.gain.value, t);
+      motor.out.gain.linearRampToValueAtTime(0, t + 0.18);
+      motor.nodes.forEach((n) => n.stop(t + 0.2));
+      motor = null;
+    },
+    destroy() {
+      ctx?.close();
+      ctx = null;
+      motor = null;
+    },
   };
+}
 
-  let frameTop = 0.42;
-  let cachedInsets = null;
+export async function createShredder({ root, canvas, button, albums, onAlbum, onBusy, onReady }) {
+  const ctx = canvas.getContext("2d");
+  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const sound = createSound();
+  const images = await Promise.all(albums.map((a) => loadImage(a.cover)));
+  const sans = getComputedStyle(root).getPropertyValue("--font-sans").trim() || "system-ui, sans-serif";
+  const view = { w: 1, h: 1, dpr: 1, cx: 0, slotY: 0, headBottom: 0, binY: 0 };
+  let g = geometry(300);
+  let layers = null;
+  let pile = null;
+  let pileLevel = 0;
+  let current = 0;
+  let queued = -1;
+  let feed = 0;
+  let dragging = null;
+  let motorOn = false;
+  let drop = 1;
+  let strips = [];
+  let falling = [];
+  let raf = 0;
+  let last = 0;
+  let time = 0;
+  let active = true;
+  let destroyed = false;
+  let dirty = true;
+  let glow = 0;
 
-  const frameGoal = () => clamp(PRINT_H - sim.state.L + 0.1, 0.42, 0.94);
-
-  function fit() {
+  function layout() {
     const rect = root.getBoundingClientRect();
-    width = Math.max(1, rect.width);
-    height = Math.max(1, rect.height);
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(width * dpr);
-    canvas.height = Math.round(height * dpr);
-    view = mat4.lookAt(EYE, AT, [0, 1, 0]);
-    cachedInsets = insets();
-    frameProject();
+    view.w = Math.max(1, rect.width);
+    view.h = Math.max(1, rect.height);
+    view.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(view.w * view.dpr);
+    canvas.height = Math.round(view.h * view.dpr);
+    const narrow = view.w < 720;
+    const top = narrow ? 140 : 96;
+    const bottom = narrow ? 112 : 100;
+    const avail = Math.max(240, view.h - top - bottom);
+    const S = Math.round(Math.min(view.w * (narrow ? 0.84 : 0.4), 440, avail / 1.62));
+    g = geometry(S);
+    const stack = g.cover + g.headH + g.lip * 0.4 + g.binH;
+    const y0 = top + Math.max(0, (avail - stack) / 2);
+    view.cx = view.w / 2;
+    view.slotY = y0 + g.cover + 4;
+    view.headBottom = view.slotY + g.headH + g.lip * 0.38;
+    view.binY = view.headBottom - g.S * 0.03;
+    const front = drawHeadFront(g, view.dpr, sans);
+    layers = {
+      binBack: drawBinBack(g, view.dpr),
+      binFront: drawBinFront(g, view.dpr),
+      headBack: drawHeadBack(g, view.dpr),
+      headFront: front,
+    };
+    const prev = pile;
+    pile = document.createElement("canvas");
+    pile.width = Math.round((g.binTop + 8) * view.dpr);
+    pile.height = Math.round((g.binH + 8) * view.dpr);
+    if (prev && pileLevel > 0) pile.getContext("2d").drawImage(prev, 0, 0, pile.width, pile.height);
+    if (button) {
+      const b = front.button;
+      const x = view.cx - g.headW / 2 + b.x;
+      const y = view.slotY - front.top + b.y;
+      const size = b.r * 2 + 16;
+      button.style.width = `${size}px`;
+      button.style.height = `${size}px`;
+      button.style.transform = `translate3d(${(x - size / 2).toFixed(1)}px, ${(y - size / 2).toFixed(1)}px, 0)`;
+    }
+    dirty = true;
   }
 
-  function frameProject() {
-    const base = mat4.mul(mat4.perspective((22 * Math.PI) / 180, width / height, 0.5, 40), view);
-    const pts = [];
-    const reach = width < 600 ? 0.86 : 1;
-    for (const sx of [-1, 1]) {
-      pts.push([sx * reach, 0.02, -MACHINE_Z], [sx * reach, -0.16, MACHINE_Z], [sx * reach, 0.0, MACHINE_Z]);
-      pts.push([sx * reach, FLOOR_Y, 0.3], [sx * reach, FLOOR_Y, -0.16]);
-      pts.push([sx * PRINT_W * 0.5, D[1] * frameTop, D[2] * frameTop]);
-    }
-    let minX = Infinity;
-    let maxX = -Infinity;
-    let minY = Infinity;
-    let maxY = -Infinity;
-    for (const p of pts) {
-      mat4.apply(base, p[0], p[1], p[2], v4);
-      const x = v4[0] / v4[3];
-      const y = v4[1] / v4[3];
-      minX = Math.min(minX, x);
-      maxX = Math.max(maxX, x);
-      minY = Math.min(minY, y);
-      maxY = Math.max(maxY, y);
-    }
-    const ins = cachedInsets;
-    const l = -1 + (2 * ins.left) / width;
-    const r = 1 - (2 * ins.right) / width;
-    const b = -1 + (2 * ins.bottom) / height;
-    const t = 1 - (2 * ins.top) / height;
-    const s = Math.min((r - l) / (maxX - minX), (t - b) / (maxY - minY));
-    const ox = (l + r) / 2 - ((minX + maxX) / 2) * s;
-    const oy = (b + t) / 2 - ((minY + maxY) / 2) * s;
-    const adjust = new Float32Array([s, 0, 0, 0, 0, s, 0, 0, 0, 0, 1, 0, ox, oy, 0, 1]);
-    proj = mat4.mul(adjust, mat4.perspective((22 * Math.PI) / 180, width / height, 0.5, 40));
-    vp = mat4.mul(proj, view);
-    invVP = mat4.invert(vp);
+  function binPath(c, ox, oy) {
+    const inset = (g.binTop - g.binBottom) / 2;
+    c.beginPath();
+    c.moveTo(ox, oy - (view.binY - view.headBottom) - 2);
+    c.lineTo(ox + g.binTop, oy - (view.binY - view.headBottom) - 2);
+    c.lineTo(ox + g.binTop - inset, oy + g.binH - 4);
+    c.lineTo(ox + inset, oy + g.binH - 4);
+    c.closePath();
   }
 
-  function warm(L) {
-    sim.reset(INNER + 0.002);
-    let m = 0;
-    while (sim.state.L < L - 1e-4) {
-      sim.step(STEP, Math.min(V_FEED, (L - sim.state.L) / STEP));
-    }
-    for (let i = 0; i < 480; i += 1) m = sim.step(STEP, 0);
-    fuseDirty = true;
-    return m;
+  function stripX(i) {
+    const sw = g.cover / g.strips;
+    return view.cx - g.cover / 2 + i * sw;
   }
 
-  function writeVert(o, x, y, z, nx, ny, nz, u, t, ul, col) {
-    paperData[o] = x;
-    paperData[o + 1] = y;
-    paperData[o + 2] = z;
-    paperData[o + 3] = nx;
-    paperData[o + 4] = ny;
-    paperData[o + 5] = nz;
-    paperData[o + 6] = u;
-    paperData[o + 7] = t;
-    paperData[o + 8] = ul;
-    paperData[o + 9] = col;
-  }
-
-  const ranges = [];
-  const order = [];
-  let printRange = null;
-
-  function buildPaper() {
-    let v = 0;
-    ranges.length = 0;
-    const { pos, nrm, tan, fuse, state, comb } = sim;
-    const E = state.E;
-    if (E > 0) {
-      for (let i = 0; i < N; i += 1) {
-        const first = v;
-        const px = sim.pins[i * 3];
-        const py = sim.pins[i * 3 + 1];
-        const pz = sim.pins[i * 3 + 2];
-        const topN = (i * K + E - 1) * 3;
-        const fusedTop = fuse[i * K + E - 1];
-        const hwTop = (PITCH / 2) * (fusedTop > 0.5 ? 1.004 : 0.995);
-        for (const [yy, tt] of [[py + 0.05, state.tExit + 0.05], [py, state.tExit]]) {
-          let nx = nrm[topN];
-          let nz = nrm[topN + 2];
-          const l = Math.hypot(nx, nz) || 1;
-          nx /= l;
-          nz /= l;
-          const ny = 0;
-          const bx = nz;
-          const bz = -nx;
-          writeVert(v * FLOATS, px - bx * hwTop, yy, pz - bz * hwTop, nx, ny, nz, i / N, tt, 0, i);
-          v += 1;
-          writeVert(v * FLOATS, px + bx * hwTop, yy, pz + bz * hwTop, nx, ny, nz, (i + 1) / N, tt, 1, i);
-          v += 1;
-        }
-        let sumZ = 0;
-        for (let k = E - 1; k >= 0; k -= 1) {
-          const o = (i * K + k) * 3;
-          const lo = k > 0 ? (i * K + k - 1) * 3 : o;
-          let tx = tan[o] + tan[lo];
-          let ty = tan[o + 1] + tan[lo + 1];
-          let tz = tan[o + 2] + tan[lo + 2];
-          const tl = Math.hypot(tx, ty, tz) || 1;
-          tx /= tl;
-          ty /= tl;
-          tz /= tl;
-          const nx = nrm[o];
-          const ny = nrm[o + 1];
-          const nz = nrm[o + 2];
-          let bx = ny * tz - nz * ty;
-          let by = nz * tx - nx * tz;
-          let bz = nx * ty - ny * tx;
-          const bl = Math.hypot(bx, by, bz) || 1;
-          bx /= bl;
-          by /= bl;
-          bz /= bl;
-          const f = fuse[i * K + k];
-          const hw = (PITCH / 2) * (f > 0.5 ? 1.004 : 0.995);
-          const t = k / (K - 1);
-          writeVert(v * FLOATS, pos[o] - bx * hw, pos[o + 1] - by * hw, pos[o + 2] - bz * hw, nx, ny, nz, i / N, t, 0, i);
-          v += 1;
-          writeVert(v * FLOATS, pos[o] + bx * hw, pos[o + 1] + by * hw, pos[o + 2] + bz * hw, nx, ny, nz, (i + 1) / N, t, 1, i);
-          v += 1;
-          mat4.apply(view, pos[o], pos[o + 1], pos[o + 2], v4);
-          sumZ += v4[2];
-        }
-        ranges.push({ first, count: v - first, z: sumZ / E });
-      }
-    }
-    order.length = 0;
-    for (let i = 0; i < ranges.length; i += 1) order.push(i);
-    order.sort((a, b) => ranges[a].z - ranges[b].z);
-    const L = state.L;
-    const t0 = Math.max(0, (L - 0.05) / PRINT_H);
-    printRange = null;
-    if (t0 < 0.999) {
-      const first = v;
-      const lift = lifted * 0.01;
-      const row = (r) => t0 + ((1 - t0) * r) / PRINT_ROWS;
-      const point = (u, t, out) => {
-        const along = t * PRINT_H - L;
-        const flat = clamp(along / 0.18, 0, 1);
-        const xc = (u - 0.5) * 2;
-        const bow = (0.012 * (1 - xc * xc) + lift) * flat * flat;
-        const dbow = -0.012 * 2 * xc * 2 * flat * flat / PRINT_W;
-        const off = 0.004 + bow;
-        const rattle = 1 + Math.max(0, along) * 2.5;
-        out[0] = (u - 0.5) * PRINT_W + shake[0] * rattle;
-        out[1] = D[1] * along + NT[1] * off + shake[1];
-        out[2] = D[2] * along + NT[2] * off + shake[2] * rattle;
-        let nx = -dbow;
-        let ny = NT[1];
-        let nz = NT[2];
-        const l = Math.hypot(nx, ny, nz);
-        out[3] = nx / l;
-        out[4] = ny / l;
-        out[5] = nz / l;
-        return out;
+  function makeStrips() {
+    strips = [];
+    const rand = (() => {
+      let s = current * 977 + 13;
+      return () => {
+        s = (s * 16807) % 2147483647;
+        return s / 2147483647;
       };
-      const a = [0, 0, 0, 0, 0, 0];
-      const quad = [[0, 0], [1, 0], [0, 1], [0, 1], [1, 0], [1, 1]];
-      for (let r = 0; r < PRINT_ROWS; r += 1) {
-        for (let c = 0; c < N; c += 1) {
-          for (const [dc, dr] of quad) {
-            const u = (c + dc) / N;
-            const t = row(r + dr);
-            point(u, t, a);
-            writeVert(v * FLOATS, a[0], a[1], a[2], a[3], a[4], a[5], u, t, -1, c);
-            v += 1;
-          }
-        }
-      }
-      printRange = { first, count: v - first };
+    })();
+    for (let i = 0; i < g.strips; i += 1) {
+      strips.push({
+        i,
+        tilt: (i - (g.strips - 1) / 2) * 0.006 + (rand() - 0.5) * 0.03,
+        curl: (rand() - 0.5) * 0.012,
+        phase: rand() * Math.PI * 2,
+        side: rand() < 0.5 ? -1 : 1,
+        img: current,
+        rest: rand() * g.binH * 0.16 * (1 - (Math.abs(i - (g.strips - 1) / 2) / g.strips) * 0.9),
+        drop: 0,
+        vy: 0,
+      });
     }
-    gl.bindBuffer(gl.ARRAY_BUFFER, paperVbo);
-    gl.bufferSubData(gl.ARRAY_BUFFER, 0, paperData, 0, v * FLOATS);
   }
 
-  function uploadFuse() {
-    const { fuse } = sim;
-    for (let i = 0; i < N * K; i += 1) fuseBytes[i] = Math.round(clamp(fuse[i], 0, 1) * 255);
-    gl.bindTexture(gl.TEXTURE_2D, fuseTex);
-    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, K, N, gl.RED, gl.UNSIGNED_BYTE, fuseBytes);
-    fuseDirty = false;
+  function pileTop() {
+    return view.binY + g.binH - 12 - pileLevel;
   }
 
-  function bindShadowUniforms(u, unit) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, shadowTex);
-    gl.uniform1i(u.uShadow, unit);
-    gl.uniformMatrix4fv(u.uLightVP, false, lightVP);
-    gl.uniform2f(u.uShadowTexel, 1 / SHADOW, 1 / SHADOW);
+  function drawStrip(c, s, ox, oy, topY, rows0, rows1) {
+    const img = images[s.img];
+    const sw = g.cover / g.strips;
+    const scale = img.naturalWidth / g.cover;
+    const len = rows1 - rows0;
+    if (len <= 0) return;
+    let x = stripX(s.i) + sw / 2 + ox;
+    let y = topY + oy;
+    let ang = s.tilt;
+    const floor = pileTop() + oy - sw * 0.6 - s.rest;
+    const sway = Math.sin(time * 1.6 + s.phase) * 0.0025;
+    for (let d = 0; d < len; d += SEG) {
+      const seg = Math.min(SEG, len - d);
+      const r = rows0 + d;
+      if (y + seg * Math.cos(ang) > floor - 2) {
+        const lie = s.side * (1.2 + 0.32 * Math.sin(d * 0.07 + s.phase));
+        ang += (lie - ang) * 0.45;
+      } else ang += s.curl + sway;
+      ang = clamp(ang, -1.55, 1.55);
+      c.save();
+      c.translate(x, y);
+      c.rotate(-ang);
+      c.drawImage(img, (s.i * sw) * scale, r * scale, sw * scale, seg * scale, -sw / 2 + 0.5, 0, sw - 1, seg + 0.6);
+      const shade = Math.abs(Math.sin(ang * 2 + s.phase)) * 0.18;
+      if (shade > 0.01) {
+        c.fillStyle = `rgb(0 0 0 / ${shade.toFixed(3)})`;
+        c.fillRect(-sw / 2 + 0.5, 0, sw - 1, seg + 0.6);
+      }
+      c.restore();
+      x += Math.sin(-ang) * -seg;
+      y += Math.cos(ang) * seg;
+    }
   }
 
-  function drawPaper(prog) {
-    gl.bindVertexArray(paperVao);
-    if (printRange) gl.drawArrays(gl.TRIANGLES, printRange.first, printRange.count);
-    for (const idx of order) gl.drawArrays(gl.TRIANGLE_STRIP, ranges[idx].first, ranges[idx].count);
-    gl.bindVertexArray(null);
-    return prog;
+  function bake(s) {
+    const pctx = pile.getContext("2d");
+    pctx.save();
+    pctx.scale(view.dpr, view.dpr);
+    const ox = -(view.cx - g.binTop / 2 - 4);
+    const oy = -view.binY;
+    binPath(pctx, 4, 0);
+    pctx.clip();
+    drawStrip(pctx, s, ox, oy, view.headBottom + s.drop, 0, g.cover);
+    pctx.restore();
   }
 
   function render() {
-    if (!vp) return;
-    buildPaper();
-    if (fuseDirty) uploadFuse();
+    const d = view.dpr;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.setTransform(d, 0, 0, d, 0, 0);
+    if (!layers) return;
+    const binX = view.cx - g.binTop / 2 - 4;
+    ctx.save();
+    ctx.globalAlpha = 0.5;
+    const shadow = ctx.createRadialGradient(view.cx, view.binY + g.binH, 4, view.cx, view.binY + g.binH, g.binTop * 0.6);
+    shadow.addColorStop(0, "rgb(30 34 40 / 0.4)");
+    shadow.addColorStop(0.5, "rgb(30 34 40 / 0.14)");
+    shadow.addColorStop(1, "rgb(30 34 40 / 0)");
+    ctx.fillStyle = shadow;
+    ctx.fillRect(view.cx - g.binTop, view.binY + g.binH - 30, g.binTop * 2, 60);
+    ctx.restore();
+    ctx.drawImage(layers.binBack, binX, view.binY, g.binTop + 8, g.binH + 8);
+    ctx.drawImage(pile, binX, view.binY, g.binTop + 8, g.binH + 8);
 
-    gl.bindFramebuffer(gl.FRAMEBUFFER, shadowFbo);
-    gl.viewport(0, 0, SHADOW, SHADOW);
-    gl.clear(gl.DEPTH_BUFFER_BIT);
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthFunc(gl.LESS);
-    gl.depthMask(true);
-    gl.disable(gl.BLEND);
-    gl.enable(gl.POLYGON_OFFSET_FILL);
-    gl.polygonOffset(1.5, 2);
-    gl.useProgram(depthProg.p);
-    gl.uniformMatrix4fv(depthProg.u.uLightVP, false, lightVP);
-    gl.uniform3f(depthProg.u.uOffset, shake[0], shake[1], shake[2]);
-    gl.bindVertexArray(solidVao);
-    gl.drawElements(gl.TRIANGLES, solidCount, gl.UNSIGNED_SHORT, 0);
-    gl.uniform3f(depthProg.u.uOffset, 0, 0, 0);
-    drawPaper(depthProg);
-    gl.disable(gl.POLYGON_OFFSET_FILL);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-
-    gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.clearColor(0.9, 0.9, 0.89, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-
-    gl.disable(gl.DEPTH_TEST);
-    gl.depthMask(false);
-    gl.useProgram(bgProg.p);
-    gl.uniformMatrix4fv(bgProg.u.uInvVP, false, invVP);
-    gl.uniform3fv(bgProg.u.uEye, EYE);
-    gl.uniform1f(bgProg.u.uFloor, FLOOR_Y);
-    gl.uniform3fv(bgProg.u.uWall, WALL);
-    gl.uniform3fv(bgProg.u.uGround, GROUND);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, fibreTex);
-    gl.uniform1i(bgProg.u.uFibre, 1);
-    bindShadowUniforms(bgProg.u, 0);
-    gl.bindVertexArray(bgVao);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-
-    gl.enable(gl.DEPTH_TEST);
-    gl.depthMask(true);
-    gl.useProgram(solidProg.p);
-    const su = solidProg.u;
-    gl.uniformMatrix4fv(su.uVP, false, vp);
-    gl.uniform3f(su.uOffset, shake[0], shake[1], shake[2]);
-    gl.uniform3fv(su.uEye, EYE);
-    gl.uniform3fv(su.uLight, LIGHT);
-    gl.uniform3fv(su.uMetal, METAL);
-    gl.uniform3fv(su.uAccent, accent);
-    gl.uniform1f(su.uLed, led);
-    gl.uniform1f(su.uPress, press);
-    gl.uniform1f(su.uSlotZ, 0.0);
-    gl.uniform1f(su.uSlotX, SLOT_X);
-    gl.uniform2f(su.uButton, BUTTON[0], BUTTON[1]);
-    gl.uniform1f(su.uPitch, PITCH);
-    bindShadowUniforms(su, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, fibreTex);
-    gl.uniform1i(su.uFibre, 1);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, labelTex);
-    gl.uniform1i(su.uLabel, 2);
-    gl.bindVertexArray(solidVao);
-    gl.drawElements(gl.TRIANGLES, solidCount, gl.UNSIGNED_SHORT, 0);
-
-    gl.useProgram(paperProg.p);
-    const pu = paperProg.u;
-    gl.uniformMatrix4fv(pu.uVP, false, vp);
-    gl.uniform3fv(pu.uEye, EYE);
-    gl.uniform3fv(pu.uLight, LIGHT);
-    gl.uniform1f(pu.uN, N);
-    gl.uniform1f(pu.uK, K);
-    gl.uniform1f(pu.uExitY, EXIT_Y);
-    gl.activeTexture(gl.TEXTURE5);
-    gl.bindTexture(gl.TEXTURE_2D, backTex);
-    gl.uniform1i(pu.uBack, 5);
-    bindShadowUniforms(pu, 0);
-    gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, fibreTex);
-    gl.uniform1i(pu.uFibre, 1);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, photoTex[photo]);
-    gl.uniform1i(pu.uPhotoA, 2);
-    gl.activeTexture(gl.TEXTURE3);
-    gl.bindTexture(gl.TEXTURE_2D, photoTex[(photo + 1) % PHOTOS.length]);
-    gl.uniform1i(pu.uPhotoB, 3);
-    gl.activeTexture(gl.TEXTURE4);
-    gl.bindTexture(gl.TEXTURE_2D, fuseTex);
-    gl.uniform1i(pu.uFuse, 4);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    drawPaper(paperProg);
-    gl.disable(gl.BLEND);
-  }
-
-  function status() {
-    const s = sim.state;
-    const fed = Math.round(clamp((s.L - L_BITE) / (PRINT_H - L_BITE), 0, 1) * 100);
-    const through = s.L >= L_MAX - 1e-3;
-    const key = `${healing ? 1 : 0}|${s.fusedCount}|${fed}|${through ? 1 : 0}`;
-    if (key === lastStatus) return;
-    lastStatus = key;
-    onStatus?.({ fused: s.fusedCount, total: N, fed, healing, through, photo });
-  }
-
-  function printHit(x, y) {
-    const L = sim.state.L;
-    const t0 = Math.max(0, L / PRINT_H);
-    if (t0 >= 0.995) return false;
-    const corners = [
-      [-PRINT_W / 2, t0],
-      [PRINT_W / 2, t0],
-      [PRINT_W / 2, 1],
-      [-PRINT_W / 2, 1],
-    ].map(([px, t]) => {
-      const along = t * PRINT_H - L;
-      return project(px, D[1] * along, D[2] * along, [0, 0]);
-    });
-    let area = 0;
-    for (let i = 0; i < 4; i += 1) {
-      const a = corners[i];
-      const b = corners[(i + 1) % 4];
-      area += a[0] * b[1] - b[0] * a[1];
+    ctx.save();
+    binPath(ctx, binX + 4, view.binY);
+    ctx.clip();
+    const emerged = feed - (view.headBottom - view.slotY);
+    if (emerged > 0 && strips.length) {
+      for (const s of strips) drawStrip(ctx, s, 0, 0, view.headBottom + s.drop, Math.max(0, g.cover - emerged), g.cover);
     }
-    const sign = area < 0 ? -1 : 1;
-    for (let i = 0; i < 4; i += 1) {
-      const a = corners[i];
-      const b = corners[(i + 1) % 4];
-      const cross = ((b[0] - a[0]) * (y - a[1]) - (b[1] - a[1]) * (x - a[0])) * sign;
-      if (cross < -14 * Math.hypot(b[0] - a[0], b[1] - a[1])) return false;
+    for (const f of falling) drawStrip(ctx, f.s, 0, 0, view.headBottom + f.s.drop, 0, g.cover);
+    ctx.restore();
+
+    ctx.drawImage(layers.binFront, binX, view.binY, g.binTop + 8, g.binH + 8);
+    ctx.drawImage(layers.headBack, view.cx - g.headW / 2 - 4, view.slotY - g.lip * 0.62 - 2, g.headW + 8, g.lip + 8);
+
+    if (feed < g.cover + 1) {
+      const img = images[current];
+      const y = view.slotY - g.cover + feed - (1 - easeOut(clamp(drop, 0, 1))) * (g.cover + 120);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, view.w, view.slotY);
+      ctx.clip();
+      ctx.shadowColor = "rgb(20 24 30 / 0.28)";
+      ctx.shadowBlur = 16;
+      ctx.shadowOffsetY = 6;
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(view.cx - g.cover / 2, y, g.cover, g.cover);
+      ctx.shadowColor = "transparent";
+      ctx.drawImage(img, view.cx - g.cover / 2, y, g.cover, g.cover);
+      const sheen = ctx.createLinearGradient(view.cx - g.cover / 2, y, view.cx + g.cover / 2, y + g.cover);
+      sheen.addColorStop(0, "rgb(255 255 255 / 0.22)");
+      sheen.addColorStop(0.35, "rgb(255 255 255 / 0.04)");
+      sheen.addColorStop(0.5, "rgb(255 255 255 / 0)");
+      sheen.addColorStop(1, "rgb(0 0 0 / 0.08)");
+      ctx.fillStyle = sheen;
+      ctx.fillRect(view.cx - g.cover / 2, y, g.cover, g.cover);
+      ctx.restore();
     }
-    return true;
+
+    const hf = layers.headFront;
+    ctx.drawImage(hf.canvas, view.cx - g.headW / 2 - hf.pad, view.slotY - hf.top - hf.pad, g.headW + hf.pad * 2, g.headH + g.lip + hf.pad * 2);
+    const b = hf.button;
+    drawButton(ctx, view.cx - g.headW / 2 + b.x, view.slotY - hf.top + b.y, b.r, motorOn, glow);
   }
 
-  function buttonHit(x, y) {
-    const c = project(BUTTON[0], BUTTON[1], MACHINE_Z, [0, 0]);
-    const e = project(BUTTON[0] + 0.04, BUTTON[1], MACHINE_Z, [0, 0]);
-    const r = Math.max(22, Math.abs(e[0] - c[0]) * 1.4);
-    return Math.hypot(x - c[0], y - c[1]) < r;
-  }
-
-  function stripsHit(x, y) {
-    const a = project(-PRINT_W * 0.6, EXIT_Y, 0, [0, 0]);
-    const b = project(PRINT_W * 0.6, FLOOR_Y, 0.3, [0, 0]);
-    return x > a[0] - 24 && x < b[0] + 24 && y > a[1] - 8 && y < b[1] + 24;
-  }
-
-  const projA = [0, 0];
-  function comb(x0, y0, x1, y1) {
-    const sx = x1 - x0;
-    const sy = y1 - y0;
-    const segLen = Math.hypot(sx, sy);
-    if (segLen < 0.01) return;
-    const a = project(0, -0.5, 0, [0, 0]);
-    const b = project(1, -0.5, 0, [0, 0]);
-    const ppu = Math.max(1, Math.abs(b[0] - a[0]));
-    const pitchPx = PITCH * ppu;
-    const R = Math.max(20, pitchPx * 1.6);
-    let mx = sx / ppu;
-    let my = -sy / ppu;
-    const ml = Math.hypot(mx, my);
-    if (ml > 0.02) {
-      mx *= 0.02 / ml;
-      my *= 0.02 / ml;
-    }
-    const { pos, state } = sim;
-    const E = state.E;
-    const l2 = segLen * segLen;
-    for (let i = 0; i < N; i += 1) {
-      let best = 0;
-      for (let k = 0; k < E; k += 1) {
-        const o = (i * K + k) * 3;
-        project(pos[o], pos[o + 1], pos[o + 2], projA);
-        const px = projA[0] - x0;
-        const py = projA[1] - y0;
-        const t = clamp((px * sx + py * sy) / l2, 0, 1);
-        const d = Math.hypot(px - sx * t, py - sy * t);
-        if (d >= R) continue;
-        const q = 1 - clamp((d - R * 0.3) / (R * 0.7), 0, 1);
-        const w = q * q * (3 - 2 * q);
-        best = Math.max(best, w);
-        sim.nudge(i, k, mx * w * 0.22, my * w * 0.22, 0);
-      }
-      if (best > 0) sim.addComb(i, best * Math.min(0.22, (segLen / (2 * R)) * 0.5));
-    }
-  }
-
-  function combPass() {
-    if (!sim.state.E || healing) return;
-    const len = sim.state.tExit * PRINT_H;
-    const yMid = EXIT_Y - Math.min(len, -FLOOR_Y + EXIT_Y) * 0.45;
-    const left = project(-PRINT_W * 0.62, yMid, 0, [0, 0]);
-    const right = project(PRINT_W * 0.62, yMid, 0, [0, 0]);
-    const low = project(PRINT_W * 0.62, yMid - len * 0.2, 0, [0, 0]);
-    const lowL = project(-PRINT_W * 0.62, yMid - len * 0.2, 0, [0, 0]);
-    combScript = { t: 0, legs: [[left, right], [low, lowL]], last: null };
+  function engage() {
+    if (motorOn || drop < 1 || feed >= g.cover + g.headH * 2) return;
+    motorOn = true;
+    dragging = null;
+    sound.wake();
+    sound.tick();
+    sound.start();
+    makeStripsIfNeeded();
+    onBusy?.(true);
     wake();
   }
 
-  function frame(ts) {
+  function makeStripsIfNeeded() {
+    if (!strips.length) makeStrips();
+  }
+
+  function finish() {
+    motorOn = false;
+    sound.stop();
+    for (const s of strips) falling.push({ s });
+    strips = [];
+    const next = queued >= 0 ? queued : (current + 1) % albums.length;
+    queued = -1;
+    current = next;
+    onAlbum?.(current);
+    feed = 0;
+    drop = 0;
+    onBusy?.(false);
+  }
+
+  function step(dt) {
+    let moving = false;
+    time += dt;
+    const through = g.cover + (view.headBottom - view.slotY) + 2;
+    if (motorOn) {
+      feed += dt * (g.cover / 2.4);
+      moving = true;
+      if (feed >= through) finish();
+    } else if (!dragging && feed > 0) {
+      feed = Math.max(0, feed - dt * 600);
+      moving = true;
+    }
+    if (drop < 1) {
+      drop = reduced ? 1 : Math.min(1, drop + dt / 0.55);
+      moving = true;
+    }
+    if (falling.length) {
+      moving = true;
+      const keep = [];
+      for (const f of falling) {
+        f.s.vy += GRAVITY * dt;
+        f.s.drop += f.s.vy * dt;
+        if (view.headBottom + f.s.drop > pileTop() - g.cover / g.strips - f.s.rest) {
+          bake(f.s);
+        } else keep.push(f);
+      }
+      if (keep.length < falling.length) {
+        pileLevel = Math.min(g.binH * 0.62, pileLevel + (g.binH * 0.07 * (falling.length - keep.length)) / g.strips);
+      }
+      falling = keep;
+    }
+    glow = motorOn ? 1 : Math.max(0, glow - dt * 2);
+    if (strips.length && feed > 0) moving = true;
+    return moving;
+  }
+
+  function frame(now) {
     raf = 0;
     if (destroyed || !active) return;
-    const dt = lastTs ? Math.min(0.05, Math.max(0, (ts - lastTs) / 1000)) : 1 / 60;
-    lastTs = ts;
-    const s = sim.state;
-    let want = 0;
-    if (healing) want = -V_HEAL;
-    else if (hold || keyHold) want = V_FEED;
-    else {
-      if (pointer && pointer.mode === "feed") feedTarget = Math.max(feedTarget, pointer.L0 + (pointer.y - pointer.y0) / pointer.k);
-      if (feedTarget - s.L > 0.003) want = V_FEED * clamp((feedTarget - s.L) / 0.02, 0.35, 1);
+    const dt = last ? clamp((now - last) / 1000, 0, 0.05) : 0;
+    last = now;
+    const moving = step(dt);
+    if (moving || dirty) {
+      render();
+      dirty = false;
+      onReady?.();
     }
-    if (!healing && s.L >= L_MAX - 1e-4 && want > 0) want = 0;
-    motorV += (want - motorV) * (1 - Math.exp(-dt / 0.09));
-    if (Math.abs(motorV) < 1e-4 && want === 0) motorV = 0;
-    if (!healing && s.L >= L_MAX - 1e-4 && motorV > 0) motorV = 0;
-    led += ((Math.abs(motorV) > 0.01 ? 1 : 0) - led) * (1 - Math.exp(-dt / 0.12));
-    press += ((hold ? 1 : 0) - press) * (1 - Math.exp(-dt / 0.05));
-    const wantLift = (pointer && pointer.mode === "feed") || (hoverPrint && !pointer) ? 1 : 0;
-    lifted += (wantLift - lifted) * (1 - Math.exp(-dt / 0.12));
-
-    if (pointer && pointer.mode === "comb" && !healing) {
-      comb(pointer.lx, pointer.ly, pointer.x, pointer.y);
-      pointer.lx = pointer.x;
-      pointer.ly = pointer.y;
-    }
-    if (combScript) {
-      combScript.t += dt;
-      const legDur = 0.8;
-      const leg = Math.floor(combScript.t / legDur);
-      if (leg >= combScript.legs.length || healing) combScript = null;
-      else {
-        const f = (combScript.t - leg * legDur) / legDur;
-        const e = f < 0.5 ? 2 * f * f : 1 - (-2 * f + 2) ** 2 / 2;
-        const [a, b] = combScript.legs[leg];
-        const x = a[0] + (b[0] - a[0]) * e;
-        const y = a[1] + (b[1] - a[1]) * e;
-        if (combScript.last && combScript.last[2] === leg) comb(combScript.last[0], combScript.last[1], x, y);
-        combScript.last = [x, y, leg];
-      }
-    }
-
-    const amp = reduced ? 0 : 0.002 * clamp(Math.abs(motorV) / V_FEED, 0, 1);
-    const tm = s.time;
-    shake[0] = amp * (Math.sin(tm * 197) * 0.6 + Math.sin(tm * 311 + 1.3) * 0.4);
-    shake[1] = amp * 0.6 * (Math.sin(tm * 263 + 0.7) * 0.5 + Math.sin(tm * 151 + 2.1) * 0.5);
-    shake[2] = amp * 0.5 * Math.sin(tm * 229 + 0.4);
-    s.shake[0] = shake[0];
-    s.shake[1] = shake[1];
-    s.shake[2] = shake[2];
-
-    acc += dt;
-    let motion = 0;
-    let steps = 0;
-    while (acc >= STEP && steps < 6) {
-      motion = Math.max(motion, sim.step(STEP, motorV));
-      acc -= STEP;
-      steps += 1;
-    }
-    if (steps === 6) acc = 0;
-    fuseDirty = true;
-
-    const goal = frameGoal();
-    if (Math.abs(goal - frameTop) > 1e-4) {
-      frameTop += (goal - frameTop) * (1 - Math.exp(-dt / (reduced ? 0.05 : 0.7)));
-      if (Math.abs(goal - frameTop) < 1e-4) frameTop = goal;
-      frameProject();
-    }
-    if (healing) feedTarget = 0;
-    if (healing && s.L <= L_BITE + 1e-4) {
-      healing = false;
-      motorV = 0;
-      photo = (photo + 1) % PHOTOS.length;
-      sim.reseed(SEED + photo * 31);
-      sim.reset(L_BITE);
-      onPhoto?.(photo);
-    } else if (!healing && s.allFused && s.L >= L_MAX - 1e-3) {
-      healWait += dt;
-      if (healWait > 0.7) {
-        healing = true;
-        healWait = 0;
-      }
-    } else healWait = 0;
-
-    render();
-    status();
-
-    const busy = Math.abs(frameGoal() - frameTop) > 1e-4 || feedTarget - s.L > 0.003 || pointer || hold || keyHold || combScript || healing || Math.abs(motorV) > 0 || s.fusing || s.air > 0.004 || healWait > 0 || Math.abs(led - (Math.abs(motorV) > 0.01 ? 1 : 0)) > 0.01 || Math.abs(press - (hold ? 1 : 0)) > 0.01 || Math.abs(lifted - ((pointer && pointer.mode === "feed") || (hoverPrint && !pointer) ? 1 : 0)) > 0.01;
-    if (!busy && motion < 5e-5) calm += 1;
-    else calm = 0;
-    if (calm < 24) raf = requestAnimationFrame(frame);
-    else lastTs = 0;
+    if (moving || strips.length) raf = requestAnimationFrame(frame);
+    else last = 0;
   }
 
   function wake() {
-    calm = 0;
-    if (!raf && active && !destroyed) {
-      lastTs = 0;
-      raf = requestAnimationFrame(frame);
-    }
+    if (raf || destroyed || !active) return;
+    raf = requestAnimationFrame(frame);
   }
 
-  const local = (e) => {
-    const r = canvas.getBoundingClientRect();
-    return [e.clientX - r.left, e.clientY - r.top];
-  };
+  function local(e) {
+    const rect = root.getBoundingClientRect();
+    return [e.clientX - rect.left, e.clientY - rect.top];
+  }
+
+  function onCover(x, y) {
+    const top = view.slotY - g.cover + feed;
+    return drop >= 1 && Math.abs(x - view.cx) < g.cover / 2 && y > top && y < view.slotY;
+  }
 
   function onDown(e) {
-    if (e.button !== undefined && e.button !== 0) return;
+    if (e.pointerType === "mouse" && e.button !== 0) return;
     const [x, y] = local(e);
-    if (pointer) return;
-    let mode = null;
-    if (buttonHit(x, y)) mode = "button";
-    else if (!healing && printHit(x, y)) mode = "feed";
-    else if (stripsHit(x, y)) mode = "comb";
-    if (!mode) return;
+    sound.wake();
+    if (motorOn || !onCover(x, y)) return;
     e.preventDefault();
-    canvas.focus({ preventScroll: true });
     canvas.setPointerCapture?.(e.pointerId);
-    const a = project(0, 0, 0, [0, 0]);
-    const b = project(-D[0] * 0.1, -D[1] * 0.1, -D[2] * 0.1, [0, 0]);
-    const k = Math.max(20, (b[1] - a[1]) / 0.1);
-    pointer = { id: e.pointerId, mode, x, y, x0: x, y0: y, lx: x, ly: y, L0: sim.state.L, k };
-    if (mode === "button") hold = true;
-    if (mode === "feed") feedTarget = sim.state.L;
-    root.dataset.grabbing = mode;
+    dragging = { id: e.pointerId, y, feed };
+    root.dataset.dragging = "";
+    makeStripsIfNeeded();
     wake();
   }
 
   function onMove(e) {
     const [x, y] = local(e);
-    if (pointer && e.pointerId === pointer.id) {
-      pointer.x = x;
-      pointer.y = y;
-      wake();
+    if (!dragging || e.pointerId !== dragging.id) {
+      root.toggleAttribute("data-over", onCover(x, y) && !motorOn);
       return;
     }
-    if (pointer) return;
-    const over = buttonHit(x, y) ? "button" : !healing && printHit(x, y) ? "feed" : stripsHit(x, y) ? "comb" : "";
-    if (root.dataset.hover !== over) root.dataset.hover = over;
-    if ((over === "feed") !== hoverPrint) {
-      hoverPrint = over === "feed";
-      wake();
-    }
-  }
-
-  function onUp(e) {
-    if (!pointer || e.pointerId !== pointer.id) return;
-    if (pointer.mode === "button") hold = false;
-    pointer = null;
-    delete root.dataset.grabbing;
+    feed = clamp(dragging.feed + (y - dragging.y), 0, g.cover * 0.5);
+    if (feed > g.S * 0.05) engage();
+    dirty = true;
     wake();
   }
 
+  function onUp(e) {
+    if (!dragging || e.pointerId !== dragging.id) return;
+    dragging = null;
+    delete root.dataset.dragging;
+    wake();
+  }
+
+  layout();
+  makeStrips();
+  strips = [];
+  render();
+  onReady?.();
+
+  const ro = new ResizeObserver(() => {
+    layout();
+    render();
+  });
+  ro.observe(root);
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
-  const onLeave = () => {
-    if (pointer) return;
-    delete root.dataset.hover;
-    if (hoverPrint) {
-      hoverPrint = false;
-      wake();
-    }
-  };
-  canvas.addEventListener("pointerleave", onLeave);
-
-  const ro = new ResizeObserver(() => {
-    fit();
-    render();
-  });
-  ro.observe(root);
-
-  warm(L_REST);
-  frameTop = frameGoal();
-  fit();
-  render();
-  status();
 
   return {
-    setActive(v) {
-      active = v;
-      if (v) wake();
-      else if (raf) {
+    setActive(on) {
+      active = on;
+      if (on) {
+        last = 0;
+        wake();
+      } else if (raf) {
         cancelAnimationFrame(raf);
         raf = 0;
-        lastTs = 0;
       }
     },
-    select(i) {
-      if (i === photo && !healing && sim.state.L === L_REST && !sim.state.fusedCount) return;
-      photo = i;
-      healing = false;
-      feedTarget = 0;
-      motorV = 0;
-      combScript = null;
-      sim.reseed(SEED + i * 31);
-      warm(L_REST);
-      fuseDirty = true;
-      frameTop = frameGoal();
-      frameProject();
-      onPhoto?.(photo);
-      render();
-      status();
+    shred() {
+      engage();
+    },
+    choose(i) {
+      if (motorOn || feed > 0) {
+        queued = i;
+        return;
+      }
+      if (i === current) return;
+      current = i;
+      drop = 0;
+      onAlbum?.(current);
       wake();
     },
-    feed(on) {
-      keyHold = on;
+    empty() {
+      if (!pileLevel) return;
+      pile.getContext("2d").clearRect(0, 0, pile.width, pile.height);
+      pileLevel = 0;
+      dirty = true;
+      sound.wake();
+      sound.tick();
       wake();
-    },
-    combPass,
-    relayout() {
-      fit();
-      render();
     },
     destroy() {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);
+      raf = 0;
       ro.disconnect();
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
-      canvas.removeEventListener("pointerleave", onLeave);
-      gl.getExtension("WEBGL_lose_context")?.loseContext();
+      sound.destroy();
     },
   };
 }

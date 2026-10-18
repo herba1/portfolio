@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { SLEEVES } from "./peelArt";
 import "./sticker-peel.css";
 
 const STEP = 0.03;
@@ -20,6 +21,7 @@ export default function Piece({ embedded = false }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [status, setStatus] = useState("");
+  const [sleeve, setSleeve] = useState(SLEEVES[0].id);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -100,7 +102,7 @@ export default function Piece({ embedded = false }) {
           className="sticker-peel-canvas"
           tabIndex={0}
           role="application"
-          aria-label="A used record sleeve with three shop stickers. Drag a sticker by its edge to peel it. With the keyboard, arrows choose a sticker, Enter peels it off, arrows move it and Enter sticks it down. R gives a fresh sleeve."
+          aria-label={`A used copy of ${SLEEVES.find((a) => a.id === sleeve).title} with album cover stickers and a price sticker on the sleeve. Drag a sticker by its edge to peel it. With the keyboard, arrows choose a sticker, Enter peels it off, arrows move it and Enter sticks it down. R gives a fresh sleeve.`}
           onKeyDown={onKeyDown}
           onBlur={() => engineRef.current?.blur()}
         />
@@ -112,6 +114,26 @@ export default function Piece({ embedded = false }) {
           <p className="sticker-peel-hint text-ui-lg">
             Peel a sticker from its edge. Let go halfway and it lays back down; pull it free and drop it anywhere.
           </p>
+          <div className="sticker-peel-sleeves" role="radiogroup" aria-label="Sleeve">
+            {SLEEVES.map((album) => (
+              <button
+                key={album.id}
+                type="button"
+                role="radio"
+                aria-checked={sleeve === album.id}
+                aria-label={album.title}
+                title={album.title}
+                className="sticker-peel-sleeve"
+                onClick={() => {
+                  setSleeve(album.id);
+                  engineRef.current?.setSleeve(album.id);
+                  setStatus(`${album.title}, fresh sleeve.`);
+                }}
+              >
+                <img src={album.cover} alt="" width={32} height={32} draggable={false} />
+              </button>
+            ))}
+          </div>
           <button
             type="button"
             className="sticker-peel-button"

@@ -1,11 +1,19 @@
 {
   "title": "Rain",
-  "description": "A valley behind a rainy window. Drops bead, merge and run down the glass, each one holding a tiny upside-down view of the scene; drag across the fogged pane to wipe a clear streak and watch it slowly bead and fog back over.",
-  "tags": ["WebGL", "Optics", "Simulation"],
+  "description": "A city skyline at dusk behind a rainy window, drawn live: layered sunset sky, low sun, three depths of towers with lit windows and water tanks on the roofs. Drops bead, merge and run down the glass, each holding a tiny upside-down view of the city; drag across the fogged pane to wipe a clear streak.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Simulation",
+    "City"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "One physical surface finished to the edge: real water on real glass, where every drop is a lens and your finger is the only way to see out.",
-  "tile": { "cols": 3, "rows": 5 },
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://oimo.io/works/drops/",
     "https://tympanus.net/codrops/2015/11/04/rain-water-effect-experiments/"

@@ -12,7 +12,7 @@ const VISCOUS = 0.55;
 const COULOMB = 0.35;
 const HOME = [-0.25, 0.45];
 const GROUND = [0.852, 0.842, 0.81];
-const CELL = 1024;
+const CELL = 512;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const wrapPi = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
@@ -27,8 +27,7 @@ function loadImage(src) {
   });
 }
 
-async function buildPhotos() {
-  const images = await Promise.all(PRESETS.map((p) => loadImage(p.src)));
+async function buildPhotos(images) {
   const canvas = document.createElement("canvas");
   canvas.width = CELL * images.length;
   canvas.height = CELL;
@@ -36,10 +35,9 @@ async function buildPhotos() {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
   images.forEach((img, i) => {
-    const [fx, fy, fs] = PRESETS[i].crop;
-    const crop = Math.min(img.naturalWidth, img.naturalHeight) * fs;
-    const sx = clamp(img.naturalWidth * fx - crop / 2, 0, img.naturalWidth - crop);
-    const sy = clamp(img.naturalHeight * fy - crop / 2, 0, img.naturalHeight - crop);
+    const crop = Math.min(img.naturalWidth, img.naturalHeight);
+    const sx = (img.naturalWidth - crop) / 2;
+    const sy = (img.naturalHeight - crop) / 2;
     ctx.drawImage(img, sx, sy, crop, crop, i * CELL, 0, CELL, CELL);
   });
   return canvas;
@@ -210,6 +208,7 @@ export function createGroove({ box, canvas, header, picker, embedded, preset = 0
       mix: fade.from === fade.to ? 0 : e,
       toneA: PRESETS[fade.from].tone,
       toneB: PRESETS[fade.to].tone,
+      slots: PRESETS.length,
       ground: GROUND,
       photoOn: 1 - Math.pow(1 - reveal, 3),
       kappa: 0.15,
@@ -354,7 +353,9 @@ export function createGroove({ box, canvas, header, picker, embedded, preset = 0
 
   layout();
 
-  buildPhotos()
+  const covers = Promise.all(PRESETS.map((p) => loadImage(p.src).catch(() => null)));
+  covers
+    .then((images) => (images.every(Boolean) ? buildPhotos(images) : Promise.reject(new Error("cover missing"))))
     .then((photos) => {
       if (destroyed || !gl) return;
       gl.uploadPhotos(photos);
@@ -366,9 +367,9 @@ export function createGroove({ box, canvas, header, picker, embedded, preset = 0
       wake();
     });
 
-  document.fonts.ready.then(() => {
+  Promise.all([covers, document.fonts.ready]).then(([images]) => {
     if (destroyed || !gl) return;
-    gl.uploadLabels(buildLabels(PRESETS));
+    gl.uploadLabels(buildLabels(PRESETS, images));
     labelsReady = true;
     wake();
   });

@@ -77,7 +77,7 @@ export default function Piece({ embedded = false }) {
         className="light-table-stage"
         tabIndex={0}
         role="application"
-        aria-label="A light table with mounted slides and colour negative strips on it, and a loupe. Drag the film to slide it across the glass; overlap two pieces to stack their colours. Drag the loupe onto a negative to see it as a positive. Arrow keys push the loupe, plus and minus change its magnification."
+        aria-label="A light table covered in mounted slides and colour negative strips shot from Beatles record sleeves, from With the Beatles to Let It Be. Drag the film to slide it across the glass; overlap two pieces to stack their colours. Arrow keys push the top piece, space sends it to the bottom of the pile."
       >
         <canvas ref={canvasRef} className="light-table-canvas" />
       </div>
@@ -86,7 +86,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="light-table-head">
           <h1 className="light-table-title">Light Table</h1>
           <p className="light-table-lede">
-            Slide the film around. Put the loupe on a negative to see it <em>as a positive</em>.
+            Contact strips and slides from a sleeve shoot. Slide them around, stack two <em>into one picture</em>.
           </p>
         </header>
       )}

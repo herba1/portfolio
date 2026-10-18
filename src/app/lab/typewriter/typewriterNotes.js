@@ -10,22 +10,18 @@ export const INK_COL0 = MARGIN_COLS - 3;
 export const INK_COLS = MAX_COL + 7;
 
 const NOTES = [
-  "Marisol Hart & the Lamplight Four",
-  "Low Tide at Carver Street",
+  "The Beatles",
+  "Revolver",
   "",
-  "Recorded live to two-track at Bellweather Sound, New Haven,",
-  "on the night of March 9th, 1963. Engineer: Ruth Okafor.",
+  "Parlophone PMC 7009. Released in Britain on 5 August 1966.",
   "",
-  "The band set up in a half circle around a single ribbon",
-  "mike microphone, close enough to hear one another",
-  "breathe. Nothing was overdubbed. Side one is the second",
-  "take of everything, played",
+  "Recorded at EMI Studios, Abbey Road, London, between",
+  "6 April and 21 June 1966. Produced by George Martin.",
+  "Balance engineer: Geoff Emerick. Cover drawing and",
+  "collage by",
 ];
 
-const OVERTYPES = [
-  { line: 1, col: 0, text: "_________________________" },
-  { line: 7, col: 0, text: "xxxx" },
-];
+const OVERTYPES = [];
 
 export const START = { line: NOTES.length - 1, col: NOTES[NOTES.length - 1].length + 1 };
 
@@ -41,7 +37,7 @@ export function noteStrikes() {
 }
 
 export const SCRIPT =
-  "after midnight with the doors\nopen to the rain. What you hear between songs is the room\nitself: the radiator, a cup set down, Carver Street going by\nin the wet.\n\nSide one\n\nLow tide at Carver Street  4:12\nLamplight  3:48\nThe ferry at nine  5:30\n";
+  "Klaus Voormann.\n\nSide one\n\nTaxman  2:39\nEleanor Rigby  2:08\nI'm Only Sleeping  3:01\nLove You To  3:01\nHere, There and Everywhere  2:25\nYellow Submarine  2:40\nShe Said She Said  2:37\n";
 
 const KEY_ROWS = [
   ["`1234567890-=", "~!@#$%^&*()_+"],

@@ -80,13 +80,13 @@ export default function Piece({ embedded = false }) {
         className="groove-canvas"
         tabIndex={0}
         role="application"
-        aria-label="A black record with a landscape etched into its grooves, lit by one lamp. The picture only shows where the groove sheen catches the light. Drag the record to spin it; it keeps the speed of your throw. Move the pointer to move the lamp. Left and right arrows push the record, Space stops it."
+        aria-label={`${PRESETS[preset].title} by ${PRESETS[preset].artist}, its cover etched into the grooves of a black record and printed on the label, lit by one lamp. The cover only shows where the groove sheen catches the light. Drag the record to spin it; it keeps the speed of your throw. Move the pointer to move the lamp. Left and right arrows push the record, Space stops it.`}
       />
       {embedded ? null : (
         <header ref={headRef} className="groove-head">
           <h1 className="groove-title">Groove</h1>
           <p className="groove-lede">
-            A photograph cut into black vinyl. Spin it under the lamp and the landscape <em>surfaces in the sheen</em>.
+            A Beatles cover cut into black vinyl. Spin it under the lamp and the sleeve <em>surfaces in the sheen</em>.
           </p>
         </header>
       )}
@@ -98,11 +98,12 @@ export default function Piece({ embedded = false }) {
               type="button"
               role="radio"
               aria-checked={preset === i}
+              aria-label={p.title}
               className="groove-chip"
               onClick={() => choose(i)}
             >
               <span className="groove-thumb" style={{ backgroundImage: `url(${p.src})` }} aria-hidden="true" />
-              {p.label}
+              <span className="groove-chip-name">{p.label}</span>
             </button>
           ))}
         </div>

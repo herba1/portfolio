@@ -1,7 +1,8 @@
 import { analysePhoto } from "./irisAnalyse";
+import { SUBJECT, buildScene, depthAt, hueAt, lightAllowed } from "./irisScene";
+import { createIrisSound } from "./irisSound";
 import { createIrisGL } from "./irisGL";
 
-export const PHOTO = "/monovolt/abt10.webp";
 export const STOPS = ["1.4", "2", "2.8", "4", "5.6", "8", "11", "16"];
 export const STOP_DEG = 26;
 const THIRDS = ["1.4", "1.6", "1.8", "2", "2.2", "2.5", "2.8", "3.2", "3.5", "4", "4.5", "5", "5.6", "6.3", "7.1", "8", "9", "10", "11", "13", "14", "16"];
@@ -96,6 +97,8 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   let lastReadout = "";
   let lastAria = "";
   let lastDial = NaN;
+  const sound = createIrisSound();
+  let lastTick = Math.round(start * 3);
 
   function layout() {
     const rect = box.getBoundingClientRect();
@@ -304,6 +307,13 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
     const dt = last ? clamp(raw / 1000, 0, 0.1) : 0;
     last = now;
     const busy = simulate(dt);
+    const tick = clamp(Math.round(st.s * 3), 0, MAX_STOP * 3);
+    if (tick !== lastTick) {
+      const main = tick % 3 === 0;
+      lastTick = tick;
+      if (ready) sound.click(main ? 1 : 0.4, st.s / MAX_STOP);
+    }
+    sound.swish(busy && ready ? st.v : 0, clamp(st.s / MAX_STOP, 0, 1));
     if (!reduced && busy) {
       interval = interval * 0.9 + raw * 0.1;
       slowFrames = interval > 42 ? slowFrames + 1 : 0;
@@ -334,6 +344,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
     if (e.pointerType === "mouse" && e.button !== 0) return;
     if (st.drag && !st.drag.releasing) return;
     canvas.setPointerCapture?.(e.pointerId);
+    sound.start();
     const [x, y] = local(e);
     const zone = zoneOf(x, y);
     st.spring = false;
@@ -392,6 +403,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
     else if (e.key === "End") next = MAX_STOP;
     if (next === null) return;
     if (st.drag && !st.drag.releasing) return;
+    sound.start();
     if (st.drag) {
       st.drag = null;
       delete box.dataset.grabbing;
@@ -404,6 +416,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
     if (embedded && document.activeElement !== canvas) return;
     if (st.drag) return;
     e.preventDefault();
+    sound.start();
     const dy = e.deltaMode === 1 ? e.deltaY * 32 : e.deltaY;
     if (Math.abs(dy) >= 80) {
       wheelAcc = 0;
@@ -421,10 +434,10 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   layout();
   updateDom();
 
-  loadImage(PHOTO)
+  loadImage(SUBJECT.cover)
     .then((img) => {
       if (destroyed || !gl) return;
-      gl.uploadScene(analysePhoto(img));
+      gl.uploadScene(analysePhoto(buildScene(img), { depthAt, allow: lightAllowed, hueAt }));
       ready = true;
       if (!reduced) {
         st.v = 0;
@@ -486,6 +499,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       canvas.removeEventListener("lostpointercapture", onUp);
       canvas.removeEventListener("keydown", onKey);
       canvas.removeEventListener("wheel", onWheel);
+      sound.destroy();
       gl?.destroy();
       gl = null;
     },

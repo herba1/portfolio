@@ -17,6 +17,7 @@ const UNIFORMS = [
   "uLift",
   "uShowB",
   "uLensOn",
+  "uSun",
 ];
 
 function compile(gl, type, source) {
@@ -112,6 +113,10 @@ export function createLoupeGL(canvas) {
     gl.uniform4f(loc.uLens, frame.lens.x, frame.lens.y, frame.lens.r, frame.lens.zoom);
     gl.uniform1f(loc.uLift, frame.lens.lift);
     gl.uniform1f(loc.uLensOn, frame.lens.on ? 1 : 0);
+    const reach = Math.min(1, Math.max(0, Math.log(frame.lens.zoom / 2) / Math.log(10)));
+    const angle = 0.5 + reach * 2.5 + (frame.lens.x / Math.max(1, frame.width) - 0.5) * 0.5;
+    const focus = reach * reach * (3 - 2 * reach);
+    gl.uniform4f(loc.uSun, Math.cos(angle), Math.sin(angle), focus, reach);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

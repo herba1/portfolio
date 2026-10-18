@@ -97,6 +97,7 @@ export function createGrooveGL(canvas) {
     gl.uniform3f(loc("uLight"), f.light[0], f.light[1], f.light[2]);
     gl.uniform2f(loc("uSlot"), f.slotA, f.slotB);
     gl.uniform1f(loc("uMix"), f.mix);
+    gl.uniform1f(loc("uSlots"), f.slots);
     gl.uniform3f(loc("uToneA"), f.toneA[0], f.toneA[1], f.toneA[2]);
     gl.uniform3f(loc("uToneB"), f.toneB[0], f.toneB[1], f.toneB[2]);
     gl.uniform3f(loc("uGround"), f.ground[0], f.ground[1], f.ground[2]);

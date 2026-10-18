@@ -16,6 +16,8 @@ uniform float uDpr;
 uniform float uSp;
 uniform int uMode;
 uniform vec2 uLight;
+uniform mat3 uTurn;
+uniform float uDome;
 
 out vec2 vLocal;
 out float vRpx;
@@ -27,6 +29,7 @@ out float vZ;
 out float vBack;
 flat out float vCount;
 flat out float vSeed;
+flat out float vWave;
 
 void main() {
   vec2 pos = aPos.xy;
@@ -54,6 +57,17 @@ void main() {
   if (uMode == 2) {
     show *= step(0.01, z);
     pos += uLight * z * 0.16;
+  } else {
+    float att = uMode == 1 ? 1.0 : clamp(1.0 - z * 5.0, 0.0, 1.0) * clamp(present, 0.0, 1.0);
+    if (att > 0.0) {
+      vec3 sp = vec3(pos, uDome * sqrt(max(1.0 - dot(pos, pos), 0.0)));
+      vec3 rp = uTurn * sp;
+      vec3 ax = vec3(sin(tilt) * cos(theta), sin(tilt) * sin(theta), cos(tilt));
+      vec3 ra = normalize(mix(ax, uTurn * ax, att));
+      pos = mix(pos, rp.xy, att);
+      theta = atan(ra.y, ra.x);
+      tilt = min(1.35, acos(clamp(abs(ra.z), 0.0, 1.0)));
+    }
   }
 
   if (show < 0.5) {
@@ -68,6 +82,7 @@ void main() {
     vBack = 0.0;
     vCount = 12.0;
     vSeed = 0.0;
+    vWave = 0.0;
     return;
   }
 
@@ -100,6 +115,7 @@ void main() {
   vBack = uMode == 1 ? 0.0 : clamp(-present, 0.0, 1.0);
   vCount = floor(9.0 + aHome.z * 4.0 + tone * 3.0);
   vSeed = aHome.w;
+  vWave = clamp(0.5 + 0.42 * aHome.x - 0.12 * aHome.y + 0.1 * aHome.z, 0.0, 1.0);
 }
 `;
 
@@ -117,8 +133,11 @@ in float vZ;
 in float vBack;
 flat in float vCount;
 flat in float vSeed;
+flat in float vWave;
 
 uniform int uMode;
+uniform vec2 uForm;
+uniform float uMorph;
 uniform float uDpr;
 uniform vec3 uInk;
 uniform vec3 uHusk;
@@ -138,6 +157,59 @@ float fall(float a, float b, float x) {
 float hair(float d, float w, float aa) {
   float hw = max(w, 0.5);
   return clamp((hw + 0.5 * aa - d) / aa, 0.0, 1.0) * min(1.0, w / hw);
+}
+
+float tuft(float form, vec2 p, vec2 q, float r, float c, float px, float aa) {
+  float squash = mix(c, 1.0, 0.55);
+  float ang = atan(p.y, p.x + 1e-6) + vSpin;
+  float count = vCount;
+  float w = mix(0.2, 0.46, vTone) * uDpr;
+  float plumeK = 0.13;
+  float plumeW = 2.4;
+  float hazeK = 0.02 + 0.12 * vTone;
+  float hubK = 1.0;
+  float reachLo = 0.82;
+  if (form > 1.5) {
+    ang += 0.09 * sin(r * 5.0 + vSeed * 41.0);
+    count = floor(vCount * 1.8);
+    w *= 0.62;
+    plumeK = 0.1;
+    plumeW = 2.6;
+    hazeK = 0.08 + 0.18 * vTone;
+    hubK = 0.6;
+    reachLo = 0.72;
+  } else if (form > 0.5) {
+    count = floor(5.0 + vCount * 0.2);
+    w *= 1.12;
+    plumeK = 0.2;
+    plumeW = 3.6;
+    hazeK = 0.015 + 0.06 * vTone;
+    reachLo = 0.9;
+  }
+  float stepA = 6.2831853 / max(count, 3.0);
+  float k = floor(ang / stepA + 0.5);
+  float da = ang - k * stepA;
+  float reach = reachLo + (1.0 - reachLo) * hash(mod(k, 64.0) + vSeed * 97.0);
+  float dpx = abs(sin(da)) * r * px * squash;
+  float body = fall(reach - 0.12, reach + 0.04, r);
+  float line = hair(dpx, w, aa) * body;
+  float plume = hair(dpx, w * plumeW + 0.25 * uDpr, aa) * plumeK * smoothstep(0.42, 0.82, r) * fall(reach - 0.05, reach + 0.1, r);
+  float haze = form > 1.5 ? hazeK * (1.0 - smoothstep(0.0, 0.95, r)) : hazeK * fall(0.1, 0.62, r);
+  float hubR = max(0.07, 0.65 * uDpr / max(px, 0.1));
+  float hub = clamp((hubR * px - length(q) * px) / aa + 0.5, 0.0, 1.0) * hubK;
+  float web = 0.0;
+  if (form > 0.5 && form < 1.5) {
+    float e = da >= 0.0 ? da - stepA * 0.5 : da + stepA * 0.5;
+    float u = e / (stepA * 0.5);
+    float wa = w * 0.55;
+    for (int i = 0; i < 2; i++) {
+      float rho = i == 0 ? 0.46 : 0.78;
+      float chord = rho * cos(stepA * 0.5) - 0.05 * rho * (1.0 - u * u);
+      float d = abs(r * cos(e) - chord) * px * squash;
+      web = max(web, hair(d, wa, aa) * 0.8);
+    }
+  }
+  return 1.0 - (1.0 - line) * (1.0 - plume) * (1.0 - haze) * (1.0 - hub) * (1.0 - web);
 }
 
 void main() {
@@ -175,22 +247,11 @@ void main() {
   p = vec2(q.x, (q.y - hs * min(r1, 1.2)) / c);
   float r = length(p);
 
-  float stepA = 6.2831853 / max(vCount, 3.0);
-  float ang = atan(p.y, p.x + 1e-6) + vSpin;
-  float k = floor(ang / stepA + 0.5);
-  float da = ang - k * stepA;
-  float reach = 0.82 + 0.18 * hash(mod(k, 64.0) + vSeed * 97.0);
-  float squash = mix(c, 1.0, 0.55);
-  float dpx = abs(sin(da)) * r * px * squash;
-  float w = mix(0.2, 0.46, vTone) * uDpr;
-
-  float body = fall(reach - 0.12, reach + 0.04, r);
-  float line = hair(dpx, w, aa) * body;
-  float plume = hair(dpx, w * 2.4 + 0.25 * uDpr, aa) * 0.13 * smoothstep(0.42, 0.82, r) * fall(reach - 0.05, reach + 0.1, r);
-  float haze = (0.02 + 0.12 * vTone) * fall(0.1, 0.62, r);
-  float hubR = max(0.07, 0.65 * uDpr / max(px, 0.1));
-  float hub = clamp((hubR * px - length(q) * px) / aa + 0.5, 0.0, 1.0);
-  float pappus = 1.0 - (1.0 - line) * (1.0 - plume) * (1.0 - haze) * (1.0 - hub);
+  float pappus = tuft(uForm.x, p, q, r, c, px, aa);
+  if (uForm.y != uForm.x) {
+    float m = clamp((uMorph * 1.6 - vWave * 0.6) * 2.5, 0.0, 1.0);
+    if (m > 0.0) pappus = mix(pappus, tuft(uForm.y, p, q, r, c, px, aa), m);
+  }
 
   float husk = 0.0;
   if (s > 0.04) {

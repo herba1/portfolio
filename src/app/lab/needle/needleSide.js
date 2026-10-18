@@ -16,9 +16,9 @@ export const GEO = {
   key: [-163, 151, 22, 11],
 };
 
-const BANDS = [6, 4, 5, 6];
+const BANDS = [4, 3, 3, 3, 3, 3, 2];
 const LEAD_IN = 1.6;
-const GAP = 2.4;
+const GAP = 1.6;
 const LEAD_PITCH = 4.6;
 const GAP_PITCH = 3.5;
 const RUNOUT_REVS = 1.2;

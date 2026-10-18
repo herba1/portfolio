@@ -1,14 +1,14 @@
 import {
   CUT_INDEX,
-  DATE,
   ENCORE,
   ENCORE_BASELINE,
   FIRST_BASELINE,
+  HEADER,
+  KEY_LABEL,
   LINE_STEP,
   SHEET_H,
   SHEET_W,
   SONGS,
-  VENUE,
 } from "./eraseSetlist";
 
 export const FAMILY = "EraseHand";
@@ -134,9 +134,16 @@ function shape(src, w, h, s, o) {
   return soft;
 }
 
-export function layoutHand(family) {
+export function defaultTitles() {
+  return [...SONGS.map((song) => song.title), ENCORE.title];
+}
+
+export function layoutHand(family, titles = defaultTitles()) {
   const ctx = makeCanvas(8, 8).getContext("2d");
-  const rng = mulberry(20261017);
+  let rng = mulberry(20261017);
+  const reseed = (n) => {
+    rng = mulberry(20261017 + n * 7919);
+  };
   const gauss = (sigma) => (rng() + rng() + rng() - 1.5) * 2 * sigma;
   const glyphs = [];
   const strokes = [];
@@ -190,25 +197,42 @@ export function layoutHand(family) {
     strokes.push({ ink, pts });
   };
 
-  write(VENUE, 98, 132, 44, 600, 0, { shrink: 0.04 });
-  const dateW = measure(DATE, 40, 450);
-  write(DATE, 902 - dateW, 128, 40, 450, 1, { track: 2 });
+  write(HEADER, 98, 132, 44, 600, 0, { shrink: 0.04 });
+  const labelW = measure(KEY_LABEL, 40, 450);
+  write(KEY_LABEL, 902 - labelW, 128, 40, 450, 1, { track: 2 });
   pen(0, [[92, 166], [240, 158], [420, 170], [586, 158]], 6.5, 40, { taper: 0.55 });
+
+  const fitSize = (text) => {
+    const width = measure(text, 64, 640) + text.length * 64 * 0.03;
+    return Math.max(36, Math.min(64, (64 * 720) / Math.max(1, width)));
+  };
+
+  const empty = (y) => ({ x0: 118, x1: 118, top: y - 64 * 0.8, bottom: y + 64 * 0.1, base: y, slope: 0, startX: 118 });
 
   SONGS.forEach((song, i) => {
     const y = FIRST_BASELINE + i * LINE_STEP;
-    const line = write(song.title, 118, y, 64, 640, 0, { tilt: (rng() - 0.5) * 0.012 });
+    const title = titles[i] ?? "";
+    reseed(i + 1);
+    const tilt = (rng() - 0.5) * 0.012;
+    const written = title.trim() ? write(title, 118, y, fitSize(title), 640, 0, { tilt }) : empty(y);
     const keyW = measure(song.key, 40, 450);
+    reseed(i + 101);
     const key = write(song.key, 906 - keyW, y - 2, 40, 450, 1, { track: 1.5 });
-    lines.push({ ...line, key, title: song.title, index: i });
+    lines.push({ ...written, key, title, index: i, y });
   });
+
+  reseed(200);
 
   pen(0, [[118, 1040], [200, 1046], [300, 1036], [396, 1044]], 5, 30, { taper: 0.5 });
   write("ENC", 118, ENCORE_BASELINE - 82, 36, 470, 1, { track: 2 });
-  const encore = write(ENCORE.title, 118, ENCORE_BASELINE, 64, 640, 0, { tilt: -0.006 });
+  const encoreTitle = titles[SONGS.length] ?? "";
+  reseed(300);
+  const encore = encoreTitle.trim() ? write(encoreTitle, 118, ENCORE_BASELINE, fitSize(encoreTitle), 640, 0, { tilt: -0.006 }) : empty(ENCORE_BASELINE);
   const encKeyW = measure(ENCORE.key, 40, 450);
+  reseed(301);
   const encKey = write(ENCORE.key, 906 - encKeyW, ENCORE_BASELINE - 2, 40, 450, 1, { track: 1.5 });
-  lines.push({ ...encore, key: encKey, title: ENCORE.title, index: SONGS.length });
+  lines.push({ ...encore, key: encKey, title: encoreTitle, index: SONGS.length, y: ENCORE_BASELINE });
+  reseed(400);
 
   const cx = 80;
   const cy = ENCORE_BASELINE - 24;

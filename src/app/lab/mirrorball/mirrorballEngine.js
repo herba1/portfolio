@@ -1,4 +1,4 @@
-import { GELS, PHOTOS } from "./mirrorballGels";
+import { ALBUM_CHOICES, LAMP } from "./mirrorballAlbums";
 import { createMirrorGL } from "./mirrorballGL";
 
 const RINGS = 34;
@@ -81,36 +81,65 @@ function loadImage(src) {
   });
 }
 
-async function buildAtlas() {
-  const images = await Promise.all(PHOTOS.map(loadImage));
-  const cellW = 320;
-  const cellH = 400;
-  const atlas = document.createElement("canvas");
-  atlas.width = cellW * images.length;
-  atlas.height = cellH;
-  const ctx = atlas.getContext("2d", { willReadFrequently: true });
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, atlas.width, atlas.height);
-  ctx.filter = "grayscale(1) contrast(1.08)";
-  images.forEach((img, i) => {
-    const scale = Math.max(cellW / img.naturalWidth, cellH / img.naturalHeight);
-    const w = img.naturalWidth * scale;
-    const h = img.naturalHeight * scale;
-    ctx.drawImage(img, i * cellW + (cellW - w) / 2, (cellH - h) / 2, w, h);
-  });
-  return atlas;
+function saturate(r, g, b, amount) {
+  const l = 0.3 * r + 0.59 * g + 0.11 * b;
+  return [l + (r - l) * amount, l + (g - l) * amount, l + (b - l) * amount].map((v) => clamp(v, 0, 1));
 }
 
-export async function createMirrorball({ box, canvas, header, embedded, gel = 0, onReady }) {
+async function buildCover(src, facets) {
+  const img = await loadImage(src);
+  const cell = 512;
+  const gap = 96;
+  const atlas = document.createElement("canvas");
+  atlas.width = (cell + gap) * 4;
+  atlas.height = cell;
+  const actx = atlas.getContext("2d");
+  actx.fillStyle = "#000";
+  actx.fillRect(0, 0, atlas.width, atlas.height);
+  for (let i = 0; i < 4; i += 1) actx.drawImage(img, i * (cell + gap) + gap / 2, 0, cell, cell);
+
+  const sw = 96;
+  const sh = 64;
+  const small = document.createElement("canvas");
+  small.width = sw;
+  small.height = sh;
+  const sctx = small.getContext("2d", { willReadFrequently: true });
+  sctx.drawImage(img, 0, 0, sw, sh);
+  const px = sctx.getImageData(0, 0, sw, sh).data;
+  const { width, height, data } = facets;
+  const tint = new Float32Array(width * height * 4);
+  for (let j = 0; j < height; j += 1) {
+    const k = data[(j * width) * 4 + 3];
+    const v = 1 - (j + 0.5) / height;
+    for (let i = 0; i < k; i += 1) {
+      const u = (((i + 0.5) / k) * 2) % 1;
+      const x = Math.min(sw - 1, Math.floor(u * sw));
+      const y = Math.min(sh - 1, Math.floor(v * sh));
+      const o = (y * sw + x) * 4;
+      const [r, g, b] = saturate(px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, 1.35);
+      const lift = 0.16;
+      const t = (j * width + i) * 4;
+      tint[t] = lift + r * (1 - lift);
+      tint[t + 1] = lift + g * (1 - lift);
+      tint[t + 2] = lift + b * (1 - lift);
+      tint[t + 3] = 1;
+    }
+  }
+  return { atlas, tint };
+}
+
+export async function createMirrorball({ box, canvas, header, embedded, album = 0, onReady }) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const facets = buildFacets();
   let gl = createMirrorGL(canvas, facets);
   if (!gl) throw new Error("WebGL2 unavailable");
 
-  const view = { width: 1, height: 1, dpr: 1, cx: 0, cy: 0, radius: 100, focal: 2000, cam: [0, 0, 2000], wall: 260 };
+  const view = { width: 1, height: 1, dpr: 1, cx: 0, cy: 0, radius: 100, focal: 2000, cam: [0, 0, 2000], wall: 260, room: [1, 1, 1, 1] };
   const sim = { phi: 0.6, omega: reduced ? 0 : IDLE, dragging: false, releasing: false, pointerId: null, startX: 0, startPhi: 0, pointerX: 0, vel: 0, clock: 0 };
-  const gelNow = [...GELS[gel].color];
-  let gelTarget = [...GELS[gel].color];
+  const gelNow = [...LAMP];
+  const gelTarget = [...LAMP];
+  let coverToken = 0;
+  let mix = 1;
   let quality = 1;
   let interval = 16.7;
   let slowFrames = 0;
@@ -135,18 +164,26 @@ export async function createMirrorball({ box, canvas, header, embedded, gel = 0,
     const narrow = w < 640;
     let radius;
     if (narrow) {
-      radius = Math.min(w * 0.31, h * 0.2);
+      radius = Math.min(w * 0.2, h * 0.11);
       view.cx = w * 0.5;
-      view.cy = embedded ? h * 0.46 : h * 0.5;
+      view.cy = embedded ? h * 0.36 : h * 0.4;
     } else {
-      radius = Math.min(w * 0.17, h * 0.235);
-      view.cx = embedded ? w * 0.5 : w * 0.6;
-      view.cy = embedded ? h * 0.45 : h * 0.43;
+      radius = Math.min(w * 0.085, h * 0.13);
+      view.cx = embedded ? w * 0.5 : w * 0.58;
+      view.cy = embedded ? h * 0.34 : h * 0.36;
     }
-    view.radius = clamp(radius, 48, 300);
-    view.focal = 2.1 * Math.max(w, h);
+    view.radius = clamp(radius, 40, 220);
+    const R = view.radius;
+    view.focal = 1.25 * Math.max(w, h);
     view.cam = [w / 2 - view.cx, view.cy - h / 2, view.focal];
-    view.wall = view.radius * 2.4;
+    const sBack = view.focal / (view.focal + R * 9);
+    view.wall = R * 9;
+    view.room = [
+      Math.max(w * 0.5 + Math.abs(view.cam[0]), R * 2) / sBack * 0.82,
+      Math.max(h - view.cy, R * 2) / sBack * 0.5,
+      Math.max(view.cy, R * 2) / sBack * 0.86,
+      R * 9,
+    ];
     const dprCap = Math.min(window.devicePixelRatio || 1, 2);
     const budget = Math.sqrt(2400000 / (w * h));
     view.dpr = Math.max(0.6, Math.min(dprCap, budget));
@@ -233,8 +270,10 @@ export async function createMirrorball({ box, canvas, header, embedded, gel = 0,
       else gelNow[i] = gelTarget[i];
     }
     if (atlasReady) fade = reduced ? 1 : Math.min(1, fade + dt / 0.9);
+    const mixing = mix < 1;
+    mix = reduced ? 1 : Math.min(1, mix + dt / 0.7);
     sim.clock += reduced ? 0 : dt;
-    return gelMoving || (atlasReady && fade < 1);
+    return gelMoving || mixing || (atlasReady && fade < 1);
   }
 
   function render() {
@@ -250,13 +289,15 @@ export async function createMirrorball({ box, canvas, header, embedded, gel = 0,
       focal: view.focal,
       cam: view.cam,
       wall: view.wall,
+      room: view.room,
+      mix: mix * mix * (3 - 2 * mix),
       rot: rotation(sim.phi),
       rotPrev: rotation(sim.phi - sim.omega * SHUTTER),
       light: LIGHT,
       gel: gelNow,
-      spread: 0.006,
+      spread: 0.008,
       rayGain: 0.05,
-      speckGain: 26,
+      speckGain: 90,
       glintGain: 1.1,
       time: sim.clock,
       frag: 0.3,
@@ -352,17 +393,23 @@ export async function createMirrorball({ box, canvas, header, embedded, gel = 0,
 
   layout();
 
-  buildAtlas()
-    .then((atlas) => {
-      if (destroyed || !gl) return;
-      gl.uploadAtlas(atlas);
-      atlasReady = true;
-      wake();
-    })
-    .catch(() => {
-      atlasReady = true;
-      wake();
-    });
+  function loadCover(idx) {
+    const token = ++coverToken;
+    buildCover(ALBUM_CHOICES[idx].cover, facets)
+      .then(({ atlas, tint }) => {
+        if (destroyed || !gl || token !== coverToken) return;
+        gl.uploadCover(atlas, tint);
+        mix = atlasReady ? 0 : 1;
+        atlasReady = true;
+        wake();
+      })
+      .catch(() => {
+        atlasReady = true;
+        wake();
+      });
+  }
+
+  loadCover(album);
 
   if (header) {
     document.fonts.ready.then(() => {
@@ -405,9 +452,8 @@ export async function createMirrorball({ box, canvas, header, embedded, gel = 0,
   canvas.addEventListener("keydown", onKey);
 
   return {
-    setGel(idx) {
-      gelTarget = [...GELS[idx].color];
-      wake();
+    setAlbum(idx) {
+      loadCover(idx);
     },
     destroy() {
       destroyed = true;

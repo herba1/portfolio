@@ -1,11 +1,18 @@
 {
   "title": "Amorph",
-  "description": "A Beatles portrait printed in sixty thousand dots of ink. Hold and it dissolves into drifting smoke from under your finger; let go and every dot curves across to the place in the next face that matches its tone, so John becomes Paul becomes George.",
-  "tags": ["WebGL", "Particles", "Music"],
+  "description": "Six Beatles album covers printed in tens of thousands of dots of ink. Every few seconds the next cover weaves in like a loom: each row of dots slides along its own line, trailing a comet of ink, to the place in the next cover that matches its tone, cascading from top to bottom.",
+  "tags": [
+    "WebGL",
+    "Particles",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "Herb's Sand note built for real: pixels that flow to their closest matching tone in the next picture, with a graceful curved, staggered, soft-landing swap instead of a harsh one.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "A designed transition instead of random flight: dots keep their row and travel only sideways to the matching tone, so the change reads as a clean scanning pattern with motion trails.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://futamura.dev",
     "https://tympanus.net/codrops/2025/06/30/invisible-forces-the-making-of-phantom-lands-interactive-grid-and-3d-face-particle-system/"

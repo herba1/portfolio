@@ -1,7 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
+import { mixtapeFrom } from "./cassetteMixtape";
 import "./cassette.css";
 
 const SOUND_LABEL = {
@@ -11,7 +13,7 @@ const SOUND_LABEL = {
 };
 
 const STAGE_LABEL =
-  "A C60 mixtape lying on a desk with a pencil beside it. Drag the pencil into either hub of the cassette, then press and circle around it to wind the tape. Wind back fast and slack tape spills out of the mouth; wind forward to take it back in. Tap the pencil to lay it down again. Enter puts the pencil in or out, 1 and 2 choose the hub, left and right arrows wind, M turns sound on or off.";
+  "A C60 mixtape of top songs lying on a desk with a pencil beside it. Drag the pencil into either hub of the cassette, then press and circle around it to wind the tape. Wind back fast and slack tape spills out of the mouth; wind forward to take it back in. Tap the pencil to lay it down again. Enter puts the pencil in or out, 1 and 2 choose the hub, left and right arrows wind, M turns sound on or off.";
 
 function SpeakerIcon({ state }) {
   return (
@@ -37,6 +39,9 @@ export default function Piece({ embedded = false }) {
   const [failed, setFailed] = useState(false);
   const [pencil, setPencil] = useState("rest");
   const [announce, setAnnounce] = useState("");
+  const { tracks } = useTopSongs(12);
+  const mix = useMemo(() => mixtapeFrom(tracks), [tracks]);
+  const mixRef = useRef(mix);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -54,6 +59,7 @@ export default function Piece({ embedded = false }) {
     const start = async () => {
       try {
         const { createCassetteEngine } = await import("./cassetteEngine");
+        const startMix = mixRef.current;
         if (cancelled) return;
         engine = await createCassetteEngine({
           box: root,
@@ -61,6 +67,7 @@ export default function Piece({ embedded = false }) {
           canvas: canvasRef.current,
           insets,
           embedded,
+          mix: startMix,
           onReady: () => {
             if (!cancelled) setReady(true);
           },
@@ -83,6 +90,7 @@ export default function Piece({ embedded = false }) {
           return;
         }
         engineRef.current = engine;
+        if (mixRef.current !== startMix) engine.setMix(mixRef.current);
       } catch (error) {
         console.error(error);
         if (!cancelled) setFailed(true);
@@ -104,6 +112,12 @@ export default function Piece({ embedded = false }) {
       engineRef.current = null;
     };
   }, [embedded]);
+
+  useEffect(() => {
+    if (mixRef.current === mix) return;
+    mixRef.current = mix;
+    engineRef.current?.setMix(mix);
+  }, [mix]);
 
   const Root = embedded ? "div" : "main";
   const seated = pencil === "left" || pencil === "right";
@@ -144,7 +158,7 @@ export default function Piece({ embedded = false }) {
               </>
             ) : (
               <>
-                Pick up the pencil and drop it into a hub, <em>like you used to</em>.
+                Top songs on a C60. Pick up the pencil and drop it into a hub, <em>like you used to</em>.
               </>
             )}
           </p>

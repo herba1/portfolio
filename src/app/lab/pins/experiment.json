@@ -1,14 +1,14 @@
 {
   "title": "Pin Art",
-  "description": "Twenty thousand steel pins in a clear acrylic frame, with John Lennon pressed into them in relief under a raking light. Press from behind to push a hand print out of the steel, and tilt the toy to let the pins clatter back flat.",
-  "tags": ["WebGL", "Simulation", "Material"],
+  "description": "A bed of steel pins seen straight on, with a Beatles cover pressed in from behind: the four faces of With the Beatles, the Let It Be grid, A Hard Day's Night. Each pin's height comes from the cover's tones and casts its shadow across its neighbours. Drag to push your fingertip through, or let them fall flat and press the next one.",
+  "tags": ["WebGL", "Material", "Music"],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One physical toy finished to the edge: real pins that slide with friction, stay where you push them, cast long shadows across each other, and only let go when gravity asks.",
+  "intent": "The pin-art toy flattened to one honest orthographic view, so the only depth cue is light: raised heads catch it, low ones sink into the shadows of the pins around them, and a real album portrait appears out of steel.",
   "tile": { "cols": 3, "rows": 5 },
   "sources": [
     "https://en.wikipedia.org/wiki/Pin_Art",
-    "https://learnopengl.com/Advanced-Lighting/Shadows/Shadow-Mapping",
-    "https://www.khronos.org/opengl/wiki/Sampler_(GLSL)#Shadow_samplers"
+    "https://en.wikipedia.org/wiki/With_the_Beatles",
+    "https://en.wikipedia.org/wiki/Let_It_Be_(album)"
   ]
 }

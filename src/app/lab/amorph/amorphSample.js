@@ -1,24 +1,3 @@
-const TONE_BANDS = 18;
-
-function hilbertIndex(side, x, y) {
-  let index = 0;
-  for (let span = side >> 1; span > 0; span >>= 1) {
-    const right = (x & span) > 0 ? 1 : 0;
-    const lower = (y & span) > 0 ? 1 : 0;
-    index += span * span * ((3 * right) ^ lower);
-    if (lower === 0) {
-      if (right === 1) {
-        x = span * 2 - 1 - x;
-        y = span * 2 - 1 - y;
-      }
-      const swap = x;
-      x = y;
-      y = swap;
-    }
-  }
-  return index;
-}
-
 function mulberry(seed) {
   let state = seed >>> 0;
   return () => {
@@ -61,10 +40,7 @@ export function samplePortrait(image, grid, seed) {
   const positions = new Float32Array(count * 2);
   const colors = new Uint8Array(count * 4);
   const inks = new Float32Array(count);
-  const curve = new Float64Array(count);
   const random = mulberry(seed);
-  let hilbertSide = 1;
-  while (hilbertSide < grid) hilbertSide <<= 1;
 
   for (let gy = 0; gy < grid; gy += 1) {
     for (let gx = 0; gx < grid; gx += 1) {
@@ -80,9 +56,10 @@ export function samplePortrait(image, grid, seed) {
       const x = u * 2 - 1;
       const y = 1 - v * 2;
       const edge = Math.pow(Math.pow(Math.abs(x), 5) + Math.pow(Math.abs(y * 1.02), 5), 0.2);
-      const fade = 1 - smooth(0.8, 1.0, edge);
+      const fade = 1 - smooth(0.97, 1.02, edge);
       const lum = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
-      const ink = Math.min(1, Math.max(0, (1 - lum) * 1.1 - 0.03)) * fade;
+      const chroma = (Math.max(r, g, b) - Math.min(r, g, b)) / 255;
+      const ink = Math.min(1, Math.max(0, (1 - lum) * 1.1 - 0.03, chroma * 0.72)) * fade;
       positions[index * 2] = x;
       positions[index * 2 + 1] = y;
       colors[index * 4] = r;
@@ -90,23 +67,20 @@ export function samplePortrait(image, grid, seed) {
       colors[index * 4 + 2] = b;
       colors[index * 4 + 3] = Math.round(ink * 255);
       inks[index] = ink + random() * 1e-4;
-      curve[index] = hilbertIndex(hilbertSide, gx, gy);
     }
   }
 
-  const byInk = new Int32Array(count);
-  for (let index = 0; index < count; index += 1) byInk[index] = index;
-  byInk.sort((a, b) => inks[a] - inks[b]);
-
-  const order = new Int32Array(count);
-  const band = Math.ceil(count / TONE_BANDS);
-  for (let start = 0; start < count; start += band) {
-    const slice = byInk.slice(start, Math.min(count, start + band));
-    slice.sort((a, b) => curve[a] - curve[b]);
-    order.set(slice, start);
+  const rowOrder = new Int32Array(count);
+  const rowRank = new Int32Array(count);
+  for (let gy = 0; gy < grid; gy += 1) {
+    const row = [];
+    for (let gx = 0; gx < grid; gx += 1) row.push(gy * grid + gx);
+    row.sort((a, b) => inks[a] - inks[b]);
+    row.forEach((slot, k) => {
+      rowOrder[gy * grid + k] = slot;
+      rowRank[slot] = k;
+    });
   }
-  const rank = new Int32Array(count);
-  for (let position = 0; position < count; position += 1) rank[order[position]] = position;
 
-  return { grid, count, positions, colors, order, rank };
+  return { grid, count, positions, colors, rowOrder, rowRank };
 }

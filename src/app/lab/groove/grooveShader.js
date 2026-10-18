@@ -23,6 +23,7 @@ uniform vec2 uBox;
 uniform float uThick;
 uniform sampler2D uPhotos;
 uniform sampler2D uLabels;
+uniform float uSlots;
 uniform vec2 uSlot;
 uniform float uMix;
 uniform vec3 uToneA;
@@ -108,13 +109,13 @@ float softbox(vec3 p, vec3 dir) {
 vec3 photoAt(vec2 p, float slot) {
   vec2 uv = clamp(p * 0.47 + 0.5, vec2(0.002), vec2(0.998));
   uv.y = 1.0 - uv.y;
-  return texture(uPhotos, vec2((slot + uv.x) / 3.0, uv.y)).rgb;
+  return texture(uPhotos, vec2((slot + uv.x) / uSlots, uv.y)).rgb;
 }
 
 vec3 labelAt(vec2 p, float slot) {
   vec2 uv = clamp(p / R_LABEL * 0.5 + 0.5, vec2(0.001), vec2(0.999));
   uv.y = 1.0 - uv.y;
-  return texture(uLabels, vec2((slot + uv.x) / 3.0, uv.y)).rgb;
+  return texture(uLabels, vec2((slot + uv.x) / uSlots, uv.y)).rgb;
 }
 
 vec2 rot2(vec2 v, float a) {
@@ -279,8 +280,8 @@ void main() {
       vec2 p = rot2(P.xy, -th);
       float ya = dot(toLinear(photoAt(p, uSlot.x)), vec3(0.2126, 0.7152, 0.0722));
       float yb = dot(toLinear(photoAt(p, uSlot.y)), vec3(0.2126, 0.7152, 0.0722));
-      float ta = pow(clamp((ya - uToneA.x) / max(uToneA.y - uToneA.x, 0.01), 0.0, 1.0), uToneA.z);
-      float tb = pow(clamp((yb - uToneB.x) / max(uToneB.y - uToneB.x, 0.01), 0.0, 1.0), uToneB.z);
+      float ta = pow(clamp((ya - uToneA.x) / (abs(uToneA.y - uToneA.x) < 0.01 ? 0.01 : uToneA.y - uToneA.x), 0.0, 1.0), uToneA.z);
+      float tb = pow(clamp((yb - uToneB.x) / (abs(uToneB.y - uToneB.x) < 0.01 ? 0.01 : uToneB.y - uToneB.x), 0.0, 1.0), uToneB.z);
       float tone = mix(ta, tb, uMix);
       vec3 c = vec3(0.0);
       if (labelEdge < 1.0) c += shadeLabel(P, th) * (1.0 - labelEdge);

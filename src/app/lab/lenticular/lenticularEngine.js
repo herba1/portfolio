@@ -1,6 +1,6 @@
 import { CARDS, FRAME_COUNT } from "./lenticularCards";
+import { cardLayers } from "./lenticularArt";
 import { createLenticularGL } from "./lenticularGL";
-import { prepareCard } from "./lenticularPrep";
 
 const DEG = Math.PI / 180;
 const SUB = 1 / 240;
@@ -57,7 +57,6 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
   const hold = { yaw: 0, pitch: 0, until: 0, fresh: false, active: false };
   const orient = { on: false, gamma: 0, beta: 0, baseG: null, baseB: null, fresh: false };
   const images = new Map();
-  const preps = new Map();
   let active = 0;
   let shown = 0;
   let flip = null;
@@ -80,7 +79,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
   }
 
   function aspectOf(idx) {
-    return preps.get(CARDS[idx].key)?.aspect || CARDS[idx].aspect;
+    return CARDS[idx].aspect;
   }
 
   function layout() {
@@ -110,30 +109,21 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     if (gl) gl.resize(Math.max(1, Math.round(view.width * view.dpr * q)), Math.max(1, Math.round(view.height * view.dpr * q)));
   }
 
-  function loadImage(idx) {
+  function loadLayers(idx) {
     const spec = CARDS[idx];
     if (images.has(spec.key)) return images.get(spec.key);
-    const promise = new Promise((resolve, reject) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.src = spec.src;
-      img
-        .decode()
-        .then(() => resolve(img))
-        .catch(reject);
-    });
+    const promise = cardLayers(spec, gl ? gl.size : 640);
     images.set(spec.key, promise);
     return promise;
   }
 
   function ensure(idx) {
     const spec = CARDS[idx];
-    return loadImage(idx).then((img) => {
+    return loadLayers(idx).then((layers) => {
       if (destroyed || !gl) return false;
-      if (!preps.has(spec.key)) preps.set(spec.key, prepareCard(spec, img));
       if (!gl.has(spec.key)) {
         gl.evict([CARDS[shown].key, CARDS[active].key, spec.key]);
-        gl.build(spec.key, spec, img, preps.get(spec.key));
+        gl.build(spec.key, layers);
       }
       return true;
     });
@@ -161,7 +151,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
         wake();
         if (!embedded) {
           const later = window.requestIdleCallback || ((fn) => window.setTimeout(fn, 400));
-          later(() => CARDS.forEach((_, i) => i !== active && loadImage(i).catch(() => {})));
+          later(() => CARDS.forEach((_, i) => i !== active && loadLayers(i).catch(() => {})));
         }
       })
       .catch(() => {
@@ -235,9 +225,18 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     wake();
   }
 
+  function onCard(x, y) {
+    const hw = view.hh * aspectOf(shown);
+    return Math.abs(x - view.cx) <= hw && Math.abs(y - view.cy) <= view.hh;
+  }
+
   function onUp(e) {
     if (pointer.mode !== "drag" || e.pointerId !== pointer.id) return;
     const touch = pointer.type !== "mouse";
+    const [ux, uy] = local(e);
+    if (e.type === "pointerup" && Math.hypot(ux - pointer.sx, uy - pointer.sy) < 6 && onCard(ux, uy) && !flip) {
+      select((active + 1) % CARDS.length);
+    }
     pointer.id = null;
     if (touch || e.type === "pointercancel") {
       pointer.mode = null;
@@ -267,7 +266,8 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     else if (e.key === "ArrowUp") setHold(base.yaw, base.pitch + 4 * DEG);
     else if (e.key === "ArrowDown") setHold(base.yaw, base.pitch - 4 * DEG);
     else if (e.key === "Home" || e.key === "0") setHold(0, 0);
-    else if (/^[1-3]$/.test(e.key)) select(Number(e.key) - 1);
+    else if (/^[1-4]$/.test(e.key)) select(Number(e.key) - 1);
+    else if (e.key === "Enter" || e.key === " ") select((active + 1) % CARDS.length);
     else if (e.key === "]") select((active + 1) % CARDS.length);
     else if (e.key === "[") select((active + CARDS.length - 1) % CARDS.length);
     else handled = false;

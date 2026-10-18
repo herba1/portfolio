@@ -6,7 +6,7 @@ import { SLEEVES } from "./crateSleeves";
 import "./crate.css";
 
 const LABEL =
-  "A wooden crate of records seen from above. Drag down or scroll to flip sleeves forward one by one; pull the front sleeve up to lift it out and slide the record half out. Arrow keys flip, Enter lifts the sleeve, Escape drops it.";
+  "A wooden crate of Beatles records seen from above. Drag down or scroll to flip sleeves forward one by one; pull the front sleeve up to lift it out and slide the record half out. Arrow keys flip, Enter lifts the sleeve, Escape drops it.";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -33,7 +33,7 @@ export default function Piece({ embedded = false }) {
     const onIndex = (i) => {
       const s = SLEEVES[i];
       if (nowRef.current)
-        nowRef.current.textContent = `${s.artist}, ${s.title}`;
+        nowRef.current.textContent = `${s.title}, ${s.year}`;
       if (countRef.current)
         countRef.current.textContent = `${pad(i + 1)} / ${pad(SLEEVES.length)}`;
     };

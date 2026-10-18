@@ -4,21 +4,23 @@ export const ASPECT = SHEET_W / SHEET_H;
 export const LEDGE_DEPTH = 30;
 export const LEDGE_FRONT = 22;
 
-export const VENUE = "LANTERN ROOM";
-export const DATE = "10/17";
+export const HEADER = "THE BEATLES";
+export const KEY_LABEL = "KEY";
 
 export const SONGS = [
-  { title: "LOW TIDE PHONE", key: "E" },
-  { title: "MARIGOLD STATIC", key: "Am" },
-  { title: "CINDER AVENUE", key: "D" },
-  { title: "TWO WINDOWS", key: "G" },
-  { title: "VELVET OVERPASS", key: "C#m" },
-  { title: "FERNWOOD", key: "A" },
-  { title: "KETTLE & RUST", key: "Bb" },
-  { title: "SLOW ORCHARD", key: "E" },
+  { title: "TWIST AND SHOUT", key: "D" },
+  { title: "HELP!", key: "A" },
+  { title: "TICKET TO RIDE", key: "A" },
+  { title: "YESTERDAY", key: "F" },
+  { title: "DAY TRIPPER", key: "E" },
+  { title: "NOWHERE MAN", key: "E" },
+  { title: "PAPERBACK WRITER", key: "G" },
+  { title: "TAXMAN", key: "D" },
 ];
 
-export const ENCORE = { title: "HALF A RADIO", key: "D" };
+export const ENCORE = { title: "HEY JUDE", key: "F" };
+
+export const TITLE_MAX = 28;
 
 export const CUT_INDEX = 4;
 export const FIRST_BASELINE = 262;

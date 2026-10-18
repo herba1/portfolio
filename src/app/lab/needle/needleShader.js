@@ -17,7 +17,7 @@ uniform vec4 uStrobe;
 uniform vec4 uArmA;
 uniform vec4 uArmB;
 uniform vec4 uArmC;
-uniform vec4 uSeg[9];
+uniform vec4 uSeg[16];
 uniform vec4 uSide;
 uniform vec4 uFlags;
 uniform sampler2D uLabel;
@@ -127,7 +127,7 @@ float shadowOf(vec2 p, float height, float radius) {
 
 vec4 segFor(float r) {
   vec4 s = uSeg[0];
-  for (int i = 1; i < 9; i++) {
+  for (int i = 1; i < 16; i++) {
     if (r <= uSeg[i].x) s = uSeg[i];
   }
   return s;

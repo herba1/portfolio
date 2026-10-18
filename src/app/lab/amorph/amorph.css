@@ -30,8 +30,8 @@
 .amorph__surface {
   position: absolute;
   inset: 0;
-  cursor: grab;
-  touch-action: none;
+  cursor: pointer;
+  touch-action: manipulation;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -43,8 +43,8 @@
   touch-action: pan-y;
 }
 
-.amorph[data-holding] .amorph__surface {
-  cursor: grabbing;
+.amorph[data-embedded] .amorph__surface {
+  cursor: pointer;
 }
 
 .amorph__surface:focus-visible::after {
@@ -119,6 +119,13 @@
 
 .amorph__name {
   min-width: 64px;
+}
+
+.amorph__year {
+  font-family: var(--font-mono);
+  font-weight: var(--font-weight-meta);
+  color: var(--amorph-ink-soft);
+  font-variant-numeric: tabular-nums;
 }
 
 .amorph__inks {

@@ -9,7 +9,7 @@ import { RAIN_DEFAULT, SCENES } from "./rainScenes";
 import "./rain.css";
 
 const GLASS_LABEL =
-  "A rainy window with a landscape behind it. Drops bead on the glass, merge and run down, each holding a tiny upside-down view of the scene. Drag across the glass to wipe a clear streak; it fogs and beads back over. Press Enter to wipe, and 1 to 3 to change the view.";
+  "A rainy window with a city skyline at dusk behind it. Drops bead on the glass, merge and run down, each holding a tiny upside-down view of the scene. Drag across the glass to wipe a clear streak; it fogs and beads back over. Press Enter to wipe, and 1 to 3 to change the view.";
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -69,7 +69,7 @@ export default function Piece({ embedded = false }) {
   return (
     <div ref={rootRef} className="rain" data-embedded={embedded ? "" : undefined}>
       <div ref={glassRef} className="rain__glass" tabIndex={0} role="application" aria-label={GLASS_LABEL} onKeyDown={onGlassKey}>
-        <img className="rain__fallback" src={scene.src} alt="" draggable={false} />
+        <div className="rain__fallback" style={{ backgroundImage: scene.tint }} />
         <canvas ref={canvasRef} className="rain__canvas" />
         <span ref={cursorRef} className="rain__cursor" aria-hidden="true" />
       </div>
@@ -96,7 +96,7 @@ export default function Piece({ embedded = false }) {
               className="rain__scene"
               onClick={() => chooseScene(s.id)}
             >
-              <img className="rain__thumb" src={s.src} alt="" width={20} height={20} draggable={false} />
+              <span className="rain__thumb" style={{ backgroundImage: s.tint }} aria-hidden="true" />
               <span className="rain__scene-name">{s.label}</span>
             </button>
           ))}

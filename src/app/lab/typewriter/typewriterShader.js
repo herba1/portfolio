@@ -166,7 +166,7 @@ void main() {
   vec2 q = vec2(X, Y);
   vec4 mat = texture(uMaterial, q / uPeriod);
   float m = mat.r * 2.0 - 1.0;
-  vec2 hg = (mat.gb * 2.0 - 1.0) / 6.0;
+  vec2 hg = (mat.gb * 2.0 - 1.0) / 12.0;
   float skip = mat.a;
 
   vec2 inkUv = vec2((X - uInkMap.x) * uInkMap.z, (Y - uInkMap.y) * uInkMap.w);
@@ -184,10 +184,10 @@ void main() {
   float diff = max(dot(n, L), 0.0);
   float shade = 0.44 + 0.56 * diff / L.z;
   shade *= 1.0 - 0.1 * smoothstep(0.35, 0.8, phi);
-  shade *= 1.0 - 0.72 * smoothstep(0.15, 0.97, below);
+  shade *= 1.0 - 0.5 * smoothstep(0.3, 0.97, below);
 
   vec3 cream = vec3(0.958, 0.934, 0.874);
-  vec3 albedo = cream * (1.0 + m * 0.05);
+  vec3 albedo = cream * (1.0 + m * 0.03);
   albedo *= 1.0 + (hash12(floor(p * uDpr) + 0.5) - 0.5) * 0.012;
   vec3 paperLit = albedo * shade;
 
@@ -200,32 +200,24 @@ void main() {
   vec3 paper = mix(paperLit, inkLit, clamp(a, 0.0, 1.0) * 0.96 * cover);
 
   float inCar = edge(X - uCarriage.x, fwX) * edge(uCarriage.y - X, fwX);
-  vec3 back = uEnamel * 0.74 * (1.0 - 0.18 * smoothstep(R, R * 9.0, d));
-  vec3 bg = back * (1.0 - 0.25 * (1.0 - smoothstep(-R, R * 0.4, d)));
+  vec3 bg = uEnamel * 0.93;
 
-  float cylY = clamp(d / R, -1.0, 1.0);
-  float ph = asin(cylY);
-  float onCyl = 1.0 - smoothstep(0.96, 1.0, abs(d / R));
+  float cylRaw = d / R;
+  float cylY = clamp(cylRaw, -1.0, 1.0);
+  float fwC = max(fwidth(cylRaw), 1e-4);
+  float onCyl = edge(1.0 - abs(cylRaw) - fwC, fwC);
   float knobL = 1.0 - edge(X - (uCarriage.x + uKnob), fwX);
   float knobR = edge(X - (uCarriage.y - uKnob), fwX);
   float knob = clamp(knobL + knobR, 0.0, 1.0);
-  float turn = ph + uRoll;
-  float knurl = cos(turn * 38.0);
-  vec3 cn = normalize(vec3(0.0, sin(ph) + knurl * 0.18 * knob, cos(ph)));
-  float cd = max(dot(cn, L), 0.0);
-  vec3 hv = normalize(L + vec3(0.0, 0.0, 1.0));
-  vec3 hv2 = normalize(vec3(0.0, 0.36, 1.0));
-  float spec = pow(max(dot(cn, hv2), 0.0), mix(70.0, 50.0, knob)) * mix(0.6, 0.45, knob) + pow(max(dot(cn, hv), 0.0), 8.0) * 0.05;
-  vec3 rimN = normalize(vec3(0.0, sin(ph), cos(ph)));
-  float sheen = pow(1.0 - abs(rimN.z), 3.0) * 0.06;
-  float speck = step(0.988, hash12(floor(vec2(X * 5.0, turn * R / max(uPitch, 1.0) * 5.0))));
-  vec3 rubber = vec3(0.07, 0.068, 0.072) * (1.0 + speck * 1.6);
-  vec3 bakelite = vec3(0.13, 0.1, 0.085) * (1.0 + 0.12 * knurl);
-  vec3 cylAlbedo = mix(rubber, bakelite, knob);
-  vec3 cyl = cylAlbedo * (0.3 + 0.7 * cd / L.z) + spec + sheen;
-  cyl *= 0.35 + 0.65 * (1.0 - smoothstep(0.55, 1.0, abs(cylY)));
-  float ring = (1.0 - smoothstep(0.0, 0.18, abs(X - (uCarriage.x + uKnob)))) + (1.0 - smoothstep(0.0, 0.18, abs(X - (uCarriage.y - uKnob))));
-  cyl = mix(cyl, vec3(0.72, 0.73, 0.74) * (0.35 + 0.65 * cd / L.z) + spec * 1.5, clamp(ring, 0.0, 1.0) * 0.85);
+  vec3 rubber = vec3(0.118, 0.118, 0.125);
+  vec3 bakelite = vec3(0.2, 0.2, 0.21);
+  vec3 cyl = mix(rubber, bakelite, knob);
+  float band = edge(cylY + 0.62, fwC) * (1.0 - edge(cylY + 0.48, fwC));
+  cyl = mix(cyl, vec3(0.3, 0.3, 0.31), band);
+  float turn = (asin(cylY) + uRoll) * 24.0 / 6.2832;
+  float fwT = max(fwidth(turn), 1e-3);
+  float stripe = smoothstep(0.5 - fwT, 0.5 + fwT, abs(fract(turn) - 0.5) * 2.0);
+  cyl = mix(cyl, rubber, knob * stripe);
 
   vec3 under = mix(bg, cyl, onCyl * inCar);
 
@@ -233,17 +225,11 @@ void main() {
   float rightGap = (X - uSheet.z) * uPitch;
   float leftGap = (uSheet.x - X) * uPitch;
   float drop = (1.0 - smoothstep(0.0, 26.0, rightGap)) * step(0.0, rightGap) * 0.42 + (1.0 - smoothstep(0.0, 7.0, leftGap)) * step(0.0, leftGap) * 0.16;
-  under *= 1.0 - drop * paperRow;
-  float topGap = (uSheet.y - Y) * uPitch;
-  under *= 1.0 - (1.0 - smoothstep(0.0, 10.0, topGap)) * step(0.0, topGap) * 0.2 * covX;
+  under *= 1.0 - drop * paperRow * 0.5;
 
   vec3 col = mix(under, paper, cover);
   float thick = (1.0 - smoothstep(0.0, 1.4, abs(X - uSheet.x) * uPitch)) * covY * onWrap;
   col = mix(col, vec3(1.0, 0.99, 0.95) * shade, thick * 0.35);
-
-  vec2 lampAt = vec2(-0.18, -0.3) * uBox;
-  float lampD = length(p - lampAt) / max(length(uBox), 1.0);
-  col *= mix(1.05, 0.84, smoothstep(0.3, 1.3, lampD));
 
   col += (hash12(gl_FragCoord.xy + 0.37) - 0.5) / 255.0;
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);

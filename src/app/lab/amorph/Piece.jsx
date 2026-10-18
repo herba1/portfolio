@@ -1,15 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { albumById } from "@/app/lab/_music/catalog";
 import MorphText from "@/app/ui/MorphText";
 import AmorphEngine from "./amorphEngine";
 import "./amorph.css";
 
-const PORTRAITS = [
-  { name: "John", src: "/cast/john.webp" },
-  { name: "Paul", src: "/cast/paul.webp" },
-  { name: "George", src: "/cast/george.webp" },
-];
+const PORTRAITS = ["abbey-road", "revolver", "rubber-soul", "sgt-pepper", "let-it-be", "help"].map((id) => {
+  const album = albumById(id);
+  return { name: id === "sgt-pepper" ? "Sgt. Pepper" : album.title, year: album.year, src: album.cover };
+});
 
 const INKS = [
   { key: "colour", label: "Colour", mix: 0, hex: null },
@@ -48,59 +48,30 @@ export default function Piece({ embedded = false }) {
 
   const handlePointerDown = useCallback((event) => {
     if (event.button !== 0 && event.pointerType === "mouse") return;
-    if (pointerRef.current != null) return;
-    pointerRef.current = event.pointerId;
-    event.currentTarget.setPointerCapture?.(event.pointerId);
-    engineRef.current?.press(event.clientX, event.clientY);
+    pointerRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
     setHolding(true);
   }, []);
 
-  const handlePointerMove = useCallback((event) => {
-    const engine = engineRef.current;
-    if (!engine) return;
-    if (pointerRef.current === event.pointerId) engine.moveHold(event.clientX, event.clientY);
-    else if (event.pointerType === "mouse") engine.hover(event.clientX, event.clientY);
-  }, []);
-
-  const finish = useCallback((event, commit) => {
-    if (pointerRef.current !== event.pointerId) return;
+  const handlePointerUp = useCallback((event) => {
+    const start = pointerRef.current;
     pointerRef.current = null;
-    if (commit) engineRef.current?.release();
-    else engineRef.current?.cancel();
     setHolding(false);
+    if (!start || start.id !== event.pointerId) return;
+    if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) return;
+    engineRef.current?.advance();
   }, []);
 
-  const handlePointerUp = useCallback((event) => finish(event, true), [finish]);
-  const handlePointerCancel = useCallback((event) => finish(event, false), [finish]);
-  const handlePointerLeave = useCallback((event) => {
-    if (event.pointerType === "mouse") engineRef.current?.leave();
+  const handlePointerCancel = useCallback(() => {
+    pointerRef.current = null;
+    setHolding(false);
   }, []);
 
   const handleKeyDown = useCallback((event) => {
-    const engine = engineRef.current;
-    if (!engine || event.metaKey || event.ctrlKey || event.altKey) return;
-    if (event.key === " ") {
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (event.key === " " || event.key === "Enter" || event.key === "ArrowRight") {
       event.preventDefault();
-      if (!event.repeat) {
-        engine.press(null, null);
-        setHolding(true);
-      }
-    } else if (event.key === "Enter" || event.key === "ArrowRight") {
-      event.preventDefault();
-      engine.advance();
+      if (!event.repeat) engineRef.current?.advance();
     }
-  }, []);
-
-  const handleKeyUp = useCallback((event) => {
-    if (event.key !== " ") return;
-    event.preventDefault();
-    engineRef.current?.release();
-    setHolding(false);
-  }, []);
-
-  const handleBlur = useCallback(() => {
-    engineRef.current?.cancel();
-    setHolding(false);
   }, []);
 
   const chooseInk = useCallback((option) => {
@@ -124,15 +95,11 @@ export default function Piece({ embedded = false }) {
         tabIndex={0}
         role="application"
         aria-roledescription="particle portrait"
-        aria-label={`Portrait of ${portrait.name} printed in dots. Press and hold to dissolve it, release to let every dot flow into the next face. Space holds, Enter moves on.`}
+        aria-label={`${portrait.name} by the Beatles, printed in dots. Every few seconds each row of dots slides along its line to the matching tone in the next album cover. Click or press Enter to move on.`}
         onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
-        onPointerLeave={handlePointerLeave}
         onKeyDown={handleKeyDown}
-        onKeyUp={handleKeyUp}
-        onBlur={handleBlur}
         onContextMenu={preventMenu}
       >
         <canvas ref={canvasRef} className="amorph__canvas" aria-hidden="true" />
@@ -143,7 +110,7 @@ export default function Piece({ embedded = false }) {
           <header className="amorph__head">
             <h1 className="amorph__title text-title-sm">Amorph</h1>
             <p className="amorph__hint text-ui-lg">
-              Hold to dissolve. Let go and every dot finds its tone in the next face.
+              Every row of dots slides along its line to its tone in the next cover. Click to move on.
             </p>
           </header>
 
@@ -151,6 +118,7 @@ export default function Piece({ embedded = false }) {
             <p className="amorph__who text-ui-lg" aria-live="polite">
               <span className="amorph__index text-ui-sm tabular-nums">{`0${current + 1}`}</span>
               <MorphText className="amorph__name" text={portrait.name} />
+              <span className="amorph__year text-ui tabular-nums">{portrait.year}</span>
             </p>
             <div className="amorph__inks" role="radiogroup" aria-label="Ink">
               {INKS.map((option) => (

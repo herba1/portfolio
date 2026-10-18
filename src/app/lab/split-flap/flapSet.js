@@ -3,14 +3,14 @@ export const DRUM = " AaBbCcDdEeFfGgHhIiJjKkLlMmNnOoPpQqRrSsTtUuVvWwXxYyZz012345
 export const DRUM_INDEX = new Map([...DRUM].map((ch, i) => [ch, i]));
 
 export const TRACKS = [
-  { id: "low-tide", title: "Low Tide", dur: 292 },
-  { id: "paper-moons", title: "Paper Moons", dur: 324 },
-  { id: "slow-signal", title: "Slow Signal", dur: 370 },
-  { id: "glasshouse", title: "Glasshouse", dur: 278 },
-  { id: "night-bus", title: "Night Bus", dur: 347 },
-  { id: "copper-hymn", title: "Copper Hymn", dur: 381 },
-  { id: "salt-radio", title: "Salt Radio", dur: 255 },
-  { id: "velvet-hours", title: "Velvet Hours", dur: 422, encore: true },
+  { id: "taxman", title: "Taxman", dur: 159 },
+  { id: "help", title: "Help!", dur: 138 },
+  { id: "something", title: "Something", dur: 183 },
+  { id: "penny-lane", title: "Penny Lane", dur: 180 },
+  { id: "blackbird", title: "Blackbird", dur: 138 },
+  { id: "get-back", title: "Get Back", dur: 189 },
+  { id: "yesterday", title: "Yesterday", dur: 125 },
+  { id: "hey-jude", title: "Hey Jude", dur: 431, encore: true },
 ];
 
 const BY_ID = new Map(TRACKS.map((t) => [t.id, t]));
@@ -24,8 +24,8 @@ export const STATUS_WORDS = {
 
 export function initialSet() {
   return {
-    rows: ["slow-signal", "glasshouse", "night-bus", "copper-hymn", "salt-radio", "velvet-hours", "low-tide", "paper-moons"],
-    played: new Set(["low-tide", "paper-moons"]),
+    rows: ["something", "penny-lane", "blackbird", "get-back", "yesterday", "hey-jude", "taxman", "help"],
+    played: new Set(["taxman", "help"]),
     titles: new Map(),
   };
 }

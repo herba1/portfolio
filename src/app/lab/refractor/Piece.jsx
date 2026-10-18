@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { CARDS, FOILS } from "./refractorCards";
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
+import { DEFAULT_CARDS, FOILS, cardsFromTracks } from "./refractorCards";
+import { createRefractorAudio } from "./refractorAudio";
 import { createRefractorEngine } from "./refractorEngine";
 import "./refractor.css";
 
@@ -16,6 +18,9 @@ export default function Piece({ embedded = false }) {
   const [active, setActive] = useState(0);
   const [foil, setFoil] = useState(0);
   const [motion, setMotion] = useState("hidden");
+  const { tracks, live } = useTopSongs(40);
+  const cards = useMemo(() => (live ? cardsFromTracks(tracks) : DEFAULT_CARDS), [live, tracks]);
+  const cardsRef = useRef(cards);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -29,8 +34,14 @@ export default function Piece({ embedded = false }) {
       const bottom = foot ? boxRect.bottom - foot.top + 28 : 36;
       return { top, bottom };
     };
+    const audio = createRefractorAudio();
+    const wakeAudio = () => audio.start();
+    root.addEventListener("pointerdown", wakeAudio);
+    root.addEventListener("keydown", wakeAudio);
     const engine = createRefractorEngine({
       box: root,
+      cards: cardsRef.current,
+      onRiffle: () => audio.snap(),
       stage: stageRef.current,
       canvas: canvasRef.current,
       insets,
@@ -48,10 +59,18 @@ export default function Piece({ embedded = false }) {
     });
     engineRef.current = engine;
     return () => {
+      root.removeEventListener("pointerdown", wakeAudio);
+      root.removeEventListener("keydown", wakeAudio);
+      audio.destroy();
       engine.destroy();
       engineRef.current = null;
     };
   }, [embedded]);
+
+  useEffect(() => {
+    cardsRef.current = cards;
+    engineRef.current?.setCards(cards);
+  }, [cards]);
 
   const enableMotion = () => {
     engineRef.current?.enableMotion().then((ok) => {
@@ -59,7 +78,7 @@ export default function Piece({ embedded = false }) {
     });
   };
 
-  const current = CARDS[active];
+  const current = cards[active] || cards[0];
 
   return (
     <div ref={rootRef} className="refractor" data-embedded={embedded ? "" : undefined}>
@@ -68,17 +87,17 @@ export default function Piece({ embedded = false }) {
         className="refractor__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A chrome refractor card of ${current.full} in a penny sleeve, ${FOILS[foil].name.toLowerCase()} foil. Move the pointer to tilt it, drag and flick to spin it, or tilt your phone. Arrow keys tilt, space spins, 1 to 3 change the foil, brackets change the card.`}
+        aria-label={`A chrome refractor card of ${current.title} by ${current.artist} in a penny sleeve, ${FOILS[foil].name.toLowerCase()} foil. Move the pointer to tilt it, flick it hard to spin to the next record, or tilt your phone. Arrow keys tilt, space spins to the next card, 1 to 3 change the foil, brackets change the card.`}
       >
         <canvas ref={canvasRef} className="refractor__canvas" />
-        <img className="refractor__fallback" src={current.src} alt={current.full} draggable={false} />
+        <img className="refractor__fallback" src={current.src} alt={`${current.title} by ${current.artist}`} draggable={false} />
       </div>
 
       {!embedded && (
         <header ref={headRef} className="refractor__head">
           <h1 className="refractor__title">Refractor</h1>
           <p className="refractor__lede">
-            A 1909 card reprinted on chrome. Tilt it and the foil splits the light <em>into colour</em>; flick it to spin.
+            Album covers reprinted on chrome. Tilt it and the foil splits the light <em>into colour</em>; flick it hard and the next record spins in.
           </p>
         </header>
       )}
@@ -103,18 +122,18 @@ export default function Piece({ embedded = false }) {
             ))}
           </div>
           <div className="refractor__tray" role="radiogroup" aria-label="Card">
-            {CARDS.map((card, i) => (
+            {cards.map((card, i) => (
               <button
                 key={card.key}
                 type="button"
                 role="radio"
                 aria-checked={active === i}
-                aria-label={card.full}
-                title={card.name}
+                aria-label={`${card.title}, ${card.artist}`}
+                title={card.title}
                 className="refractor__card"
                 onClick={() => engineRef.current?.select(i)}
               >
-                <img className="refractor__thumb" src={card.src} alt="" width={20} height={32} draggable={false} />
+                <img className="refractor__thumb" src={card.src} alt="" width={28} height={28} draggable={false} />
               </button>
             ))}
           </div>

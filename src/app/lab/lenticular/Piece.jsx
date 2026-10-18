@@ -66,17 +66,17 @@ export default function Piece({ embedded = false }) {
         className="lenticular__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A lenticular flicker card of ${current.full}. Move the pointer over it, drag it, or tilt your phone to change the viewing angle and play ${current.move.toLowerCase()}. Left and right arrows step through the frames; 1 to 3 change card.`}
+        aria-label={`A lenticular flip card: ${current.full}. Move the pointer over it, drag it, or tilt your phone and the cover flips. Tap the card, press Enter, or use 1 to 4 for the next card.`}
       >
         <canvas ref={canvasRef} className="lenticular__canvas" />
-        <img className="lenticular__fallback" src={current.src} alt={current.full} draggable={false} />
+        <img className="lenticular__fallback" src={current.src} alt={`${current.front.title} cover`} draggable={false} />
       </div>
 
       {!embedded && (
         <header ref={headRef} className="lenticular__head">
           <h1 className="lenticular__title">Lenticular</h1>
           <p className="lenticular__lede">
-            A flicker card from a 1960s gum pack. Tilt it and the pitch happens <em>in the plastic</em>.
+            A flip card from a 1960s record shop. Tilt it and one cover turns into the next <em>in the plastic</em>; tap it for another.
           </p>
         </header>
       )}
@@ -90,11 +90,14 @@ export default function Piece({ embedded = false }) {
                 type="button"
                 role="radio"
                 aria-checked={active === i}
-                aria-label={`${card.full}, ${card.move}`}
+                aria-label={card.full}
                 className="lenticular__card"
                 onClick={() => engineRef.current?.select(i)}
               >
-                <img className="lenticular__thumb" src={card.src} alt="" width={20} height={32} draggable={false} />
+                <span className="lenticular__thumb" aria-hidden="true">
+                  <img src={card.front.cover} alt="" width={28} height={28} draggable={false} />
+                  <img src={card.back.cover} alt="" width={28} height={28} draggable={false} />
+                </span>
                 <span className="lenticular__card-name">{card.name}</span>
                 <span className="lenticular__card-move">{card.move}</span>
               </button>

@@ -137,7 +137,7 @@
   left: 12px;
   right: 12px;
   top: calc(var(--pb-floor) - var(--pb-w) - 24px);
-  bottom: 4px;
+  bottom: max(4px, calc(100% - var(--pb-floor) - 8px));
   z-index: 0;
   border-radius: 16px;
   background:

@@ -48,7 +48,7 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
     const pad = insets();
     const availW = view.width - 32;
     const availH = Math.max(120, view.height - pad.top - pad.bottom);
-    const hh = Math.min(availH * 0.5, view.height * 0.39, (availW * 0.46) / aspect);
+    const hh = Math.min(availH * 0.44, view.height * 0.34, (availW * 0.4) / aspect);
     const hw = hh * aspect;
     return { x: view.width / 2, y: pad.top + availH / 2, rot: card.tilt, hw, hh, mmPx: card.widthMm / (2 * hw) };
   }

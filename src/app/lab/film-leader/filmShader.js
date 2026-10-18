@@ -184,14 +184,15 @@ void main() {
   float tableSee = smoothstep(0.05, -0.45, r.y);
   float room = 0.05 + 0.1 * smoothstep(-0.2, 0.9, r.y);
   float sheen = emulsion ? 0.7 : 1.0;
-  float spec = fres * (box * 2.6 * sheen + tableSee * 0.9 + room);
+  float graze = smoothstep(0.04, 0.22, nv);
+  float spec = fres * graze * (box * 2.6 * sheen + tableSee * 0.9 + room);
   fragOut = vec4(vec3(spec) * vec3(1.0, 0.99, 0.97) * alpha, 1.0);
 }
 `;
 
 export const SHADOW_VERTEX = `
-in vec2 aShadow;
-out vec2 vShadow;
+in vec3 aShadow;
+out vec3 vShadow;
 void main() {
   vShadow = aShadow;
   gl_Position = projectionMatrix * viewMatrix * modelMatrix * vec4(position, 1.0);
@@ -200,14 +201,15 @@ void main() {
 
 export const SHADOW_FRAGMENT = `
 precision highp float;
-in vec2 vShadow;
+in vec3 vShadow;
 out vec4 fragOut;
 void main() {
   float h = vShadow.y;
+  float lying = smoothstep(0.25, 0.7, vShadow.z);
   float spread = clamp(0.3 + h * 0.05, 0.3, 1.0);
   float edge = 1.0 - smoothstep(1.0 - spread, 1.0, abs(vShadow.x));
   float strength = 0.14 * smoothstep(0.4, 5.0, h) * (1.0 - smoothstep(5.0, 22.0, h));
-  fragOut = vec4(vec3(1.0 - edge * strength), 1.0);
+  fragOut = vec4(vec3(1.0 - edge * strength * lying), 1.0);
 }
 `;
 

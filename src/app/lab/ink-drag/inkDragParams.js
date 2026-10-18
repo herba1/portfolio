@@ -1,5 +1,4 @@
 export const DEFAULT_WORD = "Side A";
-export const MAX_WORD = 12;
 
 export const PAPER = [0.937, 0.906, 0.842];
 

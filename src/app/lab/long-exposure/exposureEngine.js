@@ -1,5 +1,5 @@
 import { COMPOSITE_FRAGMENT, MAX_LAMPS, MAX_TAPS, QUAD_VERTEX, RADIANCE_FRAGMENT, SCENE_FRAGMENT, STROKE_FRAGMENT, STROKE_VERTEX } from "./exposureShader";
-import { AUTO_FIGURES, LAMPS, LIGHTS, PHOTO_SRC, SEED_SHOTS, figurePath } from "./exposureScenes";
+import { AUTO_FIGURES, LAMPS, LIGHTS, SCENE_ALBUM, SEED_SHOTS, figurePath, paintScene } from "./exposureScenes";
 
 const MAX_DPR = 2;
 const MAX_SEGMENTS = 4096;
@@ -206,12 +206,12 @@ export default class ExposureEngine {
     this.resize();
     const img = new Image();
     img.decoding = "async";
-    img.src = PHOTO_SRC;
+    img.src = SCENE_ALBUM.cover;
     img
       .decode()
       .then(() => {
         if (this.destroyed || !this.gl) return;
-        this.uploadPhoto(img);
+        this.uploadPhoto(paintScene(img));
         this.develop();
       })
       .catch(() => this.onFail?.());
@@ -426,10 +426,11 @@ export default class ExposureEngine {
     const sigma = SIGMA * W * (1.35 - 0.6 * fast);
     const flicker = 1 + 0.06 * Math.sin(t * 47.0) + 0.04 * Math.sin(t * 13.0 + 1.3);
     let held = Math.max(dt, 0);
-    if (total < 0.6 && wasMoving && torch.debt + held < 0.12 && !flush) {
+    if (total < 0.6 && wasMoving && torch.debt + held < 0.25 && !flush) {
       torch.debt += held;
       return;
     }
+    if (total >= 0.6 && torch.speed > 0.05) held = Math.min((total / W) / torch.speed, held * 2.5, 0.25);
     held += torch.debt;
     torch.debt = 0;
     const energy = TORCH * W * held * flicker;
@@ -444,7 +445,7 @@ export default class ExposureEngine {
       data[o + 3] = by * H;
       data[o + 4] = sigma;
       data[o + 5] = e;
-      data[o + 6] = 2.0;
+      data[o + 6] = 4.0;
       data[o + 7] = 0;
       data[o + 8] = color[0];
       data[o + 9] = color[1];

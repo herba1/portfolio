@@ -3,11 +3,6 @@ import { createLightTableGL } from "./lightTableGL";
 
 const SUB = 1 / 240;
 const BEZEL = 7;
-const LOUPE_R = 24;
-const RING = 1.2;
-const ZOOM_MIN = 1.8;
-const ZOOM_MAX = 4.6;
-const ZOOM_REST = 2.7;
 const MAX_SPEED = 560;
 const POWER_S = 0.9;
 
@@ -31,7 +26,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     moving: false,
   }));
   let order = bodies.slice();
-  const loupe = { x: 0, y: 0, vx: 0, vy: 0, zoom: ZOOM_REST, tzoom: ZOOM_REST, vzoom: 0, home: null, moving: false };
   const drags = new Map();
   let gl = null;
   let failed = false;
@@ -40,7 +34,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   let last = 0;
   let destroyed = false;
   let loaded = false;
-  let started = false;
   let power = reduced ? 1 : 0;
   let quality = 1;
   let motionQuality = 1;
@@ -79,18 +72,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       b.moving = false;
     }
     order = bodies.slice();
-    const [lx, ly] = L.loupe;
-    loupe.vx = loupe.vy = 0;
-    if (!started && !reduced) {
-      loupe.x = lx + 58;
-      loupe.y = ly + 34;
-      loupe.home = { x: lx, y: ly };
-      loupe.moving = true;
-    } else {
-      loupe.x = lx;
-      loupe.y = ly;
-      loupe.home = null;
-    }
   }
 
   function toMm(sx, sy) {
@@ -103,7 +84,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   }
 
   function pick(mx, my) {
-    if (Math.hypot(mx - loupe.x, my - loupe.y) < LOUPE_R * RING + 1) return { loupe: true };
     for (let i = order.length - 1; i >= 0; i -= 1) {
       const b = order[i];
       const dx = mx - b.x;
@@ -185,25 +165,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     walls(b, 2);
   }
 
-  function stepLoupe(drag, h) {
-    if (drag) {
-      const omega = 19;
-      const tx = drag.tx - drag.lx;
-      const ty = drag.ty - drag.ly;
-      loupe.vx += (omega * omega * (tx - loupe.x) + 2 * omega * (drag.vx - loupe.vx)) * h;
-      loupe.vy += (omega * omega * (ty - loupe.y) + 2 * omega * (drag.vy - loupe.vy)) * h;
-    } else if (loupe.home) {
-      const omega = 5.2;
-      loupe.vx += (omega * omega * (loupe.home.x - loupe.x) - 2 * omega * loupe.vx) * h;
-      loupe.vy += (omega * omega * (loupe.home.y - loupe.y) - 2 * omega * loupe.vy) * h;
-    } else {
-      slide(loupe, h, 1500, 3);
-    }
-    loupe.x += loupe.vx * h;
-    loupe.y += loupe.vy * h;
-    walls(loupe, 0);
-  }
-
   function updateDrags(dt) {
     for (const drag of drags.values()) {
       if (drag.px == null) continue;
@@ -228,7 +189,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   }
 
   function simulate(dt) {
-    const loupeDrag = dragOf(loupe);
     if (reduced) {
       for (const b of bodies) {
         const d = dragOf(b);
@@ -239,12 +199,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
         b.y = d.ty - (s * d.lx + c * d.ly);
         walls(b, 2);
       }
-      if (loupeDrag) {
-        loupe.x = loupeDrag.tx - loupeDrag.lx;
-        loupe.y = loupeDrag.ty - loupeDrag.ly;
-        walls(loupe, 0);
-      }
-      loupe.zoom = loupe.tzoom;
       return;
     }
     const steps = Math.max(1, Math.ceil(dt / SUB));
@@ -254,10 +208,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
         const d = dragOf(b);
         if (d || b.moving) stepBody(b, d, h);
       }
-      if (loupeDrag || loupe.moving) stepLoupe(loupeDrag, h);
-      const zo = 16;
-      loupe.vzoom += (zo * zo * (loupe.tzoom - loupe.zoom) - 2 * zo * loupe.vzoom) * h;
-      loupe.zoom += loupe.vzoom * h;
     }
     for (const b of bodies) {
       if (dragOf(b)) {
@@ -269,31 +219,10 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
         b.moving = false;
       }
     }
-    if (loupeDrag) {
-      loupe.moving = true;
-      loupe.home = null;
-    } else if (loupe.moving) {
-      const sp = Math.hypot(loupe.vx, loupe.vy);
-      const far = loupe.home ? Math.hypot(loupe.home.x - loupe.x, loupe.home.y - loupe.y) : 0;
-      if (sp < 0.6 && far < 0.05) {
-        if (loupe.home) {
-          loupe.x = loupe.home.x;
-          loupe.y = loupe.home.y;
-          loupe.home = null;
-        }
-        loupe.vx = loupe.vy = 0;
-        loupe.moving = false;
-      }
-    }
-    if (Math.abs(loupe.zoom - loupe.tzoom) < 0.002 && Math.abs(loupe.vzoom) < 0.01) {
-      loupe.zoom = loupe.tzoom;
-      loupe.vzoom = 0;
-    }
   }
 
   function busy() {
-    if (drags.size || loupe.moving || power < 1) return true;
-    if (loupe.zoom !== loupe.tzoom) return true;
+    if (drags.size || power < 1) return true;
     return bodies.some((b) => b.moving);
   }
 
@@ -318,7 +247,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       power: reduced ? 1 : smooth(clamp(power, 0, 1)),
       texel: TEXEL_MM,
       pieces,
-      loupe: { x: view.gx + loupe.x * s, y: view.gy + loupe.y * s, r: LOUPE_R * s, zoom: loupe.zoom, on: true },
     });
   }
 
@@ -365,7 +293,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       if (destroyed || !gl) return;
       gl.finish();
       loaded = true;
-      started = true;
       onReady();
       wake();
     } catch (error) {
@@ -426,27 +353,24 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     const [mx, my] = toMm(x, y);
     const hit = pick(mx, my);
     if (!hit) return;
-    const target = hit.loupe ? loupe : hit.body;
+    const target = hit.body;
     if (dragOf(target)) return;
     stage.setPointerCapture?.(e.pointerId);
-    if (hit.body) {
-      order = order.filter((b) => b !== hit.body);
-      order.push(hit.body);
-    }
+    order = order.filter((b) => b !== target);
+    order.push(target);
     drags.set(e.pointerId, {
       target,
-      lx: hit.loupe ? mx - loupe.x : hit.lx,
-      ly: hit.loupe ? my - loupe.y : hit.ly,
+      lx: hit.lx,
+      ly: hit.ly,
       px: x,
       py: y,
       prevX: null,
       prevY: null,
       tx: mx,
       ty: my,
-      vx: target.vx || 0,
-      vy: target.vy || 0,
+      vx: target.vx,
+      vy: target.vy,
     });
-    if (hit.loupe) loupe.home = null;
     box.dataset.grabbing = "";
     e.preventDefault();
     wake();
@@ -478,50 +402,40 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     }
     if (reduced) {
       t.vx = t.vy = 0;
-      if ("va" in t) t.va = 0;
+      t.va = 0;
       t.moving = false;
     }
     if (!drags.size) delete box.dataset.grabbing;
     wake();
   }
 
-  function onWheel(e) {
-    if (!loaded) return;
-    const [x, y] = local(e);
-    const [mx, my] = toMm(x, y);
-    if (Math.hypot(mx - loupe.x, my - loupe.y) > LOUPE_R * RING) return;
-    e.preventDefault();
-    const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? view.height : 1;
-    const dy = clamp(e.deltaY * unit, -200, 200);
-    loupe.tzoom = clamp(loupe.tzoom * Math.exp(-dy * (e.ctrlKey ? 0.01 : 0.0022)), ZOOM_MIN, ZOOM_MAX);
-    wake();
-  }
-
   function onKey(e) {
     if (!loaded) return;
     const push = e.shiftKey ? 260 : 120;
-    let handled = true;
-    if (e.key === "ArrowLeft") loupe.vx -= push;
-    else if (e.key === "ArrowRight") loupe.vx += push;
-    else if (e.key === "ArrowUp") loupe.vy -= push;
-    else if (e.key === "ArrowDown") loupe.vy += push;
-    else if (e.key === "+" || e.key === "=") loupe.tzoom = clamp(loupe.tzoom * 1.2, ZOOM_MIN, ZOOM_MAX);
-    else if (e.key === "-" || e.key === "_") loupe.tzoom = clamp(loupe.tzoom / 1.2, ZOOM_MIN, ZOOM_MAX);
-    else handled = false;
-    if (!handled) return;
+    const top = order[order.length - 1];
+    let dx = 0;
+    let dy = 0;
+    if (e.key === "ArrowLeft") dx = -1;
+    else if (e.key === "ArrowRight") dx = 1;
+    else if (e.key === "ArrowUp") dy = -1;
+    else if (e.key === "ArrowDown") dy = 1;
+    else if (e.key === " " || e.key === "Enter") {
+      order = [order[order.length - 1], ...order.slice(0, -1)];
+      e.preventDefault();
+      render();
+      return;
+    } else return;
     e.preventDefault();
-    if (e.key.startsWith("Arrow")) {
-      loupe.home = null;
-      if (reduced) {
-        loupe.x += Math.sign(loupe.vx) * (e.shiftKey ? 20 : 8);
-        loupe.y += Math.sign(loupe.vy) * (e.shiftKey ? 20 : 8);
-        loupe.vx = loupe.vy = 0;
-        walls(loupe, 0);
-        render();
-        return;
-      }
-      loupe.moving = true;
+    if (reduced) {
+      top.x += dx * (e.shiftKey ? 20 : 8);
+      top.y += dy * (e.shiftKey ? 20 : 8);
+      walls(top, 2);
+      render();
+      return;
     }
+    top.vx += dx * push;
+    top.vy += dy * push;
+    top.moving = true;
     wake();
   }
 
@@ -554,7 +468,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   stage.addEventListener("pointerup", onUp);
   stage.addEventListener("pointercancel", onUp);
   stage.addEventListener("pointerleave", onLeave);
-  stage.addEventListener("wheel", onWheel, { passive: false });
   stage.addEventListener("keydown", onKey);
 
   return {
@@ -569,7 +482,6 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       stage.removeEventListener("pointerup", onUp);
       stage.removeEventListener("pointercancel", onUp);
       stage.removeEventListener("pointerleave", onLeave);
-      stage.removeEventListener("wheel", onWheel);
       stage.removeEventListener("keydown", onKey);
       if (gl) gl.destroy();
       gl = null;

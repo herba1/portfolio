@@ -1,11 +1,19 @@
 {
   "title": "Cassette",
-  "description": "A smoked C60 mixtape on a desk under a warm lamp, with a pencil beside it. Drop the pencil into a hub and circle to wind: the packs trade tape at their true speeds, and wind back too fast and a loop of slack spills out of the mouth.",
-  "tags": ["WebGL", "Audio", "Tape"],
+  "description": "A smoked C60 mixtape of top songs on a desk under a warm lamp, the label typed with Come Together and the J-card listing both sides, with a pencil beside it. Drop the pencil into a hub and circle to wind: the packs trade tape at their true speeds, and wind back too fast and a loop of slack spills cleanly out of the mouth onto the desk.",
+  "tags": [
+    "WebGL",
+    "Audio",
+    "Tape",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "One childhood gesture finished to the edge: the pencil in the hub is the transport, so the turns of your hand are the tape you hear, and the physics of two packs of different radii decides how it moves.",
-  "tile": { "cols": 3, "rows": 5 },
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://tympanus.net/codrops/2021/10/27/creating-the-effect-of-transparent-glass-and-plastic-in-three-js/",
     "https://en.wikipedia.org/wiki/Compact_Cassette",

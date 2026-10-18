@@ -1,10 +1,19 @@
 {
   "title": "Mirrorball",
-  "description": "A mirrorball in a dark club at 2am, every tile holding a fragment of the room. Throw it into a spin and real specks of light sweep the walls and this page's own words, stretching into ellipses as they graze.",
-  "tags": ["WebGL", "Light", "Club"],
+  "description": "A mirrorball in a dark room with one spotlight shining through a record sleeve. Every mirror carries a fragment of the cover, so Sgt. Pepper or Magical Mystery Tour scatters across the walls, floor and ceiling in its own colours. Throw it into a spin and the spots sweep round the corners of the room.",
+  "tags": [
+    "WebGL",
+    "Light",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: each facet is a real mirror, so the specks are computed reflections of one spotlight, not decoration.",
-  "tile": { "cols": 3, "rows": 5 },
-  "sources": ["https://www.igloo.inc"]
+  "intent": "One optical object finished to the edge: each facet is a real mirror in a real-sized room, the spots are computed reflections of one lamp that slide continuously across every surface, and their colours come from the album you pick.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://www.igloo.inc"
+  ]
 }

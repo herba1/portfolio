@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { albumById } from "@/app/lab/_music/catalog";
 import "./needle.css";
+
+const RECORD = albumById("revolver");
 
 const SOUND_LABEL = {
   off: "Turn sound on",
@@ -32,6 +35,7 @@ export default function Piece({ embedded = false }) {
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [announce, setAnnounce] = useState("");
+  const [band, setBand] = useState(-1);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -60,6 +64,8 @@ export default function Piece({ embedded = false }) {
           meter: meterRef.current,
           insets,
           embedded,
+          record: RECORD,
+          onBand: (idx) => setBand(idx),
           onSound: (next) => setSound(next),
           onReady: () => setReady(true),
           onFail: () => setFailed(true),
@@ -113,7 +119,7 @@ export default function Piece({ embedded = false }) {
         className="needle-stage"
         tabIndex={0}
         role="application"
-        aria-label="A turntable seen from above. Drag the record to scratch it, forwards and backwards. Drag the tonearm and let go over the grooves to drop the needle there. Space starts and stops the motor, left and right arrows nudge the record, up and down arrows cue the previous or next band, M turns sound on or off."
+        aria-label="A turntable seen from above with Revolver by The Beatles on the platter. Drag the record to scratch it, forwards and backwards. Drag the tonearm and let go over the grooves to drop the needle there. Space starts and stops the motor, left and right arrows nudge the record, up and down arrows cue the previous or next band, M turns sound on or off."
       >
         <canvas ref={canvasRef} className="needle-canvas" />
       </div>
@@ -126,9 +132,24 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="needle-head">
           <h1 className="needle-title">Needle</h1>
           <p className="needle-lede">
-            Grab the record and scratch it, <em>backwards too</em>. Lift the arm and drop it anywhere to cue.
+            Revolver on the platter. Grab the record and scratch it, <em>backwards too</em>. Lift the arm and drop it anywhere to cue.
           </p>
           {soundButton}
+          <ol className="needle-side" aria-label={`${RECORD.title}, side one`}>
+            {RECORD.tracks.map((name, i) => (
+              <li key={name}>
+                <button
+                  type="button"
+                  className="needle-track"
+                  aria-current={band === i ? "true" : undefined}
+                  onClick={() => engineRef.current?.cueTrack(i)}
+                >
+                  <span className="needle-track-no">{String(i + 1).padStart(2, "0")}</span>
+                  <span className="needle-track-name">{name}</span>
+                </button>
+              </li>
+            ))}
+          </ol>
         </header>
       )}
 

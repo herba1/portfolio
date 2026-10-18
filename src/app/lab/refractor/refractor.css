@@ -208,8 +208,8 @@
 
 .refractor__thumb {
   display: block;
-  width: 20px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   object-fit: cover;
   border-radius: 3px;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);

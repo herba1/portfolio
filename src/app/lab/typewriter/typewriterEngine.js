@@ -1,4 +1,4 @@
-import InkSheet, { makeWeave, seeded } from "./typewriterInk";
+import InkSheet, { seeded } from "./typewriterInk";
 import { MATERIAL_FRAGMENT, PAPER_FRAGMENT, PAPER_VERTEX } from "./typewriterShader";
 import TypewriterSound from "./typewriterSound";
 import {
@@ -28,7 +28,14 @@ const A1 = 0.32;
 const PHI_MAX = 0.72;
 const VMAX = 170;
 const ACCEL = 2600;
-const ENAMEL = [214, 210, 199];
+const ENAMEL = [226, 223, 216];
+const DECK = "rgb(226 223 216)";
+const DECK_SHADE = "rgb(212 208 200)";
+const CHARCOAL = "rgb(30 30 32)";
+const STEEL_DARK = "rgb(78 79 82)";
+const STEEL = "rgb(128 129 132)";
+const STEEL_LIGHT = "rgb(196 197 199)";
+const RIBBON_RED = "rgb(196 52 40)";
 const TAU = Math.PI * 2;
 const PERIOD = 20;
 const TILE = 512;
@@ -146,7 +153,6 @@ export default class TypewriterEngine {
     }
     this.ctx = this.overlay.getContext("2d");
     this.cache = document.createElement("canvas");
-    this.weaveHi = makeWeave(3, [255, 255, 255], 0);
     this.keysEl?.querySelectorAll("[data-key]").forEach((el) => this.keyMap.set(el.getAttribute("data-key"), el));
     this.glCanvas.addEventListener("webglcontextlost", this.handlers.lost);
     this.stage.addEventListener("pointerdown", this.handlers.down);
@@ -311,14 +317,8 @@ export default class TypewriterEngine {
     this.cache.width = this.overlay.width;
     this.cache.height = this.overlay.height;
     if (this.ink.setResolution(res)) this.rebuildInk();
-    this.ribbonTiles();
     this.drawCache();
     if (this.ready) this.render();
-  }
-
-  ribbonTiles() {
-    const ctx = this.ctx;
-    this.weavePattern = ctx.createPattern(this.weaveHi, "repeat");
   }
 
   arcToScreen(s) {
@@ -386,7 +386,7 @@ export default class TypewriterEngine {
   drawCache() {
     const g = this.geo;
     const c = this.cache.getContext("2d");
-    const { W, H, dpr, printX, fy, yDeck, L, R, wellR, angles, spoolR, SX } = g;
+    const { W, H, dpr, printX, fy, yDeck, L, wellR, wellA, angles, spoolR, SX } = g;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.cache.width, this.cache.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -396,52 +396,15 @@ export default class TypewriterEngine {
     c.rect(0, yDeck, W, H - yDeck + 2);
     this.wellPath(c);
     c.clip("evenodd");
-    const deck = c.createLinearGradient(0, yDeck, 0, H);
-    deck.addColorStop(0, `rgb(${ENAMEL.map((v) => Math.round(v * 0.97)).join(" ")})`);
-    deck.addColorStop(0.08, `rgb(${ENAMEL.join(" ")})`);
-    deck.addColorStop(0.5, `rgb(${ENAMEL.map((v) => Math.round(v * 0.985)).join(" ")})`);
-    deck.addColorStop(1, `rgb(${ENAMEL.map((v) => Math.round(v * 0.95)).join(" ")})`);
-    c.fillStyle = deck;
+    c.fillStyle = DECK;
     c.fillRect(0, yDeck, W, H - yDeck + 2);
-    const grain = this.grainTile();
-    c.fillStyle = c.createPattern(grain, "repeat");
-    c.fillRect(0, yDeck, W, H - yDeck + 2);
-    const under = c.createLinearGradient(0, yDeck, 0, yDeck + R * 0.9);
-    under.addColorStop(0, "rgb(40 34 26 / 0.34)");
-    under.addColorStop(0.25, "rgb(40 34 26 / 0.16)");
-    under.addColorStop(0.6, "rgb(40 34 26 / 0.05)");
-    under.addColorStop(1, "rgb(40 34 26 / 0)");
-    c.fillStyle = under;
-    c.fillRect(0, yDeck, W, R * 0.9);
-    c.fillStyle = "rgb(255 255 255 / 0.5)";
-    c.fillRect(0, yDeck, W, 1);
-
+    c.fillStyle = CHARCOAL;
+    c.fillRect(0, yDeck, W, 2);
     for (const side of [-1, 1]) {
-      const cx = printX + side * SX;
-      const cy = yDeck + spoolR + 0.22 * L;
-      c.save();
       c.beginPath();
-      c.arc(cx, cy, spoolR * 1.1, 0, TAU);
-      c.fillStyle = "rgb(36 33 30)";
+      c.arc(printX + side * SX, yDeck + spoolR + 0.22 * L, spoolR * 1.04, 0, TAU);
+      c.fillStyle = DECK_SHADE;
       c.fill();
-      c.clip();
-      c.shadowColor = "rgb(0 0 0 / 0.7)";
-      c.shadowBlur = 10;
-      c.lineWidth = 8;
-      c.strokeStyle = "rgb(0 0 0 / 1)";
-      c.beginPath();
-      c.arc(cx, cy, spoolR * 1.1 + 4, 0, TAU);
-      c.stroke();
-      c.restore();
-      c.beginPath();
-      c.arc(cx, cy, spoolR * 1.1, 0, TAU);
-      c.lineWidth = 1.5;
-      c.strokeStyle = "rgb(255 255 255 / 0.55)";
-      c.stroke();
-      c.beginPath();
-      c.arc(cx, cy, spoolR * 1.1 + 1.5, Math.PI * 0.15, Math.PI * 1.15);
-      c.strokeStyle = "rgb(60 50 40 / 0.25)";
-      c.stroke();
     }
     c.restore();
 
@@ -451,33 +414,15 @@ export default class TypewriterEngine {
     c.clip();
     c.beginPath();
     this.wellPath(c);
-    c.save();
-    c.clip();
-    const well = c.createRadialGradient(printX, fy, L * 0.8, printX, fy, wellR);
-    well.addColorStop(0, "rgb(30 28 26)");
-    well.addColorStop(0.6, "rgb(24 22 21)");
-    well.addColorStop(1, "rgb(14 13 12)");
-    c.fillStyle = well;
-    c.fillRect(0, 0, W, H);
-    c.beginPath();
-    c.arc(printX, fy, L * 2.06, Math.PI / 2 - g.wellA, Math.PI / 2 + g.wellA);
-    c.arc(printX, fy, L * 1.86, Math.PI / 2 + g.wellA, Math.PI / 2 - g.wellA, true);
-    c.closePath();
-    c.fillStyle = "rgb(58 60 52)";
-    c.fill();
-    c.fillStyle = c.createPattern(grain, "repeat");
+    c.fillStyle = CHARCOAL;
     c.fill();
     c.beginPath();
-    c.arc(printX, fy, L * 1.1, Math.PI / 2 - g.wellA, Math.PI / 2 + g.wellA);
-    c.arc(printX, fy, L * 0.9, Math.PI / 2 + g.wellA, Math.PI / 2 - g.wellA, true);
+    c.arc(printX, fy, L * 1.1, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
+    c.arc(printX, fy, L * 0.9, Math.PI / 2 + wellA, Math.PI / 2 - wellA, true);
     c.closePath();
-    const seg = c.createRadialGradient(printX, fy, L * 0.9, printX, fy, L * 1.1);
-    seg.addColorStop(0, "rgb(70 72 75)");
-    seg.addColorStop(0.5, "rgb(120 122 126)");
-    seg.addColorStop(1, "rgb(64 66 69)");
-    c.fillStyle = seg;
+    c.fillStyle = STEEL_DARK;
     c.fill();
-    c.strokeStyle = "rgb(20 20 22 / 0.8)";
+    c.strokeStyle = CHARCOAL;
     c.lineWidth = 1;
     for (const a of angles) {
       const ux = Math.sin(a);
@@ -487,63 +432,12 @@ export default class TypewriterEngine {
       c.lineTo(printX + ux * L * 1.1, fy + uy * L * 1.1);
       c.stroke();
     }
-    c.shadowColor = "rgb(0 0 0 / 0.75)";
-    c.shadowBlur = 14;
-    c.lineWidth = 10;
-    c.strokeStyle = "rgb(0 0 0)";
     c.beginPath();
-    this.wellPath(c);
+    c.arc(printX, fy, wellR, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
+    c.lineWidth = 2;
+    c.strokeStyle = STEEL;
     c.stroke();
     c.restore();
-    c.beginPath();
-    this.wellPath(c);
-    c.lineWidth = 1.25;
-    c.strokeStyle = "rgb(255 255 255 / 0.45)";
-    c.stroke();
-    c.restore();
-
-    const lampX = -0.18 * W;
-    const lampY = -0.3 * H;
-    const diag = Math.hypot(W, H);
-    const lamp = c.createRadialGradient(lampX, lampY, diag * 0.3, lampX, lampY, diag * 1.3);
-    lamp.addColorStop(0, "rgb(255 255 255)");
-    lamp.addColorStop(0.35, "rgb(246 246 246)");
-    lamp.addColorStop(0.7, "rgb(228 228 228)");
-    lamp.addColorStop(1, "rgb(214 214 214)");
-    c.save();
-    c.globalCompositeOperation = "multiply";
-    c.fillStyle = lamp;
-    c.fillRect(0, yDeck, W, H - yDeck + 2);
-    c.restore();
-    c.save();
-    c.globalCompositeOperation = "destination-in";
-    c.fillStyle = "#000";
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck + 2);
-    c.fill();
-    c.restore();
-  }
-
-  grainTile() {
-    if (this.grain) return this.grain;
-    const size = 128;
-    const canvas = document.createElement("canvas");
-    canvas.width = size;
-    canvas.height = size;
-    const ctx = canvas.getContext("2d");
-    const img = ctx.createImageData(size, size);
-    const r = seeded(4242);
-    for (let i = 0; i < size * size; i += 1) {
-      const v = r();
-      const light = v > 0.5;
-      img.data[i * 4] = light ? 255 : 40;
-      img.data[i * 4 + 1] = light ? 255 : 34;
-      img.data[i * 4 + 2] = light ? 255 : 28;
-      img.data[i * 4 + 3] = Math.round(Math.abs(v - 0.5) * 2 * 16);
-    }
-    ctx.putImageData(img, 0, 0);
-    this.grain = canvas;
-    return canvas;
   }
 
   barPose(index, theta) {
@@ -565,31 +459,15 @@ export default class TypewriterEngine {
 
   drawBar(c, pose, flying) {
     const { L, pitch } = this.geo;
-    const { a, px, py, sx, sy, z, s, st, theta } = pose;
+    const { a, px, py, sx, sy, s, theta } = pose;
     const w = L * 0.042 * (1 + (s - 1) * 0.9);
-    c.save();
-    if (flying) {
-      c.shadowColor = `rgb(20 16 10 / ${(0.12 + 0.2 * st).toFixed(3)})`;
-      c.shadowBlur = 3 + 7 * st;
-      c.shadowOffsetX = 1 + z * 0.26;
-      c.shadowOffsetY = 2 + z * 0.36;
-    }
     c.lineCap = "round";
-    c.strokeStyle = "rgb(52 54 57)";
+    c.strokeStyle = flying ? STEEL : STEEL_DARK;
     c.lineWidth = w;
     c.beginPath();
     c.moveTo(px, py);
     c.lineTo(sx, sy);
     c.stroke();
-    c.shadowColor = "transparent";
-    c.strokeStyle = "rgb(178 181 185)";
-    c.lineWidth = w * 0.32;
-    c.beginPath();
-    c.moveTo(px - w * 0.18, py - w * 0.18);
-    c.lineTo(sx - w * 0.18, sy - w * 0.18);
-    c.stroke();
-    c.restore();
-
     const face = Math.sin(Math.min(Math.PI, theta) * 0.5);
     const restW = Math.max(3, ((2 * this.geo.A) / (this.geo.angles.length - 1)) * 2 * L * 0.85);
     const sw = (restW + (pitch * 1.15 - restW) * face) * s;
@@ -597,17 +475,7 @@ export default class TypewriterEngine {
     c.save();
     c.translate(sx, sy);
     c.rotate(-a);
-    if (flying) {
-      c.shadowColor = `rgb(20 16 10 / ${(0.15 + 0.22 * st).toFixed(3)})`;
-      c.shadowBlur = 3 + 8 * st;
-      c.shadowOffsetX = 1 + z * 0.26;
-      c.shadowOffsetY = 2 + z * 0.36;
-    }
-    const grad = c.createLinearGradient(-sw / 2, -sh / 2, sw / 2, sh / 2);
-    grad.addColorStop(0, "rgb(196 198 201)");
-    grad.addColorStop(0.45, "rgb(120 122 126)");
-    grad.addColorStop(1, "rgb(58 60 63)");
-    c.fillStyle = grad;
+    c.fillStyle = flying ? STEEL_LIGHT : STEEL;
     c.beginPath();
     c.roundRect(-sw / 2, -sh / 2, sw, sh, Math.min(sw, sh) * 0.2);
     c.fill();
@@ -637,7 +505,6 @@ export default class TypewriterEngine {
     const hx = this.headX();
 
     this.drawBail(c, hx);
-    this.drawLever(c, hx);
 
     c.drawImage(this.cache, 0, 0, W, H);
 
@@ -656,46 +523,28 @@ export default class TypewriterEngine {
     }
     c.restore();
 
+    const spoolY = yDeck + spoolR + 0.22 * L;
     for (const side of [-1, 1]) {
       const cx = printX + side * SX;
-      const cy = yDeck + spoolR + 0.22 * L;
       const rot = this.spool * (side < 0 ? 1 : 0.92);
       c.save();
-      c.translate(cx, cy);
-      const coil = c.createRadialGradient(-spoolR * 0.2, -spoolR * 0.25, spoolR * 0.1, 0, 0, spoolR * 0.9);
-      coil.addColorStop(0, "rgb(52 50 52)");
-      coil.addColorStop(0.7, "rgb(30 29 31)");
-      coil.addColorStop(1, "rgb(18 17 18)");
-      c.fillStyle = coil;
+      c.translate(cx, spoolY);
+      c.fillStyle = CHARCOAL;
       c.beginPath();
       c.arc(0, 0, spoolR * (side < 0 ? 0.92 : 0.8), 0, TAU);
       c.fill();
-      c.strokeStyle = "rgb(255 255 255 / 0.05)";
-      c.lineWidth = 1;
-      for (let k = 1; k < 6; k += 1) {
-        c.beginPath();
-        c.arc(0, 0, spoolR * (0.36 + k * 0.1), 0, TAU);
-        c.stroke();
-      }
       c.rotate(rot);
-      const hub = c.createLinearGradient(-spoolR * 0.4, -spoolR * 0.4, spoolR * 0.4, spoolR * 0.4);
-      hub.addColorStop(0, "rgb(232 233 235)");
-      hub.addColorStop(0.5, "rgb(150 152 156)");
-      hub.addColorStop(1, "rgb(92 94 98)");
-      c.fillStyle = hub;
+      c.fillStyle = STEEL_LIGHT;
       c.beginPath();
-      c.arc(0, 0, spoolR * 0.36, 0, TAU);
+      c.arc(0, 0, spoolR * 0.34, 0, TAU);
       c.fill();
-      c.fillStyle = "rgb(30 29 31)";
+      c.fillStyle = CHARCOAL;
       for (let k = 0; k < 3; k += 1) {
         const ang = (k * TAU) / 3;
         c.beginPath();
-        c.arc(Math.cos(ang) * spoolR * 0.2, Math.sin(ang) * spoolR * 0.2, spoolR * 0.07, 0, TAU);
+        c.arc(Math.cos(ang) * spoolR * 0.18, Math.sin(ang) * spoolR * 0.18, spoolR * 0.06, 0, TAU);
         c.fill();
       }
-      c.beginPath();
-      c.arc(0, 0, spoolR * 0.06, 0, TAU);
-      c.fill();
       c.restore();
     }
 
@@ -703,7 +552,6 @@ export default class TypewriterEngine {
     const top0 = yP + lineH * 0.34;
     const hR = lineH * 1.45;
     const liftPx = lineH * 1.0 * lift;
-    const spoolY = yDeck + spoolR + 0.22 * L;
     const reach = SX - spoolR * 0.15;
     const N = 48;
     const smooth = (a, b, x) => {
@@ -735,59 +583,19 @@ export default class TypewriterEngine {
       }
       c.closePath();
     };
-    c.save();
-    c.shadowColor = "rgb(20 14 8 / 0.34)";
-    c.shadowBlur = 10;
-    c.shadowOffsetX = 3;
-    c.shadowOffsetY = 5 + lift * 3;
     band(0, 1);
-    c.fillStyle = "rgb(24 24 27)";
+    c.fillStyle = CHARCOAL;
     c.fill();
-    c.restore();
     band(0.5, 1);
-    c.fillStyle = "rgb(112 28 28)";
-    c.fill();
-    band(0, 1);
-    c.save();
-    c.globalAlpha = 0.14;
-    c.fillStyle = this.weavePattern;
-    c.fill();
-    c.restore();
-    const gloss = c.createLinearGradient(0, top0 - liftPx, 0, top0 - liftPx + hR);
-    gloss.addColorStop(0, "rgb(255 255 255 / 0.2)");
-    gloss.addColorStop(0.06, "rgb(255 255 255 / 0.07)");
-    gloss.addColorStop(0.3, "rgb(255 255 255 / 0.02)");
-    gloss.addColorStop(0.5, "rgb(0 0 0 / 0)");
-    gloss.addColorStop(0.8, "rgb(0 0 0 / 0.1)");
-    gloss.addColorStop(1, "rgb(0 0 0 / 0.32)");
-    c.fillStyle = gloss;
-    c.fill();
-    const fade = c.createLinearGradient(printX - reach, 0, printX + reach, 0);
-    fade.addColorStop(0, "rgb(0 0 0 / 0.45)");
-    fade.addColorStop(0.18, "rgb(0 0 0 / 0.1)");
-    fade.addColorStop(0.32, "rgb(0 0 0 / 0)");
-    fade.addColorStop(0.68, "rgb(0 0 0 / 0)");
-    fade.addColorStop(0.82, "rgb(0 0 0 / 0.1)");
-    fade.addColorStop(1, "rgb(0 0 0 / 0.45)");
-    c.fillStyle = fade;
+    c.fillStyle = RIBBON_RED;
     c.fill();
     for (const side of [-1, 1]) {
       const gx = printX + side * RS;
       const [gy, gh] = shape(gx);
-      const post = c.createLinearGradient(gx - 4, 0, gx + 4, 0);
-      post.addColorStop(0, "rgb(120 122 126)");
-      post.addColorStop(0.35, "rgb(236 237 239)");
-      post.addColorStop(1, "rgb(96 98 102)");
-      c.save();
-      c.shadowColor = "rgb(20 14 8 / 0.3)";
-      c.shadowBlur = 4;
-      c.shadowOffsetX = 2;
-      c.shadowOffsetY = 3;
-      c.fillStyle = post;
+      c.fillStyle = STEEL_LIGHT;
       c.beginPath();
-      c.roundRect(gx - 3, gy - 3, 6, gh + 6, 3);
+      c.roundRect(gx - 3, gy - 4, 6, gh + 8, 3);
       c.fill();
-      c.restore();
     }
     this.drawGuide(c);
 
@@ -802,31 +610,19 @@ export default class TypewriterEngine {
     const y = yP + lineH * 0.3;
     const h = Math.max(6, lineH * 0.34);
     const half = pitch * 4.5;
-    c.save();
-    c.shadowColor = "rgb(20 14 8 / 0.3)";
-    c.shadowBlur = 4;
-    c.shadowOffsetX = 1;
-    c.shadowOffsetY = 2;
-    const plate = c.createLinearGradient(0, y, 0, y + h);
-    plate.addColorStop(0, "rgb(246 246 247)");
-    plate.addColorStop(0.3, "rgb(196 198 201)");
-    plate.addColorStop(1, "rgb(128 130 134)");
-    c.fillStyle = plate;
+    c.fillStyle = STEEL_LIGHT;
     const notch = Math.min(h * 0.6, pitch * 0.4);
     c.beginPath();
-    c.moveTo(printX - half, y + 2);
-    c.quadraticCurveTo(printX - half, y, printX - half + 2, y);
+    c.moveTo(printX - half, y);
     c.lineTo(printX - notch, y);
     c.lineTo(printX, y + notch);
     c.lineTo(printX + notch, y);
-    c.lineTo(printX + half - 2, y);
-    c.quadraticCurveTo(printX + half, y, printX + half, y + 2);
+    c.lineTo(printX + half, y);
     c.lineTo(printX + half, y + h);
     c.lineTo(printX - half, y + h);
     c.closePath();
     c.fill();
-    c.restore();
-    c.strokeStyle = "rgb(40 40 44 / 0.6)";
+    c.strokeStyle = CHARCOAL;
     c.lineWidth = 1;
     for (let k = -4; k <= 4; k += 1) {
       if (k === 0) continue;
@@ -847,89 +643,8 @@ export default class TypewriterEngine {
     const xl = Math.max(-10, printX + (CAR_LEFT + 2.5 - hx) * pitch);
     const xr = Math.min(W + 10, printX + (CAR_RIGHT - 2.5 - hx) * pitch);
     if (xr <= xl) return;
-    const rod = Math.max(4, pitch * 0.3);
-    const shade = c.createLinearGradient(0, y, 0, y + rod * 3.2);
-    shade.addColorStop(0, "rgb(40 30 20 / 0.12)");
-    shade.addColorStop(0.4, "rgb(40 30 20 / 0.05)");
-    shade.addColorStop(1, "rgb(40 30 20 / 0)");
-    c.fillStyle = shade;
-    c.fillRect(xl + 4, y + rod * 0.6, xr - xl, rod * 3.2);
-    const metal = c.createLinearGradient(0, y - rod / 2, 0, y + rod / 2);
-    metal.addColorStop(0, "rgb(250 250 251)");
-    metal.addColorStop(0.35, "rgb(206 208 211)");
-    metal.addColorStop(0.7, "rgb(110 112 116)");
-    metal.addColorStop(1, "rgb(160 162 166)");
-    c.fillStyle = metal;
-    c.fillRect(xl, y - rod / 2, xr - xl, rod);
-    for (const X of [14, 71]) {
-      const x = printX + (X - hx) * pitch;
-      if (x < -60 || x > W + 60) continue;
-      const rw = pitch * 1.9;
-      const rh = rod * 2.3;
-      c.save();
-      c.shadowColor = "rgb(30 20 10 / 0.3)";
-      c.shadowBlur = 4;
-      c.shadowOffsetX = 2;
-      c.shadowOffsetY = 3;
-      const rub = c.createLinearGradient(0, y - rh / 2, 0, y + rh / 2);
-      rub.addColorStop(0, "rgb(96 94 92)");
-      rub.addColorStop(0.3, "rgb(52 50 50)");
-      rub.addColorStop(1, "rgb(22 21 21)");
-      c.fillStyle = rub;
-      c.beginPath();
-      c.roundRect(x - rw / 2, y - rh / 2, rw, rh, rh * 0.45);
-      c.fill();
-      c.restore();
-    }
-  }
-
-  drawLever(c, hx) {
-    const { printX, yP, lineH, pitch, R } = this.geo;
-    const baseX = printX + (CAR_LEFT + 1 - hx) * pitch;
-    if (baseX < -lineH * 6) return;
-    const baseY = yP - R * 0.25;
-    const ang = -2.55 + this.lever.x * 0.3;
-    const len = lineH * 3.4;
-    const ex = baseX + Math.cos(ang) * len;
-    const ey = baseY + Math.sin(ang) * len;
-    c.save();
-    c.shadowColor = "rgb(20 14 8 / 0.3)";
-    c.shadowBlur = 6;
-    c.shadowOffsetX = 3;
-    c.shadowOffsetY = 5;
-    c.lineCap = "round";
-    c.strokeStyle = "rgb(150 152 156)";
-    c.lineWidth = pitch * 0.42;
-    c.beginPath();
-    c.moveTo(baseX, baseY);
-    c.lineTo(ex, ey);
-    c.stroke();
-    c.shadowColor = "transparent";
-    c.strokeStyle = "rgb(236 237 239)";
-    c.lineWidth = pitch * 0.14;
-    c.beginPath();
-    c.moveTo(baseX - 1, baseY - 2);
-    c.lineTo(ex - 1, ey - 2);
-    c.stroke();
-    c.translate(ex, ey);
-    c.rotate(ang + Math.PI / 2);
-    const pad = c.createLinearGradient(-pitch, 0, pitch, 0);
-    pad.addColorStop(0, "rgb(246 246 247)");
-    pad.addColorStop(0.5, "rgb(180 182 186)");
-    pad.addColorStop(1, "rgb(110 112 116)");
-    c.fillStyle = pad;
-    c.beginPath();
-    c.roundRect(-pitch * 1.1, -pitch * 0.45, pitch * 2.2, pitch * 0.9, pitch * 0.45);
-    c.fill();
-    c.restore();
-    const boss = c.createRadialGradient(baseX - pitch * 0.2, baseY - pitch * 0.25, 1, baseX, baseY, pitch * 0.75);
-    boss.addColorStop(0, "rgb(250 250 251)");
-    boss.addColorStop(0.5, "rgb(170 172 176)");
-    boss.addColorStop(1, "rgb(80 82 86)");
-    c.fillStyle = boss;
-    c.beginPath();
-    c.arc(baseX, baseY, pitch * 0.7, 0, TAU);
-    c.fill();
+    c.fillStyle = STEEL;
+    c.fillRect(xl, Math.round(y) - 1, xr - xl, 2);
   }
 
   barTheta(t) {

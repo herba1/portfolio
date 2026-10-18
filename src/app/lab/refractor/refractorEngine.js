@@ -1,4 +1,4 @@
-import { CARDS, FOILS } from "./refractorCards";
+import { FOILS } from "./refractorCards";
 import { createRefractorGL } from "./refractorGL";
 import { prepareCard } from "./refractorPrep";
 
@@ -41,12 +41,13 @@ function rotation(yaw, pitch, roll) {
   return new Float32Array(mul(mul(ry, rx), rz));
 }
 
-export function createRefractorEngine({ box, stage, canvas, insets, embedded, onSelect, onFoil, onReady, onFail, onMotion }) {
+export function createRefractorEngine({ box, stage, canvas, insets, embedded, cards: initialCards, onSelect, onRiffle, onFoil, onReady, onFail, onMotion }) {
+  let CARDS = initialCards;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const coarse = window.matchMedia("(pointer: coarse)").matches;
   const view = { width: 1, height: 1, dpr: 1, cx: 0, cy: 0, hh: 100 };
   const body = { yaw: 0, pitch: 0, vyaw: 0, vpitch: 0, lift: 0, vlift: 0 };
-  const pointer = { mode: null, id: null, type: "mouse", x: 0, y: 0, sx: 0, sy: 0, px: 0, py: 0, vx: 0, vy: 0, inside: false, yaw0: 0, pitch0: 0 };
+  const pointer = { mode: null, id: null, type: "mouse", x: 0, y: 0, sx: 0, sy: 0, px: 0, py: 0, vx: 0, vy: 0, inside: false, yaw0: 0, pitch0: 0, trail: [] };
   const hold = { yaw: 0, pitch: 0, until: 0, fresh: false, active: false };
   const orient = { on: false, gamma: 0, beta: 0, baseG: null, baseB: null };
   const foil = { from: 0, to: 0, t: 1 };
@@ -70,6 +71,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
   let quality = 1;
   let interval = 16;
   let lastFront = true;
+  let riffle = null;
 
   function aspectOf(idx) {
     return preps.get(CARDS[idx].key)?.aspect || 660 / 1200;
@@ -102,12 +104,12 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
     wake();
   }
 
-  function loadImage(idx) {
-    const spec = CARDS[idx];
+  function loadImage(spec) {
     if (images.has(spec.key)) return images.get(spec.key);
     const promise = new Promise((resolve, reject) => {
       const img = new Image();
       img.decoding = "async";
+      if (spec.remote) img.crossOrigin = "anonymous";
       img.src = spec.src;
       img
         .decode()
@@ -119,14 +121,14 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
   }
 
   function ensure(idx) {
-    const spec = CARDS[idx];
-    return loadImage(idx).then((img) => {
+    return ensureSpec(CARDS[idx]);
+  }
+
+  function ensureSpec(spec) {
+    return loadImage(spec).then((img) => {
       if (destroyed || !gl) return false;
       if (!preps.has(spec.key)) preps.set(spec.key, prepareCard(spec, img, box));
-      if (!gl.has(spec.key)) {
-        gl.evict([CARDS[shown].key, CARDS[active].key, spec.key]);
-        gl.build(spec.key, img, preps.get(spec.key));
-      }
+      if (!gl.has(spec.key)) gl.build(spec.key, preps.get(spec.key).front, preps.get(spec.key));
       return true;
     });
   }
@@ -152,8 +154,14 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
         onReady();
         wake();
         if (!embedded) {
-          const later = window.requestIdleCallback || ((fn) => window.setTimeout(fn, 500));
-          later(() => CARDS.forEach((_, i) => i !== active && loadImage(i).catch(() => {})));
+          const later = (fn) => (window.requestIdleCallback ? window.requestIdleCallback(fn, { timeout: 900 }) : window.setTimeout(fn, 300));
+          const warm = (i) => {
+            if (destroyed || i >= CARDS.length) return;
+            const next = () => later(() => warm(i + 1));
+            if (i === active) next();
+            else ensure(i).then(next, next);
+          };
+          later(() => warm(0));
         }
       })
       .catch(() => {
@@ -172,7 +180,31 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
     hold.active = false;
   }
 
-  function select(idx) {
+  function setCards(list) {
+    if (!list.length || list.map((c) => c.key).join() === CARDS.map((c) => c.key).join()) return;
+    if (!gl) {
+      CARDS = list;
+      active = shown = 0;
+      onSelect(0);
+      return;
+    }
+    ensureSpec(list[0])
+      .then((ok) => {
+        if (!ok) return;
+        const keep = list.map((c) => c.key);
+        CARDS = list;
+        active = shown = 0;
+        riffle = null;
+        gl.evict(keep);
+        onSelect(0);
+        layout();
+        wake();
+        list.slice(1).forEach((spec) => ensureSpec(spec).catch(() => {}));
+      })
+      .catch(() => {});
+  }
+
+  function select(idx, dirn = 1) {
     if (idx === active || idx < 0 || idx >= CARDS.length) return;
     active = idx;
     onSelect(idx);
@@ -186,7 +218,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
         wake();
       })
       .catch(() => {});
-    if (!reduced && ready) spinBy(1, 7.5);
+    if (!reduced && ready) spinBy(dirn, 7.5);
     wake();
   }
 
@@ -228,9 +260,11 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
     pointer.x = pointer.sx = pointer.px = x;
     pointer.y = pointer.sy = pointer.py = y;
     pointer.vx = pointer.vy = 0;
+    pointer.trail = [{ x, y, t: e.timeStamp }];
     pointer.yaw0 = body.yaw;
     pointer.pitch0 = body.pitch;
     coast = null;
+    riffle = null;
     hold.active = false;
     wake();
   }
@@ -241,6 +275,8 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
       if (e.pointerId !== pointer.id) return;
       pointer.x = x;
       pointer.y = y;
+      pointer.trail.push({ x, y, t: e.timeStamp });
+      if (pointer.trail.length > 12) pointer.trail.shift();
       wake();
       return;
     }
@@ -256,6 +292,18 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
 
   function onUp(e) {
     if (pointer.mode !== "drag" || e.pointerId !== pointer.id) return;
+    const recent = pointer.trail.filter((p) => e.timeStamp - p.t < 90);
+    const all = pointer.trail;
+    const trail = recent.length > 1 ? recent : all.length > 1 && all[all.length - 1].t - all[all.length - 2].t < 600 && e.timeStamp - all[all.length - 1].t < 90 ? all.slice(-2) : recent;
+    if (trail.length > 1) {
+      const a = trail[0];
+      const b = trail[trail.length - 1];
+      const span = Math.max(0.016, (b.t - a.t) / 1000);
+      pointer.vx = (b.x - a.x) / span;
+      pointer.vy = (b.y - a.y) / span;
+    } else if (e.timeStamp - pointer.trail[pointer.trail.length - 1].t > 90) {
+      pointer.vx = pointer.vy = 0;
+    }
     pointer.id = null;
     pointer.mode = pointer.type === "mouse" && pointer.inside && e.type !== "pointercancel" ? "hover" : null;
     release = true;
@@ -287,11 +335,12 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
     else if (e.key === "ArrowDown") setHold(base.yaw, base.pitch - 4 * DEG);
     else if (e.key === "Home" || e.key === "0") setHold(0, 0);
     else if (e.key === " " || e.key === "Enter") {
-      if (!reduced) spinBy(e.shiftKey ? -1 : 1, 7.5);
+      const dirn = e.shiftKey ? -1 : 1;
+      select((active + dirn + CARDS.length) % CARDS.length, dirn);
       wake();
     } else if (/^[1-3]$/.test(e.key)) setFoil(Number(e.key) - 1);
     else if (e.key === "]") select((active + 1) % CARDS.length);
-    else if (e.key === "[") select((active + CARDS.length - 1) % CARDS.length);
+    else if (e.key === "[") select((active + CARDS.length - 1) % CARDS.length, -1);
     else handled = false;
     if (handled) e.preventDefault();
   }
@@ -382,6 +431,9 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
         while ((target - body.yaw) / body.vyaw > 1.9 && (target - TAU * dirn - body.yaw) / body.vyaw >= 0.4) target -= TAU * dirn;
         coast = { target, tau: (target - body.yaw) / body.vyaw };
         home = target;
+        const turns = clamp(Math.round(Math.abs(target - body.yaw) / TAU), 1, CARDS.length - 1);
+        riffle = { dir: dirn, left: turns };
+        for (let k = 1; k <= turns; k += 1) ensure((((shown + dirn * k) % CARDS.length) + CARDS.length) % CARDS.length).catch(() => {});
       } else {
         home = Math.round(body.yaw / TAU) * TAU;
       }
@@ -439,6 +491,23 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
       body.yaw -= wrap;
     }
     const front = Math.cos(body.yaw) * Math.cos(body.pitch) > 0;
+    if (riffle && !front && lastFront && gl) {
+      const next = (((shown + riffle.dir) % CARDS.length) + CARDS.length) % CARDS.length;
+      if (gl.has(CARDS[next].key)) {
+        active = shown = next;
+        onSelect(next);
+        onRiffle?.(riffle.dir);
+        layout();
+        riffle.left -= 1;
+      } else {
+        active = next;
+        onSelect(next);
+        ensure(next).catch(() => {});
+        riffle.left = 0;
+      }
+      if (riffle.left <= 0) riffle = null;
+    }
+    if (riffle && !coast && !dragging) riffle = null;
     if (shown !== active && gl && gl.has(CARDS[active].key) && (reduced || (!front && lastFront) || (!front && !coast))) {
       shown = active;
       layout();
@@ -548,6 +617,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, on
 
   return {
     select: (idx) => select(idx),
+    setCards: (list) => setCards(list),
     setFoil: (idx) => setFoil(idx),
     motionAvailable: () => coarse && typeof window.DeviceOrientationEvent !== "undefined",
     enableMotion,

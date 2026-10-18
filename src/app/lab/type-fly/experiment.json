@@ -1,0 +1,10 @@
+{
+  "title": "Type Fly",
+  "description": "An album title set flat under its cover. Hover or press and every letter lifts off the line, grows its depth and flies into a square ring around the record, the album's own shape in 3D; drag to spin the ring and the sleeve turns to show its tracklist. Let go and the letters fly home in order.",
+  "tags": ["Type", "Motion", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T12:00:00.000Z",
+  "intent": "One type mechanic finished to the edge: characters fly from their 2D line into an extruded 3D arrangement on per-letter springs, interruptible at every moment.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://herb.art/lab/ascii-bust", "https://en.wikipedia.org/wiki/Abbey_Road"]
+}

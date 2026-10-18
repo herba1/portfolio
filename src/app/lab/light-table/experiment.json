@@ -1,6 +1,6 @@
 {
   "title": "Light Table",
-  "description": "Mounted slides and orange-masked negative strips on a glowing light table. Slide the film around on the glass, stack two transparencies into a double exposure, and park the loupe on a negative to see it as a positive.",
+  "description": "Mounted slides and orange-masked negative strips shot from Beatles sleeves (With the Beatles, A Hard Day's Night, Rubber Soul, Magical Mystery Tour, Let It Be) on a glowing light table. Slide the film around the glass and stack two transparencies into a double exposure.",
   "tags": [
     "WebGL",
     "Film",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge: real transparencies over a real light source, where stacking multiplies light and the loupe turns a negative back into the picture it holds.",
+  "intent": "One optical material finished to the edge: real transparencies over a real light source, where stacking multiplies light and a negative only gives up its picture when you know how to read it.",
   "tile": {
     "cols": 4,
     "rows": 4
@@ -17,7 +17,6 @@
     "https://en.wikipedia.org/wiki/Light_table",
     "https://en.wikipedia.org/wiki/135_film",
     "https://en.wikipedia.org/wiki/Negative_(photography)",
-    "https://en.wikipedia.org/wiki/Reversal_film",
-    "https://tympanus.net/Tutorials/PointerSquareLensDistortion"
+    "https://en.wikipedia.org/wiki/Reversal_film"
   ]
 }

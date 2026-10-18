@@ -1,7 +1,7 @@
 import { createChatter } from "./cassetteAudio";
 import { PENCIL, SHELL, buildWorld, setPackTop } from "./cassetteModels";
 import { HUBS, SIDE_SECONDS, TOTAL, TAPE_HALF, TAPE_Y, MOUTH, createTape, loopHeightFor, packRadius, stepTape, tapePath, tapeSeconds } from "./cassetteTape";
-import { JCARD, drawCounter } from "./cassetteTextures";
+import { JCARD, drawCounter, jcardCanvas, labelCanvas } from "./cassetteTextures";
 
 const MAX_DPR = 2;
 const FOV = 24;
@@ -29,7 +29,7 @@ function format(seconds) {
   return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
 }
 
-export async function createCassetteEngine({ box, stage, canvas, insets, embedded, onReady, onFail, onSound, onPencil, onAnnounce }) {
+export async function createCassetteEngine({ box, stage, canvas, insets, embedded, mix, onReady, onFail, onSound, onPencil, onAnnounce }) {
   const THREE = await import("three");
   const { RoomEnvironment } = await import("three/examples/jsm/environments/RoomEnvironment.js");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -55,7 +55,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   scene.environmentIntensity = 0.36;
   pmrem.dispose();
 
-  const world = buildWorld(THREE, renderer);
+  const world = buildWorld(THREE, renderer, mix);
   scene.add(world.root);
 
   const lamp = new THREE.SpotLight(0xffe2c0, 3.1, 0, 0.6, 0.9, 0);
@@ -821,9 +821,19 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   visible = true;
   wake();
 
+  function setMix(next) {
+    if (destroyed) return;
+    world.labelTex.image = labelCanvas(next);
+    world.labelTex.needsUpdate = true;
+    world.jTex.image = jcardCanvas(next);
+    world.jTex.needsUpdate = true;
+    wake();
+  }
+
   return {
     toggleSound,
     togglePencil,
+    setMix,
     destroy() {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);

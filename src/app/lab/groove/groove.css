@@ -201,6 +201,20 @@
   }
 }
 
+.groove-chip-name {
+  white-space: nowrap;
+}
+
+@container (max-width: 639px) {
+  .groove-chip:not([aria-checked="true"]) {
+    padding-inline: 4px;
+  }
+
+  .groove-chip:not([aria-checked="true"]) .groove-chip-name {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .groove-canvas {
     filter: none;

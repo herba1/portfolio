@@ -1,28 +1,7 @@
-import { RAKING_BAKE, RAKING_FRAGMENT, RAKING_VERTEX } from "./rakingShader";
+import { CELL } from "./rakingBadges";
+import { RAKING_FRAGMENT, RAKING_VERTEX } from "./rakingShader";
 
-const MAIN_UNIFORMS = [
-  "uRes",
-  "uView",
-  "uCard",
-  "uShape",
-  "uWarp",
-  "uCrease",
-  "uFold",
-  "uCorners",
-  "uLamp",
-  "uLight",
-  "uMicro",
-  "uMat",
-  "uBounds",
-  "uInk",
-  "uHasCard",
-  "uFront",
-  "uBack",
-  "uFrontBake",
-  "uBackBake",
-];
-
-const BAKE_UNIFORMS = ["uSrc", "uSize", "uDims", "uPrint", "uPrint2"];
+const UNIFORMS = ["uRes", "uScale", "uRect", "uLift", "uLamp", "uBulb", "uFalloff", "uSteps", "uCell", "uAlbedo", "uHeight", "uMat"];
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -36,17 +15,14 @@ function compile(gl, type, source) {
   return shader;
 }
 
-function link(gl, vsSource, fsSource, names) {
-  const vs = compile(gl, gl.VERTEX_SHADER, vsSource);
-  const fs = compile(gl, gl.FRAGMENT_SHADER, fsSource);
-  const program = gl.createProgram();
-  gl.attachShader(program, vs);
-  gl.attachShader(program, fs);
-  gl.linkProgram(program);
-  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "link failed");
-  const loc = {};
-  for (const name of names) loc[name] = gl.getUniformLocation(program, name);
-  return { program, vs, fs, loc };
+function texture(gl) {
+  const tex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return tex;
 }
 
 export function createRakingGL(canvas) {
@@ -60,127 +36,117 @@ export function createRakingGL(canvas) {
     powerPreference: "high-performance",
   });
   if (!gl) return null;
-
-  const main = link(gl, RAKING_VERTEX, RAKING_FRAGMENT, MAIN_UNIFORMS);
-  const bake = link(gl, RAKING_VERTEX, RAKING_BAKE, BAKE_UNIFORMS);
+  const vs = compile(gl, gl.VERTEX_SHADER, RAKING_VERTEX);
+  const fs = compile(gl, gl.FRAGMENT_SHADER, RAKING_FRAGMENT);
+  const program = gl.createProgram();
+  gl.attachShader(program, vs);
+  gl.attachShader(program, fs);
+  gl.linkProgram(program);
+  gl.deleteShader(vs);
+  gl.deleteShader(fs);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "link failed");
+  const loc = {};
+  for (const name of UNIFORMS) loc[name] = gl.getUniformLocation(program, name);
   const vao = gl.createVertexArray();
-  const anisotropy = gl.getExtension("EXT_texture_filter_anisotropic");
-  const sets = new Map();
-  const owned = [];
+  const albedoTex = texture(gl);
+  const heightTex = texture(gl);
+  const matTex = texture(gl);
+  gl.bindTexture(gl.TEXTURE_2D, matTex);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  let ready = false;
 
-  function makeTexture(source, width, height) {
-    const texture = gl.createTexture();
-    owned.push(texture);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
+  function upload(badges) {
+    const W = CELL * badges.length;
+    const atlas = document.createElement("canvas");
+    atlas.width = W;
+    atlas.height = CELL;
+    const actx = atlas.getContext("2d");
+    const height = new Float32Array(W * CELL);
+    const mat = new Uint8Array(W * CELL * 4);
+    badges.forEach((b, i) => {
+      actx.drawImage(b.albedo, i * CELL, 0);
+      for (let y = 0; y < CELL; y += 1) {
+        height.set(b.height.subarray(y * CELL, (y + 1) * CELL), y * W + i * CELL);
+        mat.set(b.mat.subarray(y * CELL * 4, (y + 1) * CELL * 4), (y * W + i * CELL) * 4);
+      }
+    });
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    if (source) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.bindTexture(gl.TEXTURE_2D, albedoTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    if (anisotropy) gl.texParameterf(gl.TEXTURE_2D, anisotropy.TEXTURE_MAX_ANISOTROPY_EXT, 4);
-    if (source) gl.generateMipmap(gl.TEXTURE_2D);
-    return texture;
-  }
-
-  function bakeSide(src, width, height, card, side) {
-    const target = makeTexture(null, width, height);
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, target, 0);
-    gl.viewport(0, 0, width, height);
-    gl.useProgram(bake.program);
-    gl.bindVertexArray(vao);
-    gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, src);
-    gl.uniform1i(bake.loc.uSrc, 0);
-    gl.uniform2f(bake.loc.uSize, width, height);
-    gl.uniform4f(bake.loc.uDims, card.hw, card.hh, card.seed, side);
-    gl.uniform4f(bake.loc.uPrint, ...card.print);
-    gl.uniform4f(bake.loc.uPrint2, ...card.print2);
-    gl.drawArrays(gl.TRIANGLES, 0, 3);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.deleteFramebuffer(fbo);
-    gl.bindTexture(gl.TEXTURE_2D, target);
     gl.generateMipmap(gl.TEXTURE_2D);
-    return target;
-  }
-
-  function upload(key, image, backCanvas, card) {
-    const width = image.naturalWidth || image.width;
-    const height = image.naturalHeight || image.height;
-    const front = makeTexture(image);
-    const back = makeTexture(backCanvas);
-    const frontBake = bakeSide(front, width, height, card, 0);
-    const backBake = bakeSide(back, width, height, card, 1);
-    sets.set(key, { front, back, frontBake, backBake, texelMm: (2 * card.hw) / width });
-  }
-
-  function resize(width, height) {
-    if (canvas.width !== width || canvas.height !== height) {
-      canvas.width = width;
-      canvas.height = height;
+    gl.bindTexture(gl.TEXTURE_2D, heightTex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    let level = 0;
+    let lw = W;
+    let lh = CELL;
+    let data = height;
+    for (;;) {
+      gl.texImage2D(gl.TEXTURE_2D, level, gl.R16F, lw, lh, 0, gl.RED, gl.FLOAT, data);
+      if (lw === 1 && lh === 1) break;
+      const nw = Math.max(1, lw >> 1);
+      const nh = Math.max(1, lh >> 1);
+      const next = new Float32Array(nw * nh);
+      for (let y = 0; y < nh; y += 1) {
+        const y0 = Math.min(lh - 1, y * 2);
+        const y1 = Math.min(lh - 1, y * 2 + 1);
+        for (let x = 0; x < nw; x += 1) {
+          const x0 = Math.min(lw - 1, x * 2);
+          const x1 = Math.min(lw - 1, x * 2 + 1);
+          next[y * nw + x] = (data[y0 * lw + x0] + data[y0 * lw + x1] + data[y1 * lw + x0] + data[y1 * lw + x1]) * 0.25;
+        }
+      }
+      data = next;
+      lw = nw;
+      lh = nh;
+      level += 1;
     }
+    gl.bindTexture(gl.TEXTURE_2D, matTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, W, CELL, 0, gl.RGBA, gl.UNSIGNED_BYTE, mat);
+    ready = true;
   }
 
-  function bind(unit, texture, name) {
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.uniform1i(main.loc[name], unit);
+  function resize(w, h) {
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w;
+      canvas.height = h;
+    }
   }
 
   function draw(f) {
-    const set = f.card ? sets.get(f.card.key) : null;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, canvas.width, canvas.height);
-    gl.useProgram(main.program);
+    gl.useProgram(program);
     gl.bindVertexArray(vao);
-    const L = main.loc;
-    gl.uniform2f(L.uRes, canvas.width, canvas.height);
-    gl.uniform4f(L.uView, f.cx, f.cy, f.pxPerMm, f.scale);
-    gl.uniform4f(L.uLamp, f.lamp.x, f.lamp.y, f.lamp.z, f.lamp.power);
-    gl.uniform4f(L.uLight, f.bulb, f.falloff, f.intensity, f.steps);
-    gl.uniform1f(L.uHasCard, set ? 1 : 0);
-    if (set) {
-      const c = f.card;
-      const texelMm = set.texelMm;
-      const pixMm = 1 / (f.pxPerMm * f.scale);
-      const lod = Math.log2(Math.max(pixMm / texelMm, 1e-3));
-      gl.uniform4f(L.uCard, c.x, c.y, c.rot, c.theta);
-      gl.uniform4f(L.uShape, c.hw, c.hh, c.thick, c.cup);
-      gl.uniform4f(L.uWarp, c.twist, c.lift, c.seed, 0);
-      gl.uniform4f(L.uCrease, ...c.crease);
-      gl.uniform4f(L.uFold, ...c.fold);
-      gl.uniform4f(L.uCorners, ...c.corners);
-      gl.uniform4f(L.uMicro, f.micro, lod, f.ambient, texelMm);
-      gl.uniform4f(L.uMat, ...c.material);
-      gl.uniform4f(L.uBounds, c.top, c.reach, f.exposure, 0);
-      gl.uniform3f(L.uInk, ...c.ink);
-      bind(0, set.front, "uFront");
-      bind(1, set.back, "uBack");
-      bind(2, set.frontBake, "uFrontBake");
-      bind(3, set.backBake, "uBackBake");
-    } else {
-      gl.uniform4f(L.uMicro, f.micro, 0, f.ambient, 0.05);
-      gl.uniform4f(L.uBounds, 0, 0, f.exposure, 0);
-    }
+    [albedoTex, heightTex, matTex].forEach((tex, i) => {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+    });
+    gl.uniform1i(loc.uAlbedo, 0);
+    gl.uniform1i(loc.uHeight, 1);
+    gl.uniform1i(loc.uMat, 2);
+    gl.uniform2f(loc.uRes, canvas.width, canvas.height);
+    gl.uniform1f(loc.uScale, f.scale);
+    gl.uniform4fv(loc.uRect, f.rects);
+    gl.uniform1fv(loc.uLift, f.lift);
+    gl.uniform4f(loc.uLamp, f.lamp[0], f.lamp[1], f.lamp[2], f.lamp[3]);
+    gl.uniform1f(loc.uBulb, f.bulb);
+    gl.uniform1f(loc.uFalloff, f.falloff);
+    gl.uniform1f(loc.uSteps, f.steps);
+    gl.uniform1f(loc.uCell, CELL);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
   function destroy() {
-    for (const texture of owned) gl.deleteTexture(texture);
-    owned.length = 0;
-    sets.clear();
-    for (const p of [main, bake]) {
-      gl.deleteProgram(p.program);
-      gl.deleteShader(p.vs);
-      gl.deleteShader(p.fs);
-    }
+    gl.deleteTexture(albedoTex);
+    gl.deleteTexture(heightTex);
+    gl.deleteTexture(matTex);
     gl.deleteVertexArray(vao);
-    const loser = gl.getExtension("WEBGL_lose_context");
-    if (loser) loser.loseContext();
+    gl.deleteProgram(program);
+    gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
-  return { upload, has: (key) => sets.has(key), resize, draw, destroy };
+  return { upload, resize, draw, destroy, has: () => ready };
 }

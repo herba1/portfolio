@@ -8,7 +8,7 @@ import { LIGHTS } from "./exposureScenes";
 import "./long-exposure.css";
 
 const FRAME_LABEL =
-  "A camera's live view of a dark club. Press and hold to open the shutter, then move to paint light trails with a glowstick; let go to close it and develop the photo into the stack of prints. Press Enter for a demonstration exposure, and 1 to 3 to change the light.";
+  "A camera's live view of a dark room with an Abbey Road sleeve and its record standing on the floor. Press and hold to open the shutter, then move to paint light trails with a glowstick; let go to close it and develop the photo into the stack of prints. Press Enter for a demonstration exposure, and 1 to 3 to change the light.";
 
 const KEEP = 4;
 const EASE = "cubic-bezier(0.22, 1, 0.36, 1)";

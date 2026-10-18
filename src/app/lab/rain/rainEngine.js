@@ -1,6 +1,7 @@
 import RainSim, { MAX_DROPS } from "./rainSim";
 import { BLUR_FRAGMENT, COMPOSITE_FRAGMENT, COPY_FRAGMENT, DROP_FRAGMENT, DROP_VERTEX, FIELD_EDGE, MASK_FRAGMENT, MAX_SEGMENTS, QUAD_VERTEX } from "./rainShader";
 import { RAIN_DEFAULT, SCENES } from "./rainScenes";
+import { drawSkyline } from "./rainSkyline";
 
 const MAX_DPR = 2;
 const REFOG_SECONDS = 15;
@@ -254,12 +255,10 @@ export default class RainEngine {
     const scene = SCENES.find((s) => s.id === id) || SCENES[0];
     const token = ++this.loadToken;
     if (this.current && this.current.scene === scene) return;
-    const img = new Image();
-    img.decoding = "async";
-    img.src = scene.src;
-    img
-      .decode()
-      .then(() => {
+    new Promise((resolve) => {
+      window.setTimeout(() => resolve(drawSkyline(scene.id)), 0);
+    })
+      .then((img) => {
         if (this.destroyed || token !== this.loadToken || !this.gl) return;
         const slot = this.buildSlot(scene, img);
         if (this.previous) this.freeSlot(this.previous);
@@ -290,8 +289,8 @@ export default class RainEngine {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     if (this.aniso) gl.texParameterf(gl.TEXTURE_2D, this.aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(this.aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
     const [cx, cy, cw, ch] = scene.crop;
-    const cropW = img.naturalWidth * cw;
-    const cropH = img.naturalHeight * ch;
+    const cropW = (img.naturalWidth || img.width) * cw;
+    const cropH = (img.naturalHeight || img.height) * ch;
     const bw = BLUR_WIDTH;
     const bh = Math.max(8, Math.round((BLUR_WIDTH * cropH) / cropW));
     const a = this.makeTarget(bw, bh, "rgba8");

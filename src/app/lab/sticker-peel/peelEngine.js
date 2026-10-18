@@ -1,5 +1,5 @@
 import { BLUR_FS, BLUR_VS, RESIDUE_FS, RESIDUE_VS, SCENE_FS, SCENE_VS, SHADOW_FS, STICKER_FS, STICKER_VS, STRAND_FS, STRAND_VS } from "./peelShader";
-import { SLEEVE_PHOTO, STICKERS, loadImage, readyFonts, shapeContains, sleeveArt, stickerArt } from "./peelArt";
+import { SLEEVES, loadImage, readyFonts, shapeContains, sleeveArt, stickerArt, stickersFor } from "./peelArt";
 
 const ROT = -0.026;
 const DISC = [0.15, 0.004, 0.486];
@@ -299,7 +299,19 @@ export async function createPeel(stage, canvas, options = {}) {
   const reducedQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
   let reduced = reducedQuery.matches;
 
-  const [photo, fonts] = await Promise.all([loadImage(SLEEVE_PHOTO), readyFonts()]);
+  const { sleeve: firstSleeve = SLEEVES[0].id } = options;
+  const images = new Map();
+  const imageFor = (src) => {
+    if (!images.has(src)) images.set(src, loadImage(src).catch(() => null));
+    return images.get(src);
+  };
+  let sleeveId = firstSleeve;
+  let stickerDefs = stickersFor(sleeveId);
+  const coverSrcs = (list) => list.filter((def) => def.cover).map((def) => def.cover);
+  const sleeveSrc = (id) => (SLEEVES.find((a) => a.id === id) || SLEEVES[0]).cover;
+  const [photo, fonts] = await Promise.all([imageFor(sleeveSrc(sleeveId)), readyFonts(), ...coverSrcs(stickerDefs).map(imageFor)]);
+  const loaded = new Map();
+  for (const [src, promise] of images) loaded.set(src, await promise);
   if (gl.isContextLost()) return { destroy() {} };
 
   const dprNow = () => Math.min(2, window.devicePixelRatio || 1);
@@ -324,7 +336,7 @@ export async function createPeel(stage, canvas, options = {}) {
   gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 12);
   gl.bindVertexArray(null);
 
-  const sleeveTex = texture(gl, sleeveArt(photo, fonts), true);
+  let sleeveTex = texture(gl, sleeveArt(photo), true);
   const mask = target(gl, MASK_PX, MASK_PX);
   let shadowRaw = null;
   let shadowMid = null;
@@ -334,7 +346,7 @@ export async function createPeel(stage, canvas, options = {}) {
 
   let stickers = [];
   let strands = [];
-  let topLayer = STICKERS.length;
+  let topLayer = stickerDefs.length;
   let view = { w: 1, h: 1, dpr: 1, k: 1, cx: 0, cy: 0, toClip: new Float32Array(9), fromClip: new Float32Array(9) };
   const pointer = { x: 0, y: 0, vx: 0, vy: 0, t: 0, inside: false };
   let grab = null;
@@ -350,9 +362,9 @@ export async function createPeel(stage, canvas, options = {}) {
   const scratch = { x: 0, y: 0, z: 0 };
 
   function artFor(def) {
-    return texture(gl, stickerArt(def, fonts, dprNow()), true);
+    return texture(gl, stickerArt(def, fonts, dprNow(), def.cover ? loaded.get(def.cover) : null), true);
   }
-  const arts = new Map(STICKERS.map((def) => [def.id, artFor(def)]));
+  const arts = new Map(stickerDefs.map((def) => [def.id, artFor(def)]));
 
   function residuePass(st, ghost) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, mask.fbo);
@@ -627,9 +639,9 @@ export async function createPeel(stage, canvas, options = {}) {
   }
 
   function initScene() {
-    stickers = STICKERS.map((def, i) => makeSticker(def, i));
+    stickers = stickerDefs.map((def, i) => makeSticker(def, i));
     strands = [];
-    topLayer = STICKERS.length;
+    topLayer = stickerDefs.length;
     gl.bindFramebuffer(gl.FRAMEBUFFER, mask.fbo);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -1332,6 +1344,24 @@ export async function createPeel(stage, canvas, options = {}) {
     kick();
   }
 
+  async function setSleeve(id) {
+    if (id === sleeveId || destroyed) return;
+    sleeveId = id;
+    const nextStickers = stickersFor(id);
+    const srcs = [sleeveSrc(id), ...coverSrcs(nextStickers)];
+    const got = await Promise.all(srcs.map(imageFor));
+    if (destroyed || id !== sleeveId) return;
+    srcs.forEach((src, i) => loaded.set(src, got[i]));
+    if (!got[0]) return;
+    gl.deleteTexture(sleeveTex);
+    sleeveTex = texture(gl, sleeveArt(got[0]), true);
+    stickerDefs = nextStickers;
+    for (const tex of arts.values()) gl.deleteTexture(tex);
+    arts.clear();
+    for (const def of stickerDefs) arts.set(def.id, artFor(def));
+    reset();
+  }
+
   function reset() {
     grab = null;
     kb = null;
@@ -1345,6 +1375,7 @@ export async function createPeel(stage, canvas, options = {}) {
 
   return {
     reset,
+    setSleeve,
     focusSticker,
     keyPeel,
     keyMove,

@@ -89,7 +89,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="ascii-bust-head">
           <h1 className="ascii-bust-title">Type Bust</h1>
           <p className="ascii-bust-lede">
-            Drag to turn the bust. Every character <em>re-sets itself</em> to follow the form.
+            John Lennon in Geist Mono. Drag to turn him; every character <em>re-sets itself</em> to follow the form.
           </p>
         </header>
       )}

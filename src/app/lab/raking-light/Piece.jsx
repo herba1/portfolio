@@ -2,7 +2,6 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { CARDS } from "./rakingCards";
 import "./raking-light.css";
 
 export default function Piece({ embedded = false }) {
@@ -13,8 +12,6 @@ export default function Piece({ embedded = false }) {
   const sliderRef = useRef(null);
   const headRef = useRef(null);
   const footRef = useRef(null);
-  const engineRef = useRef(null);
-  const [active, setActive] = useState(0);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -24,13 +21,13 @@ export default function Piece({ embedded = false }) {
     let cancelled = false;
     let engine = null;
     const insets = () => {
-      if (embedded) return { top: 20, bottom: 20 };
+      if (embedded) return { top: 16, bottom: 16 };
       const boxRect = root.getBoundingClientRect();
-      if (boxRect.width >= 900) return { top: 88, bottom: 96 };
       const head = headRef.current?.getBoundingClientRect();
       const foot = footRef.current?.getBoundingClientRect();
+      if (boxRect.width >= 900) return { top: 96, bottom: 96 };
       const top = head ? head.bottom - boxRect.top + 16 : 140;
-      const bottom = foot ? boxRect.bottom - foot.top + 16 : 120;
+      const bottom = foot ? boxRect.bottom - foot.top + 16 : 96;
       return { top, bottom };
     };
     const start = async () => {
@@ -44,10 +41,6 @@ export default function Piece({ embedded = false }) {
           tag: tagRef.current,
           slider: sliderRef.current,
           insets,
-          embedded,
-          onSelect: (idx) => {
-            if (!cancelled) setActive(idx);
-          },
           onReady: () => {
             if (!cancelled) setReady(true);
           },
@@ -55,7 +48,6 @@ export default function Piece({ embedded = false }) {
             if (!cancelled) setFailed(true);
           },
         });
-        engineRef.current = engine;
       } catch (error) {
         console.error(error);
         if (!cancelled) setFailed(true);
@@ -74,7 +66,6 @@ export default function Piece({ embedded = false }) {
       cancelled = true;
       io.disconnect();
       engine?.destroy();
-      engineRef.current = null;
     };
   }, [embedded]);
 
@@ -93,15 +84,9 @@ export default function Piece({ embedded = false }) {
         className="raking-light-stage"
         tabIndex={0}
         role="application"
-        aria-label="An old baseball card on a dark desk, lit by a lamp held low. Move the pointer or the arrow keys to move the lamp, scroll, pinch or press plus and minus to raise and lower it, click the card or press Enter to turn it over, and press 1 to 3 to change card."
+        aria-label="Three album pieces on black: an Abbey Road enamel pin, an embroidered Revolver patch and a Sgt. Pepper drum badge, lit by one lamp held low. Move the pointer or the arrow keys to move the lamp; scroll, pinch or press plus and minus to raise and lower it."
       >
         <canvas ref={canvasRef} className="raking-light-canvas" />
-        <img
-          className="raking-light-fallback"
-          src={CARDS[active].src}
-          alt={`${CARDS[active].full}, ${CARDS[active].year}`}
-          draggable={false}
-        />
         <span ref={tagRef} className="raking-light-tag" aria-hidden="true" />
       </div>
 
@@ -109,30 +94,13 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="raking-light-head">
           <h1 className="raking-light-title">Raking Light</h1>
           <p className="raking-light-lede">
-            Bring the lamp down low and the card shows <em>everything it has been through</em>.
+            Hold the lamp low and the stitches, enamel and <em>raised gold</em> catch it.
           </p>
         </header>
       )}
 
       {embedded ? null : (
         <footer ref={footRef} className="raking-light-foot">
-          <div className="raking-light-cards" role="radiogroup" aria-label="Card">
-            {CARDS.map((card, i) => (
-              <button
-                key={card.key}
-                type="button"
-                role="radio"
-                aria-checked={active === i}
-                aria-label={`${card.full}, ${card.year}`}
-                className="raking-light-card"
-                onClick={() => engineRef.current?.select(i)}
-              >
-                <img className="raking-light-thumb" src={card.src} alt="" width={20} height={32} draggable={false} />
-                <span className="raking-light-card-name">{card.name}</span>
-                <span className="raking-light-card-year">{card.year}</span>
-              </button>
-            ))}
-          </div>
           <div className="raking-light-controls">
             <label className="raking-light-lamp">
               <span className="raking-light-lamp-label">Lamp</span>
@@ -144,14 +112,11 @@ export default function Piece({ embedded = false }) {
                 min="0"
                 max="1000"
                 step="1"
-                defaultValue="213"
+                defaultValue="448"
                 aria-label="Lamp height"
               />
               <span className="raking-light-lamp-scale">High</span>
             </label>
-            <button type="button" className="raking-light-turn" onClick={() => engineRef.current?.turn()}>
-              Turn over
-            </button>
           </div>
         </footer>
       )}

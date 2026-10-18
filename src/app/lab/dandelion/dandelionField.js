@@ -58,7 +58,7 @@ export function buildLattice(cols) {
   };
 }
 
-export function sampleTones(image, lattice) {
+export function sampleTones(image, lattice, crop) {
   const res = 160;
   const canvas = document.createElement("canvas");
   canvas.width = res;
@@ -66,8 +66,12 @@ export function sampleTones(image, lattice) {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   context.imageSmoothingEnabled = true;
   context.imageSmoothingQuality = "high";
-  const side = Math.min(image.naturalWidth, image.naturalHeight);
-  context.drawImage(image, (image.naturalWidth - side) / 2, (image.naturalHeight - side) / 2, side, side, 0, 0, res, res);
+  const iw = image.naturalWidth;
+  const ih = image.naturalHeight;
+  const side = crop ? crop[2] * Math.min(iw, ih) : Math.min(iw, ih);
+  const sx = crop ? crop[0] * iw : (iw - side) / 2;
+  const sy = crop ? crop[1] * ih : (ih - side) / 2;
+  context.drawImage(image, sx, sy, side, side, 0, 0, res, res);
   const pixels = context.getImageData(0, 0, res, res).data;
   const lum = new Float32Array(res * res);
   for (let index = 0; index < res * res; index += 1) {

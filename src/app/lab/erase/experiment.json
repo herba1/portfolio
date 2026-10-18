@@ -1,11 +1,19 @@
 {
   "title": "Erase",
-  "description": "A handwritten setlist taped above a ledge, one song already half rubbed out. Scrub across a title and the ink lifts off as fine dust that drifts down into a pile at the foot of the page; undo pulls every grain back up into its letter.",
-  "tags": ["Canvas", "Particles", "Type", "Music"],
+  "description": "A handwritten Beatles setlist taped above a ledge, one song already half rubbed out. Click any song to rewrite it in your own words, then scrub it with a real eraser: the ink lifts off as fine dust that drifts into a pile at the foot of the page, and undo pulls every grain back into its letter.",
+  "tags": [
+    "Canvas",
+    "Particles",
+    "Type",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "Erasing as matter: rubbing energy becomes ink dust and eraser crumbs that fall under gravity and heap up with a real angle of repose, the page keeps a ghost and roughened fibre where you rubbed, and undo is the dust flying home.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "Writing and erasing as matter: type a title and it is inked onto the sheet by hand, rub it and the energy becomes ink dust and eraser crumbs that heap up with a real angle of repose, undo is the dust flying home.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://tympanus.net/codrops/2026/01/28/webgpu-gommage-effect-dissolving-msdf-text-into-dust-and-petals-with-three-js-tsl/",
     "https://tympanus.net/codrops/2025/02/17/implementing-a-dissolve-effect-with-shaders-and-particles-in-three-js/",

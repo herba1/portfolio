@@ -185,11 +185,30 @@
   left: max(16px, min(32px, 3cqw));
   right: max(16px, min(32px, 3cqw));
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding: 0 24px;
   pointer-events: none;
+}
+
+.ink-drag__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.ink-drag__caption {
+  margin: 0;
+  overflow: hidden;
+  font-size: var(--text-ui);
+  line-height: 16px;
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--ink-drag-ink-2);
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 
 .ink-drag__title {
@@ -255,49 +274,7 @@
   transform: translateX(-50%);
 }
 
-.ink-drag__word {
-  display: flex;
-  align-items: center;
-  height: 36px;
-  padding: 0 4px 0 16px;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px var(--ink-drag-hair);
-  background: rgb(255 252 245 / 0.7);
-  transition: box-shadow var(--duration-200) ease;
-}
-
-.ink-drag__word:focus-within {
-  box-shadow: inset 0 0 0 1px var(--ink-drag-ink);
-}
-
-.ink-drag__label {
-  font-size: var(--text-ui);
-  line-height: 16px;
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-meta);
-  color: var(--ink-drag-ink-2);
-}
-
-.ink-drag__input {
-  width: 13ch;
-  min-width: 0;
-  height: 28px;
-  margin: 0 4px 0 8px;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  background: transparent;
-  color: var(--ink-drag-ink);
-  font: inherit;
-  font-size: var(--text-ui-lg);
-  line-height: 20px;
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--font-weight-caption);
-}
-
-.ink-drag__print,
 .ink-drag__ink,
-.ink-drag__ink-cycle,
 .ink-drag__fresh {
   display: inline-flex;
   align-items: center;
@@ -323,9 +300,45 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-.ink-drag__print {
-  background: var(--ink-drag-ink);
-  color: var(--ink-drag-paper);
+.ink-drag__records {
+  display: flex;
+  gap: 4px;
+  padding: 0 4px;
+}
+
+.ink-drag__record {
+  display: block;
+  flex: none;
+  width: 36px;
+  height: 36px;
+  padding: 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-150) ease,
+    transform var(--duration-150) var(--ink-drag-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ink-drag__record img {
+  display: block;
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.ink-drag__record[aria-checked="true"] {
+  box-shadow: inset 0 0 0 2px var(--ink-drag-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .ink-drag__record[aria-checked="false"]:hover {
+    background: var(--ink-drag-wash);
+  }
 }
 
 .ink-drag__inks {
@@ -340,12 +353,6 @@
   color: var(--ink-drag-paper);
 }
 
-.ink-drag__ink-cycle {
-  display: none;
-  height: 36px;
-  box-shadow: inset 0 0 0 1px var(--ink-drag-hair);
-}
-
 .ink-drag__fresh {
   height: 36px;
   padding: 0 16px 0 12px;
@@ -358,22 +365,19 @@
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .ink-drag__ink[aria-checked="false"]:hover,
-  .ink-drag__ink-cycle:hover {
+  .ink-drag__ink[aria-checked="false"]:hover {
     background: var(--ink-drag-wash);
   }
 }
 
-.ink-drag__print:active,
 .ink-drag__ink:active,
-.ink-drag__ink-cycle:active,
+.ink-drag__record:active,
 .ink-drag__fresh:active {
   transform: scale(0.96);
 }
 
-.ink-drag__print:focus-visible,
 .ink-drag__ink:focus-visible,
-.ink-drag__ink-cycle:focus-visible,
+.ink-drag__record:focus-visible,
 .ink-drag__fresh:focus-visible {
   outline: 2px solid var(--ink-drag-accent);
   outline-offset: 2px;
@@ -389,14 +393,6 @@
 }
 
 @container (max-width: 899px) {
-  .ink-drag__inks {
-    display: none;
-  }
-
-  .ink-drag__ink-cycle {
-    display: inline-flex;
-  }
-
   .ink-drag__head {
     padding: 0 8px;
   }
@@ -410,17 +406,17 @@
     border-radius: 24px;
   }
 
-  .ink-drag__word {
+  .ink-drag__records {
     flex: 1 1 100%;
+    justify-content: center;
   }
 
-  .ink-drag__input {
-    flex: 1;
-    width: auto;
-  }
-
-  .ink-drag__ink-cycle,
+  .ink-drag__inks,
   .ink-drag__fresh {
+    flex: 1;
+  }
+
+  .ink-drag__inks .ink-drag__ink {
     flex: 1;
   }
 }

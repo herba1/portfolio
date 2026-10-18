@@ -1,14 +1,15 @@
 {
   "title": "Refractor",
-  "description": "A 1909 card reprinted on chrome and slipped into a penny sleeve. Tilt it and a diffraction grating splits the light into rainbow bands across the border and sky while the player stays matte ink; flick it and it spins with weight.",
+  "description": "Beatles covers reprinted as chrome refractor cards in penny sleeves. Tilt one and a diffraction grating splits the light into rainbow bands across the border and sky while the print stays matte ink; flick it hard and the next record swaps in at the edge-on moment of the spin.",
   "tags": [
     "WebGL",
     "Optics",
-    "Cards"
+    "Cards",
+    "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge: a real grating equation drives the rainbow, so the colour comes from the angle between the light, the foil grooves and your eye, masked from the printed photo by a chrome map generated from the card art itself.",
+  "intent": "One optical material finished to the edge, now on real records: a grating equation drives the rainbow, a chrome map generated from each cover keeps the print matte, and a fast flick riffles through the albums one per turn, swapping cards while they are edge-on.",
   "tile": {
     "cols": 2,
     "rows": 4

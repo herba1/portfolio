@@ -1,5 +1,14 @@
-import { DISPLAY_FRAGMENT, INK_FRAGMENT, MAX_SEGMENTS, PAPER_FRAGMENT, PRINT_FRAGMENT, QUAD_VERTEX, VELOCITY_FRAGMENT } from "./inkDragShader";
+import {
+  DISPLAY_FRAGMENT,
+  INK_FRAGMENT,
+  MAX_SEGMENTS,
+  PAPER_FRAGMENT,
+  PRINT_FRAGMENT,
+  QUAD_VERTEX,
+  VELOCITY_FRAGMENT,
+} from "./inkDragShader";
 import { DEFAULT_WORD, INKS, PAPER } from "./inkDragParams";
+import { balanceLines, readCover } from "./inkDragArt";
 
 const FONT_FAMILY = "InkDragLastik";
 const FONT_URL = "/lastikfont.otf";
@@ -12,6 +21,11 @@ const PRINT_MS = 820;
 const VELOCITY_LIFE_MS = 1400;
 const QUEUE_LIMIT = 96;
 const VELOCITY_SCALE = 0.5;
+const MORPH_MS = 1700;
+const MORPH_HOLD_MS = 760;
+const IDLE_FIRST_MS = 2600;
+const IDLE_MS = 6400;
+const SWEEP_SEGMENTS = 6;
 
 let fontPromise = null;
 
@@ -66,20 +80,32 @@ function link(gl, vertex, fragmentSource) {
   const total = gl.getProgramParameter(program, gl.ACTIVE_UNIFORMS);
   for (let i = 0; i < total; i += 1) {
     const info = gl.getActiveUniform(program, i);
-    uniforms[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(program, info.name);
+    uniforms[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(
+      program,
+      info.name,
+    );
   }
   return { program, uniforms };
 }
 
 export default class InkDragEngine {
-  constructor({ host, canvas, cursor, onStatus, onReady }) {
+  constructor({ host, canvas, cursor, onStatus, onReady, onState }) {
     this.host = host;
     this.canvas = canvas;
     this.cursor = cursor;
     this.onStatus = onStatus;
     this.onReady = onReady;
-    this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    this.word = DEFAULT_WORD;
+    this.onState = onState;
+    this.items = [];
+    this.index = 0;
+    this.kind = "cover";
+    this.covers = new Map();
+    this.waits = new Map();
+    this.morph = null;
+    this.idleTimer = 0;
+    this.reduced = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
     this.ink = INKS[0];
     this.width = 0;
     this.height = 0;
@@ -154,20 +180,25 @@ export default class InkDragEngine {
     this.intersection.observe(this.host);
     this.resizer = new ResizeObserver(() => this.resize());
     this.resizer.observe(this.host);
-    loadFont().then(() => {
-      if (this.destroyed) return;
-      this.fontReady = true;
-      this.print(!this.reduced);
-      this.onReady?.();
-    });
+    loadFont()
+      .then(() => this.coverReady())
+      .then(() => {
+        if (this.destroyed) return;
+        this.fontReady = true;
+        this.print(!this.reduced);
+        this.onReady?.();
+      });
     return true;
   }
 
   setupGl() {
     const gl = this.gl;
     const fullFloat = gl.getExtension("EXT_color_buffer_float");
-    const halfFloat = fullFloat || gl.getExtension("EXT_color_buffer_half_float");
-    this.interactive = Boolean(fullFloat) || (Boolean(halfFloat) && this.renderable(gl.RGBA16F, gl.HALF_FLOAT));
+    const halfFloat =
+      fullFloat || gl.getExtension("EXT_color_buffer_half_float");
+    this.interactive =
+      Boolean(fullFloat) ||
+      (Boolean(halfFloat) && this.renderable(gl.RGBA16F, gl.HALF_FLOAT));
     this.vertex = compile(gl, gl.VERTEX_SHADER, QUAD_VERTEX);
     this.programs = {
       paper: link(gl, this.vertex, PAPER_FRAGMENT),
@@ -180,13 +211,18 @@ export default class InkDragEngine {
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
     gl.bindBuffer(gl.ARRAY_BUFFER, this.buffer);
-    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+    gl.bufferData(
+      gl.ARRAY_BUFFER,
+      new Float32Array([-1, -1, 3, -1, -1, 3]),
+      gl.STATIC_DRAW,
+    );
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);
     this.maskCanvas = document.createElement("canvas");
     this.maskTexture = gl.createTexture();
+    this.coverCanvas = document.createElement("canvas");
   }
 
   renderable(internal, type) {
@@ -196,8 +232,15 @@ export default class InkDragEngine {
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, 4, 4, 0, gl.RGBA, type, null);
     const fb = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
-    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      texture,
+      0,
+    );
+    const ok =
+      gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.deleteFramebuffer(fb);
     gl.deleteTexture(texture);
@@ -212,11 +255,39 @@ export default class InkDragEngine {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (float)
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA16F,
+        width,
+        height,
+        0,
+        gl.RGBA,
+        gl.HALF_FLOAT,
+        null,
+      );
+    else
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA8,
+        width,
+        height,
+        0,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        null,
+      );
     const framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texture, 0);
+    gl.framebufferTexture2D(
+      gl.FRAMEBUFFER,
+      gl.COLOR_ATTACHMENT0,
+      gl.TEXTURE_2D,
+      texture,
+      0,
+    );
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
@@ -230,8 +301,11 @@ export default class InkDragEngine {
   }
 
   dropTargets() {
-    for (const pair of [this.inkTargets, this.velTargets]) if (pair) pair.forEach((t) => this.dropTarget(t));
+    for (const pair of [this.inkTargets, this.velTargets])
+      if (pair) pair.forEach((t) => this.dropTarget(t));
     this.dropTarget(this.paperTarget);
+    this.dropTarget(this.goalTarget);
+    this.goalTarget = null;
     this.inkTargets = null;
     this.velTargets = null;
     this.paperTarget = null;
@@ -243,7 +317,8 @@ export default class InkDragEngine {
     const width = Math.max(1, Math.round(rect.width));
     const height = Math.max(1, Math.round(rect.height));
     const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
-    if (width === this.width && height === this.height && dpr === this.dpr) return;
+    if (width === this.width && height === this.height && dpr === this.dpr)
+      return;
     this.width = width;
     this.height = height;
     this.dpr = dpr;
@@ -254,16 +329,31 @@ export default class InkDragEngine {
     this.simHeight = Math.max(8, Math.round(height * this.simScale));
     this.dropTargets();
     const float = this.interactive;
-    this.inkTargets = [this.makeTarget(this.simWidth, this.simHeight, float), this.makeTarget(this.simWidth, this.simHeight, float)];
+    this.inkTargets = [
+      this.makeTarget(this.simWidth, this.simHeight, float),
+      this.makeTarget(this.simWidth, this.simHeight, float),
+    ];
     this.velWidth = Math.max(4, Math.round(this.simWidth * VELOCITY_SCALE));
     this.velHeight = Math.max(4, Math.round(this.simHeight * VELOCITY_SCALE));
-    this.velTargets = [this.makeTarget(this.velWidth, this.velHeight, float), this.makeTarget(this.velWidth, this.velHeight, float)];
-    this.paperTarget = this.makeTarget(this.canvas.width, this.canvas.height, false);
+    this.velTargets = [
+      this.makeTarget(this.velWidth, this.velHeight, float),
+      this.makeTarget(this.velWidth, this.velHeight, float),
+    ];
+    this.paperTarget = this.makeTarget(
+      this.canvas.width,
+      this.canvas.height,
+      false,
+    );
+    this.goalTarget = this.makeTarget(this.simWidth, this.simHeight, float);
     this.inkRead = 0;
     this.velRead = 0;
     this.renderPaper();
     if (this.fontReady) {
       this.drawMask();
+      if (this.morph) {
+        this.morph = null;
+        this.scheduleIdle(IDLE_MS);
+      }
       if (this.printStart < 0) this.runPrint(1);
     }
     this.dirty = true;
@@ -282,29 +372,73 @@ export default class InkDragEngine {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  currentItem() {
+    return this.items[this.index] || null;
+  }
+
+  currentKind() {
+    const item = this.currentItem();
+    if (this.kind === "cover" && item && this.covers.get(item.cover))
+      return "cover";
+    return "title";
+  }
+
   drawMask() {
-    const gl = this.gl;
+    const item = this.currentItem();
+    const cover =
+      this.currentKind() === "cover"
+        ? this.coverPixels(this.covers.get(item.cover))
+        : null;
+    if (!cover && item) this.covers.delete(item.cover);
+    this.tone = cover ? 1 : 0;
+    this.uploadMask(cover || this.titlePixels(item ? item.word : DEFAULT_WORD));
+  }
+
+  coverPixels(image) {
+    const w = this.simWidth;
+    const h = this.simHeight;
+    const portrait = h > w * 1.1;
+    const side = Math.round(
+      Math.min(w * (portrait ? 0.78 : 0.5), h * (portrait ? 0.46 : 0.6)),
+    );
+    const x = Math.round((w - side) / 2);
+    const y = Math.round(h * (portrait ? 0.48 : 0.5) - side / 2);
+    return readCover(this.coverCanvas, image, w, h, x, y, side);
+  }
+
+  titlePixels(text) {
     const canvas = this.maskCanvas;
     canvas.width = this.simWidth;
     canvas.height = this.simHeight;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     ctx.fillStyle = "#000";
     ctx.fillRect(0, 0, canvas.width, canvas.height);
-    const word = this.word.trim() || DEFAULT_WORD;
-    const family = this.fontReady ? `"${FONT_FAMILY}", Georgia, serif` : "Georgia, serif";
+    const word = text.trim() || DEFAULT_WORD;
+    const family = this.fontReady
+      ? `"${FONT_FAMILY}", Georgia, serif`
+      : "Georgia, serif";
     ctx.font = `100px ${family}`;
     const portrait = this.simHeight > this.simWidth * 1.1;
-    const words = word.split(/\s+/).filter(Boolean);
-    const lines = portrait && words.length > 1 ? words.slice(0, 3) : [word];
-    const metrics = lines.map((text) => {
-      const m = ctx.measureText(text);
-      return { text, ascent: m.actualBoundingBoxAscent, descent: m.actualBoundingBoxDescent, left: m.actualBoundingBoxLeft, width: m.actualBoundingBoxLeft + m.actualBoundingBoxRight };
+    const lines = portrait ? balanceLines(word, 3) : [word];
+    const metrics = lines.map((line) => {
+      const m = ctx.measureText(line);
+      return {
+        text: line,
+        ascent: m.actualBoundingBoxAscent,
+        descent: m.actualBoundingBoxDescent,
+        left: m.actualBoundingBoxLeft,
+        width: m.actualBoundingBoxLeft + m.actualBoundingBoxRight,
+      };
     });
     const gap = 14;
-    const blockHeight = metrics.reduce((sum, m) => sum + m.ascent + m.descent, 0) + gap * (metrics.length - 1);
+    const blockHeight =
+      metrics.reduce((sum, m) => sum + m.ascent + m.descent, 0) +
+      gap * (metrics.length - 1);
     const widest = Math.max(...metrics.map((m) => m.width));
     const fitWidth = (this.simWidth * (portrait ? 0.84 : 0.8)) / widest;
-    const fitHeight = (this.simHeight * (portrait ? (lines.length > 1 ? 0.56 : 0.3) : 0.5)) / blockHeight;
+    const fitHeight =
+      (this.simHeight * (portrait ? (lines.length > 1 ? 0.56 : 0.3) : 0.5)) /
+      blockHeight;
     const scale = Math.min(fitWidth, fitHeight);
     const size = 100 * scale;
     ctx.font = `${size}px ${family}`;
@@ -313,7 +447,8 @@ export default class InkDragEngine {
     ctx.strokeStyle = "#fff";
     ctx.lineJoin = "round";
     ctx.lineWidth = size * 0.014;
-    let top = canvas.height * (portrait ? 0.48 : 0.5) - (blockHeight * scale) / 2;
+    let top =
+      canvas.height * (portrait ? 0.48 : 0.5) - (blockHeight * scale) / 2;
     for (const m of metrics) {
       const x = canvas.width / 2 - (m.width * scale) / 2 + m.left * scale;
       const y = top + m.ascent * scale;
@@ -321,24 +456,48 @@ export default class InkDragEngine {
       ctx.strokeText(m.text, x, y);
       top += (m.ascent + m.descent + gap) * scale;
     }
-    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
-    const pixels = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-    const rows = canvas.height;
-    const stride = canvas.width * 4;
+    const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 0; i < data.length; i += 4) {
+      data[i + 2] = 128;
+      data[i + 3] = 128;
+    }
+    return data;
+  }
+
+  uploadMask(pixels) {
+    const gl = this.gl;
+    const rows = this.simHeight;
+    const stride = this.simWidth * 4;
     const flipped = new Uint8Array(pixels.length);
-    for (let row = 0; row < rows; row += 1) flipped.set(pixels.subarray(row * stride, (row + 1) * stride), (rows - 1 - row) * stride);
+    for (let row = 0; row < rows; row += 1)
+      flipped.set(
+        pixels.subarray(row * stride, (row + 1) * stride),
+        (rows - 1 - row) * stride,
+      );
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, canvas.width, canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, flipped);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.texImage2D(
+      gl.TEXTURE_2D,
+      0,
+      gl.RGBA8,
+      this.simWidth,
+      this.simHeight,
+      0,
+      gl.RGBA,
+      gl.UNSIGNED_BYTE,
+      flipped,
+    );
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   }
 
-  runPrint(progress) {
+  runPrint(progress, into = null) {
     const gl = this.gl;
     const { program, uniforms } = this.programs.print;
-    const target = this.inkTargets[this.inkRead];
+    const target = into || this.inkTargets[this.inkRead];
     gl.useProgram(program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, target.framebuffer);
     gl.viewport(0, 0, this.simWidth, this.simHeight);
@@ -348,9 +507,10 @@ export default class InkDragEngine {
     gl.uniform2f(uniforms.uRes, this.simWidth, this.simHeight);
     gl.uniform1f(uniforms.uProgress, progress);
     gl.uniform1f(uniforms.uGain, this.ink.gain);
+    gl.uniform1f(uniforms.uTone, this.tone || 0);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    if (progress >= 1) {
+    if (progress >= 1 && !into) {
       const vel = this.velTargets;
       for (const t of vel) {
         gl.bindFramebuffer(gl.FRAMEBUFFER, t.framebuffer);
@@ -363,6 +523,7 @@ export default class InkDragEngine {
 
   print(animate) {
     if (!this.gl || !this.inkTargets) return;
+    this.morph = null;
     this.drawMask();
     this.drying = false;
     this.velocityUntil = 0;
@@ -378,13 +539,153 @@ export default class InkDragEngine {
     }
     this.dirty = true;
     this.setStatus(this.interactive ? "wet" : "static");
+    this.emitState();
+    this.scheduleIdle(animate ? IDLE_FIRST_MS + PRINT_MS : IDLE_MS);
     this.wake();
   }
 
-  setWord(word) {
-    if (word === this.word) return;
-    this.word = word;
-    if (this.fontReady) this.print(!this.reduced);
+  emitState() {
+    this.onState?.({ index: this.index, kind: this.currentKind() });
+  }
+
+  setItems(items) {
+    this.items = items.slice();
+    if (this.index >= this.items.length) this.index = 0;
+    for (const item of this.items) this.loadCover(item.cover);
+    if (this.fontReady && this.gl && this.inkTargets) this.print(!this.reduced);
+  }
+
+  coverReady() {
+    const item = this.currentItem();
+    const wait = item ? this.waits.get(item.cover) : null;
+    if (!wait) return Promise.resolve();
+    return Promise.race([
+      wait,
+      new Promise((resolve) => setTimeout(resolve, 1600)),
+    ]);
+  }
+
+  loadCover(src) {
+    if (!src || this.covers.has(src)) return;
+    this.covers.set(src, null);
+    let settle = null;
+    this.waits.set(
+      src,
+      new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+    const image = new Image();
+    image.crossOrigin = "anonymous";
+    image.decoding = "async";
+    image.onload = () => {
+      settle();
+      if (this.destroyed) return;
+      this.covers.set(src, image);
+      const item = this.currentItem();
+      if (
+        item &&
+        item.cover === src &&
+        this.kind === "cover" &&
+        this.tone === 0 &&
+        !this.morph &&
+        this.fontReady &&
+        this.inkTargets
+      )
+        this.print(!this.reduced);
+    };
+    image.onerror = () => {
+      settle();
+      this.covers.delete(src);
+    };
+    image.src = src;
+  }
+
+  scheduleIdle(ms) {
+    clearTimeout(this.idleTimer);
+    if (this.reduced || this.destroyed || this.items.length === 0) return;
+    this.idleTimer = setTimeout(() => {
+      if (this.destroyed) return;
+      if (this.pointer || this.morph || document.hidden || !this.visible) {
+        this.scheduleIdle(IDLE_MS);
+        return;
+      }
+      this.advance();
+    }, ms);
+  }
+
+  advance() {
+    if (!this.items.length) return;
+    if (this.currentKind() === "cover") this.show(this.index, "title");
+    else this.show((this.index + 1) % this.items.length, "cover");
+  }
+
+  toggle() {
+    this.show(this.index, this.currentKind() === "cover" ? "title" : "cover");
+  }
+
+  show(index, kind) {
+    if (!this.items[index]) return;
+    if (index === this.index && kind === this.currentKind() && !this.morph)
+      return;
+    this.index = index;
+    this.kind = kind;
+    if (!this.gl || !this.inkTargets || !this.fontReady) return;
+    if (!this.interactive || this.reduced) {
+      this.print(false);
+      return;
+    }
+    this.drawMask();
+    this.runPrint(1, this.goalTarget);
+    this.printStart = -1;
+    this.drying = false;
+    this.morph = { t: 0, prevX: null };
+    this.setStatus("wet");
+    this.emitState();
+    clearTimeout(this.idleTimer);
+    this.wake();
+  }
+
+  sweep(dt) {
+    const m = this.morph;
+    m.t += dt * 1000;
+    const p = Math.min(1, m.t / MORPH_MS);
+    const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    const front = -0.16 + 1.36 * eased;
+    const W = this.width;
+    const H = this.height;
+    const x = front * W;
+    const speed =
+      m.prevX == null
+        ? 0
+        : Math.min(MAX_SPEED, Math.max(0, (x - m.prevX) / dt));
+    m.prevX = x;
+    if (p < 1 && speed > 1) {
+      for (let i = 0; i < SWEEP_SEGMENTS; i += 1) {
+        const ya = ((i / SWEEP_SEGMENTS) * 1.1 - 0.05) * H;
+        const yb = (((i + 1) / SWEEP_SEGMENTS) * 1.1 - 0.05) * H;
+        const xa = x + (ya / H - 0.5) * 0.1 * W;
+        const xb = x + (yb / H - 0.5) * 0.1 * W;
+        const wobble = Math.sin(m.t * 0.004 + i * 1.7) * speed * 0.08;
+        this.queue.push([
+          xa,
+          ya,
+          xb,
+          yb,
+          speed * 1.05,
+          wobble,
+          Math.min(speed, 1100),
+          1.9,
+        ]);
+      }
+    }
+    this.lastStir = this.clock;
+    if (m.t >= MORPH_MS + MORPH_HOLD_MS) {
+      this.morph = null;
+      this.scheduleIdle(IDLE_MS);
+      return 3;
+    }
+    return p < 1 ? front : 3;
   }
 
   setInk(id) {
@@ -404,7 +705,10 @@ export default class InkDragEngine {
   }
 
   baseRadius() {
-    return Math.min(40, Math.max(12, Math.min(this.width, this.height) * 0.045));
+    return Math.min(
+      40,
+      Math.max(12, Math.min(this.width, this.height) * 0.045),
+    );
   }
 
   pointerDown(e) {
@@ -412,8 +716,19 @@ export default class InkDragEngine {
     if (e.target.closest("button, input, label, a")) return;
     this.host.setPointerCapture?.(e.pointerId);
     const [x, y] = this.localPoint(e);
-    this.pointer = { id: e.pointerId, x, y, fx: x, fy: y, vx: 0, vy: 0, speed: 0, points: [] };
+    this.pointer = {
+      id: e.pointerId,
+      x,
+      y,
+      fx: x,
+      fy: y,
+      vx: 0,
+      vy: 0,
+      speed: 0,
+      points: [],
+    };
     this.host.setAttribute("data-pressed", "");
+    clearTimeout(this.idleTimer);
     this.placeCursor(x, y);
     this.drying = true;
     this.lastStir = this.clock;
@@ -448,6 +763,7 @@ export default class InkDragEngine {
     this.pointer = null;
     if (p.points.length) this.releasing = p;
     this.host.removeAttribute("data-pressed");
+    if (!this.morph) this.scheduleIdle(IDLE_MS);
     if (e.pointerType !== "mouse") this.hideCursor();
     this.wake();
   }
@@ -471,7 +787,15 @@ export default class InkDragEngine {
     p.speed = Math.hypot(p.vx, p.vy);
     let from = [p.fx, p.fy];
     for (const point of p.points) {
-      this.queue.push([from[0], from[1], point[0], point[1], p.vx, p.vy, p.speed]);
+      this.queue.push([
+        from[0],
+        from[1],
+        point[0],
+        point[1],
+        p.vx,
+        p.vy,
+        p.speed,
+      ]);
       from = point;
     }
     p.points.length = 0;
@@ -481,7 +805,9 @@ export default class InkDragEngine {
 
   placeCursor(x, y) {
     if (!this.cursor) return;
-    const fast = this.pointer ? smoothstep(FAST_FROM, FAST_TO, this.pointer.speed) : 0;
+    const fast = this.pointer
+      ? smoothstep(FAST_FROM, FAST_TO, this.pointer.speed)
+      : 0;
     const r = this.baseRadius() * (1 - 0.45 * fast);
     this.cursor.style.transform = `translate3d(${x.toFixed(1)}px, ${y.toFixed(1)}px, 0) scale(${(r / 28).toFixed(3)})`;
     this.cursor.setAttribute("data-shown", "");
@@ -499,7 +825,17 @@ export default class InkDragEngine {
         const a = q[i];
         const b = q[i + 1];
         if (!b) merged.push(a);
-        else merged.push([a[0], a[1], b[2], b[3], (a[4] + b[4]) / 2, (a[5] + b[5]) / 2, (a[6] + b[6]) / 2]);
+        else
+          merged.push([
+            a[0],
+            a[1],
+            b[2],
+            b[3],
+            (a[4] + b[4]) / 2,
+            (a[5] + b[5]) / 2,
+            (a[6] + b[6]) / 2,
+            Math.max(a[7] ?? 1, b[7] ?? 1),
+          ]);
       }
       q.length = 0;
       q.push(...merged);
@@ -510,10 +846,11 @@ export default class InkDragEngine {
     const base = this.baseRadius();
     const ink = this.ink;
     for (let i = 0; i < q.length; i += 1) {
-      const [x0, y0, x1, y1, vx, vy, speed] = q[i];
+      const [x0, y0, x1, y1, vx, vy, speed, grow = 1] = q[i];
       const fast = smoothstep(FAST_FROM, FAST_TO, speed);
-      const transfer = ink.transferSlow + (ink.transferFast - ink.transferSlow) * fast;
-      const radius = base * (1 - 0.45 * fast) * vs;
+      const transfer =
+        ink.transferSlow + (ink.transferFast - ink.transferSlow) * fast;
+      const radius = base * (1 - 0.45 * fast) * grow * vs;
       this.segData[i * 4] = x0 * vs;
       this.segData[i * 4 + 1] = h - y0 * vs;
       this.segData[i * 4 + 2] = x1 * vs;
@@ -543,7 +880,10 @@ export default class InkDragEngine {
     gl.uniform1f(uniforms.uUnit, this.velWidth / this.simWidth);
     gl.uniform1f(uniforms.uDt, dt);
     gl.uniform1f(uniforms.uDecay, Math.exp(-dt / this.ink.tau));
-    gl.uniform1f(uniforms.uViscosity, 1 - Math.pow(1 - this.ink.viscosity, dt * 60));
+    gl.uniform1f(
+      uniforms.uViscosity,
+      1 - Math.pow(1 - this.ink.viscosity, dt * 60),
+    );
     gl.uniform1i(uniforms.uCount, count);
     gl.uniform4fv(uniforms.uSeg, this.segData);
     gl.uniform4fv(uniforms.uSegV, this.segVel);
@@ -551,7 +891,7 @@ export default class InkDragEngine {
     this.velRead = 1 - this.velRead;
   }
 
-  stepInk(dt) {
+  stepInk(dt, front = -10) {
     const gl = this.gl;
     const { program, uniforms } = this.programs.ink;
     const read = this.inkTargets[this.inkRead];
@@ -573,6 +913,10 @@ export default class InkDragEngine {
     gl.uniform1f(uniforms.uDryThick, ink.dryThick);
     gl.uniform1f(uniforms.uRewet, ink.rewet);
     gl.uniform1f(uniforms.uLevel, 1 - Math.pow(1 - ink.level, dt * 60));
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, this.goalTarget.texture);
+    gl.uniform1i(uniforms.uGoal, 2);
+    gl.uniform1f(uniforms.uFront, front);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     this.inkRead = 1 - this.inkRead;
   }
@@ -600,6 +944,7 @@ export default class InkDragEngine {
     gl.uniform3fv(uniforms.uThinTint, ink.thin);
     gl.uniform1f(uniforms.uGloss, ink.gloss);
     gl.uniform1f(uniforms.uPx, this.dpr);
+    gl.uniform1f(uniforms.uDeboss, this.tone ? 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -624,7 +969,14 @@ export default class InkDragEngine {
   }
 
   wake() {
-    if (this.raf || this.destroyed || !this.gl || !this.visible || document.hidden) return;
+    if (
+      this.raf ||
+      this.destroyed ||
+      !this.gl ||
+      !this.visible ||
+      document.hidden
+    )
+      return;
     this.last = 0;
     this.raf = requestAnimationFrame(this.frame);
   }
@@ -641,7 +993,9 @@ export default class InkDragEngine {
   frame(now) {
     this.raf = 0;
     if (this.destroyed || !this.inkTargets) return;
-    const elapsed = this.last ? Math.min(0.1, Math.max(1 / 240, (now - this.last) / 1000)) : 1 / 60;
+    const elapsed = this.last
+      ? Math.min(0.1, Math.max(1 / 240, (now - this.last) / 1000))
+      : 1 / 60;
     const dt = Math.min(1 / 30, elapsed);
     this.last = now;
     this.frameCount += 1;
@@ -658,6 +1012,8 @@ export default class InkDragEngine {
       this.dirty = true;
     } else if (this.interactive && this.fontReady) {
       this.collectStroke(elapsed);
+      const front = this.morph ? this.sweep(dt) : -10;
+      const sweeping = front > -10;
       const count = this.queue.length ? this.packSegments() : 0;
       if (count) {
         this.velocityUntil = clock + VELOCITY_LIFE_MS;
@@ -667,11 +1023,16 @@ export default class InkDragEngine {
       const moving = clock < this.velocityUntil;
       const dryingLeft = this.drying && clock - this.lastStir < this.dryMs();
       if (moving) this.stepVelocity(dt, count);
-      if (moving || dryingLeft) {
-        this.stepInk(dt);
+      if (moving || dryingLeft || sweeping) {
+        this.stepInk(dt, front);
         this.dirty = true;
       }
-      busy = moving || dryingLeft || Boolean(this.pointer);
+      busy =
+        moving ||
+        dryingLeft ||
+        sweeping ||
+        Boolean(this.morph) ||
+        Boolean(this.pointer);
       if (this.pointer) this.placeCursor(this.pointer.x, this.pointer.y);
     }
     if (this.dirty) {
@@ -684,6 +1045,7 @@ export default class InkDragEngine {
 
   destroy() {
     this.destroyed = true;
+    clearTimeout(this.idleTimer);
     if (this.raf) cancelAnimationFrame(this.raf);
     this.raf = 0;
     this.intersection?.disconnect();
@@ -698,7 +1060,9 @@ export default class InkDragEngine {
     if (!gl) return;
     this.dropTargets();
     gl.deleteTexture(this.maskTexture);
-    Object.values(this.programs).forEach(({ program }) => gl.deleteProgram(program));
+    Object.values(this.programs).forEach(({ program }) =>
+      gl.deleteProgram(program),
+    );
     gl.deleteShader(this.vertex);
     gl.deleteBuffer(this.buffer);
     gl.deleteVertexArray(this.vao);

@@ -15,11 +15,17 @@ const AIR = 3.2;
 const TABLE_DRAG = 5.2;
 const STICK = 3;
 const MAX_SPEED = 2600;
+const MAX_TAKEUP = 420;
+const MIN_OUT = 46;
+const CAN_CLEAR = 10;
+const NEAR_MIN = 38;
+const TURN_RADIUS = 40;
 const CAN_X = 14.5;
 const CAN_HALF = 42;
 const CAN_TOP = 27;
 const W_STIFF = 0.8;
 const N_STIFF = 0.16;
+const MIN_SIDE_RADIUS = 46;
 
 function curlAt(f, u) {
   const lead = 1 / 14 + (1 / 50 - 1 / 14) * smooth(45, 115, f);
@@ -55,6 +61,7 @@ export default class FilmSim {
     this.rewindSpeed = 140;
     this.rest = U_REST;
     this.calm = 0;
+    this.takeup = false;
     this.lastH = 1 / 240;
   }
 
@@ -135,9 +142,35 @@ export default class FilmSim {
     const dz = point[2] - sz;
     const dist = Math.hypot(dx, dy, dz);
     const limit = available * 0.985;
-    if (dist <= limit || dist < 1e-6) return point;
-    const scale = limit / dist;
-    return [sx + dx * scale, sy + dy * scale, sz + dz * scale];
+    const scale = dist <= limit || dist < 1e-6 ? 1 : limit / dist;
+    return this.clearCan([sx + dx * scale, sy + dy * scale, sz + dz * scale]);
+  }
+
+  clearCan(input) {
+    let point = input;
+    const mx = CAN_X + CAN_CLEAR;
+    const mz = CAN_HALF + CAN_CLEAR;
+    if (point[0] < mx && Math.abs(point[2]) < mz) point = [mx, point[1], point[2]];
+    const ox = point[0] - this.slot[0];
+    const oz = point[2] - this.slot[2];
+    const near = Math.hypot(ox, oz);
+    if (near < NEAR_MIN) {
+      const ux = near > 1e-3 ? ox / near : this.dir[0];
+      const uz = near > 1e-3 ? oz / near : this.dir[2];
+      point = [this.slot[0] + ux * NEAR_MIN, point[1], this.slot[2] + uz * NEAR_MIN];
+    }
+    const rx = point[0] - this.slot[0];
+    const rz = point[2] - this.slot[2];
+    const reach = Math.hypot(rx, rz);
+    const base = Math.atan2(this.dir[2], this.dir[0]);
+    let turn = Math.atan2(rz, rx) - base;
+    turn = Math.atan2(Math.sin(turn), Math.cos(turn));
+    const room = reach < 2 * TURN_RADIUS ? Math.asin(reach / (2 * TURN_RADIUS)) + 0.26 : Math.PI * 0.86;
+    if (Math.abs(turn) > room) {
+      const a = base + Math.sign(turn) * room;
+      point = [this.slot[0] + Math.cos(a) * reach, point[1], this.slot[2] + Math.sin(a) * reach];
+    }
+    return point;
   }
 
   step(dt) {
@@ -164,17 +197,30 @@ export default class FilmSim {
     if (this.grab) {
       this.uVel *= Math.exp(-h * 7);
       if (this.u > this.rest) this.uVel -= 60 * h;
+      const gi = this.grab.index * 3;
+      const between = this.u - this.grab.f;
+      const reach = Math.hypot(this.pos[gi] - this.slot[0], this.pos[gi + 1] - this.slot[1], this.pos[gi + 2] - this.slot[2]);
+      const slack = between - (reach * 1.05 + 8);
+      this.takeup = slack > 0;
+      if (this.takeup) this.uVel = Math.min(this.uVel, -Math.min(MAX_TAKEUP, slack * 9));
     } else {
+      this.takeup = false;
       const over = this.u - this.rest;
-      const want = over > 0 ? -Math.min(this.rewindSpeed, over * 1.8 + 2) : 0;
+      const want = over > 0 ? -Math.min(this.rewindSpeed, over * 1.8 + 2) : Math.min(70, -over * 1.4);
       this.uVel += (want - this.uVel) * (1 - Math.exp(-h * 2.6));
-      if (over <= 0.25 && this.uVel <= 0) {
+      if (Math.abs(over) <= 0.25) {
         this.uVel = 0;
-        if (over > 0) this.u = this.rest;
+        this.u = this.rest;
       }
     }
+    const before = this.u;
     this.u += this.uVel * h;
-    this.u = Math.max(SEG * 2, Math.min(U_MAX, this.u));
+    const floor = Math.min(before, this.grab ? Math.max(MIN_OUT, this.grab.f + 14) : SEG * 2);
+    if (this.u < floor) {
+      this.u = floor;
+      if (this.uVel < 0) this.uVel = 0;
+    }
+    this.u = Math.min(U_MAX, this.u);
   }
 
   resize() {
@@ -273,7 +319,7 @@ export default class FilmSim {
     }
     this.transport();
     const uStart = this.u;
-    const share = this.grab ? 0.9 : 0.18;
+    const share = this.grab ? (this.takeup ? 0 : 0.9) : 0.18;
     const [sx, sy, sz] = this.slot;
     const [dx, dy, dz] = this.dir;
     for (let it = 0; it < ITERATIONS; it += 1) {
@@ -329,6 +375,7 @@ export default class FilmSim {
       this.bend(grabbed);
       this.collide(grabbed);
     }
+    for (let pass = 0; pass < 10; pass += 1) this.limitSide(grabbed);
     const fed = this.u - uStart;
     if (fed > 0 && this.grab) this.uVel = Math.max(this.uVel, fed / h);
     this.taut = fed / h;
@@ -405,9 +452,13 @@ export default class FilmSim {
       const ey = my - P[b + 1];
       const ez = mz - P[b + 2];
       const along = ex * wx + ey * wy + ez * wz;
-      const cx = (ex - along * wx) * N_STIFF + along * wx * W_STIFF;
-      const cy = (ey - along * wy) * N_STIFF + along * wy * W_STIFF;
-      const cz = (ez - along * wz) * N_STIFF + along * wz * W_STIFF;
+      const limit = (chord * chord) / (8 * MIN_SIDE_RADIUS);
+      const hard = along - Math.max(-limit, Math.min(limit, along));
+      const soft = along - hard;
+      const side = soft * W_STIFF + hard / 1.5;
+      const cx = (ex - along * wx) * N_STIFF + side * wx;
+      const cy = (ey - along * wy) * N_STIFF + side * wy;
+      const cz = (ez - along * wz) * N_STIFF + side * wz;
       const wa = i - 1 === grabbed ? 0 : 1;
       const wb = i === grabbed ? 0 : 2;
       const wc = i + 1 === grabbed ? 0 : 1;
@@ -425,6 +476,43 @@ export default class FilmSim {
       P[c] -= cx * kc * 1.5;
       P[c + 1] -= cy * kc * 1.5;
       P[c + 2] -= cz * kc * 1.5;
+    }
+  }
+
+  limitSide(grabbed) {
+    const n = this.n;
+    const P = this.pos;
+    const W = this.side;
+    for (let i = 1; i < n - 1; i += 1) {
+      const a = (i - 1) * 3;
+      const b = i * 3;
+      const c = (i + 1) * 3;
+      const chord = Math.hypot(P[c] - P[a], P[c + 1] - P[a + 1], P[c + 2] - P[a + 2]);
+      const wx = W[b];
+      const wy = W[b + 1];
+      const wz = W[b + 2];
+      const along = (P[b] - (P[a] + P[c]) * 0.5) * wx + (P[b + 1] - (P[a + 1] + P[c + 1]) * 0.5) * wy + (P[b + 2] - (P[a + 2] + P[c + 2]) * 0.5) * wz;
+      const limit = (chord * chord) / (8 * MIN_SIDE_RADIUS);
+      const excess = along - Math.max(-limit, Math.min(limit, along));
+      if (excess === 0) continue;
+      const wa = i - 1 === grabbed ? 0 : 1;
+      const wb = i === grabbed ? 0 : 2;
+      const wc = i + 1 === grabbed ? 0 : 1;
+      const total = wa + wb + wc;
+      if (total === 0) continue;
+      const k = excess / (wb / total + 0.5 * (wa + wc) / total);
+      const mb = (-k * wb) / total;
+      const ma = (k * wa) / total;
+      const mc = (k * wc) / total;
+      P[b] += wx * mb;
+      P[b + 1] += wy * mb;
+      P[b + 2] += wz * mb;
+      P[a] += wx * ma * 0.5;
+      P[a + 1] += wy * ma * 0.5;
+      P[a + 2] += wz * ma * 0.5;
+      P[c] += wx * mc * 0.5;
+      P[c + 1] += wy * mc * 0.5;
+      P[c + 2] += wz * mc * 0.5;
     }
   }
 

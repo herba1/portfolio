@@ -138,19 +138,26 @@ function bezier(p0, p1, p2, p3, t) {
   return [a * p0[0] + b * p1[0] + c * p2[0] + d * p3[0], a * p0[1] + b * p1[1] + c * p2[1] + d * p3[1]];
 }
 
-function loopControls(height) {
-  const flare = Math.max(0, height - 4) * 1.05;
+const LOOP_CLEAR = MOUTH.edge + 1.6;
+
+function loopPoint(height, t) {
   const p0 = [-MOUTH.x, MOUTH.z];
   const p3 = [MOUTH.x, MOUTH.z];
-  return [p0, [p0[0] - flare, p0[1] + height * 1.2], [p3[0] + flare, p3[1] + height * 1.2], p3];
+  const lift = height * 1.2;
+  const p = bezier(p0, [p0[0], p0[1] + lift], [p3[0], p3[1] + lift], p3, t);
+  const flare = Math.max(0, height - 4) * 1.05;
+  if (flare > 0) {
+    const u = clamp((p[1] - LOOP_CLEAR) / 14, 0, 1);
+    p[0] *= 1 + ((flare * 0.8) / MOUTH.x) * u * u * (3 - 2 * u);
+  }
+  return p;
 }
 
 function loopLength(height) {
-  const [p0, p1, p2, p3] = loopControls(height);
   let len = 0;
-  let prev = p0;
-  for (let i = 1; i <= 32; i += 1) {
-    const p = bezier(p0, p1, p2, p3, i / 32);
+  let prev = loopPoint(height, 0);
+  for (let i = 1; i <= 48; i += 1) {
+    const p = loopPoint(height, i / 48);
     len += Math.hypot(p[0] - prev[0], p[1] - prev[1]);
     prev = p;
   }
@@ -193,10 +200,9 @@ export function tapePath(radiusLeft, radiusRight, loopHeight, out) {
     return mirror ? pts.map(([x, z]) => [-x, z]).reverse() : pts;
   };
   for (const p of side(radiusLeft, false)) push(p[0], p[1]);
-  const [c0, c1, c2, c3] = loopControls(loopHeight);
   const steps = 72;
   for (let i = 1; i < steps; i += 1) {
-    const p = bezier(c0, c1, c2, c3, i / steps);
+    const p = loopPoint(loopHeight, i / steps);
     push(p[0], p[1]);
   }
   for (const p of side(radiusRight, true)) push(p[0], p[1]);

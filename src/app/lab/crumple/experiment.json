@@ -1,13 +1,20 @@
 {
   "title": "Crumple",
-  "description": "Beatles portraits printed on glossy photo paper arrive as crumpled balls on a pale felt table. Throw one into the others, or tap it and it lifts toward you and unfolds flat, its creases left as a lit relief your pointer rakes light across.",
-  "tags": ["WebGL", "Physics", "Paper"],
+  "description": "The Beatles' Shea Stadium setlist, or a halftone Abbey Road poster, drawn like a comic panel. Press and hold to scrunch it into a ball and drag it around; the paper animates on twos at 12 frames a second with ink outlines and screen-tone shading while your cursor stays smooth, and every crumple leaves its creases behind.",
+  "tags": [
+    "Canvas",
+    "Paper",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One paper mechanic finished to the edge: a procedural crumple that folds a print along its own crease network into a ball and back, so the flat print keeps every fold it has been through.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "One paper mechanic in a stylised frame rate: a crumple mesh drawn as held comic frames, so the scrunch reads as drawn animation instead of a simulation that looks slightly off.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
-    "https://tympanus.net/codrops/2026/09/19/crumbled-paper-houdini-vat-threejs/",
-    "https://tympanus.net/Demos/PaperCrumble/"
+    "https://www.setlist.fm/setlist/the-beatles/1965/shea-stadium-flushing-ny-6bd6a6f2.html",
+    "https://en.wikipedia.org/wiki/Spider-Man:_Into_the_Spider-Verse"
   ]
 }

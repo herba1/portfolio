@@ -1,22 +1,22 @@
 {
   "title": "Photo Booth",
-  "description": "A chemical photo booth's delivery slot. Press the chrome button for a countdown and four flashes, and a wet strip of portraits printed in Geist Mono characters feeds out of the slot; pull it sideways to tear it off at the perforation.",
+  "description": "A photo booth's delivery slot. Press the chrome button for a countdown and four flashes, and a wet strip feeds out with the four Let It Be portraits, John, Paul, Ringo and George, printed in Geist Mono characters. Pull it sideways to tear it off at the perforation and drop it in the tray.",
   "tags": [
     "WebGL",
     "Print",
     "Type",
-    "Physics"
+    "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One physical object finished to the edge: a booth strip of four shape-matched ASCII prints on glossy paper that dries matte, hanging from a slot as stiff paper you can swing, tear along a real perforation, and toss onto a pile.",
+  "intent": "One physical object finished to the edge: a four-frame booth strip cut from the Let It Be cover, printed as shape-matched ASCII on glossy paper that dries matte, hanging as stiff paper you can swing, tear along a real perforation, and toss into the tray.",
   "tile": {
     "cols": 3,
     "rows": 6
   },
   "sources": [
+    "https://en.wikipedia.org/wiki/Let_It_Be_(album)",
     "https://alexharri.com/blog/ascii-rendering",
-    "https://tympanus.net/codrops/2024/11/13/creating-an-ascii-shader-using-ogl/",
     "https://en.wikipedia.org/wiki/Photo_booth"
   ]
 }

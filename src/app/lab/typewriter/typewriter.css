@@ -1,5 +1,7 @@
 .typewriter-root {
-  --typewriter-enamel: rgb(214 210 199);
+  --typewriter-enamel: rgb(226 223 216);
+  --typewriter-charcoal: rgb(30 30 32);
+  --typewriter-red: rgb(196 52 40);
   --typewriter-ink: rgb(30 29 31);
   --typewriter-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
   --typewriter-serif-weight: 430;
@@ -120,10 +122,7 @@
   padding: 0 12px 0 10px;
   border: 0;
   border-radius: 9999px;
-  background: rgb(255 255 255 / 0.55);
-  box-shadow:
-    0 0 0 1px rgb(60 50 40 / 0.12),
-    0 1px 2px rgb(60 50 40 / 0.1);
+  background: rgb(255 255 255 / 0.6);
   color: var(--color-ink);
   font-family: inherit;
   font-size: var(--text-ui);
@@ -156,16 +155,13 @@
   width: 8px;
   height: 8px;
   border-radius: 9999px;
-  background: rgb(138 34 32);
-  box-shadow: 0 0 0 2px rgb(138 34 32 / 0.18);
+  background: var(--typewriter-red);
   transition:
-    background-color 200ms var(--typewriter-ease),
-    box-shadow 200ms var(--typewriter-ease);
+    background-color 200ms var(--typewriter-ease);
 }
 
 .typewriter-sound[aria-pressed="false"] .typewriter-sound-mark {
   background: rgb(120 116 108);
-  box-shadow: 0 0 0 2px rgb(120 116 108 / 0.16);
 }
 
 .typewriter-keys {
@@ -205,16 +201,8 @@
   padding: 0;
   border: 0;
   border-radius: 9999px;
-  background:
-    radial-gradient(circle at 34% 28%, rgb(84 84 88) 0%, rgb(48 48 52) 38%, rgb(30 30 33) 72%, rgb(22 22 25) 100%);
-  box-shadow:
-    0 0 0 2px rgb(222 223 225),
-    0 0 0 3px rgb(140 142 146),
-    inset 0 1px 1px rgb(255 255 255 / 0.18),
-    inset 0 -2px 3px rgb(0 0 0 / 0.4),
-    0 3px 0 1px rgb(110 104 92 / 0.55),
-    0 6px 10px rgb(60 50 36 / 0.28);
-  color: rgb(242 236 220);
+  background: var(--typewriter-charcoal);
+  color: rgb(240 236 228);
   font-family: var(--font-mono);
   font-size: var(--text-ui);
   line-height: var(--text-ui--line-height);
@@ -224,22 +212,16 @@
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
   transition:
-    transform 70ms var(--typewriter-ease),
-    box-shadow 70ms var(--typewriter-ease);
+    transform 90ms var(--typewriter-ease),
+    background-color 90ms var(--typewriter-ease);
 }
 
 .typewriter-key[data-down],
 .typewriter-key:active,
 .typewriter-space[data-down],
 .typewriter-space:active {
-  transform: translateY(3px) scale(0.97);
-  box-shadow:
-    0 0 0 2px rgb(222 223 225),
-    0 0 0 3px rgb(140 142 146),
-    inset 0 1px 1px rgb(255 255 255 / 0.12),
-    inset 0 -1px 2px rgb(0 0 0 / 0.4),
-    0 0 0 1px rgb(110 104 92 / 0.55),
-    0 2px 4px rgb(60 50 36 / 0.22);
+  transform: translateY(2px) scale(0.96);
+  background: rgb(64 64 68);
   transition-duration: 30ms;
 }
 
@@ -257,36 +239,20 @@
 }
 
 .typewriter-key[data-on] {
-  color: rgb(255 214 200);
-  background:
-    radial-gradient(circle at 34% 28%, rgb(176 70 64) 0%, rgb(138 34 32) 50%, rgb(98 22 22) 100%);
+  background: var(--typewriter-red);
+  color: rgb(255 240 236);
 }
 
 .typewriter-space {
   width: calc(var(--typewriter-key) * 5);
-  height: calc(var(--typewriter-key) * 0.62);
-  margin-top: calc(var(--typewriter-key) * 0.19);
-  background: linear-gradient(
-    to bottom,
-    rgb(250 250 251) 0%,
-    rgb(214 216 219) 30%,
-    rgb(160 162 166) 70%,
-    rgb(196 198 201) 100%
-  );
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.9),
-    inset 0 -1px 0 rgb(0 0 0 / 0.2),
-    0 3px 0 rgb(110 104 92 / 0.45),
-    0 6px 10px rgb(60 50 36 / 0.25);
+  height: calc(var(--typewriter-key) * 0.5);
+  margin-top: calc(var(--typewriter-key) * 0.25);
+  background: rgb(196 197 199);
 }
 
 .typewriter-space[data-down],
 .typewriter-space:active {
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.7),
-    inset 0 -1px 0 rgb(0 0 0 / 0.2),
-    0 0 0 rgb(110 104 92 / 0.45),
-    0 2px 4px rgb(60 50 36 / 0.2);
+  background: rgb(176 177 180);
 }
 
 .typewriter-sr {
@@ -326,11 +292,11 @@
     gap: 4px;
     background: linear-gradient(
       to bottom,
-      rgb(214 210 199 / 0.94) 0%,
-      rgb(214 210 199 / 0.86) 45%,
-      rgb(214 210 199 / 0.5) 72%,
-      rgb(214 210 199 / 0.16) 90%,
-      rgb(214 210 199 / 0) 100%
+      rgb(226 223 216 / 0.96) 0%,
+      rgb(226 223 216 / 0.88) 45%,
+      rgb(226 223 216 / 0.5) 72%,
+      rgb(226 223 216 / 0.16) 90%,
+      rgb(226 223 216 / 0) 100%
     );
   }
 

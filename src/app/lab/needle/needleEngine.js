@@ -21,7 +21,7 @@ const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const wrap = (a) => a - TAU * Math.floor(a / TAU);
 const wrapPi = (a) => a - TAU * Math.round(a / TAU);
 
-export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, insets, embedded, onSound, onReady, onFail, onAnnounce }) {
+export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, insets, embedded, record, onSound, onReady, onFail, onAnnounce, onBand }) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const view = { width: 1, height: 1, dpr: 1, scale: 1, cx: 0, cy: 0, eye: [0, 0, 1500], quality: 1, rot: 0 };
   let side = buildSide(5);
@@ -50,12 +50,13 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
   let meterLevels = [0, 0, 0, 0];
   let meterShown = "";
   let readySent = false;
+  let lastBand = -2;
 
   phys.phiR = wrap(Math.atan2(...[...stylusAt(arm.beta)].reverse()) + (TAU * play.t) / REV);
 
   function packSegments(s) {
-    const out = new Float32Array(36);
-    s.segments.slice(0, 9).forEach((seg, i) => {
+    const out = new Float32Array(64);
+    s.segments.slice(0, 16).forEach((seg, i) => {
       out[i * 4] = seg.r0;
       out[i * 4 + 1] = seg.pitch === 0 ? 0.001 : seg.pitch;
       out[i * 4 + 2] = seg.t0;
@@ -286,7 +287,19 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
     arm.mode = "cue";
     arm.cue = starts[idx];
     arm.target = betaForRadius(radiusAt(side, starts[idx]) - 0.3);
-    onAnnounce(`Cueing band ${idx + 1}.`);
+    onAnnounce(`Cueing ${record.tracks[idx] || `band ${idx + 1}`}.`);
+  }
+
+  function cueTrack(idx) {
+    const starts = side.bands.map((b) => b.t0);
+    if (idx < 0 || idx >= starts.length) return;
+    startAudio();
+    if (arm.mode === "play") audio.lift();
+    arm.mode = "cue";
+    arm.cue = starts[idx];
+    arm.target = betaForRadius(radiusAt(side, starts[idx]) - 0.3);
+    onAnnounce(`Cueing ${record.tracks[idx] || `band ${idx + 1}`}.`);
+    wake();
   }
 
   function onKey(e) {
@@ -471,6 +484,12 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
 
     render(dt);
     updateTag();
+    const nowBand = arm.mode === "play" ? bandAt(side, play.t) : arm.mode === "cue" && arm.cue !== null ? bandAt(side, arm.cue + 0.02) : lastBand;
+    const between = nowBand === -1 && arm.mode === "play" && play.t > side.bands[0].t0 && play.t < side.tEnd;
+    if (nowBand !== lastBand && !between) {
+      lastBand = nowBand;
+      onBand?.(nowBand);
+    }
     updateMeter(dt);
 
     const spinning = phys.motor || Math.abs(phys.wP) > 0.002 || Math.abs(phys.wR) > 0.002;
@@ -603,7 +622,7 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
       mono: style.getPropertyValue("--font-mono").trim() || "ui-monospace, monospace",
       serif: style.getPropertyValue("--needle-serif").trim() || "Georgia, serif",
     };
-    drawLabel("/monovolt/abt7.webp", fonts)
+    drawLabel(record, fonts)
       .then((label) => {
         if (destroyed || !gl) return;
         gl.setLabel(label);
@@ -681,6 +700,7 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
   return {
     toggleSound,
     toggleMotor,
+    cueTrack,
     get motor() {
       return phys.motor;
     },

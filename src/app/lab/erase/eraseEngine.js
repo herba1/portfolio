@@ -1,5 +1,5 @@
 import Dust, { AIR, REST } from "./eraseDust";
-import { FAMILY, GRID, GRID_COLS, GRID_ROWS, bakeInk, bakeScene, coverage, layoutHand, loadHand, makeCanvas, makeStamp, mulberry } from "./eraseBake";
+import { FAMILY, GRID, GRID_COLS, GRID_ROWS, bakeInk, bakeScene, coverage, defaultTitles, layoutHand, loadHand, makeCanvas, makeStamp, mulberry } from "./eraseBake";
 import { ASPECT, LEDGE_DEPTH, LEDGE_FRONT, SHEET_H, SHEET_W } from "./eraseSetlist";
 
 const MAX_DPR = 2;
@@ -17,9 +17,12 @@ const TIP_X = 10;
 const TIP_Y = 39;
 const BASE_ANGLE = -0.62;
 const LEAN_W = 15;
+const TAP_SLOP = 5;
+const TAP_TIME = 450;
+const TITLE_SIZE = 64;
 
 export default class EraseEngine {
-  constructor({ root, surface, scene, ink, pile, dust, eraser, ring, embedded, onReady, onHistory }) {
+  constructor({ root, surface, scene, ink, pile, dust, eraser, ring, embedded, onReady, onHistory, onEdit }) {
     this.root = root;
     this.surface = surface;
     this.sceneCanvas = scene;
@@ -31,6 +34,9 @@ export default class EraseEngine {
     this.embedded = embedded;
     this.onReady = onReady;
     this.onHistory = onHistory;
+    this.onEdit = onEdit;
+    this.titles = defaultTitles();
+    this.editing = -1;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.rng = mulberry(9001);
     this.dust = new Dust();
@@ -94,7 +100,7 @@ export default class EraseEngine {
   }
 
   setup() {
-    this.hand = layoutHand(this.family);
+    this.hand = layoutHand(this.family, this.titles);
     this.stampImg = makeStamp();
     const mw = Math.round(SHEET_W * MASK_SCALE);
     const mh = Math.round(SHEET_H * MASK_SCALE);
@@ -479,12 +485,17 @@ export default class EraseEngine {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       this.moveFocus(e.key === "ArrowDown" ? 1 : -1);
-    } else if (e.key === "Enter" || e.key === " ") {
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      if (e.repeat) return;
+      if (this.focusLine < 0) this.moveFocus(0);
+      this.onEdit?.(this.focusLine, true);
+    } else if (e.key === "Delete" || e.key === "Backspace" || e.key === " ") {
       e.preventDefault();
       if (e.repeat) return;
       if (this.focusLine < 0) this.moveFocus(0);
       this.scrubLine(this.focusLine);
-    } else if (e.key === "Backspace" || e.key === "u") {
+    } else if (e.key === "u") {
       e.preventDefault();
       this.undo();
     } else if (e.key === "Escape") {
@@ -510,13 +521,12 @@ export default class EraseEngine {
       this.auto = null;
       this.endStroke();
     }
-    this.pointer = { id: e.pointerId, x, y, type: e.pointerType, pressure: e.pointerType === "pen" && e.pressure > 0 ? 0.55 + e.pressure : 1, queue: [] };
+    this.pointer = { id: e.pointerId, x, y, x0: x, y0: y, t0: e.timeStamp, moved: false, type: e.pointerType, pressure: e.pointerType === "pen" && e.pressure > 0 ? 0.55 + e.pressure : 1, queue: [] };
     this.lastStamp = null;
     this.track = null;
     this.clearFocus();
     this.root.setAttribute("data-pressed", "");
     this.showEraser(x, y);
-    this.rubTo(...this.toWorld(x, y), 0, 0, this.pointer.pressure);
     this.wake();
   }
 
@@ -530,6 +540,10 @@ export default class EraseEngine {
       return;
     }
     if (!p || p.id !== e.pointerId) return;
+    if (!p.moved && Math.hypot(x - p.x0, y - p.y0) > TAP_SLOP) {
+      p.moved = true;
+      this.rubTo(...this.toWorld(p.x0, p.y0), 0, 0, p.pressure);
+    }
     const rect = this.root.getBoundingClientRect();
     const events = e.getCoalescedEvents?.() || [];
     for (const ev of events.length ? events : [e]) p.queue.push([ev.clientX - rect.left, ev.clientY - rect.top]);
@@ -550,6 +564,10 @@ export default class EraseEngine {
     this.lastStamp = null;
     this.root.removeAttribute("data-pressed");
     if (e.pointerType === "touch") this.hideEraser();
+    if (!p.moved && e.type === "pointerup" && e.timeStamp - p.t0 < TAP_TIME) {
+      const index = this.lineAt(...this.toWorld(p.x0, p.y0));
+      if (index >= 0) this.onEdit?.(index);
+    }
     this.wake();
   }
 
@@ -562,6 +580,10 @@ export default class EraseEngine {
   flushQueue() {
     const p = this.pointer;
     if (!p || !p.queue.length) return;
+    if (!p.moved) {
+      p.queue.length = 0;
+      return;
+    }
     const k = this.geo.k;
     for (const [qx, qy] of p.queue) this.rubTo(...this.toWorld(qx, qy), this.vel.x / k, this.vel.y / k, p.pressure);
     p.queue.length = 0;
@@ -653,6 +675,10 @@ export default class EraseEngine {
     this.clipTo(out, ts);
     out.drawImage(this.fxTmp, 0, 0);
     out.drawImage(this.inkTmp, 0, 0);
+    if (this.editing >= 0) {
+      const [x0, y0, x1, y1] = this.titleBox(this.editing);
+      out.clearRect(x0 * ts, y0 * ts, (x1 - x0) * ts, (y1 - y0) * ts);
+    }
     out.restore();
     this.maskDirty = false;
     this.dirty = null;
@@ -821,6 +847,103 @@ export default class EraseEngine {
       this.rubSign = sign;
       this.lastVel = { x: vx, y: this.vel.y / k };
     }
+  }
+
+  lineAt(wx, wy) {
+    if (!this.hand || wx < 80 || wx > SHEET_W - 60) return -1;
+    for (const line of this.hand.lines) {
+      if (wy >= line.y - TITLE_SIZE * 0.95 - 14 && wy <= line.y + TITLE_SIZE * 0.25 + 14) return line.index;
+    }
+    return -1;
+  }
+
+  titleBox(index) {
+    const line = this.hand.lines[index];
+    const right = line.key ? line.key.x0 - 20 : SHEET_W - 80;
+    return [100, line.y - TITLE_SIZE * 0.95 - 10, right, line.y + TITLE_SIZE * 0.3 + 6];
+  }
+
+  beginEdit(index) {
+    if (!this.ready || !this.hand?.lines[index]) return null;
+    if (this.editing >= 0 && this.editing !== index) this.markDirty(...this.titleBox(this.editing));
+    this.editing = index;
+    this.auto = null;
+    this.hideEraser();
+    this.markDirty(...this.titleBox(index));
+    this.compose();
+    return this.editBox();
+  }
+
+  editBox() {
+    if (this.editing < 0 || !this.geo) return null;
+    const { sheetX, sheetY, k } = this.geo;
+    const line = this.hand.lines[this.editing];
+    const [x0, , x1] = this.titleBox(this.editing);
+    const size = TITLE_SIZE * k;
+    return {
+      index: this.editing,
+      title: line.title,
+      left: sheetX + (118 - 4) * k,
+      baseline: sheetY + line.y * k,
+      width: (x1 - 118 + 4) * k,
+      size,
+      x0: sheetX + x0 * k,
+    };
+  }
+
+  endEdit(text) {
+    const index = this.editing;
+    if (index < 0) return;
+    this.editing = -1;
+    const box = this.titleBox(index);
+    if (text == null || text === this.titles[index]) {
+      this.markDirty(...box);
+      this.wake();
+      return;
+    }
+    this.titles[index] = text;
+    if (this.current) this.endStroke();
+    this.auto = null;
+    const base = this.baseMask.getContext("2d");
+    base.setTransform(1, 0, 0, 1, 0, 0);
+    base.globalAlpha = 1;
+    for (const st of this.strokes) {
+      if (st.state === "done") base.drawImage(st.canvas, 0, 0);
+      st.parts.length = 0;
+      st.removed.clear();
+      st.canvas.width = 1;
+      st.canvas.height = 1;
+    }
+    this.strokes = [];
+    base.setTransform(MASK_SCALE, 0, 0, MASK_SCALE, 0, 0);
+    base.clearRect(box[0], box[1] - 8, box[2] - box[0], box[3] - box[1] + 16);
+    base.setTransform(1, 0, 0, 1, 0, 0);
+    this.hand = layoutHand(this.family, this.titles);
+    if (this.tex) {
+      const { pw, ph } = this.tex;
+      const baked = bakeInk(this.hand, pw, ph, this.family);
+      const grid = coverage(baked.total, baked.blue, pw, ph, baked.s);
+      const r0 = Math.max(0, Math.floor((box[1] - 8) / GRID));
+      const r1 = Math.min(GRID_ROWS - 1, Math.ceil((box[3] + 8) / GRID));
+      const c0 = Math.max(0, Math.floor(box[0] / GRID));
+      const c1 = Math.min(GRID_COLS - 1, Math.ceil(box[2] / GRID));
+      for (let row = r0; row <= r1; row += 1) {
+        for (let col = c0; col <= c1; col += 1) {
+          const idx = row * GRID_COLS + col;
+          this.cov[idx] = grid.cov[idx];
+        }
+      }
+      for (let i = 0; i < this.cov.length; i += 1) this.cov[i] = Math.min(this.cov[i], grid.cov[i]);
+      this.cov0 = grid.cov;
+      this.tint = grid.tint;
+      this.tex.ink = baked.ink;
+      this.tex.fx = baked.fx;
+    }
+    this.markDirty(0, 0, SHEET_W, SHEET_H);
+    this.compose();
+    this.placeRing();
+    this.emitHistory();
+    this.wake();
   }
 
   destroy() {

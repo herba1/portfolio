@@ -1,11 +1,18 @@
 {
   "title": "Dandelion",
-  "description": "A Beatles portrait printed in dandelion seeds, each tuft sized by the tone beneath it. Swipe across the face and the seeds lift off on the wind, tumbling away under their parachutes; leave it be and they drift back in and land where they grew.",
-  "tags": ["WebGL", "Particles", "Music"],
+  "description": "Album-sleeve portraits (With the Beatles, and John and George from Let It Be) printed in seed heads, each tuft sized by the tone beneath it. The domed head turns gently toward your pointer; switch the seeds between dandelion, salsify and thistle. Swipe and they lift off on the wind, leave it and they drift back to land where they grew.",
+  "tags": [
+    "WebGL",
+    "Particles",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "A halftone whose dots are alive: one breath of a mechanic, swipe speed and direction become wind, the face scatters into airborne seeds and slowly re-seeds itself, botanical and airy rather than digital.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "A halftone whose dots are alive: a domed seed head that leans toward you, three real pappus forms, and swipe speed and direction become wind that scatters the face and slowly re-seeds it, botanical and airy rather than digital.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://herb.art/halftone",
     "https://www.cs.ubc.ca/~rbridson/docs/bridson-siggraph2007-curlnoise.pdf",

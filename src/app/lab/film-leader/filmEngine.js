@@ -274,10 +274,10 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
 
   const shadowGeo = keep(new THREE.BufferGeometry());
   const shadowPos = new Float32Array(maxSamples * 2 * 3);
-  const shadowCoord = new Float32Array(maxSamples * 2 * 2);
+  const shadowCoord = new Float32Array(maxSamples * 2 * 3);
   shadowGeo.setIndex(index);
   const shadowPosAttr = new THREE.BufferAttribute(shadowPos, 3).setUsage(THREE.DynamicDrawUsage);
-  const shadowCoordAttr = new THREE.BufferAttribute(shadowCoord, 2).setUsage(THREE.DynamicDrawUsage);
+  const shadowCoordAttr = new THREE.BufferAttribute(shadowCoord, 3).setUsage(THREE.DynamicDrawUsage);
   shadowGeo.setAttribute("position", shadowPosAttr);
   shadowGeo.setAttribute("aShadow", shadowCoordAttr);
   const shadowMat = keep(
@@ -316,6 +316,8 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     rootSide[2] = dx / l;
   }
 
+  const prevW = [0, 0, 1];
+  const prevQ = [0, 1];
   const buildRibbon = () => {
     const n = sim.n;
     const P = sim.pos;
@@ -374,14 +376,33 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       let wx = sampleW[i * 3];
       let wy = sampleW[i * 3 + 1];
       let wz = sampleW[i * 3 + 2];
-      const d = wx * tx + wy * ty + wz * tz;
+      let d = wx * tx + wy * ty + wz * tz;
       wx -= d * tx;
       wy -= d * ty;
       wz -= d * tz;
-      const wl = Math.hypot(wx, wy, wz) || 1;
+      let wl = Math.hypot(wx, wy, wz);
+      if (i > 0 && wl < 0.4) {
+        wx = prevW[0];
+        wy = prevW[1];
+        wz = prevW[2];
+        d = wx * tx + wy * ty + wz * tz;
+        wx -= d * tx;
+        wy -= d * ty;
+        wz -= d * tz;
+        wl = Math.hypot(wx, wy, wz);
+      }
+      wl = wl || 1;
       wx /= wl;
       wy /= wl;
       wz /= wl;
+      if (i > 0 && wx * prevW[0] + wy * prevW[1] + wz * prevW[2] < 0) {
+        wx = -wx;
+        wy = -wy;
+        wz = -wz;
+      }
+      prevW[0] = wx;
+      prevW[1] = wy;
+      prevW[2] = wz;
       const y = sampleP[i * 3 + 1];
       const f = sampleF[i];
       const lift = smooth(1.5, 14, y);
@@ -421,37 +442,42 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       filmCoord[c + 1] = -HALF;
       filmCoord[c + 2] = f;
       filmCoord[c + 3] = HALF;
-      const ax = px - ex * HALF;
-      const ay = Math.max(0, py - ey * HALF);
-      const az = pz - ez * HALF;
-      const bx = px + ex * HALF;
-      const by = Math.max(0, py + ey * HALF);
-      const bz = pz + ez * HALF;
-      const sax = ax - (BOX_DIR[0] / BOX_DIR[1]) * ay;
-      const saz = az - (BOX_DIR[2] / BOX_DIR[1]) * ay;
-      const sbx = bx - (BOX_DIR[0] / BOX_DIR[1]) * by;
-      const sbz = bz - (BOX_DIR[2] / BOX_DIR[1]) * by;
-      let sx = sbx - sax;
-      let sz = sbz - saz;
-      const sl = Math.hypot(sx, sz);
-      if (sl > 1e-3) {
-        sx /= sl;
-        sz /= sl;
-      } else {
-        sx = 0;
-        sz = 1;
+      const kx = BOX_DIR[0] / BOX_DIR[1];
+      const kz = BOX_DIR[2] / BOX_DIR[1];
+      const scx = px - kx * py;
+      const scz = pz - kz * py;
+      const ptx = tx - kx * ty;
+      const ptz = tz - kz * ty;
+      const ptl = Math.hypot(ptx, ptz);
+      let qx = 0;
+      let qz = 1;
+      if (ptl > 1e-4) {
+        qx = -ptz / ptl;
+        qz = ptx / ptl;
       }
+      if (i > 0 && qx * prevQ[0] + qz * prevQ[1] < 0) {
+        qx = -qx;
+        qz = -qz;
+      }
+      prevQ[0] = qx;
+      prevQ[1] = qz;
+      const span = Math.abs((ex - kx * ey) * qx + (ez - kz * ey) * qz) * HALF;
       const grow = py * 0.4 + 1.2;
-      shadowPos[v] = sax - sx * grow;
+      const half = span + grow;
+      shadowPos[v] = scx - qx * half;
       shadowPos[v + 1] = 0.04;
-      shadowPos[v + 2] = saz - sz * grow;
-      shadowPos[v + 3] = sbx + sx * grow;
+      shadowPos[v + 2] = scz - qz * half;
+      shadowPos[v + 3] = scx + qx * half;
       shadowPos[v + 4] = 0.04;
-      shadowPos[v + 5] = sbz + sz * grow;
-      shadowCoord[c] = -1;
-      shadowCoord[c + 1] = py;
-      shadowCoord[c + 2] = 1;
-      shadowCoord[c + 3] = py;
+      shadowPos[v + 5] = scz + qz * half;
+      const flatness = Math.abs(ny) * smooth(0.4, 0.75, ptl);
+      const edgeAt = span / half;
+      shadowCoord[v] = -1;
+      shadowCoord[v + 1] = py;
+      shadowCoord[v + 2] = flatness * edgeAt;
+      shadowCoord[v + 3] = 1;
+      shadowCoord[v + 4] = py;
+      shadowCoord[v + 5] = flatness * edgeAt;
     }
     const tris = (s - 1) * 6;
     filmGeo.setDrawRange(0, tris);

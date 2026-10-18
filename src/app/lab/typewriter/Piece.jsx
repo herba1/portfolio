@@ -6,7 +6,7 @@ import { STRIP_ROWS } from "./typewriterNotes";
 import "./typewriter.css";
 
 const STAGE_LABEL =
-  "A 1960s typewriter seen from above the platen, with liner notes already typed on the sheet. Type on your keyboard to strike the paper; Return throws the carriage back and advances the line, Backspace steps back so you can overtype, and the arrow keys roll the platen. Drag the sheet sideways to move the carriage or up and down to roll the platen.";
+  "A 1960s typewriter seen from above the platen, with the liner notes for Revolver by the Beatles already typed on the sheet. Type on your keyboard to strike the paper; Return throws the carriage back and advances the line, Backspace steps back so you can overtype, and the arrow keys roll the platen. Drag the sheet sideways to move the carriage or up and down to roll the platen.";
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);

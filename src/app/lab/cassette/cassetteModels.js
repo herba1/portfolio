@@ -340,7 +340,7 @@ function jcardGeometry(THREE) {
   return g;
 }
 
-export function buildWorld(THREE, renderer) {
+export function buildWorld(THREE, renderer, mix) {
   const disposables = [];
   const keep = (x) => {
     disposables.push(x);
@@ -507,7 +507,7 @@ export function buildWorld(THREE, renderer) {
   tape.frustumCulled = false;
   cassette.add(tape);
 
-  const labelTex = keep(texture(THREE, renderer, labelCanvas()));
+  const labelTex = keep(texture(THREE, renderer, labelCanvas(mix)));
   const label = new THREE.Mesh(
     keep(new THREE.PlaneGeometry(76, 15)),
     keep(new THREE.MeshStandardMaterial({ map: labelTex, roughness: 0.82, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })),
@@ -537,7 +537,7 @@ export function buildWorld(THREE, renderer) {
   cassette.add(cast);
 
   const jcard = new THREE.Group();
-  const jTex = keep(texture(THREE, renderer, jcardCanvas()));
+  const jTex = keep(texture(THREE, renderer, jcardCanvas(mix)));
   const jMesh = new THREE.Mesh(keep(jcardGeometry(THREE)), keep(new THREE.MeshStandardMaterial({ map: jTex, roughness: 0.9, side: THREE.DoubleSide })));
   jMesh.castShadow = true;
   jMesh.receiveShadow = true;
@@ -597,5 +597,5 @@ export function buildWorld(THREE, renderer) {
     for (const d of disposables) d.dispose?.();
   };
 
-  return { root, desk, cassette, hubs, tape, tapeGeo, tapeMax, label, jcard, counter, counterCan, counterTex, pencil, pencilHit, pencilShadow, shell, dispose };
+  return { root, desk, cassette, hubs, tape, tapeGeo, tapeMax, label, labelTex, jTex, jcard, counter, counterCan, counterTex, pencil, pencilHit, pencilShadow, shell, dispose };
 }

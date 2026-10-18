@@ -133,9 +133,19 @@ export function createMirrorGL(canvas, facets) {
   const facetTex = texture2D(gl, { filter: gl.NEAREST });
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, facets.width, facets.height, 0, gl.RGBA, gl.FLOAT, facets.data);
 
-  const atlasTex = texture2D(gl, { filter: gl.LINEAR_MIPMAP_LINEAR, wrapS: gl.REPEAT });
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
-  gl.generateMipmap(gl.TEXTURE_2D);
+  const atlasTexes = [0, 1].map(() => {
+    const tex = texture2D(gl, { filter: gl.LINEAR_MIPMAP_LINEAR, wrapS: gl.REPEAT });
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 255]));
+    gl.generateMipmap(gl.TEXTURE_2D);
+    return tex;
+  });
+  const tintTexes = [0, 1].map(() => {
+    const tex = texture2D(gl, { filter: gl.NEAREST });
+    const blank = new Float32Array(facets.width * facets.height * 4).fill(1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, facets.width, facets.height, 0, gl.RGBA, gl.FLOAT, blank);
+    return tex;
+  });
+  let current = 0;
 
   const noiseTex = texture2D(gl, { filter: gl.LINEAR_MIPMAP_LINEAR, wrapS: gl.REPEAT });
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
@@ -175,11 +185,14 @@ export function createMirrorGL(canvas, facets) {
     allocTargets(w, h);
   }
 
-  function uploadAtlas(source) {
-    gl.bindTexture(gl.TEXTURE_2D, atlasTex);
+  function uploadCover(atlas, tint) {
+    current = 1 - current;
+    gl.bindTexture(gl.TEXTURE_2D, atlasTexes[current]);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, source);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas);
     gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindTexture(gl.TEXTURE_2D, tintTexes[current]);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, facets.width, facets.height, 0, gl.RGBA, gl.FLOAT, tint);
   }
 
   function uploadMask(source) {
@@ -193,6 +206,8 @@ export function createMirrorGL(canvas, facets) {
     gl.uniform4f(p.loc("uBall"), f.cx, f.cy, f.radius, f.focal);
     gl.uniform3f(p.loc("uCam"), f.cam[0], f.cam[1], f.cam[2]);
     gl.uniform1f(p.loc("uWall"), f.wall);
+    gl.uniform4f(p.loc("uRoom"), f.room[0], f.room[1], f.room[2], f.room[3]);
+    gl.uniform1f(p.loc("uMix"), f.mix);
     gl.uniformMatrix3fv(p.loc("uRot"), false, f.rot);
     if (f.rotPrev) gl.uniformMatrix3fv(p.loc("uRotPrev"), false, f.rotPrev);
     gl.uniform3f(p.loc("uLight"), f.light[0], f.light[1], f.light[2]);
@@ -216,6 +231,12 @@ export function createMirrorGL(canvas, facets) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, facetTex);
     gl.uniform1i(speck.loc("uFacets"), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tintTexes[current]);
+    gl.uniform1i(speck.loc("uTint"), 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, tintTexes[1 - current]);
+    gl.uniform1i(speck.loc("uTintPrev"), 2);
     common(speck, f);
     gl.uniform1f(speck.loc("uSpread"), f.spread);
     gl.uniform1f(speck.loc("uRayGain"), f.rayGain);
@@ -233,7 +254,8 @@ export function createMirrorGL(canvas, facets) {
     gl.bindVertexArray(emptyVao);
     const units = [
       ["uFacets", facetTex],
-      ["uAtlas", atlasTex],
+      ["uAtlas", atlasTexes[current]],
+      ["uAtlasPrev", atlasTexes[1 - current]],
       ["uMask", maskTex],
       ["uSpecks", lightTex],
       ["uGlow", glowTex],
@@ -264,6 +286,12 @@ export function createMirrorGL(canvas, facets) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, facetTex);
     gl.uniform1i(glint.loc("uFacets"), 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, tintTexes[current]);
+    gl.uniform1i(glint.loc("uTint"), 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, tintTexes[1 - current]);
+    gl.uniform1i(glint.loc("uTintPrev"), 2);
     common(glint, f);
     gl.uniform1f(glint.loc("uSpread"), f.spread);
     gl.uniform1f(glint.loc("uGlintGain"), f.glintGain);
@@ -276,7 +304,8 @@ export function createMirrorGL(canvas, facets) {
 
   function destroy() {
     gl.deleteTexture(facetTex);
-    gl.deleteTexture(atlasTex);
+    atlasTexes.forEach((t) => gl.deleteTexture(t));
+    tintTexes.forEach((t) => gl.deleteTexture(t));
     gl.deleteTexture(maskTex);
     gl.deleteTexture(noiseTex);
     gl.deleteTexture(lightTex);
@@ -293,5 +322,5 @@ export function createMirrorGL(canvas, facets) {
     if (loser) loser.loseContext();
   }
 
-  return { resize, uploadAtlas, uploadMask, draw, destroy };
+  return { resize, uploadCover, uploadMask, draw, destroy };
 }

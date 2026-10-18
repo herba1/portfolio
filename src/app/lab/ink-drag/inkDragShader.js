@@ -63,12 +63,14 @@ uniform sampler2D uMask;
 uniform vec2 uRes;
 uniform float uProgress;
 uniform float uGain;
+uniform float uTone;
 out vec4 outColor;
 ${NOISE}
 void main() {
   vec2 uv = gl_FragCoord.xy / uRes;
   vec2 t = 1.0 / uRes;
-  float m = texture(uMask, uv).r;
+  vec4 target = texture(uMask, uv);
+  float m = target.r;
   float wide = 0.0;
   wide += texture(uMask, uv + vec2(2.5, 0.0) * t).r;
   wide += texture(uMask, uv - vec2(2.5, 0.0) * t).r;
@@ -77,12 +79,13 @@ void main() {
   wide *= 0.25;
   float squeeze = clamp(m - wide, 0.0, 1.0);
   float grain = valueNoise(gl_FragCoord.xy * 0.18) * 0.6 + valueNoise(gl_FragCoord.xy * 0.035) * 0.4;
-  float body = m * (uGain + squeeze * 0.18) * (0.97 + grain * 0.05);
+  float body = mix(m * (uGain + squeeze * 0.18), m * 1.25 * uGain, uTone) * (0.97 + grain * 0.05);
   float fine = valueNoise(gl_FragCoord.xy * 0.45);
   float front = uv.x * 0.82 + (1.0 - uv.y) * 0.06 + (fine - 0.5) * 0.05 + grain * 0.04;
   float bite = smoothstep(front, front + 0.14, uProgress * 1.12);
   float density = body * bite;
-  outColor = vec4(density, m > 0.02 ? 1.0 : 0.0, 0.0, 1.0);
+  vec2 chroma = mix(vec2(0.5), target.ba, uTone);
+  outColor = vec4(density, m > 0.02 ? 1.0 : 0.0, chroma);
 }
 `;
 
@@ -146,6 +149,8 @@ uniform float uDryThin;
 uniform float uDryThick;
 uniform float uRewet;
 uniform float uLevel;
+uniform sampler2D uGoal;
+uniform float uFront;
 out vec4 outColor;
 float mobility(float wet) {
   return smoothstep(0.02, 0.4, wet);
@@ -160,7 +165,9 @@ void main() {
   float mob = mobility(moved.g);
   float fixedInk = here.r * (1.0 - mobility(here.g));
   float arriving = moved.r * mob;
-  vec4 ink = vec4(fixedInk + arriving, (fixedInk * here.g + arriving * moved.g) / max(fixedInk + arriving, 1e-4), 0.0, 1.0);
+  float total = fixedInk + arriving;
+  vec2 chroma = total > 1e-4 ? (fixedInk * here.ba + arriving * moved.ba) / total : vec2(0.5);
+  vec4 ink = vec4(total, (fixedInk * here.g + arriving * moved.g) / max(total, 1e-4), 0.0, 1.0);
   vec2 vt = vec2(1.0) / vec2(textureSize(uVelocity, 0));
   float vr = texture(uVelocity, uv + vec2(vt.x, 0.0)).x;
   float vl = texture(uVelocity, uv - vec2(vt.x, 0.0)).x;
@@ -179,7 +186,14 @@ void main() {
   wet -= uDrying * uDt * rate;
   wet += uRewet * stir * uDt * step(0.04, wet) * (1.0 - wet);
   wet = density < 0.004 ? 0.0 : clamp(wet, 0.0, 1.0);
-  outColor = vec4(density, wet, 0.0, 1.0);
+  float frontAt = uFront + (0.5 - uv.y) * 0.1;
+  float behind = smoothstep(frontAt, frontAt - 0.14, uv.x);
+  float pull = 1.0 - exp(-uDt * 26.0 * behind);
+  vec4 goal = texture(uGoal, uv);
+  density = mix(density, goal.r, pull);
+  wet = mix(wet, goal.g, pull);
+  chroma = mix(chroma, goal.ba, pull);
+  outColor = vec4(density, wet, chroma);
 }
 `;
 
@@ -195,6 +209,7 @@ uniform vec3 uInkColor;
 uniform vec3 uThinTint;
 uniform float uGloss;
 uniform float uPx;
+uniform float uDeboss;
 out vec4 outColor;
 float lift(vec4 s) {
   return min(s.r, 1.1) * (0.35 + 0.65 * smoothstep(0.0, 0.6, s.g));
@@ -230,8 +245,8 @@ void main() {
   paper -= vec3(0.03, 0.026, 0.018) * paperTex.g;
   paper += clamp((ty - tx) * 0.22, -0.012, 0.012);
   paper *= 0.988 + 0.024 * paperTex.a;
-  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5;
-  paper *= 1.0 - m * 0.03;
+  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * uDeboss;
+  paper *= 1.0 - m * 0.03 * uDeboss;
   paper += vec3(0.05, 0.046, 0.04) * deboss;
   float dry = 1.0 - smoothstep(0.0, 0.3, wet);
   float breakup = smoothstep(tooth - 0.35, tooth + 0.1, d * 2.2);
@@ -245,6 +260,11 @@ void main() {
   color = max(color, uInkColor * smoothstep(0.35, 1.0, film));
   float wetMask = smoothstep(0.05, 0.5, wetNear) * smoothstep(0.06, 0.45, d);
   color = mix(color, (uInkColor * 1.7 + vec3(0.022)) * (0.92 + 0.16 * tooth), dry * smoothstep(0.6, 1.2, film) * 0.45);
+  vec2 pigment = (c.ba - 0.5) * 1.12;
+  float luma = dot(color, vec3(0.299, 0.587, 0.114));
+  vec3 dyed = luma + vec3(1.402 * pigment.y, -0.344 * pigment.x - 0.714 * pigment.y, 1.772 * pigment.x);
+  float dye = smoothstep(0.01, 0.2, film) * smoothstep(0.0, 0.03, length(pigment));
+  color = mix(color, clamp(dyed, 0.0, 1.0), dye);
   color *= 1.0 - min(0.3, 0.24 * uGloss) * wetMask;
   vec3 n = normalize(vec3(-grad * 1.5, 1.0));
   vec3 keyDir = normalize(vec3(-0.6, 0.7, 0.3));

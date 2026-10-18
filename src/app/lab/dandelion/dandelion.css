@@ -226,10 +226,11 @@
 
 .dandelion__thumb {
   display: block;
+  flex: none;
   width: 20px;
   height: 20px;
   border-radius: 50%;
-  object-fit: cover;
+  background-repeat: no-repeat;
   filter: grayscale(1) sepia(0.35) contrast(1.05);
   box-shadow: 0 0 0 1px rgb(42 37 31 / 0.18);
 }
@@ -269,6 +270,11 @@
 }
 
 .dandelion__mic-icon {
+  flex: none;
+}
+
+.dandelion__glyph {
+  display: block;
   flex: none;
 }
 
@@ -412,7 +418,7 @@
   }
 }
 
-@container (max-width: 420px) {
+@container (max-width: 879px) {
   .dandelion__name {
     display: none;
   }
@@ -427,6 +433,21 @@
 
   .dandelion__face[aria-checked="true"] .dandelion__name {
     display: inline;
+  }
+}
+
+@container (max-width: 560px) {
+  .dandelion__face[aria-checked="true"] {
+    padding: 0 8px;
+  }
+
+  .dandelion__face[aria-checked="true"] .dandelion__name,
+  .dandelion__mic-label {
+    display: none;
+  }
+
+  .dandelion__mic {
+    padding: 0 14px;
   }
 }
 

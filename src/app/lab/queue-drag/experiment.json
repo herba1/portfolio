@@ -1,0 +1,10 @@
+{
+  "title": "Up Next",
+  "description": "A music queue that plays: drag a song by its grip and the others part around it as it tilts with your hand, swipe a row left past the rubber band to drop it with an undo, and tap any song to fly its cover into the now-playing card with live bars.",
+  "tags": ["Interface", "Motion", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T13:40:00.000Z",
+  "intent": "Every row is a physical card on one rail: reorder and remove are the same direct gesture, retargetable mid-move, with quiet ticks as rows swap.",
+  "tile": { "cols": 3, "rows": 4 },
+  "sources": ["https://github.com/nathangitter/fluid-interfaces", "https://developer.apple.com/design/human-interface-guidelines/lists-and-tables"]
+}

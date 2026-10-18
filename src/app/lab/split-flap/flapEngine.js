@@ -205,7 +205,7 @@ export function createBoard(stage, { embedded = false, caption = null, onLive = 
 
   const plate = document.createElement("div");
   plate.className = "split-flap-plate";
-  plate.innerHTML = '<span class="split-flap-venue">Monovolt</span><span class="split-flap-night">Tonight’s set</span>';
+  plate.innerHTML = '<span class="split-flap-venue">The Beatles</span><span class="split-flap-night">Tonight’s set</span>';
   board.appendChild(plate);
 
   const vents = document.createElement("div");

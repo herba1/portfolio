@@ -1,5 +1,7 @@
 import { createBoothGL } from "./boothGL";
-import { STRIP, STRIP_LEN, poseSet, printStrip, readyMono } from "./boothPrint";
+import { albumById } from "@/app/lab/_music/catalog";
+
+import { STRIP, STRIP_LEN, printStrip, readyMono } from "./boothPrint";
 
 const SUB = 1 / 240;
 const SEGS = 22;
@@ -32,6 +34,32 @@ function loadImage(src) {
   });
 }
 
+const FACES = [
+  { x: 0.112, y: 0.108, size: 0.37, fx: 0.44, exposure: 0.02 },
+  { x: 0.513, y: 0.108, size: 0.37, fx: 0.5, exposure: 0.06 },
+  { x: 0.112, y: 0.508, size: 0.37, fx: 0.4, exposure: 0.06 },
+  { x: 0.513, y: 0.508, size: 0.37, fx: 0.4, exposure: 0.04 },
+];
+
+function cropFace(img, face) {
+  const iw = img.naturalWidth;
+  const ih = img.naturalHeight;
+  const side = face.size * iw;
+  const h = side;
+  const w = h * 0.8;
+  const left = clamp(face.fx * side - w / 2, 0, side - w);
+  const c = document.createElement("canvas");
+  c.width = 320;
+  c.height = 400;
+  c.getContext("2d").drawImage(img, face.x * iw + left, face.y * ih, w, h, 0, 0, c.width, c.height);
+  return c;
+}
+
+function facePoses(rand, order = [0, 1, 2, 3]) {
+  const j = (s) => (rand() - 0.5) * s;
+  return order.map((k) => ({ zoom: 1.05 + j(0.04), cx: 0.5 + j(0.02), cy: 0.5 + j(0.02), rot: j(0.05), exposure: FACES[k].exposure, contrast: 1.35 }));
+}
+
 function stampFor(date) {
   const d = String(date.getDate()).padStart(2, "0");
   const m = String(date.getMonth() + 1).padStart(2, "0");
@@ -48,7 +76,6 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
   const shown = { lamp: "", pips: -1, busy: false, hover: false, grabbing: false };
   let gl = null;
   let mono = null;
-  let portrait = null;
   let cast = [];
   let video = null;
   let visible = false;
@@ -135,7 +162,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pad = insets();
     const wide = !embedded && view.width >= 900;
-    const floorY = view.height - (embedded ? 12 : wide ? 24 : 16);
+    const floorY = view.height - (embedded ? 12 : wide ? 56 : 16);
     const my = embedded ? Math.max(30, view.height * 0.075) : Math.max(wide ? 132 : 96, pad.top + 28);
     let W = (floorY - my) / (STRIP_LEN + 0.72);
     W = Math.min(W, ((view.width - 28) / STRIP_LEN) * 0.98);
@@ -399,7 +426,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
       ctx.drawImage(video, 0, 0, c.width, c.height);
       return { source: c, pose: { zoom: 1.0, cx: 0.5, cy: 0.5, rot: 0, exposure: 0.04, contrast: 1.25 } };
     }
-    return { source: portrait, pose: seq.poses[index] };
+    return { source: cast[index], pose: seq.poses[index] };
   }
 
   function build() {
@@ -850,16 +877,10 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
 
   async function init() {
     try {
-      const [m, george, john, paul] = await Promise.all([
-        readyMono(),
-        loadImage("/cast/george.webp"),
-        loadImage("/cast/john.webp").catch(() => null),
-        loadImage("/cast/paul.webp").catch(() => null),
-      ]);
+      const [m, cover] = await Promise.all([readyMono(), loadImage(albumById("let-it-be").cover)]);
       if (destroyed) return;
       mono = m;
-      portrait = george;
-      cast = [john, paul].filter(Boolean);
+      cast = FACES.map((face) => cropFace(cover, face));
       gl = createBoothGL(canvas);
       if (!gl) {
         onFail?.();
@@ -867,23 +888,17 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
       }
       layout();
       const rand = Math.random;
-      const pile = cast.map((img, i) => {
-        const poses = poseSet(rand);
-        const tex = gl.texture(printStrip({ mono, frames: poses.map((pose) => ({ source: img, pose })), seed: 3 + i * 5, stamp: i ? "14.10.26" : "09.10.26" }));
-        const strip = makeStrip(tex, 3.5 + i * 5, 0);
-        strip.mode = "free";
-        strip.tornTop = true;
-        strip.depth = i ? 9 : 2;
-        strip.tilt = 0;
-        return strip;
-      });
-      const span = view.width;
-      pile.forEach((strip, i) => {
-        const cx = lay.len + 16 > span ? span / 2 + (i ? 10 : -10) : clamp(span * (i ? 0.66 : 0.3), lay.len / 2 + 10, span - lay.len / 2 - 10);
-        placeLying(strip, cx);
-        strips.push(strip);
-      });
-      const tex = gl.texture(printStrip({ mono, frames: poseSet(rand).map((pose) => ({ source: george, pose })), seed: 21, stamp: stampFor(new Date()) }));
+      const order = [3, 1, 0, 2];
+      const old = makeStrip(gl.texture(printStrip({ mono, frames: facePoses(rand, order).map((pose, i) => ({ source: cast[order[i]], pose })), seed: 8, stamp: "30.01.69" })), 8.5, 0);
+      old.mode = "free";
+      old.tornTop = true;
+      old.depth = 2;
+      old.tilt = 0;
+      const right = lay.mx + lay.W / 2 + 24 + lay.len / 2;
+      const cx = right + lay.len / 2 + 12 <= view.width ? right : view.width / 2;
+      placeLying(old, cx);
+      strips.push(old);
+      const tex = gl.texture(printStrip({ mono, frames: facePoses(rand).map((pose, i) => ({ source: cast[i], pose })), seed: 21, stamp: stampFor(new Date()) }));
       const hang = makeStrip(tex, 21.5, 0);
       placeHanging(hang, reduced ? 0 : 1);
       if (!reduced) {
@@ -919,7 +934,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
   return {
     print() {
       if (seq || !gl) return false;
-      seq = { t0: time, frames: [], poses: poseSet(Math.random), tex: null, strip: null, cut: false, seed: 0 };
+      seq = { t0: time, frames: [], poses: facePoses(Math.random), tex: null, strip: null, cut: false, seed: 0 };
       wake();
       return true;
     },

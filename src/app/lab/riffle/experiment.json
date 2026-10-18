@@ -1,23 +1,20 @@
 {
   "title": "Riffle",
-  "description": "A thick flip book of 24 pencil drawings traced from a 1909 Tinker card. Thumb the corner and riffle: each page bends, flicks past and lands, so the speed of your thumb is the frame rate.",
+  "description": "A flat flip book of forty-eight drawn pages: the Beatles walking over the Abbey Road crossing, John in white, Ringo in black, Paul barefoot, George in denim. Drag across the pages to riffle them forwards or back at your own speed, or let it play.",
   "tags": [
-    "WebGL",
-    "Paper",
-    "Cards"
+    "Canvas",
+    "Animation",
+    "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One physical object finished to the edge: card-stock pages that bend as stiff sheets and flick off your thumb one at a time, so the swing plays at whatever speed your hand riffles it, forward or back.",
+  "intent": "One physical object read straight-on: clean pages that fold flat towards the spine one by one, so the speed of your drag is the frame rate of a real walk cycle.",
   "tile": {
     "cols": 3,
     "rows": 4
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Flip_book",
-    "https://www.loc.gov/pictures/item/2008675125/",
-    "https://www.codrops.com/2012/12/11/bookblock-a-content-flip-plugin/",
-    "https://andrew-wilkinson.com/blog/pcss",
-    "https://herb.art/tear-off"
+    "https://en.wikipedia.org/wiki/Abbey_Road#Cover_art"
   ]
 }

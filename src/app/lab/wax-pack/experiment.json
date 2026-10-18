@@ -1,23 +1,23 @@
 {
-  "title": "Wax Pack",
-  "description": "A sealed 1980s wax pack of baseball cards with a slab of stale gum inside. Tear it open along your own path, flick the cards out across the table, and turn any card over to read its back.",
+  "title": "Booster",
+  "description": "A crimped foil booster pack of six album cards built from real covers. Tear the strip across the top, pull the stack out, and swipe through commons and uncommons to the rare holo waiting at the back.",
   "tags": [
     "WebGL",
     "Material",
-    "Paper"
+    "Foil",
+    "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One tactile ritual finished to the edge: waxed paper that tears with a fibrous edge and keeps its creases, then cards with real weight that slide and settle.",
+  "intent": "The trading-card pack ritual finished to the edge: metallic foil that tears along your drag and peels away, a stack that slides cleanly out of the mouth, and a rarity reveal that pays off at the last card.",
   "tile": {
     "cols": 3,
     "rows": 5
   },
   "sources": [
-    "https://en.wikipedia.org/wiki/Baseball_card",
-    "https://www.loc.gov/collections/baseball-cards/",
+    "https://en.wikipedia.org/wiki/Booster_pack",
     "https://www.ryanjuckett.com/damped-springs/",
-    "https://chrome.dev/html-in-canvas/demos/webgl-book-curl.html",
+    "https://threejs.org/docs/#api/en/materials/MeshPhysicalMaterial.iridescence",
     "https://herb.art/tear-off",
     "https://herb.art/deck"
   ]

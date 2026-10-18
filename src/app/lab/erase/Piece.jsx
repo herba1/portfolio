@@ -5,10 +5,11 @@ import { useCallback, useEffect, useId, useRef, useState, useSyncExternalStore }
 import useNearViewport from "@/app/experiments/useNearViewport";
 
 import EraseEngine from "./eraseEngine";
+import { TITLE_MAX } from "./eraseSetlist";
 import "./erase.css";
 
 const LABEL =
-  "A handwritten setlist taped above a ledge, one song already half rubbed out. Press and scrub across a title to erase it; the ink lifts off as dust and falls into a pile on the ledge. Arrow keys pick a line, Enter rubs it out, Command or Control Z undoes the last rub and the dust flies back into the letters.";
+  "A handwritten Beatles setlist taped above a ledge, one song already half rubbed out. Click a song to rewrite it, then press and scrub across a title to erase it; the ink lifts off as dust and falls into a pile on the ledge. Arrow keys pick a line, Enter rewrites it, Delete rubs it out, Command or Control Z undoes the last rub and the dust flies back into the letters.";
 
 function subscribeNothing() {
   return () => {};
@@ -80,6 +81,8 @@ export default function Piece({ embedded = false }) {
   const engineRef = useRef(null);
   const near = useNearViewport(rootRef);
   const [history, setHistory] = useState(0);
+  const [edit, setEdit] = useState(null);
+  const editRef = useRef(null);
   const mac = useSyncExternalStore(subscribeNothing, readMac, () => false);
 
   useEffect(() => {
@@ -95,6 +98,10 @@ export default function Piece({ embedded = false }) {
       ring: ringRef.current,
       embedded,
       onHistory: (count) => setHistory(count),
+      onEdit: (index, fromKey = false) => {
+        const box = engine.beginEdit(index);
+        if (box) setEdit({ ...box, value: box.title, fromKey });
+      },
     });
     engineRef.current = engine;
     engine.start();
@@ -116,6 +123,59 @@ export default function Piece({ embedded = false }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [embedded]);
+
+  useEffect(() => {
+    if (!edit) return;
+    const input = editRef.current;
+    if (!input || document.activeElement === input) return;
+    input.focus({ preventScroll: true });
+    const end = input.value.length;
+    input.setSelectionRange(end, end);
+  }, [edit]);
+
+  const finishEdit = useCallback((value, next, fromKey) => {
+    const engine = engineRef.current;
+    setEdit(null);
+    if (!engine) return;
+    const index = engine.editing;
+    engine.endEdit(value == null ? null : value.replace(/\s+/g, " ").trim());
+    if (next != null && index >= 0) {
+      const count = engine.hand?.lines.length ?? 0;
+      const target = (index + next + count) % count;
+      const box = engine.beginEdit(target);
+      if (box) setEdit({ ...box, value: box.title, fromKey });
+    } else if (fromKey) {
+      surfaceRef.current?.focus({ preventScroll: true });
+    }
+  }, []);
+
+  const onEditChange = useCallback((e) => {
+    const value = e.target.value.toUpperCase().slice(0, TITLE_MAX);
+    setEdit((current) => (current ? { ...current, value } : current));
+  }, []);
+
+  const onEditKey = useCallback(
+    (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        finishEdit(e.currentTarget.value, null, edit?.fromKey);
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        finishEdit(null, null, edit?.fromKey);
+      } else if (e.key === "Tab" || e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        finishEdit(e.currentTarget.value, e.key === "ArrowUp" || (e.key === "Tab" && e.shiftKey) ? -1 : 1, edit?.fromKey);
+      }
+    },
+    [finishEdit, edit?.fromKey],
+  );
+
+  const onEditBlur = useCallback(
+    (e) => {
+      if (engineRef.current?.editing >= 0) finishEdit(e.currentTarget.value);
+    },
+    [finishEdit],
+  );
 
   const undo = useCallback(() => engineRef.current?.undo(), []);
   const onKeyDown = useCallback((e) => engineRef.current?.key(e), []);
@@ -145,11 +205,35 @@ export default function Piece({ embedded = false }) {
         </div>
       </div>
 
+      {edit ? (
+        <input
+          ref={editRef}
+          className="erase__edit"
+          type="text"
+          value={edit.value}
+          maxLength={TITLE_MAX}
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="characters"
+          enterKeyHint="done"
+          aria-label={`Song ${edit.index + 1} title`}
+          onChange={onEditChange}
+          onKeyDown={onEditKey}
+          onBlur={onEditBlur}
+          style={{
+            "--erase-edit-size": edit.size.toFixed(2),
+            left: `${edit.left}px`,
+            top: `${edit.baseline - edit.size}px`,
+            width: `${edit.width}px`,
+          }}
+        />
+      ) : null}
+
       {embedded ? null : (
         <header className="erase__head">
           <h1 className="erase__title">Erase</h1>
           <p className="erase__lede">
-            Scrub a song off the setlist and the ink lifts away as dust. <em>Undo</em> calls it home.
+            Click a song to rewrite it, then scrub it off and the ink lifts away as dust. <em>Undo</em> calls it home.
           </p>
         </header>
       )}

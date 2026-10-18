@@ -59,7 +59,7 @@ export default function Piece({ embedded = false }) {
         className="loupe__stage"
         tabIndex={0}
         role="application"
-        aria-label="A vintage baseball card under a magnifying loupe. Move the pointer or the arrow keys to move the loupe, scroll, pinch or press plus and minus to change magnification, and press 1 to 4 to change card."
+        aria-label="A Beatles record sleeve on a dark desk under a magnifying loupe, lit by a low sun that the glass focuses into a hot spot. Move the pointer or the arrow keys to move the loupe, scroll, pinch or press plus and minus to change magnification, and press 1 to 4 to change record."
       >
         <canvas ref={canvasRef} className="loupe__canvas" />
         <img className="loupe__fallback" src={CARDS[active].src} alt={`${CARDS[active].full}, ${CARDS[active].year}`} draggable={false} />
@@ -70,14 +70,14 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="loupe__head">
           <h1 className="loupe__title">Loupe</h1>
           <p className="loupe__lede">
-            Put the glass on a card and turn it up: the photo is <em>only ink</em>.
+            Put the glass on a sleeve and turn it up. The sun swings round, the glass burns it to a point, and the cover is <em>only ink</em>.
           </p>
         </header>
       )}
 
       {!embedded && (
         <footer ref={footRef} className="loupe__foot">
-          <div className="loupe__cards" role="radiogroup" aria-label="Card">
+          <div className="loupe__cards" role="radiogroup" aria-label="Record">
             {CARDS.map((card, i) => (
               <button
                 key={card.key}
@@ -88,7 +88,7 @@ export default function Piece({ embedded = false }) {
                 className="loupe__card"
                 onClick={() => engineRef.current?.select(i)}
               >
-                <img className="loupe__thumb" src={card.src} alt="" width={20} height={32} draggable={false} />
+                <img className="loupe__thumb" src={card.src} alt="" width={28} height={28} draggable={false} />
                 <span className="loupe__card-name">{card.name}</span>
                 <span className="loupe__card-year">{card.year}</span>
               </button>

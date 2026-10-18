@@ -1,10 +1,21 @@
 {
   "title": "Lenticular",
-  "description": "A 1960s flicker card: ridged plastic laminated over a 1909 baseball card. Tilt it and each lenticule shows a different interlaced frame, so Mathewson winds up and throws right there in the plastic.",
-  "tags": ["WebGL", "Optics", "Cards"],
+  "description": "A lenticular flip card of Beatles covers: ridged plastic over two interlaced sleeves, so tilting Rubber Soul turns it into Revolver right there in the plastic. Tap the card and it flips over to the next pair.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Cards",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: the view angle through each ridge picks the frame, so the motion lives in the lens, with the banding, ghosting and sheen of a cheap Vari-Vue card.",
-  "tile": { "cols": 2, "rows": 4 },
-  "sources": ["https://lenticular.wawasensei.dev/", "https://en.wikipedia.org/wiki/Lenticular_printing"]
+  "intent": "One optical object finished to the edge: the view angle through each ridge picks the cover, with the banding, fringing and sheen of a cheap flip card, and a tap that turns the whole card to the next pair.",
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    "https://lenticular.wawasensei.dev/",
+    "https://en.wikipedia.org/wiki/Lenticular_printing"
+  ]
 }

@@ -1,26 +1,40 @@
+import { albumById } from "@/app/lab/_music/catalog";
+
 export const PX = 12;
 export const TILE_W = 38 * PX;
 export const TILE_H = 35 * PX;
 export const GRID = 4;
 export const ATLAS_W = TILE_W * GRID;
 export const ATLAS_H = TILE_H * GRID;
-export const STOCK = "Volta 400-5";
+export const STOCK = "400 · 135";
 
-export const FRAMES = [
-  { src: "/scorch/valley.webp", name: "Valley" },
-  { src: "/monovolt/louis-the-child.webp", name: "Louis the Child" },
-  { src: "/scorch/beams.webp", name: "Beams" },
-  { src: "/monovolt/abt7.webp", name: "Booth", turn: true },
-  { src: "/scorch/meadow.webp", name: "Meadow" },
-  { src: "/monovolt/lp-giobbi.webp", name: "LP Giobbi" },
-  { src: "/scorch/reading.webp", name: "Reading" },
-  { src: "/monovolt/abt1.webp", name: "Floor", turn: true },
-  { src: "/monovolt/cosmos-midnight.webp", name: "Cosmos Midnight" },
-  { src: "/scorch/visitor.webp", name: "Visitor" },
-  { src: "/monovolt/abt5.webp", name: "Shelves", turn: true },
-  { src: "/scorch/wires.webp", name: "Wires" },
-  { src: "/scorch/clock.webp", name: "Clock" },
-  { src: "/monovolt/abt10.webp", name: "Lights", turn: true },
+const SHOTS = [
+  ["abbey-road", "left", 0],
+  ["revolver", "right", 0],
+  ["rubber-soul", "left", 0],
+  ["sgt-pepper", "right", 0],
+  ["let-it-be", "left", 0],
+  ["magical-mystery-tour", "right", 0],
+  ["help", "left", 0],
+  ["a-hard-days-night", "right", 0],
+  ["with-the-beatles", "left", 0],
+  ["white-album", "right", 0],
+  ["please-please-me", "left", 0],
+  ["beatles-for-sale", "right", 0],
+  ["abbey-road", "close", 1],
+  ["sgt-pepper", "close", 2],
+];
+
+export const FRAMES = SHOTS.map(([id, pose, detail]) => {
+  const album = albumById(id);
+  return { src: album.cover, name: detail ? `${album.title}, close` : album.title, pose, detail, year: album.year };
+});
+
+const TABLES = [
+  ["#c8b294", "#8e7458", "#4a3a2a"],
+  ["#d9d4cc", "#a29a8e", "#5c564e"],
+  ["#b7c2c8", "#7f8d96", "#3f4a52"],
+  ["#d6c2a0", "#a08460", "#54402c"],
 ];
 
 export function rng(seed) {
@@ -59,23 +73,117 @@ function toCanvasX(x) {
   return (38 - x) * PX;
 }
 
-function drawCover(ctx, img, dx, dy, dw, dh, turn) {
+function averageColour(img) {
+  const c = makeCanvas(8, 8);
+  const ctx = c.getContext("2d", { willReadFrequently: true });
+  ctx.drawImage(img, 0, 0, 8, 8);
+  const d = ctx.getImageData(0, 0, 8, 8).data;
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  for (let i = 0; i < d.length; i += 4) {
+    r += d[i];
+    g += d[i + 1];
+    b += d[i + 2];
+  }
+  const n = d.length / 4;
+  return [r / n, g / n, b / n];
+}
+
+function drawRecord(ctx, cx, cy, r, tint) {
+  ctx.save();
+  ctx.fillStyle = "rgba(0,0,0,0.35)";
+  ctx.beginPath();
+  ctx.arc(cx + r * 0.05, cy + r * 0.07, r * 1.02, 0, Math.PI * 2);
+  ctx.fill();
+  const body = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
+  body.addColorStop(0, "#2a2a2c");
+  body.addColorStop(0.55, "#121214");
+  body.addColorStop(1, "#060607");
+  ctx.fillStyle = body;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.lineWidth = 0.6;
+  for (let k = 0.4; k < 0.97; k += 0.035) {
+    ctx.beginPath();
+    ctx.arc(cx, cy, r * k, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+  const sheen = ctx.createConicGradient(0.6, cx, cy);
+  sheen.addColorStop(0, "rgba(255,255,255,0)");
+  sheen.addColorStop(0.08, "rgba(255,255,255,0.16)");
+  sheen.addColorStop(0.16, "rgba(255,255,255,0)");
+  sheen.addColorStop(0.5, "rgba(255,255,255,0)");
+  sheen.addColorStop(0.58, "rgba(255,255,255,0.12)");
+  sheen.addColorStop(0.66, "rgba(255,255,255,0)");
+  sheen.addColorStop(1, "rgba(255,255,255,0)");
+  ctx.fillStyle = sheen;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.97, 0, Math.PI * 2);
+  ctx.arc(cx, cy, r * 0.36, 0, Math.PI * 2, true);
+  ctx.fill();
+  ctx.fillStyle = `rgb(${tint[0]},${tint[1]},${tint[2]})`;
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.33, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#e9e4da";
+  ctx.beginPath();
+  ctx.arc(cx, cy, r * 0.03, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawShot(ctx, img, frame, index, dx, dy, dw, dh) {
   ctx.save();
   ctx.beginPath();
   ctx.rect(dx, dy, dw, dh);
   ctx.clip();
-  ctx.translate(dx + dw / 2, dy + dh / 2);
-  let w = dw;
-  let h = dh;
-  if (turn) {
-    ctx.rotate(-Math.PI / 2);
-    w = dh;
-    h = dw;
+  if (frame.pose === "close") {
+    const zoom = frame.detail === 1 ? [0.18, 0.5, 0.62] : [0.3, 0.22, 0.6];
+    const sw = img.naturalWidth * zoom[2];
+    const sh = sw * (dh / dw);
+    ctx.drawImage(img, img.naturalWidth * zoom[0], img.naturalHeight * zoom[1], sw, sh, dx, dy, dw, dh);
+    ctx.restore();
+    return;
   }
-  const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
-  const iw = img.naturalWidth * scale;
-  const ih = img.naturalHeight * scale;
-  ctx.drawImage(img, -iw / 2, -ih / 2, iw, ih);
+  const [hi, mid, lo] = TABLES[index % TABLES.length];
+  const table = ctx.createLinearGradient(dx, dy, dx + dw * 0.3, dy + dh);
+  table.addColorStop(0, hi);
+  table.addColorStop(0.55, mid);
+  table.addColorStop(1, lo);
+  ctx.fillStyle = table;
+  ctx.fillRect(dx, dy, dw, dh);
+  const glow = ctx.createRadialGradient(dx + dw * 0.35, dy + dh * 0.2, 0, dx + dw * 0.35, dy + dh * 0.2, dw * 0.8);
+  glow.addColorStop(0, "rgba(255,248,236,0.32)");
+  glow.addColorStop(0.5, "rgba(255,248,236,0.08)");
+  glow.addColorStop(1, "rgba(255,248,236,0)");
+  ctx.fillStyle = glow;
+  ctx.fillRect(dx, dy, dw, dh);
+  const side = frame.pose === "left" ? -1 : 1;
+  const size = dh * 0.8;
+  const cx = dx + dw / 2 + side * dw * 0.1;
+  const cy = dy + dh / 2;
+  const tint = averageColour(img).map((v) => Math.round(v));
+  drawRecord(ctx, cx - side * size * 0.42, cy, size * 0.47, tint);
+  const tilt = side * 0.035;
+  ctx.translate(cx + side * size * 0.06, cy);
+  ctx.rotate(tilt);
+  ctx.shadowColor = "rgba(0,0,0,0.45)";
+  ctx.shadowBlur = size * 0.06;
+  ctx.shadowOffsetX = size * 0.02;
+  ctx.shadowOffsetY = size * 0.035;
+  ctx.fillStyle = "#111";
+  ctx.fillRect(-size / 2, -size / 2, size, size);
+  ctx.shadowColor = "transparent";
+  ctx.drawImage(img, -size / 2, -size / 2, size, size);
+  const edge = ctx.createLinearGradient(-size / 2, -size / 2, size / 2, size / 2);
+  edge.addColorStop(0, "rgba(255,255,255,0.14)");
+  edge.addColorStop(0.4, "rgba(255,255,255,0)");
+  edge.addColorStop(1, "rgba(0,0,0,0.12)");
+  ctx.fillStyle = edge;
+  ctx.fillRect(-size / 2, -size / 2, size, size);
   ctx.restore();
 }
 
@@ -105,7 +213,7 @@ export function buildPhotoAtlas(images) {
     const [ox, oy] = tileOrigin(i + 2);
     const x0 = ox + toCanvasX(37);
     const y0 = oy + 5.5 * PX;
-    drawCover(ctx, img, x0 - 2, y0 - 2, 36 * PX + 4, 24 * PX + 4, frame.turn);
+    drawShot(ctx, img, frame, i, x0 - 2, y0 - 2, 36 * PX + 4, 24 * PX + 4);
   });
   addGrain(ctx, ATLAS_W, ATLAS_H, 7);
   return canvas;
@@ -262,7 +370,7 @@ export function buildLabel(fontFamily) {
     ctx.textAlign = "center";
     ctx.textBaseline = "alphabetic";
     ctx.font = `640 210px ${fontFamily}`;
-    ctx.fillText("Volta", -40, 40);
+    ctx.fillText("Colour", -90, 40);
     ctx.fillStyle = orange;
     ctx.font = `700 150px ${fontFamily}`;
     ctx.textAlign = "left";

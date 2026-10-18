@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { GELS } from "./mirrorballGels";
+import { ALBUM_CHOICES } from "./mirrorballAlbums";
 import "./mirrorball.css";
 
 export default function Piece({ embedded = false }) {
@@ -10,8 +10,8 @@ export default function Piece({ embedded = false }) {
   const canvasRef = useRef(null);
   const headRef = useRef(null);
   const engineRef = useRef(null);
-  const gelRef = useRef(0);
-  const [gel, setGel] = useState(0);
+  const albumRef = useRef(0);
+  const [album, setAlbum] = useState(0);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
 
@@ -30,7 +30,7 @@ export default function Piece({ embedded = false }) {
           canvas,
           header: embedded ? null : headRef.current,
           embedded,
-          gel: gelRef.current,
+          album: albumRef.current,
           onReady: () => {
             if (!cancelled) setReady(true);
           },
@@ -63,9 +63,9 @@ export default function Piece({ embedded = false }) {
   }, [embedded]);
 
   const choose = (idx) => {
-    gelRef.current = idx;
-    setGel(idx);
-    engineRef.current?.setGel(idx);
+    albumRef.current = idx;
+    setAlbum(idx);
+    engineRef.current?.setAlbum(idx);
   };
 
   const Root = embedded ? "div" : "main";
@@ -83,29 +83,30 @@ export default function Piece({ embedded = false }) {
         className="mirrorball-canvas"
         tabIndex={0}
         role="application"
-        aria-label="A mirrorball hanging in a dark club, lit by one spotlight. Drag sideways to spin it; it keeps the speed of your throw and slows on its own. Left and right arrows push it, Space stops it."
+        aria-label={`A mirrorball hanging in a dark room, throwing the colours of ${ALBUM_CHOICES[album].title} across the walls, floor and ceiling. Drag sideways to spin it; it keeps the speed of your throw and slows on its own. Left and right arrows push it, Space stops it.`}
       />
       {embedded ? null : (
         <header ref={headRef} className="mirrorball-head">
           <h1 className="mirrorball-title">Mirrorball</h1>
           <p className="mirrorball-lede">
-            Give it a spin. Every mirror holds <em>a piece of the room</em> and throws its light back across the walls.
+            One spotlight through a record sleeve. Every mirror carries <em>a piece of the cover</em> around the room.
           </p>
         </header>
       )}
       {embedded ? null : (
-        <div className="mirrorball-gels" role="radiogroup" aria-label="Spotlight gel">
-          {GELS.map((g, i) => (
+        <div className="mirrorball-gels" role="radiogroup" aria-label="Album">
+          {ALBUM_CHOICES.map((a, i) => (
             <button
-              key={g.key}
+              key={a.id}
               type="button"
               role="radio"
-              aria-checked={gel === i}
+              aria-checked={album === i}
+              aria-label={`${a.title}, ${a.year}`}
               className="mirrorball-gel"
               onClick={() => choose(i)}
             >
-              <span className="mirrorball-swatch" style={{ "--mirrorball-swatch": g.swatch }} aria-hidden="true" />
-              {g.label}
+              <img className="mirrorball-swatch" src={a.cover} alt="" width={24} height={24} draggable={false} />
+              <span className="mirrorball-gel-label">{a.short}</span>
             </button>
           ))}
         </div>

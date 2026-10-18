@@ -1,13 +1,20 @@
 {
   "title": "Shredder",
-  "description": "A glossy landscape print half fed into a strip-cut shredder, its cut strips hanging below in curls and twists. Feed it through, then comb the strips straight: where neighbours line up edge to edge they fuse back into a whole print, but it is the next photograph.",
-  "tags": ["WebGL", "Physics", "Paper"],
+  "description": "A glossy desk shredder drawn like an iOS 6 icon: brushed aluminium, a stitched leather band and a green glass button over a wire-mesh bin. Push Revolver, Abbey Road or Sgt. Pepper into the slot and it hums, pulls the sleeve through and drops sixteen strips that curl into a heap you can watch through the mesh.",
+  "tags": [
+    "Canvas",
+    "Skeuomorphic",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One paper mechanic finished to the edge: a print cut into two dozen weighty ribbons with their own curl and twist, and a comb that pulls them back into line until they heal into another picture.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "One paper mechanic in a flat, layered 2D object: the sleeve is sliced into real strips of the cover that hang, sway and fall, instead of a 3D simulation.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
-    "https://tympanus.net/codrops/2026/05/19/80s-business-tech-seamless-scene-transitions-inside-shader-ses-scroll-driven-webgpu-pipeline/",
+    "https://en.wikipedia.org/wiki/IOS_6",
     "https://herb.art/lab/tear-off"
   ]
 }

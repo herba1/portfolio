@@ -1,5 +1,5 @@
 import { SETLIST } from "./ghostSet";
-import { COMPOSITE_FRAGMENT, DOWN_FRAGMENT, MATERIAL_FRAGMENT, QUAD_VERTEX, UP_FRAGMENT } from "./ghostShader";
+import { COMPOSITE_FRAGMENT, DOWN_FRAGMENT, QUAD_VERTEX, UP_FRAGMENT } from "./ghostShader";
 
 const MAX_DPR = 2;
 const GHOSTS = 4;
@@ -107,7 +107,6 @@ export default class GhostEngine {
     this.visible = true;
     this.destroyed = false;
     this.ready = false;
-    this.seed = 0;
     this.frame = this.frame.bind(this);
     this.handlers = {
       down: (e) => this.pointerDown(e),
@@ -147,7 +146,7 @@ export default class GhostEngine {
     const weight = parseInt(readVar("--text-display--font-weight", "600"), 10);
     this.weight = Number.isFinite(weight) ? weight : 600;
     try {
-      await document.fonts.load(`${this.weight} 200px ${this.sans}`, "SodiumLightsHalfwayOrders");
+      await document.fonts.load(`${this.weight} 200px ${this.sans}`, "Come Together Something Taxman");
     } catch {}
     if (this.destroyed) return false;
     this.text = document.createElement("canvas");
@@ -187,7 +186,6 @@ export default class GhostEngine {
       down: link(gl, DOWN_FRAGMENT),
       up: link(gl, UP_FRAGMENT),
       composite: link(gl, COMPOSITE_FRAGMENT),
-      material: link(gl, MATERIAL_FRAGMENT),
     };
     this.triBuffer = gl.createBuffer();
     this.triVao = gl.createVertexArray();
@@ -207,7 +205,7 @@ export default class GhostEngine {
     gl.disable(gl.BLEND);
   }
 
-  makeTarget(width, height, plain = false) {
+  makeTarget(width, height) {
     const gl = this.gl;
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -215,7 +213,7 @@ export default class GhostEngine {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    if (this.float && !plain) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    if (this.float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, width, height, 0, gl.RGBA, gl.HALF_FLOAT, null);
     else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     const framebuffer = gl.createFramebuffer();
     gl.bindFramebuffer(gl.FRAMEBUFFER, framebuffer);
@@ -235,8 +233,6 @@ export default class GhostEngine {
     this.ups?.forEach((t) => this.dropTarget(t));
     this.downs = null;
     this.ups = null;
-    this.dropTarget(this.materialTarget);
-    this.materialTarget = null;
   }
 
   resize() {
@@ -267,9 +263,7 @@ export default class GhostEngine {
       this.ups.push(i < LEVELS - 1 ? this.makeTarget(w, h) : null);
     }
     this.shift = dpr >= 1.5 ? 1 : 0;
-    this.materialTarget = this.makeTarget(width, height, true);
     this.layout();
-    this.bakeMaterial();
     if (this.ready) this.render();
   }
 
@@ -279,7 +273,7 @@ export default class GhostEngine {
     const narrow = W / H < 0.95;
     const ctx = this.ctx;
     const L = W * 1.14 + 48;
-    const amp = L * 0.042;
+    const amp = 0;
     this.slot = L;
     this.amp = amp;
     const fitW = W * (narrow ? 0.84 : 0.78);
@@ -320,7 +314,7 @@ export default class GhostEngine {
       blockHalf = Math.max(blockHalf, half);
       return { font, size, cap, glyphs, half, lineWidth: Math.max(1, size * 0.011) };
     });
-    this.cy = Math.max(H * (narrow ? 0.38 : 0.37), top + blockHalf + 12);
+    this.cy = Math.max(H * (narrow ? 0.4 : 0.42), top + blockHalf + 12);
     const span = L * 2.7;
     const step = 1;
     const samples = Math.ceil((span * 2) / step) + 1;
@@ -340,8 +334,6 @@ export default class GhostEngine {
     for (let i = 0; i < samples; i += 1) ss[i] -= s0;
     this.path = { xs, ys, ss, samples };
     this.slotArc = this.arcAtU(L);
-    const below = this.cy + blockHalf + amp * 0.9 + H * 0.06;
-    this.horizon = clamp(below, H * 0.6, H * 0.86);
   }
 
   arcAtU(u) {
@@ -495,26 +487,10 @@ export default class GhostEngine {
       this.bindTex(2, this.downs[2 + s].texture, u.uCore);
       this.bindTex(3, this.ups[1 + s].texture, u.uNear);
       this.bindTex(4, this.ups[3 + s].texture, u.uWide);
-      gl.uniform2f(u.uBox, this.width, this.height);
-      this.bindTex(5, this.materialTarget.texture, u.uMaterial);
-      gl.uniform1f(u.uHorizon, this.horizon);
       gl.uniform3f(u.uNeon, neon[0], neon[1], neon[2]);
       gl.uniform3f(u.uGhostWarm, warm[0], warm[1], warm[2]);
       gl.uniform3f(u.uCool, COOL[0], COOL[1], COOL[2]);
       gl.uniform1f(u.uGlow, 1);
-      gl.uniform1f(u.uSeed, this.seed);
-    });
-    gl.bindVertexArray(null);
-  }
-
-  bakeMaterial() {
-    const gl = this.gl;
-    const sign = this.pointAt(0);
-    gl.bindVertexArray(this.triVao);
-    this.pass(this.programs.material, this.materialTarget, (u) => {
-      gl.uniform2f(u.uBox, this.width, this.height);
-      gl.uniform1f(u.uHorizon, this.horizon);
-      gl.uniform2f(u.uSign, sign.x, sign.y);
     });
     gl.bindVertexArray(null);
   }
@@ -701,7 +677,6 @@ export default class GhostEngine {
     const tau = rising ? 0.07 : 0.2;
     this.trail += (goal - this.trail) * (1 - Math.exp(-dt / tau));
     if (Math.abs(this.trail) < 0.3 && this.mode === "idle") this.trail = 0;
-    this.seed = (this.seed + 0.618) % 1;
     this.render();
     const busy = this.mode !== "idle" || Math.abs(this.trail) > 0;
     if (busy) this.raf = requestAnimationFrame(this.frame);

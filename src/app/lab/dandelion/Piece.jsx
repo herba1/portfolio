@@ -4,13 +4,50 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Mic } from "lucide-react";
 import DandelionEngine from "./dandelionEngine";
 import Breath, { micSupported } from "./dandelionMic";
+import { albumById } from "@/app/lab/_music/catalog";
 import "./dandelion.css";
 
+const withTheBeatles = albumById("with-the-beatles");
+const letItBe = albumById("let-it-be");
+
 const PORTRAITS = [
-  { name: "John", src: "/cast/john.webp" },
-  { name: "Paul", src: "/cast/paul.webp" },
-  { name: "George", src: "/cast/george.webp" },
+  { name: "John", who: "John Lennon, half-lit, from the With the Beatles sleeve", src: withTheBeatles.cover, crop: [0, 0.2, 0.42] },
+  { name: "Paul", who: "Paul McCartney from the Let It Be sleeve", src: letItBe.cover, crop: [0.525, 0.11, 0.37] },
+  { name: "George", who: "George Harrison from the Let It Be sleeve", src: letItBe.cover, crop: [0.525, 0.52, 0.36] },
 ];
+
+const FORMS = [
+  { name: "Dandelion", word: "dandelion clock" },
+  { name: "Salsify", word: "salsify clock, its few long plumes webbed together" },
+  { name: "Thistle", word: "thistle down" },
+];
+
+const fix = (v) => v.toFixed(2);
+
+function FormGlyph({ index }) {
+  const rays = index === 1 ? 7 : index === 2 ? 22 : 12;
+  const reach = index === 2 ? 7.5 : 8;
+  const lines = [];
+  for (let i = 0; i < rays; i += 1) {
+    const a = (i / rays) * Math.PI * 2;
+    const bend = index === 2 ? 0.35 : 0;
+    lines.push(
+      <path
+        key={i}
+        d={`M10 10 Q${fix(10 + Math.cos(a + bend) * reach * 0.5)} ${fix(10 + Math.sin(a + bend) * reach * 0.5)} ${fix(10 + Math.cos(a) * reach)} ${fix(10 + Math.sin(a) * reach)}`}
+      />,
+    );
+  }
+  return (
+    <svg className="dandelion__glyph" viewBox="0 0 20 20" width={20} height={20} aria-hidden="true">
+      <g fill="none" stroke="currentColor" strokeWidth={index === 2 ? 0.5 : 0.9} strokeLinecap="round">
+        {lines}
+        {index === 1 ? <polygon points={Array.from({ length: 7 }, (_, i) => `${fix(10 + Math.cos((i / 7) * Math.PI * 2) * 5)} ${fix(10 + Math.sin((i / 7) * Math.PI * 2) * 5)}`).join(" ")} /> : null}
+      </g>
+      <circle cx="10" cy="10" r="1.4" fill="currentColor" />
+    </svg>
+  );
+}
 
 const ARROWS = {
   ArrowRight: [1, -0.12],
@@ -28,6 +65,7 @@ export default function Piece({ embedded = false }) {
   const blowingRef = useRef(false);
   const [phase, setPhase] = useState("loading");
   const [current, setCurrent] = useState(0);
+  const [form, setForm] = useState(0);
   const [mic, setMic] = useState("off");
   const [blowing, setBlowing] = useState(false);
   const [canMic, setCanMic] = useState(false);
@@ -57,6 +95,11 @@ export default function Piece({ embedded = false }) {
   const choose = useCallback((index) => {
     setCurrent(index);
     engineRef.current?.setPortrait(index);
+  }, []);
+
+  const chooseForm = useCallback((index) => {
+    setForm(index);
+    engineRef.current?.setForm(index);
   }, []);
 
   const handlePointerDown = useCallback((event) => {
@@ -101,13 +144,18 @@ export default function Piece({ embedded = false }) {
         if (!event.repeat) engine.gust(arrow[0], arrow[1]);
         return;
       }
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        chooseForm((form + 1) % FORMS.length);
+        return;
+      }
       const index = Number(event.key) - 1;
       if (index >= 0 && index < PORTRAITS.length) {
         event.preventDefault();
         choose(index);
       }
     },
-    [choose],
+    [choose, chooseForm, form],
   );
 
   const allowMic = useCallback(async () => {
@@ -212,7 +260,7 @@ export default function Piece({ embedded = false }) {
         tabIndex={0}
         role="application"
         aria-roledescription="seed portrait"
-        aria-label={`Portrait of ${portrait.name} made of dandelion seeds. Swipe across it and the seeds lift off on the wind, then drift back and land. Enter or the arrow keys blow a gust, 1 to 3 change the portrait.`}
+        aria-label={`Portrait of ${portrait.who}, printed in the seeds of a ${FORMS[form].word}. The seed head turns gently toward your pointer. Swipe across it and the seeds lift off on the wind, then drift back and land. Enter or the arrow keys blow a gust, 1 to 3 change the portrait, F changes the flower.`}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
@@ -228,7 +276,7 @@ export default function Piece({ embedded = false }) {
         <header className="dandelion__head">
           <h1 className="dandelion__title">Dandelion</h1>
           <p className="dandelion__lede">
-            Swipe across the face and the seeds <em>lift off</em>. Leave it, and the wind carries them home.
+            A sleeve printed in seed heads. It turns to follow you; swipe and the seeds <em>lift off</em>, leave it and they drift home.
           </p>
         </header>
       )}
@@ -245,7 +293,32 @@ export default function Piece({ embedded = false }) {
               className="dandelion__face"
               onClick={() => choose(index)}
             >
-              <img className="dandelion__thumb" src={option.src} alt="" width={20} height={20} draggable={false} />
+              <span
+                className="dandelion__thumb"
+                aria-hidden="true"
+                style={{
+                  backgroundImage: `url(${option.src})`,
+                  backgroundSize: `${100 / option.crop[2]}%`,
+                  backgroundPosition: `${(option.crop[0] / (1 - option.crop[2])) * 100}% ${(option.crop[1] / (1 - option.crop[2])) * 100}%`,
+                }}
+              />
+              <span className="dandelion__name">{option.name}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="dandelion__faces" role="radiogroup" aria-label="Flower">
+          {FORMS.map((option, index) => (
+            <button
+              key={option.name}
+              type="button"
+              role="radio"
+              aria-checked={index === form}
+              aria-label={option.name}
+              className="dandelion__face"
+              onClick={() => chooseForm(index)}
+            >
+              <FormGlyph index={index} />
               <span className="dandelion__name">{option.name}</span>
             </button>
           ))}
@@ -271,7 +344,7 @@ export default function Piece({ embedded = false }) {
             onContextMenu={preventMenu}
           >
             <Mic className="dandelion__mic-icon" size={16} strokeWidth={1.75} aria-hidden="true" />
-            <span>{mic === "ready" ? (blowing ? "Blowing" : "Hold to blow") : "Blow"}</span>
+            <span className="dandelion__mic-label">{mic === "ready" ? (blowing ? "Blowing" : "Hold to blow") : "Blow"}</span>
           </button>
         ) : null}
       </div>

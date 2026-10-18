@@ -15,12 +15,15 @@ uniform vec2 uBox;
 uniform vec4 uBall;
 uniform vec3 uCam;
 uniform float uWall;
+uniform vec4 uRoom;
+uniform float uMix;
 uniform mat3 uRot;
 uniform vec3 uLight;
 uniform vec3 uGel;
 uniform float uRings;
 uniform sampler2D uFacets;
 uniform sampler2D uAtlas;
+uniform sampler2D uAtlasPrev;
 uniform sampler2D uMask;
 uniform sampler2D uSpecks;
 uniform sampler2D uGlow;
@@ -57,6 +60,18 @@ float valueNoise(vec2 p) {
   return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
 }
 
+vec4 roomHit(vec3 o, vec3 d, out vec3 nrm) {
+  float best = 1e9;
+  nrm = vec3(0.0, 0.0, 1.0);
+  float t;
+  if (d.x > 1e-5) { t = (uRoom.x - o.x) / d.x; if (t < best) { best = t; nrm = vec3(-1.0, 0.0, 0.0); } }
+  if (d.x < -1e-5) { t = (-uRoom.x - o.x) / d.x; if (t < best) { best = t; nrm = vec3(1.0, 0.0, 0.0); } }
+  if (d.y > 1e-5) { t = (uRoom.z - o.y) / d.y; if (t < best) { best = t; nrm = vec3(0.0, -1.0, 0.0); } }
+  if (d.y < -1e-5) { t = (-uRoom.y - o.y) / d.y; if (t < best) { best = t; nrm = vec3(0.0, 1.0, 0.0); } }
+  if (d.z < -1e-5) { t = (-uRoom.w - o.z) / d.z; if (t < best) { best = t; nrm = vec3(0.0, 0.0, 1.0); } }
+  return vec4(o + d * best, best);
+}
+
 vec2 toScreen(vec3 q) {
   float s = uBall.w / max(uBall.w - q.z, 1.0);
   vec2 p = uCam.xy + (q.xy - uCam.xy) * s;
@@ -69,13 +84,10 @@ vec3 photoEnv(vec3 r) {
   float e = asin(clamp(r.y, -1.0, 1.0));
   float v = (e + 0.74) / 1.6;
   float band = smoothstep(-0.02, 0.32, v) * smoothstep(1.02, 0.78, v);
-  float lum = textureLod(uAtlas, vec2(u, 1.0 - clamp(v, 0.0, 1.0)), uEnvLod).r;
-  lum = pow(max(lum, 0.0), 2.4) * 1.5;
-  vec3 warm = vec3(1.0, 0.7, 0.46);
-  vec3 cool = vec3(0.42, 0.52, 1.0);
-  vec3 tint = mix(warm, cool, 0.5 + 0.5 * sin(az * 1.3 + 0.8));
-  tint = mix(tint, uGel, 0.35);
-  vec3 room = lum * band * tint * 0.42 * uPhotoOn;
+  vec2 auv = vec2(u, 1.0 - clamp(v, 0.0, 1.0));
+  vec3 cover = mix(textureLod(uAtlasPrev, auv, uEnvLod).rgb, textureLod(uAtlas, auv, uEnvLod).rgb, uMix);
+  vec3 lum = pow(max(cover, vec3(0.0)), vec3(2.2)) * 1.4;
+  vec3 room = lum * band * mix(vec3(1.0), uGel, 0.25) * 0.5 * uPhotoOn;
   float floorSide = smoothstep(-0.2, -0.8, r.y);
   float floorTex = valueNoise(vec2(az * 9.0, e * 14.0));
   room += vec3(1.0, 0.82, 0.62) * floorSide * (0.012 + floorTex * floorTex * 0.05);
@@ -110,28 +122,38 @@ void main() {
   float perp = sqrt(max(camSq - b * b, 0.0));
   float cov = clamp((R - perp) * pxPerCss * 0.9 + 0.5, 0.0, 1.0);
 
-  float tw = (-uWall - uCam.z) / min(rd.z, -0.0001);
-  vec3 hw = uCam + rd * tw;
-  vec2 wp = hw.xy;
-  vec4 wallNoise = texture(uNoise, wp / 1100.0);
-  float grainBig = wallNoise.r;
+  vec3 nR;
+  vec4 rh = roomHit(uCam, rd, nR);
+  vec3 hw = rh.xyz;
+  vec2 wp = abs(nR.z) > 0.5 ? hw.xy : (abs(nR.x) > 0.5 ? hw.zy : hw.xz);
+  float grainBig = texture(uNoise, wp / 1100.0).r;
   float grainMid = texture(uNoise, wp / 210.0 + 0.37).g;
-  float speckleTex = hash12(floor(wp * 0.9));
-  float albedo = 0.05 + (grainBig - 0.5) * 0.03 + (grainMid - 0.5) * 0.02 + (speckleTex - 0.5) * 0.01;
-  float bump = 0.8 + grainMid * 0.35 + (speckleTex - 0.5) * 0.06;
-
+  float surf = abs(nR.z) > 0.5 ? 1.0 : (nR.y > 0.5 ? 1.25 : (nR.y < -0.5 ? 0.55 : 0.8));
+  float albedo = (0.05 + (grainBig - 0.5) * 0.02 + (grainMid - 0.5) * 0.012) * surf;
+  float bump = 0.9 + grainMid * 0.2;
+  float dX = uRoom.x - abs(hw.x);
+  float dF = hw.y + uRoom.y;
+  float dC = uRoom.z - hw.y;
+  float dB = hw.z + uRoom.w;
+  float near = 1e9;
+  if (dX > 2.0) near = min(near, dX);
+  if (dF > 2.0) near = min(near, dF);
+  if (dC > 2.0) near = min(near, dC);
+  if (dB > 2.0) near = min(near, dB);
+  float ao = mix(0.45, 1.0, smoothstep(0.0, R * 2.4, near));
+  albedo *= ao;
   vec3 specks = texelFetch(uSpecks, ivec2(fc), 0).rgb * uLightInv;
   vec3 glow = texelFetch(uGlow, ivec2(fc), 0).rgb * uLightInv;
 
   float axisDist = length(cross(hw, uLight));
   float behind = -dot(hw, uLight);
   float beamR = R * 1.3;
-  float pen = R * 0.1 + max(behind, 0.0) * 0.06;
-  float pool = smoothstep(R * 1.75, R * 1.05, axisDist) * smoothstep(R - pen, R + pen, axisDist);
+  float pen = R * 0.1 + max(behind, 0.0) * 0.04;
+  float pool = smoothstep(R * 2.2, R * 1.05, axisDist) * smoothstep(R - pen, R + pen, axisDist) * step(0.0, behind);
   vec2 uvBox = css / uBox;
   float topFall = mix(0.75, 1.0, smoothstep(0.0, 0.6, uvBox.y));
-  vec3 ambient = vec3(1.0, 0.9, 0.8) * 0.22 * topFall;
-  vec3 wallLight = ambient + uGel * pool * 0.55 + specks * bump;
+  vec3 ambient = vec3(1.0, 0.92, 0.84) * 0.2 * topFall;
+  vec3 wallLight = ambient + uGel * pool * 0.3 + specks * bump;
   vec3 wall = albedo * wallLight;
 
   float mask = 0.0;
@@ -252,6 +274,10 @@ uniform vec3 uCam;
 uniform vec4 uBall;
 uniform vec2 uBox;
 uniform float uWall;
+uniform vec4 uRoom;
+uniform float uMix;
+uniform sampler2D uTint;
+uniform sampler2D uTintPrev;
 uniform float uRings;
 uniform float uSpread;
 uniform int uMode;
@@ -277,6 +303,18 @@ vec2 toScreen(vec3 q) {
   return vec2(uBall.x + p.x, uBall.y - p.y);
 }
 
+vec4 roomHit(vec3 o, vec3 d, out vec3 nrm) {
+  float best = 1e9;
+  nrm = vec3(0.0, 0.0, 1.0);
+  float t;
+  if (d.x > 1e-5) { t = (uRoom.x - o.x) / d.x; if (t < best) { best = t; nrm = vec3(-1.0, 0.0, 0.0); } }
+  if (d.x < -1e-5) { t = (-uRoom.x - o.x) / d.x; if (t < best) { best = t; nrm = vec3(1.0, 0.0, 0.0); } }
+  if (d.y > 1e-5) { t = (uRoom.z - o.y) / d.y; if (t < best) { best = t; nrm = vec3(0.0, -1.0, 0.0); } }
+  if (d.y < -1e-5) { t = (-uRoom.y - o.y) / d.y; if (t < best) { best = t; nrm = vec3(0.0, 1.0, 0.0); } }
+  if (d.z < -1e-5) { t = (-uRoom.w - o.z) / d.z; if (t < best) { best = t; nrm = vec3(0.0, 0.0, 1.0); } }
+  return vec4(o + d * best, best);
+}
+
 vec4 toClip(vec2 css) {
   return vec4(css.x / uBox.x * 2.0 - 1.0, 1.0 - css.y / uBox.y * 2.0, 0.0, 1.0);
 }
@@ -296,17 +334,19 @@ void main() {
   vec3 n = normalize(uRot * texel.xyz);
   float th = hash12(aFacet + 3.1);
   float th2 = hash12(aFacet * 1.7 + 11.0);
-  vTint = mix(vec3(1.0), vec3(0.9, 0.97, 0.94), th) * (0.45 + 0.65 * th2 * th2);
+  vec3 cover = mix(texelFetch(uTintPrev, ivec2(aFacet), 0).rgb, texelFetch(uTint, ivec2(aFacet), 0).rgb, uMix);
+  vTint = cover * (0.62 + 0.5 * th2 * th2);
   float R = uBall.z;
   float tile = R * d;
   vec3 P = ng * R;
   float lit = dot(ng, uLight);
-  if (abs(lat) > 1.38) return;
+  float polar = smoothstep(1.39, 1.3, abs(lat));
+  if (polar <= 0.0) return;
 
   if (uMode == 2) {
     vec3 V = normalize(uCam - P);
     float facing = dot(ng, V);
-    if (facing < 0.1 || lit < 0.0) return;
+    if (facing < 0.1 || lit <= 0.0) return;
     vec3 rv = reflect(-V, n);
     float g = dot(rv, uLight);
     float glint = smoothstep(0.986, 0.9985, g);
@@ -314,40 +354,43 @@ void main() {
     float s = uBall.w / max(uBall.w - P.z, 1.0);
     float fade = smoothstep(0.1, 0.4, facing);
     float rad = tile * s * (1.6 + 3.4 * glint) * mix(0.6, 1.0, fade);
-    vPower = glint * fade;
+    vPower = glint * fade * smoothstep(0.0, 0.12, lit) * polar;
     gl_Position = toClip(toScreen(P) + aCorner * rad);
     return;
   }
 
-  if (lit < 0.02) return;
+  if (lit <= 0.0) return;
   vec3 r = reflect(-uLight, n);
-  if (r.z > -0.03) return;
-  float t = (-uWall - P.z) / r.z;
-  vec3 H = P + r * t;
+  vec3 N;
+  vec4 hit = roomHit(P, r, N);
+  vec3 H = hit.xyz;
+  float t = hit.w;
+  if (t > 1e8 || H.z > uCam.z * 0.7) return;
   float pen = t * uSpread;
   float rad = tile * 0.42 + pen;
-  float stretch = min(1.0 / max(-r.z, 0.2), 5.0);
-  vec2 a = r.xy;
-  float al = length(a);
-  vec2 a1 = al > 0.0001 ? a / al : vec2(1.0, 0.0);
-  vec2 a2 = vec2(-a1.y, a1.x);
+  float cosI = abs(dot(r, N));
+  float stretch = min(1.0 / max(cosI, 0.2), 5.0);
+  vec3 a1w = r - N * dot(r, N);
+  float al = length(a1w);
+  a1w = al > 0.0001 ? a1w / al : (abs(N.y) > 0.5 ? vec3(1.0, 0.0, 0.0) : vec3(0.0, 1.0, 0.0));
+  vec3 a2w = cross(N, a1w);
   float power = sqrt(lit) * (tile * tile * 0.18) / max(rad * rad * stretch, 0.0001);
-  power = min(power, 2.4) * smoothstep(0.03, 0.12, -r.z);
+  power = min(power, 2.4) * smoothstep(0.0, 0.22, lit) * polar;
   vPower = power;
   vSoft = clamp(pen / rad, 0.06, 0.9);
 
   if (uMode == 0) {
     vec2 s1 = toScreen(H);
-    vec2 ax1 = toScreen(H + vec3(a1 * rad * stretch, 0.0)) - s1;
-    vec2 ax2 = toScreen(H + vec3(a2 * rad, 0.0)) - s1;
+    vec2 ax1 = toScreen(H + a1w * rad * stretch) - s1;
+    vec2 ax2 = toScreen(H + a2w * rad) - s1;
     vec2 motion = vec2(0.0);
     vec3 nPrev = normalize(uRotPrev * texel.xyz);
     vec3 ngPrev = uRotPrev * vec3(cos(lat) * cos(lon), sin(lat), cos(lat) * sin(lon));
     vec3 rPrev = reflect(-uLight, nPrev);
-    if (rPrev.z < -0.03) {
-      vec3 pPrev = ngPrev * R;
-      vec3 hPrev = pPrev + rPrev * ((-uWall - pPrev.z) / rPrev.z);
-      vec2 m = toScreen(hPrev) - s1;
+    vec3 nPrevHit;
+    vec4 hp = roomHit(ngPrev * R, rPrev, nPrevHit);
+    if (hp.w < 1e8 && dot(nPrevHit, N) > 0.5) {
+      vec2 m = toScreen(hp.xyz) - s1;
       float det = ax1.x * ax2.y - ax1.y * ax2.x;
       if (abs(det) > 0.0001) motion = vec2(m.x * ax2.y - m.y * ax2.x, ax1.x * m.y - ax1.y * m.x) / det;
       float ml = length(motion);
@@ -371,7 +414,7 @@ void main() {
   vec2 dn = dir / len;
   vec2 nn = vec2(-dn.y, dn.x);
   float along = aCorner.x * 0.5 + 0.5;
-  float reach = 0.62;
+  float reach = 0.4;
   float s0 = uBall.w / max(uBall.w - P0.z, 1.0);
   float s1 = uBall.w / max(uBall.w - H.z, 1.0);
   float w = max(mix(tile * 0.4 * s0, rad * s1, along * reach), 0.8);

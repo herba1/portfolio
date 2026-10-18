@@ -158,7 +158,7 @@ function findArt(border, w, h) {
   return [left, top, right, bottom];
 }
 
-export function chromeMask(pixels, w, h, { GRAD = 0.1, LOCAL = 0.04, GLOBAL = 0.14 } = {}) {
+export function chromeMask(pixels, w, h, { GRAD = 0.1, LOCAL = 0.04, GLOBAL = 0.14, artBox = null } = {}) {
   const n = w * h;
   const raw = new Float32Array(n * 3);
   for (let k = 0; k < n; k += 1) {
@@ -190,7 +190,7 @@ export function chromeMask(pixels, w, h, { GRAD = 0.1, LOCAL = 0.04, GLOBAL = 0.
       if (x < inset || y < inset || x >= w - inset || y >= h - inset) border[y * w + x] = 1;
     }
   }
-  const art = findArt(border, w, h);
+  const art = artBox ? artBox.map((v, i) => Math.round(v * (i % 2 ? h : w))) : findArt(border, w, h);
   const [ax0, ay0, ax1, ay1] = art;
   const inArt = (k) => {
     const x = k % w;
@@ -279,7 +279,8 @@ export function chromeMask(pixels, w, h, { GRAD = 0.1, LOCAL = 0.04, GLOBAL = 0.
   const ink = new Float32Array(n);
   for (let k = 0; k < n; k += 1) {
     if (inArt(k)) {
-      chrome[k] = bg[k];
+      const lit = Math.min(1, Math.max(0, (lum(k) - 0.4) / 0.16));
+      chrome[k] = bg[k] * lit * lit * (3 - 2 * lit);
     } else {
       const dark = Math.min(1, Math.max(0, (paperLum * 0.86 - lum(k)) / (paperLum * 0.3)));
       ink[k] = dark;

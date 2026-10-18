@@ -12,8 +12,6 @@ const UNIFORMS = [
   "uPose",
   "uSize",
   "uRect",
-  "uLoupe",
-  "uLoupeOn",
   "uTexel",
   "uAtlas",
 ];
@@ -109,8 +107,6 @@ export function createLightTableGL(canvas) {
     gl.uniform4fv(loc.uPose, pose);
     gl.uniform4fv(loc.uSize, size);
     gl.uniform4fv(loc.uRect, rect);
-    gl.uniform4f(loc.uLoupe, frame.loupe.x, frame.loupe.y, frame.loupe.r, frame.loupe.zoom);
-    gl.uniform1f(loc.uLoupeOn, frame.loupe.on ? 1 : 0);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, atlas);
     gl.uniform1i(loc.uAtlas, 0);

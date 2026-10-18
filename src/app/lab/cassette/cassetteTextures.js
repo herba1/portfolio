@@ -1,4 +1,3 @@
-import { MIXTAPE } from "./cassetteMixtape";
 
 export const TYPE_FACE = '"Courier New", "FreeMono", "Nimbus Mono PS", "Courier Prime", Courier, monospace';
 export const PRINT_FACE = '"Helvetica Neue", Helvetica, "Liberation Sans", Arial, sans-serif';
@@ -155,7 +154,21 @@ export function typeText(ctx, text, x, y, size, { ink = "rgb(30 28 36)", seed = 
   return total;
 }
 
-export function labelCanvas() {
+function typeFit(ctx, text, x, y, size, maxWidth, options = {}) {
+  ctx.save();
+  ctx.font = `${size}px ${TYPE_FACE}`;
+  const advance = ctx.measureText("M").width;
+  ctx.restore();
+  let fitSize = size;
+  let line = String(text);
+  if (advance * line.length > maxWidth) fitSize = Math.max(size * 0.78, maxWidth / line.length / (advance / size));
+  const fitAdvance = (advance / size) * fitSize;
+  const room = Math.floor(maxWidth / fitAdvance);
+  if (line.length > room) line = `${line.slice(0, Math.max(1, room - 1)).trimEnd()}…`;
+  return typeText(ctx, line, x, y, fitSize, options);
+}
+
+export function labelCanvas(mix) {
   const ppm = 16;
   const w = 76 * ppm;
   const h = 15 * ppm;
@@ -181,14 +194,14 @@ export function labelCanvas() {
   ctx.fillStyle = "rgb(36 64 112 / 0.8)";
   ctx.font = `500 ${1.6 * ppm}px ${PRINT_FACE}`;
   ctx.fillText("C60", w - 9 * ppm, 2.6 * ppm);
-  typeText(ctx, MIXTAPE.title, 13 * ppm, 5.8 * ppm, 3.3 * ppm, { ink: "rgb(176 40 34)", seed: 3 });
-  typeText(ctx, MIXTAPE.dedication, 13 * ppm, 9.7 * ppm, 2.3 * ppm, { seed: 5 });
+  typeFit(ctx, mix.lead.title, 13 * ppm, 5.8 * ppm, 3.3 * ppm, w - 25 * ppm, { ink: "rgb(176 40 34)", seed: 3 });
+  typeFit(ctx, [mix.lead.artist, mix.lead.album].filter(Boolean).join(" · "), 13 * ppm, 9.7 * ppm, 2.3 * ppm, w - 16 * ppm, { seed: 5 });
   return c;
 }
 
 export const JCARD = { width: 100, front: 65, spine: 12.5, flap: 15, ppm: 14 };
 
-export function jcardCanvas() {
+export function jcardCanvas(mix) {
   const { width, front, spine, flap, ppm } = JCARD;
   const w = Math.round(width * ppm);
   const h = Math.round((front + spine + flap) * ppm);
@@ -213,18 +226,17 @@ export function jcardCanvas() {
   ctx.fillText("Side A", m(6), m(16.2));
   ctx.fillText("Side B", m(52), m(16.2));
   ctx.fillRect(m(50), m(13.8), m(0.25), m(46));
-  typeText(ctx, MIXTAPE.title, m(6), m(8.4), m(4.4), { ink: red, seed: 9 });
-  typeText(ctx, MIXTAPE.dedication, m(94), m(8.4), m(2.4), { seed: 12, align: "right" });
-  const rows = (list, x0, x1, seedBase) => {
+  typeText(ctx, mix.title, m(6), m(8.4), m(4.4), { ink: red, seed: 9 });
+  typeText(ctx, mix.dedication, m(94), m(8.4), m(2.4), { seed: 12, align: "right" });
+  const rows = (list, x0, x1, seedBase, offset) => {
     list.forEach((t, i) => {
       const yy = m(17.3 + (i + 1) * 3.5);
-      typeText(ctx, `${i + 1}. ${t.title}`, x0, yy, m(2.15), { seed: seedBase + i * 3 });
-      typeText(ctx, t.artist, x0 + m(3.8), yy + m(1.8), m(1.55), { seed: seedBase + i * 3 + 1, ink: "rgb(56 52 60)" });
-      typeText(ctx, t.time, x1, yy, m(2.15), { seed: seedBase + i * 3 + 2, align: "right" });
+      typeFit(ctx, `${i + 1 + offset}. ${t.title}`, x0, yy, m(2.15), x1 - x0, { seed: seedBase + i * 3 });
+      typeFit(ctx, t.artist, x0 + m(3.8), yy + m(1.8), m(1.55), x1 - x0 - m(3.8), { seed: seedBase + i * 3 + 1, ink: "rgb(56 52 60)" });
     });
   };
-  rows(MIXTAPE.sideA, m(6), m(48), 20);
-  rows(MIXTAPE.sideB, m(52), m(94), 60);
+  rows(mix.sideA, m(6), m(48), 20, 0);
+  rows(mix.sideB, m(52), m(94), 60, mix.sideA.length);
   ctx.strokeStyle = blue;
   ctx.lineWidth = m(0.22);
   ctx.strokeRect(m(66), m(53.5), m(28), m(8.5));
@@ -241,10 +253,10 @@ export function jcardCanvas() {
   }
   ctx.fillStyle = red;
   ctx.fillRect(0, m(front + 1.4), w, m(0.6));
-  typeText(ctx, MIXTAPE.title, m(6), m(front + 8.4), m(3.6), { seed: 33 });
+  typeText(ctx, mix.title, m(6), m(front + 8.4), m(3.6), { seed: 33 });
   typeText(ctx, "A / B", m(94), m(front + 8.4), m(2.6), { seed: 34, align: "right", ink: red });
-  typeText(ctx, MIXTAPE.notes, m(6), m(front + spine + 6.4), m(1.9), { seed: 35 });
-  typeText(ctx, MIXTAPE.notes2, m(6), m(front + spine + 10.2), m(1.9), { seed: 36 });
+  typeFit(ctx, mix.notes, m(6), m(front + spine + 6.4), m(1.9), m(88), { seed: 35 });
+  typeFit(ctx, mix.notes2, m(6), m(front + spine + 10.2), m(1.9), m(88), { seed: 36 });
   return c;
 }
 

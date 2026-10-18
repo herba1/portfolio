@@ -7,6 +7,10 @@ const HUSK = [0.37, 0.26, 0.16];
 const SHADE = [0.3, 0.23, 0.15];
 const FLUFF = [0.62, 0.57, 0.5];
 const MAX_SPEED = 7;
+const LOOK = 0.2;
+const TURN_MAX = 0.34;
+const DOME = 0.85;
+const MORPH_S = 1.1;
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -48,6 +52,9 @@ export default class DandelionEngine {
     this.vel = [0, 0];
     this.auto = null;
     this.breath = null;
+    this.turn = { yaw: 0, pitch: 0, vyaw: 0, vpitch: 0 };
+    this.form = { from: 0, to: 0, t: 1 };
+    this.matrix = new Float32Array([1, 0, 0, 0, 1, 0, 0, 0, 1]);
 
     this.tick = this.tick.bind(this);
     this.handleVisibility = this.handleVisibility.bind(this);
@@ -155,7 +162,7 @@ export default class DandelionEngine {
     const lattice = buildLattice(cols);
     this.cols = cols;
     this.lattice = lattice;
-    this.tones = this.images.map((image) => sampleTones(image, lattice));
+    this.tones = this.images.map((image, index) => sampleTones(image, lattice, this.portraits[index].crop));
     this.sim = new SeedSim(lattice, this.tones[this.current], this.motion);
     this.applyView();
     for (const pass of this.passes) {
@@ -264,6 +271,7 @@ export default class DandelionEngine {
     if (this.ptr.down) return;
     this.ptr.inside = false;
     this.prev = null;
+    this.kick();
   }
 
   gust(dirX, dirY) {
@@ -289,6 +297,58 @@ export default class DandelionEngine {
     this.current = index;
     this.sim.sweep(this.tones[index], forward ? 1 : -1, 0);
     this.kick();
+  }
+
+  setForm(index) {
+    if (!this.ready) return;
+    const shown = this.form.t >= 0.5 ? this.form.to : this.form.from;
+    if (index === this.form.to && this.form.t >= 1) return;
+    this.form = this.motion ? { from: shown, to: index, t: 0 } : { from: index, to: index, t: 1 };
+    this.render();
+    this.kick();
+  }
+
+  stepTurn(dt) {
+    const turn = this.turn;
+    if (!this.motion) return false;
+    const ptr = this.ptr;
+    let tyaw = 0;
+    let tpitch = 0;
+    if (ptr.inside && (ptr.down || ptr.mouse)) {
+      const [x, y] = this.toPortrait(ptr.x, ptr.y);
+      const m = Math.hypot(x, y);
+      const k = m > 1.2 ? 1.2 / m : 1;
+      tyaw = x * k * LOOK;
+      tpitch = y * k * LOOK;
+      if (ptr.down) {
+        turn.vyaw += this.vel[0] * 0.5 * dt;
+        turn.vpitch += this.vel[1] * 0.5 * dt;
+      }
+    }
+    const omega = 5.5;
+    const damp = 2 * 0.72 * omega;
+    turn.vyaw += (omega * omega * (tyaw - turn.yaw) - damp * turn.vyaw) * dt;
+    turn.vpitch += (omega * omega * (tpitch - turn.pitch) - damp * turn.vpitch) * dt;
+    turn.yaw = Math.max(-TURN_MAX, Math.min(TURN_MAX, turn.yaw + turn.vyaw * dt));
+    turn.pitch = Math.max(-TURN_MAX, Math.min(TURN_MAX, turn.pitch + turn.vpitch * dt));
+    const settled =
+      Math.abs(turn.yaw - tyaw) < 1e-4 && Math.abs(turn.pitch - tpitch) < 1e-4 && Math.abs(turn.vyaw) < 1e-3 && Math.abs(turn.vpitch) < 1e-3;
+    if (settled) {
+      turn.yaw = tyaw;
+      turn.pitch = tpitch;
+      turn.vyaw = 0;
+      turn.vpitch = 0;
+    }
+    return !settled;
+  }
+
+  updateMatrix() {
+    const { yaw, pitch } = this.turn;
+    const ca = Math.cos(yaw);
+    const sa = Math.sin(yaw);
+    const cb = Math.cos(pitch);
+    const sb = Math.sin(pitch);
+    this.matrix.set([ca, -sb * sa, -cb * sa, 0, cb, -sb, sa, sb * ca, cb * ca]);
   }
 
   setBreath(source) {
@@ -375,6 +435,12 @@ export default class DandelionEngine {
       busy = true;
     }
 
+    busy = this.stepTurn(dt) || busy;
+    if (this.form.t < 1) {
+      this.form.t = Math.min(1, this.form.t + dt / MORPH_S);
+      if (this.form.t >= 1) this.form.from = this.form.to;
+      busy = true;
+    }
     busy = this.sim.step(dt, this.time) || busy;
     this.render();
     if (busy) this.kick();
@@ -403,6 +469,12 @@ export default class DandelionEngine {
     gl.uniform3f(u.uHusk, HUSK[0], HUSK[1], HUSK[2]);
     gl.uniform3f(u.uShade, SHADE[0], SHADE[1], SHADE[2]);
     gl.uniform3f(u.uFluff, FLUFF[0], FLUFF[1], FLUFF[2]);
+    this.updateMatrix();
+    gl.uniformMatrix3fv(u.uTurn, false, this.matrix);
+    gl.uniform1f(u.uDome, DOME);
+    const f = this.form;
+    gl.uniform2f(u.uForm, f.from, f.to);
+    gl.uniform1f(u.uMorph, f.t >= 1 ? 1 : f.t * f.t * (3 - 2 * f.t));
     for (const index of [2, 1, 0]) {
       const pass = this.passes[index];
       if (!pass.count) continue;

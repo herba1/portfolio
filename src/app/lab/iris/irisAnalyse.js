@@ -14,32 +14,9 @@ const smooth = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-function ellipse(u, v, cx, cy, rx, ry, soft) {
-  const d = Math.hypot((u - cx) / rx, (v - cy) / ry);
-  return 1 - smooth(1 - soft, 1 + soft, d);
-}
-
-export function depthAt(u, v) {
-  const dx = u - 0.51;
-  const dy = (v - 0.385) * 1.3;
-  const rr = Math.hypot(dx, dy);
-  let far = 1 - 0.42 * smooth(0, 0.62, rr);
-  far = Math.min(1, far + 0.08 * smooth(0.36, 0.5, v));
-  let near = 0;
-  near = Math.max(near, ellipse(u, v, 0.2, 0.79, 0.3, 0.37, 0.12));
-  near = Math.max(near, ellipse(u, v, 0.255, 0.445, 0.095, 0.08, 0.3));
-  near = Math.max(near, ellipse(u, v, 0.8, 0.83, 0.33, 0.3, 0.12));
-  near = Math.max(near, ellipse(u, v, 0.78, 0.545, 0.125, 0.095, 0.3));
-  near = Math.max(near, smooth(0.86, 0.94, v));
-  const desk = ellipse(u, v, 0.52, 0.75, 0.13, 0.14, 0.3) * 0.75;
-  let d = far * (1 - near) + 0.1 * near;
-  d = d * (1 - desk) + 0.3 * desk;
-  return d;
-}
-
-export function analysePhoto(img) {
-  const W = img.naturalWidth;
-  const H = img.naturalHeight;
+export function analysePhoto(img, { depthAt, allow, hueAt }) {
+  const W = img.naturalWidth || img.width;
+  const H = img.naturalHeight || img.height;
   const canvas = document.createElement("canvas");
   canvas.width = W;
   canvas.height = H;
@@ -97,6 +74,7 @@ export function analysePhoto(img) {
     if (taken[i]) continue;
     const x = i % W;
     const y = (i - x) / W;
+    if (!allow((x + 0.5) / W, (y + 0.5) / H)) continue;
     let found = -1;
     let ringMean = 0;
     for (let s = 0; s < SCALES.length; s += 1) {
@@ -144,7 +122,8 @@ export function analysePhoto(img) {
       }
     }
     if (energy < 0.6) continue;
-    lights.push({ u: (x + 0.5) / W, v: (y + 0.5) / H, energy, sigma });
+    const hue = hueAt((x + 0.5) / W, (y + 0.5) / H);
+    lights.push({ u: (x + 0.5) / W, v: (y + 0.5) / H, energy, sigma, hue });
     if (lights.length >= MAX_LIGHTS) break;
   }
 
@@ -180,7 +159,7 @@ export function analysePhoto(img) {
     instances[o + 4] = l.sigma;
     instances[o + 5] = rand();
     instances[o + 6] = rand();
-    instances[o + 7] = 0;
+    instances[o + 7] = l.hue;
   });
 
   return { width: W, height: H, base: out, depth, depthW: DW, depthH: DH, lights: instances, count: lights.length };

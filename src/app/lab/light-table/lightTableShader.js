@@ -19,8 +19,6 @@ uniform int uCount;
 uniform vec4 uPose[8];
 uniform vec4 uSize[8];
 uniform vec4 uRect[8];
-uniform vec4 uLoupe;
-uniform float uLoupeOn;
 uniform float uTexel;
 uniform sampler2D uAtlas;
 
@@ -29,7 +27,6 @@ out vec4 outColor;
 const vec3 MASK = vec3(0.86, 0.36, 0.15);
 const vec3 DENSITY = vec3(1.22, 1.16, 1.0);
 const vec3 TUBE = vec3(1.0, 0.972, 0.925);
-const float RING = 1.2;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(127.317, 311.703));
@@ -156,7 +153,7 @@ float dust(vec2 mm, float seed, float footMm) {
   return total;
 }
 
-vec3 scene(vec2 p, float foot, bool lens) {
+vec3 scene(vec2 p, float foot) {
   vec3 below = glassLight(p, foot);
   vec3 c = below;
   float bare = 1.0 - clamp(below.g * 4.0, 0.0, 1.0);
@@ -190,15 +187,9 @@ vec3 scene(vec2 p, float foot, bool lens) {
     vec3 x = clamp(tx.rgb, 0.0, 1.0);
     vec3 trans;
     if (kind > 1.5 && kind < 2.5) {
-      if (lens) {
-        vec3 pos = clamp(x * (1.0 + gr) + gr * 0.04, 0.0, 1.0);
-        pos = mix(pos, vec3(0.94), du);
-        trans = pow(max(pos, vec3(0.0)), vec3(2.2)) * 0.97 + 0.004;
-      } else {
-        vec3 xe = clamp(x + gr * 0.18, 0.0, 1.15);
-        trans = MASK * exp2(-DENSITY * xe * 3.3219);
-        trans *= 1.0 - du * 0.85;
-      }
+      vec3 xe = clamp(x + gr * 0.18, 0.0, 1.15);
+      trans = MASK * exp2(-DENSITY * xe * 3.3219);
+      trans *= 1.0 - du * 0.85;
     } else {
       trans = pow(x, vec3(2.2)) * (1.0 + gr);
       trans *= 1.0 - du * 0.85;
@@ -230,56 +221,7 @@ void main() {
   vec2 frag = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec2 p = frag / uDpr;
   float foot = 1.0 / uDpr;
-  vec3 col;
-  vec2 dl = p - uLoupe.xy;
-  float R = max(uLoupe.z, 1.0);
-  float r = length(dl) / R;
-  float aaR = foot / R;
-  if (uLoupeOn < 0.5 || r > RING + aaR) {
-    col = scene(p, foot, false);
-  } else {
-    float zoom = max(uLoupe.w, 1.0);
-    vec2 dir = r > 1e-5 ? dl / (r * R) : vec2(0.0);
-    vec3 lensCol = vec3(0.0);
-    if (r < 1.0 + aaR) {
-      float rc = min(r, 1.0);
-      float s = rc / zoom * (1.0 - 0.1 * rc * rc) + 0.16 * pow(smoothstep(0.8, 1.0, rc), 2.0) / zoom;
-      float ca = 0.004 + 0.045 * pow(rc, 3.0);
-      float lensFoot = foot / zoom;
-      vec2 qr = uLoupe.xy + dir * R * s * (1.0 - ca);
-      vec2 qg = uLoupe.xy + dir * R * s;
-      vec2 qb = uLoupe.xy + dir * R * s * (1.0 + ca);
-      lensCol.r = scene(qr, lensFoot, true).r;
-      lensCol.g = scene(qg, lensFoot, true).g;
-      lensCol.b = scene(qb, lensFoot, true).b;
-      vec3 under = glassLight(uLoupe.xy + dl, foot);
-      lensCol *= mix(1.0, 0.8, smoothstep(0.78, 1.0, rc));
-      float rim = exp(-(1.0 - rc) * R / 1.6);
-      lensCol += (under * 0.5 + vec3(0.06)) * rim;
-      vec2 g = (dl / R) - vec2(-0.38, -0.46);
-      float sheen = exp(-dot(g * vec2(1.0, 1.6), g * vec2(1.0, 1.6)) * 7.0);
-      lensCol += vec3(0.05, 0.052, 0.056) * sheen;
-    }
-    vec3 bodyCol = vec3(0.0);
-    if (r > 1.0 - aaR) {
-      float t = clamp((r - 1.0) / (RING - 1.0), 0.0, 1.0);
-      float light = 0.5 + 0.5 * dot(dir, normalize(vec2(-0.55, -0.83)));
-      float bevelIn = exp(-t / 0.08);
-      float bevelOut = exp(-(1.0 - t) / 0.12);
-      bodyCol = vec3(0.012, 0.012, 0.013);
-      bodyCol += vec3(0.11, 0.11, 0.115) * bevelIn * pow(light, 2.0);
-      bodyCol += vec3(0.05, 0.05, 0.052) * bevelOut * light;
-      bodyCol += vec3(0.022) * smoothstep(0.25, 0.5, t) * smoothstep(0.75, 0.5, t) * pow(light, 4.0);
-      float ang = atan(dir.y, dir.x);
-      bodyCol *= 1.0 + 0.18 * smoothstep(0.55, 0.62, t) * smoothstep(0.92, 0.85, t) * sin(ang * 220.0);
-      vec3 around = glassLight(p, foot);
-      bodyCol += around * 0.14 * exp(-(1.0 - t) * RING * R / 2.0);
-    }
-    float lensMask = clamp((1.0 - r) / aaR + 0.5, 0.0, 1.0);
-    float bodyMask = clamp((RING - r) / aaR + 0.5, 0.0, 1.0);
-    col = mix(bodyCol, lensCol, lensMask);
-    if (bodyMask < 1.0) col = mix(scene(p, foot, false), col, bodyMask);
-  }
+  vec3 col = scene(p, foot);
   vec3 outc = tonemap(col);
   outc += (hash21(gl_FragCoord.xy + 0.5) - 0.5) / 255.0;
   outColor = vec4(outc, 1.0);

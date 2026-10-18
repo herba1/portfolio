@@ -1,11 +1,19 @@
 {
   "title": "Groove",
-  "description": "A landscape pressed into a black record, where the picture lives only in the grooves. Spin it under the lamp and the photograph surfaces in the sheen, then sinks back into black.",
-  "tags": ["WebGL", "Optics", "Vinyl"],
+  "description": "Revolver, Abbey Road, Rubber Soul, Sgt. Pepper and Let It Be pressed into black records, the cover living only in the grooves and printed on the label with the real side-one tracks. Spin it under the lamp and the sleeve surfaces in the sheen, then sinks back into black.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Vinyl",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical object finished to the edge: the image is encoded only as groove orientation, so it exists purely as anisotropic specular light and appears wherever the lamp's lobe falls.",
-  "tile": { "cols": 3, "rows": 5 },
+  "intent": "One optical object finished to the edge on real records: the cover is encoded only as groove orientation, so it exists purely as anisotropic specular light and appears wherever the lamp's lobe falls.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://www.pbr-book.org/4ed/Reflection_Models/Roughness_Using_Microfacet_Theory",
     "https://web.engr.oregonstate.edu/~mjb/cs519/Projects/Papers/HairRendering.pdf",

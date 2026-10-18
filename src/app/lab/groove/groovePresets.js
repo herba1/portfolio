@@ -1,44 +1,23 @@
+import { albumById } from "@/app/lab/_music/catalog";
+
+const press = (id, style) => {
+  const album = albumById(id);
+  return {
+    key: album.id,
+    label: album.title,
+    src: album.cover,
+    title: album.title,
+    artist: album.artist,
+    year: album.year,
+    tracks: album.tracks,
+    ...style,
+  };
+};
+
 export const PRESETS = [
-  {
-    key: "valley",
-    label: "Valley",
-    src: "/scorch/valley.webp",
-    side: "Side A",
-    track: "Valley, at noon",
-    time: "4:12",
-    paper: "#ece4d2",
-    ink: "#1f3a2c",
-    accent: "#b4532a",
-    catalog: "GRV 001",
-    tone: [0.015, 0.7, 0.8],
-    crop: [0.5, 0.5, 0.94],
-  },
-  {
-    key: "wires",
-    label: "Wires",
-    src: "/scorch/wires.webp",
-    side: "Side B",
-    track: "Wires at dusk",
-    time: "5:37",
-    paper: "#e9673a",
-    ink: "#2a140b",
-    accent: "#fff2e2",
-    catalog: "GRV 002",
-    tone: [0.1, 0.95, 1.7],
-    crop: [0.5, 0.5, 0.98],
-  },
-  {
-    key: "meadow",
-    label: "Meadow",
-    src: "/scorch/meadow.webp",
-    side: "Side C",
-    track: "Meadow, late spring",
-    time: "3:48",
-    paper: "#f1ece1",
-    ink: "#8f1d22",
-    accent: "#1c1c1a",
-    catalog: "GRV 003",
-    tone: [0.14, 0.85, 1.9],
-    crop: [0.5, 0.5, 0.96],
-  },
+  press("revolver", { paper: "#f1eee6", ink: "#151513", tone: [0.62, 0.03, 1.4] }),
+  press("abbey-road", { paper: "#e4ebf0", ink: "#1b2a38", tone: [0.04, 0.75, 1.3] }),
+  press("rubber-soul", { paper: "#ecdcbc", ink: "#3a2412", tone: [0.02, 0.55, 1.1] }),
+  press("sgt-pepper", { label: "Sgt. Pepper", paper: "#f2d64b", ink: "#1f1a3a", tone: [0.04, 0.7, 1.3] }),
+  press("let-it-be", { paper: "#161616", ink: "#f1eee6", tone: [0.01, 0.5, 1.2] }),
 ];

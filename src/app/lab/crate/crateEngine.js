@@ -161,8 +161,8 @@ export async function createCrate({
     hinge.push({
       z: prev,
       x: (jr() - 0.5) * 0.008,
-      yaw: (jr() - 0.5) * 0.014,
-      roll: (jr() - 0.5) * 0.004,
+      yaw: (jr() - 0.5) * 0.008,
+      roll: (jr() - 0.5) * 0.002,
     });
   }
   const zFrontIn = FRONT_GAP;
@@ -173,7 +173,7 @@ export async function createCrate({
   const eps = hinge.map((h, i) =>
     i === 0
       ? 0
-      : Math.atan2(Math.max(0.002, hinge[i - 1].z - h.z - T * 1.05), H),
+      : Math.atan2(Math.max(0.0015, hinge[i - 1].z - h.z - T * 1.1 - (W / 2) * Math.abs(hinge[i - 1].yaw - h.yaw) - 0.0012), H),
   );
 
   const woodFace = tex(plyFace(512, 9, "#d8c09c"), true, [2.2, 2.2]);
@@ -515,7 +515,8 @@ export async function createCrate({
 
   function physics(h) {
     const dig = state.mode === "dig";
-    if (!dig) {
+    const raised = sleeves.some((s) => s.lift > 0.012);
+    if (!dig && !raised) {
       const omega = 10;
       spring(state, "p", "pv", state.pT, omega, 1, h);
       if (Math.abs(state.pv) > VMAX) state.pv = Math.sign(state.pv) * VMAX;
@@ -809,7 +810,13 @@ export async function createCrate({
     }
   }
 
+  function settleIntro() {
+    clearTimeout(introTimer);
+    introTimer = -1;
+  }
+
   function onDown(e) {
+    settleIntro();
     if (pointer.down) return;
     if (e.button !== undefined && e.button !== 0) return;
     setPointer(e);
@@ -921,6 +928,7 @@ export async function createCrate({
   function onWheel(e) {
     if (embedded) return;
     e.preventDefault();
+    settleIntro();
     if (state.hold || sleeves.some((s) => s.lift > 0.02)) {
       state.hold = false;
       wake();
@@ -977,16 +985,19 @@ export async function createCrate({
       }
     },
     step(dir) {
+      settleIntro();
       state.hold = false;
       state.pT = clamp(Math.round(state.pT) + dir, 0, N - 1);
       wake();
     },
     go(i) {
+      settleIntro();
       state.hold = false;
       state.pT = clamp(i, 0, N - 1);
       wake();
     },
     toggleLift() {
+      settleIntro();
       const i = clamp(Math.round(state.pT), 0, N - 1);
       startLift(i);
       state.pT = i;

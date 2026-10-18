@@ -1,48 +1,66 @@
+import { albumById } from "@/app/lab/_music/catalog";
+
 export const ART_PX_PER_UNIT = 1800;
 export const SLEEVE_PX = 1024;
-export const SLEEVE_PHOTO = "/monovolt/abt1.webp";
+export const SLEEVES = ["abbey-road", "revolver", "let-it-be", "help"].map((id) => albumById(id));
+const STICKER_POOL = ["revolver", "rubber-soul", "sgt-pepper", "abbey-road", "magical-mystery-tour"];
 
-export const STICKERS = [
+const BASE_STICKERS = [
   {
-    id: "shop",
-    label: "Slow Orbit Records shop sticker",
-    shape: "ellipse",
-    w: 0.44,
-    h: 0.24,
-    x: -0.235,
-    y: 0.325,
-    angle: -0.08,
+    id: "square",
+    shape: "rect",
+    kind: "square",
+    w: 0.25,
+    h: 0.25,
+    x: -0.29,
+    y: -0.3,
+    angle: -0.12,
     adhesion: 0.5,
     tear: 0.05,
     gloss: 0.55,
     shine: 70,
-    translucent: 0.05,
+    translucent: 0.04,
     backing: [0.95, 0.95, 0.93],
   },
   {
-    id: "used",
-    label: "Used sticker",
+    id: "round",
     shape: "circle",
-    w: 0.19,
-    h: 0.19,
-    x: 0.335,
-    y: -0.365,
+    w: 0.21,
+    h: 0.21,
+    x: 0.33,
+    y: -0.34,
     angle: 0.22,
     adhesion: 0.78,
     tear: 0.35,
-    gloss: 0.1,
-    shine: 16,
-    translucent: 0.1,
+    gloss: 0.18,
+    shine: 24,
+    translucent: 0.08,
     backing: [0.97, 0.96, 0.92],
+  },
+  {
+    id: "oval",
+    shape: "ellipse",
+    w: 0.3,
+    h: 0.18,
+    x: -0.3,
+    y: 0.39,
+    angle: -0.08,
+    adhesion: 0.6,
+    tear: 0.12,
+    gloss: 0.45,
+    shine: 56,
+    translucent: 0.05,
+    backing: [0.95, 0.95, 0.93],
   },
   {
     id: "price",
     label: "Price sticker, $4.99",
     shape: "rect",
-    w: 0.4,
-    h: 0.22,
-    x: 0.24,
-    y: -0.12,
+    kind: "price",
+    w: 0.3,
+    h: 0.165,
+    x: 0.31,
+    y: 0.4,
     angle: 0.05,
     adhesion: 1,
     tear: 0.85,
@@ -53,6 +71,18 @@ export const STICKERS = [
     rest: { corner: 2, peel: 0.08 },
   },
 ];
+
+export function stickersFor(sleeveId) {
+  const pool = STICKER_POOL.filter((id) => id !== sleeveId).map((id) => albumById(id));
+  let next = 0;
+  return BASE_STICKERS.map((def) => {
+    if (def.kind === "price") return def;
+    const album = pool[next % pool.length];
+    next += 1;
+    const short = album.title.startsWith("Sgt.") ? "Sgt. Pepper" : album.title;
+    return { ...def, cover: album.cover, label: `${short} sticker` };
+  });
+}
 
 function mulberry(seed) {
   let state = seed >>> 0;
@@ -153,7 +183,7 @@ function drawPrice(ctx, w, h, fonts) {
   ctx.fillStyle = "#fbf3e6";
   ctx.font = `600 ${Math.round(band * 0.4)}px ${fonts.sans}`;
   ctx.textBaseline = "middle";
-  ctx.fillText("Slow Orbit Records", w * 0.06, band * 0.52);
+  ctx.fillText("Used LP", w * 0.06, band * 0.52);
   ctx.font = `italic ${Math.round(band * 0.34)}px ${fonts.serif}`;
   ctx.textAlign = "right";
   ctx.fillText("2207", w * 0.95, band * 0.54);
@@ -203,87 +233,43 @@ function drawPrice(ctx, w, h, fonts) {
   ctx.restore();
 }
 
-function drawUsed(ctx, w, h, fonts) {
-  const cx = w / 2;
-  const cy = h / 2;
-  const r = w / 2 - 2;
+function drawCover(ctx, image, x, y, w, h) {
+  const iw = image.naturalWidth;
+  const ih = image.naturalHeight;
+  const scale = Math.max(w / iw, h / ih);
+  const sw = w / scale;
+  const sh = h / scale;
+  ctx.drawImage(image, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, w, h);
+}
+
+function shapePath(ctx, def, w, h, inset) {
+  ctx.beginPath();
+  if (def.shape === "circle" || def.shape === "ellipse") ctx.ellipse(w / 2, h / 2, w / 2 - inset, h / 2 - inset, 0, 0, Math.PI * 2);
+  else roundRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, Math.min(w, h) * 0.05);
+}
+
+function drawCoverSticker(ctx, def, image, w, h, seed) {
+  const rim = Math.min(w, h) * (def.shape === "rect" ? 0.06 : 0.05);
+  shapePath(ctx, def, w, h, 2);
   ctx.save();
-  ctx.beginPath();
-  ctx.arc(cx, cy, r, 0, Math.PI * 2);
   ctx.clip();
-  const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.35, r * 0.1, cx, cy, r);
-  g.addColorStop(0, "#ff7a3d");
-  g.addColorStop(0.55, "#ff6a2e");
-  g.addColorStop(1, "#f45d26");
-  ctx.fillStyle = g;
+  ctx.fillStyle = "#f6f3ec";
   ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "rgba(120,30,0,0.32)";
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.arc(cx + 1.5, cy + 1, r * 0.84, 0, Math.PI * 2);
+  shapePath(ctx, def, w, h, 2 + rim);
+  ctx.save();
+  ctx.clip();
+  if (image) drawCover(ctx, image, rim, rim, w - rim * 2, h - rim * 2);
+  ctx.restore();
+  ctx.strokeStyle = "rgba(0,0,0,0.12)";
+  ctx.lineWidth = 1.5;
+  shapePath(ctx, def, w, h, 2 + rim);
   ctx.stroke();
-  ctx.fillStyle = "#1d1714";
-  ctx.font = `600 ${Math.round(r * 0.56)}px ${fonts.sans}`;
-  ctx.textAlign = "center";
-  ctx.textBaseline = "middle";
-  ctx.fillText("Used", cx + 2, cy + r * 0.04);
-  speckle(ctx, w, h, 13, 0.01);
-  fibres(ctx, w, h, 17, 90, "#7a2a00");
+  speckle(ctx, w, h, seed, 0.003);
+  fibres(ctx, w, h, seed + 4, 60, "#7a6a50");
   ctx.restore();
 }
 
-function drawShop(ctx, w, h, fonts) {
-  const cx = w / 2;
-  const cy = h / 2;
-  const rx = w / 2 - 2;
-  const ry = h / 2 - 2;
-  ctx.save();
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx, ry, 0, 0, Math.PI * 2);
-  ctx.clip();
-  const g = ctx.createLinearGradient(0, 0, w, h);
-  g.addColorStop(0, "#1f4434");
-  g.addColorStop(0.5, "#1a3a2d");
-  g.addColorStop(1, "#163226");
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-  ctx.strokeStyle = "#ece2c8";
-  ctx.lineWidth = 4;
-  ctx.beginPath();
-  ctx.ellipse(cx, cy, rx - 16, ry - 16, 0, 0, Math.PI * 2);
-  ctx.stroke();
-
-  const ix = w * 0.22;
-  const iy = cy;
-  ctx.fillStyle = "#ece2c8";
-  ctx.beginPath();
-  ctx.arc(ix, iy, h * 0.13, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = "#1a3a2d";
-  ctx.beginPath();
-  ctx.arc(ix, iy, h * 0.045, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.strokeStyle = "#e9a23b";
-  ctx.lineWidth = 5;
-  ctx.beginPath();
-  ctx.ellipse(ix, iy, h * 0.24, h * 0.075, -0.45, 0, Math.PI * 2);
-  ctx.stroke();
-
-  ctx.fillStyle = "#ece2c8";
-  ctx.textBaseline = "alphabetic";
-  ctx.font = `italic ${Math.round(h * 0.25)}px ${fonts.serif}`;
-  const title = "Slow Orbit";
-  const room = w * 0.5;
-  const measured = ctx.measureText(title).width;
-  if (measured > room) ctx.font = `italic ${Math.round(h * 0.25 * (room / measured))}px ${fonts.serif}`;
-  ctx.fillText(title, w * 0.37, cy + h * 0.03);
-  ctx.font = `500 ${Math.round(h * 0.088)}px ${fonts.sans}`;
-  ctx.fillText("Records  ·  41 Canal St", w * 0.385, cy + h * 0.2);
-  speckle(ctx, w, h, 23, 0.002);
-  ctx.restore();
-}
-
-export function stickerArt(def, fonts, dpr) {
+export function stickerArt(def, fonts, dpr, image) {
   const scale = ART_PX_PER_UNIT * Math.min(1, Math.max(0.6, dpr / 2));
   const w = Math.round(def.w * scale);
   const h = Math.round(def.h * scale);
@@ -291,44 +277,29 @@ export function stickerArt(def, fonts, dpr) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  if (def.shape === "rect") drawPrice(ctx, w, h, fonts);
-  else if (def.shape === "circle") drawUsed(ctx, w, h, fonts);
-  else drawShop(ctx, w, h, fonts);
+  if (def.kind === "price") drawPrice(ctx, w, h, fonts);
+  else drawCoverSticker(ctx, def, image, w, h, def.id.length * 7 + 3);
   return canvas;
 }
 
-export function sleeveArt(photo, fonts) {
+export function sleeveArt(photo) {
   const size = SLEEVE_PX;
   const canvas = document.createElement("canvas");
   canvas.width = size;
   canvas.height = size;
   const ctx = canvas.getContext("2d");
+  ctx.imageSmoothingQuality = "high";
   const side = Math.min(photo.naturalWidth, photo.naturalHeight);
   const sx = (photo.naturalWidth - side) / 2;
-  const sy = (photo.naturalHeight - side) * 0.35;
-  ctx.filter = "contrast(1.1) brightness(0.96)";
+  const sy = (photo.naturalHeight - side) / 2;
+  ctx.filter = "contrast(1.04) saturate(0.94)";
   ctx.drawImage(photo, sx, sy, side, side, 0, 0, size, size);
   ctx.filter = "none";
   ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "#f4ede0";
+  ctx.fillStyle = "#f7f1e6";
   ctx.fillRect(0, 0, size, size);
   ctx.globalCompositeOperation = "source-over";
-  const shade = ctx.createLinearGradient(0, 0, 0, size * 0.32);
-  shade.addColorStop(0, "rgba(10,9,8,0.42)");
-  shade.addColorStop(0.45, "rgba(10,9,8,0.2)");
-  shade.addColorStop(1, "rgba(10,9,8,0)");
-  ctx.fillStyle = shade;
-  ctx.fillRect(0, 0, size, size * 0.32);
-  ctx.fillStyle = "#f1ece2";
-  ctx.textBaseline = "alphabetic";
-  ctx.font = `600 ${Math.round(size * 0.066)}px ${fonts.sans}`;
-  ctx.fillText("Monovolt", size * 0.055, size * 0.11);
-  ctx.font = `italic ${Math.round(size * 0.038)}px ${fonts.serif}`;
-  ctx.fillText("Live at Basement Nine", size * 0.058, size * 0.158);
-  ctx.font = `500 ${Math.round(size * 0.02)}px ${fonts.mono}`;
-  ctx.textAlign = "right";
-  ctx.fillText("MV-012  ·  Stereo", size * 0.95, size * 0.955);
-  ctx.textAlign = "left";
+  speckle(ctx, size, size, 31, 0.0016);
   return canvas;
 }
 

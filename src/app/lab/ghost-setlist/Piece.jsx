@@ -8,7 +8,7 @@ import { SETLIST } from "./ghostSet";
 import "./ghost-setlist.css";
 
 const STAGE_LABEL =
-  "Tonight's setlist as neon lettering on a wall. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
+  "A Beatles setlist as lit lettering on black. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -94,7 +94,7 @@ export default function Piece({ embedded = false }) {
         <header className="ghost-setlist-head">
           <h1 className="ghost-setlist-title">Ghost Setlist</h1>
           <p className="ghost-setlist-lede">
-            Flick through tonight&rsquo;s set. Every song leaves its <em>afterimage</em> on the way past.
+            Flick through a Beatles set. Every song leaves its <em>afterimage</em> on the way past.
           </p>
         </header>
       )}
@@ -111,8 +111,12 @@ export default function Piece({ embedded = false }) {
                   onClick={() => engineRef.current?.select(i)}
                 >
                   <span className="ghost-setlist-num">{pad(i + 1)}</span>
-                  <span className="ghost-setlist-name">{item.title}</span>
-                  {item.encore ? <span className="ghost-setlist-encore">Encore</span> : null}
+                  <span className="ghost-setlist-name">
+                    {item.title}
+                    {item.encore ? <span className="ghost-setlist-encore">Encore</span> : null}
+                  </span>
+                  <span className="ghost-setlist-album">{item.album}</span>
+                  <span className="ghost-setlist-time">{item.time}</span>
                 </button>
               </li>
             ))}
@@ -121,10 +125,15 @@ export default function Piece({ embedded = false }) {
       )}
 
       {embedded ? null : (
-        <p className="ghost-setlist-count" aria-hidden="true">
-          <span className="ghost-setlist-count-now">{pad(active + 1)}</span>
-          <span className="ghost-setlist-count-of">/ {pad(SETLIST.length)}</span>
-        </p>
+        <div className="ghost-setlist-count" aria-hidden="true">
+          <p className="ghost-setlist-count-num">
+            <span>{pad(active + 1)}</span>
+            <span className="ghost-setlist-count-of">/ {pad(SETLIST.length)}</span>
+          </p>
+          <p className="ghost-setlist-count-album">
+            {song.album}, {song.year}
+          </p>
+        </div>
       )}
 
       <p className="ghost-setlist-fallback">This piece needs WebGL 2.</p>

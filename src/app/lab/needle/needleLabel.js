@@ -26,10 +26,10 @@ function arcText(ctx, text, radius, center, font, px, bottom) {
   ctx.restore();
 }
 
-export async function drawLabel(src, fonts) {
+export async function drawLabel(record, fonts) {
   const img = new Image();
   img.decoding = "async";
-  img.src = src;
+  img.src = record.cover;
   await img.decode();
   if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
   const canvas = document.createElement("canvas");
@@ -41,7 +41,7 @@ export async function drawLabel(src, fonts) {
   ctx.fillRect(0, 0, SIZE, SIZE);
   ctx.translate(c, c);
 
-  ctx.fillStyle = "rgb(238 233 222)";
+  ctx.fillStyle = "rgb(241 238 230)";
   ctx.beginPath();
   ctx.arc(0, 0, c, 0, Math.PI * 2);
   ctx.fill();
@@ -55,10 +55,10 @@ export async function drawLabel(src, fonts) {
   const w = img.naturalWidth * scale;
   const h = img.naturalHeight * scale;
   ctx.filter = "grayscale(1) contrast(1.08) brightness(1.04)";
-  ctx.drawImage(img, -w / 2, -h * 0.47, w, h);
+  ctx.drawImage(img, -w / 2, -h / 2, w, h);
   ctx.filter = "none";
   ctx.globalCompositeOperation = "multiply";
-  ctx.fillStyle = "rgb(246 238 224)";
+  ctx.fillStyle = "rgb(248 244 236)";
   ctx.fillRect(-inner, -inner, inner * 2, inner * 2);
   ctx.globalCompositeOperation = "source-over";
   ctx.restore();
@@ -76,10 +76,10 @@ export async function drawLabel(src, fonts) {
   ctx.fillStyle = "rgb(20 20 20)";
   ctx.textBaseline = "middle";
   const ring = (inner + c * 0.965) / 2;
-  arcText(ctx, "Friday Beat", ring, 0, `italic 430 64px ${fonts.serif}`, 64, false);
-  arcText(ctx, "Side A  ·  33⅓", ring, 0, `440 34px ${fonts.mono}`, 34, true);
-  arcText(ctx, "NDL 001", ring, Math.PI * 0.5, `440 26px ${fonts.mono}`, 26, false);
-  arcText(ctx, "Monovolt", ring, -Math.PI * 0.5, `540 28px ${fonts.sans}`, 28, false);
+  arcText(ctx, record.title, ring, 0, `italic 430 64px ${fonts.serif}`, 64, false);
+  arcText(ctx, "Side one  ·  33⅓", ring, 0, `440 34px ${fonts.mono}`, 34, true);
+  arcText(ctx, String(record.year), ring, Math.PI * 0.5, `440 26px ${fonts.mono}`, 26, false);
+  arcText(ctx, record.artist, ring, -Math.PI * 0.5, `540 28px ${fonts.sans}`, 28, false);
 
   ctx.fillStyle = "rgb(8 8 8)";
   ctx.beginPath();

@@ -1,7 +1,11 @@
 .loupe {
-  --loupe-ground: rgb(214 211 206);
-  --loupe-tray: var(--color-surface-raised);
-  --loupe-metal: rgb(24 24 27);
+  --loupe-ground: rgb(9 9 10);
+  --loupe-tray: rgb(28 27 29 / 0.86);
+  --loupe-metal: rgb(236 232 224);
+  --loupe-ink: rgb(236 232 224);
+  --loupe-ink-secondary: rgb(176 172 166);
+  --loupe-hover: rgb(255 255 255 / 0.08);
+  --loupe-line: rgb(255 255 255 / 0.22);
   --loupe-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
   --loupe-serif-weight: 430;
   --loupe-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -9,7 +13,8 @@
   inset: 0;
   overflow: hidden;
   background: var(--loupe-ground);
-  color: var(--color-ink);
+  color: var(--loupe-ink);
+  color-scheme: dark;
   font-family: var(--font-sans);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
@@ -57,7 +62,7 @@
   padding: 4px 8px;
   border-radius: 999px;
   background: var(--loupe-metal);
-  color: var(--color-ink-inverse);
+  color: rgb(14 14 15);
   font-family: var(--font-mono);
   font-size: var(--text-ui-xs);
   line-height: var(--text-ui-xs--line-height);
@@ -97,7 +102,7 @@
   line-height: 20px;
   letter-spacing: var(--text-ui-lg--letter-spacing);
   font-weight: var(--font-weight-meta);
-  color: var(--color-ink-secondary);
+  color: var(--loupe-ink-secondary);
   text-wrap: pretty;
 }
 
@@ -109,7 +114,7 @@
   letter-spacing: 0.16px;
   font-variation-settings: "opsz" 10;
   line-height: 1;
-  color: var(--color-ink);
+  color: var(--loupe-ink);
 }
 
 .loupe__foot {
@@ -134,9 +139,11 @@
   border-radius: 14px;
   background: var(--loupe-tray);
   box-shadow:
-    0 0 0 1px rgb(0 0 0 / 0.06),
-    0 1px 2px rgb(0 0 0 / 0.06),
-    0 8px 24px -8px rgb(0 0 0 / 0.18);
+    0 0 0 1px rgb(255 255 255 / 0.08),
+    0 1px 2px rgb(0 0 0 / 0.3),
+    0 8px 24px -8px rgb(0 0 0 / 0.6);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 .loupe__cards {
@@ -152,13 +159,13 @@
   border: 0;
   border-radius: 10px;
   background: transparent;
-  color: var(--color-ink);
+  color: var(--loupe-ink);
   font: inherit;
   cursor: pointer;
 }
 
 .loupe__card:hover {
-  background: var(--color-surface-sunken);
+  background: var(--loupe-hover);
 }
 
 .loupe__card:focus-visible {
@@ -167,14 +174,14 @@
 }
 
 .loupe__card[aria-checked="true"] {
-  background: var(--color-surface-inverse);
-  color: var(--color-ink-inverse);
+  background: var(--loupe-ink);
+  color: rgb(14 14 15);
 }
 
 .loupe__thumb {
   display: block;
-  width: 20px;
-  height: 32px;
+  width: 28px;
+  height: 28px;
   object-fit: cover;
   border-radius: 2px;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);
@@ -222,7 +229,7 @@
   letter-spacing: var(--text-ui-xs--letter-spacing);
   font-weight: var(--text-ui-xs--font-weight);
   font-variant-numeric: tabular-nums;
-  color: var(--color-ink-secondary);
+  color: var(--loupe-ink-secondary);
 }
 
 .loupe__range {
@@ -244,13 +251,13 @@
 .loupe__range::-webkit-slider-runnable-track {
   height: 2px;
   border-radius: 2px;
-  background: var(--color-line-strong);
+  background: var(--loupe-line);
 }
 
 .loupe__range::-moz-range-track {
   height: 2px;
   border-radius: 2px;
-  background: var(--color-line-strong);
+  background: var(--loupe-line);
 }
 
 .loupe__range::-webkit-slider-thumb {

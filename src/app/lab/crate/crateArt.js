@@ -394,7 +394,14 @@ export function coverArt(spec, img, size, seed, family, grain) {
   ctx.imageSmoothingQuality = "high";
   let light = "#d8d0c2";
 
-  if (spec.kind === "photo") {
+  if (spec.kind === "cover") {
+    ctx.save();
+    ctx.filter = "contrast(1.02) saturate(0.94)";
+    ctx.drawImage(img, ...cropSquare(img, spec.focus), 0, 0, s, s);
+    ctx.restore();
+    grainOver(ctx, s, grain, 0.1);
+    light = "#ece6da";
+  } else if (spec.kind === "photo") {
     ctx.save();
     ctx.filter = "grayscale(1) contrast(1.12) brightness(0.98)";
     ctx.drawImage(img, ...cropSquare(img, spec.focus), 0, 0, s, s);
@@ -670,6 +677,28 @@ export function backArt(spec, size, seed, family, grain, frontMap) {
     fibres(ctx, s, s, seed + 3, 1400, "#9c917a", 0.14);
     return c;
   }
+  if (spec.kind === "cover") {
+    ctx.fillStyle = "#ece6da";
+    ctx.fillRect(0, 0, s, s);
+    fibres(ctx, s, s, seed + 3, 900, "#1d1c1a", 0.05);
+    ctx.fillStyle = "#1d1c1a";
+    ctx.font = font(640, s * 0.044, family);
+    ctx.fillText(spec.title.length > 26 ? spec.title.slice(0, 25) + "…" : spec.title, s * 0.08, s * 0.13);
+    ctx.font = font(440, s * 0.04, family);
+    ctx.fillText(`${spec.artist}, ${spec.year}`, s * 0.08, s * 0.185);
+    ctx.font = font(460, s * 0.026, family);
+    const half = Math.ceil(spec.tracks.length / 2);
+    spec.tracks.forEach((name, i) => {
+      const sideB = i >= half;
+      const row = sideB ? i - half : i;
+      const label = name.length > 30 ? name.slice(0, 29) + "…" : name;
+      ctx.fillText(`${sideB ? "B" : "A"}${row + 1}   ${label}`, sideB ? s * 0.52 : s * 0.08, s * 0.3 + row * s * 0.045);
+    });
+    ctx.font = font(440, s * 0.018, family);
+    ["Stereo", `${spec.title}, ${spec.year}`].forEach((t, i) => ctx.fillText(t, s * 0.08, s * 0.66 + i * s * 0.03));
+    grainOver(ctx, s, grain, 0.14);
+    return c;
+  }
   const dark = spec.kind === "circle";
   const ground = dark
     ? "#1f3c8c"
@@ -703,7 +732,7 @@ export function backArt(spec, size, seed, family, grain, frontMap) {
   [
     "Recorded live to two-track, mastered for vinyl.",
     "Cut at 33 rpm. Play loud.",
-    `${spec.cat}  /  made in a basement`,
+    `${spec.cat}`,
   ].forEach((t, i) => ctx.fillText(t, s * 0.08, s * 0.62 + i * s * 0.03));
   const bx = s * 0.72;
   const by = s * 0.8;
