@@ -71,6 +71,7 @@ const state = {
   enterClock: 0,
   reducedMotion: false,
   frames: 0,
+  manual: false,
 };
 
 /* ---------- public API ---------- */
@@ -273,7 +274,7 @@ function dispose() {
 }
 
 function start() {
-  if (!state.host || !state.gl || state.running) return;
+  if (!state.host || !state.gl || state.running || state.manual) return;
   state.running = true;
   state.lastTime = 0;
   state.gl.renderer.setAnimationLoop(frame);
@@ -630,6 +631,28 @@ function adaptResolution(dt) {
     state.slowFor = state.fastFor = 0;
     resize();
   }
+}
+
+/**
+ * Dev only: take the stage off the display clock and advance it by hand, one
+ * fixed step per call. A software-rendered headless browser draws a frame
+ * every second or so; stepping lets it record motion at its real speed, one
+ * screenshot per step.
+ */
+export function manualClock() {
+  stop();
+  state.manual = true;
+  let now = performance.now();
+  return {
+    step(ms) {
+      now += ms;
+      frame(now);
+    },
+    release() {
+      state.manual = false;
+      start();
+    },
+  };
 }
 
 /** Debug handle for the console and the browser checks. */

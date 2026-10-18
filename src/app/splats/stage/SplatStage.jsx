@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef } from "react";
-import { attach, defineActors, inspect } from "./stage";
+import { attach, defineActors, inspect, manualClock } from "./stage";
 
 // The fixed layer the stage's canvas lives in. Rendered by the splats layout,
 // so it exists on the index and on every article. The element is named
@@ -14,7 +14,10 @@ export default function SplatStage({ items }) {
   useLayoutEffect(() => {
     defineActors(items);
     const detach = attach(hostRef.current);
-    if (process.env.NODE_ENV !== "production") window.__splatStage = inspect;
+    if (process.env.NODE_ENV !== "production") {
+      window.__splatStage = inspect;
+      window.__splatClock = manualClock;
+    }
     return detach;
   }, [items]);
 
