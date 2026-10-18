@@ -52,6 +52,17 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Feature sprawl: several half-ideas on one page.
 - Abstract visual demos with no interface purpose; ideas lifted from articles or repos that have nothing to interact with.
 
+## From the bolder batch (50 WebGL material pieces, scored 1–5, October 2026)
+
+- Scored 5: Split Flap, Sticker Peel, Ink Drag, Refractor, Erase, Groove, Type Bust. Clean, beautiful, one material effect on music content, often with type. Good sound design is noticed and praised (Split Flap).
+- Scored 1: anything that is mostly machinery (Jukebox, Lathe, Letterpress, Splice, Patch Bay), chores (Dust, Sand Table), and niche subjects (Strobe, Louvres, Scoreboard, Receipt). "Too much going on" and "too much 3D" are the usual reasons.
+- Use real music. Album art from Herb's top songs (`/api/spotify/recent`, the herb.art Top Songs page) or classic records (Revolver, Abbey Road, Rubber Soul, Pet Sounds) instead of stock photos, DJ photos or placeholder cards. `src/app/lab/_music` exports the local Beatles catalogue (`ALBUMS`, `FEATURED`) and `useTopSongs()`, which loads the live top songs and falls back to it.
+- Never name Monovolt, Crowdvolt or any made-up brand on a piece.
+- Flat beats 3D when the 3D adds nothing (Pins: "might look cooler flat"). Prefer clean graphic design (pure black or a light page, little glow, no background texture) to scenic rooms.
+- Stylised beats simulated when realism looks off: a crumple at a Spider-Verse stepped frame rate, old iOS skeuomorphic icons rather than a 3D shredder.
+- Glitches, clipping and overlaps sink a piece; fix them before anything else.
+- He wants more UI: music-app elements and common components made beautiful and trendy, a little over the top.
+
 ## Rules
 
 - Pick the one thing the piece is about, name it in the title, and make every control serve it.
