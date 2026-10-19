@@ -2,12 +2,6 @@ import { ALBUMS } from "@/app/lab/_music/catalog";
 
 const key = (title, album) => `${title}::${album}`.toLowerCase();
 
-const hash = (s) => {
-  let h = 2166136261;
-  for (let i = 0; i < s.length; i += 1) h = Math.imul(h ^ s.charCodeAt(i), 16777619);
-  return (h >>> 0) / 4294967296;
-};
-
 export function buildIndex(topSongs) {
   const items = [];
   const seen = new Map();
@@ -19,8 +13,8 @@ export function buildIndex(topSongs) {
       sub: t.album ? `${t.artist} · ${t.album}` : t.artist,
       cover: t.imageLarge || t.image,
       boost: 12 * (1 - rank / Math.max(1, topSongs.length)),
+      year: t.year,
       top: true,
-      tilt: hash(t.title) * 2 - 1,
     };
     seen.set(key(t.title, t.album ?? ""), item);
     items.push(item);
@@ -34,7 +28,6 @@ export function buildIndex(topSongs) {
       cover: album.cover,
       boost: 4,
       album: true,
-      tilt: hash(album.id) * 2 - 1,
     });
     album.tracks.forEach((title, i) => {
       if (seen.has(key(title, album.title))) return;
@@ -44,8 +37,8 @@ export function buildIndex(topSongs) {
         title,
         sub: `${album.artist} · ${album.title}`,
         cover: album.cover,
+        year: album.year,
         boost: 0,
-        tilt: hash(title) * 2 - 1,
       });
     });
   });
@@ -104,9 +97,10 @@ export function search(items, query, limit = 24) {
   for (const item of items) {
     const title = matchText(item.title, q);
     const sub = title ? null : matchText(item.sub, q);
-    if (!title && !sub) continue;
-    const score = (title ? title.score : sub.score * 0.55) + item.boost + (item.album && title ? 6 : 0);
-    const fuzzy = Boolean((title ?? sub).fuzzy);
+    const year = !title && !sub && /^\d{2,4}$/.test(q) && String(item.year ?? "").startsWith(q);
+    if (!title && !sub && !year) continue;
+    const score = year ? 30 + item.boost : (title ? title.score : sub.score * 0.55) + item.boost + (item.album && title ? 6 : 0);
+    const fuzzy = Boolean((title ?? sub)?.fuzzy);
     out.push({ ...item, score, fuzzy, titleHits: title?.hits ?? [], subHits: sub?.hits ?? [] });
   }
   const exact = out.filter((r) => !r.fuzzy).length;

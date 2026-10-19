@@ -1,6 +1,5 @@
 "use client";
 
-import { AnimatePresence, LayoutGroup, motion } from "motion/react";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
@@ -8,9 +7,15 @@ import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { buildIndex, search } from "./searchIndex";
 import "./cover-search.css";
 
-const EASE = [0.22, 1, 0.36, 1];
-const SPRING = { type: "spring", stiffness: 380, damping: 36, mass: 0.8 };
 const SUGGESTIONS = ["sun", "love", "walrus", "1967", "yesterday", "abbey"];
+const BROWSE_ALBUMS = [
+  "abbey-road",
+  "revolver",
+  "rubber-soul",
+  "sgt-pepper",
+  "let-it-be",
+  "help",
+];
 
 function Highlight({ text, hits }) {
   if (!hits?.length) return text;
@@ -41,7 +46,16 @@ function Highlight({ text, hits }) {
 
 function SearchIcon() {
   return (
-    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+    <svg
+      viewBox="0 0 20 20"
+      width="20"
+      height="20"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    >
       <circle cx="9" cy="9" r="5.8" />
       <path d="m13.4 13.4 3.8 3.8" />
     </svg>
@@ -50,7 +64,16 @@ function SearchIcon() {
 
 function ClearIcon() {
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+    <svg
+      viewBox="0 0 16 16"
+      width="16"
+      height="16"
+      aria-hidden="true"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+    >
       <path d="m4.5 4.5 7 7M11.5 4.5l-7 7" />
     </svg>
   );
@@ -59,7 +82,10 @@ function ClearIcon() {
 function PlayGlyph() {
   return (
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.3-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5Z" fill="currentColor" />
+      <path
+        d="M4.5 2.8v10.4a.6.6 0 0 0 .9.5l8.3-5.2a.6.6 0 0 0 0-1L5.4 2.3a.6.6 0 0 0-.9.5Z"
+        fill="currentColor"
+      />
     </svg>
   );
 }
@@ -74,85 +100,112 @@ function Bars() {
   );
 }
 
-function Tile({ ref, item, active, playing, onPlay, onHover, index }) {
+function TopCard({ item, active, playing, onPlay }) {
   return (
-    <motion.button
-      ref={ref}
-      layout
+    <button
       type="button"
       id={`cs-opt-${item.id}`}
       role="option"
       aria-selected={active}
-      className="cs-tile"
+      className="cs-card"
       data-active={active ? "true" : "false"}
-      initial={{ opacity: 0, scale: 0.7, y: 24, filter: "blur(6px)" }}
-      animate={{ opacity: 1, scale: 1, y: 0, rotate: 0, filter: "blur(0px)", transition: { ...SPRING, delay: Math.min(index, 12) * 0.018 } }}
-      exit={{ opacity: 0, scale: 0.86, y: 56, rotate: item.tilt * 9, filter: "blur(4px)", transition: { duration: 0.32, ease: [0.55, 0, 0.75, 0.2] } }}
-      transition={SPRING}
+      data-playing={playing ? "true" : "false"}
       onClick={() => onPlay(item.id)}
-      onPointerEnter={() => onHover(item.id)}
     >
-      <span className="cs-tile-cover">
-        <motion.img layoutId={`cover-${item.id}`} transition={SPRING} src={item.cover} alt="" draggable={false} crossOrigin={item.cover.startsWith("http") ? "anonymous" : undefined} />
+      <span key={item.id} className="cs-card-body cs-fade">
+        <img
+          className="cs-card-cover"
+          src={item.cover}
+          alt=""
+          draggable={false}
+        />
+        <span className="cs-card-text">
+          <span className="cs-card-title text-title">
+            <Highlight text={item.title} hits={item.titleHits} />
+          </span>
+          <span className="cs-card-meta text-ui-lg">
+            {item.kind}
+            <span aria-hidden="true"> · </span>
+            <Highlight text={item.sub} hits={item.subHits} />
+          </span>
+        </span>
+      </span>
+      <span
+        className="cs-card-play"
+        data-playing={playing ? "true" : "false"}
+        aria-hidden="true"
+      >
+        {playing ? <Bars /> : <PlayGlyph />}
+      </span>
+    </button>
+  );
+}
+
+function SongRow({ item, active, playing, onPlay }) {
+  return (
+    <li className="cs-fade">
+      <button
+        type="button"
+        id={`cs-opt-${item.id}`}
+        role="option"
+        aria-selected={active}
+        className="cs-row"
+        data-active={active ? "true" : "false"}
+        data-playing={playing ? "true" : "false"}
+        onClick={() => onPlay(item.id)}
+      >
+        <span className="cs-row-cover">
+          <img src={item.cover} alt="" draggable={false} />
+          {playing && (
+            <span className="cs-row-bars">
+              <Bars />
+            </span>
+          )}
+        </span>
+        <span className="cs-row-text">
+          <span className="cs-row-title text-body">
+            <Highlight text={item.title} hits={item.titleHits} />
+          </span>
+          <span className="cs-row-sub text-ui-lg">
+            <Highlight text={item.sub} hits={item.subHits} />
+          </span>
+        </span>
+      </button>
+    </li>
+  );
+}
+
+function AlbumTile({ item, active, playing, onPlay }) {
+  const year = item.sub.split(" · ").pop();
+  const shift = item.sub.length - year.length;
+  const yearHits = (item.subHits ?? [])
+    .map((h) => h - shift)
+    .filter((h) => h >= 0);
+  return (
+    <button
+      type="button"
+      id={`cs-opt-${item.id}`}
+      role="option"
+      aria-selected={active}
+      className="cs-album cs-fade"
+      data-active={active ? "true" : "false"}
+      onClick={() => onPlay(item.id)}
+    >
+      <span className="cs-album-cover">
+        <img src={item.cover} alt="" draggable={false} />
         {playing && (
-          <span className="cs-playing">
+          <span className="cs-row-bars">
             <Bars />
           </span>
         )}
       </span>
-      <span className="cs-tile-title text-heading-sm">
+      <span className="cs-album-title text-heading-sm">
         <Highlight text={item.title} hits={item.titleHits} />
       </span>
-      <span className="cs-tile-sub text-ui">
-        <span className="cs-kind">{item.kind}</span>
-        <span aria-hidden="true"> · </span>
-        <Highlight text={item.sub} hits={item.subHits} />
+      <span className="cs-album-year text-ui-lg tabular-nums">
+        <Highlight text={year} hits={yearHits} />
       </span>
-    </motion.button>
-  );
-}
-
-function Hero({ ref, item, active, playing, onPlay, onHover }) {
-  return (
-    <motion.button
-      ref={ref}
-      layout
-      type="button"
-      id={`cs-opt-${item.id}`}
-      role="option"
-      aria-selected={active}
-      className="cs-hero"
-      data-active={active ? "true" : "false"}
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      exit={{ opacity: 0, transition: { duration: 0.16 } }}
-      transition={SPRING}
-      onClick={() => onPlay(item.id)}
-      onPointerEnter={() => onHover(item.id)}
-    >
-      <span className="cs-hero-cover">
-        <motion.img layoutId={`cover-${item.id}`} transition={SPRING} src={item.cover} alt="" draggable={false} crossOrigin={item.cover.startsWith("http") ? "anonymous" : undefined} />
-      </span>
-      <motion.span
-        key={item.id}
-        className="cs-hero-text"
-        initial={{ opacity: 0, x: -12, filter: "blur(6px)" }}
-        animate={{ opacity: 1, x: 0, filter: "blur(0px)" }}
-        transition={{ duration: 0.42, ease: EASE, delay: 0.06 }}
-      >
-        <span className="cs-hero-label text-ui-lg">Top result</span>
-        <span className="cs-hero-title text-title-lg">
-          <Highlight text={item.title} hits={item.titleHits} />
-        </span>
-        <span className="cs-hero-sub text-ui-lg">
-          <span className="cs-kind-pill text-ui">{item.kind}</span>
-          <Highlight text={item.sub} hits={item.subHits} />
-        </span>
-      </motion.span>
-      <span className="cs-hero-play" data-playing={playing ? "true" : "false"} aria-hidden="true">
-        {playing ? <Bars /> : <PlayGlyph />}
-      </span>
-    </motion.button>
+    </button>
   );
 }
 
@@ -165,15 +218,29 @@ export default function Piece({ embedded = false }) {
   const inputRef = useRef(null);
   const typerRef = useRef(0);
 
-  const results = useMemo(() => search(index, query), [index, query]);
   const browsing = !query.trim();
-  const list = browsing ? [...index.filter((i) => i.top).slice(0, 12), ...index.filter((i) => i.album)] : results;
-  const hero = browsing ? null : list[0] ?? null;
-  const grid = hero ? list.slice(1) : list;
-  const ordered = hero ? [hero, ...grid] : grid;
-  const activeIndex = Math.max(0, ordered.findIndex((i) => i.id === activeId));
-  const active = ordered[activeIndex] ?? null;
-  const backdrop = (hero ?? active)?.cover ?? null;
+  const results = useMemo(() => search(index, query, 40), [index, query]);
+
+  const view = useMemo(() => {
+    if (browsing) {
+      const top = index.filter((i) => i.top);
+      const albums = BROWSE_ALBUMS.map((id) =>
+        index.find((i) => i.id === `album-${id}`),
+      ).filter(Boolean);
+      return { lead: top[0] ?? null, songs: top.slice(1, 5), albums };
+    }
+    const lead = results[0] ?? null;
+    const rest = results.slice(1);
+    return {
+      lead,
+      songs: rest.filter((i) => i.kind === "Song").slice(0, 4),
+      albums: rest.filter((i) => i.kind === "Album").slice(0, 6),
+    };
+  }, [browsing, index, results]);
+
+  const ordered = [view.lead, ...view.songs, ...view.albums].filter(Boolean);
+  const activeIndex = ordered.findIndex((i) => i.id === activeId);
+  const isActive = (id) => activeIndex >= 0 && ordered[activeIndex].id === id;
 
   useEffect(() => {
     const onKey = (e) => {
@@ -202,24 +269,22 @@ export default function Piece({ embedded = false }) {
     inputRef.current?.focus();
     const step = (n) => {
       setQuery(word.slice(0, n));
-      if (n < word.length) typerRef.current = setTimeout(() => step(n + 1), 90);
+      if (n < word.length) typerRef.current = setTimeout(() => step(n + 1), 70);
     };
     step(1);
   };
 
   const onKeyDown = (e) => {
-    if (e.key === "ArrowDown" || e.key === "ArrowRight") {
-      if (e.key === "ArrowRight" && e.currentTarget.selectionStart < query.length) return;
+    if (e.key === "ArrowDown") {
       e.preventDefault();
-      const next = ordered[Math.min(ordered.length - 1, activeIndex + (activeId ? 1 : 0))];
+      const next = ordered[Math.min(ordered.length - 1, activeIndex + 1)];
       if (next) setActiveId(next.id);
-    } else if (e.key === "ArrowUp" || (e.key === "ArrowLeft" && activeId)) {
+    } else if (e.key === "ArrowUp") {
       e.preventDefault();
-      const prev = ordered[Math.max(0, activeIndex - 1)];
-      if (prev) setActiveId(prev.id);
+      setActiveId(activeIndex > 0 ? ordered[activeIndex - 1].id : null);
     } else if (e.key === "Enter") {
       e.preventDefault();
-      const pick = active ?? ordered[0];
+      const pick = ordered[Math.max(0, activeIndex)];
       if (pick) setPlayingId(pick.id);
     } else if (e.key === "Escape") {
       e.preventDefault();
@@ -227,40 +292,30 @@ export default function Piece({ embedded = false }) {
     }
   };
 
-  const countLabel = browsing ? "Your top songs and albums" : results.length ? `${results.length} result${results.length === 1 ? "" : "s"}` : "No results";
+  const status = browsing
+    ? ""
+    : results.length
+      ? `${results.length} result${results.length === 1 ? "" : "s"}`
+      : "No results";
 
   return (
     <div className="cs" data-embedded={embedded ? "true" : "false"}>
-      <div className="cs-backdrop" aria-hidden="true">
-        <AnimatePresence initial={false}>
-          {backdrop && (
-            <motion.img
-              key={backdrop}
-              src={backdrop}
-              alt=""
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              transition={{ duration: 0.8, ease: EASE }}
-            />
-          )}
-        </AnimatePresence>
-      </div>
-
       <div className="cs-scroll" data-scroll-contain>
         <div className="cs-column">
-          {!embedded && <h1 className="cs-heading text-title">Search</h1>}
+          {!embedded && <h1 className="cs-heading text-title-lg">Search</h1>}
 
-          <div className="cs-field" data-filled={query ? "true" : "false"}>
+          <div className="cs-field">
             <SearchIcon />
             <input
               ref={inputRef}
-              className="cs-input text-body"
+              className="cs-input text-body-lg"
               type="text"
               role="combobox"
               aria-expanded="true"
               aria-controls="cs-results"
-              aria-activedescendant={activeId ? `cs-opt-${activeId}` : undefined}
+              aria-activedescendant={
+                activeId ? `cs-opt-${activeId}` : undefined
+              }
               aria-label="Search songs and albums"
               placeholder="Songs, albums, years"
               autoComplete="off"
@@ -270,71 +325,124 @@ export default function Piece({ embedded = false }) {
               onKeyDown={onKeyDown}
             />
             {query ? (
-              <button type="button" className="cs-clear" aria-label="Clear search" onClick={() => change("")}>
+              <button
+                type="button"
+                className="cs-clear"
+                aria-label="Clear search"
+                onClick={() => change("")}
+              >
                 <ClearIcon />
               </button>
             ) : (
-              <kbd className="cs-kbd text-ui font-mono">⌘K</kbd>
+              <kbd className="cs-kbd text-ui-lg">⌘K</kbd>
             )}
           </div>
 
           <div className="cs-suggest">
             {SUGGESTIONS.map((s) => (
-              <button key={s} type="button" className="cs-chip text-ui" data-on={query === s ? "true" : "false"} onClick={() => typeOut(s)}>
+              <button
+                key={s}
+                type="button"
+                className="cs-chip text-ui-lg"
+                data-on={query === s ? "true" : "false"}
+                onClick={() => typeOut(s)}
+              >
                 {s}
               </button>
             ))}
           </div>
 
-          <p className="cs-count text-ui-lg tabular-nums" aria-live="polite">
-            {countLabel}
+          <p className="cs-sr" aria-live="polite">
+            {status}
           </p>
 
-          <LayoutGroup>
-            <div id="cs-results" role="listbox" aria-label="Results" className="cs-results">
-              <AnimatePresence mode="popLayout">
-                {hero && (
-                  <Hero
-                    key="hero"
-                    item={hero}
-                    active={active?.id === hero.id && Boolean(activeId)}
-                    playing={playingId === hero.id}
-                    onPlay={setPlayingId}
-                    onHover={setActiveId}
-                  />
-                )}
-              </AnimatePresence>
-              <div className="cs-grid">
-                <AnimatePresence mode="popLayout">
-                  {grid.map((item, i) => (
-                    <Tile
-                      key={item.id}
-                      item={item}
-                      index={i}
-                      active={Boolean(activeId) && active?.id === item.id}
-                      playing={playingId === item.id}
+          <div
+            id="cs-results"
+            role="listbox"
+            aria-label="Results"
+            className="cs-results"
+          >
+            {view.lead ? (
+              <>
+                <div
+                  className="cs-top"
+                  data-songs={view.songs.length ? "true" : "false"}
+                >
+                  <section className="cs-section">
+                    <h2 className="cs-label text-heading">
+                      {browsing ? "Your top song" : "Top result"}
+                    </h2>
+                    <TopCard
+                      item={view.lead}
+                      active={isActive(view.lead.id)}
+                      playing={playingId === view.lead.id}
                       onPlay={setPlayingId}
-                      onHover={setActiveId}
                     />
-                  ))}
-                </AnimatePresence>
-              </div>
-              <AnimatePresence>
-                {!browsing && !results.length && (
-                  <motion.div
-                    className="cs-empty"
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0 }}
-                    transition={{ duration: 0.3, ease: EASE }}
-                  >
-                    <p className="cs-empty-title text-heading">Nothing matches “{query}”</p>
-                    <p className="cs-empty-sub text-ui-lg">Try a song, an album or a year, like 1965.</p>
-                  </motion.div>
+                  </section>
+                  {view.songs.length > 0 ? (
+                    <section className="cs-section">
+                      <h2 className="cs-label text-heading">
+                        {browsing ? "Top songs" : "Songs"}
+                      </h2>
+                      <ul className="cs-rows">
+                        {view.songs.map((item) => (
+                          <SongRow
+                            key={item.id}
+                            item={item}
+                            active={isActive(item.id)}
+                            playing={playingId === item.id}
+                            onPlay={setPlayingId}
+                          />
+                        ))}
+                      </ul>
+                    </section>
+                  ) : (
+                    view.albums.length > 0 && (
+                      <section className="cs-section">
+                        <h2 className="cs-label text-heading">Albums</h2>
+                        <div className="cs-albums" data-side="true">
+                          {view.albums.map((item) => (
+                            <AlbumTile
+                              key={item.id}
+                              item={item}
+                              active={isActive(item.id)}
+                              playing={playingId === item.id}
+                              onPlay={setPlayingId}
+                            />
+                          ))}
+                        </div>
+                      </section>
+                    )
+                  )}
+                </div>
+                {view.songs.length > 0 && view.albums.length > 0 && (
+                  <section className="cs-section cs-albums-section">
+                    <h2 className="cs-label text-heading">Albums</h2>
+                    <div className="cs-albums">
+                      {view.albums.map((item) => (
+                        <AlbumTile
+                          key={item.id}
+                          item={item}
+                          active={isActive(item.id)}
+                          playing={playingId === item.id}
+                          onPlay={setPlayingId}
+                        />
+                      ))}
+                    </div>
+                  </section>
                 )}
-              </AnimatePresence>
-            </div>
-          </LayoutGroup>
+              </>
+            ) : (
+              <div className="cs-empty cs-fade">
+                <p className="cs-empty-title text-title-sm">
+                  Nothing matches “{query.trim()}”
+                </p>
+                <p className="cs-empty-sub text-body">
+                  Try a song, an album or a year, like 1965.
+                </p>
+              </div>
+            )}
+          </div>
         </div>
       </div>
     </div>

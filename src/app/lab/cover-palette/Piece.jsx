@@ -4,7 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { ALBUMS } from "@/app/lab/_music/catalog";
 
-import { ROLES, deriveTheme, extractPalette, fmt } from "./palette";
+import { ROLES, deriveTheme, extractPalette, toHex } from "./palette";
 import "./cover-palette.css";
 
 const START = "abbey-road";
@@ -20,7 +20,7 @@ function PlayIcon() {
 
 function HeartIcon({ on }) {
   return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+    <svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill={on ? "currentColor" : "none"} stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
       <path d="M8 13.4S2.2 10 2.2 6a3 3 0 0 1 5.8-1.2A3 3 0 0 1 13.8 6C13.8 10 8 13.4 8 13.4Z" />
     </svg>
   );
@@ -28,7 +28,10 @@ function HeartIcon({ on }) {
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
+  const coverRef = useRef(null);
   const huesRef = useRef({});
+  const stackRef = useRef(0);
+  const copyTimer = useRef(0);
   const pickerRef = useRef(null);
   const [palettes, setPalettes] = useState({});
   const [selectedId, setSelectedId] = useState(START);
@@ -50,6 +53,7 @@ export default function Piece({ embedded = false }) {
     });
     return () => {
       alive = false;
+      clearTimeout(copyTimer.current);
     };
   }, []);
 
@@ -57,11 +61,31 @@ export default function Piece({ embedded = false }) {
   const album = ALBUMS.find((a) => a.id === shownId);
   const swatches = palettes[shownId];
   const theme = useMemo(() => (swatches ? deriveTheme(swatches) : null), [swatches]);
+  const chips = useMemo(() => (swatches ?? []).slice(0, SLOTS).map((s) => ({ ...s, hex: toHex(s) })), [swatches]);
+
+  const centeredRef = useRef(false);
+  useLayoutEffect(() => {
+    const picker = pickerRef.current;
+    const thumb = picker?.querySelector(`[data-id="${selectedId}"]`);
+    if (!thumb || picker.scrollWidth <= picker.clientWidth) return;
+    const left = thumb.offsetLeft - (picker.clientWidth - thumb.offsetWidth) / 2;
+    picker.scrollTo({ left, behavior: centeredRef.current ? "smooth" : "instant" });
+    centeredRef.current = true;
+  }, [selectedId]);
+
+  useLayoutEffect(() => {
+    const img = coverRef.current?.querySelector(`[data-id="${shownId}"]`);
+    if (!img) return;
+    stackRef.current += 1;
+    img.style.zIndex = String(stackRef.current);
+  }, [shownId]);
 
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || !theme) return;
     const hues = huesRef.current;
+    const tone = theme.dark ? "dark" : "light";
+    root.dataset.flip = root.dataset.tone && root.dataset.tone !== tone ? "true" : "false";
     for (const role of ROLES) {
       const c = theme.roles[role];
       const prev = hues[role];
@@ -75,15 +99,19 @@ export default function Piece({ embedded = false }) {
       root.style.setProperty(`--cp-${role}-h`, h.toFixed(2));
     }
     root.dataset.ready = "true";
-    root.dataset.tone = theme.dark ? "dark" : "light";
+    root.dataset.tone = tone;
   }, [theme]);
 
-  const slots = Array.from({ length: SLOTS }, (_, i) => swatches?.[i] ?? null);
+  const copy = (hex) => {
+    navigator.clipboard?.writeText(hex).catch(() => {});
+    setCopied(hex);
+    clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopied(null), 1400);
+  };
 
-  const copy = (i, value) => {
-    navigator.clipboard?.writeText(value).catch(() => {});
-    setCopied(i);
-    setTimeout(() => setCopied((c) => (c === i ? null : c)), 1200);
+  const choose = (id) => {
+    setSelectedId(id);
+    setPreviewId(null);
   };
 
   const onPickerKey = (e) => {
@@ -92,65 +120,24 @@ export default function Piece({ embedded = false }) {
     e.preventDefault();
     const i = ALBUMS.findIndex((a) => a.id === selectedId);
     const next = ALBUMS[(i + step + ALBUMS.length) % ALBUMS.length];
-    setSelectedId(next.id);
-    setPreviewId(null);
-    pickerRef.current?.querySelector(`[data-id="${next.id}"]`)?.focus();
+    choose(next.id);
+    const el = pickerRef.current?.querySelector(`[data-id="${next.id}"]`);
+    el?.focus({ preventScroll: true });
   };
 
   return (
     <div ref={rootRef} className="cp" data-embedded={embedded ? "true" : "false"} data-ready="false">
-      <div className="cp-mesh" aria-hidden="true">
-        <span className="cp-blob cp-blob--0" />
-        <span className="cp-blob cp-blob--1" />
-        <span className="cp-blob cp-blob--2" />
-        <span className="cp-blob cp-blob--3" />
-      </div>
-
       <div className="cp-scroll" data-scroll-contain>
         <div className="cp-layout">
-          <div className="cp-left">
-            {!embedded && <h1 className="cp-heading text-heading">Cover Palette</h1>}
-            <div className="cp-cover">
-              {ALBUMS.map((a) => (
-                <img key={a.id} src={a.cover} alt={a.id === shownId ? `${a.title} cover` : ""} data-on={a.id === shownId ? "true" : "false"} draggable={false} />
-              ))}
-            </div>
-
-            <div className="cp-palette">
-              <div className="cp-bar" role="img" aria-label={`Palette of ${album.title}`}>
-                {slots.map((s, i) => (
-                  <span
-                    key={i}
-                    className="cp-seg"
-                    style={{ flexGrow: s ? Math.max(s.share, 0.02) : 0, backgroundColor: s ? fmt(s) : "transparent" }}
-                  />
-                ))}
-              </div>
-              <ul className="cp-swatches">
-                {slots.map((s, i) => (
-                  <li key={i}>
-                    <button
-                      type="button"
-                      className="cp-swatch"
-                      disabled={!s}
-                      onClick={() => s && copy(i, fmt(s))}
-                      aria-label={s ? `Copy ${fmt(s)}` : "Empty swatch"}
-                    >
-                      <span className="cp-dot" style={{ backgroundColor: s ? fmt(s) : "transparent" }} />
-                      <span className="cp-value font-mono text-ui tabular-nums">
-                        {copied === i ? "Copied" : s ? `${s.L.toFixed(2)} ${s.C.toFixed(2)} ${Math.round(s.h)}°` : "—"}
-                      </span>
-                      <span className="cp-share font-mono text-ui tabular-nums">{s ? `${Math.round(s.share * 100)}%` : ""}</span>
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+          <div ref={coverRef} className="cp-cover">
+            {ALBUMS.map((a) => (
+              <img key={a.id} data-id={a.id} src={a.cover} alt={a.id === shownId ? `${a.title} cover` : ""} data-on={a.id === shownId ? "true" : "false"} draggable={false} />
+            ))}
           </div>
 
-          <div className="cp-right">
+          <div className="cp-info">
             <p className="cp-eyebrow text-ui-lg">
-              Album · <span className="tabular-nums">{album.year}</span>
+              <span className="tabular-nums">{album.year}</span> · {album.tracks.length} songs
             </p>
             <h2 key={album.id} className="cp-title text-title-xl">
               {album.title}
@@ -171,10 +158,24 @@ export default function Piece({ embedded = false }) {
                 <HeartIcon on={Boolean(liked[album.id])} />
               </button>
             </div>
+
+            <ul className="cp-chips" aria-label={`Colours of ${album.title}`}>
+              {Array.from({ length: SLOTS }, (_, i) => chips[i] ?? null).map((c, i) => (
+                <li key={i} className="cp-chip-cell" data-empty={c ? "false" : "true"}>
+                  {c && (
+                    <button type="button" className="cp-chip" onClick={() => copy(c.hex)} aria-label={`Copy ${c.hex}`}>
+                      <span className="cp-chip-swatch" style={{ backgroundColor: c.hex }} />
+                      <span className="cp-chip-label text-ui-lg tabular-nums">{copied === c.hex ? "Copied" : c.hex}</span>
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+
             <ol className="cp-tracks">
               {album.tracks.map((t, i) => (
-                <li key={`${album.id}-${i}`} className="cp-track" style={{ "--i": i }}>
-                  <span className="cp-n font-mono text-ui tabular-nums">{i + 1}</span>
+                <li key={i} className="cp-track">
+                  <span className="cp-n text-ui-lg tabular-nums">{i + 1}</span>
                   <span className="cp-track-title text-ui-lg">{t}</span>
                 </li>
               ))}
@@ -203,10 +204,7 @@ export default function Piece({ embedded = false }) {
             className="cp-thumb"
             data-shown={a.id === shownId ? "true" : "false"}
             onPointerEnter={(e) => e.pointerType === "mouse" && setPreviewId(a.id)}
-            onClick={() => {
-              setSelectedId(a.id);
-              setPreviewId(null);
-            }}
+            onClick={() => choose(a.id)}
           >
             <img src={a.cover} alt="" draggable={false} />
           </button>

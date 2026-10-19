@@ -8,49 +8,22 @@ import { createBlend } from "./cfGL";
 import { css, glow, readPalette } from "./cfPalette";
 import "./crossfade.css";
 
-const COLUMN = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 0];
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 
-function Slots({ count, refs, dot, blankLead }) {
-  return (
-    <span className="cf-slots" aria-hidden="true">
-      {Array.from({ length: count }, (_, i) => (
-        <span key={i} className="cf-slot-wrap">
-          {dot === i ? <span className="cf-slot-dot">.</span> : null}
-          <span className="cf-slot">
-            <span
-              className="cf-slot-col"
-              ref={(el) => {
-                refs.current[i] = el;
-              }}
-            >
-              {COLUMN.map((d, k) => (
-                <span key={k} data-blank={blankLead && i === 0 && d === 0 ? "" : undefined}>
-                  {d}
-                </span>
-              ))}
-            </span>
-          </span>
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function rollDigits(cols, value, scale) {
-  const v = Math.max(0, value * scale);
-  const n = cols.length;
-  for (let i = 0; i < n; i += 1) {
-    const place = 10 ** (n - 1 - i);
-    const pos = place === 1 ? v % 10 : (Math.floor(v / place) % 10) + clamp((v % place) - (place - 1));
-    if (cols[i]) cols[i].style.transform = `translateY(${((-pos * 100) / 11).toFixed(3)}%)`;
-  }
-}
-
-function Deck({ side, deck, onPick, slotRefs }) {
+function Deck({ side, deck, onPick }) {
   return (
     <section className="cf-deck" data-side={side} aria-label={`Deck ${side}`}>
       <h2 className="cf-deck-label">Deck {side}</h2>
+      <div className="cf-deck-meta" key={deck.id}>
+        <span className="cf-deck-title">{deck.title}</span>
+        <span className="cf-deck-album">
+          {deck.album} · {deck.year}
+        </span>
+      </div>
+      <p className="cf-deck-bpm">
+        {deck.bpm}
+        <span className="cf-unit">BPM</span>
+      </p>
       <div className="cf-picker" role="radiogroup" aria-label={`Record on deck ${side}`}>
         {DECKS.map((d) => (
           <button key={d.id} type="button" role="radio" aria-checked={d.id === deck.id} aria-label={`${d.title}, ${d.album}`} className="cf-pick" onClick={() => onPick(d.id)}>
@@ -58,16 +31,6 @@ function Deck({ side, deck, onPick, slotRefs }) {
           </button>
         ))}
       </div>
-      <div className="cf-deck-meta" key={deck.id}>
-        <span className="cf-deck-title">{deck.title}</span>
-        <span className="cf-deck-album">
-          {deck.album} · {deck.year}
-        </span>
-      </div>
-      <p className="cf-deck-bpm" aria-label={`${deck.bpm} BPM`}>
-        <Slots count={3} refs={slotRefs} blankLead />
-        <span className="cf-unit">BPM</span>
-      </p>
     </section>
   );
 }
@@ -77,17 +40,13 @@ export default function Piece({ embedded = false }) {
   const canvasRef = useRef(null);
   const capRef = useRef(null);
   const railRef = useRef(null);
-  const titleARef = useRef(null);
-  const titleBRef = useRef(null);
-  const masterRefs = useRef([]);
-  const deckARefs = useRef([]);
-  const deckBRefs = useRef([]);
-  const stateRef = useRef({ target: 0.28, x: 0.28, v: 0, bpmA: DECKS[0].bpm, bpmB: DECKS[1].bpm, shownA: DECKS[0].bpm, shownB: DECKS[1].bpm, vA: 0, vB: 0, master: 0, vM: 0, wake: null });
+  const bpmRef = useRef(null);
+  const stateRef = useRef({ target: 0.4, x: 0.4, v: 0, bpmA: DECKS[0].bpm, bpmB: DECKS[1].bpm, shownA: DECKS[0].bpm, shownB: DECKS[1].bpm, wake: null });
   const blendRef = useRef(null);
   const clicksRef = useRef(null);
   const [aId, setAId] = useState(DECKS[0].id);
   const [bId, setBId] = useState(DECKS[1].id);
-  const [value, setValue] = useState(28);
+  const [value, setValue] = useState(40);
   const [failed, setFailed] = useState(false);
   const [dragging, setDragging] = useState(false);
 
@@ -118,8 +77,9 @@ export default function Piece({ embedded = false }) {
     let raf = 0;
     let last = 0;
     let seen = true;
-    let lastSide = Math.sign(s.x - 0.5);
-    const started = performance.now();
+    let lastSide = s.x < 0.5 ? "A" : "B";
+    let lastBpm = "";
+    let settled = 0;
 
     const size = () => {
       const r = canvas.getBoundingClientRect();
@@ -136,39 +96,31 @@ export default function Piece({ embedded = false }) {
       const steps = Math.max(1, Math.round(dt / (1 / 240)));
       const h = dt / steps;
       for (let i = 0; i < steps; i += 1) {
-        s.v += (-520 * (s.x - s.target) - 2 * Math.sqrt(520) * s.v) * h;
+        s.v += (-260 * (s.x - s.target) - 2 * Math.sqrt(260) * s.v) * h;
         s.x += s.v * h;
-        s.vA += (-160 * (s.shownA - s.bpmA) - 2 * 0.86 * Math.sqrt(160) * s.vA) * h;
-        s.shownA += s.vA * h;
-        s.vB += (-160 * (s.shownB - s.bpmB) - 2 * 0.86 * Math.sqrt(160) * s.vB) * h;
-        s.shownB += s.vB * h;
-        const goal = Math.round((s.shownA + (s.shownB - s.shownA) * clamp(s.x)) * 10) / 10;
-        if (!s.master) s.master = goal;
-        s.vM += (-300 * (s.master - goal) - 2 * 0.9 * Math.sqrt(300) * s.vM) * h;
-        s.master += s.vM * h;
       }
+      const ease = 1 - Math.exp(-dt * 10);
+      s.shownA += (s.bpmA - s.shownA) * ease;
+      s.shownB += (s.bpmB - s.shownB) * ease;
       const mix = clamp(s.x);
-      const side = Math.sign(mix - 0.5);
-      if (side !== lastSide && side !== 0) {
+      const side = mix < 0.5 ? "A" : "B";
+      if (side !== lastSide) {
         clicksRef.current?.click(1.3, 0.05);
         lastSide = side;
+        root.dataset.live = side;
       }
+      const moving = blend.advance(dt) || Math.abs(s.x - s.target) > 0.0005 || Math.abs(s.v) > 0.0005 || Math.abs(s.shownA - s.bpmA) > 0.01 || Math.abs(s.shownB - s.bpmB) > 0.01;
       blend.setMix(mix);
-      blend.advance(dt);
-      blend.render((now - started) / 1000);
+      blend.render();
       root.style.setProperty("--cf-mix", mix.toFixed(4));
       capRef.current.style.left = `${(mix * 100).toFixed(3)}%`;
-      const fa = 1 - clamp((mix - 0.3) / 0.4);
-      const fb = clamp((mix - 0.3) / 0.4);
-      titleARef.current.style.opacity = String(fa);
-      titleARef.current.style.filter = `blur(${((1 - fa) * 8).toFixed(2)}px)`;
-      titleARef.current.style.transform = `translateX(${(-(1 - fa) * 16).toFixed(2)}px)`;
-      titleBRef.current.style.opacity = String(fb);
-      titleBRef.current.style.filter = `blur(${((1 - fb) * 8).toFixed(2)}px)`;
-      titleBRef.current.style.transform = `translateX(${((1 - fb) * 16).toFixed(2)}px)`;
-      rollDigits(masterRefs.current, s.master, 10);
-      rollDigits(deckARefs.current, s.shownA, 1);
-      rollDigits(deckBRefs.current, s.shownB, 1);
+      const bpm = (s.shownA + (s.shownB - s.shownA) * mix).toFixed(1);
+      if (bpm !== lastBpm) {
+        lastBpm = bpm;
+        bpmRef.current.textContent = bpm;
+      }
+      settled = moving ? 0 : settled + 1;
+      if (settled > 8) return;
       raf = requestAnimationFrame(tick);
     };
     const wake = () => {
@@ -206,13 +158,13 @@ export default function Piece({ embedded = false }) {
   }, []);
 
   useEffect(() => {
-    blendRef.current?.setCover("A", deckA.cover);
+    blendRef.current?.setCover("A", deckA.cover).then(() => stateRef.current.wake?.());
     stateRef.current.bpmA = deckA.bpm;
     stateRef.current.wake?.();
   }, [deckA]);
 
   useEffect(() => {
-    blendRef.current?.setCover("B", deckB.cover);
+    blendRef.current?.setCover("B", deckB.cover).then(() => stateRef.current.wake?.());
     stateRef.current.bpmB = deckB.bpm;
     stateRef.current.wake?.();
   }, [deckB]);
@@ -223,9 +175,7 @@ export default function Piece({ embedded = false }) {
       const root = rootRef.current;
       if (!alive || !root) return;
       root.style.setProperty("--cf-a", css(glow(pa.colors[0])));
-      root.style.setProperty("--cf-a2", css(glow(pa.colors[1])));
       root.style.setProperty("--cf-b", css(glow(pb.colors[0])));
-      root.style.setProperty("--cf-b2", css(glow(pb.colors[1])));
     });
     return () => {
       alive = false;
@@ -289,16 +239,14 @@ export default function Piece({ embedded = false }) {
   };
 
   return (
-    <div className="crossfade" ref={rootRef} data-embedded={embedded ? "" : undefined} data-dragging={dragging ? "" : undefined} data-scroll-contain="">
-      <div className="cf-glow" aria-hidden="true" />
+    <div className="crossfade" ref={rootRef} data-live="A" data-embedded={embedded ? "" : undefined} data-dragging={dragging ? "" : undefined} data-scroll-contain="">
       {embedded ? null : (
         <header className="cf-caption">
           <h1 className="cf-title">Crossfade</h1>
-          <p className="cf-hint">Drag the fader to mix from one record to the other. Pick what is on each deck.</p>
         </header>
       )}
       <div className="cf-stage">
-        <Deck side="A" deck={deckA} onPick={setAId} slotRefs={deckARefs} />
+        <Deck side="A" deck={deckA} onPick={setAId} />
         <div className="cf-center">
           <div className="cf-canvas-wrap">
             <div ref={canvasRef} className="cf-canvas-host" aria-label={`${deckA.title} blended with ${deckB.title}`} role="img" />
@@ -306,17 +254,17 @@ export default function Piece({ embedded = false }) {
           </div>
           <div className="cf-master">
             <div className="cf-titles">
-              <span className="cf-mtitle" ref={titleARef}>
+              <span className="cf-mtitle" data-side="A">
                 <span className="cf-mtitle-song">{deckA.title}</span>
                 <span className="cf-mtitle-album">{deckA.album}</span>
               </span>
-              <span className="cf-mtitle" ref={titleBRef}>
+              <span className="cf-mtitle" data-side="B">
                 <span className="cf-mtitle-song">{deckB.title}</span>
                 <span className="cf-mtitle-album">{deckB.album}</span>
               </span>
             </div>
             <p className="cf-master-bpm" aria-hidden="true">
-              <Slots count={4} refs={masterRefs} dot={3} blankLead />
+              <span ref={bpmRef}>{(DECKS[0].bpm + (DECKS[1].bpm - DECKS[0].bpm) * 0.4).toFixed(1)}</span>
               <span className="cf-unit">BPM</span>
             </p>
           </div>
@@ -336,11 +284,7 @@ export default function Piece({ embedded = false }) {
               onDoubleClick={() => setTarget(0.5)}
             >
               <span className="cf-rail" ref={railRef}>
-                <span className="cf-tick" data-at="0" />
-                <span className="cf-tick" data-at="25" />
-                <span className="cf-tick cf-tick-mid" data-at="50" />
-                <span className="cf-tick" data-at="75" />
-                <span className="cf-tick" data-at="100" />
+                <span className="cf-tick" data-at="50" />
                 <span className="cf-cap" ref={capRef}>
                   <i />
                 </span>
@@ -349,7 +293,7 @@ export default function Piece({ embedded = false }) {
             <span className="cf-end">B</span>
           </div>
         </div>
-        <Deck side="B" deck={deckB} onPick={setBId} slotRefs={deckBRefs} />
+        <Deck side="B" deck={deckB} onPick={setBId} />
       </div>
     </div>
   );

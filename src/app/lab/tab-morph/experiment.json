@@ -1,10 +1,20 @@
 {
   "title": "Tab Morph",
-  "description": "A music app's tab bar. The selection pill stretches from tab to tab like a drop of liquid, lit from inside by the Sgt. Pepper cover, and each icon redraws its own stroke as it is picked. Drag along the bar and the pill follows your finger.",
-  "tags": ["Interface", "Music", "Motion"],
+  "description": "A music app's tab bar on a light phone screen. The ink selection pill stretches from tab to tab, its leading edge running ahead of its trailing edge, and the icons and labels turn white exactly where the pill passes over them. Each icon redraws its stroke as it is picked, and the pages slide and crossfade in the direction you moved. Drag along the bar and the pill follows your finger.",
+  "tags": [
+    "Interface",
+    "Music",
+    "Motion"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:40:00.000Z",
-  "intent": "The most common piece of app chrome finished to the edge, with one over-the-top flourish: a stretchy pill that is a window onto the album art.",
-  "tile": { "cols": 2, "rows": 4 },
-  "sources": ["https://developer.apple.com/design/human-interface-guidelines/tab-bars", "https://herb.art/top-songs"]
+  "intent": "The most common piece of app chrome finished to the edge: a crisp stretchy pill with a pixel-exact colour split, interruptible page transitions, drag and keyboard.",
+  "tile": {
+    "cols": 2,
+    "rows": 4
+  },
+  "sources": [
+    "https://developer.apple.com/design/human-interface-guidelines/tab-bars",
+    "https://herb.art/top-songs"
+  ]
 }

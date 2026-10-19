@@ -1,4 +1,4 @@
-const MAX_SPEED = 14;
+const MAX_SPEED = 9;
 const STIFFNESS = 140;
 const DAMPING = 2 * Math.sqrt(STIFFNESS) * 0.96;
 
@@ -26,11 +26,13 @@ export function createFlow(root, { count, start = 0, onCenter, onTick }) {
   let destroyed = false;
 
   const layout = () => {
-    const w = root.clientWidth;
-    const h = root.clientHeight;
-    size = w < 640 ? Math.min(w * 0.58, h * 0.34) : Math.min(h * 0.42, w * 0.3);
-    size = Math.round(clamp(size, 120, 400));
+    const w = stage.clientWidth;
+    const h = stage.clientHeight;
+    size = w < 640 ? Math.min(w * 0.7, h * 0.6) : Math.min(h * 0.62, w * 0.3);
+    size = Math.round(clamp(size, 120, 380));
+    const y = Math.max(0, (h - size * 1.38) * 0.68) + size / 2;
     root.style.setProperty("--cf-size", `${size}px`);
+    root.style.setProperty("--cf-y", `${Math.round(y)}px`);
     stage.style.perspective = `${Math.round(size * 3.2)}px`;
   };
 
@@ -152,7 +154,7 @@ export function createFlow(root, { count, start = 0, onCenter, onTick }) {
     }
     if (idle) vel = 0;
     vel = clamp(vel, -MAX_SPEED, MAX_SPEED);
-    goTo(pos + vel * 0.32);
+    goTo(pos + clamp(vel * 0.32, -5, 5));
   };
 
   const scrubTo = (clientX) => {

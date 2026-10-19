@@ -1,10 +1,10 @@
 .tab-morph {
-  --tm-ground: #0b0b0c;
-  --tm-screen: #121212;
-  --tm-raised: #1f1f21;
-  --tm-ink: #f4f4f2;
-  --tm-ink-2: #a3a3a0;
-  --tm-line: rgb(255 255 255 / 0.08);
+  --tm-ground: #f1f0ec;
+  --tm-screen: #ffffff;
+  --tm-raised: #f3f2ef;
+  --tm-ink: var(--color-ink);
+  --tm-ink-2: var(--color-ink-secondary);
+  --tm-line: rgb(20 20 20 / 0.08);
   --tm-ease: cubic-bezier(0.22, 1, 0.36, 1);
   position: relative;
   display: flex;
@@ -13,7 +13,7 @@
   width: 100%;
   height: 100%;
   min-height: 100cqh;
-  padding-top: 136px;
+  padding: 96px 16px 32px;
   box-sizing: border-box;
   overflow: clip;
   isolation: isolate;
@@ -36,9 +36,6 @@
   top: 88px;
   left: max(16px, min(40px, 3cqw));
   right: max(16px, min(40px, 3cqw));
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
   pointer-events: none;
 }
 
@@ -51,82 +48,80 @@
   text-wrap: balance;
 }
 
-.tab-morph-hint {
-  margin: 0;
-  max-width: 340px;
-  color: var(--tm-ink-2);
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--font-weight-meta);
-  text-wrap: pretty;
-}
-
 .tab-morph-screen {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  width: min(390px, 100%);
-  height: min(720px, calc(100cqh - 168px));
-  border-radius: 32px;
+  width: min(400px, 100%);
+  height: min(740px, calc(100cqh - 128px));
+  border-radius: 40px;
   overflow: hidden;
   background: var(--tm-screen);
-  box-shadow: 0 0 0 1px var(--tm-line);
+  box-shadow: 0 0 0 1px var(--tm-line), 0 24px 64px -24px rgb(40 36 28 / 0.18);
 }
 
 .tab-morph[data-embedded] .tab-morph-screen {
   height: 100%;
-  border-radius: 24px;
+  border-radius: 28px;
 }
 
-.tab-morph-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-}
-
-.tab-morph-scroll::-webkit-scrollbar {
-  display: none;
+.tab-morph-pages {
+  position: absolute;
+  inset: 0;
 }
 
 .tab-morph-page {
+  position: absolute;
+  inset: 0;
   display: flex;
   flex-direction: column;
   gap: 16px;
-  padding: 24px 16px 176px;
-  animation: tab-morph-in-right 420ms var(--tm-ease);
+  padding: 28px 20px 184px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  background: var(--tm-screen);
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 260ms var(--tm-ease),
+    transform 420ms var(--tm-ease);
 }
 
-.tab-morph-page[data-dir="left"] {
-  animation-name: tab-morph-in-left;
+.tab-morph-page::-webkit-scrollbar {
+  display: none;
 }
 
-@keyframes tab-morph-in-right {
-  from {
+.tab-morph-page[data-state="in"] {
+  z-index: 2;
+}
+
+@starting-style {
+  .tab-morph-page[data-state="in"]:not([data-first]) {
     opacity: 0;
-    filter: blur(8px);
-    transform: translateX(28px);
+    transform: translate3d(24px, 0, 0);
   }
-  to {
-    opacity: 1;
-    filter: none;
-    transform: none;
+
+  .tab-morph-page[data-state="in"][data-dir="left"]:not([data-first]) {
+    transform: translate3d(-24px, 0, 0);
   }
 }
 
-@keyframes tab-morph-in-left {
-  from {
-    opacity: 0;
-    filter: blur(8px);
-    transform: translateX(-28px);
-  }
-  to {
-    opacity: 1;
-    filter: none;
-    transform: none;
-  }
+.tab-morph-page[data-state="out"] {
+  z-index: 1;
+  opacity: 0;
+  transform: translate3d(-24px, 0, 0);
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--tm-ease),
+    transform 420ms var(--tm-ease);
+}
+
+.tab-morph-page[data-state="out"][data-dir="left"] {
+  transform: translate3d(24px, 0, 0);
+}
+
+.tab-morph-page img {
+  outline: 1px solid rgb(20 20 20 / 0.06);
+  outline-offset: -1px;
 }
 
 .tab-morph-h {
@@ -193,12 +188,12 @@
   flex: none;
   flex-direction: column;
   gap: 4px;
-  width: 140px;
+  width: 120px;
 }
 
 .tab-morph-tile img {
-  width: 140px;
-  height: 140px;
+  width: 120px;
+  height: 120px;
   margin-bottom: 4px;
   border-radius: 6px;
   object-fit: cover;
@@ -236,8 +231,8 @@
   height: 48px;
   padding: 0 12px;
   border-radius: 8px;
-  background: var(--tm-ink);
-  color: #4a4a4a;
+  background: var(--tm-raised);
+  color: var(--tm-ink-2);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
@@ -248,7 +243,7 @@
   width: 24px;
   height: 24px;
   fill: none;
-  stroke: #1a1a1a;
+  stroke: var(--tm-ink);
   stroke-width: 2;
   stroke-linecap: round;
 }
@@ -266,6 +261,7 @@
   border-radius: 8px;
   overflow: hidden;
   box-sizing: border-box;
+  color: #ffffff;
   font-size: var(--text-heading);
   line-height: var(--text-heading--line-height);
   letter-spacing: var(--text-heading--letter-spacing);
@@ -402,47 +398,58 @@
 
 .tab-morph-dock {
   position: absolute;
+  z-index: 3;
   left: 0;
   right: 0;
   bottom: 0;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 40px 8px 12px;
-  background: linear-gradient(180deg, rgb(18 18 18 / 0) 0%, rgb(18 18 18 / 0.72) 24%, rgb(18 18 18 / 0.94) 50%, #121212 100%);
+  padding: 24px 12px 16px;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0) 0%, rgb(255 255 255 / 0.8) 16%, rgb(255 255 255 / 0.96) 30%, #ffffff 44%);
 }
 
 .tab-morph-player {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 56px;
+  gap: 12px;
+  height: 64px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: 16px;
   overflow: hidden;
-  background: #3a2a2a;
+  background: var(--tm-raised);
+  box-shadow: inset 0 0 0 1px var(--tm-line);
   box-sizing: border-box;
 }
 
 .tab-morph-player img {
-  width: 40px;
-  height: 40px;
-  border-radius: 4px;
+  width: 48px;
+  height: 48px;
+  border-radius: 8px;
   object-fit: cover;
 }
 
 .tab-morph-play {
   display: grid;
   place-items: center;
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   border: 0;
   border-radius: 50%;
   background: transparent;
   color: var(--tm-ink);
   cursor: pointer;
+  transition: background-color 160ms var(--tm-ease), transform 160ms var(--tm-ease);
+}
+
+.tab-morph-play:hover {
+  background: rgb(20 20 20 / 0.06);
+}
+
+.tab-morph-play:active {
+  transform: scale(0.92);
 }
 
 .tab-morph-play:focus-visible {
@@ -458,12 +465,11 @@
 
 .tab-morph-progress {
   position: absolute;
-  left: 8px;
-  right: 8px;
+  left: 16px;
+  right: 16px;
   bottom: 0;
   height: 2px;
-  border-radius: 1px;
-  background: rgb(255 255 255 / 0.2);
+  background: rgb(20 20 20 / 0.08);
   overflow: hidden;
 }
 
@@ -491,42 +497,11 @@
   }
 }
 
-.tab-morph-barwrap {
-  position: relative;
-}
-
-.tab-morph-glow {
-  position: absolute;
-  top: 6px;
-  left: 0;
-  height: 52px;
-  border-radius: 26px;
-  overflow: hidden;
-  opacity: 0.9;
-  filter: blur(16px);
-  pointer-events: none;
-}
-
-.tab-morph-glow img,
-.tab-morph-pill img {
-  position: absolute;
-  top: 0;
-  left: 0;
-  max-width: none;
-  height: auto;
-  aspect-ratio: 1;
-  object-fit: cover;
-  filter: blur(5px) saturate(1.9) brightness(0.95);
-}
-
 .tab-morph-bar {
   position: relative;
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
   height: 64px;
-  padding: 0 6px;
   border-radius: 32px;
-  background: rgb(31 31 33 / 0.9);
+  background: var(--tm-raised);
   box-shadow: inset 0 0 0 1px var(--tm-line);
   touch-action: pan-y;
   user-select: none;
@@ -537,29 +512,35 @@
   cursor: grabbing;
 }
 
+.tab-morph-tabrow {
+  position: absolute;
+  inset: 0 6px;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.tab-morph-tabrow--lit {
+  inset: 0;
+  padding: 0 6px;
+  z-index: 2;
+  color: #ffffff;
+  pointer-events: none;
+}
+
 .tab-morph-pill {
   position: absolute;
+  z-index: 1;
   top: 6px;
   left: 0;
   height: 52px;
   border-radius: 26px;
-  overflow: hidden;
-  background: #6a2c3c;
-  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22);
+  background: var(--tm-ink);
   will-change: transform, width;
   pointer-events: none;
 }
 
-.tab-morph-pill::after {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(180deg, rgb(255 255 255 / 0.12) 0%, rgb(0 0 0 / 0.08) 35%, rgb(0 0 0 / 0.2) 70%, rgb(0 0 0 / 0.32) 100%);
-}
-
 .tab-morph-tab {
   position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -568,25 +549,23 @@
   padding: 0;
   border: 0;
   background: transparent;
-  color: var(--tm-ink-2);
+  color: var(--tm-ink);
   font-family: inherit;
   cursor: pointer;
   outline: none;
   -webkit-tap-highlight-color: transparent;
-  transition: color 240ms var(--tm-ease);
 }
 
-.tab-morph-tab:hover {
-  color: var(--tm-ink);
-}
-
-.tab-morph-tab[aria-selected="true"] {
+.tab-morph-tabrow--lit .tab-morph-tab {
   color: #ffffff;
 }
 
-.tab-morph-tab:focus-visible .tab-morph-icon {
-  border-radius: 6px;
-  box-shadow: 0 0 0 2px #ffffff;
+.tab-morph-tab:focus-visible::before {
+  content: "";
+  position: absolute;
+  inset: 4px 2px;
+  border-radius: 24px;
+  box-shadow: 0 0 0 2px var(--color-accent, #2563eb);
 }
 
 .tab-morph-icon {
@@ -605,40 +584,31 @@
   stroke-dashoffset: 0;
 }
 
-.tab-morph-tab[aria-selected="true"] .tab-morph-icon {
-  stroke-width: 2.2;
-  filter: drop-shadow(0 1px 4px rgb(0 0 0 / 0.35));
-}
-
 .tab-morph-label {
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--font-weight-caption);
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--font-weight-medium);
 }
 
-.tab-morph-tab[aria-selected="true"] .tab-morph-label {
+.tab-morph-tabrow--lit .tab-morph-label {
   font-weight: var(--font-weight-strong);
-  text-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
 }
 
-@container (max-width: 640px) {
+@container (max-width: 560px) {
   .tab-morph {
-    padding: 160px 8px 8px;
-  }
-
-  .tab-morph-head {
-    top: 80px;
+    padding: 132px 12px 12px;
   }
 
   .tab-morph-screen {
-    height: calc(100cqh - 168px);
-    border-radius: 24px;
+    width: 100%;
+    height: calc(100cqh - 144px);
+    border-radius: 32px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .tab-morph-page {
-    animation-duration: 1ms;
+    transition-duration: 1ms;
   }
 }

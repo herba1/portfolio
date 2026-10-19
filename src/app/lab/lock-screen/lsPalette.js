@@ -35,7 +35,7 @@ function fromHsl([h, s, l]) {
 
 export function glow(c) {
   const [h, s, l] = toHsl(c);
-  return fromHsl([h, s < 0.14 ? s * 0.5 : Math.max(s, 0.55), Math.min(0.7, Math.max(0.52, l))]);
+  return fromHsl([h, s < 0.14 ? s * 0.5 : Math.min(0.62, Math.max(s, 0.42)), Math.min(0.54, Math.max(0.4, l))]);
 }
 
 export const css = (c) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;

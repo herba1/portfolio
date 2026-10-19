@@ -1,5 +1,8 @@
 .tf-root {
   --tf-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --tf-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --tf-w-serif: 430;
+  --tf-cover: min(56cqh, 460px, 40cqw);
   position: relative;
   width: 100%;
   height: 100%;
@@ -17,140 +20,7 @@
 
 .tf-root[data-embedded] {
   min-height: 100%;
-}
-
-.tf-stage {
-  position: absolute;
-  inset: 0;
-  perspective: 1300px;
-  perspective-origin: 50% 42%;
-  touch-action: pan-y;
-  user-select: none;
-  -webkit-user-select: none;
-  -webkit-tap-highlight-color: transparent;
-  outline: none;
-  cursor: default;
-}
-
-.tf-stage[data-lifted] {
-  cursor: grab;
-}
-
-.tf-stage[data-lifted]:active {
-  cursor: grabbing;
-}
-
-.tf-stage:focus-visible {
-  box-shadow: inset 0 0 0 2px var(--color-accent);
-}
-
-.tf-scene {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0;
-  height: 0;
-  transform-style: preserve-3d;
-}
-
-.tf-cover {
-  position: absolute;
-  left: 0;
-  top: 0;
-  width: var(--tf-cover);
-  height: var(--tf-cover);
-  transform-style: preserve-3d;
-  transform: translate3d(-50%, -50%, 0) translateY(var(--tf-cover-y));
-}
-
-.tf-face {
-  position: absolute;
-  inset: 0;
-  display: block;
-  width: 100%;
-  height: 100%;
-  border-radius: 4px;
-  object-fit: cover;
-  backface-visibility: hidden;
-  -webkit-backface-visibility: hidden;
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-ink) 8%, transparent);
-}
-
-.tf-back {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 16px;
-  transform: rotateY(180deg);
-  background: var(--tf-color);
-  color: var(--color-ink-inverse);
-  overflow: hidden;
-}
-
-.tf-back-title {
-  font-size: var(--text-heading-sm);
-  line-height: var(--text-heading-sm--line-height);
-  letter-spacing: var(--text-heading-sm--letter-spacing);
-  font-weight: var(--text-heading-sm--font-weight);
-}
-
-.tf-back-tracks {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  margin: 0;
-  padding: 0 0 0 20px;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  font-variant-numeric: tabular-nums;
-}
-
-.tf-back-year {
-  margin-top: auto;
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
-}
-
-.tf-letter {
-  position: absolute;
-  left: 0;
-  top: 0;
-  display: block;
-  transform-style: preserve-3d;
-  font-size: var(--tf-fs);
-  line-height: 1;
-  letter-spacing: var(--text-display--letter-spacing);
-  font-weight: var(--font-weight-semibold);
-  white-space: pre;
-  will-change: transform;
-  --tf-p: 0;
-}
-
-.tf-front {
-  position: relative;
-  display: block;
-  color: color-mix(in oklab, var(--tf-color) calc(var(--tf-p) * 100%), var(--color-ink));
-}
-
-.tf-layer {
-  position: absolute;
-  inset: 0;
-  display: block;
-  visibility: hidden;
-  color: color-mix(in oklab, var(--tf-color), #000 calc(16% + var(--k) * 3%));
-  transform: translateZ(calc(var(--k) * var(--tf-p) * var(--tf-fs) * -0.013));
-}
-
-.tf-letter[data-deep] .tf-layer {
-  visibility: visible;
-}
-
-.tf-letter[data-space] {
-  visibility: hidden;
+  --tf-cover: min(56cqh, 40cqw);
 }
 
 .tf-head {
@@ -158,11 +28,6 @@
   top: 96px;
   left: 48px;
   z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-  max-width: 272px;
   pointer-events: none;
 }
 
@@ -171,97 +36,243 @@
   text-wrap: balance;
 }
 
-.tf-hint {
-  margin: 0;
-  color: var(--color-ink-secondary);
-  text-wrap: pretty;
-}
-
-.tf-picker {
+.tf-stage {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 40px;
-  z-index: 2;
-  display: flex;
-  justify-content: center;
-  gap: 8px;
-  padding: 4px 16px;
-  overflow-x: auto;
-  scrollbar-width: none;
+  inset: 72px 0 48px;
+  display: grid;
+  place-items: center;
+  padding: 0 48px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
 }
 
-.tf-picker::-webkit-scrollbar {
-  display: none;
+.tf-root[data-embedded] .tf-stage {
+  inset: 24px 0;
+  padding: 0 24px;
 }
 
-.tf-pick {
-  display: inline-flex;
-  flex: none;
-  align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 0 14px 0 4px;
-  border: 1px solid var(--color-line);
-  border-radius: 9999px;
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
+.tf-stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.tf-spread {
+  display: grid;
+  grid-template-columns: var(--tf-cover) minmax(0, 520px);
+  align-items: stretch;
+  gap: 0 56px;
+}
+
+.tf-cover {
+  position: relative;
+  width: var(--tf-cover);
+  height: var(--tf-cover);
+  border-radius: 4px;
+  background: #e4e2db;
   cursor: pointer;
-  transition:
-    background-color 160ms var(--tf-ease),
-    border-color 160ms var(--tf-ease),
-    color 160ms var(--tf-ease),
-    transform 120ms var(--tf-ease);
 }
 
-.tf-pick img {
-  width: 32px;
-  height: 32px;
-  border-radius: 9999px;
+.tf-cover img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
+  object-fit: cover;
+  opacity: 0;
+  transform: scale(0.985);
+  transition:
+    opacity 320ms var(--tf-ease),
+    transform 480ms var(--tf-ease);
+}
+
+.tf-cover img[data-on] {
+  opacity: 1;
+  transform: none;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--color-ink) 8%, transparent);
+}
+
+.tf-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 24px;
+}
+
+.tf-thumbs {
+  display: flex;
+  gap: 12px;
+}
+
+.tf-thumb {
+  position: relative;
+  flex: none;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: #e4e2db;
+  cursor: pointer;
+  transition: transform 160ms var(--tf-ease);
+}
+
+.tf-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: 4px;
   object-fit: cover;
 }
 
-.tf-pick:active {
-  transform: scale(0.96);
+.tf-thumb::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border: 2px solid var(--color-ink);
+  border-radius: 7px;
+  opacity: 0;
+  transform: scale(0.92);
+  transition:
+    opacity 180ms var(--tf-ease),
+    transform 240ms var(--tf-ease);
 }
 
-.tf-pick:focus-visible {
+.tf-thumb[aria-pressed="true"]::after {
+  opacity: 1;
+  transform: none;
+}
+
+.tf-thumb:active {
+  transform: scale(0.94);
+}
+
+.tf-thumb:focus-visible {
   outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-.tf-pick[aria-pressed="true"] {
-  background: var(--color-surface-inverse);
-  border-color: var(--color-surface-inverse);
-  color: var(--color-ink-inverse);
+  outline-offset: 4px;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .tf-pick[aria-pressed="false"]:hover {
-    border-color: var(--color-line-strong);
-    background: var(--color-surface-subtle);
+  .tf-thumb[aria-pressed="false"]:hover {
+    transform: translateY(-4px);
   }
 }
 
-.tf-root[data-embedded] .tf-picker {
-  bottom: 16px;
+.tf-area {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  perspective: 1100px;
+  perspective-origin: 40% 60%;
+  cursor: pointer;
+}
+
+.tf-set {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  transform-style: preserve-3d;
+  pointer-events: none;
+}
+
+.tf-set[data-role="out"] {
+  z-index: 1;
+}
+
+.tf-name {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.24em;
+  margin: 0;
+  font-size: var(--tf-fs, 96px);
+  line-height: var(--tf-lh, 92px);
+  letter-spacing: var(--tf-track, -0.038em);
+  font-weight: var(--font-weight-semibold);
+  transform-style: preserve-3d;
+}
+
+.tf-byline {
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 0.26em;
+  margin: 0;
+  font-family: var(--tf-serif);
+  font-style: italic;
+  font-size: var(--text-title);
+  line-height: var(--text-title--line-height);
+  letter-spacing: var(--text-title--letter-spacing);
+  font-weight: var(--tf-w-serif);
+  font-variation-settings: "opsz" 10;
+  transform-style: preserve-3d;
+}
+
+.tf-word {
+  display: inline-block;
+  white-space: nowrap;
+  transform-style: preserve-3d;
+}
+
+.tf-ch {
+  display: inline-block;
+  white-space: pre;
+  transform-origin: 50% 82%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
 }
 
 @container (max-width: 899px) {
+  .tf-root {
+    --tf-cover: min(100cqw - 32px, 38cqh);
+  }
+
   .tf-head {
     top: 84px;
     left: 16px;
-    right: 16px;
-    max-width: none;
-    gap: 4px;
   }
 
-  .tf-picker {
-    justify-content: flex-start;
-    bottom: 24px;
+  .tf-stage {
+    inset: 120px 0 24px;
+    place-items: stretch;
+    padding: 0 16px;
+  }
+
+  .tf-spread {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 24px 0;
+  }
+
+  .tf-cover {
+    justify-self: start;
+  }
+
+  .tf-text {
+    flex-direction: column-reverse;
+  }
+
+  .tf-set {
+    top: 0;
+    bottom: auto;
+  }
+
+  .tf-area {
+    perspective-origin: 50% 20%;
+  }
+
+  .tf-thumbs {
+    justify-content: space-between;
+  }
+}
+
+@container (max-width: 899px) and (max-height: 560px) {
+  .tf-stage {
+    inset: 16px 0;
   }
 }

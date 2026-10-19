@@ -1,10 +1,20 @@
 {
   "title": "Cover Flow",
-  "description": "Twelve Beatles records on a black floor. Drag, scroll, scrub or use the arrow keys and the covers swing past on a capped-speed spring with their reflections; the album that lands in the middle rolls its title in letter by letter.",
-  "tags": ["Interface", "Motion", "Music"],
+  "description": "Twelve Beatles records on a black floor with their reflections. Drag, scroll, scrub or use the arrow keys and the covers swing past on a speed-capped spring; the title and year of the record in the middle sit underneath, steady as it moves.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:00:00.000Z",
   "intent": "The classic browser rebuilt as a modern component: one spring with a speed cap drives every cover, so a fling can be caught mid-flight and nothing races past faster than you can read it.",
-  "tile": { "cols": 4, "rows": 3 },
-  "sources": ["https://en.wikipedia.org/wiki/Cover_Flow", "https://github.com/nathangitter/fluid-interfaces"]
+  "tile": {
+    "cols": 4,
+    "rows": 3
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Cover_Flow",
+    "https://github.com/nathangitter/fluid-interfaces"
+  ]
 }

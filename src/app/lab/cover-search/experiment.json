@@ -1,10 +1,20 @@
 {
   "title": "Cover Search",
-  "description": "A music search field over your top songs and the Beatles catalogue. Every keystroke re-ranks the covers: matches fly in and re-sort on springs, non-matches fall away, matched letters light up, and the best hit lifts into a top-result card that tints the page.",
-  "tags": ["Interface", "Motion", "Music"],
+  "description": "A music search field over your top songs and the Beatles catalogue. Every keystroke answers at once: a top result, the matching songs and the matching albums, with the matched letters picked out and new results fading in without anything flying around. Arrow keys walk the results, Enter plays.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:40:00.000Z",
-  "intent": "Search results as a living layout: each cover is one element that moves to its new rank, so typing feels like sorting a crate rather than reloading a list.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://motion.dev/docs/react-layout-animations", "https://herb.art/song-search"]
+  "intent": "Search that feels instant and calm: results are laid out like a real music app's search page and settle in place on each keystroke instead of reshuffling.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://motion.dev/docs/react-layout-animations",
+    "https://herb.art/song-search"
+  ]
 }

@@ -5,7 +5,7 @@ import { Airplay, Camera, Flashlight, Lock, Pause, Play, SkipBack, SkipForward }
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { createLock } from "./lsEngine";
-import { css, glow, readPalette } from "./lsPalette";
+import { glow, readPalette } from "./lsPalette";
 import { withDuration } from "./lsTracks";
 import "./lock-screen.css";
 
@@ -76,7 +76,6 @@ export default function Piece({ embedded = false }) {
   const playingRef = useRef(true);
 
   const [index, setIndex] = useState(0);
-  const [bloom, setBloom] = useState(0);
   const [now, setNow] = useState(null);
   const [playing, setPlaying] = useState(true);
   const [scrubbing, setScrubbing] = useState(false);
@@ -130,19 +129,20 @@ export default function Piece({ embedded = false }) {
   }, [tracks]);
 
   useEffect(() => {
-    if (!track) return undefined;
     let alive = true;
-    readPalette(track.imageLarge || track.image).then(({ colors }) => {
-      const root = rootRef.current;
-      if (!alive || !root) return;
-      colors.forEach((c, i) => root.style.setProperty(`--ls-c${i + 1}`, css(glow(c))));
-      root.style.setProperty("--ls-deep", css(colors[0].map((v) => v * 0.32)));
-      setBloom((b) => b + 1);
+    Promise.all(tracks.map((t) => readPalette(t.imageLarge || t.image))).then((list) => {
+      if (!alive) return;
+      const shades = list.map(({ colors }) => ({
+        c1: glow(colors[0]),
+        c2: glow(colors[1]),
+        deep: colors[0].map((v) => v * 0.3),
+      }));
+      engineRef.current?.setPalettes(shades);
     });
     return () => {
       alive = false;
     };
-  }, [track]);
+  }, [tracks]);
 
   const togglePlay = () => {
     const next = !playingRef.current;
@@ -204,18 +204,14 @@ export default function Piece({ embedded = false }) {
       data-playing={playing ? "" : undefined}
       data-scrubbing={scrubbing ? "" : undefined}
     >
-      <div className="ls-aura" aria-hidden="true" />
-      {bloom ? <div className="ls-aura-burst" key={`a${bloom}`} aria-hidden="true" /> : null}
       {embedded ? null : (
         <header className="ls-caption">
           <h1 className="ls-title">Lock Screen</h1>
-          <p className="ls-hint">Swipe the cover or the widget to change songs. Each one floods the screen with its own colour.</p>
         </header>
       )}
       <div className="ls-stage">
         <div className="ls-phone" ref={phoneRef}>
           <div className="ls-wall" aria-hidden="true" />
-          {bloom ? <div className="ls-bloom" key={`b${bloom}`} aria-hidden="true" /> : null}
           <div className="ls-status" aria-hidden="true">
             <span />
             <span className="ls-status-icons">

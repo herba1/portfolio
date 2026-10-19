@@ -12,7 +12,7 @@ const clock = (seconds) => {
 export function createLock(n, { count, start = 0, onIndex, duration }) {
   const X = { x: start, v: 0, to: start, k: 220, c: 2 * 0.9 * Math.sqrt(220) };
   const beat = { x: 1, v: 0, to: 1, k: 170, c: 2 * 0.7 * Math.sqrt(170) };
-  const geo = { s: 1, h: PHONE_H, phone: true };
+  const geo = { s: 1, h: PHONE_H, phone: true, art: 264 };
   const media = { playing: true, offset: 38, startedAt: performance.now(), duration: duration(start), scrubbing: false };
   let total = count;
   let index = start;
@@ -23,6 +23,26 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
   let seen = true;
   let lastSecond = -1;
   let dragged = false;
+  let palettes = null;
+  let paint = "";
+
+  const mix = (a, b, t) => a.map((v, i) => v + (b[i] - v) * t);
+  const rgb = (c) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;
+  const colour = (x) => {
+    if (!palettes) return;
+    const p = clamp(x, 0, palettes.length - 1);
+    const a = palettes[Math.floor(p)];
+    const b = palettes[Math.min(palettes.length - 1, Math.floor(p) + 1)];
+    const f = p - Math.floor(p);
+    const t = f * f * (3 - 2 * f);
+    const next = `${rgb(mix(a.c1, b.c1, t))}|${rgb(mix(a.c2, b.c2, t))}|${rgb(mix(a.deep, b.deep, t))}`;
+    if (next === paint) return;
+    paint = next;
+    const [c1, c2, deep] = next.split("|");
+    n.root.style.setProperty("--ls-c1", c1);
+    n.root.style.setProperty("--ls-c2", c2);
+    n.root.style.setProperty("--ls-deep", deep);
+  };
 
   const position = (now = performance.now()) => {
     if (!media.playing || media.scrubbing) return media.offset;
@@ -39,6 +59,7 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
     geo.h = h;
     geo.phone = phone;
     const art = Math.max(120, Math.min(264, h - 236 - 340));
+    geo.art = art;
     n.root.style.setProperty("--ls-s", String(s));
     n.root.style.setProperty("--ls-h", `${h}px`);
     n.root.style.setProperty("--ls-art", `${art}px`);
@@ -54,7 +75,7 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
 
   const write = (now) => {
     const x = shown();
-    const gap = 296;
+    const gap = W / 2 + geo.art / 2 + 24;
     for (let i = 0; i < n.covers.length; i += 1) {
       const d = i - x;
       const ad = Math.abs(d);
@@ -65,11 +86,12 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
       }
       el.style.visibility = "visible";
       const near = 1 - Math.min(1, ad);
-      const sc = (1 - (1 - near) * 0.18) * (1 + (beat.x - 1) * near);
+      const sc = (1 - (1 - near) * 0.08) * (1 + (beat.x - 1) * near);
       el.style.transform = `translateX(${(d * gap).toFixed(2)}px) scale(${sc.toFixed(4)})`;
       el.style.zIndex = String(10 - Math.round(ad * 2));
       el.style.setProperty("--ls-near", near.toFixed(3));
     }
+    colour(x);
     n.strip.style.transform = `translateX(${(-x * 100).toFixed(3)}%)`;
     n.dots.forEach((dot, i) => dot.style.setProperty("--ls-on", clamp(1 - Math.abs(i - x)).toFixed(3)));
 
@@ -141,7 +163,7 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
     window.addEventListener("pointercancel", onUp);
   };
 
-  const unit = (el) => (el === "strip" ? n.stripBox.clientWidth * geo.s : 296 * geo.s);
+  const unit = (el) => (el === "strip" ? n.stripBox.clientWidth * geo.s : (W / 2 + geo.art / 2 + 24) * geo.s);
 
   const onMove = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
@@ -229,6 +251,13 @@ export function createLock(n, { count, start = 0, onIndex, duration }) {
     },
     step(dir) {
       land(index + dir, 0);
+    },
+    setPalettes(list) {
+      palettes = list;
+      paint = "";
+      colour(shown());
+      n.root.toggleAttribute("data-ready", true);
+      wake();
     },
     setCount(c) {
       total = c;

@@ -36,7 +36,7 @@ export function createBlend(canvas) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   const u = {};
-  for (const name of ["uA0", "uA1", "uB0", "uB1", "uFadeA", "uFadeB", "uMix", "uCells", "uTime"]) u[name] = gl.getUniformLocation(program, name);
+  for (const name of ["uA0", "uA1", "uB0", "uB1", "uFadeA", "uFadeB", "uMix"]) u[name] = gl.getUniformLocation(program, name);
   ["uA0", "uA1", "uB0", "uB1"].forEach((name, i) => gl.uniform1i(u[name], i));
 
   const blank = () => {
@@ -100,7 +100,7 @@ export function createBlend(canvas) {
     setMix(value) {
       mix = value;
     },
-    render(time) {
+    render() {
       if (lost) return;
       const w = canvas.width;
       gl.viewport(0, 0, w, canvas.height);
@@ -115,8 +115,6 @@ export function createBlend(canvas) {
       gl.uniform1f(u.uFadeA, decks.A.fade);
       gl.uniform1f(u.uFadeB, decks.B.fade);
       gl.uniform1f(u.uMix, mix);
-      gl.uniform1f(u.uCells, Math.max(18, Math.min(44, w / 14)));
-      gl.uniform1f(u.uTime, time);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     },
     destroy() {

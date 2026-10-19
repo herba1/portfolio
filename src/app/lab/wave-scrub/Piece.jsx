@@ -5,17 +5,12 @@ import { Pause, Play, RotateCcw, RotateCw } from "lucide-react";
 
 import { createScrub } from "./wsEngine";
 import { TRACKS } from "./wsTracks";
-import { buildPeaks, readColumns } from "./wsWave";
+import { buildPeaks } from "./wsWave";
 import "./wave-scrub.css";
 
 const clock = (seconds) => {
   const t = Math.max(0, Math.floor(seconds));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
-};
-
-const parseRgb = (value) => {
-  const m = value.match(/[\d.]+/g);
-  return m ? m.slice(0, 3).map(Number) : [250, 250, 250];
 };
 
 export default function Piece({ embedded = false }) {
@@ -53,19 +48,15 @@ export default function Piece({ embedded = false }) {
         readout: readoutRef.current,
         ink: style.getPropertyValue("--ws-ink").trim() || "#111",
         ink2: style.getPropertyValue("--ws-ink-2").trim() || "#888",
+        rest: style.getPropertyValue("--ws-rest").trim() || "#ccc",
+        preview: style.getPropertyValue("--ws-preview").trim() || "#999",
       },
       track,
       wave,
       { playing: playingRef.current, from: fromRef.current, onSection: setSection },
     );
     engineRef.current = engine;
-    let alive = true;
-    readColumns(track.cover, 96).then((cols) => {
-      if (!alive || !cols) return;
-      engine.setColors(cols, parseRgb(style.backgroundColor));
-    });
     return () => {
-      alive = false;
       engine.destroy();
       engineRef.current = null;
     };
@@ -104,7 +95,6 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header className="ws-caption">
           <h1 className="ws-title">Wave Scrub</h1>
-          <p className="ws-hint">Hover for time and section. Press and hold to zoom in under your finger, then drag for fine control.</p>
         </header>
       )}
       <div className="ws-player">
@@ -120,7 +110,7 @@ export default function Piece({ embedded = false }) {
             <span className="ws-readout" ref={readoutRef}>
               0:00.0
             </span>
-            <span className="ws-total">{clock(track.duration)}</span>
+            <span className="ws-total">of {clock(track.duration)}</span>
           </div>
         </div>
         <div
@@ -161,16 +151,16 @@ export default function Piece({ embedded = false }) {
         <div className="ws-foot">
           <div className="ws-transport">
             <button type="button" className="ws-btn" aria-label="Back 15 seconds" onClick={() => engineRef.current?.nudge(-15)}>
-              <RotateCcw size={18} strokeWidth={2} />
+              <RotateCcw size={22} strokeWidth={2} />
             </button>
             <button type="button" className="ws-btn ws-btn-main" aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
               <span className="ws-glyph" data-playing={playing ? "" : undefined}>
-                <Play className="ws-glyph-play" size={20} fill="currentColor" strokeWidth={0} />
-                <Pause className="ws-glyph-pause" size={20} fill="currentColor" strokeWidth={0} />
+                <Play className="ws-glyph-play" size={26} fill="currentColor" strokeWidth={0} />
+                <Pause className="ws-glyph-pause" size={26} fill="currentColor" strokeWidth={0} />
               </span>
             </button>
             <button type="button" className="ws-btn" aria-label="Forward 15 seconds" onClick={() => engineRef.current?.nudge(15)}>
-              <RotateCw size={18} strokeWidth={2} />
+              <RotateCw size={22} strokeWidth={2} />
             </button>
             <span className="ws-now" aria-live="polite">
               {track.sections[section]?.name}

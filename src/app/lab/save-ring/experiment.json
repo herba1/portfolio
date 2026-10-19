@@ -1,10 +1,20 @@
 {
   "title": "Save Ring",
-  "description": "A download button for Abbey Road. Press it and the pill folds into a ring that fills with the cover as the songs come in, one by one, then floods the disc and draws a check. Tap the ring mid-download and it unwinds; tap again and it picks up where it was.",
-  "tags": ["Interface", "Music", "Motion"],
+  "description": "A download control for Abbey Road. Press Download and the pill folds into a progress ring while the colour sweeps round the grey cover like a clock hand, song by song. Tap the ring to stop and the sweep unwinds; tap again mid-unwind and it carries on from there. Remove it and the colour drains back out.",
+  "tags": [
+    "Interface",
+    "Music",
+    "Motion"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:30:00.000Z",
-  "intent": "A music-app save control finished to the edge, interruptible both ways, with one over-the-top flourish: the progress ring is made of the cover art.",
-  "tile": { "cols": 3, "rows": 3 },
-  "sources": ["https://herb.art/top-songs", "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"]
+  "intent": "A music-app save control finished to the edge and interruptible both ways, with one flourish: the cover itself is the progress ring, colour sweeping in as the album lands on the device.",
+  "tile": {
+    "cols": 3,
+    "rows": 3
+  },
+  "sources": [
+    "https://herb.art/top-songs",
+    "https://developer.apple.com/design/human-interface-guidelines/progress-indicators"
+  ]
 }

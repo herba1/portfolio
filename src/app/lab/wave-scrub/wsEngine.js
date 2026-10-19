@@ -10,36 +10,6 @@ const clock = (seconds, tenths) => {
   return tenths ? `${base}.${Math.floor((t - whole) * 10)}` : base;
 };
 
-function hsl([r, g, b]) {
-  const R = r / 255;
-  const G = g / 255;
-  const B = b / 255;
-  const max = Math.max(R, G, B);
-  const min = Math.min(R, G, B);
-  const l = (max + min) / 2;
-  if (max === min) return [0, 0, l];
-  const d = max - min;
-  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-  const h = (max === R ? (G - B) / d + (G < B ? 6 : 0) : max === G ? (B - R) / d + 2 : (R - G) / d + 4) / 6;
-  return [h, s, l];
-}
-
-function rgb([h, s, l]) {
-  if (!s) return [l * 255, l * 255, l * 255];
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  const f = (t) => {
-    const x = t < 0 ? t + 1 : t > 1 ? t - 1 : t;
-    if (x < 1 / 6) return p + (q - p) * 6 * x;
-    if (x < 1 / 2) return q;
-    if (x < 2 / 3) return p + (q - p) * (2 / 3 - x) * 6;
-    return p;
-  };
-  return [f(h + 1 / 3) * 255, f(h) * 255, f(h - 1 / 3) * 255];
-}
-
-const css = (c) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;
-
 export function createScrub(n, track, wave, { playing = true, from = 0, onSection, onPlaying }) {
   const Z = { x: 1, v: 0, to: 1, k: 210, c: 2 * 0.92 * Math.sqrt(210) };
   const media = { playing, offset: from, startedAt: performance.now(), duration: track.duration, scrubbing: false };
@@ -47,8 +17,6 @@ export function createScrub(n, track, wave, { playing = true, from = 0, onSectio
   const pointer = { on: false, x: 0, pressed: false, id: null, timer: 0 };
   const geo = { w: 0, h: 0, dpr: 1 };
   const g = n.canvas.getContext("2d");
-  let played = [];
-  let rest = [];
   let raf = 0;
   let last = 0;
   let acc = 0;
@@ -109,48 +77,32 @@ export function createScrub(n, track, wave, { playing = true, from = 0, onSectio
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.clearRect(0, 0, w, h);
     const { v0, D } = windowNow();
-    const pitch = 4;
-    const bar = 2.5;
+    const pitch = w > 640 ? 6 : 5;
+    const bar = pitch - 2;
     const count = Math.floor(w / pitch);
+    const pad = (w - count * pitch) / 2;
     const mid = h / 2;
-    const beat = (t * track.bpm) / 60;
-    const env = media.playing && !media.scrubbing ? Math.exp(-(beat - Math.floor(beat)) * 4) : 0;
     const headX = ((t - v0) / D) * w;
+    const hoverX = pointer.on && !pointer.pressed ? pointer.x * w : headX;
+    const lo = Math.min(headX, hoverX);
+    const hi = Math.max(headX, hoverX);
     for (let i = 0; i < count; i += 1) {
-      const x = i * pitch + (w - count * pitch) / 2;
+      const x = i * pitch + pad;
       const t0 = v0 + (x / w) * D;
       const t1 = v0 + ((x + pitch) / w) * D;
-      const near = Math.max(0, 1 - Math.abs(x - headX) / 56);
-      let peak = peakAt(t0, t1) * (1 + env * near * 0.28);
-      peak = Math.min(1, peak);
-      const half = Math.max(1, peak * (mid - 4));
-      const col = Math.min(played.length - 1, Math.floor((t0 / media.duration) * played.length));
-      const isPlayed = x + bar <= headX;
-      const split = !isPlayed && x < headX;
-      g.fillStyle = played.length ? (isPlayed ? played[col] : rest[col]) : isPlayed ? "#222" : "#ccc";
+      const peak = Math.min(1, peakAt(t0, t1));
+      const half = Math.max(bar / 2, peak * (mid - 2));
+      const centre = x + bar / 2;
+      const isPlayed = centre <= headX;
+      const inPreview = centre > lo && centre <= hi;
+      g.fillStyle = inPreview ? n.preview : isPlayed ? n.ink : n.rest;
       g.beginPath();
       g.roundRect(x, mid - half, bar, half * 2, bar / 2);
       g.fill();
-      if (split && played.length) {
-        g.save();
-        g.beginPath();
-        g.rect(x, 0, headX - x, h);
-        g.clip();
-        g.fillStyle = played[col];
-        g.beginPath();
-        g.roundRect(x, mid - half, bar, half * 2, bar / 2);
-        g.fill();
-        g.restore();
-      }
     }
     if (headX >= -2 && headX <= w + 2) {
       g.fillStyle = n.ink;
       g.fillRect(Math.round(headX) - 1, 0, 2, h);
-    }
-    if (pointer.on && !pointer.pressed) {
-      const hx = Math.round(pointer.x * w) + 0.5;
-      g.fillStyle = n.ink2;
-      for (let y = 0; y < h; y += 6) g.fillRect(hx - 0.5, y, 1, 3);
     }
   };
 
@@ -173,7 +125,7 @@ export function createScrub(n, track, wave, { playing = true, from = 0, onSectio
       el.style.transform = `translateX(${left.toFixed(1)}px)`;
       el.style.width = `${width.toFixed(1)}px`;
       el.toggleAttribute("data-clipped", x0 < 0);
-      el.toggleAttribute("data-narrow", width < 56);
+      el.toggleAttribute("data-narrow", width < 88);
     });
     const si = sectionAt(t, track.sections);
     if (si !== section) {
@@ -197,7 +149,8 @@ export function createScrub(n, track, wave, { playing = true, from = 0, onSectio
       n.bubbleTime.textContent = clock(ht, pointer.pressed);
       n.bubbleName.textContent = name;
       const bw = n.bubble.offsetWidth;
-      const px = clamp(pointer.x * geo.w, bw / 2, geo.w - bw / 2);
+      const hx = pointer.pressed ? ((ht - windowNow().v0) / windowNow().D) : pointer.x;
+      const px = clamp(hx * geo.w, bw / 2, geo.w - bw / 2);
       n.bubble.style.transform = `translateX(${(px - bw / 2).toFixed(1)}px)`;
     }
   };
@@ -327,18 +280,6 @@ export function createScrub(n, track, wave, { playing = true, from = 0, onSectio
   };
 
   return {
-    setColors(columns, ground) {
-      played = columns.map((c) => {
-        const [h, s, l] = hsl(c);
-        return css(rgb([h, s < 0.12 ? s : Math.min(1, s * 1.15 + 0.1), Math.min(0.5, Math.max(0.28, l))]));
-      });
-      rest = columns.map((c) => {
-        const [h, s, l] = hsl(c);
-        const deep = rgb([h, s < 0.12 ? s : Math.min(1, s * 1.15 + 0.1), Math.min(0.5, Math.max(0.28, l))]);
-        return css(deep.map((v, i) => v + (ground[i] - v) * 0.72));
-      });
-      wake();
-    },
     setPlaying(next) {
       if (next === media.playing) return;
       media.offset = position();

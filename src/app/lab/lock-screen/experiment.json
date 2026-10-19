@@ -1,10 +1,21 @@
 {
   "title": "Lock Screen",
-  "description": "A phone lock screen with a music live activity. The clock is set in big tabular numerals that roll on the minute, the artwork sits large in the middle, and the media widget scrubs and plays. Swipe the covers or the widget to move between top songs; each landing blooms the new cover's colour through the screen and out past the phone.",
-  "tags": ["Interface", "Motion", "Gesture", "Music"],
+  "description": "A phone lock screen with a music live activity. The clock reads the real time in big tabular numerals that roll on the minute, the artwork sits large in the middle, and the media widget scrubs and plays. Swipe the cover or the widget between top songs and the whole screen blends from one cover's colour to the next under your finger.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Gesture",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:30:00.000Z",
-  "intent": "A lock screen whose whole palette is the song: swipe to change it, and the colour floods in from the cover.",
-  "tile": { "cols": 2, "rows": 6 },
-  "sources": ["https://developer.apple.com/design/human-interface-guidelines/live-activities", "https://developer.apple.com/videos/play/wwdc2018/803/"]
+  "intent": "A lock screen whose whole palette is the song: drag between tracks and the colour follows the swipe.",
+  "tile": {
+    "cols": 2,
+    "rows": 6
+  },
+  "sources": [
+    "https://developer.apple.com/design/human-interface-guidelines/live-activities",
+    "https://developer.apple.com/videos/play/wwdc2018/803/"
+  ]
 }

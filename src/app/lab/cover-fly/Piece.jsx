@@ -8,117 +8,117 @@ import { clack, toss, wakeAudio } from "./foley";
 import "./cover-fly.css";
 
 const BASE = 160;
-const GHOSTS = [3, 6, 9];
-const START = ["abbey-road", "revolver"];
+const START = ["abbey-road", "revolver", "rubber-soul"];
 const byId = Object.fromEntries(ALBUMS.map((a) => [a.id, a]));
 
-const ease = (u) => 1 - Math.pow(1 - u, 2.4);
+const ease = (u) => {
+  const s = u * u * (3 - 2 * u);
+  const o = 1 - Math.pow(1 - u, 3);
+  return s * 0.45 + o * 0.55;
+};
 
-function centerOf(el, origin) {
+function rectIn(el, origin) {
   const r = el.getBoundingClientRect();
   return { x: r.left - origin.left + r.width / 2, y: r.top - origin.top + r.height / 2, w: r.width };
 }
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
-  const stripRef = useRef(null);
   const scrollRef = useRef(null);
   const gridEls = useRef(new Map());
-  const frameEls = useRef(new Map());
+  const slotEls = useRef(new Map());
   const flyerEls = useRef(new Map());
   const flights = useRef(new Map());
-  const dest = useRef(new Map(START.map((id) => [id, "strip"])));
   const raf = useRef(0);
-  const tickRef = useRef(null);
-  const [queue, setQueue] = useState(START);
-  const [leaving, setLeaving] = useState([]);
+  const [dock, setDock] = useState(() => START.map((id) => ({ id, leaving: false })));
+  const queue = dock.filter((d) => !d.leaving).map((d) => d.id);
   const [flying, setFlying] = useState({});
 
-  const land = useCallback((rec) => {
-    flights.current.delete(rec.id);
-    const target = rec.dir === "strip" ? frameEls.current.get(rec.id) : gridEls.current.get(rec.id);
-    target?.animate(
-      [{ transform: "scale(1.1)" }, { transform: "scale(0.97)" }, { transform: "scale(1)" }],
-      { duration: 460, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
-    );
-    if (rec.dir === "strip") {
-      stripRef.current?.animate(
-        [{ transform: "translateY(0)" }, { transform: "translateY(4px)" }, { transform: "translateY(0)" }],
-        { duration: 300, easing: "cubic-bezier(0.3, 0.7, 0.2, 1)" },
-      );
-      target?.animate([{ opacity: 0.85 }, { opacity: 0 }], { duration: 560, easing: "ease-out", pseudoElement: "::after" });
-    }
-    clack();
-    setFlying((f) => {
-      const next = { ...f };
-      delete next[rec.id];
-      return next;
-    });
-    if (rec.dir === "grid") {
-      setQueue((q) => q.filter((x) => x !== rec.id));
-      setLeaving((l) => l.filter((x) => x !== rec.id));
-    }
-  }, []);
+  const targetOf = useCallback((rec) => (rec.dir === "dock" ? slotEls.current.get(rec.id) : gridEls.current.get(rec.id)), []);
 
-  const tick = useCallback(
+  const settle = (el, from = 0.94) => {
+    el?.animate([{ transform: `scale(${from})` }, { transform: "scale(1)" }], { duration: 260, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+  };
+
+  const step = useCallback(
     (now) => {
       const root = rootRef.current;
       if (!root) return;
       const origin = root.getBoundingClientRect();
-      for (const rec of [...flights.current.values()]) {
+      const landed = [];
+      for (const rec of flights.current.values()) {
         const el = flyerEls.current.get(rec.id);
         if (!el) continue;
         if (rec.t0 == null) rec.t0 = now;
+        const target = targetOf(rec);
+        if (target) rec.to = rectIn(target, origin);
+        if (!rec.to) continue;
         const u = Math.min(1, (now - rec.t0) / rec.dur);
         const e = ease(u);
-        const targetEl = rec.dir === "strip" ? frameEls.current.get(rec.id) : gridEls.current.get(rec.id);
-        if (targetEl) rec.to = centerOf(targetEl, origin);
         const { from, to } = rec;
-        if (!to) continue;
         const dist = Math.hypot(to.x - from.x, to.y - from.y);
-        const lift = Math.min(260, Math.max(64, dist * 0.38));
-        const cx = (from.x + to.x) / 2 + (to.x - from.x) * 0.12;
+        const lift = Math.min(140, dist * 0.22);
+        const cx = from.x + (to.x - from.x) * 0.5;
         const cy = Math.min(from.y, to.y) - lift;
         const k = 1 - e;
         const x = k * k * from.x + 2 * k * e * cx + e * e * to.x;
         const y = k * k * from.y + 2 * k * e * cy + e * e * to.y;
         const w = from.w + (to.w - from.w) * e;
-        const r = Math.sin(Math.PI * e) * (to.x >= from.x ? 10 : -10);
+        const arc = Math.sin(Math.PI * e);
+        const r = arc * (to.x >= from.x ? 5 : -5) + rec.spin * (1 - e);
+        const s = (w / BASE) * (1 + arc * 0.06);
         rec.cur = { x, y, w };
-        rec.trail.push({ x, y, w, r });
-        if (rec.trail.length > 12) rec.trail.shift();
-        el.style.transform = `translate3d(${(x - BASE / 2).toFixed(2)}px, ${(y - BASE / 2).toFixed(2)}px, 0) rotate(${r.toFixed(2)}deg) scale(${(w / BASE).toFixed(4)})`;
-        GHOSTS.forEach((lag, gi) => {
-          const ghost = flyerEls.current.get(`${rec.id}:${gi}`);
-          if (!ghost) return;
-          const p = rec.trail[Math.max(0, rec.trail.length - 1 - lag)];
-          ghost.style.transform = `translate3d(${(p.x - BASE / 2).toFixed(2)}px, ${(p.y - BASE / 2).toFixed(2)}px, 0) rotate(${p.r.toFixed(2)}deg) scale(${(p.w / BASE).toFixed(4)})`;
-          ghost.style.opacity = u < 1 ? String((0.3 - gi * 0.09) * Math.sin(Math.PI * Math.min(1, u * 1.15))) : "0";
+        rec.r = r;
+        el.style.transform = `translate3d(${(x - BASE / 2).toFixed(2)}px, ${(y - BASE / 2).toFixed(2)}px, 0) rotate(${r.toFixed(2)}deg) scale(${s.toFixed(4)})`;
+        el.style.setProperty("--cf-lift", arc.toFixed(3));
+        if (u >= 1) landed.push(rec);
+      }
+      for (const rec of landed) {
+        flights.current.delete(rec.id);
+        settle(targetOf(rec), rec.dir === "dock" ? 0.92 : 0.97);
+        clack();
+      }
+      if (landed.length) {
+        setFlying((f) => {
+          const next = { ...f };
+          landed.forEach((rec) => delete next[rec.id]);
+          return next;
         });
-        if (u >= 1) land(rec);
       }
     },
-    [land],
+    [targetOf],
   );
 
+  const stepRef = useRef(step);
   useEffect(() => {
-    tickRef.current = tick;
-  }, [tick]);
+    stepRef.current = step;
+  }, [step]);
 
   const loop = useCallback(() => {
-    cancelAnimationFrame(raf.current);
-    const step = (now) => {
-      tickRef.current?.(now);
-      if (flights.current.size) raf.current = requestAnimationFrame(step);
+    if (raf.current) return;
+    const tick = (now) => {
+      stepRef.current(now);
+      raf.current = flights.current.size ? requestAnimationFrame(tick) : 0;
     };
-    raf.current = requestAnimationFrame(step);
+    raf.current = requestAnimationFrame(tick);
   }, []);
 
-  useEffect(() => () => cancelAnimationFrame(raf.current), []);
+  useEffect(
+    () => () => {
+      cancelAnimationFrame(raf.current);
+      raf.current = 0;
+    },
+    [],
+  );
 
   useLayoutEffect(() => {
-    if (flights.current.size) tick(performance.now());
-  }, [flying, tick]);
+    if (flights.current.size) step(performance.now());
+  }, [flying, step]);
+
+  const queueRef = useRef(queue);
+  useEffect(() => {
+    queueRef.current = queue;
+  }, [queue]);
 
   const send = useCallback(
     (id) => {
@@ -126,20 +126,35 @@ export default function Piece({ embedded = false }) {
       if (!root) return;
       wakeAudio();
       const origin = root.getBoundingClientRect();
-      const dir = dest.current.get(id) === "strip" ? "grid" : "strip";
-      dest.current.set(id, dir);
       const prev = flights.current.get(id);
-      const sourceEl = dir === "strip" ? gridEls.current.get(id) : frameEls.current.get(id);
-      const from = prev?.cur || (sourceEl ? centerOf(sourceEl, origin) : null);
+      const inQueue = queueRef.current.includes(id);
+      const dir = inQueue ? "grid" : "dock";
+      const sourceEl = dir === "dock" ? gridEls.current.get(id) : slotEls.current.get(id);
+      const from = prev?.cur || (sourceEl ? rectIn(sourceEl, origin) : null);
       if (!from) return;
-      flights.current.set(id, { id, dir, from, to: null, cur: from, t0: null, dur: prev ? 520 : 660, trail: prev?.trail || [] });
-      setFlying((f) => ({ ...f, [id]: dir }));
-      if (dir === "strip") {
-        setQueue((q) => (q.includes(id) ? q : [...q, id]));
-        setLeaving((l) => l.filter((x) => x !== id));
-      } else {
-        setLeaving((l) => (l.includes(id) ? l : [...l, id]));
+      const toEl = dir === "dock" ? null : gridEls.current.get(id);
+      const guess = toEl ? rectIn(toEl, origin) : null;
+      const dist = guess ? Math.hypot(guess.x - from.x, guess.y - from.y) : 600;
+      flights.current.set(id, {
+        id,
+        dir,
+        from,
+        to: null,
+        cur: from,
+        t0: null,
+        dur: prev ? 440 : Math.min(720, 440 + dist * 0.35),
+        spin: prev?.r || 0,
+      });
+      queueRef.current = inQueue ? queueRef.current.filter((x) => x !== id) : [...queueRef.current, id];
+      setDock((list) => {
+        if (inQueue) return list.map((d) => (d.id === id ? { ...d, leaving: true } : d));
+        if (list.some((d) => d.id === id)) return list.map((d) => (d.id === id ? { ...d, leaving: false } : d));
+        return [...list, { id, leaving: false }];
+      });
+      if (inQueue) {
+        setTimeout(() => setDock((list) => list.filter((d) => !(d.id === id && d.leaving))), 460);
       }
+      setFlying((f) => ({ ...f, [id]: dir }));
       toss();
       loop();
     },
@@ -147,11 +162,9 @@ export default function Piece({ embedded = false }) {
   );
 
   const clearAll = () => {
-    const ids = queue.filter((id) => dest.current.get(id) === "strip");
-    ids.forEach((id, i) => setTimeout(() => send(id), i * 90));
+    [...queueRef.current].reverse().forEach((id, i) => setTimeout(() => send(id), i * 70));
   };
 
-  const queued = queue.filter((id) => !leaving.includes(id));
   const prevCount = useRef(queue.length);
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -160,26 +173,28 @@ export default function Piece({ embedded = false }) {
   }, [queue.length]);
 
   const Root = embedded ? "div" : "main";
+  const count = queue.length;
 
   return (
     <Root ref={rootRef} className="cf-root" data-embedded={embedded ? "" : undefined}>
       {embedded ? null : (
         <header className="cf-head">
           <h1 className="text-title-sm">Cover Fly</h1>
-          <p className="cf-hint text-ui-lg">Tap a record to toss it onto the reel. Tap it on the reel, or mid-air, to send it home.</p>
         </header>
       )}
       <div className="cf-body">
         <ul className="cf-grid">
           {ALBUMS.map((a) => {
-            const away = queue.includes(a.id) || flying[a.id];
+            const pos = queue.indexOf(a.id);
+            const queued = pos >= 0;
             return (
               <li key={a.id} className="cf-cell">
                 <button
                   type="button"
                   className="cf-cover"
-                  data-away={away ? "" : undefined}
-                  aria-label={away ? `${a.title} is on the reel. Send it back` : `Queue ${a.title}`}
+                  data-queued={queued ? "" : undefined}
+                  aria-pressed={queued}
+                  aria-label={queued ? `${a.title}, number ${pos + 1} up next. Remove from queue` : `Add ${a.title} to up next`}
                   onClick={() => send(a.id)}
                   ref={(el) => {
                     if (el) gridEls.current.set(a.id, el);
@@ -187,6 +202,11 @@ export default function Piece({ embedded = false }) {
                   }}
                 >
                   <img src={a.cover} alt="" draggable={false} />
+                  <span className="cf-badge" aria-hidden="true">
+                    <span key={pos} className="cf-badge-n">
+                      {queued ? pos + 1 : ""}
+                    </span>
+                  </span>
                 </button>
                 <span className="cf-title">{a.title}</span>
                 <span className="cf-year">{a.year}</span>
@@ -196,72 +216,57 @@ export default function Piece({ embedded = false }) {
         </ul>
       </div>
       <section className="cf-dock" aria-label="Up next">
-        <div className="cf-dock-head">
-          <span className="cf-dock-label">Up next</span>
-          <span className="cf-dock-count">
-            {queued.length} {queued.length === 1 ? "record" : "records"}
-          </span>
-          <button type="button" className="cf-clear" onClick={clearAll} disabled={!queued.length}>
-            Clear
-          </button>
+        <div className="cf-dock-label">
+          <span className="cf-dock-name">Up next</span>
+          <span className="cf-dock-count">{count === 0 ? "Nothing queued" : `${count} ${count === 1 ? "record" : "records"}`}</span>
         </div>
-        <div ref={stripRef} className="cf-strip">
-          <div ref={scrollRef} className="cf-scroll" data-scroll-contain="">
-            <ol className="cf-reel">
-              {queue.map((id, i) => {
-                const a = byId[id];
-                return (
-                  <li key={id} className="cf-frame" data-leaving={leaving.includes(id) ? "" : undefined}>
-                    <button
-                      type="button"
-                      className="cf-frame-cover"
-                      data-hidden={flying[id] ? "" : undefined}
-                      aria-label={`Send ${a.title} back`}
-                      onClick={() => send(id)}
-                      ref={(el) => {
-                        if (el) frameEls.current.set(id, el);
-                        else frameEls.current.delete(id);
-                      }}
-                    >
-                      <img src={a.cover} alt="" draggable={false} />
-                    </button>
-                    <span className="cf-edge">{String(i + 1).padStart(2, "0")}A</span>
-                  </li>
-                );
-              })}
-              {queued.length === 0 ? <li className="cf-empty">Tap a record to load the reel</li> : null}
-            </ol>
-          </div>
+        <div ref={scrollRef} className="cf-scroll" data-scroll-contain="">
+          <ol className="cf-queue">
+            {dock.map(({ id, leaving }) => {
+              const a = byId[id];
+              return (
+                <li key={id} className="cf-slot" data-leaving={leaving ? "" : undefined}>
+                  <button
+                    type="button"
+                    className="cf-slot-cover"
+                    data-pending={flying[id] === "dock" || leaving ? "" : undefined}
+                    tabIndex={leaving ? -1 : undefined}
+                    aria-label={`Remove ${a.title} from up next`}
+                    title={a.title}
+                    onClick={() => send(id)}
+                    ref={(el) => {
+                      if (el) slotEls.current.set(id, el);
+                      else slotEls.current.delete(id);
+                    }}
+                  >
+                    <img src={a.cover} alt="" draggable={false} />
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
         </div>
+        <button type="button" className="cf-clear" onClick={clearAll} disabled={!count}>
+          Clear
+        </button>
       </section>
       <div className="cf-sky" aria-hidden="true">
         {Object.keys(flying).map((id) => (
-          <div key={id}>
-            {GHOSTS.map((_, gi) => (
-              <img
-                key={gi}
-                className="cf-ghost"
-                src={byId[id].cover}
-                alt=""
-                draggable={false}
-                ref={(el) => {
-                  if (el) flyerEls.current.set(`${id}:${gi}`, el);
-                  else flyerEls.current.delete(`${id}:${gi}`);
-                }}
-              />
-            ))}
-            <img
-              className="cf-flyer"
-              src={byId[id].cover}
-              alt=""
-              draggable={false}
-              onPointerDown={() => send(id)}
-              ref={(el) => {
-                if (el) flyerEls.current.set(id, el);
-                else flyerEls.current.delete(id);
-              }}
-            />
-          </div>
+          <img
+            key={id}
+            className="cf-flyer"
+            src={byId[id].cover}
+            alt=""
+            draggable={false}
+            onPointerDown={(e) => {
+              e.preventDefault();
+              send(id);
+            }}
+            ref={(el) => {
+              if (el) flyerEls.current.set(id, el);
+              else flyerEls.current.delete(id);
+            }}
+          />
         ))}
       </div>
     </Root>

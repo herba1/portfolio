@@ -1,10 +1,20 @@
 {
   "title": "Cover Palette",
-  "description": "Hover any Beatles album and the whole player re-themes from its cover: six colours are pulled from the artwork in a canvas, and every surface, line, ink and accent slides to its new value through OKLCH, with a share-weighted swatch strip you can copy from.",
-  "tags": ["Interface", "Color", "Music"],
+  "description": "Hover or pick any Beatles album and the whole player re-themes from its cover: the colours are pulled from the artwork in a canvas, the page takes the cover's own ground, and every surface, ink and accent slides to its new value through OKLCH. Tap a swatch to copy its hex.",
+  "tags": [
+    "Interface",
+    "Color",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T13:00:00.000Z",
-  "intent": "Album art as a live theme source: the palette is computed, not hand-picked, and each role eases on its own lightness, chroma and hue axes so the colour never passes through mud.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://bottosson.github.io/posts/oklab/", "https://developer.mozilla.org/en-US/docs/Web/CSS/@property"]
+  "intent": "Album art as a live theme source, like a streaming app's album page: the palette is computed, not hand-picked, each role eases on its own lightness, chroma and hue axes, and the ink flips cleanly when the ground crosses from light to dark.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://bottosson.github.io/posts/oklab/",
+    "https://developer.mozilla.org/en-US/docs/Web/CSS/@property"
+  ]
 }

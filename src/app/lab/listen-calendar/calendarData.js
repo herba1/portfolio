@@ -21,7 +21,7 @@ const WEIGHTS = {
   revolver: 5,
   "rubber-soul": 5,
   "sgt-pepper": 3,
-  "white-album": 3,
+  "white-album": 0,
   "let-it-be": 3,
   "magical-mystery-tour": 2,
   help: 2,
@@ -54,7 +54,7 @@ function buildYear() {
   for (let i = 0; i < count; i += 1) {
     if (phaseLeft <= 0) {
       phaseAlbum = pickWeighted(rand);
-      phaseLeft = 5 + Math.floor(rand() * 16);
+      phaseLeft = 2 + Math.floor(rand() * 6);
     }
     phaseLeft -= 1;
     const date = new Date(start + i * DAY_MS);
@@ -85,6 +85,7 @@ function buildYear() {
       week: Math.floor((i + offset) / 7),
       weekday,
       month,
+      date: date.getUTCDate(),
       dateLabel: `${WEEKDAYS[weekday]}, ${date.getUTCDate()} ${MONTHS[month]}`,
       shortLabel: `${MONTHS[month].slice(0, 3)} ${date.getUTCDate()}`,
       plays,

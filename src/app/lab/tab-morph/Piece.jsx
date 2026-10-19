@@ -15,30 +15,30 @@ const TABS = [
   { id: "radio", label: "Radio", paths: ["M12 10.2a1.8 1.8 0 1 1 0 3.6 1.8 1.8 0 0 1 0-3.6z", "M8.1 8.1a5.5 5.5 0 0 0 0 7.8", "M15.9 8.1a5.5 5.5 0 0 1 0 7.8", "M5.2 5.2a9.6 9.6 0 0 0 0 13.6", "M18.8 5.2a9.6 9.6 0 0 1 0 13.6"] },
 ];
 const PAD = 6;
-const INSET = 4;
+const INSET = 0;
+const RADIUS = 26;
 
 function TabIcon({ tab, active }) {
   const ref = useRef(null);
+  const was = useRef(active);
   useEffect(() => {
-    if (!active || !ref.current) return;
+    const rising = active && !was.current;
+    was.current = active;
+    if (!rising || !ref.current) return;
     if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    const paths = ref.current.querySelectorAll("path");
-    paths.forEach((p, i) => {
-      p.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], {
-        duration: 520,
-        delay: 60 + i * 70,
-        easing: "cubic-bezier(0.65, 0, 0.35, 1)",
-        fill: "backwards",
-      });
+    const anims = [];
+    ref.current.querySelectorAll("path").forEach((p, i) => {
+      anims.push(
+        p.animate([{ strokeDashoffset: 1 }, { strokeDashoffset: 0 }], {
+          duration: 460,
+          delay: 40 + i * 60,
+          easing: "cubic-bezier(0.65, 0, 0.35, 1)",
+          fill: "backwards",
+        }),
+      );
     });
-    ref.current.animate(
-      [
-        { transform: "scale(0.86)", easing: "cubic-bezier(0.22, 1, 0.36, 1)" },
-        { transform: "scale(1.08)", offset: 0.5, easing: "cubic-bezier(0.45, 0, 0.55, 1)" },
-        { transform: "scale(1)" },
-      ],
-      { duration: 520, easing: "linear" },
-    );
+    anims.push(ref.current.animate([{ transform: "scale(0.9)" }, { transform: "scale(1)" }], { duration: 360, easing: "cubic-bezier(0.22, 1, 0.36, 1)" }));
+    return () => anims.forEach((a) => a.cancel());
   }, [active]);
   return (
     <svg ref={ref} className="tab-morph-icon" viewBox="0 0 24 24" aria-hidden="true">
@@ -52,19 +52,17 @@ function TabIcon({ tab, active }) {
 export default function Piece({ embedded = false }) {
   const barRef = useRef(null);
   const pillRef = useRef(null);
-  const pillImgRef = useRef(null);
-  const glowRef = useRef(null);
-  const glowImgRef = useRef(null);
+  const litRef = useRef(null);
   const engineRef = useRef(null);
   const activeRef = useRef(0);
   const [active, setActive] = useState(0);
-  const [dir, setDir] = useState(1);
+  const [pages, setPages] = useState([{ id: "home", state: "in", dir: "right", first: true }]);
   const [playing, setPlaying] = useState(true);
 
   useEffect(() => {
     const bar = barRef.current;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    const st = { l: 0, r: 0, vl: 0, vr: 0, tl: 0, tr: 0, kl: 300, kr: 300, w: 0, W: 0, raf: 0, last: 0, drag: null, base: 0 };
+    const st = { l: 0, r: 0, vl: 0, vr: 0, tl: 0, tr: 0, kl: 300, kr: 300, w: 0, W: 0, H: 0, raf: 0, last: 0, drag: null };
 
     const rectFor = (c) => {
       const left = PAD + c * st.w + INSET;
@@ -72,25 +70,22 @@ export default function Piece({ embedded = false }) {
     };
 
     const paint = () => {
-      const width = Math.max(0, st.r - st.l);
-      const stretch = st.base ? Math.max(0, width / st.base - 1) : 0;
-      const sy = 1 - Math.min(0.16, stretch * 0.22);
-      pillRef.current.style.transform = `translate3d(${st.l}px, 0, 0) scaleY(${sy.toFixed(4)})`;
+      const l = st.l;
+      const width = Math.max(0, st.r - l);
+      pillRef.current.style.transform = `translate3d(${l}px, 0, 0)`;
       pillRef.current.style.width = `${width}px`;
-      pillImgRef.current.style.transform = `translate3d(${-st.l}px, 0, 0)`;
-      glowRef.current.style.transform = `translate3d(${st.l}px, 0, 0)`;
-      glowRef.current.style.width = `${width}px`;
-      glowImgRef.current.style.transform = `translate3d(${-st.l}px, 0, 0)`;
+      const right = Math.max(0, st.W - st.r);
+      litRef.current.style.clipPath = `inset(${PAD}px ${right.toFixed(2)}px ${PAD}px ${l.toFixed(2)}px round ${RADIUS}px)`;
     };
 
     const loop = (now) => {
-      const dt = Math.min(0.033, (now - st.last) / 1000);
+      const dt = Math.min(0.05, (now - st.last) / 1000);
       st.last = now;
       const n = Math.max(1, Math.ceil(dt * 240));
       const h = dt / n;
       for (let i = 0; i < n; i += 1) {
-        const al = st.kl * (st.tl - st.l) - 2 * Math.sqrt(st.kl) * 0.92 * st.vl;
-        const ar = st.kr * (st.tr - st.r) - 2 * Math.sqrt(st.kr) * 0.92 * st.vr;
+        const al = st.kl * (st.tl - st.l) - 2 * Math.sqrt(st.kl) * st.vl;
+        const ar = st.kr * (st.tr - st.r) - 2 * Math.sqrt(st.kr) * st.vr;
         st.vl += al * h;
         st.vr += ar * h;
         st.l += st.vl * h;
@@ -119,14 +114,14 @@ export default function Piece({ embedded = false }) {
       st.raf = requestAnimationFrame(loop);
     };
 
-    const aim = (c, stiffLead) => {
+    const aim = (c, snap) => {
       const [tl, tr] = rectFor(c);
       const movingRight = tl > st.tl + 0.5;
       const movingLeft = tl < st.tl - 0.5;
-      const lead = stiffLead ? 460 : 300;
-      const trail = stiffLead ? 150 : 300;
-      st.kl = movingLeft ? lead : movingRight ? trail : 300;
-      st.kr = movingRight ? lead : movingLeft ? trail : 300;
+      const lead = snap ? 520 : 900;
+      const trail = snap ? 150 : 520;
+      st.kl = movingLeft ? lead : movingRight ? trail : 320;
+      st.kr = movingRight ? lead : movingLeft ? trail : 320;
       st.tl = tl;
       st.tr = tr;
       kick();
@@ -135,11 +130,6 @@ export default function Piece({ embedded = false }) {
     const measure = () => {
       st.W = bar.clientWidth;
       st.w = (st.W - PAD * 2) / TABS.length;
-      st.base = st.w - INSET * 2;
-      for (const img of [pillImgRef.current, glowImgRef.current]) {
-        img.style.width = `${st.W}px`;
-        img.style.top = `${26 - st.W * 0.66}px`;
-      }
       const [tl, tr] = rectFor(activeRef.current);
       st.tl = st.l = tl;
       st.tr = st.r = tr;
@@ -153,7 +143,7 @@ export default function Piece({ embedded = false }) {
     };
 
     const onDown = (e) => {
-      if (e.button !== 0) return;
+      if (e.button !== 0 || st.drag) return;
       st.drag = { id: e.pointerId, x: e.clientX, moved: false };
     };
     const onMove = (e) => {
@@ -161,7 +151,9 @@ export default function Piece({ embedded = false }) {
       if (!st.drag.moved && Math.abs(e.clientX - st.drag.x) < 6) return;
       if (!st.drag.moved) {
         st.drag.moved = true;
-        bar.setPointerCapture(e.pointerId);
+        try {
+          bar.setPointerCapture(e.pointerId);
+        } catch {}
         bar.dataset.dragging = "";
       }
       aim(indexAt(e.clientX), false);
@@ -174,20 +166,34 @@ export default function Piece({ embedded = false }) {
       st.drag = null;
       delete bar.dataset.dragging;
       if (moved) {
-        aim(Math.round(indexAt(e.clientX)), true);
+        st.suppressClick = true;
+        window.setTimeout(() => {
+          st.suppressClick = false;
+        }, 0);
+        aim(activeRef.current, true);
       }
     };
 
     engineRef.current = {
+      click(i) {
+        if (st.suppressClick) return;
+        engineRef.current.select(i);
+      },
       select(i, move = true) {
-        if (i === activeRef.current && move) {
-          aim(i, true);
-          return;
-        }
-        setDir(i > activeRef.current ? 1 : -1);
+        if (move) aim(i, true);
+        if (i === activeRef.current) return;
+        const dir = i > activeRef.current ? "right" : "left";
         activeRef.current = i;
         setActive(i);
-        if (move) aim(i, true);
+        const id = TABS[i].id;
+        setPages((prev) => {
+          const has = prev.some((p) => p.id === id);
+          let next = prev.map((p) => (p.id === id ? { id, state: "in", dir } : p.state === "in" ? { ...p, state: "out", dir } : p));
+          if (!has) next = [...next, { id, state: "in", dir }];
+          const outs = next.filter((p) => p.state === "out");
+          if (outs.length > 2) next = next.filter((p) => p.state === "in" || outs.slice(-2).includes(p));
+          return next;
+        });
       },
     };
 
@@ -198,6 +204,7 @@ export default function Piece({ embedded = false }) {
     bar.addEventListener("pointermove", onMove);
     bar.addEventListener("pointerup", onUp);
     bar.addEventListener("pointercancel", onUp);
+    bar.addEventListener("lostpointercapture", onUp);
     return () => {
       cancelAnimationFrame(st.raf);
       ro.disconnect();
@@ -205,6 +212,7 @@ export default function Piece({ embedded = false }) {
       bar.removeEventListener("pointermove", onMove);
       bar.removeEventListener("pointerup", onUp);
       bar.removeEventListener("pointercancel", onUp);
+      bar.removeEventListener("lostpointercapture", onUp);
     };
   }, []);
 
@@ -221,7 +229,11 @@ export default function Piece({ embedded = false }) {
     barRef.current?.querySelectorAll("[role=tab]")[next]?.focus();
   };
 
-  const Page = PAGES[TABS[active].id];
+  const settle = (id) => (e) => {
+    if (e.target !== e.currentTarget || e.propertyName !== "opacity") return;
+    setPages((prev) => prev.filter((p) => !(p.id === id && p.state === "out")));
+  };
+
   const Root = embedded ? "div" : "main";
 
   return (
@@ -229,15 +241,32 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header className="tab-morph-head">
           <h1 className="tab-morph-title">Tab Morph</h1>
-          <p className="tab-morph-hint">Tap a tab, or drag along the bar and let go.</p>
         </header>
       )}
 
       <section className="tab-morph-screen">
-        <div className="tab-morph-scroll" data-scroll-contain="">
-          <div key={TABS[active].id} className="tab-morph-page" data-dir={dir > 0 ? "right" : "left"} role="tabpanel" id={`tab-morph-panel-${TABS[active].id}`}>
-            <Page />
-          </div>
+        <div className="tab-morph-pages">
+          {pages.map((p) => {
+            const Page = PAGES[p.id];
+            const live = p.state === "in";
+            return (
+              <div
+                key={p.id}
+                className="tab-morph-page"
+                data-state={p.state}
+                data-dir={p.dir}
+                data-first={p.first ? "" : undefined}
+                data-scroll-contain=""
+                role={live ? "tabpanel" : undefined}
+                id={live ? `tab-morph-panel-${p.id}` : undefined}
+                aria-hidden={live ? undefined : true}
+                inert={!live}
+                onTransitionEnd={live ? undefined : settle(p.id)}
+              >
+                <Page />
+              </div>
+            );
+          })}
         </div>
 
         <div className="tab-morph-dock">
@@ -255,14 +284,8 @@ export default function Piece({ embedded = false }) {
             <span className="tab-morph-progress" aria-hidden="true" data-playing={playing ? "" : undefined} />
           </div>
 
-          <div className="tab-morph-barwrap">
-            <div ref={glowRef} className="tab-morph-glow" aria-hidden="true">
-              <img ref={glowImgRef} src={PEPPER.cover} alt="" draggable={false} />
-            </div>
-            <div ref={barRef} className="tab-morph-bar" role="tablist" aria-label="Sections" onKeyDown={onKey}>
-              <div ref={pillRef} className="tab-morph-pill" aria-hidden="true">
-                <img ref={pillImgRef} src={PEPPER.cover} alt="" draggable={false} />
-              </div>
+          <div ref={barRef} className="tab-morph-bar" role="tablist" aria-label="Sections" onKeyDown={onKey}>
+            <div className="tab-morph-tabrow">
               {TABS.map((tab, i) => (
                 <button
                   key={tab.id}
@@ -272,11 +295,20 @@ export default function Piece({ embedded = false }) {
                   aria-selected={i === active}
                   aria-controls={`tab-morph-panel-${tab.id}`}
                   tabIndex={i === active ? 0 : -1}
-                  onClick={() => engineRef.current?.select(i)}
+                  onClick={() => engineRef.current?.click(i)}
                 >
                   <TabIcon tab={tab} active={i === active} />
                   <span className="tab-morph-label">{tab.label}</span>
                 </button>
+              ))}
+            </div>
+            <div ref={pillRef} className="tab-morph-pill" aria-hidden="true" />
+            <div ref={litRef} className="tab-morph-tabrow tab-morph-tabrow--lit" aria-hidden="true">
+              {TABS.map((tab, i) => (
+                <span key={tab.id} className="tab-morph-tab">
+                  <TabIcon tab={tab} active={i === active} />
+                  <span className="tab-morph-label">{tab.label}</span>
+                </span>
               ))}
             </div>
           </div>

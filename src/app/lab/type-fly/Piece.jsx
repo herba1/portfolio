@@ -1,196 +1,327 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { albumById } from "@/app/lab/_music/catalog";
-import { closeAudio, wakeAudio, whoosh } from "./whoosh";
+import { closeAudio, flick, wakeAudio } from "./whoosh";
 
 import "./type-fly.css";
 
-const SET = [
-  ["abbey-road", "#3b78c2"],
-  ["revolver", "#2b2b2e"],
-  ["rubber-soul", "#a8541f"],
-  ["let-it-be", "#c4302b"],
-  ["help", "#2b3a78"],
-  ["magical-mystery-tour", "#d39a12"],
-].map(([id, color]) => ({ ...albumById(id), color }));
+const SET = ["abbey-road", "revolver", "rubber-soul", "let-it-be", "help", "magical-mystery-tour"].map((id) => albumById(id));
 
-const LAYERS = 14;
-const STAGGER = 0.026;
-const STIFF = 150;
-const DAMP = 19;
-const TAU = Math.PI * 2;
+const ARRIVE_K = 70;
+const ARRIVE_C = 2 * Math.sqrt(ARRIVE_K);
+const LEAVE_K = 46;
+const LEAVE_C = 2 * Math.sqrt(LEAVE_K) * 0.9;
+const LIFT_K = 240;
+const LIFT_C = 2 * Math.sqrt(LIFT_K) * 0.92;
+const TAP_SLOP = 8;
+const MAX_LINES = 3;
 
-const clamp01 = (v) => Math.min(1, Math.max(0, v));
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+const smooth = (a, b, v) => {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 
-function ringPoint(d, R) {
-  let u = ((((d + 4 * R) % (8 * R)) + 8 * R) % (8 * R)) - 4 * R;
-  if (u >= -R && u <= R) return [u, R, 0];
-  if (u > R && u <= 3 * R) return [R, R - (u - R), Math.PI / 2];
-  if (u > 3 * R) return [R - (u - 3 * R), -R, Math.PI];
-  if (u < -R && u >= -3 * R) return [-R, R + (u + R), -Math.PI / 2];
-  return [-R - (u + 3 * R), -R, -Math.PI];
+function hash(n) {
+  const s = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return s - Math.floor(s);
 }
 
-function wrapAngle(a) {
-  return a - TAU * Math.round(a / TAU);
+function trackEm(fs) {
+  return (-0.043 * (fs - 12)) / fs;
+}
+
+function fitTitle(title, width, height, family) {
+  const canvas = fitTitle.canvas || (fitTitle.canvas = document.createElement("canvas"));
+  const ctx = canvas.getContext("2d");
+  ctx.font = `600 100px ${family}`;
+  const words = title.split(" ");
+  const measure = (w) => ctx.measureText(w).width;
+  const wordW = words.map(measure);
+  const spaceW = measure(" ");
+  const counts = words.map((w) => Array.from(w).length);
+  for (let fs = 160; fs >= 32; fs -= 2) {
+    const k = fs / 100;
+    const tr = trackEm(fs) * fs;
+    const lh = Math.round((fs * 0.96) / 4) * 4;
+    let lines = 1;
+    let run = 0;
+    let ok = true;
+    for (let i = 0; i < words.length; i += 1) {
+      const w = wordW[i] * k + counts[i] * tr;
+      if (w > width) {
+        ok = false;
+        break;
+      }
+      const add = run === 0 ? w : run + spaceW * k + w;
+      if (add > width) {
+        lines += 1;
+        run = w;
+      } else {
+        run = add;
+      }
+    }
+    if (ok && lines <= MAX_LINES && lines * lh <= height) return { fs, lh };
+  }
+  return { fs: 32, lh: 32 };
+}
+
+function offsetIn(el, stop) {
+  let x = 0;
+  let y = 0;
+  let node = el;
+  while (node && node !== stop) {
+    x += node.offsetLeft;
+    y += node.offsetTop;
+    node = node.offsetParent;
+  }
+  return [x, y];
+}
+
+function Title({ album, id, role }) {
+  const words = album.title.split(" ");
+  let n = 0;
+  return (
+    <div className="tf-set" data-id={id} data-role={role} aria-hidden={role === "out" ? "true" : undefined}>
+      <p className="tf-name" aria-label={album.title}>
+        {words.map((w, wi) => (
+          <span key={wi} className="tf-word" aria-hidden="true">
+            {Array.from(w).map((c, ci) => {
+              n += 1;
+              return (
+                <span key={ci} className="tf-ch" data-n={n}>
+                  {c}
+                </span>
+              );
+            })}
+          </span>
+        ))}
+      </p>
+      <p className="tf-byline" aria-label={`${album.artist}, ${album.year}`}>
+        {`${album.artist}, ${album.year}`.split(" ").map((w, wi) => (
+          <span key={wi} className="tf-word" aria-hidden="true">
+            {Array.from(w).map((c, ci) => {
+              n += 1;
+              return (
+                <span key={ci} className="tf-ch" data-n={n}>
+                  {c}
+                </span>
+              );
+            })}
+          </span>
+        ))}
+      </p>
+    </div>
+  );
 }
 
 export default function Piece({ embedded = false }) {
-  const stageRef = useRef(null);
-  const sceneRef = useRef(null);
-  const coverRef = useRef(null);
-  const letterRefs = useRef([]);
+  const rootRef = useRef(null);
+  const areaRef = useRef(null);
   const simRef = useRef(null);
-  const [index, setIndex] = useState(0);
-  const [lifted, setLifted] = useState(false);
+  const pressRef = useRef(null);
+  const seq = useRef(1);
+  const [sets, setSets] = useState([{ id: 0, index: 0, role: "in" }]);
+  const current = sets[sets.length - 1];
+  const index = current.index;
   const album = SET[index];
-  const chars = Array.from(album.title);
 
   useLayoutEffect(() => {
-    const stage = stageRef.current;
-    const scene = sceneRef.current;
-    if (!stage || !scene) return undefined;
+    const area = areaRef.current;
+    if (!area) return undefined;
+    const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const sim = {
-      w: 1,
-      h: 1,
-      fs: 100,
-      cover: 240,
-      coverY: 0,
-      titleY: 0,
-      R: 200,
-      ringScale: 1,
-      letters: [],
-      want: false,
-      hover: false,
-      press: false,
-      pinned: false,
-      theta: 0,
-      thetaV: 0,
-      drag: null,
-      tilt: 0,
-      tiltV: 0,
+      sets: new Map(),
+      pointer: null,
+      pressed: false,
       clock: 0,
-      raf: 0,
       last: 0,
-      onLift: setLifted,
+      raf: 0,
+      family: getComputedStyle(area).fontFamily,
+      onDone: (id) => setSets((list) => list.filter((s) => s.id !== id)),
     };
     simRef.current = sim;
 
-    const layout = () => {
-      const rect = stage.getBoundingClientRect();
-      sim.w = rect.width;
-      sim.h = rect.height;
-      const compact = sim.w < 640;
-      scene.style.setProperty("--tf-fs", "100px");
-      const widths = sim.letters.map((l) => l.el?.offsetWidth || 0);
-      const total = widths.reduce((a, b) => a + b, 0) || 1;
-      const maxFs = compact ? 72 : 136;
-      const fs = Math.max(28, Math.min(maxFs, ((sim.w - (compact ? 40 : 120)) * 100) / total));
-      sim.fs = fs;
-      scene.style.setProperty("--tf-fs", `${fs}px`);
-      const k = fs / 100;
-      const run = total * k;
-      let acc = -run / 2;
-      sim.letters.forEach((l, i) => {
-        const wi = widths[i] * k;
-        l.flatX = acc + wi / 2;
-        l.along = acc + wi / 2;
-        acc += wi;
+    const measure = (rec) => {
+      const box = area.getBoundingClientRect();
+      const { fs, lh } = fitTitle(rec.title, box.width * 0.96, box.height - rec.bylineH - 16, sim.family);
+      rec.el.style.setProperty("--tf-fs", `${fs}px`);
+      rec.el.style.setProperty("--tf-lh", `${lh}px`);
+      rec.el.style.setProperty("--tf-track", `${trackEm(fs).toFixed(4)}em`);
+      rec.fs = fs;
+      rec.letters.forEach((l) => {
+        l.size = l.el.closest(".tf-name") ? fs : 24;
+        const [ox, oy] = offsetIn(l.el, area);
+        l.cx = ox + l.el.offsetWidth / 2;
+        l.cy = oy + l.el.offsetHeight / 2;
       });
-      sim.cover = Math.round(Math.max(150, Math.min(sim.w * 0.36, sim.h * 0.32, 300)));
-      const block = sim.cover + 40 + fs;
-      const top = -block / 2 - (compact ? 8 : 24);
-      sim.coverY = top + sim.cover / 2;
-      sim.titleY = top + sim.cover + 40 + fs / 2;
-      sim.R = Math.min(sim.cover * 0.5 + fs * 0.62 + 28, sim.w * (compact ? 0.3 : 0.34));
-      sim.ringScale = Math.min(1, (8 * sim.R * 0.82) / run);
-      scene.style.setProperty("--tf-cover", `${sim.cover}px`);
-      scene.style.setProperty("--tf-cover-y", `${sim.coverY}px`);
     };
-    sim.layout = layout;
+    sim.measure = measure;
+
+    const adopt = () => {
+      area.querySelectorAll(".tf-set").forEach((el) => {
+        const id = Number(el.dataset.id);
+        const role = el.dataset.role;
+        let rec = sim.sets.get(id);
+        const fresh = !rec;
+        if (fresh) {
+          const chars = [...el.querySelectorAll(".tf-ch")];
+          rec = {
+            id,
+            el,
+            role: null,
+            title: el.querySelector(".tf-name").getAttribute("aria-label"),
+            bylineH: el.querySelector(".tf-byline").offsetHeight,
+            letters: chars.map((ch, i) => ({
+              el: ch,
+              i,
+              a: 1,
+              av: 0,
+              aTarget: 1,
+              aAt: 0,
+              b: 0,
+              bv: 0,
+              bTarget: 0,
+              bAt: 0,
+              h: 0,
+              hv: 0,
+              rest: false,
+              seed: [hash(id * 97 + i), hash(id * 131 + i * 3.1), hash(id * 17 + i * 7.7), hash(id * 3 + i * 1.9)],
+            })),
+          };
+          sim.sets.set(id, rec);
+          measure(rec);
+        }
+        if (rec.role !== role) {
+          rec.role = role;
+          const n = rec.letters.length;
+          rec.letters.forEach((l) => {
+            if (role === "in") {
+              l.aTarget = 0;
+              l.aAt = sim.clock + (id === 0 ? 0.25 : 0.16) + l.i * Math.min(0.034, 0.5 / n);
+              if (reduce) {
+                l.a = 0;
+                l.av = 0;
+              }
+            } else {
+              l.bTarget = 1;
+              l.bAt = sim.clock + l.i * Math.min(0.02, 0.3 / n);
+              if (reduce) l.b = 1;
+            }
+          });
+        }
+      });
+      for (const id of [...sim.sets.keys()]) {
+        if (!area.querySelector(`.tf-set[data-id="${id}"]`)) sim.sets.delete(id);
+      }
+    };
+    sim.adopt = adopt;
+
+    const spring = (x, v, target, k, c, dt) => {
+      const steps = 2;
+      const h = dt / steps;
+      for (let s = 0; s < steps; s += 1) {
+        v += ((target - x) * k - v * c) * h;
+        x += v * h;
+      }
+      return [x, v];
+    };
 
     const render = (dt) => {
-      const want = sim.hover || sim.press || sim.pinned;
-      if (want !== sim.want) {
-        sim.want = want;
-        sim.letters.forEach((l, i) => {
-          l.switchAt = sim.clock + i * STAGGER;
-          l.next = want ? 1 : 0;
-        });
-        whoosh(want);
-        sim.onLift(want);
-      }
-      if (sim.drag) {
-        sim.thetaV *= 0.8;
-      } else if (want) {
-        sim.thetaV += (0.32 - sim.thetaV) * Math.min(1, dt * 1.6);
-        sim.theta += sim.thetaV * dt;
-      } else {
-        const target = TAU * Math.round(sim.theta / TAU);
-        const acc = (target - sim.theta) * 60 - sim.thetaV * 13;
-        sim.thetaV += acc * dt;
-        sim.theta += sim.thetaV * dt;
-      }
-      const tiltTarget = want ? 1 : 0;
-      sim.tiltV += ((tiltTarget - sim.tilt) * 70 - sim.tiltV * 15) * dt;
-      sim.tilt += sim.tiltV * dt;
-      scene.style.transform = `rotateX(${(-16 * sim.tilt).toFixed(3)}deg)`;
-      const cover = coverRef.current;
-      if (cover) cover.style.transform = `translate3d(-50%, -50%, 0) translateY(${sim.coverY.toFixed(1)}px) rotateY(${sim.theta.toFixed(4)}rad)`;
-      const cos = Math.cos(sim.theta);
-      const sin = Math.sin(sim.theta);
-      const n = sim.letters.length;
-      for (let i = 0; i < n; i += 1) {
-        const l = sim.letters[i];
-        if (!l.el) continue;
-        if (sim.clock >= l.switchAt) l.target = l.next;
-        l.v += ((l.target - l.p) * STIFF - l.v * DAMP) * dt;
-        l.p += l.v * dt;
-        const p = l.p;
-        const q = clamp01(p);
-        const [rx0, rz0, rr0] = ringPoint(l.along * sim.ringScale, sim.R);
-        const rx = rx0 * cos + rz0 * sin;
-        const rz = -rx0 * sin + rz0 * cos;
-        const rr = wrapAngle(rr0 + sim.theta);
-        const arc = Math.sin(Math.PI * q);
-        const x = l.flatX + (rx - l.flatX) * p;
-        const y = sim.titleY + (sim.coverY - sim.titleY) * p - arc * sim.fs * 0.7;
-        const z = rz * p + arc * sim.fs * 0.9;
-        const ry = rr * p;
-        const tumble = arc * -38;
-        const scale = 1 + (sim.ringScale - 1) * q;
-        l.el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, ${z.toFixed(2)}px) translate(-50%, -50%) rotateY(${ry.toFixed(4)}rad) rotateX(${tumble.toFixed(2)}deg) scale(${scale.toFixed(4)})`;
-        l.el.style.setProperty("--tf-p", q.toFixed(3));
-        const deep = q > 0.01;
-        if (deep !== l.deep) {
-          l.deep = deep;
-          l.el.toggleAttribute("data-deep", deep);
+      const ptr = sim.pointer;
+      for (const rec of sim.sets.values()) {
+        const fs = rec.fs || 100;
+        let gone = rec.role === "out";
+        for (const l of rec.letters) {
+          if (sim.clock >= l.aAt) [l.a, l.av] = spring(l.a, l.av, l.aTarget, ARRIVE_K, ARRIVE_C, dt);
+          if (sim.clock >= l.bAt) [l.b, l.bv] = spring(l.b, l.bv, l.bTarget, LEAVE_K, LEAVE_C, dt);
+          let hTarget = 0;
+          if (ptr && rec.role === "in") {
+            const reach = Math.max(l.size * 1.5, 64);
+            const d = Math.hypot(ptr.x - l.cx, (ptr.y - l.cy) * 1.15) / reach;
+            hTarget = Math.pow(clamp(1 - d, 0, 1), 1.3) * (sim.pressed ? 1.25 : 0.6);
+          }
+          [l.h, l.hv] = spring(l.h, l.hv, hTarget, LIFT_K, LIFT_C, dt);
+          const [s0, s1, s2, s3] = l.seed;
+          const a = clamp(l.a, -0.2, 1.2);
+          const b = clamp(l.b, 0, 1.1);
+          const sz = l.size;
+                    let x = a * (1.1 + s1 * 0.9) * fs + b * (0.2 + s0 * 0.5) * fs;
+          let y = a * (0.15 + s2 * 0.5) * fs - b * (0.5 + s1 * 0.6) * fs;
+          let z = -a * (520 + s3 * 380) - b * (420 + s2 * 520);
+          let rx = a * (14 + s2 * 22) - b * (58 + s3 * 22);
+          let ry = -a * (58 + s3 * 24) + b * (18 + s1 * 34);
+          let rz = a * (s0 - 0.5) * 16 + b * (s2 - 0.5) * 22;
+          const lift = l.h;
+          if (lift > 0.0005 && ptr) {
+            const lean = clamp((l.cx - ptr.x) / Math.max(sz, 40), -1, 1);
+            z += lift * sz * 0.7;
+            y -= lift * sz * 0.1;
+            rx -= lift * 46;
+            ry += lift * lean * 26;
+            rz += lift * lean * -4;
+          } else if (lift > 0.0005) {
+            z += lift * sz * 0.7;
+            rx -= lift * 46;
+          }
+          const opacity = smooth(1, 0.66, a) * (1 - smooth(0.3, 0.78, b));
+          if (b < 0.98) gone = false;
+          const still = Math.abs(l.a) < 0.0015 && Math.abs(l.av) < 0.02 && l.b < 0.0004 && Math.abs(l.h) < 0.002 && Math.abs(l.hv) < 0.02;
+          if (still) {
+            if (!l.rest) {
+              l.rest = true;
+              l.a = 0;
+              l.av = 0;
+              l.h = 0;
+              l.hv = 0;
+              l.el.style.transform = "";
+              l.el.style.opacity = "";
+              l.el.removeAttribute("data-air");
+            }
+            continue;
+          }
+          if (l.rest) {
+            l.rest = false;
+            l.el.setAttribute("data-air", "");
+          }
+          l.el.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, ${z.toFixed(2)}px) rotateX(${rx.toFixed(2)}deg) rotateY(${ry.toFixed(2)}deg) rotateZ(${rz.toFixed(2)}deg)`;
+          l.el.style.opacity = opacity >= 0.999 ? "" : opacity.toFixed(3);
+        }
+        if (gone && !rec.done) {
+          rec.done = true;
+          sim.onDone(rec.id);
         }
       }
     };
 
-    sim.render = render;
     const step = (now) => {
       sim.raf = requestAnimationFrame(step);
-      const dt = Math.min(0.033, sim.last ? (now - sim.last) / 1000 : 0.016);
+      const dt = Math.min(1 / 20, sim.last ? (now - sim.last) / 1000 : 1 / 60);
       sim.last = now;
       sim.clock += dt;
       render(dt);
     };
 
-    const ro = new ResizeObserver(layout);
-    ro.observe(stage);
+    const relayout = () => sim.sets.forEach((rec) => measure(rec));
+    const ro = new ResizeObserver(relayout);
+    ro.observe(area);
     const onVisibility = () => {
       cancelAnimationFrame(sim.raf);
       sim.last = 0;
       if (!document.hidden) sim.raf = requestAnimationFrame(step);
     };
     document.addEventListener("visibilitychange", onVisibility);
+    adopt();
+    render(0);
     sim.raf = requestAnimationFrame(step);
     let alive = true;
-    document.fonts?.ready.then(() => alive && layout());
+    document.fonts?.ready.then(() => {
+      if (!alive) return;
+      sim.family = getComputedStyle(area).fontFamily;
+      relayout();
+    });
     return () => {
       alive = false;
       cancelAnimationFrame(sim.raf);
@@ -202,172 +333,153 @@ export default function Piece({ embedded = false }) {
   }, []);
 
   useLayoutEffect(() => {
-    const sim = simRef.current;
-    if (!sim) return;
-    const count = Array.from(SET[index].title).length;
-    const fresh = sim.letters.length === 0;
-    sim.letters = Array.from({ length: count }, (_, i) => ({
-      el: letterRefs.current[i],
-      p: 1,
-      v: 0,
-      target: 1,
-      next: sim.want ? 1 : 0,
-      switchAt: sim.clock + (fresh ? 0.35 : 0.08) + i * STAGGER,
-      flatX: 0,
-      along: 0,
-      deep: null,
-    }));
-    sim.layout();
-    sim.render(0);
-  }, [index]);
+    simRef.current?.adopt();
+  }, [sets]);
 
-  const insideBlock = (event) => {
-    const sim = simRef.current;
-    const stage = stageRef.current;
-    if (!sim || !stage) return false;
-    const rect = stage.getBoundingClientRect();
-    const x = event.clientX - rect.left - sim.w / 2;
-    const y = event.clientY - rect.top - sim.h / 2;
-    const half = Math.max(sim.R, sim.fs * 3, sim.cover / 2) + 48;
-    return Math.abs(x) < Math.max(half, sim.w * 0.42) && y > sim.coverY - sim.cover / 2 - 72 && y < sim.titleY + sim.fs / 2 + 56;
+  const go = useCallback((next) => {
+    setSets((list) => {
+      const top = list[list.length - 1];
+      const target = ((next % SET.length) + SET.length) % SET.length;
+      if (target === top.index) return list;
+      const kept = list.slice(-3).map((s) => ({ ...s, role: "out" }));
+      const id = seq.current;
+      seq.current += 1;
+      return [...kept, { id, index: target, role: "in" }];
+    });
+    flick();
+  }, []);
+
+  useEffect(() => {
+    const done = () => {
+      pressRef.current = null;
+    };
+    window.addEventListener("blur", done);
+    return () => window.removeEventListener("blur", done);
+  }, []);
+
+  const toArea = (event) => {
+    const area = areaRef.current;
+    if (!area) return null;
+    const r = area.getBoundingClientRect();
+    return { x: event.clientX - r.left, y: event.clientY - r.top };
   };
 
   const onPointerMove = (event) => {
     const sim = simRef.current;
     if (!sim) return;
-    if (event.pointerType === "mouse" && !sim.drag) sim.hover = insideBlock(event);
-    if (sim.drag && sim.drag.id === event.pointerId) {
-      const dx = event.clientX - sim.drag.x;
-      const dt = Math.max(1, event.timeStamp - sim.drag.t) / 1000;
-      sim.drag.x = event.clientX;
-      sim.drag.t = event.timeStamp;
-      const dTheta = dx * 0.0085;
-      sim.theta += dTheta;
-      sim.thetaV = sim.thetaV * 0.5 + (dTheta / dt) * 0.5;
-    }
+    const p = pressRef.current;
+    if (event.pointerType === "mouse" || (p && p.id === event.pointerId)) sim.pointer = toArea(event);
+    if (p && p.id === event.pointerId && Math.hypot(event.clientX - p.x, event.clientY - p.y) > TAP_SLOP) p.moved = true;
   };
 
   const onPointerDown = (event) => {
     const sim = simRef.current;
     if (!sim || event.button > 0) return;
     wakeAudio();
-    if (!insideBlock(event)) return;
-    sim.press = true;
-    sim.drag = { id: event.pointerId, x: event.clientX, t: event.timeStamp };
+    if (event.target.closest(".tf-thumbs")) return;
+    pressRef.current = { id: event.pointerId, x: event.clientX, y: event.clientY, moved: false, onArt: Boolean(event.target.closest(".tf-hit")) };
+    sim.pressed = true;
+    sim.pointer = toArea(event);
     try {
       event.currentTarget.setPointerCapture(event.pointerId);
     } catch {
-      sim.drag.free = true;
+      pressRef.current.free = true;
     }
   };
 
-  const endDrag = (event) => {
+  const release = (event, cancelled) => {
     const sim = simRef.current;
-    if (!sim || !sim.drag || sim.drag.id !== event.pointerId) return;
-    sim.drag = null;
-    sim.press = false;
-    sim.thetaV = Math.max(-9, Math.min(9, sim.thetaV));
-    if (event.pointerType === "mouse") sim.hover = insideBlock(event);
+    const p = pressRef.current;
+    if (!sim || !p || p.id !== event.pointerId) return;
+    pressRef.current = null;
+    sim.pressed = false;
+    if (event.pointerType !== "mouse") sim.pointer = null;
+    if (!cancelled && !p.moved && p.onArt) go(index + 1);
   };
 
   const onPointerLeave = (event) => {
     const sim = simRef.current;
-    if (!sim || event.pointerType !== "mouse" || sim.drag) return;
-    sim.hover = false;
+    if (sim && event.pointerType === "mouse" && !pressRef.current) sim.pointer = null;
   };
 
   const onKeyDown = (event) => {
-    const sim = simRef.current;
-    if (!sim) return;
-    if (event.key === " " || event.key === "Enter") {
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
       event.preventDefault();
       wakeAudio();
-      sim.pinned = !sim.pinned;
-    } else if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      go(index + 1);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
       event.preventDefault();
-      sim.pinned = true;
-      sim.thetaV += event.key === "ArrowLeft" ? -2.4 : 2.4;
-    } else if (event.key === "Escape") {
-      sim.pinned = false;
+      wakeAudio();
+      go(index - 1);
+    } else if (event.key === "Enter" || event.key === " ") {
+      if (event.target !== event.currentTarget) return;
+      event.preventDefault();
+      wakeAudio();
+      go(index + 1);
     }
   };
 
   const Root = embedded ? "div" : "main";
 
   return (
-    <Root className="tf-root" data-embedded={embedded ? "" : undefined} style={{ "--tf-color": album.color }}>
-      <div
-        ref={stageRef}
-        className="tf-stage"
-        tabIndex={0}
-        role="application"
-        aria-label={`${album.title}. Press Space to lift the letters into a ring around the cover, arrows to spin it, Escape to set them down.`}
-        data-lifted={lifted ? "" : undefined}
-        onPointerMove={onPointerMove}
-        onPointerDown={onPointerDown}
-        onPointerUp={endDrag}
-        onPointerCancel={endDrag}
-        onPointerLeave={onPointerLeave}
-        onKeyDown={onKeyDown}
-      >
-        <div ref={sceneRef} className="tf-scene">
-          <div ref={coverRef} className="tf-cover">
-            <img className="tf-face" src={album.cover} alt={`${album.title} cover`} draggable={false} />
-            <div className="tf-face tf-back" aria-hidden="true">
-              <span className="tf-back-title">{album.title}</span>
-              <ol className="tf-back-tracks">
-                {album.tracks.map((t) => (
-                  <li key={t}>{t}</li>
-                ))}
-              </ol>
-              <span className="tf-back-year">
-                {album.artist}, {album.year}
-              </span>
-            </div>
-          </div>
-          {chars.map((c, i) => (
-            <span
-              key={`${album.id}-${i}`}
-              ref={(el) => {
-                letterRefs.current[i] = el;
-              }}
-              className="tf-letter"
-              aria-hidden="true"
-              data-space={c === " " ? "" : undefined}
-            >
-              {Array.from({ length: LAYERS }, (_, k) => (
-                <span key={k} className="tf-layer" style={{ "--k": k + 1 }}>
-                  {c === " " ? " " : c}
-                </span>
-              ))}
-              <span className="tf-front">{c === " " ? " " : c}</span>
-            </span>
-          ))}
-        </div>
-      </div>
+    <Root ref={rootRef} className="tf-root" data-embedded={embedded ? "" : undefined}>
       {embedded ? null : (
         <header className="tf-head">
           <h1 className="text-title-sm">Type Fly</h1>
-          <p className="tf-hint text-ui-lg">Hover or press the record and its title lifts into a ring in depth. Drag to spin it round to the tracklist.</p>
         </header>
       )}
-      <nav className="tf-picker" aria-label="Albums">
-        {SET.map((a, i) => (
-          <button
-            key={a.id}
-            type="button"
-            className="tf-pick"
-            aria-pressed={i === index}
-            onClick={() => {
-              wakeAudio();
-              setIndex(i);
-            }}
-          >
-            <img src={a.cover} alt="" width={32} height={32} draggable={false} />
-            <span>{a.title}</span>
-          </button>
-        ))}
-      </nav>
+      <div
+        className="tf-stage"
+        tabIndex={0}
+        role="group"
+        aria-roledescription="album titles"
+        aria-label={`${album.title} by ${album.artist}, ${album.year}. Arrow keys change the record.`}
+        onPointerMove={onPointerMove}
+        onPointerDown={onPointerDown}
+        onPointerUp={(e) => release(e, false)}
+        onPointerCancel={(e) => release(e, true)}
+        onPointerLeave={onPointerLeave}
+        onKeyDown={onKeyDown}
+      >
+        <div className="tf-spread">
+          <div className="tf-cover tf-hit">
+            {SET.map((a, i) => (
+              <img
+                key={a.id}
+                src={a.cover}
+                alt={i === index ? `${a.title} cover` : ""}
+                aria-hidden={i === index ? undefined : "true"}
+                data-on={i === index ? "" : undefined}
+                draggable={false}
+              />
+            ))}
+          </div>
+          <div className="tf-text">
+            <nav className="tf-thumbs" aria-label="Records">
+              {SET.map((a, i) => (
+                <button
+                  key={a.id}
+                  type="button"
+                  className="tf-thumb"
+                  aria-label={a.title}
+                  aria-pressed={i === index}
+                  onClick={() => {
+                    wakeAudio();
+                    go(i);
+                  }}
+                >
+                  <img src={a.cover} alt="" draggable={false} />
+                </button>
+              ))}
+            </nav>
+            <div ref={areaRef} className="tf-area tf-hit">
+              {sets.map((s) => (
+                <Title key={s.id} id={s.id} role={s.role} album={SET[s.index]} />
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
     </Root>
   );
 }

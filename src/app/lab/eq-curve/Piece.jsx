@@ -4,12 +4,11 @@ import { useEffect, useRef, useState } from "react";
 
 import { albumById } from "@/app/lab/_music/catalog";
 
-import Roll from "./Roll";
 import { BANDS, MAX_DB, PRESETS, bandLabel } from "./eqPresets";
 import { createEqEngine } from "./eqEngine";
 import "./eq-curve.css";
 
-const START = PRESETS[1];
+const START = PRESETS[2];
 const BAND_X = BANDS.map((f) => Math.log2(f / 20) / Math.log2(1000));
 const formatDb = (g) => (g > 0 ? `+${g}` : g < 0 ? `−${Math.abs(g)}` : "0");
 
@@ -59,7 +58,7 @@ export default function Piece({ embedded = false }) {
   const onHandleKey = (e, i) => {
     const engine = engineRef.current;
     if (!engine) return;
-    const big = e.shiftKey ? 3 : 0.5;
+    const big = e.shiftKey ? 3 : 1;
     if (e.key === "ArrowUp") engine.nudge(i, big);
     else if (e.key === "ArrowDown") engine.nudge(i, -big);
     else if (e.key === "PageUp") engine.nudge(i, 3);
@@ -75,11 +74,15 @@ export default function Piece({ embedded = false }) {
   const track = playing ?? albumById("revolver");
 
   return (
-    <Root className="eq-curve" data-embedded={embedded ? "" : undefined}>
+    <Root
+      className="eq-curve"
+      data-embedded={embedded ? "" : undefined}
+      onKeyDownCapture={(e) => (e.currentTarget.dataset.kbd = "")}
+      onPointerDownCapture={(e) => delete e.currentTarget.dataset.kbd}
+    >
       {embedded ? null : (
         <header className="eq-curve-head">
           <h1 className="eq-curve-title">EQ Curve</h1>
-          <p className="eq-curve-hint">Drag a band, or pick a record and watch the curve take its shape.</p>
         </header>
       )}
 
@@ -96,17 +99,17 @@ export default function Piece({ embedded = false }) {
               {track.artist} · {track.title}
             </p>
           </div>
-          <p className="eq-curve-preset-name" aria-live="polite">
-            {presetId ? PRESETS.find((p) => p.id === presetId).name : "Custom"}
+          <p className="eq-curve-preset-name" aria-live="polite" data-custom={presetId ? undefined : ""}>
+            {presetId ? "" : "Custom"}
           </p>
         </div>
 
         <div ref={stageRef} className="eq-curve-stage" data-grab={grab >= 0 ? "" : undefined}>
           <canvas ref={canvasRef} className="eq-curve-canvas" aria-hidden="true" />
           <div className="eq-curve-scale" aria-hidden="true">
-            <span>+12</span>
-            <span>0</span>
-            <span>−12</span>
+            <span style={{ top: "52px" }}>+12</span>
+            <span style={{ top: "calc(52px + (100% - 80px) / 2)" }}>0</span>
+            <span style={{ top: "calc(100% - 28px)" }}>−12</span>
           </div>
           {BANDS.map((f, i) => (
             <button
@@ -115,6 +118,7 @@ export default function Piece({ embedded = false }) {
               type="button"
               data-band={i}
               data-active={grab === i ? "" : undefined}
+              data-align={i < 2 ? "start" : i > BANDS.length - 3 ? "end" : undefined}
               className="eq-curve-handle"
               role="slider"
               aria-label={`${bandLabel(f)}Hz`}
@@ -127,7 +131,7 @@ export default function Piece({ embedded = false }) {
             >
               <span className="eq-curve-knob" />
               <span className="eq-curve-tip" aria-hidden="true">
-                <Roll text={formatDb(gains[i])} />
+                {formatDb(gains[i])}
                 <span className="eq-curve-tip-unit">dB</span>
               </span>
             </button>
@@ -137,7 +141,7 @@ export default function Piece({ embedded = false }) {
         <div className="eq-curve-bands" aria-hidden="true">
           {BANDS.map((f, i) => (
             <div key={f} className="eq-curve-band" style={{ left: `${(BAND_X[i] * 100).toFixed(2)}%` }} data-active={grab === i ? "" : undefined}>
-              <Roll text={formatDb(gains[i])} className="eq-curve-band-db" />
+              <span className="eq-curve-band-db">{formatDb(gains[i])}</span>
               <span className="eq-curve-band-hz">{bandLabel(f)}</span>
             </div>
           ))}

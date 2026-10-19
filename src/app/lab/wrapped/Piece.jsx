@@ -6,60 +6,71 @@ import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 
 import "./wrapped.css";
 
-const DURATION = 6200;
-const HOLD = 200;
-const REEL = Array.from({ length: 40 }, (_, i) => i % 10);
+const DURATION = 6400;
+const HOLD = 220;
 
 const CARDS = [
-  { key: "intro", bg: "#ff5a36", ink: "#1f0904" },
-  { key: "minutes", bg: "#2f4bd8", ink: "#ffffff" },
-  { key: "song", bg: "#f7d13b", ink: "#161204" },
-  { key: "five", bg: "#0f8f57", ink: "#ffffff" },
-  { key: "album", bg: "#8f2fd1", ink: "#ffffff" },
-  { key: "outro", bg: "#141414", ink: "#ffffff" },
+  { key: "intro", bg: "#ff4f2b", ink: "#170502", alt: "#ffd23f" },
+  { key: "minutes", bg: "#2440e6", ink: "#ffffff", alt: "#c6f432" },
+  { key: "song", bg: "#ffd23f", ink: "#170f02", alt: "#ff4f2b" },
+  { key: "five", bg: "#0c8a52", ink: "#ffffff", alt: "#c6f432" },
+  { key: "album", bg: "#8a2be2", ink: "#ffffff", alt: "#ff9bd2" },
+  { key: "outro", bg: "#c6f432", ink: "#0f1402", alt: "#2440e6" },
 ];
 
-function Slot({ value }) {
-  const text = value.toLocaleString("en-US");
-  let k = 0;
+const fmt = (n) => Math.round(n).toLocaleString("en-US");
+
+function CountUp({ value, delay = 500, duration = 1500, end = false }) {
+  const ref = useRef(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return undefined;
+    let raf = 0;
+    const start = performance.now() + delay;
+    const tick = (now) => {
+      const u = Math.min(1, Math.max(0, (now - start) / duration));
+      const e = 1 - Math.pow(1 - u, 4);
+      el.textContent = fmt(value * e);
+      if (u < 1) raf = requestAnimationFrame(tick);
+    };
+    el.textContent = fmt(0);
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [value, delay, duration]);
   return (
-    <span className="wr-slot" role="img" aria-label={text}>
-      {Array.from(text).map((ch, i) => {
-        if (!/\d/.test(ch)) {
-          return (
-            <span key={i} className="wr-sep" aria-hidden="true">
-              {ch}
-            </span>
-          );
-        }
-        const style = { "--d": Number(ch), "--k": k };
-        k += 1;
-        return (
-          <span key={i} className="wr-digit" aria-hidden="true" style={style}>
-            <span className="wr-reel">
-              {REEL.map((n, j) => (
-                <span key={j}>{n}</span>
-              ))}
-            </span>
-          </span>
-        );
-      })}
+    <span className="wr-count" data-end={end ? "" : undefined} role="img" aria-label={fmt(value)}>
+      <span className="wr-count-size" aria-hidden="true">
+        {fmt(value)}
+      </span>
+      <span ref={ref} className="wr-count-live" aria-hidden="true">
+        0
+      </span>
     </span>
   );
 }
 
-function titleSize(text) {
+function Line({ i = 0, className = "", children, as: Tag = "p" }) {
+  return (
+    <Tag className={`wr-line ${className}`.trim()}>
+      <span className="wr-line-in" style={{ "--i": i }}>
+        {children}
+      </span>
+    </Tag>
+  );
+}
+
+function fitTitle(text, base) {
   const n = text.length;
-  if (n <= 8) return "17cqw";
-  if (n <= 14) return "13cqw";
-  if (n <= 22) return "10.5cqw";
-  return "8.5cqw";
+  if (n <= 6) return `${base * 1.5}cqw`;
+  if (n <= 10) return `${base * 1.2}cqw`;
+  if (n <= 16) return `${base}cqw`;
+  return `${base * 0.78}cqw`;
 }
 
 function topAlbum(tracks) {
   const counts = new Map();
   tracks.forEach((t) => {
-    const entry = counts.get(t.album) || { album: t.album, artist: t.artist, image: t.imageLarge || t.image, year: t.year, n: 0 };
+    const entry = counts.get(t.album) || { album: t.album, artist: t.artist, image: t.imageLarge || t.image, n: 0 };
     entry.n += 1;
     counts.set(t.album, entry);
   });
@@ -71,68 +82,83 @@ function Card({ card, tracks, onReplay }) {
   if (!lead) return null;
   if (card.key === "intro") {
     return (
-      <div className="wr-card-body wr-intro">
-        <p className="wr-kicker wr-in" style={{ "--i": 0 }}>
+      <div className="wr-body wr-intro">
+        <span className="wr-sun" aria-hidden="true" />
+        <Line i={0} className="wr-kicker">
           Your year in music
-        </p>
-        <p className="wr-huge wr-year" aria-label="2026">
-          {Array.from("2026").map((c, i) => (
-            <span key={i} className="wr-rise" style={{ "--i": i }} aria-hidden="true">
-              {c}
+        </Line>
+        <p className="wr-year" aria-label="2026">
+          <span className="wr-line">
+            <span className="wr-line-in" style={{ "--i": 1 }}>
+              20
             </span>
-          ))}
+          </span>
+          <span className="wr-line">
+            <span className="wr-line-in" style={{ "--i": 2 }}>
+              26
+            </span>
+          </span>
         </p>
-        <p className="wr-foot wr-in" style={{ "--i": 6 }}>
-          {tracks.length} songs, one artist you could not stop playing, and a lot of minutes. Tap to begin.
-        </p>
+        <Line i={4} className="wr-foot">
+          The songs you played most, January to now.
+        </Line>
       </div>
     );
   }
   if (card.key === "minutes") {
     return (
-      <div className="wr-card-body wr-minutes">
-        <p className="wr-kicker wr-in" style={{ "--i": 0 }}>
-          This year you listened for
-        </p>
-        <div className="wr-big-number">
-          <Slot value={48213} />
-          <p className="wr-unit wr-in" style={{ "--i": 4 }}>
-            minutes
-          </p>
+      <div className="wr-body wr-minutes">
+        <div className="wr-marquee" aria-hidden="true">
+          {[0, 1, 2, 3, 4, 5].map((row) => (
+            <div key={row} className="wr-marquee-row" style={{ "--row": row }}>
+              <span>minutes minutes minutes minutes minutes minutes </span>
+              <span>minutes minutes minutes minutes minutes minutes </span>
+            </div>
+          ))}
         </div>
-        <p className="wr-foot wr-in" style={{ "--i": 8 }}>
-          That is 33 days and 12 hours with the volume up, most of it on {lead.artist}.
-        </p>
+        <Line i={0} className="wr-kicker">
+          You listened for
+        </Line>
+        <div className="wr-big">
+          <Line i={1} className="wr-number" as="div">
+            <CountUp value={48213} delay={420} duration={1600} />
+          </Line>
+          <Line i={2} className="wr-unit">
+            minutes
+          </Line>
+        </div>
+        <Line i={4} className="wr-foot">
+          That is 33 days with the volume up, most of it on {lead.artist}.
+        </Line>
       </div>
     );
   }
   if (card.key === "song") {
     return (
-      <div className="wr-card-body wr-song">
-        <p className="wr-kicker wr-in" style={{ "--i": 0 }}>
-          Your number one song
-        </p>
-        <img className="wr-hero-cover" src={lead.imageLarge || lead.image} alt={`${lead.album} cover`} crossOrigin="anonymous" />
+      <div className="wr-body wr-song">
+        <Line i={0} className="wr-kicker">
+          Your top song
+        </Line>
+        <div className="wr-hero">
+          <img className="wr-hero-cover" src={lead.imageLarge || lead.image} alt={`${lead.album} cover`} crossOrigin="anonymous" />
+        </div>
         <div className="wr-song-meta">
-          <p className="wr-song-title wr-in" style={{ "--i": 3, fontSize: titleSize(lead.title) }}>
-            {lead.title}
-          </p>
-          <p className="wr-sub wr-in" style={{ "--i": 4 }}>
-            {lead.artist}
-          </p>
-          <p className="wr-plays wr-in" style={{ "--i": 5 }}>
-            <Slot value={412} /> <span>plays</span>
-          </p>
+          <Line i={3} className="wr-title">
+            <span style={{ fontSize: fitTitle(lead.title, 13) }}>{lead.title}</span>
+          </Line>
+          <Line i={4} className="wr-plays">
+            <CountUp value={412} delay={760} duration={1200} end /> plays
+          </Line>
         </div>
       </div>
     );
   }
   if (card.key === "five") {
     return (
-      <div className="wr-card-body wr-five">
-        <p className="wr-kicker wr-in" style={{ "--i": 0 }}>
+      <div className="wr-body wr-five">
+        <Line i={0} className="wr-kicker">
           Your top songs
-        </p>
+        </Line>
         <ol className="wr-list">
           {tracks.slice(0, 5).map((t, i) => (
             <li key={t.id} className="wr-row" style={{ "--i": i + 1 }}>
@@ -140,7 +166,7 @@ function Card({ card, tracks, onReplay }) {
               <img src={t.image} alt="" crossOrigin="anonymous" />
               <span className="wr-row-text">
                 <span className="wr-row-title">{t.title}</span>
-                <span className="wr-row-artist">{t.album}</span>
+                <span className="wr-row-sub">{t.album}</span>
               </span>
             </li>
           ))}
@@ -151,37 +177,43 @@ function Card({ card, tracks, onReplay }) {
   if (card.key === "album") {
     const album = topAlbum(tracks);
     return (
-      <div className="wr-card-body wr-album">
-        <p className="wr-kicker wr-in" style={{ "--i": 0 }}>
+      <div className="wr-body wr-album">
+        <span className="wr-rings" aria-hidden="true" />
+        <Line i={0} className="wr-kicker">
           Your album of the year
-        </p>
-        <div className="wr-disc-wrap">
-          <span className="wr-disc" aria-hidden="true" />
-          <img className="wr-album-cover" src={album.image} alt={`${album.album} cover`} crossOrigin="anonymous" />
+        </Line>
+        <div className="wr-album-art">
+          <img src={album.image} alt={`${album.album} cover`} crossOrigin="anonymous" />
         </div>
-        <p className="wr-song-title wr-in" style={{ "--i": 4, fontSize: titleSize(album.album) }}>
-          {album.album}
-        </p>
-        <p className="wr-sub wr-in" style={{ "--i": 5 }}>
-          {album.n} of your top {tracks.length} songs live on it.
-        </p>
+        <div className="wr-song-meta">
+          <Line i={3} className="wr-title">
+            <span style={{ fontSize: fitTitle(album.album, 11) }}>{album.album}</span>
+          </Line>
+          <Line i={4} className="wr-foot">
+            {album.n} of your top {tracks.length} songs are on it.
+          </Line>
+        </div>
       </div>
     );
   }
   return (
-    <div className="wr-card-body wr-outro">
-      <p className="wr-huge wr-wrap-line wr-in" style={{ "--i": 0 }}>
-        That&rsquo;s a wrap.
-      </p>
+    <div className="wr-body wr-outro">
+      <Line i={0} className="wr-wrap-line">
+        That&rsquo;s
+      </Line>
+      <Line i={1} className="wr-wrap-line">
+        a wrap.
+      </Line>
       <div className="wr-mosaic" aria-hidden="true">
-        {Array.from({ length: 16 }, (_, i) => tracks[i % tracks.length]).map((t, i) => (
-          <img key={i} src={t.image} alt="" crossOrigin="anonymous" style={{ "--i": (i % 4) + Math.floor(i / 4) }} />
+        {[...new Map(tracks.map((t) => [t.image, t])).values()].slice(0, 8).map((t, i) => (
+          <span key={t.image} className="wr-tile" style={{ "--i": (i % 4) + Math.floor(i / 4) }}>
+            <img src={t.image} alt="" crossOrigin="anonymous" />
+          </span>
         ))}
       </div>
       <button
         type="button"
-        className="wr-replay wr-in"
-        style={{ "--i": 10 }}
+        className="wr-replay"
         onPointerDown={(e) => e.stopPropagation()}
         onPointerUp={(e) => e.stopPropagation()}
         onClick={onReplay}
@@ -198,37 +230,61 @@ export default function Piece({ embedded = false }) {
   const fillRefs = useRef([]);
   const clock = useRef({ start: 0, elapsed: 0, paused: false, raf: 0 });
   const press = useRef(null);
-  const [view, setView] = useState({ index: 0, prev: null, x: 50, y: 50, n: 0 });
+  const seq = useRef(1);
+  const [stack, setStack] = useState([{ id: 0, index: 0, x: 50, y: 50, first: true }]);
   const [paused, setPaused] = useState(false);
+  const top = stack[stack.length - 1];
+  const index = top.index;
 
-  const go = useCallback((dir, x = 50, y = 50) => {
-    setView((v) => {
-      const index = Math.max(0, Math.min(CARDS.length - 1, v.index + dir));
-      if (index === v.index) return v;
-      return { index, prev: v.index, x, y, n: v.n + 1 };
+  const show = useCallback((target, x, y) => {
+    setStack((list) => {
+      const last = list[list.length - 1];
+      const next = Math.max(0, Math.min(CARDS.length - 1, target));
+      if (next === last.index) return list;
+      const id = seq.current;
+      seq.current += 1;
+      return [...list.slice(-2), { id, index: next, x, y }];
     });
   }, []);
 
-  const restart = useCallback(() => {
-    setView((v) => ({ index: 0, prev: v.index, x: 50, y: 88, n: v.n + 1 }));
-  }, []);
+  const go = useCallback(
+    (dir, x, y) => {
+      const cur = stack[stack.length - 1].index;
+      const next = cur + dir;
+      if (next < 0 || next >= CARDS.length) {
+        if (next < 0) clock.current.start = performance.now();
+        return;
+      }
+      show(next, x, y);
+    },
+    [stack, show],
+  );
+
+  const goRef = useRef(go);
+  useEffect(() => {
+    goRef.current = go;
+  }, [go]);
+
+  const settle = (id) => {
+    setStack((list) => (list[list.length - 1].id === id && list.length > 1 ? list.slice(-1) : list));
+  };
 
   useEffect(() => {
     const c = clock.current;
     c.elapsed = 0;
     c.start = performance.now();
     fillRefs.current.forEach((el, i) => {
-      if (el) el.style.transform = `scaleX(${i < view.index ? 1 : 0})`;
+      if (el) el.style.transform = `scaleX(${i < index ? 1 : 0})`;
     });
-  }, [view.index, view.n]);
+  }, [index, top.id]);
 
   useEffect(() => {
     clock.current.paused = paused;
-    clock.current.start = performance.now() - clock.current.elapsed;
   }, [paused]);
 
   useEffect(() => {
     const c = clock.current;
+    let fired = false;
     const step = (now) => {
       c.raf = requestAnimationFrame(step);
       if (c.paused || document.hidden) {
@@ -237,21 +293,30 @@ export default function Piece({ embedded = false }) {
       }
       c.elapsed = now - c.start;
       const p = Math.min(1, c.elapsed / DURATION);
-      const fill = fillRefs.current[view.index];
+      const fill = fillRefs.current[index];
       if (fill) fill.style.transform = `scaleX(${p.toFixed(4)})`;
-      if (p >= 1 && view.index < CARDS.length - 1) go(1, 92, 50);
+      if (p >= 1 && !fired && index < CARDS.length - 1) {
+        fired = true;
+        goRef.current(1, 86, 50);
+      }
     };
     c.raf = requestAnimationFrame(step);
     return () => cancelAnimationFrame(c.raf);
-  }, [view.index, go]);
+  }, [index, top.id]);
+
+  const where = (event) => {
+    const rect = frameRef.current.getBoundingClientRect();
+    return [((event.clientX - rect.left) / rect.width) * 100, ((event.clientY - rect.top) / rect.height) * 100];
+  };
 
   const onPointerDown = (event) => {
     if (event.button > 0) return;
-    const rect = frameRef.current.getBoundingClientRect();
+    const [x, y] = where(event);
+    if (press.current) clearTimeout(press.current.timer);
     press.current = {
       id: event.pointerId,
-      x: ((event.clientX - rect.left) / rect.width) * 100,
-      y: ((event.clientY - rect.top) / rect.height) * 100,
+      x,
+      y,
       held: false,
       timer: setTimeout(() => {
         if (press.current) press.current.held = true;
@@ -269,31 +334,31 @@ export default function Piece({ embedded = false }) {
       setPaused(false);
       return;
     }
-    go(p.x < 33 ? -1 : 1, p.x, p.y);
+    go(p.x < 30 ? -1 : 1, p.x, p.y);
   };
 
   const onPointerCancel = () => {
-    if (!press.current) return;
-    clearTimeout(press.current.timer);
+    const p = press.current;
+    if (!p) return;
+    clearTimeout(p.timer);
     press.current = null;
-    setPaused(false);
+    if (p.held) setPaused(false);
   };
 
   const onKeyDown = (event) => {
     if (event.key === "ArrowRight") {
       event.preventDefault();
-      go(1, 92, 50);
+      go(1, 86, 50);
     } else if (event.key === "ArrowLeft") {
       event.preventDefault();
-      go(-1, 8, 50);
+      go(-1, 14, 50);
     } else if (event.key === " ") {
       event.preventDefault();
       setPaused((p) => !p);
     }
   };
 
-  const current = CARDS[view.index];
-  const previous = view.prev == null ? null : CARDS[view.prev];
+  const current = CARDS[index];
   const Root = embedded ? "div" : "main";
 
   return (
@@ -301,7 +366,6 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header className="wr-head">
           <h1 className="text-title-sm">Wrapped</h1>
-          <p className="wr-hint text-ui-lg">A year of listening as a story. Tap the right side to go on, the left to go back, and hold anywhere to pause.</p>
         </header>
       )}
       <div
@@ -310,7 +374,7 @@ export default function Piece({ embedded = false }) {
         tabIndex={0}
         role="region"
         aria-roledescription="story"
-        aria-label={`Wrapped, card ${view.index + 1} of ${CARDS.length}. Arrow keys move, Space pauses.`}
+        aria-label={`Wrapped, card ${index + 1} of ${CARDS.length}. Arrow keys move, Space pauses.`}
         data-paused={paused ? "" : undefined}
         style={{ "--ink": current.ink }}
         onPointerDown={onPointerDown}
@@ -320,19 +384,24 @@ export default function Piece({ embedded = false }) {
         onKeyDown={onKeyDown}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {previous ? (
-          <section key={`p-${view.n}`} className="wr-card" data-static="" style={{ "--bg": previous.bg, "--ink": previous.ink }} aria-hidden="true">
-            <Card card={previous} tracks={tracks} onReplay={restart} />
-          </section>
-        ) : null}
-        <section
-          key={`c-${view.n}`}
-          className="wr-card"
-          data-enter={previous ? "" : undefined}
-          style={{ "--bg": current.bg, "--ink": current.ink, "--ox": `${view.x}%`, "--oy": `${view.y}%` }}
-        >
-          <Card card={current} tracks={tracks} onReplay={restart} />
-        </section>
+        {stack.map((s, si) => {
+          const card = CARDS[s.index];
+          const isTop = si === stack.length - 1;
+          return (
+            <section
+              key={s.id}
+              className="wr-card"
+              data-enter={s.first ? undefined : ""}
+              aria-hidden={isTop ? undefined : "true"}
+              style={{ "--bg": card.bg, "--ink": card.ink, "--alt": card.alt, "--ox": `${s.x}%`, "--oy": `${s.y}%` }}
+              onAnimationEnd={(e) => {
+                if (e.target === e.currentTarget) settle(s.id);
+              }}
+            >
+              <Card card={card} tracks={tracks} onReplay={() => show(0, 50, 90)} />
+            </section>
+          );
+        })}
         <div className="wr-bars" aria-hidden="true">
           {CARDS.map((c, i) => (
             <span key={c.key} className="wr-bar">

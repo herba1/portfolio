@@ -1,32 +1,11 @@
-@property --ls-c1 {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: rgb(110 170 210);
-}
-
-@property --ls-c2 {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: rgb(120 190 120);
-}
-
-@property --ls-c3 {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: rgb(220 200 150);
-}
-
-@property --ls-deep {
-  syntax: "<color>";
-  inherits: true;
-  initial-value: rgb(20 36 48);
-}
-
 .lock-screen {
   --ls-s: 1;
   --ls-h: 844px;
   --ls-art: 264px;
   --ls-ease: cubic-bezier(0.19, 1, 0.22, 1);
+  --ls-c1: rgb(64 64 68);
+  --ls-c2: rgb(48 48 52);
+  --ls-deep: rgb(14 14 16);
   --ls-ink: var(--neutral-0);
   --ls-ink-2: color-mix(in oklab, var(--neutral-0) 74%, var(--ls-c1));
   position: relative;
@@ -44,41 +23,10 @@
   text-rendering: optimizeLegibility;
   user-select: none;
   -webkit-user-select: none;
-  transition: --ls-c1 1100ms var(--ease-standard), --ls-c2 1100ms var(--ease-standard), --ls-c3 1100ms var(--ease-standard), --ls-deep 1100ms var(--ease-standard);
 }
 
 .lock-screen[data-embedded] {
   min-height: 100%;
-}
-
-.ls-aura,
-.ls-aura-burst {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: 960px;
-  height: 960px;
-  margin: -480px 0 0 -480px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, var(--ls-c1), color-mix(in oklab, var(--ls-c1) 60%, var(--ls-c2)) 30%, color-mix(in oklab, var(--ls-c2) 40%, transparent) 60%, transparent);
-  filter: blur(64px);
-  opacity: 0.32;
-  pointer-events: none;
-}
-
-.ls-aura-burst {
-  animation: ls-aura-burst 1600ms var(--ease-out-quart) both;
-}
-
-@keyframes ls-aura-burst {
-  from {
-    opacity: 0.7;
-    transform: scale(0.5);
-  }
-  to {
-    opacity: 0;
-    transform: scale(1.5);
-  }
 }
 
 .ls-caption {
@@ -99,16 +47,6 @@
   letter-spacing: var(--text-title-sm--letter-spacing);
   font-weight: var(--text-title-sm--font-weight);
   text-wrap: balance;
-}
-
-.ls-hint {
-  margin: 0;
-  color: var(--color-ink-secondary);
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--text-ui-lg--font-weight);
-  text-wrap: pretty;
 }
 
 @container (max-width: 1023px) {
@@ -146,35 +84,22 @@
 .ls-wall {
   position: absolute;
   inset: 0;
-  background:
-    radial-gradient(120% 70% at 24% 8%, color-mix(in oklab, var(--ls-c2) 90%, transparent), color-mix(in oklab, var(--ls-c2) 45%, transparent) 40%, transparent 72%),
-    radial-gradient(110% 60% at 82% 46%, color-mix(in oklab, var(--ls-c3) 70%, transparent), color-mix(in oklab, var(--ls-c3) 30%, transparent) 45%, transparent 75%),
-    linear-gradient(180deg, color-mix(in oklab, var(--ls-c1) 80%, var(--ls-deep)), color-mix(in oklab, var(--ls-c1) 55%, var(--ls-deep)) 30%, color-mix(in oklab, var(--ls-c1) 25%, var(--ls-deep)) 62%, var(--ls-deep));
+  background: linear-gradient(
+    180deg in oklab,
+    color-mix(in oklab, var(--ls-c2) 36%, var(--ls-c1)) 0%,
+    var(--ls-c1) 16%,
+    color-mix(in oklab, var(--ls-c1) 78%, var(--ls-deep)) 34%,
+    color-mix(in oklab, var(--ls-c1) 50%, var(--ls-deep)) 54%,
+    color-mix(in oklab, var(--ls-c1) 24%, var(--ls-deep)) 74%,
+    color-mix(in oklab, var(--ls-c1) 8%, var(--ls-deep)) 90%,
+    var(--ls-deep) 100%
+  );
+  opacity: 0;
+  transition: opacity 700ms var(--ease-out-quart);
 }
 
-.ls-bloom {
-  position: absolute;
-  top: calc(232px + var(--ls-art) / 2 - 160px);
-  left: 50%;
-  width: 320px;
-  height: 320px;
-  margin-left: -160px;
-  border-radius: 50%;
-  background: radial-gradient(closest-side, color-mix(in oklab, var(--ls-c1) 70%, white), var(--ls-c1) 30%, color-mix(in oklab, var(--ls-c2) 50%, transparent) 62%, transparent);
-  mix-blend-mode: screen;
-  pointer-events: none;
-  animation: ls-bloom 1500ms var(--ease-out-quart) both;
-}
-
-@keyframes ls-bloom {
-  from {
-    opacity: 0.95;
-    transform: scale(0.3);
-  }
-  to {
-    opacity: 0;
-    transform: scale(4.2);
-  }
+.lock-screen[data-ready] .ls-wall {
+  opacity: 1;
 }
 
 .ls-status {
@@ -229,9 +154,8 @@
   font-size: calc(var(--text-display) * 1.6);
   line-height: 104px;
   letter-spacing: var(--text-display--letter-spacing);
-  font-weight: var(--font-weight-bold);
+  font-weight: var(--font-weight-semibold);
   font-variant-numeric: tabular-nums;
-  filter: drop-shadow(0 4px 24px color-mix(in oklab, var(--ls-c1) 60%, transparent));
 }
 
 .ls-slot {
@@ -243,17 +167,14 @@
 .ls-slot-col {
   display: flex;
   flex-direction: column;
-  transition: transform 900ms cubic-bezier(0.22, 1.12, 0.36, 1);
+  transition: transform 700ms var(--ease-out-quint);
 }
 
 .ls-slot-col span,
 .ls-colon {
   display: block;
   height: 104px;
-  background: linear-gradient(180deg, var(--neutral-0) 20%, color-mix(in oklab, var(--neutral-0) 70%, var(--ls-c3)) 60%, color-mix(in oklab, var(--neutral-0) 45%, var(--ls-c1)) 92%);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: color-mix(in oklab, var(--neutral-0) 92%, var(--ls-c1));
 }
 
 .ls-colon {
@@ -459,10 +380,15 @@
   height: 10px;
 }
 
-.ls-track:hover .ls-knob,
 .ls-track:focus-visible .ls-knob,
 .lock-screen[data-scrubbing] .ls-knob {
   transform: translateY(-50%) scale(1);
+}
+
+@media (hover: hover) {
+  .ls-track:hover .ls-knob {
+    transform: translateY(-50%) scale(1);
+  }
 }
 
 .ls-times {
@@ -498,8 +424,10 @@
   transition: background-color 150ms var(--ease-hover), transform 150ms var(--ease-hover);
 }
 
-.ls-btn:hover {
-  background: rgb(255 255 255 / 0.12);
+@media (hover: hover) {
+  .ls-btn:hover {
+    background: rgb(255 255 255 / 0.12);
+  }
 }
 
 .ls-btn:active {
@@ -607,10 +535,13 @@
   white-space: nowrap;
 }
 
+.lock-screen:not([data-phone]) .ls-status {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .ls-bloom,
-  .ls-aura-burst {
-    display: none;
+  .ls-slot-col {
+    transition: none;
   }
 
   .ls-eq i {

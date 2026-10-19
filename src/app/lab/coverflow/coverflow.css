@@ -1,11 +1,13 @@
 .cf {
   --cf-size: 280px;
   --cf-ink: #f5f5f4;
-  --cf-ink-2: #a8a29e;
+  --cf-ink-2: #d6d3d1;
   --cf-line: rgb(255 255 255 / 0.14);
-  --cf-bottom: 200px;
   position: absolute;
   inset: 0;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) auto auto;
+  padding: 128px 0 40px;
   overflow: hidden;
   background: #000;
   color: var(--cf-ink);
@@ -28,29 +30,6 @@
   box-shadow: 0 0 0 2px rgb(255 255 255 / 0.5);
 }
 
-.cf-ambient {
-  position: absolute;
-  inset: 0 0 var(--cf-bottom);
-  pointer-events: none;
-}
-
-.cf-ambient img {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  width: calc(var(--cf-size) * 1.9);
-  height: calc(var(--cf-size) * 1.2);
-  object-fit: cover;
-  transform: translate(-50%, -30%);
-  filter: blur(80px) saturate(1.5);
-  opacity: 0;
-  transition: opacity 900ms cubic-bezier(0.22, 1, 0.36, 1);
-}
-
-.cf-ambient img[data-on="true"] {
-  opacity: 0.32;
-}
-
 .cf-heading {
   position: absolute;
   top: 80px;
@@ -61,14 +40,14 @@
 }
 
 .cf-stage {
-  position: absolute;
-  inset: 0 0 var(--cf-bottom);
+  position: relative;
+  min-height: 0;
   transform-style: preserve-3d;
 }
 
 .cf-item {
   position: absolute;
-  top: 50%;
+  top: var(--cf-y, 50%);
   left: 50%;
   width: var(--cf-size);
   height: var(--cf-size);
@@ -97,10 +76,10 @@
   object-fit: cover;
   border-radius: 4px;
   transform: scaleY(-1);
-  opacity: 0.34;
+  opacity: 0.26;
   pointer-events: none;
-  -webkit-mask-image: linear-gradient(to top, rgb(0 0 0 / 0.9) 0%, rgb(0 0 0 / 0.55) 12%, rgb(0 0 0 / 0.26) 26%, rgb(0 0 0 / 0.08) 40%, rgb(0 0 0 / 0) 52%);
-  mask-image: linear-gradient(to top, rgb(0 0 0 / 0.9) 0%, rgb(0 0 0 / 0.55) 12%, rgb(0 0 0 / 0.26) 26%, rgb(0 0 0 / 0.08) 40%, rgb(0 0 0 / 0) 52%);
+  -webkit-mask-image: linear-gradient(to top, rgb(0 0 0 / 0.8) 0%, rgb(0 0 0 / 0.5) 8%, rgb(0 0 0 / 0.24) 18%, rgb(0 0 0 / 0.08) 28%, rgb(0 0 0 / 0) 38%);
+  mask-image: linear-gradient(to top, rgb(0 0 0 / 0.8) 0%, rgb(0 0 0 / 0.5) 8%, rgb(0 0 0 / 0.24) 18%, rgb(0 0 0 / 0.08) 28%, rgb(0 0 0 / 0) 38%);
 }
 
 .cf-shade {
@@ -112,10 +91,10 @@
 }
 
 .cf-caption {
-  position: absolute;
-  right: 24px;
-  bottom: 104px;
-  left: 24px;
+  position: relative;
+  z-index: 2;
+  min-height: 104px;
+  padding: 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -126,48 +105,9 @@
 
 .cf-title {
   margin: 0;
-  max-width: 100%;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  max-width: 720px;
+  text-wrap: balance;
   color: var(--cf-ink);
-}
-
-.cf-sr {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.cf-roll {
-  display: inline-block;
-  perspective: 240px;
-}
-
-.cf-letter {
-  display: inline-block;
-  transform-origin: 50% 100%;
-  animation: cf-roll 560ms cubic-bezier(0.22, 1, 0.36, 1) var(--d) both;
-}
-
-@keyframes cf-roll {
-  0% {
-    opacity: 0;
-    filter: blur(4px);
-    transform: translateY(0.7em) rotateX(-88deg);
-  }
-  60% {
-    opacity: 1;
-    filter: blur(0);
-  }
-  100% {
-    opacity: 1;
-    filter: blur(0);
-    transform: none;
-  }
 }
 
 .cf-meta {
@@ -175,33 +115,24 @@
   gap: 8px;
   margin: 0;
   color: var(--cf-ink-2);
-  animation: cf-meta 420ms cubic-bezier(0.22, 1, 0.36, 1) 120ms both;
-}
-
-@keyframes cf-meta {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
 }
 
 .cf-controls {
-  position: absolute;
-  bottom: 40px;
-  left: 50%;
+  position: relative;
+  z-index: 2;
+  justify-self: center;
   display: flex;
   align-items: center;
   gap: 12px;
   width: min(480px, calc(100% - 48px));
-  transform: translateX(-50%);
 }
 
 .cf-step {
   display: grid;
   place-items: center;
   flex: none;
-  width: 32px;
-  height: 32px;
+  width: 40px;
+  height: 40px;
   padding: 0;
   border: 0;
   border-radius: 999px;
@@ -282,26 +213,20 @@
 }
 
 .cf[data-embedded="true"] {
-  --cf-bottom: 136px;
+  padding: 24px 0 16px;
 }
 
 .cf[data-embedded="true"] .cf-caption {
-  bottom: 64px;
-}
-
-.cf[data-embedded="true"] .cf-title {
-  font-size: var(--text-title);
-  line-height: var(--text-title--line-height);
-  letter-spacing: var(--text-title--letter-spacing);
-}
-
-.cf[data-embedded="true"] .cf-controls {
-  bottom: 16px;
+  min-height: 88px;
 }
 
 @container (max-width: 640px) {
   .cf {
-    --cf-bottom: 220px;
+    padding: 128px 0 32px;
+  }
+
+  .cf-caption {
+    min-height: 112px;
   }
 
   .cf-title {
@@ -312,12 +237,5 @@
 
   .cf-count {
     display: none;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .cf-letter,
-  .cf-meta {
-    animation-duration: 1ms;
   }
 }

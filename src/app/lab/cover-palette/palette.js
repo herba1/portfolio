@@ -80,10 +80,17 @@ function kmeans(points) {
       centers[ci] = [sums[ci][0] / counts[ci], sums[ci][1] / counts[ci], sums[ci][2] / counts[ci]];
     });
   }
-  return centers
-    .map((c, i) => ({ ...toLch(c), share: counts[i] / n }))
+  const merged = [];
+  centers
+    .map((c, i) => ({ lab: c, share: counts[i] / n }))
     .filter((c) => c.share > 0.01)
-    .sort((a, b) => b.share - a.share);
+    .sort((a, b) => b.share - a.share)
+    .forEach((c) => {
+      const twin = merged.find((m) => dist2(m.lab, c.lab) < 0.0036);
+      if (twin) twin.share += c.share;
+      else merged.push(c);
+    });
+  return merged.map((c) => ({ ...toLch(c.lab), share: c.share }));
 }
 
 export function extractPalette(img) {
@@ -104,30 +111,59 @@ const hueGap = (a, b) => {
   return d > 180 ? 360 - d : d;
 };
 
-export function deriveTheme(swatches) {
-  const base = swatches[0];
-  const bgL = clamp(base.L, 0.3, 0.9);
-  const dark = bgL < 0.62;
-  const bgC = Math.min(base.C, 0.15);
-  const h = base.h;
-  const bg = { L: bgL, C: bgC, h };
-  const raised = { L: clamp(bgL + (dark ? 0.06 : 0.045), 0, 0.98), C: bgC * 0.85, h };
-  const line = { L: clamp(bgL + (dark ? 0.14 : -0.12), 0, 1), C: bgC * 0.7, h };
-  const ink = { L: dark ? 0.98 : 0.2, C: Math.min(0.025, bgC), h };
-  const ink2 = { L: dark ? 0.84 : 0.4, C: Math.min(0.05, bgC), h };
-  const candidates = swatches.slice(1).filter((s) => s.C > 0.05 && (hueGap(s.h, h) > 28 || Math.abs(s.L - bgL) > 0.3 || bgC < 0.04));
-  candidates.sort((a, b) => b.C * b.share ** 0.3 - a.C * a.share ** 0.3);
-  const pick = candidates[0] ?? { L: dark ? 0.9 : 0.25, C: Math.min(0.04, bgC), h };
-  const accentL = dark ? Math.max(pick.L, 0.74) : Math.min(pick.L, 0.52);
-  const accent = { L: accentL, C: pick.C > 0.05 ? clamp(pick.C * 1.15, 0.12, 0.22) : pick.C, h: pick.h };
-  const onAccent = accentL > 0.66 ? { L: 0.2, C: 0.02, h: pick.h } : { L: 0.99, C: 0.01, h: pick.h };
-  const blobs = [0, 1, 2, 3].map((i) => {
-    const s = swatches[i % swatches.length];
-    return { L: clamp(s.L, 0.25, 0.92), C: Math.min(s.C * 1.2, 0.24), h: s.h };
-  });
-  return { dark, roles: { bg, raised, line, ink, ink2, accent, onaccent: onAccent, b0: blobs[0], b1: blobs[1], b2: blobs[2], b3: blobs[3] } };
+function pickGround(swatches) {
+  const pool = swatches.filter((s) => s.share >= 0.1);
+  const list = pool.length ? pool : swatches;
+  let best = list[0];
+  let bestScore = -1;
+  for (const s of list) {
+    const score = s.share * (0.5 + Math.min(s.C, 0.16) * 10);
+    if (score > bestScore) {
+      bestScore = score;
+      best = s;
+    }
+  }
+  return best;
 }
 
-export const ROLES = ["bg", "raised", "line", "ink", "ink2", "accent", "onaccent", "b0", "b1", "b2", "b3"];
+export function deriveTheme(swatches) {
+  const base = pickGround(swatches);
+  const bgL = clamp(base.L, 0.36, 0.93);
+  const dark = bgL < 0.64;
+  const bgC = Math.min(base.C * 1.1, bgL > 0.8 ? 0.07 : 0.13);
+  const h = base.h;
+  const bg = { L: bgL, C: bgC, h };
+  const line = { L: clamp(bgL + (dark ? 0.12 : -0.1), 0, 1), C: bgC * 0.8, h };
+  const ink = { L: dark ? 0.98 : 0.19, C: Math.min(0.03, bgC), h };
+  const ink2 = { L: dark ? 0.86 : 0.36, C: Math.min(0.05, bgC), h };
+  const candidates = swatches.filter((s) => s !== base && s.C > 0.05 && (hueGap(s.h, h) > 28 || Math.abs(s.L - bgL) > 0.3 || bgC < 0.04));
+  candidates.sort((a, b) => b.C * b.share ** 0.3 - a.C * a.share ** 0.3);
+  const pick = candidates[0] ?? { L: dark ? 0.96 : 0.2, C: Math.min(0.03, bgC), h };
+  const accentL = dark ? Math.max(pick.L, 0.8) : Math.min(pick.L, 0.5);
+  const accent = { L: accentL, C: pick.C > 0.05 ? clamp(pick.C * 1.15, 0.1, 0.2) : pick.C, h: pick.h };
+  const onaccent = accentL > 0.66 ? { L: 0.2, C: 0.02, h: pick.h } : { L: 0.99, C: 0.01, h: pick.h };
+  return { dark, roles: { bg, line, ink, ink2, accent, onaccent } };
+}
 
-export const fmt = (c) => `oklch(${c.L.toFixed(2)} ${c.C.toFixed(3)} ${Math.round(c.h)})`;
+export const ROLES = ["bg", "line", "ink", "ink2", "accent", "onaccent"];
+
+const toSrgb = (x) => {
+  const v = x <= 0.0031308 ? 12.92 * x : 1.055 * x ** (1 / 2.4) - 0.055;
+  return Math.round(clamp(v, 0, 1) * 255);
+};
+
+export function toHex({ L, C, h }) {
+  const a = C * Math.cos((h * Math.PI) / 180);
+  const b = C * Math.sin((h * Math.PI) / 180);
+  const l = (L + 0.3963377774 * a + 0.2158037573 * b) ** 3;
+  const m = (L - 0.1055613458 * a - 0.0638541728 * b) ** 3;
+  const s = (L - 0.0894841775 * a - 1.291485548 * b) ** 3;
+  const rgb = [
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.707614701 * s,
+  ];
+  return `#${rgb.map((v) => toSrgb(v).toString(16).padStart(2, "0")).join("").toUpperCase()}`;
+}
+
+export const fmt = (c) => `oklch(${c.L.toFixed(3)} ${c.C.toFixed(3)} ${c.h.toFixed(1)})`;

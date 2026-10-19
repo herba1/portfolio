@@ -1,10 +1,20 @@
 {
   "title": "Wave Scrub",
-  "description": "A precision scrubber over a song's waveform, coloured by its cover from first bar to last. Hover for the time and section, press to zoom the waveform around your finger, then drag at a fraction of the speed; release and it springs back out. Chapter markers follow the real shape of each song.",
-  "tags": ["Interface", "Motion", "Music"],
+  "description": "A precision scrubber over a song's waveform, set large and in ink. Hover to preview the jump with the time and section beneath your pointer, press to zoom the waveform around your finger and drag at a fraction of the speed; release and it eases back out. Chapter segments follow the real shape of each song.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:50:00.000Z",
   "intent": "Press-to-zoom scrubbing: the waveform magnifies under the pointer so a pixel covers a fraction of a second.",
-  "tile": { "cols": 4, "rows": 3 },
-  "sources": ["https://rauno.me/craft/interaction-design", "https://developer.apple.com/videos/play/wwdc2018/803/"]
+  "tile": {
+    "cols": 4,
+    "rows": 3
+  },
+  "sources": [
+    "https://rauno.me/craft/interaction-design",
+    "https://developer.apple.com/videos/play/wwdc2018/803/"
+  ]
 }

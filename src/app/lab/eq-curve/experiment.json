@@ -1,10 +1,20 @@
 {
   "title": "EQ Curve",
-  "description": "A ten-band graphic EQ for Taxman. Drag a band and the glowing curve bends through it while the spectrum behind it plays the change; pick a preset named after a Beatles album and the whole curve morphs into its shape, colour and all.",
-  "tags": ["Interface", "Music", "Motion"],
+  "description": "A ten-band graphic EQ on a white plate. Drag any band and the curve bends through it with its value riding on top; pick a Beatles record and the whole curve springs into that album's shape and colour.",
+  "tags": [
+    "Interface",
+    "Music",
+    "Motion"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:10:00.000Z",
-  "intent": "A music-app equaliser built like it ships, with one over-the-top flourish: album presets that morph the curve and recolour the light.",
-  "tile": { "cols": 4, "rows": 3 },
-  "sources": ["https://en.wikipedia.org/wiki/Equalization_(audio)#Graphic_equalizer", "https://herb.art/tuner"]
+  "intent": "A music-app equaliser built like it ships: big readable values, a curve that is the focal point, and album presets that morph the curve and recolour it.",
+  "tile": {
+    "cols": 4,
+    "rows": 3
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Equalization_(audio)#Graphic_equalizer",
+    "https://herb.art/tuner"
+  ]
 }
