@@ -1,6 +1,6 @@
 {
   "title": "Lenticular",
-  "description": "A lenticular flip card of Beatles covers: ridged plastic over two interlaced sleeves, so tilting Rubber Soul turns it into Revolver right there in the plastic. Tap the card and it flips over to the next pair.",
+  "description": "A lenticular flip card from a 1960s record shop: ridged plastic over a Beatles sleeve and a bold type card of its song, so tilting Abbey Road turns it into Here Comes the Sun right there in the plastic. Tap the card and it flips over to the next record.",
   "tags": [
     "WebGL",
     "Optics",
@@ -9,7 +9,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: the view angle through each ridge picks the cover, with the banding, fringing and sheen of a cheap flip card, and a tap that turns the whole card to the next pair.",
+  "intent": "One optical object finished to the edge: the view angle through each ridge picks the sleeve or the song, with the banding, fringing and sheen of a real flip card, and a tap that turns the whole card over to the next record.",
   "tile": {
     "cols": 3,
     "rows": 4

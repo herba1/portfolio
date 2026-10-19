@@ -27,6 +27,7 @@ uniform float uReady;
 uniform vec3 uKey;
 uniform float uSeed;
 uniform vec3 uGroundTint;
+uniform float uSplit;
 
 out vec4 outColor;
 
@@ -57,7 +58,7 @@ float safeDiv(float a, float b) {
 }
 
 vec3 frameAt(vec2 uv, float layer, vec2 gx, vec2 gy) {
-  return textureGrad(uArt, vec3(uv, mod(layer, uFrames)), gx, gy).rgb;
+  return textureGrad(uArt, vec3(uv, step(uSplit, abs(mod(layer, uFrames) - floor(uFrames * 0.5)))), gx, gy).rgb;
 }
 
 vec3 groundColor(vec2 p) {
@@ -111,8 +112,9 @@ void main() {
   float soft = shadowAt(pg + vec3(-4.0, 6.0, 0.0), n, c, normalize(vec3(-0.06, 0.22, 1.0)), 0.9, 26.0);
   col *= 1.0 - (0.13 * contact + 0.16 * soft) * uReady;
 
-  float coverBack = clamp(0.5 - sdb / pxb, 0.0, 1.0);
-  float coverFront = clamp(0.5 - sd / px, 0.0, 1.0) * step(0.0, facing);
+  float grazing = step(0.002, abs(dot(n, dir)));
+  float coverBack = clamp(0.5 - sdb / pxb, 0.0, 1.0) * grazing * step(0.0, tb) * step(pxb, uHalf.y * 0.2);
+  float coverFront = clamp(0.5 - sd / px, 0.0, 1.0) * step(0.0, facing) * grazing * step(0.0, t) * step(px, uHalf.y * 0.2);
   vec3 edgeCol = vec3(0.86, 0.845, 0.81) * (0.72 + 0.28 * max(dot(n, uKey), 0.0));
   col = mix(col, edgeCol, coverBack * uReady);
 
@@ -122,7 +124,7 @@ void main() {
     float fu = fract(cell);
     float ridgeCss = (2.0 * uHalf.x) / max(uRidges, 1.0);
     float ridgeDev = ridgeCss / fwx;
-    float ridgeVis = smoothstep(2.0, 4.0, ridgeDev);
+    float ridgeVis = smoothstep(3.0, 9.0, ridgeDev);
 
     vec3 vWorld = normalize(eye - p);
     vec3 vOrtho = transpose(uRot) * vec3(0.0, 0.0, 1.0);
@@ -137,7 +139,7 @@ void main() {
     float tR = smoothstep(0.5 - sharp, 0.5 + sharp, tf + 0.012);
     float tG = smoothstep(0.5 - sharp, 0.5 + sharp, tf);
     float tB = smoothstep(0.5 - sharp, 0.5 + sharp, tf - 0.012);
-    float squeeze = mix(1.0, 0.5, ridgeVis);
+    float squeeze = mix(1.0, 0.8, ridgeVis);
     vec2 suv = vec2((ci + 0.5 + (fu - 0.5) * squeeze) / max(uRidges, 1.0), uv.y);
     vec3 a = frameAt(suv, i0, gx, gy);
     vec3 b = frameAt(suv, i0 + 1.0, gx, gy);
@@ -164,29 +166,15 @@ void main() {
     float wide = exp(-min(sweep * sweep * 1.4, 30.0));
     vec3 rr = reflect(-vWorld, nr);
     float lineX = rr.x - (0.16 + 0.05 * sin(across.y * 2.0));
-    float glint = exp(-min(lineX * lineX * 260.0, 30.0)) * smoothstep(-0.2, 0.4, rr.y + 0.3);
+    float glint = exp(-min(lineX * lineX * 70.0, 30.0)) * smoothstep(-0.2, 0.4, rr.y + 0.3);
     float window = smoothstep(0.15, 0.7, rr.y) * smoothstep(0.95, 0.2, abs(rr.x + 0.2));
     float fres = 0.04 + 0.96 * pow(clamp(1.0 - dot(nr, vWorld), 0.0, 1.0), 5.0);
 
-    vec2 sc = uv * vec2(uHalf.x / max(uHalf.y, 1.0), 1.0) * 46.0;
-    vec2 sCell = floor(sc);
-    float sAng = hash21(sCell + 7.0) * 3.14159;
-    vec2 sq = sc - sCell - 0.5;
-    float sAlong = sq.x * cos(sAng) + sq.y * sin(sAng);
-    float sAcross = -sq.x * sin(sAng) + sq.y * cos(sAng);
-    float scratch = step(0.94, hash21(sCell)) * (1.0 - smoothstep(0.0, 0.035, abs(sAcross))) * (1.0 - smoothstep(0.25, 0.45, abs(sAlong)));
-
-    vec3 spec = vec3(1.0, 0.99, 0.965) * (glint * (0.015 + 0.42 * band + 0.12 * band2) * ridgeVis + band * 0.13 + band2 * 0.05 + wide * 0.035 + window * fres * 0.35 + scratch * band * 0.18);
+    vec3 spec = vec3(1.0, 0.99, 0.965) * (glint * (0.015 + 0.42 * band + 0.12 * band2) * ridgeVis + band * 0.13 + band2 * 0.05 + wide * 0.035 + window * fres * 0.35);
     vec3 face = art + spec;
 
     float edgeIn = -sd;
-    float wearN = vnoise(local.xy * 0.35 + uSeed) * 0.7 + vnoise(local.xy * 1.3) * 0.3;
-    vec2 cq = abs(local.xy) - (uHalf - uRadius * 2.2);
-    float corner = smoothstep(0.0, uRadius * 2.0, min(cq.x, cq.y));
-    float wearWidth = 1.2 + 2.6 * wearN + corner * 2.5;
-    float wear = (1.0 - smoothstep(wearWidth * 0.4, wearWidth, edgeIn)) * smoothstep(0.35, 0.75, wearN + corner * 0.3);
-    face = mix(face, vec3(0.94, 0.93, 0.9), wear * 0.4);
-    float rim = (1.0 - smoothstep(0.4, 1.6, edgeIn)) * 0.18 * (0.5 + lam);
+    float rim = (1.0 - smoothstep(0.4, 1.6, edgeIn)) * 0.14 * (0.5 + lam);
     face += rim;
     float innerShade = 1.0 - 0.06 * (1.0 - smoothstep(0.0, 10.0, edgeIn));
     face *= innerShade;

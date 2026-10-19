@@ -66,17 +66,17 @@ export default function Piece({ embedded = false }) {
         className="lenticular__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A lenticular flip card: ${current.full}. Move the pointer over it, drag it, or tilt your phone and the cover flips. Tap the card, press Enter, or use 1 to 4 for the next card.`}
+        aria-label={`A lenticular flip card: ${current.full}. Move the pointer over it, drag it, or tilt your phone and the sleeve turns into its song. Tap the card, press Enter, or use 1 to 4 for the next card.`}
       >
         <canvas ref={canvasRef} className="lenticular__canvas" />
-        <img className="lenticular__fallback" src={current.src} alt={`${current.front.title} cover`} draggable={false} />
+        <img className="lenticular__fallback" src={current.src} alt={`${current.album.title} cover`} draggable={false} />
       </div>
 
       {!embedded && (
         <header ref={headRef} className="lenticular__head">
           <h1 className="lenticular__title">Lenticular</h1>
           <p className="lenticular__lede">
-            A flip card from a 1960s record shop. Tilt it and one cover turns into the next <em>in the plastic</em>; tap it for another.
+            A flip card from a 1960s record shop. Tilt it and the sleeve turns into its song <em>in the plastic</em>; tap it for the next.
           </p>
         </header>
       )}
@@ -91,15 +91,15 @@ export default function Piece({ embedded = false }) {
                 role="radio"
                 aria-checked={active === i}
                 aria-label={card.full}
+                style={{ "--lenticular-paper": card.paper }}
                 className="lenticular__card"
                 onClick={() => engineRef.current?.select(i)}
               >
                 <span className="lenticular__thumb" aria-hidden="true">
-                  <img src={card.front.cover} alt="" width={28} height={28} draggable={false} />
-                  <img src={card.back.cover} alt="" width={28} height={28} draggable={false} />
+                  <img src={card.album.cover} alt="" width={32} height={32} draggable={false} />
+                  <span className="lenticular__thumb-paper" />
                 </span>
-                <span className="lenticular__card-name">{card.name}</span>
-                <span className="lenticular__card-move">{card.move}</span>
+                <span className="lenticular__card-name">{card.song}</span>
               </button>
             ))}
           </div>
@@ -111,7 +111,7 @@ export default function Piece({ embedded = false }) {
               onClick={enableMotion}
               disabled={motion === "on" || motion === "denied"}
             >
-              {motion === "on" ? "Tilting with your phone" : motion === "denied" ? "Motion blocked, drag instead" : "Tilt with your phone"}
+              {motion === "on" ? "Tilting" : motion === "denied" ? "Drag to tilt" : "Use tilt"}
             </button>
           )}
         </footer>

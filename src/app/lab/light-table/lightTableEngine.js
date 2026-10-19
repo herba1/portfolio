@@ -1,4 +1,4 @@
-import { LAYOUTS, PIECES, TEXEL_MM, buildPiece, readFonts } from "./lightTableFilm";
+import { LAYOUTS, PIECES, TEXEL_MM, buildPiece } from "./lightTableFilm";
 import { createLightTableGL } from "./lightTableGL";
 
 const SUB = 1 / 240;
@@ -284,12 +284,9 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
 
   async function load() {
     try {
-      const fonts = await readFonts(box);
-      for (const piece of PIECES) {
-        const data = await buildPiece(piece, fonts);
-        if (destroyed || !gl) return;
-        gl.upload(piece, data);
-      }
+      const built = await Promise.all(PIECES.map((piece) => buildPiece(piece)));
+      if (destroyed || !gl) return;
+      PIECES.forEach((piece, i) => gl.upload(piece, built[i]));
       if (destroyed || !gl) return;
       gl.finish();
       loaded = true;

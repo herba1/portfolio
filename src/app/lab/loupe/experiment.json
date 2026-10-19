@@ -1,6 +1,6 @@
 {
   "title": "Loupe",
-  "description": "A Beatles sleeve on a dark desk and a collector's loupe in a low sun. Turn the glass from 2\u00d7 to 20\u00d7: the sun swings round, the lens pulls its light into a burning hot spot with a coloured caustic ring, the sheen slides across the sleeve, and the cover comes apart into CMYK rosettes.",
+  "description": "A Beatles sleeve on a black ground under a collector's loupe in a low sun. The glass throws its shadow on the cover and burns the light to a hot point beside it, with a cone of rays and a coloured caustic ring; turn it from 2× to 20× and the cover comes apart into CMYK rosettes.",
   "tags": [
     "WebGL",
     "Optics",
@@ -9,7 +9,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: real glass with refraction, chromatic fringe and a focused caustic over a real print, where magnification turns a cover into the ink it is made of.",
+  "intent": "One optical object finished to the edge: real glass with refraction, chromatic fringe and a focused hot spot over a real print, where magnification turns a cover into the ink it is made of.",
   "tile": {
     "cols": 3,
     "rows": 5

@@ -1,7 +1,6 @@
 import RainSim, { MAX_DROPS } from "./rainSim";
 import { BLUR_FRAGMENT, COMPOSITE_FRAGMENT, COPY_FRAGMENT, DROP_FRAGMENT, DROP_VERTEX, FIELD_EDGE, MASK_FRAGMENT, MAX_SEGMENTS, QUAD_VERTEX } from "./rainShader";
 import { RAIN_DEFAULT, SCENES } from "./rainScenes";
-import { drawSkyline } from "./rainSkyline";
 
 const MAX_DPR = 2;
 const REFOG_SECONDS = 15;
@@ -255,17 +254,22 @@ export default class RainEngine {
     const scene = SCENES.find((s) => s.id === id) || SCENES[0];
     const token = ++this.loadToken;
     if (this.current && this.current.scene === scene) return;
-    new Promise((resolve) => {
-      window.setTimeout(() => resolve(drawSkyline(scene.id)), 0);
-    })
+    this.loadImage(scene)
       .then((img) => {
         if (this.destroyed || token !== this.loadToken || !this.gl) return;
         const slot = this.buildSlot(scene, img);
-        if (this.previous) this.freeSlot(this.previous);
-        this.previous = this.current;
+        if (this.previous && this.fade < 0.5) {
+          this.freeSlot(this.current);
+        } else {
+          if (this.previous) this.freeSlot(this.previous);
+          this.previous = this.current;
+        }
         this.current = slot;
         this.fade = this.previous && !this.reduced ? 0 : 1;
-        if (!this.warmed) this.warmUp();
+        if (!this.warmed) {
+          this.warmUp();
+          window.setTimeout(() => !this.destroyed && this.preload(), 600);
+        }
         this.ready = true;
         this.render();
         this.onReady?.();
@@ -274,6 +278,30 @@ export default class RainEngine {
       .catch(() => {
         if (!this.ready) this.onFail?.();
       });
+  }
+
+  loadImage(scene) {
+    if (!this.images) this.images = new Map();
+    if (!this.images.has(scene.id)) {
+      this.images.set(
+        scene.id,
+        new Promise((resolve, reject) => {
+          const img = new Image();
+          img.decoding = "async";
+          img.onload = () => img.decode().catch(() => {}).then(() => resolve(img));
+          img.onerror = () => {
+            this.images.delete(scene.id);
+            reject(new Error("image failed"));
+          };
+          img.src = scene.src;
+        }),
+      );
+    }
+    return this.images.get(scene.id);
+  }
+
+  preload() {
+    for (const scene of SCENES) this.loadImage(scene).catch(() => {});
   }
 
   buildSlot(scene, img) {

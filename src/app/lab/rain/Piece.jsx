@@ -9,7 +9,7 @@ import { RAIN_DEFAULT, SCENES } from "./rainScenes";
 import "./rain.css";
 
 const GLASS_LABEL =
-  "A rainy window with a city skyline at dusk behind it. Drops bead on the glass, merge and run down, each holding a tiny upside-down view of the scene. Drag across the glass to wipe a clear streak; it fogs and beads back over. Press Enter to wipe, and 1 to 3 to change the view.";
+  "A rainy window. Drops bead on the glass, merge and run down, each holding a tiny upside-down view of the scene outside. Drag across the glass to wipe a clear streak; it fogs and beads back over. Press Enter to wipe, and 1 to 3 to change the song and the view.";
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -69,7 +69,7 @@ export default function Piece({ embedded = false }) {
   return (
     <div ref={rootRef} className="rain" data-embedded={embedded ? "" : undefined}>
       <div ref={glassRef} className="rain__glass" tabIndex={0} role="application" aria-label={GLASS_LABEL} onKeyDown={onGlassKey}>
-        <div className="rain__fallback" style={{ backgroundImage: scene.tint }} />
+        <div className="rain__fallback" style={{ backgroundImage: `url(${scene.src})` }} />
         <canvas ref={canvasRef} className="rain__canvas" />
         <span ref={cursorRef} className="rain__cursor" aria-hidden="true" />
       </div>
@@ -84,20 +84,22 @@ export default function Piece({ embedded = false }) {
       )}
 
       <div className="rain__bar">
-        <div className="rain__scenes" role="radiogroup" aria-label="View">
+        <div className="rain__scenes" role="radiogroup" aria-label="Song">
           {SCENES.map((s) => (
             <button
               key={s.id}
               type="button"
               role="radio"
               aria-checked={s.id === sceneId}
-              aria-label={`${s.label}: ${s.note}`}
-              title={s.note}
+              aria-label={`${s.song}, from ${s.album.title}. ${s.view}`}
               className="rain__scene"
               onClick={() => chooseScene(s.id)}
             >
-              <span className="rain__thumb" style={{ backgroundImage: s.tint }} aria-hidden="true" />
-              <span className="rain__scene-name">{s.label}</span>
+              <img className="rain__thumb" src={s.album.cover} alt="" width={36} height={36} draggable={false} />
+              <span className="rain__scene-text">
+                <span className="rain__scene-name">{s.song}</span>
+                <span className="rain__scene-album">{s.album.title}</span>
+              </span>
             </button>
           ))}
         </div>

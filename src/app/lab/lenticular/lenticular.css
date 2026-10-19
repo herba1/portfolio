@@ -102,10 +102,10 @@
 .lenticular__cards {
   display: flex;
   align-items: center;
-  gap: 2px;
-  height: 48px;
+  gap: 4px;
+  height: 56px;
   padding: 4px;
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--lenticular-tray);
   box-shadow:
     0 0 0 1px rgb(0 0 0 / 0.06),
@@ -116,20 +116,24 @@
 .lenticular__card {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 4px 12px 4px 4px;
+  gap: 12px;
+  height: 48px;
+  padding: 4px 16px 4px 8px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--color-ink);
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
-  transition: background-color 160ms var(--lenticular-ease);
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms var(--lenticular-ease), color 160ms var(--lenticular-ease);
 }
 
-.lenticular__card:hover {
-  background: var(--color-surface-sunken);
+@media (hover: hover) {
+  .lenticular__card:hover {
+    background: var(--color-surface-sunken);
+  }
 }
 
 .lenticular__card:focus-visible {
@@ -145,12 +149,13 @@
 .lenticular__thumb {
   position: relative;
   display: block;
-  width: 28px;
-  height: 28px;
+  flex: none;
+  width: 32px;
+  height: 32px;
   overflow: hidden;
-  border-radius: 3px;
-  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);
-  transform: rotate(-3deg);
+  border-radius: 4px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.08), 0 1px 2px rgb(0 0 0 / 0.16);
+  transform: rotate(-4deg);
   transition: transform 260ms var(--lenticular-ease);
 }
 
@@ -163,7 +168,10 @@
   object-fit: cover;
 }
 
-.lenticular__thumb img + img {
+.lenticular__thumb-paper {
+  position: absolute;
+  inset: 0;
+  background: var(--lenticular-paper);
   clip-path: polygon(100% 0, 100% 100%, 0 100%);
 }
 
@@ -172,34 +180,25 @@
 }
 
 .lenticular__card-name {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-}
-
-.lenticular__card-move {
-  font-family: var(--lenticular-serif);
-  font-style: italic;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: 0.16px;
-  font-weight: var(--lenticular-serif-weight);
-  font-variation-settings: "opsz" 10;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
 }
 
 .lenticular__motion {
-  height: 48px;
+  height: 56px;
   padding: 0 16px;
   border: 0;
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--lenticular-tray);
   color: var(--color-ink);
   font: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
+  -webkit-tap-highlight-color: transparent;
   cursor: pointer;
   box-shadow:
     0 0 0 1px rgb(0 0 0 / 0.06),
@@ -237,6 +236,24 @@
   transform: translate(-50%, -52%) rotate(-2deg);
 }
 
+@container (max-width: 1000px) {
+  .lenticular__card {
+    padding: 4px 8px;
+  }
+
+  .lenticular__card-name {
+    display: none;
+  }
+
+  .lenticular__card[aria-checked="true"] {
+    padding-right: 16px;
+  }
+
+  .lenticular__card[aria-checked="true"] .lenticular__card-name {
+    display: block;
+  }
+}
+
 @container (max-width: 640px) {
   .lenticular__head {
     left: 16px;
@@ -246,26 +263,15 @@
     bottom: 16px;
   }
 
-  .lenticular__card {
+  .lenticular__card[aria-checked="true"] {
     padding-right: 8px;
   }
 
-  .lenticular__card-move {
-    display: none;
-  }
-}
-
-@container (max-width: 560px) {
-  .lenticular__card {
-    padding: 4px 8px;
-  }
-
-  .lenticular__card-name {
+  .lenticular__card[aria-checked="true"] .lenticular__card-name {
     display: none;
   }
 
-  .lenticular__thumb {
-    width: 32px;
-    height: 32px;
+  .lenticular__motion {
+    padding: 0 16px;
   }
 }

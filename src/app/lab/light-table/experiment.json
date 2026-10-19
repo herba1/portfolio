@@ -1,6 +1,6 @@
 {
   "title": "Light Table",
-  "description": "Mounted slides and orange-masked negative strips shot from Beatles sleeves (With the Beatles, A Hard Day's Night, Rubber Soul, Magical Mystery Tour, Let It Be) on a glowing light table. Slide the film around the glass and stack two transparencies into a double exposure.",
+  "description": "Medium-format transparencies of Beatles sleeves on a glowing light table: a strip of Abbey Road, Let It Be and Rubber Soul, and Help!, Sgt. Pepper and Revolver in black slide masks. Slide the film around the glass and stack two transparencies into a double exposure.",
   "tags": [
     "WebGL",
     "Film",
@@ -8,15 +8,14 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge: real transparencies over a real light source, where stacking multiplies light and a negative only gives up its picture when you know how to read it.",
+  "intent": "One optical material finished to the edge: real transparencies over a real light source, where stacking two pieces of film multiplies their light into one picture.",
   "tile": {
     "cols": 4,
     "rows": 4
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Light_table",
-    "https://en.wikipedia.org/wiki/135_film",
-    "https://en.wikipedia.org/wiki/Negative_(photography)",
+    "https://en.wikipedia.org/wiki/120_film",
     "https://en.wikipedia.org/wiki/Reversal_film"
   ]
 }

@@ -55,30 +55,6 @@
   opacity: 1;
 }
 
-.loupe__tag {
-  position: absolute;
-  top: 0;
-  left: 0;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: var(--loupe-metal);
-  color: rgb(14 14 15);
-  font-family: var(--font-mono);
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-  pointer-events: none;
-  opacity: 0;
-  box-shadow:
-    0 1px 2px rgb(0 0 0 / 0.18),
-    0 4px 12px rgb(0 0 0 / 0.12);
-  transition: opacity 400ms var(--loupe-ease);
-  will-change: transform;
-}
-
 .loupe__head {
   position: absolute;
   top: 88px;
@@ -119,13 +95,13 @@
 
 .loupe__foot {
   position: absolute;
-  left: 16px;
+  left: 24px;
   right: 16px;
   bottom: 24px;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   column-gap: 12px;
   row-gap: 8px;
 }
@@ -134,9 +110,9 @@
 .loupe__zoom {
   display: flex;
   align-items: center;
-  height: 48px;
+  height: 56px;
   padding: 4px;
-  border-radius: 14px;
+  border-radius: 16px;
   background: var(--loupe-tray);
   box-shadow:
     0 0 0 1px rgb(255 255 255 / 0.08),
@@ -147,25 +123,30 @@
 }
 
 .loupe__cards {
-  gap: 2px;
+  gap: 4px;
 }
 
 .loupe__card {
   display: flex;
   align-items: center;
-  gap: 8px;
-  height: 40px;
-  padding: 4px 12px 4px 4px;
+  gap: 12px;
+  height: 48px;
+  padding: 4px 16px 4px 8px;
   border: 0;
-  border-radius: 10px;
+  border-radius: 12px;
   background: transparent;
   color: var(--loupe-ink);
   font: inherit;
+  white-space: nowrap;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-color 160ms var(--loupe-ease), color 160ms var(--loupe-ease);
 }
 
-.loupe__card:hover {
-  background: var(--loupe-hover);
+@media (hover: hover) {
+  .loupe__card:hover {
+    background: var(--loupe-hover);
+  }
 }
 
 .loupe__card:focus-visible {
@@ -180,10 +161,11 @@
 
 .loupe__thumb {
   display: block;
-  width: 28px;
-  height: 28px;
+  flex: none;
+  width: 32px;
+  height: 32px;
   object-fit: cover;
-  border-radius: 2px;
+  border-radius: 3px;
   box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);
   transform: rotate(-3deg);
   transition: transform 260ms var(--loupe-ease);
@@ -194,48 +176,31 @@
 }
 
 .loupe__card-name {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-}
-
-.loupe__card-year {
-  font-family: var(--font-mono);
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
-  font-variant-numeric: tabular-nums;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
 }
 
 .loupe__zoom {
-  gap: 8px;
-  padding: 4px 16px;
+  gap: 16px;
+  padding: 4px 20px;
 }
 
-.loupe__zoom-label {
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  margin-right: 4px;
-}
-
-.loupe__zoom-scale {
-  font-family: var(--font-mono);
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
+.loupe__zoom-value {
+  min-width: 40px;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
   font-variant-numeric: tabular-nums;
-  color: var(--loupe-ink-secondary);
+  text-align: right;
 }
 
 .loupe__range {
   -webkit-appearance: none;
   appearance: none;
-  width: 148px;
+  width: 160px;
   height: 24px;
   margin: 0;
   background: transparent;
@@ -279,22 +244,25 @@
   box-shadow: 0 0 0 3px var(--loupe-tray), 0 1px 3px rgb(0 0 0 / 0.3);
 }
 
+@container (max-width: 1000px) {
+  .loupe__card-name {
+    display: none;
+  }
+
+  .loupe__card {
+    padding: 4px 8px;
+  }
+}
+
 @container (max-width: 640px) {
   .loupe__head {
     left: 16px;
   }
 
   .loupe__foot {
+    left: 16px;
     bottom: 16px;
-  }
-
-  .loupe__card {
-    padding-right: 8px;
-  }
-
-  .loupe__card-year,
-  .loupe__zoom-label {
-    display: none;
+    justify-content: center;
   }
 
   .loupe__zoom {
@@ -323,18 +291,4 @@
   border-radius: 4px;
   box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 16px 40px -12px rgb(0 0 0 / 0.3);
   transform: translate(-50%, -54%) rotate(-2deg);
-}
-
-@container (max-width: 440px) {
-  .loupe__card-name {
-    display: none;
-  }
-
-  .loupe__card {
-    padding: 4px 12px;
-  }
-
-  .loupe__cards {
-    gap: 4px;
-  }
 }

@@ -26,6 +26,8 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
   const pointers = new Map();
   const images = new Map();
   let pinch = null;
+  let pending = null;
+  let queued = null;
   let touchOffset = 0;
   let intro = false;
   let armed = !embedded;
@@ -48,7 +50,7 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
     const pad = insets();
     const availW = view.width - 32;
     const availH = Math.max(120, view.height - pad.top - pad.bottom);
-    const hh = Math.min(availH * 0.44, view.height * 0.34, (availW * 0.4) / aspect);
+    const hh = Math.min(availH * 0.44, view.height * 0.34, (availW * (view.width < 640 ? 0.47 : 0.4)) / aspect);
     const hw = hh * aspect;
     return { x: view.width / 2, y: pad.top + availH / 2, rot: card.tilt, hw, hh, mmPx: card.widthMm / (2 * hw) };
   }
@@ -82,6 +84,12 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
   }
 
   function select(idx, now = performance.now()) {
+    if (layerB) {
+      queued = idx === layerA.idx ? null : idx;
+      onSelect(idx);
+      return;
+    }
+    queued = null;
     if (idx === layerA.idx) return;
     const current = poseOf(layerA, now);
     layerB = { idx: layerA.idx, from: current, t0: now, exit: true };
@@ -107,7 +115,13 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
     lens.tx = fx;
     lens.ty = fy;
     lens.tlz = Math.log(ZOOM_REST);
-    if (reduced) {
+    if (pending) {
+      const [px, py] = bound(pending[0], pending[1]);
+      lens.x = lens.tx = px;
+      lens.y = lens.ty = py;
+      lens.lz = lens.tlz;
+      intro = false;
+    } else if (reduced) {
       lens.x = fx;
       lens.y = fy;
       lens.lz = lens.tlz;
@@ -190,9 +204,16 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
     wake();
   }
 
+  function bound(x, y) {
+    const r = rest(layerA.idx);
+    const reach = Math.max(r.hw, r.hh) + view.radius * 0.2;
+    return [clamp(x, Math.max(view.radius * 0.6, r.x - reach), Math.min(view.width - view.radius * 0.6, r.x + reach)), clamp(y, r.y - r.hh + view.radius * 0.2, r.y + r.hh + view.radius * 0.2)];
+  }
+
   function setTarget(x, y) {
-    lens.tx = clamp(x, 0, view.width);
-    lens.ty = clamp(y, 0, view.height);
+    const [bx, by] = bound(x, y);
+    lens.tx = bx;
+    lens.ty = by;
     if (reduced) {
       lens.x = lens.tx;
       lens.y = lens.ty;
@@ -226,8 +247,11 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
   }
 
   function onMove(e) {
-    if (!lens.on) return;
     const [x, y] = local(e);
+    if (!lens.on) {
+      if (e.pointerType !== "touch") pending = [x, y];
+      return;
+    }
     const p = pointers.get(e.pointerId);
     if (!p) {
       if (e.pointerType === "touch" || pointers.size) return;
@@ -297,6 +321,14 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
   }
 
   function render(now) {
+    if (layerB && poseOf(layerB, now).done) {
+      layerB = null;
+      if (queued != null) {
+        const next = queued;
+        queued = null;
+        select(next, now);
+      }
+    }
     const a = poseOf(layerA, now);
     const b = layerB ? poseOf(layerB, now) : null;
     if (b && b.done) layerB = null;
@@ -314,18 +346,11 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
       lens: { x: lens.x, y: lens.y, r: radius, zoom, lift: lens.lift, on: lens.on },
     });
     if (tag) {
-      const label = zoom < 9.95 ? `${zoom.toFixed(1)}×` : `${Math.round(zoom)}×`;
+      const label = `${zoom < 9.95 ? zoom.toFixed(1) : Math.round(zoom)}×`;
       if (label !== shownZoom) {
         tag.textContent = label;
         shownZoom = label;
       }
-      const ang = Math.PI * 0.25;
-      let tx = lens.x + Math.cos(ang) * (radius + 6);
-      let ty = lens.y + Math.sin(ang) * (radius + 6);
-      if (tx > view.width - 48) tx = lens.x - Math.cos(ang) * (radius + 6) - 44;
-      if (ty > view.height - 28) ty = lens.y - Math.sin(ang) * (radius + 6) - 24;
-      tag.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0)`;
-      tag.style.opacity = lens.on ? "1" : "0";
     }
     if (gl.has(cardA.key)) onReady();
     return (!a.done) || Boolean(layerB);
@@ -341,11 +366,11 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
     if (lens.on && !reduced) {
       const steps = Math.max(1, Math.ceil(dt / SUB));
       const h = dt / steps;
-      const omega = intro ? 6.2 : 19;
+      const omega = intro ? 9 : 19;
       for (let i = 0; i < steps; i += 1) {
         spring(lens, "x", "vx", lens.tx, omega, h);
         spring(lens, "y", "vy", lens.ty, omega, h);
-        spring(lens, "lz", "vlz", lens.tlz, intro ? 5 : 13, h);
+        spring(lens, "lz", "vlz", lens.tlz, intro ? 8 : 13, h);
         spring(lens, "lift", "vlift", lens.tlift, 16, h);
       }
       const far = Math.abs(lens.x - lens.tx) + Math.abs(lens.y - lens.ty) > 0.04 || Math.abs(lens.vx) + Math.abs(lens.vy) > 0.4;

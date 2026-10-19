@@ -1,28 +1,27 @@
 import { albumById } from "@/app/lab/_music/catalog";
 
 export const FRAME_COUNT = 7;
-export const REST_FRAME = 3;
-export const SPLIT = 4;
+export const SPLIT = 1.5;
 
-const pair = (key, a, b, move) => {
-  const front = albumById(a);
-  const back = albumById(b);
+const card = (key, albumId, song, side, paper, ink) => {
+  const album = albumById(albumId);
   return {
     key,
-    front,
-    back,
-    src: front.cover,
-    name: `${front.title.replace(/'s Lonely.*$/, "")}`,
-    move,
-    full: `${front.title} (${front.year}) and ${back.title} (${back.year})`,
+    album,
+    song,
+    side,
+    paper,
+    ink,
+    src: album.cover,
+    full: `${album.title} (${album.year}), turning into ${song}`,
     aspect: 1,
     dir: 1,
   };
 };
 
 export const CARDS = [
-  pair("soul", "rubber-soul", "revolver", "to Revolver"),
-  pair("road", "abbey-road", "let-it-be", "to Let It Be"),
-  pair("help", "help", "a-hard-days-night", "to A Hard Day's Night"),
-  pair("pepper", "sgt-pepper", "magical-mystery-tour", "to Magical Mystery Tour"),
+  card("sun", "abbey-road", "Here Comes the Sun", "Side two, track one", "#f3b23c", "#1b1712"),
+  card("wood", "rubber-soul", "Norwegian Wood", "Side one, track two", "#173826", "#f0743a"),
+  card("knows", "revolver", "Tomorrow Never Knows", "Side two, track seven", "#111111", "#f4f1ea"),
+  card("fields", "magical-mystery-tour", "Strawberry Fields Forever", "Side two, track two", "#d8283f", "#fbe3e0"),
 ];

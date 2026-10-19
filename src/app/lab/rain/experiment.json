@@ -1,15 +1,15 @@
 {
   "title": "Rain",
-  "description": "A city skyline at dusk behind a rainy window, drawn live: layered sunset sky, low sun, three depths of towers with lit windows and water tanks on the roofs. Drops bead, merge and run down the glass, each holding a tiny upside-down view of the city; drag across the fogged pane to wipe a clear streak.",
+  "description": "A rainy window with a song on. Drops bead, merge and run down the glass, each holding a tiny upside-down view of the photo outside; drag across the fogged pane to wipe a clear streak. Pick Across the Universe, Here Comes the Sun or The Fool on the Hill and the view changes with it: a light through night fog, a sunset over the hills, a green valley.",
   "tags": [
     "WebGL",
     "Optics",
     "Simulation",
-    "City"
+    "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One physical surface finished to the edge: real water on real glass, where every drop is a lens and your finger is the only way to see out.",
+  "intent": "One physical surface finished to the edge: real water on real glass over a real photograph, where every drop is a lens and your finger is the only way to see out, with the song that goes with the view.",
   "tile": {
     "cols": 3,
     "rows": 5

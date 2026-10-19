@@ -1,4 +1,4 @@
-import { CARDS, FRAME_COUNT } from "./lenticularCards";
+import { CARDS, FRAME_COUNT, SPLIT } from "./lenticularCards";
 import { cardLayers } from "./lenticularArt";
 import { createLenticularGL } from "./lenticularGL";
 
@@ -57,6 +57,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
   const hold = { yaw: 0, pitch: 0, until: 0, fresh: false, active: false };
   const orient = { on: false, gamma: 0, beta: 0, baseG: null, baseB: null, fresh: false };
   const images = new Map();
+  const family = getComputedStyle(box).fontFamily;
   let active = 0;
   let shown = 0;
   let flip = null;
@@ -87,7 +88,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     const availW = view.width - 32;
     const availH = Math.max(160, view.height - pad.top - pad.bottom);
     const aspect = aspectOf(shown);
-    view.hh = Math.max(60, Math.min(availH * 0.44, (availW * 0.4) / aspect));
+    view.hh = Math.max(60, Math.min(availH * 0.45, (availW * (view.width < 640 ? 0.47 : 0.4)) / aspect));
     view.cx = view.width / 2;
     view.cy = pad.top + availH / 2;
   }
@@ -112,7 +113,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
   function loadLayers(idx) {
     const spec = CARDS[idx];
     if (images.has(spec.key)) return images.get(spec.key);
-    const promise = cardLayers(spec, gl ? gl.size : 640);
+    const promise = cardLayers(spec, gl ? gl.size : 1024, family);
     images.set(spec.key, promise);
     return promise;
   }
@@ -234,7 +235,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     if (pointer.mode !== "drag" || e.pointerId !== pointer.id) return;
     const touch = pointer.type !== "mouse";
     const [ux, uy] = local(e);
-    if (e.type === "pointerup" && Math.hypot(ux - pointer.sx, uy - pointer.sy) < 6 && onCard(ux, uy) && !flip) {
+    if (e.type === "pointerup" && Math.hypot(ux - pointer.sx, uy - pointer.sy) < 6 && onCard(ux, uy)) {
       select((active + 1) % CARDS.length);
     }
     pointer.id = null;
@@ -320,7 +321,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
         const [yaw, pitch] = positional(pointer.x, pointer.y);
         return [yaw, pitch, false];
       }
-      const scale = 1 / Math.max(80, view.hh * aspectOf(shown) * 1.6);
+      const scale = 1 / Math.max(80, view.hh * aspectOf(shown) * 0.9);
       const yaw = pointer.startYaw + (pointer.x - pointer.sx) * scale * YAW_MAX * 1.4;
       const pitch = pointer.startPitch - (pointer.y - pointer.sy) * scale * PITCH_MAX * 1.4;
       return [soft(yaw, YAW_MAX * 1.2), soft(pitch, PITCH_MAX * 1.1), false];
@@ -368,7 +369,7 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
     }
     if (releaseFlick) {
       releaseFlick = false;
-      const scale = 1 / Math.max(80, view.hh * aspectOf(shown) * 1.6);
+      const scale = 1 / Math.max(80, view.hh * aspectOf(shown) * 0.9);
       const flickYaw = clamp(pointer.vx * scale * YAW_MAX * 1.4, -4, 4);
       const flickPitch = clamp(-pointer.vy * scale * PITCH_MAX * 1.4, -3, 3);
       tilt.vyaw = tilt.vyaw * 0.5 + flickYaw * 0.5;
@@ -473,6 +474,8 @@ export function createLenticularEngine({ box, stage, canvas, insets, embedded, o
       key3: KEY_LIGHT,
       seed: CARDS.indexOf(spec) * 3.1 + 0.7,
       tint: TINT,
+      frames: FRAME_COUNT,
+      split: SPLIT,
     });
   }
 

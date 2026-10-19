@@ -63,14 +63,13 @@ export default function Piece({ embedded = false }) {
       >
         <canvas ref={canvasRef} className="loupe__canvas" />
         <img className="loupe__fallback" src={CARDS[active].src} alt={`${CARDS[active].full}, ${CARDS[active].year}`} draggable={false} />
-        <span ref={tagRef} className="loupe__tag" aria-hidden="true" />
       </div>
 
       {!embedded && (
         <header ref={headRef} className="loupe__head">
           <h1 className="loupe__title">Loupe</h1>
           <p className="loupe__lede">
-            Put the glass on a sleeve and turn it up. The sun swings round, the glass burns it to a point, and the cover is <em>only ink</em>.
+            Slide the glass over a sleeve and turn it up. The low sun burns to a point beside it, and up close the cover is <em>only ink</em>.
           </p>
         </header>
       )}
@@ -88,17 +87,14 @@ export default function Piece({ embedded = false }) {
                 className="loupe__card"
                 onClick={() => engineRef.current?.select(i)}
               >
-                <img className="loupe__thumb" src={card.src} alt="" width={28} height={28} draggable={false} />
+                <img className="loupe__thumb" src={card.src} alt="" width={32} height={32} draggable={false} />
                 <span className="loupe__card-name">{card.name}</span>
-                <span className="loupe__card-year">{card.year}</span>
               </button>
             ))}
           </div>
           <label className="loupe__zoom">
-            <span className="loupe__zoom-label">Magnification</span>
-            <span className="loupe__zoom-scale">2×</span>
-            <input ref={sliderRef} className="loupe__range" type="range" min="0" max="1000" step="1" defaultValue="352" />
-            <span className="loupe__zoom-scale">20×</span>
+            <input ref={sliderRef} className="loupe__range" type="range" min="0" max="1000" step="1" defaultValue="544" aria-label="Magnification, 2 to 20 times" />
+            <span ref={tagRef} className="loupe__zoom-value" aria-hidden="true">7.0×</span>
           </label>
         </footer>
       )}

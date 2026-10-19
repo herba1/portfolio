@@ -1,6 +1,6 @@
 import { CARD_FRAGMENT, FULL_VERTEX } from "./lenticularShader";
 
-const CARD_UNIFORMS = ["uArt", "uRes", "uDpr", "uCenter", "uHalf", "uRot", "uLift", "uDist", "uGround", "uRidges", "uFrames", "uGain", "uRadius", "uThick", "uReady", "uKey", "uSeed", "uGroundTint"];
+const CARD_UNIFORMS = ["uArt", "uRes", "uDpr", "uCenter", "uHalf", "uRot", "uLift", "uDist", "uGround", "uRidges", "uFrames", "uGain", "uRadius", "uThick", "uReady", "uKey", "uSeed", "uGroundTint", "uSplit"];
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -55,7 +55,7 @@ export function createLenticularGL(canvas) {
   }
 
   function build(key, layers) {
-    const size = Math.min(640, maxSize);
+    const size = Math.min(1024, maxSize);
     const array = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, array);
     gl.texStorage3D(gl.TEXTURE_2D_ARRAY, Math.floor(Math.log2(size)) + 1, gl.RGBA8, size, size, layers.length);
@@ -105,7 +105,8 @@ export function createLenticularGL(canvas) {
     gl.uniform1f(l.uDist, f.dist);
     gl.uniform1f(l.uGround, f.ground);
     gl.uniform1f(l.uRidges, f.ridges);
-    gl.uniform1f(l.uFrames, set ? set.frames : 1);
+    gl.uniform1f(l.uFrames, f.frames);
+    gl.uniform1f(l.uSplit, set ? f.split : 99);
     gl.uniform1f(l.uGain, f.gain);
     gl.uniform1f(l.uRadius, f.radius);
     gl.uniform1f(l.uThick, f.thick);
@@ -126,5 +127,5 @@ export function createLenticularGL(canvas) {
     if (loser) loser.loseContext();
   }
 
-  return { build, size: Math.min(640, maxSize), has: (key) => sets.has(key), aspectOf: (key) => sets.get(key)?.aspect, evict, resize, draw, destroy };
+  return { build, size: Math.min(1024, maxSize), has: (key) => sets.has(key), aspectOf: (key) => sets.get(key)?.aspect, evict, resize, draw, destroy };
 }

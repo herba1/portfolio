@@ -197,7 +197,7 @@ vec3 scene(vec2 p, float foot) {
     vec3 albedo = pow(x, vec3(2.2));
     vec3 lit = albedo * front;
     if (kind < 1.5) {
-      vec2 win = kind < 0.5 ? vec2(17.1, 11.5) : vec2(11.5, 17.1);
+      vec2 win = vec2(28.0);
       float dWin = max(rectSd(lm, win, 0.6), 0.0);
       float dOut = max(-sd / uScale, 0.0);
       float halo = 0.07 * exp(-dWin / 0.7) + 0.05 * exp(-dOut / 0.6) + 0.03 * exp(-dOut / 3.0);
