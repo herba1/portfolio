@@ -38,10 +38,10 @@ vec2 atlasUv(int i, vec2 q) {
   return vec2((q.x * 0.5 + 0.5 + float(i)) / 3.0, q.y * 0.5 + 0.5);
 }
 
-float heightOf(int i, vec2 p) {
+float heightOf(int i, vec2 p, float spread) {
   vec2 q = localOf(i, p);
   if (abs(q.x) >= 1.0 || abs(q.y) >= 1.0) return 0.0;
-  float lod = max(0.0, log2(uCell * 0.5 / max(uRect[i].z * uScale, 1.0)));
+  float lod = max(max(0.0, log2(uCell * 0.5 / max(uRect[i].z * uScale, 1.0))), log2(max(spread, 1.0)));
   return (textureLod(uHeight, atlasUv(i, q), lod).r + uLift[i]) * uRect[i].z / (uCell * 0.5);
 }
 
@@ -50,26 +50,24 @@ float occlusion(int i, vec3 P, vec3 L) {
   vec2 seg = L.xy - P.xy;
   float segLen = max(length(seg), 0.001);
   vec2 dir = seg / segLen;
+  float unit = r.z / (uCell * 0.5);
+  float hMax = 22.0 * unit;
+  float rise = max(L.z - P.z, 0.001);
   vec2 oc = P.xy - r.xy;
-  float rad = r.z * 1.42;
-  float b = dot(oc, dir);
-  float cc = dot(oc, oc) - rad * rad;
-  float disc = b * b - cc;
-  if (disc <= 0.0) return 1.0;
-  float sq = sqrt(disc);
-  float t0 = max(-b - sq, 2.0);
-  float t1 = min(-b + sq, segLen);
-  if (t1 <= t0) return 1.0;
+  float reach = hMax * segLen / max(rise - hMax, rise * 0.15);
+  if (length(oc) > r.z * 1.42 + reach) return 1.0;
   float res = 1.0;
   float steps = uSteps;
-  for (float k = 0.0; k < 48.0; k += 1.0) {
+  float prevT = 0.0;
+  for (float k = 0.0; k < 24.0; k += 1.0) {
     if (k >= steps) break;
-    float t = mix(t0, t1, (k + 0.5) / steps);
-    vec2 xy = P.xy + dir * t;
-    float above = mix(P.z, L.z, t / segLen);
-    float h = heightOf(i, xy);
-    float pen = 0.8 + uBulb * t / max(segLen - t, 1.0);
-    res = min(res, smoothstep(-pen, pen, above - h));
+    float h = hMax * (k + 0.5) / steps;
+    float t = min(h * segLen / max(rise - h, rise * 0.15), segLen);
+    float above = P.z + h;
+    float hf = heightOf(i, P.xy + dir * t, (t - prevT) / unit * 0.7);
+    prevT = t;
+    float pen = hMax / steps * 1.2;
+    res = min(res, 1.0 - smoothstep(0.0, pen, hf - above));
   }
   return res;
 }
@@ -96,7 +94,7 @@ void main() {
   vec3 lampCol = vec3(1.0, 0.86, 0.68);
   vec3 L = uLamp.xyz;
   vec3 V = vec3(0.0, 0.0, 1.0);
-  vec3 ground = vec3(0.016, 0.0155, 0.015);
+  vec3 ground = vec3(0.86, 0.835, 0.79);
   float h0 = 0.0;
   vec3 n = vec3(0.0, 0.0, 1.0);
   vec4 albedo = vec4(ground, 0.0);
@@ -159,12 +157,16 @@ void main() {
   vec3 H = normalize(Lv + V);
   float nh = max(dot(n, H), 0.0);
   vec3 base = toLinear(albedo.rgb);
+  vec3 sky = vec3(0.94, 0.96, 1.0);
+  float amb = 0.5;
+  float lit = atten * shadow;
   vec3 col;
-  vec3 groundCol = ground * max(Lv.z, 0.0) * atten * shadow * lampCol * 1.8;
+  vec3 groundCol = toLinear(ground) * (sky * amb + lampCol * lit * 0.95);
   if (hit < 0 || mat.a < 0.1) {
     col = groundCol;
   } else {
     float kind = floor(mat.a * 3.0 + 0.5);
+    float tiltAmb = amb * (0.82 + 0.18 * n.z);
     if (kind >= 2.0) {
       float theta = (mat.b * 255.0 - 1.0) / 253.0 * PI;
       vec4 r = uRect[hit];
@@ -176,32 +178,25 @@ void main() {
       float th = dot(T, H);
       float sheen = pow(sqrt(max(1.0 - th * th, 0.0)), mix(30.0, 90.0, mat.g)) * mix(0.12, 0.5, mat.g);
       float wrap = max((dot(n, Lv) + 0.25) / 1.25, 0.0);
-      col = (base * wrap * 0.95 + mix(base, vec3(1.0), 0.5) * sheen) * atten * shadow * lampCol;
+      col = base * sky * tiltAmb + (base * wrap * 1.5 + mix(base, vec3(1.0), 0.5) * sheen) * lit * lampCol;
     } else if (mat.r > 0.5) {
       float e = mix(40.0, 900.0, mat.g);
       float spec = pow(nh, e) * (e + 8.0) / 60.0;
       float broad = pow(nh, 12.0) * 0.35;
-      col = base * (spec + broad + diff * 0.32) * atten * shadow * lampCol;
-      col += base * (0.012 + 0.05 * (1.0 - n.z));
+      col = base * sky * tiltAmb * mix(0.35, 0.75, n.z * n.z) + base * (spec * 1.4 + broad + diff * 0.7) * lit * lampCol;
     } else {
       float e = mix(60.0, 1400.0, mat.g);
       float spec = pow(nh, e) * (e + 8.0) / 90.0;
       float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-      col = (base * diff + vec3(spec) * (0.5 + fres)) * atten * shadow * lampCol;
-      col += base * 0.006;
+      col = base * sky * tiltAmb + (base * diff * 1.4 + vec3(spec) * (0.5 + fres)) * lit * lampCol;
     }
     col = mix(groundCol, col, smoothstep(0.0, 0.5, albedo.a));
   }
 
-  vec2 dl = p - L.xy;
-  float bulbR = 2.0 + L.z * 0.06;
-  float glow = exp(-dot(dl, dl) / (bulbR * bulbR)) * 0.35 * uLamp.w;
-  col += lampCol * glow;
-
-  vec3 mapped = vec3(1.0) - exp(-col * 1.25);
+  vec3 mapped = vec3(1.0) - exp(-col * 1.9);
   vec3 display = pow(mapped, vec3(1.0 / 2.2));
   float grain = fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5;
-  display += grain * 0.008;
+  display += grain * (1.5 / 255.0);
   outColor = vec4(display, 1.0);
 }
 `;

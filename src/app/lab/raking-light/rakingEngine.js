@@ -1,14 +1,13 @@
 import { BADGES, CELL, buildBadges } from "./rakingBadges";
 import { createRakingGL } from "./rakingGL";
 
-export const LAMP_MIN = 2;
+export const LAMP_MIN = 7;
 export const LAMP_MAX = 90;
-const LAMP_REST = 11;
+const LAMP_REST = 16;
 const LOG_MIN = Math.log(LAMP_MIN);
 const LOG_MAX = Math.log(LAMP_MAX);
 const SUB = 1 / 240;
-const IDLE_AFTER = 2.6;
-const INTRO_S = 1.6;
+const INTRO_S = 0.45;
 const VISIBLE = [560 / CELL, 584 / CELL, 560 / CELL];
 const TALL = [416 / 560, 1, 1];
 
@@ -21,7 +20,7 @@ function spring(state, key, velKey, target, omega, h) {
   state[key] += state[velKey] * h;
 }
 
-export function createRakingEngine({ box, stage, canvas, tag, slider, insets, onReady, onFail }) {
+export function createRakingEngine({ box, stage, canvas, slider, insets, onReady, onFail }) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const view = { width: 1, height: 1, dpr: 1, pxPerMm: 4, cx: 0, cy: 0, spanX: 100, spanY: 60 };
   const lamp = { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, lz: Math.log(LAMP_REST), vlz: 0, tlz: Math.log(LAMP_REST), power: 0 };
@@ -38,10 +37,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
   let motionQuality = 1;
   let interval = 16;
   let introT = reduced ? INTRO_S : 0;
-  let idleT = IDLE_AFTER;
-  let orbit = 0;
-  let shownHeight = "";
-  let tagOn = false;
   let sentReady = false;
   let placed = false;
 
@@ -90,8 +85,7 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
     });
     if (!placed) {
       placed = true;
-      orbit = Math.PI * 0.85;
-      const [ox, oy] = orbitPoint(orbit);
+      const [ox, oy] = orbitPoint(-Math.PI * 0.78);
       lamp.x = lamp.tx = ox;
       lamp.y = lamp.ty = oy;
     }
@@ -127,7 +121,7 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
   function resize() {
     const rect = box.getBoundingClientRect();
     const dprCap = Math.min(window.devicePixelRatio || 1, 2);
-    const budget = Math.sqrt(2200000 / Math.max(1, rect.width * rect.height));
+    const budget = Math.sqrt(1600000 / Math.max(1, rect.width * rect.height));
     view.width = Math.max(1, rect.width);
     view.height = Math.max(1, rect.height);
     view.dpr = Math.max(0.75, Math.min(dprCap, budget));
@@ -148,7 +142,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
   function setLamp(x, y) {
     lamp.tx = clamp(x, 0, view.width);
     lamp.ty = clamp(y, 0, view.height);
-    idleT = 0;
     if (reduced) {
       lamp.x = lamp.tx;
       lamp.y = lamp.ty;
@@ -195,7 +188,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
     if (pointers.size >= 2 && pinch) {
       const [a, b] = [...pointers.values()];
       setHeight(pinch.lz + Math.log((Math.hypot(a.x - b.x, a.y - b.y) || 1) / pinch.dist) * 1.4);
-      idleT = 0;
       return;
     }
     setLamp(x, y + touchLift(p.type));
@@ -211,7 +203,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? view.height : 1;
     const dy = clamp(e.deltaY * unit, -240, 240);
-    idleT = 0;
     setHeight(lamp.tlz - dy * (e.ctrlKey ? 0.012 : 0.0028));
   }
 
@@ -226,7 +217,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
     else if (e.key === "-" || e.key === "_") setHeight(lamp.tlz - Math.log(1.25));
     else handled = false;
     if (handled) {
-      idleT = 0;
       e.preventDefault();
     }
   }
@@ -234,14 +224,7 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
   function onSlider() {
     lamp.tlz = LOG_MIN + (LOG_MAX - LOG_MIN) * (Number(slider.value) / 1000);
     if (reduced) lamp.lz = lamp.tlz;
-    idleT = 0;
     wake();
-  }
-
-  function setTag(on) {
-    if (!tag || on === tagOn) return;
-    tagOn = on;
-    tag.dataset.on = on ? "true" : "false";
   }
 
   function render() {
@@ -254,18 +237,8 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
       lamp: [lamp.x, lamp.y, z * view.pxPerMm, lamp.power],
       bulb: 0.06 + z * 0.004,
       falloff: 120 * view.pxPerMm,
-      steps: quality < 1 ? 20 : 34,
+      steps: quality < 1 ? 8 : 12,
     });
-    if (tag) {
-      const label = `${z < 9.95 ? z.toFixed(1) : Math.round(z)} mm`;
-      if (label !== shownHeight) {
-        tag.textContent = label;
-        shownHeight = label;
-      }
-      const tx = clamp(lamp.x + 18, 8, view.width - 72);
-      const ty = clamp(lamp.y + 18, 8, view.height - 32);
-      tag.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0)`;
-    }
     if (!sentReady) {
       sentReady = true;
       onReady();
@@ -279,16 +252,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
       moving = true;
     }
     lamp.power = easeOut(introT / INTRO_S);
-    idleT += dt;
-    if (!reduced && idleT > IDLE_AFTER && !pointers.size) {
-      const fade = clamp((idleT - IDLE_AFTER) / 2, 0, 1);
-      if (fade < 1 && idleT - dt <= IDLE_AFTER) orbit = Math.atan2((lamp.y - view.cy) / Math.max(1, view.spanY), (lamp.x - view.cx) / Math.max(1, view.spanX));
-      orbit += dt * 0.32 * fade;
-      const [ox, oy] = orbitPoint(orbit);
-      lamp.tx += (ox - lamp.tx) * Math.min(1, dt * 2.4 * fade);
-      lamp.ty += (oy - lamp.ty) * Math.min(1, dt * 2.4 * fade);
-      moving = true;
-    }
     if (reduced) {
       lamp.x = lamp.tx;
       lamp.y = lamp.ty;
@@ -304,7 +267,6 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
     }
     const far = Math.abs(lamp.x - lamp.tx) + Math.abs(lamp.y - lamp.ty) > 0.05 || Math.abs(lamp.vx) + Math.abs(lamp.vy) > 0.5;
     const rising = Math.abs(lamp.lz - lamp.tlz) > 0.0006 || Math.abs(lamp.vlz) > 0.003;
-    setTag(rising);
     if (far || rising) moving = true;
     return moving;
   }
@@ -325,10 +287,9 @@ export function createRakingEngine({ box, stage, canvas, tag, slider, insets, on
       if (quality !== motionQuality) applyQuality(motionQuality);
     } else if (quality !== 1) applyQuality(1);
     render();
-    if (moving || idleT <= IDLE_AFTER + 0.1) raf = requestAnimationFrame(frame);
+    if (moving) raf = requestAnimationFrame(frame);
     else {
       last = 0;
-      setTag(false);
     }
   }
 

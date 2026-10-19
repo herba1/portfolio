@@ -116,8 +116,8 @@ async function buildCover(src, facets) {
       const x = Math.min(sw - 1, Math.floor(u * sw));
       const y = Math.min(sh - 1, Math.floor(v * sh));
       const o = (y * sw + x) * 4;
-      const [r, g, b] = saturate(px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, 1.35);
-      const lift = 0.16;
+      const [r, g, b] = saturate(px[o] / 255, px[o + 1] / 255, px[o + 2] / 255, 1.6);
+      const lift = 0.1;
       const t = (j * width + i) * 4;
       tint[t] = lift + r * (1 - lift);
       tint[t + 1] = lift + g * (1 - lift);
@@ -164,26 +164,20 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
     const narrow = w < 640;
     let radius;
     if (narrow) {
-      radius = Math.min(w * 0.2, h * 0.11);
+      radius = Math.min(w * 0.3, h * 0.15);
       view.cx = w * 0.5;
-      view.cy = embedded ? h * 0.36 : h * 0.4;
+      view.cy = embedded ? h * 0.4 : h * 0.42;
     } else {
-      radius = Math.min(w * 0.085, h * 0.13);
-      view.cx = embedded ? w * 0.5 : w * 0.58;
-      view.cy = embedded ? h * 0.34 : h * 0.36;
+      radius = Math.min(w * 0.12, h * 0.19);
+      view.cx = w * 0.5;
+      view.cy = embedded ? h * 0.4 : h * 0.43;
     }
     view.radius = clamp(radius, 40, 220);
     const R = view.radius;
     view.focal = 1.25 * Math.max(w, h);
     view.cam = [w / 2 - view.cx, view.cy - h / 2, view.focal];
-    const sBack = view.focal / (view.focal + R * 9);
-    view.wall = R * 9;
-    view.room = [
-      Math.max(w * 0.5 + Math.abs(view.cam[0]), R * 2) / sBack * 0.82,
-      Math.max(h - view.cy, R * 2) / sBack * 0.5,
-      Math.max(view.cy, R * 2) / sBack * 0.86,
-      R * 9,
-    ];
+    view.wall = R * 7;
+    view.room = [1e6, 1e6, 1e6, R * 7];
     const dprCap = Math.min(window.devicePixelRatio || 1, 2);
     const budget = Math.sqrt(2400000 / (w * h));
     view.dpr = Math.max(0.6, Math.min(dprCap, budget));
@@ -210,6 +204,10 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
     const boxRect = box.getBoundingClientRect();
     ctx.setTransform(scale, 0, 0, scale, 0, 0);
     ctx.fillStyle = "#fff";
+    ctx.strokeStyle = "#fff";
+    ctx.lineWidth = 10;
+    ctx.lineJoin = "round";
+    ctx.filter = `blur(${Math.round(6 * scale)}px)`;
     ctx.textBaseline = "alphabetic";
     const walker = document.createTreeWalker(header, NodeFilter.SHOW_TEXT);
     const range = document.createRange();
@@ -231,6 +229,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
         const ascent = metrics.fontBoundingBoxAscent ?? r.height * 0.8;
         const descent = metrics.fontBoundingBoxDescent ?? r.height * 0.2;
         const baseline = r.top - boxRect.top + (r.height - ascent - descent) / 2 + ascent;
+        ctx.strokeText(m[0], r.left - boxRect.left, baseline);
         ctx.fillText(m[0], r.left - boxRect.left, baseline);
       }
     }
@@ -295,7 +294,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
       rotPrev: rotation(sim.phi - sim.omega * SHUTTER),
       light: LIGHT,
       gel: gelNow,
-      spread: 0.008,
+      spread: 0.0035,
       rayGain: 0.05,
       speckGain: 90,
       glintGain: 1.1,
@@ -306,7 +305,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
       seed: reduced ? 0.37 : sim.clock * 0.731,
       maskOn,
       photoOn: atlasReady ? 1 : 0,
-      fade: reduced ? 1 : 0.15 + 0.85 * (1 - Math.pow(1 - fade, 3)),
+      fade: reduced ? 1 : 1 - Math.pow(1 - fade, 3),
     });
     if (atlasReady && !readySent && (maskOn || !header)) {
       readySent = true;

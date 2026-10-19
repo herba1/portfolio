@@ -83,7 +83,7 @@ export default function Piece({ embedded = false }) {
         className="mirrorball-canvas"
         tabIndex={0}
         role="application"
-        aria-label={`A mirrorball hanging in a dark room, throwing the colours of ${ALBUM_CHOICES[album].title} across the walls, floor and ceiling. Drag sideways to spin it; it keeps the speed of your throw and slows on its own. Left and right arrows push it, Space stops it.`}
+        aria-label={`A mirrorball hanging against black, throwing the colours of ${ALBUM_CHOICES[album].title} across the dark. Drag sideways to spin it; it keeps the speed of your throw and slows on its own. Left and right arrows push it, Space stops it.`}
       />
       {embedded ? null : (
         <header ref={headRef} className="mirrorball-head">

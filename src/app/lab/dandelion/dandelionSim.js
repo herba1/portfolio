@@ -102,7 +102,7 @@ export default class SeedSim {
     this.time = 0;
     this.lastHard = -100;
     this.waiting = false;
-    this.pause = 1.3;
+    this.pause = 1;
     this.w = [0, 0, 0, 0];
     this.t2 = [0, 0];
     for (let i = 0; i < n; i += 1) this.writeRest(i);
@@ -375,7 +375,7 @@ export default class SeedSim {
       const st = this.state[i];
       if ((st === FLY || st === AWAY) && this.toneTarget[i] > 0.015) out += 1;
     }
-    const window = Math.min(10, Math.max(1.5, (out / 450) * 2));
+    const window = Math.min(5, Math.max(1.2, (out / 450) * 1.4));
     for (let i = 0; i < this.n; i += 1) {
       const st = this.state[i];
       if (st !== FLY && st !== AWAY) continue;
@@ -387,7 +387,7 @@ export default class SeedSim {
       this.returnAt[i] = t + 0.1 + slot * window;
     }
     this.waiting = false;
-    this.pause = 1.3;
+    this.pause = 1;
   }
 
   springAxis(i, tx, ty, tz, dt, omega, zeta) {

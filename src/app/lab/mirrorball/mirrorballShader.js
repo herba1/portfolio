@@ -49,17 +49,6 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-float valueNoise(vec2 p) {
-  vec2 i = floor(p);
-  vec2 f = fract(p);
-  vec2 s = f * f * (3.0 - 2.0 * f);
-  float a = hash12(i);
-  float b = hash12(i + vec2(1.0, 0.0));
-  float c = hash12(i + vec2(0.0, 1.0));
-  float d = hash12(i + vec2(1.0, 1.0));
-  return mix(mix(a, b, s.x), mix(c, d, s.x), s.y);
-}
-
 vec4 roomHit(vec3 o, vec3 d, out vec3 nrm) {
   float best = 1e9;
   nrm = vec3(0.0, 0.0, 1.0);
@@ -88,9 +77,6 @@ vec3 photoEnv(vec3 r) {
   vec3 cover = mix(textureLod(uAtlasPrev, auv, uEnvLod).rgb, textureLod(uAtlas, auv, uEnvLod).rgb, uMix);
   vec3 lum = pow(max(cover, vec3(0.0)), vec3(2.2)) * 1.4;
   vec3 room = lum * band * mix(vec3(1.0), uGel, 0.25) * 0.5 * uPhotoOn;
-  float floorSide = smoothstep(-0.2, -0.8, r.y);
-  float floorTex = valueNoise(vec2(az * 9.0, e * 14.0));
-  room += vec3(1.0, 0.82, 0.62) * floorSide * (0.012 + floorTex * floorTex * 0.05);
   room += vec3(0.004, 0.0035, 0.003);
   return room;
 }
@@ -125,47 +111,19 @@ void main() {
   vec3 nR;
   vec4 rh = roomHit(uCam, rd, nR);
   vec3 hw = rh.xyz;
-  vec2 wp = abs(nR.z) > 0.5 ? hw.xy : (abs(nR.x) > 0.5 ? hw.zy : hw.xz);
-  float grainBig = texture(uNoise, wp / 1100.0).r;
-  float grainMid = texture(uNoise, wp / 210.0 + 0.37).g;
-  float surf = abs(nR.z) > 0.5 ? 1.0 : (nR.y > 0.5 ? 1.25 : (nR.y < -0.5 ? 0.55 : 0.8));
-  float albedo = (0.05 + (grainBig - 0.5) * 0.02 + (grainMid - 0.5) * 0.012) * surf;
-  float bump = 0.9 + grainMid * 0.2;
-  float dX = uRoom.x - abs(hw.x);
-  float dF = hw.y + uRoom.y;
-  float dC = uRoom.z - hw.y;
-  float dB = hw.z + uRoom.w;
-  float near = 1e9;
-  if (dX > 2.0) near = min(near, dX);
-  if (dF > 2.0) near = min(near, dF);
-  if (dC > 2.0) near = min(near, dC);
-  if (dB > 2.0) near = min(near, dB);
-  float ao = mix(0.45, 1.0, smoothstep(0.0, R * 2.4, near));
-  albedo *= ao;
   vec3 specks = texelFetch(uSpecks, ivec2(fc), 0).rgb * uLightInv;
   vec3 glow = texelFetch(uGlow, ivec2(fc), 0).rgb * uLightInv;
-
-  float axisDist = length(cross(hw, uLight));
-  float behind = -dot(hw, uLight);
-  float beamR = R * 1.3;
-  float pen = R * 0.1 + max(behind, 0.0) * 0.04;
-  float pool = smoothstep(R * 2.2, R * 1.05, axisDist) * smoothstep(R - pen, R + pen, axisDist) * step(0.0, behind);
   vec2 uvBox = css / uBox;
-  float topFall = mix(0.75, 1.0, smoothstep(0.0, 0.6, uvBox.y));
-  vec3 ambient = vec3(1.0, 0.92, 0.84) * 0.2 * topFall;
-  vec3 wallLight = ambient + uGel * pool * 0.3 + specks * bump;
-  vec3 wall = albedo * wallLight;
-
   float mask = 0.0;
   if (uMaskOn > 0.5) mask = texture(uMask, vec2(fc.x / uRes.x, 1.0 - fc.y / uRes.y)).a;
-  wall += mask * (specks * 0.32 + uGel * pool * 0.2);
+  vec3 wall = specks * 0.055 * (1.0 - clamp(mask * 1.6, 0.0, 0.92));
 
   float rodHalf = max(R * 0.009, 1.1);
   float rodX = abs(css.x - uBall.x);
   float rodTop = uBall.y - R * 0.96;
   float rod = smoothstep(rodHalf + 0.8 / pxPerCss, rodHalf - 0.4 / pxPerCss, rodX) * step(css.y, rodTop);
   float rodShade = 0.012 + 0.08 * smoothstep(rodHalf, -rodHalf, css.x - uBall.x + rodHalf * 0.4);
-  vec3 rodCol = vec3(rodShade) * mix(vec3(1.0), uGel, 0.6) * mix(0.6, 1.0, uvBox.y / max(rodTop / uBox.y, 0.01));
+  vec3 rodCol = vec3(0.03 + rodShade) * mix(0.4, 1.0, smoothstep(0.0, max(rodTop / uBox.y, 0.01), uvBox.y));
   wall = mix(wall, rodCol, rod);
   wall += glow;
 
@@ -202,7 +160,7 @@ void main() {
     vec3 rvF = normalize(rv + (tU * (u - 0.5) + tV * (v - 0.5)) * uFrag);
     float fres = 0.66 + 0.3 * pow(1.0 - clamp(dot(-rd, nF), 0.0, 1.0), 5.0);
     vec3 glass = mix(vec3(1.0), vec3(0.9, 0.97, 0.94), th) * (0.62 + 0.42 * hash12(vec2(j, i) + 5.3)) * fres;
-    vec3 tile = (photoEnv(rvF) + lampEnv(rv)) * glass;
+    vec3 tile = (photoEnv(rvF) + lampEnv(rv) + vec3(0.016) * (0.55 + 0.45 * rvF.y)) * glass;
     float lam = max(dot(nW, uLight), 0.0);
     float bevel = smoothstep(groutW + 0.14, groutW, edge) * (1.0 - grout);
     tile += uGel * bevel * lam * 0.03;
@@ -221,39 +179,11 @@ void main() {
     color = mix(wall, ballCol, cov);
   }
 
-  vec2 bc = uBall.xy;
-  vec2 lsc = toScreen(uLight * R * 7.0);
-  vec2 axis = lsc - bc;
-  float ld = max(length(axis), 1.0);
-  vec2 ax = axis / ld;
-  vec2 q = css - bc;
-  float along = dot(q, ax);
-  float side = abs(q.x * ax.y - q.y * ax.x);
-  float beam = 0.0;
-  if (along > 0.0) {
-    float width = beamR * mix(1.0, 0.22, clamp(along / ld, 0.0, 1.0));
-    beam = smoothstep(width, width * 0.15, side) * smoothstep(ld * 1.1, ld * 0.2, along);
-  } else {
-    float width = beamR * (1.0 + clamp(-along / ld, 0.0, 2.0) * 0.25);
-    float core = smoothstep(R * 0.8, R * 1.15, side);
-    beam = smoothstep(width, width * 0.3, side) * core * exp(max(along, -20.0 * R) / (R * 2.2)) * 0.6;
-  }
-  if (beam > 0.001) {
-    float dens = texture(uNoise, css / 700.0 + vec2(uTime * 0.012, -uTime * 0.007)).a;
-    dens *= 0.55 + 0.9 * texture(uNoise, css / 260.0 + vec2(-uTime * 0.02, uTime * 0.011)).r;
-    dens = dens * dens * 2.2;
-    color += uGel * beam * dens * uHaze * mix(1.0, 0.45, cov);
-  }
-
-  vec2 vq = (uvBox - vec2(0.5, 0.48)) * vec2(uBox.x / max(uBox.y, 1.0), 1.0);
-  float vig = smoothstep(1.35, 0.25, length(vq) * 1.15);
-  color *= mix(0.5, 1.0, vig);
-
   vec3 mapped = aces(color * 1.15);
   vec3 display = pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2));
   float n = hash12(fc + fract(uSeed) * 517.0) - 0.5;
   float n2 = hash12(fc * 1.37 + fract(uSeed * 1.7) * 311.0) - 0.5;
-  display += (n + n2) * 0.024 * (1.0 - dot(display, vec3(0.33)) * 0.6);
+  display += (n + n2) * (1.0 / 255.0) * step(0.004, dot(display, vec3(0.33)));
   outColor = vec4(display * uFade, 1.0);
 }
 `;
@@ -365,7 +295,9 @@ void main() {
   vec4 hit = roomHit(P, r, N);
   vec3 H = hit.xyz;
   float t = hit.w;
-  if (t > 1e8 || H.z > uCam.z * 0.7) return;
+  if (t > 1e8 || N.z < 0.5) return;
+  vec2 onScreen = toScreen(H) / uBox;
+  if (onScreen.x < -0.15 || onScreen.x > 1.15 || onScreen.y < -0.15 || onScreen.y > 1.15) return;
   float pen = t * uSpread;
   float rad = tile * 0.42 + pen;
   float cosI = abs(dot(r, N));

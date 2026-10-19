@@ -442,7 +442,7 @@ function sgtPepper(sans) {
   al.fill();
   al.beginPath();
   al.arc(C, C, red0, 0, Math.PI * 2);
-  al.fillStyle = "#f2dc8c";
+  al.fillStyle = "#1d2d58";
   al.fill();
   al.fillStyle = "#d6b25e";
   letters(al);
@@ -455,7 +455,7 @@ function sgtPepper(sans) {
     al.arc(x, y, 7, 0, Math.PI * 2);
     al.fill();
   }
-  al.fillStyle = "#2f5aa8";
+  al.fillStyle = "#c8323a";
   al.beginPath();
   al.moveTo(C, C + 176);
   al.bezierCurveTo(C - 30, C + 150, C - 24, C + 128, C, C + 140);
