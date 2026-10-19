@@ -12,7 +12,6 @@ const SIGMA = 0.0042;
 const MIN_SECONDS = 0.35;
 const GHOST_SECONDS = 0.28;
 const RETURN_SECONDS = 0.7;
-const HOLD_SECONDS = 0.36;
 const AUTO_SECONDS = 4.2;
 
 function smoothstep(a, b, x) {
@@ -136,6 +135,7 @@ export default class ExposureEngine {
     this.lastSeconds = 0;
     this.accMix = 1;
     this.ghostMix = 0;
+    this.restorable = 0;
     this.holdLeft = 0;
     this.seed = 1;
     this.clock = 0;
@@ -642,6 +642,7 @@ export default class ExposureEngine {
     const gl = this.gl;
     if (!gl || !this.ready) return;
     const prevMix = this.mode === "exposing" ? 0 : this.accMix;
+    this.restorable = this.mode === "review" && this.accMix === 1 ? this.lastSeconds : 0;
     const swap = this.ghost;
     this.ghost = this.acc;
     this.acc = swap;
@@ -669,6 +670,18 @@ export default class ExposureEngine {
     this.lastSeconds = seconds;
     this.ghostMix = 0;
     this.setReadout(seconds);
+    if (seconds < MIN_SECONDS && this.restorable) {
+      const swap = this.acc;
+      this.acc = this.ghost;
+      this.ghost = swap;
+      this.ghostMix = 0;
+      this.accMix = 1;
+      this.lastSeconds = this.restorable;
+      this.setReadout(this.lastSeconds);
+      this.setMode("review");
+      this.wake();
+      return;
+    }
     if (seconds < MIN_SECONDS) {
       this.setMode("returning");
       this.holdLeft = 0;
@@ -680,7 +693,7 @@ export default class ExposureEngine {
     this.composite();
     const pending = this.snapshot();
     const lights = [...this.shotLights];
-    this.holdLeft = HOLD_SECONDS;
+    this.holdLeft = 0;
     if (this.blink && !this.reduced) {
       this.blink.animate(
         [

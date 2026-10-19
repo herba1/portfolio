@@ -162,9 +162,9 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pad = insets();
     const wide = !embedded && view.width >= 900;
-    const floorY = view.height - (embedded ? 12 : wide ? 56 : 16);
-    const my = embedded ? Math.max(30, view.height * 0.075) : Math.max(wide ? 132 : 96, pad.top + 28);
-    let W = (floorY - my) / (STRIP_LEN + 0.72);
+    const floorY = view.height - (embedded ? 12 : wide ? 48 : 16);
+    const my = embedded ? Math.max(30, view.height * 0.075) : Math.max(wide ? 116 : 96, pad.top + 28);
+    let W = (floorY - my - 48) / (STRIP_LEN + 1);
     W = Math.min(W, ((view.width - 28) / STRIP_LEN) * 0.98);
     W = Math.max(36, W);
     const len = W * STRIP_LEN;
@@ -556,7 +556,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
         strip.tear = 0.02;
       }
     } else if (drive > 10) {
-      strip.tear = Math.min(1, strip.tear + (drive - 10) * 0.028 * dt);
+      strip.tear = Math.min(1, strip.tear + (drive - 10) * 0.045 * dt);
     }
     if (strip.tear > 0) {
       const open = clamp(drive / 70, 0.15, 1) * strip.W * 0.06;
@@ -866,6 +866,11 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
   function onUp(e) {
     if (!drag || e.pointerId !== drag.id) return;
     stage.releasePointerCapture?.(e.pointerId);
+    const held = drag.strip;
+    if (held.mode === "hang" && held.tear > 0.12 && !held.autoTear) {
+      held.autoTear = reduced ? 6 : 4;
+      held.asleep = false;
+    }
     drag = null;
     setAttr("data-grabbing", false, "grabbing");
     wake();
@@ -929,6 +934,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
   stage.addEventListener("pointermove", onMove);
   stage.addEventListener("pointerup", onUp);
   stage.addEventListener("pointercancel", onUp);
+  stage.addEventListener("lostpointercapture", onUp);
   init();
 
   return {
@@ -954,6 +960,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
       stage.removeEventListener("pointermove", onMove);
       stage.removeEventListener("pointerup", onUp);
       stage.removeEventListener("pointercancel", onUp);
+      stage.removeEventListener("lostpointercapture", onUp);
       if (gl) {
         for (const strip of strips) gl.freeTexture(strip.tex);
         if (seq?.tex && !seq.strip) gl.freeTexture(seq.tex);

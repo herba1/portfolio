@@ -1,6 +1,6 @@
 {
   "title": "Photo Booth",
-  "description": "A photo booth's delivery slot. Press the chrome button for a countdown and four flashes, and a wet strip feeds out with the four Let It Be portraits, John, Paul, Ringo and George, printed in Geist Mono characters. Pull it sideways to tear it off at the perforation and drop it in the tray.",
+  "description": "A photo booth's delivery slot. Press the shutter for a countdown and four flashes, and a wet strip feeds out with the four Let It Be portraits, John, Paul, Ringo and George, printed in Geist Mono characters. Pull it sideways to tear it off at the perforation and drop it in the tray.",
   "tags": [
     "WebGL",
     "Print",

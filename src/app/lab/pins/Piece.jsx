@@ -71,23 +71,26 @@ export default function Piece({ embedded = false }) {
 
   return (
     <div ref={rootRef} className="pins-root" data-embedded={embedded || undefined} data-status={status}>
-      <div
-        ref={stageRef}
-        className="pins-stage"
-        tabIndex={0}
-        role="application"
-        aria-label={`A pin art toy seen straight on, with ${ALBUMS[album].title} pressed into the steel pins. Drag across the pins to push them through from behind; Delete lets every pin fall back flat, and keys 1 to 3 press a different cover.`}
-      >
-        <canvas ref={canvasRef} className="pins-canvas" />
-      </div>
+      <div className="pins-layout">
       {!embedded && (
         <header className="pins-head">
           <h1 className="pins-title">Pin Art</h1>
           <p className="pins-lede">
-            Ten thousand steel pins with a cover pressed in from behind. Drag to push your own <em>fingertip</em> through.
+            A bed of steel pins with a cover pressed through from behind. Drag to push your own <em>fingertip</em> in.
           </p>
         </header>
       )}
+      <div className="pins-well">
+        <div
+          ref={stageRef}
+          className="pins-plate"
+          tabIndex={0}
+          role="application"
+          aria-label={`A pin art toy with ${ALBUMS[album].title} pressed into the steel pins. Drag across the pins to push them through; Delete lets every pin fall back flat, and keys 1 to 3 press a different cover.`}
+        >
+          <canvas ref={canvasRef} className="pins-canvas" />
+        </div>
+      </div>
       {!embedded && (
         <div className="pins-bar">
           <div className="pins-albums" role="radiogroup" aria-label="Cover">
@@ -101,7 +104,7 @@ export default function Piece({ embedded = false }) {
                 disabled={status !== "ready"}
                 onClick={() => engineRef.current?.choose(i)}
               >
-                <img src={a.cover} alt="" width={24} height={24} draggable={false} />
+                <img src={a.cover} alt="" width={28} height={28} draggable={false} />
                 <span>{a.title}</span>
               </button>
             ))}
@@ -111,6 +114,7 @@ export default function Piece({ embedded = false }) {
           </button>
         </div>
       )}
+      </div>
       {status === "failed" && <p className="pins-note">This piece needs WebGL 2.</p>}
     </div>
   );

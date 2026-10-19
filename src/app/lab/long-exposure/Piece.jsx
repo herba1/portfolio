@@ -357,7 +357,6 @@ export default function Piece({ embedded = false }) {
                 Review
               </span>
             </span>
-            <span className="long-exposure__settings">f/8 &nbsp;ISO 200</span>
             <span ref={timeRef} className="long-exposure__time">
               0.0s
             </span>

@@ -1,9 +1,9 @@
 import { PINS_FRAGMENT, PINS_VERTEX } from "./pinsShader";
 
 const ROW = Math.sqrt(3) / 2;
-const DEPTH = 7;
-const PRESS_SPAN = 1.1;
-const PIN_TRAVEL = 0.42;
+const WAVE = 0.7;
+const PIN_TRAVEL = 0.45;
+const PAD = 1.4;
 const FINGER = 4.2;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -55,7 +55,8 @@ async function relief(src, cols, rows) {
   c.width = S;
   c.height = S;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  ctx.drawImage(img, 0, 0, S, S);
+  const inset = Math.round(Math.min(img.naturalWidth, img.naturalHeight) * 0.025);
+  ctx.drawImage(img, inset, inset, img.naturalWidth - inset * 2, img.naturalHeight - inset * 2, 0, 0, S, S);
   const data = ctx.getImageData(0, 0, S, S).data;
   const lum = new Float32Array(S * S);
   for (let i = 0; i < S * S; i += 1) lum[i] = (0.3 * data[i * 4] + 0.59 * data[i * 4 + 1] + 0.11 * data[i * 4 + 2]) / 255;
@@ -71,9 +72,8 @@ async function relief(src, cols, rows) {
       const sx = clamp(Math.round(x * (S - 1)), 0, S - 1);
       const sy = clamp(Math.round(y * (S - 1)), 0, S - 1);
       const k = sy * S + sx;
-      const base = 0.35 * wide[k] + 0.65 * fine[k];
-      const t = clamp((base - 0.06) / 0.8, 0, 1);
-      out[j * cols + i] = Math.pow(smooth(t), 0.9) * 0.92 + wide[k] * 0.08;
+      const base = 0.15 * wide[k] + 0.85 * fine[k];
+      out[j * cols + i] = clamp((base - 0.05) / 0.85, 0, 1);
     }
   }
   return out;
@@ -117,7 +117,7 @@ function createSound() {
   };
 }
 
-export async function createPins({ root, stage, canvas, albums, onAlbum, onReady }) {
+export async function createPins({ root, stage, canvas, albums, onAlbum }) {
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false });
   if (!gl) throw new Error("WebGL2 unavailable");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -132,14 +132,19 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
   gl.deleteShader(fs);
   if (!gl.getProgramParameter(program, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(program) || "link");
   const loc = {};
-  for (const n of ["uRes", "uScale", "uField", "uGrid", "uDepth", "uLight", "uHeight"]) loc[n] = gl.getUniformLocation(program, n);
+  for (const n of ["uRes", "uScale", "uField", "uGrid", "uPlate", "uHeight"]) loc[n] = gl.getUniformLocation(program, n);
   const vao = gl.createVertexArray();
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+
+  const plateColor = (() => {
+    const m = getComputedStyle(stage).backgroundColor.match(/\d+(\.\d+)?/g) || [18, 19, 21];
+    return m.slice(0, 3).map((v) => Number(v) / 255);
+  })();
 
   const view = { w: 1, h: 1, dpr: 1, x: 0, y: 0, pitch: 4 };
   let cols = 0;
@@ -147,10 +152,12 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
   let heights = new Float32Array(1);
   let from = new Float32Array(1);
   let target = new Float32Array(1);
+  let zeros = new Float32Array(1);
   let mode = "idle";
-  let modeT = 0;
-  let pendingAlbum = -1;
+  let modeStart = 0;
   let current = 0;
+  let wanted = 0;
+  let ticket = 0;
   const reliefs = new Map();
   const pointer = { id: null, x: 0, y: 0, px: 0, py: 0 };
   let raf = 0;
@@ -158,11 +165,6 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
   let active = true;
   let destroyed = false;
   let dirty = true;
-  let uploaded = false;
-
-  function gridFor(width) {
-    return width < 720 ? 72 : 100;
-  }
 
   function allocate(c) {
     cols = c;
@@ -170,93 +172,71 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
     heights = new Float32Array(cols * rows);
     from = new Float32Array(cols * rows);
     target = new Float32Array(cols * rows);
+    zeros = new Float32Array(cols * rows);
     reliefs.clear();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, cols, rows, 0, gl.RED, gl.FLOAT, heights);
   }
 
   function layout() {
-    const rect = root.getBoundingClientRect();
+    const rect = stage.getBoundingClientRect();
     view.w = Math.max(1, rect.width);
     view.h = Math.max(1, rect.height);
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(view.w * view.dpr);
     canvas.height = Math.round(view.h * view.dpr);
-    const narrow = view.w < 720;
-    const top = narrow ? 148 : 96;
-    const bottom = narrow ? 96 : 96;
-    const avail = Math.max(160, Math.min(view.w - (narrow ? 32 : 96), view.h - top - bottom));
-    const c = gridFor(view.w);
+    const side = Math.min(view.w, view.h);
+    const c = side < 480 ? 56 : 80;
     const changed = c !== cols;
     if (changed) allocate(c);
-    view.pitch = avail / (cols + 0.5 + 2.8);
-    const fw = (cols + 0.5) * view.pitch;
-    const fh = rows * ROW * view.pitch;
-    view.x = (view.w - fw) / 2;
-    view.y = top + (view.h - top - bottom - fh) / 2;
+    view.pitch = Math.min(view.w / (cols + 0.5 + PAD * 2), view.h / (rows * ROW + PAD * 2));
+    view.x = (view.w - (cols + 0.5) * view.pitch) / 2;
+    view.y = (view.h - rows * ROW * view.pitch) / 2;
     dirty = true;
     return changed;
   }
 
-  async function reliefFor(idx) {
+  function reliefFor(idx) {
     if (!reliefs.has(idx)) reliefs.set(idx, relief(albums[idx].cover, cols, rows));
     return reliefs.get(idx);
   }
 
-  async function press(idx) {
-    const r = await reliefFor(idx);
-    if (destroyed) return;
-    target = r;
+  function morphTo(next) {
+    target = next;
     from.set(heights);
-    mode = "press";
-    modeT = 0;
-    current = idx;
-    onAlbum?.(idx);
+    mode = "morph";
+    modeStart = performance.now();
     wake();
   }
 
-  function flatten(next = -1) {
-    from.set(heights);
-    mode = "flatten";
-    modeT = 0;
-    pendingAlbum = next;
-    wake();
+  async function press(idx) {
+    const mine = ++ticket;
+    wanted = idx;
+    const r = await reliefFor(idx);
+    if (destroyed || mine !== ticket) return;
+    current = idx;
+    morphTo(r);
+  }
+
+  function flatten() {
+    ticket += 1;
+    morphTo(zeros);
   }
 
   function step(dt) {
     let moved = 0;
-    if (mode === "press") {
-      modeT += dt;
+    if (mode === "morph") {
+      const t = (performance.now() - modeStart) / 1000;
       const n = cols * rows;
       for (let k = 0; k < n; k += 1) {
         const j = Math.floor(k / cols);
-        const delay = (1 - j / rows) * PRESS_SPAN;
-        const u = reduced ? 1 : clamp((modeT - delay) / PIN_TRAVEL, 0, 1);
-        const want = Math.max(from[k], target[k] * smooth(u));
-        if (Math.abs(want - heights[k]) > 0.002) moved += 1;
+        const delay = (1 - j / rows) * WAVE;
+        const u = reduced ? 1 : smooth(clamp((t - delay) / PIN_TRAVEL, 0, 1));
+        const want = from[k] + (target[k] - from[k]) * u;
+        if (Math.abs(want - heights[k]) > 0.004) moved += 1;
         heights[k] = want;
       }
-      if (modeT > PRESS_SPAN + PIN_TRAVEL || reduced) mode = "idle";
-      dirty = true;
-    } else if (mode === "flatten") {
-      modeT += dt;
-      const n = cols * rows;
-      for (let k = 0; k < n; k += 1) {
-        const j = Math.floor(k / cols);
-        const delay = (j / rows) * 0.5;
-        const u = reduced ? 1 : clamp((modeT - delay) / 0.32, 0, 1);
-        const want = from[k] * (1 - u * u);
-        if (Math.abs(want - heights[k]) > 0.002) moved += 1;
-        heights[k] = want;
-      }
-      if (modeT > 0.9 || reduced) {
-        mode = "idle";
-        if (pendingAlbum >= 0) {
-          const next = pendingAlbum;
-          pendingAlbum = -1;
-          press(next);
-        }
-      }
+      if (t > WAVE + PIN_TRAVEL || reduced) mode = "idle";
       dirty = true;
     }
     if (pointer.id !== null) {
@@ -269,7 +249,7 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
       pointer.px = pointer.x;
       pointer.py = pointer.y;
     }
-    if (moved) sound.clatter(moved * 0.25, dt);
+    if (moved) sound.clatter(moved * 0.2, dt);
     return mode !== "idle" || pointer.id !== null;
   }
 
@@ -287,10 +267,11 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
       for (let i = i0; i <= i1; i += 1) {
         const d = Math.hypot(i + 0.5 + shift - fx, (j + 0.5) * ROW - fy) / R;
         if (d >= 1) continue;
-        const want = 0.95 * Math.sqrt(1 - d * d);
+        const want = Math.sqrt(1 - d * d);
         const k = j * cols + i;
         if (want > heights[k] + 0.01) {
           heights[k] = want;
+          if (mode === "morph") from[k] = Math.max(from[k], want);
           moved += 1;
         }
       }
@@ -305,18 +286,14 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
     gl.bindVertexArray(vao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    if (!uploaded || dirty) {
-      gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cols, rows, gl.RED, gl.FLOAT, heights);
-      uploaded = true;
-    }
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, cols, rows, gl.RED, gl.FLOAT, heights);
     gl.uniform1i(loc.uHeight, 0);
     gl.uniform2f(loc.uRes, canvas.width, canvas.height);
     gl.uniform1f(loc.uScale, view.dpr);
-    gl.uniform4f(loc.uField, view.x, view.y, view.pitch, 0);
+    gl.uniform3f(loc.uField, view.x, view.y, view.pitch);
     gl.uniform2f(loc.uGrid, cols, rows);
-    gl.uniform1f(loc.uDepth, DEPTH);
-    gl.uniform3f(loc.uLight, -0.62, -0.5, 0.6);
+    gl.uniform3f(loc.uPlate, plateColor[0], plateColor[1], plateColor[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -329,7 +306,6 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
     if (dirty) {
       render();
       dirty = false;
-      onReady?.();
     }
     if (moving) raf = requestAnimationFrame(frame);
     else last = 0;
@@ -341,16 +317,14 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
   }
 
   function local(e) {
-    const rect = root.getBoundingClientRect();
+    const rect = stage.getBoundingClientRect();
     return [e.clientX - rect.left, e.clientY - rect.top];
   }
 
   function onDown(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
+    if (pointer.id !== null) return;
     const [x, y] = local(e);
-    const fw = (cols + 0.5) * view.pitch;
-    const fh = rows * ROW * view.pitch;
-    if (x < view.x || y < view.y || x > view.x + fw || y > view.y + fh) return;
     e.preventDefault();
     sound.wake();
     stage.setPointerCapture?.(e.pointerId);
@@ -374,18 +348,22 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
     delete root.dataset.pressing;
   }
 
+  function choose(idx) {
+    sound.wake();
+    onAlbum?.(idx);
+    press(idx);
+  }
+
   function onKey(e) {
-    if (e.key === "Backspace" || e.key === "Delete" || e.key === "f") {
+    if (e.key === "Backspace" || e.key === "Delete") {
       e.preventDefault();
       sound.wake();
       flatten();
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      sound.wake();
-      flatten(current);
+      choose(wanted);
     } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= albums.length) {
-      sound.wake();
-      flatten(Number(e.key) - 1);
+      choose(Number(e.key) - 1);
     }
   }
 
@@ -395,17 +373,20 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
 
   const ro = new ResizeObserver(() => {
     const changed = layout();
-    if (changed) press(current);
-    else {
+    if (changed) {
+      mode = "idle";
+      press(current);
+    } else {
       render();
       dirty = false;
     }
   });
-  ro.observe(root);
+  ro.observe(stage);
   stage.addEventListener("pointerdown", onDown);
   stage.addEventListener("pointermove", onMove);
   stage.addEventListener("pointerup", onUp);
   stage.addEventListener("pointercancel", onUp);
+  stage.addEventListener("lostpointercapture", onUp);
   stage.addEventListener("keydown", onKey);
 
   return {
@@ -413,16 +394,14 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
       active = on;
       if (on) {
         last = 0;
+        dirty = true;
         wake();
       } else if (raf) {
         cancelAnimationFrame(raf);
         raf = 0;
       }
     },
-    choose(idx) {
-      sound.wake();
-      flatten(idx);
-    },
+    choose,
     flatten() {
       sound.wake();
       flatten();
@@ -436,6 +415,7 @@ export async function createPins({ root, stage, canvas, albums, onAlbum, onReady
       stage.removeEventListener("pointermove", onMove);
       stage.removeEventListener("pointerup", onUp);
       stage.removeEventListener("pointercancel", onUp);
+      stage.removeEventListener("lostpointercapture", onUp);
       stage.removeEventListener("keydown", onKey);
       sound.destroy();
       gl.deleteTexture(tex);

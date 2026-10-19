@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Camera } from "lucide-react";
 
 import "./photo-booth.css";
 
@@ -151,28 +152,26 @@ export default function Piece({ embedded = false }) {
     >
       <div ref={stageRef} className="photo-booth-stage" tabIndex={0} role="application" aria-label={STAGE_LABEL} onKeyDown={onStageKey}>
         <div className="photo-booth-plate" aria-hidden="true">
-          <span className="photo-booth-screw" />
           <span className="photo-booth-slit" />
-          <span className="photo-booth-screw" />
         </div>
         <div className="photo-booth-tray" aria-hidden="true" />
         <canvas ref={canvasRef} className="photo-booth-canvas" />
         <div className="photo-booth-controls" data-pb-ui="">
-          <div className="photo-booth-lamp" aria-hidden="true">
-            <span ref={lampRef} className="photo-booth-lamp-digit" />
-          </div>
+          <button type="button" className="photo-booth-button" aria-label="Take four photos" onClick={shoot}>
+            <span className="photo-booth-button-cap">
+              <span ref={lampRef} className="photo-booth-lamp-digit" aria-hidden="true" />
+            </span>
+          </button>
           <div ref={pipsRef} className="photo-booth-pips" aria-hidden="true">
             <span className="photo-booth-pip" />
             <span className="photo-booth-pip" />
             <span className="photo-booth-pip" />
             <span className="photo-booth-pip" />
           </div>
-          <button type="button" className="photo-booth-button" aria-label="Take four photos" onClick={shoot}>
-            <span className="photo-booth-button-cap" />
-          </button>
           {embedded ? null : (
             <button type="button" className="photo-booth-camera" aria-pressed={camera === "on"} onClick={toggleCamera}>
               <span className="photo-booth-camera-eye" aria-hidden="true">
+                <Camera className="photo-booth-camera-icon" size={14} strokeWidth={2} />
                 <video ref={videoRef} className="photo-booth-camera-video" muted playsInline />
               </span>
               <span>{cameraLabel}</span>
