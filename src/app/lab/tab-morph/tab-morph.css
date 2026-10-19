@@ -49,18 +49,31 @@
 }
 
 .tab-morph-screen {
+  --tm-radius: 40px;
   position: relative;
   width: min(400px, 100%);
   height: min(740px, calc(100cqh - 128px));
-  border-radius: 40px;
+  border-radius: var(--tm-radius);
   overflow: hidden;
+  isolation: isolate;
   background: var(--tm-screen);
   box-shadow: 0 0 0 1px var(--tm-line), 0 24px 64px -24px rgb(40 36 28 / 0.18);
 }
 
 .tab-morph[data-embedded] .tab-morph-screen {
+  --tm-radius: 28px;
   height: 100%;
-  border-radius: 28px;
+}
+
+.tab-morph-clip {
+  position: absolute;
+  inset: 0;
+  border-radius: var(--tm-radius);
+  overflow: hidden;
+  clip-path: inset(0 round var(--tm-radius));
+  isolation: isolate;
+  transform: translateZ(0);
+  background: var(--tm-screen);
 }
 
 .tab-morph-pages {
@@ -607,8 +620,8 @@
 
   .tab-morph-screen {
     width: 100%;
+    --tm-radius: 32px;
     height: calc(100cqh - 144px);
-    border-radius: 32px;
   }
 }
 
