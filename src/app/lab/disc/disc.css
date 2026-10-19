@@ -413,7 +413,7 @@
   font-weight: var(--text-ui--font-weight);
   white-space: nowrap;
   opacity: 0;
-  transform: translate(calc(var(--disc-home-x) - 50%), var(--disc-home-y));
+  translate: calc(var(--disc-home-x) - 50%) var(--disc-home-y);
   cursor: pointer;
   transition:
     opacity 480ms var(--ease-entrance),
