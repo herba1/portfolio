@@ -16,6 +16,9 @@ uniform float uMaxTrail;
 uniform vec2 uCanvas;
 uniform vec3 uInk;
 uniform float uInkMix;
+uniform vec2 uOrigin;
+uniform float uReach;
+uniform float uPush;
 
 out vec4 vColor;
 out float vPx;
@@ -23,30 +26,24 @@ out float vTrail;
 out float vDir;
 out vec2 vLocal;
 
+const float PI = 3.14159265;
+
 float inkSize(float ink) {
   return 1.16 * sqrt(ink);
 }
 
-float ease(float t) {
-  return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
-}
-
-float progress(float morph) {
-  float row = 1.0 - (aFrom.y * 0.5 + 0.5);
-  float delay = row * 0.42 + aSeed.x * 0.05;
-  return clamp((morph - delay) / 0.5, 0.0, 1.0);
-}
-
 void main() {
-  float t = progress(uMorph);
-  float eased = ease(t);
-  float ahead = ease(progress(uMorph + 0.012));
-  float travel = aTo.x - aFrom.x;
-  float x = aFrom.x + travel * eased;
-  float y = mix(aFrom.y, aTo.y, eased);
-  float speed = travel * (ahead - eased) / 0.012;
+  vec2 rel = aFrom - uOrigin;
+  float dist = length(rel);
+  vec2 dir = dist > 1e-4 ? rel / dist : vec2(1.0, 0.0);
+  float delay = (dist / uReach) * 0.74 + aSeed.x * 0.02;
+  float p = clamp((uMorph - delay) / 0.24, 0.0, 1.0);
+  float wave = sin(PI * p);
+  float swap = smoothstep(0.28, 0.72, p);
+  float push = wave * wave * uPush * (0.55 + 0.45 * aSeed.y);
+  vec2 position = mix(aFrom, aTo, swap) + dir * push;
 
-  float size = mix(inkSize(aFromColor.a), inkSize(aToColor.a), eased);
+  float size = mix(inkSize(aFromColor.a), inkSize(aToColor.a), swap) * (1.0 + 0.28 * wave * wave);
   float px = size * uDot;
   float alpha = 0.94;
   if (px < 1.4) {
@@ -54,14 +51,14 @@ void main() {
     px = 1.4;
   }
 
-  float trailUnits = min(abs(speed) * 0.09, 0.6);
-  float trailPx = min(trailUnits * uUnit, uMaxTrail);
-  float dir = speed >= 0.0 ? 1.0 : -1.0;
-  float shift = (trailPx * 0.5) / uUnit;
+  float speed = sin(2.0 * PI * p);
+  float trailPx = min(abs(speed) * wave * uPush * uUnit * 0.5, px * 1.6);
+  float sgn = speed >= 0.0 ? 1.0 : -1.0;
+  float shift = trailPx * 0.5;
 
-  vec3 photo = mix(aFromColor.rgb, aToColor.rgb, eased);
+  vec3 photo = mix(aFromColor.rgb, aToColor.rgb, swap);
   vec3 dyed = pow(photo, vec3(1.32)) * 0.94;
-  float tone = mix(aFromColor.a, aToColor.a, eased);
+  float tone = mix(aFromColor.a, aToColor.a, swap);
   vec3 inked = mix(uInk, uInk * 0.86, tone);
   vec3 color = mix(dyed, inked, uInkMix);
 
@@ -69,10 +66,11 @@ void main() {
   vColor = vec4(color, alpha);
   vPx = px;
   vTrail = trailPx;
-  vDir = dir;
+  vDir = sgn;
   vLocal = local;
-  vec2 position = vec2(x - dir * shift, y);
-  gl_Position = vec4(uView.xy + position * uView.zw + local * 2.0 / uCanvas, 0.0, 1.0);
+  vec2 alongPx = local - vec2(sgn * shift, 0.0);
+  vec2 rotated = vec2(alongPx.x * dir.x - alongPx.y * dir.y, alongPx.x * dir.y + alongPx.y * dir.x);
+  gl_Position = vec4(uView.xy + position * uView.zw + rotated * 2.0 / uCanvas, 0.0, 1.0);
 }
 `;
 

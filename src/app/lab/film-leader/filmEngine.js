@@ -406,7 +406,7 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       const y = sampleP[i * 3 + 1];
       const f = sampleF[i];
       const lift = smooth(1.5, 14, y);
-      const twist = (0.2 * Math.sin(f * 0.019 + 0.8) + 0.08 * Math.sin(f * 0.051 + 2.1)) * lift;
+      const twist = (0.05 * Math.sin(f * 0.019 + 0.8) + 0.02 * Math.sin(f * 0.051 + 2.1)) * lift;
       const cx = ty * wz - tz * wy;
       const cy = tz * wx - tx * wz;
       const cz = tx * wy - ty * wx;

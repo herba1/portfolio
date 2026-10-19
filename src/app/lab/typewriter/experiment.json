@@ -1,6 +1,6 @@
 {
   "title": "Typewriter",
-  "description": "The liner credits for the Beatles' Revolver on a typebar typewriter drawn flat and graphic. Every key swings its typebar into the ribbon and bites the cream bond with its own worn, uneven ink; Return throws the carriage home and rolls the platen.",
+  "description": "The liner credits for the Beatles' Revolver on a sheet of cream bond rolled into a typewriter reduced to its platen and a red ribbon guide. Every key bites the paper with its own worn, uneven ink; Return throws the carriage home and rolls the platen.",
   "tags": [
     "WebGL",
     "Print",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One machine reduced to clean flat shapes so the strike is the subject: real strikes on real paper, every letter landing a little differently, the carriage moving with weight.",
+  "intent": "The machine pared back to the paper, the platen and the ribbon so the strike is the subject: real strikes on real paper, every letter landing a little differently, the carriage moving with weight.",
   "tile": {
     "cols": 3,
     "rows": 5

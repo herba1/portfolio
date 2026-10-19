@@ -105,8 +105,6 @@ uniform float uA1;
 uniform float uRc;
 uniform vec4 uSheet;
 uniform vec2 uCarriage;
-uniform float uKnob;
-uniform float uRoll;
 uniform sampler2D uInk;
 uniform vec4 uInkMap;
 uniform vec2 uInkTexel;
@@ -166,7 +164,7 @@ void main() {
   vec2 q = vec2(X, Y);
   vec4 mat = texture(uMaterial, q / uPeriod);
   float m = mat.r * 2.0 - 1.0;
-  vec2 hg = (mat.gb * 2.0 - 1.0) / 12.0;
+  vec2 hg = (mat.gb * 2.0 - 1.0) / 28.0;
   float skip = mat.a;
 
   vec2 inkUv = vec2((X - uInkMap.x) * uInkMap.z, (Y - uInkMap.y) * uInkMap.w);
@@ -184,10 +182,10 @@ void main() {
   float diff = max(dot(n, L), 0.0);
   float shade = 0.44 + 0.56 * diff / L.z;
   shade *= 1.0 - 0.1 * smoothstep(0.35, 0.8, phi);
-  shade *= 1.0 - 0.5 * smoothstep(0.3, 0.97, below);
+  shade *= 1.0 - 0.28 * smoothstep(0.3, 0.97, below);
 
   vec3 cream = vec3(0.958, 0.934, 0.874);
-  vec3 albedo = cream * (1.0 + m * 0.03);
+  vec3 albedo = cream * (1.0 + m * 0.018);
   albedo *= 1.0 + (hash12(floor(p * uDpr) + 0.5) - 0.5) * 0.012;
   vec3 paperLit = albedo * shade;
 
@@ -200,26 +198,19 @@ void main() {
   vec3 paper = mix(paperLit, inkLit, clamp(a, 0.0, 1.0) * 0.96 * cover);
 
   float inCar = edge(X - uCarriage.x, fwX) * edge(uCarriage.y - X, fwX);
-  vec3 bg = uEnamel * 0.93;
+  vec3 bg = uEnamel;
 
   float cylRaw = d / R;
   float cylY = clamp(cylRaw, -1.0, 1.0);
   float fwC = max(fwidth(cylRaw), 1e-4);
   float onCyl = edge(1.0 - abs(cylRaw) - fwC, fwC);
-  float knobL = 1.0 - edge(X - (uCarriage.x + uKnob), fwX);
-  float knobR = edge(X - (uCarriage.y - uKnob), fwX);
-  float knob = clamp(knobL + knobR, 0.0, 1.0);
+  float paperRowNear = edge(X - (uSheet.x - 1.5), fwX) * edge(uSheet.z + 1.5 - X, fwX);
   vec3 rubber = vec3(0.118, 0.118, 0.125);
-  vec3 bakelite = vec3(0.2, 0.2, 0.21);
-  vec3 cyl = mix(rubber, bakelite, knob);
+  vec3 cyl = rubber;
   float band = edge(cylY + 0.62, fwC) * (1.0 - edge(cylY + 0.48, fwC));
   cyl = mix(cyl, vec3(0.3, 0.3, 0.31), band);
-  float turn = (asin(cylY) + uRoll) * 24.0 / 6.2832;
-  float fwT = max(fwidth(turn), 1e-3);
-  float stripe = smoothstep(0.5 - fwT, 0.5 + fwT, abs(fract(turn) - 0.5) * 2.0);
-  cyl = mix(cyl, rubber, knob * stripe);
 
-  vec3 under = mix(bg, cyl, onCyl * inCar);
+  vec3 under = mix(bg, cyl, onCyl * inCar * paperRowNear);
 
   float paperRow = covY * onWrap;
   float rightGap = (X - uSheet.z) * uPitch;

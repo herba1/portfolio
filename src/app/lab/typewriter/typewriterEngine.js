@@ -30,13 +30,9 @@ const VMAX = 170;
 const ACCEL = 2600;
 const ENAMEL = [226, 223, 216];
 const DECK = "rgb(226 223 216)";
-const DECK_SHADE = "rgb(212 208 200)";
 const CHARCOAL = "rgb(30 30 32)";
-const STEEL_DARK = "rgb(78 79 82)";
-const STEEL = "rgb(128 129 132)";
 const STEEL_LIGHT = "rgb(196 197 199)";
 const RIBBON_RED = "rgb(196 52 40)";
-const TAU = Math.PI * 2;
 const PERIOD = 20;
 const TILE = 512;
 
@@ -96,7 +92,6 @@ export default class TypewriterEngine {
     this.car = { x: START.col, v: 0, mode: "spring" };
     this.roll = { x: START.line, v: 0, mode: "spring", target: START.line };
     this.lever = { x: 0, v: 0 };
-    this.spool = 0;
     this.shift = false;
     this.script = 0;
     this.ejecting = false;
@@ -287,14 +282,10 @@ export default class TypewriterEngine {
     const pitch = clamp(Math.min(W / 84, H / 44), 11.5, 18);
     const lineH = pitch * LINE_UNITS;
     const R = lineH * 1.9;
-    let L = clamp(Math.max(pitch * 5, R * 1.85), 50, 100);
+    const L = clamp(Math.max(pitch * 5, R * 1.85), 50, 100);
     const bottom = H - ins.bottom;
-    let yP = Math.round(Math.min(H * 0.64, bottom - (2 * L + 14) - 4));
     const minY = ins.top + lineH * 5;
-    if (yP < minY) {
-      L = Math.max(R * 1.4, (bottom - 18 - minY) / 2);
-      yP = Math.round(Math.max(minY, bottom - (2 * L + 14) - 4));
-    }
+    const yP = Math.round(Math.max(minY, Math.min(H * 0.7, bottom - R * 0.92 - 28)));
     const printX = Math.round(W * 0.5);
     const fy = yP - lineH * 0.3;
     const A = Math.min(1.08, Math.acos(clamp((R * 1.05 + 8 + lineH * 0.3) / L, 0, 0.95)));
@@ -303,13 +294,11 @@ export default class TypewriterEngine {
     const wellR = 2 * L + 14;
     const wellA = A + 0.12;
     const RS = wellR * Math.sin(Math.min(wellA, 1.4)) + 0.2 * L;
-    const spoolR = L * (W < 600 ? 0.48 : 0.55);
-    const SX = RS + spoolR + 0.16 * L;
     const yDeck = yP + R * 0.92;
     const angles = [];
     for (let i = 0; i < BARS.count; i += 1) angles.push(-A + (2 * A * i) / (BARS.count - 1));
     const res = clamp(Math.round(pitch * dpr * 0.95), 16, 28);
-    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, fy, A, Rc, wellR, wellA, RS, spoolR, SX, yDeck, angles };
+    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, fy, A, Rc, wellR, wellA, RS, yDeck, angles };
     this.glCanvas.width = Math.round(W * dpr);
     this.glCanvas.height = Math.round(H * dpr);
     this.overlay.width = Math.round(W * dpr);
@@ -366,120 +355,23 @@ export default class TypewriterEngine {
     gl.uniform1f(u.uRc, g.Rc);
     gl.uniform4f(u.uSheet, 0, 0, SHEET_COLS, SHEET_LINES * LINE_UNITS);
     gl.uniform2f(u.uCarriage, CAR_LEFT, CAR_RIGHT);
-    gl.uniform1f(u.uKnob, KNOB);
-    gl.uniform1f(u.uRoll, (this.roll.x * g.lineH) / g.R);
     gl.uniform4f(u.uInkMap, INK_COL0, 0, 1 / INK_COLS, 1 / (SHEET_LINES * LINE_UNITS));
     gl.uniform2f(u.uInkTexel, 1 / this.ink.canvas.width, 1 / this.ink.canvas.height);
     gl.uniform3f(u.uEnamel, ENAMEL[0] / 255, ENAMEL[1] / 255, ENAMEL[2] / 255);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
-  wellPath(c) {
-    const { printX, fy, wellR, wellA, L } = this.geo;
-    const inner = 0.84 * L;
-    c.moveTo(printX + Math.cos(Math.PI / 2 - wellA) * wellR, fy + Math.sin(Math.PI / 2 - wellA) * wellR);
-    c.arc(printX, fy, wellR, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.arc(printX, fy, inner, Math.PI / 2 + wellA, Math.PI / 2 - wellA, true);
-    c.closePath();
-  }
-
   drawCache() {
     const g = this.geo;
     const c = this.cache.getContext("2d");
-    const { W, H, dpr, printX, fy, yDeck, L, wellR, wellA, angles, spoolR, SX } = g;
+    const { W, H, dpr, yDeck } = g;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.cache.width, this.cache.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck + 2);
-    this.wellPath(c);
-    c.clip("evenodd");
     c.fillStyle = DECK;
     c.fillRect(0, yDeck, W, H - yDeck + 2);
     c.fillStyle = CHARCOAL;
     c.fillRect(0, yDeck, W, 2);
-    for (const side of [-1, 1]) {
-      c.beginPath();
-      c.arc(printX + side * SX, yDeck + spoolR + 0.22 * L, spoolR * 1.04, 0, TAU);
-      c.fillStyle = DECK_SHADE;
-      c.fill();
-    }
-    c.restore();
-
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck + 2);
-    c.clip();
-    c.beginPath();
-    this.wellPath(c);
-    c.fillStyle = CHARCOAL;
-    c.fill();
-    c.beginPath();
-    c.arc(printX, fy, L * 1.1, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.arc(printX, fy, L * 0.9, Math.PI / 2 + wellA, Math.PI / 2 - wellA, true);
-    c.closePath();
-    c.fillStyle = STEEL_DARK;
-    c.fill();
-    c.strokeStyle = CHARCOAL;
-    c.lineWidth = 1;
-    for (const a of angles) {
-      const ux = Math.sin(a);
-      const uy = Math.cos(a);
-      c.beginPath();
-      c.moveTo(printX + ux * L * 0.9, fy + uy * L * 0.9);
-      c.lineTo(printX + ux * L * 1.1, fy + uy * L * 1.1);
-      c.stroke();
-    }
-    c.beginPath();
-    c.arc(printX, fy, wellR, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.lineWidth = 2;
-    c.strokeStyle = STEEL;
-    c.stroke();
-    c.restore();
-  }
-
-  barPose(index, theta) {
-    const { printX, fy, L, angles } = this.geo;
-    const a = angles[index];
-    const ux = Math.sin(a);
-    const uy = Math.cos(a);
-    const px = printX + ux * L;
-    const py = fy + uy * L;
-    const ct = Math.cos(theta);
-    const st = Math.sin(theta);
-    const wx = px + ux * L * ct;
-    const wy = py + uy * L * ct;
-    const z = L * st;
-    const D = 2.5 * L;
-    const s = D / Math.max(D * 0.2, D - z);
-    return { a, ux, uy, px, py, sx: printX + (wx - printX) * s, sy: fy + (wy - fy) * s, z, s, st, theta };
-  }
-
-  drawBar(c, pose, flying) {
-    const { L, pitch } = this.geo;
-    const { a, px, py, sx, sy, s, theta } = pose;
-    const w = L * 0.042 * (1 + (s - 1) * 0.9);
-    c.lineCap = "round";
-    c.strokeStyle = flying ? STEEL : STEEL_DARK;
-    c.lineWidth = w;
-    c.beginPath();
-    c.moveTo(px, py);
-    c.lineTo(sx, sy);
-    c.stroke();
-    const face = Math.sin(Math.min(Math.PI, theta) * 0.5);
-    const restW = Math.max(3, ((2 * this.geo.A) / (this.geo.angles.length - 1)) * 2 * L * 0.85);
-    const sw = (restW + (pitch * 1.15 - restW) * face) * s;
-    const sh = L * (0.13 + 0.05 * face) * s;
-    c.save();
-    c.translate(sx, sy);
-    c.rotate(-a);
-    c.fillStyle = flying ? STEEL_LIGHT : STEEL;
-    c.beginPath();
-    c.roundRect(-sw / 2, -sh / 2, sw, sh, Math.min(sw, sh) * 0.2);
-    c.fill();
-    c.restore();
   }
 
   ribbonLift() {
@@ -498,111 +390,25 @@ export default class TypewriterEngine {
   drawOverlay() {
     const g = this.geo;
     const c = this.ctx;
-    const { W, H, dpr, printX, yP, lineH, L, RS, spoolR, SX, yDeck } = g;
+    const { W, H, dpr, printX, yP, lineH, pitch } = g;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.overlay.width, this.overlay.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const hx = this.headX();
-
-    this.drawBail(c, hx);
-
     c.drawImage(this.cache, 0, 0, W, H);
 
-    const flying = [];
-    for (const b of this.bars) flying[b.index] = b;
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck);
-    c.clip();
-    c.beginPath();
-    this.wellPath(c);
-    c.clip();
-    for (let i = 0; i < g.angles.length; i += 1) {
-      if (flying[i]) continue;
-      this.drawBar(c, this.barPose(i, 0), false);
-    }
-    c.restore();
-
-    const spoolY = yDeck + spoolR + 0.22 * L;
-    for (const side of [-1, 1]) {
-      const cx = printX + side * SX;
-      const rot = this.spool * (side < 0 ? 1 : 0.92);
-      c.save();
-      c.translate(cx, spoolY);
-      c.fillStyle = CHARCOAL;
-      c.beginPath();
-      c.arc(0, 0, spoolR * (side < 0 ? 0.92 : 0.8), 0, TAU);
-      c.fill();
-      c.rotate(rot);
-      c.fillStyle = STEEL_LIGHT;
-      c.beginPath();
-      c.arc(0, 0, spoolR * 0.34, 0, TAU);
-      c.fill();
-      c.fillStyle = CHARCOAL;
-      for (let k = 0; k < 3; k += 1) {
-        const ang = (k * TAU) / 3;
-        c.beginPath();
-        c.arc(Math.cos(ang) * spoolR * 0.18, Math.sin(ang) * spoolR * 0.18, spoolR * 0.06, 0, TAU);
-        c.fill();
-      }
-      c.restore();
-    }
-
     const lift = this.ribbonLift();
-    const top0 = yP + lineH * 0.34;
-    const hR = lineH * 1.45;
-    const liftPx = lineH * 1.0 * lift;
-    const reach = SX - spoolR * 0.15;
-    const N = 48;
-    const smooth = (a, b, x) => {
-      const t = clamp((x - a) / (b - a), 0, 1);
-      return t * t * (3 - 2 * t);
-    };
-    const shape = (x) => {
-      const t = Math.abs(x - printX) / reach;
-      const span = RS / reach;
-      const hump = 1 - smooth(0, span, t);
-      const fall = smooth(span * 0.92, 1, t);
-      const mid = top0 + hR * 0.5 - liftPx * hump;
-      const cy = mid + (spoolY - spoolR * 0.78 - mid) * fall;
-      const h = hR * (1 - 0.86 * smooth(span * 0.85, 1, t));
-      return [cy - h / 2, h];
-    };
-    const band = (from, to) => {
-      c.beginPath();
-      for (let i = 0; i <= N; i += 1) {
-        const x = printX - reach + (2 * reach * i) / N;
-        const [y, h] = shape(x);
-        if (i === 0) c.moveTo(x, y + h * from);
-        else c.lineTo(x, y + h * from);
-      }
-      for (let i = N; i >= 0; i -= 1) {
-        const x = printX - reach + (2 * reach * i) / N;
-        const [y, h] = shape(x);
-        c.lineTo(x, y + h * to);
-      }
-      c.closePath();
-    };
-    band(0, 1);
+    const rw = pitch * 1.7;
+    const rh = Math.max(6, lineH * 0.42);
+    const ry = yP + lineH * 0.3 + Math.max(6, lineH * 0.34) - lineH * 0.95 * lift;
     c.fillStyle = CHARCOAL;
+    c.beginPath();
+    c.roundRect(printX - rw / 2, ry, rw, rh, 2);
     c.fill();
-    band(0.5, 1);
     c.fillStyle = RIBBON_RED;
+    c.beginPath();
+    c.roundRect(printX - rw / 2, ry + rh / 2, rw, rh / 2, [0, 0, 2, 2]);
     c.fill();
-    for (const side of [-1, 1]) {
-      const gx = printX + side * RS;
-      const [gy, gh] = shape(gx);
-      c.fillStyle = STEEL_LIGHT;
-      c.beginPath();
-      c.roundRect(gx - 3, gy - 4, 6, gh + 8, 3);
-      c.fill();
-    }
     this.drawGuide(c);
-
-    for (const b of this.bars) {
-      const theta = this.barTheta(b.t);
-      this.drawBar(c, this.barPose(b.index, theta), true);
-    }
   }
 
   drawGuide(c) {
@@ -633,28 +439,6 @@ export default class TypewriterEngine {
       c.lineTo(x, y + h * (long ? 0.85 : 0.6));
       c.stroke();
     }
-  }
-
-  drawBail(c, hx) {
-    const { W, printX, yP, lineH, pitch } = this.geo;
-    const d = this.arcToScreen(lineH * 7.2);
-    const y = yP - d;
-    if (y < -20) return;
-    const xl = Math.max(-10, printX + (CAR_LEFT + 2.5 - hx) * pitch);
-    const xr = Math.min(W + 10, printX + (CAR_RIGHT - 2.5 - hx) * pitch);
-    if (xr <= xl) return;
-    c.fillStyle = STEEL;
-    c.fillRect(xl, Math.round(y) - 1, xr - xl, 2);
-  }
-
-  barTheta(t) {
-    if (this.reduced) return 0;
-    if (t < UP) {
-      const k = t / UP;
-      return Math.PI * Math.pow(k, 1.6);
-    }
-    const k = clamp((t - UP) / DOWN, 0, 1);
-    return Math.PI * (1 - (1 - Math.pow(1 - k, 3)));
   }
 
   keyDown(e) {
@@ -943,7 +727,6 @@ export default class TypewriterEngine {
     this.sound.strike(s.force, pan, s.weave[0] - 0.5);
     if (b.advance) this.sound.escape();
     if (s.bell) this.sound.bell();
-    this.spool += 0.035;
   }
 
   stepCarriage(dt) {

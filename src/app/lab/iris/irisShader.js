@@ -80,7 +80,7 @@ void main() {
   float amp = energy * uSpike * 0.008;
   float len = uSpikeLen * (0.75 + 0.5 * aExtra.y);
   float reach = amp > 0.0 ? len * log(max(amp / 0.006, 1.0)) : 0.0;
-  float half_ = max(max(coc, core * 2.6) * 1.25 + 2.0, min(reach, 220.0));
+  float half_ = max(max(coc, core * 2.6) * 1.25 + 2.0, min(reach, 150.0));
   float distC = length(c - uCenter);
   vLocal = aCorner * half_;
   vEdge = (c - uCenter) / max(uOpenMax, 1.0);
@@ -92,7 +92,7 @@ void main() {
   vSeed = aExtra.y;
   vTint = aExtra.z;
   vHue = aExtra.w;
-  if (distC > uOpenVis + half_) {
+  if (distC > uOpenVis + max(coc, core * 2.6) * 1.25 + 2.0) {
     gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
     return;
   }
@@ -342,7 +342,7 @@ void main() {
   vec3 col;
   vec2 rhat = q / max(rpx, 1e-3);
 
-  float bg = 0.0028;
+  float bg = 0.0009;
   float shadow = smoothstep(1.32, 0.96, length((q - vec2(0.0, uRl * 0.05)) / uRl));
   vec3 ground = vec3(bg * 1.05, bg, bg * 0.95) * (1.0 - 0.6 * shadow);
   ground += vec3(0.012, 0.009, 0.006) * exp(-max(rr - 1.0, 0.0) * 9.0) * (0.3 + 0.7 * max(dot(rhat, vec2(0.0, -1.0)), 0.0)) * 0.4;

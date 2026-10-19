@@ -1,7 +1,8 @@
 import { amorphFragment, amorphVertex } from "./amorphShader";
 import { loadImage, samplePortrait } from "./amorphSample";
 
-const MORPH_SECONDS = 2.8;
+const MORPH_SECONDS = 2.2;
+const CORNERS = [[-0.9, 0.9], [0.9, -0.9], [0.9, 0.9], [-0.9, -0.9]];
 const DWELL_MS = 3600;
 
 function springStep(state, target, dt, omega) {
@@ -73,6 +74,14 @@ export default class AmorphEngine {
     else this.kick();
   }
 
+  toUnit(clientX, clientY) {
+    const { size, cx, cy } = this.layout;
+    const rect = this.box.getBoundingClientRect();
+    const x = ((clientX - rect.left - cx) / size) * 2;
+    const y = -((clientY - rect.top - cy) / size) * 2;
+    return [Math.max(-1.2, Math.min(1.2, x)), Math.max(-1.2, Math.min(1.2, y))];
+  }
+
   measure() {
     const rect = this.box.getBoundingClientRect();
     const width = Math.max(1, rect.width);
@@ -103,7 +112,7 @@ export default class AmorphEngine {
       for (let index = 0; index < images.length; index += 1) {
         await new Promise((resolve) => setTimeout(resolve, 0));
         if (this.destroyed) return;
-        this.sets.push(samplePortrait(images[index], grid, 1013 + index * 7919));
+        this.sets.push(samplePortrait(images[index], grid, 1013));
       }
       this.setupGl();
       this.ready = true;
@@ -136,8 +145,6 @@ export default class AmorphEngine {
     const set = this.sets[this.current];
     const n = set.count;
     this.count = n;
-    this.slot = new Int32Array(n);
-    for (let index = 0; index < n; index += 1) this.slot[index] = index;
     this.fromPos = new Float32Array(set.positions);
     this.toPos = new Float32Array(set.positions);
     this.fromColor = new Uint8Array(set.colors);
@@ -205,8 +212,9 @@ export default class AmorphEngine {
     }, DWELL_MS);
   }
 
-  advance() {
+  advance(origin) {
     if (!this.ready) return;
+    this.pendingOrigin = origin ?? null;
     if (this.morphing) {
       this.queued = true;
       return;
@@ -223,24 +231,20 @@ export default class AmorphEngine {
 
   begin() {
     clearTimeout(this.auto);
+    if (this.pendingOrigin) this.origin = this.pendingOrigin;
+    else {
+      this.cornerIndex = ((this.cornerIndex ?? -1) + 1) % CORNERS.length;
+      this.origin = CORNERS[this.cornerIndex];
+    }
+    this.pendingOrigin = null;
+    const [ox, oy] = this.origin;
+    this.reach = Math.max(Math.hypot(1 + Math.abs(ox), 1 + Math.abs(oy)), 0.5);
     const next = (this.current + 1) % this.sets.length;
-    const source = this.sets[this.current];
     const target = this.sets[next];
-    const n = this.count;
     this.fromPos.set(this.toPos);
     this.fromColor.set(this.toColor);
-    for (let index = 0; index < n; index += 1) {
-      const from = this.slot[index];
-      const row = Math.floor(from / source.grid);
-      const slot = target.rowOrder[row * target.grid + source.rowRank[from]];
-      this.slot[index] = slot;
-      this.toPos[index * 2] = target.positions[slot * 2];
-      this.toPos[index * 2 + 1] = target.positions[slot * 2 + 1];
-      this.toColor[index * 4] = target.colors[slot * 4];
-      this.toColor[index * 4 + 1] = target.colors[slot * 4 + 1];
-      this.toColor[index * 4 + 2] = target.colors[slot * 4 + 2];
-      this.toColor[index * 4 + 3] = target.colors[slot * 4 + 3];
-    }
+    this.toPos.set(target.positions);
+    this.toColor.set(target.colors);
     this.upload(this.buffers.from, this.fromPos);
     this.upload(this.buffers.to, this.toPos);
     this.upload(this.buffers.fromColor, this.fromColor);
@@ -248,7 +252,8 @@ export default class AmorphEngine {
     this.current = next;
     this.morph = this.motion ? 0 : 1;
     this.morphing = true;
-    this.onPortrait?.(next);
+    this.announced = !this.motion;
+    if (this.announced) this.onPortrait?.(next);
   }
 
   kick() {
@@ -271,6 +276,10 @@ export default class AmorphEngine {
     if (this.morphing) {
       this.morph = Math.min(1, this.morph + dt / MORPH_SECONDS);
       busy = true;
+      if (!this.announced && this.morph >= 0.45) {
+        this.announced = true;
+        this.onPortrait?.(this.current);
+      }
       if (this.morph >= 1) {
         this.morphing = false;
         if (this.queued) {
@@ -310,6 +319,9 @@ export default class AmorphEngine {
     gl.uniform1f(u.uMaxTrail, Math.min(160, (size / this.grid) * dpr * 18));
     gl.uniform2f(u.uCanvas, this.canvas.width, this.canvas.height);
     gl.uniform1f(u.uMorph, this.morph);
+    gl.uniform2f(u.uOrigin, this.origin?.[0] ?? 0, this.origin?.[1] ?? 0);
+    gl.uniform1f(u.uReach, this.reach ?? 2);
+    gl.uniform1f(u.uPush, 0.032);
     gl.uniform3f(u.uInk, this.ink[0], this.ink[1], this.ink[2]);
     gl.uniform1f(u.uInkMix, Math.min(1, Math.max(0, this.inkMix.value)));
     gl.bindVertexArray(this.vao);

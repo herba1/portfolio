@@ -39,7 +39,6 @@ export function samplePortrait(image, grid, seed) {
   const count = grid * grid;
   const positions = new Float32Array(count * 2);
   const colors = new Uint8Array(count * 4);
-  const inks = new Float32Array(count);
   const random = mulberry(seed);
 
   for (let gy = 0; gy < grid; gy += 1) {
@@ -66,21 +65,8 @@ export function samplePortrait(image, grid, seed) {
       colors[index * 4 + 1] = g;
       colors[index * 4 + 2] = b;
       colors[index * 4 + 3] = Math.round(ink * 255);
-      inks[index] = ink + random() * 1e-4;
     }
   }
 
-  const rowOrder = new Int32Array(count);
-  const rowRank = new Int32Array(count);
-  for (let gy = 0; gy < grid; gy += 1) {
-    const row = [];
-    for (let gx = 0; gx < grid; gx += 1) row.push(gy * grid + gx);
-    row.sort((a, b) => inks[a] - inks[b]);
-    row.forEach((slot, k) => {
-      rowOrder[gy * grid + k] = slot;
-      rowRank[slot] = k;
-    });
-  }
-
-  return { grid, count, positions, colors, rowOrder, rowRank };
+  return { grid, count, positions, colors };
 }

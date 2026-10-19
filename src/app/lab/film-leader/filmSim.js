@@ -15,7 +15,7 @@ const AIR = 3.2;
 const TABLE_DRAG = 5.2;
 const STICK = 3;
 const MAX_SPEED = 2600;
-const MAX_TAKEUP = 420;
+const MAX_TAKEUP = 1400;
 const MIN_OUT = 46;
 const CAN_CLEAR = 10;
 const NEAR_MIN = 38;
@@ -26,6 +26,7 @@ const CAN_TOP = 27;
 const W_STIFF = 0.8;
 const N_STIFF = 0.16;
 const MIN_SIDE_RADIUS = 46;
+const HOLD = 3;
 
 function curlAt(f, u) {
   const lead = 1 / 14 + (1 / 50 - 1 / 14) * smooth(45, 115, f);
@@ -96,7 +97,15 @@ export default class FilmSim {
 
   grabAt(index, point) {
     const i = Math.max(0, Math.min(this.n - 1, index));
-    this.grab = { index: i, f: i * SEG };
+    const hold = [];
+    const k0 = i * 3;
+    for (let j = -HOLD; j <= HOLD; j += 1) {
+      const m = i + j;
+      if (j === 0 || m < 0 || m >= this.n) continue;
+      const km = m * 3;
+      hold.push([m, this.pos[km] - this.pos[k0], this.pos[km + 1] - this.pos[k0 + 1], this.pos[km + 2] - this.pos[k0 + 2], 1 - Math.abs(j) / (HOLD + 1)]);
+    }
+    this.grab = { index: i, f: i * SEG, hold };
     this.target[0] = point[0];
     this.target[1] = point[1];
     this.target[2] = point[2];
@@ -200,9 +209,9 @@ export default class FilmSim {
       const gi = this.grab.index * 3;
       const between = this.u - this.grab.f;
       const reach = Math.hypot(this.pos[gi] - this.slot[0], this.pos[gi + 1] - this.slot[1], this.pos[gi + 2] - this.slot[2]);
-      const slack = between - (reach * 1.05 + 8);
+      const slack = between - (reach * 1.02 + 4);
       this.takeup = slack > 0;
-      if (this.takeup) this.uVel = Math.min(this.uVel, -Math.min(MAX_TAKEUP, slack * 9));
+      if (this.takeup) this.uVel = Math.min(this.uVel, -Math.min(MAX_TAKEUP, slack * 26));
     } else {
       this.takeup = false;
       const over = this.u - this.rest;
@@ -373,6 +382,7 @@ export default class FilmSim {
         P[kk + 2] += (sz + dz * out - P[kk + 2]) * pull;
       }
       this.bend(grabbed);
+      if (pin && this.grab) this.holdGrip(pin);
       this.collide(grabbed);
     }
     for (let pass = 0; pass < 10; pass += 1) this.limitSide(grabbed);
@@ -410,6 +420,18 @@ export default class FilmSim {
     }
     motion = Math.max(motion, Math.abs(this.uVel));
     return motion;
+  }
+
+  holdGrip(pin) {
+    const P = this.pos;
+    for (const [m, ox, oy, oz, w] of this.grab.hold) {
+      if (m >= this.n) continue;
+      const k = m * 3;
+      const t = 0.5 * w;
+      P[k] += (pin[0] + ox - P[k]) * t;
+      P[k + 1] += (Math.max(FLOOR, pin[1] + oy) - P[k + 1]) * t;
+      P[k + 2] += (pin[2] + oz - P[k + 2]) * t;
+    }
   }
 
   bend(grabbed) {

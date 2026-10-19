@@ -1,6 +1,6 @@
 {
   "title": "Amorph",
-  "description": "Six Beatles album covers printed in tens of thousands of dots of ink. Every few seconds the next cover weaves in like a loom: each row of dots slides along its own line, trailing a comet of ink, to the place in the next cover that matches its tone, cascading from top to bottom.",
+  "description": "Six Beatles album covers printed in tens of thousands of dots of ink. Every few seconds, or wherever you click, the next cover ripples out across the print: a clean wavefront swells each dot, nudges it outward on a short trail and settles it into its new colour.",
   "tags": [
     "WebGL",
     "Particles",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "A designed transition instead of random flight: dots keep their row and travel only sideways to the matching tone, so the change reads as a clean scanning pattern with motion trails.",
+  "intent": "A designed transition instead of random flight: every dot keeps its place on the halftone grid and the next cover travels through them as one ripple from a corner or from your click, so the change reads as a wave, not a scramble.",
   "tile": {
     "cols": 3,
     "rows": 5
