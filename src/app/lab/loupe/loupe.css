@@ -292,3 +292,9 @@
   box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 16px 40px -12px rgb(0 0 0 / 0.3);
   transform: translate(-50%, -54%) rotate(-2deg);
 }
+
+@media (max-width: 639px) {
+  body:has(.loupe:not([data-embedded])) .nav__container {
+    color: rgb(244 240 236);
+  }
+}

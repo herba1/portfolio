@@ -1,4 +1,4 @@
-import { FRAMES, PAGE_ASPECT, drawPage, loadCovers } from "./riffleFrames";
+import { FRAMES, PAGE_ASPECT, WIDE_ASPECT, drawPage, loadCovers } from "./riffleFrames";
 
 const MAX_SPEED = 14;
 const PLAY_SPEED = 1.6;
@@ -81,15 +81,34 @@ export async function createRiffle({ root, stage, canvas, onFrame, onPlaying, on
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(view.w * view.dpr);
     canvas.height = Math.round(view.h * view.dpr);
+    const embedded = root.hasAttribute("data-embedded");
+    const head = root.querySelector(".riffle__head");
     const narrow = view.w < 720;
-    const top = narrow ? 152 : 96;
-    const bottom = narrow ? 92 : 96;
-    const availH = Math.max(200, view.h - top - bottom);
-    const availW = view.w - (narrow ? 56 : 96);
-    view.ph = Math.round(Math.min(availH * 0.96, (availW / PAGE_ASPECT) * (narrow ? 1 : 0.6), 620));
-    view.pw = Math.round(view.ph * PAGE_ASPECT);
-    view.x = Math.round((view.w - view.pw) / 2 + 6);
-    view.y = Math.round(top + (availH - view.ph) / 2);
+    const side = !embedded && view.w >= 1024;
+    if (side || (embedded && view.w / view.h > 1.2)) {
+      const top = embedded ? 24 : 96;
+      const bottom = embedded ? 24 : 104;
+      const left = side ? 384 : 32;
+      const right = embedded ? 32 : 48;
+      const availW = view.w - left - right;
+      const availH = Math.max(160, view.h - top - bottom);
+      view.ph = Math.round(Math.min(availH, availW / WIDE_ASPECT, 640));
+      view.pw = Math.round(view.ph * WIDE_ASPECT);
+      const centred = (view.w - view.pw) / 2;
+      view.x = Math.round((centred >= left ? centred : left + (availW - view.pw) / 2) + 4);
+      view.y = Math.round(top + (availH - view.ph) / 2);
+    } else {
+      const headBottom = head ? head.getBoundingClientRect().bottom - rect.top : 0;
+      const top = embedded ? 24 : Math.max(96, Math.round(headBottom + 24));
+      const bottom = embedded ? 24 : narrow ? 92 : 104;
+      const availH = Math.max(200, view.h - top - bottom);
+      const availW = view.w - (narrow ? 56 : 96);
+      view.ph = Math.round(Math.min(availH, availW / PAGE_ASPECT, 680));
+      view.pw = Math.round(view.ph * PAGE_ASPECT);
+      view.x = Math.round((view.w - view.pw) / 2 + 6);
+      view.y = Math.round(top + (availH - view.ph) / 2);
+    }
+    root.style.setProperty("--riffle-cx", `${Math.round(view.x + view.pw / 2)}px`);
     pages = Array.from({ length: FRAMES }, (_, i) => {
       const c = document.createElement("canvas");
       c.width = Math.round(view.pw * view.dpr);
@@ -146,7 +165,7 @@ export async function createRiffle({ root, stage, canvas, onFrame, onPlaying, on
     const p = clamp(f.dir > 0 ? f.t : 1 - f.t, 0, 1);
     const fold = pw * (1 - easeInOut(p));
     if (fold < 0.5) return;
-    const flapW = Math.min(fold, (pw - fold) * 0.32);
+    const flapW = Math.min(fold, (pw - fold) * 0.32, pw * 0.08);
     const flapL = fold - flapW;
     const page = pages[mod(f.index, FRAMES)];
     ctx.save();
@@ -173,6 +192,15 @@ export async function createRiffle({ root, stage, canvas, onFrame, onPlaying, on
       ctx.shadowOffsetX = -3;
       ctx.fillStyle = BACK;
       ctx.fillRect(x + flapL, y, flapW, ph);
+      ctx.restore();
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(x + flapL, y, flapW, ph);
+      ctx.clip();
+      ctx.globalAlpha = 0.14;
+      ctx.translate(x + fold, y);
+      ctx.scale(-1, 1);
+      ctx.drawImage(page, 0, 0, pw, ph);
       ctx.restore();
       const sheen = ctx.createLinearGradient(x + flapL, 0, x + fold, 0);
       sheen.addColorStop(0, "rgb(255 255 255 / 0.5)");

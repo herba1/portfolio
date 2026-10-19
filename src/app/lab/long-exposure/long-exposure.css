@@ -558,3 +558,9 @@
     animation: none;
   }
 }
+
+@media (max-width: 639px) {
+  body:has(.long-exposure:not([data-embedded])) .nav__container {
+    color: rgb(244 240 236);
+  }
+}

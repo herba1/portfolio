@@ -298,7 +298,9 @@ export default class TypewriterEngine {
     const angles = [];
     for (let i = 0; i < BARS.count; i += 1) angles.push(-A + (2 * A * i) / (BARS.count - 1));
     const res = clamp(Math.round(pitch * dpr * 0.95), 16, 28);
-    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, fy, A, Rc, wellR, wellA, RS, yDeck, angles };
+    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, printC: printX, fy, A, Rc, wellR, wellA, RS, yDeck, angles };
+    this.view = { x: this.viewTarget(), v: 0 };
+    this.geo.printX = this.view.x;
     this.glCanvas.width = Math.round(W * dpr);
     this.glCanvas.height = Math.round(H * dpr);
     this.overlay.width = Math.round(W * dpr);
@@ -318,6 +320,23 @@ export default class TypewriterEngine {
 
   headX() {
     return MARGIN_COLS + this.car.x + 0.5;
+  }
+
+  viewTarget() {
+    const { W, pitch, printC } = this.geo;
+    const gut = Math.max(24, pitch * 2);
+    const h = this.headX();
+    const lo = gut + (h - MARGIN_COLS) * pitch;
+    const hi = W - gut - (MARGIN_COLS + MAX_COL + 1 - h) * pitch;
+    if (lo > hi) return printC;
+    return clamp(printC, lo, hi);
+  }
+
+  stepView(dt) {
+    if (!this.view || this.drag?.axis === "h") return false;
+    const moving = springStep(this.view, this.viewTarget(), 16, 1, dt);
+    this.geo.printX = this.view.x;
+    return moving;
   }
 
   headY() {
@@ -893,6 +912,7 @@ export default class TypewriterEngine {
     if (this.stepCarriage(dt)) busy = true;
     if (this.stepRoll(dt)) busy = true;
     if (this.stepLever(dt)) busy = true;
+    if (this.stepView(dt)) busy = true;
     if (this.stepKeys(now)) busy = true;
     this.flushInk();
     this.render();

@@ -216,3 +216,9 @@
     transition: none;
   }
 }
+
+@media (max-width: 639px) {
+  body:has(.mirrorball-root:not([data-embedded])) .nav__container {
+    color: rgb(244 240 236);
+  }
+}

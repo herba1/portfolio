@@ -24,7 +24,7 @@ function Home() {
       <div className="tab-morph-shortcuts">
         {SHORTCUTS.map((a) => (
           <div key={a.id} className="tab-morph-shortcut">
-            <img src={a.cover} alt="" draggable={false} />
+            <img src={a.cover} alt="" draggable={false} data-album={a.id} />
             <span>{a.title}</span>
           </div>
         ))}
@@ -33,7 +33,7 @@ function Home() {
       <div className="tab-morph-shelf">
         {JUMP.map((a) => (
           <div key={a.id} className="tab-morph-tile">
-            <img src={a.cover} alt="" draggable={false} />
+            <img src={a.cover} alt="" draggable={false} data-album={a.id} />
             <span className="tab-morph-tile-title">{a.title}</span>
             <span className="tab-morph-tile-meta">{a.year}</span>
           </div>
@@ -59,7 +59,7 @@ function Search() {
         {GENRES.map((g) => (
           <div key={g.name} className="tab-morph-genre" style={{ background: g.tint }}>
             <span>{g.name}</span>
-            <img src={albumById(g.album).cover} alt="" draggable={false} />
+            <img src={albumById(g.album).cover} alt="" draggable={false} data-album={g.album} />
           </div>
         ))}
       </div>
@@ -79,7 +79,7 @@ function Library() {
       <ul className="tab-morph-rows">
         {ALBUMS.slice(2, 10).map((a) => (
           <li key={a.id} className="tab-morph-row">
-            <img src={a.cover} alt="" draggable={false} />
+            <img src={a.cover} alt="" draggable={false} data-album={a.id} />
             <span className="tab-morph-row-text">
               <span className="tab-morph-row-title">{a.title}</span>
               <span className="tab-morph-row-meta">
@@ -101,7 +101,7 @@ function Radio() {
       <div className="tab-morph-station">
         <div className="tab-morph-collage">
           {collage.map((a) => (
-            <img key={a.id} src={a.cover} alt="" draggable={false} />
+            <img key={a.id} src={a.cover} alt="" draggable={false} data-album={a.id} />
           ))}
         </div>
         <div className="tab-morph-station-text">
@@ -116,7 +116,7 @@ function Radio() {
       <ul className="tab-morph-rows">
         {STATIONS.map((s) => (
           <li key={s.name} className="tab-morph-row">
-            <img src={albumById(s.album).cover} alt="" draggable={false} data-round="" />
+            <img src={albumById(s.album).cover} alt="" draggable={false} data-round="" data-album={s.album} />
             <span className="tab-morph-row-text">
               <span className="tab-morph-row-title">{s.name}</span>
               <span className="tab-morph-row-meta">{s.note}</span>

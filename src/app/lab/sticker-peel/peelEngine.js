@@ -444,7 +444,7 @@ export async function createPeel(stage, canvas, options = {}) {
     const parts = [];
     const lower = { from: 0, to: cut, anchor: "base" };
     const upper = { from: strand.count - 1, to: cut + 1, anchor: "top" };
-    for (const part of [lower, upper]) {
+    for (const part of strand.st.mode === "held" ? [lower] : [lower, upper]) {
       const n = Math.abs(part.to - part.from) + 1;
       const nodes = new Float32Array(n * 3);
       const prev = new Float32Array(n * 3);
@@ -551,6 +551,10 @@ export async function createPeel(stage, canvas, options = {}) {
         part.width = part.w0 * clamp((0.012 / Math.max(span, 0.012)) ** 0.35, 0.45, 1);
         next.push(part);
         if (moved > 1e-6 || Math.abs(part.rest - restBefore) > 1e-7) moving = true;
+        continue;
+      }
+      if (part.anchor === "top" && part.st.mode === "held") {
+        moving = true;
         continue;
       }
       part.rest *= Math.exp(-dt * 8);
