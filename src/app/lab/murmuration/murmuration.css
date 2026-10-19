@@ -1,0 +1,120 @@
+.murmuration {
+  --murmuration-ink: rgb(34 27 42);
+  --murmuration-ink-soft: rgb(74 62 84);
+  --murmuration-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --murmuration-serif-weight: 430;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  isolation: isolate;
+  background: rgb(232 214 232);
+  color: var(--murmuration-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.murmuration__sky,
+.murmuration__flock,
+.murmuration__land {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.murmuration__flock {
+  opacity: 0;
+  transition: opacity 900ms var(--ease-entrance);
+}
+
+.murmuration[data-ready] .murmuration__flock {
+  opacity: 1;
+}
+
+.murmuration__stage {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  cursor: none;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.murmuration[data-embedded] .murmuration__stage {
+  touch-action: pan-y;
+}
+
+.murmuration__stage:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 2px var(--murmuration-ink);
+  pointer-events: none;
+}
+
+.murmuration__head {
+  position: absolute;
+  top: 96px;
+  left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 300px;
+  pointer-events: none;
+}
+
+.murmuration__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.murmuration__lede {
+  margin: 0;
+  color: var(--murmuration-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.murmuration__lede em {
+  font-family: var(--murmuration-serif);
+  font-size: 1.07em;
+  font-style: italic;
+  font-weight: var(--murmuration-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--murmuration-ink);
+}
+
+@container (max-width: 899px) {
+  .murmuration__head {
+    top: 84px;
+    left: 16px;
+    right: 16px;
+    gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .murmuration__flock {
+    transition: none;
+  }
+}
