@@ -63,6 +63,18 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Glitches, clipping and overlaps sink a piece; fix them before anything else.
 - He wants more UI: music-app elements and common components made beautiful and trendy, a little over the top.
 
+## Type vibes — Herb's reference board (October 2026)
+
+Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:
+
+- Lyric-video type: plain white sans set over moody, grainy night footage or photos (streetlights, rain, city, a turntable), revealed a word or phrase at a time in sync with the line.
+- Justified blocks with wide, uneven word gaps; a few words per line, often lowercase, sitting centred or loose in the frame.
+- Lo-fi degradation as the effect: blurred type, JPEG-soft serif, pixelated or bitmap letters that break up line by line ("how are you?" in electric blue decaying to pixels).
+- Motion-smeared text: words that streak sideways and settle into a justified block, text that types and drags into place.
+- Collage and hand: a cut-out paper label on a sky photo, hand-lettered capitals on a photo, a small yellow caption on cobblestones, an annotation bubble on a selected text run.
+- Bold grotesk set huge against small type with tight leading, editorial and confident.
+- Mood: quiet, sincere, a little melancholy; the text says something human. Photos are real and imperfect, never stock-glossy.
+
 ## Rules
 
 - Pick the one thing the piece is about, name it in the title, and make every control serve it.
