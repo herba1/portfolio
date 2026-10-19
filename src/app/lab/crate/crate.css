@@ -5,7 +5,7 @@
   --crate-ease: cubic-bezier(0.22, 1, 0.36, 1);
   --crate-size: min(44cqh, 32cqw, 400px);
   --crate-base: 63%;
-  --crate-shift: calc(var(--crate-size) * 0.3);
+  --crate-shift: calc(var(--crate-size) * 0.2976);
   --crate-slide: 62%;
   position: absolute;
   inset: 0;
@@ -117,11 +117,17 @@
   transform-style: preserve-3d;
   will-change: transform;
   --crate-fade: 1;
+  --crate-shade: 0;
   --crate-out: 0;
 }
 
 .crate__sleeve[data-hidden] {
   visibility: hidden;
+}
+
+.crate__sleeve[data-gone] .crate__front,
+.crate__sleeve[data-gone] .crate__back {
+  pointer-events: none;
 }
 
 .crate__front,
@@ -141,6 +147,10 @@
   box-shadow:
     0 0 0 1px rgb(30 24 16 / 0.08),
     0 -2px 12px -4px rgb(30 24 16 / 0.18);
+}
+
+.crate__front {
+  filter: brightness(calc(1 - var(--crate-shade) * 0.22));
 }
 
 .crate__front img {
@@ -310,7 +320,7 @@
   .crate {
     --crate-size: min(calc(100cqw - 140px), 36cqh);
     --crate-base: 62%;
-    --crate-shift: calc(var(--crate-size) * 0.2);
+    --crate-shift: calc(var(--crate-size) * 0.192);
     --crate-slide: 40%;
   }
 

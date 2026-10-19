@@ -65,10 +65,9 @@ vec3 glassLight(vec2 p, float foot) {
   vec2 mm = (p - uGlass.xy) / uScale;
   vec2 q = (p - c) / max(h, vec2(1.0));
   vec2 dEdge = max(h - abs(p - c), vec2(0.0)) / uScale;
-  vec2 fallXY = mix(vec2(0.8), vec2(1.0), smoothstep(vec2(0.0), vec2(42.0), dEdge));
+  vec2 fallXY = mix(vec2(0.96), vec2(1.0), smoothstep(vec2(0.0), vec2(60.0), dEdge));
   float fall = fallXY.x * fallXY.y;
-  fall *= mix(0.9, 1.0, smoothstep(0.0, 5.0, min(dEdge.x, dEdge.y)));
-  float hot = 1.0 + 0.1 * exp(-dot(q * vec2(0.9, 1.2), q * vec2(0.9, 1.2)) * 1.4);
+  float hot = 1.0 + 0.05 * exp(-dot(q * vec2(0.9, 1.2), q * vec2(0.9, 1.2)) * 1.4);
   float tubes = 1.0 + 0.018 * cos(6.2831853 * (mm.y + 8.0) / 54.0);
   float mottle = 1.0 + 0.026 * (vnoise(mm * 0.045 + 3.1) - 0.5) + 0.012 * (vnoise(mm * 0.31) - 0.5);
   float frost = 1.0;

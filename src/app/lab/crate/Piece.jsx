@@ -20,7 +20,8 @@ const DAMP = 2 * Math.sqrt(STIFF) * 0.94;
 const LIFT_STIFF = 160;
 const LIFT_DAMP = 2 * Math.sqrt(LIFT_STIFF) * 0.96;
 const LEAN = 7;
-const FALL = 74;
+const TIP = 50;
+const DROP = 0.12;
 const BEHIND = 7;
 const FRONT = 1.05;
 
@@ -91,6 +92,7 @@ export default function Piece({ embedded = false }) {
         let y;
         let ly = 0;
         let fade = 1;
+        let shade = 0;
         if (d >= 0) {
           angle = -LEAN;
           z = -d * 26;
@@ -99,11 +101,13 @@ export default function Piece({ embedded = false }) {
         } else {
           const t = Math.min(1, -d);
           const e = t * t * (3 - 2 * t);
-          angle = mix(-LEAN, FALL, e) + Math.max(0, -d - 1) * 4;
-          z = -d * 8;
+          const g = clamp((t - 0.36) / 0.32, 0, 1);
+          angle = mix(-LEAN, TIP, e);
+          z = e * 12;
           y = 0;
-          ly = -e * 0.05;
-          fade = clamp((1 + d) / 0.45, 0, 1);
+          ly = -e * DROP;
+          shade = e;
+          fade = 1 - g * g * (3 - 2 * g);
         }
         let x = 0;
         let vinyl = 0;
@@ -117,6 +121,10 @@ export default function Piece({ embedded = false }) {
         }
         el.style.transform = `translate3d(calc(${x.toFixed(4)} * var(--crate-shift)), calc(${y.toFixed(2)}px - ${ly.toFixed(4)} * var(--crate-size)), ${z.toFixed(2)}px) rotateX(${(-angle).toFixed(3)}deg)`;
         el.style.setProperty("--crate-fade", fade.toFixed(3));
+        el.style.setProperty("--crate-shade", shade.toFixed(3));
+        if (fade < 0.5) {
+          if (el.dataset.gone === undefined) el.dataset.gone = "";
+        } else if (el.dataset.gone !== undefined) delete el.dataset.gone;
         el.style.setProperty("--crate-out", vinyl.toFixed(4));
       }
       const current = clamp(Math.round(s.pos), 0, N - 1);

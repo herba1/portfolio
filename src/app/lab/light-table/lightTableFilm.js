@@ -42,35 +42,22 @@ for (const piece of PIECES) {
 export const LAYOUTS = [
   {
     key: "wide",
-    w: 320,
-    h: 200,
+    box: [6, 4, 240, 180],
     pieces: {
-      roll: [112, 52, -1.2],
-      help: [60, 146, -3.5],
-      pepper: [134, 144, 2.2],
-      revolver: [205, 90, -2.4],
-    },
-  },
-  {
-    key: "square",
-    w: 244,
-    h: 236,
-    pieces: {
-      roll: [110, 46, -1.2],
-      help: [52, 146, -3.5],
-      pepper: [128, 180, 2.2],
-      revolver: [184, 92, -2.4],
+      roll: [108, 44, -1.4],
+      revolver: [198, 64, 3.2],
+      help: [88, 134, -3],
+      pepper: [172, 140, 2],
     },
   },
   {
     key: "tall",
-    w: 180,
-    h: 300,
+    box: [6, 4, 176, 238],
     pieces: {
-      roll: [42, 150, 90.8],
-      help: [128, 64, -3],
-      pepper: [132, 148, 2.2],
-      revolver: [104, 236, -2.4],
+      roll: [44, 104, 90.6],
+      help: [134, 46, -3],
+      pepper: [138, 126, 2.4],
+      revolver: [72, 200, -2.6],
     },
   },
 ];
