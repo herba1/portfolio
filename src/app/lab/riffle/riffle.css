@@ -30,7 +30,7 @@
   inset: 0;
   outline: none;
   touch-action: pan-y;
-  cursor: ew-resize;
+  cursor: grab;
   -webkit-tap-highlight-color: transparent;
 }
 

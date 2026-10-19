@@ -55,10 +55,17 @@ export function drawBinBack(g, dpr) {
   ctx.quadraticCurveTo(x0 + inset, g.binH, x0 + inset, g.binH - 10);
   ctx.closePath();
   ctx.fillStyle = grad(ctx, 0, 0, 0, g.binH, [
-    [0, "#101113"],
-    [0.35, "#1c1d20"],
-    [0.75, "#26272b"],
-    [1, "#151618"],
+    [0, "#b9bdc3"],
+    [0.18, "#d3d6da"],
+    [0.6, "#e2e4e7"],
+    [1, "#d0d3d7"],
+  ]);
+  ctx.fill();
+  ctx.fillStyle = grad(ctx, x0, 0, x0 + g.binTop, 0, [
+    [0, "rgb(70 76 84 / 0.16)"],
+    [0.2, "rgb(70 76 84 / 0)"],
+    [0.8, "rgb(70 76 84 / 0)"],
+    [1, "rgb(70 76 84 / 0.16)"],
   ]);
   ctx.fill();
   return canvas;
@@ -83,37 +90,35 @@ export function drawBinFront(g, dpr) {
   ctx.save();
   shape();
   ctx.clip();
-  const pitch = Math.max(9, g.S * 0.034);
-  ctx.strokeStyle = "rgb(22 23 26 / 0.94)";
-  ctx.lineWidth = Math.max(1.4, pitch * 0.16);
-  for (let x = -g.binH; x < g.binTop + g.binH; x += pitch) {
-    ctx.beginPath();
-    ctx.moveTo(x, 0);
-    ctx.lineTo(x + g.binH, g.binH);
-    ctx.moveTo(x + g.binH, 0);
-    ctx.lineTo(x, g.binH);
-    ctx.stroke();
-  }
-  ctx.strokeStyle = "rgb(255 255 255 / 0.08)";
-  ctx.lineWidth = 0.8;
-  for (let x = -g.binH; x < g.binTop + g.binH; x += pitch) {
-    ctx.beginPath();
-    ctx.moveTo(x + 0.8, 0);
-    ctx.lineTo(x + 0.8 + g.binH, g.binH);
-    ctx.stroke();
+  const pitch = Math.max(12, g.S * 0.048);
+  const wire = Math.max(1.2, pitch * 0.11);
+  for (const [color, dx, width] of [
+    ["rgb(60 66 74 / 0.42)", 0.7, wire],
+    ["rgb(250 251 252 / 0.85)", 0, wire * 0.7],
+  ]) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
+    for (let x = -g.binH; x < g.binTop + g.binH; x += pitch) {
+      ctx.beginPath();
+      ctx.moveTo(x + dx, 0);
+      ctx.lineTo(x + dx + g.binH, g.binH);
+      ctx.moveTo(x + dx + g.binH, 0);
+      ctx.lineTo(x + dx, g.binH);
+      ctx.stroke();
+    }
   }
   ctx.fillStyle = grad(ctx, x0, 0, x0 + g.binTop, 0, [
-    [0, "rgb(255 255 255 / 0.16)"],
-    [0.12, "rgb(255 255 255 / 0.05)"],
+    [0, "rgb(255 255 255 / 0.3)"],
+    [0.14, "rgb(255 255 255 / 0.08)"],
     [0.5, "rgb(255 255 255 / 0)"],
-    [0.86, "rgb(0 0 0 / 0.12)"],
-    [1, "rgb(0 0 0 / 0.3)"],
+    [0.86, "rgb(40 46 54 / 0.06)"],
+    [1, "rgb(40 46 54 / 0.18)"],
   ]);
   ctx.fillRect(0, 0, w, h);
   ctx.restore();
   shape();
   ctx.lineWidth = 2;
-  ctx.strokeStyle = "#0c0c0d";
+  ctx.strokeStyle = "#8e939a";
   ctx.stroke();
   const rimH = Math.round(g.S * 0.045);
   rr(ctx, x0 - 2, -2, g.binTop + 4, rimH, rimH / 2);
@@ -251,9 +256,9 @@ export function drawHeadFront(g, dpr, sans) {
   ctx.textBaseline = "middle";
   const tx = bandX + bandH * 0.42;
   const ty = bandY + bandH / 2 + 1;
-  ctx.fillStyle = "rgb(255 220 190 / 0.22)";
-  ctx.fillText("Shred", tx, ty + 1);
-  ctx.fillStyle = "#24140c";
+  ctx.fillStyle = "rgb(20 10 4 / 0.7)";
+  ctx.fillText("Shred", tx, ty - 1);
+  ctx.fillStyle = "#f1dcb4";
   ctx.fillText("Shred", tx, ty);
   return { canvas, pad, top, button: { x: bandX + bandW - bandH * 0.5, y: bandY + bandH / 2, r: bandH * 0.3 } };
 }

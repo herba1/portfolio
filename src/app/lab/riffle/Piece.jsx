@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { FRAMES } from "./riffleFrames";
+import { FRAMES, PAGES } from "./riffleFrames";
 import "./riffle.css";
 
 export default function Piece({ embedded = false }) {
@@ -26,7 +26,7 @@ export default function Piece({ embedded = false }) {
       started = true;
       const { createRiffle } = await import("./riffleEngine");
       if (disposed) return;
-      engine = createRiffle({
+      const made = await createRiffle({
         root,
         stage: stageRef.current,
         canvas: canvasRef.current,
@@ -40,7 +40,12 @@ export default function Piece({ embedded = false }) {
           if (!disposed) setReady(true);
         },
       });
-      engineRef.current = engine;
+      if (disposed) {
+        made.destroy();
+        return;
+      }
+      engine = made;
+      engineRef.current = made;
       sync();
     };
     const io = new IntersectionObserver(
@@ -69,7 +74,7 @@ export default function Piece({ embedded = false }) {
         className="riffle__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A flip book of the Beatles walking over the Abbey Road crossing, page ${frame + 1} of ${FRAMES}. Drag across the pages to riffle them, faster or backwards; arrow keys turn one page, Space plays or pauses.`}
+        aria-label={`A flip book of the Beatles' albums, page ${frame + 1} of ${FRAMES}: ${PAGES[frame].title}, ${PAGES[frame].year}. Drag sideways to riffle the pages, faster or backwards; arrow keys turn one page, Space plays or pauses.`}
       >
         <canvas ref={canvasRef} className="riffle__canvas" />
       </div>
@@ -77,7 +82,7 @@ export default function Piece({ embedded = false }) {
         <header className="riffle__head">
           <h1 className="riffle__title">Riffle</h1>
           <p className="riffle__lede">
-            Forty-eight pages of the walk across <em>Abbey Road</em>. Drag to riffle them at your own speed.
+            Twelve albums, 1963 to 1970, bound into one flip book. Drag sideways to <em>riffle</em> through them.
           </p>
         </header>
       )}

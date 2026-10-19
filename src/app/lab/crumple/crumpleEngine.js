@@ -1,4 +1,4 @@
-import { INK, PAPER_BACK, SHEETS, dotPattern, paintSheet } from "./crumpleSheets";
+import { INK, PAPER_BACK, SHEETS, dotPattern, hatchPattern, paintSheet } from "./crumpleSheets";
 
 const FPS = 12;
 const STEP_MS = 1000 / FPS;
@@ -8,7 +8,7 @@ const LIGHT = (() => {
   const l = Math.hypot(...v);
   return v.map((x) => x / l);
 })();
-const LEVELS = 6;
+const LEVELS = 4;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -109,7 +109,9 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     peak: 0,
     lastDrawnC: 0,
     seed: 7,
+    lines: [],
   };
+  const creases = { segs: [], alpha: 1, canvas: null, key: "" };
   const pointer = { x: -100, y: -100, id: null, inside: false, type: "mouse" };
 
   function buildMesh() {
@@ -187,6 +189,7 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     state.seed += 1;
     const rand = rng(state.seed * 97 + sheetIdx * 13);
     const lines = [];
+    state.lines = lines;
     for (let i = 0; i < 22; i += 1) {
       const a = rand() * Math.PI;
       lines.push({ nx: Math.cos(a), ny: Math.sin(a), lambda: 0.14 + rand() * 0.38, phase: rand(), amp: 0.4 + rand() * 0.6 });
@@ -223,11 +226,8 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     view.sw = view.sh * aspect;
     view.hx = view.w / 2;
     view.hy = top + availH / 2;
-    patterns = [null];
-    for (let i = 1; i < LEVELS; i += 1) {
-      const pitch = 6 * view.dpr;
-      patterns.push(dotPattern(ctx, pitch, pitch * (0.07 + i * 0.085), INK));
-    }
+    const pitch = 6 * view.dpr;
+    patterns = [null, dotPattern(ctx, pitch, pitch * 0.16, INK), dotPattern(ctx, pitch, pitch * 0.26, INK), hatchPattern(ctx, 5 * view.dpr, 1.1 * view.dpr, INK)];
     shadowPattern = dotPattern(ctx, 5 * view.dpr, 1.7 * view.dpr, "rgb(28 26 36 / 0.55)");
     layoutRest();
     if (!state.held) {
@@ -251,6 +251,42 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     });
     textures.set(idx, { pending: true, width, promise, canvas: have?.canvas });
     return promise;
+  }
+
+  function paperTexture() {
+    const tex = textures.get(sheetIdx)?.canvas;
+    if (!tex || !creases.segs.length) return tex;
+    const key = `${sheetIdx}:${tex.width}:${creases.segs.length}:${creases.alpha.toFixed(2)}`;
+    if (creases.key === key && creases.canvas) return creases.canvas;
+    if (!creases.canvas) creases.canvas = document.createElement("canvas");
+    const out = creases.canvas;
+    out.width = tex.width;
+    out.height = tex.height;
+    const c = out.getContext("2d");
+    c.drawImage(tex, 0, 0);
+    const tw = tex.width;
+    const th = tex.height;
+    const unit = tw / 420;
+    c.lineCap = "round";
+    for (const pass of [0, 1]) {
+      c.strokeStyle = pass ? `rgb(28 26 36 / ${0.38 * creases.alpha})` : `rgb(255 253 246 / ${0.9 * creases.alpha})`;
+      for (const seg of creases.segs) {
+        const off = pass ? 0 : 1.6 * unit;
+        const x0 = seg.x0 * tw + tw / 2 + off;
+        const y0 = seg.y0 * tw + th / 2 + off;
+        const x1 = seg.x1 * tw + tw / 2 + off;
+        const y1 = seg.y1 * tw + th / 2 + off;
+        const mx = (x0 + x1) / 2 - (y1 - y0) * seg.bend;
+        const my = (y0 + y1) / 2 + (x1 - x0) * seg.bend;
+        c.lineWidth = (pass ? 1.1 : 1.6) * unit * seg.weight;
+        c.beginPath();
+        c.moveTo(x0, y0);
+        c.quadraticCurveTo(mx, my, x1, y1);
+        c.stroke();
+      }
+    }
+    creases.key = key;
+    return out;
   }
 
   function solve() {
@@ -345,7 +381,7 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
   }
 
   function draw() {
-    const tex = textures.get(sheetIdx)?.canvas;
+    const tex = paperTexture();
     const d = view.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -406,8 +442,8 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
       }
       ctx.restore();
       const lam = normals[t * 3] * LIGHT[0] + normals[t * 3 + 1] * LIGHT[1] + normals[t * 3 + 2] * LIGHT[2];
-      const dark = clamp((0.58 - lam) / 0.6, 0, 1);
-      const level = Math.min(LEVELS - 1, Math.round(dark * (LEVELS - 1)));
+      const dark = clamp((0.5 - lam) / 0.55, 0, 1);
+      const level = dark < 0.18 ? 0 : dark < 0.5 ? 1 : dark < 0.82 ? 2 : LEVELS - 1;
       if (level > 0) {
         ctx.save();
         ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -429,7 +465,7 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
           if (rank[other] > rank[t]) continue;
           const dot = normals[t * 3] * normals[other * 3] + normals[t * 3 + 1] * normals[other * 3 + 1] + normals[t * 3 + 2] * normals[other * 3 + 2];
           if (front[t] !== front[other]) width = 2.2;
-          else if (dot < 0.93) width = 0.9 + (0.93 - dot) * 5;
+          else if (dot < 0.86) width = 1 + (0.86 - dot) * 5;
         }
         if (!width) continue;
         ctx.lineWidth = Math.min(2.8, width) * (0.85 + rand() * 0.3);
@@ -493,11 +529,40 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     if (amount < 0.05) return;
     const rb = Math.sqrt(view.sw * view.sh) * 0.2;
     const rand = rng(state.seed * 31 + 5);
+    const aspect = SHEETS[sheetIdx].aspect;
+    const halfV = 0.5 / aspect;
+    const ranked = [...state.lines].sort((p, q) => q.amp - p.amp).slice(0, 3 + Math.round(amount * 5));
+    for (const l of ranked) {
+      const reach = Math.abs(l.nx) * 0.5 + Math.abs(l.ny) * halfV;
+      const lo = Math.ceil((-reach / l.lambda + l.phase) * 2);
+      const hi = Math.floor((reach / l.lambda + l.phase) * 2);
+      if (hi < lo) continue;
+      const n = lo + Math.floor(rand() * (hi - lo + 1));
+      const d = (n / 2 - l.phase) * l.lambda;
+      const span = Math.hypot(0.5, halfV);
+      const mid = (rand() - 0.5) * span;
+      const len = span * (0.35 + rand() * 0.6);
+      const px = l.nx * d;
+      const py = l.ny * d;
+      const dx = -l.ny;
+      const dy = l.nx;
+      creases.segs.push({
+        x0: px + dx * (mid - len / 2),
+        y0: py + dy * (mid - len / 2),
+        x1: px + dx * (mid + len / 2),
+        y1: py + dy * (mid + len / 2),
+        bend: (rand() - 0.5) * 0.02,
+        weight: 0.6 + amount * 0.4,
+      });
+    }
+    if (creases.segs.length > 60) creases.segs.splice(0, creases.segs.length - 60);
+    creases.alpha = 1;
+    creases.key = "";
     for (let k = 0; k < mesh.count; k += 1) {
       const f = mesh.fold[k];
-      mesh.res[k * 3 + 2] = clamp(mesh.res[k * 3 + 2] + f * rb * 0.065 * amount, -rb * 0.25, rb * 0.25);
+      mesh.res[k * 3 + 2] = clamp(mesh.res[k * 3 + 2] + f * rb * 0.012 * amount, -rb * 0.05, rb * 0.05);
       const edge = Math.max(Math.abs(mesh.uv[k * 2] - 0.5), Math.abs(mesh.uv[k * 2 + 1] - 0.5)) * 2;
-      const pull = edge * edge * amount * 0.012;
+      const pull = edge * edge * amount * 0.008;
       mesh.res[k * 3] = clamp(mesh.res[k * 3] - mesh.rest[k * 2] * pull + (rand() - 0.5) * 1.4 * amount, -view.sw * 0.04, view.sw * 0.04);
       mesh.res[k * 3 + 1] = clamp(mesh.res[k * 3 + 1] - mesh.rest[k * 2 + 1] * pull + (rand() - 0.5) * 1.4 * amount, -view.sh * 0.04, view.sh * 0.04);
     }
@@ -518,7 +583,7 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
     if (reduced) state.c = state.target;
     else state.c = state.target > state.c ? Math.min(state.target, state.c + dt * rate) : Math.max(state.target, state.c - dt * rate);
     if (state.held) state.peak = Math.max(state.peak, state.c);
-    if (state.c !== before) moving = true;
+    if (state.c !== before || state.c !== state.target) moving = true;
     const k = 1 - Math.exp(-dt * (state.held ? 14 : 7));
     state.bx += (state.tbx - state.bx) * k;
     state.by += (state.tby - state.by) * k;
@@ -531,13 +596,20 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
       ironing -= dt;
       const keep = Math.exp(-dt * 7);
       for (let i = 0; i < mesh.res.length; i += 1) mesh.res[i] *= keep;
-      if (ironing <= 0) mesh.res.fill(0);
+      creases.alpha *= keep;
+      if (ironing <= 0) {
+        mesh.res.fill(0);
+        creases.segs = [];
+        creases.alpha = 1;
+      }
       moving = true;
     }
     if (pendingSheet >= 0 && state.c >= 0.999) {
       sheetIdx = pendingSheet;
       pendingSheet = -1;
       buildMesh();
+      creases.segs = [];
+      creases.key = "";
       layout();
       state.gx = 0;
       state.gy = 0;
@@ -568,8 +640,11 @@ export async function createCrumple({ root, stage, canvas, cursor, onSheet, onRe
       state.lastDrawnC = state.c;
       frameSeed += 1;
       draw();
-      if (impact > 0) impact -= 1;
       dirty = false;
+      if (impact > 0) {
+        impact -= 1;
+        if (impact === 0) dirty = true;
+      }
       onReady?.();
     }
     if (moving || dirty || impact > 0 || pointer.inside) raf = requestAnimationFrame(frame);

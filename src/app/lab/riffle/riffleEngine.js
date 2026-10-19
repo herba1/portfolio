@@ -1,12 +1,13 @@
-import { FRAMES, PAGE_ASPECT, drawFrame } from "./riffleFrames";
+import { FRAMES, PAGE_ASPECT, drawPage, loadCovers } from "./riffleFrames";
 
-const FLIP = 0.16;
-const MAX_SPEED = 26;
-const PLAY_SPEED = 12;
-const PX_PER_PAGE = 7;
+const MAX_SPEED = 14;
+const PLAY_SPEED = 1.6;
+const PX_PER_PAGE = 36;
+const BACK = "#f1ede3";
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const mod = (n, m) => ((n % m) + m) % m;
+const easeInOut = (t) => t * t * (3 - 2 * t);
 
 function createSound() {
   let ctx = null;
@@ -38,7 +39,7 @@ function createSound() {
       bp.frequency.value = 2600 + Math.random() * 1600;
       bp.Q.value = 1.1;
       const g = ctx.createGain();
-      g.gain.value = 0.11 / (1 + rate * 0.04);
+      g.gain.value = 0.1 / (1 + rate * 0.06);
       src.connect(bp).connect(g).connect(ctx.destination);
       src.start(t);
     },
@@ -49,7 +50,7 @@ function createSound() {
   };
 }
 
-export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady }) {
+export async function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady }) {
   const ctx = canvas.getContext("2d");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const sound = createSound();
@@ -58,8 +59,10 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     sans: cs.getPropertyValue("--font-sans").trim() || "system-ui, sans-serif",
     mono: cs.getPropertyValue("--font-mono").trim() || "ui-monospace, monospace",
   };
+  const covers = await loadCovers();
   const view = { w: 1, h: 1, dpr: 1, x: 0, y: 0, pw: 1, ph: 1 };
   const flights = [];
+  let pages = [];
   let pos = 0;
   let vel = 0;
   let playing = !reduced;
@@ -69,9 +72,7 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
   let active = true;
   let destroyed = false;
   let dirty = true;
-  let shownFrame = -1;
-  let page = null;
-  let pageCtx = null;
+  let shown = -1;
 
   function layout() {
     const rect = root.getBoundingClientRect();
@@ -81,40 +82,34 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     canvas.width = Math.round(view.w * view.dpr);
     canvas.height = Math.round(view.h * view.dpr);
     const narrow = view.w < 720;
-    const top = narrow ? 156 : 184;
-    const bottom = narrow ? 100 : 104;
-    const availH = Math.max(160, view.h - top - bottom);
-    const availW = view.w - (narrow ? 40 : 96);
-    view.pw = Math.min(availW * (narrow ? 0.94 : 0.62), availH * 0.86 * PAGE_ASPECT, 760);
-    view.ph = view.pw / PAGE_ASPECT;
-    view.x = (view.w - view.pw) / 2 + (narrow ? 6 : 10);
-    view.y = top + (availH - view.ph) / 2;
-    page = document.createElement("canvas");
-    page.width = Math.round(view.pw * view.dpr);
-    page.height = Math.round(view.ph * view.dpr);
-    pageCtx = page.getContext("2d");
-    shownFrame = -1;
+    const top = narrow ? 152 : 96;
+    const bottom = narrow ? 92 : 96;
+    const availH = Math.max(200, view.h - top - bottom);
+    const availW = view.w - (narrow ? 56 : 96);
+    view.ph = Math.round(Math.min(availH * 0.96, (availW / PAGE_ASPECT) * (narrow ? 1 : 0.6), 620));
+    view.pw = Math.round(view.ph * PAGE_ASPECT);
+    view.x = Math.round((view.w - view.pw) / 2 + 6);
+    view.y = Math.round(top + (availH - view.ph) / 2);
+    pages = Array.from({ length: FRAMES }, (_, i) => {
+      const c = document.createElement("canvas");
+      c.width = Math.round(view.pw * view.dpr);
+      c.height = Math.round(view.ph * view.dpr);
+      const cx = c.getContext("2d");
+      cx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
+      drawPage(cx, i, view.pw, view.ph, covers, fonts);
+      return c;
+    });
     dirty = true;
   }
 
-  function paintPage(frame) {
-    pageCtx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
-    drawFrame(pageCtx, frame, view.pw, view.ph, fonts);
-  }
-
-  function frameCanvas(frame) {
-    const c = document.createElement("canvas");
-    c.width = page.width;
-    c.height = page.height;
-    const cx = c.getContext("2d");
-    cx.setTransform(view.dpr, 0, 0, view.dpr, 0, 0);
-    drawFrame(cx, frame, view.pw, view.ph, fonts);
-    return c;
+  function flightTime() {
+    return clamp(1.1 / Math.max(1, Math.abs(vel)), 0.14, 0.42);
   }
 
   function startFlight(index, dir) {
-    flights.push({ index, dir, t: 0, canvas: frameCanvas(index) });
-    if (flights.length > 10) flights.shift();
+    for (const f of flights) f.dur = Math.min(f.dur, 0.16);
+    flights.push({ index, dir, t: 0, dur: reduced ? 0.01 : flightTime() });
+    if (flights.length > 8) flights.shift();
     sound.flick(Math.abs(vel));
   }
 
@@ -122,17 +117,19 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     const before = Math.floor(pos);
     if (drag) {
       const target = drag.pos + (drag.x0 - drag.x) / PX_PER_PAGE;
-      const inst = dt > 0 ? (target - pos) / dt : 0;
-      vel += (clamp(inst, -MAX_SPEED, MAX_SPEED) - vel) * Math.min(1, dt * 14);
-      pos += clamp(target - pos, -MAX_SPEED * dt, MAX_SPEED * dt);
+      const step = clamp(target - pos, -MAX_SPEED * dt, MAX_SPEED * dt);
+      const inst = dt > 0 ? step / dt : 0;
+      vel += (inst - vel) * Math.min(1, dt * 18);
+      pos += step;
     } else if (playing) {
       vel += (PLAY_SPEED - vel) * Math.min(1, dt * 4);
       pos += vel * dt;
     } else {
-      vel *= Math.exp(-dt * 2.6);
-      if (Math.abs(vel) < 0.6) {
-        const settle = Math.round(pos);
-        pos += (settle - pos) * Math.min(1, dt * 10);
+      vel *= Math.exp(-dt * 4);
+      if (Math.abs(vel) < 0.8) {
+        const settle = vel >= 0 ? Math.ceil(pos - 0.001) : Math.floor(pos + 0.001);
+        const k = Math.min(1, dt * 12);
+        pos += (settle - pos) * k;
         if (Math.abs(settle - pos) < 0.002) pos = settle;
         vel = 0;
       } else pos += vel * dt;
@@ -140,8 +137,51 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     const after = Math.floor(pos);
     if (after > before) for (let i = before; i < after; i += 1) startFlight(i, 1);
     else if (after < before) for (let i = before - 1; i >= after; i -= 1) startFlight(i, -1);
-    for (const f of flights) f.t += dt / FLIP;
-    while (flights.length && flights[0].t >= 1) flights.shift();
+    for (const f of flights) f.t += dt / f.dur;
+    for (let i = flights.length - 1; i >= 0; i -= 1) if (flights[i].t >= 1) flights.splice(i, 1);
+  }
+
+  function drawFlight(f) {
+    const { x, y, pw, ph } = view;
+    const p = clamp(f.dir > 0 ? f.t : 1 - f.t, 0, 1);
+    const fold = pw * (1 - easeInOut(p));
+    if (fold < 0.5) return;
+    const flapW = Math.min(fold, (pw - fold) * 0.32);
+    const flapL = fold - flapW;
+    const page = pages[mod(f.index, FRAMES)];
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x + fold, y, Math.min(pw - fold, 28), ph);
+    ctx.clip();
+    const cast = ctx.createLinearGradient(x + fold, 0, x + fold + 28, 0);
+    cast.addColorStop(0, "rgb(30 28 36 / 0.16)");
+    cast.addColorStop(0.4, "rgb(30 28 36 / 0.05)");
+    cast.addColorStop(1, "rgb(30 28 36 / 0)");
+    ctx.fillStyle = cast;
+    ctx.fillRect(x + fold, y, 28, ph);
+    ctx.restore();
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, fold, ph);
+    ctx.clip();
+    ctx.drawImage(page, x, y, pw, ph);
+    ctx.restore();
+    if (flapW > 0.5) {
+      ctx.save();
+      ctx.shadowColor = "rgb(30 28 36 / 0.18)";
+      ctx.shadowBlur = 12;
+      ctx.shadowOffsetX = -3;
+      ctx.fillStyle = BACK;
+      ctx.fillRect(x + flapL, y, flapW, ph);
+      ctx.restore();
+      const sheen = ctx.createLinearGradient(x + flapL, 0, x + fold, 0);
+      sheen.addColorStop(0, "rgb(255 255 255 / 0.5)");
+      sheen.addColorStop(0.55, "rgb(255 255 255 / 0)");
+      sheen.addColorStop(0.85, "rgb(30 28 36 / 0.05)");
+      sheen.addColorStop(1, "rgb(30 28 36 / 0.14)");
+      ctx.fillStyle = sheen;
+      ctx.fillRect(x + flapL, y, flapW, ph);
+    }
   }
 
   function render() {
@@ -151,73 +191,48 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     ctx.setTransform(d, 0, 0, d, 0, 0);
     const { x, y, pw, ph } = view;
     const back = flights.filter((f) => f.dir < 0).length;
-    const top = Math.floor(pos) + back;
-    if (top !== shownFrame) {
-      paintPage(top);
-      shownFrame = top;
-      onFrame?.(mod(top, FRAMES));
+    const base = Math.floor(pos) + back;
+    const current = mod(base, FRAMES);
+    if (current !== shown) {
+      shown = current;
+      onFrame?.(current);
     }
     ctx.save();
-    ctx.shadowColor = "rgb(30 28 36 / 0.16)";
-    ctx.shadowBlur = 24;
-    ctx.shadowOffsetY = 10;
+    ctx.shadowColor = "rgb(30 28 36 / 0.14)";
+    ctx.shadowBlur = 28;
+    ctx.shadowOffsetY = 12;
     ctx.fillStyle = "#f3f0e8";
-    ctx.fillRect(x, y, pw + 10, ph + 10);
+    ctx.fillRect(x, y, pw + 8, ph + 8);
     ctx.restore();
-    for (let i = 5; i >= 1; i -= 1) {
+    for (let i = 4; i >= 1; i -= 1) {
       ctx.fillStyle = i % 2 ? "#ece8de" : "#f6f3ec";
       ctx.fillRect(x + i * 2, y + i * 2, pw, ph);
-      ctx.strokeStyle = "rgb(30 28 36 / 0.1)";
+      ctx.strokeStyle = "rgb(30 28 36 / 0.08)";
       ctx.lineWidth = 1;
       ctx.strokeRect(x + i * 2 + 0.5, y + i * 2 + 0.5, pw - 1, ph - 1);
     }
-    ctx.drawImage(page, x, y, pw, ph);
-    ctx.strokeStyle = "rgb(30 28 36 / 0.14)";
+    ctx.drawImage(pages[mod(base, FRAMES)], x, y, pw, ph);
+    const ordered = [...flights].sort((a, b) => b.index - a.index);
+    for (const f of ordered) drawFlight(f);
+    ctx.strokeStyle = "rgb(30 28 36 / 0.12)";
     ctx.strokeRect(x + 0.5, y + 0.5, pw - 1, ph - 1);
-
-    const ordered = [...flights].sort((a, b) => (a.dir > 0 ? a.t : 1 - a.t) - (b.dir > 0 ? b.t : 1 - b.t));
-    for (const f of ordered) {
-      const p = f.dir > 0 ? f.t : 1 - f.t;
-      const e = p * p * (3 - 2 * p);
-      const sx = Math.cos(e * Math.PI * 0.5);
-      if (sx < 0.01) continue;
-      const fw = pw * sx;
-      ctx.save();
-      ctx.shadowColor = "rgb(30 28 36 / 0.22)";
-      ctx.shadowBlur = 14;
-      ctx.shadowOffsetX = 4 + 10 * (1 - sx);
-      ctx.fillStyle = "#fbf9f4";
-      ctx.fillRect(x, y, fw, ph);
-      ctx.restore();
-      ctx.drawImage(f.canvas, x, y, fw, ph);
-      const shade = ctx.createLinearGradient(x, 0, x + fw, 0);
-      shade.addColorStop(0, `rgb(30 28 36 / ${(0.18 * e).toFixed(3)})`);
-      shade.addColorStop(0.6, `rgb(30 28 36 / ${(0.06 * e).toFixed(3)})`);
-      shade.addColorStop(1, `rgb(255 255 255 / ${(0.25 * e).toFixed(3)})`);
-      ctx.fillStyle = shade;
-      ctx.fillRect(x, y, fw, ph);
-    }
-
-    const tape = Math.max(14, pw * 0.035);
+    const tape = Math.max(12, Math.round(pw * 0.034));
     ctx.fillStyle = "#1d1c22";
     ctx.beginPath();
-    ctx.roundRect(x - tape * 0.6, y - 4, tape, ph + 18, 3);
+    ctx.roundRect(x - tape * 0.6, y - 4, tape, ph + 16, 3);
     ctx.fill();
-    ctx.fillStyle = "rgb(255 255 255 / 0.08)";
-    ctx.fillRect(x - tape * 0.6 + 3, y, 2, ph + 10);
   }
 
   function frame(now) {
     raf = 0;
     if (destroyed || !active) return;
-    const dt = last ? clamp((now - last) / 1000, 0, 0.05) : 0;
+    const dt = last ? clamp((now - last) / 1000, 0, 0.05) : 1 / 60;
     last = now;
     advance(dt);
     const moving = drag || playing || Math.abs(vel) > 0 || flights.length > 0 || pos !== Math.round(pos);
     if (moving || dirty) {
       render();
       dirty = false;
-      onReady?.();
     }
     if (moving) raf = requestAnimationFrame(frame);
     else last = 0;
@@ -241,9 +256,7 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
 
   function onDown(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    const [x, y] = local(e);
-    const inside = x > view.x - 20 && x < view.x + view.pw + 30 && y > view.y - 20 && y < view.y + view.ph + 30;
-    if (!inside) return;
+    const [x] = local(e);
     sound.wake();
     e.preventDefault();
     stage.setPointerCapture?.(e.pointerId);
@@ -266,27 +279,28 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     wake();
   }
 
+  function turn(dir) {
+    sound.wake();
+    if (playing) setPlaying(false);
+    vel = 0;
+    const from = Math.round(pos);
+    pos = from + dir;
+    if (dir > 0) startFlight(from, 1);
+    else startFlight(from - 1, -1);
+    wake();
+  }
+
   function onKey(e) {
     if (e.key === "ArrowRight") {
-      sound.wake();
-      setPlaying(false);
-      vel = 0;
-      pos = Math.round(pos) + 1;
-      startFlight(Math.round(pos) - 1, 1);
       e.preventDefault();
-      wake();
+      turn(1);
     } else if (e.key === "ArrowLeft") {
-      sound.wake();
-      setPlaying(false);
-      vel = 0;
-      pos = Math.round(pos) - 1;
-      startFlight(Math.round(pos), -1);
       e.preventDefault();
-      wake();
+      turn(-1);
     } else if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
       sound.wake();
       setPlaying(!playing);
-      e.preventDefault();
     }
   }
 

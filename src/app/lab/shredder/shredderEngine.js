@@ -272,13 +272,18 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
     if (!layers) return;
     const binX = view.cx - g.binTop / 2 - 4;
     ctx.save();
-    ctx.globalAlpha = 0.5;
-    const shadow = ctx.createRadialGradient(view.cx, view.binY + g.binH, 4, view.cx, view.binY + g.binH, g.binTop * 0.6);
-    shadow.addColorStop(0, "rgb(30 34 40 / 0.4)");
-    shadow.addColorStop(0.5, "rgb(30 34 40 / 0.14)");
+    ctx.translate(view.cx, view.binY + g.binH);
+    ctx.scale(1, 0.09);
+    const shadowR = g.binTop * 0.62;
+    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, shadowR);
+    shadow.addColorStop(0, "rgb(30 34 40 / 0.26)");
+    shadow.addColorStop(0.45, "rgb(30 34 40 / 0.12)");
+    shadow.addColorStop(0.75, "rgb(30 34 40 / 0.04)");
     shadow.addColorStop(1, "rgb(30 34 40 / 0)");
     ctx.fillStyle = shadow;
-    ctx.fillRect(view.cx - g.binTop, view.binY + g.binH - 30, g.binTop * 2, 60);
+    ctx.beginPath();
+    ctx.arc(0, 0, shadowR, 0, Math.PI * 2);
+    ctx.fill();
     ctx.restore();
     ctx.drawImage(layers.binBack, binX, view.binY, g.binTop + 8, g.binH + 8);
     ctx.drawImage(pile, binX, view.binY, g.binTop + 8, g.binH + 8);
@@ -298,8 +303,10 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
 
     if (feed < g.cover + 1) {
       const img = images[current];
-      const y = view.slotY - g.cover + feed - (1 - easeOut(clamp(drop, 0, 1))) * (g.cover + 120);
+      const entering = easeOut(clamp(drop, 0, 1));
+      const y = view.slotY - g.cover + feed - (1 - entering) * 40;
       ctx.save();
+      ctx.globalAlpha = clamp(drop * 1.6, 0, 1);
       ctx.beginPath();
       ctx.rect(0, 0, view.w, view.slotY);
       ctx.clip();
@@ -345,7 +352,11 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
   function finish() {
     motorOn = false;
     sound.stop();
-    for (const s of strips) falling.push({ s });
+    for (const s of strips) {
+      s.wait = Math.random() * 0.22;
+      s.vy = -Math.random() * 40;
+      falling.push({ s });
+    }
     strips = [];
     const next = queued >= 0 ? queued : (current + 1) % albums.length;
     queued = -1;
@@ -361,7 +372,7 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
     time += dt;
     const through = g.cover + (view.headBottom - view.slotY) + 2;
     if (motorOn) {
-      feed += dt * (g.cover / 2.4);
+      feed += dt * (g.cover / 1.7);
       moving = true;
       if (feed >= through) finish();
     } else if (!dragging && feed > 0) {
@@ -369,13 +380,18 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
       moving = true;
     }
     if (drop < 1) {
-      drop = reduced ? 1 : Math.min(1, drop + dt / 0.55);
+      drop = reduced ? 1 : Math.min(1, drop + dt / 0.42);
       moving = true;
     }
     if (falling.length) {
       moving = true;
       const keep = [];
       for (const f of falling) {
+        if (f.s.wait > 0) {
+          f.s.wait -= dt;
+          keep.push(f);
+          continue;
+        }
         f.s.vy += GRAVITY * dt;
         f.s.drop += f.s.vy * dt;
         if (view.headBottom + f.s.drop > pileTop() - g.cover / g.strips - f.s.rest) {

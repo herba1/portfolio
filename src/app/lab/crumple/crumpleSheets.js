@@ -32,24 +32,6 @@ export const SHEETS = [
     aspect: 0.7,
     title: "Abbey Road poster, 1969",
     album: "abbey-road",
-    songs: [
-      "Come Together",
-      "Something",
-      "Maxwell's Silver Hammer",
-      "Oh! Darling",
-      "Octopus's Garden",
-      "I Want You",
-      "Here Comes the Sun",
-      "Because",
-      "You Never Give Me Your Money",
-      "Sun King",
-      "Mean Mr. Mustard",
-      "Polythene Pam",
-      "Bathroom Window",
-      "Golden Slumbers",
-      "Carry That Weight",
-      "The End",
-    ],
   },
 ];
 
@@ -153,32 +135,19 @@ function drawPoster(ctx, w, h, sheet, f, cover) {
   ctx.fillStyle = INK;
   ctx.textBaseline = "alphabetic";
   ctx.textAlign = "left";
-  const ty = m + size + w * 0.13;
-  const px = fit(ctx, "Abbey Road", size * 0.66, 800, w * 0.12, f.sans);
+  const room = h - m - (m + size);
+  const px = fit(ctx, "Abbey Road", size, 800, room * 0.42, f.sans);
   ctx.font = `800 ${px}px ${f.sans}`;
-  ctx.fillText("Abbey Road", m, ty);
-  ctx.textAlign = "right";
+  const ty = m + size + room * 0.5;
+  ctx.fillText("Abbey Road", m - px * 0.04, ty);
   ctx.fillStyle = ACCENT;
-  ctx.font = `600 ${w * 0.034}px ${f.mono}`;
-  ctx.fillText("26.09.1969", w - m, ty - px * 0.62);
+  ctx.fillRect(m, ty + room * 0.1, size, w * 0.012);
+  ctx.font = `600 ${w * 0.036}px ${f.mono}`;
   ctx.fillStyle = INK;
-  ctx.fillText("The Beatles", w - m, ty);
+  ctx.fillText("The Beatles", m, ty + room * 0.3);
+  ctx.textAlign = "right";
+  ctx.fillText("26.09.1969", w - m, ty + room * 0.3);
   ctx.textAlign = "left";
-  const half = Math.ceil(sheet.songs.length / 2);
-  const colW = size / 2;
-  const top = ty + w * 0.07;
-  const step = (h - top - m * 0.6) / half;
-  ctx.font = `560 ${Math.min(step * 0.62, w * 0.03)}px ${f.sans}`;
-  sheet.songs.forEach((song, i) => {
-    const col = i < half ? 0 : 1;
-    const row = i % half;
-    const x = m + col * colW;
-    const y = top + row * step + step * 0.5;
-    ctx.fillStyle = ACCENT;
-    ctx.fillText(String(i + 1).padStart(2, "0"), x, y);
-    ctx.fillStyle = INK;
-    ctx.fillText(song, x + w * 0.06, y);
-  });
 }
 
 export async function paintSheet(sheet, width, root) {
@@ -215,6 +184,24 @@ export function dotPattern(ctx, pitch, radius, color) {
     t.beginPath();
     t.arc(x, y, r, 0, Math.PI * 2);
     t.fill();
+  }
+  return ctx.createPattern(tile, "repeat");
+}
+
+export function hatchPattern(ctx, pitch, width, color) {
+  const tile = document.createElement("canvas");
+  const size = Math.max(3, Math.round(pitch));
+  tile.width = size;
+  tile.height = size;
+  const t = tile.getContext("2d");
+  t.strokeStyle = color;
+  t.lineWidth = width;
+  t.lineCap = "square";
+  for (const o of [-size, 0, size]) {
+    t.beginPath();
+    t.moveTo(o, size);
+    t.lineTo(o + size, 0);
+    t.stroke();
   }
   return ctx.createPattern(tile, "repeat");
 }

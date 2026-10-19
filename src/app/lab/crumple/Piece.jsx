@@ -86,7 +86,7 @@ export default function Piece({ embedded = false }) {
         <header className="crumple__head">
           <h1 className="crumple__title">Crumple</h1>
           <p className="crumple__hint">
-            Hold to scrunch it up, drag it, let go. The paper moves <em>on twos</em>.
+            Hold the paper to scrunch it into a ball. Let go and it opens out <em>creased</em>.
           </p>
         </header>
       )}
