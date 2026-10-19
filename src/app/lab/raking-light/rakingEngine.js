@@ -8,8 +8,6 @@ const LOG_MIN = Math.log(LAMP_MIN);
 const LOG_MAX = Math.log(LAMP_MAX);
 const SUB = 1 / 240;
 const INTRO_S = 0.45;
-const VISIBLE = [560 / CELL, 584 / CELL, 560 / CELL];
-const TALL = [416 / 560, 1, 1];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const easeOut = (t) => 1 - Math.pow(1 - t, 4);
@@ -34,8 +32,6 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
   let last = 0;
   let destroyed = false;
   let quality = 1;
-  let motionQuality = 1;
-  let interval = 16;
   let introT = reduced ? INTRO_S : 0;
   let sentReady = false;
   let placed = false;
@@ -45,34 +41,36 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
     const availW = Math.max(200, view.width - 32);
     const availH = Math.max(200, view.height - pad.top - pad.bottom);
     const narrow = view.width < 720;
-    const mm = BADGES.map((b, i) => b.widthMm / VISIBLE[i]);
-    const vis = BADGES.map((b, i) => [b.widthMm, b.widthMm * TALL[i]]);
-    const gap = 12;
+    const cellMm = BADGES.map((b) => (b.widthMm * CELL) / b.cellW);
+    const vis = BADGES.map((b) => [b.widthMm, b.heightMm]);
+    const gap = 14;
     let centres;
     if (narrow) {
-      const wMm = Math.max(vis[1][0], vis[0][0] + vis[2][0] + gap);
-      const hMm = vis[1][1] + gap + Math.max(vis[0][1], vis[2][1]);
-      view.pxPerMm = Math.min((availW * 0.94) / wMm, (availH * 0.9) / hMm);
+      const lowW = vis[0][0] + vis[2][0] + gap;
+      const wMm = Math.max(vis[1][0], lowW);
+      const lowH = Math.max(vis[0][1], vis[2][1]);
+      const hMm = vis[1][1] + gap + lowH;
+      view.pxPerMm = Math.min((availW * 0.96) / wMm, (availH * 0.92) / hMm);
       view.spanX = wMm / 2;
       view.spanY = hMm / 2;
       const topY = -hMm / 2 + vis[1][1] / 2;
-      const lowY = hMm / 2 - Math.max(vis[0][1], vis[2][1]) / 2;
+      const lowY = hMm / 2 - lowH / 2;
       centres = [
-        [-(vis[2][0] + gap) / 2, lowY],
+        [-lowW / 2 + vis[0][0] / 2, lowY - 1],
         [0, topY],
-        [(vis[0][0] + gap) / 2, lowY + 2],
+        [lowW / 2 - vis[2][0] / 2, lowY + 1],
       ];
     } else {
       const wMm = vis[0][0] + vis[1][0] + vis[2][0] + gap * 2;
-      const hMm = Math.max(vis[0][1], vis[1][1], vis[2][1]);
-      view.pxPerMm = Math.min((availW * 0.84) / wMm, (availH * 0.82) / hMm);
+      const hMm = Math.max(vis[0][1], vis[1][1], vis[2][1]) + 8;
+      view.pxPerMm = Math.min((availW * 0.86) / wMm, (availH * 0.8) / hMm);
       view.spanX = wMm / 2;
       view.spanY = hMm / 2;
       const x0 = -wMm / 2;
       centres = [
-        [x0 + vis[0][0] / 2, 4],
-        [x0 + vis[0][0] + gap + vis[1][0] / 2, -2],
-        [x0 + vis[0][0] + vis[1][0] + gap * 2 + vis[2][0] / 2, 6],
+        [x0 + vis[0][0] / 2, BADGES[0].dy],
+        [x0 + vis[0][0] + gap + vis[1][0] / 2, BADGES[1].dy],
+        [x0 + vis[0][0] + vis[1][0] + gap * 2 + vis[2][0] / 2, BADGES[2].dy],
       ];
     }
     view.cx = view.width / 2;
@@ -80,7 +78,7 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
     BADGES.forEach((b, i) => {
       rects[i * 4] = view.cx + centres[i][0] * view.pxPerMm;
       rects[i * 4 + 1] = view.cy + centres[i][1] * view.pxPerMm;
-      rects[i * 4 + 2] = (mm[i] / 2) * view.pxPerMm;
+      rects[i * 4 + 2] = (cellMm[i] / 2) * view.pxPerMm;
       rects[i * 4 + 3] = b.tilt;
     });
     if (!placed) {
@@ -110,18 +108,22 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
       return;
     }
     resize();
-    const sans = getComputedStyle(box).fontFamily || "system-ui, sans-serif";
-    document.fonts.ready.then(() => {
-      if (destroyed || !gl) return;
-      gl.upload(buildBadges(sans));
-      wake();
-    });
+    buildBadges()
+      .then((badges) => {
+        if (destroyed || !gl) return;
+        gl.upload(badges);
+        wake();
+      })
+      .catch((error) => {
+        console.error(error);
+        onFail();
+      });
   }
 
   function resize() {
     const rect = box.getBoundingClientRect();
     const dprCap = Math.min(window.devicePixelRatio || 1, 2);
-    const budget = Math.sqrt(1600000 / Math.max(1, rect.width * rect.height));
+    const budget = Math.sqrt(1300000 / Math.max(1, rect.width * rect.height));
     view.width = Math.max(1, rect.width);
     view.height = Math.max(1, rect.height);
     view.dpr = Math.max(0.75, Math.min(dprCap, budget));
@@ -237,7 +239,7 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
       lamp: [lamp.x, lamp.y, z * view.pxPerMm, lamp.power],
       bulb: 0.06 + z * 0.004,
       falloff: 120 * view.pxPerMm,
-      steps: quality < 1 ? 8 : 12,
+      steps: 16,
     });
     if (!sentReady) {
       sentReady = true;
@@ -278,14 +280,6 @@ export function createRakingEngine({ box, stage, canvas, slider, insets, onReady
     const dt = clamp(raw / 1000, 0, 0.05);
     last = now;
     const moving = step(dt) || !gl.has();
-    if (moving) {
-      interval = interval * 0.8 + raw * 0.2;
-      if (interval > 34 && motionQuality > 0.5) {
-        motionQuality = Math.max(0.5, motionQuality * 0.85);
-        interval = 20;
-      }
-      if (quality !== motionQuality) applyQuality(motionQuality);
-    } else if (quality !== 1) applyQuality(1);
     render();
     if (moving) raf = requestAnimationFrame(frame);
     else {

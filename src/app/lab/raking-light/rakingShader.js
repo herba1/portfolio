@@ -51,7 +51,7 @@ float occlusion(int i, vec3 P, vec3 L) {
   float segLen = max(length(seg), 0.001);
   vec2 dir = seg / segLen;
   float unit = r.z / (uCell * 0.5);
-  float hMax = 22.0 * unit;
+  float hMax = 14.0 * unit;
   float rise = max(L.z - P.z, 0.001);
   vec2 oc = P.xy - r.xy;
   float reach = hMax * segLen / max(rise - hMax, rise * 0.15);
@@ -59,14 +59,15 @@ float occlusion(int i, vec3 P, vec3 L) {
   float res = 1.0;
   float steps = uSteps;
   float prevT = 0.0;
+  float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
   for (float k = 0.0; k < 24.0; k += 1.0) {
     if (k >= steps) break;
-    float h = hMax * (k + 0.5) / steps;
+    float h = hMax * (k + jitter) / steps;
     float t = min(h * segLen / max(rise - h, rise * 0.15), segLen);
     float above = P.z + h;
     float hf = heightOf(i, P.xy + dir * t, (t - prevT) / unit * 0.7);
     prevT = t;
-    float pen = hMax / steps * 1.2;
+    float pen = hMax / steps * 2.4 + t * uBulb * 0.5;
     res = min(res, 1.0 - smoothstep(0.0, pen, hf - above));
   }
   return res;
@@ -119,6 +120,7 @@ void main() {
     float c = cos(r.w);
     float s = sin(r.w);
     vec2 gs = vec2(c * g.x - s * g.y, s * g.x + c * g.y);
+    gs *= mix(1.0, 7.0, smoothstep(0.97, 0.99, mat.g) * (1.0 - mat.r));
     float gl = length(gs);
     if (gl > 2.5) gs *= 2.5 / gl;
     n = normalize(vec3(-gs, 1.0));
@@ -188,7 +190,8 @@ void main() {
       float e = mix(60.0, 1400.0, mat.g);
       float spec = pow(nh, e) * (e + 8.0) / 90.0;
       float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
-      col = base * sky * tiltAmb + (base * diff * 1.4 + vec3(spec) * (0.5 + fres)) * lit * lampCol;
+      float glaze = pow(nh, 48.0) * smoothstep(0.97, 0.99, mat.g) * 0.32;
+      col = base * sky * tiltAmb + (base * diff * 1.4 + vec3(spec + glaze) * (0.5 + fres)) * lit * lampCol;
     }
     col = mix(groundCol, col, smoothstep(0.0, 0.5, albedo.a));
   }

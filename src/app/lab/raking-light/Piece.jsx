@@ -82,7 +82,7 @@ export default function Piece({ embedded = false }) {
         className="raking-light-stage"
         tabIndex={0}
         role="application"
-        aria-label="Three album pieces on pale cotton: an Abbey Road enamel pin, an embroidered Revolver patch and a Sgt. Pepper drum badge, lit by one lamp held low. Move the pointer or the arrow keys to move the lamp; scroll, pinch or press plus and minus to raise and lower it."
+        aria-label="Three album badges on pale cotton, lit by one lamp held low: a Revolver enamel pin in gold line and white enamel, an embroidered Abbey Road patch with a merrowed edge, and a domed Sgt. Pepper button. Move the pointer or the arrow keys to move the lamp; scroll, pinch or press plus and minus to raise and lower it."
       >
         <canvas ref={canvasRef} className="raking-light-canvas" />
       </div>

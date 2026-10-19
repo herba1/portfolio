@@ -6,6 +6,14 @@
   --pb-cx: 75%;
   --pb-cy: 40%;
   --pb-ctrl: 76px;
+  --pb-pl: 16px;
+  --pb-pt: 96px;
+  --pb-pw: 400px;
+  --pb-ph: 600px;
+  --pb-body: rgb(30 28 26);
+  --pb-body-edge: rgb(255 255 255 / 0.08);
+  --pb-well: rgb(255 255 255 / 0.05);
+  --pb-on-body: rgb(242 238 231);
   --pb-ground: rgb(236 233 227);
   --pb-ink-secondary: rgb(74 69 64);
   --pb-line: rgb(60 52 44 / 0.12);
@@ -73,6 +81,22 @@
   opacity: 1;
 }
 
+.photo-booth-panel {
+  position: absolute;
+  left: var(--pb-pl);
+  top: var(--pb-pt);
+  z-index: 0;
+  width: var(--pb-pw);
+  height: var(--pb-ph);
+  border-radius: 28px;
+  background: var(--pb-body);
+  box-shadow:
+    inset 0 0 0 1px var(--pb-body-edge),
+    inset 0 1px 0 rgb(255 255 255 / 0.1),
+    0 2px 4px rgb(40 32 24 / 0.12),
+    0 32px 64px -24px rgb(40 32 24 / 0.45);
+}
+
 .photo-booth-plate {
   position: absolute;
   left: var(--pb-mx);
@@ -80,32 +104,33 @@
   z-index: 1;
   display: grid;
   place-items: center;
-  width: calc(var(--pb-w) + 48px);
-  height: 40px;
+  width: calc(var(--pb-w) + 32px);
+  height: 32px;
   border-radius: 12px;
   transform: translate(-50%, -24px);
-  background: rgb(250 249 246);
-  box-shadow: inset 0 0 0 1px var(--pb-line);
+  background: rgb(52 49 46);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.1), inset 0 0 0 1px rgb(0 0 0 / 0.4);
 }
 
 .photo-booth-slit {
   width: calc(var(--pb-w) + 12px);
   height: 8px;
-  margin-top: 8px;
+  margin-top: 16px;
   border-radius: 4px;
-  background: rgb(27 25 23);
+  background: rgb(6 6 6);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 0.08);
 }
 
 .photo-booth-tray {
   position: absolute;
-  left: 16px;
-  right: 16px;
-  top: calc(var(--pb-floor) - var(--pb-w) - 24px);
-  bottom: max(4px, calc(100% - var(--pb-floor) - 12px));
+  left: calc(var(--pb-pl) + 8px);
+  width: calc(var(--pb-pw) - 16px);
+  top: calc(var(--pb-floor) - var(--pb-w) - 20px);
+  height: calc(var(--pb-w) + 28px);
   z-index: 0;
-  border-radius: 16px;
-  background: rgb(60 52 44 / 0.05);
-  box-shadow: inset 0 0 0 1px rgb(60 52 44 / 0.06);
+  border-radius: 20px;
+  background: var(--pb-well);
+  box-shadow: inset 0 2px 8px rgb(0 0 0 / 0.45), inset 0 0 0 1px rgb(0 0 0 / 0.3), 0 1px 0 rgb(255 255 255 / 0.06);
 }
 
 .photo-booth-controls {
@@ -145,7 +170,7 @@
   width: 8px;
   height: 8px;
   border-radius: 9999px;
-  background: rgb(60 52 44 / 0.16);
+  background: rgb(255 255 255 / 0.18);
   transition: background-color 120ms var(--pb-ease), transform 160ms var(--pb-ease);
 }
 
@@ -163,8 +188,8 @@
   padding: 0;
   border: 0;
   border-radius: 9999px;
-  background: #fff;
-  box-shadow: inset 0 0 0 1px var(--pb-line), 0 8px 24px -12px rgb(60 52 44 / 0.35);
+  background: linear-gradient(180deg, rgb(250 248 244) 0%, rgb(226 222 215) 45%, rgb(196 191 183) 100%);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 0 0 1px rgb(0 0 0 / 0.5), 0 8px 20px -8px rgb(0 0 0 / 0.6);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
@@ -172,15 +197,16 @@
 .photo-booth-button-cap {
   display: grid;
   place-items: center;
-  width: 76%;
-  height: 76%;
+  width: 78%;
+  height: 78%;
   border-radius: 9999px;
-  background: rgb(27 25 23);
+  background: rgb(206 58 38);
+  box-shadow: inset 0 2px 4px rgb(255 255 255 / 0.25), inset 0 -3px 6px rgb(0 0 0 / 0.25);
   transition: transform 160ms var(--pb-ease), background-color 160ms var(--pb-ease);
 }
 
 .photo-booth-button-cap:has([data-lit]) {
-  background: var(--pb-hot);
+  background: rgb(244 92 58);
 }
 
 .photo-booth-button:active .photo-booth-button-cap {
@@ -214,15 +240,15 @@
   padding: 0 12px 0 4px;
   border: 0;
   border-radius: 9999px;
-  background: #fff;
-  color: var(--color-ink);
+  background: rgb(255 255 255 / 0.1);
+  color: var(--pb-on-body);
   font-family: inherit;
   font-size: var(--text-ui-sm);
   line-height: var(--text-ui-sm--line-height);
   letter-spacing: var(--text-ui-sm--letter-spacing);
   font-weight: var(--text-ui-sm--font-weight);
   white-space: nowrap;
-  box-shadow: inset 0 0 0 1px var(--pb-line);
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.08);
   cursor: pointer;
   transition: background-color 160ms var(--ease-hover), transform 120ms var(--ease-hover);
 }
@@ -238,7 +264,7 @@
 
 @media (hover: hover) and (pointer: fine) {
   .photo-booth-camera:hover {
-    background: rgb(250 249 246);
+    background: rgb(255 255 255 / 0.16);
   }
 }
 
@@ -248,14 +274,14 @@
   height: 24px;
   overflow: hidden;
   border-radius: 9999px;
-  background: rgb(60 52 44 / 0.08);
+  background: rgb(255 255 255 / 0.1);
 }
 
 .photo-booth-camera-icon {
   position: absolute;
   inset: 0;
   margin: auto;
-  color: var(--color-ink);
+  color: var(--pb-on-body);
 }
 
 .photo-booth-camera-video {
@@ -270,13 +296,10 @@
 }
 
 .photo-booth[data-camera="on"] .photo-booth-camera-icon {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  color: #fff;
+  opacity: 0;
 }
 
-.photo-booth-camera-video {
+.photo-booth[data-camera="on"] .photo-booth-camera-video {
   opacity: 1;
 }
 
@@ -386,14 +409,7 @@
   .photo-booth-pip,
   .photo-booth-button-cap,
   .photo-booth-camera,
-  .photo-booth-camera-icon {
-  position: absolute;
-  inset: 0;
-  margin: auto;
-  color: #fff;
-}
-
-.photo-booth-camera-video {
+  .photo-booth-camera-video {
     transition: none;
   }
 }

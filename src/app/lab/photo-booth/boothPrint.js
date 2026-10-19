@@ -187,7 +187,7 @@ function drawFrame(ctx, cache, source, pose, fx, fy, rand) {
   ctx.clip();
   ctx.fillStyle = `rgb(${PAPER.join(" ")})`;
   ctx.fillRect(fx, fy, fw, fh);
-  ctx.globalAlpha = 0.34;
+  ctx.globalAlpha = 0.62;
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(tone, fx, fy, fw, fh);
@@ -238,7 +238,7 @@ function drawFrame(ctx, cache, source, pose, fx, fy, rand) {
         errs[at(r + 1, c + 1)] += diff * (1 / 16);
       }
       if (g.char === " ") continue;
-      const a = (0.5 + 0.5 * Math.min(1, mean * 1.7)) * (0.86 + rand() * 0.14);
+      const a = (0.72 + 0.28 * Math.min(1, mean * 1.7)) * (0.9 + rand() * 0.1);
       ctx.fillStyle = `rgba(${INK.join(",")},${a.toFixed(3)})`;
       ctx.fillText(g.char, fx + (c + 0.5) * cellW, fy + (r + 0.5) * cellH + cache.size * 0.04);
     }

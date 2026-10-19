@@ -184,7 +184,8 @@ vec3 sharpAt(vec2 p, float lod) {
 }
 vec3 hazeOf(vec3 c, vec4 fog) {
   float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
-  vec3 milky = mix(c, vec3(l), 0.36) * (1.0 - fog.a * 0.22) + fog.rgb * fog.a;
+  vec3 milky = mix(c, vec3(l), 0.5);
+  milky = mix(milky, fog.rgb, fog.a);
   return clamp(milky, 0.0, 1.0);
 }
 vec3 hazeAt(vec2 p) {

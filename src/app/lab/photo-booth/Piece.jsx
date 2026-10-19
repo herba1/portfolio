@@ -151,6 +151,7 @@ export default function Piece({ embedded = false }) {
       data-camera={camera}
     >
       <div ref={stageRef} className="photo-booth-stage" tabIndex={0} role="application" aria-label={STAGE_LABEL} onKeyDown={onStageKey}>
+        <div className="photo-booth-panel" aria-hidden="true" />
         <div className="photo-booth-plate" aria-hidden="true">
           <span className="photo-booth-slit" />
         </div>

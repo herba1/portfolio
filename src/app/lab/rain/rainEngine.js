@@ -377,7 +377,7 @@ export default class RainEngine {
   }
 
   wipeRadius() {
-    return Math.min(46, Math.max(24, Math.min(this.width, this.height) * 0.045));
+    return Math.min(60, Math.max(28, Math.min(this.width, this.height) * 0.06));
   }
 
   pushSegment(x0, y0, x1, y1, radius, strength, wipeness) {

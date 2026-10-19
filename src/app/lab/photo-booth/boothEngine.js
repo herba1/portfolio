@@ -14,12 +14,12 @@ const BEND = 0.45;
 const SPANS = [1, 3, 7];
 const MAX_STRIPS = 7;
 const DRY_S = 7.5;
-const COUNT_AT = [0, 0.7, 1.4];
-const FLASH_AT = [2.1, 2.95, 3.8, 4.65];
-const BUILD_AT = 5.15;
-const CUT_AT = 5.3;
-const FEED_AT = 5.75;
-const FEED_S = 2.6;
+const COUNT_AT = [0, 0.6, 1.2];
+const FLASH_AT = [1.8, 2.45, 3.1, 3.75];
+const BUILD_AT = 4.15;
+const CUT_AT = 4.25;
+const FEED_AT = 4.6;
+const FEED_S = 2.4;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -57,7 +57,7 @@ function cropFace(img, face) {
 
 function facePoses(rand, order = [0, 1, 2, 3]) {
   const j = (s) => (rand() - 0.5) * s;
-  return order.map((k) => ({ zoom: 1.05 + j(0.04), cx: 0.5 + j(0.02), cy: 0.5 + j(0.02), rot: j(0.05), exposure: FACES[k].exposure, contrast: 1.35 }));
+  return order.map((k) => ({ zoom: 1.05 + j(0.04), cx: 0.5 + j(0.02), cy: 0.5 + j(0.02), rot: j(0.05), exposure: FACES[k].exposure, contrast: 1.55 }));
 }
 
 function stampFor(date) {
@@ -162,24 +162,39 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     const pad = insets();
     const wide = !embedded && view.width >= 900;
-    const floorY = view.height - (embedded ? 12 : wide ? 48 : 16);
-    const my = embedded ? Math.max(30, view.height * 0.075) : Math.max(wide ? 116 : 96, pad.top + 28);
-    let W = (floorY - my - 48) / (STRIP_LEN + 1);
-    W = Math.min(W, ((view.width - 28) / STRIP_LEN) * 0.98);
+    const topLimit = embedded ? 12 : wide ? Math.max(84, pad.top - 8) : pad.top;
+    const bottomLimit = view.height - (embedded ? 12 : wide ? 40 : 16);
+    const slotH = embedded ? 40 : 56;
+    const lip = 16;
+    const side = wide ? 32 : embedded ? 16 : 28;
+    const gapBelow = 44;
+    let W = (bottomLimit - topLimit - slotH - gapBelow - lip) / (STRIP_LEN + 1);
+    W = Math.min(W, (Math.min(view.width - 32, 880) - side * 2) / STRIP_LEN);
     W = Math.max(36, W);
     const len = W * STRIP_LEN;
-    const mx = wide ? Math.round(view.width * 0.47) : Math.round(view.width * (view.width < 640 ? 0.4 : 0.44));
-    const ctrlX = wide ? mx + Math.max(190, W * 1.7) : Math.min(view.width - 52, mx + W / 2 + (view.width - mx - W / 2) / 2 + 6);
-    const ctrlY = my + Math.min(len * 0.42, (floorY - W - 30 - my) * 0.6);
-    Object.assign(lay, { mx, my, W, len, perf: W * STRIP.stub, floorY, wallL: 6, wallR: view.width - 6 });
+    const panelW = Math.round(Math.min(view.width - 32, len + side * 2 + (wide ? W * 0.4 : 0)));
+    const panelH = Math.round(slotH + len + gapBelow + W + lip);
+    const extra = Math.max(0, bottomLimit - topLimit - panelH);
+    const panelT = Math.round(topLimit + extra * 0.5);
+    const panelL = Math.round((view.width - panelW) / 2);
+    const my = panelT + slotH;
+    const floorY = my + len + gapBelow + W;
+    const mx = Math.round(panelL + side + W / 2 + (wide ? W * 0.2 : 0));
+    const ctrlX = (mx + W / 2 + panelL + panelW - side * 0.5) / 2;
+    const ctrlY = my + len * 0.46;
+    Object.assign(lay, { mx, my, W, len, perf: W * STRIP.stub, floorY, wallL: panelL + 8, wallR: panelL + panelW - 8 });
     const css = root.style;
     css.setProperty("--pb-mx", `${mx}px`);
     css.setProperty("--pb-my", `${my}px`);
     css.setProperty("--pb-w", `${W}px`);
     css.setProperty("--pb-floor", `${floorY}px`);
+    css.setProperty("--pb-pl", `${panelL}px`);
+    css.setProperty("--pb-pt", `${panelT}px`);
+    css.setProperty("--pb-pw", `${panelW}px`);
+    css.setProperty("--pb-ph", `${panelH}px`);
     css.setProperty("--pb-cx", `${Math.round(ctrlX)}px`);
     css.setProperty("--pb-cy", `${Math.round(ctrlY)}px`);
-    css.setProperty("--pb-ctrl", `${clamp(W * 0.62, 52, 84)}px`);
+    css.setProperty("--pb-ctrl", `${Math.round(clamp(W * 0.8, 60, 96))}px`);
     if (gl) gl.resize(Math.round(view.width * view.dpr), Math.round(view.height * view.dpr), view.width, view.height);
   }
 
@@ -195,8 +210,8 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
         let cx = 0;
         for (let i = 0; i <= SEGS; i += 1) cx += strip.x[i];
         cx = (cx / (SEGS + 1)) * (view.width / Math.max(1, oldWidth));
-        cx = clamp(cx, lay.len / 2 + 8, view.width - lay.len / 2 - 8);
-        if (lay.len + 16 > view.width) cx = view.width / 2;
+        cx = clamp(cx, lay.wallL + lay.len / 2 + 4, lay.wallR - lay.len / 2 - 4);
+        if (lay.len + 8 > lay.wallR - lay.wallL) cx = (lay.wallL + lay.wallR) / 2;
         strip.tilt = 0;
         placeLying(strip, cx);
         pileIndex += 1;
@@ -899,9 +914,7 @@ export function createBoothEngine({ root, stage, canvas, flash, lamp, pips, inse
       old.tornTop = true;
       old.depth = 2;
       old.tilt = 0;
-      const right = lay.mx + lay.W / 2 + 24 + lay.len / 2;
-      const cx = right + lay.len / 2 + 12 <= view.width ? right : view.width / 2;
-      placeLying(old, cx);
+      placeLying(old, (lay.wallL + lay.wallR) / 2);
       strips.push(old);
       const tex = gl.texture(printStrip({ mono, frames: facePoses(rand).map((pose, i) => ({ source: cast[i], pose })), seed: 21, stamp: stampFor(new Date()) }));
       const hang = makeStrip(tex, 21.5, 0);
