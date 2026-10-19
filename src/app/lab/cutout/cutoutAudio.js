@@ -106,6 +106,13 @@ export function createPaperAudio() {
       burst({ at: 0.052, freq: 7100, q: 7, peak: 0.12, attack: 0.001, decay: 0.022, pan });
       burst({ at: 0.06, freq: 1200, q: 1.5, peak: 0.12, attack: 0.002, decay: 0.03, pan });
     },
+    sheet(pan) {
+      if (!live()) return;
+      burst({ type: "bandpass", freq: 3400, q: 0.5, peak: 0.12, attack: 0.07, decay: 0.16, pan: pan - 0.2, rate: 0.9 });
+      burst({ at: 0.05, type: "highpass", freq: 6000, q: 0.6, peak: 0.05, attack: 0.04, decay: 0.1, pan: pan + 0.2 });
+      burst({ at: 0.2, type: "lowpass", freq: 700, q: 0.8, peak: 0.3, attack: 0.003, decay: 0.08, pan, rate: 0.7 });
+      burst({ at: 0.2, freq: 180, q: 2, peak: 0.18, attack: 0.003, decay: 0.09, pan });
+    },
     key(pan) {
       if (!live()) return;
       const now = ctx.currentTime;

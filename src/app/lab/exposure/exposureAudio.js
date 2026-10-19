@@ -29,8 +29,8 @@ export function createExposureAudio() {
     }
   };
 
-  const hit = (freq, q, peak, len, offset, type = "bandpass") => {
-    const now = ctx.currentTime;
+  const hit = (freq, q, peak, len, offset, type = "bandpass", delay = 0) => {
+    const now = ctx.currentTime + delay;
     const src = ctx.createBufferSource();
     src.buffer = noise;
     const f = ctx.createBiquadFilter();
@@ -74,6 +74,13 @@ export function createExposureAudio() {
       hit(4200 + voice * 60 + (major ? -600 : 0), 2.4, 0.2 * level, 0.012, offset);
       hit(major ? 1500 : 1900 + voice * 15, 4, (major ? 0.16 : 0.1) * level, major ? 0.03 : 0.02, offset + 0.05);
       if (stop) hit(320, 1.2, 0.22, 0.06, offset + 0.1, "lowpass");
+    },
+    shutter() {
+      if (!enabled || !ctx || ctx.state !== "running") return;
+      hit(3000, 1.6, 0.24, 0.016, 0.02);
+      hit(700, 1.4, 0.2, 0.04, 0.08, "lowpass");
+      hit(2200, 2.2, 0.16, 0.022, 0.15, "bandpass", 0.085);
+      hit(420, 1.2, 0.18, 0.05, 0.2, "lowpass", 0.09);
     },
     destroy() {
       enabled = false;

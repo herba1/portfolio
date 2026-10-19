@@ -2,9 +2,20 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import photo from "./beams.jpg";
+import beams from "./beams.jpg";
+import sign from "./sign.jpg";
+import thumbBeams from "./thumb-beams.jpg";
+import thumbSign from "./thumb-sign.jpg";
+import thumbTimesSquare from "./thumb-times-square.jpg";
+import timesSquare from "./times-square.jpg";
 import { START_EV, formatEv, spokenEv } from "./exposureEngine";
 import "./exposure.css";
+
+const PHOTOS = [
+  { id: "times-square", label: "Times Square", src: timesSquare.src, thumb: thumbTimesSquare.src, focus: [0.5, 0.56], caption: "it will take a while to feel like this again" },
+  { id: "sign", label: "Under the signs", src: sign.src, thumb: thumbSign.src, focus: [0.5, 0.52], caption: "i keep your voice on the walk home" },
+  { id: "beams", label: "Lights in the fog", src: beams.src, thumb: thumbBeams.src, focus: [0.5, 0.57], caption: "you don't have to be anyone tonight" },
+];
 
 const KNURL = Array.from({ length: 96 }, (_, i) => (i * 360) / 96);
 const TICKS = Array.from({ length: 19 }, (_, i) => i - 9);
@@ -73,6 +84,7 @@ export default function Piece({ embedded = false }) {
   const [ready, setReady] = useState(false);
   const [sound, setSound] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [photo, setPhoto] = useState(0);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -89,7 +101,7 @@ export default function Piece({ embedded = false }) {
         rotor: rotorRef.current,
         readout: readoutRef.current,
         embedded,
-        imageSrc: photo.src,
+        photos: PHOTOS,
         onReady: () => setReady(true),
         onFail: () => setFailed(true),
       });
@@ -121,6 +133,11 @@ export default function Piece({ embedded = false }) {
     if (result !== next) setSound(result);
   };
 
+  const pick = (i) => {
+    setPhoto(i);
+    engineRef.current?.choose(i);
+  };
+
   const Root = embedded ? "div" : "main";
 
   return (
@@ -133,6 +150,22 @@ export default function Piece({ embedded = false }) {
             <div className="exposure-caption-text">
               <h1 className="exposure-title">Exposure</h1>
               <p className="exposure-hint">Turn the dial to blow the night out or crush it down to the streetlights.</p>
+              <div className="exposure-photos" role="radiogroup" aria-label="Photo">
+                {PHOTOS.map((p, i) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={photo === i}
+                    aria-label={p.label}
+                    title={p.label}
+                    className="exposure-photo"
+                    onClick={() => pick(i)}
+                  >
+                    <img src={p.thumb} alt="" width="64" height="48" draggable="false" />
+                  </button>
+                ))}
+              </div>
             </div>
             <button type="button" className="exposure-button" aria-pressed={sound} onClick={toggleSound}>
               <SpeakerIcon on={sound} />

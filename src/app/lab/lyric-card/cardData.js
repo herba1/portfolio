@@ -1,43 +1,30 @@
-import beach from "./beach.jpg";
 import beams from "./beams.jpg";
+import dusk from "./dusk.jpg";
+import glow from "./glow.jpg";
 import sea from "./sea.jpg";
-import timesSquare from "./times-square.jpg";
-import wires from "./wires.jpg";
 
-export const SONG = { title: "friday", artist: "herb", note: "Written over herb’s friday beat" };
+export const SONG = { title: "friday", artist: "herb" };
 
-export const LYRICS = [
-  "we can stay out till the streetlights go soft",
-  "nobody’s waiting up for us tonight",
-  "i keep your voice on the walk home",
-  "the city hums like it knows our names",
-  "you don’t have to be anyone tonight",
-  "it will take a while to feel like this again",
-  "so leave the window open",
-  "let the cold come in",
-  "nothing good comes easy",
-  "but it comes",
-  "the whole point is not knowing",
-  "and going anyway",
-  "still here?",
-  "still here.",
-  "how are you, really",
-  "we’ll be fine by morning",
+export const PHOTOS = {
+  beams: { src: beams.src, focus: [0.42, 0.5], grade: { lift: 0.035, sat: 0.86, expo: 0.8, gamma: 1.28, tint: [1.03, 1, 0.94] }, threshold: 0.58, bloom: 0.5 },
+  dusk: { src: dusk.src, focus: [0.5, 0.42], grade: { lift: 0.03, sat: 0.92, expo: 0.86, gamma: 1.3, tint: [1.04, 0.98, 0.94] }, threshold: 0.62, bloom: 0.42 },
+  sea: { src: sea.src, focus: [0.4, 0.5], grade: { lift: 0.03, sat: 0.62, expo: 0.62, gamma: 1.55, tint: [0.78, 0.9, 1.12] }, threshold: 0.7, bloom: 0.32 },
+  glow: { src: glow.src, focus: [0.5, 0.5], grade: { lift: 0.02, sat: 0.9, expo: 0.72, gamma: 1.5, tint: [1, 0.96, 1.02] }, threshold: 0.66, bloom: 0.38 },
+};
+
+export const VERSES = [
+  { lines: ["you don’t have to be", "anyone tonight"], photo: "beams", y: 0.3 },
+  { lines: ["nothing good comes easy", "but it comes"], photo: "dusk", y: 0.36 },
+  { lines: ["i keep your voice", "on the walk home"], photo: "sea", y: 0.38 },
+  { lines: ["the whole point is not knowing", "and going anyway"], photo: "glow", y: 0.46 },
+  { lines: ["we can stay out till", "the streetlights go soft"], photo: "beams", y: 0.3 },
+  { lines: ["it will take a while", "to feel like this again"], photo: "dusk", y: 0.36 },
+  { lines: ["so leave the window open", "let the cold come in"], photo: "sea", y: 0.38 },
+  { lines: ["still here?"], photo: "glow", y: 0.46 },
 ];
 
-export const PHOTOS = [
-  { id: "times-square", label: "Times Square at night", src: timesSquare.src, focus: [0.46, 0.56], night: true, textY: 0.2 },
-  { id: "beams", label: "Light beams through fog", src: beams.src, focus: [0.42, 0.5], night: true, textY: 0.34 },
-  { id: "wires", label: "Power lines at dusk", src: wires.src, focus: [0.5, 0.5], night: true, textY: 0.5 },
-  { id: "sea", label: "The sea from the wall", src: sea.src, focus: [0.62, 0.5], night: false, textY: 0.3 },
-  { id: "beach", label: "On the beach with a fish", src: beach.src, focus: [0.5, 0.42], night: false, textY: 0.62 },
-];
-
-export const LAYOUTS = [
+export const STYLES = [
   { id: "block", label: "Block" },
+  { id: "serif", label: "Serif" },
   { id: "caption", label: "Caption" },
-  { id: "build", label: "Build" },
-  { id: "big", label: "Big" },
 ];
-
-export const MAX_LINES = 4;

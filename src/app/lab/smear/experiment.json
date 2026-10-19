@@ -1,11 +1,18 @@
 {
   "title": "Smear",
-  "description": "A twenty-line poem in small white Arial on black arrives line by line, each word sliding in with a stutter of repeated copies trailing behind it. Drag across it and the words under your hand smear the way you pulled; hold to scatter the whole block and let go to watch it set again line by line.",
-  "tags": ["Type", "Motion", "Lyrics"],
+  "description": "A twenty-line poem in small white Arial on black that keeps re-setting itself: every few seconds a wave runs down the block and each word slides between a tight setting and wide justified gaps, leaving a soft photographic streak with a faint colour fringe and a stutter of copies. Drag across it to smear words by hand, or hold to scatter the block and let it set again.",
+  "tags": [
+    "Type",
+    "Motion",
+    "Lyrics"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "The lyric-edit motion smear as a material you can touch: every word keeps its own short history, and the trail is that history drawn back as discrete copies.",
-  "tile": { "cols": 4, "rows": 4 },
+  "intent": "The lyric-edit motion smear as a living material: one block that breathes between two settings on its own, with sub-frame motion blur and chromatic softness on everything that moves.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage",
     "https://en.wikipedia.org/wiki/Smear_frame",

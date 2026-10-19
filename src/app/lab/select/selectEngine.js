@@ -3,6 +3,11 @@ import { createAudio } from "./selectAudio";
 const FAMILY = '"Select Arimo", Arimo, Arial, "Helvetica Neue", sans-serif';
 const TEXT = "hello there. it will take a while to feel like this again, so i keep your voice on the walk home and let the streetlights go soft. still here?";
 const ANGLES = [4.2, -5.4, 3.6, -4.4, 5.2, -3.2];
+const TILT_X = [-12, 10, -11, 11, -9, 10];
+const TILT_Y = [6, -7, 5, -6, 7, -5];
+const LIFT_Z = [56, 44, 62, 48, 54, 46];
+const DEPTH = 760;
+const SINK = 18;
 const DEG = Math.PI / 180;
 
 const WORDS = {
@@ -49,10 +54,11 @@ export function createSelect(root, refs, { onCopy } = {}) {
   const audio = createAudio();
   const meter = document.createElement("canvas").getContext("2d");
 
+  const shadowLayer = el("div", "select-shadows", stage);
   const barLayer = el("div", "select-bars", stage);
+  const flyLayer = el("div", "select-fly", stage);
   const textLayer = el("div", "select-text", stage);
   textLayer.setAttribute("aria-hidden", "true");
-  const flyLayer = el("div", "select-fly", stage);
   const startHandle = el("div", "select-handle", stage);
   startHandle.dataset.side = "start";
   el("span", "select-handle-knob", startHandle);
@@ -117,7 +123,11 @@ export function createSelect(root, refs, { onCopy } = {}) {
   let pulseTimer = 0;
   let chipTimer = 0;
   let menuTimer = 0;
+  let flyTimer = 0;
   let tipPos = { x: 0, y: 0, ready: false };
+  let shifts = [];
+  let origin = { x: 0, y: 0 };
+  let shadows = [];
 
   const font = (size) => `400 ${size}px ${FAMILY}`;
 
@@ -142,7 +152,9 @@ export function createSelect(root, refs, { onCopy } = {}) {
         vy: 0,
         vr: 0,
         vk: 0,
-        k: 150 + hash(i * 9 + 2) * 70,
+        wl: 0,
+        vwl: 0,
+        g3: null,
         rest: true,
       };
     });
@@ -214,18 +226,51 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const selLines = () => (sel ? [words[sel.a].line, words[sel.b].line] : null);
 
-  const lineShift = (li) => {
-    const range = selLines();
-    if (!range) return 0;
-    const [la, lb] = range;
-    const n = lb - la + 1;
-    const total = L * LH * (0.62 * (n - 1) + 1.2);
-    let s = 0;
-    if (li > la && li <= lb) s = (li - la) * L * LH * 0.62;
-    else if (li > lb) s = total;
-    return s - total * 0.5;
+  const depthScale = () => Math.max(0.45, Math.min(1, (W - 280) / 700));
+
+  const baseAngle = (j, width) => ANGLES[j % ANGLES.length] * Math.min(1.2, Math.max(0.4, (LH * 6) / Math.max(1, width)));
+
+  const restSpan = (li, la, lb) => {
+    const line = lines[li];
+    const x0 = (li === la ? words[sel.a].x : line.left) - 2;
+    const x1 = (li === lb ? words[sel.b].x + words[sel.b].w : line.right) + 2;
+    return [x0, x1];
   };
 
+  const computeShifts = () => {
+    shifts = lines.map(() => 0);
+    const range = selLines();
+    if (!range || L <= 0.0001) return;
+    const [la, lb] = range;
+    const gaps = [];
+    for (let li = la; li < lb; li += 1) {
+      const [a0, a1] = restSpan(li, la, lb);
+      const [b0, b1] = restSpan(li + 1, la, lb);
+      const ra = Math.abs(Math.sin(baseAngle(li - la, a1 - a0) * DEG)) * (a1 - a0) * 0.5;
+      const rb = Math.abs(Math.sin(baseAngle(li + 1 - la, b1 - b0) * DEG)) * (b1 - b0) * 0.5;
+      gaps.push(L * (ra + rb + LH * 0.55));
+    }
+    const [f0, f1] = restSpan(la, la, lb);
+    const [e0, e1] = restSpan(lb, la, lb);
+    const tiltA = Math.abs(Math.sin(baseAngle(0, f1 - f0) * DEG)) * (f1 - f0) * 0.5;
+    const tiltB = Math.abs(Math.sin(baseAngle(lb - la, e1 - e0) * DEG)) * (e1 - e0) * 0.5;
+    const lead = L * (LH * 0.62 + Math.max(tiltA, tiltB));
+    const total = lead * 2 + gaps.reduce((s0, g) => s0 + g, 0);
+    let acc = 0;
+    lines.forEach((_, li) => {
+      if (li < la) shifts[li] = 0;
+      else if (li === la) {
+        acc = lead;
+        shifts[li] = acc;
+      } else if (li <= lb) {
+        acc += gaps[li - la - 1];
+        shifts[li] = acc;
+      } else shifts[li] = total;
+      shifts[li] -= total * 0.5;
+    });
+  };
+
+  const lineShift = (li) => shifts[li] || 0;
   const ensureBars = (n) => {
     while (bars.length < n) {
       const node = el("div", "select-bar", barLayer);
@@ -237,27 +282,34 @@ export function createSelect(root, refs, { onCopy } = {}) {
   };
 
   const geometry = () => {
+    computeShifts();
     if (!sel) return [];
     const [la, lb] = selLines();
     const out = [];
     for (let li = la; li <= lb; li += 1) {
       const j = li - la;
-      const line = lines[li];
-      const x0 = (li === la ? words[sel.a].x : line.left) - 2;
-      const x1 = (li === lb ? words[sel.b].x + words[sel.b].w : line.right) + 2;
-      const top = line.top + lineShift(li);
-      const ang = ANGLES[j % ANGLES.length] * Math.min(1.3, Math.max(0.45, (LH * 7) / Math.max(1, x1 - x0)));
+      const [x0, x1] = restSpan(li, la, lb);
+      const width = x1 - x0;
+      const top = lines[li].top + lineShift(li);
+      const ang = baseAngle(j, width);
+      const grow = 1 + 0.08 * L;
       out.push({
         li,
         j,
         x0,
-        width: x1 - x0,
+        width: width * grow,
+        rest: width,
         top,
-        cx0: x0 + (x1 - x0) / 2,
-        cx: x0 + (x1 - x0) / 2 + L * (j % 2 ? -1 : 1) * F * 0.3,
+        restTop: lines[li].top,
+        cx0: x0 + width / 2,
+        cx: x0 + width / 2 + L * Math.sign(ang) * LH * 0.32,
         cy: top + LH / 2,
         ang,
         theta: L * ang * DEG,
+        grow,
+        ax: TILT_X[j % TILT_X.length] * depthScale(),
+        ay: TILT_Y[j % TILT_Y.length] * depthScale(),
+        z: LIFT_Z[j % LIFT_Z.length] * depthScale(),
       });
     }
     return out;
@@ -265,39 +317,59 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const targets = (geo) => {
     const map = new Map(geo.map((g) => [g.li, g]));
-    const count = sel ? sel.b - sel.a + 1 : 0;
     for (const w of words) {
       const g = sel && w.i >= sel.a && w.i <= sel.b ? map.get(w.line) : null;
+      w.twl = g ? 1 : 0;
       if (!g) {
         w.tx = w.x;
-        w.ty = lines[w.line].top + lineShift(w.line);
+        const range = sel ? selLines() : null;
+        let shift = lineShift(w.line);
+        if (range && w.line === range[0] && w.i < sel.a) {
+          shift = lineShift(w.line);
+          const first = map.get(range[0]);
+          if (first && L > 0.001) {
+            const edgeX = Math.min(...[-1, 1].map((sy) => project(first, first.cx - Math.cos(first.theta) * (first.width / 2) - Math.sin(first.theta) * sy * (LH / 2), first.cy - Math.sin(first.theta) * (first.width / 2) + Math.cos(first.theta) * sy * (LH / 2)).x));
+            const restEdge = words[sel.a].x - 2;
+            w.tx = Math.max(8, w.x - Math.max(0, restEdge - edgeX + space * 0.4 * L));
+          }
+        }
+        if (range && w.line === range[1] && w.i > sel.b) {
+          shift = lineShift(w.line);
+          const lastG = map.get(range[1]);
+          if (lastG && L > 0.001) {
+            const edgeX = Math.max(...[-1, 1].map((sy) => project(lastG, lastG.cx + Math.cos(lastG.theta) * (lastG.width / 2) - Math.sin(lastG.theta) * sy * (LH / 2), lastG.cy + Math.sin(lastG.theta) * (lastG.width / 2) + Math.cos(lastG.theta) * sy * (LH / 2)).x));
+            const restEdge = words[sel.b].x + words[sel.b].w + 2;
+            w.tx = Math.min(W - w.w - 8, w.x + Math.max(0, edgeX - restEdge + space * 0.4 * L));
+          }
+        }
+        w.ty = lines[w.line].top + shift;
         w.tr = 0;
         w.tk = 0;
         continue;
       }
-      const s = Math.sign(g.ang);
-      const u = w.x + w.w / 2 - g.cx0;
-      let u2 = u + L * s * LH * (0.12 + 0.6 * w.h[0]);
-      const maxU = g.width / 2 - w.w / 2 + LH * 0.5;
-      u2 = Math.max(-maxU, Math.min(maxU, u2));
-      const falls = count > 2 && w.h[1] < 0.32 && w.i !== sel.a;
-      const v2 = falls ? L * LH * (0.78 + 0.42 * w.h[2]) : L * LH * 0.08 * w.h[2];
+      w.g3 = { cx: g.cx, cy: g.cy, ax: g.ax, ay: g.ay, z: g.z };
+      const u = (w.x + w.w / 2 - g.cx0) * g.grow;
       const c = Math.cos(g.theta);
       const sn = Math.sin(g.theta);
-      const rx = u2 * c - v2 * sn;
-      const ry = u2 * sn + v2 * c;
-      w.tx = Math.max(12, Math.min(W - w.w - 12, g.cx + rx - w.w / 2));
-      w.ty = g.cy + ry - LH / 2;
-      w.tr = L * (g.ang + (w.h[3] - 0.5) * 7 + (falls ? s * 6 : 0));
-      w.tk = -12 * L;
+      w.tx = g.cx + u * c - w.w / 2;
+      w.ty = g.cy + u * sn - LH / 2;
+      w.tr = L * (g.ang + (w.h[3] - 0.5) * 2.4);
+      w.tk = -11 * L;
     }
   };
 
   const springWords = (dt) => {
     let moving = false;
     for (const w of words) {
-      const k = w.k;
-      const c = 2 * Math.sqrt(k) * 0.86;
+      const k = 190;
+      const c = 2 * Math.sqrt(k) * 0.92;
+      w.vwl += ((w.twl - w.wl) * 240 - w.vwl * 2 * Math.sqrt(240)) * dt;
+      w.wl += w.vwl * dt;
+      if (Math.abs(w.twl - w.wl) > 0.001 || Math.abs(w.vwl) > 0.01) moving = true;
+      else {
+        w.wl = w.twl;
+        w.vwl = 0;
+      }
       w.vx += ((w.tx - w.px) * k - w.vx * c) * dt;
       w.vy += ((w.ty - w.py) * k - w.vy * c) * dt;
       w.vr += ((w.tr - w.pr) * k - w.vr * c) * dt;
@@ -332,10 +404,44 @@ export function createSelect(root, refs, { onCopy } = {}) {
       w.vy = 0;
       w.vr = 0;
       w.vk = 0;
+      w.wl = w.twl ?? 0;
+      w.vwl = 0;
     }
   };
 
-  const wordTransform = (w) => `translate3d(${w.px.toFixed(2)}px, ${w.py.toFixed(2)}px, 0) rotate(${w.pr.toFixed(3)}deg) skewX(${w.pk.toFixed(3)}deg)`;
+  const lift3d = (g, amount, sink = 0) => {
+    if (!g || amount < 0.0005) return sink ? `translateZ(${(-sink).toFixed(2)}px) ` : "";
+    return `translate3d(${g.cx.toFixed(2)}px, ${g.cy.toFixed(2)}px, 0) rotateX(${(g.ax * amount).toFixed(3)}deg) rotateY(${(g.ay * amount).toFixed(3)}deg) translateZ(${(g.z * amount - sink).toFixed(2)}px) translate3d(${(-g.cx).toFixed(2)}px, ${(-g.cy).toFixed(2)}px, 0) `;
+  };
+
+  const flatTransform = (w) =>
+    `translate3d(${(w.px + w.w / 2).toFixed(2)}px, ${(w.py + LH / 2).toFixed(2)}px, 0) rotate(${w.pr.toFixed(3)}deg) skewX(${w.pk.toFixed(3)}deg) translate(${(-w.w / 2).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+
+  const wordTransform = (w) => {
+    const amount = L * w.wl;
+    return lift3d(w.g3, amount, SINK * L * (1 - w.wl)) + flatTransform(w);
+  };
+
+  const project = (g, px, py) => {
+    const a = L;
+    let vx = px - g.cx;
+    let vy = py - g.cy;
+    let vz = g.z * a;
+    const ry = g.ay * a * DEG;
+    const rx = g.ax * a * DEG;
+    const x1 = vx * Math.cos(ry) + vz * Math.sin(ry);
+    const z1 = -vx * Math.sin(ry) + vz * Math.cos(ry);
+    vx = x1;
+    vz = z1;
+    const y2 = vy * Math.cos(rx) - vz * Math.sin(rx);
+    const z2 = vy * Math.sin(rx) + vz * Math.cos(rx);
+    vy = y2;
+    vz = z2;
+    const wx = g.cx + vx;
+    const wy = g.cy + vy;
+    const f = DEPTH / Math.max(1, DEPTH - vz);
+    return { x: origin.x + (wx - origin.x) * f, y: origin.y + (wy - origin.y) * f };
+  };
 
   const placeTip = (geo) => {
     if (!geo.length || mode === "hidden") {
@@ -343,8 +449,9 @@ export function createSelect(root, refs, { onCopy } = {}) {
       return false;
     }
     const g = geo[0];
-    const ax = g.cx + Math.sin(g.theta) * (LH / 2);
-    const ay = g.cy - Math.cos(g.theta) * (LH / 2);
+    const top = project(g, g.cx + Math.sin(g.theta) * (LH / 2), g.cy - Math.cos(g.theta) * (LH / 2));
+    const ax = top.x;
+    const ay = top.y;
     const size = tipSize[mode] || tipSize.hello;
     const half = size[0] / 2 + 12;
     const x = Math.max(half + 8, Math.min(W - half - 8, ax));
@@ -368,9 +475,20 @@ export function createSelect(root, refs, { onCopy } = {}) {
     tip.dataset.mode = mode;
   };
 
+  const ensureShadows = (n) => {
+    while (shadows.length < n) {
+      const node = el("div", "select-shadow", shadowLayer);
+      shadows.push({ node, w: -1 });
+    }
+    shadows.forEach((sh, i) => {
+      sh.node.style.display = i < n ? "block" : "none";
+    });
+  };
+
   const render = () => {
     const geo = geometry();
     ensureBars(geo.length);
+    ensureShadows(geo.length);
     geo.forEach((g, i) => {
       const bar = bars[i];
       if (Math.abs(bar.w - g.width) > 0.2) {
@@ -378,14 +496,22 @@ export function createSelect(root, refs, { onCopy } = {}) {
         bar.node.style.width = `${g.width.toFixed(1)}px`;
         bar.node.style.height = `${LH}px`;
       }
-      bar.node.style.transform = `translate3d(${(g.cx - g.width / 2).toFixed(2)}px, ${g.top.toFixed(2)}px, 0) rotate(${(g.theta / DEG).toFixed(3)}deg)`;
+      bar.node.style.transform = `${lift3d(g, L)}translate3d(${g.cx.toFixed(2)}px, ${g.cy.toFixed(2)}px, 0) rotate(${(g.theta / DEG).toFixed(3)}deg) translate(${(-g.width / 2).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      const sh = shadows[i];
+      if (Math.abs(sh.w - g.width) > 0.2) {
+        sh.w = g.width;
+        sh.node.style.width = `${g.width.toFixed(1)}px`;
+        sh.node.style.height = `${LH}px`;
+      }
+      sh.node.style.transform = `translate3d(${(g.cx - g.width / 2 + L * g.ay * 0.9).toFixed(2)}px, ${(g.top + L * (10 + g.z * 0.22)).toFixed(2)}px, 0) rotate(${((g.theta / DEG) * 0.5).toFixed(3)}deg) scale(${(1 - L * 0.04).toFixed(4)}, ${(1 - L * 0.18).toFixed(4)})`;
+      sh.node.style.opacity = (Math.min(1, L) * 0.5).toFixed(3);
     });
     for (const w of words) w.node.style.transform = wordTransform(w);
     if (geo.length) {
       const first = geo[0];
       const lastG = geo[geo.length - 1];
-      startHandle.style.transform = `translate3d(${first.cx.toFixed(2)}px, ${first.cy.toFixed(2)}px, 0) rotate(${(first.theta / DEG).toFixed(3)}deg) translate(${(-first.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
-      endHandle.style.transform = `translate3d(${lastG.cx.toFixed(2)}px, ${lastG.cy.toFixed(2)}px, 0) rotate(${(lastG.theta / DEG).toFixed(3)}deg) translate(${(lastG.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      startHandle.style.transform = `${lift3d(first, L)}translate3d(${first.cx.toFixed(2)}px, ${first.cy.toFixed(2)}px, 0) rotate(${(first.theta / DEG).toFixed(3)}deg) translate(${(-first.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      endHandle.style.transform = `${lift3d(lastG, L)}translate3d(${lastG.cx.toFixed(2)}px, ${lastG.cy.toFixed(2)}px, 0) rotate(${(lastG.theta / DEG).toFixed(3)}deg) translate(${(lastG.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
       startHandle.style.height = `${LH}px`;
       endHandle.style.height = `${LH}px`;
       root.setAttribute("data-selection", "");
@@ -403,8 +529,8 @@ export function createSelect(root, refs, { onCopy } = {}) {
     const sub = 2;
     for (let s = 0; s < sub; s += 1) {
       const h = dt / sub;
-      const k = 70;
-      const c = 2 * Math.sqrt(k) * (LT > L ? 1 : 0.78);
+      const k = LT > L ? 80 : 96;
+      const c = 2 * Math.sqrt(k) * (LT > L ? 1 : 0.94);
       vL += ((LT - L) * k - vL * c) * h;
       L += vL * h;
       targets(geometry());
@@ -438,6 +564,21 @@ export function createSelect(root, refs, { onCopy } = {}) {
   };
 
   const setLift = (target) => {
+    if (target > 0 && L < 0.02 && sel) {
+      const range = selLines();
+      const top = lines[range[0]].top;
+      const bottom = lines[range[1]].top + LH;
+      let x0 = Infinity;
+      let x1 = -Infinity;
+      for (let li = range[0]; li <= range[1]; li += 1) {
+        const [a0, a1] = restSpan(li, range[0], range[1]);
+        x0 = Math.min(x0, a0);
+        x1 = Math.max(x1, a1);
+      }
+      origin = { x: (x0 + x1) / 2, y: (top + bottom) / 2 };
+      stage.style.setProperty("--select-ox", `${origin.x.toFixed(1)}px`);
+      stage.style.setProperty("--select-oy", `${origin.y.toFixed(1)}px`);
+    }
     if (target > 0.3 && !lifted) {
       lifted = true;
       audio.lift(0);
@@ -583,12 +724,24 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const selectedText = () => (sel ? words.slice(sel.a, sel.b + 1).map((w) => w.text).join(" ") : "");
 
-  const showChip = (label, text) => {
-    clearTimeout(chipTimer);
+  const fillChip = (label, text) => {
     chipLabel.textContent = label;
     const clean = text.replace(/[.,?!]+$/, "");
     chipText.textContent = `“${clean.length > 44 ? `${clean.slice(0, 42).trim()}…` : clean}”`;
+  };
+
+  const showChip = () => {
+    clearTimeout(chipTimer);
     chip.dataset.show = "true";
+    [chipIcon, chipLabel, chipText].forEach((node, i) => {
+      node.animate(
+        [
+          { opacity: 0, transform: "translateY(4px)", filter: "blur(3px)" },
+          { opacity: 1, transform: "translateY(0)", filter: "blur(0)" },
+        ],
+        { duration: 280, delay: 40 + i * 50, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "backwards" },
+      );
+    });
     chipTimer = setTimeout(() => {
       chip.dataset.show = "false";
     }, 2600);
@@ -598,40 +751,52 @@ export function createSelect(root, refs, { onCopy } = {}) {
     if (!sel) return;
     const text = selectedText();
     navigator.clipboard?.writeText(text)?.catch(() => {});
+    clearTimeout(chipTimer);
+    chip.dataset.show = "false";
+    fillChip(label, text);
     const box = stage.getBoundingClientRect();
-    const cb = chip.getBoundingClientRect();
-    const tx = cb.left - box.left + cb.width / 2;
-    const ty = cb.top - box.top + cb.height / 2 - 8;
+    const rootBox = root.getBoundingClientRect();
+    const cw = chip.offsetWidth;
+    const ch = chip.offsetHeight;
+    const cx = rootBox.left - box.left + chip.offsetLeft;
+    const cy = rootBox.top - box.top + chip.offsetTop;
+    const endLeft = cx - cw / 2;
+    const geo = geometry();
     audio.whoosh();
-    const picked = words.slice(sel.a, sel.b + 1);
-    picked.forEach((w, n) => {
-      const clone = el("span", "select-word select-word-fly", flyLayer);
-      clone.textContent = w.text;
-      clone.style.setProperty("--select-size", `${F}px`);
-      clone.style.setProperty("--select-lead", `${LH}px`);
-      const from = wordTransform(w);
-      const midX = w.px + (tx - w.px) * 0.35 - w.w / 4;
-      const midY = w.py + (ty - w.py) * 0.3 - LH * 0.7;
-      const to = `translate3d(${(tx - w.w * 0.15).toFixed(1)}px, ${(ty - LH * 0.15).toFixed(1)}px, 0) rotate(0deg) skewX(0deg) scale(0.3)`;
-      const anim = clone.animate(
+    const duration = 620;
+    const anims = [];
+    for (const node of flyLayer.querySelectorAll(".select-pill")) node.remove();
+    geo.forEach((g) => {
+      const pill = el("div", "select-pill", flyLayer);
+      const x0 = g.cx - g.width / 2;
+      pill.style.width = `${g.width}px`;
+      pill.style.height = `${LH}px`;
+      const start = `translate3d(${x0.toFixed(1)}px, ${g.top.toFixed(1)}px, 0)`;
+      const end = `translate3d(${endLeft.toFixed(1)}px, ${cy.toFixed(1)}px, 0)`;
+      const anim = pill.animate(
         [
-          { transform: from, opacity: 1 },
-          { transform: `translate3d(${midX.toFixed(1)}px, ${midY.toFixed(1)}px, 0) rotate(${(w.h[3] - 0.5) * 16}deg) skewX(-8deg) scale(0.8)`, opacity: 1, offset: 0.45 },
-          { transform: to.replace("scale(0.3)", "scale(0.36)"), opacity: 1, offset: 0.86 },
-          { transform: to, opacity: 0 },
+          { transform: start, width: `${g.width}px`, height: `${LH}px`, borderRadius: "2px", backgroundColor: "var(--select-wash)", offset: 0 },
+          { backgroundColor: "var(--select-wash)", offset: 0.55 },
+          { transform: end, width: `${cw}px`, height: `${ch}px`, borderRadius: `${ch / 2}px`, backgroundColor: "var(--select-tip)", offset: 1 },
         ],
-        { duration: 640, delay: n * 34, easing: "cubic-bezier(0.45, 0, 0.2, 1)", fill: "both" },
+        { duration, delay: 0, easing: "cubic-bezier(0.32, 0.72, 0, 1)", fill: "both" },
       );
-      anim.onfinish = () => clone.remove();
+      anims.push(anim);
     });
-    setTimeout(
-      () => {
-        if (destroyed) return;
-        showChip(label, text);
-        audio.pop();
-      },
-      picked.length * 34 + 420,
-    );
+    clearTimeout(flyTimer);
+    flyTimer = setTimeout(() => {
+      if (destroyed) return;
+      chip.dataset.instant = "true";
+      showChip();
+      audio.pop();
+      requestAnimationFrame(() => {
+        for (const node of flyLayer.querySelectorAll(".select-pill")) node.remove();
+        anims.forEach((anim) => anim.cancel());
+        requestAnimationFrame(() => {
+          delete chip.dataset.instant;
+        });
+      });
+    }, duration);
     setMode("hidden");
     onCopy?.(text);
   };
@@ -757,6 +922,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
       clearTimeout(pulseTimer);
       clearTimeout(chipTimer);
       clearTimeout(menuTimer);
+      clearTimeout(flyTimer);
       io.disconnect();
       ro.disconnect();
       stage.removeEventListener("pointerdown", onDown);

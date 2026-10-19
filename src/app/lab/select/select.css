@@ -62,12 +62,40 @@
   pointer-events: none;
 }
 
+.select-stage {
+  perspective: 760px;
+  perspective-origin: var(--select-ox, 50%) var(--select-oy, 50%);
+}
+
+.select-shadows,
 .select-bars,
 .select-text,
 .select-fly {
   position: absolute;
   inset: 0;
   pointer-events: none;
+  perspective: 760px;
+  perspective-origin: var(--select-ox, 50%) var(--select-oy, 50%);
+}
+
+.select-shadow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 8px;
+  background: rgb(24 38 70 / 0.34);
+  filter: blur(14px);
+  transform-origin: 50% 50%;
+  will-change: transform, opacity;
+  opacity: 0;
+}
+
+.select-pill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  background: var(--select-wash);
+  will-change: transform, width, height;
 }
 
 .select-bar {
@@ -76,7 +104,8 @@
   left: 0;
   border-radius: 2px;
   background: var(--select-wash);
-  transform-origin: 50% 50%;
+  transform-origin: 0 0;
+  backface-visibility: hidden;
   will-change: transform;
   opacity: 0;
   transition: opacity 180ms var(--ease-hover);
@@ -96,12 +125,8 @@
   line-height: var(--select-lead);
   font-weight: var(--font-weight-normal);
   white-space: pre;
-  transform-origin: 50% 50%;
+  transform-origin: 0 0;
   will-change: transform;
-}
-
-.select-word-fly {
-  width: auto;
 }
 
 .select-handle {
@@ -220,22 +245,76 @@
 .select-tip-card {
   position: absolute;
   top: 0;
-  left: 0;
-  opacity: 0;
+  left: 50%;
   visibility: hidden;
-  transition:
-    opacity 180ms var(--ease-hover),
-    visibility 0ms linear 180ms;
+  transform: translateX(-50%);
+  transition: visibility 0ms linear 160ms;
 }
 
 .select-tip[data-mode="hello"] .select-tip-hello,
 .select-tip[data-mode="menu"] .select-tip-menu,
 .select-tip[data-mode="card"] .select-tip-card {
-  opacity: 1;
   visibility: visible;
+  transition: visibility 0ms linear 0ms;
+}
+
+.select-tip-hello,
+.select-tip-item,
+.select-tip-sep,
+.select-tip-card > * {
+  opacity: 0;
+  filter: blur(4px);
+  transform: translateY(4px);
   transition:
-    opacity 220ms var(--ease-hover) 80ms,
-    visibility 0ms linear 0ms;
+    opacity 110ms var(--ease-hover),
+    filter 110ms var(--ease-hover),
+    transform 110ms var(--ease-hover);
+}
+
+.select-tip-hello {
+  transform: translate(-50%, 4px);
+}
+
+.select-tip[data-mode="hello"] .select-tip-hello {
+  opacity: 1;
+  filter: blur(0);
+  transform: translate(-50%, 0);
+  transition:
+    opacity 220ms var(--ease-entrance) 150ms,
+    filter 220ms var(--ease-entrance) 150ms,
+    transform 260ms var(--ease-entrance) 150ms;
+}
+
+.select-tip[data-mode="menu"] .select-tip-item,
+.select-tip[data-mode="menu"] .select-tip-sep,
+.select-tip[data-mode="card"] .select-tip-card > * {
+  opacity: 1;
+  filter: blur(0);
+  transform: translateY(0);
+  transition:
+    opacity 220ms var(--ease-entrance) calc(150ms + var(--select-i, 0) * 40ms),
+    filter 220ms var(--ease-entrance) calc(150ms + var(--select-i, 0) * 40ms),
+    transform 260ms var(--ease-entrance) calc(150ms + var(--select-i, 0) * 40ms);
+}
+
+.select-tip-menu > :nth-child(2) {
+  --select-i: 1;
+}
+
+.select-tip-menu > :nth-child(3) {
+  --select-i: 1;
+}
+
+.select-tip-menu > :nth-child(4) {
+  --select-i: 2;
+}
+
+.select-tip-menu > :nth-child(5) {
+  --select-i: 2;
+}
+
+.select-tip-card > :nth-child(2) {
+  --select-i: 1;
 }
 
 .select-tip-hello {
@@ -339,6 +418,12 @@
   opacity: 1;
   transform: translate(-50%, 0) scale(1);
 }
+
+.select-chip[data-instant] {
+  transition: none;
+}
+
+
 
 .select-chip-icon {
   display: inline-grid;

@@ -16,6 +16,10 @@ uniform sampler2D uImage;
 uniform vec2 uRes;
 uniform float uCell;
 uniform float uSeed;
+uniform vec3 uPaper;
+uniform float uLine;
+uniform float uDensity;
+uniform float uSat;
 
 float hash(vec2 p) {
   p = fract(p * vec2(123.34, 456.21) + uSeed);
@@ -61,13 +65,13 @@ void main() {
   vec3 src = textureLod(uImage, vec2(vUv.x, 1.0 - vUv.y), lod).rgb;
   vec3 sharp = texture(uImage, vec2(vUv.x, 1.0 - vUv.y)).rgb;
   float luma = dot(src, vec3(0.299, 0.587, 0.114));
-  src = mix(vec3(luma), src, 0.82);
+  src = clamp(mix(vec3(luma), src, uSat), 0.0, 1.0);
 
-  float density = 0.7 + 0.1 * fbm(px / (uCell * 60.0) + 3.0);
+  float density = uDensity + 0.1 * fbm(px / (uCell * 60.0) + 3.0);
   vec3 cmy = (1.0 - src) * density;
   cmy.y *= 0.8;
   cmy.x *= 1.04;
-  float k = min(min(cmy.x, cmy.y), cmy.z) * 0.6;
+  float k = min(min(cmy.x, cmy.y), cmy.z) * 0.5;
   cmy -= k;
   cmy = clamp(cmy * 1.06, 0.0, 1.0);
 
@@ -77,7 +81,7 @@ void main() {
   float dy = screenDot(px + 0.17 * uCell, 0.0 + wobble, cmy.z);
   float dk = screenDot(px + 0.53 * uCell, 0.7854 + wobble, k * 1.1);
 
-  vec3 paper = vec3(0.925, 0.918, 0.878);
+  vec3 paper = uPaper;
   float mottle = fbm(px / (uCell * 22.0));
   paper *= 0.975 + 0.045 * mottle;
   float fibre = noise(vec2(px.x / (uCell * 0.9), px.y / (uCell * 7.0)) + 11.0);
@@ -102,7 +106,7 @@ void main() {
 
   vec3 color = mix(tone, dots, 0.5);
   float line = 1.0 - smoothstep(0.0, 0.35, dot(sharp, vec3(0.333)));
-  color = mix(color, blackInk * paper, line * 0.55);
+  color = mix(color, blackInk * paper, line * uLine);
 
   float grain = hash(floor(px)) - 0.5;
   color += grain * 0.035;

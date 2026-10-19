@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import photo from "./times-square.jpg";
+import photo from "./night-tower.jpg";
 import "./blob-track.css";
 
 function SpeakerIcon({ on }) {

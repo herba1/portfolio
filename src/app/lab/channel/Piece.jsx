@@ -17,6 +17,16 @@ function SpeakerIcon({ on }) {
   );
 }
 
+function DegaussIcon() {
+  return (
+    <svg className="channel-speaker" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+      <path d="M8 2.5a5.5 5.5 0 1 0 5.5 5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+      <path d="M8 5a3 3 0 1 0 3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
+      <circle cx="8" cy="8" r="0.9" fill="currentColor" />
+    </svg>
+  );
+}
+
 export default function Piece({ embedded = false }) {
   const stageRef = useRef(null);
   const captionRef = useRef(null);
@@ -69,16 +79,23 @@ export default function Piece({ embedded = false }) {
   return (
     <Root className="channel" data-embedded={embedded ? "" : undefined} data-ready={ready ? "" : undefined}>
       <div ref={stageRef} className="channel-stage">
+        {embedded ? null : <div className="channel-shade" aria-hidden="true" />}
         {embedded ? null : (
           <header ref={captionRef} className="channel-caption">
             <div className="channel-caption-text">
               <h1 className="channel-title">Channel</h1>
-              <p className="channel-hint">Turn the knob, scroll or tap the screen to change channel. Degauss when the colours drift.</p>
+              <p className="channel-hint">Drag, scroll or tap the picture to change channel. Arrow keys work too.</p>
             </div>
-            <button type="button" className="channel-sound" aria-pressed={sound} onClick={toggleSound}>
-              <SpeakerIcon on={sound} />
-              <span>{sound ? "Sound on" : "Sound off"}</span>
-            </button>
+            <div className="channel-buttons">
+              <button type="button" className="channel-sound" onClick={() => engineRef.current?.degauss()}>
+                <DegaussIcon />
+                <span>Degauss</span>
+              </button>
+              <button type="button" className="channel-sound" aria-pressed={sound} onClick={toggleSound}>
+                <SpeakerIcon on={sound} />
+                <span>{sound ? "Sound on" : "Sound off"}</span>
+              </button>
+            </div>
           </header>
         )}
       </div>

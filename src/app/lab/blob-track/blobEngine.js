@@ -58,6 +58,78 @@ function boxBlurColumns(src, dst, w, h, radius) {
   }
 }
 
+function toCanvas(buf, w, h, tone) {
+  const out = new ImageData(w, h);
+  const n = w * h;
+  for (let i = 0; i < n; i += 1) {
+    const r = buf[i * 3];
+    const g = buf[i * 3 + 1];
+    const b = buf[i * 3 + 2];
+    const v = tone(r, g, b);
+    out.data[i * 4] = v[0];
+    out.data[i * 4 + 1] = v[1];
+    out.data[i * 4 + 2] = v[2];
+    out.data[i * 4 + 3] = 255;
+  }
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  c.getContext("2d").putImageData(out, 0, 0);
+  return c;
+}
+
+const TINT = [0.86, 0.87, 1.06];
+
+function grade(r, g, b, lift, crush = 0) {
+  const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  const rgb = [r, g, b];
+  const out = [0, 0, 0];
+  for (let c = 0; c < 3; c += 1) {
+    let v = l + (rgb[c] - l) * 0.42;
+    if (crush) v = Math.pow(Math.max(0, v - crush) / (1 - crush), 1.35);
+    v = v * TINT[c];
+    v = lift * TINT[c] + v * 0.92;
+    v = Math.pow(Math.max(0, v), 0.94);
+    out[c] = Math.max(0, Math.min(255, Math.round(v * 255)));
+  }
+  return out;
+}
+
+function streaks(src, w, h, lo, down, up) {
+  const out = new Float32Array(w * h * 3);
+  for (let x = 0; x < w; x += 1) {
+    let r = 0;
+    let g = 0;
+    let bl = 0;
+    for (let y = 0; y < h; y += 1) {
+      const i = (y * w + x) * 3;
+      const l = 0.2126 * src[i] + 0.7152 * src[i + 1] + 0.0722 * src[i + 2];
+      const m = smoothstep(lo, 0.95, l);
+      r = Math.max(src[i] * m, r * down);
+      g = Math.max(src[i + 1] * m, g * down);
+      bl = Math.max(src[i + 2] * m, bl * down);
+      out[i] = r;
+      out[i + 1] = g;
+      out[i + 2] = bl;
+    }
+    r = 0;
+    g = 0;
+    bl = 0;
+    for (let y = h - 1; y >= 0; y -= 1) {
+      const i = (y * w + x) * 3;
+      const l = 0.2126 * src[i] + 0.7152 * src[i + 1] + 0.0722 * src[i + 2];
+      const m = smoothstep(lo + 0.08, 0.95, l);
+      r = Math.max(src[i] * m, r * up);
+      g = Math.max(src[i + 1] * m, g * up);
+      bl = Math.max(src[i + 2] * m, bl * up);
+      out[i] = Math.max(out[i], r);
+      out[i + 1] = Math.max(out[i + 1], g);
+      out[i + 2] = Math.max(out[i + 2], bl);
+    }
+  }
+  return out;
+}
+
 function buildSmear(img) {
   const raw = readPixels(img, SW, SH).data;
   const n = SW * SH;
@@ -71,62 +143,37 @@ function buildSmear(img) {
   const b = new Float32Array(n * 3);
   boxBlurColumns(src, a, SW, SH, 22);
   boxBlurColumns(a, b, SW, SH, 22);
-  const streak = new Float32Array(n * 3);
+  const base = new Float32Array(n * 3);
+  for (let i = 0; i < n * 3; i += 1) base[i] = b[i] * 0.62 + src[i] * 0.38;
+  const baseCanvas = toCanvas(base, SW, SH, (r, g, bl) => grade(r, g, bl, 0.035, 0.14));
+  const layer = (lo, down, up) => {
+    const st = streaks(src, SW, SH, lo, down, up);
+    boxBlurColumns(st, a, SW, SH, 3);
+    return toCanvas(a, SW, SH, (r, g, bl) => grade(r * 0.78, g * 0.78, bl * 0.78, 0, 0.04));
+  };
+  const index = new Float32Array(SW);
   for (let x = 0; x < SW; x += 1) {
-    let r = 0;
-    let g = 0;
-    let bl = 0;
-    for (let y = 0; y < SH; y += 1) {
+    let best = 0;
+    let at = SH / 2;
+    for (let y = 0; y < SH; y += 2) {
       const i = (y * SW + x) * 3;
       const l = 0.2126 * src[i] + 0.7152 * src[i + 1] + 0.0722 * src[i + 2];
-      const m = smoothstep(0.42, 0.95, l);
-      r = Math.max(src[i] * m, r * 0.988);
-      g = Math.max(src[i + 1] * m, g * 0.988);
-      bl = Math.max(src[i + 2] * m, bl * 0.988);
-      streak[i] = r;
-      streak[i + 1] = g;
-      streak[i + 2] = bl;
+      if (l > best) {
+        best = l;
+        at = y;
+      }
     }
-    r = 0;
-    g = 0;
-    bl = 0;
-    for (let y = SH - 1; y >= 0; y -= 1) {
+    index[x] = at;
+  }
+  const sources = [];
+  for (let y = 0; y < SH; y += 3) {
+    for (let x = 0; x < SW; x += 3) {
       const i = (y * SW + x) * 3;
       const l = 0.2126 * src[i] + 0.7152 * src[i + 1] + 0.0722 * src[i + 2];
-      const m = smoothstep(0.5, 0.95, l);
-      r = Math.max(src[i] * m, r * 0.975);
-      g = Math.max(src[i + 1] * m, g * 0.975);
-      bl = Math.max(src[i + 2] * m, bl * 0.975);
-      streak[i] = Math.max(streak[i], r);
-      streak[i + 1] = Math.max(streak[i + 1], g);
-      streak[i + 2] = Math.max(streak[i + 2], bl);
+      if (l > 0.62) sources.push([x, y, src[i], src[i + 1], src[i + 2]]);
     }
   }
-  boxBlurColumns(streak, a, SW, SH, 3);
-  const out = new ImageData(SW, SH);
-  const tint = [0.86, 0.87, 1.06];
-  for (let i = 0; i < n; i += 1) {
-    const rgb = [0, 0, 0];
-    for (let c = 0; c < 3; c += 1) {
-      const base = b[i * 3 + c] * 0.62 + src[i * 3 + c] * 0.38;
-      const s = a[i * 3 + c] * 0.72;
-      rgb[c] = 1 - (1 - base) * (1 - s);
-    }
-    const l = 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2];
-    for (let c = 0; c < 3; c += 1) {
-      let v = l + (rgb[c] - l) * 0.38;
-      v = v * tint[c];
-      v = 0.05 * tint[c] + v * 0.92;
-      v = Math.pow(Math.max(0, v), 0.94);
-      out.data[i * 4 + c] = Math.max(0, Math.min(255, Math.round(v * 255)));
-    }
-    out.data[i * 4 + 3] = 255;
-  }
-  const c = document.createElement("canvas");
-  c.width = SW;
-  c.height = SH;
-  c.getContext("2d").putImageData(out, 0, 0);
-  return c;
+  return { base: baseCanvas, a: layer(0.56, 0.987, 0.974), b: layer(0.5, 0.993, 0.984), anchor: index, sources };
 }
 
 function iou(a, b) {
@@ -150,7 +197,7 @@ export function createTracker({ frame, canvas, src, onReady }) {
     dpr: 1,
     k: 1,
     view: { dx: 0, dy: 0, r: 0, s: ZOOM },
-    hub: { x: 470, y: 1060, tx: 470, ty: 1060, vx: 0, vy: 0, active: false },
+    hub: { x: 640, y: 1080, tx: 640, ty: 1080, vx: 0, vy: 0, active: false },
     tracks: [],
     nextId: FIRST_ID + 1,
     t0: performance.now(),
@@ -446,6 +493,86 @@ export function createTracker({ frame, canvas, src, onReady }) {
     g.stroke();
   };
 
+  const STRIP = 4;
+  const strips = Array.from({ length: SW / STRIP }, (_, i) => {
+    const h = (k) => {
+      const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
+      return v - Math.floor(v);
+    };
+    return { f: 0.35 + h(1) * 0.7, g: 0.9 + h(2) * 1.6, p: h(3) * 6.283, q: h(4) * 6.283, amp: 0.14 + h(5) * 0.3 };
+  });
+  let drips = [];
+
+  const seedDrip = (d, t, fresh) => {
+    const list = smear.sources;
+    const s = list[(Math.random() * list.length) | 0];
+    d.x = s[0] + Math.random() * 3;
+    d.y0 = s[1];
+    d.born = t - (fresh ? 0 : Math.random() * 6);
+    d.speed = 14 + Math.random() * 46;
+    d.len = 40 + Math.random() * 160;
+    d.life = 3 + Math.random() * 5;
+    d.w = Math.random() < 0.2 ? 2 : 1;
+    d.color = `rgb(${Math.round(Math.min(1, s[2] * 1.05) * 255)}, ${Math.round(Math.min(1, s[3] * 1.05) * 255)}, ${Math.round(Math.min(1, s[4] * 1.1) * 255)})`;
+    return d;
+  };
+
+  const drawSmear = (t) => {
+    const { dx, dy, r, s } = state.view;
+    const k = IW / SW;
+    g.save();
+    g.translate(state.fw / 2 + dx, state.fh / 2 + dy);
+    g.rotate(r);
+    g.scale(s * state.k, s * state.k);
+    g.translate(-IW / 2, -IH / 2);
+    const breathe = reduced ? 0 : 1;
+    const sx = (x) => x * k;
+    g.drawImage(smear.base, 0, 0, SW, SH, 0, 0 + breathe * 6 * Math.sin(t * 0.21), IW, IH + breathe * 10 * Math.sin(t * 0.17 + 1));
+    g.globalCompositeOperation = "screen";
+    for (let i = 0; i < strips.length; i += 1) {
+      const st = strips[i];
+      const x = i * STRIP;
+      const anchor = smear.anchor[x] * k;
+      const stretch = 1 + breathe * st.amp * (0.65 * Math.sin(t * 0.32 * st.f + st.p) + 0.35 * Math.sin(t * 0.9 * st.g + st.q));
+      const flow = breathe * 28 * Math.sin(t * 0.18 * st.f + st.q);
+      const h = IH * stretch;
+      const y = anchor - anchor * stretch + flow;
+      const mix = breathe ? 0.5 + 0.5 * Math.sin(t * 0.42 - i * 0.07 + st.p * 0.3) : 0;
+      const shimmer = 0.82 + breathe * 0.18 * Math.sin(t * 3.1 * st.g + st.p);
+      if (mix < 0.98) {
+        g.globalAlpha = (1 - mix) * shimmer;
+        g.drawImage(smear.a, x, 0, STRIP, SH, sx(x), y, STRIP * k + 0.6, h);
+      }
+      if (mix > 0.02) {
+        g.globalAlpha = mix * shimmer;
+        g.drawImage(smear.b, x, 0, STRIP, SH, sx(x), y, STRIP * k + 0.6, h);
+      }
+    }
+    g.globalCompositeOperation = "lighter";
+    if (breathe && smear.sources.length) {
+      for (const d of drips) {
+        const age = t - d.born;
+        if (age > d.life || age < 0) {
+          seedDrip(d, t, true);
+          continue;
+        }
+        const env = Math.min(1, age / 0.6) * Math.min(1, (d.life - age) / 1.2);
+        const head = d.y0 + age * d.speed;
+        const len = d.len * Math.min(1, age / 1.5);
+        g.fillStyle = d.color;
+        g.globalAlpha = 0.3 * env;
+        g.fillRect(sx(d.x), (head - len) * k, d.w * k, len * k * 0.6);
+        g.globalAlpha = 0.55 * env;
+        g.fillRect(sx(d.x), (head - len * 0.4) * k, d.w * k, len * k * 0.4);
+        g.globalAlpha = 0.9 * env;
+        g.fillRect(sx(d.x), (head - 2) * k, d.w * k, 2 * k);
+      }
+    }
+    g.globalAlpha = 1;
+    g.globalCompositeOperation = "source-over";
+    g.restore();
+  };
+
   const drawPhoto = (img) => {
     const { dx, dy, r, s } = state.view;
     g.save();
@@ -462,7 +589,7 @@ export function createTracker({ frame, canvas, src, onReady }) {
     g.imageSmoothingEnabled = true;
     g.fillStyle = "#16151c";
     g.fillRect(0, 0, state.fw, state.fh);
-    drawPhoto(smear);
+    drawSmear((now - state.t0) / 1000);
 
     const shown = [];
     for (const tr of state.tracks) {
@@ -693,6 +820,8 @@ export function createTracker({ frame, canvas, src, onReady }) {
       photo = img;
       lum = buildLuma(img);
       smear = buildSmear(img);
+      const t = (performance.now() - state.t0) / 1000;
+      drips = Array.from({ length: 220 }, () => seedDrip({}, t, false));
       resize();
       warm();
       wake();

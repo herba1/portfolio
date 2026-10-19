@@ -86,7 +86,7 @@ export function createAudio() {
       band.frequency.setTargetAtTime(500 + e * 2600, now, 0.06);
       if (pan) pan.pan.setTargetAtTime(Math.max(-0.7, Math.min(0.7, x)), now, 0.08);
     },
-    land(x, line) {
+    land(x, line, level = 1) {
       if (!live()) return;
       const now = ctx.currentTime;
       if (now - lastTick < 0.024) return;
@@ -101,7 +101,7 @@ export function createAudio() {
       f.Q.value = 2.2;
       const env = ctx.createGain();
       env.gain.setValueAtTime(0.0001, now);
-      env.gain.exponentialRampToValueAtTime(0.07, now + 0.001);
+      env.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.07 * level), now + 0.001);
       env.gain.exponentialRampToValueAtTime(0.0001, now + 0.022);
       src.connect(f);
       f.connect(env);

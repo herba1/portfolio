@@ -3,11 +3,19 @@ import { createAudio } from "./justifyAudio";
 const FAMILY = '"Justify Arimo", Arimo, Arial, "Helvetica Neue", sans-serif';
 const LEAD = 0.98;
 const ASCENT = 0.8;
+const GLYPH_TOP = 0.94;
+const GLYPH_H = 1.18;
+const MID = 0.3;
 const MIN_GAP = 0.26;
 const MIN_MEASURE = 2.6;
 const MAX_DPR = 2;
 const INK = "#0b0b0b";
 const BLUE = "#1a5cff";
+const K = 150;
+const ZETA = 0.86;
+const ROLL = 0.3;
+const SEAM = Math.PI * ROLL;
+const MAX_SPEED_EM = 34;
 
 export const PRESETS = [
   { id: "streetlights", label: "streetlights", text: "we can stay out till the streetlights go soft", measure: 5.2, narrow: 0.84, soft: 0.5 },
@@ -31,6 +39,33 @@ function tokenize(text) {
 function hash(n) {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
+}
+
+function keyOf(text) {
+  return text.toLowerCase().replace(/[^a-z0-9’']/g, "");
+}
+
+function matchWords(oldWords, tokens) {
+  const n = oldWords.length;
+  const m = tokens.length;
+  const table = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
+  for (let i = n - 1; i >= 0; i -= 1) {
+    for (let j = m - 1; j >= 0; j -= 1) {
+      table[i][j] = keyOf(oldWords[i].text) === keyOf(tokens[j].text) ? table[i + 1][j + 1] + 1 : Math.max(table[i + 1][j], table[i][j + 1]);
+    }
+  }
+  const pairs = new Map();
+  let i = 0;
+  let j = 0;
+  while (i < n && j < m) {
+    if (keyOf(oldWords[i].text) === keyOf(tokens[j].text)) {
+      pairs.set(j, oldWords[i]);
+      i += 1;
+      j += 1;
+    } else if (table[i + 1][j] >= table[i][j + 1]) i += 1;
+    else j += 1;
+  }
+  return pairs;
 }
 
 export function createJustify(root, refs, { onEdit, onReady } = {}) {
@@ -57,6 +92,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
   let measure = PRESETS[0].measure;
   let narrow = PRESETS[0].narrow;
   let softness = PRESETS[0].soft;
+  let softTarget = softness;
   let text = PRESETS[0].text;
   let words = [];
   let dying = [];
@@ -82,9 +118,11 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
   let frameAlpha = 0;
   let frameTarget = 0;
   let edge = { l: 0, x: 0, y: 0, h: 0 };
+  let left = 0;
   let edgeV = { l: 0, x: 0, y: 0, h: 0 };
   let edgeT = { l: 0, x: 0, y: 0, h: 0 };
   let q = 1;
+  let r = 1;
 
   const font = (size) => `400 ${size}px ${FAMILY}`;
 
@@ -94,10 +132,40 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     for (let i = 1; i <= word.text.length; i += 1) pref.push((meter.measureText(word.text.slice(0, i)).width / 100) * narrow);
     word.pref = pref;
     word.w = pref[pref.length - 1];
+    word.nw = word.w / narrow;
   };
 
   const makeWord = (token) => {
-    const word = { id: nextId, text: token.text, start: token.start, end: token.end, x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0, a: 0, va: 0, ta: 1, line: -1, k: 168 + hash(nextId) * 26 };
+    const word = {
+      id: nextId,
+      text: token.text,
+      start: token.start,
+      end: token.end,
+      x: 0,
+      y: 0,
+      vx: 0,
+      vy: 0,
+      tx: 0,
+      ty: 0,
+      a: 0,
+      va: 0,
+      ta: 1,
+      ka: 140,
+      s: 1,
+      vs: 0,
+      ts: 1,
+      sx: narrow,
+      vsx: 0,
+      ln: 0,
+      lx: 0,
+      tl: 0,
+      txl: 0,
+      wait: 0,
+      line: -1,
+      col: 0,
+      delay: 0,
+      sprite: null,
+    };
     nextId += 1;
     measureWord(word);
     return word;
@@ -135,6 +203,10 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     F = Math.max(22, Math.min(112, aw / 6.4, ah / (5.6 * LEAD)));
   };
 
+  const minMeasure = () => words.reduce((m, w) => Math.max(m, w.w + 0.04), MIN_MEASURE);
+
+  const maxMeasure = () => Math.min(10.5, (W - avail.left - avail.right - 24) / F);
+
   const fitOverflow = () => {
     const ah = H - avail.top - avail.bottom - 24;
     let rows = flow(measure).length;
@@ -145,49 +217,48 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     if (rows * LEAD * F > ah) F = Math.max(14, ah / (rows * LEAD));
   };
 
-  const maxMeasure = () => Math.min(10.5, (W - avail.left - avail.right - 24) / F);
+  const keepSize = (prevF) => {
+    if (!prevF || Math.abs(prevF - F) < 0.01) return;
+    const ratio = prevF / F;
+    for (const word of words) {
+      word.s *= ratio;
+      word.lx /= ratio;
+    }
+    for (const word of dying) {
+      word.s *= ratio;
+      word.lx /= ratio;
+    }
+  };
 
-  const layout = (snap = false, sounds = false) => {
+  const snapPx = (v) => Math.round(v * dpr) / dpr;
+
+  const layout = (snap = false) => {
     const rows = flow(measure);
     lines = rows.length;
     blockW = measure * F;
     blockH = lines * LEAD * F;
     cx = avail.left + (W - avail.left - avail.right) / 2;
     cy = avail.top + (H - avail.top - avail.bottom) / 2;
-    const left = cx - blockW / 2;
+    left = drag?.kind === "measure" ? drag.left : snapPx(cx - blockW / 2);
     const top = cy - blockH / 2;
     rows.forEach((row, li) => {
       const sum = row.reduce((s, w) => s + w.w, 0);
       const lastRow = li === rows.length - 1;
       const gap = !lastRow && row.length > 1 ? (measure - sum) / (row.length - 1) : MIN_GAP;
       let x = 0;
-      row.forEach((word) => {
-        word.tx = left + x * F;
-        word.ty = top + (li * LEAD + ASCENT) * F;
-        const col = row.indexOf(word);
-        const slides = word.col === 0 && col === 0;
-        if (!snap && word.line !== -1 && word.line !== li && !slides) {
-          const dir = li > word.line ? 1 : -1;
-          const shift = 0.7 * F;
-          if (word.a > 0.05) dying.push({ ...word, id: -word.id, tx: word.x + dir * shift, ty: word.y, ta: 0, va: 0, ka: 720 });
-          word.x = word.tx - dir * shift;
-          word.y = word.ty;
+      row.forEach((word, col) => {
+        word.txl = snapPx(x * F);
+        word.tl = li;
+        word.tx = left + word.txl;
+        word.ty = snapPx(top + (li * LEAD + ASCENT) * F);
+        if (!snap && word.line !== -1 && word.line !== li) word.arrived = false;
+        if (snap || word.line === -1) {
+          word.ln = li;
+          word.lx = word.txl;
           word.vx = 0;
-          word.vy = 0;
-          word.a = 0;
-          word.va = 0;
-          word.ta = 1;
-          word.ka = 320;
-          if (sounds) audio.tick(((word.tx - cx) / Math.max(1, W)) * 1.6, li);
         }
         word.line = li;
         word.col = col;
-        if (snap) {
-          word.x = word.tx;
-          word.y = word.ty;
-          word.vx = 0;
-          word.vy = 0;
-        }
         x += word.w + gap;
       });
     });
@@ -196,6 +267,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
       edge = { ...edgeT };
       edgeV = { l: 0, x: 0, y: 0, h: 0 };
     }
+    for (const word of words) place(word);
     placeArea(left, top);
   };
 
@@ -203,6 +275,20 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     area.style.transform = `translate3d(${(left - 12).toFixed(1)}px, ${(top - 12).toFixed(1)}px, 0)`;
     area.style.width = `${(blockW + 24).toFixed(1)}px`;
     area.style.height = `${(blockH + 24).toFixed(1)}px`;
+  };
+
+  const retire = (word, delay = 0) => {
+    word.ta = 0;
+    word.ts = 0.86;
+    word.ka = 320;
+    word.tl = word.ln;
+    word.txl = word.lx;
+    word.vx = 0;
+    word.wait = delay;
+    word.dying = true;
+    word.fixedX = edge.l + word.lx;
+    word.fixedY = lineY(word.ln);
+    dying.push(word);
   };
 
   const setWords = (nextText, spawnAt) => {
@@ -221,23 +307,23 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
         const word = midOld[i];
         if (word.text !== token.text) {
           word.text = token.text;
+          word.sprite = null;
           measureWord(word);
         }
         next.push(word);
       } else {
         const word = makeWord(token);
         const anchor = next[next.length - 1];
-        word.x = anchor ? anchor.x + (anchor.w + MIN_GAP) * F : spawnAt?.x ?? cx;
-        word.y = anchor ? anchor.y : spawnAt?.y ?? cy;
+        word.line = 0;
+        word.ln = anchor ? anchor.ln : 0;
+        word.lx = anchor ? anchor.lx + (anchor.w + MIN_GAP) * F : spawnAt ? spawnAt.x - edge.l : 0;
         word.a = 0;
+        word.s = 0.72;
+        word.ka = 220;
         next.push(word);
       }
     });
-    for (let i = midNew.length; i < midOld.length; i += 1) {
-      const word = midOld[i];
-      word.ta = 0;
-      dying.push(word);
-    }
+    for (let i = midNew.length; i < midOld.length; i += 1) retire(midOld[i]);
     for (let i = old.length - s; i < old.length; i += 1) next.push(old[i]);
     next.forEach((word, i) => {
       word.start = tokens[i].start;
@@ -249,6 +335,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
 
   const resizeLow = () => {
     q = 1 / (1 + softness * softness * 9.5 * Math.min(1.4, (F * dpr) / 90));
+    r = dpr * q;
     const lw = Math.max(2, Math.round(W * dpr * q));
     const lh = Math.max(2, Math.round(H * dpr * q));
     if (low.width !== lw || low.height !== lh) {
@@ -273,11 +360,34 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     readInsets();
     fitFont();
     const mm = maxMeasure();
-    if (measure > mm) measure = Math.max(MIN_MEASURE, mm);
+    if (measure > mm) measure = Math.max(minMeasure(), mm);
     fitOverflow();
     resizeLow();
-    layout(!ready);
+    layout(true);
     wake();
+  };
+
+  const spriteFor = (word) => {
+    const key = `${word.text}|${F.toFixed(2)}|${r.toFixed(4)}`;
+    if (word.sprite && word.sprite.key === key) return word.sprite;
+    const pad = Math.ceil(0.14 * F);
+    const cw = Math.max(1, Math.ceil((word.nw * F + pad * 2) * r) + 2);
+    const ch = Math.max(1, Math.ceil((GLYPH_H * F + pad * 2) * r) + 2);
+    const make = () => {
+      const c = document.createElement("canvas");
+      c.width = cw;
+      c.height = ch;
+      const g = c.getContext("2d");
+      g.scale(r, r);
+      g.font = font(F);
+      g.textBaseline = "alphabetic";
+      g.fillStyle = INK;
+      g.fillText(word.text, pad, pad + GLYPH_TOP * F);
+      return c;
+    };
+    const sprite = { key, pad, cw, ch, fill: make() };
+    word.sprite = sprite;
+    return sprite;
   };
 
   const caretPos = (index) => {
@@ -328,59 +438,114 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     return best.start + ci;
   };
 
+  const spring = (pos, vel, target, k, zeta, dt) => {
+    const acc = (target - pos) * k - vel * 2 * Math.sqrt(k) * zeta;
+    return vel + acc * dt;
+  };
+
+  const lineY = (ln) => edge.y + (ln * LEAD + ASCENT) * F;
+
+  const place = (word) => {
+    word.x = word.dying ? word.fixedX : edge.l + word.lx;
+    word.y = word.dying ? word.fixedY : lineY(word.ln);
+  };
+
+  const stepWord = (word, dt) => {
+    if (word.delay > 0) {
+      word.delay -= dt;
+      if (word.delay <= 0 && word.chime) {
+        word.chime = false;
+        audio.tick(((word.tx - cx) / Math.max(1, W)) * 1.6, word.line);
+      }
+      place(word);
+      return true;
+    }
+    const M = edge.x - edge.l;
+    const P = M + SEAM * F;
+    const drawn = word.nw * word.sx * F;
+    if (word.wait > 0) word.wait -= dt;
+    else {
+      const goal = (word.tl - word.ln) * P + word.txl;
+      word.vx = spring(word.lx, word.vx, goal, K, ZETA, dt);
+      const cap = MAX_SPEED_EM * F;
+      if (word.vx > cap) word.vx = cap;
+      else if (word.vx < -cap) word.vx = -cap;
+      word.lx += word.vx * dt;
+      let guard = 0;
+      while (word.lx + drawn / 2 > M + (SEAM * F) / 2 && word.ln < word.tl && guard < 40) {
+        word.ln += 1;
+        word.lx -= P;
+        guard += 1;
+      }
+      while (word.lx + drawn / 2 < -(SEAM * F) / 2 && word.ln > word.tl && guard < 80) {
+        word.ln -= 1;
+        word.lx += P;
+        guard += 1;
+      }
+      if (word.ln < word.tl && word.lx > P) {
+        word.ln += 1;
+        word.lx -= P;
+      }
+      if (word.ln > word.tl && word.lx < -P) {
+        word.ln -= 1;
+        word.lx += P;
+      }
+    }
+    word.vs = spring(word.s, word.vs, word.ts, K * 1.8, 1, dt);
+    word.s += word.vs * dt;
+    word.vsx = spring(word.sx, word.vsx, narrow, K, 1, dt);
+    word.sx += word.vsx * dt;
+    word.va = spring(word.a, word.va, word.ta, word.ka, 1, dt);
+    word.a = Math.max(0, Math.min(1, word.a + word.va * dt));
+    const busy =
+      word.wait > 0 ||
+      word.ln !== word.tl ||
+      Math.abs(word.txl - word.lx) > 0.04 ||
+      Math.abs(word.vx) > 0.6 ||
+      Math.abs(word.ts - word.s) > 0.0006 ||
+      Math.abs(word.vs) > 0.002 ||
+      Math.abs(narrow - word.sx) > 0.0006 ||
+      Math.abs(word.ta - word.a) > 0.002;
+    if (!busy) {
+      if (word.arrived === false && !word.dying) {
+        word.arrived = true;
+        audio.tick(((word.tx - cx) / Math.max(1, W)) * 1.6, word.line);
+      }
+      word.lx = word.txl;
+      word.vx = 0;
+      word.s = word.ts;
+      word.vs = 0;
+      word.sx = narrow;
+      word.vsx = 0;
+      word.a = word.ta;
+      word.va = 0;
+    }
+    place(word);
+    return busy;
+  };
+
   const step = (dt) => {
     let moving = false;
-    const springWord = (word) => {
-      if (word.delay > 0) {
-        word.delay -= dt;
-        moving = true;
-        if (word.delay <= 0 && word.chime) {
-          word.chime = false;
-          audio.tick(((word.tx - cx) / Math.max(1, W)) * 1.6, word.line);
-        }
-        return;
-      }
-      const k = drag?.kind === "measure" ? word.k * 0.9 : word.k;
-      const c = 2 * Math.sqrt(k) * 0.86;
-      const ax = (word.tx - word.x) * k - word.vx * c;
-      const ay = (word.ty - word.y) * k - word.vy * c;
-      word.vx += ax * dt;
-      word.vy += ay * dt;
-      const sp = Math.hypot(word.vx, word.vy);
-      const cap = 2600;
-      if (sp > cap) {
-        word.vx *= cap / sp;
-        word.vy *= cap / sp;
-      }
-      word.x += word.vx * dt;
-      word.y += word.vy * dt;
-      const ka = word.ka || 120;
-      word.va += ((word.ta - word.a) * ka - word.va * 2 * Math.sqrt(ka)) * dt;
-      word.a = Math.max(0, Math.min(1, word.a + word.va * dt));
-      if (Math.abs(word.tx - word.x) > 0.05 || Math.abs(word.ty - word.y) > 0.05 || Math.abs(word.vx) > 0.5 || Math.abs(word.vy) > 0.5 || Math.abs(word.ta - word.a) > 0.002) {
-        moving = true;
-      } else {
-        word.x = word.tx;
-        word.y = word.ty;
-        word.vx = 0;
-        word.vy = 0;
-        word.a = word.ta;
-      }
-    };
-    words.forEach(springWord);
-    dying.forEach(springWord);
-    dying = dying.filter((w) => w.a > 0.01);
-    if (dying.length) moving = true;
-    for (const key of ["l", "x", "y", "h"]) {
-      const k = 260;
+    if (Math.abs(softTarget - softness) > 0.001) {
+      softness += (softTarget - softness) * Math.min(1, dt * 7);
+      if (Math.abs(softTarget - softness) <= 0.001) softness = softTarget;
+      moving = true;
+    }
+    for (const key of ["l", "y", "h"]) {
+      const k = key === "l" ? 70 : 190;
       edgeV[key] += ((edgeT[key] - edge[key]) * k - edgeV[key] * 2 * Math.sqrt(k)) * dt;
       edge[key] += edgeV[key] * dt;
-      if (Math.abs(edgeT[key] - edge[key]) > 0.05 || Math.abs(edgeV[key]) > 0.5) moving = true;
+      if (Math.abs(edgeT[key] - edge[key]) > 0.02 || Math.abs(edgeV[key]) > 0.3) moving = true;
       else {
         edge[key] = edgeT[key];
         edgeV[key] = 0;
       }
     }
+    edge.x = edge.l + measure * F;
+    for (const word of words) moving = stepWord(word, dt) || moving;
+    for (const word of dying) moving = stepWord(word, dt) || moving;
+    dying = dying.filter((w) => w.wait > 0 || w.a > 0.004);
+    if (dying.length) moving = true;
     const fa = frameTarget - frameAlpha;
     frameAlpha += fa * Math.min(1, dt * 14);
     if (Math.abs(fa) > 0.004) moving = true;
@@ -398,37 +563,83 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
       if (word.end < a || word.start > b) continue;
       const s = Math.max(a, word.start) - word.start;
       const e = Math.min(b, word.end) - word.start;
-      let x0 = word.x + word.pref[s] * F;
+      const x0 = word.x + word.pref[s] * F;
       let x1 = word.x + word.pref[e] * F;
       const next = words[i + 1];
       if (next && next.line === word.line && b >= next.start && a <= word.end) x1 = next.x;
       if (x1 - x0 < 1) continue;
       const top = word.y - ASCENT * F - 0.02 * F;
       ctx.fillRect(x0 * scale, top * scale, (x1 - x0) * scale, LEAD * F * scale);
-      x0 = 0;
     }
   };
 
+  const stamp = (word, sprite, ux, ln, M) => {
+    const k = word.s * word.sx;
+    const full = word.nw * F * k;
+    const u0 = ux + (word.nw * word.sx * F * (1 - word.s)) / 2;
+    const u1 = u0 + full;
+    const R = ROLL * F;
+    const reach = (Math.PI / 2) * R;
+    const top = (word.dying ? word.fixedY : lineY(ln)) - MID * F - ((GLYPH_TOP - MID) * F + sprite.pad) * word.s;
+    const dh = (sprite.ch / r) * word.s;
+    const base = word.dying ? word.fixedX - ux : edge.l;
+    const src = (u) => (sprite.pad + (u - u0) / k) * r;
+    const alpha = word.a;
+    const fa = word.dying || u0 > -0.5 ? u0 : 0;
+    const fb = word.dying || u1 < M + 0.5 ? u1 : M;
+    if (fb > fa) {
+      lctx.globalAlpha = alpha;
+      const sa = src(fa);
+      const sb = fb >= u1 ? sprite.cw : src(fb);
+      const sa2 = fa <= u0 ? 0 : sa;
+      const da = fa <= u0 ? fa - sprite.pad * k : fa;
+      const db = fb >= u1 ? fb + (sprite.cw / r - sprite.pad - word.nw * F) * k : fb;
+      lctx.drawImage(sprite.fill, sa2, 0, Math.max(0.01, sb - sa2), sprite.ch, base + da, top, Math.max(0.01, db - da), dh);
+    }
+    const strip = Math.max(0.6, 0.035 * F);
+    const bend = (from, to, map) => {
+      if (to <= from) return;
+      const n = Math.max(1, Math.ceil((to - from) / strip));
+      const du = (to - from) / n;
+      for (let i = 0; i < n; i += 1) {
+        const ua = from + i * du;
+        const ub = ua + du;
+        const ma = map(ua);
+        const mb = map(ub);
+        const lit = Math.cos(Math.min(Math.PI / 2, mb.phi * 0.5 + ma.phi * 0.5));
+        if (lit <= 0.01) continue;
+        lctx.globalAlpha = alpha * Math.pow(lit, 1.4);
+        const xa = Math.min(ma.x, mb.x);
+        const xb = Math.max(ma.x, mb.x);
+        lctx.drawImage(sprite.fill, src(ua), 0, Math.max(0.01, src(ub) - src(ua)), sprite.ch, base + xa, top, Math.max(0.02, xb - xa + 0.02), dh);
+      }
+    };
+    bend(Math.max(u0, fb), Math.min(u1, M + reach), (u) => ({ phi: (u - M) / R, x: M + R * Math.sin((u - M) / R) }));
+    bend(Math.max(u0, -reach), Math.min(u1, fa), (u) => ({ phi: -u / R, x: -R * Math.sin(-u / R) }));
+  };
+
+  const paint = (word) => {
+    if (word.a <= 0.003 || word.delay > 0) return;
+    const sprite = spriteFor(word);
+    const M = edge.x - edge.l;
+    const P = M + SEAM * F;
+    stamp(word, sprite, word.lx, word.ln, M);
+    if (word.dying) return;
+    if (word.ln < word.tl) stamp(word, sprite, word.lx - P, word.ln + 1, M);
+    if (word.ln > word.tl) stamp(word, sprite, word.lx + P, word.ln - 1, M);
+  };
+
   const draw = (now) => {
+    resizeLow();
     lctx.setTransform(1, 0, 0, 1, 0, 0);
     lctx.clearRect(0, 0, low.width, low.height);
-    const ls = dpr * q;
-    lctx.setTransform(ls, 0, 0, ls, 0, 0);
-    lctx.font = font(F);
-    lctx.fillStyle = INK;
-    lctx.textBaseline = "alphabetic";
-    const paint = (word) => {
-      if (word.a <= 0.003) return;
-      lctx.globalAlpha = word.a;
-      lctx.save();
-      lctx.translate(word.x, word.y);
-      lctx.scale(narrow, 1);
-      lctx.fillText(word.text, 0, 0);
-      lctx.restore();
-    };
-    words.forEach(paint);
-    dying.forEach(paint);
+    lctx.imageSmoothingEnabled = true;
+    lctx.imageSmoothingQuality = "high";
+    lctx.setTransform(r, 0, 0, r, 0, 0);
+    for (const word of dying) paint(word);
+    for (const word of words) paint(word);
     lctx.globalAlpha = 1;
+    lctx.setTransform(1, 0, 0, 1, 0, 0);
 
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -454,13 +665,13 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
       ctx.lineWidth = Math.max(1, dpr);
       ctx.beginPath();
       const half = ctx.lineWidth / 2;
-      ctx.rect(Math.round(left * dpr) + half, Math.round((edge.y - 8) * dpr) + half, Math.round(width * dpr), Math.round((edge.h + 16) * dpr));
+      ctx.rect(Math.round((left - 12) * dpr) + half, Math.round((edge.y - 8) * dpr) + half, Math.round((width + 24) * dpr), Math.round((edge.h + 16) * dpr));
       ctx.stroke();
       ctx.globalAlpha = 1;
     }
 
     if (focused && selA === selB) {
-      const on = ((now - blinkAt) % 1060) < 620;
+      const on = (now - blinkAt) % 1060 < 620;
       if (on) {
         const p = caretPos(selA);
         ctx.fillStyle = BLUE;
@@ -469,7 +680,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
       }
     }
 
-    handle.style.transform = `translate3d(${edge.x.toFixed(1)}px, ${(edge.y + edge.h / 2).toFixed(1)}px, 0)`;
+    handle.style.transform = `translate3d(${(edge.x + 12).toFixed(1)}px, ${(edge.y + edge.h / 2).toFixed(1)}px, 0)`;
   };
 
   const frame = (now) => {
@@ -477,7 +688,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     const dt = Math.min(1 / 30, last ? (now - last) / 1000 : 1 / 60);
     last = now;
     let moving = false;
-    const sub = 2;
+    const sub = 3;
     for (let i = 0; i < sub; i += 1) moving = step(dt / sub) || moving;
     draw(now);
     if (moving || drag) wake();
@@ -522,7 +733,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
   };
 
   const inBlock = (p, pad = 20) => {
-    const left = cx - blockW / 2;
+    const left = edgeT.l;
     const top = cy - blockH / 2;
     return p.x >= left - pad && p.x <= left + blockW + pad && p.y >= top - pad && p.y <= top + blockH + pad;
   };
@@ -533,8 +744,9 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     wake();
   };
 
-  const setMeasure = (m, sounds = true) => {
-    const clamped = Math.max(MIN_MEASURE, Math.min(maxMeasure(), m));
+  const setMeasure = (m) => {
+    const room = drag?.kind === "measure" ? Math.min(maxMeasure(), (W - avail.right - 16 - drag.left) / F) : maxMeasure();
+    const clamped = Math.max(minMeasure(), Math.min(room, m));
     const prev = measure;
     measure = clamped;
     const rows = flow(measure).length;
@@ -542,7 +754,7 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
       measure = prev;
       return;
     }
-    layout(false, sounds);
+    layout(false);
     syncCaretInput();
     wake();
   };
@@ -560,19 +772,20 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     audio.unlock();
     handle.setPointerCapture(e.pointerId);
     const p = localPoint(e);
-    drag = { kind: "measure", id: e.pointerId, x0: p.x, m0: measure };
+    drag = { kind: "measure", id: e.pointerId, x0: p.x, m0: measure, left: edgeT.l };
     updateFrame();
   };
 
   const onHandleMove = (e) => {
     if (!drag || drag.kind !== "measure" || drag.id !== e.pointerId) return;
     const p = localPoint(e);
-    setMeasure(drag.m0 + ((p.x - drag.x0) * 2) / F);
+    setMeasure(drag.m0 + (p.x - drag.x0) / F);
   };
 
   const onHandleUp = (e) => {
     if (!drag || drag.id !== e.pointerId) return;
     drag = null;
+    layout(false);
     updateFrame();
     wake();
   };
@@ -651,9 +864,11 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
     const caret = input.selectionStart ?? value.length;
     const p = caretPos(Math.min(caret, text.length));
     setWords(value, p);
+    measure = Math.min(Math.max(measure, minMeasure()), Math.max(minMeasure(), maxMeasure()));
+    const prevF = F;
     fitOverflow();
-    resizeLow();
-    layout(false, false);
+    keepSize(prevF);
+    layout(false);
     audio.key(((p.x - cx) / Math.max(1, W)) * 1.6);
     selA = -1;
     syncSelection();
@@ -734,48 +949,59 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
   };
 
   const fontReady = document.fonts ? document.fonts.load(font(64), "a").catch(() => null) : Promise.resolve();
-  Promise.race([fontReady, new Promise((r) => setTimeout(r, 2500))]).then(start);
+  Promise.race([fontReady, new Promise((res) => setTimeout(res, 2500))]).then(start);
 
   return {
     setPreset(preset) {
       if (focused) input.blur();
       narrow = preset.narrow;
-      words.forEach(measureWord);
-      dying.forEach(measureWord);
+      const tokens = tokenize(preset.text);
+      const pairs = matchWords(words, tokens);
+      const kept = new Set(pairs.values());
+      let gone = 0;
+      words.forEach((word) => {
+        if (kept.has(word)) return;
+        retire(word, gone * 0.025);
+        gone += 1;
+      });
       input.value = preset.text;
-      words.forEach((word) => {
-        word.ta = 0;
-        word.delay = 0;
-        word.ty = word.y - 0.08 * F;
-        word.ka = 320;
-        word.tx = word.x;
-        dying.push(word);
-      });
       text = preset.text;
-      words = tokenize(text).map(makeWord);
-      words.forEach((word, i) => {
+      let born = 0;
+      words = tokens.map((token, j) => {
+        const old = pairs.get(j);
+        if (old) {
+          old.text = token.text;
+          old.start = token.start;
+          old.end = token.end;
+          old.sprite = null;
+          old.wait = 0.2;
+          old.arrived = false;
+          measureWord(old);
+          return old;
+        }
+        const word = makeWord(token);
         word.a = 0;
-        word.delay = 0.2 + i * 0.075;
+        word.s = 0.9;
+        word.ka = 110;
+        word.delay = 0.2 + born * 0.045;
         word.chime = true;
+        born += 1;
+        return word;
       });
+      const prevF = F;
       fitFont();
-      measure = Math.max(MIN_MEASURE, Math.min(preset.measure, maxMeasure()));
+      measure = Math.max(minMeasure(), Math.min(preset.measure, maxMeasure()));
       fitOverflow();
-      softness = preset.soft;
-      resizeLow();
-      layout(false, false);
-      words.forEach((word) => {
-        word.x = word.tx;
-        word.y = word.ty + 0.12 * F;
-        word.vx = 0;
-        word.vy = 0;
-      });
+      keepSize(prevF);
+      softTarget = preset.soft;
+      layout(false);
       wake();
       return preset.soft;
     },
     setSoftness(v) {
       const prev = Math.round(softness * 20);
       softness = v;
+      softTarget = v;
       const nextStep = Math.round(v * 20);
       if (nextStep !== prev) audio.detent(v);
       resizeLow();

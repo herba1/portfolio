@@ -1,6 +1,6 @@
-import { ALBUMS, albumById } from "@/app/lab/_music/catalog";
-
-import { BANDS, createSkinAudio, loadBeat } from "./skinAudio";
+import { BANDS, createSkinAudio } from "./skinAudio";
+import { activity, renderSong } from "./skinChip";
+import { arrange } from "./skinSongs";
 import { drawDigit, drawText, fitText, textWidth } from "./skinFont";
 
 const C = {
@@ -27,7 +27,7 @@ const ROW_H = 8;
 const PL_ROWS = 21;
 const BAR_N = 19;
 const FFT_N = 1024;
-const LENGTHS = { "Come Together": 260, Something: 183, "Here Comes the Sun": 185, Because: 165, "You Never Give Me Your Money": 242, "The End": 125, "Let It Be": 243, "Across the Universe": 228, "Get Back": 189, "Two of Us": 216, "In My Life": 147, Yesterday: 125, "Eleanor Rigby": 128, "Help!": 138 };
+const OSC_GAIN = 2.4;
 const PRESETS = [
   ["Smile", 0, [4, 3, 1, -1, -2, -1, 1, 3, 4, 5]],
   ["Flat", 0, [0, 0, 0, 0, 0, 0, 0, 0, 0, 0]],
@@ -39,13 +39,6 @@ const PRESETS = [
   ["Treble", -2, [-6, -6, -6, -3, 1, 6, 9, 10, 10, 11]],
 ];
 const BAND_LABELS = ["60", "170", "310", "600", "1K", "3K", "6K", "12K", "14K", "16K"];
-
-const lengthOf = (title) => {
-  if (LENGTHS[title]) return LENGTHS[title];
-  let h = 7;
-  for (let i = 0; i < title.length; i += 1) h = (h * 31 + title.charCodeAt(i)) >>> 0;
-  return 130 + (h % 100);
-};
 
 const fmt = (s) => {
   const t = Math.max(0, Math.floor(s));
@@ -59,9 +52,18 @@ const fmtLong = (s) => {
   return `${hh}:${String(mm).padStart(2, "0")}:${String(t % 60).padStart(2, "0")}`;
 };
 
-function buildTracks() {
-  const order = [albumById("abbey-road"), ...ALBUMS.filter((a) => a.id !== "abbey-road").reverse()];
-  return order.flatMap((a) => a.tracks.map((title) => ({ artist: a.artist, title, album: a.title, length: lengthOf(title) })));
+const songCache = new Map();
+const songFor = (t) => {
+  const key = `${t.title}|${t.artist}`;
+  if (!songCache.has(key)) songCache.set(key, arrange(t.title, t.artist));
+  return songCache.get(key);
+};
+
+function buildTracks(list) {
+  return list.map((t) => {
+    const song = songFor(t);
+    return { artist: t.artist || "Unknown", title: t.title, album: t.album || "", length: song.length, song };
+  });
 }
 
 function levelColor(v) {
@@ -118,20 +120,27 @@ function fft(re, im) {
   }
 }
 
-export function createSkin(stage, { embedded = false, caption = null, onReady = () => {}, onLive = () => {} } = {}) {
+export function createSkin(stage, { embedded = false, caption = null, songs = [], onReady = () => {}, onLive = () => {} } = {}) {
   const audio = createSkinAudio();
   const root = stage.closest(".skin") || stage;
-  const tracks = buildTracks();
-  const totalLength = tracks.reduce((s, t) => s + t.length, 0);
+  let tracks = buildTracks(songs);
+  let totalLength = tracks.reduce((s, t) => s + t.length, 0);
   let destroyed = false;
   let raf = 0;
   let visible = true;
   let lastT = performance.now();
   let pcm = null;
-  let pcmRate = 44100;
+  let pcmRate = 32000;
+  let pcmSong = null;
+  let rendering = null;
+  const chanLevels = new Float32Array(4);
+  let winRate = 0;
+  let winLive = false;
+  const chanShown = new Float32Array(4);
+  const win = new Float32Array(FFT_N);
 
-  const player = { index: 2, pos: 38, playing: true, startedAt: performance.now(), paused: false, shuffle: false, repeat: true };
-  const ui = { timeMode: "elapsed", vis: "spectrum", volume: 0.72, balance: 0, eqOn: true, pre: 0, bands: PRESETS[0][2].slice(), target: PRESETS[0][2].slice(), preTarget: 0, preset: 0, pressed: null, seekDrag: null, notice: null, noticeUntil: 0, marquee: 0, playlistSel: 2, playlistTop: 0 };
+  const player = { index: 0, pos: 6, playing: true, startedAt: performance.now(), paused: false, shuffle: false, repeat: true };
+  const ui = { timeMode: "elapsed", vis: "spectrum", volume: 0.72, balance: 0, eqOn: true, pre: 0, bands: PRESETS[0][2].slice(), target: PRESETS[0][2].slice(), preTarget: 0, preset: 0, pressed: null, seekDrag: null, notice: null, noticeUntil: 0, marquee: 0, playlistSel: 0, playlistTop: 0 };
   const bars = new Float32Array(BAR_N);
   const peaks = new Float32Array(BAR_N);
   const peakHold = new Float32Array(BAR_N);
@@ -181,6 +190,7 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
   };
 
   const syncAudio = () => {
+    audio.setSong(current().song);
     if (player.playing && !player.paused) audio.play(songPos());
     else audio.stop();
   };
@@ -447,11 +457,19 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
           c.fillRect(bx, y0 + 15 - p, 3, 1);
         }
       }
-    } else if (ui.vis === "osc" && pcm && player.playing && !player.paused) {
-      const start = Math.floor((songPos() % (pcm.length / pcmRate)) * pcmRate);
+    } else if (ui.vis === "osc" && winRate > 0) {
+      const stride = Math.max(2, Math.round(winRate / 8000));
+      const span = 76 * stride;
+      let start = FFT_N - span - 1;
+      for (let i = FFT_N - span - 1; i > 1; i -= 1) {
+        if (win[i - 1] < 0 && win[i] >= 0) {
+          start = i;
+          break;
+        }
+      }
       let prev = null;
       for (let i = 0; i < 76; i += 1) {
-        const s = pcm[(start + i * 12) % pcm.length] * 1.6;
+        const s = win[start + i * stride] * OSC_GAIN;
         const y = Math.max(0, Math.min(15, Math.round(7.5 - s * 8)));
         const lo = prev == null ? y : Math.min(prev, y);
         const hi = prev == null ? y : Math.max(prev, y);
@@ -504,7 +522,7 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
       drawText(c, fitText(ui.notice, 150), 112, 25, C.lcd);
     } else {
       ui.notice = null;
-      const msg = `${player.index + 1}. ${t.artist} - ${t.title} (${fmt(t.length)})  ***  `;
+      const msg = `${player.index + 1}. ${t.artist} - ${t.title} (8-BIT) (${fmt(t.length)})  ***  `;
       const mw = textWidth(msg) + 4;
       const off = Math.floor(ui.marquee) % mw;
       drawText(c, msg, 112 - off, 25, C.lcd);
@@ -512,14 +530,17 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
     }
     c.restore();
 
-    inset(c, 109, 38, 18, 9);
-    drawText(c, "1411", 110, 40, player.playing ? C.lcd : C.lcdDim);
-    drawText(c, "KBPS", 130, 40, C.textDim);
-    inset(c, 152, 38, 12, 9);
-    drawText(c, "44", 154, 40, player.playing ? C.lcd : C.lcdDim);
-    drawText(c, "KHZ", 167, 40, C.textDim);
-    drawText(c, "MONO", 205, 40, C.lcdDim);
-    drawText(c, "STEREO", 229, 40, player.playing ? C.lcd : C.lcdDim);
+    ["SQ1", "SQ2", "TRI", "NOI"].forEach((label, i) => {
+      const bx = 110 + i * 39;
+      inset(c, bx, 38, 36, 9);
+      const lvl = chanShown[i];
+      drawText(c, label, bx + 2, 40, lvl > 0.05 ? C.lcd : C.lcdDim);
+      for (let k = 0; k < 4; k += 1) {
+        const on = lvl > 0.05 && lvl * 4 > k;
+        c.fillStyle = on ? SPECTRUM[Math.min(15, 2 + k * 4)] : C.lcdGhost;
+        c.fillRect(bx + 17 + k * 4, 40, 3, 5);
+      }
+    });
 
     hslider(c, 109, 54, 68, ui.volume, 14, levelColor(ui.volume * 0.9));
     hslider(c, 180, 54, 38, (ui.balance + 1) / 2, 14, levelColor(0.3 + Math.abs(ui.balance) * 0.6), true);
@@ -655,18 +676,69 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
     drawText(c, `${fmt(Math.min(songPos(), t.length))} / ${fmt(t.length)}`, 142, 215, C.lcdHi);
   };
 
+  const requestRender = (song) => {
+    if (rendering === song || destroyed) return;
+    rendering = song;
+    const full = song.loopStart + song.loopLen;
+    const take = (r) => {
+      if (destroyed || rendering !== song || !r) return false;
+      pcm = r.pcm;
+      pcmRate = r.rate;
+      pcmSong = song;
+      wake();
+      ready();
+      return true;
+    };
+    renderSong(song, Math.min(full, songPos() + 8))
+      .then((r) => (take(r) && full > songPos() + 8 ? renderSong(song, full) : null))
+      .then((r) => {
+        take(r);
+        if (rendering === song) rendering = null;
+      })
+      .catch(() => {
+        if (rendering === song) rendering = null;
+        ready();
+      });
+  };
+
+  const fillWindow = () => {
+    if (!player.playing || player.paused) return 0;
+    if (audio.live()) {
+      const rate = audio.read(win);
+      let peak = 0;
+      for (let i = 0; i < FFT_N; i += 8) peak = Math.max(peak, Math.abs(win[i]));
+      if (peak > 1e-4) {
+        winLive = true;
+        return rate;
+      }
+    }
+    winLive = false;
+    const song = current().song;
+    if (!pcm || pcmSong !== song) {
+      requestRender(song);
+      return 0;
+    }
+    const s = songPos();
+    const vis = s < song.loopStart + song.loopLen ? s : song.loopStart + ((s - song.loopStart) % song.loopLen);
+    const end = Math.floor(vis * pcmRate);
+    const len = pcm.length;
+    for (let i = 0; i < FFT_N; i += 1) {
+      const k = end - FFT_N + i;
+      win[i] = k >= 0 && k < len ? pcm[k] : 0;
+    }
+    return pcmRate;
+  };
+
   const computeSpectrum = (dt) => {
-    const running = player.playing && !player.paused && pcm && ui.vis === "spectrum";
+    const running = winRate > 0 && ui.vis === "spectrum";
     const fall = 46 * dt;
     if (running) {
-      const len = pcm.length;
-      const start = Math.floor((songPos() % (len / pcmRate)) * pcmRate);
       for (let i = 0; i < FFT_N; i += 1) {
-        re[i] = pcm[(start + i) % len] * hann[i];
+        re[i] = win[i] * hann[i];
         im[i] = 0;
       }
       fft(re, im);
-      const binHz = pcmRate / FFT_N;
+      const binHz = winRate / FFT_N;
       for (let b = 0; b < BAR_N; b += 1) {
         const [f0, f1, fc] = barRanges[b];
         const k0 = Math.max(1, Math.floor(f0 / binHz));
@@ -674,9 +746,9 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
         let m = 0;
         for (let k = k0; k <= k1; k += 1) m = Math.max(m, Math.hypot(re[k], im[k]));
         let db = 20 * Math.log10(m / (FFT_N / 4) + 1e-6);
-        if (ui.eqOn) db += ui.pre + eqAt(fc);
+        if (!winLive) db += (ui.eqOn ? ui.pre + eqAt(fc) : 0) - 4;
         db += b * 2.1;
-        const level = Math.max(0, Math.min(16, ((db + 62) / 54) * 16));
+        const level = Math.max(0, Math.min(16, ((db + 48) / 52) * 16));
         bars[b] = level > bars[b] ? level : Math.max(level, bars[b] - fall);
         if (bars[b] >= peaks[b]) {
           peaks[b] = bars[b];
@@ -738,6 +810,12 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
       pushEq();
       wins.eq.dirty = true;
       again = true;
+    }
+    winRate = fillWindow();
+    activity(player.playing ? current().song : null, songPos(), chanLevels);
+    for (let i = 0; i < 4; i += 1) {
+      const target = player.playing && !player.paused ? chanLevels[i] : 0;
+      chanShown[i] = target > chanShown[i] ? target : Math.max(target, chanShown[i] - dt * 5);
     }
     if (computeSpectrum(dt)) again = true;
     ui.marquee += dt * 22;
@@ -882,7 +960,7 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
       pushEq();
       mark("eq");
     } else if (id === "scroll") {
-      const max = tracks.length - PL_ROWS;
+      const max = Math.max(0, tracks.length - PL_ROWS);
       ui.playlistTop = Math.round(Math.max(0, Math.min(1, (ly - 20 - 9) / (174 - 18))) * max);
       mark("pl");
     }
@@ -1104,35 +1182,36 @@ export function createSkin(stage, { embedded = false, caption = null, onReady = 
   drawPl();
 
   let readied = false;
-  const ready = () => {
+  function ready() {
     if (readied || destroyed) return;
     readied = true;
     onReady();
-  };
-  const readyTimer = window.setTimeout(ready, 900);
-  loadBeat()
-    .then((buffer) => {
-      if (destroyed) return;
-      const l = buffer.getChannelData(0);
-      const r = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : l;
-      pcm = new Float32Array(l.length);
-      for (let i = 0; i < l.length; i += 1) pcm[i] = (l[i] + r[i]) * 0.5;
-      pcmRate = buffer.sampleRate;
-      audio.setBeat(buffer);
-      player.startedAt = performance.now();
-      syncAudio();
-      wake();
-      ready();
-    })
-    .catch(ready);
+  }
+  const readyTimer = window.setTimeout(ready, 1400);
+  audio.setSong(current().song);
+  requestRender(current().song);
+  player.startedAt = performance.now();
+  syncAudio();
+  onLive(`${current().artist}, ${current().title}`);
   pushEq();
   wake();
 
   return {
     async setSound(on) {
-      const ok = await audio.setEnabled(on);
-      if (on && ok && player.playing && !player.paused) audio.play(songPos());
+      const ok = await audio.setEnabled(on, songPos);
+      if (on && ok && player.playing && !player.paused && !audio.live()) audio.play(songPos());
       return ok;
+    },
+    setTracks(list) {
+      if (!list?.length) return;
+      const next = buildTracks(list);
+      const same = next.length === tracks.length && next.every((t, i) => t.song === tracks[i].song);
+      if (same) return;
+      tracks = next;
+      totalLength = tracks.reduce((s, t) => s + t.length, 0);
+      ui.playlistSel = 0;
+      ui.playlistTop = 0;
+      startTrack(0, player.playing && !player.paused);
     },
     destroy() {
       destroyed = true;

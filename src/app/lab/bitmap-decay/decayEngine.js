@@ -1,17 +1,20 @@
 import { createTicks } from "./tickAudio";
 
-const FAMILY = '"How Are You Arimo", Arial, Helvetica, sans-serif';
-const FONT_PX = 17;
-const ASCENT = 16;
-const DESCENT = 5;
-const THRESHOLD = 118;
+const FAMILY = '"How Are You Pixelify", monospace';
+const PROBE = 720;
+const ASC = 8;
+const DESC = 3;
+const LETTER_GAP = 1;
+const WORD_GAP = 3;
 const LINES = 4;
+const PITCH = 10;
 const STEP = 1 / 20;
 const BRUSH_STEP = 0.25;
-const DEFAULTS = [0, 0.05, 0.3, 0.6];
+const DEFAULTS = [0, 0.1, 0.3, 0.5];
 const BLUE = "#0b1cff";
 const STEP_MS = 46;
 const HOLD_MS = 380;
+const DRIFT_MS = 520;
 
 function hash(x, y, line, k) {
   let h = (x * 374761393 + y * 668265263 + line * 2147483647 + k * 1274126177) | 0;
@@ -28,41 +31,112 @@ function clamp(v, lo, hi) {
   return v < lo ? lo : v > hi ? hi : v;
 }
 
-function rasterize(phrase) {
-  const probe = document.createElement("canvas").getContext("2d");
-  probe.font = `${FONT_PX}px ${FAMILY}`;
-  const width = Math.ceil(probe.measureText(phrase).width) + 4;
-  const height = ASCENT + DESCENT + 2;
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, width);
-  canvas.height = height;
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.font = `${FONT_PX}px ${FAMILY}`;
-  ctx.textBaseline = "alphabetic";
-  ctx.fillStyle = "#000";
-  ctx.fillText(phrase, 2, ASCENT + 1);
-  const data = ctx.getImageData(0, 0, canvas.width, height).data;
-  let minX = canvas.width;
+const glyphCache = new Map();
+let probeCtx = null;
+let unit = 0;
+
+function inkBox(data, size) {
+  let minX = size;
   let maxX = -1;
-  const on = [];
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < canvas.width; x += 1) {
-      if (data[(y * canvas.width + x) * 4 + 3] > THRESHOLD) {
-        on.push(x, y);
+  let minY = size;
+  let maxY = -1;
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      if (data[(y * size + x) * 4 + 3] > 127) {
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
       }
     }
   }
-  if (maxX < 0) return { cols: 1, rows: height, xs: new Int16Array(0), ys: new Int16Array(0) };
-  const count = on.length / 2;
-  const xs = new Int16Array(count);
-  const ys = new Int16Array(count);
-  for (let i = 0; i < count; i += 1) {
-    xs[i] = on[i * 2] - minX;
-    ys[i] = on[i * 2 + 1];
+  return maxX < 0 ? null : { minX, maxX, minY, maxY };
+}
+
+function probe() {
+  if (probeCtx) return probeCtx;
+  const canvas = document.createElement("canvas");
+  canvas.width = PROBE * 1.5;
+  canvas.height = PROBE * 1.5;
+  probeCtx = canvas.getContext("2d", { willReadFrequently: true });
+  return probeCtx;
+}
+
+function paintProbe(ch) {
+  const g = probe();
+  const size = g.canvas.width;
+  g.clearRect(0, 0, size, size);
+  g.font = `${PROBE}px ${FAMILY}`;
+  g.textBaseline = "alphabetic";
+  g.fillStyle = "#000";
+  g.fillText(ch, PROBE * 0.25, PROBE);
+  return { data: g.getImageData(0, 0, size, size).data, size };
+}
+
+function measureUnit() {
+  if (unit) return unit;
+  const dotProbe = paintProbe(".");
+  const dot = inkBox(dotProbe.data, dotProbe.size);
+  const ellProbe = paintProbe("l");
+  const ell = inkBox(ellProbe.data, ellProbe.size);
+  if (dot && ell) {
+    const box = (dot.maxX - dot.minX + 1 + (dot.maxY - dot.minY + 1)) / 2;
+    unit = { step: (ell.maxY - ell.minY + 1 - box) / 6, box };
+  } else {
+    unit = { step: PROBE * 0.09, box: PROBE * 0.1 };
   }
-  return { cols: maxX - minX + 1, rows: height, xs, ys };
+  return unit;
+}
+
+function glyph(ch) {
+  if (glyphCache.has(ch)) return glyphCache.get(ch);
+  const { step, box: pixel } = measureUnit();
+  const { data, size } = paintProbe(ch);
+  const box = inkBox(data, size);
+  let result = { cols: 0, cells: [] };
+  if (box) {
+    const cols = Math.max(1, Math.round((box.maxX - box.minX + 1 - pixel) / step) + 1);
+    const rows = Math.max(1, Math.round((box.maxY - box.minY + 1 - pixel) / step) + 1);
+    const top = Math.round((PROBE - box.minY - pixel) / step) + 1;
+    const cells = [];
+    for (let r = 0; r < rows; r += 1) {
+      for (let c = 0; c < cols; c += 1) {
+        const x = Math.floor(box.minX + c * step + pixel / 2);
+        const y = Math.floor(box.minY + r * step + pixel / 2);
+        if (data[(y * size + x) * 4 + 3] > 127) cells.push(c, ASC - top + r);
+      }
+    }
+    result = { cols, cells };
+  }
+  glyphCache.set(ch, result);
+  return result;
+}
+
+function rasterize(phrase) {
+  const xs = [];
+  const ys = [];
+  let pen = 0;
+  let started = false;
+  for (const ch of phrase.trim()) {
+    if (/\s/.test(ch)) {
+      pen += WORD_GAP;
+      started = false;
+      continue;
+    }
+    const g = glyph(ch);
+    if (!g.cols) continue;
+    if (started) pen += LETTER_GAP;
+    for (let k = 0; k < g.cells.length; k += 2) {
+      xs.push(pen + g.cells[k]);
+      ys.push(g.cells[k + 1]);
+    }
+    pen += g.cols;
+    started = true;
+  }
+  const rows = ASC + DESC;
+  const keep = [];
+  for (let i = 0; i < xs.length; i += 1) if (ys[i] >= 0 && ys[i] < rows) keep.push(i);
+  return { cols: Math.max(1, pen), rows, xs: Int16Array.from(keep.map((i) => xs[i])), ys: Int16Array.from(keep.map((i) => ys[i])) };
 }
 
 export function createDecay({ root, canvas, onChange }) {
@@ -77,7 +151,9 @@ export function createDecay({ root, canvas, onChange }) {
   let cell = 8;
   let originX = 0;
   let originY = 0;
-  let pitch = ASCENT + DESCENT - 2;
+  const pitch = PITCH;
+  let drift = 0;
+  let driftTimer = 0;
   let frame = 0;
   let visible = true;
   let destroyed = false;
@@ -105,10 +181,13 @@ export function createDecay({ root, canvas, onChange }) {
       for (let i = 0; i < n; i += 1) {
         const x = raster.xs[i];
         const y = raster.ys[i];
+        const along = hash(Math.floor(x / 3), Math.floor(y / 3), l, 5) < 0.62;
+        const kx = along ? Math.floor((x + ((y * 7) % 3)) / 3) : x + 4096;
+        const ky = along ? y : Math.floor((y + ((x * 5) % 3)) / 3) + 4096;
         h[i * 4] = hash(x, y, l, 1);
-        h[i * 4 + 1] = hash(x, y, l, 2);
-        h[i * 4 + 2] = hash(x, y, l, 3);
-        h[i * 4 + 3] = hash(x, y, l, 4);
+        h[i * 4 + 1] = hash(kx, ky, l, 2);
+        h[i * 4 + 2] = (along ? 0 : 0.5) + hash(kx, ky, l, 3) * 0.5;
+        h[i * 4 + 3] = hash(kx, ky, l, 4);
       }
       hashes.push(h);
     }
@@ -160,16 +239,26 @@ export function createDecay({ root, canvas, onChange }) {
     const x = raster.xs[i];
     const y = raster.ys[i];
     if (e <= 0) return [x, y];
-    if (h[i * 4] < e * 0.62) return null;
-    if (h[i * 4 + 1] < e * 0.7) {
+    if (h[i * 4] < e * 0.34) return null;
+    if (h[i * 4 + 1] < e * 0.85) {
       const dir = h[i * 4 + 2];
-      const far = e > 0.5 && h[i * 4 + 3] < 0.45 ? 2 : 1;
-      if (dir < 0.38) return [x + far, y];
-      if (dir < 0.6) return [x - far, y];
-      if (dir < 0.84) return [x, y + 1];
+      const far = e > 0.55 && h[i * 4 + 3] < 0.3 ? 2 : 1;
+      if (dir < 0.25) return [x + far, y];
+      if (dir < 0.5) return [x - far, y];
+      if (dir < 0.75) return [x, y + 1];
       return [x, y - 1];
     }
     return [x, y];
+  };
+
+  const ambient = (l) => quantize((0.07 * Math.sin(drift * 0.83 + l * 2.1) + 0.035 * Math.sin(drift * 2.17 + l * 0.7)) * Math.min(1, lines[l].d / 0.3));
+
+  const driftTick = () => {
+    driftTimer = window.setTimeout(driftTick, DRIFT_MS);
+    if (!visible || document.hidden || gesture || !raster) return;
+    drift += 1;
+    markAll();
+    request();
   };
 
   const layers = [];
@@ -196,7 +285,7 @@ export function createDecay({ root, canvas, onChange }) {
     g.fillStyle = BLUE;
     const line = lines[l];
     for (let i = 0; i < raster.xs.length; i += 1) {
-      const e = clamp(line.d + line.v[i], 0, 1);
+      const e = clamp(line.d + line.v[i] + (line.d > 0 ? ambient(l) : 0), 0, 1);
       const p = placed(l, i, e);
       if (!p) continue;
       g.fillRect((p[0] + 3) * cell, (p[1] + 2) * cell, cell, cell);
@@ -213,8 +302,8 @@ export function createDecay({ root, canvas, onChange }) {
     }
     ctx.fillStyle = BLUE;
     if (focusLine >= 0) {
-      const y = originY + focusLine * pitch * cell + 4 * cell;
-      ctx.fillRect(originX - 3 * cell, y, cell, cell * (raster.rows - 9));
+      const y = originY + focusLine * pitch * cell + (ASC - 5) * cell;
+      ctx.fillRect(originX - 3 * cell, y, cell, cell * 5);
     }
     const at = gesture?.mode === "brush" || gesture?.mode === "repair" ? pointer : hover;
     if (at) {
@@ -481,13 +570,14 @@ export function createDecay({ root, canvas, onChange }) {
   return {
     async init() {
       try {
-        await document.fonts.load(`${FONT_PX}px "How Are You Arimo"`);
+        await document.fonts.load(`${PROBE}px "How Are You Pixelify"`);
       } catch {
         return;
       }
       if (destroyed) return;
       build(false);
       draw();
+      driftTimer = window.setTimeout(driftTick, DRIFT_MS);
     },
     setPhrase(text) {
       phrase = text.trim() ? text : " ";
@@ -515,6 +605,7 @@ export function createDecay({ root, canvas, onChange }) {
     },
     destroy() {
       destroyed = true;
+      window.clearTimeout(driftTimer);
       if (frame) cancelAnimationFrame(frame);
       window.clearTimeout(gesture?.timer);
       ro.disconnect();

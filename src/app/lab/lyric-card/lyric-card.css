@@ -14,13 +14,24 @@
   font-display: block;
 }
 
+@font-face {
+  font-family: "LyricSerif";
+  src: url("./instrument-serif-latin-400-italic.woff2") format("woff2");
+  font-weight: 400;
+  font-style: italic;
+  font-display: block;
+}
+
 .lyric-card {
   --lyric-card-ground: #efede8;
-  --lyric-card-card-w: 460px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
   width: 100%;
   height: 100%;
   min-height: 100cqh;
+  padding: 88px 48px 40px;
   overflow: clip;
   isolation: isolate;
   background: var(--lyric-card-ground);
@@ -34,23 +45,18 @@
 
 .lyric-card[data-embedded] {
   min-height: 100%;
-}
-
-.lyric-card-scroll {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
+  padding: 0;
 }
 
 .lyric-card-caption {
-  position: absolute;
-  top: 88px;
-  right: 48px;
-  left: 48px;
   display: flex;
-  align-items: flex-start;
+  flex: none;
+  align-items: flex-end;
   justify-content: space-between;
   gap: 16px;
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
   opacity: 0;
   transition: opacity 400ms var(--ease-entrance);
 }
@@ -86,25 +92,71 @@
   text-wrap: pretty;
 }
 
-.lyric-card-pill,
-.lyric-card-button {
-  display: inline-flex;
+.lyric-card-tools {
+  display: flex;
   flex: none;
   align-items: center;
-  justify-content: center;
   gap: 8px;
+}
+
+.lyric-card-styles {
+  display: flex;
+  gap: 4px;
+  margin-right: 8px;
+}
+
+.lyric-card-style {
   height: 32px;
   padding-inline: 12px;
+  border: 0;
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui);
+  line-height: 32px;
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 150ms var(--ease-hover),
+    color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.lyric-card-style[data-face="block"] {
+  font-family: "LyricSans", Arial, sans-serif;
+}
+
+.lyric-card-style[data-face="serif"] {
+  font-family: "LyricSerif", Georgia, serif;
+  font-size: 16px;
+}
+
+.lyric-card-style[data-face="caption"] {
+  font-family: "LyricSans", Arial, sans-serif;
+  font-size: 12px;
+}
+
+.lyric-card-style[aria-checked="true"] {
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-line);
+}
+
+.lyric-card-icon {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 1px solid var(--color-line);
   border-radius: 9999px;
   background: var(--color-surface-raised);
   color: var(--color-ink);
-  font-family: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-semibold);
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
   transition:
     background-color 150ms var(--ease-hover),
     border-color 150ms var(--ease-hover),
@@ -112,500 +164,114 @@
     transform 120ms var(--ease-hover);
 }
 
-.lyric-card-pill[aria-pressed="true"] .lyric-card-speaker {
-  color: #c06a00;
+.lyric-card-icon[aria-pressed="false"] {
+  color: var(--color-ink-secondary);
 }
 
-.lyric-card-button {
-  flex: 1;
-  height: 40px;
-}
-
-.lyric-card-button-primary {
+.lyric-card-icon[data-saved] {
   border-color: var(--color-surface-inverse);
   background: var(--color-surface-inverse);
   color: var(--color-ink-inverse);
 }
 
-.lyric-card-button:disabled {
-  cursor: default;
-  color: var(--color-ink-disabled);
-  border-color: var(--color-line);
-  background: var(--color-surface-raised);
-}
-
-.lyric-card-pill:active,
-.lyric-card-button:not(:disabled):active,
-.lyric-card-segment:active,
-.lyric-card-photo:active {
+.lyric-card-style:active,
+.lyric-card-icon:active {
   transform: scale(0.96);
 }
 
-.lyric-card-grid {
-  position: absolute;
-  top: 176px;
-  right: 48px;
-  bottom: 48px;
-  left: 48px;
-  display: grid;
-  grid-template-columns: minmax(260px, 1fr) auto minmax(240px, 264px);
-  gap: 40px;
-  opacity: 0;
-  transform: translateY(8px);
-  transition:
-    opacity 500ms var(--ease-entrance) 80ms,
-    transform 600ms var(--ease-entrance) 80ms;
-}
-
-.lyric-card[data-ready] .lyric-card-grid {
-  opacity: 1;
-  transform: none;
-}
-
-.lyric-card-lyrics {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  max-width: 400px;
-}
-
-.lyric-card-song {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--color-line);
-}
-
-.lyric-card-cover {
-  flex: none;
-  width: 44px;
-  height: 44px;
-  border-radius: 6px;
-  background-color: #1b1a1d;
-  background-position: center;
-  background-size: cover;
-}
-
-.lyric-card-song-text {
-  display: flex;
-  flex-direction: column;
-  gap: 0;
-  min-width: 0;
-}
-
-.lyric-card-song-title {
-  margin: 0;
-  font-size: var(--text-heading);
-  line-height: var(--text-heading--line-height);
-  letter-spacing: var(--text-heading--letter-spacing);
-  font-weight: var(--text-heading--font-weight);
-}
-
-.lyric-card-song-meta {
-  margin: 0;
-  color: var(--color-ink-secondary);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-}
-
-.lyric-card-count {
-  font-variant-numeric: tabular-nums;
-}
-
-.lyric-card-lines {
-  flex: 1;
-  min-height: 0;
-  margin: 0;
-  padding: 12px 0 24px;
-  overflow-y: auto;
-  list-style: none;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  mask-image: linear-gradient(to bottom, #000 0%, #000 88%, rgb(0 0 0 / 0.6) 94%, rgb(0 0 0 / 0) 100%);
-}
-
-.lyric-card-line {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  width: 100%;
-  margin: 0;
-  padding: 8px 12px;
-  border: 0;
-  border-radius: 10px;
-  background: transparent;
-  color: var(--color-ink);
-  font-family: inherit;
-  font-size: var(--text-title-sm);
-  line-height: 28px;
-  letter-spacing: var(--text-title-sm--letter-spacing);
-  font-weight: var(--font-weight-meta);
-  text-align: left;
-  cursor: pointer;
-  transition:
-    background-color 180ms var(--ease-hover),
-    font-weight 180ms var(--ease-hover);
-}
-
-.lyric-card-line-text {
-  text-wrap: pretty;
-}
-
-.lyric-card-line-check {
-  display: grid;
-  flex: none;
-  place-items: center;
-  width: 24px;
-  height: 28px;
-  color: var(--color-accent);
-  opacity: 0;
-  transform: scale(0.6);
-  transition:
-    opacity 160ms var(--ease-hover),
-    transform 220ms var(--ease-entrance);
-}
-
-.lyric-card-line[aria-pressed="true"] {
-  background: var(--color-accent-surface);
-  font-weight: var(--font-weight-semibold);
-}
-
-.lyric-card-line[aria-pressed="true"] .lyric-card-line-check {
-  opacity: 1;
-  transform: none;
-}
-
-.lyric-card-line:focus-visible,
-.lyric-card-pill:focus-visible,
-.lyric-card-button:focus-visible,
-.lyric-card-segment:focus-visible,
-.lyric-card-photo:focus-visible,
+.lyric-card-style:focus-visible,
+.lyric-card-icon:focus-visible,
 .lyric-card-frame:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 2px;
 }
 
 @media (hover: hover) and (pointer: fine) {
-  .lyric-card-line:hover {
-    background: var(--color-surface-sunken);
+  .lyric-card-style:not([aria-checked="true"]):hover {
+    color: var(--color-ink);
   }
 
-  .lyric-card-line[aria-pressed="true"]:hover {
-    background: var(--color-accent-surface);
-  }
-
-  .lyric-card-pill:hover,
-  .lyric-card-button:not(:disabled):not(.lyric-card-button-primary):hover {
+  .lyric-card-icon:not([data-saved]):hover {
     background: var(--color-surface-subtle);
     border-color: var(--color-line-strong);
-  }
-
-  .lyric-card-button-primary:not(:disabled):hover {
-    background: #2a2a2e;
-  }
-
-  .lyric-card-segment[aria-checked="false"]:hover {
-    color: var(--color-ink);
-    background: rgb(255 255 255 / 0.5);
   }
 }
 
 .lyric-card-stage {
-  display: flex;
-  align-items: flex-start;
-  justify-content: center;
+  position: relative;
+  flex: 1;
+  width: 100%;
   min-height: 0;
+  container-type: size;
 }
 
 .lyric-card-frame {
-  position: relative;
+  position: absolute;
+  inset: 0;
   display: block;
-  height: 100%;
-  max-height: 640px;
+  width: min(100cqw, 80cqh);
+  height: auto;
   aspect-ratio: 4 / 5;
-  margin: 0;
+  margin: auto;
   padding: 0;
   overflow: hidden;
   border: 0;
-  border-radius: 8px;
+  border-radius: 4px;
   background: #0b0a0c;
   cursor: pointer;
   box-shadow:
     0 1px 2px rgb(20 16 10 / 0.12),
-    0 24px 48px -24px rgb(20 16 10 / 0.4);
+    0 32px 64px -32px rgb(20 16 10 / 0.45);
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
   -webkit-tap-highlight-color: transparent;
+}
+
+.lyric-card[data-ready] .lyric-card-frame {
+  opacity: 1;
+}
+
+.lyric-card[data-embedded] .lyric-card-frame {
+  border-radius: 0;
+  box-shadow: none;
 }
 
 .lyric-card-canvas {
   position: absolute;
   inset: 0;
   display: block;
-}
-
-.lyric-card-empty {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-items: center;
-  color: #f4f1ec;
-  font-family: "LyricSans", Arial, sans-serif;
-  font-size: var(--text-body);
-  line-height: var(--text-body--line-height);
-  letter-spacing: var(--text-body--letter-spacing);
-  font-weight: var(--font-weight-normal);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity 200ms var(--ease-hover);
-}
-
-.lyric-card-empty[data-show] {
-  opacity: 1;
-}
-
-.lyric-card-controls {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-  min-width: 0;
-}
-
-.lyric-card-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lyric-card-label {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  margin: 0;
-  color: var(--color-ink);
-  font-size: var(--text-heading-sm);
-  line-height: var(--text-heading-sm--line-height);
-  letter-spacing: var(--text-heading-sm--letter-spacing);
-  font-weight: var(--text-heading-sm--font-weight);
-}
-
-.lyric-card-label-note {
-  overflow: hidden;
-  color: var(--color-ink-secondary);
-  font-size: var(--text-ui);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lyric-card-segments {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: var(--color-surface-sunken);
-}
-
-.lyric-card-segment {
-  flex: 1;
-  height: 32px;
-  padding-inline: 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--color-ink-secondary);
-  font-family: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-semibold);
-  cursor: pointer;
-  transition:
-    background-color 160ms var(--ease-hover),
-    color 160ms var(--ease-hover),
-    box-shadow 160ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
-}
-
-.lyric-card-segment[aria-checked="true"] {
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  box-shadow: 0 1px 2px rgb(20 16 10 / 0.12);
-}
-
-.lyric-card-face-sans {
-  font-family: "LyricSans", Arial, sans-serif;
-  font-weight: var(--font-weight-normal);
-}
-
-.lyric-card-face-serif {
-  font-family: "LyricSerif", Georgia, serif;
-  font-size: var(--text-body);
-  font-weight: var(--font-weight-normal);
-}
-
-.lyric-card-photos {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 8px;
-}
-
-.lyric-card-photo {
-  aspect-ratio: 4 / 5;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background-color: #1b1a1d;
-  background-size: cover;
-  cursor: pointer;
-  box-shadow: 0 0 0 1px rgb(20 16 10 / 0.08);
-  transition:
-    box-shadow 160ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
-}
-
-.lyric-card-photo[aria-checked="true"] {
-  box-shadow:
-    0 0 0 2px var(--lyric-card-ground),
-    0 0 0 4px var(--color-ink);
-}
-
-.lyric-card-sliders {
-  gap: 16px;
-}
-
-.lyric-card-slider {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.lyric-card-slider input {
-  --lyric-card-fill: 50%;
   width: 100%;
-  height: 20px;
-  margin: 0;
-  background: transparent;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
+  height: 100%;
 }
 
-.lyric-card-slider input::-webkit-slider-runnable-track {
-  height: 4px;
-  border-radius: 9999px;
-  background: linear-gradient(to right, var(--color-ink) 0%, var(--color-ink) var(--lyric-card-fill), var(--color-line-strong) var(--lyric-card-fill), var(--color-line-strong) 100%);
-}
-
-.lyric-card-slider input::-moz-range-track {
-  height: 4px;
-  border-radius: 9999px;
-  background: var(--color-line-strong);
-}
-
-.lyric-card-slider input::-moz-range-progress {
-  height: 4px;
-  border-radius: 9999px;
-  background: var(--color-ink);
-}
-
-.lyric-card-slider input::-webkit-slider-thumb {
-  width: 20px;
-  height: 20px;
-  margin-top: -8px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--color-surface-raised);
-  box-shadow:
-    0 0 0 1px rgb(20 16 10 / 0.16),
-    0 2px 4px rgb(20 16 10 / 0.16);
-  appearance: none;
-  -webkit-appearance: none;
-}
-
-.lyric-card-slider input::-moz-range-thumb {
-  width: 20px;
-  height: 20px;
-  border: 0;
-  border-radius: 50%;
-  background: var(--color-surface-raised);
-  box-shadow:
-    0 0 0 1px rgb(20 16 10 / 0.16),
-    0 2px 4px rgb(20 16 10 / 0.16);
-}
-
-.lyric-card-slider input:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 4px;
-  border-radius: 4px;
-}
-
-.lyric-card-actions {
-  display: flex;
-  gap: 8px;
-  margin-top: 8px;
-}
-
-@container (max-width: 1099px) {
-  .lyric-card-scroll {
-    overflow-y: auto;
-    overscroll-behavior: contain;
+@media (max-width: 720px) {
+  .lyric-card {
+    gap: 16px;
+    padding: 72px 16px 24px;
   }
 
   .lyric-card-caption {
-    position: relative;
-    top: auto;
-    right: auto;
-    left: auto;
-    max-width: 480px;
-    margin: 0 auto;
-    padding: 80px 16px 0;
-  }
-
-  .lyric-card-grid {
-    position: relative;
-    inset: auto;
-    display: flex;
     flex-direction: column;
-    gap: 24px;
-    max-width: 480px;
-    margin: 0 auto;
-    padding: 20px 16px 48px;
+    align-items: stretch;
+    gap: 12px;
   }
 
-  .lyric-card-stage {
-    position: sticky;
-    top: 48px;
-    z-index: 2;
-    order: -1;
-    margin: 0 -16px;
-    padding: 8px 16px 12px;
-    background: var(--lyric-card-ground);
+  .lyric-card-hint {
+    font-size: var(--text-ui);
+    line-height: var(--text-ui--line-height);
+    letter-spacing: var(--text-ui--letter-spacing);
+    font-weight: var(--text-ui--font-weight);
+  }
+
+  .lyric-card-tools {
+    justify-content: space-between;
+  }
+
+  .lyric-card-styles {
+    margin-right: auto;
   }
 
   .lyric-card-frame {
-    width: min(100%, 320px);
-    height: auto;
-  }
-
-  .lyric-card-lyrics {
-    max-width: none;
-  }
-
-  .lyric-card-lines {
-    overflow: visible;
-    mask-image: none;
-    padding-bottom: 0;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .lyric-card-caption,
-  .lyric-card-grid {
-    transition: opacity 200ms linear;
-    transform: none;
+    inset: 0 0 auto;
   }
 }

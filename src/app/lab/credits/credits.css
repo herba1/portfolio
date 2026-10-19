@@ -92,12 +92,10 @@
 }
 
 .credits-kicker,
-.credits-heading,
-.credits-note,
-.credits-finale-note {
+.credits-heading {
   margin: 0;
   color: var(--credits-ink-soft);
-  font-size: 19px;
+  font-size: 21px;
   line-height: 28px;
   font-style: italic;
   font-weight: var(--font-weight-normal);
@@ -111,24 +109,77 @@
   line-height: 72px;
   font-weight: var(--font-weight-normal);
   text-align: center;
+  text-wrap: balance;
 }
 
 .credits-section {
   display: flex;
   flex-direction: column;
   align-items: stretch;
-  gap: 0;
-  margin-bottom: 96px;
+  margin-bottom: 160px;
 }
 
 .credits-heading {
-  margin-bottom: 20px;
+  margin-bottom: 64px;
+}
+
+.credits-quotes {
+  display: flex;
+  flex-direction: column;
+  gap: 96px;
+}
+
+.credits-quote {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  margin: 0;
+}
+
+.credits-quote-text,
+.credits-finale-text {
+  margin: 0;
+  max-width: 680px;
+  color: var(--credits-ink);
+  font-size: 28px;
+  line-height: 40px;
+  font-weight: var(--font-weight-normal);
+  text-align: center;
+  white-space: pre-line;
+  text-wrap: balance;
+  hanging-punctuation: first;
+}
+
+.credits-credit,
+.credits-finale-by {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0;
+  margin: 0;
+}
+
+.credits-by {
+  color: var(--credits-ink);
+  font-size: 19px;
+  line-height: 28px;
+  font-style: italic;
+  text-align: center;
+}
+
+.credits-source {
+  color: var(--credits-ink-soft);
+  font-size: 15px;
+  line-height: 24px;
+  font-style: italic;
+  text-align: center;
 }
 
 .credits-rows {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 20px;
   margin: 0;
 }
 
@@ -141,60 +192,48 @@
 
 .credits-role {
   margin: 0;
-  color: var(--credits-ink-soft);
-  font-size: 19px;
+  color: var(--credits-ink);
+  font-size: 22px;
   line-height: 28px;
   font-style: italic;
   text-align: right;
+  white-space: pre-line;
   text-wrap: balance;
 }
 
 .credits-name {
   margin: 0;
-  color: var(--credits-ink);
-  font-size: 23px;
+  color: var(--credits-ink-soft);
+  font-size: 19px;
   line-height: 28px;
   text-align: left;
-}
-
-.credits-solo {
-  margin: 0;
-  color: var(--credits-ink);
-  font-size: 30px;
-  line-height: 40px;
-  text-align: center;
-}
-
-.credits-note {
-  margin-top: 8px;
 }
 
 .credits-finale {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  margin-top: 240px;
+  gap: 28px;
+  margin-top: max(560px, 80cqh);
 }
 
-.credits-cover {
-  display: block;
-  width: 168px;
-  height: 168px;
-  margin-bottom: 24px;
-  object-fit: cover;
-  filter: sepia(0.12) contrast(1.04) saturate(0.88) blur(0.3px);
-  box-shadow: 0 0 24px rgb(255 190 140 / 0.08);
-  pointer-events: none;
-}
-
-.credits-finale-title {
-  margin: 0;
-  color: var(--credits-ink);
-  font-size: 40px;
+.credits-finale-text {
+  font-size: 36px;
   line-height: 48px;
-  font-style: italic;
-  font-weight: var(--font-weight-normal);
+}
+
+.credits-finale-by {
+  opacity: 0;
+  transform: translate3d(0, 4px, 0);
+  transition:
+    opacity 1600ms var(--ease-entrance),
+    transform 1600ms var(--ease-entrance);
+}
+
+.credits[data-ended] .credits-finale-by {
+  opacity: 1;
+  transform: none;
+  transition-delay: 900ms;
 }
 
 .credits-grain {
@@ -351,37 +390,44 @@
     column-gap: 16px;
   }
 
-  .credits-role,
   .credits-kicker,
-  .credits-heading,
-  .credits-note,
-  .credits-finale-note {
-    font-size: 15px;
-    line-height: 20px;
+  .credits-heading {
+    font-size: 17px;
+    line-height: 24px;
   }
 
-  .credits-name {
+  .credits-quote-text {
+    font-size: 21px;
+    line-height: 28px;
+  }
+
+  .credits-quotes {
+    gap: 72px;
+  }
+
+  .credits-role {
     font-size: 17px;
+    line-height: 24px;
+  }
+
+  .credits-name,
+  .credits-by {
+    font-size: 16px;
+    line-height: 24px;
+  }
+
+  .credits-source {
+    font-size: 13px;
     line-height: 20px;
   }
 
   .credits-rows {
-    gap: 12px;
+    gap: 16px;
   }
 
-  .credits-solo {
-    font-size: 22px;
-    line-height: 28px;
-  }
-
-  .credits-finale-title {
-    font-size: 32px;
-    line-height: 40px;
-  }
-
-  .credits-cover {
-    width: 144px;
-    height: 144px;
+  .credits-finale-text {
+    font-size: 26px;
+    line-height: 36px;
   }
 }
 

@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
+
 import "./skin.css";
 
 function SpeakerIcon({ on }) {
@@ -24,6 +26,12 @@ export default function Piece({ embedded = false }) {
   const [ready, setReady] = useState(false);
   const [sound, setSound] = useState(true);
   const [live, setLive] = useState("");
+  const { tracks } = useTopSongs(20);
+  const tracksRef = useRef(tracks);
+  useEffect(() => {
+    tracksRef.current = tracks;
+    engineRef.current?.setTracks(tracks);
+  }, [tracks]);
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) return undefined;
@@ -32,7 +40,7 @@ export default function Piece({ embedded = false }) {
     const start = async () => {
       const { createSkin } = await import("./skinEngine");
       if (cancelled) return;
-      engine = createSkin(stage, { embedded, caption: captionRef.current, onLive: setLive, onReady: () => setReady(true) });
+      engine = createSkin(stage, { embedded, caption: captionRef.current, songs: tracksRef.current, onLive: setLive, onReady: () => setReady(true) });
       engineRef.current = engine;
     };
     const io = new IntersectionObserver(
@@ -69,8 +77,8 @@ export default function Piece({ embedded = false }) {
         {embedded ? null : (
           <header ref={captionRef} className="skin-caption">
             <div className="skin-caption-text">
-              <h1 className="skin-heading">Skin</h1>
-              <p className="skin-hint">Drag a window by its frame and it snaps to the others. Double-click a track, slide the EQ, click the visualiser to change it.</p>
+              <h1 className="skin-heading">8-Bit Player</h1>
+              <p className="skin-hint">Your top songs remade as chiptunes on four sound channels. Press play, double-click a track, slide the EQ, drag the windows.</p>
             </div>
             <button type="button" className="skin-sound" aria-pressed={sound} onClick={toggleSound}>
               <SpeakerIcon on={sound} />

@@ -107,6 +107,7 @@ export function createChannelGL(canvas) {
       gl.uniform1f(u.uHasCover, cover ? 1 : 0);
       gl.uniform4f(u.uKen, p.ken[0], p.ken[1], p.ken[2], 0);
       gl.uniform1f(u.uCurve, p.curve);
+      gl.uniform1f(u.uFade, p.fade ?? 1);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
     dispose() {

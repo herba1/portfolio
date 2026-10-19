@@ -1,6 +1,6 @@
 import { createProjector } from "./creditsAudio";
 
-const NATURAL = 52;
+const NATURAL = 40;
 const MAX_SPEED = 1200;
 const RELAX = 1.6;
 const WHEEL_GAIN = 5;

@@ -1,4 +1,4 @@
-import photo from "./times-square.jpg";
+import photo from "./record-wall.jpg";
 import { createCamSound } from "./camcorderAudio";
 import { createCamGL } from "./camcorderGL";
 
@@ -103,21 +103,21 @@ export function createCamcorder(stage, { embedded = false, caption = null, onLiv
 
   const cam = {
     cx: 0.5,
-    cy: 0.56,
+    cy: 0.5,
     tx: 0.5,
-    ty: 0.56,
+    ty: 0.5,
     vx: 0,
     vy: 0,
     flingX: 0,
     flingY: 0,
-    zl: Math.log(1.15),
-    ztl: Math.log(1.15),
+    zl: Math.log(1.3),
+    ztl: Math.log(1.3),
     f: 0,
     fv: 0,
     ev: 0,
     gain: 0,
     lastCx: 0.5,
-    lastCy: 0.56,
+    lastCy: 0.5,
   };
   let rockerDefl = 0;
   let wasZooming = false;

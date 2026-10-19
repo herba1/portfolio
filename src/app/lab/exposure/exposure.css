@@ -115,6 +115,66 @@
   text-wrap: pretty;
 }
 
+.exposure-photos {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.exposure-photo {
+  position: relative;
+  display: block;
+  width: 56px;
+  height: 40px;
+  padding: 0;
+  overflow: hidden;
+  border: 0;
+  border-radius: 6px;
+  background: #000;
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgb(244 240 232 / 0.18),
+    0 4px 12px rgb(0 0 0 / 0.4);
+  transition:
+    box-shadow 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.exposure-photo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: brightness(0.62) saturate(0.85);
+  transition: filter 200ms var(--ease-hover);
+  pointer-events: none;
+}
+
+.exposure-photo[aria-checked="true"] {
+  box-shadow:
+    0 0 0 2px var(--exposure-ink),
+    0 4px 12px rgb(0 0 0 / 0.4);
+}
+
+.exposure-photo[aria-checked="true"] img {
+  filter: none;
+}
+
+.exposure-photo:active {
+  transform: scale(0.95);
+}
+
+.exposure-photo:focus-visible {
+  outline: 2px solid var(--exposure-amber);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .exposure-photo:hover img {
+    filter: brightness(0.9);
+  }
+}
+
 .exposure-button {
   display: inline-flex;
   flex: none;

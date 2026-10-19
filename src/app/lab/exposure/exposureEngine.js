@@ -2,11 +2,9 @@ import { createExposureAudio } from "./exposureAudio";
 import { createExposureGL } from "./exposureGL";
 
 export const FONT_FAMILY = "ExposureArimo";
-export const CAPTION = "it will take a while to feel like this again";
 export const STEP = 12;
 export const START_EV = 1;
 const LIMIT = 108;
-const FOCUS = [0.5, 0.57];
 const ZOOM = 1.04;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
@@ -57,7 +55,7 @@ const magnet = (raw) => {
 };
 
 export function createExposureEngine(opts) {
-  const { stage, canvas, knob, rotor, readout, embedded, imageSrc, onEv, onReady, onFail } = opts;
+  const { stage, canvas, knob, rotor, readout, embedded, photos, onEv, onReady, onFail } = opts;
   let gl = null;
   try {
     gl = createExposureGL(canvas);
@@ -94,6 +92,12 @@ export function createExposureEngine(opts) {
   let soundWanted = null;
   let wheelAcc = 0;
   let shownThirds = null;
+  let current = 0;
+  let wanted = 0;
+  let swap = 1;
+  let swapping = false;
+  let loadToken = 0;
+  const cache = new Map();
 
   const valueOf = (a) => -a / 36;
 
@@ -106,7 +110,7 @@ export function createExposureEngine(opts) {
     tctx.textAlign = "center";
     tctx.textBaseline = "alphabetic";
     const maxW = w * dpr - 48 * dpr;
-    const words = CAPTION.split(" ");
+    const words = photos[current].caption.split(" ");
     const lines = [];
     let line = "";
     for (const word of words) {
@@ -158,6 +162,39 @@ export function createExposureEngine(opts) {
     return now;
   };
 
+  const fetchPhoto = (i) => {
+    if (!cache.has(i)) cache.set(i, loadImage(photos[i].src));
+    return cache.get(i);
+  };
+
+  const choose = (i) => {
+    if (!ready || i === wanted || !photos[i]) return;
+    wanted = i;
+    const token = ++loadToken;
+    swapping = true;
+    audio.shutter?.();
+    wake();
+    const started = performance.now();
+    fetchPhoto(i)
+      .then((img) => {
+        const wait = Math.max(0, 230 - (performance.now() - started));
+        window.setTimeout(() => {
+          if (destroyed || token !== loadToken) return;
+          gl.setImage(img);
+          current = i;
+          drawCaption();
+          swapping = false;
+          wake();
+        }, wait);
+      })
+      .catch(() => {
+        if (token !== loadToken) return;
+        swapping = false;
+        wanted = current;
+        wake();
+      });
+  };
+
   const settled = () => !drag && Math.abs(angle - target) < 0.01 && Math.abs(vel) < 0.01;
 
   const frame = (ms) => {
@@ -190,7 +227,9 @@ export function createExposureEngine(opts) {
     ev += (v - ev) * (1 - Math.exp(-dt / 0.07));
     updateDial(now);
     const t = performance.now() / 1000 - t0;
-    const fade = ready ? clamp((performance.now() - readyAt) / 900, 0, 1) : 0;
+    if (swapping) swap = Math.max(0, swap - dt / 0.22);
+    else if (swap < 1) swap = Math.min(1, swap + dt / 0.6);
+    const fadeIn = ready ? clamp((performance.now() - readyAt) / 900, 0, 1) : 0;
     const [iw, ih] = gl.imageSize;
     const a = iw / ih;
     const A = w / h;
@@ -199,11 +238,11 @@ export function createExposureEngine(opts) {
     const vy = cover[1] / ZOOM / 2 + 0.02;
     gl.draw({
       cover,
-      focus: [clamp(FOCUS[0], vx, 1 - vx), clamp(FOCUS[1], vy, 1 - vy)],
+      focus: [clamp(photos[current].focus[0], vx, 1 - vx), clamp(photos[current].focus[1], vy, 1 - vy)],
       cam: camera(t),
       ev,
       frame: Math.floor(t * 24) % 997,
-      fade: fade * fade * (3 - 2 * fade),
+      fade: fadeIn * fadeIn * (3 - 2 * fadeIn) * (swap * swap * (3 - 2 * swap)),
       grain: Math.max(1, dpr),
     });
     raf = requestAnimationFrame(frame);
@@ -341,7 +380,7 @@ export function createExposureEngine(opts) {
   document.addEventListener("visibilitychange", onVisibility);
 
   const fontLoad = document.fonts ? document.fonts.load(`400 30px ${FONT_FAMILY}`).catch(() => null) : Promise.resolve(null);
-  Promise.all([loadImage(imageSrc), fontLoad])
+  Promise.all([fetchPhoto(0), fontLoad])
     .then(([img]) => {
       if (destroyed) return;
       gl.setImage(img);
@@ -357,6 +396,7 @@ export function createExposureEngine(opts) {
 
   return {
     setSound,
+    choose,
     destroy() {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);

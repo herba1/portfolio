@@ -1,10 +1,22 @@
 {
   "title": "Lyric Card",
-  "description": "A lyrics sheet for herb’s friday beat. Tap lines to pick them and a share card cuts them in word by word over his own photos, in white Arimo blocks with wide justified gaps, grain and bloom, the way the edits on his board do. Save it as a PNG.",
-  "tags": ["Lyric edit", "Type", "Share", "Photo"],
+  "description": "A lyric card that plays itself like an edit: each word cuts in on the beat of herb’s friday beat over grainy night photos, building a force-justified white block, a big Instrument Serif verse with an italic last line, or a small centred caption. Click for the next verse, save any verse as a PNG.",
+  "tags": [
+    "Lyric edit",
+    "Type",
+    "Share",
+    "Photo"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "Spotify’s lyric share, rebuilt in the lo-fi lyric-edit language of the reference board: justified blocks with big gaps, small centred captions, top-left builds and big words, over real night photos.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://support.spotify.com/us/article/sharing-lyrics/", "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob", "herb reference board: lyric edits 859f (you dont have to be a staarr), 899 (cause I don't wanna be in love), e936 rain, 70e0 LA skyline, 7af8 big words, 95d9 small caption"]
+  "intent": "Lyric typography taken all the way: deliberate justified blocks with even, generous gaps, a serif that sings, words cut in on an eighth-note grid, and almost no chrome so the card is the piece.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob",
+    "https://en.wikipedia.org/wiki/Knuth%E2%80%93Plass_line-breaking_algorithm",
+    "herb reference board: lyric edits 859f, 899, e936 rain, 70e0 LA skyline, 0fc5 and ee6e justified blocks"
+  ]
 }

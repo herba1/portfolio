@@ -2,12 +2,17 @@ import { createAudio } from "./smearAudio";
 
 const FAMILY = '"Smear Arimo", Arimo, Arial, "Helvetica Neue", sans-serif';
 const MAX_DPR = 2;
-const HIST = 18;
-const COPIES = 7;
-const COPY_STEP = 15;
+const HIST = 24;
+const COPIES = 5;
+const COPY_STEP = 18;
+const SHUTTER = 42;
+const STREAK = 7;
 const MAX_SPEED = 4200;
 const HOLD_MS = 380;
 const SLOP = 8;
+const REST_MS = 3000;
+const IDLE_MS = 3200;
+const SET_K = 210;
 
 export const POEM = [
   "it’s been a long, long winter",
@@ -54,6 +59,7 @@ export function createSmear(root, refs, { onReady } = {}) {
   let LH = 26;
   let ascent = 14;
   let words = [];
+  let rows = [];
   let raf = 0;
   let last = 0;
   let visible = true;
@@ -67,15 +73,22 @@ export function createSmear(root, refs, { onReady } = {}) {
   let avail = { top: 0, bottom: 0 };
   let blockLeft = 0;
   let blockTop = 0;
+  let mode = 1;
+  let wave = 0;
+  let lastInput = 0;
+  let ambientTimer = 0;
+  let turnAt = 0;
 
   const font = (size) => `400 ${size}px ${FAMILY}`;
 
   const build = () => {
     words = [];
+    rows = [];
     let id = 0;
     POEM.forEach((line, li) => {
+      const row = [];
       line.split(" ").forEach((text, col) => {
-        words.push({
+        const word = {
           id,
           text,
           line: li,
@@ -83,6 +96,8 @@ export function createSmear(root, refs, { onReady } = {}) {
           w: 0,
           tx: 0,
           ty: 0,
+          ax: 0,
+          bx: 0,
           x: 0,
           y: 0,
           vx: 0,
@@ -91,20 +106,24 @@ export function createSmear(root, refs, { onReady } = {}) {
           oy: 0,
           back: 0,
           delay: 0,
+          flip: -1,
           shown: true,
           peak: 0,
           k: 64 + hash(id + 7) * 22,
+          kk: 0,
           hx: new Float32Array(HIST),
           hy: new Float32Array(HIST),
           ht: new Float64Array(HIST),
           head: 0,
           count: 0,
           idle: 0,
-          sprite: null,
-          warm: null,
-        });
+          sprites: null,
+        };
+        words.push(word);
+        row.push(word);
         id += 1;
       });
+      rows.push(row);
     });
   };
 
@@ -112,7 +131,7 @@ export function createSmear(root, refs, { onReady } = {}) {
     const box = root.getBoundingClientRect();
     const top = refs.caption ? refs.caption.getBoundingClientRect().bottom - box.top : 0;
     const bottom = refs.controls ? box.bottom - refs.controls.getBoundingClientRect().top : 0;
-    avail = { top: Math.max(top + 16, 24), bottom: Math.max(bottom + 16, 24) };
+    avail = { top: Math.max(top + 24, 24), bottom: Math.max(bottom + 24, 24) };
   };
 
   const makeSprite = (word, color) => {
@@ -131,35 +150,40 @@ export function createSmear(root, refs, { onReady } = {}) {
   const layout = () => {
     const ah = H - avail.top - avail.bottom;
     const aw = W - 40;
-    F = Math.max(11, Math.min(20, Math.floor(ah / (POEM.length * 1.42))));
-    LH = Math.round(F * 1.42);
+    F = Math.max(11, Math.min(19, Math.floor(ah / (POEM.length * 1.4))));
+    LH = Math.round(F * 1.4);
     ascent = Math.round(LH * 0.5 + F * 0.36);
     meter.font = font(F);
     const space = meter.measureText(" ").width;
     for (const word of words) word.w = meter.measureText(word.text).width;
-    const rows = POEM.map((_, li) => words.filter((w) => w.line === li));
-    const shapes = rows.map((row, li) => {
-      const sum = row.reduce((s, w) => s + w.w, 0);
-      const wave = 0.55 + 1.5 * Math.pow(Math.sin(li * 0.61 + 0.4) * 0.5 + 0.5, 1.6) + hash(li) * 0.35;
-      let gap = Math.max(space * 1.6, F * wave);
-      if (row.length > 1) gap = Math.min(gap, (aw - sum) / (row.length - 1));
-      gap = Math.max(space, gap);
-      return { gap, width: sum + gap * (row.length - 1) };
-    });
-    const blockW = Math.min(aw, Math.max(...shapes.map((s) => s.width)));
-    blockLeft = Math.round((W - blockW) / 2);
+    const natural = rows.map((row) => row.reduce((s, w) => s + w.w, 0) + space * (row.length - 1));
+    const measure = Math.min(aw, Math.max(F * 19, Math.max(...natural) * 1.36));
+    blockLeft = Math.round((W - measure) / 2);
     blockTop = Math.round(avail.top + (ah - POEM.length * LH) / 2);
     rows.forEach((row, li) => {
-      let x = blockLeft;
+      const sum = row.reduce((s, w) => s + w.w, 0);
+      const free = row.length > 1 ? (measure - sum) / (row.length - 1) : 0;
+      const cap = F * (3.6 + hash(li * 3 + 1) * 2.2);
+      const gap = Math.max(space, Math.min(free, cap));
+      let a = blockLeft;
+      let b = blockLeft;
       row.forEach((word) => {
-        word.tx = x;
+        word.ax = a;
+        word.bx = b;
         word.ty = blockTop + li * LH;
-        x += word.w + shapes[li].gap;
+        a += word.w + space;
+        b += word.w + gap;
       });
     });
     for (const word of words) {
-      word.sprite = makeSprite(word, "#f6f5ef");
-      word.warm = makeSprite(word, "#ece49c");
+      word.tx = mode ? word.bx : word.ax;
+      word.sprites = {
+        white: makeSprite(word, "#f4f3ee"),
+        warm: makeSprite(word, "#e9e4cf"),
+        r: makeSprite(word, "#f43a2e"),
+        g: makeSprite(word, "#2ef06a"),
+        b: makeSprite(word, "#3a66ff"),
+      };
     }
   };
 
@@ -194,10 +218,14 @@ export function createSmear(root, refs, { onReady } = {}) {
 
   const arrive = (lead = 0) => {
     scattered = false;
+    mode = 1;
     for (const word of words) {
       word.ox = 0;
       word.oy = 0;
       word.back = 0;
+      word.flip = -1;
+      word.kk = 0;
+      word.tx = word.bx;
       const far = W * 0.42 + word.col * F * 2.6 + hash(word.id) * F * 6;
       word.x = word.tx + far;
       word.y = word.ty;
@@ -208,6 +236,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       word.peak = 0;
       resetHistory(word);
     }
+    scheduleAmbient(5200);
     wake();
   };
 
@@ -235,6 +264,44 @@ export function createSmear(root, refs, { onReady } = {}) {
     wake();
   };
 
+  const turn = () => {
+    if (destroyed || scattered || press) return;
+    mode = mode ? 0 : 1;
+    wave += 1;
+    const fromTop = wave % 4 < 2;
+    for (const word of words) {
+      const li = fromTop ? word.line : POEM.length - 1 - word.line;
+      const dir = mode ? 1 : -1;
+      const order = dir > 0 ? rows[word.line].length - 1 - word.col : word.col;
+      word.flip = li * 0.075 + order * 0.022 + hash(word.id * 5 + wave) * 0.03;
+    }
+    wake();
+  };
+
+  function scheduleAmbient(ms = REST_MS) {
+    clearTimeout(ambientTimer);
+    if (destroyed) return;
+    turnAt = performance.now() + ms;
+    const check = () => {
+      if (destroyed) return;
+      const now = performance.now();
+      if (turnAt - now > ms + 50) turnAt = now + ms;
+      if (lastInput > now) lastInput = now - IDLE_MS;
+      if (now < turnAt - 4) {
+        ambientTimer = setTimeout(check, Math.max(16, turnAt - now));
+        return;
+      }
+      const quiet = now - lastInput;
+      if (!visible || document.hidden || press || scattered || quiet < IDLE_MS) {
+        scheduleAmbient(Math.max(600, IDLE_MS - quiet + 200));
+        return;
+      }
+      turn();
+      scheduleAmbient(REST_MS + POEM.length * 75);
+    };
+    ambientTimer = setTimeout(check, ms);
+  }
+
   const step = (dt) => {
     let moving = false;
     let energy = 0;
@@ -248,6 +315,16 @@ export function createSmear(root, refs, { onReady } = {}) {
         word.shown = true;
         resetHistory(word);
       }
+      if (word.flip >= 0) {
+        word.flip -= dt;
+        moving = true;
+        if (word.flip < 0) {
+          word.tx = mode ? word.bx : word.ax;
+          word.kk = SET_K;
+          word.vx += (word.tx - word.x) * 7;
+          word.quiet = true;
+        }
+      }
       if (word.back > 0) {
         word.back -= dt;
         moving = true;
@@ -256,8 +333,8 @@ export function createSmear(root, refs, { onReady } = {}) {
           word.oy = 0;
         }
       }
-      const k = scattered ? 26 : word.k;
-      const c = 2 * Math.sqrt(k) * (scattered ? 1.1 : 0.94);
+      const k = scattered ? 26 : word.kk || word.k;
+      const c = 2 * Math.sqrt(k) * (scattered ? 1.1 : word.kk ? 1 : 0.94);
       const gx = word.tx + word.ox;
       const gy = word.ty + word.oy;
       word.vx += ((gx - word.x) * k - word.vx * c) * dt;
@@ -272,9 +349,10 @@ export function createSmear(root, refs, { onReady } = {}) {
       const off = Math.abs(gx - word.x) + Math.abs(gy - word.y);
       const speed = Math.abs(word.vx) + Math.abs(word.vy);
       word.peak = Math.max(word.peak, speed);
-      if (word.peak > 700 && speed < 60 && off < 3) {
+      if (word.peak > 500 && speed < 60 && off < 3) {
         word.peak = 0;
-        audio.land((word.x / W) * 1.6 - 0.8, word.line);
+        if (!word.quiet) audio.land((word.x / W) * 1.6 - 0.8, word.line);
+        else if (word.col === 0) audio.land((word.x / W) * 1.6 - 0.8, word.line, 0.45);
       }
       if (off > 0.08 || speed > 0.8) {
         moving = true;
@@ -285,6 +363,8 @@ export function createSmear(root, refs, { onReady } = {}) {
         word.vx = 0;
         word.vy = 0;
         word.idle += dt;
+        word.kk = 0;
+        word.quiet = false;
       }
       energy += Math.min(speed, 2400);
       ex += word.x * speed;
@@ -300,23 +380,53 @@ export function createSmear(root, refs, { onReady } = {}) {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     for (const word of words) {
-      if (!word.shown || !word.sprite) continue;
-      const sw = word.sprite.width / dpr;
-      const sh = word.sprite.height / dpr;
-      if (word.idle < 0.2 && word.count > 1) {
-        for (let j = COPIES; j >= 1; j -= 1) {
-          if (!sample(word, now - j * COPY_STEP, tmp)) continue;
-          const dx = tmp[0] - word.x;
-          const dy = tmp[1] - word.y;
-          if (dx * dx + dy * dy < 2.2) continue;
-          const fade = 1 - j / (COPIES + 1);
-          ctx.globalAlpha = 0.62 * fade * fade;
-          ctx.drawImage(word.warm, tmp[0] - 2, tmp[1], sw, sh);
-        }
+      if (!word.shown || !word.sprites || word.idle >= 0.25 || word.count < 2) continue;
+      const sp = word.sprites;
+      const sw = sp.white.width / dpr;
+      const sh = sp.white.height / dpr;
+      ctx.globalCompositeOperation = "lighter";
+      for (let j = COPIES; j >= 1; j -= 1) {
+        if (!sample(word, now - SHUTTER - j * COPY_STEP, tmp)) continue;
+        const dx = tmp[0] - word.x;
+        const dy = tmp[1] - word.y;
+        if (dx * dx + dy * dy < 4) continue;
+        const fade = 1 - j / (COPIES + 1);
+        ctx.globalAlpha = 0.34 * fade * fade;
+        ctx.drawImage(sp.warm, tmp[0] - 2, tmp[1], sw, sh);
       }
-      ctx.globalAlpha = 1;
-      ctx.drawImage(word.sprite, word.x - 2, word.y, sw, sh);
+      for (let j = STREAK; j >= 1; j -= 1) {
+        if (!sample(word, now - (j / STREAK) * SHUTTER, tmp)) continue;
+        const dx = tmp[0] - word.x;
+        if (dx * dx < 1) continue;
+        ctx.globalAlpha = 0.16 * (1 - j / (STREAK + 2));
+        ctx.drawImage(sp.white, tmp[0] - 2, tmp[1], sw, sh);
+      }
     }
+    for (const word of words) {
+      if (!word.shown || !word.sprites) continue;
+      const sp = word.sprites;
+      const sw = sp.white.width / dpr;
+      const sh = sp.white.height / dpr;
+      const speed = Math.abs(word.vx);
+      if (speed > 40) {
+        const split = Math.min(3.2, speed * 0.0016);
+        const dir = Math.sign(word.vx);
+        const settle = Math.min(1, speed / 400);
+        ctx.globalCompositeOperation = "lighter";
+        ctx.globalAlpha = settle;
+        ctx.drawImage(sp.r, word.x - 2 - dir * split, word.y, sw, sh);
+        ctx.drawImage(sp.g, word.x - 2, word.y, sw, sh);
+        ctx.drawImage(sp.b, word.x - 2 + dir * split * 0.6, word.y, sw, sh);
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1 - settle;
+        if (ctx.globalAlpha > 0.02) ctx.drawImage(sp.white, word.x - 2, word.y, sw, sh);
+      } else {
+        ctx.globalCompositeOperation = "source-over";
+        ctx.globalAlpha = 1;
+        ctx.drawImage(sp.white, word.x - 2, word.y, sw, sh);
+      }
+    }
+    ctx.globalCompositeOperation = "source-over";
     ctx.globalAlpha = 1;
   };
 
@@ -343,7 +453,7 @@ export function createSmear(root, refs, { onReady } = {}) {
     if (moving || press) {
       still = 0;
       wake();
-    } else if (still < 14) {
+    } else if (still < 16) {
       still += 1;
       wake();
     } else {
@@ -362,6 +472,10 @@ export function createSmear(root, refs, { onReady } = {}) {
     return { x: e.clientX - rect.left, y: e.clientY - rect.top };
   };
 
+  const touch = () => {
+    lastInput = performance.now();
+  };
+
   const scatter = () => {
     scattered = true;
     seed += 1;
@@ -371,6 +485,9 @@ export function createSmear(root, refs, { onReady } = {}) {
         word.shown = true;
         resetHistory(word);
       }
+      word.flip = -1;
+      word.kk = 0;
+      word.tx = mode ? word.bx : word.ax;
       const spread = 1.5 + hash(word.line * 7 + seed) * 2.6;
       const shift = Math.max(12 - blockLeft, (hash(word.line * 13 + seed * 3) - 0.35) * W * 0.5);
       const target = blockLeft + (word.tx - blockLeft) * spread + shift;
@@ -389,6 +506,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       word.back = 0.04 + word.line * 0.07 + word.col * 0.012;
     }
     root.removeAttribute("data-scattered");
+    touch();
     wake();
   };
 
@@ -427,6 +545,7 @@ export function createSmear(root, refs, { onReady } = {}) {
   const onDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
     audio.unlock();
+    touch();
     const p = local(e);
     stage.setPointerCapture?.(e.pointerId);
     press = { id: e.pointerId, x0: p.x, y0: p.y, lx: p.x, ly: p.y, lt: performance.now(), vx: 0, vy: 0, mode: "pending", timer: 0 };
@@ -443,6 +562,7 @@ export function createSmear(root, refs, { onReady } = {}) {
 
   const onMove = (e) => {
     if (!press || press.id !== e.pointerId) return;
+    touch();
     const p = local(e);
     const now = performance.now();
     const dt = Math.max(1, now - press.lt) / 1000;
@@ -477,12 +597,13 @@ export function createSmear(root, refs, { onReady } = {}) {
   const onUp = (e) => {
     if (!press || press.id !== e.pointerId) return;
     clearTimeout(press.timer);
-    const mode = press.mode;
+    touch();
+    const mode0 = press.mode;
     const p = { x: press.lx, y: press.ly };
     press = null;
     root.removeAttribute("data-pressing");
-    if (mode === "hold") gather();
-    else if (mode === "pending" && e.type === "pointerup") ripple(p);
+    if (mode0 === "hold") gather();
+    else if (mode0 === "pending" && e.type === "pointerup") ripple(p);
     wake();
   };
 
@@ -491,14 +612,17 @@ export function createSmear(root, refs, { onReady } = {}) {
       e.preventDefault();
       if (e.repeat) return;
       audio.unlock();
+      touch();
       scatter();
     } else if (e.key === "Enter") {
       e.preventDefault();
       audio.unlock();
+      touch();
       arrive();
     } else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
       e.preventDefault();
       audio.unlock();
+      touch();
       const dir = e.key === "ArrowLeft" ? -1 : 1;
       for (const word of words) word.vx += dir * (1400 + hash(word.id) * 900);
       wake();
@@ -556,6 +680,7 @@ export function createSmear(root, refs, { onReady } = {}) {
   return {
     replay() {
       audio.unlock();
+      touch();
       arrive();
     },
     setSound(on) {
@@ -564,6 +689,7 @@ export function createSmear(root, refs, { onReady } = {}) {
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);
+      clearTimeout(ambientTimer);
       if (press) clearTimeout(press.timer);
       io.disconnect();
       ro.disconnect();

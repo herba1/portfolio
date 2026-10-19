@@ -84,7 +84,7 @@ export default function Piece({ embedded = false }) {
         className="bitmap-decay-canvas"
         tabIndex={0}
         role="img"
-        aria-label={`"${text}" in blue bitmap type, four times, each line more broken. Drag a line down to decay it or up to heal it, scrub across to wear pixels away, hold still to mend them. Arrow keys pick a line and change its decay.`}
+        aria-label={`"${text}" in blue pixel type, four times, each line more broken. Drag a line down to decay it or up to heal it, scrub across to wear pixels away, hold still to mend them. Arrow keys pick a line and change its decay.`}
       />
       {embedded ? null : (
         <header className="bitmap-decay-caption">

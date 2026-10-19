@@ -2,8 +2,15 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { albumById } from "@/app/lab/_music/catalog";
+import { PRINTS } from "./cutoutPrint";
+import { PAPERS } from "./cutoutEngine";
 import sea from "./sea.jpg";
+import dusk from "./dusk.jpg";
 import "./cutout.css";
+
+const ALBUM = albumById("rubber-soul");
+const ALBUM_META = { title: ALBUM.title, artist: ALBUM.artist, year: ALBUM.year, folio: 14 };
 
 function SpeakerIcon({ on }) {
   return (
@@ -31,7 +38,8 @@ function ScissorsIcon() {
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const pageRef = useRef(null);
-  const canvasRef = useRef(null);
+  const sheetA = useRef(null);
+  const sheetB = useRef(null);
   const layerRef = useRef(null);
   const inputRef = useRef(null);
   const engineRef = useRef(null);
@@ -39,6 +47,9 @@ export default function Piece({ embedded = false }) {
   const [failed, setFailed] = useState(false);
   const [sound, setSound] = useState(true);
   const [drafting, setDrafting] = useState(false);
+  const [thumbs, setThumbs] = useState(null);
+  const [printId, setPrintId] = useState(PRINTS[0].id);
+  const [paperId, setPaperId] = useState(PAPERS[0].id);
 
   useEffect(() => {
     const pageEl = pageRef.current;
@@ -51,14 +62,16 @@ export default function Piece({ embedded = false }) {
       engine = createCutout({
         root: rootRef.current,
         page: pageEl,
-        canvas: canvasRef.current,
+        sheets: [sheetA.current, sheetB.current],
         layer: layerRef.current,
         input: inputRef.current,
-        photoSrc: sea.src,
+        sources: { dusk: dusk.src, sea: sea.src, album: ALBUM.cover },
+        album: ALBUM_META,
         embedded,
         onReady: () => setReady(true),
         onFail: () => setFailed(true),
         onDraft: (on) => setDrafting(on),
+        onThumbs: (next) => setThumbs(next),
       });
       engineRef.current = engine;
     };
@@ -88,6 +101,16 @@ export default function Piece({ embedded = false }) {
     if (next && !result) setSound(false);
   };
 
+  const choosePrint = (id) => {
+    setPrintId(id);
+    engineRef.current?.setPrint(id);
+  };
+
+  const choosePaper = (id) => {
+    setPaperId(id);
+    engineRef.current?.setPaper(id);
+  };
+
   const Root = embedded ? "div" : "main";
 
   return (
@@ -96,7 +119,7 @@ export default function Piece({ embedded = false }) {
         <header className="cutout-caption">
           <div className="cutout-caption-text">
             <h1 className="cutout-title">Cut-out</h1>
-            <p className="cutout-hint">Type a line and press Enter to cut it out. Drag strips around the page; drop one off the edge to throw it away.</p>
+            <p className="cutout-hint">Type a line to cut it from paper. Drag strips around; drop one off the page to bin it.</p>
           </div>
           <div className="cutout-actions">
             <button
@@ -109,18 +132,59 @@ export default function Piece({ embedded = false }) {
               <ScissorsIcon />
               <span>New line</span>
             </button>
-            <button type="button" className="cutout-button" aria-pressed={sound} onClick={toggleSound}>
+            <button type="button" className="cutout-button cutout-button-icon" aria-pressed={sound} aria-label={sound ? "Sound on" : "Sound off"} onClick={toggleSound}>
               <SpeakerIcon on={sound} />
-              <span>{sound ? "Sound on" : "Sound off"}</span>
             </button>
           </div>
         </header>
       )}
       <div className="cutout-desk">
         <div ref={pageRef} className="cutout-page">
-          <canvas ref={canvasRef} className="cutout-print" aria-hidden="true" />
+          <canvas ref={sheetA} className="cutout-print" aria-hidden="true" />
+          <canvas ref={sheetB} className="cutout-print" aria-hidden="true" />
+          <div className="cutout-sheen" aria-hidden="true" />
           <div ref={layerRef} className="cutout-layer" />
+          <span className="cutout-tape" data-side="left" aria-hidden="true" />
+          <span className="cutout-tape" data-side="right" aria-hidden="true" />
         </div>
+        {embedded ? null : (
+          <div className="cutout-rail">
+            <div className="cutout-group" role="radiogroup" aria-label="Page">
+              {PRINTS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={printId === p.id}
+                  aria-label={p.label}
+                  title={p.label}
+                  className="cutout-thumb"
+                  style={thumbs ? { backgroundImage: `url(${thumbs[p.id]})` } : undefined}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => choosePrint(p.id)}
+                />
+              ))}
+            </div>
+            <div className="cutout-group" role="radiogroup" aria-label="Paper">
+              {PAPERS.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={paperId === p.id}
+                  aria-label={p.label}
+                  title={p.label}
+                  className="cutout-chip"
+                  style={{ "--chip-paper": p.paper, "--chip-ink": p.ink }}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => choosePaper(p.id)}
+                >
+                  <span aria-hidden="true">Aa</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       <input
         ref={inputRef}

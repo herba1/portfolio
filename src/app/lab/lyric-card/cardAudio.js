@@ -88,14 +88,17 @@ export function createCardSound() {
       }
       return enabled && ctx.state === "running";
     },
-    startBeat() {
+    live() {
+      return ready() && Boolean(beat);
+    },
+    startBeat(delay = 0.03) {
       if (!ready() || !beat) return null;
       stopVoice(0.03);
       const src = ctx.createBufferSource();
       src.buffer = beat;
       src.loop = true;
       const gain = ctx.createGain();
-      const now = ctx.currentTime + 0.03;
+      const now = ctx.currentTime + Math.max(0.03, delay);
       gain.gain.setValueAtTime(0, now);
       gain.gain.linearRampToValueAtTime(0.8, now + 0.02);
       src.connect(gain);
@@ -106,11 +109,6 @@ export function createCardSound() {
     },
     fadeBeat(seconds) {
       stopVoice(seconds);
-    },
-    select(on) {
-      if (!ready()) return;
-      burst({ freq: on ? 2600 : 1900, q: 1.5, peak: 0.08, decay: 0.012 });
-      burst({ freq: on ? 360 : 280, q: 2.4, peak: 0.07, attack: 0.002, decay: 0.03 });
     },
     shutter() {
       if (!ready()) return;

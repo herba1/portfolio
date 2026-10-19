@@ -4,9 +4,13 @@ const DOC = 320;
 const SQUASH = 0.46;
 const INK = "#10134f";
 const FAMILY = '"Still Here Tinos", "Times New Roman", Times, serif';
-const HOLD_FIRST = 320;
-const HOLD_SLOW = 150;
-const HOLD_FAST = 70;
+export const MAX_GENERATIONS = 100;
+const REST_MS = 1400;
+const HOLD_MS = 2600;
+const HEAL_MS = 2600;
+const WEAR_SLOW = 260;
+const WEAR_FAST = 70;
+const CLICK_GAP = 120;
 
 function encode(canvas, quality) {
   return new Promise((resolve) => canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality));
@@ -83,36 +87,65 @@ function paintText(ctx, text) {
   });
 }
 
+function wobble(g) {
+  const grow = Math.min(1, g / 64);
+  const s = 1 + (0.003 + 0.002 * grow) * Math.sin(g * 2.399 + 0.6);
+  const r = (0.0009 + 0.0008 * grow) * Math.sin(g * 1.31 + 2.1);
+  const dx = (0.1 + 0.18 * grow) * Math.sin(g * 1.73);
+  const dy = (0.1 + 0.18 * grow) * Math.cos(g * 2.29);
+  return { s, r, dx, dy };
+}
+
+const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+
 export function createGeneration({ canvas, ghost, card, onState }) {
+  const make = () => {
+    const c = document.createElement("canvas");
+    c.width = DOC;
+    c.height = DOC;
+    return c;
+  };
   canvas.width = DOC;
   canvas.height = DOC;
   ghost.width = DOC;
   ghost.height = DOC;
   const ctx = canvas.getContext("2d", { alpha: false });
   const ghostCtx = ghost.getContext("2d", { alpha: false });
-  const pass = document.createElement("canvas");
-  pass.width = DOC;
-  pass.height = DOC;
+  const head = make();
+  const headCtx = head.getContext("2d", { alpha: false });
+  const pass = make();
   const passCtx = pass.getContext("2d", { alpha: false });
   passCtx.imageSmoothingQuality = "high";
 
   let text = "still here?";
   let quality = 0.32;
-  let generation = 0;
-  let bytes = 0;
-  let history = [];
+  let frames = [{ blob: null, bytes: 0 }];
+  let shown = 0;
+  let target = 0;
   let token = 0;
-  let busy = false;
-  let queued = 0;
-  let holding = false;
-  let holdTimer = 0;
-  let measureTimer = 0;
-  let holdCount = 0;
+  let syncing = false;
+  let invalid = false;
+  let playing = true;
+  let visible = true;
+  let started = false;
+  let phase = "rest";
+  let phaseAt = 0;
+  let timer = 0;
   let destroyed = false;
   let audio = null;
   let soundOn = true;
+  let lastClick = 0;
+  let clickNext = 0;
+  let healFrom = 0;
 
-  const emit = () => onState?.({ generation, bytes, history: history.slice(-64), text, quality });
+  const emit = () =>
+    onState?.({
+      generation: shown,
+      bytes: frames[shown]?.bytes ?? 0,
+      history: frames.slice(1, shown + 1).map((f) => f.bytes),
+      playing,
+      phase,
+    });
 
   const crossfade = (ms) => {
     ghostCtx.drawImage(canvas, 0, 0);
@@ -120,38 +153,35 @@ export function createGeneration({ canvas, ghost, card, onState }) {
     ghost.animate([{ opacity: 1 }, { opacity: 0 }], { duration: ms, easing: "cubic-bezier(0.22, 1, 0.36, 1)", fill: "forwards" });
   };
 
+  const click = (intensity) => {
+    const now = performance.now();
+    if (now - lastClick < CLICK_GAP) return;
+    lastClick = now;
+    audio?.shutter(intensity);
+  };
+
   const measureOriginal = async (mine) => {
-    const blob = await encode(canvas, 0.98);
+    const blob = await encode(head, 0.98);
     if (destroyed || mine !== token || !blob) return;
-    bytes = blob.size;
-    history = [blob.size];
-    emit();
+    frames[0].bytes = blob.size;
+    if (shown === 0) emit();
   };
 
-  const pristine = (fade) => {
+  const pristine = () => {
     token += 1;
-    queued = 0;
-    if (fade) crossfade(fade);
-    paintText(ctx, text);
-    generation = 0;
-    history = [];
+    paintText(headCtx, text);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.drawImage(head, 0, 0);
+    frames = [{ blob: null, bytes: frames[0]?.bytes ?? 0 }];
+    shown = 0;
+    target = 0;
+    invalid = false;
     emit();
-    window.clearTimeout(measureTimer);
-    const mine = token;
-    measureTimer = window.setTimeout(() => measureOriginal(mine), 220);
+    measureOriginal(token);
   };
 
-  const wobble = (g) => {
-    const s = 1 + 0.003 * Math.sin(g * 2.399 + 0.6);
-    const r = 0.0009 * Math.sin(g * 1.31 + 2.1);
-    const dx = 0.1 * Math.sin(g * 1.73);
-    const dy = 0.1 * Math.cos(g * 2.29);
-    return { s, r, dx, dy };
-  };
-
-  const generationOnce = async () => {
-    const mine = token;
-    const g = generation + 1;
+  const produce = async (mine) => {
+    const g = frames.length;
     const { s, r, dx, dy } = wobble(g);
     passCtx.setTransform(1, 0, 0, 1, 0, 0);
     passCtx.fillStyle = "#ffffff";
@@ -159,7 +189,7 @@ export function createGeneration({ canvas, ghost, card, onState }) {
     passCtx.translate(DOC / 2 + dx, DOC / 2 + dy);
     passCtx.rotate(r);
     passCtx.scale(s, s);
-    passCtx.drawImage(canvas, -DOC / 2, -DOC / 2);
+    passCtx.drawImage(head, -DOC / 2, -DOC / 2);
     const blob = await encode(pass, quality);
     if (destroyed || mine !== token || !blob) return false;
     const bitmap = await decode(blob);
@@ -167,59 +197,134 @@ export function createGeneration({ canvas, ghost, card, onState }) {
       bitmap.close?.();
       return false;
     }
+    headCtx.setTransform(1, 0, 0, 1, 0, 0);
+    headCtx.drawImage(bitmap, 0, 0);
+    bitmap.close?.();
+    frames.push({ blob, bytes: blob.size });
+    return true;
+  };
+
+  const display = async (g, mine) => {
+    if (g === frames.length - 1) {
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.drawImage(head, 0, 0);
+      return true;
+    }
+    if (g === 0) {
+      paintText(ctx, text);
+      return true;
+    }
+    const bitmap = await decode(frames[g].blob);
+    if (destroyed || mine !== token) {
+      bitmap.close?.();
+      return false;
+    }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.drawImage(bitmap, 0, 0);
     bitmap.close?.();
-    generation = g;
-    bytes = blob.size;
-    history.push(blob.size);
-    if (history.length > 400) history = history.slice(-400);
     return true;
+  };
+
+  const sync = async () => {
+    if (syncing || destroyed) return;
+    syncing = true;
+    const mine = token;
+    let aborted = false;
+    if (invalid) {
+      invalid = false;
+      frames = frames.slice(0, shown + 1);
+      headCtx.setTransform(1, 0, 0, 1, 0, 0);
+      headCtx.drawImage(canvas, 0, 0);
+    }
+    while (shown !== target && !destroyed && mine === token) {
+      const want = target;
+      while (frames.length - 1 < want) {
+        if (!(await produce(mine))) {
+          aborted = true;
+          break;
+        }
+      }
+      if (aborted) break;
+      if (!(await display(want, mine))) break;
+      const forward = want > shown;
+      shown = want;
+      if (forward && clickNext) click(clickNext);
+      if (forward && phase === "wear") press();
+      emit();
+    }
+    syncing = false;
+    if (!destroyed && (shown !== target || invalid)) sync();
   };
 
   const press = () => {
     card.getAnimations().forEach((a) => a.cancel());
-    card.animate([{ transform: "scale(0.992)" }, { transform: "scale(1)" }], { duration: 180, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+    card.animate([{ transform: "scale(0.996)" }, { transform: "scale(1)" }], { duration: 160, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
   };
 
-  const pump = async () => {
-    if (busy) return;
-    busy = true;
-    while (queued > 0 && !destroyed) {
-      queued -= 1;
-      const ok = await generationOnce();
-      if (ok) {
-        audio?.shutter(holding ? 0.6 : 1);
-        press();
-        emit();
+  const goTo = (g, intensity) => {
+    target = Math.max(0, Math.min(MAX_GENERATIONS, Math.round(g)));
+    clickNext = intensity;
+    sync();
+  };
+
+  const setPhase = (next) => {
+    phase = next;
+    phaseAt = performance.now();
+    emit();
+  };
+
+  const schedule = (ms) => {
+    window.clearTimeout(timer);
+    if (!playing || !visible || destroyed || !started) return;
+    timer = window.setTimeout(tick, ms);
+  };
+
+  const tick = () => {
+    if (!playing || !visible || destroyed) return;
+    const now = performance.now();
+    if (phase === "rest") {
+      if (now - phaseAt >= REST_MS) {
+        setPhase("wear");
+        return schedule(0);
       }
+      return schedule(REST_MS - (now - phaseAt));
     }
-    busy = false;
-  };
-
-  const save = () => {
-    if (destroyed) return;
-    audio?.wake();
-    queued = Math.min(queued + 1, 2);
-    pump();
-  };
-
-  const holdTick = () => {
-    if (!holding || destroyed) return;
-    if (!busy) save();
-    holdCount += 1;
-    const delay = Math.max(HOLD_FAST, HOLD_SLOW - holdCount * 8);
-    holdTimer = window.setTimeout(holdTick, delay);
-  };
-
-  const hold = (on) => {
-    window.clearTimeout(holdTimer);
-    holding = on;
-    holdCount = 0;
-    if (on) {
-      save();
-      holdTimer = window.setTimeout(holdTick, HOLD_FIRST);
+    if (phase === "wear") {
+      if (shown >= MAX_GENERATIONS) {
+        setPhase("hold");
+        return schedule(HOLD_MS);
+      }
+      if (!syncing && shown === target) goTo(shown + 1, 0.35);
+      const p = shown / MAX_GENERATIONS;
+      const delay = WEAR_SLOW + (WEAR_FAST - WEAR_SLOW) * (1 - Math.pow(1 - Math.min(1, p * 1.6), 2));
+      return schedule(delay);
     }
+    if (phase === "hold") {
+      if (now - phaseAt >= HOLD_MS) {
+        healFrom = shown;
+        setPhase("heal");
+        return schedule(0);
+      }
+      return schedule(HOLD_MS - (now - phaseAt));
+    }
+    if (phase === "heal") {
+      const t = Math.min(1, (now - phaseAt) / HEAL_MS);
+      const g = Math.round(healFrom * (1 - easeInOut(t)));
+      if (g === 0 && shown !== 0) crossfade(500);
+      goTo(g, 0);
+      if (t >= 1) {
+        setPhase("rest");
+        return schedule(REST_MS);
+      }
+      return schedule(32);
+    }
+    return undefined;
+  };
+
+  const resumeFromHere = () => {
+    if (shown >= MAX_GENERATIONS) setPhase("hold");
+    else if (shown === 0) setPhase("rest");
+    else setPhase("wear");
   };
 
   const ensureAudio = () => {
@@ -236,7 +341,7 @@ export function createGeneration({ canvas, ghost, card, onState }) {
   window.addEventListener("pointerdown", onFirstGesture, true);
   window.addEventListener("keydown", onFirstGesture, true);
 
-  const init = async (startText, startGenerations) => {
+  const init = async (startText) => {
     try {
       await document.fonts.load(`100px "Still Here Tinos"`);
     } catch {
@@ -244,29 +349,53 @@ export function createGeneration({ canvas, ghost, card, onState }) {
     }
     if (destroyed) return;
     text = startText;
-    paintText(ctx, text);
-    const mine = token;
-    const original = await encode(canvas, 0.98);
-    if (original) history = [original.size];
-    for (let i = 0; i < startGenerations && !destroyed && mine === token; i += 1) await generationOnce();
-    if (destroyed) return;
-    emit();
+    pristine();
+    started = true;
+    setPhase("rest");
+    schedule(REST_MS);
   };
 
   return {
     init,
-    save,
-    hold,
     setText(next) {
       text = next;
-      pristine(0);
+      pristine();
+      if (playing) {
+        setPhase("rest");
+        phaseAt = performance.now() - REST_MS * 0.5;
+        schedule(REST_MS * 0.5);
+      }
     },
     setQuality(q) {
       quality = q;
+      invalid = true;
+      if (!syncing) sync();
+    },
+    scrub(g) {
+      if (playing) {
+        playing = false;
+        window.clearTimeout(timer);
+      }
+      goTo(g, 0.25);
       emit();
     },
-    reset() {
-      pristine(420);
+    setPlaying(on) {
+      playing = on;
+      window.clearTimeout(timer);
+      if (on) {
+        resumeFromHere();
+        schedule(phase === "hold" ? HOLD_MS * 0.5 : 0);
+      }
+      emit();
+    },
+    setVisible(on) {
+      if (visible === on) return;
+      visible = on;
+      window.clearTimeout(timer);
+      if (on && playing) {
+        if (phase === "heal") phaseAt = performance.now() - HEAL_MS;
+        schedule(0);
+      }
     },
     async setSound(on) {
       soundOn = on;
@@ -280,8 +409,7 @@ export function createGeneration({ canvas, ghost, card, onState }) {
     },
     destroy() {
       destroyed = true;
-      window.clearTimeout(holdTimer);
-      window.clearTimeout(measureTimer);
+      window.clearTimeout(timer);
       window.removeEventListener("pointerdown", onFirstGesture, true);
       window.removeEventListener("keydown", onFirstGesture, true);
       audio?.destroy();

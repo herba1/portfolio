@@ -1,11 +1,18 @@
 {
   "title": "Justify",
-  "description": "A lyric set as a force-justified block in soft black Arial on white, two or three words to a line with wide uneven gaps. Drag the right edge and every word glides on its own spring to its new slot; click in to rewrite it live, and turn the softness from crisp to upscaled-JPEG mush.",
-  "tags": ["Type", "Layout", "Lyrics"],
+  "description": "A lyric set as a force-justified block in soft black Arial on white. Drag the right edge and the words flow like one ribbon: each slides along its line, rolls around the margin and comes back in at the start of the next, never crossing another word; rewrite it or switch lyrics and the shared words travel to their new places.",
+  "tags": [
+    "Type",
+    "Layout",
+    "Lyrics"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "One typographic mechanic finished to the edge: force-justification as a live material, where the measure is the only control and the gaps are the design.",
-  "tile": { "cols": 4, "rows": 4 },
+  "intent": "Force-justification as a live material with reflow that is physically continuous: the measure is a roller the text winds around, so every word keeps one body and one path, interruptible mid-drag.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://aerotwist.com/blog/flip-your-animations/",
     "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/imageSmoothingQuality",

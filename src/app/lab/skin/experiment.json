@@ -1,14 +1,16 @@
 {
-  "title": "Skin",
-  "description": "A pixel-crisp early-2000s media player in three windows: a scrolling title marquee, a live spectrum analyser and oscilloscope drawn from herb's beat, a ten-band equaliser that really filters it, and a Beatles playlist. Drag the windows by their frames and they snap and dock together, and moving the main window carries the docked ones with it.",
-  "tags": ["Y2K", "Interface", "Music", "Sound", "Pixel"],
+  "title": "8-Bit Player",
+  "description": "herb's top songs remade as 8-bit chiptunes inside a pixel-crisp early-2000s player: two pulse channels, a triangle bass and a noise drum kit play each remake live, while the spectrum analyser, oscilloscope and channel meters read the real output and the ten-band EQ really filters it. Double-click a track, slide the EQ, drag the windows and they snap together.",
+  "tags": ["Y2K", "Interface", "Music", "Sound", "Pixel", "Chiptune"],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "One period object finished to the edge: every pixel of the skin is drawn on tiny canvases scaled by whole device pixels, and every readout is real, from the FFT behind the bars to the biquad filters behind the EQ sliders.",
+  "intent": "One period object finished to the edge, now with its own sound: every song in the playlist becomes a short NES-style arrangement synthesised in Web Audio (band-limited pulse waves with duty changes, a stepped triangle, LFSR noise, envelopes and vibrato) on a lookahead clock, and every readout on the skin is drawn from that real signal.",
   "tile": { "cols": 4, "rows": 4 },
   "sources": [
+    "https://www.nesdev.org/wiki/APU",
+    "https://web.dev/articles/audio-scheduling",
+    "https://developer.mozilla.org/en-US/docs/Web/API/PeriodicWave",
     "https://developer.mozilla.org/en-US/docs/Web/API/BiquadFilterNode",
-    "https://en.wikipedia.org/wiki/Cooley%E2%80%93Tukey_FFT_algorithm",
     "herb reference board: Y2K found-footage montage (fa23bcd4), CRT green terminal text and early-2000s media objects"
   ]
 }

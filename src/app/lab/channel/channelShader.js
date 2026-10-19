@@ -21,6 +21,7 @@ uniform float uDegauss;
 uniform float uHasCover;
 uniform vec4 uKen;
 uniform float uCurve;
+uniform float uFade;
 out vec4 outColor;
 
 float hash(vec2 p) {
@@ -41,7 +42,8 @@ float vnoise(vec2 p) {
 }
 
 vec3 picture(vec2 uv, float lod) {
-  vec2 cuv = vec2(uv.x, (uv.y - 0.5) * (uScreen.y / uScreen.x) + 0.5);
+  float aspect = uScreen.x / uScreen.y;
+  vec2 cuv = aspect >= 1.0 ? vec2(uv.x, (uv.y - 0.5) / aspect + 0.5) : vec2((uv.x - 0.5) * aspect + 0.5, uv.y);
   cuv = (cuv - 0.5) / uKen.x + 0.5 + uKen.yz;
   vec3 c = textureLod(uCover, cuv, lod).rgb;
   return c * uHasCover;
@@ -108,14 +110,14 @@ void main() {
 
   float r = length(cs * vec2(0.9, 1.0));
   col *= 1.0 - smoothstep(0.6, 1.5, r) * 0.6;
-  vec2 rp = (c - vec2(-0.42, -0.58)) * vec2(0.9, 2.1);
-  float refl = 1.0 - smoothstep(0.0, 0.85, length(rp));
-  col += vec3(0.9, 0.93, 1.0) * refl * 0.07;
+  vec2 rp = (c - vec2(-0.5, -0.62)) * vec2(0.8, 1.9);
+  float refl = 1.0 - smoothstep(0.0, 0.9, length(rp));
+  col += vec3(0.9, 0.93, 1.0) * refl * 0.035;
   float rim = (1.0 - smoothstep(0.0, 0.06, min(edge.x, edge.y))) * glass;
   col += vec3(0.6, 0.62, 0.66) * rim * 0.05 * (0.4 + 0.6 * (1.0 - smoothstep(-0.8, 0.4, c.y)));
   vec3 off = vec3(0.045, 0.05, 0.05) * (1.0 - 0.4 * r * r);
   col = max(col, off);
-  col = clamp(col, 0.0, 1.0);
+  col = clamp(col, 0.0, 1.0) * uFade;
   outColor = vec4(col * glass, glass);
 }
 `;

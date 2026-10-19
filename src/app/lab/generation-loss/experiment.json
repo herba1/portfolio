@@ -1,11 +1,18 @@
 {
   "title": "Still Here",
-  "description": "\"still here?\" in a tall navy serif, saved as a real JPEG forty times over until the blocks, ringing and purple chroma bleed set in. Type your own line, then hold Save again and watch every re-encode wear it down while the file size drops.",
-  "tags": ["Type", "Lo-fi", "Image"],
+  "description": "\"still here?\" in a tall navy serif saves itself as a JPEG over and over on its own, each copy made from the last, until blocks, ringing and purple colour bleed take the line apart; then it rewinds clean and starts again. Pause it, drag through the generations, or type your own line and watch it wear.",
+  "tags": [
+    "Type",
+    "Lo-fi",
+    "Image"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "Generation loss as the material: each save is a genuine canvas.toBlob JPEG decoded back onto itself with a sub-pixel wobble, so the artefacts compound exactly like a reposted screenshot.",
-  "tile": { "cols": 4, "rows": 4 },
+  "intent": "Generation loss that runs by itself: every step is a real canvas.toBlob JPEG decoded back with a slight wobble, cached per generation so the line can be scrubbed, rewound and replayed while the file size ticks down.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://en.wikipedia.org/wiki/Generation_loss",
     "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob",

@@ -2,11 +2,8 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { albumById } from "@/app/lab/_music/catalog";
-import { SECTIONS } from "./creditsData";
+import { FINALE, OPENING, SECTIONS } from "./creditsData";
 import "./credits.css";
-
-const ALBUM = albumById("abbey-road");
 
 function SpeakerIcon({ on }) {
   return (
@@ -21,28 +18,39 @@ function SpeakerIcon({ on }) {
   );
 }
 
+function Quote({ quote }) {
+  return (
+    <figure className="credits-quote">
+      <blockquote className="credits-quote-text">{quote.text}</blockquote>
+      <figcaption className="credits-credit">
+        <span className="credits-by">{quote.by}</span>
+        {quote.source ? <span className="credits-source">{quote.source}</span> : null}
+      </figcaption>
+    </figure>
+  );
+}
+
 function Section({ section }) {
   return (
     <section className="credits-section">
       <p className="credits-heading">{section.heading}</p>
+      {section.quotes ? (
+        <div className="credits-quotes">
+          {section.quotes.map((q) => (
+            <Quote key={q.text} quote={q} />
+          ))}
+        </div>
+      ) : null}
       {section.rows ? (
         <dl className="credits-rows">
-          {section.rows.map(([role, name], i) => (
-            <div className="credits-row" key={`${role}-${name}-${i}`}>
-              <dt className="credits-role">{role}</dt>
+          {section.rows.map(([line, name]) => (
+            <div className="credits-row" key={line}>
+              <dt className="credits-role">{line}</dt>
               <dd className="credits-name">{name}</dd>
             </div>
           ))}
         </dl>
       ) : null}
-      {section.names
-        ? section.names.map((name) => (
-            <p className="credits-solo" key={name}>
-              {name}
-            </p>
-          ))
-        : null}
-      {section.note ? <p className="credits-note">{section.note}</p> : null}
     </section>
   );
 }
@@ -108,20 +116,22 @@ export default function Piece({ embedded = false }) {
 
   return (
     <Root className="credits" data-embedded={embedded ? "" : undefined} data-ready={ready ? "" : undefined} data-ended={ended ? "" : undefined}>
-      <div ref={filmRef} className="credits-film" tabIndex={0} aria-label="Abbey Road end credits. Drag or scroll to scrub, space to pause.">
+      <div ref={filmRef} className="credits-film" tabIndex={0} aria-label="The most inspiring words of all time, as an end-credits roll. Drag or scroll to scrub, space to pause.">
         <div ref={gateRef} className="credits-gate">
           <div ref={rollRef} className="credits-roll">
             <div className="credits-opening">
-              <p className="credits-kicker">The Beatles</p>
-              <p className="credits-album">Abbey Road</p>
+              <p className="credits-album">{OPENING.title}</p>
+              <p className="credits-kicker">{OPENING.kicker}</p>
             </div>
             {SECTIONS.map((section) => (
               <Section key={section.heading} section={section} />
             ))}
             <div ref={finaleRef} className="credits-finale">
-              <img className="credits-cover" src={ALBUM.cover} alt="Abbey Road cover" width={168} height={168} draggable={false} />
-              <p className="credits-finale-title">Abbey Road</p>
-              <p className="credits-finale-note">The Beatles · EMI Studios, London · 1969</p>
+              <blockquote className="credits-finale-text">{FINALE.text}</blockquote>
+              <p className="credits-finale-by">
+                <span className="credits-by">{FINALE.by}</span>
+                <span className="credits-source">{FINALE.source}</span>
+              </p>
             </div>
           </div>
         </div>
@@ -132,7 +142,7 @@ export default function Piece({ embedded = false }) {
         <header className="credits-caption">
           <div className="credits-caption-text">
             <h1 className="credits-title">Credits</h1>
-            <p className="credits-hint">Drag or scroll to scrub the roll. Let go and it plays on at its own pace.</p>
+            <p className="credits-hint">The most inspiring words of all time, rolling like the end of a film. Drag or scroll to scrub; let go and it rolls on.</p>
           </div>
           <button type="button" className="credits-pill" aria-pressed={sound} onClick={toggleSound}>
             <SpeakerIcon on={sound} />
@@ -141,7 +151,7 @@ export default function Piece({ embedded = false }) {
         </header>
       )}
       <button type="button" className="credits-again" onClick={() => engineRef.current?.restart()} tabIndex={ended ? 0 : -1} aria-hidden={ended ? undefined : true}>
-        Run it back
+        Roll it again
       </button>
     </Root>
   );

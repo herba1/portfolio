@@ -1,5 +1,5 @@
 import { createPaperAudio } from "./cutoutAudio";
-import { createPrint } from "./cutoutPrint";
+import { PRINTS, composeThumb, createPrint } from "./cutoutPrint";
 
 const BACKS = [
   "continued on page fourteen",
@@ -12,7 +12,14 @@ const BACKS = [
   "in the spring of that year",
 ];
 
-const TINTS = ["#ecebe5", "#eeece4", "#e9e8e2", "#efede6", "#ebe9e0"];
+export const PAPERS = [
+  { id: "news", label: "Newsprint", paper: "#ebe9e1", ink: "#1b1916" },
+  { id: "cream", label: "Cream", paper: "#f3e7cf", ink: "#2c2117" },
+  { id: "rose", label: "Rose", paper: "#eec3bb", ink: "#3b1717" },
+  { id: "sky", label: "Pale blue", paper: "#c6d8e4", ink: "#14243a" },
+  { id: "kraft", label: "Kraft", paper: "#c7a074", ink: "#26190c" },
+  { id: "night", label: "Black", paper: "#1d1e26", ink: "#f1ebdd" },
+];
 const DEFAULT_LINE = "it must be out there.";
 const MAX_DT = 1 / 30;
 
@@ -80,12 +87,17 @@ function spring(value, velocity, target, stiffness, ratio, dt) {
   return [value + v * dt, v];
 }
 
-export function createCutout({ root, page, canvas, layer, input, photoSrc, embedded, onReady, onFail, onDraft }) {
+export function createCutout({ root, page, sheets, layer, input, sources, album, embedded, onReady, onFail, onDraft, onThumbs }) {
   const printScale = 2;
   const rnd = mulberry(20261019);
   const strips = [];
   let print = null;
-  let photo = null;
+  let images = null;
+  let printId = PRINTS[0].id;
+  let front = 0;
+  let paperId = PAPERS[0].id;
+  let active = null;
+  let angle = 0;
   let audio = null;
   let soundWanted = true;
   let width = page.clientWidth;
@@ -102,7 +114,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
 
   root.style.setProperty("--cutout-grain", `url(${grainURL()})`);
 
-  const fontSize = () => Math.round(Math.min(40, Math.max(22, width * 0.034)));
+  const fontSize = () => Math.round(Math.min(34, Math.max(17, width * 0.05)));
 
   const sizeStrip = (strip) => {
     const size = Math.round(fontSize() * strip.scale * strip.fit);
@@ -111,6 +123,14 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     strip.paper.style.lineHeight = `${lead}px`;
     strip.paper.style.paddingInline = `${Math.round(size * 0.34)}px ${Math.round(size * 0.42)}px`;
     strip.back.style.fontSize = `${Math.round(size * 0.8)}px`;
+  };
+
+  const dressStrip = (strip, id) => {
+    const paper = PAPERS.find((p) => p.id === id) ?? PAPERS[0];
+    strip.paperId = paper.id;
+    strip.paper.style.backgroundColor = paper.paper;
+    strip.paper.style.setProperty("--cutout-strip-ink", paper.ink);
+    strip.el.dataset.paper = paper.id;
   };
 
   const makeStrip = (text, x, y, opts = {}) => {
@@ -125,7 +145,6 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     const paper = document.createElement("div");
     paper.className = "cutout-strip-paper";
     paper.style.clipPath = cutPath(rnd);
-    paper.style.backgroundColor = TINTS[Math.floor(rnd() * TINTS.length)];
     const back = document.createElement("span");
     back.className = "cutout-strip-back";
     back.setAttribute("aria-hidden", "true");
@@ -168,6 +187,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
       outside: false,
     };
     el.style.zIndex = String((z += 1));
+    dressStrip(strip, opts.paper ?? paperId);
     sizeStrip(strip);
     setText(strip, text, false);
     strips.push(strip);
@@ -289,7 +309,24 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     if (busy) raf = requestAnimationFrame(tick);
   }
 
-  const toPage = (e) => ({ x: e.clientX - pageRect.left, y: e.clientY - pageRect.top });
+  const toPage = (e) => {
+    const cx = pageRect.left + pageRect.width / 2;
+    const cy = pageRect.top + pageRect.height / 2;
+    const dx = e.clientX - cx;
+    const dy = e.clientY - cy;
+    const c = Math.cos(-angle);
+    const s = Math.sin(-angle);
+    return { x: dx * c - dy * s + width / 2, y: dx * s + dy * c + height / 2 };
+  };
+
+  const readAngle = () => {
+    const m = getComputedStyle(page).transform;
+    if (!m || m === "none") return 0;
+    const v = m.match(/matrix\(([^)]+)\)/);
+    if (!v) return 0;
+    const [a, b] = v[1].split(",").map(Number);
+    return Math.atan2(b, a);
+  };
 
   const onPointerDown = (e) => {
     const el = e.target.closest?.(".cutout-strip");
@@ -298,7 +335,9 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     if (!strip || strip.removing) return;
     e.preventDefault();
     ensureAudio();
+    active = strip;
     pageRect = page.getBoundingClientRect();
+    angle = readAngle();
     const p = toPage(e);
     drag = { strip, id: e.pointerId, px: p.x, py: p.y, ox: p.x - strip.x, oy: p.y - strip.y };
     el.setPointerCapture?.(e.pointerId);
@@ -324,6 +363,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     strip.liftT = 1;
     strip.el.setAttribute("aria-hidden", "true");
     strip.el.tabIndex = -1;
+    if (strip === active) active = null;
     if (strip === draft) {
       draft = null;
       onDraft?.(false);
@@ -372,6 +412,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     const x = width * 0.5;
     const y = height * (width < 560 ? 0.62 : 0.68);
     const strip = makeStrip("", x, y + 28, { lift: 1, alpha: 0, draft: true, base: rnd() * 1.4 - 0.7 });
+    active = strip;
     strip.ty = y;
     strip.el.dataset.draft = "";
     const caret = document.createElement("span");
@@ -453,9 +494,16 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     wake();
   };
 
-  const renderPrint = () => {
-    if (!print || !photo) return;
-    print.render(photo, width, height, printScale);
+  const renderPrint = (into = front) => {
+    if (!print || !images) return;
+    const p = PRINTS.find((item) => item.id === printId) ?? PRINTS[0];
+    const img = p.id === "album" ? images.album : p.id === "dusk" ? images.dusk : images.sea;
+    print.render(sheets[into], p, img, album, width, height, printScale);
+    root.style.setProperty("--cutout-shadow", p.shadow);
+  };
+
+  const showSheets = () => {
+    sheets.forEach((sheet, i) => sheet.toggleAttribute("data-front", i === front));
   };
 
   const ro = new ResizeObserver(() => {
@@ -467,6 +515,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
     width = w;
     height = h;
     pageRect = page.getBoundingClientRect();
+    angle = readAngle();
     for (const strip of strips) {
       strip.x *= sx;
       strip.tx *= sx;
@@ -501,7 +550,7 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
 
   const boot = async () => {
     try {
-      print = createPrint(canvas);
+      print = createPrint();
     } catch {
       print = null;
     }
@@ -509,19 +558,38 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
       onFail?.();
       return;
     }
-    const image = new Image();
-    image.decoding = "async";
-    image.src = photoSrc;
-    await Promise.all([image.decode().catch(() => {}), document.fonts?.load?.("32px CutoutTinos").catch(() => {})]);
+    const load = (src) => {
+      const image = new Image();
+      image.decoding = "async";
+      image.src = src;
+      return image.decode().then(() => image).catch(() => image);
+    };
+    const [dusk, sea, cover] = await Promise.all([
+      load(sources.dusk),
+      load(sources.sea),
+      load(sources.album),
+      document.fonts?.load?.("32px CutoutTinos").catch(() => {}),
+      document.fonts?.load?.("italic 32px CutoutTinos").catch(() => {}),
+    ]);
     if (destroyed) return;
-    photo = image;
+    images = { dusk, sea, album: cover };
     width = page.clientWidth;
     height = page.clientHeight;
     pageRect = page.getBoundingClientRect();
+    angle = readAngle();
     renderPrint();
-    const first = makeStrip(DEFAULT_LINE, width * (width < 560 ? 0.5 : 0.42), height * 0.42, { base: -0.6, scale: 1 });
-    first.el.style.zIndex = "2";
+    showSheets();
+    const first = makeStrip(DEFAULT_LINE, width * 0.5, height * 0.34, { base: -0.8, scale: 1, paper: "news" });
+    first.el.style.zIndex = "3";
+    const second = makeStrip("keep looking.", width * 0.64, height * 0.47, { base: 2.2, scale: 0.72, paper: "sky" });
+    second.el.style.zIndex = "2";
     onReady?.();
+    const thumbs = {};
+    for (const p of PRINTS) {
+      const img = p.id === "album" ? images.album : p.id === "dusk" ? images.dusk : images.sea;
+      thumbs[p.id] = composeThumb(p, img, album, 56, 72);
+    }
+    if (!destroyed) onThumbs?.(thumbs);
   };
   boot();
 
@@ -531,6 +599,27 @@ export function createCutout({ root, page, canvas, layer, input, photoSrc, embed
       if (on && !audio) audio = createPaperAudio();
       if (!audio) return false;
       return audio.setEnabled(on);
+    },
+    setPrint(id) {
+      if (id === printId) return;
+      printId = id;
+      if (!images) return;
+      const back = 1 - front;
+      renderPrint(back);
+      front = back;
+      showSheets();
+      ensureAudio().then(() => audio?.sheet(0));
+    },
+    setPaper(id) {
+      paperId = id;
+      const strip = active && !active.removing && strips.includes(active) ? active : null;
+      if (!strip) return;
+      if (strip.paperId === id) return;
+      dressStrip(strip, id);
+      strip.paper.style.clipPath = cutPath(rnd);
+      strip.base += rnd() * 1.2 - 0.6;
+      ensureAudio().then(() => audio?.snip(pan(strip.x)));
+      wake();
     },
     newLine() {
       ensureAudio();

@@ -1,11 +1,18 @@
 {
   "title": "Selection",
-  "description": "A lyric paragraph on pale grey with an iPhone text selection: blue handles with round knobs, a pale blue highlight and a black “hello there!” tooltip. Drag a handle and the selected run lifts off the line, its highlight bars tilt and the words slide down the slope in italic; let go and it snaps back while the tooltip turns into Copy, Look Up and Share.",
-  "tags": ["Type", "Interface", "Lyrics"],
+  "description": "A lyric paragraph on pale grey with an iPhone text selection: blue handles, a pale blue highlight and a black “hello there!” tooltip. Drag a handle and the selected run lifts off the page in real perspective, each highlight bar tilting toward you over its own soft shadow while the rest of the paragraph parts to make room; let go and it settles back, the tooltip turns into Copy, Look Up and Share, and Copy folds the highlight down into a copied pill.",
+  "tags": [
+    "Type",
+    "Interface",
+    "Lyrics"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "The text-selection UI itself as the graphic: a familiar control given weight, so selecting words physically pulls them off the page.",
-  "tile": { "cols": 4, "rows": 4 },
+  "intent": "The text-selection UI itself as the graphic: a familiar control given depth and weight, so selecting words physically pulls them off the page, with every morph clean and nothing overlapping.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://developer.apple.com/design/human-interface-guidelines/edit-menus",
     "https://developer.mozilla.org/en-US/docs/Web/API/Element/animate",

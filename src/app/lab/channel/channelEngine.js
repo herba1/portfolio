@@ -23,51 +23,31 @@ const WORD = 0.26;
 const LEAD = 0.75;
 const HOLD = 5.6;
 const GAP = 0.9;
-const STEP = 360 / COUNT;
+const NOTCH = 72;
 
 const mod = (n, m) => ((n % m) + m) % m;
+const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-function el(tag, className, parent) {
-  const node = document.createElement(tag);
-  if (className) node.className = className;
-  if (parent) parent.append(node);
-  return node;
+function smooth(x) {
+  const v = clamp(x, 0, 1);
+  return v * v * (3 - 2 * v);
 }
 
-export function createChannel(stage, { embedded = false, caption = null, onLive = () => {}, onFail = () => {} } = {}) {
-  const set = el("div", "channel-set", stage);
-  el("div", "channel-body", set);
-  const bezel = el("div", "channel-bezel", set);
-  const canvas = el("canvas", "channel-canvas", bezel);
+export function createChannel(stage, { embedded = false, caption = null, onLive = () => {}, onChannel = () => {}, onFail = () => {} } = {}) {
+  const canvas = document.createElement("canvas");
+  canvas.className = "channel-canvas";
+  canvas.tabIndex = 0;
+  canvas.setAttribute("role", "slider");
+  canvas.setAttribute("aria-label", "Channel");
+  canvas.setAttribute("aria-valuemin", "2");
+  canvas.setAttribute("aria-valuemax", String(COUNT + 1));
+  stage.prepend(canvas);
   const gl = createChannelGL(canvas);
   if (!gl) {
-    set.remove();
+    canvas.remove();
     onFail();
-    return { destroy() {}, setSound: async () => false };
+    return { destroy() {}, setSound: async () => false, degauss() {} };
   }
-  const dial = el("div", "channel-dial", set);
-  const nums = ALBUMS.map((_, i) => {
-    const n = el("span", "channel-num", dial);
-    n.textContent = String(i + 2);
-    n.style.setProperty("--a", `${i * STEP}deg`);
-    return n;
-  });
-  const knob = el("div", "channel-knob", dial);
-  knob.tabIndex = 0;
-  knob.setAttribute("role", "slider");
-  knob.setAttribute("aria-label", "Channel");
-  knob.setAttribute("aria-valuemin", "2");
-  knob.setAttribute("aria-valuemax", String(COUNT + 1));
-  const cap = el("div", "channel-knob-cap", knob);
-  el("div", "channel-knob-mark", cap);
-  const degaussWrap = el("div", "channel-degauss-wrap", set);
-  const degaussBtn = el("button", "channel-degauss", degaussWrap);
-  degaussBtn.type = "button";
-  degaussBtn.setAttribute("aria-label", "Degauss");
-  const degaussLabel = el("span", "channel-degauss-label", degaussWrap);
-  degaussLabel.textContent = "degauss";
-  const led = el("div", "channel-led", set);
-  el("div", "channel-grille", set);
 
   const capCanvas = document.createElement("canvas");
   const cx = capCanvas.getContext("2d");
@@ -82,15 +62,16 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
   });
 
   let sound = null;
-  let S = 600;
   let screenW = 600;
   let screenH = 450;
   let scale = 1;
+  let osdTop = 120;
+  let osdSide = 32;
+  let capBottom = 0.82;
   let chan = START;
-  let knobPos = START * STEP;
-  let knobVel = 0;
-  let knobTarget = START * STEP;
   let drag = null;
+  let detune = 0;
+  let detuneSign = 1;
   let tuneClock = 0;
   let degaussClock = 99;
   let osdLeft = 0;
@@ -104,6 +85,7 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
   let ready = false;
   let layoutKey = "";
   let wordsCache = null;
+  let fadeIn = 0;
 
   const layout = () => {
     const sr = stage.getBoundingClientRect();
@@ -112,33 +94,12 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     if (key === layoutKey) return;
     layoutKey = key;
     const narrow = sr.width < 700;
-    const side = narrow ? 16 : 32;
-    if (caption) {
-      caption.style.left = `${side}px`;
-      caption.style.width = `${sr.width - side * 2}px`;
-    }
-    const capBottom = caption ? caption.getBoundingClientRect().bottom - sr.top : 0;
-    const top = caption ? capBottom + 24 : side;
-    const bottom = caption ? (narrow ? 56 : 64) : side;
-    const availW = sr.width - side * 2;
-    const availH = sr.height - top - bottom;
-    const tall = narrow && availH > availW;
-    S = tall ? Math.min(availW / 1.1, availH / 1.2) : Math.min(availW / 1.42, availH / 0.86, 820);
-    S = Math.max(200, Math.floor(S));
-    const bodyW = S * (tall ? 1.1 : 1.42);
-    const bodyH = S * (tall ? 1.2 : 0.86);
-    const left = Math.round((sr.width - bodyW) / 2);
-    const y = Math.round(top + Math.max(0, (availH - bodyH) * 0.4));
-    set.dataset.layout = tall ? "tall" : "wide";
-    set.style.setProperty("--s", `${S}px`);
-    set.style.left = `${left}px`;
-    set.style.top = `${y}px`;
-    if (caption && !narrow) {
-      caption.style.left = `${left}px`;
-      caption.style.width = `${Math.round(bodyW)}px`;
-    }
-    screenW = Math.round(S);
-    screenH = Math.round(S * 0.75);
+    screenW = Math.round(sr.width);
+    screenH = Math.round(sr.height);
+    osdSide = narrow ? 24 : 40;
+    const capRect = caption?.getBoundingClientRect();
+    osdTop = capRect ? capRect.bottom - sr.top + (narrow ? 28 : 36) : narrow ? 32 : 48;
+    capBottom = narrow ? 0.8 : 0.84;
     scale = Math.min(window.devicePixelRatio || 1, 2);
     gl.resize(Math.round(screenW * scale), Math.round(screenH * scale));
     const cs = Math.min(scale, 1.5);
@@ -152,11 +113,11 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
   const layoutWords = () => {
     if (wordsCache && wordsCache.chan === chan) return wordsCache;
     const cs = capCanvas.width / screenW;
-    const fs = Math.round(screenH * 0.064);
+    const fs = Math.round(clamp(Math.min(screenH * 0.05, screenW * 0.068), 20, 46));
     cx.setTransform(cs, 0, 0, cs, 0, 0);
     cx.font = `${fs}px ChannelArimo, Arial, sans-serif`;
     const words = LINES[chan].split(" ");
-    const maxW = screenW * 0.62;
+    const maxW = Math.min(screenW * 0.72, fs * 15);
     const space = cx.measureText(" ").width;
     const rows = [[]];
     let rowW = 0;
@@ -172,7 +133,7 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
       }
     }
     const lh = Math.round(fs * 1.2);
-    const baseY = screenH * 0.82 - (rows.length - 1) * lh;
+    const baseY = screenH * capBottom - (rows.length - 1) * lh;
     const placed = [];
     rows.forEach((row, r) => {
       const total = row.reduce((a, b) => a + b.ww, 0) + space * (row.length - 1);
@@ -187,7 +148,7 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
   };
 
   const drawCaption = (shown, osd) => {
-    const key = `${chan}:${shown}:${osd ? 1 : 0}:${capCanvas.width}`;
+    const key = `${chan}:${shown}:${osd ? 1 : 0}:${capCanvas.width}:${capCanvas.height}`;
     if (key === capKey) return;
     capKey = key;
     const cs = capCanvas.width / screenW;
@@ -197,6 +158,7 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     const { fs, words } = layoutWords();
     cx.font = `${fs}px ChannelArimo, Arial, sans-serif`;
     cx.textBaseline = "alphabetic";
+    cx.textAlign = "left";
     cx.shadowColor = "rgba(0, 0, 0, 0.42)";
     cx.shadowBlur = fs * 0.3;
     cx.shadowOffsetY = fs * 0.04;
@@ -204,16 +166,24 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     for (let i = 0; i < Math.min(shown, words.length); i += 1) cx.fillText(words[i].text, words[i].x, words[i].y);
     cx.shadowColor = "transparent";
     if (osd) {
-      const os = Math.round(screenH * 0.1);
-      cx.font = `${os}px ChannelVT, monospace`;
+      const os = Math.round(clamp(screenH * 0.07, 36, 64));
+      const ts = Math.round(os * 0.46);
       cx.textAlign = "right";
+      cx.lineJoin = "round";
+      const x = screenW - osdSide;
+      const y = osdTop + os * 0.72;
       const label = `CH ${String(chan + 2).padStart(2, "0")}`;
+      cx.font = `${os}px ChannelVT, monospace`;
       cx.lineWidth = os * 0.12;
       cx.strokeStyle = "rgba(0, 0, 0, 0.85)";
-      cx.lineJoin = "round";
-      cx.strokeText(label, screenW * 0.9, screenH * 0.17);
+      cx.strokeText(label, x, y);
       cx.fillStyle = "#74ff6a";
-      cx.fillText(label, screenW * 0.9, screenH * 0.17);
+      cx.fillText(label, x, y);
+      cx.font = `${ts}px ChannelVT, monospace`;
+      cx.lineWidth = ts * 0.16;
+      const title = ALBUMS[chan].title.toLowerCase();
+      cx.strokeText(title, x, y + ts * 1.25);
+      cx.fillText(title, x, y + ts * 1.25);
       cx.textAlign = "left";
     }
     gl.setCaption(capCanvas);
@@ -228,34 +198,33 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     return Math.min(n, Math.floor(phase / WORD) + 1);
   };
 
+  const announce = () => {
+    canvas.setAttribute("aria-valuenow", String(chan + 2));
+    canvas.setAttribute("aria-valuetext", `Channel ${chan + 2}, ${ALBUMS[chan].title}`);
+  };
+
   const tune = (index) => {
     const next = mod(index, COUNT);
     if (next === chan) return;
     chan = next;
     tuneClock = 0;
-    osdLeft = 2.6;
+    osdLeft = 2.8;
     wordsCache = null;
     sound?.detent();
     sound?.retune(chan);
-    knob.setAttribute("aria-valuenow", String(chan + 2));
-    knob.setAttribute("aria-valuetext", `Channel ${chan + 2}, ${ALBUMS[chan].title}`);
-    nums.forEach((n, i) => (i === chan ? n.setAttribute("data-on", "") : n.removeAttribute("data-on")));
+    announce();
     onLive(`Channel ${chan + 2}: ${ALBUMS[chan].title}`);
+    onChannel(chan + 2);
     wake();
   };
 
   const step = (dir) => {
-    const idx = Math.round(knobTarget / STEP) + dir;
-    knobTarget = idx * STEP;
-    tune(idx);
-    wake();
+    tune(chan + dir);
   };
 
   const degauss = () => {
     degaussClock = 0;
     sound?.degauss();
-    led.dataset.flash = "";
-    window.setTimeout(() => led.removeAttribute("data-flash"), 260);
     wake();
   };
 
@@ -265,40 +234,46 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     if (destroyed || !visible || !onscreen) return;
     const dt = Math.min(0.05, Math.max(0.001, (now - last) / 1000));
     last = now;
-    if (!drag) {
-      const k = 210;
-      const c = 2 * Math.sqrt(k);
-      knobVel += ((knobTarget - knobPos) * k - knobVel * c) * dt;
-      knobPos += knobVel * dt;
-      if (Math.abs(knobTarget - knobPos) < 0.01 && Math.abs(knobVel) < 0.01) {
-        knobPos = knobTarget;
-        knobVel = 0;
-      }
+    fadeIn = Math.min(1, fadeIn + dt / 0.6);
+    if (drag) {
+      detune = Math.abs(drag.acc) / NOTCH;
+      detuneSign = Math.sign(drag.acc) || detuneSign;
+    } else {
+      detune *= Math.exp(-dt / 0.08);
+      if (detune < 0.002) detune = 0;
     }
-    knob.style.transform = `rotate(${knobPos}deg)`;
     tuneClock += dt;
     degaussClock += dt;
     osdLeft -= dt;
     const tt = tuneClock;
     const stat = tt < 0.14 ? 1 : tt < 0.46 ? 1 - smooth((tt - 0.14) / 0.32) : 0;
-    const p = Math.min(1, Math.max(0, (tt - 0.1) / 0.78));
+    const p = clamp((tt - 0.1) / 0.78, 0, 1);
     const roll = p > 0 && p < 1 ? 1 - Math.pow(1 - p, 3) : 0;
     const bar = p > 0 && p < 1 ? 1 - p * p : 0;
     const dg = degaussClock;
     const degaussAmt = dg < 2.4 ? Math.exp(-dg * 2.1) * (dg < 0.05 ? dg / 0.05 : 1) : 0;
-    drawCaption(wordsShown(tt), osdLeft > 0);
+    const off = smooth(detune);
+    drawCaption(wordsShown(tt), osdLeft > 0 || drag !== null);
     const t = now / 1000;
     const seed = chan * 1.7 + 0.4;
-    const ken = [1.07 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.09 + seed)), 0.024 * Math.sin(t * 0.05 + seed * 1.3), 0.055 * Math.sin(t * 0.06 + seed * 2.1)];
-    gl.render({ cover: ALBUMS[chan].id, screenW, screenH, time: t % 1000, static: Math.max(stat, gl.hasCover(ALBUMS[chan].id) ? 0 : 0.85), roll, bar, degauss: degaussAmt, ken, curve: 0.06 });
-    sound?.levels(Math.max(stat, bar * 0.12), (1 - stat) * (1 - bar * 0.6));
+    const ken = [1.06 + 0.05 * (0.5 + 0.5 * Math.sin(t * 0.09 + seed)), 0.024 * Math.sin(t * 0.05 + seed * 1.3), 0.04 * Math.sin(t * 0.06 + seed * 2.1)];
+    const staticAmt = Math.max(stat, off * 0.62, gl.hasCover(ALBUMS[chan].id) ? 0 : 0.85);
+    gl.render({
+      cover: ALBUMS[chan].id,
+      screenW,
+      screenH,
+      time: t % 1000,
+      static: staticAmt,
+      roll: roll + off * 0.08 * detuneSign,
+      bar: Math.max(bar, off * 0.7),
+      degauss: degaussAmt,
+      ken,
+      curve: screenW < 700 ? 0.05 : 0.07,
+      fade: smooth(fadeIn),
+    });
+    sound?.levels(Math.max(stat, off * 0.7, bar * 0.12), (1 - stat) * (1 - Math.max(bar * 0.6, off * 0.8)));
     raf = requestAnimationFrame(frame);
   };
-
-  function smooth(x) {
-    const v = Math.min(1, Math.max(0, x));
-    return v * v * (3 - 2 * v);
-  }
 
   function wake() {
     if (destroyed || raf || !visible || !onscreen || !ready) return;
@@ -306,78 +281,60 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     raf = requestAnimationFrame(frame);
   }
 
-  const angleOf = (e) => {
-    const r = knob.getBoundingClientRect();
-    return (Math.atan2(e.clientY - (r.top + r.height / 2), e.clientX - (r.left + r.width / 2)) * 180) / Math.PI;
-  };
-
-  const magnet = (raw) => {
-    const near = Math.round(raw / STEP) * STEP;
-    const d = raw - near;
-    const half = STEP / 2;
-    return near + Math.sign(d) * half * Math.pow(Math.abs(d) / half, 1.8);
-  };
-
-  const onKnobDown = (e) => {
+  const onDown = (e) => {
     if (e.button > 0) return;
     e.preventDefault();
-    knob.setPointerCapture(e.pointerId);
-    drag = { id: e.pointerId, last: angleOf(e), raw: knobTarget, moved: 0, x: e.clientX, y: e.clientY };
-    knob.dataset.grab = "";
+    canvas.focus({ preventScroll: true });
+    canvas.setPointerCapture?.(e.pointerId);
+    drag = { id: e.pointerId, x: e.clientX, y: e.clientY, sx: e.clientX, sy: e.clientY, acc: 0, travel: 0, steps: 0 };
+    canvas.dataset.grab = "";
     wake();
   };
 
-  const onKnobMove = (e) => {
+  const onMove = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
-    const a = angleOf(e);
-    let d = a - drag.last;
-    if (d > 180) d -= 360;
-    if (d < -180) d += 360;
-    drag.last = a;
-    d = Math.max(-40, Math.min(40, d));
-    drag.raw += d;
-    drag.moved += Math.abs(d);
-    knobPos = magnet(drag.raw);
-    knobVel = 0;
-    const idx = Math.round(drag.raw / STEP);
-    if (mod(idx, COUNT) !== chan) tune(idx);
+    const dx = e.clientX - drag.x;
+    const dy = e.clientY - drag.y;
+    drag.x = e.clientX;
+    drag.y = e.clientY;
+    drag.travel += Math.hypot(dx, dy);
+    if (drag.travel < 6) return;
+    const d = Math.abs(dx) >= Math.abs(dy) ? dx : -dy;
+    drag.acc += clamp(d, -NOTCH * 0.9, NOTCH * 0.9);
+    while (Math.abs(drag.acc) >= NOTCH) {
+      const s = Math.sign(drag.acc);
+      step(s);
+      drag.steps += 1;
+      drag.acc -= s * NOTCH;
+    }
     wake();
   };
 
-  const onKnobUp = (e) => {
+  const onUp = (e) => {
     if (!drag || e.pointerId !== drag.id) return;
     const d = drag;
     drag = null;
-    knob.removeAttribute("data-grab");
-    const tap = d.moved < 4 && Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6;
-    if (tap && e.type === "pointerup") {
-      step(1);
-      return;
-    }
-    knobTarget = Math.round(d.raw / STEP) * STEP;
+    canvas.removeAttribute("data-grab");
+    const tap = d.travel < 6 && e.type === "pointerup";
+    if (tap) step(1);
+    else if (!d.steps && Math.abs(d.acc) > NOTCH * 0.5) step(Math.sign(d.acc));
     wake();
-  };
-
-  const onScreenDown = (e) => {
-    if (e.button > 0) return;
-    e.preventDefault();
-    step(1);
   };
 
   const onWheel = (e) => {
     if (embedded) return;
     e.preventDefault();
     wheelAcc += Math.abs(e.deltaY) > Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-    while (Math.abs(wheelAcc) >= 50) {
+    while (Math.abs(wheelAcc) >= 60) {
       step(Math.sign(wheelAcc));
-      wheelAcc -= Math.sign(wheelAcc) * 50;
+      wheelAcc -= Math.sign(wheelAcc) * 60;
     }
   };
 
   const onKey = (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     const t = e.target;
-    if (t && t !== knob && t !== document.body && t.closest?.("input, textarea, a, button:not(.channel-degauss)")) return;
+    if (t && t !== canvas && t !== document.body && t.closest?.("input, textarea, a, button")) return;
     if (t && t.isContentEditable) return;
     const k = e.key;
     if (k === "ArrowUp" || k === "ArrowRight" || k === "PageUp") step(1);
@@ -387,39 +344,29 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     e.preventDefault();
   };
 
-  const onDegaussDown = () => {
-    sound?.press();
-  };
-
-  const onDegauss = () => {
-    degauss();
-  };
-
   const onVisibility = () => {
     visible = !document.hidden;
     if (visible) wake();
   };
 
-  knob.addEventListener("pointerdown", onKnobDown);
-  knob.addEventListener("pointermove", onKnobMove);
-  knob.addEventListener("pointerup", onKnobUp);
-  knob.addEventListener("pointercancel", onKnobUp);
-  canvas.addEventListener("pointerdown", onScreenDown);
-  set.addEventListener("wheel", onWheel, { passive: false });
-  degaussBtn.addEventListener("pointerdown", onDegaussDown);
-  degaussBtn.addEventListener("click", onDegauss);
-  const keyTarget = embedded ? set : window;
+  canvas.addEventListener("pointerdown", onDown);
+  canvas.addEventListener("pointermove", onMove);
+  canvas.addEventListener("pointerup", onUp);
+  canvas.addEventListener("pointercancel", onUp);
+  canvas.addEventListener("wheel", onWheel, { passive: false });
+  const keyTarget = embedded ? canvas : window;
   keyTarget.addEventListener("keydown", onKey);
   document.addEventListener("visibilitychange", onVisibility);
   const ro = new ResizeObserver(() => {
     if (ready) layout();
   });
   ro.observe(stage);
+  if (caption) ro.observe(caption);
   const io = new IntersectionObserver(([entry]) => {
     onscreen = entry.isIntersecting;
     if (onscreen) wake();
   });
-  io.observe(set);
+  io.observe(stage);
 
   const boot = async () => {
     const fonts = Promise.all([document.fonts.load("24px ChannelArimo"), document.fonts.load("24px ChannelVT")]).catch(() => {});
@@ -435,17 +382,19 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
     if (destroyed) return;
     if (covers[START].complete && covers[START].naturalWidth) gl.addCover(ALBUMS[START].id, covers[START]);
     tuneClock = LEAD + LINES[chan].split(" ").length * WORD + 0.6;
-    knob.setAttribute("aria-valuenow", String(chan + 2));
-    knob.setAttribute("aria-valuetext", `Channel ${chan + 2}, ${ALBUMS[chan].title}`);
-    nums[chan].setAttribute("data-on", "");
+    osdLeft = 3.2;
+    announce();
+    onChannel(chan + 2);
     ready = true;
+    layoutKey = "";
     layout();
-    set.dataset.ready = "";
+    canvas.dataset.ready = "";
     wake();
   };
   boot();
 
   return {
+    degauss,
     async setSound(on) {
       if (on && !sound) sound = createChannelSound("/blog/audio/friday-beat.wav");
       if (!sound) return false;
@@ -456,19 +405,16 @@ export function createChannel(stage, { embedded = false, caption = null, onLive 
       if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
-      knob.removeEventListener("pointerdown", onKnobDown);
-      knob.removeEventListener("pointermove", onKnobMove);
-      knob.removeEventListener("pointerup", onKnobUp);
-      knob.removeEventListener("pointercancel", onKnobUp);
-      canvas.removeEventListener("pointerdown", onScreenDown);
-      set.removeEventListener("wheel", onWheel);
-      degaussBtn.removeEventListener("pointerdown", onDegaussDown);
-      degaussBtn.removeEventListener("click", onDegauss);
+      canvas.removeEventListener("pointerdown", onDown);
+      canvas.removeEventListener("pointermove", onMove);
+      canvas.removeEventListener("pointerup", onUp);
+      canvas.removeEventListener("pointercancel", onUp);
+      canvas.removeEventListener("wheel", onWheel);
       keyTarget.removeEventListener("keydown", onKey);
       document.removeEventListener("visibilitychange", onVisibility);
       sound?.destroy();
       gl.dispose();
-      set.remove();
+      canvas.remove();
     },
   };
 }

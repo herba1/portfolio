@@ -1,7 +1,80 @@
 import { BAKE_FRAGMENT, BAKE_VERTEX, FOCUS_FRAGMENT, FOCUS_VERTEX } from "./focusShader";
 import { createLensAudio } from "./lensAudio";
+import { albumById } from "@/app/lab/_music/catalog";
 
-export const LYRIC = ["i keep your", "voice on the", "walk home", "and it gets", "clearer the", "closer i get"];
+const ABBEY = albumById("abbey-road");
+const LINES = [
+  ["i", "keep", "your", { glyph: "moon", w: 0.62 }],
+  ["voice", { img: "/scorch/beams.webp", w: 1.34, fx: 0.72, fy: 0.42, label: "light through fog at night" }, "on", "the"],
+  ["walk", { img: ABBEY.cover, w: 0.78, fx: 0.5, fy: 0.5, label: ABBEY.title }, "home"],
+  ["and", "it", "gets"],
+  ["clearer", { img: "/scorch/meadow.webp", w: 1.34, fx: 0.5, fy: 0.72, label: "a meadow of flowers" }, "the"],
+  ["closer", "i", "get", { glyph: "star", w: 0.62 }],
+];
+export const LYRIC = LINES.map((tokens) => tokens.filter((t) => typeof t === "string").join(" "));
+const ATOM_H = 0.78;
+const ATOM_DROP = 0.03;
+const AUTO_ORDER = [3, 1, 4, 0, 5, 2];
+const AUTO_EVERY = 3800;
+const AUTO_IDLE = 7000;
+
+function loadImage(src) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.onload = () => resolve(img);
+    img.onerror = () => resolve(null);
+    img.src = src;
+  });
+}
+
+function drawCover(g, img, x, y, w, h, fx, fy, r) {
+  g.save();
+  g.beginPath();
+  g.roundRect(x, y, w, h, r);
+  g.clip();
+  if (img) {
+    const scale = Math.max(w / img.naturalWidth, h / img.naturalHeight);
+    const sw = w / scale;
+    const sh = h / scale;
+    const sx = (img.naturalWidth - sw) * fx;
+    const sy = (img.naturalHeight - sh) * fy;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(img, sx, sy, sw, sh, x, y, w, h);
+  } else {
+    g.fillStyle = "#d8d8d6";
+    g.fillRect(x, y, w, h);
+  }
+  g.restore();
+}
+
+function drawGlyph(g, kind, x, baseline, em) {
+  const cx = x + em * 0.31;
+  const cy = baseline - em * 0.36;
+  if (kind === "moon") {
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, em * 0.3, 0, Math.PI * 2);
+    g.fill();
+    g.globalCompositeOperation = "destination-out";
+    g.beginPath();
+    g.arc(cx + em * 0.15, cy - em * 0.09, em * 0.26, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+    return;
+  }
+  const R = em * 0.33;
+  const pinch = em * 0.035;
+  g.beginPath();
+  for (let k = 0; k < 4; k += 1) {
+    const a = (k * Math.PI) / 2 - Math.PI / 2;
+    const b = a + Math.PI / 4;
+    if (k === 0) g.moveTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+    g.quadraticCurveTo(cx + Math.cos(b) * pinch, cy + Math.sin(b) * pinch, cx + Math.cos(a + Math.PI / 2) * R, cy + Math.sin(a + Math.PI / 2) * R);
+  }
+  g.closePath();
+  g.fill();
+}
 const DISTANCES = [0.5, 0.7, 1, 1.5, 3, Infinity];
 const DIOPTERS = DISTANCES.map((d) => (Number.isFinite(d) ? 1 / d : 0));
 const MAX_D = 2;
@@ -19,7 +92,7 @@ const LABELS = [
 ];
 const MINOR = [1 / 0.6, 1 / 0.8, 1 / 1.2, 1 / 2.5, 1 / 4, 0.1];
 const FAMILY = '"Focus Arimo", Arial, Helvetica, sans-serif';
-const INK = [0.035, 0.035, 0.045];
+const INK_CSS = "rgb(9, 9, 11)";
 const PEAK = [0.95, 0.12, 0.08];
 const RING_H = 76;
 const SPEED_CAP = 1.4;
@@ -81,7 +154,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const stack = gl.createTexture();
   const fbo = gl.createFramebuffer();
   const u = {};
-  for (const name of ["uRect", "uUv", "uRes", "uTex", "uStack", "uTexel", "uLevel", "uPeak", "uInk", "uPeakColor"]) u[name] = gl.getUniformLocation(program, name);
+  for (const name of ["uRect", "uUv", "uRes", "uTex", "uStack", "uTexel", "uLevel", "uPeak", "uPeakColor"]) u[name] = gl.getUniformLocation(program, name);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const vbo = gl.createBuffer();
@@ -121,6 +194,17 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   let audio = null;
   let soundOn = true;
   let atEnd = false;
+  let images = new Map();
+  let autoTimer = 0;
+  let autoIdx = 0;
+  let lastTouch = -Infinity;
+
+  const touch = () => {
+    lastTouch = performance.now();
+  };
+
+  const tokenWidth = (m, token, em) => (typeof token === "string" ? m.measureText(token).width : token.w * em);
+  const lineWidth = (m, tokens, em) => tokens.reduce((sum, t) => sum + tokenWidth(m, t, em), 0) + m.measureText(" ").width * (tokens.length - 1);
 
   const ensureAudio = () => {
     if (!audio) audio = createLensAudio();
@@ -147,13 +231,13 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     const availH = Math.max(160, cssH - top - ringSpace - 24);
     const m = atlas.getContext("2d");
     m.font = `100px ${FAMILY}`;
-    const widest = Math.max(...LYRIC.map((l) => m.measureText(l).width)) / 100;
+    const widest = Math.max(...LINES.map((tokens) => lineWidth(m, tokens, 100))) / 100;
     const lead = 1.04;
-    font = Math.min(availW / (widest * 1.18), availH / (LYRIC.length * lead + 0.2), 96);
+    font = Math.min(availW / (widest * 1.18), availH / (LINES.length * lead + 0.2), 96);
     font = Math.max(22, Math.floor(font));
     const blockW = Math.min(availW, Math.round(widest * font * 1.42));
     const pitch = font * lead;
-    const blockH = pitch * (LYRIC.length - 1) + font * 1.16;
+    const blockH = pitch * (LINES.length - 1) + font * 1.16;
     const x = Math.round((cssW - blockW) / 2);
     const y = Math.round(top + Math.max(0, (availH - blockH) / 2));
     block = { x, y, w: blockW, h: blockH, pitch };
@@ -177,28 +261,36 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     rowH = boxH + pad * 2;
     const w = Math.ceil(block.w * dpr) + pad * 2;
     atlas.width = w;
-    atlas.height = rowH * LYRIC.length;
+    atlas.height = rowH * LINES.length;
     const g = atlas.getContext("2d");
     g.clearRect(0, 0, atlas.width, atlas.height);
-    g.fillStyle = "#000";
-    g.font = `${font * dpr}px ${FAMILY}`;
+    const em = font * dpr;
+    g.fillStyle = INK_CSS;
+    g.font = `${em}px ${FAMILY}`;
     g.textBaseline = "alphabetic";
-    lines = LYRIC.map((text, i) => {
-      const words = text.split(" ");
-      const widths = words.map((word) => g.measureText(word).width);
+    lines = LINES.map((tokens, i) => {
+      const widths = tokens.map((t) => tokenWidth(g, t, em));
       const total = widths.reduce((a, b) => a + b, 0);
       const span = block.w * dpr;
-      const gap = words.length > 1 ? (span - total) / (words.length - 1) : 0;
+      const gap = tokens.length > 1 ? (span - total) / (tokens.length - 1) : 0;
       const baseline = i * rowH + pad + font * 0.93 * dpr;
       let cx = pad;
-      words.forEach((word, k) => {
-        g.fillText(word, Math.round(cx), Math.round(baseline));
+      tokens.forEach((token, k) => {
+        const x = Math.round(cx);
+        if (typeof token === "string") g.fillText(token, x, Math.round(baseline));
+        else if (token.glyph) drawGlyph(g, token.glyph, x, baseline, em);
+        else {
+          const h = Math.round(em * ATOM_H);
+          const y = Math.round(baseline + em * ATOM_DROP) - h;
+          drawCover(g, images.get(token.img), x, y, Math.round(widths[k]), h, token.fx, token.fy, em * 0.06);
+          g.fillStyle = INK_CSS;
+        }
         cx += widths[k] + gap;
       });
-      return { text, top: block.y + i * block.pitch, diopter: DIOPTERS[i] };
+      return { text: LYRIC[i], top: block.y + i * block.pitch, diopter: DIOPTERS[i] };
     });
     gl.bindTexture(gl.TEXTURE_2D, texture);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, atlas);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
@@ -213,7 +305,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     const bh = Math.ceil(atlas.height / 2);
     const depth = LEVELS.length - 1;
     gl.bindTexture(gl.TEXTURE_2D_ARRAY, stack);
-    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.R8, bw, bh, depth, 0, gl.RED, gl.UNSIGNED_BYTE, null);
+    gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.RGBA8, bw, bh, depth, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
@@ -259,7 +351,6 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     gl.uniform1i(u.uStack, 1);
     gl.uniform2f(u.uRes, glCanvas.width, glCanvas.height);
     gl.uniform2f(u.uTexel, 1 / atlas.width, 1 / atlas.height);
-    gl.uniform3f(u.uInk, INK[0], INK[1], INK[2]);
     gl.uniform3f(u.uPeakColor, PEAK[0], PEAK[1], PEAK[2]);
     const focus = df();
     const breathe = 1 + 0.012 * (focus - 1);
@@ -457,6 +548,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const onRingDown = (e) => {
     if (e.button !== 0) return;
     e.preventDefault();
+    touch();
     audio?.wake();
     ring.setPointerCapture?.(e.pointerId);
     mode = "drag";
@@ -498,10 +590,32 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const lineAt = (x, y) => {
     if (x < block.x - 16 || x > block.x + block.w + 16) return -1;
     const i = Math.floor((y - block.y + block.pitch * 0.08) / block.pitch);
-    return i >= 0 && i < LYRIC.length ? i : -1;
+    return i >= 0 && i < LINES.length ? i : -1;
+  };
+
+  const rack = (i, w) => {
+    target = 1 - DIOPTERS[i] / MAX_D;
+    omega = w;
+    if (mode !== "target") v = 0;
+    mode = "target";
+    request();
+  };
+
+  const autoTick = () => {
+    autoTimer = window.setTimeout(autoTick, AUTO_EVERY);
+    if (destroyed || !visible || document.hidden || drag || mode !== "idle") return;
+    if (performance.now() - lastTouch < AUTO_IDLE) return;
+    let next = AUTO_ORDER[autoIdx % AUTO_ORDER.length];
+    autoIdx += 1;
+    if (Math.abs(1 - DIOPTERS[next] / MAX_D - p) < 0.01) {
+      next = AUTO_ORDER[autoIdx % AUTO_ORDER.length];
+      autoIdx += 1;
+    }
+    rack(next, 4.2);
   };
 
   const focusLine = (i) => {
+    touch();
     audio?.wake();
     target = 1 - DIOPTERS[i] / MAX_D;
     omega = 7;
@@ -512,6 +626,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
 
   const onTextDown = (e) => {
     if (e.button !== 0) return;
+    touch();
     tap = { id: e.pointerId, x: e.clientX, y: e.clientY, line: lineAt(localX(e), localY(e)) };
   };
 
@@ -535,6 +650,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     const overBlock = y > block.y - 24 && y < ringBox.y + RING_H + 16;
     if (!onRing && (root.dataset.embedded !== undefined || !overBlock)) return;
     e.preventDefault();
+    touch();
     audio?.wake();
     const delta = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
     const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
@@ -549,6 +665,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const onKey = (e) => {
     const stepBy = (n) => {
       e.preventDefault();
+      touch();
       audio?.wake();
       const base = mode === "target" ? target : p;
       target = clamp(Math.round(base * DETENTS + n) / DETENTS, 0, 1);
@@ -616,10 +733,15 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
         return;
       }
       if (destroyed) return;
+      const sources = LINES.flat().filter((t) => typeof t === "object" && t.img);
+      const loaded = await Promise.all(sources.map((t) => loadImage(t.img)));
+      if (destroyed) return;
+      images = new Map(sources.map((t, k) => [t.img, loaded[k]]));
       layout();
       drawText();
       drawRing();
       needsDraw = false;
+      autoTimer = window.setTimeout(autoTick, 1600);
     },
     focusLine,
     async setSound(on) {
@@ -633,6 +755,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     },
     destroy() {
       destroyed = true;
+      window.clearTimeout(autoTimer);
       if (frame) cancelAnimationFrame(frame);
       ro.disconnect();
       io.disconnect();

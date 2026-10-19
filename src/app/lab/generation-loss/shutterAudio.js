@@ -13,7 +13,7 @@ export function createShutter() {
     data[i] = (seed / 4294967296) * 2 - 1;
   }
   const master = ctx.createGain();
-  master.gain.value = 0.85;
+  master.gain.value = 0.5;
   const comp = ctx.createDynamicsCompressor();
   comp.threshold.value = -16;
   comp.knee.value = 10;

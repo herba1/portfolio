@@ -27,7 +27,7 @@ function ReplayIcon() {
   );
 }
 
-const LABEL = `A poem in small white type on black. Drag across it to smear the words, press and hold or hold Space to scatter it, and let go to watch it set again line by line. Enter plays the arrival again. ${POEM.join(" / ")}`;
+const LABEL = `A poem in small white type on black that keeps re-setting itself between a tight block and wide justified gaps. Drag across it to smear the words, press and hold or hold Space to scatter it, and let go to watch it set again line by line. Enter plays the arrival again. ${POEM.join(" / ")}`;
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -85,7 +85,7 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header ref={captionRef} className="smear-caption">
           <h1 className="smear-title">Smear</h1>
-          <p className="smear-hint">Drag across the poem to smear it. Hold to scatter the block, then let go and it sets again line by line.</p>
+          <p className="smear-hint">Drag across the poem to smear it, or hold to scatter it. Left alone, it keeps re-setting itself.</p>
         </header>
       )}
       <div ref={controlsRef} className="smear-controls">
