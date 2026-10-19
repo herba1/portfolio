@@ -75,6 +75,18 @@ Herb shared Pinterest stills and lyric edits as the visual direction for type an
 - Bold grotesk set huge against small type with tight leading, editorial and confident.
 - Mood: quiet, sincere, a little melancholy; the text says something human. Photos are real and imperfect, never stock-glossy.
 
+## From the reference-board batch (30 pieces, scored 1–5, October 2026)
+
+- Scored 5: Terminal, a green phosphor menu of Beatles records whose covers draw in as dither while the tracklist types out. "This should be the bar of polish." Many small details all finished, one coherent screen, no frame around it.
+- Scored 4: type and lo-fi pieces where the type itself moves (Justify, Smear, Selection, Still Here, Focus), plus Skin and Credits. The ask on each is more polish: morphs that are perfectly smooth, more depth and perspective, effects that run on their own rather than waiting for a click.
+- Scored 1: realistic hardware (Disc, Burn, Scan, Click Wheel: "bad realism", "too much gimmick"), anything busy (Hex: "too much going on"), app mock-ups that feel cringe (For You, Board), and effects you have to work for (Stretch: "annoying that I have to pull myself"; Sort: "don't really get it").
+- Don't build realistic devices around a screen. If a TV, CD player or camcorder is the idea, keep only the screen and its picture (Channel: "the screen in itself is fire", the TV body is "realistic slop").
+- Don't use herb's personal photos as footage or backdrops (Camcorder: "not with my photo, lol", Word Drop: "what are these images"). Use album art, or good atmospheric imagery when better images are available.
+- No UI chrome around a lyric edit: no timelines, no recording bars, nothing under the frame (Lyric Edit: "bottom UI is dogshit"). Lyric type has to be really well set, or go all in on the effect (Lyric Card: "if you're gonna do that, go all in").
+- Pixel type must use a real pixel typeface, not a downsampled sans (How Are You).
+- Effects should animate on their own. A static backdrop behind a live effect reads as dead (Tracking), and a degradation effect should run itself (Still Here: "auto do the compress effect").
+- He likes inspirational and sincere words: quotes, lyrics, short human lines.
+
 ## Rules
 
 - Pick the one thing the piece is about, name it in the title, and make every control serve it.
