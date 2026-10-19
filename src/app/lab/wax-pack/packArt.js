@@ -225,6 +225,14 @@ export function packFront(featured, img, sans) {
 
   ctx.fillStyle = "#151a3d";
   ctx.fillRect(0, CRIMP_PX, PW, TEAR_PX - CRIMP_PX);
+  ctx.fillStyle = "#f4f1ea";
+  ctx.font = `500 30px ${sans}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const mid = (CRIMP_PX + TEAR_PX) / 2 + 2;
+  ctx.fillText("Tear here", 60, mid);
+  ctx.textAlign = "right";
+  ctx.fillText("Open from either notch", PW - 60, mid);
   ctx.setLineDash([14, 10]);
   ctx.strokeStyle = "rgb(244 241 234 / 0.75)";
   ctx.lineWidth = 3;
@@ -295,11 +303,20 @@ export function packFront(featured, img, sans) {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "#f4f1ea";
+  ctx.font = `500 32px ${sans}`;
+  ctx.fillText("Featuring", cx, 1278);
   const title = featured?.title || "";
-  ctx.font = `italic 400 ${fit(ctx, title, 820, [76, 68, 60, 52, 44], "italic 400", SERIF)}px ${SERIF}`;
-  ctx.fillText(clip(ctx, title, 840), cx, 1340);
-  ctx.font = `600 40px ${sans}`;
-  ctx.fillText([featured?.artist, featured?.year].filter(Boolean).join(", "), cx, 1414);
+  ctx.font = `italic 400 ${fit(ctx, title, 820, [64, 56, 48, 42, 36], "italic 400", SERIF)}px ${SERIF}`;
+  ctx.fillText(clip(ctx, title, 840), cx, 1350);
+  ctx.font = `500 32px ${sans}`;
+  ctx.fillText([featured?.artist, featured?.year].filter(Boolean).join(" · "), cx, 1404);
+
+  roundRect(ctx, 110, 1474, PW - 220, 76, 38);
+  ctx.fillStyle = "rgb(10 12 40 / 0.6)";
+  ctx.fill();
+  ctx.fillStyle = "#f4f1ea";
+  ctx.font = `500 28px ${sans}`;
+  ctx.fillText("● Common   ◆ Uncommon   ★ Rare holo", cx, 1522);
 
   crimpBand(ctx, 0, CRIMP_PX);
   crimpBand(ctx, PH - CRIMP_PX, PH);

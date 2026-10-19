@@ -1,6 +1,6 @@
 {
   "title": "Raking Light",
-  "description": "Three badges made from real album covers, laid on pale cotton with one lamp in your hand: Revolver as a gold-line enamel pin, Abbey Road as an embroidered patch with a merrowed edge, Sgt. Pepper as a glossy domed button. Move the lamp and the light rakes across them; stitches, raised gold and the dome catch it and throw soft shadows away from the bulb. Lower it to make the relief stand up.",
+  "description": "Three badges made from real album covers, laid on pale cotton with one lamp in your hand: Revolver as a hard enamel pin with raised black nickel lines over white enamel, Magical Mystery Tour as a rectangular embroidered patch, and Sgt. Pepper as a round patch with a gold merrowed edge. Each patch is stitched from a thread palette pulled from its cover, every colour region in its own stitch direction with satin outlines. Move the lamp and the light rakes across them; lower it to make the relief stand up.",
   "tags": [
     "WebGL",
     "Light",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One light finished to the edge: a real point lamp grazing height fields built from the covers themselves, so the line art, the thread direction and the dome come alive as the light comes down to them.",
+  "intent": "One light finished to the edge on believable merch: a real point lamp grazing height fields built from the covers themselves, with cloisonn\u00e9 lines, per-region stitch direction, satin outlines and rolled merrow edges that come alive as the light comes down to them.",
   "tile": {
     "cols": 3,
     "rows": 5

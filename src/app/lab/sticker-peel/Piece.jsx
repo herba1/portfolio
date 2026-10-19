@@ -102,7 +102,7 @@ export default function Piece({ embedded = false }) {
           className="sticker-peel-canvas"
           tabIndex={0}
           role="application"
-          aria-label={`A used copy of ${SLEEVES.find((a) => a.id === sleeve).title} with album cover stickers and a price sticker on the sleeve. Drag a sticker by its edge to peel it. With the keyboard, arrows choose a sticker, Enter peels it off, arrows move it and Enter sticks it down. R gives a fresh sleeve.`}
+          aria-label={`A used copy of ${SLEEVES.find((a) => a.id === sleeve).title} with a price sticker on the sleeve, one corner already lifting. Drag the sticker by its edge to peel it. With the keyboard, Enter peels it off, arrows move it and Enter sticks it down. R gives a fresh sleeve.`}
           onKeyDown={onKeyDown}
           onBlur={() => engineRef.current?.blur()}
         />
@@ -112,7 +112,7 @@ export default function Piece({ embedded = false }) {
         <header className="sticker-peel-head">
           <h1 className="text-title-sm">Sticker Peel</h1>
           <p className="sticker-peel-hint text-ui-lg">
-            Peel a sticker from its edge. Let go halfway and it lays back down; pull it free and drop it anywhere.
+            Peel the price sticker from its lifted corner. Let go halfway and it lays back down; pull it free and drop it anywhere.
           </p>
           <div className="sticker-peel-sleeves" role="radiogroup" aria-label="Sleeve">
             {SLEEVES.map((album) => (

@@ -1,6 +1,6 @@
 {
   "title": "Refractor",
-  "description": "Beatles covers reprinted as chrome refractor cards in penny sleeves. Tilt one and a diffraction grating splits the light into rainbow bands across the chrome border while the cover print stays matte ink; flick it hard and the next record swaps in at the edge-on moment of the spin.",
+  "description": "Records from Herb's top songs printed as chrome refractor trading cards: the cover as the photo, a foil-stamped nameplate in a colour pulled from the art, a year roundel, and a numbered tracklist back. Tilt one and a diffraction grating splits the light across the chrome while the print stays matte; flick it hard and the next card spins in edge-on.",
   "tags": [
     "WebGL",
     "Optics",
@@ -9,7 +9,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge, now on real records: a grating equation drives the rainbow, a chrome map generated from each cover keeps the print matte, and a fast flick riffles through the albums one per turn, swapping cards while they are edge-on.",
+  "intent": "One optical material finished to the edge on a believable premium card: a grating equation drives the rainbow, a chrome map generated from each cover keeps the print matte, and the card design follows a modern chrome set, with a silver border, a team-colour nameplate and a printed back.",
   "tile": {
     "cols": 2,
     "rows": 4

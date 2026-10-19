@@ -66,7 +66,7 @@ export default function Piece({ embedded = false }) {
         className="lenticular__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A lenticular flip card: ${current.full}. Move the pointer over it, drag it, or tilt your phone and the sleeve turns into its song. Tap the card, press Enter, or use 1 to 4 for the next card.`}
+        aria-label={`A lenticular flip card: ${current.full}. Move the pointer over it, drag it, or tilt your phone and the sleeve turns into a recoloured print of itself titled with its song. Tap the card, press Enter, or use 1 to 4 for the next card.`}
       >
         <canvas ref={canvasRef} className="lenticular__canvas" />
         <img className="lenticular__fallback" src={current.src} alt={`${current.album.title} cover`} draggable={false} />
@@ -76,7 +76,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="lenticular__head">
           <h1 className="lenticular__title">Lenticular</h1>
           <p className="lenticular__lede">
-            A flip card from a 1960s record shop. Tilt it and the sleeve turns into its song <em>in the plastic</em>; tap it for the next.
+            A flip card from a 1960s record shop. Tilt it and the sleeve turns into a second print of itself, <em>regraded for its song</em>; tap it for the next.
           </p>
         </header>
       )}
