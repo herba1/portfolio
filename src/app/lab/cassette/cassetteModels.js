@@ -551,7 +551,7 @@ export function buildWorld(THREE, renderer, mix) {
   );
   counter.rotation.x = -Math.PI / 2;
   const jDepth = JCARD.front + JCARD.spine + JCARD.flap;
-  counter.position.set(-JCARD.width / 2 + 80, 0.2, -jDepth / 2 + 59.2);
+  counter.position.set(-JCARD.width / 2 + 80, 0.2, -jDepth / 2 + 57.9);
   counter.receiveShadow = true;
   jcard.add(counter);
   const jShadowTex = keep(texture(THREE, renderer, blobCanvas(200, 190, 20, 10), { srgb: false }));

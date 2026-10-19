@@ -411,8 +411,7 @@
     justify-content: center;
   }
 
-  .ink-drag__inks,
-  .ink-drag__fresh {
+  .ink-drag__inks {
     flex: 1;
   }
 

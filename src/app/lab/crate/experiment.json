@@ -1,14 +1,14 @@
 {
   "title": "Crate",
-  "description": "A wooden crate of worn Beatles LPs, from Please Please Me to Abbey Road, seen from just above. Drag or scroll to flip the real sleeves forward one after another, and pull one up out of the crate to slide its record half out.",
+  "description": "Nine Beatles LPs standing in a stack on a light page. Drag or scroll to flip sleeves forward and back, with a soft paper flick for each one; tap the front sleeve to pull it up and slide its record out.",
   "tags": [
-    "WebGL",
     "Music",
-    "Physical"
+    "Physical",
+    "Motion"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One record-shop gesture finished to the edge: real cardboard sleeves with weight, ring wear and gloss that tip under your hand, and a black record with its own groove sheen that slides out when you lift one.",
+  "intent": "One record-shop gesture, flattened to the essentials: real covers in a clean CSS 3D stack you dig through with your hand, and a black record that slides out of the sleeve you choose.",
   "tile": {
     "cols": 3,
     "rows": 5

@@ -54,7 +54,7 @@ export default function Piece({ embedded = false }) {
       if (rect.width >= 900) return { top: 88, bottom: 32, left: rect.width >= 1100 ? 300 : 48, right: 48 };
       const head = headRef.current?.getBoundingClientRect();
       const top = head ? head.bottom - rect.top + 8 : 160;
-      return { top, bottom: 16, left: 12, right: 12 };
+      return { top, bottom: 24, left: 20, right: 20 };
     };
     const start = async () => {
       try {

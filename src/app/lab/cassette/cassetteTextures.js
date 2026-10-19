@@ -154,14 +154,14 @@ export function typeText(ctx, text, x, y, size, { ink = "rgb(30 28 36)", seed = 
   return total;
 }
 
-function typeFit(ctx, text, x, y, size, maxWidth, options = {}) {
+function typeFit(ctx, text, x, y, size, maxWidth, options = {}, floor = 0.78) {
   ctx.save();
   ctx.font = `${size}px ${TYPE_FACE}`;
   const advance = ctx.measureText("M").width;
   ctx.restore();
   let fitSize = size;
   let line = String(text);
-  if (advance * line.length > maxWidth) fitSize = Math.max(size * 0.78, maxWidth / line.length / (advance / size));
+  if (advance * line.length > maxWidth) fitSize = Math.max(size * floor, maxWidth / line.length / (advance / size));
   const fitAdvance = (advance / size) * fitSize;
   const room = Math.floor(maxWidth / fitAdvance);
   if (line.length > room) line = `${line.slice(0, Math.max(1, room - 1)).trimEnd()}…`;
@@ -181,7 +181,7 @@ export function labelCanvas(mix) {
   ctx.fillRect(0, h - 1.1 * ppm, w, 0.35 * ppm);
   ctx.strokeStyle = "rgb(120 140 170 / 0.45)";
   ctx.lineWidth = 1.2;
-  for (const yy of [6.6, 10.4]) {
+  for (const yy of [6.9, 10.9]) {
     ctx.beginPath();
     ctx.moveTo(12.5 * ppm, yy * ppm);
     ctx.lineTo(w - 3 * ppm, yy * ppm);
@@ -191,11 +191,8 @@ export function labelCanvas(mix) {
   ctx.font = `600 ${9.4 * ppm}px ${PRINT_FACE}`;
   ctx.textBaseline = "alphabetic";
   ctx.fillText("A", 2.4 * ppm, 11.2 * ppm);
-  ctx.fillStyle = "rgb(36 64 112 / 0.8)";
-  ctx.font = `500 ${1.6 * ppm}px ${PRINT_FACE}`;
-  ctx.fillText("C60", w - 9 * ppm, 2.6 * ppm);
-  typeFit(ctx, mix.lead.title, 13 * ppm, 5.8 * ppm, 3.3 * ppm, w - 25 * ppm, { ink: "rgb(176 40 34)", seed: 3 });
-  typeFit(ctx, [mix.lead.artist, mix.lead.album].filter(Boolean).join(" · "), 13 * ppm, 9.7 * ppm, 2.3 * ppm, w - 16 * ppm, { seed: 5 });
+  typeFit(ctx, mix.lead.title, 13 * ppm, 6.2 * ppm, 4.2 * ppm, w - 16 * ppm, { ink: "rgb(176 40 34)", seed: 3 });
+  typeFit(ctx, [mix.lead.artist, mix.lead.album].filter(Boolean).join(" · "), 13 * ppm, 10.2 * ppm, 3 * ppm, w - 16 * ppm, { seed: 5 });
   return c;
 }
 
@@ -211,10 +208,11 @@ export function jcardCanvas(mix) {
   const blue = "rgb(36 64 112)";
   const red = "rgb(176 40 34)";
   const m = (v) => v * ppm;
+  const row = (i) => m(23 + i * 5.4);
   ctx.strokeStyle = "rgb(120 140 170 / 0.4)";
   ctx.lineWidth = 1.2;
-  for (let k = 0; k < 13; k += 1) {
-    const yy = m(18 + k * 3.5);
+  for (let k = 0; k < 7; k += 1) {
+    const yy = row(k) + m(1.4);
     ctx.beginPath();
     ctx.moveTo(m(6), yy);
     ctx.lineTo(m(94), yy);
@@ -222,17 +220,15 @@ export function jcardCanvas(mix) {
   }
   ctx.fillStyle = blue;
   ctx.fillRect(m(6), m(10.2), m(88), m(0.5));
-  ctx.font = `600 ${m(1.9)}px ${PRINT_FACE}`;
-  ctx.fillText("Side A", m(6), m(16.2));
-  ctx.fillText("Side B", m(52), m(16.2));
-  ctx.fillRect(m(50), m(13.8), m(0.25), m(46));
+  ctx.font = `600 ${m(2.2)}px ${PRINT_FACE}`;
+  ctx.fillText("Side A", m(6), m(16.4));
+  ctx.fillText("Side B", m(52), m(16.4));
+  ctx.fillRect(m(50), m(13.8), m(0.25), m(39));
   typeText(ctx, mix.title, m(6), m(8.4), m(4.4), { ink: red, seed: 9 });
-  typeText(ctx, mix.dedication, m(94), m(8.4), m(2.4), { seed: 12, align: "right" });
+  typeText(ctx, mix.dedication, m(94), m(8.4), m(2.8), { seed: 12, align: "right" });
   const rows = (list, x0, x1, seedBase, offset) => {
     list.forEach((t, i) => {
-      const yy = m(17.3 + (i + 1) * 3.5);
-      typeFit(ctx, `${i + 1 + offset}. ${t.title}`, x0, yy, m(2.15), x1 - x0, { seed: seedBase + i * 3 });
-      typeFit(ctx, t.artist, x0 + m(3.8), yy + m(1.8), m(1.55), x1 - x0 - m(3.8), { seed: seedBase + i * 3 + 1, ink: "rgb(56 52 60)" });
+      typeFit(ctx, `${i + 1 + offset}. ${t.title}`, x0, row(i), m(2.7), x1 - x0, { seed: seedBase + i * 3 }, 1);
     });
   };
   rows(mix.sideA, m(6), m(48), 20, 0);
@@ -240,9 +236,6 @@ export function jcardCanvas(mix) {
   ctx.strokeStyle = blue;
   ctx.lineWidth = m(0.22);
   ctx.strokeRect(m(66), m(53.5), m(28), m(8.5));
-  ctx.font = `500 ${m(1.5)}px ${PRINT_FACE}`;
-  ctx.fillStyle = blue;
-  ctx.fillText("Tape counter", m(67.4), m(55.9));
   ctx.strokeStyle = "rgb(90 80 70 / 0.16)";
   ctx.lineWidth = 2;
   for (const yy of [front, front + spine]) {
@@ -255,8 +248,8 @@ export function jcardCanvas(mix) {
   ctx.fillRect(0, m(front + 1.4), w, m(0.6));
   typeText(ctx, mix.title, m(6), m(front + 8.4), m(3.6), { seed: 33 });
   typeText(ctx, "A / B", m(94), m(front + 8.4), m(2.6), { seed: 34, align: "right", ink: red });
-  typeFit(ctx, mix.notes, m(6), m(front + spine + 6.4), m(1.9), m(88), { seed: 35 });
-  typeFit(ctx, mix.notes2, m(6), m(front + spine + 10.2), m(1.9), m(88), { seed: 36 });
+  typeFit(ctx, mix.notes, m(6), m(front + spine + 6.6), m(2.5), m(88), { seed: 35 });
+  typeFit(ctx, mix.notes2, m(6), m(front + spine + 11.4), m(2.5), m(88), { seed: 36 });
   return c;
 }
 
@@ -351,8 +344,6 @@ export function foilCanvas() {
   ctx.fillStyle = "#fff";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${3.1 * ppm}px ${PRINT_FACE}`;
-  ctx.fillText("Moth & Lantern  No. 2", -4 * ppm, 0);
   ctx.font = `700 ${3.2 * ppm}px ${PRINT_FACE}`;
   ctx.fillText("HB", 24 * ppm, 0);
   ctx.restore();

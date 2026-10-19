@@ -38,8 +38,8 @@ void main() {
   vec3 v = normalize(vV);
   vec2 view = v.xy - n.xy;
   float lum = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  float win = step(0.0667, vUv.x) * step(vUv.x, 0.9333) * step(0.2786, vUv.y) * step(vUv.y, 0.8976);
-  float inner = step(0.03, vUv.x) * step(vUv.x, 0.97) * step(0.0214, vUv.y) * step(vUv.y, 0.9786);
+  float win = step(0.07, vUv.x) * step(vUv.x, 0.93) * step(0.4214, vUv.y) * step(vUv.y, 0.8881);
+  float inner = step(0.0367, vUv.x) * step(vUv.x, 0.9633) * step(0.0262, vUv.y) * step(vUv.y, 0.9738);
   float rim = 1.0 - inner;
   float phase = vUv.x * 1.2 + vUv.y * 0.8 + view.x * 2.6 + view.y * 1.8 + uTilt.x * 1.8 - uTilt.y * 1.3;
   vec3 rainbow = hue(fract(phase));

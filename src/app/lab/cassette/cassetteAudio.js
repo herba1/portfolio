@@ -122,8 +122,25 @@ function parseWav(buffer) {
   return null;
 }
 
+async function songUrl(song) {
+  if (!song?.title) return null;
+  if (song.previewUrl) return song.previewUrl;
+  const query = new URLSearchParams({ artist: song.artist || "", title: song.title });
+  const response = await fetch(`/api/spotify/preview?${query}`);
+  if (!response.ok) return null;
+  const data = await response.json();
+  return data?.url || null;
+}
+
+async function loadFirst(song, fallback) {
+  const url = await songUrl(song).catch(() => null);
+  if (!url) return loadBeat(fallback);
+  return loadBeat(url).catch(() => loadBeat(fallback));
+}
+
 async function loadBeat(url) {
   const response = await fetch(url);
+  if (!response.ok) throw new Error(`audio ${response.status}`);
   const bytes = await response.arrayBuffer();
   const parsed = parseWav(bytes);
   let beat = parsed;
@@ -145,7 +162,7 @@ async function loadBeat(url) {
   return beat;
 }
 
-export function createChatter(url) {
+export function createChatter(url, getSong) {
   let ctx = null;
   let node = null;
   let master = null;
@@ -166,7 +183,7 @@ export function createChatter(url) {
     master.gain.value = 0;
     master.connect(ctx.destination);
     moduleUrl = URL.createObjectURL(new Blob([PROCESSOR], { type: "application/javascript" }));
-    Promise.all([ctx.audioWorklet.addModule(moduleUrl), loadBeat(url)])
+    Promise.all([ctx.audioWorklet.addModule(moduleUrl), loadFirst(getSong?.(), url)])
       .then(([, beat]) => {
         if (!ctx || destroyed) return;
         node = new AudioWorkletNode(ctx, "cassette-chatter", { numberOfInputs: 0, outputChannelCount: [2] });

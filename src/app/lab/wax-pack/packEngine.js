@@ -28,8 +28,8 @@ const CLEAR_Y = PACK.H / 2 + 0.06 + CARD.H / 2;
 const OUT_Z = 0.36;
 const IN_GAP = 0.005;
 const DEAL_GAP = 0.016;
-const X_OUT = 1.04;
-const X_CLEAR = 0.95;
+const X_OUT = 0.62;
+const X_CLEAR = 0.55;
 const COUNT = 6;
 const BG = 0xe6e3dc;
 
@@ -447,11 +447,18 @@ export async function createPack(stage, canvas, { embedded, onChange, insets, ge
       y1 = Math.max(y1, cy + h / 2);
     };
     const packIn = !st.fall;
-    if (packIn) add(0, Math.max(st.packY.x, -0.4), PACK.W, PACK.H);
+    const lifted = stackRig.visible && stackWorld().y + CARD.H / 2 > PACK.H / 2;
+    if (packIn && lifted) {
+      const s = stackWorld();
+      const rise = smooth(0.2, CLEAR_Y, s.y);
+      const keep = PACK.H * (1 - 0.8 * rise);
+      add(0, st.packY.x + PACK.H / 2 - keep / 2, PACK.W, keep);
+    }
+    else if (packIn) add(0, Math.max(st.packY.x, -0.4), PACK.W, PACK.H);
     if (stackRig.visible) {
       const s = stackWorld();
       if (!packIn) {
-        add(s.x, s.y, CARD.W * 1.24, CARD.H);
+        add(s.x, s.y, CARD.W * 1.5, CARD.H);
         z = s.z;
       } else if (s.y + CARD.H / 2 > PACK.H / 2) add(s.x, s.y, CARD.W, CARD.H);
     }
@@ -676,7 +683,7 @@ export async function createPack(stage, canvas, { embedded, onChange, insets, ge
       st.auto = false;
       deformStrip(stripF, 1, st.dir);
       deformStrip(stripB, 1, st.dir);
-      st.fly = { t: 0, vx: st.dir * 0.9, vy: 1.4, vz: 0.6, spin: st.dir * -1.6 };
+      st.fly = { t: 0, vx: st.dir * 1.7, vy: 0.12, vz: 0.6, spin: st.dir * -1.4 };
       for (const m of stripMats) {
         m.transparent = true;
         m.needsUpdate = true;
@@ -759,18 +766,22 @@ export async function createPack(stage, canvas, { embedded, onChange, insets, ge
       if (card.mode === "drag") {
         card.x.x = card.dragX;
       } else if (card.mode === "out") {
-        spring(card.x, card.dir * X_OUT, 170, dt);
-        if (Math.abs(card.x.x) > X_CLEAR) {
+        const reach = Math.min(1, Math.max(0.68, (width / 2 / ppu - CARD.W * 0.1) / X_OUT));
+        spring(card.x, card.dir * X_OUT * reach, 170, dt);
+        if (Math.abs(card.x.x) > X_CLEAR * reach) {
           card.mode = "in";
           card.slot.x = card.slotT;
           card.slot.v = 0;
         }
       } else if (card.mode === "in") {
-        spring(card.x, restX, 70, dt);
+        spring(card.x, restX, 130, dt);
         if (Math.abs(card.x.x - restX) < 0.002 && Math.abs(card.x.v) < 0.02) card.mode = "rest";
       } else spring(card.x, restX, 200, dt);
       let z = zOf(card.slot.x);
-      if (card.mode === "out") z = zOf(0) + 0.06;
+      if (card.mode === "out") {
+        const tuck = smooth(0.28, X_CLEAR, Math.abs(card.x.x - restX));
+        z = zOf(0) + 0.06 + (Math.min(zOf(card.slotT), minRest - 0.004) - zOf(0) - 0.06) * tuck;
+      }
       if (card.mode === "in") z = Math.min(zOf(card.slotT), minRest - 0.004);
       const off = card.x.x - restX;
       card.mesh.position.set(card.x.x, 0, z);
@@ -790,11 +801,12 @@ export async function createPack(stage, canvas, { embedded, onChange, insets, ge
 
     const target = cameraTarget();
     const c = st.cam;
-    spring(c.x, target.x, 40, dt);
-    spring(c.y, target.y, 40, dt);
-    spring(c.z, target.z, 40, dt);
-    spring(c.w, target.w, 40, dt);
-    spring(c.h, target.h, 40, dt);
+    const camK = st.phase === "open" || st.phase === "pulling" ? 900 : 40;
+    spring(c.x, target.x, camK, dt);
+    spring(c.y, target.y, camK, dt);
+    spring(c.z, target.z, camK, dt);
+    spring(c.w, target.w, camK, dt);
+    spring(c.h, target.h, camK, dt);
 
     const moving =
       Math.abs(st.tx.v) + Math.abs(st.ty.v) + Math.abs(st.p.v) + Math.abs(st.u.v) + Math.abs(c.y.v) + Math.abs(c.h.v) + Math.abs(st.sz.v) + Math.abs(st.packY.v) >

@@ -110,7 +110,8 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   const press = { id: null, x: 0, y: 0, moved: 0, age: 0, hitPencil: false, hitHub: -1, kind: null };
   const drive = { hub: -1, held: false, target: 0, psi: 0, lastAngle: 0 };
   const view = { width: 1, height: 1 };
-  const chatter = createChatter("/blog/audio/friday-beat.wav");
+  let song = mix.lead;
+  const chatter = createChatter("/blog/audio/friday-beat.wav", () => song);
   let soundState = "off";
   let userMuted = false;
   let raf = 0;
@@ -123,8 +124,8 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   let quietFrames = 0;
 
   function restPoseFor(portrait) {
-    const base = portrait ? new THREE.Vector3(-46, PENCIL.inR, 132) : new THREE.Vector3(64, PENCIL.inR + 0.2, 55);
-    const angle = portrait ? (24 * Math.PI) / 180 : (33 * Math.PI) / 180;
+    const base = portrait ? new THREE.Vector3(-60, PENCIL.inR, -47) : new THREE.Vector3(-58, PENCIL.inR + 0.2, -48);
+    const angle = portrait ? (-3 * Math.PI) / 180 : (-4 * Math.PI) / 180;
     const dir = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle));
     const a = new THREE.Vector3(Math.cos(Math.PI / 6), 0, Math.sin(Math.PI / 6));
     const b = new THREE.Vector3(0, 1, 0);
@@ -143,8 +144,8 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     const portrait = view.height > view.width * 1.12;
     layout.portrait = portrait;
     if (portrait) {
-      world.jcard.position.set(4, 0, 104);
-      world.jcard.rotation.y = 0.07;
+      world.jcard.position.set(2, 0, 96);
+      world.jcard.rotation.y = 0.04;
     } else {
       world.jcard.position.set(114, 0, 6);
       world.jcard.rotation.y = -0.12;
@@ -168,7 +169,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     for (const x of [-JCARD.width / 2, JCARD.width / 2]) for (const z of [-depth / 2, depth / 2]) pts.push(new THREE.Vector3(x, 0, z).applyMatrix4(world.jcard.matrixWorld));
     const rest = layout.rest;
     pts.push(rest.base.clone(), rest.base.clone().addScaledVector(rest.dir, PENCIL.length));
-    pts.push(new THREE.Vector3(HUBS[1].x, layout.portrait ? 84 : 30, HUBS[1].z));
+    for (const hub of HUBS) pts.push(new THREE.Vector3(hub.x, PENCIL.length + HOVER_Y, hub.z));
     return pts;
   }
 
@@ -823,6 +824,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
 
   function setMix(next) {
     if (destroyed) return;
+    song = next.lead;
     world.labelTex.image = labelCanvas(next);
     world.labelTex.needsUpdate = true;
     world.jTex.image = jcardCanvas(next);

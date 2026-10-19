@@ -21,7 +21,7 @@ const PRINT_MS = 820;
 const VELOCITY_LIFE_MS = 1400;
 const QUEUE_LIMIT = 96;
 const VELOCITY_SCALE = 0.5;
-const MORPH_MS = 1700;
+const MORPH_MS = 1300;
 const MORPH_HOLD_MS = 760;
 const IDLE_FIRST_MS = 2600;
 const IDLE_MS = 6400;
@@ -385,11 +385,11 @@ export default class InkDragEngine {
 
   drawMask() {
     const item = this.currentItem();
-    const cover =
-      this.currentKind() === "cover"
-        ? this.coverPixels(this.covers.get(item.cover))
-        : null;
-    if (!cover && item) this.covers.delete(item.cover);
+    const wantsCover = this.currentKind() === "cover";
+    const cover = wantsCover
+      ? this.coverPixels(this.covers.get(item.cover))
+      : null;
+    if (wantsCover && !cover) this.covers.delete(item.cover);
     this.tone = cover ? 1 : 0;
     this.uploadMask(cover || this.titlePixels(item ? item.word : DEFAULT_WORD));
   }
@@ -403,6 +403,7 @@ export default class InkDragEngine {
     );
     const x = Math.round((w - side) / 2);
     const y = Math.round(h * (portrait ? 0.48 : 0.5) - side / 2);
+    this.extent = [x / w, (x + side) / w];
     return readCover(this.coverCanvas, image, w, h, x, y, side);
   }
 
@@ -441,6 +442,8 @@ export default class InkDragEngine {
       blockHeight;
     const scale = Math.min(fitWidth, fitHeight);
     const size = 100 * scale;
+    const half = (widest * scale) / 2 / canvas.width;
+    this.extent = [0.5 - half, 0.5 + half];
     ctx.font = `${size}px ${family}`;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#fff";
@@ -635,11 +638,16 @@ export default class InkDragEngine {
       this.print(false);
       return;
     }
+    const before = this.extent || [0, 1];
     this.drawMask();
+    const after = this.extent || [0, 1];
     this.runPrint(1, this.goalTarget);
     this.printStart = -1;
     this.drying = false;
-    this.morph = { t: 0, prevX: null };
+    const from = Math.max(-0.08, Math.min(before[0], after[0]) - 0.08);
+    const to = Math.min(1.08, Math.max(before[1], after[1]) + 0.08);
+    this.morph = { t: 0, prevX: null, from, to };
+    this.front = from;
     this.setStatus("wet");
     this.emitState();
     clearTimeout(this.idleTimer);
@@ -650,8 +658,10 @@ export default class InkDragEngine {
     const m = this.morph;
     m.t += dt * 1000;
     const p = Math.min(1, m.t / MORPH_MS);
-    const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-    const front = -0.16 + 1.36 * eased;
+    const inOut = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    const eased = 0.3 * p + 0.7 * inOut;
+    const front = m.from + (m.to - m.from) * eased;
+    this.front = front;
     const W = this.width;
     const H = this.height;
     const x = front * W;
@@ -682,6 +692,7 @@ export default class InkDragEngine {
     this.lastStir = this.clock;
     if (m.t >= MORPH_MS + MORPH_HOLD_MS) {
       this.morph = null;
+      this.front = 3;
       this.scheduleIdle(IDLE_MS);
       return 3;
     }
@@ -945,6 +956,7 @@ export default class InkDragEngine {
     gl.uniform1f(uniforms.uGloss, ink.gloss);
     gl.uniform1f(uniforms.uPx, this.dpr);
     gl.uniform1f(uniforms.uDeboss, this.tone ? 0 : 1);
+    gl.uniform1f(uniforms.uFront, this.morph ? this.front : 3);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

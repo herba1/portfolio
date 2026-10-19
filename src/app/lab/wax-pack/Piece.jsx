@@ -36,7 +36,7 @@ export default function Piece({ embedded = false }) {
       const box = root.getBoundingClientRect();
       if (box.width >= 900) return { top: 96, bottom: 48, left: 320, right: 320 };
       const head = headRef.current?.getBoundingClientRect();
-      const top = head ? head.bottom - box.top + 24 : 200;
+      const top = head ? head.bottom - box.top + 32 : 200;
       return { top, bottom: 40, left: 16, right: 16 };
     };
     const onChange = (change) => {

@@ -20,6 +20,8 @@ const SERIF = '"Iowan Old Style", "Times New Roman", Georgia, serif';
 const CRIMP_PX = PACK.CRIMP * PX;
 const TEAR_PX = PACK.TEAR * PX;
 
+const SKIP = new Set(ALBUMS.filter((a) => a.id === "white-album" || a.size < 480).map((a) => a.cover));
+
 const byTitle = new Map(ALBUMS.map((a) => [a.title.toLowerCase(), a]));
 
 const keyOf = (text) =>
@@ -63,7 +65,7 @@ export function albumsFrom(tracks) {
       songs: [],
     });
   }
-  return [...groups.values()].filter((a) => a.src);
+  return [...groups.values()].filter((a) => a.src && !SKIP.has(a.src));
 }
 
 export function dealPack(pool, rand = Math.random) {
@@ -144,28 +146,6 @@ function rng(seed) {
   };
 }
 
-function averageOf(img) {
-  if (!img) return [120, 120, 130];
-  try {
-    const c = canvasOf(8, 8);
-    const ctx = c.getContext("2d", { willReadFrequently: true });
-    ctx.drawImage(img, ...squareCrop(img), 0, 0, 8, 8);
-    const d = ctx.getImageData(0, 0, 8, 8).data;
-    const sum = [0, 0, 0];
-    for (let i = 0; i < d.length; i += 4) {
-      sum[0] += d[i];
-      sum[1] += d[i + 1];
-      sum[2] += d[i + 2];
-    }
-    return sum.map((v) => v / 64);
-  } catch {
-    return [120, 120, 130];
-  }
-}
-
-const mixRgb = (a, b, t) => a.map((v, i) => Math.round(v + (b[i] - v) * t));
-const rgb = (c) => `rgb(${c[0]} ${c[1]} ${c[2]})`;
-
 function crimpBand(ctx, y0, y1) {
   const g = ctx.createLinearGradient(0, y0, 0, y1);
   g.addColorStop(0, "#c7ccd6");
@@ -245,14 +225,6 @@ export function packFront(featured, img, sans) {
 
   ctx.fillStyle = "#151a3d";
   ctx.fillRect(0, CRIMP_PX, PW, TEAR_PX - CRIMP_PX);
-  ctx.fillStyle = "#f4f1ea";
-  ctx.font = `500 30px ${sans}`;
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "left";
-  const mid = (CRIMP_PX + TEAR_PX) / 2 + 2;
-  ctx.fillText("Tear here", 60, mid);
-  ctx.textAlign = "right";
-  ctx.fillText("Open from either notch", PW - 60, mid);
   ctx.setLineDash([14, 10]);
   ctx.strokeStyle = "rgb(244 241 234 / 0.75)";
   ctx.lineWidth = 3;
@@ -323,20 +295,11 @@ export function packFront(featured, img, sans) {
 
   ctx.textAlign = "center";
   ctx.fillStyle = "#f4f1ea";
-  ctx.font = `500 32px ${sans}`;
-  ctx.fillText("Featuring", cx, 1278);
   const title = featured?.title || "";
-  ctx.font = `italic 400 ${fit(ctx, title, 820, [64, 56, 48, 42, 36], "italic 400", SERIF)}px ${SERIF}`;
-  ctx.fillText(clip(ctx, title, 840), cx, 1350);
-  ctx.font = `500 32px ${sans}`;
-  ctx.fillText([featured?.artist, featured?.year].filter(Boolean).join(" · "), cx, 1404);
-
-  roundRect(ctx, 110, 1474, PW - 220, 76, 38);
-  ctx.fillStyle = "rgb(10 12 40 / 0.6)";
-  ctx.fill();
-  ctx.fillStyle = "#f4f1ea";
-  ctx.font = `500 28px ${sans}`;
-  ctx.fillText("● Common   ◆ Uncommon   ★ Rare holo", cx, 1522);
+  ctx.font = `italic 400 ${fit(ctx, title, 820, [76, 68, 60, 52, 44], "italic 400", SERIF)}px ${SERIF}`;
+  ctx.fillText(clip(ctx, title, 840), cx, 1340);
+  ctx.font = `600 40px ${sans}`;
+  ctx.fillText([featured?.artist, featured?.year].filter(Boolean).join(", "), cx, 1414);
 
   crimpBand(ctx, 0, CRIMP_PX);
   crimpBand(ctx, PH - CRIMP_PX, PH);
@@ -460,102 +423,142 @@ export function haloCanvas() {
   return c;
 }
 
+const TYPE_COLORS = {
+  early: ["#f6e7c8", "#efd5a4", "#e7c487"],
+  middle: ["#e3eedc", "#cfe3c4", "#b9d6aa"],
+  late: ["#dfe6f2", "#c9d6ea", "#b1c4e0"],
+};
+
+function typeOf(year) {
+  if (!year || year < 1966) return "early";
+  return year < 1969 ? "middle" : "late";
+}
+
+function gold(ctx, x0, y0, x1, y1, rare) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  const stops = rare
+    ? ["#fff4c4", "#f0c955", "#fbe7a0", "#d9a93a", "#f7df8c", "#c99528"]
+    : ["#fff1a8", "#f5d33a", "#fbe58a", "#e8bd22", "#f8dc66", "#ddb01c"];
+  stops.forEach((c, i) => g.addColorStop(i / (stops.length - 1), c));
+  return g;
+}
+
+function coverCrop(img, aspect) {
+  const w = img.naturalWidth || img.width;
+  const h = img.naturalHeight || img.height;
+  let sw = w;
+  let sh = w / aspect;
+  if (sh > h) {
+    sh = h;
+    sw = h * aspect;
+  }
+  return [(w - sw) / 2, (h - sh) / 2.4, sw, sh];
+}
+
 export function cardFace(card, img, sans) {
   const c = canvasOf(CW, CH);
   const ctx = c.getContext("2d");
   const rare = card.rarity.key === "rare";
-  const avg = averageOf(img);
-  roundRect(ctx, 0, 0, CW, CH, 30);
+  const ink = "#1b1915";
+  const kind = typeOf(card.year);
+  const [t0, t1, t2] = TYPE_COLORS[kind];
+  roundRect(ctx, 0, 0, CW, CH, 28);
   ctx.save();
   ctx.clip();
-  const rim = ctx.createLinearGradient(0, 0, CW, CH);
-  if (rare) {
-    rim.addColorStop(0, "#f7e7b0");
-    rim.addColorStop(0.4, "#c99a3c");
-    rim.addColorStop(0.7, "#f3dc8a");
-    rim.addColorStop(1, "#a8792a");
-  } else {
-    rim.addColorStop(0, "#eef1f4");
-    rim.addColorStop(0.45, "#a3abb6");
-    rim.addColorStop(0.75, "#dde1e7");
-    rim.addColorStop(1, "#8f98a4");
-  }
-  ctx.fillStyle = rim;
+  ctx.fillStyle = gold(ctx, 0, 0, CW, CH, rare);
   ctx.fillRect(0, 0, CW, CH);
-  const ground = mixRgb(avg, [250, 247, 240], 0.72);
-  const deep = mixRgb(avg, [40, 36, 30], 0.35);
-  roundRect(ctx, 18, 18, CW - 36, CH - 36, 16);
-  ctx.fillStyle = rgb(ground);
-  ctx.fill();
-  const ink = "#1f1d1a";
 
-  ctx.fillStyle = ink;
+  roundRect(ctx, 22, 22, CW - 44, CH - 44, 14);
+  const panel = ctx.createLinearGradient(0, 22, 0, CH - 22);
+  panel.addColorStop(0, t0);
+  panel.addColorStop(0.45, t1);
+  panel.addColorStop(1, t2);
+  ctx.fillStyle = panel;
+  ctx.fill();
+
   ctx.textBaseline = "alphabetic";
-  ctx.textAlign = "left";
+  ctx.fillStyle = ink;
   const yearText = card.year ? String(card.year) : "";
-  ctx.font = `600 26px ${sans}`;
-  const yearW = yearText ? ctx.measureText(yearText).width + 20 : 0;
-  const tSize = fit(ctx, card.title, CW - 80 - yearW, [36, 32, 28, 26], 600, sans);
-  ctx.font = `600 ${tSize}px ${sans}`;
-  ctx.fillText(clip(ctx, card.title, CW - 80 - yearW), 40, 68);
+  ctx.font = `700 34px ${sans}`;
+  const yearW = yearText ? ctx.measureText(yearText).width : 0;
+  ctx.font = `600 18px ${sans}`;
+  const lpW = yearText ? ctx.measureText("LP").width + 6 : 0;
+  const nameMax = CW - 84 - yearW - lpW - 20;
+  const nameSize = fit(ctx, card.title, nameMax, [40, 36, 32, 28], 700, sans);
+  ctx.font = `700 ${nameSize}px ${sans}`;
+  ctx.textAlign = "left";
+  ctx.fillText(clip(ctx, card.title, nameMax), 42, 74);
   if (yearText) {
     ctx.textAlign = "right";
-    ctx.font = `600 26px ${sans}`;
-    ctx.fillText(yearText, CW - 40, 68);
-    ctx.textAlign = "left";
+    ctx.font = `700 34px ${sans}`;
+    ctx.fillText(yearText, CW - 42, 74);
+    ctx.font = `600 18px ${sans}`;
+    ctx.fillText("LP", CW - 48 - yearW, 74);
   }
 
-  const win = { x: 40, y: 86, s: 520 };
-  ctx.fillStyle = rgb(deep);
-  ctx.fillRect(win.x - 6, win.y - 6, win.s + 12, win.s + 12);
+  const win = { x: 42, y: 94, w: CW - 84, h: 392 };
+  ctx.fillStyle = gold(ctx, win.x, win.y, win.x + win.w, win.y + win.h, true);
+  ctx.fillRect(win.x - 6, win.y - 6, win.w + 12, win.h + 12);
   if (img) {
     ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(img, ...squareCrop(img), win.x, win.y, win.s, win.s);
+    ctx.drawImage(img, ...coverCrop(img, win.w / win.h), win.x, win.y, win.w, win.h);
   } else {
-    ctx.fillStyle = rgb(mixRgb(avg, [30, 30, 40], 0.4));
-    ctx.fillRect(win.x, win.y, win.s, win.s);
+    ctx.fillStyle = "#3a3630";
+    ctx.fillRect(win.x, win.y, win.w, win.h);
   }
+  const inner = ctx.createLinearGradient(0, win.y, 0, win.y + win.h);
+  inner.addColorStop(0, "rgb(0 0 0 / 0.12)");
+  inner.addColorStop(0.06, "rgb(0 0 0 / 0)");
+  inner.addColorStop(0.94, "rgb(0 0 0 / 0)");
+  inner.addColorStop(1, "rgb(0 0 0 / 0.14)");
+  ctx.fillStyle = inner;
+  ctx.fillRect(win.x, win.y, win.w, win.h);
 
-  const bandY = 618;
-  roundRect(ctx, 34, bandY, CW - 68, 46, 10);
-  ctx.fillStyle = rgb(mixRgb(avg, [250, 247, 240], 0.45));
+  const stripY = win.y + win.h + 14;
+  roundRect(ctx, 64, stripY, CW - 128, 34, 17);
+  ctx.fillStyle = gold(ctx, 64, stripY, CW - 64, stripY + 34, rare);
   ctx.fill();
   ctx.fillStyle = ink;
-  ctx.font = `italic 400 26px ${SERIF}`;
-  ctx.fillText(clip(ctx, card.artist, 330), 52, bandY + 32);
-  ctx.textAlign = "right";
-  ctx.font = `600 22px ${sans}`;
-  ctx.fillText(`${card.rarity.name} ${card.rarity.mark}`, CW - 52, bandY + 31);
-  ctx.textAlign = "left";
+  ctx.textAlign = "center";
+  ctx.font = `italic 400 24px ${SERIF}`;
+  ctx.fillText(clip(ctx, `${card.artist}, long play`, CW - 160), CW / 2, stripY + 25);
 
-  card.moves.forEach((name, i) => {
-    const y = 700 + i * 50;
-    ctx.beginPath();
-    ctx.arc(58, y - 8, 17, 0, Math.PI * 2);
-    ctx.fillStyle = rare ? "#c99a3c" : rgb(deep);
-    ctx.fill();
-    ctx.fillStyle = "#faf7f0";
-    ctx.textAlign = "center";
-    ctx.font = `600 16px ${sans}`;
-    ctx.fillText(`A${i + 1}`, 58, y - 2);
-    ctx.textAlign = "left";
+  const moves = card.moves.length ? card.moves : [card.title];
+  moves.slice(0, 2).forEach((name, i) => {
+    const y = 600 + i * 84;
+    for (let k = 0; k <= i; k += 1) {
+      ctx.beginPath();
+      ctx.arc(62 + k * 34, y - 12, 15, 0, Math.PI * 2);
+      ctx.fillStyle = rare ? "#c99528" : "#2b2722";
+      ctx.fill();
+      ctx.fillStyle = "#fffaf0";
+      ctx.font = `700 17px ${sans}`;
+      ctx.textAlign = "center";
+      ctx.fillText("♪", 62 + k * 34, y - 6);
+    }
+    const left = 62 + i * 34 + 32;
     ctx.fillStyle = ink;
-    ctx.font = `500 26px ${sans}`;
-    ctx.fillText(clip(ctx, name, CW - 150), 88, y);
-    ctx.fillStyle = "rgb(31 29 26 / 0.18)";
-    ctx.fillRect(40, y + 16, CW - 80, 2);
+    ctx.textAlign = "left";
+    const right = CW - 112;
+    const size = fit(ctx, name, right - left, [32, 29, 26], 700, sans);
+    ctx.font = `700 ${size}px ${sans}`;
+    ctx.fillText(clip(ctx, name, right - left), left, y);
+    ctx.textAlign = "right";
+    ctx.font = `700 34px ${sans}`;
+    ctx.fillText(`A${i + 1}`, CW - 44, y);
+    if (i === 0) {
+      ctx.fillStyle = "rgb(27 25 21 / 0.22)";
+      ctx.fillRect(44, y + 36, CW - 88, 2);
+    }
   });
 
   ctx.fillStyle = ink;
-  ctx.font = `500 20px ${sans}`;
-  const footY = CH - 38;
-  ctx.fillText(`${String(card.number).padStart(2, "0")}/${String(card.count).padStart(2, "0")}`, 40, footY);
-  ctx.textAlign = "center";
+  const footY = CH - 44;
+  ctx.textAlign = "left";
   ctx.font = `600 24px ${sans}`;
-  ctx.fillText(card.rarity.mark, CW / 2, footY + 1);
+  ctx.fillText(`${String(card.number).padStart(2, "0")}/${String(card.count).padStart(2, "0")}`, 44, footY);
   ctx.textAlign = "right";
-  ctx.font = `500 20px ${sans}`;
-  ctx.fillText("Top Songs", CW - 40, footY);
+  ctx.fillText(`${card.rarity.name} ${card.rarity.mark}`, CW - 44, footY);
   ctx.restore();
   return c;
 }

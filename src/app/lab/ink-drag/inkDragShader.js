@@ -210,6 +210,7 @@ uniform vec3 uThinTint;
 uniform float uGloss;
 uniform float uPx;
 uniform float uDeboss;
+uniform float uFront;
 out vec4 outColor;
 float lift(vec4 s) {
   return min(s.r, 1.1) * (0.35 + 0.65 * smoothstep(0.0, 0.6, s.g));
@@ -245,8 +246,10 @@ void main() {
   paper -= vec3(0.03, 0.026, 0.018) * paperTex.g;
   paper += clamp((ty - tx) * 0.22, -0.012, 0.012);
   paper *= 0.988 + 0.024 * paperTex.a;
-  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * uDeboss;
-  paper *= 1.0 - m * 0.03 * uDeboss;
+  float swept = 1.0 - smoothstep(-0.04, 0.0, uv.x - (uFront + (0.5 - uv.y) * 0.1));
+  float debossAmount = uDeboss * swept;
+  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * debossAmount;
+  paper *= 1.0 - m * 0.03 * debossAmount;
   paper += vec3(0.05, 0.046, 0.04) * deboss;
   float dry = 1.0 - smoothstep(0.0, 0.3, wet);
   float breakup = smoothstep(tooth - 0.35, tooth + 0.1, d * 2.2);

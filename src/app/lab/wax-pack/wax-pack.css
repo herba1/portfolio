@@ -198,3 +198,11 @@
     transition: opacity 200ms linear;
   }
 }
+
+.wax-pack-hint {
+  transition: opacity 240ms var(--ease-entrance);
+}
+
+.wax-pack-root:not([data-phase="sealed"]) .wax-pack-hint {
+  opacity: 0;
+}
