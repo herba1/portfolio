@@ -45,11 +45,10 @@ export default function Piece({ embedded = false }) {
       const rect = root.getBoundingClientRect();
       if (embedded) return { top: 12, bottom: 12, left: 12, right: 12 };
       const wide = rect.width >= 900;
-      const narrow = rect.width < 520;
       if (wide) return { top: 76, bottom: 24, left: rect.width >= 1100 ? 300 : 24, right: 24 };
       const head = headRef.current?.getBoundingClientRect();
       const top = head ? head.bottom - rect.top + 12 : 160;
-      return { top, bottom: 16, left: narrow ? 6 : 16, right: narrow ? 6 : 16 };
+      return { top, bottom: 24, left: 16, right: 16 };
     };
     const start = async () => {
       try {

@@ -119,6 +119,11 @@
   font-weight: var(--font-weight-meta, var(--text-ui-xs--font-weight));
   white-space: nowrap;
   pointer-events: none;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.needle:not([data-ready]) .needle-legend {
+  opacity: 0;
 }
 
 .needle-key[data-rot="true"] .needle-legend {

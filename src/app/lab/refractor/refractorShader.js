@@ -182,7 +182,7 @@ Foil atomicFoil(vec2 q, float aa) {
 
 Foil prismFoil(vec2 q, float aa) {
   Foil f;
-  float scale = 7.5;
+  float scale = 13.0;
   vec2 g = q * scale;
   vec2 sk = vec2(g.x - g.y * 0.57735, g.y * 1.1547);
   vec2 id = floor(sk);
@@ -198,7 +198,7 @@ Foil prismFoil(vec2 q, float aa) {
   f.tilt = vec2(cos(ta), sin(ta)) * (0.05 + 0.06 * hash21(tid + 1.9));
   f.d = 1080.0;
   float w = aa * scale * 1.1 + 0.005;
-  f.seam = (1.0 - smoothstep(0.0, w, edge)) * 0.45;
+  f.seam = (1.0 - smoothstep(0.0, w, edge)) * 0.3;
   f.tex = 0.96 + 0.08 * hash21(tid + 2.0);
   return f;
 }
@@ -281,6 +281,11 @@ void main() {
   float covN = clamp(0.5 - sdN / pxN, 0.0, 1.0);
   float covF = clamp(0.5 - sdF / pxF, 0.0, 1.0);
   float covS = clamp(0.5 - sdS / pxN, 0.0, 1.0);
+  float nearOk = step(pxN, uHalf.y * 3.0);
+  float farOk = step(pxF, uHalf.y * 3.0);
+  covN *= nearOk;
+  covS *= nearOk;
+  covF *= farOk;
 
   vec2 uv = vec2(lc.x / (2.0 * uHalf.x) + 0.5, 0.5 - lc.y / (2.0 * uHalf.y));
   vec2 gx = dFdx(uv);
@@ -325,10 +330,8 @@ void main() {
       vec3 photo = textureGrad(uPhoto, uv, gx, gy).rgb;
       float plum = dot(photo, vec3(0.3, 0.55, 0.15));
       bool inArt = uv.x > uArt.x && uv.x < uArt.z && uv.y > uArt.y && uv.y < uArt.w;
-      float maskAa = min(0.04 + 0.22 * max(length(gx), length(gy)) * uMaskRes, 0.42);
-      float bg = smoothstep(0.5 - maskAa, 0.5 + maskAa, textureGrad(uMask, uv, gx, gy).r);
       float dark = clamp((uPaper * 0.84 - plum) / max(uPaper * 0.3, 1e-3), 0.0, 1.0);
-      float chrome = inArt ? bg : 1.0 - dark;
+      float chrome = inArt ? 0.0 : 1.0 - dark;
       vec3 inkTint = pow(max(photo / max(uPaper, 0.2), vec3(0.0)), vec3(1.1));
       vec3 tint = inArt ? inkTint : vec3(clamp(plum / max(uPaper, 0.2), 0.0, 1.1));
       vec3 foil = shadeFoil(uFoil.x, q, aa, tint, V, Lk, Lf, T, B, N);

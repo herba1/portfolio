@@ -170,12 +170,22 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       });
   }
 
+  function coastTo(target, velocity) {
+    const from = body.yaw;
+    const dist = target - from;
+    const speed = Math.max(Math.abs(velocity), 1);
+    const span = clamp((3 * Math.abs(dist)) / speed, 0.7, 1.6);
+    const power = clamp((speed * span) / Math.max(Math.abs(dist), 1e-3), 1.6, 4);
+    return { from, dist, span, power, t: 0 };
+  }
+
   function spinBy(turns, speed) {
     const dirn = Math.sign(turns) || 1;
-    const target = Math.round(body.yaw / TAU) * TAU + turns * TAU;
-    const distance = target - body.yaw;
+    let target = Math.round(body.yaw / TAU) * TAU + turns * TAU;
+    if ((target - body.yaw) * dirn < Math.PI * 0.6) target += TAU * dirn;
+    while ((target - body.yaw) * dirn > TAU * 1.6) target -= TAU * dirn;
     const v = Math.max(Math.abs(body.vyaw), speed) * dirn;
-    coast = { target, tau: clamp(distance / v, 0.45, 2.2) };
+    coast = coastTo(target, v);
     home = target;
     hold.active = false;
   }
@@ -429,7 +439,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
         const dirn = Math.sign(body.vyaw);
         while ((target - body.yaw) / body.vyaw < 0.4) target += TAU * dirn;
         while ((target - body.yaw) / body.vyaw > 1.9 && (target - TAU * dirn - body.yaw) / body.vyaw >= 0.4) target -= TAU * dirn;
-        coast = { target, tau: (target - body.yaw) / body.vyaw };
+        coast = coastTo(target, body.vyaw);
         home = target;
         const turns = clamp(Math.round(Math.abs(target - body.yaw) / TAU), 1, CARDS.length - 1);
         riffle = { dir: dirn, left: turns };
@@ -473,10 +483,12 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       const zeta = dragging ? 1 : 0.86;
       for (let i = 0; i < steps; i += 1) {
         if (coast) {
-          const decay = Math.exp(-h / coast.tau);
-          body.yaw = coast.target - (coast.target - body.yaw) * decay;
-          body.vyaw = (coast.target - body.yaw) / coast.tau;
-          if (Math.abs(coast.target - body.yaw) < 0.3) coast = null;
+          coast.t += h;
+          const u = Math.min(1, coast.t / coast.span);
+          const rest = Math.pow(1 - u, coast.power);
+          body.yaw = coast.from + coast.dist * (1 - rest);
+          body.vyaw = u >= 1 ? 0 : (coast.dist * coast.power * rest) / ((1 - u) * coast.span);
+          if (u >= 1) coast = null;
         } else {
           spring(body, "yaw", "vyaw", goalYaw, omega, zeta, h);
         }
@@ -617,6 +629,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
 
   return {
     select: (idx) => select(idx),
+    relayout: () => resize(),
     setCards: (list) => setCards(list),
     setFoil: (idx) => setFoil(idx),
     motionAvailable: () => coarse && typeof window.DeviceOrientationEvent !== "undefined",

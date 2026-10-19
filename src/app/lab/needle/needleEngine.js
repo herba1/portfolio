@@ -501,6 +501,7 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
       else slowFrames = Math.max(0, slowFrames - 1);
       if (slowFrames > 40 && view.quality > 0.6) {
         applyQuality(Math.max(0.6, view.quality * 0.85));
+        render(dt);
         slowFrames = 0;
       }
     }
@@ -509,6 +510,10 @@ export function createNeedleEngine({ box, stage, canvas, tag, keyButton, meter, 
       phys.wP = 0;
       phys.wR = 0;
       audio.sleep();
+      if (view.quality < 1) {
+        applyQuality(1);
+        render(dt);
+      }
     }
   }
 

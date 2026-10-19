@@ -279,15 +279,13 @@ export function chromeMask(pixels, w, h, { GRAD = 0.1, LOCAL = 0.04, GLOBAL = 0.
   const ink = new Float32Array(n);
   for (let k = 0; k < n; k += 1) {
     if (inArt(k)) {
-      const lit = Math.min(1, Math.max(0, (lum(k) - 0.4) / 0.16));
-      chrome[k] = bg[k] * lit * lit * (3 - 2 * lit);
+      chrome[k] = bg[k];
     } else {
       const dark = Math.min(1, Math.max(0, (paperLum * 0.86 - lum(k)) / (paperLum * 0.3)));
       ink[k] = dark;
-      chrome[k] = 1 - dark;
     }
   }
-  const soft = blur(chrome, w, h, 1);
+  const soft = blur(blur(blur(chrome, w, h, 3), w, h, 3), w, h, 2);
   const inkSoft = blur(ink, w, h, 1);
   const out = new Uint8Array(n * 4);
   for (let k = 0; k < n; k += 1) {

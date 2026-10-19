@@ -128,6 +128,7 @@
 }
 
 .refractor__foil {
+  transition: none;
   gap: 8px;
   padding: 0 12px 0 8px;
 }
@@ -222,6 +223,9 @@
 }
 
 .refractor__motion {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   height: 48px;
   padding: 0 16px;
   border: 0;
@@ -281,5 +285,15 @@
 
   .refractor__foil {
     padding: 0 10px 0 8px;
+  }
+
+  .refractor__motion {
+    justify-content: center;
+    width: 48px;
+    padding: 0;
+  }
+
+  .refractor__motion-label {
+    display: none;
   }
 }

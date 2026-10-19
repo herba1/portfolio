@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Smartphone } from "lucide-react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { DEFAULT_CARDS, FOILS, cardsFromTracks } from "./refractorCards";
@@ -58,7 +59,11 @@ export default function Piece({ embedded = false }) {
       onMotion: (state) => setMotion(state),
     });
     engineRef.current = engine;
+    const chrome = new ResizeObserver(() => engine.relayout());
+    if (headRef.current) chrome.observe(headRef.current);
+    if (footRef.current) chrome.observe(footRef.current);
     return () => {
+      chrome.disconnect();
       root.removeEventListener("pointerdown", wakeAudio);
       root.removeEventListener("keydown", wakeAudio);
       audio.destroy();
@@ -121,6 +126,21 @@ export default function Piece({ embedded = false }) {
               </button>
             ))}
           </div>
+          {motion !== "hidden" && (
+            <button
+              type="button"
+              className="refractor__motion"
+              data-state={motion}
+              onClick={enableMotion}
+              aria-label={motion === "on" ? "Tilting with your phone" : motion === "denied" ? "Motion blocked, drag instead" : "Tilt with your phone"}
+              disabled={motion === "on" || motion === "denied"}
+            >
+              <Smartphone className="refractor__motion-icon" size={18} strokeWidth={1.75} aria-hidden="true" />
+              <span className="refractor__motion-label">
+                {motion === "on" ? "Tilting with your phone" : motion === "denied" ? "Motion blocked, drag instead" : "Tilt with your phone"}
+              </span>
+            </button>
+          )}
           <div className="refractor__tray" role="radiogroup" aria-label="Card">
             {cards.map((card, i) => (
               <button
@@ -137,17 +157,6 @@ export default function Piece({ embedded = false }) {
               </button>
             ))}
           </div>
-          {motion !== "hidden" && (
-            <button
-              type="button"
-              className="refractor__motion"
-              data-state={motion}
-              onClick={enableMotion}
-              disabled={motion === "on" || motion === "denied"}
-            >
-              {motion === "on" ? "Tilting with your phone" : motion === "denied" ? "Motion blocked, drag instead" : "Tilt with your phone"}
-            </button>
-          )}
         </footer>
       )}
     </div>

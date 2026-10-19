@@ -100,9 +100,12 @@ export function createGroove({ box, canvas, header, picker, embedded, preset = 0
       view.cx = w / 2;
       view.cy = h / 2;
     } else if (w >= 900) {
-      radius = Math.min(w * 0.27, (h - 72 - 72) / 2);
+      const top = 80;
+      const bottom = (picker ? picker.getBoundingClientRect().height + 40 : 72) + 32;
+      const room = h - top - bottom;
+      radius = Math.min(w * 0.27, room / 2);
       view.cx = w * 0.58;
-      view.cy = 72 + (h - 72) / 2;
+      view.cy = top + room / 2;
     } else {
       const headBottom = header ? header.getBoundingClientRect().bottom - rect.top : 120;
       const pickH = picker ? picker.getBoundingClientRect().height + 40 : 64;
@@ -410,7 +413,7 @@ export function createGroove({ box, canvas, header, picker, embedded, preset = 0
   return {
     setPreset(idx) {
       if (idx === fade.to) return;
-      fade.from = fade.t < 1 && fade.t < 0.5 ? fade.from : fade.to;
+      fade.from = fade.t < 1 && 1 - Math.pow(1 - fade.t, 3) < 0.5 ? fade.from : fade.to;
       fade.to = idx;
       fade.t = 0;
       wake();

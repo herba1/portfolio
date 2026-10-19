@@ -703,10 +703,9 @@ export async function createPeel(stage, canvas, options = {}) {
     let p;
     if (embedded) p = place(16, 16, 16);
     else if (narrow) {
-      const aw = w - 32;
-      const ah = h - 184 - 24;
-      const k = Math.min(aw / 1.14, ah / bh, 760);
-      p = { k, cx: w / 2, cy: 184 + Math.min((ah - bh * k) * 0.3, 40) + k * 0.55 };
+      const head = stage.parentElement?.querySelector(".sticker-peel-head");
+      const top = head ? head.getBoundingClientRect().bottom - rect.top + 24 : 184;
+      p = place(top, 32, 16);
     }
     else if (w >= 1100) {
       const aw = w - 348;
@@ -1118,7 +1117,15 @@ export async function createPeel(stage, canvas, options = {}) {
     render();
     govern(gap);
     if (active) kick();
-    else last = 0;
+    else {
+      last = 0;
+      slow.length = 0;
+      if (quality < 1) {
+        quality = 1;
+        fit();
+        render();
+      }
+    }
   }
 
   function govern(gap) {
@@ -1130,9 +1137,11 @@ export async function createPeel(stage, canvas, options = {}) {
     if (median > 45 && quality > 0.5) {
       quality = Math.max(0.5, quality * 0.7);
       fit();
+      render();
     } else if (median < 22 && quality < 1) {
       quality = Math.min(1, quality / 0.7);
       fit();
+      render();
     }
   }
 
