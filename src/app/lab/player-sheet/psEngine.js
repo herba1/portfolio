@@ -23,6 +23,7 @@ export function createSheet(n, { onOpenChange }) {
   let lastSecond = -1;
   let open = false;
   let dragged = false;
+  const paint = { from: [255, 255, 255], to: [34, 70, 72], shown: [34, 70, 72], target: [34, 70, 72] };
 
   const position = (now = performance.now()) => {
     if (!media.playing || media.scrubbing) return media.offset;
@@ -64,16 +65,19 @@ export function createSheet(n, { onOpenChange }) {
     const bottom = lerp(28, 0, q);
     const r = lerp(16, 40, q);
     n.sheet.style.clipPath = `inset(${top.toFixed(2)}px ${side}px ${bottom}px ${side}px round ${r}px ${r}px ${geo.phone ? 48 : lerp(16, 0, q)}px ${geo.phone ? 48 : lerp(16, 0, q)}px)`;
-    n.light.style.opacity = String(1 - clamp(p * 2.6));
+    const m = clamp(p * 1.7);
+    const mix = m * m * (3 - 2 * m);
+    const bg = paint.from.map((c, i) => Math.round(lerp(c, paint.shown[i], mix)));
+    n.sheet.style.backgroundColor = `rgb(${bg[0]} ${bg[1]} ${bg[2]})`;
     n.shadow.style.opacity = String(1 - clamp(p * 3));
-    n.mini.style.opacity = String(1 - clamp(p * 4));
+    n.mini.style.opacity = String(1 - clamp(p * 7));
     n.mini.style.transform = `translateY(${(top - geo.miniTop).toFixed(2)}px)`;
-    const fo = clamp((p - 0.3) / 0.5);
+    const fo = clamp((p - 0.38) / 0.42);
     n.full.style.opacity = String(fo);
     n.full.style.transform = `translateY(${(top - geo.fullTop + (1 - fo) * 24).toFixed(2)}px)`;
     n.library.style.transform = `translateY(${q * (geo.phone ? 12 : 8)}px) scale(${1 - 0.07 * q})`;
     n.library.style.borderRadius = `${q * 24}px`;
-    n.dim.style.opacity = String(q * 0.4);
+    n.dim.style.opacity = String(q * 0.12);
 
     const x0 = 18;
     const y0 = geo.miniTop + 10;
@@ -89,10 +93,12 @@ export function createSheet(n, { onOpenChange }) {
     const x = lerp(x0, x1, q) + (base - size) / 2 - arc * 0.4;
     const y = lerp(y0, y1, q) + (base - size) / 2 - arc * 0.6 + overshoot;
     n.cover.style.transform = `translate(${x.toFixed(2)}px, ${y.toFixed(2)}px)`;
+    n.mini.style.setProperty("--ps-shift", `${Math.max(0, x + size + 12 - 74).toFixed(2)}px`);
     n.cover.style.width = `${size.toFixed(2)}px`;
     n.cover.style.height = `${size.toFixed(2)}px`;
     n.cover.style.borderRadius = `${lerp(8, 14, q)}px`;
     n.cover.style.setProperty("--ps-lift", q.toFixed(3));
+    n.root.toggleAttribute("data-dark", p > 0.5);
 
     const t = position(now);
     const frac = clamp(t / media.duration);
@@ -124,6 +130,8 @@ export function createSheet(n, { onOpenChange }) {
       beat.x += beat.v * STEP;
       acc -= STEP;
     }
+    const kc = 1 - Math.exp(-dt * 5);
+    for (let i = 0; i < 3; i += 1) paint.shown[i] += (paint.target[i] - paint.shown[i]) * kc;
     write(now);
     raf = requestAnimationFrame(tick);
   };
@@ -155,7 +163,7 @@ export function createSheet(n, { onOpenChange }) {
     if (e.target.closest("[data-nodrag]")) return;
     const y = toLocal(e);
     const fromMini = !open && P.x < 0.5;
-    drag = { id: e.pointerId, y0: y, p0: P.x, shown: shown(), active: false, samples: [{ y, t: performance.now() }], fromMini };
+    drag = { id: e.pointerId, y0: y, p0: P.x, shown: shown(), active: false, moved: false, samples: [{ y, t: performance.now() }], fromMini };
     if (Math.abs(P.v) > 0.05 || Math.abs(P.x - P.to) > 0.01) {
       drag.active = true;
       drag.p0 = P.x;
@@ -173,10 +181,12 @@ export function createSheet(n, { onOpenChange }) {
     const now = performance.now();
     drag.samples.push({ y, t: now });
     if (drag.samples.length > 6) drag.samples.shift();
-    if (!drag.active) {
+    if (!drag.moved) {
       if (Math.abs(y - drag.y0) < 6) return;
+      drag.moved = true;
       drag.active = true;
       drag.y0 = y;
+      drag.p0 = P.x;
     }
     const travel = geo.miniTop - geo.fullTop;
     const raw = drag.p0 + (drag.y0 - y) / travel;
@@ -192,7 +202,12 @@ export function createSheet(n, { onOpenChange }) {
     window.removeEventListener("pointermove", onMove);
     window.removeEventListener("pointerup", onUp);
     window.removeEventListener("pointercancel", onUp);
-    if (!d.active) {
+    if (!d.moved) {
+      if (d.active) {
+        if (!e.target.closest("button")) setOpen(P.to === 0 ? true : open);
+        else wake();
+        return;
+      }
       if (d.fromMini && !e.target.closest("button")) setOpen(true);
       return;
     }
@@ -238,6 +253,10 @@ export function createSheet(n, { onOpenChange }) {
 
   return {
     setOpen,
+    setTone(rgb) {
+      paint.target = rgb.slice(0, 3);
+      wake();
+    },
     setPlaying(next) {
       if (next === media.playing) return;
       media.offset = position();

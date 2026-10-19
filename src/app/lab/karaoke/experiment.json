@@ -1,10 +1,21 @@
 {
-  "title": "Karaoke",
-  "description": "Synced lyrics in the Apple Music style over a slow mesh of the cover's colours. The active line fills word by word, held notes swell and glow letter by letter, and every line rides its own spring so the column settles in a cascade. Far lines soften by weight and focus rather than fading. Scroll or drag to look around, click a line to jump there.",
-  "tags": ["Interface", "Motion", "Music", "Type"],
+  "title": "Liner Notes",
+  "description": "A song's liner notes, synced to the track like lyrics. As it plays, each section's note fills word by word in white while the notes ahead wait in the cover's deep ink, all on one flat colour pulled from the artwork. Scroll or drag to look around, click a note to jump to that part of the song.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music",
+    "Type"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:10:00.000Z",
-  "intent": "Lyrics as the instrument: a word-by-word fill and a staggered spring scroll, with hierarchy carried by weight and blur.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://www.apple.com/apple-music/", "https://developer.apple.com/videos/play/wwdc2018/803/"]
+  "intent": "The synced-lyrics view rebuilt around who played what and when: credits and recording facts as the time-synced line, with weight and colour carrying the hierarchy.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://www.apple.com/apple-music/",
+    "https://developer.apple.com/videos/play/wwdc2018/803/"
+  ]
 }

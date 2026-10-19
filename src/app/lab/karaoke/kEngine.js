@@ -11,10 +11,9 @@ function spring(k, ratio) {
   return { x: 0, v: 0, to: 0, next: 0, at: 0, k, c: 2 * ratio * Math.sqrt(k) };
 }
 
-export function createKaraoke(n, song, { from = 0, playing = true, onActive, onEnd, onKick }) {
+export function createKaraoke(n, song, { from = 0, playing = true, onActive, onEnd }) {
   n.lines = [...n.list.querySelectorAll(".k-line")];
-  n.words = n.lines.map((line) => [...line.querySelectorAll(".k-word")].map((el) => ({ el, letters: [...el.querySelectorAll(".k-letter")] })));
-  n.gaps = n.lines.map((line) => [...line.querySelectorAll(".k-gap i")]);
+  n.words = n.lines.map((line) => [...line.querySelectorAll(".k-word")]);
   const lines = song.lines;
   const springs = lines.map(() => spring(150, 0.92));
   const media = { playing, offset: from, startedAt: performance.now(), duration: song.duration, scrubbing: false };
@@ -28,7 +27,6 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
   let first = true;
   let lastSecond = -1;
   let ended = false;
-  let lastBeat = -1;
 
   const position = (now = performance.now()) => {
     if (!media.playing || media.scrubbing) return media.offset;
@@ -56,8 +54,10 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
 
   const retarget = (now, cascade) => {
     const to = baseTarget();
+    const up = to < (springs[active]?.to ?? to);
     springs.forEach((s, i) => {
-      const delay = cascade ? Math.min(0.42, 0.05 * Math.abs(i - active + 1)) : 0;
+      const lag = up ? i - (active - 1) : active + 1 - i;
+      const delay = cascade ? Math.min(0.2, 0.03 * Math.max(0, lag)) : 0;
       s.next = to;
       s.at = now + delay * 1000;
       if (!cascade) s.to = to;
@@ -66,6 +66,7 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
 
   const setActive = (i, now) => {
     if (i === active) return;
+    const step = Math.abs(i - active) === 1;
     active = i;
     n.lines.forEach((el, j) => {
       const d = j - i;
@@ -74,13 +75,9 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
     });
     n.words.forEach((list, j) => {
       if (j === i) return;
-      for (const w of list) {
-        w.el.style.removeProperty("--f");
-        w.el.style.removeProperty("--glow");
-        for (const l of w.letters) l.style.removeProperty("transform");
-      }
+      for (const el of list) el.style.setProperty("--f", j < i ? "1" : "0");
     });
-    retarget(now, !first);
+    retarget(now, !first && step && !manual.on);
     onActive?.(i);
   };
 
@@ -88,35 +85,10 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
     for (let i = 0; i < springs.length; i += 1) n.lines[i].style.transform = `translate3d(0, ${springs[i].x.toFixed(2)}px, 0)`;
     const line = lines[active];
     if (!line) return;
-    if (line.kind === "line") {
-      const list = n.words[active];
-      for (let j = 0; j < list.length; j += 1) {
-        const w = line.words[j];
-        const f = clamp((t - w.start) / (w.end - w.start));
-        list[j].el.style.setProperty("--f", f.toFixed(3));
-        if (w.hold) {
-          const swell = Math.sin(Math.PI * clamp((t - w.start) / (w.end - w.start + 0.6)));
-          list[j].el.style.setProperty("--glow", swell.toFixed(3));
-          const count = list[j].letters.length;
-          list[j].letters.forEach((el, k) => {
-            const phase = clamp(f * (count + 2) - k, 0, 3) / 3;
-            const lift = Math.sin(Math.PI * phase) * swell;
-            el.style.transform = `translateY(${(-5 * lift).toFixed(2)}px) scale(${(1 + 0.1 * lift).toFixed(3)})`;
-          });
-        }
-      }
-    } else {
-      const dots = n.gaps[active];
-      if (!dots) return;
-      const f = clamp((t - line.start) / (line.end - line.start));
-      const beat = (t * song.bpm) / 60;
-      const env = Math.exp(-(beat - Math.floor(beat)) * 3);
-      const out = clamp((f - 0.9) / 0.1);
-      dots.forEach((el, k) => {
-        const fill = clamp(f * 3.3 - k);
-        el.style.setProperty("--f", fill.toFixed(3));
-        el.style.transform = `scale(${((0.9 + 0.18 * env + 0.12 * fill) * (1 - out * 0.9)).toFixed(3)})`;
-      });
+    const list = n.words[active];
+    for (let j = 0; j < list.length; j += 1) {
+      const w = line.words[j];
+      list[j].style.setProperty("--f", clamp((t - w.start) / (w.end - w.start)).toFixed(3));
     }
   };
 
@@ -162,7 +134,7 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
         manual.on = false;
         manual.offset = 0;
         n.root.removeAttribute("data-manual");
-        retarget(now, true);
+        retarget(now, false);
       }
     }
     for (const s of springs) if (s.at && now >= s.at) {
@@ -176,11 +148,6 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
         s.x += s.v * STEP;
       }
       acc -= STEP;
-    }
-    const beat = Math.floor((t * song.bpm) / 60);
-    if (media.playing && beat !== lastBeat) {
-      lastBeat = beat;
-      if (/Chorus|Bridge|Outro/.test(lines[active]?.part || "")) onKick?.(beat % 2 ? 0.45 : 1);
     }
     paint(t);
     writeClock(t);
@@ -310,7 +277,7 @@ export function createKaraoke(n, song, { from = 0, playing = true, onActive, onE
       manual.on = false;
       manual.offset = 0;
       n.root.removeAttribute("data-manual");
-      retarget(performance.now(), true);
+      retarget(performance.now(), false);
       wake();
     },
     seekTo(seconds) {

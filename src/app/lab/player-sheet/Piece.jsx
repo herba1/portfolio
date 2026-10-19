@@ -6,7 +6,7 @@ import { Airplay, ChevronDown, Ellipsis, ListMusic, MessageSquareQuote, Pause, P
 import { FEATURED } from "@/app/lab/_music/catalog";
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { createSheet } from "./psEngine";
-import { css, glow, readPalette } from "./psPalette";
+import { readPalette, tone } from "./psPalette";
 import { withDuration } from "./psTracks";
 import "./player-sheet.css";
 
@@ -18,8 +18,6 @@ export default function Piece({ embedded = false }) {
   const libraryRef = useRef(null);
   const dimRef = useRef(null);
   const sheetRef = useRef(null);
-  const lightRef = useRef(null);
-  const artRef = useRef(null);
   const shadowRef = useRef(null);
   const miniRef = useRef(null);
   const fullRef = useRef(null);
@@ -52,8 +50,6 @@ export default function Piece({ embedded = false }) {
         library: libraryRef.current,
         dim: dimRef.current,
         sheet: sheetRef.current,
-        light: lightRef.current,
-        art: artRef.current,
         shadow: shadowRef.current,
         mini: miniRef.current,
         full: fullRef.current,
@@ -82,9 +78,7 @@ export default function Piece({ embedded = false }) {
     if (!cover) return undefined;
     let alive = true;
     readPalette(cover).then(({ colors }) => {
-      const root = rootRef.current;
-      if (!alive || !root) return;
-      colors.forEach((c, i) => root.style.setProperty(`--ps-c${i + 1}`, css(glow(c))));
+      if (alive) engineRef.current?.setTone(tone(colors));
     });
     return () => {
       alive = false;
@@ -199,7 +193,6 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header className="ps-caption">
           <h1 className="ps-title">Player Sheet</h1>
-          <p className="ps-hint">Drag the mini player up, or fling it. Catch it halfway, pull it past the end, flick it back down.</p>
         </header>
       )}
       <div className="ps-stage">
@@ -250,11 +243,6 @@ export default function Piece({ embedded = false }) {
           <div className="ps-dim" ref={dimRef} aria-hidden="true" />
           <div className="ps-mini-shadow" ref={shadowRef} aria-hidden="true" />
           <div className="ps-sheet" ref={sheetRef}>
-            <div className="ps-art" ref={artRef} aria-hidden="true">
-              <img key={cover} src={cover} alt="" draggable={false} />
-              <span className="ps-art-shade" />
-            </div>
-            <div className="ps-light" ref={lightRef} aria-hidden="true" />
             <div className="ps-mini" ref={miniRef} inert={open}>
               <button type="button" className="ps-mini-open" ref={openBtnRef} aria-label={`Open player, ${track.title} by ${track.artist}`} onClick={() => engineRef.current?.setOpen(true)}>
                 <span className="ps-mini-text" key={track.id}>

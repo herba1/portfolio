@@ -1,10 +1,20 @@
 {
   "title": "Dynamic Player",
-  "description": "A now-playing pill that blooms into a full player when you hover or click it, and folds back when you leave. Width, height, corners and the cover ride one spring, so you can catch it mid-morph; the glow and the ring around it are drawn from the album art and breathe with the beat.",
-  "tags": ["Interface", "Motion", "Music"],
+  "description": "A black Dynamic Island on a light page. Hover or tap the compact pill and it stretches into the media player on one retargetable spring: the cover grows out of the corner, the waveform rides the edge, and the title, scrubber and transport arrive in a short stagger. Leave and it folds back, catchable at any point mid-morph.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:00:00.000Z",
-  "intent": "One ink shape that morphs between a pill and a player on a retargetable spring, lit by its own cover.",
-  "tile": { "cols": 3, "rows": 4 },
-  "sources": ["https://developer.apple.com/design/human-interface-guidelines/live-activities", "https://developer.apple.com/videos/play/wwdc2018/803/"]
+  "intent": "One precise island morph between the compact live activity and the expanded player, interruptible in both directions.",
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    "https://developer.apple.com/design/human-interface-guidelines/live-activities",
+    "https://developer.apple.com/videos/play/wwdc2018/803/"
+  ]
 }

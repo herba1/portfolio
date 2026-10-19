@@ -33,24 +33,32 @@ function fromHsl([h, s, l]) {
   return [hue(h + 1 / 3) * 255, hue(h) * 255, hue(h - 1 / 3) * 255];
 }
 
-export function glow(c) {
-  const [h, s, l] = toHsl(c);
-  return fromHsl([h, s < 0.14 ? s * 0.5 : Math.max(s, 0.55), Math.min(0.7, Math.max(0.52, l))]);
-}
+const luminance = (c) => {
+  const lin = (v) => {
+    const x = v / 255;
+    return x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4;
+  };
+  return 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+};
 
-export function deep(c) {
-  const [h, s, l] = toHsl(c);
-  return fromHsl([h, s < 0.14 ? s : Math.min(1, s * 1.2 + 0.08), Math.min(0.38, Math.max(0.18, l * 0.8))]);
-}
+const atLuminance = (h, s, target) => {
+  let lo = 0;
+  let hi = 1;
+  for (let i = 0; i < 18; i += 1) {
+    const mid = (lo + hi) / 2;
+    if (luminance(fromHsl([h, s, mid])) < target) lo = mid;
+    else hi = mid;
+  }
+  return fromHsl([h, s, lo]);
+};
 
-export function ground(c) {
-  const [h, s] = toHsl(c);
-  return fromHsl([h, s < 0.14 ? s : Math.min(0.7, s), 0.12]);
-}
-
-export function pale(c) {
-  const [h, s] = toHsl(c);
-  return fromHsl([h, s < 0.14 ? 0 : Math.min(0.7, s + 0.1), 0.76]);
+export function stage(colors) {
+  const tones = colors.map((c) => toHsl(c));
+  const pick = tones.find(([h, s]) => s >= 0.18 && (h < 0.11 || h > 0.24)) || tones.find(([, s]) => s >= 0.18);
+  if (!pick) return { ground: [62, 64, 68], ink: [20, 21, 24] };
+  const [h, s] = pick;
+  const sat = Math.min(0.5, Math.max(0.32, s));
+  return { ground: atLuminance(h, sat, 0.1), ink: atLuminance(h, sat * 0.9, 0.012) };
 }
 
 export const css = (c) => `rgb(${Math.round(c[0])} ${Math.round(c[1])} ${Math.round(c[2])})`;

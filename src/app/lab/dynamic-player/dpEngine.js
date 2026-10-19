@@ -1,11 +1,17 @@
 const STEP = 1 / 240;
-const COMPACT = { w: 236, h: 44, r: 22 };
-const EXPANDED_H = 220;
+const COMPACT = { w: 216, h: 40, r: 20, cover: 24, coverR: 7, pad: 8 };
+const EXPANDED = { h: 188, r: 44, cover: 56, coverR: 14, pad: 20 };
+const ROWS = [0, 0.14, 0.28];
 const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
 const lerp = (a, b, t) => a + (b - a) * t;
 
 function spring(stiffness, ratio) {
   return { x: 0, v: 0, to: 0, k: stiffness, c: 2 * ratio * Math.sqrt(stiffness) };
+}
+
+function tune(s, stiffness, ratio) {
+  s.k = stiffness;
+  s.c = 2 * ratio * Math.sqrt(stiffness);
 }
 
 function advance(s, dt) {
@@ -19,24 +25,25 @@ const clock = (seconds) => {
 };
 
 export function createPlayer(n, { onEnd }) {
-  const P = spring(300, 0.8);
-  const H = spring(250, 0.84);
+  const W = spring(340, 0.74);
+  const H = spring(300, 0.78);
+  const C = spring(240, 1);
   const press = spring(700, 0.9);
   press.x = 1;
   press.to = 1;
   const amp = spring(60, 1);
-  const bars = n.bars.map(() => 0.2);
+  amp.x = 1;
+  amp.to = 1;
+  const bars = n.bars.map(() => 0.3);
   const media = { playing: true, offset: 41, startedAt: performance.now(), duration: 185, bpm: 120, scrubbing: false };
-  const geo = { W: 0, ew: 400 };
-  let angle = 0;
+  const geo = { ew: 372, base: 1 };
+  let open = false;
   let raf = 0;
   let last = 0;
   let acc = 0;
   let seen = true;
   let lastSecond = -1;
   let ended = false;
-  amp.x = 1;
-  amp.to = 1;
 
   const position = (now = performance.now()) => {
     if (!media.playing || media.scrubbing) return media.offset;
@@ -44,66 +51,50 @@ export function createPlayer(n, { onEnd }) {
   };
 
   const measure = () => {
-    geo.W = n.root.clientWidth;
-    geo.ew = Math.min(400, geo.W - 24);
+    geo.base = n.root.clientWidth >= 900 && n.root.clientHeight >= 640 ? 1.25 : 1;
+    geo.ew = Math.max(COMPACT.w, Math.min(372, n.root.clientWidth / geo.base - 24));
     n.root.style.setProperty("--dp-ew", `${geo.ew}px`);
   };
 
-  const levelAt = (t) => {
-    const beat = (t * media.bpm) / 60;
-    const env = Math.exp(-(beat - Math.floor(beat)) * 4.2);
-    return env;
-  };
-
-  const write = (t, env) => {
-    const p = P.x;
+  const write = (t) => {
+    const p = W.x;
     const h = H.x;
     const s = press.x;
     const w = lerp(COMPACT.w, geo.ew, p);
-    const ht = lerp(COMPACT.h, EXPANDED_H, h);
-    const r = Math.min(ht / 2, lerp(COMPACT.r, 44, clamp(h * 1.4)));
-    const lev = amp.x * env;
-    n.island.style.width = `${w}px`;
-    n.island.style.height = `${ht}px`;
-    n.island.style.borderRadius = `${r}px`;
-    n.island.style.transform = `translateX(-50%) scale(${s})`;
-    const ringOpacity = String(clamp(0.5 + p * 0.5) * (0.6 + lev * 0.4));
-    for (const ring of n.rings) {
-      ring.style.width = `${w + 4}px`;
-      ring.style.height = `${ht + 4}px`;
-      ring.style.borderRadius = `${r + 2}px`;
-      ring.style.transform = `translateX(-50%) scale(${s})`;
-      ring.style.opacity = ringOpacity;
+    const ht = lerp(COMPACT.h, EXPANDED.h, h);
+    const r = Math.min(ht / 2, lerp(COMPACT.r, EXPANDED.r, clamp(h)));
+    n.island.style.width = `${w.toFixed(2)}px`;
+    n.island.style.height = `${ht.toFixed(2)}px`;
+    n.island.style.borderRadius = `${r.toFixed(2)}px`;
+    n.island.style.transform = `translateX(-50%) scale(${(s * geo.base).toFixed(4)})`;
+
+    const g = clamp(h, 0, 1.04);
+    const pad = lerp(COMPACT.pad, EXPANDED.pad, g);
+    const cs = lerp(COMPACT.cover, EXPANDED.cover, g);
+    n.cover.style.transform = `translate(${pad.toFixed(2)}px, ${pad.toFixed(2)}px)`;
+    n.cover.style.width = `${cs.toFixed(2)}px`;
+    n.cover.style.height = `${cs.toFixed(2)}px`;
+    n.cover.style.borderRadius = `${lerp(COMPACT.coverR, EXPANDED.coverR, g).toFixed(2)}px`;
+
+    const bs = lerp(1, 1.25, g);
+    const bw = 24 * bs;
+    const by = lerp(12, 32, g);
+    n.barBox.style.transform = `translate(${(w - pad - 4 * g - bw).toFixed(2)}px, ${by.toFixed(2)}px) scale(${bs.toFixed(3)})`;
+    for (let i = 0; i < n.bars.length; i += 1) n.bars[i].style.transform = `scaleY(${bars[i].toFixed(3)})`;
+
+    const c = clamp(C.x);
+    n.expanded.style.visibility = c < 0.002 ? "hidden" : "visible";
+    for (let i = 0; i < n.rows.length; i += 1) {
+      const e = clamp((c - ROWS[i]) / (1 - ROWS[i]));
+      const el = n.rows[i];
+      el.style.opacity = (open ? e * e * (3 - 2 * e) : clamp((e - 0.3) / 0.7) ** 2).toFixed(3);
+      el.style.transform = `translateY(${((1 - e) * 8).toFixed(2)}px) scale(${(0.96 + 0.04 * e).toFixed(4)})`;
+      el.style.filter = e > 0.001 && e < 0.999 ? `blur(${((1 - e) * 4).toFixed(2)}px)` : "none";
     }
-    n.spin.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
-    n.spinGlow.style.transform = `translate(-50%, -50%) rotate(${angle}deg)`;
-    const gx = (w / geo.ew) * (1.04 + lev * 0.05);
-    const gy = (ht / EXPANDED_H) * (1.1 + lev * 0.12);
-    n.halo.style.transform = `translateX(-50%) scale(${gx}, ${gy})`;
-    n.halo.style.opacity = String(clamp(0.5 + 0.5 * p) * (0.7 + lev * 0.3));
-    n.bloom.style.transform = `translateX(-50%) scale(${0.5 + p * 0.6 + lev * 0.06})`;
-    n.bloom.style.opacity = String(clamp(p) * (0.5 + lev * 0.25));
-
-    const cs = lerp(28, 64, p);
-    n.cover.style.transform = `translate(${lerp(8, 20, p)}px, ${lerp(8, 20, h)}px)`;
-    n.cover.style.width = `${cs}px`;
-    n.cover.style.height = `${cs}px`;
-    n.cover.style.borderRadius = `${lerp(14, 16, p)}px`;
-
-    const bs = lerp(1, 1.4, p);
-    const bw = 26 * bs;
-    n.barBox.style.transform = `translate(${w - lerp(16, 22, p) - bw}px, ${lerp(13, 30, h)}px) scale(${bs})`;
-    for (let i = 0; i < n.bars.length; i += 1) n.bars[i].style.transform = `scaleY(${bars[i]})`;
-
-    const eo = clamp((p - 0.42) / 0.5);
-    n.expanded.style.opacity = String(eo);
-    n.expanded.style.transform = `translateX(-50%) translateY(${(1 - eo) * -8}px) scale(${0.96 + 0.04 * eo})`;
-    n.expanded.style.filter = eo > 0.001 && eo < 0.999 ? `blur(${(1 - eo) * 8}px)` : "none";
-    n.expanded.style.visibility = eo < 0.002 ? "hidden" : "visible";
 
     const frac = clamp(t / media.duration);
-    n.fill.style.transform = `scaleX(${frac})`;
-    n.knob.style.left = `${frac * 100}%`;
+    n.fill.style.transform = `scaleX(${frac.toFixed(4)})`;
+    n.knob.style.left = `${(frac * 100).toFixed(3)}%`;
     const sec = Math.floor(t);
     if (sec !== lastSecond) {
       lastSecond = sec;
@@ -121,10 +112,12 @@ export function createPlayer(n, { onEnd }) {
     last = now;
     acc += dt;
     while (acc >= STEP) {
-      advance(P, STEP);
+      advance(W, STEP);
       advance(H, STEP);
       advance(press, STEP);
       advance(amp, STEP);
+      if (open && C.to === 0 && H.x > 0.3) C.to = 1;
+      advance(C, STEP);
       acc -= STEP;
     }
     let t = position(now);
@@ -135,17 +128,17 @@ export function createPlayer(n, { onEnd }) {
         onEnd?.();
       }
     }
-    const env = levelAt(t);
-    angle = (angle + dt * (18 + amp.x * env * 70)) % 360;
-    const k = 1 - Math.exp(-dt * 16);
+    const beat = (t * media.bpm) / 60;
+    const env = Math.exp(-(beat - Math.floor(beat)) * 4.2);
+    const k = 1 - Math.exp(-dt * 14);
     for (let i = 0; i < bars.length; i += 1) {
       const wob = Math.abs(Math.sin(t * (2.3 + i * 1.41) + i * 1.9)) * (0.6 + 0.4 * Math.sin(t * 0.73 + i * 2.1));
       const fizz = Math.abs(Math.sin(t * (6.1 + i * 0.83) + i * 0.7));
       const hit = env * (i % 2 ? 0.9 : 0.6);
-      const target = 0.16 + 0.84 * amp.x * clamp(0.5 * hit + 0.45 * wob * wob + 0.2 * fizz) ** 1.3;
+      const target = 0.22 + 0.78 * amp.x * clamp(0.5 * hit + 0.45 * wob * wob + 0.2 * fizz) ** 1.3;
       bars[i] += (target - bars[i]) * k;
     }
-    write(t, env);
+    write(t);
     raf = requestAnimationFrame(tick);
   };
 
@@ -172,9 +165,21 @@ export function createPlayer(n, { onEnd }) {
   wake();
 
   return {
-    setOpen(open) {
-      P.to = open ? 1 : 0;
-      H.to = open ? 1 : 0;
+    setOpen(next) {
+      open = next;
+      W.to = next ? 1 : 0;
+      H.to = next ? 1 : 0;
+      if (next) {
+        tune(W, 340, 0.74);
+        tune(H, 300, 0.78);
+        tune(C, 380, 1);
+        if (H.x > 0.3) C.to = 1;
+      } else {
+        tune(W, 420, 0.82);
+        tune(H, 460, 0.86);
+        tune(C, 1400, 1);
+        C.to = 0;
+      }
       wake();
     },
     press(down) {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Airplay, Heart, Pause, Play, SkipBack, SkipForward } from "lucide-react";
+import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 
 import { createPlayer } from "./dpEngine";
 import { css, glow, readPalette } from "./dpPalette";
@@ -9,22 +9,17 @@ import { TRACKS } from "./dpTracks";
 import "./dynamic-player.css";
 
 const BARS = 5;
-const OPEN_DELAY = 90;
-const CLOSE_DELAY = 260;
+const OPEN_DELAY = 80;
+const CLOSE_DELAY = 240;
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const islandRef = useRef(null);
-  const ringRef = useRef(null);
-  const ringGlowRef = useRef(null);
-  const spinRef = useRef(null);
-  const spinGlowRef = useRef(null);
-  const haloRef = useRef(null);
-  const bloomRef = useRef(null);
   const coverRef = useRef(null);
   const barBoxRef = useRef(null);
   const barRefs = useRef([]);
   const expandedRef = useRef(null);
+  const rowRefs = useRef([]);
   const fillRef = useRef(null);
   const knobRef = useRef(null);
   const trackRef = useRef(null);
@@ -38,12 +33,12 @@ export default function Piece({ embedded = false }) {
   const viaKeyRef = useRef(false);
   const indexRef = useRef(0);
   const playingRef = useRef(true);
+  const scrubbingRef = useRef(false);
 
   const [index, setIndex] = useState(0);
   const [previous, setPrevious] = useState(null);
   const [open, setOpen] = useState(false);
   const [playing, setPlaying] = useState(true);
-  const [liked, setLiked] = useState(() => new Set([TRACKS[0].id]));
   const [scrubbing, setScrubbing] = useState(false);
 
   const track = TRACKS[index];
@@ -62,15 +57,11 @@ export default function Piece({ embedded = false }) {
       {
         root: rootRef.current,
         island: islandRef.current,
-        rings: [ringRef.current, ringGlowRef.current],
-        spin: spinRef.current,
-        spinGlow: spinGlowRef.current,
-        halo: haloRef.current,
-        bloom: bloomRef.current,
         cover: coverRef.current,
         barBox: barBoxRef.current,
         bars: barRefs.current,
         expanded: expandedRef.current,
+        rows: rowRefs.current,
         fill: fillRef.current,
         knob: knobRef.current,
         track: trackRef.current,
@@ -93,7 +84,7 @@ export default function Piece({ embedded = false }) {
     readPalette(track.cover).then(({ colors }) => {
       const root = rootRef.current;
       if (!alive || !root) return;
-      colors.forEach((c, i) => root.style.setProperty(`--dp-c${i + 1}`, css(glow(c))));
+      root.style.setProperty("--dp-wave", css(glow(colors[0])));
     });
     return () => {
       alive = false;
@@ -108,7 +99,7 @@ export default function Piece({ embedded = false }) {
 
   const show = useCallback((next, pin) => {
     clearTimeout(hoverTimer.current);
-    if (pin !== undefined) pinnedRef.current = pin;
+    pinnedRef.current = pin;
     setOpen(next);
   }, []);
 
@@ -119,7 +110,7 @@ export default function Piece({ embedded = false }) {
   };
 
   const onLeave = (e) => {
-    if (e.pointerType !== "mouse" || pinnedRef.current || scrubbing) return;
+    if (e.pointerType !== "mouse" || pinnedRef.current || scrubbingRef.current) return;
     clearTimeout(hoverTimer.current);
     hoverTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY);
   };
@@ -165,29 +156,14 @@ export default function Piece({ embedded = false }) {
     playingRef.current = next;
     setPlaying(next);
     engineRef.current?.setPlaying(next);
-    pinnedRef.current = true;
   };
 
   const back = () => {
-    pinnedRef.current = true;
     if ((engineRef.current?.elapsed() || 0) > 3) engineRef.current?.seek(0, true);
     else goTo(indexRef.current - 1, playingRef.current);
   };
 
-  const forward = () => {
-    pinnedRef.current = true;
-    goTo(indexRef.current + 1, playingRef.current);
-  };
-
-  const toggleLike = () => {
-    pinnedRef.current = true;
-    setLiked((set) => {
-      const next = new Set(set);
-      if (next.has(track.id)) next.delete(track.id);
-      else next.add(track.id);
-      return next;
-    });
-  };
+  const forward = () => goTo(indexRef.current + 1, playingRef.current);
 
   const onTrackDown = (e) => {
     if (e.pointerType === "mouse" && e.button !== 0) return;
@@ -195,7 +171,7 @@ export default function Piece({ embedded = false }) {
     const rect = el.getBoundingClientRect();
     const id = e.pointerId;
     el.setPointerCapture(id);
-    pinnedRef.current = true;
+    scrubbingRef.current = true;
     setScrubbing(true);
     const at = (ev) => (ev.clientX - rect.left) / rect.width;
     engineRef.current?.seek(at(e), false);
@@ -203,10 +179,15 @@ export default function Piece({ embedded = false }) {
     const up = (ev) => {
       if (ev.pointerId !== id) return;
       engineRef.current?.seek(at(ev), true);
+      scrubbingRef.current = false;
       setScrubbing(false);
       el.removeEventListener("pointermove", move);
       el.removeEventListener("pointerup", up);
       el.removeEventListener("pointercancel", up);
+      if (ev.pointerType === "mouse" && !pinnedRef.current && !islandRef.current?.matches(":hover")) {
+        clearTimeout(hoverTimer.current);
+        hoverTimer.current = setTimeout(() => setOpen(false), CLOSE_DELAY);
+      }
     };
     el.addEventListener("pointermove", move);
     el.addEventListener("pointerup", up);
@@ -221,27 +202,16 @@ export default function Piece({ embedded = false }) {
     e.preventDefault();
   };
 
-  const isLiked = liked.has(track.id);
-
   return (
     <div
       className="dynamic-player"
       ref={rootRef}
       data-embedded={embedded ? "" : undefined}
       data-open={open ? "" : undefined}
-      data-playing={playing ? "" : undefined}
       data-scrubbing={scrubbing ? "" : undefined}
       onPointerDown={onRootDown}
       onKeyDown={onRootKey}
     >
-      <div className="dp-bloom" ref={bloomRef} aria-hidden="true" />
-      <div className="dp-halo" ref={haloRef} aria-hidden="true" />
-      <div className="dp-ring dp-ring-glow" ref={ringGlowRef} aria-hidden="true">
-        <div className="dp-spin" ref={spinGlowRef} />
-      </div>
-      <div className="dp-ring" ref={ringRef} aria-hidden="true">
-        <div className="dp-spin" ref={spinRef} />
-      </div>
       <div className="dp-island" ref={islandRef} role="group" aria-label="Now playing" onPointerEnter={onEnter} onPointerLeave={onLeave} onPointerDown={onIslandDown}>
         <button
           type="button"
@@ -255,8 +225,8 @@ export default function Piece({ embedded = false }) {
           onKeyDown={onHitKey}
         />
         <button type="button" className="dp-cover" ref={coverRef} tabIndex={open ? 0 : -1} aria-label="Fold player" onClick={() => show(false, false)}>
-          {previous ? <img className="dp-cover-img dp-cover-prev" src={previous} alt="" draggable={false} /> : null}
-          <img key={track.cover} className="dp-cover-img dp-cover-now" src={track.cover} alt={`${track.album} cover`} draggable={false} />
+          {previous ? <img className="dp-cover-img" src={previous} alt="" draggable={false} /> : null}
+          <img key={track.cover} className="dp-cover-img dp-cover-now" src={track.cover} alt={`${track.album} cover`} draggable={false} onAnimationEnd={() => setPrevious(null)} />
         </button>
         <span className="dp-bars" ref={barBoxRef} aria-hidden="true">
           {Array.from({ length: BARS }, (_, i) => (
@@ -264,52 +234,48 @@ export default function Piece({ embedded = false }) {
           ))}
         </span>
         <div className="dp-expanded" ref={expandedRef} inert={!open}>
-          <div className="dp-head" key={track.id}>
-            <span className="dp-song">{track.title}</span>
-            <span className="dp-artist">
-              {track.artist} · {track.album}
-            </span>
-          </div>
-          <div
-            className="dp-track"
-            ref={trackRef}
-            role="slider"
-            tabIndex={0}
-            aria-label="Playback position"
-            aria-valuemin={0}
-            aria-valuemax={track.duration}
-            onPointerDown={onTrackDown}
-            onKeyDown={onTrackKey}
-          >
-            <span className="dp-rail">
-              <span className="dp-fill" ref={fillRef} />
-            </span>
-            <span className="dp-knob" ref={knobRef} />
-          </div>
-          <div className="dp-times">
-            <span ref={timeARef}>0:00</span>
-            <span ref={timeBRef}>-0:00</span>
-          </div>
-          <div className="dp-transport">
-            <button type="button" className="dp-btn dp-btn-side" aria-label={isLiked ? "Remove from Liked Songs" : "Add to Liked Songs"} aria-pressed={isLiked} onClick={toggleLike}>
-              <Heart size={18} strokeWidth={2} fill={isLiked ? "currentColor" : "none"} />
-            </button>
-            <div className="dp-transport-main">
-              <button type="button" className="dp-btn" aria-label="Previous" onClick={back}>
-                <SkipBack size={22} fill="currentColor" strokeWidth={0} />
-              </button>
-              <button type="button" className="dp-btn dp-btn-main" ref={playRef} aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
-                <span className="dp-glyph" data-playing={playing ? "" : undefined}>
-                  <Play className="dp-glyph-play" size={28} fill="currentColor" strokeWidth={0} />
-                  <Pause className="dp-glyph-pause" size={28} fill="currentColor" strokeWidth={0} />
-                </span>
-              </button>
-              <button type="button" className="dp-btn" aria-label="Next" onClick={forward}>
-                <SkipForward size={22} fill="currentColor" strokeWidth={0} />
-              </button>
+          <div className="dp-row dp-head" ref={(el) => (rowRefs.current[0] = el)}>
+            <div className="dp-head-text" key={track.id}>
+              <span className="dp-song">{track.title}</span>
+              <span className="dp-artist">{track.artist}</span>
             </div>
-            <button type="button" className="dp-btn dp-btn-side" aria-label="Play on another device">
-              <Airplay size={18} strokeWidth={2} />
+          </div>
+          <div className="dp-row dp-scrub" ref={(el) => (rowRefs.current[1] = el)}>
+            <span className="dp-time" ref={timeARef}>
+              0:00
+            </span>
+            <div
+              className="dp-track"
+              ref={trackRef}
+              role="slider"
+              tabIndex={0}
+              aria-label="Playback position"
+              aria-valuemin={0}
+              aria-valuemax={track.duration}
+              onPointerDown={onTrackDown}
+              onKeyDown={onTrackKey}
+            >
+              <span className="dp-rail">
+                <span className="dp-fill" ref={fillRef} />
+              </span>
+              <span className="dp-knob" ref={knobRef} />
+            </div>
+            <span className="dp-time dp-time-end" ref={timeBRef}>
+              -0:00
+            </span>
+          </div>
+          <div className="dp-row dp-transport" ref={(el) => (rowRefs.current[2] = el)}>
+            <button type="button" className="dp-btn" aria-label="Previous" onClick={back}>
+              <SkipBack size={24} fill="currentColor" strokeWidth={0} />
+            </button>
+            <button type="button" className="dp-btn dp-btn-main" ref={playRef} aria-label={playing ? "Pause" : "Play"} onClick={togglePlay}>
+              <span className="dp-glyph" data-playing={playing ? "" : undefined}>
+                <Play className="dp-glyph-play" size={32} fill="currentColor" strokeWidth={0} />
+                <Pause className="dp-glyph-pause" size={32} fill="currentColor" strokeWidth={0} />
+              </span>
+            </button>
+            <button type="button" className="dp-btn" aria-label="Next" onClick={forward}>
+              <SkipForward size={24} fill="currentColor" strokeWidth={0} />
             </button>
           </div>
         </div>
@@ -317,7 +283,6 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header className="dp-caption">
           <h1 className="dp-title">Dynamic Player</h1>
-          <p className="dp-hint">Hover or click the pill to open the player. Leave halfway and it turns around.</p>
         </header>
       )}
       <p className="dp-sr" aria-live="polite">

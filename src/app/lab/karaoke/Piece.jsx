@@ -4,30 +4,17 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Pause, Play, SkipBack, SkipForward } from "lucide-react";
 
 import { createKaraoke } from "./kEngine";
-import { createMesh } from "./kMesh";
-import { css, deep, ground, pale, readPalette } from "./kPalette";
+import { css, readPalette, stage } from "./kPalette";
 import { SONGS } from "./kSongs";
 import "./karaoke.css";
 
-function Word({ word }) {
-  return (
-    <span className="k-word" data-hold={word.hold ? "" : undefined} data-text={word.text}>
-      <span className="k-ink">
-        {word.hold
-          ? Array.from(word.text).map((ch, i) => (
-              <span key={i} className="k-letter">
-                {ch}
-              </span>
-            ))
-          : word.text}
-      </span>
-    </span>
-  );
-}
+const clockText = (seconds) => {
+  const t = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+};
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
-  const canvasRef = useRef(null);
   const viewportRef = useRef(null);
   const listRef = useRef(null);
   const fillRef = useRef(null);
@@ -35,10 +22,9 @@ export default function Piece({ embedded = false }) {
   const trackRef = useRef(null);
   const timeARef = useRef(null);
   const timeBRef = useRef(null);
-  const meshRef = useRef(null);
   const engineRef = useRef(null);
   const playingRef = useRef(true);
-  const startRef = useRef(41);
+  const startRef = useRef(22);
   const indexRef = useRef(0);
 
   const [index, setIndex] = useState(0);
@@ -50,18 +36,10 @@ export default function Piece({ embedded = false }) {
 
   const choose = useCallback((i) => {
     const next = (i + SONGS.length) % SONGS.length;
+    if (next === indexRef.current) return;
     startRef.current = 0;
     indexRef.current = next;
     setIndex(next);
-  }, []);
-
-  useEffect(() => {
-    const mesh = createMesh(canvasRef.current);
-    meshRef.current = mesh;
-    return () => {
-      mesh.destroy();
-      meshRef.current = null;
-    };
   }, []);
 
   useEffect(() => {
@@ -69,9 +47,9 @@ export default function Piece({ embedded = false }) {
     readPalette(song.cover).then(({ colors }) => {
       const root = rootRef.current;
       if (!alive || !root) return;
-      meshRef.current?.setPalette(colors.map(deep), ground(colors[0]));
-      root.style.setProperty("--k-tint", css(pale(colors[0])));
-      root.style.setProperty("--k-glow", css(pale(colors[1])));
+      const { ground, ink } = stage(colors);
+      root.style.setProperty("--k-ground", css(ground));
+      root.style.setProperty("--k-ahead", css(ink));
     });
     return () => {
       alive = false;
@@ -96,10 +74,9 @@ export default function Piece({ embedded = false }) {
         playing: playingRef.current,
         onActive: (i) => {
           const line = song.lines[i];
-          setCurrent(line.kind === "line" ? line.words.map((w) => w.text).join(" ") : "");
+          setCurrent(`${line.section}: ${line.words.map((w) => w.text).join(" ")}`);
         },
         onEnd: () => choose(indexRef.current + 1),
-        onKick: (v) => meshRef.current?.kick(v),
       },
     );
     engineRef.current = engine;
@@ -158,7 +135,6 @@ export default function Piece({ embedded = false }) {
   };
 
   const onRootKey = (e) => {
-    if (e.target.closest("input, [role=slider]")) return;
     if (e.key === " " && e.target === rootRef.current) {
       e.preventDefault();
       togglePlay();
@@ -175,22 +151,19 @@ export default function Piece({ embedded = false }) {
       data-scrubbing={scrubbing ? "" : undefined}
       onKeyDown={onRootKey}
     >
-      <canvas className="k-mesh" ref={canvasRef} aria-hidden="true" />
-      <div className="k-shade" aria-hidden="true" />
       <aside className="k-side">
         {embedded ? null : (
           <header className="k-caption">
-            <h1 className="k-title">Karaoke</h1>
-            <p className="k-hint">Lines fill word by word. Scroll to look around, click a line to jump there. The words are written for this page, not taken from the record.</p>
+            <h1 className="k-title">Liner Notes</h1>
           </header>
         )}
-        <div className="k-art" key={song.cover}>
-          <img src={song.cover} alt={`${song.album} cover`} draggable={false} />
+        <div className="k-art">
+          <img key={song.cover} src={song.cover} alt={`${song.album} cover`} draggable={false} />
         </div>
         <div className="k-meta" key={song.id}>
           <span className="k-song">{song.title}</span>
           <span className="k-artist">
-            {song.artist} · {song.album}
+            {song.writer} · {song.album}
           </span>
         </div>
         <div className="k-scrub">
@@ -238,31 +211,24 @@ export default function Piece({ embedded = false }) {
           ))}
         </div>
       </aside>
-      <section className="k-lyrics" ref={viewportRef} aria-label={`Lyrics for ${song.title}`}>
+      <section className="k-lyrics" ref={viewportRef} aria-label={`Notes for ${song.title}`}>
         <ol className="k-list" ref={listRef} key={song.id}>
           {song.lines.map((line, i) => (
-            <li
-              key={i}
-              className="k-line"
-              data-kind={line.kind}
-            >
-              {line.section ? <span className="k-section">{line.section}</span> : null}
-              {line.kind === "gap" ? (
-                <button type="button" className="k-gap" aria-label={`Jump to ${clockText(line.start)}, instrumental`} onClick={() => onLineClick(line)}>
-                  <i />
-                  <i />
-                  <i />
-                </button>
-              ) : (
-                <button type="button" className="k-text" onClick={() => onLineClick(line)}>
+            <li key={i} className="k-line">
+              <button type="button" className="k-text" aria-label={`${line.section} at ${clockText(line.start)}: ${line.words.map((w) => w.text).join(" ")}`} onClick={() => onLineClick(line)}>
+                <span className="k-section" aria-hidden="true">
+                  {line.section}
+                  <span className="k-stamp">{clockText(line.start)}</span>
+                </span>
+                <span className="k-words" aria-hidden="true">
                   {line.words.map((w, j) => (
                     <span key={j}>
-                      <Word word={w} />
+                      <span className="k-word">{w.text}</span>
                       {j < line.words.length - 1 ? " " : null}
                     </span>
                   ))}
-                </button>
-              )}
+                </span>
+              </button>
             </li>
           ))}
         </ol>
@@ -272,9 +238,4 @@ export default function Piece({ embedded = false }) {
       </p>
     </div>
   );
-}
-
-function clockText(seconds) {
-  const t = Math.max(0, Math.floor(seconds));
-  return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 }
