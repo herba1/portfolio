@@ -32,16 +32,37 @@ const AXES = ["x", "y", "s"];
  * A flight from the actor's current state to a (possibly moving) target.
  * `launch` is the starting tangent in px per flight (velocity × duration),
  * already including any arc. The end tangent is zero: it always lands soft.
+ *
+ * Entrances pass `control` instead: a quadratic Bézier whose control point
+ * sits `control` px from the target, so the path is a visible arc (up and
+ * over, then down into the slot). Time runs through it on an ease-out, so it
+ * leaves fast, like a throw, and is caught at rest.
  */
-export function createFlight({ from, launch, duration, kind }) {
-  return { from: { ...from }, launch: { ...launch }, duration, elapsed: 0, kind };
+export function createFlight({ from, launch, control, duration, kind }) {
+  return { from: { ...from }, launch: { ...launch }, control: control && { ...control }, duration, elapsed: 0, kind };
 }
+
+const ARC_EASE = 2.6; // u = 1 - (1 - t)^ARC_EASE
 
 /** Advance a flight toward `target`; returns { x, y, s, vx, vy, vs, t, done }. */
 export function stepFlight(flight, target, dt) {
   flight.elapsed += dt;
   const t = clamp(flight.elapsed / flight.duration);
   const out = { t, done: t >= 1 };
+  if (flight.control) {
+    const u = 1 - Math.pow(1 - t, ARC_EASE);
+    const du = (ARC_EASE * Math.pow(1 - t, ARC_EASE - 1)) / flight.duration;
+    for (const axis of ["x", "y"]) {
+      const a = flight.from[axis];
+      const c = target[axis] + flight.control[axis];
+      const b = target[axis];
+      out[axis] = (1 - u) * (1 - u) * a + 2 * u * (1 - u) * c + u * u * b;
+      out[`v${axis}`] = (2 * (1 - u) * (c - a) + 2 * u * (b - c)) * du;
+    }
+    out.s = lerp(flight.from.s, target.s, u);
+    out.vs = (target.s - flight.from.s) * du;
+    return out;
+  }
   for (const axis of AXES) {
     const [p, d] = hermite(flight.from[axis], flight.launch[axis] ?? 0, target[axis], 0, t);
     out[axis] = p;
@@ -82,33 +103,40 @@ export function moveLaunch(state, target, duration, bend) {
 /** Flight time for a move: longer for longer trips, capped so nothing races or drags. */
 export function moveDuration(state, target) {
   const distance = Math.hypot(target.x - state.x, target.y - state.y);
-  return clamp(0.42 + distance / 2600, 0.52, 0.86);
+  return clamp(0.5 + distance / 2200, 0.62, 0.95);
 }
 
 /**
- * Where an entering actor starts and how it is thrown. `side` is -1 (from the
- * left edge) or 1 (from the right). The actor starts above and outside its
- * slot and is launched inward and slightly up, so the Hermite curve rises,
- * turns over and falls into place: a toss, not a slide.
+ * The first visit's entrance: a lob from low on one side. `side` is -1 (the
+ * left edge) or 1 (the right). The actor starts outside the edge, below its
+ * slot, climbs past the slot's height and comes down into it from above, so
+ * every splat draws one clean arc across the page.
  */
 export function tossFrom({ target, side, viewport, duration }) {
   const s = target.s;
   const from = {
-    x: side < 0 ? -s * 0.9 : viewport.w + s * 0.9,
-    y: target.y - viewport.h * 0.22 - s * 0.2,
-    s: s * 0.82,
+    x: side < 0 ? -s * 0.7 : viewport.w + s * 0.7,
+    y: target.y + viewport.h * 0.28,
+    s: s * 0.5,
   };
   const dx = target.x - from.x;
-  const launch = {
-    x: dx * 1.35,
-    y: -Math.abs(dx) * 0.55,
-    s: 0,
+  // The control point: most of the way across, well above the slot. A
+  // quadratic Bézier crests halfway to it, so the apex clears the slot by
+  // about a sixth of the viewport.
+  const control = {
+    x: -dx * 0.32,
+    y: -viewport.h * 0.3 - Math.abs(dx) * 0.08,
   };
-  return { from, launch, duration };
+  return { from, control, duration };
 }
 
-/** A gentler entrance for returning visits: rise from below the fold. */
-export function riseFrom({ target, viewport, duration }) {
-  const from = { x: target.x, y: Math.max(target.y + target.s * 0.6, viewport.h + target.s * 0.6), s: target.s * 0.9 };
-  return { from, launch: { x: 0, y: (target.y - from.y) * 1.4, s: 0 }, duration };
+/**
+ * The entrance for return visits: a shorter arc up from below the fold, curling
+ * in from the actor's own side.
+ */
+export function riseFrom({ target, side, viewport, duration }) {
+  const s = target.s;
+  const from = { x: target.x + side * viewport.w * 0.16, y: Math.max(target.y + s * 0.8, viewport.h + s * 0.6), s: s * 0.7 };
+  const control = { x: side * viewport.w * 0.1, y: -viewport.h * 0.14 };
+  return { from, control, duration };
 }
