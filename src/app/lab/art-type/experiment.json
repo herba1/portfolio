@@ -1,10 +1,20 @@
 {
   "title": "Art Type",
-  "description": "An album cover made of its own pixels. Move across it and every pixel lifts off on its own arc and lands in the letters of the title, set as a poster in the cover's colours; move back and the picture puts itself together again. Left alone it breathes between the two.",
-  "tags": ["Type", "Canvas", "Music"],
+  "description": "An album cover made of its own pixels. Move across it or drag the scrubber and the pixels peel off in one clean left-to-right wave, take on the cover's darkest ink in flight and settle into the title, which resolves into crisp type with the year beneath. Move back and the picture puts itself together again.",
+  "tags": [
+    "Type",
+    "Canvas",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:50:00.000Z",
-  "intent": "One morph finished to the edge: a particle reassignment from cover pixels to title glyphs, swept left to right, scrubbed by the pointer or a slider and springing to wherever you leave it.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://herb.art/lab/ascii-bust", "https://en.wikipedia.org/wiki/Revolver_(Beatles_album)"]
+  "intent": "One morph finished to the edge: a particle reassignment from cover pixels to title glyphs, swept left to right, with the real artwork and real type at both ends so the rest states are always sharp.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://herb.art/lab/ascii-bust",
+    "https://en.wikipedia.org/wiki/Revolver_(Beatles_album)"
+  ]
 }

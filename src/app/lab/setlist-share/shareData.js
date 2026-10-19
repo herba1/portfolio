@@ -1,26 +1,3 @@
-const LINES = {
-  "Come Together": "Four bars of bass and a hiss, and the room already belongs to it.",
-  Something: "The guitar answers every line before the line has finished.",
-  Taxman: "A grin set to a count-in, all elbows and treble.",
-  "Eleanor Rigby": "No drums, no guitars, just strings keeping time for the lonely.",
-  "Drive My Car": "Cowbell, swagger and a punchline waiting in the chorus.",
-  "Norwegian Wood": "A sitar wanders through a story that ends with a match.",
-  "Sgt. Pepper's Lonely Hearts Club Band": "The crowd is made up and the welcome is entirely real.",
-  "With a Little Help from My Friends": "The easiest singalong ever written, sung by the drummer.",
-  "Two of Us": "Two voices on one road, heading home the long way round.",
-  "Across the Universe": "A slow hum of a song that floats a few inches off the floor.",
-  "Magical Mystery Tour": "Trumpets out of the bus window. Roll up, and keep rolling.",
-  "The Fool on the Hill": "A recorder and a piano on a quiet hill above everything.",
-  "Help!": "A shout for help dressed as a hit, and somehow both are true.",
-  "The Night Before": "Electric piano and a bruised heart from the night before.",
-  "A Hard Day's Night": "That opening chord is still the best first second of any record.",
-  "I Should Have Known Better": "Harmonica up front and a heart that never stood a chance.",
-};
-
-export function lineFor(track) {
-  return LINES[track.title] || `${track.title} on repeat, and it still sounds new every single time.`;
-}
-
 function hsl(r, g, b) {
   r /= 255;
   g /= 255;
@@ -52,6 +29,7 @@ export function palette(h, s) {
     s,
     bg: `hsl(${h} ${s}% 30%)`,
     glow: `hsl(${h} ${Math.min(90, s + 12)}% 60%)`,
+    soft: `hsl(${h} ${Math.min(50, s)}% 84%)`,
     stops: STOPS.map(([at, l]) => [at, `hsl(${h} ${s}% ${l}%)`]),
   };
 }

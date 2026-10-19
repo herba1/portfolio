@@ -8,9 +8,12 @@ import { pop, swish, wakeAudio } from "./foley";
 import "./now-toasts.css";
 
 const LIFE = 5000;
-const ROW = 72;
+const GAP = 8;
+const HEIGHT = 64;
+const PEEK = 10;
 const VISIBLE = 3;
-const MAX = 6;
+const MAX = 5;
+const FLIGHT = 480;
 
 function Heart({ on }) {
   return (
@@ -19,7 +22,7 @@ function Heart({ on }) {
         d="M10 16.6s-6.1-3.7-6.1-8.2A3.4 3.4 0 0 1 10 6.3a3.4 3.4 0 0 1 6.1 2.1c0 4.5-6.1 8.2-6.1 8.2z"
         fill={on ? "currentColor" : "none"}
         stroke="currentColor"
-        strokeWidth="1.5"
+        strokeWidth="1.6"
         strokeLinejoin="round"
       />
     </svg>
@@ -29,7 +32,7 @@ function Heart({ on }) {
 function QueueIcon() {
   return (
     <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-      <path d="M3.5 5.5h9M3.5 10h9M3.5 14.5h5M14.5 12v6M11.5 15h6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" fill="none" />
+      <path d="M3.5 5.5h9M3.5 10h9M3.5 14.5h5M14.5 12v6M11.5 15h6" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" fill="none" />
     </svg>
   );
 }
@@ -37,17 +40,25 @@ function QueueIcon() {
 function NextIcon() {
   return (
     <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true">
-      <path d="M4.5 5v10l7-5zM14 5v10" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" fill="none" />
+      <path d="M4.5 5v10l7-5zM14 5v10" stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" strokeLinecap="round" fill="none" />
     </svg>
   );
+}
+
+const ICONS = { like: <Heart on />, unlike: <Heart />, next: <NextIcon />, queue: <QueueIcon /> };
+
+function ordinal(n) {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 function Toast({ toast, index, expanded, onDismiss, onUndo, thumbRef }) {
   const ref = useRef(null);
   const drag = useRef(null);
   const hidden = index >= (expanded ? MAX : VISIBLE);
-  const y = expanded ? -index * ROW : -index * 12;
-  const s = expanded ? 1 : 1 - index * 0.055;
+  const y = expanded ? -index * (HEIGHT + GAP) : -index * PEEK;
+  const s = expanded ? 1 : 1 - index * 0.05;
 
   const onPointerDown = (event) => {
     if (event.button > 0 || event.target.closest("button")) return;
@@ -55,20 +66,18 @@ function Toast({ toast, index, expanded, onDismiss, onUndo, thumbRef }) {
     ref.current.setAttribute("data-dragging", "");
     try {
       ref.current.setPointerCapture(event.pointerId);
-    } catch {
-      drag.current.free = true;
-    }
+    } catch {}
   };
   const onPointerMove = (event) => {
     const d = drag.current;
     if (!d || d.id !== event.pointerId) return;
     const dx = event.clientX - d.x;
     const dt = Math.max(1, event.timeStamp - d.t);
-    d.v = (dx - d.dx) / dt;
+    d.v = d.v * 0.4 + ((dx - d.dx) / dt) * 0.6;
     d.dx = dx;
     d.t = event.timeStamp;
     ref.current.style.setProperty("--dx", `${dx}px`);
-    ref.current.style.setProperty("--fade", String(Math.max(0, 1 - Math.abs(dx) / 260)));
+    ref.current.style.setProperty("--fade", String(Math.max(0, 1 - Math.abs(dx) / 320)));
   };
   const onPointerUp = (event) => {
     const d = drag.current;
@@ -76,9 +85,10 @@ function Toast({ toast, index, expanded, onDismiss, onUndo, thumbRef }) {
     drag.current = null;
     const el = ref.current;
     el.removeAttribute("data-dragging");
-    if (Math.abs(d.dx) > 96 || Math.abs(d.v) > 0.6) {
+    const fling = Math.abs(d.v) > 0.5 && Math.sign(d.v) === Math.sign(d.dx);
+    if (Math.abs(d.dx) > 112 || fling) {
       const dir = Math.sign(d.dx || d.v);
-      el.style.setProperty("--dx", `${dir * (el.offsetWidth + 80)}px`);
+      el.style.setProperty("--dx", `${dir * (el.offsetWidth + 48)}px`);
       el.style.setProperty("--fade", "0");
       el.setAttribute("data-swiped", "");
       onDismiss(toast.id, true);
@@ -96,28 +106,24 @@ function Toast({ toast, index, expanded, onDismiss, onUndo, thumbRef }) {
       data-leaving={toast.leaving ? "" : undefined}
       data-hidden={hidden ? "" : undefined}
       data-front={index === 0 ? "" : undefined}
+      data-fresh={toast.rev === 0 ? "" : undefined}
       style={{ "--y": `${y}px`, "--s": s, zIndex: 50 - index }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={onPointerUp}
       onPointerCancel={onPointerUp}
     >
-      <span className="nt-thumb" ref={thumbRef} data-landed={toast.landed ? "" : undefined}>
-        <img src={toast.track.image} alt="" draggable={false} crossOrigin="anonymous" />
-        <span className="nt-badge">{toast.kind === "like" ? <Heart on /> : toast.kind === "next" ? <NextIcon /> : <QueueIcon />}</span>
-        {toast.kind === "like" && toast.landed ? (
-          <span className="nt-burst" aria-hidden="true">
-            {Array.from({ length: 8 }, (_, i) => (
-              <i key={i} style={{ "--a": `${i * 45}deg` }} />
-            ))}
-          </span>
-        ) : null}
+      <span className="nt-thumb">
+        <img ref={thumbRef} src={toast.track.image} alt="" draggable={false} />
+        <span className="nt-badge" key={toast.rev}>
+          {ICONS[toast.kind]}
+        </span>
       </span>
-      <span className="nt-text">
+      <span className="nt-text" key={toast.rev}>
         <span className="nt-title">{toast.title}</span>
         <span className="nt-sub">{toast.sub}</span>
       </span>
-      <button type="button" className="nt-undo" onClick={() => onUndo(toast)}>
+      <button type="button" className="nt-undo" tabIndex={index === 0 || expanded ? 0 : -1} onClick={() => onUndo(toast)}>
         Undo
       </button>
     </li>
@@ -127,127 +133,181 @@ function Toast({ toast, index, expanded, onDismiss, onUndo, thumbRef }) {
 export default function Piece({ embedded = false }) {
   const { tracks } = useTopSongs(8);
   const rootRef = useRef(null);
+  const scrollRef = useRef(null);
   const toasterRef = useRef(null);
   const coverEls = useRef(new Map());
   const thumbEls = useRef(new Map());
+  const flights = useRef(new Map());
+  const timers = useRef(new Map());
   const pending = useRef([]);
   const seq = useRef(0);
+  const toastsRef = useRef([]);
+  const pausedRef = useRef(false);
   const [liked, setLiked] = useState(() => new Set());
   const [queue, setQueue] = useState([]);
   const [toasts, setToasts] = useState([]);
   const [hover, setHover] = useState(false);
   const [touchOpen, setTouchOpen] = useState(false);
   const [focusIn, setFocusIn] = useState(false);
-  const expanded = hover || focusIn || touchOpen;
-  const pausedRef = useRef(false);
+  const live = toasts.filter((t) => !t.leaving);
+  const expanded = (hover || focusIn || touchOpen) && live.length > 0;
 
   useEffect(() => {
-    pausedRef.current = expanded;
-  }, [expanded]);
+    toastsRef.current = toasts;
+  }, [toasts]);
 
-  const dismiss = useCallback((id, swiped = false) => {
-    if (swiped) swish();
-    setToasts((ts) => ts.map((t) => (t.id === id ? { ...t, leaving: true } : t)));
-    setTimeout(() => setToasts((ts) => ts.filter((t) => t.id !== id)), swiped ? 260 : 360);
+  const remove = useCallback((id) => {
+    setToasts((ts) => ts.filter((t) => t.id !== id));
+    thumbEls.current.delete(id);
+    flights.current.delete(id);
   }, []);
 
-  useEffect(() => {
-    const timer = setInterval(() => {
-      if (pausedRef.current || document.hidden) return;
+  const dismiss = useCallback(
+    (id, swiped = false) => {
+      const timer = timers.current.get(id);
+      if (timer) clearTimeout(timer.handle);
+      timers.current.delete(id);
+      if (swiped) swish();
       setToasts((ts) => {
-        let changed = false;
-        const next = ts.map((t, i) => {
-          if (t.leaving || i >= VISIBLE) return t;
-          changed = true;
-          return { ...t, left: t.left - 100 };
+        let k = 0;
+        return ts.map((t) => {
+          if (t.leaving) return t;
+          const slot = k++;
+          return t.id === id ? { ...t, leaving: true, slot, swiped } : t;
         });
-        if (!changed) return ts;
-        next.filter((t) => t.left <= 0 && !t.leaving).forEach((t) => setTimeout(() => dismiss(t.id), 0));
-        return next;
       });
-    }, 100);
-    return () => clearInterval(timer);
-  }, [dismiss]);
+      if (!toastsRef.current.some((t) => !t.leaving && t.id !== id)) setTouchOpen(false);
+      setTimeout(() => remove(id), swiped ? 280 : 360);
+    },
+    [remove, setTouchOpen],
+  );
 
-  const push = (kind, track, title, sub) => {
+  const arm = useCallback(
+    (id, ms) => {
+      const timer = timers.current.get(id) || { remaining: ms };
+      clearTimeout(timer.handle);
+      timer.remaining = ms;
+      timer.start = performance.now();
+      timer.handle = pausedRef.current ? null : setTimeout(() => dismiss(id), ms);
+      timers.current.set(id, timer);
+    },
+    [dismiss],
+  );
+
+  useEffect(() => {
+    const pause = () => {
+      timers.current.forEach((timer) => {
+        if (!timer.handle) return;
+        clearTimeout(timer.handle);
+        timer.handle = null;
+        timer.remaining = Math.max(0, timer.remaining - (performance.now() - timer.start));
+      });
+    };
+    const resume = () => {
+      timers.current.forEach((timer, id) => {
+        if (timer.handle) return;
+        timer.start = performance.now();
+        timer.handle = setTimeout(() => dismiss(id), Math.max(1200, timer.remaining));
+      });
+    };
+    const sync = () => {
+      pausedRef.current = expanded || document.hidden;
+      if (pausedRef.current) pause();
+      else resume();
+    };
+    sync();
+    document.addEventListener("visibilitychange", sync);
+    return () => document.removeEventListener("visibilitychange", sync);
+  }, [expanded, dismiss]);
+
+  useEffect(() => {
+    const all = timers.current;
+    return () => all.forEach((timer) => clearTimeout(timer.handle));
+  }, []);
+
+  const push = (kind, track, title, sub, undo) => {
     wakeAudio();
+    const family = kind === "unlike" ? "like" : kind;
+    const same = family === "like" ? toastsRef.current.find((t) => !t.leaving && t.track.id === track.id && (t.kind === "like" || t.kind === "unlike")) : null;
+    if (same) {
+      setToasts((ts) => [{ ...same, kind, title, sub, undo, rev: same.rev + 1 }, ...ts.filter((t) => t.id !== same.id)]);
+      arm(same.id, LIFE);
+      return;
+    }
     seq.current += 1;
     const id = seq.current;
-    const toast = { id, kind, track, title, sub, left: LIFE, leaving: false, landed: false };
+    const toast = { id, kind, track, title, sub, undo, rev: 0, leaving: false };
     pending.current.push({ id, from: coverEls.current.get(track.id) });
-    setToasts((ts) => {
-      const next = [toast, ...ts];
-      next.slice(MAX).forEach((t) => setTimeout(() => dismiss(t.id), 0));
-      return next;
-    });
+    setToasts((ts) => [toast, ...ts]);
+    toastsRef.current.filter((t) => !t.leaving).slice(MAX - 1).forEach((t) => dismiss(t.id));
+    arm(id, LIFE);
   };
 
   useLayoutEffect(() => {
-    const root = rootRef.current;
-    if (!root || !pending.current.length) return;
+    if (!pending.current.length) return;
     const jobs = pending.current.splice(0);
-    const origin = root.getBoundingClientRect();
+    const dock = toasterRef.current?.getBoundingClientRect();
+    const view = scrollRef.current?.getBoundingClientRect();
     jobs.forEach(({ id, from }) => {
-      const thumb = thumbEls.current.get(id);
-      const markLanded = () => setToasts((ts) => ts.map((t) => (t.id === id ? { ...t, landed: true } : t)));
-      if (!thumb || !from) {
-        markLanded();
+      const img = thumbEls.current.get(id);
+      if (!img || !dock) return;
+      const tx = dock.left + GAP;
+      const ty = dock.bottom - HEIGHT + GAP;
+      const done = () => {
+        flights.current.delete(id);
+        pop();
+      };
+      if (!from || !view) {
+        const anim = img.animate([{ opacity: 0, transform: "scale(0.9)" }, { opacity: 1, transform: "none" }], { duration: 240, easing: "cubic-bezier(0.22, 1, 0.36, 1)" });
+        anim.onfinish = done;
         return;
       }
       const a = from.getBoundingClientRect();
-      const dock = toasterRef.current.getBoundingClientRect();
-      const fly = document.createElement("img");
-      fly.src = from.querySelector("img")?.src || "";
-      fly.className = "nt-fly";
-      root.appendChild(fly);
-      const x0 = a.left - origin.left;
-      const y0 = a.top - origin.top;
-      const x1 = dock.left - origin.left + 12;
-      const y1 = dock.bottom - origin.top - 52;
-      const s0 = a.width / 40;
-      const cx = (x0 + x1) / 2 + (x1 - x0) * 0.2;
-      const cy = Math.min(y0, y1) - Math.min(220, Math.max(80, Math.abs(y1 - y0) * 0.45));
-      const frames = Array.from({ length: 13 }, (_, k) => {
-        const e = k / 12;
-        const m = 1 - e;
-        const x = m * m * x0 + 2 * m * e * cx + e * e * x1;
-        const y = m * m * y0 + 2 * m * e * cy + e * e * y1;
-        const s = s0 + (1 - s0) * e;
-        const r = Math.sin(Math.PI * e) * -14;
-        return { transform: `translate(${x}px, ${y}px) rotate(${r}deg) scale(${s})`, offset: e };
-      });
-      const anim = fly.animate(frames, { duration: 640, easing: "cubic-bezier(0.3, 0.6, 0.25, 1)", fill: "forwards" });
+      const top = Math.min(Math.max(a.top, view.top - a.height * 0.5), view.bottom - a.height * 0.5);
+      const dx = a.left - tx;
+      const dy = top - ty;
+      const lift = Math.min(1, Math.abs(dy) / 400);
+      const anim = img.animate(
+        [
+          { transform: `translate(${dx}px, ${dy}px)`, boxShadow: "0 0 0 0 rgb(0 0 0 / 0)" },
+          { transform: `translate(${dx * 0.5}px, ${dy * 0.5}px) scale(${1 + 0.06 * lift})`, boxShadow: "0 12px 24px -8px rgb(0 0 0 / 0.28)", offset: 0.5 },
+          { transform: "none", boxShadow: "0 0 0 0 rgb(0 0 0 / 0)" },
+        ],
+        { duration: FLIGHT, easing: "cubic-bezier(0.45, 0, 0.15, 1)" },
+      );
+      img.closest(".nt-toast")?.setAttribute("data-flying", "");
+      flights.current.set(id, anim);
       anim.onfinish = () => {
-        fly.remove();
-        markLanded();
-        pop();
+        img.closest(".nt-toast")?.removeAttribute("data-flying");
+        done();
       };
+      anim.oncancel = () => img.closest(".nt-toast")?.removeAttribute("data-flying");
     });
   });
 
   const toggleLike = (track) => {
-    const on = !liked.has(track.id);
+    const was = liked.has(track.id);
     setLiked((s) => {
       const next = new Set(s);
-      if (on) next.add(track.id);
-      else next.delete(track.id);
+      if (was) next.delete(track.id);
+      else next.add(track.id);
       return next;
     });
-    push("like", track, on ? "Added to Liked Songs" : "Removed from Liked Songs", `${track.title} · ${track.artist}`);
+    push(was ? "unlike" : "like", track, was ? "Removed from Liked Songs" : "Added to Liked Songs", `${track.title} · ${track.artist}`, { liked: was });
   };
 
   const addQueue = (track, next) => {
-    setQueue((q) => (next ? [track.id, ...q] : [...q, track.id]));
     const position = next ? 1 : queue.length + 1;
-    push(next ? "next" : "queue", track, `${next ? "Playing next" : "Queued"}: ${track.title}`, position === 1 ? "Up next after this song" : `Number ${position} in your queue`);
+    setQueue((q) => (next ? [track.id, ...q] : [...q, track.id]));
+    push(next ? "next" : "queue", track, next ? "Playing next" : "Added to queue", next ? `${track.title} · after this song` : position === 1 ? `${track.title} · next in queue` : `${track.title} · ${ordinal(position)} in queue`, {});
   };
 
   const undo = (toast) => {
-    if (toast.kind === "like") {
+    if (toast.kind === "like" || toast.kind === "unlike") {
       setLiked((s) => {
         const next = new Set(s);
-        if (toast.title.startsWith("Added")) next.delete(toast.track.id);
-        else next.add(toast.track.id);
+        if (toast.undo.liked) next.add(toast.track.id);
+        else next.delete(toast.track.id);
         return next;
       });
     } else {
@@ -265,23 +325,21 @@ export default function Piece({ embedded = false }) {
     if (front) dismiss(front.id);
   };
 
-  const live = toasts.filter((t) => !t.leaving);
   const Root = embedded ? "div" : "main";
+  let k = 0;
 
   return (
     <Root ref={rootRef} className="nt-root" data-embedded={embedded ? "" : undefined} onKeyDown={onKeyDown}>
-      <div className="nt-scroll" data-scroll-contain="">
+      <div ref={scrollRef} className="nt-scroll" data-scroll-contain="">
         <div className="nt-column">
           {embedded ? null : (
             <header className="nt-head">
-              <h1 className="text-title-sm">Now Toasts</h1>
-              <p className="nt-hint text-ui-lg">Like or queue a song and its cover flies down into a toast. Hover or tap the stack to fan it out, swipe a toast away.</p>
+              <h1 className="nt-h1">Now Toasts</h1>
             </header>
           )}
           <ol className="nt-list">
-            {tracks.map((t, i) => (
+            {tracks.map((t) => (
               <li key={t.id} className="nt-row">
-                <span className="nt-n">{i + 1}</span>
                 <span
                   className="nt-cover"
                   ref={(el) => {
@@ -289,7 +347,7 @@ export default function Piece({ embedded = false }) {
                     else coverEls.current.delete(t.id);
                   }}
                 >
-                  <img src={t.image} alt="" draggable={false} crossOrigin="anonymous" />
+                  <img src={t.image} alt="" draggable={false} />
                 </span>
                 <span className="nt-row-text">
                   <span className="nt-row-title">{t.title}</span>
@@ -320,6 +378,7 @@ export default function Piece({ embedded = false }) {
           </ol>
         </div>
       </div>
+      <div className="nt-veil" aria-hidden="true" data-on={expanded ? "" : undefined} style={{ "--count": Math.max(1, Math.min(live.length, MAX)) }} />
       <section
         ref={toasterRef}
         className="nt-toaster"
@@ -329,34 +388,30 @@ export default function Piece({ embedded = false }) {
         style={{ "--count": Math.max(1, Math.min(live.length, MAX)) }}
         onPointerEnter={(e) => e.pointerType === "mouse" && setHover(true)}
         onPointerLeave={(e) => e.pointerType === "mouse" && setHover(false)}
-        onPointerDown={(e) => e.pointerType !== "mouse" && setTouchOpen(true)}
+        onPointerDown={(e) => e.pointerType !== "mouse" && live.length > 1 && setTouchOpen(true)}
         onFocus={() => setFocusIn(true)}
         onBlur={(e) => !e.currentTarget.contains(e.relatedTarget) && setFocusIn(false)}
       >
         <ol className="nt-stack">
-          {(() => {
-            let k = 0;
-            return toasts.map((t) => {
-              const index = t.leaving ? k : k++;
-              return (
-                <Toast
-                  key={t.id}
-                  toast={t}
-                  index={index}
-                  expanded={expanded}
-                  onDismiss={dismiss}
-                  onUndo={undo}
-                  thumbRef={(el) => {
-                    if (el) thumbEls.current.set(t.id, el);
-                    else thumbEls.current.delete(t.id);
-                  }}
-                />
-              );
-            });
-          })()}
+          {toasts.map((t) => {
+            const index = t.leaving ? t.slot : k++;
+            return (
+              <Toast
+                key={t.id}
+                toast={t}
+                index={index}
+                expanded={expanded}
+                onDismiss={dismiss}
+                onUndo={undo}
+                thumbRef={(el) => {
+                  if (el) thumbEls.current.set(t.id, el);
+                }}
+              />
+            );
+          })}
         </ol>
       </section>
-      {touchOpen ? <div className="nt-catch" aria-hidden="true" onPointerDown={() => setTouchOpen(false)} /> : null}
+      {touchOpen && expanded ? <div className="nt-catch" aria-hidden="true" onPointerDown={() => setTouchOpen(false)} /> : null}
     </Root>
   );
 }

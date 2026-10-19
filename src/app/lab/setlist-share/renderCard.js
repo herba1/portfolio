@@ -36,7 +36,7 @@ function loadImage(src) {
 }
 
 export async function renderCard(card, colors) {
-  await Promise.all(card.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {})));
+  await Promise.all(card.getAnimations({ subtree: true }).filter((a) => a.effect?.getTiming().iterations !== Infinity && a.effect?.target !== card.parentElement).map((a) => a.finished.catch(() => {})));
   const box = card.getBoundingClientRect();
   const W = 1080;
   const k = W / box.width;

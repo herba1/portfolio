@@ -7,7 +7,7 @@ import { albumById } from "@/app/lab/_music/catalog";
 import "./art-type.css";
 
 const SET = ["abbey-road", "revolver", "rubber-soul", "let-it-be", "help", "magical-mystery-tour"].map(albumById);
-const IDLE = 4200;
+const IDLE = 3600;
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -15,6 +15,8 @@ export default function Piece({ embedded = false }) {
   const engineRef = useRef(null);
   const rangeRef = useRef(null);
   const lastInput = useRef(0);
+  const touched = useRef(false);
+  const sliding = useRef(false);
   const [index, setIndex] = useState(0);
   const [ready, setReady] = useState(false);
 
@@ -31,22 +33,23 @@ export default function Piece({ embedded = false }) {
       engine = createArt(canvas, {
         onProgress: (p) => {
           const r = rangeRef.current;
-          if (r && document.activeElement !== r) r.value = String(Math.round(p * 1000));
-          root.style.setProperty("--at-p", p.toFixed(3));
+          if (sliding.current || document.activeElement === r) return;
+          if (r) r.value = String(Math.round(p * 1000));
+          root.style.setProperty("--at-p", p.toFixed(4));
         },
       });
       engine.setFamily(getComputedStyle(root).fontFamily || "sans-serif");
       engineRef.current = engine;
-      lastInput.current = Math.max(lastInput.current, performance.now() - IDLE + 1400);
+      lastInput.current = Math.max(lastInput.current, performance.now() + 800);
       setReady(true);
     };
     start();
     const timer = setInterval(() => {
       const e = engineRef.current;
-      if (!e || document.hidden) return;
+      if (!e || document.hidden || touched.current) return;
       if (performance.now() - lastInput.current < IDLE) return;
-      lastInput.current = performance.now() - IDLE + 2800;
-      e.setTarget(e.target > 0.5 ? 0 : 1);
+      lastInput.current = performance.now();
+      e.setTarget(e.target > 0.5 ? 0 : 1, 14);
     }, 300);
     return () => {
       cancelled = true;
@@ -69,9 +72,9 @@ export default function Piece({ embedded = false }) {
     const sq = engine.square();
     const x = event.clientX - rect.left - sq.x;
     const y = event.clientY - rect.top - sq.y;
-    if (y < -48 || y > sq.S + 48 || x < -96 || x > sq.S + 96) return;
-    lastInput.current = performance.now();
-    engine.setTarget((x + 24) / (sq.S + 48));
+    if (y < -32 || y > sq.S + 32 || x < -64 || x > sq.S + 64) return;
+    touched.current = true;
+    engine.setTarget((x - sq.S * 0.1) / (sq.S * 0.8));
   };
 
   const onPointerMove = (event) => {
@@ -83,8 +86,10 @@ export default function Piece({ embedded = false }) {
   };
 
   const onRange = (event) => {
-    lastInput.current = performance.now();
-    engineRef.current?.setTarget(Number(event.target.value) / 1000);
+    touched.current = true;
+    const v = Number(event.target.value) / 1000;
+    rootRef.current?.style.setProperty("--at-p", v.toFixed(4));
+    engineRef.current?.setTarget(v);
   };
 
   const onKeyDown = (event) => {
@@ -92,8 +97,8 @@ export default function Piece({ embedded = false }) {
     if (!engine) return;
     if (event.key === " " || event.key === "Enter") {
       event.preventDefault();
-      lastInput.current = performance.now();
-      engine.setTarget(engine.target > 0.5 ? 0 : 1);
+      touched.current = true;
+      engine.setTarget(engine.target > 0.5 ? 0 : 1, 22);
     }
   };
 
@@ -108,15 +113,14 @@ export default function Piece({ embedded = false }) {
         data-ready={ready ? "" : undefined}
         tabIndex={0}
         role="img"
-        aria-label={`The ${album.title} cover, made of its own pixels, which rearrange into the words ${album.title}. Move across it to scrub; Space flips it.`}
+        aria-label={`The ${album.title} cover, made of its own pixels, which rearrange into the words ${album.title}. Space flips it.`}
         onPointerMove={onPointerMove}
         onPointerDown={onPointerDown}
         onKeyDown={onKeyDown}
       />
       {embedded ? null : (
         <header className="at-head">
-          <h1 className="text-title-sm">Art Type</h1>
-          <p className="at-hint text-ui-lg">Every pixel of the cover is a letter waiting to happen. Move across the record to scrub it into its title and back.</p>
+          <h1 className="at-h1">Art Type</h1>
         </header>
       )}
       <div className="at-dock">
@@ -130,12 +134,34 @@ export default function Piece({ embedded = false }) {
             defaultValue="0"
             aria-label="Cover to title"
             onInput={onRange}
+            onPointerDown={() => {
+              sliding.current = true;
+            }}
+            onPointerUp={(event) => {
+              sliding.current = false;
+              event.currentTarget.blur();
+            }}
+            onPointerCancel={() => {
+              sliding.current = false;
+            }}
+            onBlur={() => {
+              sliding.current = false;
+            }}
           />
           <span className="at-end">Title</span>
         </label>
         <nav className="at-picker" aria-label="Albums">
           {SET.map((a, i) => (
-            <button key={a.id} type="button" className="at-pick" aria-pressed={i === index} onClick={() => setIndex(i)}>
+            <button
+              key={a.id}
+              type="button"
+              className="at-pick"
+              aria-pressed={i === index}
+              onClick={() => {
+                lastInput.current = performance.now();
+                setIndex(i);
+              }}
+            >
               <img src={a.cover} alt="" width={32} height={32} draggable={false} />
               <span>{a.title}</span>
             </button>

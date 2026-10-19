@@ -1,10 +1,20 @@
 {
   "title": "Now Toasts",
-  "description": "Your top songs with a like, play-next and queue on every row. Each action answers with a toast whose cover flies down from the row into it; the toasts stack like cards, fan out when you hover, pause while you read, and swipe away with a flick. Liking bursts the heart.",
-  "tags": ["Toast", "Motion", "Music"],
+  "description": "Your top songs with like, play next and add to queue on every row. Each action answers with a toast at the foot of the list: the cover drops straight down its own column into the toast's thumbnail, the toasts stack like cards, fan out on hover or tap, pause while you read, and flick away sideways. Repeated likes update one toast instead of piling up.",
+  "tags": [
+    "Toast",
+    "Motion",
+    "Music"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:30:00.000Z",
-  "intent": "A Sonner-style toast stack built for a music app: real covers, undo on every toast, swipe to dismiss with velocity, and a cover that flies from the row into its toast.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://sonner.emilkowal.ski", "https://herb.art/top-songs"]
+  "intent": "A Sonner-style toast stack built for a music app: real covers, undo on every toast, swipe to dismiss with velocity, and a cover that travels from its row into its toast without crossing any text.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://sonner.emilkowal.ski",
+    "https://herb.art/top-songs"
+  ]
 }
