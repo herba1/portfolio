@@ -197,9 +197,9 @@ export function layoutHand(family, titles = defaultTitles()) {
     strokes.push({ ink, pts });
   };
 
-  write(HEADER, 98, 132, 44, 600, 0, { shrink: 0.04 });
-  const labelW = measure(KEY_LABEL, 40, 450);
-  write(KEY_LABEL, 902 - labelW, 128, 40, 450, 1, { track: 2 });
+  write(HEADER, 98, 132, 50, 600, 0, { shrink: 0.04 });
+  const labelW = measure(KEY_LABEL, 44, 544);
+  write(KEY_LABEL, 902 - labelW, 128, 44, 544, 1, { track: 2 });
   pen(0, [[92, 166], [240, 158], [420, 170], [586, 158]], 6.5, 40, { taper: 0.55 });
 
   const fitSize = (text) => {
@@ -215,22 +215,22 @@ export function layoutHand(family, titles = defaultTitles()) {
     reseed(i + 1);
     const tilt = (rng() - 0.5) * 0.012;
     const written = title.trim() ? write(title, 118, y, fitSize(title), 640, 0, { tilt }) : empty(y);
-    const keyW = measure(song.key, 40, 450);
+    const keyW = measure(song.key, 40, 560);
     reseed(i + 101);
-    const key = write(song.key, 906 - keyW, y - 2, 40, 450, 1, { track: 1.5 });
+    const key = write(song.key, 906 - keyW, y - 2, 40, 560, 1, { track: 1.5 });
     lines.push({ ...written, key, title, index: i, y });
   });
 
   reseed(200);
 
   pen(0, [[118, 1040], [200, 1046], [300, 1036], [396, 1044]], 5, 30, { taper: 0.5 });
-  write("ENC", 118, ENCORE_BASELINE - 82, 36, 470, 1, { track: 2 });
+  write("Encore", 118, ENCORE_BASELINE - 80, 42, 540, 1, { track: 2 });
   const encoreTitle = titles[SONGS.length] ?? "";
   reseed(300);
   const encore = encoreTitle.trim() ? write(encoreTitle, 118, ENCORE_BASELINE, fitSize(encoreTitle), 640, 0, { tilt: -0.006 }) : empty(ENCORE_BASELINE);
-  const encKeyW = measure(ENCORE.key, 40, 450);
+  const encKeyW = measure(ENCORE.key, 40, 560);
   reseed(301);
-  const encKey = write(ENCORE.key, 906 - encKeyW, ENCORE_BASELINE - 2, 40, 450, 1, { track: 1.5 });
+  const encKey = write(ENCORE.key, 906 - encKeyW, ENCORE_BASELINE - 2, 40, 560, 1, { track: 1.5 });
   lines.push({ ...encore, key: encKey, title: encoreTitle, index: SONGS.length, y: ENCORE_BASELINE });
   reseed(400);
 
@@ -338,7 +338,7 @@ export function bakeInk(hand, pw, ph, family) {
       let ab = 0;
       if (ba > 0.004) {
         const grain = noise(u * 0.6, v * 0.6, 37);
-        const skip = noise(u * 0.32 + 7, v * 0.32, 41) > 0.8 ? 0.62 : 1;
+        const skip = noise(u * 0.32 + 7, v * 0.32, 41) > 0.82 ? 0.8 : 1;
         ab = ba * (0.74 + 0.26 * grain) * skip * 0.92;
       }
       const a = ab + am * (1 - ab);
@@ -597,30 +597,14 @@ export function bakeScene(canvas, geo, dpr) {
       const tooth = (noise(u * 0.42, v * 0.42, 3) - 0.5) * 0.045 + (noise(u * 1.3, v * 1.3, 5) - 0.5) * 0.03 + (noise(u * 0.03, v * 0.045, 9) - 0.5) * 0.04;
       const light2 = 0.016 * (1 - u / SHEET_W) + 0.02 * (1 - v / SHEET_H) - 0.016;
       const d = v - SHEET_H * 0.5;
-      const crease = -0.055 * Math.exp(-(d * d) / 1.6) + 0.03 * Math.exp(-((d + 2.6) * (d + 2.6)) / 5) - 0.014 * Math.exp(-((d - 7) * (d - 7)) / 160) + 0.008 * Math.exp(-((d + 12) * (d + 12)) / 220);
+      const crease = -0.022 * Math.exp(-(d * d) / 2.4) + 0.016 * Math.exp(-((d + 2.6) * (d + 2.6)) / 5) - 0.014 * Math.exp(-((d - 7) * (d - 7)) / 160) + 0.008 * Math.exp(-((d + 12) * (d + 12)) / 220);
       const e = Math.min(u, SHEET_W - u, v, SHEET_H - v);
       const edge = -0.06 * Math.exp(-e / 1.2);
       const L = 1 + tooth + light2 + crease + edge;
-      const cdx = u - 806;
-      const cdy = v - 232;
-      const cr = Math.sqrt(cdx * cdx + cdy * cdy);
-      let stain = 0;
-      if (cr < 160) {
-        const ang = Math.atan2(cdy, cdx);
-        const rn = 128 * (1 + 0.035 * (noise(ang * 2.2 + 5, 1.3, 11) - 0.5) * 2);
-        const rim = Math.exp(-((cr - rn) * (cr - rn)) / 5.5) * (0.4 + 0.6 * noise(ang * 3 + 2, 0.5, 13));
-        const inner = cr < rn ? (0.05 + 0.06 * smooth(rn * 0.4, rn, cr)) * (0.6 + 0.4 * noise(u * 0.05, v * 0.05, 15)) : 0;
-        const c2x = u - 818;
-        const c2y = v - 248;
-        const cr2 = Math.sqrt(c2x * c2x + c2y * c2y);
-        const ang2 = Math.atan2(c2y, c2x);
-        const rim2 = Math.exp(-((cr2 - 121) * (cr2 - 121)) / 3) * smooth(0.35, 0.7, noise(ang2 * 1.4 + 9, 7, 17)) * 0.5;
-        stain = Math.min(1, rim * 0.5 + rim2 * 0.34 + inner);
-      }
       const o = (y * pw + x) * 4;
-      data[o] = 246 * L * (1 - stain * 0.3);
-      data[o + 1] = 242 * L * (1 - stain * 0.5);
-      data[o + 2] = 233 * L * (1 - stain * 0.72);
+      data[o] = 246 * L;
+      data[o + 1] = 242 * L;
+      data[o + 2] = 233 * L;
       data[o + 3] = 255;
     }
   }

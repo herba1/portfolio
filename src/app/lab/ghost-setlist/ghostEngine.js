@@ -277,7 +277,7 @@ export default class GhostEngine {
     this.slot = L;
     this.amp = amp;
     const fitW = W * (narrow ? 0.84 : 0.78);
-    const top = this.embedded ? H * 0.08 : narrow ? 150 : 156;
+    const top = this.embedded ? H * 0.08 : narrow ? 184 : 156;
     const room = Math.max(H * 0.2, H * 0.6 - top);
     const capLine = Math.min(H * (narrow ? 0.15 : 0.3), (room / (narrow ? 1.74 : 0.72)) * 0.92);
     let blockHalf = 0;
@@ -314,7 +314,7 @@ export default class GhostEngine {
       blockHalf = Math.max(blockHalf, half);
       return { font, size, cap, glyphs, half, lineWidth: Math.max(1, size * 0.011) };
     });
-    this.cy = Math.max(H * (narrow ? 0.4 : 0.42), top + blockHalf + 12);
+    this.cy = Math.max(H * (narrow ? 0.34 : 0.42), top + blockHalf + 12);
     const span = L * 2.7;
     const step = 1;
     const samples = Math.ceil((span * 2) / step) + 1;
@@ -550,7 +550,7 @@ export default class GhostEngine {
     if (e.target.closest?.("button, a, input")) return;
     this.host.setPointerCapture?.(e.pointerId);
     this.grab();
-    this.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0 };
+    this.pointer = { id: e.pointerId, x: e.clientX, y: e.clientY, dx: 0, dy: 0, trace: [{ t: e.timeStamp, x: e.clientX, y: e.clientY }] };
     this.mode = "drag";
     this.onGrab?.(true);
     this.wake();
@@ -563,13 +563,28 @@ export default class GhostEngine {
     p.dy += e.clientY - p.y;
     p.x = e.clientX;
     p.y = e.clientY;
+    p.trace.push({ t: e.timeStamp, x: e.clientX, y: e.clientY });
+    if (p.trace.length > 12) p.trace.shift();
     this.wake();
+  }
+
+  flickVelocity(p, now) {
+    const end = p.trace[p.trace.length - 1];
+    if (!end || now - end.t > 100) return 0;
+    const recent = p.trace.filter((s) => end.t - s.t < 160);
+    if (recent.length < 2) return 0;
+    const a = recent[0];
+    const b = recent[recent.length - 1];
+    const span = Math.max(16, b.t - a.t) / 1000;
+    const travel = -((b.x - a.x) / this.slotArc) - (this.embedded ? 0 : (b.y - a.y) / this.height);
+    return travel / span;
   }
 
   pointerUp(e) {
     const p = this.pointer;
     if (!p || p.id !== e.pointerId) return;
     p.released = true;
+    p.flick = this.flickVelocity(p, e.timeStamp);
     this.wake();
   }
 
@@ -617,6 +632,7 @@ export default class GhostEngine {
       this.v += (inst - this.v) * (1 - Math.exp(-dt / 0.045));
       this.emitSelect(clamp(Math.round(this.p), 0, this.count - 1));
       if (ptr.released) {
+        this.v = ptr.flick;
         this.pointer = null;
         this.onGrab?.(false);
         this.release();

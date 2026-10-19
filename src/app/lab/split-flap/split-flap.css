@@ -2,6 +2,7 @@
   --split-flap-ground: #e9e7e2;
   --split-flap-paint: #e4dfd4;
   --split-flap-amber: #ffb04a;
+  --split-flap-ink-soft: rgb(86 80 70);
   position: relative;
   width: 100%;
   height: 100%;
@@ -64,7 +65,7 @@
 .split-flap-hint {
   margin: 0;
   max-width: 440px;
-  color: var(--color-ink-secondary);
+  color: var(--split-flap-ink-soft);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
@@ -427,7 +428,7 @@
   display: grid;
   place-items: center;
   margin: 0;
-  color: var(--color-ink-secondary);
+  color: var(--split-flap-ink-soft);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);

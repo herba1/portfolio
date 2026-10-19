@@ -150,7 +150,7 @@ export default function Piece({ embedded = false }) {
   }, []);
 
   const onEditChange = useCallback((e) => {
-    const value = e.target.value.toUpperCase().slice(0, TITLE_MAX);
+    const value = e.target.value.slice(0, TITLE_MAX);
     setEdit((current) => (current ? { ...current, value } : current));
   }, []);
 
@@ -214,7 +214,7 @@ export default function Piece({ embedded = false }) {
           maxLength={TITLE_MAX}
           spellCheck={false}
           autoComplete="off"
-          autoCapitalize="characters"
+          autoCapitalize="words"
           enterKeyHint="done"
           aria-label={`Song ${edit.index + 1} title`}
           onChange={onEditChange}
