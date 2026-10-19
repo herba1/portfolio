@@ -1,0 +1,15 @@
+{
+  "title": "Disc",
+  "description": "A pressed Abbey Road CD on the table: spin it by the edge and the print turns while the rainbow stays pinned to the light, then turn it over to the label and drop it into a portable player whose lid snaps shut, spins up and counts the track time on its LCD.",
+  "tags": ["Optics", "WebGL", "Music", "Y2K"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One real optical material: the data side is a 1.6 µm groove grating, so the diffraction colours are computed from the light, the eye and the groove direction and stay fixed while the disc spins under them.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://developer.nvidia.com/gpugems/gpugems/part-i-natural-effects/chapter-8-simulating-diffraction",
+    "https://www.alanzucconi.com/2017/07/15/improving-the-rainbow/",
+    "https://en.wikipedia.org/wiki/Compact_disc",
+    "herb reference board: fa23 Y2K montage, the spinning CD"
+  ]
+}

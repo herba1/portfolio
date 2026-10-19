@@ -1,0 +1,13 @@
+{
+  "title": "How Are You",
+  "description": "\"how are you?\" in electric-blue bitmap type on grey, four times over, each line more broken than the last. Drag a line down and its pixels drop out and slip a cell at a time; drag up and it heals; scrub across to wear it away and hold still to mend it.",
+  "tags": ["Type", "Lo-fi", "Pixel"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "Decay as a stepped, physical property of a real pixel grid: each glyph is rasterised to cells, and every cell owns a fixed threshold for dropping out or slipping one cell, so wear is monotonic and reversible.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/getImageData",
+    "herb reference board: 4090d1d5 \"how are you?\" electric-blue bitmap type decaying line by line"
+  ]
+}

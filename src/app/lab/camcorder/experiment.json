@@ -1,0 +1,15 @@
+{
+  "title": "Camcorder",
+  "description": "herb's Times Square night through a 2000s camcorder viewfinder, with STBY, battery, date stamp and timecode on screen. Drag to aim and the hand-held picture lags, combs and hunts for focus; rock W–T to zoom until the digital zoom goes blocky, press Record, then play the clip back off the tape with tracking lines.",
+  "tags": ["Camera", "Photo", "Sound", "Y2K"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "The imperfect home-video look of herb's references, made by the camera itself: auto-exposure that lags when you swing to the bright signs, focus that hunts after a zoom, interlaced combing on fast pans, and a real record and playback loop.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/DV_(video_format)",
+    "https://en.wikipedia.org/wiki/Digital_zoom",
+    "https://en.wikipedia.org/wiki/Interlaced_video#Interlacing_problems",
+    "herb reference board: handheld lo-fi night footage (95d9, 7af8, 859f, 899734)"
+  ]
+}

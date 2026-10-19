@@ -1,0 +1,23 @@
+{
+  "title": "Cut-out",
+  "description": "A sea-and-sky photo printed as a scanned magazine page, halftone dots and power lines and all, with \"it must be out there.\" glued on a strip of newsprint. Type a line and it prints onto a fresh scissor-cut strip; drag strips around the page and they lift on a soft shadow and land with a paper tap.",
+  "tags": [
+    "Collage",
+    "Type",
+    "Paper",
+    "Print"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One collage gesture finished to the edge: words cut out of newsprint and laid on a printed sky, every strip its own piece of paper with a hand-cut edge, a reverse-side show-through and weight when you move it.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "herb reference board: 039a magazine cut-out 'it must be out there.' on a scanned sky",
+    "https://en.wikipedia.org/wiki/Halftone",
+    "https://developer.mozilla.org/en-US/docs/Web/CSS/basic-shape/polygon"
+  ],
+  "gate": []
+}

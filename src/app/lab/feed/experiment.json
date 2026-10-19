@@ -1,0 +1,10 @@
+{
+  "title": "For You",
+  "description": "A phone feed of five short lyric edits, each in a look from the reference board: a blooming justified block over Times Square at night, a poem smearing in on black, electric-blue pixel type decaying line by line, a newsprint strip glued onto a halftoned sky, and white crayon capitals boiling on blue paper. Swipe or scroll to snap between them, double-tap to drop a heart.",
+  "tags": ["Feed", "Type", "Motion", "Music"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "A real vertical feed with snap physics where every post is a finished lyric edit, so the reference board's styles play as the content of a believable app.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["herb reference board: e936b121 rain lyric edit, 859f77f6 overexposed caption, cfcf1930 smear poem, 4090d1d5 how are you pixel decay, 039a956a cut-out on sky, 7463e163 crayon on blue paper", "https://www.ryanjuckett.com/damped-springs/", "https://en.wikipedia.org/wiki/Halftone"]
+}

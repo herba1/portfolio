@@ -1,0 +1,15 @@
+{
+  "title": "Channel",
+  "description": "An old beige television where every channel is a Beatles album broadcast: the cover drifts under scanlines while a lyric caption builds word by word. Turn the knob and it clunks through static and a rolling picture to the next one; press degauss and the screen wobbles back to true colour.",
+  "tags": ["Screen", "Sound", "Music", "Y2K"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "Changing channel as a physical, audible event: a detented knob, a burst of snow and hiss, a vertical roll that settles, and herb's beat coming back through a small TV speaker.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Degaussing#Monitors",
+    "https://en.wikipedia.org/wiki/Vertical_hold",
+    "https://en.wikipedia.org/wiki/Ken_Burns_effect",
+    "herb reference board: fa23 Y2K montage (old CRT TV with a console), e936 and 70e0 lyric captions"
+  ]
+}

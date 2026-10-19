@@ -1,0 +1,15 @@
+{
+  "title": "Terminal",
+  "description": "A green phosphor screen asks \"shall we play a record?\" and lists the Beatles albums like a 1983 menu. Pick one and its cover is rastered in dithered phosphor line by line while the tracklist types out on a teletype rhythm.",
+  "tags": ["Screen", "Type", "Music", "Y2K"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One old screen made beautiful: a real CRT pass (curvature, scanlines, bloom, phosphor persistence) over a plain lowercase record menu, so moving the selection leaves glowing trails and every character arrives with a key click.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Phosphor#Standard_phosphor_types",
+    "https://en.wikipedia.org/wiki/Atkinson_dithering",
+    "https://en.wikipedia.org/wiki/WarGames",
+    "herb reference board: fa23 Y2K montage (green CRT terminal text, menu list)"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Focus",
+  "description": "A justified lyric block where every line sits at its own distance from the lens. Turn the ribbed focus ring (0.5 m to infinity) and focus racks down the lines: the rest melt into real disc blur, and the sharp line lights up with red focus-peaking edges.",
+  "tags": ["Type", "Optics", "Instrument"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "Depth of field as typography: each line is a layer at a set distance, blurred by a mip-prefiltered disc kernel sized from the diopter gap to the focus ring, with focus peaking drawn only where the text is genuinely sharp.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Circle_of_confusion",
+    "https://en.wikipedia.org/wiki/Focus_peaking",
+    "http://blog.tuxedolabs.com/2018/05/04/bokeh-depth-of-field-in-single-pass.html",
+    "herb reference board: ee6eda60 and 0fc59ca9 justified, softened lyric blocks"
+  ]
+}

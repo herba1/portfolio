@@ -1,0 +1,17 @@
+{
+  "title": "Lyric Edit",
+  "description": "Herb's Times Square night photo plays as warm, grainy handheld footage while the beat loops. Tap on the beat and the next word of the lyric drops into a white justified block; your taps land on a timeline and Replay plays the edit back exactly in time.",
+  "tags": ["Type", "Music", "Footage", "Shader"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "The lyric-edit look from herb's board made playable: one gesture, tapping in time, builds the justified Arial block word by word over blooming, overexposed night footage, and the recording replays in sync with the beat.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "herb reference board: e936b121 rain lyric edit (justified block built word by word)",
+    "herb reference board: 70e084cd LA skyline lyric edit",
+    "herb reference board: 899734831825564852 blooming caption over rainy night",
+    "herb reference board: 859f77f6 overexposed warm night footage",
+    "https://learnopengl.com/Advanced-Lighting/Bloom",
+    "https://developer.mozilla.org/en-US/docs/Web/API/BaseAudioContext/currentTime"
+  ]
+}

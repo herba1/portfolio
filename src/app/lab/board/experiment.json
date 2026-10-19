@@ -1,0 +1,10 @@
+{
+  "title": "Board",
+  "description": "A Pinterest-style board of Beatles covers interleaved with heavy grotesk type cards in grey, black and red. Click any card and it grows to max width as the album, title set huge beside the tracklist, while the rest of the board is pushed off in a stagger; Escape or Back reverses it from wherever it is.",
+  "tags": ["Motion", "Layout", "Music", "Type"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One shared-element expansion done properly: the card itself becomes the page, the others leave in the push direction, and a single spring drives every element so the move can be reversed mid-flight.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["herb reference board: b091f70f Pinterest promo grid and max. width card", "https://aerotwist.com/blog/flip-your-animations/", "https://www.ryanjuckett.com/damped-springs/"]
+}

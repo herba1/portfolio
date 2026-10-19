@@ -1,0 +1,16 @@
+{
+  "title": "Exposure",
+  "description": "A foggy night photo of light beams with a quiet white caption, and a camera exposure dial that clicks in thirds of a stop. Turn it up and the lights clip and halate red-orange, the caption blooms and the shadows lift into grain; turn it down and the night crushes to a few lamps.",
+  "tags": ["Photo", "Shader", "Type", "Instrument"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "The blown-out, blooming lyric caption from herb's board turned into one physical control: a real tone curve over scene-referred light, so exposure compensation clips, blooms and halates the way film and phone footage do.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "herb reference board: 859f77f6 overexposed warm night footage with white caption",
+    "herb reference board: 899734831825564852 blooming caption over rainy night",
+    "https://en.wikipedia.org/wiki/Halation",
+    "https://64.github.io/tonemapping/",
+    "https://learnopengl.com/Advanced-Lighting/Bloom"
+  ]
+}

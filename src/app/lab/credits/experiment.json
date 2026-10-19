@@ -1,0 +1,10 @@
+{
+  "title": "Credits",
+  "description": "Abbey Road’s real credits roll up a black screen as a film end crawl: the four Beatles, Billy Preston, George Martin, Geoff Emerick and Phil McDonald, every song and its writer, set in a centred two-column Garamond with grain, halation and gate weave. Drag or scroll to scrub with weight, let go and it rolls on at its own pace to a quiet last card.",
+  "tags": ["Type", "Film", "Music", "Scroll"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One thing done like the real thing: a projected end-credits crawl you can grab, with capped inertia that always relaxes back to the film’s own pace, and a projector you can hear speed up under your hand.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://en.wikipedia.org/wiki/Abbey_Road", "https://en.wikipedia.org/wiki/Gate_weave", "https://en.wikipedia.org/wiki/Closing_credits", "herb reference board: cfcf small white poem block, fa23 Y2K found footage, 95d9 quiet captions"]
+}

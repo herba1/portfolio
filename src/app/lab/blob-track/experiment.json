@@ -1,0 +1,10 @@
+{
+  "title": "Tracking",
+  "description": "herb's Times Square night photo, smeared into vertical streaks and drifting like handheld footage, with live blob tracking running on every frame: thin green boxes lock onto the signs and headlights, each with a number and a line of lisp, and your pointer is a tracked blob that fans lines out to the nearest lights.",
+  "tags": ["Photo", "Tracking", "Canvas", "Night"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "The TouchDesigner blob-tracking edit, done for real: bright regions are found with connected-component labelling on a downscaled buffer each frame and held steady by a tracker in image space, so the boxes stick to the street while the camera breathes.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://en.wikipedia.org/wiki/Connected-component_labeling", "https://derivative.ca/UserGuide/Blob_Track_TOP", "herb reference board: Pinterest video #896638607050931780 (blob tracking over pixel-sorted footage)"]
+}

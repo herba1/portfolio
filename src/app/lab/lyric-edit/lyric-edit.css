@@ -1,0 +1,367 @@
+@font-face {
+  font-family: "LyricEditArimo";
+  src: url("./arimo.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.lyric-edit {
+  --lyric-edit-ground: #0b0a09;
+  --lyric-edit-ink: #f4f0e8;
+  --lyric-edit-ink-secondary: #c4bcaf;
+  --lyric-edit-line: rgb(244 240 232 / 0.22);
+  --lyric-edit-rec: #ff5a3c;
+  --lyric-edit-amber: #ffc070;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--lyric-edit-ground);
+  color: var(--lyric-edit-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.lyric-edit[data-embedded] {
+  min-height: 100%;
+}
+
+.lyric-edit-stage {
+  position: absolute;
+  inset: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: pointer;
+}
+
+.lyric-edit[data-embedded] .lyric-edit-stage {
+  touch-action: pan-y;
+}
+
+.lyric-edit-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lyric-edit-shade {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(
+      to bottom,
+      rgb(8 7 6 / 0.72) 0%,
+      rgb(8 7 6 / 0.6) 8%,
+      rgb(8 7 6 / 0.36) 16%,
+      rgb(8 7 6 / 0.14) 24%,
+      rgb(8 7 6 / 0.04) 30%,
+      rgb(8 7 6 / 0) 36%
+    ),
+    linear-gradient(
+      to top,
+      rgb(8 7 6 / 0.7) 0%,
+      rgb(8 7 6 / 0.48) 7%,
+      rgb(8 7 6 / 0.22) 15%,
+      rgb(8 7 6 / 0.06) 24%,
+      rgb(8 7 6 / 0) 32%
+    );
+  opacity: 0;
+  transition: opacity 900ms var(--ease-entrance);
+}
+
+.lyric-edit[data-ready] .lyric-edit-shade {
+  opacity: 1;
+}
+
+.lyric-edit-caption {
+  position: absolute;
+  top: 72px;
+  left: 24px;
+  right: 24px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  opacity: 0;
+  cursor: default;
+  transition: opacity 600ms var(--ease-entrance) 200ms;
+}
+
+.lyric-edit[data-ready] .lyric-edit-caption,
+.lyric-edit[data-ready] .lyric-edit-timeline {
+  opacity: 1;
+}
+
+.lyric-edit-caption-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.lyric-edit-title {
+  margin: 0;
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.5);
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.lyric-edit-hint {
+  margin: 0;
+  max-width: 360px;
+  color: var(--lyric-edit-ink-secondary);
+  text-shadow: 0 1px 12px rgb(0 0 0 / 0.6);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.lyric-edit-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--lyric-edit-line);
+  border-radius: 9999px;
+  background: rgb(20 18 16 / 0.42);
+  color: var(--lyric-edit-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.lyric-edit-button:active {
+  transform: scale(0.96);
+}
+
+.lyric-edit-button:focus-visible {
+  outline: 2px solid var(--lyric-edit-amber);
+  outline-offset: 2px;
+}
+
+.lyric-edit-button[aria-pressed="true"] .lyric-edit-icon {
+  color: var(--lyric-edit-amber);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .lyric-edit-button:hover {
+    background: rgb(40 36 32 / 0.6);
+    border-color: rgb(244 240 232 / 0.4);
+  }
+}
+
+.lyric-edit-timeline {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  bottom: 64px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  opacity: 0;
+  cursor: default;
+  transition: opacity 600ms var(--ease-entrance) 300ms;
+}
+
+.lyric-edit-track {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  height: 24px;
+}
+
+.lyric-edit-track::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 11px;
+  height: 2px;
+  border-radius: 1px;
+  background:
+    repeating-linear-gradient(to right, rgb(244 240 232 / 0.5) 0 1px, rgb(244 240 232 / 0) 1px 10%),
+    rgb(244 240 232 / 0.16);
+}
+
+.lyric-edit-marks {
+  position: absolute;
+  inset: 0;
+}
+
+.lyric-edit-mark {
+  position: absolute;
+  top: 6px;
+  width: 2px;
+  height: 12px;
+  margin-left: -1px;
+  border-radius: 1px;
+  background: var(--lyric-edit-ink);
+  animation: lyric-edit-mark-in 220ms var(--ease-entrance) both;
+}
+
+.lyric-edit-mark[data-kind="clear"] {
+  top: 2px;
+  height: 20px;
+  background: var(--lyric-edit-amber);
+}
+
+@keyframes lyric-edit-mark-in {
+  from {
+    transform: scaleY(0.2);
+    opacity: 0;
+  }
+}
+
+.lyric-edit-head {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  will-change: transform;
+}
+
+.lyric-edit-head::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -4px;
+  width: 8px;
+  height: 24px;
+  background:
+    linear-gradient(to right, rgb(255 255 255 / 0) 0 3px, #fff 3px 5px, rgb(255 255 255 / 0) 5px);
+  filter: drop-shadow(0 0 4px rgb(255 230 190 / 0.7));
+}
+
+.lyric-edit-status {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  min-width: 132px;
+  justify-content: flex-end;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+}
+
+.lyric-edit-mode {
+  color: var(--lyric-edit-ink-secondary);
+}
+
+.lyric-edit-time {
+  min-width: 32px;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.lyric-edit-dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--lyric-edit-rec);
+  box-shadow: 0 0 8px rgb(255 90 60 / 0.8);
+  animation: lyric-edit-pulse 1s steps(1, end) infinite;
+}
+
+.lyric-edit-status[data-mode="rec"] .lyric-edit-dot {
+  display: block;
+}
+
+.lyric-edit-status[data-mode="rec"] .lyric-edit-mode {
+  color: var(--lyric-edit-ink);
+}
+
+@keyframes lyric-edit-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.lyric-edit-icon {
+  flex: none;
+}
+
+.lyric-edit-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--lyric-edit-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+.lyric-edit[data-embedded] .lyric-edit-timeline {
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+}
+
+@container (max-width: 699px) {
+  .lyric-edit-caption {
+    top: 64px;
+    left: 16px;
+    right: 16px;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .lyric-edit-timeline {
+    left: 16px;
+    right: 16px;
+    bottom: 20px;
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .lyric-edit-track {
+    order: -1;
+    flex-basis: 100%;
+  }
+
+  .lyric-edit-status {
+    margin-left: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lyric-edit-caption,
+  .lyric-edit-timeline,
+  .lyric-edit-shade {
+    transition: opacity 200ms linear;
+  }
+}

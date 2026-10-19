@@ -1,0 +1,15 @@
+{
+  "title": "Scan",
+  "description": "A flatbed scanner with its lid open and a magazine page of sky on the glass, a slip of newsprint laid over it. Press Scan or pull the head across by hand: a cyan-white light bar sweeps under the paper and the preview rebuilds line by line, with halftone moiré, colour fringing and the dust on the glass.",
+  "tags": ["Y2K", "Paper", "Collage", "Tactile"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "Turn the scanner itself into the lo-fi effect: what you lay on the glass is printed matter with a real halftone screen, and the scan resamples it into moiré, misregistered colour and dust the way a cheap flatbed does.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Image_scanner#Flatbed",
+    "https://en.wikipedia.org/wiki/Halftone",
+    "https://en.wikipedia.org/wiki/Moir%C3%A9_pattern",
+    "herb reference board: 039a, it must be out there. on a scanned sky"
+  ]
+}

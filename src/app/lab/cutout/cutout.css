@@ -1,0 +1,340 @@
+@font-face {
+  font-family: "CutoutTinos";
+  src: url("./fonts/tinos.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.cutout {
+  --cutout-ground: #e8e6e1;
+  --cutout-ink: #1c1a18;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  padding: 88px 48px 48px;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--cutout-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.cutout[data-embedded] {
+  min-height: 100%;
+  padding: 0;
+}
+
+.cutout-caption {
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  width: 100%;
+  max-width: 1120px;
+  margin-inline: auto;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance);
+}
+
+.cutout[data-ready] .cutout-caption {
+  opacity: 1;
+}
+
+.cutout-caption-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.cutout-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.cutout-hint {
+  margin: 0;
+  max-width: 520px;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.cutout-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
+.cutout-button {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 9999px;
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.cutout-button:active {
+  transform: scale(0.96);
+}
+
+.cutout-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.cutout-button[data-active] {
+  border-color: var(--color-line-strong);
+  background: var(--color-surface-subtle);
+}
+
+.cutout-button[aria-pressed="false"] .cutout-speaker {
+  color: var(--color-ink-secondary);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .cutout-button:hover {
+    background: var(--color-surface-subtle);
+    border-color: var(--color-line-strong);
+  }
+}
+
+.cutout-desk {
+  position: relative;
+  flex: 1;
+  width: 100%;
+  max-width: 1120px;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.cutout-page {
+  position: absolute;
+  inset: 0;
+  background: #e3e4df;
+  box-shadow:
+    0 0 0 1px rgb(40 36 28 / 0.06),
+    0 1px 2px rgb(40 36 28 / 0.12),
+    0 12px 32px -12px rgb(40 36 28 / 0.28);
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.cutout[data-ready] .cutout-page {
+  opacity: 1;
+}
+
+.cutout[data-embedded] .cutout-page {
+  box-shadow: none;
+}
+
+.cutout-print {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.cutout-layer {
+  position: absolute;
+  inset: 0;
+}
+
+.cutout-strip {
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: grab;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  will-change: transform;
+}
+
+.cutout[data-embedded] .cutout-strip {
+  touch-action: pan-y;
+}
+
+.cutout-strip[data-dragging],
+.cutout[data-dragging] {
+  cursor: grabbing;
+}
+
+.cutout-strip-near,
+.cutout-strip-far {
+  position: absolute;
+  pointer-events: none;
+}
+
+.cutout-strip-near {
+  inset: 1px 1px 0;
+  box-shadow:
+    0 1px 1px rgb(24 40 56 / 0.3),
+    0 0 1px rgb(24 40 56 / 0.2);
+}
+
+.cutout-strip-far {
+  inset: 2px;
+  opacity: 0;
+  box-shadow:
+    0 12px 20px -4px rgb(14 34 52 / 0.34),
+    0 4px 8px rgb(14 34 52 / 0.16);
+}
+
+.cutout-strip-paper {
+  position: relative;
+  overflow: hidden;
+  color: var(--cutout-ink);
+  font-family: "CutoutTinos", "Times New Roman", serif;
+  white-space: nowrap;
+  background-image: var(--cutout-grain);
+  background-size: 160px 160px;
+  transition: opacity 160ms var(--ease-hover);
+}
+
+.cutout-strip[data-outside] .cutout-strip-paper {
+  opacity: 0.6;
+}
+
+.cutout-strip-text {
+  position: relative;
+  text-shadow: 0 0 0.6px rgb(20 18 16 / 0.55);
+}
+
+.cutout-strip-back {
+  position: absolute;
+  top: 0;
+  left: 0;
+  color: rgb(40 36 30 / 0.05);
+  white-space: nowrap;
+  filter: blur(0.6px);
+  pointer-events: none;
+}
+
+.cutout-strip::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  border-radius: 4px;
+  box-shadow: 0 0 0 2px var(--color-accent);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.cutout-strip:focus-visible::after {
+  opacity: 1;
+}
+
+.cutout-char[data-fresh] {
+  animation: cutout-ink 260ms var(--ease-out-quad) both;
+}
+
+@keyframes cutout-ink {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.cutout-caret {
+  display: inline-block;
+  width: 2px;
+  height: 0.84em;
+  margin-left: 2px;
+  vertical-align: -0.08em;
+  background: var(--cutout-ink);
+  animation: cutout-blink 1s steps(1, end) infinite;
+}
+
+@keyframes cutout-blink {
+  0% {
+    opacity: 1;
+  }
+  55% {
+    opacity: 0;
+  }
+}
+
+.cutout-input {
+  position: fixed;
+  bottom: 40%;
+  left: 50%;
+  width: 1px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  line-height: 24px;
+  pointer-events: none;
+}
+
+.cutout-fallback {
+  position: absolute;
+  inset: auto 0 48px;
+  margin: 0;
+  text-align: center;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+@media (max-width: 640px) {
+  .cutout {
+    gap: 16px;
+    padding: 72px 16px 16px;
+  }
+
+  .cutout-caption {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .cutout-hint {
+    font-size: var(--text-ui);
+    line-height: var(--text-ui--line-height);
+    letter-spacing: var(--text-ui--letter-spacing);
+    font-weight: var(--text-ui--font-weight);
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "title": "Stretch",
+  "description": "“to run away” in a tall condensed serif over herb’s Times Square night, graded down to streetlight. Grab any letter and drag: the row under your finger repeats like a pixel-stretched lyric edit, then eases home unless you flick it to stay.",
+  "tags": ["Type", "Lyric edit", "Photo"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "One mechanic from the reference: a glyph slit-scanned from the grab row, the y's tail pulled down the frame, as a thing you do with your hand.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://en.wikipedia.org/wiki/Slit-scan_photography", "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage", "herb reference board: Pinterest video 1061231099707587460 (to run away)"]
+}

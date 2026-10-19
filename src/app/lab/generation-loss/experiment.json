@@ -1,0 +1,14 @@
+{
+  "title": "Still Here",
+  "description": "\"still here?\" in a tall navy serif, saved as a real JPEG forty times over until the blocks, ringing and purple chroma bleed set in. Type your own line, then hold Save again and watch every re-encode wear it down while the file size drops.",
+  "tags": ["Type", "Lo-fi", "Image"],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "Generation loss as the material: each save is a genuine canvas.toBlob JPEG decoded back onto itself with a sub-pixel wobble, so the artefacts compound exactly like a reposted screenshot.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Generation_loss",
+    "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob",
+    "herb reference board: 51b6830b \"still here?\" condensed navy serif with JPEG artefacts"
+  ]
+}

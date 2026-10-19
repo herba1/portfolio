@@ -1,0 +1,23 @@
+{
+  "title": "Away",
+  "description": "An early-2000s away message composer next to a living buddy list. Write a quiet lowercase line, colour it, add what you're listening to and set yourself away; friends sign on and off with the creak and slam of the door, and the next one who messages you gets your words back as an auto response.",
+  "tags": [
+    "Y2K",
+    "Interface",
+    "Type",
+    "Sound"
+  ],
+  "status": "candidate",
+  "createdAt": "2026-10-19T00:00:00.000Z",
+  "intent": "The away message as a small sincere poem: one composer, one buddy list, and the moment someone reaches for you and finds the line you left, all in the period look of Arial 10pt, coloured text and bevelled grey windows.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Away_message",
+    "https://en.wikipedia.org/wiki/Windows_2000",
+    "herb reference board: sincere lowercase lines (still here?, how are you?, it must be out there.) and the Y2K found-footage montage (fa23bcd4)"
+  ],
+  "gate": []
+}

@@ -1,0 +1,422 @@
+@font-face {
+  font-family: "Justify Arimo";
+  src: url("./arimo-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.justify {
+  --justify-ground: #ffffff;
+  --justify-blue: #1a5cff;
+  --justify-line: rgb(11 11 11 / 0.1);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--justify-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.justify[data-embedded] {
+  min-height: 100%;
+}
+
+.justify-stage {
+  position: absolute;
+  inset: 0;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.justify-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.justify[data-ready] .justify-canvas {
+  opacity: 1;
+}
+
+.justify-area {
+  position: absolute;
+  top: 0;
+  left: 0;
+  cursor: text;
+}
+
+.justify-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 2px;
+  height: 24px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  resize: none;
+  overflow: hidden;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 16px;
+  line-height: 24px;
+  opacity: 0;
+  outline: none;
+  pointer-events: none;
+}
+
+.justify-handle {
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  width: 44px;
+  height: 64px;
+  margin: -32px 0 0 -22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: ew-resize;
+  touch-action: none;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance) 200ms;
+}
+
+.justify[data-ready] .justify-handle {
+  opacity: 1;
+}
+
+.justify-knob {
+  position: absolute;
+  top: 16px;
+  left: 18px;
+  width: 8px;
+  height: 32px;
+  border-radius: 4px;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1.5px var(--justify-blue),
+    0 1px 3px rgb(0 0 0 / 0.12);
+  transition:
+    transform 160ms var(--ease-hover),
+    background-color 160ms var(--ease-hover);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .justify-handle:hover .justify-knob {
+    transform: scaleY(1.12);
+  }
+}
+
+.justify[data-measuring] .justify-knob {
+  background: var(--justify-blue);
+  transform: scaleY(1.12);
+}
+
+.justify-handle:focus-visible {
+  outline: none;
+}
+
+.justify-handle:focus-visible .justify-knob {
+  box-shadow:
+    0 0 0 1.5px var(--justify-blue),
+    0 0 0 4px rgb(26 92 255 / 0.25);
+}
+
+.justify-caption {
+  position: absolute;
+  top: 96px;
+  left: 56px;
+  right: 56px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance);
+}
+
+.justify[data-ready] .justify-caption {
+  opacity: 1;
+}
+
+.justify-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.justify-hint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.justify-controls {
+  position: absolute;
+  left: 56px;
+  right: 56px;
+  bottom: 72px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance) 120ms;
+}
+
+.justify[data-ready] .justify-controls {
+  opacity: 1;
+}
+
+.justify[data-embedded] .justify-controls {
+  left: 16px;
+  right: 16px;
+  bottom: 16px;
+  justify-content: center;
+}
+
+.justify-presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.justify-chip {
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--justify-line);
+  border-radius: 9999px;
+  background: var(--justify-ground);
+  color: var(--color-ink);
+  font-family: "Justify Arimo", Arial, sans-serif;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-normal);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.justify-chip:active {
+  transform: scale(0.96);
+}
+
+.justify-chip[aria-pressed="true"] {
+  border-color: var(--color-ink);
+  background: var(--color-ink);
+  color: var(--justify-ground);
+}
+
+.justify-chip:focus-visible,
+.justify-sound:focus-visible {
+  outline: 2px solid var(--justify-blue);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .justify-chip:not([aria-pressed="true"]):hover {
+    border-color: rgb(11 11 11 / 0.28);
+  }
+
+  .justify-sound:hover {
+    border-color: rgb(11 11 11 / 0.28);
+  }
+}
+
+.justify-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 16px;
+}
+
+.justify-soft {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.justify-soft-label {
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+.justify-range {
+  width: 160px;
+  height: 32px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: none;
+}
+
+.justify-range::-webkit-slider-runnable-track {
+  height: 2px;
+  border-radius: 1px;
+  background: linear-gradient(to right, var(--color-ink) 0%, var(--color-ink) var(--justify-fill), var(--justify-line) var(--justify-fill), var(--justify-line) 100%);
+}
+
+.justify-range::-moz-range-track {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--justify-line);
+}
+
+.justify-range::-moz-range-progress {
+  height: 2px;
+  border-radius: 1px;
+  background: var(--color-ink);
+}
+
+.justify-range::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  margin-top: -7px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgb(11 11 11 / 0.16),
+    0 1px 4px rgb(0 0 0 / 0.18);
+  -webkit-appearance: none;
+  transition: transform 150ms var(--ease-hover);
+}
+
+.justify-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border: 0;
+  border-radius: 50%;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 1px rgb(11 11 11 / 0.16),
+    0 1px 4px rgb(0 0 0 / 0.18);
+}
+
+.justify-range:active::-webkit-slider-thumb {
+  transform: scale(1.12);
+}
+
+.justify-range:focus-visible {
+  outline: none;
+}
+
+.justify-range:focus-visible::-webkit-slider-thumb {
+  box-shadow:
+    0 0 0 2px var(--justify-blue),
+    0 1px 4px rgb(0 0 0 / 0.18);
+}
+
+.justify-sound {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--justify-line);
+  border-radius: 9999px;
+  background: var(--justify-ground);
+  color: var(--color-ink);
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.justify-sound:active {
+  transform: scale(0.94);
+}
+
+@container (max-width: 759px) {
+  .justify-caption {
+    top: 72px;
+    left: 20px;
+    right: 20px;
+  }
+
+  .justify-controls {
+    left: 16px;
+    right: 16px;
+    bottom: 24px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .justify-presets {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    margin-inline: -16px;
+    padding-inline: 16px;
+    scrollbar-width: none;
+  }
+
+  .justify-presets::-webkit-scrollbar {
+    display: none;
+  }
+
+  .justify-chip {
+    flex: none;
+  }
+
+  .justify-tools {
+    justify-content: space-between;
+  }
+
+  .justify-soft {
+    flex: 1;
+  }
+
+  .justify-range {
+    flex: 1;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .justify-canvas,
+  .justify-caption,
+  .justify-controls {
+    transition: opacity 200ms linear;
+  }
+}
