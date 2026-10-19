@@ -77,7 +77,7 @@ export default function Piece({ embedded = false }) {
         className="light-table-stage"
         tabIndex={0}
         role="application"
-        aria-label="A light table with a strip of medium-format transparencies (Abbey Road, Let It Be, Rubber Soul) and three mounted slides (Help!, Sgt. Pepper, Revolver). Drag the film to slide it across the glass; overlap two pieces to stack them into a double exposure. Arrow keys push the top piece, space sends it to the bottom of the pile."
+        aria-label="A light table spread with a contact sheet, a strip of colour negatives, two mounted 35mm slides, medium-format transparencies, a typed label and a loupe. Drag anything to slide it across the glass; overlap two transparencies to stack them into a double exposure, and drag the loupe over the film to magnify it. Arrow keys push the top piece, space sends it to the bottom of the pile."
       >
         <canvas ref={canvasRef} className="light-table-canvas" />
       </div>
@@ -86,7 +86,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="light-table-head">
           <h1 className="light-table-title">Light Table</h1>
           <p className="light-table-lede">
-            Medium-format slides of Beatles sleeves, lit from below. Slide them around and stack two <em>into one picture</em>.
+            A contact sheet, negatives, slides and transparencies, lit from below. Slide them around, stack two <em>into one picture</em> and run the loupe over the grain.
           </p>
         </header>
       )}

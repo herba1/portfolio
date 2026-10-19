@@ -35,7 +35,7 @@ void main() {
   vec2 q = (px - uField.xy) / uField.z;
   float j0 = floor(q.y / ROW);
 
-  float best = 1e3;
+  float best = 0.6;
   vec2 bestD = vec2(0.0);
   float bestH = 0.0;
   float bestR = 1.0;
@@ -46,7 +46,7 @@ void main() {
     vec2 cell = vec2(i, j);
     float h = pinHeight(cell);
     if (h < 0.0) continue;
-    float e = smoothstep(0.0, 1.0, h);
+    float e = smoothstep(0.0, 1.0, min(h, 1.0)) + max(h - 1.0, 0.0) * 0.9;
     float r = mix(FLUSH, RAISED, e);
     vec2 d = q - vec2(i + 0.5 + shift, (j + 0.5) * ROW);
     float sd = length(d) - r;
@@ -63,7 +63,7 @@ void main() {
 
   vec2 off = normalize(LIGHT) * bestR * 0.34;
   float crescent = smoothstep(-aa, aa, length(bestD - off) - bestR);
-  vec3 face = mix(LOW, HIGH, pow(bestH, 0.85));
+  vec3 face = mix(LOW, HIGH, pow(min(bestH, 1.0), 0.85));
   vec3 shade = face * mix(0.78, 0.62, bestH);
   vec3 pin = mix(face, shade, crescent);
 

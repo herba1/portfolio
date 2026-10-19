@@ -1,10 +1,22 @@
 import { PINS_FRAGMENT, PINS_VERTEX } from "./pinsShader";
 
 const ROW = Math.sqrt(3) / 2;
-const WAVE = 0.7;
-const PIN_TRAVEL = 0.45;
 const PAD = 1.4;
 const FINGER = 4.2;
+const OMEGA = 15;
+const ZETA = 0.66;
+const WAVE_SPEED = 46;
+const LIFT = 0.42;
+const LIFT_WIDTH = 0.2;
+const HOLD = 0.32;
+const RELAX = 1.15;
+const IDLE_MS = 4600;
+const ORIGINS = [
+  [0.08, 0.1],
+  [0.95, 0.5],
+  [0.5, 0.96],
+  [0.04, 0.6],
+];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -48,18 +60,23 @@ function blur(src, w, h, r) {
   return out;
 }
 
-async function relief(src, cols, rows) {
-  const img = await loadImage(src);
+async function relief(subject, cols, rows) {
+  const img = await loadImage(subject.src);
   const S = 256;
   const c = document.createElement("canvas");
   c.width = S;
   c.height = S;
   const ctx = c.getContext("2d", { willReadFrequently: true });
-  const inset = Math.round(Math.min(img.naturalWidth, img.naturalHeight) * 0.025);
-  ctx.drawImage(img, inset, inset, img.naturalWidth - inset * 2, img.naturalHeight - inset * 2, 0, 0, S, S);
+  const W = img.naturalWidth;
+  const [cx, cy, cs] = subject.crop;
+  ctx.drawImage(img, cx * W, cy * W, cs * W, cs * W, 0, 0, S, S);
   const data = ctx.getImageData(0, 0, S, S).data;
   const lum = new Float32Array(S * S);
   for (let i = 0; i < S * S; i += 1) lum[i] = (0.3 * data[i * 4] + 0.59 * data[i * 4 + 1] + 0.11 * data[i * 4 + 2]) / 255;
+  const sorted = Float32Array.from(lum).sort();
+  const lo = sorted[Math.floor(sorted.length * 0.02)];
+  const hi = sorted[Math.floor(sorted.length * 0.985)];
+  for (let i = 0; i < lum.length; i += 1) lum[i] = clamp((lum[i] - lo) / Math.max(hi - lo, 0.05), 0, 1);
   const wide = blur(blur(lum, S, S, 6), S, S, 4);
   const fine = blur(lum, S, S, 1);
   const out = new Float32Array(cols * rows);
@@ -117,7 +134,7 @@ function createSound() {
   };
 }
 
-export async function createPins({ root, stage, canvas, albums, onAlbum }) {
+export async function createPins({ root, stage, canvas, subjects, onAlbum }) {
   const gl = canvas.getContext("webgl2", { antialias: false, alpha: false, depth: false, stencil: false, premultipliedAlpha: false });
   if (!gl) throw new Error("WebGL2 unavailable");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -150,14 +167,20 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
   let cols = 0;
   let rows = 0;
   let heights = new Float32Array(1);
-  let from = new Float32Array(1);
-  let target = new Float32Array(1);
+  let vel = new Float32Array(1);
+  let base = new Float32Array(1);
+  let next = new Float32Array(1);
+  let delay = new Float32Array(1);
+  let imp = new Float32Array(1);
+  let hold = new Float32Array(1);
   let zeros = new Float32Array(1);
-  let mode = "idle";
-  let modeStart = 0;
+  let wave = null;
   let current = 0;
   let wanted = 0;
   let ticket = 0;
+  let loopIndex = 0;
+  let lastInput = 0;
+  let idleTimer = 0;
   const reliefs = new Map();
   const pointer = { id: null, x: 0, y: 0, px: 0, py: 0 };
   let raf = 0;
@@ -169,10 +192,16 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
   function allocate(c) {
     cols = c;
     rows = Math.round((cols + 0.5) / ROW);
-    heights = new Float32Array(cols * rows);
-    from = new Float32Array(cols * rows);
-    target = new Float32Array(cols * rows);
-    zeros = new Float32Array(cols * rows);
+    const n = cols * rows;
+    heights = new Float32Array(n);
+    vel = new Float32Array(n);
+    base = new Float32Array(n);
+    next = new Float32Array(n);
+    delay = new Float32Array(n);
+    imp = new Float32Array(n);
+    hold = new Float32Array(n);
+    zeros = new Float32Array(n);
+    wave = null;
     reliefs.clear();
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, cols, rows, 0, gl.RED, gl.FLOAT, heights);
@@ -197,60 +226,140 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
   }
 
   function reliefFor(idx) {
-    if (!reliefs.has(idx)) reliefs.set(idx, relief(albums[idx].cover, cols, rows));
+    if (!reliefs.has(idx)) reliefs.set(idx, relief(subjects[idx], cols, rows));
     return reliefs.get(idx);
   }
 
-  function morphTo(next) {
-    target = next;
-    from.set(heights);
-    mode = "morph";
-    modeStart = performance.now();
+  function rollTo(target, origin, lift = LIFT) {
+    if (wave) {
+      const t = (performance.now() - wave.start) / 1000;
+      for (let k = 0; k < base.length; k += 1) if (t >= delay[k]) base[k] = next[k];
+    }
+    next = target;
+    const ox = origin[0] * (cols + 0.5);
+    const oy = origin[1] * rows * ROW;
+    let far = 0;
+    for (let j = 0; j < rows; j += 1) {
+      const y = (j + 0.5) * ROW;
+      const shift = (j % 2) * 0.5;
+      for (let i = 0; i < cols; i += 1) {
+        const d = Math.hypot(i + 0.5 + shift - ox, y - oy) / WAVE_SPEED;
+        delay[j * cols + i] = d;
+        if (d > far) far = d;
+      }
+    }
+    wave = { start: performance.now(), far, target, lift };
+    if (reduced) {
+      base.set(target);
+      heights.set(target);
+      vel.fill(0);
+      wave = null;
+      dirty = true;
+    }
     wake();
   }
 
-  async function press(idx) {
+  async function press(idx, origin) {
     const mine = ++ticket;
     wanted = idx;
     const r = await reliefFor(idx);
     if (destroyed || mine !== ticket) return;
     current = idx;
-    morphTo(r);
+    rollTo(r, origin);
   }
 
   function flatten() {
     ticket += 1;
-    morphTo(zeros);
+    rollTo(zeros, [0.5, 0.04], 0.12);
+  }
+
+  function nudge() {
+    lastInput = performance.now();
+    if (idleTimer) {
+      clearTimeout(idleTimer);
+      idleTimer = 0;
+    }
+  }
+
+  function scheduleIdle() {
+    if (idleTimer || reduced || destroyed || !active || pointer.id !== null) return;
+    const now = performance.now();
+    lastInput = Math.max(lastInput, now - IDLE_MS + 3400);
+    const wait = Math.max(120, IDLE_MS - (now - lastInput));
+    idleTimer = setTimeout(() => {
+      idleTimer = 0;
+      if (destroyed || !active || pointer.id !== null || wave) return;
+      if (performance.now() - lastInput < IDLE_MS - 60) {
+        scheduleIdle();
+        return;
+      }
+      loopIndex += 1;
+      const idx = (current + 1) % subjects.length;
+      onAlbum?.(idx);
+      press(idx, ORIGINS[loopIndex % ORIGINS.length]);
+    }, wait);
   }
 
   function step(dt) {
-    let moved = 0;
-    if (mode === "morph") {
-      const t = (performance.now() - modeStart) / 1000;
-      const n = cols * rows;
-      for (let k = 0; k < n; k += 1) {
-        const j = Math.floor(k / cols);
-        const delay = (1 - j / rows) * WAVE;
-        const u = reduced ? 1 : smooth(clamp((t - delay) / PIN_TRAVEL, 0, 1));
-        const want = from[k] + (target[k] - from[k]) * u;
-        if (Math.abs(want - heights[k]) > 0.004) moved += 1;
-        heights[k] = want;
+    let clicks = 0;
+    let busy = false;
+    const n = cols * rows;
+    const t = wave ? (performance.now() - wave.start) / 1000 : 0;
+    if (wave && t > wave.far + 0.9) {
+      base.set(wave.target);
+      wave = null;
+    }
+    const sub = Math.max(1, Math.ceil(dt / (1 / 120)));
+    const h = dt / sub;
+    const k2 = OMEGA * OMEGA;
+    const c = 2 * ZETA * OMEGA;
+    for (let k = 0; k < n; k += 1) {
+      let target = base[k];
+      if (wave) {
+        const tk = t - delay[k];
+        if (tk >= 0) target = next[k];
+        const lift = wave.lift * Math.exp(-((tk / LIFT_WIDTH) ** 2));
+        if (lift > 0.002) target = Math.max(target, Math.min(1, Math.max(base[k], next[k]) + lift));
       }
-      if (t > WAVE + PIN_TRAVEL || reduced) mode = "idle";
-      dirty = true;
+      if (hold[k] > 0) hold[k] = Math.max(0, hold[k] - dt);
+      else if (imp[k] > 0) imp[k] = Math.max(0, imp[k] - dt * RELAX);
+      if (imp[k] > target) target = imp[k];
+      let x = heights[k];
+      let v = vel[k];
+      for (let s = 0; s < sub; s += 1) {
+        v += (k2 * (target - x) - c * v) * h;
+        x += v * h;
+      }
+      if (x < 0) {
+        if (v < -1.4) clicks += 1;
+        x = 0;
+        v = 0;
+      } else if (x > 1.08) {
+        x = 1.08;
+        v = Math.min(v, 0);
+      }
+      if (Math.abs(v) > 0.003 || Math.abs(target - x) > 0.002) busy = true;
+      else {
+        x = target;
+        v = 0;
+      }
+      if (x !== heights[k]) dirty = true;
+      heights[k] = x;
+      vel[k] = v;
     }
     if (pointer.id !== null) {
       const steps = Math.max(1, Math.ceil(Math.hypot(pointer.x - pointer.px, pointer.y - pointer.py) / (view.pitch * 1.2)));
       for (let s = 1; s <= steps; s += 1) {
         const x = pointer.px + ((pointer.x - pointer.px) * s) / steps;
         const y = pointer.py + ((pointer.y - pointer.py) * s) / steps;
-        moved += pushAt(x, y);
+        clicks += pushAt(x, y) * 0.25;
       }
       pointer.px = pointer.x;
       pointer.py = pointer.y;
+      busy = true;
     }
-    if (moved) sound.clatter(moved * 0.2, dt);
-    return mode !== "idle" || pointer.id !== null;
+    if (clicks) sound.clatter(clicks, dt);
+    return busy || Boolean(wave);
   }
 
   function pushAt(x, y) {
@@ -269,14 +378,13 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
         if (d >= 1) continue;
         const want = Math.sqrt(1 - d * d);
         const k = j * cols + i;
-        if (want > heights[k] + 0.01) {
-          heights[k] = want;
-          if (mode === "morph") from[k] = Math.max(from[k], want);
-          moved += 1;
+        if (want > imp[k] + 0.01) {
+          if (want > heights[k] + 0.08) moved += 1;
+          imp[k] = want;
         }
+        if (want > 0.05) hold[k] = HOLD;
       }
     }
-    if (moved) dirty = true;
     return moved;
   }
 
@@ -308,7 +416,10 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
       dirty = false;
     }
     if (moving) raf = requestAnimationFrame(frame);
-    else last = 0;
+    else {
+      last = 0;
+      scheduleIdle();
+    }
   }
 
   function wake() {
@@ -332,6 +443,7 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
     pointer.x = pointer.px = x;
     pointer.y = pointer.py = y;
     root.dataset.pressing = "";
+    nudge();
     pushAt(x, y);
     wake();
   }
@@ -346,36 +458,40 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
     if (e.pointerId !== pointer.id) return;
     pointer.id = null;
     delete root.dataset.pressing;
+    nudge();
+    wake();
   }
 
   function choose(idx) {
     sound.wake();
+    nudge();
     onAlbum?.(idx);
-    press(idx);
+    press(idx, [0.5, 0.98]);
   }
 
   function onKey(e) {
     if (e.key === "Backspace" || e.key === "Delete") {
       e.preventDefault();
       sound.wake();
+      nudge();
       flatten();
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       choose(wanted);
-    } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= albums.length) {
+    } else if (/^[1-9]$/.test(e.key) && Number(e.key) <= subjects.length) {
       choose(Number(e.key) - 1);
     }
   }
 
   layout();
   render();
-  await press(0);
+  nudge();
+  await press(0, [0.5, 0.98]);
 
   const ro = new ResizeObserver(() => {
     const changed = layout();
     if (changed) {
-      mode = "idle";
-      press(current);
+      press(current, [0.5, 0.98]);
     } else {
       render();
       dirty = false;
@@ -396,18 +512,23 @@ export async function createPins({ root, stage, canvas, albums, onAlbum }) {
         last = 0;
         dirty = true;
         wake();
-      } else if (raf) {
-        cancelAnimationFrame(raf);
+      } else {
+        if (raf) cancelAnimationFrame(raf);
         raf = 0;
+        if (idleTimer) clearTimeout(idleTimer);
+        idleTimer = 0;
       }
     },
     choose,
     flatten() {
       sound.wake();
+      nudge();
       flatten();
     },
     destroy() {
       destroyed = true;
+      if (idleTimer) clearTimeout(idleTimer);
+      idleTimer = 0;
       if (raf) cancelAnimationFrame(raf);
       raf = 0;
       ro.disconnect();

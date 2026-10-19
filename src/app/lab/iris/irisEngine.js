@@ -1,5 +1,5 @@
 import { analysePhoto } from "./irisAnalyse";
-import { SUBJECT, buildScene, depthAt, hueAt, lightAllowed } from "./irisScene";
+import { FRAME, SCENE_H, SCENE_W, SUBJECT, buildScene, depthAt, extraLights, hueAt, lightAllowed } from "./irisScene";
 import { createIrisSound } from "./irisSound";
 import { createIrisGL } from "./irisGL";
 
@@ -263,7 +263,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       shapeC[i * 2 + 1] = -ny * (shapeRb - 1);
     }
     const coc = 0.085 * rl * Math.pow(2, -sc / 2);
-    const k = (1.4 * rl) / 480;
+    const k = (FRAME.span * rl) / SCENE_W;
     const ev = clamp(st.gainEv - s, -0.3, 0.3);
     gl.draw({
       cx,
@@ -280,7 +280,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       openVis: Math.min(0.69 * rl, (openA / Math.cos(Math.PI / 9)) * 1.03),
       rot,
       ring: (-s * STOP_DEG * Math.PI) / 180,
-      map: [cx - 0.5 * 480 * k, cy - 0.43 * 600 * k, 480 * k, 600 * k],
+      map: [cx - FRAME.anchorX * SCENE_W * k, cy - FRAME.anchorY * SCENE_H * k, SCENE_W * k, SCENE_H * k],
       k,
       coc,
       focus: 0.1,
@@ -434,10 +434,10 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   layout();
   updateDom();
 
-  loadImage(SUBJECT.cover)
+  loadImage(SUBJECT.src)
     .then((img) => {
       if (destroyed || !gl) return;
-      gl.uploadScene(analysePhoto(buildScene(img), { depthAt, allow: lightAllowed, hueAt }));
+      gl.uploadScene(analysePhoto(buildScene(img), { depthAt, allow: lightAllowed, hueAt, extra: extraLights() }));
       ready = true;
       if (!reduced) {
         st.v = 0;

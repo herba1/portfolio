@@ -3,8 +3,8 @@ import { createMirrorGL } from "./mirrorballGL";
 
 const RINGS = 34;
 const TILT = -0.16;
-const IDLE = 0.085;
 const MAX_SPIN = 6.5;
+const STEP = 1.3;
 const SHUTTER = 1 / 75;
 const VISCOUS = 0.42;
 const COULOMB = 0.22;
@@ -135,7 +135,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
   if (!gl) throw new Error("WebGL2 unavailable");
 
   const view = { width: 1, height: 1, dpr: 1, cx: 0, cy: 0, radius: 100, focal: 2000, cam: [0, 0, 2000], wall: 260, room: [1, 1, 1, 1] };
-  const sim = { phi: 0.6, omega: reduced ? 0 : IDLE, dragging: false, releasing: false, pointerId: null, startX: 0, startPhi: 0, pointerX: 0, vel: 0, clock: 0 };
+  const sim = { phi: 0.6, omega: reduced ? 0 : MAX_SPIN, cruise: reduced ? 0 : MAX_SPIN, parked: MAX_SPIN, dragging: false, releasing: false, pointerId: null, startX: 0, startPhi: 0, pointerX: 0, vel: 0, clock: 0 };
   const gelNow = [...LAMP];
   const gelTarget = [...LAMP];
   let coverToken = 0;
@@ -239,7 +239,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
   }
 
   function simulate(dt) {
-    const idle = reduced ? 0 : IDLE;
+    const idle = sim.cruise;
     if (sim.dragging) {
       const target = sim.startPhi + ((sim.pointerX - sim.startX) / view.radius) * 0.95;
       if (dt > 0.002) {
@@ -381,11 +381,16 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
     if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
       e.preventDefault();
       const dir = e.key === "ArrowRight" ? 1 : -1;
-      sim.omega = clamp(sim.omega + dir * (e.shiftKey ? 3 : 1.2), -MAX_SPIN, MAX_SPIN);
+      sim.cruise = clamp(sim.cruise + dir * (e.shiftKey ? MAX_SPIN : STEP), -MAX_SPIN, MAX_SPIN);
+      if (Math.abs(sim.cruise) < 0.05) sim.cruise = 0;
+      if (sim.cruise !== 0) sim.parked = sim.cruise;
       wake();
     } else if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      sim.omega = 0;
+      if (sim.cruise !== 0) {
+        sim.parked = sim.cruise;
+        sim.cruise = 0;
+      } else sim.cruise = sim.parked;
       wake();
     }
   }

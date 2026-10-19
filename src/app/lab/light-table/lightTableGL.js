@@ -14,6 +14,8 @@ const UNIFORMS = [
   "uRect",
   "uTexel",
   "uAtlas",
+  "uWin",
+  "uLoupe",
 ];
 
 function compile(gl, type, source) {
@@ -64,6 +66,7 @@ export function createLightTableGL(canvas) {
   const pose = new Float32Array(32);
   const size = new Float32Array(32);
   const rect = new Float32Array(32);
+  const win = new Float32Array(32);
 
   function upload(piece, data) {
     gl.bindTexture(gl.TEXTURE_2D, atlas);
@@ -102,11 +105,15 @@ export function createLightTableGL(canvas) {
       pose.set([p.x, p.y, Math.cos(p.a), Math.sin(p.a)], i * 4);
       size.set([p.hw, p.hh, p.code, p.seed], i * 4);
       rect.set(p.rect, i * 4);
+      win.set([p.win[0], p.win[1], 0, 0], i * 4);
     }
     gl.uniform1i(loc.uCount, n);
     gl.uniform4fv(loc.uPose, pose);
     gl.uniform4fv(loc.uSize, size);
     gl.uniform4fv(loc.uRect, rect);
+    gl.uniform4fv(loc.uWin, win);
+    const l = frame.loupe;
+    gl.uniform4f(loc.uLoupe, l ? l.x : 0, l ? l.y : 0, l ? l.r : 0, l ? l.mag : 1);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, atlas);
     gl.uniform1i(loc.uAtlas, 0);

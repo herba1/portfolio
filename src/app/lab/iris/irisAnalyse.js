@@ -14,7 +14,7 @@ const smooth = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-export function analysePhoto(img, { depthAt, allow, hueAt }) {
+export function analysePhoto(img, { depthAt, allow, hueAt, extra = [] }) {
   const W = img.naturalWidth || img.width;
   const H = img.naturalHeight || img.height;
   const canvas = document.createElement("canvas");
@@ -68,7 +68,7 @@ export function analysePhoto(img, { depthAt, allow, hueAt }) {
   candidates.sort((a, b) => L[b] - L[a]);
 
   const taken = new Uint8Array(n);
-  const lights = [];
+  const lights = extra.map((l) => ({ ...l }));
   const sample = (x, y) => L[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
   for (const i of candidates) {
     if (taken[i]) continue;

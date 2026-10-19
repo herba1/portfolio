@@ -5,7 +5,11 @@ import { useEffect, useRef, useState } from "react";
 import { albumById } from "@/app/lab/_music/catalog";
 import "./pins.css";
 
-const ALBUMS = ["with-the-beatles", "let-it-be", "a-hard-days-night"].map((id) => albumById(id));
+const SUBJECTS = [
+  { id: "mathewson", title: "Mathewson, 1909", full: "Christy Mathewson on a 1909 baseball card", src: "/flyout/card-03.jpg", crop: [0.1, 0.13, 0.8], thumb: "50% 20%" },
+  { id: "young", title: "Cy Young, 1909", full: "Cy Young on a 1909 baseball card", src: "/flyout/card-04.jpg", crop: [0.1, 0.13, 0.8], thumb: "50% 20%" },
+  { id: "with-the-beatles", title: "With the Beatles", full: "the cover of With the Beatles", src: albumById("with-the-beatles").cover, crop: [0.025, 0.025, 0.95], thumb: "50% 50%" },
+];
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -32,7 +36,7 @@ export default function Piece({ embedded = false }) {
           root,
           stage: stageRef.current,
           canvas: canvasRef.current,
-          albums: ALBUMS,
+          subjects: SUBJECTS,
           onAlbum: (i) => {
             if (!disposed) setAlbum(i);
           },
@@ -76,7 +80,7 @@ export default function Piece({ embedded = false }) {
         <header className="pins-head">
           <h1 className="pins-title">Pin Art</h1>
           <p className="pins-lede">
-            A bed of steel pins with a cover pressed through from behind. Drag to push your own <em>fingertip</em> in.
+            A bed of steel pins with a face pressed through from behind. Drag to push your own <em>fingertip</em> in, then watch the pins settle back.
           </p>
         </header>
       )}
@@ -86,15 +90,15 @@ export default function Piece({ embedded = false }) {
           className="pins-plate"
           tabIndex={0}
           role="application"
-          aria-label={`A pin art toy with ${ALBUMS[album].title} pressed into the steel pins. Drag across the pins to push them through; Delete lets every pin fall back flat, and keys 1 to 3 press a different cover.`}
+          aria-label={`A pin art toy with ${SUBJECTS[album].full} pressed into the steel pins. Drag across the pins to push them through; Delete lets every pin fall back flat, and keys 1 to 3 press a different picture. Left alone, it presses the next picture through by itself.`}
         >
           <canvas ref={canvasRef} className="pins-canvas" />
         </div>
       </div>
       {!embedded && (
         <div className="pins-bar">
-          <div className="pins-albums" role="radiogroup" aria-label="Cover">
-            {ALBUMS.map((a, i) => (
+          <div className="pins-albums" role="radiogroup" aria-label="Picture">
+            {SUBJECTS.map((a, i) => (
               <button
                 key={a.id}
                 type="button"
@@ -104,7 +108,7 @@ export default function Piece({ embedded = false }) {
                 disabled={status !== "ready"}
                 onClick={() => engineRef.current?.choose(i)}
               >
-                <img src={a.cover} alt="" width={28} height={28} draggable={false} />
+                <img src={a.src} alt="" width={28} height={28} draggable={false} style={{ objectPosition: a.thumb }} />
                 <span>{a.title}</span>
               </button>
             ))}

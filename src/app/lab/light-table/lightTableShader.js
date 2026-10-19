@@ -19,6 +19,8 @@ uniform int uCount;
 uniform vec4 uPose[8];
 uniform vec4 uSize[8];
 uniform vec4 uRect[8];
+uniform vec4 uWin[8];
+uniform vec4 uLoupe;
 uniform float uTexel;
 uniform sampler2D uAtlas;
 
@@ -102,7 +104,7 @@ vec3 frontLight(vec2 p) {
   float sd = glassSd(p);
   float outside = max(sd, 0.0) / uScale;
   float near = exp(-outside / 30.0);
-  return vec3(0.34, 0.33, 0.315) * (0.3 + 0.7 * uPower) * mix(0.4, 1.0, near);
+  return vec3(0.46, 0.45, 0.43) * (0.3 + 0.7 * uPower) * mix(0.4, 1.0, near);
 }
 
 float grain(vec2 mm, float seed, float footMm) {
@@ -196,7 +198,7 @@ vec3 scene(vec2 p, float foot) {
     vec3 albedo = pow(x, vec3(2.2));
     vec3 lit = albedo * front;
     if (kind < 1.5) {
-      vec2 win = vec2(28.0);
+      vec2 win = uWin[i].xy;
       float dWin = max(rectSd(lm, win, 0.6), 0.0);
       float dOut = max(-sd / uScale, 0.0);
       float halo = 0.07 * exp(-dWin / 0.7) + 0.05 * exp(-dOut / 0.6) + 0.03 * exp(-dOut / 3.0);
@@ -205,6 +207,8 @@ vec3 scene(vec2 p, float foot) {
       lit += c * 0.02;
     }
     vec3 next = c * (wFilm * trans + wHole) + wOpq * lit;
+    if (kind > 3.5) next += wOpq * c * albedo * 0.3;
+    else if (kind > 0.5 && kind < 1.5) next += wOpq * c * albedo * 0.2;
     c = mix(c, next, cov);
   }
   return c;
@@ -220,7 +224,34 @@ void main() {
   vec2 frag = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec2 p = frag / uDpr;
   float foot = 1.0 / uDpr;
-  vec3 col = scene(p, foot);
+  vec3 col;
+  vec2 dl = p - uLoupe.xy;
+  float rl = length(dl);
+  float rOut = uLoupe.z;
+  float rIn = rOut * 0.78;
+  if (rOut > 0.0 && rl < rOut + foot * 1.5) {
+    vec3 under = rl > rOut - foot * 1.5 ? scene(p, foot) : vec3(0.0);
+    float rr = min(rl / rIn, 1.0);
+    vec3 seen = vec3(0.0);
+    if (rl < rIn + foot * 1.5) {
+      vec2 s = dl / uLoupe.w * (1.0 + 0.05 * rr * rr + 0.08 * pow(rr, 8.0));
+      seen = scene(uLoupe.xy + s, foot / uLoupe.w);
+      seen *= 1.0 - 0.22 * pow(rr, 6.0);
+    }
+    vec2 dir = dl / max(rl, 1e-4);
+    float t = clamp((rl - rIn) / max(rOut - rIn, 1e-3), 0.0, 1.0);
+    float lit = max(dot(dir, normalize(vec2(-0.5, -0.8))), 0.0);
+    vec3 ring = vec3(0.012, 0.012, 0.013);
+    ring += vec3(0.16, 0.155, 0.15) * exp(-t / 0.08) * (0.35 + 0.65 * (1.0 - lit));
+    ring += vec3(0.1, 0.098, 0.094) * exp(-(1.0 - t) / 0.06) * (0.3 + 0.7 * lit);
+    ring *= 0.9 + 0.1 * uPower;
+    float inner = clamp((rIn - rl) / foot + 0.5, 0.0, 1.0);
+    vec3 loupe = mix(ring, seen, inner);
+    float outer = clamp((rOut - rl) / foot + 0.5, 0.0, 1.0);
+    col = mix(under, loupe, outer);
+  } else {
+    col = scene(p, foot);
+  }
   vec3 outc = tonemap(col);
   outc += (hash21(gl_FragCoord.xy + 0.5) - 0.5) / 255.0;
   outColor = vec4(outc, 1.0);

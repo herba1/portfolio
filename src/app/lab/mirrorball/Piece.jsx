@@ -83,13 +83,13 @@ export default function Piece({ embedded = false }) {
         className="mirrorball-canvas"
         tabIndex={0}
         role="application"
-        aria-label={`A mirrorball hanging against black, throwing the colours of ${ALBUM_CHOICES[album].title} across the dark. Drag sideways to spin it; it keeps the speed of your throw and slows on its own. Left and right arrows push it, Space stops it.`}
+        aria-label={`Flecks of light from an unseen mirrorball sweeping across the dark at full speed, in the colours of ${ALBUM_CHOICES[album].title}. Drag sideways to throw it faster or hold it still; it eases back to its own speed. Left and right arrows set the speed, Space stops and restarts it.`}
       />
       {embedded ? null : (
         <header ref={headRef} className="mirrorball-head">
           <h1 className="mirrorball-title">Mirrorball</h1>
           <p className="mirrorball-lede">
-            One spotlight through a record sleeve. Every mirror carries <em>a piece of the cover</em> around the room.
+            One spotlight through a record sleeve, thrown off a ball you never see. Every fleck carries <em>a piece of the cover</em> around the room.
           </p>
         </header>
       )}
