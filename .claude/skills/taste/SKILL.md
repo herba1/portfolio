@@ -63,6 +63,17 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Glitches, clipping and overlaps sink a piece; fix them before anything else.
 - He wants more UI: music-app elements and common components made beautiful and trendy, a little over the top.
 
+## From batch three (54 pieces, scored 1–5, October 2026)
+
+- Scored 5: Type Bust, Film Leader, Dandelion ("beautiful computer art"), Mirrorball at full speed. Scored 4: Cover Flow, Pull Vinyl, Erase, Split Flap. One striking image-making effect still beats any app chrome.
+- Scored 1 and cut: nearly every generic music-app component (search, calendar, queue, volume dial, EQ, like burst, save ring, tab bar, toasts, share sheet, lock screen, player sheet, crossfade, wave scrub, Wrapped). A plain app component re-skinned with album art is "lame", "boring", "wack". UI pieces must carry a real visual idea.
+- Not everything is the Beatles. Using one band on every piece read as lazy; mix subjects, and a piece need not be about music at all. Visually pleasing, cool or fun is enough.
+- Reach for deeper sources: award-level sites (Awwwards, FWA, Codrops) and top component work, and rebuild their actual techniques from source rather than paraphrasing a screenshot.
+- Transitions must stay coherent: things move out of the way rather than fading, a drag becomes the type rather than two effects side by side, morphs that break on enter or exit sink a piece.
+- Don't over-decorate a liked effect: one sticker, not a pile; the paper and the type, not the typewriter's keyboard; the cassette and a pencil, not a desk.
+- Realism, slow and eased, when the subject is a physical material (Crumple: "should have kept it realistic, and slow, with ease"). The stepped Spider-Verse frame rate was a miss.
+- Let the UI show a quality instead of labelling it: re-theme from a cover without printing the swatches.
+
 ## Type vibes — Herb's reference board (October 2026)
 
 Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:

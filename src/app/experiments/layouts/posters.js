@@ -110,11 +110,6 @@ export const POSTERS = {
     "width": 922,
     "height": 464
   },
-  "/lab/long-exposure": {
-    "src": "/posters/experiments/lab--long-exposure.webp?v=L0zAUHws",
-    "width": 688,
-    "height": 584
-  },
   "/lab/loupe": {
     "src": "/posters/experiments/lab--loupe.webp?v=KS-CEpyU",
     "width": 688,
@@ -135,28 +130,13 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/needle": {
-    "src": "/posters/experiments/lab--needle.webp?v=HP4uXI_f",
-    "width": 688,
-    "height": 584
-  },
   "/lab/oklch-picker": {
     "src": "/posters/experiments/lab--oklch-picker.webp?v=nZMPhAAA",
     "width": 688,
     "height": 584
   },
-  "/lab/photo-booth": {
-    "src": "/posters/experiments/lab--photo-booth.webp?v=VcS5dtMD",
-    "width": 688,
-    "height": 704
-  },
   "/lab/pins": {
     "src": "/posters/experiments/lab--pins.webp?v=HCX3CKFS",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/rain": {
-    "src": "/posters/experiments/lab--rain.webp?v=9EqbEBye",
     "width": 688,
     "height": 584
   },
@@ -168,11 +148,6 @@ export const POSTERS = {
   "/lab/refractor": {
     "src": "/posters/experiments/lab--refractor.webp?v=egApCXAq",
     "width": 453,
-    "height": 464
-  },
-  "/lab/riffle": {
-    "src": "/posters/experiments/lab--riffle.webp?v=3Y6-DZqI",
-    "width": 688,
     "height": 464
   },
   "/lab/shredder": {
