@@ -1,14 +1,34 @@
 {
   "title": "Smear",
   "description": "A quiet photo essay in big lowercase lines. Scroll slowly and it holds still; scroll hard and every photo and line smears in uneven vertical bands and burns out toward white, then snaps back sharp the moment you slow down.",
-  "tags": ["WebGL", "Type", "Photography", "Scroll"],
+  "tags": [
+    "WebGL",
+    "Type",
+    "Photography",
+    "Scroll"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-19T12:00:00.000Z",
   "intent": "Speed made visible as light: the award-studio scroll-sync smear on real photographs and on the type itself, glued to native scroll with no scroll-jacking, crisp at rest.",
-  "tile": { "cols": 3, "rows": 5 },
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
-    { "name": "Lusion, WebGL Scroll Sync", "url": "https://github.com/lusionltd/WebGL-Scroll-Sync", "what": "Ported (MIT): the 5-tap smear gated per column band by the sin-then-hash trick, the overexposure 1 + 2s, the strength rule s *= exp(-10 dt) + min(10|dy|/vh, 5), the per-frame re-roll of the band seeds, and the padded canvas that rides with the page between frames. The resting jitter is removed so it snaps fully sharp." },
-    { "name": "Dave Hoskins, Hash without Sine", "url": "https://www.shadertoy.com/view/4djSRW", "what": "hash43, as used by the Lusion shader." },
-    { "name": "Photographs", "url": "https://herb.art/scorch", "what": "Herb's own prints from Scorch, used with permission and re-encoded for this page." }
+    {
+      "name": "Lusion, WebGL Scroll Sync",
+      "url": "https://github.com/lusionltd/WebGL-Scroll-Sync",
+      "what": "Ported (MIT): the 5-tap smear gated per column band by the sin-then-hash trick, the overexposure 1 + 2s, the strength rule s *= exp(-10 dt) + min(10|dy|/vh, 5), the per-frame re-roll of the band seeds, and the padded canvas that rides with the page between frames. The resting jitter is removed so it snaps fully sharp."
+    },
+    {
+      "name": "Dave Hoskins, Hash without Sine",
+      "url": "https://www.shadertoy.com/view/4djSRW",
+      "what": "hash43, as used by the Lusion shader."
+    },
+    {
+      "name": "Kodak Lossless True Color Image Suite",
+      "url": "https://r0k.us/graphics/kodak/",
+      "what": "The seven photographs (kodim01, 02, 06, 12, 16, 19, 22): 35mm film scans from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; taken from the mirror at https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite and re-encoded as webp."
+    }
   ]
 }
