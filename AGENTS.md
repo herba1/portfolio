@@ -76,3 +76,13 @@ Every page root sets `font-synthesis: none`, `-webkit-font-smoothing: antialiase
 # Lab — generated experiments
 
 `src/app/lab/<slug>/` holds agent-built candidates; each carries an `experiment.json` manifest (`status`: candidate → liked/rejected → shipped). `scripts/lab-registry.mjs` generates `src/app/lab/registry.js` from the manifests before dev, build and lint; the experiments index and dev links read from it, so never edit those files to register a lab piece. Judge candidates at `/taste` (localhost only); votes, notes, and pointed elements live in `taste/*.jsonl`. `npm run lab:run` builds a batch: supply → generate → gate → learn → cleanup. The build contract is `.claude/skills/lab-build/SKILL.md`; the learned taste is `.claude/skills/taste/SKILL.md`.
+
+<!-- BEGIN:nextjs-agent-rules -->
+
+## This is NOT the Next.js you know
+
+This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+
+This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
+
+<!-- END:nextjs-agent-rules -->
