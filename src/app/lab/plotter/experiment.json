@@ -1,0 +1,15 @@
+{
+  "title": "Plotter",
+  "description": "Caravaggio's Basket of Fruit redrawn by a pen plotter on cream paper, in black for tone and a second pen for the warm fruit. Turn the dial and the sheet is re-plotted row by row as hatch, waves, contours, stipple or one long spiral; swap the pens, or drop in your own photo.",
+  "tags": ["WebGL", "Print", "Drawing"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T18:00:00.000Z",
+  "intent": "One image, five hands: every line width comes from a distance field weighted by the tone beneath it, so a single dial changes how the drawing is made, and the plotter re-draws the sheet under its gantry instead of cross-fading.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    { "name": "basement.studio shader-lab, plotter pass (Apache-2.0)", "url": "https://github.com/basementstudio/shader-lab", "took": "Ported the hatch, wave, contour, stipple and spiral distance-field formulas, wobble warp, ink bleed, paper and pen colours from packages/shader-lab-react/src/renderer/plotter-pass.ts" },
+    { "name": "Jaume Sanchez, sketch (MIT)", "url": "https://github.com/spite/sketch", "took": "Engraving idea of line width swelling with darkness" },
+    { "name": "darkroom.engineering, Lenis (MIT)", "url": "https://github.com/darkroomengineering/lenis", "took": "Frame-rate independent damp for the gantry and the dial" },
+    { "name": "Caravaggio, Basket of Fruit, c. 1599 (public domain)", "url": "https://commons.wikimedia.org/wiki/File:Canestra_di_frutta_(Caravaggio).jpg", "took": "The still life, via the three.js examples textures" }
+  ]
+}
