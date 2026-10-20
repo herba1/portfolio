@@ -1,10 +1,21 @@
 {
   "title": "Split Flap",
-  "description": "A Beatles setlist on a departure board, built flap by flap. Click a track to put it on and every changed letter rolls through the drum to its new place; drag a row to reorder, or type to rename one.",
-  "tags": ["Mechanical", "Type", "Music"],
+  "description": "A film played on a split-flap board. Every cell is a pair of real flaps carrying a tile of the picture, and a flap only falls when its piece of the frame changes, so motion ripples across the board while the still parts hold. Watch a red flower open and close, switch to a 1940 switchboard scene, or drop in a video of your own.",
+  "tags": [
+    "Mechanical",
+    "WebGL",
+    "Video"
+  ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One clean physical mechanism finished to the edge: every character is a pair of real flaps on a hinge, and the ripple comes from each cell stepping through its drum in order.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://herb.art/counter", "https://en.wikipedia.org/wiki/Split-flap_display"]
+  "intent": "One physical mechanism finished to the edge: real hinged flaps with a fall, a bounce and shading, now carrying moving pictures instead of letters; the board's own limits (one flap at a time per cell) become the look of the film.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Split-flap_display",
+    "Switchboard clip: His Girl Friday (1940), public domain; the short excerpt friday.mp4 from MDN's CC0 video assets, https://github.com/mdn/interactive-examples (live-examples/media/cc0-videos) and https://github.com/mdn/shared-assets (videos/friday.mp4)",
+    "Bloom clip: flower.mp4 from MDN's CC0 video assets, same repositories (videos/flower.mp4), played forward then reversed"
+  ]
 }
