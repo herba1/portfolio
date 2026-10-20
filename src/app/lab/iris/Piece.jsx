@@ -164,7 +164,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="iris-head">
           <h1 className="iris-title">Iris</h1>
           <p className="iris-lede">
-            Turn the ring. Nine blades close on a foggy night shot on film, and the lamps in the haze fall from <em>soft discs</em> into stars.
+            Turn the ring. Nine blades close on a mountain stream shot on film, and the sun glinting off the water falls from <em>soft discs</em> into stars.
           </p>
         </header>
       )}

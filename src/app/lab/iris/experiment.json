@@ -1,6 +1,6 @@
 {
   "title": "Iris",
-  "description": "Nine black anodised aperture blades over a grainy night photograph shot on film: a parked car, two people on the sand and a lamp burning through the fog. Turn the ring from f/1.4 to f/16 and the lamps fall from nine-sided bokeh discs into 18-point stars, every stop clicks into its detent and the blades swish as they close.",
+  "description": "Nine black anodised aperture blades over a mountain stream shot on 35mm film. Turn the ring from f/1.4 to f/16: the far bank stays sharp, and the sun glinting off the water in the foreground falls from nine-sided bokeh discs into 18-point stars. Every stop clicks into its detent and the blades swish as they close.",
   "tags": [
     "WebGL",
     "Optics",
@@ -16,6 +16,6 @@
   },
   "sources": [
     "https://kinoria.studio",
-    "Photograph: Herb's own film photo, public/scorch/beams.webp (used with permission, all rights Herb)"
+    "Photograph: Kodak Lossless True Color Image Suite, kodim13 (mountain stream), a 35mm film scan from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/)"
   ]
 }

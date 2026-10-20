@@ -7,9 +7,11 @@ import k09 from "./film/kodim09.jpg";
 import k11 from "./film/kodim11.jpg";
 import k12 from "./film/kodim12.jpg";
 import k13 from "./film/kodim13.jpg";
+import k14 from "./film/kodim14.jpg";
 import k15 from "./film/kodim15.jpg";
 import k16 from "./film/kodim16.jpg";
 import k17 from "./film/kodim17.jpg";
+import k20 from "./film/kodim20.jpg";
 import k21 from "./film/kodim21.jpg";
 import k22 from "./film/kodim22.jpg";
 import k23 from "./film/kodim23.jpg";
@@ -33,7 +35,7 @@ const KIND_CODE = { mask: 0, mount: 1, negative: 2, strip: 3, paper: 4 };
 
 export const PIECES = [
   { key: "contact", kind: "paper", seed: 0.17, at: [8, 8], w: 128, h: 122, frames: [k01, k08, k24, k13, k21, k02, k07, k23, k15].map((i) => i.src) },
-  { key: "roll", kind: "strip", seed: 0.31, at: [1424, 8], w: 2 * MF_PITCH + 4, h: MF_FILM, frames: ["/scorch/reading.webp", "/scorch/beams.webp"] },
+  { key: "roll", kind: "strip", seed: 0.31, at: [1424, 8], w: 2 * MF_PITCH + 4, h: MF_FILM, frames: [k14, k20].map((i) => i.src) },
   { key: "statue", kind: "mask", seed: 0.84, at: [2840, 8], w: MASK, h: MASK, src: k17.src, win: [MF_FRAME / 2, MF_FRAME / 2] },
   { key: "barn", kind: "mount", seed: 0.52, at: [1424, 698], w: MOUNT, h: MOUNT, src: k22.src, win: [17.5, 11.5], number: "14" },
   { key: "regatta", kind: "mount", seed: 0.66, at: [1982, 698], w: MOUNT, h: MOUNT, src: k09.src, win: [11.5, 17.5], number: "22" },

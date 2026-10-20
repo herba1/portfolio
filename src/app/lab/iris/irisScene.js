@@ -1,37 +1,24 @@
-export const SUBJECT = { src: "/scorch/beams.webp" };
+import streamImg from "./film-stream.jpg";
+
+export const SUBJECT = { src: streamImg.src };
 
 export const SCENE_W = 640;
 export const SCENE_H = 640;
-export const FRAME = { anchorX: 0.6, anchorY: 0.55, span: 1.5 };
-
-const LAMPS = [{ u: 0.598, v: 0.568, energy: 150, sigma: 3, hue: 0 }];
+export const FRAME = { anchorX: 0.5, anchorY: 0.62, span: 1.8 };
 
 const smooth = (a, b, x) => {
   const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
 };
 
-function ellipse(u, v, cx, cy, rx, ry, soft) {
-  const d = Math.hypot((u - cx) / rx, (v - cy) / ry);
-  return 1 - smooth(1 - soft, 1 + soft, d);
-}
-
-function nearMask(u, v) {
-  const car = ellipse(u, v, 0.2, 0.67, 0.29, 0.13, 0.08) * smooth(0.54, 0.57, v);
-  const sitter = ellipse(u, v, 0.775, 0.615, 0.055, 0.075, 0.12);
-  const friend = ellipse(u, v, 0.915, 0.61, 0.07, 0.08, 0.12);
-  return Math.max(car, sitter, friend);
-}
-
 export function depthAt(u, v) {
-  const ground = smooth(0.53, 0.56, v);
-  const sand = 1 - 0.9 * smooth(0.56, 0.86, v);
-  const far = 1 - ground + ground * sand;
-  return Math.min(far, 1 - 0.9 * nearMask(u, v));
+  const bushes = 0.06 * smooth(0.3, 0.5, v);
+  const water = smooth(0.5, 1.0, v);
+  return Math.min(1, 0.03 + bushes + 0.95 * water * (0.85 + 0.15 * water));
 }
 
 export function lightAllowed(u, v) {
-  return v < 0.545 && depthAt(u, v) > 0.6 && Math.hypot(u - LAMPS[0].u, v - LAMPS[0].v) > 0.11;
+  return v > 0.54 && depthAt(u, v) > 0.3;
 }
 
 let pixels = null;
@@ -50,7 +37,7 @@ export function hueAt(u, v) {
 }
 
 export function extraLights() {
-  return LAMPS;
+  return [];
 }
 
 export function buildScene(photo) {
