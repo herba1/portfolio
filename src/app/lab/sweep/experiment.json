@@ -1,0 +1,16 @@
+{
+  "title": "Sweep",
+  "description": "A green phosphor radar screen whose beam finds herb's most played songs, the closest contacts being the most played. Each echo pings at a pitch set by its range and leaves a fading afterglow; tap one to lock on and the beam narrows to it while the readout types out.",
+  "tags": ["Screen", "Music", "Sound", "WebGL"],
+  "status": "candidate",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "intent": "A PPI radar as a way to browse top songs: rank becomes range, every contact is painted only when the beam crosses it, and a float persistence buffer holds three phosphor decays (beam wake, long blip afterglow, short clutter) so the trails are real accumulation, not drawn fades.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Plan_position_indicator",
+    "https://en.wikipedia.org/wiki/Phosphor#Standard_phosphor_types",
+    "https://developer.mozilla.org/en-US/docs/Web/API/ConvolverNode",
+    "herb reference board: fa23 Y2K montage (green CRT phosphor)",
+    "lab: terminal (phosphor display shader)"
+  ]
+}
