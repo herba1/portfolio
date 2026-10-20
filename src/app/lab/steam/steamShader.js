@@ -12,9 +12,9 @@ uniform sampler2D uPrev;
 uniform float uFalloff;
 uniform float uDissipation;
 uniform float uAspect;
+uniform float uRise;
 uniform vec2 uMouse;
 uniform vec2 uVelocity;
-uniform float uRise;
 varying vec2 vUv;
 void main() {
   vec4 color = texture2D(uPrev, vUv - vec2(0.0, uRise)) * uDissipation;
@@ -27,17 +27,21 @@ void main() {
 }
 `;
 
-export const compositeFragment = `
+export const steamFragment = `
 precision highp float;
-uniform sampler2D uScene;
 uniform sampler2D uFlow;
 uniform sampler2D uNoise;
+uniform sampler2D uMaskA;
+uniform sampler2D uMaskB;
 uniform vec2 uRes;
-uniform vec2 uSource;
-uniform float uRadius;
-uniform float uHeight;
 uniform float uTime;
 uniform float uPush;
+uniform float uInA;
+uniform float uOutA;
+uniform float uInB;
+uniform float uOutB;
+uniform float uLift;
+uniform vec3 uGround;
 uniform vec3 uSteam;
 varying vec2 vUv;
 
@@ -45,47 +49,67 @@ float noise(vec2 p) {
   return texture2D(uNoise, p).r;
 }
 
-float plume(vec2 q, float seed, float offset, float t) {
-  float h = (q.y - uSource.y) / uHeight;
-  if (h < -0.04 || h > 1.05) return 0.0;
-  float hh = max(h, 0.0);
-  float sway = (noise(vec2(seed * 0.173 + t * 0.021, hh * 0.32 - t * 0.043)) - 0.5) * 2.0;
-  float sway2 = (noise(vec2(seed * 0.311 - t * 0.017, hh * 0.9 - t * 0.09 + 0.5)) - 0.5) * 2.0;
-  float lean = pow(hh * 1.6, 2.0);
-  float cx = uSource.x + offset * uRadius + (sway * 0.9 + sway2 * 0.35) * uRadius * lean;
-  float width = uRadius * (0.2 + 0.62 * hh);
-  float dx = (q.x - cx) / width;
-  float body = exp(-dx * dx * 1.6);
-  vec2 nuv = vec2(dx * 0.11 + seed * 0.37, hh * 0.62 - t * 0.16);
-  float n = noise(nuv) * 0.62 + noise(nuv * 2.3 + vec2(0.31, -t * 0.07)) * 0.38;
-  float puffs = smoothstep(0.38, 0.86, n);
-  float edge = min((dx + 2.2) * 0.9, (2.2 - dx) * 0.9);
-  return body * puffs * clamp(edge, 0.0, 1.0);
+float fbm(vec2 p) {
+  return noise(p) * 0.6 + noise(p * 2.03 + 0.37) * 0.28 + noise(p * 4.1 + 0.71) * 0.12;
+}
+
+float vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, float blown) {
+  if (inAmt <= 0.0 || outAmt >= 1.0) return 0.0;
+  float t = uTime;
+  float aspect = uRes.x / uRes.y;
+  vec2 st = vec2(uv.x * aspect, uv.y);
+  float rise = outAmt * outAmt * uLift;
+  vec2 warp = vec2(fbm(st * 1.6 + vec2(seed, -t * 0.05)), fbm(st * 1.6 + vec2(seed + 4.3, -t * 0.05 + 2.1))) - 0.5;
+  float churn = 0.011 + 0.05 * outAmt + 0.05 * (1.0 - inAmt);
+  vec2 base = uv + warp * vec2(churn / aspect, churn) - vec2(0.0, rise);
+  vec3 m = texture2D(mask, base).rgb;
+  float flowA = fbm(st * vec2(1.7, 0.9) + vec2(seed, -t * 0.12));
+  float flowB = fbm(st * vec2(3.4, 1.8) + vec2(seed + 1.7, -t * 0.22));
+  float vap = smoothstep(0.28, 0.82, flowA * 0.6 + flowB * 0.4);
+  float gather = inAmt * (1.0 - outAmt * 0.8) * (1.0 - blown * 0.75);
+  float body = smoothstep(0.04, 0.8, mix(m.b * 0.8, m.g, gather));
+  float letter = body * (0.22 + 0.5 * vap) + m.r * (0.3 + 0.2 * vap) * gather;
+  float env = 0.0;
+  for (int k = 1; k <= 8; k++) {
+    float fk = float(k);
+    float lean = (fbm(vec2(st.x * 0.7 + seed, st.y * 0.5 - t * 0.06 - fk * 0.03)) - 0.5) * fk * 0.02;
+    float src = texture2D(mask, base - vec2(lean / aspect, fk * 0.022)).b;
+    env = max(env, src * smoothstep(0.0, 1.6, fk) * pow(1.0 - fk / 9.0, 1.3));
+  }
+  float bend = fbm(vec2(st.x * 0.9 + seed, st.y * 0.6 - t * 0.07)) - 0.5;
+  vec2 fp = vec2(st.x + bend * 0.22, st.y * 0.32 - t * 0.075);
+  float fil = fbm(fp * vec2(9.0, 2.2) + vec2(seed * 2.3, 0.0)) * 0.7 + fbm(fp * vec2(17.0, 3.0) + vec2(seed, 1.3)) * 0.3;
+  float strands = smoothstep(0.46, 0.78, fil);
+  float wisps = env * (0.25 + 0.75 * strands) * 1.4;
+  float w = wisps * 0.85 * (1.0 - 0.75 * m.r);
+  float d = 1.0 - (1.0 - letter) * (1.0 - w);
+  float appear = smoothstep(0.0, 1.0, inAmt);
+  float leave = 1.0 - smoothstep(0.0, 0.8, outAmt);
+  return d * appear * leave;
 }
 
 void main() {
-  vec4 scene = texture2D(uScene, vUv);
-  vec3 color = scene.rgb;
-  vec2 p = gl_FragCoord.xy;
-  if (p.y > uSource.y - uRadius && abs(p.x - uSource.x) < uRadius * 5.0) {
-    vec3 flow = texture2D(uFlow, vUv).rgb;
-    float push = clamp(length(flow.xy), 0.0, 3.0);
-    vec2 off = flow.xy * uPush;
-    off *= min(1.0, uRadius * 1.6 / max(length(off), 0.001));
-    vec2 q = p - off;
-    float swirl = (noise(q / uRadius * 0.35 + uTime * 0.05) - 0.5) * min(push, 1.2) * uRadius * 0.4;
-    q += vec2(swirl, -swirl * 0.5);
-    float t = uTime;
-    float d = plume(q, 1.0, -0.22, t) * 0.8 + plume(q, 2.7, 0.08, t + 13.0) * 1.0 + plume(q, 4.1, 0.3, t + 29.0) * 0.7;
-    float h = (q.y - uSource.y) / uHeight;
-    d *= smoothstep(0.0, 0.16, h) * (1.0 - smoothstep(0.5, 1.0, h));
-    d *= 0.44 * (1.0 - 0.45 * clamp(flow.z, 0.0, 1.0));
-    float side = clamp(0.5 - (q.x - uSource.x) / (uRadius * 6.0), 0.0, 1.0);
-    vec3 steam = uSteam * (0.86 + 0.28 * side);
-    color = mix(color, steam, clamp(d, 0.0, 0.9));
-  }
+  vec2 uv = vUv;
+  vec3 flow = texture2D(uFlow, uv).rgb;
+  vec2 off = flow.xy * uPush / uRes;
+  float len = length(off);
+  off *= min(1.0, 0.09 / max(len, 0.0001));
+  float push = clamp(length(flow.xy), 0.0, 2.0);
+  vec2 q = uv - off;
+  float swirl = (noise(q * vec2(uRes.x / uRes.y, 1.0) * 2.2 + uTime * 0.04) - 0.5) * push * 0.02;
+  q += vec2(swirl, -swirl * 0.4);
+  float thin = 1.0 - 0.55 * clamp(flow.z, 0.0, 1.0);
+  float blown = clamp(push * 0.7, 0.0, 1.0);
+  float d = vapour(uMaskA, q, uInA, uOutA, 1.3, blown) + vapour(uMaskB, q, uInB, uOutB, 7.9, blown);
+  d = clamp(d * thin, 0.0, 1.0);
+  vec2 c = uv - 0.5;
+  c.x *= uRes.x / uRes.y;
+  float vignette = 1.0 - 0.5 * smoothstep(0.25, 1.05, length(c));
+  float grain = (noise(uv * uRes / 256.0 + fract(uTime * 7.31) * vec2(0.37, 0.71)) - 0.5) * 0.018;
+  vec3 ground = uGround * vignette + grain;
+  vec3 steam = uSteam * (0.9 + 0.1 * smoothstep(0.0, 1.0, uv.y));
+  vec3 color = mix(ground, steam, d * 0.92);
+  color += uSteam * 0.05 * smoothstep(0.0, 0.4, d);
   gl_FragColor = vec4(color, 1.0);
-  #include <tonemapping_fragment>
-  #include <colorspace_fragment>
 }
 `;

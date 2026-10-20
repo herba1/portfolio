@@ -1,11 +1,17 @@
 .steam-root {
+  --steam-ground: rgb(17 15 14);
+  --steam-ink: rgb(238 234 228);
+  --steam-ink-secondary: rgb(178 172 164);
   position: relative;
   width: 100%;
   height: 100%;
   min-height: 100cqh;
   overflow: clip;
   isolation: isolate;
-  background: #e2d8ca;
+  background: var(--steam-ground);
+  color: var(--steam-ink);
+  font-family: var(--font-sans);
+  color-scheme: dark;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -66,46 +72,8 @@
 }
 
 .steam-hint {
-  color: var(--color-ink);
+  color: var(--steam-ink-secondary);
   text-wrap: pretty;
-}
-
-.steam-button {
-  display: inline-flex;
-  align-items: center;
-  height: 32px;
-  margin-top: 4px;
-  padding-inline: 12px;
-  border: 1px solid var(--color-line);
-  border-radius: 9999px;
-  background: var(--color-surface-raised);
-  color: var(--color-ink);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  cursor: pointer;
-  pointer-events: auto;
-  transition:
-    background-color 150ms var(--ease-hover),
-    border-color 150ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
-}
-
-.steam-button:active {
-  transform: scale(0.96);
-}
-
-.steam-button:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 2px;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .steam-button:hover {
-    background: var(--color-surface-subtle);
-    border-color: var(--color-line-strong);
-  }
 }
 
 .steam-fallback {
@@ -113,7 +81,7 @@
   inset: 0;
   display: grid;
   place-items: center;
-  color: var(--color-ink-secondary);
+  color: var(--steam-ink-secondary);
 }
 
 .steam-live {
@@ -137,5 +105,11 @@
 @media (prefers-reduced-motion: reduce) {
   .steam-canvas {
     transition: opacity 200ms linear;
+  }
+}
+
+@media (max-width: 639px) {
+  body:has(.steam-root:not([data-embedded])) .nav__container {
+    color: rgb(238 234 228);
   }
 }
