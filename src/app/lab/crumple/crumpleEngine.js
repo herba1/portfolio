@@ -3,9 +3,8 @@ import { createRustle } from "./crumpleSound";
 
 const SUB = 4;
 const GROUND = "#ebe9e4";
-const OMEGA = 6.5;
-const FRAME_MS = 125;
-const ZETA = 0.6;
+const FRAME_MS = 200;
+const KEYS = [0.42, 0.78, 1.05, 0.98, 1];
 const CRUSH = [0, 0.6, 0.74, 0.8, 0.855, 1];
 const OPEN = CRUSH;
 
@@ -176,7 +175,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   scene.add(sheet);
 
   const pose = new Float32Array(stride);
-  const st = { p: 0, v: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, last: 0, drawnAt: -1e9, stale: false, active: true, destroyed: false, dirty: true, held: false };
+  const st = { p: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, anim: null, active: true, destroyed: false, dirty: true, held: false };
   const view = { w: 1, h: 1 };
   const rustle = createRustle();
 
@@ -287,48 +286,32 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   function step(now) {
     st.raf = 0;
     if (st.destroyed || !st.active) return;
-    const dt = st.last ? Math.min(0.05, (now - st.last) / 1000) : 1 / 60;
-    st.last = now;
-    const before = st.p;
-    if (reduced) {
-      st.p = st.target;
-      st.v = 0;
-    } else {
-      const n = 4;
-      for (let k = 0; k < n; k += 1) {
-        const h = dt / n;
-        const a = OMEGA * OMEGA * (st.target - st.p) - 2 * ZETA * OMEGA * st.v;
-        st.v += a * h;
-        st.p += st.v * h;
-        if (st.p > 1) {
-          st.p = 1;
-          st.v = Math.min(0, -st.v * 0.25);
-        } else if (st.p < 0) {
-          st.p = 0;
-          st.v = Math.max(0, -st.v * 0.25);
-        }
+    const anim = st.anim;
+    if (anim) {
+      const keys = reduced ? [1] : KEYS;
+      const k = Math.min(keys.length - 1, Math.max(0, Math.floor((now - anim.start) / FRAME_MS)));
+      if (k !== anim.k) {
+        const prev = st.p;
+        st.p = clamp(anim.from + (anim.to - anim.from) * keys[k], 0, 1);
+        st.memory = Math.max(st.memory, smoothstep(0, 0.14, st.p));
+        anim.k = k;
+        anim.speed = Math.abs(st.p - prev) / (FRAME_MS / 1000);
+        st.dirty = true;
       }
-      if (Math.abs(st.target - st.p) < 0.0004 && Math.abs(st.v) < 0.0008) {
-        st.p = st.target;
-        st.v = 0;
+      if (st.dirty) {
+        update();
+        render();
+        st.dirty = false;
       }
-    }
-    st.memory = Math.max(st.memory, smoothstep(0, 0.14, st.p));
-    const moving = st.p !== before;
-    if (moving) {
-      rustle.rustle(Math.abs(st.p - before) / Math.max(dt, 1e-3), st.p);
-      st.stale = true;
-    }
-    const since = now - st.drawnAt;
-    if ((st.stale && since >= FRAME_MS - 4) || st.dirty) {
+      const left = now - anim.start - k * FRAME_MS;
+      if (anim.speed > 0 && left < FRAME_MS * 0.6) rustle.rustle(anim.speed, st.p);
+      if (k >= keys.length - 1 && left >= FRAME_MS) st.anim = null;
+    } else if (st.dirty) {
       update();
       render();
       st.dirty = false;
-      st.stale = false;
-      st.drawnAt = since < FRAME_MS * 2 ? st.drawnAt + FRAME_MS : now;
     }
-    if (moving || st.stale) st.raf = requestAnimationFrame(step);
-    else st.last = 0;
+    if (st.anim) st.raf = requestAnimationFrame(step);
   }
 
   function wake() {
@@ -343,9 +326,11 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     else if (st.dir < 0 && st.stage <= 0) st.dir = 1;
     st.stage = clamp(st.stage + st.dir, 0, last);
     st.target = (st.dir < 0 ? OPEN : CRUSH)[st.stage];
-    st.v += st.dir * 0.6;
+    st.anim = { from: st.p, to: st.target, start: performance.now(), k: -1, speed: 0 };
     onState?.({ stage: st.stage, dir: st.dir, last });
-    wake();
+    if (st.raf) cancelAnimationFrame(st.raf);
+    st.raf = 0;
+    step(performance.now());
   }
 
   function onDown(e) {
@@ -380,7 +365,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     setActive(on) {
       st.active = on;
       if (on) {
-        st.last = 0;
+        st.dirty = true;
         wake();
       } else if (st.raf) {
         cancelAnimationFrame(st.raf);
