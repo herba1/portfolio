@@ -1,6 +1,6 @@
 {
   "title": "Type Fly",
-  "description": "An album title set flat and huge beside its cover. Change the record and every letter of the old title peels off the page and sails away in depth while the new one turns in from space and lands flat, crisp Geist with a serif byline. Hover or press the title and the letters under your finger lift off the page and lean toward you.",
+  "description": "A record title set flat and huge beside its cover, from the top songs. Change the record and the title re-spells itself: every letter the two titles share lifts off the page, flies on an arc and lands in its new place at its new size, while the letters that are not needed drift off up and away in the direction of travel and the new ones rise in from the other side, as the next cover wipes across in step. Hover or press the title and the letters under your finger lift toward you.",
   "tags": [
     "Type",
     "Motion",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:00:00.000Z",
-  "intent": "One type mechanic finished to the edge: real flat glyphs that peel into 3D and land back as crisp text, on per-letter springs that can be interrupted at any moment.",
+  "intent": "One choreographed move instead of two effects: glyphs are matched between titles (longest common subsequence, then nearest spare), so the old title visibly becomes the new one, and every path follows the same direction of travel. Interrupt at any time and the letters in the air are handed on from where they are.",
   "tile": {
     "cols": 4,
     "rows": 4

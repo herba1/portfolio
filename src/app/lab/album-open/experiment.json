@@ -1,6 +1,6 @@
 {
   "title": "Album Open",
-  "description": "Twelve Beatles albums in a library grid. Open one and its cover lifts out of the grid and lands as the album header, tinted by the record's own colour, while the title and tracklist rise in after it; Back or Escape sends the same cover home to its slot.",
+  "description": "A library of records from the top songs. Open one and the grid parts around it, each row and column sliding off the stage, while the cover flies on an arc to become the album header and the title, buttons and tracklist rise into place. Back, Escape or the mouse back button runs the same move in reverse, and any flight can be caught and turned around mid-air.",
   "tags": [
     "Interface",
     "Motion",
@@ -8,13 +8,14 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:20:00.000Z",
-  "intent": "One cover that is never replaced: a single flying copy carries it between grid and header on a spring, above everything, and every flight can be caught and reversed mid-air.",
+  "intent": "One progress value drives the whole choreography: the cover's FLIP is measured fresh on every open and close, neighbours move out of the way as rigid groups so nothing overlaps, and the detail content enters through masks instead of fading.",
   "tile": {
     "cols": 4,
     "rows": 4
   },
   "sources": [
     "https://motion.dev/docs/react-layout-animations",
+    "https://aerotwist.com/blog/flip-your-animations/",
     "https://www.apple.com/apple-music/"
   ]
 }

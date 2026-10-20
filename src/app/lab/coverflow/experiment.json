@@ -1,6 +1,6 @@
 {
   "title": "Cover Flow",
-  "description": "Twelve Beatles records on a black floor with their reflections. Drag, scroll, scrub or use the arrow keys and the covers swing past on a speed-capped spring; the title and year of the record in the middle sit underneath, steady as it moves.",
+  "description": "Records from the top songs on a black floor with their reflections. Drag, fling, scroll, scrub or use the arrow keys and the covers swing past on a speed-capped spring, a gloss sliding across each sleeve as it turns to the light. Click the record in the middle, or press Enter, and it flips over to its back with the tracklist, printed on the sleeve's own colour; move on and it turns back as it slides away.",
   "tags": [
     "Interface",
     "Motion",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:00:00.000Z",
-  "intent": "The classic browser rebuilt as a modern component: one spring with a speed cap drives every cover, so a fling can be caught mid-flight and nothing races past faster than you can read it.",
+  "intent": "The classic browser with the one move the iPod had and the web versions forgot: the centred record flips to its back. One spring per cover for the flip, one speed-capped spring for the flow, and one light that both share.",
   "tile": {
     "cols": 4,
     "rows": 3

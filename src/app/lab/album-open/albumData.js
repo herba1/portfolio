@@ -93,8 +93,49 @@ const seconds = (t) => {
   return m * 60 + s;
 };
 
-export const LIBRARY = ALBUMS.map((album) => {
-  const tracks = album.tracks.map((title, i) => ({ id: `${album.id}-${i}`, n: i + 1, title, length: LENGTHS[title] ?? "2:30" }));
-  const total = tracks.reduce((sum, t) => sum + seconds(t.length), 0);
-  return { ...album, tracks, minutes: Math.round(total / 60), released: RELEASED[album.id] };
-});
+const clock = (ms) => {
+  const total = Math.round(ms / 1000);
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+};
+
+const slug = (text) =>
+  String(text)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+
+const fromCatalog = (album) => {
+  const tracks = album.tracks.map((title, i) => ({ id: `${album.id}-${i}`, n: i + 1, title, length: LENGTHS[title] ?? null }));
+  const total = tracks.reduce((sum, t) => sum + (t.length ? seconds(t.length) : 0), 0);
+  return { id: album.id, title: album.title, artist: album.artist, cover: album.cover, remote: false, tracks, minutes: Math.round(total / 60), facts: RELEASED[album.id] ?? String(album.year), year: album.year };
+};
+
+export const LIBRARY = ALBUMS.map(fromCatalog);
+
+const byTitle = new Map(ALBUMS.map((a) => [a.title.toLowerCase(), a]));
+const byCover = new Map(ALBUMS.map((a) => [a.cover, a]));
+
+export function recordsFrom(tracks, live, limit = 18) {
+  if (!live) return LIBRARY;
+  const groups = new Map();
+  for (const t of tracks) {
+    const cover = t.imageLarge || t.image;
+    if (!cover) continue;
+    if (!groups.has(cover)) {
+      const known = byCover.get(cover) || (t.album ? byTitle.get(String(t.album).toLowerCase()) : null);
+      if (known) {
+        groups.set(cover, { ...fromCatalog(known), cover, songs: [] });
+      } else {
+        groups.set(cover, { id: `r-${slug(`${t.artist}-${t.album || t.title}`)}-${groups.size}`, title: t.album || t.title, artist: t.artist, cover, remote: /^https?:/.test(cover), tracks: [], songs: [], year: t.year ?? null });
+      }
+    }
+    groups.get(cover).songs.push(t);
+  }
+  const records = [...groups.values()].slice(0, limit).map((r) => {
+    if (r.tracks.length) return r;
+    const tracks = r.songs.map((t, i) => ({ id: `${r.id}-${i}`, n: i + 1, title: t.title, length: t.durationMs ? clock(t.durationMs) : null }));
+    const facts = tracks.length === 1 ? "1 song in rotation" : `${tracks.length} songs in rotation`;
+    return { ...r, tracks, facts };
+  });
+  return records.length ? records : LIBRARY;
+}

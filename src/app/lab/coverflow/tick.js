@@ -51,10 +51,32 @@ export function createTicks() {
     src.stop(now + 0.05);
   };
 
+  const flick = () => {
+    if (!ctx || ctx.state !== "running") return;
+    const now = ctx.currentTime;
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.playbackRate.value = 0.32;
+    const band = ctx.createBiquadFilter();
+    band.type = "bandpass";
+    band.frequency.setValueAtTime(900, now);
+    band.frequency.exponentialRampToValueAtTime(2600, now + 0.12);
+    band.Q.value = 0.9;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.exponentialRampToValueAtTime(0.07, now + 0.03);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    src.connect(band);
+    band.connect(env);
+    env.connect(out);
+    src.start(now);
+    src.stop(now + 0.17);
+  };
+
   const destroy = () => {
     ctx?.close();
     ctx = null;
   };
 
-  return { wake, tick, destroy };
+  return { wake, tick, flick, destroy };
 }

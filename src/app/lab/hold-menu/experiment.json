@@ -1,6 +1,6 @@
 {
   "title": "Hold Menu",
-  "description": "A shelf of Beatles records with an iOS-style long press. Hold a cover and it gives a little, then lifts free and crisp on a spring while the shelf softens and dims behind it; a full-size menu opens beside it with Play Next, Add to Queue, Share Album and Go to Album. Keep holding, slide onto an action and let go to choose it, or right-click, or use the keyboard.",
+  "description": "A shelf of records with an iOS-style long press that branches. Hold a cover and it lifts free on a spring while the shelf softens behind it; the menu opens beside it, and Add to Playlist and Share open real submenus, with Share going one level deeper into Messages and a contact. Submenus cascade out from the row that opened them with hover intent that forgives a diagonal reach, close back into it, and on a phone push in from the right with a back row. Slide and release to choose, or drive the whole tree with arrow keys, Enter and Escape.",
   "tags": [
     "Menu",
     "Gesture",
@@ -8,12 +8,14 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:40:00.000Z",
-  "intent": "The context-menu moment from a music app finished to the edge: press, lift, dim, open, slide and release, with a spring that retargets the moment you let go and a lifted cover that is always sharp.",
+  "intent": "The context-menu moment finished to the edge, now with depth: every layer opens from and closes into the row it belongs to, the pointer can cut a corner toward a submenu without losing it, and the same tree reads as a stacked push and pop when there is no room to cascade.",
   "tile": {
     "cols": 4,
     "rows": 4
   },
   "sources": [
-    "https://developer.apple.com/design/human-interface-guidelines/context-menus"
+    "https://developer.apple.com/design/human-interface-guidelines/context-menus",
+    "https://bjk5.com/post/44698559168/breaking-down-amazons-mega-dropdown",
+    "https://www.w3.org/WAI/ARIA/apg/patterns/menubar/"
   ]
 }
