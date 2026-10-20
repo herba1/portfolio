@@ -241,6 +241,8 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
       uInB: { value: 0 },
       uOutB: { value: 1 },
       uLift: { value: 0.14 },
+      uDepth: { value: 1.2 },
+      uTilt: { value: new THREE.Vector2() },
       uGround: { value: new THREE.Vector3(...palette.ground.map((c) => c / 255)) },
       uSteam: { value: new THREE.Vector3(...palette.steam.map((c) => c / 255)) },
     },
@@ -253,8 +255,9 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
   steamScene.add(new THREE.Mesh(screenGeo, steamMat));
 
   const breath = createBreath();
-  const pointer = { lastX: 0, lastY: 0, lastT: 0, vx: 0, vy: 0, fresh: false, inside: false, downX: 0, downY: 0, downT: 0, moved: 0 };
+  const pointer = { nx: 0, ny: 0, lastX: 0, lastY: 0, lastT: 0, vx: 0, vy: 0, fresh: false, inside: false, downX: 0, downY: 0, downT: 0, moved: 0 };
   const velocity = new THREE.Vector2();
+  const tilt = new THREE.Vector2();
   const view = { w: 1, h: 1, dpr: 1, compact: false };
   const slots = [
     { index: -1, phase: "idle", inT: 0, outT: 1 },
@@ -341,6 +344,10 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
     renderer.setSize(view.w, view.h, false);
     steamMat.uniforms.uRes.value.set(view.w * view.dpr, view.h * view.dpr);
     steamMat.uniforms.uPush.value = (view.compact ? 60 : 90) * view.dpr;
+    const W = view.w * view.dpr;
+    const H = view.h * view.dpr;
+    const typeSize = view.compact ? Math.min(W * 0.125, H * 0.075) : Math.min(H * 0.12, W * 0.066);
+    steamMat.uniforms.uDepth.value = typeSize * 0.012;
     flowMat.uniforms.uAspect.value = view.w / view.h;
     flowMat.uniforms.uFalloff.value = view.compact ? 0.18 : 0.12;
     if (index >= 0) {
@@ -382,6 +389,12 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
     updateFlow(dt);
     breath.level(pointer.inside ? velocity.length() * 0.05 : 0);
     steamMat.uniforms.uTime.value = time;
+    const k = 1 - Math.exp(-3 * dt);
+    const tx = pointer.inside && !reducedMotion ? pointer.nx * 0.7 : 0;
+    const ty = pointer.inside && !reducedMotion ? -pointer.ny * 0.7 : 0;
+    tilt.x += (tx - tilt.x) * k;
+    tilt.y += (ty - tilt.y) * k;
+    steamMat.uniforms.uTilt.value.copy(tilt);
     renderer.render(steamScene, ortho);
     raf = requestAnimationFrame(tick);
   }
@@ -414,6 +427,8 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
     pointer.fresh = true;
     pointer.inside = true;
     flowMat.uniforms.uMouse.value.set(x / rect.width, 1 - y / rect.height);
+    pointer.nx = x / rect.width - 0.5;
+    pointer.ny = y / rect.height - 0.5;
   }
 
   function onDown(event) {

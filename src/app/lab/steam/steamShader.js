@@ -41,6 +41,8 @@ uniform float uOutA;
 uniform float uInB;
 uniform float uOutB;
 uniform float uLift;
+uniform float uDepth;
+uniform vec2 uTilt;
 uniform vec3 uGround;
 uniform vec3 uSteam;
 varying vec2 vUv;
@@ -53,8 +55,8 @@ float fbm(vec2 p) {
   return noise(p) * 0.6 + noise(p * 2.03 + 0.37) * 0.28 + noise(p * 4.1 + 0.71) * 0.12;
 }
 
-float vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, float blown) {
-  if (inAmt <= 0.0 || outAmt >= 1.0) return 0.0;
+vec2 vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, float blown) {
+  if (inAmt <= 0.0 || outAmt >= 1.0) return vec2(0.0, 1.0);
   float t = uTime;
   float aspect = uRes.x / uRes.y;
   vec2 st = vec2(uv.x * aspect, uv.y);
@@ -69,6 +71,21 @@ float vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, flo
   float gather = inAmt * (1.0 - outAmt * 0.8) * (1.0 - blown * 0.75);
   float body = smoothstep(0.04, 0.8, mix(m.b * 0.8, m.g, gather));
   float letter = body * (0.22 + 0.5 * vap) + m.r * (0.3 + 0.2 * vap) * gather;
+  vec2 e = vec2(2.0) / uRes;
+  float hx = texture2D(mask, base + vec2(e.x, 0.0)).g - texture2D(mask, base - vec2(e.x, 0.0)).g;
+  float hy = texture2D(mask, base + vec2(0.0, e.y)).g - texture2D(mask, base - vec2(0.0, e.y)).g;
+  vec3 n = normalize(vec3(-hx * 1.5, -hy * 1.5, 1.0));
+  vec3 light = normalize(vec3(-0.55, 0.62, 0.58));
+  float shade = clamp(mix(1.0, dot(n, light) / light.z, 0.5 * gather), 0.78, 1.14);
+  vec2 dir = normalize(vec2(0.62, -0.78) + uTilt);
+  vec2 stepUv = dir * uDepth / uRes;
+  float side = 0.0;
+  for (int i = 1; i <= 5; i++) {
+    float fi = float(i);
+    float layer = smoothstep(0.3, 0.75, texture2D(mask, base - stepUv * fi).g);
+    side = max(side, layer * (1.0 - fi * 0.07));
+  }
+  side *= gather * (0.3 + 0.36 * vap);
   float env = 0.0;
   for (int k = 1; k <= 8; k++) {
     float fk = float(k);
@@ -82,10 +99,14 @@ float vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, flo
   float strands = smoothstep(0.46, 0.78, fil);
   float wisps = env * (0.25 + 0.75 * strands) * 1.4;
   float w = wisps * 0.85 * (1.0 - 0.75 * m.r);
-  float d = 1.0 - (1.0 - letter) * (1.0 - w);
+  float solid = max(letter, side);
+  float front = clamp((letter - side * 0.85) * 6.0 + 0.5, 0.0, 1.0);
+  float faceLit = mix(0.5, shade, front);
+  float d = 1.0 - (1.0 - solid) * (1.0 - w);
+  float lit = (solid * faceLit + w) / max(solid + w, 0.0001);
   float appear = smoothstep(0.0, 1.0, inAmt);
   float leave = 1.0 - smoothstep(0.0, 0.8, outAmt);
-  return d * appear * leave;
+  return vec2(d * appear * leave, lit);
 }
 
 void main() {
@@ -100,15 +121,17 @@ void main() {
   q += vec2(swirl, -swirl * 0.4);
   float thin = 1.0 - 0.55 * clamp(flow.z, 0.0, 1.0);
   float blown = clamp(push * 0.7, 0.0, 1.0);
-  float d = vapour(uMaskA, q, uInA, uOutA, 1.3, blown) + vapour(uMaskB, q, uInB, uOutB, 7.9, blown);
-  d = clamp(d * thin, 0.0, 1.0);
+  vec2 va = vapour(uMaskA, q, uInA, uOutA, 1.3, blown);
+  vec2 vb = vapour(uMaskB, q, uInB, uOutB, 7.9, blown);
+  float lit = (va.x * va.y + vb.x * vb.y) / max(va.x + vb.x, 0.0001);
+  float d = clamp((va.x + vb.x) * thin, 0.0, 1.0);
   vec2 c = uv - 0.5;
   c.x *= uRes.x / uRes.y;
   float vignette = 1.0 - 0.5 * smoothstep(0.25, 1.05, length(c));
   float grain = (noise(uv * uRes / 256.0 + fract(uTime * 7.31) * vec2(0.37, 0.71)) - 0.5) * 0.018;
   vec3 ground = uGround * vignette + grain;
   vec3 steam = uSteam * (0.9 + 0.1 * smoothstep(0.0, 1.0, uv.y));
-  vec3 color = mix(ground, steam, d * 0.92);
+  vec3 color = mix(ground, steam * lit, d * 0.92);
   color += uSteam * 0.05 * smoothstep(0.0, 0.4, d);
   gl_FragColor = vec4(color, 1.0);
 }
