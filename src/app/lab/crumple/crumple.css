@@ -1,8 +1,8 @@
 .crumple {
-  --crumple-ground: #ece8df;
-  --crumple-ink: #1c1a24;
-  --crumple-ink-secondary: #3d3a45;
-  --crumple-accent: #e2412f;
+  --crumple-ground: #ebe9e4;
+  --crumple-ink: #1c1a18;
+  --crumple-ink-secondary: #4a4640;
+  --crumple-accent: #2f6fe0;
   --crumple-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
   --crumple-serif-weight: 430;
   --crumple-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -30,8 +30,18 @@
   position: absolute;
   inset: 0;
   outline: none;
+  cursor: grab;
   touch-action: none;
   -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+}
+
+.crumple[data-embedded] .crumple__stage {
+  touch-action: pan-y;
+}
+
+.crumple[data-held] .crumple__stage {
+  cursor: grabbing;
 }
 
 .crumple__stage:focus-visible {
@@ -42,67 +52,17 @@
   display: block;
   width: 100%;
   height: 100%;
-  opacity: 0;
-  transition: opacity 400ms var(--crumple-ease);
-}
-
-.crumple[data-status="ready"] .crumple__canvas {
-  opacity: 1;
-}
-
-.crumple__cursor {
-  position: absolute;
-  top: 0;
-  left: 0;
-  width: 0;
-  height: 0;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity 160ms var(--crumple-ease);
-  will-change: transform;
-}
-
-.crumple__cursor-ring {
-  position: absolute;
-  left: -14px;
-  top: -14px;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  border: 2px solid var(--crumple-ink);
-  background: rgb(255 255 255 / 0.5);
-  transition:
-    transform 180ms var(--crumple-ease),
-    background-color 180ms var(--crumple-ease);
-}
-
-.crumple[data-over] .crumple__cursor-ring {
-  transform: scale(1.25);
-}
-
-.crumple[data-holding] .crumple__cursor-ring {
-  transform: scale(0.7);
-  background: var(--crumple-accent);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .crumple__stage {
-    cursor: none;
-  }
-
-  .crumple__stage:hover .crumple__cursor {
-    opacity: 1;
-  }
 }
 
 .crumple__head {
   position: absolute;
   top: 88px;
   left: 48px;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-width: 288px;
+  max-width: 280px;
   pointer-events: none;
 }
 
@@ -136,110 +96,25 @@
   color: var(--crumple-ink);
 }
 
-.crumple__bar {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  display: flex;
-  gap: 8px;
-  transform: translateX(-50%);
-}
-
-.crumple__seg {
-  display: flex;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 999px;
-  background: rgb(255 255 255 / 0.7);
-  box-shadow: inset 0 0 0 2px var(--crumple-ink);
-}
-
-.crumple__key {
-  height: 32px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 999px;
-  background: transparent;
-  color: var(--crumple-ink);
-  font: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background-color 160ms var(--ease-hover),
-    color 160ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
-}
-
-.crumple__key:active {
-  transform: scale(0.96);
-}
-
-.crumple__key:disabled {
-  cursor: default;
-}
-
-.crumple__key[aria-checked="true"] {
-  background: var(--crumple-ink);
-  color: #f6f1e4;
-}
-
-.crumple__key:focus-visible {
-  outline: 2px solid var(--crumple-accent);
-  outline-offset: 2px;
-}
-
-.crumple__iron {
-  height: 40px;
-  padding: 0 20px;
-  background: #f6f1e4;
-  box-shadow:
-    inset 0 0 0 2px var(--crumple-ink),
-    3px 4px 0 var(--crumple-ink);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .crumple__key:not([aria-checked="true"]):not(:disabled):hover {
-    background: rgb(28 26 36 / 0.08);
-  }
-
-  .crumple__iron:not(:disabled):hover {
-    background: #fffaf0;
-  }
-}
-
 .crumple__fallback {
   position: absolute;
   inset: 0;
   display: grid;
   place-items: center;
   margin: 0;
+  color: var(--crumple-ink);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
   font-weight: var(--text-ui-lg--font-weight);
 }
 
-@container (max-width: 640px) {
+@container (max-width: 759px) {
   .crumple__head {
     top: 80px;
     left: 16px;
     right: 16px;
+    max-width: none;
     gap: 4px;
-  }
-
-  .crumple__bar {
-    bottom: 16px;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .crumple__canvas,
-  .crumple__cursor-ring,
-  .crumple__key {
-    transition: none;
   }
 }

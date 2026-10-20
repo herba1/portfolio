@@ -1,20 +1,21 @@
 {
   "title": "Crumple",
-  "description": "The Beatles' Shea Stadium setlist, or a halftone Abbey Road poster, drawn like a comic panel. Press and hold to scrunch it into a ball and drag it around; the paper animates on twos at 12 frames a second with ink outlines and screen-tone shading while your cursor stays smooth, and every crumple leaves inked crease lines behind until you smooth it out.",
+  "description": "A real film photo print, Kodak's sun hats on a wall, lying on the table. Press and hold and it slowly scrunches into a faceted paper ball under the lamp; let go and it eases back open, flat again but covered in the creases it just learned.",
   "tags": [
-    "Canvas",
+    "WebGL",
     "Paper",
-    "Music"
+    "Physics"
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One paper mechanic in a stylised frame rate: a crumple mesh drawn as held comic frames, so the scrunch reads as drawn animation instead of a simulation that looks slightly off.",
+  "intent": "Realistic paper, slow and eased: a cloth simulation with plastic bending is baked offline into a crumple and an uncrumple path, and a critically damped spring scrubs between them so every press, release and change of mind stays continuous.",
   "tile": {
     "cols": 3,
     "rows": 5
   },
   "sources": [
-    "https://www.setlist.fm/setlist/the-beatles/1965/shea-stadium-flushing-ny-6bd6a6f2.html",
-    "https://en.wikipedia.org/wiki/Spider-Man:_Into_the_Spider-Verse"
+    "https://matthias-research.github.io/pages/publications/posBasedDyn.pdf",
+    "https://tympanus.net/codrops/",
+    "Print photo: kodim03 (hats), a 35mm film scan from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/), cropped square and re-encoded as webp."
   ]
 }
