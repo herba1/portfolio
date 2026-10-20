@@ -50,6 +50,15 @@ function DialMarks() {
   );
 }
 
+async function loadOwn(engine, file, done) {
+  if (!engine) return;
+  try {
+    if (await engine.setImage(file)) done(true);
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const canvasRef = useRef(null);
@@ -57,8 +66,12 @@ export default function Piece({ embedded = false }) {
   const dialRefs = useRef([]);
   const fRef = useRef(null);
   const tRef = useRef(null);
+  const engineRef = useRef(null);
+  const fileRef = useRef(null);
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [dropping, setDropping] = useState(false);
+  const [own, setOwn] = useState(false);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -81,6 +94,7 @@ export default function Piece({ embedded = false }) {
             if (!cancelled) setReady(true);
           },
         });
+        engineRef.current = engine;
       } catch (error) {
         console.error(error);
         if (!cancelled) setFailed(true);
@@ -99,8 +113,66 @@ export default function Piece({ embedded = false }) {
       cancelled = true;
       io.disconnect();
       engine?.destroy();
+      engineRef.current = null;
     };
   }, [embedded]);
+
+  useEffect(() => {
+    if (embedded) return undefined;
+    const root = rootRef.current;
+    if (!root) return undefined;
+    let depth = 0;
+    const hasFile = (e) => Array.from(e.dataTransfer?.types || []).includes("Files");
+    const onEnter = (e) => {
+      if (!hasFile(e)) return;
+      e.preventDefault();
+      depth += 1;
+      setDropping(true);
+    };
+    const onOver = (e) => {
+      if (!hasFile(e)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "copy";
+    };
+    const onLeave = (e) => {
+      if (!hasFile(e)) return;
+      depth = Math.max(0, depth - 1);
+      if (!depth) setDropping(false);
+    };
+    const onDrop = (e) => {
+      if (!hasFile(e)) return;
+      e.preventDefault();
+      depth = 0;
+      setDropping(false);
+      const file = Array.from(e.dataTransfer.files).find((f) => f.type.startsWith("image/"));
+      if (file) loadOwn(engineRef.current, file, setOwn);
+    };
+    const onPaste = (e) => {
+      const item = Array.from(e.clipboardData?.items || []).find((i) => i.type.startsWith("image/"));
+      const file = item?.getAsFile();
+      if (!file) return;
+      e.preventDefault();
+      loadOwn(engineRef.current, file, setOwn);
+    };
+    root.addEventListener("dragenter", onEnter);
+    root.addEventListener("dragover", onOver);
+    root.addEventListener("dragleave", onLeave);
+    root.addEventListener("drop", onDrop);
+    window.addEventListener("paste", onPaste);
+    return () => {
+      root.removeEventListener("dragenter", onEnter);
+      root.removeEventListener("dragover", onOver);
+      root.removeEventListener("dragleave", onLeave);
+      root.removeEventListener("drop", onDrop);
+      window.removeEventListener("paste", onPaste);
+    };
+  }, [embedded]);
+
+  const onPick = (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) loadOwn(engineRef.current, file, setOwn);
+  };
 
   const Root = embedded ? "div" : "main";
   const arc = `M ${-LENS_TEXT_R} 0 A ${LENS_TEXT_R} ${LENS_TEXT_R} 0 0 0 ${LENS_TEXT_R} 0`;
@@ -112,6 +184,7 @@ export default function Piece({ embedded = false }) {
       data-embedded={embedded ? "" : undefined}
       data-ready={ready ? "" : undefined}
       data-failed={failed ? "" : undefined}
+      data-dropping={dropping ? "" : undefined}
     >
       <canvas
         ref={canvasRef}
@@ -164,8 +237,22 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="iris-head">
           <h1 className="iris-title">Iris</h1>
           <p className="iris-lede">
-            Turn the ring. Nine blades close on a mountain stream shot on film, and the sun glinting off the water falls from <em>soft discs</em> into stars.
+            <span className="iris-lede-line" data-on={own ? undefined : ""} aria-hidden={own}>
+              Turn the ring. Nine blades close on a mountain stream shot on film, and the sun glinting off the water falls from <em>soft discs</em> into stars.
+            </span>
+            <span className="iris-lede-line" data-on={own ? "" : undefined} aria-hidden={!own}>
+              Turn the ring. Nine blades close on your picture, and its brightest points fall from <em>soft discs</em> into stars.
+            </span>
           </p>
+          <button type="button" className="iris-own" onClick={() => fileRef.current?.click()}>
+            <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+              <rect x="2" y="3" width="12" height="10" rx="2" fill="none" stroke="currentColor" strokeWidth="1.3" />
+              <circle cx="6" cy="6.75" r="1.25" fill="currentColor" />
+              <path d="M3 12l3.4-3.4 2.2 2.2L11 8.4l2.6 2.6" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round" />
+            </svg>
+            <span>{dropping ? "Drop it on the lens" : own ? "Use another image" : "Use your own image"}</span>
+          </button>
+          <input ref={fileRef} className="iris-file" type="file" accept="image/*" tabIndex={-1} aria-hidden="true" onChange={onPick} />
         </header>
       )}
       {failed ? <p className="iris-fallback">This piece needs WebGL 2.</p> : null}
