@@ -1,6 +1,6 @@
 {
   "title": "Crumple",
-  "description": "A real film photo print, Kodak's sun hats on a wall, lying on the table. Each press crushes it one step further: the first squeeze already breaks it into sharp creases and flat facets, each later one folds it tighter until it is a faceted ball under the lamp. Keep pressing and it opens back out a step at a time, keeping every crease.",
+  "description": "A real film photo print, Kodak's sun hats on a wall, lying on the table, animated like stop-motion at 8 frames a second. Each press crushes it one step further: the first squeeze breaks it into sharp creases and flat facets, each later one folds it tighter until it is a faceted ball under the lamp. Keep pressing and it opens back out a step at a time, keeping every crease.",
   "tags": [
     "WebGL",
     "Paper",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "Realistic paper in discrete stages: a cloth simulation with plastic bending is baked offline, and every stage sits on the creased fold path with flat-shaded facets, so the sheet folds along sharp ridges from the first press and never puffs up like a bag; each press springs it quickly to the next stage and lets it settle.",
+  "intent": "Realistic paper in discrete stages, shown at a stepped stop-motion frame rate: the crease simulation is baked offline, a spring carries each press to the next stage every display frame so input stays immediate, and the picture only advances every 125ms, settle included.",
   "tile": {
     "cols": 3,
     "rows": 5

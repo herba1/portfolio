@@ -3,7 +3,8 @@ import { createRustle } from "./crumpleSound";
 
 const SUB = 4;
 const GROUND = "#ebe9e4";
-const OMEGA = 8.5;
+const OMEGA = 6.5;
+const FRAME_MS = 125;
 const ZETA = 0.6;
 const CRUSH = [0, 0.6, 0.74, 0.8, 0.855, 1];
 const OPEN = CRUSH;
@@ -175,7 +176,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   scene.add(sheet);
 
   const pose = new Float32Array(stride);
-  const st = { p: 0, v: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, last: 0, active: true, destroyed: false, dirty: true, held: false };
+  const st = { p: 0, v: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, last: 0, drawnAt: -1e9, stale: false, active: true, destroyed: false, dirty: true, held: false };
   const view = { w: 1, h: 1 };
   const rustle = createRustle();
 
@@ -314,13 +315,19 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     }
     st.memory = Math.max(st.memory, smoothstep(0, 0.14, st.p));
     const moving = st.p !== before;
-    if (moving) rustle.rustle(Math.abs(st.p - before) / Math.max(dt, 1e-3), st.p);
-    if (moving || st.dirty) {
+    if (moving) {
+      rustle.rustle(Math.abs(st.p - before) / Math.max(dt, 1e-3), st.p);
+      st.stale = true;
+    }
+    const since = now - st.drawnAt;
+    if ((st.stale && since >= FRAME_MS - 4) || st.dirty) {
       update();
       render();
       st.dirty = false;
+      st.stale = false;
+      st.drawnAt = since < FRAME_MS * 2 ? st.drawnAt + FRAME_MS : now;
     }
-    if (moving) st.raf = requestAnimationFrame(step);
+    if (moving || st.stale) st.raf = requestAnimationFrame(step);
     else st.last = 0;
   }
 
