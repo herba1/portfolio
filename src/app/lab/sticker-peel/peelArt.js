@@ -25,8 +25,20 @@ const BASE_STICKERS = [
   },
 ];
 
-export function stickersFor() {
-  return BASE_STICKERS.map((def) => ({ ...def }));
+export function stickersFor(sleeveId) {
+  const album = albumById(sleeveId) || SLEEVES[0];
+  return BASE_STICKERS.map((def) => ({ ...def, title: album.title, artist: album.artist, label: `Price sticker, ${album.title}, $4.99` }));
+}
+
+function fitFont(ctx, text, weight, size, family, room) {
+  let px = size;
+  ctx.font = `${weight} ${Math.round(px)}px ${family}`;
+  const width = ctx.measureText(text).width;
+  if (width > room) {
+    px *= room / width;
+    ctx.font = `${weight} ${Math.round(px)}px ${family}`;
+  }
+  return px;
 }
 
 function mulberry(seed) {
@@ -112,7 +124,7 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawPrice(ctx, w, h, fonts) {
+function drawPrice(ctx, w, h, fonts, def) {
   const pad = 2;
   const radius = h * 0.07;
   roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
@@ -130,16 +142,30 @@ function drawPrice(ctx, w, h, fonts) {
   ctx.fillStyle = "rgba(90,20,10,0.18)";
   ctx.fillRect(0, band - 2, w, 2);
   const inset = w * 0.065;
+  const title = def.title || "Abbey Road";
   ctx.fillStyle = "#fbf3e6";
   ctx.textBaseline = "middle";
-  ctx.font = `600 ${Math.round(band * 0.42)}px ${fonts.sans}`;
-  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-0.01 * band * 0.42).toFixed(2)}px`;
-  ctx.fillText("Used LP", inset, band * 0.54);
   ctx.textAlign = "right";
-  ctx.font = `500 ${Math.round(band * 0.36)}px ${fonts.sans}`;
-  ctx.fillText("Very good +", w - inset, band * 0.55);
+  const tagPx = fitFont(ctx, "Used LP", 500, band * 0.36, fonts.sans, w * 0.3);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-0.005 * tagPx).toFixed(2)}px`;
+  const tagW = ctx.measureText("Used LP").width;
+  ctx.fillText("Used LP", w - inset, band * 0.55);
   ctx.textAlign = "left";
+  const titlePx = fitFont(ctx, title, 600, band * 0.5, fonts.sans, w - inset * 2 - tagW - w * 0.05);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-0.018 * titlePx).toFixed(2)}px`;
+  ctx.fillText(title, inset, band * 0.54);
   if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+
+  ctx.save();
+  ctx.filter = "blur(0.35px)";
+  ctx.fillStyle = "rgba(40,40,52,0.78)";
+  ctx.textBaseline = "alphabetic";
+  const line = `${def.artist || "The Beatles"} · Very good +`;
+  const linePx = fitFont(ctx, line, 500, h * 0.1, fonts.sans, w - inset * 2);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(0.004 * linePx).toFixed(2)}px`;
+  ctx.fillText(line, inset, band + h * 0.135);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  ctx.restore();
 
   ctx.save();
   ctx.filter = "blur(0.6px)";
@@ -173,7 +199,7 @@ export function stickerArt(def, fonts, dpr) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  drawPrice(ctx, w, h, fonts);
+  drawPrice(ctx, w, h, fonts, def);
   return canvas;
 }
 
