@@ -2,8 +2,7 @@
   "git": {
     "deploymentEnabled": {
       "**": false,
-      "main": true,
-      "claude/lab-taste-refs-28ck96": true
+      "main": true
     }
   }
 }
