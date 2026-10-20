@@ -436,6 +436,7 @@ export default class TypewriterEngine {
     if (this.drag && this.drag.axis) return;
     this.settleHead();
     const strike = this.makeStrike(ch, this.col, this.line);
+    this.sound.key(clamp((this.geo?.angles[bar.index] || 0) * 0.5, -0.6, 0.6));
     const advance = this.col < MAX_COL;
     if (advance) this.col += 1;
     strike.bell = advance && this.col === BELL_COL;
@@ -637,7 +638,7 @@ export default class TypewriterEngine {
     this.dirty.push(this.ink.stamp(s));
     const pan = clamp((this.geo.angles[b.index] || 0) * 0.5, -0.6, 0.6);
     this.sound.strike(s.force, pan, s.weave[0] - 0.5);
-    if (b.advance) this.sound.escape();
+    if (b.advance) this.sound.escape(0.032);
     if (s.bell) this.sound.bell();
   }
 
