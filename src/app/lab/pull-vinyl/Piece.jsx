@@ -110,7 +110,7 @@ export default function Piece({ embedded = false }) {
         decode(upcoming.image),
       ]).then(() => {
         if (!alive) return;
-        setItems(initial);
+        setItems(initial.map((s) => ({ ...s, intro: true })));
         setLabel(upcoming.image);
         engineRef.current?.ready();
       });
@@ -179,8 +179,11 @@ export default function Piece({ embedded = false }) {
       const e = reduce ? 1 : easeOut(span(u, 0.18, 1));
       const es = reduce || u >= 1 ? 1 : settle((u * ARRIVE) / 1000, 11);
       const yOld = lerp(a.y0, a.blockH, e);
-      const listY = yOld - a.blockH;
+      const listY = yOld - a.blockH * e;
       listRef.current.style.transform = `translate3d(0, ${listY.toFixed(2)}px, 0)`;
+      a.rows.forEach((li, i) => {
+        li.style.height = `${(a.heights[i] * e).toFixed(2)}px`;
+      });
       a.texts.forEach((el, i) => {
         const et = reduce
           ? 1
@@ -209,6 +212,10 @@ export default function Piece({ embedded = false }) {
       st.target = 0;
       a.texts.forEach((el) => {
         el.style.transform = "";
+      });
+      a.rows.forEach((li) => {
+        li.style.height = "";
+        li.style.overflow = "";
       });
       if (a.thumb) a.thumb.style.visibility = "";
       const g = groupRef.current;
@@ -485,6 +492,7 @@ export default function Piece({ embedded = false }) {
           y0: listY,
           blockH,
           rows,
+          heights: rows.map((li) => li.offsetHeight),
           texts: rows.flatMap((li) =>
             Array.from(
               li.querySelectorAll(".pull-vinyl-song, .pull-vinyl-meta"),
@@ -498,6 +506,10 @@ export default function Piece({ embedded = false }) {
           radius: 6 / (tw / g.offsetWidth),
         };
         if (thumb) thumb.style.visibility = "hidden";
+        rows.forEach((li) => {
+          li.style.overflow = "hidden";
+          li.style.height = "0px";
+        });
         g.style.zIndex = "2";
         g.style.visibility = "visible";
         st.arrive = a;
@@ -632,11 +644,13 @@ export default function Piece({ embedded = false }) {
             data-ready={items.length ? "" : undefined}
           >
             <ul ref={listRef} className="pull-vinyl-list" aria-live="polite">
-              {items.map((it) => (
+              {items.map((it, i) => (
                 <li
                   key={it.key}
                   className="pull-vinyl-item"
                   data-fresh={it.fresh ? "" : undefined}
+                  data-intro={it.intro ? "" : undefined}
+                  style={it.intro ? { "--pv-i": i } : undefined}
                 >
                   <div className="pull-vinyl-row">
                     <img src={it.image} alt="" draggable={false} />
