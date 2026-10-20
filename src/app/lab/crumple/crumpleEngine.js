@@ -3,7 +3,10 @@ import { createRustle } from "./crumpleSound";
 
 const SUB = 4;
 const GROUND = "#ebe9e4";
-const OMEGA = 2.3;
+const OMEGA = 8.5;
+const ZETA = 0.6;
+const CRUSH = [0, 0.6, 0.74, 0.8, 0.855, 1];
+const OPEN = CRUSH;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smoothstep = (a, b, x) => {
@@ -156,11 +159,11 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const front = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.52, metalness: 0, vertexColors: true, side: THREE.FrontSide }),
+    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.52, metalness: 0, vertexColors: true, flatShading: true, side: THREE.FrontSide }),
   );
   const back = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0, vertexColors: true, side: THREE.BackSide }),
+    new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0, vertexColors: true, flatShading: true, side: THREE.BackSide }),
   );
   for (const m of [front, back]) {
     m.castShadow = true;
@@ -172,7 +175,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   scene.add(sheet);
 
   const pose = new Float32Array(stride);
-  const st = { p: 0, v: 0, target: 0, memory: 0, raf: 0, last: 0, active: true, destroyed: false, dirty: true, held: false };
+  const st = { p: 0, v: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, last: 0, active: true, destroyed: false, dirty: true, held: false };
   const view = { w: 1, h: 1 };
   const rustle = createRustle();
 
@@ -189,7 +192,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     pose.fill(0);
     const f = clamp(st.p, 0, 1) * (F - 1);
     const m = st.memory;
-    if (m < 1) sample(A, f, pose, 1 - m);
+    if (m < 1) for (let k = 0; k < stride; k += 1) pose[k] += A[k] * (1 - m);
     if (m > 0) sample(B, (F - 1) - f, pose, m);
   }
 
@@ -290,16 +293,26 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
       st.p = st.target;
       st.v = 0;
     } else {
-      const a = OMEGA * OMEGA * (st.target - st.p) - 2 * OMEGA * st.v;
-      st.v += a * dt;
-      st.p += st.v * dt;
+      const n = 4;
+      for (let k = 0; k < n; k += 1) {
+        const h = dt / n;
+        const a = OMEGA * OMEGA * (st.target - st.p) - 2 * ZETA * OMEGA * st.v;
+        st.v += a * h;
+        st.p += st.v * h;
+        if (st.p > 1) {
+          st.p = 1;
+          st.v = Math.min(0, -st.v * 0.25);
+        } else if (st.p < 0) {
+          st.p = 0;
+          st.v = Math.max(0, -st.v * 0.25);
+        }
+      }
       if (Math.abs(st.target - st.p) < 0.0004 && Math.abs(st.v) < 0.0008) {
         st.p = st.target;
         st.v = 0;
       }
     }
-    st.p = clamp(st.p, 0, 1);
-    st.memory = Math.max(st.memory, smoothstep(0.35, 0.95, st.p));
+    st.memory = Math.max(st.memory, smoothstep(0, 0.14, st.p));
     const moving = st.p !== before;
     if (moving) rustle.rustle(Math.abs(st.p - before) / Math.max(dt, 1e-3), st.p);
     if (moving || st.dirty) {
@@ -316,24 +329,28 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     st.raf = requestAnimationFrame(step);
   }
 
-  function setTarget(t) {
-    st.target = t;
-    onState?.(t > 0.5);
+  function squeeze() {
+    rustle.unlock();
+    const last = CRUSH.length - 1;
+    if (st.dir > 0 && st.stage >= last) st.dir = -1;
+    else if (st.dir < 0 && st.stage <= 0) st.dir = 1;
+    st.stage = clamp(st.stage + st.dir, 0, last);
+    st.target = (st.dir < 0 ? OPEN : CRUSH)[st.stage];
+    st.v += st.dir * 0.6;
+    onState?.({ stage: st.stage, dir: st.dir, last });
     wake();
   }
 
   function onDown(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    rustle.unlock();
     host.setPointerCapture?.(e.pointerId);
     st.held = e.pointerId;
-    setTarget(1);
+    squeeze();
   }
 
   function onUp(e) {
     if (st.held !== e.pointerId) return;
     st.held = false;
-    setTarget(0);
   }
 
   const ro = new ResizeObserver(() => {
@@ -352,10 +369,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   render();
 
   return {
-    hold(on) {
-      if (on) rustle.unlock();
-      setTarget(on ? 1 : 0);
-    },
+    squeeze,
     setActive(on) {
       st.active = on;
       if (on) {

@@ -20,29 +20,82 @@ const DAMP = 2 * Math.sqrt(STIFF) * 0.94;
 const LIFT_STIFF = 160;
 const LIFT_DAMP = 2 * Math.sqrt(LIFT_STIFF) * 0.96;
 const LEAN = 7;
-const GAP_Z = 26;
-const GAP_Y = 9;
-const TIP = 58;
-const TIP_STEP = 1.2;
-const FRONT_Z = 18;
-const FRONT_GAP_Z = 12;
-const DROP = 0.2;
-const DROP_STEP = 0.045;
-const PILE_SOFT = 4;
+const GAP = 0.055;
+const WALL_Z = 0.8 - 0.035;
+const WALL_H = 0.26 + 0.01;
+const REST_STEP = 0.02;
+const PIVOT = 0.05;
+const PIVOT_STEP = 0.014;
+const LIFT_Y = 0.34;
+const DEG = 180 / Math.PI;
 
-function place(d) {
-  if (d >= 0) return { angle: -LEAN, z: -d * GAP_Z, y: -d * GAP_Y, drop: 0, shade: 0 };
+const jitter = (i, k) => {
+  const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
+  return (v - Math.floor(v)) * 2 - 1;
+};
+
+function place(d, i) {
+  const lean = LEAN + jitter(i, 1) * 0.7;
+  const x = jitter(i, 2) * 0.012;
+  const twist = jitter(i, 3) * 0.6;
+  if (d >= 0) return { angle: -lean, z: -d * GAP, x, twist: twist * 0.4, shade: 0 };
   const t = -d;
   const a = Math.min(1, t);
   const e = a * a * (3 - 2 * a);
-  const x = Math.max(0, t - 1);
-  return {
-    angle: mix(-LEAN, TIP, e) + TIP_STEP * x,
-    z: e * FRONT_Z + x * FRONT_GAP_Z,
-    y: 0,
-    drop: e * DROP + PILE_SOFT * (1 - Math.exp(-x / PILE_SOFT)) * DROP_STEP,
-    shade: e,
+  const over = Math.max(0, t - 1);
+  const z = PIVOT * e + PIVOT_STEP * over;
+  const rest = Math.atan2(WALL_Z - z, WALL_H + i * REST_STEP) * DEG;
+  return { angle: mix(-lean, rest, e), z, x: x * (1 + e), twist: twist * (0.4 + 0.6 * e), shade: e };
+}
+
+function woodTexture() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext("2d");
+  const base = ctx.createLinearGradient(0, 0, 0, 256);
+  base.addColorStop(0, "#caa577");
+  base.addColorStop(0.5, "#c19b6b");
+  base.addColorStop(1, "#c6a172");
+  ctx.fillStyle = base;
+  ctx.fillRect(0, 0, 512, 256);
+  let seed = 7;
+  const rand = () => {
+    seed = (seed * 16807) % 2147483647;
+    return seed / 2147483647;
   };
+  for (let k = 0; k < 9; k += 1) {
+    const y0 = rand() * 256;
+    ctx.fillStyle = `rgba(${128 + rand() * 30}, ${86 + rand() * 20}, ${44 + rand() * 18}, ${0.1 + rand() * 0.12})`;
+    ctx.beginPath();
+    ctx.moveTo(0, y0);
+    const amp = 4 + rand() * 10;
+    const f = 0.004 + rand() * 0.008;
+    const ph = rand() * 6.28;
+    const h = 6 + rand() * 18;
+    for (let x = 0; x <= 512; x += 8) ctx.lineTo(x, y0 + Math.sin(x * f + ph) * amp);
+    for (let x = 512; x >= 0; x -= 8) ctx.lineTo(x, y0 + h + Math.sin(x * f + ph + 0.4) * amp);
+    ctx.closePath();
+    ctx.fill();
+  }
+  for (let k = 0; k < 150; k += 1) {
+    const y0 = rand() * 256;
+    const amp = 1 + rand() * 5;
+    const f = 0.006 + rand() * 0.012;
+    const ph = rand() * 6.28;
+    ctx.strokeStyle = `rgba(92, 58, 26, ${0.08 + rand() * 0.2})`;
+    ctx.lineWidth = 0.5 + rand() * 1.1;
+    ctx.beginPath();
+    const x0 = rand() * 200 - 100;
+    const len = 200 + rand() * 500;
+    for (let x = x0; x <= x0 + len; x += 6) {
+      const y = y0 + Math.sin(x * f + ph) * amp + Math.sin(x * f * 3.1 + ph) * amp * 0.25;
+      if (x === x0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  return canvas.toDataURL("image/jpeg", 0.86);
 }
 
 function Vinyl({ sleeve }) {
@@ -60,9 +113,48 @@ function Vinyl({ sleeve }) {
   );
 }
 
-function Back() {
-  return <div className="crate__back" aria-hidden="true" />;
+function Back({ sleeve }) {
+  const tracks = sleeve.tracks?.length ? sleeve.tracks : sleeve.songs;
+  const half = tracks.length > 3 ? Math.ceil(tracks.length / 2) : tracks.length;
+  const sides = [tracks.slice(0, half), tracks.slice(half)].filter((side) => side.length);
+  return (
+    <div className="crate__back" aria-hidden="true" style={{ "--crate-back-paper": sleeve.back }}>
+      <div className="crate__back-head">
+        <span className="crate__back-title">{sleeve.title}</span>
+        <span className="crate__back-artist">{sleeve.artist}</span>
+      </div>
+      <div className="crate__back-sides" data-count={sides.length}>
+        {sides.map((side, k) => (
+          <div key={k} className="crate__back-col">
+            <span className="crate__back-side">{k ? "Side two" : "Side one"}</span>
+            <ol className="crate__back-list" start={k ? half + 1 : 1}>
+              {side.map((song) => (
+                <li key={song}>{song}</li>
+              ))}
+            </ol>
+          </div>
+        ))}
+      </div>
+      <div className="crate__back-notes" />
+      <div className="crate__back-foot">
+        <span>{sleeve.year ? `${sleeve.year} · Stereo` : "Stereo"}</span>
+        <span>33⅓</span>
+      </div>
+    </div>
+  );
 }
+
+function Edges() {
+  return (
+    <>
+      <div className="crate__edge crate__edge--top" aria-hidden="true" />
+      <div className="crate__edge crate__edge--left" aria-hidden="true" />
+      <div className="crate__edge crate__edge--right" aria-hidden="true" />
+    </>
+  );
+}
+
+const BOX = ["shadow", "floor", "back", "back-lip", "left", "right", "right-out", "left-lip", "right-lip", "left-end", "right-end", "front", "front-lip"];
 
 const START = 2;
 
@@ -72,7 +164,7 @@ export default function Piece({ embedded = false }) {
   const sleeveRefs = useRef([]);
   const apiRef = useRef(null);
   const placeRef = useRef(START);
-  const { tracks } = useTopSongs(30);
+  const { tracks } = useTopSongs(50);
   const sleeves = useMemo(() => toSleeves(tracks), [tracks]);
   const N = sleeves.length;
   const [index, setIndex] = useState(START);
@@ -109,21 +201,23 @@ export default function Piece({ embedded = false }) {
         const el = sleeveRefs.current[i];
         if (!el) continue;
         const d = i - s.pos;
-        const p = place(d);
+        const p = place(d, i);
         let angle = p.angle;
         let z = p.z;
-        let ly = -p.drop;
-        let x = 0;
+        let ly = 0;
         let vinyl = 0;
+        let sx = p.x;
+        let tw = p.twist;
         if (i === s.liftIndex && lift > 0.001) {
           const l = lift * clamp(1 - Math.abs(d) * 2, 0, 1);
-          ly = mix(ly, 0.1, l);
-          x = -l;
+          ly = LIFT_Y * l;
+          sx = mix(sx, 0, l);
+          tw = mix(tw, 0, l);
           angle = mix(angle, 0, l);
-          z += l * 24;
-          vinyl = l;
+          z += 0.02 * l;
+          vinyl = clamp((l - 0.55) / 0.45, 0, 1);
         }
-        el.style.transform = `translate3d(calc(${x.toFixed(4)} * var(--crate-shift)), calc(${p.y.toFixed(2)}px - ${ly.toFixed(4)} * var(--crate-size)), ${z.toFixed(2)}px) rotateX(${(-angle).toFixed(3)}deg)`;
+        el.style.transform = `translate3d(calc(${sx.toFixed(4)} * var(--crate-size)), calc(${(-ly).toFixed(4)} * var(--crate-size)), calc(${z.toFixed(4)} * var(--crate-size))) rotateX(${(-angle).toFixed(3)}deg) rotateZ(${tw.toFixed(3)}deg)`;
         el.style.setProperty("--crate-shade", p.shade.toFixed(3));
         el.style.setProperty("--crate-out", vinyl.toFixed(4));
         if (d < -0.5) {
@@ -336,6 +430,11 @@ export default function Piece({ embedded = false }) {
       drop,
     };
     render();
+    try {
+      root.style.setProperty("--crate-wood", `url(${woodTexture()})`);
+    } catch {
+      root.style.removeProperty("--crate-wood");
+    }
     root.setAttribute("data-ready", "");
 
     return () => {
@@ -389,8 +488,11 @@ export default function Piece({ embedded = false }) {
         aria-label={LABEL}
         onKeyDown={onKeyDown}
       >
-        <div className="crate__floor" aria-hidden="true" />
         <div className="crate__scene">
+          <div className="crate__world" style={{ "--crate-back": ((Math.max(1, N) - 1) * GAP + 0.16).toFixed(3) }}>
+          {BOX.map((part) => (
+            <div key={part} className={`crate__box crate__box--${part}`} aria-hidden="true" />
+          ))}
           {sleeves.map((s, i) => (
             <div
               key={s.id}
@@ -404,9 +506,11 @@ export default function Piece({ embedded = false }) {
               <div className="crate__front">
                 <img src={s.src} alt="" draggable="false" decoding="async" />
               </div>
-              <Back />
+              <Edges />
+              <Back sleeve={s} />
             </div>
           ))}
+          </div>
         </div>
       </div>
       <div className="crate__now" aria-live="polite">

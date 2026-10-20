@@ -10,7 +10,7 @@ export default function Piece({ embedded = false }) {
   const stageRef = useRef(null);
   const engineRef = useRef(null);
   const [status, setStatus] = useState("loading");
-  const [held, setHeld] = useState(false);
+  const [phase, setPhase] = useState({ stage: 0, dir: 1, last: 5 });
 
   useEffect(() => {
     const root = rootRef.current;
@@ -32,8 +32,8 @@ export default function Piece({ embedded = false }) {
           root,
           src: print.src,
           reduced,
-          onState: (on) => {
-            if (!disposed) setHeld(on);
+          onState: (next) => {
+            if (!disposed) setPhase(next);
           },
         });
         if (disposed) {
@@ -69,37 +69,29 @@ export default function Piece({ embedded = false }) {
   }, []);
 
   const onKeyDown = (e) => {
-    if (e.repeat) return;
     if (e.key === " " || e.key === "Enter") {
       e.preventDefault();
-      engineRef.current?.hold(true);
+      if (!e.repeat) engineRef.current?.squeeze();
     }
   };
 
-  const onKeyUp = (e) => {
-    if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      engineRef.current?.hold(false);
-    }
-  };
+  const opening = phase.dir < 0 || phase.stage >= phase.last;
 
   return (
-    <div ref={rootRef} className="crumple" data-embedded={embedded || undefined} data-status={status} data-held={held || undefined}>
+    <div ref={rootRef} className="crumple" data-embedded={embedded || undefined} data-status={status} data-stage={phase.stage}>
       <div
         ref={stageRef}
         className="crumple__stage"
         tabIndex={0}
         role="button"
-        aria-pressed={held}
-        aria-label="A photo print of bright sun hats on a wall, lying on a table. Press and hold to crumple it into a ball; let go and it slowly opens out again, keeping its creases."
+        aria-label={`A photo print of bright sun hats on a wall, lying on a table, crushed ${phase.stage} of ${phase.last} steps. Press to ${opening ? "open it out one step" : "crush it one step further"}.`}
         onKeyDown={onKeyDown}
-        onKeyUp={onKeyUp}
       />
       {!embedded && (
         <header className="crumple__head">
           <h1 className="crumple__title">Crumple</h1>
           <p className="crumple__hint">
-            Press and hold the print to crumple it. Let go and it <em>opens back out</em>, creases and all.
+            Each press crushes the print one step further. Once it is a ball, keep pressing and it <em>opens back out</em>, creases and all.
           </p>
         </header>
       )}

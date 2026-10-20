@@ -40,7 +40,7 @@
   touch-action: pan-y;
 }
 
-.crumple[data-held] .crumple__stage {
+.crumple__stage:active {
   cursor: grabbing;
 }
 
