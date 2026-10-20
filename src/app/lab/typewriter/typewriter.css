@@ -6,8 +6,6 @@
   --typewriter-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
   --typewriter-serif-weight: 430;
   --typewriter-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --typewriter-key: clamp(28px, calc((100cqw - 48px) / 11), 44px);
-  --typewriter-gap: clamp(4px, 1.2cqw, 8px);
   position: relative;
   width: 100%;
   height: 100%;
@@ -47,12 +45,12 @@
   cursor: grabbing;
 }
 
-.typewriter-stage:focus-visible::after {
+.typewriter-stage:not([data-pointer]):focus-visible::after {
   content: "";
   position: absolute;
   inset: 8px;
-  border-radius: 4px;
-  box-shadow: inset 0 0 0 2px var(--color-accent);
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 1px rgb(30 30 32 / 0.24);
   pointer-events: none;
 }
 
@@ -72,15 +70,28 @@
 
 .typewriter-head {
   position: absolute;
-  left: 40px;
-  bottom: 32px;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: flex-start;
-  gap: 8px;
-  max-width: 272px;
+  gap: 4px;
+  padding: 84px 40px 32px;
+  background: linear-gradient(
+    to bottom,
+    rgb(226 223 216) 0%,
+    rgb(226 223 216) 74%,
+    rgb(226 223 216 / 0.7) 84%,
+    rgb(226 223 216 / 0.24) 93%,
+    rgb(226 223 216 / 0) 100%
+  );
   pointer-events: none;
+}
+
+.typewriter-lede {
+  max-width: 400px;
 }
 
 .typewriter-title {
@@ -94,7 +105,7 @@
 
 .typewriter-lede {
   margin: 0;
-  color: var(--color-ink-secondary);
+  color: var(--color-ink);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
@@ -114,11 +125,14 @@
 }
 
 .typewriter-sound {
+  position: absolute;
+  top: 84px;
+  right: 40px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
   height: 28px;
-  margin-top: 4px;
+  margin-top: 0;
   padding: 0 12px 0 10px;
   border: 0;
   border-radius: 9999px;
@@ -164,108 +178,18 @@
   background: rgb(120 116 108);
 }
 
-.typewriter-keys {
+.typewriter-type {
   position: absolute;
   left: 50%;
-  bottom: 24px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  transform: translateX(-50%);
-  touch-action: none;
-}
-
-.typewriter-row {
-  display: flex;
-  gap: var(--typewriter-gap);
-}
-
-.typewriter-row[data-row="1"] {
-  transform: translateX(calc(var(--typewriter-key) * 0.3));
-}
-
-.typewriter-row[data-row="2"] {
-  transform: translateX(calc(var(--typewriter-key) * 0.1));
-}
-
-.typewriter-key,
-.typewriter-space {
-  position: relative;
-  display: grid;
-  place-items: center;
-  flex: none;
-  width: var(--typewriter-key);
-  height: var(--typewriter-key);
-  padding: 0;
-  border: 0;
-  border-radius: 9999px;
-  background: var(--typewriter-charcoal);
-  color: rgb(240 236 228);
-  font-family: var(--font-mono);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-caption);
-  cursor: pointer;
-  touch-action: none;
-  -webkit-tap-highlight-color: transparent;
-  transition:
-    transform 90ms var(--typewriter-ease),
-    background-color 90ms var(--typewriter-ease);
-}
-
-.typewriter-key[data-down],
-.typewriter-key:active,
-.typewriter-space[data-down],
-.typewriter-space:active {
-  transform: translateY(2px) scale(0.96);
-  background: rgb(64 64 68);
-  transition-duration: 30ms;
-}
-
-.typewriter-key-wide {
-  width: calc(var(--typewriter-key) * 1.6);
-  font-family: var(--font-sans);
-  font-size: var(--text-ui-xs);
-  line-height: var(--text-ui-xs--line-height);
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
-}
-
-.typewriter-key-return {
-  width: calc(var(--typewriter-key) * 1.9);
-}
-
-.typewriter-key[data-on] {
-  background: var(--typewriter-red);
-  color: rgb(255 240 236);
-}
-
-.typewriter-space {
-  width: calc(var(--typewriter-key) * 5);
-  height: calc(var(--typewriter-key) * 0.5);
-  margin-top: calc(var(--typewriter-key) * 0.25);
-  background: rgb(196 197 199);
-}
-
-.typewriter-space[data-down],
-.typewriter-space:active {
-  background: rgb(176 177 180);
-}
-
-.typewriter-sr {
-  position: absolute;
+  bottom: 0;
   width: 1px;
   height: 1px;
-  overflow: hidden;
-  clip-path: inset(50%);
-  white-space: nowrap;
-}
-
-.typewriter-legend {
-  transform: translateY(-1px);
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  resize: none;
+  font-size: 16px;
+  pointer-events: none;
 }
 
 .typewriter-fallback {
@@ -274,48 +198,20 @@
   display: grid;
   place-items: center;
   margin: 0;
-  color: var(--color-ink-secondary);
+  color: var(--color-ink);
   font-size: var(--text-ui-lg);
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
   font-weight: var(--text-ui-lg--font-weight);
 }
 
-@container (max-width: 1179px) {
+@container (max-width: 640px) {
   .typewriter-head {
-    top: 0;
-    bottom: auto;
-    left: 0;
-    right: 0;
-    max-width: none;
     padding: 84px 16px 32px;
-    gap: 4px;
-    background: linear-gradient(
-      to bottom,
-      rgb(226 223 216) 0%,
-      rgb(226 223 216) 74%,
-      rgb(226 223 216 / 0.7) 84%,
-      rgb(226 223 216 / 0.24) 93%,
-      rgb(226 223 216 / 0) 100%
-    );
-  }
-
-  .typewriter-lede {
-    max-width: 400px;
   }
 
   .typewriter-sound {
-    position: absolute;
-    top: 84px;
     right: 16px;
-    margin-top: 0;
-  }
-}
-
-@container (max-width: 640px) {
-  .typewriter-keys {
-    bottom: 16px;
-    gap: 4px;
   }
 
   .typewriter-lede {
@@ -325,8 +221,6 @@
 
 @media (prefers-reduced-motion: reduce) {
   .typewriter-canvas,
-  .typewriter-key,
-  .typewriter-space,
   .typewriter-sound,
   .typewriter-sound-mark {
     transition: none;

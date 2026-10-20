@@ -28,8 +28,8 @@ const A1 = 0.32;
 const PHI_MAX = 0.72;
 const VMAX = 170;
 const ACCEL = 2600;
+const FOLLOW = 0.8;
 const ENAMEL = [226, 223, 216];
-const DECK = "rgb(226 223 216)";
 const CHARCOAL = "rgb(30 30 32)";
 const STEEL_LIGHT = "rgb(196 197 199)";
 const RIBBON_RED = "rgb(196 52 40)";
@@ -69,30 +69,26 @@ function springStep(state, target, omega, zeta, dt) {
 }
 
 export default class TypewriterEngine {
-  constructor({ stage, glCanvas, overlay, keys, embedded, insets, onReady, onFail, onShift }) {
+  constructor({ stage, glCanvas, overlay, embedded, insets, onReady, onFail }) {
     this.stage = stage;
     this.glCanvas = glCanvas;
     this.overlay = overlay;
-    this.keysEl = keys;
     this.embedded = embedded;
     this.insets = insets;
     this.onReady = onReady;
     this.onFail = onFail;
-    this.onShift = onShift;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.sound = new TypewriterSound();
     this.rand = seeded(20261017);
     this.seed = 1;
     this.strikes = [];
     this.bars = [];
-    this.keyFx = [];
     this.dirty = [];
     this.col = START.col;
     this.line = START.line;
     this.car = { x: START.col, v: 0, mode: "spring" };
     this.roll = { x: START.line, v: 0, mode: "spring", target: START.line };
     this.lever = { x: 0, v: 0 };
-    this.shift = false;
     this.script = 0;
     this.ejecting = false;
     this.strikeCount = 0;
@@ -103,7 +99,6 @@ export default class TypewriterEngine {
     this.destroyed = false;
     this.ready = false;
     this.geo = null;
-    this.keyMap = new Map();
     this.frame = this.frame.bind(this);
     this.handlers = {
       down: (e) => this.pointerDown(e),
@@ -147,8 +142,6 @@ export default class TypewriterEngine {
       return;
     }
     this.ctx = this.overlay.getContext("2d");
-    this.cache = document.createElement("canvas");
-    this.keysEl?.querySelectorAll("[data-key]").forEach((el) => this.keyMap.set(el.getAttribute("data-key"), el));
     this.glCanvas.addEventListener("webglcontextlost", this.handlers.lost);
     this.stage.addEventListener("pointerdown", this.handlers.down);
     this.stage.addEventListener("pointermove", this.handlers.move);
@@ -163,7 +156,6 @@ export default class TypewriterEngine {
     this.intersection.observe(this.stage);
     this.resizer = new ResizeObserver(() => this.layout());
     this.resizer.observe(this.stage);
-    if (this.keysEl) this.resizer.observe(this.keysEl);
     for (const s of noteStrikes()) this.strikes.push(this.makeStrike(s.ch, s.col, s.line));
     this.layout();
     this.ready = true;
@@ -279,36 +271,27 @@ export default class TypewriterEngine {
     const H = Math.max(1, Math.round(rect.height));
     const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     const ins = this.insets();
-    const pitch = clamp(Math.min(W / 84, H / 44), 11.5, 18);
+    const gut = W < 640 ? 16 : 40;
+    const fit = (W - gut * 2) / (CAR_RIGHT - CAR_LEFT + MAX_COL * (1 - FOLLOW));
+    const wide = fit >= 9;
+    const pitch = wide ? clamp(Math.min(fit, H / 44), 9, 15) : clamp(Math.min(W / 80, H / 40), 11.5, 19);
     const lineH = pitch * LINE_UNITS;
-    const R = lineH * 1.9;
-    const L = clamp(Math.max(pitch * 5, R * 1.85), 50, 100);
-    const bottom = H - ins.bottom;
-    const minY = ins.top + lineH * 5;
-    const yP = Math.round(Math.max(minY, Math.min(H * 0.7, bottom - R * 0.92 - 28)));
+    const R = lineH * 2.4;
+    const yP = Math.round(clamp(H * (wide ? 0.62 : 0.7), ins.top + lineH * 8, H - ins.bottom - R * 1.6));
     const printX = Math.round(W * 0.5);
-    const fy = yP - lineH * 0.3;
-    const A = Math.min(1.08, Math.acos(clamp((R * 1.05 + 8 + lineH * 0.3) / L, 0, 0.95)));
     const dA = R * Math.sin(A1);
     const Rc = Math.max(R * 2, (yP + 24 - dA) / (Math.sin(PHI_MAX) - Math.sin(A1)));
-    const wellR = 2 * L + 14;
-    const wellA = A + 0.12;
-    const RS = wellR * Math.sin(Math.min(wellA, 1.4)) + 0.2 * L;
-    const yDeck = yP + R * 0.92;
     const angles = [];
-    for (let i = 0; i < BARS.count; i += 1) angles.push(-A + (2 * A * i) / (BARS.count - 1));
+    for (let i = 0; i < BARS.count; i += 1) angles.push(-0.9 + (1.8 * i) / (BARS.count - 1));
     const res = clamp(Math.round(pitch * dpr * 0.95), 16, 28);
-    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, printC: printX, fy, A, Rc, wellR, wellA, RS, yDeck, angles };
+    this.geo = { W, H, dpr, pitch, lineH, R, yP, printX, printC: printX, Rc, angles, wide };
     this.view = { x: this.viewTarget(), v: 0 };
     this.geo.printX = this.view.x;
     this.glCanvas.width = Math.round(W * dpr);
     this.glCanvas.height = Math.round(H * dpr);
     this.overlay.width = Math.round(W * dpr);
     this.overlay.height = Math.round(H * dpr);
-    this.cache.width = this.overlay.width;
-    this.cache.height = this.overlay.height;
     if (this.ink.setResolution(res)) this.rebuildInk();
-    this.drawCache();
     if (this.ready) this.render();
   }
 
@@ -323,9 +306,10 @@ export default class TypewriterEngine {
   }
 
   viewTarget() {
-    const { W, pitch, printC } = this.geo;
-    const gut = Math.max(24, pitch * 2);
+    const { W, pitch, printC, wide } = this.geo;
     const h = this.headX();
+    if (wide) return W / 2 + (h - (CAR_LEFT + CAR_RIGHT) / 2) * pitch * FOLLOW;
+    const gut = Math.max(24, pitch * 2);
     const lo = gut + (h - MARGIN_COLS) * pitch;
     const hi = W - gut - (MARGIN_COLS + MAX_COL + 1 - h) * pitch;
     if (lo > hi) return printC;
@@ -333,7 +317,7 @@ export default class TypewriterEngine {
   }
 
   stepView(dt) {
-    if (!this.view || this.drag?.axis === "h") return false;
+    if (!this.view || (this.drag?.axis === "h" && !this.geo.wide)) return false;
     const moving = springStep(this.view, this.viewTarget(), 16, 1, dt);
     this.geo.printX = this.view.x;
     return moving;
@@ -374,23 +358,11 @@ export default class TypewriterEngine {
     gl.uniform1f(u.uRc, g.Rc);
     gl.uniform4f(u.uSheet, 0, 0, SHEET_COLS, SHEET_LINES * LINE_UNITS);
     gl.uniform2f(u.uCarriage, CAR_LEFT, CAR_RIGHT);
+    gl.uniform1f(u.uKnob, KNOB);
     gl.uniform4f(u.uInkMap, INK_COL0, 0, 1 / INK_COLS, 1 / (SHEET_LINES * LINE_UNITS));
     gl.uniform2f(u.uInkTexel, 1 / this.ink.canvas.width, 1 / this.ink.canvas.height);
     gl.uniform3f(u.uEnamel, ENAMEL[0] / 255, ENAMEL[1] / 255, ENAMEL[2] / 255);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-
-  drawCache() {
-    const g = this.geo;
-    const c = this.cache.getContext("2d");
-    const { W, H, dpr, yDeck } = g;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, this.cache.width, this.cache.height);
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.fillStyle = DECK;
-    c.fillRect(0, yDeck, W, H - yDeck + 2);
-    c.fillStyle = CHARCOAL;
-    c.fillRect(0, yDeck, W, 2);
   }
 
   ribbonLift() {
@@ -409,11 +381,10 @@ export default class TypewriterEngine {
   drawOverlay() {
     const g = this.geo;
     const c = this.ctx;
-    const { W, H, dpr, printX, yP, lineH, pitch } = g;
+    const { dpr, printX, yP, lineH, pitch } = g;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.overlay.width, this.overlay.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    c.drawImage(this.cache, 0, 0, W, H);
 
     const lift = this.ribbonLift();
     const rw = pitch * 1.7;
@@ -477,50 +448,18 @@ export default class TypewriterEngine {
     }
     if (key === "Enter") {
       e.preventDefault();
-      this.flash("return");
       this.carriageReturn();
     } else if (key === "Backspace" || key === "ArrowLeft") {
       e.preventDefault();
-      this.flash("back");
       this.backspace();
     } else if (key === " " || key === "ArrowRight") {
       e.preventDefault();
-      this.flash(" ");
       this.space();
     } else if (key.length === 1) {
       if (!BARS.map.has(key)) return;
       e.preventDefault();
-      this.flash(key.toLowerCase());
       this.press(key);
     }
-  }
-
-  pressKey(key) {
-    this.sound.unlock();
-    if (key === "return") this.carriageReturn();
-    else if (key === "back") this.backspace();
-    else if (key === " ") this.space();
-    else if (key === "shift") {
-      this.shift = !this.shift;
-      this.onShift?.(this.shift);
-    } else {
-      const ch = this.shift ? key.toUpperCase() : key;
-      if (this.shift) {
-        this.shift = false;
-        this.onShift?.(false);
-      }
-      this.press(ch);
-    }
-    this.flash(key);
-  }
-
-  flash(key) {
-    const el = this.keyMap.get(key);
-    if (!el) return;
-    el.setAttribute("data-down", "");
-    this.keyFx = this.keyFx.filter((k) => k.el !== el);
-    this.keyFx.push({ el, t0: -1 });
-    this.wake();
   }
 
   settleHead() {
@@ -866,19 +805,6 @@ export default class TypewriterEngine {
     return springStep(this.lever, 0, 18, 0.9, dt);
   }
 
-  stepKeys(now) {
-    if (!this.keyFx.length) return false;
-    this.keyFx = this.keyFx.filter((k) => {
-      if (k.t0 < 0) k.t0 = now;
-      if (now - k.t0 > 130) {
-        k.el.removeAttribute("data-down");
-        return false;
-      }
-      return true;
-    });
-    return true;
-  }
-
   flushInk() {
     if (!this.dirty.length) return;
     for (const r of this.dirty) this.uploadInk(r);
@@ -913,7 +839,6 @@ export default class TypewriterEngine {
     if (this.stepRoll(dt)) busy = true;
     if (this.stepLever(dt)) busy = true;
     if (this.stepView(dt)) busy = true;
-    if (this.stepKeys(now)) busy = true;
     this.flushInk();
     this.render();
     if (busy) this.raf = requestAnimationFrame(this.frame);
@@ -936,7 +861,6 @@ export default class TypewriterEngine {
     this.stage.removeEventListener("pointerup", this.handlers.up);
     this.stage.removeEventListener("pointercancel", this.handlers.up);
     (this.embedded ? this.stage : window).removeEventListener("keydown", this.handlers.key);
-    for (const k of this.keyFx) k.el.removeAttribute("data-down");
     this.sound.destroy();
     const gl = this.gl;
     if (!gl) return;

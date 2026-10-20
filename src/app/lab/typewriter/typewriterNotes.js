@@ -65,5 +65,3 @@ function buildBars() {
 }
 
 export const BARS = buildBars();
-
-export const STRIP_ROWS = ["qwertyuiop", "asdfghjkl", "zxcvbnm,."];

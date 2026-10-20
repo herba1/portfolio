@@ -105,6 +105,7 @@ uniform float uA1;
 uniform float uRc;
 uniform vec4 uSheet;
 uniform vec2 uCarriage;
+uniform float uKnob;
 uniform sampler2D uInk;
 uniform vec4 uInkMap;
 uniform vec2 uInkTexel;
@@ -198,19 +199,33 @@ void main() {
   vec3 paper = mix(paperLit, inkLit, clamp(a, 0.0, 1.0) * 0.96 * cover);
 
   float inCar = edge(X - uCarriage.x, fwX) * edge(uCarriage.y - X, fwX);
+  float inKnob = inCar * (1.0 - edge(X - (uCarriage.x + uKnob), fwX) * edge(uCarriage.y - uKnob - X, fwX));
   vec3 bg = uEnamel;
 
-  float cylRaw = d / R;
+  float Rk = R * 1.22;
+  float rad = mix(R, Rk, inKnob);
+  float cylRaw = d / rad;
   float cylY = clamp(cylRaw, -1.0, 1.0);
   float fwC = max(fwidth(cylRaw), 1e-4);
-  float onCyl = edge(1.0 - abs(cylRaw) - fwC, fwC);
-  float paperRowNear = edge(X - (uSheet.x - 1.5), fwX) * edge(uSheet.z + 1.5 - X, fwX);
-  vec3 rubber = vec3(0.118, 0.118, 0.125);
-  vec3 cyl = rubber;
-  float band = edge(cylY + 0.62, fwC) * (1.0 - edge(cylY + 0.48, fwC));
-  cyl = mix(cyl, vec3(0.3, 0.3, 0.31), band);
+  float onCyl = edge(1.0 - abs(cylRaw) - fwC, fwC) * inCar;
+  float cz = sqrt(max(1.0 - cylY * cylY, 0.0));
+  vec3 cn = vec3(0.0, cylY, cz);
+  float cdiff = max(dot(cn, L), 0.0);
+  float spec = pow(max(dot(reflect(-L, cn), vec3(0.0, 0.0, 1.0)), 0.0), 18.0);
+  vec3 rubber = vec3(0.105, 0.105, 0.112) * (0.42 + 1.1 * cdiff) + spec * 0.14;
+  float ridge = 0.5 + 0.5 * cos(asin(cylY) * 38.0);
+  vec3 knob = vec3(0.075, 0.075, 0.08) * (0.4 + 1.25 * cdiff) * (0.78 + 0.22 * ridge) + spec * 0.22;
+  vec3 cyl = mix(rubber, knob, inKnob);
+  float shaft = abs(X - (uCarriage.x + uKnob)) * uPitch;
+  float shaft2 = abs(X - (uCarriage.y - uKnob)) * uPitch;
+  float ring = (1.0 - smoothstep(0.6, 2.2, min(shaft, shaft2))) * onCyl;
+  cyl = mix(cyl, vec3(0.78, 0.79, 0.8) * (0.5 + 0.7 * cdiff), ring * 0.85);
 
-  vec3 under = mix(bg, cyl, onCyl * inCar * paperRowNear);
+  float below0 = (-d - rad) / R;
+  float shadow = inCar * step(0.0, below0) * exp(-below0 * 2.6) * 0.16;
+  bg *= 1.0 - shadow;
+
+  vec3 under = mix(bg, cyl, onCyl);
 
   float paperRow = covY * onWrap;
   float rightGap = (X - uSheet.z) * uPitch;
