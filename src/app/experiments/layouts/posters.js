@@ -30,11 +30,6 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/cassette": {
-    "src": "/posters/experiments/lab--cassette.webp?v=6r5AWHkO",
-    "width": 688,
-    "height": 584
-  },
   "/lab/checklist": {
     "src": "/posters/experiments/lab--checklist.webp?v=5DRfGczv",
     "width": 453,
@@ -80,11 +75,6 @@ export const POSTERS = {
     "width": 922,
     "height": 464
   },
-  "/lab/groove": {
-    "src": "/posters/experiments/lab--groove.webp?v=UBMgAA4v",
-    "width": 688,
-    "height": 584
-  },
   "/lab/icon-morph": {
     "src": "/posters/experiments/lab--icon-morph.webp?v=gFrti7dB",
     "width": 688,
@@ -99,11 +89,6 @@ export const POSTERS = {
     "src": "/posters/experiments/lab--iris.webp?v=DiC0bBBA",
     "width": 688,
     "height": 584
-  },
-  "/lab/lenticular": {
-    "src": "/posters/experiments/lab--lenticular.webp?v=FlAfUrpN",
-    "width": 453,
-    "height": 464
   },
   "/lab/light-table": {
     "src": "/posters/experiments/lab--light-table.webp?v=CAGFTAAA",
@@ -135,11 +120,6 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/pins": {
-    "src": "/posters/experiments/lab--pins.webp?v=HCX3CKFS",
-    "width": 688,
-    "height": 584
-  },
   "/lab/raking-light": {
     "src": "/posters/experiments/lab--raking-light.webp?v=vUFMQHzH",
     "width": 688,
@@ -149,11 +129,6 @@ export const POSTERS = {
     "src": "/posters/experiments/lab--refractor.webp?v=egApCXAq",
     "width": 453,
     "height": 464
-  },
-  "/lab/shredder": {
-    "src": "/posters/experiments/lab--shredder.webp?v=HdUeAF2H",
-    "width": 688,
-    "height": 584
   },
   "/lab/split-flap": {
     "src": "/posters/experiments/lab--split-flap.webp?v=75KHB8QB",
@@ -178,11 +153,6 @@ export const POSTERS = {
   "/lab/voice-memo": {
     "src": "/posters/experiments/lab--voice-memo.webp?v=_Skbu7-Q",
     "width": 453,
-    "height": 584
-  },
-  "/lab/wax-pack": {
-    "src": "/posters/experiments/lab--wax-pack.webp?v=32E-ge8_",
-    "width": 688,
     "height": 584
   },
   "/lab/weighted-reading": {

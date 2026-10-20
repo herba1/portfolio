@@ -71,8 +71,17 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Reach for deeper sources: award-level sites (Awwwards, FWA, Codrops) and top component work, and rebuild their actual techniques from source rather than paraphrasing a screenshot.
 - Transitions must stay coherent: things move out of the way rather than fading, a drag becomes the type rather than two effects side by side, morphs that break on enter or exit sink a piece.
 - Don't over-decorate a liked effect: one sticker, not a pile; the paper and the type, not the typewriter's keyboard; the cassette and a pencil, not a desk.
-- Realism, slow and eased, when the subject is a physical material (Crumple: "should have kept it realistic, and slow, with ease"). The stepped Spider-Verse frame rate was a miss.
+- Realism, slow and eased, when the subject is a physical material (Crumple: "should have kept it realistic, and slow, with ease"). The stepped Spider-Verse frame rate was a miss. Batch four refined this: realistic paper should crumple in discrete stages (each press is one more crush), not as one smooth continuous squeeze.
 - Let the UI show a quality instead of labelling it: re-theme from a cover without printing the swatches.
+
+## From batch four (50 pieces, scored 1–5, October 2026)
+
+- Scored 5: Type Bust, Dandelion, Sticker Peel. Scored 4: Film Leader, Mirrorball, Pull Vinyl, Erase, Hold Menu, Ink Drag, Iris, Raking Light, Crumple. Pieces that survived two rounds of notes keep climbing; polishing a liked piece pays better than inventing a new one.
+- Every brand-new piece except Linocut, Steam, Ribbon and Ghost Type scored 1 or 2: oil paint, caustics, rack focus, reeded glass, golden hour, lanyard, folded note, lumen print, murmuration, smear, screen glow, x-ray, wet type, slime type. Simulating a physical process or a photographic effect is not enough by itself; "Golden Hour" drew "Jesus this is bad", Lanyard "overdone and design is horrendous", Booster "too ugly".
+- Plotter's stipple mode was the one good part ("just stipple is the best"): when a piece has several modes, the best one alone usually beats the menu.
+- Music-object pieces that had become desk props (cassette, groove zoetrope, album open, type fly, shredder, booster pack) were cut. Keep a music object only when the object itself is gorgeous (a "sick" CD, a mirrorball).
+- Notes on the keepers ask for: fewer glitches, smoother transitions, real springs instead of bad eases, less chrome and fewer shadows (just the sheet and the stamper), no overlapping elements, and letting people bring their own image or place their own type.
+- Depth reads well: nested menus should stack as layers that recede as you go deeper.
 
 ## Type vibes — Herb's reference board (October 2026)
 
