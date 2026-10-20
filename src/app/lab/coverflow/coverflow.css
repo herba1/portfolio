@@ -242,12 +242,15 @@
   pointer-events: none;
 }
 
-.cf-stage {
+.cf-stage,
+.cf-caption,
+.cf-controls {
   transition: opacity 360ms ease-out;
 }
 
-.cf-stage[data-ready="false"] {
+.cf[data-ready="false"] :is(.cf-stage, .cf-caption, .cf-controls) {
   opacity: 0;
+  pointer-events: none;
 }
 
 .cf-item[data-loaded="false"] {
@@ -282,28 +285,61 @@
 .cf-caption {
   position: relative;
   z-index: 2;
-  min-height: 104px;
+  height: 120px;
   padding: 0 24px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
+  overflow: hidden;
   text-align: center;
   pointer-events: none;
 }
 
 .cf-title {
-  margin: 0;
+  display: flex;
+  flex: none;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
   max-width: 720px;
-  text-wrap: balance;
+  height: 76px;
+  margin: 0;
   color: var(--cf-ink);
+}
+
+.cf-title-text {
+  display: -webkit-box;
+  max-width: 100%;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  text-wrap: balance;
+  overflow-wrap: anywhere;
 }
 
 .cf-meta {
   display: flex;
+  flex: none;
+  justify-content: center;
   gap: 8px;
+  width: 100%;
+  max-width: 720px;
+  height: 20px;
   margin: 0;
+  white-space: nowrap;
   color: var(--cf-ink-2);
+}
+
+.cf-meta-artist {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cf-meta-year {
+  flex: none;
 }
 
 .cf-controls {
@@ -344,7 +380,7 @@
 }
 
 .cf-step:active:not(:disabled) {
-  transform: scale(0.94);
+  background: rgb(255 255 255 / 0.18);
 }
 
 .cf-step:focus-visible {
@@ -396,7 +432,8 @@
 
 .cf-count {
   flex: none;
-  min-width: 56px;
+  width: 56px;
+  white-space: nowrap;
   text-align: right;
   color: var(--cf-ink-2);
 }
@@ -406,7 +443,17 @@
 }
 
 .cf[data-embedded="true"] .cf-caption {
-  min-height: 88px;
+  height: 88px;
+  justify-content: center;
+}
+
+.cf[data-embedded="true"] .cf-title {
+  height: 40px;
+}
+
+.cf[data-embedded="true"] .cf-title-text {
+  -webkit-line-clamp: 1;
+  line-clamp: 1;
 }
 
 @container (max-width: 640px) {
@@ -415,10 +462,11 @@
   }
 
   .cf-caption {
-    min-height: 112px;
+    height: 112px;
   }
 
   .cf-title {
+    height: 60px;
     font-size: var(--text-title);
     line-height: var(--text-title--line-height);
     letter-spacing: var(--text-title--letter-spacing);

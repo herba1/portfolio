@@ -74,6 +74,8 @@ const startOf = (records) => {
 export default function Piece({ embedded = false }) {
   const { tracks, live } = useTopSongs(50);
   const records = useMemo(() => recordsFrom(tracks, live), [tracks, live]);
+  const [firstTracks] = useState(tracks);
+  const settled = tracks !== firstTracks;
   const rootRef = useRef(null);
   const flowRef = useRef(null);
   const [view, setView] = useState({ records: null, center: 0 });
@@ -144,13 +146,14 @@ export default function Piece({ embedded = false }) {
   const album = records[center] ?? records[0];
   const state = loaded.records === records ? loaded.map : {};
   const first = startOf(records);
-  const ready = late === records || records.every((r, i) => Math.abs(i - first) > 4 || state[r.id]);
+  const ready = late === records || (settled && records.every((r, i) => Math.abs(i - first) > 4 || state[r.id]));
 
   return (
     <div
       ref={rootRef}
       className="cf"
       data-embedded={embedded ? "true" : "false"}
+      data-ready={ready ? "true" : "false"}
       data-flipped="false"
       tabIndex={0}
       role="listbox"
@@ -159,7 +162,7 @@ export default function Piece({ embedded = false }) {
     >
       {!embedded && <h1 className="cf-heading text-heading">Cover Flow</h1>}
 
-      <div className="cf-stage" data-cf-stage data-ready={ready ? "true" : "false"}>
+      <div className="cf-stage" data-cf-stage>
         {records.map((a, i) => (
           <div
             key={a.id}
@@ -200,12 +203,12 @@ export default function Piece({ embedded = false }) {
 
       <div className="cf-caption">
         <h2 className="cf-title text-title-lg" aria-live="polite">
-          {album.title}
+          <span className="cf-title-text">{album.title}</span>
         </h2>
         <p className="cf-meta text-ui-lg">
           <span className="cf-meta-artist">{album.artist}</span>
           {album.year && <span aria-hidden="true">·</span>}
-          {album.year && <span className="tabular-nums">{album.year}</span>}
+          {album.year && <span className="cf-meta-year tabular-nums">{album.year}</span>}
         </p>
       </div>
 
