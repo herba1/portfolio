@@ -1,0 +1,325 @@
+.linocut {
+  --lino-page: #e7e3da;
+  --lino-paper: #efe8da;
+  --lino-ink: #16140f;
+  --lino-ink-2: #57524a;
+  --lino-rule: rgb(22 20 15 / 0.12);
+  --lino-tray: rgb(248 245 238 / 0.9);
+  --lino-accent: #b8462b;
+  --lino-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --lino-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --lino-serif-weight: 430;
+  --lino-top: 196px;
+  --lino-bottom: 132px;
+  --lino-side: 48px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--lino-page);
+  color: var(--lino-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.linocut__stage {
+  position: absolute;
+  top: var(--lino-top);
+  bottom: var(--lino-bottom);
+  left: var(--lino-side);
+  right: var(--lino-side);
+  pointer-events: none;
+}
+
+.linocut__canvas {
+  position: absolute;
+  display: block;
+  touch-action: none;
+  outline: none;
+  box-shadow:
+    0 1px 2px rgb(40 34 24 / 0.08),
+    0 16px 36px -24px rgb(40 34 24 / 0.4);
+  cursor: grab;
+  opacity: 0;
+  transition: opacity var(--duration-300) ease;
+}
+
+.linocut[data-ready] .linocut__canvas {
+  opacity: 1;
+}
+
+.linocut[data-dragging] .linocut__canvas {
+  cursor: grabbing;
+}
+
+.linocut__canvas:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--lino-page),
+    0 0 0 4px var(--lino-accent);
+}
+
+.linocut__moon {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--lino-moon, 48px);
+  height: var(--lino-moon, 48px);
+  margin: calc(var(--lino-moon, 48px) / -2) 0 0 calc(var(--lino-moon, 48px) / -2);
+  border-radius: 50%;
+  box-shadow: 0 0 0 1px rgb(239 232 218 / 0);
+  pointer-events: none;
+  transition: box-shadow var(--duration-200) ease;
+}
+
+.linocut__canvas:focus-visible ~ .linocut__moon,
+.linocut[data-dragging] .linocut__moon {
+  box-shadow: 0 0 0 1.5px var(--lino-accent);
+}
+
+.linocut__caption {
+  position: absolute;
+  top: calc(var(--lino-y, 0px) + var(--lino-h, 0px) + 12px);
+  left: var(--lino-x, 0px);
+  width: var(--lino-w, 0px);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--lino-ink-2);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-300) ease;
+}
+
+.linocut[data-ready] .linocut__caption {
+  opacity: 1;
+}
+
+.linocut__caption > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.linocut__altitude {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.linocut__head {
+  position: absolute;
+  z-index: 2;
+  top: 88px;
+  left: 32px;
+  max-width: 300px;
+  pointer-events: none;
+}
+
+.linocut__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.linocut__lede {
+  margin: 4px 0 0;
+  color: var(--lino-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.linocut__lede em {
+  font-family: var(--lino-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--lino-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--lino-ink);
+}
+
+.linocut__bar {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.linocut__control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 48px;
+  padding: 0 20px 0 18px;
+  border-radius: 999px;
+  background: var(--lino-tray);
+  box-shadow:
+    inset 0 0 0 1px var(--lino-rule),
+    0 1px 2px rgb(40 34 24 / 0.06),
+    0 12px 28px -16px rgb(40 34 24 / 0.36);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  pointer-events: auto;
+}
+
+.linocut__label {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+}
+
+.linocut__range {
+  width: 148px;
+  height: 28px;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  touch-action: pan-y;
+}
+
+.linocut__range::-webkit-slider-runnable-track {
+  height: 4px;
+  border-radius: 2px;
+  background: linear-gradient(
+    to right,
+    var(--lino-ink) 0%,
+    var(--lino-ink) var(--lino-fill),
+    var(--lino-rule) var(--lino-fill),
+    var(--lino-rule) 100%
+  );
+}
+
+.linocut__range::-moz-range-track {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lino-rule);
+}
+
+.linocut__range::-moz-range-progress {
+  height: 4px;
+  border-radius: 2px;
+  background: var(--lino-ink);
+}
+
+.linocut__range::-webkit-slider-thumb {
+  width: 20px;
+  height: 20px;
+  margin-top: -8px;
+  border-radius: 50%;
+  background: var(--lino-ink);
+  box-shadow:
+    0 0 0 4px var(--lino-tray),
+    0 2px 6px rgb(20 18 12 / 0.25);
+  appearance: none;
+  -webkit-appearance: none;
+  transition: transform var(--duration-150) var(--lino-ease);
+}
+
+.linocut__range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--lino-ink);
+  box-shadow:
+    0 0 0 4px var(--lino-tray),
+    0 2px 6px rgb(20 18 12 / 0.25);
+}
+
+.linocut__range:active::-webkit-slider-thumb {
+  transform: scale(1.1);
+}
+
+.linocut__range:focus-visible {
+  outline: 2px solid var(--lino-accent);
+  outline-offset: 4px;
+  border-radius: 999px;
+}
+
+.linocut__error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+}
+
+@container (max-width: 639px) {
+  .linocut {
+    --lino-top: 200px;
+    --lino-bottom: 196px;
+    --lino-side: 16px;
+  }
+
+  .linocut__head {
+    top: 80px;
+    left: 16px;
+    right: 16px;
+  }
+
+  .linocut__bar {
+    bottom: 24px;
+  }
+
+  .linocut__control {
+    flex: 1 1 100%;
+    max-width: 358px;
+  }
+
+  .linocut__range {
+    flex: 1;
+    width: auto;
+  }
+}
+
+.linocut[data-embedded] {
+  --lino-top: 24px;
+  --lino-bottom: 84px;
+  --lino-side: 24px;
+}
+
+.linocut[data-embedded] .linocut__bar {
+  bottom: 16px;
+}
+
+.linocut[data-embedded] .linocut__caption {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .linocut__canvas,
+  .linocut__moon {
+    transition: none;
+  }
+}

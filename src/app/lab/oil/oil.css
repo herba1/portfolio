@@ -1,0 +1,362 @@
+.oil {
+  --oil-page: #e9e6df;
+  --oil-ink: #1b1a17;
+  --oil-ink-2: #56524b;
+  --oil-rule: rgb(27 26 23 / 0.12);
+  --oil-tray: rgb(249 247 242 / 0.9);
+  --oil-wash: rgb(27 26 23 / 0.06);
+  --oil-accent: #2c4f86;
+  --oil-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --oil-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --oil-serif-weight: 430;
+  --oil-top: 216px;
+  --oil-bottom: 124px;
+  --oil-side: 48px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--oil-page);
+  color: var(--oil-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.oil__stage {
+  position: absolute;
+  top: var(--oil-top);
+  bottom: var(--oil-bottom);
+  left: var(--oil-side);
+  right: var(--oil-side);
+  pointer-events: none;
+}
+
+.oil__canvas {
+  position: absolute;
+  display: block;
+  touch-action: none;
+  cursor: none;
+  box-shadow: 0 0 0 1px rgb(27 26 23 / 0.08);
+  opacity: 0;
+  transition: opacity var(--duration-300) ease;
+}
+
+.oil[data-ready] .oil__canvas {
+  opacity: 1;
+}
+
+.oil__brush {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--oil-brush, 40px);
+  height: 8px;
+  margin: -4px 0 0 calc(var(--oil-brush, 40px) / -2);
+  border-radius: 4px;
+  box-shadow:
+    inset 0 0 0 1.5px var(--oil-ink),
+    0 0 0 1px rgb(255 255 255 / 0.6);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-150) ease;
+  will-change: transform;
+}
+
+.oil__brush::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  top: 3px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--oil-tube);
+}
+
+.oil__brush[data-shown] {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .oil__brush {
+    display: none;
+  }
+
+  .oil__canvas {
+    cursor: default;
+  }
+}
+
+.oil__caption {
+  position: absolute;
+  top: calc(var(--oil-y, 0px) + var(--oil-h, 0px) + 12px);
+  left: var(--oil-x, 0px);
+  width: var(--oil-w, 0px);
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--oil-ink-2);
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity var(--duration-300) ease;
+}
+
+.oil[data-ready] .oil__caption {
+  opacity: 1;
+}
+
+.oil__caption > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.oil__count {
+  flex: none;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.oil__head {
+  position: absolute;
+  z-index: 2;
+  top: 88px;
+  left: 32px;
+  max-width: 340px;
+  pointer-events: none;
+}
+
+.oil__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: var(--text-title-sm--line-height);
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.oil__lede {
+  margin: 4px 0 0;
+  color: var(--oil-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.oil__lede em {
+  font-family: var(--oil-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--oil-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--oil-ink);
+}
+
+.oil__bar {
+  position: absolute;
+  z-index: 2;
+  left: 16px;
+  right: 16px;
+  bottom: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.oil__bar > * {
+  pointer-events: auto;
+}
+
+.oil__tubes {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 48px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--oil-tray);
+  box-shadow:
+    inset 0 0 0 1px var(--oil-rule),
+    0 1px 2px rgb(40 36 28 / 0.06),
+    0 12px 28px -16px rgb(40 36 28 / 0.36);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.oil__tube {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 14px 0 10px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--oil-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    background-color var(--duration-150) ease,
+    box-shadow var(--duration-150) ease,
+    transform var(--duration-150) var(--oil-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.oil__tube[aria-checked="true"] {
+  box-shadow: inset 0 0 0 1.5px var(--oil-ink);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .oil__tube[aria-checked="false"]:hover {
+    background-color: var(--oil-wash);
+  }
+}
+
+.oil__tube:active {
+  transform: scale(0.96);
+}
+
+.oil__tube:focus-visible,
+.oil__reset:focus-visible {
+  outline: 2px solid var(--oil-accent);
+  outline-offset: 2px;
+}
+
+.oil__swatch {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--oil-swatch);
+  box-shadow: inset 0 0 0 1px rgb(27 26 23 / 0.16);
+}
+
+.oil__reset {
+  height: 48px;
+  padding: 0 20px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--oil-tray);
+  color: var(--oil-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow:
+    inset 0 0 0 1px var(--oil-rule),
+    0 1px 2px rgb(40 36 28 / 0.06),
+    0 12px 28px -16px rgb(40 36 28 / 0.36);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  transition: transform var(--duration-150) var(--oil-ease);
+}
+
+.oil__reset:active {
+  transform: scale(0.97);
+}
+
+.oil__reset:disabled {
+  cursor: default;
+}
+
+.oil__error {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: 0;
+  transform: translate(-50%, -50%);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+}
+
+@container (max-width: 899px) {
+  .oil__tube {
+    padding: 0;
+    width: 44px;
+    justify-content: center;
+  }
+
+  .oil__tube-name {
+    display: none;
+  }
+
+  .oil__swatch {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+@container (max-width: 639px) {
+  .oil {
+    --oil-top: 212px;
+    --oil-bottom: 124px;
+    --oil-side: 16px;
+  }
+
+  .oil__head {
+    top: 80px;
+    left: 16px;
+    right: 16px;
+  }
+
+  .oil__bar {
+    bottom: 24px;
+  }
+}
+
+.oil[data-embedded] {
+  --oil-top: 24px;
+  --oil-bottom: 84px;
+  --oil-side: 24px;
+}
+
+.oil[data-embedded] .oil__bar {
+  bottom: 16px;
+}
+
+.oil[data-embedded] .oil__caption {
+  display: none;
+}
+
+.oil[data-embedded] .oil__tube {
+  padding: 0;
+  width: 44px;
+  justify-content: center;
+}
+
+.oil[data-embedded] .oil__tube-name {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .oil__canvas,
+  .oil__brush {
+    transition: none;
+  }
+}
