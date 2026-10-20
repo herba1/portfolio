@@ -87,17 +87,17 @@ vec2 vapour(sampler2D mask, vec2 uv, float inAmt, float outAmt, float seed, floa
   }
   side *= gather * (0.3 + 0.36 * vap);
   float env = 0.0;
-  for (int k = 1; k <= 8; k++) {
+  for (int k = 1; k <= 6; k++) {
     float fk = float(k);
     float lean = (fbm(vec2(st.x * 0.7 + seed, st.y * 0.5 - t * 0.06 - fk * 0.03)) - 0.5) * fk * 0.02;
-    float src = texture2D(mask, base - vec2(lean / aspect, fk * 0.022)).b;
-    env = max(env, src * smoothstep(0.0, 1.6, fk) * pow(1.0 - fk / 9.0, 1.3));
+    float src = texture2D(mask, base - vec2(lean / aspect, fk * 0.018)).b;
+    env = max(env, src * smoothstep(0.0, 1.6, fk) * pow(1.0 - fk / 7.0, 1.5));
   }
   float bend = fbm(vec2(st.x * 0.9 + seed, st.y * 0.6 - t * 0.07)) - 0.5;
   vec2 fp = vec2(st.x + bend * 0.22, st.y * 0.32 - t * 0.075);
   float fil = fbm(fp * vec2(9.0, 2.2) + vec2(seed * 2.3, 0.0)) * 0.7 + fbm(fp * vec2(17.0, 3.0) + vec2(seed, 1.3)) * 0.3;
-  float strands = smoothstep(0.46, 0.78, fil);
-  float wisps = env * (0.25 + 0.75 * strands) * 1.4;
+  float strands = smoothstep(0.5, 0.8, fil);
+  float wisps = env * (0.14 + 0.86 * strands) * 1.0;
   float w = wisps * 0.85 * (1.0 - 0.75 * m.r);
   float solid = max(letter, side);
   float front = clamp((letter - side * 0.85) * 6.0 + 0.5, 0.0, 1.0);
