@@ -7,6 +7,7 @@ const SUB = 3;
 const FOV = 26;
 const TILT = 0.55;
 const GRAB_Y = 7;
+const GRIP_FROM_SLOT = 40;
 const LEADER = 76;
 const SLOT = [15.2, 4.2, 0];
 const DIR_PITCH = -0.2;
@@ -710,22 +711,24 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
 
   const grabTarget = (now, dt) => {
     if (keyPull) {
-      if (keyPull.start === null) keyPull.start = now;
-      const t = Math.min(1, (now - keyPull.start) / keyPull.ms);
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const x = keyPull.from[0] + (keyPull.to[0] - keyPull.from[0]) * e;
-      const z = keyPull.from[2] + (keyPull.to[2] - keyPull.from[2]) * e;
-      const y = keyPull.from[1] + (GRAB_Y - keyPull.from[1]) * Math.min(1, t * 3);
-      if (t >= 1) {
+      const w = reduced ? 30 : 9;
+      let far = 0;
+      for (let a = 0; a < 3; a += 1) {
+        const acc = w * w * (keyPull.to[a] - keyPull.p[a]) - 2 * w * keyPull.v[a];
+        keyPull.v[a] += acc * dt;
+        keyPull.p[a] += keyPull.v[a] * dt;
+        far = Math.max(far, Math.abs(keyPull.to[a] - keyPull.p[a]), Math.abs(keyPull.v[a]) * 0.05);
+      }
+      if (far < 0.3 || !sim.grab) {
         keyPull = null;
         sim.release();
         return null;
       }
-      return [x, y, z];
+      return [...keyPull.p];
     }
     if (pointer.id === null || !sim.grab) return null;
     pointer.lift = Math.min(1, pointer.lift + dt * 7);
-    const y = pointer.startY + (GRAB_Y - pointer.startY) * (1 - Math.pow(1 - pointer.lift, 3));
+    const y = pointer.startY + (Math.max(GRAB_Y, pointer.startY) - pointer.startY) * (1 - Math.pow(1 - pointer.lift, 3));
     const p = planePoint(pointer.x, pointer.y, y);
     if (!p) return null;
     return [p[0] + pointer.offset[0], y, p[2] + pointer.offset[1]];
@@ -781,7 +784,7 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     pointer.downY = e.clientY;
     pointer.moved = false;
     pointer.tile = tileAt(hit);
-    const i = Math.max(0, Math.min(sim.n - 1, Math.round(hit.f / SEG)));
+    const i = Math.max(0, Math.min(sim.n - 1, Math.round(hit.f / SEG), Math.floor((sim.u - GRIP_FROM_SLOT) / SEG)));
     const k = i * 3;
     const py = sim.pos[k + 1];
     const ground = planePoint(e.clientX, e.clientY, py);
@@ -880,6 +883,13 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     key(name) {
       if (name === "pull") {
         if (pointer.id !== null) return;
+        const step = PITCH * 1.4;
+        if (keyPull && sim.grab) {
+          keyPull.to[0] += keyPull.dir[0] * step;
+          keyPull.to[2] += keyPull.dir[1] * step;
+          wake(true);
+          return;
+        }
         const k = 0;
         const from = [sim.pos[k], sim.pos[k + 1], sim.pos[k + 2]];
         let hx = sim.pos[k] - SLOT[0];
@@ -891,11 +901,10 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
           hx = 1;
           hz = 0;
         }
-        const step = PITCH * 1.4;
         const ms = reduced ? 240 : 620;
         sim.grabAt(0, from);
         if (sim.grab) sim.grab.fade = sim.grab.slack0 / (ms / 1000);
-        keyPull = { start: null, ms, from, to: [from[0] + hx * step, GRAB_Y, from[2] + hz * step] };
+        keyPull = { p: [...from], v: [0, 0, 0], dir: [hx, hz], to: [from[0] + hx * step, Math.max(GRAB_Y, from[1]), from[2] + hz * step] };
         wake(true);
       } else if (name === "rewind") {
         if (pointer.id !== null) return;
