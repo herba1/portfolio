@@ -21,20 +21,15 @@ import {
 const MAX_DPR = 2;
 const UP = 0.05;
 const DOWN = 0.14;
-const KNOB = 4;
-const CAR_LEFT = -KNOB - 3;
-const CAR_RIGHT = SHEET_COLS + KNOB + 3;
-const A1 = 0.32;
-const PHI_MAX = 0.72;
 const VMAX = 170;
 const ACCEL = 2600;
 const FOLLOW = 0.8;
 const ENAMEL = [226, 223, 216];
 const CHARCOAL = "rgb(30 30 32)";
-const STEEL_LIGHT = "rgb(196 197 199)";
 const RIBBON_RED = "rgb(196 52 40)";
 const PERIOD = 20;
 const TILE = 512;
+const NARROW_COLS = [MARGIN_COLS - 2, MARGIN_COLS + MAX_COL + 3];
 
 function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v));
@@ -272,19 +267,19 @@ export default class TypewriterEngine {
     const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     const ins = this.insets();
     const gut = W < 640 ? 16 : 40;
-    const fit = (W - gut * 2) / (CAR_RIGHT - CAR_LEFT + MAX_COL * (1 - FOLLOW));
+    const fit = (W - gut * 2) / (SHEET_COLS + MAX_COL * (1 - FOLLOW));
     const wide = fit >= 9;
-    const pitch = wide ? clamp(Math.min(fit, H / 44), 9, 15) : clamp(Math.min(W / 80, H / 40), 11.5, 19);
+    const pitch = wide ? clamp(Math.min(fit, H / 44), 9, 15) : Math.min((W - gut * 2) / (NARROW_COLS[1] - NARROW_COLS[0]), 15);
     const lineH = pitch * LINE_UNITS;
-    const R = lineH * 2.4;
-    const yP = Math.round(clamp(H * (wide ? 0.62 : 0.7), ins.top + lineH * 8, H - ins.bottom - R * 1.6));
+    const top = Math.round(ins.top);
+    const bottom = Math.round(H - ins.bottom);
+    const yP = Math.round(clamp(top + (bottom - top) * (wide ? 0.56 : 0.62), top + lineH * 4, bottom - lineH * 3));
     const printX = Math.round(W * 0.5);
-    const dA = R * Math.sin(A1);
-    const Rc = Math.max(R * 2, (yP + 24 - dA) / (Math.sin(PHI_MAX) - Math.sin(A1)));
+    const box = { x0: gut, x1: W - gut, y0: top, y1: bottom };
     const angles = [];
     for (let i = 0; i < BARS.count; i += 1) angles.push(-0.9 + (1.8 * i) / (BARS.count - 1));
     const res = clamp(Math.round(pitch * dpr * 0.95), 16, 28);
-    this.geo = { W, H, dpr, pitch, lineH, R, yP, printX, printC: printX, Rc, angles, wide };
+    this.geo = { W, H, dpr, pitch, lineH, yP, printX, angles, wide, box };
     this.view = { x: this.viewTarget(), v: 0 };
     this.geo.printX = this.view.x;
     this.glCanvas.width = Math.round(W * dpr);
@@ -295,32 +290,24 @@ export default class TypewriterEngine {
     if (this.ready) this.render();
   }
 
-  arcToScreen(s) {
-    const { R, Rc } = this.geo;
-    if (s <= R * A1) return R * Math.sin(s / R);
-    return R * Math.sin(A1) + Rc * (Math.sin(Math.min(1.5, A1 + (s - R * A1) / Rc)) - Math.sin(A1));
-  }
-
   headX() {
     return MARGIN_COLS + this.car.x + 0.5;
   }
 
   viewTarget() {
-    const { W, pitch, printC, wide } = this.geo;
+    const { W, pitch, wide, box } = this.geo;
     const h = this.headX();
-    if (wide) return W / 2 + (h - (CAR_LEFT + CAR_RIGHT) / 2) * pitch * FOLLOW;
-    const gut = Math.max(24, pitch * 2);
-    const lo = gut + (h - MARGIN_COLS) * pitch;
-    const hi = W - gut - (MARGIN_COLS + MAX_COL + 1 - h) * pitch;
-    if (lo > hi) return printC;
-    return clamp(printC, lo, hi);
+    if (wide) return W / 2 + (h - SHEET_COLS / 2) * pitch * FOLLOW;
+    const span = (NARROW_COLS[1] - NARROW_COLS[0]) * pitch;
+    const left = (box.x0 + box.x1 - span) / 2;
+    return left + (h - NARROW_COLS[0]) * pitch;
   }
 
-  stepView(dt) {
-    if (!this.view || (this.drag?.axis === "h" && !this.geo.wide)) return false;
-    const moving = springStep(this.view, this.viewTarget(), 16, 1, dt);
+  stepView() {
+    if (!this.view) return false;
+    this.view.x = this.viewTarget();
     this.geo.printX = this.view.x;
-    return moving;
+    return false;
   }
 
   headY() {
@@ -348,17 +335,15 @@ export default class TypewriterEngine {
     gl.uniform1i(u.uMaterial, 1);
     gl.uniform1f(u.uPeriod, PERIOD);
     gl.uniform2f(u.uRes, this.glCanvas.width, this.glCanvas.height);
-    gl.uniform2f(u.uBox, g.W, g.H);
     gl.uniform1f(u.uDpr, this.glCanvas.width / g.W);
     gl.uniform2f(u.uPrint, g.printX, g.yP);
     gl.uniform1f(u.uPitch, g.pitch);
     gl.uniform2f(u.uHead, this.headX(), this.headY());
-    gl.uniform1f(u.uPlatenR, g.R);
-    gl.uniform1f(u.uA1, A1);
-    gl.uniform1f(u.uRc, g.Rc);
     gl.uniform4f(u.uSheet, 0, 0, SHEET_COLS, SHEET_LINES * LINE_UNITS);
-    gl.uniform2f(u.uCarriage, CAR_LEFT, CAR_RIGHT);
-    gl.uniform1f(u.uKnob, KNOB);
+    const span = Math.round((NARROW_COLS[1] - NARROW_COLS[0]) * g.pitch);
+    const left = Math.round(g.wide ? g.printX - this.headX() * g.pitch : (g.box.x0 + g.box.x1 - span) / 2);
+    const right = left + (g.wide ? Math.round(SHEET_COLS * g.pitch) : span);
+    gl.uniform4f(u.uFrame, left, g.box.y0, right, g.box.y1);
     gl.uniform4f(u.uInkMap, INK_COL0, 0, 1 / INK_COLS, 1 / (SHEET_LINES * LINE_UNITS));
     gl.uniform2f(u.uInkTexel, 1 / this.ink.canvas.width, 1 / this.ink.canvas.height);
     gl.uniform3f(u.uEnamel, ENAMEL[0] / 255, ENAMEL[1] / 255, ENAMEL[2] / 255);
@@ -387,8 +372,8 @@ export default class TypewriterEngine {
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
 
     const lift = this.ribbonLift();
-    const rw = pitch * 1.7;
-    const rh = Math.max(6, lineH * 0.42);
+    const rw = pitch * 2;
+    const rh = Math.max(8, lineH * 0.5);
     const ry = yP + lineH * 0.3 + Math.max(6, lineH * 0.34) - lineH * 0.95 * lift;
     c.fillStyle = CHARCOAL;
     c.beginPath();
@@ -398,37 +383,6 @@ export default class TypewriterEngine {
     c.beginPath();
     c.roundRect(printX - rw / 2, ry + rh / 2, rw, rh / 2, [0, 0, 2, 2]);
     c.fill();
-    this.drawGuide(c);
-  }
-
-  drawGuide(c) {
-    const { printX, yP, lineH, pitch } = this.geo;
-    const y = yP + lineH * 0.3;
-    const h = Math.max(6, lineH * 0.34);
-    const half = pitch * 4.5;
-    c.fillStyle = STEEL_LIGHT;
-    const notch = Math.min(h * 0.6, pitch * 0.4);
-    c.beginPath();
-    c.moveTo(printX - half, y);
-    c.lineTo(printX - notch, y);
-    c.lineTo(printX, y + notch);
-    c.lineTo(printX + notch, y);
-    c.lineTo(printX + half, y);
-    c.lineTo(printX + half, y + h);
-    c.lineTo(printX - half, y + h);
-    c.closePath();
-    c.fill();
-    c.strokeStyle = CHARCOAL;
-    c.lineWidth = 1;
-    for (let k = -4; k <= 4; k += 1) {
-      if (k === 0) continue;
-      const x = Math.round(printX + k * pitch) + 0.5;
-      const long = k % 5 === 0;
-      c.beginPath();
-      c.moveTo(x, y + h * 0.3);
-      c.lineTo(x, y + h * (long ? 0.85 : 0.6));
-      c.stroke();
-    }
   }
 
   keyDown(e) {
@@ -838,7 +792,7 @@ export default class TypewriterEngine {
     if (this.stepCarriage(dt)) busy = true;
     if (this.stepRoll(dt)) busy = true;
     if (this.stepLever(dt)) busy = true;
-    if (this.stepView(dt)) busy = true;
+    if (this.stepView()) busy = true;
     this.flushInk();
     this.render();
     if (busy) this.raf = requestAnimationFrame(this.frame);

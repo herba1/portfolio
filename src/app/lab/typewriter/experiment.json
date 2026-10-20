@@ -1,6 +1,6 @@
 {
   "title": "Typewriter",
-  "description": "Revolver's liner credits on a sheet of cream bond rolled around a typewriter platen, nothing else of the machine but the ribbon guide. Every key bites the paper with its own worn, uneven ink; Return throws the carriage home and rolls the platen.",
+  "description": "Revolver's liner credits on a flat sheet of cream bond, and nothing of the machine but the stamper that strikes it. Every key bites the paper with its own worn, uneven ink; Return throws the carriage home and rolls the sheet up a line.",
   "tags": [
     "WebGL",
     "Print",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "The machine pared back to the paper and the platen so the strike is the subject: real strikes on real paper, every letter landing a little differently, the carriage moving with weight.",
+  "intent": "The machine pared back to the sheet and the stamper so the strike is the subject: real strikes on real paper, every letter landing a little differently, the carriage moving with weight.",
   "tile": {
     "cols": 3,
     "rows": 5

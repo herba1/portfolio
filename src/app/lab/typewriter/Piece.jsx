@@ -5,7 +5,7 @@ import { useEffect, useRef, useState } from "react";
 import "./typewriter.css";
 
 const STAGE_LABEL =
-  "A typewriter seen from above the platen, with the liner notes for Revolver already typed on the sheet. Type on your keyboard to strike the paper; Return throws the carriage back and advances the line, Backspace steps back so you can overtype, and the arrow keys roll the platen. Drag the sheet sideways to move the carriage or up and down to roll the platen. On a touch screen, tap the sheet to type.";
+  "A single sheet of paper under a typewriter's stamper, with the liner notes for Revolver already typed on the sheet. Type on your keyboard to strike the paper; Return throws the carriage back and advances the line, Backspace steps back so you can overtype, and the arrow keys roll the sheet. Drag the sheet sideways to move the carriage or up and down to roll it. On a touch screen, tap the sheet to type.";
 
 const KEY_FOR_INPUT = {
   insertLineBreak: "Enter",
@@ -34,7 +34,7 @@ export default function Piece({ embedded = false }) {
     const insets = () => {
       const box = root.getBoundingClientRect();
       const head = headRef.current?.getBoundingClientRect();
-      const top = head && head.height ? head.bottom - box.top + 8 : 12;
+      const top = head && head.height ? head.bottom - box.top : 12;
       return { top, bottom: embedded ? 12 : 56 };
     };
     const start = async () => {
@@ -165,7 +165,7 @@ export default function Piece({ embedded = false }) {
         <header ref={headRef} className="typewriter-head">
           <h1 className="typewriter-title">Typewriter</h1>
           <p className="typewriter-lede">
-            Type on your keyboard. Return <em>throws the carriage</em>; drag the sheet to slide it or roll the platen.
+            Type on your keyboard. Return <em>throws the carriage</em>; drag the sheet to slide or roll it.
           </p>
           <button type="button" className="typewriter-sound" aria-pressed={sound} onClick={toggleSound}>
             <span className="typewriter-sound-mark" aria-hidden="true" />

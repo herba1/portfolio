@@ -78,15 +78,7 @@
   flex-direction: column;
   align-items: flex-start;
   gap: 4px;
-  padding: 84px 40px 32px;
-  background: linear-gradient(
-    to bottom,
-    rgb(226 223 216) 0%,
-    rgb(226 223 216) 74%,
-    rgb(226 223 216 / 0.7) 84%,
-    rgb(226 223 216 / 0.24) 93%,
-    rgb(226 223 216 / 0) 100%
-  );
+  padding: 84px 40px 24px;
   pointer-events: none;
 }
 
@@ -207,7 +199,7 @@
 
 @container (max-width: 640px) {
   .typewriter-head {
-    padding: 84px 16px 32px;
+    padding: 84px 16px 24px;
   }
 
   .typewriter-sound {
