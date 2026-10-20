@@ -1,6 +1,6 @@
 {
   "title": "Compact Disc",
-  "description": "Records from Herb's top songs pressed as compact discs. Tilt one and the 1.6 micron track pitch splits the light into a rainbow that streams out from the lamp's reflection, while the clear polycarbonate hub and outer lip show the table through. Tap it to turn it over to a printed label with the cover, a ring of colour pulled from the art and the tracklist set around the edge; flick it hard and the next record spins in.",
+  "description": "Records from Herb's top songs pressed as compact discs and shot like product photos. The data side is a true mirror: a studio scrim, softbox and strip light reflect off it with crisp edges against a dark room, and the inner mirror band and the lead-out after the music are the same aluminium, separated only by a faint change in tone. A vivid spectral streak runs out from the hub towards the light, with a fainter one opposite, and both slide as you tilt it. The hub and outer lip are clear polycarbonate with the table showing through, and faint scuffs catch the light near the highlight. Tap it to turn it over to a printed label with the cover and the tracklist set around the edge; flick it hard and the next record spins in.",
   "tags": [
     "WebGL",
     "Optics",
@@ -9,7 +9,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical object made believable: a radial diffraction grating with first to third orders and the track pitch of a real CD drives the colour, a mirror environment and a small hot lamp reflection give it contrast, the clear hub and lip show the table through, and the label side is printed from each cover in silver, gold or black stock.",
+  "intent": "One optical object made physically believable: the data side reflects a high-contrast studio (scrim, small hot softbox, strip light, camera, table bounce) from a close camera, with a hue-preserving tone map so polished metal keeps deep darks and bright whites. The program area adds first and second diffraction orders of the lights, computed at 12 wavelengths from the real 1.6 micron grating, so colour is narrow spectral streaks rather than a gradient. The proportions follow the Red Book disc (120 mm, 15 mm hole, clear hub, stacking ring, mirror band, data area, lead-out, clear lip), with hairline scuffs, a bright polished edge, and silver, gold or black metal layers.",
   "tile": {
     "cols": 2,
     "rows": 4

@@ -147,6 +147,6 @@ export function prepareCard(card, image, box) {
   return {
     aspect: 1,
     label: drawLabel(card, image, box, team),
-    data: 0.5 + ((seed * 37) % 100) / 300,
+    data: 0.72 + ((seed * 37) % 100) / 400,
   };
 }
