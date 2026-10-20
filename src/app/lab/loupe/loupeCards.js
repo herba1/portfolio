@@ -1,28 +1,28 @@
-import { albumById } from "@/app/lab/_music/catalog";
+import faceImg from "./print-face-paint.jpg";
+import hibiscusImg from "./print-hibiscus.jpg";
+import lighthouseImg from "./print-lighthouse.jpg";
+import macawsImg from "./print-macaws.jpg";
 
-const sleeve = (id, tilt, focus, wear) => {
-  const album = albumById(id);
-  return {
-    key: id,
-    src: album.cover,
-    name: album.title.replace(/'s Lonely.*$/, ""),
-    full: `${album.title}, ${album.artist}`,
-    year: String(album.year),
-    widthMm: 120,
-    aspect: 1,
-    tilt,
-    focus,
-    wear,
-  };
-};
+const print = (key, img, name, full, tilt, focus, wear) => ({
+  key,
+  src: img.src,
+  name,
+  full,
+  year: "1991",
+  widthMm: 148,
+  aspect: 768 / 512,
+  tilt,
+  focus,
+  wear,
+});
 
 export const CARDS = [
-  sleeve("abbey-road", -0.035, [0.5, 0.62], [2.2, 30.0, 0.0, 0.31]),
-  sleeve("sgt-pepper", 0.03, [0.5, 0.45], [-0.5, -40.0, 0.0, 0.72]),
-  sleeve("rubber-soul", -0.022, [0.45, 0.4], [0.3, 44.0, 0.0, 0.53]),
-  sleeve("magical-mystery-tour", 0.035, [0.5, 0.5], [1.35, 20.0, 0.0, 0.9]),
+  print("macaws", macawsImg, "Macaws", "Two macaws, a Kodak Photo CD film scan", -0.03, [0.64, 0.345], [2.2, 30.0, 0.0, 0.31]),
+  print("face", faceImg, "Face paint", "A girl in yellow face paint, a Kodak Photo CD film scan", 0.028, [0.54, 0.4], [-0.5, -40.0, 0.0, 0.72]),
+  print("hibiscus", hibiscusImg, "Hibiscus", "Hibiscus at a shuttered window, a Kodak Photo CD film scan", -0.022, [0.47, 0.5], [0.3, 44.0, 0.0, 0.53]),
+  print("lighthouse", lighthouseImg, "Lighthouse", "A lighthouse on a rocky coast, a Kodak Photo CD film scan", 0.032, [0.44, 0.33], [1.35, 20.0, 0.0, 0.9]),
 ];
 
-export const ZOOM_MIN = 2;
-export const ZOOM_MAX = 20;
-export const ZOOM_REST = 7;
+export const ZOOM_MIN = 1.5;
+export const ZOOM_MAX = 4;
+export const ZOOM_REST = 2.8;

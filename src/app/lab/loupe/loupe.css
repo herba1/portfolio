@@ -162,7 +162,7 @@
 .loupe__thumb {
   display: block;
   flex: none;
-  width: 32px;
+  width: 48px;
   height: 32px;
   object-fit: cover;
   border-radius: 3px;

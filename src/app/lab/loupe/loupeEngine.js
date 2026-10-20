@@ -5,7 +5,6 @@ const LOG_MIN = Math.log(ZOOM_MIN);
 const LOG_MAX = Math.log(ZOOM_MAX);
 const SUB = 1 / 240;
 const SWAP_MS = 760;
-const T206_ASPECT = 660 / 1232;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const ease = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -44,24 +43,36 @@ export function createLoupeEngine({ box, stage, canvas, tag, slider, insets, emb
   let interval = 16;
   let layerB = null;
 
+  function fit(aspect, tilt) {
+    const pad = insets();
+    const availH = Math.max(120, view.height - pad.top - pad.bottom);
+    const freeW = Math.max(160, view.width - pad.left - pad.right);
+    const wide = !embedded && view.width >= 900;
+    const c = Math.abs(Math.cos(tilt));
+    const s = Math.abs(Math.sin(tilt));
+    let hh = Math.min(availH * 0.44, view.height * 0.34);
+    if (!wide) hh = Math.min(hh, (freeW * (view.width < 640 ? 0.5 : 0.42)) / aspect);
+    hh = Math.min(hh, (freeW * 0.47) / (aspect * c + s), (availH * 0.48) / (aspect * s + c));
+    hh = Math.max(60, hh);
+    const hw = hh * aspect;
+    const ext = hw * c + hh * s;
+    const lo = pad.left + ext;
+    const hi = view.width - pad.right - ext;
+    const x = wide ? clamp(view.width / 2, Math.min(lo, hi), Math.max(lo, hi)) : view.width / 2;
+    return { x, y: pad.top + availH / 2, hw, hh };
+  }
+
   function rest(idx) {
     const card = CARDS[idx];
     const aspect = images.get(card.key)?.aspect || card.aspect;
-    const pad = insets();
-    const availW = view.width - 32;
-    const availH = Math.max(120, view.height - pad.top - pad.bottom);
-    const hh = Math.min(availH * 0.44, view.height * 0.34, (availW * (view.width < 640 ? 0.47 : 0.4)) / aspect);
-    const hw = hh * aspect;
-    return { x: view.width / 2, y: pad.top + availH / 2, rot: card.tilt, hw, hh, mmPx: card.widthMm / (2 * hw) };
+    const f = fit(aspect, card.tilt);
+    return { x: f.x, y: f.y, rot: card.tilt, hw: f.hw, hh: f.hh, mmPx: card.widthMm / (2 * f.hw) };
   }
 
   function layout() {
-    const pad = insets();
-    const availW = view.width - 32;
-    const availH = Math.max(120, view.height - pad.top - pad.bottom);
-    const hh = Math.min(availH * 0.5, view.height * 0.39, (availW * 0.46) / T206_ASPECT);
-    view.tableMm = 66.7 / (2 * hh);
-    view.radius = clamp(0.8 * hh * T206_ASPECT, 52, 170);
+    const { hh } = fit(CARDS[0].aspect, CARDS[0].tilt);
+    view.tableMm = 50 / (2 * hh);
+    view.radius = clamp(0.5 * hh, 52, 150);
   }
 
   function poseOf(layer, now) {

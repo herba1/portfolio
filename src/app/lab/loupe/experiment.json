@@ -1,15 +1,15 @@
 {
   "title": "Loupe",
-  "description": "A Beatles sleeve on a black ground under a collector's loupe in a low sun. The glass throws its shadow on the cover and burns the light to a hot point beside it, with a cone of rays and a coloured caustic ring; turn it from 2× to 20× and the cover comes apart into CMYK rosettes.",
+  "description": "A loupe with no ring and no frame, only glass: slide it over a film print on a black desk in a low sun. The lens bends the print at its edge, splits the light into a thin fringe and burns the sun to a hot point beside it with a cone of rays; turn it from 1.5× to 4× to look into the macaws, the face paint, the hibiscus or the lighthouse.",
   "tags": [
     "WebGL",
     "Optics",
     "Print",
-    "Music"
+    "Photography"
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: real glass with refraction, chromatic fringe and a focused hot spot over a real print, where magnification turns a cover into the ink it is made of.",
+  "intent": "One optical object finished to the edge: a lens drawn only by refraction and light, with chromatic fringe and a focused hot spot over a real film photograph, magnifying only as far as the scan still holds up.",
   "tile": {
     "cols": 3,
     "rows": 5
@@ -18,6 +18,7 @@
     "https://marijanapav.com/stamps",
     "https://tympanus.net/codrops/2026/06/09/building-an-interactive-digital-stamp-collection-with-shaders-postcards-and-playful-inspection/",
     "https://tympanus.net/Tutorials/PointerSquareLensDistortion",
-    "https://kube.io/blog/liquid-glass-css-svg/"
+    "https://kube.io/blog/liquid-glass-css-svg/",
+    "Prints: Kodak Lossless True Color Image Suite (kodim07, kodim15, kodim21, kodim23), 35mm film scans from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/)"
   ]
 }
