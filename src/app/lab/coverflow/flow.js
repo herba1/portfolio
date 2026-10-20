@@ -20,13 +20,14 @@ const rubber = (x, d) => (1 - 1 / ((x * 0.55) / d + 1)) * d;
 
 export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, onFlick }) {
   const stage = root.querySelector("[data-cf-stage]");
-  const items = [...root.querySelectorAll("[data-cf-item]")];
-  const flipA = new Float64Array(count);
-  const flipV = new Float64Array(count);
+  let items = [...root.querySelectorAll("[data-cf-item]")];
+  let flipA = new Float64Array(count);
+  let flipV = new Float64Array(count);
   let flipped = -1;
   const scrub = root.querySelector("[data-cf-scrub]");
   const thumb = root.querySelector("[data-cf-thumb]");
-  const last = count - 1;
+  let last = count - 1;
+  let swapTimer = 0;
 
   let size = 240;
   let pos = start;
@@ -161,7 +162,7 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     }
     if (thumb && scrub) {
       const travel = scrub.clientWidth - thumb.offsetWidth;
-      thumb.style.transform = `translateX(${((clamp(pos, 0, last) / last) * travel).toFixed(2)}px)`;
+      thumb.style.transform = `translateX(${((clamp(pos, 0, last) / Math.max(1, last)) * travel).toFixed(2)}px)`;
     }
     const idx = clamp(Math.round(pos), 0, last);
     if (idx !== center) {
@@ -380,14 +381,39 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
   root.addEventListener("keydown", onKey);
   scrub?.addEventListener("pointerdown", onScrubDown);
 
+  const setCount = (n) => {
+    items = [...root.querySelectorAll("[data-cf-item]")];
+    if (n !== count) {
+      const a = new Float64Array(n);
+      const v = new Float64Array(n);
+      a.set(flipA.subarray(0, Math.min(n, count)));
+      v.set(flipV.subarray(0, Math.min(n, count)));
+      flipA = a;
+      flipV = v;
+      count = n;
+      last = n - 1;
+      if (flipped > last) setFlip(-1);
+      target = clamp(Math.round(target), 0, last);
+      root.dataset.swap = "true";
+      clearTimeout(swapTimer);
+      swapTimer = setTimeout(() => {
+        root.dataset.swap = "false";
+      }, 700);
+    }
+    paint();
+    kick();
+  };
+
   return {
     goTo,
     toggle,
+    setCount,
     step: (n) => goTo(Math.round(target) + n),
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);
       clearTimeout(wheelTimer);
+      clearTimeout(swapTimer);
       ro.disconnect();
       root.removeEventListener("pointerdown", onDown);
       root.removeEventListener("pointermove", onMove);

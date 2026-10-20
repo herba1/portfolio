@@ -72,10 +72,43 @@
   height: 100%;
   object-fit: cover;
   pointer-events: none;
+  transition: opacity 480ms ease-out;
+}
+
+.cf-cover[data-in="false"] {
+  opacity: 0;
+}
+
+.cf-cover[data-plain] {
+  filter: brightness(0.69) contrast(2.46);
 }
 
 .cf-front {
   box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+  transition: box-shadow 480ms ease-out;
+}
+
+.cf-item:not([data-lit]) .cf-front {
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0);
+}
+
+.cf-item[data-gone] {
+  pointer-events: none;
+}
+
+@property --cf-on {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 0;
+}
+
+.cf-item {
+  --cf-on: 0;
+  transition: --cf-on 480ms ease-out;
+}
+
+.cf-item[data-lit] {
+  --cf-on: 1;
 }
 
 .cf-back {
@@ -227,7 +260,7 @@
 
 .cf-front .cf-gloss {
   background-position: calc(var(--cf-gf, 0.5) * 100%) 0;
-  opacity: calc(var(--cf-gfo, 0) * 0.9);
+  opacity: calc(var(--cf-gfo, 0) * 0.9 * var(--cf-on));
 }
 
 .cf-back .cf-gloss {
@@ -242,23 +275,34 @@
   pointer-events: none;
 }
 
-.cf-stage,
-.cf-caption,
-.cf-controls {
-  transition: opacity 360ms ease-out;
+.cf-swap {
+  display: grid;
 }
 
-.cf[data-ready="false"] :is(.cf-stage, .cf-caption, .cf-controls) {
-  opacity: 0;
+.cf-swap-layer {
+  grid-area: 1 / 1;
+  min-width: 0;
+}
+
+.cf-swap-layer[data-in] {
+  animation: cf-swap-in 220ms ease-out both;
+}
+
+.cf-swap-layer[data-out] {
   pointer-events: none;
+  animation: cf-swap-out 120ms ease-in both;
 }
 
-.cf-item[data-loaded="false"] {
-  visibility: hidden;
+@keyframes cf-swap-in {
+  from {
+    opacity: 0;
+  }
 }
 
-.cf-item[data-plain] .cf-cover {
-  filter: brightness(0.69) contrast(2.46);
+@keyframes cf-swap-out {
+  to {
+    opacity: 0;
+  }
 }
 
 .cf-mirror {
@@ -285,15 +329,19 @@
 .cf-caption {
   position: relative;
   z-index: 2;
+  display: grid;
   height: 120px;
   padding: 0 24px;
+  overflow: hidden;
+  text-align: center;
+  pointer-events: none;
+}
+
+.cf-caption > .cf-swap-layer {
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 4px;
-  overflow: hidden;
-  text-align: center;
-  pointer-events: none;
 }
 
 .cf-title {
@@ -424,6 +472,13 @@
   transition: height 150ms ease-out, top 150ms ease-out;
 }
 
+.cf[data-swap="true"] .cf-thumb {
+  transition:
+    transform 560ms cubic-bezier(0.22, 1, 0.36, 1),
+    height 150ms ease-out,
+    top 150ms ease-out;
+}
+
 .cf-scrub:hover .cf-thumb,
 .cf[data-scrub="true"] .cf-thumb {
   top: 10px;
@@ -444,6 +499,9 @@
 
 .cf[data-embedded="true"] .cf-caption {
   height: 88px;
+}
+
+.cf[data-embedded="true"] .cf-caption > .cf-swap-layer {
   justify-content: center;
 }
 
@@ -478,8 +536,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .cf-bars i {
+  .cf-bars i,
+  .cf-swap-layer[data-in],
+  .cf-swap-layer[data-out] {
     animation: none;
+  }
+
+  .cf-swap-layer[data-out] {
+    visibility: hidden;
   }
 }
 

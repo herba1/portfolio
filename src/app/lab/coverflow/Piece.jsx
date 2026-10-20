@@ -71,20 +71,45 @@ const startOf = (records) => {
   return i >= 0 ? i : Math.floor((records.length - 1) / 2);
 };
 
+function Swap({ id, className, block = false, children }) {
+  const [s, setS] = useState({ id, node: children, prev: null, n: 0 });
+  if (s.id !== id) setS({ id, node: children, prev: { node: s.node, n: s.n }, n: s.n + 1 });
+  const Tag = block ? "div" : "span";
+  return (
+    <Tag className={`cf-swap ${className ?? ""}`}>
+      {s.prev ? (
+        <Tag key={s.prev.n} className="cf-swap-layer" data-out="" aria-hidden="true">
+          {s.prev.node}
+        </Tag>
+      ) : null}
+      <Tag key={s.n} className="cf-swap-layer" data-in={s.n > 0 ? "" : undefined}>
+        {s.id === id ? children : s.node}
+      </Tag>
+    </Tag>
+  );
+}
+
+function Layers({ layers, front }) {
+  return layers.map((l) => (
+    <img key={l.key} className="cf-cover" src={l.cover} alt="" draggable={false} data-in={l.on ? "true" : "false"} data-plain={l.plain ? "true" : undefined} data-back-layer={front ? undefined : "true"} />
+  ));
+}
+
 export default function Piece({ embedded = false }) {
   const { tracks, live } = useTopSongs(50);
   const records = useMemo(() => recordsFrom(tracks, live), [tracks, live]);
-  const [firstTracks] = useState(tracks);
-  const settled = tracks !== firstTracks;
   const rootRef = useRef(null);
   const flowRef = useRef(null);
-  const [view, setView] = useState({ records: null, center: 0 });
+  const [hist, setHist] = useState({ records, prev: null });
+  if (hist.records !== records) setHist({ records, prev: hist.records });
+  const prev = hist.records === records ? hist.prev : null;
+  const [view, setView] = useState(() => startOf(records));
   const [flipped, setFlipped] = useState(-1);
   const [playing, setPlaying] = useState(null);
   const [sleeves, setSleeves] = useState({});
-  const [loaded, setLoaded] = useState({ records: null, map: {} });
-  const [late, setLate] = useState(null);
-  const center = view.records === records ? view.center : startOf(records);
+  const [loaded, setLoaded] = useState({});
+  const [start] = useState(view);
+  const center = Math.min(view, records.length - 1);
 
   useEffect(() => {
     let alive = true;
@@ -101,18 +126,16 @@ export default function Piece({ embedded = false }) {
         } catch {
           tone = null;
         }
-        setSleeves((m) => (m[r.id] === tone ? m : { ...m, [r.id]: tone }));
-        setLoaded((l) => ({ records, map: { ...(l.records === records ? l.map : {}), [r.id]: plain ? "plain" : "ok" } }));
+        setSleeves((m) => (m[r.cover] === tone ? m : { ...m, [r.cover]: tone }));
+        setLoaded((m) => ({ ...m, [r.cover]: plain ? "plain" : "ok" }));
       };
       img.onerror = () => {
-        if (alive) setLoaded((l) => ({ records, map: { ...(l.records === records ? l.map : {}), [r.id]: "failed" } }));
+        if (alive) setLoaded((m) => ({ ...m, [r.cover]: "failed" }));
       };
       img.src = r.cover;
     }
-    const timer = setTimeout(() => alive && setLate(records), 4000);
     return () => {
       alive = false;
-      clearTimeout(timer);
     };
   }, [records]);
 
@@ -123,9 +146,9 @@ export default function Piece({ embedded = false }) {
     root.addEventListener("pointerdown", wake);
     root.addEventListener("keydown", wake);
     const flow = createFlow(root, {
-      count: records.length,
-      start: startOf(records),
-      onCenter: (i) => setView({ records, center: i }),
+      count: root.querySelectorAll("[data-cf-item]").length,
+      start,
+      onCenter: (i) => setView(i),
       onTick: ticks.tick,
       onFlip: (i) => {
         setFlipped(i);
@@ -141,59 +164,70 @@ export default function Piece({ embedded = false }) {
       ticks.destroy();
       flowRef.current = null;
     };
+  }, [start]);
+
+  useEffect(() => {
+    flowRef.current?.setCount(records.length);
   }, [records]);
 
   const album = records[center] ?? records[0];
-  const state = loaded.records === records ? loaded.map : {};
-  const first = startOf(records);
-  const ready = late === records || (settled && records.every((r, i) => Math.abs(i - first) > 4 || state[r.id]));
+  const ok = (cover) => loaded[cover] === "ok" || loaded[cover] === "plain";
+  const slots = Array.from({ length: Math.max(records.length, prev?.length ?? 0) }, (_, i) => {
+    const rec = records[i] ?? null;
+    const old = prev?.[i] ?? null;
+    const shown = rec ?? old;
+    const layers = [];
+    if (old && (!rec || old.cover !== rec.cover)) layers.push({ key: `o-${old.cover}`, cover: old.cover, on: !!rec && ok(old.cover), plain: loaded[old.cover] === "plain" });
+    if (rec) layers.push({ key: `n-${rec.cover}`, cover: rec.cover, on: ok(rec.cover), plain: loaded[rec.cover] === "plain" });
+    return { i, rec, shown, layers };
+  });
 
   return (
     <div
       ref={rootRef}
       className="cf"
       data-embedded={embedded ? "true" : "false"}
-      data-ready={ready ? "true" : "false"}
       data-flipped="false"
       tabIndex={0}
       role="listbox"
       aria-label="Records"
-      aria-activedescendant={`cf-item-${album.id}`}
+      aria-activedescendant={`cf-item-${center}`}
     >
       {!embedded && <h1 className="cf-heading text-heading">Cover Flow</h1>}
 
       <div className="cf-stage" data-cf-stage>
-        {records.map((a, i) => (
+        {slots.map(({ i, rec, shown, layers }) => (
           <div
-            key={a.id}
-            id={`cf-item-${a.id}`}
+            key={i}
+            id={rec ? `cf-item-${i}` : undefined}
             className="cf-item"
-            data-cf-item
+            data-cf-item={rec ? "" : undefined}
+            data-gone={rec ? undefined : "true"}
+            data-lit={layers.some((l) => l.on) ? "" : undefined}
             data-index={i}
-            role="option"
-            aria-selected={i === center}
-            aria-label={a.year ? `${a.title}, ${a.artist}, ${a.year}` : `${a.title}, ${a.artist}`}
-            data-loaded={state[a.id] === "ok" || state[a.id] === "plain" ? "true" : "false"}
-            data-plain={state[a.id] === "plain" ? "true" : undefined}
-            style={{ "--cf-sleeve": sleeves[a.id] ?? "hsl(30 6% 14%)" }}
+            role={rec ? "option" : undefined}
+            aria-hidden={rec ? undefined : "true"}
+            aria-selected={rec ? i === center : undefined}
+            aria-label={rec ? (rec.year ? `${rec.title}, ${rec.artist}, ${rec.year}` : `${rec.title}, ${rec.artist}`) : undefined}
+            style={{ "--cf-sleeve": sleeves[shown.cover] ?? "hsl(30 6% 14%)" }}
           >
             <div className="cf-face cf-front">
-              <img className="cf-cover" src={a.cover} alt="" draggable={false} />
+              <Layers layers={layers} front />
               <span className="cf-gloss" aria-hidden="true" />
               <span className="cf-shade" aria-hidden="true" />
             </div>
-            <div className="cf-face cf-back" inert={flipped !== i ? true : undefined} aria-hidden={flipped !== i}>
-              <Back record={a} playing={playing} onPlay={setPlaying} live />
+            <div className="cf-face cf-back" inert={!rec || flipped !== i ? true : undefined} aria-hidden={!rec || flipped !== i}>
+              <Back record={shown} playing={playing} onPlay={setPlaying} live={!!rec} />
               <span className="cf-gloss" aria-hidden="true" />
               <span className="cf-shade" aria-hidden="true" />
             </div>
             <div className="cf-mirror" aria-hidden="true" inert>
               <div className="cf-face cf-front">
-                <img className="cf-cover" src={a.cover} alt="" draggable={false} />
+                <Layers layers={layers} front />
                 <span className="cf-shade" />
               </div>
               <div className="cf-face cf-back">
-                <Back record={a} playing={playing} onPlay={setPlaying} live={false} />
+                <Back record={shown} playing={playing} onPlay={setPlaying} live={false} />
                 <span className="cf-shade" />
               </div>
             </div>
@@ -201,8 +235,8 @@ export default function Piece({ embedded = false }) {
         ))}
       </div>
 
-      <div className="cf-caption">
-        <h2 className="cf-title text-title-lg" aria-live="polite">
+      <Swap id={`${album.cover}|${album.title}`} className="cf-caption" block>
+        <h2 className="cf-title text-title-lg">
           <span className="cf-title-text">{album.title}</span>
         </h2>
         <p className="cf-meta text-ui-lg">
@@ -210,7 +244,7 @@ export default function Piece({ embedded = false }) {
           {album.year && <span aria-hidden="true">·</span>}
           {album.year && <span className="cf-meta-year tabular-nums">{album.year}</span>}
         </p>
-      </div>
+      </Swap>
 
       <div className="cf-controls">
         <button type="button" className="cf-step" aria-label="Previous record" disabled={center === 0} onClick={() => flowRef.current?.step(-1)}>
@@ -223,9 +257,9 @@ export default function Piece({ embedded = false }) {
         <button type="button" className="cf-step" aria-label="Next record" disabled={center === records.length - 1} onClick={() => flowRef.current?.step(1)}>
           <Chevron dir={1} />
         </button>
-        <span className="cf-count text-ui font-mono tabular-nums">
+        <Swap id={`${center}/${records.length}`} className="cf-count text-ui font-mono tabular-nums">
           {String(center + 1).padStart(2, "0")} / {String(records.length).padStart(2, "0")}
-        </span>
+        </Swap>
       </div>
     </div>
   );
