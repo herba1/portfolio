@@ -251,12 +251,12 @@ void main() {
   paper += clamp((ty - tx) * 0.22, -0.012, 0.012);
   paper *= 0.988 + 0.024 * paperTex.a;
   vec2 maps = texture(uMaps, uv).rg;
-  float landed = uMorph > 0.5 ? max(maps.g, smoothstep(0.62, 1.0, uT)) : 1.0;
+  float landed = uMorph > 0.5 ? max(maps.g, smoothstep(0.85, 1.0, uT)) : 1.0;
   float lifted = uMorph > 0.5 ? max(maps.r, smoothstep(0.6, 1.0, uT)) : 1.0;
   float pm = texture(uPrevMask, uv).r;
   float pmx = texture(uPrevMask, uv + vec2(1.5, 0.0) * st).r - texture(uPrevMask, uv - vec2(1.5, 0.0) * st).r;
   float pmy = texture(uPrevMask, uv + vec2(0.0, 1.5) * st).r - texture(uPrevMask, uv - vec2(0.0, 1.5) * st).r;
-  float debossAmount = uDeboss * landed;
+  float debossAmount = uDeboss * (uMorph > 0.5 ? landed * smoothstep(0.72, 1.0, uT) : 1.0);
   float oldAmount = uPrevDeboss * (1.0 - lifted);
   float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * debossAmount + clamp(pmy - pmx, -1.0, 1.0) * 0.5 * oldAmount;
   paper *= 1.0 - (m * debossAmount + pm * oldAmount) * 0.03;
@@ -312,6 +312,7 @@ out float vMass;
 out vec2 vChroma;
 out float vWeight;
 out float vAcross;
+out float vU;
 float easeInOut(float x) {
   return x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0;
 }
@@ -342,7 +343,7 @@ void main() {
   vec2 b = head;
   float weight;
   if (uMode == 0) {
-    weight = smoothstep(0.0, 0.2, u) * (1.0 - smoothstep(0.62, 1.0, u));
+    weight = smoothstep(0.0, 0.2, u) * (1.0 - smoothstep(0.8, 1.0, u));
   } else if (uMode == 1) {
     a = src;
     b = src;
@@ -352,7 +353,7 @@ void main() {
     a = dst;
     b = dst;
     w *= 1.8;
-    weight = smoothstep(0.62, 1.0, u);
+    weight = smoothstep(0.76, 1.0, u);
   }
   vec2 dir = b - a;
   float len = length(dir);
@@ -365,6 +366,7 @@ void main() {
   vMass = mix(mass.x, mass.y, smoothstep(0.05, 0.7, u));
   vChroma = mix(tint.xy, tint.zw, smoothstep(0.15, 0.85, u));
   vWeight = weight;
+  vU = u;
   gl_Position = weight <= 0.0 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p / uRes * 2.0 - 1.0, 0.0, 1.0);
 }
 `;
@@ -373,15 +375,20 @@ export const FLOW_FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
 uniform int uMode;
+uniform sampler2D uGoal;
+uniform vec2 uRes;
 in float vMass;
 in vec2 vChroma;
 in float vWeight;
 in float vAcross;
+in float vU;
 out vec4 outColor;
 void main() {
   if (uMode == 0) {
     float soft = 1.0 - smoothstep(0.55, 1.0, abs(vAcross));
-    float k = vWeight * (0.35 + 0.65 * soft);
+    float shape = smoothstep(0.04, 0.45, texture(uGoal, gl_FragCoord.xy / uRes).r);
+    float settle = smoothstep(0.3, 0.78, vU);
+    float k = vWeight * mix(0.35 + 0.65 * soft, shape, settle);
     outColor = vec4(vMass * k, k, vChroma * k);
   } else {
     outColor = vec4(vWeight);
@@ -404,7 +411,7 @@ void main() {
   vec4 f = texture(uFlow, uv);
   vec2 mp = texture(uMaps, uv).rg;
   float lift = max(mp.r, smoothstep(0.6, 1.0, uT));
-  float land = max(mp.g, smoothstep(0.62, 1.0, uT));
+  float land = max(mp.g, smoothstep(0.85, 1.0, uT));
   vec4 goal = texture(uGoal, uv);
   float cover = min(1.0, f.g);
   float fd = f.g > 1e-4 ? f.r / f.g * cover : 0.0;

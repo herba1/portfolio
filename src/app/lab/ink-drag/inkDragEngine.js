@@ -878,6 +878,9 @@ export default class InkDragEngine {
     gl.uniform1i(uniforms.uLook, 1);
     gl.uniform1i(uniforms.uTint, 2);
     gl.uniform1i(uniforms.uMass, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.goalTarget.texture);
+    gl.uniform1i(uniforms.uGoal, 4);
     gl.uniform1i(uniforms.uCols, FLOW_COLS);
     gl.uniform2f(uniforms.uRes, this.simWidth, this.simHeight);
     gl.uniform1f(uniforms.uT, t);
