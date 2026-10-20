@@ -40,11 +40,6 @@ export const POSTERS = {
     "width": 688,
     "height": 464
   },
-  "/lab/crate": {
-    "src": "/posters/experiments/lab--crate.webp?v=lkn0tgrB",
-    "width": 688,
-    "height": 584
-  },
   "/lab/crumple": {
     "src": "/posters/experiments/lab--crumple.webp?v=mPx2Wtd_",
     "width": 688,

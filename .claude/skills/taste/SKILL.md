@@ -83,6 +83,17 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Notes on the keepers ask for: fewer glitches, smoother transitions, real springs instead of bad eases, less chrome and fewer shadows (just the sheet and the stamper), no overlapping elements, and letting people bring their own image or place their own type.
 - Depth reads well: nested menus should stack as layers that recede as you go deeper.
 
+## From batch five (27 polished keepers, scored 1–5, October 2026)
+
+- Scored 5: Dandelion ("pretty"), Sticker Peel ("pretty asf"), Loupe ("clean"). Scored 4: Steam, Pull Vinyl, Erase, Hold Menu, Raking Light, Film Leader, Type Bust, Mirrorball, Light Table. "Pretty" and "clean" are the words that win.
+- Cut at 1–2: Plotter even as a proper stipple print, Crate even in real perspective, Ribbon, Linocut, Cover Palette ("meh"), and Ghost Type ("I don't understand it"). If the mechanic needs explaining, it has failed; a heavy rework of a weak piece rarely saves it.
+- Crumple reversed again: he now wants it "literally like 8 fps", a stepped, stop-motion frame rate. Treat stepped frame rates as a deliberate style he likes on physical-material pieces, not a bug.
+- Motion should be bold where the piece is about a transition ("doesn't feel crazy enough"), and seamless where one thing turns into another ("not smooth into the text").
+- Realism is judged hard: the compact disc "looks cheap, not realistic". A realistic object needs real reference-level materials, or it reads as cheap.
+- Depth should carry through the whole scene: when menus layer deeper, the album art should recede too. Flaps and boards need real perspective.
+- Sound design is welcome when it is genuinely good (Typewriter).
+- Layout must be stable: any shift while browsing ("layout shifty") costs a point.
+
 ## Type vibes — Herb's reference board (October 2026)
 
 Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:
