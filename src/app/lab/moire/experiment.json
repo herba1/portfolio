@@ -1,11 +1,19 @@
 {
   "title": "Moiré",
   "description": "Two fine black line screens lie on white, one sliding and turning over the other. A word or a Beatles cover is hidden in the phase of the bottom screen, so it only appears where the two interfere, comes up as the top layer settles into register and dissolves into ripples as it moves off; drag to slide it yourself.",
-  "tags": ["Optics", "Type", "Sound", "WebGL"],
-  "status": "candidate",
-  "createdAt": "2026-10-21T00:00:00.000Z",
+  "tags": [
+    "Optics",
+    "Type",
+    "Sound",
+    "WebGL"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-21T23:00:00.000Z",
   "intent": "A moiré as a reveal: both gratings share the same wavy warp, and the bottom one is phase-shifted by half a line wherever the image is dark, so neither layer shows the picture on its own and only their product does. The tone is two close sine pairs at the line screen's odd harmonics, detuned by the rate the fringes pass, so the audible beat is the visible beat and it falls still when the image locks in.",
-  "tile": { "cols": 4, "rows": 4 },
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://en.wikipedia.org/wiki/Moir%C3%A9_pattern",
     "https://www.amidror.ch/ (Amidror, The Theory of the Moiré Phenomenon)",

@@ -753,7 +753,7 @@ export function createField(stage, { embedded = false, caption = null, input = n
   const boot = async () => {
     loadCovers();
     try {
-      await Promise.race([Promise.all([document.fonts.load("500 16px FieldMono"), document.fonts.load("700 32px FieldSans")]), new Promise((r) => setTimeout(r, 1500))]);
+      await Promise.race([Promise.all([document.fonts.load("500 16px FieldMono"), document.fonts.load("700 32px FieldSerif")]), new Promise((r) => setTimeout(r, 1500))]);
     } catch {}
     if (destroyed) return;
     if (!layout(true)) {

@@ -6,8 +6,8 @@
 }
 
 @font-face {
-  font-family: "FieldSans";
-  src: url("./arimo-700.woff2") format("woff2");
+  font-family: "FieldSerif";
+  src: url("./garamond-700.woff2") format("woff2");
   font-weight: 700;
   font-display: block;
 }

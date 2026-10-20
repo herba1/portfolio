@@ -202,7 +202,7 @@ export function wordTarget(text, { cols, rows, cw, ch, region }) {
   const data = sampleCanvas(cols, rows, cw, ch, (x) => {
     const maxW = region.w * 0.9;
     const maxH = region.h * 0.74;
-    x.font = `700 100px FieldSans, Arial, sans-serif`;
+    x.font = `700 100px FieldSerif, Georgia, serif`;
     let lines = [text];
     let size = 0;
     for (const option of layouts(text)) {
@@ -213,7 +213,7 @@ export function wordTarget(text, { cols, rows, cw, ch, region }) {
         lines = option;
       }
     }
-    x.font = `700 ${size}px FieldSans, Arial, sans-serif`;
+    x.font = `700 ${size}px FieldSerif, Georgia, serif`;
     lineCount = lines.length;
     x.fillStyle = "#fff";
     x.strokeStyle = "#fff";

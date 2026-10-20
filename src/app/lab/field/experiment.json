@@ -8,8 +8,8 @@
     "Sound",
     "WebGL"
   ],
-  "status": "candidate",
-  "createdAt": "2026-10-21T00:00:00.000Z",
+  "status": "shipped",
+  "createdAt": "2026-10-21T22:00:00.000Z",
   "intent": "ASCII art as weather: about sixteen thousand particles follow a curl-noise wind, their density is counted per character cell and mapped through a glyph ramp sorted by measured ink coverage, and a WebGL pass draws every cell from one glyph atlas. To gather, each particle is given a destination sampled from the target's brightness and released by a front that sweeps across like a gust; filtered-noise wind swells as the field closes.",
   "tile": {
     "cols": 4,
