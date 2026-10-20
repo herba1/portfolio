@@ -19,6 +19,21 @@ const DWELL = 380;
 const RECEDE = 220;
 const PEEK = 40;
 const OPEN = 200;
+const GRID_R = 8;
+const LIFT_R = 12;
+const PRESS = 0.96;
+const SETTLE = 660;
+
+function slotRect(root, el) {
+  const box = root.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const k = root.offsetWidth ? box.width / root.offsetWidth : 1;
+  const width = el.offsetWidth * k;
+  const height = el.offsetHeight * k;
+  const cx = r.left + r.width / 2 - box.left;
+  const cy = r.top + r.height / 2 - box.top;
+  return { left: cx - width / 2, top: cy - height / 2, width, height };
+}
 
 const itemsAt = (root, path, level) => {
   let items = root;
@@ -73,7 +88,8 @@ export default function Piece({ embedded = false }) {
   const cloneRef = useRef(null);
   const coverEls = useRef(new Map());
   const press = useRef(null);
-  const spring = useRef({ x: 0, y: 0, s: 1, vx: 0, vy: 0, vs: 0, tx: 0, ty: 0, ts: 1, raf: 0, onRest: null });
+  const spring = useRef({ x: 0, y: 0, s: 1, fs: 1, vx: 0, vy: 0, vs: 0, tx: 0, ty: 0, ts: 1, raf: 0, onRest: null });
+  const queued = useRef(null);
   const [pressing, setPressing] = useState(null);
   const [menu, setMenu] = useState(null);
   const [nav, setNavState] = useState({ path: [], hot: [-1], ghosts: [] });
@@ -89,6 +105,16 @@ export default function Piece({ embedded = false }) {
   useEffect(() => {
     menuRef.current = menu;
   }, [menu]);
+
+  const openRef = useRef(null);
+
+  const slotOf = useCallback((m) => {
+    const root = rootRef.current;
+    const el = coverEls.current.get(m.record.id);
+    if (!root || !el) return null;
+    const r = slotRect(root, el);
+    return { x: r.left + r.width / 2 - (m.left + m.size / 2), y: r.top + r.height / 2 - (m.top + m.size / 2), s: r.width / m.size };
+  }, []);
 
   const setNav = useCallback((next) => {
     navRef.current = next;
@@ -123,7 +149,10 @@ export default function Piece({ embedded = false }) {
   const paint = useCallback(() => {
     const st = spring.current;
     const el = cloneRef.current;
-    if (el) el.style.transform = `translate3d(${st.x.toFixed(2)}px, ${st.y.toFixed(2)}px, 0) scale(${st.s.toFixed(4)})`;
+    if (!el) return;
+    el.style.transform = `translate3d(${st.x.toFixed(2)}px, ${st.y.toFixed(2)}px, 0) scale(${st.s.toFixed(4)})`;
+    const p = Math.min(1, Math.max(0, (st.s - st.fs) / Math.max(0.001, 1 - st.fs)));
+    el.style.setProperty("--hm-r", `${((GRID_R + (LIFT_R - GRID_R) * p) / st.s).toFixed(3)}px`);
   }, []);
 
   const runSpring = useCallback(() => {
@@ -240,18 +269,38 @@ export default function Piece({ embedded = false }) {
     timers.current.forEach((t) => clearTimeout(t));
     timers.current.clear();
     const st = spring.current;
-    setMenu({ ...m, closing: true });
-    st.tx = m.from.x;
-    st.ty = m.from.y;
-    st.ts = m.from.s;
-    st.onRest = () => {
-      setMenu((cur) => (cur && cur.closing && cur.n === m.n ? null : cur));
+    const from = slotOf(m) ?? m.from;
+    const cur = navRef.current;
+    const settle = cur.path.length > 0 || (cur.lift ?? 0) > 0 ? SETTLE : 0;
+    const t0 = performance.now();
+    setMenu({ ...m, from, closing: true });
+    st.tx = from.x;
+    st.ty = from.y;
+    st.ts = from.s;
+    st.fs = from.s;
+    const land = () => {
+      setMenu((c) => (c && c.closing && c.n === m.n ? null : c));
       setNav({ path: [], hot: [-1], ghosts: [] });
       setChosen(null);
-      if (m.viaKey) requestAnimationFrame(() => coverEls.current.get(m.record.id)?.focus({ preventScroll: true }));
+      const next = queued.current;
+      queued.current = null;
+      if (next) requestAnimationFrame(() => openRef.current?.(next.record, next.viaKey));
+      else if (m.viaKey) requestAnimationFrame(() => coverEls.current.get(m.record.id)?.focus({ preventScroll: true }));
+    };
+    st.onRest = () => {
+      const wait = settle - (performance.now() - t0);
+      if (wait > 0)
+        timers.current.set(
+          "land",
+          setTimeout(() => {
+            timers.current.delete("land");
+            land();
+          }, wait),
+        );
+      else land();
     };
     runSpring();
-  }, [runSpring, setNav]);
+  }, [runSpring, setNav, slotOf]);
 
   const choose = useCallback(
     (level, index) => {
@@ -273,9 +322,12 @@ export default function Piece({ embedded = false }) {
       const root = rootRef.current;
       const el = coverEls.current.get(record.id);
       if (!root || !el) return;
+      if (menuRef.current?.closing) {
+        queued.current = { record, viaKey };
+        return;
+      }
       const box = root.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      const rect = { left: r.left - box.left, top: r.top - box.top, width: r.width, height: r.height };
+      const rect = slotRect(root, el);
       const items = menuFor(record);
       const narrow = box.width < 640;
       const menuW = Math.min(narrow ? 300 : ROOT_W, box.width - 32);
@@ -286,7 +338,8 @@ export default function Piece({ embedded = false }) {
       cancelAnimationFrame(st.raf);
       st.x = pos.from.x;
       st.y = pos.from.y;
-      st.s = pos.from.s * (viaKey ? 1 : 0.96);
+      st.s = pos.from.s * (viaKey ? 1 : PRESS);
+      st.fs = pos.from.s;
       st.vx = 0;
       st.vy = 0;
       st.vs = 0;
@@ -305,6 +358,10 @@ export default function Piece({ embedded = false }) {
     },
     [setNav],
   );
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useLayoutEffect(() => {
     if (menu && !menu.closing && cloneRef.current) {
