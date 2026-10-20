@@ -2,7 +2,7 @@
   "title": "Tab Morph",
   "description": "A music app's tab bar. The selection pill stretches from tab to tab like a drop of liquid, lit from inside by the Sgt. Pepper cover, and each icon redraws its own stroke as it is picked. Drag along the bar and the pill follows your finger.",
   "tags": ["Interface", "Music", "Motion"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:40:00.000Z",
   "intent": "The most common piece of app chrome finished to the edge, with one over-the-top flourish: a stretchy pill that is a window onto the album art.",
   "tile": { "cols": 2, "rows": 4 },

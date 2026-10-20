@@ -2,7 +2,7 @@
   "title": "EQ Curve",
   "description": "A ten-band graphic EQ for Taxman. Drag a band and the glowing curve bends through it while the spectrum behind it plays the change; pick a preset named after a Beatles album and the whole curve morphs into its shape, colour and all.",
   "tags": ["Interface", "Music", "Motion"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:10:00.000Z",
   "intent": "A music-app equaliser built like it ships, with one over-the-top flourish: album presets that morph the curve and recolour the light.",
   "tile": { "cols": 4, "rows": 3 },

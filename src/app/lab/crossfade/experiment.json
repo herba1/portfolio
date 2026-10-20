@@ -2,7 +2,7 @@
   "title": "Crossfade",
   "description": "A DJ crossfader between two Beatles records. Drag the fader and the covers blend through a rotated halftone screen, the brightest parts of the incoming record breaking through first. The track titles cross-dissolve, and the master tempo rolls on slot digits between the two decks' BPM.",
   "tags": ["Interface", "Shader", "Music", "Type"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:40:00.000Z",
   "intent": "One fader drives everything: the halftone blend of two covers, the title dissolve and a rolling tempo readout.",
   "tile": { "cols": 4, "rows": 4 },

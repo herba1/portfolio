@@ -7,7 +7,7 @@
     "Vinyl",
     "Music"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "One music object finished to the edge: the record is the transport, so the hand on the vinyl is the playhead, and the seven bands cut into the side are the seven tracks you can cue.",
   "tile": {

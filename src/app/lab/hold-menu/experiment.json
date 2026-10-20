@@ -2,7 +2,7 @@
   "title": "Hold Menu",
   "description": "A shelf of Beatles records with an iOS-style long press. Hold a cover and it sinks, then lifts free on a spring with its own colour glowing behind it while the page blurs away; a menu unfolds with Play Next, Add to Queue, Share and Go to Album. Keep holding, slide onto an action and let go to choose it.",
   "tags": ["Menu", "Gesture", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:40:00.000Z",
   "intent": "The context-menu moment from a music app finished to the edge: press, lift, blur, unfold, slide and release, with a spring that can be retargeted the moment you change your mind.",
   "tile": { "cols": 4, "rows": 4 },

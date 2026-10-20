@@ -6,7 +6,7 @@
     "Paper",
     "Music"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "One paper mechanic in a stylised frame rate: a crumple mesh drawn as held comic frames, so the scrunch reads as drawn animation instead of a simulation that looks slightly off.",
   "tile": {

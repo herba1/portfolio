@@ -2,7 +2,7 @@
   "title": "Lock Screen",
   "description": "A phone lock screen with a music live activity. The clock is set in big tabular numerals that roll on the minute, the artwork sits large in the middle, and the media widget scrubs and plays. Swipe the covers or the widget to move between top songs; each landing blooms the new cover's colour through the screen and out past the phone.",
   "tags": ["Interface", "Motion", "Gesture", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:30:00.000Z",
   "intent": "A lock screen whose whole palette is the song: swipe to change it, and the colour floods in from the cover.",
   "tile": { "cols": 2, "rows": 6 },

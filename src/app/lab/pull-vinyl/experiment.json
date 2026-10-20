@@ -2,7 +2,7 @@
   "title": "Pull Vinyl",
   "description": "Pull-to-refresh on a feed of Beatles songs. Drag the list down and a record slides out of its sleeve as far as you pull; let go past the line and it spins as the spinner, crackling, until the new songs drop in at the top and it slips back into the sleeve.",
   "tags": ["Interface", "Music", "Motion"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:50:00.000Z",
   "intent": "The pull-to-refresh gesture made physical and musical, with one over-the-top flourish: the spinner is a record coming out of its sleeve.",
   "tile": { "cols": 2, "rows": 4 },
