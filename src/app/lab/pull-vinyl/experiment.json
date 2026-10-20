@@ -1,6 +1,6 @@
 {
   "title": "Pull Vinyl",
-  "description": "Pull-to-refresh on a list of top songs. Pull the list down and you uncover a record sleeve underneath; the record rolls out of it as far as you pull. Let go past the line and it spins, crackling, while it loads, rolls back into its sleeve, and the sleeve shrinks into the cover of the first new song as the new rows slide in over the well.",
+  "description": "Pull-to-refresh on a list of top songs, set on a card over a warm well. Pull the card down and you uncover a record sleeve underneath; the record rolls out of it as far as you pull. Let go past the line and it spins, crackling, while it loads, rolls back into its sleeve, and the sleeve springs into the cover of the new song as it slides in. The new songs come from A Hard Day's Night, starting with I'll Be Back.",
   "tags": [
     "Interface",
     "Music",
