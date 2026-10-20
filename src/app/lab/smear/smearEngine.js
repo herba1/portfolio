@@ -194,7 +194,7 @@ export function createSmear(root, refs, { onReady } = {}) {
         r: makeSprite(word, "#f43a2e"),
         g: makeSprite(word, "#2ef06a"),
         b: makeSprite(word, "#3a66ff"),
-        ember: makeSprite(word, "#ff9a4a"),
+        ember: makeSprite(word, "#dcdcd8"),
       };
     }
   };

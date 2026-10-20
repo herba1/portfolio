@@ -9,7 +9,6 @@ const LIFT_Z = [120, 112, 126, 116, 122, 114];
 const PLANE_X = 14;
 const PLANE_Y = 5;
 const DEPTH = 640;
-const DIGITS = 28;
 const SINK = 70;
 const DEG = Math.PI / 180;
 
@@ -57,7 +56,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
   const audio = createAudio();
   const meter = document.createElement("canvas").getContext("2d");
 
-  const shadowLayer = el("div", "select-shadows", stage);
   const barLayer = el("div", "select-bars", stage);
   const flyLayer = el("div", "select-fly", stage);
   const textLayer = el("div", "select-text", stage);
@@ -127,15 +125,9 @@ export function createSelect(root, refs, { onCopy } = {}) {
   let chipTimer = 0;
   let menuTimer = 0;
   let flyTimer = 0;
-  let burstTimer = 0;
   let tipPos = { x: 0, y: 0, ready: false };
   let shifts = [];
   let origin = { x: 0, y: 0 };
-  let shadows = [];
-  const digitLayer = el("div", "select-digits", stage);
-  digitLayer.setAttribute("aria-hidden", "true");
-  const digits = [];
-  let digitSeed = 0;
   let lastGeo = [];
 
   const font = (size) => `400 ${size}px ${FAMILY}`;
@@ -496,68 +488,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
     return { x: origin.x + (p.x - origin.x) * f, y: origin.y + (p.y - origin.y) * f };
   };
 
-  const spawnDigits = (g, side, n) => {
-    if (!g || L < 0.2) return;
-    const c = Math.cos(g.theta);
-    const sn = Math.sin(g.theta);
-    const ex = g.cx + c * side * (g.width / 2);
-    const ey = g.cy + sn * side * (g.width / 2);
-    for (let k = 0; k < n; k += 1) {
-      digitSeed += 1;
-      let d = digits.find((q) => q.age >= q.life);
-      if (!d) {
-        if (digits.length >= DIGITS) break;
-        d = { node: el("span", "select-digit", digitLayer), age: 1, life: 0 };
-        digits.push(d);
-      }
-      const h0 = hash(digitSeed * 1.7);
-      const h1 = hash(digitSeed * 2.3 + 5);
-      const h2 = hash(digitSeed * 3.1 + 9);
-      const p = world(g, ex + sn * LH * 0.5, ey - c * LH * 0.5 + (h0 - 0.5) * LH * 0.3);
-      d.node.textContent = h1 > 0.5 ? "1" : "0";
-      d.x = p.x + side * 6;
-      d.y = p.y;
-      d.z = p.z;
-      d.vx = side * (90 + h0 * 120);
-      d.vy = -170 - h1 * 100;
-      d.vz = 120 + h2 * 150;
-      d.rx = 0;
-      d.ry = 0;
-      d.rz = (h2 - 0.5) * 30;
-      d.vrx = (h1 - 0.5) * 220;
-      d.vry = side * (40 + h0 * 90);
-      d.vrz = (h0 - 0.5) * 160;
-      d.age = 0;
-      d.life = 1.4 + h2 * 0.6;
-    }
-    wake();
-  };
-
-  const stepDigits = (dt) => {
-    let alive = false;
-    const zMax = DEPTH * 0.6;
-    for (const d of digits) {
-      if (d.age >= d.life) {
-        if (d.node.style.opacity !== "0") d.node.style.opacity = "0";
-        continue;
-      }
-      alive = true;
-      d.age += dt;
-      d.vy += 170 * dt;
-      d.x += d.vx * dt;
-      d.y += d.vy * dt;
-      d.z = Math.min(zMax, d.z + d.vz * dt);
-      d.rx += d.vrx * dt;
-      d.ry += d.vry * dt;
-      d.rz += d.vrz * dt;
-      const t = Math.min(1, d.age / d.life);
-      const near = Math.max(0, (d.z - zMax * 0.7) / (zMax * 0.3));
-      const o = Math.min(1, d.age / 0.08) * (1 - t * t) * (1 - near);
-      d.node.style.opacity = Math.max(0, o).toFixed(3);
-      d.node.style.transform = `translate3d(${d.x.toFixed(2)}px, ${d.y.toFixed(2)}px, ${d.z.toFixed(2)}px) rotateX(${d.rx.toFixed(2)}deg) rotateY(${d.ry.toFixed(2)}deg) rotateZ(${d.rz.toFixed(2)}deg) skewX(-12deg) translate(-50%, -50%)`;
-    }
-    return alive;
-  };
 
   const placeTip = (geo) => {
     if (!geo.length || mode === "hidden") {
@@ -591,21 +521,11 @@ export function createSelect(root, refs, { onCopy } = {}) {
     tip.dataset.mode = mode;
   };
 
-  const ensureShadows = (n) => {
-    while (shadows.length < n) {
-      const node = el("div", "select-shadow", shadowLayer);
-      shadows.push({ node, w: -1 });
-    }
-    shadows.forEach((sh, i) => {
-      sh.node.style.display = i < n ? "block" : "none";
-    });
-  };
 
   const render = () => {
     const geo = geometry();
     lastGeo = geo;
     ensureBars(geo.length);
-    ensureShadows(geo.length);
     geo.forEach((g, i) => {
       const bar = bars[i];
       if (Math.abs(bar.w - g.width) > 0.2) {
@@ -614,14 +534,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
         bar.node.style.height = `${LH}px`;
       }
       bar.node.style.transform = `${plane()}${lift3d(g, L)}translate3d(${g.cx.toFixed(2)}px, ${g.cy.toFixed(2)}px, 0) rotate(${(g.theta / DEG).toFixed(3)}deg) translate(${(-g.width / 2).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
-      const sh = shadows[i];
-      if (Math.abs(sh.w - g.width) > 0.2) {
-        sh.w = g.width;
-        sh.node.style.width = `${g.width.toFixed(1)}px`;
-        sh.node.style.height = `${LH}px`;
-      }
-      sh.node.style.transform = `${plane()}translate3d(${(g.cx - g.width / 2 + L * g.ay * 0.9).toFixed(2)}px, ${(g.top + L * (10 + g.z * 0.22)).toFixed(2)}px, 0) rotate(${((g.theta / DEG) * 0.5).toFixed(3)}deg) scale(${(1 - L * 0.04).toFixed(4)}, ${(1 - L * 0.18).toFixed(4)})`;
-      sh.node.style.opacity = (Math.min(1, L) * 0.5).toFixed(3);
     });
     const pl = plane();
     for (const w of words) {
@@ -667,8 +579,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
       vL = 0;
     }
     const tipMoving = render();
-    const flying = stepDigits(dt);
-    if (moving || drag || tipMoving || flying) wake();
+    if (moving || drag || tipMoving) wake();
     else last = 0;
   };
 
@@ -708,10 +619,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
     if (target > 0.3 && !lifted) {
       lifted = true;
       audio.lift(0);
-      clearTimeout(burstTimer);
-      burstTimer = setTimeout(() => {
-        if (lifted && lastGeo.length) spawnDigits(lastGeo[lastGeo.length - 1], 1, 7);
-      }, 180);
     }
     if (target === 0 && lifted) {
       lifted = false;
@@ -775,12 +682,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const setSel = (a, b) => {
     const changed = !sel || sel.a !== a || sel.b !== b;
-    const prevA = sel ? sel.a : a;
     sel = { a, b };
-    if (changed && drag && L > 0.3 && lastGeo.length) {
-      const moved = drag.kind === "start" || (sel && a !== prevA) ? -1 : 1;
-      spawnDigits(moved < 0 ? lastGeo[0] : lastGeo[lastGeo.length - 1], moved, 2);
-    }
     if (changed) {
       const w = words[b];
       audio.tick(((w.x + w.w / 2) / W) * 1.4 - 0.7);
@@ -1058,7 +960,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
       clearTimeout(chipTimer);
       clearTimeout(menuTimer);
       clearTimeout(flyTimer);
-      clearTimeout(burstTimer);
       io.disconnect();
       ro.disconnect();
       stage.removeEventListener("pointerdown", onDown);
@@ -1072,8 +973,6 @@ export function createSelect(root, refs, { onCopy } = {}) {
       barLayer.remove();
       textLayer.remove();
       flyLayer.remove();
-      digitLayer.remove();
-      shadowLayer.remove();
       startHandle.remove();
       endHandle.remove();
       tip.remove();

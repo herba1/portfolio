@@ -67,11 +67,9 @@
   perspective-origin: var(--select-ox, 50%) var(--select-oy, 50%);
 }
 
-.select-shadows,
 .select-bars,
 .select-text,
-.select-fly,
-.select-digits {
+.select-fly {
   position: absolute;
   inset: 0;
   pointer-events: none;
@@ -79,17 +77,6 @@
   perspective-origin: var(--select-ox, 50%) var(--select-oy, 50%);
 }
 
-.select-shadow {
-  position: absolute;
-  top: 0;
-  left: 0;
-  border-radius: 8px;
-  background: rgb(24 38 70 / 0.34);
-  filter: blur(14px);
-  transform-origin: 50% 50%;
-  will-change: transform, opacity;
-  opacity: 0;
-}
 
 .select-pill {
   position: absolute;
@@ -129,19 +116,6 @@
   transform-origin: 0 0;
 }
 
-.select-digit {
-  position: absolute;
-  top: 0;
-  left: 0;
-  color: var(--select-ink);
-  font-family: "Select Arimo", Arial, sans-serif;
-  font-size: calc(var(--select-size, 40px) * 0.8);
-  line-height: 1;
-  font-weight: var(--font-weight-normal);
-  backface-visibility: visible;
-  will-change: transform, opacity;
-  opacity: 0;
-}
 
 .select-handle {
   position: absolute;
