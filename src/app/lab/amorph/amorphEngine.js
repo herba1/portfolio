@@ -2,12 +2,15 @@ import { MAX_STAGES, amorphFragment, amorphVertex } from "./amorphShader";
 import { loadImage, samplePortrait } from "./amorphSample";
 
 const CORNERS = [[-0.9, 0.9], [0.9, -0.9], [0.9, 0.9], [-0.9, -0.9]];
-const DWELL_MS = 3600;
-const SPEED = 1.45;
+const DWELL_MS = 4000;
+const SPEED = 3.2;
 const SWAP_OMEGA = 9;
-const KICK_OMEGA = 12;
-const PUSH = 0.03;
-const SETTLE = 1.3;
+const SWAP_DELAY = 0.16;
+const KICK_OMEGA = 4.5;
+const KICK_ZETA = 0.32;
+const KICK_RISE = 9;
+const PUSH = 0.3;
+const SETTLE = 3.4;
 const BLANK = 0;
 
 function springStep(state, target, dt, omega) {
@@ -350,6 +353,9 @@ export default class AmorphEngine {
     gl.uniform1f(u.uSpeed, SPEED);
     gl.uniform1f(u.uSwapOmega, SWAP_OMEGA);
     gl.uniform1f(u.uKickOmega, KICK_OMEGA);
+    gl.uniform1f(u.uKickZeta, KICK_ZETA);
+    gl.uniform1f(u.uKickRise, KICK_RISE);
+    gl.uniform1f(u.uSwapDelay, SWAP_DELAY);
     gl.uniform1f(u.uPush, PUSH);
     gl.uniform3f(u.uInk, this.ink[0].value, this.ink[1].value, this.ink[2].value);
     gl.uniform1f(u.uInkMix, Math.min(1, Math.max(0, this.inkMix.value)));

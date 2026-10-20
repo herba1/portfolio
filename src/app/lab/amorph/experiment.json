@@ -1,6 +1,6 @@
 {
   "title": "Amorph",
-  "description": "Six Beatles album covers printed in tens of thousands of dots of ink. Every few seconds, or wherever you click, the next cover ripples out across the print: a wavefront travels at a steady speed, and as it reaches each dot a spring swells it, nudges it outward and settles it into its new colour. Click again mid-ripple and the new wave rides on top of the old one.",
+  "description": "Six Beatles album covers printed in tens of thousands of dots of ink. Every few seconds, or wherever you click, the print bursts: a fast wave throws every dot out of the picture, swirling and stretching as it flies, the cover changes colour in mid-air, and the dots spring back with a wobble into the next cover. Click again mid-burst and the new one rides on top.",
   "tags": [
     "WebGL",
     "Particles",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "Real motion instead of eases: every dot's change is a critically damped spring and its push is a spring driving a spring, solved exactly per dot on the GPU, so nothing runs linear, nothing overshoots, and overlapping ripples add together without a jump.",
+  "intent": "A bold transition that stays physical: every dot rides an underdamped spring that starts softly, flies far, overshoots home and settles, with stretch along its velocity and growth as it lifts toward you; the springs are solved exactly per dot on the GPU, so overlapping bursts add together without a jump.",
   "tile": {
     "cols": 3,
     "rows": 5

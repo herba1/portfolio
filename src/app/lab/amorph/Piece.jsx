@@ -96,7 +96,7 @@ export default function Piece({ embedded = false }) {
         tabIndex={0}
         role="application"
         aria-roledescription="particle portrait"
-        aria-label={`${portrait.name} by the Beatles, printed in dots. Every few seconds the next album cover ripples through the dots. Click anywhere to send the next one out from that point, or press Enter.`}
+        aria-label={`${portrait.name} by the Beatles, printed in dots. Every few seconds the print bursts apart into flying dots and springs back together as the next album cover. Click anywhere to burst it from that point, or press Enter.`}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
@@ -111,7 +111,7 @@ export default function Piece({ embedded = false }) {
           <header className="amorph__head">
             <h1 className="amorph__title text-title-sm">Amorph</h1>
             <p className="amorph__hint text-ui-lg">
-              Click anywhere on the cover and the next one <em>ripples out</em> from that point.
+              Click anywhere on the cover and it <em>bursts apart</em> into the next one.
             </p>
           </header>
 
