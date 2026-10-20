@@ -2,11 +2,6 @@
   --ghost-setlist-ground: rgb(0 0 0);
   --ghost-setlist-ink: rgb(244 240 236);
   --ghost-setlist-ink-soft: rgb(196 190 184);
-  --ghost-setlist-hair: rgb(255 255 255 / 0.16);
-  --ghost-setlist-wash: rgb(255 255 255 / 0.07);
-  --ghost-setlist-neon: rgb(255 128 96);
-  --ghost-setlist-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
-  --ghost-setlist-serif-weight: 430;
   --ghost-setlist-ease: cubic-bezier(0.22, 1, 0.36, 1);
   position: absolute;
   inset: 0;
@@ -64,6 +59,7 @@
   opacity: 1;
 }
 
+.ghost-setlist-sr,
 .ghost-setlist-live {
   position: absolute;
   width: 1px;
@@ -72,196 +68,6 @@
   overflow: hidden;
   clip-path: inset(50%);
   white-space: nowrap;
-}
-
-.ghost-setlist-head {
-  position: absolute;
-  top: 96px;
-  left: 48px;
-  right: 48px;
-  z-index: 2;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  column-gap: 24px;
-  padding-top: 12px;
-  border-top: 1px solid var(--ghost-setlist-hair);
-  pointer-events: none;
-}
-
-.ghost-setlist-title {
-  margin: 0;
-  font-size: var(--text-heading);
-  line-height: var(--text-heading--line-height);
-  letter-spacing: var(--text-heading--letter-spacing);
-  font-weight: var(--text-heading--font-weight);
-  text-wrap: balance;
-}
-
-.ghost-setlist-lede {
-  max-width: 320px;
-  margin: 0;
-  color: var(--ghost-setlist-ink-soft);
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--text-ui-lg--font-weight);
-  text-wrap: pretty;
-}
-
-.ghost-setlist-lede em {
-  font-family: var(--ghost-setlist-serif);
-  font-style: italic;
-  font-size: 1.07em;
-  font-weight: var(--ghost-setlist-serif-weight);
-  letter-spacing: 0.16px;
-  font-variation-settings: "opsz" 10;
-  line-height: 1;
-  color: var(--ghost-setlist-ink);
-}
-
-.ghost-setlist-rail {
-  position: absolute;
-  left: 48px;
-  bottom: 64px;
-  z-index: 2;
-  padding-top: 8px;
-  border-top: 1px solid var(--ghost-setlist-hair);
-}
-
-.ghost-setlist-list {
-  display: flex;
-  flex-direction: column;
-  margin: 0 -12px;
-  padding: 0;
-  list-style: none;
-}
-
-.ghost-setlist-row {
-  display: grid;
-  grid-template-columns: 24px 208px 176px 40px;
-  align-items: center;
-  column-gap: 16px;
-  height: 32px;
-  padding: 0 12px;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--ghost-setlist-ink-soft);
-  font-family: inherit;
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--font-weight-meta);
-  text-align: left;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background-color var(--duration-150) var(--ease-hover),
-    color var(--duration-150) var(--ease-hover);
-  -webkit-tap-highlight-color: transparent;
-}
-
-.ghost-setlist-row:focus-visible {
-  outline: 2px solid var(--color-accent);
-  outline-offset: 0;
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .ghost-setlist-row:hover {
-    background: var(--ghost-setlist-wash);
-    color: var(--ghost-setlist-ink);
-  }
-}
-
-.ghost-setlist-row[aria-current="true"] {
-  color: var(--ghost-setlist-ink);
-  font-weight: var(--font-weight-strong);
-}
-
-.ghost-setlist-num,
-.ghost-setlist-time {
-  font-family: var(--font-mono);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.ghost-setlist-time {
-  text-align: right;
-}
-
-.ghost-setlist-row[aria-current="true"] .ghost-setlist-num {
-  color: var(--ghost-setlist-neon);
-}
-
-.ghost-setlist-name {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
-}
-
-.ghost-setlist-album {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  font-weight: var(--font-weight-meta);
-}
-
-.ghost-setlist-encore {
-  display: inline-flex;
-  align-items: center;
-  height: 20px;
-  padding: 0 8px;
-  border-radius: 9999px;
-  box-shadow: inset 0 0 0 1px var(--ghost-setlist-hair);
-  color: var(--ghost-setlist-neon);
-  font-size: var(--text-ui-sm);
-  line-height: 1;
-  letter-spacing: var(--text-ui-sm--letter-spacing);
-  font-weight: var(--font-weight-meta);
-}
-
-.ghost-setlist-count {
-  position: absolute;
-  right: 48px;
-  bottom: 64px;
-  z-index: 2;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 4px;
-  pointer-events: none;
-}
-
-.ghost-setlist-count p {
-  margin: 0;
-}
-
-.ghost-setlist-count-num {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  font-variant-numeric: tabular-nums;
-}
-
-.ghost-setlist-count-of {
-  font-weight: var(--font-weight-meta);
-  color: var(--ghost-setlist-ink-soft);
-}
-
-.ghost-setlist-count-album {
-  color: var(--ghost-setlist-ink-soft);
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--font-weight-meta);
 }
 
 .ghost-setlist-fallback {
@@ -281,59 +87,9 @@
   display: grid;
 }
 
-@container (max-width: 899px) {
-  .ghost-setlist-head {
-    top: 84px;
-    left: 16px;
-    right: 16px;
-    grid-template-columns: minmax(0, 1fr);
-    row-gap: 4px;
-  }
-
-  .ghost-setlist-rail {
-    left: 16px;
-    right: 16px;
-    bottom: 120px;
-  }
-
-  .ghost-setlist-row {
-    grid-template-columns: 24px minmax(0, 1fr) 40px;
-    width: 100%;
-    height: 28px;
-  }
-
-  .ghost-setlist-album {
-    display: none;
-  }
-
-  .ghost-setlist-count {
-    right: 16px;
-    left: 16px;
-    bottom: 64px;
-    flex-direction: row;
-    justify-content: space-between;
-    align-items: baseline;
-    padding-top: 12px;
-    border-top: 1px solid var(--ghost-setlist-hair);
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ghost-setlist-canvas,
-  .ghost-setlist-row {
+  .ghost-setlist-canvas {
     transition: none;
-  }
-}
-
-@container (max-height: 719px) {
-  .ghost-setlist-rail {
-    display: none;
-  }
-}
-
-@container (max-width: 899px) and (max-height: 799px) {
-  .ghost-setlist-rail {
-    display: none;
   }
 }
 

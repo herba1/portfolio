@@ -276,10 +276,10 @@ export default class GhostEngine {
     const amp = L * 0.042;
     this.slot = L;
     this.amp = amp;
-    const fitW = W * (narrow ? 0.84 : 0.78);
-    const top = this.embedded ? H * 0.08 : narrow ? 184 : 156;
-    const room = Math.max(H * 0.2, H * 0.6 - top);
-    const capLine = Math.min(H * (narrow ? 0.15 : 0.3), (room / (narrow ? 1.74 : 0.72)) * 0.92);
+    const fitW = W * (narrow ? 0.86 : 0.8);
+    const top = this.embedded ? H * 0.08 : Math.min(96, H * 0.14);
+    const room = Math.max(H * 0.2, H * 0.62 - top);
+    const capLine = Math.min(H * (narrow ? 0.17 : 0.32), (room / (narrow ? 1.74 : 0.72)) * 0.92);
     let blockHalf = 0;
     this.titles = SETLIST.map((item) => {
       const lines = narrow ? item.lines : [item.title];
@@ -314,7 +314,7 @@ export default class GhostEngine {
       blockHalf = Math.max(blockHalf, half);
       return { font, size, cap, glyphs, half, lineWidth: Math.max(1, size * 0.011) };
     });
-    this.cy = Math.max(H * (narrow ? 0.34 : 0.38), top + blockHalf + 12);
+    this.cy = Math.max(H * 0.5 - amp * 0.5, top + blockHalf + 12);
     const span = L * 2.7;
     const step = 1;
     const samples = Math.ceil((span * 2) / step) + 1;
