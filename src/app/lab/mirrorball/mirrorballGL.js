@@ -1,4 +1,4 @@
-import { SCENE_FS, SCENE_VS, SPECK_FS, SPECK_VS } from "./mirrorballShader";
+import { BLUR_FS, DOWN_FS, SCENE_FS, SCENE_VS, SPECK_FS, SPECK_VS } from "./mirrorballShader";
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -59,6 +59,8 @@ export function createMirrorGL(canvas, facets) {
 
   const scene = program(gl, SCENE_VS, SCENE_FS);
   const speck = program(gl, SPECK_VS, SPECK_FS);
+  const down = program(gl, SCENE_VS, DOWN_FS);
+  const blur = program(gl, SCENE_VS, BLUR_FS);
 
   const emptyVao = gl.createVertexArray();
   const vao = gl.createVertexArray();
@@ -97,7 +99,11 @@ export function createMirrorGL(canvas, facets) {
   const maskTex = texture2D(gl);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, new Uint8Array([0, 0, 0, 0]));
 
-  const lightTex = texture2D(gl, { filter: gl.NEAREST });
+  const lightTex = texture2D(gl);
+  const bloomTexes = [texture2D(gl), texture2D(gl)];
+  const bloomFbos = [gl.createFramebuffer(), gl.createFramebuffer()];
+  let bloomW = 1;
+  let bloomH = 1;
   const glowTex = texture2D(gl, { filter: gl.NEAREST });
   const fbo = gl.createFramebuffer();
   let fboW = 0;
@@ -116,7 +122,45 @@ export function createMirrorGL(canvas, facets) {
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, lightTex, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, glowTex, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    bloomW = Math.max(1, Math.round(w / 4));
+    bloomH = Math.max(1, Math.round(h / 4));
+    bloomTexes.forEach((tex, i) => {
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      if (floatTargets) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, bloomW, bloomH, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, bloomW, bloomH, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, bloomFbos[i]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    });
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  }
+
+  function pass(p, target, src, w, h) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, target);
+    gl.viewport(0, 0, w, h);
+    gl.useProgram(p.prog);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, src);
+    gl.uniform1i(p.loc("uSrc"), 0);
+  }
+
+  function bloomPasses(w, h) {
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(emptyVao);
+    pass(down, bloomFbos[0], lightTex, bloomW, bloomH);
+    gl.uniform2f(down.loc("uSrcRes"), w, h);
+    gl.uniform2f(down.loc("uDstRes"), bloomW, bloomH);
+    gl.uniform1f(down.loc("uKnee"), 1.2 * lightScale);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    for (let i = 0; i < 2; i += 1) {
+      pass(blur, bloomFbos[1], bloomTexes[0], bloomW, bloomH);
+      gl.uniform2f(blur.loc("uRes"), bloomW, bloomH);
+      gl.uniform2f(blur.loc("uDir"), 1 + i, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      pass(blur, bloomFbos[0], bloomTexes[1], bloomW, bloomH);
+      gl.uniform2f(blur.loc("uRes"), bloomW, bloomH);
+      gl.uniform2f(blur.loc("uDir"), 0, 1 + i);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
   }
 
   function resize(w, h) {
@@ -187,6 +231,7 @@ export function createMirrorGL(canvas, facets) {
     gl.uniform1i(speck.loc("uMode"), 0);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, count);
 
+    bloomPasses(w, h);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, w, h);
     gl.disable(gl.BLEND);
@@ -195,6 +240,7 @@ export function createMirrorGL(canvas, facets) {
     const units = [
       ["uMask", maskTex],
       ["uSpecks", lightTex],
+      ["uBloom", bloomTexes[0]],
     ];
     units.forEach(([name, tex], i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
@@ -206,6 +252,11 @@ export function createMirrorGL(canvas, facets) {
     gl.uniform1f(scene.loc("uSeed"), f.seed);
     gl.uniform1f(scene.loc("uMaskOn"), f.maskOn ? 1 : 0);
     gl.uniform1f(scene.loc("uFade"), f.fade);
+    gl.uniform2f(scene.loc("uCenter"), (f.cx / f.width) * w, (1 - f.cy / f.height) * h);
+    gl.uniform1f(scene.loc("uSwirl"), f.swirl);
+    gl.uniform1f(scene.loc("uBend"), f.bend);
+    gl.uniform1f(scene.loc("uTime"), f.time);
+    gl.uniform1f(scene.loc("uBloomGain"), f.bloom);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.bindVertexArray(null);
@@ -218,6 +269,10 @@ export function createMirrorGL(canvas, facets) {
     gl.deleteTexture(maskTex);
     gl.deleteTexture(lightTex);
     gl.deleteTexture(glowTex);
+    bloomTexes.forEach((t) => gl.deleteTexture(t));
+    bloomFbos.forEach((b) => gl.deleteFramebuffer(b));
+    gl.deleteProgram(down.prog);
+    gl.deleteProgram(blur.prog);
     gl.deleteFramebuffer(fbo);
     gl.deleteBuffer(cornerBuf);
     gl.deleteBuffer(facetBuf);

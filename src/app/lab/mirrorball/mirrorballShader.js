@@ -13,10 +13,16 @@ precision highp sampler2D;
 uniform vec2 uRes;
 uniform sampler2D uMask;
 uniform sampler2D uSpecks;
+uniform sampler2D uBloom;
 uniform float uLightInv;
 uniform float uSeed;
 uniform float uMaskOn;
 uniform float uFade;
+uniform vec2 uCenter;
+uniform float uSwirl;
+uniform float uBend;
+uniform float uTime;
+uniform float uBloomGain;
 
 out vec4 outColor;
 
@@ -31,18 +37,75 @@ vec3 aces(vec3 x) {
   return clamp((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14), 0.0, 1.0);
 }
 
+vec2 warp(vec2 fc, float k) {
+  float m = min(uRes.x, uRes.y);
+  vec2 p = (fc - uCenter) / m;
+  float r = length(p);
+  float a = uSwirl * k * exp(-r * r * 1.6) + uBend * 0.06 * sin(r * 7.0 - uTime * 0.9);
+  float c = cos(a);
+  float s = sin(a);
+  p = vec2(c * p.x - s * p.y, s * p.x + c * p.y);
+  p /= 1.0 + uBend * 0.32 * r * r * k;
+  return (uCenter + p * m) / uRes;
+}
+
 void main() {
   vec2 fc = gl_FragCoord.xy;
-  vec3 specks = texelFetch(uSpecks, ivec2(fc), 0).rgb * uLightInv;
+  vec3 specks = vec3(
+    texture(uSpecks, warp(fc, 1.014)).r,
+    texture(uSpecks, warp(fc, 1.0)).g,
+    texture(uSpecks, warp(fc, 0.986)).b
+  ) * uLightInv;
+  vec3 bloom = texture(uBloom, warp(fc, 1.0)).rgb * uLightInv;
   float mask = 0.0;
   if (uMaskOn > 0.5) mask = texture(uMask, vec2(fc.x / uRes.x, 1.0 - fc.y / uRes.y)).a;
-  vec3 color = specks * 0.055 * (1.0 - clamp(mask * 1.6, 0.0, 0.92));
+  float keep = 1.0 - clamp(mask * 1.6, 0.0, 0.92);
+  vec3 color = (specks * 0.055 + bloom * 0.055 * uBloomGain) * keep;
   vec3 mapped = aces(color * 1.15);
   vec3 display = pow(max(mapped, vec3(0.0)), vec3(1.0 / 2.2));
   float n = hash12(fc + fract(uSeed) * 517.0) - 0.5;
   float n2 = hash12(fc * 1.37 + fract(uSeed * 1.7) * 311.0) - 0.5;
   display += (n + n2) * (1.0 / 255.0) * step(0.004, dot(display, vec3(0.33)));
   outColor = vec4(display * uFade, 1.0);
+}
+`;
+
+export const DOWN_FS = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uSrc;
+uniform vec2 uSrcRes;
+uniform vec2 uDstRes;
+uniform float uKnee;
+out vec4 outColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uDstRes;
+  vec2 t = 1.0 / uSrcRes;
+  vec3 c = texture(uSrc, uv + t * vec2(-1.0, -1.0)).rgb;
+  c += texture(uSrc, uv + t * vec2(1.0, -1.0)).rgb;
+  c += texture(uSrc, uv + t * vec2(-1.0, 1.0)).rgb;
+  c += texture(uSrc, uv + t * vec2(1.0, 1.0)).rgb;
+  c *= 0.25;
+  float l = max(c.r, max(c.g, c.b));
+  float w = l > 0.0 ? max(l - uKnee, 0.0) / l : 0.0;
+  outColor = vec4(c * w, 1.0);
+}
+`;
+
+export const BLUR_FS = `#version 300 es
+precision highp float;
+precision highp sampler2D;
+uniform sampler2D uSrc;
+uniform vec2 uRes;
+uniform vec2 uDir;
+out vec4 outColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 d = uDir / uRes;
+  vec3 c = texture(uSrc, uv).rgb * 0.2270;
+  c += (texture(uSrc, uv + d * 1.3846).rgb + texture(uSrc, uv - d * 1.3846).rgb) * 0.3162;
+  c += (texture(uSrc, uv + d * 3.2308).rgb + texture(uSrc, uv - d * 3.2308).rgb) * 0.0703;
+  outColor = vec4(c, 1.0);
 }
 `;
 

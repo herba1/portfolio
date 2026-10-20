@@ -154,6 +154,7 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
   let readySent = false;
   let maskCanvas = null;
   let fontsReady = !header;
+  let swirl = 0.6;
 
   function layout() {
     const rect = box.getBoundingClientRect();
@@ -272,6 +273,8 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
     const mixing = mix < 1;
     mix = reduced ? 1 : Math.min(1, mix + dt / 0.7);
     sim.clock += reduced ? 0 : dt;
+    const swirlTarget = reduced ? 0.6 : 0.6 * Math.sign(sim.omega || 1) * (0.55 + 0.45 * Math.min(1, Math.abs(sim.omega) / MAX_SPIN));
+    swirl += (swirlTarget - swirl) * (reduced ? 1 : 1 - Math.exp(-dt / 0.45));
     return gelMoving || mixing || (atlasReady && fade < 1);
   }
 
@@ -303,6 +306,9 @@ export async function createMirrorball({ box, canvas, header, embedded, album = 
       envLod,
       haze: 0.05,
       seed: reduced ? 0.37 : sim.clock * 0.731,
+      swirl,
+      bend: 1,
+      bloom: 0.9,
       maskOn,
       photoOn: atlasReady ? 1 : 0,
       fade: reduced ? 1 : 1 - Math.pow(1 - fade, 3),
