@@ -88,18 +88,19 @@ float softbox(vec3 r, vec3 d, vec3 u, vec3 v, vec2 size, float soft) {
 }
 
 vec3 envRoom(vec3 r) {
-  vec3 col = mix(vec3(0.05, 0.052, 0.058), vec3(0.15, 0.155, 0.165), smoothstep(-0.5, 0.4, r.y));
-  float scrim = smoothstep(-0.29, -0.265, r.y - 0.15 * r.x) * smoothstep(-0.95, -0.88, r.x) * (1.0 - smoothstep(0.88, 0.95, r.x));
-  col = mix(col, vec3(1.55, 1.54, 1.5) * (0.8 + 0.2 * smoothstep(-0.25, 0.3, r.y)), scrim);
+  float y = r.y - 0.12 * r.x;
+  vec3 col = mix(vec3(0.42, 0.41, 0.405), vec3(1.0, 1.02, 1.06), smoothstep(-0.6, 0.12, y));
+  col *= 0.9 + 0.1 * smoothstep(-0.6, 0.6, r.x);
+  col += vec3(0.22, 0.22, 0.23) * exp(-pow((y + 0.02) / 0.2, 2.0));
   vec3 flagD = normalize(vec3(0.0, 0.08, 1.0));
-  col *= 1.0 - 0.35 * smoothstep(0.991, 0.997, dot(r, flagD));
-  col = mix(col, vec3(0.42, 0.41, 0.39), smoothstep(-0.32, -0.6, r.y) * 0.8);
+  col *= 1.0 - 0.15 * smoothstep(0.985, 0.997, dot(r, flagD));
+  col = mix(col, vec3(0.62, 0.61, 0.59), smoothstep(-0.35, -0.7, r.y) * 0.5);
   return col;
 }
 
 vec3 envLights(vec3 r, vec3 keyDir, vec3 fillDir) {
-  return vec3(9.0, 8.85, 8.5) * softbox(r, keyDir, gKu, gKv, vec2(0.07, 0.05), 0.02)
-    + vec3(1.6, 1.65, 1.75) * softbox(r, fillDir, gFu, gFv, vec2(0.025, 0.5), 0.015);
+  return vec3(4.0, 3.93, 3.8) * softbox(r, keyDir, gKu, gKv, vec2(0.2, 0.13), 0.09)
+    + vec3(0.9, 0.93, 0.98) * softbox(r, fillDir, gFu, gFv, vec2(0.04, 0.5), 0.05);
 }
 
 vec3 envAt(vec3 r, vec3 keyDir, vec3 fillDir) {
@@ -131,7 +132,7 @@ vec3 diffracted(vec3 R, vec3 N, vec3 kW, vec3 Lk, vec3 Lf) {
       float t2 = dot(t, t);
       if (t2 >= 0.99) continue;
       vec3 Rd = t + N * sqrt(1.0 - t2);
-      acc += w * envLights(Rd, Lk, Lf) * (abs(m) == 1 ? 1.0 : 0.25);
+      acc += w * (envLights(Rd, Lk, Lf) + envRoom(Rd) * 0.05) * (abs(m) == 1 ? 1.0 : 0.25);
     }
   }
   return acc / max(wsum, vec3(1e-3));
@@ -172,6 +173,30 @@ float scuffs(vec2 q, float aa, vec2 hT) {
   return min(acc, 1.0);
 }
 
+float grime(vec2 q, float aa) {
+  float acc = 0.0;
+  for (int i = 0; i < 2; i += 1) {
+    float fi = float(i) * 3.7 + uSeed * 0.021;
+    float ang = hash21(vec2(fi, 8.3)) * 6.2832;
+    vec2 c = vec2(cos(ang), sin(ang)) * mix(0.5, 0.82, hash21(vec2(fi, 9.1)));
+    float rot = hash21(vec2(fi, 10.7)) * 3.1416;
+    vec2 d = q - c;
+    d = vec2(d.x * cos(rot) - d.y * sin(rot), d.x * sin(rot) + d.y * cos(rot)) / vec2(0.095, 0.17);
+    float e = length(d);
+    float warp = vnoise(q * 70.0 + fi) * 3.0;
+    float ridge = 0.5 + 0.5 * sin(e * 60.0 + warp);
+    float fineOk = smoothstep(0.012, 0.004, aa);
+    float mask = (1.0 - smoothstep(0.35, 1.0, e)) * (0.6 + 0.4 * vnoise(q * 22.0 + fi * 5.0)) * 0.5;
+    acc += mask * mix(0.55, 0.25 + 0.75 * ridge, fineOk);
+  }
+  vec2 g = q * 160.0 + uSeed;
+  vec2 cell = floor(g);
+  float pick = step(0.976, hash21(cell));
+  float dotD = length(fract(g) - vec2(hash21(cell + 3.1), hash21(cell + 5.3)) * 0.6 - 0.2);
+  acc += pick * (1.0 - smoothstep(0.04, 0.1, dotD)) * 1.6;
+  return min(acc, 1.6);
+}
+
 vec3 dataSide(float kind, vec2 q, float r, float aa, vec3 V, vec3 Lk, vec3 Lf, vec3 T, vec3 B, vec3 N) {
   vec3 tint = discTint(kind);
   vec2 k = q / max(r, 1e-4);
@@ -187,7 +212,7 @@ vec3 dataSide(float kind, vec2 q, float r, float aa, vec3 V, vec3 Lk, vec3 Lf, v
   float tracks = inData * recorded;
   vec3 orders = tracks > 0.0 ? diffracted(R, Nw, kW, Lk, Lf) : vec3(0.0);
   float leadRing = 1.0 - (1.0 - smoothstep(0.0, max(0.0025, aa), abs(r - lead))) * 0.04 * inData;
-  vec3 col = tint * mirror * mix(0.95, 0.86, tracks) + orders * diffTint(kind) * tracks * 0.32;
+  vec3 col = tint * mirror * mix(0.95, 0.84, tracks) + orders * diffTint(kind) * tracks * 0.46;
   col *= leadRing;
   float band = smoothstep(METAL_IN, METAL_IN + 0.003, r) * (1.0 - smoothstep(DATA_IN - 0.006, DATA_IN, r));
   float ang = atan(q.y, q.x);
@@ -198,6 +223,10 @@ vec3 dataSide(float kind, vec2 q, float r, float aa, vec3 V, vec3 Lk, vec3 Lf, v
   float sc = scuffs(q, aa, hT);
   float keyFacing = 0.35 + 0.65 * smoothstep(0.6, 0.98, dot(N, H));
   col += vec3(0.2, 0.2, 0.21) * sc * keyFacing;
+  float haze = grime(q, aa);
+  float scatter = 0.5 + 0.7 * keyFacing;
+  col = col * (1.0 - 0.16 * haze) + vec3(0.9, 0.9, 0.92) * haze * 0.2 * scatter;
+  col = col * 0.93 + vec3(0.05, 0.05, 0.055);
   return col;
 }
 
@@ -209,7 +238,7 @@ vec3 clearPoly(vec3 behind, float r, vec3 V, vec3 Nv, vec3 Lk, vec3 Lf, vec2 q) 
   vec3 R = reflect(-V, n);
   float fres = 0.04 + 0.96 * pow(clamp(1.0 - abs(dot(n, V)), 0.0, 1.0), 5.0);
   vec3 refl = envAt(R, Lk, Lf);
-  vec3 col = behind * vec3(0.9, 0.915, 0.93) + refl * (0.07 + fres * 0.5);
+  vec3 col = behind * vec3(0.85, 0.862, 0.875) + vec3(0.075, 0.077, 0.08) + refl * (0.05 + fres * 0.45);
   col += vec3(1.0) * smoothstep(0.93, 0.99, dot(R, Lk)) * (0.25 + ring * 0.6);
   col *= 1.0 - ring * 0.05;
   float edgeIn = 1.0 - smoothstep(HOLE, HOLE + 0.012, r);
@@ -306,7 +335,7 @@ void main() {
       float fresF = 0.04 + 0.96 * pow(clamp(1.0 - dot(Nv, V), 0.0, 1.0), 5.0);
       data += envAt(reflect(-V, Nv), Lk, Lf) * fresF * 0.6;
       float peak = max(max(data.r, data.g), data.b);
-      data *= (1.0 - exp(-peak * 1.5)) / max(peak, 1e-4);
+      data *= (1.0 - exp(-peak * 1.85)) / max(peak, 1e-4);
       face = mix(poly, data, metal);
     } else {
       vec2 uv = vec2(0.5 - q.x * 0.5, 0.5 - q.y * 0.5);
