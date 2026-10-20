@@ -299,7 +299,7 @@
   background: rgb(52 52 60 / 0.14);
 }
 
-@media (max-width: 640px) {
+@container (max-width: 640px) {
   .margins-sheet {
     padding: 32px 64px 104px 20px;
   }
@@ -340,5 +340,48 @@
     line-height: var(--text-ui--line-height);
     letter-spacing: var(--text-ui--letter-spacing);
     font-weight: var(--text-ui--font-weight);
+  }
+}
+
+.margins[data-embedded] .margins-desk {
+  max-width: none;
+  padding: 16px 16px 0;
+}
+
+.margins[data-embedded] .margins-sheet {
+  padding: 28px 280px 32px 56px;
+}
+
+.margins[data-embedded] .margins-sheet-head {
+  margin-bottom: 20px;
+}
+
+.margins[data-embedded] .margins-sheet-title {
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.margins[data-embedded] .margins-line {
+  font-size: 16px;
+  line-height: 24px;
+}
+
+.margins[data-embedded] .margins-stanza + .margins-stanza {
+  margin-top: 16px;
+}
+
+@container (max-width: 760px) {
+  .margins[data-embedded] .margins-sheet {
+    padding: 24px 40px 32px 24px;
+  }
+
+  .margins[data-embedded] .margins-line {
+    font-size: 15px;
+  }
+
+  .margins[data-embedded] .margins-note {
+    max-width: 160px;
+    font-size: 20px;
+    line-height: 24px;
   }
 }

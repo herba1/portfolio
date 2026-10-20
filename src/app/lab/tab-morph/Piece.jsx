@@ -63,6 +63,10 @@ export default function Piece({ embedded = false }) {
 
   useEffect(() => {
     const bar = barRef.current;
+    const pill = pillRef.current;
+    const pillImg = pillImgRef.current;
+    const glow = glowRef.current;
+    const glowImg = glowImgRef.current;
     const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const st = { l: 0, r: 0, vl: 0, vr: 0, tl: 0, tr: 0, kl: 300, kr: 300, w: 0, W: 0, raf: 0, last: 0, drag: null, base: 0 };
 
@@ -75,12 +79,12 @@ export default function Piece({ embedded = false }) {
       const width = Math.max(0, st.r - st.l);
       const stretch = st.base ? Math.max(0, width / st.base - 1) : 0;
       const sy = 1 - Math.min(0.16, stretch * 0.22);
-      pillRef.current.style.transform = `translate3d(${st.l}px, 0, 0) scaleY(${sy.toFixed(4)})`;
-      pillRef.current.style.width = `${width}px`;
-      pillImgRef.current.style.transform = `translate3d(${-st.l}px, 0, 0)`;
-      glowRef.current.style.transform = `translate3d(${st.l}px, 0, 0)`;
-      glowRef.current.style.width = `${width}px`;
-      glowImgRef.current.style.transform = `translate3d(${-st.l}px, 0, 0)`;
+      pill.style.transform = `translate3d(${st.l}px, 0, 0) scaleY(${sy.toFixed(4)})`;
+      pill.style.width = `${width}px`;
+      pillImg.style.transform = `translate3d(${-st.l}px, 0, 0)`;
+      glow.style.transform = `translate3d(${st.l}px, 0, 0)`;
+      glow.style.width = `${width}px`;
+      glowImg.style.transform = `translate3d(${-st.l}px, 0, 0)`;
     };
 
     const loop = (now) => {
@@ -136,7 +140,7 @@ export default function Piece({ embedded = false }) {
       st.W = bar.clientWidth;
       st.w = (st.W - PAD * 2) / TABS.length;
       st.base = st.w - INSET * 2;
-      for (const img of [pillImgRef.current, glowImgRef.current]) {
+      for (const img of [pillImg, glowImg]) {
         img.style.width = `${st.W}px`;
         img.style.top = `${26 - st.W * 0.66}px`;
       }

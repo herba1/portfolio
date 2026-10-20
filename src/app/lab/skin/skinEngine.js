@@ -843,12 +843,14 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
 
   let scale = 1;
   let mode = null;
+  let arranged = false;
   const placeWin = (w) => {
     w.canvas.style.transform = `translate3d(${w.x}px, ${w.y}px, 0)`;
   };
 
   const layout = () => {
-    const rect = root.getBoundingClientRect();
+    const rectRaw = root.getBoundingClientRect();
+    const rect = { top: rectRaw.top, left: rectRaw.left, right: rectRaw.right, bottom: rectRaw.bottom, x: rectRaw.x, y: rectRaw.y, width: root.clientWidth, height: root.clientHeight };
     const W = rect.width;
     const H = rect.height;
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -868,7 +870,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     const nextMode = wide ? "wide" : "narrow";
     const ox = Math.round((W / scale - gw) / 2);
     const oy = Math.round(top / scale + (availH / scale - gh) / 2);
-    if (mode !== nextMode) {
+    if (mode !== nextMode || !arranged) {
       mode = nextMode;
       const pos = wide ? { main: [0, 0], eq: [0, 116], pl: [275, 0] } : { main: [0, 0], eq: [0, 116], pl: [0, 232] };
       for (const id of Object.keys(wins)) {
@@ -1049,6 +1051,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       const [sx, sy, snapped] = snapDelta(drag.group, dx, dy);
       if (snapped && !drag.snapped) audio.click("snap");
       drag.snapped = snapped;
+      arranged = true;
       for (const g of drag.group) {
         g.x = g.start[0] + sx;
         g.y = g.start[1] + sy;

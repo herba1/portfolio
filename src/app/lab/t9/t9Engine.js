@@ -600,7 +600,8 @@ export function createT9(stage, { embedded = false, caption = null, input = null
 
   let sizeKey = "";
   const layout = (force) => {
-    const sr = stage.getBoundingClientRect();
+    const srRaw = stage.getBoundingClientRect();
+    const sr = { top: srRaw.top, left: srRaw.left, right: srRaw.right, bottom: srRaw.bottom, x: srRaw.x, y: srRaw.y, width: stage.clientWidth, height: stage.clientHeight };
     if (!sr.width || !sr.height) return;
     const key = `${Math.round(sr.width)}x${Math.round(sr.height)}x${window.devicePixelRatio}`;
     if (!force && key === sizeKey) return;

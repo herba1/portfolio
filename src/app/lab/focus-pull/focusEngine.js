@@ -215,7 +215,8 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const df = () => MAX_D * (1 - p);
 
   const layout = () => {
-    const rect = root.getBoundingClientRect();
+    const rectRaw = root.getBoundingClientRect();
+    const rect = { top: rectRaw.top, left: rectRaw.left, right: rectRaw.right, bottom: rectRaw.bottom, x: rectRaw.x, y: rectRaw.y, width: root.clientWidth, height: root.clientHeight };
     cssW = rect.width;
     cssH = rect.height;
     dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -225,11 +226,14 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     glCanvas.style.height = `${cssH}px`;
     uiFamily = getComputedStyle(root).fontFamily || uiFamily;
     const narrow = cssW < 640;
+    const embedded = root.dataset.embedded !== undefined;
     const side = narrow ? 20 : 48;
-    const top = narrow ? 200 : 196;
-    const ringSpace = RING_H + (narrow ? 72 : 64);
+    const ringGap = narrow ? 40 : 36;
+    const edge = narrow ? 28 : 32;
+    const top = embedded ? edge : narrow ? 200 : 196;
+    const ringSpace = embedded ? RING_H + ringGap : RING_H + (narrow ? 72 : 64);
     const availW = Math.min(760, cssW - side * 2);
-    const availH = Math.max(160, cssH - top - ringSpace - 24);
+    const availH = Math.max(embedded ? 96 : 160, cssH - top - ringSpace - (embedded ? edge : 24));
     const m = atlas.getContext("2d");
     m.font = `100px ${FAMILY}`;
     const widest = Math.max(...LINES.map((tokens) => lineWidth(m, tokens, 100))) / 100;
@@ -240,11 +244,13 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     const pitch = font * lead;
     const blockH = pitch * (LINES.length - 1) + font * 1.16;
     const x = Math.round((cssW - blockW) / 2);
-    const y = Math.round(top + Math.max(0, (availH - blockH) / 2));
+    const y = embedded
+      ? Math.round(Math.max(edge * 0.5, (cssH - blockH - ringGap - RING_H) / 2))
+      : Math.round(top + Math.max(0, (availH - blockH) / 2));
     block = { x, y, w: blockW, h: blockH, pitch };
     maxBlur = font * 0.34;
     const rw = Math.max(blockW, Math.min(cssW - 32, 360));
-    ringBox = { x: Math.round((cssW - rw) / 2), y: Math.round(y + blockH + (narrow ? 40 : 36)), w: rw };
+    ringBox = { x: Math.round((cssW - rw) / 2), y: Math.round(y + blockH + ringGap), w: rw };
     ring.style.left = `${ringBox.x}px`;
     ring.style.top = `${ringBox.y}px`;
     ring.style.width = `${ringBox.w}px`;

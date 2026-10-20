@@ -165,7 +165,8 @@ export function createSelect(root, refs, { onCopy } = {}) {
   };
 
   const readInsets = () => {
-    const box = root.getBoundingClientRect();
+    const boxRaw = root.getBoundingClientRect();
+    const box = { top: boxRaw.top, left: boxRaw.left, right: boxRaw.right, bottom: boxRaw.bottom, x: boxRaw.x, y: boxRaw.y, width: root.clientWidth, height: root.clientHeight };
     const top = refs.caption ? refs.caption.getBoundingClientRect().bottom - box.top : 0;
     avail = { top: Math.max(top + 72, 96), bottom: refs.caption ? 120 : 72 };
   };

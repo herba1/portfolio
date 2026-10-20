@@ -35,9 +35,9 @@ export default function Piece({ embedded = false }) {
       labelTitle: labelTitleRef.current,
       ticks: [tickTopRef.current, tickBottomRef.current],
       stem: stemRef.current,
-      lines: linesRef.current,
+      lines: [...linesRef.current],
       blocks: BLOCKS,
-      blockEls: blocksRef.current,
+      blockEls: [...blocksRef.current],
       inset: embedded ? 0 : 72,
     });
   }, [embedded]);

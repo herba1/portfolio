@@ -237,7 +237,8 @@ export function createKern(stage, { embedded = false, onLive = () => {}, onMorph
   };
 
   const layout = () => {
-    const r = stage.getBoundingClientRect();
+    const rRaw = stage.getBoundingClientRect();
+    const r = { top: rRaw.top, left: rRaw.left, right: rRaw.right, bottom: rRaw.bottom, x: rRaw.x, y: rRaw.y, width: stage.clientWidth, height: stage.clientHeight };
     if (!r.width || !r.height) return;
     const prevCx = cx;
     const prevBase = baseY;

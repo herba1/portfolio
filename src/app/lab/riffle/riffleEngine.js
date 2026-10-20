@@ -85,7 +85,7 @@ export function createRiffle({ root, stage, canvas, onFrame, onPlaying, onReady 
     const bottom = narrow ? 100 : 104;
     const availH = Math.max(160, view.h - top - bottom);
     const availW = view.w - (narrow ? 40 : 96);
-    view.pw = Math.min(availW * (narrow ? 0.94 : 0.62), availH * 0.86 * PAGE_ASPECT, 760);
+    view.pw = Math.max(1, Math.min(availW * (narrow ? 0.94 : 0.62), availH * 0.86 * PAGE_ASPECT, 760));
     view.ph = view.pw / PAGE_ASPECT;
     view.x = (view.w - view.pw) / 2 + (narrow ? 6 : 10);
     view.y = top + (availH - view.ph) / 2;

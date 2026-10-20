@@ -191,7 +191,8 @@ export function createJustify(root, refs, { onEdit, onReady } = {}) {
   };
 
   const readInsets = () => {
-    const box = root.getBoundingClientRect();
+    const boxRaw = root.getBoundingClientRect();
+    const box = { top: boxRaw.top, left: boxRaw.left, right: boxRaw.right, bottom: boxRaw.bottom, x: boxRaw.x, y: boxRaw.y, width: root.clientWidth, height: root.clientHeight };
     const top = refs.caption ? refs.caption.getBoundingClientRect().bottom - box.top : 0;
     const bottom = refs.controls ? box.bottom - refs.controls.getBoundingClientRect().top : 0;
     avail = { top: Math.max(top, 16), bottom: Math.max(bottom, 16), left: 16, right: 16 };

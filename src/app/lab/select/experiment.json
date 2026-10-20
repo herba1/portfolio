@@ -6,8 +6,8 @@
     "Interface",
     "Lyrics"
   ],
-  "status": "candidate",
-  "createdAt": "2026-10-19T00:00:00.000Z",
+  "status": "shipped",
+  "createdAt": "2026-10-20T11:00:00.000Z",
   "intent": "The text-selection UI itself as the graphic: a familiar control given depth and weight, so selecting words physically pulls them off the page, with every morph clean and nothing overlapping.",
   "tile": {
     "cols": 4,
