@@ -8,6 +8,7 @@ uniform vec2 uRes;
 uniform vec4 uCell;
 uniform float uPersp;
 uniform vec2 uCenter;
+uniform float uThick;
 out vec2 vLocal;
 flat out float vKind;
 flat out float vSlot;
@@ -26,25 +27,37 @@ void main() {
   if (kind < 0.5) {
     x0 = -1.5;
     x1 = w + 1.5;
-    y0 = topH - 1.0;
-    y1 = botY + 1.0;
+    y0 = topH - 0.5;
+    y1 = botY + 0.5;
   } else if (kind < 1.5 || (kind > 2.5 && kind < 3.5)) {
     y1 = topH;
-  } else {
+  } else if (kind < 4.5) {
     y0 = botY;
   }
   vec2 local = vec2(mix(x0, x1, aCorner.x), mix(y0, y1, aCorner.y));
   float hinge = (topH + botY) * 0.5;
   vec3 p = vec3(local, 0.0);
-  if (kind > 2.5) {
+  if (kind > 4.5) {
+    float th = radians(iB.x);
+    float L = hinge;
+    vec2 tip = vec2(hinge - L * cos(th), L * sin(th));
+    vec2 nrm = vec2(sin(th), cos(th));
+    vec2 q = tip - nrm * uThick * aCorner.y;
+    p = vec3(local.x, q.x, q.y);
+    local = vec2(local.x, aCorner.y);
+  } else if (kind > 2.5) {
     float th = radians(iB.x);
     float a = kind < 3.5 ? -th : 3.14159265 - th;
     float dy = local.y - hinge;
     p.y = hinge + dy * cos(a);
     p.z = dy * sin(a);
+    if (kind > 3.5) {
+      p.y -= sin(th) * uThick;
+      p.z -= cos(th) * uThick;
+    }
   }
   vec2 pivot = iA.xy + vec2(w * 0.5, hinge);
-  vec2 o = pivot + (uCenter - pivot) * 0.16;
+  vec2 o = pivot + (uCenter - pivot) * vec2(0.06, 0.14);
   float denom = max(uPersp - p.z, 1.0);
   float s = uPersp / denom;
   vec2 proj = o + (iA.xy + p.xy - o) * s;
@@ -97,13 +110,23 @@ void main() {
   float botY = uCell.w;
   vec2 L = vLocal;
   if (vKind < 0.5) {
-    float inPinY = step(topH - 1.0, L.y) * step(L.y, botY + 1.0);
+    float inPinY = step(topH - 1.5, L.y) * step(L.y, botY + 1.5);
     float inPinX = max(step(-1.5, L.x) * step(L.x, 0.5), step(w - 0.5, L.x) * step(L.x, w + 1.5));
     float pin = inPinY * inPinX;
     float inside = step(0.0, L.x) * step(L.x, w);
     vec3 col = mix(vec3(0.012, 0.011, 0.010), vec3(0.2, 0.19, 0.18), pin);
     float alpha = max(inside, pin);
     outColor = vec4(col * alpha, alpha);
+    return;
+  }
+  if (vKind > 4.5) {
+    float th = radians(vB.x);
+    float facing = clamp(sin(th), 0.0, 1.0);
+    float up = clamp(cos(th), 0.0, 1.0);
+    float ex = min(L.x, w - L.x);
+    float ea = clamp(ex * uDpr + 0.5, 0.0, 1.0) * smoothstep(0.0, 0.35, sin(th));
+    vec3 edge = vec3(0.07, 0.068, 0.064) + vec3(0.2, 0.19, 0.17) * (0.65 * facing + 0.5 * up);
+    outColor = vec4(edge * ea, ea);
     return;
   }
   bool isTop = vKind < 1.5 || (vKind > 2.5 && vKind < 3.5);
@@ -121,13 +144,16 @@ void main() {
   vec3 col = vec3(0.018) + photo * 0.94;
   col *= 1.0 + grain * 0.05;
   if (isTop) {
-    col *= 1.0 - 0.3 * smoothstep(0.62, 1.0, v) * smoothstep(0.62, 1.0, v);
+    col *= 1.0 - 0.16 * smoothstep(0.62, 1.0, v) * smoothstep(0.62, 1.0, v);
     col += 0.018 * (1.0 - v) * (1.0 - v);
   } else {
-    col *= 1.0 - 0.5 * exp(-v * 12.0) - 0.16 * smoothstep(0.7, 1.0, v);
+    col *= 1.0 - 0.3 * exp(-v * 14.0) - 0.1 * smoothstep(0.7, 1.0, v);
   }
-  if (vKind > 2.5) {
-    col = col * (1.0 - vB.y) + vec3(0.95, 0.9, 0.82) * vB.w * 0.16;
+  if (vKind > 3.5) {
+    col *= 1.0 - vB.y;
+    col *= 1.0 - 0.22 * smoothstep(0.55, 1.0, v) * (vB.y / 0.6);
+  } else if (vKind > 2.5) {
+    col = col * (1.0 - vB.y) + vec3(0.95, 0.9, 0.82) * vB.w * (0.02 + 0.06 * (1.0 - v));
   } else if (vKind < 1.5) {
     float g = 0.12 + 0.88 * v * v;
     col *= 1.0 - vB.z * g;

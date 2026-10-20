@@ -54,7 +54,7 @@ export function createFlapGL(canvas) {
     powerPreference: "high-performance",
   });
   if (!gl) return null;
-  const flap = program(gl, FLAP_VERTEX, FLAP_FRAGMENT, ["uRes", "uCell", "uPersp", "uCenter", "uDpr", "uRadius", "uGrid", "uTile", "uTiles"]);
+  const flap = program(gl, FLAP_VERTEX, FLAP_FRAGMENT, ["uRes", "uCell", "uPersp", "uCenter", "uDpr", "uRadius", "uGrid", "uTile", "uTiles", "uThick"]);
   const copy = program(gl, COPY_VERTEX, COPY_FRAGMENT, ["uGrid", "uSrc", "uCrop", "uCurve"]);
 
   const corners = gl.createBuffer();
@@ -108,7 +108,7 @@ export function createFlapGL(canvas) {
   let tileW = 1;
   let tileH = 1;
   let capacity = 0;
-  const view = { w: 1, h: 1, dpr: 1, cell: [1, 1, 1, 1], persp: 1, center: [0, 0], radius: 1, grid: [1, 1], tile: [1, 1] };
+  const view = { w: 1, h: 1, dpr: 1, cell: [1, 1, 1, 1], persp: 1, center: [0, 0], radius: 1, grid: [1, 1], tile: [1, 1], thick: 1 };
 
   function attach(tex, layer) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -263,6 +263,7 @@ export function createFlapGL(canvas) {
     gl.uniform2f(flap.loc.uCenter, ...view.center);
     gl.uniform1f(flap.loc.uDpr, view.dpr);
     gl.uniform1f(flap.loc.uRadius, view.radius);
+    gl.uniform1f(flap.loc.uThick, view.thick);
     gl.uniform2f(flap.loc.uGrid, view.grid[0], view.grid[1]);
     gl.uniform2f(flap.loc.uTile, view.tile[0], view.tile[1]);
     gl.activeTexture(gl.TEXTURE0);

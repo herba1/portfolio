@@ -32,25 +32,27 @@ function poseAngle(u) {
 }
 
 function fitBoard(availW, availH, narrow, embedded) {
+  const pad = narrow || embedded ? 12 : 20;
   const aspect = narrow ? 4 / 5 : 16 / 10;
-  let bw = availW;
+  let bw = availW - pad * 2;
   let bh = bw / aspect;
-  if (bh > availH) {
-    bh = availH;
+  if (bh > availH - pad * 2) {
+    bh = availH - pad * 2;
     bw = bh * aspect;
   }
-  const pitch = narrow ? 11 : embedded ? 10 : clamp(bw / 58, 12, 20);
-  const cols = Math.max(12, Math.round(bw / pitch));
-  const px = Math.max(6, Math.floor(bw / cols));
-  const rows = Math.max(8, Math.round(bh / (px * 1.36)));
-  const py = Math.max(8, Math.floor(bh / rows));
-  const cg = Math.max(1, Math.round(px * 0.07));
-  const rg = Math.max(1, Math.round(py * 0.06));
+  const cols = narrow ? 11 : embedded ? clamp(Math.round(bw / 30), 10, 20) : clamp(Math.round(bw / 40), 14, 24);
+  const px = Math.max(10, Math.floor(bw / cols));
+  const rows = Math.max(4, Math.round(bh / (px * 1.38)));
+  const py = Math.max(14, Math.floor(bh / rows));
+  const cg = Math.max(2, Math.round(px * 0.08));
+  const rg = Math.max(2, Math.round(py * 0.07));
   const w = px - cg;
   const h = py - rg;
-  const gap = h >= 30 ? 2 : 1;
+  const gap = h >= 40 ? 2 : 1;
   const topH = Math.floor((h - gap) / 2);
-  return { cols, rows, px, py, w, h, cg, rg, gap, topH, botY: topH + gap, boardW: cols * px - cg, boardH: rows * py - rg };
+  const boardW = cols * px - cg;
+  const boardH = rows * py - rg;
+  return { cols, rows, px, py, w, h, cg, rg, gap, topH, botY: topH + gap, pad, boardW, boardH, outerW: boardW + pad * 2, outerH: boardH + pad * 2 };
 }
 
 export function createBoard(stage, { embedded = false, caption = null, footer = null, onLive = () => {}, onPlaying = () => {}, onFail = () => {} } = {}) {
@@ -107,14 +109,14 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
   const active = new Set();
   const counts = new Float32Array(BUCKETS);
   const upper = [];
-  const lower = [];
 
   function build() {
     const g = layout;
-    board.style.width = `${g.boardW}px`;
-    board.style.height = `${g.boardH}px`;
+    board.style.width = `${g.outerW}px`;
+    board.style.height = `${g.outerH}px`;
+    board.style.setProperty("--split-flap-pad", `${g.pad}px`);
     dpr = Math.min(2, window.devicePixelRatio || 1);
-    const tile = [Math.min(32, Math.max(4, Math.round(g.w * dpr))), Math.min(44, Math.max(6, Math.round(g.h * dpr)))];
+    const tile = [Math.min(64, Math.max(4, Math.round(g.w * dpr))), Math.min(88, Math.max(6, Math.round(g.h * dpr)))];
     active.clear();
     cells = [];
     for (let r = 0; r < g.rows; r += 1) {
@@ -123,8 +125,8 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
         for (let k = 0; k < POOL; k += 1) flaps.push({ busy: false, t0: 0, from: 0, to: 0, theta: 0 });
         const seed = hash(r * 97 + 13, c * 31 + 7);
         cells.push({
-          x: c * g.px,
-          y: r * g.py,
+          x: g.pad + c * g.px,
+          y: g.pad + r * g.py,
           col: c,
           row: r,
           seed,
@@ -147,18 +149,19 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
     sigs = new Float32Array(cells.length * SIG);
     for (let i = 0; i < cells.length; i += 1) for (let k = 0; k < SIG; k += 1) sigs[i * SIG + k] = BLANK[k % 3];
     latest = new Float32Array(cells.length * SIG);
-    data = new Float32Array(cells.length * (3 + POOL) * STRIDE);
+    data = new Float32Array(cells.length * (3 + POOL * 2) * STRIDE);
     groups = Array.from({ length: SLOTS }, () => []);
     sampled = false;
     lastVideoTime = -1;
     if (renderer) {
       renderer.setView({
-        w: g.boardW,
-        h: g.boardH,
+        w: g.outerW,
+        h: g.outerH,
         dpr,
         cell: [g.w, g.h, g.topH, g.botY],
-        persp: Math.round(g.h * 9),
-        center: [g.boardW / 2, g.boardH / 2],
+        persp: Math.round(g.h * 3.4),
+        center: [g.outerW / 2, g.outerH * 1.1],
+        thick: Math.max(1.5, g.h * 0.035),
         radius: Math.max(1, Math.round(g.w * 0.1)),
         grid: [g.cols, g.rows],
         tile,
@@ -319,27 +322,23 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
     if (!renderer || !layout) return;
     let n = 0;
     upper.length = 0;
-    lower.length = 0;
     for (const cell of cells) {
       put(n++, cell, 0, 0, 0, 0, 0, 0);
       const moving = cell.flaps.some((f) => f.busy);
       put(n++, cell, 1, cell.started, 0, 0, moving ? cell.ct : 0, 0);
       put(n++, cell, 2, cell.shown, 0, 0, moving ? cell.cb : 0, moving ? cell.ck : 1);
-      for (const flap of cell.flaps) {
-        if (!flap.busy) continue;
-        if (flap.theta < 90) upper.push([cell, flap]);
-        else lower.push([cell, flap]);
-      }
+      for (const flap of cell.flaps) if (flap.busy) upper.push([cell, flap]);
     }
-    upper.sort((a, b) => a[1].theta - b[1].theta);
-    lower.sort((a, b) => b[1].theta - a[1].theta);
+    upper.sort((a, b) => Math.sin((a[1].theta * Math.PI) / 180) - Math.sin((b[1].theta * Math.PI) / 180));
     for (const [cell, flap] of upper) {
-      const k = flap.theta / 90;
-      put(n++, cell, 3, flap.from, flap.theta, 0.6 * k * k, 0, 0.09 * Math.sin(k * Math.PI));
-    }
-    for (const [cell, flap] of lower) {
-      const k = (180 - flap.theta) / 90;
-      put(n++, cell, 4, flap.to, flap.theta, 0.68 * Math.pow(k, 1.4), 0, 0);
+      if (flap.theta < 90) {
+        const k = flap.theta / 90;
+        put(n++, cell, 3, flap.from, flap.theta, 0.52 * Math.pow(k, 1.6), 0, Math.sin(k * Math.PI));
+      } else {
+        const k = (180 - flap.theta) / 90;
+        put(n++, cell, 4, flap.to, flap.theta, 0.6 * Math.pow(k, 1.4), 0, 0);
+      }
+      put(n++, cell, 5, 0, flap.theta, 0, 0, 0);
     }
     renderer.draw(data, n);
   }
@@ -419,15 +418,15 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
       layout = next;
       build();
     }
-    const left = Math.round((W - layout.boardW) / 2);
-    const free = H - top - bottom - layout.boardH;
+    const left = Math.round((W - layout.outerW) / 2);
+    const free = H - top - bottom - layout.outerH;
     const y = Math.round(top + Math.max(0, free) * 0.5);
     board.style.left = `${left}px`;
     board.style.top = `${y}px`;
     stage.style.setProperty("--split-flap-board-x", `${left}px`);
     stage.style.setProperty("--split-flap-board-y", `${y}px`);
-    stage.style.setProperty("--split-flap-board-w", `${layout.boardW}px`);
-    stage.style.setProperty("--split-flap-board-h", `${layout.boardH}px`);
+    stage.style.setProperty("--split-flap-board-w", `${layout.outerW}px`);
+    stage.style.setProperty("--split-flap-board-h", `${layout.outerH}px`);
     kick();
   }
 
