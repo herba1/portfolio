@@ -72,7 +72,53 @@ export function createBlips() {
     src.onended = () => nenv.disconnect();
   };
 
+  const thump = (level) => {
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(96, now);
+    osc.frequency.exponentialRampToValueAtTime(42, now + 0.16);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.exponentialRampToValueAtTime(level, now + 0.006);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.26);
+    osc.connect(env);
+    env.connect(master);
+    osc.start(now);
+    osc.stop(now + 0.3);
+    osc.onended = () => env.disconnect();
+  };
+
+  const hat = (level, pan) => {
+    const now = ctx.currentTime;
+    const dest = out(pan);
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    const band = ctx.createBiquadFilter();
+    band.type = "highpass";
+    band.frequency.value = 7200;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, now);
+    env.gain.exponentialRampToValueAtTime(level, now + 0.001);
+    env.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
+    src.connect(band);
+    band.connect(env);
+    env.connect(dest);
+    src.start(now, ((voice * 0.017) % 0.18) + 0.01, 0.05);
+    src.onended = () => {
+      env.disconnect();
+      if (dest !== master) dest.disconnect();
+    };
+  };
+
   return {
+    beat(accent, drop) {
+      if (!enabled || ctx.state !== "running") return;
+      voice = (voice + 1) % 101;
+      if (drop) thump(0.32);
+      else if (accent >= 0.9) thump(0.13);
+      if (accent >= 0.3) hat(0.018 + accent * 0.014, ((voice * 13) % 9) / 10 - 0.4);
+    },
     async setEnabled(on) {
       enabled = on;
       if (on && ctx.state !== "running") await ctx.resume().catch(() => {});

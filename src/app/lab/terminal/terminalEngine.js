@@ -1,6 +1,7 @@
 import { ALBUMS } from "@/app/lab/_music/catalog";
 
 import { createTerminalSound } from "./terminalAudio";
+import { createRain, createSpectrum, flowFrame, plasmaFrame, recordFrame } from "./terminalArt";
 import { createGL } from "./terminalGL";
 
 const FONT = "TerminalVT";
@@ -10,6 +11,11 @@ const INK = "rgb(0, 0, 0)";
 const CELL = 3;
 const BLINK = 530;
 const START = ALBUMS.findIndex((a) => a.id === "abbey-road");
+const IDLE_MS = 9000;
+const SCENE_MS = 7200;
+const ART_MS = 42;
+const SCENES = ["record", "flow", "plasma"];
+const LINES = { flow: "still here?", plasma: "how are you?" };
 
 function lower(text) {
   return text.toLowerCase();
@@ -144,6 +150,14 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
   let destroyed = false;
   let wheelAcc = 0;
   let press = null;
+  let rain = null;
+  let art = null;
+  let attract = null;
+  let artTick = 0;
+  let lastInput = performance.now();
+  let exitMove = 0;
+  let exitFrom = null;
+  let sceneIdx = 0;
 
   const images = new Map();
   const dithers = new Map();
@@ -217,6 +231,17 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
     promptLine.shown = 2;
     enqueue(promptLine);
     cursorLine = promptLine;
+    art = null;
+    rain = null;
+    const leftEnd = x0 - cellW * 3;
+    const rightStart = x0 + contentCols * cellW + cellW * 3;
+    const columns = [];
+    for (let x = padX; x + cellW <= leftEnd; x += cellW * 2) columns.push(Math.round(x));
+    for (let x = rightStart; x + cellW <= W - padX; x += cellW * 2) columns.push(Math.round(x));
+    if (!reduced && columns.length >= 4) {
+      const rows = Math.floor((H - padY * 2) / lineH);
+      rain = { y0: padY, rows, cols: columns, live: false, inst: createRain(columns.map((_, k) => k), rows, sel + 1) };
+    }
     if (instant) finishPrinting();
   };
 
@@ -270,6 +295,17 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
     });
     cursorLine = lastTrack;
     promptLine = null;
+    rain = null;
+    art = null;
+    const panelX = landscape ? trackX : x0;
+    const panelY = trackY + lineH * (n + 1);
+    const panelCols = Math.floor((W - padX - panelX) / cellW);
+    const rowsLeft = Math.floor((footerY - lineH * 0.5 - panelY) / lineH);
+    if (!reduced && rowsLeft >= 3 && panelCols >= 16) {
+      const specRows = Math.min(5, rowsLeft - 1);
+      const specCols = Math.min(panelCols, 40);
+      art = { x: panelX, y: panelY, cols: Math.min(panelCols, 40), specRows, specCols, spectrum: createSpectrum(Math.ceil(specCols / 2)), start: null, trackLines: lines.slice(2, 2 + n), n, clock: 0 };
+    }
     cover = { index: album, x: coverX, y: coverY, size, n: Math.round(size / CELL), reveal: instant || reduced ? 1 : 0, delay: instant ? 0 : 0.22 };
     loadCover(album);
     if (instant) finishPrinting();
@@ -425,9 +461,99 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
     lineH = Math.round(fontPx * 1.1);
     cols = Math.floor((W - padX * 2) / cellW);
     if (mode === "menu") buildMenu(true);
+    else if (mode === "attract") sizeAttract();
     else buildAlbum(true);
     dirty = true;
     wake();
+  };
+
+  const blit = (fr, x, y, mid, limit = fr.rows) => {
+    for (let j = 0; j < Math.min(fr.rows, limit); j += 1) {
+      const yy = y + j * lineH + mid;
+      sx.fillStyle = GREEN;
+      sx.fillText(fr.text[j], x, yy);
+      sx.fillStyle = BRIGHT;
+      sx.fillText(fr.bright[j], x, yy);
+    }
+  };
+
+  const sceneFrame = (name, t) => {
+    const a = attract;
+    const opts = { aspect: lineH / cellW, tracks: ALBUMS[sel].tracks.length };
+    if (name === "record") return recordFrame(a.cols, a.rows, t, opts);
+    if (name === "flow") return flowFrame(a.cols, a.rows, t, opts);
+    return plasmaFrame(a.cols, a.rows, t, opts);
+  };
+
+  const drawAttract = (now, mid) => {
+    const a = attract;
+    const t = (now - a.t0) / 1000;
+    const since = now - a.sceneAt;
+    const reveal = Math.min(1, since / 520);
+    const cur = sceneFrame(a.scene, t);
+    if (reveal < 1 && a.prev) {
+      const old = sceneFrame(a.prev, t);
+      const cut = Math.floor(reveal * a.rows);
+      blit(cur, a.x, a.y, mid, cut);
+      for (let j = cut; j < a.rows; j += 1) {
+        const yy = a.y + j * lineH + mid;
+        sx.fillStyle = GREEN;
+        sx.fillText(old.text[j], a.x, yy);
+        sx.fillStyle = BRIGHT;
+        sx.fillText(old.bright[j], a.x, yy);
+      }
+      if (cut < a.rows) {
+        sx.fillStyle = "rgba(214, 255, 228, 0.5)";
+        sx.fillRect(a.x, a.y + cut * lineH + lineH * 0.42, a.cols * cellW, lineH * 0.16);
+      }
+    } else blit(cur, a.x, a.y, mid);
+    const caption = a.scene === "record" ? `now spinning  ${lower(ALBUMS[sel].title)}` : LINES[a.scene];
+    const typedN = Math.max(0, Math.min(caption.length, Math.floor((since - 420) / 46)));
+    if (typedN > a.typed) {
+      if (caption[typedN - 1] !== " ") sound?.key(true);
+      a.typed = typedN;
+    }
+    const cx = Math.round(a.x + ((a.cols - caption.length) / 2) * cellW);
+    const cy = a.y + (a.rows + 1) * lineH;
+    sx.fillStyle = BRIGHT;
+    sx.fillText(caption.slice(0, typedN), cx, cy + mid);
+    if (typedN < caption.length || Math.floor(now / BLINK) % 2 === 0) {
+      sx.fillStyle = GREEN;
+      sx.fillRect(Math.round(cx + typedN * cellW + cellW * 0.08), Math.round(cy + lineH * 0.14), Math.round(cellW * 0.84), Math.round(lineH * 0.72));
+    }
+  };
+
+  const fmt = (sec) => `${String(Math.floor(sec / 60)).padStart(2, "0")}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+
+  const drawArt = (now, mid) => {
+    if (!art || art.start === null) return;
+    const el = (now - art.start) / 1000;
+    const rowsShown = Math.min(art.specRows + 1, Math.floor(el / 0.07));
+    const per = 14;
+    const k = Math.floor(el / per) % art.n;
+    const within = el % per;
+    const tl = art.trackLines[k];
+    if (tl && tl.shown >= tl.text.length) {
+      sx.fillStyle = BRIGHT;
+      sx.fillText(tl.text, tl.x, tl.y + mid);
+    }
+    if (rowsShown < 1) return;
+    const barLen = Math.max(4, Math.min(16, art.cols - 20));
+    const filled = Math.round((within / per) * barLen);
+    const nowLine = `> ${String(k + 1).padStart(2, "0")}  ${fmt(within + 0.0)}  [${"#".repeat(filled)}${"-".repeat(barLen - filled)}]`.slice(0, art.cols);
+    sx.fillStyle = GREEN;
+    sx.fillText(nowLine, art.x, art.y + mid);
+    const fr = art.spectrum.frame(art.specCols, art.specRows);
+    blit(fr, art.x, art.y + lineH, mid, rowsShown - 1);
+  };
+
+  const drawRain = (now) => {
+    if (!rain) return;
+    const mid = lineH / 2 + fontPx * 0.04;
+    for (const c of rain.inst.cells(now / 1000)) {
+      sx.fillStyle = c.lit ? BRIGHT : GREEN;
+      sx.fillText(c.ch, rain.cols[c.col], rain.y0 + c.row * lineH + mid);
+    }
   };
 
   const draw = (now) => {
@@ -437,6 +563,11 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
     sx.font = `${fontPx}px ${FONT}`;
     sx.textBaseline = "middle";
     const mid = lineH / 2 + fontPx * 0.04;
+    if (mode === "attract" && attract) {
+      drawAttract(now, mid);
+      return;
+    }
+    if (mode === "menu" && rain?.live) drawRain(now);
     for (const line of lines) {
       if (!line.shown) continue;
       const text = line.text.slice(0, line.shown);
@@ -465,6 +596,7 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
         sx.imageSmoothingEnabled = true;
       }
     }
+    if (mode === "album") drawArt(now, mid);
     let cur = null;
     if (printing && printIdx < queue.length) {
       const l = queue[printIdx];
@@ -477,6 +609,53 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
       sx.fillStyle = GREEN;
       sx.fillRect(Math.round(cur.x + cellW * 0.08), Math.round(cur.y + lineH * 0.14), Math.round(cellW * 0.84), Math.round(lineH * 0.72));
     }
+  };
+
+  const sizeAttract = () => {
+    if (!attract) return;
+    attract.cols = Math.floor((W - padX * 2) / cellW);
+    attract.rows = Math.max(4, Math.floor((H - padY * 2) / lineH) - 2);
+    attract.x = Math.round((W - attract.cols * cellW) / 2);
+    attract.y = padY;
+  };
+
+  function enterAttract(now) {
+    mode = "attract";
+    lines = [];
+    queue = [];
+    printing = false;
+    cover = null;
+    cursorLine = null;
+    promptLine = null;
+    rain = null;
+    hover = null;
+    exitMove = 0;
+    exitFrom = null;
+    attract = { scene: SCENES[sceneIdx % SCENES.length], prev: null, t0: now, sceneAt: now, typed: 0 };
+    sizeAttract();
+    sound?.clunk();
+    onLive("Screensaver. Press any key or tap to return to the records.");
+    dirty = true;
+  }
+
+  function nextScene(now) {
+    sceneIdx += 1;
+    attract.prev = attract.scene;
+    attract.scene = SCENES[sceneIdx % SCENES.length];
+    attract.sceneAt = now;
+    attract.typed = 0;
+    sound?.tick();
+  }
+
+  const exitAttract = () => {
+    attract = null;
+    mode = "menu";
+    lastInput = performance.now();
+    sound?.tick();
+    buildMenu(true);
+    onLive("Records");
+    dirty = true;
+    wake();
   };
 
   const frame = () => {
@@ -503,6 +682,30 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
         if (cover.reveal >= 1) sound?.raster(false);
         dirty = true;
         busy = true;
+      }
+    }
+    if (!reduced) {
+      if (mode === "menu" && !printing && now - lastInput > IDLE_MS && power >= 1) enterAttract(now);
+      let animating = false;
+      if (mode === "attract" && attract) {
+        animating = true;
+        if (now - attract.sceneAt > SCENE_MS) nextScene(now);
+      } else if (mode === "menu" && rain && (rain.live || !printing)) {
+        rain.live = true;
+        rain.inst.step(raw);
+        animating = true;
+      } else if (mode === "album" && art && !printing && (!cover || cover.reveal >= 1)) {
+        if (art.start === null) art.start = now;
+        art.spectrum.step((now - art.start) / 1000, raw);
+        animating = true;
+      }
+      if (animating) {
+        busy = true;
+        const tick = Math.floor(now / ART_MS);
+        if (tick !== artTick) {
+          artTick = tick;
+          dirty = true;
+        }
       }
     }
     const b = Math.floor(now / BLINK);
@@ -560,6 +763,13 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
   };
 
   const onMove = (e) => {
+    if (mode === "attract") {
+      if (exitFrom) exitMove += Math.hypot(e.clientX - exitFrom.x, e.clientY - exitFrom.y);
+      exitFrom = { x: e.clientX, y: e.clientY };
+      if (e.pointerType === "mouse" && exitMove > 40) exitAttract();
+      return;
+    }
+    lastInput = performance.now();
     const hit = hitAt(toScene(e));
     root.style.cursor = hit ? "pointer" : "";
     if (press && e.pointerType !== "mouse") {
@@ -576,6 +786,12 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
 
   const onDown = (e) => {
     if (e.button > 0) return;
+    lastInput = performance.now();
+    if (mode === "attract") {
+      exitAttract();
+      press = null;
+      return;
+    }
     const hit = hitAt(toScene(e));
     press = { x: e.clientX, y: e.clientY, hit, moved: false };
     if (e.pointerType !== "mouse" && hit) {
@@ -613,6 +829,12 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
     if (t && t !== root && t !== document.body && (t.closest?.("button, input, textarea, a") || t.isContentEditable)) return;
     const k = e.key;
     let handled = true;
+    lastInput = performance.now();
+    if (mode === "attract") {
+      e.preventDefault();
+      exitAttract();
+      return;
+    }
     if (mode === "menu") {
       if (k === "ArrowDown" || k === "j") select(sel + 1);
       else if (k === "ArrowUp" || k === "k") select(sel - 1);
@@ -630,6 +852,11 @@ export function createTerminal(stage, { embedded = false, caption = null, onLive
   };
 
   const onWheel = (e) => {
+    lastInput = performance.now();
+    if (mode === "attract") {
+      exitAttract();
+      return;
+    }
     if (mode !== "menu" || embedded) return;
     e.preventDefault();
     wheelAcc += e.deltaY;

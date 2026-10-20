@@ -14,6 +14,30 @@ const LINE = "rgba(214, 246, 112, 0.86)";
 const CURVE = "rgba(255, 255, 255, 0.82)";
 const DOT = "#ff3b2f";
 const FONT = '"BlobTrack Arimo", Arimo, Arial, sans-serif';
+const BPM = 122;
+const BEAT = 60 / BPM;
+const CYCLE = 32;
+const ACCENT = [1, 0, 0.5, 0.2, 0.9, 0, 0.5, 0.35, 1, 0, 0.55, 0.2, 0.9, 0.4, 0.7, 0.5];
+const CODES = [
+  LISP,
+  "(setq lum (blob 0.72))",
+  "(defun track (b) b)",
+  "(mapcar #'id frame)",
+  "(let ((x 0)) (incf x))",
+  "(when (> l th) (box))",
+  "(cons 'light nil)",
+  "(sort cols #'<)",
+];
+const GLYPHS = "01#%&*+=<>/\\";
+
+function hash(n) {
+  const v = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return v - Math.floor(v);
+}
+
+function hex(n) {
+  return `#x${(Math.floor(hash(n) * 65535) | 0).toString(16).padStart(4, "0")}`;
+}
 
 function smoothstep(a, b, x) {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
@@ -208,6 +232,11 @@ export function createTracker({ frame, canvas, src, onReady }) {
     ready: false,
     destroyed: false,
     font: 11,
+    rhythm: { beat: -1, at: 0, power: 0, pulse: 0, energy: 0.3, drop: 0, dropAt: -10000 },
+    splits: [],
+    scouts: [],
+    edges: [],
+    tails: [],
   };
   let photo = null;
   let smear = null;
@@ -260,7 +289,7 @@ export function createTracker({ frame, canvas, src, onReady }) {
     state.view.dx = a * w * (0.011 * Math.sin(t * 0.29 + 1.1) + 0.006 * Math.sin(t * 0.71 + 2.3) + 0.0018 * Math.sin(t * 2.3 + 0.4));
     state.view.dy = a * w * (0.012 * Math.sin(t * 0.23 + 0.2) + 0.005 * Math.sin(t * 0.83 + 4.1) + 0.0016 * Math.sin(t * 2.9 + 1.7));
     state.view.r = a * (0.0042 * Math.sin(t * 0.19 + 0.7) + 0.0016 * Math.sin(t * 0.67 + 3.3));
-    state.view.s = ZOOM + a * 0.008 * Math.sin(t * 0.13 + 0.5);
+    state.view.s = ZOOM + a * (0.008 * Math.sin(t * 0.13 + 0.5) + 0.014 * Math.min(1.5, state.rhythm.pulse));
   };
 
   const sampleLum = (ix, iy) => {
@@ -380,7 +409,7 @@ export function createTracker({ frame, canvas, src, onReady }) {
     for (let d = 0; d < dets.length; d += 1) {
       if (usedD[d]) continue;
       const det = dets[d];
-      state.tracks.push({ id: 0, x: det.x, y: det.y, w: det.w, h: det.h, det, hits: 0, miss: 0, mode: "pending", born: 0, died: 0, link: 0, curve: 0 });
+      state.tracks.push({ id: 0, x: det.x, y: det.y, w: det.w, h: det.h, det, hits: 0, miss: 0, mode: "pending", born: 0, died: 0, link: 0, curve: 0, epoch: 0, labelAt: 0, hotAt: -10000 });
     }
     const ranked = state.tracks
       .filter((tr) => tr.det)
@@ -499,8 +528,34 @@ export function createTracker({ frame, canvas, src, onReady }) {
       const v = Math.sin(i * 12.9898 + k * 78.233) * 43758.5453;
       return v - Math.floor(v);
     };
-    return { f: 0.35 + h(1) * 0.7, g: 0.9 + h(2) * 1.6, p: h(3) * 6.283, q: h(4) * 6.283, amp: 0.14 + h(5) * 0.3 };
+    return { f: 0.35 + h(1) * 0.7, g: 0.9 + h(2) * 1.6, p: h(3) * 6.283, q: h(4) * 6.283, amp: 0.14 + h(5) * 0.3, kick: 0, drag: 0.4 + h(6) * 0.6 };
   });
+
+  const kickColumns = (power, wide) => {
+    const centre = Math.random() * SW;
+    const width = wide ? SW : 24 + Math.random() * 150 * power;
+    for (let i = 0; i < strips.length; i += 1) {
+      const d = Math.abs(i * STRIP - centre) / width;
+      if (d >= 1) continue;
+      const v = power * (1 - d * d) * (wide ? 0.45 + 0.55 * strips[i].drag : 1);
+      if (v > strips[i].kick) strips[i].kick = v;
+    }
+  };
+
+  const spawnTail = (now, power) => {
+    const list = smear.sources;
+    if (!list.length) return;
+    const s = list[(Math.random() * list.length) | 0];
+    const w = 4 + Math.random() * (14 + 40 * power);
+    state.tails.push({
+      x: Math.max(0, Math.min(IW - w, s[0] * (IW / SW) - w / 2)),
+      y: s[1] * (IH / SH),
+      w,
+      len: 260 + Math.random() * 760 * power,
+      born: now,
+      life: 700 + Math.random() * 900,
+    });
+  };
   let drips = [];
 
   const seedDrip = (d, t, fresh) => {
@@ -517,9 +572,11 @@ export function createTracker({ frame, canvas, src, onReady }) {
     return d;
   };
 
-  const drawSmear = (t) => {
+  const drawSmear = (t, now, dt) => {
     const { dx, dy, r, s } = state.view;
     const k = IW / SW;
+    const energy = state.rhythm.energy;
+    const decay = Math.exp(-dt / 420);
     g.save();
     g.translate(state.fw / 2 + dx, state.fh / 2 + dy);
     g.rotate(r);
@@ -533,12 +590,14 @@ export function createTracker({ frame, canvas, src, onReady }) {
       const st = strips[i];
       const x = i * STRIP;
       const anchor = smear.anchor[x] * k;
-      const stretch = 1 + breathe * st.amp * (0.65 * Math.sin(t * 0.32 * st.f + st.p) + 0.35 * Math.sin(t * 0.9 * st.g + st.q));
-      const flow = breathe * 28 * Math.sin(t * 0.18 * st.f + st.q);
+      st.kick *= decay;
+      const kick = breathe * st.kick;
+      const stretch = 1 + breathe * st.amp * (1 + energy * 0.9) * (0.65 * Math.sin(t * 0.32 * st.f + st.p) + 0.35 * Math.sin(t * 0.9 * st.g + st.q)) + kick * 2.6 * st.drag;
+      const flow = breathe * 28 * Math.sin(t * 0.18 * st.f + st.q) + kick * 170 * st.drag;
       const h = IH * stretch;
       const y = anchor - anchor * stretch + flow;
       const mix = breathe ? 0.5 + 0.5 * Math.sin(t * 0.42 - i * 0.07 + st.p * 0.3) : 0;
-      const shimmer = 0.82 + breathe * 0.18 * Math.sin(t * 3.1 * st.g + st.p);
+      const shimmer = Math.min(1, 0.82 + breathe * 0.18 * Math.sin(t * 3.1 * st.g + st.p) + kick * 0.35);
       if (mix < 0.98) {
         g.globalAlpha = (1 - mix) * shimmer;
         g.drawImage(smear.a, x, 0, STRIP, SH, sx(x), y, STRIP * k + 0.6, h);
@@ -568,6 +627,29 @@ export function createTracker({ frame, canvas, src, onReady }) {
         g.fillRect(sx(d.x), (head - 2) * k, d.w * k, 2 * k);
       }
     }
+    if (breathe && state.tails.length) {
+      g.globalCompositeOperation = "screen";
+      const px = photo.naturalWidth / IW;
+      const py = photo.naturalHeight / IH;
+      for (const tl of state.tails) {
+        const age = now - tl.born;
+        const u = Math.min(1, age / 420);
+        const grow = 1 - Math.pow(1 - u, 3);
+        const fade = Math.min(1, (tl.life - age) / 360);
+        if (fade <= 0) continue;
+        const len = tl.len * grow;
+        g.globalAlpha = 0.78 * fade;
+        g.drawImage(photo, tl.x * px, tl.y * py, tl.w * px, 2 * py, tl.x, tl.y, tl.w, len);
+        g.globalAlpha = 0.45 * fade;
+        g.drawImage(photo, tl.x * px, (tl.y + 6) * py, tl.w * px, 2 * py, tl.x + tl.w * 0.2, tl.y + len * 0.4, tl.w * 0.6, len * 0.9);
+      }
+    }
+    if (breathe && state.rhythm.pulse > 0.01) {
+      g.globalCompositeOperation = "screen";
+      g.globalAlpha = Math.min(0.14, 0.06 * state.rhythm.pulse);
+      g.fillStyle = "#c8d2ff";
+      g.fillRect(0, 0, IW, IH);
+    }
     g.globalAlpha = 1;
     g.globalCompositeOperation = "source-over";
     g.restore();
@@ -583,13 +665,13 @@ export function createTracker({ frame, canvas, src, onReady }) {
     g.restore();
   };
 
-  const draw = (now) => {
+  const draw = (now, dt) => {
     const dpr = state.dpr;
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
     g.imageSmoothingEnabled = true;
     g.fillStyle = "#16151c";
     g.fillRect(0, 0, state.fw, state.fh);
-    drawSmear((now - state.t0) / 1000);
+    drawSmear((now - state.t0) / 1000, now, dt);
 
     const shown = [];
     for (const tr of state.tracks) {
@@ -599,48 +681,112 @@ export function createTracker({ frame, canvas, src, onReady }) {
       const rect = rectOf(tr);
       shown.push({ tr, rect, age, dying });
     }
+    const rh = state.rhythm;
+    const pulse = reduced ? 0 : rh.pulse;
+    const sk = state.view.s * state.k;
     const [hx, hy] = toFrame(state.hub.x, state.hub.y);
-    const hs = Math.round(Math.max(30, state.fw * 0.072));
+    const hs = Math.round(Math.max(30, state.fw * 0.072) * (1 + 0.08 * Math.min(1, pulse)));
     const hubRect = { x: Math.round(hx - hs / 2) + 0.5, y: Math.round(hy - hs / 2) + 0.5, w: hs, h: hs, cx: hx, cy: hy };
+    const boxOf = (cx, cy, w, h) => ({ x: Math.round(cx - w / 2) + 0.5, y: Math.round(cy - h / 2) + 0.5, w: Math.round(w), h: Math.round(h), cx, cy });
+
+    const kids = [];
+    for (const sp of state.splits) {
+      const age = now - sp.born;
+      if (age < 0 || age > sp.life) continue;
+      const e = 1 - Math.pow(1 - Math.min(1, age / 280), 3);
+      const [cx, cy] = toFrame(sp.x + sp.ox * e, sp.y + sp.oy * e);
+      const shrink = 1 - 0.18 * e;
+      kids.push({ sp, age, rect: boxOf(cx, cy, Math.max(5, sp.w * sk * shrink), Math.max(5, sp.h * sk * shrink)), fade: Math.min(1, (sp.life - age) / 240) });
+    }
+    const scouts = [];
+    for (const sc of state.scouts) {
+      const age = now - sc.born;
+      if (age < 0 || age > sc.life) continue;
+      const [cx, cy] = toFrame(sc.x, sc.y);
+      const on = age > 180 || Math.floor(age / 45) % 2 === 0;
+      if (!on) continue;
+      const w = Math.max(6, sc.s * sk);
+      scouts.push({ sc, age, rect: boxOf(cx, cy, w, w * sc.ar), fade: Math.min(1, (sc.life - age) / 200) });
+    }
 
     g.save();
     g.beginPath();
     for (const s of shown) if (s.dying < 0 && s.age > 40) g.rect(s.rect.x, s.rect.y, s.rect.w, s.rect.h);
+    for (const kd of kids) if (kd.age > 60 && kd.fade > 0.5) g.rect(kd.rect.x, kd.rect.y, kd.rect.w, kd.rect.h);
     g.rect(hubRect.x, hubRect.y, hubRect.w, hubRect.h);
     g.clip();
     drawPhoto(photo);
     g.restore();
 
+    for (const s of shown) {
+      const since = now - s.tr.hotAt;
+      if (s.dying >= 0 || since > 600) continue;
+      g.fillStyle = `rgba(201, 242, 92, ${(0.26 * Math.exp(-since / 170)).toFixed(3)})`;
+      g.fillRect(s.rect.x, s.rect.y, s.rect.w, s.rect.h);
+    }
+
     g.lineWidth = 1;
     const curveEnds = [];
+    const quad = (ax, ay, bx, by, bendK, side) => {
+      const mx = (ax + bx) / 2;
+      const my = (ay + by) / 2;
+      const bend = bendK * Math.hypot(bx - ax, by - ay);
+      const nx = -(by - ay);
+      const ny = bx - ax;
+      const nl = Math.hypot(nx, ny) || 1;
+      return [mx + (nx / nl) * bend * side, my + (ny / nl) * bend * side];
+    };
+    const at = (ax, ay, cx, cy, bx, by, u) => {
+      const a = (1 - u) * (1 - u);
+      const b = 2 * (1 - u) * u;
+      const c = u * u;
+      return [a * ax + b * cx + c * bx, a * ay + b * cy + c * by];
+    };
+    const strokeQuad = (ax, ay, cx, cy, bx, by, u0, u1) => {
+      const steps = 28;
+      g.beginPath();
+      let p = at(ax, ay, cx, cy, bx, by, u0);
+      g.moveTo(p[0], p[1]);
+      for (let i = 1; i <= steps; i += 1) {
+        p = at(ax, ay, cx, cy, bx, by, u0 + ((u1 - u0) * i) / steps);
+        g.lineTo(p[0], p[1]);
+      }
+      g.stroke();
+    };
+    g.strokeStyle = CURVE;
     for (const s of shown) {
       if (s.tr.curve <= 0.001) continue;
       const e = s.tr.curve;
       const tx = s.rect.cx;
       const ty = s.rect.y;
-      const mx = (hx + tx) / 2;
-      const my = (hy + ty) / 2;
-      const bend = 0.32 * Math.hypot(tx - hx, ty - hy);
-      const nx = -(ty - hy);
-      const ny = tx - hx;
-      const nl = Math.hypot(nx, ny) || 1;
-      const side = s.tr.id % 2 ? 1 : -1;
-      const cx = mx + (nx / nl) * bend * side;
-      const cy = my + (ny / nl) * bend * side;
-      g.strokeStyle = CURVE;
-      g.beginPath();
-      const steps = 24;
-      const end = Math.max(1, Math.round(steps * e));
-      g.moveTo(hx, hy);
-      for (let i = 1; i <= end; i += 1) {
-        const u = i / steps;
-        const a = (1 - u) * (1 - u);
-        const b = 2 * (1 - u) * u;
-        const c = u * u;
-        g.lineTo(a * hx + b * cx + c * tx, a * hy + b * cy + c * ty);
-      }
-      g.stroke();
+      const [cx, cy] = quad(hx, hy, tx, ty, 0.32, s.tr.id % 2 ? 1 : -1);
+      strokeQuad(hx, hy, cx, cy, tx, ty, 0, Math.max(0.04, e));
       if (e > 0.98) curveEnds.push([tx, ty]);
+    }
+    const byTrack = new Map(shown.map((s) => [s.tr, s]));
+    const packets = [];
+    for (const ed of state.edges) {
+      const a = byTrack.get(ed.a);
+      const b = byTrack.get(ed.b);
+      if (!a || !b || a.dying >= 0 || b.dying >= 0) continue;
+      const age = now - ed.born;
+      if (age < 0 || age > ed.life) continue;
+      const grow = 1 - Math.pow(1 - Math.min(1, age / 360), 3);
+      const shrink = Math.max(0, (age - (ed.life - 380)) / 380);
+      const u0 = 1 - Math.pow(1 - shrink, 3);
+      if (grow - u0 < 0.01) continue;
+      const ax = a.rect.cx;
+      const ay = a.rect.cy;
+      const bx = b.rect.cx;
+      const by = b.rect.cy;
+      const [cx, cy] = quad(ax, ay, bx, by, ed.bend, ed.side);
+      g.strokeStyle = ed.lime ? LINE : CURVE;
+      strokeQuad(ax, ay, cx, cy, bx, by, u0, grow);
+      if (grow > 0.98) {
+        const u = ((age - 360) / 900) % 1;
+        if (u > u0) packets.push(at(ax, ay, cx, cy, bx, by, u));
+        curveEnds.push([bx, by]);
+      }
     }
     g.strokeStyle = LINE;
     g.beginPath();
@@ -650,11 +796,20 @@ export function createTracker({ frame, canvas, src, onReady }) {
       const e = 1 - Math.pow(1 - s.tr.link, 3);
       const tx = s.rect.x;
       const ty = s.rect.y;
-      const ex = hx + (tx - hx) * e;
-      const ey = hy + (ty - hy) * e;
       g.moveTo(hx, hy);
-      g.lineTo(ex, ey);
+      g.lineTo(hx + (tx - hx) * e, hy + (ty - hy) * e);
       if (e > 0.98) ends.push([tx, ty]);
+    }
+    g.stroke();
+    g.strokeStyle = "rgba(214, 246, 112, 0.42)";
+    g.beginPath();
+    for (const kd of kids) {
+      if (kd.age > 320 || kd.fade < 1) continue;
+      const parent = kd.sp.parent;
+      const ps = byTrack.get(parent);
+      if (!ps) continue;
+      g.moveTo(ps.rect.cx, ps.rect.cy);
+      g.lineTo(kd.rect.cx, kd.rect.cy);
     }
     g.stroke();
 
@@ -669,8 +824,35 @@ export function createTracker({ frame, canvas, src, onReady }) {
       if (age < 40) strokeCorners(rect, Math.min(4, rect.w / 3, rect.h / 3));
       else g.strokeRect(rect.x, rect.y, rect.w, rect.h);
     }
+    for (const kd of kids) {
+      g.globalAlpha = kd.fade;
+      if (kd.age < 60) strokeCorners(kd.rect, Math.min(4, kd.rect.w / 3, kd.rect.h / 3));
+      else g.strokeRect(kd.rect.x, kd.rect.y, kd.rect.w, kd.rect.h);
+    }
+    for (const sc of scouts) {
+      g.globalAlpha = sc.fade * 0.95;
+      strokeCorners(sc.rect, Math.min(5, sc.rect.w / 3, sc.rect.h / 3));
+    }
+    g.globalAlpha = 1;
     g.strokeRect(hubRect.x, hubRect.y, hubRect.w, hubRect.h);
     g.strokeRect(hubRect.x + 3, hubRect.y + 3, hubRect.w - 6, hubRect.h - 6);
+
+    const scan = now - rh.dropAt;
+    if (!reduced && scan >= 0 && scan < 900) {
+      const u = scan / 900;
+      const y = Math.round(state.fh * (1 - Math.pow(1 - u, 2))) + 0.5;
+      g.globalAlpha = 0.75 * (1 - u);
+      g.strokeStyle = BOX;
+      g.beginPath();
+      g.moveTo(0, y);
+      g.lineTo(state.fw, y);
+      for (let x = 12; x < state.fw; x += 24) {
+        g.moveTo(x + 0.5, y - 3);
+        g.lineTo(x + 0.5, y + 3);
+      }
+      g.stroke();
+      g.globalAlpha = 1;
+    }
 
     g.fillStyle = DOT;
     for (const [x, y] of ends.concat(curveEnds)) {
@@ -678,6 +860,13 @@ export function createTracker({ frame, canvas, src, onReady }) {
       g.arc(x, y, 2, 0, Math.PI * 2);
       g.fill();
     }
+    g.fillStyle = "#ffffff";
+    for (const [x, y] of packets) {
+      g.beginPath();
+      g.arc(x, y, 1.8, 0, Math.PI * 2);
+      g.fill();
+    }
+    g.fillStyle = DOT;
     g.beginPath();
     g.arc(hx, hy, 2.4, 0, Math.PI * 2);
     g.fill();
@@ -686,9 +875,19 @@ export function createTracker({ frame, canvas, src, onReady }) {
     g.font = `${fs}px ${FONT}`;
     g.textBaseline = "alphabetic";
     g.fillStyle = "#ffffff";
+    g.shadowColor = "rgba(8, 8, 12, 0.75)";
+    g.shadowBlur = 3;
     const placed = [];
     const lineH = fs + 4;
-    const lispW = g.measureText(LISP).width;
+    const tick = Math.floor(now / 45);
+    const scramble = (str, n, seed) => {
+      const shownText = str.slice(0, Math.max(0, Math.min(str.length, n)));
+      if (n >= str.length || reduced) return shownText;
+      const tail = Math.min(3, shownText.length);
+      let out = shownText.slice(0, shownText.length - tail);
+      for (let i = 0; i < tail; i += 1) out += GLYPHS[Math.floor(hash(seed + i * 7 + tick) * GLYPHS.length)];
+      return out;
+    };
     const fits = (box) => {
       if (box.x1 < -40 || box.x0 > state.fw + 40 || box.y1 < 0 || box.y0 > state.fh) return false;
       for (const p of placed) if (box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0) return false;
@@ -701,24 +900,169 @@ export function createTracker({ frame, canvas, src, onReady }) {
     g.fillText("(track pointer)", hubRect.x + hubRect.w + 6, hubRect.y + fs);
     g.fillText(hubLabel, hubRect.x + hubRect.w + 6, hubRect.y + fs + lineH);
     placed.push({ x0: hubRect.x + hubRect.w, x1: hubRect.x + hubRect.w + 8 + g.measureText("(track pointer)").width, y0: hubRect.y, y1: hubRect.y + lineH * 2 });
+    const rolling = !reduced && scan >= 0 && scan < 420;
     for (const s of ordered) {
-      const id = `${s.tr.id}.0`;
+      const tr = s.tr;
+      const code = CODES[(tr.id * 3 + tr.epoch) % CODES.length];
+      const id = rolling ? `${Math.floor(1000000 + hash(tr.id + tick) * 8999999)}.0` : `${tr.id}.0`;
       const idW = g.measureText(id).width;
+      const codeW = g.measureText(code).width;
       const y = s.rect.y + s.rect.h + fs + 3;
       const idBox = { x0: s.rect.x + s.rect.w + 6, x1: s.rect.x + s.rect.w + 6 + idW, y0: y - fs, y1: y + 3 };
-      const full = { x0: idBox.x0 - 12 - lispW, x1: idBox.x1, y0: idBox.y0, y1: idBox.y1 };
-      const chars = Math.floor((s.age - 80) / 20) * 4;
+      const full = { x0: idBox.x0 - 12 - codeW, x1: idBox.x1, y0: idBox.y0, y1: idBox.y1 };
+      const since = now - Math.max(tr.born + 80, tr.labelAt);
+      const chars = Math.floor(since / 20) * 4;
       if (fits(full)) {
         placed.push(full);
-        const text = `${LISP}  ${id}`;
-        const shownText = text.slice(0, Math.max(0, Math.min(text.length, chars)));
-        g.fillText(shownText.slice(0, Math.min(LISP.length, shownText.length)), full.x0, y);
-        if (shownText.length > LISP.length + 2) g.fillText(id.slice(0, shownText.length - LISP.length - 2), idBox.x0, y);
+        g.fillText(scramble(code, chars, tr.id), full.x0, y);
+        if (chars > code.length + 2) g.fillText(scramble(id, chars - code.length - 2, tr.id + 3), idBox.x0, y);
       } else if (fits(idBox)) {
         placed.push(idBox);
-        g.fillText(id.slice(0, Math.max(0, chars)), idBox.x0, y);
+        g.fillText(scramble(id, chars, tr.id + 3), idBox.x0, y);
       }
     }
+    for (const kd of kids) {
+      if (kd.age < 90 || kd.fade < 0.6) continue;
+      const label = kd.sp.label;
+      const w = g.measureText(label).width;
+      const box = { x0: kd.rect.x + kd.rect.w + 4, x1: kd.rect.x + kd.rect.w + 4 + w, y0: kd.rect.y - 2, y1: kd.rect.y + fs + 2 };
+      if (!fits(box)) continue;
+      placed.push(box);
+      g.globalAlpha = kd.fade;
+      g.fillText(scramble(label, Math.floor((kd.age - 90) / 16) * 3, kd.sp.seed), box.x0, kd.rect.y + fs - 1);
+    }
+    g.fillStyle = BOX;
+    for (const sc of scouts) {
+      if (sc.age < 120 || sc.fade < 0.6) continue;
+      const label = sc.sc.label;
+      const w = g.measureText(label).width;
+      const box = { x0: sc.rect.x, x1: sc.rect.x + w, y0: sc.rect.y - fs - 4, y1: sc.rect.y - 1 };
+      if (!fits(box)) continue;
+      placed.push(box);
+      g.globalAlpha = sc.fade;
+      g.fillText(scramble(label, Math.floor((sc.age - 120) / 18) * 2, sc.sc.seed), box.x0, sc.rect.y - 4);
+    }
+    g.globalAlpha = 1;
+    g.shadowBlur = 0;
+    g.shadowColor = "transparent";
+  };
+
+  const pickLive = () => state.tracks.filter((tr) => tr.mode === "live");
+
+  const spawnScouts = (now, n) => {
+    const list = smear.sources;
+    if (!list.length) return;
+    for (let i = 0; i < n && state.scouts.length < 100; i += 1) {
+      const s = list[(Math.random() * list.length) | 0];
+      const seed = Math.floor(Math.random() * 100000);
+      state.scouts.push({
+        x: s[0] * (IW / SW) + (Math.random() - 0.5) * 30,
+        y: s[1] * (IH / SH) + (Math.random() - 0.5) * 30,
+        s: 16 + Math.random() * 54,
+        ar: 0.6 + Math.random() * 0.9,
+        born: now + i * 28,
+        life: 380 + Math.random() * 900,
+        seed,
+        label: Math.random() < 0.5 ? hex(seed) : `${(0.5 + hash(seed) * 0.5).toFixed(2)}`,
+      });
+    }
+  };
+
+  const splitTrack = (tr, now) => {
+    const sk = state.view.s * state.k;
+    if (tr.w * sk < 16 || tr.h * sk < 16) return;
+    const tall = tr.h > tr.w * 1.6;
+    const wide = tr.w > tr.h * 1.6;
+    const cols = tall ? 1 : wide ? 3 : 2;
+    const rows = tall ? 3 : wide ? 1 : 2;
+    let n = 0;
+    for (let j = 0; j < rows; j += 1) {
+      for (let i = 0; i < cols; i += 1) {
+        if (state.splits.length >= 72) return;
+        n += 1;
+        const fx = (i + 0.5) / cols - 0.5;
+        const fy = (j + 0.5) / rows - 0.5;
+        const len = Math.hypot(fx, fy) || 1;
+        const push = 0.35 + Math.random() * 0.55;
+        const seed = Math.floor(Math.random() * 100000);
+        state.splits.push({
+          parent: tr,
+          x: tr.x + fx * tr.w,
+          y: tr.y + fy * tr.h,
+          w: tr.w / cols,
+          h: tr.h / rows,
+          ox: (fx / len) * push * (tr.w / cols) * 1.2 + (Math.random() - 0.5) * 16,
+          oy: (fy / len) * push * (tr.h / rows) * 1.2 + (Math.random() - 0.5) * 16,
+          born: now + n * 18,
+          life: 760 + Math.random() * 640,
+          seed,
+          label: `${tr.id}.${n}`,
+        });
+      }
+    }
+  };
+
+  const spawnEdge = (live, now, lime) => {
+    if (live.length < 2 || state.edges.length >= 22) return;
+    const a = live[(Math.random() * live.length) | 0];
+    const others = live.filter((tr) => tr !== a && Math.hypot(tr.x - a.x, tr.y - a.y) > 140);
+    if (!others.length) return;
+    const b = others[(Math.random() * others.length) | 0];
+    state.edges.push({ a, b, born: now, life: 1300 + Math.random() * 1300, bend: 0.18 + Math.random() * 0.3, side: Math.random() < 0.5 ? -1 : 1, lime });
+  };
+
+  const onBeat = (b, now) => {
+    const c = ((b % CYCLE) + CYCLE) % CYCLE;
+    const drop = c === 0;
+    const build = c >= 24 ? (c - 23) / 8 : 0;
+    const accent = drop ? 1.5 : build ? 0.45 + build * 0.6 : ACCENT[c % 16];
+    const rh = state.rhythm;
+    rh.beat = b;
+    rh.at = now;
+    rh.power = Math.max(0.15, accent);
+    if (drop) rh.dropAt = now;
+    audio?.beat(accent, drop);
+    if (accent < 0.3) {
+      spawnScouts(now, 2);
+      return;
+    }
+    const live = pickLive();
+    kickColumns(Math.min(1.2, accent), drop);
+    if (accent >= 0.9 || build) kickColumns(Math.min(1, accent * 0.7), false);
+    const tails = drop ? 14 : Math.round(accent * 4);
+    for (let i = 0; i < tails && state.tails.length < 34; i += 1) spawnTail(now + i * 30, Math.min(1.2, accent));
+    spawnScouts(now, Math.round(accent * (drop ? 18 : 9)));
+    const order = live.slice().sort(() => Math.random() - 0.5);
+    const splitN = drop ? 9 : accent >= 0.9 ? 3 : 2;
+    for (let i = 0; i < Math.min(splitN, order.length); i += 1) splitTrack(order[i], now);
+    for (const tr of live) {
+      if (drop || hash(tr.id + b * 13) < accent * 0.3) {
+        tr.epoch += 1;
+        tr.labelAt = now;
+      }
+      if (drop || hash(tr.id * 7 + b) < accent * 0.35) tr.hotAt = now;
+    }
+    const edgeN = drop ? 8 : accent >= 0.9 ? 3 : 2;
+    for (let i = 0; i < edgeN; i += 1) spawnEdge(live, now, i % 2 === 1);
+    const [px] = toFrame(state.hub.x, state.hub.y);
+    if (accent >= 0.9) audio?.acquire(0.4 + Math.random() * 0.5, (px / state.fw) * 2 - 1);
+  };
+
+  const stepRhythm = (t, now, dt) => {
+    const rh = state.rhythm;
+    const pos = t / BEAT + 20;
+    const b = Math.floor(pos);
+    if (b !== rh.beat) onBeat(b, now);
+    rh.pulse = rh.power * Math.exp(-(now - rh.at) / 170);
+    const c = ((b % CYCLE) + CYCLE) % CYCLE;
+    const build = c >= 24 ? (c - 24 + (pos - b)) / 8 : 0;
+    const speed = Math.min(0.4, Math.hypot(state.hub.vx, state.hub.vy) / 4000);
+    const target = Math.min(1.5, 0.2 + 0.7 * rh.pulse + build * 0.55 + speed);
+    rh.energy += (target - rh.energy) * (1 - Math.exp(-dt / 120));
+    state.splits = state.splits.filter((sp) => now - sp.born < sp.life && sp.parent.mode !== "dying");
+    state.scouts = state.scouts.filter((sc) => now - sc.born < sc.life);
+    state.edges = state.edges.filter((ed) => now - ed.born < ed.life && ed.a.mode === "live" && ed.b.mode === "live");
+    state.tails = state.tails.filter((tl) => now - tl.born < tl.life);
   };
 
   let lastDetect = 0;
@@ -735,7 +1079,8 @@ export function createTracker({ frame, canvas, src, onReady }) {
     }
     updateHub(dt);
     updateLinks(dt);
-    draw(now);
+    if (!reduced && smear) stepRhythm(t, now, dt);
+    draw(now, dt);
     if (!state.ready) {
       state.ready = true;
       onReady?.();

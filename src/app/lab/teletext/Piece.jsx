@@ -74,8 +74,8 @@ export default function Piece({ embedded = false }) {
             <div className="teletext-caption-text">
               <h1 className="teletext-title">Teletext</h1>
               <p className="teletext-hint">
-                <span className="teletext-hint-fine">Type a page number from 100 to 112, or click a record or a coloured link.</span>
-                <span className="teletext-hint-touch">Tap a record or a coloured link, or tap the top line to type a page.</span>
+                <span className="teletext-hint-fine">Type a page number to hold it, or click a record or a coloured link.</span>
+                <span className="teletext-hint-touch">Tap a record or a coloured link to hold it, or tap the top line to type a page.</span>
               </p>
             </div>
             <button type="button" className="teletext-sound" aria-pressed={sound} onClick={toggleSound}>

@@ -164,7 +164,7 @@ export function buildAlbum(i, sub, mosaicRows) {
   p[20] = row();
   const prev = (i - 1 + ALBUMS.length) % ALBUMS.length;
   const next = (i + 1) % ALBUMS.length;
-  p[22] = row(C.blue, "the beatles on herb.art", C.white, "    ", C.yellow, "100");
+  p[22] = row(C.cyan, "the beatles on herb.art", C.white, "    ", C.yellow, "100");
   p[24] = fastext([`${albumPage(prev)} prev`, `${albumPage(next)} next`, "100 index", sub === 1 ? "about" : "tracks"]);
   links.push({ row: 24, c0: 0, c1: 9, page: albumPage(prev) });
   links.push({ row: 24, c0: 10, c1: 19, page: albumPage(next) });

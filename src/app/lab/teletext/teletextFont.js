@@ -133,3 +133,7 @@ export function glyphBits(ch) {
 }
 
 export { CELL_W, CELL_H };
+
+export function glyphRows(ch) {
+  return G[ch] || G[ch.toLowerCase()] || G[" "];
+}

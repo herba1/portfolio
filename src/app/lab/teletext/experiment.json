@@ -1,11 +1,19 @@
 {
   "title": "Teletext",
-  "description": "A teletext service about the Beatles on a 40 by 25 grid: eight colours, double-height banners and every album cover redrawn as block mosaics. Type a page number and the header rolls through the carousel until your page arrives row by row.",
-  "tags": ["Screen", "Pixel", "Music", "Y2K"],
+  "description": "A Beatles teletext service on a real 40 by 25 grid, overclocked to 156 bpm: the header races through page numbers, banners cycle the eight colours, and every bar a new page drops in, from album covers redrawn in block mosaics to lyric pages where one word at a time bursts in giant double-height mosaic letters or a plasma of sextant blocks rolls behind the line. Type any page number and it holds there.",
+  "tags": [
+    "Screen",
+    "Pixel",
+    "Music",
+    "Y2K"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-20T00:00:00.000Z",
-  "intent": "Teletext rendered for real: control codes decoded the way the chip did it, a hand-set character set with diagonal smoothing, covers converted to mosaics under the genuine one-cell-per-colour-change rule, the live clock ticking in the header, and only a faint CRT softness around it.",
-  "tile": { "cols": 4, "rows": 4 },
+  "intent": "Teletext stays authentic (control codes decoded like the SAA5050, eight colours, contiguous and separated mosaics, hold-mosaics, double height) but the carousel runs at a hyperpop tempo: a step sequencer flips pages, cycles colours, animates LED meters, big mosaic type and plasma, and drives an optional chiptune beat.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://en.wikipedia.org/wiki/Teletext",
     "https://en.wikipedia.org/wiki/Mullard_SAA5050",

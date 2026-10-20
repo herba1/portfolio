@@ -3,12 +3,14 @@ import { ALBUMS } from "@/app/lab/_music/catalog";
 import { createTeletextSound } from "./teletextAudio";
 import { CELL_H, CELL_W, glyphBits } from "./teletextFont";
 import { createTeletextGL } from "./teletextGL";
+import { BEAT, BRIGHTS, HYPER, RAINBOW, STEP, buildHyper, fgOn, hyperFor, meterRows, waveRow } from "./teletextHyper";
 import { C, PAGE_INDEX, PALETTE, SERVICE, albumPage, blankPage, buildAlbum, buildIndex, decodePage, mosaicFromImage, pageAlbum, row } from "./teletextPages";
 
 const SRC_W = 40 * CELL_W;
 const SRC_H = 25 * CELL_H;
-const ROLL_STEP = 0.05;
+const ROLL_STEP = 0.018;
 const ROW_STEP = 0.026;
+const HYPER_ROW_STEP = 0.009;
 const SUB_SECONDS = 14;
 const IDLE_SECONDS = 7;
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -81,6 +83,13 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
   let H = 0;
   let dpr = 1;
   let box = [0, 0, 1, 1];
+  let step = -1;
+  let half = -1;
+  let racing = 100;
+  let liveHyper = null;
+  let scheduled = -1;
+  let lastFlipBar = -1;
+  const t0 = performance.now();
 
   const images = new Map();
   const mosaics = new Map();
@@ -111,6 +120,8 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
 
   const buildPage = (n, s) => {
     if (n === PAGE_INDEX) return buildIndex();
+    const h = hyperFor(n);
+    if (h) return { ...buildHyper(h, Math.max(0, step)), hyper: h };
     const ai = pageAlbum(n);
     if (ai < 0) return null;
     return buildAlbum(ai, s, mosaicFor(ai));
@@ -119,8 +130,9 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
   const startArrival = (n, s, quiet) => {
     const built = buildPage(n, s);
     if (!built) return;
-    arrival = { rows: built.rows, links: built.links, next: 1, t: 0, page: n, sub: s };
-    if (!quiet) sound?.arrive(24, ROW_STEP);
+    arrival = { rows: built.rows, links: built.links, next: 1, t: 0, page: n, sub: s, hyper: built.hyper || null };
+    liveHyper = built.hyper || null;
+    if (!quiet) sound?.arrive(reduced ? 24 : 8, reduced ? ROW_STEP : HYPER_ROW_STEP * 3);
     dirty = true;
   };
 
@@ -181,10 +193,61 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
     const d = new Date(Date.now());
     const date = `${DAYS[d.getDay()]} ${String(d.getDate()).padStart(2, "0")} ${MONTHS[d.getMonth()]}`;
     const time = `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}/${String(d.getSeconds()).padStart(2, "0")}`;
-    const shownNum = search ? String(rollNum) : String(pageNum);
-    const pfield = `P${typed ? typed : String(pageNum)}`.padEnd(8);
-    if (search) return row(pfield, "HERB.ART", C.green, shownNum, C.white, date, C.yellow, time);
-    return row(pfield, "HERB.ART ", shownNum, " ", date, C.yellow, time);
+    if (reduced) {
+      const shownNum = search ? String(rollNum) : String(pageNum);
+      const pfield = `P${typed ? typed : String(pageNum)}`.padEnd(8);
+      if (search) return row(pfield, "HERB.ART", C.green, shownNum, C.white, date, C.yellow, time);
+      return row(pfield, "HERB.ART ", shownNum, " ", date, C.yellow, time);
+    }
+    const beat = Math.floor(Math.max(0, step) / 4);
+    const pfield = `P${typed ? typed : String(pageNum)}`.padEnd(7);
+    const brand = BRIGHTS[beat % BRIGHTS.length];
+    if (search) return row(pfield, brand, "HERB.ART", C.green, String(rollNum), C.white, date, C.yellow, time);
+    const steady = sinceArrive < BEAT * 2 || userHold > 0;
+    return row(pfield, brand, "HERB.ART", steady ? C.white : C.green, steady ? String(pageNum) : String(racing), C.white, date, C.yellow, time);
+  };
+
+  const applyFx = (rows) => {
+    if (reduced || step < 0) return;
+    const s = step;
+    const beat = Math.floor(s / 4);
+    const banner = rows[1];
+    if (banner && banner[1] === C.newBg && !liveHyper) {
+      const col = RAINBOW[(beat + pageNum) % 6];
+      banner[0] = col;
+      banner[3] = fgOn(col);
+    }
+    const ai = pageAlbum(pageNum);
+    if (ai >= 0) {
+      if (s % 32 >= 28) {
+        const k = (s % 4) + 1;
+        for (let r = 4; r <= 16; r += 1) {
+          const src = rows[r];
+          if (!src) continue;
+          const next = src.slice();
+          for (let c = 0; c < 17; c += 1) {
+            const b = next[c];
+            if (b >= 0x11 && b <= 0x17) next[c] = 0x11 + ((b - 0x11 + k) % 7);
+          }
+          rows[r] = next;
+        }
+      }
+      if (rows[19] && rows[19][0] === C.double) {
+        const next = rows[19].slice();
+        next[1] = BRIGHTS[(beat + 2) % BRIGHTS.length];
+        rows[19] = next;
+      }
+      if (!arrival) rows[21] = meterRows(s, 1, ai)[0];
+    } else if (pageNum === PAGE_INDEX && !liveHyper) {
+      const hi = 5 + (s % 12);
+      if (rows[hi] && rows[hi][0] !== 0x20) {
+        const next = rows[hi].slice();
+        next[0] = BRIGHTS[beat % BRIGHTS.length];
+        rows[hi] = next;
+      }
+      if (rows[20] && rows[20][0] === C.gGreen) rows[20] = waveRow(s);
+      if (!arrival) rows[23] = meterRows(s, 1, 3)[0];
+    }
   };
 
   const sextant = (code) => {
@@ -231,19 +294,63 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
   const paint = () => {
     const rows = shown.slice();
     rows[0] = headerRow();
+    applyFx(rows);
     const cells = decodePage(rows);
     for (let r = 0; r < 25; r += 1) for (let c = 0; c < 40; c += 1) paintCell(r, c, cells[r][c]);
     sx.putImageData(image, 0, 0);
   };
 
   const pickTour = () => {
-    const ai = TOUR[tourIdx % TOUR.length];
+    if (reduced) {
+      const ai = TOUR[tourIdx % TOUR.length];
+      tourIdx += 1;
+      return tourIdx % 5 === 0 ? PAGE_INDEX : albumPage(ai);
+    }
+    const k = tourIdx;
     tourIdx += 1;
-    return tourIdx % 5 === 0 ? PAGE_INDEX : albumPage(ai);
+    if (k % 9 === 8) return PAGE_INDEX;
+    if (k % 2 === 1) return HYPER[Math.floor(k / 2) % HYPER.length].page;
+    return albumPage(TOUR[Math.floor(k / 2) % TOUR.length]);
+  };
+
+  const onStep = (s) => {
+    if (liveHyper) {
+      const built = buildHyper(liveHyper, s);
+      if (arrival && arrival.hyper === liveHyper) arrival.rows = built.rows;
+      else if (!arrival) for (let r = 1; r < 25; r += 1) shown[r] = built.rows[r];
+    }
+    const bar = Math.floor(s / 16);
+    if (userHold <= 0 && !search && !arrival && !autoTyping && s % 16 >= 11 && bar !== lastFlipBar && sinceArrive > BEAT * 2) {
+      lastFlipBar = bar;
+      autoTyping = { digits: String(pickTour()), t: 0, hyper: true };
+      typed = "";
+    }
+    dirty = true;
   };
 
   const update = (dt) => {
     clock += dt;
+    if (!reduced) {
+      const rt = (performance.now() - t0) / 1000;
+      const s = Math.floor(rt / STEP);
+      if (s !== step) {
+        step = s;
+        onStep(s);
+      }
+      const hs = Math.floor(rt / (STEP / 2));
+      if (hs !== half) {
+        half = hs;
+        racing = 100 + ((racing - 100 + 7 + (hs % 5)) % 100);
+        if (!search && sinceArrive >= BEAT * 2) dirty = true;
+      }
+      if (sound && scheduled < step + 2) {
+        const base = sound.now();
+        if (base !== null) {
+          for (let k = Math.max(scheduled + 1, step + 1); k <= step + 2; k += 1) sound.step(k, base + (k * STEP - rt));
+          scheduled = step + 2;
+        }
+      }
+    }
     if (fade < 1) fade = Math.min(1, fade + dt / 0.5);
     const fo = clock % 1 < 0.75;
     if (fo !== flashOn) {
@@ -272,14 +379,16 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
           sinceArrive = 0;
           startArrival(pageNum, 1, false);
           const ai = pageAlbum(pageNum);
-          onLive(ai >= 0 ? `Page ${pageNum}: ${ALBUMS[ai].title}, ${ALBUMS[ai].year}` : `Page ${pageNum}: index`);
+          const hp = hyperFor(pageNum);
+          onLive(ai >= 0 ? `Page ${pageNum}: ${ALBUMS[ai].title}, ${ALBUMS[ai].year}` : hp ? `Page ${pageNum}: ${hp.line}` : `Page ${pageNum}: index`);
         }
       }
     }
     if (arrival) {
       arrival.t += dt;
-      while (arrival && arrival.t >= ROW_STEP) {
-        arrival.t -= ROW_STEP;
+      const rowStep = reduced ? ROW_STEP : HYPER_ROW_STEP;
+      while (arrival && arrival.t >= rowStep) {
+        arrival.t -= rowStep;
         shown[arrival.next] = arrival.rows[arrival.next];
         arrival.next += 1;
         dirty = true;
@@ -298,15 +407,16 @@ export function createTeletext(stage, { embedded = false, caption = null, onLive
         sinceArrive = 0;
         startArrival(pageNum, sub, true);
       }
-      if (!autoTyping && userHold <= 0 && idle >= IDLE_SECONDS) {
+      if (reduced && !autoTyping && userHold <= 0 && idle >= IDLE_SECONDS) {
         autoTyping = { digits: String(pickTour()), t: -0.2 };
         typed = "";
       }
     }
     if (autoTyping) {
       autoTyping.t += dt;
-      if (autoTyping.t >= 0.32) {
-        autoTyping.t -= 0.32;
+      const gap = autoTyping.hyper ? STEP : 0.32;
+      if (autoTyping.t >= gap) {
+        autoTyping.t -= gap;
         const dgt = autoTyping.digits[typed.length];
         const done = typed.length + 1 >= 3;
         if (done) autoTyping = null;

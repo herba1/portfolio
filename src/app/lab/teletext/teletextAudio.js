@@ -84,7 +84,70 @@ export function createTeletextSound() {
 
   const live = () => enabled && ctx.state === "running";
 
+  const NOTES = [
+    [76, 83, 88, 91],
+    [71, 78, 83, 87],
+    [73, 80, 85, 88],
+    [69, 76, 81, 85],
+  ];
+  const ARP = [0, -1, 1, 2, -1, 3, 2, -1, 1, -1, 2, 3, 0, 2, -1, 3];
+
+  const kick = (at, level) => {
+    const osc = ctx.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(150, at);
+    osc.frequency.exponentialRampToValueAtTime(48, at + 0.12);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(level, at + 0.004);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + 0.22);
+    osc.connect(env);
+    env.connect(master);
+    osc.start(at);
+    osc.stop(at + 0.25);
+    osc.onended = () => env.disconnect();
+  };
+
+  const blip = (at, midi, level) => {
+    const freq = 440 * Math.pow(2, (midi - 69) / 12);
+    const osc = ctx.createOscillator();
+    osc.type = "square";
+    osc.frequency.setValueAtTime(freq, at);
+    const lp = ctx.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(5200, at);
+    lp.frequency.exponentialRampToValueAtTime(1400, at + 0.07);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, at);
+    env.gain.exponentialRampToValueAtTime(level, at + 0.003);
+    env.gain.exponentialRampToValueAtTime(0.0001, at + 0.08);
+    osc.connect(lp);
+    lp.connect(env);
+    env.connect(master);
+    osc.start(at);
+    osc.stop(at + 0.1);
+    osc.onended = () => env.disconnect();
+  };
+
   return {
+    now() {
+      return live() ? ctx.currentTime : null;
+    },
+    step(s, at) {
+      if (!live()) return;
+      const when = Math.max(ctx.currentTime + 0.005, at);
+      const p = ((s % 16) + 16) % 16;
+      const bar = Math.floor(s / 16);
+      voice = (voice + 1) % 97;
+      if (p === 0 || p === 7 || p === 10) kick(when, p === 0 ? 0.3 : 0.2);
+      if (p === 4 || p === 12) {
+        burst({ at: when, freq: 1700, q: 0.9, gain: 0.07, attack: 0.002, decay: 0.09, high: 700 });
+        burst({ at: when + 0.011, freq: 2300, q: 1.2, gain: 0.04, attack: 0.001, decay: 0.06, high: 900 });
+      }
+      burst({ at: when, freq: 9000, q: 0.8, gain: p % 2 ? 0.006 : 0.012, attack: 0.001, decay: p % 4 === 2 ? 0.05 : 0.018, high: 6500 });
+      const deg = ARP[p];
+      if (deg >= 0) blip(when, NOTES[bar % 4][deg] + (p >= 12 && bar % 2 ? 12 : 0), 0.022);
+    },
     async setEnabled(on) {
       enabled = on;
       if (on) {

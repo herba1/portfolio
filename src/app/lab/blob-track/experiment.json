@@ -1,6 +1,6 @@
 {
   "title": "Tracking",
-  "description": "A hazy Times Square night, the billboard towers smeared into vertical streaks that keep moving: columns stretch and re-sort, light drips slowly down from every sign, and the smear shimmers like footage. Live blob tracking runs on top, with thin green boxes locked to the bright signs, each with a number and a line of lisp, and your pointer is a tracked blob that fans lines out to the nearest lights.",
+  "description": "A hazy Times Square night smeared into vertical pixel-sorted streaks, with live blob tracking locked to every bright sign. It runs on its own 122 bpm pulse: columns kick and drag light down, boxes split into numbered children, scout boxes flicker on, curves arc between targets carrying little packets, and every 32 beats a scan line sweeps the frame as the IDs roll.",
   "tags": [
     "Photo",
     "Tracking",
@@ -9,7 +9,7 @@
   ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "The TouchDesigner blob-tracking edit, done for real and in motion: a pixel-sorted smear that is redrawn every frame in drifting column strips with falling light drips, while bright regions are found with connected-component labelling each frame and held steady by a tracker in image space.",
+  "intent": "The TouchDesigner blob-tracking edit, overclocked but still legible: a beat clock drives every layer (column kicks in the smear, pixel-drag tails pulled from the sharp photo, box splits, scout detections, relabelled lisp lines, track-to-track curves, a drop with a scan sweep), while real connected-component tracking stays steady underneath.",
   "tile": {
     "cols": 4,
     "rows": 4
