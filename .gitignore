@@ -59,6 +59,7 @@ public/audio/
 
 # generated from src/app/lab/*/experiment.json
 /src/app/lab/registry.js
+/src/app/lab/pieces.js
 
 # lab runtime state and personal claude config
 /taste/runs/

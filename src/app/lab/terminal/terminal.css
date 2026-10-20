@@ -1,0 +1,196 @@
+@font-face {
+  font-family: "TerminalVT";
+  src: url("./vt323.woff2") format("woff2");
+  font-display: block;
+}
+
+.terminal {
+  --terminal-ground: #070807;
+  --terminal-ink: #e3e7e2;
+  --terminal-ink-soft: #a7afa7;
+  --terminal-line: rgb(255 255 255 / 0.12);
+  --terminal-phosphor: #60fa8e;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--terminal-ground);
+  color: var(--terminal-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.terminal[data-embedded] {
+  min-height: 100%;
+}
+
+.terminal-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.terminal-caption {
+  position: absolute;
+  top: 88px;
+  left: 32px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  opacity: 0;
+}
+
+.terminal[data-ready] .terminal-caption {
+  animation: terminal-in 400ms var(--ease-entrance) forwards;
+}
+
+@keyframes terminal-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.terminal-caption-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.terminal-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.terminal-hint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--terminal-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.terminal-sound {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--terminal-line);
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--terminal-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.terminal-sound:active {
+  transform: scale(0.96);
+}
+
+.terminal-sound:focus-visible {
+  outline: 2px solid var(--terminal-phosphor);
+  outline-offset: 2px;
+}
+
+.terminal-sound[aria-pressed="true"] .terminal-speaker {
+  color: var(--terminal-phosphor);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .terminal-sound:hover {
+    background: rgb(255 255 255 / 0.08);
+    border-color: rgb(255 255 255 / 0.2);
+  }
+}
+
+.terminal-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: 28px;
+  outline: none;
+  opacity: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.terminal[data-embedded] .terminal-screen {
+  touch-action: pan-y;
+}
+
+.terminal-screen[data-ready] {
+  animation: terminal-in 360ms var(--ease-entrance) forwards;
+}
+
+.terminal-screen:focus-visible {
+  outline: none;
+}
+
+.terminal-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.terminal-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--terminal-ink);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+.terminal-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .terminal-caption {
+    top: 72px;
+    left: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}

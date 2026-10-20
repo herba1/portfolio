@@ -1,0 +1,20 @@
+{
+  "title": "Riffle",
+  "description": "A flat flip book of forty-eight drawn pages: the Beatles walking over the Abbey Road crossing, John in white, Ringo in black, Paul barefoot, George in denim. Drag across the pages to riffle them forwards or back at your own speed, or let it play.",
+  "tags": [
+    "Canvas",
+    "Animation",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One physical object read straight-on: clean pages that fold flat towards the spine one by one, so the speed of your drag is the frame rate of a real walk cycle.",
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Flip_book",
+    "https://en.wikipedia.org/wiki/Abbey_Road#Cover_art"
+  ]
+}

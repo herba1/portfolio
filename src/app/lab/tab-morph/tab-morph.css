@@ -1,0 +1,644 @@
+.tab-morph {
+  --tm-ground: #0b0b0c;
+  --tm-screen: #121212;
+  --tm-raised: #1f1f21;
+  --tm-ink: #f4f4f2;
+  --tm-ink-2: #a3a3a0;
+  --tm-line: rgb(255 255 255 / 0.08);
+  --tm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  padding-top: 136px;
+  box-sizing: border-box;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--tm-ground);
+  color: var(--tm-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.tab-morph[data-embedded] {
+  min-height: 100%;
+  padding: 12px;
+}
+
+.tab-morph-head {
+  position: absolute;
+  top: 88px;
+  left: max(16px, min(40px, 3cqw));
+  right: max(16px, min(40px, 3cqw));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.tab-morph-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.tab-morph-hint {
+  margin: 0;
+  max-width: 340px;
+  color: var(--tm-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.tab-morph-screen {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(390px, 100%);
+  height: min(720px, calc(100cqh - 168px));
+  border-radius: 32px;
+  overflow: hidden;
+  background: var(--tm-screen);
+  box-shadow: 0 0 0 1px var(--tm-line);
+}
+
+.tab-morph[data-embedded] .tab-morph-screen {
+  height: 100%;
+  border-radius: 24px;
+}
+
+.tab-morph-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.tab-morph-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+.tab-morph-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 24px 16px 176px;
+  animation: tab-morph-in-right 420ms var(--tm-ease);
+}
+
+.tab-morph-page[data-dir="left"] {
+  animation-name: tab-morph-in-left;
+}
+
+@keyframes tab-morph-in-right {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateX(28px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+@keyframes tab-morph-in-left {
+  from {
+    opacity: 0;
+    filter: blur(8px);
+    transform: translateX(-28px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+
+.tab-morph-h {
+  margin: 0;
+  font-size: var(--text-title);
+  line-height: 32px;
+  letter-spacing: var(--text-title--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.tab-morph-h3 {
+  margin: 8px 0 0;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+}
+
+.tab-morph-shortcuts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tab-morph-shortcut {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 56px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--tm-raised);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.tab-morph-shortcut img {
+  width: 56px;
+  height: 56px;
+  object-fit: cover;
+}
+
+.tab-morph-shortcut span {
+  min-width: 0;
+  padding-right: 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-morph-shelf {
+  display: flex;
+  gap: 12px;
+  margin: 0 -16px;
+  padding: 0 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.tab-morph-tile {
+  display: flex;
+  flex: none;
+  flex-direction: column;
+  gap: 4px;
+  width: 140px;
+}
+
+.tab-morph-tile img {
+  width: 140px;
+  height: 140px;
+  margin-bottom: 4px;
+  border-radius: 6px;
+  object-fit: cover;
+}
+
+.tab-morph-tile-title,
+.tab-morph-row-title,
+.tab-morph-player-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-medium);
+}
+
+.tab-morph-tile-meta,
+.tab-morph-row-meta,
+.tab-morph-player-meta {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--tm-ink-2);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+}
+
+.tab-morph-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: var(--tm-ink);
+  color: #4a4a4a;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-medium);
+}
+
+.tab-morph-field svg {
+  width: 24px;
+  height: 24px;
+  fill: none;
+  stroke: #1a1a1a;
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.tab-morph-genres {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.tab-morph-genre {
+  position: relative;
+  height: 96px;
+  padding: 12px;
+  border-radius: 8px;
+  overflow: hidden;
+  box-sizing: border-box;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.tab-morph-genre img {
+  position: absolute;
+  right: -12px;
+  bottom: -4px;
+  width: 64px;
+  height: 64px;
+  border-radius: 4px;
+  object-fit: cover;
+  transform: rotate(24deg);
+}
+
+.tab-morph-chips {
+  display: flex;
+  gap: 8px;
+}
+
+.tab-morph-chips span {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 16px;
+  background: var(--tm-raised);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-medium);
+}
+
+.tab-morph-chips span[data-on] {
+  background: var(--tm-ink);
+  color: var(--tm-screen);
+}
+
+.tab-morph-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tab-morph-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.tab-morph-row img {
+  flex: none;
+  width: 56px;
+  height: 56px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.tab-morph-row img[data-round] {
+  border-radius: 50%;
+}
+
+.tab-morph-row-text,
+.tab-morph-player-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.tab-morph-station {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tab-morph-collage {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tab-morph-collage img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.tab-morph-station-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.tab-morph-station-name {
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.tab-morph-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #ff5a4f;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.tab-morph-live i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: tab-morph-live 1400ms ease-in-out infinite;
+}
+
+@keyframes tab-morph-live {
+  50% {
+    transform: scale(0.6);
+  }
+}
+
+.tab-morph-dock {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 40px 8px 12px;
+  background: linear-gradient(180deg, rgb(18 18 18 / 0) 0%, rgb(18 18 18 / 0.72) 24%, rgb(18 18 18 / 0.94) 50%, #121212 100%);
+}
+
+.tab-morph-player {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 56px;
+  padding: 0 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #3a2a2a;
+  box-sizing: border-box;
+}
+
+.tab-morph-player img {
+  width: 40px;
+  height: 40px;
+  border-radius: 4px;
+  object-fit: cover;
+}
+
+.tab-morph-play {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--tm-ink);
+  cursor: pointer;
+}
+
+.tab-morph-play:focus-visible {
+  box-shadow: 0 0 0 2px var(--tm-ink);
+  outline: none;
+}
+
+.tab-morph-play svg {
+  width: 24px;
+  height: 24px;
+  fill: currentColor;
+}
+
+.tab-morph-progress {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 0;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(255 255 255 / 0.2);
+  overflow: hidden;
+}
+
+.tab-morph-progress::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--tm-ink);
+  transform-origin: left;
+  transform: scaleX(0.38);
+  animation: tab-morph-progress 208s linear infinite;
+  animation-play-state: paused;
+}
+
+.tab-morph-progress[data-playing]::after {
+  animation-play-state: running;
+}
+
+@keyframes tab-morph-progress {
+  from {
+    transform: scaleX(0.38);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+
+.tab-morph-barwrap {
+  position: relative;
+}
+
+.tab-morph-glow {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  height: 52px;
+  border-radius: 26px;
+  overflow: hidden;
+  opacity: 0.9;
+  filter: blur(16px);
+  pointer-events: none;
+}
+
+.tab-morph-glow img,
+.tab-morph-pill img {
+  position: absolute;
+  top: 0;
+  left: 0;
+  max-width: none;
+  height: auto;
+  aspect-ratio: 1;
+  object-fit: cover;
+  filter: blur(5px) saturate(1.9) brightness(0.95);
+}
+
+.tab-morph-bar {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  height: 64px;
+  padding: 0 6px;
+  border-radius: 32px;
+  background: rgb(31 31 33 / 0.9);
+  box-shadow: inset 0 0 0 1px var(--tm-line);
+  touch-action: pan-y;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.tab-morph-bar[data-dragging] {
+  cursor: grabbing;
+}
+
+.tab-morph-pill {
+  position: absolute;
+  top: 6px;
+  left: 0;
+  height: 52px;
+  border-radius: 26px;
+  overflow: hidden;
+  background: #6a2c3c;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.22);
+  will-change: transform, width;
+  pointer-events: none;
+}
+
+.tab-morph-pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, rgb(255 255 255 / 0.12) 0%, rgb(0 0 0 / 0.08) 35%, rgb(0 0 0 / 0.2) 70%, rgb(0 0 0 / 0.32) 100%);
+}
+
+.tab-morph-tab {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--tm-ink-2);
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition: color 240ms var(--tm-ease);
+}
+
+.tab-morph-tab:hover {
+  color: var(--tm-ink);
+}
+
+.tab-morph-tab[aria-selected="true"] {
+  color: #ffffff;
+}
+
+.tab-morph-tab:focus-visible .tab-morph-icon {
+  border-radius: 6px;
+  box-shadow: 0 0 0 2px #ffffff;
+}
+
+.tab-morph-icon {
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.tab-morph-icon path {
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 0;
+}
+
+.tab-morph-tab[aria-selected="true"] .tab-morph-icon {
+  stroke-width: 2.2;
+  filter: drop-shadow(0 1px 4px rgb(0 0 0 / 0.35));
+}
+
+.tab-morph-label {
+  font-size: var(--text-ui-xs);
+  line-height: var(--text-ui-xs--line-height);
+  letter-spacing: var(--text-ui-xs--letter-spacing);
+  font-weight: var(--font-weight-caption);
+}
+
+.tab-morph-tab[aria-selected="true"] .tab-morph-label {
+  font-weight: var(--font-weight-strong);
+  text-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+}
+
+@container (max-width: 640px) {
+  .tab-morph {
+    padding: 160px 8px 8px;
+  }
+
+  .tab-morph-head {
+    top: 80px;
+  }
+
+  .tab-morph-screen {
+    height: calc(100cqh - 168px);
+    border-radius: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tab-morph-page {
+    animation-duration: 1ms;
+  }
+}

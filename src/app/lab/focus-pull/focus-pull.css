@@ -1,0 +1,190 @@
+@font-face {
+  font-family: "Focus Arimo";
+  src: url("./arimo-latin-400-normal.woff2") format("woff2");
+  font-display: block;
+}
+
+.focus-pull {
+  --focus-pull-red: #e5321f;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  background: #ffffff;
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.focus-pull[data-embedded] {
+  min-height: 100%;
+}
+
+.focus-pull-gl {
+  position: absolute;
+  inset: 0;
+  display: block;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.focus-pull[data-over-line] .focus-pull-gl {
+  cursor: pointer;
+}
+
+.focus-pull-ring {
+  position: absolute;
+  display: block;
+  border-radius: 8px;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: grab;
+  opacity: 0;
+  transition: opacity 500ms var(--ease-entrance) 120ms;
+}
+
+.focus-pull[data-grabbing] .focus-pull-ring {
+  cursor: grabbing;
+}
+
+.focus-pull-ring:focus-visible {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 0 4px var(--focus-pull-red);
+}
+
+.focus-pull[data-ready] .focus-pull-gl,
+.focus-pull[data-ready] .focus-pull-ring {
+  opacity: 1;
+}
+
+.focus-pull-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.focus-pull-caption {
+  position: absolute;
+  z-index: 2;
+  top: 88px;
+  left: max(32px, 6cqw);
+  right: max(32px, 6cqw);
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance);
+}
+
+.focus-pull[data-ready] .focus-pull-caption {
+  opacity: 1;
+}
+
+.focus-pull-caption-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-width: 440px;
+  min-width: 0;
+}
+
+.focus-pull-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.focus-pull-hint {
+  margin: 0;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.focus-pull-sound {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 9999px;
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.focus-pull-sound:active {
+  transform: scale(0.96);
+}
+
+.focus-pull-sound:focus-visible {
+  outline: 2px solid var(--focus-pull-red);
+  outline-offset: 2px;
+}
+
+.focus-pull-sound[aria-pressed="true"] .focus-pull-speaker {
+  color: var(--focus-pull-red);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .focus-pull-sound:hover {
+    background: var(--color-surface-subtle);
+    border-color: var(--color-line-strong);
+  }
+}
+
+.focus-pull-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--color-ink-secondary);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+@container (max-width: 639px) {
+  .focus-pull-caption {
+    top: 80px;
+    left: 20px;
+    right: 20px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

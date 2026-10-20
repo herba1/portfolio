@@ -1,0 +1,10 @@
+{
+  "title": "Cover Search",
+  "description": "A music search field over your top songs and the Beatles catalogue. Every keystroke re-ranks the covers: matches fly in and re-sort on springs, non-matches fall away, matched letters light up, and the best hit lifts into a top-result card that tints the page.",
+  "tags": ["Interface", "Motion", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T12:40:00.000Z",
+  "intent": "Search results as a living layout: each cover is one element that moves to its new rank, so typing feels like sorting a crate rather than reloading a list.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://motion.dev/docs/react-layout-animations", "https://herb.art/song-search"]
+}

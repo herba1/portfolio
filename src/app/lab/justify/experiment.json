@@ -1,0 +1,21 @@
+{
+  "title": "Justify",
+  "description": "A lyric set as a force-justified block in soft black Arial on white. Drag the right edge and the words flow like one ribbon around the margin; the lyrics, softness and sound sit underneath as one more justified line of the same Arial, the chosen one marked with a pale-blue text selection, and dragging the word soft blurs the block.",
+  "tags": [
+    "Type",
+    "Layout",
+    "Lyrics"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T22:00:00.000Z",
+  "intent": "Force-justification as a live material with reflow that is physically continuous: the measure is a roller the text winds around, so every word keeps one body and one path, interruptible mid-drag.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://aerotwist.com/blog/flip-your-animations/",
+    "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/imageSmoothingQuality",
+    "herb reference board: 0fc59ca9 (I'm a star justified block) and ee6eda60 (the sun'll come out, blurred justified block)"
+  ]
+}

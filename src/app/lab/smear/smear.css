@@ -1,0 +1,204 @@
+@font-face {
+  font-family: "Smear Arimo";
+  src: url("./arimo-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.smear {
+  --smear-ground: #000000;
+  --smear-ink: #f2f1ec;
+  --smear-ink-soft: #a9a8a2;
+  --smear-line: rgb(255 255 255 / 0.14);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--smear-ground);
+  color: var(--smear-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.smear[data-embedded] {
+  min-height: 100%;
+}
+
+.smear-stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.smear[data-embedded] .smear-stage {
+  touch-action: pan-y;
+}
+
+.smear[data-pressing] .smear-stage {
+  cursor: grabbing;
+}
+
+.smear-stage:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 12px;
+  border-radius: 12px;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.32);
+  pointer-events: none;
+}
+
+.smear-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.smear-caption {
+  position: absolute;
+  top: 96px;
+  left: 56px;
+  right: 56px;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance);
+}
+
+.smear[data-ready] .smear-caption {
+  opacity: 1;
+}
+
+.smear-title {
+  margin: 0;
+  color: var(--smear-ink);
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.smear-hint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--smear-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.smear-controls {
+  position: absolute;
+  left: 56px;
+  bottom: 72px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  opacity: 0;
+  transition: opacity 400ms var(--ease-entrance) 160ms;
+}
+
+.smear[data-ready] .smear-controls {
+  opacity: 1;
+}
+
+.smear[data-embedded] .smear-controls {
+  left: 16px;
+  bottom: 16px;
+}
+
+.smear-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--smear-line);
+  border-radius: 9999px;
+  background: var(--smear-ground);
+  color: var(--smear-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.smear-sound {
+  display: inline-grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--smear-line);
+  border-radius: 9999px;
+  background: var(--smear-ground);
+  color: var(--smear-ink);
+  cursor: pointer;
+  transition:
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.smear-button:active,
+.smear-sound:active {
+  transform: scale(0.95);
+}
+
+.smear-button:focus-visible,
+.smear-sound:focus-visible {
+  outline: 2px solid var(--smear-ink);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .smear-button:hover,
+  .smear-sound:hover {
+    border-color: rgb(255 255 255 / 0.34);
+  }
+}
+
+@container (max-width: 759px) {
+  .smear-caption {
+    top: 72px;
+    left: 20px;
+    right: 20px;
+  }
+
+  .smear-controls {
+    left: 16px;
+    bottom: 24px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .smear-caption,
+  .smear-controls {
+    transition: opacity 200ms linear;
+  }
+}

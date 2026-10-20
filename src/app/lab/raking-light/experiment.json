@@ -1,0 +1,22 @@
+{
+  "title": "Raking Light",
+  "description": "An Abbey Road enamel pin, an embroidered Revolver patch and a Sgt. Pepper drum badge on black, with one lamp in your hand held low to the surface. Move it and the light rakes across them, so satin stitches, raised gold and domed enamel catch it and throw long shadows away from the bulb.",
+  "tags": [
+    "WebGL",
+    "Light",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One light finished to the edge: a real point lamp grazing three height fields drawn as relief, so stitch direction, enamel gloss and metal edges only show when the light comes down to them.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://www.metmuseum.org/perspectives/raking-light",
+    "https://culturalheritageimaging.org/Technologies/RTI/",
+    "https://iquilezles.org/articles/rmshadows/",
+    "https://en.wikipedia.org/wiki/Kajiya%E2%80%93Kay_model"
+  ]
+}

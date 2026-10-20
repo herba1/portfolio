@@ -1,0 +1,22 @@
+{
+  "title": "Long Exposure",
+  "description": "A camera pointed at an Abbey Road sleeve and its record standing in a dark room. Hold to open the shutter and drag to paint glowstick trails that burn into the exposure while the cover slowly emerges from the dark; let go and the developed photo drops into a stack of prints.",
+  "tags": [
+    "WebGL",
+    "Photography",
+    "Light",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One photographic process finished to the edge: a real bulb exposure where light adds up, cores burn white and bloom, a record sleeve surfaces out of the black the longer you hold, and the sensor grows noisy.",
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Abbey_Road",
+    "https://en.wikipedia.org/wiki/Long-exposure_photography",
+    "https://en.wikipedia.org/wiki/Light_painting"
+  ]
+}

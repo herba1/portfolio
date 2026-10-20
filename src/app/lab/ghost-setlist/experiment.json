@@ -1,0 +1,21 @@
+{
+  "title": "Ghost Setlist",
+  "description": "A Beatles set as lit lettering on pure black, laid out like a Swiss poster. Flick through it and every song leaves cooling outline afterimages behind it like a long exposure, then lands solid on its baseline.",
+  "tags": [
+    "WebGL",
+    "Type",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One kinetic type mechanic finished to the edge: a title whose speed is drawn as long-exposure ghosts, collapsing into a single lit line when it settles, on a clean typographic grid.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://tympanus.net/codrops/2020/06/02/kinetic-typography-with-three-js/",
+    "https://en.wikipedia.org/wiki/Neon_sign",
+    "https://en.wikipedia.org/wiki/Long-exposure_photography"
+  ]
+}

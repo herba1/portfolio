@@ -1,0 +1,10 @@
+{
+  "title": "Volume Dial",
+  "description": "A big volume dial for Here Comes the Sun. Turn it and it clicks through detents every ten, the ticks lean towards your finger, the percentage rolls like a slot reel, and at full volume the cover starts to glow and pulse with the song.",
+  "tags": ["Interface", "Music", "Motion"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T12:00:00.000Z",
+  "intent": "A music-app volume control finished to the edge, with one over-the-top flourish: the cover art blooms and beats at max.",
+  "tile": { "cols": 3, "rows": 4 },
+  "sources": ["https://herb.art/tuner", "https://developer.apple.com/design/human-interface-guidelines/sliders"]
+}

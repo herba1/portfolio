@@ -1,0 +1,271 @@
+.lenticular {
+  --lenticular-ground: rgb(236 234 230);
+  --lenticular-tray: var(--color-surface-raised);
+  --lenticular-serif: "Iowan Old Style", "Times New Roman", Georgia, serif;
+  --lenticular-serif-weight: 430;
+  --lenticular-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--lenticular-ground);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.lenticular__stage {
+  position: absolute;
+  inset: 0;
+  touch-action: none;
+  outline: none;
+  cursor: grab;
+}
+
+.lenticular__stage:active {
+  cursor: grabbing;
+}
+
+.lenticular__stage:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.lenticular__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 700ms var(--lenticular-ease);
+}
+
+.lenticular[data-ready] .lenticular__canvas {
+  opacity: 1;
+}
+
+.lenticular__head {
+  position: absolute;
+  top: 88px;
+  left: 24px;
+  max-width: min(320px, calc(100cqw - 48px));
+  pointer-events: none;
+}
+
+.lenticular__title {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: 20px;
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+}
+
+.lenticular__lede {
+  margin: 4px 0 0;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--color-ink-secondary);
+  text-wrap: pretty;
+}
+
+.lenticular__lede em {
+  font-family: var(--lenticular-serif);
+  font-style: italic;
+  font-size: 1.07em;
+  font-weight: var(--lenticular-serif-weight);
+  letter-spacing: 0.16px;
+  font-variation-settings: "opsz" 10;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
+.lenticular__foot {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  bottom: 24px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  column-gap: 12px;
+  row-gap: 8px;
+}
+
+.lenticular__cards {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 48px;
+  padding: 4px;
+  border-radius: 14px;
+  background: var(--lenticular-tray);
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 24px -8px rgb(0 0 0 / 0.18);
+}
+
+.lenticular__card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 4px 12px 4px 4px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-ink);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color 160ms var(--lenticular-ease);
+}
+
+.lenticular__card:hover {
+  background: var(--color-surface-sunken);
+}
+
+.lenticular__card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 0;
+}
+
+.lenticular__card[aria-checked="true"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.lenticular__thumb {
+  position: relative;
+  display: block;
+  width: 28px;
+  height: 28px;
+  overflow: hidden;
+  border-radius: 3px;
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.1), 0 1px 2px rgb(0 0 0 / 0.2);
+  transform: rotate(-3deg);
+  transition: transform 260ms var(--lenticular-ease);
+}
+
+.lenticular__thumb img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.lenticular__thumb img + img {
+  clip-path: polygon(100% 0, 100% 100%, 0 100%);
+}
+
+.lenticular__card[aria-checked="true"] .lenticular__thumb {
+  transform: rotate(0deg);
+}
+
+.lenticular__card-name {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+}
+
+.lenticular__card-move {
+  font-family: var(--lenticular-serif);
+  font-style: italic;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: 0.16px;
+  font-weight: var(--lenticular-serif-weight);
+  font-variation-settings: "opsz" 10;
+}
+
+.lenticular__motion {
+  height: 48px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 14px;
+  background: var(--lenticular-tray);
+  color: var(--color-ink);
+  font: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 1px 2px rgb(0 0 0 / 0.06),
+    0 8px 24px -8px rgb(0 0 0 / 0.18);
+}
+
+.lenticular__motion:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.lenticular__motion[data-state="on"] {
+  background: var(--color-surface-inverse);
+  color: var(--color-ink-inverse);
+}
+
+.lenticular__motion:disabled {
+  cursor: default;
+}
+
+.lenticular__fallback {
+  display: none;
+}
+
+.lenticular[data-fallback] .lenticular__fallback {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: block;
+  height: min(64cqh, 110cqw);
+  width: auto;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgb(0 0 0 / 0.12), 0 16px 40px -12px rgb(0 0 0 / 0.3);
+  transform: translate(-50%, -52%) rotate(-2deg);
+}
+
+@container (max-width: 640px) {
+  .lenticular__head {
+    left: 16px;
+  }
+
+  .lenticular__foot {
+    bottom: 16px;
+  }
+
+  .lenticular__card {
+    padding-right: 8px;
+  }
+
+  .lenticular__card-move {
+    display: none;
+  }
+}
+
+@container (max-width: 560px) {
+  .lenticular__card {
+    padding: 4px 8px;
+  }
+
+  .lenticular__card-name {
+    display: none;
+  }
+
+  .lenticular__thumb {
+    width: 32px;
+    height: 32px;
+  }
+}

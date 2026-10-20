@@ -76,26 +76,47 @@ function hueOf({ red, green, blue }) {
   return (sector * 60 + 360) % 360;
 }
 
+// The colour reads sample a tiny thumbnail, never the full cover: decoding
+// happens off the main thread (decode() + createImageBitmap's resize), so a
+// tile mounting mid-scroll costs microseconds instead of a synchronous decode
+// of a 640px JPEG per cover. Results are kept per URL, so a piece that
+// remounts (the index unmounts far-offscreen tiles) reads them back for free.
+const THUMB = 24;
+const analysed = new Map();
+
+function thumbnailOf(image) {
+  const decoded = image.decode ? image.decode().catch(() => {}) : Promise.resolve();
+  return decoded.then(() =>
+    typeof createImageBitmap === "function"
+      ? createImageBitmap(image, { resizeWidth: THUMB, resizeHeight: THUMB, resizeQuality: "medium" }).catch(() => image)
+      : image,
+  );
+}
+
 function loadCover(cover) {
+  if (!analysed.has(cover.image)) analysed.set(cover.image, analyse(cover));
+  return analysed.get(cover.image).then((result) => (result ? { ...cover, ...result, image: cover.image } : null));
+}
+
+function analyse(cover) {
   return new Promise((resolve) => {
     const image = new Image();
     image.crossOrigin = "anonymous";
     image.decoding = "async";
-    image.onload = () => {
+    image.onload = async () => {
       let colour = { red: 128, green: 128, blue: 128 };
       let edge = "";
       let palette = [];
       let pattern = [];
       try {
-        colour = averageColour(image);
-        ({ edge, palette } = edgeGradient(image));
-        pattern = patternGrid(image);
+        const thumb = await thumbnailOf(image);
+        colour = averageColour(thumb);
+        ({ edge, palette } = edgeGradient(thumb));
+        pattern = patternGrid(thumb);
       } catch {
         colour = { red: 128, green: 128, blue: 128 };
       }
       resolve({
-        ...cover,
-        image: cover.image,
         element: image,
         edge,
         palette,
@@ -105,7 +126,10 @@ function loadCover(cover) {
         light: 0.2126 * colour.red + 0.7152 * colour.green + 0.0722 * colour.blue,
       });
     };
-    image.onerror = () => resolve(null);
+    image.onerror = () => {
+      analysed.delete(cover.image);
+      resolve(null);
+    };
     image.src = cover.image;
   });
 }

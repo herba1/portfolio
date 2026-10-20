@@ -1,0 +1,25 @@
+{
+  "title": "Refractor",
+  "description": "Beatles covers reprinted as chrome refractor cards in penny sleeves. Tilt one and a diffraction grating splits the light into rainbow bands across the border and sky while the print stays matte ink; flick it hard and the next record swaps in at the edge-on moment of the spin.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Cards",
+    "Music"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-17T00:00:00.000Z",
+  "intent": "One optical material finished to the edge, now on real records: a grating equation drives the rainbow, a chrome map generated from each cover keeps the print matte, and a fast flick riffles through the albums one per turn, swapping cards while they are edge-on.",
+  "tile": {
+    "cols": 2,
+    "rows": 4
+  },
+  "sources": [
+    "https://github.com/simeydotme/pokemon-cards-css",
+    "https://poke-holo.simey.me/",
+    "https://hover-tilt.simey.me/bespoke/credit-cards/",
+    "https://feedbagel.com/post/creating-foil-sticker-effects-with-custom-threejs-shaders",
+    "https://developer.nvidia.com/gpugems/GPUGems/gpugems_ch08.html",
+    "https://github.com/ektogamat/threejs-holographic-material"
+  ]
+}

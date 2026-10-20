@@ -1,0 +1,10 @@
+{
+  "title": "Cover Palette",
+  "description": "Hover any Beatles album and the whole player re-themes from its cover: six colours are pulled from the artwork in a canvas, and every surface, line, ink and accent slides to its new value through OKLCH, with a share-weighted swatch strip you can copy from.",
+  "tags": ["Interface", "Color", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T13:00:00.000Z",
+  "intent": "Album art as a live theme source: the palette is computed, not hand-picked, and each role eases on its own lightness, chroma and hue axes so the colour never passes through mud.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://bottosson.github.io/posts/oklab/", "https://developer.mozilla.org/en-US/docs/Web/CSS/@property"]
+}

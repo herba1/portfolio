@@ -1,0 +1,10 @@
+{
+  "title": "Album Open",
+  "description": "A library of twelve Beatles albums. Open one and its cover flies out of the grid into the header while the tracklist staggers in with real song lengths; scroll and the header shrinks until the cover flies again into the top bar, and Back sends it home.",
+  "tags": ["Interface", "Motion", "Music"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T12:20:00.000Z",
+  "intent": "One cover that is never replaced: the same element travels grid to header to bar and back on a sprung shared layout, and every leg can be caught and reversed mid-flight.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": ["https://motion.dev/docs/react-layout-animations", "https://www.apple.com/apple-music/"]
+}

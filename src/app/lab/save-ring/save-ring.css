@@ -1,0 +1,539 @@
+.save-ring {
+  --save-ground: #f4f3ef;
+  --save-ink: var(--color-ink);
+  --save-ink-2: var(--color-ink-secondary);
+  --save-line: rgb(26 26 26 / 0.08);
+  --save-sunken: #e7e5df;
+  --save-green: #17a34a;
+  --save-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  padding: 152px 32px 48px;
+  box-sizing: border-box;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--save-ground);
+  color: var(--save-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.save-ring[data-embedded] {
+  min-height: 100%;
+  padding: 16px;
+}
+
+.save-ring-head {
+  position: absolute;
+  top: 88px;
+  left: max(16px, min(40px, 3cqw));
+  right: max(16px, min(40px, 3cqw));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.save-ring-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.save-ring-hint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--save-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  text-wrap: pretty;
+}
+
+.save-ring-card {
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+  width: min(640px, 100%);
+}
+
+.save-ring-top {
+  display: flex;
+  align-items: flex-end;
+  gap: 32px;
+}
+
+.save-ring-cover {
+  position: relative;
+  flex: none;
+  width: 220px;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--save-line);
+}
+
+.save-ring-cover img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.save-ring-sheen {
+  position: absolute;
+  inset: -20% 0;
+  width: 50%;
+  background: linear-gradient(90deg, rgb(255 255 255 / 0) 0%, rgb(255 255 255 / 0.18) 30%, rgb(255 255 255 / 0.55) 50%, rgb(255 255 255 / 0.18) 70%, rgb(255 255 255 / 0) 100%);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.save-ring-about {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.save-ring-album {
+  margin: 0;
+  font-size: var(--text-title-lg);
+  line-height: 40px;
+  letter-spacing: var(--text-title-lg--letter-spacing);
+  font-weight: var(--text-title-lg--font-weight);
+  text-wrap: balance;
+}
+
+.save-ring-meta {
+  margin: 0;
+  color: var(--save-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+}
+
+.save-ring-action {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.save-ring-btn {
+  position: relative;
+  flex: none;
+  width: 148px;
+  height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 24px;
+  background: var(--save-ink);
+  color: #ffffff;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    width 520ms var(--save-ease),
+    height 520ms var(--save-ease),
+    margin 520ms var(--save-ease),
+    border-radius 520ms var(--save-ease),
+    background-color 320ms var(--save-ease),
+    color 320ms var(--save-ease),
+    transform 160ms var(--save-ease);
+}
+
+.save-ring-btn:hover {
+  background: #333333;
+}
+
+.save-ring-btn:active {
+  transform: scale(0.96);
+}
+
+.save-ring-btn:focus-visible {
+  box-shadow: 0 0 0 2px var(--save-ground), 0 0 0 4px var(--save-ink);
+}
+
+.save-ring-btn[data-phase="loading"],
+.save-ring-btn[data-phase="cancelling"],
+.save-ring-btn[data-phase="filling"] {
+  width: 64px;
+  height: 64px;
+  margin: -8px 0;
+  border-radius: 32px;
+  background: transparent;
+}
+
+.save-ring-btn[data-phase="saved"] {
+  width: 168px;
+  background: var(--save-sunken);
+  color: var(--save-ink);
+}
+
+.save-ring-face {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-strong);
+  white-space: nowrap;
+  opacity: 0;
+  filter: blur(4px);
+  transform: scale(0.9);
+  transition: opacity 200ms var(--save-ease), filter 200ms var(--save-ease), transform 320ms var(--save-ease);
+  pointer-events: none;
+}
+
+.save-ring-face svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.save-ring-face img {
+  width: 32px;
+  height: 32px;
+  margin-left: -8px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.save-ring-btn[data-phase="idle"] .save-ring-face--idle,
+.save-ring-btn[data-phase="saved"] .save-ring-face--saved {
+  opacity: 1;
+  filter: none;
+  transform: none;
+  transition-delay: 160ms;
+}
+
+.save-ring-disc {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  overflow: visible;
+  opacity: 0;
+  transform: scale(0.6) rotate(-45deg);
+  transition: opacity 240ms var(--save-ease), transform 520ms var(--save-ease);
+  pointer-events: none;
+}
+
+.save-ring-btn[data-phase="loading"] .save-ring-disc,
+.save-ring-btn[data-phase="cancelling"] .save-ring-disc,
+.save-ring-btn[data-phase="filling"] .save-ring-disc {
+  opacity: 1;
+  transform: none;
+  transition-delay: 120ms;
+}
+
+.save-ring-track {
+  fill: none;
+  stroke: var(--save-sunken);
+  stroke-width: 8;
+}
+
+.save-ring-mask {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 8;
+  stroke-dasharray: 0 1;
+  transition: stroke-width 620ms cubic-bezier(0.65, 0, 0.35, 1);
+}
+
+.save-ring[data-phase="filling"] .save-ring-mask,
+.save-ring[data-phase="saved"] .save-ring-mask {
+  stroke-width: 40;
+}
+
+.save-ring-stop,
+.save-ring-play {
+  fill: var(--save-ink);
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.4);
+  transition: opacity 160ms var(--save-ease), transform 260ms var(--save-ease);
+}
+
+.save-ring-btn[data-phase="loading"] .save-ring-stop,
+.save-ring-btn[data-phase="cancelling"] .save-ring-play {
+  opacity: 1;
+  transform: none;
+}
+
+.save-ring-btn[data-phase="loading"]:hover .save-ring-stop {
+  transform: scale(1.15);
+}
+
+.save-ring-scrim {
+  fill: rgb(10 10 10 / 0.42);
+  opacity: 0;
+  transition: opacity 300ms var(--save-ease);
+}
+
+.save-ring-btn[data-phase="filling"] .save-ring-scrim {
+  opacity: 1;
+  transition-delay: 420ms;
+}
+
+.save-ring-check {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 3.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 200ms var(--save-ease);
+}
+
+.save-ring-btn[data-phase="filling"] .save-ring-check {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 440ms var(--save-ease) 520ms;
+}
+
+.save-ring-wave {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 64px;
+  height: 64px;
+  margin: -32px 0 0 -32px;
+  border: 2px solid var(--save-ink);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.save-ring-status {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin: 0;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-strong);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.save-ring-sub {
+  color: var(--save-ink-2);
+  font-weight: var(--font-weight-meta);
+}
+
+.save-ring-list {
+  display: flex;
+  flex-direction: column;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--save-line);
+}
+
+.save-ring-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 44px;
+  padding: 0 4px;
+  border-bottom: 1px solid var(--save-line);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--font-weight-meta);
+}
+
+.save-ring-n {
+  width: 16px;
+  color: var(--save-ink-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.save-ring-song {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.save-ring-row[data-state="active"] .save-ring-song {
+  font-weight: var(--font-weight-strong);
+}
+
+.save-ring-len {
+  width: 40px;
+  color: var(--save-ink-2);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.save-ring-mark {
+  width: 20px;
+  height: 20px;
+  overflow: visible;
+}
+
+.save-ring-mark-track,
+.save-ring-mark-arc {
+  fill: none;
+  stroke-width: 2.4;
+  transition: opacity 240ms var(--save-ease);
+}
+
+.save-ring-mark-track {
+  stroke: var(--save-sunken);
+  opacity: 0;
+}
+
+.save-ring-mark-arc {
+  stroke: var(--save-ink);
+  stroke-linecap: round;
+  opacity: 0;
+}
+
+.save-ring-mark[data-state="active"] .save-ring-mark-track,
+.save-ring-mark[data-state="active"] .save-ring-mark-arc {
+  opacity: 1;
+}
+
+.save-ring-mark-dot {
+  fill: var(--save-green);
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0);
+  transition: transform 360ms var(--save-ease);
+}
+
+.save-ring-mark[data-state="done"] .save-ring-mark-dot {
+  transform: scale(1);
+}
+
+.save-ring-mark-check {
+  fill: none;
+  stroke: #ffffff;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1 1;
+  stroke-dashoffset: 1;
+  transition: stroke-dashoffset 160ms var(--save-ease);
+}
+
+.save-ring-mark[data-state="done"] .save-ring-mark-check {
+  stroke-dashoffset: 0;
+  transition: stroke-dashoffset 320ms var(--save-ease) 140ms;
+}
+
+.save-ring-roll {
+  position: relative;
+  display: inline-flex;
+  height: 1em;
+  line-height: 1;
+  vertical-align: -0.12em;
+}
+
+.save-ring-roll-col {
+  display: inline-block;
+  height: 1em;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+  mask-image: linear-gradient(180deg, transparent 0%, #000 18%, #000 82%, transparent 100%);
+}
+
+.save-ring-roll-strip {
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+
+.save-ring-roll-strip span {
+  display: block;
+  height: 1em;
+  text-align: center;
+}
+
+.save-ring-roll-sym {
+  display: inline-block;
+}
+
+.save-ring-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@container (max-width: 640px) {
+  .save-ring {
+    align-items: flex-start;
+    padding: 176px 16px 32px;
+  }
+
+  .save-ring-card {
+    gap: 24px;
+  }
+
+  .save-ring-top {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 16px;
+  }
+
+  .save-ring-cover {
+    width: 160px;
+  }
+
+  .save-ring-album {
+    font-size: var(--text-title);
+    line-height: 32px;
+    letter-spacing: var(--text-title--letter-spacing);
+  }
+
+  .save-ring-action {
+    margin-top: 12px;
+  }
+
+  .save-ring-row {
+    height: 40px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .save-ring-btn,
+  .save-ring-disc,
+  .save-ring-face {
+    transition-duration: 1ms;
+  }
+}

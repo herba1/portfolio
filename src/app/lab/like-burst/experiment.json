@@ -1,0 +1,10 @@
+{
+  "title": "Like Burst",
+  "description": "A like button for Abbey Road. Tap the heart and it fills like a glass, the count rolls up a digit, and a burst of tiny Beatles covers flies out; double-tap the cover for the big version. Unlike and the fill drains slowly back out.",
+  "tags": ["Interface", "Music", "Motion"],
+  "status": "shipped",
+  "createdAt": "2026-10-18T12:20:00.000Z",
+  "intent": "The most ordinary music-app control finished to the edge, with one over-the-top flourish: confetti made of album covers.",
+  "tile": { "cols": 3, "rows": 4 },
+  "sources": ["https://herb.art/top-songs", "https://www.joshwcomeau.com/react/animated-sparkles-in-react/"]
+}

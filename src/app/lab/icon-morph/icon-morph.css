@@ -1,0 +1,470 @@
+.icon-morph {
+  --icon-morph-ink: var(--color-surface-inverse);
+  --icon-morph-raise: color-mix(in oklab, white 8%, var(--color-surface-inverse));
+  --icon-morph-press: color-mix(in oklab, white 13%, var(--color-surface-inverse));
+  --icon-morph-quiet: var(--neutral-400);
+  --icon-morph-accent: var(--brand-400);
+  --icon-morph-w-body: 460;
+  --icon-morph-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 88px 16px 24px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.icon-morph[data-embedded] {
+  padding: 16px;
+  justify-content: flex-end;
+}
+
+.icon-morph__title {
+  width: min(100%, 560px);
+  margin: 0 0 auto;
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+}
+
+.icon-morph__player {
+  container: icon-morph-player / inline-size;
+  width: min(100%, 560px);
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.icon-morph__queue {
+  flex: 0 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  border-radius: 20px;
+  background: var(--icon-morph-ink);
+  color: var(--color-ink-inverse);
+  clip-path: inset(0 0 0 0 round 20px);
+  transform: translateY(0);
+  transition:
+    clip-path 520ms var(--icon-morph-ease),
+    transform 520ms var(--icon-morph-ease),
+    visibility 0s linear 0s;
+}
+
+.icon-morph__queue[data-open="false"] {
+  clip-path: inset(100% 0 0 0 round 20px);
+  transform: translateY(8px);
+  visibility: hidden;
+  transition:
+    clip-path 340ms var(--ease-standard),
+    transform 340ms var(--ease-standard),
+    visibility 0s linear 340ms;
+}
+
+.icon-morph__queue-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px 12px;
+}
+
+.icon-morph__queue-name {
+  font-size: var(--text-heading-sm);
+  line-height: var(--text-heading-sm--line-height);
+  letter-spacing: var(--text-heading-sm--letter-spacing);
+  font-weight: var(--font-weight-strong);
+  white-space: nowrap;
+}
+
+.icon-morph__queue-meta {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
+  color: var(--icon-morph-quiet);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.icon-morph__rows {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, white 18%, transparent) transparent;
+}
+
+.icon-morph__item {
+  transition:
+    opacity 280ms var(--icon-morph-ease),
+    transform 520ms var(--icon-morph-ease);
+}
+
+.icon-morph__queue[data-open="false"] .icon-morph__item {
+  opacity: 0;
+  transform: translateY(12px);
+  transition:
+    opacity 160ms var(--icon-morph-ease),
+    transform 380ms var(--icon-morph-ease);
+}
+
+.icon-morph__row {
+  width: 100%;
+  height: 48px;
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--color-ink-inverse);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 160ms var(--ease-hover);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-morph__row:hover {
+  background: var(--icon-morph-raise);
+}
+
+.icon-morph__row:active {
+  background: var(--icon-morph-press);
+}
+
+.icon-morph__row:focus-visible {
+  outline: 2px solid var(--icon-morph-accent);
+  outline-offset: -2px;
+}
+
+.icon-morph__lead {
+  position: relative;
+  width: 24px;
+  height: 20px;
+  display: grid;
+  place-items: center;
+}
+
+.icon-morph__num {
+  font-family: var(--font-mono);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--icon-morph-quiet);
+  transition: opacity 140ms var(--ease-hover);
+}
+
+.icon-morph__lead-icon {
+  position: absolute;
+  inset: 0 2px;
+  opacity: 0;
+  transition:
+    opacity 140ms var(--ease-hover),
+    color 140ms var(--ease-hover);
+}
+
+.icon-morph__row:hover .icon-morph__num,
+.icon-morph__row:focus-visible .icon-morph__num,
+.icon-morph__row[data-current] .icon-morph__num {
+  opacity: 0;
+}
+
+.icon-morph__row:hover .icon-morph__lead-icon,
+.icon-morph__row:focus-visible .icon-morph__lead-icon,
+.icon-morph__row[data-current] .icon-morph__lead-icon {
+  opacity: 1;
+}
+
+.icon-morph__row[data-current] .icon-morph__lead-icon {
+  color: var(--icon-morph-accent);
+}
+
+.icon-morph__row-title {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--icon-morph-w-body);
+}
+
+.icon-morph__row[data-current] .icon-morph__row-title {
+  font-weight: var(--font-weight-strong);
+}
+
+.icon-morph__row-time {
+  font-family: var(--font-mono);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--icon-morph-quiet);
+}
+
+.icon-morph__bar {
+  position: relative;
+  flex: 0 0 auto;
+  height: 72px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border-radius: 20px;
+  background: var(--icon-morph-ink);
+  color: var(--color-ink-inverse);
+}
+
+.icon-morph__now {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-morph__cover {
+  position: relative;
+  flex: 0 0 auto;
+  width: 44px;
+  height: 44px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--icon-morph-raise);
+}
+
+.icon-morph__cover img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.icon-morph__text {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.icon-morph__slot {
+  position: relative;
+  display: grid;
+  height: 20px;
+  overflow: clip;
+}
+
+.icon-morph__track {
+  grid-area: 1 / 1;
+  min-width: 0;
+  display: block;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-heading-sm);
+  line-height: 20px;
+  letter-spacing: var(--text-heading-sm--letter-spacing);
+  font-weight: var(--font-weight-strong);
+}
+
+.icon-morph__artist {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-body-sm);
+  color: var(--icon-morph-quiet);
+}
+
+.icon-morph__controls {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-morph__tools {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.icon-morph__time {
+  margin-right: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.icon-morph__time-total {
+  color: var(--icon-morph-quiet);
+}
+
+.icon-morph__btn {
+  flex: 0 0 auto;
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--color-ink-inverse);
+  cursor: pointer;
+  transition:
+    background-color 160ms var(--ease-hover),
+    color 220ms var(--ease-hover),
+    transform 200ms var(--icon-morph-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.icon-morph__btn:hover {
+  background: var(--icon-morph-raise);
+}
+
+.icon-morph__btn:active {
+  background: var(--icon-morph-press);
+  transform: scale(0.92);
+  transition-duration: 160ms, 220ms, 90ms;
+}
+
+.icon-morph__btn:focus-visible {
+  outline: 2px solid var(--icon-morph-accent);
+  outline-offset: 2px;
+}
+
+.icon-morph__btn--play {
+  width: 48px;
+  height: 48px;
+  background: var(--color-ink-inverse);
+  color: var(--icon-morph-ink);
+}
+
+.icon-morph__btn--play:hover {
+  background: var(--neutral-100);
+}
+
+.icon-morph__btn--play:active {
+  background: var(--neutral-200);
+}
+
+.icon-morph__btn--save[data-on] {
+  color: var(--icon-morph-accent);
+}
+
+.icon-morph__progress {
+  position: absolute;
+  left: 20px;
+  right: 20px;
+  bottom: 0;
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in oklab, white 12%, transparent);
+}
+
+.icon-morph__fill {
+  position: absolute;
+  inset: 0;
+  background: var(--icon-morph-accent);
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation-name: icon-morph-fill;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+@keyframes icon-morph-fill {
+  from {
+    transform: scaleX(0);
+  }
+
+  to {
+    transform: scaleX(1);
+  }
+}
+
+@container icon-morph-player (max-width: 520px) {
+  .icon-morph__time {
+    display: none;
+  }
+}
+
+@container icon-morph-player (max-width: 420px) {
+  .icon-morph__bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+    gap: 4px;
+    padding: 0 8px 0 12px;
+  }
+
+  .icon-morph__btn--prev {
+    display: none;
+  }
+
+  .icon-morph__queue-meta {
+    display: none;
+  }
+}
+
+@container icon-morph-player (max-width: 352px) {
+  .icon-morph__cover {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .icon-morph__queue,
+  .icon-morph__queue[data-open="false"] {
+    clip-path: none;
+    transform: none;
+    transition: opacity 200ms linear, visibility 0s linear 200ms;
+  }
+
+  .icon-morph__queue[data-open="false"] {
+    opacity: 0;
+  }
+
+  .icon-morph__queue[data-open="true"] {
+    transition: opacity 200ms linear, visibility 0s;
+  }
+
+  .icon-morph__item,
+  .icon-morph__queue[data-open="false"] .icon-morph__item {
+    transform: none;
+  }
+
+  .icon-morph__btn:active {
+    transform: none;
+  }
+}

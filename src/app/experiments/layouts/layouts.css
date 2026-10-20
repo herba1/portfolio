@@ -138,11 +138,30 @@
     "scorch scorch stir stir stir stir";
   gap: 16px;
 }
+/* Lab studies, after the hand-placed pieces: each sets its own span in its
+   manifest (tile.cols of 6, tile.rows of 104px) and the grid packs them. */
+.xl-bento__grid--studies {
+  min-height: 0;
+  margin-top: 16px;
+  grid-template-rows: none;
+  grid-template-areas: none;
+  grid-auto-rows: 104px;
+  grid-auto-flow: row dense;
+}
+.xl-tile.xl-tile--study {
+  grid-column: span var(--cols, 2);
+  grid-row: span var(--rows, 4);
+  animation: none;
+}
 .xl-bento__tile {
   display: flex;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
+  /* Offscreen tiles skip style, layout and paint entirely. Every tile's size
+     comes from the grid, so nothing reflows when one wakes up. */
+  content-visibility: auto;
+  contain-intrinsic-size: auto 440px;
 }
 .xl-bento__tile > .piece-box {
   flex: 1;
@@ -162,6 +181,13 @@
   }
   .xl-bento__tile {
     grid-area: auto !important;
+  }
+  .xl-bento__grid--studies {
+    grid-auto-rows: auto;
+  }
+  .xl-tile.xl-tile--study {
+    grid-column: auto;
+    grid-row: auto;
   }
   .xl-bento__tile > .piece-box {
     flex: none;
@@ -183,16 +209,12 @@
    entrance holds its frame rate while eight pieces mount, compile shaders
    and decode art on the main thread underneath it. The resting state is
    `transform: none`, so nothing stays promoted to a layer once it lands. */
-.xl-bento[data-gate] .xl-tile:not([data-ready]) {
-  animation-play-state: paused;
-}
-
 .xl-tile {
   transform-origin: 50% 100%;
   animation:
-    xl-tile-rise 860ms cubic-bezier(0.22, 1, 0.36, 1) both,
-    xl-tile-slide 860ms cubic-bezier(0.22, 1, 0.36, 1) both;
-  animation-delay: calc(var(--wave, 0) * 80ms), calc(var(--wave, 0) * 80ms);
+    xl-tile-rise 640ms cubic-bezier(0.22, 1, 0.36, 1) both,
+    xl-tile-slide 640ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  animation-delay: calc(var(--wave, 0) * 48ms), calc(var(--wave, 0) * 48ms);
 }
 
 @keyframes xl-tile-rise {
@@ -304,6 +326,31 @@
     transition: none;
     animation: none;
   }
+}
+
+/* A tile's live mount and its poster. The poster sits over the piece until
+   the piece has painted, then lifts off; it never takes a pointer. */
+.xl-live {
+  position: absolute;
+  inset: 0;
+}
+.xl-live__poster {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+  user-select: none;
+  transition: opacity 240ms var(--ease-out-quart), visibility 0s linear 240ms;
+}
+.xl-live__poster--blank {
+  background: var(--color-surface-raised);
+}
+.xl-live[data-live] > .xl-live__poster {
+  opacity: 0;
+  visibility: hidden;
 }
 
 /* A piece mounted as a component. */
