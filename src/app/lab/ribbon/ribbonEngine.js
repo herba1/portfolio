@@ -5,9 +5,7 @@ export const MAX_TWIST = 3;
 
 const SEGMENTS = 960;
 const TEX_H = 256;
-const RULE = 5;
-const RULE_INSET = 6;
-const SEPARATOR = "  —  ";
+const SEPARATOR = "\u2003\u2003";
 const IDLE_SPEED = 0.012;
 const MAX_SPEED = 0.55;
 const FOV = (26 * Math.PI) / 180;
@@ -203,8 +201,6 @@ export function createRibbon(host, { canvas, onTwist, onReady, onFail, insets })
     const descent = m.actualBoundingBoxDescent;
     const baseline = TEX_H / 2 + (ascent - descent) / 2;
     for (let i = 0; i < reps; i += 1) tctx.fillText(phrase, i * phraseW, baseline);
-    tctx.fillRect(0, RULE_INSET, reps * phraseW, RULE);
-    tctx.fillRect(0, TEX_H - RULE_INSET - RULE, reps * phraseW, RULE);
     state.band = (2 * Math.PI * TEX_H) / (reps * phraseW);
     gl.bindTexture(gl.TEXTURE_2D, texture);
     gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);

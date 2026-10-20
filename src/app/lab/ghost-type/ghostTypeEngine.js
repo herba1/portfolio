@@ -8,6 +8,7 @@ const PAPER = "#f3f1ec";
 const INK = "#151412";
 const MAX_HISTORY = 900;
 const PHASE_RATE = 0.42;
+const MAX_FREE = 24;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const damp = (a, b, lambda, dt) => a + (b - a) * (1 - Math.exp(-lambda * dt));
@@ -18,7 +19,7 @@ function bezier(p0, p1, p2, t) {
   return [u * u * p0[0] + 2 * u * t * p1[0] + t * t * p2[0], u * u * p0[1] + 2 * u * t * p1[1] + t * t * p2[1]];
 }
 
-export function createGhostType(host, { canvas, onReady, onActive, insets }) {
+export function createGhostType(host, { canvas, onReady, onActive, onPlaced, insets }) {
   const ctx = canvas.getContext("2d");
   const family = getComputedStyle(host).fontFamily || "sans-serif";
   const state = {
@@ -44,7 +45,37 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     quietUntil: 0,
     ready: false,
     hover: -1,
+    zTop: 0,
+    touched: false,
+    placedCount: 0,
   };
+
+  function makeWord(text, line) {
+    return {
+      text,
+      line,
+      free: line < 0,
+      w: 0,
+      x: 0,
+      y: 0,
+      hx: 0,
+      hy: 0,
+      lifted: false,
+      placed: null,
+      flight: null,
+      history: [],
+      trail: 0,
+      bend: 0,
+      vx: 0,
+      vy: 0,
+      z: 0,
+      alpha: 1,
+      phase: Math.random() * 6.28,
+      solid: null,
+      lift: null,
+      ghost: null,
+    };
+  }
 
   function buildWords(lines) {
     state.lines = [];
@@ -52,26 +83,7 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     lines.forEach((line, li) => {
       state.lines.push(
         line.split(" ").map((text) => {
-          const word = {
-            text,
-            line: li,
-            w: 0,
-            x: 0,
-            y: 0,
-            hx: 0,
-            hy: 0,
-            lifted: false,
-            flight: null,
-            history: [],
-            trail: 0,
-            bend: 0,
-            vx: 0,
-            vy: 0,
-            phase: Math.random() * 6.28,
-            solid: null,
-            lift: null,
-            ghost: null,
-          };
+          const word = makeWord(text, li);
           state.words.push(word);
           return word;
         }),
@@ -176,6 +188,7 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
   }
 
   function slotOf(word) {
+    if (word.free) return null;
     const line = state.lines[word.line];
     const all = line.reduce((a, b) => a + b.w, 0);
     const gap = line.length > 1 ? (state.block.w - all) / (line.length - 1) : 0;
@@ -281,8 +294,80 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     }
   }
 
+  function bounds(word, x, y) {
+    const m = 16;
+    return [
+      clamp(x, m, Math.max(m, state.width - word.w - m)),
+      clamp(y, state.roof + state.fs * 0.78, Math.max(state.roof + state.fs * 0.78, state.floor - state.fs * 0.24)),
+    ];
+  }
+
+  function countPlaced() {
+    const drifting = state.drift ? state.drift.word : null;
+    const n = state.words.filter((w) => !(w.flight && w.flight.remove) && w !== drifting && (w.free || w.lifted || w.placed)).length;
+    if (n !== state.placedCount) {
+      state.placedCount = n;
+      onPlaced?.(n);
+    }
+  }
+
+  function place(word, vx, vy) {
+    word.flight = null;
+    word.placed = bounds(word, word.x + vx * 0.11, word.y + vy * 0.11);
+    state.touched = true;
+    countPlaced();
+  }
+
+  function flyTo(word, from, to, remove) {
+    const lift = state.fs * (remove ? 0.6 : 1.4);
+    const p1 = [from[0] + (to[0] - from[0]) * 0.35, Math.min(from[1], to[1]) - lift];
+    const dist = Math.hypot(to[0] - from[0], to[1] - from[1]);
+    word.flight = { p0: [from[0], from[1]], p1, t: 0, T: clamp(0.7 + dist / 1800, 0.7, 1.2), to, remove: Boolean(remove) };
+    word.placed = null;
+  }
+
+  function freeSpot(word) {
+    const others = state.words.filter((o) => o !== word && o.alpha > 0.5);
+    let best = null;
+    let bestScore = -Infinity;
+    for (let i = 0; i < 40; i += 1) {
+      const p = bounds(word, Math.random() * state.width, state.roof + Math.random() * (state.floor - state.roof));
+      let score = Infinity;
+      for (const o of others) {
+        const ox = o.placed ? o.placed[0] : o.x;
+        const oy = o.placed ? o.placed[1] : o.y;
+        const dx = Math.max(0, Math.max(ox - (p[0] + word.w), p[0] - (ox + o.w)));
+        const dy = Math.max(0, Math.abs(oy - p[1]) - state.fs * 0.9);
+        score = Math.min(score, Math.hypot(dx, dy));
+      }
+      if (score > bestScore) {
+        bestScore = score;
+        best = p;
+      }
+    }
+    return best;
+  }
+
+  function addWord(text) {
+    const free = state.words.filter((w) => w.free && !(w.flight && w.flight.remove));
+    if (free.length >= MAX_FREE) clearWord(free[0]);
+    const word = makeWord(text, -1);
+    setFont(ctx, state.fs);
+    word.w = ctx.measureText(text).width - tracking(state.fs);
+    buildGlyphs(word);
+    word.z = ++state.zTop;
+    state.words.push(word);
+    return word;
+  }
+
+  function clearWord(word) {
+    const to = state.dock ? state.dock() : [state.width / 2, state.height];
+    flyTo(word, [word.x, word.y], [to[0] - word.w / 2, to[1]], true);
+  }
+
   function startFlight(word, vx, vy) {
     const slot = slotOf(word);
+    word.placed = null;
     const p0 = [word.x, word.y];
     const dist = Math.hypot(slot[0] - p0[0], slot[1] - p0[1]);
     const T = clamp(0.62 + dist / 1800, 0.62, 1.15);
@@ -306,15 +391,17 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
   function settleLift(word) {
     if (!word.pending) return;
     const slot = slotOf(word);
-    if (Math.hypot(word.x - slot[0], word.y - slot[1]) < state.fs * 0.6) return;
+    if (Math.hypot(word.x - slot[0], word.y - slot[1]) < state.fs * 1.05) return;
     word.pending = false;
     word.lifted = true;
     justify(false);
   }
 
   function hit(x, y) {
-    for (let i = state.words.length - 1; i >= 0; i -= 1) {
+    const order = state.words.map((w, i) => i).sort((a, b) => state.words[b].z - state.words[a].z);
+    for (const i of order) {
       const w = state.words[i];
+      if (w.flight && w.flight.remove) continue;
       const top = w.y - state.fs * 0.82;
       const bottom = w.y + state.fs * 0.26;
       const padX = state.fs * 0.12;
@@ -328,7 +415,7 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     const idx = state.driftOrder[state.driftIndex % state.driftOrder.length];
     state.driftIndex += 1;
     const word = state.words[idx];
-    if (!word || word.lifted || word.flight || (state.drag && state.drag.word === word)) return;
+    if (!word || word.lifted || word.placed || word.flight || (state.drag && state.drag.word === word)) return;
     const narrow = state.width < 640;
     const dir = word.hx + word.w / 2 > state.width / 2 ? -1 : 1;
     const reach = narrow ? state.width * 0.3 : Math.min(380, state.width * 0.24);
@@ -356,7 +443,7 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     state.time += dt;
     let busy = false;
 
-    if (!state.reduced && !state.drift && !state.drag && tNow > state.quietUntil) {
+    if (!state.reduced && !state.touched && !state.drift && !state.drag && tNow > state.quietUntil) {
       if (state.driftWait <= 0) {
         scheduleDrift(tNow);
         state.driftWait = 2.4;
@@ -396,31 +483,44 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
         word.vy = (ny - word.y) / dt;
         word.x = nx;
         word.y = ny;
+        if (!word.free && word.lifted) {
+          const slot = slotOf(word);
+          if (Math.hypot(word.x - slot[0], word.y - slot[1]) < state.fs * 0.8) {
+            word.lifted = false;
+            word.pending = true;
+            justify(false);
+          }
+        }
       } else if (word.flight) {
         const f = word.flight;
         f.t += dt;
         const k = clamp(f.t / f.T, 0, 1);
-        const slot = slotOf(word);
-        const p = bezier(f.p0, f.p1, slot, easeOutCubic(k));
+        const target = f.to || slotOf(word);
+        const p = bezier(f.p0, f.p1, target, easeOutCubic(k));
         word.vx = (p[0] - word.x) / dt;
         word.vy = (p[1] - word.y) / dt;
         word.x = p[0];
         word.y = p[1];
+        if (f.remove) word.alpha = 1 - clamp((k - 0.45) / 0.55, 0, 1) ** 1.5;
         if (k >= 1) {
           word.flight = null;
-          word.x = slot[0];
-          word.y = slot[1];
+          word.x = target[0];
+          word.y = target[1];
+          if (f.remove) word.dead = true;
+          else if (f.to) word.placed = [target[0], target[1]];
+          countPlaced();
         }
       } else if (!(state.drift && state.drift.word === word)) {
-        const nx = damp(word.x, word.hx, 9, dt);
-        const ny = damp(word.y, word.hy, 9, dt);
+        const rest = word.placed || [word.hx, word.hy];
+        const nx = damp(word.x, rest[0], 9, dt);
+        const ny = damp(word.y, rest[1], 9, dt);
         word.vx = (nx - word.x) / dt;
         word.vy = (ny - word.y) / dt;
         word.x = nx;
         word.y = ny;
-        if (Math.abs(word.x - word.hx) < 0.05 && Math.abs(word.y - word.hy) < 0.05) {
-          word.x = word.hx;
-          word.y = word.hy;
+        if (Math.abs(word.x - rest[0]) < 0.05 && Math.abs(word.y - rest[1]) < 0.05) {
+          word.x = rest[0];
+          word.y = rest[1];
           word.vx = 0;
           word.vy = 0;
         }
@@ -436,7 +536,12 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
       if (moving || word.trail > 0.004) record(word);
       else word.history.length = 0;
       if (word.trail < 0.004 && !moving) word.trail = 0;
-      if (moving || word.trail > 0 || word.bend > 0.004 || Math.abs(word.x - word.hx) > 0.05 || Math.abs(word.y - word.hy) > 0.05) busy = true;
+      const rest = word.placed || [word.hx, word.hy];
+      if (moving || word.trail > 0 || word.bend > 0.004 || Math.abs(word.x - rest[0]) > 0.05 || Math.abs(word.y - rest[1]) > 0.05) busy = true;
+    }
+    if (state.words.some((w) => w.dead)) {
+      state.words = state.words.filter((w) => !w.dead);
+      countPlaced();
     }
 
     draw();
@@ -455,8 +560,10 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, width, height);
     const phaseT = state.time * PHASE_RATE;
-    const order = [...state.words].sort((a, b) => (a.trail > 0) - (b.trail > 0));
+    const order = [...state.words].sort((a, b) => a.z - b.z || (a.trail > 0) - (b.trail > 0));
     for (const word of order) {
+      if (word.alpha <= 0.004) continue;
+      const wa = word.alpha;
       if (word.trail > 0.004 && word.history.length) {
         const spacing = state.fs * 1.05 * word.trail;
         const phase = (phaseT + word.hx * 0.0002) % 1;
@@ -465,12 +572,12 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
           const p = pointAlong(word, age * spacing);
           const fade = (1 - age / GHOSTS) ** 1.35;
           const amp = state.fs * 0.05 * word.trail * (0.35 + (age / GHOSTS) * 0.65);
-          drawBent(word, word.ghost, p[0], p[1], amp, word.phase + state.time * 2.2 + age * 0.8, fade * 0.9 * Math.min(1, word.trail * 1.8));
+          drawBent(word, word.ghost, p[0], p[1], amp, word.phase + state.time * 2.2 + age * 0.8, fade * 0.9 * Math.min(1, word.trail * 1.8) * wa);
         }
       }
       const amp = state.fs * 0.06 * word.bend;
-      const away = Math.hypot(word.x - word.hx, word.y - word.hy) > 2 || word.trail > 0.02;
-      drawBent(word, away ? word.lift : word.solid, word.x, word.y, amp, word.phase + state.time * 2.6, 1);
+      const away = word.free || word.placed || Math.hypot(word.x - word.hx, word.y - word.hy) > 2 || word.trail > 0.02;
+      drawBent(word, away ? word.lift : word.solid, word.x, word.y, amp, word.phase + state.time * 2.6, wa);
     }
     ctx.globalAlpha = 1;
   }
@@ -493,8 +600,15 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     const word = state.words[i];
     if (state.drift && state.drift.word === word) state.drift = null;
     canvas.setPointerCapture?.(e.pointerId);
-    lift(word);
-    state.drag = { id: e.pointerId, word, px: x, py: y, ox: x - word.x, oy: y - word.y, samples: [[e.timeStamp, x, y]] };
+    grabWord(word, e.pointerId, x, y, e.timeStamp);
+  }
+
+  function grabWord(word, id, x, y, ts) {
+    if (!word.free) lift(word);
+    word.flight = null;
+    word.placed = null;
+    word.z = ++state.zTop;
+    state.drag = { id, word, px: x, py: y, ox: x - word.x, oy: y - word.y, samples: [[ts, x, y]] };
     state.quietUntil = Infinity;
     host.setAttribute("data-dragging", "");
     onActive?.(word.text);
@@ -504,6 +618,7 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
   function onMove(e) {
     const [x, y] = toLocal(e);
     const d = state.drag;
+    if (!d && e.target !== canvas) return;
     if (d && d.id === e.pointerId) {
       d.px = x;
       d.py = y;
@@ -533,7 +648,12 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     const recent = e.timeStamp - b[0] < 140;
     const vx = recent ? (b[1] - a[1]) / span : 0;
     const vy = recent ? (b[2] - a[2]) / span : 0;
-    startFlight(d.word, clamp(vx, -3000, 3000), clamp(vy, -3000, 3000));
+    const word = d.word;
+    const cvx = clamp(vx, -3000, 3000);
+    const cvy = clamp(vy, -3000, 3000);
+    if (!word.free && !word.lifted) startFlight(word, cvx, cvy);
+    else place(word, cvx, cvy);
+    countPlaced();
     state.quietUntil = performance.now() / 1000 + 5;
     state.driftWait = 0;
     onActive?.(null);
@@ -553,18 +673,34 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     const narrow = state.width < 640;
     if (narrow !== state.narrow || !state.words.length) {
       state.narrow = narrow;
+      const extra = state.words.filter((w) => w.free);
       buildWords(narrow ? POEM_NARROW : POEM);
+      state.words.push(...extra);
+      countPlaced();
     }
+    const sw = state.width;
+    const sh = state.height;
+    state.words = state.words.filter((w) => !(w.flight && w.flight.remove));
     for (const w of state.words) {
       w.history.length = 0;
       w.trail = 0;
+      if (w.flight && w.flight.to) w.placed = w.flight.to;
       w.flight = null;
-      w.lifted = false;
       w.pending = false;
+      if (w.placed) w.placed = [(w.placed[0] / (state.prevW || sw)) * sw, (w.placed[1] / (state.prevH || sh)) * sh];
     }
+    state.prevW = sw;
+    state.prevH = sh;
     state.drift = null;
     state.drag = null;
     layout();
+    for (const w of state.words) {
+      if (w.placed) {
+        w.placed = bounds(w, w.placed[0], w.placed[1]);
+        w.x = w.placed[0];
+        w.y = w.placed[1];
+      }
+    }
     draw();
     frame();
   }
@@ -588,9 +724,9 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
   }
 
   canvas.addEventListener("pointerdown", onDown);
-  canvas.addEventListener("pointermove", onMove);
-  canvas.addEventListener("pointerup", onUp);
-  canvas.addEventListener("pointercancel", onUp);
+  window.addEventListener("pointermove", onMove);
+  window.addEventListener("pointerup", onUp);
+  window.addEventListener("pointercancel", onUp);
   canvas.addEventListener("lostpointercapture", onUp);
 
   const ro = new ResizeObserver(() => resize());
@@ -623,6 +759,58 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
     });
 
   return {
+    setDock(fn) {
+      state.dock = fn;
+    },
+    drop(text, from) {
+      if (!state.laidOut) return;
+      const word = addWord(text);
+      if (state.drift) {
+        const dw = state.drift.word;
+        state.drift = null;
+        startFlight(dw, 0, 0);
+      }
+      const start = from || [state.width / 2, state.height];
+      const to = freeSpot(word);
+      word.x = start[0] - word.w / 2;
+      word.y = start[1];
+      flyTo(word, [word.x, word.y], to, false);
+      state.touched = true;
+      countPlaced();
+      frame();
+    },
+    grab(text, e) {
+      if (!state.laidOut) return;
+      const word = addWord(text);
+      if (state.drift) {
+        const dw = state.drift.word;
+        state.drift = null;
+        startFlight(dw, 0, 0);
+      }
+      const [x, y] = toLocal(e);
+      word.x = x - word.w / 2;
+      word.y = y + state.fs * 0.3;
+      grabWord(word, e.pointerId, x, y, e.timeStamp);
+      state.touched = true;
+      countPlaced();
+    },
+    putBack() {
+      state.drag = null;
+      state.drift = null;
+      host.removeAttribute("data-dragging");
+      for (const word of state.words) {
+        if (word.free) {
+          if (!(word.flight && word.flight.remove)) clearWord(word);
+        } else if (word.lifted || word.placed || word.pending) {
+          startFlight(word, 0, -400);
+        }
+      }
+      state.touched = false;
+      countPlaced();
+      state.quietUntil = performance.now() / 1000 + 4;
+      state.driftWait = 0;
+      frame();
+    },
     release() {
       state.quietUntil = 0;
       state.driftWait = 0;
@@ -637,9 +825,9 @@ export function createGhostType(host, { canvas, onReady, onActive, insets }) {
       document.removeEventListener("visibilitychange", onVisibility);
       motionQuery.removeEventListener?.("change", onMotion);
       canvas.removeEventListener("pointerdown", onDown);
-      canvas.removeEventListener("pointermove", onMove);
-      canvas.removeEventListener("pointerup", onUp);
-      canvas.removeEventListener("pointercancel", onUp);
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("lostpointercapture", onUp);
     },
   };

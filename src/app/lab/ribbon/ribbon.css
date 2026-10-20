@@ -4,6 +4,9 @@
   --ribbon-ink-2: #4f4b42;
   --ribbon-hair: rgb(22 21 15 / 0.14);
   --ribbon-hair-strong: rgb(22 21 15 / 0.32);
+  --ribbon-fill: rgb(22 21 15 / 0.05);
+  --ribbon-fill-hover: rgb(22 21 15 / 0.08);
+  --ribbon-fill-focus: rgb(22 21 15 / 0.11);
   --ribbon-well: rgb(22 21 15 / 0.06);
   --ribbon-ease: cubic-bezier(0.22, 1, 0.36, 1);
   position: absolute;
@@ -117,11 +120,10 @@
   width: 100%;
   height: 44px;
   margin: 0;
-  padding: 0 4px;
+  padding: 0 20px;
   border: 0;
-  border-bottom: 1px solid var(--ribbon-hair-strong);
-  border-radius: 0;
-  background: transparent;
+  border-radius: 9999px;
+  background: var(--ribbon-fill);
   color: var(--ribbon-ink);
   font-family: inherit;
   font-size: var(--text-body-lg);
@@ -130,7 +132,7 @@
   font-weight: var(--font-weight-strong);
   text-align: center;
   outline: none;
-  transition: border-color 150ms var(--ease-hover);
+  transition: background-color 150ms var(--ease-hover);
 }
 
 .ribbon__input::placeholder {
@@ -138,11 +140,11 @@
 }
 
 .ribbon__input:hover {
-  border-color: var(--ribbon-ink-2);
+  background: var(--ribbon-fill-hover);
 }
 
 .ribbon__input:focus-visible {
-  border-color: var(--ribbon-ink);
+  background: var(--ribbon-fill-focus);
 }
 
 .ribbon__twists {
