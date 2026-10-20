@@ -94,6 +94,17 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Sound design is welcome when it is genuinely good (Typewriter).
 - Layout must be stable: any shift while browsing ("layout shifty") costs a point.
 
+## From batch six (21 keepers, scored 4–5, October 2026)
+
+- Thirteen 5s, nothing below 4: the polish loop works when each round answers his notes literally. Every reworked piece from batch five rose (Amorph, Crumple, Cover Flow, Split Flap and Hold Menu went 3 or 4 to 5).
+- Nothing may pop in. Every surface that appears (a card, a list, a stage after load) arrives with motion; hard edges where content meets a loader are softened with an edge fade.
+- Pauses read as broken: a loading hold before the stage appears is as bad as a layout shift. Lerp into the final state instead of waiting and revealing.
+- Shared elements must match exactly when they return home: corner radius, size and position, or the close reads as a shift.
+- Stepped frame rate is liked, but the whole action must still be quick (about a second per crumple step).
+- Realism means real, not idealised: "no disc is this polished irl". Match the imperfect look of real objects in good photos, not a perfect render.
+- Shader pieces can go harder: stronger distortion, bloom.
+- Use real names on the objects (the sticker should say Abbey Road).
+
 ## Type vibes — Herb's reference board (October 2026)
 
 Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:
