@@ -64,3 +64,12 @@ Add a splat: put the file in `public/splats/carousel/`, add an entry to `data.js
 - Anchors register from their ref callback, which runs in the commit. On a route change the old anchors drop and the new ones register in the same commit, so the stage sees one jump, never a frame with no anchor (which would read as an exit).
 - The back link uses `scroll={false}` and `armReturn(slug)`; the index centres that card in its layout effect. Next's own scroll-to-top runs after the page's layout effect and would undo it.
 - `transitions.css` hides the stage's old snapshot and keeps the live canvas painting during a transition, like the navbar. When one side of the navigation has no stage, it fades with the page.
+
+## Motion (entrances, exits, flights)
+
+- First visit: each splat is lobbed in along a quadratic Bézier arc from low on its side, condensing out of specks (the `reveal` uniform in `applyModifier`), with one unwinding turn and a lean into its travel. Return visits curl up from below.
+- Exit: thrown along a gravity parabola toward the nearer edge, spinning, dissolving back into specks.
+- Moves between anchors: Hermite flight (bend 0.24), a turn of half to one and a half revolutions, and a slight mid-air swell.
+- Every entrance and move lands on the item's `front` yaw (data.js). Most of these captures face away at 0 after the `[π, 0, 0]` flip; set `front` per item when swapping assets.
+- `reveal` regenerates the mesh's splats when it changes; it is only written while it changes, so a resting splat costs nothing.
+- Page text: `.splat-rise` (splats.css) staggers each block in; `.splat-out` (transitions.css) captures each block with `match-element` so it leaves on its own in the view transition. Never put `.splat-rise` on an ancestor of a `Shared` element.

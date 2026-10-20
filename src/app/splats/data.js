@@ -64,6 +64,7 @@ export const SPLATS = [
   }),
   statue({
     id: "st-peter",
+    front: Math.PI,
     crop: 0.4,
     title: "St Peter",
     kicker: "Bronze, standing",
@@ -105,6 +106,7 @@ export const SPLATS = [
   }),
   statue({
     id: "trumpet",
+    front: Math.PI,
     crop: 0.41,
     title: "Trumpeter",
     kicker: "Bronze, arms raised",
