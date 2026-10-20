@@ -303,3 +303,38 @@
   letter-spacing: var(--text-title-sm--letter-spacing);
   font-weight: var(--text-title-sm--font-weight);
 }
+
+/* — Entrances ——————————————————————————————————————— */
+
+/* The page's own text arrives in a cascade while the splats land: each
+ * block rises out of a soft blur, one stagger step after the last. `--rise`
+ * is the block's place in the cascade. The index waits a beat so its title
+ * resolves as the first splats cross the page; an article starts at once,
+ * under the flight of its hero. Never put this on an ancestor of a Shared
+ * element (see the view-transitions skill). */
+@keyframes splat-rise {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+    filter: blur(6px);
+  }
+}
+
+.splat-rise {
+  animation: splat-rise var(--duration-entrance) var(--ease-entrance) backwards;
+  animation-delay: calc(var(--rise-from, var(--duration-100)) + var(--rise, 0) * var(--stagger-lg));
+}
+
+.splats .splat-rise {
+  --rise-from: var(--duration-250);
+}
+
+.splats-hero__title.splat-rise {
+  animation-duration: var(--duration-entrance-lg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .splat-rise {
+    animation: none;
+  }
+}

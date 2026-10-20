@@ -38,7 +38,7 @@ function HeroSlot({ item }) {
 
 function Card({ item, index, onFocusCard }) {
   return (
-    <li className="splats-card">
+    <li className="splats-card splat-out splat-out--card">
       <Link
         href={`/splats/${item.id}`}
         transitionTypes={OPEN}
@@ -141,11 +141,11 @@ export default function SplatsIndex({ items }) {
   return (
     <main id="content" className="splats">
       <section ref={heroRef} className="splats-hero" aria-labelledby="splats-title">
-        <div className="splats-hero__copy">
-          <h1 id="splats-title" className="splats-hero__title">
+        <div className="splats-hero__copy splat-out">
+          <h1 id="splats-title" className="splats-hero__title splat-rise" style={{ "--rise": 0 }}>
             Splats
           </h1>
-          <p className="splats-hero__lede">
+          <p className="splats-hero__lede splat-rise" style={{ "--rise": 1 }}>
             Captured objects, rendered as millions of soft Gaussians. Scroll to line them up; open one to read about it.
           </p>
         </div>

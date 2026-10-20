@@ -525,6 +525,8 @@ function beginEnter(actor, target, now) {
   // One turn about its own axis on the way in (half a turn on a rise),
   // turning toward the middle of the page, unwound by the time it lands.
   actor.tumble = -actor.side * (first ? 1 : 0.5);
+  actor.spin = actor.item.front ?? 0;
+  actor.spinVelocity = 0;
   actor.reveal = 0;
   actor.phase = "flying";
 }
@@ -541,10 +543,14 @@ function beginMove(actor, target) {
     duration,
     kind: "move",
   });
-  // A flick of spin in the direction of travel, which the turntable's
-  // friction then eats: the statue turns over in the air and arrives facing
-  // front-ish, never on a fixed count.
-  actor.spinVelocity += (target.x >= actor.x ? 1 : -1) * 5.5;
+  // Turn over in the air, in the direction of travel, and land facing front:
+  // half a turn at least, up to one and a half, to the next front angle.
+  const dir = target.x >= actor.x ? 1 : -1;
+  const front = actor.item.front ?? 0;
+  const turn = Math.PI * 2;
+  const ahead = (((dir * (front - actor.spin)) % turn) + turn) % turn;
+  actor.flight.spin = { from: actor.spin, to: actor.spin + dir * (ahead < Math.PI ? ahead + turn : ahead) };
+  actor.spinVelocity = 0;
   actor.tumble = 0;
   actor.phase = "flying";
 }
@@ -604,6 +610,7 @@ function stepActor(actor, dt, now) {
         actor.opacity = Math.min(1, actor.opacity + dt / 0.2);
         actor.reveal = Math.min(1, actor.reveal + solidify);
         breath = Math.sin(Math.PI * out.t);
+        if (f.spin) actor.spin = lerp(f.spin.from, f.spin.to, smoothstep(out.t));
       } else {
         // Condense out of specks over the first two thirds of the arc, so it
         // is whole before it starts to slow into its slot.
@@ -649,7 +656,9 @@ function stepActor(actor, dt, now) {
   // (sideways speed banks it, falling nods it forward) that relaxes to
   // upright when it stops.
   const still = state.reducedMotion;
-  if (!still) actor.spin += dt * IDLE_SPIN * (1 - actor.hover * 0.85);
+  // The turntable waits while a flight owns the spin, so every landing faces
+  // front.
+  if (!still && !actor.flight) actor.spin += dt * IDLE_SPIN * (1 - actor.hover * 0.85);
   actor.spin += actor.spinVelocity * dt;
   actor.spinVelocity *= Math.exp(-dt * 3.2);
   const follow = 1 - Math.exp(-dt * 10);

@@ -156,6 +156,70 @@
   animation: page-in-up var(--duration-slow) var(--ease-entrance) var(--duration-120) both;
 }
 
+/* Splat pages: the text leaves on its own instead of with the page.
+ * Each `.splat-out` block is captured separately (match-element) and lifts
+ * away into a blur in a short cascade while the splats are thrown out; on a
+ * back link it sinks instead. Rail cards drop and shrink away. The incoming
+ * blocks show live: their own entrance (.splat-rise, splats.css) plays
+ * inside the snapshot, so the group only fades them up. */
+.splat-out {
+  view-transition-name: match-element;
+  view-transition-class: splat-out;
+}
+
+.splat-out--2 { view-transition-class: splat-out d2; }
+.splat-out--3 { view-transition-class: splat-out d3; }
+.splat-out--4 { view-transition-class: splat-out d4; }
+.splat-out--card { view-transition-class: splat-out card; }
+
+@keyframes splat-out-up {
+  to {
+    opacity: 0;
+    transform: translateY(-20px);
+    filter: blur(6px);
+  }
+}
+
+@keyframes splat-out-down {
+  to {
+    opacity: 0;
+    transform: translateY(20px);
+    filter: blur(6px);
+  }
+}
+
+@keyframes splat-out-card {
+  to {
+    opacity: 0;
+    transform: translateY(32px) scale(0.94);
+    filter: blur(4px);
+  }
+}
+
+::view-transition-group(.splat-out) {
+  animation: none;
+}
+
+::view-transition-old(.splat-out) {
+  animation: splat-out-up var(--duration-250) var(--ease-in-quad) both;
+}
+
+:root:active-view-transition-type(nav-back)::view-transition-old(.splat-out) {
+  animation-name: splat-out-down;
+}
+
+::view-transition-old(.splat-out.d2) { animation-delay: var(--stagger-xs); }
+::view-transition-old(.splat-out.d3) { animation-delay: calc(var(--stagger-xs) * 2); }
+::view-transition-old(.splat-out.d4) { animation-delay: calc(var(--stagger-xs) * 3); }
+
+::view-transition-old(.splat-out.card) {
+  animation: splat-out-card var(--duration-300) var(--ease-in-quad) both;
+}
+
+::view-transition-new(.splat-out) {
+  animation: page-in-up var(--duration-slow) var(--ease-entrance) both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(*),
   ::view-transition-old(*),

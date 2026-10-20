@@ -11,6 +11,8 @@
 //   fit       multiplier on the auto-fit (robust bounds, see stage/fit.js)
 //             for captures whose subject is smaller or larger than the frame
 //             wants.
+//   front     yaw (radians) at which the capture faces the camera; every
+//             entrance and flight lands on it. Defaults to 0.
 //   crop      optional share of the capture's height to hide from the bottom
 //             up: a plinth, a turntable, the floor it stood on. The splats are
 //             cut by a per-splat modifier and the framing ignores them.
@@ -34,6 +36,7 @@ const statue = (entry) => ({ rotation: FLIP, fit: 0.92, credit: PLAYCANVAS, ...e
 export const SPLATS = [
   statue({
     id: "angel",
+    front: -Math.PI / 2,
     crop: 0.36,
     title: "Angel",
     kicker: "Marble, kneeling",
@@ -47,6 +50,7 @@ export const SPLATS = [
   }),
   statue({
     id: "narcissus",
+    front: Math.PI,
     crop: 0.335,
     title: "Narcissus",
     kicker: "Marble, crouching",
@@ -73,6 +77,7 @@ export const SPLATS = [
   }),
   statue({
     id: "massa",
+    front: Math.PI,
     crop: 0.51,
     title: "Massa",
     kicker: "Marble, bust",
@@ -86,6 +91,7 @@ export const SPLATS = [
   }),
   statue({
     id: "angel-candlestick",
+    front: Math.PI,
     crop: 0.38,
     title: "Angel with candlestick",
     kicker: "Terracotta, kneeling",
@@ -112,6 +118,7 @@ export const SPLATS = [
   }),
   statue({
     id: "angel-book",
+    front: -Math.PI / 4,
     crop: 0.4,
     title: "Angel with book",
     kicker: "Marble, kneeling",

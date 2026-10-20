@@ -34,32 +34,39 @@ export default async function SplatArticle({ params }) {
 
   return (
     <main id="content" className="splat-article">
-      <nav className="splat-article__back">
+      <nav className="splat-article__back splat-out splat-rise" style={{ "--rise": 0 }}>
         <BackToIndex slug={item.id} className="splat-article__back-link">All splats</BackToIndex>
       </nav>
 
       <SplatAnchor actor={item.id} slot="article" interactive className="splat-article__hero" />
 
       <article className="splat-article__body">
-        <header className="splat-article__header">
+        <header className="splat-article__header splat-out splat-out--2">
           <h1 className="splat-article__title">
             <Shared name={`splat-title-${item.id}`} morph="fade" on={OPEN_DETAIL}>
               <span className="inline-block">{item.title}</span>
             </Shared>
           </h1>
-          <p className="splat-article__kicker">{item.kicker}</p>
+          <p className="splat-article__kicker splat-rise" style={{ "--rise": 1 }}>
+            {item.kicker}
+          </p>
         </header>
-        <div className="splat-article__prose">
+        <div className="splat-article__prose splat-out splat-out--3 splat-rise" style={{ "--rise": 2 }}>
           {item.body.map((paragraph, i) => (
             <p key={i}>{paragraph}</p>
           ))}
         </div>
-        <p className="splat-article__credit">
+        <p className="splat-article__credit splat-out splat-out--4 splat-rise" style={{ "--rise": 3 }}>
           Capture: <a href={item.credit.url}>{item.credit.name}</a>, {item.credit.license}.
         </p>
       </article>
 
-      <Link href={`/splats/${next.id}`} transitionTypes={OPEN} className="splat-article__next">
+      <Link
+        href={`/splats/${next.id}`}
+        transitionTypes={OPEN}
+        className="splat-article__next splat-out splat-out--4 splat-rise"
+        style={{ "--rise": 4 }}
+      >
         <SplatAnchor actor={next.id} slot="next" className="splat-article__next-frame" />
         <span className="splat-article__next-label">
           <span className="splat-article__next-hint">Next</span>
