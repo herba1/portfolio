@@ -6,7 +6,7 @@
     "Particles",
     "Music"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "A designed transition instead of random flight: dots keep their row and travel only sideways to the matching tone, so the change reads as a clean scanning pattern with motion trails.",
   "tile": {

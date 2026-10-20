@@ -2,7 +2,7 @@
   "title": "Dynamic Player",
   "description": "A now-playing pill that blooms into a full player when you hover or click it, and folds back when you leave. Width, height, corners and the cover ride one spring, so you can catch it mid-morph; the glow and the ring around it are drawn from the album art and breathe with the beat.",
   "tags": ["Interface", "Motion", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:00:00.000Z",
   "intent": "One ink shape that morphs between a pill and a player on a retargetable spring, lit by its own cover.",
   "tile": { "cols": 3, "rows": 4 },

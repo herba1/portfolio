@@ -2,7 +2,7 @@
   "title": "Transport",
   "description": "A player bar on an ink panel where every icon is drawn from exactly three lines. Play folds into pause, plus draws into a check, the queue list crosses into a close, and the playing row's level bars fold into a pause under your cursor, every line on its own spring so a second click mid-morph turns it around.",
   "tags": ["Interface", "Motion", "Icons"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "Icons as three springing lines that morph between states and can be reversed mid-flight",
   "tile": { "cols": 3, "rows": 5 },

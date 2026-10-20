@@ -2,7 +2,7 @@
   "title": "Cover Flow",
   "description": "Twelve Beatles records on a black floor. Drag, scroll, scrub or use the arrow keys and the covers swing past on a capped-speed spring with their reflections; the album that lands in the middle rolls its title in letter by letter.",
   "tags": ["Interface", "Motion", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:00:00.000Z",
   "intent": "The classic browser rebuilt as a modern component: one spring with a speed cap drives every cover, so a fling can be caught mid-flight and nothing races past faster than you can read it.",
   "tile": { "cols": 4, "rows": 3 },

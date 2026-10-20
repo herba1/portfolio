@@ -2,7 +2,7 @@
   "title": "Now Toasts",
   "description": "Your top songs with a like, play-next and queue on every row. Each action answers with a toast whose cover flies down from the row into it; the toasts stack like cards, fan out when you hover, pause while you read, and swipe away with a flick. Liking bursts the heart.",
   "tags": ["Toast", "Motion", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:30:00.000Z",
   "intent": "A Sonner-style toast stack built for a music app: real covers, undo on every toast, swipe to dismiss with velocity, and a cover that flies from the row into its toast.",
   "tile": { "cols": 4, "rows": 4 },

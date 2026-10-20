@@ -2,7 +2,7 @@
   "title": "Setlist Share",
   "description": "A share-card generator for your top songs. Pick a song and the card composes itself: the background wipes in with the colour lifted from the cover, the cover drops into place, the title rises word by word and a pull-quote types itself out. Copy image renders the card to a PNG on a canvas and it flies into the button.",
   "tags": ["Generator", "Canvas", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T13:00:00.000Z",
   "intent": "A real share flow: colour from the artwork, a composed card that animates element by element, and a pixel-faithful canvas export to the clipboard with a download fallback.",
   "tile": { "cols": 4, "rows": 4 },

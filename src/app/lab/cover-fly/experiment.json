@@ -2,7 +2,7 @@
   "title": "Cover Fly",
   "description": "Twelve Beatles records and a reel of film. Tap a cover and it shrinks and tosses itself on an arc into the next frame of the strip, which opens a slot, catches it with a jolt and a flash. Tap it on the reel, or catch it mid-air, and it flies home the same way.",
   "tags": ["Motion", "Queue", "Music"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:10:00.000Z",
   "intent": "One flight finished to the edge: a cover thrown from the grid into a film-strip queue on a live-tracked arc, interruptible and reversible at any point of the flight.",
   "tile": { "cols": 4, "rows": 4 },
