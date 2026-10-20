@@ -4,6 +4,7 @@ export const CELL = 640;
 
 const KIND_HARD = 85;
 const KIND_SATIN = 170;
+const KIND_WRAP = 255;
 
 const PIN = { w: 520, h: 520, r: 64 };
 const PATCH = { w: 600, h: 404, r: 40 };
@@ -138,7 +139,7 @@ function dilate(src, r) {
 function enamelPin(img) {
   const hw = PIN.w / 2;
   const hh = PIN.h / 2;
-  const rim = 16;
+  const rim = 20;
   const face = (c) => {
     c.beginPath();
     c.roundRect(C - hw + rim, C - hh + rim, PIN.w - rim * 2, PIN.h - rim * 2, PIN.r - rim);
@@ -177,9 +178,14 @@ function enamelPin(img) {
   }
   al.putImageData(out, 0, 0);
   const pB = blur(plate, 3);
-  const mB = blur(metal, 0.8);
+  const mB = blur(metal, 2.2);
+  const near = blur(metal, 4);
   const height = new Float32Array(N);
-  for (let i = 0; i < N; i += 1) height[i] = 6 * pB[i] + 2.2 * mB[i] - 0.6 * enamel[i] * (1 - mB[i]);
+  for (let i = 0; i < N; i += 1) {
+    const ridge = 2.5 * Math.sqrt(clamp01(mB[i] * 1.2));
+    const dish = enamel[i] * (1 - mB[i]) * (-0.8 + 1.1 * near[i]);
+    height[i] = 6 * pB[i] + ridge + dish;
+  }
   return pack(al, height, [
     { mask: enamel, metal: false, gloss: 0.95, kind: KIND_HARD },
     { mask: metal, metal: true, gloss: 0.9, kind: KIND_HARD },
@@ -375,7 +381,7 @@ function embroider(img, { crop, sdf, count, edge, edgeColor, edgeGloss, angleBas
   return pack(al, height, [
     { mask: fill, metal: false, gloss: 0.4, kind: KIND_SATIN, angle },
     { mask: satin, metal: false, gloss: 0.62, kind: KIND_SATIN, angle },
-    { mask: rimMask, metal: false, gloss: edgeGloss, kind: KIND_SATIN, angle },
+    { mask: rimMask, metal: false, gloss: edgeGloss, kind: KIND_WRAP, angle },
   ]);
 }
 
@@ -400,7 +406,7 @@ function roundPatch(img) {
   return embroider(img, {
     crop: [0.52 - span / 2, 0.48 - span / 2, span, span, BUTTON.d, BUTTON.d],
     sdf: (x, y) => Math.hypot(x, y) - R,
-    count: 14,
+    count: 12,
     edge: 22,
     edgeColor: [206, 160, 64],
     edgeGloss: 0.86,

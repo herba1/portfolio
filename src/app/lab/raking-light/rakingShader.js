@@ -73,6 +73,17 @@ float occlusion(int i, vec3 P, vec3 L) {
   return res;
 }
 
+float hash2(vec2 v) {
+  return fract(sin(dot(v, vec2(127.1, 311.7))) * 43758.5453);
+}
+
+vec3 room(vec3 r) {
+  float up = clamp(r.z, 0.0, 1.0);
+  vec3 c = mix(vec3(0.34, 0.33, 0.31), vec3(0.95, 0.96, 1.0), smoothstep(0.2, 0.95, up));
+  float box = smoothstep(0.86, 0.97, dot(r, normalize(vec3(-0.45, -0.55, 0.7))));
+  return c + vec3(1.6, 1.58, 1.52) * box;
+}
+
 vec3 toLinear(vec3 c) {
   return pow(max(c, vec3(0.0)), vec3(2.2));
 }
@@ -101,6 +112,10 @@ void main() {
   vec4 albedo = vec4(ground, 0.0);
   vec4 mat = vec4(0.0);
   float px = 1.0;
+  vec2 stitchT = vec2(1.0, 0.0);
+  float stitchAo = 1.0;
+  float stitchVar = 1.0;
+  float stitchSheen = 1.0;
 
   if (hit >= 0) {
     vec4 r = uRect[hit];
@@ -127,21 +142,37 @@ void main() {
     px = unit;
     float kind = floor(mat.a * 3.0 + 0.5);
     if (kind >= 2.0) {
+      bool rim = kind > 2.5;
+      bool satin = !rim && mat.g > 0.5;
       float theta = (mat.b * 255.0 - 1.0) / 253.0 * PI;
-      vec2 Tl = vec2(cos(theta), sin(theta));
+      vec2 dl = q * uCell * 0.5;
+      float period = rim ? 8.0 : satin ? 4.6 : 5.0;
+      vec2 Tl0 = vec2(cos(theta), sin(theta));
+      float acrossC = dot(dl, vec2(-Tl0.y, Tl0.x)) / period;
+      float row = floor(acrossC);
+      float fa = fract(acrossC);
+      float stitchLen = rim ? 1000.0 : satin ? 44.0 : 26.0;
+      float stagger = rim ? 0.0 : fract(row * 0.29);
+      float alongC = dot(dl, Tl0) / stitchLen + stagger;
+      float stitch = floor(alongC);
+      float fs = fract(alongC);
+      float jit = (hash2(vec2(row, stitch)) - 0.5) * (rim ? 0.05 : 0.12);
+      vec2 Tl = vec2(cos(theta + jit), sin(theta + jit));
       vec2 Ts = vec2(c * Tl.x - s * Tl.y, s * Tl.x + c * Tl.y);
       vec2 Bs = vec2(-Ts.y, Ts.x);
-      vec2 dl = q * uCell * 0.5;
-      float period = kind > 2.5 ? 5.0 : 6.0;
-      float across = dot(dl, vec2(-Tl.y, Tl.x)) / period;
-      float along = dot(dl, Tl) / (kind > 2.5 ? 5.0 : 30.0);
-      float stagger = kind > 2.5 ? 0.0 : floor(across) * 0.37;
-      float w = sin(fract(across) * PI);
       float alias = smoothstep(1.4, 4.0, unit * uScale * period);
-      float bump = cos(fract(across) * PI) * 0.6 * alias;
-      float seam = smoothstep(0.0, 0.08, fract(along + stagger)) * smoothstep(1.0, 0.92, fract(along + stagger));
-      n = normalize(n + vec3(Bs * bump, 0.0));
-      albedo.rgb *= mix(1.0, 0.72 + 0.28 * w * seam, alias);
+      float u2 = 2.0 * fa - 1.0;
+      float prof = sqrt(max(1.0 - u2 * u2, 0.0));
+      float slopeA = clamp(u2 / max(prof, 0.3), -3.0, 3.0);
+      float ends = rim ? 1.0 : smoothstep(0.0, 0.07, fs) * smoothstep(1.0, 0.93, fs);
+      float slopeL = rim ? 0.0 : (fs < 0.5 ? -1.0 : 1.0) * (1.0 - ends) * 0.9;
+      n = normalize(n + vec3((Bs * slopeA * (rim ? 0.55 : 0.42) + Ts * slopeL * 0.5) * alias, 0.0));
+      stitchT = Ts;
+      stitchAo = mix(1.0, mix(0.5, 1.0, prof) * mix(0.62, 1.0, ends), alias);
+      stitchVar = 1.0 + (hash2(vec2(stitch * 1.7 + 3.0, row)) - 0.5) * 0.16 * alias;
+      float twist = sin((dot(dl, Tl) * 1.15 + fa * 2.2) * PI * 2.0);
+      stitchSheen = 1.0 + 0.22 * twist * smoothstep(2.0, 5.0, unit * uScale * period) * prof;
+      albedo.rgb *= stitchVar;
     }
   }
 
@@ -169,29 +200,28 @@ void main() {
   } else {
     float kind = floor(mat.a * 3.0 + 0.5);
     float tiltAmb = amb * (0.82 + 0.18 * n.z);
+    vec3 R = reflect(-V, n);
     if (kind >= 2.0) {
-      float theta = (mat.b * 255.0 - 1.0) / 253.0 * PI;
-      vec4 r = uRect[hit];
-      float c = cos(r.w);
-      float s = sin(r.w);
-      vec2 Tl = vec2(cos(theta), sin(theta));
-      vec3 T = normalize(vec3(c * Tl.x - s * Tl.y, s * Tl.x + c * Tl.y, 0.0));
+      vec3 T = normalize(vec3(stitchT, 0.0));
       T = normalize(T - n * dot(T, n));
       float th = dot(T, H);
-      float sheen = pow(sqrt(max(1.0 - th * th, 0.0)), mix(30.0, 90.0, mat.g)) * mix(0.12, 0.5, mat.g);
+      float sheen = pow(sqrt(max(1.0 - th * th, 0.0)), mix(30.0, 110.0, mat.g)) * mix(0.14, 0.62, mat.g) * stitchSheen;
       float wrap = max((dot(n, Lv) + 0.25) / 1.25, 0.0);
-      col = base * sky * tiltAmb + (base * wrap * 1.5 + mix(base, vec3(1.0), 0.5) * sheen) * lit * lampCol;
+      col = (base * sky * tiltAmb + (base * wrap * 1.5 + mix(base, vec3(1.0), 0.45) * sheen) * lit * lampCol) * stitchAo;
     } else if (mat.r > 0.5) {
+      vec3 f0 = max(base, vec3(0.26));
       float e = mix(40.0, 900.0, mat.g);
       float spec = pow(nh, e) * (e + 8.0) / 60.0;
-      float broad = pow(nh, 12.0) * 0.35;
-      col = base * sky * tiltAmb * mix(0.35, 0.75, n.z * n.z) + base * (spec * 1.4 + broad + diff * 0.7) * lit * lampCol;
+      float edge = smoothstep(0.995, 0.93, n.z);
+      float broad = pow(nh, 10.0) * mix(0.12, 1.1, edge);
+      col = base * sky * tiltAmb * 0.6 + f0 * room(R) * mix(0.025, 0.36, edge) + f0 * (spec * 1.6 + broad + diff * mix(0.12, 0.4, edge)) * lit * lampCol;
     } else {
       float e = mix(60.0, 1400.0, mat.g);
       float spec = pow(nh, e) * (e + 8.0) / 90.0;
       float fres = 0.04 + 0.96 * pow(1.0 - max(dot(n, V), 0.0), 5.0);
       float glaze = pow(nh, 48.0) * smoothstep(0.97, 0.99, mat.g) * 0.32;
-      col = base * sky * tiltAmb + (base * diff * 1.4 + vec3(spec + glaze) * (0.5 + fres)) * lit * lampCol;
+      vec3 refl = room(R) * (0.035 + fres * 0.6) * smoothstep(0.7, 0.95, mat.g);
+      col = base * sky * tiltAmb + refl + (base * diff * 1.4 + vec3(spec + glaze) * (0.5 + fres)) * lit * lampCol;
     }
     col = mix(groundCol, col, smoothstep(0.0, 0.5, albedo.a));
   }

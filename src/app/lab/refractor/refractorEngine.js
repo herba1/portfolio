@@ -41,7 +41,7 @@ function rotation(yaw, pitch, roll) {
   return new Float32Array(mul(mul(ry, rx), rz));
 }
 
-export function createRefractorEngine({ box, stage, canvas, insets, embedded, cards: initialCards, onSelect, onRiffle, onFoil, onReady, onFail, onMotion }) {
+export function createRefractorEngine({ box, stage, canvas, insets, embedded, cards: initialCards, onSelect, onRiffle, onFoil, onFace, onReady, onFail, onMotion }) {
   let CARDS = initialCards;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const coarse = window.matchMedia("(pointer: coarse)").matches;
@@ -72,9 +72,33 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
   let interval = 16;
   let lastFront = true;
   let riffle = null;
+  let face = 0;
+
+  function settle(yaw) {
+    return Math.round((yaw - face * Math.PI) / TAU) * TAU + face * Math.PI;
+  }
+
+  function flip() {
+    if (reduced) {
+      face = 1 - face;
+      home = settle(body.yaw + Math.PI);
+      wake();
+      return;
+    }
+    face = 1 - face;
+    const dirn = Math.sign(body.vyaw) || 1;
+    let target = settle(body.yaw + dirn * Math.PI * 0.5);
+    if ((target - body.yaw) * dirn < Math.PI * 0.5) target += TAU * dirn;
+    coast = coastTo(target, Math.max(Math.abs(body.vyaw), 6) * dirn);
+    home = target;
+    riffle = null;
+    hold.active = false;
+    onFace?.(face);
+    wake();
+  }
 
   function aspectOf(idx) {
-    return preps.get(CARDS[idx].key)?.aspect || 660 / 1200;
+    return preps.get(CARDS[idx].key)?.aspect || 1;
   }
 
   function layout() {
@@ -128,7 +152,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
     return loadImage(spec).then((img) => {
       if (destroyed || !gl) return false;
       if (!preps.has(spec.key)) preps.set(spec.key, prepareCard(spec, img, box));
-      if (!gl.has(spec.key)) gl.build(spec.key, preps.get(spec.key).front, preps.get(spec.key));
+      if (!gl.has(spec.key)) gl.build(spec.key, preps.get(spec.key));
       return true;
     });
   }
@@ -181,7 +205,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
 
   function spinBy(turns, speed) {
     const dirn = Math.sign(turns) || 1;
-    let target = Math.round(body.yaw / TAU) * TAU + turns * TAU;
+    let target = settle(body.yaw) + turns * TAU;
     if ((target - body.yaw) * dirn < Math.PI * 0.6) target += TAU * dirn;
     while ((target - body.yaw) * dirn > TAU * 1.6) target -= TAU * dirn;
     const v = Math.max(Math.abs(body.vyaw), speed) * dirn;
@@ -271,6 +295,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
     pointer.y = pointer.sy = pointer.py = y;
     pointer.vx = pointer.vy = 0;
     pointer.trail = [{ x, y, t: e.timeStamp }];
+    pointer.t0 = e.timeStamp;
     pointer.yaw0 = body.yaw;
     pointer.pitch0 = body.pitch;
     coast = null;
@@ -316,6 +341,12 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
     }
     pointer.id = null;
     pointer.mode = pointer.type === "mouse" && pointer.inside && e.type !== "pointercancel" ? "hover" : null;
+    const travel = Math.hypot(pointer.x - pointer.sx, pointer.y - pointer.sy);
+    const onDisc = Math.hypot(pointer.sx - view.cx, pointer.sy - view.cy) <= view.hh;
+    if (e.type !== "pointercancel" && travel < 6 && e.timeStamp - pointer.t0 < 400 && onDisc) {
+      flip();
+      return;
+    }
     release = true;
     wake();
   }
@@ -349,6 +380,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       select((active + dirn + CARDS.length) % CARDS.length, dirn);
       wake();
     } else if (/^[1-3]$/.test(e.key)) setFoil(Number(e.key) - 1);
+    else if (e.key === "f" || e.key === "F") flip();
     else if (e.key === "]") select((active + 1) % CARDS.length);
     else if (e.key === "[") select((active + CARDS.length - 1) % CARDS.length, -1);
     else handled = false;
@@ -435,7 +467,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       body.vyaw = clamp(v, -SPIN_CAP, SPIN_CAP);
       if (Math.abs(body.vyaw) > 2.4 && !reduced) {
         const natural = body.yaw + body.vyaw * 0.85;
-        let target = Math.round(natural / TAU) * TAU;
+        let target = settle(natural);
         const dirn = Math.sign(body.vyaw);
         while ((target - body.yaw) / body.vyaw < 0.4) target += TAU * dirn;
         while ((target - body.yaw) / body.vyaw > 1.9 && (target - TAU * dirn - body.yaw) / body.vyaw >= 0.4) target -= TAU * dirn;
@@ -445,7 +477,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
         riffle = { dir: dirn, left: turns };
         for (let k = 1; k <= turns; k += 1) ensure((((shown + dirn * k) % CARDS.length) + CARDS.length) % CARDS.length).catch(() => {});
       } else {
-        home = Math.round(body.yaw / TAU) * TAU;
+        home = settle(body.yaw);
       }
       body.vpitch = clamp(body.vpitch - pointer.vy * dragScale() * 0.25, -3, 3);
     }
@@ -502,7 +534,8 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       home -= wrap;
       body.yaw -= wrap;
     }
-    const front = Math.cos(body.yaw) * Math.cos(body.pitch) > 0;
+    const facing = Math.cos(body.yaw) * Math.cos(body.pitch) > 0;
+    const front = face === 0 ? facing : !facing;
     if (riffle && !front && lastFront && gl) {
       const next = (((shown + riffle.dir) % CARDS.length) + CARDS.length) % CARDS.length;
       if (gl.has(CARDS[next].key)) {
@@ -548,8 +581,6 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
     const roll = -Math.sin(body.yaw) * 0.04 - (body.yaw - home) * 0.02;
     const rot = rotation(body.yaw, body.pitch, clamp(roll, -0.06, 0.06));
     const mix = foil.t >= 1 ? 0 : smooth01(foil.t);
-    const sleeveBottom = -hh - hh * 0.014;
-    const sleeveTop = hh + hh * 0.07;
     gl.draw({
       key: spec.key,
       dpr: view.dpr * quality,
@@ -561,9 +592,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       lift: body.lift * view.hh * 0.08,
       dist: Math.max(view.width, view.height) * 1.6 + 500,
       ground: view.hh * 0.16,
-      radius: hw * 0.045,
-      thick: Math.max(1.2, hh * 0.007),
-      sleeve: [(sleeveTop + sleeveBottom) / 2, hw + hw * 0.05, (sleeveTop - sleeveBottom) / 2],
+      thick: Math.max(1.4, hh * 0.022),
       keyLight: [-0.95 * view.hh, 1.35 * view.hh, 2.7 * view.hh],
       fillLight: [1.7 * view.hh, -0.15 * view.hh, 2.3 * view.hh],
       foil: foil.t >= 1 ? [foil.to, foil.to, 0] : [foil.from, foil.to, mix],
@@ -632,6 +661,7 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
     relayout: () => resize(),
     setCards: (list) => setCards(list),
     setFoil: (idx) => setFoil(idx),
+    flip: () => flip(),
     motionAvailable: () => coarse && typeof window.DeviceOrientationEvent !== "undefined",
     enableMotion,
     destroy() {

@@ -99,6 +99,11 @@
   row-gap: 8px;
 }
 
+.refractor__tools {
+  display: flex;
+  gap: 8px;
+}
+
 .refractor__tray {
   display: flex;
   align-items: center;
@@ -162,9 +167,9 @@
 .refractor__chip {
   position: relative;
   display: block;
-  width: 16px;
+  width: 20px;
   height: 20px;
-  border-radius: 3px;
+  border-radius: 50%;
   overflow: hidden;
   background: conic-gradient(
     from 210deg at 40% 30%,
@@ -179,25 +184,37 @@
   box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14);
 }
 
-.refractor__foil[data-foil="atomic"] .refractor__chip::after,
-.refractor__foil[data-foil="prism"] .refractor__chip::after {
+.refractor__chip::before {
   content: "";
   position: absolute;
-  inset: 0;
+  inset: 7px;
+  border-radius: 50%;
+  background: var(--refractor-tray);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.14);
 }
 
-.refractor__foil[data-foil="atomic"] .refractor__chip::after {
-  background:
-    linear-gradient(118deg, transparent 46%, rgb(0 0 0 / 0.28) 48%, transparent 50%),
-    linear-gradient(32deg, transparent 58%, rgb(0 0 0 / 0.24) 60%, transparent 62%),
-    linear-gradient(74deg, transparent 22%, rgb(0 0 0 / 0.2) 24%, transparent 26%);
+.refractor__foil[data-foil="gold"] .refractor__chip {
+  background: conic-gradient(
+    from 210deg at 50% 50%,
+    rgb(214 172 92),
+    rgb(240 214 150),
+    rgb(198 214 160),
+    rgb(232 190 120),
+    rgb(244 220 170),
+    rgb(214 172 92)
+  );
 }
 
-.refractor__foil[data-foil="prism"] .refractor__chip::after {
-  background:
-    repeating-linear-gradient(60deg, transparent 0 5px, rgb(0 0 0 / 0.2) 5px 6px),
-    repeating-linear-gradient(-60deg, transparent 0 5px, rgb(0 0 0 / 0.2) 5px 6px),
-    repeating-linear-gradient(0deg, transparent 0 5px, rgb(0 0 0 / 0.16) 5px 6px);
+.refractor__foil[data-foil="black"] .refractor__chip {
+  background: conic-gradient(
+    from 210deg at 50% 50%,
+    rgb(24 24 28),
+    rgb(70 40 84),
+    rgb(30 52 80),
+    rgb(30 70 50),
+    rgb(84 70 30),
+    rgb(24 24 28)
+  );
 }
 
 .refractor__foil-name {
@@ -289,7 +306,7 @@
 
   .refractor__motion {
     justify-content: center;
-    width: 48px;
+    width: 44px;
     padding: 0;
   }
 

@@ -11,10 +11,12 @@ const SUBSTEPS = 4;
 const ITERATIONS = 10;
 const GRAVITY = -300;
 const FLOOR = 0.12;
-const AIR = 3.2;
-const TABLE_DRAG = 5.2;
+const AIR = 4.4;
+const TABLE_DRAG = 11;
 const STICK = 3;
 const MAX_SPEED = 2600;
+const FREE_SPEED = 1100;
+const FLING = 1200;
 const MAX_TAKEUP = 1400;
 const MIN_OUT = 46;
 const CAN_CLEAR = 10;
@@ -26,7 +28,7 @@ const CAN_TOP = 27;
 const W_STIFF = 0.8;
 const N_STIFF = 0.16;
 const MIN_SIDE_RADIUS = 46;
-const HOLD = 3;
+const HOLD = 6;
 
 function curlAt(f, u) {
   const lead = 1 / 14 + (1 / 50 - 1 / 14) * smooth(45, 115, f);
@@ -105,7 +107,9 @@ export default class FilmSim {
       const km = m * 3;
       hold.push([m, this.pos[km] - this.pos[k0], this.pos[km + 1] - this.pos[k0 + 1], this.pos[km + 2] - this.pos[k0 + 2], 1 - Math.abs(j) / (HOLD + 1)]);
     }
-    this.grab = { index: i, f: i * SEG, hold };
+    const reach0 = Math.hypot(this.pos[k0] - this.slot[0], this.pos[k0 + 1] - this.slot[1], this.pos[k0 + 2] - this.slot[2]);
+    const slack0 = Math.max(0, this.u - i * SEG - (reach0 * 1.02 + 4));
+    this.grab = { index: i, f: i * SEG, hold, slack0, fade: 0 };
     this.target[0] = point[0];
     this.target[1] = point[1];
     this.target[2] = point[2];
@@ -129,8 +133,8 @@ export default class FilmSim {
     let vy = this.pos[k + 1] - this.prev[k + 1];
     let vz = this.pos[k + 2] - this.prev[k + 2];
     const speed = Math.hypot(vx, vy, vz) / this.lastH;
-    if (speed > MAX_SPEED) {
-      const scale = MAX_SPEED / speed;
+    if (speed > FLING) {
+      const scale = FLING / speed;
       vx *= scale;
       vy *= scale;
       vz *= scale;
@@ -206,10 +210,11 @@ export default class FilmSim {
     if (this.grab) {
       this.uVel *= Math.exp(-h * 7);
       if (this.u > this.rest) this.uVel -= 60 * h;
+      if (this.grab.fade > 0) this.grab.slack0 = Math.max(0, this.grab.slack0 - this.grab.fade * h);
       const gi = this.grab.index * 3;
       const between = this.u - this.grab.f;
       const reach = Math.hypot(this.pos[gi] - this.slot[0], this.pos[gi + 1] - this.slot[1], this.pos[gi + 2] - this.slot[2]);
-      const slack = between - (reach * 1.02 + 4);
+      const slack = between - (reach * 1.02 + 4) - this.grab.slack0;
       this.takeup = slack > 0;
       if (this.takeup) this.uVel = Math.min(this.uVel, -Math.min(MAX_TAKEUP, slack * 26));
     } else {
@@ -269,25 +274,61 @@ export default class FilmSim {
     let px = this.slot[0];
     let py = this.slot[1];
     let pz = this.slot[2];
+    let ax = -this.dir[0];
+    let ay = -this.dir[1];
+    let az = -this.dir[2];
     for (let i = n - 1; i >= 0; i -= 1) {
       const k = i * 3;
       let tx = px - P[k];
       let ty = py - P[k + 1];
       let tz = pz - P[k + 2];
+      if (i === n - 1) {
+        const short = Math.max(0, SEG - Math.hypot(tx, ty, tz));
+        tx -= this.dir[0] * short;
+        ty -= this.dir[1] * short;
+        tz -= this.dir[2] * short;
+      }
       const tl = Math.hypot(tx, ty, tz);
       if (tl > 1e-5) {
         tx /= tl;
         ty /= tl;
         tz /= tl;
+        const c = ax * tx + ay * ty + az * tz;
+        if (c > -0.95) {
+          const vx = ay * tz - az * ty;
+          const vy = az * tx - ax * tz;
+          const vz = ax * ty - ay * tx;
+          const cx = vy * wz - vz * wy;
+          const cy = vz * wx - vx * wz;
+          const cz = vx * wy - vy * wx;
+          const k2 = 1 / (1 + c);
+          wx += cx + (vy * cz - vz * cy) * k2;
+          wy += cy + (vz * cx - vx * cz) * k2;
+          wz += cz + (vx * cy - vy * cx) * k2;
+        }
+        const rx = wx;
+        const ry = wy;
+        const rz = wz;
         wy *= 0.2;
-        const d = wx * tx + wy * ty + wz * tz;
+        let d = wx * tx + wy * ty + wz * tz;
         wx -= d * tx;
         wy -= d * ty;
         wz -= d * tz;
-        const wl = Math.hypot(wx, wy, wz) || 1;
+        let wl = Math.hypot(wx, wy, wz);
+        if (wl < 0.3) {
+          d = rx * tx + ry * ty + rz * tz;
+          wx = rx - d * tx;
+          wy = ry - d * ty;
+          wz = rz - d * tz;
+          wl = Math.hypot(wx, wy, wz);
+        }
+        wl = wl || 1;
         wx /= wl;
         wy /= wl;
         wz /= wl;
+        ax = tx;
+        ay = ty;
+        az = tz;
       }
       W[k] = wx;
       W[k + 1] = wy;
@@ -328,7 +369,7 @@ export default class FilmSim {
     }
     this.transport();
     const uStart = this.u;
-    const share = this.grab ? (this.takeup ? 0 : 0.9) : 0.18;
+    const share = this.grab ? (this.takeup ? 0 : 0.9) : this.u > this.rest + 1 ? 0 : 0.18;
     const [sx, sy, sz] = this.slot;
     const [dx, dy, dz] = this.dir;
     for (let it = 0; it < ITERATIONS; it += 1) {
@@ -386,6 +427,7 @@ export default class FilmSim {
       this.collide(grabbed);
     }
     for (let pass = 0; pass < 10; pass += 1) this.limitSide(grabbed);
+    this.collide(grabbed);
     const fed = this.u - uStart;
     if (fed > 0 && this.grab) this.uVel = Math.max(this.uVel, fed / h);
     this.taut = fed / h;
@@ -407,7 +449,7 @@ export default class FilmSim {
         }
       }
       const sp = Math.hypot(vx, vy, vz);
-      const cap = MAX_SPEED * h;
+      const cap = (this.grab ? MAX_SPEED : FREE_SPEED) * h;
       if (sp > cap) {
         vx *= cap / sp;
         vy *= cap / sp;
@@ -550,12 +592,18 @@ export default class FilmSim {
         this.contact[i] = P[k + 1] < FLOOR + 0.25 ? 1 : 0;
       }
       if (i === grabbed) continue;
-      if (P[k + 1] < CAN_TOP) {
-        const px = Math.abs(P[k]) - CAN_X;
-        const pz = Math.abs(P[k + 2]) - CAN_HALF;
+      const W = this.side;
+      const ex = i >= n - 3 ? 0 : HALF * Math.abs(W[k]);
+      const ez = HALF * Math.abs(W[k + 2]);
+      const ey = HALF * Math.abs(W[k + 1]);
+      if (P[k + 1] < CAN_TOP + ey) {
+        const px = Math.abs(P[k]) - CAN_X - ex;
+        const pz = Math.abs(P[k + 2]) - CAN_HALF - ez;
+        const py = P[k + 1] - CAN_TOP - ey;
         if (px < 0 && pz < 0) {
-          if (px > pz) P[k] = Math.sign(P[k] || 1) * CAN_X;
-          else P[k + 2] = Math.sign(P[k + 2] || 1) * CAN_HALF;
+          if (py > px && py > pz) P[k + 1] = CAN_TOP + ey;
+          else if (px > pz) P[k] = Math.sign(P[k] || 1) * (CAN_X + ex);
+          else P[k + 2] = Math.sign(P[k + 2] || 1) * (CAN_HALF + ez);
         }
       }
     }

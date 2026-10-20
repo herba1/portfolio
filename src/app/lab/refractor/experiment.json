@@ -1,25 +1,25 @@
 {
-  "title": "Refractor",
-  "description": "Records from Herb's top songs printed as chrome refractor trading cards: the cover as the photo, a foil-stamped nameplate in a colour pulled from the art, a year roundel, and a numbered tracklist back. Tilt one and a diffraction grating splits the light across the chrome while the print stays matte; flick it hard and the next card spins in edge-on.",
+  "title": "Compact Disc",
+  "description": "Records from Herb's top songs pressed as compact discs. Tilt one and the 1.6 micron track pitch splits the light into a rainbow that streams out from the lamp's reflection, while the clear polycarbonate hub and outer lip show the table through. Tap it to turn it over to a printed label with the cover, a ring of colour pulled from the art and the tracklist set around the edge; flick it hard and the next record spins in.",
   "tags": [
     "WebGL",
     "Optics",
-    "Cards",
+    "Objects",
     "Music"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge on a believable premium card: a grating equation drives the rainbow, a chrome map generated from each cover keeps the print matte, and the card design follows a modern chrome set, with a silver border, a team-colour nameplate and a printed back.",
+  "intent": "One optical object made believable: a radial diffraction grating with first to third orders and the track pitch of a real CD drives the colour, a mirror environment and a small hot lamp reflection give it contrast, the clear hub and lip show the table through, and the label side is printed from each cover in silver, gold or black stock.",
   "tile": {
     "cols": 2,
     "rows": 4
   },
   "sources": [
-    "https://github.com/simeydotme/pokemon-cards-css",
-    "https://poke-holo.simey.me/",
-    "https://hover-tilt.simey.me/bespoke/credit-cards/",
     "https://feedbagel.com/post/creating-foil-sticker-effects-with-custom-threejs-shaders",
     "https://developer.nvidia.com/gpugems/GPUGems/gpugems_ch08.html",
-    "https://github.com/ektogamat/threejs-holographic-material"
+    "https://github.com/ektogamat/threejs-holographic-material",
+    "https://en.wikipedia.org/wiki/Compact_disc",
+    "https://en.wikipedia.org/wiki/Diffraction_grating",
+    "https://www.webexhibits.org/causesofcolor/15D.html"
   ]
 }

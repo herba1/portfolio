@@ -38,7 +38,7 @@ export function cardsFromTracks(tracks, limit = 8) {
 export const DEFAULT_CARDS = cardsFromTracks(FALLBACK_TRACKS);
 
 export const FOILS = [
-  { key: "refractor", name: "Refractor", note: "Concentric grating" },
-  { key: "atomic", name: "Atomic", note: "Cracked ice" },
-  { key: "prism", name: "Prism", note: "Triangle facets" },
+  { key: "silver", name: "Silver", note: "Aluminium pressing" },
+  { key: "gold", name: "Gold", note: "Gold recordable" },
+  { key: "black", name: "Black", note: "Black polycarbonate" },
 ];

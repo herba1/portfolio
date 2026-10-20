@@ -1,9 +1,6 @@
 import { CARD_FRAGMENT, FULL_VERTEX } from "./refractorShader";
 
-const UNIFORMS = [
-  "uPhoto", "uMask", "uBack", "uRes", "uDpr", "uCenter", "uHalf", "uRot", "uLift", "uDist", "uGround", "uRadius", "uThick",
-  "uSleeve", "uKey", "uFill", "uFoil", "uArt", "uPaper", "uMaskRes", "uReady", "uSeed", "uGroundTint",
-];
+const UNIFORMS = ["uBack", "uRes", "uDpr", "uCenter", "uHalf", "uRot", "uLift", "uDist", "uGround", "uThick", "uKey", "uFill", "uFoil", "uData", "uReady", "uSeed", "uGroundTint"];
 
 function compile(gl, type, source) {
   const shader = gl.createShader(type);
@@ -56,23 +53,14 @@ export function createRefractorGL(canvas) {
     return tex;
   }
 
-  function build(key, image, prep) {
+  function build(key, prep) {
     if (sets.has(key)) return;
-    sets.set(key, {
-      photo: texture(image, true),
-      mask: texture(prep.mask, false),
-      back: texture(prep.back, true),
-      art: prep.art,
-      paper: prep.paper,
-      maskRes: prep.mask.width,
-    });
+    sets.set(key, { back: texture(prep.label, true), data: prep.data });
   }
 
   function evict(keep) {
     for (const [key, set] of sets) {
       if (keep.includes(key)) continue;
-      gl.deleteTexture(set.photo);
-      gl.deleteTexture(set.mask);
       gl.deleteTexture(set.back);
       sets.delete(key);
     }
@@ -95,14 +83,8 @@ export function createRefractorGL(canvas) {
     gl.viewport(0, 0, canvas.width, canvas.height);
     gl.useProgram(program);
     gl.bindVertexArray(vao);
-    if (set) {
-      bind(0, set.photo);
-      bind(1, set.mask);
-      bind(2, set.back);
-    }
-    gl.uniform1i(loc.uPhoto, 0);
-    gl.uniform1i(loc.uMask, 1);
-    gl.uniform1i(loc.uBack, 2);
+    if (set) bind(0, set.back);
+    gl.uniform1i(loc.uBack, 0);
     gl.uniform2f(loc.uRes, canvas.width, canvas.height);
     gl.uniform1f(loc.uDpr, f.dpr);
     gl.uniform2f(loc.uCenter, f.cx, f.cy);
@@ -111,16 +93,11 @@ export function createRefractorGL(canvas) {
     gl.uniform1f(loc.uLift, f.lift);
     gl.uniform1f(loc.uDist, f.dist);
     gl.uniform1f(loc.uGround, f.ground);
-    gl.uniform1f(loc.uRadius, f.radius);
     gl.uniform1f(loc.uThick, f.thick);
-    gl.uniform4f(loc.uSleeve, f.sleeve[0], f.sleeve[1], f.sleeve[2], 0);
     gl.uniform3f(loc.uKey, f.keyLight[0], f.keyLight[1], f.keyLight[2]);
     gl.uniform3f(loc.uFill, f.fillLight[0], f.fillLight[1], f.fillLight[2]);
     gl.uniform3f(loc.uFoil, f.foil[0], f.foil[1], f.foil[2]);
-    const art = set ? set.art : [0.06, 0.04, 0.94, 0.95];
-    gl.uniform4f(loc.uArt, art[0], art[1], art[2], art[3]);
-    gl.uniform1f(loc.uPaper, set ? set.paper : 0.88);
-    gl.uniform1f(loc.uMaskRes, set ? set.maskRes : 320);
+    gl.uniform1f(loc.uData, set ? set.data : 0.8);
     gl.uniform1f(loc.uReady, set ? 1 : 0);
     gl.uniform1f(loc.uSeed, f.seed);
     gl.uniform3f(loc.uGroundTint, f.tint[0], f.tint[1], f.tint[2]);
