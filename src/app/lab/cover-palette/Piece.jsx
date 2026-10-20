@@ -5,10 +5,10 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 
 import { NEUTRAL, ROLES, extractPalette, paint, themeFrom } from "./palette";
+import { createMosaic } from "./mosaic";
 import { queueFrom } from "./queue";
 import "./cover-palette.css";
 
-const SPILL = 1200;
 const ROWS = 3;
 
 const clock = (s) => {
@@ -29,19 +29,6 @@ function rowOf(i, a, b, n) {
   const p = (((i - a) % n) + n) % n;
   if (d > 0 && d <= n / 2 && p < d) return clamp(p - 1 - d, -ROWS - 1, ROWS * 2);
   return clamp(((((i - b) % n) + n) % n) - 1, -ROWS - 1, ROWS * 2);
-}
-
-function frontAt(f) {
-  let lo = 0;
-  let hi = 1;
-  for (let i = 0; i < 24; i += 1) {
-    const s = (lo + hi) / 2;
-    const y = 3 * (1 - s) * (1 - s) * s * 0.1 + 3 * (1 - s) * s * s + s * s * s;
-    if (y < f) lo = s;
-    else hi = s;
-  }
-  const s = (lo + hi) / 2;
-  return 3 * (1 - s) * (1 - s) * s * 0.25 + 3 * (1 - s) * s * s * 0.2 + s * s * s;
 }
 
 function Icon({ d, size = 20 }) {
@@ -71,19 +58,19 @@ export default function Piece({ embedded = false }) {
   const n = queue.length;
   const rootRef = useRef(null);
   const frameRef = useRef(null);
-  const infoRef = useRef(null);
+  const canvasRef = useRef(null);
+  const mosaicRef = useRef(null);
+  const imagesRef = useRef(new Map());
+  const atIdRef = useRef(null);
   const sliderRef = useRef(null);
   const elapsedRef = useRef(null);
   const leftRef = useRef(null);
   const posRef = useRef(0);
-  const delayRef = useRef(0);
   const huesRef = useRef({});
-  const keyRef = useRef(0);
   const stepRef = useRef(() => {});
   const dragRef = useRef(null);
   const [nav, setNav] = useState({ queue: null, at: 0, from: 0, before: 0 });
   const [themes, setThemes] = useState({});
-  const [spill, setSpill] = useState({ queue: null, list: [] });
   const [playing, setPlaying] = useState(false);
   const [liked, setLiked] = useState({});
 
@@ -92,7 +79,6 @@ export default function Piece({ embedded = false }) {
   const before = nav.queue === queue ? nav.before : 0;
   const item = queue[at];
   const theme = themes[item.id];
-  const layers = spill.queue === queue ? spill.list : [];
 
   useEffect(() => {
     let alive = true;
@@ -102,6 +88,9 @@ export default function Piece({ embedded = false }) {
       img.decoding = "async";
       const done = (t) => alive && setThemes((m) => (m[q.id] ? m : { ...m, [q.id]: t }));
       img.onload = () => {
+        if (!alive) return;
+        imagesRef.current.set(q.id, img);
+        if (atIdRef.current === q.id) mosaicRef.current?.show(img);
         let t = NEUTRAL;
         try {
           t = themeFrom(extractPalette(img));
@@ -134,27 +123,6 @@ export default function Piece({ embedded = false }) {
     if (n < 2) return;
     const next = ((to % n) + n) % n;
     if (next === at) return;
-    const root = rootRef.current;
-    const frame = frameRef.current;
-    const info = infoRef.current;
-    if (root && frame && info) {
-      const rr = root.getBoundingClientRect();
-      const fr = frame.getBoundingClientRect();
-      const ir = info.getBoundingClientRect();
-      const cx = fr.left + fr.width / 2 - rr.left;
-      const cy = fr.top + fr.height / 2 - rr.top;
-      const r = Math.max(Math.hypot(cx, cy), Math.hypot(rr.width - cx, cy), Math.hypot(cx, rr.height - cy), Math.hypot(rr.width - cx, rr.height - cy)) + 8;
-      const d = Math.hypot(ir.left + Math.min(ir.width, 240) / 2 - rr.left - cx, ir.top + ir.height / 2 - rr.top - cy);
-      delayRef.current = frontAt(clamp(d / r, 0, 1)) * SPILL;
-      keyRef.current += 1;
-      const key = keyRef.current;
-      const id = queue[next].id;
-      const base = item.id;
-      setSpill((sp) => {
-        const ls = sp.queue === queue && sp.list.length ? sp.list : [{ key: 0, id: base, still: true }];
-        return { queue, list: [...ls, { key, id, cx, cy, r }] };
-      });
-    }
     posRef.current = 0;
     setNav({ queue, at: next, from: at, before: from });
   };
@@ -171,6 +139,32 @@ export default function Piece({ embedded = false }) {
   useEffect(() => {
     stepRef.current = step;
   });
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const frame = frameRef.current;
+    if (!canvas || !frame) return undefined;
+    const mosaic = createMosaic(canvas);
+    mosaicRef.current = mosaic;
+    const fit = () => {
+      const r = frame.getBoundingClientRect();
+      mosaic.resize(frame.clientWidth || r.width, frame.clientHeight || r.height, Math.min(2, window.devicePixelRatio || 1));
+    };
+    fit();
+    const ro = new ResizeObserver(fit);
+    ro.observe(frame);
+    return () => {
+      ro.disconnect();
+      mosaic.destroy();
+      mosaicRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    atIdRef.current = item.id;
+    const img = imagesRef.current.get(item.id);
+    if (img) mosaicRef.current?.show(img);
+  }, [item.id]);
 
   useLayoutEffect(() => {
     paintTime();
@@ -199,7 +193,9 @@ export default function Piece({ embedded = false }) {
     const root = rootRef.current;
     if (!root || !theme) return;
     const hues = huesRef.current;
-    root.style.setProperty("--cp-delay", `${Math.round(delayRef.current)}ms`);
+    root.style.setProperty("--cp-g-bg", paint(theme.ground.bg));
+    root.style.setProperty("--cp-g-a", paint(theme.ground.glows[0]));
+    root.style.setProperty("--cp-g-b", paint(theme.ground.glows[1]));
     for (const role of ROLES) {
       const c = theme.roles[role];
       const prev = hues[role];
@@ -213,15 +209,6 @@ export default function Piece({ embedded = false }) {
     root.dataset.tone = theme.dark ? "dark" : "light";
     root.dataset.ready = "true";
   }, [theme]);
-
-  const settle = (key) => (e) => {
-    if (e.target !== e.currentTarget || e.propertyName !== "clip-path") return;
-    setSpill((sp) => {
-      const i = sp.list.findIndex((l) => l.key === key);
-      if (i < 0) return sp;
-      return { ...sp, list: sp.list.slice(i).map((l, j) => (j === 0 ? { ...l, still: true } : l)) };
-    });
-  };
 
   const seekTo = (clientX) => {
     const r = sliderRef.current.getBoundingClientRect();
@@ -278,56 +265,19 @@ export default function Piece({ embedded = false }) {
     return { now, snap: Math.abs(now - was) > (hi - lo) / 2 };
   };
 
-  const ground = layers.length ? layers : [{ key: 0, id: item.id, still: true }];
   const isLiked = Boolean(liked[item.id]);
 
   return (
     <div ref={rootRef} className="cp" data-embedded={embedded ? "true" : "false"} data-ready="false" data-playing={playing ? "true" : "false"} onKeyDown={onKeyDown}>
-      <div className="cp-ground" aria-hidden="true">
-        {ground.map((l) => {
-          const t = themes[l.id];
-          if (!t) return null;
-          return (
-            <div
-              key={l.key}
-              className="cp-layer"
-              data-still={l.still ? "true" : "false"}
-              onTransitionEnd={l.still ? undefined : settle(l.key)}
-              style={{
-                "--cx": `${l.cx ?? 0}px`,
-                "--cy": `${l.cy ?? 0}px`,
-                "--r": `${l.r ?? 0}px`,
-                "--g-bg": paint(t.ground.bg),
-                "--g-a": paint(t.ground.glows[0]),
-                "--g-b": paint(t.ground.glows[1]),
-              }}
-            />
-          );
-        })}
-      </div>
+      <div className="cp-ground" aria-hidden="true" />
 
       <div className="cp-scroll" data-scroll-contain>
         <div className="cp-layout">
           <div ref={frameRef} className="cp-frame">
-            {queue.map((q, i) => {
-              const s = slide(i, -1, 1);
-              return (
-                <img
-                  key={q.id}
-                  className="cp-art"
-                  src={q.cover}
-                  alt={i === at ? `${q.album ?? q.title} cover` : ""}
-                  aria-hidden={i === at ? undefined : true}
-                  crossOrigin={q.remote ? "anonymous" : undefined}
-                  draggable={false}
-                  data-snap={s.snap ? "true" : "false"}
-                  style={{ "--s": s.now }}
-                />
-              );
-            })}
+            <canvas ref={canvasRef} className="cp-art" role="img" aria-label={`${item.album ?? item.title} cover`} />
           </div>
 
-          <div ref={infoRef} className="cp-info">
+          <div className="cp-info">
             <p className="cp-from text-ui-lg">
               <span className="cp-bars" aria-hidden="true">
                 <i />

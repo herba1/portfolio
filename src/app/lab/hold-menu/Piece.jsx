@@ -15,10 +15,10 @@ const GAP = 12;
 const TOP = 72;
 const BOTTOM = 24;
 const ROOT_W = 280;
-const SUB_W = 248;
-const OVERLAP = 6;
 const DWELL = 380;
-const INTENT = 130;
+const RECEDE = 220;
+const PEEK = 40;
+const OPEN = 200;
 
 const itemsAt = (root, path, level) => {
   let items = root;
@@ -62,17 +62,8 @@ function Glyph({ d }) {
 }
 
 const CHEVRON_R = "M8 5l5 5-5 5";
-const CHEVRON_L = "M12 5l-5 5 5 5";
 
-function inTriangle(p, a, b, c) {
-  const s = (p1, p2, p3) => (p1.x - p3.x) * (p2.y - p3.y) - (p2.x - p3.x) * (p1.y - p3.y);
-  const d1 = s(p, a, b);
-  const d2 = s(p, b, c);
-  const d3 = s(p, c, a);
-  const neg = d1 < 0 || d2 < 0 || d3 < 0;
-  const pos = d1 > 0 || d2 > 0 || d3 > 0;
-  return !(neg && pos);
-}
+const CHEVRON_D = "M5 8l5 5 5-5";
 
 export default function Piece({ embedded = false }) {
   const { tracks, live } = useTopSongs(40);
@@ -93,7 +84,7 @@ export default function Piece({ embedded = false }) {
   const menuEl = useRef(null);
   const seq = useRef(1);
   const timers = useRef(new Map());
-  const pts = useRef([]);
+  const quiet = useRef(null);
 
   useEffect(() => {
     menuRef.current = menu;
@@ -192,7 +183,7 @@ export default function Piece({ embedded = false }) {
       const cur = navRef.current;
       if (cur.path.length <= level) return;
       const leaving = cur.path.slice(level).map((e, i) => ({ ...e, level: level + i + 1 }));
-      setNav({ path: cur.path.slice(0, level), hot: cur.hot.slice(0, level + 1), ghosts: [...cur.ghosts, ...leaving] });
+      setNav({ path: cur.path.slice(0, level), hot: cur.hot.slice(0, level + 1), ghosts: [...cur.ghosts, ...leaving], lift: level === 0 ? 0 : cur.lift });
       dropGhost(leaving.map((g) => g.key));
     },
     [setNav, dropGhost],
@@ -209,32 +200,23 @@ export default function Piece({ embedded = false }) {
       if (!item?.children) return;
       if (cur.path[level]?.index === index && cur.path.length === level + 1) return;
       const box = layer.getBoundingClientRect();
-      const entry = { id: item.id, index, key: seq.current++, label: item.label, items: item.children, parentLabel: level === 0 ? m.record.title : cur.path[level - 1].label };
-      if (!m.stacked) {
-        const row = layer.querySelector(`[data-level="${level}"][data-item="${index}"]`);
-        const frame = row?.closest("[data-frame]");
-        if (row && frame) {
-          const rr = row.getBoundingClientRect();
-          const fr = frame.getBoundingClientRect();
-          const h = item.children.length * ITEM_H;
-          const want = level === 0 ? (m.alignLeft ? "right" : "left") : cur.path[level - 1]?.side ?? "right";
-          const rightX = fr.right - box.left - OVERLAP;
-          const leftX = fr.left - box.left - SUB_W + OVERLAP;
-          const fitsRight = rightX + SUB_W <= box.width - 16;
-          const fitsLeft = leftX >= 16;
-          const side = want === "right" ? (fitsRight || !fitsLeft ? "right" : "left") : fitsLeft || !fitsRight ? "left" : "right";
-          entry.side = side;
-          entry.x = Math.max(16, Math.min(box.width - 16 - SUB_W, side === "right" ? rightX : leftX));
-          entry.y = Math.max(TOP, Math.min(box.height - BOTTOM - h, rr.top - box.top));
-        }
-      }
-      const swap = !m.stacked && cur.path.length > level;
+      const parent = level === 0 ? { x: m.menuLeft, y: m.menuTop } : cur.path[level - 1];
+      const rowTop = parent.y + (level === 0 ? 0 : ITEM_H) + index * ITEM_H;
+      const h = (item.children.length + 1) * ITEM_H;
+      const dx = (m.narrow ? 12 : 24) * (m.alignLeft ? 1 : -1);
+      const x = Math.max(16, Math.min(box.width - 16 - m.menuW, parent.x + dx));
+      const limit = box.height - BOTTOM;
+      const want = Math.max(TOP, rowTop, parent.y + PEEK);
+      const lift = Math.min(Math.max(0, m.top - 16), Math.max(0, want + h - limit));
+      const y = Math.max(TOP - lift, Math.min(want, limit + lift - h));
+      const entry = { id: item.id, index, key: seq.current++, label: item.label, items: item.children, x, y, lift, fx: parent.x - x, fy: rowTop - y };
+      const swap = cur.path.length > level;
       if (swap) entry.late = true;
       const leaving = cur.path.slice(level).map((e, i) => ({ ...e, level: level + i + 1, swap }));
       const hot = cur.hot.slice(0, level + 1);
       hot[level] = index;
       hot[level + 1] = viaKey ? 0 : -1;
-      setNav({ path: [...cur.path.slice(0, level), entry], hot, ghosts: [...cur.ghosts, ...leaving] });
+      setNav({ path: [...cur.path.slice(0, level), entry], hot, ghosts: [...cur.ghosts, ...leaving], lift: Math.max(cur.lift ?? 0, lift) });
       dropGhost(leaving.map((g) => g.key));
       tick();
     },
@@ -295,10 +277,11 @@ export default function Piece({ embedded = false }) {
       const r = el.getBoundingClientRect();
       const rect = { left: r.left - box.left, top: r.top - box.top, width: r.width, height: r.height };
       const items = menuFor(record);
-      const stacked = box.width < ROOT_W + SUB_W * 2 + 120;
-      const menuW = Math.min(stacked ? 300 : ROOT_W, box.width - 32);
-      const reserve = (stacked ? tallest(items) : items.length) * ITEM_H;
+      const narrow = box.width < 640;
+      const menuW = Math.min(narrow ? 300 : ROOT_W, box.width - 32);
+      const reserve = (narrow ? tallest(items) : items.length) * ITEM_H;
       const pos = place(rect, { width: box.width, height: box.height }, reserve, menuW);
+      pos.menuTop = pos.below ? pos.anchor : pos.anchor - items.length * ITEM_H;
       const st = spring.current;
       cancelAnimationFrame(st.raf);
       st.x = pos.from.x;
@@ -314,8 +297,9 @@ export default function Piece({ embedded = false }) {
       timers.current.forEach((t) => clearTimeout(t));
       timers.current.clear();
       setChosen(null);
+      quiet.current = null;
       setNav({ path: [], hot: [viaKey ? 0 : -1], ghosts: [] });
-      setMenu({ record, ...pos, stacked, viaKey, closing: false, n: performance.now() });
+      setMenu({ record, ...pos, narrow, viaKey, closing: false, n: performance.now() });
       setPressing(null);
       thunk();
     },
@@ -339,38 +323,23 @@ export default function Piece({ embedded = false }) {
     return { level: Number(el.dataset.level), index: el.hasAttribute("data-back") ? -1 : Number(el.dataset.item), back: el.hasAttribute("data-back") };
   };
 
-  const aiming = (level) => {
-    const layer = layerRef.current;
-    const entry = navRef.current.path[level];
-    const list = pts.current;
-    if (!layer || !entry || list.length < 2) return false;
-    const panel = layer.querySelector(`[data-frame="${entry.key}"]`);
-    if (!panel) return false;
-    const r = panel.getBoundingClientRect();
-    const p = list[list.length - 1];
-    const p0 = list.find((q) => p.t - q.t <= 120) ?? list[0];
-    const edge = entry.side === "left" ? r.right : r.left;
-    if (entry.side === "left" ? p.x < edge : p.x > edge) return false;
-    return inTriangle(p, { x: p0.x, y: p0.y }, { x: edge, y: r.top - 8 }, { x: edge, y: r.bottom + 8 });
-  };
-
   const onRowEnter = (level, index) => {
     const m = menuRef.current;
-    if (!m || m.closing) return;
+    if (!m || m.closing || quiet.current) return;
     const cur = navRef.current;
     const items = itemsAt(rootItemsRef.current, cur.path, level);
     const item = items[index];
     clearTimer(`intent-${level}`);
-    const openHere = cur.path[level]?.index === index;
-    const someOpen = cur.path.length > level && !openHere;
-    if (!m.stacked && someOpen && aiming(level)) {
-      later(`intent-${level}`, INTENT, () => onRowEnter(level, index));
+    if (level < cur.path.length) {
+      later(`intent-${level}`, RECEDE, () => {
+        if (item?.children && navRef.current.path[level]?.index !== index) openSub(level, index);
+        else back(level);
+        setHot(level, index);
+      });
       return;
     }
     setHot(level, index);
-    if (m.stacked) return;
-    if (item?.children && !openHere) later(`intent-${level}`, someOpen ? INTENT : 90, () => openSub(level, index));
-    else if (someOpen) later(`intent-${level}`, INTENT, () => back(level));
+    if (item?.children) later(`intent-${level}`, OPEN, () => openSub(level, index));
   };
 
   const onPanelEnter = (level) => {
@@ -388,9 +357,12 @@ export default function Piece({ embedded = false }) {
     if (!item) return;
     clearTimer(`intent-${level}`);
     if (item.children) {
-      if (cur.path[level]?.index === index) {
-        if (m.stacked || cur.path.length > level + 1) back(level + 1);
-      } else openSub(level, index);
+      if (cur.path[level]?.index === index) back(level);
+      else openSub(level, index);
+    } else if (level < cur.path.length) {
+      back(level);
+      setHot(level, index);
+      tick();
     } else choose(level, index);
   };
 
@@ -402,9 +374,17 @@ export default function Piece({ embedded = false }) {
     };
     root?.addEventListener("touchmove", onTouchMove, { passive: false });
     const onMove = (event) => {
-      const list = pts.current;
-      list.push({ x: event.clientX, y: event.clientY, t: performance.now() });
-      if (list.length > 8) list.shift();
+      const q = quiet.current;
+      if (q) {
+        if (q.x === null) {
+          q.x = event.clientX;
+          q.y = event.clientY;
+        } else if (Math.hypot(event.clientX - q.x, event.clientY - q.y) > 4) {
+          quiet.current = null;
+          const hit = event.pointerType === "mouse" ? hitAt(event.clientX, event.clientY) : null;
+          if (hit && !hit.back) onRowEnter(hit.level, hit.index);
+        }
+      }
       const p = press.current;
       if (!p || p.id !== event.pointerId) return;
       if (!p.opened) {
@@ -426,7 +406,12 @@ export default function Piece({ embedded = false }) {
         later("dwell", DWELL, () => back(hit.level - 1));
         return;
       }
-      if (event.pointerType !== "mouse" || menuRef.current?.stacked) {
+      const deep = navRef.current.path.length;
+      if (hit.level < deep) {
+        later("dwell", DWELL, () => back(hit.level));
+        return;
+      }
+      if (event.pointerType !== "mouse") {
         setHot(hit.level, hit.index);
         tick();
       }
@@ -453,6 +438,7 @@ export default function Piece({ embedded = false }) {
         back(hit.level - 1);
         return;
       }
+      if (hit.level < navRef.current.path.length) return;
       const item = itemsAt(rootItemsRef.current, navRef.current.path, hit.level)[hit.index];
       if (item?.children) openSub(hit.level, hit.index);
       else choose(hit.level, hit.index);
@@ -499,6 +485,7 @@ export default function Piece({ embedded = false }) {
   const onMenuKey = (event) => {
     const m = menuRef.current;
     if (!m || m.closing) return;
+    quiet.current = quiet.current ?? { x: null, y: null };
     const cur = navRef.current;
     const level = cur.path.length;
     const items = itemsAt(rootItems, cur.path, level);
@@ -529,7 +516,6 @@ export default function Piece({ embedded = false }) {
   const rows = (level, items, live = true) => {
     return items.map((item, i) => {
       const isOpen = nav.path[level]?.index === i;
-      const side = nav.path[level]?.side ?? (level === 0 ? (menu?.alignLeft ? "right" : "left") : nav.path[level - 1]?.side ?? "right");
       return (
         <button
           key={item.id}
@@ -540,7 +526,7 @@ export default function Piece({ embedded = false }) {
           data-level={live ? level : undefined}
           data-item={live ? i : undefined}
           data-hot={live && nav.hot[level] === i ? "" : undefined}
-          data-open={live && isOpen && !menu?.stacked ? "" : undefined}
+          data-open={live && isOpen ? "" : undefined}
           data-chosen={live && chosen === `${level}-${i}` ? "" : undefined}
           aria-haspopup={item.children ? "menu" : undefined}
           aria-expanded={item.children ? live && isOpen : undefined}
@@ -556,26 +542,30 @@ export default function Piece({ embedded = false }) {
           ) : null}
           <span className="hm-label">{item.label}</span>
           {item.meta ? <span className="hm-meta">{item.meta}</span> : null}
-          {item.children ? <Glyph d={!menu?.stacked && side === "left" ? CHEVRON_L : CHEVRON_R} /> : item.icon ? <Glyph d={item.icon} /> : null}
+          {item.children ? <Glyph d={CHEVRON_R} /> : item.icon ? <Glyph d={item.icon} /> : null}
         </button>
       );
     });
   };
 
   const backRow = (level, label, live = true) => (
-    <button type="button" tabIndex={-1} className="hm-item hm-back" data-level={live ? level : undefined} data-back={live ? "" : undefined} onClick={() => live && back(level - 1)}>
-      <Glyph d={CHEVRON_L} />
+    <button
+      type="button"
+      tabIndex={-1}
+      className="hm-item hm-back"
+      aria-label={`Back from ${label}`}
+      data-level={live ? level : undefined}
+      data-back={live ? "" : undefined}
+      onClick={() => live && back(level - 1)}
+    >
       <span className="hm-label">{label}</span>
+      <Glyph d={CHEVRON_D} />
     </button>
   );
 
   const Root = embedded ? "div" : "main";
   const record = menu?.record;
   const isOpen = menu && !menu.closing;
-  const heightOf = (level) => (itemsAt(rootItems, nav.path, level).length + (level > 0 ? 1 : 0)) * ITEM_H;
-  const frameH = menu?.stacked ? heightOf(depth) : null;
-  const frameTop = menu ? (menu.below ? menu.anchor : menu.anchor - (frameH ?? rootItems.length * ITEM_H)) : 0;
-
   return (
     <Root ref={rootRef} className="hm-root" data-embedded={embedded ? "" : undefined} data-open={isOpen ? "" : undefined}>
       <div className="hm-page">
@@ -624,76 +614,58 @@ export default function Piece({ embedded = false }) {
       </div>
       <div className="hm-veil" aria-hidden="true" onPointerDown={close} />
       {menu ? (
-        <div ref={layerRef} className="hm-layer" data-closing={menu.closing ? "" : undefined}>
+        <div ref={layerRef} className="hm-layer" data-closing={menu.closing ? "" : undefined} style={{ "--lift": menu.closing ? 0 : nav.lift ?? 0 }}>
           <div ref={cloneRef} className="hm-lifted" style={{ left: menu.left, top: menu.top, width: menu.size, height: menu.size }}>
             <img src={record.cover} alt={record.title} draggable={false} />
           </div>
-          {menu.stacked ? (
-            <div
-              ref={menuEl}
-              className="hm-menu"
-              data-frame="root"
-              data-stacked=""
-              role="menu"
-              tabIndex={-1}
-              aria-label={`${record.title} actions`}
-              data-below={menu.below ? "" : undefined}
-              data-left={menu.alignLeft ? "" : undefined}
-              style={{ left: menu.menuLeft, top: frameTop, width: menu.menuW, height: frameH }}
-              onKeyDown={onMenuKey}
-            >
-              <div className="hm-panel" data-pos={depth > 0 ? "under" : "on"} inert={depth > 0 ? true : undefined}>
-                {rows(0, rootItems)}
-              </div>
-              {panels.map((e) => {
-                const live = !e.ghost;
-                const pos = e.ghost ? "off" : e.level < depth ? "under" : "on";
-                return (
-                  <div key={e.key} className="hm-panel" data-pos={pos} inert={pos !== "on" ? true : undefined} role="menu" aria-label={e.label} aria-hidden={live ? undefined : "true"}>
-                    {backRow(e.level, e.parentLabel, live)}
-                    {rows(e.level, e.items, live)}
-                  </div>
-                );
-              })}
-            </div>
-          ) : (
-            <>
+          <div
+            ref={menuEl}
+            className="hm-menu"
+            data-frame="root"
+            role="menu"
+            tabIndex={-1}
+            aria-label={`${record.title} actions`}
+            data-below={menu.below ? "" : undefined}
+            data-left={menu.alignLeft ? "" : undefined}
+            data-under={depth > 0 ? "" : undefined}
+            style={{ left: menu.menuLeft, top: menu.menuTop, width: menu.menuW, "--d": depth, "--rx": menu.alignLeft ? "-1" : "1" }}
+            onKeyDown={onMenuKey}
+          >
+            {rows(0, rootItems)}
+          </div>
+          {panels.map((e) => {
+            const d = e.ghost ? 0 : depth - e.level;
+            return (
               <div
-                ref={menuEl}
-                className="hm-menu"
-                data-frame="root"
+                key={e.key}
+                className="hm-menu hm-sub"
+                data-frame={e.ghost ? undefined : e.key}
+                data-leaving={e.ghost ? "" : undefined}
+                data-swap={e.ghost && e.swap ? "" : undefined}
+                data-late={!e.ghost && e.late ? "" : undefined}
+                data-under={d > 0 ? "" : undefined}
                 role="menu"
-                tabIndex={-1}
-                aria-label={`${record.title} actions`}
-                data-below={menu.below ? "" : undefined}
-                data-left={menu.alignLeft ? "" : undefined}
-                style={{ left: menu.menuLeft, top: frameTop, width: menu.menuW }}
-                onKeyDown={onMenuKey}
+                aria-label={e.label}
+                aria-hidden={e.ghost ? "true" : undefined}
+                style={{
+                  left: e.x,
+                  top: e.y,
+                  width: menu.menuW,
+                  "--h": `${(e.items.length + 1) * ITEM_H}px`,
+                  "--fx": `${e.fx}px`,
+                  "--fy": `${e.fy}px`,
+                  "--d": d,
+                  "--rx": menu.alignLeft ? "-1" : "1",
+                }}
+                onPointerEnter={(ev) => {
+                  if (!e.ghost && ev.pointerType === "mouse") onPanelEnter(e.level);
+                }}
               >
-                {rows(0, rootItems)}
+                {backRow(e.level, e.label, !e.ghost)}
+                {rows(e.level, e.items, !e.ghost)}
               </div>
-              {panels.map((e) => (
-                <div
-                  key={e.key}
-                  className="hm-menu hm-sub"
-                  data-frame={e.ghost ? undefined : e.key}
-                  data-side={e.side}
-                  data-leaving={e.ghost ? "" : undefined}
-                  data-swap={e.ghost && e.swap ? "" : undefined}
-                  data-late={!e.ghost && e.late ? "" : undefined}
-                  role="menu"
-                  aria-label={e.label}
-                  aria-hidden={e.ghost ? "true" : undefined}
-                  style={{ left: e.x, top: e.y, width: SUB_W }}
-                  onPointerEnter={(ev) => {
-                    if (!e.ghost && ev.pointerType === "mouse") onPanelEnter(e.level);
-                  }}
-                >
-                  {rows(e.level, e.items, !e.ghost)}
-                </div>
-              ))}
-            </>
-          )}
+            );
+          })}
         </div>
       ) : null}
       <p className="hm-pill" data-show={pill?.show ? "" : undefined} aria-live="polite">

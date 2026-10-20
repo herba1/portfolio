@@ -1,3 +1,21 @@
+@property --cp-g-bg {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.93 0.005 80);
+}
+
+@property --cp-g-a {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.88 0.01 80);
+}
+
+@property --cp-g-b {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: oklch(0.96 0.005 80);
+}
+
 @property --cp-line-l {
   syntax: "<number>";
   inherits: true;
@@ -107,11 +125,9 @@
 }
 
 .cp {
-  --cp-spill: 1200ms;
-  --cp-tone: 420ms;
-  --cp-delay: 0ms;
+  --cp-resolve: 940ms;
+  --cp-half: 400ms;
   --cp-ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --cp-flood: cubic-bezier(0.25, 0.1, 0.2, 1);
   --cp-glide: cubic-bezier(0.32, 0.72, 0, 1);
   --cp-line: oklch(var(--cp-line-l) var(--cp-line-c) var(--cp-line-h));
   --cp-ink: oklch(var(--cp-ink-l) var(--cp-ink-c) var(--cp-ink-h));
@@ -127,24 +143,27 @@
   color: var(--cp-ink);
   container: cp / size;
   transition:
-    --cp-line-l 160ms var(--cp-ease) calc(var(--cp-delay) - 80ms),
-    --cp-line-c var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-line-h var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-ink-l 160ms var(--cp-ease) calc(var(--cp-delay) - 80ms),
-    --cp-ink-c var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-ink-h var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-ink2-l 160ms var(--cp-ease) calc(var(--cp-delay) - 80ms),
-    --cp-ink2-c var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-ink2-h var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-accent-l 160ms var(--cp-ease) calc(var(--cp-delay) - 80ms),
-    --cp-accent-c var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-accent-h var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-onaccent-l 160ms var(--cp-ease) calc(var(--cp-delay) - 80ms),
-    --cp-onaccent-c var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-onaccent-h var(--cp-tone) var(--cp-ease) calc(var(--cp-delay) - 210ms),
-    --cp-shadow-l var(--cp-spill) var(--cp-ease) 0ms,
-    --cp-shadow-c var(--cp-spill) var(--cp-ease) 0ms,
-    --cp-shadow-h var(--cp-spill) var(--cp-ease) 0ms;
+    --cp-line-l var(--cp-resolve) steps(10, end),
+    --cp-line-c var(--cp-resolve) steps(10, end),
+    --cp-line-h var(--cp-resolve) steps(10, end),
+    --cp-ink-l var(--cp-half) steps(1, end),
+    --cp-ink-c var(--cp-resolve) steps(10, end),
+    --cp-ink-h var(--cp-resolve) steps(10, end),
+    --cp-ink2-l var(--cp-half) steps(1, end),
+    --cp-ink2-c var(--cp-resolve) steps(10, end),
+    --cp-ink2-h var(--cp-resolve) steps(10, end),
+    --cp-accent-l var(--cp-resolve) steps(10, end),
+    --cp-accent-c var(--cp-resolve) steps(10, end),
+    --cp-accent-h var(--cp-resolve) steps(10, end),
+    --cp-onaccent-l var(--cp-half) steps(1, end),
+    --cp-onaccent-c var(--cp-resolve) steps(10, end),
+    --cp-onaccent-h var(--cp-resolve) steps(10, end),
+    --cp-shadow-l var(--cp-resolve) steps(10, end),
+    --cp-shadow-c var(--cp-resolve) steps(10, end),
+    --cp-shadow-h var(--cp-resolve) steps(10, end),
+    --cp-g-bg var(--cp-resolve) steps(10, end),
+    --cp-g-a var(--cp-resolve) steps(10, end),
+    --cp-g-b var(--cp-resolve) steps(10, end);
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
@@ -170,29 +189,11 @@
   position: absolute;
   inset: 0;
   overflow: hidden;
+  background: var(--cp-g-bg);
 }
 
-.cp-layer {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  background: var(--g-bg);
-  clip-path: circle(var(--r) at var(--cx) var(--cy));
-  transition: clip-path var(--cp-spill) var(--cp-flood);
-}
-
-@starting-style {
-  .cp-layer[data-still="false"] {
-    clip-path: circle(0px at var(--cx) var(--cy));
-  }
-}
-
-.cp-layer[data-still="true"] {
-  clip-path: none;
-}
-
-.cp-layer::before,
-.cp-layer::after {
+.cp-ground::before,
+.cp-ground::after {
   content: "";
   position: absolute;
   width: 90cqmax;
@@ -201,17 +202,17 @@
   will-change: transform;
 }
 
-.cp-layer::before {
+.cp-ground::before {
   top: -40cqmax;
   left: -30cqmax;
-  background: radial-gradient(closest-side, var(--g-a), transparent);
+  background: radial-gradient(closest-side, var(--cp-g-a), transparent);
   animation: cp-drift-a 26s ease-in-out infinite alternate;
 }
 
-.cp-layer::after {
+.cp-ground::after {
   right: -36cqmax;
   bottom: -44cqmax;
-  background: radial-gradient(closest-side, var(--g-b), transparent);
+  background: radial-gradient(closest-side, var(--cp-g-b), transparent);
   animation: cp-drift-b 32s ease-in-out infinite alternate;
 }
 
@@ -279,14 +280,11 @@
 .cp-art {
   position: absolute;
   inset: 0;
+  display: block;
   width: 100%;
   height: 100%;
-  object-fit: cover;
-  transform: translateX(calc(var(--s) * (100% + 24px)));
-  transition: transform 860ms var(--cp-glide);
 }
 
-.cp-art[data-snap="true"],
 .cp-title[data-snap="true"],
 .cp-sub[data-snap="true"],
 .cp-row-cell[data-snap="true"] {
@@ -650,19 +648,17 @@
 
 @media (prefers-reduced-motion: reduce) {
   .cp {
-    --cp-spill: 1ms;
     transition: none;
   }
 
-  .cp-art,
   .cp-title,
   .cp-sub,
   .cp-row-cell {
     transition-duration: 1ms;
   }
 
-  .cp-layer::before,
-  .cp-layer::after,
+  .cp-ground::before,
+  .cp-ground::after,
   .cp[data-playing="true"] .cp-bars i {
     animation: none;
   }

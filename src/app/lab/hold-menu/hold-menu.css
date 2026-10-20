@@ -1,5 +1,6 @@
 .hm-root {
   --hm-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --hm-spring: linear(0, 0.0237, 0.0838, 0.1662, 0.2603, 0.3584, 0.4547, 0.5456, 0.6286, 0.7025, 0.7668, 0.8216, 0.8674, 0.9049, 0.9351, 0.9588, 0.977, 0.9906, 1.0004, 1.0071, 1.0114, 1.0139, 1.015, 1.0151, 1.0145, 1.0134, 1.0121, 1.0106, 1.0091, 1.0077, 1.0063, 1.0051, 1.0041, 1.0032, 1.0024, 1.0018, 1.0012, 1.0008, 1.0005, 1.0003, 1);
   --hm-cover: clamp(144px, min((100cqw - 96px - 3 * 32px) / 4, (100cqh - 136px - 2 * 56px - 32px - 48px) / 2), 248px);
   position: relative;
   width: 100%;
@@ -169,6 +170,8 @@
   inset: 0;
   z-index: 10;
   pointer-events: none;
+  transform: translateY(calc(var(--lift, 0) * -1px));
+  transition: transform 620ms var(--hm-spring);
 }
 
 .hm-lifted {
@@ -208,7 +211,29 @@
   transform-origin: 0 0;
   outline: none;
   pointer-events: auto;
-  animation: hm-unfold 300ms var(--hm-ease) both;
+  animation: hm-unfold 300ms var(--hm-ease) backwards;
+  --d: 0;
+  --rx: 1;
+  transform: translate(calc(var(--rx) * var(--d) * 8px), calc(var(--d) * -4px)) scale(calc(1 - var(--d) * 0.06));
+  transition:
+    transform 620ms var(--hm-spring),
+    box-shadow 320ms var(--hm-ease);
+}
+
+.hm-menu::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  background: rgb(24 22 28 / calc(var(--d) * 0.07));
+  pointer-events: none;
+  transition: background-color 320ms var(--hm-ease);
+}
+
+.hm-menu[data-under] {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.06),
+    0 8px 16px -12px rgb(0 0 0 / 0.16);
 }
 
 .hm-menu:not([data-left]) {
@@ -251,87 +276,47 @@
 }
 
 .hm-sub {
+  height: var(--h);
   animation: none;
-  transform-origin: 0 0;
+  transform-origin: 50% 0;
   transition:
-    opacity 180ms var(--hm-ease),
-    transform 240ms var(--hm-ease);
-}
-
-.hm-sub[data-side="left"] {
-  transform-origin: 100% 0;
+    transform 620ms var(--hm-spring),
+    height 420ms var(--hm-ease),
+    box-shadow 320ms var(--hm-ease),
+    opacity 120ms linear;
 }
 
 @starting-style {
   .hm-sub {
-    opacity: 0;
-    transform: translateX(-12px) scale(0.94);
-  }
-
-  .hm-sub[data-side="left"] {
-    opacity: 0;
-    transform: translateX(12px) scale(0.94);
+    height: 48px;
+    transform: translate(var(--fx), var(--fy));
   }
 }
 
 .hm-sub[data-late] {
-  transition-delay: 70ms;
+  transition-delay: 60ms;
 }
 
 .hm-sub[data-leaving] {
+  height: 48px;
   opacity: 0;
-  transform: translateX(-12px) scale(0.94);
+  transform: translate(var(--fx), var(--fy));
   pointer-events: none;
   transition:
-    opacity 140ms cubic-bezier(0.4, 0, 1, 1),
-    transform 160ms cubic-bezier(0.4, 0, 1, 1);
-}
-
-.hm-sub[data-side="left"][data-leaving] {
-  transform: translateX(12px) scale(0.94);
+    transform 380ms var(--hm-ease),
+    height 300ms var(--hm-ease),
+    opacity 100ms linear 280ms;
 }
 
 .hm-sub[data-leaving][data-swap] {
-  transition-duration: 80ms;
+  transition:
+    transform 240ms var(--hm-ease),
+    height 200ms var(--hm-ease),
+    opacity 80ms linear 160ms;
 }
 
 .hm-layer[data-closing] .hm-sub:not([data-leaving]) {
   animation: hm-fold 160ms cubic-bezier(0.4, 0, 1, 1) both;
-}
-
-.hm-menu[data-stacked] {
-  transition:
-    height 320ms var(--hm-ease),
-    top 320ms var(--hm-ease);
-}
-
-.hm-panel {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-surface-raised);
-  transition: transform 320ms var(--hm-ease);
-}
-
-.hm-panel[data-pos="under"] {
-  transform: translateX(-32%);
-}
-
-.hm-panel[data-pos="off"] {
-  transform: translateX(100%);
-}
-
-@starting-style {
-  .hm-panel {
-    transform: translateX(100%);
-  }
-}
-
-.hm-panel + .hm-panel {
-  box-shadow: -12px 0 24px -16px rgb(0 0 0 / 0.24);
 }
 
 .hm-item {
@@ -397,14 +382,7 @@
 }
 
 .hm-back {
-  gap: 8px;
-  padding-left: 12px;
-  color: var(--color-ink-secondary);
   font-weight: var(--font-weight-strong);
-}
-
-.hm-back svg {
-  order: -1;
 }
 
 .hm-item[data-open] {

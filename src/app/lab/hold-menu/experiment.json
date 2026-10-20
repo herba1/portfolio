@@ -1,6 +1,6 @@
 {
   "title": "Hold Menu",
-  "description": "A shelf of records with an iOS-style long press that branches. Hold a cover and it lifts free on a spring while the shelf softens behind it; the menu opens beside it, and Add to Playlist and Share open real submenus, with Share going one level deeper into Messages and a contact. Submenus cascade out from the row that opened them with hover intent that forgives a diagonal reach, close back into it, and on a phone push in from the right with a back row. Slide and release to choose, or drive the whole tree with arrow keys, Enter and Escape.",
+  "description": "A shelf of records with an iOS-style long press that branches into layers. Hold a cover and it lifts free on a spring; the menu opens beside it. Add to Playlist and Share lift out of their row as a new card on top, and the level you came from sinks back behind it, scaled down, shifted and shaded, so the nesting reads as a stack: Share, then Messages, then a contact. Reach back onto a layer peeking behind and it springs forward again while the front card folds back into its row. Slide and release to choose, tap on a phone, or drive the whole stack with arrow keys, Enter and Escape.",
   "tags": [
     "Menu",
     "Gesture",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:40:00.000Z",
-  "intent": "The context-menu moment finished to the edge, now with depth: every layer opens from and closes into the row it belongs to, the pointer can cut a corner toward a submenu without losing it, and the same tree reads as a stacked push and pop when there is no room to cascade.",
+  "intent": "Depth you can read: every submenu is a layer lifted out of the row that owns it, previous levels recede behind it on springs, and going back brings them forward, at any width.",
   "tile": {
     "cols": 4,
     "rows": 4
