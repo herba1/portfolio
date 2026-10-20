@@ -6,7 +6,7 @@ import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 
 import { createFlow } from "./flow";
 import { recordsFrom } from "./records";
-import { readSleeve } from "./sleeve";
+import { isPlain, readSleeve } from "./sleeve";
 import { createTicks } from "./tick";
 import "./coverflow.css";
 
@@ -80,6 +80,8 @@ export default function Piece({ embedded = false }) {
   const [flipped, setFlipped] = useState(-1);
   const [playing, setPlaying] = useState(null);
   const [sleeves, setSleeves] = useState({});
+  const [loaded, setLoaded] = useState({ records: null, map: {} });
+  const [late, setLate] = useState(null);
   const center = view.records === records ? view.center : startOf(records);
 
   useEffect(() => {
@@ -90,17 +92,25 @@ export default function Piece({ embedded = false }) {
       img.onload = () => {
         if (!alive) return;
         let tone = null;
+        let plain = false;
         try {
           tone = readSleeve(img);
+          plain = isPlain(img);
         } catch {
           tone = null;
         }
         setSleeves((m) => (m[r.id] === tone ? m : { ...m, [r.id]: tone }));
+        setLoaded((l) => ({ records, map: { ...(l.records === records ? l.map : {}), [r.id]: plain ? "plain" : "ok" } }));
+      };
+      img.onerror = () => {
+        if (alive) setLoaded((l) => ({ records, map: { ...(l.records === records ? l.map : {}), [r.id]: "failed" } }));
       };
       img.src = r.cover;
     }
+    const timer = setTimeout(() => alive && setLate(records), 4000);
     return () => {
       alive = false;
+      clearTimeout(timer);
     };
   }, [records]);
 
@@ -132,6 +142,9 @@ export default function Piece({ embedded = false }) {
   }, [records]);
 
   const album = records[center] ?? records[0];
+  const state = loaded.records === records ? loaded.map : {};
+  const first = startOf(records);
+  const ready = late === records || records.every((r, i) => Math.abs(i - first) > 4 || state[r.id]);
 
   return (
     <div
@@ -146,7 +159,7 @@ export default function Piece({ embedded = false }) {
     >
       {!embedded && <h1 className="cf-heading text-heading">Cover Flow</h1>}
 
-      <div className="cf-stage" data-cf-stage>
+      <div className="cf-stage" data-cf-stage data-ready={ready ? "true" : "false"}>
         {records.map((a, i) => (
           <div
             key={a.id}
@@ -157,6 +170,8 @@ export default function Piece({ embedded = false }) {
             role="option"
             aria-selected={i === center}
             aria-label={a.year ? `${a.title}, ${a.artist}, ${a.year}` : `${a.title}, ${a.artist}`}
+            data-loaded={state[a.id] === "ok" || state[a.id] === "plain" ? "true" : "false"}
+            data-plain={state[a.id] === "plain" ? "true" : undefined}
             style={{ "--cf-sleeve": sleeves[a.id] ?? "hsl(30 6% 14%)" }}
           >
             <div className="cf-face cf-front">

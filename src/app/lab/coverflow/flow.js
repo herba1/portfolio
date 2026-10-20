@@ -5,6 +5,11 @@ const DAMPING = 2 * Math.sqrt(STIFFNESS) * 0.96;
 const FLIP_K = 70;
 const FLIP_D = 2 * Math.sqrt(FLIP_K);
 const LIGHT = 28;
+const ANG = 74;
+const Z_CENTER = 0.26;
+const Z_SIDE = -0.22;
+const GAP = 0.04;
+const PERSP = 5;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const glint = (deg) => {
@@ -43,12 +48,86 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     const y = Math.max(0, (h - size * 1.38) * 0.68) + size / 2;
     root.style.setProperty("--cf-size", `${size}px`);
     root.style.setProperty("--cf-y", `${Math.round(y)}px`);
-    stage.style.perspective = `${Math.round(size * 3.2)}px`;
+    stage.style.perspective = `${Math.round(size * PERSP)}px`;
+  };
+
+  const pose = (t) => {
+    const near = Math.min(Math.abs(t), 1);
+    return { near, th: near * ANG, z: ((1 - near) * Z_CENTER + near * Z_SIDE) * size };
+  };
+
+  const shape = (th, z, scale = 1) => {
+    const r = (th * Math.PI) / 180;
+    return { c: (size / 2) * scale * Math.abs(Math.cos(r)), e: (size / 2) * scale * Math.abs(Math.sin(r)), z };
+  };
+  const kAt = (z) => {
+    const P = size * PERSP;
+    return P / Math.max(P * 0.15, P - z);
+  };
+  const shapeAt = (t) => {
+    const p = pose(t);
+    return shape(p.th, p.z);
+  };
+  const nextOut = (x, from, to, gap) => to.c + ((x + from.c) * kAt(from.z + from.e) + gap) / kAt(to.z - to.e);
+
+  const N = 64;
+  let base = null;
+  let baseSize = 0;
+  const solveBase = () => {
+    baseSize = size;
+    const gap = GAP * size;
+    base = new Float64Array(N + 1);
+    const one = shapeAt(1);
+    const x1 = one.c + ((size / 2) * kAt(Z_CENTER * size) + gap) / kAt(one.z - one.e);
+    for (let j = 0; j <= N; j += 1) base[j] = (x1 * j) / N;
+    for (let it = 0; it < 60; it += 1) {
+      for (let j = 1; j < N; j += 1) {
+        const t = j / N;
+        const b = shapeAt(t);
+        const a = shapeAt(1 - t);
+        const edgeA = (-base[N - j] + a.c) * kAt(a.z - a.e);
+        const need = b.c + (edgeA + gap) / kAt(b.z - b.e);
+        base[j] = Math.max(base[j], need, base[j - 1]);
+      }
+      base[N] = x1;
+    }
+  };
+
+  const span = (d) => {
+    if (!base || baseSize !== size) solveBase();
+    const t = Math.abs(d);
+    const n = Math.floor(t);
+    const frac = t - n;
+    const k = frac * N;
+    const j = Math.min(N - 1, Math.floor(k));
+    let x = base[j] + (base[j + 1] - base[j]) * (k - j);
+    const gap = GAP * size;
+    for (let m = 1; m <= n && m <= 12; m += 1) x = nextOut(x, shapeAt(frac + m - 1), shapeAt(frac + m), gap);
+    return Math.sign(d) * x;
   };
 
   const paint = () => {
-    const spread = size * 0.6;
-    const step = size * 0.2;
+    let pushAt = -1;
+    let pushR = 0;
+    let pushL = 0;
+    for (let i = 0; i < items.length; i += 1) {
+      const f = flipA[i] / 180;
+      if (f <= 0.001) continue;
+      const d = i - pos;
+      const p = pose(d);
+      const lift = Math.sin(Math.PI * clamp(f, 0, 1));
+      const grow = 1 + 0.1 * clamp(f, 0, 1) * (1 - p.near);
+      const me = shape(p.th + flipA[i], p.z + lift * size * 0.34, grow);
+      const x = span(d);
+      const reachR = Math.max((x + me.c) * kAt(me.z + me.e), (x + me.c) * kAt(me.z - me.e));
+      const reachL = Math.min((x - me.c) * kAt(me.z + me.e), (x - me.c) * kAt(me.z - me.e));
+      const gap = GAP * size;
+      const r = shapeAt(d + 1);
+      const l = shapeAt(d - 1);
+      pushR = Math.max(0, r.c + (reachR + gap) / kAt(r.z - r.e) - span(d + 1));
+      pushL = Math.max(0, l.c + (-reachL + gap) / kAt(l.z - l.e) + span(d - 1));
+      pushAt = i;
+    }
     for (let i = 0; i < items.length; i += 1) {
       const d = i - pos;
       const ad = Math.abs(d);
@@ -59,17 +138,20 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
       }
       el.style.visibility = "visible";
       const a = clamp(d, -1, 1);
-      const x = a * spread + (ad > 1 ? Math.sign(d) * (ad - 1) * step : 0);
-      const near = Math.min(ad, 1);
-      const rot = -a * 66;
+      const p = pose(d);
+      const near = p.near;
+      const shift = pushAt < 0 || i === pushAt ? 0 : i > pushAt ? pushR : -pushL;
+      const x = span(d) + shift;
+      const rot = -a * ANG;
       const f = flipA[i] / 180;
       const lift = Math.sin(Math.PI * clamp(f, 0, 1));
       const grow = 1 + 0.1 * clamp(f, 0, 1) * (1 - near);
-      const z = (1 - near) * size * 0.28 - near * size * 0.12 + lift * size * 0.34;
+      const z = p.z + lift * size * 0.34;
       const turn = rot + flipA[i];
       el.style.transform = `translate3d(${x.toFixed(2)}px,0,${z.toFixed(2)}px) rotateY(${turn.toFixed(2)}deg) scale(${grow.toFixed(4)})`;
       el.style.zIndex = String(1000 - Math.round(ad * 10) + (f > 0.001 ? 20 : 0));
       el.style.setProperty("--cf-shade", (near * 0.42 + Math.max(0, ad - 1) * 0.06).toFixed(3));
+      el.style.setProperty("--cf-dir", d >= 0 ? "90deg" : "270deg");
       const gf = glint(turn);
       const gb = glint(turn - 180);
       el.style.setProperty("--cf-gf", gf.at.toFixed(3));

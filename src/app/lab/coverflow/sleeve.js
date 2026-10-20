@@ -38,3 +38,25 @@ export function readSleeve(img) {
   const light = hue >= 40 && hue <= 170 ? 15 : 19;
   return `hsl(${hue} ${sat}% ${light}%)`;
 }
+
+export function isPlain(img) {
+  const n = 32;
+  const canvas = document.createElement("canvas");
+  canvas.width = n;
+  canvas.height = n;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.drawImage(img, 0, 0, n, n);
+  const { data } = ctx.getImageData(0, 0, n, n);
+  let sum = 0;
+  let sq = 0;
+  const count = n * n;
+  for (let i = 0; i < data.length; i += 4) {
+    const y = (data[i] * 0.2126 + data[i + 1] * 0.7152 + data[i + 2] * 0.0722) / 255;
+    sum += y;
+    sq += y * y;
+  }
+  const mean = sum / count;
+  const sd = Math.sqrt(Math.max(0, sq / count - mean * mean));
+  return mean > 0.85 && sd < 0.05;
+}

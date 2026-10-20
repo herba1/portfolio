@@ -238,9 +238,24 @@
 .cf-shade {
   position: absolute;
   inset: 0;
-  background: #000;
-  opacity: var(--cf-shade, 0);
+  background: linear-gradient(var(--cf-dir, 90deg), rgb(0 0 0 / calc(var(--cf-shade, 0) * 1.2)), rgb(0 0 0 / calc(var(--cf-shade, 0) * 0.5)));
   pointer-events: none;
+}
+
+.cf-stage {
+  transition: opacity 360ms ease-out;
+}
+
+.cf-stage[data-ready="false"] {
+  opacity: 0;
+}
+
+.cf-item[data-loaded="false"] {
+  visibility: hidden;
+}
+
+.cf-item[data-plain] .cf-cover {
+  filter: brightness(0.69) contrast(2.46);
 }
 
 .cf-mirror {
