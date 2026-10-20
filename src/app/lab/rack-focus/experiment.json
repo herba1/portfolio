@@ -1,0 +1,26 @@
+{
+  "title": "Rack Focus",
+  "description": "A night street drawn in code, sodium lamps, a string of bulbs, a neon sign, tail lights and their streaks on the wet road, behind one line of white type. Tap the words or any light and focus racks to it like a follow-focus: the lights resolve into points while the type melts, or bloom into seven-bladed bokeh discs with bright rims, colour fringes and cat's-eye edges while the type snaps sharp. Turn the distance scale to pull focus by hand.",
+  "tags": ["WebGL", "Optics", "Photography", "Type"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T12:00:00.000Z",
+  "intent": "One photographic mechanic, focus distance, finished to the edge: every light has a real distance, its blur disc is the thin-lens circle of confusion for the current focus, and the type sits at its own distance in the same scene, so pulling focus moves the sharpness through the street instead of fading two layers.",
+  "tile": { "cols": 4, "rows": 3 },
+  "sources": [
+    {
+      "name": "XorDev, Bokeh",
+      "url": "https://github.com/XorDev/Bokeh",
+      "what": "The golden-angle (Vogel) disc gather for the background and type blur, re-derived; disc kernels instead of Gaussians so soft edges keep a lens shape."
+    },
+    {
+      "name": "Bartosz Ciechanowski, Cameras and Lenses",
+      "url": "https://ciechanow.ski/cameras-and-lenses/",
+      "what": "The circle of confusion scaling with the difference in inverse distance from the focus plane, aperture-blade disc shapes, and the cat's-eye clipping toward the frame edge from mechanical vignetting."
+    },
+    {
+      "name": "Jhey Tompkins, Osaka card",
+      "url": "https://github.com/jh3y/osaka-card",
+      "what": "The idea of layered depth with blur rising by distance from the subject, used here as true per-light depth instead of stacked panes."
+    }
+  ]
+}
