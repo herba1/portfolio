@@ -88,12 +88,10 @@ function paintText(ctx, text) {
 }
 
 function wobble(g) {
-  const grow = Math.min(1, g / 64);
-  const s = 1 + (0.003 + 0.002 * grow) * Math.sin(g * 2.399 + 0.6);
-  const r = (0.0009 + 0.0008 * grow) * Math.sin(g * 1.31 + 2.1);
-  const dx = (0.1 + 0.18 * grow) * Math.sin(g * 1.73);
-  const dy = (0.1 + 0.18 * grow) * Math.cos(g * 2.29);
-  return { s, r, dx, dy };
+  const grow = Math.min(1, g / 48);
+  const dx = Math.round((0.6 + 0.9 * grow) * Math.sin(g * 1.73 + 0.4));
+  const dy = Math.round((0.6 + 0.9 * grow) * Math.cos(g * 2.29 + 1.1));
+  return { dx, dy };
 }
 
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
@@ -115,10 +113,10 @@ export function createGeneration({ canvas, ghost, card, onState }) {
   const headCtx = head.getContext("2d", { alpha: false });
   const pass = make();
   const passCtx = pass.getContext("2d", { alpha: false });
-  passCtx.imageSmoothingQuality = "high";
+  passCtx.imageSmoothingEnabled = false;
 
   let text = "still here?";
-  let quality = 0.32;
+  let quality = 0.18;
   let frames = [{ blob: null, bytes: 0 }];
   let shown = 0;
   let target = 0;
@@ -182,14 +180,13 @@ export function createGeneration({ canvas, ghost, card, onState }) {
 
   const produce = async (mine) => {
     const g = frames.length;
-    const { s, r, dx, dy } = wobble(g);
+    const { dx, dy } = wobble(g);
     passCtx.setTransform(1, 0, 0, 1, 0, 0);
     passCtx.fillStyle = "#ffffff";
     passCtx.fillRect(0, 0, DOC, DOC);
-    passCtx.translate(DOC / 2 + dx, DOC / 2 + dy);
-    passCtx.rotate(r);
-    passCtx.scale(s, s);
-    passCtx.drawImage(head, -DOC / 2, -DOC / 2);
+    passCtx.filter = "saturate(1.04)";
+    passCtx.drawImage(head, dx, dy);
+    passCtx.filter = "none";
     const blob = await encode(pass, quality);
     if (destroyed || mine !== token || !blob) return false;
     const bitmap = await decode(blob);
@@ -198,9 +195,11 @@ export function createGeneration({ canvas, ghost, card, onState }) {
       return false;
     }
     headCtx.setTransform(1, 0, 0, 1, 0, 0);
-    headCtx.drawImage(bitmap, 0, 0);
+    headCtx.fillStyle = "#ffffff";
+    headCtx.fillRect(0, 0, DOC, DOC);
+    headCtx.drawImage(bitmap, -dx, -dy);
     bitmap.close?.();
-    frames.push({ blob, bytes: blob.size });
+    frames.push({ blob, bytes: blob.size, dx, dy });
     return true;
   };
 
@@ -220,7 +219,9 @@ export function createGeneration({ canvas, ghost, card, onState }) {
       return false;
     }
     ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.drawImage(bitmap, 0, 0);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(0, 0, DOC, DOC);
+    ctx.drawImage(bitmap, -frames[g].dx, -frames[g].dy);
     bitmap.close?.();
     return true;
   };

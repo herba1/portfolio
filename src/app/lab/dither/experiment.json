@@ -1,0 +1,16 @@
+{
+  "title": "Dither",
+  "description": "Beatles covers as one-bit art on a 1985 black and white desktop. Drag along the four methods, threshold, Bayer, Floyd–Steinberg and Atkinson, and the cover dissolves pixel by pixel from one to the next; a tiny arrow cursor plays with it on its own until you take over.",
+  "tags": ["Screen", "Image", "Music", "Pixel"],
+  "status": "candidate",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "intent": "A screenshot from 1985 that is actually beautiful: crisp one-bit window chrome, a hand-drawn bitmap font, real album art re-dithered live, and a HyperCard-style dissolve as the transition between algorithms, scrubbed directly by the radio column or by dragging across the cover.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Atkinson_dithering",
+    "https://en.wikipedia.org/wiki/Floyd%E2%80%93Steinberg_dithering",
+    "https://en.wikipedia.org/wiki/Ordered_dithering",
+    "https://en.wikipedia.org/wiki/HyperCard",
+    "herb reference board: bitmap type and lo-fi degradation as beauty"
+  ]
+}

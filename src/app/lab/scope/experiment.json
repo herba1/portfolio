@@ -1,0 +1,16 @@
+{
+  "title": "Scope",
+  "description": "An oscilloscope in XY mode writes words and little record shapes with a green beam. Type anything and the stereo signal that draws it is what you hear: the left channel moves the beam across, the right moves it up.",
+  "tags": ["Screen", "Type", "Sound", "WebGL"],
+  "status": "candidate",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "intent": "Oscilloscope music as an interface: one Web Audio worklet renders a looping stereo path for each word, the same synth runs on the page to draw the phosphor trace, so the beam is brighter where it moves slowly and the jumps between letters are faint, just like a real XY scope.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://oscilloscopemusic.com/",
+    "https://en.wikipedia.org/wiki/Vectrex",
+    "https://en.wikipedia.org/wiki/Hershey_fonts",
+    "https://developer.mozilla.org/en-US/docs/Web/API/AudioWorkletProcessor",
+    "herb reference board: fa23 Y2K montage (green CRT phosphor)"
+  ]
+}

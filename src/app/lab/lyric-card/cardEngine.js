@@ -164,7 +164,7 @@ function justifyBreaks(tokens, M, space, whole) {
       let cost;
       if (count === 1) {
         const fill = ink / M;
-        cost = whole && n === 1 ? (1 - fill) * 40 : fill > 0.62 ? 30 + (1 - fill) * 120 : 900;
+        cost = whole && n === 1 ? (1 - fill) * 40 : fill > 0.62 ? 30 + (1 - fill) * 120 : whole && j === n && fill > 0.3 ? 48 : 900;
       } else {
         const ratio = (M - ink) / ((count - 1) * space);
         if (j === n && ratio > 2.2) cost = ink + space * (count - 1) > M * 0.34 ? 6 : 60;
@@ -222,27 +222,50 @@ function balanceBreaks(tokens, M, space) {
   return rows;
 }
 
-function planBlock(lines, measure, y) {
+function blockAt(lines, measure, size) {
   let pick = null;
-  for (let M = 560; M <= 760; M += 40) {
-    for (let size = 132; size >= 40; size *= 0.96) {
-      if (pick && pick.size >= 64 && size < 64) break;
-      measure.font = fontOf(size, "sans");
-      const space = measure.measureText(" ").width;
-      const tokens = tokensOf(lines, measure);
-      const result = justifyBreaks(tokens, M, space, true);
-      if (!result) continue;
-      const lead = Math.round(size * 1.1);
-      const height = result.rows.length * lead;
-      if (height > UNIT_H * 0.5 || result.rows.length > 6) continue;
-      const ratios = result.rows
-        .filter((r) => r.length > 1)
-        .map((r) => (M - r.reduce((sum, t) => sum + t.width, 0)) / ((r.length - 1) * space))
-        .filter((r, i, all) => !(i === all.length - 1 && r > 2.2));
-      const spread = ratios.length > 1 ? Math.max(...ratios) - Math.min(...ratios) : 0;
-      const score = result.cost + spread * spread * 12 + (132 / size - 1) * 130 + Math.abs(M - 680) * 0.03 + (size < 64 ? 400 : 0);
-      if (!pick || score < pick.score) pick = { ...result, size, lead, space, score, M };
+  measure.font = fontOf(size, "sans");
+  const space = measure.measureText(" ").width;
+  const tokens = tokensOf(lines, measure);
+  const lead = Math.round(size * 1.1);
+  for (let M = 560; M <= 800; M += 40) {
+    const result = justifyBreaks(tokens, M, space, true);
+    if (!result) continue;
+    const height = result.rows.length * lead;
+    if (height > UNIT_H * 0.56 || result.rows.length > 5) continue;
+    const ratios = result.rows
+      .filter((r) => r.length > 1)
+      .map((r) => (M - r.reduce((sum, t) => sum + t.width, 0)) / ((r.length - 1) * space))
+      .filter((r, i, all) => !(i === all.length - 1 && r > 2.2));
+    const spread = ratios.length > 1 ? Math.max(...ratios) - Math.min(...ratios) : 0;
+    const lone = result.rows.length === 1 ? (M - result.rows[0].reduce((sum, t) => sum + t.width, 0)) * 0.2 : 0;
+    const score = result.cost + spread * spread * 12 + Math.abs(M - 680) * 0.03 + lone;
+    if (!pick || score < pick.score) pick = { ...result, size, lead, space, score, M };
+  }
+  return pick;
+}
+
+const blockSizes = new WeakMap();
+function sharedBlockSize(verses, measure) {
+  if (blockSizes.has(verses)) return blockSizes.get(verses);
+  let chosen = 64;
+  for (let size = 132; size >= 64; size -= 2) {
+    const picks = verses.map((v) => blockAt(v.lines, measure, size));
+    if (picks.every((p) => p && p.score < 140)) {
+      chosen = size;
+      break;
     }
+  }
+  blockSizes.set(verses, chosen);
+  return chosen;
+}
+
+function planBlock(lines, measure, y, verses) {
+  let pick = null;
+  if (verses) {
+    for (let size = sharedBlockSize(verses, measure); size >= 40 && !pick; size -= 2) pick = blockAt(lines, measure, size);
+  } else {
+    for (let size = 132; size >= 40 && !pick; size -= 2) pick = blockAt(lines, measure, size);
   }
   const { rows, size, lead, M } = pick;
   const left = (UNIT_W - M) / 2;
@@ -336,8 +359,8 @@ function planCaption(lines, measure) {
   return { items, size, face: "sans", shade: 0.5, center: true };
 }
 
-export function planVerse(verse, style, measure) {
-  const plan = style === "serif" ? planSerif(verse.lines, measure, verse.y) : style === "caption" ? planCaption(verse.lines, measure) : planBlock(verse.lines, measure, verse.y);
+export function planVerse(verse, style, measure, verses) {
+  const plan = style === "serif" ? planSerif(verse.lines, measure, verse.y) : style === "caption" ? planCaption(verse.lines, measure) : planBlock(verse.lines, measure, verse.y, verses);
   let at = LEAD;
   for (const item of plan.items) {
     item.at = at;
@@ -486,7 +509,7 @@ export function createCard(host, { verses, photos, onVerse }) {
 
   const replan = () => {
     if (!fontsReady) return;
-    plan = planVerse(verses[index], style, measure);
+    plan = planVerse(verses[index], style, measure, verses);
     describe();
   };
 

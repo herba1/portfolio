@@ -1,0 +1,15 @@
+{
+  "title": "Teletext",
+  "description": "A teletext service about the Beatles on a 40 by 25 grid: eight colours, double-height banners and every album cover redrawn as block mosaics. Type a page number and the header rolls through the carousel until your page arrives row by row.",
+  "tags": ["Screen", "Pixel", "Music", "Y2K"],
+  "status": "candidate",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "intent": "Teletext rendered for real: control codes decoded the way the chip did it, a hand-set character set with diagonal smoothing, covers converted to mosaics under the genuine one-cell-per-colour-change rule, the live clock ticking in the header, and only a faint CRT softness around it.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Teletext",
+    "https://en.wikipedia.org/wiki/Mullard_SAA5050",
+    "https://www.etsi.org/deliver/etsi_en/300700_300799/300706/01.02.01_60/en_300706v010201p.pdf",
+    "herb reference board: fa23 Y2K montage (CRT text screens)"
+  ]
+}

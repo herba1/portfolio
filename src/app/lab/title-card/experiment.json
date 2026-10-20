@@ -1,0 +1,15 @@
+{
+  "title": "Title Sequence",
+  "description": "A Saul Bass style opening for Abbey Road in flat cut paper: a zebra crossing is punched out stripe by stripe, the four Beatles stride across it as their names are cut in, then produced by George Martin and the title dropping in letter by letter, all on the beat. It loops on its own and a scrubber lets you drag through it.",
+  "tags": ["Motion", "Type", "Music", "Sound"],
+  "status": "candidate",
+  "createdAt": "2026-10-20T00:00:00.000Z",
+  "intent": "One 20 second opening title made the way Saul Bass made them: hand-cut paper shapes with rough edges and a little shadow, a palette of four inks, and every cut, slide and drop landing on a beat of Friday Beat so the picture and the sound are one timeline you can scrub.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://www.artofthetitle.com/designer/saul-bass/",
+    "https://www.artofthetitle.com/title/anatomy-of-a-murder/",
+    "https://en.wikipedia.org/wiki/Abbey_Road",
+    "herb reference board: b091f70f Pinterest promo motion design (bold shapes and type sliding in on a beat)"
+  ]
+}

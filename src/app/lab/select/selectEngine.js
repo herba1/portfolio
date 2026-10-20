@@ -312,6 +312,29 @@ export function createSelect(root, refs, { onCopy } = {}) {
         z: LIFT_Z[j % LIFT_Z.length] * depthScale(),
       });
     }
+    if (L > 0.0001) {
+      const safe = (W < 600 ? 20 : 24) + 8;
+      for (const g of out) {
+        for (let pass = 0; pass < 3; pass += 1) {
+          const c = Math.cos(g.theta);
+          const sn = Math.sin(g.theta);
+          const xs = [];
+          for (const sx of [-1, 1]) for (const sy of [-1, 1]) xs.push(project(g, g.cx + c * sx * (g.width / 2) - sn * sy * (LH / 2), g.cy + sn * sx * (g.width / 2) + c * sy * (LH / 2)).x);
+          const lo = Math.min(...xs);
+          const hi = Math.max(...xs);
+          let d = 0;
+          if (hi - lo > W - safe * 2) {
+            const k = (W - safe * 2) / (hi - lo);
+            g.grow = Math.max(0.94, g.grow * k);
+            g.width = g.rest * g.grow;
+            d = W / 2 - (lo + hi) / 2;
+          } else if (hi > W - safe) d = W - safe - hi;
+          else if (lo < safe) d = safe - lo;
+          if (Math.abs(d) < 0.01) break;
+          g.cx += d;
+        }
+      }
+    }
     return out;
   };
 

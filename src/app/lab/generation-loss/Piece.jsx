@@ -56,7 +56,7 @@ export default function Piece({ embedded = false }) {
   const [ready, setReady] = useState(false);
   const [sound, setSound] = useState(true);
   const [text, setText] = useState(START_TEXT);
-  const [quality, setQuality] = useState(32);
+  const [quality, setQuality] = useState(18);
   const [state, setState] = useState({ generation: 0, bytes: 0, history: [], playing: true });
   const [max, setMax] = useState(100);
 

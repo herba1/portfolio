@@ -384,15 +384,9 @@
   }
 
   .justify-presets {
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    margin-inline: -16px;
-    padding-inline: 16px;
-    scrollbar-width: none;
-  }
-
-  .justify-presets::-webkit-scrollbar {
-    display: none;
+    flex-wrap: wrap;
+    row-gap: 8px;
+    max-width: 100%;
   }
 
   .justify-chip {

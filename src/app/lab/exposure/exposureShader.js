@@ -110,10 +110,12 @@ void main() {
   float text = texture(uText, suv).a;
   float tBloom = texture(uTextBloom, suv).r;
   float tHalo = texture(uTextHalo, suv).r;
-  scene *= 1.0 - 0.55 * clamp(tHalo * 2.4 + tBloom * 0.8, 0.0, 1.0) * (1.0 - 0.6 * over);
+  float shade = clamp(tHalo * 2.4 + tBloom * 0.8, 0.0, 1.0);
+  scene *= 1.0 - 0.55 * shade * (1.0 - 0.6 * over);
+  scene = mix(scene, scene / (1.0 + scene * 2.6), shade * smoothstep(0.0, 0.5, over) * 0.92);
   float capI = 1.25 * exp2(max(uEv, 0.0) * 1.1 + min(uEv, 0.0) * 0.62);
   scene = mix(scene, vec3(capI), text);
-  scene += tBloom * capI * vec3(1.0, 0.96, 0.9) * (0.26 + 0.95 * over);
+  scene += tBloom * capI * vec3(1.0, 0.96, 0.9) * (0.26 + 0.4 * over);
   scene += tHalo * max(capI - 1.0, 0.0) * vec3(1.0, 0.34, 0.08) * 0.85;
 
   vec2 gp = floor(gl_FragCoord.xy / uGrainScale);

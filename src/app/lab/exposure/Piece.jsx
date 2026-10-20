@@ -12,9 +12,9 @@ import { START_EV, formatEv, spokenEv } from "./exposureEngine";
 import "./exposure.css";
 
 const PHOTOS = [
-  { id: "times-square", label: "Times Square", src: timesSquare.src, thumb: thumbTimesSquare.src, focus: [0.5, 0.56], caption: "it will take a while to feel like this again" },
-  { id: "sign", label: "Under the signs", src: sign.src, thumb: thumbSign.src, focus: [0.5, 0.52], caption: "i keep your voice on the walk home" },
-  { id: "beams", label: "Lights in the fog", src: beams.src, thumb: thumbBeams.src, focus: [0.5, 0.57], caption: "you don't have to be anyone tonight" },
+  { id: "times-square", label: "Times Square", src: timesSquare.src, thumb: thumbTimesSquare.src, focus: [0.5, 0.56], anchor: [0.58, 0.3], caption: "it will take a while to feel like this again" },
+  { id: "sign", label: "Under the signs", src: sign.src, thumb: thumbSign.src, focus: [0.5, 0.52], anchor: [0.45, 0.36], caption: "i keep your voice on the walk home" },
+  { id: "beams", label: "Lights in the fog", src: beams.src, thumb: thumbBeams.src, focus: [0.5, 0.57], anchor: [0.31, 0.74], caption: "you don't have to be anyone tonight" },
 ];
 
 const KNURL = Array.from({ length: 96 }, (_, i) => (i * 360) / 96);

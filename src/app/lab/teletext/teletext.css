@@ -1,0 +1,218 @@
+
+.teletext {
+  --teletext-ground: #000000;
+  --teletext-ink: #e3e7e2;
+  --teletext-ink-soft: #a7afa7;
+  --teletext-line: rgb(255 255 255 / 0.12);
+  --teletext-phosphor: #ffff00;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--teletext-ground);
+  color: var(--teletext-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.teletext[data-embedded] {
+  min-height: 100%;
+}
+
+.teletext-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.teletext-caption {
+  position: absolute;
+  top: 88px;
+  left: 32px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  opacity: 0;
+}
+
+.teletext[data-ready] .teletext-caption {
+  animation: teletext-in 400ms var(--ease-entrance) forwards;
+}
+
+@keyframes teletext-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.teletext-caption-text {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.teletext-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.teletext-hint {
+  margin: 0;
+  max-width: 440px;
+  color: var(--teletext-ink-soft);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.teletext-sound {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding-inline: 12px;
+  border: 1px solid var(--teletext-line);
+  border-radius: 9999px;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--teletext-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.teletext-sound:active {
+  transform: scale(0.96);
+}
+
+.teletext-sound:focus-visible {
+  outline: 2px solid var(--teletext-phosphor);
+  outline-offset: 2px;
+}
+
+.teletext-sound[aria-pressed="true"] .teletext-speaker {
+  color: var(--teletext-phosphor);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .teletext-sound:hover {
+    background: rgb(255 255 255 / 0.08);
+    border-color: rgb(255 255 255 / 0.2);
+  }
+}
+
+.teletext-screen {
+  position: absolute;
+  top: 0;
+  left: 0;
+  outline: none;
+  opacity: 0;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.teletext[data-embedded] .teletext-screen {
+  touch-action: pan-y;
+}
+
+.teletext-screen[data-ready] {
+  animation: teletext-in 360ms var(--ease-entrance) forwards;
+}
+
+.teletext-screen:focus-visible {
+  outline: none;
+}
+
+.teletext-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.teletext-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  color: var(--teletext-ink);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+.teletext-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 640px) {
+  .teletext-caption {
+    top: 72px;
+    left: 16px;
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+}
+
+.teletext-input {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  font-size: 16px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.teletext-hint-touch {
+  display: none;
+}
+
+@media (hover: none) {
+  .teletext-hint-fine {
+    display: none;
+  }
+
+  .teletext-hint-touch {
+    display: inline;
+  }
+}

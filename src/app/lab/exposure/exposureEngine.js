@@ -121,7 +121,8 @@ export function createExposureEngine(opts) {
       } else line = next;
     }
     if (line) lines.push(line);
-    if (lines.length === 2 || (lines.length === 1 && w < 700)) {
+    const anchor = photos[current].anchor;
+    if (lines.length === 2 || (lines.length === 1 && (w < 700 || anchor))) {
       let best = 1;
       let bestW = Infinity;
       for (let i = 1; i < words.length; i += 1) {
@@ -134,8 +135,22 @@ export function createExposureEngine(opts) {
       lines.splice(0, lines.length, words.slice(0, best).join(" "), words.slice(best).join(" "));
     }
     const lead = size * 1.18;
-    const cy = h * dpr * (w < 700 ? 0.71 : 0.66);
-    lines.forEach((l, i) => tctx.fillText(l, (w * dpr) / 2, cy + (i - (lines.length - 1) / 2) * lead + size * 0.35));
+    let cx = (w * dpr) / 2;
+    let cy = h * dpr * (w < 700 ? 0.71 : 0.66);
+    if (anchor) {
+      const [iw, ih] = gl.imageSize;
+      const a = iw / ih;
+      const A = w / h;
+      const cv = A > a ? [1, a / A] : [A / a, 1];
+      const vx = cv[0] / ZOOM / 2 + 0.02;
+      const vy = cv[1] / ZOOM / 2 + 0.02;
+      const fx = clamp(photos[current].focus[0], vx, 1 - vx);
+      const fy = clamp(photos[current].focus[1], vy, 1 - vy);
+      const half = Math.max(...lines.map((l) => tctx.measureText(l).width)) / 2 + 24 * dpr;
+      cx = clamp(((anchor[0] - fx) / cv[0]) * ZOOM * w * dpr + (w * dpr) / 2, half, w * dpr - half);
+      cy = clamp(((anchor[1] - fy) / cv[1]) * ZOOM * h * dpr + (h * dpr) / 2, h * dpr * (w < 700 ? 0.4 : 0.3), h * dpr * (w < 700 ? 0.72 : 0.8));
+    }
+    lines.forEach((l, i) => tctx.fillText(l, cx, cy + (i - (lines.length - 1) / 2) * lead + size * 0.35));
     gl.setText(textCanvas);
   };
 
