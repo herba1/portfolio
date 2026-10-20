@@ -1,0 +1,26 @@
+{
+  "title": "Lanyard",
+  "description": "A glossy herb.art lab pass hanging on a woven strap. Grab it and throw it: it swings on the strap, twists, and turns itself back to face you while light slides across the clearcoat and the foil. Double-click to turn it over.",
+  "tags": ["WebGL", "Physics", "Object"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T18:00:00.000Z",
+  "intent": "One precious object you can fling: a pass on a strap with real weight, a strap that twists with it, and a face that always comes back to you.",
+  "tile": { "cols": 3, "rows": 5 },
+  "sources": [
+    {
+      "name": "Vercel, Building an interactive 3D event badge with React Three Fiber",
+      "url": "https://vercel.com/blog/building-an-interactive-3d-event-badge-with-react-three-fiber",
+      "what": "The rig (fixed point, three rope links, the card on a ball joint), gravity -40 with heavy damping, the strap drawn as a chordal Catmull-Rom through smoothed rope points, the settle-to-face twist spring (angvel.y += error * 7.5 * dt) and the Lightformer strip lighting. Re-derived as Verlet particles without Rapier or meshline."
+    },
+    {
+      "name": "owu-uy-community website, Lanyard.tsx",
+      "url": "https://github.com/owu-uy-community/website/blob/main/src/app/conf/components/Lanyard.tsx",
+      "what": "Read as a reference port of the badge: the strip positions for the PMREM room, the jitter fix that lerps the strap's middle points by min(1, dt * (10 + distance * 40)), and the tab offset where the strap leaves the card. No code copied."
+    },
+    {
+      "name": "Lenis, damp",
+      "url": "https://github.com/darkroomengineering/lenis",
+      "what": "Frame-rate independent damp(x, y, lambda, dt) for the held card and the lean."
+    }
+  ]
+}

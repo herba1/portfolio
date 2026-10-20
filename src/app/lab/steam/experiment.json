@@ -1,0 +1,33 @@
+{
+  "title": "Steam",
+  "description": "A speckled stoneware cup of black coffee on its saucer, on a studio sweep that falls from pale light into warm shade behind the cup. Steam rises in three loose ribbons that sway most at the top; move across it and it bends away along your breath, curls, rises with the kink still in it, then straightens.",
+  "tags": [
+    "WebGL",
+    "Still life",
+    "Fluid"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-19T18:00:00.000Z",
+  "intent": "A quiet still life with one living part: steam you can blow on, drawn from a velocity field that forgets you a second later.",
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    {
+      "name": "Bruno Simon, My Room in 3D, coffee steam",
+      "url": "https://github.com/brunosimon/my-room-in-3d",
+      "what": "Read for the idea only (no licence): noise alpha scrolling upward, sway that grows with the square of height so only the top moves, and a soft edge fade. Re-derived as three screen-space plumes."
+    },
+    {
+      "name": "OGL, Flowmap",
+      "url": "https://github.com/oframe/ogl",
+      "what": "The flowmap technique: a 128 square ping-pong field that decays each frame, a velocity stamp with a smoothstep falloff around the pointer, and pointer velocity eased in at 0.5 and out at 0.1. Re-implemented in three.js with time-based decay and an upward advection so a breath travels up the plume; the steam is sampled upstream of the flow so it bends along it."
+    },
+    {
+      "name": "three.js",
+      "url": "https://threejs.org",
+      "what": "Lathe and tube geometry for the cup, saucer and handle, a custom sweep backdrop, physical glaze, PMREM window reflections, soft shadow maps."
+    }
+  ]
+}

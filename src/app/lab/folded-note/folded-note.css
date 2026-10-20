@@ -1,0 +1,141 @@
+.folded-note-root {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: #d6d1c9;
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.folded-note-root[data-embedded] {
+  min-height: 100%;
+}
+
+.folded-note-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.folded-note-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  outline: none;
+  opacity: 0;
+  transition: opacity 480ms var(--ease-entrance);
+}
+
+.folded-note-root[data-embedded] .folded-note-canvas {
+  touch-action: pan-y;
+}
+
+.folded-note-stage[data-ready] .folded-note-canvas {
+  opacity: 1;
+}
+
+.folded-note-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+}
+
+.folded-note-head {
+  position: absolute;
+  top: 96px;
+  left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: 248px;
+  pointer-events: none;
+}
+
+.folded-note-head h1 {
+  text-wrap: balance;
+}
+
+.folded-note-hint {
+  color: var(--color-ink-secondary);
+  text-wrap: pretty;
+}
+
+.folded-note-button {
+  display: inline-flex;
+  align-items: center;
+  height: 32px;
+  margin-top: 4px;
+  padding-inline: 12px;
+  border: 1px solid var(--color-line);
+  border-radius: 9999px;
+  background: var(--color-surface-raised);
+  color: var(--color-ink);
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  pointer-events: auto;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.folded-note-button:active {
+  transform: scale(0.96);
+}
+
+.folded-note-button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .folded-note-button:hover {
+    background: var(--color-surface-subtle);
+    border-color: var(--color-line-strong);
+  }
+}
+
+.folded-note-fallback {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--color-ink-secondary);
+}
+
+.folded-note-live {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+@media (max-width: 899px) {
+  .folded-note-head {
+    top: 84px;
+    left: 16px;
+    max-width: min(360px, calc(100% - 32px));
+    gap: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .folded-note-canvas {
+    transition: opacity 200ms linear;
+  }
+}

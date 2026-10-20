@@ -1,0 +1,26 @@
+{
+  "title": "Lumen Print",
+  "description": "A sheet of photo paper lying in the sun with a pressed fern and an old brass key on it. Lift them off and their pale, soft-edged prints are left behind in peach on plum. Lay the fern, the grass or the key anywhere and the paper keeps exposing around them; move one mid-exposure for a double ghost, then fix the print before the sun takes it.",
+  "tags": ["WebGL", "Photography", "Material"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T18:00:00.000Z",
+  "intent": "A camera-less photograph you make with your hands: the paper is a live exposure field, and every object leaves exactly the shadow it cast.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    {
+      "name": "basement.studio shader-lab, Lumen print pass (Apache-2.0)",
+      "url": "https://github.com/basementstudio/shader-lab",
+      "what": "The tone chain from lumen-print-pass.ts and color-map-lut.ts: 16-tap golden-angle diffusion rotated by a per-pixel hash, the bright-pass halation, ragged washout from two value-noise octaves, edge burn wobbled by noise, midtone-weighted grain, and the default plum to peach gradient-map stops. Ported to GLSL over a live exposure field instead of an image."
+    },
+    {
+      "name": "Lumen printing, the process",
+      "url": "https://en.wikipedia.org/wiki/Lumen_print",
+      "what": "Objects on silver gelatin paper in daylight, no developer; uncovered paper darkens toward plum while shadowed areas stay pale, and fixing shifts the colours warmer."
+    },
+    {
+      "name": "Lenis, damp",
+      "url": "https://github.com/darkroomengineering/lenis",
+      "what": "Frame-rate independent damp for the held objects and their lift."
+    }
+  ]
+}
