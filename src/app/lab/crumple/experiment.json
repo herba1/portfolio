@@ -6,7 +6,7 @@
     "Paper",
     "Physics"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "Realistic paper in discrete stages, shown at a stepped stop-motion frame rate: the crease simulation is baked offline, and each press is keyed as five held 200ms frames (crush, crush, overshoot, relax, settle), the first drawn on the press itself, so every step lands and settles in about one second.",
   "tile": {

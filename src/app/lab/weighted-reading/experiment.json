@@ -2,7 +2,7 @@
   "title": "Liner notes",
   "description": "Liner notes for Please Please Me in their own scroller. Each word gains weight from 430 to 600 as the reading line passes it and keeps it, so the page remembers how far you read, without a single line reflowing.",
   "tags": ["Interface", "Typography", "Scroll"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "Reading progress written into the type itself: weight, not opacity, with zero reflow.",
   "tile": { "cols": 2, "rows": 5 },

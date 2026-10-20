@@ -2,7 +2,7 @@
   "title": "Film",
   "description": "A short film's timeline. Hover the strip and a frame preview rides the pointer; drag to scrub, and pull your finger away from the strip to slow the scrub down to fine, frame-accurate steps.",
   "tags": ["Interface", "Motion", "Media"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "A video timeline whose scrub gain falls as the pointer moves away from it, with a sprung frame preview.",
   "tile": { "cols": 4, "rows": 4 },

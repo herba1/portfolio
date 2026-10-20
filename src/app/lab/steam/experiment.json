@@ -6,7 +6,7 @@
     "Type",
     "Fluid"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-19T18:00:00.000Z",
   "intent": "Type you can blow on: the words are the steam, drawn from a velocity field that forgets you a second later.",
   "tile": {

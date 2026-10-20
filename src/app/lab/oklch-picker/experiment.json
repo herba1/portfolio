@@ -2,7 +2,7 @@
   "title": "OKLCH",
   "description": "A colour picker in OKLCH. Drag across the lightness × chroma plane with the sRGB and P3 gamut edges drawn, slide the hue, and watch contrast against ink and surface update live. Saved colours slide aside as new ones arrive, and picking one glides the picker there.",
   "tags": ["Interface", "Colour", "Data"],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "A perceptual colour picker you can read: the gamut is drawn, contrast is live, and every move is interruptible.",
   "tile": { "cols": 3, "rows": 5 },

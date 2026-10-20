@@ -6,7 +6,7 @@
     "Gesture",
     "Music"
   ],
-  "status": "shipped",
+  "status": "liked",
   "createdAt": "2026-10-18T12:40:00.000Z",
   "intent": "Depth you can read: every submenu is a layer lifted out of the row that owns it, previous levels recede behind it on springs, and going back brings them forward, at any width.",
   "tile": {
