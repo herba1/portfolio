@@ -1,0 +1,106 @@
+.slime-type {
+  --slime-type-paper: #efebe1;
+  --slime-type-ink-2: #4d4840;
+  --slime-type-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  background: var(--slime-type-paper);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.slime-type__stage {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: zoom-in;
+}
+
+.slime-type[data-embedded] .slime-type__stage {
+  touch-action: pan-y;
+}
+
+.slime-type__stage[data-magnified] {
+  cursor: zoom-out;
+}
+
+.slime-type__stage[data-swiping] {
+  cursor: grabbing;
+}
+
+.slime-type__stage:focus-visible::after {
+  content: "";
+  position: absolute;
+  inset: 8px;
+  border-radius: 8px;
+  box-shadow: inset 0 0 0 2px var(--color-accent);
+  pointer-events: none;
+}
+
+.slime-type__canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+  font-family: var(--font-mono);
+  opacity: 0;
+  transition: opacity 240ms var(--slime-type-ease);
+}
+
+.slime-type[data-ready] .slime-type__canvas {
+  opacity: 1;
+}
+
+.slime-type__head {
+  position: absolute;
+  top: 88px;
+  left: max(40px, min(56px, 5cqw));
+  right: max(40px, min(56px, 5cqw));
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  pointer-events: none;
+}
+
+.slime-type__title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.slime-type__hint {
+  margin: 0;
+  color: var(--slime-type-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+}
+
+@container (max-width: 699px) {
+  .slime-type__head {
+    top: 80px;
+    left: 16px;
+    right: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .slime-type__canvas {
+    transition: opacity 200ms linear;
+  }
+}
