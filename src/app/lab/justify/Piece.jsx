@@ -1,22 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
 import { PRESETS } from "./justifyEngine";
 import "./justify.css";
-
-function SpeakerIcon({ on }) {
-  return (
-    <svg className="justify-speaker" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor" />
-      {on ? (
-        <path d="M10.4 5.6a3.4 3.4 0 0 1 0 4.8M12.2 4a5.6 5.6 0 0 1 0 8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
-      ) : (
-        <path d="M10.6 6.1l3.8 3.8M14.4 6.1l-3.8 3.8" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" fill="none" />
-      )}
-    </svg>
-  );
-}
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -72,11 +59,43 @@ export default function Piece({ embedded = false }) {
     setSoft(Math.round(engine.setPreset(item) * 100));
   };
 
-  const onSoft = (e) => {
-    const value = Number(e.target.value);
-    setSoft(value);
+  const scrubRef = useRef(null);
+
+  const applySoft = (value) => {
+    const next = Math.max(0, Math.min(100, Math.round(value)));
+    setSoft(next);
     engineRef.current?.unlock();
-    engineRef.current?.setSoftness(value / 100);
+    engineRef.current?.setSoftness(next / 100);
+  };
+
+  const onScrubDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return;
+    e.currentTarget.setPointerCapture?.(e.pointerId);
+    scrubRef.current = { id: e.pointerId, x: e.clientX, from: soft };
+  };
+
+  const onScrubMove = (e) => {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.id !== e.pointerId) return;
+    applySoft(scrub.from + (e.clientX - scrub.x) * 0.5);
+  };
+
+  const onScrubUp = (e) => {
+    const scrub = scrubRef.current;
+    if (!scrub || scrub.id !== e.pointerId) return;
+    if (Math.abs(e.clientX - scrub.x) < 3 && e.type === "pointerup") applySoft(soft >= 50 ? 0 : 100);
+    scrubRef.current = null;
+  };
+
+  const onScrubKey = (e) => {
+    const steps = { ArrowRight: 5, ArrowUp: 5, ArrowLeft: -5, ArrowDown: -5, PageUp: 20, PageDown: -20 };
+    if (e.key in steps) {
+      e.preventDefault();
+      applySoft(soft + steps[e.key]);
+    } else if (e.key === "Home" || e.key === "End") {
+      e.preventDefault();
+      applySoft(e.key === "Home" ? 0 : 100);
+    }
   };
 
   const toggleSound = async () => {
@@ -113,27 +132,42 @@ export default function Piece({ embedded = false }) {
       {embedded ? null : (
         <header ref={captionRef} className="justify-caption">
           <h1 className="justify-title">Justify</h1>
-          <p className="justify-hint">Drag the right edge to re-set the measure, or click the words to rewrite them.</p>
+          <p className="justify-hint">Drag the right edge to re-set the measure, click the words to rewrite them, drag soft to blur.</p>
         </header>
       )}
       <div ref={controlsRef} className="justify-controls">
         {embedded ? null : (
           <div className="justify-presets" role="group" aria-label="Lyrics">
             {PRESETS.map((item) => (
-              <button key={item.id} type="button" className="justify-chip" aria-pressed={preset === item.id} onClick={() => choose(item)}>
-                {item.label}
-              </button>
+              <Fragment key={item.id}>
+                <button type="button" className="justify-word" aria-pressed={preset === item.id} onClick={() => choose(item)}>
+                  {item.label}
+                </button>{" "}
+              </Fragment>
             ))}
           </div>
-        )}
+        )}{" "}
         <div className="justify-tools">
-          <label className="justify-soft">
-            <span className="justify-soft-label">Softness</span>
-            <input className="justify-range" type="range" min="0" max="100" step="1" value={soft} onChange={onSoft} style={{ "--justify-fill": `${soft}%` }} />
-          </label>
+          <span
+            role="slider"
+            tabIndex={0}
+            className="justify-word justify-soft"
+            aria-label="Softness"
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-valuenow={soft}
+            onPointerDown={onScrubDown}
+            onPointerMove={onScrubMove}
+            onPointerUp={onScrubUp}
+            onPointerCancel={onScrubUp}
+            onKeyDown={onScrubKey}
+            style={{ "--justify-soft": soft / 100 }}
+          >
+            soft
+          </span>{" "}
           {embedded ? null : (
-            <button type="button" className="justify-sound" aria-pressed={sound} onClick={toggleSound} aria-label={sound ? "Sound on" : "Sound off"}>
-              <SpeakerIcon on={sound} />
+            <button type="button" className="justify-word justify-sound" aria-pressed={sound} onClick={toggleSound}>
+              {sound ? "sound" : "quiet"}
             </button>
           )}
         </div>

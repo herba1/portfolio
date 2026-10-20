@@ -27,20 +27,16 @@ const fvs = (m) => {
   const a = axesAt(m);
   return `"wght" ${a.wght.toFixed(1)}, "wdth" ${a.wdth.toFixed(2)}, "opsz" 96`;
 };
-const minus = (n) => (n < 0 ? `−${Math.abs(n)}` : n > 0 ? `+${n}` : "0");
 
-export function createKern(stage, { embedded = false, readout = null, onLive = () => {}, onMorph = () => {} } = {}) {
+export function createKern(stage, { embedded = false, onLive = () => {}, onMorph = () => {}, onGesture = () => {} } = {}) {
   const root = document.createElement("div");
   root.className = "kern-surface";
   root.setAttribute("role", "application");
-  root.setAttribute("aria-label", "A word set in large type. Drag a letter to stretch the line. Type to change the word. Hold Shift for the heavy width.");
+  root.setAttribute("aria-label", "A word set in large type. Drag a letter to stretch the line. Type to change the word. Tap a letter or hold Shift for the heavy cut.");
   if (embedded) root.tabIndex = 0;
 
   const svg = document.createElementNS(SVG, "svg");
   svg.setAttribute("class", "kern-svg");
-  const base = document.createElementNS(SVG, "path");
-  base.setAttribute("class", "kern-baseline");
-  svg.append(base);
   const glyphLayer = document.createElementNS(SVG, "g");
   svg.append(glyphLayer);
   const caret = document.createElementNS(SVG, "rect");
@@ -48,10 +44,6 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   caret.setAttribute("width", "2");
   svg.append(caret);
   root.append(svg);
-
-  const numbers = document.createElement("div");
-  numbers.className = "kern-numbers";
-  root.append(numbers);
 
   const meter = document.createElement("div");
   meter.className = "kern-meter";
@@ -106,8 +98,8 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   let destroyed = false;
   let lastFvs = "";
   let lastSize = -1;
-  let readoutKey = "";
   let started = false;
+  let tap = null;
 
   const measureAt = (text, m) => {
     meter.style.fontVariationSettings = fvs(m);
@@ -188,25 +180,17 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   const makeLetter = (ch) => {
     const g = document.createElementNS(SVG, "g");
     g.setAttribute("class", "kern-glyph");
-    const left = document.createElementNS(SVG, "line");
-    left.setAttribute("class", "kern-side");
-    const right = document.createElementNS(SVG, "line");
-    right.setAttribute("class", "kern-side");
     const t = document.createElementNS(SVG, "text");
     t.textContent = ch === " " ? " " : ch;
     t.setAttribute("x", "0");
     t.setAttribute("y", "0");
-    g.append(left, right, t);
+    g.append(t);
     glyphLayer.append(g);
-    const num = document.createElement("span");
-    num.className = "kern-num";
-    numbers.append(num);
-    return { ch, g, t, left, right, num, x: 0, y: 0, vx: 0, vy: 0, o: 0, born: performance.now(), home: 0, alone: 0, rot: 0, numText: "", numX: 0, live: false, sideKey: "", lastSide: 0, tickAt: 0 };
+    return { ch, g, t, x: 0, y: 0, vx: 0, vy: 0, o: 0, born: performance.now(), home: 0, alone: 0, rot: 0, tickAt: 0 };
   };
 
   const retire = (l, now) => {
     l.dieAt = now;
-    l.num.remove();
     leaving.push(l);
   };
 
@@ -359,33 +343,13 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
     forces(h, dt);
   };
 
-  const catmull = (pts) => {
-    if (pts.length < 2) return "";
-    let d = `M${pts[0][0].toFixed(2)} ${pts[0][1].toFixed(2)}`;
-    for (let i = 0; i < pts.length - 1; i += 1) {
-      const p0 = pts[Math.max(0, i - 1)];
-      const p1 = pts[i];
-      const p2 = pts[i + 1];
-      const p3 = pts[Math.min(pts.length - 1, i + 2)];
-      const c1x = p1[0] + (p2[0] - p0[0]) / 6;
-      const c1y = p1[1] + (p2[1] - p0[1]) / 6;
-      const c2x = p2[0] - (p3[0] - p1[0]) / 6;
-      const c2y = p2[1] - (p3[1] - p1[1]) / 6;
-      d += ` C${c1x.toFixed(2)} ${c1y.toFixed(2)} ${c2x.toFixed(2)} ${c2y.toFixed(2)} ${p2[0].toFixed(2)} ${p2[1].toFixed(2)}`;
-    }
-    return d;
-  };
-
   const render = (now) => {
     const f = fvs(morph);
     const fs = Math.round(size * 100) / 100;
     const styleChanged = f !== lastFvs || fs !== lastSize;
     lastFvs = f;
     lastSize = fs;
-    const h = homes();
     const n = letters.length;
-    let deform = 0;
-    const pts = [];
     for (let i = 0; i < n; i += 1) {
       const l = letters[i];
       const prev = letters[i - 1] || l;
@@ -403,38 +367,7 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
         l.t.style.fontVariationSettings = f;
         l.t.style.fontSize = `${fs}px`;
       }
-      const sideKey = `${l.alone.toFixed(2)}:${fs}`;
-      if (sideKey !== l.sideKey) {
-        l.sideKey = sideKey;
-        const top = (-size * 0.76).toFixed(2);
-        const bottom = (size * 0.22).toFixed(2);
-        l.left.setAttribute("x1", "0");
-        l.left.setAttribute("x2", "0");
-        l.left.setAttribute("y1", top);
-        l.left.setAttribute("y2", bottom);
-        l.right.setAttribute("x1", l.alone.toFixed(2));
-        l.right.setAttribute("x2", l.alone.toFixed(2));
-        l.right.setAttribute("y1", top);
-        l.right.setAttribute("y2", bottom);
-      }
-      pts.push([l.x + l.alone / 2, l.y]);
-      if (h) deform = Math.max(deform, Math.abs(l.x - h.x[i]) / size, Math.abs(l.y - baseY) / size);
     }
-    const sideAlpha = clamp((deform - 0.02) * 9, 0, 1);
-    glyphLayer.style.setProperty("--kern-side", sideAlpha.toFixed(3));
-    if (pts.length) {
-      const first = pts[0];
-      const lastP = pts[pts.length - 1];
-      const ext = size * 0.5;
-      const a0 = n > 1 ? Math.atan2(pts[1][1] - first[1], pts[1][0] - first[0]) : 0;
-      const a1 = n > 1 ? Math.atan2(lastP[1] - pts[n - 2][1], lastP[0] - pts[n - 2][0]) : 0;
-      const line = [[first[0] - Math.cos(a0) * ext - letters[0].alone / 2, first[1] - Math.sin(a0) * ext], ...pts, [lastP[0] + Math.cos(a1) * ext + letters[n - 1].alone / 2, lastP[1] + Math.sin(a1) * ext]];
-      base.setAttribute("d", catmull(line));
-      base.style.opacity = (0.35 + sideAlpha * 0.65).toFixed(3);
-    } else {
-      base.setAttribute("d", `M${cx - size} ${baseY} L${cx + size} ${baseY}`);
-    }
-
     const showCaret = typing && now - typedAt < 4200;
     if (showCaret) {
       const lastL = letters[n - 1];
@@ -448,35 +381,6 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
       caret.style.opacity = "0";
     }
 
-    const numY = baseY + size * 0.24 + 16;
-    const desired = [];
-    for (let i = 0; i < n - 1; i += 1) {
-      const a = letters[i];
-      const b = letters[i + 1];
-      const val = Math.round(((b.x - a.x - a.alone) / size) * 1000);
-      const restVal = h ? Math.round(((h.rest[i] - a.alone) / size) * 1000) : val;
-      desired.push({ l: a, x: (a.x + a.alone + b.x) / 2, val, live: Math.abs(val - restVal) > 4, o: Math.min(a.o, b.o) });
-    }
-    const minSep = W < 640 ? 32 : 40;
-    for (let k = 1; k < desired.length; k += 1) desired[k].x = Math.max(desired[k].x, desired[k - 1].x + minSep);
-    for (let k = desired.length - 2; k >= 0; k -= 1) desired[k].x = Math.min(desired[k].x, desired[k + 1].x - minSep);
-    for (const d of desired) {
-      const text = minus(d.val);
-      if (text !== d.l.numText) {
-        d.l.numText = text;
-        d.l.num.textContent = text;
-      }
-      if (d.live !== d.l.live) {
-        d.l.live = d.live;
-        if (d.live) d.l.num.dataset.live = "";
-        else delete d.l.num.dataset.live;
-      }
-      d.l.num.style.transform = `translate3d(${d.x.toFixed(1)}px, ${numY.toFixed(1)}px, 0) translateX(-50%)`;
-      d.l.num.style.opacity = d.o.toFixed(3);
-      d.l.num.hidden = false;
-    }
-    if (n) letters[n - 1].num.hidden = true;
-
     for (let k = leaving.length - 1; k >= 0; k -= 1) {
       const l = leaving[k];
       const t = clamp((now - l.dieAt) / 240, 0, 1);
@@ -486,15 +390,6 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
       if (t >= 1) {
         l.g.remove();
         leaving.splice(k, 1);
-      }
-    }
-
-    if (readout) {
-      const a = axesAt(morph);
-      const key = `${Math.round(a.wght)}|${Math.round(a.wdth)}|${Math.round(size)}|${Math.round(trackAt(size, morph) * 100)}`;
-      if (key !== readoutKey) {
-        readoutKey = key;
-        readout.textContent = `wght ${Math.round(a.wght)}  ·  wdth ${Math.round(a.wdth)}  ·  ${Math.round(size)} px  ·  tracking ${minus(Math.round(trackAt(size, morph) * 100) / 100).replace("+", "")} px`;
       }
     }
   };
@@ -651,8 +546,10 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   const onDown = (e) => {
     if (e.button !== undefined && e.button !== 0) return;
     if (e.target.closest && e.target.closest("button, a, input")) return;
+    onGesture();
     const [x, y] = local(e);
     const i = hit(x, y);
+    tap = { id: e.pointerId, x, y, at: performance.now(), letter: i >= 0 };
     if (i < 0) return;
     touched();
     const l = letters[i];
@@ -671,6 +568,10 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   };
 
   const onMove = (e) => {
+    if (tap && e.pointerId === tap.id) {
+      const [mx, my] = local(e);
+      if (Math.hypot(mx - tap.x, my - tap.y) > 8) tap = null;
+    }
     if (!grab || e.pointerId !== grab.id) {
       if (e.pointerType === "mouse" && !grab) {
         const [x, y] = local(e);
@@ -693,7 +594,14 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
   };
 
   const onUp = (e) => {
+    const wasTap = tap && e.pointerId === tap.id && e.type === "pointerup" && performance.now() - tap.at < 320 ? tap : null;
+    tap = null;
+    if (wasTap && !wasTap.letter && touchy) startTyping();
     if (!grab || e.pointerId !== grab.id) return;
+    if (wasTap) {
+      morphLocked = !morphLocked;
+      setMorphTarget(morphLocked || shiftHeld);
+    }
     const l = letters[grab.index];
     if (l) {
       const stretch = Math.hypot(l.x - l.home, l.y - baseY) / size;
@@ -747,6 +655,7 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
 
   const onKey = (e) => {
     if (e.target === input) return;
+    if (!e.metaKey && !e.ctrlKey && !e.altKey) onGesture();
     if (e.key === "Shift") {
       if (!e.repeat && !shiftHeld) {
         shiftHeld = true;
@@ -841,8 +750,17 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
     started = true;
     setWord(WORDS[0]);
     root.dataset.ready = "";
-    scheduleAttract(IDLE + 600);
+    scheduleAttract(reduced ? IDLE + 600 : 1300);
   };
+
+  function startTyping() {
+    input.value = word;
+    input.focus({ preventScroll: true });
+    typing = true;
+    typedAt = performance.now();
+    touched();
+    wake();
+  }
 
   const fontReady = document.fonts?.load ? document.fonts.load(`100px ${FAMILY}`, "something") : Promise.resolve();
   Promise.race([fontReady, new Promise((r) => setTimeout(r, 2500))]).then(() => requestAnimationFrame(begin));
@@ -858,12 +776,7 @@ export function createKern(stage, { embedded = false, readout = null, onLive = (
       setMorphTarget(on || shiftHeld);
     },
     editWord() {
-      input.value = word;
-      input.focus({ preventScroll: true });
-      typing = true;
-      typedAt = performance.now();
-      touched();
-      wake();
+      startTyping();
     },
     destroy() {
       destroyed = true;

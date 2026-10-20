@@ -1,10 +1,25 @@
 {
   "title": "Credits",
-  "description": "The most inspiring words of all time roll up a black screen as a film’s end credits: Roosevelt, Baldwin, Dickinson, Frost, Wilde and more, each quote a short centred block in Garamond with its author as the credit, gathered under On courage, On love, On time and On keeping going, with grain, halation and gate weave. Drag or scroll to scrub, let go and it rolls on at a reading pace to one last line alone on black.",
-  "tags": ["Type", "Film", "Quotes", "Scroll"],
+  "description": "The most inspiring words of all time roll up a black screen as a film’s end credits: Roosevelt, Baldwin, Dickinson, Frost, Wilde and more, each quote a short centred block in Garamond with its author as the credit, with grain, halation and gate weave. Under it, a quiet bed of voices in the dark: a murmuring room, soft whispers drifting past on either side, and the projector you can hear speed up as you drag or scroll.",
+  "tags": [
+    "Type",
+    "Film",
+    "Quotes",
+    "Scroll"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-19T00:00:00.000Z",
-  "intent": "One thing done like the real thing: a projected end-credits crawl of correctly attributed, much-loved lines you can grab, with capped inertia that always relaxes back to a pace slow enough to read, and a projector you can hear speed up under your hand.",
-  "tile": { "cols": 4, "rows": 4 },
-  "sources": ["https://en.wikiquote.org/wiki/Main_Page", "https://en.wikipedia.org/wiki/Gate_weave", "https://en.wikipedia.org/wiki/Closing_credits", "herb reference board: cfcf small white poem block, 95d9 quiet captions; herb asked for the most inspirational quotes of all time"]
+  "intent": "One thing done like the real thing: a projected end-credits crawl of correctly attributed, much-loved lines you can grab, with capped inertia that always relaxes back to a pace slow enough to read, over a synthesised theatre ambience (formant-filtered murmur, HRTF-panned whispers, room tone, a convolution hall) that starts on the first touch and swells a little when the lights would come up.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikiquote.org/wiki/Main_Page",
+    "https://en.wikipedia.org/wiki/Gate_weave",
+    "https://en.wikipedia.org/wiki/Closing_credits",
+    "herb reference board: cfcf small white poem block, 95d9 quiet captions; herb asked for the most inspirational quotes of all time",
+    "https://en.wikipedia.org/wiki/Formant",
+    "https://developer.mozilla.org/en-US/docs/Web/API/PannerNode"
+  ]
 }

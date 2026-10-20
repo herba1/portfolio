@@ -114,8 +114,7 @@ export default function Piece({ embedded = false }) {
           autoComplete="off"
           autoCorrect="off"
           spellCheck={false}
-          
-          aria-label="Word for the oscillot9 to draw"
+          aria-label="Your text message"
           enterKeyHint="send"
         />
       </div>

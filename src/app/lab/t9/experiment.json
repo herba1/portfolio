@@ -1,11 +1,19 @@
 {
   "title": "Text",
-  "description": "A green phone LCD types a quiet text the old way: letters cycle on the keys and wait before they commit, T9 guesses good before home, and the message flies off as Sending, then Sent. Type on your keyboard to take over and it is entered key press by key press.",
-  "tags": ["Screen", "Type", "Pixel", "Sound"],
+  "description": "A green phone LCD types hopeless-romantic 2am texts to jude the old way: letters cycle on the keys and wait before they commit, T9 guesses the words, and each message flies off as Sending, then Sent, before the next one starts. Type on your keyboard to take over and it is entered key press by key press.",
+  "tags": [
+    "Screen",
+    "Type",
+    "Pixel",
+    "Sound"
+  ],
   "status": "candidate",
   "createdAt": "2026-10-20T00:00:00.000Z",
   "intent": "Only the screen of a Nokia-era phone, rendered as a real reflective LCD: a visible pixel grid, off pixels faintly there, each lit pixel casting a small shadow on the backplane and fading with the slow liquid-crystal response, a hand-drawn one-bit phone font, and authentic multi-tap and T9 timing.",
-  "tile": { "cols": 4, "rows": 4 },
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
   "sources": [
     "https://en.wikipedia.org/wiki/T9_(predictive_text)",
     "https://en.wikipedia.org/wiki/Multi-tap",

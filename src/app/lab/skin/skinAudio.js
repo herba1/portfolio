@@ -4,6 +4,7 @@ export const BANDS = [60, 170, 310, 600, 1000, 3000, 6000, 12000, 14000, 16000];
 const LOOKAHEAD = 0.2;
 const HIDDEN_LOOKAHEAD = 1.8;
 const WINDOW = 1024;
+const LEVEL = 1.7;
 
 export function createSkinAudio() {
   let ctx = null;
@@ -25,6 +26,25 @@ export function createSkinAudio() {
   let want = null;
   let session = null;
   let timer = 0;
+  let listener = null;
+  let unlocked = false;
+  let lastReport = "";
+
+  const report = () => {
+    const next = !enabled ? "off" : ctx && ctx.state === "running" ? "on" : "pending";
+    if (next === lastReport) return;
+    lastReport = next;
+    listener?.(next);
+  };
+
+  const unlock = () => {
+    if (unlocked || !ctx) return;
+    unlocked = true;
+    const src = ctx.createBufferSource();
+    src.buffer = ctx.createBuffer(1, 1, ctx.sampleRate);
+    src.connect(ctx.destination);
+    src.start(0);
+  };
 
   const dbToGain = (db) => Math.pow(10, db / 20);
 
@@ -39,18 +59,29 @@ export function createSkinAudio() {
     if (ctx) return ctx;
     const Ctx = window.AudioContext || window.webkitAudioContext;
     if (!Ctx) return null;
+    try {
+      if (navigator.audioSession) navigator.audioSession.type = "playback";
+    } catch {}
     ctx = new Ctx({ latencyHint: "playback" });
+    ctx.onstatechange = report;
     waves = createWaves(ctx);
     master = ctx.createGain();
-    master.gain.value = enabled ? 1 : 0;
+    master.gain.value = enabled ? LEVEL : 0;
     const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -12;
+    comp.threshold.value = -14;
     comp.knee.value = 8;
     comp.ratio.value = 3;
     comp.attack.value = 0.004;
     comp.release.value = 0.2;
+    const limit = ctx.createDynamicsCompressor();
+    limit.threshold.value = -2;
+    limit.knee.value = 0;
+    limit.ratio.value = 20;
+    limit.attack.value = 0.001;
+    limit.release.value = 0.08;
     master.connect(comp);
-    comp.connect(ctx.destination);
+    comp.connect(limit);
+    limit.connect(ctx.destination);
     pre = ctx.createGain();
     const dc = ctx.createBiquadFilter();
     dc.type = "highpass";
@@ -183,13 +214,17 @@ export function createSkinAudio() {
       if (!enabled) return;
       const c = ensure();
       if (!c) return;
-      if (c.state !== "running") {
-        c.resume()
-          .then(() => {
-            if (want && !session) startSession(getOffset ? getOffset() : want.offset);
-          })
-          .catch(() => {});
-      }
+      unlock();
+      const begin = () => {
+        if (want && !session) startSession(getOffset ? getOffset() : want.offset);
+        report();
+      };
+      if (c.state === "running") begin();
+      else c.resume().then(begin).catch(() => {});
+    },
+    onState(fn) {
+      listener = fn;
+      report();
     },
     play(offset) {
       want = { offset, at: performance.now() };
@@ -238,12 +273,15 @@ export function createSkinAudio() {
       if (on) {
         const c = ensure();
         if (!c) return false;
+        unlock();
         await c.resume().catch(() => {});
         master.gain.cancelScheduledValues(c.currentTime);
-        master.gain.setTargetAtTime(1, c.currentTime, 0.02);
+        master.gain.setTargetAtTime(LEVEL, c.currentTime, 0.02);
         if (want && !session) startSession(getOffset ? getOffset() : want.offset);
+        report();
         return c.state === "running";
       }
+      report();
       if (master) {
         master.gain.setTargetAtTime(0, ctx.currentTime, 0.02);
         window.setTimeout(() => {

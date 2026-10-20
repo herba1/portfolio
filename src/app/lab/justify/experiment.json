@@ -1,6 +1,6 @@
 {
   "title": "Justify",
-  "description": "A lyric set as a force-justified block in soft black Arial on white. Drag the right edge and the words flow like one ribbon: each slides along its line, rolls around the margin and comes back in at the start of the next, never crossing another word; rewrite it or switch lyrics and the shared words travel to their new places.",
+  "description": "A lyric set as a force-justified block in soft black Arial on white. Drag the right edge and the words flow like one ribbon around the margin; the lyrics, softness and sound sit underneath as one more justified line of the same Arial, the chosen one marked with a pale-blue text selection, and dragging the word soft blurs the block.",
   "tags": [
     "Type",
     "Layout",

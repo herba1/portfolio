@@ -12,9 +12,11 @@ const COMMIT = 900;
 const IDLE = 14000;
 
 const MESSAGES = [
-  { to: "jude", text: "hey. still up? i keep your voice on the walk home." },
-  { to: "mum", text: "here comes the sun. look outside x" },
-  { to: "sam", text: "it will take a while to feel like this again. call me when you land?" },
+  { to: "jude", text: "still up? i saved the last song for you x" },
+  { to: "jude", text: "i think i would find you in any crowd. even half asleep. even here." },
+  { to: "jude", text: "the moon is doing that thing again. i wish you were seeing it with me." },
+  { to: "jude", text: "no reason. i just miss you a normal amount, which is a lot." },
+  { to: "jude", text: "goodnight again, for real this time x" },
 ];
 
 const ICONS = {

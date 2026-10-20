@@ -326,8 +326,50 @@
     transform 120ms var(--ease-hover);
 }
 
-.credits-pill[aria-pressed="true"] .credits-speaker {
+.credits-pill[data-state="on"] .credits-speaker {
   color: #ffd27a;
+}
+
+.credits-pill[data-state="pending"] .credits-wave {
+  opacity: 0.4;
+}
+
+.credits-pill[data-state="on"] .credits-wave {
+  animation: credits-wave 1600ms ease-in-out infinite;
+}
+
+.credits-pill[data-state="on"] .credits-wave-far {
+  animation-delay: 200ms;
+}
+
+@keyframes credits-wave {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.credits-sound-fine {
+  display: none;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .credits-sound-fine {
+    display: inline;
+  }
+
+  .credits-sound-touch {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .credits-pill[data-state="on"] .credits-wave {
+    animation: none;
+  }
 }
 
 .credits-again {

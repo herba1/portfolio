@@ -120,8 +120,9 @@ function fft(re, im) {
   }
 }
 
-export function createSkin(stage, { embedded = false, caption = null, songs = [], onReady = () => {}, onLive = () => {} } = {}) {
+export function createSkin(stage, { embedded = false, caption = null, songs = [], onReady = () => {}, onLive = () => {}, onAudio = () => {} } = {}) {
   const audio = createSkinAudio();
+  audio.onState(onAudio);
   const root = stage.closest(".skin") || stage;
   let tracks = buildTracks(songs);
   let totalLength = tracks.reduce((s, t) => s + t.length, 0);
@@ -1160,6 +1161,14 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
   };
   window.addEventListener("keydown", onKey);
 
+  const onGesture = (e) => {
+    if (e.target?.closest?.(".skin-sound")) return;
+    if (e.type === "keydown" && (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab" || e.key === "Escape")) return;
+    audio.arm(songPos);
+  };
+  const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+  for (const type of GESTURES) window.addEventListener(type, onGesture, { capture: true, passive: true });
+
   const ro = new ResizeObserver(layout);
   ro.observe(root);
   if (caption) ro.observe(caption);
@@ -1220,6 +1229,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       ro.disconnect();
       io.disconnect();
       window.removeEventListener("keydown", onKey);
+      for (const type of GESTURES) window.removeEventListener(type, onGesture, { capture: true });
       document.removeEventListener("visibilitychange", onVis);
       audio.destroy();
       desk.remove();

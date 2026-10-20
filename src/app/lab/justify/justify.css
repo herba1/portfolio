@@ -9,7 +9,7 @@
 .justify {
   --justify-ground: #ffffff;
   --justify-blue: #1a5cff;
-  --justify-line: rgb(11 11 11 / 0.1);
+  --justify-select: rgb(26 92 255 / 0.18);
   position: relative;
   width: 100%;
   height: 100%;
@@ -182,12 +182,17 @@
   position: absolute;
   left: 56px;
   right: 56px;
-  bottom: 72px;
+  bottom: 64px;
   z-index: 3;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
+  margin: 0;
+  font-family: "Justify Arimo", Arial, sans-serif;
+  font-size: var(--text-body);
+  line-height: 32px;
+  letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--font-weight-normal);
+  text-align: justify;
+  text-align-last: justify;
+  word-spacing: 24px;
   opacity: 0;
   transition: opacity 400ms var(--ease-entrance) 120ms;
 }
@@ -200,171 +205,78 @@
   left: 16px;
   right: 16px;
   bottom: 16px;
-  justify-content: center;
 }
 
-.justify-presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
+.justify-presets,
+.justify-tools {
+  display: contents;
 }
 
-.justify-chip {
-  height: 32px;
-  padding-inline: 12px;
-  border: 1px solid var(--justify-line);
-  border-radius: 9999px;
-  background: var(--justify-ground);
+.justify-word {
+  position: relative;
+  display: inline-block;
+  margin: 0;
+  padding: 0 2px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: linear-gradient(var(--justify-select), var(--justify-select));
+  background-repeat: no-repeat;
+  background-position: 0 0;
+  background-size: 0% 100%;
   color: var(--color-ink);
   font-family: "Justify Arimo", Arial, sans-serif;
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
   font-weight: var(--font-weight-normal);
+  word-spacing: normal;
+  vertical-align: baseline;
+  white-space: nowrap;
   cursor: pointer;
-  transition:
-    background-color 150ms var(--ease-hover),
-    border-color 150ms var(--ease-hover),
-    color 150ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+  transition: background-size 280ms var(--ease-entrance);
 }
 
-.justify-chip:active {
-  transform: scale(0.96);
+.justify-word[aria-pressed="true"] {
+  background-size: 100% 100%;
 }
 
-.justify-chip[aria-pressed="true"] {
-  border-color: var(--color-ink);
-  background: var(--color-ink);
-  color: var(--justify-ground);
-}
-
-.justify-chip:focus-visible,
-.justify-sound:focus-visible {
+.justify-word:focus-visible {
   outline: 2px solid var(--justify-blue);
   outline-offset: 2px;
 }
 
-@media (hover: hover) and (pointer: fine) {
-  .justify-chip:not([aria-pressed="true"]):hover {
-    border-color: rgb(11 11 11 / 0.28);
-  }
-
-  .justify-sound:hover {
-    border-color: rgb(11 11 11 / 0.28);
-  }
-}
-
-.justify-tools {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 16px;
+.justify-word:active {
+  background-size: 100% 100%;
 }
 
 .justify-soft {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  cursor: pointer;
-}
-
-.justify-soft-label {
-  color: var(--color-ink-secondary);
-  font-size: var(--text-ui-lg);
-  line-height: var(--text-ui-lg--line-height);
-  letter-spacing: var(--text-ui-lg--letter-spacing);
-  font-weight: var(--text-ui-lg--font-weight);
-}
-
-.justify-range {
-  width: 160px;
-  height: 32px;
-  margin: 0;
-  background: transparent;
-  cursor: pointer;
-  appearance: none;
-  -webkit-appearance: none;
+  background-size: calc(var(--justify-soft, 0.5) * 100%) 100%;
+  filter: blur(calc(var(--justify-soft, 0.5) * 1.6px));
+  cursor: ew-resize;
   touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: none;
 }
 
-.justify-range::-webkit-slider-runnable-track {
-  height: 2px;
-  border-radius: 1px;
-  background: linear-gradient(to right, var(--color-ink) 0%, var(--color-ink) var(--justify-fill), var(--justify-line) var(--justify-fill), var(--justify-line) 100%);
-}
-
-.justify-range::-moz-range-track {
-  height: 2px;
-  border-radius: 1px;
-  background: var(--justify-line);
-}
-
-.justify-range::-moz-range-progress {
-  height: 2px;
-  border-radius: 1px;
-  background: var(--color-ink);
-}
-
-.justify-range::-webkit-slider-thumb {
-  width: 16px;
-  height: 16px;
-  margin-top: -7px;
-  border: 0;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow:
-    0 0 0 1px rgb(11 11 11 / 0.16),
-    0 1px 4px rgb(0 0 0 / 0.18);
-  -webkit-appearance: none;
-  transition: transform 150ms var(--ease-hover);
-}
-
-.justify-range::-moz-range-thumb {
-  width: 16px;
-  height: 16px;
-  border: 0;
-  border-radius: 50%;
-  background: #ffffff;
-  box-shadow:
-    0 0 0 1px rgb(11 11 11 / 0.16),
-    0 1px 4px rgb(0 0 0 / 0.18);
-}
-
-.justify-range:active::-webkit-slider-thumb {
-  transform: scale(1.12);
-}
-
-.justify-range:focus-visible {
-  outline: none;
-}
-
-.justify-range:focus-visible::-webkit-slider-thumb {
-  box-shadow:
-    0 0 0 2px var(--justify-blue),
-    0 1px 4px rgb(0 0 0 / 0.18);
+.justify-soft:active {
+  background-size: calc(var(--justify-soft, 0.5) * 100%) 100%;
 }
 
 .justify-sound {
-  display: inline-grid;
-  flex: none;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid var(--justify-line);
-  border-radius: 9999px;
-  background: var(--justify-ground);
-  color: var(--color-ink);
-  cursor: pointer;
-  transition:
-    border-color 150ms var(--ease-hover),
-    transform 120ms var(--ease-hover);
+  min-width: 48px;
+  text-align: left;
 }
 
-.justify-sound:active {
-  transform: scale(0.94);
+@media (hover: hover) and (pointer: fine) {
+  .justify-word:not(.justify-soft):hover {
+    text-decoration: underline;
+    text-decoration-thickness: 1px;
+    text-underline-offset: 4px;
+  }
 }
 
 @container (max-width: 759px) {
@@ -375,35 +287,10 @@
   }
 
   .justify-controls {
-    left: 16px;
-    right: 16px;
+    left: 20px;
+    right: 20px;
     bottom: 24px;
-    flex-direction: column;
-    align-items: stretch;
-    gap: 12px;
-  }
-
-  .justify-presets {
-    flex-wrap: wrap;
-    row-gap: 8px;
-    max-width: 100%;
-  }
-
-  .justify-chip {
-    flex: none;
-  }
-
-  .justify-tools {
-    justify-content: space-between;
-  }
-
-  .justify-soft {
-    flex: 1;
-  }
-
-  .justify-range {
-    flex: 1;
-    width: auto;
+    word-spacing: 12px;
   }
 }
 

@@ -1,4 +1,4 @@
-import { createProjector } from "./creditsAudio";
+import { createCreditsAudio } from "./creditsAudio";
 
 const NATURAL = 40;
 const MAX_SPEED = 1200;
@@ -8,7 +8,7 @@ const FRAME = 1 / 24;
 
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) {
+export function createCredits(root, { film, gate, roll, finale, grain, onEnd, onAudio }) {
   const gctx = grain.getContext("2d");
   const tiles = [];
   for (let t = 0; t < 4; t += 1) {
@@ -48,7 +48,8 @@ export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) 
   let destroyed = false;
   let paused = false;
   let ended = false;
-  let projector = null;
+  const audio = createCreditsAudio();
+  if (onAudio) audio.onState(onAudio);
   let speck = null;
   let seed = 7;
   let seek = null;
@@ -149,7 +150,7 @@ export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) 
       ended = nowEnded;
       onEnd?.(ended);
     }
-    projector?.update(drag ? drag.v / NATURAL : v / NATURAL);
+    audio.update(drag ? drag.v / NATURAL : v / NATURAL, ended);
   };
 
   const frame = (now) => {
@@ -271,6 +272,15 @@ export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) 
   film.addEventListener("wheel", onWheel, { passive: false });
   film.addEventListener("keydown", onKey);
 
+  const onGesture = (e) => {
+    if (e.target?.closest?.(".credits-pill")) return;
+    if (e.type === "keydown" && (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab" || e.key === "Escape")) return;
+    audio.arm();
+    wake();
+  };
+  const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
+  for (const type of GESTURES) window.addEventListener(type, onGesture, { capture: true, passive: true });
+
   measure();
   weave();
   wake();
@@ -282,10 +292,8 @@ export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) 
       wake();
     },
     async setSound(on) {
-      if (on && !projector) projector = createProjector();
-      if (!projector) return false;
-      const result = await projector.setEnabled(on);
-      projector.update(v / NATURAL);
+      const result = await audio.setEnabled(on);
+      audio.update(v / NATURAL, ended);
       wake();
       return result;
     },
@@ -297,8 +305,8 @@ export function createCredits(root, { film, gate, roll, finale, grain, onEnd }) 
       document.removeEventListener("visibilitychange", onVis);
       film.removeEventListener("wheel", onWheel);
       film.removeEventListener("keydown", onKey);
-      projector?.destroy();
-      projector = null;
+      for (const type of GESTURES) window.removeEventListener(type, onGesture, { capture: true });
+      audio.destroy();
     },
   };
 }
