@@ -1,4 +1,5 @@
 import {
+  BLUR_FRAGMENT,
   COMBINE_FRAGMENT,
   DISPLAY_FRAGMENT,
   FLOW_FRAGMENT,
@@ -261,6 +262,7 @@ export default class InkDragEngine {
       ink: link(gl, this.vertex, INK_FRAGMENT),
       display: link(gl, this.vertex, DISPLAY_FRAGMENT),
       combine: link(gl, this.vertex, COMBINE_FRAGMENT),
+      blur: link(gl, this.vertex, BLUR_FRAGMENT),
       probe: link(gl, this.vertex, PROBE_FRAGMENT),
       flow: link(gl, compile(gl, gl.VERTEX_SHADER, FLOW_VERTEX), FLOW_FRAGMENT),
     };
@@ -373,7 +375,9 @@ export default class InkDragEngine {
       if (pair) pair.forEach((t) => this.dropTarget(t));
     this.dropTarget(this.paperTarget);
     this.dropTarget(this.goalTarget);
-    for (const t of [this.fromTarget, this.flowTarget, this.mapsTarget, this.probeTarget]) this.dropTarget(t);
+    for (const t of [this.fromTarget, this.flowTarget, this.mapsTarget, this.probeTarget, this.blurTargets?.[0], this.blurTargets?.[1], this.crispTarget]) this.dropTarget(t);
+    this.crispTarget = null;
+    this.blurTargets = null;
     this.fromTarget = null;
     this.flowTarget = null;
     this.mapsTarget = null;
@@ -421,6 +425,8 @@ export default class InkDragEngine {
     if (float) {
       this.fromTarget = this.makeTarget(this.simWidth, this.simHeight, true);
       this.flowTarget = this.makeTarget(this.simWidth, this.simHeight, true);
+      this.blurTargets = [0, 1].map(() => this.makeTarget(this.simWidth, this.simHeight, true));
+      this.crispTarget = this.makeTarget(this.simWidth, this.simHeight, true);
       this.mapsTarget = this.makeTarget(this.simWidth, this.simHeight, false);
       this.probeTarget = this.makeTarget(Math.ceil(this.simWidth / PROBE), Math.ceil(this.simHeight / PROBE), false);
     }
@@ -846,9 +852,9 @@ export default class InkDragEngine {
         path[o + 3] = g.y;
         const xn = (s.x - minX) / spanX;
         look[o] = s.d;
-        look[o + 1] = 0.3 * xn + 0.07 * hash(k * 0.73 + 5);
-        look[o + 2] = (hash(k * 1.11 + 9) - 0.5) * 0.36;
-        look[o + 3] = 0.03 + 0.12 * hash(k * 0.53 + 3);
+        look[o + 1] = 0.3 * xn + 0.035 * hash(k * 0.73 + 5);
+        look[o + 2] = (hash(k * 1.11 + 9) - 0.5) * 0.2;
+        look[o + 3] = 0.03 + 0.06 * hash(k * 0.53 + 3);
         tint[o] = s.a;
         tint[o + 1] = s.b;
         tint[o + 2] = g.a;
@@ -881,6 +887,9 @@ export default class InkDragEngine {
     gl.activeTexture(gl.TEXTURE4);
     gl.bindTexture(gl.TEXTURE_2D, this.goalTarget.texture);
     gl.uniform1i(uniforms.uGoal, 4);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, this.fromTarget.texture);
+    gl.uniform1i(uniforms.uFrom, 5);
     gl.uniform1i(uniforms.uCols, FLOW_COLS);
     gl.uniform2f(uniforms.uRes, this.simWidth, this.simHeight);
     gl.uniform1f(uniforms.uT, t);
@@ -894,6 +903,11 @@ export default class InkDragEngine {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.blendEquation(gl.FUNC_ADD);
     gl.uniform1i(uniforms.uMode, 0);
+    gl.uniform1i(uniforms.uPart, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.crispTarget.framebuffer);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1i(uniforms.uPart, 1);
     gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
     gl.bindFramebuffer(gl.FRAMEBUFFER, this.mapsTarget.framebuffer);
     gl.clear(gl.COLOR_BUFFER_BIT);
@@ -908,11 +922,23 @@ export default class InkDragEngine {
     gl.blendEquation(gl.FUNC_ADD);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(this.vao);
+    const blur = this.programs.blur;
+    gl.useProgram(blur.program);
+    gl.uniform2f(blur.uniforms.uRes, this.simWidth, this.simHeight);
+    gl.uniform1i(blur.uniforms.uSrc, 0);
+    const reach = Math.max(1, (this.flowWidth || 2) * 0.55);
+    [[this.flowTarget, this.blurTargets[0], reach, 0], [this.blurTargets[0], this.blurTargets[1], 0, reach]].forEach(([src, dst, dx, dy]) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.framebuffer);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src.texture);
+      gl.uniform2f(blur.uniforms.uDir, dx, dy);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    });
     const combine = this.programs.combine;
     const write = this.inkTargets[1 - this.inkRead];
     gl.useProgram(combine.program);
     gl.bindFramebuffer(gl.FRAMEBUFFER, write.framebuffer);
-    [this.fromTarget, this.flowTarget, this.mapsTarget, this.goalTarget].forEach((target, i) => {
+    [this.fromTarget, this.crispTarget, this.mapsTarget, this.goalTarget].forEach((target, i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, target.texture);
     });
@@ -920,6 +946,9 @@ export default class InkDragEngine {
     gl.uniform1i(combine.uniforms.uFlow, 1);
     gl.uniform1i(combine.uniforms.uMaps, 2);
     gl.uniform1i(combine.uniforms.uGoal, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.blurTargets[1].texture);
+    gl.uniform1i(combine.uniforms.uBlur, 4);
     gl.uniform2f(combine.uniforms.uRes, this.simWidth, this.simHeight);
     gl.uniform1f(combine.uniforms.uT, t);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

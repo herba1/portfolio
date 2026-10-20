@@ -375,7 +375,9 @@ export const FLOW_FRAGMENT = `#version 300 es
 precision highp float;
 precision highp int;
 uniform int uMode;
+uniform int uPart;
 uniform sampler2D uGoal;
+uniform sampler2D uFrom;
 uniform vec2 uRes;
 in float vMass;
 in vec2 vChroma;
@@ -388,7 +390,10 @@ void main() {
     float soft = 1.0 - smoothstep(0.55, 1.0, abs(vAcross));
     float shape = smoothstep(0.04, 0.45, texture(uGoal, gl_FragCoord.xy / uRes).r);
     float settle = smoothstep(0.3, 0.78, vU);
-    float k = vWeight * mix(0.35 + 0.65 * soft, shape, settle);
+    float origin = smoothstep(0.2, 0.6, texture(uFrom, gl_FragCoord.xy / uRes).r);
+    float early = 1.0 - smoothstep(0.15, 0.45, vU);
+    float leave = mix(origin, 1.0, smoothstep(0.3, 0.6, vU));
+    float k = uPart == 0 ? vWeight * (0.35 + 0.65 * soft) * (1.0 - settle) * (1.0 - early) * leave : vWeight * (shape * settle + origin * early);
     outColor = vec4(vMass * k, k, vChroma * k);
   } else {
     outColor = vec4(vWeight);
@@ -396,10 +401,27 @@ void main() {
 }
 `;
 
+export const BLUR_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uRes;
+uniform vec2 uDir;
+out vec4 outColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec2 st = uDir / uRes;
+  vec4 sum = texture(uSrc, uv) * 0.2270;
+  sum += (texture(uSrc, uv + st * 1.3846) + texture(uSrc, uv - st * 1.3846)) * 0.3162;
+  sum += (texture(uSrc, uv + st * 3.2308) + texture(uSrc, uv - st * 3.2308)) * 0.0703;
+  outColor = sum;
+}
+`;
+
 export const COMBINE_FRAGMENT = `#version 300 es
 precision highp float;
 uniform sampler2D uFrom;
 uniform sampler2D uFlow;
+uniform sampler2D uBlur;
 uniform sampler2D uMaps;
 uniform sampler2D uGoal;
 uniform vec2 uRes;
@@ -413,14 +435,23 @@ void main() {
   float lift = max(mp.r, smoothstep(0.6, 1.0, uT));
   float land = max(mp.g, smoothstep(0.85, 1.0, uT));
   vec4 goal = texture(uGoal, uv);
-  float cover = min(1.0, f.g);
-  float fd = f.g > 1e-4 ? f.r / f.g * cover : 0.0;
-  vec2 fc = f.g > 1e-4 ? f.ba / f.g : vec2(0.5);
+  vec4 b = texture(uBlur, uv);
+  float shape = smoothstep(0.04, 0.45, goal.r);
+  float meta = smoothstep(0.2, 0.5, b.g);
+  float crisp = min(1.0, f.g);
+  float cover = max(meta, crisp);
+  float mw = meta * step(1e-4, b.g);
+  float cw = crisp * step(1e-4, f.g);
+  float wsum = max(1e-4, mw + cw);
+  float mass = (mw * b.r / max(b.g, 1e-4) + cw * f.r / max(f.g, 1e-4)) / wsum;
+  float fd = mass * cover;
+  vec2 fc = mw + cw > 1e-4 ? (mw * b.ba / max(b.g, 1e-4) + cw * f.ba / max(f.g, 1e-4)) / wsum : vec2(0.5);
   float bd = from.r * (1.0 - lift);
   float gd = goal.r * land;
-  float total = bd + fd + gd;
-  vec2 chroma = total > 1e-4 ? (bd * from.ba + fd * fc + gd * goal.ba) / total : vec2(0.5);
-  float wet = total > 1e-4 ? (bd * from.g + fd + gd * goal.g) / total : 0.0;
+  float lead = max(bd, fd);
+  float total = lead + gd;
+  vec2 chroma = total > 1e-4 ? (lead * (bd > fd ? from.ba : fc) + gd * goal.ba) / total : vec2(0.5);
+  float wet = total > 1e-4 ? (lead * (bd > fd ? from.g : 1.0) + gd * goal.g) / total : 0.0;
   outColor = vec4(min(total, 2.6), wet, chroma);
 }
 `;
