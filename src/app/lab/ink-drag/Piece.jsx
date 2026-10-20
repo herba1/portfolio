@@ -26,7 +26,7 @@ const ALBUM_ITEMS = FEATURED.slice(0, 6).map((album) => ({
 }));
 
 const SHEET_LABEL =
-  "A record printed in wet ink: its album cover, then its title in type. Drag through the sheet with a mouse, finger or pen to smear the ink along your path; slow strokes push thick soft smears, fast strokes pull thin streaks. Every few seconds a sweep drags the cover into the title and the title into the next cover. Press Enter to flip between cover and title.";
+  "A record printed in wet ink: its album cover, then its title in type. Drag through the sheet with a mouse, finger or pen to smear the ink along your path; slow strokes push thick soft smears, fast strokes pull thin streaks. Every few seconds the ink of the cover flows across the sheet and settles into the letters of its title, then flows back out into the next cover. Press Enter to flip between cover and title.";
 
 function FreshIcon() {
   return (

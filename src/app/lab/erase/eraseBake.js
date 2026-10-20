@@ -115,7 +115,7 @@ function sample(src, w, h, x, y) {
   return a + (b - a) * fy;
 }
 
-function shape(src, w, h, s, o) {
+function shape(src, w, h, s, o, ox = 0, oy = 0) {
   const amp = o.wobble * s;
   const f = 1 / (o.scale * s);
   const reach = boxBlur(src, w, h, Math.ceil(amp) + 2);
@@ -124,8 +124,8 @@ function shape(src, w, h, s, o) {
     for (let x = 0; x < w; x += 1) {
       const i = y * w + x;
       if (reach[i] < 0.0005) continue;
-      const dx = (noise(x * f, y * f, o.seed) - 0.5) * 2 * amp;
-      const dy = (noise(x * f + 31.7, y * f + 12.9, o.seed + 1) - 0.5) * 2 * amp;
+      const dx = (noise((x + ox) * f, (y + oy) * f, o.seed) - 0.5) * 2 * amp;
+      const dy = (noise((x + ox) * f + 31.7, (y + oy) * f + 12.9, o.seed + 1) - 0.5) * 2 * amp;
       moved[i] = sample(src, w, h, x + dx, y + dy);
     }
   }
@@ -157,6 +157,7 @@ export function layoutHand(family, titles = defaultTitles()) {
     let minX = Infinity;
     let maxX = -Infinity;
     const chars = [...text];
+    const stops = [cx];
     chars.forEach((ch, i) => {
       const shrink = 1 - (i / Math.max(1, chars.length)) * (opts.shrink ?? 0.06);
       const size1 = size * shrink * (1 + gauss(0.03));
@@ -167,15 +168,17 @@ export function layoutHand(family, titles = defaultTitles()) {
       const adv = ctx.measureText(ch).width * sx;
       if (ch === " ") {
         cx += adv * (0.85 + rng() * 0.35);
+        stops.push(cx);
         return;
       }
       const gy = base + slope * (cx - startX) + gauss(size * 0.02);
       glyphs.push({ ch, x: cx, y: gy, size: size1, weight: w, rot: gauss(0.03) + slope, sx, sy, skew: -0.07 + gauss(0.025), ink });
       minX = Math.min(minX, cx);
       maxX = Math.max(maxX, cx + adv);
+      stops.push(cx + adv);
       cx += adv + (opts.track ?? size * 0.03) + gauss(size * 0.018);
     });
-    return { x0: minX, x1: maxX, top: base - size * 0.8, bottom: base + size * 0.1, base, slope, startX };
+    return { x0: minX, x1: maxX, top: base - size * 0.8, bottom: base + size * 0.1, base, slope, startX, stops, size };
   };
 
   const measure = (text, size, weight) => {
@@ -207,7 +210,7 @@ export function layoutHand(family, titles = defaultTitles()) {
     return Math.max(36, Math.min(64, (64 * 720) / Math.max(1, width)));
   };
 
-  const empty = (y) => ({ x0: 118, x1: 118, top: y - 64 * 0.8, bottom: y + 64 * 0.1, base: y, slope: 0, startX: 118 });
+  const empty = (y) => ({ x0: 118, x1: 118, top: y - 64 * 0.8, bottom: y + 64 * 0.1, base: y, slope: 0, startX: 118, stops: [118], size: 64 });
 
   SONGS.forEach((song, i) => {
     const y = FIRST_BASELINE + i * LINE_STEP;
@@ -278,15 +281,19 @@ function drawHand(ctx, hand, ink, family) {
   }
 }
 
-export function bakeInk(hand, pw, ph, family) {
-  const s = pw / SHEET_W;
+export function bakeInk(hand, fullW, fullH, family, region = null) {
+  const s = fullW / SHEET_W;
+  const ox = region ? region.x : 0;
+  const oy = region ? region.y : 0;
+  const pw = region ? region.w : fullW;
+  const ph = region ? region.h : fullH;
   const n = pw * ph;
   const canvas = makeCanvas(pw, ph);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const read = (ink) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, pw, ph);
-    ctx.setTransform(s, 0, 0, s, 0, 0);
+    ctx.setTransform(s, 0, 0, s, -ox, -oy);
     ctx.fillStyle = "#000";
     ctx.strokeStyle = "#000";
     ctx.textBaseline = "alphabetic";
@@ -296,8 +303,8 @@ export function bakeInk(hand, pw, ph, family) {
     for (let i = 0; i < n; i += 1) a[i] = data[i * 4 + 3] / 255;
     return a;
   };
-  const m = shape(read(0), pw, ph, s, { wobble: 1.1, scale: 9, round: 1.05, lo: 0.34, hi: 0.6, seed: 21 });
-  const b = shape(read(1), pw, ph, s, { wobble: 0.55, scale: 6, round: 0.4, lo: 0.3, hi: 0.66, seed: 23 });
+  const m = shape(read(0), pw, ph, s, { wobble: 1.1, scale: 9, round: 1.05, lo: 0.34, hi: 0.6, seed: 21 }, ox, oy);
+  const b = shape(read(1), pw, ph, s, { wobble: 0.55, scale: 6, round: 0.4, lo: 0.3, hi: 0.66, seed: 23 }, ox, oy);
   const bm = boxBlur(m, pw, ph, Math.max(1, Math.round(2.4 * s)));
   const total = new Float32Array(n);
   for (let i = 0; i < n; i += 1) total[i] = 1 - (1 - m[i]) * (1 - b[i]);
@@ -312,8 +319,8 @@ export function bakeInk(hand, pw, ph, family) {
       const ma = m[i];
       const ba = b[i];
       if (ma + ba < 0.004) continue;
-      const u = x / s;
-      const v = y / s;
+      const u = (x + ox) / s;
+      const v = (y + oy) / s;
       let r = 0;
       let g = 0;
       let bl = 0;
@@ -361,14 +368,14 @@ export function bakeInk(hand, pw, ph, family) {
   for (let y = 0; y < ph; y += 1) {
     for (let x = 0; x < pw; x += 1) {
       const i = y * pw + x;
-      const u = x / s;
-      const v = y / s;
+      const u = (x + ox) / s;
+      const v = (y + oy) / s;
       const fibre = noise(u * 0.5, v * 0.13, 43) * 0.6 + noise(u * 1.6, v * 0.42, 47) * 0.4;
       let la = 0.05 + 0.26 * smooth(0.52, 0.86, fibre);
       let lr = 255;
       let lg = 253;
       let lb = 247;
-      if (hash(x, y, 53) > 0.9984) {
+      if (hash(x + ox, y + oy, 53) > 0.9984) {
         lr = 150;
         lg = 138;
         lb = 124;
@@ -384,7 +391,32 @@ export function bakeInk(hand, pw, ph, family) {
     }
   }
   fctx.putImageData(fxImage, 0, 0);
-  return { ink: inkCanvas, fx: fxCanvas, total, blue: b, s };
+  return { ink: inkCanvas, fx: fxCanvas, total, blue: b, s, x: ox, y: oy, w: pw, h: ph };
+}
+
+export function coverageInto(cov, tint, baked, cells) {
+  const { total, blue, s, x: ox, y: oy, w: pw, h: ph } = baked;
+  for (let row = cells.r0; row <= cells.r1; row += 1) {
+    const y0 = Math.floor(row * GRID * s) - oy;
+    const y1 = Math.max(y0 + 1, Math.floor((row + 1) * GRID * s) - oy);
+    for (let col = cells.c0; col <= cells.c1; col += 1) {
+      const x0 = Math.floor(col * GRID * s) - ox;
+      const x1 = Math.max(x0 + 1, Math.floor((col + 1) * GRID * s) - ox);
+      let sum = 0;
+      let sumB = 0;
+      let count = 0;
+      for (let y = Math.max(0, y0); y < Math.min(ph, y1); y += 1) {
+        for (let x = Math.max(0, x0); x < Math.min(pw, x1); x += 1) {
+          sum += total[y * pw + x];
+          sumB += blue[y * pw + x];
+          count += 1;
+        }
+      }
+      const idx = row * GRID_COLS + col;
+      cov[idx] = count ? sum / count : 0;
+      tint[idx] = sum > 0.001 ? Math.min(1, sumB / sum) : 0;
+    }
+  }
 }
 
 export function coverage(total, blue, pw, ph, s) {

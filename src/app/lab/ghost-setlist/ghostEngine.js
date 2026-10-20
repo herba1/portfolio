@@ -273,7 +273,7 @@ export default class GhostEngine {
     const narrow = W / H < 0.95;
     const ctx = this.ctx;
     const L = W * 1.14 + 48;
-    const amp = 0;
+    const amp = L * 0.042;
     this.slot = L;
     this.amp = amp;
     const fitW = W * (narrow ? 0.84 : 0.78);
@@ -314,7 +314,7 @@ export default class GhostEngine {
       blockHalf = Math.max(blockHalf, half);
       return { font, size, cap, glyphs, half, lineWidth: Math.max(1, size * 0.011) };
     });
-    this.cy = Math.max(H * (narrow ? 0.34 : 0.42), top + blockHalf + 12);
+    this.cy = Math.max(H * (narrow ? 0.34 : 0.38), top + blockHalf + 12);
     const span = L * 2.7;
     const step = 1;
     const samples = Math.ceil((span * 2) / step) + 1;

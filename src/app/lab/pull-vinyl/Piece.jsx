@@ -1,50 +1,57 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { ALBUMS } from "@/app/lab/_music/catalog";
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 
 import { createVinylAudio } from "./vinylAudio";
 import "./pull-vinyl.css";
 
-const ORDER = [
-  "abbey-road",
-  "revolver",
-  "rubber-soul",
-  "sgt-pepper",
-  "let-it-be",
-  "help",
-  "magical-mystery-tour",
-  "a-hard-days-night",
-  "white-album",
-  "beatles-for-sale",
-  "with-the-beatles",
-  "please-please-me",
-];
-const POOL = (() => {
-  const albums = ORDER.map((id) => ALBUMS.find((a) => a.id === id));
-  const out = [];
-  for (let j = 0; j < 7; j += 1) {
-    albums.forEach((a) => {
-      if (a.tracks[j]) out.push({ title: a.tracks[j], album: a });
-    });
-  }
-  return out;
-})();
 const FIRST = 9;
-const INITIAL = POOL.slice(0, FIRST).map((s, i) => ({
-  ...s,
-  key: `s${i}`,
-  fresh: false,
-}));
+const BATCH = 3;
 const THRESHOLD = 128;
 const HOLD = 156;
 const MAX = 236;
-const GROUP = 120;
 const DISC_R = 54;
-const SETTLE = 560;
+const ARRIVE = 780;
+const LIVE_WAIT = 2500;
+const DECODE_WAIT = 2500;
+
+const decoded = new Map();
+
+function decode(src) {
+  if (!src) return Promise.resolve();
+  if (decoded.has(src)) return decoded.get(src).ready;
+  const img = new Image();
+  img.decoding = "async";
+  img.src = src;
+  const ready = Promise.race([
+    img.decode().catch(() => {}),
+    new Promise((res) => window.setTimeout(res, DECODE_WAIT)),
+  ]);
+  decoded.set(src, { img, ready });
+  return ready;
+}
+
+const easeOut = (u) => 1 - Math.pow(1 - u, 4);
+const easeOut3 = (u) => 1 - Math.pow(1 - u, 3);
+const span = (u, a, b) => Math.min(1, Math.max(0, (u - a) / (b - a)));
+const easeInOut = (u) =>
+  u < 0.5 ? 4 * u * u * u : 1 - Math.pow(-2 * u + 2, 3) / 2;
+const lerp = (a, b, t) => a + (b - a) * t;
+
+function toSong(track, n) {
+  return {
+    key: `s${n}`,
+    title: track.title,
+    meta: [track.album, track.artist].filter(Boolean).join(" · "),
+    image: track.image || track.imageLarge,
+    fresh: false,
+  };
+}
 
 export default function Piece({ embedded = false }) {
+  const { tracks } = useTopSongs(50);
   const scrollRef = useRef(null);
   const listRef = useRef(null);
   const zoneRef = useRef(null);
@@ -53,10 +60,48 @@ export default function Piece({ embedded = false }) {
   const sleeveRef = useRef(null);
   const spinRef = useRef(null);
   const engineRef = useRef(null);
-  const nextRef = useRef(FIRST);
-  const [items, setItems] = useState(INITIAL);
-  const [phase, setPhase] = useState("idle");
-  const [labelAt, setLabelAt] = useState(FIRST);
+  const poolRef = useRef(null);
+  const nextRef = useRef(0);
+  const firstTracksRef = useRef(null);
+  const [items, setItems] = useState([]);
+  const [phase, setPhase] = useState("loading");
+  const [label, setLabel] = useState(null);
+
+  useEffect(() => {
+    if (!firstTracksRef.current) firstTracksRef.current = tracks;
+    if (poolRef.current) return undefined;
+    let alive = true;
+    const adopt = () => {
+      if (!alive || poolRef.current || !tracks.length) return;
+      const pool = tracks.map((t, i) => ({ ...t, n: i }));
+      poolRef.current = pool;
+      const first = Math.min(FIRST, pool.length);
+      const initial = pool.slice(0, first).map((t, i) => toSong(t, i));
+      nextRef.current = first;
+      const upcoming = toSong(pool[first % pool.length], first);
+      Promise.all([
+        ...initial.map((s) => decode(s.image)),
+        decode(upcoming.image),
+      ]).then(() => {
+        if (!alive) return;
+        setItems(initial.map((s) => ({ ...s, intro: true })));
+        setLabel(upcoming.image);
+        engineRef.current?.ready();
+      });
+      pool.forEach((t) => decode(t.image || t.imageLarge));
+    };
+    if (tracks !== firstTracksRef.current) {
+      adopt();
+      return () => {
+        alive = false;
+      };
+    }
+    const timer = window.setTimeout(adopt, LIVE_WAIT);
+    return () => {
+      alive = false;
+      window.clearTimeout(timer);
+    };
+  }, [tracks]);
 
   useEffect(() => {
     const scroller = scrollRef.current;
@@ -65,7 +110,7 @@ export default function Piece({ embedded = false }) {
     ).matches;
     const audio = createVinylAudio();
     const st = {
-      phase: "idle",
+      phase: "loading",
       pull: 0,
       y: 0,
       vy: 0,
@@ -76,6 +121,8 @@ export default function Piece({ embedded = false }) {
       spinV: 0,
       armed: false,
       drag: null,
+      loaded: false,
+      arrive: null,
       wheelTimer: 0,
       timers: [],
       raf: 0,
@@ -88,12 +135,66 @@ export default function Piece({ embedded = false }) {
     };
 
     const rubber = (d) => MAX * (1 - Math.exp(-Math.max(0, d) / 210));
+    const unrubber = (y) =>
+      Math.max(0, -210 * Math.log(1 - Math.min(0.999, Math.max(0, y) / MAX)));
 
-    const paint = () => {
+    const setArmed = (armed) => {
+      if (armed === st.armed) return;
+      st.armed = armed;
+      zoneRef.current.dataset.armed = armed ? "true" : "false";
+    };
+
+    const paintArrive = (now) => {
+      const a = st.arrive;
+      const u = Math.min(1, Math.max(0, (now - a.t0) / ARRIVE));
+      const e = reduce ? 1 : easeOut(span(u, 0.18, 1));
+      const ex = reduce ? 1 : easeOut3(span(u, 0, 0.62));
+      const es = reduce ? 1 : easeInOut(u);
+      const yOld = lerp(a.y0, a.blockH, e);
+      const listY = yOld - a.blockH;
+      const blockTop = lerp(-a.blockH, 0, e);
+      listRef.current.style.transform = `translate3d(0, ${listY.toFixed(2)}px, 0)`;
+      a.rows.forEach((li) => {
+        li.style.transform = `translate3d(0, ${(blockTop - listY).toFixed(2)}px, 0)`;
+      });
+      zoneRef.current.style.height = `${Math.ceil(yOld)}px`;
+      const gx = lerp(0, a.dx, ex);
+      const gy = lerp(a.gy0, a.ty, es);
+      const sc = lerp(1, a.scale, ex);
+      groupRef.current.style.transform = `translate3d(${gx.toFixed(2)}px, ${gy.toFixed(2)}px, 0) scale(${sc.toFixed(4)})`;
+      groupRef.current.style.setProperty("--pv-lift", (1 - es).toFixed(3));
+      groupRef.current.style.setProperty("--pv-radius", `${lerp(4, a.radius, es).toFixed(2)}px`);
+      return u >= 1;
+    };
+
+    const finishArrive = () => {
+      const a = st.arrive;
+      st.arrive = null;
+      st.y = 0;
+      st.vy = 0;
+      st.target = 0;
+      a.rows.forEach((li) => {
+        li.style.transform = "";
+      });
+      if (a.thumb) a.thumb.style.visibility = "";
+      const g = groupRef.current;
+      g.style.zIndex = "";
+      g.style.removeProperty("--pv-lift");
+      g.style.removeProperty("--pv-radius");
+      go("idle");
+      engineRef.current?.arrived();
+    };
+
+    const paint = (now) => {
+      if (st.phase === "arriving" && st.arrive) {
+        if (paintArrive(now)) finishArrive();
+        else return;
+      }
       const y = Math.max(0, st.y);
       listRef.current.style.transform = `translate3d(0, ${y.toFixed(2)}px, 0)`;
       zoneRef.current.style.height = `${Math.ceil(y)}px`;
-      groupRef.current.style.transform = `translate3d(0, ${((y - GROUP) / 2).toFixed(2)}px, 0)`;
+      groupRef.current.style.transform = `translate3d(0, ${((y - 120) / 2).toFixed(2)}px, 0)`;
+      groupRef.current.style.visibility = y < 0.5 ? "hidden" : "visible";
       const out = Math.max(0, st.out);
       sleeveRef.current.style.transform = `translate3d(${(-36 * out).toFixed(2)}px, 0, 0)`;
       discRef.current.style.transform = `translate3d(${(40 * out).toFixed(2)}px, 0, 0)`;
@@ -103,20 +204,10 @@ export default function Piece({ embedded = false }) {
     const loop = (now) => {
       const dt = Math.min(0.033, (now - st.last) / 1000);
       st.last = now;
-      const following = st.phase === "pulling";
-      if (following) {
+      if (st.phase === "pulling") {
         st.y = rubber(st.pull);
         st.vy = 0;
-      } else if (st.phase === "settling") {
-        const u = Math.min(1, (now - st.settleAt) / SETTLE);
-        st.y = st.settleFrom * Math.pow(1 - u, 3);
-        st.vy = 0;
-        if (u >= 1) {
-          st.y = 0;
-          st.target = 0;
-          go("idle");
-        }
-      } else {
+      } else if (st.phase !== "arriving") {
         const k = 170;
         const c = 2 * Math.sqrt(k);
         const n = Math.max(1, Math.ceil(dt * 240));
@@ -125,37 +216,51 @@ export default function Piece({ embedded = false }) {
           st.y += (st.vy * dt) / n;
         }
       }
-      const outTarget = st.phase === "refreshing" ? 1 : st.phase === "pulling" ? Math.min(1, Math.max(0, st.y) / THRESHOLD) : 0;
-      const ko = st.phase === "pulling" ? 700 : st.phase === "returning" ? 160 : 260;
+      const outTarget =
+        st.phase === "refreshing"
+          ? 1
+          : st.phase === "pulling"
+            ? Math.min(1, Math.max(0, st.y) / THRESHOLD)
+            : 0;
+      const ko =
+        st.phase === "pulling" ? 700 : st.phase === "returning" ? 160 : 260;
       const n2 = Math.max(1, Math.ceil(dt * 240));
       const before = st.out;
-      for (let i = 0; i < n2; i += 1) {
-        st.vout += ((ko * (outTarget - st.out) - 2 * Math.sqrt(ko) * st.vout) * dt) / n2;
-        st.out += (st.vout * dt) / n2;
+      if (st.phase !== "arriving") {
+        for (let i = 0; i < n2; i += 1) {
+          st.vout +=
+            ((ko * (outTarget - st.out) - 2 * Math.sqrt(ko) * st.vout) * dt) /
+            n2;
+          st.out += (st.vout * dt) / n2;
+        }
       }
       const roll = (((st.out - before) * 76) / DISC_R) * (180 / Math.PI);
       const spinTarget = st.phase === "refreshing" ? 400 : 0;
-      st.spinV += (spinTarget - st.spinV) * Math.min(1, dt * (st.phase === "refreshing" ? 3 : 5));
+      st.spinV +=
+        (spinTarget - st.spinV) *
+        Math.min(1, dt * (st.phase === "refreshing" ? 3 : 5));
       st.spin = (st.spin + st.spinV * dt + roll) % 360;
       if (st.phase === "pulling") {
         const armed = st.y >= THRESHOLD;
-        if (armed !== st.armed) {
-          st.armed = armed;
-          if (armed) {
-            audio.slide(0.035);
-            if (navigator.vibrate) navigator.vibrate(6);
-          }
-          zoneRef.current.dataset.armed = armed ? "true" : "false";
+        if (armed && !st.armed) {
+          audio.slide(0.035);
+          if (navigator.vibrate) navigator.vibrate(6);
         }
+        setArmed(armed);
       }
-      paint();
-      const idle = st.phase === "idle" && Math.abs(st.y) < 0.2 && Math.abs(st.vy) < 0.5 && Math.abs(st.out) < 0.002 && Math.abs(st.spinV) < 1;
+      paint(now);
+      const idle =
+        st.phase === "idle" &&
+        Math.abs(st.y) < 0.2 &&
+        Math.abs(st.vy) < 0.5 &&
+        Math.abs(st.out) < 0.002 &&
+        Math.abs(st.spinV) < 1;
       if (idle) {
         st.y = 0;
+        st.vy = 0;
         st.out = 0;
         st.vout = 0;
-        paint();
-        engineRef.current?.settled?.();
+        paint(now);
         st.raf = 0;
         return;
       }
@@ -172,75 +277,99 @@ export default function Piece({ embedded = false }) {
       st.timers.push(id);
     };
 
+    const arrive = () => {
+      audio.slide(0.02);
+      go("arriving");
+      st.arrive = null;
+      engineRef.current?.load();
+      kick();
+    };
+
+    const comeBack = () => {
+      st.loaded = false;
+      audio.stopCrackle();
+      go("returning");
+      st.target = HOLD;
+      kick();
+      later(arrive, reduce ? 0 : 400);
+    };
+
     const refresh = () => {
       go("refreshing");
       st.target = HOLD;
-      st.armed = false;
-      zoneRef.current.dataset.armed = "false";
+      st.loaded = false;
+      setArmed(false);
       audio.startCrackle();
       kick();
       later(
         () => {
-          audio.stopCrackle();
-          go("returning");
-          kick();
-          later(
-            () => {
-              audio.slide(0.02);
-              engineRef.current?.onLoaded();
-              st.settleAt = performance.now();
-              st.settleFrom = Math.max(0, st.y);
-              go(reduce ? "idle" : "settling");
-              st.target = 0;
-              kick();
-            },
-            reduce ? 0 : 380,
-          );
+          if (st.drag?.active) st.loaded = true;
+          else comeBack();
         },
         reduce ? 300 : 1500,
       );
     };
 
     const release = () => {
-      if (st.phase !== "pulling") return;
+      const drag = st.drag;
+      st.drag = null;
+      if (st.phase === "refreshing") {
+        st.target = HOLD;
+        kick();
+        if (st.loaded) comeBack();
+        return;
+      }
+      if (st.phase !== "pulling" || !drag?.active) return;
       if (st.y >= THRESHOLD) {
         st.vy = 0;
         refresh();
       } else {
         go("idle");
+        setArmed(false);
         st.target = 0;
         kick();
       }
     };
 
-    const begin = (startY) => {
+    const begin = (startY, id) => {
       audio.wake();
-      if (st.phase === "refreshing" || st.phase === "returning" || st.phase === "settling") return false;
-      st.pull = Math.max(
-        0,
-        -210 * Math.log(1 - Math.min(0.999, Math.max(0, st.y) / MAX)),
-      );
-      st.drag = { y: startY, base: st.pull, active: false };
-      return true;
+      if (st.phase === "loading") return;
+      st.drag = { y: startY, base: 0, active: false, id };
     };
 
     const moveTo = (clientY) => {
-      const d = st.drag.base + (clientY - st.drag.y);
-      if (!st.drag.active) {
-        if (clientY - st.drag.y < 4 || scroller.scrollTop > 0) return false;
-        st.drag.active = true;
-        go("pulling");
+      const drag = st.drag;
+      if (!drag.active) {
+        if (st.phase === "returning" || st.phase === "arriving") {
+          drag.y = Math.min(drag.y, clientY);
+          return false;
+        }
+        if (clientY - drag.y < 4 || scroller.scrollTop > 0) return false;
+        drag.active = true;
+        drag.y = clientY;
+        if (st.phase === "refreshing") {
+          drag.base = 0;
+          drag.hold = true;
+        } else {
+          drag.base = unrubber(st.y);
+          go("pulling");
+        }
         kick();
       }
-      st.pull = Math.max(0, d);
+      const d = drag.base + (clientY - drag.y);
+      if (drag.hold) {
+        st.target = HOLD + 40 * (1 - Math.exp(-Math.max(0, d) / 120));
+        kick();
+      } else {
+        st.pull = Math.max(0, d);
+      }
       return true;
     };
 
     const onPointerDown = (e) => {
       if (e.pointerType === "touch" || e.button !== 0) return;
       if (scroller.scrollTop > 0) return;
-      if (!begin(e.clientY)) return;
-      st.drag.id = e.pointerId;
+      begin(e.clientY, e.pointerId);
     };
     const onPointerMove = (e) => {
       if (!st.drag || st.drag.id !== e.pointerId) return;
@@ -249,14 +378,12 @@ export default function Piece({ embedded = false }) {
     };
     const onPointerUp = (e) => {
       if (!st.drag || st.drag.id !== e.pointerId) return;
-      st.drag = null;
       release();
     };
 
     const onTouchStart = (e) => {
       if (scroller.scrollTop > 0 || e.touches.length !== 1) return;
-      if (!begin(e.touches[0].clientY)) return;
-      st.drag.id = "touch";
+      begin(e.touches[0].clientY, "touch");
     };
     const onTouchMove = (e) => {
       if (!st.drag || st.drag.id !== "touch") return;
@@ -264,27 +391,34 @@ export default function Piece({ embedded = false }) {
     };
     const onTouchEnd = () => {
       if (!st.drag || st.drag.id !== "touch") return;
-      st.drag = null;
       release();
     };
 
     const onWheel = (e) => {
-      if (scroller.scrollTop > 0 || st.phase === "refreshing" || st.phase === "returning" || st.phase === "settling") return;
+      if (scroller.scrollTop > 0 || st.drag) return;
+      if (st.phase !== "idle" && st.phase !== "pulling") return;
       if (e.deltaY >= 0 && st.phase !== "pulling") return;
       e.preventDefault();
       audio.wake();
       if (st.phase !== "pulling") {
-        st.pull = 0;
+        st.pull = unrubber(st.y);
         go("pulling");
         kick();
       }
       st.pull = Math.max(0, st.pull - e.deltaY * 0.9);
       window.clearTimeout(st.wheelTimer);
-      st.wheelTimer = window.setTimeout(release, 160);
+      st.wheelTimer = window.setTimeout(() => {
+        if (st.phase !== "pulling" || st.drag) return;
+        st.drag = { active: true };
+        release();
+      }, 160);
     };
 
     engineRef.current = {
       ...engineRef.current,
+      ready() {
+        if (st.phase === "loading") go("idle");
+      },
       trigger() {
         if (st.phase !== "idle") return;
         audio.wake();
@@ -292,9 +426,43 @@ export default function Piece({ embedded = false }) {
         st.vy = 900;
         refresh();
       },
+      committed(rows) {
+        if (st.phase !== "arriving" || st.arrive) return;
+        const list = listRef.current;
+        const g = groupRef.current;
+        const thumb = rows[0]?.querySelector("img") || null;
+        const listY = Math.max(0, st.y);
+        list.style.transform = `translate3d(0, ${listY.toFixed(2)}px, 0)`;
+        const blockH = rows.reduce((h, li) => h + li.offsetHeight, 0);
+        const sRect = scroller.getBoundingClientRect();
+        const t = thumb?.getBoundingClientRect();
+        const tx = t ? t.left - sRect.left : 24;
+        const ty = t ? t.top - sRect.top + scroller.scrollTop - listY : 8;
+        const tw = t ? t.width : 56;
+        const a = {
+          t0: performance.now(),
+          y0: listY,
+          blockH,
+          rows,
+          thumb,
+          gy0: (listY - 120) / 2,
+          dx: tx - g.offsetLeft,
+          ty: ty - g.offsetTop,
+          scale: tw / g.offsetWidth,
+          radius: 6 / (tw / g.offsetWidth),
+        };
+        if (thumb) thumb.style.visibility = "hidden";
+        g.style.zIndex = "2";
+        g.style.visibility = "visible";
+        st.arrive = a;
+        st.out = 0;
+        st.vout = 0;
+        paintArrive(a.t0);
+        kick();
+      },
     };
 
-    paint();
+    paint(performance.now());
     scroller.addEventListener("pointerdown", onPointerDown);
     scroller.addEventListener("pointermove", onPointerMove);
     scroller.addEventListener("pointerup", onPointerUp);
@@ -324,27 +492,42 @@ export default function Piece({ embedded = false }) {
   useEffect(() => {
     engineRef.current = {
       ...engineRef.current,
-      settled() {
-        setLabelAt(nextRef.current);
-      },
-      onLoaded() {
+      load() {
+        const pool = poolRef.current;
         const start = nextRef.current;
-        const fresh = [0, 1, 2].map((i) => {
-          const s = POOL[(start + i) % POOL.length];
-          return { ...s, key: `s${start + i}`, fresh: true };
+        const count = Math.min(BATCH, pool.length);
+        const fresh = Array.from({ length: count }, (_, i) => ({
+          ...toSong(pool[(start + i) % pool.length], start + i),
+          fresh: true,
+        }));
+        nextRef.current = start + count;
+        Promise.all(fresh.map((s) => decode(s.image))).then(() => {
+          setItems((prev) => [
+            ...fresh,
+            ...prev.map((it) => (it.fresh ? { ...it, fresh: false } : it)),
+          ]);
         });
-        nextRef.current = start + 3;
+      },
+      arrived() {
+        const pool = poolRef.current;
+        const n = nextRef.current;
+        const upcoming = toSong(pool[n % pool.length], n);
+        decode(upcoming.image).then(() => setLabel(upcoming.image));
         setItems((prev) =>
-          [...fresh, ...prev.map((it) => ({ ...it, fresh: false }))].slice(
-            0,
-            30,
-          ),
+          prev.length > pool.length ? prev.slice(0, pool.length) : prev,
         );
       },
     };
   }, []);
 
-  const label = POOL[labelAt % POOL.length].album;
+  useLayoutEffect(() => {
+    const engine = engineRef.current;
+    if (!engine?.committed || !items.length || !items[0].fresh) return;
+    const list = listRef.current;
+    const rows = Array.from(list.children).filter((li) => li.dataset.fresh !== undefined);
+    engine.committed(rows);
+  }, [items]);
+
   const Root = embedded ? "div" : "main";
 
   return (
@@ -376,41 +559,43 @@ export default function Piece({ embedded = false }) {
           className="pull-vinyl-scroll"
           data-scroll-contain=""
         >
-          <div ref={zoneRef} className="pull-vinyl-zone" data-armed="false" aria-hidden="true">
-            <div ref={groupRef} className="pull-vinyl-group">
-              <div ref={discRef} className="pull-vinyl-disc">
-                <div ref={spinRef} className="pull-vinyl-spin">
-                  <span className="pull-vinyl-label">
-                    <img src={label.cover} alt="" draggable={false} />
-                  </span>
-                </div>
-                <span className="pull-vinyl-sheen" />
+          <div
+            ref={zoneRef}
+            className="pull-vinyl-zone"
+            data-armed="false"
+            aria-hidden="true"
+          />
+          <div ref={groupRef} className="pull-vinyl-group" aria-hidden="true">
+            <div ref={discRef} className="pull-vinyl-disc">
+              <div ref={spinRef} className="pull-vinyl-spin">
+                <span className="pull-vinyl-label">
+                  {label ? <img src={label} alt="" draggable={false} /> : null}
+                </span>
               </div>
-              <div ref={sleeveRef} className="pull-vinyl-sleeve">
-                <img src={label.cover} alt="" draggable={false} />
-              </div>
+              <span className="pull-vinyl-sheen" />
+            </div>
+            <div ref={sleeveRef} className="pull-vinyl-sleeve">
+              {label ? <img src={label} alt="" draggable={false} /> : null}
             </div>
           </div>
 
           <ul ref={listRef} className="pull-vinyl-list" aria-live="polite">
-            {items.map((it) => (
+            {items.map((it, i) => (
               <li
                 key={it.key}
                 className="pull-vinyl-item"
                 data-fresh={it.fresh ? "" : undefined}
+                data-intro={it.intro ? "" : undefined}
+                style={it.intro ? { "--pv-i": i } : undefined}
               >
-                <div className="pull-vinyl-clip">
-                  <div className="pull-vinyl-row">
-                    <img src={it.album.cover} alt="" draggable={false} />
-                    <span className="pull-vinyl-text">
-                      <span className="pull-vinyl-song">{it.title}</span>
-                      <span className="pull-vinyl-meta">
-                        {it.album.title} · {it.album.year}
-                      </span>
-                    </span>
-                    {it.fresh ? <span className="pull-vinyl-sr">New</span> : null}
-                    <span className="pull-vinyl-new" aria-hidden="true" />
-                  </div>
+                <div className="pull-vinyl-row">
+                  <img src={it.image} alt="" draggable={false} />
+                  <span className="pull-vinyl-text">
+                    <span className="pull-vinyl-song">{it.title}</span>
+                    <span className="pull-vinyl-meta">{it.meta}</span>
+                  </span>
+                  {it.fresh ? <span className="pull-vinyl-sr">New</span> : null}
+                  <span className="pull-vinyl-new" aria-hidden="true" />
                 </div>
               </li>
             ))}

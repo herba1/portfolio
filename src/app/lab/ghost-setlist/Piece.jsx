@@ -8,7 +8,7 @@ import { SETLIST } from "./ghostSet";
 import "./ghost-setlist.css";
 
 const STAGE_LABEL =
-  "A Beatles setlist as lit lettering on black. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
+  "A setlist as lit lettering on black, set along an arc. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels the curve and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -94,7 +94,7 @@ export default function Piece({ embedded = false }) {
         <header className="ghost-setlist-head">
           <h1 className="ghost-setlist-title">Ghost Setlist</h1>
           <p className="ghost-setlist-lede">
-            Flick through a Beatles set. Every song leaves its <em>afterimage</em> on the way past.
+            Flick through the set. Every song leaves its <em>afterimage</em> on the way round the arc.
           </p>
         </header>
       )}

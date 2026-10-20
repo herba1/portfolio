@@ -1,6 +1,6 @@
 {
   "title": "Pull Vinyl",
-  "description": "Pull-to-refresh on a feed of Beatles songs. Pull the list down and you uncover a record sleeve underneath; the record rolls out of it as far as you pull. Let go past the line and it spins, crackling, while it loads, rolls back into the sleeve, and the new songs grow in at the top as the list closes over it.",
+  "description": "Pull-to-refresh on a list of top songs. Pull the list down and you uncover a record sleeve underneath; the record rolls out of it as far as you pull. Let go past the line and it spins, crackling, while it loads, rolls back into its sleeve, and the sleeve shrinks into the cover of the first new song as the new rows slide in over the well.",
   "tags": [
     "Interface",
     "Music",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-18T12:50:00.000Z",
-  "intent": "The pull-to-refresh gesture made physical: a record uncovered beneath the list rather than faded in, rolling out with the pull, and an arrival where the old rows only ever move one way.",
+  "intent": "The pull-to-refresh gesture made physical: the record you uncover is the song that arrives, and every row, cover and sleeve moves into place rather than appearing.",
   "tile": {
     "cols": 2,
     "rows": 4

@@ -1,6 +1,6 @@
 {
   "title": "Ink Drag",
-  "description": "A record printed in wet ink on cream letterpress paper: its real album cover, then its title in type. Every few seconds a squeegee sweep drags the cover into the title and the title into the next cover; drag through it yourself and the ink smears along your path, thick and soft when slow, thin streaks when fast.",
+  "description": "A record printed in wet ink on cream letterpress paper: its album cover, then its title in type. Every few seconds the cover's own ink lifts off in strands, flows across the sheet and settles into the letters, then pours back out into the next cover; drag through it yourself and the same ink smears along your path, thick and soft when slow, thin streaks when fast.",
   "tags": [
     "WebGL",
     "Type",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "Type and art as the same matter: one ink field that carries a full-colour cover and its title, pulled from one into the other by the same drag that smears it under your finger.",
+  "intent": "Type and art as the same matter: one ink field that carries a full-colour cover and its title, every drop of the art travelling as a strand to its place in a glyph, so the drag and the type are one continuous material.",
   "tile": {
     "cols": 4,
     "rows": 4

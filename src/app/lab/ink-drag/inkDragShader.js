@@ -210,7 +210,11 @@ uniform vec3 uThinTint;
 uniform float uGloss;
 uniform float uPx;
 uniform float uDeboss;
-uniform float uFront;
+uniform sampler2D uPrevMask;
+uniform float uPrevDeboss;
+uniform sampler2D uMaps;
+uniform float uMorph;
+uniform float uT;
 out vec4 outColor;
 float lift(vec4 s) {
   return min(s.r, 1.1) * (0.35 + 0.65 * smoothstep(0.0, 0.6, s.g));
@@ -246,10 +250,16 @@ void main() {
   paper -= vec3(0.03, 0.026, 0.018) * paperTex.g;
   paper += clamp((ty - tx) * 0.22, -0.012, 0.012);
   paper *= 0.988 + 0.024 * paperTex.a;
-  float swept = 1.0 - smoothstep(-0.04, 0.0, uv.x - (uFront + (0.5 - uv.y) * 0.1));
-  float debossAmount = uDeboss * swept;
-  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * debossAmount;
-  paper *= 1.0 - m * 0.03 * debossAmount;
+  vec2 maps = texture(uMaps, uv).rg;
+  float landed = uMorph > 0.5 ? max(maps.g, smoothstep(0.86, 1.0, uT)) : 1.0;
+  float lifted = uMorph > 0.5 ? max(maps.r, smoothstep(0.72, 1.0, uT)) : 1.0;
+  float pm = texture(uPrevMask, uv).r;
+  float pmx = texture(uPrevMask, uv + vec2(1.5, 0.0) * st).r - texture(uPrevMask, uv - vec2(1.5, 0.0) * st).r;
+  float pmy = texture(uPrevMask, uv + vec2(0.0, 1.5) * st).r - texture(uPrevMask, uv - vec2(0.0, 1.5) * st).r;
+  float debossAmount = uDeboss * landed;
+  float oldAmount = uPrevDeboss * (1.0 - lifted);
+  float deboss = clamp(my - mx, -1.0, 1.0) * 0.5 * debossAmount + clamp(pmy - pmx, -1.0, 1.0) * 0.5 * oldAmount;
+  paper *= 1.0 - (m * debossAmount + pm * oldAmount) * 0.03;
   paper += vec3(0.05, 0.046, 0.04) * deboss;
   float dry = 1.0 - smoothstep(0.0, 0.3, wet);
   float breakup = smoothstep(tooth - 0.35, tooth + 0.1, d * 2.2);
@@ -282,5 +292,139 @@ void main() {
   color *= mix(0.92, 1.0, vig);
   color += (fract(sin(dot(gl_FragCoord.xy, vec2(12.9898, 78.233))) * 43758.5453) - 0.5) / 255.0;
   outColor = vec4(color, 1.0);
+}
+`;
+
+export const FLOW_VERTEX = `#version 300 es
+precision highp float;
+precision highp int;
+uniform sampler2D uPath;
+uniform sampler2D uLook;
+uniform sampler2D uTint;
+uniform sampler2D uMass;
+uniform int uCols;
+uniform vec2 uRes;
+uniform float uT;
+uniform float uFlight;
+uniform float uWidth;
+uniform int uMode;
+out float vMass;
+out vec2 vChroma;
+out float vWeight;
+out float vAcross;
+float easeInOut(float x) {
+  return x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0;
+}
+vec2 bez(vec2 a, vec2 b, vec2 c, vec2 d, float t) {
+  float m = 1.0 - t;
+  return m * m * m * a + 3.0 * m * m * t * b + 3.0 * m * t * t * c + t * t * t * d;
+}
+void main() {
+  int id = gl_VertexID / 6;
+  int corner = gl_VertexID - id * 6;
+  ivec2 cell = ivec2(id % uCols, id / uCols);
+  vec4 path = texelFetch(uPath, cell, 0);
+  vec4 look = texelFetch(uLook, cell, 0);
+  vec4 tint = texelFetch(uTint, cell, 0);
+  vec2 mass = texelFetch(uMass, cell, 0).xy;
+  vec2 src = path.xy;
+  vec2 dst = path.zw;
+  float u = clamp((uT - look.y) / uFlight, 0.0, 1.0);
+  vec2 span = dst - src;
+  vec2 side = vec2(-span.y, span.x);
+  vec2 c1 = src + span * 0.2 + side * look.z + vec2(abs(span.x) + abs(span.y), 0.0) * look.w;
+  vec2 c2 = dst - span * 0.3 + side * look.z * 0.35;
+  float e = easeInOut(u);
+  vec2 head = bez(src, c1, c2, dst, e);
+  vec2 tail = bez(src, c1, c2, dst, max(0.0, e - 0.06));
+  float w = uWidth;
+  vec2 a = tail;
+  vec2 b = head;
+  float weight;
+  if (uMode == 0) {
+    weight = smoothstep(0.0, 0.06, u) * (1.0 - smoothstep(0.82, 1.0, u));
+  } else if (uMode == 1) {
+    a = src;
+    b = src;
+    w *= 1.8;
+    weight = smoothstep(0.0, 0.06, u);
+  } else {
+    a = dst;
+    b = dst;
+    w *= 1.8;
+    weight = smoothstep(0.82, 1.0, u);
+  }
+  vec2 dir = b - a;
+  float len = length(dir);
+  dir = len > 1e-3 ? dir / len : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-dir.y, dir.x);
+  float along = (corner == 1 || corner == 2 || corner == 4) ? 1.0 : 0.0;
+  float across = (corner == 2 || corner == 4 || corner == 5) ? 1.0 : -1.0;
+  vec2 p = mix(a - dir * w * 0.5, b + dir * w * 0.5, along) + nrm * across * w * 0.5;
+  vAcross = across;
+  vMass = mix(mass.x, mass.y, smoothstep(0.25, 0.95, u));
+  vChroma = mix(tint.xy, tint.zw, smoothstep(0.15, 0.85, u));
+  vWeight = weight;
+  gl_Position = weight <= 0.0 ? vec4(2.0, 2.0, 2.0, 1.0) : vec4(p / uRes * 2.0 - 1.0, 0.0, 1.0);
+}
+`;
+
+export const FLOW_FRAGMENT = `#version 300 es
+precision highp float;
+precision highp int;
+uniform int uMode;
+in float vMass;
+in vec2 vChroma;
+in float vWeight;
+in float vAcross;
+out vec4 outColor;
+void main() {
+  if (uMode == 0) {
+    float soft = 1.0 - smoothstep(0.55, 1.0, abs(vAcross));
+    float k = vWeight * (0.35 + 0.65 * soft);
+    outColor = vec4(vMass * k, k, vChroma * k);
+  } else {
+    outColor = vec4(vWeight);
+  }
+}
+`;
+
+export const COMBINE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uFrom;
+uniform sampler2D uFlow;
+uniform sampler2D uMaps;
+uniform sampler2D uGoal;
+uniform vec2 uRes;
+uniform float uT;
+out vec4 outColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / uRes;
+  vec4 from = texture(uFrom, uv);
+  vec4 f = texture(uFlow, uv);
+  vec2 mp = texture(uMaps, uv).rg;
+  float lift = max(mp.r, smoothstep(0.72, 1.0, uT));
+  float land = max(mp.g, smoothstep(0.86, 1.0, uT));
+  vec4 goal = texture(uGoal, uv);
+  float cover = min(1.0, f.g);
+  float fd = f.g > 1e-4 ? f.r / f.g * cover : 0.0;
+  vec2 fc = f.g > 1e-4 ? f.ba / f.g : vec2(0.5);
+  float bd = from.r * (1.0 - lift);
+  float gd = goal.r * land;
+  float total = bd + fd + gd;
+  vec2 chroma = total > 1e-4 ? (bd * from.ba + fd * fc + gd * goal.ba) / total : vec2(0.5);
+  float wet = total > 1e-4 ? (bd * from.g + fd + gd * goal.g) / total : 0.0;
+  outColor = vec4(min(total, 2.6), wet, chroma);
+}
+`;
+
+export const PROBE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uInk;
+uniform vec2 uRes;
+out vec4 outColor;
+void main() {
+  vec4 c = texture(uInk, gl_FragCoord.xy / uRes);
+  outColor = vec4(clamp(c.r / 1.6, 0.0, 1.0), clamp(c.g, 0.0, 1.0), clamp(c.b, 0.0, 1.0), clamp(c.a, 0.0, 1.0));
 }
 `;
