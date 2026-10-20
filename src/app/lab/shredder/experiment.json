@@ -1,6 +1,6 @@
 {
   "title": "Shredder",
-  "description": "A glossy desk shredder drawn like an iOS 6 icon: brushed aluminium, a stitched leather band and a green glass button over a silver wire-mesh bin. Push Revolver, Abbey Road or Sgt. Pepper into the slot and it hums, pulls the sleeve through and drops sixteen strips that curl into a heap you can watch through the mesh.",
+  "description": "Just the shredder head, drawn like an iOS 6 icon: brushed aluminium, a stitched leather band and a green glass button. Push a top-song sleeve into the slot and it hums and pulls it through; sixteen strips of the cover hang from the blades, then drop away out of the bottom of the frame while the next sleeve slides down from above.",
   "tags": [
     "Canvas",
     "Skeuomorphic",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One paper mechanic in a flat, layered 2D object: the sleeve is sliced into real strips of the cover that hang, sway and fall, instead of a 3D simulation.",
+  "intent": "One paper mechanic in a flat, layered 2D object: the sleeve is sliced into real strips of the cover that hang, sway and fall away, with nothing else on stage.",
   "tile": {
     "cols": 3,
     "rows": 5

@@ -1,4 +1,4 @@
-import { drawBinBack, drawBinFront, drawButton, drawHeadBack, drawHeadFront, geometry } from "./shredderBody";
+import { drawButton, drawHeadBack, drawHeadFront, geometry } from "./shredderBody";
 
 const SEG = 8;
 const GRAVITY = 1400;
@@ -105,17 +105,16 @@ function createSound() {
   };
 }
 
-export async function createShredder({ root, canvas, button, albums, onAlbum, onBusy, onReady }) {
+export async function createShredder({ root, canvas, button, chrome, albums: firstAlbums, onAlbum, onBusy, onReady }) {
   const ctx = canvas.getContext("2d");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
   const sound = createSound();
-  const images = await Promise.all(albums.map((a) => loadImage(a.cover)));
+  let albums = firstAlbums;
+  let images = await Promise.all(albums.map((a) => loadImage(a.cover)));
   const sans = getComputedStyle(root).getPropertyValue("--font-sans").trim() || "system-ui, sans-serif";
-  const view = { w: 1, h: 1, dpr: 1, cx: 0, slotY: 0, headBottom: 0, binY: 0 };
+  const view = { w: 1, h: 1, dpr: 1, cx: 0, slotY: 0, headBottom: 0, clipTop: 0 };
   let g = geometry(300);
   let layers = null;
-  let pile = null;
-  let pileLevel = 0;
   let current = 0;
   let queued = -1;
   let feed = 0;
@@ -139,30 +138,24 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
     view.dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = Math.round(view.w * view.dpr);
     canvas.height = Math.round(view.h * view.dpr);
-    const narrow = view.w < 720;
-    const top = narrow ? 140 : 96;
-    const bottom = narrow ? 112 : 100;
+    const narrow = view.w < 760;
+    const chromeBottom = narrow && chrome ? chrome.getBoundingClientRect().bottom - rect.top : 0;
+    const top = narrow ? Math.max(140, chromeBottom + 24) : 96;
+    const bottom = 24;
     const avail = Math.max(240, view.h - top - bottom);
-    const S = Math.round(Math.min(view.w * (narrow ? 0.84 : 0.4), 440, avail / 1.62));
+    const S = Math.round(Math.min(view.w * (narrow ? 0.84 : 0.4), 440, avail / 1.56));
     g = geometry(S);
-    const stack = g.cover + g.headH + g.lip * 0.4 + g.binH;
+    const stack = g.cover + g.headH + g.lip * 0.4 + g.cover * 0.96;
     const y0 = top + Math.max(0, (avail - stack) / 2);
-    view.cx = view.w / 2;
+    view.cx = narrow ? view.w / 2 : Math.max(view.w / 2, 360 + S / 2 + 24);
+    view.clipTop = narrow ? chromeBottom + 8 : 0;
     view.slotY = y0 + g.cover + 4;
     view.headBottom = view.slotY + g.headH + g.lip * 0.38;
-    view.binY = view.headBottom - g.S * 0.03;
     const front = drawHeadFront(g, view.dpr, sans);
     layers = {
-      binBack: drawBinBack(g, view.dpr),
-      binFront: drawBinFront(g, view.dpr),
       headBack: drawHeadBack(g, view.dpr),
       headFront: front,
     };
-    const prev = pile;
-    pile = document.createElement("canvas");
-    pile.width = Math.round((g.binTop + 8) * view.dpr);
-    pile.height = Math.round((g.binH + 8) * view.dpr);
-    if (prev && pileLevel > 0) pile.getContext("2d").drawImage(prev, 0, 0, pile.width, pile.height);
     if (button) {
       const b = front.button;
       const x = view.cx - g.headW / 2 + b.x;
@@ -173,16 +166,6 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
       button.style.transform = `translate3d(${(x - size / 2).toFixed(1)}px, ${(y - size / 2).toFixed(1)}px, 0)`;
     }
     dirty = true;
-  }
-
-  function binPath(c, ox, oy) {
-    const inset = (g.binTop - g.binBottom) / 2;
-    c.beginPath();
-    c.moveTo(ox, oy - (view.binY - view.headBottom) - 2);
-    c.lineTo(ox + g.binTop, oy - (view.binY - view.headBottom) - 2);
-    c.lineTo(ox + g.binTop - inset, oy + g.binH - 4);
-    c.lineTo(ox + inset, oy + g.binH - 4);
-    c.closePath();
   }
 
   function stripX(i) {
@@ -205,17 +188,13 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
         tilt: (i - (g.strips - 1) / 2) * 0.006 + (rand() - 0.5) * 0.03,
         curl: (rand() - 0.5) * 0.012,
         phase: rand() * Math.PI * 2,
-        side: rand() < 0.5 ? -1 : 1,
         img: current,
-        rest: rand() * g.binH * 0.16 * (1 - (Math.abs(i - (g.strips - 1) / 2) / g.strips) * 0.9),
+        drift: (rand() - 0.5) * 60,
+        spin: (rand() - 0.5) * 0.9,
         drop: 0,
         vy: 0,
       });
     }
-  }
-
-  function pileTop() {
-    return view.binY + g.binH - 12 - pileLevel;
   }
 
   function drawStrip(c, s, ox, oy, topY, rows0, rows1) {
@@ -224,18 +203,16 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
     const scale = img.naturalWidth / g.cover;
     const len = rows1 - rows0;
     if (len <= 0) return;
-    let x = stripX(s.i) + sw / 2 + ox;
+    const fall = clamp(s.drop / 400, 0, 1);
+    let x = stripX(s.i) + sw / 2 + ox + s.drift * fall * fall;
     let y = topY + oy;
-    let ang = s.tilt;
-    const floor = pileTop() + oy - sw * 0.6 - s.rest;
-    const sway = Math.sin(time * 1.6 + s.phase) * 0.0025;
+    let ang = s.tilt + s.spin * fall * fall;
+    const sway = Math.sin(time * 1.6 + s.phase) * (0.0025 + fall * 0.01);
+    const curl = s.curl * (1 + fall * 3);
     for (let d = 0; d < len; d += SEG) {
       const seg = Math.min(SEG, len - d);
       const r = rows0 + d;
-      if (y + seg * Math.cos(ang) > floor - 2) {
-        const lie = s.side * (1.2 + 0.32 * Math.sin(d * 0.07 + s.phase));
-        ang += (lie - ang) * 0.45;
-      } else ang += s.curl + sway;
+      ang += curl + sway;
       ang = clamp(ang, -1.55, 1.55);
       c.save();
       c.translate(x, y);
@@ -252,63 +229,26 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
     }
   }
 
-  function bake(s) {
-    const pctx = pile.getContext("2d");
-    pctx.save();
-    pctx.scale(view.dpr, view.dpr);
-    const ox = -(view.cx - g.binTop / 2 - 4);
-    const oy = -view.binY;
-    binPath(pctx, 4, 0);
-    pctx.clip();
-    drawStrip(pctx, s, ox, oy, view.headBottom + s.drop, 0, g.cover);
-    pctx.restore();
-  }
-
   function render() {
     const d = view.dpr;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(d, 0, 0, d, 0, 0);
     if (!layers) return;
-    const binX = view.cx - g.binTop / 2 - 4;
-    ctx.save();
-    ctx.translate(view.cx, view.binY + g.binH);
-    ctx.scale(1, 0.09);
-    const shadowR = g.binTop * 0.62;
-    const shadow = ctx.createRadialGradient(0, 0, 0, 0, 0, shadowR);
-    shadow.addColorStop(0, "rgb(30 34 40 / 0.26)");
-    shadow.addColorStop(0.45, "rgb(30 34 40 / 0.12)");
-    shadow.addColorStop(0.75, "rgb(30 34 40 / 0.04)");
-    shadow.addColorStop(1, "rgb(30 34 40 / 0)");
-    ctx.fillStyle = shadow;
-    ctx.beginPath();
-    ctx.arc(0, 0, shadowR, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
-    ctx.drawImage(layers.binBack, binX, view.binY, g.binTop + 8, g.binH + 8);
-    ctx.drawImage(pile, binX, view.binY, g.binTop + 8, g.binH + 8);
-
-    ctx.save();
-    binPath(ctx, binX + 4, view.binY);
-    ctx.clip();
+    ctx.drawImage(layers.headBack, view.cx - g.headW / 2 - 4, view.slotY - g.lip * 0.62 - 2, g.headW + 8, g.lip + 8);
     const emerged = feed - (view.headBottom - view.slotY);
     if (emerged > 0 && strips.length) {
       for (const s of strips) drawStrip(ctx, s, 0, 0, view.headBottom + s.drop, Math.max(0, g.cover - emerged), g.cover);
     }
     for (const f of falling) drawStrip(ctx, f.s, 0, 0, view.headBottom + f.s.drop, 0, g.cover);
-    ctx.restore();
-
-    ctx.drawImage(layers.binFront, binX, view.binY, g.binTop + 8, g.binH + 8);
-    ctx.drawImage(layers.headBack, view.cx - g.headW / 2 - 4, view.slotY - g.lip * 0.62 - 2, g.headW + 8, g.lip + 8);
 
     if (feed < g.cover + 1) {
       const img = images[current];
       const entering = easeOut(clamp(drop, 0, 1));
-      const y = view.slotY - g.cover + feed - (1 - entering) * 40;
+      const y = view.slotY - g.cover + feed - (1 - entering) * (view.slotY - view.clipTop + 24);
       ctx.save();
-      ctx.globalAlpha = clamp(drop * 1.6, 0, 1);
       ctx.beginPath();
-      ctx.rect(0, 0, view.w, view.slotY);
+      ctx.rect(0, view.clipTop, view.w, view.slotY - view.clipTop);
       ctx.clip();
       ctx.shadowColor = "rgb(20 24 30 / 0.28)";
       ctx.shadowBlur = 16;
@@ -380,7 +320,7 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
       moving = true;
     }
     if (drop < 1) {
-      drop = reduced ? 1 : Math.min(1, drop + dt / 0.42);
+      drop = reduced ? 1 : Math.min(1, drop + dt / 0.56);
       moving = true;
     }
     if (falling.length) {
@@ -394,12 +334,7 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
         }
         f.s.vy += GRAVITY * dt;
         f.s.drop += f.s.vy * dt;
-        if (view.headBottom + f.s.drop > pileTop() - g.cover / g.strips - f.s.rest) {
-          bake(f.s);
-        } else keep.push(f);
-      }
-      if (keep.length < falling.length) {
-        pileLevel = Math.min(g.binH * 0.62, pileLevel + (g.binH * 0.07 * (falling.length - keep.length)) / g.strips);
+        if (view.headBottom + f.s.drop < view.h + 40) keep.push(f);
       }
       falling = keep;
     }
@@ -511,14 +446,26 @@ export async function createShredder({ root, canvas, button, albums, onAlbum, on
       onAlbum?.(current);
       wake();
     },
-    empty() {
-      if (!pileLevel) return;
-      pile.getContext("2d").clearRect(0, 0, pile.width, pile.height);
-      pileLevel = 0;
-      dirty = true;
-      sound.wake();
-      sound.tick();
-      wake();
+    async setAlbums(next) {
+      try {
+        const loaded = await Promise.all(next.map((a) => loadImage(a.cover)));
+        if (destroyed) return;
+        albums = next;
+        images = loaded;
+        falling = [];
+        strips = [];
+        queued = -1;
+        current = Math.min(current, albums.length - 1);
+        if (!motorOn) {
+          feed = 0;
+          drop = 0;
+        }
+        onAlbum?.(current);
+        dirty = true;
+        wake();
+      } catch {
+        dirty = true;
+      }
     },
     destroy() {
       destroyed = true;

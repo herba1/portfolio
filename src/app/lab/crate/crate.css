@@ -3,8 +3,8 @@
   --crate-ink: #1f1c18;
   --crate-ink-2: #4d4740;
   --crate-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  --crate-size: min(44cqh, 32cqw, 400px);
-  --crate-base: 63%;
+  --crate-size: min(40cqh, 30cqw, 380px);
+  --crate-base: 57%;
   --crate-shift: calc(var(--crate-size) * 0.2976);
   --crate-slide: 62%;
   position: absolute;
@@ -116,18 +116,12 @@
   transform-origin: 50% 100%;
   transform-style: preserve-3d;
   will-change: transform;
-  --crate-fade: 1;
   --crate-shade: 0;
   --crate-out: 0;
 }
 
-.crate__sleeve[data-hidden] {
+.crate:not([data-ready]) .crate__sleeve {
   visibility: hidden;
-}
-
-.crate__sleeve[data-gone] .crate__front,
-.crate__sleeve[data-gone] .crate__back {
-  pointer-events: none;
 }
 
 .crate__front,
@@ -138,7 +132,6 @@
   overflow: hidden;
   backface-visibility: hidden;
   -webkit-backface-visibility: hidden;
-  opacity: var(--crate-fade);
   pointer-events: auto;
 }
 
@@ -256,6 +249,11 @@
   letter-spacing: var(--text-ui--letter-spacing);
   font-weight: var(--font-weight-semibold);
   text-wrap: balance;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
   transform: translateY(-12px);
 }
 
@@ -264,6 +262,10 @@
   line-height: 12px;
   letter-spacing: var(--text-ui-xs--letter-spacing);
   font-weight: var(--font-weight-caption);
+  max-width: 76%;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   transform: translateY(12px);
 }
 
@@ -281,7 +283,7 @@
 .crate__now {
   position: absolute;
   left: 50%;
-  top: calc(var(--crate-base) + var(--crate-size) * 0.3);
+  top: calc(var(--crate-base) + var(--crate-size) * 0.66);
   z-index: 2;
   width: min(calc(100% - 32px), max(var(--crate-size), 360px));
   transform: translateX(-50%);
@@ -295,9 +297,18 @@
   line-height: 32px;
   letter-spacing: var(--text-title--letter-spacing);
   font-weight: var(--font-weight-semibold);
+  text-wrap: balance;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+}
+
+.crate__now-artist {
+  min-width: 0;
+  overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  text-wrap: balance;
 }
 
 .crate__now-meta {
@@ -313,13 +324,14 @@
 }
 
 .crate__now-count {
+  flex: none;
   font-variant-numeric: tabular-nums;
 }
 
 @container (max-width: 699px) {
   .crate {
-    --crate-size: min(calc(100cqw - 140px), 36cqh);
-    --crate-base: 62%;
+    --crate-size: min(calc(100cqw - 120px), 36cqh);
+    --crate-base: 59%;
     --crate-shift: calc(var(--crate-size) * 0.192);
     --crate-slide: 40%;
   }

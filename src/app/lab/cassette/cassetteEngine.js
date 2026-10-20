@@ -1,7 +1,7 @@
 import { createChatter } from "./cassetteAudio";
-import { PENCIL, SHELL, buildWorld, setPackTop } from "./cassetteModels";
-import { HUBS, SIDE_SECONDS, TOTAL, TAPE_HALF, TAPE_Y, MOUTH, createTape, loopHeightFor, packRadius, stepTape, tapePath, tapeSeconds } from "./cassetteTape";
-import { JCARD, drawCounter, jcardCanvas, labelCanvas } from "./cassetteTextures";
+import { GROUND, PENCIL, SHELL, buildWorld, setPackTop } from "./cassetteModels";
+import { HUBS, SIDE_SECONDS, SLACK_MAX, TOTAL, TAPE_HALF, TAPE_Y, MOUTH, createTape, loopHeightFor, packRadius, stepTape, tapePath } from "./cassetteTape";
+import { labelCanvas } from "./cassetteTextures";
 
 const MAX_DPR = 2;
 const FOV = 24;
@@ -23,12 +23,6 @@ const smoothstep = (a, b, x) => {
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 const easeIn = (t) => t * t * (2.2 * t - 1.2 * t * t);
 
-function format(seconds) {
-  const s = Math.max(0, Math.min(SIDE_SECONDS, Math.round(seconds)));
-  const m = Math.floor(s / 60);
-  return `${String(m).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`;
-}
-
 export async function createCassetteEngine({ box, stage, canvas, insets, embedded, mix, onReady, onFail, onSound, onPencil, onAnnounce }) {
   const THREE = await import("three");
   const { RoomEnvironment } = await import("three/examples/jsm/environments/RoomEnvironment.js");
@@ -41,7 +35,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     onFail?.();
     return { destroy() {}, toggleSound() {}, togglePencil() {} };
   }
-  renderer.setClearColor(0xc4ac8e);
+  renderer.setClearColor(new THREE.Color(GROUND));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;
   renderer.toneMappingExposure = 0.96;
@@ -58,7 +52,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   const world = buildWorld(THREE, renderer, mix);
   scene.add(world.root);
 
-  const lamp = new THREE.SpotLight(0xffe2c0, 3.1, 0, 0.6, 0.9, 0);
+  const lamp = new THREE.SpotLight(0xfff0e0, 2.8, 0, 0.6, 0.9, 0);
   lamp.position.set(-230, 430, -200);
   lamp.castShadow = true;
   lamp.shadow.mapSize.set(2048, 2048);
@@ -70,7 +64,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   lamp.shadow.normalBias = 0.25;
   scene.add(lamp);
   scene.add(lamp.target);
-  const hemi = new THREE.HemisphereLight(0xfff4ea, 0x9a8068, 0.5);
+  const hemi = new THREE.HemisphereLight(0xfffaf2, 0xb9b4aa, 0.6);
   scene.add(hemi);
   const fill = new THREE.DirectionalLight(0xdfe7ff, 0.32);
   fill.position.set(300, 200, 260);
@@ -87,7 +81,6 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   const pathPoints = [];
   const loop = { h: 0, v: 0 };
   let radiusShown = [-1, -1];
-  let counterShown = "";
 
   const layout = { portrait: false, rest: { base: new THREE.Vector3(), quat: new THREE.Quaternion(), dir: new THREE.Vector3() } };
   const pencil = {
@@ -124,7 +117,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   let quietFrames = 0;
 
   function restPoseFor(portrait) {
-    const base = portrait ? new THREE.Vector3(-60, PENCIL.inR, -47) : new THREE.Vector3(-58, PENCIL.inR + 0.2, -48);
+    const base = portrait ? new THREE.Vector3(-60, PENCIL.inR, -54) : new THREE.Vector3(-58, PENCIL.inR + 0.2, -57);
     const angle = portrait ? (-3 * Math.PI) / 180 : (-4 * Math.PI) / 180;
     const dir = new THREE.Vector3(Math.cos(angle), 0, -Math.sin(angle));
     const a = new THREE.Vector3(Math.cos(Math.PI / 6), 0, Math.sin(Math.PI / 6));
@@ -143,13 +136,6 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
   function applyLayout() {
     const portrait = view.height > view.width * 1.12;
     layout.portrait = portrait;
-    if (portrait) {
-      world.jcard.position.set(2, 0, 96);
-      world.jcard.rotation.y = 0.04;
-    } else {
-      world.jcard.position.set(114, 0, 6);
-      world.jcard.rotation.y = -0.12;
-    }
     layout.rest = restPoseFor(portrait);
     lamp.target.position.set(portrait ? 0 : 40, 0, portrait ? 40 : 10);
     if (pencil.mode === "rest") {
@@ -163,10 +149,10 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     const hw = SHELL.w / 2 + 2;
     const hd = SHELL.d / 2;
     for (const x of [-hw, hw]) for (const z of [-hd - 2, hd + 4]) pts.push(new THREE.Vector3(x, 0, z), new THREE.Vector3(x, SHELL.h, z));
-    pts.push(new THREE.Vector3(0, 0, hd + 20));
-    const depth = JCARD.front + JCARD.spine + JCARD.flap;
-    world.jcard.updateMatrixWorld(true);
-    for (const x of [-JCARD.width / 2, JCARD.width / 2]) for (const z of [-depth / 2, depth / 2]) pts.push(new THREE.Vector3(x, 0, z).applyMatrix4(world.jcard.matrixWorld));
+    const loopH = loopHeightFor(SLACK_MAX);
+    const loopZ = MOUTH.z + loopH * 0.9;
+    const loopX = MOUTH.x + Math.max(0, loopH - 4) * 0.84;
+    pts.push(new THREE.Vector3(-loopX, 0, loopZ), new THREE.Vector3(loopX, 0, loopZ));
     const rest = layout.rest;
     pts.push(rest.base.clone(), rest.base.clone().addScaledVector(rest.dir, PENCIL.length));
     for (const hub of HUBS) pts.push(new THREE.Vector3(hub.x, PENCIL.length + HOVER_Y, hub.z));
@@ -337,7 +323,7 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     drive.held = false;
     drive.hub = -1;
     flyTo("rest");
-    onAnnounce?.("Pencil back on the desk.");
+    onAnnounce?.("Pencil laid down.");
   }
 
   function seatHub(i) {
@@ -656,12 +642,6 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     }
     tapePath(rl, rr, loop.h, pathPoints);
     writeRibbon();
-    const text = format(tapeSeconds(tape));
-    if (text !== counterShown) {
-      counterShown = text;
-      drawCounter(world.counterCan, text);
-      world.counterTex.needsUpdate = true;
-    }
   }
 
   function writeRibbon() {
@@ -827,8 +807,6 @@ export async function createCassetteEngine({ box, stage, canvas, insets, embedde
     song = next.lead;
     world.labelTex.image = labelCanvas(next);
     world.labelTex.needsUpdate = true;
-    world.jTex.image = jcardCanvas(next);
-    world.jTex.needsUpdate = true;
     wake();
   }
 

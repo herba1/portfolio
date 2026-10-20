@@ -1,17 +1,33 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { albumById } from "@/app/lab/_music/catalog";
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import "./shredder.css";
 
-const ALBUMS = ["revolver", "abbey-road", "sgt-pepper", "rubber-soul", "help", "magical-mystery-tour"].map((id) => albumById(id));
+function toSleeves(tracks) {
+  const seen = new Set();
+  const out = [];
+  for (const t of tracks) {
+    const cover = t.imageLarge || t.image;
+    const key = t.album || cover;
+    if (!cover || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ id: t.id || key, title: t.album || t.title, artist: t.artist, cover });
+    if (out.length === 6) break;
+  }
+  return out;
+}
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const canvasRef = useRef(null);
   const buttonRef = useRef(null);
   const engineRef = useRef(null);
+  const chromeRef = useRef(null);
+  const { tracks } = useTopSongs(30);
+  const sleeves = useMemo(() => toSleeves(tracks), [tracks]);
+  const sleevesRef = useRef(sleeves);
   const [album, setAlbum] = useState(0);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("loading");
@@ -28,12 +44,14 @@ export default function Piece({ embedded = false }) {
       started = true;
       try {
         const { createShredder } = await import("./shredderEngine");
+        const startList = sleevesRef.current;
         if (disposed) return;
         const made = await createShredder({
           root,
           canvas: canvasRef.current,
           button: buttonRef.current,
-          albums: ALBUMS,
+          chrome: chromeRef.current,
+          albums: startList,
           onAlbum: (i) => {
             if (!disposed) setAlbum(i);
           },
@@ -47,6 +65,7 @@ export default function Piece({ embedded = false }) {
         }
         engine = made;
         engineRef.current = made;
+        if (sleevesRef.current !== startList) made.setAlbums(sleevesRef.current);
         setStatus("ready");
         sync();
       } catch (error) {
@@ -73,40 +92,46 @@ export default function Piece({ embedded = false }) {
     };
   }, []);
 
+  useEffect(() => {
+    if (sleevesRef.current === sleeves) return;
+    sleevesRef.current = sleeves;
+    engineRef.current?.setAlbums(sleeves);
+  }, [sleeves]);
+
+  const current = sleeves[Math.min(album, sleeves.length - 1)];
+
   return (
     <div ref={rootRef} className="shredder" data-embedded={embedded || undefined} data-status={status} data-busy={busy || undefined}>
       <canvas
         ref={canvasRef}
         className="shredder__canvas"
         role="img"
-        aria-label={`A glossy desk shredder with ${ALBUMS[album].title} waiting above the slot. Drag the cover down into the slot or press the green button to shred it.`}
+        aria-label={`A glossy shredder with ${current?.title} waiting above the slot. Drag the cover down into the slot or press the green button to shred it.`}
       />
       <button
         ref={buttonRef}
         type="button"
         className="shredder__power"
-        aria-label={`Shred ${ALBUMS[album].title}`}
+        aria-label={`Shred ${current?.title}`}
         disabled={status !== "ready" || busy}
         onClick={() => engineRef.current?.shred()}
       />
       {!embedded && (
-        <header className="shredder__head">
-          <h1 className="shredder__title">Shredder</h1>
-          <p className="shredder__hint">
-            Push a record sleeve into the slot, or press the <em>green button</em>.
-          </p>
-        </header>
-      )}
-      {!embedded && (
-        <div className="shredder__bar">
+        <div ref={chromeRef} className="shredder__side">
+          <header className="shredder__head">
+            <h1 className="shredder__title">Shredder</h1>
+            <p className="shredder__hint">
+              Push a record sleeve into the slot, or press the <em>green button</em>.
+            </p>
+          </header>
           <div className="shredder__albums" role="radiogroup" aria-label="Next sleeve">
-            {ALBUMS.map((a, i) => (
+            {sleeves.map((a, i) => (
               <button
                 key={a.id}
                 type="button"
                 role="radio"
                 aria-checked={album === i}
-                aria-label={`${a.title}, ${a.year}`}
+                aria-label={`${a.title}, ${a.artist}`}
                 className="shredder__album"
                 disabled={status !== "ready"}
                 onClick={() => engineRef.current?.choose(i)}
@@ -115,9 +140,6 @@ export default function Piece({ embedded = false }) {
               </button>
             ))}
           </div>
-          <button type="button" className="shredder__empty" disabled={status !== "ready"} onClick={() => engineRef.current?.empty()}>
-            Empty bin
-          </button>
         </div>
       )}
       {status === "failed" && <p className="shredder__fallback">The shredder could not load its sleeves.</p>}

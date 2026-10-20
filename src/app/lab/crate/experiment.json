@@ -1,6 +1,6 @@
 {
   "title": "Crate",
-  "description": "Nine Beatles LPs standing in a stack on a light page. Drag or scroll to flip sleeves forward and back, with a soft paper flick for each one; tap the front sleeve to pull it up and slide its record out.",
+  "description": "Herb's top-song records standing in a crate on a light page. Drag or scroll to dig: every sleeve you flip past tips forward onto the pile in front, cover still showing, and tips back up when you dig the other way. Tap the front sleeve to slide its record out, or tap one in the pile to pull it back up.",
   "tags": [
     "Music",
     "Physical",
@@ -8,7 +8,7 @@
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One record-shop gesture, flattened to the essentials: real covers in a clean CSS 3D stack you dig through with your hand, and a black record that slides out of the sleeve you choose.",
+  "intent": "One record-shop gesture, flattened to the essentials: real covers in a clean CSS 3D crate where nothing fades, every sleeve stays in the stack, either standing behind or tipped onto the pile in front.",
   "tile": {
     "cols": 3,
     "rows": 5

@@ -1,440 +1,466 @@
-import { createGrooveGL } from "./grooveGL";
-import { buildLabels } from "./grooveLabel";
-import { PRESETS } from "./groovePresets";
+import { DISC, NOMINAL, PRESSINGS, STROBE_HZ, buildEtchMask, buildGrooveMask, buildTexture, etchCells } from "./groovePressings";
 
-const TILT = 0.36;
-const DIST = 6;
-const THICK = 0.014;
-const LIGHT_Z = 2.3;
-const IDLE = 0.16;
-const MAX_SPIN = 9;
-const VISCOUS = 0.55;
-const COULOMB = 0.35;
-const HOME = [-0.25, 0.45];
-const GROUND = [0.852, 0.842, 0.81];
-const CELL = 512;
+const LIGHT = -132;
+const MAX_SPIN = 1440;
+const SLIDE_K = 70;
+const DEG = Math.PI / 180;
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
-const wrapPi = (a) => a - Math.PI * 2 * Math.round(a / (Math.PI * 2));
+const wrap180 = (a) => a - 360 * Math.round(a / 360);
 
-function loadImage(src) {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.decoding = "async";
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+function speedText(omega) {
+  const rpm = (Math.abs(omega) * 60) / 360;
+  if (Math.abs(rpm - 100 / 3) < 0.25) return "33⅓";
+  if (rpm < 0.5) return "0";
+  return String(Math.round(rpm));
 }
 
-async function buildPhotos(images) {
-  const canvas = document.createElement("canvas");
-  canvas.width = CELL * images.length;
-  canvas.height = CELL;
+export function createGroove({ box, canvas, header, controls, speedEl, embedded, index = 0, strobe = true, onThumbs }) {
   const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  images.forEach((img, i) => {
-    const crop = Math.min(img.naturalWidth, img.naturalHeight);
-    const sx = (img.naturalWidth - crop) / 2;
-    const sy = (img.naturalHeight - crop) / 2;
-    ctx.drawImage(img, sx, sy, crop, crop, i * CELL, 0, CELL, CELL);
-  });
-  return canvas;
-}
-
-export function createGroove({ box, canvas, header, picker, embedded, preset = 0, onReady }) {
+  if (!ctx) throw new Error("Canvas unavailable");
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  let gl = createGrooveGL(canvas);
-  if (!gl) throw new Error("WebGL2 unavailable");
-
-  const eye = [0, -DIST * Math.sin(TILT), DIST * Math.cos(TILT)];
-  const view = { width: 1, height: 1, dpr: 1, cx: 0, cy: 0, radius: 200, focal: 1200 };
-  const sim = { theta: -0.2, omega: reduced ? 0 : IDLE, vel: 0, dragging: false, releasing: false, pointerId: null, grabAngle: 0, pointerAngle: 0, lastAngle: 0, thetaPrev: -0.2 };
-  const light = { x: 0, y: 0, tx: 0, ty: 0, tau: 0.6 };
-  const fade = { from: preset, to: preset, t: 1 };
-  let hover = false;
-  let quality = 1;
-  let interval = 16.7;
-  let slowFrames = 0;
-  let visible = false;
+  const view = { w: 1, h: 1, dpr: 1, cx: 0, cy: 0, R: 100, spacing: 800 };
+  const st = {
+    theta: -8,
+    omega: reduced ? 0 : NOMINAL,
+    motor: !reduced,
+    strobe,
+    shown: -8,
+    flashN: -1,
+    drag: null,
+    p: index,
+    pv: 0,
+    sel: index,
+    speed: "",
+  };
+  const textures = new Array(PRESSINGS.length).fill(null);
+  let texSize = 0;
+  let mask = null;
+  let sheen = null;
+  let gloss = null;
+  let shadow = null;
+  let cells = null;
+  let etchMask = null;
+  let font = "system-ui, sans-serif";
   let raf = 0;
   let last = 0;
+  let visible = true;
   let destroyed = false;
-  let photosReady = false;
-  let labelsReady = false;
-  let reveal = 0;
-  let readySent = false;
-
-  function homeLight() {
-    const l = lightFor(HOME[0], HOME[1]);
-    light.tx = l[0];
-    light.ty = l[1];
-  }
-
-  function lightFor(qx, qy) {
-    const ez = eye[2];
-    let lx = (qx * (LIGHT_Z + ez) - eye[0] * LIGHT_Z) / ez;
-    let ly = (qy * (LIGHT_Z + ez) - eye[1] * LIGHT_Z) / ez;
-    const m = Math.hypot(lx, ly);
-    if (m > 2.4) {
-      lx *= 2.4 / m;
-      ly *= 2.4 / m;
-    }
-    return [lx, ly];
-  }
-
-  homeLight();
-  light.x = light.tx;
-  light.y = light.ty;
+  let buildTimer = 0;
+  let dirty = true;
+  const drawn = { shown: NaN, p: NaN };
 
   function layout() {
     const rect = box.getBoundingClientRect();
     const w = Math.max(1, rect.width);
     const h = Math.max(1, rect.height);
-    view.width = w;
-    view.height = h;
-    let radius;
+    view.w = w;
+    view.h = h;
+    let R;
     if (embedded) {
-      radius = Math.min(w * 0.44, h * 0.45);
+      R = Math.min(w * 0.44, h * 0.44);
       view.cx = w / 2;
       view.cy = h / 2;
     } else if (w >= 900) {
-      const top = 80;
-      const bottom = (picker ? picker.getBoundingClientRect().height + 40 : 72) + 32;
+      const top = 88;
+      const bottom = 48;
       const room = h - top - bottom;
-      radius = Math.min(w * 0.27, room / 2);
-      view.cx = w * 0.58;
+      const left = 360;
+      const right = w - 300;
+      R = Math.min((right - left) / 2, room / 2);
+      view.cx = (left + right) / 2;
       view.cy = top + room / 2;
     } else {
       const headBottom = header ? header.getBoundingClientRect().bottom - rect.top : 120;
-      const pickH = picker ? picker.getBoundingClientRect().height + 40 : 64;
-      const room = h - headBottom - pickH - 16;
-      radius = Math.min((w - 28) / 2, room / 2);
+      const pickH = controls ? controls.getBoundingClientRect().height + 24 : 64;
+      const room = h - headBottom - pickH - 24;
+      R = Math.min((w - 32) / 2, room / 2);
       view.cx = w / 2;
-      view.cy = headBottom + 8 + room / 2;
+      view.cy = headBottom + 12 + room / 2;
     }
-    view.radius = clamp(radius, 60, 520);
-    view.focal = view.radius * DIST;
-    const dprCap = Math.min(window.devicePixelRatio || 1, 2);
-    const budget = Math.sqrt(3200000 / (w * h));
-    view.dpr = Math.max(0.75, Math.min(dprCap, budget));
-    applyQuality(quality);
+    view.R = Math.max(60, R);
+    view.vertical = !embedded && w >= 900;
+    view.spacing = view.vertical
+      ? Math.max(view.cy, h - view.cy) + view.R + 32
+      : Math.max(view.cx, w - view.cx) + view.R + 32;
+    view.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.round(w * view.dpr);
+    canvas.height = Math.round(h * view.dpr);
+    const want = Math.min(2048, Math.ceil((view.R * 2 * view.dpr) / 64) * 64);
+    const maskSize = Math.ceil(view.R * 2 * view.dpr);
+    mask = buildGrooveMask(maskSize, 17);
+    sheen = document.createElement("canvas");
+    sheen.width = maskSize;
+    sheen.height = maskSize;
+    gloss = buildSheen(maskSize);
+    shadow = buildShadow();
+    if (!texSize || want > texSize * 1.15 || want < texSize * 0.6) {
+      texSize = want;
+      textures.fill(null);
+      scheduleBuild();
+    }
   }
 
-  function applyQuality(q) {
-    quality = q;
-    gl?.resize(Math.max(1, Math.round(view.width * view.dpr * q)), Math.max(1, Math.round(view.height * view.dpr * q)));
+  function buildShadow() {
+    const size = Math.ceil(view.R * 2.6 * view.dpr);
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const g = c.getContext("2d");
+    const r = size / 2;
+    const grad = g.createRadialGradient(r, r, r * 0.62, r, r, r);
+    grad.addColorStop(0, "rgb(40 34 26 / 0.22)");
+    grad.addColorStop(0.25, "rgb(40 34 26 / 0.14)");
+    grad.addColorStop(0.5, "rgb(40 34 26 / 0.07)");
+    grad.addColorStop(0.75, "rgb(40 34 26 / 0.025)");
+    grad.addColorStop(1, "rgb(40 34 26 / 0)");
+    g.fillStyle = grad;
+    g.fillRect(0, 0, size, size);
+    return c;
   }
 
-  function toPlane(x, y) {
-    const sx = (x - view.cx) / view.focal;
-    const sy = -(y - view.cy) / view.focal;
-    const s = Math.sin(TILT);
-    const c = Math.cos(TILT);
-    let dx = sx;
-    let dy = s + c * sy;
-    let dz = -c + s * sy;
-    const l = Math.hypot(dx, dy, dz);
-    dx /= l;
-    dy /= l;
-    dz /= l;
-    const t = (THICK - eye[2]) / Math.min(dz, -1e-4);
-    return [eye[0] + dx * t, eye[1] + dy * t];
+  function buildOne(i) {
+    textures[i] = buildTexture(PRESSINGS[i], texSize, font);
   }
 
-  function simulate(dt) {
-    const idle = reduced ? 0 : IDLE;
-    sim.thetaPrev = sim.theta;
-    if (sim.dragging) {
-      const target = sim.grabTheta + sim.pointerAngle - sim.grabAngle;
-      if (dt > 0.002) {
-        const inst = (target - sim.theta) / dt;
-        const k = 1 - Math.exp(-dt / 0.045);
-        sim.vel += (inst - sim.vel) * k;
+  function scheduleBuild() {
+    clearTimeout(buildTimer);
+    const order = [st.sel, ...PRESSINGS.map((_, i) => i).filter((i) => i !== st.sel)];
+    const step = () => {
+      if (destroyed) return;
+      const next = order.find((i) => !textures[i]);
+      if (next === undefined) {
+        sendThumbs();
+        return;
       }
-      sim.theta = target;
-      sim.omega = sim.vel;
-      if (sim.releasing) {
-        sim.dragging = false;
-        sim.releasing = false;
-        sim.omega = clamp(sim.vel, -MAX_SPIN, MAX_SPIN);
+      buildOne(next);
+      wake(true);
+      buildTimer = setTimeout(step, 16);
+    };
+    step();
+  }
+
+  function sendThumbs() {
+    if (!onThumbs) return;
+    const urls = textures.map((tex) => {
+      const c = document.createElement("canvas");
+      c.width = 64;
+      c.height = 64;
+      const g = c.getContext("2d");
+      g.imageSmoothingQuality = "high";
+      g.drawImage(tex, 0, 0, 64, 64);
+      return c.toDataURL("image/png");
+    });
+    onThumbs(urls);
+  }
+
+  function buildSheen(size) {
+    const c = document.createElement("canvas");
+    c.width = size;
+    c.height = size;
+    const g = c.getContext("2d");
+    const r = size / 2;
+    const cone = g.createConicGradient((LIGHT - 30) * DEG, r, r);
+    const lobe = (a) => `rgb(255 255 255 / ${a.toFixed(3)})`;
+    const stops = [
+      [0, 0],
+      [0.03, 0.12],
+      [0.06, 0.55],
+      [0.083, 1],
+      [0.106, 0.55],
+      [0.136, 0.12],
+      [0.166, 0],
+    ];
+    stops.forEach(([o, a]) => cone.addColorStop(o, lobe(a * 0.46)));
+    stops.forEach(([o, a]) => cone.addColorStop(0.5 + o, lobe(a * 0.32)));
+    cone.addColorStop(1, lobe(0));
+    g.fillStyle = cone;
+    g.fillRect(0, 0, size, size);
+    g.globalCompositeOperation = "destination-in";
+    g.drawImage(mask, 0, 0, size, size);
+    g.globalCompositeOperation = "source-over";
+    const gloss = g.createRadialGradient(r * 0.55, r * 0.5, 0, r * 0.55, r * 0.5, r * 1.3);
+    gloss.addColorStop(0, "rgb(255 255 255 / 0.14)");
+    gloss.addColorStop(0.35, "rgb(255 255 255 / 0.06)");
+    gloss.addColorStop(0.7, "rgb(255 255 255 / 0.015)");
+    gloss.addColorStop(1, "rgb(255 255 255 / 0)");
+    g.fillStyle = gloss;
+    g.beginPath();
+    g.arc(r, r, r * DISC.rim, 0, Math.PI * 2);
+    g.arc(r, r, r * DISC.hole, 0, Math.PI * 2, true);
+    g.fill("evenodd");
+    return c;
+  }
+
+  function drawSheen(x, y) {
+    const R = view.R;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.drawImage(gloss, x - R, y - R, R * 2, R * 2);
+    ctx.restore();
+  }
+
+  function drawEtchGlints(x, y, angle) {
+    if (!cells) cells = etchCells();
+    if (!etchMask || etchMask.width !== texSize) etchMask = buildEtchMask(texSize);
+    const g = sheen.getContext("2d");
+    const s = sheen.width;
+    const r = s / 2;
+    g.globalCompositeOperation = "source-over";
+    g.clearRect(0, 0, s, s);
+    g.save();
+    g.translate(r, r);
+    g.rotate(angle * DEG);
+    g.save();
+    g.scale(r, r);
+    for (const cell of cells) {
+      const d = (cell.dir + angle - LIGHT) * DEG;
+      const b = Math.pow(Math.abs(Math.cos(d)), 60);
+      if (b < 0.02) continue;
+      g.fillStyle = `rgb(240 236 228 / ${b.toFixed(3)})`;
+      g.fill(cell.path);
+    }
+    g.restore();
+    g.globalCompositeOperation = "destination-in";
+    g.drawImage(etchMask, -r, -r, s, s);
+    g.restore();
+    const R = view.R;
+    ctx.save();
+    ctx.globalCompositeOperation = "screen";
+    ctx.drawImage(sheen, x - R, y - R, R * 2, R * 2);
+    ctx.restore();
+  }
+
+  function drawDisc(i, x, y, angle, blur) {
+    const tex = textures[i];
+    const R = view.R;
+    const pressing = PRESSINGS[i];
+    ctx.drawImage(shadow, x - R * 1.3, y - R * 1.3 + R * 0.05, R * 2.6, R * 2.6);
+    ctx.save();
+    ctx.translate(x, y);
+    if (!tex) {
+      ctx.fillStyle = "#e4e0d6";
+      ctx.beginPath();
+      ctx.arc(0, 0, R, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+      return;
+    }
+    const samples = blur > 1.5 && !pressing.etched ? Math.min(7, Math.ceil(blur / 1.4)) : 1;
+    for (let k = 0; k < samples; k += 1) {
+      const a = samples > 1 ? angle - (blur * k) / (samples - 1) : angle;
+      ctx.save();
+      ctx.globalAlpha = 1 / (k + 1);
+      ctx.rotate(a * DEG);
+      ctx.drawImage(tex, -R, -R, R * 2, R * 2);
+      ctx.restore();
+    }
+    ctx.restore();
+    if (pressing.etched) drawEtchGlints(x, y, angle);
+    if (pressing.sheen !== "none") drawSheen(x, y);
+  }
+
+  function render() {
+    const { w, h, dpr, cx, cy, R, spacing } = view;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, w, h);
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    const blur = st.strobe ? 0 : Math.abs(st.omega) * 0.028;
+    for (let i = 0; i < PRESSINGS.length; i += 1) {
+      const off = (i - st.p) * spacing;
+      const x = view.vertical ? cx : cx + off;
+      const y = view.vertical ? cy + off : cy;
+      if (x + R * 1.3 < 0 || x - R * 1.3 > w || y + R * 1.3 < 0 || y - R * 1.3 > h) continue;
+      drawDisc(i, x, y, st.shown, blur);
+    }
+  }
+
+  function step(now) {
+    raf = 0;
+    if (destroyed) return;
+    const t = now / 1000;
+    const dt = last ? Math.min(0.05, t - last) : 1 / 60;
+    last = t;
+    if (st.drag) {
+      if (now - st.drag.lastT > 50) st.drag.vel *= Math.exp(-dt * 14);
+      st.omega = st.drag.vel;
+    } else {
+      const target = st.motor ? NOMINAL : 0;
+      const k = st.motor ? 2.2 : 1.2;
+      st.omega += (target - st.omega) * (1 - Math.exp(-k * dt));
+      if (!st.motor && Math.abs(st.omega) < 0.6) st.omega = 0;
+      st.theta += st.omega * dt;
+    }
+    if (st.strobe) {
+      const n = Math.floor(t * STROBE_HZ);
+      if (n !== st.flashN) {
+        st.flashN = n;
+        st.shown = st.theta - st.omega * (t - n / STROBE_HZ);
       }
     } else {
-      const diff = sim.omega - idle;
-      const decel = (VISCOUS * Math.abs(diff) + COULOMB * (reduced ? 4 : 1)) * dt;
-      sim.omega = Math.abs(diff) <= decel ? idle : sim.omega - Math.sign(diff) * decel;
-      sim.theta += sim.omega * dt;
+      st.shown = st.theta;
+      st.flashN = -1;
     }
-    if (!sim.dragging && Math.abs(sim.theta) > 1000) sim.theta = wrapPi(sim.theta);
-    const k = reduced ? 1 : 1 - Math.exp(-dt / light.tau);
-    light.x += (light.tx - light.x) * k;
-    light.y += (light.ty - light.y) * k;
-    const lightMoving = Math.hypot(light.tx - light.x, light.ty - light.y) > 0.0008;
-    if (!lightMoving) {
-      light.x = light.tx;
-      light.y = light.ty;
+    const a = -SLIDE_K * (st.p - st.sel) - 2 * Math.sqrt(SLIDE_K) * st.pv;
+    st.pv += a * dt;
+    st.p += st.pv * dt;
+    if (Math.abs(st.p - st.sel) < 0.0005 && Math.abs(st.pv) < 0.001) {
+      st.p = st.sel;
+      st.pv = 0;
     }
-    let fading = false;
-    if (fade.t < 1) {
-      fade.t = reduced ? 1 : Math.min(1, fade.t + dt / 0.75);
-      fading = true;
-      if (fade.t >= 1) fade.from = fade.to;
+    if (reduced) {
+      st.p = st.sel;
+      st.pv = 0;
     }
-    if (photosReady && reveal < 1) {
-      reveal = reduced ? 1 : Math.min(1, reveal + dt / 1.1);
-      fading = true;
+    if (dirty || st.shown !== drawn.shown || st.p !== drawn.p || (!st.strobe && st.omega !== 0)) {
+      dirty = false;
+      drawn.shown = st.shown;
+      drawn.p = st.p;
+      render();
     }
-    return lightMoving || fading;
+    const text = speedText(st.omega);
+    if (text !== st.speed) {
+      st.speed = text;
+      if (speedEl) speedEl.textContent = text;
+    }
+    const idle = !st.drag && st.omega === 0 && st.p === st.sel && st.shown === st.theta;
+    if (visible && !idle) raf = requestAnimationFrame(step);
+    else if (visible && idle) last = 0;
   }
 
-  function render(dt) {
-    const step = sim.theta - sim.thetaPrev;
-    const span = clamp(Math.abs(step) > 1e-5 ? step : sim.omega * Math.max(dt, 1 / 60), -0.16, 0.16);
-    const samples = clamp(Math.ceil(Math.abs(span) / 0.018), 1, 6);
-    const e = fade.t < 1 ? 1 - Math.pow(1 - fade.t, 3) : 0;
-    gl.draw({
-      width: view.width,
-      height: view.height,
-      cx: view.cx,
-      cy: view.cy,
-      focal: view.focal,
-      tilt: TILT,
-      dist: DIST,
-      thick: THICK,
-      theta: sim.theta,
-      sweep: samples > 1 ? span : 0,
-      samples,
-      light: [light.x, light.y, LIGHT_Z],
-      slotA: fade.from,
-      slotB: fade.to,
-      mix: fade.from === fade.to ? 0 : e,
-      toneA: PRESETS[fade.from].tone,
-      toneB: PRESETS[fade.to].tone,
-      slots: PRESETS.length,
-      ground: GROUND,
-      photoOn: 1 - Math.pow(1 - reveal, 3),
-      kappa: 0.15,
-      lobe: [0.06, 0.15],
-      gain: 14,
-    });
-    if (photosReady && labelsReady && !readySent) {
-      readySent = true;
-      onReady?.();
-    }
-  }
-
-  function frame(now) {
-    raf = 0;
-    if (!gl || !visible || document.hidden || destroyed) return;
-    const raw = last ? now - last : 16.7;
-    const dt = last ? clamp(raw / 1000, 0, 0.05) : 0;
-    last = now;
-    const busy = simulate(dt);
-    if (!reduced) {
-      interval = interval * 0.9 + raw * 0.1;
-      slowFrames = interval > 40 ? slowFrames + 1 : 0;
-      if (slowFrames > 45 && quality > 0.62) {
-        slowFrames = 0;
-        interval = 20;
-        applyQuality(Math.max(0.6, quality * 0.85));
-      }
-    }
-    render(dt);
-    const spinning = Math.abs(sim.omega) > 0.0005;
-    if (sim.dragging || spinning || busy) raf = requestAnimationFrame(frame);
-  }
-
-  function wake() {
-    if (raf || !gl || !visible || document.hidden || destroyed) return;
-    last = 0;
-    raf = requestAnimationFrame(frame);
+  function wake(force) {
+    if (force) dirty = true;
+    if (raf || !visible || destroyed) return;
+    raf = requestAnimationFrame(step);
   }
 
   function local(e) {
-    const rect = box.getBoundingClientRect();
+    const rect = canvas.getBoundingClientRect();
     return [e.clientX - rect.left, e.clientY - rect.top];
   }
 
-  function aim(e, tau, reach = 0.8) {
-    const [x, y] = local(e);
-    const [qx, qy] = toPlane(x, y);
-    const l = lightFor(HOME[0] + (qx - HOME[0]) * reach, HOME[1] + (qy - HOME[1]) * reach);
-    light.tx = l[0];
-    light.ty = l[1];
-    light.tau = tau;
+  function center() {
+    const off = (st.sel - st.p) * view.spacing;
+    return view.vertical ? [view.cx, view.cy + off] : [view.cx + off, view.cy];
   }
 
-  function unwrapAngle(qx, qy) {
-    const a = Math.atan2(qy, qx);
-    const d = wrapPi(a - sim.lastAngle);
-    const r = Math.hypot(qx, qy);
-    const weight = clamp((r - 0.06) / 0.2, 0, 1);
-    sim.lastAngle = a;
-    sim.pointerAngle += d * weight;
+  function angleAt(x, y) {
+    const [ox, oy] = center();
+    return Math.atan2(y - oy, x - ox) / DEG;
   }
 
   function onDown(e) {
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    if (sim.dragging && !sim.releasing) return;
     const [x, y] = local(e);
-    const [qx, qy] = toPlane(x, y);
-    const onDisc = Math.hypot(qx, qy) < 1.06;
-    if (e.pointerType === "mouse") aim(e, 0.4, onDisc ? 0.3 : 0.8);
-    if (!onDisc) {
-      if (e.pointerType !== "mouse") {
-        canvas.setPointerCapture?.(e.pointerId);
-        sim.lightPointer = e.pointerId;
-        aim(e, 0.08);
-      }
-      wake();
-      return;
-    }
+    const [ox, oy] = center();
+    if (Math.hypot(x - ox, y - oy) > view.R) return;
     canvas.setPointerCapture?.(e.pointerId);
-    sim.dragging = true;
-    sim.releasing = false;
-    sim.pointerId = e.pointerId;
-    sim.lastAngle = Math.atan2(qy, qx);
-    sim.pointerAngle = sim.lastAngle;
-    sim.grabAngle = sim.lastAngle;
-    sim.grabTheta = sim.theta;
-    sim.vel = 0;
-    sim.omega = 0;
-    box.dataset.grabbing = "";
+    st.drag = { id: e.pointerId, last: angleAt(x, y), lastT: performance.now(), vel: 0 };
+    box.setAttribute("data-grabbing", "");
+    e.preventDefault();
     wake();
   }
 
   function onMove(e) {
-    if (e.pointerType === "mouse") {
-      hover = true;
-      if (sim.dragging) aim(e, 0.4, 0.3);
-      else aim(e, 0.1);
+    const [x, y] = local(e);
+    if (!st.drag) {
+      const [ox, oy] = center();
+      const over = Math.hypot(x - ox, y - oy) <= view.R;
+      if (over) box.setAttribute("data-over", "");
+      else box.removeAttribute("data-over");
+      return;
     }
-    if (sim.lightPointer === e.pointerId) aim(e, 0.08);
-    if (sim.dragging && !sim.releasing && e.pointerId === sim.pointerId) {
-      const [x, y] = local(e);
-      const [qx, qy] = toPlane(x, y);
-      unwrapAngle(qx, qy);
-    }
+    if (e.pointerId !== st.drag.id) return;
+    const now = performance.now();
+    const a = angleAt(x, y);
+    const d = wrap180(a - st.drag.last);
+    const dtm = Math.max(4, now - st.drag.lastT);
+    st.theta += d;
+    st.drag.vel = st.drag.vel * 0.55 + ((d / dtm) * 1000) * 0.45;
+    st.drag.last = a;
+    st.drag.lastT = now;
     wake();
   }
 
   function onUp(e) {
-    if (sim.lightPointer === e.pointerId) sim.lightPointer = null;
-    if (!sim.dragging || e.pointerId !== sim.pointerId) return;
-    if (e.type === "pointerup") {
-      const [x, y] = local(e);
-      const [qx, qy] = toPlane(x, y);
-      unwrapAngle(qx, qy);
-    }
-    sim.releasing = true;
-    sim.pointerId = null;
-    delete box.dataset.grabbing;
-    wake();
-  }
-
-  function onLeave(e) {
-    if (e.pointerType !== "mouse" || sim.dragging) return;
-    hover = false;
-    homeLight();
-    light.tau = 0.7;
+    if (!st.drag || e.pointerId !== st.drag.id) return;
+    const fresh = performance.now() - st.drag.lastT < 90;
+    st.omega = fresh ? clamp(st.drag.vel, -MAX_SPIN, MAX_SPIN) : 0;
+    st.drag = null;
+    box.removeAttribute("data-grabbing");
     wake();
   }
 
   function onKey(e) {
-    if (e.key === "ArrowRight" || e.key === "ArrowLeft") {
-      e.preventDefault();
-      const dir = e.key === "ArrowRight" ? -1 : 1;
-      sim.omega = clamp(sim.omega + dir * (e.shiftKey ? 3 : 1.2), -MAX_SPIN, MAX_SPIN);
-      wake();
-    } else if (e.key === " " || e.key === "Enter") {
-      e.preventDefault();
-      sim.omega = 0;
-      wake();
-    }
+    if (e.key === "ArrowRight") st.omega = clamp(st.omega + 90, -MAX_SPIN, MAX_SPIN);
+    else if (e.key === "ArrowLeft") st.omega = clamp(st.omega - 90, -MAX_SPIN, MAX_SPIN);
+    else if (e.key === " ") st.motor = !st.motor;
+    else return;
+    e.preventDefault();
+    wake();
   }
 
-  layout();
-
-  const covers = Promise.all(PRESETS.map((p) => loadImage(p.src).catch(() => null)));
-  covers
-    .then((images) => (images.every(Boolean) ? buildPhotos(images) : Promise.reject(new Error("cover missing"))))
-    .then((photos) => {
-      if (destroyed || !gl) return;
-      gl.uploadPhotos(photos);
-      photosReady = true;
-      wake();
-    })
-    .catch(() => {
-      photosReady = true;
-      wake();
-    });
-
-  Promise.all([covers, document.fonts.ready]).then(([images]) => {
-    if (destroyed || !gl) return;
-    gl.uploadLabels(buildLabels(PRESETS, images));
-    labelsReady = true;
-    wake();
-  });
-
-  const io = new IntersectionObserver(
-    ([entry]) => {
-      visible = entry.isIntersecting;
-      if (visible) wake();
-      else if (raf) {
-        cancelAnimationFrame(raf);
-        raf = 0;
-      }
-    },
-    { rootMargin: "80px" },
-  );
-  io.observe(box);
   const ro = new ResizeObserver(() => {
     layout();
-    if (!raf && gl && visible) render(0);
-    wake();
+    wake(true);
   });
-  ro.observe(box);
+  const io = new IntersectionObserver(([entry]) => {
+    visible = entry.isIntersecting && document.visibilityState === "visible";
+    if (visible) {
+      last = 0;
+      wake(true);
+    }
+  });
   const onVisibility = () => {
-    if (document.hidden) {
-      if (raf) cancelAnimationFrame(raf);
-      raf = 0;
-    } else wake();
+    visible = document.visibilityState === "visible";
+    if (visible) {
+      last = 0;
+      wake();
+    }
   };
+
+  font = getComputedStyle(box).fontFamily || font;
+  layout();
+  ro.observe(box);
+  io.observe(box);
   document.addEventListener("visibilitychange", onVisibility);
   canvas.addEventListener("pointerdown", onDown);
   canvas.addEventListener("pointermove", onMove);
   canvas.addEventListener("pointerup", onUp);
   canvas.addEventListener("pointercancel", onUp);
   canvas.addEventListener("lostpointercapture", onUp);
-  canvas.addEventListener("pointerleave", onLeave);
   canvas.addEventListener("keydown", onKey);
+  wake();
 
   return {
-    setPreset(idx) {
-      if (idx === fade.to) return;
-      fade.from = fade.t < 1 && 1 - Math.pow(1 - fade.t, 3) < 0.5 ? fade.from : fade.to;
-      fade.to = idx;
-      fade.t = 0;
+    setPressing(i) {
+      st.sel = clamp(i, 0, PRESSINGS.length - 1);
+      if (!textures[st.sel]) buildOne(st.sel);
+      wake(true);
+    },
+    setStrobe(on) {
+      st.strobe = on;
+      wake(true);
+    },
+    toggleMotor() {
+      st.motor = !st.motor;
       wake();
     },
-    isHovering: () => hover,
     destroy() {
       destroyed = true;
+      clearTimeout(buildTimer);
       if (raf) cancelAnimationFrame(raf);
-      raf = 0;
-      io.disconnect();
       ro.disconnect();
+      io.disconnect();
       document.removeEventListener("visibilitychange", onVisibility);
       canvas.removeEventListener("pointerdown", onDown);
       canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp);
       canvas.removeEventListener("pointercancel", onUp);
       canvas.removeEventListener("lostpointercapture", onUp);
-      canvas.removeEventListener("pointerleave", onLeave);
       canvas.removeEventListener("keydown", onKey);
-      gl?.destroy();
-      gl = null;
+      textures.fill(null);
     },
   };
 }

@@ -43,50 +43,6 @@ function canvas(w, h) {
   return c;
 }
 
-export function deskCanvas(size) {
-  const c = canvas(size, size);
-  const ctx = c.getContext("2d");
-  const img = ctx.createImageData(size, size);
-  const warp = lattice(8, 11);
-  const warp2 = lattice(16, 12);
-  const fine = lattice(128, 23);
-  const tone = lattice(4, 5);
-  const figure = lattice(8, 19);
-  const base = [210, 190, 163];
-  const late = [182, 155, 121];
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const u = x / size;
-      const v = y / size;
-      const w = warp(u * 2, v * 8) * 2.2 + warp2(u * 16, v * 16) * 0.35;
-      const ring = v * 64 + w;
-      const f = ring - Math.floor(ring);
-      const band = Math.pow(Math.max(0, Math.sin(f * Math.PI)), 3);
-      const strength = 0.25 + 0.75 * figure(u * 8, v * 8);
-      const streak = fine(u * 8, v * 128) * 0.6 + fine(u * 16 + 3, v * 128 + 7) * 0.4;
-      const broad = tone(u * 4, v * 4);
-      const k = band * 0.17 * strength + streak * 0.26 + (broad - 0.5) * 0.22;
-      const i = (y * size + x) * 4;
-      for (let ch = 0; ch < 3; ch += 1) {
-        const value = base[ch] + (late[ch] - base[ch]) * k + (streak - 0.5) * 5;
-        img.data[i + ch] = Math.max(0, Math.min(255, value));
-      }
-      img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  const pores = rng(7);
-  ctx.globalAlpha = 0.1;
-  ctx.fillStyle = "rgb(110 80 50)";
-  for (let k = 0; k < size * 2; k += 1) {
-    const x = pores() * size;
-    const y = pores() * size;
-    ctx.fillRect(x, y, 2 + pores() * 6, 1);
-  }
-  ctx.globalAlpha = 1;
-  return c;
-}
-
 function paper(ctx, w, h, seed, tint) {
   const img = ctx.createImageData(w, h);
   const r = rng(seed);
@@ -194,82 +150,6 @@ export function labelCanvas(mix) {
   typeFit(ctx, mix.lead.title, 13 * ppm, 6.2 * ppm, 4.2 * ppm, w - 16 * ppm, { ink: "rgb(176 40 34)", seed: 3 });
   typeFit(ctx, [mix.lead.artist, mix.lead.album].filter(Boolean).join(" · "), 13 * ppm, 10.2 * ppm, 3 * ppm, w - 16 * ppm, { seed: 5 });
   return c;
-}
-
-export const JCARD = { width: 100, front: 65, spine: 12.5, flap: 15, ppm: 14 };
-
-export function jcardCanvas(mix) {
-  const { width, front, spine, flap, ppm } = JCARD;
-  const w = Math.round(width * ppm);
-  const h = Math.round((front + spine + flap) * ppm);
-  const c = canvas(w, h);
-  const ctx = c.getContext("2d");
-  paper(ctx, w, h, 77, [238, 231, 214]);
-  const blue = "rgb(36 64 112)";
-  const red = "rgb(176 40 34)";
-  const m = (v) => v * ppm;
-  const row = (i) => m(23 + i * 5.4);
-  ctx.strokeStyle = "rgb(120 140 170 / 0.4)";
-  ctx.lineWidth = 1.2;
-  for (let k = 0; k < 7; k += 1) {
-    const yy = row(k) + m(1.4);
-    ctx.beginPath();
-    ctx.moveTo(m(6), yy);
-    ctx.lineTo(m(94), yy);
-    ctx.stroke();
-  }
-  ctx.fillStyle = blue;
-  ctx.fillRect(m(6), m(10.2), m(88), m(0.5));
-  ctx.font = `600 ${m(2.2)}px ${PRINT_FACE}`;
-  ctx.fillText("Side A", m(6), m(16.4));
-  ctx.fillText("Side B", m(52), m(16.4));
-  ctx.fillRect(m(50), m(13.8), m(0.25), m(39));
-  typeText(ctx, mix.title, m(6), m(8.4), m(4.4), { ink: red, seed: 9 });
-  typeText(ctx, mix.dedication, m(94), m(8.4), m(2.8), { seed: 12, align: "right" });
-  const rows = (list, x0, x1, seedBase, offset) => {
-    list.forEach((t, i) => {
-      typeFit(ctx, `${i + 1 + offset}. ${t.title}`, x0, row(i), m(2.7), x1 - x0, { seed: seedBase + i * 3 }, 1);
-    });
-  };
-  rows(mix.sideA, m(6), m(48), 20, 0);
-  rows(mix.sideB, m(52), m(94), 60, mix.sideA.length);
-  ctx.strokeStyle = blue;
-  ctx.lineWidth = m(0.22);
-  ctx.strokeRect(m(66), m(53.5), m(28), m(8.5));
-  ctx.strokeStyle = "rgb(90 80 70 / 0.16)";
-  ctx.lineWidth = 2;
-  for (const yy of [front, front + spine]) {
-    ctx.beginPath();
-    ctx.moveTo(0, m(yy));
-    ctx.lineTo(w, m(yy));
-    ctx.stroke();
-  }
-  ctx.fillStyle = red;
-  ctx.fillRect(0, m(front + 1.4), w, m(0.6));
-  typeText(ctx, mix.title, m(6), m(front + 8.4), m(3.6), { seed: 33 });
-  typeText(ctx, "A / B", m(94), m(front + 8.4), m(2.6), { seed: 34, align: "right", ink: red });
-  typeFit(ctx, mix.notes, m(6), m(front + spine + 6.6), m(2.5), m(88), { seed: 35 });
-  typeFit(ctx, mix.notes2, m(6), m(front + spine + 11.4), m(2.5), m(88), { seed: 36 });
-  return c;
-}
-
-export const COUNTER = { width: 28, height: 6, ppm: 18 };
-
-export function drawCounter(c, text) {
-  const ctx = c.getContext("2d");
-  const { ppm } = COUNTER;
-  ctx.clearRect(0, 0, c.width, c.height);
-  let x = 1.6 * ppm;
-  const advance = 3.1 * ppm;
-  [...text].forEach((ch, i) => {
-    typeText(ctx, ch, x, 4.6 * ppm, 4.2 * ppm, { ink: "rgb(176 40 34)", seed: ch.charCodeAt(0) * 13 + i * 101, weight: 0.8 });
-    x += ch === ":" ? advance * 0.7 : advance;
-  });
-}
-
-export function counterCanvas() {
-  const { width, height, ppm } = COUNTER;
-  return canvas(width * ppm, height * ppm);
 }
 
 export function packCanvas(size) {

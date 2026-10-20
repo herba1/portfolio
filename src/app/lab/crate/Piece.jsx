@@ -1,14 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-import { SLEEVES, START_INDEX } from "./crateSleeves";
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
+import { toSleeves } from "./crateSleeves";
 import { createFoley } from "./crateSound";
 import "./crate.css";
 
-const N = SLEEVES.length;
 const LABEL =
-  "A crate of Beatles records. Drag down or scroll to flip sleeves forward, drag up to flip back. Tap the front sleeve to pull its record out. Arrow keys flip, Enter pulls the record, Escape puts it back.";
+  "A crate of records. Drag down or scroll to flip sleeves forward, drag up to flip back. Tap the front sleeve to pull its record out. Arrow keys flip, Enter pulls the record, Escape puts it back.";
 
 const pad = (n) => String(n).padStart(2, "0");
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
@@ -20,10 +20,30 @@ const DAMP = 2 * Math.sqrt(STIFF) * 0.94;
 const LIFT_STIFF = 160;
 const LIFT_DAMP = 2 * Math.sqrt(LIFT_STIFF) * 0.96;
 const LEAN = 7;
-const TIP = 50;
-const DROP = 0.12;
-const BEHIND = 7;
-const FRONT = 1.05;
+const GAP_Z = 26;
+const GAP_Y = 9;
+const TIP = 58;
+const TIP_STEP = 1.2;
+const FRONT_Z = 18;
+const FRONT_GAP_Z = 12;
+const DROP = 0.2;
+const DROP_STEP = 0.045;
+const PILE_SOFT = 4;
+
+function place(d) {
+  if (d >= 0) return { angle: -LEAN, z: -d * GAP_Z, y: -d * GAP_Y, drop: 0, shade: 0 };
+  const t = -d;
+  const a = Math.min(1, t);
+  const e = a * a * (3 - 2 * a);
+  const x = Math.max(0, t - 1);
+  return {
+    angle: mix(-LEAN, TIP, e) + TIP_STEP * x,
+    z: e * FRONT_Z + x * FRONT_GAP_Z,
+    y: 0,
+    drop: e * DROP + PILE_SOFT * (1 - Math.exp(-x / PILE_SOFT)) * DROP_STEP,
+    shade: e,
+  };
+}
 
 function Vinyl({ sleeve }) {
   return (
@@ -32,7 +52,7 @@ function Vinyl({ sleeve }) {
         className="crate__label"
         style={{ "--crate-label-paper": sleeve.label.paper, "--crate-label-ink": sleeve.label.ink }}
       >
-        <span className="crate__label-title">{sleeve.short}</span>
+        <span className="crate__label-title">{sleeve.song}</span>
         <span className="crate__label-meta">{sleeve.artist}</span>
         <span className="crate__label-hole" />
       </div>
@@ -44,32 +64,39 @@ function Back() {
   return <div className="crate__back" aria-hidden="true" />;
 }
 
+const START = 2;
+
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const binRef = useRef(null);
   const sleeveRefs = useRef([]);
   const apiRef = useRef(null);
-  const [index, setIndex] = useState(START_INDEX);
+  const placeRef = useRef(START);
+  const { tracks } = useTopSongs(30);
+  const sleeves = useMemo(() => toSleeves(tracks), [tracks]);
+  const N = sleeves.length;
+  const [index, setIndex] = useState(START);
   const [lifted, setLifted] = useState(false);
 
   useEffect(() => {
     const root = rootRef.current;
     const bin = binRef.current;
-    if (!root || !bin) return undefined;
+    if (!root || !bin || !N) return undefined;
     const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const foley = createFoley();
+    const start = clamp(placeRef.current, 0, N - 1);
     const s = {
-      pos: START_INDEX,
+      pos: start,
       vel: 0,
-      target: START_INDEX,
+      target: start,
       lift: 0,
       liftVel: 0,
       liftTarget: 0,
-      liftIndex: START_INDEX,
+      liftIndex: start,
       drag: null,
       raf: 0,
       last: 0,
-      shownIndex: START_INDEX,
+      shownIndex: placeRef.current,
       shownLift: false,
       wheel: 0,
       wheelAt: 0,
@@ -82,52 +109,29 @@ export default function Piece({ embedded = false }) {
         const el = sleeveRefs.current[i];
         if (!el) continue;
         const d = i - s.pos;
-        if (d > BEHIND || d < -FRONT) {
-          if (el.dataset.hidden === undefined) el.dataset.hidden = "";
-          continue;
-        }
-        if (el.dataset.hidden !== undefined) delete el.dataset.hidden;
-        let angle;
-        let z;
-        let y;
-        let ly = 0;
-        let fade = 1;
-        let shade = 0;
-        if (d >= 0) {
-          angle = -LEAN;
-          z = -d * 26;
-          y = -d * 9;
-          fade = clamp(BEHIND - d, 0, 1);
-        } else {
-          const t = Math.min(1, -d);
-          const e = t * t * (3 - 2 * t);
-          const g = clamp((t - 0.36) / 0.32, 0, 1);
-          angle = mix(-LEAN, TIP, e);
-          z = e * 12;
-          y = 0;
-          ly = -e * DROP;
-          shade = e;
-          fade = 1 - g * g * (3 - 2 * g);
-        }
+        const p = place(d);
+        let angle = p.angle;
+        let z = p.z;
+        let ly = -p.drop;
         let x = 0;
         let vinyl = 0;
         if (i === s.liftIndex && lift > 0.001) {
           const l = lift * clamp(1 - Math.abs(d) * 2, 0, 1);
-          ly = l * 0.1;
+          ly = mix(ly, 0.1, l);
           x = -l;
           angle = mix(angle, 0, l);
           z += l * 24;
           vinyl = l;
         }
-        el.style.transform = `translate3d(calc(${x.toFixed(4)} * var(--crate-shift)), calc(${y.toFixed(2)}px - ${ly.toFixed(4)} * var(--crate-size)), ${z.toFixed(2)}px) rotateX(${(-angle).toFixed(3)}deg)`;
-        el.style.setProperty("--crate-fade", fade.toFixed(3));
-        el.style.setProperty("--crate-shade", shade.toFixed(3));
-        if (fade < 0.5) {
-          if (el.dataset.gone === undefined) el.dataset.gone = "";
-        } else if (el.dataset.gone !== undefined) delete el.dataset.gone;
+        el.style.transform = `translate3d(calc(${x.toFixed(4)} * var(--crate-shift)), calc(${p.y.toFixed(2)}px - ${ly.toFixed(4)} * var(--crate-size)), ${z.toFixed(2)}px) rotateX(${(-angle).toFixed(3)}deg)`;
+        el.style.setProperty("--crate-shade", p.shade.toFixed(3));
         el.style.setProperty("--crate-out", vinyl.toFixed(4));
+        if (d < -0.5) {
+          if (el.dataset.flipped === undefined) el.dataset.flipped = "";
+        } else if (el.dataset.flipped !== undefined) delete el.dataset.flipped;
       }
       const current = clamp(Math.round(s.pos), 0, N - 1);
+      placeRef.current = current;
       if (current !== s.shownIndex) {
         s.shownIndex = current;
         setIndex(current);
@@ -346,7 +350,7 @@ export default function Piece({ embedded = false }) {
       foley.destroy();
       apiRef.current = null;
     };
-  }, [embedded]);
+  }, [embedded, N]);
 
   const onKeyDown = (e) => {
     const api = apiRef.current;
@@ -361,7 +365,8 @@ export default function Piece({ embedded = false }) {
     e.preventDefault();
   };
 
-  const sleeve = SLEEVES[index];
+  const shown = clamp(index, 0, Math.max(0, N - 1));
+  const sleeve = sleeves[shown];
 
   return (
     <div
@@ -386,7 +391,7 @@ export default function Piece({ embedded = false }) {
       >
         <div className="crate__floor" aria-hidden="true" />
         <div className="crate__scene">
-          {SLEEVES.map((s, i) => (
+          {sleeves.map((s, i) => (
             <div
               key={s.id}
               ref={(el) => {
@@ -394,7 +399,6 @@ export default function Piece({ embedded = false }) {
               }}
               className="crate__sleeve"
               data-sleeve={i}
-              data-hidden=""
             >
               <Vinyl sleeve={s} />
               <div className="crate__front">
@@ -406,13 +410,11 @@ export default function Piece({ embedded = false }) {
         </div>
       </div>
       <div className="crate__now" aria-live="polite">
-        <p className="crate__now-title">{sleeve.title}</p>
+        <p className="crate__now-title">{sleeve?.title}</p>
         <p className="crate__now-meta">
-          <span>
-            {sleeve.artist}, {sleeve.year}
-          </span>
+          <span className="crate__now-artist">{sleeve?.artist}</span>
           <span className="crate__now-count">
-            {pad(index + 1)} / {pad(N)}
+            {pad(shown + 1)} / {pad(N)}
           </span>
         </p>
       </div>

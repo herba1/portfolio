@@ -76,10 +76,19 @@
   outline-offset: 2px;
 }
 
-.shredder__head {
+.shredder__side {
   position: absolute;
   top: 88px;
   left: 48px;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  max-width: 288px;
+}
+
+.shredder__head {
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -115,16 +124,6 @@
   font-variation-settings: "opsz" 10;
   line-height: 1;
   color: var(--shredder-ink);
-}
-
-.shredder__bar {
-  position: absolute;
-  left: 50%;
-  bottom: 24px;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  transform: translateX(-50%);
 }
 
 .shredder__albums {
@@ -169,44 +168,14 @@
   transform: scale(0.94);
 }
 
-.shredder__album:focus-visible,
-.shredder__empty:focus-visible {
+.shredder__album:focus-visible {
   outline: 2px solid var(--shredder-accent);
   outline-offset: 2px;
-}
-
-.shredder__empty {
-  height: 48px;
-  padding: 0 16px;
-  border: 0;
-  border-radius: 14px;
-  background: rgb(255 255 255 / 0.8);
-  box-shadow:
-    inset 0 0 0 1px rgb(20 24 30 / 0.08),
-    0 1px 2px rgb(20 24 30 / 0.08),
-    0 8px 24px -12px rgb(20 24 30 / 0.3);
-  color: var(--shredder-ink);
-  font: inherit;
-  font-size: var(--text-ui);
-  line-height: var(--text-ui--line-height);
-  letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  white-space: nowrap;
-  cursor: pointer;
-  transition: transform 120ms var(--ease-hover);
-}
-
-.shredder__empty:active {
-  transform: scale(0.96);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .shredder__album:not([aria-checked="true"]):hover {
     background: rgb(20 24 30 / 0.05);
-  }
-
-  .shredder__empty:hover {
-    background: #fff;
   }
 }
 
@@ -222,29 +191,23 @@
   font-weight: var(--text-ui-lg--font-weight);
 }
 
-@container (max-width: 640px) {
-  .shredder__head {
+@container (max-width: 759px) {
+  .shredder__side {
     top: 80px;
     left: 16px;
     right: 16px;
+    max-width: none;
+    gap: 16px;
+  }
+
+  .shredder__head {
     gap: 4px;
-  }
-
-  .shredder__bar {
-    bottom: 16px;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .shredder__empty {
-    height: 40px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .shredder__canvas,
-  .shredder__album,
-  .shredder__empty {
+  .shredder__album {
     transition: none;
   }
 }

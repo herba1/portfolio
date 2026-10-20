@@ -6,27 +6,8 @@ import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { mixtapeFrom } from "./cassetteMixtape";
 import "./cassette.css";
 
-const SOUND_LABEL = {
-  off: "Turn sound on",
-  on: "Sound on",
-  muted: "Sound off",
-};
-
 const STAGE_LABEL =
-  "A C60 mixtape of top songs lying on a desk with a pencil beside it. Drag the pencil into either hub of the cassette, then press and circle around it to wind the tape. Wind back fast and slack tape spills out of the mouth; wind forward to take it back in. Tap the pencil to lay it down again. Enter puts the pencil in or out, 1 and 2 choose the hub, left and right arrows wind, M turns sound on or off.";
-
-function SpeakerIcon({ state }) {
-  return (
-    <svg className="cassette-speaker" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M2.5 6h2.2L8 3.2v9.6L4.7 10H2.5z" fill="currentColor" />
-      {state === "on" ? (
-        <path d="M10.4 5.6c.9.7 1.4 1.5 1.4 2.4s-.5 1.7-1.4 2.4" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-      ) : (
-        <path d="M10.6 6.1l3.8 3.8M14.4 6.1l-3.8 3.8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" fill="none" />
-      )}
-    </svg>
-  );
-}
+  "A C60 mixtape of top songs with a pencil beside it. Drag the pencil into either hub of the cassette, then press and circle around it to wind the tape. Wind back fast and slack tape spills out of the mouth; wind forward to take it back in. Tap the pencil to lay it down again. Enter puts the pencil in or out, 1 and 2 choose the hub, left and right arrows wind, M turns sound on or off.";
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
@@ -34,7 +15,6 @@ export default function Piece({ embedded = false }) {
   const canvasRef = useRef(null);
   const headRef = useRef(null);
   const engineRef = useRef(null);
-  const [sound, setSound] = useState("off");
   const [ready, setReady] = useState(false);
   const [failed, setFailed] = useState(false);
   const [pencil, setPencil] = useState("rest");
@@ -73,9 +53,6 @@ export default function Piece({ embedded = false }) {
           },
           onFail: () => {
             if (!cancelled) setFailed(true);
-          },
-          onSound: (next) => {
-            if (!cancelled) setSound(next);
           },
           onPencil: (next) => {
             if (!cancelled) setPencil(next);
@@ -122,26 +99,12 @@ export default function Piece({ embedded = false }) {
   const Root = embedded ? "div" : "main";
   const seated = pencil === "left" || pencil === "right";
 
-  const soundButton = (
-    <button
-      type="button"
-      className="cassette-sound"
-      aria-pressed={sound === "on"}
-      aria-label={embedded ? SOUND_LABEL[sound] : undefined}
-      onClick={() => engineRef.current?.toggleSound()}
-    >
-      <SpeakerIcon state={sound} />
-      {embedded ? null : <span className="cassette-sound-label">{SOUND_LABEL[sound]}</span>}
-    </button>
-  );
-
   return (
     <Root
       ref={rootRef}
       className="cassette"
       data-embedded={embedded ? "" : undefined}
       data-ready={ready ? "" : undefined}
-      data-sound={sound}
       data-pencil={seated ? "seated" : pencil}
     >
       <div ref={stageRef} className="cassette-stage" tabIndex={0} role="application" aria-label={STAGE_LABEL}>
@@ -162,11 +125,8 @@ export default function Piece({ embedded = false }) {
               </>
             )}
           </p>
-          {soundButton}
         </header>
       )}
-
-      {embedded ? soundButton : null}
 
       {failed ? <p className="cassette-fallback">This cassette needs WebGL 2.</p> : null}
       <p className="cassette-live" aria-live="polite">

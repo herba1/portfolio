@@ -1,38 +1,30 @@
-import { albumById } from "@/app/lab/_music/catalog";
-
-const LABELS = {
-  early: { paper: "#1d1b19", ink: "#f1e9d6" },
-  middle: { paper: "#ece4cf", ink: "#1d1b19" },
-  late: { paper: "#4a8a3f", ink: "#f4eedd" },
-};
-
-const ORDER = [
-  "a-hard-days-night",
-  "beatles-for-sale",
-  "help",
-  "rubber-soul",
-  "revolver",
-  "sgt-pepper",
-  "magical-mystery-tour",
-  "abbey-road",
-  "let-it-be",
+const LABELS = [
+  { paper: "#1d1b19", ink: "#f1e9d6" },
+  { paper: "#ece4cf", ink: "#1d1b19" },
+  { paper: "#c8432b", ink: "#f6efe2" },
+  { paper: "#2f5d8a", ink: "#f2ede2" },
+  { paper: "#e2b13c", ink: "#1d1b19" },
 ];
 
-const SHORT = { "sgt-pepper": "Sgt. Pepper" };
+export const MAX_SLEEVES = 10;
 
-export const SLEEVES = ORDER.map((id) => {
-  const album = albumById(id);
-  const era = album.year < 1965 ? "early" : album.year < 1969 ? "middle" : "late";
-  return {
-    id,
-    src: album.cover,
-    title: album.title,
-    short: SHORT[id] || album.title,
-    artist: album.artist,
-    year: album.year,
-    tracks: album.tracks,
-    label: LABELS[era],
-  };
-});
-
-export const START_INDEX = ORDER.indexOf("revolver");
+export function toSleeves(tracks) {
+  const seen = new Set();
+  const sleeves = [];
+  for (const track of tracks) {
+    const src = track.imageLarge || track.image;
+    const key = track.album || src;
+    if (!src || seen.has(key)) continue;
+    seen.add(key);
+    sleeves.push({
+      id: track.id || key,
+      src,
+      title: track.album || track.title,
+      song: track.title,
+      artist: track.artist,
+      label: LABELS[sleeves.length % LABELS.length],
+    });
+    if (sleeves.length === MAX_SLEEVES) break;
+  }
+  return sleeves;
+}

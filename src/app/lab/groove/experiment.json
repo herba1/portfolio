@@ -1,24 +1,23 @@
 {
   "title": "Groove",
-  "description": "Revolver, Abbey Road, Rubber Soul, Sgt. Pepper and Let It Be pressed into black records, the cover living only in the grooves and printed on the label with the real side-one tracks. Spin it under the lamp and the sleeve surfaces in the sheen, then sinks back into black.",
+  "description": "Five real kinds of vinyl pressing drawn from scratch: two zoetrope picture discs, a picture disc, a splatter and an etched B-side. At 33⅓ under a 20 Hz strobe the zoetrope's 36 drawings line up and the birds flap, the balls bounce and the dots pulse; drag the record by hand and they stall, slip and run backwards, and switch the strobe off to see them smear into a blur.",
   "tags": [
-    "WebGL",
-    "Optics",
+    "Canvas",
     "Vinyl",
-    "Music"
+    "Optics",
+    "Motion"
   ],
   "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical object finished to the edge on real records: the cover is encoded only as groove orientation, so it exists purely as anisotropic specular light and appears wherever the lamp's lobe falls.",
+  "intent": "One real optical trick finished to the edge: the animation is not played, it falls out of the record's rotation and the strobe, so the right speed is what brings the drawings to life.",
   "tile": {
     "cols": 3,
     "rows": 5
   },
   "sources": [
-    "https://www.pbr-book.org/4ed/Reflection_Models/Roughness_Using_Microfacet_Theory",
-    "https://web.engr.oregonstate.edu/~mjb/cs519/Projects/Papers/HairRendering.pdf",
-    "https://www.graphics.cornell.edu/~bjw/wardsiggraph92.pdf",
-    "https://en.wikipedia.org/wiki/Scratch_hologram",
-    "https://www.infinitylightscience.com"
+    "https://en.wikipedia.org/wiki/Phenakistiscope",
+    "https://en.wikipedia.org/wiki/Picture_disc",
+    "https://en.wikipedia.org/wiki/Stroboscopic_effect",
+    "https://en.wikipedia.org/wiki/Gramophone_record#Vinyl_variants"
   ]
 }

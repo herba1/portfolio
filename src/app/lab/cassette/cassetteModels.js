@@ -1,18 +1,7 @@
 import { CORE, FULL, HUBS, MOUTH, ROLLER, TAPE_HALF, TAPE_Y } from "./cassetteTape";
-import {
-  COUNTER,
-  JCARD,
-  blobCanvas,
-  counterCanvas,
-  deskCanvas,
-  endGrainCanvas,
-  foilCanvas,
-  jcardCanvas,
-  labelCanvas,
-  packCanvas,
-  pencilWoodCanvas,
-} from "./cassetteTextures";
+import { blobCanvas, endGrainCanvas, foilCanvas, labelCanvas, packCanvas, pencilWoodCanvas } from "./cassetteTextures";
 
+export const GROUND = "#e9e6df";
 export const SHELL = { w: 100.4, d: 63.8, h: 12 };
 export const PENCIL = { length: 124, inR: 3.45, tan: 4.05 / 17.5, lead: 1.0, tip: 0.24 };
 export const HUB_HOLE = 6.6;
@@ -318,28 +307,6 @@ function hexCap(THREE) {
   return g;
 }
 
-function jcardGeometry(THREE) {
-  const { width, front, spine, flap } = JCARD;
-  const depth = front + spine + flap;
-  const rows = Math.round(depth * 2);
-  const g = new THREE.PlaneGeometry(width, depth, 1, rows);
-  g.rotateX(-Math.PI / 2);
-  const p = g.attributes.position.array;
-  const z0 = -depth / 2 + front;
-  const z1 = z0 + spine;
-  const t1 = Math.tan((5 * Math.PI) / 180);
-  const t2 = Math.tan((13 * Math.PI) / 180);
-  for (let i = 0; i < p.length / 3; i += 1) {
-    const z = p[i * 3 + 2];
-    let y = 0.18;
-    if (z > z0) y += (Math.min(z, z1) - z0) * t1;
-    if (z > z1) y += (z - z1) * t2;
-    p[i * 3 + 1] = y;
-  }
-  g.computeVertexNormals();
-  return g;
-}
-
 export function buildWorld(THREE, renderer, mix) {
   const disposables = [];
   const keep = (x) => {
@@ -348,12 +315,9 @@ export function buildWorld(THREE, renderer, mix) {
   };
   const root = new THREE.Group();
 
-  const deskTex = keep(texture(THREE, renderer, deskCanvas(1024), { repeat: true }));
-  deskTex.repeat.set(3, 3);
-  deskTex.rotation = 0.06;
   const desk = new THREE.Mesh(
     keep(new THREE.PlaneGeometry(1600, 1600)),
-    keep(new THREE.MeshStandardMaterial({ map: deskTex, roughness: 0.62, metalness: 0, bumpMap: deskTex, bumpScale: 0.35 })),
+    keep(new THREE.ShadowMaterial({ color: new THREE.Color("#2a2620"), opacity: 0.2 })),
   );
   desk.rotation.x = -Math.PI / 2;
   desk.receiveShadow = true;
@@ -520,7 +484,7 @@ export function buildWorld(THREE, renderer, mix) {
   const shadowTex = keep(texture(THREE, renderer, blobCanvas(256, 176, 26, 9), { srgb: false }));
   const contact = new THREE.Mesh(
     keep(new THREE.PlaneGeometry(SHELL.w * 1.22, SHELL.d * 1.26)),
-    keep(new THREE.MeshBasicMaterial({ color: 0x1a1008, alphaMap: shadowTex, transparent: true, opacity: 0.55, depthWrite: false })),
+    keep(new THREE.MeshBasicMaterial({ color: 0x24211c, alphaMap: shadowTex, transparent: true, opacity: 0.42, depthWrite: false })),
   );
   contact.rotation.x = -Math.PI / 2;
   contact.position.y = 0.06;
@@ -529,40 +493,12 @@ export function buildWorld(THREE, renderer, mix) {
   const castTex = keep(texture(THREE, renderer, blobCanvas(256, 176, 34, 22), { srgb: false }));
   const cast = new THREE.Mesh(
     keep(new THREE.PlaneGeometry(SHELL.w * 1.34, SHELL.d * 1.5)),
-    keep(new THREE.MeshBasicMaterial({ color: 0x2a1a0c, alphaMap: castTex, transparent: true, opacity: 0.42, depthWrite: false })),
+    keep(new THREE.MeshBasicMaterial({ color: 0x2a2620, alphaMap: castTex, transparent: true, opacity: 0.26, depthWrite: false })),
   );
   cast.rotation.x = -Math.PI / 2;
   cast.position.set(8, 0.05, 9);
   cast.renderOrder = 1;
   cassette.add(cast);
-
-  const jcard = new THREE.Group();
-  const jTex = keep(texture(THREE, renderer, jcardCanvas(mix)));
-  const jMesh = new THREE.Mesh(keep(jcardGeometry(THREE)), keep(new THREE.MeshStandardMaterial({ map: jTex, roughness: 0.9, side: THREE.DoubleSide })));
-  jMesh.castShadow = true;
-  jMesh.receiveShadow = true;
-  jcard.add(jMesh);
-  const counterCan = counterCanvas();
-  const counterTex = keep(texture(THREE, renderer, counterCan, { mips: false }));
-  counterTex.minFilter = THREE.LinearFilter;
-  const counter = new THREE.Mesh(
-    keep(new THREE.PlaneGeometry(COUNTER.width, COUNTER.height)),
-    keep(new THREE.MeshStandardMaterial({ map: counterTex, transparent: true, roughness: 0.9, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 })),
-  );
-  counter.rotation.x = -Math.PI / 2;
-  const jDepth = JCARD.front + JCARD.spine + JCARD.flap;
-  counter.position.set(-JCARD.width / 2 + 80, 0.2, -jDepth / 2 + 57.9);
-  counter.receiveShadow = true;
-  jcard.add(counter);
-  const jShadowTex = keep(texture(THREE, renderer, blobCanvas(200, 190, 20, 10), { srgb: false }));
-  const jShadow = new THREE.Mesh(
-    keep(new THREE.PlaneGeometry(JCARD.width * 1.08, jDepth * 1.08)),
-    keep(new THREE.MeshBasicMaterial({ color: 0x1a1008, alphaMap: jShadowTex, transparent: true, opacity: 0.16, depthWrite: false })),
-  );
-  jShadow.rotation.x = -Math.PI / 2;
-  jShadow.position.y = 0.04;
-  jcard.add(jShadow);
-  root.add(jcard);
 
   const woodTex = keep(texture(THREE, renderer, pencilWoodCanvas(), { repeat: true }));
   const foilTex = keep(texture(THREE, renderer, foilCanvas(), { srgb: false }));
@@ -586,7 +522,7 @@ export function buildWorld(THREE, renderer, mix) {
   const pShadowTex = keep(texture(THREE, renderer, blobCanvas(512, 64, 14, 9), { srgb: false }));
   const pencilShadow = new THREE.Mesh(
     keep(new THREE.PlaneGeometry(PENCIL.length + 14, 14)),
-    keep(new THREE.MeshBasicMaterial({ color: 0x1a1008, alphaMap: pShadowTex, transparent: true, opacity: 0.42, depthWrite: false })),
+    keep(new THREE.MeshBasicMaterial({ color: 0x24211c, alphaMap: pShadowTex, transparent: true, opacity: 0.3, depthWrite: false })),
   );
   pencilShadow.rotation.x = -Math.PI / 2;
   pencilShadow.position.y = 0.05;
@@ -597,5 +533,5 @@ export function buildWorld(THREE, renderer, mix) {
     for (const d of disposables) d.dispose?.();
   };
 
-  return { root, desk, cassette, hubs, tape, tapeGeo, tapeMax, label, labelTex, jTex, jcard, counter, counterCan, counterTex, pencil, pencilHit, pencilShadow, shell, dispose };
+  return { root, desk, cassette, hubs, tape, tapeGeo, tapeMax, label, labelTex, pencil, pencilHit, pencilShadow, shell, dispose };
 }
