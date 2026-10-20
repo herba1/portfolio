@@ -1,0 +1,13 @@
+{
+  "title": "Ghost Type",
+  "description": "Christina Rossetti’s “Who Has Seen the Wind?” set huge as a justified block of heavy type. Pull any word out and it trails outlined ghosts that ripple like cloth; let go and it flies home along a curve while the line opens its gap to take it back.",
+  "tags": ["Type", "Motion", "Canvas"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T12:10:00.000Z",
+  "intent": "Type as cloth in the wind: one heavy word at a time leaves the block, its speed drawn as computed outline ghosts and a one-pixel slice bend, and the block re-justifies around it without ever jumping.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    { "name": "A Drift by Robert Aperios (Codrops, 2026)", "url": "https://github.com/zen-aperios/a-drift", "what": "The technique of cached glyph canvases bent by one-pixel slices (0.72 sin + 0.28 cos), a five-ghost outline stack with pow(1 - age/5, 1.35) opacity and a cycling phase; re-derived, no files copied (the repo has no licence)." },
+    { "name": "Christina Rossetti, “Who Has Seen the Wind?” (Sing-Song, 1872)", "url": "https://en.wikisource.org/wiki/Sing-Song/Who_has_seen_the_wind%3F", "what": "The poem, public domain." }
+  ]
+}

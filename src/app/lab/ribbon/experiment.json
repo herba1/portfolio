@@ -1,0 +1,13 @@
+{
+  "title": "Ribbon",
+  "description": "A line of type set on a turning ring that twists into a Möbius band, so the words read upright at the front, roll edge-on at the sides and come back upside down. Drag sideways to spin it, drag up or down to cut and re-join it with more half twists, and type your own line.",
+  "tags": ["WebGL", "Type", "Geometry"],
+  "status": "shipped",
+  "createdAt": "2026-10-19T12:00:00.000Z",
+  "intent": "Type as a physical strip: one sentence printed on a band you can spin and twist, re-derived from the twist-then-wrap vertex maths, with every move eased and interruptible.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    { "name": "basement.studio laboratory, #52 Twisted 3D text", "url": "https://github.com/basementstudio/basement-laboratory", "what": "The idea of type twisted along its length and wrapped into a ring; the twist-then-circle maths was re-derived (no licence on the repo), set on a canvas-text strip instead of extruded geometry." },
+    { "name": "Lenis by darkroom.engineering", "url": "https://github.com/darkroomengineering/lenis", "what": "Frame-rate independent damp (MIT) for the twist follower and spin glide." }
+  ]
+}
