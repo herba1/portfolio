@@ -1,49 +1,84 @@
+export const MAX_STAGES = 6;
+
 export const amorphVertex = `#version 300 es
 precision highp float;
+precision highp int;
+precision highp sampler2D;
 
-layout(location = 0) in vec2 aFrom;
-layout(location = 1) in vec2 aTo;
-layout(location = 2) in vec4 aFromColor;
-layout(location = 3) in vec4 aToColor;
-layout(location = 4) in vec2 aSeed;
-layout(location = 5) in vec2 aCorner;
+layout(location = 0) in vec2 aPos;
+layout(location = 1) in vec2 aSeed;
+layout(location = 2) in vec2 aCorner;
+
+uniform sampler2D uSets;
+uniform int uGrid;
+uniform int uBase;
+uniform int uStages;
+uniform int uStageSet[${MAX_STAGES}];
+uniform vec2 uStageOrigin[${MAX_STAGES}];
+uniform float uStageTime[${MAX_STAGES}];
+uniform float uSpeed;
+uniform float uSwapOmega;
+uniform float uKickOmega;
+uniform float uPush;
 
 uniform vec4 uView;
 uniform float uDot;
 uniform float uUnit;
-uniform float uMorph;
-uniform float uMaxTrail;
 uniform vec2 uCanvas;
 uniform vec3 uInk;
 uniform float uInkMix;
-uniform vec2 uOrigin;
-uniform float uReach;
-uniform float uPush;
 
 out vec4 vColor;
 out float vPx;
 out float vTrail;
-out float vDir;
 out vec2 vLocal;
 
-const float PI = 3.14159265;
+vec4 setColor(int set) {
+  int index = gl_InstanceID;
+  return texelFetch(uSets, ivec2(index % uGrid, index / uGrid + set * uGrid), 0);
+}
+
+float stepResponse(float t) {
+  if (t <= 0.0) return 0.0;
+  float w = uSwapOmega * t;
+  return 1.0 - (1.0 + w) * exp(-w);
+}
+
+vec2 kick(float t) {
+  if (t <= 0.0) return vec2(0.0);
+  float w = uKickOmega * t;
+  float e = exp(-w);
+  return vec2(w * w * e, uKickOmega * w * (2.0 - w) * e);
+}
 
 float inkSize(float ink) {
-  return 1.16 * sqrt(ink);
+  return 1.16 * sqrt(max(ink, 0.0));
 }
 
 void main() {
-  vec2 rel = aFrom - uOrigin;
-  float dist = length(rel);
-  vec2 dir = dist > 1e-4 ? rel / dist : vec2(1.0, 0.0);
-  float delay = (dist / uReach) * 0.74 + aSeed.x * 0.02;
-  float p = clamp((uMorph - delay) / 0.24, 0.0, 1.0);
-  float wave = sin(PI * p);
-  float swap = smoothstep(0.28, 0.72, p);
-  float push = wave * wave * uPush * (0.55 + 0.45 * aSeed.y);
-  vec2 position = mix(aFrom, aTo, swap) + dir * push;
+  vec4 base = setColor(uBase);
+  vec4 color = base;
+  vec4 previous = base;
+  vec2 offset = vec2(0.0);
+  vec2 velocity = vec2(0.0);
+  float amp = uPush / (4.0 * exp(-2.0));
 
-  float size = mix(inkSize(aFromColor.a), inkSize(aToColor.a), swap) * (1.0 + 0.28 * wave * wave);
+  for (int k = 0; k < ${MAX_STAGES}; k += 1) {
+    if (k >= uStages) break;
+    vec4 next = setColor(uStageSet[k]);
+    vec2 rel = aPos - uStageOrigin[k];
+    float dist = length(rel);
+    vec2 dir = dist > 1e-4 ? rel / dist : vec2(1.0, 0.0);
+    float t = uStageTime[k] - dist / uSpeed - aSeed.x * 0.03;
+    color += (next - previous) * stepResponse(t);
+    previous = next;
+    vec2 kv = kick(t) * amp * (0.6 + 0.4 * aSeed.y);
+    offset += dir * kv.x;
+    velocity += dir * kv.y;
+  }
+
+  float swell = clamp(length(offset) / uPush, 0.0, 1.4);
+  float size = inkSize(color.a) * (1.0 + 0.26 * swell);
   float px = size * uDot;
   float alpha = 0.94;
   if (px < 1.4) {
@@ -51,26 +86,23 @@ void main() {
     px = 1.4;
   }
 
-  float speed = sin(2.0 * PI * p);
-  float trailPx = min(abs(speed) * wave * uPush * uUnit * 0.5, px * 1.6);
-  float sgn = speed >= 0.0 ? 1.0 : -1.0;
-  float shift = trailPx * 0.5;
+  float speed = length(velocity);
+  vec2 dir = speed > 1e-5 ? velocity / speed : vec2(1.0, 0.0);
+  float trailPx = min(speed * uUnit * 0.028, px * 1.6);
 
-  vec3 photo = mix(aFromColor.rgb, aToColor.rgb, swap);
+  vec3 photo = clamp(color.rgb, 0.0, 1.0);
   vec3 dyed = pow(photo, vec3(1.32)) * 0.94;
-  float tone = mix(aFromColor.a, aToColor.a, swap);
-  vec3 inked = mix(uInk, uInk * 0.86, tone);
-  vec3 color = mix(dyed, inked, uInkMix);
+  vec3 inked = mix(uInk, uInk * 0.86, clamp(color.a, 0.0, 1.0));
+  vec3 rgb = mix(dyed, inked, uInkMix);
 
   vec2 local = aCorner * vec2(px + trailPx + 2.0, px + 2.0) * 0.5;
-  vColor = vec4(color, alpha);
+  vColor = vec4(rgb, alpha);
   vPx = px;
   vTrail = trailPx;
-  vDir = sgn;
   vLocal = local;
-  vec2 alongPx = local - vec2(sgn * shift, 0.0);
-  vec2 rotated = vec2(alongPx.x * dir.x - alongPx.y * dir.y, alongPx.x * dir.y + alongPx.y * dir.x);
-  gl_Position = vec4(uView.xy + position * uView.zw + rotated * 2.0 / uCanvas, 0.0, 1.0);
+  vec2 along = local - vec2(trailPx * 0.5, 0.0);
+  vec2 rotated = vec2(along.x * dir.x - along.y * dir.y, along.x * dir.y + along.y * dir.x);
+  gl_Position = vec4(uView.xy + (aPos + offset) * uView.zw + rotated * 2.0 / uCanvas, 0.0, 1.0);
 }
 `;
 
@@ -80,14 +112,13 @@ precision highp float;
 in vec4 vColor;
 in float vPx;
 in float vTrail;
-in float vDir;
 in vec2 vLocal;
 out vec4 outColor;
 
 void main() {
   vec2 p = vLocal;
-  float head = vDir * vTrail * 0.5;
-  float tail = -head;
+  float head = vTrail * 0.5;
+  float tail = -vTrail * 0.5;
   float along = vTrail > 0.5 ? clamp((p.x - head) / (tail - head), 0.0, 1.0) : 0.0;
   vec2 nearest = vec2(mix(head, tail, along), 0.0);
   float radius = vPx * 0.5 * (1.0 - 0.7 * along);
