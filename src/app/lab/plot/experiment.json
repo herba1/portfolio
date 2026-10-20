@@ -1,0 +1,16 @@
+{
+  "title": "Plot",
+  "description": "A pen plotter with no machine: on warm paper one pen line draws a Beatles cover as a single travelling-salesman path, then writes a sincere line in a single-stroke Hershey script. Drag across the sheet to scrub the drawing back and forth.",
+  "tags": ["Generative", "Print", "Type", "Sound"],
+  "status": "candidate",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "intent": "Plotter art as the subject: the real cover is stippled with weighted Voronoi relaxation, joined into one TSP tour, and fed through a motion planner with acceleration and corner slowdown, so the line thickens and pools where the pen slows and two stepper tones follow each axis speed.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://www.cs.ubc.ca/labs/imager/tr/2002/secord2002b/secord.2002b.pdf",
+    "https://www2.oberlin.edu/math/faculty/bosch/tspart-page.html",
+    "https://github.com/gnea/grbl/wiki/Grbl-v1.1-Configuration#11--junction-deviation-mm",
+    "https://en.wikipedia.org/wiki/Hershey_fonts",
+    "https://github.com/kamalmostafa/hershey-fonts"
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "title": "Strike",
+  "description": "A sheet of paper and nothing else. It types a short letter to someone on its own, and when you type, every key bites the sheet with real typewriter character: uneven ink, a wandering baseline, ribbon texture, a margin bell and a carriage return.",
+  "tags": ["Type", "Print", "Sound"],
+  "status": "candidate",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "intent": "The typewriter without the machine: only the strike matters, so each letter is a ribbon-textured stamp with per-key wear, tilted pressure, heavier punctuation and the occasional ghost double strike, while the paper itself carries the carriage motion, the line feed and the page eject.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Typewriter",
+    "https://en.wikipedia.org/wiki/Typewriter_ribbon",
+    "https://fonts.google.com/specimen/Cutive+Mono",
+    "https://webaudio.github.io/web-audio-api/"
+  ]
+}
