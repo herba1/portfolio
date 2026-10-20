@@ -1045,17 +1045,26 @@ export default class EraseEngine {
     if (this.current) this.endStroke();
     this.auto = null;
     const base = this.baseMask.getContext("2d");
-    base.setTransform(1, 0, 0, 1, 0, 0);
-    base.globalAlpha = 1;
-    for (const st of this.strokes) {
-      if (st.state === "done") base.drawImage(st.canvas, 0, 0);
-      st.parts.length = 0;
-      st.removed.clear();
+    const { cells, inner, baked } = strip;
+    const x0 = cells.c0 * GRID;
+    const y0 = cells.r0 * GRID;
+    const x1 = (cells.c1 + 1) * GRID;
+    const y1 = (cells.r1 + 1) * GRID;
+    this.strokes = this.strokes.filter((st) => {
+      st.ctx.setTransform(MASK_SCALE, 0, 0, MASK_SCALE, 0, 0);
+      st.ctx.clearRect(x0, y0, x1 - x0, y1 - y0);
+      st.ctx.setTransform(1, 0, 0, 1, 0, 0);
+      for (const idx of Array.from(st.removed.keys())) {
+        const row = Math.floor(idx / GRID_COLS);
+        const col = idx - row * GRID_COLS;
+        if (row >= cells.r0 && row <= cells.r1 && col >= cells.c0 && col <= cells.c1) st.removed.delete(idx);
+      }
+      st.parts = st.parts.filter((pt) => !(pt.ox >= x0 && pt.ox < x1 && pt.oy >= y0 && pt.oy < y1));
+      if (st.state === "undo" || st.removed.size || st.parts.length) return true;
       st.canvas.width = 1;
       st.canvas.height = 1;
-    }
-    this.strokes = [];
-    const { cells, inner, baked } = strip;
+      return false;
+    });
     base.setTransform(MASK_SCALE, 0, 0, MASK_SCALE, 0, 0);
     base.clearRect(cells.c0 * GRID, cells.r0 * GRID, (cells.c1 + 1 - cells.c0) * GRID, (cells.r1 + 1 - cells.r0) * GRID);
     base.setTransform(1, 0, 0, 1, 0, 0);

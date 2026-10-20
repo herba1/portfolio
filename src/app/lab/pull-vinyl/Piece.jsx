@@ -8,7 +8,7 @@ import { createVinylAudio } from "./vinylAudio";
 import "./pull-vinyl.css";
 
 const FIRST = 9;
-const BATCH = 3;
+const BATCH = 1;
 const THRESHOLD = 128;
 const HOLD = 156;
 const MAX = 236;
@@ -146,16 +146,17 @@ export default function Piece({ embedded = false }) {
 
     const paintArrive = (now) => {
       const a = st.arrive;
-      const u = Math.min(1, Math.max(0, (now - a.t0) / ARRIVE));
+      if (a.t0 === null && now !== null) a.t0 = now;
+      const u = a.t0 === null ? 0 : Math.min(1, Math.max(0, (now - a.t0) / ARRIVE));
       const e = reduce ? 1 : easeOut(span(u, 0.18, 1));
       const ex = reduce ? 1 : easeOut3(span(u, 0, 0.62));
       const es = reduce ? 1 : easeInOut(u);
       const yOld = lerp(a.y0, a.blockH, e);
       const listY = yOld - a.blockH;
-      const blockTop = lerp(-a.blockH, 0, e);
       listRef.current.style.transform = `translate3d(0, ${listY.toFixed(2)}px, 0)`;
-      a.rows.forEach((li) => {
-        li.style.transform = `translate3d(0, ${(blockTop - listY).toFixed(2)}px, 0)`;
+      a.texts.forEach((el, i) => {
+        const et = reduce ? 1 : easeOut(span(u, 0.4 + i * 0.08, 0.92 + i * 0.08));
+        el.style.transform = `translate3d(${(-(1 - et) * 104).toFixed(2)}%, 0, 0)`;
       });
       zoneRef.current.style.height = `${Math.ceil(yOld)}px`;
       const gx = lerp(0, a.dx, ex);
@@ -173,8 +174,8 @@ export default function Piece({ embedded = false }) {
       st.y = 0;
       st.vy = 0;
       st.target = 0;
-      a.rows.forEach((li) => {
-        li.style.transform = "";
+      a.texts.forEach((el) => {
+        el.style.transform = "";
       });
       if (a.thumb) a.thumb.style.visibility = "";
       const g = groupRef.current;
@@ -440,10 +441,11 @@ export default function Piece({ embedded = false }) {
         const ty = t ? t.top - sRect.top + scroller.scrollTop - listY : 8;
         const tw = t ? t.width : 56;
         const a = {
-          t0: performance.now(),
+          t0: null,
           y0: listY,
           blockH,
           rows,
+          texts: rows.flatMap((li) => Array.from(li.querySelectorAll(".pull-vinyl-song, .pull-vinyl-meta"))),
           thumb,
           gy0: (listY - 120) / 2,
           dx: tx - g.offsetLeft,
@@ -457,7 +459,7 @@ export default function Piece({ embedded = false }) {
         st.arrive = a;
         st.out = 0;
         st.vout = 0;
-        paintArrive(a.t0);
+        paintArrive(null);
         kick();
       },
     };

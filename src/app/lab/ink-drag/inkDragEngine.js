@@ -25,7 +25,7 @@ const PRINT_MS = 820;
 const VELOCITY_LIFE_MS = 1400;
 const QUEUE_LIMIT = 96;
 const VELOCITY_SCALE = 0.5;
-const MORPH_MS = 2100;
+const MORPH_MS = 2600;
 const FLIGHT = 0.62;
 const IDLE_FIRST_MS = 2600;
 const IDLE_MS = 6400;
@@ -735,7 +735,7 @@ export default class InkDragEngine {
     this.runPrint(1, this.goalTarget);
     this.drying = false;
     this.buildFlow(sources, this.readTargets());
-    this.morph = { t: 0, rate: 1 };
+    this.morph = { t: 0, rate: 1, goal: 1 };
     this.setStatus("wet");
     this.emitState();
     clearTimeout(this.idleTimer);
@@ -926,6 +926,7 @@ export default class InkDragEngine {
 
   stepMorph(dt) {
     const m = this.morph;
+    m.rate += (m.goal - m.rate) * (1 - Math.exp(-dt / 0.25));
     m.t += dt * 1000 * m.rate;
     const t = Math.min(1, m.t / MORPH_MS);
     this.morphT = t;
@@ -986,7 +987,7 @@ export default class InkDragEngine {
     };
     this.host.setAttribute("data-pressed", "");
     clearTimeout(this.idleTimer);
-    if (this.morph) this.morph.rate = 3;
+    if (this.morph) this.morph.goal = 2.2;
     this.placeCursor(x, y);
     this.drying = true;
     this.lastStir = this.clock;

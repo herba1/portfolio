@@ -302,6 +302,7 @@
   flex: 1;
   flex-direction: column;
   min-width: 0;
+  overflow: hidden;
 }
 
 .pull-vinyl-song,
@@ -338,7 +339,16 @@
 
 .pull-vinyl-item[data-fresh] .pull-vinyl-new {
   transform: none;
-  transition-delay: 320ms;
+  animation: pull-vinyl-dot 320ms var(--pv-ease) 620ms both;
+}
+
+@keyframes pull-vinyl-dot {
+  from {
+    transform: scale(0);
+  }
+  to {
+    transform: none;
+  }
 }
 
 .pull-vinyl-sr {
@@ -366,5 +376,9 @@
   .pull-vinyl-item[data-intro] {
     animation-duration: 1ms;
     animation-delay: 0ms;
+  }
+
+  .pull-vinyl-item[data-fresh] .pull-vinyl-new {
+    animation: none;
   }
 }
