@@ -74,6 +74,7 @@ export default class TypewriterEngine {
     this.onFail = onFail;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.sound = new TypewriterSound();
+    this.sound.prepare();
     this.rand = seeded(20261017);
     this.seed = 1;
     this.strikes = [];
@@ -637,7 +638,7 @@ export default class TypewriterEngine {
     this.strikes.push(s);
     this.dirty.push(this.ink.stamp(s));
     const pan = clamp((this.geo.angles[b.index] || 0) * 0.5, -0.6, 0.6);
-    this.sound.strike(s.force, pan, s.weave[0] - 0.5);
+    this.sound.strike(s.force, pan, s.weave[0] - 0.5, b.index);
     if (b.advance) this.sound.escape(0.032);
     if (s.bell) this.sound.bell();
   }
