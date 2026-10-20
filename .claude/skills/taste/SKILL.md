@@ -86,6 +86,12 @@ Herb shared Pinterest stills and lyric edits as the visual direction for type an
 - Pixel type must use a real pixel typeface, not a downsampled sans (How Are You).
 - Effects should animate on their own. A static backdrop behind a live effect reads as dead (Tracking), and a degradation effect should run itself (Still Here: "auto do the compress effect").
 - He likes inspirational and sincere words: quotes, lyrics, short human lines.
+- Round three (28 pieces): Scope got "so sick and insane", the top score. It is text drawn by sound on an oscilloscope, so what you see is literally what you hear. Kern, Text (T9), Justify, Still Here and Tracking also got 5. The common thread is generative, satisfying motion with almost no chrome.
+- Chrome loses points even on a 5: "remove the kerning little lines and the chrome, just leave the text" (Kern), "don't like the controls" (Still Here), "make the panel box fit the style" (Justify). Controls must be few and in the piece's own visual language, or replaced by direct manipulation.
+- He wants things to "tweak out": more intensity, hyper rhythm, more generative art inside a screen (Teletext, Tracking, Terminal). Push energy further than feels safe, as long as it stays beautiful.
+- Don't copy a reference image too closely. Crayon was cut for being "too exact" to its Pinterest source; translate the feeling, not the artwork.
+- Sound keeps scoring: he asked for audible audio (8-Bit Player) and ambient whispers under Credits.
+- Cut at 1/5 in round three: Marquee, Riso, Title Sequence ("the shapes are kinda slop"), Channel, Exposure, Lyric Card, How Are You, Max Width, Away.
 
 ## Rules
 
