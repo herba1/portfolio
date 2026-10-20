@@ -63,21 +63,10 @@ uniform sampler2D uTex;
 uniform sampler2DArray uStack;
 uniform vec2 uTexel;
 uniform float uLevel;
-uniform float uPeak;
-uniform vec3 uPeakColor;
 out vec4 outColor;
-
-float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
 
 vec4 sharpAt(vec2 uv) {
   return textureLod(uTex, uv, 0.0);
-}
-
-float darkAt(vec2 uv) {
-  vec4 s = sharpAt(uv);
-  return s.a - dot(s.rgb, vec3(0.299, 0.587, 0.114));
 }
 
 vec4 levelAt(float k) {
@@ -90,19 +79,6 @@ void main() {
   float f = uLevel - base;
   vec4 c = levelAt(base);
   if (f > 0.001) c = mix(c, levelAt(base + 1.0), f);
-  float peak = 0.0;
-  if (uPeak > 0.001) {
-    float l = darkAt(vUv - vec2(uTexel.x, 0.0));
-    float r = darkAt(vUv + vec2(uTexel.x, 0.0));
-    float t = darkAt(vUv - vec2(0.0, uTexel.y));
-    float b = darkAt(vUv + vec2(0.0, uTexel.y));
-    float edge = length(vec2(r - l, b - t));
-    float grain = hash(floor(gl_FragCoord.xy) * 0.37);
-    float flicker = mix(1.0, step(0.32, grain), 0.75) * (0.7 + 0.3 * grain);
-    peak = smoothstep(0.42, 0.95, edge) * uPeak * flicker;
-  }
-  float alpha = max(c.a, peak);
-  vec3 color = mix(c.rgb, uPeakColor * alpha, peak);
-  outColor = vec4(color, alpha);
+  outColor = c;
 }
 `;

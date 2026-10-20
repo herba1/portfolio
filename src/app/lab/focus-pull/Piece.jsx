@@ -89,7 +89,7 @@ export default function Piece({ embedded = false }) {
         <header className="focus-pull-caption">
           <div className="focus-pull-caption-text">
             <h1 className="focus-pull-title">Focus</h1>
-            <p className="focus-pull-hint">Turn the ring to rack focus down the lines, or tap a line to focus on it. Red edges are what’s sharp.</p>
+            <p className="focus-pull-hint">Turn the ring to rack focus down the lines, or tap a line to focus on it.</p>
           </div>
           <button type="button" className="focus-pull-sound" aria-pressed={sound} onClick={toggleSound}>
             <SpeakerIcon on={sound} />

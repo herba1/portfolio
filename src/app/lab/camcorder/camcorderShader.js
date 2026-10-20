@@ -61,14 +61,17 @@ void main() {
   float field = mod(line, 2.0);
   s -= uVel * field * 0.5;
 
-  float band = 0.0;
+  float rowHash = hash(vec2(floor(frag.y / 2.0), floor(uTime * 30.0)));
+  float headZone = smoothstep(0.982, 1.0, frag.y / uRes.y) * uPlay;
+  s.x += headZone * headZone * 0.035 + (rowHash - 0.5) * 0.004 * headZone;
+  float streak = 0.0;
   if (uTrack > 0.0) {
-    float y = s.y;
-    float pos = fract(uTime * 0.23);
-    float d = abs(y - pos);
-    band = (1.0 - smoothstep(0.0, 0.05 + 0.08 * uTrack, d)) * uTrack;
-    float jitter = (hash(vec2(floor(frag.y / 2.0), floor(uTime * 60.0))) - 0.5);
-    s.x += jitter * 0.02 * band + jitter * 0.0015 * uTrack;
+    s.x += (rowHash - 0.5) * 0.003 * uTrack;
+    float lineOn = step(1.0 - 0.07 * uTrack, rowHash);
+    float startX = hash(vec2(rowHash * 31.0, floor(uTime * 30.0)));
+    float lenX = 0.15 + 0.5 * hash(vec2(rowHash * 17.0, 3.0));
+    float u = frag.x / uRes.x;
+    streak = lineOn * step(startX, u) * (1.0 - smoothstep(startX + lenX * 0.6, startX + lenX, u)) * uTrack;
   }
 
   float texPerPx = uPhotoSize.x / (uZoom * uRes.x);
@@ -102,12 +105,10 @@ void main() {
   col += grain * (0.018 + uGain * 0.09);
   col += vec3(chroma, -chroma * 0.5, chroma * 0.8) * uGain * 0.05;
 
-  if (uTrack > 0.0) {
-    float sn = hash(vec2(floor(frag.x / 3.0), floor(frag.y / 2.0)) + floor(uTime * 60.0));
-    col = mix(col, vec3(sn * 0.9), band * 0.75);
-    col *= 1.0 - band * 0.25;
-    col.rb += vec2(0.02, -0.02) * uPlay;
-  }
+  float sn = hash(vec2(floor(frag.x / 3.0), floor(frag.y / 2.0)) + floor(uTime * 60.0));
+  col = mix(col, vec3(0.35 + sn * 0.65), streak * 0.7);
+  col = mix(col, vec3(sn * 0.5), headZone * 0.55);
+  col.rb += vec2(0.015, -0.015) * uPlay;
 
   vec2 vuv = frag / uRes - 0.5;
   col *= 1.0 - dot(vuv, vuv) * 0.45;

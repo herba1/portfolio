@@ -2,7 +2,7 @@ import { createAudio } from "./smearAudio";
 
 const FAMILY = '"Smear Arimo", Arimo, Arial, "Helvetica Neue", sans-serif';
 const MAX_DPR = 2;
-const HIST = 24;
+const HIST = 32;
 const COPIES = 5;
 const COPY_STEP = 18;
 const SHUTTER = 42;
@@ -13,6 +13,11 @@ const SLOP = 8;
 const REST_MS = 3000;
 const IDLE_MS = 3200;
 const SET_K = 210;
+const GLOW_SCALE = 0.25;
+const HALO_SCALE = 0.0833;
+const GLOW_FADE = 210;
+const GLOW_STEP = 24;
+const GLOW_TAIL = 18;
 
 export const POEM = [
   "it’s been a long, long winter",
@@ -50,6 +55,11 @@ export function createSmear(root, refs, { onReady } = {}) {
   stage.appendChild(canvas);
   const ctx = canvas.getContext("2d");
   const meter = document.createElement("canvas").getContext("2d");
+  const glow = document.createElement("canvas");
+  const gctx = glow.getContext("2d");
+  const halo = document.createElement("canvas");
+  const hctx = halo.getContext("2d");
+  let glowDirty = false;
   const audio = createAudio();
 
   let W = 0;
@@ -118,6 +128,7 @@ export function createSmear(root, refs, { onReady } = {}) {
           count: 0,
           idle: 0,
           sprites: null,
+          lit: 0,
         };
         words.push(word);
         row.push(word);
@@ -183,6 +194,7 @@ export function createSmear(root, refs, { onReady } = {}) {
         r: makeSprite(word, "#f43a2e"),
         g: makeSprite(word, "#2ef06a"),
         b: makeSprite(word, "#3a66ff"),
+        ember: makeSprite(word, "#ff9a4a"),
       };
     }
   };
@@ -234,6 +246,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       word.delay = Math.max(0, word.line * 0.1 + word.col * 0.035 - lead);
       word.shown = word.delay <= 0;
       word.peak = 0;
+      word.lit = 0;
       resetHistory(word);
     }
     scheduleAmbient(5200);
@@ -248,6 +261,11 @@ export function createSmear(root, refs, { onReady } = {}) {
     dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     canvas.width = Math.round(W * dpr);
     canvas.height = Math.round(H * dpr);
+    glow.width = Math.max(1, Math.ceil(W * GLOW_SCALE));
+    glow.height = Math.max(1, Math.ceil(H * GLOW_SCALE));
+    halo.width = Math.max(1, Math.ceil(W * HALO_SCALE));
+    halo.height = Math.max(1, Math.ceil(H * HALO_SCALE));
+    clearGlow();
     readInsets();
     layout();
     if (ready && prevW) {
@@ -274,6 +292,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       const dir = mode ? 1 : -1;
       const order = dir > 0 ? rows[word.line].length - 1 - word.col : word.col;
       word.flip = li * 0.075 + order * 0.022 + hash(word.id * 5 + wave) * 0.03;
+      word.lit = 0.6;
     }
     wake();
   };
@@ -375,10 +394,87 @@ export function createSmear(root, refs, { onReady } = {}) {
 
   const tmp = [0, 0];
 
+  function clearGlow() {
+    gctx.setTransform(1, 0, 0, 1, 0, 0);
+    gctx.globalCompositeOperation = "source-over";
+    gctx.globalAlpha = 1;
+    gctx.fillStyle = "#000";
+    gctx.fillRect(0, 0, glow.width, glow.height);
+    hctx.setTransform(1, 0, 0, 1, 0, 0);
+    hctx.fillStyle = "#000";
+    hctx.fillRect(0, 0, halo.width, halo.height);
+    glowDirty = false;
+  }
+
+  const expose = (now, dt) => {
+    let any = false;
+    for (const word of words) {
+      word.lit = Math.max(0, word.lit - dt * 0.9);
+      if (word.shown && word.lit > 0.01 && word.count > 1) any = true;
+    }
+    if (!any) {
+      if (glowDirty) clearGlow();
+      return;
+    }
+    gctx.setTransform(1, 0, 0, 1, 0, 0);
+    gctx.globalCompositeOperation = "source-over";
+    gctx.globalAlpha = 1;
+    gctx.fillStyle = "#000";
+    gctx.fillRect(0, 0, glow.width, glow.height);
+    gctx.setTransform(GLOW_SCALE, 0, 0, GLOW_SCALE, 0, 0);
+    gctx.globalCompositeOperation = "lighter";
+    let deposited = false;
+    for (const word of words) {
+      if (!word.shown || !word.sprites || word.lit <= 0.01 || word.count < 2) continue;
+      const sp = word.sprites.ember;
+      const sw = sp.width / dpr;
+      const sh = sp.height / dpr;
+      const speed = Math.min(1, Math.abs(word.vx) / 1400);
+      if (speed > 0.08) {
+        gctx.globalAlpha = 0.4 * word.lit * speed;
+        gctx.drawImage(sp, word.x - 2, word.y, sw, sh);
+        deposited = true;
+      }
+      for (let j = 1; j <= GLOW_TAIL; j += 1) {
+        const age = j * GLOW_STEP;
+        if (!sample(word, now - age, tmp)) break;
+        const dx = Math.abs(tmp[0] - word.x);
+        if (dx < 2) continue;
+        gctx.globalAlpha = 0.38 * word.lit * Math.min(1, dx / 48) * Math.exp(-age / GLOW_FADE);
+        gctx.drawImage(sp, tmp[0] - 2, tmp[1], sw, sh);
+        deposited = true;
+      }
+    }
+    if (!deposited) {
+      if (glowDirty) clearGlow();
+      return;
+    }
+    glowDirty = true;
+    hctx.setTransform(1, 0, 0, 1, 0, 0);
+    hctx.globalCompositeOperation = "source-over";
+    hctx.globalAlpha = 1;
+    hctx.imageSmoothingQuality = "high";
+    hctx.drawImage(glow, 0, 0, halo.width, halo.height);
+  };
+
+  const drawGlow = () => {
+    if (!glowDirty) return;
+    ctx.globalCompositeOperation = "lighter";
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.globalAlpha = 0.3;
+    ctx.drawImage(glow, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+    ctx.drawImage(halo, 0, 0, W, H);
+    ctx.globalAlpha = 0.5;
+    ctx.drawImage(halo, 0, 0, W, H);
+  };
+
   const draw = (now) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawGlow();
     for (const word of words) {
       if (!word.shown || !word.sprites || word.idle >= 0.25 || word.count < 2) continue;
       const sp = word.sprites;
@@ -445,12 +541,13 @@ export function createSmear(root, refs, { onReady } = {}) {
       pan = r.pan;
     }
     for (const word of words) if (word.shown) record(word, now);
+    expose(now, dt);
     draw(now);
     if (now - audioAt > 33) {
       audioAt = now;
       audio.motion(energy, pan);
     }
-    if (moving || press) {
+    if (moving || press || glowDirty || words.some((w) => w.lit > 0.01)) {
       still = 0;
       wake();
     } else if (still < 16) {
@@ -494,6 +591,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       word.ox = target - word.tx;
       word.oy = 0;
       word.back = 0;
+      word.lit = 0.6;
     }
     root.setAttribute("data-scattered", "");
     wake();
@@ -504,6 +602,7 @@ export function createSmear(root, refs, { onReady } = {}) {
     scattered = false;
     for (const word of words) {
       word.back = 0.04 + word.line * 0.07 + word.col * 0.012;
+      word.lit = 0.6;
     }
     root.removeAttribute("data-scattered");
     touch();
@@ -523,6 +622,7 @@ export function createSmear(root, refs, { onReady } = {}) {
       const f = (1 - dx / rx) * (1 - dy / ry);
       const fall = f * f;
       word.vx += vx * 0.55 * fall;
+      word.lit = Math.min(1, word.lit + fall * 1.5);
       word.vy += vy * 0.12 * fall;
       const limit = W * 0.5;
       if (Math.abs(word.x - word.tx) > limit) word.vx *= 0.5;
@@ -537,7 +637,9 @@ export function createSmear(root, refs, { onReady } = {}) {
       const cxw = word.x + word.w / 2;
       const side = cxw < p.x ? -1 : 1;
       const near = Math.max(0, 1 - Math.abs(cxw - p.x) / (W * 0.6));
-      word.vx += side * (900 + 700 * near) * Math.pow(1 - dy / 2.6, 2);
+      const reach = Math.pow(1 - dy / 2.6, 2);
+      word.vx += side * (900 + 700 * near) * reach;
+      word.lit = Math.min(1, word.lit + reach * 0.8);
     }
     wake();
   };
@@ -624,7 +726,10 @@ export function createSmear(root, refs, { onReady } = {}) {
       audio.unlock();
       touch();
       const dir = e.key === "ArrowLeft" ? -1 : 1;
-      for (const word of words) word.vx += dir * (1400 + hash(word.id) * 900);
+      for (const word of words) {
+        word.vx += dir * (1400 + hash(word.id) * 900);
+        word.lit = 0.8;
+      }
       wake();
     }
   };

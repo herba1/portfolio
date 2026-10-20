@@ -406,8 +406,7 @@ export function createCamcorder(stage, { embedded = false, caption = null, onLiv
     const f = frames[lo];
     const intro = Math.max(0, 1 - t / 0.7);
     const outro = t > clip.duration ? Math.min(1, (t - clip.duration) / 0.25) : 0;
-    const wander = 0.12 + 0.1 * Math.max(0, Math.sin(t * 0.9 + 1.2));
-    return { ...f, track: Math.min(1, Math.max(intro, outro, wander)), play: 1 };
+    return { ...f, track: Math.min(1, Math.max(intro * intro, outro)), play: 1 };
   };
 
   const frame = () => {
@@ -429,7 +428,7 @@ export function createCamcorder(stage, { embedded = false, caption = null, onLiv
     const ready = loaded ? clamp((now - readyAt) / 500, 0, 1) : 0;
     gl.render({ ...view, time: (now / 1000) % 1000, ready: ready * ready * (3 - 2 * ready) });
     updateOsd(now, view);
-    sound?.update({ zoom: state === "play" ? 0 : liveView.zoomRate, tape: state !== "stby", hiss: state === "play" ? view.track : 0 });
+    sound?.update({ zoom: state === "play" ? 0 : liveView.zoomRate, tape: state !== "stby", hiss: state === "play" ? Math.max(view.track, 0.14) : 0 });
     raf = requestAnimationFrame(frame);
   };
 

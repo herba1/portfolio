@@ -2,12 +2,15 @@ import { createAudio } from "./selectAudio";
 
 const FAMILY = '"Select Arimo", Arimo, Arial, "Helvetica Neue", sans-serif';
 const TEXT = "hello there. it will take a while to feel like this again, so i keep your voice on the walk home and let the streetlights go soft. still here?";
-const ANGLES = [4.2, -5.4, 3.6, -4.4, 5.2, -3.2];
-const TILT_X = [-12, 10, -11, 11, -9, 10];
-const TILT_Y = [6, -7, 5, -6, 7, -5];
-const LIFT_Z = [56, 44, 62, 48, 54, 46];
-const DEPTH = 760;
-const SINK = 18;
+const ANGLES = [-3, -2.2, -3.4, -2.6, -3.1, -2.3];
+const TILT_X = [-7, 6, -6, 7, -5, 6];
+const TILT_Y = [17, -15, 18, -16, 15, -18];
+const LIFT_Z = [120, 112, 126, 116, 122, 114];
+const PLANE_X = 14;
+const PLANE_Y = 5;
+const DEPTH = 640;
+const DIGITS = 28;
+const SINK = 70;
 const DEG = Math.PI / 180;
 
 const WORDS = {
@@ -124,10 +127,16 @@ export function createSelect(root, refs, { onCopy } = {}) {
   let chipTimer = 0;
   let menuTimer = 0;
   let flyTimer = 0;
+  let burstTimer = 0;
   let tipPos = { x: 0, y: 0, ready: false };
   let shifts = [];
   let origin = { x: 0, y: 0 };
   let shadows = [];
+  const digitLayer = el("div", "select-digits", stage);
+  digitLayer.setAttribute("aria-hidden", "true");
+  const digits = [];
+  let digitSeed = 0;
+  let lastGeo = [];
 
   const font = (size) => `400 ${size}px ${FAMILY}`;
 
@@ -180,8 +189,8 @@ export function createSelect(root, refs, { onCopy } = {}) {
     const aw = W - 48;
     F = Math.round(Math.max(22, Math.min(46, aw / 16.5)));
     LH = Math.round((F * 1.26) / 4) * 4;
-    textLayer.style.setProperty("--select-size", `${F}px`);
-    textLayer.style.setProperty("--select-lead", `${LH}px`);
+    stage.style.setProperty("--select-size", `${F}px`);
+    stage.style.setProperty("--select-lead", `${LH}px`);
     meter.font = font(F);
     space = meter.measureText(" ").width;
     for (const w of words) w.w = meter.measureText(w.text).width;
@@ -248,13 +257,16 @@ export function createSelect(root, refs, { onCopy } = {}) {
       const [b0, b1] = restSpan(li + 1, la, lb);
       const ra = Math.abs(Math.sin(baseAngle(li - la, a1 - a0) * DEG)) * (a1 - a0) * 0.5;
       const rb = Math.abs(Math.sin(baseAngle(li + 1 - la, b1 - b0) * DEG)) * (b1 - b0) * 0.5;
-      gaps.push(L * (ra + rb + LH * 0.55));
+      gaps.push(L * (ra + rb + LH * 0.85));
     }
     const [f0, f1] = restSpan(la, la, lb);
     const [e0, e1] = restSpan(lb, la, lb);
     const tiltA = Math.abs(Math.sin(baseAngle(0, f1 - f0) * DEG)) * (f1 - f0) * 0.5;
     const tiltB = Math.abs(Math.sin(baseAngle(lb - la, e1 - e0) * DEG)) * (e1 - e0) * 0.5;
-    const lead = L * (LH * 0.62 + Math.max(tiltA, tiltB));
+    const zAvg = LIFT_Z[0] * depthScale() * L;
+    const grow = DEPTH / Math.max(1, DEPTH - zAvg) - 1;
+    const span = (lb - la + 1) * LH + gaps.reduce((s0, g) => s0 + g, 0);
+    const lead = L * (LH * 0.62 + Math.max(tiltA, tiltB)) + span * 0.5 * grow + L * LH * 0.3;
     const total = lead * 2 + gaps.reduce((s0, g) => s0 + g, 0);
     let acc = 0;
     lines.forEach((_, li) => {
@@ -345,6 +357,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
       w.twl = g ? 1 : 0;
       if (!g) {
         w.tx = w.x;
+        w.tf = 0;
         const range = sel ? selLines() : null;
         let shift = lineShift(w.line);
         if (range && w.line === range[0] && w.i < sel.a) {
@@ -353,7 +366,11 @@ export function createSelect(root, refs, { onCopy } = {}) {
           if (first && L > 0.001) {
             const edgeX = Math.min(...[-1, 1].map((sy) => project(first, first.cx - Math.cos(first.theta) * (first.width / 2) - Math.sin(first.theta) * sy * (LH / 2), first.cy - Math.sin(first.theta) * (first.width / 2) + Math.cos(first.theta) * sy * (LH / 2)).x));
             const restEdge = words[sel.a].x - 2;
-            w.tx = Math.max(8, w.x - Math.max(0, restEdge - edgeX + space * 0.4 * L));
+            const fs = DEPTH / (DEPTH + SINK * L);
+            const restScreen = origin.x + (restEdge - origin.x) * fs;
+            const want = w.x - Math.max(0, (restScreen - edgeX + space * 0.8 * L) / fs);
+            w.tx = Math.max(8, want);
+            w.tf = Math.min(1, Math.max(0, 8 - want) / Math.max(1, w.w * 0.5));
           }
         }
         if (range && w.line === range[1] && w.i > sel.b) {
@@ -362,7 +379,11 @@ export function createSelect(root, refs, { onCopy } = {}) {
           if (lastG && L > 0.001) {
             const edgeX = Math.max(...[-1, 1].map((sy) => project(lastG, lastG.cx + Math.cos(lastG.theta) * (lastG.width / 2) - Math.sin(lastG.theta) * sy * (LH / 2), lastG.cy + Math.sin(lastG.theta) * (lastG.width / 2) + Math.cos(lastG.theta) * sy * (LH / 2)).x));
             const restEdge = words[sel.b].x + words[sel.b].w + 2;
-            w.tx = Math.min(W - w.w - 8, w.x + Math.max(0, edgeX - restEdge + space * 0.4 * L));
+            const fs = DEPTH / (DEPTH + SINK * L);
+            const restScreen = origin.x + (restEdge - origin.x) * fs;
+            const want = w.x + Math.max(0, (edgeX - restScreen + space * 0.8 * L) / fs);
+            w.tx = Math.min(W - w.w - 8, want);
+            w.tf = Math.min(1, Math.max(0, want - (W - w.w - 8)) / Math.max(1, w.w * 0.5));
           }
         }
         w.ty = lines[w.line].top + shift;
@@ -445,25 +466,97 @@ export function createSelect(root, refs, { onCopy } = {}) {
     return lift3d(w.g3, amount, SINK * L * (1 - w.wl)) + flatTransform(w);
   };
 
-  const project = (g, px, py) => {
+  const rotate = (vx, vy, vz, ay, ax) => {
+    const x1 = vx * Math.cos(ay) + vz * Math.sin(ay);
+    const z1 = -vx * Math.sin(ay) + vz * Math.cos(ay);
+    const y2 = vy * Math.cos(ax) - z1 * Math.sin(ax);
+    const z2 = vy * Math.sin(ax) + z1 * Math.cos(ax);
+    return [x1, y2, z2];
+  };
+
+  const planeAngles = () => [PLANE_X * L * depthScale(), PLANE_Y * L * depthScale()];
+
+  const plane = () => {
+    if (L < 0.0005) return "";
+    const [px, py] = planeAngles();
+    return `translate3d(${origin.x.toFixed(2)}px, ${origin.y.toFixed(2)}px, 0) rotateX(${px.toFixed(3)}deg) rotateY(${py.toFixed(3)}deg) translate3d(${(-origin.x).toFixed(2)}px, ${(-origin.y).toFixed(2)}px, 0) `;
+  };
+
+  const world = (g, px, py) => {
     const a = L;
-    let vx = px - g.cx;
-    let vy = py - g.cy;
-    let vz = g.z * a;
-    const ry = g.ay * a * DEG;
-    const rx = g.ax * a * DEG;
-    const x1 = vx * Math.cos(ry) + vz * Math.sin(ry);
-    const z1 = -vx * Math.sin(ry) + vz * Math.cos(ry);
-    vx = x1;
-    vz = z1;
-    const y2 = vy * Math.cos(rx) - vz * Math.sin(rx);
-    const z2 = vy * Math.sin(rx) + vz * Math.cos(rx);
-    vy = y2;
-    vz = z2;
-    const wx = g.cx + vx;
-    const wy = g.cy + vy;
-    const f = DEPTH / Math.max(1, DEPTH - vz);
-    return { x: origin.x + (wx - origin.x) * f, y: origin.y + (wy - origin.y) * f };
+    const [vx, vy, vz] = rotate(px - g.cx, py - g.cy, g.z * a, g.ay * a * DEG, g.ax * a * DEG);
+    const [pxd, pyd] = planeAngles();
+    const [qx, qy, qz] = rotate(g.cx + vx - origin.x, g.cy + vy - origin.y, vz, pyd * DEG, pxd * DEG);
+    return { x: origin.x + qx, y: origin.y + qy, z: qz };
+  };
+
+  const project = (g, px, py) => {
+    const p = world(g, px, py);
+    const f = DEPTH / Math.max(1, DEPTH - p.z);
+    return { x: origin.x + (p.x - origin.x) * f, y: origin.y + (p.y - origin.y) * f };
+  };
+
+  const spawnDigits = (g, side, n) => {
+    if (!g || L < 0.2) return;
+    const c = Math.cos(g.theta);
+    const sn = Math.sin(g.theta);
+    const ex = g.cx + c * side * (g.width / 2);
+    const ey = g.cy + sn * side * (g.width / 2);
+    for (let k = 0; k < n; k += 1) {
+      digitSeed += 1;
+      let d = digits.find((q) => q.age >= q.life);
+      if (!d) {
+        if (digits.length >= DIGITS) break;
+        d = { node: el("span", "select-digit", digitLayer), age: 1, life: 0 };
+        digits.push(d);
+      }
+      const h0 = hash(digitSeed * 1.7);
+      const h1 = hash(digitSeed * 2.3 + 5);
+      const h2 = hash(digitSeed * 3.1 + 9);
+      const p = world(g, ex + sn * LH * 0.5, ey - c * LH * 0.5 + (h0 - 0.5) * LH * 0.3);
+      d.node.textContent = h1 > 0.5 ? "1" : "0";
+      d.x = p.x + side * 6;
+      d.y = p.y;
+      d.z = p.z;
+      d.vx = side * (90 + h0 * 120);
+      d.vy = -170 - h1 * 100;
+      d.vz = 120 + h2 * 150;
+      d.rx = 0;
+      d.ry = 0;
+      d.rz = (h2 - 0.5) * 30;
+      d.vrx = (h1 - 0.5) * 220;
+      d.vry = side * (40 + h0 * 90);
+      d.vrz = (h0 - 0.5) * 160;
+      d.age = 0;
+      d.life = 1.4 + h2 * 0.6;
+    }
+    wake();
+  };
+
+  const stepDigits = (dt) => {
+    let alive = false;
+    const zMax = DEPTH * 0.6;
+    for (const d of digits) {
+      if (d.age >= d.life) {
+        if (d.node.style.opacity !== "0") d.node.style.opacity = "0";
+        continue;
+      }
+      alive = true;
+      d.age += dt;
+      d.vy += 170 * dt;
+      d.x += d.vx * dt;
+      d.y += d.vy * dt;
+      d.z = Math.min(zMax, d.z + d.vz * dt);
+      d.rx += d.vrx * dt;
+      d.ry += d.vry * dt;
+      d.rz += d.vrz * dt;
+      const t = Math.min(1, d.age / d.life);
+      const near = Math.max(0, (d.z - zMax * 0.7) / (zMax * 0.3));
+      const o = Math.min(1, d.age / 0.08) * (1 - t * t) * (1 - near);
+      d.node.style.opacity = Math.max(0, o).toFixed(3);
+      d.node.style.transform = `translate3d(${d.x.toFixed(2)}px, ${d.y.toFixed(2)}px, ${d.z.toFixed(2)}px) rotateX(${d.rx.toFixed(2)}deg) rotateY(${d.ry.toFixed(2)}deg) rotateZ(${d.rz.toFixed(2)}deg) skewX(-12deg) translate(-50%, -50%)`;
+    }
+    return alive;
   };
 
   const placeTip = (geo) => {
@@ -510,6 +603,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const render = () => {
     const geo = geometry();
+    lastGeo = geo;
     ensureBars(geo.length);
     ensureShadows(geo.length);
     geo.forEach((g, i) => {
@@ -519,22 +613,30 @@ export function createSelect(root, refs, { onCopy } = {}) {
         bar.node.style.width = `${g.width.toFixed(1)}px`;
         bar.node.style.height = `${LH}px`;
       }
-      bar.node.style.transform = `${lift3d(g, L)}translate3d(${g.cx.toFixed(2)}px, ${g.cy.toFixed(2)}px, 0) rotate(${(g.theta / DEG).toFixed(3)}deg) translate(${(-g.width / 2).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      bar.node.style.transform = `${plane()}${lift3d(g, L)}translate3d(${g.cx.toFixed(2)}px, ${g.cy.toFixed(2)}px, 0) rotate(${(g.theta / DEG).toFixed(3)}deg) translate(${(-g.width / 2).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
       const sh = shadows[i];
       if (Math.abs(sh.w - g.width) > 0.2) {
         sh.w = g.width;
         sh.node.style.width = `${g.width.toFixed(1)}px`;
         sh.node.style.height = `${LH}px`;
       }
-      sh.node.style.transform = `translate3d(${(g.cx - g.width / 2 + L * g.ay * 0.9).toFixed(2)}px, ${(g.top + L * (10 + g.z * 0.22)).toFixed(2)}px, 0) rotate(${((g.theta / DEG) * 0.5).toFixed(3)}deg) scale(${(1 - L * 0.04).toFixed(4)}, ${(1 - L * 0.18).toFixed(4)})`;
+      sh.node.style.transform = `${plane()}translate3d(${(g.cx - g.width / 2 + L * g.ay * 0.9).toFixed(2)}px, ${(g.top + L * (10 + g.z * 0.22)).toFixed(2)}px, 0) rotate(${((g.theta / DEG) * 0.5).toFixed(3)}deg) scale(${(1 - L * 0.04).toFixed(4)}, ${(1 - L * 0.18).toFixed(4)})`;
       sh.node.style.opacity = (Math.min(1, L) * 0.5).toFixed(3);
     });
-    for (const w of words) w.node.style.transform = wordTransform(w);
+    const pl = plane();
+    for (const w of words) {
+      w.node.style.transform = pl + wordTransform(w);
+      const o = (1 - (w.tf || 0) * Math.min(1, L)).toFixed(3);
+      if (w.op !== o) {
+        w.op = o;
+        w.node.style.opacity = o;
+      }
+    }
     if (geo.length) {
       const first = geo[0];
       const lastG = geo[geo.length - 1];
-      startHandle.style.transform = `${lift3d(first, L)}translate3d(${first.cx.toFixed(2)}px, ${first.cy.toFixed(2)}px, 0) rotate(${(first.theta / DEG).toFixed(3)}deg) translate(${(-first.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
-      endHandle.style.transform = `${lift3d(lastG, L)}translate3d(${lastG.cx.toFixed(2)}px, ${lastG.cy.toFixed(2)}px, 0) rotate(${(lastG.theta / DEG).toFixed(3)}deg) translate(${(lastG.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      startHandle.style.transform = `${pl}${lift3d(first, L)}translate3d(${first.cx.toFixed(2)}px, ${first.cy.toFixed(2)}px, 0) rotate(${(first.theta / DEG).toFixed(3)}deg) translate(${(-first.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
+      endHandle.style.transform = `${pl}${lift3d(lastG, L)}translate3d(${lastG.cx.toFixed(2)}px, ${lastG.cy.toFixed(2)}px, 0) rotate(${(lastG.theta / DEG).toFixed(3)}deg) translate(${(lastG.width / 2 - 1).toFixed(2)}px, ${(-LH / 2).toFixed(2)}px)`;
       startHandle.style.height = `${LH}px`;
       endHandle.style.height = `${LH}px`;
       root.setAttribute("data-selection", "");
@@ -565,7 +667,8 @@ export function createSelect(root, refs, { onCopy } = {}) {
       vL = 0;
     }
     const tipMoving = render();
-    if (moving || drag || tipMoving) wake();
+    const flying = stepDigits(dt);
+    if (moving || drag || tipMoving || flying) wake();
     else last = 0;
   };
 
@@ -605,6 +708,10 @@ export function createSelect(root, refs, { onCopy } = {}) {
     if (target > 0.3 && !lifted) {
       lifted = true;
       audio.lift(0);
+      clearTimeout(burstTimer);
+      burstTimer = setTimeout(() => {
+        if (lifted && lastGeo.length) spawnDigits(lastGeo[lastGeo.length - 1], 1, 7);
+      }, 180);
     }
     if (target === 0 && lifted) {
       lifted = false;
@@ -668,7 +775,12 @@ export function createSelect(root, refs, { onCopy } = {}) {
 
   const setSel = (a, b) => {
     const changed = !sel || sel.a !== a || sel.b !== b;
+    const prevA = sel ? sel.a : a;
     sel = { a, b };
+    if (changed && drag && L > 0.3 && lastGeo.length) {
+      const moved = drag.kind === "start" || (sel && a !== prevA) ? -1 : 1;
+      spawnDigits(moved < 0 ? lastGeo[0] : lastGeo[lastGeo.length - 1], moved, 2);
+    }
     if (changed) {
       const w = words[b];
       audio.tick(((w.x + w.w / 2) / W) * 1.4 - 0.7);
@@ -946,6 +1058,7 @@ export function createSelect(root, refs, { onCopy } = {}) {
       clearTimeout(chipTimer);
       clearTimeout(menuTimer);
       clearTimeout(flyTimer);
+      clearTimeout(burstTimer);
       io.disconnect();
       ro.disconnect();
       stage.removeEventListener("pointerdown", onDown);
@@ -959,6 +1072,8 @@ export function createSelect(root, refs, { onCopy } = {}) {
       barLayer.remove();
       textLayer.remove();
       flyLayer.remove();
+      digitLayer.remove();
+      shadowLayer.remove();
       startHandle.remove();
       endHandle.remove();
       tip.remove();

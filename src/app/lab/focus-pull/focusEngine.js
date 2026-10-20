@@ -3,12 +3,14 @@ import { createLensAudio } from "./lensAudio";
 import { albumById } from "@/app/lab/_music/catalog";
 
 const ABBEY = albumById("abbey-road");
+const RUBBER = albumById("rubber-soul");
+const LETITBE = albumById("let-it-be");
 const LINES = [
   ["i", "keep", "your", { glyph: "moon", w: 0.62 }],
-  ["voice", { img: "/scorch/beams.webp", w: 1.34, fx: 0.72, fy: 0.42, label: "light through fog at night" }, "on", "the"],
+  ["voice", { img: RUBBER.cover, w: 0.78, fx: 0.5, fy: 0.5, label: RUBBER.title }, "on", "the"],
   ["walk", { img: ABBEY.cover, w: 0.78, fx: 0.5, fy: 0.5, label: ABBEY.title }, "home"],
   ["and", "it", "gets"],
-  ["clearer", { img: "/scorch/meadow.webp", w: 1.34, fx: 0.5, fy: 0.72, label: "a meadow of flowers" }, "the"],
+  ["clearer", { img: LETITBE.cover, w: 0.78, fx: 0.5, fy: 0.5, label: LETITBE.title }, "the"],
   ["closer", "i", "get", { glyph: "star", w: 0.62 }],
 ];
 export const LYRIC = LINES.map((tokens) => tokens.filter((t) => typeof t === "string").join(" "));
@@ -93,7 +95,6 @@ const LABELS = [
 const MINOR = [1 / 0.6, 1 / 0.8, 1 / 1.2, 1 / 2.5, 1 / 4, 0.1];
 const FAMILY = '"Focus Arimo", Arial, Helvetica, sans-serif';
 const INK_CSS = "rgb(9, 9, 11)";
-const PEAK = [0.95, 0.12, 0.08];
 const RING_H = 76;
 const SPEED_CAP = 1.4;
 const LEVELS = [0, 0.05, 0.1, 0.17, 0.26, 0.38, 0.53, 0.75, 1];
@@ -154,7 +155,7 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   const stack = gl.createTexture();
   const fbo = gl.createFramebuffer();
   const u = {};
-  for (const name of ["uRect", "uUv", "uRes", "uTex", "uStack", "uTexel", "uLevel", "uPeak", "uPeakColor"]) u[name] = gl.getUniformLocation(program, name);
+  for (const name of ["uRect", "uUv", "uRes", "uTex", "uStack", "uTexel", "uLevel"]) u[name] = gl.getUniformLocation(program, name);
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
   const vbo = gl.createBuffer();
@@ -351,14 +352,12 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     gl.uniform1i(u.uStack, 1);
     gl.uniform2f(u.uRes, glCanvas.width, glCanvas.height);
     gl.uniform2f(u.uTexel, 1 / atlas.width, 1 / atlas.height);
-    gl.uniform3f(u.uPeakColor, PEAK[0], PEAK[1], PEAK[2]);
     const focus = df();
     const breathe = 1 + 0.012 * (focus - 1);
     const cx = (block.x + block.w / 2) * dpr;
     const cy = (block.y + block.h / 2) * dpr;
     lines.forEach((line, i) => {
       const blurCss = Math.min(maxBlur, Math.abs(focus - line.diopter) * font * 0.19);
-      const peak = smoothstep(font * 0.022, font * 0.004, blurCss);
       const x0 = block.x * dpr - pad;
       const y0 = line.top * dpr - pad;
       const w = atlas.width;
@@ -368,7 +367,6 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
       gl.uniform4f(u.uRect, sx, sy, w * breathe, h * breathe);
       gl.uniform4f(u.uUv, 0, (i * rowH) / atlas.height, 1, rowH / atlas.height);
       gl.uniform1f(u.uLevel, levelFor(blurCss));
-      gl.uniform1f(u.uPeak, peak);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     });
   };
