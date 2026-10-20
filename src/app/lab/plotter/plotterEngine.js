@@ -1,5 +1,4 @@
-import { PLOT_FRAGMENT, QUAD_VERTEX } from "./plotterShader";
-import { readTone } from "./plotterTone";
+import { DOT_FRAGMENT, DOT_VERTEX, PLOT_FRAGMENT, QUAD_VERTEX } from "./plotterShader";
 import PlotterSound from "./plotterSound";
 
 const ROWS = 1024;
@@ -34,13 +33,13 @@ function compile(gl, type, source) {
   return shader;
 }
 
-function link(gl, vertexSource, fragmentSource) {
+function link(gl, vertexSource, fragmentSource, attributes = ["aPosition"]) {
   const vertex = compile(gl, gl.VERTEX_SHADER, vertexSource);
   const fragment = compile(gl, gl.FRAGMENT_SHADER, fragmentSource);
   const program = gl.createProgram();
   gl.attachShader(program, vertex);
   gl.attachShader(program, fragment);
-  gl.bindAttribLocation(program, 0, "aPosition");
+  attributes.forEach((name, index) => gl.bindAttribLocation(program, index, name));
   gl.linkProgram(program);
   gl.deleteShader(vertex);
   gl.deleteShader(fragment);
@@ -79,13 +78,13 @@ export default class PlotterEngine {
     this.goal = HOME;
     this.rect = { x: 0, y: 0, w: 1, h: 1 };
     this.aspect = 758 / 600;
-    this.center = [0.47, 0.66];
     this.dpr = 1;
     this.raf = 0;
     this.last = 0;
     this.visible = true;
     this.destroyed = false;
-    this.toneReady = false;
+    this.stippleReady = false;
+    this.maskDirty = true;
     this.rowsDirty = true;
     this.lastProgress = -1;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -94,7 +93,7 @@ export default class PlotterEngine {
     this.handleVisibility = () => this.wake();
   }
 
-  start(image) {
+  start(stipple) {
     const gl = this.canvas.getContext("webgl2", {
       alpha: false,
       antialias: false,
@@ -110,6 +109,7 @@ export default class PlotterEngine {
     this.gl = gl;
     try {
       this.plot = link(gl, QUAD_VERTEX, PLOT_FRAGMENT);
+      this.dots = link(gl, DOT_VERTEX, DOT_FRAGMENT, ["aPoint", "aInfo"]);
     } catch {
       this.onError?.();
       return;
@@ -121,7 +121,29 @@ export default class PlotterEngine {
     gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
     gl.enableVertexAttribArray(0);
     gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-    this.toneTexture = gl.createTexture();
+    this.pointBuffer = gl.createBuffer();
+    this.infoBuffer = gl.createBuffer();
+    this.pointVao = gl.createVertexArray();
+    gl.bindVertexArray(this.pointVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pointBuffer);
+    gl.enableVertexAttribArray(0);
+    gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.infoBuffer);
+    gl.enableVertexAttribArray(1);
+    gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    this.maskTexture = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    this.maskSize = [1, 1];
+    this.maskFramebuffer = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFramebuffer);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, this.maskTexture, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     this.rowTexture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, this.rowTexture);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
@@ -140,23 +162,21 @@ export default class PlotterEngine {
     this.resizer = new ResizeObserver(() => this.resize());
     this.resizer.observe(this.root);
     this.resizer.observe(this.stage);
-    this.setImage(image, { first: true });
+    this.setStipple(stipple, { first: true });
   }
 
-  setImage(image, { first = false, center } = {}) {
+  setStipple(stipple, { first = false } = {}) {
     if (!this.gl || this.destroyed) return;
-    const tone = readTone(image, { crop: first ? [0.02, 0.27, 0.015, 0.02] : [0, 0, 0, 0] });
     const gl = this.gl;
-    gl.bindTexture(gl.TEXTURE_2D, this.toneTexture);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, tone.width, tone.height, 0, gl.RGBA, gl.FLOAT, tone.data);
-    this.aspect = tone.aspect;
-    this.center = center || [0.5, 0.5];
-    if (first) this.center = [0.46, 0.6];
-    this.toneReady = true;
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.pointBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, stipple.points, gl.STATIC_DRAW);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.infoBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, stipple.info, gl.STATIC_DRAW);
+    this.pointCount = stipple.points.length / 2;
+    this.dotRadius = stipple.radius;
+    this.aspect = stipple.aspect;
+    this.stippleReady = true;
+    this.maskDirty = true;
     this.resize();
     if (first) {
       this.render();
@@ -166,6 +186,34 @@ export default class PlotterEngine {
       this.rowsDirty = true;
       this.retarget(this.target[0], this.target[1]);
     }
+  }
+
+  renderMask() {
+    const gl = this.gl;
+    const width = Math.max(1, Math.round(this.rect.w * this.dpr));
+    const height = Math.max(1, Math.round(this.rect.h * this.dpr));
+    if (width !== this.maskSize[0] || height !== this.maskSize[1]) {
+      gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      this.maskSize = [width, height];
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.maskFramebuffer);
+    gl.viewport(0, 0, width, height);
+    gl.clearColor(0, 0, 0, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    const { program, uniforms: u } = this.dots;
+    gl.useProgram(program);
+    gl.uniform1f(u.uRadius, Math.max(0.55 * this.dpr, this.dotRadius * width));
+    gl.uniform1f(u.uFeather, 0.6);
+    gl.enable(gl.BLEND);
+    gl.blendEquation(gl.MAX);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.bindVertexArray(this.pointVao);
+    gl.drawArrays(gl.POINTS, 0, this.pointCount);
+    gl.disable(gl.BLEND);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.maskDirty = false;
   }
 
   resize() {
@@ -189,7 +237,7 @@ export default class PlotterEngine {
     const x = Math.round(box.left - host.left + (box.width - w) / 2);
     const y = Math.round(box.top - host.top + (box.height - h) / 2);
     this.rect = { x, y, w: Math.round(w), h: Math.round(h) };
-    this.scale = Math.max(0.78, Math.min(1.15, Math.sqrt((this.rect.w * this.rect.h) / (700 * 554))));
+    this.maskDirty = true;
     const style = this.root.style;
     style.setProperty("--plot-x", `${x}px`);
     style.setProperty("--plot-y", `${y}px`);
@@ -348,7 +396,8 @@ export default class PlotterEngine {
 
   render() {
     const gl = this.gl;
-    if (!gl || !this.toneReady) return;
+    if (!gl || !this.stippleReady) return;
+    if (this.maskDirty) this.renderMask();
     if (this.rowsDirty) {
       gl.bindTexture(gl.TEXTURE_2D, this.rowTexture);
       gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -359,8 +408,8 @@ export default class PlotterEngine {
     gl.viewport(0, 0, this.canvas.width, this.canvas.height);
     gl.useProgram(program);
     gl.activeTexture(gl.TEXTURE0);
-    gl.bindTexture(gl.TEXTURE_2D, this.toneTexture);
-    gl.uniform1i(u.uTone, 0);
+    gl.bindTexture(gl.TEXTURE_2D, this.maskTexture);
+    gl.uniform1i(u.uMask, 0);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, this.rowTexture);
     gl.uniform1i(u.uRows, 1);
@@ -372,8 +421,6 @@ export default class PlotterEngine {
     gl.uniform1f(u.uActive, this.phase === "plot" ? 1 : 0);
     gl.uniform1f(u.uBand, BAND);
     gl.uniform1f(u.uLift, LIFT);
-    gl.uniform1f(u.uScale, this.scale);
-    gl.uniform2f(u.uCenter, this.center[0], this.center[1]);
     gl.uniform3f(u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
     gl.uniform3fv(u.uInks, PENS.flatMap((pen) => hexToRgb(pen.ink)));
     gl.uniform3fv(u.uAccents, PENS.flatMap((pen) => hexToRgb(pen.accent)));
@@ -394,7 +441,12 @@ export default class PlotterEngine {
     this.sound.close();
     const gl = this.gl;
     if (gl) {
-      gl.deleteTexture(this.toneTexture);
+      gl.deleteTexture(this.maskTexture);
+      gl.deleteFramebuffer(this.maskFramebuffer);
+      gl.deleteBuffer(this.pointBuffer);
+      gl.deleteBuffer(this.infoBuffer);
+      gl.deleteVertexArray(this.pointVao);
+      if (this.dots) gl.deleteProgram(this.dots.program);
       gl.deleteTexture(this.rowTexture);
       gl.deleteBuffer(this.buffer);
       gl.deleteVertexArray(this.vao);
