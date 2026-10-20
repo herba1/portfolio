@@ -615,7 +615,13 @@ export default function Piece({ embedded = false }) {
       <div className="hm-veil" aria-hidden="true" onPointerDown={close} />
       {menu ? (
         <div ref={layerRef} className="hm-layer" data-closing={menu.closing ? "" : undefined} style={{ "--lift": menu.closing ? 0 : nav.lift ?? 0 }}>
-          <div ref={cloneRef} className="hm-lifted" style={{ left: menu.left, top: menu.top, width: menu.size, height: menu.size }}>
+          <div
+            ref={cloneRef}
+            className="hm-lifted"
+            data-under={!menu.closing && depth > 0 ? "" : undefined}
+            data-above={menu.below ? undefined : ""}
+            style={{ left: menu.left, top: menu.top, width: menu.size, height: menu.size, "--d": menu.closing ? 0 : depth, "--rx": menu.alignLeft ? "-1" : "1" }}
+          >
             <img src={record.cover} alt={record.title} draggable={false} />
           </div>
           <div

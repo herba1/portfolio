@@ -179,6 +179,11 @@
   transform-origin: 50% 50%;
 }
 
+.hm-lifted {
+  --d: 0;
+  --rx: 1;
+}
+
 .hm-lifted img {
   display: block;
   width: 100%;
@@ -189,7 +194,24 @@
     0 0 0 1px rgb(0 0 0 / 0.04),
     0 8px 16px -8px rgb(0 0 0 / 0.2),
     0 32px 64px -24px rgb(0 0 0 / 0.36);
-  transition: box-shadow 280ms var(--hm-ease);
+  transform-origin: 50% 100%;
+  transform: translate(calc(var(--rx) * var(--d) * 8px), calc(var(--d) * -4px)) scale(calc(1 - var(--d) * 0.09));
+  filter: brightness(calc(1 - var(--d) * 0.12)) saturate(calc(1 - var(--d) * 0.1)) blur(calc(var(--d) * 0.8px));
+  transition:
+    transform 620ms var(--hm-spring),
+    filter 420ms var(--hm-ease),
+    box-shadow 420ms var(--hm-ease);
+}
+
+.hm-lifted[data-above] img {
+  transform-origin: 50% 0;
+}
+
+.hm-lifted[data-under] img {
+  box-shadow:
+    0 0 0 1px rgb(0 0 0 / 0.04),
+    0 4px 8px -4px rgb(0 0 0 / 0.16),
+    0 16px 32px -16px rgb(0 0 0 / 0.2);
 }
 
 .hm-layer[data-closing] .hm-lifted img {

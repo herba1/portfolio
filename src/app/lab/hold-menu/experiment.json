@@ -1,6 +1,6 @@
 {
   "title": "Hold Menu",
-  "description": "A shelf of records with an iOS-style long press that branches into layers. Hold a cover and it lifts free on a spring; the menu opens beside it. Add to Playlist and Share lift out of their row as a new card on top, and the level you came from sinks back behind it, scaled down, shifted and shaded, so the nesting reads as a stack: Share, then Messages, then a contact. Reach back onto a layer peeking behind and it springs forward again while the front card folds back into its row. Slide and release to choose, tap on a phone, or drive the whole stack with arrow keys, Enter and Escape.",
+  "description": "A shelf of records with an iOS-style long press that branches into layers. Hold a cover and it lifts free on a spring; the menu opens beside it. Add to Playlist and Share lift out of their row as a new card on top, and the level you came from sinks back behind it, scaled down, shifted and shaded, and the lifted cover sinks with it, shrinking, dimming and softening a step per level, so the nesting reads as a stack: Share, then Messages, then a contact. Reach back onto a layer peeking behind and it springs forward again, cover included, while the front card folds back into its row. Slide and release to choose, tap on a phone, or drive the whole stack with arrow keys, Enter and Escape.",
   "tags": [
     "Menu",
     "Gesture",
