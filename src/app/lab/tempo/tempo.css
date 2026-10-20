@@ -1,0 +1,91 @@
+@font-face {
+  font-family: "TempoArial";
+  src: url("./arimo.woff2") format("woff2");
+  font-weight: 400;
+  font-display: block;
+}
+
+.tempo {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: #040404;
+  color: #f3f2ee;
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.tempo[data-embedded] {
+  min-height: 100%;
+}
+
+.tempo-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.tempo-surface {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  cursor: default;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+}
+
+.tempo[data-embedded] .tempo-surface {
+  touch-action: pan-y;
+}
+
+.tempo-surface[data-ready] {
+  animation: tempo-in 500ms var(--ease-entrance) forwards;
+}
+
+@keyframes tempo-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.tempo-canvas {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.tempo-input {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.tempo-title,
+.tempo-live {
+  margin: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

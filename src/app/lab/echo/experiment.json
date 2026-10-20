@@ -1,0 +1,15 @@
+{
+  "title": "Echo",
+  "description": "A tape delay you can see. Every key is a soft note pitched by its letter, and its letter repeats down the screen with each echo, darker, softer and a little wobblier, exactly as the sound repeats; drag up or down anywhere to change the delay time and watch the echoes spread apart.",
+  "tags": ["Sound", "Type", "Canvas"],
+  "status": "candidate",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "intent": "One Web Audio tape echo (delay, lowpass, saturation and feedback with wow and flutter on the delay time) drives the picture: row k is echo k, printed at the moment you hear it, its opacity is the feedback gain to the k, its blur follows the darkening filter, and its baseline wavers with the same wow and flutter LFOs.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Delay_(audio_effect)#Tape_delay",
+    "https://en.wikipedia.org/wiki/Wow_and_flutter_measurement",
+    "https://developer.mozilla.org/en-US/docs/Web/API/DelayNode",
+    "herb reference board: 4090d1d5 how are you? (a line repeated, each copy decaying more)"
+  ]
+}

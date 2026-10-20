@@ -1,0 +1,15 @@
+{
+  "title": "Weight",
+  "description": "One line, you don't have to carry all of it at once, set huge in a variable grotesk while a slow wave of weight and width moves through the letters like breath, over a soft drone whose filter opens as the wave passes. Move closer and the wave bends toward you; press and hold and every letter goes heavy, let go and it exhales.",
+  "tags": ["Type", "Variable font", "Sound"],
+  "status": "candidate",
+  "createdAt": "2026-10-21T00:00:00.000Z",
+  "intent": "A breathing line whose measure never moves: every letter's weight comes from a travelling wave, and each frame a solver finds the width axis that keeps every line exactly at its resting measure, so weight flows through the letters without the line ever reflowing.",
+  "tile": { "cols": 4, "rows": 4 },
+  "sources": [
+    "https://fonts.google.com/specimen/Anybody",
+    "https://fontsource.org/fonts/anybody",
+    "https://developer.mozilla.org/en-US/docs/Web/CSS/font-variation-settings",
+    "herb reference board: b091f70f Pinterest promo (giant grotesk as the subject)"
+  ]
+}
