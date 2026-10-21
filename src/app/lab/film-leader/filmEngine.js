@@ -60,6 +60,8 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
+    // The shaders are fixed; checking each link reads the log back synchronously.
+    renderer.debug.checkShaderErrors = false;
   } catch {
     onFail?.();
     return { destroy() {}, setPrint() {}, key() {} };
@@ -541,12 +543,15 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
   let width = 1;
   let height = 1;
   let portrait = false;
+  const sizeProbe = new THREE.Vector2();
   const layoutCamera = () => {
     const rect = host.getBoundingClientRect();
     width = Math.max(1, rect.width);
     height = Math.max(1, rect.height);
     portrait = width / height < 0.9;
-    renderer.setSize(width, height, false);
+    // setSize reallocates the drawing buffer even when nothing changed.
+    const size = renderer.getSize(sizeProbe);
+    if (size.x !== width || size.y !== height) renderer.setSize(width, height, false);
     camera.aspect = width / height;
     const long = portrait ? height : width;
     const short = portrait ? width : height;

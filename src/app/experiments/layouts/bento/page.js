@@ -37,6 +37,17 @@ const AREAS = {
 };
 
 const PLACED = PIECES.filter((piece) => AREAS[piece.slug]);
+
+// Which tiles fill the first screen: the bento's top waves on a desktop, the
+// first two of the stack on a phone (which follows source order).
+const DESKTOP = "(min-width: 900px)";
+const PHONE = "(max-width: 899px)";
+function firstScreen(slug, index) {
+  const desktop = (AREAS[slug]?.wave ?? 99) < 5;
+  const phone = index < 2;
+  if (desktop && phone) return "all";
+  return desktop ? DESKTOP : phone ? PHONE : null;
+}
 const STUDIES = PIECES.filter((piece) => !AREAS[piece.slug]);
 
 export default async function BentoLayout() {
@@ -57,7 +68,7 @@ export default async function BentoLayout() {
               "--dx": AREAS[piece.slug]?.dx ?? 0,
             }}
           >
-            <Piece slug={piece.slug} data={data} title={piece.title} priority={(AREAS[piece.slug]?.wave ?? 99) < 5} />
+            <Piece slug={piece.slug} data={data} title={piece.title} priority={firstScreen(piece.slug, i)} />
           </li>
         ))}
       </ul>

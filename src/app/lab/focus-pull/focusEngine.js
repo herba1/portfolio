@@ -690,9 +690,12 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
     }
   };
 
+  // On the experiments index the first touch anywhere must not arm this
+  // tile's sound, only a touch on the tile itself.
+  const gestureScope = root.dataset.embedded !== undefined ? root : window;
   const onFirstGesture = () => {
-    window.removeEventListener("pointerdown", onFirstGesture, true);
-    window.removeEventListener("keydown", onFirstGesture, true);
+    gestureScope.removeEventListener("pointerdown", onFirstGesture, true);
+    gestureScope.removeEventListener("keydown", onFirstGesture, true);
     if (soundOn) ensureAudio()?.setEnabled(true);
   };
 
@@ -705,8 +708,8 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
   glCanvas.addEventListener("pointerup", onTextUp);
   glCanvas.addEventListener("pointermove", onTextHover);
   root.addEventListener("wheel", onWheel, { passive: false });
-  window.addEventListener("pointerdown", onFirstGesture, true);
-  window.addEventListener("keydown", onFirstGesture, true);
+  gestureScope.addEventListener("pointerdown", onFirstGesture, true);
+  gestureScope.addEventListener("keydown", onFirstGesture, true);
 
   const ro = new ResizeObserver(() => layout());
   ro.observe(root);
@@ -774,8 +777,8 @@ export function createFocus({ root, glCanvas, ring, onFail }) {
       glCanvas.removeEventListener("pointermove", onTextHover);
       glCanvas.removeEventListener("webglcontextlost", onLost);
       root.removeEventListener("wheel", onWheel);
-      window.removeEventListener("pointerdown", onFirstGesture, true);
-      window.removeEventListener("keydown", onFirstGesture, true);
+      gestureScope.removeEventListener("pointerdown", onFirstGesture, true);
+      gestureScope.removeEventListener("keydown", onFirstGesture, true);
       gl.deleteTexture(texture);
       gl.deleteTexture(stack);
       gl.deleteFramebuffer(fbo);

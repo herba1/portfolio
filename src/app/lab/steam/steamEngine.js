@@ -191,6 +191,8 @@ export async function createSteam(stage, canvas, { reducedMotion = false, lines,
   } catch {}
 
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: false, powerPreference: "high-performance" });
+  // The shaders are fixed; checking each link reads the log back synchronously.
+  renderer.debug.checkShaderErrors = false;
   renderer.setClearColor(new THREE.Color(...palette.ground.map((c) => c / 255)), 1);
 
   const flowOptions = { type: THREE.HalfFloatType, depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter };

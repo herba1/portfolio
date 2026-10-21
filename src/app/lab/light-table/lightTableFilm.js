@@ -1,3 +1,4 @@
+import yieldToMain from "@/lib/yieldToMain";
 import k01 from "./film/kodim01.jpg";
 import k02 from "./film/kodim02.jpg";
 import k06 from "./film/kodim06.jpg";
@@ -497,13 +498,22 @@ function merge(built, piece) {
   return out;
 }
 
-export async function buildPiece(piece) {
+// Each print is a few hundred milliseconds of canvas work on a phone, so the
+// drawing and the read-back run as separate tasks.
+async function draw(piece) {
   const family = await mono();
-  if (piece.kind === "strip") return merge(buildStrip(piece, await Promise.all(piece.frames.map(loadImage))), piece);
-  if (piece.kind === "negative") return merge(buildNegative(piece, await Promise.all(piece.frames.map(loadImage)), family), piece);
-  if (piece.kind === "paper" && piece.frames) return merge(buildContact(piece, await Promise.all(piece.frames.map(loadImage)), family), piece);
-  if (piece.kind === "paper") return merge(buildLabel(piece, family), piece);
+  if (piece.kind === "strip") return buildStrip(piece, await Promise.all(piece.frames.map(loadImage)));
+  if (piece.kind === "negative") return buildNegative(piece, await Promise.all(piece.frames.map(loadImage)), family);
+  if (piece.kind === "paper" && piece.frames) return buildContact(piece, await Promise.all(piece.frames.map(loadImage)), family);
+  if (piece.kind === "paper") return buildLabel(piece, family);
   const img = await loadImage(piece.src);
-  if (piece.kind === "mount") return merge(buildMount(piece, img, family), piece);
-  return merge(buildMask(piece, img), piece);
+  await yieldToMain();
+  if (piece.kind === "mount") return buildMount(piece, img, family);
+  return buildMask(piece, img);
+}
+
+export async function buildPiece(piece) {
+  const built = await draw(piece);
+  await yieldToMain();
+  return merge(built, piece);
 }

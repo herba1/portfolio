@@ -293,5 +293,8 @@ export function createFlapGL(canvas) {
     gl.getExtension("WEBGL_lose_context")?.loseContext();
   }
 
-  return { gl, setView, uploadVideo, prepare, collect, capture, draw, destroy };
+  // Free to take a new video frame: the last one has been read back.
+  const idle = () => !fence && !gl.isContextLost();
+
+  return { gl, setView, uploadVideo, idle, prepare, collect, capture, draw, destroy };
 }

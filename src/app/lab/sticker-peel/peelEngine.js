@@ -717,8 +717,11 @@ export async function createPeel(stage, canvas, options = {}) {
       const k = Math.min(aw / bw, ah / bh, 760);
       p = { k, cx: 300 + aw / 2 - k * (VIEW.minX + bw / 2), cy: 88 + ah / 2 - k * (VIEW.minY + bh / 2) };
     } else p = place(176, 40, 48);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    // Assigning a canvas its own size still reallocates and clears it.
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    if (canvas.width !== pw) canvas.width = pw;
+    if (canvas.height !== ph) canvas.height = ph;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     const c = Math.cos(ROT);
@@ -1138,12 +1141,11 @@ export async function createPeel(stage, canvas, options = {}) {
     if (slow.length < 12) return;
     const median = [...slow].sort((x, y) => x - y)[slow.length >> 1];
     slow.length = 0;
+    // Only ever steps down mid-motion; full quality returns once the paper
+    // comes to rest (see frame). Stepping back up while moving made a slow
+    // GPU flip between two sizes, reallocating the canvas every few frames.
     if (median > 45 && quality > 0.5) {
       quality = Math.max(0.5, quality * 0.7);
-      fit();
-      render();
-    } else if (median < 22 && quality < 1) {
-      quality = Math.min(1, quality / 0.7);
       fit();
       render();
     }

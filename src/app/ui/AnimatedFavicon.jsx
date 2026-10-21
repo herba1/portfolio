@@ -254,7 +254,11 @@ export default function AnimatedFavicon() {
     const headObserver = new MutationObserver(claim);
     headObserver.observe(document.head, { childList: true });
 
-    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    // A phone never shows the tab strip while the page is open, so there is
+    // nobody to watch: paint the face once and run no loop or encodes.
+    const reduced =
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ||
+      window.matchMedia?.("(hover: none)").matches;
 
     /* ── State ── */
     const spring = { x: 0, y: 0, vx: 0, vy: 0 };

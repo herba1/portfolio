@@ -1162,21 +1162,29 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     } else handled = false;
     if (handled) e.preventDefault();
   };
-  window.addEventListener("keydown", onKey);
+  // In a tile on the experiments index the page is not ours: keys and the
+  // first touch only count when they land on the player itself.
+  const inputScope = embedded ? root : window;
+  inputScope.addEventListener("keydown", onKey);
 
+  let armed = false;
   const onGesture = (e) => {
     if (e.target?.closest?.(".skin-sound")) return;
     if (e.type === "keydown" && (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab" || e.key === "Escape")) return;
+    armed = true;
     audio.arm(songPos);
   };
   const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
-  for (const type of GESTURES) window.addEventListener(type, onGesture, { capture: true, passive: true });
+  for (const type of GESTURES) inputScope.addEventListener(type, onGesture, { capture: true, passive: true });
 
   const ro = new ResizeObserver(layout);
   ro.observe(root);
   if (caption) ro.observe(caption);
   const io = new IntersectionObserver(([entry]) => {
     visible = entry.isIntersecting;
+    // A tile scrolled away stops being heard: pause the song it was playing,
+    // and leave it paused for a press of play when it comes back.
+    if (embedded && !visible && armed && player.playing && !player.paused) actions.pause();
     if (visible) wake();
   });
   io.observe(root);
@@ -1231,8 +1239,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       if (raf) cancelAnimationFrame(raf);
       ro.disconnect();
       io.disconnect();
-      window.removeEventListener("keydown", onKey);
-      for (const type of GESTURES) window.removeEventListener(type, onGesture, { capture: true });
+      inputScope.removeEventListener("keydown", onKey);
+      for (const type of GESTURES) inputScope.removeEventListener(type, onGesture, { capture: true });
       document.removeEventListener("visibilitychange", onVis);
       audio.destroy();
       desk.remove();

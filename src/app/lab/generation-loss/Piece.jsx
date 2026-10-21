@@ -41,6 +41,8 @@ export default function Piece({ embedded = false }) {
         canvas: canvasRef.current,
         ghost: ghostRef.current,
         card: cardRef.current,
+        // In a tile, only a touch on the piece arms its shutter sound.
+        gestureScope: embedded ? root : window,
         onState: (s) => setState({ generation: s.generation, bytes: s.bytes, history: s.history, playing: s.playing }),
       });
       engineRef.current = engine;
@@ -70,7 +72,7 @@ export default function Piece({ embedded = false }) {
       engine?.destroy();
       engineRef.current = null;
     };
-  }, []);
+  }, [embedded]);
 
   const toggleSound = async () => {
     const engine = engineRef.current;

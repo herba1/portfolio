@@ -1,3 +1,4 @@
+import yieldToMain from "@/lib/yieldToMain";
 import { albumById } from "@/app/lab/_music/catalog";
 
 export const CELL = 640;
@@ -416,5 +417,10 @@ function roundPatch(img) {
 
 export async function buildBadges() {
   const [revolver, mystery, pepper] = await Promise.all(BADGES.map((b) => loadImage(b.album.cover)));
-  return [enamelPin(revolver), embroideredPatch(mystery), roundPatch(pepper)];
+  // Each badge is a long bake; one per task keeps the page responsive.
+  const pin = enamelPin(revolver);
+  await yieldToMain();
+  const patch = embroideredPatch(mystery);
+  await yieldToMain();
+  return [pin, patch, roundPatch(pepper)];
 }

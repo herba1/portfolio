@@ -84,6 +84,8 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   const stride = N * 3;
 
   const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: "high-performance" });
+  // The shaders are fixed; checking each link reads the log back synchronously.
+  renderer.debug.checkShaderErrors = false;
   renderer.setClearColor(new THREE.Color(GROUND));
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;

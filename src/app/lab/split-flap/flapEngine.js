@@ -352,7 +352,9 @@ export function createBoard(stage, { embedded = false, caption = null, footer = 
     counts.fill(0);
     if (layout && renderer && video.readyState >= 2 && video.videoWidth) {
       const t = video.currentTime;
-      if (t !== lastVideoTime) {
+      // Upload only once the previous frame's read-back has landed, or a
+      // frame the GPU is still busy with gets re-uploaded every tick.
+      if (t !== lastVideoTime && renderer.idle()) {
         if (wave) updateCrop();
         renderer.uploadVideo(video);
         if (renderer.prepare(crop, layout.cols * 2, layout.rows * 2)) lastVideoTime = t;
