@@ -1,20 +1,21 @@
 {
   "title": "Crumple",
-  "description": "The Beatles' Shea Stadium setlist, or a halftone Abbey Road poster, drawn like a comic panel. Press and hold to scrunch it into a ball and drag it around; the paper animates on twos at 12 frames a second with ink outlines and screen-tone shading while your cursor stays smooth, and every crumple leaves its creases behind.",
+  "description": "A real film photo print, Kodak's sun hats on a wall, lying on the table, animated like stop-motion at 5 frames a second. Each press crushes it one step further in about a second, and the paper creases the way paper does: the first squeeze puts a few long folds across it, and each later one breaks every facet into smaller ones, photo and border alike, until it is a densely faceted ball under the lamp. Keep pressing and it opens back out a step at a time, keeping every crease it has made.",
   "tags": [
-    "Canvas",
+    "WebGL",
     "Paper",
-    "Music"
+    "Physics"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One paper mechanic in a stylised frame rate: a crumple mesh drawn as held comic frames, so the scrunch reads as drawn animation instead of a simulation that looks slightly off.",
+  "intent": "Realistic paper in discrete stages, at a stepped stop-motion frame rate. The large-scale shape is an offline crumple simulation, smoothed so it carries no grid-scale noise. The creases come from a nested crease network laid over the sheet in material space, so density is the same over photo and border. Each crush adds a finer tier of folds and keeps the coarser ones, the sheet is drawn as flat facets between those creases, and the tier it has reached is remembered when it opens. Each press is keyed as five held 200ms frames, the first drawn on the press itself, so every step lands and settles in about one second.",
   "tile": {
     "cols": 3,
     "rows": 5
   },
   "sources": [
-    "https://www.setlist.fm/setlist/the-beatles/1965/shea-stadium-flushing-ny-6bd6a6f2.html",
-    "https://en.wikipedia.org/wiki/Spider-Man:_Into_the_Spider-Verse"
+    "https://matthias-research.github.io/pages/publications/posBasedDyn.pdf",
+    "https://tympanus.net/codrops/",
+    "Print photo: kodim03 (hats), a 35mm film scan from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/), cropped square and re-encoded as webp."
   ]
 }

@@ -3,85 +3,42 @@ import { albumById } from "@/app/lab/_music/catalog";
 export const ART_PX_PER_UNIT = 1800;
 export const SLEEVE_PX = 1024;
 export const SLEEVES = ["abbey-road", "revolver", "let-it-be", "help"].map((id) => albumById(id));
-const STICKER_POOL = ["revolver", "rubber-soul", "sgt-pepper", "abbey-road", "magical-mystery-tour"];
 
 const BASE_STICKERS = [
-  {
-    id: "square",
-    shape: "rect",
-    kind: "square",
-    w: 0.25,
-    h: 0.25,
-    x: -0.29,
-    y: -0.3,
-    angle: -0.12,
-    adhesion: 0.5,
-    tear: 0.05,
-    gloss: 0.55,
-    shine: 70,
-    translucent: 0.04,
-    backing: [0.95, 0.95, 0.93],
-  },
-  {
-    id: "round",
-    shape: "circle",
-    w: 0.21,
-    h: 0.21,
-    x: 0.33,
-    y: -0.34,
-    angle: 0.22,
-    adhesion: 0.78,
-    tear: 0.35,
-    gloss: 0.18,
-    shine: 24,
-    translucent: 0.08,
-    backing: [0.97, 0.96, 0.92],
-  },
-  {
-    id: "oval",
-    shape: "ellipse",
-    w: 0.3,
-    h: 0.18,
-    x: -0.3,
-    y: 0.39,
-    angle: -0.08,
-    adhesion: 0.6,
-    tear: 0.12,
-    gloss: 0.45,
-    shine: 56,
-    translucent: 0.05,
-    backing: [0.95, 0.95, 0.93],
-  },
   {
     id: "price",
     label: "Price sticker, $4.99",
     shape: "rect",
     kind: "price",
-    w: 0.3,
-    h: 0.165,
-    x: 0.31,
-    y: 0.4,
-    angle: 0.05,
+    w: 0.36,
+    h: 0.2,
+    x: 0.25,
+    y: -0.31,
+    angle: 0.06,
     adhesion: 1,
     tear: 0.85,
     gloss: 0.08,
     shine: 14,
     translucent: 0.11,
     backing: [0.97, 0.95, 0.9],
-    rest: { corner: 2, peel: 0.08 },
+    rest: { corner: 2, peel: 0.1 },
   },
 ];
 
 export function stickersFor(sleeveId) {
-  const pool = STICKER_POOL.filter((id) => id !== sleeveId).map((id) => albumById(id));
-  let next = 0;
-  return BASE_STICKERS.map((def) => {
-    if (def.kind === "price") return def;
-    const album = pool[next % pool.length];
-    next += 1;
-    const short = album.title.startsWith("Sgt.") ? "Sgt. Pepper" : album.title;
-    return { ...def, cover: album.cover, label: `${short} sticker` };
-  });
+  const album = albumById(sleeveId) || SLEEVES[0];
+  return BASE_STICKERS.map((def) => ({ ...def, title: album.title, artist: album.artist, label: `Price sticker, ${album.title}, $4.99` }));
+}
+
+function fitFont(ctx, text, weight, size, family, room) {
+  let px = size;
+  ctx.font = `${weight} ${Math.round(px)}px ${family}`;
+  const width = ctx.measureText(text).width;
+  if (width > room) {
+    px *= room / width;
+    ctx.font = `${weight} ${Math.round(px)}px ${family}`;
+  }
+  return px;
 }
 
 function mulberry(seed) {
@@ -167,109 +124,74 @@ function roundRectPath(ctx, x, y, w, h, r) {
   ctx.closePath();
 }
 
-function drawPrice(ctx, w, h, fonts) {
+function drawPrice(ctx, w, h, fonts, def) {
   const pad = 2;
-  const radius = h * 0.06;
+  const radius = h * 0.07;
   roundRectPath(ctx, pad, pad, w - pad * 2, h - pad * 2, radius);
   ctx.save();
   ctx.clip();
-  ctx.fillStyle = "#f3eee0";
+  const paper = ctx.createLinearGradient(0, 0, w, h);
+  paper.addColorStop(0, "#f8f4ea");
+  paper.addColorStop(0.5, "#f4efe2");
+  paper.addColorStop(1, "#efe8d8");
+  ctx.fillStyle = paper;
   ctx.fillRect(0, 0, w, h);
-  const band = h * 0.32;
-  ctx.fillStyle = "#c8352d";
+  const band = h * 0.3;
+  ctx.fillStyle = "#c63a2c";
   ctx.fillRect(0, 0, w, band);
-  ctx.fillStyle = "rgba(255,255,255,0.08)";
-  ctx.fillRect(0, band - 3, w, 3);
+  ctx.fillStyle = "rgba(90,20,10,0.18)";
+  ctx.fillRect(0, band - 2, w, 2);
+  const inset = w * 0.065;
+  const title = def.title || "Abbey Road";
   ctx.fillStyle = "#fbf3e6";
-  ctx.font = `600 ${Math.round(band * 0.4)}px ${fonts.sans}`;
   ctx.textBaseline = "middle";
-  ctx.fillText("Used LP", w * 0.06, band * 0.52);
-  ctx.font = `italic ${Math.round(band * 0.34)}px ${fonts.serif}`;
   ctx.textAlign = "right";
-  ctx.fillText("2207", w * 0.95, band * 0.54);
+  const tagPx = fitFont(ctx, "Used LP", 500, band * 0.36, fonts.sans, w * 0.3);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-0.005 * tagPx).toFixed(2)}px`;
+  const tagW = ctx.measureText("Used LP").width;
+  ctx.fillText("Used LP", w - inset, band * 0.55);
   ctx.textAlign = "left";
-
-  ctx.strokeStyle = "#2a2b34";
-  ctx.lineWidth = 3;
-  const tagX = w * 0.06;
-  const tagY = band + h * 0.12;
-  ctx.strokeRect(tagX, tagY, h * 0.24, h * 0.16);
-  ctx.fillStyle = "#2a2b34";
-  ctx.font = `600 ${Math.round(h * 0.11)}px ${fonts.sans}`;
-  ctx.textBaseline = "middle";
-  ctx.textAlign = "center";
-  ctx.fillText("LP", tagX + h * 0.12, tagY + h * 0.085);
-  ctx.font = `500 ${Math.round(h * 0.095)}px ${fonts.sans}`;
-  ctx.fillText("VG+", tagX + h * 0.12, tagY + h * 0.3);
-  ctx.textAlign = "left";
+  const titlePx = fitFont(ctx, title, 600, band * 0.5, fonts.sans, w - inset * 2 - tagW - w * 0.05);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(-0.018 * titlePx).toFixed(2)}px`;
+  ctx.fillText(title, inset, band * 0.54);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
 
   ctx.save();
-  ctx.filter = "blur(0.7px)";
-  ctx.fillStyle = "rgba(24,26,40,0.92)";
-  ctx.font = `600 ${Math.round(h * 0.4)}px ${fonts.mono}`;
+  ctx.filter = "blur(0.35px)";
+  ctx.fillStyle = "rgba(40,40,52,0.78)";
+  ctx.textBaseline = "alphabetic";
+  const line = `${def.artist || "The Beatles"} · Very good +`;
+  const linePx = fitFont(ctx, line, 500, h * 0.1, fonts.sans, w - inset * 2);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = `${(0.004 * linePx).toFixed(2)}px`;
+  ctx.fillText(line, inset, band + h * 0.135);
+  if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+  ctx.restore();
+
+  ctx.save();
+  ctx.filter = "blur(0.6px)";
+  ctx.fillStyle = "rgba(28,30,46,0.9)";
+  ctx.font = `600 ${Math.round(h * 0.44)}px ${fonts.mono}`;
   ctx.textBaseline = "alphabetic";
   const glyphs = "$4.99".split("");
   const random = mulberry(41);
-  let x = w * 0.31;
+  const total = glyphs.reduce((acc, g) => acc + ctx.measureText(g).width * (g === "." ? 0.5 : 0.96), 0);
+  let x = w - inset - total;
   for (const glyph of glyphs) {
-    const jitter = (random() - 0.5) * h * 0.02;
+    const jitter = (random() - 0.5) * h * 0.018;
     const advance = ctx.measureText(glyph).width;
     const dot = glyph === ".";
+    ctx.globalAlpha = 0.82 + random() * 0.18;
     ctx.fillText(glyph, x - (dot ? advance * 0.24 : 0), h * 0.86 + jitter);
     x += advance * (dot ? 0.5 : 0.96);
   }
   ctx.restore();
 
-  ctx.strokeStyle = "rgba(255,255,255,0.75)";
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(w * 0.9, h * 0.6);
-  ctx.lineTo(w * 0.96, h * 0.72);
-  ctx.moveTo(w * 0.04, h * 0.88);
-  ctx.lineTo(w * 0.1, h * 0.98);
-  ctx.stroke();
-  speckle(ctx, w, h, 7, 0.006);
-  fibres(ctx, w, h, 9, 220, "#7a6a50");
+  speckle(ctx, w, h, 7, 0.005);
+  fibres(ctx, w, h, 9, 260, "#7a6a50");
   ctx.restore();
 }
 
-function drawCover(ctx, image, x, y, w, h) {
-  const iw = image.naturalWidth;
-  const ih = image.naturalHeight;
-  const scale = Math.max(w / iw, h / ih);
-  const sw = w / scale;
-  const sh = h / scale;
-  ctx.drawImage(image, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, w, h);
-}
-
-function shapePath(ctx, def, w, h, inset) {
-  ctx.beginPath();
-  if (def.shape === "circle" || def.shape === "ellipse") ctx.ellipse(w / 2, h / 2, w / 2 - inset, h / 2 - inset, 0, 0, Math.PI * 2);
-  else roundRectPath(ctx, inset, inset, w - inset * 2, h - inset * 2, Math.min(w, h) * 0.05);
-}
-
-function drawCoverSticker(ctx, def, image, w, h, seed) {
-  const rim = Math.min(w, h) * (def.shape === "rect" ? 0.06 : 0.05);
-  shapePath(ctx, def, w, h, 2);
-  ctx.save();
-  ctx.clip();
-  ctx.fillStyle = "#f6f3ec";
-  ctx.fillRect(0, 0, w, h);
-  shapePath(ctx, def, w, h, 2 + rim);
-  ctx.save();
-  ctx.clip();
-  if (image) drawCover(ctx, image, rim, rim, w - rim * 2, h - rim * 2);
-  ctx.restore();
-  ctx.strokeStyle = "rgba(0,0,0,0.12)";
-  ctx.lineWidth = 1.5;
-  shapePath(ctx, def, w, h, 2 + rim);
-  ctx.stroke();
-  speckle(ctx, w, h, seed, 0.003);
-  fibres(ctx, w, h, seed + 4, 60, "#7a6a50");
-  ctx.restore();
-}
-
-export function stickerArt(def, fonts, dpr, image) {
+export function stickerArt(def, fonts, dpr) {
   const scale = ART_PX_PER_UNIT * Math.min(1, Math.max(0.6, dpr / 2));
   const w = Math.round(def.w * scale);
   const h = Math.round(def.h * scale);
@@ -277,9 +199,52 @@ export function stickerArt(def, fonts, dpr, image) {
   canvas.width = w;
   canvas.height = h;
   const ctx = canvas.getContext("2d");
-  if (def.kind === "price") drawPrice(ctx, w, h, fonts);
-  else drawCoverSticker(ctx, def, image, w, h, def.id.length * 7 + 3);
+  drawPrice(ctx, w, h, fonts, def);
   return canvas;
+}
+
+function ringWear(ctx, size, seed) {
+  const random = mulberry(seed);
+  const cx = size * 0.5;
+  const cy = size * 0.5;
+  const r = size * 0.462;
+  ctx.save();
+  ctx.lineCap = "round";
+  for (let i = 0; i < 90; i += 1) {
+    const a0 = random() * Math.PI * 2;
+    const span = 0.08 + random() * 0.32;
+    const rr = r + (random() - 0.5) * size * 0.012;
+    ctx.strokeStyle = `rgba(255,250,238,${0.03 + random() * 0.07})`;
+    ctx.lineWidth = size * (0.006 + random() * 0.016);
+    ctx.beginPath();
+    ctx.arc(cx, cy, rr, a0, a0 + span);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = "rgba(255,250,238,0.05)";
+  ctx.lineWidth = size * 0.02;
+  ctx.beginPath();
+  ctx.arc(cx, cy, size * 0.17, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function edgeWear(ctx, size, seed) {
+  const random = mulberry(seed);
+  ctx.save();
+  for (let i = 0; i < 320; i += 1) {
+    const side = Math.floor(random() * 4);
+    const t = random();
+    const corner = Math.pow(Math.abs(t - 0.5) * 2, 6);
+    const depth = size * (0.001 + random() * 0.003 + corner * 0.012);
+    const along = t * size;
+    const len = size * (0.004 + random() * 0.02);
+    ctx.fillStyle = `rgba(255,252,244,${0.04 + random() * 0.12 + corner * 0.26})`;
+    if (side === 0) ctx.fillRect(along, 0, len, depth);
+    else if (side === 1) ctx.fillRect(along, size - depth, len, depth);
+    else if (side === 2) ctx.fillRect(0, along, depth, len);
+    else ctx.fillRect(size - depth, along, depth, len);
+  }
+  ctx.restore();
 }
 
 export function sleeveArt(photo) {
@@ -292,14 +257,31 @@ export function sleeveArt(photo) {
   const side = Math.min(photo.naturalWidth, photo.naturalHeight);
   const sx = (photo.naturalWidth - side) / 2;
   const sy = (photo.naturalHeight - side) / 2;
-  ctx.filter = "contrast(1.04) saturate(0.94)";
+  ctx.filter = "contrast(1.03) saturate(0.92)";
   ctx.drawImage(photo, sx, sy, side, side, 0, 0, size, size);
   ctx.filter = "none";
   ctx.globalCompositeOperation = "multiply";
   ctx.fillStyle = "#f7f1e6";
   ctx.fillRect(0, 0, size, size);
   ctx.globalCompositeOperation = "source-over";
+  const wear = document.createElement("canvas");
+  wear.width = size;
+  wear.height = size;
+  const wctx = wear.getContext("2d");
+  ringWear(wctx, size, 53);
+  const edges = document.createElement("canvas");
+  edges.width = size;
+  edges.height = size;
+  edgeWear(edges.getContext("2d"), size, 61);
+  ctx.save();
+  ctx.globalCompositeOperation = "screen";
+  ctx.filter = `blur(${Math.round(size * 0.006)}px)`;
+  ctx.drawImage(wear, 0, 0);
+  ctx.filter = "blur(1.2px)";
+  ctx.drawImage(edges, 0, 0);
+  ctx.restore();
   speckle(ctx, size, size, 31, 0.0016);
+  fibres(ctx, size, size, 37, 900, "#efe6d2");
   return canvas;
 }
 

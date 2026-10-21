@@ -77,11 +77,11 @@ void main() {
   float body = mix(texture(uMid, vUv).r, core.r, 0.5);
   float fill = clamp(body / max(solid, 1e-3), 0.0, 1.0);
   float hot = smoothstep(0.66, 0.98, fill) * solid;
-  vec3 tube = uNeon * solid * 1.1 + vec3(1.0, 0.92, 0.84) * hot * 0.5;
+  vec3 tube = uNeon * solid * 1.1 + vec3(1.0, 0.92, 0.84) * hot * 0.32;
   float cool = clamp(text.b / max(text.g, 1e-4), 0.0, 1.0);
   vec3 ghost = mix(uGhostWarm, uCool, cool) * text.g * 1.2;
 
-  vec3 color = tube + ghost + (near * 0.26 + wide * 0.1) * uGlow;
+  vec3 color = tube + ghost + (near * 0.15 + wide * 0.035) * uGlow;
   color = vec3(1.0) - exp(-color * 1.4);
   outColor = vec4(clamp(color, 0.0, 1.0), 1.0);
 }

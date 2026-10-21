@@ -8,7 +8,6 @@ export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const stageRef = useRef(null);
   const canvasRef = useRef(null);
-  const tagRef = useRef(null);
   const sliderRef = useRef(null);
   const headRef = useRef(null);
   const footRef = useRef(null);
@@ -38,7 +37,6 @@ export default function Piece({ embedded = false }) {
           box: root,
           stage: stageRef.current,
           canvas: canvasRef.current,
-          tag: tagRef.current,
           slider: sliderRef.current,
           insets,
           onReady: () => {
@@ -84,17 +82,16 @@ export default function Piece({ embedded = false }) {
         className="raking-light-stage"
         tabIndex={0}
         role="application"
-        aria-label="Three album pieces on black: an Abbey Road enamel pin, an embroidered Revolver patch and a Sgt. Pepper drum badge, lit by one lamp held low. Move the pointer or the arrow keys to move the lamp; scroll, pinch or press plus and minus to raise and lower it."
+        aria-label="Three album badges on pale cotton, lit by one lamp held low: a Revolver enamel pin with raised black nickel lines and white enamel, an embroidered Magical Mystery Tour patch with a merrowed edge, and a round embroidered Sgt. Pepper patch with a gold merrowed edge. Move the pointer or the arrow keys to move the lamp; scroll, pinch or press plus and minus to raise and lower it."
       >
         <canvas ref={canvasRef} className="raking-light-canvas" />
-        <span ref={tagRef} className="raking-light-tag" aria-hidden="true" />
       </div>
 
       {embedded ? null : (
         <header ref={headRef} className="raking-light-head">
           <h1 className="raking-light-title">Raking Light</h1>
           <p className="raking-light-lede">
-            Hold the lamp low and the stitches, enamel and <em>raised gold</em> catch it.
+            Hold the lamp low and the stitches, enamel and <em>raised metal</em> catch it.
           </p>
         </header>
       )}
@@ -103,8 +100,7 @@ export default function Piece({ embedded = false }) {
         <footer ref={footRef} className="raking-light-foot">
           <div className="raking-light-controls">
             <label className="raking-light-lamp">
-              <span className="raking-light-lamp-label">Lamp</span>
-              <span className="raking-light-lamp-scale">Low</span>
+              <span className="raking-light-lamp-label">Lamp height</span>
               <input
                 ref={sliderRef}
                 className="raking-light-range"
@@ -115,7 +111,6 @@ export default function Piece({ embedded = false }) {
                 defaultValue="448"
                 aria-label="Lamp height"
               />
-              <span className="raking-light-lamp-scale">High</span>
             </label>
           </div>
         </footer>

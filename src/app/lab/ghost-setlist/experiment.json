@@ -1,14 +1,14 @@
 {
   "title": "Ghost Setlist",
-  "description": "A Beatles set as lit lettering on pure black, laid out like a Swiss poster. Flick through it and every song leaves cooling outline afterimages behind it like a long exposure, then lands solid on its baseline.",
+  "description": "A setlist as lit lettering on pure black, each title set along a shallow arc and nothing else on the page. Flick through it and every song swings round the curve leaving cooling outline afterimages like a long exposure, then lands solid at the crest.",
   "tags": [
     "WebGL",
     "Type",
     "Music"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One kinetic type mechanic finished to the edge: a title whose speed is drawn as long-exposure ghosts, collapsing into a single lit line when it settles, on a clean typographic grid.",
+  "intent": "One kinetic type mechanic finished to the edge, with no chrome: a title whose speed is drawn as long-exposure ghosts, collapsing into a single lit line when it settles.",
   "tile": {
     "cols": 4,
     "rows": 4

@@ -58,7 +58,8 @@ export default function Piece({ embedded = false }) {
     setHolding(false);
     if (!start || start.id !== event.pointerId) return;
     if (Math.hypot(event.clientX - start.x, event.clientY - start.y) > 12) return;
-    engineRef.current?.advance();
+    const engine = engineRef.current;
+    engine?.advance(engine.toUnit(event.clientX, event.clientY));
   }, []);
 
   const handlePointerCancel = useCallback(() => {
@@ -70,7 +71,7 @@ export default function Piece({ embedded = false }) {
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     if (event.key === " " || event.key === "Enter" || event.key === "ArrowRight") {
       event.preventDefault();
-      if (!event.repeat) engineRef.current?.advance();
+      if (!event.repeat) engineRef.current?.advance([0, 0]);
     }
   }, []);
 
@@ -95,7 +96,7 @@ export default function Piece({ embedded = false }) {
         tabIndex={0}
         role="application"
         aria-roledescription="particle portrait"
-        aria-label={`${portrait.name} by the Beatles, printed in dots. Every few seconds each row of dots slides along its line to the matching tone in the next album cover. Click or press Enter to move on.`}
+        aria-label={`${portrait.name} by the Beatles, printed in dots. Every few seconds the print bursts apart into flying dots and springs back together as the next album cover. Click anywhere to burst it from that point, or press Enter.`}
         onPointerDown={handlePointerDown}
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerCancel}
@@ -110,7 +111,7 @@ export default function Piece({ embedded = false }) {
           <header className="amorph__head">
             <h1 className="amorph__title text-title-sm">Amorph</h1>
             <p className="amorph__hint text-ui-lg">
-              Every row of dots slides along its line to its tone in the next cover. Click to move on.
+              Click anywhere on the cover and it <em>bursts apart</em> into the next one.
             </p>
           </header>
 

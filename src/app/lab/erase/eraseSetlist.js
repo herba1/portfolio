@@ -4,21 +4,21 @@ export const ASPECT = SHEET_W / SHEET_H;
 export const LEDGE_DEPTH = 30;
 export const LEDGE_FRONT = 22;
 
-export const HEADER = "THE BEATLES";
-export const KEY_LABEL = "KEY";
+export const HEADER = "The Beatles";
+export const KEY_LABEL = "Key";
 
 export const SONGS = [
-  { title: "TWIST AND SHOUT", key: "D" },
-  { title: "HELP!", key: "A" },
-  { title: "TICKET TO RIDE", key: "A" },
-  { title: "YESTERDAY", key: "F" },
-  { title: "DAY TRIPPER", key: "E" },
-  { title: "NOWHERE MAN", key: "E" },
-  { title: "PAPERBACK WRITER", key: "G" },
-  { title: "TAXMAN", key: "D" },
+  { title: "Twist and Shout", key: "D" },
+  { title: "Help!", key: "A" },
+  { title: "Ticket to Ride", key: "A" },
+  { title: "Yesterday", key: "F" },
+  { title: "Day Tripper", key: "E" },
+  { title: "Nowhere Man", key: "E" },
+  { title: "Paperback Writer", key: "G" },
+  { title: "Taxman", key: "D" },
 ];
 
-export const ENCORE = { title: "HEY JUDE", key: "F" };
+export const ENCORE = { title: "Hey Jude", key: "F" };
 
 export const TITLE_MAX = 28;
 

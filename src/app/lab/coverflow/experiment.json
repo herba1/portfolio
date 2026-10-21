@@ -1,10 +1,20 @@
 {
   "title": "Cover Flow",
-  "description": "Twelve Beatles records on a black floor. Drag, scroll, scrub or use the arrow keys and the covers swing past on a capped-speed spring with their reflections; the album that lands in the middle rolls its title in letter by letter.",
-  "tags": ["Interface", "Motion", "Music"],
-  "status": "liked",
+  "description": "Records from the top songs on a black floor with their reflections. Drag, fling, scroll, scrub or use the arrow keys and the covers swing past on a critically damped, speed-capped spring that never overshoots, every sleeve turning and travelling one way only, with no swing back through the middle, a gloss sliding across each sleeve as it turns to the light. Every sleeve is spaced by its projected width, so no two ever cross or overlap, at any width or mid-swing. Click the record in the middle, or press Enter, and it flips over to its back with the tracklist, printed on the sleeve's own colour; its neighbours step aside to make room, and it turns back as you move on. Only the covers move: the title sits in a fixed two-line block with the artist pinned beneath it, and the controls and counter never shift. The page is there at once; each sleeve fades up in place as it loads, and when your live top songs arrive they crossfade over the fallback records slot by slot while the title and counter dissolve to the new values, with no pause and no jump.",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Music"
+  ],
+  "status": "shipped",
   "createdAt": "2026-10-18T12:00:00.000Z",
-  "intent": "The classic browser rebuilt as a modern component: one spring with a speed cap drives every cover, so a fling can be caught mid-flight and nothing races past faster than you can read it.",
-  "tile": { "cols": 4, "rows": 3 },
-  "sources": ["https://en.wikipedia.org/wiki/Cover_Flow", "https://github.com/nathangitter/fluid-interfaces"]
+  "intent": "The classic browser with the one move the iPod had and the web versions forgot: the centred record flips to its back. One spring per cover for the flip, one speed-capped spring for the flow, and one light that both share.",
+  "tile": {
+    "cols": 4,
+    "rows": 3
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Cover_Flow",
+    "https://github.com/nathangitter/fluid-interfaces"
+  ]
 }

@@ -8,7 +8,7 @@ import { SETLIST } from "./ghostSet";
 import "./ghost-setlist.css";
 
 const STAGE_LABEL =
-  "A Beatles setlist as lit lettering on black. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
+  "A setlist as lit lettering on black, set along an arc. Drag, scroll or flick to move through the songs; each one leaves outline afterimages while it travels the curve and lands lit at the centre. Arrow keys step one song, Home and End jump to the first and last.";
 
 const pad = (n) => String(n).padStart(2, "0");
 
@@ -86,55 +86,11 @@ export default function Piece({ embedded = false }) {
         <canvas ref={canvasRef} className="ghost-setlist-canvas" />
       </div>
 
+      {embedded ? null : <h1 className="ghost-setlist-sr">Ghost Setlist</h1>}
+
       <p className="ghost-setlist-live" aria-live="polite">
         {`${pad(active + 1)} of ${pad(SETLIST.length)}, ${song.title}${song.encore ? ", encore" : ""}`}
       </p>
-
-      {embedded ? null : (
-        <header className="ghost-setlist-head">
-          <h1 className="ghost-setlist-title">Ghost Setlist</h1>
-          <p className="ghost-setlist-lede">
-            Flick through a Beatles set. Every song leaves its <em>afterimage</em> on the way past.
-          </p>
-        </header>
-      )}
-
-      {embedded ? null : (
-        <nav className="ghost-setlist-rail" aria-label="Setlist">
-          <ol className="ghost-setlist-list">
-            {SETLIST.map((item, i) => (
-              <li key={item.id}>
-                <button
-                  type="button"
-                  className="ghost-setlist-row"
-                  aria-current={i === active ? "true" : undefined}
-                  onClick={() => engineRef.current?.select(i)}
-                >
-                  <span className="ghost-setlist-num">{pad(i + 1)}</span>
-                  <span className="ghost-setlist-name">
-                    {item.title}
-                    {item.encore ? <span className="ghost-setlist-encore">Encore</span> : null}
-                  </span>
-                  <span className="ghost-setlist-album">{item.album}</span>
-                  <span className="ghost-setlist-time">{item.time}</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-        </nav>
-      )}
-
-      {embedded ? null : (
-        <div className="ghost-setlist-count" aria-hidden="true">
-          <p className="ghost-setlist-count-num">
-            <span>{pad(active + 1)}</span>
-            <span className="ghost-setlist-count-of">/ {pad(SETLIST.length)}</span>
-          </p>
-          <p className="ghost-setlist-count-album">
-            {song.album}, {song.year}
-          </p>
-        </div>
-      )}
 
       <p className="ghost-setlist-fallback">This piece needs WebGL 2.</p>
     </Root>

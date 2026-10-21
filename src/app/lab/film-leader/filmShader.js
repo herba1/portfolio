@@ -126,9 +126,9 @@ void main() {
 
   float tileFlip = uFlip[int(tile)];
   float band = (1.0 - smoothstep(12.6, 13.2, abs(y - 17.5)));
-  float flip = tileFlip * band;
+  float flip = smoothstep(0.0, 1.0, tileFlip) * band;
   vec3 pos = positive(exposure);
-  vec3 trans = mix(neg, pos, flip);
+  vec3 trans = exp2(mix(log2(max(neg, vec3(1e-4))), log2(max(pos, vec3(1e-4))), flip));
 
   float dust = detail.g;
   trans *= 1.0 - dust * 0.85;

@@ -63,6 +63,56 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Glitches, clipping and overlaps sink a piece; fix them before anything else.
 - He wants more UI: music-app elements and common components made beautiful and trendy, a little over the top.
 
+## From batch three (54 pieces, scored 1–5, October 2026)
+
+- Scored 5: Type Bust, Film Leader, Dandelion ("beautiful computer art"), Mirrorball at full speed. Scored 4: Cover Flow, Pull Vinyl, Erase, Split Flap. One striking image-making effect still beats any app chrome.
+- Scored 1 and cut: nearly every generic music-app component (search, calendar, queue, volume dial, EQ, like burst, save ring, tab bar, toasts, share sheet, lock screen, player sheet, crossfade, wave scrub, Wrapped). A plain app component re-skinned with album art is "lame", "boring", "wack". UI pieces must carry a real visual idea.
+- Not everything is the Beatles. Using one band on every piece read as lazy; mix subjects, and a piece need not be about music at all. Visually pleasing, cool or fun is enough.
+- Reach for deeper sources: award-level sites (Awwwards, FWA, Codrops) and top component work, and rebuild their actual techniques from source rather than paraphrasing a screenshot.
+- Transitions must stay coherent: things move out of the way rather than fading, a drag becomes the type rather than two effects side by side, morphs that break on enter or exit sink a piece.
+- Don't over-decorate a liked effect: one sticker, not a pile; the paper and the type, not the typewriter's keyboard; the cassette and a pencil, not a desk.
+- Realism, slow and eased, when the subject is a physical material (Crumple: "should have kept it realistic, and slow, with ease"). The stepped Spider-Verse frame rate was a miss. Batch four refined this: realistic paper should crumple in discrete stages (each press is one more crush), not as one smooth continuous squeeze.
+- Let the UI show a quality instead of labelling it: re-theme from a cover without printing the swatches.
+
+## From batch four (50 pieces, scored 1–5, October 2026)
+
+- Scored 5: Type Bust, Dandelion, Sticker Peel. Scored 4: Film Leader, Mirrorball, Pull Vinyl, Erase, Hold Menu, Ink Drag, Iris, Raking Light, Crumple. Pieces that survived two rounds of notes keep climbing; polishing a liked piece pays better than inventing a new one.
+- Every brand-new piece except Linocut, Steam, Ribbon and Ghost Type scored 1 or 2: oil paint, caustics, rack focus, reeded glass, golden hour, lanyard, folded note, lumen print, murmuration, smear, screen glow, x-ray, wet type, slime type. Simulating a physical process or a photographic effect is not enough by itself; "Golden Hour" drew "Jesus this is bad", Lanyard "overdone and design is horrendous", Booster "too ugly".
+- Plotter's stipple mode was the one good part ("just stipple is the best"): when a piece has several modes, the best one alone usually beats the menu.
+- Music-object pieces that had become desk props (cassette, groove zoetrope, album open, type fly, shredder, booster pack) were cut. Keep a music object only when the object itself is gorgeous (a "sick" CD, a mirrorball).
+- Notes on the keepers ask for: fewer glitches, smoother transitions, real springs instead of bad eases, less chrome and fewer shadows (just the sheet and the stamper), no overlapping elements, and letting people bring their own image or place their own type.
+- Depth reads well: nested menus should stack as layers that recede as you go deeper.
+
+## From batch five (27 polished keepers, scored 1–5, October 2026)
+
+- Scored 5: Dandelion ("pretty"), Sticker Peel ("pretty asf"), Loupe ("clean"). Scored 4: Steam, Pull Vinyl, Erase, Hold Menu, Raking Light, Film Leader, Type Bust, Mirrorball, Light Table. "Pretty" and "clean" are the words that win.
+- Cut at 1–2: Plotter even as a proper stipple print, Crate even in real perspective, Ribbon, Linocut, Cover Palette ("meh"), and Ghost Type ("I don't understand it"). If the mechanic needs explaining, it has failed; a heavy rework of a weak piece rarely saves it.
+- Crumple reversed again: he now wants it "literally like 8 fps", a stepped, stop-motion frame rate. Treat stepped frame rates as a deliberate style he likes on physical-material pieces, not a bug.
+- Motion should be bold where the piece is about a transition ("doesn't feel crazy enough"), and seamless where one thing turns into another ("not smooth into the text").
+- Realism is judged hard: the compact disc "looks cheap, not realistic". A realistic object needs real reference-level materials, or it reads as cheap.
+- Depth should carry through the whole scene: when menus layer deeper, the album art should recede too. Flaps and boards need real perspective.
+- Sound design is welcome when it is genuinely good (Typewriter).
+- Layout must be stable: any shift while browsing ("layout shifty") costs a point.
+
+## From batch six (21 keepers, scored 4–5, October 2026)
+
+- Thirteen 5s, nothing below 4: the polish loop works when each round answers his notes literally. Every reworked piece from batch five rose (Amorph, Crumple, Cover Flow, Split Flap and Hold Menu went 3 or 4 to 5).
+- Nothing may pop in. Every surface that appears (a card, a list, a stage after load) arrives with motion; hard edges where content meets a loader are softened with an edge fade.
+- Pauses read as broken: a loading hold before the stage appears is as bad as a layout shift. Lerp into the final state instead of waiting and revealing.
+- Shared elements must match exactly when they return home: corner radius, size and position, or the close reads as a shift.
+- Stepped frame rate is liked, but the whole action must still be quick (about a second per crumple step).
+- Realism means real, not idealised: "no disc is this polished irl". Match the imperfect look of real objects in good photos, not a perfect render.
+- Shader pieces can go harder: stronger distortion, bloom.
+- Use real names on the objects (the sticker should say Abbey Road).
+
+## From batch seven (21 keepers, scored 4–5, October 2026)
+
+- Twelve 5s. Typewriter jumped to 5 once the sound was modelled from the machine's parts, so sound design pays when it is physical. Sticker Peel stayed 5 with the real album name printed on it.
+- Physical materials must behave consistently: crease density that differs between the photo and its border "doesn't make sense". One material, one response, and it must build up with each action.
+- No motion may reverse against the direction of travel. A cover that swings back as it passes the centre, or a spring that overshoots and returns, reads as wrong.
+- Easing should feel native: real springs, velocity carried through, no linear or stalled phases.
+- Real proportions matter: a CD is 1.2mm thick, and a slab of a disc reads as fake. Glare, bloom and lens flare on highlights are welcome on shiny objects.
+
 ## Type vibes — Herb's reference board (October 2026)
 
 Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:

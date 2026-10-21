@@ -7,6 +7,7 @@ const SUB = 3;
 const FOV = 26;
 const TILT = 0.55;
 const GRAB_Y = 7;
+const GRIP_FROM_SLOT = 40;
 const LEADER = 76;
 const SLOT = [15.2, 4.2, 0];
 const DIR_PITCH = -0.2;
@@ -23,10 +24,24 @@ function smooth(a, b, x) {
   return t * t * (3 - 2 * t);
 }
 
-function catmull(p0, p1, p2, p3, t) {
-  const t2 = t * t;
-  const t3 = t2 * t;
-  return 0.5 * (2 * p1 + (-p0 + p2) * t + (2 * p0 - 5 * p1 + 4 * p2 - p3) * t2 + (-p0 + 3 * p1 - 3 * p2 + p3) * t3);
+function knot(a, b) {
+  return Math.max(0.05, Math.sqrt(Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2])));
+}
+
+function centripetal(p0, p1, p2, p3, k, u, out) {
+  const t0 = 0;
+  const t1 = t0 + k[0];
+  const t2 = t1 + k[1];
+  const t3 = t2 + k[2];
+  const t = t1 + (t2 - t1) * u;
+  for (let c = 0; c < 3; c += 1) {
+    const a1 = ((t1 - t) * p0[c] + (t - t0) * p1[c]) / (t1 - t0);
+    const a2 = ((t2 - t) * p1[c] + (t - t1) * p2[c]) / (t2 - t1);
+    const a3 = ((t3 - t) * p2[c] + (t - t2) * p3[c]) / (t3 - t2);
+    const b1 = ((t2 - t) * a1 + (t - t0) * a2) / (t2 - t0);
+    const b2 = ((t3 - t) * a2 + (t - t1) * a3) / (t3 - t1);
+    out[c] = ((t2 - t) * b1 + (t - t1) * b2) / (t2 - t1);
+  }
 }
 
 export function framesOut(u) {
@@ -45,6 +60,8 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
   let renderer;
   try {
     renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
+    // The shaders are fixed; checking each link reads the log back synchronously.
+    renderer.debug.checkShaderErrors = false;
   } catch {
     onFail?.();
     return { destroy() {}, setPrint() {}, key() {} };
@@ -316,17 +333,30 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     rootSide[2] = dx / l;
   }
 
+  const q0 = [0, 0, 0];
+  const q1 = [0, 0, 0];
+  const q2 = [0, 0, 0];
+  const q3 = [0, 0, 0];
+  const qOut = [0, 0, 0];
+  const knots = [1, 1, 1];
   const prevW = [0, 0, 1];
+  const firstW = [0, 0, 1];
+  let hasFirst = false;
   const prevQ = [0, 1];
   const buildRibbon = () => {
     const n = sim.n;
     const P = sim.pos;
     const W = sim.side;
     let count = 0;
+    const rem = Math.max(0, sim.u - (n - 1) * SEG);
+    const snap = 1 - Math.min(1, rem / SEG);
     for (let i = 0; i < n; i += 1) {
       ctrl[count * 3] = P[i * 3];
       ctrl[count * 3 + 1] = P[i * 3 + 1];
       ctrl[count * 3 + 2] = P[i * 3 + 2];
+      if (i === n - 1) {
+        for (let c = 0; c < 3; c += 1) ctrl[count * 3 + c] += (SLOT[c] + dir[c] * rem - P[i * 3 + c]) * snap;
+      }
       ctrlW[count * 3] = W[i * 3];
       ctrlW[count * 3 + 1] = W[i * 3 + 1];
       ctrlW[count * 3 + 2] = W[i * 3 + 2];
@@ -348,13 +378,27 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       count += 1;
     }
     let s = 0;
-    const at = (k, c) => ctrl[Math.max(0, Math.min(count - 1, k)) * 3 + c];
+    const at = (k, out) => {
+      const i = Math.max(0, Math.min(count - 1, k)) * 3;
+      out[0] = ctrl[i];
+      out[1] = ctrl[i + 1];
+      out[2] = ctrl[i + 2];
+      return out;
+    };
     for (let k = 0; k < count - 1; k += 1) {
       const steps = k === count - 2 ? SUB + 1 : SUB;
+      at(k - 1, q0);
+      at(k, q1);
+      at(k + 1, q2);
+      at(k + 2, q3);
+      knots[0] = knot(q0, q1);
+      knots[1] = knot(q1, q2);
+      knots[2] = knot(q2, q3);
       for (let j = 0; j < steps; j += 1) {
         const t = j / SUB;
+        centripetal(q0, q1, q2, q3, knots, t, qOut);
         for (let c = 0; c < 3; c += 1) {
-          sampleP[s * 3 + c] = catmull(at(k - 1, c), at(k, c), at(k + 1, c), at(k + 2, c), t);
+          sampleP[s * 3 + c] = qOut[c];
           sampleW[s * 3 + c] = ctrlW[k * 3 + c] * (1 - t) + ctrlW[(k + 1) * 3 + c] * t;
         }
         sampleF[s] = ctrlF[k] * (1 - t) + ctrlF[k + 1] * t;
@@ -395,10 +439,17 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       wx /= wl;
       wy /= wl;
       wz /= wl;
-      if (i > 0 && wx * prevW[0] + wy * prevW[1] + wz * prevW[2] < 0) {
+      const refW = i > 0 ? prevW : firstW;
+      if ((i > 0 || hasFirst) && wx * refW[0] + wy * refW[1] + wz * refW[2] < 0) {
         wx = -wx;
         wy = -wy;
         wz = -wz;
+      }
+      if (i === 0) {
+        firstW[0] = wx;
+        firstW[1] = wy;
+        firstW[2] = wz;
+        hasFirst = true;
       }
       prevW[0] = wx;
       prevW[1] = wy;
@@ -406,7 +457,7 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
       const y = sampleP[i * 3 + 1];
       const f = sampleF[i];
       const lift = smooth(1.5, 14, y);
-      const twist = (0.2 * Math.sin(f * 0.019 + 0.8) + 0.08 * Math.sin(f * 0.051 + 2.1)) * lift;
+      const twist = (0.05 * Math.sin(f * 0.019 + 0.8) + 0.02 * Math.sin(f * 0.051 + 2.1)) * lift;
       const cx = ty * wz - tz * wy;
       const cy = tz * wx - tx * wz;
       const cz = tx * wy - ty * wx;
@@ -492,12 +543,15 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
   let width = 1;
   let height = 1;
   let portrait = false;
+  const sizeProbe = new THREE.Vector2();
   const layoutCamera = () => {
     const rect = host.getBoundingClientRect();
     width = Math.max(1, rect.width);
     height = Math.max(1, rect.height);
     portrait = width / height < 0.9;
-    renderer.setSize(width, height, false);
+    // setSize reallocates the drawing buffer even when nothing changed.
+    const size = renderer.getSize(sizeProbe);
+    if (size.x !== width || size.y !== height) renderer.setSize(width, height, false);
     camera.aspect = width / height;
     const long = portrait ? height : width;
     const short = portrait ? width : height;
@@ -662,22 +716,24 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
 
   const grabTarget = (now, dt) => {
     if (keyPull) {
-      if (keyPull.start === null) keyPull.start = now;
-      const t = Math.min(1, (now - keyPull.start) / keyPull.ms);
-      const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-      const x = keyPull.from[0] + (keyPull.to[0] - keyPull.from[0]) * e;
-      const z = keyPull.from[2] + (keyPull.to[2] - keyPull.from[2]) * e;
-      const y = keyPull.from[1] + (GRAB_Y - keyPull.from[1]) * Math.min(1, t * 3);
-      if (t >= 1) {
+      const w = reduced ? 30 : 9;
+      let far = 0;
+      for (let a = 0; a < 3; a += 1) {
+        const acc = w * w * (keyPull.to[a] - keyPull.p[a]) - 2 * w * keyPull.v[a];
+        keyPull.v[a] += acc * dt;
+        keyPull.p[a] += keyPull.v[a] * dt;
+        far = Math.max(far, Math.abs(keyPull.to[a] - keyPull.p[a]), Math.abs(keyPull.v[a]) * 0.05);
+      }
+      if (far < 0.3 || !sim.grab) {
         keyPull = null;
         sim.release();
         return null;
       }
-      return [x, y, z];
+      return [...keyPull.p];
     }
     if (pointer.id === null || !sim.grab) return null;
     pointer.lift = Math.min(1, pointer.lift + dt * 7);
-    const y = pointer.startY + (GRAB_Y - pointer.startY) * (1 - Math.pow(1 - pointer.lift, 3));
+    const y = pointer.startY + (Math.max(GRAB_Y, pointer.startY) - pointer.startY) * (1 - Math.pow(1 - pointer.lift, 3));
     const p = planePoint(pointer.x, pointer.y, y);
     if (!p) return null;
     return [p[0] + pointer.offset[0], y, p[2] + pointer.offset[1]];
@@ -733,7 +789,7 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     pointer.downY = e.clientY;
     pointer.moved = false;
     pointer.tile = tileAt(hit);
-    const i = Math.max(0, Math.min(sim.n - 1, Math.round(hit.f / SEG)));
+    const i = Math.max(0, Math.min(sim.n - 1, Math.round(hit.f / SEG), Math.floor((sim.u - GRIP_FROM_SLOT) / SEG)));
     const k = i * 3;
     const py = sim.pos[k + 1];
     const ground = planePoint(e.clientX, e.clientY, py);
@@ -832,11 +888,17 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     key(name) {
       if (name === "pull") {
         if (pointer.id !== null) return;
+        const step = PITCH * 1.4;
+        if (keyPull && sim.grab) {
+          keyPull.to[0] += keyPull.dir[0] * step;
+          keyPull.to[2] += keyPull.dir[1] * step;
+          wake(true);
+          return;
+        }
         const k = 0;
         const from = [sim.pos[k], sim.pos[k + 1], sim.pos[k + 2]];
-        const ref = Math.min(sim.n - 1, 8) * 3;
-        let hx = sim.pos[k] - sim.pos[ref];
-        let hz = sim.pos[k + 2] - sim.pos[ref + 2];
+        let hx = sim.pos[k] - SLOT[0];
+        let hz = sim.pos[k + 2] - SLOT[2];
         const hl = Math.hypot(hx, hz) || 1;
         hx /= hl;
         hz /= hl;
@@ -844,9 +906,10 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
           hx = 1;
           hz = 0;
         }
-        const step = PITCH * 1.4;
+        const ms = reduced ? 240 : 620;
         sim.grabAt(0, from);
-        keyPull = { start: null, ms: reduced ? 240 : 620, from, to: [from[0] + hx * step, GRAB_Y, from[2] + hz * step] };
+        if (sim.grab) sim.grab.fade = sim.grab.slack0 / (ms / 1000);
+        keyPull = { p: [...from], v: [0, 0, 0], dir: [hx, hz], to: [from[0] + hx * step, Math.max(GRAB_Y, from[1]), from[2] + hz * step] };
         wake(true);
       } else if (name === "rewind") {
         if (pointer.id !== null) return;

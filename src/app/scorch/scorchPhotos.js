@@ -31,24 +31,34 @@ function rawFuel(red, green, blue) {
   return 0.7 * (1 - lum) + 0.3 * saturation;
 }
 
-function printOf(image, focus) {
+// Where the photo sits inside a square print of `side` px: the centred
+// square crop of the source, inset by the white border.
+function framing(image, focus, side) {
   const width = image.naturalWidth;
   const height = image.naturalHeight;
   const crop = Math.min(width, height);
-  const sx = (width - crop) / 2;
-  const sy = (height - crop) * focus;
+  const inset = Math.round(side * BORDER);
+  return { sx: (width - crop) / 2, sy: (height - crop) * focus, crop, inset, inner: side - inset * 2 };
+}
+
+function paintPrint(context, image, focus, side) {
+  const { sx, sy, crop, inset, inner } = framing(image, focus, side);
+  context.fillStyle = PRINT_WHITE;
+  context.fillRect(0, 0, side, side);
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(image, sx, sy, crop, crop, inset, inset, inner, inner);
+}
+
+function printOf(image, focus) {
+  const crop = Math.min(image.naturalWidth, image.naturalHeight);
   const side = Math.min(PRINT_MAX, Math.max(PRINT_MIN, crop));
   const canvas = document.createElement("canvas");
   canvas.width = side;
   canvas.height = side;
   const context = canvas.getContext("2d");
   if (!context) return null;
-  context.fillStyle = PRINT_WHITE;
-  context.fillRect(0, 0, side, side);
-  const inset = Math.round(side * BORDER);
-  context.imageSmoothingEnabled = true;
-  context.imageSmoothingQuality = "high";
-  context.drawImage(image, sx, sy, crop, crop, inset, inset, side - inset * 2, side - inset * 2);
+  paintPrint(context, image, focus, side);
   return canvas;
 }
 
@@ -71,13 +81,15 @@ function quietCorner(blurred) {
   return best;
 }
 
-function analyse(print) {
+// The fuel map is painted straight from the decoded photo rather than from
+// the print: the print lives on the GPU, and reading it back to the CPU
+// stalls the page until the GPU has drawn everything queued before it.
+function analyse(image, focus) {
   const sample = document.createElement("canvas");
   sample.width = SAMPLE;
   sample.height = SAMPLE;
   const context = sample.getContext("2d", { willReadFrequently: true });
-  context.imageSmoothingQuality = "high";
-  context.drawImage(print, 0, 0, SAMPLE, SAMPLE);
+  paintPrint(context, image, focus, SAMPLE);
   const { data } = context.getImageData(0, 0, SAMPLE, SAMPLE);
   const raw = new Float32Array(SAMPLE * SAMPLE);
   for (let index = 0; index < raw.length; index += 1) raw[index] = rawFuel(data[index * 4], data[index * 4 + 1], data[index * 4 + 2]);
@@ -142,7 +154,7 @@ export async function loadPhoto(photo) {
   try {
     const print = printOf(image, photo.focus);
     if (!print) return null;
-    return { photo, image: print, crop: [1, 1, 0, 0], ...analyse(print) };
+    return { photo, image: print, crop: [1, 1, 0, 0], ...analyse(image, photo.focus) };
   } catch {
     return null;
   }

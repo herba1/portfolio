@@ -95,18 +95,12 @@ export const PAPER_FRAGMENT = `#version 300 es
 precision highp float;
 
 uniform vec2 uRes;
-uniform vec2 uBox;
 uniform float uDpr;
 uniform vec2 uPrint;
 uniform float uPitch;
 uniform vec2 uHead;
-uniform float uPlatenR;
-uniform float uA1;
-uniform float uRc;
 uniform vec4 uSheet;
-uniform vec2 uCarriage;
-uniform float uKnob;
-uniform float uRoll;
+uniform vec4 uFrame;
 uniform sampler2D uInk;
 uniform vec4 uInkMap;
 uniform vec2 uInkTexel;
@@ -122,51 +116,26 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-float edge(float x, float w) {
-  return smoothstep(-w, w, x);
+float edge(float x) {
+  return clamp(x + 0.5, 0.0, 1.0);
 }
 
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uDpr;
-  float d = uPrint.y - p.y;
-  float R = max(uPlatenR, 1.0);
-  float X = uHead.x + (p.x - uPrint.x) / max(uPitch, 1.0);
+  float pitch = max(uPitch, 1.0);
+  float X = uHead.x + (p.x - uPrint.x) / pitch;
+  float Y = uHead.y - (uPrint.y - p.y) / pitch;
   vec3 L = normalize(vec3(-0.66, 0.34, 0.67));
 
-  float s = 0.0;
-  float phi = 0.0;
-  float below = 0.0;
-  float sA1 = sin(uA1);
-  if (d >= 0.0) {
-    float dA = R * sA1;
-    if (d <= dA) {
-      phi = asin(clamp(d / R, 0.0, 1.0));
-      s = R * phi;
-    } else {
-      float arg = sA1 + (d - dA) / max(uRc, 1.0);
-      float ang = asin(clamp(arg, 0.0, 0.995));
-      s = R * uA1 + uRc * (ang - uA1);
-      phi = ang;
-    }
-  } else {
-    float qd = clamp(-d / R, 0.0, 0.999);
-    below = qd;
-    phi = -asin(qd);
-    s = R * phi;
-  }
-  float Y = uHead.y - s / max(uPitch, 1.0);
-
-  float fwX = max(fwidth(X), 1e-4);
-  float fwY = max(fwidth(Y), 1e-4);
-  float onWrap = 1.0 - smoothstep(0.9, 0.985, below);
-  float covX = edge(X - uSheet.x, fwX) * edge(uSheet.z - X, fwX);
-  float covY = edge(Y - uSheet.y, fwY) * edge(uSheet.w - Y, fwY);
-  float cover = covX * covY * onWrap;
+  vec2 d = p * uDpr;
+  vec4 f = uFrame * uDpr;
+  float cover = edge(d.x - f.x) * edge(f.z - d.x) * edge(d.y - f.y) * edge(f.w - d.y);
+  float onPage = step(uSheet.x, X) * step(X, uSheet.z) * step(uSheet.y, Y) * step(Y, uSheet.w);
 
   vec2 q = vec2(X, Y);
   vec4 mat = texture(uMaterial, q / uPeriod);
   float m = mat.r * 2.0 - 1.0;
-  vec2 hg = (mat.gb * 2.0 - 1.0) / 12.0;
+  vec2 hg = (mat.gb * 2.0 - 1.0) / 28.0;
   float skip = mat.a;
 
   vec2 inkUv = vec2((X - uInkMap.x) * uInkMap.z, (Y - uInkMap.y) * uInkMap.w);
@@ -175,62 +144,25 @@ void main() {
   float br = texture(uInk, inkUv + vec2(uInkTexel.x, 0.0)).g;
   float bt = texture(uInk, inkUv - vec2(0.0, uInkTexel.y)).g;
   float bb = texture(uInk, inkUv + vec2(0.0, uInkTexel.y)).g;
-  vec2 bite = vec2(br - bl, bb - bt);
+  vec2 bite = vec2(br - bl, bb - bt) * onPage;
 
-  vec3 nb = normalize(vec3(-hg.x + bite.x * 0.55, hg.y - bite.y * 0.55, 1.0));
-  float cp = cos(phi);
-  float sp = sin(phi);
-  vec3 n = normalize(vec3(nb.x, nb.y * cp + nb.z * sp, nb.z * cp - nb.y * sp));
-  float diff = max(dot(n, L), 0.0);
-  float shade = 0.44 + 0.56 * diff / L.z;
-  shade *= 1.0 - 0.1 * smoothstep(0.35, 0.8, phi);
-  shade *= 1.0 - 0.5 * smoothstep(0.3, 0.97, below);
+  vec3 n = normalize(vec3(-hg.x + bite.x * 0.55, hg.y - bite.y * 0.55, 1.0));
+  float shade = 0.5 + 0.56 * max(dot(n, L), 0.0) / L.z;
 
   vec3 cream = vec3(0.958, 0.934, 0.874);
-  vec3 albedo = cream * (1.0 + m * 0.03);
+  vec3 albedo = cream * (1.0 + m * 0.018);
   albedo *= 1.0 + (hash12(floor(p * uDpr) + 0.5) - 0.5) * 0.012;
   vec3 paperLit = albedo * shade;
 
-  float raw = ink.r + m * 0.12;
+  float raw = ink.r * onPage + m * 0.12;
   float a = smoothstep(0.05, 0.78, raw);
   a *= 1.0 - skip * 0.22;
   float heavy = smoothstep(0.82, 1.0, ink.r);
   vec3 inkCol = mix(vec3(0.135, 0.13, 0.15), vec3(0.05, 0.05, 0.065), heavy);
   vec3 inkLit = inkCol * (0.72 + 0.28 * shade);
-  vec3 paper = mix(paperLit, inkLit, clamp(a, 0.0, 1.0) * 0.96 * cover);
+  vec3 paper = mix(paperLit, inkLit, clamp(a, 0.0, 1.0) * 0.96);
 
-  float inCar = edge(X - uCarriage.x, fwX) * edge(uCarriage.y - X, fwX);
-  vec3 bg = uEnamel * 0.93;
-
-  float cylRaw = d / R;
-  float cylY = clamp(cylRaw, -1.0, 1.0);
-  float fwC = max(fwidth(cylRaw), 1e-4);
-  float onCyl = edge(1.0 - abs(cylRaw) - fwC, fwC);
-  float knobL = 1.0 - edge(X - (uCarriage.x + uKnob), fwX);
-  float knobR = edge(X - (uCarriage.y - uKnob), fwX);
-  float knob = clamp(knobL + knobR, 0.0, 1.0);
-  vec3 rubber = vec3(0.118, 0.118, 0.125);
-  vec3 bakelite = vec3(0.2, 0.2, 0.21);
-  vec3 cyl = mix(rubber, bakelite, knob);
-  float band = edge(cylY + 0.62, fwC) * (1.0 - edge(cylY + 0.48, fwC));
-  cyl = mix(cyl, vec3(0.3, 0.3, 0.31), band);
-  float turn = (asin(cylY) + uRoll) * 24.0 / 6.2832;
-  float fwT = max(fwidth(turn), 1e-3);
-  float stripe = smoothstep(0.5 - fwT, 0.5 + fwT, abs(fract(turn) - 0.5) * 2.0);
-  cyl = mix(cyl, rubber, knob * stripe);
-
-  vec3 under = mix(bg, cyl, onCyl * inCar);
-
-  float paperRow = covY * onWrap;
-  float rightGap = (X - uSheet.z) * uPitch;
-  float leftGap = (uSheet.x - X) * uPitch;
-  float drop = (1.0 - smoothstep(0.0, 26.0, rightGap)) * step(0.0, rightGap) * 0.42 + (1.0 - smoothstep(0.0, 7.0, leftGap)) * step(0.0, leftGap) * 0.16;
-  under *= 1.0 - drop * paperRow * 0.5;
-
-  vec3 col = mix(under, paper, cover);
-  float thick = (1.0 - smoothstep(0.0, 1.4, abs(X - uSheet.x) * uPitch)) * covY * onWrap;
-  col = mix(col, vec3(1.0, 0.99, 0.95) * shade, thick * 0.35);
-
+  vec3 col = mix(uEnamel, paper, cover);
   col += (hash12(gl_FragCoord.xy + 0.37) - 0.5) / 255.0;
   outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
 }

@@ -1,20 +1,21 @@
 {
   "title": "Iris",
-  "description": "Nine black anodised aperture blades over Revolver propped on a record shelf under festoon bulbs. Turn the ring from f/1.4 to f/16: the bulbs fall from nine-sided bokeh discs into 18-point stars, every stop clicks into its detent and the blades swish as they close.",
+  "description": "Nine black anodised aperture blades over a mountain stream shot on 35mm film. Turn the ring from f/1.4 to f/16: the far bank stays sharp, and the sun glinting off the water in the foreground falls from nine-sided bokeh discs into 18-point stars. Every stop clicks into its detent and the blades swish as they close. Drop, paste or pick your own image and the blades close on it, then open on your picture with its brightest points turned into discs and stars.",
   "tags": [
     "WebGL",
     "Optics",
     "Sound",
-    "Music"
+    "Photography"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
-  "intent": "One optical object finished to the edge: a real nine-blade iris whose opening is the shape of every bokeh disc and the source of every diffraction spike, with the foley of a manual lens ring.",
+  "intent": "One optical object finished to the edge: a real nine-blade iris whose opening is the shape of every bokeh disc and the source of every diffraction star, over a real film photograph, with the foley of a manual lens ring.",
   "tile": {
     "cols": 3,
     "rows": 5
   },
   "sources": [
-    "https://kinoria.studio"
+    "https://kinoria.studio",
+    "Photograph: Kodak Lossless True Color Image Suite, kodim13 (mountain stream), a 35mm film scan from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/)"
   ]
 }

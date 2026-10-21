@@ -1,11 +1,4 @@
-import { chromeMask } from "./refractorMask";
-
-const MASK_WIDTH = 320;
-const CARD_W = 660;
-const CARD_H = 924;
 const SERIF = '"Iowan Old Style", "Times New Roman", Georgia, serif';
-const INK = "#24221e";
-const ACCENT = "#8d2a1f";
 
 function pixelsOf(source, width, height) {
   const canvas = document.createElement("canvas");
@@ -21,159 +14,139 @@ function fontOf(box) {
   return getComputedStyle(box).fontFamily || "system-ui, sans-serif";
 }
 
-function stock(ctx, width, height, seedText, tone) {
-  const fill = ctx.createLinearGradient(0, 0, width, height);
-  tone.forEach((c, i) => fill.addColorStop(i / (tone.length - 1), c));
-  ctx.fillStyle = fill;
-  ctx.fillRect(0, 0, width, height);
-  const fibre = ctx.getImageData(0, 0, width, height);
-  let seed = [...seedText].reduce((s, ch) => s + ch.charCodeAt(0), 0) * 9301 + 49297;
-  const rand = () => {
-    seed = (seed * 9301 + 49297) % 233280;
-    return seed / 233280;
-  };
-  for (let k = 0; k < fibre.data.length; k += 4) {
-    const v = (rand() - 0.5) * 8;
-    fibre.data[k] += v;
-    fibre.data[k + 1] += v;
-    fibre.data[k + 2] += v * 0.9;
-  }
-  ctx.putImageData(fibre, 0, 0);
+function hsl(r, g, b) {
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const l = (max + min) / 2;
+  if (max === min) return [0, 0, l];
+  const d = max - min;
+  const s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+  let h = 0;
+  if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+  else if (max === g) h = (b - r) / d + 2;
+  else h = (r - g) / d + 4;
+  return [h / 6, s, l];
 }
 
-function fitLines(ctx, text, maxWidth, sizes, family, style) {
-  for (const size of sizes) {
-    ctx.font = `${style} ${size}px ${family}`;
-    if (ctx.measureText(text).width <= maxWidth) return { size, lines: [text] };
+function teamColour(image) {
+  const n = 28;
+  const data = pixelsOf(image, n, n);
+  const bins = new Float32Array(24);
+  const sat = new Float32Array(24);
+  for (let k = 0; k < data.length; k += 4) {
+    const [h, s, l] = hsl(data[k] / 255, data[k + 1] / 255, data[k + 2] / 255);
+    if (s < 0.22 || l < 0.12 || l > 0.86) continue;
+    const bin = Math.floor(h * 24) % 24;
+    const w = s * (1 - Math.abs(l - 0.5));
+    bins[bin] += w;
+    sat[bin] += s * w;
   }
-  const size = sizes[sizes.length - 1];
-  ctx.font = `${style} ${size}px ${family}`;
-  const words = text.split(" ");
-  const lines = [];
-  let line = "";
-  for (const word of words) {
-    const next = line ? `${line} ${word}` : word;
-    if (ctx.measureText(next).width > maxWidth && line) {
-      lines.push(line);
-      line = word;
-    } else line = next;
+  let best = -1;
+  let score = 0;
+  for (let i = 0; i < 24; i += 1) {
+    const v = bins[(i + 23) % 24] * 0.5 + bins[i] + bins[(i + 1) % 24] * 0.5;
+    if (v > score) {
+      score = v;
+      best = i;
+    }
   }
-  if (line) lines.push(line);
-  return { size, lines: lines.slice(0, 2) };
+  if (best < 0 || score < (n * n) / 60) return { h: 30, s: 6, deep: "hsl(30 6% 9%)", mid: "hsl(30 4% 30%)", wash: "hsl(30 8% 88%)" };
+  const h = Math.round(((best + 0.5) / 24) * 360);
+  const s = Math.round(Math.min(0.62, Math.max(0.3, sat[best] / Math.max(bins[best], 1e-4))) * 100);
+  return { h, s, deep: `hsl(${h} ${s}% 15%)`, mid: `hsl(${h} ${Math.round(s * 0.8)}% 34%)`, wash: `hsl(${h} ${Math.round(s * 0.6)}% 86%)` };
 }
 
-function coverCrop(image) {
-  const w = image.naturalWidth || image.width;
-  const h = image.naturalHeight || image.height;
-  const side = Math.min(w, h);
-  return [(w - side) / 2, (h - side) / 2, side, side];
+const SIZE = 1024;
+const C = SIZE / 2;
+const PRINT_IN = 0.36;
+const PRINT_OUT = 0.975;
+const BAND_IN = 0.855;
+
+function annulus(ctx, r0, r1) {
+  ctx.beginPath();
+  ctx.arc(C, C, r1 * C, 0, Math.PI * 2);
+  ctx.arc(C, C, r0 * C, 0, Math.PI * 2, true);
+  ctx.closePath();
 }
 
-function drawFront(card, image, box) {
+function ringText(ctx, text, radius, start) {
+  let a = start;
+  ctx.save();
+  ctx.translate(C, C);
+  for (const ch of text) {
+    const w = ctx.measureText(ch).width;
+    a += w / 2 / radius;
+    ctx.save();
+    ctx.rotate(a);
+    ctx.fillText(ch, 0, -radius);
+    ctx.restore();
+    a += w / 2 / radius;
+  }
+  ctx.restore();
+  return a;
+}
+
+function fitRing(ctx, parts, radius, span) {
+  const room = radius * span;
+  const out = [];
+  let used = 0;
+  for (const part of parts) {
+    const w = ctx.measureText(part).width;
+    if (used + w > room) break;
+    out.push(part);
+    used += w;
+  }
+  return out.join("");
+}
+
+function drawLabel(card, image, box, team) {
   const canvas = document.createElement("canvas");
-  canvas.width = CARD_W;
-  canvas.height = CARD_H;
+  canvas.width = SIZE;
+  canvas.height = SIZE;
   const ctx = canvas.getContext("2d");
-  const sans = fontOf(box);
-  stock(ctx, CARD_W, CARD_H, card.key, ["#efebe2", "#ebe6dc", "#e7e1d6", "#e3ddd0"]);
-  const m = 36;
-  const side = CARD_W - m * 2;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(image, ...coverCrop(image), m, m, side, side);
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = 3;
-  ctx.strokeRect(m - 1.5, m - 1.5, side + 3, side + 3);
-  const left = m + 4;
-  const right = CARD_W - m - 4;
-  ctx.fillStyle = INK;
-  ctx.textBaseline = "alphabetic";
-  const title = fitLines(ctx, card.title, right - left, [56, 50, 44, 40], SERIF, "italic 400");
-  const top = m + side + 20 + title.size;
-  title.lines.forEach((line, i) => ctx.fillText(line, left, top + i * title.size * 1.04));
-  const after = top + (title.lines.length - 1) * title.size * 1.04;
-  ctx.font = `500 26px ${sans}`;
-  ctx.fillText(card.artist, left, after + 44);
-  if (card.year) {
-    ctx.textAlign = "right";
-    ctx.fillText(String(card.year), right, after + 44);
-    ctx.textAlign = "left";
-  }
-  ctx.fillStyle = ACCENT;
-  ctx.fillRect(left, CARD_H - m - 50, 56, 4);
-  ctx.fillStyle = INK;
-  ctx.font = `500 22px ${sans}`;
-  ctx.textAlign = "right";
-  ctx.fillText(`${String(card.number).padStart(2, "0")} / ${String(card.count).padStart(2, "0")}`, right, CARD_H - m - 22);
-  ctx.textAlign = "left";
-  ctx.font = `italic 400 30px ${SERIF}`;
-  ctx.fillText("Refractor", left, CARD_H - m - 18);
-  return canvas;
-}
-
-function drawBack(card, box) {
-  const canvas = document.createElement("canvas");
-  canvas.width = CARD_W;
-  canvas.height = CARD_H;
-  const ctx = canvas.getContext("2d");
   const sans = fontOf(box);
-  stock(ctx, CARD_W, CARD_H, `${card.key}-back`, ["#e9e4d8", "#e4dfd2", "#dfd9cb", "#d9d2c3"]);
-  const m = CARD_W * 0.07;
-  ctx.strokeStyle = INK;
-  ctx.lineWidth = 2;
-  ctx.strokeRect(m, m, CARD_W - m * 2, CARD_H - m * 2);
-  ctx.lineWidth = 1;
-  ctx.strokeRect(m + 8, m + 8, CARD_W - m * 2 - 16, CARD_H - m * 2 - 16);
-  const left = m + 36;
-  const right = CARD_W - left;
-  ctx.fillStyle = INK;
-  ctx.textBaseline = "alphabetic";
-  ctx.font = `500 22px ${sans}`;
-  ctx.fillText(card.artist, left, m + 66);
-  if (card.year) {
-    ctx.textAlign = "right";
-    ctx.fillText(String(card.year), right, m + 66);
-    ctx.textAlign = "left";
-  }
-  const title = fitLines(ctx, card.title, right - left, [64, 56, 48, 42], SERIF, "italic 400");
-  const top = m + 120 + title.size * 0.6;
-  title.lines.forEach((line, i) => ctx.fillText(line, left, top + i * title.size * 1.04));
-  const ruleY = top + (title.lines.length - 1) * title.size * 1.04 + 36;
-  ctx.fillStyle = ACCENT;
-  ctx.fillRect(left, ruleY, 64, 4);
-  ctx.fillStyle = INK;
-  ctx.font = `500 25px ${sans}`;
-  const rows = card.tracks.slice(0, 7);
-  rows.forEach((name, i) => {
-    const y = ruleY + 72 + i * 50;
-    ctx.textAlign = "left";
-    ctx.fillText(String(i + 1).padStart(2, "0"), left, y);
-    let label = name;
-    while (ctx.measureText(label).width > right - left - 60 && label.length > 4) label = `${label.slice(0, -2)}…`;
-    ctx.fillText(label, left + 52, y);
-    ctx.fillRect(left, y + 16, right - left, 1);
-  });
-  ctx.font = `italic 400 30px ${SERIF}`;
+  ctx.save();
+  annulus(ctx, PRINT_IN, PRINT_OUT);
+  ctx.clip();
+  const iw = image.naturalWidth || image.width;
+  const ih = image.naturalHeight || image.height;
+  const side = Math.min(iw, ih);
+  const span = PRINT_OUT * C * 2;
+  ctx.drawImage(image, (iw - side) / 2, (ih - side) / 2, side, side, C - span / 2, C - span / 2, span, span);
+  annulus(ctx, BAND_IN, PRINT_OUT);
+  ctx.fillStyle = team.deep;
+  ctx.fill();
+  ctx.fillStyle = "#f6f3ec";
+  annulus(ctx, BAND_IN - 0.006, BAND_IN);
+  ctx.fill();
+  annulus(ctx, PRINT_IN, PRINT_IN + 0.03);
+  ctx.fill();
+  ctx.restore();
+
+  const radius = ((BAND_IN + PRINT_OUT) / 2) * C;
+  ctx.fillStyle = "#f6f3ec";
   ctx.textAlign = "center";
-  ctx.fillText("Refractor", CARD_W / 2, CARD_H - m - 52);
-  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.font = `600 27px ${sans}`;
+  const head = `${card.title}`;
+  const end = ringText(ctx, head, radius, -Math.PI * 0.32);
+  ctx.font = `500 22px ${sans}`;
+  const meta = `  ·  ${card.artist}${card.year ? `  ·  ${card.year}` : ""}`;
+  const after = ringText(ctx, meta, radius, end);
+  const tracks = card.tracks.map((name, i) => `     ${i + 1}  ${name}`);
+  const room = Math.PI * 2 - 0.08 - (after - -Math.PI * 0.32);
+  const list = fitRing(ctx, tracks, radius, room);
+  if (list) ringText(ctx, list, radius, after);
   return canvas;
 }
 
 export function prepareCard(card, image, box) {
-  const front = drawFront(card, image, box);
-  const aspect = CARD_W / CARD_H;
-  const width = MASK_WIDTH;
-  const height = Math.round(width / aspect);
-  const pixels = pixelsOf(front, width, height);
-  const inset = 36 / CARD_W;
-  const artBox = [inset, 36 / CARD_H, 1 - inset, (CARD_W - 36) / CARD_H];
-  const mask = chromeMask(pixels, width, height, { artBox });
+  const team = teamColour(image);
+  const seed = [...card.key].reduce((s, ch) => s + ch.charCodeAt(0), 0);
   return {
-    aspect,
-    front,
-    mask: { data: mask.data, width, height },
-    art: mask.art,
-    paper: mask.paper,
-    back: drawBack(card, box),
+    aspect: 1,
+    label: drawLabel(card, image, box, team),
+    data: 0.72 + ((seed * 37) % 100) / 400,
   };
 }

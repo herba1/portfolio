@@ -1,123 +1,52 @@
-import { albumById } from "@/app/lab/_music/catalog";
+import yieldToMain from "@/lib/yieldToMain";
+import k01 from "./film/kodim01.jpg";
+import k02 from "./film/kodim02.jpg";
+import k06 from "./film/kodim06.jpg";
+import k07 from "./film/kodim07.jpg";
+import k08 from "./film/kodim08.jpg";
+import k09 from "./film/kodim09.jpg";
+import k11 from "./film/kodim11.jpg";
+import k12 from "./film/kodim12.jpg";
+import k13 from "./film/kodim13.jpg";
+import k14 from "./film/kodim14.jpg";
+import k15 from "./film/kodim15.jpg";
+import k16 from "./film/kodim16.jpg";
+import k17 from "./film/kodim17.jpg";
+import k20 from "./film/kodim20.jpg";
+import k21 from "./film/kodim21.jpg";
+import k22 from "./film/kodim22.jpg";
+import k23 from "./film/kodim23.jpg";
+import k24 from "./film/kodim24.jpg";
 
-export const TEXEL_MM = 13;
+export const TEXEL_MM = 11;
 export const ATLAS_W = 4096;
 export const ATLAS_H = 2048;
-export const PITCH = 38;
-export const FRAME_W = 36;
-export const FRAME_H = 24;
-export const FILM_W = 35;
-export const MOUNT = 50;
+export const LOUPE_R = 21;
+export const LOUPE_MAG = 3.6;
 
-const KIND_CODE = { slideLand: 0, slidePort: 1, neg: 2, chrome: 3 };
+const MF_FRAME = 56;
+const MF_PITCH = 62;
+const MF_FILM = 62;
+const MASK = 66;
+const MOUNT = 50;
+const NEG_PITCH = 38;
+const NEG_FILM = 35;
 
-const stripLength = (n) => n * PITCH + 2;
-
-const cover = (id) => albumById(id).cover;
+const KIND_CODE = { mask: 0, mount: 1, negative: 2, strip: 3, paper: 4 };
 
 export const PIECES = [
-  {
-    key: "negA",
-    kind: "neg",
-    seed: 0.31,
-    first: 11,
-    stock: "HB 400-5",
-    at: [8, 8],
-    frames: [
-      { src: cover("with-the-beatles"), crop: [0, 0.2, 1, 0.667] },
-      { src: cover("beatles-for-sale"), crop: [0, 0.08, 1, 0.667] },
-      { src: cover("a-hard-days-night"), crop: [0, 0.22, 1, 0.667] },
-      { src: cover("please-please-me"), crop: [0.12, 0.1, 0.6, 0.9], turn: true },
-    ],
-  },
-  {
-    key: "negB",
-    kind: "neg",
-    seed: 0.67,
-    first: 23,
-    stock: "HB 400-5",
-    at: [2052, 8],
-    frames: [
-      { src: cover("let-it-be"), crop: [0.06, 0.1, 0.94, 0.627] },
-      { src: cover("help"), crop: [0, 0.3, 1, 0.667] },
-      { src: cover("rubber-soul"), crop: [0.3, 0, 0.667, 1], turn: true },
-      { src: cover("revolver"), crop: [0, 0.33, 1, 0.667] },
-    ],
-  },
-  {
-    key: "chrome",
-    kind: "chrome",
-    seed: 0.13,
-    first: 7,
-    stock: "HB 100 E",
-    at: [8, 479],
-    frames: [
-      { src: cover("magical-mystery-tour"), crop: [0, 0.18, 1, 0.667] },
-      { src: cover("beatles-for-sale"), crop: [0.3, 0, 0.667, 1], turn: true },
-      { src: cover("please-please-me"), crop: [0, 0.02, 1, 0.667] },
-    ],
-  },
-  {
-    key: "hard",
-    kind: "slideLand",
-    seed: 0.52,
-    at: [1558, 479],
-    src: cover("a-hard-days-night"),
-    crop: [0, 0.2, 1, 0.667],
-    mount: "card",
-    paper: [233, 229, 219],
-    ink: [34, 46, 112],
-    top: "hard day · stills",
-    bottom: "03 · 64",
-    dot: true,
-  },
-  {
-    key: "apple",
-    kind: "slideLand",
-    seed: 0.84,
-    at: [2224, 479],
-    src: cover("let-it-be"),
-    crop: [0.06, 0.08, 0.94, 0.627],
-    mount: "plastic",
-    paper: [168, 170, 168],
-    ink: [24, 24, 26],
-    top: "savile row",
-    bottom: "no. 14",
-  },
-  {
-    key: "soul",
-    kind: "slidePort",
-    seed: 0.21,
-    at: [2890, 479],
-    src: cover("rubber-soul"),
-    crop: [0.2, 0, 0.667, 1],
-    mount: "card",
-    paper: [229, 222, 204],
-    ink: [28, 28, 32],
-    top: "soul",
-    bottom: "dup",
-  },
-  {
-    key: "mystery",
-    kind: "slidePort",
-    seed: 0.93,
-    at: [8, 1145],
-    src: cover("magical-mystery-tour"),
-    crop: [0.17, 0, 0.667, 1],
-    mount: "card",
-    paper: [236, 233, 226],
-    ink: [36, 52, 128],
-    top: "mystery",
-    bottom: "sandwich?",
-    dot: true,
-  },
+  { key: "contact", kind: "paper", seed: 0.17, at: [8, 8], w: 128, h: 122, frames: [k01, k08, k24, k13, k21, k02, k07, k23, k15].map((i) => i.src) },
+  { key: "roll", kind: "strip", seed: 0.31, at: [1424, 8], w: 2 * MF_PITCH + 4, h: MF_FILM, frames: [k14, k20].map((i) => i.src) },
+  { key: "statue", kind: "mask", seed: 0.84, at: [2840, 8], w: MASK, h: MASK, src: k17.src, win: [MF_FRAME / 2, MF_FRAME / 2] },
+  { key: "barn", kind: "mount", seed: 0.52, at: [1424, 698], w: MOUNT, h: MOUNT, src: k22.src, win: [17.5, 11.5], number: "14" },
+  { key: "regatta", kind: "mount", seed: 0.66, at: [1982, 698], w: MOUNT, h: MOUNT, src: k09.src, win: [11.5, 17.5], number: "22" },
+  { key: "beach", kind: "negative", seed: 0.21, at: [1424, 1256], w: 4 * NEG_PITCH + 6, h: NEG_FILM, frames: [k12, k06, k11, k16].map((i) => i.src) },
+  { key: "label", kind: "paper", seed: 0.47, at: [8, 1358], w: 54, h: 13, text: "Roll 12, the coast" },
 ];
 
 for (const piece of PIECES) {
-  const strip = piece.kind === "neg" || piece.kind === "chrome";
   piece.code = KIND_CODE[piece.kind];
-  piece.w = strip ? stripLength(piece.frames.length) : MOUNT;
-  piece.h = strip ? FILM_W : MOUNT;
+  piece.win = piece.win || [0, 0];
   piece.px = [Math.round(piece.w * TEXEL_MM), Math.round(piece.h * TEXEL_MM)];
   piece.rect = [
     piece.at[0] / ATLAS_W,
@@ -130,45 +59,31 @@ for (const piece of PIECES) {
 export const LAYOUTS = [
   {
     key: "wide",
-    w: 320,
-    h: 200,
+    box: [0, 0, 336, 196],
     pieces: {
-      negA: [116, 40, -1.6],
-      negB: [214, 170, 1.8],
-      chrome: [276, 98, 87],
-      hard: [48, 128, -7],
-      apple: [190, 104, 4],
-      soul: [114, 127, -6],
-      mystery: [119, 123, 2.5],
+      contact: [70, 68, -2.4],
+      roll: [214, 40, 1.2],
+      beach: [218, 104, -1.6],
+      statue: [298, 156, 3.4],
+      barn: [158, 160, -5],
+      regatta: [222, 166, 4],
+      label: [108, 130, -3.5],
     },
-  },
-  {
-    key: "square",
-    w: 244,
-    h: 232,
-    pieces: {
-      negA: [98, 36, -1.6],
-      negB: [116, 202, 1.6],
-      chrome: [214, 116, 88],
-      hard: [42, 104, -7],
-      apple: [152, 96, 4],
-      soul: [95, 145, -6],
-      mystery: [100, 141, 2.5],
-    },
+    loupe: [223, 165],
   },
   {
     key: "tall",
-    w: 180,
-    h: 296,
+    box: [0, 0, 186, 322],
     pieces: {
-      negA: [90, 34, -1.6],
-      negB: [90, 262, 1.6],
-      chrome: [146, 168, 86],
-      hard: [38, 94, -7],
-      apple: [128, 90, 5],
-      soul: [63, 167, -6],
-      mystery: [68, 163, 2.5],
+      contact: [68, 64, -2],
+      roll: [80, 206, 1.5],
+      beach: [94, 148, -1.4],
+      statue: [148, 286, 3],
+      barn: [38, 276, -5],
+      regatta: [94, 290, 4],
+      label: [160, 44, 88],
     },
+    loupe: [38, 274],
   },
 ];
 
@@ -193,48 +108,57 @@ function loadImage(src) {
   });
 }
 
+let monoFamily = null;
+
+async function mono() {
+  if (monoFamily) return monoFamily;
+  const probe = document.createElement("span");
+  probe.style.fontFamily = "var(--font-mono)";
+  document.body.appendChild(probe);
+  monoFamily = getComputedStyle(probe).fontFamily || "monospace";
+  probe.remove();
+  try {
+    await document.fonts.load(`500 24px ${monoFamily}`);
+  } catch {}
+  return monoFamily;
+}
+
+function canvas2d(w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  return c.getContext("2d", { willReadFrequently: true });
+}
+
 function roundRect(ctx, x, y, w, h, r) {
   ctx.beginPath();
   ctx.roundRect(x, y, w, h, r);
 }
 
-function drawCover(ctx, img, crop, x, y, w, h, turn) {
-  const [cx, cy, cw, ch] = crop || [0, 0, 1, 1];
-  const iw = img.naturalWidth * cw;
-  const ih = img.naturalHeight * ch;
-  const ox = img.naturalWidth * cx;
-  const oy = img.naturalHeight * cy;
-  const tw = turn ? h : w;
-  const th = turn ? w : h;
-  const scale = Math.max(tw / iw, th / ih);
-  const sw = tw / scale;
-  const sh = th / scale;
-  const sx = ox + (iw - sw) / 2;
-  const sy = oy + (ih - sh) / 2;
-  ctx.save();
-  ctx.translate(x + w / 2, y + h / 2);
-  if (turn) ctx.rotate(-Math.PI / 2);
-  ctx.drawImage(img, sx, sy, sw, sh, -tw / 2, -th / 2, tw, th);
-  ctx.restore();
+function drawCover(ctx, img, x, y, w, h) {
+  const iw = img.naturalWidth || img.width;
+  const ih = img.naturalHeight || img.height;
+  const s = Math.max(w / iw, h / ih);
+  const sw = w / s;
+  const sh = h / s;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(img, (iw - sw) / 2, (ih - sh) / 2, sw, sh, x, y, w, h);
 }
 
-function grade(ctx, x, y, w, h, kind) {
+function grade(ctx, x, y, w, h) {
   const data = ctx.getImageData(x, y, w, h);
   const d = data.data;
-  const chrome = kind !== "neg";
   for (let i = 0; i < d.length; i += 4) {
     let r = d[i] / 255;
     let g = d[i + 1] / 255;
     let b = d[i + 2] / 255;
     const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    const sat = chrome ? 1.18 : 1.06;
-    r = l + (r - l) * sat;
-    g = l + (g - l) * sat;
-    b = l + (b - l) * sat;
+    r = l + (r - l) * 1.16;
+    g = l + (g - l) * 1.16;
+    b = l + (b - l) * 1.16;
     const curve = (v) => {
       const c = Math.min(1, Math.max(0, v));
-      const s = c * c * (3 - 2 * c);
-      return chrome ? c + (s - c) * 0.42 : c + (s - c) * 0.18;
+      return c + (c * c * (3 - 2 * c) - c) * 0.36;
     };
     d[i] = curve(r) * 255;
     d[i + 1] = curve(g) * 255;
@@ -243,246 +167,321 @@ function grade(ctx, x, y, w, h, kind) {
   ctx.putImageData(data, x, y);
 }
 
-function handFamily(sans) {
-  return `"Noteworthy", "Bradley Hand", "Segoe Print", "Ink Free", ${sans}`;
-}
-
-function drawHand(ctx, text, x, y, size, color, seed, family, align = "center") {
+function speckle(ctx, w, h, seed, amount) {
   const rand = rng(seed);
-  ctx.save();
-  ctx.font = `360 ${size}px ${family}`;
-  ctx.textBaseline = "alphabetic";
-  const chars = [...text];
-  const widths = chars.map((c) => ctx.measureText(c).width * 0.94);
-  const total = widths.reduce((a, b) => a + b, 0);
-  let cursor = align === "center" ? x - total / 2 : x;
-  const drift = (rand() - 0.5) * 0.05;
-  chars.forEach((c, i) => {
-    const jitterY = (rand() - 0.5) * size * 0.08 + i * drift * size * 0.2;
-    const rot = (rand() - 0.5) * 0.16;
-    const scale = 1 + (rand() - 0.5) * 0.1;
-    ctx.save();
-    ctx.translate(cursor + widths[i] / 2, y + jitterY);
-    ctx.rotate(rot);
-    ctx.transform(1, 0, -0.24, 1, 0, 0);
-    ctx.scale(scale, scale);
-    ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.9)`;
-    ctx.fillText(c, -widths[i] / 2, 0);
-    ctx.fillStyle = `rgba(${color[0]}, ${color[1]}, ${color[2]}, 0.35)`;
-    ctx.fillText(c, -widths[i] / 2 + size * 0.025, size * 0.02);
-    ctx.restore();
-    cursor += widths[i] + (rand() - 0.5) * size * 0.05;
-  });
-  ctx.restore();
-}
-
-function paperTexture(ctx, w, h, base, seed, fibre) {
-  const rand = rng(seed);
-  ctx.fillStyle = `rgb(${base[0]}, ${base[1]}, ${base[2]})`;
-  ctx.fillRect(0, 0, w, h);
   const data = ctx.getImageData(0, 0, w, h);
   const d = data.data;
   for (let i = 0; i < d.length; i += 4) {
-    const n = (rand() - 0.5) * 9;
+    const n = (rand() - 0.5) * amount;
     d[i] += n;
     d[i + 1] += n;
     d[i + 2] += n;
   }
   ctx.putImageData(data, 0, 0);
-  if (!fibre) return;
-  ctx.lineCap = "round";
-  for (let i = 0; i < 700; i += 1) {
-    const x = rand() * w;
-    const y = rand() * h;
-    const len = (0.4 + rand() * 1.6) * TEXEL_MM;
-    const a = rand() * Math.PI;
-    const dark = rand() < 0.5;
-    ctx.strokeStyle = dark ? "rgba(90, 80, 60, 0.07)" : "rgba(255, 255, 250, 0.1)";
-    ctx.lineWidth = 0.6 + rand() * 0.8;
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.quadraticCurveTo(x + Math.cos(a + 0.6) * len * 0.5, y + Math.sin(a + 0.6) * len * 0.5, x + Math.cos(a) * len, y + Math.sin(a) * len);
-    ctx.stroke();
-  }
 }
 
-function buildSlide(piece, img, fonts) {
-  const [w, h] = piece.px;
-  const k = TEXEL_MM;
-  const color = document.createElement("canvas");
-  color.width = w;
-  color.height = h;
-  const ctx = color.getContext("2d", { willReadFrequently: true });
-  const mask = document.createElement("canvas");
-  mask.width = w;
-  mask.height = h;
-  const mctx = mask.getContext("2d");
-  const portrait = piece.kind === "slidePort";
-  const winW = (portrait ? 23 : 34.2) * k;
-  const winH = (portrait ? 34.2 : 23) * k;
-  const filmW = (portrait ? FRAME_H : FRAME_W) * k;
-  const filmH = (portrait ? FRAME_W : FRAME_H) * k;
-  const wx = (w - winW) / 2;
-  const wy = (h - winH) / 2;
-
-  paperTexture(ctx, w, h, piece.paper, piece.seed, piece.mount === "card");
-
-  if (piece.mount === "plastic") {
-    const g = ctx.createLinearGradient(0, 0, w, h);
-    g.addColorStop(0, "rgba(255,255,255,0.08)");
-    g.addColorStop(0.5, "rgba(255,255,255,0)");
-    g.addColorStop(1, "rgba(0,0,0,0.08)");
-    ctx.fillStyle = g;
-    ctx.fillRect(0, 0, w, h);
-    ctx.strokeStyle = "rgba(0,0,0,0.22)";
-    ctx.lineWidth = 0.18 * k;
-    roundRect(ctx, 1.1 * k, 1.1 * k, w - 2.2 * k, h - 2.2 * k, 1.2 * k);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.28)";
-    ctx.lineWidth = 0.12 * k;
-    roundRect(ctx, 1.35 * k, 1.35 * k, w - 2.7 * k, h - 2.7 * k, 1.1 * k);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(0,0,0,0.18)";
-    ctx.lineWidth = 0.6 * k;
-    roundRect(ctx, wx - 0.9 * k, wy - 0.9 * k, winW + 1.8 * k, winH + 1.8 * k, 1.2 * k);
-    ctx.stroke();
-  } else {
-    ctx.strokeStyle = "rgba(60,50,30,0.16)";
-    ctx.lineWidth = 0.5 * k;
-    roundRect(ctx, wx - 0.5 * k, wy - 0.5 * k, winW + k, winH + k, 1 * k);
-    ctx.stroke();
-    ctx.strokeStyle = "rgba(255,255,255,0.4)";
-    ctx.lineWidth = 0.25 * k;
-    roundRect(ctx, wx - 1.05 * k, wy - 1.05 * k, winW + 2.1 * k, winH + 2.1 * k, 1.3 * k);
-    ctx.stroke();
+function opaqueAlpha(w, h, radius, holes) {
+  const m = canvas2d(w, h);
+  m.fillStyle = "rgb(0,0,0)";
+  m.fillRect(0, 0, w, h);
+  m.fillStyle = "rgb(128,128,128)";
+  roundRect(m, 0, 0, w, h, radius);
+  m.fill();
+  if (holes) {
+    m.fillStyle = "rgb(255,255,255)";
+    holes(m);
   }
-
-  const marginTop = wy;
-  const labelSize = Math.min(marginTop * 0.5, 4.2 * k);
-  const labelInk = piece.ink;
-  if (piece.mount === "plastic") {
-    const lw = 26 * k;
-    const lh = Math.min(marginTop * 0.62, 8 * k);
-    const ly = (marginTop - lh) / 2 + 0.3 * k;
-    ctx.save();
-    ctx.translate(w / 2, ly + lh / 2);
-    ctx.rotate(-0.025);
-    ctx.fillStyle = "rgb(240, 236, 226)";
-    roundRect(ctx, -lw / 2, -lh / 2, lw, lh, 0.6 * k);
-    ctx.fill();
-    ctx.restore();
-  }
-  drawHand(ctx, piece.top, w / 2, marginTop * 0.5 + labelSize * 0.36, labelSize, labelInk, piece.seed + 0.11, handFamily(fonts.sans));
-  drawHand(
-    ctx,
-    piece.bottom,
-    w / 2 + (piece.dot ? -3 * k : 0),
-    h - marginTop * 0.5 + labelSize * 0.36,
-    labelSize * 0.9,
-    piece.mount === "plastic" ? [238, 236, 230] : labelInk,
-    piece.seed + 0.37,
-    handFamily(fonts.sans),
-  );
-  if (piece.dot) {
-    const r = 2.1 * k;
-    const cx = w - 6.4 * k;
-    const cy = h - 6.4 * k;
-    const g = ctx.createRadialGradient(cx - r * 0.3, cy - r * 0.3, r * 0.1, cx, cy, r);
-    g.addColorStop(0, "rgb(234, 82, 58)");
-    g.addColorStop(1, "rgb(206, 52, 38)");
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(cx, cy, r, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  const fx = (w - filmW) / 2;
-  const fy = (h - filmH) / 2;
-  ctx.save();
-  roundRect(ctx, wx, wy, winW, winH, 0.6 * k);
-  ctx.clip();
-  ctx.fillStyle = "rgb(8, 7, 6)";
-  ctx.fillRect(wx, wy, winW, winH);
-  drawCover(ctx, img, piece.crop, fx, fy, filmW, filmH, false);
-  ctx.restore();
-  grade(ctx, Math.floor(wx), Math.floor(wy), Math.ceil(winW), Math.ceil(winH), piece.kind);
-
-  mctx.fillStyle = "rgb(0,0,0)";
-  mctx.fillRect(0, 0, w, h);
-  mctx.fillStyle = "rgb(128,128,128)";
-  roundRect(mctx, 0, 0, w, h, 1.6 * k);
-  mctx.fill();
-  mctx.fillStyle = "rgb(255,255,255)";
-  roundRect(mctx, wx, wy, winW, winH, 0.6 * k);
-  mctx.fill();
-  return { color: ctx, mask: mctx };
+  return m;
 }
 
-function buildStrip(piece, images, fonts) {
+function buildMask(piece, img) {
   const [w, h] = piece.px;
   const k = TEXEL_MM;
-  const color = document.createElement("canvas");
-  color.width = w;
-  color.height = h;
-  const ctx = color.getContext("2d", { willReadFrequently: true });
-  const mask = document.createElement("canvas");
-  mask.width = w;
-  mask.height = h;
-  const mctx = mask.getContext("2d");
-  const neg = piece.kind === "neg";
-  const rand = rng(piece.seed + 0.5);
-
-  ctx.fillStyle = neg ? "rgb(0,0,0)" : "rgb(10, 9, 8)";
+  const ctx = canvas2d(w, h);
+  const win = MF_FRAME * k;
+  const wx = (w - win) / 2;
+  const wy = (h - win) / 2;
+  ctx.fillStyle = "rgb(20, 20, 22)";
   ctx.fillRect(0, 0, w, h);
-  const fy = ((FILM_W - FRAME_H) / 2) * k;
-  piece.frames.forEach((frame, i) => {
-    const fx = (2 + i * PITCH) * k;
+  speckle(ctx, w, h, piece.seed, 5);
+  ctx.strokeStyle = "rgba(255,255,255,0.05)";
+  ctx.lineWidth = 0.3 * k;
+  roundRect(ctx, wx - 0.8 * k, wy - 0.8 * k, win + 1.6 * k, win + 1.6 * k, 0.8 * k);
+  ctx.stroke();
+  ctx.save();
+  roundRect(ctx, wx, wy, win, win, 0.5 * k);
+  ctx.clip();
+  drawCover(ctx, img, wx, wy, win, win);
+  ctx.restore();
+  grade(ctx, Math.floor(wx), Math.floor(wy), Math.ceil(win), Math.ceil(win));
+  const mask = opaqueAlpha(w, h, 1.6 * k, (m) => {
+    roundRect(m, wx, wy, win, win, 0.5 * k);
+    m.fill();
+  });
+  return { color: ctx, mask };
+}
+
+function buildMount(piece, img, family) {
+  const [w, h] = piece.px;
+  const k = TEXEL_MM;
+  const ctx = canvas2d(w, h);
+  const ww = piece.win[0] * 2 * k;
+  const wh = piece.win[1] * 2 * k;
+  const wx = (w - ww) / 2;
+  const wy = (h - wh) / 2;
+  ctx.fillStyle = "rgb(226, 223, 216)";
+  ctx.fillRect(0, 0, w, h);
+  speckle(ctx, w, h, piece.seed, 7);
+  ctx.strokeStyle = "rgba(0,0,0,0.08)";
+  ctx.lineWidth = 0.35 * k;
+  roundRect(ctx, wx - 2.2 * k, wy - 2.2 * k, ww + 4.4 * k, wh + 4.4 * k, 1.6 * k);
+  ctx.stroke();
+  ctx.fillStyle = "rgba(0,0,0,0.05)";
+  roundRect(ctx, 1.4 * k, 1.4 * k, w - 2.8 * k, h - 2.8 * k, 1.8 * k);
+  ctx.fill();
+  ctx.fillStyle = "rgb(226, 223, 216)";
+  roundRect(ctx, 1.8 * k, 1.8 * k, w - 3.6 * k, h - 3.6 * k, 1.6 * k);
+  ctx.fill();
+  ctx.fillStyle = "rgb(70, 66, 60)";
+  ctx.font = `500 ${2.6 * k}px ${family}`;
+  ctx.textBaseline = "alphabetic";
+  const portrait = piece.win[1] > piece.win[0];
+  if (portrait) {
     ctx.save();
-    roundRect(ctx, fx, fy, FRAME_W * k, FRAME_H * k, 0.5 * k);
-    ctx.clip();
-    drawCover(ctx, images[i], frame.crop, fx, fy, FRAME_W * k, FRAME_H * k, frame.turn);
+    ctx.translate(w - 4.6 * k, h / 2);
+    ctx.rotate(Math.PI / 2);
+    ctx.textAlign = "center";
+    ctx.fillText(piece.number, 0, 0);
     ctx.restore();
-    grade(ctx, Math.floor(fx), Math.floor(fy), Math.ceil(FRAME_W * k), Math.ceil(FRAME_H * k), piece.kind);
-  });
-
-  const printInk = neg ? "rgba(235, 235, 235, 0.92)" : "rgba(214, 200, 150, 0.9)";
-  ctx.fillStyle = printInk;
-  ctx.font = `600 ${1.5 * k}px ${fonts.mono}`;
-  ctx.textBaseline = "middle";
-  const edgeY = (FILM_W - 1.05) * k;
-  piece.frames.forEach((_, i) => {
-    const fx = (2 + i * PITCH) * k;
-    const n = piece.first + i;
-    ctx.textAlign = "left";
-    ctx.fillText(`${n}`, fx + 4 * k, edgeY);
-    ctx.fillText(`▸${n}A`, fx + 22 * k, edgeY);
-  });
-  ctx.textAlign = "left";
-  ctx.font = `600 ${1.35 * k}px ${fonts.mono}`;
-  for (let i = 0; i < piece.frames.length; i += 2) {
-    const fx = (2 + i * PITCH + 11 + rand() * 6) * k;
-    ctx.fillText(piece.stock, fx, 1.05 * k);
+  } else {
+    ctx.textAlign = "center";
+    ctx.fillText(piece.number, w / 2, h - 3.2 * k);
   }
+  ctx.save();
+  roundRect(ctx, wx, wy, ww, wh, 0.4 * k);
+  ctx.clip();
+  drawCover(ctx, img, wx, wy, ww, wh);
+  ctx.restore();
+  grade(ctx, Math.floor(wx), Math.floor(wy), Math.ceil(ww), Math.ceil(wh));
+  const mask = opaqueAlpha(w, h, 2.2 * k, (m) => {
+    roundRect(m, wx, wy, ww, wh, 0.4 * k);
+    m.fill();
+  });
+  return { color: ctx, mask };
+}
 
-  mctx.fillStyle = "rgb(0,0,0)";
-  mctx.fillRect(0, 0, w, h);
-  mctx.fillStyle = "rgb(255,255,255)";
-  roundRect(mctx, 0, 0, w, h, 0.5 * k);
-  mctx.fill();
-  mctx.fillStyle = "rgb(0,0,0)";
-  const perfW = 2.8 * k;
-  const perfH = 1.98 * k;
-  const perfPitch = PITCH / 8;
-  const count = Math.floor((piece.w - 1) / perfPitch);
-  for (let i = 0; i < count; i += 1) {
-    const px = (1.2 + i * perfPitch) * k;
-    if (px + perfW > w - 0.5 * k) break;
-    for (const py of [2.0 * k, h - 2.0 * k - perfH]) {
-      roundRect(mctx, px, py, perfW, perfH, 0.5 * k);
-      mctx.fill();
+function buildStrip(piece, images) {
+  const [w, h] = piece.px;
+  const k = TEXEL_MM;
+  const ctx = canvas2d(w, h);
+  ctx.fillStyle = "rgb(9, 8, 8)";
+  ctx.fillRect(0, 0, w, h);
+  const fy = ((MF_FILM - MF_FRAME) / 2) * k;
+  images.forEach((img, i) => {
+    const fx = (2 + 3 + i * MF_PITCH) * k;
+    ctx.save();
+    roundRect(ctx, fx, fy, MF_FRAME * k, MF_FRAME * k, 0.4 * k);
+    ctx.clip();
+    drawCover(ctx, img, fx, fy, MF_FRAME * k, MF_FRAME * k);
+    ctx.restore();
+    grade(ctx, Math.floor(fx), Math.floor(fy), Math.ceil(MF_FRAME * k), Math.ceil(MF_FRAME * k));
+  });
+  const mask = canvas2d(w, h);
+  mask.fillStyle = "rgb(0,0,0)";
+  mask.fillRect(0, 0, w, h);
+  mask.fillStyle = "rgb(255,255,255)";
+  roundRect(mask, 0, 0, w, h, 0.5 * k);
+  mask.fill();
+  return { color: ctx, mask };
+}
+
+function sprockets(ctx, w, h, k, fill) {
+  const pitch = 4.75 * k;
+  const hw = 1.98 * k;
+  const hh = 2.8 * k;
+  ctx.fillStyle = fill;
+  for (let x = 1.6 * k; x + hw < w; x += pitch) {
+    roundRect(ctx, x, 1.1 * k, hw, hh, 0.5 * k);
+    ctx.fill();
+    roundRect(ctx, x, h - 1.1 * k - hh, hw, hh, 0.5 * k);
+    ctx.fill();
+  }
+}
+
+function buildNegative(piece, images, family) {
+  const [w, h] = piece.px;
+  const k = TEXEL_MM;
+  const ctx = canvas2d(w, h);
+  ctx.fillStyle = "rgb(10, 10, 10)";
+  ctx.fillRect(0, 0, w, h);
+  const fw = 36 * k;
+  const fh = 24 * k;
+  const fy = (h - fh) / 2;
+  images.forEach((img, i) => {
+    const fx = (4 + i * NEG_PITCH) * k;
+    ctx.save();
+    roundRect(ctx, fx, fy, fw, fh, 0.6 * k);
+    ctx.clip();
+    drawCover(ctx, img, fx, fy, fw, fh);
+    ctx.restore();
+  });
+  const data = ctx.getImageData(0, 0, w, h);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i] = Math.min(255, 10 + d[i] * 0.86);
+    d[i + 1] = Math.min(255, 10 + d[i + 1] * 0.86);
+    d[i + 2] = Math.min(255, 10 + d[i + 2] * 0.86);
+  }
+  ctx.putImageData(data, 0, 0);
+  ctx.fillStyle = "rgb(150, 150, 150)";
+  ctx.font = `500 ${2 * k}px ${family}`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  images.forEach((_, i) => {
+    const cx = (4 + i * NEG_PITCH + 18) * k;
+    ctx.fillText(`${12 + i}`, cx - 8 * k, h - 5.2 * k);
+    ctx.fillText(`▸ ${12 + i}A`, cx + 8 * k, h - 5.2 * k);
+  });
+  const mask = canvas2d(w, h);
+  mask.fillStyle = "rgb(0,0,0)";
+  mask.fillRect(0, 0, w, h);
+  mask.fillStyle = "rgb(255,255,255)";
+  mask.fillRect(0, 0, w, h);
+  sprockets(mask, w, h, k, "rgb(0,0,0)");
+  return { color: ctx, mask };
+}
+
+function greasePencil(ctx, cx, cy, rx, ry, k, seed) {
+  const rand = rng(seed);
+  ctx.save();
+  ctx.strokeStyle = "rgba(196, 38, 30, 0.86)";
+  ctx.lineCap = "round";
+  ctx.lineJoin = "round";
+  for (let pass = 0; pass < 3; pass += 1) {
+    ctx.lineWidth = (0.7 + rand() * 0.3) * k;
+    ctx.beginPath();
+    const start = -0.4 + rand() * 0.2;
+    const sweep = Math.PI * 2.12;
+    for (let s = 0; s <= 80; s += 1) {
+      const t = start + (s / 80) * sweep;
+      const wob = 1 + (rand() - 0.5) * 0.02 + 0.04 * Math.sin(t * 3 + pass);
+      const x = cx + Math.cos(t) * rx * wob;
+      const y = cy + Math.sin(t) * ry * wob;
+      if (s === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.globalAlpha = pass === 0 ? 1 : 0.35;
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function greaseCross(ctx, cx, cy, r, k) {
+  ctx.save();
+  ctx.strokeStyle = "rgba(196, 38, 30, 0.82)";
+  ctx.lineWidth = 0.8 * k;
+  ctx.lineCap = "round";
+  ctx.beginPath();
+  ctx.moveTo(cx - r, cy - r * 0.9);
+  ctx.quadraticCurveTo(cx, cy + r * 0.1, cx + r * 1.05, cy + r);
+  ctx.moveTo(cx + r * 0.95, cy - r);
+  ctx.quadraticCurveTo(cx + r * 0.1, cy, cx - r * 0.9, cy + r * 0.95);
+  ctx.stroke();
+  ctx.restore();
+}
+
+function toGray(ctx, x, y, w, h) {
+  const data = ctx.getImageData(x, y, w, h);
+  const d = data.data;
+  for (let i = 0; i < d.length; i += 4) {
+    const l = (0.3 * d[i] + 0.59 * d[i + 1] + 0.11 * d[i + 2]) / 255;
+    const c = Math.min(1, Math.max(0, (l - 0.04) * 1.12));
+    const v = 255 * (c + (c * c * (3 - 2 * c) - c) * 0.5);
+    d[i] = v * 0.99;
+    d[i + 1] = v * 0.975;
+    d[i + 2] = v * 0.94;
+  }
+  ctx.putImageData(data, x, y);
+}
+
+function buildContact(piece, images, family) {
+  const [w, h] = piece.px;
+  const k = TEXEL_MM;
+  const ctx = canvas2d(w, h);
+  ctx.fillStyle = "rgb(240, 236, 226)";
+  ctx.fillRect(0, 0, w, h);
+  const border = 5 * k;
+  ctx.fillStyle = "rgb(18, 17, 16)";
+  ctx.fillRect(border, border, w - border * 2, h - border * 2);
+  const stripH = NEG_FILM * k;
+  const gap = (h - border * 2 - stripH * 3) / 4;
+  for (let row = 0; row < 3; row += 1) {
+    const sy = border + gap + row * (stripH + gap);
+    const sx = border + 2 * k;
+    const sw = w - border * 2 - 4 * k;
+    ctx.fillStyle = "rgb(28, 27, 25)";
+    ctx.fillRect(sx, sy, sw, stripH);
+    ctx.save();
+    ctx.translate(sx, sy);
+    sprockets(ctx, sw, stripH, k, "rgb(12, 12, 11)");
+    ctx.restore();
+    for (let col = 0; col < 3; col += 1) {
+      const img = images[row * 3 + col];
+      const fx = sx + (1.5 + col * NEG_PITCH) * k;
+      const fy = sy + (stripH - 24 * k) / 2;
+      ctx.save();
+      roundRect(ctx, fx, fy, 36 * k, 24 * k, 0.6 * k);
+      ctx.clip();
+      drawCover(ctx, img, fx, fy, 36 * k, 24 * k);
+      ctx.restore();
+      ctx.fillStyle = "rgb(214, 210, 200)";
+      ctx.font = `500 ${1.8 * k}px ${family}`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText(`${row * 3 + col + 1}`, fx + 18 * k, sy + stripH - 2.4 * k);
     }
   }
-  return { color: ctx, mask: mctx };
+  toGray(ctx, 0, 0, w, h);
+  speckle(ctx, w, h, piece.seed, 4);
+  const frameCenter = (row, col) => {
+    const sy = border + gap + row * (stripH + gap);
+    const sx = border + 2 * k;
+    return [sx + (1.5 + col * NEG_PITCH + 18) * k, sy + stripH / 2];
+  };
+  const [cx, cy] = frameCenter(0, 2);
+  greasePencil(ctx, cx, cy, 21 * k, 15 * k, k, piece.seed);
+  const [xx, xy] = frameCenter(1, 0);
+  greaseCross(ctx, xx, xy, 6 * k, k);
+  const mask = opaqueAlpha(w, h, 0.6 * k);
+  return { color: ctx, mask };
+}
+
+function buildLabel(piece, family) {
+  const [w, h] = piece.px;
+  const k = TEXEL_MM;
+  const ctx = canvas2d(w, h);
+  ctx.fillStyle = "rgb(243, 238, 222)";
+  ctx.fillRect(0, 0, w, h);
+  speckle(ctx, w, h, piece.seed, 6);
+  ctx.fillStyle = "rgb(36, 34, 32)";
+  ctx.font = `500 ${3.3 * k}px ${family}`;
+  ctx.textAlign = "left";
+  ctx.textBaseline = "middle";
+  ctx.fillText(piece.text, 3 * k, h / 2 + 0.2 * k);
+  const mask = canvas2d(w, h);
+  mask.fillStyle = "rgb(0,0,0)";
+  mask.fillRect(0, 0, w, h);
+  mask.fillStyle = "rgb(128,128,128)";
+  mask.beginPath();
+  const rand = rng(piece.seed + 0.5);
+  const jag = () => (rand() - 0.5) * 0.5 * k;
+  mask.moveTo(0.4 * k, 0.4 * k + jag());
+  for (let x = 2 * k; x < w; x += 2 * k) mask.lineTo(x, 0.4 * k + jag());
+  mask.lineTo(w - 0.4 * k, h - 0.4 * k);
+  for (let x = w - 2 * k; x > 0; x -= 2 * k) mask.lineTo(x, h - 0.4 * k + jag());
+  mask.closePath();
+  mask.fill();
+  return { color: ctx, mask };
 }
 
 function merge(built, piece) {
@@ -499,21 +498,22 @@ function merge(built, piece) {
   return out;
 }
 
-export async function readFonts(box) {
-  const style = getComputedStyle(box);
-  const sans = style.getPropertyValue("--font-sans").trim() || "sans-serif";
-  const mono = style.getPropertyValue("--font-mono").trim() || "monospace";
-  try {
-    await document.fonts.ready;
-  } catch {}
-  return { sans, mono };
+// Each print is a few hundred milliseconds of canvas work on a phone, so the
+// drawing and the read-back run as separate tasks.
+async function draw(piece) {
+  const family = await mono();
+  if (piece.kind === "strip") return buildStrip(piece, await Promise.all(piece.frames.map(loadImage)));
+  if (piece.kind === "negative") return buildNegative(piece, await Promise.all(piece.frames.map(loadImage)), family);
+  if (piece.kind === "paper" && piece.frames) return buildContact(piece, await Promise.all(piece.frames.map(loadImage)), family);
+  if (piece.kind === "paper") return buildLabel(piece, family);
+  const img = await loadImage(piece.src);
+  await yieldToMain();
+  if (piece.kind === "mount") return buildMount(piece, img, family);
+  return buildMask(piece, img);
 }
 
-export async function buildPiece(piece, fonts) {
-  if (piece.kind === "neg" || piece.kind === "chrome") {
-    const images = await Promise.all(piece.frames.map((f) => loadImage(f.src)));
-    return merge(buildStrip(piece, images, fonts), piece);
-  }
-  const img = await loadImage(piece.src);
-  return merge(buildSlide(piece, img, fonts), piece);
+export async function buildPiece(piece) {
+  const built = await draw(piece);
+  await yieldToMain();
+  return merge(built, piece);
 }

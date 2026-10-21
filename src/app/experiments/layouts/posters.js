@@ -30,25 +30,20 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/cassette": {
-    "src": "/posters/experiments/lab--cassette.webp?v=6r5AWHkO",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/checklist": {
-    "src": "/posters/experiments/lab--checklist.webp?v=5DRfGczv",
-    "width": 453,
-    "height": 704
-  },
-  "/lab/clip-tabs": {
-    "src": "/posters/experiments/lab--clip-tabs.webp?v=rZ_L12Q5",
-    "width": 688,
+  "/lab/blob-track": {
+    "src": "/posters/experiments/lab--blob-track.webp?v=WBkXvEB8",
+    "width": 923,
     "height": 464
   },
-  "/lab/crate": {
-    "src": "/posters/experiments/lab--crate.webp?v=lkn0tgrB",
-    "width": 688,
-    "height": 584
+  "/lab/camcorder": {
+    "src": "/posters/experiments/lab--camcorder.webp?v=ref81O_L",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/coverflow": {
+    "src": "/posters/experiments/lab--coverflow.webp?v=hCRll3BQ",
+    "width": 923,
+    "height": 344
   },
   "/lab/crumple": {
     "src": "/posters/experiments/lab--crumple.webp?v=mPx2Wtd_",
@@ -60,19 +55,29 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/directional-tabs": {
-    "src": "/posters/experiments/lab--directional-tabs.webp?v=dk3nahym",
-    "width": 453,
-    "height": 704
-  },
   "/lab/erase": {
     "src": "/posters/experiments/lab--erase.webp?v=Wyr3-zwC",
     "width": 688,
     "height": 584
   },
+  "/lab/field": {
+    "src": "/posters/experiments/lab--field.webp?v=i3iNw9CX",
+    "width": 923,
+    "height": 464
+  },
   "/lab/film-leader": {
     "src": "/posters/experiments/lab--film-leader.webp?v=2AAAAAAA",
     "width": 688,
+    "height": 464
+  },
+  "/lab/focus-pull": {
+    "src": "/posters/experiments/lab--focus-pull.webp?v=3zQzl7M3",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/generation-loss": {
+    "src": "/posters/experiments/lab--generation-loss.webp?v=cznpixqN",
+    "width": 923,
     "height": 464
   },
   "/lab/ghost-setlist": {
@@ -80,15 +85,10 @@ export const POSTERS = {
     "width": 922,
     "height": 464
   },
-  "/lab/groove": {
-    "src": "/posters/experiments/lab--groove.webp?v=UBMgAA4v",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/icon-morph": {
-    "src": "/posters/experiments/lab--icon-morph.webp?v=gFrti7dB",
-    "width": 688,
-    "height": 584
+  "/lab/hold-menu": {
+    "src": "/posters/experiments/lab--hold-menu.webp?v=Jxy8V_0j",
+    "width": 923,
+    "height": 464
   },
   "/lab/ink-drag": {
     "src": "/posters/experiments/lab--ink-drag.webp?v=pWpMhCoX",
@@ -100,9 +100,14 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/lenticular": {
-    "src": "/posters/experiments/lab--lenticular.webp?v=FlAfUrpN",
-    "width": 453,
+  "/lab/justify": {
+    "src": "/posters/experiments/lab--justify.webp?v=VZ9CCfg7",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/kern": {
+    "src": "/posters/experiments/lab--kern.webp?v=AEHZbcAA",
+    "width": 923,
     "height": 464
   },
   "/lab/light-table": {
@@ -110,55 +115,30 @@ export const POSTERS = {
     "width": 922,
     "height": 464
   },
-  "/lab/long-exposure": {
-    "src": "/posters/experiments/lab--long-exposure.webp?v=L0zAUHws",
-    "width": 688,
-    "height": 584
-  },
   "/lab/loupe": {
     "src": "/posters/experiments/lab--loupe.webp?v=KS-CEpyU",
     "width": 688,
     "height": 584
   },
-  "/lab/minimap": {
-    "src": "/posters/experiments/lab--minimap.webp?v=iRx_AtG4",
-    "width": 453,
-    "height": 584
+  "/lab/margins": {
+    "src": "/posters/experiments/lab--margins.webp?v=AbdBCP6i",
+    "width": 923,
+    "height": 464
   },
   "/lab/mirrorball": {
     "src": "/posters/experiments/lab--mirrorball.webp?v=ka-grq3q",
     "width": 688,
     "height": 584
   },
-  "/lab/morph-toolbar": {
-    "src": "/posters/experiments/lab--morph-toolbar.webp?v=zS8AvwtZ",
-    "width": 688,
-    "height": 584
+  "/lab/moire": {
+    "src": "/posters/experiments/lab--moire.webp?v=yZtg3ale",
+    "width": 923,
+    "height": 464
   },
-  "/lab/needle": {
-    "src": "/posters/experiments/lab--needle.webp?v=HP4uXI_f",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/oklch-picker": {
-    "src": "/posters/experiments/lab--oklch-picker.webp?v=nZMPhAAA",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/photo-booth": {
-    "src": "/posters/experiments/lab--photo-booth.webp?v=VcS5dtMD",
-    "width": 688,
-    "height": 704
-  },
-  "/lab/pins": {
-    "src": "/posters/experiments/lab--pins.webp?v=HCX3CKFS",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/rain": {
-    "src": "/posters/experiments/lab--rain.webp?v=9EqbEBye",
-    "width": 688,
-    "height": 584
+  "/lab/pull-vinyl": {
+    "src": "/posters/experiments/lab--pull-vinyl.webp?v=wAgazk_Q",
+    "width": 454,
+    "height": 464
   },
   "/lab/raking-light": {
     "src": "/posters/experiments/lab--raking-light.webp?v=vUFMQHzH",
@@ -170,19 +150,34 @@ export const POSTERS = {
     "width": 453,
     "height": 464
   },
-  "/lab/riffle": {
-    "src": "/posters/experiments/lab--riffle.webp?v=3Y6-DZqI",
-    "width": 688,
+  "/lab/scope": {
+    "src": "/posters/experiments/lab--scope.webp?v=BjJ5Uu_G",
+    "width": 923,
     "height": 464
   },
-  "/lab/shredder": {
-    "src": "/posters/experiments/lab--shredder.webp?v=HdUeAF2H",
-    "width": 688,
-    "height": 584
+  "/lab/select": {
+    "src": "/posters/experiments/lab--select.webp?v=I4AAAazZ",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/skin": {
+    "src": "/posters/experiments/lab--skin.webp?v=AAAAAAAA",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/smear": {
+    "src": "/posters/experiments/lab--smear.webp?v=K1w730Tr",
+    "width": 923,
+    "height": 464
   },
   "/lab/split-flap": {
     "src": "/posters/experiments/lab--split-flap.webp?v=75KHB8QB",
     "width": 922,
+    "height": 464
+  },
+  "/lab/steam": {
+    "src": "/posters/experiments/lab--steam.webp?v=XbCTmWGn",
+    "width": 688,
     "height": 464
   },
   "/lab/sticker-peel": {
@@ -190,33 +185,18 @@ export const POSTERS = {
     "width": 688,
     "height": 584
   },
-  "/lab/thumb-scrubber": {
-    "src": "/posters/experiments/lab--thumb-scrubber.webp?v=AAAAAAAA",
-    "width": 922,
+  "/lab/t9": {
+    "src": "/posters/experiments/lab--t9.webp?v=BSdzfXpZ",
+    "width": 923,
+    "height": 464
+  },
+  "/lab/terminal": {
+    "src": "/posters/experiments/lab--terminal.webp?v=AI8f7f_T",
+    "width": 923,
     "height": 464
   },
   "/lab/typewriter": {
     "src": "/posters/experiments/lab--typewriter.webp?v=Pq0CtL9G",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/voice-memo": {
-    "src": "/posters/experiments/lab--voice-memo.webp?v=_Skbu7-Q",
-    "width": 453,
-    "height": 584
-  },
-  "/lab/wax-pack": {
-    "src": "/posters/experiments/lab--wax-pack.webp?v=32E-ge8_",
-    "width": 688,
-    "height": 584
-  },
-  "/lab/weighted-reading": {
-    "src": "/posters/experiments/lab--weighted-reading.webp?v=d0_AsqV2",
-    "width": 453,
-    "height": 584
-  },
-  "/lab/word-lookup": {
-    "src": "/posters/experiments/lab--word-lookup.webp?v=0KjYMNn0",
     "width": 688,
     "height": 584
   },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCcw, Smartphone } from "lucide-react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { DEFAULT_CARDS, FOILS, cardsFromTracks } from "./refractorCards";
@@ -18,8 +19,12 @@ export default function Piece({ embedded = false }) {
   const [active, setActive] = useState(0);
   const [foil, setFoil] = useState(0);
   const [motion, setMotion] = useState("hidden");
+  const [face, setFace] = useState(0);
   const { tracks, live } = useTopSongs(40);
-  const cards = useMemo(() => (live ? cardsFromTracks(tracks) : DEFAULT_CARDS), [live, tracks]);
+  const cards = useMemo(
+    () => (live ? cardsFromTracks(tracks) : DEFAULT_CARDS),
+    [live, tracks],
+  );
   const cardsRef = useRef(cards);
 
   useEffect(() => {
@@ -48,17 +53,23 @@ export default function Piece({ embedded = false }) {
       embedded,
       onSelect: (idx) => setActive(idx),
       onFoil: (idx) => setFoil(idx),
+      onFace: (side) => setFace(side),
       onFail: () => {
         root.dataset.fallback = "true";
       },
       onReady: () => {
         if (!root.dataset.ready) root.dataset.ready = "true";
-        if (!embedded && engine.motionAvailable()) setMotion((m) => (m === "hidden" ? "off" : m));
+        if (!embedded && engine.motionAvailable())
+          setMotion((m) => (m === "hidden" ? "off" : m));
       },
       onMotion: (state) => setMotion(state),
     });
     engineRef.current = engine;
+    const chrome = new ResizeObserver(() => engine.relayout());
+    if (headRef.current) chrome.observe(headRef.current);
+    if (footRef.current) chrome.observe(footRef.current);
     return () => {
+      chrome.disconnect();
       root.removeEventListener("pointerdown", wakeAudio);
       root.removeEventListener("keydown", wakeAudio);
       audio.destroy();
@@ -81,30 +92,41 @@ export default function Piece({ embedded = false }) {
   const current = cards[active] || cards[0];
 
   return (
-    <div ref={rootRef} className="refractor" data-embedded={embedded ? "" : undefined}>
+    <div
+      ref={rootRef}
+      className="refractor"
+      data-embedded={embedded ? "" : undefined}
+    >
       <div
         ref={stageRef}
         className="refractor__stage"
         tabIndex={0}
         role="application"
-        aria-label={`A chrome refractor card of ${current.title} by ${current.artist} in a penny sleeve, ${FOILS[foil].name.toLowerCase()} foil. Move the pointer to tilt it, flick it hard to spin to the next record, or tilt your phone. Arrow keys tilt, space spins to the next card, 1 to 3 change the foil, brackets change the card.`}
+        aria-label={`A ${FOILS[foil].name.toLowerCase()} compact disc of ${current.title} by ${current.artist}, ${face ? "printed label" : "data side"} up. Move the pointer to tilt it through the rainbow, tap it to turn it over, flick it hard to spin to the next record, or tilt your phone. Arrow keys tilt, F turns it over, space spins to the next disc, 1 to 3 change the disc, brackets change the record.`}
       >
         <canvas ref={canvasRef} className="refractor__canvas" />
-        <img className="refractor__fallback" src={current.src} alt={`${current.title} by ${current.artist}`} draggable={false} />
+        <img
+          className="refractor__fallback"
+          src={current.src}
+          alt={`${current.title} by ${current.artist}`}
+          draggable={false}
+        />
       </div>
 
       {!embedded && (
         <header ref={headRef} className="refractor__head">
-          <h1 className="refractor__title">Refractor</h1>
+          <h1 className="refractor__title">Compact Disc</h1>
           <p className="refractor__lede">
-            Album covers reprinted on chrome. Tilt it and the foil splits the light <em>into colour</em>; flick it hard and the next record spins in.
+            Tilt it and the tracks split the light <em>into colour</em>. Tap to
+            turn it over to the label; flick it hard and the next record spins
+            in.
           </p>
         </header>
       )}
 
       {!embedded && (
         <footer ref={footRef} className="refractor__foot">
-          <div className="refractor__tray" role="radiogroup" aria-label="Foil">
+          <div className="refractor__tray" role="radiogroup" aria-label="Disc">
             {FOILS.map((f, i) => (
               <button
                 key={f.key}
@@ -121,7 +143,61 @@ export default function Piece({ embedded = false }) {
               </button>
             ))}
           </div>
-          <div className="refractor__tray" role="radiogroup" aria-label="Card">
+          <div className="refractor__tools">
+            <button
+              type="button"
+              className="refractor__motion"
+              aria-label={
+                face ? "Turn over to the data side" : "Turn over to the label"
+              }
+              onClick={() => engineRef.current?.flip()}
+            >
+              <RefreshCcw
+                className="refractor__motion-icon"
+                size={18}
+                strokeWidth={1.75}
+                aria-hidden="true"
+              />
+              <span className="refractor__motion-label">
+                {face ? "Data side" : "Label"}
+              </span>
+            </button>
+            {motion !== "hidden" && (
+              <button
+                type="button"
+                className="refractor__motion"
+                data-state={motion}
+                onClick={enableMotion}
+                aria-label={
+                  motion === "on"
+                    ? "Tilting with your phone"
+                    : motion === "denied"
+                      ? "Motion blocked, drag instead"
+                      : "Tilt with your phone"
+                }
+                disabled={motion === "on" || motion === "denied"}
+              >
+                <Smartphone
+                  className="refractor__motion-icon"
+                  size={18}
+                  strokeWidth={1.75}
+                  aria-hidden="true"
+                />
+                <span className="refractor__motion-label">
+                  {motion === "on"
+                    ? "Tilting with your phone"
+                    : motion === "denied"
+                      ? "Motion blocked, drag instead"
+                      : "Tilt with your phone"}
+                </span>
+              </button>
+            )}
+          </div>
+          <div
+            className="refractor__tray"
+            role="radiogroup"
+            aria-label="Record"
+          >
             {cards.map((card, i) => (
               <button
                 key={card.key}
@@ -133,21 +209,17 @@ export default function Piece({ embedded = false }) {
                 className="refractor__card"
                 onClick={() => engineRef.current?.select(i)}
               >
-                <img className="refractor__thumb" src={card.src} alt="" width={28} height={28} draggable={false} />
+                <img
+                  className="refractor__thumb"
+                  src={card.src}
+                  alt=""
+                  width={28}
+                  height={28}
+                  draggable={false}
+                />
               </button>
             ))}
           </div>
-          {motion !== "hidden" && (
-            <button
-              type="button"
-              className="refractor__motion"
-              data-state={motion}
-              onClick={enableMotion}
-              disabled={motion === "on" || motion === "denied"}
-            >
-              {motion === "on" ? "Tilting with your phone" : motion === "denied" ? "Motion blocked, drag instead" : "Tilt with your phone"}
-            </button>
-          )}
         </footer>
       )}
     </div>

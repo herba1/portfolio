@@ -96,7 +96,7 @@ function wobble(g) {
 
 const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
-export function createGeneration({ canvas, ghost, card, onState }) {
+export function createGeneration({ canvas, ghost, card, gestureScope = window, onState }) {
   const make = () => {
     const c = document.createElement("canvas");
     c.width = DOC;
@@ -110,9 +110,12 @@ export function createGeneration({ canvas, ghost, card, onState }) {
   const ctx = canvas.getContext("2d", { alpha: false });
   const ghostCtx = ghost.getContext("2d", { alpha: false });
   const head = make();
-  const headCtx = head.getContext("2d", { alpha: false });
+  // The two working canvases live in CPU memory: every generation is copied
+  // between them and encoded from one, and a GPU-backed canvas would have to
+  // be read back to the CPU for each, on the main thread.
+  const headCtx = head.getContext("2d", { alpha: false, willReadFrequently: true });
   const pass = make();
-  const passCtx = pass.getContext("2d", { alpha: false });
+  const passCtx = pass.getContext("2d", { alpha: false, willReadFrequently: true });
   passCtx.imageSmoothingEnabled = false;
 
   let text = "still here?";
@@ -334,13 +337,13 @@ export function createGeneration({ canvas, ghost, card, onState }) {
   };
 
   const onFirstGesture = () => {
-    window.removeEventListener("pointerdown", onFirstGesture, true);
-    window.removeEventListener("keydown", onFirstGesture, true);
+    gestureScope.removeEventListener("pointerdown", onFirstGesture, true);
+    gestureScope.removeEventListener("keydown", onFirstGesture, true);
     if (!soundOn) return;
     ensureAudio()?.setEnabled(true);
   };
-  window.addEventListener("pointerdown", onFirstGesture, true);
-  window.addEventListener("keydown", onFirstGesture, true);
+  gestureScope.addEventListener("pointerdown", onFirstGesture, true);
+  gestureScope.addEventListener("keydown", onFirstGesture, true);
 
   const init = async (startText) => {
     try {
@@ -411,8 +414,8 @@ export function createGeneration({ canvas, ghost, card, onState }) {
     destroy() {
       destroyed = true;
       window.clearTimeout(timer);
-      window.removeEventListener("pointerdown", onFirstGesture, true);
-      window.removeEventListener("keydown", onFirstGesture, true);
+      gestureScope.removeEventListener("pointerdown", onFirstGesture, true);
+      gestureScope.removeEventListener("keydown", onFirstGesture, true);
       audio?.destroy();
       audio = null;
     },

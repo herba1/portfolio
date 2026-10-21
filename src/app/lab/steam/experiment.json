@@ -1,0 +1,33 @@
+{
+  "title": "Steam",
+  "description": "Short lines of type made of steam on a dark ground, a few words at a time like a lyric video. Each line gathers out of a haze, breathes thin strands upward while it holds, then lifts away for the next. Move across the words to blow them apart; they swirl, thin, and pull themselves back together.",
+  "tags": [
+    "WebGL",
+    "Type",
+    "Fluid"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-19T18:00:00.000Z",
+  "intent": "Type you can blow on: the words are the steam, drawn from a velocity field that forgets you a second later.",
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    {
+      "name": "Bruno Simon, My Room in 3D, coffee steam",
+      "url": "https://github.com/brunosimon/my-room-in-3d",
+      "what": "Read for the idea only (no licence): steam as noise scrolling upward with sway that grows with height. Re-derived as strands rising from a blurred text mask, warped by drifting noise."
+    },
+    {
+      "name": "OGL, Flowmap",
+      "url": "https://github.com/oframe/ogl",
+      "what": "The flowmap technique: a 128 square ping-pong field that decays each frame, a velocity stamp with a smoothstep falloff around the pointer, pointer velocity eased in at 0.5 and out at 0.1. Re-implemented in three.js with time-based decay and an upward drift; the type is sampled upstream of the flow so it bends and thins along your breath."
+    },
+    {
+      "name": "three.js",
+      "url": "https://threejs.org",
+      "what": "Render targets, data textures and the full-screen shader passes."
+    }
+  ]
+}

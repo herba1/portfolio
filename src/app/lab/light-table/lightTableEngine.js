@@ -1,8 +1,7 @@
-import { LAYOUTS, PIECES, TEXEL_MM, buildPiece, readFonts } from "./lightTableFilm";
+import { LAYOUTS, LOUPE_MAG, LOUPE_R, PIECES, TEXEL_MM, buildPiece } from "./lightTableFilm";
 import { createLightTableGL } from "./lightTableGL";
 
 const SUB = 1 / 240;
-const BEZEL = 7;
 const MAX_SPEED = 560;
 const POWER_S = 0.9;
 
@@ -11,8 +10,9 @@ const smooth = (t) => t * t * (3 - 2 * t);
 
 export function createLightTableEngine({ box, stage, canvas, insets, embedded, onReady, onFail }) {
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const view = { width: 1, height: 1, dpr: 1, scale: 1, gx: 0, gy: 0, layout: LAYOUTS[0] };
-  const bodies = PIECES.map((def) => ({
+  const view = { width: 1, height: 1, dpr: 1, scale: 1, gx: 0, gy: 0, top: 0, layout: LAYOUTS[0] };
+  const LOUPE = { key: "loupe", w: LOUPE_R * 2, h: LOUPE_R * 2, round: true };
+  const bodies = [...PIECES, LOUPE].map((def) => ({
     def,
     x: 0,
     y: 0,
@@ -25,7 +25,9 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     inertia: (def.w * def.w + def.h * def.h) / 12,
     moving: false,
   }));
-  let order = bodies.slice();
+  const loupe = bodies[bodies.length - 1];
+  const sheets = bodies.slice(0, -1);
+  let order = sheets.slice();
   const drags = new Map();
   let gl = null;
   let failed = false;
@@ -42,36 +44,38 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
 
   function layout() {
     const pad = insets();
-    const side = embedded ? 16 : view.width >= 900 ? 48 : 16;
+    const side = embedded ? 16 : view.width >= 900 ? 64 : 16;
     const availW = Math.max(80, view.width - side * 2);
     const availH = Math.max(80, view.height - pad.top - pad.bottom);
     let best = null;
     for (const L of LAYOUTS) {
-      const ow = L.w + BEZEL * 2;
-      const oh = L.h + BEZEL * 2;
-      const s = Math.min(availW / ow, availH / oh);
-      const fill = (s * ow * s * oh) / (availW * availH);
+      const bw = L.box[2] - L.box[0];
+      const bh = L.box[3] - L.box[1];
+      const s = Math.min(availW / bw, availH / bh);
+      const fill = (s * bw * s * bh) / (availW * availH);
       if (!best || fill > best.fill + 0.04) best = { L, s, fill };
     }
-    view.layout = best.L;
-    view.scale = best.s;
-    view.gx = view.width / 2 - (best.L.w * best.s) / 2;
-    view.gy = pad.top + availH / 2 - (best.L.h * best.s) / 2;
-    if (placed !== best.L.key) place(best.L);
+    const { L, s } = best;
+    view.layout = L;
+    view.scale = s;
+    view.gx = view.width / 2 - ((L.box[0] + L.box[2]) / 2) * s;
+    view.gy = pad.top + availH / 2 - ((L.box[1] + L.box[3]) / 2) * s;
+    view.top = embedded ? 0 : Math.max(0, pad.top - 16);
+    if (placed !== L.key) place(L);
   }
 
   function place(L) {
     placed = L.key;
     drags.clear();
     for (const b of bodies) {
-      const [x, y, deg] = L.pieces[b.def.key];
+      const [x, y, deg] = b === loupe ? [...L.loupe, 0] : L.pieces[b.def.key];
       b.x = x;
       b.y = y;
       b.a = (deg * Math.PI) / 180;
       b.vx = b.vy = b.va = 0;
       b.moving = false;
     }
-    order = bodies.slice();
+    order = sheets.slice();
   }
 
   function toMm(sx, sy) {
@@ -84,6 +88,7 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   }
 
   function pick(mx, my) {
+    if (Math.hypot(mx - loupe.x, my - loupe.y) < LOUPE_R + 1) return { body: loupe, lx: mx - loupe.x, ly: my - loupe.y };
     for (let i = order.length - 1; i >= 0; i -= 1) {
       const b = order[i];
       const dx = mx - b.x;
@@ -98,10 +103,11 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
   }
 
   function walls(obj, inset) {
-    const L = view.layout;
-    const lo = inset;
-    const hiX = L.w - inset;
-    const hiY = L.h - inset;
+    const s = view.scale;
+    const lo = (0 - view.gx) / s + inset;
+    const hiX = (view.width - view.gx) / s - inset;
+    const top = (view.top - view.gy) / s + inset;
+    const hiY = (view.height - view.gy) / s - inset;
     if (obj.x < lo) {
       obj.x = lo;
       if (obj.vx < 0) obj.vx *= -0.22;
@@ -109,14 +115,16 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       obj.x = hiX;
       if (obj.vx > 0) obj.vx *= -0.22;
     }
-    if (obj.y < lo) {
-      obj.y = lo;
+    if (obj.y < top) {
+      obj.y = top;
       if (obj.vy < 0) obj.vy *= -0.22;
     } else if (obj.y > hiY) {
       obj.y = hiY;
       if (obj.vy > 0) obj.vy *= -0.22;
     }
   }
+
+  const reach = (b) => Math.min(b.hw, b.hh);
 
   function slide(obj, h, mu, visc) {
     const sp = Math.hypot(obj.vx, obj.vy);
@@ -158,11 +166,11 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       if (av > 0) b.va *= Math.max(0, av - 7 * h) / av;
       b.va *= Math.exp(-2.6 * h);
     }
-    b.va = clamp(b.va, -7, 7);
+    b.va = b.def.round ? 0 : clamp(b.va, -7, 7);
     b.x += b.vx * h;
     b.y += b.vy * h;
     b.a += b.va * h;
-    walls(b, 2);
+    walls(b, reach(b));
   }
 
   function updateDrags(dt) {
@@ -197,7 +205,7 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
         const s = Math.sin(b.a);
         b.x = d.tx - (c * d.lx - s * d.ly);
         b.y = d.ty - (s * d.lx + c * d.ly);
-        walls(b, 2);
+        walls(b, reach(b));
       }
       return;
     }
@@ -237,16 +245,17 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
       code: b.def.code,
       seed: b.def.seed,
       rect: b.def.rect,
+      win: b.def.win,
     }));
-    const L = view.layout;
     gl.draw({
       height: view.height,
       scale: s,
-      glass: [view.gx, view.gy, view.gx + L.w * s, view.gy + L.h * s],
-      bezel: BEZEL * s,
-      power: reduced ? 1 : smooth(clamp(power, 0, 1)),
+      glass: [-8, -8, view.width + 8, view.height + 8],
+      bezel: 0,
+      power: reduced ? 1 : 0.72 + 0.28 * smooth(clamp(power, 0, 1)),
       texel: TEXEL_MM,
       pieces,
+      loupe: { x: view.gx + loupe.x * s, y: view.gy + loupe.y * s, r: LOUPE_R * s, mag: LOUPE_MAG },
     });
   }
 
@@ -284,12 +293,9 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
 
   async function load() {
     try {
-      const fonts = await readFonts(box);
-      for (const piece of PIECES) {
-        const data = await buildPiece(piece, fonts);
-        if (destroyed || !gl) return;
-        gl.upload(piece, data);
-      }
+      const built = await Promise.all(PIECES.map((piece) => buildPiece(piece)));
+      if (destroyed || !gl) return;
+      PIECES.forEach((piece, i) => gl.upload(piece, built[i]));
       if (destroyed || !gl) return;
       gl.finish();
       loaded = true;
@@ -356,8 +362,10 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     const target = hit.body;
     if (dragOf(target)) return;
     stage.setPointerCapture?.(e.pointerId);
-    order = order.filter((b) => b !== target);
-    order.push(target);
+    if (target !== loupe) {
+      order = order.filter((b) => b !== target);
+      order.push(target);
+    }
     drags.set(e.pointerId, {
       target,
       lx: hit.lx,
@@ -429,7 +437,7 @@ export function createLightTableEngine({ box, stage, canvas, insets, embedded, o
     if (reduced) {
       top.x += dx * (e.shiftKey ? 20 : 8);
       top.y += dy * (e.shiftKey ? 20 : 8);
-      walls(top, 2);
+      walls(top, reach(top));
       render();
       return;
     }

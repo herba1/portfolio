@@ -99,47 +99,53 @@ float fineFibres(vec2 mm) {
 
 vec3 table(vec2 p, float foot, float inLens) {
   vec2 uv = p / uBox;
-  vec2 sunUv = vec2(0.5) - uSun.xy * 0.75;
-  vec2 lamp = (uv - sunUv) * vec2(1.0, 1.2);
-  float pool = exp(-dot(lamp, lamp) * 2.2);
-  vec3 col = vec3(0.034, 0.033, 0.036) + vec3(0.05, 0.034, 0.02) * pool;
+  vec2 sunUv = vec2(0.5) - uSun.xy * 0.42;
+  vec2 lamp = (uv - sunUv) * vec2(1.0, 1.3);
+  float pool = exp(-dot(lamp, lamp) * 3.2);
+  vec3 col = vec3(0.012, 0.012, 0.013) + vec3(0.034, 0.026, 0.018) * pool;
   vec2 mm = p * uTableMm;
   float vis = smoothstep(1.5, 5.0, 0.3 / (uTableMm * foot)) * inLens;
-  float tooth = fbm(mm * 5.0);
-  col *= 1.0 + (tooth - 0.5) * (0.12 + 0.2 * vis);
   if (vis > 0.001) {
+    float tooth = fbm(mm * 5.0);
+    col *= 1.0 + (tooth - 0.5) * 0.3 * vis;
     float speck = smoothstep(0.82, 0.9, vnoise(mm * 3.1 + 2.0));
-    col += vec3(0.05, 0.045, 0.04) * speck * vis;
+    col += vec3(0.04, 0.036, 0.032) * speck * vis;
   }
   return col;
 }
 
-vec3 sunlight(vec3 col, vec2 p) {
+vec3 sunlight(vec3 col, vec2 p, float outside) {
   if (uLensOn < 0.5) return col;
   float radius = uLens.z;
   vec2 dir = uSun.xy;
-  vec2 c = uLens.xy + dir * radius * (1.85 + uLift * 0.5);
-  float q = length(p - c) / radius;
-  float disc = 1.0 - smoothstep(0.92, 1.06, q);
-  float rim = smoothstep(0.86, 0.92, q) * (1.0 - smoothstep(1.0, 1.08, q));
-  col *= 1.0 - disc * 0.55 - rim * 0.25;
-  float sigma = mix(0.24, 0.03, uSun.z) * (1.0 + uLift * 0.6);
-  float peak = min(6.0, 0.55 * pow(0.24 / sigma, 1.35));
-  float qr = length(p - c) / radius;
-  float core = exp(-qr * qr / (2.0 * sigma * sigma));
-  float ringR = sigma * 1.9;
-  vec3 fringe = vec3(
-    exp(-pow((qr - ringR * 1.06) / (sigma * 0.35), 2.0)),
-    exp(-pow((qr - ringR) / (sigma * 0.35), 2.0)),
-    exp(-pow((qr - ringR * 0.94) / (sigma * 0.35), 2.0))
-  ) * (1.0 - uSun.z) * 0.35;
-  vec3 warm = vec3(1.0, 0.86, 0.62);
-  float bloom = exp(-qr * qr / (2.0 * sigma * sigma * 9.0));
-  vec3 light = warm * (core * peak * 1.4 + bloom * peak * 0.18) + fringe * peak;
   vec2 ax = vec2(-dir.y, dir.x);
-  float streak = exp(-pow(dot(p - c, ax) / (radius * sigma * 0.25), 2.0)) * exp(-pow(dot(p - c, dir) / (radius * sigma * 3.0), 2.0)) * uSun.z * 0.6;
-  light += warm * streak;
-  return col * (1.0 + light * 3.0) + light * 0.08;
+  float reachD = radius * (1.32 + uLift * 0.45);
+  vec2 c = uLens.xy + dir * reachD;
+  float q = length(p - c) / radius;
+  float disc = 1.0 - smoothstep(0.7, 1.12, q);
+  col *= 1.0 - disc * 0.14;
+  float sigma = mix(0.15, 0.045, uSun.z) * (1.0 + uLift * 0.5);
+  float peak = min(5.0, 0.7 * pow(0.15 / sigma, 1.2));
+  float core = exp(-q * q / (2.0 * sigma * sigma));
+  float ringR = sigma * 2.1;
+  vec3 fringe = vec3(
+    exp(-pow((q - ringR * 1.07) / (sigma * 0.4), 2.0)),
+    exp(-pow((q - ringR) / (sigma * 0.4), 2.0)),
+    exp(-pow((q - ringR * 0.93) / (sigma * 0.4), 2.0))
+  ) * 0.3;
+  vec3 warm = vec3(1.0, 0.84, 0.6);
+  float bloom = exp(-q * q / (2.0 * sigma * sigma * 10.0));
+  vec3 light = warm * (core * peak * 1.3 + bloom * peak * 0.16) + fringe * peak * 0.6;
+  vec2 rel = p - uLens.xy;
+  float along = dot(rel, dir) / reachD;
+  float across = dot(rel, ax);
+  float half0 = radius * 0.9;
+  float half1 = radius * sigma;
+  float halfW = mix(half0, half1, clamp(along, 0.0, 1.0));
+  float cone = smoothstep(0.0, 0.35, along) * (1.0 - smoothstep(0.92, 1.04, along)) * exp(-pow(across / max(halfW, 1.0), 2.0) * 2.4);
+  float spokes = 0.55 + 0.45 * vnoise(vec2(across / max(halfW, 1.0) * 5.0, 0.5) + 3.1);
+  vec3 rays = warm * cone * spokes * (0.1 + 0.14 * uSun.z) * outside;
+  return col * (1.0 + light * 1.6) + light * 0.62 + rays;
 }
 
 vec4 cmyk(vec3 c) {
@@ -250,7 +256,7 @@ vec3 layCard(vec3 under, vec2 p, float foot, float inLens, sampler2D tex, vec4 c
 
   float cellPx = CELL / max(footMm, 1e-5);
   float zoom = uLens.w;
-  float resolve = 0.22 * smoothstep(3.0, 6.0, zoom) + 0.78 * smoothstep(7.5, 14.0, zoom);
+  float resolve = 0.3 * smoothstep(3.0, 4.0, zoom);
   float w = resolve * smoothstep(2.2, 4.0, cellPx) * inLens;
   float fv = smoothstep(10.0, 19.0, zoom) * smoothstep(8.0, 16.0, cellPx) * inLens;
   vec3 surface = photo;
@@ -308,88 +314,59 @@ vec3 scene(vec2 p, float foot, float inLens) {
   vec3 col = table(p, foot, inLens);
   if (uShowB > 0.5) col = layCard(col, p, foot, inLens, uTexB, uCardB, uPoseB, uWearB);
   col = layCard(col, p, foot, inLens, uTexA, uCardA, uPoseA, uWearA);
-  return sunlight(col, p);
+  return sunlight(col, p, 1.0 - inLens);
 }
 
-vec3 lensShadow(vec3 col, vec2 p, float radius, float g) {
-  return col;
-}
-
-vec3 bezel(vec2 dir, float t, float radius) {
-  float s = 2.0 * t - 1.0;
-  vec3 n = normalize(vec3(dir * s * 1.25, sqrt(max(1.0 - s * s, 0.0)) + 0.2));
-  vec3 ld = normalize(vec3(-uSun.x * 0.7, -uSun.y * 0.7, 0.62));
-  float diff = max(dot(n, ld), 0.0);
-  vec3 h = normalize(ld + vec3(0.0, 0.0, 1.0));
-  float spec = pow(max(dot(n, h), 0.0), 60.0);
-  float ang = atan(dir.y, dir.x);
-  float env = 0.5 + 0.5 * sin(ang * 2.0 + 1.1);
-  float fill = pow(max(dot(n, normalize(vec3(0.6, 0.75, 0.4))), 0.0), 3.0);
-  vec3 c = vec3(0.075, 0.074, 0.08);
-  c += vec3(0.30, 0.295, 0.29) * diff * (0.55 + 0.45 * env);
-  c += vec3(0.09, 0.09, 0.1) * fill;
-  c += vec3(1.0, 0.98, 0.94) * spec * 0.85;
-  float knurl = 0.5 + 0.5 * sin(ang * floor(radius * 1.1));
-  c *= 1.0 - 0.1 * knurl * smoothstep(0.75, 0.15, abs(s));
-  return c;
+vec3 glass(vec2 dl, float r, float radius, float zoom, float foot0) {
+  vec2 L = uLens.xy;
+  vec2 dir = dl / max(length(dl), 1e-4);
+  float rr = min(r, 1.0);
+  float r2 = rr * rr;
+  float r8 = r2 * r2 * r2 * r2;
+  float m = 1.0 + 0.04 * r2 + 0.12 * r8;
+  float dm = 1.0 + 0.12 * r2 + 1.08 * r8;
+  float band = smoothstep(0.8, 1.0, rr);
+  float bend = band * band * (3.0 - 2.0 * band);
+  vec2 inner = dl / zoom * m;
+  vec2 outer = dir * radius * mix(0.9, 1.22, bend);
+  vec2 s = mix(inner, outer, bend);
+  float foot = foot0 * (dm / zoom + bend * 6.0);
+  vec3 seen = scene(L + s, foot, 1.0 - bend);
+  float ca = 0.035 * pow(max(rr - 0.6, 0.0) / 0.4, 2.0) + 0.03 * bend;
+  if (ca > 0.002) {
+    seen.r = scene(L + s * (1.0 + ca), foot, 1.0 - bend).r;
+    seen.b = scene(L + s * (1.0 - ca), foot, 1.0 - bend).b;
+  }
+  vec2 nd = dl / radius;
+  vec2 sb = rot(nd + uSun.xy * 0.42, atan(uSun.y, uSun.x) + 1.5708) / vec2(0.34, 0.1);
+  float softbox = smoothstep(1.0, 0.4, length(sb));
+  seen = mix(seen, vec3(1.0, 0.96, 0.9), softbox * 0.16);
+  float toSun = max(dot(dir, -uSun.xy), 0.0);
+  float away = max(dot(dir, uSun.xy), 0.0);
+  float fresnel = pow(rr, 14.0);
+  seen += vec3(0.9, 0.93, 1.0) * fresnel * (0.05 + 0.16 * toSun);
+  float glint = exp(-pow((rr - 0.986) / 0.01, 2.0)) * (0.12 + 0.88 * pow(toSun, 3.0));
+  float lip = exp(-pow((rr - 0.955) / 0.02, 2.0)) * pow(away, 4.0);
+  float caustic = exp(-pow((rr - 0.9) / 0.05, 2.0)) * pow(away, 3.0);
+  seen += vec3(1.0, 0.97, 0.92) * glint * 0.75 + vec3(1.0, 0.9, 0.74) * lip * 0.22 + caustic * vec3(0.3, 0.24, 0.16);
+  return seen;
 }
 
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uDpr;
   float foot0 = 1.0 / uDpr;
-  vec2 L = uLens.xy;
+  vec2 dl = p - uLens.xy;
   float radius = uLens.z;
-  float zoom = uLens.w;
-  vec2 dl = p - L;
   float r = length(dl) / radius;
   float aa = foot0 / radius;
-  float bw = clamp(7.0 / radius, 0.045, 0.09);
-  float g = 1.0 - bw;
-  vec2 dir = dl / max(length(dl), 1e-4);
 
   vec3 col = vec3(0.0);
   if (uLensOn < 0.5 || r > 1.0 - aa * 1.5) {
     col = scene(p, foot0, 0.0);
-    if (uLensOn > 0.5) col = lensShadow(col, p, radius, g);
   }
 
   if (uLensOn > 0.5 && r < 1.0 + aa * 1.5) {
-    vec3 lens = vec3(0.0);
-    if (r < g + aa * 1.5) {
-      float rr = min(r / g, 1.0);
-      float r2 = rr * rr;
-      float r8 = r2 * r2 * r2 * r2;
-      float m = 1.0 + 0.04 * r2 + 0.12 * r8;
-      float dm = 1.0 + 0.12 * r2 + 1.08 * r8;
-      vec2 s = dl / zoom * m;
-      float foot = foot0 * dm / zoom;
-      vec3 seen = scene(L + s, foot, 1.0);
-      if (rr > 0.7) {
-        float ca = 0.05 * pow((rr - 0.7) / 0.3, 2.0);
-        seen.r = scene(L + s * (1.0 + ca), foot, 1.0).r;
-        seen.b = scene(L + s * (1.0 - ca), foot, 1.0).b;
-      }
-      seen *= vec3(0.988, 0.994, 1.0);
-      seen *= 1.0 - 0.1 * pow(rr, 5.0);
-      vec2 nd = dl / (radius * g);
-      vec2 sb = rot(nd + uSun.xy * 0.45, atan(uSun.y, uSun.x) + 1.5708) / vec2(0.36, 0.11);
-      float softbox = smoothstep(1.0, 0.45, length(sb));
-      seen = mix(seen, vec3(1.0, 0.95, 0.88), softbox * 0.12);
-      float rimLit = 0.22 + 0.78 * pow(max(dot(dir, -uSun.xy), 0.0), 2.0);
-      float glint = exp(-pow((rr - 0.982) / 0.014, 2.0)) * rimLit;
-      float caustic = exp(-pow((rr - 0.93) / 0.05, 2.0)) * pow(max(dot(dir, uSun.xy), 0.0), 3.0);
-      seen += glint * 0.9 + caustic * vec3(0.3, 0.24, 0.16);
-      seen = mix(seen, vec3(0.95, 0.965, 1.0), 0.05 * pow(rr, 16.0));
-      float seam = exp(-pow((r - g) / (aa * 1.4), 2.0));
-      seen = mix(seen, vec3(0.05), seam * 0.55);
-      lens = seen;
-    }
-    if (r > g - aa * 1.5) {
-      float t = clamp((r - g) / bw, 0.0, 1.0);
-      vec3 metal = bezel(dir, t, radius);
-      float k = smoothstep(g - aa, g + aa, r);
-      lens = mix(lens, metal, k);
-    }
+    vec3 lens = glass(dl, r, radius, uLens.w, foot0);
     float a = smoothstep(1.0 + aa, 1.0 - aa, r);
     col = mix(col, lens, a);
   }

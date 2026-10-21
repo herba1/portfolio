@@ -35,7 +35,16 @@ export default function Piece({ embedded = false }) {
           onReady: () => root.setAttribute("data-ready", ""),
           onFail: () => root.setAttribute("data-failed", ""),
           onStatus: (text) => {
-            if (statusRef.current) statusRef.current.textContent = text;
+            const box = statusRef.current;
+            if (!box) return;
+            const [a, b] = box.children;
+            const incoming = a.dataset.on === "true" ? b : a;
+            const outgoing = incoming === a ? b : a;
+            incoming.textContent = text;
+            incoming.dataset.on = "true";
+            incoming.removeAttribute("aria-hidden");
+            outgoing.dataset.on = "false";
+            outgoing.setAttribute("aria-hidden", "true");
           },
         });
         if (cancelled) {
@@ -103,8 +112,9 @@ export default function Piece({ embedded = false }) {
               Print
             </button>
           </div>
-          <p className="film-leader__status" aria-live="polite">
-            <span ref={statusRef} />
+          <p ref={statusRef} className="film-leader__status" aria-live="polite">
+            <span data-on="false" aria-hidden="true" />
+            <span data-on="false" aria-hidden="true" />
           </p>
         </div>
       )}

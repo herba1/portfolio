@@ -1,95 +1,159 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { FEATURED } from "@/app/lab/_music/catalog";
+import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { pick, thunk, tick, wakeAudio } from "./foley";
+import { menuFor, recordsFrom } from "./menuData";
 
 import "./hold-menu.css";
 
-const HOLD = 420;
-const MENU_W = 248;
-const ITEM_H = 44;
-const HEAD_H = 56;
-const LIFT = 1.06;
+const HOLD = 400;
+const ITEM_H = 48;
+const LIFT = 1.08;
+const GAP = 12;
+const TOP = 72;
+const BOTTOM = 24;
+const ROOT_W = 280;
+const DWELL = 380;
+const RECEDE = 220;
+const PEEK = 40;
+const OPEN = 200;
+const GRID_R = 8;
+const LIFT_R = 12;
+const PRESS = 0.96;
+const SETTLE = 660;
 
-const ITEMS = [
-  {
-    id: "next",
-    label: "Play Next",
-    done: (a) => `Playing next: ${a.title}`,
-    icon: <path d="M5 4.5v11l8-5.5zM15.5 4.5v11" strokeLinejoin="round" strokeLinecap="round" />,
-  },
-  {
-    id: "queue",
-    label: "Add to Queue",
-    done: (a) => `Added ${a.title} to your queue`,
-    icon: <path d="M3.5 5.5h9M3.5 10h9M3.5 14.5h5M14.5 12v6M11.5 15h6" strokeLinecap="round" />,
-  },
-  {
-    id: "share",
-    label: "Share",
-    done: (a) => `Copied a link to ${a.title}`,
-    icon: <path d="M10 3v9.5M6.5 6.5 10 3l3.5 3.5M5 10H4.5v6.5h11V10H15" strokeLinecap="round" strokeLinejoin="round" />,
-  },
-  {
-    id: "album",
-    label: "Go to Album",
-    done: (a) => `Opening ${a.title}`,
-    icon: <path d="M10 16.5a6.5 6.5 0 1 0 0-13 6.5 6.5 0 0 0 0 13zM10 11.2a1.2 1.2 0 1 0 0-2.4 1.2 1.2 0 0 0 0 2.4z" />,
-  },
-];
-
-function menuHeight() {
-  return HEAD_H + ITEMS.length * ITEM_H + 8;
+function slotRect(root, el) {
+  const box = root.getBoundingClientRect();
+  const r = el.getBoundingClientRect();
+  const k = root.offsetWidth ? box.width / root.offsetWidth : 1;
+  const width = el.offsetWidth * k;
+  const height = el.offsetHeight * k;
+  const cx = r.left + r.width / 2 - box.left;
+  const cy = r.top + r.height / 2 - box.top;
+  return { left: cx - width / 2, top: cy - height / 2, width, height };
 }
 
-function place(rect, box) {
-  const w = rect.width * LIFT;
-  const h = rect.height * LIFT;
-  const mh = menuHeight();
-  let top = rect.top - (h - rect.height) / 2;
-  const bottomRoom = box.height - 24 - (top + h + 12 + mh);
-  const below = bottomRoom >= 0 || rect.top + rect.height / 2 < box.height / 2;
-  let menuTop;
-  if (below) {
-    if (bottomRoom < 0) top += bottomRoom;
-    top = Math.max(72, top);
-    menuTop = top + h + 12;
-  } else {
-    top = Math.min(top, box.height - 24 - h);
-    menuTop = top - 12 - mh;
-    if (menuTop < 72) {
-      top += 72 - menuTop;
-      menuTop = 72;
-    }
+const itemsAt = (root, path, level) => {
+  let items = root;
+  for (let l = 0; l < level; l += 1) {
+    const entry = path[l];
+    items = items.find((x) => x.id === entry?.id)?.children ?? [];
   }
-  const cx = rect.left + rect.width / 2;
-  const left = cx - w / 2;
-  let menuLeft = cx < box.width / 2 ? left : left + w - MENU_W;
-  menuLeft = Math.max(16, Math.min(box.width - 16 - MENU_W, menuLeft));
-  const dx = left + w / 2 - cx;
-  const dy = top + h / 2 - (rect.top + rect.height / 2);
-  return { dx, dy, menuLeft, menuTop, below };
+  return items;
+};
+
+const tallest = (items, depth = 0) => items.reduce((h, it) => Math.max(h, it.children ? tallest(it.children, depth + 1) : 0), items.length + (depth > 0 ? 1 : 0));
+
+function place(rect, box, menuH, menuW) {
+  const avail = box.height - TOP - BOTTOM;
+  const size = Math.max(96, Math.min(rect.width * LIFT, avail - GAP - menuH, box.width - 32));
+  const cy = rect.top + rect.height / 2;
+  const block = size + GAP + menuH;
+  const clampTop = (t) => Math.min(Math.max(t, TOP), box.height - BOTTOM - block);
+  const belowTop = clampTop(cy - size / 2);
+  const aboveTop = clampTop(cy - size / 2 - GAP - menuH);
+  const belowShift = Math.abs(belowTop - (cy - size / 2));
+  const aboveShift = Math.abs(aboveTop + GAP + menuH - (cy - size / 2));
+  const below = belowShift <= aboveShift;
+  const top = below ? belowTop : aboveTop + GAP + menuH;
+  const anchor = below ? top + size + GAP : top - GAP;
+  const cx = Math.min(Math.max(rect.left + rect.width / 2, 16 + size / 2), box.width - 16 - size / 2);
+  const left = cx - size / 2;
+  const alignLeft = cx < box.width / 2;
+  let menuLeft = alignLeft ? left : left + size - menuW;
+  menuLeft = Math.max(16, Math.min(box.width - 16 - menuW, menuLeft));
+  const from = { x: rect.left + rect.width / 2 - cx, y: cy - (top + size / 2), s: rect.width / size };
+  return { left, top, size, menuLeft, anchor, menuW, below, alignLeft, from };
 }
+
+function Glyph({ d }) {
+  return (
+    <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+      <path d={d} />
+    </svg>
+  );
+}
+
+const CHEVRON_R = "M8 5l5 5-5 5";
+
+const CHEVRON_D = "M5 8l5 5 5-5";
 
 export default function Piece({ embedded = false }) {
+  const { tracks, live } = useTopSongs(40);
+  const records = useMemo(() => recordsFrom(tracks, live), [tracks, live]);
   const rootRef = useRef(null);
+  const layerRef = useRef(null);
   const cloneRef = useRef(null);
   const coverEls = useRef(new Map());
   const press = useRef(null);
-  const spring = useRef({ x: 0, y: 0, s: 1, vx: 0, vy: 0, vs: 0, tx: 0, ty: 0, ts: 1, raf: 0, onRest: null });
+  const spring = useRef({ x: 0, y: 0, s: 1, fs: 1, vx: 0, vy: 0, vs: 0, tx: 0, ty: 0, ts: 1, raf: 0, onRest: null });
+  const queued = useRef(null);
   const [pressing, setPressing] = useState(null);
   const [menu, setMenu] = useState(null);
-  const [hot, setHot] = useState(-1);
+  const [nav, setNavState] = useState({ path: [], hot: [-1], ghosts: [] });
   const [chosen, setChosen] = useState(null);
   const [pill, setPill] = useState(null);
-  const hotRef = useRef(-1);
+  const navRef = useRef(nav);
   const menuRef = useRef(null);
+  const menuEl = useRef(null);
+  const seq = useRef(1);
+  const timers = useRef(new Map());
+  const quiet = useRef(null);
 
   useEffect(() => {
     menuRef.current = menu;
   }, [menu]);
+
+  const openRef = useRef(null);
+
+  const slotOf = useCallback((m) => {
+    const root = rootRef.current;
+    const el = coverEls.current.get(m.record.id);
+    if (!root || !el) return null;
+    const r = slotRect(root, el);
+    return { x: r.left + r.width / 2 - (m.left + m.size / 2), y: r.top + r.height / 2 - (m.top + m.size / 2), s: r.width / m.size };
+  }, []);
+
+  const setNav = useCallback((next) => {
+    navRef.current = next;
+    setNavState(next);
+  }, []);
+
+  const clearTimer = (name) => {
+    const t = timers.current.get(name);
+    if (t) clearTimeout(t);
+    timers.current.delete(name);
+  };
+
+  const later = (name, ms, fn) => {
+    clearTimer(name);
+    timers.current.set(
+      name,
+      setTimeout(() => {
+        timers.current.delete(name);
+        fn();
+      }, ms),
+    );
+  };
+
+  useEffect(() => {
+    const all = timers.current;
+    return () => {
+      all.forEach((t) => clearTimeout(t));
+      all.clear();
+    };
+  }, []);
+
+  const paint = useCallback(() => {
+    const st = spring.current;
+    const el = cloneRef.current;
+    if (!el) return;
+    el.style.transform = `translate3d(${st.x.toFixed(2)}px, ${st.y.toFixed(2)}px, 0) scale(${st.s.toFixed(4)})`;
+    const p = Math.min(1, Math.max(0, (st.s - st.fs) / Math.max(0.001, 1 - st.fs)));
+    el.style.setProperty("--hm-r", `${((GRID_R + (LIFT_R - GRID_R) * p) / st.s).toFixed(3)}px`);
+  }, []);
 
   const runSpring = useCallback(() => {
     const st = spring.current;
@@ -98,105 +162,289 @@ export default function Piece({ embedded = false }) {
     const step = (now) => {
       const dt = Math.min(0.032, last ? (now - last) / 1000 : 0.016);
       last = now;
-      const k = 260;
-      const c = 26;
+      const k = 320;
+      const c = 32;
       st.vx += ((st.tx - st.x) * k - st.vx * c) * dt;
       st.vy += ((st.ty - st.y) * k - st.vy * c) * dt;
       st.vs += ((st.ts - st.s) * k - st.vs * c) * dt;
       st.x += st.vx * dt;
       st.y += st.vy * dt;
       st.s += st.vs * dt;
-      const el = cloneRef.current;
-      if (el) el.style.transform = `translate3d(${st.x.toFixed(2)}px, ${st.y.toFixed(2)}px, 0) scale(${st.s.toFixed(4)})`;
-      const resting = Math.abs(st.tx - st.x) < 0.3 && Math.abs(st.ty - st.y) < 0.3 && Math.abs(st.ts - st.s) < 0.001 && Math.abs(st.vs) < 0.01 && Math.abs(st.vx) + Math.abs(st.vy) < 1;
+      const resting = Math.abs(st.tx - st.x) < 0.2 && Math.abs(st.ty - st.y) < 0.2 && Math.abs(st.ts - st.s) < 0.0008 && Math.abs(st.vs) < 0.01 && Math.abs(st.vx) + Math.abs(st.vy) < 1;
       if (resting) {
+        st.x = st.tx;
+        st.y = st.ty;
+        st.s = st.ts;
+        paint();
         st.raf = 0;
         const done = st.onRest;
         st.onRest = null;
         done?.();
         return;
       }
+      paint();
       st.raf = requestAnimationFrame(step);
     };
     st.raf = requestAnimationFrame(step);
-  }, []);
+  }, [paint]);
 
   useEffect(() => () => cancelAnimationFrame(spring.current.raf), []);
 
+  const rootItems = useMemo(() => (menu ? menuFor(menu.record) : []), [menu]);
+  const rootItemsRef = useRef(rootItems);
+  useEffect(() => {
+    rootItemsRef.current = rootItems;
+  }, [rootItems]);
+
+  const dropGhost = useCallback(
+    (keys) => {
+      if (!keys.length) return;
+      later(`ghost-${keys[0]}`, 420, () => {
+        const cur = navRef.current;
+        setNav({ ...cur, ghosts: cur.ghosts.filter((g) => !keys.includes(g.key)) });
+      });
+    },
+    [setNav],
+  );
+
+  const back = useCallback(
+    (level) => {
+      const cur = navRef.current;
+      if (cur.path.length <= level) return;
+      const leaving = cur.path.slice(level).map((e, i) => ({ ...e, level: level + i + 1 }));
+      setNav({ path: cur.path.slice(0, level), hot: cur.hot.slice(0, level + 1), ghosts: [...cur.ghosts, ...leaving], lift: level === 0 ? 0 : cur.lift });
+      dropGhost(leaving.map((g) => g.key));
+    },
+    [setNav, dropGhost],
+  );
+
+  const openSub = useCallback(
+    (level, index, viaKey = false) => {
+      const m = menuRef.current;
+      const layer = layerRef.current;
+      if (!m || m.closing || !layer) return;
+      const cur = navRef.current;
+      const items = itemsAt(rootItemsRef.current, cur.path, level);
+      const item = items[index];
+      if (!item?.children) return;
+      if (cur.path[level]?.index === index && cur.path.length === level + 1) return;
+      const box = layer.getBoundingClientRect();
+      const parent = level === 0 ? { x: m.menuLeft, y: m.menuTop } : cur.path[level - 1];
+      const rowTop = parent.y + (level === 0 ? 0 : ITEM_H) + index * ITEM_H;
+      const h = (item.children.length + 1) * ITEM_H;
+      const dx = (m.narrow ? 12 : 24) * (m.alignLeft ? 1 : -1);
+      const x = Math.max(16, Math.min(box.width - 16 - m.menuW, parent.x + dx));
+      const limit = box.height - BOTTOM;
+      const want = Math.max(TOP, rowTop, parent.y + PEEK);
+      const lift = Math.min(Math.max(0, m.top - 16), Math.max(0, want + h - limit));
+      const y = Math.max(TOP - lift, Math.min(want, limit + lift - h));
+      const entry = { id: item.id, index, key: seq.current++, label: item.label, items: item.children, x, y, lift, fx: parent.x - x, fy: rowTop - y };
+      const swap = cur.path.length > level;
+      if (swap) entry.late = true;
+      const leaving = cur.path.slice(level).map((e, i) => ({ ...e, level: level + i + 1, swap }));
+      const hot = cur.hot.slice(0, level + 1);
+      hot[level] = index;
+      hot[level + 1] = viaKey ? 0 : -1;
+      setNav({ path: [...cur.path.slice(0, level), entry], hot, ghosts: [...cur.ghosts, ...leaving], lift: Math.max(cur.lift ?? 0, lift) });
+      dropGhost(leaving.map((g) => g.key));
+      tick();
+    },
+    [setNav, dropGhost],
+  );
+
+  const setHot = useCallback(
+    (level, index) => {
+      const cur = navRef.current;
+      if (cur.hot[level] === index) return;
+      const hot = [...cur.hot];
+      hot[level] = index;
+      setNav({ ...cur, hot });
+    },
+    [setNav],
+  );
+
   const close = useCallback(() => {
+    const m = menuRef.current;
+    if (!m || m.closing) return;
+    timers.current.forEach((t) => clearTimeout(t));
+    timers.current.clear();
     const st = spring.current;
-    setMenu((m) => (m ? { ...m, closing: true } : m));
-    setHot(-1);
-    hotRef.current = -1;
-    st.tx = 0;
-    st.ty = 0;
-    st.ts = 1;
-    st.onRest = () => {
-      setMenu(null);
+    const from = slotOf(m) ?? m.from;
+    const cur = navRef.current;
+    const settle = cur.path.length > 0 || (cur.lift ?? 0) > 0 ? SETTLE : 0;
+    const t0 = performance.now();
+    setMenu({ ...m, from, closing: true });
+    st.tx = from.x;
+    st.ty = from.y;
+    st.ts = from.s;
+    st.fs = from.s;
+    const land = () => {
+      setMenu((c) => (c && c.closing && c.n === m.n ? null : c));
+      setNav({ path: [], hot: [-1], ghosts: [] });
       setChosen(null);
+      const next = queued.current;
+      queued.current = null;
+      if (next) requestAnimationFrame(() => openRef.current?.(next.record, next.viaKey));
+      else if (m.viaKey) requestAnimationFrame(() => coverEls.current.get(m.record.id)?.focus({ preventScroll: true }));
+    };
+    st.onRest = () => {
+      const wait = settle - (performance.now() - t0);
+      if (wait > 0)
+        timers.current.set(
+          "land",
+          setTimeout(() => {
+            timers.current.delete("land");
+            land();
+          }, wait),
+        );
+      else land();
     };
     runSpring();
-  }, [runSpring]);
+  }, [runSpring, setNav, slotOf]);
 
   const choose = useCallback(
-    (index) => {
+    (level, index) => {
       const m = menuRef.current;
       if (!m || m.closing) return;
-      const item = ITEMS[index];
+      const item = itemsAt(rootItemsRef.current, navRef.current.path, level)[index];
+      if (!item || item.children) return;
       pick();
-      setChosen(index);
-      if (item.id === "share") navigator.clipboard?.writeText(`${m.album.title} by ${m.album.artist} (${m.album.year})`).catch(() => {});
-      setPill({ text: item.done(m.album), n: Date.now() });
-      setTimeout(close, 180);
+      setChosen(`${level}-${index}`);
+      if (item.copy) navigator.clipboard?.writeText(`${m.record.title} by ${m.record.artist}`).catch(() => {});
+      setPill({ text: item.done, n: performance.now(), show: true });
+      later("close", 160, close);
     },
     [close],
   );
 
   const open = useCallback(
-    (album) => {
+    (record, viaKey = false) => {
       const root = rootRef.current;
-      const el = coverEls.current.get(album.id);
+      const el = coverEls.current.get(record.id);
       if (!root || !el) return;
+      if (menuRef.current?.closing) {
+        queued.current = { record, viaKey };
+        return;
+      }
       const box = root.getBoundingClientRect();
-      const r = el.getBoundingClientRect();
-      const rect = { left: r.left - box.left, top: r.top - box.top, width: r.width, height: r.height };
-      const pos = place(rect, box);
+      const rect = slotRect(root, el);
+      const items = menuFor(record);
+      const narrow = box.width < 640;
+      const menuW = Math.min(narrow ? 300 : ROOT_W, box.width - 32);
+      const reserve = (narrow ? tallest(items) : items.length) * ITEM_H;
+      const pos = place(rect, { width: box.width, height: box.height }, reserve, menuW);
+      pos.menuTop = pos.below ? pos.anchor : pos.anchor - items.length * ITEM_H;
       const st = spring.current;
-      st.x = 0;
-      st.y = 0;
-      st.s = 0.95;
-      st.vs = 0.8;
-      st.tx = pos.dx;
-      st.ty = pos.dy;
-      st.ts = LIFT;
+      cancelAnimationFrame(st.raf);
+      st.x = pos.from.x;
+      st.y = pos.from.y;
+      st.s = pos.from.s * (viaKey ? 1 : PRESS);
+      st.fs = pos.from.s;
+      st.vx = 0;
+      st.vy = 0;
+      st.vs = 0;
+      st.tx = 0;
+      st.ty = 0;
+      st.ts = 1;
       st.onRest = null;
-      setMenu({ album, rect, ...pos, closing: false, n: Date.now() });
+      timers.current.forEach((t) => clearTimeout(t));
+      timers.current.clear();
+      setChosen(null);
+      quiet.current = null;
+      setNav({ path: [], hot: [viaKey ? 0 : -1], ghosts: [] });
+      setMenu({ record, ...pos, narrow, viaKey, closing: false, n: performance.now() });
       setPressing(null);
-      setHot(-1);
-      hotRef.current = -1;
       thunk();
     },
-    [],
+    [setNav],
   );
+
+  useEffect(() => {
+    openRef.current = open;
+  }, [open]);
 
   useLayoutEffect(() => {
     if (menu && !menu.closing && cloneRef.current) {
-      const st = spring.current;
-      cloneRef.current.style.transform = `translate3d(${st.x}px, ${st.y}px, 0) scale(${st.s})`;
+      paint();
       runSpring();
     }
-  }, [menu, runSpring]);
+  }, [menu, paint, runSpring]);
 
-  const itemAt = (x, y) => {
-    const target = document.elementFromPoint(x, y)?.closest("[data-item]");
-    return target ? Number(target.getAttribute("data-item")) : -1;
+  useEffect(() => {
+    if (menu && !menu.closing) menuEl.current?.focus({ preventScroll: true });
+  }, [menu]);
+
+  const hitAt = (x, y) => {
+    const el = document.elementFromPoint(x, y)?.closest("[data-level]");
+    if (!el) return null;
+    return { level: Number(el.dataset.level), index: el.hasAttribute("data-back") ? -1 : Number(el.dataset.item), back: el.hasAttribute("data-back") };
+  };
+
+  const onRowEnter = (level, index) => {
+    const m = menuRef.current;
+    if (!m || m.closing || quiet.current) return;
+    const cur = navRef.current;
+    const items = itemsAt(rootItemsRef.current, cur.path, level);
+    const item = items[index];
+    clearTimer(`intent-${level}`);
+    if (level < cur.path.length) {
+      later(`intent-${level}`, RECEDE, () => {
+        if (item?.children && navRef.current.path[level]?.index !== index) openSub(level, index);
+        else back(level);
+        setHot(level, index);
+      });
+      return;
+    }
+    setHot(level, index);
+    if (item?.children) later(`intent-${level}`, OPEN, () => openSub(level, index));
+  };
+
+  const onPanelEnter = (level) => {
+    for (let l = 0; l < level; l += 1) clearTimer(`intent-${l}`);
+    const cur = navRef.current;
+    const entry = cur.path[level - 1];
+    if (entry && cur.hot[level - 1] !== entry.index) setHot(level - 1, entry.index);
+  };
+
+  const onRowClick = (level, index) => {
+    const m = menuRef.current;
+    if (!m || m.closing) return;
+    const cur = navRef.current;
+    const item = itemsAt(rootItemsRef.current, cur.path, level)[index];
+    if (!item) return;
+    clearTimer(`intent-${level}`);
+    if (item.children) {
+      if (cur.path[level]?.index === index) back(level);
+      else openSub(level, index);
+    } else if (level < cur.path.length) {
+      back(level);
+      setHot(level, index);
+      tick();
+    } else choose(level, index);
   };
 
   useEffect(() => {
+    const root = rootRef.current;
+    const onTouchMove = (event) => {
+      const m = menuRef.current;
+      if ((m && !m.closing) || press.current?.opened) event.preventDefault();
+    };
+    root?.addEventListener("touchmove", onTouchMove, { passive: false });
     const onMove = (event) => {
+      const q = quiet.current;
+      if (q) {
+        if (q.x === null) {
+          q.x = event.clientX;
+          q.y = event.clientY;
+        } else if (Math.hypot(event.clientX - q.x, event.clientY - q.y) > 4) {
+          quiet.current = null;
+          const hit = event.pointerType === "mouse" ? hitAt(event.clientX, event.clientY) : null;
+          if (hit && !hit.back) onRowEnter(hit.level, hit.index);
+        }
+      }
       const p = press.current;
       if (!p || p.id !== event.pointerId) return;
-      if (!menuRef.current) {
+      if (!p.opened) {
         if (Math.hypot(event.clientX - p.x, event.clientY - p.y) > 10) {
           clearTimeout(p.timer);
           press.current = null;
@@ -204,110 +452,197 @@ export default function Piece({ embedded = false }) {
         }
         return;
       }
-      const i = itemAt(event.clientX, event.clientY);
-      if (i !== hotRef.current) {
-        hotRef.current = i;
-        setHot(i);
-        if (i >= 0) tick();
+      if (Math.hypot(event.clientX - p.x, event.clientY - p.y) > 6) p.slid = true;
+      const hit = hitAt(event.clientX, event.clientY);
+      const key = hit ? `${hit.level}:${hit.index}` : "";
+      if (key === p.over) return;
+      p.over = key;
+      clearTimer("dwell");
+      if (!hit) return;
+      if (hit.back) {
+        later("dwell", DWELL, () => back(hit.level - 1));
+        return;
       }
+      const deep = navRef.current.path.length;
+      if (hit.level < deep) {
+        later("dwell", DWELL, () => back(hit.level));
+        return;
+      }
+      if (event.pointerType !== "mouse") {
+        setHot(hit.level, hit.index);
+        tick();
+      }
+      const item = itemsAt(rootItemsRef.current, navRef.current.path, hit.level)[hit.index];
+      if (item?.children && event.pointerType !== "mouse") later("dwell", DWELL, () => openSub(hit.level, hit.index));
     };
     const onUp = (event) => {
       const p = press.current;
       if (!p || p.id !== event.pointerId) return;
       clearTimeout(p.timer);
+      clearTimer("dwell");
       press.current = null;
       setPressing(null);
-      if (!menuRef.current) {
-        if (event.type === "pointerup") setPill({ text: `Playing ${p.album.title}`, n: Date.now() });
+      if (!p.opened) {
+        if (event.type === "pointerup") setPill({ text: `Playing ${p.record.title}`, n: performance.now(), show: true });
         return;
       }
-      const i = itemAt(event.clientX, event.clientY);
-      if (i >= 0 && p.moved) choose(i);
+      const hit = hitAt(event.clientX, event.clientY);
+      if (!hit || !p.slid) {
+        if (event.pointerType !== "mouse") setHot(navRef.current.path.length, -1);
+        return;
+      }
+      if (hit.back) {
+        back(hit.level - 1);
+        return;
+      }
+      if (hit.level < navRef.current.path.length) return;
+      const item = itemsAt(rootItemsRef.current, navRef.current.path, hit.level)[hit.index];
+      if (item?.children) openSub(hit.level, hit.index);
+      else choose(hit.level, hit.index);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
     window.addEventListener("pointercancel", onUp);
     return () => {
+      root?.removeEventListener("touchmove", onTouchMove);
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
       window.removeEventListener("pointercancel", onUp);
     };
-  }, [choose]);
+  });
 
   useEffect(() => {
-    if (!pill) return undefined;
-    const t = setTimeout(() => setPill(null), 2400);
+    if (!pill?.show) return undefined;
+    const t = setTimeout(() => setPill((p) => (p ? { ...p, show: false } : p)), 2200);
     return () => clearTimeout(t);
   }, [pill]);
 
-  const onCoverDown = (album) => (event) => {
-    if (event.button > 0 || menuRef.current) return;
+  const onCoverDown = (record) => (event) => {
+    if (event.button > 0) return;
+    const m = menuRef.current;
+    if (m && !m.closing) return;
     wakeAudio();
-    const p = { id: event.pointerId, x: event.clientX, y: event.clientY, album, moved: false };
+    const p = { id: event.pointerId, x: event.clientX, y: event.clientY, record, opened: false, slid: false, over: "" };
     p.timer = setTimeout(() => {
-      p.moved = true;
-      open(album);
+      p.opened = true;
+      open(record);
     }, HOLD);
     press.current = p;
-    setPressing(album.id);
+    setPressing(record.id);
   };
 
-  const onCoverKey = (album) => (event) => {
+  const onCoverKey = (record) => (event) => {
     if (event.key === "Enter" || event.key === " " || event.key === "ContextMenu") {
       event.preventDefault();
       wakeAudio();
-      open(album);
-      hotRef.current = 0;
-      setHot(0);
+      open(record, true);
     }
   };
 
   const onMenuKey = (event) => {
-    if (!menu) return;
-    if (event.key === "Escape") {
+    const m = menuRef.current;
+    if (!m || m.closing) return;
+    quiet.current = quiet.current ?? { x: null, y: null };
+    const cur = navRef.current;
+    const level = cur.path.length;
+    const items = itemsAt(rootItems, cur.path, level);
+    const hot = cur.hot[level] ?? -1;
+    if (event.key === "Tab" || (event.key === "Escape" && level === 0)) {
       event.preventDefault();
       close();
+    } else if ((event.key === "Escape" || event.key === "ArrowLeft") && level > 0) {
+      event.preventDefault();
+      back(level - 1);
+      tick();
     } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault();
       const d = event.key === "ArrowDown" ? 1 : -1;
-      const i = (Math.max(0, hotRef.current) + d + ITEMS.length) % ITEMS.length;
-      hotRef.current = i;
-      setHot(i);
+      setHot(level, hot < 0 ? (d > 0 ? 0 : items.length - 1) : (hot + d + items.length) % items.length);
       tick();
-    } else if (event.key === "Enter" || event.key === " ") {
+    } else if (event.key === "ArrowRight" || event.key === "Enter" || event.key === " ") {
       event.preventDefault();
-      if (hotRef.current >= 0) choose(hotRef.current);
+      if (hot < 0) return;
+      if (items[hot]?.children) openSub(level, hot, true);
+      else if (event.key !== "ArrowRight") choose(level, hot);
     }
   };
 
-  const menuEl = useRef(null);
-  useEffect(() => {
-    if (menu && !menu.closing) menuEl.current?.focus({ preventScroll: true });
-  }, [menu]);
+  const depth = nav.path.length;
+  const panels = [...nav.path.map((e, l) => ({ ...e, level: l + 1 })), ...nav.ghosts.map((g) => ({ ...g, ghost: true }))].sort((a, b) => a.key - b.key);
+
+  const rows = (level, items, live = true) => {
+    return items.map((item, i) => {
+      const isOpen = nav.path[level]?.index === i;
+      return (
+        <button
+          key={item.id}
+          type="button"
+          role="menuitem"
+          tabIndex={-1}
+          className="hm-item"
+          data-level={live ? level : undefined}
+          data-item={live ? i : undefined}
+          data-hot={live && nav.hot[level] === i ? "" : undefined}
+          data-open={live && isOpen ? "" : undefined}
+          data-chosen={live && chosen === `${level}-${i}` ? "" : undefined}
+          aria-haspopup={item.children ? "menu" : undefined}
+          aria-expanded={item.children ? live && isOpen : undefined}
+          onPointerEnter={(e) => {
+            if (live && e.pointerType === "mouse") onRowEnter(level, i);
+          }}
+          onClick={() => live && onRowClick(level, i)}
+        >
+          {item.initial ? (
+            <span className="hm-avatar" aria-hidden="true">
+              {item.initial}
+            </span>
+          ) : null}
+          <span className="hm-label">{item.label}</span>
+          {item.meta ? <span className="hm-meta">{item.meta}</span> : null}
+          {item.children ? <Glyph d={CHEVRON_R} /> : item.icon ? <Glyph d={item.icon} /> : null}
+        </button>
+      );
+    });
+  };
+
+  const backRow = (level, label, live = true) => (
+    <button
+      type="button"
+      tabIndex={-1}
+      className="hm-item hm-back"
+      aria-label={`Back from ${label}`}
+      data-level={live ? level : undefined}
+      data-back={live ? "" : undefined}
+      onClick={() => live && back(level - 1)}
+    >
+      <span className="hm-label">{label}</span>
+      <Glyph d={CHEVRON_D} />
+    </button>
+  );
 
   const Root = embedded ? "div" : "main";
-  const album = menu?.album;
-
+  const record = menu?.record;
+  const isOpen = menu && !menu.closing;
   return (
-    <Root ref={rootRef} className="hm-root" data-embedded={embedded ? "" : undefined}>
-      <div className="hm-page" data-blurred={menu && !menu.closing ? "" : undefined}>
+    <Root ref={rootRef} className="hm-root" data-embedded={embedded ? "" : undefined} data-open={isOpen ? "" : undefined}>
+      <div className="hm-page">
         <div className="hm-scroll" data-scroll-contain="">
           {embedded ? null : (
             <header className="hm-head">
-              <h1 className="text-title-sm">Hold Menu</h1>
-              <p className="hm-hint text-ui-lg">Press and hold a record. Keep holding, slide onto an action and let go to choose it.</p>
+              <h1 className="hm-h1">Hold Menu</h1>
             </header>
           )}
           <ul className="hm-grid">
-            {FEATURED.map((a) => (
+            {records.map((a) => (
               <li key={a.id} className="hm-cell">
                 <button
                   type="button"
                   className="hm-cover"
                   data-pressing={pressing === a.id ? "" : undefined}
-                  data-lifted={menu?.album.id === a.id ? "" : undefined}
+                  data-lifted={menu?.record.id === a.id ? "" : undefined}
                   aria-haspopup="menu"
-                  aria-label={`${a.title}. Hold for actions`}
+                  aria-expanded={Boolean(isOpen && menu.record.id === a.id)}
+                  aria-label={`${a.title}, ${a.sub}`}
                   ref={(el) => {
                     if (el) coverEls.current.set(a.id, el);
                     else coverEls.current.delete(a.id);
@@ -316,78 +651,87 @@ export default function Piece({ embedded = false }) {
                   onKeyDown={onCoverKey(a)}
                   onContextMenu={(event) => {
                     event.preventDefault();
-                    if (!menuRef.current) {
-                      if (press.current) clearTimeout(press.current.timer);
-                      press.current = null;
-                      open(a);
+                    const m = menuRef.current;
+                    if (m && !m.closing) return;
+                    if (press.current) {
+                      clearTimeout(press.current.timer);
+                      press.current.opened = true;
                     }
+                    open(a);
                   }}
                 >
                   <img src={a.cover} alt="" draggable={false} />
                 </button>
                 <span className="hm-title">{a.title}</span>
-                <span className="hm-year">
-                  {a.year} · {a.tracks.length} songs
-                </span>
+                <span className="hm-year">{a.sub}</span>
               </li>
             ))}
           </ul>
         </div>
       </div>
+      <div className="hm-veil" aria-hidden="true" onPointerDown={close} />
       {menu ? (
-        <div className="hm-layer" data-closing={menu.closing ? "" : undefined}>
-          <div className="hm-veil" onPointerDown={close} />
+        <div ref={layerRef} className="hm-layer" data-closing={menu.closing ? "" : undefined} style={{ "--lift": menu.closing ? 0 : nav.lift ?? 0 }}>
           <div
             ref={cloneRef}
             className="hm-lifted"
-            style={{ left: menu.rect.left, top: menu.rect.top, width: menu.rect.width, height: menu.rect.height }}
+            data-under={!menu.closing && depth > 0 ? "" : undefined}
+            data-above={menu.below ? undefined : ""}
+            style={{ left: menu.left, top: menu.top, width: menu.size, height: menu.size, "--d": menu.closing ? 0 : depth, "--rx": menu.alignLeft ? "-1" : "1" }}
           >
-            <img className="hm-glow" src={album.cover} alt="" draggable={false} />
-            <img className="hm-lifted-img" src={album.cover} alt={album.title} draggable={false} />
+            <img src={record.cover} alt={record.title} draggable={false} />
           </div>
           <div
             ref={menuEl}
             className="hm-menu"
+            data-frame="root"
             role="menu"
             tabIndex={-1}
-            aria-label={`${album.title} actions`}
+            aria-label={`${record.title} actions`}
             data-below={menu.below ? "" : undefined}
-            style={{ left: menu.menuLeft, top: menu.menuTop, width: MENU_W }}
+            data-left={menu.alignLeft ? "" : undefined}
+            data-under={depth > 0 ? "" : undefined}
+            style={{ left: menu.menuLeft, top: menu.menuTop, width: menu.menuW, "--d": depth, "--rx": menu.alignLeft ? "-1" : "1" }}
             onKeyDown={onMenuKey}
           >
-            <div className="hm-menu-head">
-              <span className="hm-menu-title">{album.title}</span>
-              <span className="hm-menu-sub">
-                {album.artist} · {album.year}
-              </span>
-            </div>
-            {ITEMS.map((item, i) => (
-              <button
-                key={item.id}
-                type="button"
-                role="menuitem"
-                className="hm-item"
-                data-item={i}
-                data-hot={hot === i ? "" : undefined}
-                data-chosen={chosen === i ? "" : undefined}
-                style={{ "--i": i }}
-                onPointerEnter={(e) => {
-                  if (e.pointerType !== "mouse") return;
-                  hotRef.current = i;
-                  setHot(i);
-                }}
-                onClick={() => choose(i)}
-              >
-                <span>{item.label}</span>
-                <svg viewBox="0 0 20 20" width="20" height="20" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  {item.icon}
-                </svg>
-              </button>
-            ))}
+            {rows(0, rootItems)}
           </div>
+          {panels.map((e) => {
+            const d = e.ghost ? 0 : depth - e.level;
+            return (
+              <div
+                key={e.key}
+                className="hm-menu hm-sub"
+                data-frame={e.ghost ? undefined : e.key}
+                data-leaving={e.ghost ? "" : undefined}
+                data-swap={e.ghost && e.swap ? "" : undefined}
+                data-late={!e.ghost && e.late ? "" : undefined}
+                data-under={d > 0 ? "" : undefined}
+                role="menu"
+                aria-label={e.label}
+                aria-hidden={e.ghost ? "true" : undefined}
+                style={{
+                  left: e.x,
+                  top: e.y,
+                  width: menu.menuW,
+                  "--h": `${(e.items.length + 1) * ITEM_H}px`,
+                  "--fx": `${e.fx}px`,
+                  "--fy": `${e.fy}px`,
+                  "--d": d,
+                  "--rx": menu.alignLeft ? "-1" : "1",
+                }}
+                onPointerEnter={(ev) => {
+                  if (!e.ghost && ev.pointerType === "mouse") onPanelEnter(e.level);
+                }}
+              >
+                {backRow(e.level, e.label, !e.ghost)}
+                {rows(e.level, e.items, !e.ghost)}
+              </div>
+            );
+          })}
         </div>
       ) : null}
-      <p className="hm-pill" data-show={pill ? "" : undefined} aria-live="polite">
+      <p className="hm-pill" data-show={pill?.show ? "" : undefined} aria-live="polite">
         <span key={pill?.n}>{pill?.text}</span>
       </p>
     </Root>

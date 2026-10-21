@@ -740,8 +740,11 @@ export function createKern(stage, { embedded = false, onLive = () => {}, onMorph
   root.addEventListener("pointercancel", onUp);
   input.addEventListener("input", onInput);
   input.addEventListener("blur", onInputDone);
-  window.addEventListener("keydown", onKey);
-  window.addEventListener("keyup", onKeyUp);
+  // In a tile on the experiments index, typing only reaches the piece once
+  // it has focus — space and the arrows still scroll the page.
+  const keyScope = embedded ? root : window;
+  keyScope.addEventListener("keydown", onKey);
+  keyScope.addEventListener("keyup", onKeyUp);
   window.addEventListener("blur", onBlur);
   document.addEventListener("visibilitychange", onVisibility);
 
@@ -791,8 +794,8 @@ export function createKern(stage, { embedded = false, onLive = () => {}, onMorph
       root.removeEventListener("pointercancel", onUp);
       input.removeEventListener("input", onInput);
       input.removeEventListener("blur", onInputDone);
-      window.removeEventListener("keydown", onKey);
-      window.removeEventListener("keyup", onKeyUp);
+      keyScope.removeEventListener("keydown", onKey);
+      keyScope.removeEventListener("keyup", onKeyUp);
       window.removeEventListener("blur", onBlur);
       document.removeEventListener("visibilitychange", onVisibility);
       sound?.destroy();

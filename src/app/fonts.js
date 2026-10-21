@@ -19,12 +19,17 @@ import localFont from "next/font/local";
  * Subset to latin + latin-ext + punctuation/currency/arrows/math with
  * `--layout-features='*'`, so the feature tables survive the cut: 192 KB
  * for the upright variable. Italic is not loaded — nothing on this site
- * sets Inter italic, and `font-synthesis: none` means nothing fakes it. */
+ * sets Inter italic, and `font-synthesis: none` means nothing fakes it.
+ *
+ * `preload: false` — at 192 KB it is the heaviest file in every page's
+ * first request burst, and only those two surfaces set it. Unpreloaded it
+ * is fetched the moment a rule that uses it applies. */
 export const inter = localFont({
     src: "../../public/fonts/Inter-Variable.woff2",
     weight: "100 900",
     style: "normal",
     display: "swap",
+    preload: false,
     variable: "--font-inter",
     fallback: ["ui-sans-serif", "system-ui", "-apple-system", "sans-serif"],
 });

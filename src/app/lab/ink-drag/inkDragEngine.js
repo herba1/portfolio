@@ -1,5 +1,10 @@
 import {
+  BLUR_FRAGMENT,
+  COMBINE_FRAGMENT,
   DISPLAY_FRAGMENT,
+  FLOW_FRAGMENT,
+  FLOW_VERTEX,
+  PROBE_FRAGMENT,
   INK_FRAGMENT,
   MAX_SEGMENTS,
   PAPER_FRAGMENT,
@@ -21,11 +26,65 @@ const PRINT_MS = 820;
 const VELOCITY_LIFE_MS = 1400;
 const QUEUE_LIMIT = 96;
 const VELOCITY_SCALE = 0.5;
-const MORPH_MS = 1700;
-const MORPH_HOLD_MS = 760;
+const MORPH_MS = 2600;
+const FLIGHT = 0.62;
+const STIFF = 8.6;
+const STAGGER = 0.3;
+const PRINT_STIFF = 6.4;
 const IDLE_FIRST_MS = 2600;
 const IDLE_MS = 6400;
-const SWEEP_SEGMENTS = 6;
+const FLOW_COLS = 160;
+const FLOW_ROWS = 120;
+const FLOW_COUNT = FLOW_COLS * FLOW_ROWS;
+const PROBE = 3;
+const BANDS = 40;
+
+function springAt(x, k) {
+  return (1 - Math.exp(-k * x) * (1 + k * x)) / (1 - Math.exp(-k) * (1 + k));
+}
+
+function hash(n) {
+  const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+function sampleCells(cells, count, step, salt) {
+  let total = 0;
+  for (const c of cells) total += c.w;
+  if (total <= 0) return null;
+  const out = new Array(count);
+  const stride = total / count;
+  let next = stride * 0.5;
+  let acc = 0;
+  let k = 0;
+  for (let i = 0; i < cells.length && k < count; i += 1) {
+    const c = cells[i];
+    acc += c.w;
+    while (acc >= next && k < count) {
+      const jx = hash(k * 1.37 + salt);
+      const jy = hash(k * 2.91 + salt + 17);
+      out[k] = { x: (c.gx + jx) * step, y: (c.gy + jy) * step, d: c.d, a: c.a, b: c.b };
+      next += stride;
+      k += 1;
+    }
+  }
+  while (k < count) {
+    out[k] = out[k - 1];
+    k += 1;
+  }
+  return out;
+}
+
+function rearrange(list) {
+  const idx = list.map((_, i) => i).sort((a, b) => list[a].y - list[b].y);
+  const size = Math.ceil(list.length / BANDS);
+  const order = [];
+  for (let start = 0; start < idx.length; start += size) {
+    const band = idx.slice(start, start + size).sort((a, b) => list[a].x - list[b].x);
+    order.push(...band);
+  }
+  return order;
+}
 
 let fontPromise = null;
 
@@ -102,6 +161,9 @@ export default class InkDragEngine {
     this.covers = new Map();
     this.waits = new Map();
     this.morph = null;
+    this.maskData = null;
+    this.tone = 0;
+    this.prevTone = 0;
     this.idleTimer = 0;
     this.reduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
@@ -206,7 +268,21 @@ export default class InkDragEngine {
       velocity: link(gl, this.vertex, VELOCITY_FRAGMENT),
       ink: link(gl, this.vertex, INK_FRAGMENT),
       display: link(gl, this.vertex, DISPLAY_FRAGMENT),
+      combine: link(gl, this.vertex, COMBINE_FRAGMENT),
+      blur: link(gl, this.vertex, BLUR_FRAGMENT),
+      probe: link(gl, this.vertex, PROBE_FRAGMENT),
+      flow: link(gl, compile(gl, gl.VERTEX_SHADER, FLOW_VERTEX), FLOW_FRAGMENT),
     };
+    this.flowVao = gl.createVertexArray();
+    this.flowTextures = [0, 1, 2, 3].map(() => {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      return t;
+    });
     this.buffer = gl.createBuffer();
     this.vao = gl.createVertexArray();
     gl.bindVertexArray(this.vao);
@@ -222,6 +298,7 @@ export default class InkDragEngine {
     gl.disable(gl.BLEND);
     this.maskCanvas = document.createElement("canvas");
     this.maskTexture = gl.createTexture();
+    this.prevMaskTexture = gl.createTexture();
     this.coverCanvas = document.createElement("canvas");
   }
 
@@ -305,6 +382,13 @@ export default class InkDragEngine {
       if (pair) pair.forEach((t) => this.dropTarget(t));
     this.dropTarget(this.paperTarget);
     this.dropTarget(this.goalTarget);
+    for (const t of [this.fromTarget, this.flowTarget, this.mapsTarget, this.probeTarget, this.blurTargets?.[0], this.blurTargets?.[1], this.crispTarget]) this.dropTarget(t);
+    this.crispTarget = null;
+    this.blurTargets = null;
+    this.fromTarget = null;
+    this.flowTarget = null;
+    this.mapsTarget = null;
+    this.probeTarget = null;
     this.goalTarget = null;
     this.inkTargets = null;
     this.velTargets = null;
@@ -345,6 +429,14 @@ export default class InkDragEngine {
       false,
     );
     this.goalTarget = this.makeTarget(this.simWidth, this.simHeight, float);
+    if (float) {
+      this.fromTarget = this.makeTarget(this.simWidth, this.simHeight, true);
+      this.flowTarget = this.makeTarget(this.simWidth, this.simHeight, true);
+      this.blurTargets = [0, 1].map(() => this.makeTarget(this.simWidth, this.simHeight, true));
+      this.crispTarget = this.makeTarget(this.simWidth, this.simHeight, true);
+      this.mapsTarget = this.makeTarget(this.simWidth, this.simHeight, false);
+      this.probeTarget = this.makeTarget(Math.ceil(this.simWidth / PROBE), Math.ceil(this.simHeight / PROBE), false);
+    }
     this.inkRead = 0;
     this.velRead = 0;
     this.renderPaper();
@@ -352,6 +444,7 @@ export default class InkDragEngine {
       this.drawMask();
       if (this.morph) {
         this.morph = null;
+        this.prevTone = this.tone;
         this.scheduleIdle(IDLE_MS);
       }
       if (this.printStart < 0) this.runPrint(1);
@@ -383,15 +476,22 @@ export default class InkDragEngine {
     return "title";
   }
 
-  drawMask() {
+  drawMask(keepPrev = false) {
     const item = this.currentItem();
-    const cover =
-      this.currentKind() === "cover"
-        ? this.coverPixels(this.covers.get(item.cover))
-        : null;
-    if (!cover && item) this.covers.delete(item.cover);
+    const wantsCover = this.currentKind() === "cover";
+    const cover = wantsCover
+      ? this.coverPixels(this.covers.get(item.cover))
+      : null;
+    if (wantsCover && !cover) this.covers.delete(item.cover);
+    if (!keepPrev) {
+      this.prevTone = this.tone;
+      const swap = this.prevMaskTexture;
+      this.prevMaskTexture = this.maskTexture;
+      this.maskTexture = swap;
+    }
     this.tone = cover ? 1 : 0;
-    this.uploadMask(cover || this.titlePixels(item ? item.word : DEFAULT_WORD));
+    this.maskData = cover || this.titlePixels(item ? item.word : DEFAULT_WORD);
+    this.uploadMask(this.maskData);
   }
 
   coverPixels(image) {
@@ -403,6 +503,7 @@ export default class InkDragEngine {
     );
     const x = Math.round((w - side) / 2);
     const y = Math.round(h * (portrait ? 0.48 : 0.5) - side / 2);
+    this.extent = [x / w, (x + side) / w];
     return readCover(this.coverCanvas, image, w, h, x, y, side);
   }
 
@@ -441,6 +542,8 @@ export default class InkDragEngine {
       blockHeight;
     const scale = Math.min(fitWidth, fitHeight);
     const size = 100 * scale;
+    const half = (widest * scale) / 2 / canvas.width;
+    this.extent = [0.5 - half, 0.5 + half];
     ctx.font = `${size}px ${family}`;
     ctx.textBaseline = "alphabetic";
     ctx.fillStyle = "#fff";
@@ -635,57 +738,267 @@ export default class InkDragEngine {
       this.print(false);
       return;
     }
-    this.drawMask();
+    if (this.printStart >= 0) {
+      this.runPrint(1);
+      this.printStart = -1;
+    }
+    const launch = this.morph ? this.carried() : 0;
+    const unlanded = Boolean(this.morph) && this.morph.t / MORPH_MS < 0.72;
+    this.collectStroke(1 / 60);
+    this.queue.length = 0;
+    this.snapshot();
+    const sources = this.readSources();
+    this.drawMask(unlanded);
     this.runPrint(1, this.goalTarget);
-    this.printStart = -1;
     this.drying = false;
-    this.morph = { t: 0, prevX: null };
+    this.buildFlow(sources, this.readTargets());
+    this.morph = { t: 0, rate: 1, goal: 1, launch, stagger: Math.max(0.15, 1 - launch / 0.15) };
     this.setStatus("wet");
     this.emitState();
     clearTimeout(this.idleTimer);
     this.wake();
   }
 
-  sweep(dt) {
+  carried() {
     const m = this.morph;
-    m.t += dt * 1000;
-    const p = Math.min(1, m.t / MORPH_MS);
-    const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
-    const front = -0.16 + 1.36 * eased;
-    const W = this.width;
-    const H = this.height;
-    const x = front * W;
-    const speed =
-      m.prevX == null
-        ? 0
-        : Math.min(MAX_SPEED, Math.max(0, (x - m.prevX) / dt));
-    m.prevX = x;
-    if (p < 1 && speed > 1) {
-      for (let i = 0; i < SWEEP_SEGMENTS; i += 1) {
-        const ya = ((i / SWEEP_SEGMENTS) * 1.1 - 0.05) * H;
-        const yb = (((i + 1) / SWEEP_SEGMENTS) * 1.1 - 0.05) * H;
-        const xa = x + (ya / H - 0.5) * 0.1 * W;
-        const xb = x + (yb / H - 0.5) * 0.1 * W;
-        const wobble = Math.sin(m.t * 0.004 + i * 1.7) * speed * 0.08;
-        this.queue.push([
-          xa,
-          ya,
-          xb,
-          yb,
-          speed * 1.05,
-          wobble,
-          Math.min(speed, 1100),
-          1.9,
-        ]);
+    const s = Math.min(1, Math.max(0, (m.t / MORPH_MS - STAGGER * 0.4 * m.stagger) / FLIGHT));
+    const k = STIFF;
+    const v = Math.min(0.95, m.launch) * k;
+    const speed = Math.exp(-k * s) * (v + k * (k - v) * s);
+    return Math.min(0.2, (0.5 * speed * m.rate) / k);
+  }
+
+  snapshot() {
+    const gl = this.gl;
+    const read = this.inkTargets[this.inkRead];
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, read.framebuffer);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, this.fromTarget.framebuffer);
+    gl.blitFramebuffer(0, 0, this.simWidth, this.simHeight, 0, 0, this.simWidth, this.simHeight, gl.COLOR_BUFFER_BIT, gl.NEAREST);
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
+    gl.bindFramebuffer(gl.DRAW_FRAMEBUFFER, null);
+  }
+
+  readSources() {
+    const gl = this.gl;
+    const t = this.probeTarget;
+    const { program, uniforms } = this.programs.probe;
+    gl.useProgram(program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, t.framebuffer);
+    gl.viewport(0, 0, t.width, t.height);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, this.fromTarget.texture);
+    gl.uniform1i(uniforms.uInk, 0);
+    gl.uniform2f(uniforms.uRes, t.width, t.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    const px = new Uint8Array(t.width * t.height * 4);
+    gl.readPixels(0, 0, t.width, t.height, gl.RGBA, gl.UNSIGNED_BYTE, px);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    const cells = [];
+    for (let gy = 0; gy < t.height; gy += 1) {
+      for (let gx = 0; gx < t.width; gx += 1) {
+        const o = (gy * t.width + gx) * 4;
+        const d = (px[o] / 255) * 1.6;
+        if (d < 0.05) continue;
+        cells.push({ gx, gy, w: d, d, a: px[o + 2] / 255, b: px[o + 3] / 255 });
       }
     }
-    this.lastStir = this.clock;
-    if (m.t >= MORPH_MS + MORPH_HOLD_MS) {
-      this.morph = null;
-      this.scheduleIdle(IDLE_MS);
-      return 3;
+    return cells;
+  }
+
+  readTargets() {
+    const data = this.maskData;
+    const w = this.simWidth;
+    const h = this.simHeight;
+    const gw = Math.ceil(w / PROBE);
+    const gh = Math.ceil(h / PROBE);
+    const cover = this.tone > 0;
+    const cells = [];
+    for (let gy = 0; gy < gh; gy += 1) {
+      for (let gx = 0; gx < gw; gx += 1) {
+        let d = 0;
+        let a = 0;
+        let b = 0;
+        let n = 0;
+        for (let sy = 0; sy < PROBE; sy += 1) {
+          const y = gy * PROBE + sy;
+          if (y >= h) break;
+          const row = h - 1 - y;
+          for (let sx = 0; sx < PROBE; sx += 1) {
+            const x = gx * PROBE + sx;
+            if (x >= w) break;
+            const o = (row * w + x) * 4;
+            d += data[o] / 255;
+            a += data[o + 2] / 255;
+            b += data[o + 3] / 255;
+            n += 1;
+          }
+        }
+        if (!n) continue;
+        d /= n;
+        if (d < 0.05) continue;
+        cells.push({ gx, gy, w: d, d: d * (cover ? 1.25 : 1), a: cover ? a / n : 0.5, b: cover ? b / n : 0.5 });
+      }
     }
-    return p < 1 ? front : 3;
+    return cells;
+  }
+
+  buildFlow(sourceCells, targetCells) {
+    const gl = this.gl;
+    const N = FLOW_COUNT;
+    const targets = sampleCells(targetCells, N, PROBE, 91) || [];
+    let sources = sampleCells(sourceCells, N, PROBE, 37);
+    if (!sources) sources = targets.map((t) => ({ ...t, d: 0 }));
+    const path = new Float32Array(N * 4);
+    const look = new Float32Array(N * 4);
+    const tint = new Float32Array(N * 4);
+    const mass = new Float32Array(N * 4);
+    if (targets.length) {
+      const so = rearrange(sources);
+      const to = rearrange(targets);
+      let minX = Infinity;
+      let maxX = -Infinity;
+      for (const p of sources) {
+        minX = Math.min(minX, p.x);
+        maxX = Math.max(maxX, p.x);
+      }
+      const spanX = Math.max(1, maxX - minX);
+      for (let k = 0; k < N; k += 1) {
+        const s = sources[so[k]];
+        const g = targets[to[k]];
+        const o = k * 4;
+        path[o] = s.x;
+        path[o + 1] = s.y;
+        path[o + 2] = g.x;
+        path[o + 3] = g.y;
+        const xn = (s.x - minX) / spanX;
+        look[o] = s.d;
+        look[o + 1] = STAGGER * Math.pow(xn, 2.2) + 0.035 * hash(k * 0.73 + 5);
+        look[o + 2] = (hash(k * 1.11 + 9) - 0.5) * 0.2;
+        look[o + 3] = 0.03 + 0.06 * hash(k * 0.53 + 3);
+        tint[o] = s.a;
+        tint[o + 1] = s.b;
+        tint[o + 2] = g.a;
+        tint[o + 3] = g.b;
+        mass[o] = s.d;
+        mass[o + 1] = g.d;
+      }
+    }
+    [path, look, tint, mass].forEach((data, i) => {
+      gl.bindTexture(gl.TEXTURE_2D, this.flowTextures[i]);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, FLOW_COLS, FLOW_ROWS, 0, gl.RGBA, gl.FLOAT, data);
+    });
+    const area = Math.max(1, sourceCells.length) * PROBE * PROBE;
+    this.flowWidth = Math.min(8, Math.max(1.8, Math.sqrt(area / N) * 2.2));
+  }
+
+  renderFlow(t) {
+    const gl = this.gl;
+    const { program, uniforms } = this.programs.flow;
+    gl.useProgram(program);
+    gl.bindVertexArray(this.flowVao);
+    this.flowTextures.forEach((tex, i) => {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+    });
+    gl.uniform1i(uniforms.uPath, 0);
+    gl.uniform1i(uniforms.uLook, 1);
+    gl.uniform1i(uniforms.uTint, 2);
+    gl.uniform1i(uniforms.uMass, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.goalTarget.texture);
+    gl.uniform1i(uniforms.uGoal, 4);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, this.fromTarget.texture);
+    gl.uniform1i(uniforms.uFrom, 5);
+    gl.uniform1i(uniforms.uCols, FLOW_COLS);
+    gl.uniform2f(uniforms.uRes, this.simWidth, this.simHeight);
+    gl.uniform1f(uniforms.uT, t);
+    gl.uniform1f(uniforms.uFlight, FLIGHT);
+    gl.uniform1f(uniforms.uStiff, STIFF);
+    gl.uniform1f(uniforms.uLaunch, this.morph ? this.morph.launch : 0);
+    gl.uniform1f(uniforms.uStagger, this.morph ? this.morph.stagger : 1);
+    gl.uniform1f(uniforms.uWidth, this.flowWidth || 2);
+    gl.viewport(0, 0, this.simWidth, this.simHeight);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.flowTarget.framebuffer);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.uniform1i(uniforms.uMode, 0);
+    gl.uniform1i(uniforms.uPart, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.crispTarget.framebuffer);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.uniform1i(uniforms.uPart, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, this.mapsTarget.framebuffer);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.blendEquation(gl.MAX);
+    gl.colorMask(true, false, false, false);
+    gl.uniform1i(uniforms.uMode, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
+    gl.colorMask(false, true, false, false);
+    gl.uniform1i(uniforms.uMode, 2);
+    gl.drawArrays(gl.TRIANGLES, 0, FLOW_COUNT * 6);
+    gl.colorMask(true, true, true, true);
+    gl.blendEquation(gl.FUNC_ADD);
+    gl.disable(gl.BLEND);
+    gl.bindVertexArray(this.vao);
+    const blur = this.programs.blur;
+    gl.useProgram(blur.program);
+    gl.uniform2f(blur.uniforms.uRes, this.simWidth, this.simHeight);
+    gl.uniform1i(blur.uniforms.uSrc, 0);
+    const reach = Math.max(1, (this.flowWidth || 2) * 0.55);
+    [[this.flowTarget, this.blurTargets[0], reach, 0], [this.blurTargets[0], this.blurTargets[1], 0, reach]].forEach(([src, dst, dx, dy]) => {
+      gl.bindFramebuffer(gl.FRAMEBUFFER, dst.framebuffer);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, src.texture);
+      gl.uniform2f(blur.uniforms.uDir, dx, dy);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    });
+    const combine = this.programs.combine;
+    const write = this.inkTargets[1 - this.inkRead];
+    gl.useProgram(combine.program);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, write.framebuffer);
+    [this.fromTarget, this.crispTarget, this.mapsTarget, this.goalTarget].forEach((target, i) => {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(gl.TEXTURE_2D, target.texture);
+    });
+    gl.uniform1i(combine.uniforms.uFrom, 0);
+    gl.uniform1i(combine.uniforms.uFlow, 1);
+    gl.uniform1i(combine.uniforms.uMaps, 2);
+    gl.uniform1i(combine.uniforms.uGoal, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.blurTargets[1].texture);
+    gl.uniform1i(combine.uniforms.uBlur, 4);
+    gl.uniform2f(combine.uniforms.uRes, this.simWidth, this.simHeight);
+    gl.uniform1f(combine.uniforms.uT, t);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    this.inkRead = 1 - this.inkRead;
+  }
+
+  stepMorph(dt) {
+    const m = this.morph;
+    m.rate += (m.goal - m.rate) * (1 - Math.exp(-dt / 0.25));
+    m.t += dt * 1000 * m.rate;
+    const t = Math.min(1, m.t / MORPH_MS);
+    this.morphT = t;
+    this.renderFlow(t);
+    if (t >= 1) {
+      this.morph = null;
+      this.prevTone = this.tone;
+      const gl = this.gl;
+      for (const v of this.velTargets) {
+        gl.bindFramebuffer(gl.FRAMEBUFFER, v.framebuffer);
+        gl.clearColor(0, 0, 0, 0);
+        gl.clear(gl.COLOR_BUFFER_BIT);
+      }
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      this.velocityUntil = 0;
+      if (!this.pointer) this.scheduleIdle(IDLE_MS);
+    }
   }
 
   setInk(id) {
@@ -729,6 +1042,7 @@ export default class InkDragEngine {
     };
     this.host.setAttribute("data-pressed", "");
     clearTimeout(this.idleTimer);
+    if (this.morph) this.morph.goal = 2.2;
     this.placeCursor(x, y);
     this.drying = true;
     this.lastStir = this.clock;
@@ -945,6 +1259,15 @@ export default class InkDragEngine {
     gl.uniform1f(uniforms.uGloss, ink.gloss);
     gl.uniform1f(uniforms.uPx, this.dpr);
     gl.uniform1f(uniforms.uDeboss, this.tone ? 0 : 1);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, this.prevMaskTexture);
+    gl.uniform1i(uniforms.uPrevMask, 3);
+    gl.uniform1f(uniforms.uPrevDeboss, this.prevTone ? 0 : 1);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, this.mapsTarget ? this.mapsTarget.texture : this.maskTexture);
+    gl.uniform1i(uniforms.uMaps, 4);
+    gl.uniform1f(uniforms.uMorph, this.morph ? 1 : 0);
+    gl.uniform1f(uniforms.uT, this.morph ? this.morphT || 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
@@ -1005,15 +1328,17 @@ export default class InkDragEngine {
     if (this.printStart >= 0) {
       this.printStart += dt * 1000;
       const p = Math.min(1, this.printStart / PRINT_MS);
-      const eased = 1 - Math.pow(1 - p, 3);
+      const eased = springAt(p, PRINT_STIFF);
       this.runPrint(eased);
       if (p >= 1) this.printStart = -1;
       busy = true;
       this.dirty = true;
+    } else if (this.morph) {
+      this.stepMorph(dt);
+      busy = true;
+      this.dirty = true;
     } else if (this.interactive && this.fontReady) {
       this.collectStroke(elapsed);
-      const front = this.morph ? this.sweep(dt) : -10;
-      const sweeping = front > -10;
       const count = this.queue.length ? this.packSegments() : 0;
       if (count) {
         this.velocityUntil = clock + VELOCITY_LIFE_MS;
@@ -1023,14 +1348,13 @@ export default class InkDragEngine {
       const moving = clock < this.velocityUntil;
       const dryingLeft = this.drying && clock - this.lastStir < this.dryMs();
       if (moving) this.stepVelocity(dt, count);
-      if (moving || dryingLeft || sweeping) {
-        this.stepInk(dt, front);
+      if (moving || dryingLeft) {
+        this.stepInk(dt);
         this.dirty = true;
       }
       busy =
         moving ||
         dryingLeft ||
-        sweeping ||
         Boolean(this.morph) ||
         Boolean(this.pointer);
       if (this.pointer) this.placeCursor(this.pointer.x, this.pointer.y);
@@ -1060,6 +1384,9 @@ export default class InkDragEngine {
     if (!gl) return;
     this.dropTargets();
     gl.deleteTexture(this.maskTexture);
+    gl.deleteTexture(this.prevMaskTexture);
+    this.flowTextures.forEach((t) => gl.deleteTexture(t));
+    gl.deleteVertexArray(this.flowVao);
     Object.values(this.programs).forEach(({ program }) =>
       gl.deleteProgram(program),
     );

@@ -285,6 +285,8 @@ void main() {
   float curled = smoothstep(0.0005, 0.006, vSigma);
   vec3 col;
   if (front) {
+    float held = smoothstep(0.004, 0.03, vZ);
+    shade = mix(shade, max(shade, 0.98 + 0.06 * diffuse), held);
     col = base * shade + vec3(gloss * max(spec - flatSpec * (1.0 - curled), 0.0));
     col += vec3(0.05) * curled * diffuse * gloss;
   } else {

@@ -1,22 +1,23 @@
 {
   "title": "Light Table",
-  "description": "Mounted slides and orange-masked negative strips shot from Beatles sleeves (With the Beatles, A Hard Day's Night, Rubber Soul, Magical Mystery Tour, Let It Be) on a glowing light table. Slide the film around the glass and stack two transparencies into a double exposure.",
+  "description": "A real light-table spread on glowing glass: a contact sheet marked up in red grease pencil, a strip of orange-masked colour negatives, two 35mm slides in plastic mounts, a medium-format pair and a 6×6 transparency in a black mask, a typed label and a loupe. Slide anything around, stack two transparencies into a double exposure, and drag the loupe over the film to see its grain.",
   "tags": [
     "WebGL",
     "Film",
-    "Optics"
+    "Optics",
+    "Photography"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical material finished to the edge: real transparencies over a real light source, where stacking multiplies light and a negative only gives up its picture when you know how to read it.",
+  "intent": "One optical material finished to the edge: real film over a real light source, in every form it takes on a light table, where stacking two pieces multiplies their light into one picture and a loupe shows the grain.",
   "tile": {
     "cols": 4,
     "rows": 4
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Light_table",
-    "https://en.wikipedia.org/wiki/135_film",
-    "https://en.wikipedia.org/wiki/Negative_(photography)",
-    "https://en.wikipedia.org/wiki/Reversal_film"
+    "https://en.wikipedia.org/wiki/120_film",
+    "https://en.wikipedia.org/wiki/Reversal_film",
+    "Photographs: Kodak Lossless True Color Image Suite (kodim01, 02, 06, 07, 08, 09, 11, 12, 13, 14, 15, 16, 17, 20, 21, 22, 23, 24), 35mm film scans from Kodak Photo CD PCD0992, released by the Eastman Kodak Company for unrestricted usage; via https://github.com/MohamedBakrAli/Kodak-Lossless-True-Color-Image-Suite (mirror of http://r0k.us/graphics/kodak/)"
   ]
 }

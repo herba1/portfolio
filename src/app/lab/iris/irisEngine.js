@@ -1,5 +1,5 @@
 import { analysePhoto } from "./irisAnalyse";
-import { SUBJECT, buildScene, depthAt, hueAt, lightAllowed } from "./irisScene";
+import { DEFAULT_SUBJECT, SCENE_H, SCENE_W, SUBJECT, buildScene, hueAt, subjectFor } from "./irisScene";
 import { createIrisSound } from "./irisSound";
 import { createIrisGL } from "./irisGL";
 
@@ -9,7 +9,7 @@ const THIRDS = ["1.4", "1.6", "1.8", "2", "2.2", "2.5", "2.8", "3.2", "3.5", "4"
 const SHUTTER = ["1/500", "1/400", "1/320", "1/250", "1/200", "1/160", "1/125", "1/100", "1/80", "1/60", "1/50", "1/40", "1/30", "1/25", "1/20", "1/15", "1/13", "1/10", "1/8", "1/6", "1/5", "1/4"];
 const MAX_STOP = STOPS.length - 1;
 const REST = 1;
-const INTRO = 4.6;
+const INTRO = 2.2;
 const DETENT = 0.62;
 const SETTLE = 13;
 const OPEN_SETTLE = 5.2;
@@ -99,6 +99,15 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   let lastDial = NaN;
   const sound = createIrisSound();
   let lastTick = Math.round(start * 3);
+  let frameSpec = DEFAULT_SUBJECT.frame;
+  const swap = { token: 0, pending: null, closing: false, back: REST, t: 0 };
+
+  function upload(img, custom) {
+    const scene = buildScene(img);
+    const subject = custom ? subjectFor(scene) : DEFAULT_SUBJECT;
+    gl.uploadScene(analysePhoto(scene, { depthAt: subject.depthAt, allow: subject.allow, hueAt, extra: subject.extra, pick: subject.pick }));
+    frameSpec = subject.frame;
+  }
 
   function layout() {
     const rect = box.getBoundingClientRect();
@@ -211,8 +220,24 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       st.gainEv += (st.s - st.gainEv) * adapt;
       if (Math.abs(st.s - st.gainEv) < 0.002) st.gainEv = st.s;
     }
-    if (ready && st.fade < 1) st.fade = reduced ? 1 : Math.min(1, st.fade + dt / 1.1);
-    return Boolean(st.drag) || st.spring || (ready && st.gainEv !== st.s) || (ready && st.fade < 1);
+    if (swap.closing) {
+      st.fade = reduced ? 0 : Math.max(0, st.fade - dt / 0.34);
+      const moved = Boolean(st.drag) || Math.round(baseTarget()) !== MAX_STOP;
+      const late = performance.now() - swap.t > 900;
+      if (st.fade <= 0 && (reduced || moved || late || st.s > MAX_STOP - 0.5)) {
+        const img = swap.pending;
+        swap.pending = null;
+        swap.closing = false;
+        try {
+          if (img && gl) upload(img, true);
+        } catch (error) {
+          console.error(error);
+        }
+        st.gainEv = st.s;
+        if (!moved) stepTo(swap.back, OPEN_SETTLE);
+      }
+    } else if (ready && st.fade < 1) st.fade = reduced ? 1 : Math.min(1, st.fade + dt / 0.9);
+    return Boolean(st.drag) || st.spring || swap.closing || (ready && st.gainEv !== st.s) || (ready && st.fade < 1);
   }
 
   function updateDom() {
@@ -263,7 +288,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       shapeC[i * 2 + 1] = -ny * (shapeRb - 1);
     }
     const coc = 0.085 * rl * Math.pow(2, -sc / 2);
-    const k = (1.4 * rl) / 480;
+    const k = (frameSpec.span * rl) / SCENE_W;
     const ev = clamp(st.gainEv - s, -0.3, 0.3);
     gl.draw({
       cx,
@@ -280,7 +305,7 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
       openVis: Math.min(0.69 * rl, (openA / Math.cos(Math.PI / 9)) * 1.03),
       rot,
       ring: (-s * STOP_DEG * Math.PI) / 180,
-      map: [cx - 0.5 * 480 * k, cy - 0.43 * 600 * k, 480 * k, 600 * k],
+      map: [cx - frameSpec.anchorX * SCENE_W * k, cy - frameSpec.anchorY * SCENE_H * k, SCENE_W * k, SCENE_H * k],
       k,
       coc,
       focus: 0.1,
@@ -434,10 +459,10 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   layout();
   updateDom();
 
-  loadImage(SUBJECT.cover)
+  loadImage(SUBJECT.src)
     .then((img) => {
-      if (destroyed || !gl) return;
-      gl.uploadScene(analysePhoto(buildScene(img), { depthAt, allow: lightAllowed, hueAt }));
+      if (destroyed || !gl || ready) return;
+      upload(img, false);
       ready = true;
       if (!reduced) {
         st.v = 0;
@@ -484,7 +509,44 @@ export function createIris({ box, canvas, header, dial, readout, embedded, onRea
   canvas.addEventListener("keydown", onKey);
   canvas.addEventListener("wheel", onWheel, { passive: false });
 
+  async function decode(file) {
+    if (window.createImageBitmap) {
+      try {
+        return await createImageBitmap(file, { imageOrientation: "from-image" });
+      } catch {}
+    }
+    const url = URL.createObjectURL(file);
+    try {
+      return await loadImage(url);
+    } finally {
+      URL.revokeObjectURL(url);
+    }
+  }
+
   return {
+    async setImage(file) {
+      const token = ++swap.token;
+      const img = await decode(file);
+      if (destroyed || !gl || token !== swap.token) return false;
+      if (!ready) {
+        upload(img, true);
+        ready = true;
+        if (!reduced) {
+          st.v = 0;
+          stepTo(REST, OPEN_SETTLE);
+        }
+        wake();
+        return true;
+      }
+      if (!swap.closing) swap.back = clamp(Math.round(baseTarget()), 0, MAX_STOP);
+      swap.pending = img;
+      if (!swap.closing) swap.t = performance.now();
+      swap.closing = true;
+      sound.start();
+      stepTo(MAX_STOP);
+      wake();
+      return true;
+    },
     destroy() {
       destroyed = true;
       if (raf) cancelAnimationFrame(raf);

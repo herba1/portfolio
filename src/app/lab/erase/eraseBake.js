@@ -115,7 +115,7 @@ function sample(src, w, h, x, y) {
   return a + (b - a) * fy;
 }
 
-function shape(src, w, h, s, o) {
+function shape(src, w, h, s, o, ox = 0, oy = 0) {
   const amp = o.wobble * s;
   const f = 1 / (o.scale * s);
   const reach = boxBlur(src, w, h, Math.ceil(amp) + 2);
@@ -124,8 +124,8 @@ function shape(src, w, h, s, o) {
     for (let x = 0; x < w; x += 1) {
       const i = y * w + x;
       if (reach[i] < 0.0005) continue;
-      const dx = (noise(x * f, y * f, o.seed) - 0.5) * 2 * amp;
-      const dy = (noise(x * f + 31.7, y * f + 12.9, o.seed + 1) - 0.5) * 2 * amp;
+      const dx = (noise((x + ox) * f, (y + oy) * f, o.seed) - 0.5) * 2 * amp;
+      const dy = (noise((x + ox) * f + 31.7, (y + oy) * f + 12.9, o.seed + 1) - 0.5) * 2 * amp;
       moved[i] = sample(src, w, h, x + dx, y + dy);
     }
   }
@@ -157,6 +157,7 @@ export function layoutHand(family, titles = defaultTitles()) {
     let minX = Infinity;
     let maxX = -Infinity;
     const chars = [...text];
+    const stops = [cx];
     chars.forEach((ch, i) => {
       const shrink = 1 - (i / Math.max(1, chars.length)) * (opts.shrink ?? 0.06);
       const size1 = size * shrink * (1 + gauss(0.03));
@@ -167,15 +168,17 @@ export function layoutHand(family, titles = defaultTitles()) {
       const adv = ctx.measureText(ch).width * sx;
       if (ch === " ") {
         cx += adv * (0.85 + rng() * 0.35);
+        stops.push(cx);
         return;
       }
       const gy = base + slope * (cx - startX) + gauss(size * 0.02);
       glyphs.push({ ch, x: cx, y: gy, size: size1, weight: w, rot: gauss(0.03) + slope, sx, sy, skew: -0.07 + gauss(0.025), ink });
       minX = Math.min(minX, cx);
       maxX = Math.max(maxX, cx + adv);
+      stops.push(cx + adv);
       cx += adv + (opts.track ?? size * 0.03) + gauss(size * 0.018);
     });
-    return { x0: minX, x1: maxX, top: base - size * 0.8, bottom: base + size * 0.1, base, slope, startX };
+    return { x0: minX, x1: maxX, top: base - size * 0.8, bottom: base + size * 0.1, base, slope, startX, stops, size };
   };
 
   const measure = (text, size, weight) => {
@@ -197,9 +200,9 @@ export function layoutHand(family, titles = defaultTitles()) {
     strokes.push({ ink, pts });
   };
 
-  write(HEADER, 98, 132, 44, 600, 0, { shrink: 0.04 });
-  const labelW = measure(KEY_LABEL, 40, 450);
-  write(KEY_LABEL, 902 - labelW, 128, 40, 450, 1, { track: 2 });
+  write(HEADER, 98, 132, 50, 600, 0, { shrink: 0.04 });
+  const labelW = measure(KEY_LABEL, 44, 544);
+  write(KEY_LABEL, 902 - labelW, 128, 44, 544, 1, { track: 2 });
   pen(0, [[92, 166], [240, 158], [420, 170], [586, 158]], 6.5, 40, { taper: 0.55 });
 
   const fitSize = (text) => {
@@ -207,7 +210,7 @@ export function layoutHand(family, titles = defaultTitles()) {
     return Math.max(36, Math.min(64, (64 * 720) / Math.max(1, width)));
   };
 
-  const empty = (y) => ({ x0: 118, x1: 118, top: y - 64 * 0.8, bottom: y + 64 * 0.1, base: y, slope: 0, startX: 118 });
+  const empty = (y) => ({ x0: 118, x1: 118, top: y - 64 * 0.8, bottom: y + 64 * 0.1, base: y, slope: 0, startX: 118, stops: [118], size: 64 });
 
   SONGS.forEach((song, i) => {
     const y = FIRST_BASELINE + i * LINE_STEP;
@@ -215,22 +218,22 @@ export function layoutHand(family, titles = defaultTitles()) {
     reseed(i + 1);
     const tilt = (rng() - 0.5) * 0.012;
     const written = title.trim() ? write(title, 118, y, fitSize(title), 640, 0, { tilt }) : empty(y);
-    const keyW = measure(song.key, 40, 450);
+    const keyW = measure(song.key, 40, 560);
     reseed(i + 101);
-    const key = write(song.key, 906 - keyW, y - 2, 40, 450, 1, { track: 1.5 });
+    const key = write(song.key, 906 - keyW, y - 2, 40, 560, 1, { track: 1.5 });
     lines.push({ ...written, key, title, index: i, y });
   });
 
   reseed(200);
 
   pen(0, [[118, 1040], [200, 1046], [300, 1036], [396, 1044]], 5, 30, { taper: 0.5 });
-  write("ENC", 118, ENCORE_BASELINE - 82, 36, 470, 1, { track: 2 });
+  write("Encore", 118, ENCORE_BASELINE - 80, 42, 540, 1, { track: 2 });
   const encoreTitle = titles[SONGS.length] ?? "";
   reseed(300);
   const encore = encoreTitle.trim() ? write(encoreTitle, 118, ENCORE_BASELINE, fitSize(encoreTitle), 640, 0, { tilt: -0.006 }) : empty(ENCORE_BASELINE);
-  const encKeyW = measure(ENCORE.key, 40, 450);
+  const encKeyW = measure(ENCORE.key, 40, 560);
   reseed(301);
-  const encKey = write(ENCORE.key, 906 - encKeyW, ENCORE_BASELINE - 2, 40, 450, 1, { track: 1.5 });
+  const encKey = write(ENCORE.key, 906 - encKeyW, ENCORE_BASELINE - 2, 40, 560, 1, { track: 1.5 });
   lines.push({ ...encore, key: encKey, title: encoreTitle, index: SONGS.length, y: ENCORE_BASELINE });
   reseed(400);
 
@@ -278,15 +281,19 @@ function drawHand(ctx, hand, ink, family) {
   }
 }
 
-export function bakeInk(hand, pw, ph, family) {
-  const s = pw / SHEET_W;
+export function bakeInk(hand, fullW, fullH, family, region = null) {
+  const s = fullW / SHEET_W;
+  const ox = region ? region.x : 0;
+  const oy = region ? region.y : 0;
+  const pw = region ? region.w : fullW;
+  const ph = region ? region.h : fullH;
   const n = pw * ph;
   const canvas = makeCanvas(pw, ph);
   const ctx = canvas.getContext("2d", { willReadFrequently: true });
   const read = (ink) => {
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, pw, ph);
-    ctx.setTransform(s, 0, 0, s, 0, 0);
+    ctx.setTransform(s, 0, 0, s, -ox, -oy);
     ctx.fillStyle = "#000";
     ctx.strokeStyle = "#000";
     ctx.textBaseline = "alphabetic";
@@ -296,8 +303,8 @@ export function bakeInk(hand, pw, ph, family) {
     for (let i = 0; i < n; i += 1) a[i] = data[i * 4 + 3] / 255;
     return a;
   };
-  const m = shape(read(0), pw, ph, s, { wobble: 1.1, scale: 9, round: 1.05, lo: 0.34, hi: 0.6, seed: 21 });
-  const b = shape(read(1), pw, ph, s, { wobble: 0.55, scale: 6, round: 0.4, lo: 0.3, hi: 0.66, seed: 23 });
+  const m = shape(read(0), pw, ph, s, { wobble: 1.1, scale: 9, round: 1.05, lo: 0.34, hi: 0.6, seed: 21 }, ox, oy);
+  const b = shape(read(1), pw, ph, s, { wobble: 0.55, scale: 6, round: 0.4, lo: 0.3, hi: 0.66, seed: 23 }, ox, oy);
   const bm = boxBlur(m, pw, ph, Math.max(1, Math.round(2.4 * s)));
   const total = new Float32Array(n);
   for (let i = 0; i < n; i += 1) total[i] = 1 - (1 - m[i]) * (1 - b[i]);
@@ -312,8 +319,8 @@ export function bakeInk(hand, pw, ph, family) {
       const ma = m[i];
       const ba = b[i];
       if (ma + ba < 0.004) continue;
-      const u = x / s;
-      const v = y / s;
+      const u = (x + ox) / s;
+      const v = (y + oy) / s;
       let r = 0;
       let g = 0;
       let bl = 0;
@@ -338,7 +345,7 @@ export function bakeInk(hand, pw, ph, family) {
       let ab = 0;
       if (ba > 0.004) {
         const grain = noise(u * 0.6, v * 0.6, 37);
-        const skip = noise(u * 0.32 + 7, v * 0.32, 41) > 0.8 ? 0.62 : 1;
+        const skip = noise(u * 0.32 + 7, v * 0.32, 41) > 0.82 ? 0.8 : 1;
         ab = ba * (0.74 + 0.26 * grain) * skip * 0.92;
       }
       const a = ab + am * (1 - ab);
@@ -361,14 +368,14 @@ export function bakeInk(hand, pw, ph, family) {
   for (let y = 0; y < ph; y += 1) {
     for (let x = 0; x < pw; x += 1) {
       const i = y * pw + x;
-      const u = x / s;
-      const v = y / s;
+      const u = (x + ox) / s;
+      const v = (y + oy) / s;
       const fibre = noise(u * 0.5, v * 0.13, 43) * 0.6 + noise(u * 1.6, v * 0.42, 47) * 0.4;
       let la = 0.05 + 0.26 * smooth(0.52, 0.86, fibre);
       let lr = 255;
       let lg = 253;
       let lb = 247;
-      if (hash(x, y, 53) > 0.9984) {
+      if (hash(x + ox, y + oy, 53) > 0.9984) {
         lr = 150;
         lg = 138;
         lb = 124;
@@ -384,7 +391,32 @@ export function bakeInk(hand, pw, ph, family) {
     }
   }
   fctx.putImageData(fxImage, 0, 0);
-  return { ink: inkCanvas, fx: fxCanvas, total, blue: b, s };
+  return { ink: inkCanvas, fx: fxCanvas, total, blue: b, s, x: ox, y: oy, w: pw, h: ph };
+}
+
+export function coverageInto(cov, tint, baked, cells) {
+  const { total, blue, s, x: ox, y: oy, w: pw, h: ph } = baked;
+  for (let row = cells.r0; row <= cells.r1; row += 1) {
+    const y0 = Math.floor(row * GRID * s) - oy;
+    const y1 = Math.max(y0 + 1, Math.floor((row + 1) * GRID * s) - oy);
+    for (let col = cells.c0; col <= cells.c1; col += 1) {
+      const x0 = Math.floor(col * GRID * s) - ox;
+      const x1 = Math.max(x0 + 1, Math.floor((col + 1) * GRID * s) - ox);
+      let sum = 0;
+      let sumB = 0;
+      let count = 0;
+      for (let y = Math.max(0, y0); y < Math.min(ph, y1); y += 1) {
+        for (let x = Math.max(0, x0); x < Math.min(pw, x1); x += 1) {
+          sum += total[y * pw + x];
+          sumB += blue[y * pw + x];
+          count += 1;
+        }
+      }
+      const idx = row * GRID_COLS + col;
+      cov[idx] = count ? sum / count : 0;
+      tint[idx] = sum > 0.001 ? Math.min(1, sumB / sum) : 0;
+    }
+  }
 }
 
 export function coverage(total, blue, pw, ph, s) {
@@ -597,30 +629,14 @@ export function bakeScene(canvas, geo, dpr) {
       const tooth = (noise(u * 0.42, v * 0.42, 3) - 0.5) * 0.045 + (noise(u * 1.3, v * 1.3, 5) - 0.5) * 0.03 + (noise(u * 0.03, v * 0.045, 9) - 0.5) * 0.04;
       const light2 = 0.016 * (1 - u / SHEET_W) + 0.02 * (1 - v / SHEET_H) - 0.016;
       const d = v - SHEET_H * 0.5;
-      const crease = -0.055 * Math.exp(-(d * d) / 1.6) + 0.03 * Math.exp(-((d + 2.6) * (d + 2.6)) / 5) - 0.014 * Math.exp(-((d - 7) * (d - 7)) / 160) + 0.008 * Math.exp(-((d + 12) * (d + 12)) / 220);
+      const crease = -0.022 * Math.exp(-(d * d) / 2.4) + 0.016 * Math.exp(-((d + 2.6) * (d + 2.6)) / 5) - 0.014 * Math.exp(-((d - 7) * (d - 7)) / 160) + 0.008 * Math.exp(-((d + 12) * (d + 12)) / 220);
       const e = Math.min(u, SHEET_W - u, v, SHEET_H - v);
       const edge = -0.06 * Math.exp(-e / 1.2);
       const L = 1 + tooth + light2 + crease + edge;
-      const cdx = u - 806;
-      const cdy = v - 232;
-      const cr = Math.sqrt(cdx * cdx + cdy * cdy);
-      let stain = 0;
-      if (cr < 160) {
-        const ang = Math.atan2(cdy, cdx);
-        const rn = 128 * (1 + 0.035 * (noise(ang * 2.2 + 5, 1.3, 11) - 0.5) * 2);
-        const rim = Math.exp(-((cr - rn) * (cr - rn)) / 5.5) * (0.4 + 0.6 * noise(ang * 3 + 2, 0.5, 13));
-        const inner = cr < rn ? (0.05 + 0.06 * smooth(rn * 0.4, rn, cr)) * (0.6 + 0.4 * noise(u * 0.05, v * 0.05, 15)) : 0;
-        const c2x = u - 818;
-        const c2y = v - 248;
-        const cr2 = Math.sqrt(c2x * c2x + c2y * c2y);
-        const ang2 = Math.atan2(c2y, c2x);
-        const rim2 = Math.exp(-((cr2 - 121) * (cr2 - 121)) / 3) * smooth(0.35, 0.7, noise(ang2 * 1.4 + 9, 7, 17)) * 0.5;
-        stain = Math.min(1, rim * 0.5 + rim2 * 0.34 + inner);
-      }
       const o = (y * pw + x) * 4;
-      data[o] = 246 * L * (1 - stain * 0.3);
-      data[o + 1] = 242 * L * (1 - stain * 0.5);
-      data[o + 2] = 233 * L * (1 - stain * 0.72);
+      data[o] = 246 * L;
+      data[o + 1] = 242 * L;
+      data[o + 2] = 233 * L;
       data[o + 3] = 255;
     }
   }

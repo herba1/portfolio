@@ -14,7 +14,9 @@ const smooth = (a, b, x) => {
   return t * t * (3 - 2 * t);
 };
 
-export function analysePhoto(img, { depthAt, allow, hueAt }) {
+const DEFAULT_PICK = { floor: 0.2, rank: 0, hi: 0.72, mean: 0.55, max: MAX_LIGHTS, spacing: 0, energy: 0.6, focusDepth: 0, focusEnergy: 0.6, restore: false, cap: Infinity };
+
+export function analysePhoto(img, { depthAt, allow, hueAt, extra = [], pick = DEFAULT_PICK }) {
   const W = img.naturalWidth || img.width;
   const H = img.naturalHeight || img.height;
   const canvas = document.createElement("canvas");
@@ -47,12 +49,19 @@ export function analysePhoto(img, { depthAt, allow, hueAt }) {
     return pts;
   });
 
+  let floor = pick.floor;
+  if (pick.rank > 0) {
+    const ranked = [];
+    for (let i = 0; i < n; i += 7) ranked.push(L[i]);
+    ranked.sort((a, b) => a - b);
+    floor = Math.max(floor, ranked[Math.min(ranked.length - 1, Math.floor(ranked.length * pick.rank))]);
+  }
   const candidates = [];
   for (let y = 2; y < H - 2; y += 1) {
     for (let x = 2; x < W - 2; x += 1) {
       const i = y * W + x;
       const c = L[i];
-      if (c < 0.2) continue;
+      if (c < floor) continue;
       let peak = true;
       for (let oy = -1; oy <= 1 && peak; oy += 1) {
         for (let ox = -1; ox <= 1; ox += 1) {
@@ -68,13 +77,14 @@ export function analysePhoto(img, { depthAt, allow, hueAt }) {
   candidates.sort((a, b) => L[b] - L[a]);
 
   const taken = new Uint8Array(n);
-  const lights = [];
+  const lights = extra.map((l) => ({ ...l }));
   const sample = (x, y) => L[Math.min(H - 1, Math.max(0, y)) * W + Math.min(W - 1, Math.max(0, x))];
   for (const i of candidates) {
     if (taken[i]) continue;
     const x = i % W;
     const y = (i - x) / W;
     if (!allow((x + 0.5) / W, (y + 0.5) / H)) continue;
+    if (pick.spacing > 0 && lights.some((l) => Math.hypot(l.u * W - x, l.v * H - y) < pick.spacing)) continue;
     let found = -1;
     let ringMean = 0;
     for (let s = 0; s < SCALES.length; s += 1) {
@@ -91,7 +101,7 @@ export function analysePhoto(img, { depthAt, allow, hueAt }) {
       const vals = ringOffsets[s].map(([ox, oy]) => sample(x + ox, y + oy)).sort((a, b) => a - b);
       const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
       const hi = vals[Math.floor(vals.length * 0.85)];
-      if (hi < 0.72 * coreMean && mean < 0.55 * coreMean) {
+      if (hi < pick.hi * coreMean && mean < pick.mean * coreMean) {
         found = s;
         ringMean = mean;
         break;
@@ -99,32 +109,39 @@ export function analysePhoto(img, { depthAt, allow, hueAt }) {
     }
     if (found < 0) continue;
     const { r0, sigma } = SCALES[found];
-    let energy = 0;
     const rr = r0 + 1;
-    for (let oy = -rr; oy <= rr; oy += 1) {
-      for (let ox = -rr; ox <= rr; ox += 1) {
-        const xx = x + ox;
-        const yy = y + oy;
-        if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
-        const j = yy * W + xx;
-        const d = Math.hypot(ox, oy);
-        if (d <= r0) taken[j] = 1;
-        const w = 1 - smooth(r0 * 0.6, rr + 0.5, d);
-        const excess = Math.max(0, L[j] - ringMean) * w;
-        energy += excess;
-        if (w > 0 && L[j] > ringMean) {
-          const k = (ringMean + (L[j] - ringMean) * (1 - w)) / L[j];
-          lin[j * 3] *= k;
-          lin[j * 3 + 1] *= k;
-          lin[j * 3 + 2] *= k;
-          L[j] *= k;
+    const cut = (apply) => {
+      let sum = 0;
+      for (let oy = -rr; oy <= rr; oy += 1) {
+        for (let ox = -rr; ox <= rr; ox += 1) {
+          const xx = x + ox;
+          const yy = y + oy;
+          if (xx < 0 || yy < 0 || xx >= W || yy >= H) continue;
+          const j = yy * W + xx;
+          const d = Math.hypot(ox, oy);
+          const w = 1 - smooth(r0 * 0.6, rr + 0.5, d);
+          sum += Math.max(0, L[j] - ringMean) * w;
+          if (!apply) continue;
+          if (d <= r0) taken[j] = 1;
+          if (w > 0 && L[j] > ringMean) {
+            const k = (ringMean + (L[j] - ringMean) * (1 - w)) / L[j];
+            lin[j * 3] *= k;
+            lin[j * 3 + 1] *= k;
+            lin[j * 3 + 2] *= k;
+            L[j] *= k;
+          }
         }
       }
-    }
-    if (energy < 0.6) continue;
+      return sum;
+    };
+    const near = depthAt((x + 0.5) / W, (y + 0.5) / H) < pick.focusDepth;
+    const need = near ? pick.focusEnergy : pick.energy;
+    if (pick.restore && cut(false) < need) continue;
+    const energy = cut(true);
+    if (energy < need) continue;
     const hue = hueAt((x + 0.5) / W, (y + 0.5) / H);
-    lights.push({ u: (x + 0.5) / W, v: (y + 0.5) / H, energy, sigma, hue });
-    if (lights.length >= MAX_LIGHTS) break;
+    lights.push({ u: (x + 0.5) / W, v: (y + 0.5) / H, energy: Math.min(energy, pick.cap), sigma, hue });
+    if (lights.length >= pick.max) break;
   }
 
   const out = ctx.createImageData(W, H);

@@ -444,7 +444,7 @@ export async function createPeel(stage, canvas, options = {}) {
     const parts = [];
     const lower = { from: 0, to: cut, anchor: "base" };
     const upper = { from: strand.count - 1, to: cut + 1, anchor: "top" };
-    for (const part of [lower, upper]) {
+    for (const part of strand.st.mode === "held" ? [lower] : [lower, upper]) {
       const n = Math.abs(part.to - part.from) + 1;
       const nodes = new Float32Array(n * 3);
       const prev = new Float32Array(n * 3);
@@ -551,6 +551,10 @@ export async function createPeel(stage, canvas, options = {}) {
         part.width = part.w0 * clamp((0.012 / Math.max(span, 0.012)) ** 0.35, 0.45, 1);
         next.push(part);
         if (moved > 1e-6 || Math.abs(part.rest - restBefore) > 1e-7) moving = true;
+        continue;
+      }
+      if (part.anchor === "top" && part.st.mode === "held") {
+        moving = true;
         continue;
       }
       part.rest *= Math.exp(-dt * 8);
@@ -703,10 +707,9 @@ export async function createPeel(stage, canvas, options = {}) {
     let p;
     if (embedded) p = place(16, 16, 16);
     else if (narrow) {
-      const aw = w - 32;
-      const ah = h - 184 - 24;
-      const k = Math.min(aw / 1.14, ah / bh, 760);
-      p = { k, cx: w / 2, cy: 184 + Math.min((ah - bh * k) * 0.3, 40) + k * 0.55 };
+      const head = stage.parentElement?.querySelector(".sticker-peel-head");
+      const top = head ? head.getBoundingClientRect().bottom - rect.top + 24 : 184;
+      p = place(top, 32, 16);
     }
     else if (w >= 1100) {
       const aw = w - 348;
@@ -714,8 +717,11 @@ export async function createPeel(stage, canvas, options = {}) {
       const k = Math.min(aw / bw, ah / bh, 760);
       p = { k, cx: 300 + aw / 2 - k * (VIEW.minX + bw / 2), cy: 88 + ah / 2 - k * (VIEW.minY + bh / 2) };
     } else p = place(176, 40, 48);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    // Assigning a canvas its own size still reallocates and clears it.
+    const pw = Math.round(w * dpr);
+    const ph = Math.round(h * dpr);
+    if (canvas.width !== pw) canvas.width = pw;
+    if (canvas.height !== ph) canvas.height = ph;
     canvas.style.width = `${w}px`;
     canvas.style.height = `${h}px`;
     const c = Math.cos(ROT);
@@ -1118,7 +1124,15 @@ export async function createPeel(stage, canvas, options = {}) {
     render();
     govern(gap);
     if (active) kick();
-    else last = 0;
+    else {
+      last = 0;
+      slow.length = 0;
+      if (quality < 1) {
+        quality = 1;
+        fit();
+        render();
+      }
+    }
   }
 
   function govern(gap) {
@@ -1127,12 +1141,13 @@ export async function createPeel(stage, canvas, options = {}) {
     if (slow.length < 12) return;
     const median = [...slow].sort((x, y) => x - y)[slow.length >> 1];
     slow.length = 0;
+    // Only ever steps down mid-motion; full quality returns once the paper
+    // comes to rest (see frame). Stepping back up while moving made a slow
+    // GPU flip between two sizes, reallocating the canvas every few frames.
     if (median > 45 && quality > 0.5) {
       quality = Math.max(0.5, quality * 0.7);
       fit();
-    } else if (median < 22 && quality < 1) {
-      quality = Math.min(1, quality / 0.7);
-      fit();
+      render();
     }
   }
 

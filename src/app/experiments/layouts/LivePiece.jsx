@@ -1,21 +1,21 @@
 "use client";
 
 import { Suspense, useEffect, useRef, useState } from "react";
+import { preload } from "react-dom";
 import PieceBoundary from "./PieceBoundary";
 import { lazyPiece, preloadPiece } from "./pieceLoaders";
-import { enqueueMount, runWhenIdle } from "./mountQueue";
+import { enqueueMount, retain } from "./mountQueue";
 
 // A tile arrives as its poster — a still of the piece, in the HTML — so the
 // index paints whole on the first frame without a byte of piece code. The
 // live piece mounts behind the poster once the tile nears the viewport
 // (through the mount queue, one per idle slot), and the poster lifts off
-// only after the piece has painted. Far offscreen the piece unmounts again,
-// which frees its GPU context and stops its frame loop for good.
+// only after the piece has painted. A tile that leaves before its turn never
+// mounts. A mounted piece stays (pausing itself offscreen) until the queue
+// needs its GPU context back for a nearer tile.
 
 const NEAR = "60% 0px";
-const FAR = "180% 0px";
 const READY_TIMEOUT_MS = 1400;
-const UNMOUNT_AFTER_MS = 1200;
 
 function painted(box) {
   if (box.querySelector("[data-plate]")) return Boolean(box.querySelector("canvas[data-painted]"));
@@ -24,7 +24,12 @@ function painted(box) {
   return [...box.querySelectorAll("img")].every((image) => image.complete);
 }
 
-export default function LivePiece({ slug, data, poster, priority = false, title }) {
+// `priority` is the media query under which this tile is in the first screen
+// (the bento and the phone stack put different tiles there), or null. Its
+// poster is preloaded for that query only, so a phone never spends its first
+// second of bandwidth on stills from the desktop's top row.
+export default function LivePiece({ slug, data, poster, priority = null, title }) {
+  if (poster && priority) preload(poster.src, { as: "image", fetchPriority: "high", media: priority });
   const boxRef = useRef(null);
   const [mounted, setMounted] = useState(false);
   const [live, setLive] = useState(false);
@@ -33,47 +38,41 @@ export default function LivePiece({ slug, data, poster, priority = false, title 
   useEffect(() => {
     const box = boxRef.current;
     if (!box || !Component) return undefined;
+    let near = false;
     let cancelJob = null;
-    let unmountTimer = 0;
-    let cancelIdle = null;
+    let release = null;
 
-    const near = new IntersectionObserver(
+    const evict = () => {
+      release = null;
+      setLive(false);
+      setMounted(false);
+    };
+    const observer = new IntersectionObserver(
       ([entry]) => {
-        if (!entry.isIntersecting) return;
-        clearTimeout(unmountTimer);
-        cancelIdle?.();
-        if (cancelJob) return;
+        near = entry.isIntersecting;
+        if (!near) {
+          cancelJob?.();
+          cancelJob = null;
+          return;
+        }
+        if (cancelJob || release) return;
         cancelJob = enqueueMount(
           box,
           () => preloadPiece(slug),
-          () => setMounted(true),
+          () => {
+            cancelJob = null;
+            release = retain(box, () => near, evict);
+            setMounted(true);
+          },
         );
       },
       { rootMargin: NEAR },
     );
-    const far = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) return;
-        clearTimeout(unmountTimer);
-        unmountTimer = setTimeout(() => {
-          cancelIdle = runWhenIdle(() => {
-            cancelJob?.();
-            cancelJob = null;
-            setLive(false);
-            setMounted(false);
-          });
-        }, UNMOUNT_AFTER_MS);
-      },
-      { rootMargin: FAR },
-    );
-    near.observe(box);
-    far.observe(box);
+    observer.observe(box);
     return () => {
-      near.disconnect();
-      far.disconnect();
-      clearTimeout(unmountTimer);
-      cancelIdle?.();
+      observer.disconnect();
       cancelJob?.();
+      release?.();
     };
   }, [slug, Component]);
 
@@ -116,7 +115,7 @@ export default function LivePiece({ slug, data, poster, priority = false, title 
           alt={title ? `${title}, a still` : ""}
           decoding="async"
           loading={priority ? "eager" : "lazy"}
-          fetchPriority={priority ? "high" : "low"}
+          fetchPriority={priority ? "auto" : "low"}
           draggable={false}
         />
       ) : (

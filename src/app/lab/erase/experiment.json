@@ -1,13 +1,13 @@
 {
   "title": "Erase",
-  "description": "A handwritten Beatles setlist taped above a ledge, one song already half rubbed out. Click any song to rewrite it in your own words, then scrub it with a real eraser: the ink lifts off as fine dust that drifts into a pile at the foot of the page, and undo pulls every grain back into its letter.",
+  "description": "A handwritten setlist taped above a ledge, one song already half rubbed out. Click any song and write over it: your words go down in the same hand as you type. Then scrub it with a real eraser: the ink lifts off as fine dust that drifts into a pile at the foot of the page, and undo pulls every grain back into its letter.",
   "tags": [
     "Canvas",
     "Particles",
     "Type",
     "Music"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "Writing and erasing as matter: type a title and it is inked onto the sheet by hand, rub it and the energy becomes ink dust and eraser crumbs that heap up with a real angle of repose, undo is the dust flying home.",
   "tile": {

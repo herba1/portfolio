@@ -2,25 +2,25 @@
 
 import { useEffect, useRef, useState } from "react";
 
-import { SHEETS } from "./crumpleSheets";
+import print from "./print-hats.webp";
 import "./crumple.css";
 
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const stageRef = useRef(null);
-  const canvasRef = useRef(null);
-  const cursorRef = useRef(null);
   const engineRef = useRef(null);
-  const [sheet, setSheet] = useState(0);
   const [status, setStatus] = useState("loading");
+  const [phase, setPhase] = useState({ stage: 0, dir: 1, last: 5 });
 
   useEffect(() => {
     const root = rootRef.current;
-    if (!root) return undefined;
+    const stage = stageRef.current;
+    if (!root || !stage) return undefined;
     let disposed = false;
     let started = false;
     let visible = false;
     let engine = null;
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     const sync = () => engine?.setActive(visible && !document.hidden);
     const start = async () => {
       started = true;
@@ -28,12 +28,12 @@ export default function Piece({ embedded = false }) {
         const { createCrumple } = await import("./crumpleEngine");
         if (disposed) return;
         const made = await createCrumple({
+          host: stage,
           root,
-          stage: stageRef.current,
-          canvas: canvasRef.current,
-          cursor: cursorRef.current,
-          onSheet: (idx) => {
-            if (!disposed) setSheet(idx);
+          src: print.src,
+          reduced,
+          onState: (next) => {
+            if (!disposed) setPhase(next);
           },
         });
         if (disposed) {
@@ -68,54 +68,34 @@ export default function Piece({ embedded = false }) {
     };
   }, []);
 
+  const onKeyDown = (e) => {
+    if (e.key === " " || e.key === "Enter") {
+      e.preventDefault();
+      if (!e.repeat) engineRef.current?.squeeze();
+    }
+  };
+
+  const opening = phase.dir < 0 || phase.stage >= phase.last;
+
   return (
-    <div ref={rootRef} className="crumple" data-embedded={embedded || undefined} data-status={status}>
+    <div ref={rootRef} className="crumple" data-embedded={embedded || undefined} data-status={status} data-stage={phase.stage}>
       <div
         ref={stageRef}
         className="crumple__stage"
         tabIndex={0}
-        role="application"
-        aria-label={`${SHEETS[sheet].title}. Press and hold on the paper to crumple it into a ball and drag it around; let go and it opens out again with its creases. Space crumples and releases it.`}
-      >
-        <canvas ref={canvasRef} className="crumple__canvas" />
-        <div ref={cursorRef} className="crumple__cursor" aria-hidden="true">
-          <span className="crumple__cursor-ring" />
-        </div>
-      </div>
+        role="button"
+        aria-label={`A photo print of bright sun hats on a wall, lying on a table, crushed ${phase.stage} of ${phase.last} steps. Press to ${opening ? "open it out one step" : "crush it one step further"}.`}
+        onKeyDown={onKeyDown}
+      />
       {!embedded && (
         <header className="crumple__head">
           <h1 className="crumple__title">Crumple</h1>
           <p className="crumple__hint">
-            Hold to scrunch it up, drag it, let go. The paper moves <em>on twos</em>.
+            Each press crushes the print one step further. Once it is a ball, keep pressing and it <em>opens back out</em>, creases and all.
           </p>
         </header>
       )}
-      {!embedded && (
-        <div className="crumple__bar">
-          <div className="crumple__seg" role="radiogroup" aria-label="Sheet">
-            {SHEETS.map((s, i) => (
-              <button
-                key={s.key}
-                type="button"
-                role="radio"
-                aria-checked={sheet === i}
-                className="crumple__key"
-                disabled={status !== "ready"}
-                onClick={() => {
-                  setSheet(i);
-                  engineRef.current?.setSheet(i);
-                }}
-              >
-                {s.label}
-              </button>
-            ))}
-          </div>
-          <button type="button" className="crumple__key crumple__iron" disabled={status !== "ready"} onClick={() => engineRef.current?.smooth()}>
-            Smooth it out
-          </button>
-        </div>
-      )}
-      {status === "failed" && <p className="crumple__fallback">This piece could not load its paper.</p>}
+      {status === "failed" && <p className="crumple__fallback">This print needs WebGL to fold.</p>}
     </div>
   );
 }

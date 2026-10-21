@@ -21,24 +21,15 @@ import {
 const MAX_DPR = 2;
 const UP = 0.05;
 const DOWN = 0.14;
-const KNOB = 4;
-const CAR_LEFT = -KNOB - 3;
-const CAR_RIGHT = SHEET_COLS + KNOB + 3;
-const A1 = 0.32;
-const PHI_MAX = 0.72;
 const VMAX = 170;
 const ACCEL = 2600;
+const FOLLOW = 0.8;
 const ENAMEL = [226, 223, 216];
-const DECK = "rgb(226 223 216)";
-const DECK_SHADE = "rgb(212 208 200)";
 const CHARCOAL = "rgb(30 30 32)";
-const STEEL_DARK = "rgb(78 79 82)";
-const STEEL = "rgb(128 129 132)";
-const STEEL_LIGHT = "rgb(196 197 199)";
 const RIBBON_RED = "rgb(196 52 40)";
-const TAU = Math.PI * 2;
 const PERIOD = 20;
 const TILE = 512;
+const NARROW_COLS = [MARGIN_COLS - 2, MARGIN_COLS + MAX_COL + 3];
 
 function clamp(v, a, b) {
   return Math.min(b, Math.max(a, v));
@@ -73,31 +64,27 @@ function springStep(state, target, omega, zeta, dt) {
 }
 
 export default class TypewriterEngine {
-  constructor({ stage, glCanvas, overlay, keys, embedded, insets, onReady, onFail, onShift }) {
+  constructor({ stage, glCanvas, overlay, embedded, insets, onReady, onFail }) {
     this.stage = stage;
     this.glCanvas = glCanvas;
     this.overlay = overlay;
-    this.keysEl = keys;
     this.embedded = embedded;
     this.insets = insets;
     this.onReady = onReady;
     this.onFail = onFail;
-    this.onShift = onShift;
     this.reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
     this.sound = new TypewriterSound();
+    this.sound.prepare();
     this.rand = seeded(20261017);
     this.seed = 1;
     this.strikes = [];
     this.bars = [];
-    this.keyFx = [];
     this.dirty = [];
     this.col = START.col;
     this.line = START.line;
     this.car = { x: START.col, v: 0, mode: "spring" };
     this.roll = { x: START.line, v: 0, mode: "spring", target: START.line };
     this.lever = { x: 0, v: 0 };
-    this.spool = 0;
-    this.shift = false;
     this.script = 0;
     this.ejecting = false;
     this.strikeCount = 0;
@@ -108,7 +95,6 @@ export default class TypewriterEngine {
     this.destroyed = false;
     this.ready = false;
     this.geo = null;
-    this.keyMap = new Map();
     this.frame = this.frame.bind(this);
     this.handlers = {
       down: (e) => this.pointerDown(e),
@@ -152,8 +138,6 @@ export default class TypewriterEngine {
       return;
     }
     this.ctx = this.overlay.getContext("2d");
-    this.cache = document.createElement("canvas");
-    this.keysEl?.querySelectorAll("[data-key]").forEach((el) => this.keyMap.set(el.getAttribute("data-key"), el));
     this.glCanvas.addEventListener("webglcontextlost", this.handlers.lost);
     this.stage.addEventListener("pointerdown", this.handlers.down);
     this.stage.addEventListener("pointermove", this.handlers.move);
@@ -168,7 +152,6 @@ export default class TypewriterEngine {
     this.intersection.observe(this.stage);
     this.resizer = new ResizeObserver(() => this.layout());
     this.resizer.observe(this.stage);
-    if (this.keysEl) this.resizer.observe(this.keysEl);
     for (const s of noteStrikes()) this.strikes.push(this.makeStrike(s.ch, s.col, s.line));
     this.layout();
     this.ready = true;
@@ -284,51 +267,48 @@ export default class TypewriterEngine {
     const H = Math.max(1, Math.round(rect.height));
     const dpr = Math.min(MAX_DPR, window.devicePixelRatio || 1);
     const ins = this.insets();
-    const pitch = clamp(Math.min(W / 84, H / 44), 11.5, 18);
+    const gut = W < 640 ? 16 : 40;
+    const fit = (W - gut * 2) / (SHEET_COLS + MAX_COL * (1 - FOLLOW));
+    const wide = fit >= 9;
+    const pitch = wide ? clamp(Math.min(fit, H / 44), 9, 15) : Math.min((W - gut * 2) / (NARROW_COLS[1] - NARROW_COLS[0]), 15);
     const lineH = pitch * LINE_UNITS;
-    const R = lineH * 1.9;
-    let L = clamp(Math.max(pitch * 5, R * 1.85), 50, 100);
-    const bottom = H - ins.bottom;
-    let yP = Math.round(Math.min(H * 0.64, bottom - (2 * L + 14) - 4));
-    const minY = ins.top + lineH * 5;
-    if (yP < minY) {
-      L = Math.max(R * 1.4, (bottom - 18 - minY) / 2);
-      yP = Math.round(Math.max(minY, bottom - (2 * L + 14) - 4));
-    }
+    const top = Math.round(ins.top);
+    const bottom = Math.round(H - ins.bottom);
+    const yP = Math.round(clamp(top + (bottom - top) * (wide ? 0.56 : 0.62), top + lineH * 4, bottom - lineH * 3));
     const printX = Math.round(W * 0.5);
-    const fy = yP - lineH * 0.3;
-    const A = Math.min(1.08, Math.acos(clamp((R * 1.05 + 8 + lineH * 0.3) / L, 0, 0.95)));
-    const dA = R * Math.sin(A1);
-    const Rc = Math.max(R * 2, (yP + 24 - dA) / (Math.sin(PHI_MAX) - Math.sin(A1)));
-    const wellR = 2 * L + 14;
-    const wellA = A + 0.12;
-    const RS = wellR * Math.sin(Math.min(wellA, 1.4)) + 0.2 * L;
-    const spoolR = L * (W < 600 ? 0.48 : 0.55);
-    const SX = RS + spoolR + 0.16 * L;
-    const yDeck = yP + R * 0.92;
+    const box = { x0: gut, x1: W - gut, y0: top, y1: bottom };
     const angles = [];
-    for (let i = 0; i < BARS.count; i += 1) angles.push(-A + (2 * A * i) / (BARS.count - 1));
+    for (let i = 0; i < BARS.count; i += 1) angles.push(-0.9 + (1.8 * i) / (BARS.count - 1));
     const res = clamp(Math.round(pitch * dpr * 0.95), 16, 28);
-    this.geo = { W, H, dpr, pitch, lineH, R, L, yP, printX, fy, A, Rc, wellR, wellA, RS, spoolR, SX, yDeck, angles };
+    this.geo = { W, H, dpr, pitch, lineH, yP, printX, angles, wide, box };
+    this.view = { x: this.viewTarget(), v: 0 };
+    this.geo.printX = this.view.x;
     this.glCanvas.width = Math.round(W * dpr);
     this.glCanvas.height = Math.round(H * dpr);
     this.overlay.width = Math.round(W * dpr);
     this.overlay.height = Math.round(H * dpr);
-    this.cache.width = this.overlay.width;
-    this.cache.height = this.overlay.height;
     if (this.ink.setResolution(res)) this.rebuildInk();
-    this.drawCache();
     if (this.ready) this.render();
-  }
-
-  arcToScreen(s) {
-    const { R, Rc } = this.geo;
-    if (s <= R * A1) return R * Math.sin(s / R);
-    return R * Math.sin(A1) + Rc * (Math.sin(Math.min(1.5, A1 + (s - R * A1) / Rc)) - Math.sin(A1));
   }
 
   headX() {
     return MARGIN_COLS + this.car.x + 0.5;
+  }
+
+  viewTarget() {
+    const { W, pitch, wide, box } = this.geo;
+    const h = this.headX();
+    if (wide) return W / 2 + (h - SHEET_COLS / 2) * pitch * FOLLOW;
+    const span = (NARROW_COLS[1] - NARROW_COLS[0]) * pitch;
+    const left = (box.x0 + box.x1 - span) / 2;
+    return left + (h - NARROW_COLS[0]) * pitch;
+  }
+
+  stepView() {
+    if (!this.view) return false;
+    this.view.x = this.viewTarget();
+    this.geo.printX = this.view.x;
+    return false;
   }
 
   headY() {
@@ -356,130 +336,19 @@ export default class TypewriterEngine {
     gl.uniform1i(u.uMaterial, 1);
     gl.uniform1f(u.uPeriod, PERIOD);
     gl.uniform2f(u.uRes, this.glCanvas.width, this.glCanvas.height);
-    gl.uniform2f(u.uBox, g.W, g.H);
     gl.uniform1f(u.uDpr, this.glCanvas.width / g.W);
     gl.uniform2f(u.uPrint, g.printX, g.yP);
     gl.uniform1f(u.uPitch, g.pitch);
     gl.uniform2f(u.uHead, this.headX(), this.headY());
-    gl.uniform1f(u.uPlatenR, g.R);
-    gl.uniform1f(u.uA1, A1);
-    gl.uniform1f(u.uRc, g.Rc);
     gl.uniform4f(u.uSheet, 0, 0, SHEET_COLS, SHEET_LINES * LINE_UNITS);
-    gl.uniform2f(u.uCarriage, CAR_LEFT, CAR_RIGHT);
-    gl.uniform1f(u.uKnob, KNOB);
-    gl.uniform1f(u.uRoll, (this.roll.x * g.lineH) / g.R);
+    const span = Math.round((NARROW_COLS[1] - NARROW_COLS[0]) * g.pitch);
+    const left = Math.round(g.wide ? g.printX - this.headX() * g.pitch : (g.box.x0 + g.box.x1 - span) / 2);
+    const right = left + (g.wide ? Math.round(SHEET_COLS * g.pitch) : span);
+    gl.uniform4f(u.uFrame, left, g.box.y0, right, g.box.y1);
     gl.uniform4f(u.uInkMap, INK_COL0, 0, 1 / INK_COLS, 1 / (SHEET_LINES * LINE_UNITS));
     gl.uniform2f(u.uInkTexel, 1 / this.ink.canvas.width, 1 / this.ink.canvas.height);
     gl.uniform3f(u.uEnamel, ENAMEL[0] / 255, ENAMEL[1] / 255, ENAMEL[2] / 255);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
-  }
-
-  wellPath(c) {
-    const { printX, fy, wellR, wellA, L } = this.geo;
-    const inner = 0.84 * L;
-    c.moveTo(printX + Math.cos(Math.PI / 2 - wellA) * wellR, fy + Math.sin(Math.PI / 2 - wellA) * wellR);
-    c.arc(printX, fy, wellR, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.arc(printX, fy, inner, Math.PI / 2 + wellA, Math.PI / 2 - wellA, true);
-    c.closePath();
-  }
-
-  drawCache() {
-    const g = this.geo;
-    const c = this.cache.getContext("2d");
-    const { W, H, dpr, printX, fy, yDeck, L, wellR, wellA, angles, spoolR, SX } = g;
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.clearRect(0, 0, this.cache.width, this.cache.height);
-    c.setTransform(dpr, 0, 0, dpr, 0, 0);
-
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck + 2);
-    this.wellPath(c);
-    c.clip("evenodd");
-    c.fillStyle = DECK;
-    c.fillRect(0, yDeck, W, H - yDeck + 2);
-    c.fillStyle = CHARCOAL;
-    c.fillRect(0, yDeck, W, 2);
-    for (const side of [-1, 1]) {
-      c.beginPath();
-      c.arc(printX + side * SX, yDeck + spoolR + 0.22 * L, spoolR * 1.04, 0, TAU);
-      c.fillStyle = DECK_SHADE;
-      c.fill();
-    }
-    c.restore();
-
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck + 2);
-    c.clip();
-    c.beginPath();
-    this.wellPath(c);
-    c.fillStyle = CHARCOAL;
-    c.fill();
-    c.beginPath();
-    c.arc(printX, fy, L * 1.1, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.arc(printX, fy, L * 0.9, Math.PI / 2 + wellA, Math.PI / 2 - wellA, true);
-    c.closePath();
-    c.fillStyle = STEEL_DARK;
-    c.fill();
-    c.strokeStyle = CHARCOAL;
-    c.lineWidth = 1;
-    for (const a of angles) {
-      const ux = Math.sin(a);
-      const uy = Math.cos(a);
-      c.beginPath();
-      c.moveTo(printX + ux * L * 0.9, fy + uy * L * 0.9);
-      c.lineTo(printX + ux * L * 1.1, fy + uy * L * 1.1);
-      c.stroke();
-    }
-    c.beginPath();
-    c.arc(printX, fy, wellR, Math.PI / 2 - wellA, Math.PI / 2 + wellA);
-    c.lineWidth = 2;
-    c.strokeStyle = STEEL;
-    c.stroke();
-    c.restore();
-  }
-
-  barPose(index, theta) {
-    const { printX, fy, L, angles } = this.geo;
-    const a = angles[index];
-    const ux = Math.sin(a);
-    const uy = Math.cos(a);
-    const px = printX + ux * L;
-    const py = fy + uy * L;
-    const ct = Math.cos(theta);
-    const st = Math.sin(theta);
-    const wx = px + ux * L * ct;
-    const wy = py + uy * L * ct;
-    const z = L * st;
-    const D = 2.5 * L;
-    const s = D / Math.max(D * 0.2, D - z);
-    return { a, ux, uy, px, py, sx: printX + (wx - printX) * s, sy: fy + (wy - fy) * s, z, s, st, theta };
-  }
-
-  drawBar(c, pose, flying) {
-    const { L, pitch } = this.geo;
-    const { a, px, py, sx, sy, s, theta } = pose;
-    const w = L * 0.042 * (1 + (s - 1) * 0.9);
-    c.lineCap = "round";
-    c.strokeStyle = flying ? STEEL : STEEL_DARK;
-    c.lineWidth = w;
-    c.beginPath();
-    c.moveTo(px, py);
-    c.lineTo(sx, sy);
-    c.stroke();
-    const face = Math.sin(Math.min(Math.PI, theta) * 0.5);
-    const restW = Math.max(3, ((2 * this.geo.A) / (this.geo.angles.length - 1)) * 2 * L * 0.85);
-    const sw = (restW + (pitch * 1.15 - restW) * face) * s;
-    const sh = L * (0.13 + 0.05 * face) * s;
-    c.save();
-    c.translate(sx, sy);
-    c.rotate(-a);
-    c.fillStyle = flying ? STEEL_LIGHT : STEEL;
-    c.beginPath();
-    c.roundRect(-sw / 2, -sh / 2, sw, sh, Math.min(sw, sh) * 0.2);
-    c.fill();
-    c.restore();
   }
 
   ribbonLift() {
@@ -498,163 +367,23 @@ export default class TypewriterEngine {
   drawOverlay() {
     const g = this.geo;
     const c = this.ctx;
-    const { W, H, dpr, printX, yP, lineH, L, RS, spoolR, SX, yDeck } = g;
+    const { dpr, printX, yP, lineH, pitch } = g;
     c.setTransform(1, 0, 0, 1, 0, 0);
     c.clearRect(0, 0, this.overlay.width, this.overlay.height);
     c.setTransform(dpr, 0, 0, dpr, 0, 0);
-    const hx = this.headX();
-
-    this.drawBail(c, hx);
-
-    c.drawImage(this.cache, 0, 0, W, H);
-
-    const flying = [];
-    for (const b of this.bars) flying[b.index] = b;
-    c.save();
-    c.beginPath();
-    c.rect(0, yDeck, W, H - yDeck);
-    c.clip();
-    c.beginPath();
-    this.wellPath(c);
-    c.clip();
-    for (let i = 0; i < g.angles.length; i += 1) {
-      if (flying[i]) continue;
-      this.drawBar(c, this.barPose(i, 0), false);
-    }
-    c.restore();
-
-    const spoolY = yDeck + spoolR + 0.22 * L;
-    for (const side of [-1, 1]) {
-      const cx = printX + side * SX;
-      const rot = this.spool * (side < 0 ? 1 : 0.92);
-      c.save();
-      c.translate(cx, spoolY);
-      c.fillStyle = CHARCOAL;
-      c.beginPath();
-      c.arc(0, 0, spoolR * (side < 0 ? 0.92 : 0.8), 0, TAU);
-      c.fill();
-      c.rotate(rot);
-      c.fillStyle = STEEL_LIGHT;
-      c.beginPath();
-      c.arc(0, 0, spoolR * 0.34, 0, TAU);
-      c.fill();
-      c.fillStyle = CHARCOAL;
-      for (let k = 0; k < 3; k += 1) {
-        const ang = (k * TAU) / 3;
-        c.beginPath();
-        c.arc(Math.cos(ang) * spoolR * 0.18, Math.sin(ang) * spoolR * 0.18, spoolR * 0.06, 0, TAU);
-        c.fill();
-      }
-      c.restore();
-    }
 
     const lift = this.ribbonLift();
-    const top0 = yP + lineH * 0.34;
-    const hR = lineH * 1.45;
-    const liftPx = lineH * 1.0 * lift;
-    const reach = SX - spoolR * 0.15;
-    const N = 48;
-    const smooth = (a, b, x) => {
-      const t = clamp((x - a) / (b - a), 0, 1);
-      return t * t * (3 - 2 * t);
-    };
-    const shape = (x) => {
-      const t = Math.abs(x - printX) / reach;
-      const span = RS / reach;
-      const hump = 1 - smooth(0, span, t);
-      const fall = smooth(span * 0.92, 1, t);
-      const mid = top0 + hR * 0.5 - liftPx * hump;
-      const cy = mid + (spoolY - spoolR * 0.78 - mid) * fall;
-      const h = hR * (1 - 0.86 * smooth(span * 0.85, 1, t));
-      return [cy - h / 2, h];
-    };
-    const band = (from, to) => {
-      c.beginPath();
-      for (let i = 0; i <= N; i += 1) {
-        const x = printX - reach + (2 * reach * i) / N;
-        const [y, h] = shape(x);
-        if (i === 0) c.moveTo(x, y + h * from);
-        else c.lineTo(x, y + h * from);
-      }
-      for (let i = N; i >= 0; i -= 1) {
-        const x = printX - reach + (2 * reach * i) / N;
-        const [y, h] = shape(x);
-        c.lineTo(x, y + h * to);
-      }
-      c.closePath();
-    };
-    band(0, 1);
+    const rw = pitch * 2;
+    const rh = Math.max(8, lineH * 0.5);
+    const ry = yP + lineH * 0.3 + Math.max(6, lineH * 0.34) - lineH * 0.95 * lift;
     c.fillStyle = CHARCOAL;
-    c.fill();
-    band(0.5, 1);
-    c.fillStyle = RIBBON_RED;
-    c.fill();
-    for (const side of [-1, 1]) {
-      const gx = printX + side * RS;
-      const [gy, gh] = shape(gx);
-      c.fillStyle = STEEL_LIGHT;
-      c.beginPath();
-      c.roundRect(gx - 3, gy - 4, 6, gh + 8, 3);
-      c.fill();
-    }
-    this.drawGuide(c);
-
-    for (const b of this.bars) {
-      const theta = this.barTheta(b.t);
-      this.drawBar(c, this.barPose(b.index, theta), true);
-    }
-  }
-
-  drawGuide(c) {
-    const { printX, yP, lineH, pitch } = this.geo;
-    const y = yP + lineH * 0.3;
-    const h = Math.max(6, lineH * 0.34);
-    const half = pitch * 4.5;
-    c.fillStyle = STEEL_LIGHT;
-    const notch = Math.min(h * 0.6, pitch * 0.4);
     c.beginPath();
-    c.moveTo(printX - half, y);
-    c.lineTo(printX - notch, y);
-    c.lineTo(printX, y + notch);
-    c.lineTo(printX + notch, y);
-    c.lineTo(printX + half, y);
-    c.lineTo(printX + half, y + h);
-    c.lineTo(printX - half, y + h);
-    c.closePath();
+    c.roundRect(printX - rw / 2, ry, rw, rh, 2);
     c.fill();
-    c.strokeStyle = CHARCOAL;
-    c.lineWidth = 1;
-    for (let k = -4; k <= 4; k += 1) {
-      if (k === 0) continue;
-      const x = Math.round(printX + k * pitch) + 0.5;
-      const long = k % 5 === 0;
-      c.beginPath();
-      c.moveTo(x, y + h * 0.3);
-      c.lineTo(x, y + h * (long ? 0.85 : 0.6));
-      c.stroke();
-    }
-  }
-
-  drawBail(c, hx) {
-    const { W, printX, yP, lineH, pitch } = this.geo;
-    const d = this.arcToScreen(lineH * 7.2);
-    const y = yP - d;
-    if (y < -20) return;
-    const xl = Math.max(-10, printX + (CAR_LEFT + 2.5 - hx) * pitch);
-    const xr = Math.min(W + 10, printX + (CAR_RIGHT - 2.5 - hx) * pitch);
-    if (xr <= xl) return;
-    c.fillStyle = STEEL;
-    c.fillRect(xl, Math.round(y) - 1, xr - xl, 2);
-  }
-
-  barTheta(t) {
-    if (this.reduced) return 0;
-    if (t < UP) {
-      const k = t / UP;
-      return Math.PI * Math.pow(k, 1.6);
-    }
-    const k = clamp((t - UP) / DOWN, 0, 1);
-    return Math.PI * (1 - (1 - Math.pow(1 - k, 3)));
+    c.fillStyle = RIBBON_RED;
+    c.beginPath();
+    c.roundRect(printX - rw / 2, ry + rh / 2, rw, rh / 2, [0, 0, 2, 2]);
+    c.fill();
   }
 
   keyDown(e) {
@@ -674,50 +403,18 @@ export default class TypewriterEngine {
     }
     if (key === "Enter") {
       e.preventDefault();
-      this.flash("return");
       this.carriageReturn();
     } else if (key === "Backspace" || key === "ArrowLeft") {
       e.preventDefault();
-      this.flash("back");
       this.backspace();
     } else if (key === " " || key === "ArrowRight") {
       e.preventDefault();
-      this.flash(" ");
       this.space();
     } else if (key.length === 1) {
       if (!BARS.map.has(key)) return;
       e.preventDefault();
-      this.flash(key.toLowerCase());
       this.press(key);
     }
-  }
-
-  pressKey(key) {
-    this.sound.unlock();
-    if (key === "return") this.carriageReturn();
-    else if (key === "back") this.backspace();
-    else if (key === " ") this.space();
-    else if (key === "shift") {
-      this.shift = !this.shift;
-      this.onShift?.(this.shift);
-    } else {
-      const ch = this.shift ? key.toUpperCase() : key;
-      if (this.shift) {
-        this.shift = false;
-        this.onShift?.(false);
-      }
-      this.press(ch);
-    }
-    this.flash(key);
-  }
-
-  flash(key) {
-    const el = this.keyMap.get(key);
-    if (!el) return;
-    el.setAttribute("data-down", "");
-    this.keyFx = this.keyFx.filter((k) => k.el !== el);
-    this.keyFx.push({ el, t0: -1 });
-    this.wake();
   }
 
   settleHead() {
@@ -740,6 +437,7 @@ export default class TypewriterEngine {
     if (this.drag && this.drag.axis) return;
     this.settleHead();
     const strike = this.makeStrike(ch, this.col, this.line);
+    this.sound.key(clamp((this.geo?.angles[bar.index] || 0) * 0.5, -0.6, 0.6));
     const advance = this.col < MAX_COL;
     if (advance) this.col += 1;
     strike.bell = advance && this.col === BELL_COL;
@@ -940,10 +638,9 @@ export default class TypewriterEngine {
     this.strikes.push(s);
     this.dirty.push(this.ink.stamp(s));
     const pan = clamp((this.geo.angles[b.index] || 0) * 0.5, -0.6, 0.6);
-    this.sound.strike(s.force, pan, s.weave[0] - 0.5);
-    if (b.advance) this.sound.escape();
+    this.sound.strike(s.force, pan, s.weave[0] - 0.5, b.index);
+    if (b.advance) this.sound.escape(0.032);
     if (s.bell) this.sound.bell();
-    this.spool += 0.035;
   }
 
   stepCarriage(dt) {
@@ -1064,19 +761,6 @@ export default class TypewriterEngine {
     return springStep(this.lever, 0, 18, 0.9, dt);
   }
 
-  stepKeys(now) {
-    if (!this.keyFx.length) return false;
-    this.keyFx = this.keyFx.filter((k) => {
-      if (k.t0 < 0) k.t0 = now;
-      if (now - k.t0 > 130) {
-        k.el.removeAttribute("data-down");
-        return false;
-      }
-      return true;
-    });
-    return true;
-  }
-
   flushInk() {
     if (!this.dirty.length) return;
     for (const r of this.dirty) this.uploadInk(r);
@@ -1110,7 +794,7 @@ export default class TypewriterEngine {
     if (this.stepCarriage(dt)) busy = true;
     if (this.stepRoll(dt)) busy = true;
     if (this.stepLever(dt)) busy = true;
-    if (this.stepKeys(now)) busy = true;
+    if (this.stepView()) busy = true;
     this.flushInk();
     this.render();
     if (busy) this.raf = requestAnimationFrame(this.frame);
@@ -1133,7 +817,6 @@ export default class TypewriterEngine {
     this.stage.removeEventListener("pointerup", this.handlers.up);
     this.stage.removeEventListener("pointercancel", this.handlers.up);
     (this.embedded ? this.stage : window).removeEventListener("keydown", this.handlers.key);
-    for (const k of this.keyFx) k.el.removeAttribute("data-down");
     this.sound.destroy();
     const gl = this.gl;
     if (!gl) return;

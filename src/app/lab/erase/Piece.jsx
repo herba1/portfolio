@@ -9,7 +9,7 @@ import { TITLE_MAX } from "./eraseSetlist";
 import "./erase.css";
 
 const LABEL =
-  "A handwritten Beatles setlist taped above a ledge, one song already half rubbed out. Click a song to rewrite it, then press and scrub across a title to erase it; the ink lifts off as dust and falls into a pile on the ledge. Arrow keys pick a line, Enter rewrites it, Delete rubs it out, Command or Control Z undoes the last rub and the dust flies back into the letters.";
+  "A handwritten setlist taped above a ledge, one song already half rubbed out. Click a song to rewrite it, then press and scrub across a title to erase it; the ink lifts off as dust and falls into a pile on the ledge. Arrow keys pick a line, Enter rewrites it, Delete rubs it out, Command or Control Z undoes the last rub and the dust flies back into the letters.";
 
 function subscribeNothing() {
   return () => {};
@@ -78,6 +78,7 @@ export default function Piece({ embedded = false }) {
   const dustRef = useRef(null);
   const eraserRef = useRef(null);
   const ringRef = useRef(null);
+  const caretRef = useRef(null);
   const engineRef = useRef(null);
   const near = useNearViewport(rootRef);
   const [history, setHistory] = useState(0);
@@ -96,11 +97,22 @@ export default function Piece({ embedded = false }) {
       dust: dustRef.current,
       eraser: eraserRef.current,
       ring: ringRef.current,
+      caret: caretRef.current,
       embedded,
       onHistory: (count) => setHistory(count),
       onEdit: (index, fromKey = false) => {
         const box = engine.beginEdit(index);
         if (box) setEdit({ ...box, value: box.title, fromKey });
+      },
+      onEditBox: (box) => {
+        const input = editRef.current;
+        if (box && input) {
+          input.style.setProperty("--erase-edit-size", box.size.toFixed(2));
+          input.style.left = `${box.left}px`;
+          input.style.top = `${box.baseline - box.size}px`;
+          input.style.width = `${box.width}px`;
+        }
+        if (box) setEdit((current) => (current && current.index === box.index ? { ...current, ...box, title: current.title } : current));
       },
     });
     engineRef.current = engine;
@@ -129,8 +141,26 @@ export default function Piece({ embedded = false }) {
     const input = editRef.current;
     if (!input || document.activeElement === input) return;
     input.focus({ preventScroll: true });
-    const end = input.value.length;
-    input.setSelectionRange(end, end);
+    input.setSelectionRange(0, input.value.length);
+    engineRef.current?.setEditSelection(0, input.value.length);
+  }, [edit]);
+
+  useEffect(() => {
+    if (!edit) return undefined;
+    const input = editRef.current;
+    if (!input) return undefined;
+    const sync = () => {
+      if (document.activeElement !== input) return;
+      engineRef.current?.setEditSelection(input.selectionStart ?? 0, input.selectionEnd ?? 0);
+    };
+    document.addEventListener("selectionchange", sync);
+    input.addEventListener("keyup", sync);
+    input.addEventListener("pointerup", sync);
+    return () => {
+      document.removeEventListener("selectionchange", sync);
+      input.removeEventListener("keyup", sync);
+      input.removeEventListener("pointerup", sync);
+    };
   }, [edit]);
 
   const finishEdit = useCallback((value, next, fromKey) => {
@@ -150,7 +180,9 @@ export default function Piece({ embedded = false }) {
   }, []);
 
   const onEditChange = useCallback((e) => {
-    const value = e.target.value.toUpperCase().slice(0, TITLE_MAX);
+    const input = e.target;
+    const value = input.value.slice(0, TITLE_MAX);
+    engineRef.current?.setEditText(value, input.selectionStart ?? value.length, input.selectionEnd ?? value.length);
     setEdit((current) => (current ? { ...current, value } : current));
   }, []);
 
@@ -200,6 +232,7 @@ export default function Piece({ embedded = false }) {
         <canvas ref={pileRef} className="erase__pile" aria-hidden="true" />
         <canvas ref={dustRef} className="erase__dust" aria-hidden="true" />
         <span ref={ringRef} className="erase__ring" aria-hidden="true" />
+        <span ref={caretRef} className="erase__caret" aria-hidden="true" />
         <div ref={eraserRef} className="erase__eraser" aria-hidden="true">
           <EraserArt />
         </div>
@@ -214,7 +247,7 @@ export default function Piece({ embedded = false }) {
           maxLength={TITLE_MAX}
           spellCheck={false}
           autoComplete="off"
-          autoCapitalize="characters"
+          autoCapitalize="words"
           enterKeyHint="done"
           aria-label={`Song ${edit.index + 1} title`}
           onChange={onEditChange}

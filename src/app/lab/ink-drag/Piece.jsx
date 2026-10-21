@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import useNearViewport from "@/app/experiments/useNearViewport";
 import { FEATURED } from "@/app/lab/_music/catalog";
@@ -26,7 +26,80 @@ const ALBUM_ITEMS = FEATURED.slice(0, 6).map((album) => ({
 }));
 
 const SHEET_LABEL =
-  "A record printed in wet ink: its album cover, then its title in type. Drag through the sheet with a mouse, finger or pen to smear the ink along your path; slow strokes push thick soft smears, fast strokes pull thin streaks. Every few seconds a sweep drags the cover into the title and the title into the next cover. Press Enter to flip between cover and title.";
+  "A record printed in wet ink: its album cover, then its title in type. Drag through the sheet with a mouse, finger or pen to smear the ink along your path; slow strokes push thick soft smears, fast strokes pull thin streaks. Every few seconds the ink of the cover flows across the sheet and settles into the letters of its title, then flows back out into the next cover. Press Enter to flip between cover and title.";
+
+const SPRING = { stiffness: 380, damping: 36 };
+
+function useSlider(trackRef, markRef, index) {
+  const state = useRef(null);
+
+  useLayoutEffect(() => {
+    const track = trackRef.current;
+    const mark = markRef.current;
+    if (!track || !mark) return undefined;
+    const items = track.querySelectorAll("[role='radio']");
+    const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let raf = 0;
+    let last = 0;
+    const paint = (s) => {
+      mark.style.transform = `translate3d(${s.x.toFixed(2)}px, 0, 0)`;
+      mark.style.width = `${s.w.toFixed(2)}px`;
+    };
+    const measure = () => {
+      const el = items[index];
+      return el ? { x: el.offsetLeft, w: el.offsetWidth } : null;
+    };
+    const tick = (now) => {
+      const s = state.current;
+      const goal = measure();
+      if (!s || !goal) return;
+      const dt = Math.min(1 / 30, Math.max(0.001, (now - last) / 1000));
+      last = now;
+      for (const [p, v, g] of [["x", "vx", goal.x], ["w", "vw", goal.w]]) {
+        const a = SPRING.stiffness * (g - s[p]) - SPRING.damping * s[v];
+        s[v] += a * dt;
+        s[p] += s[v] * dt;
+      }
+      const done =
+        Math.abs(goal.x - s.x) < 0.1 &&
+        Math.abs(goal.w - s.w) < 0.1 &&
+        Math.abs(s.vx) < 1 &&
+        Math.abs(s.vw) < 1;
+      if (done) {
+        s.x = goal.x;
+        s.w = goal.w;
+        s.vx = 0;
+        s.vw = 0;
+      }
+      paint(s);
+      raf = done ? 0 : requestAnimationFrame(tick);
+    };
+    const goal = measure();
+    if (!goal) return undefined;
+    if (!state.current || reduced) {
+      state.current = { ...goal, vx: 0, vw: 0 };
+      paint(state.current);
+    } else {
+      last = performance.now();
+      raf = requestAnimationFrame(tick);
+    }
+    mark.setAttribute("data-shown", "");
+    const snap = () => {
+      const g = measure();
+      if (!g || !state.current) return;
+      Object.assign(state.current, g, { vx: 0, vw: 0 });
+      paint(state.current);
+    };
+    const observer = new ResizeObserver(() => {
+      if (!raf) snap();
+    });
+    observer.observe(track);
+    return () => {
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, [trackRef, markRef, index]);
+}
 
 function FreshIcon() {
   return (
@@ -60,6 +133,12 @@ export default function Piece({ embedded = false }) {
   const near = useNearViewport(rootRef);
   const { tracks, live } = useTopSongs(6);
   const [view, setView] = useState({ index: 0, kind: "cover" });
+  const recordsRef = useRef(null);
+  const ringRef = useRef(null);
+  const inksRef = useRef(null);
+  const pillRef = useRef(null);
+  useSlider(recordsRef, ringRef, view.index);
+  useSlider(inksRef, pillRef, view.kind === "cover" ? 0 : 1);
 
   const items = useMemo(() => {
     if (!live) return ALBUM_ITEMS;
@@ -179,10 +258,16 @@ export default function Piece({ embedded = false }) {
       ) : (
         <div className="ink-drag__bar">
           <div
+            ref={recordsRef}
             className="ink-drag__records"
             role="radiogroup"
             aria-label="Record"
           >
+            <span
+              ref={ringRef}
+              className="ink-drag__ring"
+              aria-hidden="true"
+            />
             {items.map((item, i) => (
               <button
                 key={item.id}
@@ -204,7 +289,17 @@ export default function Piece({ embedded = false }) {
             ))}
           </div>
 
-          <div className="ink-drag__inks" role="radiogroup" aria-label="Show">
+          <div
+            ref={inksRef}
+            className="ink-drag__inks"
+            role="radiogroup"
+            aria-label="Show"
+          >
+            <span
+              ref={pillRef}
+              className="ink-drag__pill"
+              aria-hidden="true"
+            />
             {["cover", "title"].map((kind) => (
               <button
                 key={kind}
