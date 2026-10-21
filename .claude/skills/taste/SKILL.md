@@ -105,6 +105,14 @@ Load these with the Skill tool before designing; they are decoded from work Herb
 - Shader pieces can go harder: stronger distortion, bloom.
 - Use real names on the objects (the sticker should say Abbey Road).
 
+## From batch seven (21 keepers, scored 4–5, October 2026)
+
+- Twelve 5s. Typewriter jumped to 5 once the sound was modelled from the machine's parts, so sound design pays when it is physical. Sticker Peel stayed 5 with the real album name printed on it.
+- Physical materials must behave consistently: crease density that differs between the photo and its border "doesn't make sense". One material, one response, and it must build up with each action.
+- No motion may reverse against the direction of travel. A cover that swings back as it passes the centre, or a spring that overshoots and returns, reads as wrong.
+- Easing should feel native: real springs, velocity carried through, no linear or stalled phases.
+- Real proportions matter: a CD is 1.2mm thick, and a slab of a disc reads as fake. Glare, bloom and lens flare on highlights are welcome on shiny objects.
+
 ## Type vibes — Herb's reference board (October 2026)
 
 Herb shared Pinterest stills and lyric edits as the visual direction for type and UI pieces. What they share:
