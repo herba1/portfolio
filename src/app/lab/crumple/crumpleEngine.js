@@ -1,17 +1,26 @@
 import { BAKE } from "./crumpleBake";
 import { createRustle } from "./crumpleSound";
+import { createFacets } from "./crumpleCreases";
 
-const SUB = 4;
+const SUB = 6;
 const GROUND = "#ebe9e4";
 const FRAME_MS = 200;
 const KEYS = [0.42, 0.78, 1.05, 0.98, 1];
 const CRUSH = [0, 0.6, 0.74, 0.8, 0.855, 1];
 const OPEN = CRUSH;
+const LEVEL = [0, 1, 2, 3, 4, 6];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const smoothstep = (a, b, x) => {
   const t = clamp((x - a) / (b - a), 0, 1);
   return t * t * (3 - 2 * t);
+};
+const levelAt = (p) => {
+  if (p < CRUSH[1]) return clamp(p / (CRUSH[1] * KEYS[0]), 0, 1);
+  for (let i = 1; i < CRUSH.length; i += 1) {
+    if (p <= CRUSH[i]) return LEVEL[i - 1] + ((LEVEL[i] - LEVEL[i - 1]) * (p - CRUSH[i - 1])) / (CRUSH[i] - CRUSH[i - 1]);
+  }
+  return LEVEL[LEVEL.length - 1];
 };
 
 function decode(text) {
@@ -159,11 +168,11 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   tex.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
   const front = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.52, metalness: 0, vertexColors: true, flatShading: true, side: THREE.FrontSide }),
+    new THREE.MeshStandardMaterial({ map: tex, roughness: 0.52, metalness: 0, vertexColors: true, flatShading: false, side: THREE.FrontSide }),
   );
   const back = new THREE.Mesh(
     geometry,
-    new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0, vertexColors: true, flatShading: true, side: THREE.BackSide }),
+    new THREE.MeshStandardMaterial({ color: 0xf3f1ec, roughness: 0.92, metalness: 0, vertexColors: true, flatShading: false, side: THREE.BackSide }),
   );
   for (const m of [front, back]) {
     m.castShadow = true;
@@ -175,7 +184,9 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
   scene.add(sheet);
 
   const pose = new Float32Array(stride);
-  const st = { p: 0, target: 0, stage: 0, dir: 1, memory: 0, raf: 0, anim: null, active: true, destroyed: false, dirty: true, held: false };
+  const gridNormal = new Float32Array(stride);
+  const facets = createFacets({ nx, ny, sub: SUB });
+  const st = { p: 0, target: 0, stage: 0, dir: 1, memory: 0, level: 0, raf: 0, anim: null, active: true, destroyed: false, dirty: true, held: false };
   const view = { w: 1, h: 1 };
   const rustle = createRustle();
 
@@ -194,6 +205,28 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     const m = st.memory;
     if (m < 1) for (let k = 0; k < stride; k += 1) pose[k] += A[k] * (1 - m);
     if (m > 0) sample(B, (F - 1) - f, pose, m);
+  }
+
+  function poseNormals() {
+    const at = (i, j) => (clamp(j, 0, ny - 1) * nx + clamp(i, 0, nx - 1)) * 3;
+    for (let j = 0; j < ny; j += 1) {
+      for (let i = 0; i < nx; i += 1) {
+        const l = at(i - 1, j);
+        const r = at(i + 1, j);
+        const d = at(i, j - 1);
+        const u = at(i, j + 1);
+        const ax = pose[r] - pose[l];
+        const ay = pose[r + 1] - pose[l + 1];
+        const az = pose[r + 2] - pose[l + 2];
+        const bx = pose[u] - pose[d];
+        const by = pose[u + 1] - pose[d + 1];
+        const bz = pose[u + 2] - pose[d + 2];
+        const k = (j * nx + i) * 3;
+        gridNormal[k] = ay * bz - az * by;
+        gridNormal[k + 1] = az * bx - ax * bz;
+        gridNormal[k + 2] = ax * by - ay * bx;
+      }
+    }
   }
 
   function upsample() {
@@ -222,6 +255,14 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
     }
   }
 
+  function crease() {
+    const p = clamp(st.p, 0, 1);
+    facets.apply(position, pose, gridNormal, st.level, 0.35 + 0.65 * smoothstep(0, 0.6, p), smoothstep(0.7, 1, p));
+    let low = Infinity;
+    for (let k = 2; k < RN * 3; k += 3) low = Math.min(low, position[k]);
+    for (let k = 2; k < RN * 3; k += 3) position[k] -= low;
+  }
+
   function shade() {
     let cx = 0;
     let cy = 0;
@@ -248,7 +289,9 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
 
   function update() {
     buildPose();
+    poseNormals();
     upsample();
+    crease();
     shade();
     geometry.attributes.position.needsUpdate = true;
     geometry.attributes.color.needsUpdate = true;
@@ -294,6 +337,7 @@ export async function createCrumple({ host, root, src, reduced, onState }) {
         const prev = st.p;
         st.p = clamp(anim.from + (anim.to - anim.from) * keys[k], 0, 1);
         st.memory = Math.max(st.memory, smoothstep(0, 0.14, st.p));
+        st.level = Math.max(st.level, levelAt(st.p));
         anim.k = k;
         anim.speed = Math.abs(st.p - prev) / (FRAME_MS / 1000);
         st.dirty = true;
