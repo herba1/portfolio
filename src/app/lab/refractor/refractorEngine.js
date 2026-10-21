@@ -10,6 +10,7 @@ const PITCH_MAX = 12 * DEG;
 const SPIN_CAP = 11;
 const FOIL_MS = 640;
 const TINT = [0.925, 0.918, 0.902];
+const GLARE = [0.5, 0.35, 4.5, 0.7];
 
 const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const soft = (v, max) => max * Math.tanh(v / max);
@@ -592,7 +593,8 @@ export function createRefractorEngine({ box, stage, canvas, insets, embedded, ca
       lift: body.lift * view.hh * 0.08,
       dist: Math.max(view.width, view.height) * 1.6 + 500,
       ground: view.hh * 0.16,
-      thick: Math.max(1.4, hh * 0.022),
+      thick: Math.max(1, hh * 0.02),
+      glare: GLARE,
       keyLight: [-0.95 * view.hh, 1.35 * view.hh, 2.7 * view.hh],
       fillLight: [1.7 * view.hh, -0.15 * view.hh, 2.3 * view.hh],
       foil: foil.t >= 1 ? [foil.to, foil.to, 0] : [foil.from, foil.to, mix],

@@ -33,7 +33,7 @@ const float HOLE = 0.125;
 const float HUB = 0.31;
 const float METAL_IN = 0.335;
 const float DATA_IN = 0.385;
-const float METAL_OUT = 0.978;
+const float METAL_OUT = 0.983;
 
 float hash21(vec2 p) {
   p = fract(p * vec2(127.317, 311.703));
@@ -67,10 +67,16 @@ vec3 spectral(float nm) {
   return vec3(bump(x, 0.8, 0.27) + 0.22 * bump(x, 0.06, 0.12), bump(x, 0.5, 0.25), bump(x, 0.18, 0.22));
 }
 
+vec3 spectralWide(float nm) {
+  float x = (nm - 380.0) / 330.0;
+  return vec3(bump(x, 0.78, 0.36) + 0.2 * bump(x, 0.04, 0.14), bump(x, 0.52, 0.34), bump(x, 0.2, 0.32));
+}
+
 vec3 gKu;
 vec3 gKv;
 vec3 gFu;
 vec3 gFv;
+vec3 gS;
 
 void lightBasis(vec3 d, out vec3 u, out vec3 v) {
   u = normalize(cross(vec3(0.0, 1.0, 0.0), d));
@@ -98,9 +104,18 @@ vec3 envRoom(vec3 r) {
   return col;
 }
 
-vec3 envLights(vec3 r, vec3 keyDir, vec3 fillDir) {
+vec3 spotLight(vec3 r) {
+  float x = max(1.0 - dot(r, gS), 0.0);
+  return vec3(30.0, 29.2, 27.6) * (exp(-x * 9000.0) + 0.05 * exp(-x * 600.0));
+}
+
+vec3 envBoxes(vec3 r, vec3 keyDir, vec3 fillDir) {
   return vec3(4.0, 3.93, 3.8) * softbox(r, keyDir, gKu, gKv, vec2(0.2, 0.13), 0.09)
     + vec3(0.9, 0.93, 0.98) * softbox(r, fillDir, gFu, gFv, vec2(0.04, 0.5), 0.05);
+}
+
+vec3 envLights(vec3 r, vec3 keyDir, vec3 fillDir) {
+  return envBoxes(r, keyDir, fillDir) + spotLight(r);
 }
 
 vec3 envAt(vec3 r, vec3 keyDir, vec3 fillDir) {
@@ -115,6 +130,7 @@ vec3 envLabel(vec3 r, vec3 keyDir, vec3 fillDir) {
   col = mix(col, vec3(0.52, 0.51, 0.49), smoothstep(-0.4, -0.8, r.y) * 0.6);
   col += vec3(6.4, 6.3, 6.05) * softbox(r, keyDir, gKu, gKv, vec2(0.12, 0.09), 0.035);
   col += vec3(1.1, 1.14, 1.2) * softbox(r, fillDir, gFu, gFv, vec2(0.03, 0.5), 0.03);
+  col += spotLight(r) * 0.3;
   return col;
 }
 
@@ -132,10 +148,22 @@ vec3 diffracted(vec3 R, vec3 N, vec3 kW, vec3 Lk, vec3 Lf) {
       float t2 = dot(t, t);
       if (t2 >= 0.99) continue;
       vec3 Rd = t + N * sqrt(1.0 - t2);
-      acc += w * (envLights(Rd, Lk, Lf) + envRoom(Rd) * 0.05) * (abs(m) == 1 ? 1.0 : 0.25);
+      acc += w * (envBoxes(Rd, Lk, Lf) + envRoom(Rd) * 0.05) * (abs(m) == 1 ? 1.0 : 0.25);
     }
   }
-  return acc / max(wsum, vec3(1e-3));
+  acc /= max(wsum, vec3(1e-3));
+  vec3 dlt = gS - N * dot(gS, N) - rt;
+  float along = dot(dlt, kW);
+  float perp = length(dlt - kW * along);
+  float core = exp(-perp * perp * 9000.0) + 0.012 * exp(-perp * perp * 900.0);
+  if (core > 1e-3) {
+    for (int m = -2; m <= 2; m += 1) {
+      if (m == 0) continue;
+      float nm = 1600.0 * along / float(m);
+      if (nm > 380.0 && nm < 720.0) acc += spectralWide(nm) * core * (abs(m) == 1 ? 2.2 : 0.35);
+    }
+  }
+  return acc;
 }
 
 vec3 discTint(float kind) {
@@ -239,6 +267,8 @@ vec3 clearPoly(vec3 behind, float r, vec3 V, vec3 Nv, vec3 Lk, vec3 Lf, vec2 q) 
   float fres = 0.04 + 0.96 * pow(clamp(1.0 - abs(dot(n, V)), 0.0, 1.0), 5.0);
   vec3 refl = envAt(R, Lk, Lf);
   vec3 col = behind * vec3(0.85, 0.862, 0.875) + vec3(0.075, 0.077, 0.08) + refl * (0.05 + fres * 0.45);
+  vec3 lip = behind * vec3(0.93, 0.935, 0.94) + vec3(0.025, 0.026, 0.028) + refl * (0.025 + fres * 0.3);
+  col = mix(col, lip, step(0.6, r));
   col += vec3(1.0) * smoothstep(0.93, 0.99, dot(R, Lk)) * (0.25 + ring * 0.6);
   col *= 1.0 - ring * 0.05;
   float edgeIn = 1.0 - smoothstep(HOLE, HOLE + 0.012, r);
@@ -303,6 +333,7 @@ void main() {
   vec3 Lf = normalize(uFill - pv);
   lightBasis(Lk, gKu, gKv);
   lightBasis(Lf, gFu, gFv);
+  gS = normalize(vec3(-0.47 * R, 0.15 * R, uLift + 2.4 * R) - pv);
 
   vec2 groundUv = css / max(uRes / uDpr, vec2(1.0));
   vec2 lamp = (groundUv - vec2(0.3, 0.16)) * vec2(1.0, 1.3);
@@ -311,16 +342,19 @@ void main() {
   float tg = safeDiv(-uGround - eye.z, dir.z);
   vec3 pg = eye + dir * tg;
   vec3 sun = normalize(uKey);
-  float contact = discShadow(pg, N, c, sun, R, 0.1, 3.0);
+  float level = smoothstep(0.82, 0.97, abs(N.z));
+  float contact = discShadow(pg, N, c, sun, R, 0.1 + 0.5 * (1.0 - level), 3.0 + 14.0 * (1.0 - level));
   float soft = discShadow(pg + vec3(-4.0, 6.0, 0.0), N, c, normalize(vec3(-0.05, 0.2, 1.0)), R * 1.02, 0.85, 22.0);
-  col *= 1.0 - (0.14 * contact + 0.16 * soft) * uReady;
+  col *= 1.0 - (0.14 * contact * mix(0.25, 1.0, level) + 0.16 * soft * mix(0.7, 1.0, level)) * uReady;
   vec3 ground = col;
+  float hot = 0.0;
 
   if (uReady > 0.0 && covF > 0.0) {
     vec2 rad = lfar / max(rf, 1e-3);
     vec3 nEdge = uRot * normalize(vec3(rad, 0.0));
     float lit = max(dot(nEdge, Lk), 0.0);
-    vec3 edgeCol = mix(ground * 0.8, vec3(0.86, 0.86, 0.85), 0.55) * (0.6 + 0.4 * lit);
+    float glint = pow(max(dot(reflect(-dir, nEdge), normalize(uKey)), 0.0), 24.0);
+    vec3 edgeCol = ground * mix(0.7, 0.86, lit) + vec3(0.03) + vec3(0.9) * glint;
     col = mix(col, edgeCol, covF * (1.0 - covN));
   }
 
@@ -333,8 +367,10 @@ void main() {
       vec3 data = dataSide(uFoil.x, q, r, aa, V, Lk, Lf, T, B, N);
       if (uFoil.z > 0.001) data = mix(data, dataSide(uFoil.y, q, r, aa, V, Lk, Lf, T, B, N), uFoil.z);
       float fresF = 0.04 + 0.96 * pow(clamp(1.0 - dot(Nv, V), 0.0, 1.0), 5.0);
-      data += envAt(reflect(-V, Nv), Lk, Lf) * fresF * 0.6;
+      vec3 Rv = reflect(-V, Nv);
+      data += envAt(Rv, Lk, Lf) * fresF * 0.6;
       float peak = max(max(data.r, data.g), data.b);
+      hot = (max(peak - 1.6, 0.0) + spotLight(Rv).g * fresF * 8.0) * metal;
       data *= (1.0 - exp(-peak * 1.85)) / max(peak, 1e-4);
       face = mix(poly, data, metal);
     } else {
@@ -354,16 +390,90 @@ void main() {
     if (!front) {
       float fres = 0.04 + 0.96 * pow(clamp(1.0 - dot(Nv, V), 0.0, 1.0), 5.0);
       face += envLabel(reflect(-V, Nv), Lk, Lf) * fres * 0.6 * metal;
+      hot = max(max(max(face.r, face.g), face.b) - 1.8, 0.0) * metal;
       face = 1.0 - exp(-face * 1.6);
     }
     vec3 radW = uRot * vec3(ln / max(rn, 1e-3), 0.0);
     float edgeLit = max(dot(radW, Lk), 0.0) + 0.4 * max(dot(radW, Lf), 0.0);
-    float rim = 1.0 - smoothstep(0.0, 1.1, R - rn);
-    face = mix(face, vec3(0.98, 0.98, 0.97), rim * clamp(0.3 + 0.8 * edgeLit, 0.0, 0.95));
+    float rim = 1.0 - smoothstep(0.0, 0.8, R - rn);
+    face = mix(face, vec3(0.98, 0.98, 0.97), rim * clamp(0.15 + 0.7 * edgeLit, 0.0, 0.75));
+    float hubGlint = spotLight(reflect(-V, Nv)).g * 0.06 * (1.0 - metal);
+    hot = max(hot, max(hubGlint, rim * edgeLit * 0.5));
     col = mix(col, face, covN);
+    hot *= covN;
   }
 
   float grain = (hash21(gl_FragCoord.xy) - 0.5) / 255.0;
-  outColor = vec4(col + grain, 1.0);
+  outColor = vec4(col + grain, clamp(hot / 48.0, 0.0, 1.0));
+}
+`;
+
+export const DOWN_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uOut;
+uniform float uBright;
+out vec4 outColor;
+vec3 tap(vec2 uv) {
+  vec4 c = texture(uSrc, uv);
+  float e = c.a * 48.0;
+  return uBright > 1.5 ? c.rgb * max(e - 4.0, 0.0) : uBright > 0.5 ? c.rgb * e : c.rgb;
+}
+void main() {
+  vec2 uv = gl_FragCoord.xy / uOut;
+  vec2 o = 1.0 / vec2(textureSize(uSrc, 0));
+  vec3 c = tap(uv + vec2(-o.x, -o.y)) + tap(uv + vec2(o.x, -o.y)) + tap(uv + vec2(-o.x, o.y)) + tap(uv + vec2(o.x, o.y));
+  outColor = vec4(c * 0.25, 1.0);
+}
+`;
+
+export const LINE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+uniform vec2 uStep;
+uniform float uFall;
+out vec4 outColor;
+void main() {
+  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uSrc, 0));
+  vec3 acc = texture(uSrc, uv).rgb;
+  float sum = 1.0;
+  for (int i = 1; i <= 4; i += 1) {
+    float w = pow(uFall, float(i));
+    acc += (texture(uSrc, uv + uStep * float(i)).rgb + texture(uSrc, uv - uStep * float(i)).rgb) * w;
+    sum += 2.0 * w;
+  }
+  outColor = vec4(acc / sum, 1.0);
+}
+`;
+
+export const COMPOSITE_FRAGMENT = `#version 300 es
+precision highp float;
+uniform sampler2D uScene;
+uniform sampler2D uNear;
+uniform sampler2D uWide;
+uniform sampler2D uStreak;
+uniform sampler2D uStarA;
+uniform sampler2D uStarB;
+uniform vec4 uGain;
+out vec4 outColor;
+float hash(vec2 p) {
+  p = fract(p * vec2(127.317, 311.703));
+  p += dot(p, p + 47.113);
+  return fract(p.x * p.y);
+}
+void main() {
+  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uScene, 0));
+  vec3 col = texture(uScene, uv).rgb;
+  vec3 near = texture(uNear, uv).rgb;
+  vec3 wide = texture(uWide, uv).rgb;
+  vec3 streak = texture(uStreak, uv).rgb;
+  vec3 star = texture(uStarA, uv).rgb + texture(uStarB, uv).rgb;
+  float sl = dot(streak, vec3(0.3, 0.5, 0.2));
+  vec3 glow = 1.0 - exp(-(near * uGain.x + wide * uGain.y));
+  col = 1.0 - (1.0 - col) * (1.0 - glow);
+  vec3 flare = mix(vec3(sl), streak, 0.3) * vec3(0.82, 0.92, 1.1) * uGain.z + star * uGain.w;
+  col += (1.0 - col) * (1.0 - exp(-flare));
+  col += (hash(gl_FragCoord.xy + 0.5) - 0.5) / 255.0;
+  outColor = vec4(col, 1.0);
 }
 `;

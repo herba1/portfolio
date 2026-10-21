@@ -1,6 +1,6 @@
 {
   "title": "Compact Disc",
-  "description": "Records from Herb's top songs pressed as compact discs and photographed softly, the way a CD looks in a good still life. The data side is gentle silver under a big soft light, cool at the top and warm toward the table, and the 1.6 micron track pitch fans the light into broad spectral bands that sweep across the tracks as you tilt it. Faint fingerprints, dust and hairline scratches catch the light, the polycarbonate is slightly milky, and the clear hub and lip show the table through. Tap it to turn it over to a printed label with the cover and the tracklist set around the edge; flick it hard and the next record spins in.",
+  "description": "Records from Herb's top songs pressed as compact discs and photographed softly, the way a CD looks in a good still life. The data side is gentle silver under a big soft light, cool at the top and warm toward the table, and the 1.6 micron track pitch fans the light into broad spectral bands that sweep across the tracks as you tilt it. A small bare bulb glints off the mirror, blooms, and throws a long anamorphic streak and a soft star across the page, with its own thin rainbow line drawn out radially by the tracks. The disc is its true 1.2 mm against 120 mm, so edge-on it is a fine line. Faint fingerprints, dust and hairline scratches catch the light, the polycarbonate is slightly milky, and the clear hub and lip show the table through. Tap it to turn it over to a printed label with the cover and the tracklist set around the edge; flick it hard and the next record spins in.",
   "tags": [
     "WebGL",
     "Optics",
@@ -9,7 +9,7 @@
   ],
   "status": "liked",
   "createdAt": "2026-10-17T00:00:00.000Z",
-  "intent": "One optical object made believable without looking idealised: a soft studio environment (large diffuse source with a warm-to-cool gradient, a broad key light, a strip light) reflected from a close camera, first and second diffraction orders of the lights computed at 12 wavelengths from the real 1.6 micron grating so the colour fans broadly but stays spectral, and the wear of a handled disc: two oval fingerprints with ridges, dust, micro-scratches and a milky veil. Proportions follow the Red Book disc (120 mm, 15 mm hole, clear hub, stacking ring, mirror band, data area, lead-out, clear lip) in silver, gold or black.",
+  "intent": "One optical object made believable without looking idealised, photographed rather than drawn: a soft studio environment (large diffuse source with a warm-to-cool gradient, a broad key light, a strip light, and one small hard bulb) reflected from a close camera; first and second diffraction orders of the lights computed at 12 wavelengths from the real 1.6 micron grating, with the bulb's orders solved analytically so they stay continuous lines; a camera pass with bloom from HDR highlight energy, a four-stage anamorphic streak and a soft six-point star that follow the hot spot; and the wear of a handled disc: two oval fingerprints with ridges, dust, micro-scratches and a milky veil. Proportions follow the Red Book disc (120 mm by 1.2 mm, 15 mm hole, clear hub, stacking ring, mirror band, data area, lead-out, clear lip) in silver, gold or black.",
   "tile": {
     "cols": 2,
     "rows": 4
