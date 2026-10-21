@@ -148,7 +148,7 @@
   grid-auto-rows: 104px;
   grid-auto-flow: row dense;
 }
-.xl-tile--study {
+.xl-tile.xl-tile--study {
   grid-column: span var(--cols, 2);
   grid-row: span var(--rows, 4);
   animation: none;
@@ -185,7 +185,7 @@
   .xl-bento__grid--studies {
     grid-auto-rows: auto;
   }
-  .xl-tile--study {
+  .xl-tile.xl-tile--study {
     grid-column: auto;
     grid-row: auto;
   }

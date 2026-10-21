@@ -2,7 +2,7 @@
   "title": "Type Bust",
   "description": "A marble bust of John Lennon typed entirely in Geist Mono on warm paper, every character chosen to match the edge and tone of the lit form beneath it. Drag to turn it on a heavy turntable and the type re-sets itself to follow the changing shape.",
   "tags": ["WebGL", "Type", "Sculpture"],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "One typewriter print finished to the edge: a sculpted, lit 3D bust drawn only in shape-matched monospace glyphs that crossfade as you spin it by hand.",
   "tile": { "cols": 3, "rows": 5 },

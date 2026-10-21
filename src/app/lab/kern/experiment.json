@@ -1,0 +1,22 @@
+{
+  "title": "Kern",
+  "description": "One word set huge in Bricolage Grotesque and nothing else on the page, every letter a body tied to its neighbours by springs at the font's true kerning. It plucks itself on load; pull a letter and the line stretches like a ribbon, let go and it re-kerns, tap a letter or hold Shift for the heavy cut, type to set a new word.",
+  "tags": [
+    "Type",
+    "Physics",
+    "Interaction"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T18:00:00.000Z",
+  "intent": "Make spacing physical: the optically correct spacing (the font's kerning plus the house tracking law) is the rest length of a spring chain, so stretching, morphing weight and width, and retyping all resolve back to perfectly set type.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://fonts.google.com/specimen/Bricolage+Grotesque",
+    "https://developer.mozilla.org/en-US/docs/Web/API/Range/getBoundingClientRect",
+    "https://en.wikipedia.org/wiki/Kerning",
+    "herb reference board: b091f70f Pinterest promo (giant grotesk, type as the subject)"
+  ]
+}

@@ -1,0 +1,294 @@
+@font-face {
+  font-family: "BlobTrack Arimo";
+  src: url("./arimo-400.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+.blob-track {
+  --blob-track-ground: #0c0c0f;
+  --blob-track-ink: #f3f3f1;
+  --blob-track-ink-2: #a3a3a8;
+  --blob-track-line: #2a2a31;
+  --blob-track-lime: #c9f25c;
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  column-gap: 48px;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  padding: 48px;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--blob-track-ground);
+  color: var(--blob-track-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.blob-track[data-embedded] {
+  display: block;
+  min-height: 100%;
+  padding: 0;
+}
+
+.blob-track-caption {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: start;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 280px);
+  margin-top: 48px;
+  opacity: 0;
+  transition: opacity 500ms var(--ease-entrance);
+}
+
+.blob-track-title {
+  margin: 0;
+  font-size: var(--text-title-sm);
+  line-height: 28px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  text-wrap: balance;
+}
+
+.blob-track-hint {
+  margin: 0;
+  color: var(--blob-track-ink-2);
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  text-wrap: pretty;
+}
+
+.blob-track-frame {
+  position: relative;
+  grid-column: 2;
+  grid-row: 1;
+  height: calc(100cqh - 96px);
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: #16151c;
+  outline: none;
+  touch-action: none;
+  cursor: crosshair;
+  -webkit-tap-highlight-color: transparent;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.blob-track[data-embedded] .blob-track-frame {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.blob-track-frame:focus-visible:not([data-pointer]) {
+  box-shadow:
+    0 0 0 2px var(--blob-track-ground),
+    0 0 0 4px var(--blob-track-lime);
+}
+
+.blob-track-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  transition: opacity 600ms var(--ease-entrance);
+}
+
+.blob-track[data-ready] .blob-track-canvas,
+.blob-track[data-ready] .blob-track-caption,
+.blob-track[data-ready] .blob-track-controls {
+  opacity: 1;
+}
+
+.blob-track-controls {
+  grid-column: 1;
+  grid-row: 1;
+  align-self: end;
+  justify-self: end;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 20px;
+  width: min(100%, 280px);
+  opacity: 0;
+  transition: opacity 500ms var(--ease-entrance) 120ms;
+}
+
+.blob-track-control {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: var(--text-ui);
+  line-height: 20px;
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+}
+
+.blob-track-control-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.blob-track-value {
+  color: var(--blob-track-ink-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.blob-track-range {
+  --blob-track-fill: 50%;
+  width: 100%;
+  height: 20px;
+  margin: 0;
+  background: transparent;
+  appearance: none;
+  -webkit-appearance: none;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.blob-track-range::-webkit-slider-runnable-track {
+  height: 2px;
+  background: var(--blob-track-line);
+}
+
+.blob-track-range::-moz-range-track {
+  height: 2px;
+  background: var(--blob-track-line);
+}
+
+.blob-track-range::-webkit-slider-thumb {
+  width: 12px;
+  height: 12px;
+  margin-top: -5px;
+  border: 1px solid var(--blob-track-lime);
+  background: var(--blob-track-ground);
+  appearance: none;
+  -webkit-appearance: none;
+  transition: transform 120ms var(--ease-hover);
+}
+
+.blob-track-range::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border: 1px solid var(--blob-track-lime);
+  border-radius: 0;
+  background: var(--blob-track-ground);
+}
+
+.blob-track-range:active::-webkit-slider-thumb {
+  background: var(--blob-track-lime);
+}
+
+.blob-track-range:focus-visible {
+  outline: 2px solid var(--blob-track-lime);
+  outline-offset: 4px;
+}
+
+.blob-track-sound {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  margin-top: 4px;
+  padding-inline: 12px;
+  border: 1px solid var(--blob-track-line);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--blob-track-ink);
+  font-family: inherit;
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  cursor: pointer;
+  transition:
+    background-color 150ms var(--ease-hover),
+    border-color 150ms var(--ease-hover),
+    transform 120ms var(--ease-hover);
+}
+
+.blob-track-sound:active {
+  transform: scale(0.96);
+}
+
+.blob-track-sound:focus-visible {
+  outline: 2px solid var(--blob-track-lime);
+  outline-offset: 2px;
+}
+
+.blob-track-sound[aria-pressed="true"] .blob-track-speaker {
+  color: var(--blob-track-lime);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .blob-track-sound:hover {
+    background: #17171c;
+    border-color: #3b3b44;
+  }
+}
+
+@container (max-width: 899px) {
+  .blob-track {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+    padding: 72px 0 20px;
+  }
+
+  .blob-track-caption {
+    align-self: stretch;
+    width: auto;
+    margin-top: 0;
+    padding-inline: 16px;
+    gap: 4px;
+  }
+
+  .blob-track-frame {
+    flex: none;
+    width: min(100%, calc((100cqh - 280px) * 3 / 4));
+    height: auto;
+    align-self: center;
+  }
+
+  .blob-track-controls {
+    align-self: stretch;
+    width: auto;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+    align-items: end;
+    column-gap: 16px;
+    padding-inline: 16px;
+  }
+
+  .blob-track-sound {
+    margin-top: 0;
+  }
+
+  .blob-track-sound span {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .blob-track-canvas,
+  .blob-track-caption,
+  .blob-track-controls {
+    transition: none;
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Selection",
+  "description": "A lyric paragraph on pale grey with an iPhone text selection: blue handles, a pale blue highlight and a black “hello there!” tooltip. Drag a handle and the whole page tips back toward a vanishing point while the selected lines lift off it in real perspective, each highlight bar turning in depth with its handles; let go and it all settles flat, the tooltip turns into Copy, Look Up and Share, and Copy folds the highlight down into a copied pill.",
+  "tags": [
+    "Type",
+    "Interface",
+    "Lyrics"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T11:00:00.000Z",
+  "intent": "The text-selection UI itself as the graphic: a familiar control given depth and weight, so selecting words physically pulls them off the page, with every morph clean and nothing overlapping.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://developer.apple.com/design/human-interface-guidelines/edit-menus",
+    "https://developer.mozilla.org/en-US/docs/Web/API/Element/animate",
+    "herb reference board: 387b841b (selection handles, tilted highlight bars, italic digits tumbling, black hello there! tooltip)"
+  ]
+}

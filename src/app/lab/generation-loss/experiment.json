@@ -1,0 +1,21 @@
+{
+  "title": "Still Here",
+  "description": "\"still here?\" in a tall navy serif saves itself as a JPEG over and over, each copy made from the last, until blocks, ringing and purple colour bleed take the line apart, then it rewinds clean. Drag sideways across the picture to go through the copies, up and down for quality, tap to hold, and rename the file under it to change the line.",
+  "tags": [
+    "Type",
+    "Lo-fi",
+    "Image"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T21:00:00.000Z",
+  "intent": "Generation loss that runs by itself: every step is a real canvas.toBlob JPEG at low quality, saved with the line nudged a pixel or two against the 8x8 block grid and put back, so the blocks, ringing and navy-purple colour bleed compound instead of smearing; cached per generation so the line can be scrubbed, rewound and replayed while the file size ticks down.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Generation_loss",
+    "https://developer.mozilla.org/en-US/docs/Web/API/HTMLCanvasElement/toBlob",
+    "herb reference board: 51b6830b \"still here?\" condensed navy serif with JPEG artefacts"
+  ]
+}

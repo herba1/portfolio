@@ -1,0 +1,21 @@
+{
+  "title": "Smear",
+  "description": "A twenty-line poem in small white Arial on black that keeps re-setting itself: every few seconds a wave runs down the block and each word slides between a tight setting and wide justified gaps, leaving a soft photographic streak with a faint colour fringe and a stutter of copies. Drag across it and the words you push burn a soft white light trail behind them, like a long exposure, that glows and fades as they settle; hold to scatter the block and let it set again.",
+  "tags": [
+    "Type",
+    "Motion",
+    "Lyrics"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T16:00:00.000Z",
+  "intent": "The lyric-edit motion smear as a living material: one block that breathes between two settings on its own, with sub-frame motion blur, chromatic softness and a blooming long-exposure afterglow on everything you move.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://developer.mozilla.org/en-US/docs/Web/API/CanvasRenderingContext2D/drawImage",
+    "https://en.wikipedia.org/wiki/Smear_frame",
+    "herb reference board: cfcf1930 gif (poem on black with stuttered horizontal motion-smear settling into a block)"
+  ]
+}

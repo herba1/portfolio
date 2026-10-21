@@ -6,7 +6,7 @@
     "Particles",
     "Music"
   ],
-  "status": "liked",
+  "status": "shipped",
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "A bold transition that stays physical: every dot rides an underdamped spring that starts softly, flies far, overshoots home and settles, with stretch along its velocity and growth as it lifts toward you; the springs are solved exactly per dot on the GPU, so overlapping bursts add together without a jump.",
   "tile": {

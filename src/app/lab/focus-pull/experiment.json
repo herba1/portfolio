@@ -1,0 +1,22 @@
+{
+  "title": "Focus",
+  "description": "A justified lyric block where every line sits at its own distance from the lens, with Rubber Soul, Abbey Road and Let It Be set inline between the words beside a small moon and star. Focus racks slowly down the lines on its own; turn the ribbed focus ring or tap a line to take over, and the covers blur and sharpen with their line.",
+  "tags": [
+    "Type",
+    "Optics",
+    "Instrument"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T15:00:00.000Z",
+  "intent": "Depth of field as typography: each line, with its inline album cover and glyph atoms sized in em on the baseline, is a layer at a set distance, blurred by a disc kernel from the diopter gap to the focus ring, so sharpness alone shows where the lens is.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Circle_of_confusion",
+    "http://blog.tuxedolabs.com/2018/05/04/bokeh-depth-of-field-in-single-pass.html",
+    "herb reference board: ee6eda60 and 0fc59ca9 justified, softened lyric blocks",
+    "Beatles album covers from the site's tierlist"
+  ]
+}

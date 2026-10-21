@@ -1,0 +1,127 @@
+@font-face {
+  font-family: "KernGrotesque";
+  src: url("./bricolage.woff2") format("woff2-variations");
+  font-weight: 200 800;
+  font-stretch: 75% 100%;
+  font-display: block;
+}
+
+.kern {
+  --kern-ground: #f3f1ec;
+  --kern-ink: #151514;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--kern-ground);
+  color: var(--kern-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.kern[data-embedded] {
+  min-height: 100%;
+}
+
+.kern-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.kern-surface {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+}
+
+.kern[data-embedded] .kern-surface {
+  touch-action: pan-y;
+}
+
+.kern-surface[data-ready] {
+  animation: kern-in 400ms var(--ease-entrance) forwards;
+}
+
+.kern-surface[data-over] {
+  cursor: grab;
+}
+
+.kern-surface[data-grabbing] {
+  cursor: grabbing;
+}
+
+@keyframes kern-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.kern-svg {
+  position: absolute;
+  inset: 0;
+  display: block;
+  overflow: visible;
+}
+
+.kern-glyph text {
+  font-family: "KernGrotesque", var(--font-sans);
+  font-kerning: none;
+  font-variant-ligatures: none;
+  fill: var(--kern-ink);
+}
+
+.kern-caret {
+  fill: var(--kern-ink);
+}
+
+.kern-meter {
+  position: absolute;
+  top: 0;
+  left: -99999px;
+  visibility: hidden;
+  white-space: pre;
+  font-family: "KernGrotesque", var(--font-sans);
+  font-size: 100px;
+  line-height: 100px;
+  font-kerning: normal;
+  font-variant-ligatures: none;
+  pointer-events: none;
+}
+
+.kern-input {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  pointer-events: none;
+}
+
+.kern-title,
+.kern-live {
+  margin: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

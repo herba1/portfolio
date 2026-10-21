@@ -1,0 +1,26 @@
+{
+  "title": "Field",
+  "description": "The whole screen is a field of green monospace characters blowing along curl noise, denser where the wind bunches up. Every few seconds the wind gathers them into a word or a Beatles cover in ASCII, holds it, then blows it apart again; move through it to stir the field, type to choose the next word.",
+  "tags": [
+    "Type",
+    "ASCII",
+    "Generative",
+    "Sound",
+    "WebGL"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-21T22:00:00.000Z",
+  "intent": "ASCII art as weather: about sixteen thousand particles follow a curl-noise wind, their density is counted per character cell and mapped through a glyph ramp sorted by measured ink coverage, and a WebGL pass draws every cell from one glyph atlas. To gather, each particle is given a destination sampled from the target's brightness and released by a front that sweeps across like a gust; filtered-noise wind swells as the field closes.",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://www.cs.ubc.ca/~rbridson/docs/bridson-siggraph2007-curlnoise.pdf",
+    "https://paulbourke.net/dataformats/asciiart/",
+    "https://developer.mozilla.org/en-US/docs/Web/API/BiquadFilterNode",
+    "herb reference board: fa23 Y2K montage (green CRT terminal text)",
+    "herb 5/5: terminal (ASCII generative art)"
+  ],
+  "gate": []
+}

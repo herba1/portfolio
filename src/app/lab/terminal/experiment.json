@@ -1,0 +1,23 @@
+{
+  "title": "Terminal",
+  "description": "A green phosphor screen asks \"shall we play a record?\" and lists the Beatles albums like a 1983 menu, with number rain trickling down the margins. Open a record and its cover rasters in dither while the tracklist types out, then a now-playing line and a character spectrum with falling peaks start up; leave the menu alone and it drifts into a screensaver of a spinning ASCII record, flowing slashes and dithered plasma.",
+  "tags": [
+    "Screen",
+    "Type",
+    "Music",
+    "Y2K"
+  ],
+  "status": "shipped",
+  "createdAt": "2026-10-20T19:00:00.000Z",
+  "intent": "One old screen made beautiful, now with generative character art living inside it: a ray-cast ASCII vinyl whose groove gaps match the album's track count, a flow field drawn in slashes, a Bayer-dithered plasma, a peak-hold spectrum and digit rain, all through the same CRT pass (curvature, scanlines, bloom, phosphor persistence).",
+  "tile": {
+    "cols": 4,
+    "rows": 4
+  },
+  "sources": [
+    "https://en.wikipedia.org/wiki/Phosphor#Standard_phosphor_types",
+    "https://en.wikipedia.org/wiki/Atkinson_dithering",
+    "https://en.wikipedia.org/wiki/WarGames",
+    "herb reference board: fa23 Y2K montage (green CRT terminal text, menu list)"
+  ]
+}
