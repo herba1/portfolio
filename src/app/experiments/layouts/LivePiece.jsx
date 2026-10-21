@@ -114,7 +114,7 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
           height={poster.height}
           alt={title ? `${title}, a still` : ""}
           decoding="async"
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "auto" : "low"}
           draggable={false}
         />

@@ -110,9 +110,12 @@ export function createGeneration({ canvas, ghost, card, gestureScope = window, o
   const ctx = canvas.getContext("2d", { alpha: false });
   const ghostCtx = ghost.getContext("2d", { alpha: false });
   const head = make();
-  const headCtx = head.getContext("2d", { alpha: false });
+  // The two working canvases live in CPU memory: every generation is copied
+  // between them and encoded from one, and a GPU-backed canvas would have to
+  // be read back to the CPU for each, on the main thread.
+  const headCtx = head.getContext("2d", { alpha: false, willReadFrequently: true });
   const pass = make();
-  const passCtx = pass.getContext("2d", { alpha: false });
+  const passCtx = pass.getContext("2d", { alpha: false, willReadFrequently: true });
   passCtx.imageSmoothingEnabled = false;
 
   let text = "still here?";
