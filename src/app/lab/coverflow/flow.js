@@ -1,6 +1,8 @@
 const MAX_SPEED = 9;
 const STIFFNESS = 140;
-const DAMPING = 2 * Math.sqrt(STIFFNESS) * 0.96;
+const DAMPING = 2 * Math.sqrt(STIFFNESS);
+const OMEGA = Math.sqrt(STIFFNESS);
+const REACH = 12;
 
 const FLIP_K = 70;
 const FLIP_D = 2 * Math.sqrt(FLIP_K);
@@ -17,6 +19,8 @@ const glint = (deg) => {
   return { at: clamp(0.5 - d / 70, -0.4, 1.4), o: Math.exp(-((d / 34) ** 2)) };
 };
 const rubber = (x, d) => (1 - 1 / ((x * 0.55) / d + 1)) * d;
+const ease = (u) => u * u * (3 - 2 * u);
+const snap = (t, dir) => (dir > 0 ? Math.ceil(t - 0.001) : dir < 0 ? Math.floor(t + 0.001) : Math.round(t));
 
 export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, onFlick }) {
   const stage = root.querySelector("[data-cf-stage]");
@@ -39,6 +43,8 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
   let drag = null;
   let scrubbing = false;
   let wheelTimer = 0;
+  let wheelDir = 0;
+  let scrubDir = 0;
   let destroyed = false;
 
   const layout = () => {
@@ -53,7 +59,7 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
   };
 
   const pose = (t) => {
-    const near = Math.min(Math.abs(t), 1);
+    const near = ease(Math.min(Math.abs(t), 1));
     return { near, th: near * ANG, z: ((1 - near) * Z_CENTER + near * Z_SIDE) * size };
   };
 
@@ -72,39 +78,70 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
   const nextOut = (x, from, to, gap) => to.c + ((x + from.c) * kAt(from.z + from.e) + gap) / kAt(to.z - to.e);
 
   const N = 64;
-  let base = null;
-  let baseSize = 0;
-  const solveBase = () => {
-    baseSize = size;
+  let table = null;
+  let tableSize = 0;
+  const reachAt = (x, t) => {
+    const p = pose(t);
+    const r = (p.th * Math.PI) / 180;
+    const c = (size / 2) * Math.cos(r);
+    const e = (size / 2) * Math.sin(r);
+    return { c, kl: kAt(p.z - e), kr: kAt(p.z + e), l: (x - c) * kAt(p.z - e), r: (x + c) * kAt(p.z + e) };
+  };
+  const onward = (x, prevX, prevT, t) => {
+    const was = reachAt(prevX, prevT);
+    const now = reachAt(x, t);
+    return Math.max(x, prevX, was.l / now.kl + now.c, was.r / now.kr - now.c);
+  };
+  const solve = () => {
+    tableSize = size;
     const gap = GAP * size;
-    base = new Float64Array(N + 1);
+    const M = REACH * N;
     const one = shapeAt(1);
     const x1 = one.c + ((size / 2) * kAt(Z_CENTER * size) + gap) / kAt(one.z - one.e);
-    for (let j = 0; j <= N; j += 1) base[j] = (x1 * j) / N;
-    for (let it = 0; it < 60; it += 1) {
-      for (let j = 1; j < N; j += 1) {
-        const t = j / N;
-        const b = shapeAt(t);
-        const a = shapeAt(1 - t);
-        const edgeA = (-base[N - j] + a.c) * kAt(a.z - a.e);
-        const need = b.c + (edgeA + gap) / kAt(b.z - b.e);
-        base[j] = Math.max(base[j], need, base[j - 1]);
+    let t = new Float64Array(M + 1);
+    for (let j = 0; j <= N; j += 1) t[j] = (x1 * j) / N;
+    const enforce = () => {
+      for (let j = 1; j <= M; j += 1) {
+        const at = j / N;
+        let need;
+        if (j < N) {
+          const b = shapeAt(at);
+          const a = shapeAt(1 - at);
+          need = b.c + ((-t[N - j] + a.c) * kAt(a.z - a.e) + gap) / kAt(b.z - b.e);
+        } else need = nextOut(t[j - N], shapeAt(at - 1), shapeAt(at), gap);
+        t[j] = onward(Math.max(t[j], need), t[j - 1], (j - 1) / N, at);
       }
-      base[N] = x1;
+    };
+    const hull = (from, to) => {
+      const keep = [from];
+      for (let j = from + 1; j <= to; j += 1) {
+        while (keep.length > 1) {
+          const a = keep[keep.length - 2];
+          const b = keep[keep.length - 1];
+          if ((t[b] - t[a]) * (j - a) <= (t[j] - t[a]) * (b - a)) keep.pop();
+          else break;
+        }
+        keep.push(j);
+      }
+      for (let k = 1; k < keep.length; k += 1) {
+        const a = keep[k - 1];
+        const b = keep[k];
+        for (let j = a + 1; j < b; j += 1) t[j] = t[a] + ((t[b] - t[a]) * (j - a)) / (b - a);
+      }
+    };
+    for (let it = 0; it < 40; it += 1) enforce();
+    for (let u = 1; u < REACH; u += 1) {
+      for (let j = u * N + 1; j <= (u + 1) * N; j += 1) t[j] = Math.max(nextOut(t[j - N], shapeAt(j / N - 1), shapeAt(j / N), gap), t[j - 1]);
+      hull(u * N, (u + 1) * N);
     }
+    table = t;
   };
 
   const span = (d) => {
-    if (!base || baseSize !== size) solveBase();
-    const t = Math.abs(d);
-    const n = Math.floor(t);
-    const frac = t - n;
-    const k = frac * N;
-    const j = Math.min(N - 1, Math.floor(k));
-    let x = base[j] + (base[j + 1] - base[j]) * (k - j);
-    const gap = GAP * size;
-    for (let m = 1; m <= n && m <= 12; m += 1) x = nextOut(x, shapeAt(frac + m - 1), shapeAt(frac + m), gap);
-    return Math.sign(d) * x;
+    if (!table || tableSize !== size) solve();
+    const k = Math.min(Math.abs(d), REACH) * N;
+    const j = Math.min(REACH * N - 1, Math.floor(k));
+    return Math.sign(d) * (table[j] + (table[j + 1] - table[j]) * (k - j));
   };
 
   const paint = () => {
@@ -138,12 +175,11 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
         continue;
       }
       el.style.visibility = "visible";
-      const a = clamp(d, -1, 1);
       const p = pose(d);
       const near = p.near;
       const shift = pushAt < 0 || i === pushAt ? 0 : i > pushAt ? pushR : -pushL;
       const x = span(d) + shift;
-      const rot = -a * ANG;
+      const rot = -Math.sign(d) * p.th;
       const f = flipA[i] / 180;
       const lift = Math.sin(Math.PI * clamp(f, 0, 1));
       const grow = 1 + 0.1 * clamp(f, 0, 1) * (1 - near);
@@ -230,8 +266,8 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     if (!raf && !destroyed) raf = requestAnimationFrame(frame);
   };
 
-  const goTo = (i) => {
-    target = clamp(Math.round(i), 0, last);
+  const goTo = (i, dir = 0) => {
+    target = clamp(snap(i, dir), 0, last);
     kick();
   };
 
@@ -245,7 +281,7 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
   const onDown = (e) => {
     if (e.button !== 0 && e.pointerType === "mouse") return;
     if (e.target.closest(".cf-controls")) return;
-    drag = { id: e.pointerId, x: e.clientX, lastX: e.clientX, t: performance.now(), base: pos, moved: 0, item: e.target.closest("[data-cf-item]"), onButton: !!e.target.closest("button"), captured: false };
+    drag = { id: e.pointerId, x: e.clientX, lastX: e.clientX, t: performance.now(), base: pos, moved: 0, item: e.target.closest("[data-cf-item]"), onButton: !!e.target.closest("button"), captured: false, dir: 0 };
     vel = 0;
     root.dataset.grab = "true";
   };
@@ -273,6 +309,7 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     vel = vel * 0.6 + inst * 0.4;
     drag.lastX = e.clientX;
     drag.t = now;
+    if (Math.abs(raw - pos) > 0.0001) drag.dir = Math.sign(raw - pos);
     pos = raw;
     if (drag.moved > 5 && flipped >= 0) setFlip(-1);
     paint();
@@ -283,11 +320,11 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     if (scrubbing) {
       scrubbing = false;
       root.dataset.scrub = "false";
-      goTo(target);
+      goTo(target, scrubDir);
       return;
     }
     if (!drag || e.pointerId !== drag.id) return;
-    const { moved, item, onButton } = drag;
+    const { moved, item, onButton, dir } = drag;
     const idle = performance.now() - drag.t > 90;
     drag = null;
     root.dataset.grab = "false";
@@ -309,14 +346,17 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
       else goTo(i);
       return;
     }
-    if (idle) vel = 0;
+    if (idle || Math.sign(vel) !== dir) vel = 0;
     vel = clamp(vel, -MAX_SPEED, MAX_SPEED);
-    goTo(pos + clamp(vel * 0.32, -5, 5));
+    const reach = clamp(vel * 0.32, -5, 5);
+    const coast = Math.abs(vel) / OMEGA;
+    goTo(pos + Math.sign(reach || dir) * Math.max(Math.abs(reach), coast), vel ? Math.sign(vel) : dir);
   };
 
   const scrubTo = (clientX) => {
     const r = scrub.getBoundingClientRect();
     const f = clamp((clientX - r.left - thumb.offsetWidth / 2) / (r.width - thumb.offsetWidth), 0, 1);
+    if (Math.abs(f * last - target) > 0.0001) scrubDir = Math.sign(f * last - target);
     target = f * last;
     kick();
   };
@@ -337,7 +377,8 @@ export function createFlow(root, { count, start = 0, onCenter, onTick, onFlip, o
     target = clamp(target + (delta * unit) / (size * 0.5), 0, last);
     kick();
     clearTimeout(wheelTimer);
-    wheelTimer = setTimeout(() => goTo(target), 140);
+    wheelDir = Math.sign(delta);
+    wheelTimer = setTimeout(() => goTo(target, wheelDir), 140);
   };
 
   const onKey = (e) => {
