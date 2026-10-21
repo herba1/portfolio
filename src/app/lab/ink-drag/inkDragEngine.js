@@ -28,6 +28,9 @@ const QUEUE_LIMIT = 96;
 const VELOCITY_SCALE = 0.5;
 const MORPH_MS = 2600;
 const FLIGHT = 0.62;
+const STIFF = 8.6;
+const STAGGER = 0.3;
+const PRINT_STIFF = 6.4;
 const IDLE_FIRST_MS = 2600;
 const IDLE_MS = 6400;
 const FLOW_COLS = 160;
@@ -35,6 +38,10 @@ const FLOW_ROWS = 120;
 const FLOW_COUNT = FLOW_COLS * FLOW_ROWS;
 const PROBE = 3;
 const BANDS = 40;
+
+function springAt(x, k) {
+  return (1 - Math.exp(-k * x) * (1 + k * x)) / (1 - Math.exp(-k) * (1 + k));
+}
 
 function hash(n) {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
@@ -469,18 +476,20 @@ export default class InkDragEngine {
     return "title";
   }
 
-  drawMask() {
+  drawMask(keepPrev = false) {
     const item = this.currentItem();
     const wantsCover = this.currentKind() === "cover";
     const cover = wantsCover
       ? this.coverPixels(this.covers.get(item.cover))
       : null;
     if (wantsCover && !cover) this.covers.delete(item.cover);
-    this.prevTone = this.tone;
+    if (!keepPrev) {
+      this.prevTone = this.tone;
+      const swap = this.prevMaskTexture;
+      this.prevMaskTexture = this.maskTexture;
+      this.maskTexture = swap;
+    }
     this.tone = cover ? 1 : 0;
-    const swap = this.prevMaskTexture;
-    this.prevMaskTexture = this.maskTexture;
-    this.maskTexture = swap;
     this.maskData = cover || this.titlePixels(item ? item.word : DEFAULT_WORD);
     this.uploadMask(this.maskData);
   }
@@ -733,19 +742,30 @@ export default class InkDragEngine {
       this.runPrint(1);
       this.printStart = -1;
     }
+    const launch = this.morph ? this.carried() : 0;
+    const unlanded = Boolean(this.morph) && this.morph.t / MORPH_MS < 0.72;
     this.collectStroke(1 / 60);
     this.queue.length = 0;
     this.snapshot();
     const sources = this.readSources();
-    this.drawMask();
+    this.drawMask(unlanded);
     this.runPrint(1, this.goalTarget);
     this.drying = false;
     this.buildFlow(sources, this.readTargets());
-    this.morph = { t: 0, rate: 1, goal: 1 };
+    this.morph = { t: 0, rate: 1, goal: 1, launch, stagger: Math.max(0.15, 1 - launch / 0.15) };
     this.setStatus("wet");
     this.emitState();
     clearTimeout(this.idleTimer);
     this.wake();
+  }
+
+  carried() {
+    const m = this.morph;
+    const s = Math.min(1, Math.max(0, (m.t / MORPH_MS - STAGGER * 0.4 * m.stagger) / FLIGHT));
+    const k = STIFF;
+    const v = Math.min(0.95, m.launch) * k;
+    const speed = Math.exp(-k * s) * (v + k * (k - v) * s);
+    return Math.min(0.2, (0.5 * speed * m.rate) / k);
   }
 
   snapshot() {
@@ -852,7 +872,7 @@ export default class InkDragEngine {
         path[o + 3] = g.y;
         const xn = (s.x - minX) / spanX;
         look[o] = s.d;
-        look[o + 1] = 0.3 * xn + 0.035 * hash(k * 0.73 + 5);
+        look[o + 1] = STAGGER * Math.pow(xn, 2.2) + 0.035 * hash(k * 0.73 + 5);
         look[o + 2] = (hash(k * 1.11 + 9) - 0.5) * 0.2;
         look[o + 3] = 0.03 + 0.06 * hash(k * 0.53 + 3);
         tint[o] = s.a;
@@ -894,6 +914,9 @@ export default class InkDragEngine {
     gl.uniform2f(uniforms.uRes, this.simWidth, this.simHeight);
     gl.uniform1f(uniforms.uT, t);
     gl.uniform1f(uniforms.uFlight, FLIGHT);
+    gl.uniform1f(uniforms.uStiff, STIFF);
+    gl.uniform1f(uniforms.uLaunch, this.morph ? this.morph.launch : 0);
+    gl.uniform1f(uniforms.uStagger, this.morph ? this.morph.stagger : 1);
     gl.uniform1f(uniforms.uWidth, this.flowWidth || 2);
     gl.viewport(0, 0, this.simWidth, this.simHeight);
     gl.enable(gl.BLEND);
@@ -1305,7 +1328,7 @@ export default class InkDragEngine {
     if (this.printStart >= 0) {
       this.printStart += dt * 1000;
       const p = Math.min(1, this.printStart / PRINT_MS);
-      const eased = 1 - Math.pow(1 - p, 3);
+      const eased = springAt(p, PRINT_STIFF);
       this.runPrint(eased);
       if (p >= 1) this.printStart = -1;
       busy = true;

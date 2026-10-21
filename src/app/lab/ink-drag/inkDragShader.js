@@ -306,6 +306,9 @@ uniform int uCols;
 uniform vec2 uRes;
 uniform float uT;
 uniform float uFlight;
+uniform float uStiff;
+uniform float uLaunch;
+uniform float uStagger;
 uniform float uWidth;
 uniform int uMode;
 out float vMass;
@@ -313,8 +316,14 @@ out vec2 vChroma;
 out float vWeight;
 out float vAcross;
 out float vU;
-float easeInOut(float x) {
-  return x < 0.5 ? 4.0 * x * x * x : 1.0 - pow(-2.0 * x + 2.0, 3.0) / 2.0;
+float spring(float x) {
+  float k = uStiff;
+  float v = min(uLaunch, 0.95) * k;
+  float end = 1.0 - exp(-k) * (1.0 + k - v);
+  return (1.0 - exp(-k * x) * (1.0 + (k - v) * x)) / end;
+}
+float phase(float e) {
+  return e < 0.5 ? pow(e * 0.25, 1.0 / 3.0) : 1.0 - pow(max(0.0, 2.0 - 2.0 * e), 1.0 / 3.0) * 0.5;
 }
 vec2 bez(vec2 a, vec2 b, vec2 c, vec2 d, float t) {
   float m = 1.0 - t;
@@ -330,12 +339,12 @@ void main() {
   vec2 mass = texelFetch(uMass, cell, 0).xy;
   vec2 src = path.xy;
   vec2 dst = path.zw;
-  float u = clamp((uT - look.y) / uFlight, 0.0, 1.0);
+  float e = spring(clamp((uT - look.y * uStagger) / uFlight, 0.0, 1.0));
+  float u = phase(e);
   vec2 span = dst - src;
   vec2 side = vec2(-span.y, span.x);
   vec2 c1 = src + span * 0.2 + side * look.z + vec2(abs(span.x) + abs(span.y), 0.0) * look.w;
   vec2 c2 = dst - span * 0.3 + side * look.z * 0.35;
-  float e = easeInOut(u);
   vec2 head = bez(src, c1, c2, dst, e);
   vec2 tail = bez(src, c1, c2, dst, max(0.0, e - 0.06));
   float w = uWidth;
@@ -448,7 +457,7 @@ void main() {
   vec2 fc = mw + cw > 1e-4 ? (mw * b.ba / max(b.g, 1e-4) + cw * f.ba / max(f.g, 1e-4)) / wsum : vec2(0.5);
   float bd = from.r * (1.0 - lift);
   float gd = goal.r * land;
-  float lead = max(bd, fd);
+  float lead = min(bd + fd, max(from.r, mass));
   float total = lead + gd;
   vec2 chroma = total > 1e-4 ? (lead * (bd > fd ? from.ba : fc) + gd * goal.ba) / total : vec2(0.5);
   float wet = total > 1e-4 ? (lead * (bd > fd ? from.g : 1.0) + gd * goal.g) / total : 0.0;
