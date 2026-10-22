@@ -36,6 +36,7 @@
     "@react-three/fiber": "^9.8.1",
     "@react-three/postprocessing": "^3.0.4",
     "@replit/codemirror-vim": "^6.3.0",
+    "@sparkjsdev/spark": "^2.3.1",
     "@splidejs/react-splide": "^0.7.12",
     "@tailwindcss/typography": "^0.5.19",
     "@uiw/react-codemirror": "^4.25.9",

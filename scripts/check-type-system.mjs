@@ -13,7 +13,7 @@ const WEIGHT_LADDER = new Set([
   300, 400, 430, 440, 450, 460, 490, 500, 520, 540, 550, 560, 590, 600, 620, 700,
 ]);
 
-const ENFORCED = ["src/app/tierlist", "src/app/blog", "src/app/(blog)", "src/app/song-search", "src/app/bio"];
+const ENFORCED = ["src/app/tierlist", "src/app/blog", "src/app/(blog)", "src/app/song-search", "src/app/bio", "src/app/splats"];
 
 const EXEMPT = [{ path: "src/app/song-search", rules: ["leading-grid"] }];
 

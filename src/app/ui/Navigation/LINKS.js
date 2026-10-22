@@ -21,6 +21,7 @@ export const DEV_LINKS = [
   { name: "Work Studio", link: "/~studio/work", primary: true, dev: true },
   { name: "Intro", link: "/intro", primary: true, dev: true },
   { name: "Isolate", link: "/isolate", primary: true, dev: true },
+  { name: "Splats", link: "/splats", primary: true, dev: true },
   { name: "Arcs", link: "/arcs", primary: true, dev: true },
   { name: "Album Card", link: "/experiments/album-card", primary: true, dev: true },
   { name: "Ask Me Why", link: "/ask-me-why", primary: true, dev: true },
