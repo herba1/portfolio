@@ -3,6 +3,7 @@
 import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { useMobileMenu } from './MobileMenuContext'
+import useIntentPrefetch from '../useIntentPrefetch'
 
 /* ─────────────────────────────────────────────
  * "herbart" nav logo
@@ -59,6 +60,7 @@ export default function NavLogo({ className = '' }) {
   // Link handles the click itself and keeps its prefetch and modifier-key
   // behaviour intact.
   const menu = useMobileMenu()
+  const intent = useIntentPrefetch('/')
 
   const onClick = (e) => {
     if (!menu?.active) return
@@ -71,7 +73,7 @@ export default function NavLogo({ className = '' }) {
   }
 
   return (
-    <Link href="/" onClick={onClick} className={`nav__logo block ${className}`} aria-label="herbart">
+    <Link href="/" prefetch={false} {...intent} onClick={onClick} className={`nav__logo block ${className}`} aria-label="herbart">
       <span className="nl-word" aria-hidden="true">
         <style>{`
           .nl-word {

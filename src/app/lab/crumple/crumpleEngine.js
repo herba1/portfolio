@@ -51,9 +51,15 @@ function printCanvas(img) {
   c.width = w;
   c.height = h;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = "#f6f4ef";
-  ctx.fillRect(0, 0, w, h);
-  const data = ctx.getImageData(0, 0, w, h);
+  // The paper is built in memory rather than filled and read back: a
+  // readback waits for the GPU to finish everything queued ahead of it.
+  const data = ctx.createImageData(w, h);
+  for (let i = 0; i < data.data.length; i += 4) {
+    data.data[i] = 0xf6;
+    data.data[i + 1] = 0xf4;
+    data.data[i + 2] = 0xef;
+    data.data[i + 3] = 255;
+  }
   let seed = 9;
   for (let i = 0; i < data.data.length; i += 4) {
     seed = (seed * 16807) % 2147483647;

@@ -2,6 +2,7 @@ import createMDX from '@next/mdx'
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  productionBrowserSourceMaps: !!process.env.SOURCEMAPS,
   pageExtensions: ['js', 'jsx', 'md', 'mdx'],
   allowedDevOrigins: ['herbfrontend.ngrok.app', 'h', '100.76.6.81', '*.ts.net'],
   // Vercel's CDN compresses at the edge anyway; disabling Next.js-level

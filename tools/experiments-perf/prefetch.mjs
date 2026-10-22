@@ -1,0 +1,10 @@
+import { launch, sleep, BASE } from "./lib.mjs";
+const [device = "phone"] = process.argv.slice(2);
+const { browser, page, cdp } = await launch(device);
+await cdp.send("Network.enable");
+let t0 = 0; const rows = [];
+cdp.on("Network.requestWillBeSent", (e) => { if (!t0) t0 = e.timestamp; if (/_rsc=|\.rsc|segment/.test(e.request.url) || e.request.headers?.RSC) rows.push({ t: Math.round((e.timestamp - t0) * 1000), url: e.request.url.replace(BASE, ""), h: e.request.headers["Next-Router-Prefetch"] ? "prefetch" : "" }); });
+await page.goto(BASE + "/experiments", { waitUntil: "load" });
+await sleep(6000);
+for (const r of rows) console.log(r.t, r.h, r.url.slice(0, 120));
+await browser.close();

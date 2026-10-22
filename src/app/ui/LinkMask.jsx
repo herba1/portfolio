@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import posthog from "posthog-js";
+import useIntentPrefetch from "./useIntentPrefetch";
 
 export default function LinkMask({
   href = "#",
@@ -10,6 +11,7 @@ export default function LinkMask({
 }) {
   const isInternal = href.startsWith("/");
   const Component = isInternal ? Link : "a";
+  const intent = useIntentPrefetch(href);
 
   return (
     <Component
@@ -18,7 +20,7 @@ export default function LinkMask({
       onClick={() => {
         posthog.capture("link_clicked", { href, text });
       }}
-      {...(!isInternal ? { target: "_blank", rel: "noopener noreferrer" } : {})}
+      {...(isInternal ? { prefetch: false, ...intent } : { target: "_blank", rel: "noopener noreferrer" })}
     >
       <span className={`LinkMask__text ${textClassName}`}>{text}</span>
     </Component>

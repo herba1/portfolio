@@ -157,14 +157,6 @@ const advanceFade = (fade, want, dt) => {
   return fade.value !== want;
 };
 
-const halfToFloat = (bits) => {
-  const sign = bits & 0x8000 ? -1 : 1;
-  const exponent = (bits >> 10) & 31;
-  const mantissa = bits & 1023;
-  if (!exponent) return sign * mantissa * 2 ** -24;
-  return sign * (1 + mantissa / 1024) * 2 ** (exponent - 15);
-};
-
 function readColour(value, fallback) {
   const canvas = document.createElement("canvas");
   canvas.width = 1;
@@ -312,10 +304,10 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
   let bondPopTimer = 0;
   const freeFingers = new Map();
 
-  // Whether half-float fields upload is asked of the driver once. getError
-  // waits for the GPU to drain everything queued, so asking on every title
-  // stalls the page for as long as the GPU is busy.
-  let halfFields = null;
+  // R16F from HALF_FLOAT data, linearly filtered, is core WebGL2, so the
+  // fields upload as half floats without asking the driver first — getError
+  // would wait for the GPU to drain everything queued, which on a page of
+  // running pieces stalls the main thread for as long as the GPU is busy.
   const uploadField = (word) => {
     const texture = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -323,17 +315,8 @@ export function createTaffyEngine({ host, canvas, family, reducedMotion, dprCap 
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    if (halfFields !== false) {
-      if (halfFields === null) while (gl.getError() !== gl.NO_ERROR && !gl.isContextLost());
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, word.width, word.height, 0, gl.RED, gl.HALF_FLOAT, word.half);
-      if (halfFields === null) halfFields = gl.getError() === gl.NO_ERROR;
-      if (halfFields) return { texture, decode: [1, -FIELD_BIAS] };
-    }
-    const range = word.pad * 1.6;
-    const packed = new Uint8Array(word.half.length);
-    for (let i = 0; i < packed.length; i += 1) packed[i] = Math.round(clamp01(halfToFloat(word.half[i]) / (range * 2) + 0.5) * 255);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, word.width, word.height, 0, gl.RED, gl.UNSIGNED_BYTE, packed);
-    return { texture, decode: [range * 2, -range - FIELD_BIAS] };
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, word.width, word.height, 0, gl.RED, gl.HALF_FLOAT, word.half);
+    return { texture, decode: [1, -FIELD_BIAS] };
   };
 
   const makeGlyphs = (count) =>

@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { geist } from "@/app/fonts";
@@ -44,6 +45,14 @@ export default function NavMenu({ open, setOpen }) {
     closeThen(() => router.push(link.link));
   };
 
+  // The list sits in the DOM behind the card on every page, so a viewport
+  // prefetch would pull every route's bundle down on every load. Opening the
+  // menu is the intent; prefetch then.
+  useEffect(() => {
+    if (!open) return;
+    for (const link of mainLinks) if (link.link.startsWith("/")) router.prefetch(link.link);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
   return (
     <div
       className={`mobile-menu ${open ? "is-open" : ""} ${geist.className}`}
@@ -61,9 +70,9 @@ export default function NavMenu({ open, setOpen }) {
               onClick={(e) => onNavigate(e, link)}
               className="mobile-menu__link"
               style={{ "--i": i }}
-              {...(!isInternal
-                ? { target: "_blank", rel: "noopener noreferrer" }
-                : {})}
+              {...(isInternal
+                ? { prefetch: false }
+                : { target: "_blank", rel: "noopener noreferrer" })}
             >
               {link.name}
             </Component>

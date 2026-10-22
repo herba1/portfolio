@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { preload } from "react-dom";
 import PieceBoundary from "./PieceBoundary";
-import { lazyPiece, preloadPiece } from "./pieceLoaders";
+import { READY_MARK, lazyPiece, preloadPiece } from "./pieceLoaders";
 import { enqueueMount, retain } from "./mountQueue";
 
 // A tile arrives as its poster — a still of the piece, in the HTML — so the
@@ -16,12 +16,45 @@ import { enqueueMount, retain } from "./mountQueue";
 
 const NEAR = "60% 0px";
 const READY_TIMEOUT_MS = 1400;
+// A piece that says when its first real frame is up waits for that instead,
+// however long its art takes to arrive; the cap only covers a piece that
+// never says so. Both clocks run only while the tile is on screen: a piece
+// mounted just below the fold may not start until it is scrolled to.
+const MARKED_TIMEOUT_MS = 8000;
+// Pieces mostly fade their art in once drawn. The poster waits for that
+// reveal to finish, or it would crossfade into a half-drawn tile.
+const REVEAL_CAP_MS = 1500;
 
-function painted(box) {
+function revealing(box) {
+  return box.getAnimations({ subtree: true }).some((animation) => {
+    if (animation.playState !== "running") return false;
+    return Number.isFinite(animation.effect?.getComputedTiming().endTime);
+  });
+}
+
+function painted(box, mark) {
   if (box.querySelector("[data-plate]")) return Boolean(box.querySelector("canvas[data-painted]"));
+  if (mark) return Boolean(box.querySelector(mark));
+  // Nothing but the poster yet: the piece has not rendered at all.
+  if (box.childElementCount < 2) return false;
   const canvas = box.querySelector("canvas");
   if (canvas && !canvas.width) return false;
   return [...box.querySelectorAll("img")].every((image) => image.complete);
+}
+
+// Below this width the bento stacks every tile at 4:5 (layouts.css), and the
+// tile shows its narrow still: a phone crop of the desktop still is a
+// different picture from the one the piece paints there.
+const NARROW = "(max-width: 899px)";
+const WIDE = "(min-width: 900px)";
+
+function preloadPoster(poster, priority) {
+  if (!poster.narrow) {
+    preload(poster.src, { as: "image", fetchPriority: "high", media: priority });
+    return;
+  }
+  if (priority === "all" || priority === NARROW) preload(poster.narrow.src, { as: "image", fetchPriority: "high", media: NARROW });
+  if (priority === "all" || priority === WIDE) preload(poster.src, { as: "image", fetchPriority: "high", media: WIDE });
 }
 
 // `priority` is the media query under which this tile is in the first screen
@@ -29,9 +62,17 @@ function painted(box) {
 // poster is preloaded for that query only, so a phone never spends its first
 // second of bandwidth on stills from the desktop's top row.
 export default function LivePiece({ slug, data, poster, priority = null, title }) {
-  if (poster && priority) preload(poster.src, { as: "image", fetchPriority: "high", media: priority });
+  if (poster && priority) preloadPoster(poster, priority);
+  // A first-screen tile fetches its chunk as the page hydrates. The mount
+  // queue only hears of it from an effect, once all of hydration is done —
+  // on a phone that was most of a second with the network sitting idle.
+  if (priority && typeof window !== "undefined" && (priority === "all" || window.matchMedia(priority).matches)) {
+    preloadPiece(slug);
+  }
   const boxRef = useRef(null);
   const [mounted, setMounted] = useState(false);
+  // A tile with no still has nothing to hold over its piece: it shows the
+  // piece as it draws.
   const [live, setLive] = useState(false);
   const Component = lazyPiece(slug);
 
@@ -79,13 +120,31 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
   useEffect(() => {
     if (!mounted) return undefined;
     const box = boxRef.current;
-    const started = performance.now();
+    if (!poster) return undefined;
+    const mark = READY_MARK.get(slug);
+    const cap = () => (mark || box.querySelector("[data-plate]") ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS);
+    let onScreen = false;
+    const observer = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+    });
+    observer.observe(box);
+    let waited = 0;
+    let markedAt = 0;
+    let last = performance.now();
     let frame = 0;
     let settleFrames = 2;
-    const check = () => {
-      if (painted(box) || performance.now() - started > READY_TIMEOUT_MS) {
+    const check = (now) => {
+      if (onScreen) waited += now - last;
+      last = now;
+      let done = waited > cap();
+      if (!done && painted(box, mark)) {
+        markedAt ||= now;
+        done = !revealing(box) || now - markedAt > REVEAL_CAP_MS;
+      }
+      if (done) {
         settleFrames -= 1;
         if (settleFrames <= 0) {
+          observer.disconnect();
           setLive(true);
           return;
         }
@@ -93,11 +152,14 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
       frame = requestAnimationFrame(check);
     };
     frame = requestAnimationFrame(check);
-    return () => cancelAnimationFrame(frame);
-  }, [mounted]);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+    };
+  }, [mounted, slug, poster]);
 
   return (
-    <div ref={boxRef} className="xl-live" data-live={live ? "" : undefined}>
+    <div ref={boxRef} className="xl-live" data-live={live || (mounted && !poster) ? "" : undefined}>
       {mounted && Component ? (
         <PieceBoundary slug={slug}>
           <Suspense fallback={null}>
@@ -106,18 +168,22 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
         </PieceBoundary>
       ) : null}
       {poster ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          className="xl-live__poster"
-          src={poster.src}
-          width={poster.width}
-          height={poster.height}
-          alt={title ? `${title}, a still` : ""}
-          decoding="async"
-          loading={priority ? "eager" : "lazy"}
-          fetchPriority={priority ? "auto" : "low"}
-          draggable={false}
-        />
+        <picture>
+          {poster.narrow ? (
+            <source media={NARROW} srcSet={poster.narrow.src} width={poster.narrow.width} height={poster.narrow.height} />
+          ) : null}
+          <img
+            className="xl-live__poster"
+            src={poster.src}
+            width={poster.width}
+            height={poster.height}
+            alt={title ? `${title}, a still` : ""}
+            decoding="async"
+            loading={priority ? "eager" : "lazy"}
+            fetchPriority={priority ? "auto" : "low"}
+            draggable={false}
+          />
+        </picture>
       ) : (
         <div className="xl-live__poster xl-live__poster--blank" aria-hidden="true" />
       )}

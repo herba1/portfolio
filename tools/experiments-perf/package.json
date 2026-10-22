@@ -1,0 +1,18 @@
+{
+  "name": "experiments-perf",
+  "private": true,
+  "type": "module",
+  "description": "Measures the /experiments index in a real browser: frames, long frames, GPU stalls, load, fit, sound and the still-to-live handoff.",
+  "scripts": {
+    "scroll": "node scroll.mjs",
+    "tiles": "node tiles.mjs",
+    "load": "node load.mjs",
+    "handoff": "node handoff.mjs",
+    "audio": "node audio.mjs"
+  },
+  "dependencies": {
+    "playwright-core": "1.56.1",
+    "pngjs": "^7.0.0",
+    "source-map": "^0.7.6"
+  }
+}
