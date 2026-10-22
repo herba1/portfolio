@@ -69,6 +69,8 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
   }
   const boxRef = useRef(null);
   const [mounted, setMounted] = useState(false);
+  // A tile with no still has nothing to hold over its piece: it shows the
+  // piece as it draws.
   const [live, setLive] = useState(false);
   const Component = lazyPiece(slug);
 
@@ -116,12 +118,7 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
   useEffect(() => {
     if (!mounted) return undefined;
     const box = boxRef.current;
-    // A tile with no still has nothing to hold over the piece: show it as it
-    // draws.
-    if (!poster) {
-      setLive(true);
-      return undefined;
-    }
+    if (!poster) return undefined;
     const mark = READY_MARK.get(slug);
     // A plate marks its painted canvas, so it gets a marked piece's patience.
     const cap = () => (mark || box.querySelector("[data-plate]") ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS);
@@ -161,7 +158,7 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
   }, [mounted, slug, poster]);
 
   return (
-    <div ref={boxRef} className="xl-live" data-live={live ? "" : undefined}>
+    <div ref={boxRef} className="xl-live" data-live={live || (mounted && !poster) ? "" : undefined}>
       {mounted && Component ? (
         <PieceBoundary slug={slug}>
           <Suspense fallback={null}>
