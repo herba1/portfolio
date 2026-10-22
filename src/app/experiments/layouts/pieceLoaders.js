@@ -49,6 +49,8 @@ const SCREEN_MARK = {
 };
 export const READY_MARK = new Map([
   ...["/scorch", "/stir", "/taffy", "/counter", "/wet-ink", "/backdrop"].map((slug) => [slug, ANY_MARK]),
+  // The plates mark the canvas their art is drawn on.
+  ...["/ink", "/refract", "/halftone", "/blobs"].map((slug) => [slug, "canvas[data-painted]"]),
   ...["amorph", "ascii-bust", "blob-track", "camcorder", "crumple", "dandelion", "erase", "field", "film-leader", "focus-pull", "generation-loss", "ghost-setlist", "ink-drag", "iris", "justify", "kern", "light-table", "loupe", "margins", "mirrorball", "moire", "pull-vinyl", "raking-light", "refractor", "scope", "select", "skin", "smear", "split-flap", "steam", "sticker-peel", "t9", "terminal", "typewriter"].map((slug) => [`/lab/${slug}`, SCREEN_MARK[slug] ?? ANY_MARK]),
 ]);
 

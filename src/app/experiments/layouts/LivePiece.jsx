@@ -35,6 +35,8 @@ function revealing(box) {
 function painted(box, mark) {
   if (box.querySelector("[data-plate]")) return Boolean(box.querySelector("canvas[data-painted]"));
   if (mark) return Boolean(box.querySelector(mark));
+  // Nothing but the poster yet: the piece has not rendered at all.
+  if (box.childElementCount < 2) return false;
   const canvas = box.querySelector("canvas");
   if (canvas && !canvas.width) return false;
   return [...box.querySelectorAll("img")].every((image) => image.complete);
@@ -120,7 +122,6 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
     const box = boxRef.current;
     if (!poster) return undefined;
     const mark = READY_MARK.get(slug);
-    // A plate marks its painted canvas, so it gets a marked piece's patience.
     const cap = () => (mark || box.querySelector("[data-plate]") ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS);
     let onScreen = false;
     const observer = new IntersectionObserver(([entry]) => {

@@ -11,17 +11,17 @@ export const POSTERS = {
     }
   },
   "/blobs": {
-    "src": "/posters/experiments/blobs.webp?v=vHcHZruK",
+    "src": "/posters/experiments/blobs.webp?v=Pi8diLU2",
     "width": 1392,
     "height": 440,
     "narrow": {
-      "src": "/posters/experiments/blobs-narrow.webp?v=M7OXRBtW",
+      "src": "/posters/experiments/blobs-narrow.webp?v=sjXPB4tX",
       "width": 358,
       "height": 447
     }
   },
   "/halftone": {
-    "src": "/posters/experiments/halftone.webp?v=3EwXJyNL",
+    "src": "/posters/experiments/halftone.webp?v=MBsumTxC",
     "width": 453,
     "height": 440,
     "narrow": {
@@ -31,11 +31,11 @@ export const POSTERS = {
     }
   },
   "/ink": {
-    "src": "/posters/experiments/ink.webp?v=3bddOduZ",
+    "src": "/posters/experiments/ink.webp?v=EzOSVHAI",
     "width": 453,
     "height": 440,
     "narrow": {
-      "src": "/posters/experiments/ink-narrow.webp?v=ruXbzLde",
+      "src": "/posters/experiments/ink-narrow.webp?v=qfzDG73y",
       "width": 358,
       "height": 447
     }
@@ -401,7 +401,7 @@ export const POSTERS = {
     }
   },
   "/refract": {
-    "src": "/posters/experiments/refract.webp?v=l5q_Kv5Z",
+    "src": "/posters/experiments/refract.webp?v=-NigPYHM",
     "width": 922,
     "height": 440,
     "narrow": {
