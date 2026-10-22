@@ -116,17 +116,47 @@ function schedule() {
   requestAnimationFrame(() => idle(pump));
 }
 
+// Chunk fetches go out nearest tile first, a couple at a time. Started all at
+// once, the tiles below the fold split the connection with the ones on screen
+// and everything arrives late together; in order, the first screen's pieces
+// land first.
+const MAX_LOADING = 2;
+let loading = 0;
+
+function pumpLoads() {
+  while (loading < MAX_LOADING) {
+    let next = null;
+    let nextDistance = Infinity;
+    for (const job of jobs) {
+      if (job.started) continue;
+      const d = distance(job.element);
+      if (d < nextDistance) {
+        next = job;
+        nextDistance = d;
+      }
+    }
+    if (!next) return;
+    next.started = true;
+    loading += 1;
+    Promise.resolve(next.load()).finally(() => {
+      loading -= 1;
+      if (jobs.has(next)) {
+        next.ready = true;
+        schedule();
+      }
+      pumpLoads();
+    });
+  }
+}
+
 // Queue a mount: `load` fetches the chunk, `run` mounts once it has arrived
 // and it is this tile's turn. Returns a cancel for a tile that leaves before
-// its turn comes — a flick past twenty tiles mounts none of them.
+// its turn comes — a flick past twenty tiles mounts none of them, and fetches
+// none that had not started.
 export function enqueueMount(element, load, run) {
-  const job = { element, ready: false, run };
+  const job = { element, ready: false, started: false, load, run };
   jobs.add(job);
-  Promise.resolve(load()).finally(() => {
-    if (!jobs.has(job)) return;
-    job.ready = true;
-    schedule();
-  });
+  pumpLoads();
   return () => jobs.delete(job);
 }
 

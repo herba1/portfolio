@@ -228,7 +228,10 @@ export default function AnimatedFavicon() {
     const canvas = document.createElement("canvas");
     canvas.width = SIZE;
     canvas.height = SIZE;
-    const ctx = canvas.getContext("2d");
+    // A software canvas. A GPU one makes every toBlob snapshot wait for the
+    // GPU to finish whatever the page queued ahead of it, and on a page of
+    // WebGL pieces that wait held the main thread for whole seconds.
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return;
 
     const link = document.createElement("link");

@@ -348,7 +348,11 @@
 .xl-live__poster--blank {
   background: var(--color-surface-raised);
 }
-.xl-live[data-live] > .xl-live__poster {
+.xl-live > picture {
+  display: contents;
+}
+.xl-live[data-live] > .xl-live__poster,
+.xl-live[data-live] > picture > .xl-live__poster {
   opacity: 0;
   visibility: hidden;
 }

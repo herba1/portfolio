@@ -26,6 +26,28 @@ export const LOADERS = {
   ...Object.fromEntries(Object.entries(LAB_PIECES).map(([slug, load]) => [`/lab/${slug}`, load])),
 };
 
+// Pieces that mark their first real frame — `data-ready` or `data-painted`
+// somewhere in their tree, set once their art has loaded and drawn. A tile
+// keeps its poster up until then rather than lifting it off an empty canvas.
+// The value is the marker to wait for: most pieces mark the element their art
+// is revealed on, but a few mark their outer root as soon as the engine exists
+// (it fades the caption in) and reveal the screen itself later, after a photo
+// or a font has arrived — for those, only the screen's own mark counts.
+const ANY_MARK = '[data-ready]:not([data-ready="false"]), [data-painted]:not([data-painted="false"])';
+const SCREEN_MARK = {
+  camcorder: ".camcorder-rig[data-ready]",
+  field: ".field-screen[data-ready]",
+  kern: ".kern-surface[data-ready]",
+  moire: ".moire-screen[data-ready]",
+  scope: ".scope-screen[data-ready]",
+  t9: ".t9-screen[data-ready]",
+  terminal: ".terminal-screen[data-ready]",
+};
+export const READY_MARK = new Map([
+  ...["/scorch", "/stir", "/taffy", "/counter", "/wet-ink", "/backdrop"].map((slug) => [slug, ANY_MARK]),
+  ...["ascii-bust", "blob-track", "camcorder", "erase", "field", "film-leader", "focus-pull", "generation-loss", "ghost-setlist", "ink-drag", "iris", "justify", "kern", "light-table", "loupe", "margins", "mirrorball", "moire", "pull-vinyl", "raking-light", "refractor", "scope", "select", "skin", "smear", "split-flap", "steam", "sticker-peel", "t9", "terminal", "typewriter"].map((slug) => [`/lab/${slug}`, SCREEN_MARK[slug] ?? ANY_MARK]),
+]);
+
 const LAZY = new Map();
 
 export function lazyPiece(slug) {
