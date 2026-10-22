@@ -62,6 +62,13 @@ const save = () => {
 // it, so the still is that tile's first live frame however long the earlier
 // tiles took, and a piece that wedges a (software) GPU costs only its own
 // still.
+function hideFixed() {
+  for (const el of document.body.querySelectorAll("*")) {
+    if (el.closest(".xl-bento")) continue;
+    if (getComputedStyle(el).position === "fixed") el.style.setProperty("visibility", "hidden", "important");
+  }
+}
+
 async function capture(variant, index, slug) {
   const browser = await launch();
   try {
@@ -70,11 +77,8 @@ async function capture(variant, index, slug) {
     await page.goto(`${base}/experiments`, { waitUntil: "domcontentloaded" });
     // No entrance, and nothing fixed (nav, switcher) over the tiles.
     await page.addStyleTag({ content: ".xl-tile{animation:none!important}" });
+    await page.evaluate(hideFixed);
     await page.evaluate((n) => {
-      for (const el of document.body.querySelectorAll("*")) {
-        if (el.closest(".xl-bento")) continue;
-        if (getComputedStyle(el).position === "fixed") el.style.setProperty("visibility", "hidden", "important");
-      }
       const tile = document.querySelectorAll(".xl-bento .xl-tile")[n];
       const r = tile.getBoundingClientRect();
       window.scrollTo(0, window.scrollY + r.top + r.height / 2 - window.innerHeight / 2);
@@ -83,6 +87,9 @@ async function capture(variant, index, slug) {
     await page.waitForFunction((n) => document.querySelectorAll(".xl-bento .xl-tile")[n].querySelector(".xl-live[data-live]"), index, { timeout: 30000 }).catch(() => {});
     await page.waitForTimeout(HANDOFF_MS);
     await page.mouse.move(2, 2);
+    // Again: some fixed UI (the dev palette on localhost) only mounts after
+    // hydration.
+    await page.evaluate(hideFixed);
     // A clip of the page rather than an element shot: a live piece never
     // holds still long enough for an element to count as stable.
     const clip = await (await tile.$(".piece-box")).boundingBox();
