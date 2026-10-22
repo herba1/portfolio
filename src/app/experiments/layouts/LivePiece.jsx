@@ -21,8 +21,8 @@ const READY_TIMEOUT_MS = 1400;
 // never says so. Both clocks run only while the tile is on screen: a piece
 // mounted just below the fold may not start until it is scrolled to.
 const MARKED_TIMEOUT_MS = 8000;
-// Marked pieces mostly fade their art in once marked. The poster waits for
-// that reveal to finish, or it would crossfade into a half-drawn tile.
+// Pieces mostly fade their art in once drawn. The poster waits for that
+// reveal to finish, or it would crossfade into a half-drawn tile.
 const REVEAL_CAP_MS = 1500;
 
 function revealing(box) {
@@ -116,8 +116,15 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
   useEffect(() => {
     if (!mounted) return undefined;
     const box = boxRef.current;
+    // A tile with no still has nothing to hold over the piece: show it as it
+    // draws.
+    if (!poster) {
+      setLive(true);
+      return undefined;
+    }
     const mark = READY_MARK.get(slug);
-    const cap = mark ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS;
+    // A plate marks its painted canvas, so it gets a marked piece's patience.
+    const cap = () => (mark || box.querySelector("[data-plate]") ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS);
     let onScreen = false;
     const observer = new IntersectionObserver(([entry]) => {
       onScreen = entry.isIntersecting;
@@ -131,10 +138,10 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
     const check = (now) => {
       if (onScreen) waited += now - last;
       last = now;
-      let done = waited > cap;
+      let done = waited > cap();
       if (!done && painted(box, mark)) {
         markedAt ||= now;
-        done = !mark || !revealing(box) || now - markedAt > REVEAL_CAP_MS;
+        done = !revealing(box) || now - markedAt > REVEAL_CAP_MS;
       }
       if (done) {
         settleFrames -= 1;
@@ -151,7 +158,7 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
       observer.disconnect();
       cancelAnimationFrame(frame);
     };
-  }, [mounted, slug]);
+  }, [mounted, slug, poster]);
 
   return (
     <div ref={boxRef} className="xl-live" data-live={live ? "" : undefined}>

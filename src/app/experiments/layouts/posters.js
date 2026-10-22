@@ -11,17 +11,17 @@ export const POSTERS = {
     }
   },
   "/blobs": {
-    "src": "/posters/experiments/blobs.webp?v=HTnCqt-n",
+    "src": "/posters/experiments/blobs.webp?v=vHcHZruK",
     "width": 1392,
     "height": 440,
     "narrow": {
-      "src": "/posters/experiments/blobs-narrow.webp?v=OK3pS--t",
+      "src": "/posters/experiments/blobs-narrow.webp?v=M7OXRBtW",
       "width": 358,
       "height": 447
     }
   },
   "/halftone": {
-    "src": "/posters/experiments/halftone.webp?v=SxjOLMYi",
+    "src": "/posters/experiments/halftone.webp?v=3EwXJyNL",
     "width": 453,
     "height": 440,
     "narrow": {
@@ -31,7 +31,7 @@ export const POSTERS = {
     }
   },
   "/ink": {
-    "src": "/posters/experiments/ink.webp?v=16MaFqe3",
+    "src": "/posters/experiments/ink.webp?v=3bddOduZ",
     "width": 453,
     "height": 440,
     "narrow": {
@@ -41,11 +41,11 @@ export const POSTERS = {
     }
   },
   "/lab/amorph": {
-    "src": "/posters/experiments/lab--amorph.webp?v=N77hcAh4",
+    "src": "/posters/experiments/lab--amorph.webp?v=dp8yFONd",
     "width": 688,
     "height": 584,
     "narrow": {
-      "src": "/posters/experiments/lab--amorph-narrow.webp?v=VJO3d76x",
+      "src": "/posters/experiments/lab--amorph-narrow.webp?v=7k_V9Rpl",
       "width": 358,
       "height": 447
     }
@@ -91,21 +91,21 @@ export const POSTERS = {
     }
   },
   "/lab/crumple": {
-    "src": "/posters/experiments/lab--crumple.webp?v=xUDHudnT",
+    "src": "/posters/experiments/lab--crumple.webp?v=YaadbElO",
     "width": 688,
     "height": 584,
     "narrow": {
-      "src": "/posters/experiments/lab--crumple-narrow.webp?v=34XQIjiu",
+      "src": "/posters/experiments/lab--crumple-narrow.webp?v=cCwrnPGd",
       "width": 358,
       "height": 447
     }
   },
   "/lab/dandelion": {
-    "src": "/posters/experiments/lab--dandelion.webp?v=wTqrynrP",
+    "src": "/posters/experiments/lab--dandelion.webp?v=g8CgkuRk",
     "width": 688,
     "height": 584,
     "narrow": {
-      "src": "/posters/experiments/lab--dandelion-narrow.webp?v=tLeAYq64",
+      "src": "/posters/experiments/lab--dandelion-narrow.webp?v=8kIBvj3y",
       "width": 358,
       "height": 447
     }
@@ -401,7 +401,7 @@ export const POSTERS = {
     }
   },
   "/refract": {
-    "src": "/posters/experiments/refract.webp?v=3MqejYV5",
+    "src": "/posters/experiments/refract.webp?v=l5q_Kv5Z",
     "width": 922,
     "height": 440,
     "narrow": {
