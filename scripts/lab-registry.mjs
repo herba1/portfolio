@@ -31,7 +31,11 @@ for (const entry of entries) {
     status: STATUSES.has(data.status) ? data.status : "candidate",
     createdAt: typeof data.createdAt === "string" ? data.createdAt : "",
     parentSlug: typeof data.parentSlug === "string" ? data.parentSlug : null,
-    tile: data.tile && typeof data.tile === "object" ? { cols: Number(data.tile.cols) || 2, rows: Number(data.tile.rows) || 4 } : null,
+    // A study on the experiments index is a whole row ("wide") or half of one
+    // ("tall"), and as tall as the screen either way.
+    // An older manifest's { cols, rows } maps across: three of six columns or
+    // fewer was a half.
+    tile: data.tile && typeof data.tile === "object" ? { shape: data.tile.shape ? (data.tile.shape === "tall" ? "tall" : "wide") : Number(data.tile.cols) <= 3 ? "tall" : "wide" } : null,
     embeddable: existsSync(join(LAB, entry.name, "Piece.jsx")),
   });
 }

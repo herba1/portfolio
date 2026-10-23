@@ -10,8 +10,7 @@
   "createdAt": "2026-10-18T12:00:00.000Z",
   "intent": "The classic browser with the one move the iPod had and the web versions forgot: the centred record flips to its back. One spring per cover for the flip, one speed-capped spring for the flow, and one light that both share.",
   "tile": {
-    "cols": 4,
-    "rows": 3
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Cover_Flow",

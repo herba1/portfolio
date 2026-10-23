@@ -1,70 +1,66 @@
+import { createSound } from "@/lib/sound/engine";
+import { takes } from "./crumpleTakes";
+
+// The print crushing (crumpleTakes.js), keyed to the stop-motion: each held
+// frame opens with the crinkle of the creases rubbing, and while the sheet
+// moves, facets snap through — long folds early in the crush, fine bright
+// creases as it becomes a ball.
+const FRAME_GAP = 50;
+const SNAP_GAP = 0.018;
+
 export function createRustle() {
-  let ctx = null;
-  let noise = null;
-  let out = null;
+  const sound = createSound({ level: -3, room: 0.1, on: true });
+  const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let last = 0;
+  let nextAt = 0;
 
-  const ensure = () => {
-    if (ctx) return ctx;
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return null;
-    ctx = new Ctor();
-    const length = Math.round(ctx.sampleRate * 0.5);
-    noise = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = noise.getChannelData(0);
-    for (let i = 0; i < length; i += 1) data[i] = Math.random() * 2 - 1;
-    out = ctx.createGain();
-    out.gain.value = 0.5;
-    const shelf = ctx.createBiquadFilter();
-    shelf.type = "highshelf";
-    shelf.frequency.value = 6000;
-    shelf.gain.value = -8;
-    out.connect(shelf).connect(ctx.destination);
-    return ctx;
-  };
-
-  const crackle = (t, strength) => {
-    const src = ctx.createBufferSource();
-    src.buffer = noise;
-    const band = ctx.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = 1800 + Math.random() * 4200;
-    band.Q.value = 0.9 + Math.random() * 1.6;
-    const amp = ctx.createGain();
-    const dur = 0.006 + Math.random() * 0.03;
-    const peak = (0.015 + Math.random() * 0.05) * strength;
-    amp.gain.setValueAtTime(0.0001, t);
-    amp.gain.exponentialRampToValueAtTime(peak, t + 0.002);
-    amp.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(band).connect(amp).connect(out);
-    src.start(t, Math.random() * 0.4, dur + 0.01);
+  const snap = (at, p, strength) => {
+    const big = Math.random() > p * 0.85 + 0.1;
+    sound.play(big ? bank.snapBig : bank.snapSmall, {
+      gain: (big ? -9 : -13) + 4 * (strength - 1) + (Math.random() * 3 - 1.5),
+      pan: (Math.random() - 0.5) * 0.5,
+      rate: (0.95 + Math.random() * 0.1) * (1 + 0.15 * p),
+      at,
+    });
   };
 
   return {
     unlock() {
-      const c = ensure();
-      if (c && c.state === "suspended") c.resume().catch(() => {});
+      sound.unlock();
     },
     rustle(speed, p) {
-      if (!ctx || ctx.state !== "running") return;
+      if (!sound.live) return;
       const now = performance.now();
-      const dt = last ? Math.min(0.05, (now - last) / 1000) : 1 / 60;
+      const gap = last ? now - last : Infinity;
+      const dt = Number.isFinite(gap) ? Math.min(0.05, gap / 1000) : 1 / 60;
       last = now;
+      const strength = Math.min(1, 0.4 + speed);
+      // A new held frame: the whole sheet shifts at once.
+      if (gap > FRAME_GAP) {
+        sound.play(bank.crinkle, { gain: -11 + 5 * (strength - 1) + (Math.random() * 2 - 1), rate: 0.96 + Math.random() * 0.08 });
+        snap(0, p, strength);
+        nextAt = SNAP_GAP;
+        return;
+      }
       const density = 0.4 + 0.6 * Math.sin(Math.min(1, p) * Math.PI);
-      const rate = Math.min(90, speed * 110 * density);
+      const rate = Math.min(45, speed * 70 * density);
       let count = 0;
       let x = Math.random();
       const expected = rate * dt;
-      while (x < expected && count < 6) {
+      while (x < expected && count < 2) {
         count += 1;
         x += Math.random() * 1.2;
       }
-      const t = ctx.currentTime;
-      for (let i = 0; i < count; i += 1) crackle(t + Math.random() * dt, Math.min(1, 0.4 + speed));
+      // Spread the snaps over the frame, never closer than SNAP_GAP.
+      nextAt = Math.max(0, nextAt - dt);
+      for (let i = 0; i < count; i += 1) {
+        const at = Math.max(nextAt, Math.random() * dt);
+        snap(at, p, strength);
+        nextAt = at + SNAP_GAP;
+      }
     },
     destroy() {
-      ctx?.close().catch(() => {});
-      ctx = null;
+      sound.destroy();
     },
   };
 }

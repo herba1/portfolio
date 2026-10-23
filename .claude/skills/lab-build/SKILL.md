@@ -30,6 +30,8 @@ For UI work: `page.js` → `XExperience.jsx` (page shell, mock data, state) → 
 - `XControls.jsx` — a hand-rolled panel over the groups. Never leva.
 - `x.css` — scoped styles, prefixed with the slug.
 - `experiment.json` — manifest. Update `title`, `description`, `tags`, `intent` when done.
+  Set `tile.shape` for the experiments index: `"wide"` (the whole row — a screen, a line of type, a strip) or `"tall"` (half a row — an object, a page, a disc). Either is as tall as the screen.
+- Sound goes through `src/lib/sound` (one shared context, takes rendered in a worker): put the banks in `xTakes.js` (`label()` them and add the file to `src/lib/sound/registry.js`), model each sound from the physical event, and run `node scripts/sound-check.mjs`.
 
 ## Stack
 

@@ -11,8 +11,7 @@
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "One optical object finished to the edge: a real nine-blade iris whose opening is the shape of every bokeh disc and the source of every diffraction star, over a real film photograph, with the foley of a manual lens ring.",
   "tile": {
-    "cols": 3,
-    "rows": 5
+    "shape": "tall"
   },
   "sources": [
     "https://kinoria.studio",

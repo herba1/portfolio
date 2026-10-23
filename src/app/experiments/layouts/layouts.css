@@ -138,20 +138,24 @@
     "scorch scorch stir stir stir stir";
   gap: 16px;
 }
-/* Lab studies, after the hand-placed pieces: each sets its own span in its
-   manifest (tile.cols of 6, tile.rows of 104px) and the grid packs them. */
+/* Lab studies, after the hand-placed pieces. Each is as tall as the screen
+   below the nav, and takes the whole row (a piece that reads across: a
+   screen, a line of type, a strip of film) or half of it (an object, a page,
+   a disc), so none is letterboxed into a short band. */
 .xl-bento__grid--studies {
+  --study-height: clamp(480px, calc(100dvh - 152px), 960px);
   min-height: 0;
   margin-top: 16px;
   grid-template-rows: none;
   grid-template-areas: none;
-  grid-auto-rows: 104px;
-  grid-auto-flow: row dense;
+  grid-auto-rows: var(--study-height);
 }
 .xl-tile.xl-tile--study {
-  grid-column: span var(--cols, 2);
-  grid-row: span var(--rows, 4);
+  grid-column: span 6;
   animation: none;
+}
+.xl-tile.xl-tile--study[data-shape="tall"] {
+  grid-column: span 3;
 }
 .xl-bento__tile {
   display: flex;
@@ -185,13 +189,23 @@
   .xl-bento__grid--studies {
     grid-auto-rows: auto;
   }
-  .xl-tile.xl-tile--study {
+  .xl-tile.xl-tile--study,
+  .xl-tile.xl-tile--study[data-shape="tall"] {
     grid-column: auto;
     grid-row: auto;
   }
   .xl-bento__tile > .piece-box {
     flex: none;
     aspect-ratio: 4 / 5;
+  }
+}
+/* Two columns of 4:5 halves: an odd study out at the end takes the row. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .xl-bento__grid--studies > .xl-tile--study:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .xl-bento__grid--studies > .xl-tile--study:last-child:nth-child(odd) > .piece-box {
+    aspect-ratio: 8 / 5;
   }
 }
 @media (max-width: 599px) {
@@ -326,6 +340,18 @@
     transition: none;
     animation: none;
   }
+}
+
+/* Until a tile is taken in hand (ScrollGuard), the page owns vertical
+   scroll over it: a finger pans the page, and the pieces' own scrollers hold
+   still so a wheel passes through them to the page. Their scroll position is
+   kept, and comes back to life with the first press inside. */
+.xl-tile:not([data-engaged]) .piece-box * {
+  touch-action: pan-y !important;
+}
+.xl-tile:not([data-engaged])
+  :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
+  overflow-y: hidden !important;
 }
 
 /* A tile's live mount and its poster. The poster sits over the piece until

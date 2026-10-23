@@ -4,6 +4,7 @@ import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
 import PlateHand from "../PlateHand";
 import OffscreenPause from "../OffscreenPause";
+import ScrollGuard from "../ScrollGuard";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -48,7 +49,24 @@ function firstScreen(slug, index) {
   if (desktop && phone) return "all";
   return desktop ? DESKTOP : phone ? PHONE : null;
 }
-const STUDIES = PIECES.filter((piece) => !AREAS[piece.slug]);
+// Studies take a whole row or half of one (their manifest's tile.shape), each
+// as tall as the screen. A half waits in source order for the next half to
+// share its row, so reading order and tab order follow the rows as drawn;
+// an odd one out takes the row.
+function pairHalves(pieces) {
+  const ordered = [];
+  let waiting = null;
+  for (const piece of pieces) {
+    if (piece.tile?.shape !== "tall") ordered.push({ piece, shape: "wide" });
+    else if (waiting) {
+      ordered.push(waiting, { piece, shape: "tall" });
+      waiting = null;
+    } else waiting = { piece, shape: "tall" };
+  }
+  if (waiting) ordered.push({ ...waiting, shape: "wide" });
+  return ordered;
+}
+const STUDIES = pairHalves(PIECES.filter((piece) => !AREAS[piece.slug]));
 
 export default async function BentoLayout() {
   const data = await pieceData();
@@ -74,13 +92,13 @@ export default async function BentoLayout() {
       </ul>
       {STUDIES.length ? (
         <ul className="xl-bento__grid xl-bento__grid--studies">
-          {STUDIES.map((piece) => (
+          {STUDIES.map(({ piece, shape }) => (
             <li
               key={piece.slug}
               className="xl-bento__tile xl-tile xl-tile--study"
               data-slug={piece.slug}
+              data-shape={shape}
               aria-label={piece.title}
-              style={{ "--cols": piece.tile?.cols ?? 2, "--rows": piece.tile?.rows ?? 4 }}
             >
               <Piece slug={piece.slug} data={data} title={piece.title} />
             </li>
@@ -89,6 +107,7 @@ export default async function BentoLayout() {
       ) : null}
       <PlateHand />
       <OffscreenPause />
+      <ScrollGuard />
       <IntroSettle />
     </main>
   );

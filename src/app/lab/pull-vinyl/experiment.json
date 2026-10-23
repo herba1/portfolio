@@ -10,8 +10,7 @@
   "createdAt": "2026-10-18T12:50:00.000Z",
   "intent": "The pull-to-refresh gesture made physical: the record you uncover is the song that arrives, and every row, cover and sleeve moves into place rather than appearing.",
   "tile": {
-    "cols": 2,
-    "rows": 4
+    "shape": "tall"
   },
   "sources": [
     "https://developer.apple.com/design/human-interface-guidelines/refresh-content-controls",

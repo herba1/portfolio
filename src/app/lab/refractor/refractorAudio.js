@@ -1,44 +1,28 @@
+import { createSound } from "@/lib/sound/engine";
+import { takes } from "./refractorTakes";
+
 export function createRefractorAudio() {
-  let ctx = null;
-  let noise = null;
+  const sound = createSound({ level: -3, room: 0.12 });
+  const snapBank = sound.bank(takes.snap.render, takes.snap);
+  let last = 0;
 
   function start() {
-    if (ctx) {
-      if (ctx.state === "suspended") ctx.resume().catch(() => {});
-      return;
-    }
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return;
-    ctx = new Ctor();
-    const length = Math.round(ctx.sampleRate * 0.12);
-    noise = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = noise.getChannelData(0);
-    for (let i = 0; i < length; i += 1) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, 3);
+    sound.unlock();
   }
 
+  // One riffle per disc that turns past edge-on. A hard flick can turn
+  // several in a row, so space them rather than stack them.
   function snap(strength = 1) {
-    if (!ctx || ctx.state !== "running") return;
-    const t = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = noise;
-    src.playbackRate.value = 0.9 + Math.random() * 0.25;
-    const band = ctx.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = 2600 + Math.random() * 900;
-    band.Q.value = 0.9;
-    const gain = ctx.createGain();
-    const level = 0.12 * Math.min(1, strength);
-    gain.gain.setValueAtTime(0, t);
-    gain.gain.linearRampToValueAtTime(level, t + 0.003);
-    gain.gain.exponentialRampToValueAtTime(0.0008, t + 0.09);
-    src.connect(band).connect(gain).connect(ctx.destination);
-    src.start(t);
-    src.stop(t + 0.12);
+    if (!sound.live) return;
+    const now = performance.now();
+    if (now - last < 40) return;
+    last = now;
+    const level = 20 * Math.log10(Math.max(0.05, Math.min(1, strength)));
+    sound.play(snapBank, { gain: -9 + level + (Math.random() * 3 - 1.5), rate: 0.97 + Math.random() * 0.06 });
   }
 
   function destroy() {
-    if (ctx) ctx.close().catch(() => {});
-    ctx = null;
+    sound.destroy();
   }
 
   return { start, snap, destroy };
