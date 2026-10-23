@@ -1,31 +1,34 @@
-let ctx = null;
+import { createSound } from "@/lib/sound/engine";
+import { takes } from "./foleyTakes";
+
+// One client for the module, made on the first gesture so nothing touches
+// audio during server rendering.
+let sound = null;
+let bank = null;
+let lastTick = 0;
 
 export function wakeAudio() {
   if (typeof window === "undefined") return;
-  if (!ctx) {
-    const Ctor = window.AudioContext || window.webkitAudioContext;
-    if (!Ctor) return;
-    ctx = new Ctor();
+  if (!sound) {
+    sound = createSound({ level: -8, room: 0.1 });
+    bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   }
-  if (ctx.state === "suspended") ctx.resume();
+  sound.unlock();
 }
 
-function blip(freq, peak, length) {
-  if (!ctx || ctx.state !== "running") return;
-  const t = ctx.currentTime;
-  const osc = ctx.createOscillator();
-  osc.type = "triangle";
-  osc.frequency.setValueAtTime(freq, t);
-  osc.frequency.exponentialRampToValueAtTime(freq * 0.6, t + length);
-  const gain = ctx.createGain();
-  gain.gain.setValueAtTime(0.0001, t);
-  gain.gain.exponentialRampToValueAtTime(peak, t + 0.004);
-  gain.gain.exponentialRampToValueAtTime(0.0001, t + length);
-  osc.connect(gain).connect(ctx.destination);
-  osc.start(t);
-  osc.stop(t + length + 0.02);
-}
+const vary = () => Math.random() * 2 - 1;
 
-export const thunk = () => blip(220, 0.12, 0.09);
-export const tick = () => blip(1800, 0.025, 0.025);
-export const pick = () => blip(1100, 0.05, 0.06);
+// The cover lifts free and the menu opens.
+export const thunk = () => sound?.play(bank.thunk, { gain: -5 + vary(), rate: 0.97 + Math.random() * 0.06 });
+
+// Crossing a row: a fast slide across the menu would otherwise pile these up.
+export const tick = () => {
+  if (!sound?.live) return;
+  const now = performance.now();
+  if (now - lastTick < 32) return;
+  lastTick = now;
+  sound.play(bank.tick, { gain: -13 + vary(), rate: 0.97 + Math.random() * 0.06 });
+};
+
+// Choosing an item.
+export const pick = () => sound?.play(bank.pick, { gain: -8 + vary() });

@@ -161,6 +161,11 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     async setEnabled(value) {
       client.on = Boolean(value);
       if (!ensure()) return false;
+      // Off means silent now, loops and tails included, even while another
+      // piece keeps the shared context running.
+      const t = shared.ctx.currentTime;
+      out.gain.cancelScheduledValues(t);
+      out.gain.setTargetAtTime(client.on ? db(level) : 0, t, 0.03);
       wantRunning();
       if (client.on) {
         prepare();
@@ -171,7 +176,18 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     // A bank of `count` takes of one sound, rendered lazily:
     // render(sampleRate, rand, index) returns a Float32Array.
     bank(render, { count = 6, seed = 1 } = {}) {
-      const bank = { takes: new Array(count).fill(null), buffers: new Array(count).fill(null), last: -1, render, seed };
+      const bank = {
+        takes: new Array(count).fill(null),
+        buffers: new Array(count).fill(null),
+        last: -1,
+        render,
+        seed,
+        // Whether the idle renderer has the first take, so a continuous loop
+        // can wait for it rather than render on the frame it is asked for.
+        get ready() {
+          return Boolean(this.takes[0]);
+        },
+      };
       banks.push(bank);
       for (let i = 0; i < count; i += 1) {
         jobs.push(() => {
@@ -215,9 +231,9 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
       return src;
     },
     // A looping noise or tone texture to drive continuously (friction, a
-    // motor, hiss). It starts silent; ramp the returned { gain, rate }
+    // motor, hiss). It starts silent; ramp the returned { gain, rate, pan }
     // AudioParams, and stop() fades it out.
-    loop(bank) {
+    loop(bank, { pan = 0 } = {}) {
       if (!ensure() || !bank) return null;
       const ctx = shared.ctx;
       if (!bank.buffers[0]) {
@@ -232,17 +248,27 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
       const g = ctx.createGain();
       g.gain.value = 0;
       src.connect(g);
-      g.connect(out);
+      let panner = null;
+      if (ctx.createStereoPanner) {
+        panner = ctx.createStereoPanner();
+        panner.pan.value = Math.max(-1, Math.min(1, pan));
+        g.connect(panner);
+        panner.connect(out);
+      } else g.connect(out);
       src.start(ctx.currentTime, Math.random() * src.buffer.duration);
       return {
         gain: g.gain,
         rate: src.playbackRate,
+        pan: panner?.pan ?? null,
         stop() {
           const t = ctx.currentTime;
           g.gain.cancelScheduledValues(t);
           g.gain.setTargetAtTime(0, t, 0.02);
           src.stop(t + 0.15);
-          src.onended = () => g.disconnect();
+          src.onended = () => {
+            g.disconnect();
+            panner?.disconnect();
+          };
         },
       };
     },

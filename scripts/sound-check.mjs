@@ -163,7 +163,7 @@ for (const path of modules) {
     const problems = [];
     if (m.some((x) => x.nan)) problems.push("NaN");
     if (m.some((x) => x.peak > -0.1)) problems.push("clips");
-    if (m.some((x) => x.first > 0.02)) problems.push("starts on a step");
+    if (m.some((x) => x.first > 0.02) && !spec.loop) problems.push("starts on a step");
     if (m.some((x) => x.last > 0.01 && !spec.loop)) problems.push("ends on a step");
     if (m.some((x) => Math.abs(x.dc) > 0.01)) problems.push("DC");
     if (takes.length > 1 && maxSim > 0.995) problems.push("takes identical");

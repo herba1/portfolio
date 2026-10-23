@@ -1,5 +1,6 @@
 import * as THREE from "three";
 
+import { createBreath } from "./steamAudio";
 import { flowFragment, screenVertex, steamFragment } from "./steamShader";
 
 const HOLD = 7.2;
@@ -61,52 +62,6 @@ function noiseTexture(size = 256) {
   tex.minFilter = THREE.LinearFilter;
   tex.needsUpdate = true;
   return tex;
-}
-
-function createBreath() {
-  let ctx = null;
-  let gain = null;
-  let source = null;
-  return {
-    unlock() {
-      if (ctx) {
-        if (ctx.state === "suspended") ctx.resume().catch(() => {});
-        return;
-      }
-      const Ctor = window.AudioContext || window.webkitAudioContext;
-      if (!Ctor) return;
-      ctx = new Ctor();
-      const buffer = ctx.createBuffer(1, ctx.sampleRate * 2, ctx.sampleRate);
-      const d = buffer.getChannelData(0);
-      let pink = 0;
-      for (let i = 0; i < d.length; i += 1) {
-        pink = pink * 0.94 + (Math.random() * 2 - 1) * 0.06;
-        d[i] = pink * 3 + (Math.random() * 2 - 1) * 0.15;
-      }
-      source = ctx.createBufferSource();
-      source.buffer = buffer;
-      source.loop = true;
-      const band = ctx.createBiquadFilter();
-      band.type = "bandpass";
-      band.frequency.value = 900;
-      band.Q.value = 0.5;
-      gain = ctx.createGain();
-      gain.gain.value = 0;
-      source.connect(band).connect(gain).connect(ctx.destination);
-      source.start();
-    },
-    level(v) {
-      if (!ctx || !gain) return;
-      gain.gain.setTargetAtTime(Math.min(0.14, v), ctx.currentTime, 0.08);
-    },
-    close() {
-      try {
-        source?.stop();
-      } catch {}
-      ctx?.close().catch(() => {});
-      ctx = null;
-    },
-  };
 }
 
 function paintMask(canvas, text, { family, weight, compact }) {

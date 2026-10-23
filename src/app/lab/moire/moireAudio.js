@@ -1,89 +1,69 @@
-const BASE = 174.61;
+import { createSound } from "@/lib/sound/engine";
+import { BASE, takes } from "./moireTakes";
+
+// Two copies of the line-screen tone, one per grating. The bottom screen
+// plays at rate 1; the top one is sped up by exactly the fringe rate, so the
+// fundamentals beat at the rate the fringes pass and fall still when the
+// image locks in. Clarity opens the upper harmonics, as the picture sharpens.
+const LEVEL = { low: 0.5, high: 0.42 };
 
 export function createMoireSound() {
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return null;
-  const ctx = new Ctx({ latencyHint: "interactive" });
-  const master = ctx.createGain();
-  master.gain.value = 0;
-  const tone = ctx.createBiquadFilter();
-  tone.type = "lowpass";
-  tone.frequency.value = 1400;
-  tone.Q.value = 0.3;
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -16;
-  comp.knee.value = 8;
-  comp.ratio.value = 3;
-  comp.attack.value = 0.01;
-  comp.release.value = 0.3;
-  tone.connect(master);
-  master.connect(comp);
-  comp.connect(ctx.destination);
-
-  const voice = (freq, gain, pan) => {
-    const osc = ctx.createOscillator();
-    osc.type = "sine";
-    osc.frequency.value = freq;
-    const g = ctx.createGain();
-    g.gain.value = gain;
-    osc.connect(g);
-    if (ctx.createStereoPanner) {
-      const p = ctx.createStereoPanner();
-      p.pan.value = pan;
-      g.connect(p);
-      p.connect(tone);
-    } else g.connect(tone);
-    return osc;
-  };
-  const a1 = voice(BASE, 0.3, -0.25);
-  const b1 = voice(BASE, 0.3, 0.25);
-  const a2 = voice(BASE * 3, 0.1, -0.15);
-  const b2 = voice(BASE * 3, 0.1, 0.15);
-  const a3 = voice(BASE * 5, 0.03, 0);
-  const b3 = voice(BASE * 5, 0.03, 0);
-  const oscs = [a1, b1, a2, b2, a3, b3];
-
-  let started = false;
+  const sound = createSound({ level: -9, room: 0.06, on: false });
+  if (!sound.ctx) return null;
+  const bank = { low: sound.bank(takes.low.render, takes.low), high: sound.bank(takes.high.render, takes.high) };
+  // Two seconds of four sines each render in a few milliseconds, so the
+  // loops are made on the gesture that turns sound on.
+  let pairs = null;
   let enabled = false;
+  let open = 0.5;
+
+  const startPairs = () => {
+    if (pairs) return pairs;
+    const make = (name) => [sound.loop(bank[name]), sound.loop(bank[name])];
+    pairs = { low: make("low"), high: make("high") };
+    return pairs;
+  };
+
+  const level = (target, tau) => {
+    if (!pairs) return;
+    const now = sound.ctx.currentTime;
+    for (const name of ["low", "high"]) {
+      const g = name === "low" ? LEVEL.low : LEVEL.high * open;
+      for (const loop of pairs[name]) {
+        if (!loop) continue;
+        loop.gain.cancelScheduledValues(now);
+        loop.gain.setTargetAtTime(g * target, now, tau);
+      }
+    }
+  };
 
   return {
     async setEnabled(on) {
       enabled = on;
       if (on) {
-        const resumed = ctx.state === "running" ? Promise.resolve() : ctx.resume().catch(() => {});
-        if (!started) {
-          started = true;
-          const t = ctx.currentTime + 0.02;
-          oscs.forEach((o) => o.start(t));
-        }
-        await resumed;
-        if (ctx.state !== "running" || !enabled) return false;
-        master.gain.cancelScheduledValues(ctx.currentTime);
-        master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
-        master.gain.linearRampToValueAtTime(0.32, ctx.currentTime + 0.6);
+        const ok = await sound.setEnabled(true);
+        if (!ok || !enabled) return false;
+        startPairs();
+        level(1, 0.2);
         return true;
       }
-      master.gain.cancelScheduledValues(ctx.currentTime);
-      master.gain.setValueAtTime(master.gain.value, ctx.currentTime);
-      master.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.2);
+      level(0, 0.06);
       await new Promise((r) => setTimeout(r, 260));
-      if (!enabled && ctx.state === "running") await ctx.suspend().catch(() => {});
+      if (!enabled) await sound.setEnabled(false);
       return false;
     },
     update(beat, clarity) {
-      if (!enabled || ctx.state !== "running") return;
-      const now = ctx.currentTime;
-      b1.frequency.setTargetAtTime(BASE + beat, now, 0.05);
-      b2.frequency.setTargetAtTime(BASE * 3 + beat * 3, now, 0.05);
-      b3.frequency.setTargetAtTime(BASE * 5 + beat * 5, now, 0.05);
-      tone.frequency.setTargetAtTime(900 + 1400 * clarity, now, 0.2);
+      if (!enabled || !pairs || !sound.live) return;
+      const now = sound.ctx.currentTime;
+      const rate = 1 + beat / BASE;
+      for (const name of ["low", "high"]) pairs[name][1]?.rate.setTargetAtTime(rate, now, 0.05);
+      open = 0.25 + 0.75 * clarity;
+      for (const loop of pairs.high) loop?.gain.setTargetAtTime(LEVEL.high * open, now, 0.2);
     },
     destroy() {
       enabled = false;
-      try {
-        oscs.forEach((o) => o.stop());
-      } catch {}
-      ctx.close().catch(() => {});
+      if (pairs) for (const loop of [...pairs.low, ...pairs.high]) loop?.stop();
+      sound.destroy();
     },
   };
 }

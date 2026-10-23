@@ -1,129 +1,97 @@
+import { createSound, db } from "@/lib/sound/engine";
+import { rng } from "@/lib/sound/synth";
+import { takes } from "./smearTakes";
+
+const RATE = 48000;
+const clampPan = (pan) => Math.max(-0.7, Math.min(0.7, pan || 0));
+
+// Starts on; the first gesture unlocks it and the speaker button toggles it.
+// The slide is a pre-rendered loop on the shared context, panned to where
+// the motion is and driven by how much of the block is moving.
 export function createAudio() {
-  let ctx = null;
-  let noise = null;
-  let out = null;
-  let band = null;
-  let air = null;
-  let pan = null;
-  let enabled = true;
-  let voice = 0;
+  const sound = createSound({ level: -8, room: 0.1, on: true });
+  const land = sound.bank(takes.land.render, takes.land);
+  let slide = null;
   let lastTick = 0;
 
-  const ensure = () => {
-    if (ctx) return ctx;
-    const Ctx = window.AudioContext || window.webkitAudioContext;
-    if (!Ctx) return null;
-    ctx = new Ctx({ latencyHint: "interactive" });
-    const length = Math.floor(ctx.sampleRate * 2);
-    noise = ctx.createBuffer(1, length, ctx.sampleRate);
-    const data = noise.getChannelData(0);
-    let seed = 424242;
-    let brown = 0;
-    for (let i = 0; i < length; i += 1) {
-      seed = (seed * 1664525 + 1013904223) >>> 0;
-      const white = (seed / 4294967296) * 2 - 1;
-      brown = brown * 0.86 + white * 0.14;
-      data[i] = white * 0.55 + brown * 1.6;
-    }
-    const comp = ctx.createDynamicsCompressor();
-    comp.threshold.value = -20;
-    comp.knee.value = 10;
-    comp.ratio.value = 4;
-    comp.attack.value = 0.003;
-    comp.release.value = 0.12;
-    out = ctx.createGain();
-    out.gain.value = 0.8;
-    out.connect(comp);
-    comp.connect(ctx.destination);
-
-    const loop = ctx.createBufferSource();
-    loop.buffer = noise;
-    loop.loop = true;
-    band = ctx.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = 900;
-    band.Q.value = 0.9;
-    const high = ctx.createBiquadFilter();
-    high.type = "highpass";
-    high.frequency.value = 260;
-    air = ctx.createGain();
-    air.gain.value = 0;
-    loop.connect(band);
-    band.connect(high);
-    high.connect(air);
+  const ensureSlide = () => {
+    if (slide) return slide;
+    const ctx = sound.ctx;
+    const out = sound.out;
+    if (!ctx || !out) return null;
+    const data = takes.slide.render(RATE, rng(takes.slide.seed * 7919));
+    const buffer = ctx.createBuffer(1, data.length, RATE);
+    buffer.getChannelData(0).set(data);
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.loop = true;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    src.connect(gain);
+    let tail = gain;
+    let pan = null;
     if (ctx.createStereoPanner) {
       pan = ctx.createStereoPanner();
-      air.connect(pan);
-      pan.connect(out);
-    } else {
-      air.connect(out);
+      gain.connect(pan);
+      tail = pan;
     }
-    loop.start();
-    return ctx;
+    tail.connect(out);
+    src.start(ctx.currentTime, Math.random() * buffer.duration);
+    slide = { src, gain, pan, tail };
+    return slide;
   };
 
-  const live = () => enabled && ctx && ctx.state === "running";
+  const hush = (tc = 0.06) => {
+    if (!slide) return;
+    const t = sound.ctx.currentTime;
+    slide.gain.gain.cancelScheduledValues(t);
+    slide.gain.gain.setTargetAtTime(0, t, tc);
+  };
 
   return {
     unlock() {
-      if (!enabled) return;
-      const c = ensure();
-      if (c && c.state !== "running") c.resume().catch(() => {});
+      sound.unlock();
     },
     async setEnabled(on) {
-      enabled = on;
-      const c = on ? ensure() : ctx;
-      if (!c) return false;
-      if (on && c.state !== "running") await c.resume().catch(() => {});
-      if (!on && c.state === "running") await c.suspend().catch(() => {});
-      return on;
+      if (!on) hush(0.03);
+      await sound.setEnabled(on);
+      return sound.ctx ? on : false;
     },
+    // `energy` 0..1 is how much the block is moving; `x` is where, -1..1.
     motion(energy, x) {
-      if (!live()) return;
-      const now = ctx.currentTime;
-      const e = Math.min(1, energy);
-      air.gain.setTargetAtTime(e * e * 0.34, now, 0.05);
-      band.frequency.setTargetAtTime(500 + e * 2600, now, 0.06);
-      if (pan) pan.pan.setTargetAtTime(Math.max(-0.7, Math.min(0.7, x)), now, 0.08);
+      if (!sound.live) return;
+      const s = ensureSlide();
+      if (!s) return;
+      const t = sound.ctx.currentTime;
+      const e = Math.min(1, Math.max(0, energy));
+      s.gain.gain.setTargetAtTime(e * e * db(-6), t, 0.05);
+      // Faster drag, brighter rub.
+      s.src.playbackRate.setTargetAtTime(0.75 + e * 0.6, t, 0.06);
+      if (s.pan) s.pan.pan.setTargetAtTime(clampPan(x), t, 0.08);
     },
     land(x, line, level = 1) {
-      if (!live()) return;
-      const now = ctx.currentTime;
-      if (now - lastTick < 0.024) return;
+      if (!sound.live) return;
+      const now = performance.now();
+      if (now - lastTick < 30) return;
       lastTick = now;
-      voice = (voice + 1) % 61;
-      const vary = ((voice * 29) % 13) / 13;
-      const src = ctx.createBufferSource();
-      src.buffer = noise;
-      const f = ctx.createBiquadFilter();
-      f.type = "bandpass";
-      f.frequency.value = 2600 + vary * 1400 - line * 40;
-      f.Q.value = 2.2;
-      const env = ctx.createGain();
-      env.gain.setValueAtTime(0.0001, now);
-      env.gain.exponentialRampToValueAtTime(Math.max(0.0002, 0.07 * level), now + 0.001);
-      env.gain.exponentialRampToValueAtTime(0.0001, now + 0.022);
-      src.connect(f);
-      f.connect(env);
-      if (ctx.createStereoPanner) {
-        const p = ctx.createStereoPanner();
-        p.pan.value = Math.max(-0.7, Math.min(0.7, x));
-        env.connect(p);
-        p.connect(out);
-      } else {
-        env.connect(out);
-      }
-      src.start(now, (voice * 0.0173) % 1.8, 0.04);
-      src.onended = () => env.disconnect();
+      const rate = Math.max(0.85, 1 - Math.max(0, line) * 0.008) * (0.97 + Math.random() * 0.06);
+      sound.play(land, { gain: -13 + 20 * Math.log10(Math.max(0.05, level)) + Math.random() * 2 - 1, pan: clampPan(x), rate });
     },
     quiet() {
-      if (!ctx || !air) return;
-      air.gain.setTargetAtTime(0, ctx.currentTime, 0.06);
+      hush();
     },
     destroy() {
-      enabled = false;
-      if (ctx) ctx.close().catch(() => {});
-      ctx = null;
+      if (slide) {
+        hush(0.02);
+        slide.src.stop(sound.ctx.currentTime + 0.15);
+        const { tail, gain } = slide;
+        slide.src.onended = () => {
+          tail.disconnect();
+          if (tail !== gain) gain.disconnect();
+        };
+        slide = null;
+      }
+      sound.destroy();
     },
   };
 }

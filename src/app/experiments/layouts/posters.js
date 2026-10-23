@@ -51,9 +51,9 @@ export const POSTERS = {
     }
   },
   "/lab/ascii-bust": {
-    "src": "/posters/experiments/lab--ascii-bust.webp?v=7KhvlOLX",
+    "src": "/posters/experiments/lab--ascii-bust.webp?v=q6ouX9Wn",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--ascii-bust-narrow.webp?v=wvwQ27s2",
       "width": 358,
@@ -61,9 +61,9 @@ export const POSTERS = {
     }
   },
   "/lab/blob-track": {
-    "src": "/posters/experiments/lab--blob-track.webp?v=Wg_h4WM0",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--blob-track.webp?v=2tYhlIPL",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--blob-track-narrow.webp?v=3R640woj",
       "width": 358,
@@ -71,9 +71,9 @@ export const POSTERS = {
     }
   },
   "/lab/camcorder": {
-    "src": "/posters/experiments/lab--camcorder.webp?v=-4__em81",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--camcorder.webp?v=a2KsP99k",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--camcorder-narrow.webp?v=OfeFxUaO",
       "width": 358,
@@ -81,9 +81,9 @@ export const POSTERS = {
     }
   },
   "/lab/coverflow": {
-    "src": "/posters/experiments/lab--coverflow.webp?v=oio6hyEK",
-    "width": 922,
-    "height": 344,
+    "src": "/posters/experiments/lab--coverflow.webp?v=0ZDJRUOc",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--coverflow-narrow.webp?v=fOlPfEZI",
       "width": 358,
@@ -91,9 +91,9 @@ export const POSTERS = {
     }
   },
   "/lab/crumple": {
-    "src": "/posters/experiments/lab--crumple.webp?v=YaadbElO",
+    "src": "/posters/experiments/lab--crumple.webp?v=Ea_FQIXW",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--crumple-narrow.webp?v=cCwrnPGd",
       "width": 358,
@@ -101,9 +101,9 @@ export const POSTERS = {
     }
   },
   "/lab/dandelion": {
-    "src": "/posters/experiments/lab--dandelion.webp?v=g8CgkuRk",
+    "src": "/posters/experiments/lab--dandelion.webp?v=ktaiyBz1",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--dandelion-narrow.webp?v=8kIBvj3y",
       "width": 358,
@@ -111,9 +111,9 @@ export const POSTERS = {
     }
   },
   "/lab/erase": {
-    "src": "/posters/experiments/lab--erase.webp?v=JU0E6YfY",
+    "src": "/posters/experiments/lab--erase.webp?v=Q5yVgBfX",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--erase-narrow.webp?v=sJ4SCiD3",
       "width": 358,
@@ -121,9 +121,9 @@ export const POSTERS = {
     }
   },
   "/lab/field": {
-    "src": "/posters/experiments/lab--field.webp?v=8IGY8AXe",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--field.webp?v=XUmfwMuU",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--field-narrow.webp?v=EVJyY5Ag",
       "width": 358,
@@ -131,9 +131,9 @@ export const POSTERS = {
     }
   },
   "/lab/film-leader": {
-    "src": "/posters/experiments/lab--film-leader.webp?v=unXLtL7H",
-    "width": 688,
-    "height": 464,
+    "src": "/posters/experiments/lab--film-leader.webp?v=eg8cRDbE",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--film-leader-narrow.webp?v=lCmcTQi0",
       "width": 358,
@@ -141,9 +141,9 @@ export const POSTERS = {
     }
   },
   "/lab/focus-pull": {
-    "src": "/posters/experiments/lab--focus-pull.webp?v=Ql8jrCkQ",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--focus-pull.webp?v=Aws8DIlF",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--focus-pull-narrow.webp?v=ijcEfr5r",
       "width": 358,
@@ -151,9 +151,9 @@ export const POSTERS = {
     }
   },
   "/lab/generation-loss": {
-    "src": "/posters/experiments/lab--generation-loss.webp?v=BmO7xpVA",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--generation-loss.webp?v=ar4f8Am8",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--generation-loss-narrow.webp?v=4L-IOSRx",
       "width": 358,
@@ -161,9 +161,9 @@ export const POSTERS = {
     }
   },
   "/lab/ghost-setlist": {
-    "src": "/posters/experiments/lab--ghost-setlist.webp?v=19_gHsFm",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--ghost-setlist.webp?v=dNMPLitV",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--ghost-setlist-narrow.webp?v=xJLRyy6e",
       "width": 358,
@@ -171,9 +171,9 @@ export const POSTERS = {
     }
   },
   "/lab/hold-menu": {
-    "src": "/posters/experiments/lab--hold-menu.webp?v=hYbTy5Lf",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--hold-menu.webp?v=tZuBQqu4",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--hold-menu-narrow.webp?v=RVbnMGId",
       "width": 358,
@@ -181,9 +181,9 @@ export const POSTERS = {
     }
   },
   "/lab/ink-drag": {
-    "src": "/posters/experiments/lab--ink-drag.webp?v=js6sennB",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--ink-drag.webp?v=Nbpnnm8x",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--ink-drag-narrow.webp?v=RZFNEnal",
       "width": 358,
@@ -191,9 +191,9 @@ export const POSTERS = {
     }
   },
   "/lab/iris": {
-    "src": "/posters/experiments/lab--iris.webp?v=54TmERkH",
+    "src": "/posters/experiments/lab--iris.webp?v=uqBIAQtA",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--iris-narrow.webp?v=zPxq1eJI",
       "width": 358,
@@ -201,9 +201,9 @@ export const POSTERS = {
     }
   },
   "/lab/justify": {
-    "src": "/posters/experiments/lab--justify.webp?v=uH5warcH",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--justify.webp?v=SWnjPAxz",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--justify-narrow.webp?v=KmuueW4A",
       "width": 358,
@@ -211,9 +211,9 @@ export const POSTERS = {
     }
   },
   "/lab/kern": {
-    "src": "/posters/experiments/lab--kern.webp?v=KnBKVWGt",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--kern.webp?v=a4yfB-4H",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--kern-narrow.webp?v=5cxRRaJg",
       "width": 358,
@@ -221,9 +221,9 @@ export const POSTERS = {
     }
   },
   "/lab/light-table": {
-    "src": "/posters/experiments/lab--light-table.webp?v=Ejxv_F0Z",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--light-table.webp?v=C2JykF69",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--light-table-narrow.webp?v=cxvR66io",
       "width": 358,
@@ -231,9 +231,9 @@ export const POSTERS = {
     }
   },
   "/lab/loupe": {
-    "src": "/posters/experiments/lab--loupe.webp?v=NaXP6A4u",
+    "src": "/posters/experiments/lab--loupe.webp?v=ieCPDVnK",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--loupe-narrow.webp?v=IhtZ8e0Q",
       "width": 358,
@@ -241,9 +241,9 @@ export const POSTERS = {
     }
   },
   "/lab/mirrorball": {
-    "src": "/posters/experiments/lab--mirrorball.webp?v=yHBmuaNB",
+    "src": "/posters/experiments/lab--mirrorball.webp?v=hrakUsIW",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--mirrorball-narrow.webp?v=XULNunce",
       "width": 358,
@@ -251,9 +251,9 @@ export const POSTERS = {
     }
   },
   "/lab/moire": {
-    "src": "/posters/experiments/lab--moire.webp?v=iH1EE6VM",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--moire.webp?v=xzSrdQ9J",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--moire-narrow.webp?v=azjVRrzf",
       "width": 358,
@@ -261,9 +261,9 @@ export const POSTERS = {
     }
   },
   "/lab/pull-vinyl": {
-    "src": "/posters/experiments/lab--pull-vinyl.webp?v=_ClgRvk7",
-    "width": 453,
-    "height": 464,
+    "src": "/posters/experiments/lab--pull-vinyl.webp?v=tx3zJTbT",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--pull-vinyl-narrow.webp?v=etZHe_n3",
       "width": 358,
@@ -271,9 +271,9 @@ export const POSTERS = {
     }
   },
   "/lab/raking-light": {
-    "src": "/posters/experiments/lab--raking-light.webp?v=rINhsaoe",
-    "width": 688,
-    "height": 584,
+    "src": "/posters/experiments/lab--raking-light.webp?v=uR5GzJ6i",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--raking-light-narrow.webp?v=rnXsiALf",
       "width": 358,
@@ -281,9 +281,9 @@ export const POSTERS = {
     }
   },
   "/lab/refractor": {
-    "src": "/posters/experiments/lab--refractor.webp?v=B-dkiFH2",
-    "width": 453,
-    "height": 464,
+    "src": "/posters/experiments/lab--refractor.webp?v=GxHrLN9m",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--refractor-narrow.webp?v=eQJZNXt9",
       "width": 358,
@@ -291,9 +291,9 @@ export const POSTERS = {
     }
   },
   "/lab/scope": {
-    "src": "/posters/experiments/lab--scope.webp?v=Kotvpnz7",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--scope.webp?v=FsMrqvuv",
+    "width": 688,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--scope-narrow.webp?v=bwcZ6paI",
       "width": 358,
@@ -301,9 +301,9 @@ export const POSTERS = {
     }
   },
   "/lab/select": {
-    "src": "/posters/experiments/lab--select.webp?v=iN1HrXAg",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--select.webp?v=fLe674F8",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--select-narrow.webp?v=2RFX5VIu",
       "width": 358,
@@ -311,9 +311,9 @@ export const POSTERS = {
     }
   },
   "/lab/skin": {
-    "src": "/posters/experiments/lab--skin.webp?v=fag7otyj",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--skin.webp?v=ZkSQBEqT",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--skin-narrow.webp?v=wYEuE02S",
       "width": 358,
@@ -321,9 +321,9 @@ export const POSTERS = {
     }
   },
   "/lab/smear": {
-    "src": "/posters/experiments/lab--smear.webp?v=fwrj2G40",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--smear.webp?v=_CBZAZHP",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--smear-narrow.webp?v=Mk8bSSqj",
       "width": 358,
@@ -331,9 +331,9 @@ export const POSTERS = {
     }
   },
   "/lab/split-flap": {
-    "src": "/posters/experiments/lab--split-flap.webp?v=D7_YIkXS",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--split-flap.webp?v=uivjF_FZ",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--split-flap-narrow.webp?v=4UPrM2EN",
       "width": 358,
@@ -341,9 +341,9 @@ export const POSTERS = {
     }
   },
   "/lab/steam": {
-    "src": "/posters/experiments/lab--steam.webp?v=BfOPEX-4",
-    "width": 688,
-    "height": 464,
+    "src": "/posters/experiments/lab--steam.webp?v=rFb4Fn27",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--steam-narrow.webp?v=p4xuBiH8",
       "width": 358,
@@ -351,9 +351,9 @@ export const POSTERS = {
     }
   },
   "/lab/sticker-peel": {
-    "src": "/posters/experiments/lab--sticker-peel.webp?v=bgpQlkY2",
+    "src": "/posters/experiments/lab--sticker-peel.webp?v=mDP9e7eJ",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--sticker-peel-narrow.webp?v=ObKdl3bO",
       "width": 358,
@@ -361,9 +361,9 @@ export const POSTERS = {
     }
   },
   "/lab/t9": {
-    "src": "/posters/experiments/lab--t9.webp?v=xlem7pAI",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--t9.webp?v=TE7-hTAQ",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--t9-narrow.webp?v=PNTkGQk8",
       "width": 358,
@@ -371,9 +371,9 @@ export const POSTERS = {
     }
   },
   "/lab/terminal": {
-    "src": "/posters/experiments/lab--terminal.webp?v=zaZGGhdM",
-    "width": 922,
-    "height": 464,
+    "src": "/posters/experiments/lab--terminal.webp?v=kgjK4SCz",
+    "width": 1392,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--terminal-narrow.webp?v=fC6bmyia",
       "width": 358,
@@ -381,9 +381,9 @@ export const POSTERS = {
     }
   },
   "/lab/typewriter": {
-    "src": "/posters/experiments/lab--typewriter.webp?v=Vzeh6YwI",
+    "src": "/posters/experiments/lab--typewriter.webp?v=NKJEZIQh",
     "width": 688,
-    "height": 584,
+    "height": 748,
     "narrow": {
       "src": "/posters/experiments/lab--typewriter-narrow.webp?v=7TJf9YAY",
       "width": 358,

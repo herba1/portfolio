@@ -1,113 +1,59 @@
-const TICK_GAP = 0.022;
+import { createSound } from "@/lib/sound/engine";
+import { takes } from "./lensTakes";
+
+// The foley of a manual focus ring (lensTakes.js): grease while it turns, a
+// ball detent at every mark, a cushioned thunk at the end of travel.
+const TICK_GAP = 22;
 
 export function createLensAudio() {
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  if (!Ctx) return null;
-  const ctx = new Ctx({ latencyHint: "interactive" });
-  const length = Math.floor(ctx.sampleRate * 2);
-  const noise = ctx.createBuffer(1, length, ctx.sampleRate);
-  const data = noise.getChannelData(0);
-  let seed = 77001;
-  let brown = 0;
-  for (let i = 0; i < length; i += 1) {
-    seed = (seed * 1664525 + 1013904223) >>> 0;
-    const white = (seed / 4294967296) * 2 - 1;
-    brown = (brown + 0.04 * white) / 1.04;
-    data[i] = white * 0.55 + brown * 3.2;
-  }
-  const master = ctx.createGain();
-  master.gain.value = 0.9;
-  const comp = ctx.createDynamicsCompressor();
-  comp.threshold.value = -18;
-  comp.ratio.value = 4;
-  comp.attack.value = 0.003;
-  comp.release.value = 0.12;
-  master.connect(comp);
-  comp.connect(ctx.destination);
-
-  const bed = ctx.createBufferSource();
-  bed.buffer = noise;
-  bed.loop = true;
-  const grease = ctx.createBiquadFilter();
-  grease.type = "bandpass";
-  grease.frequency.value = 520;
-  grease.Q.value = 0.9;
-  const air = ctx.createBiquadFilter();
-  air.type = "lowpass";
-  air.frequency.value = 2400;
-  const bedGain = ctx.createGain();
-  bedGain.gain.value = 0;
-  bed.connect(grease);
-  grease.connect(air);
-  air.connect(bedGain);
-  bedGain.connect(master);
-  bed.start();
-
-  let enabled = true;
+  const sound = createSound({ level: -7, room: 0.08, on: true });
+  if (!sound.ctx) return null;
+  const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
+  let bed = null;
   let last = 0;
-  let voice = 0;
 
-  const click = (freq, q, peak, decay) => {
-    const now = ctx.currentTime;
-    const src = ctx.createBufferSource();
-    src.buffer = noise;
-    const band = ctx.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = freq;
-    band.Q.value = q;
-    const env = ctx.createGain();
-    env.gain.setValueAtTime(0.0001, now);
-    env.gain.exponentialRampToValueAtTime(peak, now + 0.0008);
-    env.gain.exponentialRampToValueAtTime(0.0001, now + decay);
-    src.connect(band);
-    band.connect(env);
-    env.connect(master);
-    src.start(now, ((voice * 0.0191) % 1.6) + 0.02, decay + 0.02);
-    src.onended = () => env.disconnect();
+  const ensureBed = () => {
+    // Started once the idle renderer has the grease take, never by forcing
+    // a three-second render inside a drag.
+    if (!bed && bank.grease.takes[0]) bed = sound.loop(bank.grease);
+    return bed;
   };
 
   return {
     async wake() {
-      if (enabled && ctx.state !== "running") await ctx.resume().catch(() => {});
+      if (sound.enabled) sound.unlock();
     },
     async setEnabled(on) {
-      enabled = on;
-      if (on && ctx.state !== "running") await ctx.resume().catch(() => {});
-      if (!on && ctx.state === "running") await ctx.suspend().catch(() => {});
-      return enabled && ctx.state === "running";
+      if (!on) bed?.gain.setTargetAtTime(0, sound.ctx.currentTime, 0.03);
+      return sound.setEnabled(on);
     },
     friction(speed) {
-      if (ctx.state !== "running") return;
+      if (!sound.live) return;
+      const b = ensureBed();
+      if (!b) return;
       const s = Math.min(1, Math.abs(speed));
-      const now = ctx.currentTime;
-      bedGain.gain.setTargetAtTime(enabled ? s * 0.22 : 0, now, 0.04);
-      grease.frequency.setTargetAtTime(420 + s * 520, now, 0.06);
+      const now = sound.ctx.currentTime;
+      b.gain.setTargetAtTime(s * 0.55, now, 0.04);
+      // Faster shear pitches the grease up, as the band did before.
+      b.rate.setTargetAtTime(0.85 + s * 0.9, now, 0.06);
     },
     detent(speed) {
-      if (!enabled || ctx.state !== "running") return;
-      const now = ctx.currentTime;
+      if (!sound.live) return;
+      const now = performance.now();
       if (now - last < TICK_GAP) return;
       last = now;
-      voice = (voice + 1) % 53;
-      const vary = ((voice * 31) % 11) / 11;
-      const level = 0.05 + 0.05 * Math.min(1, Math.abs(speed));
-      click(2900 + vary * 500, 3.5, level, 0.009);
-      click(1150 + vary * 120, 5, level * 0.6, 0.016);
+      const s = Math.min(1, Math.abs(speed));
+      sound.play(bank.detent, { gain: -15 + 5 * s + (Math.random() * 2 - 1), rate: 0.97 + Math.random() * 0.06 });
     },
     stop() {
-      if (!enabled || ctx.state !== "running") return;
-      voice = (voice + 1) % 53;
-      click(240, 1.2, 0.3, 0.06);
-      click(1700, 2.5, 0.08, 0.02);
+      if (!sound.live) return;
+      sound.play(bank.stop, { gain: -5 + Math.random(), rate: 0.98 + Math.random() * 0.04 });
     },
     destroy() {
-      enabled = false;
-      try {
-        bed.stop();
-      } catch {
-        return ctx.close().catch(() => {});
-      }
-      return ctx.close().catch(() => {});
+      bed?.stop();
+      bed = null;
+      sound.destroy();
+      return Promise.resolve();
     },
   };
 }

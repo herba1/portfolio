@@ -1,83 +1,58 @@
+import { createSound, db } from "@/lib/sound/engine";
+import { takes } from "./scorchTakes";
+
+// The burning print: a flame bed whose loudness follows how much of the
+// sheet is alight, crackles scheduled as a Poisson stream that thickens with
+// the heat, and a flare when a piece catches or breaks away.
 const TICK_MS = 60;
 const LOOKAHEAD_SECONDS = 0.12;
 const QUIET = 0.002;
 
 export function createCrackle() {
-  let context = null;
-  let master = null;
-  let hissGain = null;
-  let noise = null;
-  let hissSource = null;
+  const sound = createSound({ level: -8, room: 0.14 });
+  const snapBank = sound.bank(takes.snap.render, takes.snap);
+  const flameBank = sound.bank(takes.flame.render, takes.flame);
+  const flareBank = sound.bank(takes.flare.render, takes.flare);
+  let flame = null;
   let enabled = true;
+  let woken = false;
   let level = 0;
   let nextPop = 0;
   let timer = 0;
+  let shown = -1;
 
-  function build() {
-    const AudioCtor = window.AudioContext || window.webkitAudioContext;
-    if (!AudioCtor) return false;
-    context = new AudioCtor();
-    master = context.createGain();
-    master.gain.value = enabled ? 1 : 0;
-    master.connect(context.destination);
-    const length = context.sampleRate;
-    noise = context.createBuffer(1, length, context.sampleRate);
-    const channel = noise.getChannelData(0);
-    for (let index = 0; index < length; index += 1) channel[index] = Math.random() * 2 - 1;
-    hissSource = context.createBufferSource();
-    hissSource.buffer = noise;
-    hissSource.loop = true;
-    const band = context.createBiquadFilter();
-    band.type = "bandpass";
-    band.frequency.value = 2600;
-    band.Q.value = 0.6;
-    hissGain = context.createGain();
-    hissGain.gain.value = 0;
-    hissSource.connect(band);
-    band.connect(hissGain);
-    hissGain.connect(master);
-    hissSource.start();
-    return true;
-  }
-
-  function pop(at, strength) {
-    const source = context.createBufferSource();
-    source.buffer = noise;
-    const filter = context.createBiquadFilter();
-    filter.type = "bandpass";
-    filter.frequency.value = 1300 + Math.random() * 4200;
-    filter.Q.value = 1.1 + Math.random() * 2;
-    const gain = context.createGain();
-    const length = 0.006 + Math.random() * 0.03;
-    const peak = (0.03 + Math.random() * 0.11) * strength;
-    gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(peak, at + 0.002);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + length);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    source.start(at, Math.random() * 0.9, length + 0.01);
-    source.onended = () => {
-      source.disconnect();
-      filter.disconnect();
-      gain.disconnect();
-    };
+  function bed() {
+    if (!flame) return;
+    // The roar saturates where the old hiss did (level 0.225).
+    const amount = enabled ? Math.min(1, level / 0.225) : 0;
+    if (Math.abs(amount - shown) < 0.005 && (amount > 0 || shown === 0)) return;
+    shown = amount;
+    const t = sound.ctx.currentTime;
+    flame.gain.setTargetAtTime(amount > 0.001 ? db(-10) * Math.sqrt(amount) : 0, t, enabled ? 0.3 : 0.05);
+    flame.rate.setTargetAtTime(0.92 + amount * 0.14, t, 0.4);
   }
 
   function tick() {
-    if (!context || !enabled || level < QUIET) return;
-    const now = context.currentTime;
+    if (!sound.live || !enabled || level < QUIET) return;
+    const now = sound.ctx.currentTime;
     if (nextPop < now) nextPop = now;
     const rate = 6 + level * 140;
     const strength = Math.min(1, 0.35 + level * 3);
     while (nextPop < now + LOOKAHEAD_SECONDS) {
-      pop(nextPop, strength);
+      // Mostly small snaps, a few loud ones, as a real burn has.
+      const size = Math.random() ** 2.2;
+      sound.play(snapBank, {
+        gain: -24 + size * 14 + 20 * Math.log10(strength),
+        pan: Math.random() * 0.9 - 0.45,
+        rate: 0.85 + Math.random() * 0.3,
+        at: nextPop - now,
+      });
       nextPop += -Math.log(1 - Math.random()) / rate;
     }
   }
 
   function syncTimer() {
-    const wanted = context && enabled && level >= QUIET;
+    const wanted = woken && enabled && level >= QUIET;
     if (wanted && !timer) timer = window.setInterval(tick, TICK_MS);
     if (!wanted && timer) {
       window.clearInterval(timer);
@@ -85,72 +60,52 @@ export function createCrackle() {
     }
   }
 
-  function whoosh(strength) {
-    const at = context.currentTime;
-    const source = context.createBufferSource();
-    source.buffer = noise;
-    const filter = context.createBiquadFilter();
-    filter.type = "lowpass";
-    filter.frequency.setValueAtTime(320, at);
-    filter.frequency.exponentialRampToValueAtTime(2400, at + 0.18);
-    filter.frequency.exponentialRampToValueAtTime(700, at + 0.5);
-    const gain = context.createGain();
-    gain.gain.setValueAtTime(0.0001, at);
-    gain.gain.exponentialRampToValueAtTime(Math.max(0.001, 0.16 * strength), at + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.0001, at + 0.55);
-    source.connect(filter);
-    filter.connect(gain);
-    gain.connect(master);
-    source.start(at, Math.random() * 0.4, 0.6);
-    source.onended = () => {
-      source.disconnect();
-      filter.disconnect();
-      gain.disconnect();
-    };
+  function flare(strength) {
+    sound.play(flareBank, { gain: -5 + 20 * Math.log10(Math.max(0.1, strength)) + (Math.random() * 2 - 1), rate: 0.95 + Math.random() * 0.1 });
   }
 
   return {
     wake() {
-      if (!context && !build()) return;
-      if (context.state === "suspended") context.resume().catch(() => {});
+      if (typeof window === "undefined") return;
+      woken = true;
+      sound.unlock();
+      if (!flame) {
+        flame = sound.loop(flameBank);
+        bed();
+      }
       syncTimer();
     },
     setLevel(next) {
       level = next;
-      if (context && hissGain) hissGain.gain.setTargetAtTime(enabled ? Math.min(0.045, next * 0.2) : 0, context.currentTime, 0.3);
+      bed();
       syncTimer();
     },
     setEnabled(next) {
       enabled = next;
-      if (context && master) master.gain.setTargetAtTime(next ? 1 : 0, context.currentTime, 0.05);
+      // The client's own switch stops new hits; the flame bed is a live loop,
+      // so it fades here.
+      sound.setEnabled(next);
+      bed();
       syncTimer();
     },
     catchFire(strength = 1) {
-      if (!context || !enabled) return;
-      if (context.state !== "suspended") {
-        whoosh(strength);
+      if (!woken || !enabled) return;
+      if (sound.live) {
+        flare(strength);
         return;
       }
-      const waiting = context;
-      waiting.resume().then(
-        () => {
-          if (context === waiting && enabled) whoosh(strength);
-        },
-        () => {},
-      );
+      // The first ignition can arrive in the same gesture that resumed the
+      // context: play once it is running.
+      sound.setEnabled(true).then((running) => {
+        if (running && enabled) flare(strength);
+      });
     },
     dispose() {
       if (timer) window.clearInterval(timer);
       timer = 0;
-      if (hissSource) {
-        try {
-          hissSource.stop();
-        } catch {
-          hissSource = null;
-        }
-      }
-      if (context) context.close();
-      context = null;
+      flame?.stop();
+      flame = null;
+      sound.destroy();
     },
   };
 }

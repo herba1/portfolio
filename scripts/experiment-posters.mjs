@@ -8,6 +8,7 @@
 //
 //   npm run build && npm start   (or npm run dev)
 //   node scripts/experiment-posters.mjs [http://localhost:3000] [slug ...]
+//   VARIANT=wide node scripts/experiment-posters.mjs ...   (one layout only)
 //
 // Needs Playwright; it is not a dependency of the site, so a global install
 // (npm i -g playwright) is used when the project has none.
@@ -114,7 +115,8 @@ await listPage.goto(`${base}/experiments`, { waitUntil: "domcontentloaded" });
 const tiles = await listPage.$$eval(".xl-bento .xl-tile", (items) => items.map((item, index) => ({ index, slug: item.dataset.slug })));
 await listing.close();
 
-for (const variant of VARIANTS) {
+// VARIANT=wide or VARIANT=narrow recaptures one layout only.
+for (const variant of VARIANTS.filter((v) => !process.env.VARIANT || v.key === process.env.VARIANT)) {
   for (const { index, slug } of tiles) {
     if (only.length && !only.includes(slug)) continue;
     if (LIVE_DATA.has(slug)) {
