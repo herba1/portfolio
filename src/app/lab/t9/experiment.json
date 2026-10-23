@@ -11,8 +11,7 @@
   "createdAt": "2026-10-20T17:00:00.000Z",
   "intent": "Only the screen of a Nokia-era phone, rendered as a real reflective LCD: a visible pixel grid, off pixels faintly there, each lit pixel casting a small shadow on the backplane and fading with the slow liquid-crystal response, a hand-drawn one-bit phone font, and authentic multi-tap and T9 timing.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/T9_(predictive_text)",

@@ -11,8 +11,7 @@
   "createdAt": "2026-10-20T23:00:00.000Z",
   "intent": "Oscilloscope music as an interface: one Web Audio worklet renders a looping stereo path for each word, the same synth runs on the page to draw the phosphor trace, so the beam is brighter where it moves slowly and the jumps between letters are faint, just like a real XY scope.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "tall"
   },
   "sources": [
     "https://oscilloscopemusic.com/",

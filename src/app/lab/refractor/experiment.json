@@ -11,8 +11,7 @@
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "One optical object made believable without looking idealised, photographed rather than drawn: a soft studio environment (large diffuse source with a warm-to-cool gradient, a broad key light, a strip light, and one small hard bulb) reflected from a close camera; first and second diffraction orders of the lights computed at 12 wavelengths from the real 1.6 micron grating, with the bulb's orders solved analytically so they stay continuous lines; a camera pass with bloom from HDR highlight energy, a four-stage anamorphic streak and a soft six-point star that follow the hot spot; and the wear of a handled disc: two oval fingerprints with ridges, dust, micro-scratches and a milky veil. Proportions follow the Red Book disc (120 mm by 1.2 mm, 15 mm hole, clear hub, stacking ring, mirror band, data area, lead-out, clear lip) in silver, gold or black.",
   "tile": {
-    "cols": 2,
-    "rows": 4
+    "shape": "tall"
   },
   "sources": [
     "https://feedbagel.com/post/creating-foil-sticker-effects-with-custom-threejs-shaders",

@@ -10,8 +10,7 @@
   "createdAt": "2026-10-20T15:00:00.000Z",
   "intent": "Depth of field as typography: each line, with its inline album cover and glyph atoms sized in em on the baseline, is a layer at a set distance, blurred by a disc kernel from the diopter gap to the focus ring, so sharpness alone shows where the lens is.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Circle_of_confusion",

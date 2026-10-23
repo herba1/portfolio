@@ -240,16 +240,6 @@ export const POSTERS = {
       "height": 447
     }
   },
-  "/lab/margins": {
-    "src": "/posters/experiments/lab--margins.webp?v=KJg7xFMH",
-    "width": 922,
-    "height": 464,
-    "narrow": {
-      "src": "/posters/experiments/lab--margins-narrow.webp?v=rMDy6XSh",
-      "width": 358,
-      "height": 447
-    }
-  },
   "/lab/mirrorball": {
     "src": "/posters/experiments/lab--mirrorball.webp?v=yHBmuaNB",
     "width": 688,

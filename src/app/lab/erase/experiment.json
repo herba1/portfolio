@@ -11,8 +11,7 @@
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "Writing and erasing as matter: type a title and it is inked onto the sheet by hand, rub it and the energy becomes ink dust and eraser crumbs that heap up with a real angle of repose, undo is the dust flying home.",
   "tile": {
-    "cols": 3,
-    "rows": 5
+    "shape": "tall"
   },
   "sources": [
     "https://tympanus.net/codrops/2026/01/28/webgpu-gommage-effect-dissolving-msdf-text-into-dust-and-petals-with-three-js-tsl/",

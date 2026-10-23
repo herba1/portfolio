@@ -10,8 +10,7 @@
   "createdAt": "2026-10-20T22:00:00.000Z",
   "intent": "Force-justification as a live material with reflow that is physically continuous: the measure is a roller the text winds around, so every word keeps one body and one path, interruptible mid-drag.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://aerotwist.com/blog/flip-your-animations/",

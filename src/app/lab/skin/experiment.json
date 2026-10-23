@@ -14,8 +14,7 @@
   "createdAt": "2026-10-20T14:00:00.000Z",
   "intent": "One period object finished to the edge, now hearing the real songs: Spotify's Basic Pitch model runs in a worker on each track's preview, a beat tracker, chord Viterbi and line tracker turn its notes into parts, and the parts are rebuilt as an NES-style arrangement (band-limited pulse waves, tracker arpeggios, a stepped triangle, LFSR noise) on the song's own beat grid, so every readout on the skin is drawn from that signal.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://www.nesdev.org/wiki/APU",

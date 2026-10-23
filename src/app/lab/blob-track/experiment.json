@@ -11,8 +11,7 @@
   "createdAt": "2026-10-20T20:00:00.000Z",
   "intent": "The TouchDesigner blob-tracking edit, overclocked but still legible: a beat clock drives every layer (column kicks in the smear, pixel-drag tails pulled from the sharp photo, box splits, scout detections, relabelled lisp lines, track-to-track curves, a drop with a scan sweep), while real connected-component tracking stays steady underneath.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Connected-component_labeling",

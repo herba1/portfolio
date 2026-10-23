@@ -4,6 +4,7 @@ import { PIECES } from "../pieces";
 import IntroSettle from "../IntroSettle";
 import PlateHand from "../PlateHand";
 import OffscreenPause from "../OffscreenPause";
+import ScrollGuard from "../ScrollGuard";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -48,7 +49,11 @@ function firstScreen(slug, index) {
   if (desktop && phone) return "all";
   return desktop ? DESKTOP : phone ? PHONE : null;
 }
+// Studies take a whole row or half of one (their manifest's tile.shape), each
+// as tall as the screen. Halves pair up; an odd one out takes the row.
 const STUDIES = PIECES.filter((piece) => !AREAS[piece.slug]);
+const TALL = STUDIES.filter((piece) => piece.tile?.shape === "tall");
+const shapeOf = (piece) => (piece.tile?.shape === "tall" && !(TALL.length % 2 && piece === TALL.at(-1)) ? "tall" : "wide");
 
 export default async function BentoLayout() {
   const data = await pieceData();
@@ -79,8 +84,8 @@ export default async function BentoLayout() {
               key={piece.slug}
               className="xl-bento__tile xl-tile xl-tile--study"
               data-slug={piece.slug}
+              data-shape={shapeOf(piece)}
               aria-label={piece.title}
-              style={{ "--cols": piece.tile?.cols ?? 2, "--rows": piece.tile?.rows ?? 4 }}
             >
               <Piece slug={piece.slug} data={data} title={piece.title} />
             </li>
@@ -89,6 +94,7 @@ export default async function BentoLayout() {
       ) : null}
       <PlateHand />
       <OffscreenPause />
+      <ScrollGuard />
       <IntroSettle />
     </main>
   );

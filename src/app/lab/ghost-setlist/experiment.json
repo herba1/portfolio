@@ -10,8 +10,7 @@
   "createdAt": "2026-10-17T00:00:00.000Z",
   "intent": "One kinetic type mechanic finished to the edge, with no chrome: a title whose speed is drawn as long-exposure ghosts, collapsing into a single lit line when it settles.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "tall"
   },
   "sources": [
     "https://tympanus.net/codrops/2020/06/02/kinetic-typography-with-three-js/",

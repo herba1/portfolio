@@ -10,8 +10,7 @@
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "One tactile act finished to the edge: a sticker that peels like paper and glue, not like a UI layer",
   "tile": {
-    "cols": 3,
-    "rows": 5
+    "shape": "tall"
   },
   "sources": [
     "https://chrome.dev/html-in-canvas/demos/webgl-book-curl.html",

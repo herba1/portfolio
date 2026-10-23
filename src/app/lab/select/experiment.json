@@ -10,8 +10,7 @@
   "createdAt": "2026-10-20T11:00:00.000Z",
   "intent": "The text-selection UI itself as the graphic: a familiar control given depth and weight, so selecting words physically pulls them off the page, with every morph clean and nothing overlapping.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://developer.apple.com/design/human-interface-guidelines/edit-menus",

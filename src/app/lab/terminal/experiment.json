@@ -11,8 +11,7 @@
   "createdAt": "2026-10-20T19:00:00.000Z",
   "intent": "One old screen made beautiful, now with generative character art living inside it: a ray-cast ASCII vinyl whose groove gaps match the album's track count, a flow field drawn in slashes, a Bayer-dithered plasma, a peak-hold spectrum and digit rain, all through the same CRT pass (curvature, scanlines, bloom, phosphor persistence).",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Phosphor#Standard_phosphor_types",

@@ -10,8 +10,7 @@
   "createdAt": "2026-10-16T18:00:00.000Z",
   "intent": "Type and art as the same matter: one ink field that carries a full-colour cover and its title, every drop of the art travelling as a strand to its place in a glyph, so the drag and the type are one continuous material.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://tympanus.net/codrops/2026/09/24/custom-shaped-cursor-trail/",

@@ -10,8 +10,7 @@
   "createdAt": "2026-10-20T18:00:00.000Z",
   "intent": "Make spacing physical: the optically correct spacing (the font's kerning plus the house tracking law) is the rest length of a spring chain, so stretching, morphing weight and width, and retyping all resolve back to perfectly set type.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://fonts.google.com/specimen/Bricolage+Grotesque",

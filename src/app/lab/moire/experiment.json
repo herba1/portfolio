@@ -11,8 +11,7 @@
   "createdAt": "2026-10-21T23:00:00.000Z",
   "intent": "A moiré as a reveal: both gratings share the same wavy warp, and the bottom one is phase-shifted by half a line wherever the image is dark, so neither layer shows the picture on its own and only their product does. The tone is two close sine pairs at the line screen's odd harmonics, detuned by the rate the fringes pass, so the audible beat is the visible beat and it falls still when the image locks in.",
   "tile": {
-    "cols": 4,
-    "rows": 4
+    "shape": "wide"
   },
   "sources": [
     "https://en.wikipedia.org/wiki/Moir%C3%A9_pattern",
