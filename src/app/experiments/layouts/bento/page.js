@@ -50,10 +50,23 @@ function firstScreen(slug, index) {
   return desktop ? DESKTOP : phone ? PHONE : null;
 }
 // Studies take a whole row or half of one (their manifest's tile.shape), each
-// as tall as the screen. Halves pair up; an odd one out takes the row.
-const STUDIES = PIECES.filter((piece) => !AREAS[piece.slug]);
-const TALL = STUDIES.filter((piece) => piece.tile?.shape === "tall");
-const shapeOf = (piece) => (piece.tile?.shape === "tall" && !(TALL.length % 2 && piece === TALL.at(-1)) ? "tall" : "wide");
+// as tall as the screen. A half waits in source order for the next half to
+// share its row, so reading order and tab order follow the rows as drawn;
+// an odd one out takes the row.
+function pairHalves(pieces) {
+  const ordered = [];
+  let waiting = null;
+  for (const piece of pieces) {
+    if (piece.tile?.shape !== "tall") ordered.push({ piece, shape: "wide" });
+    else if (waiting) {
+      ordered.push(waiting, { piece, shape: "tall" });
+      waiting = null;
+    } else waiting = { piece, shape: "tall" };
+  }
+  if (waiting) ordered.push({ ...waiting, shape: "wide" });
+  return ordered;
+}
+const STUDIES = pairHalves(PIECES.filter((piece) => !AREAS[piece.slug]));
 
 export default async function BentoLayout() {
   const data = await pieceData();
@@ -79,12 +92,12 @@ export default async function BentoLayout() {
       </ul>
       {STUDIES.length ? (
         <ul className="xl-bento__grid xl-bento__grid--studies">
-          {STUDIES.map((piece) => (
+          {STUDIES.map(({ piece, shape }) => (
             <li
               key={piece.slug}
               className="xl-bento__tile xl-tile xl-tile--study"
               data-slug={piece.slug}
-              data-shape={shapeOf(piece)}
+              data-shape={shape}
               aria-label={piece.title}
             >
               <Piece slug={piece.slug} data={data} title={piece.title} />

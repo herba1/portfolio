@@ -149,7 +149,6 @@
   grid-template-rows: none;
   grid-template-areas: none;
   grid-auto-rows: var(--study-height);
-  grid-auto-flow: row dense;
 }
 .xl-tile.xl-tile--study {
   grid-column: span 6;
@@ -198,6 +197,15 @@
   .xl-bento__tile > .piece-box {
     flex: none;
     aspect-ratio: 4 / 5;
+  }
+}
+/* Two columns of 4:5 halves: an odd study out at the end takes the row. */
+@media (min-width: 600px) and (max-width: 899px) {
+  .xl-bento__grid--studies > .xl-tile--study:last-child:nth-child(odd) {
+    grid-column: 1 / -1;
+  }
+  .xl-bento__grid--studies > .xl-tile--study:last-child:nth-child(odd) > .piece-box {
+    aspect-ratio: 8 / 5;
   }
 }
 @media (max-width: 599px) {

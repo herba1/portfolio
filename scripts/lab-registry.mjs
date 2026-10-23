@@ -33,7 +33,9 @@ for (const entry of entries) {
     parentSlug: typeof data.parentSlug === "string" ? data.parentSlug : null,
     // A study on the experiments index is a whole row ("wide") or half of one
     // ("tall"), and as tall as the screen either way.
-    tile: data.tile && typeof data.tile === "object" ? { shape: data.tile.shape === "tall" ? "tall" : "wide" } : null,
+    // An older manifest's { cols, rows } maps across: three of six columns or
+    // fewer was a half.
+    tile: data.tile && typeof data.tile === "object" ? { shape: data.tile.shape ? (data.tile.shape === "tall" ? "tall" : "wide") : Number(data.tile.cols) <= 3 ? "tall" : "wide" } : null,
     embeddable: existsSync(join(LAB, entry.name, "Piece.jsx")),
   });
 }
