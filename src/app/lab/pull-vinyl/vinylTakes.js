@@ -1,5 +1,5 @@
-import { seamless } from "../../../lib/sound/engine.js";
-import { Take, jitter, span } from "../../../lib/sound/synth.js";
+import { label } from "../../../lib/sound/label.js";
+import { jitter, seamless, span, Take } from "../../../lib/sound/synth.js";
 
 
 // A loop has no start, so begin it where the wave crosses zero: rotating a
@@ -63,3 +63,5 @@ export const takes = {
   slide: { count: 4, seed: 501, render: (sr, rand) => sleeve(sr, rand, { length: span(rand, 0.26, 0.32) }) },
   surface: { count: 1, seed: 502, loop: true, render: (sr, rand) => surface(sr, rand) },
 };
+
+label("lab/pull-vinyl/vinylTakes", takes);

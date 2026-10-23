@@ -1,5 +1,5 @@
-import { BAR, PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
-import { seamless } from "../../../lib/sound/engine.js";
+import { label } from "../../../lib/sound/label.js";
+import { BAR, body, jitter, PLATE, seamless, Take } from "../../../lib/sound/synth.js";
 
 // A manual lens's aperture ring over a nine-blade iris. The ring clicks
 // through its stops on a sprung ball: a firm detent at each full stop and a
@@ -76,3 +76,5 @@ export const takes = {
   third: { count: 6, seed: 52, render: third },
   blades: { count: 1, seed: 53, loop: true, render: blades },
 };
+
+label("lab/iris/irisTakes", takes);

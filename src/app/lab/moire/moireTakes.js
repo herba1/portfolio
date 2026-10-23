@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 // The line screen as a tone. A grating of thin dark lines is close to a
 // square wave in space, so its spectrum is the odd harmonics; the tone is
 // those harmonics, pure, as sines, because a moiré is pure interference and
@@ -48,3 +49,5 @@ export const takes = {
   low: { count: 1, seed: 31, loop: true, render: screen(LOW) },
   high: { count: 1, seed: 32, loop: true, render: screen(HIGH) },
 };
+
+label("lab/moire/moireTakes", takes);

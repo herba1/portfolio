@@ -2,7 +2,7 @@ import { createSound } from "@/lib/sound/engine";
 import { takes } from "./tickTakes";
 
 export function createTicks() {
-  const sound = createSound({ level: -8, room: 0.1 });
+  const sound = createSound({ level: -3, room: 0.1 });
   const tickBank = sound.bank(takes.tick.render, takes.tick);
   const flickBank = sound.bank(takes.flick.render, takes.flick);
   let last = 0;

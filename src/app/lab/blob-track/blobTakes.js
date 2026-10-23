@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { beep } from "../../../lib/sound/recipes.js";
 import { BAR, PLATE, Take, body, jitter, span } from "../../../lib/sound/synth.js";
 
@@ -54,3 +55,5 @@ export const takes = {
   lock: { count: 4, seed: 404, render: (sr, rand) => beep(sr, rand, { pitch: 2400 * jitter(rand, 0.01), length: 0.026, buzz: 0.3 }) },
   lose: { count: 3, seed: 405, render: (sr, rand) => beep(sr, rand, { pitch: 1250 * jitter(rand, 0.01), length: 0.02, buzz: 0.45 }) },
 };
+
+label("lab/blob-track/blobTakes", takes);

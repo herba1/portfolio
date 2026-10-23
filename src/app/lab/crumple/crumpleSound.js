@@ -9,7 +9,7 @@ const FRAME_GAP = 50;
 const SNAP_GAP = 0.018;
 
 export function createRustle() {
-  const sound = createSound({ level: -7, room: 0.1, on: true });
+  const sound = createSound({ level: -3, room: 0.1, on: true });
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let last = 0;
   let nextAt = 0;

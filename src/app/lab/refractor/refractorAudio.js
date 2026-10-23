@@ -2,7 +2,7 @@ import { createSound } from "@/lib/sound/engine";
 import { takes } from "./refractorTakes";
 
 export function createRefractorAudio() {
-  const sound = createSound({ level: -8, room: 0.12 });
+  const sound = createSound({ level: -3, room: 0.12 });
   const snapBank = sound.bank(takes.snap.render, takes.snap);
   let last = 0;
 

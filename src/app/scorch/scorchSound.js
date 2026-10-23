@@ -42,7 +42,7 @@ export function createCrackle() {
       // Mostly small snaps, a few loud ones, as a real burn has.
       const size = Math.random() ** 2.2;
       sound.play(snapBank, {
-        gain: -24 + size * 14 + 20 * Math.log10(strength),
+        gain: -16 + size * 14 + 20 * Math.log10(strength),
         pan: Math.random() * 0.9 - 0.45,
         rate: 0.85 + Math.random() * 0.3,
         at: nextPop - now,

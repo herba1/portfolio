@@ -2,7 +2,7 @@ import { createSound, db } from "@/lib/sound/engine";
 import { takes } from "./vinylTakes";
 
 export function createVinylAudio() {
-  const sound = createSound({ level: -8, room: 0.1 });
+  const sound = createSound({ level: -3, room: 0.1 });
   const slideBank = sound.bank(takes.slide.render, takes.slide);
   const surfaceBank = sound.bank(takes.surface.render, takes.surface);
   let crackle = null;
@@ -26,7 +26,7 @@ export function createVinylAudio() {
     if (!crackle) return;
     const t = sound.ctx.currentTime;
     crackle.gain.setValueAtTime(0, t);
-    crackle.gain.setTargetAtTime(db(0), t, 0.07);
+    crackle.gain.setTargetAtTime(db(-15), t, 0.07);
   };
 
   const stopCrackle = () => {

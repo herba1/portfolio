@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { BAR, PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 import { tick, whoosh } from "../../../lib/sound/recipes.js";
 
@@ -65,3 +66,5 @@ export const takes = {
   heavier: { count: 3, seed: 65, render: (sr, rand) => whoosh(sr, rand, { length: 0.56, from: 380, to: 1300, q: 1.4, up: true }) },
   lighter: { count: 3, seed: 66, render: (sr, rand) => whoosh(sr, rand, { length: 0.56, from: 420, to: 1500, q: 1.4, up: false }) },
 };
+
+label("lab/kern/kernTakes", takes);

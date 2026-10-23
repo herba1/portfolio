@@ -5,7 +5,7 @@ const clampPan = (pan) => Math.max(-0.8, Math.min(0.8, pan || 0));
 
 // Starts on; the first gesture unlocks it, the "sound / quiet" word toggles.
 export function createAudio() {
-  const sound = createSound({ level: -8, room: 0.1, on: true });
+  const sound = createSound({ level: -3, room: 0.1, on: true });
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let lastTick = 0;
   let lastKey = 0;
@@ -38,7 +38,7 @@ export function createAudio() {
     // `level` is the softness, 0..1: the detents climb with it.
     detent(level) {
       if (!sound.live) return;
-      sound.play(bank.detent, { gain: -16 + Math.random() * 2, rate: 0.9 + level * 0.3 });
+      sound.play(bank.detent, { gain: -12 + Math.random() * 2, rate: 0.9 + level * 0.3 });
     },
     destroy() {
       sound.destroy();

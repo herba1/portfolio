@@ -5,7 +5,7 @@ const clampPan = (pan) => Math.max(-0.8, Math.min(0.8, pan || 0));
 
 // Created and switched on by the first gesture on the piece.
 export function createKernSound() {
-  const sound = createSound({ level: -8, room: 0.12, on: false });
+  const sound = createSound({ level: -3, room: 0.12, on: false });
   if (!sound.ctx) return null;
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let lastTick = 0;
@@ -30,7 +30,7 @@ export function createKernSound() {
       const now = performance.now();
       if (now - lastTick < 30) return;
       lastTick = now;
-      const gain = -20 + Math.min(8, speed * 0.01) + Math.random() * 2;
+      const gain = -15 + Math.min(8, speed * 0.01) + Math.random() * 2;
       sound.play(bank.settle, { gain, pan: clampPan(pan), rate: 0.97 + Math.random() * 0.06 });
     },
     key(pan) {

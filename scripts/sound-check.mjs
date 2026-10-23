@@ -8,8 +8,10 @@
 //
 // Writes a WAV per take to outDir (default .sound-check/) so the takes can be
 // auditioned or drawn as spectrograms (ffmpeg -i x.wav -lavfi showspectrumpic x.png).
-// Each piece's banks are listed in the piece's own `*Takes` export.
-import { mkdirSync, writeFileSync, readdirSync, existsSync } from "node:fs";
+// Each piece's banks are listed in its own *Takes.js `takes` export; the
+// engine renders them in a worker, so a slow render costs no frames, but the
+// render ms column shows what a fallback without workers would cost.
+import { mkdirSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { rng } from "../src/lib/sound/synth.js";
@@ -131,28 +133,51 @@ function similarity(a, b) {
   return aa && bb ? ab / Math.sqrt(aa * bb) : 0;
 }
 
-// Every module that exports `takes`: { name: { render, count } }.
-const roots = ["src/app/lab", "src/app"];
+// Every *Takes.js under src/app, each of which must also be in the render
+// worker's registry under the key it labels itself with.
+const { TAKES } = await import(pathToFileURL(join(process.cwd(), "src/lib/sound/registry.js")).href);
 const modules = [];
-for (const root of roots) {
-  for (const dir of readdirSync(root, { withFileTypes: true })) {
-    if (!dir.isDirectory()) continue;
-    const folder = join(root, dir.name);
-    for (const file of readdirSync(folder)) {
-      if (!/Takes\.js$/.test(file)) continue;
-      modules.push(join(folder, file));
-    }
+const walk = (dir) => {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) walk(path);
+    else if (/Takes\.js$/.test(entry.name)) modules.push(path);
   }
+};
+walk("src/app");
+modules.sort();
+
+// A loop's seam: the step across the wrap against the take's typical step,
+// and (for a tone, where a crossfade of correlated halves swells) the
+// loudest 10 ms against the median.
+function seam(data) {
+  let typical = 0;
+  for (let i = 1; i < data.length; i += 1) typical += Math.abs(data[i] - data[i - 1]);
+  typical /= data.length - 1;
+  const wrap = Math.abs(data[0] - data[data.length - 1]);
+  const win = Math.round(SR * 0.01);
+  const levels = [];
+  for (let i = 0; i + win <= data.length; i += win) {
+    let sum = 0;
+    for (let j = i; j < i + win; j += 1) sum += data[j] * data[j];
+    levels.push(dbfs(Math.sqrt(sum / win)));
+  }
+  const sorted = [...levels].sort((x, y) => x - y);
+  return { wrapStep: typical ? wrap / typical : 0, swell: Math.max(...levels) - sorted[Math.floor(sorted.length / 2)] };
 }
 
 let failures = 0;
 const rows = [];
 for (const path of modules) {
   const mod = await import(pathToFileURL(join(process.cwd(), path)).href);
+  const key = path.replace(/^src\/app\//, "").replace(/\.js$/, "");
   for (const [name, spec] of Object.entries(mod.takes ?? {})) {
     const takes = [];
+    let renderMs = 0;
     for (let i = 0; i < (spec.count ?? 6); i += 1) {
+      const t0 = performance.now();
       const data = spec.render(SR, rng((spec.seed ?? 1) * 7919 + i * 104729), i);
+      renderMs = Math.max(renderMs, performance.now() - t0);
       takes.push(data);
       writeFileSync(join(out, `${path.split("/").at(-2)}-${name}-${i}.wav`), wav(data));
     }
@@ -161,6 +186,12 @@ for (const path of modules) {
     let maxSim = 0;
     for (let i = 0; i < takes.length; i += 1) for (let j = i + 1; j < takes.length; j += 1) maxSim = Math.max(maxSim, similarity(takes[i], takes[j]));
     const problems = [];
+    if (!TAKES[key] || spec.key !== key || spec.name !== name) problems.push("not labelled or not in registry.js");
+    if (spec.loop) {
+      const { wrapStep, swell } = seam(takes[0]);
+      if (wrapStep > 6) problems.push("loop seam steps");
+      if (m[0].crest < 9 && swell > 1.5) problems.push(`tonal loop swells ${swell.toFixed(1)} dB`);
+    }
     if (m.some((x) => x.nan)) problems.push("NaN");
     if (m.some((x) => x.peak > -0.1)) problems.push("clips");
     if (m.some((x) => x.first > 0.02) && !spec.loop) problems.push("starts on a step");
@@ -177,6 +208,7 @@ for (const path of modules) {
       "centroid Hz": Math.round(avg("centroid")),
       "decay40 ms": Math.round(avg("decay40") * 1000),
       "max sim": maxSim.toFixed(3),
+      "render ms": Math.round(renderMs),
       problems: problems.join(", ") || "ok",
     });
   }

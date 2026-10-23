@@ -1,5 +1,5 @@
-import { PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
-import { seamless } from "../../../lib/sound/engine.js";
+import { label } from "../../../lib/sound/label.js";
+import { body, jitter, PLATE, seamless, Take } from "../../../lib/sound/synth.js";
 
 // The poem is set in small paper slips that slide across a dark table.
 // Moving, they rub: a soft drag of paper over felt with the odd fibre
@@ -42,3 +42,5 @@ export const takes = {
   slide: { count: 1, seed: 81, loop: true, render: slide },
   land: { count: 8, seed: 82, render: land },
 };
+
+label("lab/smear/smearTakes", takes);

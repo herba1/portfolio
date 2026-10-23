@@ -6,7 +6,7 @@ import { takes } from "./lensTakes";
 const TICK_GAP = 22;
 
 export function createLensAudio() {
-  const sound = createSound({ level: -7, room: 0.08, on: true });
+  const sound = createSound({ level: -3, room: 0.08, on: true });
   if (!sound.ctx) return null;
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let bed = null;

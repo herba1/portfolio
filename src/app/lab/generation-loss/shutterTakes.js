@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { shutter } from "../../../lib/sound/recipes.js";
 import { span } from "../../../lib/sound/synth.js";
 
@@ -13,3 +14,5 @@ export const takes = {
     render: (sr, rand) => shutter(sr, rand, { exposure: span(rand, 0.034, 0.05), mirror: span(rand, 0.45, 0.65) }),
   },
 };
+
+label("lab/generation-loss/shutterTakes", takes);

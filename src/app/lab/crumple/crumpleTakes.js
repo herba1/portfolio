@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { PLATE, Take, body, jitter, span } from "../../../lib/sound/synth.js";
 
 // A resin-coated photo print being crushed. It is stiffer and glossier than
@@ -55,3 +56,5 @@ export const takes = {
   snapSmall: { count: 8, seed: 72, render: snap(0.2) },
   crinkle: { count: 6, seed: 73, render: crinkle },
 };
+
+label("lab/crumple/crumpleTakes", takes);

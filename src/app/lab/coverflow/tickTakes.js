@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 
 // Flipping through a crate of records: each sleeve that passes the middle is
@@ -34,3 +35,5 @@ export const takes = {
   tick: { count: 8, seed: 701, render: (sr, rand) => sleeve(sr, rand) },
   flick: { count: 4, seed: 702, render: (sr, rand) => turn(sr, rand) },
 };
+
+label("lab/coverflow/tickTakes", takes);

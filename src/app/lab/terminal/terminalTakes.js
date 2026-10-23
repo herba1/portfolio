@@ -1,6 +1,6 @@
-import { BAR, PLATE, Take, body, jitter, span } from "../../../lib/sound/synth.js";
+import { label } from "../../../lib/sound/label.js";
+import { BAR, body, jitter, PLATE, seamless, span, Take } from "../../../lib/sound/synth.js";
 import { thunk } from "../../../lib/sound/recipes.js";
-import { seamless } from "../../../lib/sound/engine.js";
 
 // A seamless loop may start anywhere in its cycle: start it where it is
 // quietest, so the first sample of the first pass is not a step.
@@ -92,7 +92,7 @@ function hum(sr, rand) {
       0.08 * Math.sin(2 * Math.PI * f * 11 * s + p[4]);
   }
   t.add(t.noise(0, seconds, 0.12, rand, { lp: 0.3, hp: 0.05, curve: 0 }));
-  return quietStart(seamless(t.finish(0.7, 0), sr));
+  return quietStart(seamless(t.finish(0.7, 0), sr, 0.05, { periodic: true }));
 }
 
 // The cover being drawn: the beam sweeps lines, each a tiny click at the
@@ -124,3 +124,5 @@ export const takes = {
   hum: { count: 1, seed: 35, loop: true, render: hum },
   raster: { count: 1, seed: 36, loop: true, render: raster },
 };
+
+label("lab/terminal/terminalTakes", takes);

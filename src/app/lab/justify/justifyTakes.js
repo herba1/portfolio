@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 import { key, tick } from "../../../lib/sound/recipes.js";
 
@@ -21,3 +22,5 @@ export const takes = {
   key: { count: 8, seed: 72, render: (sr, rand) => key(sr, rand, { pitch: 1.05, cap: 0.9 }) },
   detent: { count: 5, seed: 73, render: (sr, rand) => tick(sr, rand, { pitch: 1.2, weight: 0.06 }) },
 };
+
+label("lab/justify/justifyTakes", takes);

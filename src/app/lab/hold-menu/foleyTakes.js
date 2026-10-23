@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { click, tick } from "../../../lib/sound/recipes.js";
 import { PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 
@@ -21,3 +22,5 @@ export const takes = {
   tick: { count: 8, seed: 602, render: (sr, rand) => tick(sr, rand, { pitch: 0.9, weight: 0.12 }) },
   pick: { count: 4, seed: 603, render: (sr, rand) => click(sr, rand, { pitch: 0.85, housing: 0.8 }) },
 };
+
+label("lab/hold-menu/foleyTakes", takes);

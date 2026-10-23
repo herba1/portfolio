@@ -15,7 +15,7 @@ export function createIrisSound() {
 
   function start() {
     if (!sound) {
-      sound = createSound({ level: -7, room: 0.1, on: true });
+      sound = createSound({ level: -3, room: 0.1, on: true });
       bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
     }
     sound.unlock();

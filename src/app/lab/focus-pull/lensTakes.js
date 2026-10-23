@@ -1,5 +1,5 @@
-import { BAR, PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
-import { seamless } from "../../../lib/sound/engine.js";
+import { label } from "../../../lib/sound/label.js";
+import { BAR, body, jitter, PLATE, seamless, Take } from "../../../lib/sound/synth.js";
 
 // A manual focus lens, from its parts. The ring turns a helicoid packed in
 // damping grease; under the ring a sprung steel ball rides over a ribbed
@@ -78,3 +78,5 @@ export const takes = {
   grease: { count: 1, seed: 42, loop: true, render: grease },
   stop: { count: 4, seed: 43, render: stop },
 };
+
+label("lab/focus-pull/lensTakes", takes);

@@ -4,7 +4,7 @@ import { takes } from "./camcorderTakes";
 // Starts off; the Sound button turns it on. The bed (zoom motor, tape
 // transport, playback hiss) runs while sound is on and follows the camera.
 export function createCamSound() {
-  const sound = createSound({ level: -8, room: 0.08, on: false });
+  const sound = createSound({ level: -4, room: 0.08, on: false });
   if (!sound.ctx) return null;
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let bed = null;
@@ -53,7 +53,7 @@ export function createCamSound() {
     },
     focusTick() {
       if (!sound.live) return;
-      sound.play(bank.focus, { gain: -17 + Math.random() * 2, rate: 0.97 + Math.random() * 0.06 });
+      sound.play(bank.focus, { gain: -13 + Math.random() * 2, rate: 0.97 + Math.random() * 0.06 });
     },
     update({ zoom, tape, hiss }) {
       if (!sound.live || !bed) return;

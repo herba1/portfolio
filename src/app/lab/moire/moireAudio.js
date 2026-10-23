@@ -19,7 +19,12 @@ export function createMoireSound() {
 
   const startPairs = () => {
     if (pairs) return pairs;
-    const make = (name) => [sound.loop(bank[name]), sound.loop(bank[name])];
+    // Both copies start together from the same point, so with the fringes
+    // still they sum in phase rather than at a random cancellation.
+    const make = (name) => {
+      const offset = Math.random();
+      return [sound.loop(bank[name], { offset }), sound.loop(bank[name], { offset })];
+    };
     pairs = { low: make("low"), high: make("high") };
     return pairs;
   };

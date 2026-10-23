@@ -81,8 +81,9 @@ export class Take {
   }
 
   // Ring a bank of modes from an excitation. `list` holds [freq, tau, gain]:
-  // tau is the 1/e decay in seconds. Gains are normalised across frequency so
-  // a mode's level is its gain, wherever it sits.
+  // tau is the 1/e decay in seconds. An impulse rings every mode at its gain,
+  // wherever it sits; a wider contact pulse reaches the low modes harder and
+  // the high ones less, as a soft contact does.
   modes(x, list, { scale = 1, detune = 1, target = this.out } = {}) {
     const sr = this.sr;
     let first = -1;
@@ -124,10 +125,11 @@ export class Take {
     let low = 0;
     let band = 0;
     const damp = 1 / q;
+    // The Chamberlin form is stable while k < 2 - 1/q (and accurate only well
+    // below a sixth of the rate), so the centre is held under both.
+    const kMax = Math.min(2 * Math.sin(Math.PI / 6.5), 0.95 * (2 - damp));
     for (let i = 0; i < this.n; i += 1) {
-      // The Chamberlin form stays stable below about a sixth of the rate.
-      const f = Math.min(this.sr / 6.5, centre(i / this.n));
-      const k = 2 * Math.sin((Math.PI * f) / this.sr);
+      const k = Math.min(kMax, 2 * Math.sin((Math.PI * centre(i / this.n)) / this.sr));
       low += k * band;
       const high = x[i] - low - damp * band;
       band += k * high;
@@ -186,4 +188,42 @@ export function body(f1, ratios, { tau = 0.02, fall = 0.7, gain = 1, tilt = 0.75
     tau * Math.pow(ratio, -fall),
     gain * Math.pow(tilt, i),
   ]);
+}
+
+// A seamless loop: the end crossfades into the start, so a looping texture
+// has no seam to click on. Noise wants an equal-power fade (its two halves
+// are unrelated); a tone or a motor that repeats exactly wants an
+// equal-gain one (`periodic`), or the seam swells by up to 3 dB.
+export function seamless(data, sr, fadeSeconds = 0.05, { periodic = false } = {}) {
+  const fade = Math.min(Math.floor(data.length / 2), Math.round(sr * fadeSeconds));
+  const n = data.length - fade;
+  const out = new Float32Array(n);
+  out.set(data.subarray(0, n));
+  for (let i = 0; i < fade; i += 1) {
+    const t = i / fade;
+    const into = periodic ? t : Math.sin((t * Math.PI) / 2);
+    const from = periodic ? 1 - t : Math.cos((t * Math.PI) / 2);
+    out[i] = data[n + i] * from + data[i] * into;
+  }
+  return out;
+}
+
+// The shared room: a short, darkening tail with a few early reflections.
+export function roomImpulseData(sr, seconds = 0.45) {
+  const length = Math.floor(sr * seconds);
+  const channels = [];
+  for (let c = 0; c < 2; c += 1) {
+    const data = new Float32Array(length);
+    const rand = rng(4049 + c * 131);
+    let low = 0;
+    for (let i = 0; i < length; i += 1) {
+      const t = i / sr;
+      // Darker as it decays, as air and walls take the highs first.
+      low += (rand() * 2 - 1 - low) * (0.55 - 0.45 * Math.min(1, t / seconds));
+      const early = t > 0.003 && t < 0.03 && rand() > 0.988 ? (rand() - 0.5) * 2.2 : 0;
+      data[i] = (low * Math.exp(-t / 0.08) * 0.5 + early * Math.exp(-t / 0.015)) * 0.6;
+    }
+    channels.push(data);
+  }
+  return channels;
 }

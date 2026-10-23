@@ -6,8 +6,6 @@ import { CHORDS, takes } from "./fieldTakes";
 // rate, and the aeolian chord for the word fades up as the picture holds.
 const WIND = ["body", "rush", "whistle"];
 const HARPS = CHORDS.map((_, k) => `harp${k}`);
-// If the idle renderer has not reached a layer by then, render it now.
-const FORCE_AFTER = 1.5;
 
 export function createFieldSound() {
   const sound = createSound({ level: -6, room: 0.18, on: false });
@@ -16,7 +14,6 @@ export function createFieldSound() {
   const loops = {};
 
   let enabled = false;
-  let enabledAt = 0;
   let gust = 0;
   let gustTarget = 0;
   let gustAt = 0;
@@ -26,14 +23,10 @@ export function createFieldSound() {
     param.setTargetAtTime(value, sound.ctx.currentTime, tau);
   };
 
-  // Start each layer as soon as its take exists, so turning sound on never
-  // renders seconds of wind on the frame of the gesture.
-  const startLayers = (clock) => {
-    for (const name of [...WIND, ...HARPS]) {
-      if (loops[name]) continue;
-      if (!bank[name].takes[0] && clock - enabledAt < FORCE_AFTER) continue;
-      loops[name] = sound.loop(bank[name]);
-    }
+  // Each layer starts silent and begins to sound once the worker has
+  // rendered its take; nothing is rendered on the frame of the gesture.
+  const startLayers = () => {
+    for (const name of [...WIND, ...HARPS]) if (!loops[name]) loops[name] = sound.loop(bank[name]);
   };
 
   const silence = (tau) => {
@@ -49,7 +42,6 @@ export function createFieldSound() {
     async setEnabled(on) {
       enabled = on;
       if (on) {
-        enabledAt = -1;
         const ok = await sound.setEnabled(true);
         return ok && enabled;
       }
@@ -63,8 +55,7 @@ export function createFieldSound() {
     },
     update({ swell, hold, stir, clock }) {
       if (!enabled || !sound.live) return;
-      if (enabledAt < 0) enabledAt = clock;
-      startLayers(clock);
+      startLayers();
       if (clock > gustAt) {
         gustAt = clock + 0.8 + Math.random() * 1.6;
         gustTarget = Math.random();

@@ -10,7 +10,7 @@ let lastTick = 0;
 export function wakeAudio() {
   if (typeof window === "undefined") return;
   if (!sound) {
-    sound = createSound({ level: -8, room: 0.1 });
+    sound = createSound({ level: -3, room: 0.1 });
     bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   }
   sound.unlock();

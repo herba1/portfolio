@@ -1,5 +1,5 @@
-import { seamless } from "../../lib/sound/engine.js";
-import { PLATE, Take, body, jitter, span } from "../../lib/sound/synth.js";
+import { label } from "../../lib/sound/label.js";
+import { body, jitter, PLATE, seamless, span, Take } from "../../lib/sound/synth.js";
 
 
 // A loop has no start, so begin it where the wave crosses zero: rotating a
@@ -85,3 +85,5 @@ export const takes = {
   flame: { count: 1, seed: 902, loop: true, render: (sr, rand) => flame(sr, rand) },
   flare: { count: 4, seed: 903, render: (sr, rand) => flare(sr, rand) },
 };
+
+label("scorch/scorchTakes", takes);

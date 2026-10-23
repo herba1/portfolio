@@ -1,51 +1,28 @@
 import { createSound, db } from "@/lib/sound/engine";
-import { rng } from "@/lib/sound/synth";
 import { takes } from "./smearTakes";
 
-const RATE = 48000;
 const clampPan = (pan) => Math.max(-0.7, Math.min(0.7, pan || 0));
 
 // Starts on; the first gesture unlocks it and the speaker button toggles it.
 // The slide is a pre-rendered loop on the shared context, panned to where
 // the motion is and driven by how much of the block is moving.
 export function createAudio() {
-  const sound = createSound({ level: -8, room: 0.1, on: true });
+  const sound = createSound({ level: -3, room: 0.1, on: true });
   const land = sound.bank(takes.land.render, takes.land);
+  const slideBank = sound.bank(takes.slide.render, takes.slide);
   let slide = null;
   let lastTick = 0;
 
   const ensureSlide = () => {
-    if (slide) return slide;
-    const ctx = sound.ctx;
-    const out = sound.out;
-    if (!ctx || !out) return null;
-    const data = takes.slide.render(RATE, rng(takes.slide.seed * 7919));
-    const buffer = ctx.createBuffer(1, data.length, RATE);
-    buffer.getChannelData(0).set(data);
-    const src = ctx.createBufferSource();
-    src.buffer = buffer;
-    src.loop = true;
-    const gain = ctx.createGain();
-    gain.gain.value = 0;
-    src.connect(gain);
-    let tail = gain;
-    let pan = null;
-    if (ctx.createStereoPanner) {
-      pan = ctx.createStereoPanner();
-      gain.connect(pan);
-      tail = pan;
-    }
-    tail.connect(out);
-    src.start(ctx.currentTime, Math.random() * buffer.duration);
-    slide = { src, gain, pan, tail };
+    if (!slide && sound.ctx) slide = sound.loop(slideBank);
     return slide;
   };
 
   const hush = (tc = 0.06) => {
     if (!slide) return;
     const t = sound.ctx.currentTime;
-    slide.gain.gain.cancelScheduledValues(t);
-    slide.gain.gain.setTargetAtTime(0, t, tc);
+    slide.gain.cancelScheduledValues(t);
+    slide.gain.setTargetAtTime(0, t, tc);
   };
 
   return {
@@ -64,10 +41,10 @@ export function createAudio() {
       if (!s) return;
       const t = sound.ctx.currentTime;
       const e = Math.min(1, Math.max(0, energy));
-      s.gain.gain.setTargetAtTime(e * e * db(-6), t, 0.05);
+      s.gain.setTargetAtTime(e * e * db(-6), t, 0.05);
       // Faster drag, brighter rub.
-      s.src.playbackRate.setTargetAtTime(0.75 + e * 0.6, t, 0.06);
-      if (s.pan) s.pan.pan.setTargetAtTime(clampPan(x), t, 0.08);
+      s.rate.setTargetAtTime(0.75 + e * 0.6, t, 0.06);
+      s.pan?.setTargetAtTime(clampPan(x), t, 0.08);
     },
     land(x, line, level = 1) {
       if (!sound.live) return;
@@ -81,16 +58,8 @@ export function createAudio() {
       hush();
     },
     destroy() {
-      if (slide) {
-        hush(0.02);
-        slide.src.stop(sound.ctx.currentTime + 0.15);
-        const { tail, gain } = slide;
-        slide.src.onended = () => {
-          tail.disconnect();
-          if (tail !== gain) gain.disconnect();
-        };
-        slide = null;
-      }
+      slide?.stop();
+      slide = null;
       sound.destroy();
     },
   };

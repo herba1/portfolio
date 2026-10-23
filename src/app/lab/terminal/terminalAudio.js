@@ -4,7 +4,7 @@ import { takes } from "./terminalTakes";
 // Starts off; the Sound button turns it on (inside the click, so the shared
 // context can start).
 export function createTerminalSound() {
-  const sound = createSound({ level: -8, room: 0.1, on: false });
+  const sound = createSound({ level: -4, room: 0.1, on: false });
   if (!sound.ctx) return null;
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let lastKey = 0;

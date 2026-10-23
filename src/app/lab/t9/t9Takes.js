@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { BAR, PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 import { beep } from "../../../lib/sound/recipes.js";
 
@@ -53,3 +54,5 @@ export const takes = {
   // Message sent: two rising notes, a fifth apart.
   sent: { count: 3, seed: 43, render: (sr, rand) => earcon(sr, rand, [[1046.5, 0.001, 0.17], [1568, 0.091, 0.24]]) },
 };
+
+label("lab/t9/t9Takes", takes);

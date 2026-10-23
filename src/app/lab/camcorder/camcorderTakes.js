@@ -1,6 +1,6 @@
-import { BAR, PLATE, Take, body, jitter, span } from "../../../lib/sound/synth.js";
+import { label } from "../../../lib/sound/label.js";
+import { BAR, body, jitter, PLATE, seamless, span, Take } from "../../../lib/sound/synth.js";
 import { beep, tick } from "../../../lib/sound/recipes.js";
-import { seamless } from "../../../lib/sound/engine.js";
 
 // A 2000s MiniDV camcorder in the hand: a piezo beeper, a tape transport
 // that clamps and releases, a lens with a zoom motor and a focus stepper,
@@ -56,7 +56,7 @@ function zoomMotor(sr, rand) {
   }
   t.modes(mesh, [[1600 * jitter(rand, 0.03), 0.002, 0.5], [2500 * jitter(rand, 0.03), 0.0015, 0.35]]);
   t.add(t.noise(0, seconds, 0.08, rand, { lp: 0.5, hp: 0.1, curve: 0 }));
-  return quietStart(seamless(t.finish(0.7, 0), sr));
+  return quietStart(seamless(t.finish(0.7, 0), sr, 0.05, { periodic: true }));
 }
 
 // The tape running: the head drum spins at 30 turns a second, so its
@@ -74,7 +74,7 @@ function tapeRun(sr, rand) {
     const turn = 0.75 + 0.25 * Math.sin(2 * Math.PI * drum * s) + 0.1 * Math.sin(2 * Math.PI * drum * 2 * s + 1.3);
     t.out[i] = swirl[i] * turn + 0.12 * Math.sin(2 * Math.PI * 270 * s) + 0.08 * Math.sin(2 * Math.PI * 540 * s + 0.7);
   }
-  return quietStart(seamless(t.finish(0.7, 0), sr));
+  return quietStart(seamless(t.finish(0.7, 0), sr, 0.05, { periodic: true }));
 }
 
 // Playback: the head reading the tape, hiss with a grain of dropouts and
@@ -98,3 +98,5 @@ export const takes = {
   tape: { count: 1, seed: 55, loop: true, render: tapeRun },
   hiss: { count: 1, seed: 56, loop: true, render: playHiss },
 };
+
+label("lab/camcorder/camcorderTakes", takes);

@@ -5,7 +5,7 @@ import { takes } from "./shutterTakes";
 const MIN_GAP = 30;
 
 export function createShutter() {
-  const sound = createSound({ level: -8, room: 0.12, on: true });
+  const sound = createSound({ level: -3, room: 0.12, on: true });
   if (!sound.ctx) return null;
   const bank = sound.bank(takes.shutter.render, takes.shutter);
   let last = 0;

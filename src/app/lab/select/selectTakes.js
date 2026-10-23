@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { pop, settle, tap, tick, whoosh } from "../../../lib/sound/recipes.js";
 
 // A selection on glass: the handle catching each word is a light detent
@@ -11,3 +12,5 @@ export const takes = {
   pop: { count: 3, seed: 15, render: (sr, rand) => pop(sr, rand, { pitch: 760, length: 0.06, rise: 1.7 }) },
   whoosh: { count: 3, seed: 16, render: (sr, rand) => whoosh(sr, rand, { length: 0.34, from: 600, to: 2200, q: 1.1 }) },
 };
+
+label("lab/select/selectTakes", takes);

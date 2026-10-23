@@ -2,7 +2,7 @@ import { createSound } from "@/lib/sound/engine";
 import { takes } from "./selectTakes";
 
 export function createAudio() {
-  const sound = createSound({ level: -8, room: 0.1 });
+  const sound = createSound({ level: -3, room: 0.1 });
   const bank = Object.fromEntries(Object.entries(takes).map(([name, spec]) => [name, sound.bank(spec.render, spec)]));
   let lastTick = 0;
 

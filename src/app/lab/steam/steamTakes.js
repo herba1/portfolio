@@ -1,5 +1,5 @@
-import { seamless } from "../../../lib/sound/engine.js";
-import { Take, jitter } from "../../../lib/sound/synth.js";
+import { label } from "../../../lib/sound/label.js";
+import { jitter, seamless, Take } from "../../../lib/sound/synth.js";
 
 
 // A loop has no start, so begin it where the wave crosses zero: rotating a
@@ -42,3 +42,5 @@ function breath(sr, rand) {
 export const takes = {
   breath: { count: 1, seed: 801, loop: true, render: (sr, rand) => breath(sr, rand) },
 };
+
+label("lab/steam/steamTakes", takes);

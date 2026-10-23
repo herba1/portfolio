@@ -1,5 +1,5 @@
-import { Take, jitter } from "../../../lib/sound/synth.js";
-import { seamless } from "../../../lib/sound/engine.js";
+import { label } from "../../../lib/sound/label.js";
+import { jitter, seamless, Take } from "../../../lib/sound/synth.js";
 
 // Wind through the field, as loops the client pitches and fades with the
 // swell. Wind is air tearing around edges: broadband turbulence whose band
@@ -139,3 +139,5 @@ export const takes = {
   harp2: { count: 1, seed: 26, loop: true, render: harp(CHORDS[2]) },
   harp3: { count: 1, seed: 27, loop: true, render: harp(CHORDS[3]) },
 };
+
+label("lab/field/fieldTakes", takes);

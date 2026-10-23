@@ -1,3 +1,4 @@
+import { label } from "../../../lib/sound/label.js";
 import { PLATE, Take, body, jitter } from "../../../lib/sound/synth.js";
 
 // A compact disc is a thin free plate of polycarbonate with a film of
@@ -19,3 +20,5 @@ function disc(sr, rand, { pitch = 1 } = {}) {
 export const takes = {
   snap: { count: 6, seed: 301, render: (sr, rand) => disc(sr, rand) },
 };
+
+label("lab/refractor/refractorTakes", takes);
