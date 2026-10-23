@@ -9,6 +9,7 @@ const SHIPPED_FROM_LAB = LAB.filter((item) => item.status === "shipped").map((it
   description: item.description,
   tags: item.tags,
   tile: item.tile,
+  hint: item.hint,
 }));
 
 export const PIECES = [...SHIPPED_FROM_LAB, ...EXPERIMENTS];

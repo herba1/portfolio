@@ -5,7 +5,9 @@ import IntroSettle from "../IntroSettle";
 import PlateHand from "../PlateHand";
 import OffscreenPause from "../OffscreenPause";
 import ScrollGuard from "../ScrollGuard";
-import TapHint from "../TapHint";
+import TileHints from "../TileHints";
+import { DEFAULT_HINT, HINTS } from "../hints";
+import AudioGate from "../AudioGate";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -66,6 +68,35 @@ const firstScreen = (index) => (index < 2 ? "all" : null);
 
 // Takes the tile's touch on a phone (ScrollGuard): until it is pressed a
 // finger only swipes a piece sideways and the page keeps vertical scroll.
+// How the piece is played: a line, and a ghost hand acting it out, until the
+// visitor first takes hold of the tile (TileHints).
+const HAND =
+  "M6 14V4a2 2 0 0 1 4 0v5a2 2 0 0 1 4 0v1a2 2 0 0 1 4 0v1a2 2 0 0 1 4 0v3a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15z";
+function TileHint({ piece, index }) {
+  const hint = piece.hint ?? HINTS[piece.slug] ?? DEFAULT_HINT;
+  const [x0, y0] = hint.from ?? [0.5, 0.5];
+  const [x1, y1] = hint.to ?? hint.from ?? [0.5, 0.5];
+  return (
+    <div
+      className="xl-hint"
+      data-gesture={hint.gesture ?? "tap"}
+      aria-hidden="true"
+      style={{ "--x0": x0, "--y0": y0, "--x1": x1, "--y1": y1, "--hint-delay": `${(index % 5) * -0.7}s` }}
+    >
+      <span className="xl-hint__hand">
+        <svg viewBox="0 0 24 24" width="30" height="30">
+          <path d={HAND} />
+          <path d="M10 9v3.4M14 10v2.4M18 11v2" />
+        </svg>
+      </span>
+      <span className="xl-hint__label">
+        <span className="xl-hint__mouse">{hint.text}</span>
+        <span className="xl-hint__touch">{hint.touch ?? hint.text}</span>
+      </span>
+    </div>
+  );
+}
+
 function FocusButton() {
   return (
     <button type="button" className="xl-focus" data-tile-focus aria-pressed="false">
@@ -94,6 +125,7 @@ export default async function BentoLayout() {
               aria-label={piece.title}
             >
               <Piece slug={piece.slug} data={data} title={piece.title} priority={firstScreen(i)} />
+              <TileHint piece={piece} index={i} />
               <FocusButton />
             </li>
           ))}
@@ -113,14 +145,16 @@ export default async function BentoLayout() {
             }}
           >
             <Piece slug={piece.slug} data={data} title={piece.title} />
+            <TileHint piece={piece} index={i} />
             <FocusButton />
           </li>
         ))}
       </ul>
       <PlateHand />
       <OffscreenPause />
+      <AudioGate />
       <ScrollGuard />
-      <TapHint />
+      <TileHints />
       <IntroSettle />
     </main>
   );
