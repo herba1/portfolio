@@ -22,6 +22,8 @@ let observer = null;
 const watched = new Map();
 const gates = new WeakMap();
 const shared = new WeakSet();
+// Tiles playing their idle demo (TileDemos): heard only once a visitor plays.
+const muted = new WeakSet();
 
 const visibleShare = (entry) => {
   if (!entry.isIntersecting) return 0;
@@ -30,7 +32,7 @@ const visibleShare = (entry) => {
 };
 
 const apply = (state) => {
-  const level = document.hidden ? 0 : state.level;
+  const level = document.hidden || muted.has(state.tile) ? 0 : state.level;
   for (const { gain, ctx } of state.gains) {
     gain.gain.cancelScheduledValues(ctx.currentTime);
     gain.gain.setTargetAtTime(level, ctx.currentTime, FADE);
@@ -61,12 +63,19 @@ export function gateToTile(tile, gain, ctx) {
   if (!tile || !installed) return;
   let state = watched.get(tile);
   if (!state) {
-    state = { level: 1, gains: new Set() };
+    state = { tile, level: 1, gains: new Set() };
     watched.set(tile, state);
     ensureObserver().observe(tile);
   }
   state.gains.add({ gain, ctx });
   apply(state);
+}
+
+export function muteTile(tile, on) {
+  if (on) muted.add(tile);
+  else muted.delete(tile);
+  const state = watched.get(tile);
+  if (state) apply(state);
 }
 
 // The shared bus routes its own clients; its context's output stays open.

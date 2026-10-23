@@ -36,9 +36,9 @@ for (const entry of entries) {
     // An older manifest's { cols, rows } maps across: three of six columns or
     // fewer was a half.
     tile: data.tile && typeof data.tile === "object" ? { shape: data.tile.shape ? (data.tile.shape === "tall" ? "tall" : "wide") : Number(data.tile.cols) <= 3 ? "tall" : "wide" } : null,
-    // How the piece is played, for its tile on the experiments index (see
-    // src/app/experiments/layouts/hints.js for the shape).
-    hint: data.hint && typeof data.hint === "object" && typeof data.hint.text === "string" ? data.hint : null,
+    // How the piece plays itself while idle on the experiments index (see
+    // src/app/experiments/layouts/demos.js for the shape).
+    demo: data.demo && typeof data.demo === "object" && typeof data.demo.gesture === "string" ? data.demo : null,
     embeddable: existsSync(join(LAB, entry.name, "Piece.jsx")),
   });
 }
