@@ -117,10 +117,10 @@
     "flowers flowers flowers flowers flowers flowers"
     "flowers flowers flowers flowers flowers flowers"
     "flowers flowers flowers flowers flowers flowers"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
     "counter counter counter counter counter counter"
     "counter counter counter counter counter counter"
     "counter counter counter counter counter counter"
@@ -352,6 +352,35 @@
 .xl-tile:not([data-engaged])
   :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
   overflow-y: hidden !important;
+}
+
+/* The touch stand-in for PlateHand's hint (TapHint): a chip in the corner of
+   a plate's tile until the first tap inside it. */
+.xl-tile[data-tap-hint] {
+  position: relative;
+}
+.xl-tap {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-ink-inverse);
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--text-ui-sm--font-weight);
+  white-space: nowrap;
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--ease-out-quint),
+    transform 260ms var(--ease-overshoot);
+}
+.xl-tile[data-tapped] .xl-tap {
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
 }
 
 /* A tile's live mount and its poster. The poster sits over the piece until

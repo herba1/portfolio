@@ -29,7 +29,6 @@ export const DEV_LINKS = [
   { name: "Refract", link: "/refract", primary: true, dev: true },
   { name: "Blobs playground", link: "/blobs/playground", primary: true, dev: true },
   { name: "Cover ring", link: "/cover-ring", primary: true, dev: true },
-  { name: "ASCII cover", link: "/ascii-cover", primary: true, dev: true },
   { name: "Wet ink", link: "/wet-ink", primary: true, dev: true },
   { name: "One line", link: "/one-line", primary: true, dev: true },
   { name: "Counter", link: "/counter", primary: true, dev: true },

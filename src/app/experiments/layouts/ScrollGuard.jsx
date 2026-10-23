@@ -12,13 +12,15 @@ import { useEffect } from "react";
 // scrollers are held still (layouts.css), and touch only pans the page. A
 // horizontal swipe or a pinch is never a page scroll, so it always reaches
 // the piece.
+//
+// Touch never engages a tile. A finger has no wheel to hand over, only the
+// swipe itself, and on a phone a vertical swipe is always the page's: a tap
+// or a sideways drag still reaches the piece, but the next swipe up or down
+// scrolls the index, never a stack or a list inside a tile.
 const PRESS_WINDOW_MS = 900;
 // A wheel gesture, trackpad momentum included, arrives as events far closer
 // together than this; a longer gap is a new gesture.
 const WHEEL_GAP_MS = 220;
-// A finger cannot wheel, so a tap engages the tile for its next touches,
-// until the visitor leaves it alone this long.
-const TOUCH_IDLE_MS = 3000;
 
 export default function ScrollGuard() {
   useEffect(() => {
@@ -56,25 +58,17 @@ export default function ScrollGuard() {
         release();
         return;
       }
-      // A touch engages only once it ends as a tap (below): engaging on the
-      // press would hand the swipe it starts to the piece's own scroller.
       if (event.pointerType === "touch") {
-        if (tile !== engaged) release();
-        else engage(tile, TOUCH_IDLE_MS);
+        release();
         return;
       }
       engage(tile, PRESS_WINDOW_MS + WHEEL_GAP_MS);
       wheelUntil = performance.now() + PRESS_WINDOW_MS;
     };
-    const onUp = (event) => {
-      if (event.pointerType !== "touch") return;
-      const tile = tileOf(event.target);
-      if (tile && root.contains(tile)) engage(tile, TOUCH_IDLE_MS);
-    };
     const onMove = (event) => {
       // A drag in progress keeps its tile in hand.
       if (engaged && event.buttons && engaged.contains(event.target)) {
-        engage(engaged, event.pointerType === "touch" ? TOUCH_IDLE_MS : PRESS_WINDOW_MS + WHEEL_GAP_MS);
+        engage(engaged, PRESS_WINDOW_MS + WHEEL_GAP_MS);
         wheelUntil = performance.now() + PRESS_WINDOW_MS;
       }
     };
@@ -98,14 +92,12 @@ export default function ScrollGuard() {
     // Capture, and on the window for the press, so it lands before any piece
     // can stop it.
     window.addEventListener("pointerdown", onDown, { capture: true, passive: true });
-    window.addEventListener("pointerup", onUp, { capture: true, passive: true });
     root.addEventListener("pointermove", onMove, { capture: true, passive: true });
     root.addEventListener("wheel", onWheel, { capture: true, passive: true });
     return () => {
       release();
       offscreen.disconnect();
       window.removeEventListener("pointerdown", onDown, { capture: true });
-      window.removeEventListener("pointerup", onUp, { capture: true });
       root.removeEventListener("pointermove", onMove, { capture: true });
       root.removeEventListener("wheel", onWheel, { capture: true });
     };

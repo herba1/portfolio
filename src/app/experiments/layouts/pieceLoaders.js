@@ -16,7 +16,6 @@ export const LOADERS = {
   "/tuner": () => import("@/app/tuner/TunerExperience"),
   "/blobs": () => import("@/app/blobs/BlobPiece"),
   "/cover-ring": () => import("@/app/cover-ring/CoverRing"),
-  "/ascii-cover": () => import("@/app/ascii-cover/AsciiCover"),
   "/wet-ink": () => import("@/app/wet-ink/WetInkExperience"),
   "/one-line": () => import("@/app/one-line/OneLineExperience"),
   "/counter": () => import("@/app/counter/CounterExperience"),

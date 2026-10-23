@@ -5,6 +5,7 @@ import IntroSettle from "../IntroSettle";
 import PlateHand from "../PlateHand";
 import OffscreenPause from "../OffscreenPause";
 import ScrollGuard from "../ScrollGuard";
+import TapHint from "../TapHint";
 
 // Static, refreshed hourly: the only server data is the Spotify read, which
 // pieceData caches on the same clock — so the page is served from the edge
@@ -28,7 +29,6 @@ const AREAS = {
   "/tuner": { area: "tuner", wave: 10, dx: 0 },
   "/blobs": { area: "flowers", wave: 11, dx: 0 },
   "/cover-ring": { area: "ring", wave: 12, dx: -1 },
-  "/ascii-cover": { area: "ascii", wave: 13, dx: 1 },
   "/wet-ink": { area: "wetink", wave: 15, dx: -1 },
   "/one-line": { area: "oneline", wave: 16, dx: 1 },
   "/counter": { area: "counter", wave: 14, dx: 0 },
@@ -108,6 +108,7 @@ export default async function BentoLayout() {
       <PlateHand />
       <OffscreenPause />
       <ScrollGuard />
+      <TapHint />
       <IntroSettle />
     </main>
   );
