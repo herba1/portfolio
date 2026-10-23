@@ -1,6 +1,8 @@
+import { soundAllowed } from "@/lib/sound/desktopOnly";
 import { workletSource } from "./scopeSynth";
 
 export function createScopeSound(size) {
+  if (!soundAllowed()) return null;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx || typeof AudioWorkletNode === "undefined") return null;
   const ctx = new Ctx({ latencyHint: "interactive" });

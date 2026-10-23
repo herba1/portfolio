@@ -47,7 +47,8 @@ export default function TapHint() {
     const onUp = (event) => {
       if (event.pointerType !== "touch") return;
       if (Math.hypot(event.clientX - down.x, event.clientY - down.y) > TAP_SLOP_PX) return;
-      const tile = event.target instanceof Element ? event.target.closest(".xl-tile") : null;
+      if (!(event.target instanceof Element) || event.target.closest("[data-tile-focus]")) return;
+      const tile = event.target.closest(".xl-tile");
       if (!tile || !chips.has(tile)) return;
       tile.dataset.tapped = "";
     };

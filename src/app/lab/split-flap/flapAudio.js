@@ -1,7 +1,10 @@
+import { soundAllowed } from "@/lib/sound/desktopOnly";
+
 const BUCKETS = 5;
 const MIN_GAP = 0.016;
 
 export function createClicks() {
+  if (!soundAllowed()) return null;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if (!Ctx) return null;
   const ctx = new Ctx({ latencyHint: "interactive" });

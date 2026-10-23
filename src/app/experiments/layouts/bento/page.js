@@ -39,16 +39,6 @@ const AREAS = {
 
 const PLACED = PIECES.filter((piece) => AREAS[piece.slug]);
 
-// Which tiles fill the first screen: the bento's top waves on a desktop, the
-// first two of the stack on a phone (which follows source order).
-const DESKTOP = "(min-width: 900px)";
-const PHONE = "(max-width: 899px)";
-function firstScreen(slug, index) {
-  const desktop = (AREAS[slug]?.wave ?? 99) < 5;
-  const phone = index < 2;
-  if (desktop && phone) return "all";
-  return desktop ? DESKTOP : phone ? PHONE : null;
-}
 // Studies take a whole row or half of one (their manifest's tile.shape), each
 // as tall as the screen. A half waits in source order for the next half to
 // share its row, so reading order and tab order follow the rows as drawn;
@@ -66,13 +56,49 @@ function pairHalves(pieces) {
   if (waiting) ordered.push({ ...waiting, shape: "wide" });
   return ordered;
 }
-const STUDIES = pairHalves(PIECES.filter((piece) => !AREAS[piece.slug]));
+// The lab studies lead, newest first (the registry's order), with the
+// 8-Bit Player up front; the older hand-placed mosaic follows them.
+const FEATURED = ["/lab/skin"];
+const featuredFirst = (pieces) => [...pieces].sort((a, b) => (FEATURED.includes(b.slug) ? 1 : 0) - (FEATURED.includes(a.slug) ? 1 : 0));
+const STUDIES = pairHalves(featuredFirst(PIECES.filter((piece) => !AREAS[piece.slug])));
+// The first row of studies is the first screen everywhere.
+const firstScreen = (index) => (index < 2 ? "all" : null);
+
+// Takes the tile's touch on a phone (ScrollGuard): until it is pressed a
+// finger only swipes a piece sideways and the page keeps vertical scroll.
+function FocusButton() {
+  return (
+    <button type="button" className="xl-focus" data-tile-focus aria-pressed="false">
+      <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
+        <path d="M2.5 6V2.5H6M10 2.5h3.5V6M13.5 10v3.5H10M6 13.5H2.5V10" />
+      </svg>
+      <span className="xl-focus__idle">Focus</span>
+      <span className="xl-focus__on">Done</span>
+    </button>
+  );
+}
 
 export default async function BentoLayout() {
   const data = await pieceData();
   return (
     <main className="xl-bento">
       <h1 className="sr-only">Experiments</h1>
+      {STUDIES.length ? (
+        <ul className="xl-bento__grid xl-bento__grid--studies">
+          {STUDIES.map(({ piece, shape }, i) => (
+            <li
+              key={piece.slug}
+              className="xl-bento__tile xl-tile xl-tile--study"
+              data-slug={piece.slug}
+              data-shape={shape}
+              aria-label={piece.title}
+            >
+              <Piece slug={piece.slug} data={data} title={piece.title} priority={firstScreen(i)} />
+              <FocusButton />
+            </li>
+          ))}
+        </ul>
+      ) : null}
       <ul className="xl-bento__grid">
         {PLACED.map((piece, i) => (
           <li
@@ -86,25 +112,11 @@ export default async function BentoLayout() {
               "--dx": AREAS[piece.slug]?.dx ?? 0,
             }}
           >
-            <Piece slug={piece.slug} data={data} title={piece.title} priority={firstScreen(piece.slug, i)} />
+            <Piece slug={piece.slug} data={data} title={piece.title} />
+            <FocusButton />
           </li>
         ))}
       </ul>
-      {STUDIES.length ? (
-        <ul className="xl-bento__grid xl-bento__grid--studies">
-          {STUDIES.map(({ piece, shape }) => (
-            <li
-              key={piece.slug}
-              className="xl-bento__tile xl-tile xl-tile--study"
-              data-slug={piece.slug}
-              data-shape={shape}
-              aria-label={piece.title}
-            >
-              <Piece slug={piece.slug} data={data} title={piece.title} />
-            </li>
-          ))}
-        </ul>
-      ) : null}
       <PlateHand />
       <OffscreenPause />
       <ScrollGuard />

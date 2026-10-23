@@ -38,7 +38,6 @@ const SCREEN_MARK = {
   amorph: '.amorph[data-phase="ready"]',
   crumple: '.crumple[data-status="ready"]',
   dandelion: '.dandelion[data-phase="ready"]',
-  camcorder: ".camcorder-rig[data-ready]",
   field: ".field-screen[data-ready]",
   kern: ".kern-surface[data-ready]",
   moire: ".moire-screen[data-ready]",
@@ -50,7 +49,7 @@ export const READY_MARK = new Map([
   ...["/scorch", "/stir", "/taffy", "/counter", "/wet-ink", "/backdrop"].map((slug) => [slug, ANY_MARK]),
   // The plates mark the canvas their art is drawn on.
   ...["/ink", "/refract", "/halftone", "/blobs"].map((slug) => [slug, "canvas[data-painted]"]),
-  ...["amorph", "ascii-bust", "blob-track", "camcorder", "crumple", "dandelion", "erase", "field", "film-leader", "focus-pull", "generation-loss", "ghost-setlist", "ink-drag", "iris", "justify", "kern", "light-table", "loupe", "mirrorball", "moire", "pull-vinyl", "raking-light", "refractor", "scope", "select", "skin", "smear", "split-flap", "steam", "sticker-peel", "t9", "terminal", "typewriter"].map((slug) => [`/lab/${slug}`, SCREEN_MARK[slug] ?? ANY_MARK]),
+  ...["amorph", "ascii-bust", "blob-track", "crumple", "dandelion", "erase", "field", "film-leader", "focus-pull", "generation-loss", "ghost-setlist", "ink-drag", "iris", "justify", "kern", "light-table", "loupe", "mirrorball", "moire", "pull-vinyl", "raking-light", "refractor", "scope", "select", "skin", "smear", "split-flap", "steam", "sticker-peel", "t9", "terminal", "typewriter"].map((slug) => [`/lab/${slug}`, SCREEN_MARK[slug] ?? ANY_MARK]),
 ]);
 
 const LAZY = new Map();

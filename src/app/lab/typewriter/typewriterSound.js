@@ -1,3 +1,5 @@
+import { soundAllowed } from "@/lib/sound/desktopOnly";
+
 function rng(seed) {
   let a = seed >>> 0;
   return () => {
@@ -338,7 +340,7 @@ export default class TypewriterSound {
   }
 
   unlock() {
-    if (!this.enabled) return;
+    if (!this.enabled || !soundAllowed()) return;
     if (!this.ctx) {
       const Ctx = window.AudioContext || window.webkitAudioContext;
       if (!Ctx) return;
