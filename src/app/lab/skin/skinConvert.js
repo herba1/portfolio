@@ -3,6 +3,9 @@
 // time, and the result replaces the track's made-up arrangement.
 
 const keyOf = (t) => `${t.title}|${t.artist}`;
+// Generous: the model's CPU fallback takes most of a minute on a slow machine.
+const TIMEOUT = 150000;
+const RETRY_AFTER = 60000;
 
 async function previewUrl(track, signal) {
   const q = new URLSearchParams({ artist: track.artist || "", title: track.title });
@@ -25,19 +28,25 @@ export function createConverter({ onChange }) {
     const job = queue.shift();
     job.state = "converting";
     onChange(job);
+    // A stalled fetch or model run must not hold up every track behind it.
+    const ctl = new AbortController();
+    const stop = () => ctl.abort();
+    abort.signal.addEventListener("abort", stop);
+    const timer = setTimeout(stop, TIMEOUT);
     try {
       lib ??= await import("@/lib/chiptune");
-      const input = job.file ?? (await previewUrl(job, abort.signal));
-      const opts = { title: job.title, artist: job.artist, signal: abort.signal, onProgress: (p) => {
+      const opts = { title: job.title, artist: job.artist, signal: ctl.signal, onProgress: (p) => {
         job.progress = p;
         onChange(job);
       } };
       let result;
       if (job.file) result = await lib.convertToChiptune(job.file, opts);
       else {
-        // Apple's CDN allows cross-origin reads; the proxy is the fallback.
+        const input = await previewUrl(job, ctl.signal);
+        // Apple's CDN allows cross-origin reads; the proxy is the fallback,
+        // only worth trying when the audio itself didn't arrive.
         result = await lib.convertToChiptune(input.direct, opts).catch((err) => {
-          if (abort.signal.aborted) throw err;
+          if (ctl.signal.aborted || err instanceof lib.ConvertError) throw err;
           return lib.convertToChiptune(input.proxied, opts);
         });
       }
@@ -45,11 +54,15 @@ export function createConverter({ onChange }) {
       job.midi = result.midi;
       job.state = "ready";
     } catch (err) {
-      if (abort.signal.aborted) return;
       job.state = "failed";
       job.error = err;
+      job.failedAt = performance.now();
+    } finally {
+      clearTimeout(timer);
+      abort.signal.removeEventListener("abort", stop);
     }
     busy = false;
+    if (abort.signal.aborted) return;
     onChange(job);
     pump();
   };
@@ -69,8 +82,9 @@ export function createConverter({ onChange }) {
     request(track, front = true) {
       const k = keyOf(track);
       let have = jobs.get(k);
-      // A preview that failed (offline, no match) gets another try next time.
-      if (have?.state === "failed") {
+      // A preview that failed (offline, no match) gets another try later, not
+      // straight away: the player asks again as soon as it hears of a failure.
+      if (have?.state === "failed" && performance.now() - have.failedAt > RETRY_AFTER) {
         jobs.delete(k);
         have = null;
       }
@@ -102,6 +116,7 @@ export function createConverter({ onChange }) {
     destroy() {
       abort.abort();
       queue.length = 0;
+      lib?.releaseWorker();
     },
   };
 }

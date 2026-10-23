@@ -204,6 +204,10 @@ export function createSkinAudio() {
   live() {
       return Boolean(running() && session);
     },
+    // Sound is on but the browser hasn't let the context start yet.
+    blocked() {
+      return Boolean(enabled && !(ctx && ctx.state === "running"));
+    },
     read(out) {
       if (!analyser) return 0;
       analyser.getFloatTimeDomainData(scratch);

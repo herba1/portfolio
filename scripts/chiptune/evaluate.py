@@ -102,7 +102,7 @@ def main():
         for kind in "ksh":
             ref = np.array([t for t, k in truth["drums"] if k == kind])
             est = np.array([h["time"] for h in out["drums"] if h["kind"] == kind])
-            drum[kind] = mir_eval.onset.f_measure(ref, est, window=0.06)[0] if len(ref) else float("nan")
+            drum[kind] = mir_eval.onset.f_measure(ref, est, window=0.06)[0] if len(ref) else float(len(est) == 0)
         rows.append([truth_path.stem, truth["bpm"], out["bpm"], beat_f, mf, rpa, rca, bf, bpc, root, majmin, drum["k"], drum["s"], drum["h"]])
     head = ["fixture", "bpm", "est", "beatF", "melF1", "melRPA", "melRCA", "bassF1", "bassPC", "chdRoot", "chdMajMin", "kick", "snare", "hat"]
     print("  ".join(f"{h:>9}" for h in head))

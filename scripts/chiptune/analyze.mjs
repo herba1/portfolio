@@ -1,4 +1,5 @@
 // node --import ./scripts/chiptune/register.mjs scripts/chiptune/analyze.mjs in.wav out.json
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { analyze } from "../../src/lib/chiptune/analyze.js";
 import { loudestWindow } from "../../src/lib/chiptune/audio.js";
@@ -14,7 +15,9 @@ const offset = loudestWindow(full, 22050, 30);
 const mono = full.subarray(Math.round(offset * 22050), Math.round((offset + 30) * 22050));
 // The model pass is the slow part on the CPU backend; keep its output next to
 // the input so tuning the decoders afterwards is instant.
-const cache = `${input}.${offset}.post.json`;
+// Keyed by the model weights too, so a new model is never scored on old output.
+const weights = createHash("sha1").update(readFileSync(new URL("../../public/models/basic-pitch/group1-shard1of1.bin", import.meta.url))).digest("hex").slice(0, 8);
+const cache = `${input}.${offset}.${weights}.post.json`;
 let posteriors;
 if (existsSync(cache)) {
   const c = JSON.parse(readFileSync(cache, "utf8"));

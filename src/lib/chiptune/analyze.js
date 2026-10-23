@@ -39,18 +39,24 @@ export async function analyze(mono, { model, onProgress, signal, posteriors } = 
 
   const melody = trackLine(post, MELODY);
   const bass = trackLine(post, BASS);
-  const spans = chromaBetween(post, beats);
+  // Chords are read per beat, or per half beat when the tempo is slow: a slow
+  // reading may be a fast song counted in halves, and its chords can still
+  // change on every real beat.
+  const split = bpm < 100 ? 2 : 1;
+  const marks = beats.flatMap((b, i) => (i + 1 < beats.length ? Array.from({ length: split }, (_, k) => b + ((beats[i + 1] - b) * k) / split) : [b]));
+  const spans = chromaBetween(post, marks);
   const total = new Float32Array(12);
   for (const s of spans) for (let k = 0; k < 12; k += 1) total[k] += s.chroma[k];
   const key = estimateKey(total);
-  const perBeat = estimateChords(spans);
+  const perSpan = estimateChords(spans);
+  const perBeat = beats.map((_, i) => perSpan[i * split] ?? null);
   const phase = downbeatPhase(beats, perBeat, feat);
 
   const chords = [];
-  perBeat.forEach((c, i) => {
+  perSpan.forEach((c, i) => {
     const last = chords[chords.length - 1];
-    if (last && (last.chord === c || (last.chord && c && last.chord.root === c.root && last.chord.quality === c.quality))) last.end = beats[i + 1];
-    else chords.push({ start: beats[i], end: beats[i + 1], chord: c });
+    if (last && (last.chord === c || (last.chord && c && last.chord.root === c.root && last.chord.quality === c.quality))) last.end = marks[i + 1];
+    else chords.push({ start: marks[i], end: marks[i + 1], chord: c });
   });
 
   const grid = sixteenths(beats);

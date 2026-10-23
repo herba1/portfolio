@@ -7,12 +7,10 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { OfflineAudioContext } from "node-web-audio-api";
 import { arrange } from "../../src/lib/chiptune/arrange.js";
-import { songToMidi } from "../../src/lib/chiptune/midi.js";
+import { conversionToMidi } from "../../src/lib/chiptune/midi.js";
 import { sixteenths } from "../../src/lib/chiptune/rhythm.js";
 import { renderSong } from "../../src/lib/chiptune/synth.js";
 import { writeWav } from "./wav.mjs";
-
-globalThis.window = { OfflineAudioContext };
 
 const [input, prefix] = process.argv.slice(2);
 const analysis = JSON.parse(readFileSync(input, "utf8"));
@@ -20,13 +18,15 @@ analysis.grid ??= sixteenths(analysis.beats);
 const opts = process.env.ARRANGE ? JSON.parse(process.env.ARRANGE) : {};
 const song = arrange(analysis, { title: prefix.split("/").pop(), ...opts });
 writeFileSync(`${prefix}.song.json`, JSON.stringify(song));
-writeFileSync(`${prefix}.mid`, songToMidi(song, analysis.beats, analysis.downbeat));
+writeFileSync(`${prefix}.mid`, conversionToMidi(song, analysis, { offset: analysis.offset ?? 0 }));
 const rate = 22050;
-const mix = await renderSong(song, song.length, rate);
+const mix = await renderSong(song, song.length, rate, OfflineAudioContext);
 writeWav(`${prefix}.wav`, mix.pcm, rate);
 for (let ch = 0; ch < 4; ch += 1) {
-  const stem = await renderSong({ ...song, events: song.events.filter((e) => e.ch === ch) }, song.length, rate);
+  const stem = await renderSong({ ...song, events: song.events.filter((e) => e.ch === ch) }, song.length, rate, OfflineAudioContext);
   writeWav(`${prefix}.ch${ch}.wav`, stem.pcm, rate);
 }
 const counts = [0, 1, 2, 3].map((ch) => song.events.filter((e) => e.ch === ch).length);
 console.log(`${prefix}: ${song.length.toFixed(1)}s, events per channel ${counts.join("/")}, peak ${mix.pcm.reduce((m, v) => Math.max(m, Math.abs(v)), 0).toFixed(2)}`);
+// node-web-audio-api can crash tearing down its native contexts; the files are written.
+process.exit(0);

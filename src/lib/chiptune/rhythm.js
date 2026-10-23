@@ -92,9 +92,11 @@ function autocorr(env, lag) {
 // Fast tempos are often eighth notes read as beats. A backbeat snare repeats
 // every two beats, so if the snare only repeats every four "beats" the beat
 // was really twice as long.
+// Only past 160 BPM: below that a busy groove (sixteenth hats, syncopated
+// kicks) also repeats most strongly over the bar and would be halved wrongly.
 export function refinePeriod(period, feat) {
   const bpm = (60 * feat.fps) / period;
-  if (bpm < 135) return period;
+  if (bpm < 160) return period;
   const back = feat.snare.map((v, i) => v + feat.body[i]);
   const two = autocorr(back, 2 * period);
   const four = autocorr(back, 4 * period);

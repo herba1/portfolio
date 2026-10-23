@@ -4,7 +4,12 @@ Each fixture is a General MIDI arrangement rendered through FluidSynth, so the
 converter is tested on real sampled instruments playing at the same time, with
 the exact answer kept next to the audio.
 
-  python3 scripts/chiptune/make_fixtures.py <out_dir>
+  python3 scripts/chiptune/make_fixtures.py <out_dir> [count] [first_seed]
+
+Seeds below 100 are the tuning set: one drum pattern, a chord per bar, round
+tempos. Seeds from 100 are held out and vary what the tuning set keeps fixed:
+off-grid tempos, chords every two beats or every two bars, four-on-the-floor,
+half-time, sixteenth hats or no drums, and other instruments.
 """
 import json
 import random
@@ -36,12 +41,31 @@ BANDS = [
 ]
 
 
+HELD_OUT_BANDS = [
+    (56, 12, 33),  # trumpet, marimba, finger bass
+    (71, 46, 39),  # clarinet, harp, synth bass 2
+    (80, 5, 36),   # square lead, e-piano 2, slap bass
+    (68, 24, 32),  # oboe, nylon guitar, acoustic bass
+]
+DRUMS = {
+    "rock": [(0, "k"), (2, "k"), (2.5, "k"), (1, "s"), (3, "s")] + [(e / 2, "h") for e in range(8)],
+    "four": [(b, "k") for b in range(4)] + [(1, "s"), (3, "s")] + [(b + 0.5, "h") for b in range(4)],
+    "half": [(0, "k"), (1.5, "k"), (2, "s")] + [(e / 2, "h") for e in range(8)],
+    "sixteen": [(0, "k"), (1.75, "k"), (2.5, "k"), (1, "s"), (3, "s")] + [(e / 4, "h") for e in range(16)],
+    "none": [],
+}
+
+
 def song(seed):
     rnd = random.Random(seed)
+    held = seed >= 100
     tonic = rnd.randrange(12)
-    bpm = rnd.choice([84, 96, 104, 112, 120, 128, 140])
+    bpm = round(rnd.uniform(72, 160), 1) if held else rnd.choice([84, 96, 104, 112, 120, 128, 140])
     prog = rnd.choice(PROGS)
-    lead_p, chord_p, bass_p = BANDS[seed % len(BANDS)]
+    lead_p, chord_p, bass_p = (HELD_OUT_BANDS if held else BANDS)[seed % (len(HELD_OUT_BANDS) if held else len(BANDS))]
+    # beats per chord, and the drum pattern
+    span = rnd.choice([2, 4, 8]) if held else 4
+    kit = rnd.choice(list(DRUMS)) if held else "rock"
     beat = 60.0 / bpm
     bars = 12
     # every third song sings in a low, male-vocal register under the chords' top
@@ -56,25 +80,32 @@ def song(seed):
     t0 = offset
     scale = [(tonic + i) % 12 for i in MAJOR]
     prev = (mlo + mhi) // 2
+    truth["kit"], truth["span"] = kit, span
     for bar in range(bars):
-        root_off, qual = prog[bar % len(prog)]
-        root = (tonic + root_off) % 12
-        pcs = [(root + i) % 12 for i in QUAL[qual]]
         bs = t0 + bar * 4 * beat
-        be = bs + 4 * beat
-        truth["chords"].append([bs, be, f"{NAMES[root]}:{qual}"])
         for b in range(4):
             truth["beats"].append(bs + b * beat)
         # chords: strum/stab on every beat, voiced in 52..67
-        voicing = sorted(m for m in range(52, 68) if m % 12 in pcs)[:4]
+        at = []
         for b in range(4):
+            idx = (bar * 4 + b) // span
+            root_off, qual = prog[idx % len(prog)]
+            r = (tonic + root_off) % 12
+            cpcs = [(r + i) % 12 for i in QUAL[qual]]
+            if (bar * 4 + b) % span == 0:
+                truth["chords"].append([bs + b * beat, bs + b * beat + span * beat, f"{NAMES[r]}:{qual}"])
+            at.append((r, cpcs))
+            voicing = sorted(m for m in range(52, 68) if m % 12 in cpcs)[:4]
             for k, m in enumerate(voicing):
                 st = bs + b * beat + k * 0.012
                 chords.notes.append(pretty_midi.Note(62, m, st, st + beat * 0.9))
         # bass: root on 1, fifth or root on 3, eighth pickups
-        broot = 28 + ((root - 4) % 12)
+        broot = 28 + ((at[0][0] - 4) % 12)
         fifth = broot + 7 if broot + 7 <= 47 else broot - 5
-        pattern = [(0, broot, 1.5), (1.5, broot, 0.5), (2, fifth, 1.5), (3.5, broot + 12 if broot + 12 <= 50 else broot, 0.5)]
+        pick = broot
+        if at[2][0] != at[0][0]:  # the chord changes mid-bar: follow it
+            fifth = pick = 28 + ((at[2][0] - 4) % 12)
+        pattern = [(0, broot, 1.5), (1.5, broot, 0.5), (2, fifth, 1.5), (3.5, pick + 12 if pick + 12 <= 50 else pick, 0.5)]
         for o, m, d in pattern:
             st = bs + o * beat
             bass.notes.append(pretty_midi.Note(96, m, st, st + d * beat * 0.92))
@@ -87,6 +118,7 @@ def song(seed):
                 pos += -d
                 continue
             strong = abs(pos - round(pos)) < 1e-6 and int(round(pos)) % 2 == 0
+            pcs = at[min(3, int(pos))][1]
             cands = [m for m in range(mlo, mhi) if (m % 12 in (pcs if strong else scale)) and abs(m - prev) <= (7 if strong else 4)]
             if not cands:
                 cands = [m for m in range(mlo, mhi) if m % 12 in pcs]
@@ -97,17 +129,18 @@ def song(seed):
             truth["melody"].append([st, en, m])
             prev = m
             pos += d
-        # drums: kick 1 & 3 (+ the and of 3), snare 2 & 4, closed hats on eighths
-        for e in range(8):
-            st = bs + e * beat / 2
-            drums.notes.append(pretty_midi.Note(70 if e % 2 else 90, 42, st, st + 0.05))
-            truth["drums"].append([st, "h"])
-        for o, kind, pitch in [(0, "k", 36), (2, "k", 36), (2.5, "k", 36), (1, "s", 38), (3, "s", 38)]:
+        for o, kind in DRUMS[kit]:
             st = bs + o * beat
-            drums.notes.append(pretty_midi.Note(110, pitch, st, st + 0.08))
+            if kind == "h":
+                drums.notes.append(pretty_midi.Note(90 if o == int(o) else 70, 42, st, st + 0.05))
+            else:
+                drums.notes.append(pretty_midi.Note(110, 36 if kind == "k" else 38, st, st + 0.08))
             truth["drums"].append([st, kind])
     pm.instruments += [lead, chords, bass, drums]
     truth["beats"].sort()
+    truth["chords"] = [c for c in truth["chords"] if c[0] < t0 + bars * 4 * beat]
+    for c in truth["chords"]:
+        c[1] = min(c[1], t0 + bars * 4 * beat)
     truth["drums"].sort()
     truth["duration"] = t0 + bars * 4 * beat + 1.0
     return pm, truth
@@ -117,7 +150,8 @@ def main():
     out = Path(sys.argv[1])
     out.mkdir(parents=True, exist_ok=True)
     count = int(sys.argv[2]) if len(sys.argv) > 2 else 6
-    for i in range(count):
+    first = int(sys.argv[3]) if len(sys.argv) > 3 else 0
+    for i in range(first, first + count):
         pm, truth = song(i)
         mid = out / f"fixture{i}.mid"
         wav = out / f"fixture{i}.wav"

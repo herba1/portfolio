@@ -45,7 +45,9 @@ def pitch_scores(rows, path, fmin, fmax):
         shift = 12 * np.round(np.median(12 * np.log2(est[both] / ref[both])) / 12)
         ref = np.where(ref > 0, ref * 2 ** (shift / 12), 0)
     s = mir_eval.melody.evaluate(t, ref, t, est)
-    return s["Raw Pitch Accuracy"], s["Raw Chroma Accuracy"], s["Voicing Recall"]
+    # Overall accuracy also counts notes played where the truth is silent, so
+    # extra wrong notes cost something; raw pitch accuracy only measures recall.
+    return s["Raw Pitch Accuracy"], s["Raw Chroma Accuracy"], s["Overall Accuracy"]
 
 
 def triad(chroma):
@@ -95,7 +97,9 @@ def shift(truth, off):
 
 def main():
     d = Path(sys.argv[1])
-    head = ["fixture", "leadRPA", "leadRCA", "leadVR", "bassRPA", "bassRCA", "chdStem", "chdMix", "drumsF"]
+    # hitsF pools every drum kind on the noise stem (kicks sound mostly on the
+    # triangle); per-kind accuracy is in evaluate.py.
+    head = ["fixture", "leadRPA", "leadRCA", "leadOA", "bassRPA", "bassRCA", "chdStem", "chdMix", "hitsF"]
     print("  ".join(f"{h:>9}" for h in head))
     rows = []
     for tp in sorted(d.glob("fixture*[0-9].json")):
@@ -107,11 +111,11 @@ def main():
         truth = shift(truth, json.loads(out.read_text()).get("offset", 0) if out.exists() else 0)
         lr = pitch_scores(truth["melody"], f"{pre}.chip.ch0.wav", 150, 1600)
         br = pitch_scores(truth["bass"], f"{pre}.chip.ch2.wav", 35, 260)
-        row = [lr[0], lr[1], lr[2], br[0], br[1], chord_score(truth, f"{pre}.chip.ch1.wav"), chord_score(truth, f"{pre}.chip.wav"), drum_score(truth, f"{pre}.chip.ch3.wav")]
+        row = [lr[0], lr[1], lr[2], br[0], br[1], chord_score(truth, f"{pre}.chip.ch1.wav"), chord_score(truth, f"{pre}.chip.wav"), drum_score(truth, f"{pre}.chip.ch3.wav") if truth["drums"] else float("nan")]
         rows.append(row)
         print("  ".join([f"{pre.name:>9}"] + [f"{v:9.2f}" for v in row]))
     if rows:
-        print("  ".join([f"{'MEAN':>9}"] + [f"{v:9.2f}" for v in np.mean(rows, axis=0)]))
+        print("  ".join([f"{'MEAN':>9}"] + [f"{v:9.2f}" for v in np.nanmean(rows, axis=0)]))
 
 
 if __name__ == "__main__":

@@ -1,10 +1,20 @@
 import { analyze } from "./analyze";
 
-self.onmessage = async ({ data: { id, mono } }) => {
+const running = new Map();
+
+self.onmessage = async ({ data: { id, mono, cancel } }) => {
+  if (cancel) {
+    running.get(cancel)?.abort();
+    return;
+  }
+  const ctl = new AbortController();
+  running.set(id, ctl);
   try {
-    const analysis = await analyze(mono, { onProgress: (p) => self.postMessage({ id, progress: p }) });
-    self.postMessage({ id, analysis });
+    const analysis = await analyze(mono, { signal: ctl.signal, onProgress: (p) => self.postMessage({ id, progress: p }) });
+    if (!ctl.signal.aborted) self.postMessage({ id, analysis });
   } catch (err) {
-    self.postMessage({ id, error: String(err?.message || err) });
+    if (!ctl.signal.aborted) self.postMessage({ id, error: String(err?.message || err) });
+  } finally {
+    running.delete(id);
   }
 };

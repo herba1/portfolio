@@ -2,7 +2,11 @@
 // rate). Long songs are cut to the loudest stretch of `maxSeconds`: a chorus
 // says more about a song than its intro.
 
+import { ConvertError } from "./errors";
 import { RATE } from "./model";
+
+// Decoded audio is held whole in memory; past this a long mix could take the tab down.
+export const MAX_BYTES = 40 * 1024 * 1024;
 
 const Offline = () => globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext;
 
@@ -12,18 +16,24 @@ async function toArrayBuffer(input, signal) {
     if (!res.ok) throw new Error(`Could not fetch audio (${res.status})`);
     return res.arrayBuffer();
   }
-  if (typeof Blob !== "undefined" && input instanceof Blob) return input.arrayBuffer();
+  if (typeof Blob !== "undefined" && input instanceof Blob) {
+    if (input.size > MAX_BYTES) throw new ConvertError("too-large", "That file is too big (40 MB at most)");
+    return input.arrayBuffer();
+  }
   return input;
 }
 
+// Start time of the loudest `seconds`; `data` is one channel or a list of them.
 export function loudestWindow(data, rate, seconds) {
-  const total = data.length / rate;
+  const channels = Array.isArray(data) ? data : [data];
+  const len = channels[0].length;
+  const total = len / rate;
   if (total <= seconds) return 0;
   const block = Math.floor(rate / 2);
   const energy = [];
-  for (let i = 0; i + block <= data.length; i += block) {
+  for (let i = 0; i + block <= len; i += block) {
     let s = 0;
-    for (let k = i; k < i + block; k += 4) s += data[k] * data[k];
+    for (const ch of channels) for (let k = i; k < i + block; k += 4) s += ch[k] * ch[k];
     energy.push(s);
   }
   const span = Math.floor(seconds * 2);
@@ -47,9 +57,14 @@ export async function decodeToMono(input, { maxSeconds = 30, signal } = {}) {
   let decoded = input;
   if (!(typeof AudioBuffer !== "undefined" && input instanceof AudioBuffer)) {
     const bytes = await toArrayBuffer(input, signal);
-    decoded = await new Ctx(1, 1, 44100).decodeAudioData(bytes);
+    if (bytes.byteLength > MAX_BYTES) throw new ConvertError("too-large", "That file is too big (40 MB at most)");
+    // Decoding into a context at the model's rate resamples once and halves
+    // the memory a long file takes.
+    decoded = await new Ctx(1, 1, RATE).decodeAudioData(bytes);
   }
-  const offset = loudestWindow(decoded.getChannelData(0), decoded.sampleRate, maxSeconds);
+  signal?.throwIfAborted?.();
+  const channels = Array.from({ length: decoded.numberOfChannels }, (_, i) => decoded.getChannelData(i));
+  const offset = loudestWindow(channels, decoded.sampleRate, maxSeconds);
   const seconds = Math.min(maxSeconds, decoded.duration - offset);
   const ctx = new Ctx(1, Math.max(1, Math.ceil(seconds * RATE)), RATE);
   const src = ctx.createBufferSource();

@@ -225,6 +225,10 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     delete root.dataset.drop;
     audio.arm(songPos);
     addFile(e.dataTransfer.files[0]);
+    // A drop doesn't count as a gesture that may start audio.
+    window.setTimeout(() => {
+      if (!destroyed && audio.blocked()) notice("CLICK THE PLAYER FOR SOUND", 3000);
+    }, 400);
   };
   root.addEventListener("dragover", onDragOver);
   root.addEventListener("dragleave", onDragLeave);
@@ -265,10 +269,36 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     return job;
   };
 
+  const FAILED = {
+    "too-large": "TOO BIG: 40 MB AT MOST",
+    "too-short": "TOO SHORT: NEED 3 SECONDS",
+    silent: "THAT FILE IS SILENT",
+    "no-notes": "NO NOTES FOUND IN THAT FILE",
+  };
+
   const onJob = (job) => {
     if (destroyed) return;
     const t = current();
     const mine = jobFor(t) === job;
+    if (job.state === "failed" && job.file) {
+      // A file we couldn't hear has nothing to fall back on: take it out,
+      // whether or not it's the one playing.
+      const gone = tracks.findIndex((x) => x.file === job);
+      if (gone >= 0 && tracks.length > 1) {
+        tracks = tracks.filter((_, i) => i !== gone);
+        totalLength = tracks.reduce((s, x) => s + x.length, 0);
+        notice(FAILED[job.error?.code] ?? "COULD NOT READ THAT FILE", 2600);
+        if (mine) {
+          player.waiting = false;
+          startTrack(Math.min(gone, tracks.length - 1), false);
+          return;
+        }
+        if (gone < player.index) player.index -= 1;
+        ui.playlistSel = Math.min(ui.playlistSel, tracks.length - 1);
+        mark("main", "pl");
+        return;
+      }
+    }
     for (const tr of tracks) {
       if (jobFor(tr) !== job || job.state !== "ready" || tr.song === job.song) continue;
       tr.song = job.song;
@@ -277,14 +307,6 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     totalLength = tracks.reduce((s, x) => s + x.length, 0);
     if (mine && player.waiting && job.state !== "queued" && job.state !== "converting") {
       player.waiting = false;
-      if (job.state === "failed" && t.file) {
-        // A file we couldn't hear has nothing to fall back on: take it out.
-        tracks = tracks.filter((x) => x !== t);
-        totalLength = tracks.reduce((s, x) => s + x.length, 0);
-        notice("COULD NOT READ THAT FILE", 2600);
-        startTrack(Math.min(player.index, tracks.length - 1), false);
-        return;
-      }
       if (job.state === "failed") notice("NO PREVIEW: PLAYING A MADE-UP REMAKE", 2600);
       const held = player.paused;
       startTrack(player.index, player.playing);
@@ -293,7 +315,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
         syncAudio();
       }
       // While this one plays, get the next one ready.
-      const next = tracks[(player.index + 1) % tracks.length];
+      const next = tracks[upcoming()];
       if (!next.file) converter.request(next, false);
     }
     mark("main", "pl");
@@ -320,28 +342,44 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     if (i >= ui.playlistTop + PL_ROWS) ui.playlistTop = i - PL_ROWS + 1;
   };
 
+  // The track `next` will play. Shuffle picks it ahead of time so the
+  // prefetch converts the right one.
+  const upcoming = () => {
+    if (!player.shuffle) return (player.index + 1) % tracks.length;
+    if (player.shuffleNext == null || player.shuffleNext >= tracks.length) player.shuffleNext = Math.floor(Math.random() * tracks.length);
+    return player.shuffleNext;
+  };
+
+  // Leaving pause (or a seek after stop) plays the remake, so ask for it.
+  const resume = () => {
+    player.paused = false;
+    player.startedAt = performance.now();
+    if (armed) want();
+    syncAudio();
+  };
+
   const actions = {
     prev: () => startTrack(songPos() > 4 ? player.index : player.index - 1, player.playing),
-    next: () => startTrack(player.shuffle ? Math.floor(Math.random() * tracks.length) : player.index + 1, player.playing),
+    next: () => {
+      const i = upcoming();
+      player.shuffleNext = null;
+      startTrack(i, player.playing);
+    },
     play: () => {
       if (player.playing && !player.paused) startTrack(player.index);
       else if (player.paused) {
-        player.paused = false;
-        player.startedAt = performance.now();
-        syncAudio();
+        resume();
         mark("main");
       } else startTrack(player.index);
     },
     pause: () => {
       if (!player.playing) return;
-      if (player.paused) {
-        player.paused = false;
-        player.startedAt = performance.now();
-      } else {
+      if (player.paused) resume();
+      else {
         player.pos = songPos();
         player.paused = true;
+        syncAudio();
       }
-      syncAudio();
       mark("main");
     },
     stop: () => {

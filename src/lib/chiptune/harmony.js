@@ -103,7 +103,7 @@ const cosine = (x, t) => {
 
 // One chord per beat span. `stay` is how much a change costs, in units of
 // template fit; a chord has to win clearly for a beat or two to take over.
-export function estimateChords(spans, { stay = 0.35, bassWeight = 0.25 } = {}) {
+export function estimateChords(spans, { stay = 0.12, bassWeight = 0.25 } = {}) {
   const S = STATES.length;
   const n = spans.length;
   if (!n) return [];
