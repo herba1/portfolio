@@ -1,5 +1,5 @@
 // An analysis (analyze.js) becomes a song for synth.js: the melody on a
-// 25% pulse, the chords as a tracker arpeggio on the second pulse, the bass on
+// square pulse, the chords as a tracker arpeggio on the second pulse, the bass on
 // the triangle and the drums on the noise kit. Every note is snapped to the
 // song's own sixteenth grid, which follows the tracked beats, so the remake
 // lines up with the original second for second.
@@ -60,11 +60,15 @@ export function arrange(analysis, { title = "Untitled", artist = "", arpRate = 2
   // Bass: the transcribed line, with the chord root filling any beat it
   // leaves empty so the low end never drops out under a held chord.
   const low = toSlots(bass, grid);
-  let lastBass = 40;
   const covered = new Uint8Array(grid.length);
+  // The register a fill should sit in: the nearest transcribed bass note.
+  const nearBass = (slot) => {
+    let best = null;
+    for (const n of low) if (!best || Math.abs(n.a - slot) < Math.abs(best.a - slot)) best = n;
+    return best ? fold(best.midi, BASS) : 40;
+  };
   for (const n of low) {
     const m = fold(n.midi, BASS);
-    lastBass = m;
     const s = at(n.a);
     const len = at(n.b) - s;
     events.push({ ch: 2, s, d: Math.max(0.05, len * 0.92), m, v: 0.9 });
@@ -85,8 +89,12 @@ export function arrange(analysis, { title = "Untitled", artist = "", arpRate = 2
       const s = at(k);
       events.push({ ch: 1, s, d: Math.max(0.05, (at(end) - s) * 0.9), m: root, arp, arpRate, v: 0.8, duty: harmonyDuty, env: "pluck" });
       if (!covered[k]) {
-        const near = fold(c.root + 12 * Math.round((lastBass - c.root) / 12), BASS);
-        events.push({ ch: 2, s, d: Math.max(0.05, (at(Math.min(end, k + 2)) - s) * 0.9), m: near, v: 0.8 });
+        // An eighth-note root, cut short if the transcribed line comes back in.
+        let stop = k + 1;
+        while (stop < Math.min(end, k + 2) && !covered[stop]) stop += 1;
+        const ref = nearBass(k);
+        const near = fold(c.root + 12 * Math.round((ref - c.root) / 12), BASS);
+        events.push({ ch: 2, s, d: Math.max(0.05, (at(stop) - s) * 0.9), m: near, v: 0.8 });
       }
     }
   }

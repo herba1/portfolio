@@ -20,7 +20,7 @@ analysis.grid ??= sixteenths(analysis.beats);
 const opts = process.env.ARRANGE ? JSON.parse(process.env.ARRANGE) : {};
 const song = arrange(analysis, { title: prefix.split("/").pop(), ...opts });
 writeFileSync(`${prefix}.song.json`, JSON.stringify(song));
-writeFileSync(`${prefix}.mid`, songToMidi(song, analysis.beats));
+writeFileSync(`${prefix}.mid`, songToMidi(song, analysis.beats, analysis.downbeat));
 const rate = 22050;
 const mix = await renderSong(song, song.length, rate);
 writeWav(`${prefix}.wav`, mix.pcm, rate);

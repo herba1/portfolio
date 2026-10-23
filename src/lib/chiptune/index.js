@@ -67,5 +67,5 @@ export async function convertToChiptune(input, { title, artist, maxSeconds = 30,
   if (!analysis.melody.length && !analysis.bass.length && !analysis.chords.some((c) => c.root != null)) throw new Error("No notes found in that audio");
   const song = arrange(analysis, { title, artist });
   onProgress?.(1);
-  return { song, analysis, offset, sourceDuration, midi: () => songToMidi(song, analysis.beats) };
+  return { song, analysis, offset, sourceDuration, midi: () => songToMidi(song, analysis.beats, analysis.downbeat) };
 }

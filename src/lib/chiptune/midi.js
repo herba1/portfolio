@@ -36,10 +36,17 @@ function track(events) {
   return chunk("MTrk", body);
 }
 
-export function songToMidi(song, beats) {
+// `downbeat` is the index of the first bar's first beat in `beats`. The file
+// starts on the bar that contains the clip's first moment, so bar lines in a
+// DAW fall where the song's bars do.
+export function songToMidi(song, beats, downbeat = 0) {
   const b = beats.slice();
   const period = b.length > 1 ? b[1] - b[0] : 0.5;
-  while (b[0] > 0) b.unshift(b[0] - period);
+  let lead = ((downbeat % 4) + 4) % 4;
+  while (b[0] > 0 || lead % 4 !== 0) {
+    b.unshift(b[0] - period);
+    lead += 1;
+  }
   const tick = (t) => {
     let i = 0;
     while (i < b.length - 2 && b[i + 1] <= t) i += 1;

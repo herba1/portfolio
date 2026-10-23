@@ -1,6 +1,8 @@
 // Basic Pitch's note decoder (output_to_notes_polyphonic), on flat typed
-// arrays. Same thresholds and the same "melodia trick" second pass, but each
-// pass is one sort instead of a full-matrix scan per note.
+// arrays. Same onset and frame thresholds and the same "melodia trick" second
+// pass, but each pass is one sort instead of a full-matrix scan per note.
+// minFrames is 7 (about 80 ms) rather than the reference's 11: chiptune leads
+// are made of short notes and the line trackers clean up what this lets in.
 
 import { MIDI_OFFSET, PITCHES, frameTime } from "./model";
 
@@ -25,12 +27,13 @@ export function decodeNotes({ frames, onsets, nFrames }, { onsetThresh = 0.5, fr
   for (let i = 0; i < n * P; i += 1) inferred[i] = Math.max(onsets[i], inferred[i] * k);
 
   const starts = [];
-  for (let t = 0; t < n; t += 1) {
+  // Strict local maxima in time (scipy's argrelmax), so never the first or last frame.
+  for (let t = 1; t < n - 1; t += 1) {
     for (let p = 0; p < P; p += 1) {
       const v = inferred[t * P + p];
-      if (v <= onsetThresh) continue;
-      if (t > 0 && inferred[(t - 1) * P + p] >= v) continue;
-      if (t < n - 1 && inferred[(t + 1) * P + p] >= v) continue;
+      if (v < onsetThresh) continue;
+      if (inferred[(t - 1) * P + p] >= v) continue;
+      if (inferred[(t + 1) * P + p] >= v) continue;
       starts.push(t * P + p);
     }
   }

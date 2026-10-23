@@ -112,9 +112,19 @@ export function trackBeats(env, period, tightness = 100) {
   );
   const score = new Float32Array(n);
   const back = new Int32Array(n).fill(-1);
+  // librosa's rule: until the onset strength first passes 1% of its peak, a
+  // frame starts a fresh chain instead of hanging off the silence before it.
+  let peak = 0;
+  for (let i = 0; i < n; i += 1) peak = Math.max(peak, local[i]);
+  let started = false;
   for (let i = 0; i < n; i += 1) {
     let best = 0;
     let arg = -1;
+    if (!started && local[i] <= 0.01 * peak) {
+      score[i] = local[i];
+      continue;
+    }
+    started = true;
     for (let prev = Math.max(0, Math.round(i - 2 * period)); prev <= i - Math.round(period / 2); prev += 1) {
       const v = score[prev] - tightness * Math.log((i - prev) / period) ** 2;
       if (arg < 0 || v > best) {

@@ -62,7 +62,9 @@ export function bandFlux(mono, rate, hop, bands, size = 1024) {
         const d = mag[k] - prev[k];
         if (d > 0) s += d;
       }
-      out[bi][f] = f === 0 ? 0 : s / (b - a + 1);
+      // Until the previous window lies wholly inside the clip, the rise is the
+      // zero padding ending, not an onset (a clip cut mid-song would open on a spike).
+      out[bi][f] = (f - 1) * hop < half ? 0 : s / (b - a + 1);
     });
     prev.set(mag);
   }

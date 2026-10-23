@@ -24,7 +24,7 @@ const FPS = Math.floor(RATE / HOP);
 // plain f * HOP drifts ~9ms per window; place frames by the window they came from.
 export const frameTime = (f) => (Math.floor(f / KEPT) * STRIDE + (f % KEPT) * HOP) / RATE;
 
-let loading = null;
+const loading = new Map();
 
 async function backend(tf) {
   // WebGL on a page or, through OffscreenCanvas, in a worker; Node gets the CPU.
@@ -40,8 +40,8 @@ async function backend(tf) {
 
 // `source` is the model.json URL, or any tfjs IOHandler (tests load from disk).
 export function loadModel(source = "/models/basic-pitch/model.json") {
-  if (loading) return loading;
-  loading = (async () => {
+  if (loading.has(source)) return loading.get(source);
+  const promise = (async () => {
     const tf = await import("@tensorflow/tfjs-core");
     const { loadGraphModel } = await import("@tensorflow/tfjs-converter");
     await backend(tf);
@@ -49,10 +49,9 @@ export function loadModel(source = "/models/basic-pitch/model.json") {
     const model = await loadGraphModel(source);
     return { tf, model, backend: tf.getBackend() };
   })();
-  loading.catch(() => {
-    loading = null;
-  });
-  return loading;
+  loading.set(source, promise);
+  promise.catch(() => loading.delete(source));
+  return promise;
 }
 
 // mono: Float32Array at 22050Hz. Returns flat row-major matrices, one row per
