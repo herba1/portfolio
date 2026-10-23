@@ -82,6 +82,8 @@ export default function ScrollGuard() {
     };
 
     const onDown = (event) => {
+      // A tile's idle demo (TileDemos) is not a visitor.
+      if (!event.isTrusted) return;
       const tile = tileOf(event.target);
       if (focused && tile !== focused) unfocus();
       if (!tile || !root.contains(tile)) {
@@ -96,6 +98,7 @@ export default function ScrollGuard() {
       wheelUntil = performance.now() + PRESS_WINDOW_MS;
     };
     const onMove = (event) => {
+      if (!event.isTrusted) return;
       // A drag in progress keeps its tile in hand.
       if (engaged && event.buttons && engaged.contains(event.target)) {
         engage(engaged, PRESS_WINDOW_MS + WHEEL_GAP_MS);
