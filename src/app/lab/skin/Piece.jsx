@@ -81,7 +81,7 @@ export default function Piece({ embedded = false }) {
           <header ref={captionRef} className="skin-caption">
             <div className="skin-caption-text">
               <h1 className="skin-heading">8-Bit Player</h1>
-              <p className="skin-hint">Your top songs remade as chiptunes on four sound channels. Press play, double-click a track, slide the EQ, drag the windows.</p>
+              <p className="skin-hint">Your top songs, transcribed from their real previews by a pitch model and remade as chiptunes on four sound channels. Press play, double-click a track, or drop in a song of your own.</p>
             </div>
             <button type="button" className="skin-sound" data-state={sound} aria-pressed={sound === "on"} onClick={toggleSound}>
               <SpeakerIcon on={sound !== "off"} />

@@ -1,17 +1,18 @@
 {
   "title": "8-Bit Player",
-  "description": "herb's top songs remade as 8-bit chiptunes inside a pixel-crisp early-2000s player: two pulse channels, a triangle bass and a noise drum kit play each remake live, while the spectrum analyser, oscilloscope and channel meters read the real output and the ten-band EQ really filters it. Double-click a track, slide the EQ, drag the windows and they snap together.",
+  "description": "herb's top songs converted into 8-bit chiptunes inside a pixel-crisp early-2000s player: each track's real 30-second preview is transcribed by a pitch model in the browser, split into melody, chords, bass and drums, and replayed on two pulse channels, a triangle and a noise kit. Drop in any song to convert it, save the result as MIDI, slide the EQ, drag the windows.",
   "tags": [
     "Y2K",
     "Interface",
     "Music",
     "Sound",
     "Pixel",
-    "Chiptune"
+    "Chiptune",
+    "Machine Learning"
   ],
   "status": "shipped",
   "createdAt": "2026-10-20T14:00:00.000Z",
-  "intent": "One period object finished to the edge, now with its own sound: every song in the playlist becomes a short NES-style arrangement synthesised in Web Audio (band-limited pulse waves with duty changes, a stepped triangle, LFSR noise, envelopes and vibrato) on a lookahead clock, and every readout on the skin is drawn from that real signal.",
+  "intent": "One period object finished to the edge, now hearing the real songs: Spotify's Basic Pitch model runs in a worker on each track's preview, a beat tracker, chord Viterbi and line tracker turn its notes into parts, and the parts are rebuilt as an NES-style arrangement (band-limited pulse waves, tracker arpeggios, a stepped triangle, LFSR noise) on the song's own beat grid, so every readout on the skin is drawn from that signal.",
   "tile": {
     "cols": 4,
     "rows": 4
@@ -21,6 +22,8 @@
     "https://web.dev/articles/audio-scheduling",
     "https://developer.mozilla.org/en-US/docs/Web/API/PeriodicWave",
     "https://developer.mozilla.org/en-US/docs/Web/API/BiquadFilterNode",
-    "herb reference board: Y2K found-footage montage (fa23bcd4), CRT green terminal text and early-2000s media objects"
+    "herb reference board: Y2K found-footage montage (fa23bcd4), CRT green terminal text and early-2000s media objects",
+    "https://github.com/spotify/basic-pitch",
+    "https://www.ee.columbia.edu/~dpwe/pubs/Ellis07-beattrack.pdf"
   ]
 }

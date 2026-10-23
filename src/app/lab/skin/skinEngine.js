@@ -1,5 +1,6 @@
 import { BANDS, createSkinAudio } from "./skinAudio";
-import { activity, renderSong } from "./skinChip";
+import { activity, renderSong } from "@/lib/chiptune/synth";
+import { createConverter } from "./skinConvert";
 import { arrange } from "./skinSongs";
 import { drawDigit, drawText, fitText, textWidth } from "./skinFont";
 
@@ -59,10 +60,12 @@ const songFor = (t) => {
   return songCache.get(key);
 };
 
-function buildTracks(list) {
+function buildTracks(list, converter) {
   return list.map((t) => {
-    const song = songFor(t);
-    return { artist: t.artist || "Unknown", title: t.title, album: t.album || "", length: song.length, song };
+    const artist = t.artist || "Unknown";
+    const job = converter?.get({ title: t.title, artist });
+    const song = job?.state === "ready" ? job.song : songFor(t);
+    return { artist, title: t.title, album: t.album || "", length: song.length, song, file: t.file ?? null };
   });
 }
 
@@ -125,6 +128,10 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
   audio.onState(onAudio);
   const root = stage.closest(".skin") || stage;
   let tracks = buildTracks(songs);
+  // After the first gesture every track the visitor plays is converted from
+  // its real preview; until a remake is ready the player holds at 0:00.
+  let armed = false;
+  const converter = createConverter({ onChange: (job) => onJob(job) });
   let totalLength = tracks.reduce((s, t) => s + t.length, 0);
   let destroyed = false;
   let raf = 0;
@@ -140,7 +147,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
   const chanShown = new Float32Array(4);
   const win = new Float32Array(FFT_N);
 
-  const player = { index: 0, pos: 6, playing: true, startedAt: performance.now(), paused: false, shuffle: false, repeat: true };
+  const player = { index: 0, pos: 6, playing: true, startedAt: performance.now(), paused: false, shuffle: false, repeat: true, waiting: false };
   const ui = { timeMode: "elapsed", vis: "spectrum", volume: 0.72, balance: 0, eqOn: true, pre: 0, bands: PRESETS[0][2].slice(), target: PRESETS[0][2].slice(), preTarget: 0, preset: 0, pressed: null, seekDrag: null, notice: null, noticeUntil: 0, marquee: 0, playlistSel: 0, playlistTop: 0 };
   const bars = new Float32Array(BAR_N);
   const peaks = new Float32Array(BAR_N);
@@ -173,7 +180,59 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     desk.append(canvas);
     wins[id] = { id, x: 0, y: 0, w, h, visible: true, canvas, ctx, dirty: true };
   }
-  wins.main.canvas.setAttribute("aria-label", "Player. Z previous, X play, C pause, V stop, B next.");
+  wins.main.canvas.setAttribute("aria-label", "Player. Z previous, X play, C pause, V stop, B next, L add a song file.");
+
+  // Your own song: the playlist's ADD button, the L key, or a file dropped
+  // anywhere on the player. It goes to the top of the list and plays once
+  // it has been converted.
+  const picker = document.createElement("input");
+  picker.type = "file";
+  picker.accept = "audio/*,.mp3,.m4a,.wav,.ogg,.flac,.aac";
+  picker.hidden = true;
+  root.append(picker);
+  const addFile = (file) => {
+    if (!file) return;
+    if (file.type && !file.type.startsWith("audio/") && !file.type.startsWith("video/")) {
+      notice("THAT IS NOT AN AUDIO FILE", 2000);
+      return;
+    }
+    const job = converter.addFile(file);
+    const song = songFor({ title: job.title, artist: job.artist });
+    tracks = [{ artist: job.artist, title: job.title, album: "", length: song.length, song, file: job }, ...tracks];
+    totalLength = tracks.reduce((s, t) => s + t.length, 0);
+    ui.playlistSel = 0;
+    ui.playlistTop = 0;
+    armed = true;
+    startTrack(0, true);
+  };
+  picker.addEventListener("change", () => {
+    addFile(picker.files?.[0]);
+    picker.value = "";
+  });
+  const onDragOver = (e) => {
+    if (!e.dataTransfer?.types?.includes("Files")) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    root.dataset.drop = "";
+  };
+  const onDragLeave = (e) => {
+    if (e.relatedTarget && root.contains(e.relatedTarget)) return;
+    delete root.dataset.drop;
+  };
+  const onDrop = (e) => {
+    if (!e.dataTransfer?.files?.length) return;
+    e.preventDefault();
+    delete root.dataset.drop;
+    audio.arm(songPos);
+    addFile(e.dataTransfer.files[0]);
+    // A drop doesn't count as a gesture that may start audio.
+    window.setTimeout(() => {
+      if (!destroyed && audio.blocked()) notice("CLICK THE PLAYER FOR SOUND", 3000);
+    }, 400);
+  };
+  root.addEventListener("dragover", onDragOver);
+  root.addEventListener("dragleave", onDragLeave);
+  root.addEventListener("drop", onDrop);
   wins.main.canvas.setAttribute("role", "img");
 
   const songPos = () => (player.playing && !player.paused ? player.pos + (performance.now() - player.startedAt) / 1000 : player.pos);
@@ -192,8 +251,74 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
 
   const syncAudio = () => {
     audio.setSong(current().song);
-    if (player.playing && !player.paused) audio.play(songPos());
+    if (player.playing && !player.paused && !player.waiting) audio.play(songPos());
     else audio.stop();
+  };
+
+  const jobFor = (t) => t.file ?? converter.get(t);
+
+  // Ask for the current track's remake; hold playback while it converts.
+  const want = () => {
+    const t = current();
+    const job = t.file ?? converter.request(t);
+    player.waiting = job.state === "queued" || job.state === "converting";
+    if (player.waiting) {
+      player.pos = 0;
+      player.startedAt = performance.now();
+    }
+    return job;
+  };
+
+  const FAILED = {
+    "too-large": "TOO BIG: 40 MB AT MOST",
+    "too-short": "TOO SHORT: NEED 3 SECONDS",
+    silent: "THAT FILE IS SILENT",
+    "no-notes": "NO NOTES FOUND IN THAT FILE",
+  };
+
+  const onJob = (job) => {
+    if (destroyed) return;
+    const t = current();
+    const mine = jobFor(t) === job;
+    if (job.state === "failed" && job.file) {
+      // A file we couldn't hear has nothing to fall back on: take it out,
+      // whether or not it's the one playing.
+      const gone = tracks.findIndex((x) => x.file === job);
+      if (gone >= 0 && tracks.length > 1) {
+        tracks = tracks.filter((_, i) => i !== gone);
+        totalLength = tracks.reduce((s, x) => s + x.length, 0);
+        notice(FAILED[job.error?.code] ?? "COULD NOT READ THAT FILE", 2600);
+        if (mine) {
+          player.waiting = false;
+          startTrack(Math.min(gone, tracks.length - 1), false);
+          return;
+        }
+        if (gone < player.index) player.index -= 1;
+        ui.playlistSel = Math.min(ui.playlistSel, tracks.length - 1);
+        mark("main", "pl");
+        return;
+      }
+    }
+    for (const tr of tracks) {
+      if (jobFor(tr) !== job || job.state !== "ready" || tr.song === job.song) continue;
+      tr.song = job.song;
+      tr.length = job.song.length;
+    }
+    totalLength = tracks.reduce((s, x) => s + x.length, 0);
+    if (mine && player.waiting && job.state !== "queued" && job.state !== "converting") {
+      player.waiting = false;
+      if (job.state === "failed") notice("NO PREVIEW: PLAYING A MADE-UP REMAKE", 2600);
+      const held = player.paused;
+      startTrack(player.index, player.playing);
+      if (held) {
+        player.paused = true;
+        syncAudio();
+      }
+      // While this one plays, get the next one ready.
+      const next = tracks[upcoming()];
+      if (!next.file) converter.request(next, false);
+    }
+    mark("main", "pl");
   };
 
   const startTrack = (i, play = true) => {
@@ -203,6 +328,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     player.paused = false;
     player.startedAt = performance.now();
     ui.marquee = 0;
+    if (armed && play) want();
+    else player.waiting = false;
     syncAudio();
     const t = current();
     onLive(`${t.artist}, ${t.title}`);
@@ -215,28 +342,44 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     if (i >= ui.playlistTop + PL_ROWS) ui.playlistTop = i - PL_ROWS + 1;
   };
 
+  // The track `next` will play. Shuffle picks it ahead of time so the
+  // prefetch converts the right one.
+  const upcoming = () => {
+    if (!player.shuffle) return (player.index + 1) % tracks.length;
+    if (player.shuffleNext == null || player.shuffleNext >= tracks.length) player.shuffleNext = Math.floor(Math.random() * tracks.length);
+    return player.shuffleNext;
+  };
+
+  // Leaving pause (or a seek after stop) plays the remake, so ask for it.
+  const resume = () => {
+    player.paused = false;
+    player.startedAt = performance.now();
+    if (armed) want();
+    syncAudio();
+  };
+
   const actions = {
     prev: () => startTrack(songPos() > 4 ? player.index : player.index - 1, player.playing),
-    next: () => startTrack(player.shuffle ? Math.floor(Math.random() * tracks.length) : player.index + 1, player.playing),
+    next: () => {
+      const i = upcoming();
+      player.shuffleNext = null;
+      startTrack(i, player.playing);
+    },
     play: () => {
       if (player.playing && !player.paused) startTrack(player.index);
       else if (player.paused) {
-        player.paused = false;
-        player.startedAt = performance.now();
-        syncAudio();
+        resume();
         mark("main");
       } else startTrack(player.index);
     },
     pause: () => {
       if (!player.playing) return;
-      if (player.paused) {
-        player.paused = false;
-        player.startedAt = performance.now();
-      } else {
+      if (player.paused) resume();
+      else {
         player.pos = songPos();
         player.paused = true;
+        syncAudio();
       }
-      syncAudio();
       mark("main");
     },
     stop: () => {
@@ -253,6 +396,22 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     repeat: () => {
       player.repeat = !player.repeat;
       notice(`REPEAT: ${player.repeat ? "ON" : "OFF"}`);
+    },
+    add: () => picker.click(),
+    midi: () => {
+      const t = current();
+      const job = jobFor(t);
+      if (job?.state !== "ready") {
+        notice(player.waiting ? "MIDI: STILL CONVERTING" : "MIDI: PLAY THE TRACK TO CONVERT IT FIRST", 2000);
+        return;
+      }
+      const url = URL.createObjectURL(new Blob([job.midi()], { type: "audio/midi" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${t.artist} - ${t.title} (8-bit).mid`.replace(/[/\\?%*:|"<>]/g, "-");
+      a.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      notice("MIDI: SAVED");
     },
     eqbtn: () => toggleWin("eq"),
     plbtn: () => toggleWin("pl"),
@@ -315,6 +474,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       ...BANDS.map((_, i) => ({ id: `band-${i}`, r: [76 + i * 18, 36, 18, 67], kind: "slider" })),
     ],
     pl: [
+      { id: "add", r: [12, 202, 32, 10], kind: "button" },
+      { id: "midi", r: [12, 214, 32, 10], kind: "button" },
       { id: "list", r: [12, 20, 243, 174], kind: "list" },
       { id: "scroll", r: [256, 20, 12, 174], kind: "slider" },
     ],
@@ -521,6 +682,10 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     c.clip();
     if (ui.notice && now < ui.noticeUntil) {
       drawText(c, fitText(ui.notice, 150), 112, 25, C.lcd);
+    } else if (player.waiting) {
+      const job = jobFor(t);
+      const pct = Math.round((job?.progress ?? 0) * 100);
+      drawText(c, fitText(job?.state === "converting" ? `CONVERTING TO 8-BIT ${pct}%` : "FETCHING PREVIEW..", 150), 112, 25, Math.floor(now / 400) % 2 ? C.lcd : C.lcdHi);
     } else {
       ui.notice = null;
       const msg = `${player.index + 1}. ${t.artist} - ${t.title} (8-BIT) (${fmt(t.length)})  ***  `;
@@ -657,7 +822,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       }
       const t = tracks[i];
       const color = i === player.index ? C.white : C.lcd;
-      const time = fmt(t.length);
+      const job = jobFor(t);
+      const time = job?.state === "converting" ? `${Math.round(job.progress * 100)}%` : job?.state === "queued" ? "..." : fmt(t.length);
       const tw = textWidth(time);
       drawText(c, fitText(`${i + 1}. ${t.artist} - ${t.title}`, 243 - tw - 12), 15, y + 2, color);
       drawText(c, time, 252 - tw, y + 2, color);
@@ -668,9 +834,17 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     panel(c, 258, ty, 8, 18, C.light);
     c.fillStyle = C.base;
     for (let i = 0; i < 3; i += 1) c.fillRect(260, ty + 6 + i * 2, 4, 1);
-    inset(c, 12, 202, 118, 22);
-    drawText(c, `${tracks.length} TRACKS`, 16, 206, C.lcd);
-    drawText(c, `TOTAL ${fmtLong(totalLength)}`, 16, 215, C.lcd);
+    for (const [id, label] of [
+      ["add", "+ADD"],
+      ["midi", "MIDI"],
+    ]) {
+      const r = CONTROLS.pl.find((k) => k.id === id).r;
+      const off = id === "midi" && jobFor(current())?.state !== "ready";
+      button(c, r, ui.pressed === id, (x, y) => drawText(c, label, x + Math.round((r[2] - textWidth(label)) / 2), y + 3, off ? C.textDim : C.text));
+    }
+    inset(c, 48, 202, 82, 22);
+    drawText(c, `${tracks.length} TRACKS`, 52, 206, C.lcd);
+    drawText(c, `TOTAL ${fmtLong(totalLength)}`, 52, 215, C.lcd);
     inset(c, 138, 202, 128, 22);
     const t = current();
     drawText(c, fitText(`${player.index + 1}. ${t.title}`, 120), 142, 206, C.lcd);
@@ -785,7 +959,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     const dt = Math.min(0.05, (now - lastT) / 1000);
     lastT = now;
     let again = false;
-    if (player.playing && !player.paused) {
+    if (player.waiting) player.startedAt = performance.now();
+    if (player.playing && !player.paused && !player.waiting) {
       const t = current();
       if (songPos() >= t.length) {
         if (player.index === tracks.length - 1 && !player.repeat && !player.shuffle) actions.stop();
@@ -813,7 +988,7 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       again = true;
     }
     winRate = fillWindow();
-    activity(player.playing ? current().song : null, songPos(), chanLevels);
+    activity(player.playing && !player.waiting ? current().song : null, songPos(), chanLevels);
     for (let i = 0; i < 4; i += 1) {
       const target = player.playing && !player.paused ? chanLevels[i] : 0;
       chanShown[i] = target > chanShown[i] ? target : Math.max(target, chanShown[i] - dt * 5);
@@ -1106,18 +1281,19 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
     }
   };
 
+  // The wheel scrolls the list only while the list can move that way; at
+  // either end, or with nothing to scroll, it scrolls the page as usual.
   const onWheel = (e) => {
     const id = e.currentTarget.dataset.win;
-    if (id !== "pl") return;
-    e.preventDefault();
+    if (id !== "pl" || Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
     const n = Math.sign(e.deltaY) * Math.max(1, Math.min(4, Math.round(Math.abs(e.deltaY) / 30)));
-    const max = tracks.length - PL_ROWS;
+    const max = Math.max(0, tracks.length - PL_ROWS);
     const next = Math.max(0, Math.min(max, ui.playlistTop + n));
-    if (next !== ui.playlistTop) {
-      ui.playlistTop = next;
-      audio.click("notch");
-      mark("pl");
-    }
+    if (next === ui.playlistTop) return;
+    e.preventDefault();
+    ui.playlistTop = next;
+    audio.click("notch");
+    mark("pl");
   };
 
   for (const w of Object.values(wins)) {
@@ -1144,6 +1320,8 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       audio.click("button");
       if (player.playing) actions.pause();
       else actions.play();
+    } else if (k === "l") {
+      picker.click();
     } else if (k === "arrowdown" || k === "arrowup") {
       ui.playlistSel = Math.max(0, Math.min(tracks.length - 1, ui.playlistSel + (k === "arrowdown" ? 1 : -1)));
       ensureVisible(ui.playlistSel);
@@ -1167,11 +1345,19 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
   const inputScope = embedded ? root : window;
   inputScope.addEventListener("keydown", onKey);
 
-  let armed = false;
+  const arm = () => {
+    if (armed) return;
+    armed = true;
+    if (player.playing && !player.paused) {
+      want();
+      syncAudio();
+      mark("main", "pl");
+    }
+  };
   const onGesture = (e) => {
     if (e.target?.closest?.(".skin-sound")) return;
     if (e.type === "keydown" && (e.metaKey || e.ctrlKey || e.altKey || e.key === "Tab" || e.key === "Escape")) return;
-    armed = true;
+    arm();
     audio.arm(songPos);
   };
   const GESTURES = ["pointerdown", "pointerup", "touchend", "keydown"];
@@ -1218,13 +1404,14 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
 
   return {
     async setSound(on) {
+      if (on) arm();
       const ok = await audio.setEnabled(on, songPos);
-      if (on && ok && player.playing && !player.paused && !audio.live()) audio.play(songPos());
+      if (on && ok && player.playing && !player.paused && !player.waiting && !audio.live()) audio.play(songPos());
       return ok;
     },
     setTracks(list) {
       if (!list?.length) return;
-      const next = buildTracks(list);
+      const next = [...tracks.filter((t) => t.file), ...buildTracks(list, converter)];
       const same = next.length === tracks.length && next.every((t, i) => t.song === tracks[i].song);
       if (same) return;
       tracks = next;
@@ -1242,7 +1429,12 @@ export function createSkin(stage, { embedded = false, caption = null, songs = []
       inputScope.removeEventListener("keydown", onKey);
       for (const type of GESTURES) inputScope.removeEventListener(type, onGesture, { capture: true });
       document.removeEventListener("visibilitychange", onVis);
+      root.removeEventListener("dragover", onDragOver);
+      root.removeEventListener("dragleave", onDragLeave);
+      root.removeEventListener("drop", onDrop);
+      converter.destroy();
       audio.destroy();
+      picker.remove();
       desk.remove();
     },
   };

@@ -1,3 +1,8 @@
+// The 2A03-style voices every chiptune song plays through: two band-limited
+// pulse channels, a stepped triangle and LFSR noise. A song is
+// { events, length }, each event { s, d, ch, m, v, duty?, env?, vib?, slide?, arp? }
+// for ch 0-2 (pulse, pulse, triangle) or { s, ch: 3, kind, v } for the noise kit.
+
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const HARMONICS = 64;
 export const CH_GAIN = [0.2, 0.15, 0.42, 0.3];
@@ -63,19 +68,31 @@ function tone(ctx, W, dest, when, dur, ev, flags) {
   const tri = ev.ch === 2;
   osc.setPeriodicWave(tri ? W.triangle : W.pulse(ev.duty ?? 0.5));
   const f = mtof(ev.m);
-  if (ev.slide) {
+  if (ev.arp) {
+    // Tracker-style arpeggio: one channel cycles the chord tones fast enough
+    // to read as a chord.
+    const step = 1 / (ev.arpRate ?? 50);
+    const stop = when + dur + 0.05;
+    for (let t = when, i = 0; t < stop; t += step, i += 1) osc.frequency.setValueAtTime(mtof(ev.m + ev.arp[i % ev.arp.length]), t);
+  } else if (ev.slide) {
     osc.frequency.setValueAtTime(mtof(ev.m + ev.slide), when);
     osc.frequency.exponentialRampToValueAtTime(f, when + 0.07);
   } else osc.frequency.setValueAtTime(f, when);
   const g = ctx.createGain();
   const peak = ev.v;
-  const attack = tri ? 0.003 : 0.005;
-  const sustain = tri ? peak * 0.95 : ev.env === "sustain" ? peak * 0.78 : peak * 0.52;
-  const decay = ev.env === "sustain" ? 0.25 : 0.09;
+  // A chip envelope starts at full volume: the onset is the transient, so the
+  // attack is only long enough not to click, and a pluck falls away fast.
+  const attack = tri ? 0.002 : 0.0015;
+  const sustain = tri ? peak * 0.95 : ev.env === "sustain" ? peak * 0.78 : peak * 0.5;
+  const decay = ev.env === "sustain" ? 0.25 : 0.055;
   const release = tri ? 0.018 : ev.ch === 0 ? 0.05 : 0.03;
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(peak, when + attack);
   g.gain.setTargetAtTime(sustain, when + attack, decay);
+  // Pin the level the decay has reached before releasing. Without the anchor a
+  // long note leaves one setTarget running for dozens of time constants, which
+  // some Web Audio implementations integrate into a huge spike.
+  if (dur > attack) g.gain.setValueAtTime(sustain + (peak - sustain) * Math.exp(-(dur - attack) / decay), when + dur);
   g.gain.setTargetAtTime(0, when + dur, release);
   const end = when + dur + release * 7;
   osc.connect(g);
@@ -127,11 +144,13 @@ function hit(ctx, W, dest, triDest, when, ev, flags) {
     src.start(when, Math.max(0, offset), len);
     if (flags.live) src.onended = () => g.disconnect();
   };
-  const drop = (from, to, gain, tau, len) => {
+  // A triangle pitch drop: most of the fall happens in the first `fall`
+  // seconds, which is what makes a kick or tom thump rather than whoosh.
+  const drop = (from, to, gain, tau, len, fall = len * 0.6) => {
     const osc = ctx.createOscillator();
     osc.setPeriodicWave(W.triangle);
     osc.frequency.setValueAtTime(from, when);
-    osc.frequency.exponentialRampToValueAtTime(to, when + len * 0.6);
+    osc.frequency.exponentialRampToValueAtTime(to, when + fall);
     const g = ctx.createGain();
     g.gain.setValueAtTime(0, when);
     g.gain.linearRampToValueAtTime(gain, when + 0.002);
@@ -142,14 +161,17 @@ function hit(ctx, W, dest, triDest, when, ev, flags) {
     osc.stop(when + len);
     if (flags.live) osc.onended = () => g.disconnect();
   };
+  // Kick and snare are a short bright click over a body, the way a famitracker
+  // kit layers a noise blip on a triangle drop.
   if (kind === "k") {
-    drop(150, 42, 1.1 * v, 0.06, 0.32);
-    noise(W.noiseLong, "lowpass", 1400, 0.7, 0.35 * v, 0.012, 0.06);
+    drop(240, 45, 1.2 * v, 0.04, 0.22, 0.035);
+    noise(W.noiseLong, "lowpass", 3200, 0.7, 0.55 * v, 0.006, 0.03);
   } else if (kind === "s") {
-    noise(W.noiseLong, "highpass", 900, 0.6, 0.85 * v, 0.07, 0.4);
-    drop(230, 150, 0.45 * v, 0.03, 0.12);
+    noise(W.noiseLong, "highpass", 1800, 0.7, 0.95 * v, 0.012, 0.05);
+    noise(W.noiseLong, "highpass", 900, 0.6, 0.55 * v, 0.06, 0.32);
+    drop(300, 170, 0.5 * v, 0.025, 0.1, 0.02);
   } else if (kind === "h") {
-    noise(W.noiseShort, "highpass", 6500, 0.7, 0.32 * v, 0.014, 0.09, 1.4);
+    noise(W.noiseShort, "highpass", 6500, 0.7, 0.4 * v, 0.012, 0.08, 1.4);
   } else if (kind === "o") {
     noise(W.noiseShort, "highpass", 6000, 0.7, 0.3 * v, 0.06, 0.32, 1.4);
   } else if (kind === "t") {
@@ -189,8 +211,9 @@ export function firstEventAt(events, s) {
   return lo;
 }
 
-export async function renderSong(song, upto, rate = 32000) {
-  const Off = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+// Offline render to mono PCM. `Off` is any OfflineAudioContext constructor
+// (Node passes node-web-audio-api's).
+export async function renderSong(song, upto, rate = 32000, Off = globalThis.OfflineAudioContext || globalThis.webkitOfflineAudioContext) {
   if (!Off) return null;
   const seconds = Math.min(upto, song.length);
   const ctx = new Off(1, Math.ceil(seconds * rate) + 1, rate);
