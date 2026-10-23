@@ -368,8 +368,8 @@
   overscroll-behavior: contain;
 }
 /* The tile clips its paint (content-visibility), so the ring is drawn
-   inside it, over the piece. On a desktop the same ring shows while a click
-   has given the piece the wheel. */
+   inside it, over the piece. Focus is a touch-screen mode only: a desktop
+   piece takes the mouse straight away and shows no ring. */
 .xl-bento__tile::after {
   content: "";
   position: absolute;
@@ -381,7 +381,7 @@
   pointer-events: none;
   transition: opacity 180ms var(--ease-out-quint);
 }
-.xl-tile:is([data-focused], [data-engaged])::after {
+.xl-tile[data-focused]::after {
   opacity: 1;
 }
 .xl-focus {
@@ -428,13 +428,29 @@
   }
 }
 
-/* The touch stand-in for PlateHand's hint (TapHint): a chip in the corner of
-   a plate's tile until the first tap inside it. */
-.xl-tap {
+/* A tile's hint (TileHint): a line saying how the piece is played and a
+   ghost hand acting it out, both gone once the visitor takes hold of the
+   tile. The hand works in the tile's own units, so its path lands on the
+   same part of the piece at any size. */
+.xl-hint {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  container-type: size;
+  pointer-events: none;
+  transition: opacity 240ms var(--ease-out-quint);
+}
+.xl-tile[data-touched] .xl-hint {
+  opacity: 0;
+}
+.xl-tile[data-touched] .xl-hint__hand {
+  animation: none;
+}
+.xl-hint__label {
   position: absolute;
   left: 12px;
   bottom: 12px;
-  z-index: 3;
+  max-width: calc(100% - 24px);
   padding: 4px 10px;
   border-radius: 999px;
   background: var(--color-ink);
@@ -444,14 +460,206 @@
   letter-spacing: var(--text-ui-sm--letter-spacing);
   font-weight: var(--text-ui-sm--font-weight);
   white-space: nowrap;
-  pointer-events: none;
-  transition:
-    opacity 180ms var(--ease-out-quint),
-    transform 260ms var(--ease-overshoot);
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
-.xl-tile[data-tapped] .xl-tap {
+.xl-hint__mouse {
+  display: none;
+}
+@media (hover: hover) and (pointer: fine) {
+  .xl-hint__mouse {
+    display: inline;
+  }
+  .xl-hint__touch {
+    display: none;
+  }
+  /* The visitor is already exploring; the hand steps aside for the cursor. */
+  .xl-tile:hover .xl-hint__hand {
+    visibility: hidden;
+  }
+}
+.xl-hint__hand {
+  position: absolute;
+  /* the fingertip, not the corner, sits on the point */
+  left: -9px;
+  top: -2px;
+  transform-origin: 9px 2px;
+  translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
   opacity: 0;
-  transform: translateY(4px) scale(0.96);
+  filter: drop-shadow(0 2px 4px rgb(0 0 0 / 0.28));
+  animation: xl-hint-tap 3.6s var(--ease-in-out-cubic) var(--hint-delay, 0s) infinite;
+}
+.xl-hint__hand svg {
+  display: block;
+  fill: var(--neutral-0, #fff);
+  stroke: var(--neutral-950, #111);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+/* the press: a ring that opens under the fingertip */
+.xl-hint__hand::before {
+  content: "";
+  position: absolute;
+  left: -9px;
+  top: -16px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 2px solid var(--neutral-0, #fff);
+  box-shadow: 0 0 0 1px rgb(0 0 0 / 0.18);
+  opacity: 0;
+  scale: 0.3;
+  animation: inherit;
+  animation-name: xl-hint-ring;
+}
+.xl-hint[data-gesture="drag"] .xl-hint__hand {
+  animation-name: xl-hint-drag;
+}
+.xl-hint[data-gesture="hold"] .xl-hint__hand {
+  animation-name: xl-hint-hold;
+}
+.xl-hint[data-gesture="hover"] .xl-hint__hand {
+  animation-name: xl-hint-hover;
+}
+.xl-hint[data-gesture="hover"] .xl-hint__hand::before {
+  display: none;
+}
+.xl-tile[data-offscreen] .xl-hint__hand,
+.xl-tile[data-offscreen] .xl-hint__hand::before {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .xl-hint__hand {
+    display: none;
+  }
+}
+
+@keyframes xl-hint-tap {
+  0%,
+  12% {
+    opacity: 0;
+    scale: 1;
+  }
+  22% {
+    opacity: 1;
+    scale: 1;
+  }
+  30% {
+    scale: 0.86;
+  }
+  40% {
+    scale: 1;
+  }
+  52% {
+    scale: 0.86;
+  }
+  62%,
+  76% {
+    opacity: 1;
+    scale: 1;
+  }
+  88%,
+  100% {
+    opacity: 0;
+    scale: 1;
+  }
+}
+@keyframes xl-hint-hold {
+  0%,
+  12% {
+    opacity: 0;
+    scale: 1;
+  }
+  22% {
+    opacity: 1;
+    scale: 1;
+  }
+  30%,
+  66% {
+    opacity: 1;
+    scale: 0.86;
+  }
+  74% {
+    scale: 1;
+  }
+  88%,
+  100% {
+    opacity: 0;
+    scale: 1;
+  }
+}
+@keyframes xl-hint-drag {
+  0%,
+  10% {
+    opacity: 0;
+    scale: 1;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+  18% {
+    opacity: 1;
+    scale: 1;
+  }
+  26% {
+    scale: 0.86;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+  62% {
+    scale: 0.86;
+    translate: calc(var(--x1) * 100cqw) calc(var(--y1) * 100cqh);
+  }
+  70% {
+    opacity: 1;
+    scale: 1;
+  }
+  84%,
+  100% {
+    opacity: 0;
+    scale: 1;
+    translate: calc(var(--x1) * 100cqw) calc(var(--y1) * 100cqh);
+  }
+}
+@keyframes xl-hint-hover {
+  0%,
+  8% {
+    opacity: 0;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+  18% {
+    opacity: 1;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+  48% {
+    translate: calc(var(--x1) * 100cqw) calc(var(--y1) * 100cqh);
+  }
+  76% {
+    opacity: 1;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+  88%,
+  100% {
+    opacity: 0;
+    translate: calc(var(--x0) * 100cqw) calc(var(--y0) * 100cqh);
+  }
+}
+@keyframes xl-hint-ring {
+  0%,
+  26% {
+    opacity: 0;
+    scale: 0.3;
+  }
+  30% {
+    opacity: 0.9;
+    scale: 0.5;
+  }
+  44% {
+    opacity: 0;
+    scale: 1.2;
+  }
+  100% {
+    opacity: 0;
+    scale: 1.2;
+  }
 }
 
 /* A tile's live mount and its poster. The poster sits over the piece until

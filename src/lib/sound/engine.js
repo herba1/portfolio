@@ -13,6 +13,7 @@
 // on the spot.
 
 import { soundAllowed } from "./desktopOnly.js";
+import { gateToTile, markShared, ownerTile } from "./tileGate.js";
 import { rng, roomImpulseData } from "./synth.js";
 
 export { seamless } from "./synth.js";
@@ -84,6 +85,7 @@ function bus() {
   } catch {
     return null;
   }
+  markShared(ctx);
   const input = ctx.createGain();
   input.gain.value = 1;
   const lowCut = ctx.createBiquadFilter();
@@ -231,6 +233,8 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
   let destroyed = false;
   let out = null;
   let send = null;
+  let gate = null;
+  let claimed = false;
   const client = { on };
   warm();
 
@@ -240,15 +244,27 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     if (!b) return false;
     out = b.ctx.createGain();
     out.gain.value = client.on ? db(level) : 0;
-    out.connect(b.input);
+    // On the experiments index the gate follows this piece's tile on screen
+    // (tileGate.js); everywhere else it stays open.
+    gate = b.ctx.createGain();
+    out.connect(gate);
+    gate.connect(b.input);
     if (room > 0) {
       send = b.ctx.createGain();
       send.gain.value = room;
-      out.connect(send);
+      gate.connect(send);
       send.connect(b.room);
     }
     b.clients.add(client);
     return true;
+  };
+  // The tile this piece lives in is the one in hand when it first sounds.
+  const claim = () => {
+    if (claimed || !gate) return;
+    const tile = ownerTile();
+    if (!tile) return;
+    claimed = true;
+    gateToTile(tile, gate, shared.ctx);
   };
 
   // Without a worker: render in idle slots, one take per slot.
@@ -307,6 +323,7 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     // gesture.
     unlock() {
       if (!client.on || !ensure()) return;
+      claim();
       wantRunning();
     },
     async setEnabled(value) {
@@ -346,6 +363,7 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     // length together; at is a delay in seconds; pick fixes the take.
     play(bank, { gain = 0, pan = 0, rate = 1, at = 0, pick = -1 } = {}) {
       if (!bank || !live()) return null;
+      claim();
       const ctx = shared.ctx;
       if (ctx.state !== "running") {
         const asked = performance.now();
@@ -389,6 +407,7 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
     // loops of one take can start in phase.
     loop(bank, { pan = 0, offset = -1 } = {}) {
       if (!ensure() || !bank) return null;
+      claim();
       const ctx = shared.ctx;
       const g = ctx.createGain();
       g.gain.value = 0;
@@ -460,13 +479,16 @@ export function createSound({ level = -6, room = 0.12, on = true } = {}) {
       }
       const node = out;
       const sendNode = send;
+      const gateNode = gate;
       out = null;
       send = null;
+      gate = null;
       if (node && shared) {
         // Let anything still ringing finish under a short fade.
         glide(node.gain, 0, shared.ctx.currentTime, 0.03);
         setTimeout(() => {
           node.disconnect();
+          gateNode?.disconnect();
           sendNode?.disconnect();
         }, 300);
       }
