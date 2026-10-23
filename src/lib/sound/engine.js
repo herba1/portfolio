@@ -12,6 +12,7 @@
 // tear down. A take that has not arrived yet is skipped rather than rendered
 // on the spot.
 
+import { soundAllowed } from "./desktopOnly.js";
 import { rng, roomImpulseData } from "./synth.js";
 
 export { seamless } from "./synth.js";
@@ -74,6 +75,7 @@ const idle = (fn) =>
 
 function bus() {
   if (shared) return shared;
+  if (!soundAllowed()) return null;
   const Ctx = typeof window !== "undefined" && (window.AudioContext || window.webkitAudioContext);
   if (!Ctx) return null;
   let ctx;

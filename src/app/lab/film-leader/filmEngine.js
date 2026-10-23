@@ -774,25 +774,27 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     if (host.dataset.cursor !== state) host.dataset.cursor = state;
   };
 
-  const onDown = (e) => {
-    if (pointer.id !== null) return;
-    if (e.button !== undefined && e.button !== 0) return;
-    const hit = pick(e.clientX, e.clientY, e.pointerType === "touch" ? 14 : 4);
-    if (!hit) return;
-    e.preventDefault();
+  // A finger on the strip might be the start of a page scroll, so touch
+  // waits: the strip is taken only once the finger moves and the browser
+  // hasn't claimed the gesture (it cancels the pointer when it does), and a
+  // press that ends where it began is a tap. Grabbing on the press made every
+  // scroll that started on the film yank it up, drop it, and flip a frame.
+  let pending = null;
+
+  const grab = (id, x, y, hit) => {
     keyPull = null;
-    host.setPointerCapture?.(e.pointerId);
-    pointer.id = e.pointerId;
-    pointer.x = e.clientX;
-    pointer.y = e.clientY;
-    pointer.downX = e.clientX;
-    pointer.downY = e.clientY;
+    host.setPointerCapture?.(id);
+    pointer.id = id;
+    pointer.x = x;
+    pointer.y = y;
+    pointer.downX = x;
+    pointer.downY = y;
     pointer.moved = false;
     pointer.tile = tileAt(hit);
     const i = Math.max(0, Math.min(sim.n - 1, Math.round(hit.f / SEG), Math.floor((sim.u - GRIP_FROM_SLOT) / SEG)));
     const k = i * 3;
     const py = sim.pos[k + 1];
-    const ground = planePoint(e.clientX, e.clientY, py);
+    const ground = planePoint(x, y, py);
     pointer.offset = ground ? [sim.pos[k] - ground[0], sim.pos[k + 2] - ground[2]] : [0, 0];
     pointer.startY = py;
     pointer.lift = 0;
@@ -803,7 +805,33 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
     wake(true);
   };
 
+  const toggleTile = (tile) => {
+    if (tile < 2) return;
+    pinned[tile] = !pinned[tile];
+    setFlipTargets();
+    wake(false);
+  };
+
+  const onDown = (e) => {
+    if (pointer.id !== null || pending) return;
+    if (e.button !== undefined && e.button !== 0) return;
+    const hit = pick(e.clientX, e.clientY, e.pointerType === "touch" ? 14 : 4);
+    if (!hit) return;
+    if (e.pointerType === "touch") {
+      pending = { id: e.pointerId, x: e.clientX, y: e.clientY, hit };
+      return;
+    }
+    e.preventDefault();
+    grab(e.pointerId, e.clientX, e.clientY, hit);
+  };
+
   const onMove = (e) => {
+    if (pending && pending.id === e.pointerId) {
+      if (Math.hypot(e.clientX - pending.x, e.clientY - pending.y) <= TAP_PX) return;
+      const { x, y, hit } = pending;
+      pending = null;
+      grab(e.pointerId, x, y, hit);
+    }
     if (pointer.id === e.pointerId) {
       pointer.x = e.clientX;
       pointer.y = e.clientY;
@@ -823,14 +851,17 @@ export async function createFilmEngine({ host, canvas, embedded, onReady, onFail
   };
 
   const onUp = (e) => {
+    if (pending && pending.id === e.pointerId) {
+      const { hit } = pending;
+      pending = null;
+      if (e.type === "pointerup") toggleTile(tileAt(hit));
+      return;
+    }
     if (pointer.id !== e.pointerId) return;
-    const tap = !pointer.moved;
+    const tap = !pointer.moved && e.type === "pointerup";
     pointer.id = null;
     sim.release();
-    if (tap && pointer.tile >= 2) {
-      pinned[pointer.tile] = !pinned[pointer.tile];
-      setFlipTargets();
-    }
+    if (tap) toggleTile(pointer.tile);
     host.releasePointerCapture?.(e.pointerId);
     setCursor(e.pointerType === "mouse" && pick(e.clientX, e.clientY, 2) ? "grab" : "idle");
     wake(true);

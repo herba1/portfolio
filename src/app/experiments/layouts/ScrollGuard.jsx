@@ -12,13 +12,18 @@ import { useEffect } from "react";
 // scrollers are held still (layouts.css), and touch only pans the page. A
 // horizontal swipe or a pinch is never a page scroll, so it always reaches
 // the piece.
+//
+// Touch never engages a tile on its own. A finger has no wheel to hand over,
+// only the swipe itself, and on a phone a vertical swipe is the page's: a tap
+// or a sideways drag still reaches the piece, but the next swipe up or down
+// scrolls the index, never a stack or a list inside a tile. A piece that
+// wants the whole finger gets it through focus: the tile's Focus button hands
+// it every gesture, the page holds still around it, and Done, a tap outside,
+// Escape or scrolling it away gives the page back.
 const PRESS_WINDOW_MS = 900;
 // A wheel gesture, trackpad momentum included, arrives as events far closer
 // together than this; a longer gap is a new gesture.
 const WHEEL_GAP_MS = 220;
-// A finger cannot wheel, so a tap engages the tile for its next touches,
-// until the visitor leaves it alone this long.
-const TOUCH_IDLE_MS = 3000;
 
 export default function ScrollGuard() {
   useEffect(() => {
@@ -28,13 +33,14 @@ export default function ScrollGuard() {
     // The wheel may reach the engaged piece until then.
     let wheelUntil = 0;
     let idle = 0;
+    let focused = null;
 
     const tileOf = (target) => (target instanceof Element ? target.closest(".xl-tile") : null);
     const release = () => {
       clearTimeout(idle);
       if (engaged) {
         delete engaged.dataset.engaged;
-        offscreen.unobserve(engaged);
+        if (engaged !== focused) offscreen.unobserve(engaged);
       }
       engaged = null;
       wheelUntil = 0;
@@ -50,31 +56,49 @@ export default function ScrollGuard() {
       idle = setTimeout(release, ms);
     };
 
+    const unfocus = () => {
+      if (!focused) return;
+      delete focused.dataset.focused;
+      focused.querySelector("[data-tile-focus]")?.setAttribute("aria-pressed", "false");
+      if (focused !== engaged) offscreen.unobserve(focused);
+      focused = null;
+    };
+    const focus = (tile) => {
+      unfocus();
+      focused = tile;
+      tile.dataset.focused = "";
+      tile.querySelector("[data-tile-focus]")?.setAttribute("aria-pressed", "true");
+      offscreen.observe(tile);
+    };
+    const onClick = (event) => {
+      const button = event.target instanceof Element ? event.target.closest("[data-tile-focus]") : null;
+      if (!button) return;
+      const tile = tileOf(button);
+      if (tile === focused) unfocus();
+      else focus(tile);
+    };
+    const onKey = (event) => {
+      if (event.key === "Escape") unfocus();
+    };
+
     const onDown = (event) => {
       const tile = tileOf(event.target);
+      if (focused && tile !== focused) unfocus();
       if (!tile || !root.contains(tile)) {
         release();
         return;
       }
-      // A touch engages only once it ends as a tap (below): engaging on the
-      // press would hand the swipe it starts to the piece's own scroller.
       if (event.pointerType === "touch") {
-        if (tile !== engaged) release();
-        else engage(tile, TOUCH_IDLE_MS);
+        release();
         return;
       }
       engage(tile, PRESS_WINDOW_MS + WHEEL_GAP_MS);
       wheelUntil = performance.now() + PRESS_WINDOW_MS;
     };
-    const onUp = (event) => {
-      if (event.pointerType !== "touch") return;
-      const tile = tileOf(event.target);
-      if (tile && root.contains(tile)) engage(tile, TOUCH_IDLE_MS);
-    };
     const onMove = (event) => {
       // A drag in progress keeps its tile in hand.
       if (engaged && event.buttons && engaged.contains(event.target)) {
-        engage(engaged, event.pointerType === "touch" ? TOUCH_IDLE_MS : PRESS_WINDOW_MS + WHEEL_GAP_MS);
+        engage(engaged, PRESS_WINDOW_MS + WHEEL_GAP_MS);
         wheelUntil = performance.now() + PRESS_WINDOW_MS;
       }
     };
@@ -91,23 +115,30 @@ export default function ScrollGuard() {
       if (tile === engaged) release();
       event.stopPropagation();
     };
-    const offscreen = new IntersectionObserver(([entry]) => {
-      if (!entry.isIntersecting && entry.target === engaged) release();
+    const offscreen = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) continue;
+        if (entry.target === engaged) release();
+        if (entry.target === focused) unfocus();
+      }
     });
 
     // Capture, and on the window for the press, so it lands before any piece
     // can stop it.
     window.addEventListener("pointerdown", onDown, { capture: true, passive: true });
-    window.addEventListener("pointerup", onUp, { capture: true, passive: true });
     root.addEventListener("pointermove", onMove, { capture: true, passive: true });
     root.addEventListener("wheel", onWheel, { capture: true, passive: true });
+    root.addEventListener("click", onClick);
+    window.addEventListener("keydown", onKey);
     return () => {
       release();
+      unfocus();
       offscreen.disconnect();
       window.removeEventListener("pointerdown", onDown, { capture: true });
-      window.removeEventListener("pointerup", onUp, { capture: true });
       root.removeEventListener("pointermove", onMove, { capture: true });
       root.removeEventListener("wheel", onWheel, { capture: true });
+      root.removeEventListener("click", onClick);
+      window.removeEventListener("keydown", onKey);
     };
   }, []);
   return null;

@@ -79,16 +79,6 @@ export const EXPERIMENTS = [
     updated: "2026-10-05",
   },
   {
-    slug: "/ascii-cover",
-    title: "ASCII cover",
-    seoTitle: "ASCII cover — album art redrawn in characters",
-    description:
-      "An album cover redrawn as text, one symbol per cell. Click and a ring of the next cover ripples out from your pointer.",
-    tags: ["Canvas", "Music"],
-    date: "2026-10-05",
-    updated: "2026-10-05",
-  },
-  {
     slug: "/blobs",
     title: "Flower wall",
     seoTitle: "Flower wall — a field of soft flowers in WebGL",

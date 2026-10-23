@@ -117,10 +117,10 @@
     "flowers flowers flowers flowers flowers flowers"
     "flowers flowers flowers flowers flowers flowers"
     "flowers flowers flowers flowers flowers flowers"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
-    "ring ring ring ascii ascii ascii"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
+    "ring ring ring ring ring ring"
     "counter counter counter counter counter counter"
     "counter counter counter counter counter counter"
     "counter counter counter counter counter counter"
@@ -346,12 +346,112 @@
    scroll over it: a finger pans the page, and the pieces' own scrollers hold
    still so a wheel passes through them to the page. Their scroll position is
    kept, and comes back to life with the first press inside. */
-.xl-tile:not([data-engaged]) .piece-box * {
+.xl-tile:not([data-engaged], [data-focused]) .piece-box * {
   touch-action: pan-y !important;
 }
-.xl-tile:not([data-engaged])
+.xl-tile:not([data-engaged], [data-focused])
   :is(.deck, .ol-root, .flyout-panel, .bd-dock__panel, .cf-tracks, .hm-scroll, .pull-vinyl-scroll, .ink-panel__body) {
   overflow-y: hidden !important;
+}
+
+/* Focus (ScrollGuard): on a touch screen a tile hands the piece every
+   gesture only once its Focus button is pressed. Inside, nothing reaches the
+   page: the box takes no pan of its own, and a scroller inside it keeps its
+   overscroll. A ring says the tile has the finger; Done gives it back. */
+.xl-bento__tile {
+  position: relative;
+}
+.xl-tile[data-focused] .piece-box {
+  touch-action: none;
+}
+.xl-tile[data-focused] .piece-box * {
+  overscroll-behavior: contain;
+}
+/* The tile clips its paint (content-visibility), so the ring is drawn
+   inside it, over the piece. On a desktop the same ring shows while a click
+   has given the piece the wheel. */
+.xl-bento__tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  border-radius: var(--radius-xl);
+  box-shadow: inset 0 0 0 2px var(--color-ink);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 180ms var(--ease-out-quint);
+}
+.xl-tile:is([data-focused], [data-engaged])::after {
+  opacity: 1;
+}
+.xl-focus {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px 4px 10px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--color-surface);
+  color: var(--color-ink);
+  box-shadow: 0 0 0 1px var(--color-border, rgb(0 0 0 / 0.08)), 0 2px 8px rgb(0 0 0 / 0.08);
+  font-size: var(--text-ui);
+  line-height: 24px;
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  -webkit-tap-highlight-color: transparent;
+}
+.xl-focus svg {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.xl-focus__on,
+.xl-tile[data-focused] .xl-focus__idle {
+  display: none;
+}
+.xl-tile[data-focused] .xl-focus__on {
+  display: inline;
+}
+.xl-tile[data-focused] .xl-focus {
+  background: var(--color-ink);
+  color: var(--color-ink-inverse);
+}
+@media (hover: hover) and (pointer: fine) {
+  .xl-focus {
+    display: none;
+  }
+}
+
+/* The touch stand-in for PlateHand's hint (TapHint): a chip in the corner of
+   a plate's tile until the first tap inside it. */
+.xl-tap {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+  z-index: 3;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--color-ink);
+  color: var(--color-ink-inverse);
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--text-ui-sm--font-weight);
+  white-space: nowrap;
+  pointer-events: none;
+  transition:
+    opacity 180ms var(--ease-out-quint),
+    transform 260ms var(--ease-overshoot);
+}
+.xl-tile[data-tapped] .xl-tap {
+  opacity: 0;
+  transform: translateY(4px) scale(0.96);
 }
 
 /* A tile's live mount and its poster. The poster sits over the piece until
@@ -445,7 +545,7 @@
   position: absolute;
   left: 26px;
   top: 28px;
-  padding: 2px 8px;
+  padding: 4px 8px;
   border-radius: 999px;
   background: var(--color-ink);
   color: var(--color-ink-inverse);

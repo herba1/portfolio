@@ -36,7 +36,7 @@ const only = process.argv.slice(process.argv[2]?.startsWith("http") ? 3 : 2).map
 const HANDOFF_MS = 120;
 // Pieces fed live data (recent Spotify tracks) change by the hour, so a still
 // of them would never match what mounts. They get no poster.
-const LIVE_DATA = new Set(["/deck", "/flyout", "/cover-ring", "/ascii-cover", "/counter", "/one-line", "/taffy", "/stir"]);
+const LIVE_DATA = new Set(["/deck", "/flyout", "/cover-ring", "/counter", "/one-line", "/taffy", "/stir"]);
 const QUALITY = 74;
 // The bento below 900px stacks every tile at 4:5; LivePiece serves the narrow
 // still there.

@@ -1,6 +1,5 @@
 .cr {
   --cr-thick: calc(var(--cr-card, 160px) * 0.03);
-  --cr-corner: 10px;
   position: absolute;
   inset: 0;
   perspective: 1300px;
@@ -42,14 +41,12 @@
   width: 100%;
   height: 100%;
   object-fit: cover;
-  border-radius: var(--cr-corner);
   backface-visibility: hidden;
 }
 
 .cr__back {
   position: absolute;
   inset: 0;
-  border-radius: var(--cr-corner);
   transform: translateZ(calc(var(--cr-thick) * -1)) rotateY(180deg);
   backface-visibility: hidden;
   filter: saturate(1.25);
@@ -59,9 +56,9 @@
 .cr__card::after {
   content: "";
   position: absolute;
-  top: calc(var(--cr-corner) * 0.7);
+  top: 0;
   width: var(--cr-thick);
-  height: calc(100% - var(--cr-corner) * 1.4);
+  height: 100%;
   backface-visibility: hidden;
   pointer-events: none;
 }
