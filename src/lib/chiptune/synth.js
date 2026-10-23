@@ -1,3 +1,8 @@
+// The 2A03-style voices every chiptune song plays through: two band-limited
+// pulse channels, a stepped triangle and LFSR noise. A song is
+// { events, length }, each event { s, d, ch, m, v, duty?, env?, vib?, slide?, arp? }
+// for ch 0-2 (pulse, pulse, triangle) or { s, ch: 3, kind, v } for the noise kit.
+
 const mtof = (m) => 440 * Math.pow(2, (m - 69) / 12);
 const HARMONICS = 64;
 export const CH_GAIN = [0.2, 0.15, 0.42, 0.3];
@@ -63,7 +68,13 @@ function tone(ctx, W, dest, when, dur, ev, flags) {
   const tri = ev.ch === 2;
   osc.setPeriodicWave(tri ? W.triangle : W.pulse(ev.duty ?? 0.5));
   const f = mtof(ev.m);
-  if (ev.slide) {
+  if (ev.arp) {
+    // Tracker-style arpeggio: one channel cycles the chord tones fast enough
+    // to read as a chord.
+    const step = 1 / (ev.arpRate ?? 50);
+    const stop = when + dur + 0.05;
+    for (let t = when, i = 0; t < stop; t += step, i += 1) osc.frequency.setValueAtTime(mtof(ev.m + ev.arp[i % ev.arp.length]), t);
+  } else if (ev.slide) {
     osc.frequency.setValueAtTime(mtof(ev.m + ev.slide), when);
     osc.frequency.exponentialRampToValueAtTime(f, when + 0.07);
   } else osc.frequency.setValueAtTime(f, when);
@@ -76,6 +87,10 @@ function tone(ctx, W, dest, when, dur, ev, flags) {
   g.gain.setValueAtTime(0, when);
   g.gain.linearRampToValueAtTime(peak, when + attack);
   g.gain.setTargetAtTime(sustain, when + attack, decay);
+  // Pin the level the decay has reached before releasing. Without the anchor a
+  // long note leaves one setTarget running for dozens of time constants, which
+  // some Web Audio implementations integrate into a huge spike.
+  if (dur > attack) g.gain.setValueAtTime(sustain + (peak - sustain) * Math.exp(-(dur - attack) / decay), when + dur);
   g.gain.setTargetAtTime(0, when + dur, release);
   const end = when + dur + release * 7;
   osc.connect(g);
