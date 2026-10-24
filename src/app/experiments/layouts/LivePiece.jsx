@@ -3,27 +3,30 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { preload } from "react-dom";
 import PieceBoundary from "./PieceBoundary";
-import { READY_MARK, lazyPiece, preloadPiece } from "./pieceLoaders";
-import { enqueueMount, retain } from "./mountQueue";
+import { READY_MARK, lazyPiece, preloadPiece, resolvedPiece } from "./pieceLoaders";
+import { enqueueTile, retain } from "./mountQueue";
 
 // A tile arrives as its poster — a still of the piece, in the HTML — so the
 // index paints whole on the first frame without a byte of piece code. The
-// live piece mounts behind the poster once the tile nears the viewport
-// (through the mount queue, one per idle slot), and the poster lifts off
-// only after the piece has painted. A tile that leaves before its turn never
-// mounts. A mounted piece stays (pausing itself offscreen) until the queue
-// needs its GPU context back for a nearer tile.
+// piece's chunk is fetched a few screens before the tile arrives, and the
+// piece itself mounts behind the poster about a screen and a half out
+// (through the mount queue), so by the time the tile is on screen it is
+// already live underneath. The poster lifts the moment the piece has painted
+// its first real frame, and at once if a visitor reaches for the tile first:
+// a still is never left standing over a piece that already takes the hand.
+// A mounted piece stays (pausing itself offscreen) until the queue needs its
+// GPU context back for a nearer tile.
 
-const NEAR = "60% 0px";
-const READY_TIMEOUT_MS = 1400;
-// A piece that says when its first real frame is up waits for that instead,
-// however long its art takes to arrive; the cap only covers a piece that
-// never says so. Both clocks run only while the tile is on screen: a piece
-// mounted just below the fold may not start until it is scrolled to.
-const MARKED_TIMEOUT_MS = 8000;
-// Pieces mostly fade their art in once drawn. The poster waits for that
-// reveal to finish, or it would crossfade into a half-drawn tile.
-const REVEAL_CAP_MS = 1500;
+const WARM = "300% 0px";
+const NEAR = "150% 0px";
+// How long the poster may stay up once the tile is on screen, for a piece
+// that paints without saying so, and for one that says so (it is waiting on
+// its art). Both clocks run only while the tile is on screen.
+const READY_TIMEOUT_MS = 600;
+const MARKED_TIMEOUT_MS = 2500;
+// Pieces mostly fade their art in once drawn. The poster waits a moment for
+// that reveal, so it doesn't crossfade into a blank tile, but no longer.
+const REVEAL_CAP_MS = 320;
 
 function revealing(box) {
   return box.getAnimations({ subtree: true }).some((animation) => {
@@ -70,97 +73,165 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
     preloadPiece(slug);
   }
   const boxRef = useRef(null);
-  const [mounted, setMounted] = useState(false);
-  // A tile with no still has nothing to hold over its piece: it shows the
-  // piece as it draws.
+  // The component once it is this tile's turn, or null.
+  const [mounted, setMounted] = useState(null);
+  // Within a screen and a half of the viewport.
+  const [near, setNear] = useState(false);
+  // The piece has drawn its first real frame, and the poster has lifted.
   const [live, setLive] = useState(false);
-  const Component = lazyPiece(slug);
+  const known = Boolean(lazyPiece(slug));
 
   useEffect(() => {
     const box = boxRef.current;
-    if (!box || !Component) return undefined;
-    let near = false;
-    let cancelJob = null;
+    if (!box || !known) return undefined;
+    const tile = box.closest(".xl-tile") ?? box;
+    let isNear = false;
     let release = null;
 
-    const evict = () => {
+    const handle = enqueueTile(
+      box,
+      () => preloadPiece(slug),
+      () => {
+        release = retain(box, evict);
+        setMounted(() => resolvedPiece(slug) ?? lazyPiece(slug));
+      },
+    );
+    function evict() {
       release = null;
+      handle.released();
       setLive(false);
-      setMounted(false);
-    };
-    const observer = new IntersectionObserver(
+      setMounted(null);
+      // Still within reach: back in line for when it comes nearer.
+      if (isNear) handle.mount();
+    }
+
+    const warm = new IntersectionObserver(
       ([entry]) => {
-        near = entry.isIntersecting;
-        if (!near) {
-          cancelJob?.();
-          cancelJob = null;
-          return;
-        }
-        if (cancelJob || release) return;
-        cancelJob = enqueueMount(
-          box,
-          () => preloadPiece(slug),
-          () => {
-            cancelJob = null;
-            release = retain(box, () => near, evict);
-            setMounted(true);
-          },
-        );
+        if (entry.isIntersecting) handle.warm();
+        else if (!release) handle.cancel();
+      },
+      { rootMargin: WARM },
+    );
+    const reach = new IntersectionObserver(
+      ([entry]) => {
+        isNear = entry.isIntersecting;
+        setNear(isNear);
+        if (release) return;
+        if (isNear) handle.mount();
+        else handle.unmount();
       },
       { rootMargin: NEAR },
     );
-    observer.observe(box);
+    warm.observe(box);
+    reach.observe(box);
+
+    // A hand on a tile whose piece is not up yet puts it first in line, for
+    // the network and the main thread both.
+    const reachFor = (event) => {
+      if (!event.isTrusted || release) return;
+      handle.urgent();
+    };
+    tile.addEventListener("pointerenter", reachFor, { passive: true });
+    tile.addEventListener("pointerdown", reachFor, { passive: true, capture: true });
+    tile.addEventListener("focusin", reachFor);
     return () => {
-      observer.disconnect();
-      cancelJob?.();
+      warm.disconnect();
+      reach.disconnect();
+      tile.removeEventListener("pointerenter", reachFor);
+      tile.removeEventListener("pointerdown", reachFor, { capture: true });
+      tile.removeEventListener("focusin", reachFor);
+      handle.cancel();
       release?.();
     };
-  }, [slug, Component]);
+  }, [slug, known]);
 
+  // A tile renders in full (layouts.css) only while its piece is coming up
+  // near the viewport: long enough for a piece mounted ahead of the scroll to
+  // measure its box and draw its first frame offscreen. Once it has, the tile
+  // goes back to skipping its rendering whenever it is out of sight, so a
+  // piece that keeps drawing offscreen costs nothing there.
+  useEffect(() => {
+    const tile = boxRef.current?.closest(".xl-tile");
+    if (!tile) return undefined;
+    tile.toggleAttribute("data-near", near && !live);
+    return () => tile.removeAttribute("data-near");
+  }, [near, live]);
+
+  // Watch for the piece's first real frame. Mounted ahead of the scroll, it
+  // usually draws while still offscreen, and the poster lifts there, unseen:
+  // the tile arrives already live, with no swap to watch. On screen the check
+  // runs every frame, and gives up waiting after a short cap; offscreen it
+  // runs a few times a second, and never gives up on its own.
   useEffect(() => {
     if (!mounted) return undefined;
     const box = boxRef.current;
-    if (!poster) return undefined;
+    const tile = box.closest(".xl-tile") ?? box;
     const mark = READY_MARK.get(slug);
     const cap = () => (mark || box.querySelector("[data-plate]") ? MARKED_TIMEOUT_MS : READY_TIMEOUT_MS);
     let onScreen = false;
-    const observer = new IntersectionObserver(([entry]) => {
-      onScreen = entry.isIntersecting;
-    });
-    observer.observe(box);
     let waited = 0;
     let markedAt = 0;
-    let last = performance.now();
+    let last = 0;
     let frame = 0;
-    let settleFrames = 2;
-    const check = (now) => {
-      if (onScreen) waited += now - last;
-      last = now;
-      let done = waited > cap();
-      if (!done && painted(box, mark)) {
-        markedAt ||= now;
-        done = !revealing(box) || now - markedAt > REVEAL_CAP_MS;
-      }
-      if (done) {
-        settleFrames -= 1;
-        if (settleFrames <= 0) {
-          observer.disconnect();
-          setLive(true);
-          return;
-        }
-      }
-      frame = requestAnimationFrame(check);
+    let timer = 0;
+    let done = false;
+    const lift = () => {
+      if (done) return;
+      done = true;
+      stop();
+      setLive(true);
     };
-    frame = requestAnimationFrame(check);
-    return () => {
+    // The piece is already taking the hand underneath; let it be seen.
+    const onHand = (event) => {
+      if (event.isTrusted) lift();
+    };
+    const check = () => {
+      frame = 0;
+      timer = 0;
+      const now = performance.now();
+      if (onScreen) waited += last ? now - last : 0;
+      last = now;
+      let ready = waited > cap();
+      if (!ready && painted(box, mark)) {
+        markedAt ||= now;
+        ready = !revealing(box) || now - markedAt > REVEAL_CAP_MS;
+      }
+      if (ready) lift();
+      else next();
+    };
+    const next = () => {
+      if (frame || timer || done) return;
+      if (onScreen) frame = requestAnimationFrame(check);
+      else timer = setTimeout(check, 160);
+    };
+    const observer = new IntersectionObserver(([entry]) => {
+      onScreen = entry.isIntersecting;
+      last = 0;
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+      frame = 0;
+      timer = 0;
+      next();
+    });
+    function stop() {
       observer.disconnect();
       cancelAnimationFrame(frame);
-    };
-  }, [mounted, slug, poster]);
+      clearTimeout(timer);
+      tile.removeEventListener("pointerdown", onHand, { capture: true });
+      tile.removeEventListener("pointermove", onHand, { capture: true });
+      tile.removeEventListener("keydown", onHand, { capture: true });
+    }
+    observer.observe(box);
+    tile.addEventListener("pointerdown", onHand, { passive: true, capture: true });
+    tile.addEventListener("pointermove", onHand, { passive: true, capture: true });
+    tile.addEventListener("keydown", onHand, { capture: true });
+    return stop;
+  }, [mounted, slug]);
 
+  const Component = mounted;
   return (
     <div ref={boxRef} className="xl-live" data-live={live || (mounted && !poster) ? "" : undefined}>
-      {mounted && Component ? (
+      {Component ? (
         <PieceBoundary slug={slug}>
           <Suspense fallback={null}>
             <Component embedded {...(data ?? {})} />
