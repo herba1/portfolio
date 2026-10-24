@@ -45,6 +45,31 @@ function painted(box, mark) {
   return [...box.querySelectorAll("img")].every((image) => image.complete);
 }
 
+// Give back an evicted piece's GPU contexts now, rather than whenever the
+// collector gets to them: a phone keeps only a few alive, and past the cap
+// the browser kills the oldest one, which may be a tile on screen. The
+// piece's own cleanup runs after this and finds a lost context, which it
+// tolerates as it would any context loss.
+// Asking a canvas for a context would create one, so the contexts pieces
+// make are noted as they are made.
+const GL_CONTEXTS = new WeakMap();
+if (typeof window !== "undefined" && !HTMLCanvasElement.prototype.getContext.noted) {
+  const native = HTMLCanvasElement.prototype.getContext;
+  const noted = function (type, ...rest) {
+    const context = native.call(this, type, ...rest);
+    if (context && /webgl/.test(type)) GL_CONTEXTS.set(this, context);
+    return context;
+  };
+  noted.noted = true;
+  HTMLCanvasElement.prototype.getContext = noted;
+}
+
+function loseContexts(box) {
+  for (const canvas of box.querySelectorAll("canvas")) {
+    GL_CONTEXTS.get(canvas)?.getExtension("WEBGL_lose_context")?.loseContext();
+  }
+}
+
 // Below this width the bento stacks every tile at 4:5 (layouts.css), and the
 // tile shows its narrow still: a phone crop of the desktop still is a
 // different picture from the one the piece paints there.
@@ -88,17 +113,20 @@ export default function LivePiece({ slug, data, poster, priority = null, title }
     let isNear = false;
     let release = null;
 
+    // Measured by its tile: the box sits inside a tile that may be skipping
+    // its rendering, and measuring inside a skipped subtree forces layout.
     const handle = enqueueTile(
-      box,
+      tile,
       () => preloadPiece(slug),
       () => {
-        release = retain(box, evict);
+        release = retain(tile, evict);
         setMounted(() => resolvedPiece(slug) ?? lazyPiece(slug));
       },
     );
     function evict() {
       release = null;
       handle.released();
+      loseContexts(box);
       setLive(false);
       setMounted(null);
       // Still within reach: back in line for when it comes nearer.

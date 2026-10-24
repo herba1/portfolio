@@ -25,6 +25,15 @@ const IDLE_WAIT_MS = 120;
 // How long it waits while the page is still moving. A long flick on a phone
 // scrolls for a second or more; the tile it lands on cannot wait that out.
 const SCROLL_WAIT_MS = 320;
+// On a phone a mount (a shader compile) mid-fling lands as a hitch in the
+// momentum scroll, so while the page is moving only a tile this close (in
+// screens) is mounted ahead.
+const FLING_REACH = 0.5;
+// Scroll travel the other way before the queue believes the page turned:
+// a rubber-band or a small correction is not a change of direction.
+const TURN_PX = 100;
+// Parked jobs come back at most this often while scrolling.
+const UNPARK_MS = 100;
 // A tile behind the scroll counts as this much farther than one ahead.
 const BEHIND = 2;
 
@@ -36,7 +45,9 @@ const parked = new Set();
 let scheduled = false;
 let lastScroll = -Infinity;
 let lastY = 0;
+let turnFrom = 0;
 let direction = 1;
+let lastUnpark = -Infinity;
 
 const isBrowser = typeof window !== "undefined";
 
@@ -46,31 +57,47 @@ const idle =
     : (fn) => setTimeout(fn, 16);
 
 if (isBrowser) {
-  lastY = window.scrollY;
+  lastY = turnFrom = window.scrollY;
   window.addEventListener(
     "scroll",
     () => {
       lastScroll = performance.now();
       const y = window.scrollY;
-      if (y !== lastY) direction = y > lastY ? 1 : -1;
-      lastY = y;
-      if (!parked.size) return;
-      for (const job of parked) {
-        job.parked = false;
-        jobs.add(job);
+      const moving = Math.sign(y - lastY);
+      // Where the page last moved the believed way; a turn counts once the
+      // page has travelled TURN_PX back from there.
+      if (moving === direction || !moving) turnFrom = y;
+      else if (Math.abs(y - turnFrom) > TURN_PX) {
+        direction = moving;
+        turnFrom = y;
       }
-      parked.clear();
-      schedule();
+      lastY = y;
+      if (lastScroll - lastUnpark >= UNPARK_MS) unpark();
     },
     { passive: true, capture: true },
   );
+  // A reflow moves tiles without a scroll.
+  window.addEventListener("resize", () => unpark(), { passive: true });
 }
+
+function unpark() {
+  lastUnpark = performance.now();
+  if (!parked.size) return;
+  for (const job of parked) {
+    job.parked = false;
+    jobs.add(job);
+  }
+  parked.clear();
+  schedule();
+}
+
+const coarse = () => window.matchMedia("(pointer: coarse)").matches;
 
 function budget() {
   // Coarse pointers are phones and tablets: smaller GPU, a stricter context
   // cap (Chrome on Android keeps eight), and a stacked layout where few tiles
   // share the screen.
-  return window.matchMedia("(pointer: coarse)").matches ? 6 : 12;
+  return coarse() ? 6 : 12;
 }
 
 function onScreen(rect) {
@@ -125,6 +152,8 @@ function run(job) {
 function evict(entry) {
   alive.delete(entry);
   entry.evict();
+  // Its place may go to a parked tile.
+  unpark();
 }
 
 function pump(deadline) {
@@ -137,11 +166,12 @@ function pump(deadline) {
     const { job, distance: d } = next;
     // On screen, or reached for: now.
     if (d <= 0) {
-      run(job);
+      // Room first, so its GPU context is gone before the new one comes up.
       if (over >= 0) {
         const far = farthestAlive();
         if (far) evict(far.entry);
       }
+      run(job);
       return reschedule();
     }
     const scrolling = now - lastScroll < SCROLL_QUIET_MS;
@@ -149,7 +179,8 @@ function pump(deadline) {
     // when its code arrived: a tile warmed long ago is not overdue.
     const waited = now - Math.max(job.readyAt, job.wantedAt);
     const roomy = !deadline || deadline.didTimeout || deadline.timeRemaining() >= 8;
-    const due = scrolling ? waited > SCROLL_WAIT_MS : roomy || waited > IDLE_WAIT_MS;
+    const fling = scrolling && coarse() && d > window.innerHeight * FLING_REACH;
+    const due = fling ? false : scrolling ? waited > SCROLL_WAIT_MS : roomy || waited > IDLE_WAIT_MS;
     if (due) {
       if (over < 0) {
         run(job);
@@ -321,5 +352,7 @@ export function retain(element, evictTile) {
   const entry = { element, evict: evictTile };
   alive.add(entry);
   if (alive.size > budget()) schedule();
-  return () => alive.delete(entry);
+  return () => {
+    if (alive.delete(entry)) unpark();
+  };
 }
