@@ -141,6 +141,7 @@ Herb shared Pinterest stills and lyric edits as the visual direction for type an
 - He wants things to "tweak out": more intensity, hyper rhythm, more generative art inside a screen (Teletext, Tracking, Terminal). Push energy further than feels safe, as long as it stays beautiful.
 - Don't copy a reference image too closely. Crayon was cut for being "too exact" to its Pinterest source; translate the feeling, not the artwork.
 - Sound keeps scoring: he asked for audible audio (8-Bit Player) and ambient whispers under Credits.
+- 8-Bit Player, the period media player that converted real songs to chiptune with a pitch model, was removed in October 2026: "so bad". Heavy machinery behind a skeuomorphic player did not save it.
 - Cut at 1/5 in round three: Marquee, Riso, Title Sequence ("the shapes are kinda slop"), Channel, Exposure, Lyric Card, How Are You, Max Width, Away.
 - Round four: Scope, Justify, Still Here, Tracking and Terminal at 5. Keep a monochrome piece monochrome; one accent colour added to it reads as a mistake (Smear's amber trail). Decoration that flies around the main mechanic reads as clutter (Selection's shadows and tumbling digits). A 3 with no note is a cut.
 
