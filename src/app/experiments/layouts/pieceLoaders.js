@@ -53,6 +53,12 @@ export const READY_MARK = new Map([
 ]);
 
 const LAZY = new Map();
+// A piece whose chunk has arrived, as the component itself. A tile mounts it
+// directly rather than through lazy(): a lazy component suspends on its
+// first render even when its module is already here, and React holds a
+// revealed Suspense boundary back for a beat — time the tile would sit dead.
+const RESOLVED = new Map();
+const LOADING = new Map();
 
 export function lazyPiece(slug) {
   if (!LOADERS[slug]) return null;
@@ -60,6 +66,26 @@ export function lazyPiece(slug) {
   return LAZY.get(slug);
 }
 
+export function resolvedPiece(slug) {
+  return RESOLVED.get(slug) ?? null;
+}
+
 export function preloadPiece(slug) {
-  return LOADERS[slug]?.().catch(() => null);
+  if (!LOADERS[slug]) return Promise.resolve(null);
+  if (!LOADING.has(slug)) {
+    LOADING.set(
+      slug,
+      LOADERS[slug]()
+        .then((module) => {
+          if (module?.default) RESOLVED.set(slug, module.default);
+          return module;
+        })
+        .catch(() => {
+          // A failed fetch may succeed on the next approach.
+          LOADING.delete(slug);
+          return null;
+        }),
+    );
+  }
+  return LOADING.get(slug);
 }
