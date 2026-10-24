@@ -310,16 +310,6 @@ export const POSTERS = {
       "height": 447
     }
   },
-  "/lab/skin": {
-    "src": "/posters/experiments/lab--skin.webp?v=ZkSQBEqT",
-    "width": 1392,
-    "height": 748,
-    "narrow": {
-      "src": "/posters/experiments/lab--skin-narrow.webp?v=wYEuE02S",
-      "width": 358,
-      "height": 447
-    }
-  },
   "/lab/smear": {
     "src": "/posters/experiments/lab--smear.webp?v=_CBZAZHP",
     "width": 1392,

@@ -57,11 +57,9 @@ function pairHalves(pieces) {
   if (waiting) ordered.push({ ...waiting, shape: "wide" });
   return ordered;
 }
-// The lab studies lead, newest first (the registry's order), with the
-// 8-Bit Player up front; the older hand-placed mosaic follows them.
-const FEATURED = ["/lab/skin"];
-const featuredFirst = (pieces) => [...pieces].sort((a, b) => (FEATURED.includes(b.slug) ? 1 : 0) - (FEATURED.includes(a.slug) ? 1 : 0));
-const STUDIES = pairHalves(featuredFirst(PIECES.filter((piece) => !AREAS[piece.slug])));
+// The lab studies lead, newest first (the registry's order); the older
+// hand-placed mosaic follows them.
+const STUDIES = pairHalves(PIECES.filter((piece) => !AREAS[piece.slug]));
 // The first row of studies is the first screen everywhere.
 const firstScreen = (index) => (index < 2 ? "all" : null);
 

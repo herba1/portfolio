@@ -25,7 +25,7 @@ async function origin(stack) {
   }
   return { piece: "?", src: stack.slice(0, 120) };
 }
-const pieceOf = (slug) => slug; // tile slugs are "/scorch", "/lab/skin" — same shape as origin().piece
+const pieceOf = (slug) => slug; // tile slugs are "/scorch", "/lab/scope" — same shape as origin().piece
 
 const { browser, page } = await launch(device);
 await page.addInitScript(() => {
