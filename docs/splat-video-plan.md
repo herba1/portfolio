@@ -696,15 +696,15 @@ All binaries are little-endian. Splats are ordered `[static…, dynamic…]`. Ke
 
 ## Phase 4: the player (lab page)
 
-Load the `lab-build` and `taste` skills first and follow the lab contract. That means:
+Follow the repo's CLAUDE.md. That means:
 - Files only in `src/app/lab/splat-video/`.
 - No comments in lab code.
 - Type tokens only; 4px vertical grid.
 - Light page with a one-line title.
-- `node scripts/lab-gate.mjs splat-video` must print PASS.
+- `npm run lint:type` and `npx eslint src/app/lab/splat-video` pass.
 - No new dependencies.
 
-Scaffold by hand the way `scaffold()` in `scripts/lab-generate.mjs` does: the same `page.js` shape and an `experiment.json` with `status: "candidate"`. Lab pages 404 in prod view unless shipped, so this stays local.
+Give it a `page.js` and an `experiment.json` with `status: "draft"`. Lab pages 404 in prod view unless shipped, so this stays local.
 
 ### 4a: fake data first
 
@@ -859,6 +859,6 @@ Ask Herb before spending money. If the Mac can't run the model:
 
 - `localhost:3000/lab/splat-video?clip=<herb-clip>` plays Herb's clip as moving splats on a loop.
 - The camera can be dragged and nudged while it plays.
-- `node scripts/lab-gate.mjs splat-video` prints PASS, and `experiment.json` is filled in.
+- The lints pass, and `experiment.json` is filled in.
 - FPS, splat count and data size reported to Herb.
 - The exporter, shims, fake generator and player are committed on a branch and pushed. No scene data or weights.

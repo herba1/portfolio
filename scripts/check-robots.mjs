@@ -52,7 +52,6 @@ const mustBlock = [
   "/api/spotify/login",
   "/~studio",
   "/~studio/work",
-  "/taste",
   "/lab",
   "/work",
   "/arcs",

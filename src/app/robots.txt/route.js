@@ -24,7 +24,6 @@ export const dynamic = "force-static"
 export const DISALLOW = [
   "/api/",
   "/~studio",
-  "/taste",
   "/lab",
   "/work",
   "/arcs",

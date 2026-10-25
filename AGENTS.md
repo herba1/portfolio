@@ -73,9 +73,9 @@ Every page root sets `font-synthesis: none`, `-webkit-font-smoothing: antialiase
 
 `song-search` keeps its own font sizes and line-heights by decision. Everything else — tracking, weights, craft defaults — follows the system.
 
-# Lab — generated experiments
+# Lab pieces
 
-`src/app/lab/<slug>/` holds agent-built candidates; each carries an `experiment.json` manifest (`status`: candidate → liked/rejected → shipped). `scripts/lab-registry.mjs` generates `src/app/lab/registry.js` from the manifests before dev, build and lint; the experiments index and dev links read from it, so never edit those files to register a lab piece. Judge candidates at `/taste` (localhost only); votes, notes, and pointed elements live in `taste/*.jsonl`. `npm run lab:run` builds a batch: supply → generate → gate → learn → cleanup. The build contract is `.claude/skills/lab-build/SKILL.md`; the learned taste is `.claude/skills/taste/SKILL.md`.
+`src/app/lab/<slug>/` holds experiment pieces, each with an `experiment.json` manifest. `"status": "shipped"` puts a piece on the experiments index; anything else is a dev-only draft. `scripts/lab-registry.mjs` generates `src/app/lab/registry.js` and `pieces.js` from the manifests before dev, build and lint, so never edit those files to register a piece.
 
 <!-- BEGIN:nextjs-agent-rules -->
 

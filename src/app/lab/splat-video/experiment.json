@@ -7,15 +7,7 @@
     "Splats",
     "Audio"
   ],
-  "status": "candidate",
+  "status": "draft",
   "createdAt": "2026-09-30T03:11:41.568Z",
-  "ideaId": null,
-  "parentSlug": null,
-  "parents": null,
-  "tasteVersion": 1,
-  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video, on a real player interface (play, scrub, speed, sound, look, back to lens) on the light palette.",
-  "source": {
-    "kind": "manual"
-  },
-  "generation": null
+  "intent": "Gets as close to 4DV.ai as one webcam allows: a sharp, native-frame-rate subject with no crossfade over a splat room built once, with exposure that follows the video, on a real player interface (play, scrub, speed, sound, look, back to lens) on the light palette."
 }
