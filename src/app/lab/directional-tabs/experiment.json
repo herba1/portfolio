@@ -1,10 +1,22 @@
 {
   "title": "Library",
   "description": "A music library on a phone with Albums, Artists and Songs tabs. Changing tab slides the content a short way toward the side you're heading, under a soft blur, while the card springs to the new height. Swipe the card sideways to move between tabs; at either end it pulls back on a rubber band.",
-  "tags": ["Interface", "Motion", "Tabs"],
-  "status": "liked",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Tabs"
+  ],
+  "status": "draft",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "Tab content that moves in the direction you're going and can be swiped",
-  "tile": { "cols": 2, "rows": 6 },
-  "sources": ["https://benji.org/family-values", "https://github.com/nathangitter/fluid-interfaces", "https://github.com/pmndrs/use-gesture", "https://emilkowal.ski/ui/7-practical-animation-tips"]
+  "tile": {
+    "cols": 2,
+    "rows": 6
+  },
+  "sources": [
+    "https://benji.org/family-values",
+    "https://github.com/nathangitter/fluid-interfaces",
+    "https://github.com/pmndrs/use-gesture",
+    "https://emilkowal.ski/ui/7-practical-animation-tips"
+  ]
 }

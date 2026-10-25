@@ -6,7 +6,6 @@ const LAB = join(ROOT, "src/app/lab");
 const OUT = join(LAB, "registry.js");
 const PIECES_OUT = join(LAB, "pieces.js");
 const SLUG_RE = /^[a-z0-9][a-z0-9-]{1,48}$/;
-const STATUSES = new Set(["candidate", "liked", "rejected", "shipped", "broken"]);
 
 mkdirSync(LAB, { recursive: true });
 
@@ -28,7 +27,7 @@ for (const entry of entries) {
     title: typeof data.title === "string" ? data.title : entry.name,
     description: typeof data.description === "string" ? data.description : "",
     tags: Array.isArray(data.tags) ? data.tags.filter((t) => typeof t === "string") : [],
-    status: STATUSES.has(data.status) ? data.status : "candidate",
+    status: data.status === "shipped" ? "shipped" : "draft",
     createdAt: typeof data.createdAt === "string" ? data.createdAt : "",
     parentSlug: typeof data.parentSlug === "string" ? data.parentSlug : null,
     // A study on the experiments index is a whole row ("wide") or half of one

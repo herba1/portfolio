@@ -1,10 +1,10 @@
 export const meta = {
   name: 'splat-video-runcheck',
-  description: 'Verify every splat-video clip is served intact by the dev server and the lab code passes its checks',
-  whenToUse: 'After exporting or rebuilding splat-video clips, or before showing the lab. Pass clip names as args to check others.',
+  description: 'Verify every splat-video clip is served intact by the dev server and the player code passes its checks',
+  whenToUse: 'After exporting or rebuilding splat-video clips, or before showing the piece. Pass clip names as args to check others.',
   phases: [
     { title: 'Clips', detail: 'one agent per clip validates served files against meta.json and the loader' },
-    { title: 'Code', detail: 'type-system lint and lab gate on the splat-video lab' },
+    { title: 'Code', detail: 'type-system lint and eslint on the splat-video piece' },
   ],
 }
 
@@ -50,13 +50,12 @@ phase('Clips')
 const clipChecks = pipeline(CLIPS, clip => agent(clipPrompt(clip), { label: `clip:${clip}`, phase: 'Clips', schema: CLIP_SCHEMA }))
 
 phase('Code')
-const codeCheck = agent(`Repo: /Users/herb/Documents/GitHub/portfolio. Do NOT edit files, do NOT start or stop servers (a dev server is already on port 3000; leave it alone). Read-only checks for the splat-video lab at src/app/lab/splat-video:
+const codeCheck = agent(`Repo: /Users/herb/Documents/GitHub/portfolio. Do NOT edit files, do NOT start or stop servers (a dev server is already on port 3000; leave it alone). Read-only checks for the splat-video piece at src/app/lab/splat-video:
 1. Run \`npm run lint:type\` and report whether it passes and any violations under src/app/lab/splat-video.
 2. Run \`npx eslint src/app/lab/splat-video\` and report errors (warnings separately, briefly).
-3. Look at package.json scripts and .claude/skills/lab-build/SKILL.md for the lab gate command (the lab gate checks experiment.json manifests); run the gate for the splat-video experiment if a command exists that does not spawn model runs or long builds, and report PASS/FAIL.
-4. Confirm src/app/lab/registry.js includes splat-video (run \`node scripts/lab-registry.mjs\` only if it is idempotent and safe; otherwise just read registry.js).
-5. Grep src/app/lab/splat-video for any code comments (// or /* or {/* */}) since the repo owner forbids comments; list file:line for any found.
-Return ok=true only if lint and gate pass with no errors.`, { label: 'code-checks', phase: 'Code', schema: CODE_SCHEMA })
+3. Confirm src/app/lab/registry.js includes splat-video (run \`node scripts/lab-registry.mjs\` only if it is idempotent and safe; otherwise just read registry.js).
+4. Grep src/app/lab/splat-video for any code comments (// or /* or {/* */}) since the repo owner forbids comments; list file:line for any found.
+Return ok=true only if both lints pass with no errors.`, { label: 'code-checks', phase: 'Code', schema: CODE_SCHEMA })
 
 const [clips, code] = await Promise.all([clipChecks, codeCheck])
 return { clips: clips.filter(Boolean), code }

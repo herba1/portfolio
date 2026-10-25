@@ -1,10 +1,21 @@
 {
   "title": "Morph toolbar",
   "description": "A sketch canvas with one floating toolbar that changes shape instead of opening panels: tools, a colour palette, two sliders, and a disc that tucks away when your stroke comes near it.",
-  "tags": ["Interface", "Motion", "Toolbar"],
-  "status": "liked",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Toolbar"
+  ],
+  "status": "draft",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "one container that springs between shapes, so every mode is the same object",
-  "tile": { "cols": 3, "rows": 5 },
-  "sources": ["https://benji.org/drawesome", "https://rauno.me/craft", "https://github.com/nathangitter/fluid-interfaces"]
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
+  "sources": [
+    "https://benji.org/drawesome",
+    "https://rauno.me/craft",
+    "https://github.com/nathangitter/fluid-interfaces"
+  ]
 }

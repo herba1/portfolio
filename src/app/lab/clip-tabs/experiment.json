@@ -1,10 +1,21 @@
 {
   "title": "Chart",
   "description": "A band's chord chart split into sections by a segmented control. The ink pill is a second copy of the tab row clipped to the selection, so the labels swap colour exactly at its edge. Click a section, or grab the pill and drag or flick it across the rail. Wherever you let go, it snaps to the nearest section.",
-  "tags": ["Interface", "Motion", "Tabs"],
-  "status": "liked",
+  "tags": [
+    "Interface",
+    "Motion",
+    "Tabs"
+  ],
+  "status": "draft",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "A clip-path pill whose colour swap is exact, held and thrown by hand",
-  "tile": { "cols": 3, "rows": 4 },
-  "sources": ["https://emilkowal.ski/ui/the-magic-of-clip-path", "https://github.com/nathangitter/fluid-interfaces", "https://www.joshuawootonn.com/vercel-tabs-component"]
+  "tile": {
+    "cols": 3,
+    "rows": 4
+  },
+  "sources": [
+    "https://emilkowal.ski/ui/the-magic-of-clip-path",
+    "https://github.com/nathangitter/fluid-interfaces",
+    "https://www.joshuawootonn.com/vercel-tabs-component"
+  ]
 }

@@ -4,7 +4,7 @@ const eslintConfig = [
   ...nextCoreWebVitals,
   {
     files: ["src/**/*.{js,jsx}"],
-    ignores: ["src/app/lab/**", "src/app/taste/**", "src/app/api/taste/**", "src/lib/taste/**"],
+    ignores: ["src/app/lab/**"],
     rules: {
       "@next/next/no-html-link-for-pages": "warn",
       "react-hooks/immutability": "warn",

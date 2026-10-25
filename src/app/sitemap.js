@@ -13,7 +13,7 @@ import { absoluteUrl } from '@/lib/urls'
 // a lastmod that only moves when the content moves is the one Google keeps
 // trusting. No changefreq or priority — every engine ignores them.
 //
-// Deliberately absent: dev-gated routes (/work, /lab, /taste, /arcs, /~studio
+// Deliberately absent: dev-gated routes (/work, /lab, /arcs, /~studio
 // all 404 in production), the tier-list editor, the unpublished /test post
 // and the unfinished /intro, /isolate, /ask-me-why and album-card pages,
 // which carry noindex until they are ready for the nav.

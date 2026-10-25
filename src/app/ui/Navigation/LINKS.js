@@ -36,7 +36,4 @@ export const DEV_LINKS = [
   { name: "Scorch", link: "/scorch", primary: true, dev: true },
   { name: "Stir", link: "/stir", primary: true, dev: true },
   { name: "Most played options", link: "/covers/rank-lab", primary: true, dev: true },
-  { name: "Taste", link: "/taste", primary: true, dev: true },
-  { name: "Taste Profile", link: "/taste/profile", primary: true, dev: true },
-  { name: "Lab", link: "/lab", primary: true, dev: true },
 ];

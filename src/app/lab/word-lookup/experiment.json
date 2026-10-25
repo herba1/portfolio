@@ -1,11 +1,18 @@
 {
   "title": "Lyric lookup",
   "description": "A lyric sheet where double-clicking a word grows a definition card out of the word's own underline, with pronunciation and the other songs it turns up in. Arrow keys walk word to word and the card glides along instead of reopening.",
-  "tags": ["Interface", "Typography", "Motion"],
-  "status": "liked",
+  "tags": [
+    "Interface",
+    "Typography",
+    "Motion"
+  ],
+  "status": "draft",
   "createdAt": "2026-10-16T14:00:00.000Z",
   "intent": "A popover that is spatially continuous with the word it explains, opening, gliding and closing from one place.",
-  "tile": { "cols": 3, "rows": 5 },
+  "tile": {
+    "cols": 3,
+    "rows": 5
+  },
   "sources": [
     "https://rauno.me/craft/interaction-design",
     "https://emilkowal.ski/ui/7-practical-animation-tips",

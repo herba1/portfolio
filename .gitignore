@@ -61,8 +61,7 @@ public/audio/
 /src/app/lab/registry.js
 /src/app/lab/pieces.js
 
-# lab runtime state and personal claude config
-/taste/runs/
+# personal claude config
 .claude/settings.local.json
 .claude/worktrees/
 
