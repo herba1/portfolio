@@ -3,7 +3,6 @@
 // fails until it does).
 export const TAKES = {
   "lab/blob-track/blobTakes": () => import("../../app/lab/blob-track/blobTakes.js"),
-  "lab/camcorder/camcorderTakes": () => import("../../app/lab/camcorder/camcorderTakes.js"),
   "lab/coverflow/tickTakes": () => import("../../app/lab/coverflow/tickTakes.js"),
   "lab/crumple/crumpleTakes": () => import("../../app/lab/crumple/crumpleTakes.js"),
   "lab/field/fieldTakes": () => import("../../app/lab/field/fieldTakes.js"),

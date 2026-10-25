@@ -70,16 +70,6 @@ export const POSTERS = {
       "height": 447
     }
   },
-  "/lab/camcorder": {
-    "src": "/posters/experiments/lab--camcorder.webp?v=a2KsP99k",
-    "width": 688,
-    "height": 748,
-    "narrow": {
-      "src": "/posters/experiments/lab--camcorder-narrow.webp?v=OfeFxUaO",
-      "width": 358,
-      "height": 447
-    }
-  },
   "/lab/coverflow": {
     "src": "/posters/experiments/lab--coverflow.webp?v=0ZDJRUOc",
     "width": 1392,
