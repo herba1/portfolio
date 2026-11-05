@@ -1,0 +1,206 @@
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  @font-face { font-family: Geist; src: url(/font/Geist-Variable.woff2) format("woff2"); font-weight: 100 900; }
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+<canvas id="c"></canvas>
+<script>
+// Pass 2 renderer. compose.mjs calls setup() once, then render() for every
+// output frame in order. All motion is integrated frame by frame from the
+// capture's timeline, so the output is smooth at any frame rate no matter
+// how unevenly the browser painted during capture.
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+let S, W, H, K, vw, vh, look;
+const bitmaps = new Map();
+
+// Critically damped spring: starts from rest, eases in and out, never overshoots.
+const spring = (s, target, omega, dt) => {
+  const x = s.x - target, v = s.v;
+  const e = Math.exp(-omega * dt);
+  s.x = target + (x + (v + omega * x) * dt) * e;
+  s.v = (v - omega * (v + omega * x) * dt) * e;
+};
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
+const outCubic = (p) => 1 - Math.pow(1 - clamp(p, 0, 1), 3);
+// The tracking law from CLAUDE.md: -0.043px per px above 12.
+const track = (px) => `${(-0.043 * (px - 12)).toFixed(2)}px`;
+
+const cam = { z: { x: 0, v: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
+const cur = { x: 0, y: 0, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 } };
+let ev = 0, lastT = 0, camTarget;
+const ripples = [], keys = [], captions = [];
+
+window.setup = async (spec) => {
+  S = spec; [W, H] = spec.out; vw = spec.viewport.width; vh = spec.viewport.height;
+  K = W / vw; // output px per css px at zoom 1
+  look = spec.look;
+  c.width = W; c.height = H;
+  await document.fonts.load("600 40px Geist");
+  const intro = spec.intro ?? {};
+  camTarget = { z: 1, x: vw / 2, y: vh / 2, follow: false, omega: 5.5 };
+  cam.z.x = Math.log(intro.zoom ?? 1.08); cam.x.x = intro.x ?? vw / 2; cam.y.x = intro.y ?? vh / 2;
+  const first = spec.timeline.find((e) => e.type === "cursor" && e.visible);
+  cur.x = first?.x ?? vw * 0.66; cur.y = first?.y ?? vh * 0.82;
+  return true;
+};
+
+async function bitmap(url) {
+  if (!bitmaps.has(url)) {
+    bitmaps.set(url, fetch(url).then((r) => r.blob()).then(createImageBitmap));
+    if (bitmaps.size > 6) { const [k, v] = bitmaps.entries().next().value; bitmaps.delete(k); v.then((b) => b.close()); }
+  }
+  return bitmaps.get(url);
+}
+
+// Advance the timeline to absolute capture time T.
+function consume(T) {
+  const tl = S.timeline;
+  while (ev < tl.length && tl[ev].t <= T) {
+    const e = tl[ev++];
+    if (e.type === "move") { cur.x = e.x; cur.y = e.y; }
+    else if (e.type === "cursor") { cur.visible = e.visible; if (e.x != null) { cur.x = e.x; cur.y = e.y; } }
+    else if (e.type === "down") { cur.down = true; ripples.push({ t: e.t, x: e.x, y: e.y }); }
+    else if (e.type === "up") cur.down = false;
+    else if (e.type === "camera") camTarget = { z: e.zoom, x: e.x ?? cur.x, y: e.y ?? cur.y, follow: !!e.follow, omega: e.stiffness ?? 5.5 };
+    else if (e.type === "key") keys.push({ t: e.t, key: e.key });
+    else if (e.type === "caption") captions.push({ t: e.t, text: e.text, d: e.duration });
+  }
+}
+
+const css2out = (x, y, view) => [(x - view.x0) * view.k, (y - view.y0) * view.k];
+
+// The page's ground colour, read from a settled frame, for the fades.
+window.sample = async (url) => {
+  const b = await bitmap(url), o = new OffscreenCanvas(b.width, b.height).getContext("2d");
+  o.drawImage(b, 0, 0);
+  const px = (x, y) => o.getImageData(x, y, 1, 1).data;
+  const pts = [[4, b.height - 4], [b.width - 4, b.height - 4], [b.width / 2, b.height - 4], [4, b.height / 2]].map(([x, y]) => px(Math.round(x), Math.round(y)));
+  const avg = [0, 1, 2].map((i) => Math.round(pts.reduce((s, p) => s + p[i], 0) / pts.length));
+  return avg;
+};
+
+window.render = async ({ t, T, src, phase }) => {
+  const dt = Math.min(0.05, (T - lastT) / 1000 || 1 / S.fps); lastT = T;
+  consume(T);
+
+  // camera
+  const tz = Math.log(Math.max(1, camTarget.z));
+  const tx = camTarget.follow ? cur.x : camTarget.x, ty = camTarget.follow ? cur.y : camTarget.y;
+  spring(cam.z, tz, camTarget.omega, dt);
+  spring(cam.x, tx, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
+  spring(cam.y, ty, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
+  const z = Math.exp(cam.z.x);
+  const hw = vw / z / 2, hh = vh / z / 2;
+  const cx = clamp(cam.x.x, hw, vw - hw), cy = clamp(cam.y.x, hh, vh - hh);
+  const view = { x0: cx - hw, y0: cy - hh, k: K * z };
+
+  const img = await bitmap(src);
+  const d = img.width / vw; // source px per css px
+  ctx.globalAlpha = 1; ctx.filter = "none";
+  ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, view.x0 * d, view.y0 * d, (hw * 2) * d, (hh * 2) * d, 0, 0, W, H);
+
+  // ripples (under the cursor)
+  for (const r of ripples) {
+    const p = (T - r.t) / 520; if (p > 1) continue;
+    const [ox, oy] = css2out(r.x, r.y, view);
+    const rad = (8 + 30 * outCubic(p)) * K * Math.sqrt(z);
+    ctx.beginPath(); ctx.arc(ox, oy, rad, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.22 * (1 - p)})`; ctx.fill();
+    ctx.lineWidth = 1.5 * K; ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - p)})`; ctx.stroke();
+  }
+
+  // cursor
+  spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
+  spring(cur.press, cur.down ? 1 : 0, 26, dt);
+  if (cur.alpha.x > 0.01) drawCursor(...css2out(cur.x, cur.y, view), K * Math.pow(z, 0.4), clamp(cur.alpha.x, 0, 1), cur.press.x);
+
+  drawKeys(T); drawCaptions(T);
+
+  // intro: fade up from the page's own ground colour
+  if (phase === "intro") { ctx.fillStyle = look.bg; ctx.globalAlpha = 1 - smooth(t / (S.intro?.fade ?? 450)); ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  if (phase === "outro") drawEndCard(t);
+  return true;
+};
+
+// macOS-style arrow, drawn at 1 css px units, tip at the origin.
+const ARROW = new Path2D("M0 0 L0 16.6 L4.2 12.6 L7 19.2 L9.9 18 L7.2 11.6 L13 11.6 Z");
+function drawCursor(x, y, k, a, press) {
+  ctx.save(); ctx.translate(x, y); ctx.globalAlpha = a;
+  if (S.cursor === "touch") {
+    const r = 15 * k * (1 - 0.18 * press);
+    ctx.shadowColor = "rgba(0,0,0,0.25)"; ctx.shadowBlur = 10 * k;
+    ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
+    ctx.fillStyle = `rgba(255,255,255,${0.42 + 0.3 * press})`; ctx.fill();
+    ctx.shadowColor = "transparent"; ctx.lineWidth = 1.5 * k; ctx.strokeStyle = "rgba(255,255,255,0.9)"; ctx.stroke();
+  } else {
+    const s = k * 1.15 * (1 - 0.12 * press);
+    ctx.scale(s, s); ctx.lineJoin = "round";
+    ctx.shadowColor = "rgba(0,0,0,0.32)"; ctx.shadowBlur = 6 * s; ctx.shadowOffsetY = 1.5 * s;
+    ctx.fillStyle = "#fff"; ctx.fill(ARROW);
+    ctx.shadowColor = "transparent"; ctx.lineWidth = 1.25; ctx.strokeStyle = "#111"; ctx.stroke(ARROW);
+  }
+  ctx.restore();
+}
+
+const GLYPH = { ArrowRight: "→", ArrowLeft: "←", ArrowUp: "↑", ArrowDown: "↓", Enter: "↵", Escape: "esc", " ": "space", Space: "space", Tab: "tab", Backspace: "⌫" };
+function drawKeys(T) {
+  const live = keys.filter((k) => T - k.t < 900);
+  if (!live.length) return;
+  const k = live[live.length - 1];
+  const p = (T - k.t) / 900;
+  const a = p < 0.15 ? smooth(p / 0.15) : 1 - smooth((p - 0.6) / 0.4);
+  const u = Math.min(W, H) / 1080;
+  const size = Math.round(34 * u), label = GLYPH[k.key] ?? k.key;
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.font = `560 ${size}px Geist`; ctx.letterSpacing = track(size);
+  const tw = Math.max(ctx.measureText(label).width, size * 0.9);
+  const w = tw + 44 * u, h = 72 * u, x = W / 2 - w / 2, y = H - 128 * u - h + (1 - outCubic(p / 0.15)) * 12 * u;
+  ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 24 * u; ctx.shadowOffsetY = 6 * u;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, 16 * u); ctx.fillStyle = "rgba(24,24,27,0.86)"; ctx.fill();
+  ctx.shadowColor = "transparent"; ctx.lineWidth = 1.5 * u; ctx.strokeStyle = "rgba(255,255,255,0.14)"; ctx.stroke();
+  ctx.fillStyle = "#fafafa"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(label, W / 2, y + h / 2 + 2 * u);
+  ctx.restore();
+}
+
+function drawCaptions(T) {
+  const c = captions.filter((c) => T >= c.t && T - c.t < c.d).pop();
+  if (!c) return;
+  const p = (T - c.t) / c.d, edge = 350 / c.d;
+  const a = p < edge ? smooth(p / edge) : 1 - smooth((p - (1 - edge)) / edge);
+  const u = Math.min(W, H) / 1080, size = Math.round(36 * u);
+  ctx.save(); ctx.globalAlpha = a;
+  ctx.font = `560 ${size}px Geist`; ctx.letterSpacing = track(size);
+  const w = ctx.measureText(c.text).width + 48 * u, h = 76 * u;
+  const x = (W - w) / 2, y = 72 * u + (1 - outCubic(p / edge)) * 8 * u;
+  ctx.beginPath(); ctx.roundRect(x, y, w, h, h / 2); ctx.fillStyle = "rgba(24,24,27,0.82)"; ctx.fill();
+  ctx.fillStyle = "#fafafa"; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(c.text, W / 2, y + h / 2 + 2 * u);
+  ctx.restore();
+}
+
+// Outro: the last frame softens and settles back, and the piece's name and
+// address rise in over it on the page's own ground colour.
+function drawEndCard(t) {
+  const u = Math.min(W, H) / 1080;
+  const veil = smooth(t / 700);
+  ctx.save();
+  ctx.globalAlpha = veil * 0.9; ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H);
+  ctx.globalAlpha = 1;
+  const rise = (delay) => { const p = outCubic((t - delay) / 700); return { a: p, dy: (1 - p) * 16 * u }; };
+  ctx.fillStyle = look.ink; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  const ts = Math.round((W > H ? 76 : 68) * u);
+  const r1 = rise(250);
+  ctx.globalAlpha = r1.a; ctx.font = `600 ${ts}px Geist`; ctx.letterSpacing = `${(-0.043 * (ts - 12) / ts).toFixed(4)}em`;
+  ctx.fillText(S.title, W / 2, H / 2 + r1.dy);
+  const us = Math.round(30 * u), r2 = rise(420);
+  ctx.globalAlpha = r2.a; ctx.font = `460 ${us}px Geist`; ctx.letterSpacing = `${(-0.043 * (us - 12) / us).toFixed(4)}em`;
+  ctx.fillStyle = look.ink2; ctx.fillText(S.link, W / 2, H / 2 + 56 * u + r2.dy);
+  ctx.restore();
+}
+</script>
