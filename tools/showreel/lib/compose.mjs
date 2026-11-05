@@ -15,7 +15,7 @@ const HERE = path.dirname(fileURLToPath(import.meta.url));
 const FONTS = path.resolve(HERE, "../../../public/fonts");
 const ORIGIN = "http://showreel.local";
 
-export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = () => {} } = {}) {
+export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = () => {}, draft = false } = {}) {
   const { frames, timeline, format } = cap;
   const [W, H] = format.out;
   const tAt = (type) => timeline.find((e) => e.type === type)?.t;
@@ -49,9 +49,10 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     intro: reel.intro, look, title: reel.title ?? cap.title, link: reel.link ?? `herb.art${new URL(cap.url).pathname}`,
   });
 
-  const ff = spawn("ffmpeg", ["-y", "-v", "error", "-f", "image2pipe", "-framerate", String(fps), "-c:v", "png", "-i", "-",
-    "-c:v", "libx264", "-preset", "slow", "-crf", "16", "-pix_fmt", "yuv420p", "-profile:v", "high", "-level", "4.2",
-    "-r", String(fps), "-movflags", "+faststart", outFile], { stdio: ["pipe", "inherit", "inherit"] });
+  const shot = draft ? { format: "jpeg", quality: 80, optimizeForSpeed: true } : { format: "png", optimizeForSpeed: true };
+  const encode = draft ? ["-preset", "ultrafast", "-crf", "24"] : ["-preset", "slow", "-crf", "16", "-profile:v", "high", "-level", "4.2"];
+  const ff = spawn("ffmpeg", ["-y", "-v", "error", "-f", "image2pipe", "-framerate", String(fps), "-c:v", draft ? "mjpeg" : "png", "-i", "-",
+    "-c:v", "libx264", ...encode, "-pix_fmt", "yuv420p", "-r", String(fps), "-movflags", "+faststart", outFile], { stdio: ["pipe", "inherit", "inherit"] });
   const done = new Promise((res, rej) => ff.on("close", (c) => (c === 0 ? res() : rej(new Error(`ffmpeg exited ${c}`)))));
 
   const posterAt = reel.poster != null ? Math.round((reel.poster / 1000) * fps) : Math.round(total * 0.45);
@@ -63,9 +64,9 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     while (fi + 1 < frames.length && frames[fi + 1].t <= T) fi++;
     const phase = T >= outroStart ? "outro" : tOut < (reel.intro?.fade ?? 450) ? "intro" : "main";
     await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase });
-    const { data } = await cdp.send("Page.captureScreenshot", { format: "png", optimizeForSpeed: true });
+    const { data } = await cdp.send("Page.captureScreenshot", shot);
     const buf = Buffer.from(data, "base64");
-    if (i === posterAt) fs.writeFileSync(outFile.replace(/\.mp4$/, ".poster.png"), buf);
+    if (i === posterAt && !draft) fs.writeFileSync(outFile.replace(/\.mp4$/, ".poster.png"), buf);
     if (!ff.stdin.write(buf)) await new Promise((r) => ff.stdin.once("drain", r));
     if (i % fps === 0) log(`  composing ${i}/${total} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
   }

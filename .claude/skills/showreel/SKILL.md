@@ -9,7 +9,8 @@ The harness is `tools/showreel/`. A **reel** is a small file in `tools/showreel/
 
 ```sh
 cd tools/showreel && npm install            # once; needs ffmpeg on PATH
-node record.mjs coverflow                   # the reel's own formats, against https://herb.art
+node record.mjs coverflow --draft           # fast preview while directing (see below)
+node record.mjs coverflow                   # full quality: the reel's own formats, against https://herb.art
 node record.mjs coverflow --format all      # landscape 16:9, square 1:1, vertical 9:16
 node record.mjs ink-drag --base http://localhost:3000   # a draft on the dev server
 node record.mjs coverflow --recompose       # re-render the last capture only (seconds, not minutes)
@@ -17,6 +18,24 @@ GPU=native CHANNEL=chrome node record.mjs amorph        # WebGL pieces: use the 
 ```
 
 Output: `tools/showreel/out/<reel>/<format>.mp4` plus `<format>.poster.png`. H.264 High, yuv420p, 60fps, faststart: uploads to X, Instagram, TikTok, YouTube and LinkedIn as is.
+
+## Draft, then final
+
+Iterate on drafts; render full quality once the cut is approved.
+
+| | Draft (`--draft`) | Final |
+|---|---|---|
+| Size / rate | half size (960×540, 540×960), 30fps, 1x capture | 1920×1080 / 1080×1920, 60fps, 2–3x capture |
+| Encode | JPEG frames, x264 ultrafast | PNG frames, x264 slow CRF 16 |
+| Output | `out/<reel>/<format>.draft.mp4` | `out/<reel>/<format>.mp4` + poster |
+| Time, 16s clip, no GPU | ~50s | ~2.5–5 min |
+
+Speed tricks, fastest first:
+- `--recompose` re-renders only the overlay pass from the last capture: camera, captions, cursor, end card. Seconds. Use it whenever you changed only `camera`, `zoom`, `caption`, `intro`/`outro` settings or the compositor, not the beats that drive the page.
+- `--draft --format landscape` — one format at a time.
+- `--draft --realtime` on a Mac (`GPU=native CHANNEL=chrome`) records as fast as the clip plays. Timing can drift a little from the lockstep final; good enough to judge a cut.
+
+Beats, timings and camera are identical between draft and final, so the approved draft is exactly what the final shows, only sharper and smoother.
 
 ## How it works (so you can direct it)
 
