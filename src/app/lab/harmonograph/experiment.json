@@ -1,0 +1,11 @@
+{
+  "title": "Harmonograph",
+  "description": "A sheet of warm white paper under the pen of a pendulum harmonograph. Two pendulums swing the pen at nearly two to three (three to four on the next sheet), a third circles the table beneath it, and the single line they draw winds inward as the swing decays, thinning where the pen runs fast and pooling ink where it slows. Drag across the sheet to push the pendulums: the direction and speed of your hand set their swing and phase, and the pen keeps drawing from wherever they are. Double-click to tear the sheet off the pad and start a fresh one.",
+  "tags": ["Canvas", "Physics", "Drawing"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "From the Vertigo titles (Saul Bass and John Whitney, 1958, https://artofthetitle.com/title/vertigo): machine-drawn Lissajous figures made with total precision. Here the machine is a real damped three-pendulum harmonograph, and the paper is the object.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.4], "to": [0.6, 0.62] },
+  "sources": ["https://artofthetitle.com/title/vertigo", "https://en.wikipedia.org/wiki/Harmonograph"]
+}
