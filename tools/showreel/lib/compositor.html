@@ -28,10 +28,22 @@ const spring = (s, target, omega, dt) => {
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
 
-const cam = { z: { x: 0, v: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
+// Camera state (log zoom, centre in css px) and the shot it is playing.
+const cam = { z: 0, x: 0, y: 0 };
+const lead = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
+let shot = null;
+const inOut = (p) => { p = clamp(p, 0, 1); return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; };
+// A camera move is a shot: an eased tween from where the camera is to where
+// it is going, travelling on a gentle arc and easing back a touch mid-flight
+// on long pans, the way an operator would move it. Duration scales with distance.
+function startShot(t0, to, follow = false, dur) {
+  const dist = Math.hypot(to.x - cam.x, to.y - cam.y) * Math.exp(cam.z);
+  shot = { t0, from: { z: cam.z, x: cam.x, y: cam.y }, to, follow,
+    dur: dur ?? clamp(520 + dist * 0.9 + Math.abs(to.z - cam.z) * 700, 650, 1400) };
+}
 // raw: where the real pointer is. x/y: where it is drawn, lerped behind raw.
 const cur = { raw: { x: 0, y: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 }, tilt: { x: 0, v: 0 }, idle: { x: 0, v: 0 } };
-let ev = 0, lastT = 0, camTarget, base;
+let ev = 0, lastT = 0, base;
 
 window.setup = async (spec) => {
   S = spec; [W, H] = spec.out; vw = spec.viewport.width; vh = spec.viewport.height;
@@ -46,11 +58,13 @@ window.setup = async (spec) => {
     const z = Math.min(vw / (st.width * (1 + 2 * st.pad)), vh / (st.height * (1 + 2 * st.pad)));
     base = { z: clamp(z, 1, spec.maxBase ?? 2.2), x: st.x + st.width / 2, y: st.y + st.height / 2 };
   }
-  camTarget = { ...base, follow: false, omega: 5.5 };
+
   const intro = spec.intro ?? {};
-  cam.z.x = Math.log(base.z * (intro.zoom ?? 1.08)); cam.x.x = base.x; cam.y.x = base.y;
+  cam.z = Math.log(base.z * (intro.zoom ?? 1.08)); cam.x = base.x; cam.y = base.y;
+  shot = { t0: null, from: { ...cam }, to: { z: Math.log(base.z), x: base.x, y: base.y }, dur: intro.settle ?? 1600 };
   const first = spec.timeline.find((e) => e.type === "cursor" && e.visible);
   cur.raw.x = cur.x.x = first?.x ?? vw * 0.66; cur.raw.y = cur.y.x = first?.y ?? vh * 0.82;
+  lead.x.x = cur.x.x; lead.y.x = cur.y.x;
   return true;
 };
 
@@ -74,9 +88,11 @@ function consume(T) {
     }
     else if (e.type === "down") cur.down = true;
     else if (e.type === "up") cur.down = false;
-    else if (e.type === "camera") camTarget = e.zoom === 1 && e.x == null
-      ? { ...base, follow: false, omega: e.stiffness ?? 5.5 }
-      : { z: base.z * e.zoom, x: e.x ?? cur.raw.x, y: e.y ?? cur.raw.y, follow: !!e.follow, omega: e.stiffness ?? 5.5 };
+    else if (e.type === "camera") {
+      const home = e.zoom === 1 && e.x == null;
+      const to = home ? { z: Math.log(base.z), x: base.x, y: base.y } : { z: Math.log(Math.max(1, base.z * e.zoom)), x: e.x ?? cur.raw.x, y: e.y ?? cur.raw.y };
+      startShot(e.t, to, !home && !!e.follow, e.duration);
+    }
   }
 }
 
@@ -101,18 +117,30 @@ window.render = async ({ t, T, src, phase }) => {
   spring(cur.y, cur.raw.y, lag, dt);
 
   // camera
-  const tz = Math.log(Math.max(1, camTarget.z));
-  const tx = camTarget.follow ? cur.x.x : camTarget.x, ty = camTarget.follow ? cur.y.x : camTarget.y;
-  spring(cam.z, tz, camTarget.omega, dt);
-  spring(cam.x, tx, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
-  spring(cam.y, ty, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
+  // follow: aim a little ahead of the pointer, smoothed, so the frame leads the move
+  spring(lead.x, cur.x.x + cur.x.v * 0.16, 7, dt);
+  spring(lead.y, cur.y.x + cur.y.v * 0.16, 7, dt);
+  if (shot) {
+    if (shot.t0 == null) shot.t0 = T;
+    const p = (T - shot.t0) / shot.dur, e = inOut(p);
+    const to = shot.follow ? { ...shot.to, x: lead.x.x, y: lead.y.x } : shot.to;
+    const dx = to.x - shot.from.x, dy = to.y - shot.from.y, d = Math.hypot(dx, dy);
+    const arc = Math.sin(Math.PI * clamp(p, 0, 1));
+    // bow upward (or outward on a vertical move), like the pointer does
+    const nx = d ? -dy / d : 0, ny = d ? dx / d : 0;
+    const side = Math.abs(ny) > 0.2 ? Math.sign(-ny) : Math.sign(nx) || 1;
+    cam.x = shot.from.x + dx * e + nx * side * d * 0.12 * arc;
+    cam.y = shot.from.y + dy * e + ny * side * d * 0.12 * arc;
+    cam.z = shot.from.z + (to.z - shot.from.z) * e - 0.06 * Math.min(1, d / 400) * arc;
+    if (p >= 1 && !shot.follow) shot = null;
+  }
   // The frame breathes: a slow sub-1% push and drift so a held moment never
   // reads as a frozen picture.
   const b = T / 1000, br = S.breathe ?? 1;
-  const z = Math.exp(cam.z.x) * (1 + 0.009 * br * (1 + Math.sin(b * 0.55)));
+  const z = Math.max(1, Math.exp(cam.z)) * (1 + 0.009 * br * (1 + Math.sin(b * 0.55)));
   cam.dx = 0.004 * br * vw * Math.sin(b * 0.37 + 1.1); cam.dy = 0.004 * br * vh * Math.sin(b * 0.31 + 0.2);
   const hw = vw / z / 2, hh = vh / z / 2;
-  const cx = clamp(cam.x.x + cam.dx, hw, vw - hw), cy = clamp(cam.y.x + cam.dy, hh, vh - hh);
+  const cx = clamp(cam.x + cam.dx, hw, vw - hw), cy = clamp(cam.y + cam.dy, hh, vh - hh);
   const x0 = cx - hw, y0 = cy - hh, k = K * z;
 
   const img = await bitmap(src);
