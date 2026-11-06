@@ -1,0 +1,759 @@
+import { createStage, clamp, damp } from "../_kit/stage";
+import { createFilm, FILM_PRESETS } from "../_kit/film";
+
+// Splat Towers: one worm's-eye photograph lifted into real 3D Gaussians.
+//
+// Offline (tools/depth/bakes/splat-towers/bake.py) the photo is cut by a
+// quadtree that splits where the picture or the geometry asks for it, and each
+// cell becomes one anisotropic Gaussian: its shape from the structure tensor
+// (an edge gives a thin splat laid along it, open sky a big round one), its
+// position unprojected through the depth map, its tilt from a plane fitted to
+// the cell's inverse depth. Sky and cloud sit on a dome far behind the towers.
+//
+// Here every splat is projected the 3DGS way (EWA: Sigma' = J W Sigma W^T J^T),
+// sorted back to front on a worker and alpha-blended. Each splat also carries
+// the photograph through its own plane: a fragment's ray meets the splat's
+// plane, and that point, seen from the original camera, is where the colour
+// comes from. From the original camera every splat agrees, so the photograph
+// comes back exactly, at full resolution. Move the camera and the splats move
+// as the surfaces they are. At the edges of the view they let go of the
+// photograph and show themselves: their own colour, wider and softer.
+//
+// Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
+// opening.
+
+const ASSET = "/lab/splat-towers/";
+const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
+
+const MAX_DEG = 5; // orbit range before the rubber band
+const PIVOT = 70; // metres up the optical axis: the camera swings round this point
+const DEG_PER_PX = 0.016;
+const OVERZOOM = 1.07; // a little more than cover, so the orbit has room
+
+const FILM = {
+  ...FILM_PRESETS.summer,
+  input: "linear",
+  headroom: 0,
+  exposure: 0.1,
+  whitePoint: 1.62,
+  contrast: 1.16,
+  shoulder: 0.95,
+  halation: 0.42,
+  halationThreshold: 0.75,
+  bloom: 0.3,
+  softness: 0.4,
+  saturation: 1.08,
+  blueDepth: 0.55,
+  highlightTint: [1.02, 1, 0.96],
+  grain: 0.38,
+  vignette: 0.24,
+};
+const HEADROOM = 0.9; // near-white photo values pushed past 1.0 so cloud carries energy
+
+const SPLAT_VS = `#version 300 es
+precision highp float;
+precision highp int;
+precision highp usampler2D;
+layout(location = 0) in vec2 aCorner;
+layout(location = 1) in uint aIdx;
+uniform usampler2D uData;
+uniform mat3 uRot;      // world -> view
+uniform vec3 uCam;
+uniform float uF;
+uniform vec2 uC;
+uniform vec2 uSrc;
+uniform vec4 uM2;       // device offset = M2 * image offset (row major)
+uniform vec2 uRes;
+uniform vec4 uSoft;     // screen band, photo band, reveal radius, extra
+uniform int uCut;       // level-of-detail cut for the crisp field
+out vec2 vOff;
+flat out vec3 vConic;
+flat out vec4 vCol;
+flat out float vTex;
+flat out vec4 vPlane;
+
+vec3 s2l(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+
+void main() {
+  gl_Position = vec4(0.0, 0.0, 2.0, 1.0);
+  uint i2 = aIdx * 2u;
+  ivec2 tc = ivec2(int(i2 & 2047u), int(i2 >> 11));
+  uvec4 t0 = texelFetch(uData, tc, 0);
+  uvec4 t1 = texelFetch(uData, tc + ivec2(1, 0), 0);
+  vec3 X = uintBitsToFloat(t0.xyz);
+  vec3 col = s2l(vec3(float(t0.w & 255u), float((t0.w >> 8) & 255u), float((t0.w >> 16) & 255u)) / 255.0);
+  uint flags = t0.w >> 24;
+  vec2 h0 = unpackHalf2x16(t1.x);
+  vec2 h1 = unpackHalf2x16(t1.y);
+  vec2 h2 = unpackHalf2x16(t1.z);
+  vec3 a1 = vec3(h0, h1.x);
+  vec3 a2 = vec3(h1.y, h2);
+
+  vec3 p = uRot * (X - uCam);
+  if (p.z < 0.5) return;
+  mat2 M2 = mat2(uM2.x, uM2.z, uM2.y, uM2.w);
+  vec2 img = uF * p.xy / p.z;
+  vec2 dev = M2 * img + 0.5 * uRes;
+
+  // How much this splat lets go of the photograph: near the edge of the view,
+  // near the edge of the photograph, and outside the opening's radius.
+  vec2 src0 = uF * X.xy / X.z + uC;
+  float qs = min(min(dev.x, dev.y), min(uRes.x - dev.x, uRes.y - dev.y)) / min(uRes.x, uRes.y);
+  float qp = min(min(src0.x, src0.y), min(uSrc.x - src0.x, uSrc.y - src0.y)) / min(uSrc.x, uSrc.y);
+  float soft = max(1.0 - smoothstep(-0.015, uSoft.x, qs), 1.0 - smoothstep(-0.03, uSoft.y, qp));
+  float rr = length(dev - 0.5 * uRes) / (0.5 * length(uRes));
+  soft = max(soft, smoothstep(uSoft.z - 0.3, uSoft.z, rr));
+  soft = clamp(soft + uSoft.w, 0.0, 1.0);
+  float grow = 1.0 + 1.4 * soft * soft;
+
+  // Crisp field from the fine cut; soft field from the coarse one (16 px
+  // cells and up), cross-faded, so the splats at the edge are big enough to
+  // read as splats.
+  int level = int((flags >> 2) & 7u);
+  bool leaf = ((flags >> 1) & 1u) == 1u;
+  bool inCut = leaf ? level <= uCut : level == uCut;
+  bool inCoarse = leaf ? level <= 4 : level == 4;
+  float k = smoothstep(0.3, 0.62, soft);
+  float wsel = (inCut ? 1.0 - k : 0.0) + (inCoarse ? k : 0.0);
+  if (wsel < 0.004) return;
+
+  // EWA: the Jacobian of the projection at p, applied to the splat's axes.
+  vec3 nn = normalize(cross(a1, a2));
+  vec3 b1 = uRot * a1;
+  vec3 b2 = uRot * a2;
+  vec3 b3 = uRot * nn * (0.06 * min(length(a1), length(a2)));
+  float iz = 1.0 / p.z;
+  vec2 j1 = M2 * (uF * iz * (b1.xy - p.xy * iz * b1.z)) * grow;
+  vec2 j2 = M2 * (uF * iz * (b2.xy - p.xy * iz * b2.z)) * grow;
+  vec2 j3 = M2 * (uF * iz * (b3.xy - p.xy * iz * b3.z)) * grow;
+  mat2 S = outerProduct(j1, j1) + outerProduct(j2, j2) + outerProduct(j3, j3) + mat2(0.3);
+  float a = S[0][0];
+  float b = S[0][1];
+  float c = S[1][1];
+  float mid = 0.5 * (a + c);
+  float rad = length(vec2(0.5 * (a - c), b));
+  float l1 = mid + rad;
+  float l2 = max(mid - rad, 0.1);
+  vec2 v1 = abs(b) > 1e-6 ? normalize(vec2(b, l1 - a)) : (a >= c ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+  vec2 v2 = vec2(-v1.y, v1.x);
+  float ext = mix(1.9, 3.2, soft); // opaque cores overlap their neighbours long before 1.9 sigma
+  float r1 = min(ext * sqrt(l1), 3000.0);
+  float r2 = min(ext * sqrt(l2), 3000.0);
+  vec2 off = aCorner.x * r1 * v1 + aCorner.y * r2 * v2;
+  vOff = off;
+  vConic = vec3(c, -b, a) / (a * c - b * b);
+  vec2 pos = dev + off;
+  gl_Position = vec4(pos.x / uRes.x * 2.0 - 1.0, 1.0 - pos.y / uRes.y * 2.0, 0.0, 1.0);
+  // Let go, a splat is its own soft light: brighter, translucent.
+  vCol = vec4(col * (1.0 + 0.3 * soft * soft), mix(2.6, 0.5, soft) * wsel);
+  vTex = (flags & 1u) == 1u ? 1.0 - smoothstep(0.0, 0.6, soft) : 0.0;
+  vPlane = vec4(nn, dot(nn, X));
+}`;
+
+const SPLAT_FS = `#version 300 es
+precision highp float;
+in vec2 vOff;
+flat in vec3 vConic;
+flat in vec4 vCol;
+flat in float vTex;
+flat in vec4 vPlane;
+uniform sampler2D uPhoto;
+uniform mat3 uRotT;     // view -> world
+uniform vec3 uCam;
+uniform float uF;
+uniform vec2 uC;
+uniform vec2 uSrc;
+uniform vec4 uM2inv;
+uniform vec2 uRes;
+uniform float uHeadroom;
+uniform vec2 uZr;       // log(ZMIN), 1 / log(ZMAX / ZMIN)
+out vec4 outColor;
+void main() {
+  float pw = -0.5 * (vConic.x * vOff.x * vOff.x + 2.0 * vConic.y * vOff.x * vOff.y + vConic.z * vOff.y * vOff.y);
+  float alpha = min(0.995, vCol.a * exp(pw));
+  if (alpha < 1.0 / 255.0) discard;
+  // The pixel's ray meets the splat's plane; the original camera says where
+  // that point was in the photograph.
+  vec2 dev = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) - 0.5 * uRes;
+  vec2 img = mat2(uM2inv.x, uM2inv.z, uM2inv.y, uM2inv.w) * dev;
+  vec3 dir = uRotT * vec3(img / uF, 1.0);
+  float den = dot(vPlane.xyz, dir);
+  float t = (vPlane.w - dot(vPlane.xyz, uCam)) / (abs(den) > 1e-6 ? den : 1e-6);
+  vec3 P = uCam + t * dir;
+  vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC) / uSrc;
+  vec4 photo = texture(uPhoto, clamp(uv, vec2(0.0), vec2(1.0)));
+  float ok = (t > 0.0 && P.z > 0.1) ? 1.0 : 0.0;
+  // The photograph's alpha says how far away each pixel was. A splat only
+  // takes colour from its own surface: where the photo shows something
+  // nearer or further (a tower edge over sky, sky behind a tower), this
+  // fragment is not part of it and stays clear.
+  float lnr = abs(photo.a - (log(max(P.z, 1e-3)) - uZr.x) * uZr.y) / uZr.y;
+  float mine = ok * (1.0 - smoothstep(0.16, 0.34, lnr));
+  alpha *= mix(1.0, mine, vTex);
+  if (alpha < 1.0 / 255.0) discard;
+  vec3 c = mix(vCol.rgb, photo.rgb, vTex * ok);
+  float m = max(c.r, max(c.g, c.b));
+  float e = smoothstep(0.55, 1.0, m);
+  c *= 1.0 + uHeadroom * e * e;
+  outColor = vec4(c * alpha, alpha);
+}`;
+
+const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+
+function compile(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [
+    [gl.VERTEX_SHADER, vs],
+    [gl.FRAGMENT_SHADER, fs],
+  ]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+    gl.deleteShader(s);
+  }
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+
+// float32 -> float16 bits
+const f32 = new Float32Array(1);
+const u32 = new Uint32Array(f32.buffer);
+function toHalf(v) {
+  f32[0] = v;
+  const x = u32[0];
+  const sign = (x >>> 16) & 0x8000;
+  let e = ((x >>> 23) & 0xff) - 127 + 15;
+  let m = x & 0x7fffff;
+  if (e <= 0) {
+    if (e < -10) return sign;
+    m = (m | 0x800000) >> (1 - e);
+    return sign | ((m + 0x1000) >> 13);
+  }
+  if (e >= 31) return sign | 0x7bff;
+  const h = sign | (e << 10) | ((m + 0x1000) >> 13);
+  return h;
+}
+const half2 = (a, b) => (toHalf(a) | (toHalf(b) << 16)) >>> 0;
+
+// Decode the quantised bake into GPU texels and worker positions.
+function decode(buf) {
+  const dv = new DataView(buf);
+  if (dv.getUint32(0, true) !== 0x31545053) throw new Error("splats.bin: bad magic");
+  const N = dv.getUint32(4, true);
+  const h = new Float32Array(buf.slice(8, 40));
+  const [W, H, F, CX, CY, M, ZMIN, ZMAX] = h;
+  let o = 40;
+  const qu = new Uint16Array(buf, o, N);
+  o += 2 * N;
+  const qv = new Uint16Array(buf, o, N);
+  o += 2 * N;
+  const qz = new Uint16Array(buf, o, N);
+  o += 2 * N;
+  const qn = new Int8Array(buf, o, 2 * N);
+  o += 2 * N;
+  const qs1 = new Uint8Array(buf, o, N);
+  o += N;
+  const qs2 = new Uint8Array(buf, o, N);
+  o += N;
+  const qa = new Uint8Array(buf, o, N);
+  o += N;
+  const rgb = new Uint8Array(buf, o, 3 * N);
+  o += 3 * N;
+  const flags = new Uint8Array(buf, o, N);
+
+  const rows = Math.ceil((2 * N) / DATA_W);
+  const texels = new Uint32Array(DATA_W * rows * 4);
+  const tf = new Float32Array(texels.buffer);
+  const pos = new Float32Array(3 * N);
+  const lz = Math.log(ZMAX / ZMIN);
+  const n = [0, 0, 0];
+  const plane = (px, py, nd, out) => {
+    const rx = (px - CX) / F;
+    const ry = (py - CY) / F;
+    const den = n[0] * rx + n[1] * ry + n[2];
+    const t = nd / den;
+    out[0] = t * rx;
+    out[1] = t * ry;
+    out[2] = t;
+    return den;
+  };
+  const P = [0, 0, 0];
+  const Q = [0, 0, 0];
+  const axis = (u, v, Z, nd, ex, ey, den0, out) => {
+    const d1 = plane(u + ex, v + ey, nd, P);
+    const d2 = plane(u - ex, v - ey, nd, Q);
+    let ax = (P[0] - Q[0]) / 2;
+    let ay = (P[1] - Q[1]) / 2;
+    let az = (P[2] - Q[2]) / 2;
+    const flat = (Math.hypot(ex, ey) * Z) / F;
+    const len = Math.hypot(ax, ay, az);
+    // Past grazing (or through the horizon of the plane): lay it flat.
+    if (!(d1 * den0 > 0 && d2 * den0 > 0) || !(len < flat * 10)) {
+      ax = (ex * Z) / F;
+      ay = (ey * Z) / F;
+      az = 0;
+    }
+    out[0] = ax;
+    out[1] = ay;
+    out[2] = az;
+  };
+  const a1 = [0, 0, 0];
+  const a2 = [0, 0, 0];
+  for (let i = 0; i < N; i++) {
+    const u = qu[i] / 8 - M;
+    const v = qv[i] / 8 - M;
+    const Z = ZMIN * Math.exp((qz[i] / 65535) * lz);
+    const X = ((u - CX) / F) * Z;
+    const Y = ((v - CY) / F) * Z;
+    // octahedral normal
+    let nx = qn[2 * i] / 127;
+    let ny = qn[2 * i + 1] / 127;
+    let nz = 1 - Math.abs(nx) - Math.abs(ny);
+    if (nz < 0) {
+      const ox = nx;
+      nx = (1 - Math.abs(ny)) * Math.sign(ox || 1);
+      ny = (1 - Math.abs(ox)) * Math.sign(ny || 1);
+    }
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    n[0] = nx / nl;
+    n[1] = ny / nl;
+    n[2] = nz / nl;
+    const nd = n[0] * X + n[1] * Y + n[2] * Z;
+    const den0 = n[0] * ((u - CX) / F) + n[1] * ((v - CY) / F) + n[2];
+    const s1 = 2 ** (qs1[i] / 20 - 2);
+    const s2 = 2 ** (qs2[i] / 20 - 2);
+    const ang = (qa[i] / 256) * Math.PI;
+    const ca = Math.cos(ang);
+    const sa = Math.sin(ang);
+    axis(u, v, Z, nd, ca * s1, sa * s1, den0, a1);
+    axis(u, v, Z, nd, -sa * s2, ca * s2, den0, a2);
+    const t = i * 8;
+    tf[t] = X;
+    tf[t + 1] = Y;
+    tf[t + 2] = Z;
+    texels[t + 3] = (rgb[3 * i] | (rgb[3 * i + 1] << 8) | (rgb[3 * i + 2] << 16) | (flags[i] << 24)) >>> 0;
+    texels[t + 4] = half2(a1[0], a1[1]);
+    texels[t + 5] = half2(a1[2], a2[0]);
+    texels[t + 6] = half2(a2[1], a2[2]);
+    texels[t + 7] = 0;
+    pos[3 * i] = X;
+    pos[3 * i + 1] = Y;
+    pos[3 * i + 2] = Z;
+  }
+  return { N, W, H, F, CX, CY, ZMIN, ZMAX, rows, texels, pos, flags: flags.slice() };
+}
+
+// A damped spring on one value.
+function spring(x) {
+  return { x, v: 0, to: x };
+}
+function stepSpring(s, omega, zeta, dt) {
+  const n = Math.ceil(dt / (1 / 240));
+  const h = dt / n;
+  for (let i = 0; i < n; i++) {
+    const a = -omega * omega * (s.x - s.to) - 2 * zeta * omega * s.v;
+    s.v += a * h;
+    s.x += s.v * h;
+  }
+}
+
+// R = Ry(yaw) Rx(pitch), row major. World: x right, y down, z up the lens.
+function rotation(yawDeg, pitchDeg) {
+  const y = (yawDeg * Math.PI) / 180;
+  const p = (pitchDeg * Math.PI) / 180;
+  const cy = Math.cos(y);
+  const sy = Math.sin(y);
+  const cp = Math.cos(p);
+  const sp = Math.sin(p);
+  // Ry * Rx
+  return [cy, sy * sp, sy * cp, 0, cp, -sp, -sy, cy * sp, cy * cp];
+}
+
+export async function createSplatTowers(host, { embedded = false } = {}) {
+  const q = new URLSearchParams(window.location.search);
+  const num = (k) => {
+    const v = q.get(k);
+    return v != null && v !== "" && Number.isFinite(+v) ? +v : null;
+  };
+  const qYaw = num("yaw");
+  const qPitch = num("pitch");
+  const qReveal = num("reveal");
+  const held = qYaw != null || qPitch != null || qReveal != null;
+  const film0 = { ...FILM };
+  for (const key of Object.keys(FILM)) {
+    const v = num(key);
+    if (typeof FILM[key] === "number" && v != null) film0[key] = v;
+  }
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const coarse = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+
+  // The colour field the picture opens from.
+  host.style.background = "#dfe8ef";
+
+  const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
+  const gl = stage.ctx;
+  if (!gl) throw new Error("no webgl2");
+  const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
+  const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+
+  const [buf, bitmap] = await Promise.all([
+    fetch(`${ASSET}splats.bin`).then((r) => {
+      if (!r.ok) throw new Error(`splats.bin ${r.status}`);
+      return r.arrayBuffer();
+    }),
+    fetch(`${ASSET}photo.webp`)
+      .then((r) => r.blob())
+      .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" })),
+  ]);
+  const D = decode(buf);
+
+  // ---- textures
+  const dataTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, dataTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32UI, DATA_W, D.rows, 0, gl.RGBA_INTEGER, gl.UNSIGNED_INT, D.texels);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+  const photo = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, photo);
+  const levels = Math.floor(Math.log2(Math.max(bitmap.width, bitmap.height))) + 1;
+  gl.texStorage2D(gl.TEXTURE_2D, levels, gl.SRGB8_ALPHA8, bitmap.width, bitmap.height);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RGBA, gl.UNSIGNED_BYTE, bitmap);
+  bitmap.close?.();
+  gl.generateMipmap(gl.TEXTURE_2D);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+
+  // ---- geometry: one quad, instanced per splat index
+  const prog = compile(gl, SPLAT_VS, SPLAT_FS);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  const corners = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, corners);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  const order = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, order);
+  gl.bufferData(gl.ARRAY_BUFFER, D.N * 4, gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribIPointer(1, 1, gl.UNSIGNED_INT, 0, 0);
+  gl.vertexAttribDivisor(1, 1);
+  gl.bindVertexArray(null);
+
+  // ---- the sort worker
+  const worker = new Worker(new URL("./sortWorker.js", import.meta.url), { type: "module" });
+  worker.postMessage({ type: "init", pos: D.pos, meta: D.flags });
+  let drawCount = 0;
+  let sortBusy = false;
+  let sortWanted = null;
+  let sortId = 0;
+  let resolveFirst;
+  const firstSort = new Promise((r) => (resolveFirst = r));
+  worker.onmessage = (e) => {
+    const { order: ord, count } = e.data;
+    gl.bindBuffer(gl.ARRAY_BUFFER, order);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, ord, 0, count);
+    drawCount = count;
+    sortBusy = false;
+    dirty = true;
+    resolveFirst?.();
+    resolveFirst = null;
+    if (sortWanted) {
+      const w = sortWanted;
+      sortWanted = null;
+      requestSort(w);
+    }
+  };
+  function requestSort(cam) {
+    if (sortBusy) {
+      sortWanted = cam;
+      return;
+    }
+    sortBusy = true;
+    worker.postMessage({ type: "sort", cam: cam.C, fwd: cam.fwd, cut: cam.cut, id: ++sortId });
+  }
+
+  // ---- scene target + film
+  const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
+  let tex = null;
+  let fbo = null;
+  let dirty = true;
+  const build = () => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    if (tex) gl.deleteTexture(tex);
+    if (fbo) gl.deleteFramebuffer(fbo);
+    tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    fbo = gl.createFramebuffer();
+    let ok = false;
+    if (half) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    }
+    if (!ok) {
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    }
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    film.resize(w, h);
+    dirty = true;
+  };
+  stage.onResize(build);
+
+  // Looking straight up there is no "up": a landscape box turns the
+  // photograph a quarter turn so it fills the window.
+  const view = () => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    const turn = w > h * 1.02;
+    const sw = turn ? D.H : D.W;
+    const sh = turn ? D.W : D.H;
+    const s = Math.max(w / sw, h / sh) * OVERZOOM;
+    // device = M * image offset; a quarter turn sends the photo's top to the right
+    const m = turn ? [0, -s, s, 0] : [s, 0, 0, s];
+    const det = m[0] * m[3] - m[1] * m[2];
+    const inv = [m[3] / det, -m[1] / det, -m[2] / det, m[0] / det];
+    return { m, inv, turn, s };
+  };
+
+  const camera = (yawDeg, pitchDeg) => {
+    const R = rotation(yawDeg, pitchDeg);
+    const fwd = [R[2], R[5], R[8]];
+    const C = [-PIVOT * fwd[0], -PIVOT * fwd[1], PIVOT - PIVOT * fwd[2]];
+    return { R, fwd, C };
+  };
+
+  const uploadMat3 = (loc, R, transpose) => {
+    // GL wants column major. R is row major: as-is it is R^T in GL's eyes.
+    const a = transpose ? R : [R[0], R[3], R[6], R[1], R[4], R[7], R[2], R[5], R[8]];
+    gl.uniformMatrix3fv(loc, false, a);
+  };
+
+  const renderSplats = (cam, soft) => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    const V = view();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0.16, 0.33, 0.47, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(prog.p);
+    const u = prog.u;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, dataTex);
+    gl.uniform1i(u.uData, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, photo);
+    gl.uniform1i(u.uPhoto, 1);
+    // world -> view is R^T: R row major read as column major is exactly R^T.
+    uploadMat3(u.uRot, cam.R, true);
+    uploadMat3(u.uRotT, cam.R, false);
+    gl.uniform3fv(u.uCam, cam.C);
+    gl.uniform1f(u.uF, D.F);
+    gl.uniform2f(u.uC, D.CX, D.CY);
+    gl.uniform2f(u.uSrc, D.W, D.H);
+    gl.uniform4fv(u.uM2, V.m);
+    gl.uniform4fv(u.uM2inv, V.inv);
+    gl.uniform2f(u.uRes, w, h);
+    gl.uniform4fv(u.uSoft, soft);
+    gl.uniform1i(u.uCut, cut);
+    gl.uniform1f(u.uHeadroom, HEADROOM);
+    gl.uniform2f(u.uZr, Math.log(D.ZMIN), 1 / Math.log(D.ZMAX / D.ZMIN));
+    gl.bindVertexArray(vao);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, drawCount);
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+  };
+
+  // ---- state
+  const yaw = spring(qYaw ?? 0);
+  const pitch = spring(qPitch ?? 0);
+  const hover = { x: 0, y: 0 };
+  const orient = { b: null, g: null, x: 0, y: 0 };
+  let grab = null;
+  let born = performance.now();
+  let breathe = 0;
+  let lastKey = "";
+  let lastGrain = -1;
+  let cut = coarse ? 5 : 6;
+  let slow = 0;
+  let lastSortCam = null;
+
+  stage.on("down", (p) => {
+    // Take over from the hover lean where it is, so the grab does not jump.
+    yaw.x += hover.x;
+    pitch.x += hover.y;
+    hover.x = 0;
+    hover.y = 0;
+    grab = { x: p.x, y: p.y, y0: yaw.x, p0: pitch.x };
+    yaw.to = yaw.x;
+    pitch.to = pitch.x;
+    requestOrientation();
+  });
+  stage.on("up", (p) => {
+    if (!grab) return;
+    grab = null;
+    // Let go: the camera swings home, carrying the hand's speed into the spring.
+    const V = view();
+    const [ix, iy] = toImage(V, p.vx, p.vy);
+    yaw.v = ix * DEG_PER_PX * 0.9;
+    pitch.v = -iy * DEG_PER_PX * 0.9;
+    yaw.to = 0;
+    pitch.to = 0;
+  });
+  // screen (css px) -> image-space direction
+  const toImage = (V, dx, dy) => {
+    const r = V.turn ? [dy, -dx] : [dx, dy];
+    return r;
+  };
+
+  const onOrient = (e) => {
+    if (e.beta == null) return;
+    if (orient.b == null) {
+      orient.b = e.beta;
+      orient.g = e.gamma;
+    }
+    orient.x = clamp((e.gamma - orient.g) * 0.15, -2, 2);
+    orient.y = clamp((e.beta - orient.b) * 0.15, -2, 2);
+  };
+  let orientOn = false;
+  function requestOrientation() {
+    if (orientOn || typeof window.DeviceOrientationEvent === "undefined") return;
+    if (!coarse) return;
+    orientOn = true;
+    const ask = window.DeviceOrientationEvent.requestPermission;
+    if (typeof ask === "function") ask().then((r) => r === "granted" && window.addEventListener("deviceorientation", onOrient)).catch(() => {});
+    else window.addEventListener("deviceorientation", onOrient);
+  }
+
+  const band = (lim, x) => (Math.abs(x) <= lim ? x : Math.sign(x) * (lim + (Math.abs(x) - lim) * 0.35));
+
+  const frame = (dt, t) => {
+    const now = performance.now();
+    const p = stage.pointer;
+    const age = (now - born) / 1000;
+    const V = view();
+
+    if (grab) {
+      const [ix, iy] = toImage(V, p.x - grab.x, p.y - grab.y);
+      yaw.to = band(MAX_DEG, grab.y0 + ix * DEG_PER_PX);
+      pitch.to = band(MAX_DEG, grab.p0 - iy * DEG_PER_PX);
+      stepSpring(yaw, 40, 1, dt);
+      stepSpring(pitch, 40, 1, dt);
+    } else if (!held) {
+      stepSpring(yaw, 9, 0.85, dt);
+      stepSpring(pitch, 9, 0.85, dt);
+    }
+
+    // Hover: the field leans a degree toward the pointer.
+    let hx = 0;
+    let hy = 0;
+    if (!grab && p.inside && !reduced && !held) {
+      const [ix, iy] = toImage(V, p.x / stage.width - 0.5, p.y / stage.height - 0.5);
+      hx = ix * 2.2;
+      hy = -iy * 2.2;
+    }
+    hover.x = damp(hover.x, hx + orient.x, 1 / 0.35, dt);
+    hover.y = damp(hover.y, hy - orient.y, 1 / 0.35, dt);
+
+    // Breathing: the camera drifts half a degree once the hand is away.
+    const idle = !grab && !held && !reduced && stage.idleFor() > 1500;
+    breathe = damp(breathe, idle ? 1 : 0, 0.8, dt);
+    const by = breathe * 0.6 * Math.sin((t * 2 * Math.PI) / 11.3);
+    const bp = breathe * 0.45 * Math.sin((t * 2 * Math.PI) / 13.7 + 1.2);
+
+    const yd = yaw.x + hover.x + by;
+    const pd = pitch.x + hover.y + bp;
+    const cam = camera(yd, pd);
+
+    // The edges breathe, and open further the further the camera swings.
+    const swing = Math.min(1, Math.hypot(yd, pd) / MAX_DEG);
+    const reveal = qReveal != null ? qReveal : held || reduced ? 1 : expoOut(clamp((age - 0.25) / 2.6, 0, 1));
+    const screenBand = 0.06 + 0.014 * breathe * Math.sin((t * 2 * Math.PI) / 9.1) + 0.035 * swing * swing;
+    const soft = [screenBand, 0.06, 0.3 + reveal * 1.25, 0];
+
+    // Keep the order fresh as the camera moves.
+    const sk = `${cam.C.map((v) => v.toFixed(2)).join(",")}|${cut}`;
+    if (sk !== lastSortCam) {
+      lastSortCam = sk;
+      requestSort({ ...cam, cut });
+    }
+
+    const key = `${yd.toFixed(4)}|${pd.toFixed(4)}|${soft.map((v) => v.toFixed(4)).join(",")}`;
+    let drew = false;
+    if (key !== lastKey || dirty) {
+      const t0 = performance.now();
+      renderSplats(cam, soft);
+      lastKey = key;
+      dirty = false;
+      drew = true;
+      // Adaptive count: if frames run long while moving, stop a level early.
+      slow = damp(slow, dt > 1 / 36 ? 1 : 0, 2, dt);
+      if (slow > 0.8 && cut > 4 && !held) {
+        cut -= 1;
+        slow = 0;
+      }
+      void t0;
+    }
+    const exposure = film0.exposure + (held ? 0 : 1.6 * (1 - reveal));
+    const tick = reduced || held ? 0 : Math.floor(t * 24);
+    if (drew || tick !== lastGrain) {
+      film.render(tex, { ...film0, exposure, grainSeed: tick * 7.31 });
+      lastGrain = tick;
+    }
+  };
+  stage.onFrame(frame);
+
+  // First order, then one full frame before the reveal.
+  await new Promise((r) => requestAnimationFrame(() => r()));
+  if (!tex) build();
+  const c0 = camera(yaw.x, pitch.x);
+  requestSort({ ...c0, cut });
+  lastSortCam = `${c0.C.map((v) => v.toFixed(2)).join(",")}|${cut}`;
+  await firstSort;
+  frame(1 / 60, performance.now() / 1000);
+  born = performance.now();
+  void embedded;
+
+  return {
+    destroy() {
+      worker.terminate();
+      window.removeEventListener("deviceorientation", onOrient);
+      film.destroy();
+      if (tex) gl.deleteTexture(tex);
+      if (fbo) gl.deleteFramebuffer(fbo);
+      gl.deleteTexture(dataTex);
+      gl.deleteTexture(photo);
+      gl.deleteBuffer(corners);
+      gl.deleteBuffer(order);
+      gl.deleteVertexArray(vao);
+      gl.deleteProgram(prog.p);
+      stage.destroy();
+    },
+  };
+}
