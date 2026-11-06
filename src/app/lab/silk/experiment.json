@@ -1,0 +1,99 @@
+{
+  "title": "Silk",
+  "description": "A record sleeve printed on a silk square, hung from two clips on a wire. Grab it anywhere and it drapes, folds and throws a travelling sheen; let go and it swings back. Pull hard enough and a clip lets go, then the other, and the scarf falls away while the next one is hung.",
+  "tags": [
+    "WebGL",
+    "Physics",
+    "Material"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T03:00:00.000Z",
+  "intent": "Factory round 1. Material: silk. Verb: grab. A cover you can hold like cloth, with sheen that only exists while it moves.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "from": [
+      0.5,
+      0.62
+    ],
+    "to": [
+      0.62,
+      0.42
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1200
+    },
+    {
+      "hover": [
+        [
+          0.2,
+          0.5
+        ],
+        [
+          0.5,
+          0.62
+        ],
+        [
+          0.8,
+          0.5
+        ]
+      ],
+      "ms": 700
+    },
+    {
+      "idle": 900
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.62
+        ],
+        [
+          0.6,
+          0.5
+        ],
+        [
+          0.42,
+          0.4
+        ],
+        [
+          0.55,
+          0.48
+        ]
+      ],
+      "ms": 1800
+    },
+    {
+      "idle": 1400
+    },
+    {
+      "drag": [
+        [
+          0.38,
+          0.7
+        ],
+        [
+          0.2,
+          0.95
+        ],
+        [
+          0.1,
+          1.1
+        ]
+      ],
+      "ms": 900
+    },
+    {
+      "idle": 2200
+    }
+  ],
+  "sources": [
+    "https://en.wikipedia.org/wiki/Verlet_integration",
+    "Kajiya-Kay anisotropic hair/fibre highlight"
+  ]
+}

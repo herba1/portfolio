@@ -1,0 +1,85 @@
+{
+  "title": "Blinds",
+  "description": "Venetian blinds with a different record printed across each side of the slats, a low sun behind them. Drag up or down and the slats turn in a travelling wave, letting bright bars of light through the gaps as one sleeve tilts away and the next one turns into place.",
+  "tags": [
+    "Canvas",
+    "Interaction",
+    "Light"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T03:50:00.000Z",
+  "intent": "Factory round 1. Material: aluminium slats and sunlight. Verb: tilt.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "from": [
+      0.5,
+      0.3
+    ],
+    "to": [
+      0.5,
+      0.7
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1000
+    },
+    {
+      "drag": [
+        [
+          0.42,
+          0.45
+        ],
+        [
+          0.5,
+          0.5
+        ],
+        [
+          0.58,
+          0.45
+        ]
+      ],
+      "ms": 1500,
+      "hold": 500
+    },
+    {
+      "idle": 900
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.3
+        ],
+        [
+          0.5,
+          0.55
+        ]
+      ],
+      "ms": 900
+    },
+    {
+      "idle": 700
+    },
+    {
+      "drag": [
+        [
+          0.45,
+          0.4
+        ],
+        [
+          0.5,
+          0.95
+        ]
+      ],
+      "ms": 500
+    },
+    {
+      "idle": 2000
+    }
+  ],
+  "sources": []
+}
