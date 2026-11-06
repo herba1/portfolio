@@ -1,0 +1,41 @@
+.kit-focal-length {
+  background: #f2f0eb;
+  outline: none;
+  cursor: grab;
+}
+
+.kit-focal-length[data-grabbing] {
+  cursor: grabbing;
+}
+
+/* The print: the frame is the sensor, it never changes size. */
+.fl-print {
+  position: absolute;
+  overflow: hidden;
+  background: #dde7ee;
+}
+
+/* The focal length, set like a contact-sheet note under the frame. */
+.fl-mark {
+  position: absolute;
+  color: #1c1b19;
+  font-family: var(--font-sans);
+  font-size: var(--text-ui-sm);
+  line-height: var(--text-ui-sm--line-height);
+  letter-spacing: var(--text-ui-sm--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 1200ms cubic-bezier(0.16, 1, 0.3, 1) 900ms;
+}
+
+.kit-focal-length[data-ready] .fl-mark {
+  opacity: 1;
+}
+
+.kit-focal-length:focus-visible .fl-print {
+  outline: 1px solid #1c1b19;
+  outline-offset: 4px;
+}
