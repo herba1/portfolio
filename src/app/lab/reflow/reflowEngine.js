@@ -21,11 +21,12 @@ const CAP = 8.8; // ink band of a line above the baseline
 const DESC = 2.8; // and below it
 const GUTTER = 14; // round clearance between letter ink and text ink
 const MIN_SEG = 84; // narrower slivers stay empty
+const DEPTH = 3; // and so does any free region shallower than this many lines
 const MEASURE = 360; // column width: about 56 characters of the ballad
 const COL_GAP = 24;
 const PASSES = 6;
 // Justified lines may stretch their spaces this far (r); a line that cannot
-// is set ragged, flush to the column edge, rather than loose or left out.
+// is set ragged, flush left, rather than loose or left out.
 // The search itself looks further (EMERGENCY) so one hard line ahead does
 // not stop the lines before it from finding an even set; Knuth's cubic
 // badness keeps it from choosing loose lines it does not need.
@@ -362,8 +363,12 @@ export async function createReflow(host) {
 
   // Free segments on each baseline of each column: the column minus the
   // dilated letter, in reading order (column, then line, then left to right).
+  // A segment is kept only if it belongs to a free region at least DEPTH
+  // baselines deep: some run of DEPTH consecutive lines through it whose
+  // free spans share MIN_SEG of width with it. A lone line under a
+  // terminal, or a two-line notch in a bay, stays white, so the letter cuts
+  // a clean channel through the block instead of leaving islands.
   function segments() {
-    const segs = [];
     const blockedAt = [];
     for (let li = 0; li < lines; li += 1) {
       const base = top + SIZE + li * LEAD;
@@ -375,17 +380,51 @@ export async function createReflow(host) {
       }
       blockedAt.push(mergeSpans(spans));
     }
+    const segs = [];
     for (const c of cols) {
+      // Every free span of this column, line by line, before any culling.
+      const free = [];
       for (let li = 0; li < lines; li += 1) {
         const base = top + SIZE + li * LEAD;
+        const row = [];
         let x = c.l;
         for (const [a, b] of blockedAt[li]) {
           if (b <= x) continue;
           if (a >= c.r) break;
-          if (a - x >= MIN_SEG) segs.push({ x, w: a - x, base, atL: x === c.l, atR: false });
+          if (a - x >= MIN_SEG) row.push({ x, w: a - x, base, atL: x === c.l, atR: false });
           x = Math.max(x, b);
         }
-        if (c.r - x >= MIN_SEG) segs.push({ x, w: c.r - x, base, atL: x === c.l, atR: true });
+        if (c.r - x >= MIN_SEG) row.push({ x, w: c.r - x, base, atL: x === c.l, atR: true });
+        free.push(row);
+      }
+      // Widest overlap of [a, b) with any free span on line li.
+      const reach = (li, a, b) => {
+        let best = null;
+        for (const s of free[li] || []) {
+          const l = Math.max(a, s.x);
+          const r = Math.min(b, s.x + s.w);
+          if (r - l >= MIN_SEG && (!best || r - l > best[1] - best[0])) best = [l, r];
+        }
+        return best;
+      };
+      const deep = (li, s) => {
+        for (let k = li - DEPTH + 1; k <= li; k += 1) {
+          if (k < 0 || k + DEPTH > lines) continue;
+          let a = s.x;
+          let b = s.x + s.w;
+          let ok = true;
+          for (let m = k; m < k + DEPTH && ok; m += 1) {
+            if (m === li) continue;
+            const o = reach(m, a, b);
+            if (o) [a, b] = o;
+            else ok = false;
+          }
+          if (ok) return true;
+        }
+        return false;
+      };
+      for (let li = 0; li < lines; li += 1) {
+        for (const s of free[li]) if (deep(li, s)) segs.push(s);
       }
     }
     return segs;
@@ -434,7 +473,7 @@ export async function createReflow(host) {
       // Total fit over the next five lines; if that sets this line loose,
       // the best tight line on its own, and failing that, ragged.
       // A short runaround line has too few spaces to justify evenly: it is
-      // always set ragged, flush to the column edge, never stretched.
+      // always set ragged, flush left at its segment, never stretched.
       const short = segs[j].w < MEASURE * SHORT;
       let b = short ? null : firstOfBest(par, from, j, fit, flag, widthAt, EMERGENCY, WINDOW);
       // A full measure would show a rag as an error in the block; it may go
@@ -483,14 +522,10 @@ export async function createReflow(host) {
       } else r = Math.min(0, natural > L ? (L - natural) / Math.max(1e-3, ssh[ln.to] - ssh[ln.from]) : 0);
       let x = ln.seg.x;
       if (debug) ctx.fillStyle = ln.rag ? "#d00" : r > 1.1 ? "#06c" : INK;
-      if (ln.rag || ln.last) {
-        // Natural spacing; the line sits against whichever side is the
-        // column's own edge, and centres in a bay held by the letter alone.
-        r = Math.min(0, r);
-        const set = natural + (r < 0 ? r * (ssh[ln.to] - ssh[ln.from]) : 0);
-        const slack = Math.max(0, L - set);
-        if (!ln.seg.atL) x += ln.seg.atR ? slack : slack / 2;
-      }
+      // Ragged and last lines keep natural spacing (or shrink) and start
+      // flush left at their segment, wherever it begins: one rule for every
+      // line, so the letter cuts the block rather than shaping it.
+      if (ln.rag || ln.last) r = Math.min(0, r);
       const y = ln.seg.base;
       for (let i = ln.from; i < ln.to; i += 1) {
         const it = items[i];

@@ -1,6 +1,6 @@
 {
   "title": "Reflow",
-  "description": "One enormous black S, the initial of Scarborough Fair, overlaps the edge of a two-column block of the ballad set small and justified, and runs off the sheet. The letter is Geist itself, read from the font's real outline, and the text runs around its curves with an even gutter, filling the bays of the S. Drag the letter and every line is cut again and re-broken at frame rate: Knuth–Plass total fit, Liang's hyphenation patterns, hanging punctuation, and short runaround lines set ragged against the letter rather than stretched.",
+  "description": "One enormous black S, the initial of Scarborough Fair, overlaps the edge of a two-column block of the ballad set small and justified, and runs off the sheet. The letter is Geist itself, read from the font's real outline, and the text runs around its curves with an even gutter, filling the bays of the S. Drag the letter and every line is cut again and re-broken at frame rate: Knuth–Plass total fit, Liang's hyphenation patterns, hanging punctuation, and short runaround lines set flush left and ragged rather than stretched; a free region shallower than three lines stays white.",
   "tags": ["Typography", "Layout", "Canvas"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
