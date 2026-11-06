@@ -8,8 +8,8 @@ import { hyphenateToken } from "./hyphenate";
 // Every frame each line of the baseline grid is cut by the letter into free
 // segments, and every verse is broken into those segments with Knuth–Plass
 // total-fit line breaking (Liang hyphenation, hanging punctuation). The text
-// is a two-column block on a grid; the letter overlaps its edge and runs off
-// the sheet, as on the Stedelijk posters.
+// is a block of columns filling the sheet between equal margins; the letter
+// stands in it and runs off the foot, as on the Stedelijk posters.
 
 const FAMILY = '"Reflow Geist", Geist, system-ui, sans-serif';
 const INK = "#0a0a0a";
@@ -310,6 +310,7 @@ export async function createReflow(host) {
   let H = 0;
   let letter = null;
   let cols = [];
+  let colW = MEASURE;
   let top = 0;
   let lines = 0;
   const pos = { x: 0, y: 0, vx: 0, vy: 0 };
@@ -335,22 +336,26 @@ export async function createReflow(host) {
     const margin = w < 700 ? 24 : 48;
     const letterPx = Math.round(w < 700 ? Math.min(h * 0.9, w * 1.05) : Math.min(h * 1.3, w * 1.3));
     letter = rasterLetter("S", letterPx, wDisplay);
-    // The block: two columns on a wide sheet, one on a narrow one, set from
-    // the left margin. The rest of the sheet is the letter's.
+    // The block fills the sheet between equal margins, left and right, in
+    // as many columns as fit at the measure (three on a laptop sheet, one on
+    // a phone), each widened to share the leftover evenly. The letter then
+    // always stands in text on both sides, never beside an empty strip.
     const avail = w - margin * 2;
-    const n = avail >= 2 * MEASURE + COL_GAP + letter.w * 0.5 ? 2 : 1;
-    const measure = Math.min(MEASURE, n === 1 && w < 700 ? avail : MEASURE);
+    const n = Math.max(1, Math.round((avail + COL_GAP) / (MEASURE + COL_GAP)));
+    const measure = (avail - (n - 1) * COL_GAP) / n;
+    colW = measure;
     cols = [];
     for (let c = 0; c < n; c += 1) {
       const l = Math.round(margin + c * (measure + COL_GAP));
-      cols.push({ l, r: l + measure });
+      cols.push({ l, r: Math.round(margin + c * (measure + COL_GAP) + measure) });
     }
     top = Math.ceil(margin / 4) * 4;
     lines = Math.floor((h - top * 2) / LEAD);
-    // Home: the letter's left third over the block's right edge, its tail
-    // running off the foot of the sheet.
+    // Home: right of centre, standing in the block with the third column
+    // running past it on the right and its tail off the foot of the sheet.
+    const blockL = cols[0].l;
     const blockR = cols[n - 1].r;
-    home = w < 700 ? { x: w * 0.62, y: h * 0.56 } : { x: Math.min(blockR + letter.w * 0.18, w - letter.w * 0.36), y: h * 0.6 };
+    home = w < 700 ? { x: w * 0.62, y: h * 0.56 } : { x: blockL + (blockR - blockL) * 0.68, y: h * 0.6 };
     const p = still == null ? home : pathAt(still);
     if (!grab) {
       pos.x = target.x = p.x;
@@ -361,6 +366,77 @@ export async function createReflow(host) {
     dirty = true;
   });
 
+  // The letter's blocked spans per column and line, with every enclosed
+  // region (a run of free spans walled by ink at both ends, joined line to
+  // line where they overlap) also blocked in each column but its owner.
+  function enclosedOwners(blockedAt) {
+    const L = cols[0].l;
+    const R = cols[cols.length - 1].r;
+    const spans = []; // [li, a, b, region]
+    const parent = [];
+    const find = (i) => {
+      while (parent[i] !== i) {
+        parent[i] = parent[parent[i]];
+        i = parent[i];
+      }
+      return i;
+    };
+    let prev = [];
+    for (let li = 0; li < lines; li += 1) {
+      const row = [];
+      let x = L;
+      for (const [a, b] of blockedAt[li]) {
+        if (b <= x) continue;
+        if (a >= R) break;
+        // Walled on the left by ink (x > L) and on the right by ink (a < R).
+        if (x > L && a > x) {
+          const k = spans.length;
+          spans.push([li, x, a]);
+          parent.push(k);
+          for (const j of prev) {
+            if (spans[j][1] < a && spans[j][2] > x) parent[find(j)] = find(k);
+          }
+          row.push(k);
+        }
+        x = Math.max(x, b);
+      }
+      prev = row;
+    }
+    // Each region's width in each column box, summed over its lines.
+    const share = new Map();
+    for (let k = 0; k < spans.length; k += 1) {
+      const root = find(k);
+      let v = share.get(root);
+      if (!v) share.set(root, (v = new Float64Array(cols.length)));
+      const [, a, b] = spans[k];
+      cols.forEach((c, ci) => {
+        v[ci] += Math.max(0, Math.min(b, c.r) - Math.max(a, c.l));
+      });
+    }
+    const owner = new Map();
+    for (const [root, v] of share) {
+      let best = 0;
+      for (let ci = 1; ci < v.length; ci += 1) if (v[ci] > v[best]) best = ci;
+      owner.set(root, best);
+    }
+    const out = cols.map(() => blockedAt.map((r) => r));
+    const extra = cols.map(() => new Map());
+    for (let k = 0; k < spans.length; k += 1) {
+      const own = owner.get(find(k));
+      const [li, a, b] = spans[k];
+      for (let ci = 0; ci < cols.length; ci += 1) {
+        if (ci === own || b <= cols[ci].l || a >= cols[ci].r) continue;
+        let m = extra[ci].get(li);
+        if (!m) extra[ci].set(li, (m = []));
+        m.push([a, b]);
+      }
+    }
+    extra.forEach((m, ci) => {
+      for (const [li, add] of m) out[ci][li] = mergeSpans([...blockedAt[li].map((s) => s.slice()), ...add]);
+    });
+    return out;
+  }
+
   // Free segments on each baseline of each column: the column minus the
   // dilated letter, in reading order (column, then line, then left to right).
   // A segment is kept only if it belongs to a free region at least DEPTH
@@ -368,6 +444,12 @@ export async function createReflow(host) {
   // free spans share MIN_SEG of width with it. A lone line under a
   // terminal, or a two-line notch in a bay, stays white, so the letter cuts
   // a clean channel through the block instead of leaving islands.
+  //
+  // A counter or a bay (free space walled by the letter on both sides) is
+  // owned by one column: the one whose box holds most of it. Only that
+  // column runs into it; the other column's sliver of it stays white, so a
+  // bowl carries one continuous run of the text, never two fragments side
+  // by side across a gutter that read across in the wrong order.
   function segments() {
     const blockedAt = [];
     for (let li = 0; li < lines; li += 1) {
@@ -380,15 +462,17 @@ export async function createReflow(host) {
       }
       blockedAt.push(mergeSpans(spans));
     }
+    const blocked = enclosedOwners(blockedAt);
     const segs = [];
-    for (const c of cols) {
+    for (let ci = 0; ci < cols.length; ci += 1) {
+      const c = cols[ci];
       // Every free span of this column, line by line, before any culling.
       const free = [];
       for (let li = 0; li < lines; li += 1) {
         const base = top + SIZE + li * LEAD;
         const row = [];
         let x = c.l;
-        for (const [a, b] of blockedAt[li]) {
+        for (const [a, b] of blocked[ci][li]) {
           if (b <= x) continue;
           if (a >= c.r) break;
           if (a - x >= MIN_SEG) row.push({ x, w: a - x, base, atL: x === c.l, atR: false });
@@ -458,7 +542,7 @@ export async function createReflow(host) {
   function relayout() {
     const segs = segments();
     const out = [];
-    const widthAt = (j) => (segs[j] ? segs[j].w : MEASURE);
+    const widthAt = (j) => (segs[j] ? segs[j].w : colW);
     let p = 0;
     let par = pars[0];
     let from = 0;
@@ -474,7 +558,7 @@ export async function createReflow(host) {
       // the best tight line on its own, and failing that, ragged.
       // A short runaround line has too few spaces to justify evenly: it is
       // always set ragged, flush left at its segment, never stretched.
-      const short = segs[j].w < MEASURE * SHORT;
+      const short = segs[j].w < colW * SHORT;
       let b = short ? null : firstOfBest(par, from, j, fit, flag, widthAt, EMERGENCY, WINDOW);
       // A full measure would show a rag as an error in the block; it may go
       // a little looser before it gives up.
