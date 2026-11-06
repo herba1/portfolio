@@ -1,0 +1,10 @@
+{
+  "title": "Spatial scene",
+  "description": "A night photo of Times Square, with herb standing in the street, that turns out to have depth. Move across it and the city shifts behind him: herb, the pedicab and the taxis slide over street and storefronts that were hidden behind them a moment ago. The photo was split offline into four layers at its depth edges, each one inpainted behind the layers in front, and each drawn as a mesh displaced by its own depth, so the reveal is real street rather than a smear.",
+  "tags": ["WebGL", "Photo", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T17:00:00.000Z",
+  "intent": "Apple's Spatial Scenes (iOS 26 lock screen and Photos, https://support.apple.com/guide/iphone/spatial-scenes) and Facebook 3D Photos (2018, https://ai.meta.com/blog/powered-by-ai-turning-any-2d-photo-into-3d-using-convolutional-neural-nets/): a flat photo you know suddenly has depth that behaves correctly, foreground sliding over background that was hidden behind it.",
+  "tile": { "shape": "wide" },
+  "sources": ["https://support.apple.com/guide/iphone/spatial-scenes", "https://ai.meta.com/blog/powered-by-ai-turning-any-2d-photo-into-3d-using-convolutional-neural-nets/"]
+}
