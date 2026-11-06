@@ -35,8 +35,8 @@ void main(){
   o = vec4(col + (hash(gl_FragCoord.xy * 0.37 + 0.5) - 0.5) / 255.0, 1.0);
 }`;
 
-// Each plate is its own quad, just big enough for the numeral, its bands and
-// its shadow, multiplied onto what is already printed. Gamma is a power, so
+// Each plate is its own quad, just big enough for the numeral and its bands,
+// multiplied onto what is already printed. Gamma is a power, so
 // a product of encoded transmittances is the encoding of the product: the
 // press maths survives the blend unit exactly.
 const PLATE_VS = `#version 300 es
@@ -57,7 +57,7 @@ uniform int uI;
 uniform vec4 uRect;   // atlas uv rect
 uniform vec4 uBody;   // cx, cy (track frame), height, aspect
 uniform vec4 uMove;   // signed speed, stretch, lean, band length
-uniform vec4 uLift;   // elevation, register offset x, y, unused
+uniform vec4 uLift;   // elevation, unused x3
 uniform vec3 uInk;    // linear transmittance at full density
 uniform float uSeed;
 out vec4 o;
@@ -87,18 +87,11 @@ void main(){
   vec4 b = uBody; vec4 m = uMove;
   float e = uLift.x;
   float el = max(e, 0.0);
-  float h = b.z * (1.0 + 0.045 * e);
-  vec2 ctr = b.xy + uLift.yz;
+  // Ink on paper casts no shadow. Picked up, a plate only grows a touch.
+  float h = b.z * (1.0 + 0.025 * e);
+  vec2 ctr = b.xy;
   float L = m.w;
   float dir = sign(m.x);
-
-  // The plate's own shadow on the stock while it is held up off it.
-  float shade = 0.0;
-  if (el > 0.002) {
-    vec2 sd = tp - (b.xy + vec2(12.0, 26.0) * el);
-    sd.x += m.z * sd.y; sd.x /= m.y;
-    shade = glyph(sd, b.z, 1.0, 1.5 + 2.2 * el) * 0.24 * min(el * 2.5, 1.0);
-  }
 
   vec2 d = tp + jit - ctr;
   d.x += m.z * d.y;            // lean into the direction of travel
@@ -134,7 +127,7 @@ void main(){
   float mottle = texture(uMottle, lp * 0.9 + uSeed).r * 0.65 + texture(uMottle, lp * 2.3 + uSeed * 1.7).r * 0.35;
   // Held up off the stock, the plate stops catching its tooth.
   float dens = 0.9 + 0.14 * mottle - 0.08 * tooth * (1.0 - el);
-  vec3 t = pow(uInk, vec3(cov * dens)) * (1.0 - shade);
+  vec3 t = pow(uInk, vec3(cov * dens));
   o = vec4(pow(t, vec3(1.0 / 2.2)), 1.0);
 }`;
 
@@ -427,7 +420,7 @@ export async function createOverprint(host) {
     paperDirty = true;
     stillFrames = 0;
     nums.forEach((n) => {
-      if (!placed) n.x = TW * ((Number.isFinite(startX[n.i]) ? startX[n.i] : [0.4, 0.42, 0.52][n.i]) - 0.5);
+      if (!placed) n.x = TW * ((Number.isFinite(startX[n.i]) ? startX[n.i] : [0.375, 0.493, 0.647][n.i]) - 0.5);
       n.y = laneY(n);
     });
     placed = true;
@@ -547,9 +540,7 @@ export async function createOverprint(host) {
       const e = n.e;
       body.set([n.x, n.y, height(n), atlas.rects[i].aspect], i * 4);
       move.set([n.shown || 0.001, stretchOf(n.shown), leanOf(n, n.shown), tailOf(n.shown)], i * 4);
-      // Held up toward the light it slides off register, up and against the
-      // shadow; on landing it comes straight back.
-      lift.set([e, -7 * e, -12 * e, 0], i * 4);
+      lift.set([e, 0, 0, 0], i * 4);
     }
 
     // Render only on change.
@@ -613,15 +604,14 @@ export async function createOverprint(host) {
       const o = i * 4;
       const [x, y, h0, asp] = body.subarray(o, o + 4);
       const [v, st, ln, L] = move.subarray(o, o + 4);
-      const [e, rx, ry] = lift.subarray(o, o + 3);
-      const h = h0 * (1 + 0.045 * Math.max(e, 0));
-      const el = Math.max(e, 0);
+      const e = lift[o];
+      const h = h0 * (1 + 0.025 * Math.max(e, 0));
       const halfW = (h * asp * st) / 2 + (Math.abs(ln) * h) / 2 + 4;
-      const pad = 4 + 48 * el;
-      const cx = x + Math.min(rx, 0);
+      const pad = 4;
+      const cx = x;
       const back = v > 0 ? L : 0;
       const front = v > 0 ? 0 : L;
-      gl.uniform4f(U.uBox, cx - halfW - back - 4, y + Math.min(ry, 0) - h / 2 - 4, x + halfW + front + pad, y + h / 2 + pad);
+      gl.uniform4f(U.uBox, cx - halfW - back - 4, y - h / 2 - 4, x + halfW + front + pad, y + h / 2 + pad);
       gl.uniform1i(U.uI, i);
       gl.uniform4fv(U.uRect, rect.subarray(o, o + 4));
       gl.uniform4fv(U.uBody, body.subarray(o, o + 4));

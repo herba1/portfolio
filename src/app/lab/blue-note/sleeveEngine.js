@@ -26,7 +26,6 @@ const PANELS = [
   [53, 244, 177, 177], // Ringo
   [246, 244, 177, 177], // George
 ];
-const PLATE = 720;
 
 const COLS = 3;
 const ROWS = 2;
@@ -129,52 +128,104 @@ function noiseCanvas(w, h, draw) {
   return c;
 }
 
-// Separate one portrait into a colour plate and a black plate: colour carries
-// everything but the highlights, black only the deep shadows, so where both
-// print the shadows go rich and the mids stay the colour.
-function separate(img, rect) {
-  const up = noiseCanvas(PLATE, PLATE, (g) => {
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = "high";
-    g.drawImage(img, rect[0], rect[1], rect[2], rect[3], 0, 0, PLATE, PLATE);
-  });
-  const src = up.getContext("2d").getImageData(0, 0, PLATE, PLATE).data;
-  const n = PLATE * PLATE;
-  const lum = new Float32Array(n);
+// Separate one portrait into two screened plates and print them, multiplied,
+// onto one canvas. The source panels are only 177px square, so a smooth
+// enlargement goes soft; instead each plate is broken into a halftone screen
+// whose cell spans just over one source pixel. Every dot is drawn at device
+// resolution, so the picture carries all the detail the scan has and none it
+// doesn't. Colour screen at 75 degrees, black at 45, the duotone standard.
+const SRC = 177;
+const CELL_SRC = 1.1; // source pixels per halftone cell
+function separate(pixels, stride, rect, px) {
+  // Luminance of the panel at its native resolution.
+  const [rx, ry, rw, rh] = rect;
+  const lumS = new Float32Array(rw * rh);
   const hist = new Uint32Array(256);
-  for (let i = 0; i < n; i++) {
-    const l = (0.2126 * src[i * 4] + 0.7152 * src[i * 4 + 1] + 0.0722 * src[i * 4 + 2]) / 255;
-    lum[i] = l;
-    hist[Math.min(255, (l * 255) | 0)]++;
-  }
+  for (let y = 0; y < rh; y++)
+    for (let x = 0; x < rw; x++) {
+      const o = ((ry + y) * stride + rx + x) * 4;
+      const l = (0.2126 * pixels[o] + 0.7152 * pixels[o + 1] + 0.0722 * pixels[o + 2]) / 255;
+      lumS[y * rw + x] = l;
+      hist[Math.min(255, (l * 255) | 0)]++;
+    }
   const pct = (q) => {
     let acc = 0;
-    for (let i = 0; i < 256; i++) if ((acc += hist[i]) >= n * q) return i / 255;
+    for (let i = 0; i < 256; i++) if ((acc += hist[i]) >= rw * rh * q) return i / 255;
     return 1;
   };
   const lo = pct(0.015);
   const hi = pct(0.985);
-  const cImg = new ImageData(PLATE, PLATE);
-  const kImg = new ImageData(PLATE, PLATE);
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  for (let i = 0; i < n; i++) {
-    let l = clamp((lum[i] - lo) / Math.max(0.05, hi - lo), 0, 1);
-    // Film grain, at the photograph's own scale.
-    l = clamp(l + (rnd() + rnd() - 1) * 0.07, 0, 1);
-    const cov = Math.pow(clamp((1 - l) * 1.12, 0, 1), 0.85);
-    const k = Math.pow(clamp((0.5 - l) / 0.46, 0, 1), 1.35) * 0.96;
-    const o = i * 4;
-    cImg.data[o] = 255 - cov * (255 - COLOUR[0]);
-    cImg.data[o + 1] = 255 - cov * (255 - COLOUR[1]);
-    cImg.data[o + 2] = 255 - cov * (255 - COLOUR[2]);
-    cImg.data[o + 3] = 255;
-    const kv = 255 - k * (255 - BLACK[0]);
-    kImg.data[o] = kImg.data[o + 1] = kImg.data[o + 2] = kv;
-    kImg.data[o + 3] = 255;
+  // Bilinear sampling coordinates, per column and per row.
+  const axis = (len) => {
+    const i0 = new Int32Array(px);
+    const f = new Float32Array(px);
+    for (let j = 0; j < px; j++) {
+      const sxy = clamp(((j + 0.5) * len) / px - 0.5, 0, len - 1.001);
+      i0[j] = sxy | 0;
+      f[j] = sxy - i0[j];
+    }
+    return [i0, f];
+  };
+  const [xi, xf] = axis(rw);
+  const [yi, yf] = axis(rh);
+  const cell = (px / SRC) * CELL_SRC;
+  const aa = (cell / Math.PI) * 0.7; // spot-function slope, about one pixel wide
+  // Tone curves and the cosine, as tables: this runs over a million pixels.
+  const LV = 1024;
+  const covT = new Float32Array(LV);
+  const kT = new Float32Array(LV);
+  for (let i = 0; i < LV; i++) {
+    const l = i / (LV - 1);
+    covT[i] = 1 - 2 * Math.pow(clamp((1 - l) * 1.12, 0, 1), 0.85);
+    kT[i] = 1 - 2 * Math.pow(clamp((0.5 - l) / 0.46, 0, 1), 1.35) * 0.96;
   }
-  const toCanvas = (data) => noiseCanvas(PLATE, PLATE, (g) => g.putImageData(data, 0, 0));
-  return { c: toCanvas(cImg), k: toCanvas(kImg) };
+  const CS = 4096;
+  const cosT = new Float32Array(CS);
+  for (let i = 0; i < CS; i++) cosT[i] = Math.cos((2 * Math.PI * i) / CS) / 2;
+  const cosF = (u) => cosT[((u - Math.floor(u)) * CS) | 0];
+  // Screen axes per pixel: colour at 75 degrees, black at 45.
+  const axes = (deg) => {
+    const r = (deg * Math.PI) / 180;
+    return [Math.cos(r) / cell, Math.sin(r) / cell];
+  };
+  const [cc, cs] = axes(75);
+  const [kc, ks] = axes(45);
+  const ink = (spot, t) => {
+    if (t >= 0.996) return 0;
+    if (t <= -0.996) return 1;
+    const v = (spot - t) * aa + 0.5;
+    return v <= 0 ? 0 : v >= 1 ? 1 : v;
+  };
+  const span = Math.max(0.05, hi - lo);
+  const out = new ImageData(px, px);
+  const d = out.data;
+  const kInk = 1 - BLACK[0] / 255;
+  for (let y = 0; y < px; y++) {
+    const yy = y + 0.5;
+    const r0 = yi[y] * rw;
+    const r1 = r0 + rw;
+    const fy = yf[y];
+    for (let x = 0; x < px; x++) {
+      const xx = x + 0.5;
+      const i = y * px + x;
+      const c0 = xi[x];
+      const fx = xf[x];
+      const top = lumS[r0 + c0] + (lumS[r0 + c0 + 1] - lumS[r0 + c0]) * fx;
+      const bot = lumS[r1 + c0] + (lumS[r1 + c0 + 1] - lumS[r1 + c0]) * fx;
+      let l = (top + (bot - top) * fy - lo) / span;
+      l = l < 0 ? 0 : l > 1 ? 1 : l;
+      const li = (l * (LV - 1)) | 0;
+      const dc = ink(cosF(xx * cc + yy * cs) + cosF(-xx * cs + yy * cc), covT[li]);
+      const dk = ink(cosF(xx * kc + yy * ks) + cosF(-xx * ks + yy * kc), kT[li]);
+      const kv = 1 - dk * kInk;
+      const o = i * 4;
+      d[o] = (255 - dc * (255 - COLOUR[0])) * kv;
+      d[o + 1] = (255 - dc * (255 - COLOUR[1])) * kv;
+      d[o + 2] = (255 - dc * (255 - COLOUR[2])) * kv;
+      d[o + 3] = 255;
+    }
+  }
+  return noiseCanvas(px, px, (g) => g.putImageData(out, 0, 0));
 }
 
 // Board: warm white with fibre and tooth.
@@ -249,7 +300,18 @@ export async function createSleeve(host) {
     loadCover("let-it-be"),
     Promise.race([document.fonts.load(`${WEIGHT} 100px ${family}`), new Promise((r) => setTimeout(r, 1500))]).catch(() => null),
   ]);
-  const plates = PANELS.map((r) => separate(img, r));
+  // Plates are screened at the size they print, so they are rebuilt when the
+  // sleeve changes size. The largest crop any layout takes is 1.06 sleeves.
+  const pixels = noiseCanvas(img.naturalWidth, img.naturalHeight, (g) => g.drawImage(img, 0, 0))
+    .getContext("2d")
+    .getImageData(0, 0, img.naturalWidth, img.naturalHeight).data;
+  let plates = [];
+  let PLATE = 0;
+  const buildPlates = (px) => {
+    if (px === PLATE) return;
+    PLATE = px;
+    plates = PANELS.map((r) => separate(pixels, img.naturalWidth, r, px));
+  };
 
   // Advance widths per unit size, with the tracking law at a large size.
   const meas = document.createElement("canvas").getContext("2d");
@@ -280,6 +342,8 @@ export async function createSleeve(host) {
     detent = false;
   }
   const mod = (a, n) => ((a % n) + n) % n;
+  // The sleeve whose inks are on the press right now.
+  let inkLayout = 0;
   const blendInto = (out, gx, gy, useDetent) => {
     const ix = Math.floor(gx);
     const iy = Math.floor(gy);
@@ -296,6 +360,7 @@ export async function createSleeve(host) {
     const d = at(ix + 1, iy + 1);
     const cx = fx < 0.5 ? 0 : 1;
     const cy = fy < 0.5 ? 0 : 1;
+    inkLayout = mod(iy + cy, ROWS) * COLS + mod(ix + cx, COLS);
     for (let n = 0; n < N; n++) {
       const ux = discrete[n] ? cx : fx;
       const uy = discrete[n] ? cy : fy;
@@ -329,6 +394,7 @@ export async function createSleeve(host) {
     }
     board = makeBoard(px);
     wear = makeWear(px);
+    buildPlates(Math.min(1600, Math.ceil(px * 1.06)));
     dirty = true;
   });
 
@@ -378,7 +444,7 @@ export async function createSleeve(host) {
   // ------------------------------------------------------------ draw
   const drawPlatePhoto = (l, which, v, dpr) => {
     const [x, y, w, h, fx, fy, z] = v;
-    if (w < 0.002 || h < 0.002) return;
+    if (which !== "c" || w < 0.002 || h < 0.002) return;
     const s = Math.max(w, h) * Math.max(1, z);
     const uw = Math.min(1, w / s);
     const uh = Math.min(1, h / s);
@@ -393,7 +459,7 @@ export async function createSleeve(host) {
     for (const [i, a] of order) {
       acc += a;
       l.globalAlpha = acc === a ? 1 : a / acc;
-      l.drawImage(plates[i][which], u0 * PLATE, v0 * PLATE, uw * PLATE, uh * PLATE, x * S, y * S, w * S, h * S);
+      l.drawImage(plates[i], u0 * PLATE, v0 * PLATE, uw * PLATE, uh * PLATE, x * S, y * S, w * S, h * S);
     }
     l.restore();
   };
@@ -413,8 +479,18 @@ export async function createSleeve(host) {
     const s = pos[base + 2];
     const sx = pos[base + 3];
     const r = pos[base + 4];
-    const k = pos[base + 5];
-    const c = pos[base + 6];
+    // Inks never tint: a plate prints a word or it doesn't. A knockout only
+    // works where it sits wholly inside ink, which is true only once the word
+    // is home on the sleeve that knocks it out; anywhere in between it would
+    // half vanish into bare board, so in transit it prints black instead.
+    let k = pos[base + 5] >= 0.5 ? 1 : 0;
+    const c = pos[base + 6] >= 0.5 ? 1 : 0;
+    if (!k && !c) {
+      const home = targets[inkLayout];
+      let off = Math.abs(r - home[base + 4]) / 90;
+      for (let j = 0; j < 4; j++) off = Math.max(off, Math.abs(pos[base + j] - home[base + j]));
+      if (off > 0.006) k = 1;
+    }
     const px = s * S;
     if (px < 1) return;
     l.save();
