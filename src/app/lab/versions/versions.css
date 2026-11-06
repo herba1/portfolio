@@ -64,20 +64,22 @@
   height: 640px;
   margin-left: -320px;
   margin-top: -320px;
+  /* Origin and offset are set from the stack's constants in
+     versionsEngine.js. */
   perspective: 1000px;
-  perspective-origin: 50% 4%;
   zoom: var(--fit, 1);
 }
 
 .versions-card {
   position: absolute;
   left: 50%;
-  top: 56%;
+  /* Every save hangs from the same top edge and is only as tall as its own
+     text, so the front card never carries a band of empty paper. */
+  top: var(--versions-top, 336px);
   box-sizing: border-box;
   width: 440px;
-  min-height: var(--card-h, 0px);
   margin-left: -220px;
-  padding: 28px 32px 32px;
+  padding: 16px 32px 28px;
   border-radius: 14px;
   background: var(--versions-paper);
   box-shadow:
@@ -101,8 +103,33 @@
   pointer-events: none;
 }
 
+/* The head line is the spine: the only part of an older save that shows
+   above the one in front of it, so it carries the title and when it was
+   saved, and a hairline closes it off from the text. */
+.versions-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  margin: 0 0 16px;
+  padding: 0 0 16px;
+  /* The rule is drawn inside the padding so the head stays on the grid. */
+  box-shadow: inset 0 -1px 0 var(--versions-line);
+}
+
+.versions-stamp {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: var(--text-ui-xs);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-xs--letter-spacing);
+  font-weight: var(--text-ui-xs--font-weight);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .versions-title {
-  margin: 0 0 12px;
+  margin: 0;
   font-size: var(--text-heading);
   line-height: var(--text-heading--line-height);
   letter-spacing: var(--text-heading--letter-spacing);

@@ -8,8 +8,20 @@ import { createTicks } from "./tick";
 // keys, the timeline) moves `p`, and a spring settles it on a whole version.
 
 const LAST = COUNT - 1;
-const DZ = 88; // px of depth between saves
-const DY = 9; // px each save sits higher, before perspective
+// Depth and lift together set how much of each older save shows above the
+// one in front of it. A shallow DZ keeps every card near full size and a
+// tall DY lifts it clear, so each save shows its whole head line (title and
+// time) like a spine in a crate. The perspective origin is placed so the
+// stack would converge REACH px above the front card's top edge: the lips
+// then run from about 45px at the front to 22px at the back, which still
+// clears the head line of a card shrunk to two thirds.
+const PERSP = 1000; // px, the scene's perspective
+const DZ = 40; // px of depth between saves
+const DY = 32; // px each save sits higher, before perspective
+const TOP = 336; // px from the scene's head to the front card's top edge
+const REACH = 1170;
+const ORIGIN = TOP + (DY * PERSP) / DZ - REACH;
+const SCENE = 640; // px, the scene's own height
 const DRAG_PX = 150; // px of drag per version, at fit 1
 const WHEEL_PX = 110; // px of wheel delta per version
 const PROJECT = 0.22; // s of flick velocity carried into the landing
@@ -57,12 +69,16 @@ export function createVersions(root, { embedded = false } = {}) {
   let target = Math.round(p);
   let mode = held != null ? "held" : "spring";
   let fit = 1;
-  let cardH = 0;
+  let heights = cards.map(() => 0);
   let raf = 0;
   let lastT = 0;
   let shown = Math.round(p);
   let spread = held != null || reduced?.matches ? 1 : 0;
   const born = performance.now();
+
+  space.style.perspective = `${PERSP}px`;
+  space.style.perspectiveOrigin = `50% ${ORIGIN}px`;
+  space.style.setProperty("--versions-top", `${TOP}px`);
 
   // Drag state.
   let drag = null;
@@ -74,19 +90,33 @@ export function createVersions(root, { embedded = false } = {}) {
   const measure = () => {
     const r = box.getBoundingClientRect();
     fit = clamp(Math.min((r.width - 48) / 600, (r.height - 24) / 600), 0.3, 1);
-    // Measured unzoomed, in the scene's own pixels.
+    // Each card is as tall as its own text. Measured unzoomed, in the
+    // scene's own pixels.
     root.style.setProperty("--fit", "1");
-    space.style.setProperty("--card-h", "0px");
-    let h = 0;
-    for (const c of cards) h = Math.max(h, c.offsetHeight);
-    cardH = Math.ceil(h / 4) * 4;
-    space.style.setProperty("--card-h", `${cardH}px`);
+    heights = cards.map((c) => c.offsetHeight);
     root.style.setProperty("--fit", fit.toFixed(4));
+  };
+
+  // Where a card's top edge lands on screen at depth d, in scene px.
+  const lift = (d, s) => ORIGIN + ((TOP - d * DY * s - ORIGIN) * PERSP) / (PERSP + d * DZ * s);
+
+  // Centre what is actually on screen, from the top of the oldest save still
+  // behind to the foot of the front card, so the scene stays balanced as the
+  // stack thins and as the front card's length changes.
+  const centre = (q, s) => {
+    const at = clamp(q, 0, LAST);
+    const lo = Math.floor(at);
+    const hi = Math.min(LAST, lo + 1);
+    const h = heights[lo] + (heights[hi] - heights[lo]) * (at - lo);
+    const top = lift(LAST - at, s);
+    const shift = SCENE / 2 - (top + TOP + h) / 2;
+    space.style.transform = `translate3d(0, ${shift.toFixed(2)}px, 0)`;
   };
 
   const render = () => {
     const q = reduced?.matches && mode !== "held" ? Math.round(p) : p;
     const s = spread;
+    centre(q, s);
     for (let i = 0; i < COUNT; i += 1) {
       const c = cards[i];
       const d = i - q;
@@ -104,8 +134,11 @@ export function createVersions(root, { embedded = false } = {}) {
       if (d >= 0) {
         z = -d * DZ * s;
         y = -d * DY * s;
-        blur = clamp((d - 0.15) * 0.62, 0, 3.4) * s;
-        fog = Math.min(0.88, Math.pow(d, 1.1) * 0.058) * s;
+        // Light enough that every head line stays readable: the haze only
+        // starts to soften type past the seventh save back, and never by
+        // more than a pixel's blur.
+        blur = clamp((d - 7) * 0.12, 0, 0.6) * s;
+        fog = Math.min(0.5, Math.pow(d, 1.15) * 0.032) * s;
         alpha = 1;
         f = 1 - smooth(0.04, 0.62, d);
       } else {
@@ -121,7 +154,7 @@ export function createVersions(root, { embedded = false } = {}) {
         alpha = (1 - Math.min(1, k / 0.38)) ** 2;
         f = 1 - smooth(0, 0.2, k);
       }
-      c.style.transform = `translate3d(0, ${(y - cardH / 2).toFixed(2)}px, ${z.toFixed(2)}px)`;
+      c.style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px)`;
       c.style.filter = blur > 0.02 ? `blur(${blur.toFixed(2)}px)` : "none";
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));

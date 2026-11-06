@@ -83,9 +83,12 @@ export default function Piece({ embedded = false }) {
         <div className="versions-space">
           {VERSIONS.map((v, i) => (
             <article key={i} className="versions-card" data-i={i} aria-hidden={i === 0 ? undefined : "true"}>
-              <h2 className="versions-title">
-                <Words diff={v.title} />
-              </h2>
+              <div className="versions-head">
+                <h2 className="versions-title">
+                  <Words diff={v.title} />
+                </h2>
+                <span className="versions-stamp">{v.when}</span>
+              </div>
               <p className="versions-body">
                 <Words diff={v.body} />
               </p>
