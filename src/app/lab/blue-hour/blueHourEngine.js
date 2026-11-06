@@ -2,18 +2,17 @@ import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
 // Blue Hour. One real dusk street (Poly Haven's Modern Evening Street, an HDR
-// panorama) seen from the kerb looking up, split offline into three layers of
-// linear light: the ambient city with every lamp switched off, the sky matte
-// with its cloud texture, and the emitters themselves, each lamp and lit room
-// on its own index. Drag across and the twenty minutes after sunset run:
-// the skylight falls about three and a half stops while the sky deepens from
-// pale peach-cyan to cobalt, the camera opens up as a photographer would, and
-// the lights come on in the order a street does: the sodium lamps on their
-// photocells first, slow to warm from pink to amber, then the cool LED
-// downlights, then the rooms upstairs as people reach for the switch, each
-// striking with a short flicker. All of it is developed through _kit/film
-// with its dusk preset easing into night, so the lamps bloom and halate the
-// way they would on CineStill.
+// panorama) seen from the kerb lying on your back: a worm's-eye shaft of sky
+// walled by two towers, a crane, brick and glass, every vertical running in
+// to the zenith. Split offline into three layers of linear light: the ambient
+// city with the lamp switched off, the sky matte with its cloud texture, and
+// the one sodium lamp head poking in at the bottom edge. Drag across and the
+// twenty minutes after sunset run: the skylight falls about three and a half
+// stops while the shaft deepens from pale peach-cyan to cobalt, darkest
+// overhead, the camera opens up as a photographer would, and the lamp trips
+// on its photocell and warms slowly from pink to amber. All of it is
+// developed through _kit/film with its dusk preset easing into night, so the
+// lamp blooms and halates the way it would on CineStill.
 
 const AMB_STOPS = 4.0; // skylight lost over the span
 const EXPO_STOPS = 1.7; // exposure the camera gives back
@@ -22,43 +21,20 @@ const HI = 3;
 const ELO = -9;
 const EHI = 14;
 
-// The view the plate was rendered with (stereographic, see experiment.json),
-// so every sky pixel knows its elevation and bearing.
-const VIEW = { yaw: 118, pitch: -60, hfov: 112, k: 2 };
+// The view the plate was rendered with (see experiment.json), so every sky
+// pixel knows its elevation and bearing: rectilinear (k = 1), 94 deg across,
+// the axis pitched 84 deg up and the frame slid 0.2 half-widths below it (a
+// rising front, seen from underneath), so the zenith and the vanishing point
+// of every vertical sit inside the print, a little above its centre.
+const VIEW = { yaw: 116, pitch: -84, hfov: 94, k: 1, shift: 0.2 };
 const SUN_AZ = 168; // degrees, the bearing the sun went down on
 
 // Lights, from the offline split (index = value in aux.b). kind: street
 // (sodium, on a photocell), led, warm (warm-white LED) or window (a room).
-const LIGHTS = [
-  { kind: "street", x: 479, y: 1266, chroma: [0.505, 0.351, 0.144] },
-  { kind: "street", x: 1313, y: 1150, chroma: [0.455, 0.375, 0.169] },
-  { kind: "street", x: 1336, y: 1301, chroma: [0.47, 0.351, 0.18] },
-  { kind: "window", x: 362, y: 1386 },
-  { kind: "led", x: 1145, y: 1541 },
-  { kind: "window", x: 74, y: 1248 },
-  { kind: "warm", x: 783, y: 1701 },
-  { kind: "led", x: 775, y: 1653 },
-  { kind: "window", x: 7, y: 1226 },
-  { kind: "window", x: 158, y: 1301 },
-  { kind: "window", x: 502, y: 1401 },
-  { kind: "led", x: 666, y: 1652 },
-  { kind: "warm", x: 864, y: 1492 },
-  { kind: "warm", x: 927, y: 1586 },
-  { kind: "window", x: 278, y: 1348 },
-  { kind: "warm", x: 1386, y: 1562 },
-  { kind: "led", x: 1318, y: 1517 },
-  { kind: "led", x: 1103, y: 1604 },
-  { kind: "led", x: 723, y: 1619 },
-  { kind: "led", x: 1351, y: 1504 },
-  { kind: "warm", x: 935, y: 1709 },
-  { kind: "led", x: 1437, y: 1468 },
-  { kind: "led", x: 886, y: 1606 },
-  { kind: "led", x: 684, y: 1692 },
-  { kind: "window", x: 6, y: 1398 },
-  { kind: "warm", x: 653, y: 1705 },
-];
+// Looking straight up only one is in frame, and it is the only warm note.
+const LIGHTS = [{ kind: "street", x: 359, y: 1731, chroma: [0.505, 0.351, 0.144] }];
 const MAX_LIGHTS = 32;
-const STREET_GAIN = 0.4; // the plate's lamps were metered for a darker sky
+const STREET_GAIN = 0.15; // the plate's lamp was metered for a darker sky, and it sits close
 const WARMUP = 0.16; // of the span (~3 min) for a sodium lamp to reach full
 
 // A fixed, believable schedule: photocells trip within a few minutes of each
@@ -73,7 +49,7 @@ function schedule() {
   const ground = LIGHTS.map((l, i) => ({ l, i })).filter((o) => o.l.kind === "led" || o.l.kind === "warm");
   const rooms = LIGHTS.map((l, i) => ({ l, i })).filter((o) => o.l.kind === "window");
   const on = new Array(LIGHTS.length).fill(2);
-  [0.08, 0.13, 0.18].forEach((t, j) => (on[street[j].i] = t));
+  street.forEach((o, j) => (on[o.i] = [0.08, 0.13, 0.18][j % 3]));
   // lowest first: the kerb before the lobby, the lobby before the floors
   ground.sort((a, b) => b.l.y - a.l.y);
   ground.forEach((o, j) => (on[o.i] = 0.27 + (j / ground.length) * 0.18 + rnd() * 0.03));
@@ -109,7 +85,9 @@ uniform sampler2D uAux;     // r sky matte, g cloud log-ratio, b light index
 uniform vec2 uSize;         // target size in px
 uniform vec2 uTexSize;
 uniform mat3 uRot;          // camera to world
-uniform float uF;           // stereographic focal length in plate px
+uniform float uF;           // focal length in plate px
+uniform float uK;           // radial projection: 1 rectilinear, 2 stereographic
+uniform float uShift;       // frame below the optical axis, plate px
 uniform vec2 uSun;          // sun bearing on the horizon (x,z)
 uniform float uS;           // eased time 0..1
 uniform float uAmbK;        // skylight scale
@@ -121,6 +99,7 @@ uniform float uCloudK;
 uniform vec3 uCloudTint;
 uniform float uCloudW;
 uniform float uGlow;        // sun-side brightening
+uniform float uZenDeep;     // stops the zenith sits below the low sky
 uniform float uLod;         // mip level: sharp, only as soft as the print needs
 uniform float uB[${MAX_LIGHTS}];
 uniform vec3 uTint[${MAX_LIGHTS}];
@@ -137,10 +116,10 @@ void main(){
   float lr = (ax.g - 0.5) / 0.3;
   int id = int(texelFetch(uAux, ivec2(uv * uTexSize), 0).b * 255.0 + 0.5);
 
-  // View direction of this plate pixel (stereographic), for the sky gradient.
-  vec2 q = (uv * uTexSize - 0.5 * uTexSize);
+  // View direction of this plate pixel, for the sky gradient.
+  vec2 q = uv * uTexSize - 0.5 * uTexSize + vec2(0.0, uShift);
   float r = length(q) + 1e-6;
-  float th = 2.0 * atan(r / (2.0 * uF));
+  float th = uK * atan(r / (uK * uF));
   vec3 dc = vec3(q / r * sin(th), cos(th));
   vec3 d = uRot * dc;
   float elev = asin(clamp(-d.y, -1.0, 1.0));
@@ -155,6 +134,10 @@ void main(){
   vec3 col = mix(uZen, uMid, smoothstep(0.0, 0.5, g));
   col = mix(col, hor, smoothstep(0.3, 0.8, g));
   float lum = uSkyLum * (1.0 + uGlow * g * g * facing);
+  // Looking almost straight up the gradient is the picture: the zenith is
+  // the deepest, most saturated blue and the sky pales towards the roofs.
+  float ze = smoothstep(0.4, 1.0, e);
+  lum *= exp2(uZenDeep * (0.45 - ze));
   // Cloud: the plate's own texture, as a luminance ratio; the denser parts
   // catch the last warm light, later the city's glow.
   float w = smoothstep(-0.1, 0.5, lr);
@@ -276,8 +259,8 @@ const smooth = (a, b, x) => {
 
 // The sky at sunset (pale peach at the horizon under a cyan zenith) and at
 // +20 minutes (cobalt overhead, a cleaner, lighter blue low down).
-const SKY0 = { zen: lin("#a2c6dc"), mid: lin("#d0d7d4"), horSun: lin("#f2c29c"), horAnti: lin("#dcc8bf"), lum: 0.92, cloudK: 1.0, cloudTint: [1.22, 0.97, 0.82], cloudW: 0.55, glow: 0.55 };
-const SKY1 = { zen: lin("#06428a"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, cloudK: 0.8, cloudTint: [1.02, 1.0, 0.98], cloudW: 0.3, glow: 1.4 };
+const SKY0 = { zen: lin("#a2c6dc"), mid: lin("#d0d7d4"), horSun: lin("#f0caa0"), horAnti: lin("#d6d3c4"), lum: 0.92, cloudK: 1.0, cloudTint: [1.22, 0.97, 0.82], cloudW: 0.55, glow: 0.55, zenDeep: 0.6 };
+const SKY1 = { zen: lin("#0b5592"), mid: lin("#0f5aa6"), horSun: lin("#4a8cc2"), horAnti: lin("#1460a8"), lum: 0.32, cloudK: 0.8, cloudTint: [1.02, 1.0, 0.98], cloudW: 0.3, glow: 1.4, zenDeep: 1.5 };
 
 function lerpParams(a, b, k) {
   const out = {};
@@ -557,6 +540,8 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform2f(u.uTexSize, texW, texH);
     gl.uniformMatrix3fv(u.uRot, false, rot);
     gl.uniform1f(u.uF, fPlate);
+    gl.uniform1f(u.uK, VIEW.k);
+    gl.uniform1f(u.uShift, (VIEW.shift * texW) / 2);
     gl.uniform2f(u.uSun, sunDir[0], sunDir[1]);
     gl.uniform1f(u.uS, s);
     gl.uniform1f(u.uAmbK, ambK);
@@ -571,6 +556,7 @@ export async function createBlueHour(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uCloudTint, sky.cloudTint);
     gl.uniform1f(u.uCloudW, sky.cloudW);
     gl.uniform1f(u.uGlow, sky.glow);
+    gl.uniform1f(u.uZenDeep, sky.zenDeep);
     gl.uniform1f(u.uLod, Math.max(0, Math.log2(texH / sceneT.h) - 0.7));
     gl.uniform1fv(u.uB, B);
     gl.uniform3fv(u.uTint, TINT);
