@@ -264,7 +264,13 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   }
   await clock.wait(reel.intro?.hold ?? 1200);
 
-  for (const beat of reel.beats) {
+  // tempo > 1 slows every motion and hold in the reel by that factor.
+  const TIMED = ["duration", "pause", "settle", "hold", "press", "approach", "release", "between", "dragDuration", "gap", "delay"];
+  const tempo = reel.tempo ?? 1;
+  for (const raw of reel.beats) {
+    const beat = { ...raw };
+    for (const k of TIMED) if (typeof beat[k] === "number") beat[k] *= tempo;
+    if (typeof beat.wait === "number") beat.wait *= tempo;
     const verb = Object.keys(verbs).find((k) => k in beat);
     if (!verb) throw new Error(`Beat has no verb: ${JSON.stringify(beat)}`);
     try {
@@ -275,7 +281,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       // Leave a picture of where it got stuck next to the frames so far.
       await page.screenshot({ path: path.join(dir, "failed.png") }).catch(() => {});
       await browser.close();
-      throw new Error(`Beat ${reel.beats.indexOf(beat) + 1} (${verb}) failed: ${err.message}\n  See ${path.join(dir, "failed.png")}`);
+      throw new Error(`Beat ${reel.beats.indexOf(raw) + 1} (${verb}) failed: ${err.message}\n  See ${path.join(dir, "failed.png")}`);
     }
   }
   mark("camera", { zoom: 1, follow: false });

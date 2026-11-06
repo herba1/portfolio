@@ -10,6 +10,7 @@ const reel = {
   ready: ".sticker-peel-stage[data-ready]",
   intro: { hold: 1400, zoom: 1.1 },
   cursor: { from: [0.86, 0.9] },
+  tempo: 1.4,                          // unhurried: every move and hold 40% slower
   formats: ["landscape"],
   beats: [
     { move: [798, 262], duration: 1200, zoom: 1.45, zoomOn: [880, 225], pause: 700 },

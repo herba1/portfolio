@@ -14,6 +14,7 @@ const reel = {
   ready: ".kern-stage text",
   intro: { hold: 1900, zoom: 1.06 },
   cursor: { from: [0.78, 0.9] },
+  tempo: 1.4,                          // unhurried: every move and hold 40% slower
   formats: ["landscape", "vertical"],
   beats: [
     { click: letter(4), duration: 1100, settle: 220, pause: 1700 },          // heavy
