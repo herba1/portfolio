@@ -15,7 +15,7 @@
     { "idle": 1200 }
   ],
   "sources": [
-    "HDRI: Tree Lined Driveway, Poly Haven, photographed by Dimitrios Savva, processed by Jarod Guest, CC0. https://polyhaven.com/a/tree_lined_driveway (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/tree_lined_driveway_8k.hdr). Rectilinear crop: yaw -118 deg from the panorama centre, pitch +36 deg, 72 deg field, 1536 px square, one stitching patch in the pine cloned over; shipped as log2 radiance -8.5..+0.7 in 8 bits with TPDF dither (scene.webp), with the diffusion and halation blurs baked from the same radiance (optics.png).",
+    "HDRI: Tree Lined Driveway, Poly Haven, photographed by Dimitrios Savva, processed by Jarod Guest, CC0. https://polyhaven.com/a/tree_lined_driveway (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/tree_lined_driveway_8k.hdr). Worm's-eye view lying under the pines: stereographic projection, 116 deg field, pitched +76 deg towards the zenith at yaw +150 deg from the panorama centre, rolled -10 deg, 1536 px square. The sun (about 37 deg off axis, unavoidable this close to the zenith), its 16-ray diffraction star and its inner aureole are painted out of the equirect, so the sky still pales towards where it was but carries no light source; shipped as log2 radiance -8.5..+0.7 in 8 bits with TPDF dither (scene.webp), with the diffusion and halation blurs baked from the same radiance (optics.png).",
     "https://en.wikipedia.org/wiki/Rinko_Kawauchi",
     "https://en.wikipedia.org/wiki/Sensitometry",
     "https://rassokhin-video.pages.dev/articles/what-is-halation-effect-dehancer-guide"

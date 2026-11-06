@@ -1,9 +1,9 @@
 import { createStage, clamp } from "../_kit/stage";
 
-// Overexpose. One linear HDR frame (a rectilinear crop of a Poly Haven HDRI,
-// log-encoded so the radiance is real) developed live through a colour
-// negative: per-layer H&D curves with a long shoulder, a fixed printer light,
-// then a print paper curve. Drag up and the exposure rises to +3 stops.
+// Overexpose. One linear HDR frame (a worm's-eye stereographic view of a Poly
+// Haven HDRI, looking up through the pines; log-encoded so the radiance is
+// real) developed live through a colour negative: per-layer H&D curves with a
+// long shoulder, a fixed printer light, then a print paper curve. Drag up and the exposure rises to +3 stops.
 // Because the negative's shoulder and the paper's toe compress instead of
 // clipping, the frame goes airy and pastel, the cobalt thins to powder blue
 // and the cumulus keep their shape; nothing reaches 255.
