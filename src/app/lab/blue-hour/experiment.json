@@ -1,0 +1,28 @@
+{
+  "title": "Blue Hour",
+  "description": "The twenty minutes after sunset, from the kerb of a city street looking up past brick, glass and a crane into broken cloud. Drag across and the evening runs: the skylight falls three and a half stops while the sky deepens from pale peach-cyan to cobalt, and the street's own lights come on in the order a street does. The sodium lamps trip on their photocells first and warm slowly from a dim pink strike to amber; the cool LED downlights snap on at street level with a driver's blink; then the rooms upstairs, one by one, each fluorescent tube stuttering before it holds. Every light is a real emitter cut from the HDR panorama, so its bloom and halation through the film come from its own radiance.",
+  "tags": ["WebGL", "Film", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:00:00.000Z",
+  "intent": "Genre spec idea 10, Blue Hour (factory/reality/genre-spec.md section 4), after Todd Hido's dusk houses and CineStill 800T: glow that behaves like optics, as the one night-adjacent piece. Reference: https://www.toddhido.com/ and https://cinestillfilm.com/products/800tungsten-high-speed-color-film-135-36exp . ?t=0..1 holds the time (0 = sunset, 1 = twenty minutes on); ?still=1 skips the reveal.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.62, 0.5] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.4, 0.5], [0.62, 0.5]], "ms": 1800 },
+    { "idle": 1400 },
+    { "drag": [[0.62, 0.5], [0.45, 0.5]], "ms": 1200 },
+    { "idle": 1200 }
+  ],
+  "photo": {
+    "name": "Grzegorz Wronkowski, Modern Evening Street (Poly Haven HDRI, CC0)",
+    "url": "https://polyhaven.com/a/modern_evening_street"
+  },
+  "sources": [
+    "HDRI: Modern Evening Street, Poly Haven, by Grzegorz Wronkowski, CC0. https://polyhaven.com/a/modern_evening_street (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/modern_evening_street_8k.hdr). Stereographic worm's-eye view, 112 deg across, pitched 60 deg up at yaw 118, rendered 2x supersampled and shipped at 1440x1800. Offline split: the sky matte (depth from Depth Anything V2 plus a two-colour luminance and chroma projection at the edges), the cloud texture as a log luminance ratio over the smooth sky, and 26 emitters (lamp heads, LED downlights, lit rooms) cut out as radiance above their surround, the lamps' diffraction stars painted out; ambient (lights off) as log2 radiance -10..+3 in 8 bits, emitters as log2 -9..+14.",
+    "https://en.wikipedia.org/wiki/Blue_hour",
+    "https://en.wikipedia.org/wiki/Sodium-vapor_lamp",
+    "https://www.toddhido.com/",
+    "https://rassokhin-video.pages.dev/articles/what-is-halation-effect-dehancer-guide"
+  ]
+}
