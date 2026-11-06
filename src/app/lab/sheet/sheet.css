@@ -93,96 +93,12 @@
   pointer-events: none;
 }
 
-/* The title-sm step, held to 24px leading so the page stays on the 4px grid
-   (the token's 25px would knock everything under it off by one). */
-.sh-album-title,
-.sh-album-artist {
-  margin: 0;
-  text-align: center;
-  line-height: 24px;
-  text-wrap: balance;
-}
-
-.sh-album-title {
+/* The record, on the credits' own grid and side margins: the sheet rises
+   over the front of the sleeve its credits are the back of. */
+.sh-credits.sh-record {
   margin-top: 24px;
-  font-weight: var(--font-weight-semibold);
+  padding: 0 20px;
 }
-
-.sh-album-artist {
-  color: var(--sh-ink-2);
-  font-weight: var(--font-weight-body);
-}
-
-.sh-album-meta {
-  margin: 4px 0 0;
-  text-align: center;
-  color: var(--sh-ink-2);
-}
-
-.sh-tracks {
-  margin: 24px 0 0;
-  padding: 0 0 0 20px;
-  list-style: none;
-}
-
-.sh-tracks li {
-  position: relative;
-  display: grid;
-  grid-template-columns: 28px 1fr auto;
-  align-items: center;
-  height: 48px;
-  padding-right: 20px;
-}
-
-.sh-tracks li + li::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 28px;
-  right: 0;
-  height: 0.5px;
-  background: var(--sh-rule-color);
-}
-
-.sh-num,
-.sh-track-time {
-  color: var(--sh-ink-2);
-}
-
-.sh-track-title {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  font-weight: var(--font-weight-body);
-}
-
-.sh-track-time {
-  padding-left: 12px;
-}
-
-.sh-tracks li[data-playing] .sh-track-title {
-  font-weight: var(--font-weight-strong);
-}
-
-.sh-bars {
-  display: inline-flex;
-  align-items: flex-end;
-  height: 12px;
-}
-
-.sh-bars i + i {
-  margin-left: 2px;
-}
-
-.sh-bars i {
-  width: 3px;
-  border-radius: 1px;
-  background: var(--sh-ink);
-}
-
-.sh-bars i:nth-child(1) { height: 7px; }
-.sh-bars i:nth-child(2) { height: 12px; }
-.sh-bars i:nth-child(3) { height: 9px; }
 
 /* ---- the clock ----------------------------------------------------------
    The only thing left of the status bar. Its midline sits at half the page's
@@ -270,18 +186,10 @@
   pointer-events: none;
 }
 
-.sh-head-text {
-  min-width: 0;
-}
-
 .sh-head-title {
   margin: 0;
+  min-width: 0;
   font-weight: var(--font-weight-strong);
-}
-
-.sh-head-sub {
-  margin: 4px 0 0;
-  color: var(--sh-ink-2);
 }
 
 .sh-head-time {
@@ -349,6 +257,12 @@
   text-wrap: pretty;
 }
 
+/* The record's name: the same size and line as every value, a step up the
+   weight ladder. */
+.sh-v[data-strong] {
+  font-weight: var(--font-weight-strong);
+}
+
 /* Titles hang: a turnover line steps in, so every title starts flush on the
    axis and nothing else does. */
 .sh-side li > span:first-child {
@@ -376,7 +290,7 @@
 .sh-side li {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  column-gap: 16px;
+  column-gap: 12px;
   align-items: baseline;
 }
 

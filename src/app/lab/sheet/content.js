@@ -2,31 +2,28 @@ import { albumById } from "@/app/lab/_music/catalog";
 
 const abbey = albumById("abbey-road");
 
+// The record as the page behind sets it: the same label/value axis as the
+// credits in the sheet, and side one, so the sheet's side two continues it.
 export const ALBUM = {
-  title: abbey.title,
-  artist: abbey.artist,
-  meta: "Rock · 1969",
   cover: abbey.cover,
-  playing: 6,
-  tracks: [
+  rows: [
+    ["Title", abbey.title],
+    ["Artist", abbey.artist],
+    ["Year", "1969"],
+  ],
+  sideLabel: "Side one",
+  side: [
     ["Come Together", "4:20"],
     ["Something", "3:03"],
     ["Maxwell's Silver Hammer", "3:27"],
     ["Oh! Darling", "3:26"],
     ["Octopus's Garden", "2:51"],
-    ["I Want You (She's So Heavy)", "7:47"],
-    ["Here Comes the Sun", "3:05"],
-    ["Because", "2:45"],
-    ["You Never Give Me Your Money", "4:02"],
-    ["Sun King", "2:26"],
-    ["Mean Mr. Mustard", "1:06"],
-    ["Polythene Pam", "1:12"],
+    ["I Want You (She's\u00a0So\u00a0Heavy)", "7:47"],
   ],
 };
 
 export const TRACK = {
   title: "Here Comes the Sun",
-  by: "The Beatles · Abbey Road",
   length: "3:05",
   credits: [
     ["Written by", "George Harrison"],

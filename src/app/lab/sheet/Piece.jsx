@@ -11,7 +11,7 @@ import "./sheet.css";
 const W = 390;
 const H = 844;
 const FULL = 64; // sheet top at each detent
-const HALF = 444; // 24pt under the album's meta line, so half frames the record whole
+const HALF = 444; // 20pt under the record's Year row, so half frames cover, title, artist and year whole
 const PEEK = 732; // the track row and the home indicator's band
 const DETENTS = [PEEK, HALF, FULL];
 const HEAD = 88; // grabber and the track row: the part that is always out
@@ -395,10 +395,7 @@ export default function Piece() {
             <div className="sh-grabber" aria-hidden />
             <div className="sh-head" ref={headRef}>
               <img className="sh-thumb" src={ALBUM.cover} alt="" draggable={false} />
-              <div className="sh-head-text">
-                <h2 className="sh-head-title text-heading">{TRACK.title}</h2>
-                <p className="sh-head-sub text-ui-lg">{TRACK.by}</p>
-              </div>
+              <h2 className="sh-head-title text-heading">{TRACK.title}</h2>
               <span className="sh-head-time text-ui-lg tabular-nums">{TRACK.length}</span>
             </div>
             <div className="sh-body" ref={bodyRef} data-scroll-contain>
@@ -413,32 +410,23 @@ export default function Piece() {
   );
 }
 
+// The page behind is the front of the same sleeve: the cover, then the record
+// set on the credits' own axis, label against value, and side one as a
+// listing the sheet's side two carries on from.
 function Album() {
   return (
     <div className="sh-album">
       <img className="sh-cover" src={ALBUM.cover} alt="" draggable={false} />
-      <h1 className="sh-album-title text-title-sm">{ALBUM.title}</h1>
-      <p className="sh-album-artist text-title-sm">{ALBUM.artist}</p>
-      <p className="sh-album-meta text-ui">{ALBUM.meta}</p>
-      <ol className="sh-tracks">
-        {ALBUM.tracks.map(([t, d], i) => (
-          <li key={t} data-playing={i === ALBUM.playing ? "" : undefined}>
-            <span className="sh-num text-ui-lg tabular-nums">
-              {i === ALBUM.playing ? (
-                <span className="sh-bars" aria-label="Playing">
-                  <i />
-                  <i />
-                  <i />
-                </span>
-              ) : (
-                i + 1
-              )}
-            </span>
-            <span className="sh-track-title text-body">{t}</span>
-            <span className="sh-track-time text-ui-lg tabular-nums">{d}</span>
-          </li>
+      <dl className="sh-credits sh-record">
+        {ALBUM.rows.map(([k, v], i) => (
+          <Row key={k} label={k} strong={i === 0}>
+            {v}
+          </Row>
         ))}
-      </ol>
+        <Row label={ALBUM.sideLabel} group>
+          <Side tracks={ALBUM.side} />
+        </Row>
+      </dl>
     </div>
   );
 }
@@ -453,7 +441,6 @@ const clock = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 // hang in the left column at the quiet weight, every value starts on the same
 // left edge and shares its label's baseline, and a new group only adds space.
 function Credits() {
-  const total = clock(TRACK.side.reduce((sum, [, d]) => sum + seconds(d), 0));
   return (
     <dl className="sh-credits">
       {TRACK.credits.map(([k, v]) => (
@@ -492,18 +479,7 @@ function Credits() {
       </Row>
 
       <Row label={TRACK.sideLabel} group>
-        <ol className="sh-side">
-          {TRACK.side.map(([t, d], i) => (
-            <li key={t} data-current={i === 0 ? "" : undefined}>
-              <span>{t}</span>
-              <span className="sh-dur tabular-nums">{d}</span>
-            </li>
-          ))}
-          <li className="sh-total">
-            <span className="sr-only">Total</span>
-            <span className="sh-dur tabular-nums">{total}</span>
-          </li>
-        </ol>
+        <Side tracks={TRACK.side} current={0} />
       </Row>
 
       {TRACK.label.map(([k, v], i) => (
@@ -515,14 +491,35 @@ function Credits() {
   );
 }
 
-function Row({ label, group, children }) {
+// A side as the sleeve lists it: titles flush left from the axis, running
+// times flush right in tabular figures, one 24px pitch and no rules, and the
+// side's total under the durations like a ledger.
+function Side({ tracks, current }) {
+  const total = clock(tracks.reduce((sum, [, d]) => sum + seconds(d), 0));
+  return (
+    <ol className="sh-side">
+      {tracks.map(([t, d], i) => (
+        <li key={t} data-current={i === current ? "" : undefined}>
+          <span>{t}</span>
+          <span className="sh-dur tabular-nums">{d}</span>
+        </li>
+      ))}
+      <li className="sh-total">
+        <span className="sr-only">Total</span>
+        <span className="sh-dur tabular-nums">{total}</span>
+      </li>
+    </ol>
+  );
+}
+
+function Row({ label, group, strong, children }) {
   const g = group ? "" : undefined;
   return (
     <>
       <dt className="sh-k text-ui-lg" data-group={g}>
         {label}
       </dt>
-      <dd className="sh-v text-body" data-group={g}>
+      <dd className="sh-v text-body" data-group={g} data-strong={strong ? "" : undefined}>
         {children}
       </dd>
     </>
