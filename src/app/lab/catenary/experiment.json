@@ -1,0 +1,28 @@
+{
+  "title": "Catenary",
+  "description": "A railway mast in Ine, Kyoto, seen from underneath against summer cumulus. The overhead wires are real strings: each was found in the photograph, fitted as a catenary from its insulator, painted out of the sky and redrawn live with its own width, shade and softening with distance, so at rest the frame is the photograph. Drag across a wire and it catches on your hand, slips off, and rings as a damped string: two pulses run out to the insulators, come back inverted, and settle into the low modes, while the wires on the same mast pick up a faint tremor. A slow breeze keeps them breathing.",
+  "tags": ["WebGL", "Physics", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:30:00.000Z",
+  "intent": "Herb's taste for worm's-eye utility poles and wires against cumulus in soft film colour (genre spec, factory/reality/genre-spec.md: one sharp silhouette, the natsu sky), turned into one physical gesture: the wires in a real photograph are strings you can pluck. Wave equation with Kelvin-Voigt damping and compliant supports; reference: https://en.wikipedia.org/wiki/Catenary and https://en.wikipedia.org/wiki/String_vibration",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.62, 0.12], "to": [0.66, 0.28] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.6, 0.1], [0.68, 0.3]], "ms": 600 },
+    { "idle": 2400 },
+    { "drag": [[0.9, 0.42], [0.92, 0.6]], "ms": 500 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
+      "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV. Six wires fitted as catenaries and painted out (clean plate 3600x2400 webp); the two in-line strain insulators cut out as sprites that ride their wires; per-wire width, blur, opacity and cross-cable shade measured against the clean plate, blur and opacity regressed on a Depth Anything V2 depth map of the photo."
+    },
+    "https://en.wikipedia.org/wiki/Catenary",
+    "https://en.wikipedia.org/wiki/String_vibration"
+  ]
+}
