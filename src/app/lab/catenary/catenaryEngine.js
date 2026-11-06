@@ -32,7 +32,7 @@ import { NODES, createWorld, locate, offsetAt, sampleY } from "./strings";
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
 // Any numeric FILM key (exposure, whitePoint, ...), warmTop and polar,
-// polarSat, polarHue override the grade.
+// polarSat, polarHue, vib, vibFloor, vibHue, vibV override the grade.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -73,6 +73,17 @@ const WARM_TOP = 0.16;
 const POLAR = 0.22;
 const POLAR_SAT = 0.08;
 const POLAR_HUE = 208;
+// Sky vibrance floor, after the polariser and before the film. The plate's
+// lower sky is a hazy powder blue (S ~0.46 as shot); a real summer sky under
+// a polariser holds its cyan-cobalt down to the horizon. Through the same
+// chroma mask, ungraduated, low-saturation sky is drawn toward VIB_FLOOR
+// (S' = max(S, mix(S, VIB_FLOOR, VIB))), its hue held at VIB_HUE, and the
+// brightest of it (V over ~0.7) loses up to VIB_V of its value. The
+// polariser's top-to-bottom deepening rides on top of this.
+const VIB = 0.4;
+const VIB_FLOOR = 0.85;
+const VIB_HUE = 208;
+const VIB_V = 0.045;
 
 const VERT_FULL = `#version 300 es
 in vec2 aPos;
@@ -87,6 +98,7 @@ uniform vec3 uMap;   // ox, oy, k (device px per image px)
 uniform vec2 uImg;   // image px
 uniform vec3 uTopTint; // linear multiplier on the sunlit cloud
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
+uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 vec3 rgb2hsv(vec3 c) {
   vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
   vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
@@ -120,6 +132,11 @@ void main() {
   h.x = fract(h.x + dh * 0.6 * w);
   h.y = clamp(h.y * (1.0 + uPolar.y * w), 0.0, 1.0);
   h.z *= 1.0 - uPolar.x * w;
+  // Vibrance floor: the whole open sky, not graduated.
+  float dv = fract(uVib.z - h.x + 0.5) - 0.5;
+  h.x = fract(h.x + dv * 0.8 * sky);
+  h.y = mix(h.y, max(h.y, mix(h.y, uVib.y, uVib.x)), sky);
+  h.z *= 1.0 - uVib.w * sky * smoothstep(0.6, 0.8, h.z);
   c = pow(hsv2rgb(h), vec3(2.2));
   // Sunlit cloud tops: bright and near neutral. They take a warm cast on the
   // shoulder so they glow instead of reading grey; blue sky (chroma) and the
@@ -275,6 +292,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
+  const vib = [
+    clamp(num("vib", VIB), 0, 1),
+    clamp(num("vibFloor", VIB_FLOOR), 0, 1),
+    num("vibHue", VIB_HUE) / 360,
+    clamp(num("vibV", VIB_V), 0, 0.5),
+  ];
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -498,6 +521,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform2f(plateP.u.uImg, IW, IH);
     gl.uniform3fv(plateP.u.uTopTint, topTint);
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
+    gl.uniform4fv(plateP.u.uVib, vib);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
