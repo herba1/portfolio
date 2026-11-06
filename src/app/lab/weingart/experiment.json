@@ -1,0 +1,15 @@
+{
+  "title": "Weingart",
+  "description": "A song credit set like a forme of hand-set metal type: three stepped lines of title, a process-red running time printed underneath, rules and a reversed slug, small text cascading down the right. Push any line and it moves the way lead moves in a chase, one diagonal step at a time, its letters opening out as it travels down and closing up until they collide as it climbs back. Lines overprint where they cross, and when you let go the slug drops into the nearest step and seats.",
+  "tags": ["Type", "Print", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:00:00.000Z",
+  "intent": "After Wolfgang Weingart's Basel letterpress experiments and his stepped Typografische Monatsblätter covers (1972–73): Swiss order broken from inside the system, using the real constraints of a press, quantised steps, letterspacing and overprinting, to make new rhythm. https://neugraphic.com/weingart/weingart-text2.html",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.42, 0.5], "to": [0.6, 0.62] },
+  "sources": [
+    "https://neugraphic.com/weingart/weingart-text2.html",
+    "https://letterformarchive.org/news/from-the-collection-legacies-of-swiss-style-part-2-wolfgang-weingart/",
+    "https://eguide.ch/en/?p=2657"
+  ]
+}
