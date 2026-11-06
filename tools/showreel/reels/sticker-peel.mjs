@@ -8,7 +8,7 @@ const reel = {
   css: ".sticker-peel-head, .sticker-peel-live { visibility: hidden; }",
   stage: { rect: [0.3, 0.02, 0.56, 0.94] },   // the record and the air above it, not the empty desk
   ready: ".sticker-peel-stage[data-ready]",
-  intro: { hold: 200, zoom: 1, fade: 0, trim: 130 },   // feed: the record is there from frame one and the hand is already moving
+  intro: { hold: 900, zoom: 1, fade: 0, trim: 820 },   // loop: open on the settled record, hand at rest; the reach starts at once
   tempo: 1.2,
   outro: { hold: 1400 },
   loop: true,
@@ -20,9 +20,14 @@ const reel = {
     { move: [880, 236], duration: 650, arc: 0.04, pause: 300 },            // glue strands
     { move: [1090, 190], duration: 700, arc: 0.04, pause: 200 },           // lets go
     { camera: { zoom: 1.2, on: "cursor", follow: true } },
-    { move: [640, 470], duration: 1000, arc: 0.14, pause: 150 },            // carry it over
-    { lift: true, pause: 150 },
-    { camera: "reset", pause: 1200 },
+    { move: [640, 470], duration: 1000, arc: 0.14, pause: 250 },            // carry it over the cover
+    { move: [853, 232], duration: 1000, arc: 0.14, pause: 150 },            // and back onto its own spot
+    { lift: true, pause: 300 },
+    { camera: "reset" },
+    // The piece's own fresh-sleeve key, sent straight to the canvas so it never
+    // takes focus (no ring): the corner lifts again, exactly as on frame one.
+    { run: ({ page }) => page.$eval(".sticker-peel-canvas", (c) => c.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true }))) },
+    { move: [0.78, 0.62], duration: 900, pause: 400 },                      // hand home, for the loop
   ],
 };
 

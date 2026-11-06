@@ -22,13 +22,16 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   const end = tAt("end"), stop = tAt("stop");
   // Outro: let the camera settle back on the piece, then fade into its ground.
   // `outro: { fade: false }` ends on the live frame instead (for loops).
-  // loop: no fade-out; the last moments dissolve into the opening frame so an
-  // autoplaying feed replays it without a seam.
-  const loop = reel.loop ? { xfade: 450, ...(reel.loop === true ? {} : reel.loop) } : null;
+  // loop: no fade-out. Over the last `home` ms the camera and pointer ease
+  // back to exactly where they were on frame one, and the clip stops one
+  // frame short of it, so autoplay replays without a seam or a dissolve.
+  // The page itself has to end as it began; the reel's beats make sure of that.
+  const loop = reel.loop ? { home: 1400, ...(reel.loop === true ? {} : reel.loop) } : null;
   const fades = !loop && reel.outro?.fade !== false;
   const outroStart = fades ? end + (reel.outro?.settle ?? 700) : Infinity;
   const finish = fades ? Math.min(stop, outroStart + (reel.outro?.fade ?? 700) + 150) : stop;
   const total = Math.ceil(((finish - start) / 1000) * fps);
+  const loopLen = loop ? (total / fps) * 1000 : 0;
 
   const browser = await chromium.launch();
   const page = await browser.newPage({ viewport: { width: W, height: H }, deviceScaleFactor: 1 });
@@ -48,7 +51,7 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   const look = reel.look ?? { bg: `rgb(${r},${g},${b})`, ink: dark ? "#fafafa" : "#18181b", ink2: dark ? "#a1a1aa" : "#52525b" };
 
   await page.evaluate((s) => window.setup(s), {
-    out: [W, H], viewport: cap.viewport, dpr: cap.dpr, fps, timeline, intro: reel.intro, outro: reel.outro, look,
+    out: [W, H], viewport: cap.viewport, dpr: cap.dpr, fps, timeline, intro: reel.intro, outro: reel.outro, look, loopLen,
     cursorLag: reel.cursorLag, cursorSize: reel.cursorSize, maxBase: reel.maxBase,
     follow: reel.follow, restFollow: reel.restFollow, followAmount: reel.followAmount, cameraArc: reel.cameraArc, followArc: reel.followArc,
   });
@@ -67,8 +70,10 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     const T = start + tOut;
     while (fi + 1 < frames.length && frames[fi + 1].t <= T) fi++;
     const phase = T >= outroStart ? "outro" : tOut < (reel.intro?.fade ?? 450) ? "intro" : "main";
-    const loopMix = loop ? Math.max(0, 1 - (finish - T) / loop.xfade) : 0;
-    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, loopMix });
+    // 0 until the last stretch, then eases to 1 at frame `total` (never drawn: it is frame 0)
+    const k = loop ? Math.min(1, Math.max(0, 1 - (total - i) / ((loop.home / 1000) * fps))) : 0;
+    const home = k * k * k * (k * (k * 6 - 15) + 10);
+    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, home });
     const { data } = await cdp.send("Page.captureScreenshot", shot);
     const buf = Buffer.from(data, "base64");
     if (i === posterAt && !draft) fs.writeFileSync(outFile.replace(/\.mp4$/, ".poster.png"), buf);

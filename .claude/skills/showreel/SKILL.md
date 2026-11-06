@@ -41,7 +41,11 @@ So, for every feed reel:
 1. **Frame one is the piece, already moving.** `intro: { fade: 0 }` (no fade from blank), `intro.trim` to cut any empty mount frames, and `cursor: { visible: true }` so the pointer is on screen at once. Never a title card.
 2. **The payoff lands inside ~2s.** The first beat is the move the piece exists for, not a warm-up.
 3. **8–15 seconds,** three to five beats.
-4. **Loop it.** `loop: true` drops the fade-out and dissolves the last moments into the opening frame, so autoplay replays without a seam. End where you began (Kern returns to the light cut).
+4. **Loop it, for real.** `loop: true` makes the last frame lead straight into the first: no fade, no crossfade. The compositor does its half: over the last `loop.home` ms (default 1400) the camera, pointer position, tilt and press ease back to exactly their frame-one state; breathing and idle drift run on loop time with every frequency rounded to whole cycles; and the clip stops one frame short, because the next frame is frame one. The page has to do its half, and that is the reel's job:
+   - **Open on a settled frame.** `intro.trim` to a moment where the piece is at rest and the pointer is still (pick it by diffing the captured frames). Let the piece's own entrance motion be the first thing that happens after it, if it has one (Kern's load pluck).
+   - **End in the same state.** Undo what you did (Kern taps back to the light cut), use the piece's own reset if it has one (Sticker Peel lays the sticker back on its spot, then its fresh-sleeve `R` key, dispatched to the canvas so it never takes focus), and finish with a `move` of the pointer back to `cursor.from`.
+   - **Stop before idle behaviour.** Pieces with an attract mode (Kern plucks after 3.2s idle) need `outro.hold` short enough to end first.
+   - **Verify the seam.** Diff the first captured frame of the clip against the last (`frames/*.jpg`): it should be ~0. Then diff the output's last frame against its first; it should be no bigger than an ordinary frame-to-frame step (draft encodes add a little keyframe noise).
 5. **Lead with `feed` (4:5).** It's the most room a phone feed gives a post uncropped. Add `landscape` for X on desktop and YouTube, `vertical` for Reels, TikTok and Shorts.
 
 ## Draft, then final
@@ -62,7 +66,7 @@ Beats, timings and camera are identical between draft and final.
 1. **Capture** (`lib/capture.mjs`) opens the real page in Playwright and plays the beats with real mouse and keyboard input.
    - **Lockstep** (default): the page clock is frozen and stepped 1/fps per frame (timers, rAF, `performance.now`, every CSS transition and Web Animation), so the clip is smooth even when the machine renders at 3fps.
    - **Realtime** (`mode: "realtime"`): only for pieces timed by audio or `<video>` clocks.
-2. **Compose** (`lib/compose.mjs` + `lib/compositor.html`) redraws every output frame from the captured frames and the timeline: the framing, the camera shots, the pointer, the intro, and the outro fade or loop dissolve.
+2. **Compose** (`lib/compose.mjs` + `lib/compositor.html`) redraws every output frame from the captured frames and the timeline: the framing, the camera shots, the pointer, the intro, and the outro fade or the loop's return home.
 
 ## Writing a reel
 
@@ -73,9 +77,9 @@ const reel = {
   css: ".kern-title { visibility: hidden; }",   // hide the piece's own heading
   stage: { sel: ".kern-stage text", pad: 0.06 }, // what to frame: selector (union of matches) or { rect: [x, y, w, h] } in viewport fractions
   ready: ".kern-stage text",                     // wait for this before the first beat
-  intro: { hold: 400, zoom: 1, fade: 0, trim: 380 },
+  intro: { hold: 1900, zoom: 1, fade: 0, trim: 1150 },  // open on the settled word, before its load pluck
   outro: { hold: 1400 },
-  loop: true,                                    // or { xfade: 450 }
+  loop: true,                                    // or { home: 1400 }: how long the camera and pointer take to ease back to frame one
   tempo: 1.2,                                    // multiplies every timed field; >1 is slower
   cursor: { from: [0.7, 0.86], visible: true },
   formats: ["feed", "landscape", "vertical"],
