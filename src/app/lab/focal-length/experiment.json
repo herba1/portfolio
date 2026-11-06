@@ -20,14 +20,14 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/canary_wharf_16k.hdr",
       "author": "Andreas Mischok",
       "licence": "CC0",
-      "note": "16K HDR, the towers and street. Reprojected to a zenith cap (azimuthal equidistant, 95 degrees), towers exposed and cooled slightly."
+      "note": "16K HDR, the towers and street. Reprojected to a zenith cap (azimuthal equidistant, 95 degrees) and re-lit by the new sky's sun: facade normals from the floor lines give each face a sun incidence, sun-facing faces get about a stop of warm-neutral light, faces turned away go toward near-black with a little skylight blue, and cranes stay backlit silhouettes."
     },
     {
       "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
       "author": "Greg Zaal (original), Jarod Guest (sky edits)",
       "licence": "CC0",
-      "note": "16K HDR cumulus sky, set in behind the towers with a luminance matte (sky at infinity, so the composite is geometrically exact), rotated so the sun sits behind a tower, and mapped linearly per zenith angle toward the natsu targets (cobalt zenith, unclipped cloud). Stored as scene light / 2, sRGB webp: a 4096 cap to 95 degrees and a native 2048 inset of the centre 23.75 degrees."
+      "note": "16K HDR cumulus sky, set in behind the towers with a luminance matte (sky at infinity, so the composite is geometrically exact), rotated so the sun sits behind a tower, and regraded as clear sky plus cloud light on a smooth, dithered ramp from cyan 200 degrees at the horizon to cobalt 212 degrees at the zenith, saturation capped so no gap goes ultramarine. The matte is unmixed at true coverage, then choked and feathered about 2.5 px round the tower crowns. Stored as scene light / 2, sRGB webp: a 4096 cap to 95 degrees and a native 2048 inset of the centre 23.75 degrees."
     }
   ]
 }
