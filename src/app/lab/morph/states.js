@@ -18,50 +18,47 @@ export const STATES = ["idle", "expanded", "toast"];
 const ART_IDLE = 24;
 
 // ---- the open panel's grid --------------------------------------------------
-// A record sleeve and its type. The cover is the second shared element: the
-// pill's thumbnail grows out of its own top-left corner into a square that
-// stands the full height of the content, from the clock's cap height to the
-// transport's baseline. Everything else, clock, title, artist, scrubber and
-// transport, hangs flush left off one line, COL, immediately to its right.
-// Two columns, no gutter left over: image square / type.
-// Every vertical address is on the 4px grid.
+// A record sleeve and its type, and nothing else: no buttons, no bar. The
+// figures are the control (drag them to seek, tap the sleeve to pause), and
+// progress is one hairline on the figures' baseline.
+//
+// The cover is the second shared element: the pill's thumbnail grows out of
+// its own top-left corner into a square that stands from the figures' top to
+// the artist's baseline. Everything else, clock, rule, title, artist, hangs
+// flush left off one line, COL, immediately to its right. Two columns:
+// image square / type. Every vertical address is on the 4px grid.
 const PAD = 24;
-export const ART = 200; // the sleeve: the content's full height
+export const ART = 140; // the sleeve: figure top to artist baseline
 const GAP = 28; // sleeve to type
-export const PANEL = { W: 552, H: PAD + ART + PAD };
+export const COL_W = 320; // the type column's measure, which the rule runs
+export const PANEL = { W: PAD + ART + GAP + COL_W + PAD, H: PAD + ART + PAD };
 export const COL = -PANEL.W / 2 + PAD + ART + GAP; // the text column's left edge
-export const COL_W = PANEL.W / 2 - PAD - COL; // ... and its measure
 
-// Clock sizes. Open, the figures are the column's headline: Geist's lining
-// figures are 0.73em, so 96px figures are 70px, top on the sleeve's top edge.
+// Clock sizes. Open, the figures are the column's headline: Geist's tabular
+// lining figures are 0.71em, so 115px figures stand 81.7px, their top on the
+// sleeve's top edge and their round overshoot just clear of the rule at 108.
 export const CLOCK_PILL = 13;
-export const CLOCK = 96;
+export const CLOCK = 115;
 
-// Geist's metrics with line-height 1: figure top and figure centre, as a
-// fraction of the size, measured from the top of the line box.
-export const FIG_TOP = 0.1225;
-export const FIG_BASE = 0.8525;
+// Geist's tabular figures with line-height 1, measured from rendered pixels
+// at the clock's weight: flat figure top and baseline as a fraction of the
+// size from the top of the line box, and the figure centre.
+export const FIG_TOP = 0.144;
+export const FIG_BASE = 0.854;
 const clockTop = (s, top) => top - FIG_TOP * s;
-const clockMid = (s) => 0.4875 * s;
+const clockMid = (s) => ((FIG_TOP + FIG_BASE) / 2) * s;
 
-// The clock's baseline lands at PAD + 70 = 94. The title's 24px line sits
-// 18px under it, the artist straight beneath, the scrubber after a 16px
-// breath, and the transport row last, its glyphs' ink ending on the
-// sleeve's bottom edge.
+// The figures' baseline lands at PAD + 81.7 = 105.7. The rule is laid on it,
+// just clear of the round figures' overshoot so it lands on the grid at 108;
+// the time left stands on the same baseline at the rule's far end, in the
+// 13px body step (a 16px line, baseline 12.6px down). The title's 24px line
+// sits 16px under the rule and the artist straight beneath.
+export const CLOCK_BASE = PAD + (FIG_BASE - FIG_TOP) * CLOCK;
 export const ROW = {
-  title: 112,
-  artist: 136,
-  scrub: 172,
-  transport: 196,
-};
-
-// Transport buttons are 40px boxes with the glyph centred; the glyphs' left
-// ink sits 11px in, so the row is pulled left by that to hang on COL.
-const GLYPH_INSET = 11;
-export const TRANSPORT = {
-  prev: COL - GLYPH_INSET,
-  play: COL - GLYPH_INSET + 52,
-  next: COL - GLYPH_INSET + 104,
+  rule: 108,
+  remain: CLOCK_BASE - 12.6,
+  title: 124,
+  artist: 148,
 };
 
 // The idle pill's geometry, which the open panel borrows to park the
@@ -69,6 +66,9 @@ export const TRANSPORT = {
 const PILL_W = 196;
 const PILL_H = 40;
 const WAVE_IDLE = { x: PILL_W / 2 - 14 - 22, y: (PILL_H - 16) / 2 };
+// Next only has a place in the toast; elsewhere it rests, unseen, at the
+// pill's right end, so it comes into the toast from where the toast grows.
+const NEXT_PARK = { x: PILL_W / 2 - 14 - 32, y: (PILL_H - 32) / 2, s: 32 };
 
 export function layout(state, { hover = false, press = false } = {}) {
   if (state === "expanded") {
@@ -81,7 +81,8 @@ export function layout(state, { hover = false, press = false } = {}) {
       // the waveform has no place in the open panel: it folds flat where it was
       wave: { x: WAVE_IDLE.x, y: WAVE_IDLE.y, o: 0 },
       elapsed: { x: COL, y: clockTop(CLOCK, PAD), s: CLOCK, o: 1 },
-      next: { x: TRANSPORT.next, y: ROW.transport, s: 40, o: 1 },
+      // no chrome open: next waits where the toast will want it
+      next: { ...NEXT_PARK, o: 0 },
       p: { idle: 0, expanded: 1, toast: 0 },
     };
   }
@@ -111,7 +112,7 @@ export function layout(state, { hover = false, press = false } = {}) {
     art: { x: L, y: (H - ART_IDLE) / 2, s: ART_IDLE, r: 7, o: 1 },
     wave: { x: W / 2 - 14 - 22, y: (H - 16) / 2, o: 1 },
     elapsed: { x: L + 32, y: H / 2 - clockMid(CLOCK_PILL), s: CLOCK_PILL, o: 1 },
-    next: { x: TRANSPORT.next, y: ROW.transport, s: 40, o: 0 },
+    next: { ...NEXT_PARK, o: 0 },
     p: { idle: 1, expanded: 0, toast: 0 },
   };
 }

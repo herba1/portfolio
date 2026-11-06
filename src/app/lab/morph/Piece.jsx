@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
-import { BODY, COL, COL_W, FADE, FIG_BASE, PANEL, ROW, TRANSPORT, flat, isFade, layout } from "./states";
+import { BODY, COL, COL_W, FADE, PANEL, ROW, flat, isFade, layout } from "./states";
 import { squircle } from "./squircle";
 
 import "./morph.css";
@@ -14,33 +14,32 @@ const fmt = (s) => {
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 };
 const MINUS = "\u2212";
-// baseline of a 13px figure in its 16px line box (the ui token)
-const REMAIN_BASE = 12.6;
 
 // The tracking law, tracking_px = -0.043 x (size_px - 12), for type whose
 // size is a spring: written in em, so it holds at whatever size this frame is.
 const trackingFor = (size) => `${((-0.043 * (size - 12)) / size).toFixed(4)}em`;
 
-// The clock hangs flush on the text column by its ink, not its box. Its
-// leading figure is set proportional (it changes once a minute; the seconds
-// stay tabular so they never jitter), which is also what lets canvas, which
-// cannot switch tnum on, measure that figure's left side bearing exactly.
-// The result is in em, so it scales with the clock as it grows.
-const bearingCache = new Map();
-function inkLeft(el, text) {
-  const key = text[0];
-  if (bearingCache.has(key)) return bearingCache.get(key);
-  try {
-    const cs = getComputedStyle(el);
-    const g = document.createElement("canvas").getContext("2d");
-    g.font = `${cs.fontWeight} 100px ${cs.fontFamily}`;
-    const v = -g.measureText(key).actualBoundingBoxLeft / 100;
-    if (document.fonts?.status === "loaded") bearingCache.set(key, v);
-    return v;
-  } catch {
-    return 0;
-  }
-}
+// The clock is an odometer: every figure sits on a wheel of its own, a strip
+// of tabular digits that rolls on its own spring to the place value of the
+// time. Each wheel's target is unwrapped (seconds counts 0, 1, ... 83 ...),
+// so a carry rolls the next wheel up exactly as far as it should, and lower
+// places are stiffer, so a carry ripples left a beat after the units turn.
+const WHEELS = {
+  mt: { m: 10, place: 600, k: 220 },
+  mu: { m: 10, place: 60, k: 260 },
+  st: { m: 6, place: 10, k: 320 },
+  su: { m: 10, place: 1, k: 420 },
+};
+const WHEEL_ZETA = 0.78;
+
+// The clock hangs flush on the text column by its ink, not its box. Every
+// figure is tabular, and Geist's tabular figures are not the proportional
+// outlines centred (the tabular 1 grows a foot), and canvas cannot switch
+// tnum on to measure them, so these are measured once from rendered pixels:
+// each tabular figure's left side bearing at the clock's weight, in em, so it
+// holds as the clock grows. One entry per digit, so the bearing can follow
+// the lead wheel through a roll.
+const TNUM_BEARING = [0.038, 0.1, 0.05, 0.042, 0.03, 0.046, 0.048, 0.05, 0.032, 0.048];
 
 // The fallback catalogue carries no lengths, so each title gets a stable one
 // in a plausible range rather than a random one per visit.
@@ -147,27 +146,10 @@ function Art({ src }) {
 }
 
 const Icon = {
-  prev: (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M11.2 12 19.6 6.4c.6-.4 1.4 0 1.4.7v9.8c0 .7-.8 1.1-1.4.7L11.2 12Z" />
-      <path d="M2.2 12 10.6 6.4c.6-.4 1.4 0 1.4.7v9.8c0 .7-.8 1.1-1.4.7L2.2 12Z" />
-    </svg>
-  ),
   next: (
     <svg viewBox="0 0 24 24" aria-hidden="true">
       <path d="M12.8 12 4.4 17.6c-.6.4-1.4 0-1.4-.7V7.1c0-.7.8-1.1 1.4-.7l8.4 5.6Z" />
       <path d="M21.8 12 13.4 17.6c-.6.4-1.4 0-1.4-.7V7.1c0-.7.8-1.1 1.4-.7l8.4 5.6Z" />
-    </svg>
-  ),
-  play: (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M7 4.9c0-.8.9-1.3 1.6-.9l11.2 7.1c.6.4.6 1.4 0 1.8L8.6 20c-.7.4-1.6-.1-1.6-.9V4.9Z" />
-    </svg>
-  ),
-  pause: (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <rect x="5.5" y="4" width="4.5" height="16" rx="1.4" />
-      <rect x="14" y="4" width="4.5" height="16" rx="1.4" />
     </svg>
   ),
 };
@@ -185,7 +167,8 @@ export default function Piece() {
   const elapsedRef = useRef(null);
   const nextRef = useRef(null);
   const fillRef = useRef(null);
-  const remainRef = useRef(null);
+  const ruleRef = useRef(null);
+  const wheelRefs = useRef({});
 
   const [mode, setMode] = useState("idle");
   const [idx, setIdx] = useState(0);
@@ -247,7 +230,11 @@ export default function Piece() {
       art.style.width = `${s}px`;
       art.style.height = `${s}px`;
       art.style.borderRadius = `${v("ar")}px`;
-      art.style.transform = `translate3d(${cx + v("ax")}px,${v("ay")}px,0)`;
+      // the sleeve is the play button: it gives a little under the finger
+      const Lp = live.current;
+      Lp.ap = (Lp.ap ?? 0) + ((Lp.artDown ? 1 : 0) - (Lp.ap ?? 0)) * 0.3;
+      const k = 1 - 0.035 * Lp.ap;
+      art.style.transform = `translate3d(${cx + v("ax") + (s * (1 - k)) / 2}px,${v("ay") + (s * (1 - k)) / 2}px,0) scale(${k})`;
     }
     const fade = (o) => clamp(o, 0, 1) ** 2;
     // x, y is the top-left of the element at size s; it scales about its centre
@@ -274,11 +261,27 @@ export default function Piece() {
     // the figures are drawn, never stretched. It slides left by its own ink
     // bearing (in em, so it grows with it) to hang flush on the column.
     const clock = elapsedRef.current;
+    const Lw = live.current;
+    let bearing = 0;
+    for (const key in WHEELS) {
+      const el = wheelRefs.current[key];
+      const w = Lw.wheels?.[key];
+      if (!el || !w) continue;
+      const { m } = WHEELS[key];
+      const pos = ((w.x % m) + m) % m;
+      el.style.transform = `translate3d(0,${-pos}em,0)`;
+      // the lead wheel's ink bearing, followed through the roll
+      if (key === (Lw.elapsed >= 600 ? "mt" : "mu")) {
+        const i = Math.floor(pos);
+        const f = pos - i;
+        bearing = TNUM_BEARING[i % m] * (1 - f) + TNUM_BEARING[(i + 1) % m] * f;
+      }
+    }
     if (clock) {
       const size = v("es");
       const o = v("eo");
       const p = clamp(o, 0, 1);
-      const x = v("ex") - (live.current.bearing || 0) * size;
+      const x = v("ex") - bearing * size;
       clock.style.fontSize = `${size}px`;
       clock.style.letterSpacing = trackingFor(size);
       clock.style.transform = `translate3d(${cx + x}px,${v("ey")}px,0)`;
@@ -294,16 +297,9 @@ export default function Piece() {
     const P = { idle: v("pi"), expanded: v("pe"), toast: v("pt") };
     const T = target.current || {};
     const IN = { idle: T.pi > 0.5, expanded: T.pe > 0.5, toast: T.pt > 0.5 };
-    // time left: hangs off the clock's right edge on its baseline, and comes in
-    // like the other open-only content, once the figures have mostly grown
-    const rem = remainRef.current;
-    if (rem && clock) {
-      const p = clamp(P.expanded, 0, 1);
-      rem.style.top = `${FIG_BASE * v("es") - REMAIN_BASE}px`;
-      rem.style.opacity = IN.expanded ? clamp((p - 0.3) / 0.7, 0, 1) ** 2 : fade(p);
-      rem.style.filter = p > 0.995 ? "none" : `blur(${(1 - p) * 6}px)`;
-      rem.style.visibility = p < 0.002 ? "hidden" : "";
-    }
+    // open, the figures are the scrubber: they take the pointer only once the
+    // panel has mostly arrived
+    if (clock) clock.style.pointerEvents = T.pe > 0.5 && P.expanded > 0.6 ? "auto" : "none";
 
     for (const el of surf ? surf.querySelectorAll(":scope > .mp-layer") : []) {
       const [state, x, y] = el.dataset.at.split(",");
@@ -368,6 +364,20 @@ export default function Piece() {
           setSec(s);
         }
       }
+      // the odometer: each wheel springs to its place value of the time. A
+      // jump of more than a turn is taken up silently, a whole turn at a
+      // time, so a long seek still rolls, but never more than once round.
+      const total = Math.floor(L.elapsed);
+      L.wheels ??= {};
+      const n = Math.max(1, Math.ceil(dt / (1 / 240)));
+      for (const key in WHEELS) {
+        const { m, place, k } = WHEELS[key];
+        const T = Math.floor(total / place);
+        const w = (L.wheels[key] ??= { x: T, v: 0 });
+        const d = T - w.x;
+        if (Math.abs(d) > m) w.x += m * Math.trunc(d / m);
+        for (let i = 0; i < n; i += 1) step(w, T, { k, zeta: WHEEL_ZETA }, dt / n);
+      }
       paint(now);
       raf = requestAnimationFrame(loop);
     };
@@ -378,17 +388,6 @@ export default function Piece() {
   useEffect(() => {
     live.current.dur = dur;
   }, [dur]);
-
-  const lead = fmt(sec)[0];
-  useEffect(() => {
-    const el = elapsedRef.current;
-    if (!el) return;
-    const set = () => {
-      live.current.bearing = inkLeft(el, lead);
-    };
-    set();
-    document.fonts?.ready.then(set);
-  }, [lead]);
 
   useEffect(() => {
     live.current.playing = playing;
@@ -509,6 +508,7 @@ export default function Piece() {
   const onKey = (e) => {
     if (e.target !== e.currentTarget) return;
     if (e.key === "Escape") close();
+    else if (mode === "expanded" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) onClockKey(e);
     else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       if (mode === "expanded") setPlaying((p) => !p);
@@ -524,30 +524,62 @@ export default function Piece() {
     return () => window.removeEventListener("keydown", k);
   });
 
-  // scrubber
-  const scrubRef = useRef(null);
-  const seek = (e) => {
-    const el = scrubRef.current;
-    const r = el.getBoundingClientRect();
+  // The figures are the scrubber. Drag them sideways and the time moves by
+  // the distance along the rule under them, so the rule's played edge keeps
+  // pace with the finger; press the rule itself and the time goes there.
+  const drag = useRef(null);
+  const seekTo = (t) => {
     const L = live.current;
-    L.elapsed = clamp((e.clientX - r.left) / r.width, 0, 1) * (L.dur - 0.5);
+    L.elapsed = clamp(t, 0, L.dur - 0.5);
     L.sec = Math.floor(L.elapsed);
     setSec(L.sec);
   };
-  const onScrubDown = (e) => {
+  const scrubAt = (e) => {
+    const d = drag.current;
+    const L = live.current;
+    seekTo(d.absolute ? ((e.clientX - d.left) / d.w) * L.dur : d.t0 + ((e.clientX - d.x0) / d.w) * L.dur);
+  };
+  const scrubDown = (e, absolute) => {
     e.stopPropagation();
-    if (live.current.frozen) return;
+    const L = live.current;
+    if (L.frozen || L.mode !== "expanded" || e.button > 0) return;
     e.currentTarget.setPointerCapture(e.pointerId);
-    live.current.scrubbing = true;
+    const r = ruleRef.current.getBoundingClientRect();
+    drag.current = { x0: e.clientX, t0: L.elapsed, w: r.width, left: r.left, absolute };
+    L.scrubbing = true;
     setScrubbing(true);
-    seek(e);
+    if (absolute) scrubAt(e);
   };
-  const onScrubMove = (e) => {
-    if (live.current.scrubbing) seek(e);
+  const onClockDown = (e) => scrubDown(e, false);
+  const onRuleDown = (e) => scrubDown(e, true);
+  const scrubMove = (e) => {
+    if (drag.current) scrubAt(e);
   };
-  const onScrubUp = () => {
+  const scrubUp = () => {
+    drag.current = null;
     live.current.scrubbing = false;
     setScrubbing(false);
+  };
+  const onClockKey = (e) => {
+    if (live.current.frozen) return;
+    const by = { ArrowLeft: -5, ArrowRight: 5, PageDown: -30, PageUp: 30 }[e.key];
+    if (by) {
+      e.preventDefault();
+      seekTo(live.current.elapsed + by);
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      seekTo(0);
+    }
+  };
+
+  // The sleeve is play and pause, once the panel is open.
+  const artUp = () => {
+    live.current.artDown = false;
+  };
+  const onArtClick = (e) => {
+    if (mode !== "expanded") return;
+    e.stopPropagation();
+    if (!live.current.frozen) setPlaying((p) => !p);
   };
 
   const at = (state, x, y) => `${state},${x},${y}`;
@@ -559,6 +591,7 @@ export default function Piece() {
       ref={rootRef}
       className="mp-root"
       data-mode={mode}
+      data-paused={playing ? undefined : ""}
       onPointerDown={(e) => {
         if (mode === "expanded" && !surfRef.current?.contains(e.target)) close();
       }}
@@ -589,8 +622,19 @@ export default function Piece() {
             <path ref={edgeRef} />
           </svg>
 
-          {/* shared: art, the pill's thumbnail and the open panel's sleeve */}
-          <div ref={artRef} className="mp-art">
+          {/* shared: art, the pill's thumbnail and the open panel's sleeve,
+              which, open, is also play and pause */}
+          <div
+            ref={artRef}
+            className="mp-art"
+            onClick={onArtClick}
+            onPointerDown={() => {
+              if (mode === "expanded") live.current.artDown = true;
+            }}
+            onPointerUp={artUp}
+            onPointerLeave={artUp}
+            onPointerCancel={artUp}
+          >
             <Art src={shown?.imageLarge || shown?.image} />
           </div>
 
@@ -601,16 +645,42 @@ export default function Piece() {
             ))}
           </div>
 
-          {/* shared: the clock, which carries the morph. The time left rides on
-              its baseline and only shows when the panel is open. */}
-          <span ref={elapsedRef} className="mp-elapsed">
-            <span className="mp-clock">
-              <span className="mp-lead">{fmt(sec)[0]}</span>
-              {fmt(sec).slice(1)}
-            </span>
-            <span ref={remainRef} className="mp-time mp-remain" aria-label={`${fmt(dur - sec)} remaining`}>
-              {MINUS}
-              {fmt(dur - sec)}
+          {/* shared: the clock, which carries the morph. Open, it is also the
+              scrubber: drag the figures sideways to seek. */}
+          <span
+            ref={elapsedRef}
+            className="mp-elapsed"
+            role="slider"
+            tabIndex={mode === "expanded" ? 0 : -1}
+            aria-label="Position"
+            aria-valuemin={0}
+            aria-valuemax={dur}
+            aria-valuenow={sec}
+            aria-valuetext={`${fmt(sec)} of ${fmt(dur)}`}
+            data-active={scrubbing ? "" : undefined}
+            onPointerDown={onClockDown}
+            onPointerMove={scrubMove}
+            onPointerUp={scrubUp}
+            onPointerCancel={scrubUp}
+            onClick={(e) => e.stopPropagation()}
+            onKeyDown={onClockKey}
+          >
+            <span className="mp-clock" aria-hidden="true">
+              {(sec >= 600 ? ["mt", "mu", ":", "st", "su"] : ["mu", ":", "st", "su"]).map((key) =>
+                key === ":" ? (
+                  <span key={key} className="mp-colon">
+                    :
+                  </span>
+                ) : (
+                  <span key={key} className="mp-wheel">
+                    <span ref={(el) => (wheelRefs.current[key] = el)} className="mp-strip">
+                      {Array.from({ length: WHEELS[key].m + 1 }, (_, i) => (
+                        <span key={i}>{i % WHEELS[key].m}</span>
+                      ))}
+                    </span>
+                  </span>
+                ),
+              )}
             </span>
           </span>
 
@@ -619,58 +689,36 @@ export default function Piece() {
             <span className="mp-btn-face">{Icon.next}</span>
           </button>
 
-          {/* expanded only */}
+          {/* expanded only: the rule on the figures' baseline, the time left at
+              its far end, and the title and artist under it */}
+          <div
+            ref={ruleRef}
+            data-at={at("expanded", COL, ROW.rule - 8)}
+            className="mp-layer mp-rule"
+            style={{ width: COL_W }}
+            onPointerDown={onRuleDown}
+            onPointerMove={scrubMove}
+            onPointerUp={scrubUp}
+            onPointerCancel={scrubUp}
+            onClick={(e) => e.stopPropagation()}
+            aria-hidden="true"
+          >
+            <div className="mp-rule-line">
+              <div ref={fillRef} className="mp-rule-fill" />
+            </div>
+          </div>
+
+          <div data-at={at("expanded", COL, ROW.remain)} className="mp-layer mp-time mp-remain" style={{ width: COL_W }}>
+            <span aria-label={`${fmt(dur - sec)} remaining`}>
+              {MINUS}
+              {fmt(dur - sec)}
+            </span>
+          </div>
+
           <div data-at={at("expanded", COL, ROW.title)} className="mp-layer mp-meta" style={{ width: COL_W }}>
             <div className="mp-title">{track?.title}</div>
             <div className="mp-artist">{track?.artist}</div>
           </div>
-
-          <div
-            ref={scrubRef}
-            data-at={at("expanded", COL, ROW.scrub)}
-            data-active={scrubbing ? "" : undefined}
-            className="mp-layer mp-scrub"
-            style={{ width: COL_W }}
-            onPointerDown={onScrubDown}
-            onPointerMove={onScrubMove}
-            onPointerUp={onScrubUp}
-            onPointerCancel={onScrubUp}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="mp-track">
-              <div ref={fillRef} className="mp-fill" />
-            </div>
-          </div>
-
-          <button
-            data-at={at("expanded", TRANSPORT.prev, ROW.transport)}
-            type="button"
-            className="mp-layer mp-btn"
-            aria-label="Previous"
-            onClick={(e) => {
-              e.stopPropagation();
-              go(-1);
-            }}
-          >
-            <span className="mp-btn-face">{Icon.prev}</span>
-          </button>
-
-          <button
-            data-at={at("expanded", TRANSPORT.play, ROW.transport)}
-            type="button"
-            className="mp-layer mp-btn mp-play"
-            aria-label={playing ? "Pause" : "Play"}
-            data-playing={playing ? "" : undefined}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!live.current.frozen) setPlaying((p) => !p);
-            }}
-          >
-            <span className="mp-btn-face">
-              <span className="mp-glyph mp-glyph-pause">{Icon.pause}</span>
-              <span className="mp-glyph mp-glyph-play">{Icon.play}</span>
-            </span>
-          </button>
 
           {/* toast only */}
           <div data-at={at("toast", -96, 12)} className="mp-layer mp-up">
