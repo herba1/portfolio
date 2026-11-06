@@ -1,12 +1,15 @@
 import { createStage, clamp } from "../_kit/stage";
 import { TITLE, VERSES } from "./reflowText";
+import { hyphenateToken } from "./hyphenate";
 
 // One enormous S, the initial of the song, sits in a column of small
 // justified text. The letter is Geist itself: rasterised once from the real
 // font, read back as ink spans per pixel row, and dilated by a round gutter.
 // Every frame each line of the baseline grid is cut by the letter into free
 // segments, and every verse is broken into those segments with Knuth–Plass
-// total-fit line breaking (hand-set hyphenation, hanging punctuation).
+// total-fit line breaking (Liang hyphenation, hanging punctuation). The text
+// is a two-column block on a grid; the letter overlaps its edge and runs off
+// the sheet, as on the Stedelijk posters.
 
 const FAMILY = '"Reflow Geist", Geist, system-ui, sans-serif';
 const INK = "#0a0a0a";
@@ -16,16 +19,26 @@ const SIZE = 12; // text px; the tracking law gives 0 at 12px
 const LEAD = 16; // whole-pixel leading on the 4px grid
 const CAP = 8.8; // ink band of a line above the baseline
 const DESC = 2.8; // and below it
-const GUTTER = 12; // round clearance between letter ink and text ink
-const MIN_SEG = 96; // narrower slivers stay empty
-const SKIP_BELOW = 260; // and so do these, when they would set loose
-const PASSES = 5;
+const GUTTER = 14; // round clearance between letter ink and text ink
+const MIN_SEG = 84; // narrower slivers stay empty
+const MEASURE = 360; // column width: about 56 characters of the ballad
+const COL_GAP = 24;
+const PASSES = 6;
+// Justified lines may stretch their spaces this far (r); a line that cannot
+// is set ragged, flush to the column edge, rather than loose or left out.
+// The search itself looks further (EMERGENCY) so one hard line ahead does
+// not stop the lines before it from finding an even set; Knuth's cubic
+// badness keeps it from choosing loose lines it does not need.
+const TOLERANCE = 1.3;
+const FULL_TOLERANCE = 2;
+const EMERGENCY = 3;
+const SHORT = 0.6; // of the measure
 
 // Knuth–Plass constants (TeX's, tightened for a narrow measure).
 const STRETCH = 0.55;
-const SHRINK = 0.1;
+const SHRINK = 0.2;
 const LINE_PENALTY = 10;
-const HYPHEN_PENALTY = 60;
+const HYPHEN_PENALTY = 50;
 const FLAGGED = 3000;
 const FITNESS = 3000;
 const INF = 1e7;
@@ -162,7 +175,7 @@ function buildParagraphs(ctx, wBody, wTitle) {
   const items = [];
   const glue = () => items.push({ t: GLUE, w: space, st: space * STRETCH, sh: space * SHRINK });
   const word = (wd, f) => {
-    const parts = wd.split("·");
+    const parts = hyphenateToken(wd);
     parts.forEach((p, pi) => {
       const last = pi === parts.length - 1;
       items.push({ t: BOX, w: measure(p, f), s: p, f, hang: last ? hang(p, f) : 0 });
@@ -216,7 +229,7 @@ function buildParagraphs(ctx, wBody, wTitle) {
 // committed. Lines well above the letter therefore never move when it does.
 const WINDOW = 5;
 
-function firstOfBest(par, from, line0, fit0, flag0, widthAt, tolerance) {
+function firstOfBest(par, from, line0, fit0, flag0, widthAt, tolerance, window = WINDOW) {
   const { items, sw, sst, ssh } = par;
   const n = items.length;
   let active = [{ pos: -1, line: 0, fit: fit0, w: sw[from], st: sst[from], sh: ssh[from], dem: 0, prev: null, flag: flag0, start: from }];
@@ -259,15 +272,15 @@ function firstOfBest(par, from, line0, fit0, flag0, widthAt, tolerance) {
       d += a.dem;
       const key = (a.line + 1) * 4 + fit;
       const best = cand.get(key);
-      if (!best || d < best.dem) cand.set(key, { line: a.line + 1, fit, dem: d, prev: a });
+      if (!best || d < best.dem) cand.set(key, { line: a.line + 1, fit, dem: d, prev: a, r });
     }
     active = next;
     let k = i + 1;
     while (k < n && items[k].t !== BOX && !(items[k].t === PEN && items[k].p <= -INF)) k += 1;
     for (const c of cand.values()) {
-      const node = { pos: i, line: c.line, fit: c.fit, w: sw[k], st: sst[k], sh: ssh[k], dem: c.dem, prev: c.prev, flag: it.t === PEN && it.flag, start: k };
+      const node = { pos: i, line: c.line, fit: c.fit, r: c.r, w: sw[k], st: sst[k], sh: ssh[k], dem: c.dem, prev: c.prev, flag: it.t === PEN && it.flag, start: k };
       // A window is complete at WINDOW lines or at the end of the text.
-      if (c.line >= WINDOW || forced) {
+      if (c.line >= window || forced) {
         if (!bestEnd || node.dem < bestEnd.dem) bestEnd = node;
       } else active.push(node);
     }
@@ -295,7 +308,9 @@ export async function createReflow(host) {
   let W = 0;
   let H = 0;
   let letter = null;
-  let col = { l: 0, r: 0, top: 0, lines: 0 };
+  let cols = [];
+  let top = 0;
+  let lines = 0;
   const pos = { x: 0, y: 0, vx: 0, vy: 0 };
   const target = { x: 0, y: 0 };
   let home = { x: 0, y: 0 };
@@ -305,10 +320,10 @@ export async function createReflow(host) {
   let lastKey = "";
 
   const pathAt = (t) => {
-    // The scripted sweep a still frame (?t=) holds: from home, down and
-    // across the column, as a hand would drag it.
+    // The scripted sweep a still frame (?t=) holds: from home, left and
+    // down into the block, as a hand would drag it.
     const a = home;
-    const b = { x: col.l + (col.r - col.l) * 0.22, y: H * 0.6 };
+    const b = { x: cols[0].l + (cols[cols.length - 1].r - cols[0].l) * 0.5, y: H * 0.62 };
     const e = t * t * (3 - 2 * t);
     return { x: a.x + (b.x - a.x) * e, y: a.y + (b.y - a.y) * e + Math.sin(e * Math.PI) * H * 0.04 };
   };
@@ -317,14 +332,24 @@ export async function createReflow(host) {
     W = w;
     H = h;
     const margin = w < 700 ? 24 : 48;
-    const letterPx = Math.round(Math.min(h * 1.14, w * 1.3));
+    const letterPx = Math.round(w < 700 ? Math.min(h * 0.9, w * 1.05) : Math.min(h * 1.3, w * 1.3));
     letter = rasterLetter("S", letterPx, wDisplay);
-    const cw = Math.min(w - margin * 2, Math.max(letter.w * 1.85, w * 0.52));
-    col.l = Math.round((w - cw) / 2);
-    col.r = Math.round(col.l + cw);
-    col.top = Math.ceil(margin / 4) * 4;
-    col.lines = Math.floor((h - col.top * 2) / LEAD);
-    home = { x: col.l + cw * 0.6, y: h * 0.5 };
+    // The block: two columns on a wide sheet, one on a narrow one, set from
+    // the left margin. The rest of the sheet is the letter's.
+    const avail = w - margin * 2;
+    const n = avail >= 2 * MEASURE + COL_GAP + letter.w * 0.5 ? 2 : 1;
+    const measure = Math.min(MEASURE, n === 1 && w < 700 ? avail : MEASURE);
+    cols = [];
+    for (let c = 0; c < n; c += 1) {
+      const l = Math.round(margin + c * (measure + COL_GAP));
+      cols.push({ l, r: l + measure });
+    }
+    top = Math.ceil(margin / 4) * 4;
+    lines = Math.floor((h - top * 2) / LEAD);
+    // Home: the letter's left third over the block's right edge, its tail
+    // running off the foot of the sheet.
+    const blockR = cols[n - 1].r;
+    home = w < 700 ? { x: w * 0.62, y: h * 0.56 } : { x: Math.min(blockR + letter.w * 0.18, w - letter.w * 0.36), y: h * 0.6 };
     const p = still == null ? home : pathAt(still);
     if (!grab) {
       pos.x = target.x = p.x;
@@ -335,35 +360,66 @@ export async function createReflow(host) {
     dirty = true;
   });
 
-  // Free segments on each baseline: the column minus the dilated letter.
+  // Free segments on each baseline of each column: the column minus the
+  // dilated letter, in reading order (column, then line, then left to right).
   function segments() {
     const segs = [];
-    for (let li = 0; li < col.lines; li += 1) {
-      const base = col.top + SIZE + li * LEAD;
+    const blockedAt = [];
+    for (let li = 0; li < lines; li += 1) {
+      const base = top + SIZE + li * LEAD;
       const y0 = Math.floor(base - CAP - pos.y - letter.rowOrigin);
       const y1 = Math.ceil(base + DESC - pos.y - letter.rowOrigin);
       const spans = [];
       for (let y = Math.max(0, y0); y <= y1 && y < letter.rows.length; y += 1) {
         for (const s of letter.rows[y]) spans.push([s[0] + letter.ox + pos.x, s[1] + letter.ox + pos.x]);
       }
-      const blocked = mergeSpans(spans);
-      let x = col.l;
-      for (const [a, b] of blocked) {
-        if (b <= x) continue;
-        if (a >= col.r) break;
-        if (a - x >= MIN_SEG) segs.push({ x, w: a - x, base });
-        x = Math.max(x, b);
+      blockedAt.push(mergeSpans(spans));
+    }
+    for (const c of cols) {
+      for (let li = 0; li < lines; li += 1) {
+        const base = top + SIZE + li * LEAD;
+        let x = c.l;
+        for (const [a, b] of blockedAt[li]) {
+          if (b <= x) continue;
+          if (a >= c.r) break;
+          if (a - x >= MIN_SEG) segs.push({ x, w: a - x, base, atL: x === c.l, atR: false });
+          x = Math.max(x, b);
+        }
+        if (c.r - x >= MIN_SEG) segs.push({ x, w: c.r - x, base, atL: x === c.l, atR: true });
       }
-      if (col.r - x >= MIN_SEG) segs.push({ x, w: col.r - x, base });
     }
     return segs;
+  }
+
+  // The longest line that fits at natural spacing (or shrunk), for a
+  // segment no justified break can fill evenly.
+  function ragged(par, from, L) {
+    const { items, sw, ssh } = par;
+    let best = null;
+    for (let i = from + 1; i < items.length; i += 1) {
+      const it = items[i];
+      let legal = false;
+      if (it.t === GLUE) legal = items[i - 1].t === BOX;
+      else if (it.t === PEN) legal = it.p < INF;
+      if (!legal) continue;
+      const extra = it.t === PEN ? it.w : 0;
+      const hangW = it.t === PEN ? it.hang : items[i - 1].hang || 0;
+      const natural = sw[i] - sw[from] + extra - hangW;
+      if (natural - (ssh[i] - ssh[from]) > L) break;
+      best = i;
+      if (it.t === PEN && it.p <= -INF) break;
+    }
+    if (best == null) return null;
+    let k = best + 1;
+    while (k < items.length && items[k].t !== BOX && !(items[k].t === PEN && items[k].p <= -INF)) k += 1;
+    const end = items[best];
+    return { pos: best, start: k, fit: 1, flag: end.t === PEN && end.flag, rag: true };
   }
 
   function relayout() {
     const segs = segments();
     const out = [];
-    const full = col.r - col.l;
-    const widthAt = (j) => (segs[j] ? segs[j].w : full);
+    const widthAt = (j) => (segs[j] ? segs[j].w : MEASURE);
     let p = 0;
     let par = pars[0];
     let from = 0;
@@ -375,30 +431,27 @@ export async function createReflow(host) {
         par = pars[p % pars.length];
         from = 0;
       }
-      let b = firstOfBest(par, from, j, fit, flag, widthAt, 1.8);
+      // Total fit over the next five lines; if that sets this line loose,
+      // the best tight line on its own, and failing that, ragged.
+      // A short runaround line has too few spaces to justify evenly: it is
+      // always set ragged, flush to the column edge, never stretched.
+      const short = segs[j].w < MEASURE * SHORT;
+      let b = short ? null : firstOfBest(par, from, j, fit, flag, widthAt, EMERGENCY, WINDOW);
+      // A full measure would show a rag as an error in the block; it may go
+      // a little looser before it gives up.
+      const tol = segs[j].atL && segs[j].atR ? FULL_TOLERANCE : TOLERANCE;
+      if (!short && (!b || b.r > tol)) b = firstOfBest(par, from, j, fit, flag, widthAt, tol, 1);
       if (!b) {
-        if (debug) debug.p2 = (debug.p2 || 0) + 1;
-        b = firstOfBest(par, from, j, fit, flag, widthAt, 3);
+        if (debug) debug.rag = (debug.rag || 0) + 1;
+        b = ragged(par, from, segs[j].w);
       }
-      if (!b && segs[j] && segs[j].w < SKIP_BELOW) {
-        // A sliver that can only be set loose stays white instead.
+      // Not even one word fits this sliver: it stays white.
+      if (!b) {
         if (debug) debug.skip = (debug.skip || 0) + 1;
         continue;
       }
-      if (!b) {
-        if (debug) debug.p3 = (debug.p3 || 0) + 1;
-        b = firstOfBest(par, from, j, fit, flag, widthAt, Infinity);
-      }
-      if (!b) {
-        // Nothing fits (a word wider than the sliver): break after one box.
-        let i = from + 1;
-        while (i < par.items.length - 1 && !(par.items[i].t === GLUE || (par.items[i].t === PEN && par.items[i].p < INF))) i += 1;
-        let k = i + 1;
-        while (k < par.items.length && par.items[k].t !== BOX) k += 1;
-        b = { pos: i, start: k, fit: 1, flag: false };
-      }
       const end = par.items[b.pos];
-      out.push({ seg: segs[j], par, from, to: b.pos, last: end.t === PEN && end.p <= -INF });
+      out.push({ seg: segs[j], par, from, to: b.pos, rag: !!b.rag, last: end.t === PEN && end.p <= -INF });
       from = b.start;
       fit = b.fit;
       flag = b.flag;
@@ -429,6 +482,15 @@ export async function createReflow(host) {
         }
       } else r = Math.min(0, natural > L ? (L - natural) / Math.max(1e-3, ssh[ln.to] - ssh[ln.from]) : 0);
       let x = ln.seg.x;
+      if (debug) ctx.fillStyle = ln.rag ? "#d00" : r > 1.1 ? "#06c" : INK;
+      if (ln.rag || ln.last) {
+        // Natural spacing; the line sits against whichever side is the
+        // column's own edge, and centres in a bay held by the letter alone.
+        r = Math.min(0, r);
+        const set = natural + (r < 0 ? r * (ssh[ln.to] - ssh[ln.from]) : 0);
+        const slack = Math.max(0, L - set);
+        if (!ln.seg.atL) x += ln.seg.atR ? slack : slack / 2;
+      }
       const y = ln.seg.base;
       for (let i = ln.from; i < ln.to; i += 1) {
         const it = items[i];
@@ -525,7 +587,7 @@ export async function createReflow(host) {
       debug.n += 1;
       debug.sum += ms;
       debug.max = Math.max(debug.max, ms);
-      if (debug.n % 30 === 0) console.log(`reflow: ${(debug.sum / debug.n).toFixed(2)}ms avg, ${debug.max.toFixed(2)}ms max, ${layout.length} lines, p2 ${debug.p2 || 0}, p3 ${debug.p3 || 0}, skip ${debug.skip || 0}`);
+      if (debug.n % 30 === 0) console.log(`reflow: ${(debug.sum / debug.n).toFixed(2)}ms avg, ${debug.max.toFixed(2)}ms max, ${layout.length} lines, rag ${debug.rag || 0}, skip ${debug.skip || 0}`);
     }
   });
 
