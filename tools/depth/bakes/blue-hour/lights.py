@@ -1,6 +1,7 @@
 # split the foreground into ambient (lights off) + individual emitters
-import numpy as np, cv2, json
-Wk = '/tmp/claude-0/blue-hour-work/'
+import numpy as np, cv2, json, os
+WK = os.environ.get('WK', '/tmp/claude-0/blue-hour-work/')
+Wk = WK
 im = np.load(Wk + 'v.npy')
 fg = np.load(Wk + 'fg.npy')
 alpha = np.load(Wk + 'alpha.npy')
@@ -60,7 +61,8 @@ Owide = np.exp2(np.minimum(cv2.GaussianBlur(lgw, (0, 0), 4), lg))
 for d in lights:
     b = d['bbox']
     if d['peak'] > 1000:
-        d['kind'] = 'street' if d['y'] < 1500 else 'led'
+        # sodium is warm (blue under 0.2 of the flux); a hot white point is an LED
+        d['kind'] = 'street' if d['chroma'][2] < 0.2 else 'led'
         R = 70 if d['kind'] == 'street' else 40
         rr = np.sqrt((xx - d['x']) ** 2 + (yy - d['y']) ** 2)
         ring = (rr >= R) & (rr < R + 12) & fgm
@@ -141,16 +143,36 @@ for d in lights:
     Bk = np.percentile(L[ringm], 50)
     core = (mask == d['id']) & (rr < 14)
     spikes = disc & (Lr > np.maximum(2.2 * Bk, 0.15))
-    hole = cv2.dilate((core | spikes).astype(np.uint8), np.ones((5, 5), np.uint8))
+    hole = cv2.dilate((core | spikes).astype(np.uint8), np.ones((7, 7), np.uint8))
     y0, y1, x0, x1 = int(d['y']) - R - 4, int(d['y']) + R + 4, int(d['x']) - R - 4, int(d['x']) + R + 4
     y0, x0 = max(0, y0), max(0, x0)
     sub = np.log2(np.maximum(rest[y0:y1, x0:x1], 1e-4)).astype(np.float32)
     hs = hole[y0:y1, x0:x1]
-    filled = np.stack([cv2.inpaint(np.ascontiguousarray(sub[..., c]), hs, 5, cv2.INPAINT_TELEA) for c in range(3)], -1)
-    filled = np.exp2(filled)
+    # fill the hole from its surround by normalised convolution in log space
+    # (Telea left a dithered checker on the brick); two scales so the middle
+    # of a large hole is still covered
+    ok = (hs == 0).astype(np.float32)
+    def ncv(sig):
+        num = cv2.GaussianBlur(sub * ok[..., None], (0, 0), sig)
+        den = cv2.GaussianBlur(ok, (0, 0), sig)[..., None]
+        return num / np.maximum(den, 1e-6), den
+    f1, d1 = ncv(4)
+    f2, _ = ncv(14)
+    filled = np.exp2(np.where(d1 > 0.08, f1, f2))
     a_sub = AMB[y0:y1, x0:x1]
     dsub = disc[y0:y1, x0:x1]
-    newamb = np.where(hs[..., None] > 0, filled, rest[y0:y1, x0:x1])
+    # feathered seam, wide enough to take the coloured fringe of the spikes
+    wf = cv2.GaussianBlur(cv2.dilate(hs, np.ones((9, 9), np.uint8)).astype(np.float32), (0, 0), 3)[..., None]
+    newamb = np.exp2(wf * np.log2(filled) + (1 - wf) * np.log2(np.maximum(rest[y0:y1, x0:x1], 1e-4)))
+    # the fill still carries the lamp's own spill and the stars' coloured
+    # fringe; give it the wall's colour from just outside the glare, keeping
+    # its luminance (so the brick coursing survives at the edge)
+    ringc = np.median(rest[ringm], 0)
+    ringc = ringc / max(float(ringc @ LUM), 1e-6)
+    Ln = newamb @ LUM
+    Lcap = np.minimum(Ln, 1.3 * Bk)
+    target = Lcap[..., None] * ringc[None, None, :]
+    newamb = newamb * (1 - wf) + target * wf
     a_sub[dsub] = newamb[dsub]
     e_sub = E[y0:y1, x0:x1]
     coresub = core[y0:y1, x0:x1]

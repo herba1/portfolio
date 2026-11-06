@@ -1,6 +1,7 @@
 # pack the web assets for blue-hour
 import numpy as np, cv2, json, os
-Wk = '/tmp/claude-0/blue-hour-work/'
+WK = os.environ.get('WK', '/tmp/claude-0/blue-hour-work/')
+Wk = WK
 OUT = '/home/user/portfolio/public/lab/blue-hour/'
 os.makedirs(OUT, exist_ok=True)
 W, H = 1440, 1800
@@ -15,6 +16,12 @@ cloud = np.load(Wk + 'cloud.npy')
 mask = np.load(Wk + 'lightmask.npy')
 lights = json.load(open(Wk + 'lights.json'))
 AMB = np.maximum(fg - E, 1e-6)
+# where lights.py painted out a lamp's diffraction star, take its ambient
+im = np.load(Wk + 'v.npy')
+painted = np.load(Wk + 'AMB.npy')
+pm = (np.abs(painted - (im - E)).max(-1) > 1e-5) & (alpha < 0.5)
+AMB[pm] = np.maximum(painted[pm], 1e-6)
+del im
 # sky pixels hold the extrapolated foreground; keep them from being absurd
 AMB = np.where(alpha[..., None] > 0.999, np.minimum(AMB, 2.0), AMB)
 

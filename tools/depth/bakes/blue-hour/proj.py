@@ -7,11 +7,13 @@ def load_eq(path, maxw=None):
         eq = cv2.resize(eq, (maxw, maxw // 2), interpolation=cv2.INTER_AREA)
     return np.ascontiguousarray(eq)
 
-def dirs(W, H, hfov, k=2.0):
+def dirs(W, H, hfov, k=2.0, shift=0.0):
     # camera: x right, y down, z forward. hfov measured across the width.
+    # shift: the frame slides down off the optical axis by shift * W/2 (a
+    # rising-front lens movement seen from below: the axis sits above centre)
     th_half = np.radians(hfov) / 2
     f = (W / 2) / (k * np.tan(th_half / k))
-    xs = np.arange(W) - (W - 1) / 2; ys = np.arange(H) - (H - 1) / 2
+    xs = np.arange(W) - (W - 1) / 2; ys = np.arange(H) - (H - 1) / 2 + shift * W / 2
     x, y = np.meshgrid(xs, ys)
     r = np.sqrt(x * x + y * y) + 1e-9
     th = k * np.arctan(r / (f * k))
@@ -27,9 +29,9 @@ def rot(yaw, pitch, roll):
     Ry = np.array([[ct, 0, st], [0, 1, 0], [-st, 0, ct]])
     return Ry @ Rx @ Rz
 
-def render(eq, yaw, pitch, hfov, W, H, roll=0.0, k=2.0):
+def render(eq, yaw, pitch, hfov, W, H, roll=0.0, k=2.0, shift=0.0):
     Hh, Wh = eq.shape[:2]
-    d = dirs(W, H, hfov, k) @ rot(yaw, pitch, roll).T.astype(np.float32)
+    d = dirs(W, H, hfov, k, shift) @ rot(yaw, pitch, roll).T.astype(np.float32)
     lon = np.arctan2(d[..., 0], d[..., 2]); lat = np.arcsin(np.clip(-d[..., 1], -1, 1))
     u = ((lon / (2 * np.pi) + 0.5) * Wh - 0.5).astype(np.float32)
     v = ((0.5 - lat / np.pi) * Hh - 0.5).astype(np.float32)

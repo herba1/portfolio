@@ -1,16 +1,20 @@
 # sky matte, sky gradient, cloud ratio for the blue-hour view
-import numpy as np, cv2, sys
+import numpy as np, cv2, sys, os
+WK = os.environ.get('WK', '/tmp/claude-0/blue-hour-work/')
 W = 'work'
-im = np.load('/tmp/claude-0/blue-hour-work/v.npy')
-dep = cv2.imread('/tmp/claude-0/blue-hour-work/v-depth.png', cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
+im = np.load(WK + 'v.npy')
+dep = cv2.imread(WK + 'v-depth.png', cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
 H, Wd = dep.shape
 L = 0.2126 * im[..., 0] + 0.7152 * im[..., 1] + 0.0722 * im[..., 2]
 lg = np.log2(L + 1e-5)
 
-# 1. coarse sky: far + bright + not in the tower polygon
+# 1. coarse sky: far + bright + not in a hand-drawn exclusion polygon (none
+# needed for the 83 deg worm's-eye view: the depth is clean on every tower)
 sky = (dep < 0.06) & (L > 0.5)
-poly = np.array([(560, 0), (866, 0), (821, 100), (800, 148), (776, 201), (752, 197), (737, 183), (725, 205), (700, 260), (675, 325), (650, 390), (625, 447), (560, 447)], np.int32)
-pm = np.zeros((H, Wd), np.uint8); cv2.fillPoly(pm, [poly], 1)
+POLYS = []
+pm = np.zeros((H, Wd), np.uint8)
+for poly in POLYS:
+    cv2.fillPoly(pm, [np.array(poly, np.int32)], 1)
 sky &= pm == 0
 # keep components touching the big central sky
 n, lab = cv2.connectedComponents(sky.astype(np.uint8))
@@ -54,7 +58,7 @@ a = np.where(den > 0.35 * Lb, a, sky.astype(np.float32))
 alpha = np.where(band, a, sky.astype(np.float32)).astype(np.float32)
 # sky seen through the canopy (top left): holes are as bright as the sky
 yy, xx = np.mgrid[0:H, 0:Wd]
-tree = (xx < 760) & (yy < 820) & (pm == 0) & (alpha < 0.5)
+tree = (xx < 680) & (yy < 860) & (pm == 0) & (alpha < 0.5)
 Lbw = nconv(L, sure_sky, 150)
 wden = cv2.GaussianBlur(sure_sky, (0, 0), 150)
 Lbw = np.where(wden > 0.02, Lbw, np.median(L[sure_sky > 0]))
@@ -66,7 +70,10 @@ B = np.where(tree[..., None] & (cv2.GaussianBlur(sure_sky, (0, 0), 6) <= 0.05)[.
 dl = np.abs(np.log2(np.maximum(im, 1e-5) / np.maximum(B, 1e-5))).max(-1)
 simil = np.clip((0.26 - dl) / 0.12, 0, 1)
 wide_band = (cv2.dilate(sky.astype(np.uint8), np.ones((81, 81), np.uint8)) > 0) & (pm == 0)
-alpha = np.where(wide_band, np.maximum(alpha, simil), alpha).astype(np.float32)
+# ...but only near the depth edge: the glass towers mirror the sky a few
+# hundred px in and must stay facade
+near_edge = cv2.dilate((dep < 0.06).astype(np.uint8), np.ones((13, 13), np.uint8)) > 0
+alpha = np.where(wide_band & near_edge, np.maximum(alpha, simil), alpha).astype(np.float32)
 # chroma-only test near the depth edge: sky is b/r ~2.6-2.9, panels and frames are greyer
 br = np.log2(np.maximum(im[..., 2], 1e-5) / np.maximum(im[..., 0], 1e-5))
 gr = np.log2(np.maximum(im[..., 1], 1e-5) / np.maximum(im[..., 0], 1e-5))
@@ -77,7 +84,7 @@ csim = np.clip((0.22 - cd) / 0.1, 0, 1) * np.clip((L / np.maximum(Lb, 1e-4) - 0.
 alpha = np.where(wide_band, np.maximum(alpha, csim), alpha).astype(np.float32)
 # hand-placed box: the construction tower's hoarding, where the depth edge
 # sits far out in the sky; sky-chroma pixels there are sky by luminance
-box = np.zeros((H, Wd), bool); box[0:520, 1150:1330] = True
+box = np.zeros((H, Wd), bool)  # 60 deg view: box[0:520, 1150:1330]; none needed now
 brr = im[..., 2] / np.maximum(im[..., 0], 1e-5)
 cand = box & (brr > 2.0) & (L > 0.25)
 ab = np.clip((L - 0.2) / np.maximum(Lbw - 0.2, 1e-3), 0, 1)
@@ -111,10 +118,10 @@ print('cloud log-ratio pct', np.percentile(lr[sky], [0.5, 5, 50, 95, 99.5]))
 # sky chroma reference (for info)
 print('sky mean rgb', im[sky].mean(0))
 
-np.save('/tmp/claude-0/blue-hour-work/alpha.npy', alpha)
-np.save('/tmp/claude-0/blue-hour-work/fg.npy', fg.astype(np.float32))
-np.save('/tmp/claude-0/blue-hour-work/cloud.npy', lr)
-np.save('/tmp/claude-0/blue-hour-work/grad.npy', grad.astype(np.float32))
+np.save(WK + 'alpha.npy', alpha)
+np.save(WK + 'fg.npy', fg.astype(np.float32))
+np.save(WK + 'cloud.npy', lr)
+np.save(WK + 'grad.npy', grad.astype(np.float32))
 v = (np.clip(alpha, 0, 1) * 255).astype(np.uint8)
-cv2.imwrite('/tmp/claude-0/blue-hour-work/alpha.png', v)
-cv2.imwrite('/tmp/claude-0/blue-hour-work/cloud.png', (np.clip(lr * 0.8 + 0.5, 0, 1) * 255).astype(np.uint8))
+cv2.imwrite(WK + 'alpha.png', v)
+cv2.imwrite(WK + 'cloud.png', (np.clip(lr * 0.8 + 0.5, 0, 1) * 255).astype(np.uint8))

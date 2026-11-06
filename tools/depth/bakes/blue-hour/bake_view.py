@@ -5,8 +5,10 @@ from proj import load_eq, render, tm
 a = sys.argv
 eq = load_eq(a[1], 8192)
 yaw, pitch, fov, W, H, roll = float(a[3]), float(a[4]), float(a[5]), int(a[6]), int(a[7]), float(a[8])
+k = float(a[9]) if len(a) > 9 else 2.0  # 1 = rectilinear, 2 = stereographic
+shift = float(a[10]) if len(a) > 10 else 0.0  # frame below the axis, in half-widths
 # supersample 2x for clean edges
-im, d = render(eq, yaw, pitch, fov, W * 2, H * 2, roll, 2.0)
+im, d = render(eq, yaw, pitch, fov, W * 2, H * 2, roll, k, shift)
 im = cv2.resize(im, (W, H), interpolation=cv2.INTER_AREA)
 d = cv2.resize(d, (W, H), interpolation=cv2.INTER_AREA)
 np.save(a[2] + '.npy', im.astype(np.float32))
