@@ -1,0 +1,21 @@
+{
+  "title": "Polariser",
+  "description": "Looking up past two glass and concrete buildings on a Dublin quay into a March cumulus sky, through a circular polariser. Turn the ring and the band of sky ninety degrees from the sun deepens toward ultramarine while the cumulus stays and steps forward, unevenly across the wide frame, the way a real polariser darkens a wide sky. The reflections on the glass curtain wall fade on one face and hold on the other as the filter's axis crosses each one's angle of reflection. Each pixel's polarisation comes from its exact view direction and the sun's position in the HDRI.",
+  "tags": ["WebGL", "Photography", "Optics", "Film"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:30:00.000Z",
+  "intent": "Genre spec idea 3, 'Polariser' (factory/reality/genre-spec.md section 4): a circular polarising filter, Rayleigh sky polarisation P = Pmax sin²γ/(1+cos²γ) and Fresnel reflection off glass, graded to the summer-film targets. Reference: how a circular polariser behaves on a wide lens, https://en.wikipedia.org/wiki/Polarizing_filter_(photography) and https://en.wikipedia.org/wiki/Rayleigh_sky_model . ?pol=0..1 holds the filter angle, ?still=1 skips the reveal.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.62, 0.22], "to": [0.8, 0.5] },
+  "photo": {
+    "name": "Savva Zakharov, Docklands 01 (Poly Haven HDRI, CC0)",
+    "url": "https://polyhaven.com/a/docklands_01"
+  },
+  "sources": [
+    "https://polyhaven.com/a/docklands_01 (Savva Zakharov, CC0): HDRI rendered to a rectilinear plate, 110° hfov, pitch 48°",
+    "https://en.wikipedia.org/wiki/Polarizing_filter_(photography)",
+    "https://en.wikipedia.org/wiki/Rayleigh_sky_model",
+    "https://en.wikipedia.org/wiki/Fresnel_equations",
+    "https://en.wikipedia.org/wiki/Brewster%27s_angle"
+  ]
+}
