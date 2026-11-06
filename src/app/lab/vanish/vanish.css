@@ -1,0 +1,129 @@
+.vanish {
+  --vanish-ground: #f2f0eb;
+  --vanish-field: #fdfcfa;
+  --vanish-ink: #1c1b19;
+  --vanish-placeholder: #a29f98;
+  --vanish-rule: rgb(28 27 25 / 0.07);
+  --vanish-weight-body: 460;
+  --vanish-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--vanish-ground);
+  color: var(--vanish-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.vanish-field {
+  position: relative;
+  /* Sit on the optical centre, a touch above the geometric one. */
+  margin-bottom: 32px;
+  width: min(480px, 100cqw - 48px);
+  height: 48px;
+  border-radius: 24px;
+  background: var(--vanish-field);
+  box-shadow:
+    0 0 0 1px var(--vanish-rule),
+    0 1px 2px rgb(28 27 25 / 0.04),
+    0 8px 24px -12px rgb(28 27 25 / 0.12);
+  transition: box-shadow 240ms var(--vanish-ease);
+}
+
+.vanish-field:focus-within {
+  box-shadow:
+    0 0 0 1px rgb(28 27 25 / 0.12),
+    0 0 0 4px rgb(28 27 25 / 0.035),
+    0 1px 2px rgb(28 27 25 / 0.04),
+    0 8px 24px -12px rgb(28 27 25 / 0.14);
+}
+
+.vanish-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: 48px;
+  margin: 0;
+  padding: 12px 52px 12px 20px;
+  border: 0;
+  border-radius: inherit;
+  outline: none;
+  appearance: none;
+  background: transparent;
+  color: var(--vanish-ink);
+  caret-color: var(--vanish-ink);
+  font: inherit;
+  font-size: var(--text-body);
+  line-height: var(--text-body--line-height);
+  letter-spacing: var(--text-body--letter-spacing);
+  font-weight: var(--vanish-weight-body);
+  font-kerning: normal;
+  transition: caret-color 320ms var(--vanish-ease);
+}
+
+.vanish-input::placeholder {
+  color: var(--vanish-placeholder);
+  opacity: 1;
+  transition: opacity 360ms var(--vanish-ease);
+}
+
+/* While the line dissolves the field holds its breath: no caret, no
+   placeholder. Typing returns it to idle immediately. */
+.vanish[data-phase="vanishing"] .vanish-input {
+  caret-color: transparent;
+  transition-duration: 0ms;
+}
+
+.vanish[data-phase="vanishing"] .vanish-input::placeholder {
+  opacity: 0;
+  transition-duration: 0ms;
+}
+
+.vanish-send {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  background: rgb(28 27 25 / 0.06);
+  color: rgb(28 27 25 / 0.3);
+  cursor: default;
+  transition:
+    background-color 200ms var(--vanish-ease),
+    color 200ms var(--vanish-ease),
+    transform 160ms var(--vanish-ease);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.vanish-send[data-filled] {
+  background: var(--vanish-ink);
+  color: var(--vanish-field);
+  cursor: pointer;
+}
+
+.vanish-send[data-filled]:active {
+  transform: scale(0.94);
+}
+
+.vanish-send:focus-visible {
+  outline: 2px solid var(--vanish-ink);
+  outline-offset: 2px;
+}
+
+.vanish-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
