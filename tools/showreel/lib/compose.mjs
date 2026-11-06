@@ -22,7 +22,10 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   const end = tAt("end"), stop = tAt("stop");
   // Outro: let the camera settle back on the piece, then fade into its ground.
   // `outro: { fade: false }` ends on the live frame instead (for loops).
-  const fades = reel.outro?.fade !== false;
+  // loop: no fade-out; the last moments dissolve into the opening frame so an
+  // autoplaying feed replays it without a seam.
+  const loop = reel.loop ? { xfade: 450, ...(reel.loop === true ? {} : reel.loop) } : null;
+  const fades = !loop && reel.outro?.fade !== false;
   const outroStart = fades ? end + (reel.outro?.settle ?? 700) : Infinity;
   const finish = fades ? Math.min(stop, outroStart + (reel.outro?.fade ?? 700) + 150) : stop;
   const total = Math.ceil(((finish - start) / 1000) * fps);
@@ -63,7 +66,8 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     const T = start + tOut;
     while (fi + 1 < frames.length && frames[fi + 1].t <= T) fi++;
     const phase = T >= outroStart ? "outro" : tOut < (reel.intro?.fade ?? 450) ? "intro" : "main";
-    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase });
+    const loopMix = loop ? Math.max(0, 1 - (finish - T) / loop.xfade) : 0;
+    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, loopMix });
     const { data } = await cdp.send("Page.captureScreenshot", shot);
     const buf = Buffer.from(data, "base64");
     if (i === posterAt && !draft) fs.writeFileSync(outFile.replace(/\.mp4$/, ".poster.png"), buf);

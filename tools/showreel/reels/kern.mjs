@@ -12,13 +12,14 @@ const reel = {
   css: ".kern-title { visibility: hidden; }",
   stage: { sel: ".kern-stage text", pad: 0.06 },
   ready: ".kern-stage text",
-  intro: { hold: 1000, zoom: 1, fade: 350 },   // catch the pluck on load, then straight in
+  intro: { hold: 400, zoom: 1, fade: 0, trim: 380 },   // feed: the word is on screen and plucking from frame one
   tempo: 1.2,
-  outro: { hold: 2000, fade: 900 },
-  cursor: { from: [0.78, 0.9] },
-  formats: ["landscape", "vertical"],
+  outro: { hold: 1400 },
+  loop: true,                                   // dissolve back into the opening so autoplay replays without a seam
+  cursor: { from: [0.7, 0.86], visible: true },
+  formats: ["feed", "landscape", "vertical"],
   beats: [
-    { click: letter(4), duration: 700, settle: 100, pause: 900 },          // heavy
+    { click: letter(4), duration: 550, settle: 100, pause: 900 },          // heavy
     { press: letter(8), duration: 600, settle: 80 },
     { move: off(8, 3.6, 0.35), duration: 650, arc: 0.04, pause: 250 },     // stretch
     { lift: true, pause: 900 },                                           // snap back, re-kern

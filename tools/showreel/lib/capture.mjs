@@ -244,6 +244,8 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 });
   await clock.record();
   mark("start"); // the video opens here: the piece's own entrance is the intro
+  // Feed rule: a hand on screen from frame one reads as "interactive" before anything happens.
+  if (reel.cursor?.visible) show();
   if (reel.ready) await clock.waitFor(reel.ready);
   // The stage is what the camera frames at rest: the piece, not the page.
   if (reel.stage?.rect) {

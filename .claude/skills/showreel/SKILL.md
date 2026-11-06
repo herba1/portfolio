@@ -1,113 +1,134 @@
 ---
 name: showreel
-description: Record a polished, social-ready video of a lab piece or any page on herb.art — scripted story beats, a drawn cursor with press ripples, eased camera zooms, keycaps, captions, a fade-up intro and an end card, in 16:9, 1:1 and 9:16 mp4. Load when asked to record, film, demo, showcase, or make a clip/reel/video of an experiment for X, Instagram, TikTok or anywhere else.
+description: Record a wordless, feed-ready video of a lab piece or any page on herb.art: scripted beats with a drawn Mac-style pointer, an arcing camera that follows a beat behind, intros and outros that come from the piece itself, seamless loops, in 4:5, 16:9, 1:1 and 9:16 mp4. Load when asked to record, film, demo, showcase, or make a clip/reel/video of an experiment for X, Instagram, TikTok or anywhere else.
 ---
 
-# Showreel: cinematic recordings of lab pieces
+# Showreel: wordless recordings of lab pieces
 
 The harness is `tools/showreel/`. A **reel** is a small file in `tools/showreel/reels/<slug>.mjs` that says where to go and what to do, beat by beat. One command turns it into finished clips:
 
 ```sh
 cd tools/showreel && npm install            # once; needs ffmpeg on PATH
-node record.mjs coverflow --draft           # fast preview while directing (see below)
-node record.mjs coverflow                   # full quality: the reel's own formats, against https://herb.art
-node record.mjs coverflow --format all      # landscape 16:9, square 1:1, vertical 9:16
-node record.mjs ink-drag --base http://localhost:3000   # a draft on the dev server
-node record.mjs coverflow --recompose       # re-render the last capture only (seconds, not minutes)
-GPU=native CHANNEL=chrome node record.mjs amorph        # WebGL pieces: use the Mac's real GPU
+node record.mjs kern --draft                # fast preview while directing
+node record.mjs kern                        # full quality: the reel's own formats, against https://herb.art
+node record.mjs kern --format feed,landscape   # or: all
+node record.mjs kern --base http://localhost:3000   # a draft piece on the dev server
+node record.mjs kern --recompose            # re-render the last capture only (seconds)
+GPU=native CHANNEL=chrome node record.mjs amorph    # WebGL pieces: use the Mac's real GPU
 ```
 
-Output: `tools/showreel/out/<reel>/<format>.mp4` plus `<format>.poster.png`. H.264 High, yuv420p, 60fps, faststart: uploads to X, Instagram, TikTok, YouTube and LinkedIn as is.
+Output: `out/<reel>/<format>.mp4` plus `<format>.poster.png`. H.264 High, yuv420p, 60fps, faststart: uploads to X, Instagram, TikTok, YouTube and LinkedIn as is.
+
+## The direction
+
+- **No words.** No captions, labels, keycaps, title or end cards. The piece is shown purely by being used.
+- **No chrome.** The site's chrome-off mode is switched on, the Next dev badge is hidden, and the reel's `css` hides the piece's own heading. Only the component, framed at a scale where the interaction reads.
+- **No click pulses or ripples.** A press shows as the piece reacting.
+- **The pointer is a Mac-style arrow,** fat and rounded, never a circle. It lags its target on a critically damped spring, rotates freely toward its heading as it speeds up and lerps back upright as it slows, and never sits dead still: it drifts a few pixels while idle.
+- **The camera moves in shots.** Each zoom is an eased arc (always bowing upward, with a small zoom dip on long pans). In `follow` mode it chases the pointer fully, a beat behind, through a spring. A slight breath keeps a held frame alive.
+
+## Feed rules (why the defaults are what they are)
+
+People scroll fast on phones and decide in a fraction of a second. The research behind these rules:
+
+- Recall starts after 0.25s in a feed, and impressions under 2s drive 38% of brand recall; people scroll 41% faster on phones ([Facebook via Marketing Dive](https://www.marketingdive.com/news/facebook-why-mobile-video-ads-must-work-fast/446217/)).
+- Landing the message in the first 3s gives +13% breakthrough, and opening on the product gives +24% positive interest; ≤15s is recommended ([Twitter/GroupM via SocialSamosa](https://socialsamosa.com/2020/09/data-backed-tips-engaging-video-ads-twitter)).
+- Most feed video plays muted, and phones are held upright about 98% of the time.
+- Loops that replay without a seam earn rewatches, which feeds count as engagement.
+
+So, for every feed reel:
+
+1. **Frame one is the piece, already moving.** `intro: { fade: 0 }` (no fade from blank), `intro.trim` to cut any empty mount frames, and `cursor: { visible: true }` so the pointer is on screen at once. Never a title card.
+2. **The payoff lands inside ~2s.** The first beat is the move the piece exists for, not a warm-up.
+3. **8–15 seconds,** three to five beats.
+4. **Loop it.** `loop: true` drops the fade-out and dissolves the last moments into the opening frame, so autoplay replays without a seam. End where you began (Kern returns to the light cut).
+5. **Lead with `feed` (4:5).** It's the most room a phone feed gives a post uncropped. Add `landscape` for X on desktop and YouTube, `vertical` for Reels, TikTok and Shorts.
 
 ## Draft, then final
 
-Iterate on drafts; render full quality once the cut is approved.
-
 | | Draft (`--draft`) | Final |
 |---|---|---|
-| Size / rate | half size (960×540, 540×960), 30fps, 1x capture | 1920×1080 / 1080×1920, 60fps, 2–3x capture |
+| Size / rate | half size, 30fps, 1x capture | full size, 60fps, 2–3x capture |
 | Encode | JPEG frames, x264 ultrafast | PNG frames, x264 slow CRF 16 |
 | Output | `out/<reel>/<format>.draft.mp4` | `out/<reel>/<format>.mp4` + poster |
-| Time, 16s clip, no GPU | ~50s | ~2.5–5 min |
 
-Speed tricks, fastest first:
-- `--recompose` re-renders only the overlay pass from the last capture: camera, captions, cursor, end card. Seconds. Use it whenever you changed only `camera`, `zoom`, `caption`, `intro`/`outro` settings or the compositor, not the beats that drive the page.
-- `--draft --format landscape` — one format at a time.
-- `--draft --realtime` on a Mac (`GPU=native CHANNEL=chrome`) records as fast as the clip plays. Timing can drift a little from the lockstep final; good enough to judge a cut.
+- `--recompose` re-renders only the compose pass: camera, pointer, intro, outro, loop, trim. Use it whenever the beats that drive the page didn't change.
+- `--realtime` on a Mac (`GPU=native CHANNEL=chrome`) records as fast as the clip plays; timing can drift a little.
 
-Beats, timings and camera are identical between draft and final, so the approved draft is exactly what the final shows, only sharper and smoother.
+Beats, timings and camera are identical between draft and final.
 
-## How it works (so you can direct it)
+## How it works
 
-1. **Capture** (`lib/capture.mjs`) opens the real page in Playwright and plays the beats with real mouse and keyboard input. Nothing is injected into the page.
-   - **Lockstep** (default): the page's clock is frozen and stepped exactly 1/60s per frame — timers, `requestAnimationFrame`, `performance.now` and every CSS transition and Web Animation. The clip is perfectly smooth even when the machine renders at 3fps. Use this.
-   - **Realtime** (`mode: "realtime"`): records the screen as it paints. Only for pieces timed by audio or `<video>` clocks, which cannot be frozen. Needs a fast machine with `GPU=native`.
-2. **Compose** (`lib/compose.mjs` + `lib/compositor.html`) redraws every output frame: the camera springs (critically damped, no overshoot) toward each zoom, the cursor and ripples are drawn on top, then keycaps, captions, the intro fade and the end card. Re-run it alone with `--recompose`.
+1. **Capture** (`lib/capture.mjs`) opens the real page in Playwright and plays the beats with real mouse and keyboard input.
+   - **Lockstep** (default): the page clock is frozen and stepped 1/fps per frame (timers, rAF, `performance.now`, every CSS transition and Web Animation), so the clip is smooth even when the machine renders at 3fps.
+   - **Realtime** (`mode: "realtime"`): only for pieces timed by audio or `<video>` clocks.
+2. **Compose** (`lib/compose.mjs` + `lib/compositor.html`) redraws every output frame from the captured frames and the timeline: the framing, the camera shots, the pointer, the intro, and the outro fade or loop dissolve.
 
 ## Writing a reel
 
 ```js
-const centre = '.cf-item[aria-selected="true"]';
+const letter = (i) => `.kern-stage text >> nth=${i}`;
 const reel = {
-  url: "/lab/coverflow",
-  title: "Cover Flow",                 // end card title (default: the page title)
-  ready: ".cf-item[data-lit]",         // wait for this before the first beat
-  intro: { hold: 1600, zoom: 1.12 },   // let the entrance play; open slightly close and settle out
-  outro: { hold: 1400, card: 2400 },   // card: false for no end card (e.g. a seamless loop)
-  cursor: { from: [0.78, 0.86] },      // where the pointer enters (fractions of the viewport)
-  formats: ["landscape", "vertical"],
+  url: "/lab/kern",
+  css: ".kern-title { visibility: hidden; }",   // hide the piece's own heading
+  stage: { sel: ".kern-stage text", pad: 0.06 }, // what to frame: selector (union of matches) or { rect: [x, y, w, h] } in viewport fractions
+  ready: ".kern-stage text",                     // wait for this before the first beat
+  intro: { hold: 400, zoom: 1, fade: 0, trim: 380 },
+  outro: { hold: 1400 },
+  loop: true,                                    // or { xfade: 450 }
+  tempo: 1.2,                                    // multiplies every timed field; >1 is slower
+  cursor: { from: [0.7, 0.86], visible: true },
+  formats: ["feed", "landscape", "vertical"],
   beats: [
-    { caption: "Drag to fling", duration: 2200 },
-    { drag: [[0.66, 0.42], [0.22, 0.44]], duration: 520, pause: 1500 },
-    { key: "ArrowLeft", times: 2, gap: 520, pause: 900 },
-    { move: centre, zoom: 1.45, pause: 300 },
-    { click: "cursor", pause: 1500 },
-    { camera: "reset" },
+    { click: letter(4), duration: 550, pause: 900 },
+    { press: letter(8) },
+    { move: { sel: letter(8), at: [3.6, 0.35] }, duration: 650, arc: 0.04 },
+    { lift: true, pause: 900 },
   ],
   per: { vertical: { beats: [/* a different cut for the narrow layout */] } },
 };
 export default reel;
 ```
 
-**Targets** are a CSS selector (centre of its box), `{ sel, at: [fx, fy] }` (a point inside the box), `[fx, fy]` fractions of the viewport, `{ x, y }` CSS pixels, or `"cursor"` (stay put).
+**Targets** are a CSS selector (centre of its box), `{ sel, at: [fx, fy] }` (a point relative to the box; may go outside it), `[fx, fy]` fractions of the viewport, `[x, y]` or `{ x, y }` CSS pixels, or `"cursor"` (stay put).
 
 | Beat | Does |
 |---|---|
 | `{ wait: ms }` | Hold. |
 | `{ waitFor: sel }` | Hold until the element shows. |
-| `{ move: target, duration?, arc? }` | Glide the pointer on an eased, slightly bowed path. |
-| `{ click: target, hold?, settle? }` | Glide there, press, release. Ripple + cursor squish. |
-| `{ hold: target, press: ms, then?: [targets] }` | Long press; `then` slides while held (slide-to-choose menus). |
+| `{ move: target, duration?, arc? }` | Glide the pointer on an eased, slightly bowed path. `arc: 0` is straight. |
+| `{ click: target, hold?, settle? }` | Glide there, press, release. |
+| `{ press: target }` / `{ lift: true }` | Press and hold; release later. Moves in between drag. |
+| `{ hold: target, press: ms, then?: [targets] }` | Long press; `then` slides while held. |
 | `{ drag: [from, to, ...], duration, approach? }` | Press at `from`, drag through the rest. |
-| `{ key: "ArrowRight", times?, gap? }` | Key press, shown as a keycap chip. |
+| `{ key: "ArrowRight", times?, gap? }` | Key press (not drawn). |
 | `{ type: "text", delay? }` | Type text. |
 | `{ scroll: dy, duration?, at? }` | Eased wheel scroll. |
-| `{ camera: { zoom, on: target, follow? } }` | Zoom to `zoom` centred on `on`. `follow: true` tracks the pointer. |
-| `{ camera: "reset" }` | Ease back to the full frame. |
-| `{ caption: "text", duration? }` | A pill caption at the top. |
+| `{ camera: { zoom, on: target, follow? } }` | A shot to `zoom` on `on`. `follow: true` chases the pointer a beat behind. |
+| `{ camera: "reset" }` | Shot back to the resting frame. |
 | `{ hide: true }` | Fade the pointer out. |
-| `{ run: async ({ page, wait }) => {} }` | Anything else. Use `wait`, never `setTimeout`, so lockstep stays in step. |
+| `{ run: async ({ page, wait }) => {} }` | Anything else. Use `wait`, never `setTimeout`. |
 
-Every beat takes `pause: ms` (hold after it) and `zoom: n` (zoom onto its target as it starts; `zoomOn` overrides the point, `follow: true` makes the camera track the pointer instead, which is what you want when a menu or drag travels away from where it started).
+Every beat takes `pause: ms` (hold after it) and `zoom: n` (a shot onto its target as it starts; `zoomOn` overrides the point, `follow: true` chases the pointer).
 
-Selectors are Playwright selectors, so `:has-text("Share")` and `:visible` work: `.hm-item:has-text("Messages"):visible` picks the item in the menu that is actually showing.
+Reel-level compose knobs: `cursorLag`, `cursorSize` (default 1.7), `maxBase` (cap on the resting zoom), `look` (override the ground colour sampled from the last frame), `poster` (ms; default 45%), `outro.settle` and `outro.fade` (when not looping).
+
+Pixel-coordinate targets only hold for the viewport they were written for; give other formats their own beats in `per.<format>`.
 
 ## Directing well
 
-- **Story first, three to five beats.** Arrive, show the one move the piece exists for, show it again bigger, resolve. 12–20 seconds. X autoplays muted, so the first two seconds must already move: let the piece's own entrance be the intro (`intro.hold`), not a title card.
-- **Intros and outros live in the piece.** The capture starts at navigation, so whatever the piece does as it mounts (sleeves fading up, dots assembling, type setting itself) is the opening shot. If a piece has no entrance, give it one in the piece — that improves the site too — rather than faking one in the edit.
-- **Zoom for detail, not motion.** Zoom 1.3–1.6 onto the thing that changes (a flip, a fold, a glyph), hold, `camera: "reset"` before a big move. Never zoom during a fast drag; the camera and the content fight.
-- **Pauses are the edit.** Give every reaction ~1–1.5s to land before the next beat. The pointer should rest while the piece performs.
-- **Captions name the gesture, not the feature:** "Drag to fling", "Hold a cover". Two or three per reel at most. They follow the tracking law and the weight ladder from CLAUDE.md.
-- **Vertical is its own cut.** It records the real narrow layout at 432×768 with a touch-dot pointer; give it shorter drags and smaller zooms via `per.vertical`.
-- **Check the poster** (`<format>.poster.png`, taken at 45%, or `poster: ms`) and scrub the mp4 before posting. A contact sheet is quick: `ffmpeg -i out/x/landscape.mp4 -vf "fps=1,scale=480:-1,tile=4x5" -frames:v 1 sheet.png`.
+- **Story first.** Arrive on the piece, do the one move it exists for, do it again bigger or differently, return to the start.
+- **Intros and outros live in the piece.** Whatever it does as it mounts is the opening shot. If a piece has no entrance, give it one in the piece rather than faking it in the edit. Trim only the empty frames before it.
+- **Zoom for detail, not motion.** 1.2–1.5 onto the thing that changes, then `camera: "reset"` before a big move. To carry something across the frame, use `follow`.
+- **Pauses are the edit.** About a second for each reaction to land; the pointer idles while the piece performs.
+- **Check it** with a contact sheet before posting: `ffmpeg -i out/x/feed.mp4 -vf "fps=2,scale=240:-1,tile=6x4" -frames:v 1 sheet.png`. Look hardest at the first frame and at the loop seam.
 
 ## Gotchas
 
-- Record against production (`https://herb.art`, the default) for anything shipped; analytics requests are blocked so recordings don't count as visits. Drafts need the dev server with `NEXT_PUBLIC_FORCE_PROD_VIEW=true` so the dev palette stays hidden.
-- In a cloud container there's no GPU: WebGL pieces still come out smooth in lockstep, just slowly (minutes per clip).
-- Pieces that fetch live data (Cover Flow's top songs) may show the fallback set; that's what a first visit sees too.
+- Record finals against production (`https://herb.art`, the default); analytics requests are blocked. Drafts on the dev server need `NEXT_PUBLIC_FORCE_PROD_VIEW=true` so the dev palette stays hidden.
+- No GPU in a cloud container: WebGL pieces still come out smooth in lockstep, just slowly.
+- Pieces that fetch live data may show their fallback set.
 - Sound is not recorded.
-- Targets must be on screen: the narrow vertical layout pushes things below the fold, so pick a different target in `per.vertical` (see `reels/hold-menu.mjs`) or scroll first.
-- When a beat fails, the run stops and leaves `out/<reel>/<format>/failed.png` showing the page at that moment; the frames so far are in `frames/`.
-- A hover that opens a submenu fires during a held slide, so the next thing under the pointer may get chosen on release. Slide all the way to the final choice while holding, as the Hold Menu reel does.
+- Targets must be on screen; narrow layouts push things below the fold.
+- When a beat fails, the run stops and leaves `out/<reel>/<format>/failed.png`.
+- A hover that opens a submenu fires during a held slide; slide all the way to the final choice while holding.

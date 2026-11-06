@@ -106,7 +106,8 @@ window.sample = async (url) => {
   return [0, 1, 2].map((i) => Math.round(pts.reduce((s, p) => s + p[i], 0) / pts.length));
 };
 
-window.render = async ({ t, T, src, phase }) => {
+const firstFrame = document.createElement("canvas");
+window.render = async ({ t, T, src, phase, first, loopMix = 0 }) => {
   const dt = Math.min(0.05, (T - lastT) / 1000 || 1 / S.fps); lastT = T;
   consume(T);
 
@@ -175,9 +176,12 @@ window.render = async ({ t, T, src, phase }) => {
 
   // intro: fade up from the page's own ground colour. outro: fade back into it.
   let veil = 0;
-  if (phase === "intro") veil = 1 - smooth(t / (S.intro?.fade ?? 500));
+  if (phase === "intro" && (S.intro?.fade ?? 500) > 0) veil = 1 - smooth(t / (S.intro?.fade ?? 500));
   if (phase === "outro") veil = smooth(t / (S.outro?.fade ?? 700));
   if (veil > 0) { ctx.globalAlpha = veil; ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  // seamless loop: keep the opening frame, dissolve back into it at the end
+  if (first) { firstFrame.width = W; firstFrame.height = H; firstFrame.getContext("2d").drawImage(c, 0, 0); }
+  if (loopMix > 0) { ctx.globalAlpha = smooth(loopMix); ctx.drawImage(firstFrame, 0, 0); ctx.globalAlpha = 1; }
   return true;
 };
 
