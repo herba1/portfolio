@@ -75,6 +75,10 @@ const WHEN = [
 
 const words = (s) => s.split(/\s+/).filter(Boolean);
 
+// Two words match if they differ only in case or trailing punctuation, so
+// "moves." becoming "moves all day." marks "all day." and not "moves".
+const key = (w) => w.toLowerCase().replace(/[.,;:!?]+$/, "");
+
 // Word-level diff of `next` against `prev`: every word of `next` tagged
 // kept or added, and a count of words removed just before each of them (and
 // after the last). An LCS is plenty for seventy words.
@@ -86,7 +90,7 @@ function diff(prev, next) {
   const L = Array.from({ length: n + 1 }, () => new Int16Array(m + 1));
   for (let i = n - 1; i >= 0; i -= 1) {
     for (let j = m - 1; j >= 0; j -= 1) {
-      L[i][j] = a[i] === b[j] ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
+      L[i][j] = key(a[i]) === key(b[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
     }
   }
   const out = [];
@@ -94,7 +98,7 @@ function diff(prev, next) {
   let i = 0;
   let j = 0;
   while (j < m) {
-    if (i < n && a[i] === b[j]) {
+    if (i < n && key(a[i]) === key(b[j])) {
       out.push({ word: b[j], added: false, removedBefore: removed });
       removed = 0;
       i += 1;
@@ -111,6 +115,33 @@ function diff(prev, next) {
   return { tokens: out, removedAfter: removed + (n - i) };
 }
 
+// The edit as a proofreader would mark it: added words gathered into runs,
+// and two runs with at most two kept words between them joined into one,
+// so "looks the same" becoming "is the same colour" reads as one rewritten
+// phrase rather than two single-word islands. A run never crosses the end
+// of a sentence.
+const GAP = 2;
+const ends = (w) => /[.!?]$/.test(w);
+function runs({ tokens, removedAfter }) {
+  const marked = tokens.map((t) => t.added);
+  let last = -1;
+  tokens.forEach((t, k) => {
+    if (!t.added) return;
+    const gap = k - last - 1;
+    if (last >= 0 && gap > 0 && gap <= GAP && !tokens.slice(last, k).some((x) => ends(x.word))) {
+      for (let g = last + 1; g < k; g += 1) marked[g] = true;
+    }
+    last = k;
+  });
+  const out = [];
+  tokens.forEach((t, k) => {
+    const prev = out[out.length - 1];
+    if (prev && prev.added === marked[k]) prev.tokens.push(t);
+    else out.push({ added: marked[k], tokens: [t] });
+  });
+  return { runs: out, removedAfter };
+}
+
 // Newest first. Each version carries its diff against the state it replaced;
 // the first draft has nothing to compare with, so nothing is marked.
 export const VERSIONS = DRAFTS.map((d, k) => {
@@ -118,8 +149,8 @@ export const VERSIONS = DRAFTS.map((d, k) => {
   const plain = (s) => ({ tokens: words(s).map((word) => ({ word, added: false, removedBefore: 0 })), removedAfter: 0 });
   return {
     when: WHEN[DRAFTS.length - 1 - k],
-    title: prev ? diff(prev.title, d.title) : plain(d.title),
-    body: prev ? diff(prev.body, d.body) : plain(d.body),
+    title: runs(prev ? diff(prev.title, d.title) : plain(d.title)),
+    body: runs(prev ? diff(prev.body, d.body) : plain(d.body)),
   };
 }).reverse();
 

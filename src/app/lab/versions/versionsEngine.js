@@ -28,6 +28,13 @@ const PROJECT = 0.22; // s of flick velocity carried into the landing
 const SNAP_K = 190;
 const SNAP_Z = 0.9;
 const CHASE_K = 420;
+// The correction on the front card inks in once the spring is landing on
+// it: over INK_IN s from the caret, and back to pencil faster once the card
+// is pulled well away.
+const INK_IN = 0.18;
+const INK_OUT = 0.12;
+const INK_LAND = 0.15; // versions from rest at which the ink starts
+const INK_LEAVE = 0.3; // versions from rest at which it lifts
 
 const clamp = (x, a, b) => Math.min(b, Math.max(a, x));
 const smooth = (a, b, x) => {
@@ -74,6 +81,9 @@ export function createVersions(root, { embedded = false } = {}) {
   let lastT = 0;
   let shown = Math.round(p);
   let spread = held != null || reduced?.matches ? 1 : 0;
+  // How far each card's correction has inked, 0 (pencil) to 1.
+  const ink = cards.map(() => 0);
+  if (held != null && Math.abs(p - Math.round(p)) < INK_LEAVE) ink[Math.round(p)] = 1;
   const born = performance.now();
 
   space.style.perspective = `${PERSP}px`;
@@ -130,7 +140,6 @@ export function createVersions(root, { embedded = false } = {}) {
       let blur;
       let fog;
       let alpha;
-      let f;
       if (d >= 0) {
         z = -d * DZ * s;
         y = -d * DY * s;
@@ -140,7 +149,6 @@ export function createVersions(root, { embedded = false } = {}) {
         blur = clamp((d - 7) * 0.12, 0, 0.6) * s;
         fog = Math.min(0.5, Math.pow(d, 1.15) * 0.032) * s;
         alpha = 1;
-        f = 1 - smooth(0.04, 0.62, d);
       } else {
         const k = -d;
         // Toward the eye, fast at first and easing as it goes, held up
@@ -152,13 +160,15 @@ export function createVersions(root, { embedded = false } = {}) {
         blur = k * 16;
         fog = 0;
         alpha = (1 - Math.min(1, k / 0.38)) ** 2;
-        f = 1 - smooth(0, 0.2, k);
       }
       c.style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px)`;
       c.style.filter = blur > 0.02 ? `blur(${blur.toFixed(2)}px)` : "none";
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));
       c.style.setProperty("--fog", fog.toFixed(3));
+      // Eased out, so the stroke starts quick at the caret and slows into
+      // the last letters.
+      const f = 1 - (1 - ink[i]) ** 3;
       c.style.setProperty("--f", f.toFixed(3));
     }
     for (let i = 0; i < COUNT; i += 1) {
@@ -174,7 +184,24 @@ export function createVersions(root, { embedded = false } = {}) {
     });
   };
 
-  const settled = () => mode === "spring" && Math.abs(target - p) < 0.0004 && Math.abs(vel) < 0.002 && spread >= 1;
+  // Ink rises on the card the spring is landing on, finishes a stroke it
+  // has started, and lifts from a card pulled well away.
+  const inkStep = (dt) => {
+    let moving = false;
+    for (let i = 0; i < COUNT; i += 1) {
+      const off = Math.abs(p - i);
+      const landing = (mode === "spring" || mode === "held") && target === i && off < INK_LAND && spread > 0.85;
+      let v = ink[i];
+      if (landing || (v > 0 && v < 1 && off < INK_LEAVE)) v = reduced?.matches ? 1 : Math.min(1, v + dt / INK_IN);
+      else if (off >= INK_LEAVE || (mode === "spring" && target !== i)) v = reduced?.matches ? 0 : Math.max(0, v - dt / INK_OUT);
+      ink[i] = v;
+      if (v > 0 && v < 1) moving = true;
+    }
+    return moving;
+  };
+
+  const settled = (inking) =>
+    mode === "spring" && !inking && Math.abs(target - p) < 0.0004 && Math.abs(vel) < 0.002 && spread >= 1;
 
   const frame = (now) => {
     raf = 0;
@@ -211,7 +238,8 @@ export function createVersions(root, { embedded = false } = {}) {
       sound.tick(Math.abs(vel));
     }
 
-    if (settled()) {
+    const inking = inkStep(dt);
+    if (settled(inking)) {
       p = target;
       vel = 0;
       render();

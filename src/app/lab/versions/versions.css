@@ -3,10 +3,17 @@
   --versions-paper: #fcfbf8;
   --versions-ink: var(--color-ink);
   --versions-line: rgb(26 24 20 / 0.16);
-  --versions-mark: rgb(246 205 92 / 0.42);
+  /* Pencil: what a correction looks like before it is inked, at the
+     secondary ink's strength (never fainter), warmed to the paper. */
+  --versions-pencil: #6b665e;
   --versions-cut: #c8553d;
   /* Body sits at 460 on the ladder; the scale has no named rung for it. */
   --font-weight-body: 460;
+  /* The serif emphasis rung, and its four compensations. */
+  --font-weight-serif: 430;
+  --versions-serif-size: 1.07em;
+  --versions-serif-track: 0.16px;
+  --versions-serif-opsz: "opsz" 10;
   position: relative;
   width: 100%;
   height: 100%;
@@ -147,20 +154,42 @@
   hanging-punctuation: first;
 }
 
-/* What this save added, swept in left to right as the card arrives at the
-   front. Only the front card has any --f, so only it is marked. */
+/* What this save wrote, marked as a proof correction rather than a search
+   hit: the run is set in the serif, compensated on all four axes so it sits
+   at the size, colour and fit of the grotesk around it, and pinned to
+   line-height 1 so it never stretches the line. It is always laid out in
+   the serif, so nothing reflows as it inks. Only the front card has any
+   --f: as the card settles the ink runs in from the caret over the pencil,
+   one line after another, with a soft wet edge. */
 .versions-add {
-  color: inherit;
-  background-color: transparent;
-  background-image: linear-gradient(var(--versions-mark), var(--versions-mark));
-  background-repeat: no-repeat;
-  background-position: 0 0;
-  background-size: calc(var(--f, 0) * 100%) 100%;
-  border-radius: 3px;
-  margin: 0 -2px;
-  padding: 0 2px;
-  -webkit-box-decoration-break: clone;
-  box-decoration-break: clone;
+  --edge: 1.6em;
+  --at: calc(var(--f, 0) * (100% + var(--edge)));
+  font-family: var(--versions-serif), "Iowan Old Style", Georgia, serif;
+  font-style: italic;
+  font-size: var(--versions-serif-size);
+  font-weight: var(--font-weight-serif);
+  letter-spacing: var(--versions-serif-track);
+  font-variation-settings: var(--versions-serif-opsz);
+  font-feature-settings: normal;
+  line-height: 1;
+  text-decoration: none;
+  /* Room for the italic's overhang, which background-clip would cut off.
+     The negative margin gives most of it back, keeping a hair of italic
+     correction on the left where the slant leans into the space. */
+  margin: 0 -0.12em 0 -0.07em;
+  padding: 0 0.12em;
+  color: transparent;
+  background-image: linear-gradient(
+    90deg,
+    var(--versions-ink) calc(var(--at) - var(--edge)),
+    var(--versions-pencil) var(--at)
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  /* Slice, so the ink runs along the first line and then the next, as if
+     the run were one strip of type. */
+  -webkit-box-decoration-break: slice;
+  box-decoration-break: slice;
 }
 
 /* Where words were taken out: a caret with no width, so the line never
