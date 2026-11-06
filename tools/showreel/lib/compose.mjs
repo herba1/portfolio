@@ -26,7 +26,10 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   // back to exactly where they were on frame one, and the clip stops one
   // frame short of it, so autoplay replays without a seam or a dissolve.
   // The page itself has to end as it began; the reel's beats make sure of that.
-  const loop = reel.loop ? { home: 1400, ...(reel.loop === true ? {} : reel.loop) } : null;
+  // `loop.fade` (ms) is for pieces that can't end exactly as they began: the
+  // page alone dissolves to its first frame over that stretch, so only the
+  // parts that differ fade while the camera and pointer still land exactly.
+  const loop = reel.loop ? { home: 1400, fade: 0, ...(reel.loop === true ? {} : reel.loop) } : null;
   const fades = !loop && reel.outro?.fade !== false;
   const outroStart = fades ? end + (reel.outro?.settle ?? 700) : Infinity;
   const finish = fades ? Math.min(stop, outroStart + (reel.outro?.fade ?? 700) + 150) : stop;
@@ -68,12 +71,16 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   for (let i = 0; i < total; i++) {
     const tOut = (i / fps) * 1000;
     const T = start + tOut;
-    while (fi + 1 < frames.length && frames[fi + 1].t <= T) fi++;
+    // nearest captured frame at or before T, with a half-frame of slack so float
+    // drift between the two clocks can't double a frame or skip one
+    while (fi + 1 < frames.length && frames[fi + 1].t <= T + 500 / fps) fi++;
     const phase = T >= outroStart ? "outro" : tOut < (reel.intro?.fade ?? 450) ? "intro" : "main";
     // 0 until the last stretch, then eases to 1 at frame `total` (never drawn: it is frame 0)
     const k = loop ? Math.min(1, Math.max(0, 1 - (total - i) / ((loop.home / 1000) * fps))) : 0;
     const home = k * k * k * (k * (k * 6 - 15) + 10);
-    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, home });
+    const kf = loop?.fade ? Math.min(1, Math.max(0, 1 - (total - i) / ((loop.fade / 1000) * fps))) : 0;
+    const pageMix = kf * kf * (3 - 2 * kf);
+    await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, home, pageMix });
     const { data } = await cdp.send("Page.captureScreenshot", shot);
     const buf = Buffer.from(data, "base64");
     if (i === posterAt && !draft) fs.writeFileSync(outFile.replace(/\.mp4$/, ".poster.png"), buf);

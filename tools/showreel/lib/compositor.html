@@ -125,8 +125,9 @@ window.sample = async (url) => {
 // frame after the last one is frame one again: no fade, no crossfade.
 let T0 = null, s0 = null;
 const hz = (f) => (S.loopLen ? (Math.max(1, Math.round((f * S.loopLen) / 1000 / (2 * Math.PI))) * 2 * Math.PI * 1000) / S.loopLen : f);
-window.render = async ({ t, T, src, phase, first, home = 0 }) => {
-  if (first) T0 = T;
+let firstSrc = null;
+window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
+  if (first) { T0 = T; firstSrc = src; }
   const lt = S.loopLen ? T - T0 : T;
   const dt = Math.min(0.05, (T - lastT) / 1000 || 1 / S.fps); lastT = T;
   consume(T);
@@ -176,6 +177,14 @@ window.render = async ({ t, T, src, phase, first, home = 0 }) => {
   ctx.globalAlpha = 1;
   ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H);
   ctx.drawImage(img, x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H);
+  // Loop with a page that can't put itself back exactly: dissolve only the
+  // page toward its first frame, under the same camera. Whatever already
+  // matches (the sleeve, the record) doesn't change; only what moved fades.
+  if (pageMix > 0 && firstSrc) {
+    ctx.globalAlpha = pageMix;
+    ctx.drawImage(await bitmap(firstSrc), x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
 
   spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
   spring(cur.press, cur.down ? 1 : 0, 30, dt);

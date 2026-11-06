@@ -11,7 +11,10 @@ const reel = {
   intro: { hold: 900, zoom: 1, fade: 0, trim: 820 },   // loop: open on the settled record, hand at rest; the reach starts at once
   tempo: 1.2,
   outro: { hold: 1400 },
-  loop: true,
+  // The sticker can't be put back exactly, so at the end the page alone dissolves
+  // to frame one: the sticker fades off the cover and back onto its corner while
+  // the sleeve, record, camera and pointer land on frame one exactly.
+  loop: { fade: 1000 },
   cursor: { from: [0.78, 0.62], visible: true },
   formats: ["landscape"],
   beats: [
@@ -20,13 +23,9 @@ const reel = {
     { move: [880, 236], duration: 650, arc: 0.04, pause: 300 },            // glue strands
     { move: [1090, 190], duration: 700, arc: 0.04, pause: 200 },           // lets go
     { camera: { zoom: 1.2, on: "cursor", follow: true } },
-    { move: [640, 470], duration: 1000, arc: 0.14, pause: 250 },            // carry it over the cover
-    { move: [853, 232], duration: 1000, arc: 0.14, pause: 150 },            // and back onto its own spot
+    { move: [640, 470], duration: 1000, arc: 0.14, pause: 150 },            // carry it over the cover
     { lift: true, pause: 300 },
     { camera: "reset" },
-    // The piece's own fresh-sleeve key, sent straight to the canvas so it never
-    // takes focus (no ring): the corner lifts again, exactly as on frame one.
-    { run: ({ page }) => page.$eval(".sticker-peel-canvas", (c) => c.dispatchEvent(new KeyboardEvent("keydown", { key: "r", bubbles: true }))) },
     { move: [0.78, 0.62], duration: 900, pause: 400 },                      // hand home, for the loop
   ],
 };
