@@ -1,0 +1,11 @@
+{
+  "title": "Play Count",
+  "description": "One large number on warm white: the play count of a song. Type digits, press the arrow keys or drag up and down on it. Every digit rolls on its own spring, the thousands commas glide to their new places as the number grows or shrinks instead of jumping, and the whole figure recentres as its width changes.",
+  "tags": ["Type", "Interface", "Motion"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Benji Taylor's moving commas in Family (https://benji.org/family-values): a frequent, boring number input given quiet physical continuity that never slows typing.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".playcount-stage", "from": [0.5, 0.6], "to": [0.5, 0.35] },
+  "sources": ["https://benji.org/family-values"]
+}

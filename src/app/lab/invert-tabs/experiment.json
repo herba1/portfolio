@@ -1,0 +1,11 @@
+{
+  "title": "Invert Tabs",
+  "description": "One pill tab bar on warm white: Albums, Singles, Live, Demos. A black highlight springs between the tabs, and the labels invert exactly where it covers them, so mid-travel a letter is half black and half white inside a single glyph. Drag along the bar to scrub the highlight through the words; let go and it snaps to the nearest tab with the speed you threw it at.",
+  "tags": ["Type", "Interface", "Motion"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Translate the exclusion-tabs technique from https://paco.me/craft/tabs: a duplicated, inverted label row clipped to the highlight, so colour flips at the pill edge rather than per label, set as a hero object under the house type law.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".it-bar", "from": [0.15, 0.5], "to": [0.85, 0.5] },
+  "sources": ["https://paco.me/craft/tabs"]
+}

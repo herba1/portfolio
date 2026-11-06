@@ -19,6 +19,7 @@ export const TAKES = {
   "lab/smear/smearTakes": () => import("../../app/lab/smear/smearTakes.js"),
   "lab/steam/steamTakes": () => import("../../app/lab/steam/steamTakes.js"),
   "lab/t9/t9Takes": () => import("../../app/lab/t9/t9Takes.js"),
+  "lab/tempo-wheel/tempoTakes": () => import("../../app/lab/tempo-wheel/tempoTakes.js"),
   "lab/terminal/terminalTakes": () => import("../../app/lab/terminal/terminalTakes.js"),
   "scorch/scorchTakes": () => import("../../app/scorch/scorchTakes.js"),
 };

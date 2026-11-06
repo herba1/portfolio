@@ -1,0 +1,11 @@
+{
+  "title": "Corner Throw",
+  "description": "A small now-playing cover resting in the corner of a warm white page, behaving like a picture-in-picture window. Throw it and it does not go where your finger let go: it projects the throw forward with the same deceleration a scroll view uses, picks the corner nearest to where that momentum would have carried it, and travels there on a spring that starts at your release velocity. While you hold it, a faint ghost waits in the corner it will land in, and changes its mind as your hand does. Catch it in flight and it stops in your fingers.",
+  "tags": ["Gesture", "Spring", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Apple PiP corner projection, WWDC 2018 'Designing Fluid Interfaces' (https://developer.apple.com/videos/play/wwdc2018/803/): the target is chosen from where the throw would land, not where the finger lifted, and the spring keeps the release velocity.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".ct-tile", "from": [0.15, 0.8], "to": [0.4, 0.55] },
+  "sources": ["https://developer.apple.com/videos/play/wwdc2018/803/"]
+}
