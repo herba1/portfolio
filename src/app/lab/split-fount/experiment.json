@@ -1,0 +1,18 @@
+{
+  "title": "Split Fount",
+  "description": "One big wood type word on cream stock, inked the way poster shops do a rainbow roll: three inks laid side by side in one fountain, blended by the roller into a gradient across the type. Drag across the sheet to run the press. The last proof is pulled away and the cylinder prints a fresh one under your hand, in the direction you dragged, and every pass the inks mix a little further on the roller, so the bands widen, drift and muddy from proof to proof. The ink is flat and a little uneven: squeezed dark at the letter edges, thin and speckled where the roller ran short, with the grain and nicks of the wood block and a faint bite of impression in the paper.",
+  "tags": ["WebGL", "Print", "Typography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:00:00.000Z",
+  "intent": "After split-fount (rainbow roll) letterpress inking, as printed on wood type by poster shops such as Hatch Show Print and the Hamilton Wood Type museum: the gradient is the press, not decoration, and it changes with every proof. https://en.wikipedia.org/wiki/Split-fount_inking",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.2], "to": [0.5, 0.8] },
+  "probe": [
+    { "idle": 1200 },
+    { "drag": [[0.5, 0.18], [0.5, 0.8]], "ms": 1400 },
+    { "idle": 1200 },
+    { "drag": [[0.2, 0.5], [0.8, 0.5]], "ms": 1100 },
+    { "idle": 1400 }
+  ],
+  "sources": ["https://en.wikipedia.org/wiki/Split-fount_inking", "https://woodtype.org", "https://hatchshowprint.com"]
+}
