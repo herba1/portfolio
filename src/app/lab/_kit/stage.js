@@ -3,15 +3,16 @@
 // while the piece is off screen or the tab is hidden.
 //
 //   const stage = createStage(host, { dpr: 1.5, webgl: false });
+//   (webgl pieces that shade every edge themselves can pass antialias: false)
 //   stage.onFrame((dt, t) => …); stage.onResize((w, h, dpr) => …);
 //   stage.pointer  { x, y, vx, vy, down, inside, lastInput }
 //   stage.on("down" | "move" | "up", fn)
-export function createStage(host, { dpr: maxDpr = 1.5, webgl = false, alpha = false } = {}) {
+export function createStage(host, { dpr: maxDpr = 1.5, webgl = false, alpha = false, antialias = true } = {}) {
   const box = host.closest(".piece-box") || host;
   const canvas = document.createElement("canvas");
   canvas.className = "kit-canvas";
   host.appendChild(canvas);
-  const ctx = webgl ? canvas.getContext("webgl2", { alpha, antialias: true, premultipliedAlpha: false, preserveDrawingBuffer: false }) : canvas.getContext("2d", { alpha });
+  const ctx = webgl ? canvas.getContext("webgl2", { alpha, antialias, premultipliedAlpha: false, preserveDrawingBuffer: false }) : canvas.getContext("2d", { alpha });
 
   const pointer = { x: 0, y: 0, vx: 0, vy: 0, down: false, inside: false, lastInput: -1e9, id: null };
   const listeners = { down: [], move: [], up: [] };
