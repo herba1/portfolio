@@ -1,8 +1,8 @@
 // Pass 2: turn a capture into a finished clip.
 //
 // A headless page (compositor.html) redraws every output frame from the
-// captured frames plus the timeline: the eased camera, the cursor, press
-// ripples, keycaps, captions, the fade-up intro and the end card. Frames are
+// captured frames plus the timeline: the eased camera framing the piece, the
+// lerped round pointer, and the fade in and out. No text, ever. Frames are
 // piped straight into ffmpeg as PNG and encoded the way X, Instagram and
 // TikTok want: H.264 High, yuv420p, faststart, constant frame rate.
 import fs from "node:fs";
@@ -12,7 +12,6 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "./playwright.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const FONTS = path.resolve(HERE, "../../../public/fonts");
 const ORIGIN = "http://showreel.local";
 
 export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = () => {}, draft = false } = {}) {
@@ -21,9 +20,11 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   const tAt = (type) => timeline.find((e) => e.type === type)?.t;
   const start = tAt("start") + (reel.intro?.trim ?? 0);
   const end = tAt("end"), stop = tAt("stop");
-  const card = reel.outro?.card !== false;
-  const outroStart = card ? end + (reel.outro?.settle ?? 600) : Infinity;
-  const finish = card ? outroStart + (reel.outro?.card ?? 2400) : stop;
+  // Outro: let the camera settle back on the piece, then fade into its ground.
+  // `outro: { fade: false }` ends on the live frame instead (for loops).
+  const fades = reel.outro?.fade !== false;
+  const outroStart = fades ? end + (reel.outro?.settle ?? 700) : Infinity;
+  const finish = fades ? Math.min(stop, outroStart + (reel.outro?.fade ?? 700) + 150) : stop;
   const total = Math.ceil(((finish - start) / 1000) * fps);
 
   const browser = await chromium.launch();
@@ -31,7 +32,6 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   await page.route(`${ORIGIN}/**`, (route) => {
     const u = new URL(route.request().url());
     if (u.pathname === "/") return route.fulfill({ path: path.join(HERE, "compositor.html"), contentType: "text/html" });
-    if (u.pathname.startsWith("/font/")) return route.fulfill({ path: path.join(FONTS, path.basename(u.pathname)) });
     if (u.pathname.startsWith("/frames/")) return route.fulfill({ path: path.join(dir, u.pathname), contentType: "image/jpeg" });
     return route.fulfill({ status: 404 });
   });
@@ -45,8 +45,8 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   const look = reel.look ?? { bg: `rgb(${r},${g},${b})`, ink: dark ? "#fafafa" : "#18181b", ink2: dark ? "#a1a1aa" : "#52525b" };
 
   await page.evaluate((s) => window.setup(s), {
-    out: [W, H], viewport: cap.viewport, dpr: cap.dpr, fps, timeline, cursor: reel.cursorStyle ?? format.cursor,
-    intro: reel.intro, look, title: reel.title ?? cap.title, link: reel.link ?? `herb.art${new URL(cap.url).pathname}`,
+    out: [W, H], viewport: cap.viewport, dpr: cap.dpr, fps, timeline, intro: reel.intro, outro: reel.outro, look,
+    cursorLag: reel.cursorLag, maxBase: reel.maxBase,
   });
 
   const shot = draft ? { format: "jpeg", quality: 80, optimizeForSpeed: true } : { format: "png", optimizeForSpeed: true };

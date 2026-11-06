@@ -33,6 +33,9 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     colorScheme: reel.colorScheme || "light",
     reducedMotion: "no-preference",
   });
+  // The site's own chrome-off mode: no nav, no footer clock, no dev tools.
+  // Just the piece on its page. `chrome: true` in a reel keeps them.
+  if (!reel.chrome) await context.addInitScript(() => { try { sessionStorage.setItem("herb:chrome-hidden", "1"); } catch {} });
   if (reel.storage) await context.addInitScript((s) => { for (const [k, v] of Object.entries(s)) try { localStorage.setItem(k, v); } catch {} }, reel.storage);
   // Hide dev-only chrome (the Next.js dev badge) plus anything the reel names.
   await context.addInitScript((css) => {
@@ -123,7 +126,6 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
 
   // --- cursor -----------------------------------------------------------
   const cur = { x: vp.width * (reel.cursor?.from?.[0] ?? 0.66), y: vp.height * (reel.cursor?.from?.[1] ?? 0.82), shown: false, down: false };
-  let arcSign = 1;
 
   const resolve = async (target, opts = {}) => {
     if (target == null || target === "cursor") return { x: cur.x, y: cur.y };
@@ -142,16 +144,19 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
 
   const show = () => { if (!cur.shown) { cur.shown = true; mark("cursor", { visible: true, x: cur.x, y: cur.y }); } };
 
-  // An eased path with a slight arc, like a hand moving a mouse. Samples are
-  // taken against the wall clock, so a slow page never stretches the motion.
-  const glide = async (to, duration = 900, arc = 0.1) => {
+  // An eased path on a gentle arc, like a wrist pivoting: it always bows
+  // upward (or outward on a vertical move), never zig-zags. Samples follow the
+  // capture clock, so a slow page never stretches the motion. The compositor
+  // lerps the drawn pointer behind these samples for extra softness.
+  const glide = async (to, duration = 900, arc = 0.2) => {
     show();
     const from = { x: cur.x, y: cur.y };
     const dx = to.x - from.x, dy = to.y - from.y;
     const dist = Math.hypot(dx, dy);
     if (dist < 1) return;
     const nx = -dy / dist, ny = dx / dist;
-    const bow = arc * dist * (arcSign *= -1);
+    const side = Math.abs(ny) > 0.2 ? Math.sign(-ny) : Math.sign(nx) || 1;
+    const bow = arc * dist * side;
     const start = at();
     for (;;) {
       const p = Math.min(1, (at() - start) / duration);
@@ -183,7 +188,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       if (target !== "cursor") await glide(await resolve(target, b), b.duration ?? 850, b.arc);
       await clock.wait(b.settle ?? 120);
       await press(); await clock.wait(b.press ?? 700);
-      for (const step of [].concat(b.then ?? [])) { await glide(await resolve(step), b.dragDuration ?? 700, 0.04); await clock.wait(b.between ?? 350); }
+      for (const step of [].concat(b.then ?? [])) { await glide(await resolve(step), b.dragDuration ?? 700, b.dragArc ?? 0.1); await clock.wait(b.between ?? 350); }
       await release();
     },
     drag: async (spec, b) => {
@@ -191,7 +196,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       await glide(await resolve(from), b.approach ?? 800, b.arc);
       await clock.wait(b.settle ?? 100);
       await press();
-      for (const to of rest) await glide(await resolve(to), b.duration ?? 900, b.dragArc ?? 0.03);
+      for (const to of rest) await glide(await resolve(to), b.duration ?? 900, b.dragArc ?? 0.06);
       await clock.wait(b.release ?? 60);
       await release();
     },
@@ -220,7 +225,6 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       const target = spec.on === undefined || spec.on === "cursor" ? null : await resolve(spec.on);
       mark("camera", { zoom: spec.zoom ?? 1.6, x: target?.x, y: target?.y, follow: spec.follow ?? spec.on === "cursor", stiffness: spec.stiffness });
     },
-    caption: async (text, b) => mark("caption", { text, duration: b.duration ?? 2400 }),
     hide: async () => { cur.shown = false; mark("cursor", { visible: false }); },
     run: async (fn) => fn({ page, mark, resolve, glide, wait: clock.wait }),
   };
@@ -233,6 +237,19 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   await clock.record();
   mark("start"); // the video opens here: the piece's own entrance is the intro
   if (reel.ready) await clock.waitFor(reel.ready);
+  // The stage is what the camera frames at rest: the piece, not the page.
+  if (reel.stage) {
+    const sel = typeof reel.stage === "string" ? reel.stage : reel.stage.sel;
+    await clock.waitFor(sel);
+    // Union of every match, so `.cell` frames a whole grid of cells even when
+    // their container is wider than they are.
+    const box = await page.locator(sel).evaluateAll((els) => {
+      const rs = els.map((e) => e.getBoundingClientRect()).filter((r) => r.width && r.height && r.bottom > 0 && r.top < innerHeight);
+      const x = Math.min(...rs.map((r) => r.left)), y = Math.min(...rs.map((r) => r.top));
+      return { x, y, width: Math.max(...rs.map((r) => r.right)) - x, height: Math.min(innerHeight, Math.max(...rs.map((r) => r.bottom))) - y };
+    });
+    mark("stage", { ...box, pad: reel.stage.pad ?? 0.12 });
+  }
   await clock.wait(reel.intro?.hold ?? 1200);
 
   for (const beat of reel.beats) {
@@ -251,7 +268,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   }
   mark("camera", { zoom: 1, follow: false });
   mark("end");
-  await clock.wait(reel.outro?.hold ?? 1400);
+  await clock.wait(reel.outro?.hold ?? 1800);
   mark("stop");
   await clock.stop();
   while (pending) await clock.wait(20);
