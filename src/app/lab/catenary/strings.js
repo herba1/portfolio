@@ -8,12 +8,12 @@ export const NODES = 96; // segments; the offline polyline has NODES + 1 points
 // Per wire: fundamental (Hz), pluck reach (css px at a 1280 box), breeze sway
 // (device px at mid span), coupling into its structure.
 export const TUNE = {
-  feeder: { f1: 1.05, reach: 10, sway: 2.6, coup: 1 },
-  low: { f1: 1.35, reach: 8, sway: 1.8, coup: 1 },
-  east1: { f1: 1.7, reach: 6, sway: 1.1, coup: 1 },
-  east2: { f1: 1.8, reach: 6, sway: 1.1, coup: 1 },
-  east3: { f1: 1.55, reach: 6, sway: 1.3, coup: 1 },
-  east4: { f1: 1.6, reach: 6, sway: 1.3, coup: 1 },
+  feeder: { f1: 1.05, reach: 18, sway: 2.6, coup: 1 },
+  low: { f1: 1.35, reach: 16, sway: 1.8, coup: 1 },
+  east1: { f1: 1.7, reach: 12, sway: 1.1, coup: 1 },
+  east2: { f1: 1.8, reach: 12, sway: 1.1, coup: 1 },
+  east3: { f1: 1.55, reach: 12, sway: 1.3, coup: 1 },
+  east4: { f1: 1.6, reach: 12, sway: 1.3, coup: 1 },
 };
 const GAMMA = 0.55; // broadband damping, 1/s: the fundamental rings ~3.5 s
 const VOIGT = 0.0045; // high modes die first (rate ~ VOIGT (n pi)^2 / 2)

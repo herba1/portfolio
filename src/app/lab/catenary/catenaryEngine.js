@@ -31,6 +31,7 @@ import { NODES, createWorld, locate, offsetAt, sampleY } from "./strings";
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
+// Any numeric FILM key (exposure, whitePoint, ...) and warmTop override the grade.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -39,20 +40,25 @@ const FOCUS = [0.85, 0.5]; // where a narrow screen crops toward: the feeder, th
 
 const FILM = {
   ...FILM_PRESETS.summer,
-  exposure: -0.25,
+  exposure: 0,
   input: "linear",
-  // A plate that is already a soft film scan: less extra veil, and a shoulder
-  // that keeps the sunlit cloud off paper white.
+  // A plate that is already a soft film scan: less extra veil. The sunlit
+  // cloud is printed up to just under paper white (about 0.96, nothing at
+  // 255) so it glows; the shoulder still rolls it off instead of clipping.
   bloom: 0.2,
   softness: 0.4,
   halation: 0.32,
-  whitePoint: 1.3,
+  whitePoint: 1.1,
   contrast: 1.25,
   blueDepth: 0.85,
   saturation: 1.06,
   grain: 0.38,
   vignette: 0.2,
 };
+// Warm cast on the sunlit cloud tops (see PLATE): red up 0.8x this, blue
+// down by it, eased in over the shoulder, so the brightest cloud rolls off
+// warm-neutral instead of grey. The sky and its cobalt depth are untouched.
+const WARM_TOP = 0.16;
 
 const VERT_FULL = `#version 300 es
 in vec2 aPos;
@@ -65,10 +71,19 @@ uniform sampler2D uPlate;
 uniform vec2 uRes;   // device px
 uniform vec3 uMap;   // ox, oy, k (device px per image px)
 uniform vec2 uImg;   // image px
+uniform vec3 uTopTint; // linear multiplier on the sunlit cloud
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec2 uv = (p - uMap.xy) / uMap.z / uImg;
-  outColor = vec4(texture(uPlate, uv).rgb, 1.0);
+  vec3 c = texture(uPlate, uv).rgb;
+  // Sunlit cloud tops: bright and near neutral. They take a warm cast on the
+  // shoulder so they glow instead of reading grey; blue sky (chroma) and the
+  // shade side of the cloud (luminance) are left as shot.
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float mx = max(c.r, max(c.g, c.b));
+  float chroma = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-4);
+  float top = smoothstep(0.45, 0.92, y) * (1.0 - smoothstep(0.3, 0.5, chroma));
+  outColor = vec4(c * mix(vec3(1.0), uTopTint, top), 1.0);
 }`;
 
 // One strip per wire. Positions arrive in device px (top-left origin); the
@@ -210,6 +225,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const holdPull = q.get("pull") != null;
   const held = pluckQ != null || q.get("still") != null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  const warmTop = num("warmTop", WARM_TOP);
+  const topTint = [1 + 0.8 * warmTop, 1, 1 - warmTop];
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -431,6 +448,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform2f(plateP.u.uRes, W, H);
     gl.uniform3f(plateP.u.uMap, map.ox, map.oy, map.k);
     gl.uniform2f(plateP.u.uImg, IW, IH);
+    gl.uniform3fv(plateP.u.uTopTint, topTint);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
