@@ -32,14 +32,15 @@ const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
 const cam = { z: 0, x: 0, y: 0 };
 const lead = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
 let shot = null;
-const inOut = (p) => { p = clamp(p, 0, 1); return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2; };
+// ease-in-out quint: a soft departure, a long glide, a soft landing
+const inOut = (p) => { p = clamp(p, 0, 1); return p < 0.5 ? 16 * p ** 5 : 1 - Math.pow(-2 * p + 2, 5) / 2; };
 // A camera move is a shot: an eased tween from where the camera is to where
 // it is going, travelling on a gentle arc and easing back a touch mid-flight
 // on long pans, the way an operator would move it. Duration scales with distance.
 function startShot(t0, to, follow = false, dur) {
   const dist = Math.hypot(to.x - cam.x, to.y - cam.y) * Math.exp(cam.z);
   shot = { t0, from: { z: cam.z, x: cam.x, y: cam.y }, to, follow,
-    dur: dur ?? clamp(520 + dist * 0.9 + Math.abs(to.z - cam.z) * 700, 650, 1400) };
+    dur: dur ?? clamp(900 + dist * 1.1 + Math.abs(to.z - cam.z) * 900, 1100, 2000) };
 }
 // raw: where the real pointer is. x/y: where it is drawn, lerped behind raw.
 const cur = { raw: { x: 0, y: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 }, tilt: { x: 0, v: 0 }, idle: { x: 0, v: 0 } };
@@ -182,15 +183,22 @@ window.render = async ({ t, T, src, phase }) => {
 // The direction the unrotated arrow points (from its body to its tip).
 const ARROW_HEADING = Math.atan2(-13, -5.5);
 const ARROW = new Path2D("M1.2 1.9 L1.2 15.6 L4.9 12.4 L7.4 17.9 L9.5 17.0 L7.1 11.6 L11.6 11.6 Z");
+const layer = document.createElement("canvas");
+const lctx = layer.getContext("2d");
 function drawPointer(x, y, k, a, press, tilt) {
   const s = k * (S.cursorSize ?? 1.7) * (1 - 0.08 * press);
-  ctx.save(); ctx.translate(x, y); ctx.rotate(tilt); ctx.scale(s, s); ctx.globalAlpha = a;
-  ctx.lineJoin = "round"; ctx.lineCap = "round";
-  ctx.shadowColor = "rgba(0,0,0,0.26)"; ctx.shadowBlur = 8 * s; ctx.shadowOffsetY = 1.8 * s;
-  ctx.lineWidth = 6.4; ctx.strokeStyle = "#fff"; ctx.stroke(ARROW);
-  ctx.shadowColor = "transparent";
-  ctx.lineWidth = 2.6; ctx.strokeStyle = "#151517"; ctx.stroke(ARROW);
-  ctx.fillStyle = "#151517"; ctx.fill(ARROW);
-  ctx.restore();
+  // Draw it opaque on its own layer, then lay that down at the fade's alpha:
+  // fading the rim and body separately lets the white show through the black.
+  const R = Math.ceil(34 * s);
+  if (layer.width !== R * 2) { layer.width = layer.height = R * 2; }
+  lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, R * 2, R * 2);
+  lctx.translate(R, R); lctx.rotate(tilt); lctx.scale(s, s);
+  lctx.lineJoin = "round"; lctx.lineCap = "round";
+  lctx.shadowColor = "rgba(0,0,0,0.26)"; lctx.shadowBlur = 8 * s; lctx.shadowOffsetY = 1.8 * s;
+  lctx.lineWidth = 6.4; lctx.strokeStyle = "#fff"; lctx.stroke(ARROW);
+  lctx.shadowColor = "transparent";
+  lctx.lineWidth = 2.6; lctx.strokeStyle = "#151517"; lctx.stroke(ARROW);
+  lctx.fillStyle = "#151517"; lctx.fill(ARROW);
+  ctx.save(); ctx.globalAlpha = a; ctx.drawImage(layer, x - R, y - R); ctx.restore();
 }
 </script>

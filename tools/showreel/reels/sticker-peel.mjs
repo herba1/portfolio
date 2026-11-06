@@ -8,8 +8,9 @@ const reel = {
   css: ".sticker-peel-head, .sticker-peel-live { visibility: hidden; }",
   stage: { rect: [0.3, 0.02, 0.56, 0.94] },   // the record and the air above it, not the empty desk
   ready: ".sticker-peel-stage[data-ready]",
-  intro: { hold: 900, zoom: 1.1 },
-  outro: { hold: 1300 },
+  intro: { hold: 1700, zoom: 1, fade: 900 },   // open on the whole piece as it appears, then begin
+  tempo: 1.2,
+  outro: { hold: 2000, fade: 900 },
   cursor: { from: [0.86, 0.9] },
   formats: ["landscape"],
   beats: [
