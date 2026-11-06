@@ -12,7 +12,7 @@
 // how unevenly the browser painted during capture.
 //
 // Deliberately wordless: no captions, keycaps, titles or click pulses. The
-// piece and a soft round pointer are the whole picture.
+// piece and the pointer are the whole picture.
 const c = document.getElementById("c");
 const ctx = c.getContext("2d");
 let S, W, H, K, vw, vh, look;
@@ -95,7 +95,8 @@ window.render = async ({ t, T, src, phase }) => {
 
   // pointer: lerp the drawn position behind the real one (critically damped,
   // so it trails smoothly into each stop and never overshoots a target)
-  const lag = S.cursorLag ?? 16;
+  // Tighter while a button is down, so a dragged thing never slips from under the tip.
+  const lag = cur.down ? 40 : S.cursorLag ?? 16;
   spring(cur.x, cur.raw.x, lag, dt);
   spring(cur.y, cur.raw.y, lag, dt);
 
@@ -128,17 +129,18 @@ window.render = async ({ t, T, src, phase }) => {
   return true;
 };
 
-// A soft round pointer, like iPadOS: translucent graphite with a hairline of
-// white and a quiet shadow, so it reads on light and dark pieces alike. A
-// press only presses it in a little; nothing radiates.
+// A Mac-style arrow, a little fatter and rounder: black body, thick white
+// rim, every corner rounded, a soft shadow. A press only nudges it smaller.
+const ARROW = new Path2D("M0 0 L0 17.2 L4.4 13.4 L7.1 19.6 L10.3 18.2 L7.7 12.3 L13.2 12.3 Z");
 function drawPointer(x, y, k, a, press) {
-  const r = 11 * k * (1 - 0.16 * press);
-  ctx.save(); ctx.translate(x, y); ctx.globalAlpha = a;
-  ctx.shadowColor = "rgba(0,0,0,0.22)"; ctx.shadowBlur = 12 * k; ctx.shadowOffsetY = 2 * k;
-  ctx.beginPath(); ctx.arc(0, 0, r, 0, Math.PI * 2);
-  ctx.fillStyle = `rgba(92,92,99,${0.62 + 0.18 * press})`; ctx.fill();
+  const s = k * 1.7 * (1 - 0.08 * press);
+  ctx.save(); ctx.translate(x, y); ctx.scale(s, s); ctx.globalAlpha = a;
+  ctx.lineJoin = "round"; ctx.lineCap = "round";
+  ctx.shadowColor = "rgba(0,0,0,0.28)"; ctx.shadowBlur = 7 * s; ctx.shadowOffsetY = 1.6 * s;
+  ctx.lineWidth = 3.6; ctx.strokeStyle = "#fff"; ctx.stroke(ARROW);
   ctx.shadowColor = "transparent";
-  ctx.lineWidth = 1.25 * k; ctx.strokeStyle = "rgba(255,255,255,0.85)"; ctx.stroke();
+  ctx.fillStyle = "#151517"; ctx.fill(ARROW);
+  ctx.lineWidth = 1.1; ctx.strokeStyle = "#151517"; ctx.stroke(ARROW); // rounds the body's corners too
   ctx.restore();
 }
 </script>

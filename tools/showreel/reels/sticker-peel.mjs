@@ -1,5 +1,8 @@
-// Sticker Peel: catch the lifted corner, peel the price sticker back over its
-// fold until the glue lets go, carry it off and stick it down somewhere else.
+// Sticker Peel, as a hand would do it:
+//   1. hover the lifted corner; it lifts a touch more
+//   2. press and peel slowly along the sticker, stopping halfway so the glue strands show
+//   3. keep going until it lets go of the sleeve
+//   4. carry it across the cover and lay it down; the old spot keeps its residue
 const reel = {
   url: "/lab/sticker-peel",
   css: ".sticker-peel-head, .sticker-peel-live { visibility: hidden; }",
@@ -9,13 +12,16 @@ const reel = {
   cursor: { from: [0.86, 0.9] },
   formats: ["landscape"],
   beats: [
-    // find the curl, lean in on it
-    { move: [783, 252], duration: 1100, zoom: 1.6, zoomOn: [840, 220], pause: 350 },
-    // peel it back across itself, past the far corner, until the glue lets go
-    { drag: [[783, 252], [840, 215], [930, 160], [1010, 115], [1060, 95]], duration: 800, release: 400, follow: true, pause: 300 },
-    { camera: "reset", pause: 200 },
-    // it is free: carry it across the cover and stick it down
-    { drag: [[1060, 95], [620, 470]], approach: 300, duration: 1400, pause: 1800 },
+    { move: [798, 262], duration: 1200, zoom: 1.45, zoomOn: [880, 225], pause: 700 },
+    { press: "cursor", settle: 150 },
+    { move: [880, 236], duration: 1000, arc: 0.04, pause: 650 },           // halfway: strands
+    { move: [1010, 206], duration: 1000, arc: 0.04, pause: 150 },
+    { move: [1090, 190], duration: 650, arc: 0.03, pause: 500 },           // free
+    { camera: { zoom: 1.2, on: "cursor", follow: true } },
+    { move: [640, 470], duration: 1500, arc: 0.14, pause: 350 },            // carry it over
+    { lift: true, pause: 300 },
+    { camera: "reset", pause: 1700 },
+    { move: [0.84, 0.86], duration: 1100, pause: 500 },
   ],
 };
 

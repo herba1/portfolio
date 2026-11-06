@@ -1,19 +1,31 @@
-// Kern: one huge word on springs. Pull letters out of line and let them snap back.
+// Kern: one huge word on springs.
+//   1. it plucks itself on load
+//   2. tap a letter: the whole word morphs into the heavy, condensed cut
+//   3. grab the g and stretch the line like a ribbon, hold, let go: it re-kerns
+//   4. tap again: back to the light cut
+//   5. flick the h up and down; it rings and settles
 const letter = (i) => `.kern-stage text >> nth=${i}`;
+const off = (i, x, y) => ({ sel: letter(i), at: [x, y] });
 
 const reel = {
   url: "/lab/kern",
   css: ".kern-title { visibility: hidden; }",
   stage: { sel: ".kern-stage text", pad: 0.06 },
   ready: ".kern-stage text",
-  intro: { hold: 1800, zoom: 1.06 },   // it plucks itself on load
-  cursor: { from: [0.8, 0.88] },
+  intro: { hold: 1900, zoom: 1.06 },
+  cursor: { from: [0.78, 0.9] },
   formats: ["landscape", "vertical"],
   beats: [
-    // pull each letter well out of line, hold it there so the springs show, let go
-    { drag: [letter(5), { sel: letter(5), at: [0.5, -2.2] }], duration: 900, approach: 1000, release: 450, pause: 1500 },
-    { drag: [letter(8), { sel: letter(8), at: [4.5, 0.2] }], duration: 1000, approach: 900, release: 450, pause: 1600 },
-    { drag: [letter(2), { sel: letter(2), at: [-0.3, 3.2] }], duration: 900, approach: 900, release: 450, pause: 1800 },
+    { click: letter(4), duration: 1100, settle: 220, pause: 1700 },          // heavy
+    { press: letter(8), duration: 900, settle: 180 },
+    { move: off(8, 3.6, 0.35), duration: 1000, arc: 0.04, pause: 700 },     // stretched, held
+    { lift: true, pause: 1600 },                                            // snaps back, re-kerns
+    { click: letter(1), duration: 1000, settle: 220, pause: 1700 },         // light again
+    { press: letter(5), duration: 900, settle: 180 },
+    { move: off(5, 0.5, -1.7), duration: 600, arc: 0, pause: 250 },
+    { move: off(5, 0.5, 2.2), duration: 450, arc: 0 },
+    { lift: true, pause: 1900 },
+    { move: [0.8, 0.86], duration: 1100, pause: 600 },                      // step out of the way
   ],
 };
 

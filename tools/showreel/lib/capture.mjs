@@ -225,6 +225,14 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       const target = spec.on === undefined || spec.on === "cursor" ? null : await resolve(spec.on);
       mark("camera", { zoom: spec.zoom ?? 1.6, x: target?.x, y: target?.y, follow: spec.follow ?? spec.on === "cursor", stiffness: spec.stiffness });
     },
+    // Fine-grained hands: press, then any number of `move` beats (each with
+    // its own duration, arc and pause) while the button stays down, then lift.
+    press: async (target, b) => {
+      if (target !== "cursor") await glide(await resolve(target, b), b.duration ?? 850, b.arc);
+      await clock.wait(b.settle ?? 120);
+      await press();
+    },
+    lift: async () => release(),
     hide: async () => { cur.shown = false; mark("cursor", { visible: false }); },
     run: async (fn) => fn({ page, mark, resolve, glide, wait: clock.wait }),
   };
