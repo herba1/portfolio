@@ -26,6 +26,15 @@ const spring = (s, target, omega, dt) => {
   s.v = (v - omega * (v + omega * x) * dt) * e;
 };
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// A clamp with rounded corners: near the frame edge the camera eases into the
+// limit instead of hitting it, so an arc never flattens into a straight slide.
+const softClamp = (v, a, b) => {
+  if (b - a < 1e-6) return (a + b) / 2;
+  const m = Math.min(60, (b - a) / 2);
+  if (v < a + m) return a + m - m * (1 - Math.exp((v - a - m) / m));
+  if (v > b - m) return b - m + m * (1 - Math.exp(-(v - b + m) / m));
+  return v;
+};
 const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
 
 // Camera state (log zoom, centre in css px) and the shot it is playing.
@@ -135,8 +144,21 @@ window.render = async ({ t, T, src, phase, first, loopMix = 0 }) => {
     // bow upward (or outward on a vertical move), like the pointer does
     const nx = d ? -dy / d : 0, ny = d ? dx / d : 0;
     const side = Math.abs(ny) > 0.2 ? Math.sign(-ny) : Math.sign(nx) || 1;
-    cam.x = shot.from.x + dx * e + nx * side * d * 0.12 * arc;
-    cam.y = shot.from.y + dy * e + ny * side * d * 0.12 * arc;
+    const bow = (S.cameraArc ?? 0.18) * d * arc;
+    cam.x = shot.from.x + dx * e + nx * side * bow;
+    cam.y = shot.from.y + dy * e + ny * side * bow;
+    if (shot.follow) {
+      // The chase never runs on a rail either: the camera lifts off the line
+      // of travel in proportion to its speed, so every pan swings through an
+      // arc and settles back onto the pointer as it slows.
+      const vx = lead.x.v, vy = lead.y.v, sp = Math.hypot(vx, vy);
+      if (sp > 1) {
+        const px = -vy / sp, py = vx / sp;
+        const sd = Math.abs(py) > 0.2 ? Math.sign(-py) : Math.sign(px) || 1;
+        const lift = Math.min(sp * (S.followArc ?? 0.1), 70);
+        cam.x += px * sd * lift; cam.y += py * sd * lift;
+      }
+    }
     cam.z = shot.from.z + (to.z - shot.from.z) * e - 0.06 * Math.min(1, d / 400) * arc;
     if (p >= 1 && !shot.follow) shot = null;
   }
@@ -146,8 +168,9 @@ window.render = async ({ t, T, src, phase, first, loopMix = 0 }) => {
   const z = Math.max(1, Math.exp(cam.z)) * (1 + 0.009 * br * (1 + Math.sin(b * 0.55)));
   cam.dx = 0.004 * br * vw * Math.sin(b * 0.37 + 1.1); cam.dy = 0.004 * br * vh * Math.sin(b * 0.31 + 0.2);
   const hw = vw / z / 2, hh = vh / z / 2;
-  const cx = clamp(cam.x + cam.dx, hw, vw - hw), cy = clamp(cam.y + cam.dy, hh, vh - hh);
+  const cx = softClamp(cam.x + cam.dx, hw, vw - hw), cy = softClamp(cam.y + cam.dy, hh, vh - hh);
   const x0 = cx - hw, y0 = cy - hh, k = K * z;
+  (window.camPath ??= []).push([+cx.toFixed(2), +cy.toFixed(2), +z.toFixed(4)]);
 
   const img = await bitmap(src);
   const d = img.width / vw; // source px per css px

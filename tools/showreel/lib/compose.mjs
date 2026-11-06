@@ -75,6 +75,8 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     if (i % fps === 0) log(`  composing ${i}/${total} (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
   }
   ff.stdin.end();
+  // SHOWREEL_CAM=1 writes the camera path (centre x, y in css px and zoom, per frame) for checking moves.
+  if (process.env.SHOWREEL_CAM) fs.writeFileSync(outFile.replace(/\.mp4$/, ".cam.json"), JSON.stringify(await page.evaluate(() => window.camPath)));
   await done;
   await browser.close();
   log(`  wrote ${outFile} (${(total / fps).toFixed(1)}s, ${W}x${H} @ ${fps}fps)`);
