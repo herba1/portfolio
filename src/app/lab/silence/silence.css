@@ -1,0 +1,59 @@
+.silence {
+  --silence-ground: #ffffff;
+  --silence-ink: #141413;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  background: var(--silence-ground);
+  color: var(--silence-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-kerning: normal;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.silence[data-embedded] {
+  min-height: 100%;
+}
+
+.silence-word {
+  position: absolute;
+  left: 0;
+  top: 0;
+  margin: 0;
+  white-space: nowrap;
+  font-weight: var(--font-weight-meta);
+  font-variant-ligatures: common-ligatures;
+  opacity: 0;
+  transition: opacity 600ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.silence[data-ready] .silence-word {
+  opacity: 1;
+}
+
+.silence-measure {
+  position: absolute;
+  left: 0;
+  top: 0;
+  visibility: hidden;
+  white-space: nowrap;
+  font-weight: var(--font-weight-meta);
+}
+
+.silence-sr {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
