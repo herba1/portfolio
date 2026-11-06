@@ -1,0 +1,11 @@
+{
+  "title": "Octilinear",
+  "description": "A small invented transit diagram in six flat colours, drawn only at 0, 45 and 90 degrees. Grab any station and drag it: every line through it reroutes live, staying octilinear with round bends of one radius, bundles stay parallel and evenly spaced through their shared corridors, and the neighbouring stations follow on springs. Let go and the network tidies itself back onto the grid, into the cleanest octilinear layout it can find around where you left the station.",
+  "tags": ["Diagram", "Physics", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Translate Massimo Vignelli and Unimark's 1972 New York subway diagram (and the 2008/2011 Vignelli redraws): geography gives way to clarity, lines only at 0/45/90 in parallel bundles. Make the designer's tidying hand the interaction. Reference: https://en.wikipedia.org/wiki/Massimo_Vignelli#/media/File:Vignelli_MTA_map_1972.jpg",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.478, 0.45], "to": [0.6, 0.25] },
+  "sources": ["https://en.wikipedia.org/wiki/Massimo_Vignelli", "https://www.moma.org/collection/works/89300", "https://en.wikipedia.org/wiki/Octilinear"]
+}
