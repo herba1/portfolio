@@ -1,5 +1,5 @@
 // Kern: one huge word on springs.
-//   1. it plucks itself on load
+//   1. the still word (its own load pluck and idle hints are off on camera)
 //   2. tap a letter: the whole word morphs into the heavy, condensed cut
 //   3. grab the g and stretch the line like a ribbon, hold, let go: it re-kerns
 //   4. tap again: back to the light cut
@@ -10,14 +10,15 @@ const off = (i, x, y) => ({ sel: letter(i), at: [x, y] });
 const reel = {
   url: "/lab/kern",
   css: ".kern-title { visibility: hidden; }",
-  stage: { sel: ".kern-stage text", pad: 0.06 },
-  ready: ".kern-stage text",
-  // loop: open on the settled word with the hand at rest, so the clip can end on
-  // exactly that frame. The word's own load pluck is the first motion (a quarter
-  // second in), and the hand is in for the first tap by about 1.5s.
-  intro: { hold: 1900, zoom: 1, fade: 0, trim: 1150 },
+  stage: { sel: ".kern-stage text", pad: 0.16 },  // room for the camera to lean toward the hand and for the stretch
+  ready: ".kern[data-ready]",                   // after the font is in and the word is laid out, so the framing is measured on the real word
+  // No idle motion on camera: Kern gates its load pluck, scatter-in and idle
+  // attract (auto-plucks, auto-morphs) behind reduced motion, and keeps every
+  // spring the hand drives. So the word sits still until the pointer touches it.
+  reducedMotion: "reduce",
+  intro: { hold: 1500, zoom: 1, fade: 0, trim: 1400 },  // skip the grow-in: open on the still word, hand at rest; the first tap lands by ~1.2s
   tempo: 1.2,
-  outro: { hold: 500 },                         // stop before the word's own idle pluck kicks in
+  outro: { hold: 500 },
   loop: true,                                   // ends on its own first frame: the light cut, the hand back where it began
   cursor: { from: [0.7, 0.86], visible: true },
   formats: ["feed", "landscape", "vertical"],

@@ -31,7 +31,10 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     viewport: vp,
     deviceScaleFactor: format.dpr,
     colorScheme: reel.colorScheme || "light",
-    reducedMotion: "no-preference",
+    // A reel can ask for "reduce" to switch off a piece's own idle/attract motion
+    // (hints, auto-plucks) when that is how the piece gates it, so only the
+    // pointer moves it on camera.
+    reducedMotion: reel.reducedMotion ?? "no-preference",
   });
   // The site's own chrome-off mode: no nav, no footer clock, no dev tools.
   // Just the piece on its page. `chrome: true` in a reel keeps them.
@@ -247,6 +250,9 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   // Feed rule: a hand on screen from frame one reads as "interactive" before anything happens.
   if (reel.cursor?.visible) show();
   if (reel.ready) await clock.waitFor(reel.ready);
+  // Let the entrance finish before measuring, so the framing fits the settled
+  // piece, not a word still growing in. (The compositor frames from the start.)
+  await clock.wait(reel.intro?.hold ?? 1200);
   // The stage is what the camera frames at rest: the piece, not the page.
   if (reel.stage?.rect) {
     // A fixed region in viewport fractions [x, y, w, h], for pieces drawn on one canvas.
@@ -264,7 +270,6 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     });
     mark("stage", { ...box, pad: reel.stage.pad ?? 0.12 });
   }
-  await clock.wait(reel.intro?.hold ?? 1200);
 
   // tempo > 1 slows every motion and hold in the reel by that factor.
   const TIMED = ["duration", "pause", "settle", "hold", "press", "approach", "release", "between", "dragDuration", "gap", "delay"];
