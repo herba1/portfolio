@@ -2,7 +2,6 @@
   --mp-ground: #f2f0eb;
   --mp-black: #0b0b0a;
   --mp-ink: #ffffff;
-  --mp-ink-2: #8e8b86;
   --mp-rail: #2b2a28;
   --mp-hover: #1e1d1c;
   --mp-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -84,6 +83,17 @@
   transform-origin: 0 0;
 }
 
+/* a printed sleeve's edge: a hairline so the square reads as an object laid
+   on the black, not a hole cut in it */
+.mp-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  pointer-events: none;
+}
+
 .mp-art-img {
   position: absolute;
   inset: 0;
@@ -156,12 +166,14 @@
   font-feature-settings: "kern" 1, "pnum" 1;
 }
 
-/* time left, hung on the clock's baseline just past its last figure */
+/* time left, hung on the clock's baseline just past its last figure. It is
+   quieter by weight, at full ink, never by dimming. */
 .mp-remain {
   position: absolute;
   left: 100%;
   margin-left: 12px;
-  color: var(--mp-ink-2);
+  font-weight: var(--font-weight-meta);
+  color: var(--mp-ink);
 }
 
 /* ---- buttons ------------------------------------------------------------ */
@@ -243,12 +255,17 @@
   text-overflow: ellipsis;
 }
 
+/* The ladder under the clock: title 20px at 600, artist 14px at 440, time
+   left 13px at 440. Each step down is a weight step as well as a size step,
+   and all of it at full ink. The title's leading is pulled from the token's
+   25px to 24px so the column below the clock stays on the 4px grid. */
 .mp-title {
-  font-size: var(--text-heading);
-  line-height: var(--text-heading--line-height);
-  letter-spacing: var(--text-heading--letter-spacing);
-  font-weight: var(--text-heading--font-weight);
+  font-size: var(--text-title-sm);
+  line-height: 24px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
   color: var(--mp-ink);
+  text-wrap: balance;
 }
 
 .mp-artist {
@@ -256,7 +273,7 @@
   line-height: var(--text-ui-lg--line-height);
   letter-spacing: var(--text-ui-lg--letter-spacing);
   font-weight: var(--text-ui-lg--font-weight);
-  color: var(--mp-ink-2);
+  color: var(--mp-ink);
 }
 
 .mp-scrub {
@@ -305,8 +322,8 @@
   font-size: var(--text-ui);
   line-height: var(--text-ui--line-height);
   letter-spacing: var(--text-ui--letter-spacing);
-  font-weight: var(--text-ui--font-weight);
-  color: var(--mp-ink-2);
+  font-weight: var(--font-weight-meta);
+  color: var(--mp-ink);
   animation: mp-label-in 360ms var(--mp-ease) both;
 }
 

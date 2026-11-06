@@ -6,9 +6,10 @@
 // still gets a rect, parked out of the way, with o = 0. Parking spots are
 // chosen so nothing crosses the art in flight.
 //
-// The clock is the element that carries the open: the pill's small "1:23"
-// travels up into the panel's text column and grows, on the same spring as
-// the edge, into numerals as tall as the cover beside them. Its size is a
+// Two elements carry the open, on the same spring as the edge: the cover,
+// which grows from the pill's thumbnail out of its top-left corner into the
+// sleeve, and the clock, whose small "1:23" rises into the type column beside
+// it and grows into the column's headline figures. Its size is a
 // channel of its own (s, in px), set as a real font size every frame, so the
 // figures stay sharp at every step instead of being a scaled bitmap.
 
@@ -17,20 +18,24 @@ export const STATES = ["idle", "expanded", "toast"];
 const ART_IDLE = 24;
 
 // ---- the open panel's grid --------------------------------------------------
-// A hanging column: the cover sits in the margin and everything else, clock,
-// title, artist, scrubber and transport, hangs flush left off one line, COL.
+// A record sleeve and its type. The cover is the second shared element: the
+// pill's thumbnail grows out of its own top-left corner into a square that
+// stands the full height of the content, from the clock's cap height to the
+// transport's baseline. Everything else, clock, title, artist, scrubber and
+// transport, hangs flush left off one line, COL, immediately to its right.
+// Two columns, no gutter left over: image square / type.
 // Every vertical address is on the 4px grid.
-const PAD = 20;
-const ART = 56;
-export const PANEL = { W: 368, H: 228 };
-export const COL = -PANEL.W / 2 + PAD + ART + 16; // the text column's left edge
+const PAD = 24;
+export const ART = 200; // the sleeve: the content's full height
+const GAP = 28; // sleeve to type
+export const PANEL = { W: 552, H: PAD + ART + PAD };
+export const COL = -PANEL.W / 2 + PAD + ART + GAP; // the text column's left edge
 export const COL_W = PANEL.W / 2 - PAD - COL; // ... and its measure
 
-// Clock sizes. Open, the figures stand as tall as the cover: Geist's lining
-// figures are 0.73em, so 76px figures are 56px, top on the cover's top edge
-// and baseline on its bottom.
+// Clock sizes. Open, the figures are the column's headline: Geist's lining
+// figures are 0.73em, so 96px figures are 70px, top on the sleeve's top edge.
 export const CLOCK_PILL = 13;
-export const CLOCK = 76;
+export const CLOCK = 96;
 
 // Geist's metrics with line-height 1: figure top and figure centre, as a
 // fraction of the size, measured from the top of the line box.
@@ -39,11 +44,15 @@ export const FIG_BASE = 0.8525;
 const clockTop = (s, top) => top - FIG_TOP * s;
 const clockMid = (s) => 0.4875 * s;
 
+// The clock's baseline lands at PAD + 70 = 94. The title's 24px line sits
+// 18px under it, the artist straight beneath, the scrubber after a 16px
+// breath, and the transport row last, its glyphs' ink ending on the
+// sleeve's bottom edge.
 export const ROW = {
-  title: 92,
-  artist: 112,
-  scrub: 144,
-  transport: 168,
+  title: 112,
+  artist: 136,
+  scrub: 172,
+  transport: 196,
 };
 
 // Transport buttons are 40px boxes with the glyph centred; the glyphs' left
@@ -55,16 +64,22 @@ export const TRANSPORT = {
   next: COL - GLYPH_INSET + 104,
 };
 
+// The idle pill's geometry, which the open panel borrows to park the
+// waveform where it already is: it doesn't travel, it folds flat in place.
+const PILL_W = 196;
+const PILL_H = 40;
+const WAVE_IDLE = { x: PILL_W / 2 - 14 - 22, y: (PILL_H - 16) / 2 };
+
 export function layout(state, { hover = false, press = false } = {}) {
   if (state === "expanded") {
     const { W, H } = PANEL;
     return {
       W,
       H,
-      R: 44,
-      art: { x: -W / 2 + PAD, y: PAD, s: ART, r: 14, o: 1 },
-      // the waveform has no place in the open panel: it goes out where it was
-      wave: { x: W / 2 - PAD - 22, y: 28, o: 0 },
+      R: 32,
+      art: { x: -W / 2 + PAD, y: PAD, s: ART, r: 8, o: 1 },
+      // the waveform has no place in the open panel: it folds flat where it was
+      wave: { x: WAVE_IDLE.x, y: WAVE_IDLE.y, o: 0 },
       elapsed: { x: COL, y: clockTop(CLOCK, PAD), s: CLOCK, o: 1 },
       next: { x: TRANSPORT.next, y: ROW.transport, s: 40, o: 1 },
       p: { idle: 0, expanded: 1, toast: 0 },
@@ -86,8 +101,8 @@ export function layout(state, { hover = false, press = false } = {}) {
     };
   }
   // idle: the pill breathes up a touch under the pointer and gives under a press
-  const W = 196 + (hover ? 8 : 0) - (press ? 8 : 0);
-  const H = 40 + (hover ? 4 : 0) - (press ? 4 : 0);
+  const W = PILL_W + (hover ? 8 : 0) - (press ? 8 : 0);
+  const H = PILL_H + (hover ? 4 : 0) - (press ? 4 : 0);
   const L = -W / 2 + (H - ART_IDLE) / 2;
   return {
     W,

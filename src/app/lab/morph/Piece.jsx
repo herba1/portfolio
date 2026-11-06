@@ -260,7 +260,15 @@ export default function Piece() {
       el.style.filter = p > 0.995 ? "none" : `blur(${(1 - p) * 6}px)`;
       el.style.pointerEvents = p > 0.5 ? "" : "none";
     };
-    shared(waveRef.current, v("wx"), v("wy"), v("wo"), 22, 16);
+    // The waveform never travels or blurs: it folds. Its bars drop to dots in
+    // place (the bar heights below follow the same channel), and only once
+    // they are flat do the dots go out. Coming back, dots first, then bars.
+    const wave = waveRef.current;
+    const wo = clamp(v("wo"), 0, 1);
+    if (wave) {
+      wave.style.transform = `translate3d(${cx + v("wx")}px,${v("wy")}px,0)`;
+      wave.style.opacity = clamp((wo - 0.2) / 0.25, 0, 1) ** 2;
+    }
     // The clock is type that travels: its size is a spring channel and is set
     // as a real font size, with the tracking the law gives for that size, so
     // the figures are drawn, never stretched. It slides left by its own ink
@@ -315,7 +323,7 @@ export default function Piece() {
     barRefs.current.forEach((bar, i) => {
       if (!bar) return;
       const n = 0.5 + 0.5 * Math.sin(t * (5.1 + i * 1.7) + i * 1.9) * Math.sin(t * (2.3 + i * 0.6) + i);
-      const h = 4 + (12 * (0.25 + 0.75 * Math.abs(n))) * L.amp;
+      const h = 4 + 12 * (0.25 + 0.75 * Math.abs(n)) * L.amp * clamp((wo - 0.45) / 0.55, 0, 1);
       bar.style.transform = `scaleY(${h / 16})`;
     });
 
@@ -581,7 +589,7 @@ export default function Piece() {
             <path ref={edgeRef} />
           </svg>
 
-          {/* shared: art */}
+          {/* shared: art, the pill's thumbnail and the open panel's sleeve */}
           <div ref={artRef} className="mp-art">
             <Art src={shown?.imageLarge || shown?.image} />
           </div>
