@@ -1,11 +1,31 @@
 {
   "title": "Drum",
-  "description": "An album title in ultra-condensed black capitals that fills the box top to bottom, printed on a row of drums. Swipe up or down and every letter rolls over on its own wheel to the next title, one wheel a beat after the last, curving away and darkening over the top of its cylinder before it clicks hard into the next notch.",
-  "tags": ["Type", "WebGL", "Motion"],
+  "description": "An album title in ultra-condensed black capitals that fills the box top to bottom, printed on a row of drums. Swipe up or down and every letter rolls over on its own wheel to the next title, one wheel a beat after the last, curving away over the top of its cylinder before its pawl drops hard into the next notch with a click.",
+  "tags": [
+    "Type",
+    "WebGL",
+    "Motion"
+  ],
   "status": "draft",
   "createdAt": "2026-11-06T18:00:00.000Z",
   "intent": "After Berton Hasebe's Druk for Commercial Type (https://type.today/en/journal/new-typeface-druk): extreme condensed proportions that fill a cover, set on a mechanical number drum with the weight of a Teenage Engineering readout.",
-  "tile": { "shape": "wide" },
-  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.7], "to": [0.5, 0.3] },
-  "sources": ["https://type.today/en/journal/new-typeface-druk", "https://github.com/googlefonts/AntonFont"]
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.5,
+      0.7
+    ],
+    "to": [
+      0.5,
+      0.3
+    ]
+  },
+  "sources": [
+    "https://type.today/en/journal/new-typeface-druk",
+    "https://github.com/Etcetera-Type-Co/Anybody"
+  ]
 }

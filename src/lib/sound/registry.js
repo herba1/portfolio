@@ -5,6 +5,7 @@ export const TAKES = {
   "lab/blob-track/blobTakes": () => import("../../app/lab/blob-track/blobTakes.js"),
   "lab/coverflow/tickTakes": () => import("../../app/lab/coverflow/tickTakes.js"),
   "lab/crumple/crumpleTakes": () => import("../../app/lab/crumple/crumpleTakes.js"),
+  "lab/drum/detentTakes": () => import("../../app/lab/drum/detentTakes.js"),
   "lab/field/fieldTakes": () => import("../../app/lab/field/fieldTakes.js"),
   "lab/focus-pull/lensTakes": () => import("../../app/lab/focus-pull/lensTakes.js"),
   "lab/generation-loss/shutterTakes": () => import("../../app/lab/generation-loss/shutterTakes.js"),

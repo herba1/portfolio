@@ -1,12 +1,14 @@
 "use client";
 
-import { Anton } from "next/font/google";
+import { Anybody } from "next/font/google";
 import { makePiece } from "../_kit/makePiece";
 
-// Anton (Vernon Adams, SIL OFL 1.1): the nearest open face to Druk's heavy
-// condensed sans. Compressed further in the engine to Druk's proportions.
-const anton = Anton({ weight: "400", subsets: ["latin"], display: "block" });
+// Anybody (Etcetera Type Co, SIL OFL 1.1): a variable face whose width axis
+// runs down to 50%, drawn ultra-condensed at 900 rather than squeezed, so
+// its stems hold their weight. The nearest open relative of Druk's
+// condensed super weights.
+const anybody = Anybody({ subsets: ["latin"], axes: ["wdth"], display: "block" });
 
 export default makePiece("drum", () =>
-  import("./drumEngine").then((m) => (host, opts) => m.createDrum(host, { ...opts, family: anton.style.fontFamily })),
+  import("./drumEngine").then((m) => (host, opts) => m.createDrum(host, { ...opts, family: anybody.style.fontFamily })),
 );
