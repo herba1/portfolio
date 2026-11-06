@@ -1,0 +1,26 @@
+{
+  "title": "Depth Clock",
+  "description": "Roman stone pines from below, and the time set very large in the sky between them. The crowns overlap the figures because the figures really sit behind them: the photo is split by its depth into sky, trees and a plane for the time, the matte cut down to single needles, and every plane moves by its own parallax as you tilt. Developed like daylight negative film, so the numerals bloom like the sky does. The minutes tick over with a small roll.",
+  "tags": ["WebGL", "Depth", "Photography", "Type"],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:00:00.000Z",
+  "intent": "After the iOS 16 Lock Screen depth effect, where the clock sits between the wallpaper's background and its subject (https://www.apple.com/newsroom/2022/06/apple-reimagines-the-iphone-experience-with-ios-16/), translated into reality in the computer: a real capture split into planes, with the time physically in the air between them.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.2, 0.3], "to": [0.8, 0.7] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.2, 0.3], [0.8, 0.7]], "ms": 2400 },
+    { "idle": 1200 },
+    { "drag": [[0.8, 0.7], [0.3, 0.6]], "ms": 1800 },
+    { "idle": 1600 }
+  ],
+  "sources": [
+    {
+      "url": "https://polyhaven.com/a/piazza_martin_lutero",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k/piazza_martin_lutero_16k.hdr",
+      "author": "Greg Zaal, Rico Cilliers",
+      "licence": "CC0",
+      "note": "Rectilinear view (yaw 150, pitch -68, hfov 95) from the 16k HDRI, scene-linear; depth by Depth Anything V2; matte by unmixing each pixel between a fitted sky and the local foreground colour."
+    }
+  ]
+}
