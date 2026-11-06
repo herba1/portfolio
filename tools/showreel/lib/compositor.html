@@ -119,10 +119,16 @@ window.render = async ({ t, T, src, phase }) => {
 
   spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
   spring(cur.press, cur.down ? 1 : 0, 30, dt);
-  // Lean: the arrow swings on its tip like it is being pulled along, trailing
-  // whichever way it travels, and rights itself as it slows.
-  const lean = clamp(cur.x.v * 0.00042 + cur.y.v * 0.00008, -0.42, 0.42);
-  spring(cur.tilt, cur.down ? lean * 0.5 : lean, 11, dt);
+  // Free rotation: the arrow turns to point the way it is travelling, all the
+  // way round if it has to, and keeps that heading when it stops.
+  const speed = Math.hypot(cur.x.v, cur.y.v);
+  if (speed > 140) {
+    let want = Math.atan2(cur.y.v, cur.x.v) - ARROW_HEADING;
+    while (want - cur.tilt.x > Math.PI) want -= 2 * Math.PI;
+    while (want - cur.tilt.x < -Math.PI) want += 2 * Math.PI;
+    cur.heading = want;
+  }
+  spring(cur.tilt, cur.heading ?? 0, 9, dt);
   if (cur.alpha.x > 0.01) drawPointer((cur.x.x - x0) * k, (cur.y.x - y0) * k, K * Math.pow(z, 0.35), clamp(cur.alpha.x, 0, 1), cur.press.x, cur.tilt.x);
 
   // intro: fade up from the page's own ground colour. outro: fade back into it.
@@ -135,6 +141,8 @@ window.render = async ({ t, T, src, phase }) => {
 
 // A Mac-style arrow, a little fatter and rounder: black body, thick white
 // rim, every corner rounded, a soft shadow. A press only nudges it smaller.
+// The direction the unrotated arrow points (from its body to its tip).
+const ARROW_HEADING = Math.atan2(-13, -5.5);
 const ARROW = new Path2D("M0 0 L0 17.2 L4.4 13.4 L7.1 19.6 L10.3 18.2 L7.7 12.3 L13.2 12.3 Z");
 function drawPointer(x, y, k, a, press, tilt) {
   const s = k * (S.cursorSize ?? 1.7) * (1 - 0.08 * press);
