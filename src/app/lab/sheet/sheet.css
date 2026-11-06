@@ -10,7 +10,8 @@
   /* The credits' grid: labels set flush right against an axis, values flush
      left from it, the way a sleeve sets its credits. The sheet's head hangs
      on the same axis. */
-  --sh-label: 96px;
+  /* Wide enough for the longest name in the personnel, "George Harrison". */
+  --sh-label: 104px;
   --sh-gutter: 16px;
   position: absolute;
   inset: 0;
@@ -318,10 +319,28 @@
   margin-top: 24px;
 }
 
+/* Labels take the 24px pitch too, so a label on a line of its own (a group's
+   name) still advances the block by exactly one line. */
 .sh-k {
   text-align: right;
+  line-height: 24px;
+  white-space: nowrap;
   color: var(--sh-ink);
   font-weight: var(--font-weight-quiet);
+}
+
+/* The personnel spans both columns and re-uses them through a subgrid, so the
+   names hang on the same axis as every other label. */
+.sh-personnel {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  margin: 0;
+}
+
+.sh-personnel > .sh-credits {
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
 }
 
 .sh-v {
@@ -330,17 +349,12 @@
   text-wrap: pretty;
 }
 
-/* Entries hang: a turnover line steps in, so every name and every title
-   starts flush on the axis and nothing else does. */
-.sh-performer,
+/* Titles hang: a turnover line steps in, so every title starts flush on the
+   axis and nothing else does. */
 .sh-side li > span:first-child {
   margin: 0;
   padding-left: 16px;
   text-indent: -16px;
-}
-
-.sh-name {
-  font-weight: var(--font-weight-strong);
 }
 
 /* Sleeve notes: no space between paragraphs, an indent instead, so the

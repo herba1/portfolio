@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { Fragment, useEffect, useRef } from "react";
 
 import { ALBUM, TRACK } from "./content";
 
@@ -462,15 +462,26 @@ function Credits() {
         </Row>
       ))}
 
-      <Row label="Performed by" group>
-        {TRACK.performers.map(([name, role]) => (
-          <p key={name} className="sh-performer">
-            <span className="sh-name">{name}</span>
-            {" "}
-            {role}
-          </p>
-        ))}
-      </Row>
+      {/* Personnel: the group's label takes a line of its own, then each
+          musician is a label on the same axis, the parts their value. The
+          inner list is a subgrid, so it shares the outer columns exactly. */}
+      <dt className="sh-k text-ui-lg" data-group="">
+        Performed by
+      </dt>
+      <dd className="sh-personnel">
+        <dl className="sh-credits">
+          {TRACK.performers.map(([name, parts]) => (
+            <Row key={name} label={name}>
+              {parts.map((line, i) => (
+                <Fragment key={line}>
+                  {i > 0 && <br />}
+                  {line}
+                </Fragment>
+              ))}
+            </Row>
+          ))}
+        </dl>
+      </dd>
 
       <Row label="Notes" group>
         {TRACK.about.map((p) => (

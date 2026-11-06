@@ -35,12 +35,15 @@ export const TRACK = {
     ["Recorded", "EMI Studios, London, 7\u00a0July\u00a0to\u00a019\u00a0August\u00a01969"],
     ["Key", "A major"],
   ],
+  // Personnel as a sleeve lists it: the name against the axis, the parts
+  // after it, broken by hand so each line is one family of instruments and
+  // every entry takes one or two lines of the 24px pitch.
   performers: [
-    ["George Harrison", "lead vocals, acoustic guitar, harmonium, Moog synthesiser, handclaps"],
-    ["Paul McCartney", "bass, backing vocals, handclaps"],
-    ["Ringo Starr", "drums, handclaps"],
-    ["George Martin", "orchestral arrangement, with Harrison"],
-    ["Orchestra", "four violas, four cellos, double bass, two piccolos, two flutes, two alto flutes, two clarinets"],
+    ["George Harrison", ["lead vocals, acoustic guitar,", "harmonium, Moog, handclaps"]],
+    ["Paul McCartney", ["bass, harmonies, handclaps"]],
+    ["Ringo Starr", ["drums, handclaps"]],
+    ["George Martin", ["orchestral arrangement"]],
+    ["Orchestra", ["violas, cellos, double bass,", "piccolos, flutes, clarinets"]],
   ],
   about: [
     "Harrison wrote it in April 1969 in Eric Clapton's garden in Surrey, on a morning he had skipped another Apple business meeting, with a borrowed acoustic guitar and the first warm day of the year.",
