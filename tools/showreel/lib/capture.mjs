@@ -238,7 +238,11 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   mark("start"); // the video opens here: the piece's own entrance is the intro
   if (reel.ready) await clock.waitFor(reel.ready);
   // The stage is what the camera frames at rest: the piece, not the page.
-  if (reel.stage) {
+  if (reel.stage?.rect) {
+    // A fixed region in viewport fractions [x, y, w, h], for pieces drawn on one canvas.
+    const [x, y, w, h] = reel.stage.rect;
+    mark("stage", { x: x * vp.width, y: y * vp.height, width: w * vp.width, height: h * vp.height, pad: reel.stage.pad ?? 0 });
+  } else if (reel.stage) {
     const sel = typeof reel.stage === "string" ? reel.stage : reel.stage.sel;
     await clock.waitFor(sel);
     // Union of every match, so `.cell` frames a whole grid of cells even when
