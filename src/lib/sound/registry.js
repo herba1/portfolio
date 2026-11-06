@@ -17,6 +17,7 @@ export const TAKES = {
   "lab/kern/kernTakes": () => import("../../app/lab/kern/kernTakes.js"),
   "lab/ligature/ligatureTakes": () => import("../../app/lab/ligature/ligatureTakes.js"),
   "lab/moire/moireTakes": () => import("../../app/lab/moire/moireTakes.js"),
+  "lab/musica-viva/musicaTakes": () => import("../../app/lab/musica-viva/musicaTakes.js"),
   "lab/pull-vinyl/vinylTakes": () => import("../../app/lab/pull-vinyl/vinylTakes.js"),
   "lab/refractor/refractorTakes": () => import("../../app/lab/refractor/refractorTakes.js"),
   "lab/select/selectTakes": () => import("../../app/lab/select/selectTakes.js"),
