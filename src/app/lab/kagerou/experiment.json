@@ -1,0 +1,54 @@
+{
+  "title": "Kagerou",
+  "description": "An abandoned highway at noon, seen from thirty centimetres off the concrete. Hold the pointer down and the sun works on the road: the air over it starts to shimmer, finest and fastest toward the horizon where the rays graze hundreds of metres of hot air, and the far road turns to water, an inferior mirage that is the bridge and the sky bent back up off a layer of thin, hot air. Let go and it cools off over a few seconds.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Film",
+    "Photography"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:30:00.000Z",
+  "intent": "Genre spec idea 9, kagerou (heat haze): Japanese summer heat shimmer on asphalt and Shinkai's low road shots. The gesture is heat; the shimmer is path-integrated refraction through a rising turbulent layer and the mirage is the exact inferior-mirage mirror below the critical depression. Reference: https://en.wikipedia.org/wiki/Mirage#Inferior_mirage",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.48,
+      0.72
+    ],
+    "to": [
+      0.52,
+      0.72
+    ]
+  },
+  "probe": [
+    {
+      "idle": 2600
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.72
+        ],
+        [
+          0.5,
+          0.72
+        ]
+      ],
+      "ms": 3600
+    },
+    {
+      "idle": 3200
+    }
+  ],
+  "sources": [
+    "HDRI: Derelict Highway (Midday), Poly Haven, photographed by Dimitrios Savva, processed by Jarod Guest, CC0. https://polyhaven.com/a/derelict_highway_midday (16k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/derelict_highway_midday_16k.hdr). Rectilinear view down the road (yaw -74.84 deg from the panorama centre, pitch 0, ~22 deg lens), the camera lowered from ~2 m to ~0.3 m: road plane resampled exactly, banks, bridge and terrain moved by their Depth Anything V2 distance (tools/depth/depth_hr.py) with occlusion. Shipped as log2 radiance -6.5..-0.5 in 8 bits with TPDF dither (plate.webp, clear sky denoised); aux.png holds log2 distance, the road mask and the sky mask.",
+    "https://en.wikipedia.org/wiki/Mirage#Inferior_mirage",
+    "https://en.wikipedia.org/wiki/Heat_haze"
+  ]
+}
