@@ -1,0 +1,11 @@
+{
+  "title": "Morph",
+  "description": "One black pill on warm white that is the whole player. At rest it is a capsule with the cover, the elapsed time and a waveform tinted from the record. Click it and the same surface grows into a panel with the title, a scrubber and controls; a few seconds before a song ends it reshapes on its own into a wider toast announcing the next one, then folds back. Nothing is a new sheet: width, height and corner radius run on one spring from wherever they are, so you can change your mind mid-morph; the cover, waveform, clock and skip button glide to their new places, everything else fades through a slight blur as the edge reveals or absorbs it, and the corners stay continuous curves from capsule to squircle.",
+  "tags": ["Interface", "Motion", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T15:00:00.000Z",
+  "intent": "Translate the one-surface morph of Emil Kowalski's Dynamic Island recreation (https://emilkowal.ski/ui/dynamic-island) and Family's dynamic tray (https://benji.org/family-values) into a now-playing control: states are shapes of one object on interruptible springs, shared elements travel, the rest crossfades with blur so nothing pops.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "tap", "on": ".mp-surface", "at": [0.5, 0.5] },
+  "sources": ["https://emilkowal.ski/ui/dynamic-island", "https://benji.org/family-values"]
+}

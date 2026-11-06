@@ -1,0 +1,324 @@
+.mp-root {
+  --mp-ground: #f2f0eb;
+  --mp-black: #0b0b0a;
+  --mp-ink: #ffffff;
+  --mp-ink-2: #8e8b86;
+  --mp-rail: #2b2a28;
+  --mp-hover: #1e1d1c;
+  --mp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--mp-ground);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mp-anchor {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  filter: drop-shadow(0 1px 1px rgb(40 30 10 / 0.1)) drop-shadow(0 12px 28px rgb(40 30 10 / 0.12));
+}
+
+.mp-surface {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--mp-black);
+  color: var(--mp-ink);
+  cursor: pointer;
+  outline: none;
+  touch-action: manipulation;
+  --mp-tint: #e9e4da;
+}
+
+.mp-root[data-mode="expanded"] .mp-surface {
+  cursor: default;
+}
+
+.mp-edge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.mp-edge path {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.08);
+  stroke-width: 1.5;
+  transition: stroke 200ms var(--mp-ease);
+}
+
+.mp-surface:focus-visible .mp-edge path {
+  stroke: var(--mp-tint);
+  stroke-width: 3;
+}
+
+.mp-surface > * {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+}
+
+/* ---- shared ---------------------------------------------------------- */
+
+.mp-art {
+  overflow: hidden;
+  background: #222120;
+  transform-origin: 0 0;
+}
+
+.mp-art-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.mp-art-img[data-fresh] {
+  animation: mp-art-in 440ms var(--mp-ease) both;
+}
+
+@keyframes mp-art-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: scale(1.08);
+  }
+}
+
+.mp-wave {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 22px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.mp-wave i {
+  display: block;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--mp-tint);
+  transform: scaleY(0.25);
+  transition: background-color 600ms var(--mp-ease);
+}
+
+.mp-time {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--font-features-numeric);
+  white-space: nowrap;
+}
+
+.mp-elapsed {
+  width: 32px;
+  color: var(--mp-ink);
+}
+
+.mp-pos {
+  width: 96px;
+  color: var(--mp-ink-2);
+}
+
+/* ---- buttons ------------------------------------------------------------ */
+
+.mp-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mp-ink);
+  cursor: pointer;
+  outline: none;
+}
+
+.mp-btn-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  transition:
+    transform 160ms var(--mp-ease),
+    background-color 160ms var(--mp-ease);
+}
+
+.mp-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+@media (hover: hover) {
+  .mp-btn:hover .mp-btn-face {
+    background: var(--mp-hover);
+  }
+}
+
+.mp-btn:active .mp-btn-face {
+  transform: scale(0.88);
+}
+
+.mp-btn:focus-visible .mp-btn-face {
+  box-shadow: inset 0 0 0 2px var(--mp-tint);
+}
+
+.mp-play svg {
+  width: 26px;
+  height: 26px;
+}
+
+.mp-glyph {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  transition:
+    opacity 180ms var(--mp-ease),
+    transform 220ms var(--mp-ease),
+    filter 180ms var(--mp-ease);
+}
+
+.mp-play[data-playing] .mp-glyph-play,
+.mp-play:not([data-playing]) .mp-glyph-pause {
+  opacity: 0;
+  transform: scale(0.6);
+  filter: blur(4px);
+}
+
+/* ---- expanded ---------------------------------------------------------- */
+
+.mp-meta {
+  width: 226px;
+}
+
+.mp-title,
+.mp-artist,
+.mp-up-title,
+.mp-up-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.mp-title {
+  font-size: var(--text-heading-sm);
+  line-height: var(--text-heading-sm--line-height);
+  letter-spacing: var(--text-heading-sm--letter-spacing);
+  font-weight: var(--text-heading-sm--font-weight);
+  color: var(--mp-ink);
+}
+
+.mp-artist {
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  color: var(--mp-ink-2);
+}
+
+.mp-scrub {
+  width: 328px;
+  height: 20px;
+  cursor: pointer;
+  touch-action: none;
+}
+
+.mp-track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 4px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: var(--mp-rail);
+  transition: transform 220ms var(--mp-ease);
+}
+
+@media (hover: hover) {
+  .mp-scrub:hover .mp-track {
+    transform: scaleY(1.5);
+  }
+}
+
+.mp-scrub[data-active] .mp-track {
+  transform: scaleY(2);
+}
+
+.mp-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--mp-ink);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+.mp-remain {
+  width: 96px;
+  text-align: right;
+  color: var(--mp-ink-2);
+}
+
+/* ---- toast ------------------------------------------------------------- */
+
+.mp-up {
+  width: 192px;
+}
+
+.mp-up-label {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  color: var(--mp-ink-2);
+  animation: mp-label-in 360ms var(--mp-ease) both;
+}
+
+@keyframes mp-label-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(4px);
+  }
+}
+
+.mp-up-title {
+  font-size: var(--text-heading-sm);
+  line-height: var(--text-heading-sm--line-height);
+  letter-spacing: var(--text-heading-sm--letter-spacing);
+  font-weight: var(--text-heading-sm--font-weight);
+  color: var(--mp-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mp-art-img[data-fresh],
+  .mp-up-label {
+    animation: none;
+  }
+}
