@@ -27,5 +27,6 @@ export const TAKES = {
   "lab/t9/t9Takes": () => import("../../app/lab/t9/t9Takes.js"),
   "lab/tempo-wheel/tempoTakes": () => import("../../app/lab/tempo-wheel/tempoTakes.js"),
   "lab/terminal/terminalTakes": () => import("../../app/lab/terminal/terminalTakes.js"),
+  "lab/versions/tickTakes": () => import("../../app/lab/versions/tickTakes.js"),
   "scorch/scorchTakes": () => import("../../app/scorch/scorchTakes.js"),
 };
