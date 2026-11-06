@@ -1,0 +1,18 @@
+{
+  "title": "Programme",
+  "description": "One word set twenty times on a ruled grid, black and one red on white, each cell a variant run by rule rather than drawn by hand. Two rows of a morphological box of typographic variables, weight, size, slope, rule, reversal, red and alignment, run along the columns and the rows. Drag across the grid to re-map which variables are running, and the whole grid recomposes in a wave from the hand, every cell interpolating its parameters. Click a cell to promote that variant to the chosen logotype; it grows to fill the box, holds, and returns.",
+  "tags": ["Type", "Systems", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "After Karl Gerstner's Designing Programmes (1964): design as a programme you can run, the morphological box of the typogram, and his grids of one logotype set across systematically varied parameters. https://medium.com/svilenk/what-i-learned-from-the-2-000-elusive-design-book-designing-programmes-f518faefcf4b. Tracking follows the house law at every rendered size, and resting weights come from the ladder tokens.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.62, 0.5] },
+  "probe": [
+    { "idle": 1500 },
+    { "drag": [[0.3, 0.5], [0.55, 0.5]], "ms": 1400 },
+    { "idle": 1400 },
+    { "drag": [[0.5, 0.3], [0.5, 0.6]], "ms": 1200 },
+    { "idle": 1600 }
+  ],
+  "sources": ["https://medium.com/svilenk/what-i-learned-from-the-2-000-elusive-design-book-designing-programmes-f518faefcf4b", "https://openlab.citytech.cuny.edu/langecomd3504fa2019/files/2018/10/Gerstner_DesigningProgrammes.pdf", "https://vercel.com/font"]
+}
