@@ -28,11 +28,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    perspective from this camera and lit by the plate's own HDRI), with their
 //    conductors drawn as catenaries.
 //
-// Motion blur is the shutter: every layer is integrated along x over 1/50 s
+// Motion blur is the shutter: every layer is integrated along x over 1/40 s
 // at its own screen velocity, so the near grass streaks, the poles smear into
-// soft bars, the hedge softens and the clouds stay sharp. The integration
-// reads horizontally box-filtered pyramids, so a long streak keeps its
-// vertical detail the way a real one does.
+// soft bars, the hedge softens and the clouds stay sharp. The field and hedge
+// read horizontally box-filtered pyramids; the poles, which carry the idea,
+// read per-row summed-area tables of their premultiplied radiance, so their
+// smear is the exact box integral over the shutter's path (two reads a row at
+// any length, no taps to band). Either way a long streak keeps its vertical
+// detail the way a real one does.
 //
 // Drag sideways to set the train's speed and direction; let go and it coasts
 // down to a crawl. Query: ?v=m/s holds a speed (blur visible), ?s=metres sets
@@ -52,7 +55,7 @@ const D_POLE = 8; // pole line, just past the ballast
 const POLE_SCALE = 1.88; // model units -> metres (an 11.5 m pole)
 const POLE_CELL = 15; // mean spacing (m): one is nearly always in the window
 const POLE_JITTER = 8; // spacing varies by this much (m)
-const SHUTTER = 1 / 50;
+const SHUTTER = 1 / 40;
 const V_MAX = 34; // m/s, a fast local
 const V_CRUISE = 2.4; // the crawl it coasts down to
 const HFOV = 88; // degrees across a landscape print
@@ -68,6 +71,13 @@ const GROUND = { y0: -0.004, y1: -0.335, x0: -0.95, period: 1.65 };
 const POLE = { l: -0.18, r: 0.18, b: -0.23, t: 1.44, n: 4, rot: [1.22, 1.22, -1.22, -1.22] };
 const LEVELS = 7;
 const POLE_TEX_H = 1670; // poles.webp height (texels)
+const POLE_CELL_W = 360; // poles.webp cell width (texels): four sprites side by side
+// The poles are seen from below, against a sky the polariser holds down: the
+// faces toward the lens are mostly shaded undersides. The wood keeps its own
+// radiance up to a knee; above it the sunlit steel and glaze roll off under a
+// ceiling (linear, under the darkest clear blue the poles cross), so a pole is
+// darker than the sky behind it, sharp or smeared, and still has its form.
+const POLE_TONE = { knee: 0.016, ceil: 0.036 };
 // Sky grade (see the shader): cloud highlight push in stops, how much local
 // form and top-lit relief steer it, the warm-neutral shoulder, and the
 // luminance the push eases toward (x the print exposure, just under white).
@@ -90,10 +100,9 @@ uniform sampler2D uSky;
 uniform sampler2D uDist;
 uniform sampler2D uGround;  // horizontal box pyramid atlas, premultiplied linear
 uniform sampler2D uHedge;
-uniform sampler2D uPoles;
+uniform highp sampler2D uPoles; // per-row prefix sums, premultiplied linear, one run per cell
 uniform vec4 uGroundLv[${LEVELS}]; // x offset (texels), width (texels), atlas width, unused
 uniform vec4 uHedgeLv[${LEVELS}];
-uniform vec4 uPolesLv[${LEVELS}];
 
 uniform vec4 uView;     // x0, y0, w, h in Panini-plane units
 uniform vec2 uPitch;    // cos, sin of the camera's upward tilt
@@ -151,8 +160,35 @@ vec4 NAME(float u, float v, float len, float wrap) { \
   return mix(a, b, f) / float(N); \
 }
 BLUR(blurGround, uGround, uGroundLv, 10)
-BLUR(blurPoles, uPoles, uPolesLv, 16)
-BLUR(spreadPoles, uPoles, uPolesLv, 6)
+
+// Pole sprites as per-row prefix sums: texel i of a cell's run holds the sum
+// of the premultiplied texels left of i, so the integral of the row from 0 to
+// a continuous X is a lerp of two neighbours, and a box of any length is the
+// difference of two of those: exact, with nothing to band or step.
+const int PCW = ${POLE_CELL_W};
+const int PH = ${POLE_TEX_H};
+vec4 poleS(int base, float X, int row) {
+  X = clamp(X, 0.0, float(PCW));
+  float fx = floor(X);
+  int i = int(fx);
+  vec4 a = texelFetch(uPoles, ivec2(base + i, row), 0);
+  vec4 b = texelFetch(uPoles, ivec2(base + min(i + 1, PCW), row), 0);
+  return mix(a, b, X - fx);
+}
+// Mean premultiplied colour and coverage over [X - len/2, X + len/2] (cell
+// texels, outside the cell is clear), linear between rows at Y (texels from
+// the top). len is at least one texel, which is plain linear filtering.
+vec4 poleBox(int cell, float X, float Y, float len) {
+  len = max(len, 1.0);
+  int base = cell * (PCW + 1);
+  float x0 = X - 0.5 * len, x1 = X + 0.5 * len;
+  float yy = clamp(Y - 0.5, 0.0, float(PH - 1));
+  int r0 = int(floor(yy));
+  int r1 = min(r0 + 1, PH - 1);
+  vec4 s0 = poleS(base, x1, r0) - poleS(base, x0, r0);
+  vec4 s1 = poleS(base, x1, r1) - poleS(base, x0, r1);
+  return max(mix(s0, s1, yy - floor(yy)) / len, vec4(0.0));
+}
 
 // The hedge is tiled H | mirror(H) | gap; every tap finds its own tile.
 vec4 hedgeAt(float yawDeg, float v, float lenDeg, float lv) {
@@ -341,12 +377,14 @@ void main() {
     float hb = 0.5 * lenM / ${D_POLE.toFixed(1)};
     if (lx < ${POLE.l.toFixed(3)} - hb || lx > ${POLE.r.toFixed(3)} + hb) continue;
     if (y < ${POLE.b.toFixed(3)} || y > ${POLE.t.toFixed(4)}) continue;
-    float cell = pl.y;
-    float uc = (lx - ${POLE.l.toFixed(3)}) / ${(POLE.r - POLE.l).toFixed(3)};
-    float v = (${POLE.t.toFixed(4)} - y) / ${(POLE.t - POLE.b).toFixed(4)};
-    float cellW = 1.0 / ${POLE.n.toFixed(1)};
-    float lenTex = (lenM / ${D_POLE.toFixed(1)}) / ${(POLE.r - POLE.l).toFixed(3)} * cellW * uPolesLv[0].y;
-    vec4 pc = blurPoles((cell + uc) * cellW, v, lenTex, 0.0);
+    int cell = int(pl.y + 0.5);
+    // sprite texels: X across the cell, Y down from its top
+    float X = (lx - ${POLE.l.toFixed(3)}) / ${(POLE.r - POLE.l).toFixed(3)} * float(PCW);
+    float Y = (${POLE.t.toFixed(4)} - y) / ${(POLE.t - POLE.b).toFixed(4)} * float(PH);
+    // the shutter's path, in texels: the train moved lenM, the pole line is
+    // D_POLE off, so the sprite slid lenM / D_POLE of the image plane
+    float lenTex = (lenM / ${D_POLE.toFixed(1)}) / ${(POLE.r - POLE.l).toFixed(3)} * float(PCW);
+    vec4 pc = poleBox(cell, X, Y, lenTex);
     if ((uDbg & 4) == 0) {
       // Halation: where the dark pole crosses bright cloud, light that went
       // through the emulsion and bounced off the film base comes back
@@ -358,11 +396,9 @@ void main() {
       float hot = smoothstep(0.6, 1.7, bgL);
       col = col * (1.0 - pc.a) + pc.rgb;
       if (hot > 0.0 && pc.a > 0.01) {
-        float u0 = (cell + uc) * cellW;
-        float dv = 5.0 / ${POLE_TEX_H.toFixed(1)};
-        float nA = 0.5 * spreadPoles(u0, v, lenTex + 12.0, 0.0).a
-                 + 0.25 * tapLv(uPoles, uPolesLv[3], u0, v - dv).a
-                 + 0.25 * tapLv(uPoles, uPolesLv[3], u0, v + dv).a;
+        float nA = 0.5 * poleBox(cell, X, Y, lenTex + 12.0).a
+                 + 0.25 * poleBox(cell, X, Y - 5.0, 8.0).a
+                 + 0.25 * poleBox(cell, X, Y + 5.0, 8.0).a;
         float ring = pc.a * clamp(2.2 * (pc.a - nA) + 0.6 * (1.0 - nA), 0.0, 1.0);
         col += uHalo * ring * hot;
       }
@@ -545,6 +581,67 @@ function hPyramid(gl, img, { wrap, alpha }) {
   return { tex: t, lv };
 }
 
+// The pole sprites as per-row prefix sums (RGBA32F, one run of cellW + 1
+// texels per cell, each starting at zero) of premultiplied linear radiance,
+// rolled off from 'knee' toward 'ceil' first. Read with texelFetch only: float32 linear
+// filtering is optional in WebGL2, and the shader interpolates itself.
+function rowSAT(gl, img, { cells, knee, ceil }) {
+  const w = img.naturalWidth;
+  const h = img.naturalHeight;
+  const cw = Math.floor(w / cells);
+  const cv = document.createElement("canvas");
+  cv.width = w;
+  cv.height = h;
+  const cx = cv.getContext("2d", { willReadFrequently: true, colorSpace: "srgb" });
+  cx.drawImage(img, 0, 0);
+  const src = cx.getImageData(0, 0, w, h).data;
+  const lut = new Float32Array(256);
+  for (let i = 0; i < 256; i++) lut[i] = 2 ** ((i / 255) * (HI - LO) + LO);
+  const tw = cells * (cw + 1);
+  const out = new Float32Array(tw * h * 4);
+  for (let y = 0; y < h; y++) {
+    for (let c = 0; c < cells; c++) {
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let a = 0;
+      let d = (y * tw + c * (cw + 1)) * 4;
+      // out[d..d+3] stays 0: the run starts at zero
+      for (let i = 0; i < cw; i++) {
+        const si = (y * w + c * cw + i) * 4;
+        const al = src[si + 3] / 255;
+        if (al > 0) {
+          const R = lut[src[si]];
+          const G = lut[src[si + 1]];
+          const B = lut[src[si + 2]];
+          const l = 0.2126 * R + 0.7152 * G + 0.0722 * B;
+          const o = l - knee;
+          const k = o > 0 ? (al * (knee + o / (1 + o / (ceil - knee)))) / l : al;
+          r += R * k;
+          g += G * k;
+          b += B * k;
+          a += al;
+        }
+        d += 4;
+        out[d] = r;
+        out[d + 1] = g;
+        out[d + 2] = b;
+        out[d + 3] = a;
+      }
+    }
+  }
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, tw, h, 0, gl.RGBA, gl.FLOAT, out);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
 function target(gl, w, h, float) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -605,7 +702,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
   const dist = imageTexture(gl, distImg, { wrap: gl.MIRRORED_REPEAT });
   const ground = hPyramid(gl, groundImg, { wrap: true, alpha: false });
   const hedge = hPyramid(gl, hedgeImg, { wrap: false, alpha: true });
-  const poles = hPyramid(gl, polesImg, { wrap: false, alpha: true });
+  const poles = rowSAT(gl, polesImg, { cells: POLE.n, ...POLE_TONE });
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -790,10 +887,9 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     bind(1, dist, "uDist");
     bind(2, ground.tex, "uGround");
     bind(3, hedge.tex, "uHedge");
-    bind(4, poles.tex, "uPoles");
+    bind(4, poles, "uPoles");
     gl.uniform4fv(u.uGroundLv, ground.lv);
     gl.uniform4fv(u.uHedgeLv, hedge.lv);
-    gl.uniform4fv(u.uPolesLv, poles.lv);
     gl.uniform4f(u.uView, x0, y0, vw, vh);
     gl.uniform2f(u.uPitch, Math.cos(pitch), Math.sin(pitch));
     gl.uniform1f(u.uS, s);
@@ -926,7 +1022,7 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
-      for (const t of [sky, dist, ground.tex, hedge.tex, poles.tex]) gl.deleteTexture(t);
+      for (const t of [sky, dist, ground.tex, hedge.tex, poles]) gl.deleteTexture(t);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);
