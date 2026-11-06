@@ -16,14 +16,28 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // plane, and that point, seen from the original camera, is where the colour
 // comes from. From the original camera every splat agrees, so the photograph
 // comes back exactly, at full resolution. Move the camera and the splats move
-// as the surfaces they are. At the edges of the view they let go of the
-// photograph and show themselves: their own colour, wider and softer.
+// as the surfaces they are. That lookup is depth-tested: a depth map ships
+// with the photo, texel for texel, and a splat only takes the photo's colour
+// where the photo shows its own surface. Where the photo shows something
+// further off (the splat hanging past its tower's edge into sky) it lets the
+// fragment go; where something nearer stood in front (a tower that has since
+// moved aside) it shows its own colour. The bake never lets one splat bridge a
+// depth step, so no colour is smeared across a silhouette. At the edges of the
+// view the splats let go of the photograph and show themselves: their own
+// colour, wider and softer.
 //
 // Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
 // opening.
 
 const ASSET = "/lab/splat-towers/";
 const DATA_W = 2048; // texels per row of the splat texture (2 per splat)
+// depth.png: 0..254 is log Z from DEPTH_LO to DEPTH_HI metres, 255 is sky (bake.py)
+const DEPTH_LO = 20;
+const DEPTH_HI = 400;
+// How far (in log depth) a photo texel may sit off a splat's own plane and
+// still be its surface: same below the first value, gone past the second.
+// The bake finds steps at 0.05 over 5 px; a facade drifts ~1% across a splat.
+const DEPTH_TOL = [0.035, 0.07];
 
 const MAX_DEG = 5; // orbit range before the rubber band
 const PIVOT = 70; // metres up the optical axis: the camera swings round this point
@@ -71,6 +85,7 @@ flat out vec3 vConic;
 flat out vec4 vCol;
 flat out float vTex;
 flat out vec4 vPlane;
+flat out float vTower;
 
 vec3 s2l(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
@@ -148,6 +163,7 @@ void main() {
   vCol = vec4(col * (1.0 + 0.3 * soft * soft), mix(2.6, 0.5, soft) * wsel);
   vTex = (flags & 1u) == 1u ? 1.0 - smoothstep(0.0, 0.6, soft) : 0.0;
   vPlane = vec4(nn, dot(nn, X));
+  vTower = float((flags >> 5) & 1u);
 }`;
 
 const SPLAT_FS = `#version 300 es
@@ -157,7 +173,11 @@ flat in vec3 vConic;
 flat in vec4 vCol;
 flat in float vTex;
 flat in vec4 vPlane;
+flat in float vTower;
 uniform sampler2D uPhoto;
+uniform sampler2D uDepth; // R8, nearest: log Z per photo texel, 1.0 = sky
+uniform vec2 uDr;       // log(DEPTH_LO), log(DEPTH_HI / DEPTH_LO) / 254
+uniform vec2 uTol;
 uniform mat3 uRotT;     // view -> world
 uniform vec3 uCam;
 uniform float uF;
@@ -166,8 +186,22 @@ uniform vec2 uSrc;
 uniform vec4 uM2inv;
 uniform vec2 uRes;
 uniform float uHeadroom;
-uniform vec2 uZr;       // log(ZMIN), 1 / log(ZMAX / ZMIN)
 out vec4 outColor;
+
+// One photo texel against this fragment's own surface, at log depth lp.
+// x: the texel is this surface (take the photo); y: something nearer stood in
+// front of it in the photo (take the splat's own colour). Neither: the texel
+// is further off, beyond this surface's edge, and the fragment lets go.
+vec2 tapClass(ivec2 ij, ivec2 size, float lp) {
+  if (any(lessThan(ij, ivec2(0))) || any(greaterThanEqual(ij, size))) return vec2(0.0, 1.0);
+  float d = texelFetch(uDepth, ij, 0).r * 255.0;
+  if (d > 254.5) return vTower > 0.5 ? vec2(0.0) : vec2(1.0, 0.0);
+  if (vTower < 0.5) return vec2(0.0, 1.0);
+  float dz = uDr.x + d * uDr.y - lp;
+  float same = 1.0 - smoothstep(uTol.x, uTol.y, abs(dz));
+  return vec2(same, dz < 0.0 ? 1.0 - same : 0.0);
+}
+
 void main() {
   float pw = -0.5 * (vConic.x * vOff.x * vOff.x + 2.0 * vConic.y * vOff.x * vOff.y + vConic.z * vOff.y * vOff.y);
   float alpha = min(0.995, vCol.a * exp(pw));
@@ -180,18 +214,46 @@ void main() {
   float den = dot(vPlane.xyz, dir);
   float t = (vPlane.w - dot(vPlane.xyz, uCam)) / (abs(den) > 1e-6 ? den : 1e-6);
   vec3 P = uCam + t * dir;
-  vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC) / uSrc;
-  vec4 photo = texture(uPhoto, clamp(uv, vec2(0.0), vec2(1.0)));
-  float ok = (t > 0.0 && P.z > 0.1) ? 1.0 : 0.0;
-  // The photograph's alpha says how far away each pixel was. A splat only
-  // takes colour from its own surface: where the photo shows something
-  // nearer or further (a tower edge over sky, sky behind a tower), this
-  // fragment is not part of it and stays clear.
-  float lnr = abs(photo.a - (log(max(P.z, 1e-3)) - uZr.x) * uZr.y) / uZr.y;
-  float mine = ok * (1.0 - smoothstep(0.16, 0.34, lnr));
-  alpha *= mix(1.0, mine, vTex);
-  if (alpha < 1.0 / 255.0) discard;
-  vec3 c = mix(vCol.rgb, photo.rgb, vTex * ok);
+  vec3 c = vCol.rgb;
+  if (vTex > 0.0) {
+    vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC) / uSrc;
+    float keep = 0.0;
+    vec3 look = vec3(0.0);
+    if (t > 0.0 && P.z > 0.1) {
+      // Depth test the lookup on the four texels around it, unfiltered, and
+      // weigh them bilinearly so the cut is antialiased, not texel-stepped.
+      ivec2 size = textureSize(uDepth, 0);
+      vec2 tp = uv * vec2(size) - 0.5;
+      ivec2 i0 = ivec2(floor(tp));
+      vec2 f = tp - floor(tp);
+      float lp = log(P.z);
+      vec2 k00 = tapClass(i0, size, lp);
+      vec2 k10 = tapClass(i0 + ivec2(1, 0), size, lp);
+      vec2 k01 = tapClass(i0 + ivec2(0, 1), size, lp);
+      vec2 k11 = tapClass(i0 + ivec2(1, 1), size, lp);
+      vec4 w = vec4((1.0 - f.x) * (1.0 - f.y), f.x * (1.0 - f.y), (1.0 - f.x) * f.y, f.x * f.y);
+      vec4 sm = w * vec4(k00.x, k10.x, k01.x, k11.x);
+      float same = sm.x + sm.y + sm.z + sm.w;
+      float own = dot(w, vec4(k00.y, k10.y, k01.y, k11.y));
+      vec3 ph;
+      if (same > 0.999) {
+        ph = texture(uPhoto, uv).rgb; // all its own surface: filtered, mipmapped
+      } else {
+        // on a silhouette: only the texels that are this surface
+        ivec2 cl = size - 1;
+        ph = sm.x * texelFetch(uPhoto, clamp(i0, ivec2(0), cl), 0).rgb
+           + sm.y * texelFetch(uPhoto, clamp(i0 + ivec2(1, 0), ivec2(0), cl), 0).rgb
+           + sm.z * texelFetch(uPhoto, clamp(i0 + ivec2(0, 1), ivec2(0), cl), 0).rgb
+           + sm.w * texelFetch(uPhoto, clamp(i0 + ivec2(1, 1), ivec2(0), cl), 0).rgb;
+        ph /= max(same, 1e-4);
+      }
+      keep = same + own;
+      look = (ph * same + vCol.rgb * own) / max(keep, 1e-4);
+    }
+    alpha *= mix(1.0, keep, vTex);
+    if (alpha < 1.0 / 255.0) discard;
+    c = mix(vCol.rgb, look, vTex);
+  }
   float m = max(c.r, max(c.g, c.b));
   float e = smoothstep(0.55, 1.0, m);
   c *= 1.0 + uHeadroom * e * e;
@@ -405,14 +467,20 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
 
-  const [buf, bitmap] = await Promise.all([
+  const loadBitmap = (name) =>
+    fetch(`${ASSET}${name}`)
+      .then((r) => {
+        if (!r.ok) throw new Error(`${name} ${r.status}`);
+        return r.blob();
+      })
+      .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" }));
+  const [buf, bitmap, depthBitmap] = await Promise.all([
     fetch(`${ASSET}splats.bin`).then((r) => {
       if (!r.ok) throw new Error(`splats.bin ${r.status}`);
       return r.arrayBuffer();
     }),
-    fetch(`${ASSET}photo.webp`)
-      .then((r) => r.blob())
-      .then((b) => createImageBitmap(b, { colorSpaceConversion: "none", premultiplyAlpha: "none" })),
+    loadBitmap("photo.webp"),
+    loadBitmap("depth.png"),
   ]);
   const D = decode(buf);
 
@@ -438,6 +506,17 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
+
+  // The depth map: read texel by texel, never filtered across a silhouette.
+  const depthTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, depthTex);
+  gl.texStorage2D(gl.TEXTURE_2D, 1, gl.R8, depthBitmap.width, depthBitmap.height);
+  gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, gl.RED, gl.UNSIGNED_BYTE, depthBitmap);
+  depthBitmap.close?.();
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   // ---- geometry: one quad, instanced per splat index
   const prog = compile(gl, SPLAT_VS, SPLAT_FS);
@@ -570,6 +649,11 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, photo);
     gl.uniform1i(u.uPhoto, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, depthTex);
+    gl.uniform1i(u.uDepth, 2);
+    gl.uniform2f(u.uDr, Math.log(DEPTH_LO), Math.log(DEPTH_HI / DEPTH_LO) / 254);
+    gl.uniform2f(u.uTol, DEPTH_TOL[0], DEPTH_TOL[1]);
     // world -> view is R^T: R row major read as column major is exactly R^T.
     uploadMat3(u.uRot, cam.R, true);
     uploadMat3(u.uRotT, cam.R, false);
@@ -583,7 +667,6 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.uniform4fv(u.uSoft, soft);
     gl.uniform1i(u.uCut, cut);
     gl.uniform1f(u.uHeadroom, HEADROOM);
-    gl.uniform2f(u.uZr, Math.log(D.ZMIN), 1 / Math.log(D.ZMAX / D.ZMIN));
     gl.bindVertexArray(vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, drawCount);
     gl.bindVertexArray(null);
@@ -749,6 +832,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
       if (fbo) gl.deleteFramebuffer(fbo);
       gl.deleteTexture(dataTex);
       gl.deleteTexture(photo);
+      gl.deleteTexture(depthTex);
       gl.deleteBuffer(corners);
       gl.deleteBuffer(order);
       gl.deleteVertexArray(vao);
