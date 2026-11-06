@@ -48,7 +48,7 @@ export async function createCoup(host, { embedded = false } = {}) {
   const box = host.closest(".piece-box") || host;
   const params = new URLSearchParams(window.location.search);
   const freezeT = params.has("t") ? Math.max(0, parseFloat(params.get("t")) || 0) : null;
-  const baseSeed = parseInt(params.get("seed") || "11", 10) || 11;
+  const baseSeed = parseInt(params.get("seed") || "7", 10) || 7;
   let seed = baseSeed;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -79,6 +79,8 @@ export async function createCoup(host, { embedded = false } = {}) {
       k: 120,
       mass: line.tier === 0 ? 0.42 : line.tier === 1 ? 0.75 : 1,
       shown: -1,
+      shownW: -1,
+      shownZ: -1,
     };
   });
 
@@ -95,6 +97,13 @@ export async function createCoup(host, { embedded = false } = {}) {
   } catch {
     /* measure with whatever is there */
   }
+
+  // Weight is the line's state: a line in flight thins to the meta cut and
+  // fills back in as it lands, so lines passing one another read as passing.
+  const tok = getComputedStyle(host);
+  const wt = (name, fb) => parseFloat(tok.getPropertyValue(name)) || fb;
+  const REST_W = [wt("--font-weight-bold", 700), wt("--font-weight-semibold", 600)];
+  const FLIGHT_W = wt("--font-weight-meta", 440);
 
   const widths = new Map();
   const measure = (item, size) => {
@@ -120,39 +129,90 @@ export async function createCoup(host, { embedded = false } = {}) {
 
   // ---- composition -------------------------------------------------------
 
-  function compose(rng) {
+  // Minimum clear space between any two settled boxes, capitals included.
+  const GAP_X = () => Math.max(16, 24 * u);
+  const GAP_Y = () => Math.max(8, 12 * u);
+
+  // The capitals take a new diagonal on every throw: their own sizes, their
+  // own stride, still stepping down the spread from left to right.
+  // The diagonal the capitals sit on now; a new throw must move them.
+  let lastBig = null;
+  const bigDistance = (a, b) => a.reduce((sum, p, j) => sum + Math.hypot(p.x - b[j].x, p.y - b[j].y) + Math.abs(p.s - b[j].s) * 4, 0) / a.length;
+
+  function composeBig(rng, mX, mY) {
+    let best = null;
+    for (let n = 0; n < 16; n++) {
+      const cand = composeBigOnce(rng, mX, mY);
+      if (!lastBig) return cand;
+      const d = bigDistance(cand, lastBig);
+      if (!best || d > best.d) best = { cand, d };
+      if (d > Math.max(W, H) * 0.16) break;
+    }
+    return best.cand;
+  }
+
+  function composeBigOnce(rng, mX, mY) {
+    const big = items.filter((it) => it.tier === 0);
+    let base = Math.round(Math.min(84 * u, H * 0.11));
+    const room = W * (spread ? 0.5 : 0.86);
+    const sizes = big.map(() => 0.5 + rng() * 0.5);
+    // one of them always carries the full weight of the page
+    sizes[Math.floor(rng() * 4)] = 1;
+    let px = sizes.map((f, j) => {
+      let s = Math.round(base * f);
+      const w = measure(big[j], s);
+      if (w > room) s = Math.floor((s * room) / w);
+      return Math.max(20, s);
+    });
+    // fit the four rows plus breathing room into the page height
+    const avail = H - mY * 2;
+    let hs = px.map(lineHeight);
+    const minGap = GAP_Y() * 2;
+    while (hs.reduce((a, b) => a + b, 0) + minGap * 3 > avail * 0.86 && px.some((s) => s > 20)) {
+      px = px.map((s) => Math.max(20, s - 2));
+      hs = px.map(lineHeight);
+    }
+    const free = avail - hs.reduce((a, b) => a + b, 0) - minGap * 3;
+    // top margin, three gaps, bottom margin, each a random share of the slack
+    const wts = [0.2 + rng() * 0.8, 0.4 + rng() * 1.6, 0.4 + rng() * 1.6, 0.4 + rng() * 1.6, 0.2 + rng() * 0.8];
+    const sum = wts.reduce((a, b) => a + b, 0);
+    let y = mY + (free * wts[0]) / sum;
+    const ys = [];
+    for (let j = 0; j < 4; j++) {
+      ys.push(snap4(y));
+      y = snap4(y) + hs[j] + minGap + (j < 3 ? (free * wts[j + 1]) / sum : 0);
+    }
+    const ws = px.map((s, j) => measure(big[j], s));
+    // stride: a start and an end on the diagonal, with uneven steps between
+    const x0 = mX + rng() * W * 0.2;
+    const xEnd = W - mX - ws[3] - rng() * W * 0.12;
+    const steps = [0.3 + rng(), 0.3 + rng(), 0.3 + rng()];
+    const stepSum = steps.reduce((a, b) => a + b, 0);
+    let acc = 0;
+    const out = [];
+    let prevX = -Infinity;
+    big.forEach((it, j) => {
+      if (j > 0) acc += steps[j - 1] / stepSum;
+      let x = x0 + (Math.max(x0, xEnd) - x0) * acc;
+      x = Math.max(prevX + W * 0.04, x);
+      x = Math.min(x, W - mX - ws[j]);
+      x = Math.max(mX, x);
+      prevX = x;
+      out.push({ it, x: Math.round(x), y: ys[j], s: px[j], w: ws[j], h: hs[j] });
+    });
+    return out;
+  }
+
+  function composeOnce(rng) {
     const mX = Math.round(W * 0.065);
     const mY = snap4(H * 0.09);
     const out = new Array(items.length);
     const rects = [];
-    const big = items.filter((it) => it.tier === 0);
 
-    // The capitals: one size, fitted so the longest sits inside a page and a half.
-    let bigSize = Math.round(Math.min(76 * u, H * 0.1));
-    const widest = Math.max(...big.map((it) => measure(it, bigSize)));
-    const room = W * (spread ? 0.46 : 0.86);
-    if (widest > room) bigSize = Math.floor((bigSize * room) / widest);
-    bigSize = Math.max(20, bigSize);
-    const bigLh = lineHeight(bigSize);
-
-    const top = mY;
-    const span = H - mY * 2 - bigLh;
-    const fr = [0, 0.3 + (rng() - 0.5) * 0.12, 0.62 + (rng() - 0.5) * 0.12, 1];
-    const bw = big.map((it) => measure(it, bigSize));
-    const x0 = mX + rng() * W * 0.05;
-    const x3 = W - mX - bw[3] - rng() * W * 0.07;
-    let prevX = -Infinity;
-    big.forEach((it, j) => {
-      const t = j / 3;
-      let x = x0 + (x3 - x0) * t + (j === 1 || j === 2 ? (rng() - 0.5) * W * 0.12 : 0);
-      x = Math.max(prevX + W * 0.06, x);
-      x = Math.min(x, W - mX - bw[j]);
-      x = Math.max(mX, x);
-      prevX = x;
-      const y = snap4(top + span * fr[j]);
-      out[it.i] = { x: Math.round(x), y, s: bigSize };
-      rects.push({ x, y, w: bw[j], h: bigLh, big: true });
-    });
+    for (const b of composeBig(rng, mX, mY)) {
+      out[b.it.i] = { x: b.x, y: b.y, s: b.s };
+      rects.push({ x: b.x, y: b.y, w: b.w, h: b.h, big: true });
+    }
 
     // The threads, larger first, each placed near something already set.
     const blocks = BLOCKS.map((b, bi) => ({ ...b, bi, items: items.filter((it) => it.block === bi) })).filter((b) => b.tier !== 0);
@@ -165,6 +225,7 @@ export async function createCoup(host, { embedded = false } = {}) {
     const gutterPad = 20 * u;
     const cols = 14;
     const scale = Math.min(1, Math.max(0.7, u));
+    let failed = 0;
     for (const blk of blocks) {
       const sizes = blk.tier === 1 ? TIER1_SIZES : TIER2_SIZES;
       const size = Math.max(10, Math.round(sizes[Math.floor(rng() * sizes.length)] * scale));
@@ -173,8 +234,9 @@ export async function createCoup(host, { embedded = false } = {}) {
       const prefersStair = many && (blk.items.length > 3 || rng() < 0.6);
       let best = null;
       let rel = [];
-      // if the thread will not fit as drawn, hang it flush, then loosen the spacing
-      for (const [stair, loose] of [[prefersStair, 1], [false, 1], [false, 0.5], [false, 0.2]]) {
+      // if the thread will not fit as drawn, hang it flush, then loosen the
+      // spacing, but never below the hard clearance
+      for (const [stair, loose] of [[prefersStair, 1], [false, 1], [false, 0.6], [false, 0]]) {
         const pitch = stair ? h + snap4(h * 0.5) : h;
         const space = size * 0.32;
         rel = [];
@@ -187,11 +249,11 @@ export async function createCoup(host, { embedded = false } = {}) {
           if (stair) rx += w + space;
         });
         const bh = (blk.items.length - 1) * pitch + h;
-        const padY = Math.max(16, h) * loose;
-        const padX = 32 * u * loose;
+        const padY = Math.max(GAP_Y(), Math.max(16, h) * loose);
+        const padX = Math.max(GAP_X(), 32 * u * loose);
         const want = (16 + rng() * 110) * u;
         let bestScore = Infinity;
-        for (let n = 0; n < 260; n++) {
+        for (let n = 0; n < 320; n++) {
           let x;
           const pick = rng();
           const anchor = rects[Math.floor(rng() * rects.length)];
@@ -200,8 +262,8 @@ export async function createCoup(host, { embedded = false } = {}) {
           else if (pick < 0.7) x = anchor.x + anchor.w - bw;
           else x = mX + Math.floor(rng() * cols) * ((W - mX * 2) / cols);
           x = Math.round(x);
-          const y = snap4(mY + rng() * (H - mY * 2 - bh));
-          if (x < mX || x + bw > W - mX) continue;
+          const y = snap4(mY * 0.6 + rng() * (H - mY * 1.2 - bh));
+          if (x < mX * 0.6 || x + bw > W - mX * 0.6) continue;
           // only the capitals may cross the fold; a thread stays on its page
           if (spread && x < W / 2 + gutterPad && x + bw > W / 2 - gutterPad) continue;
           let ok = true;
@@ -224,13 +286,31 @@ export async function createCoup(host, { embedded = false } = {}) {
         }
         if (best) break;
       }
+      if (!best) failed += 1;
       blk.items.forEach((it, n) => {
         if (!best) out[it.i] = { x: -9999, y: snap4(H * 0.5), s: size, hidden: true };
         else out[it.i] = { x: Math.round(best.x + rel[n].dx), y: best.y + rel[n].dy, s: size };
       });
       if (best) rects.push({ x: best.x, y: best.y, w: best.bw, h: best.bh });
     }
+    return { out, failed };
+  }
+
+  function remember(out) {
+    lastBig = items.filter((it) => it.tier === 0).map((it) => out[it.i]);
     return out;
+  }
+
+  // A throw that cannot seat every line is thrown again from the same seed,
+  // so the poem is always whole and nothing ever lands on anything.
+  function compose(rng) {
+    let fallback = null;
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const { out, failed } = composeOnce(rng);
+      if (!failed) return remember(out);
+      if (!fallback || failed < fallback.failed) fallback = { out, failed };
+    }
+    return remember(fallback.out);
   }
 
   function place(layout) {
@@ -256,19 +336,29 @@ export async function createCoup(host, { embedded = false } = {}) {
     const len = Math.hypot(dirX, dirY) || 1;
     const nx = dirX / len;
     const ny = dirY / len;
+    // The capitals tumble one after another, in reading order; the threads
+    // let go once the first capital is on its way, each line of a thread a
+    // beat behind the one above it, so a cascade lands as a cascade.
+    const blockAt = BLOCKS.map(() => 0.22 + rngMotion() * 0.36);
     for (const it of items) {
       const rnd = rngMotion;
       const t = layout[it.i];
-      // Each line lets go at its own moment and travels at its own pace,
-      // so they arrive out of order.
       it.next = t;
-      it.at = clock + rnd() * 0.34 + (it.tier === 0 ? 0.06 : 0);
-      it.k = it.tier === 0 ? 46 + rnd() * 14 : 60 + rnd() * 70;
+      if (it.tier === 0) {
+        const j = it.block;
+        it.at = clock + 0.04 + j * 0.15;
+        it.k = 44 + j * 4 + rnd() * 6;
+      } else {
+        it.at = clock + blockAt[it.block] + it.line * 0.05;
+        it.k = 72 + rnd() * 48;
+      }
       const sp = power * (0.55 + rnd() * 0.9) * it.mass;
       const side = (rnd() - 0.5) * 0.9;
       it.vx += (nx - ny * side) * sp;
       it.vy += (ny + nx * side) * sp;
-      it.vr += (rnd() - 0.5) * 70 * it.mass;
+      // a capital turns over as it falls; small lines only rock
+      const spin = it.tier === 0 ? (rnd() < 0.5 ? -1 : 1) * (22 + rnd() * 18) : (rnd() - 0.5) * 70 * it.mass;
+      it.vr += spin;
     }
     wake();
   }
@@ -296,7 +386,9 @@ export async function createCoup(host, { embedded = false } = {}) {
       it.vy += (-k * (it.y - it.ty) - c * it.vy) * dt;
       it.vs += (-k * (it.s - it.ts) - c * it.vs) * dt;
       const kr = k * 1.6;
-      it.vr += (-kr * it.r - 2 * Math.sqrt(kr) * it.vr) * dt;
+      // a capital leans into its flight and rights itself as it arrives
+      const rT = it.tier === 0 ? Math.max(-6, Math.min(6, ((it.x - it.tx) / W) * 14 + ((it.ty - it.y) / H) * 4)) : 0;
+      it.vr += (-kr * (it.r - rT) - 2 * Math.sqrt(kr) * it.vr) * dt;
       it.x += it.vx * dt;
       it.y += it.vy * dt;
       it.s += it.vs * dt;
@@ -332,7 +424,27 @@ export async function createCoup(host, { embedded = false } = {}) {
         if (it.tier === 2 && s <= 13.5) el.dataset.small = "";
         else delete el.dataset.small;
       }
-      const r = Math.max(-2.2, Math.min(2.2, it.r));
+      const d = Math.hypot(it.x - it.tx, it.y - it.ty) + Math.abs(it.s - it.ts) * 3;
+      const v = Math.hypot(it.vx, it.vy);
+      let f = Math.min(1, Math.max(d / (110 * Math.max(0.6, u)), v / (520 * Math.max(0.6, u))));
+      f = f * f * (3 - 2 * f);
+      if (it.tier < 2) {
+        const w = Math.round(REST_W[it.tier] - (REST_W[it.tier] - FLIGHT_W) * f);
+        if (w !== it.shownW) {
+          it.shownW = w;
+          el.style.fontWeight = w === REST_W[it.tier] ? "" : String(w);
+        }
+      }
+      // landed lines sit above lines still travelling, and a halo of ground
+      // around every letter makes a crossing read as one line passing under
+      // another rather than two lines printed on top of each other
+      const z = (f < 0.08 ? 4 : 1) + (it.tier === 0 ? 1 : 0);
+      if (z !== it.shownZ) {
+        it.shownZ = z;
+        el.style.zIndex = String(z);
+      }
+      const lim = it.tier === 0 ? 7 : 2.2;
+      const r = Math.max(-lim, Math.min(lim, it.r));
       el.style.transform = `translate3d(${it.x.toFixed(2)}px, ${it.y.toFixed(2)}px, 0) rotate(${r.toFixed(3)}deg)`;
     }
   }
@@ -473,6 +585,7 @@ export async function createCoup(host, { embedded = false } = {}) {
     widths.clear();
     for (const it of items) it.shown = -1;
     if (freezeT != null) seed = baseSeed;
+    lastBig = null;
     place(compose(mulberry32(seed)));
     if (freezeT != null) {
       rngMotion = mulberry32(seed * 7919 + 3);
@@ -482,11 +595,55 @@ export async function createCoup(host, { embedded = false } = {}) {
       for (let t = 0; t < freezeT; t += dt) step(dt);
     }
     render();
+    if (freezeT != null) window.__coupOverlaps = overlaps(0, 0);
     sized = true;
   };
+
+  // Every pair of visible line boxes, read back from the DOM, closer than
+  // the given clearance. Used by ?audit and by the frozen still.
+  function overlaps(mx, my) {
+    const hr = host.getBoundingClientRect();
+    const boxes = items
+      .filter((it) => !it.hidden)
+      .map((it) => {
+        const r = it.el.getBoundingClientRect();
+        return { t: it.text, blk: it.block, x: r.left - hr.left, y: r.top - hr.top, w: r.width, h: r.height };
+      });
+    const hits = [];
+    for (let a = 0; a < boxes.length; a++) {
+      for (let b = a + 1; b < boxes.length; b++) {
+        const A = boxes[a];
+        const B = boxes[b];
+        const gx = Math.max(B.x - (A.x + A.w), A.x - (B.x + B.w));
+        const gy = Math.max(B.y - (A.y + A.h), A.y - (B.y + B.h));
+        // lines of one thread are set solid against each other; they may
+        // touch but never overlap
+        const same = A.blk === B.blk;
+        if (same ? gx < -0.5 && gy < -0.5 : gx < mx && gy < my) hits.push(`${A.t} × ${B.t}`);
+      }
+    }
+    return { hits, boxes };
+  }
+
+
   const ro = new ResizeObserver(resize);
   ro.observe(box);
   resize();
+  if (params.has("audit")) {
+    const n = parseInt(params.get("audit"), 10) || 50;
+    const report = [];
+    for (let k = 0; k < n; k++) {
+      const before = lastBig;
+      place(compose(mulberry32(baseSeed + k)));
+      const moved = before ? Math.round(bigDistance(lastBig, before)) : 0;
+      render();
+      const { hits, boxes } = overlaps(12, 8);
+      const out = boxes.filter((b) => b.x < 0 || b.y < 0 || b.x + b.w > W || b.y + b.h > H).map((b) => b.t);
+      const big = items.filter((it) => it.tier === 0).map((it) => [Math.round(it.x), Math.round(it.y), Math.round(it.s)]);
+      report.push({ seed: baseSeed + k, hits, out, hidden: items.filter((it) => it.hidden).length, big, moved });
+    }
+    window.__coupAudit = report;
+  }
   void sized;
   void embedded;
 
