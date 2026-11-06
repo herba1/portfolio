@@ -1,0 +1,188 @@
+/* Landscape: real text on planes in one perspective space.
+   Every plane is set at the size it reads at when the camera frames it, so
+   tracking follows the law for that size: -0.043 x (size - 12). */
+
+.ls {
+  --ls-ground: #f2f0eb;
+  --ls-ink: #141413;
+  --ls-accent: #d4391d;
+  --font-weight-body: 460;
+
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--ls-ground);
+  color: var(--ls-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  outline: none;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.ls[data-embedded] {
+  min-height: 100%;
+  touch-action: pan-y;
+}
+
+.ls[data-grabbing] {
+  cursor: grabbing;
+}
+
+.ls-world {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 0;
+  height: 0;
+  opacity: 0;
+}
+
+.ls[data-ready] .ls-world {
+  animation: ls-in 900ms var(--ease-entrance) forwards;
+}
+
+@keyframes ls-in {
+  to {
+    opacity: 1;
+  }
+}
+
+.ls-plane {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: 0 0;
+  visibility: hidden;
+  backface-visibility: hidden;
+}
+
+.ls-plane p,
+.ls-plane h2,
+.ls-plane h3,
+.ls-plane h4 {
+  margin: 0;
+}
+
+.ls-plane h2,
+.ls-plane h3,
+.ls-plane h4 {
+  text-wrap: balance;
+}
+
+/* Level 0: the title, far away and large. */
+.ls-title {
+  width: 860px;
+}
+
+.ls-kicker {
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.0172em;
+  font-weight: var(--font-weight-strong);
+  color: var(--ls-accent);
+}
+
+.ls-title-h {
+  margin-top: 4px;
+  font-size: 128px;
+  line-height: 128px;
+  letter-spacing: -0.039em;
+  font-weight: var(--font-weight-semibold);
+}
+
+.ls-sub {
+  margin-top: 20px;
+  max-width: 560px;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.0172em;
+  font-weight: var(--font-weight-body);
+}
+
+/* Level 1: chapters of the year. */
+.ls-chapter {
+  width: 520px;
+}
+
+.ls-when {
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: -0.17px;
+  font-weight: var(--font-weight-body);
+  font-variant-numeric: tabular-nums;
+  color: var(--ls-accent);
+}
+
+.ls-n {
+  margin-right: 12px;
+  font-weight: var(--font-weight-strong);
+}
+
+.ls-chapter-h {
+  margin-top: 4px;
+  font-size: 72px;
+  line-height: 80px;
+  letter-spacing: -0.0358em;
+  font-weight: var(--font-weight-semibold);
+}
+
+.ls-line {
+  margin-top: 8px;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.0172em;
+  font-weight: var(--font-weight-body);
+}
+
+/* Level 2: dated entries. */
+.ls-entry {
+  width: 360px;
+}
+
+.ls-date {
+  font-size: 14px;
+  line-height: 20px;
+  letter-spacing: -0.09px;
+  font-weight: var(--font-weight-meta);
+  font-variant-numeric: tabular-nums;
+  color: var(--ls-accent);
+}
+
+.ls-entry-h {
+  margin-top: 4px;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: -0.0172em;
+  font-weight: var(--font-weight-strong);
+}
+
+.ls-body {
+  margin-top: 8px;
+  font-size: 16px;
+  line-height: 24px;
+  letter-spacing: -0.17px;
+  font-weight: var(--font-weight-body);
+}
+
+/* Level 3: notes, the smallest layer. */
+.ls-note {
+  width: 240px;
+  padding-left: 12px;
+  border-left: 1px solid var(--ls-accent);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0px;
+  font-weight: var(--font-weight-medium);
+  font-variant-numeric: tabular-nums;
+}
