@@ -13,14 +13,6 @@ function readStill() {
   return Number.isFinite(t) ? t : 0.42;
 }
 
-function ArrowIcon() {
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true">
-      <path d="M8 12.5V3.8M4.2 7.4 8 3.6l3.8 3.8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
 export default function Piece({ embedded = false }) {
   const rootRef = useRef(null);
   const inputRef = useRef(null);
@@ -100,7 +92,6 @@ export default function Piece({ embedded = false }) {
   };
 
   const Root = embedded ? "div" : "main";
-  const filled = value.trim().length > 0;
 
   return (
     <Root ref={rootRef} className="vanish" data-embedded={embedded ? "" : undefined} data-phase={phase}>
@@ -126,16 +117,7 @@ export default function Piece({ embedded = false }) {
           enterKeyHint="send"
           maxLength={160}
         />
-        <button
-          type="submit"
-          className="vanish-send"
-          data-filled={filled ? "" : undefined}
-          aria-label="Let it go"
-          tabIndex={filled ? 0 : -1}
-          onPointerDown={(event) => event.preventDefault()}
-        >
-          <ArrowIcon />
-        </button>
+        <span className="vanish-rule" aria-hidden="true" />
       </form>
       <canvas ref={canvasRef} className="vanish-canvas" aria-hidden="true" />
     </Root>
