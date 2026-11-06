@@ -11,7 +11,14 @@ import { createStage, clamp } from "../_kit/stage";
 // delayed copy of the target, the delay growing with its distance from the
 // hand, so a re-map rolls across the grid as a wave and every cell
 // interpolates its parameters rather than crossfading. A click promotes a
-// cell: that variant grows to fill the ruled box, holds, and goes back.
+// cell: that variant grows into a full-width band of the sheet, holds, and
+// goes back.
+//
+// The cells take their proportion from the word itself: the bold cut's
+// advance against its ascender plus the rule allowance, so at its default
+// size every variant sits flush across its cell with a small, equal pad, the
+// way Gerstner's typograms are set edge to edge. The size axis runs past 1
+// and crops at the cell, rather than shrinking the word into blank ground.
 //
 // Type follows the house law at every rendered size, including every size
 // passed through while a cell grows: tracking = -0.043 x (size - 12) px.
@@ -46,7 +53,18 @@ function loadFont() {
 // rested on; anything in between is a cell in motion.
 function readLadder() {
   const cs = getComputedStyle(document.documentElement);
-  const fallback = { light: 300, normal: 400, medium: 500, semibold: 600, bold: 700 };
+  const fallback = {
+    light: 300,
+    normal: 400,
+    meta: 440,
+    "body-sm": 490,
+    medium: 500,
+    caption: 520,
+    emphasis: 540,
+    strong: 590,
+    semibold: 600,
+    bold: 700,
+  };
   const out = {};
   for (const k of Object.keys(fallback)) {
     const v = parseFloat(cs.getPropertyValue(`--font-weight-${k}`));
@@ -56,6 +74,32 @@ function readLadder() {
 }
 
 const lin = (a, b) => (n) => Array.from({ length: n }, (_, i) => a + ((b - a) * i) / Math.max(1, n - 1));
+// n values spread evenly across a list, ends included.
+const spread = (arr, n) => Array.from({ length: n }, (_, i) => arr[Math.round((i * (arr.length - 1)) / Math.max(1, n - 1))]);
+// n even steps from the first to the last of a sorted list, each taken to
+// the nearest value not already used, so a long axis keeps its steps apart.
+// An axis longer than the list repeats rungs in order instead.
+const snapSteps = (arr, n) => {
+  if (n >= arr.length) return spread(arr, n);
+  const used = new Set();
+  return lin(arr[0], arr[arr.length - 1])(n).map((t) => {
+    let pick = arr[0];
+    let d = Infinity;
+    for (const v of arr) {
+      if (!used.has(v) && Math.abs(v - t) < d) {
+        d = Math.abs(v - t);
+        pick = v;
+      }
+    }
+    used.add(pick);
+    return pick;
+  });
+};
+
+const RULE_GAP = 0.1; // em, baseline to rule
+const RULE_TH = 0.16; // em, rule thickness
+const RULE_K = RULE_GAP + RULE_TH;
+const PAD = 0.1; // pad on every side, as a fraction of cell height
 
 export async function createProgramme(host, { embedded = false } = {}) {
   await loadFont();
@@ -75,14 +119,15 @@ export async function createProgramme(host, { embedded = false } = {}) {
       def: L.medium,
       lo: L.light,
       hi: L.bold,
+      // Five main rungs for a short axis; a long one walks the whole
+      // ladder, so every resting weight is still a token.
       steps: (n) =>
-        n === 5
-          ? [L.light, L.normal, L.medium, L.semibold, L.bold]
-          : n === 4
-            ? [L.light, L.normal, L.semibold, L.bold]
-            : lin(L.light, L.bold)(n),
+        n <= 5
+          ? spread([L.light, L.normal, L.medium, L.semibold, L.bold], n)
+          : snapSteps([...new Set([L.light, L.normal, L.meta, L["body-sm"], L.medium, L.caption, L.emphasis, L.strong, L.semibold, L.bold])].sort((a, b) => a - b), n),
     },
-    { key: "size", def: 0.74, lo: 0.2, hi: 1, steps: lin(0.42, 1) },
+    // 1 is flush across the cell; past it the word crops at the cell edge.
+    { key: "size", def: 1, lo: 1, hi: 2, steps: lin(1, 1.9) },
     { key: "slope", def: 0, lo: 0, hi: 14, steps: lin(0, 14) },
     { key: "rule", def: 0, lo: 0, hi: 1, steps: lin(0, 1) },
     { key: "reversal", def: 0, lo: 0, hi: 1, steps: lin(0, 1) },
@@ -121,6 +166,10 @@ export async function createProgramme(host, { embedded = false } = {}) {
     return m;
   };
   const mBold = metrics(L.bold);
+  // The word's own box, in em: the bold advance (tracking at display size
+  // is ~ -0.043 em a gap) against its ascender plus the rule allowance.
+  const advEm = (m) => m.prefix[nL] - 0.043 * (nL - 1);
+  const ASPECT = ((1 - 2 * PAD) * advEm(mBold)) / (mBold.asc + RULE_K) + 2 * PAD;
 
   // ── Grid ───────────────────────────────────────────────────────────
   let W = 1;
@@ -147,20 +196,26 @@ export async function createProgramme(host, { embedded = false } = {}) {
     W = w;
     H = h;
     const portrait = h > w * 1.1;
-    const nc = portrait ? 4 : 5;
-    const nr = portrait ? 5 : 4;
     const mx = Math.max(16, Math.round(w * (embedded ? 0.06 : 0.085)));
-    const my = Math.max(16, Math.round(h * (embedded ? 0.08 : 0.12)));
-    let gw = w - 2 * mx;
-    let gh = h - 2 * my;
-    // Keep cells near Gerstner's proportions: no wider than 3:2.
-    const maxAspect = 1.5;
-    if (gw / nc > (gh / nr) * maxAspect) gw = (gh / nr) * maxAspect * nc;
-    if (gh / nr > gw / nc) gh = (gw / nc) * nr;
-    const cw = Math.round(gw / nc);
-    const ch = Math.round(gh / nr);
-    gw = cw * nc;
-    gh = ch * nr;
+    const my = Math.max(16, Math.round(h * (embedded ? 0.08 : 0.1)));
+    const aw = w - 2 * mx;
+    const ah = h - 2 * my;
+    // Every cell has the word's proportion; pick the count of columns and
+    // rows that covers the most of the page with it, keeping the sheet
+    // dense (six rows or more) and at least two columns to compare.
+    let best = null;
+    for (let nc = 2; nc <= 6; nc += 1) {
+      for (let nr = 6; nr <= (portrait ? 12 : 8); nr += 1) {
+        const cwf = Math.min(aw / nc, (ah / nr) * ASPECT);
+        const area = nc * nr * cwf * cwf;
+        if (!best || area > best.area * 1.02) best = { nc, nr, cwf, area };
+      }
+    }
+    const { nc, nr } = best;
+    const ch = Math.max(1, Math.floor(best.cwf / ASPECT));
+    const cw = Math.min(Math.floor(aw / nc), Math.round(ch * ASPECT));
+    const gw = cw * nc;
+    const gh = ch * nr;
     G = { x: Math.round((w - gw) / 2), y: Math.round((h - gh) / 2), w: gw, h: gh, cw, ch };
     if (nc !== cols || nr !== rows || !cells.length) {
       cols = nc;
@@ -327,29 +382,39 @@ export async function createProgramme(host, { embedded = false } = {}) {
   const hair = (v, dpr) => (Math.round(v * dpr) + 0.5) / dpr;
 
   const drawCell = (r, P, dpr) => {
-    const pad = Math.round(Math.min(r.w, r.h) * 0.11);
+    const pad = Math.max(1, Math.round(Math.min(r.w, r.h) * PAD));
     const innerW = r.w - 2 * pad;
     const innerH = r.h - 2 * pad;
     const wt = Math.round(P.weight);
     const m = metrics(wt);
     const n1 = nL - 1;
-    // Size that sets the bold cut flush across the cell (tracking included),
-    // bounded by the cell's height.
-    const widthFit = (innerW - n1 * 0.043 * 12) / (mBold.prefix[nL] - (0.043 * n1));
-    const ruleK = 0.1 + 0.16; // gap + full rule, in em
-    const heightFit = innerH / (mBold.asc + ruleK * P.rule);
-    const S = Math.max(4, P.size * Math.min(widthFit, heightFit));
+    const tan = Math.tan((P.slope * Math.PI) / 180);
+    // Size that sets this cut flush across the inner measure, tracking and
+    // slant included, bounded by the height the word and its rule need.
+    // The cell has the bold word's proportion, so at size 1 every variant
+    // meets the pad on the sides, and the top and bottom as nearly as its
+    // cut allows.
+    const widthFit = (innerW - n1 * 0.043 * 12) / (advEm(m) + tan * m.asc);
+    const heightFit = innerH / (m.asc + RULE_K * P.rule);
+    const fit = Math.min(widthFit, heightFit);
+    const S = Math.max(4, P.size * fit);
     const track = lawPx(S);
     const xs = new Array(nL + 1);
     for (let i = 0; i <= nL; i += 1) xs[i] = m.prefix[i] * S + i * track;
     const wordW = xs[nL] - track;
-    const tan = Math.tan((P.slope * Math.PI) / 180);
     const visW = wordW + tan * m.asc * S;
+    // Past size 1 the word runs off the cell and is cropped by it: it grows
+    // from the side it is aligned to, and up from the baseline.
     const x0 = r.x + pad + P.align * (innerW - visW);
-    const by = r.y + r.h - pad - ruleK * P.rule * S;
+    const blockH = (m.asc + RULE_K * P.rule) * S;
+    const spare = Math.max(0, innerH - blockH);
+    const by = r.y + r.h - pad - RULE_K * P.rule * S - spare / 2;
     const blockTop = r.y + r.h - P.reversal * r.h;
-    // Red runs from the left, letter by letter; between letters the edge
-    // sits in the middle of the gap.
+    // Red runs from the left, letter by letter. At rest whole glyphs take
+    // the colour, so a letter that overlaps its neighbour under tight
+    // tracking never shows a sliver of the other ink; in motion the edge
+    // crosses each letter's own advance. The rule's edge sits in the middle
+    // of the gap.
     const rf = P.red * nL;
     const edgeAt = (k) => (k <= 0 ? -track * 0.5 - S : k >= nL ? xs[nL] + S : xs[k] - track * 0.5);
     const k0 = Math.floor(rf);
@@ -380,17 +445,31 @@ export async function createProgramme(host, { embedded = false } = {}) {
       ctx.clip();
       // Shear about the baseline: x' = x - tan (y - by).
       ctx.setTransform(dpr, 0, -tan * dpr, dpr, tan * by * dpr, 0);
-      ctx.beginPath();
-      const cx0 = red ? r.x - r.w : redX;
-      const cx1 = red ? redX : r.x + r.w * 2;
-      ctx.rect(cx0, r.y - r.h, cx1 - cx0, r.h * 3);
-      ctx.clip();
       ctx.fillStyle = color;
-      for (let i = 0; i < nL; i += 1) ctx.fillText(chars[i], x0 + xs[i], by);
+      for (let i = 0; i < nL; i += 1) {
+        const f = clamp(rf - i, 0, 1);
+        if (red ? f < 0.0005 : f > 0.9995) continue;
+        const gx = x0 + xs[i];
+        if (f > 0.0005 && f < 0.9995) {
+          const ex = gx + f * (xs[i + 1] - xs[i]);
+          ctx.save();
+          ctx.beginPath();
+          if (red) ctx.rect(gx - S, r.y - r.h, ex - gx + S, r.h * 3);
+          else ctx.rect(ex, r.y - r.h, r.w * 3, r.h * 3);
+          ctx.clip();
+          ctx.fillText(chars[i], gx, by);
+          ctx.restore();
+        } else {
+          ctx.fillText(chars[i], gx, by);
+        }
+      }
       if (P.rule > 0.0005) {
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-        const th = 0.16 * P.rule * S;
-        ctx.fillRect(x0, by + 0.1 * P.rule * S, wordW, th);
+        const th = RULE_TH * P.rule * S;
+        const ry = by + RULE_GAP * P.rule * S;
+        const a = red ? x0 : Math.max(x0, redX);
+        const b = red ? Math.min(x0 + wordW, redX) : x0 + wordW;
+        if (b > a) ctx.fillRect(a, ry, b - a, th);
       }
       ctx.restore();
     }
@@ -427,17 +506,24 @@ export async function createProgramme(host, { embedded = false } = {}) {
     }
     ctx.stroke();
 
-    // The chosen logotype, growing out of its cell to fill the box.
+    // The chosen logotype, growing out of its cell into a band across the
+    // whole sheet. The band keeps the cell's proportion, so it lands on the
+    // rules as many rows deep as there are columns, centred on the cell's
+    // row, and the word fills it edge to edge.
     if (promo.cell >= 0 && promo.g > 0.0005) {
       const c = cells[promo.cell];
       const g = clamp(promo.g, 0, 1);
       const sx = G.x + c.i * G.cw;
       const sy = G.y + c.j * G.ch;
+      const k = Math.min(rows, cols);
+      const j0 = clamp(c.j - Math.floor((k - 1) / 2), 0, rows - k);
+      const ty = G.y + j0 * G.ch;
+      const th = k * G.ch;
       const r = {
         x: Math.round(sx + (G.x - sx) * g),
-        y: Math.round(sy + (G.y - sy) * g),
+        y: Math.round(sy + (ty - sy) * g),
         w: Math.round(G.cw + (G.w - G.cw) * g),
-        h: Math.round(G.ch + (G.h - G.ch) * g),
+        h: Math.round(G.ch + (th - G.ch) * g),
       };
       ctx.fillStyle = GROUND;
       ctx.fillRect(r.x, r.y, r.w, r.h);

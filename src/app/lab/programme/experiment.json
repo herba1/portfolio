@@ -1,6 +1,6 @@
 {
   "title": "Programme",
-  "description": "One word set twenty times on a ruled grid, black and one red on white, each cell a variant run by rule rather than drawn by hand. Two rows of a morphological box of typographic variables, weight, size, slope, rule, reversal, red and alignment, run along the columns and the rows. Drag across the grid to re-map which variables are running, and the whole grid recomposes in a wave from the hand, every cell interpolating its parameters. Click a cell to promote that variant to the chosen logotype; it grows to fill the box, holds, and returns.",
+  "description": "One word set two dozen times on a ruled grid, edge to edge in cells cut to its own proportion, black and one red on white, each cell a variant run by rule rather than drawn by hand. Two rows of a morphological box of typographic variables, weight, size, slope, rule, reversal, red and alignment, run along the columns and the rows. Drag across the grid to re-map which variables are running, and the whole grid recomposes in a wave from the hand, every cell interpolating its parameters. Click a cell to promote that variant to the chosen logotype; it grows into a full-width band of the sheet, holds, and returns.",
   "tags": ["Type", "Systems", "Interaction"],
   "status": "draft",
   "createdAt": "2026-11-06T18:00:00.000Z",
