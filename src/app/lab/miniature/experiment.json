@@ -1,0 +1,15 @@
+{
+  "title": "Miniature",
+  "description": "A night photograph of Times Square with its depth, shown as a print. The pointer is the plane of focus: hover over herb, a taxi or a far billboard and the lens racks to that distance through the real depth of the street, a gently reverse-tilted plane that blurs top and bottom faster than any real lens at this scale would, until the city reads as a model of itself. The neon opens into soft discs and foreground blur spills over what sits behind it, never the other way. Click to hold focus.",
+  "tags": ["WebGL", "Photography", "Optics", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:45:00.000Z",
+  "intent": "After Olivo Barbieri's site specific_ city photographs (https://www.olivobarbieri.it/) and Vincent Laforet's tilt-shift aerials (https://laforetvisuals.com/): depth of field that is physically wrong for the scale, driven by a Depth Anything V2 map of herb's own photo. Circle of confusion is proportional to the gap in inverse depth, gathered at reduced resolution with occlusion-aware scatter-as-gather and a depth-aware joint upsample.",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://www.olivobarbieri.it/",
+    "https://laforetvisuals.com/",
+    "http://blog.tuxedolabs.com/2018/05/04/bokeh-depth-of-field-in-single-pass.html",
+    "https://github.com/DepthAnything/Depth-Anything-V2"
+  ]
+}
