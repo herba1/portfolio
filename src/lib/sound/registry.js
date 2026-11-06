@@ -10,6 +10,7 @@ export const TAKES = {
   "lab/focus-pull/lensTakes": () => import("../../app/lab/focus-pull/lensTakes.js"),
   "lab/generation-loss/shutterTakes": () => import("../../app/lab/generation-loss/shutterTakes.js"),
   "lab/hold-menu/foleyTakes": () => import("../../app/lab/hold-menu/foleyTakes.js"),
+  "lab/interruptions/penTakes": () => import("../../app/lab/interruptions/penTakes.js"),
   "lab/iris/irisTakes": () => import("../../app/lab/iris/irisTakes.js"),
   "lab/justify/justifyTakes": () => import("../../app/lab/justify/justifyTakes.js"),
   "lab/kern/kernTakes": () => import("../../app/lab/kern/kernTakes.js"),
