@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
-import { BODY, FADE, flat, isFade, layout } from "./states";
+import { BODY, COL, COL_W, FADE, FIG_BASE, PANEL, ROW, TRANSPORT, flat, isFade, layout } from "./states";
 import { squircle } from "./squircle";
 
 import "./morph.css";
@@ -13,6 +13,34 @@ const fmt = (s) => {
   const t = Math.max(0, Math.floor(s));
   return `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
 };
+const MINUS = "\u2212";
+// baseline of a 13px figure in its 16px line box (the ui token)
+const REMAIN_BASE = 12.6;
+
+// The tracking law, tracking_px = -0.043 x (size_px - 12), for type whose
+// size is a spring: written in em, so it holds at whatever size this frame is.
+const trackingFor = (size) => `${((-0.043 * (size - 12)) / size).toFixed(4)}em`;
+
+// The clock hangs flush on the text column by its ink, not its box. Its
+// leading figure is set proportional (it changes once a minute; the seconds
+// stay tabular so they never jitter), which is also what lets canvas, which
+// cannot switch tnum on, measure that figure's left side bearing exactly.
+// The result is in em, so it scales with the clock as it grows.
+const bearingCache = new Map();
+function inkLeft(el, text) {
+  const key = text[0];
+  if (bearingCache.has(key)) return bearingCache.get(key);
+  try {
+    const cs = getComputedStyle(el);
+    const g = document.createElement("canvas").getContext("2d");
+    g.font = `${cs.fontWeight} 100px ${cs.fontFamily}`;
+    const v = -g.measureText(key).actualBoundingBoxLeft / 100;
+    if (document.fonts?.status === "loaded") bearingCache.set(key, v);
+    return v;
+  } catch {
+    return 0;
+  }
+}
 
 // The fallback catalogue carries no lengths, so each title gets a stable one
 // in a plausible range rather than a random one per visit.
@@ -157,6 +185,7 @@ export default function Piece() {
   const elapsedRef = useRef(null);
   const nextRef = useRef(null);
   const fillRef = useRef(null);
+  const remainRef = useRef(null);
 
   const [mode, setMode] = useState("idle");
   const [idx, setIdx] = useState(0);
@@ -232,7 +261,22 @@ export default function Piece() {
       el.style.pointerEvents = p > 0.5 ? "" : "none";
     };
     shared(waveRef.current, v("wx"), v("wy"), v("wo"), 22, 16);
-    shared(elapsedRef.current, v("ex"), v("ey"), v("eo"), 32, 16);
+    // The clock is type that travels: its size is a spring channel and is set
+    // as a real font size, with the tracking the law gives for that size, so
+    // the figures are drawn, never stretched. It slides left by its own ink
+    // bearing (in em, so it grows with it) to hang flush on the column.
+    const clock = elapsedRef.current;
+    if (clock) {
+      const size = v("es");
+      const o = v("eo");
+      const p = clamp(o, 0, 1);
+      const x = v("ex") - (live.current.bearing || 0) * size;
+      clock.style.fontSize = `${size}px`;
+      clock.style.letterSpacing = trackingFor(size);
+      clock.style.transform = `translate3d(${cx + x}px,${v("ey")}px,0)`;
+      clock.style.opacity = fade(o);
+      clock.style.filter = p > 0.995 ? "none" : `blur(${(1 - p) * 6}px)`;
+    }
     shared(nextRef.current, v("nx"), v("ny"), v("no"), 40, 40, v("ns") / 40);
 
     // State-only content: sits at its home address, and is revealed or
@@ -242,6 +286,17 @@ export default function Piece() {
     const P = { idle: v("pi"), expanded: v("pe"), toast: v("pt") };
     const T = target.current || {};
     const IN = { idle: T.pi > 0.5, expanded: T.pe > 0.5, toast: T.pt > 0.5 };
+    // time left: hangs off the clock's right edge on its baseline, and comes in
+    // like the other open-only content, once the figures have mostly grown
+    const rem = remainRef.current;
+    if (rem && clock) {
+      const p = clamp(P.expanded, 0, 1);
+      rem.style.top = `${FIG_BASE * v("es") - REMAIN_BASE}px`;
+      rem.style.opacity = IN.expanded ? clamp((p - 0.3) / 0.7, 0, 1) ** 2 : fade(p);
+      rem.style.filter = p > 0.995 ? "none" : `blur(${(1 - p) * 6}px)`;
+      rem.style.visibility = p < 0.002 ? "hidden" : "";
+    }
+
     for (const el of surf ? surf.querySelectorAll(":scope > .mp-layer") : []) {
       const [state, x, y] = el.dataset.at.split(",");
       const p = clamp(P[state], 0, 1);
@@ -316,6 +371,17 @@ export default function Piece() {
     live.current.dur = dur;
   }, [dur]);
 
+  const lead = fmt(sec)[0];
+  useEffect(() => {
+    const el = elapsedRef.current;
+    if (!el) return;
+    const set = () => {
+      live.current.bearing = inkLeft(el, lead);
+    };
+    set();
+    document.fonts?.ready.then(set);
+  }, [lead]);
+
   useEffect(() => {
     live.current.playing = playing;
   }, [playing]);
@@ -364,11 +430,11 @@ export default function Piece() {
       const w = box.clientWidth;
       const h = box.clientHeight;
       L.box = { w, h };
-      const k = Math.min(1, (w - 32) / 368, (h - 32) / 192);
+      const k = Math.min(1, (w - 32) / PANEL.W, (h - 32) / PANEL.H);
       const anchor = anchorRef.current;
       // the surface hangs from a fixed top edge, like the island does, set so
       // the open panel sits on the optical centre
-      anchor.style.transform = `translate3d(0,${Math.round(h * 0.47 - 96 * k)}px,0) scale(${k})`;
+      anchor.style.transform = `translate3d(0,${Math.round(h * 0.47 - (PANEL.H / 2) * k)}px,0) scale(${k})`;
     };
     fit();
     const ro = new ResizeObserver(fit);
@@ -527,9 +593,17 @@ export default function Piece() {
             ))}
           </div>
 
-          {/* shared: elapsed */}
-          <span ref={elapsedRef} className="mp-time mp-elapsed">
-            {fmt(sec)}
+          {/* shared: the clock, which carries the morph. The time left rides on
+              its baseline and only shows when the panel is open. */}
+          <span ref={elapsedRef} className="mp-elapsed">
+            <span className="mp-clock">
+              <span className="mp-lead">{fmt(sec)[0]}</span>
+              {fmt(sec).slice(1)}
+            </span>
+            <span ref={remainRef} className="mp-time mp-remain" aria-label={`${fmt(dur - sec)} remaining`}>
+              {MINUS}
+              {fmt(dur - sec)}
+            </span>
           </span>
 
           {/* shared: next */}
@@ -538,16 +612,17 @@ export default function Piece() {
           </button>
 
           {/* expanded only */}
-          <div data-at={at("expanded", -96, 28)} className="mp-layer mp-meta">
+          <div data-at={at("expanded", COL, ROW.title)} className="mp-layer mp-meta" style={{ width: COL_W }}>
             <div className="mp-title">{track?.title}</div>
             <div className="mp-artist">{track?.artist}</div>
           </div>
 
           <div
             ref={scrubRef}
-            data-at={at("expanded", -164, 88)}
+            data-at={at("expanded", COL, ROW.scrub)}
             data-active={scrubbing ? "" : undefined}
             className="mp-layer mp-scrub"
+            style={{ width: COL_W }}
             onPointerDown={onScrubDown}
             onPointerMove={onScrubMove}
             onPointerUp={onScrubUp}
@@ -559,16 +634,8 @@ export default function Piece() {
             </div>
           </div>
 
-          <span data-at={at("expanded", -164, 108)} className="mp-layer mp-time mp-pos">
-            {fmt(sec)}
-          </span>
-
-          <span data-at={at("expanded", 164 - 96, 108)} className="mp-layer mp-time mp-remain">
-            -{fmt(dur - sec)}
-          </span>
-
           <button
-            data-at={at("expanded", -84, 132)}
+            data-at={at("expanded", TRANSPORT.prev, ROW.transport)}
             type="button"
             className="mp-layer mp-btn"
             aria-label="Previous"
@@ -581,7 +648,7 @@ export default function Piece() {
           </button>
 
           <button
-            data-at={at("expanded", -20, 132)}
+            data-at={at("expanded", TRANSPORT.play, ROW.transport)}
             type="button"
             className="mp-layer mp-btn mp-play"
             aria-label={playing ? "Pause" : "Play"}

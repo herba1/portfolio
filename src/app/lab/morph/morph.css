@@ -134,13 +134,33 @@
   white-space: nowrap;
 }
 
+/* The clock is the one element that changes size: paint() sets its font
+   size and law-derived tracking every frame. Line-height 1 keeps its box
+   exactly one size tall, so its figures can be placed by their own metrics. */
 .mp-elapsed {
-  width: 32px;
+  line-height: 1;
+  font-weight: var(--font-weight-body-sm);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--font-features-numeric);
+  white-space: nowrap;
   color: var(--mp-ink);
+  pointer-events: none;
 }
 
-.mp-pos {
-  width: 96px;
+.mp-clock {
+  display: block;
+}
+
+.mp-lead {
+  font-variant-numeric: proportional-nums;
+  font-feature-settings: "kern" 1, "pnum" 1;
+}
+
+/* time left, hung on the clock's baseline just past its last figure */
+.mp-remain {
+  position: absolute;
+  left: 100%;
+  margin-left: 12px;
   color: var(--mp-ink-2);
 }
 
@@ -213,9 +233,6 @@
 
 /* ---- expanded ---------------------------------------------------------- */
 
-.mp-meta {
-  width: 226px;
-}
 
 .mp-title,
 .mp-artist,
@@ -227,10 +244,10 @@
 }
 
 .mp-title {
-  font-size: var(--text-heading-sm);
-  line-height: var(--text-heading-sm--line-height);
-  letter-spacing: var(--text-heading-sm--letter-spacing);
-  font-weight: var(--text-heading-sm--font-weight);
+  font-size: var(--text-heading);
+  line-height: var(--text-heading--line-height);
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--text-heading--font-weight);
   color: var(--mp-ink);
 }
 
@@ -243,7 +260,6 @@
 }
 
 .mp-scrub {
-  width: 328px;
   height: 20px;
   cursor: pointer;
   touch-action: none;
@@ -277,12 +293,6 @@
   background: var(--mp-ink);
   transform-origin: 0 50%;
   transform: scaleX(0);
-}
-
-.mp-remain {
-  width: 96px;
-  text-align: right;
-  color: var(--mp-ink-2);
 }
 
 /* ---- toast ------------------------------------------------------------- */
