@@ -25,7 +25,7 @@ Output: `out/<reel>/<format>.mp4` plus `<format>.poster.png`. H.264 High, yuv420
 - **No chrome.** The site's chrome-off mode is switched on, the Next dev badge is hidden, and the reel's `css` hides the piece's own heading. Only the component, framed at a scale where the interaction reads.
 - **No click pulses or ripples.** A press shows as the piece reacting.
 - **The pointer is a Mac-style arrow,** fat and rounded, never a circle. It lags its target on a critically damped spring, rotates freely toward its heading as it speeds up and lerps back upright as it slows, and never sits dead still: it drifts a few pixels while idle.
-- **The camera never travels in a straight line.** Each zoom is a shot on an eased arc (bowing upward, or outward on a vertical move, with a small zoom dip on long pans; `cameraArc`, default 0.18). In `follow` mode it chases the pointer fully, a beat behind, through a spring, and lifts off the line of travel in proportion to its speed so every pan swings (`followArc`, default 0.1). The frame edges are soft limits, so an arc never flattens into a slide along an edge. A slight breath keeps a held frame alive. `SHOWREEL_CAM=1` writes the camera path to `<format>.cam.json` for checking.
+- **The camera never travels in a straight line.** Each zoom is a shot on an eased arc (bowing upward, or outward on a vertical move, with a small zoom dip on long pans; `cameraArc`, default 0.18). The camera is never parked: after every shot it keeps chasing the pointer a beat behind through a spring (fully when zoomed in, `followAmount`; leaning about halfway at the resting frame, `restFollow` 0.45, so the piece stays in shot). `follow: false` on a camera beat, or on the reel, holds it still. The chase lifts off the line of travel in proportion to its speed so every pan swings (`followArc`, default 0.1). The frame edges are soft limits, so an arc never flattens into a slide along an edge. A slight breath keeps a held frame alive. `SHOWREEL_CAM=1` writes the camera path to `<format>.cam.json` for checking.
 
 ## Feed rules (why the defaults are what they are)
 
@@ -104,7 +104,7 @@ export default reel;
 | `{ key: "ArrowRight", times?, gap? }` | Key press (not drawn). |
 | `{ type: "text", delay? }` | Type text. |
 | `{ scroll: dy, duration?, at? }` | Eased wheel scroll. |
-| `{ camera: { zoom, on: target, follow? } }` | A shot to `zoom` on `on`. `follow: true` chases the pointer a beat behind. |
+| `{ camera: { zoom, on: target, follow? } }` | A shot to `zoom` on `on`, then the chase. `follow: false` holds it there. |
 | `{ camera: "reset" }` | Shot back to the resting frame. |
 | `{ hide: true }` | Fade the pointer out. |
 | `{ run: async ({ page, wait }) => {} }` | Anything else. Use `wait`, never `setTimeout`. |

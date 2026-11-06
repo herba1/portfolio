@@ -50,6 +50,7 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
   await page.evaluate((s) => window.setup(s), {
     out: [W, H], viewport: cap.viewport, dpr: cap.dpr, fps, timeline, intro: reel.intro, outro: reel.outro, look,
     cursorLag: reel.cursorLag, cursorSize: reel.cursorSize, maxBase: reel.maxBase,
+    follow: reel.follow, restFollow: reel.restFollow, followAmount: reel.followAmount, cameraArc: reel.cameraArc, followArc: reel.followArc,
   });
 
   const shot = draft ? { format: "jpeg", quality: 80, optimizeForSpeed: true } : { format: "png", optimizeForSpeed: true };

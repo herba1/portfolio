@@ -71,7 +71,7 @@ window.setup = async (spec) => {
 
   const intro = spec.intro ?? {};
   cam.z = Math.log(base.z * (intro.zoom ?? 1.08)); cam.x = base.x; cam.y = base.y;
-  shot = { t0: null, from: { ...cam }, to: { z: Math.log(base.z), x: base.x, y: base.y }, dur: intro.settle ?? 1600 };
+  shot = { t0: null, from: { ...cam }, to: { z: Math.log(base.z), x: base.x, y: base.y }, dur: intro.settle ?? 1600, follow: S.follow !== false, home: true };
   const first = spec.timeline.find((e) => e.type === "cursor" && e.visible);
   cur.raw.x = cur.x.x = first?.x ?? vw * 0.66; cur.raw.y = cur.y.x = first?.y ?? vh * 0.82;
   lead.x.x = cur.x.x; lead.y.x = cur.y.x;
@@ -101,7 +101,10 @@ function consume(T) {
     else if (e.type === "camera") {
       const home = e.zoom === 1 && e.x == null;
       const to = home ? { z: Math.log(base.z), x: base.x, y: base.y } : { z: Math.log(Math.max(1, base.z * e.zoom)), x: e.x ?? cur.raw.x, y: e.y ?? cur.raw.y };
-      startShot(e.t, to, !home && !!e.follow, e.duration);
+      // The camera is never parked: every shot keeps chasing the pointer once
+      // it lands, unless the beat says follow: false (or the reel does).
+      startShot(e.t, to, !e.still && S.follow !== false, e.duration);
+      shot.home = home;
     }
   }
 }
@@ -131,7 +134,9 @@ window.render = async ({ t, T, src, phase, first, loopMix = 0 }) => {
   // follow: the camera goes everywhere the pointer goes, just not at once.
   // It chases through a soft spring, so it arrives a beat later and eases in.
   if (shot?.follow) {
-    const f = S.followAmount ?? 1, w = S.followSpring ?? 3.2;
+    // Zoomed in it goes everywhere the pointer goes; at the resting frame it
+    // leans toward the pointer without letting the piece drift off.
+    const f = shot.home ? S.restFollow ?? 0.45 : S.followAmount ?? 1, w = S.followSpring ?? 3.2;
     spring(lead.x, shot.to.x + (cur.x.x - shot.to.x) * f, w, dt);
     spring(lead.y, shot.to.y + (cur.y.x - shot.to.y) * f, w, dt);
   } else { lead.x.x = cam.x; lead.y.x = cam.y; lead.x.v = lead.y.v = 0; }

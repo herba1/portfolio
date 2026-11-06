@@ -221,9 +221,9 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     },
     // Camera directions are only logged; compose.mjs springs toward them.
     camera: async (spec) => {
-      if (spec === "reset") return mark("camera", { zoom: 1, follow: false });
+      if (spec === "reset") return mark("camera", { zoom: 1 });
       const target = spec.on === undefined || spec.on === "cursor" ? null : await resolve(spec.on);
-      mark("camera", { zoom: spec.zoom ?? 1.6, x: target?.x, y: target?.y, follow: spec.follow ?? spec.on === "cursor", stiffness: spec.stiffness });
+      mark("camera", { zoom: spec.zoom ?? 1.6, x: target?.x, y: target?.y, still: spec.follow === false, stiffness: spec.stiffness });
     },
     // Fine-grained hands: press, then any number of `move` beats (each with
     // its own duration, arc and pause) while the button stays down, then lift.
@@ -286,7 +286,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       throw new Error(`Beat ${reel.beats.indexOf(raw) + 1} (${verb}) failed: ${err.message}\n  See ${path.join(dir, "failed.png")}`);
     }
   }
-  mark("camera", { zoom: 1, follow: false });
+  mark("camera", { zoom: 1 });
   mark("end");
   await clock.wait(reel.outro?.hold ?? 1800);
   mark("stop");
