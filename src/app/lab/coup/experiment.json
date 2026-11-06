@@ -1,0 +1,11 @@
+{
+  "title": "Coup de dés",
+  "description": "A white double spread with only a faint gutter, and the lines of Mallarmé's poem scattered across it in a constellation of sizes and weights, the four great capitals of UN COUP DE DÉS JAMAIS N'ABOLIRA LE HASARD stepping down the page. Sweep or drag across the spread and that is the throw: the lines tumble loose, out of order, and settle on springs into a fresh constellation, the big words always falling on the diagonal. Every size carries its own tracking from the house law.",
+  "tags": ["Type", "Layout", "Physics"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Mallarmé, Un coup de dés jamais n'abolira le hasard (1897), the first poem to make page space a structure of meaning: https://monoskop.org/log/?p=10519 . The layout is the poem's tempo, so each throw composes a new one under the same rules.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".coup", "from": [0.25, 0.4], "to": [0.7, 0.6] },
+  "sources": ["https://monoskop.org/log/?p=10519", "https://en.wikipedia.org/wiki/Un_coup_de_d%C3%A9s_jamais_n%27abolira_le_hasard"]
+}

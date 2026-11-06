@@ -1,0 +1,72 @@
+.coup {
+  --coup-ground: #fcfbf8;
+  --coup-ink: #151514;
+  --coup-gutter: #e9e7e1;
+  position: absolute;
+  inset: 0;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--coup-ground);
+  color: var(--coup-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  font-variant-ligatures: common-ligatures;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+.coup-gutter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--coup-gutter);
+  pointer-events: none;
+}
+
+.coup-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  margin: 0;
+  white-space: nowrap;
+  transform-origin: 0 50%;
+  will-change: transform;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.coup[data-ready] .coup-line {
+  opacity: 1;
+  transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+
+.coup-line[data-tier="0"] {
+  font-weight: var(--font-weight-bold);
+}
+
+.coup-line[data-tier="1"] {
+  font-weight: var(--font-weight-semibold);
+}
+
+.coup-line[data-tier="2"] {
+  font-weight: var(--font-weight-meta);
+}
+
+.coup-line[data-tier="2"][data-small] {
+  font-weight: var(--font-weight-body-sm);
+}
+
+.coup-measure {
+  position: absolute;
+  visibility: hidden;
+  white-space: nowrap;
+  top: 0;
+  left: 0;
+}
