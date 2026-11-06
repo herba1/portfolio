@@ -6,13 +6,12 @@ import { ALBUM, TRACK } from "./content";
 
 import "./sheet.css";
 
-// The phone, in its own points. Everything below is laid out at this size and
+// The screen, in its own points. Everything below is laid out at this size and
 // the whole screen is scaled once to fit the box.
 const W = 390;
 const H = 844;
-const STATUS = 54; // status bar band
 const FULL = 64; // sheet top at each detent
-const HALF = 420;
+const HALF = 444; // 24pt under the album's meta line, so half frames the record whole
 const PEEK = 732; // the track row and the home indicator's band
 const DETENTS = [PEEK, HALF, FULL];
 const HEAD = 88; // grabber and the track row: the part that is always out
@@ -24,6 +23,7 @@ const CARD_SCALE = 0.94;
 const SCREEN_R = 55;
 const CARD_R = 12;
 const DIM = 0.12;
+const TINT_AT = 0.5; // the clock's midline sits at CARD_DY / 2
 
 // Springs in UIKit terms: response (s) and damping ratio.
 const spring = (response, damping) => ({
@@ -117,9 +117,10 @@ export default function Piece() {
       card.style.transform = `translate3d(0, ${CARD_DY * p}px, 0) scale(${scale})`;
       card.style.borderRadius = `${SCREEN_R + (CARD_R - SCREEN_R) * p}px`;
       dim.style.opacity = `${DIM * p}`;
-      // The status bar is drawn twice, dark over the page and light over the
-      // black that opens above it, split exactly at the page's top edge.
-      root.style.setProperty("--sh-edge", `${CARD_DY * p}px`);
+      // The clock flips its tint as a whole, the way iOS does, once the page's
+      // edge has passed its midline: dark over the page, light over the black.
+      const tint = p > TINT_AT ? "light" : "dark";
+      if (root.dataset.tint !== tint) root.dataset.tint = tint;
       const sc = band(s.sc, 0, s.scMax, VIEW);
       inner.style.transform = `translate3d(0, ${-sc}px, 0)`;
       head.style.setProperty("--sh-rule", `${clamp(sc / 12, 0, 1)}`);
@@ -376,27 +377,29 @@ export default function Piece() {
     };
   }, []);
 
+
   return (
-    <div className="sh-root" ref={rootRef}>
+    <div className="sh-root" ref={rootRef} data-tint="dark">
       <div className="sh-stage" ref={stageRef}>
-        <div className="sh-phone">
+        <div className="sh-screen">
           <div className="sh-page" ref={cardRef}>
             <Album />
             <div className="sh-dim" ref={dimRef} />
           </div>
 
-          <StatusBar tone="dark" />
-          <StatusBar tone="light" />
+          <span className="sh-clock text-heading tabular-nums" aria-hidden>
+            9:41
+          </span>
 
           <section className="sh-sheet" ref={sheetRef} role="dialog" aria-label="Song credits">
             <div className="sh-grabber" aria-hidden />
             <div className="sh-head" ref={headRef}>
               <img className="sh-thumb" src={ALBUM.cover} alt="" draggable={false} />
               <div className="sh-head-text">
-                <h2 className="sh-head-title">{TRACK.title}</h2>
-                <p className="sh-head-sub">{TRACK.by}</p>
+                <h2 className="sh-head-title text-heading">{TRACK.title}</h2>
+                <p className="sh-head-sub text-ui-lg">{TRACK.by}</p>
               </div>
-              <span className="sh-head-time">{TRACK.length}</span>
+              <span className="sh-head-time text-ui-lg tabular-nums">{TRACK.length}</span>
             </div>
             <div className="sh-body" ref={bodyRef} data-scroll-contain>
               <div className="sh-scroll" ref={scrollRef}>
@@ -404,38 +407,8 @@ export default function Piece() {
               </div>
             </div>
           </section>
-
-          <div className="sh-island" aria-hidden />
-          <div className="sh-home" aria-hidden />
         </div>
       </div>
-    </div>
-  );
-}
-
-function StatusBar({ tone }) {
-  return (
-    <div className="sh-status" data-tone={tone} aria-hidden>
-      <span className="sh-clock">9:41</span>
-      <span />
-      <span className="sh-glyphs">
-        <svg width="18" height="12" viewBox="0 0 18 12">
-          <rect x="0" y="8" width="3" height="4" rx="1" />
-          <rect x="5" y="5.5" width="3" height="6.5" rx="1" />
-          <rect x="10" y="3" width="3" height="9" rx="1" />
-          <rect x="15" y="0" width="3" height="12" rx="1" />
-        </svg>
-        <svg width="16" height="12" viewBox="0 0 16 12">
-          <path d="M8 2.2c2.3 0 4.4.9 6 2.4l1.1-1.2A10.2 10.2 0 0 0 8 .6 10.2 10.2 0 0 0 .9 3.4L2 4.6a8.6 8.6 0 0 1 6-2.4Z" />
-          <path d="M8 5.6c1.4 0 2.6.5 3.6 1.4l1.1-1.2A6.9 6.9 0 0 0 8 4a6.9 6.9 0 0 0-4.7 1.8L4.4 7c1-.9 2.2-1.4 3.6-1.4Z" />
-          <path d="M8 9c.6 0 1.1.2 1.5.6L8 11.4 6.5 9.6c.4-.4.9-.6 1.5-.6Z" />
-        </svg>
-        <svg width="27" height="13" viewBox="0 0 27 13">
-          <rect className="sh-batt-case" x="0.5" y="0.5" width="22" height="12" rx="3.8" fill="none" />
-          <rect x="2" y="2" width="19" height="9" rx="2.4" />
-          <path d="M24.5 4.4v4.2c.8-.3 1.4-1.1 1.4-2.1s-.6-1.8-1.4-2.1Z" />
-        </svg>
-      </span>
     </div>
   );
 }
@@ -443,27 +416,14 @@ function StatusBar({ tone }) {
 function Album() {
   return (
     <div className="sh-album">
-      <div className="sh-nav">
-        <span className="sh-back">
-          <svg width="12" height="20" viewBox="0 0 12 20" aria-hidden>
-            <path d="M10 2 2 10l8 8" fill="none" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-          Library
-        </span>
-        <span className="sh-more" aria-hidden>
-          <i />
-          <i />
-          <i />
-        </span>
-      </div>
       <img className="sh-cover" src={ALBUM.cover} alt="" draggable={false} />
-      <h1 className="sh-album-title">{ALBUM.title}</h1>
-      <p className="sh-album-artist">{ALBUM.artist}</p>
-      <p className="sh-album-meta">{ALBUM.meta}</p>
+      <h1 className="sh-album-title text-title-sm">{ALBUM.title}</h1>
+      <p className="sh-album-artist text-title-sm">{ALBUM.artist}</p>
+      <p className="sh-album-meta text-ui">{ALBUM.meta}</p>
       <ol className="sh-tracks">
         {ALBUM.tracks.map(([t, d], i) => (
           <li key={t} data-playing={i === ALBUM.playing ? "" : undefined}>
-            <span className="sh-num">
+            <span className="sh-num text-ui-lg tabular-nums">
               {i === ALBUM.playing ? (
                 <span className="sh-bars" aria-label="Playing">
                   <i />
@@ -474,8 +434,8 @@ function Album() {
                 i + 1
               )}
             </span>
-            <span className="sh-track-title">{t}</span>
-            <span className="sh-track-time">{d}</span>
+            <span className="sh-track-title text-body">{t}</span>
+            <span className="sh-track-time text-ui-lg tabular-nums">{d}</span>
           </li>
         ))}
       </ol>
@@ -483,55 +443,77 @@ function Album() {
   );
 }
 
+const seconds = (d) => {
+  const [m, s] = d.split(":").map(Number);
+  return m * 60 + s;
+};
+const clock = (t) => `${Math.floor(t / 60)}:${String(t % 60).padStart(2, "0")}`;
+
+// The back of the sleeve: one two-column grid for the whole block. Labels
+// hang in the left column at the quiet weight, every value starts on the same
+// left edge and shares its label's baseline, and a new group only adds space.
 function Credits() {
+  const total = clock(TRACK.side.reduce((sum, [, d]) => sum + seconds(d), 0));
   return (
-    <div className="sh-credits">
-      <dl className="sh-list">
-        {TRACK.credits.map(([k, v]) => (
-          <div key={k}>
-            <dt>{k}</dt>
-            <dd>{v}</dd>
-          </div>
-        ))}
-      </dl>
-
-      <h3 className="sh-h">Performers</h3>
-      <dl className="sh-list">
-        {TRACK.performers.map(([k, v]) => (
-          <div key={k}>
-            <dt className="sh-name">{k}</dt>
-            <dd className="sh-role">{v}</dd>
-          </div>
-        ))}
-      </dl>
-
-      <h3 className="sh-h">About</h3>
-      {TRACK.about.map((p) => (
-        <p key={p.slice(0, 12)} className="sh-p">
-          {p}
-        </p>
+    <dl className="sh-credits">
+      {TRACK.credits.map(([k, v]) => (
+        <Row key={k} label={k}>
+          {v}
+        </Row>
       ))}
 
-      <dl className="sh-facts">
-        {TRACK.details.map(([k, v]) => (
-          <div key={k}>
-            <dt>{k}</dt>
-            <dd>{v}</dd>
-          </div>
+      <Row label="Performed by" group>
+        {TRACK.performers.map(([name, role]) => (
+          <p key={name} className="sh-performer">
+            <span className="sh-name">{name}</span>
+            {" "}
+            {role}
+          </p>
         ))}
-      </dl>
+      </Row>
 
-      <h3 className="sh-h">Side two</h3>
-      <ol className="sh-side">
-        {TRACK.side.map(([t, d], i) => (
-          <li key={t}>
-            <span className="sh-num">{i + 1}</span>
-            <span className="sh-track-title">{t}</span>
-            <span className="sh-track-time">{d}</span>
-          </li>
+      <Row label="Notes" group>
+        {TRACK.about.map((p) => (
+          <p key={p.slice(0, 12)} className="sh-note">
+            {p}
+          </p>
         ))}
-      </ol>
-      <p className="sh-colophon">Apple Records, 26 September 1969</p>
-    </div>
+      </Row>
+
+      <Row label={TRACK.sideLabel} group>
+        <ol className="sh-side">
+          {TRACK.side.map(([t, d], i) => (
+            <li key={t} data-current={i === 0 ? "" : undefined}>
+              <span>{t}</span>
+              <span className="sh-dur tabular-nums">{d}</span>
+            </li>
+          ))}
+          <li className="sh-total">
+            <span className="sr-only">Total</span>
+            <span className="sh-dur tabular-nums">{total}</span>
+          </li>
+        </ol>
+      </Row>
+
+      {TRACK.label.map(([k, v], i) => (
+        <Row key={k} label={k} group={i === 0}>
+          {v}
+        </Row>
+      ))}
+    </dl>
+  );
+}
+
+function Row({ label, group, children }) {
+  const g = group ? "" : undefined;
+  return (
+    <>
+      <dt className="sh-k text-ui-lg" data-group={g}>
+        {label}
+      </dt>
+      <dd className="sh-v text-body" data-group={g}>
+        {children}
+      </dd>
+    </>
   );
 }

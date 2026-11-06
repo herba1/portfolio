@@ -3,11 +3,15 @@
   --sh-ink: #16140f;
   --sh-ink-2: #6f6b63;
   --sh-rule-color: rgb(22 20 15 / 0.1);
-  --sh-w-meta: var(--font-weight-meta);
-  --sh-w-body: 460;
-  --sh-w-small: var(--font-weight-body-sm);
-  --sh-w-strong: var(--font-weight-strong);
-  --sh-w-head: var(--font-weight-semibold);
+  /* Body sits at 460 on the ladder and the quiet label rung at 430; the
+     scale has no named rung for either. */
+  --font-weight-body: 460;
+  --font-weight-quiet: 430;
+  /* The credits' grid: labels set flush right against an axis, values flush
+     left from it, the way a sleeve sets its credits. The sheet's head hangs
+     on the same axis. */
+  --sh-label: 96px;
+  --sh-gutter: 16px;
   position: absolute;
   inset: 0;
   display: grid;
@@ -32,7 +36,9 @@
   position: relative;
 }
 
-.sh-phone {
+/* Just the screen: a rounded rectangle of glass, black underneath, so that
+   when the page steps back there is somewhere for it to step back into. */
+.sh-screen {
   position: absolute;
   top: 0;
   left: 0;
@@ -70,57 +76,14 @@
 }
 
 .sh-album {
-  padding: 56px 0 0;
-}
-
-.sh-nav {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 44px;
-  padding: 0 16px 0 12px;
-}
-
-.sh-back {
-  display: inline-flex;
-  align-items: center;
-  font-size: 17px;
-  line-height: 24px;
-  letter-spacing: -0.215px;
-  font-weight: var(--sh-w-body);
-}
-
-.sh-back svg {
-  margin-right: 6px;
-  stroke: currentColor;
-}
-
-.sh-more {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  background: #f1f0ed;
-}
-
-.sh-more i + i {
-  margin-left: 3px;
-}
-
-.sh-more i {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--sh-ink);
+  padding: 64px 0 0;
 }
 
 .sh-cover {
   display: block;
   width: 264px;
   height: 264px;
-  margin: 16px auto 0;
+  margin: 0 auto;
   border-radius: 8px;
   object-fit: cover;
   box-shadow:
@@ -129,50 +92,39 @@
   pointer-events: none;
 }
 
+/* The title-sm step, held to 24px leading so the page stays on the 4px grid
+   (the token's 25px would knock everything under it off by one). */
 .sh-album-title,
 .sh-album-artist {
   margin: 0;
   text-align: center;
-  font-size: 20px;
   line-height: 24px;
-  letter-spacing: -0.0172em;
   text-wrap: balance;
 }
 
 .sh-album-title {
   margin-top: 24px;
-  font-weight: var(--sh-w-head);
+  font-weight: var(--font-weight-semibold);
 }
 
 .sh-album-artist {
   color: var(--sh-ink-2);
-  font-weight: var(--sh-w-body);
+  font-weight: var(--font-weight-body);
 }
 
 .sh-album-meta {
   margin: 4px 0 0;
   text-align: center;
   color: var(--sh-ink-2);
-  font-size: 13px;
-  line-height: 16px;
-  letter-spacing: -0.043px;
-  font-weight: var(--sh-w-small);
-}
-
-.sh-tracks,
-.sh-side {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 .sh-tracks {
-  margin-top: 24px;
-  padding-left: 20px;
+  margin: 24px 0 0;
+  padding: 0 0 0 20px;
+  list-style: none;
 }
 
-.sh-tracks li,
-.sh-side li {
+.sh-tracks li {
   position: relative;
   display: grid;
   grid-template-columns: 28px 1fr auto;
@@ -181,8 +133,7 @@
   padding-right: 20px;
 }
 
-.sh-tracks li + li::before,
-.sh-side li + li::before {
+.sh-tracks li + li::before {
   content: "";
   position: absolute;
   top: 0;
@@ -192,37 +143,24 @@
   background: var(--sh-rule-color);
 }
 
-.sh-num {
+.sh-num,
+.sh-track-time {
   color: var(--sh-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.086px;
-  font-weight: var(--sh-w-meta);
-  font-variant-numeric: tabular-nums;
 }
 
 .sh-track-title {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: 16px;
-  line-height: 24px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-body);
+  font-weight: var(--font-weight-body);
 }
 
 .sh-track-time {
   padding-left: 12px;
-  color: var(--sh-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.086px;
-  font-weight: var(--sh-w-meta);
-  font-variant-numeric: tabular-nums;
 }
 
 .sh-tracks li[data-playing] .sh-track-title {
-  font-weight: var(--sh-w-strong);
+  font-weight: var(--font-weight-strong);
 }
 
 .sh-bars {
@@ -245,66 +183,25 @@
 .sh-bars i:nth-child(2) { height: 12px; }
 .sh-bars i:nth-child(3) { height: 9px; }
 
-/* ---- status bar -------------------------------------------------------- */
+/* ---- the clock ----------------------------------------------------------
+   The only thing left of the status bar. Its midline sits at half the page's
+   step-back, so the tint flips as a whole exactly when the page's edge
+   passes through it, never splitting the glyphs. */
 
-.sh-status {
+.sh-clock {
   position: absolute;
-  top: 0;
+  top: 16px;
   left: 0;
   right: 0;
   z-index: 2;
-  display: grid;
-  grid-template-columns: 1fr 126px 1fr;
-  align-items: center;
-  height: 48px;
-  padding-top: 12px;
+  text-align: center;
   color: var(--sh-ink);
   pointer-events: none;
-  clip-path: inset(var(--sh-edge, 0px) 0 0 0);
+  transition: color 180ms cubic-bezier(0.2, 0, 0, 1);
 }
 
-.sh-status[data-tone="light"] {
+.sh-root[data-tint="light"] .sh-clock {
   color: #fff;
-  clip-path: inset(0 0 calc(100% - var(--sh-edge, 0px)) 0);
-}
-
-.sh-clock {
-  justify-self: center;
-  padding-left: 8px;
-  font-size: 17px;
-  line-height: 20px;
-  letter-spacing: -0.215px;
-  font-weight: var(--sh-w-head);
-  font-variant-numeric: tabular-nums;
-}
-
-.sh-island {
-  position: absolute;
-  top: 12px;
-  left: 132px;
-  z-index: 5;
-  width: 126px;
-  height: 36px;
-  border-radius: 18px;
-  background: #000;
-  pointer-events: none;
-}
-
-.sh-glyphs {
-  justify-self: center;
-  display: inline-flex;
-  align-items: center;
-  padding-right: 8px;
-  fill: currentColor;
-}
-
-.sh-glyphs svg + svg {
-  margin-left: 6px;
-}
-
-.sh-batt-case {
-  stroke: currentColor;
-  opacity: 0.4;
 }
 
 /* ---- the sheet --------------------------------------------------------- */
@@ -344,9 +241,10 @@
 .sh-head {
   --sh-rule: 0;
   position: relative;
-  display: flex;
+  display: grid;
+  grid-template-columns: var(--sh-label) minmax(0, 1fr) auto;
+  column-gap: var(--sh-gutter);
   align-items: center;
-  gap: 12px;
   height: 88px;
   padding: 24px 20px 16px;
 }
@@ -363,7 +261,7 @@
 }
 
 .sh-thumb {
-  flex: none;
+  justify-self: end;
   width: 48px;
   height: 48px;
   border-radius: 6px;
@@ -372,34 +270,21 @@
 }
 
 .sh-head-text {
-  flex: 1;
   min-width: 0;
 }
 
 .sh-head-title {
   margin: 0;
-  font-size: 16px;
-  line-height: 20px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-strong);
+  font-weight: var(--font-weight-strong);
 }
 
 .sh-head-sub {
   margin: 4px 0 0;
   color: var(--sh-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.086px;
-  font-weight: var(--sh-w-meta);
 }
 
 .sh-head-time {
   color: var(--sh-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.086px;
-  font-weight: var(--sh-w-meta);
-  font-variant-numeric: tabular-nums;
 }
 
 .sh-body {
@@ -409,132 +294,104 @@
   right: 0;
   height: 692px; /* 844 - 64 - 88: the viewport at full, ending at the screen's foot */
   overflow: hidden;
-  /* The last lines slip under the home indicator instead of colliding with it. */
+  /* The last lines fade into the screen's rounded foot instead of being cut. */
   mask-image: linear-gradient(to bottom, #000 calc(100% - 32px), transparent);
 }
 
 .sh-scroll {
-  padding: 12px 20px 48px;
+  padding: 20px 20px 64px;
 }
 
-.sh-list {
+/* ---- the credits, set like the back of a sleeve ------------------------ */
+
+.sh-credits {
+  display: grid;
+  grid-template-columns: var(--sh-label) minmax(0, 1fr);
+  column-gap: var(--sh-gutter);
+  align-items: baseline;
   margin: 0;
 }
 
-.sh-list > div {
-  position: relative;
-  padding: 12px 0;
+/* One 24px line pitch through the whole block; a new group is one empty
+   line, nothing else. */
+.sh-credits > [data-group] {
+  margin-top: 24px;
 }
 
-.sh-list > div + div::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 0.5px;
-  background: var(--sh-rule-color);
-}
-
-.sh-list dt {
-  color: var(--sh-ink-2);
-  font-size: 13px;
-  line-height: 16px;
-  letter-spacing: -0.043px;
-  font-weight: var(--sh-w-small);
-}
-
-.sh-list dd {
-  margin: 4px 0 0;
-  font-size: 16px;
-  line-height: 24px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-body);
-}
-
-.sh-list dt.sh-name {
+.sh-k {
+  text-align: right;
   color: var(--sh-ink);
-  font-size: 16px;
-  line-height: 24px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-strong);
+  font-weight: var(--font-weight-quiet);
 }
 
-.sh-list dd.sh-role {
-  margin-top: 0;
-  color: var(--sh-ink-2);
-  font-size: 14px;
-  line-height: 20px;
-  letter-spacing: -0.086px;
-  font-weight: var(--sh-w-meta);
-}
-
-.sh-h {
-  margin: 32px 0 8px;
-  font-size: 20px;
-  line-height: 24px;
-  letter-spacing: -0.0172em;
-  font-weight: var(--sh-w-head);
-  text-wrap: balance;
-}
-
-.sh-p {
-  margin: 0 0 12px;
-  font-size: 16px;
-  line-height: 24px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-body);
+.sh-v {
+  margin: 0;
+  font-weight: var(--font-weight-body);
   text-wrap: pretty;
 }
 
-.sh-facts {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 16px;
-  margin: 24px 0 0;
-  padding: 16px 0;
-  border-top: 0.5px solid var(--sh-rule-color);
-  border-bottom: 0.5px solid var(--sh-rule-color);
+/* Entries hang: a turnover line steps in, so every name and every title
+   starts flush on the axis and nothing else does. */
+.sh-performer,
+.sh-side li > span:first-child {
+  margin: 0;
+  padding-left: 16px;
+  text-indent: -16px;
 }
 
-.sh-facts dt {
-  color: var(--sh-ink-2);
-  font-size: 13px;
-  line-height: 16px;
-  letter-spacing: -0.043px;
-  font-weight: var(--sh-w-small);
+.sh-name {
+  font-weight: var(--font-weight-strong);
 }
 
-.sh-facts dd {
-  margin: 4px 0 0;
-  font-size: 16px;
-  line-height: 24px;
-  letter-spacing: -0.172px;
-  font-weight: var(--sh-w-body);
+/* Sleeve notes: no space between paragraphs, an indent instead, so the
+   column keeps one unbroken 24px rhythm. */
+.sh-note {
+  margin: 0;
+}
+
+.sh-note + .sh-note {
+  text-indent: 16px;
+}
+
+.sh-side {
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .sh-side li {
-  padding-right: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 16px;
+  align-items: baseline;
 }
 
-.sh-colophon {
-  margin: 24px 0 0;
-  color: var(--sh-ink-2);
-  font-size: 13px;
-  line-height: 16px;
-  letter-spacing: -0.043px;
-  font-weight: var(--sh-w-small);
+.sh-side li[data-current] {
+  font-weight: var(--font-weight-strong);
 }
 
-.sh-home {
+.sh-dur {
+  justify-self: end;
+  text-align: right;
+}
+
+/* The side's running time, totted up under the durations like a ledger. */
+.sh-side .sh-total {
+  margin-top: 8px;
+  font-weight: var(--font-weight-strong);
+}
+
+.sh-total .sh-dur {
+  position: relative;
+  grid-column: 2;
+}
+
+.sh-total .sh-dur::before {
+  content: "";
   position: absolute;
-  bottom: 8px;
-  left: 50%;
-  z-index: 4;
-  width: 140px;
-  height: 5px;
-  margin-left: -70px;
-  border-radius: 3px;
+  top: -4px;
+  left: -8px;
+  right: 0;
+  height: 0.5px;
   background: var(--sh-ink);
-  pointer-events: none;
 }
