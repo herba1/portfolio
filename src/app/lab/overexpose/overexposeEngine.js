@@ -19,7 +19,7 @@ import { createStage, clamp } from "../_kit/stage";
 // halation, halationColor, bloom, grain, grainSeed) match film.js.
 
 const LO = -8.5; // log2 radiance range of the shipped encoding (see experiment.json)
-const HI = 0.7;
+const HI = 2.5;
 const MIN_EV = -1;
 const MAX_EV = 3;
 const STOP = 0.225; // fraction of the print's height that is one stop of drag
