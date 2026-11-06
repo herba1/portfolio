@@ -118,9 +118,14 @@ window.render = async ({ t, T, src, phase }) => {
   spring(cur.y, cur.raw.y, lag, dt);
 
   // camera
-  // follow: aim a little ahead of the pointer, smoothed, so the frame leads the move
-  spring(lead.x, cur.x.x + cur.x.v * 0.16, 7, dt);
-  spring(lead.y, cur.y.x + cur.y.v * 0.16, 7, dt);
+  // follow: the camera drifts after the pointer, never 1:1. It takes only a
+  // share of each move (followAmount) through a heavy spring, so the pointer
+  // travels across the frame while the frame leans along behind it.
+  if (shot?.follow) {
+    const f = S.followAmount ?? 0.35;
+    spring(lead.x, shot.to.x + (cur.x.x - shot.to.x) * f, 2.6, dt);
+    spring(lead.y, shot.to.y + (cur.y.x - shot.to.y) * f, 2.6, dt);
+  } else { lead.x.x = cam.x; lead.y.x = cam.y; lead.x.v = lead.y.v = 0; }
   if (shot) {
     if (shot.t0 == null) shot.t0 = T;
     const p = (T - shot.t0) / shot.dur, e = inOut(p);
