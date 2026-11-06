@@ -31,7 +31,8 @@ import { NODES, createWorld, locate, offsetAt, sampleY } from "./strings";
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
-// Any numeric FILM key (exposure, whitePoint, ...) and warmTop override the grade.
+// Any numeric FILM key (exposure, whitePoint, ...), warmTop and polar,
+// polarSat, polarHue override the grade.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -54,11 +55,24 @@ const FILM = {
   saturation: 1.06,
   grain: 0.38,
   vignette: 0.2,
+  // Low enough that the sunlit cloud (scene luma ~0.75-0.85) feeds the halo,
+  // high enough that the polarised sky (~0.2) does not: a thin warm ring
+  // where the steel and the wires cross bright cloud.
+  halationThreshold: 0.6,
 };
 // Warm cast on the sunlit cloud tops (see PLATE): red up 0.8x this, blue
 // down by it, eased in over the shoulder, so the brightest cloud rolls off
 // warm-neutral instead of grey. The sky and its cobalt depth are untouched.
 const WARM_TOP = 0.16;
+// Graduated sky density, the way a polariser deepens a summer sky toward the
+// zenith (here the top and upper right of the frame). Only the open blue
+// sky takes it: a chroma mask (saturation over ~0.3, hue 190-220 in the
+// plate's own sRGB) leaves cloud, steel and wires as shot. At the top edge
+// the sky loses POLAR of its value, easing to nothing at the bottom, with a
+// little more saturation and its hue drawn to about 208.
+const POLAR = 0.22;
+const POLAR_SAT = 0.08;
+const POLAR_HUE = 208;
 
 const VERT_FULL = `#version 300 es
 in vec2 aPos;
@@ -72,10 +86,41 @@ uniform vec2 uRes;   // device px
 uniform vec3 uMap;   // ox, oy, k (device px per image px)
 uniform vec2 uImg;   // image px
 uniform vec3 uTopTint; // linear multiplier on the sunlit cloud
+uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec2 uv = (p - uMap.xy) / uMap.z / uImg;
   vec3 c = texture(uPlate, uv).rgb;
+
+  // Polariser. The mask reads the plate a mip up (about 2 image px, under a
+  // device px here) so the film grain in thin cloud does not speckle it.
+  vec3 g = pow(c, vec3(1.0 / 2.2));
+  vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.0).rgb, vec3(1.0 / 2.2)));
+  float hue = hm.x * 360.0;
+  float sky = smoothstep(0.26, 0.38, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
+            * smoothstep(0.25, 0.4, hm.z);
+  // Toward the zenith: the top edge, leaning to the upper right.
+  vec2 f = p / uRes;
+  float z = clamp(0.82 * (1.0 - f.y) + 0.18 * f.x, 0.0, 1.0);
+  z = z * z * (3.0 - 2.0 * z);
+  float w = sky * z;
+  vec3 h = rgb2hsv(g);
+  float dh = fract(uPolar.z - h.x + 0.5) - 0.5;
+  h.x = fract(h.x + dh * 0.6 * w);
+  h.y = clamp(h.y * (1.0 + uPolar.y * w), 0.0, 1.0);
+  h.z *= 1.0 - uPolar.x * w;
+  c = pow(hsv2rgb(h), vec3(2.2));
   // Sunlit cloud tops: bright and near neutral. They take a warm cast on the
   // shoulder so they glow instead of reading grey; blue sky (chroma) and the
   // shade side of the cloud (luminance) are left as shot.
@@ -227,6 +272,9 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
   const warmTop = num("warmTop", WARM_TOP);
   const topTint = [1 + 0.8 * warmTop, 1, 1 - warmTop];
+  const polar = clamp(num("polar", POLAR), 0, 0.6);
+  const polarSat = num("polarSat", POLAR_SAT);
+  const polarHue = num("polarHue", POLAR_HUE);
   const film0 = { ...FILM };
   for (const key of Object.keys(FILM)) {
     if (typeof FILM[key] === "number") film0[key] = num(key, FILM[key]);
@@ -449,6 +497,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3f(plateP.u.uMap, map.ox, map.oy, map.k);
     gl.uniform2f(plateP.u.uImg, IW, IH);
     gl.uniform3fv(plateP.u.uTopTint, topTint);
+    gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     gl.enable(gl.BLEND);
