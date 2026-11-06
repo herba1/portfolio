@@ -22,6 +22,7 @@ export const TAKES = {
   "lab/refractor/refractorTakes": () => import("../../app/lab/refractor/refractorTakes.js"),
   "lab/select/selectTakes": () => import("../../app/lab/select/selectTakes.js"),
   "lab/smear/smearTakes": () => import("../../app/lab/smear/smearTakes.js"),
+  "lab/snap-on/snapTakes": () => import("../../app/lab/snap-on/snapTakes.js"),
   "lab/steam/steamTakes": () => import("../../app/lab/steam/steamTakes.js"),
   "lab/t9/t9Takes": () => import("../../app/lab/t9/t9Takes.js"),
   "lab/tempo-wheel/tempoTakes": () => import("../../app/lab/tempo-wheel/tempoTakes.js"),
