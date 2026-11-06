@@ -30,7 +30,7 @@ const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
 
 const cam = { z: { x: 0, v: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
 // raw: where the real pointer is. x/y: where it is drawn, lerped behind raw.
-const cur = { raw: { x: 0, y: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 }, tilt: { x: 0, v: 0 } };
+const cur = { raw: { x: 0, y: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 }, tilt: { x: 0, v: 0 }, idle: { x: 0, v: 0 } };
 let ev = 0, lastT = 0, camTarget, base;
 
 window.setup = async (spec) => {
@@ -106,9 +106,13 @@ window.render = async ({ t, T, src, phase }) => {
   spring(cam.z, tz, camTarget.omega, dt);
   spring(cam.x, tx, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
   spring(cam.y, ty, camTarget.omega * (camTarget.follow ? 0.8 : 1), dt);
-  const z = Math.exp(cam.z.x);
+  // The frame breathes: a slow sub-1% push and drift so a held moment never
+  // reads as a frozen picture.
+  const b = T / 1000, br = S.breathe ?? 1;
+  const z = Math.exp(cam.z.x) * (1 + 0.009 * br * (1 + Math.sin(b * 0.55)));
+  cam.dx = 0.004 * br * vw * Math.sin(b * 0.37 + 1.1); cam.dy = 0.004 * br * vh * Math.sin(b * 0.31 + 0.2);
   const hw = vw / z / 2, hh = vh / z / 2;
-  const cx = clamp(cam.x.x, hw, vw - hw), cy = clamp(cam.y.x, hh, vh - hh);
+  const cx = clamp(cam.x.x + cam.dx, hw, vw - hw), cy = clamp(cam.y.x + cam.dy, hh, vh - hh);
   const x0 = cx - hw, y0 = cy - hh, k = K * z;
 
   const img = await bitmap(src);
@@ -127,7 +131,14 @@ window.render = async ({ t, T, src, phase }) => {
   const heading = speed > 1 ? near(Math.atan2(cur.y.v, cur.x.v) - ARROW_HEADING) : rest;
   const w = smooth((speed - 80) / 260); // 0 at a crawl, 1 at full glide
   spring(cur.tilt, rest + (heading - rest) * w, 10, dt);
-  if (cur.alpha.x > 0.01) drawPointer((cur.x.x - x0) * k, (cur.y.x - y0) * k, K * Math.pow(z, 0.35), clamp(cur.alpha.x, 0, 1), cur.press.x, cur.tilt.x);
+  // A resting hand is never still: when the pointer has stopped (and nothing
+  // is held) it drifts on a slow, small, looping wander instead of freezing.
+  const s1 = T / 1000;
+  spring(cur.idle, !cur.down && speed < 60 ? 1 : 0, 3, dt);
+  const amp = (S.idleDrift ?? 5) * cur.idle.x;
+  const ix = amp * (0.65 * Math.sin(s1 * 1.27 + 0.4) + 0.35 * Math.sin(s1 * 2.61 + 2.1));
+  const iy = amp * (0.6 * Math.sin(s1 * 1.06 + 1.7) + 0.4 * Math.sin(s1 * 2.23 + 0.3));
+  if (cur.alpha.x > 0.01) drawPointer((cur.x.x + ix - x0) * k, (cur.y.x + iy - y0) * k, K * Math.pow(z, 0.35), clamp(cur.alpha.x, 0, 1), cur.press.x, cur.tilt.x);
 
   // intro: fade up from the page's own ground colour. outro: fade back into it.
   let veil = 0;
@@ -137,20 +148,21 @@ window.render = async ({ t, T, src, phase }) => {
   return true;
 };
 
-// A Mac-style arrow, a little fatter and rounder: black body, thick white
-// rim, every corner rounded, a soft shadow. A press only nudges it smaller.
+// A Mac-style arrow made soft: the black body is a slightly inset arrow
+// stroked with a fat round join, so every corner is a real radius, and the
+// white rim is the same shape stroked wider. A press only nudges it smaller.
 // The direction the unrotated arrow points (from its body to its tip).
 const ARROW_HEADING = Math.atan2(-13, -5.5);
-const ARROW = new Path2D("M0 0 L0 17.2 L4.4 13.4 L7.1 19.6 L10.3 18.2 L7.7 12.3 L13.2 12.3 Z");
+const ARROW = new Path2D("M1.2 1.9 L1.2 15.6 L4.9 12.4 L7.4 17.9 L9.5 17.0 L7.1 11.6 L11.6 11.6 Z");
 function drawPointer(x, y, k, a, press, tilt) {
   const s = k * (S.cursorSize ?? 1.7) * (1 - 0.08 * press);
   ctx.save(); ctx.translate(x, y); ctx.rotate(tilt); ctx.scale(s, s); ctx.globalAlpha = a;
   ctx.lineJoin = "round"; ctx.lineCap = "round";
-  ctx.shadowColor = "rgba(0,0,0,0.28)"; ctx.shadowBlur = 7 * s; ctx.shadowOffsetY = 1.6 * s;
-  ctx.lineWidth = 3.6; ctx.strokeStyle = "#fff"; ctx.stroke(ARROW);
+  ctx.shadowColor = "rgba(0,0,0,0.26)"; ctx.shadowBlur = 8 * s; ctx.shadowOffsetY = 1.8 * s;
+  ctx.lineWidth = 6.4; ctx.strokeStyle = "#fff"; ctx.stroke(ARROW);
   ctx.shadowColor = "transparent";
+  ctx.lineWidth = 2.6; ctx.strokeStyle = "#151517"; ctx.stroke(ARROW);
   ctx.fillStyle = "#151517"; ctx.fill(ARROW);
-  ctx.lineWidth = 1.1; ctx.strokeStyle = "#151517"; ctx.stroke(ARROW); // rounds the body's corners too
   ctx.restore();
 }
 </script>
