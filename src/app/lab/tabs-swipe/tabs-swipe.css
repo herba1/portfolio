@@ -179,27 +179,54 @@
   scale: 0.88;
 }
 
+/* Captions sit in their own plane above the resting tabs, so a tab
+   travelling between rows passes under them. */
 .ts-label {
+  position: absolute;
+  top: 0;
+  left: 0;
   display: flex;
-  align-items: center;
   justify-content: center;
-  gap: 0 6px;
+  width: var(--ts-cw);
   height: 16px;
   margin-top: 8px;
-  padding: 0 4px;
+  will-change: transform;
+  touch-action: none;
+}
+
+/* Bare at rest; ground-coloured while a tab changing rows passes underneath,
+   so it reads as a small tag on the glass. */
+.ts-tag {
+  display: flex;
+  align-items: center;
+  gap: 0 6px;
+  min-width: 0;
+  max-width: 100%;
+  height: 16px;
+  padding: 0 4px 0 2px;
+  border-radius: 6px;
+  transition:
+    background-color 120ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 120ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* A 4px ground-coloured spread clears the type of whatever is underneath. */
+.ts-label[data-over] .ts-tag {
+  background: var(--ts-ground);
+  box-shadow: 0 0 0 4px var(--ts-ground), 0 4px 12px -2px rgb(40 30 15 / 0.16);
 }
 
 .ts-fav {
   flex: none;
-  width: 14px;
-  height: 14px;
-  border-radius: 4px;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
   display: grid;
   place-items: center;
   color: #fff;
-  font-size: 9px;
+  font-size: 8px;
   line-height: 12px;
-  letter-spacing: 0.13px;
+  letter-spacing: 0.17px;
   font-weight: var(--font-weight-strong);
 }
 
@@ -208,10 +235,10 @@
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
-  font-size: var(--text-ui-xs);
+  font-size: var(--text-ui-2xs);
   line-height: 16px;
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
+  letter-spacing: var(--text-ui-2xs--letter-spacing);
+  font-weight: var(--text-ui-2xs--font-weight);
   color: var(--ts-ink);
 }
 

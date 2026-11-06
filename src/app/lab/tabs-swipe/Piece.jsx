@@ -20,6 +20,10 @@ const EDGE = spring(0.42, 1); // scroll rubber band returning
 const STEP = 1 / 240;
 
 const STAGGER = 0.034; // s between neighbours as the grid closes up
+const LABEL = 24; // caption under each tab: 8px gap + 16px line
+const ROW_GAP = 24; // caption to the next row of tabs
+const TALL = 1.32; // the tallest a tab gets: a phone page
+const WIDE = 1.08; // the widest: past this the page reads as a box
 const SCROLL_DECAY = 0.998; // per ms, UIScrollView normal rate
 
 // iOS rubber band: the further past the edge, the harder it pulls.
@@ -38,19 +42,21 @@ export default function Piece() {
   const rootRef = useRef(null);
   const layerRef = useRef(null);
   const cardRefs = useRef([]);
+  const labelRefs = useRef([]);
 
   useEffect(() => {
     const root = rootRef.current;
     const layer = layerRef.current;
     const box = root.closest(".piece-box") || root;
     const els = cardRefs.current;
+    const labels = labelRefs.current;
     const params = new URLSearchParams(window.location.search);
     const stillT = params.has("t") ? Math.max(0, +params.get("t") || 0) : null;
     const stillCard = params.has("card") ? clamp(Math.round(+params.get("card") || 0), 0, PAGES.length - 1) : 2;
 
     const s = {
       w: 0, h: 0, k: 1,
-      cw: 0, ch: 0, gap: 16, rowH: 0, padTop: 0, padBottom: 0, left: 0,
+      cols: 2, cw: 0, ch: 0, gap: 16, rowH: 0, padTop: 0, padBottom: 0, left: 0,
       sy: 0, svy: 0, wheelAt: -1,
       time: 0, last: 0, raf: 0, frozen: false,
       restoreAt: -1,
@@ -68,18 +74,20 @@ export default function Piece() {
 
     const order = () => cards.filter((c) => c.present);
     const slot = (k) => [
-      (k % 2) * (s.cw + s.gap),
-      s.padTop + Math.floor(k / 2) * s.rowH,
+      (k % s.cols) * (s.cw + s.gap),
+      s.padTop + Math.floor(k / s.cols) * s.rowH,
     ];
     const maxScroll = () => {
       const n = order().length;
-      const rows = Math.ceil(n / 2);
-      const content = s.padTop + Math.max(0, rows * s.rowH - 24) + s.padBottom;
+      const rows = Math.ceil(n / s.cols);
+      const content = s.padTop + Math.max(0, rows * s.rowH - ROW_GAP) + s.padBottom;
       return Math.max(0, content - s.h);
     };
 
     // Everyone in the grid gets a new slot. The ones nearest the gap move
-    // first, so the grid closes up like a wave rather than all at once.
+    // first, in reading order, so the grid closes up like a wave rather than
+    // all at once: along the row, then the first tab of the next row wraps
+    // up to the end of this one, and so on down the sheet.
     const reflow = (from, instant = false) => {
       const list = order();
       const at = list.findIndex((c) => c.i >= from);
@@ -105,14 +113,21 @@ export default function Piece() {
       if (w === s.w && h === s.h) return;
       s.w = w;
       s.h = h;
-      const byW = (Math.min(s.w, 520) - 40 - s.gap) / 2;
-      const byH = (s.h * 0.37 - 48) / 1.32;
-      s.cw = Math.round(clamp(Math.min(byW, byH), 112, 200));
-      s.ch = r4(s.cw * 1.32);
-      s.rowH = s.ch + 24 + 24;
-      s.padTop = r4(clamp(s.h * 0.08, 24, 72));
-      s.padBottom = s.padTop + 16;
-      s.left = Math.round((s.w - (s.cw * 2 + s.gap)) / 2);
+      // The sheet fills the frame: two full rows of tabs top to bottom, and as
+      // many columns across as fit at a page's proportions, two to four.
+      s.padTop = r4(clamp(s.h * 0.06, 16, 56));
+      s.padBottom = s.padTop;
+      const padX = Math.round(clamp(s.w * 0.045, 16, 64));
+      s.gap = s.w >= 720 ? 24 : 16;
+      const fillH = Math.max(120, (s.h - s.padTop - s.padBottom - 2 * LABEL - ROW_GAP) / 2);
+      const inner = s.w - 2 * padX;
+      s.cols = clamp(Math.floor((inner + s.gap) / (fillH / TALL + s.gap)), 2, 4);
+      // Columns take the width edge to edge; a very wide frame stops at WIDE and centres.
+      const byW = (inner - (s.cols - 1) * s.gap) / s.cols;
+      s.cw = Math.round(Math.max(96, Math.min(byW, fillH / WIDE)));
+      s.ch = Math.max(128, Math.floor(Math.min(fillH, s.cw * TALL) / 4) * 4);
+      s.rowH = s.ch + LABEL + ROW_GAP;
+      s.left = Math.round((s.w - (s.cw * s.cols + s.gap * (s.cols - 1))) / 2);
       root.style.setProperty("--ts-cw", `${s.cw}px`);
       root.style.setProperty("--ts-ch", `${s.ch}px`);
       root.style.setProperty("--ts-scale", `${s.cw / PAGE_W}`);
@@ -124,29 +139,60 @@ export default function Piece() {
 
     const flyTarget = (c) => -(s.left + c.lx + s.cw + 80);
 
+    const crossing = (c) => Math.abs(c.ly - c.ty) > 1 || (c.pending && c.pending.y !== c.ty);
+
     const paint = () => {
       layer.style.transform = `translate3d(${s.left}px, ${-s.sy}px, 0)`;
+      const shown = cards.filter((c) => !c.gone);
       for (const c of cards) {
         const el = els[c.i];
-        if (!el) continue;
+        const lb = labels[c.i];
+        if (!el || !lb) continue;
         if (c.gone) {
-          el.style.visibility = "hidden";
+          el.style.visibility = lb.style.visibility = "hidden";
           continue;
         }
-        el.style.visibility = "";
+        el.style.visibility = lb.style.visibility = "";
         const sc = 0.94 + 0.06 * c.enter;
         el.style.transform =
           `translate3d(${(c.lx + c.x).toFixed(2)}px, ${c.ly.toFixed(2)}px, 0) rotate(${c.rot.toFixed(3)}deg) scale(${sc.toFixed(4)})`;
-        el.style.opacity = c.enter < 0.999 ? clamp(c.enter, 0, 1).toFixed(3) : "";
+        const enter = clamp(c.enter, 0, 1);
+        el.style.opacity = c.enter < 0.999 ? enter.toFixed(3) : "";
+        // A tab pulled sideways lets go of its caption, so it never slides
+        // across the neighbour's title; it comes back as the tab settles.
+        const held = clamp(1 - Math.abs(c.x) / (s.cw * 0.4), 0, 1);
+        const lo = enter * held;
+        lb.style.opacity = lo < 0.999 ? lo.toFixed(3) : "";
+        // The caption rides under the card but never tilts with it: the glass
+        // leans, the type under it stays level.
+        lb.style.transform =
+          `translate3d(${(c.lx + c.x).toFixed(2)}px, ${(c.ly + s.ch).toFixed(2)}px, 0)`;
         el.style.transformOrigin = `50% ${(50 + c.pivot * 50).toFixed(1)}%`;
         const lifted = c.mode === "drag" || c.mode === "fly";
         if (lifted !== (el.dataset.lifted !== undefined)) {
           if (lifted) el.dataset.lifted = "";
           else delete el.dataset.lifted;
         }
-        // A tab changing rows travels over the ones sliding along a row.
-        const crossing = Math.abs(c.ly - c.ty) > 1 || (c.pending && c.pending.y !== c.ty);
-        el.style.zIndex = lifted ? 3 : c.mode === "back" ? 2 : crossing ? 1 : 0;
+        // A tab changing rows travels over the tabs sliding along a row, but
+        // under every caption (z 2), so no title is ever covered on the way.
+        // Only a tab in the hand rises above the captions.
+        el.style.zIndex = lifted ? 4 : c.mode === "back" ? 3 : crossing(c) ? 1 : 0;
+        lb.style.zIndex = lifted || c.mode === "back" ? 4 : 2;
+        // When a caption and another tab cross (one changing rows passes under
+        // it, or it rides over a neighbour), it takes a ground-coloured backing
+        // so it reads as a tag on the glass, not type on type.
+        const lx = c.lx + c.x;
+        const ly = c.ly + s.ch + 8;
+        const over = shown.some(
+          (m) =>
+            m !== c &&
+            m.lx + m.x < lx + s.cw && m.lx + m.x + s.cw > lx &&
+            m.ly < ly + 16 && m.ly + s.ch > ly,
+        );
+        if (over !== (lb.dataset.over !== undefined)) {
+          if (over) lb.dataset.over = "";
+          else delete lb.dataset.over;
+        }
       }
     };
 
@@ -285,7 +331,7 @@ export default function Piece() {
     };
 
     const cardAt = (e) => {
-      const el = e.target.closest?.(".ts-card");
+      const el = e.target.closest?.(".ts-card, .ts-label");
       if (!el) return null;
       return cards[+el.dataset.index] || null;
     };
@@ -466,12 +512,22 @@ export default function Piece() {
                 </svg>
               </button>
             </div>
-            <div className="ts-label">
+          </div>
+        ))}
+        {PAGES.map(({ key, title, host, tint }, i) => (
+          <div
+            key={key}
+            ref={(el) => (labelRefs.current[i] = el)}
+            className="ts-label"
+            data-index={i}
+            aria-hidden="true"
+          >
+            <span className="ts-tag">
               <span className="ts-fav" style={{ background: tint }}>
                 {host}
               </span>
               <span className="ts-title">{title}</span>
-            </div>
+            </span>
           </div>
         ))}
       </div>
