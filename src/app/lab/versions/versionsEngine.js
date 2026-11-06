@@ -147,7 +147,7 @@ export function createVersions(root, { embedded = false } = {}) {
         // starts to soften type past the seventh save back, and never by
         // more than a pixel's blur.
         blur = clamp((d - 7) * 0.12, 0, 0.6) * s;
-        fog = Math.min(0.5, Math.pow(d, 1.15) * 0.032) * s;
+        fog = Math.min(0.36, Math.pow(d, 1.15) * 0.026) * s;
         alpha = 1;
       } else {
         const k = -d;
@@ -166,6 +166,9 @@ export function createVersions(root, { embedded = false } = {}) {
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));
       c.style.setProperty("--fog", fog.toFixed(3));
+      // 1 on the front card (its head carries the title), 0 on every save
+      // behind it (its head names what that save changed).
+      c.style.setProperty("--front", (d <= 0 ? 1 : 1 - smooth(0.08, 0.5, d)).toFixed(3));
       // Eased out, so the stroke starts quick at the caret and slows into
       // the last letters.
       const f = 1 - (1 - ink[i]) ** 3;

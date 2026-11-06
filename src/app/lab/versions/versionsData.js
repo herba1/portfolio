@@ -79,10 +79,10 @@ const words = (s) => s.split(/\s+/).filter(Boolean);
 // "moves." becoming "moves all day." marks "all day." and not "moves".
 const key = (w) => w.toLowerCase().replace(/[.,;:!?]+$/, "");
 
-// Word-level diff of `next` against `prev`: every word of `next` tagged
-// kept or added, and a count of words removed just before each of them (and
-// after the last). An LCS is plenty for seventy words.
-function diff(prev, next) {
+// Word-level diff of `next` against `prev`, as the sequence of operations
+// that turns one into the other: each word kept, added or removed, in
+// reading order. An LCS is plenty for seventy words.
+function align(prev, next) {
   const a = words(prev);
   const b = words(next);
   const n = a.length;
@@ -93,26 +93,40 @@ function diff(prev, next) {
       L[i][j] = key(a[i]) === key(b[j]) ? L[i + 1][j + 1] + 1 : Math.max(L[i + 1][j], L[i][j + 1]);
     }
   }
-  const out = [];
-  let removed = 0;
+  const ops = [];
   let i = 0;
   let j = 0;
-  while (j < m) {
-    if (i < n && key(a[i]) === key(b[j])) {
-      out.push({ word: b[j], added: false, removedBefore: removed });
-      removed = 0;
+  while (i < n || j < m) {
+    if (i < n && j < m && key(a[i]) === key(b[j])) {
+      ops.push({ op: "keep", word: b[j] });
       i += 1;
       j += 1;
-    } else if (i < n && L[i + 1][j] >= L[i][j + 1]) {
-      removed += 1;
+    } else if (i < n && (j >= m || L[i + 1][j] >= L[i][j + 1])) {
+      ops.push({ op: "del", word: a[i] });
       i += 1;
     } else {
-      out.push({ word: b[j], added: true, removedBefore: removed });
-      removed = 0;
+      ops.push({ op: "add", word: b[j] });
       j += 1;
     }
   }
-  return { tokens: out, removedAfter: removed + (n - i) };
+  return ops;
+}
+
+// The same diff as the front card reads it: every word of `next` tagged
+// kept or added, and a count of words removed just before each of them (and
+// after the last).
+function tag(ops) {
+  const out = [];
+  let removed = 0;
+  ops.forEach(({ op, word }) => {
+    if (op === "del") {
+      removed += 1;
+      return;
+    }
+    out.push({ word, added: op === "add", removedBefore: removed });
+    removed = 0;
+  });
+  return { tokens: out, removedAfter: removed };
 }
 
 // The edit as a proofreader would mark it: added words gathered into runs,
@@ -142,15 +156,112 @@ function runs({ tokens, removedAfter }) {
   return { runs: out, removedAfter };
 }
 
-// Newest first. Each version carries its diff against the state it replaced;
-// the first draft has nothing to compare with, so nothing is marked.
+// What one save changed, as a spine can say it in a line: each edit
+// gathered the way the front card gathers its runs (two edits with at most
+// two kept words between them, inside one sentence, are one phrase), then
+// set as the words it wrote, as "old → new" for a single word swapped, or
+// as the struck words when it only took something out. Trailing stops are
+// dropped: a spine names a change, it does not quote a sentence.
+const bare = (list) => list.join(" ").replace(/[.,;:]+$/, "");
+function edits(ops) {
+  const hunks = [];
+  let open = null;
+  // Kept words since the last edit (to judge whether the next one joins
+  // it), and since the last added word (to set inside the phrase if it
+  // does).
+  let kept = [];
+  let carry = [];
+  ops.forEach(({ op, word }) => {
+    if (op === "keep") {
+      if (open) {
+        kept.push(word);
+        carry.push(word);
+      }
+      return;
+    }
+    const near = open && kept.length <= GAP && !kept.some(ends) && !(open.add.length && ends(open.add[open.add.length - 1]));
+    if (open && !near) {
+      hunks.push(open);
+      open = null;
+    }
+    if (!open) {
+      open = { add: [], del: [] };
+      carry = [];
+    }
+    if (op === "add") {
+      open.add.push(...carry, word);
+      carry = [];
+    } else open.del.push(word);
+    kept = [];
+  });
+  if (open) hunks.push(open);
+  const seen = new Set();
+  return hunks
+    .map(({ add, del }) => {
+      if (!add.length) return { cut: bare(del) };
+      if (add.length === 1 && del.length === 1) return { from: bare(del), to: bare(add) };
+      return { to: bare(add) };
+    })
+    .filter((e) => {
+      const id = `${e.cut}|${e.from}|${e.to}`;
+      if (seen.has(id)) return false;
+      seen.add(id);
+      return true;
+    });
+}
+
+// A spine has one line, shared with its timestamp, so the edits are set
+// until the line is full and no further. Cut only at a word: a long phrase
+// keeps its first words and an ellipsis, and edits that no longer fit are
+// left as a closing "…" after the last slash. The budget is in characters of
+// the serif at its spine size, less the timestamp's share of the line (the
+// mono is wider per character); CSS still ellipsises if a guess runs over.
+const LINE = 46;
+// A shortened phrase never ends on a word that leans on the next one.
+const WEAK = new Set(["a", "an", "the", "i", "it", "is", "at", "in", "of", "to", "and", "for", "so"]);
+const SEP = 2; // a spaced slash or arrow, in characters
+const len = (e) => (e.cut ?? "").length + (e.from != null ? e.from.length + SEP : 0) + (e.to ?? "").length;
+function fit(list, when) {
+  let room = LINE - Math.ceil(when.length * 1.1);
+  const out = [];
+  for (const e of list) {
+    const need = len(e) + (out.length ? SEP : 0);
+    if (need <= room) {
+      out.push(e);
+      room -= need;
+      continue;
+    }
+    // Shorten a phrase to its first words if two or more of them fit.
+    const field = e.cut != null ? "cut" : "to";
+    const head = [];
+    let left = room - (out.length ? SEP : 0) - 1 - (e.from != null ? e.from.length + SEP : 0);
+    for (const w of e[field].split(" ")) {
+      if (w.length + (head.length ? 1 : 0) > left) break;
+      left -= w.length + (head.length ? 1 : 0);
+      head.push(w);
+    }
+    while (head.length && WEAK.has(head[head.length - 1].toLowerCase())) head.pop();
+    if (head.length >= 2) out.push({ ...e, [field]: `${head.join(" ").replace(/[,;:]$/, "")}…` });
+    else out.push({ more: true });
+    break;
+  }
+  return out;
+}
+
+// Newest first. Each version carries its diff against the state it
+// replaced, worked out once here: tagged for the front card's mark-up, and
+// summed up as the edits its spine sets. The first draft has nothing to
+// compare with, so nothing is marked and its spine names what it began.
 export const VERSIONS = DRAFTS.map((d, k) => {
   const prev = DRAFTS[k - 1];
-  const plain = (s) => ({ tokens: words(s).map((word) => ({ word, added: false, removedBefore: 0 })), removedAfter: 0 });
+  const plain = (s) => words(s).map((word) => ({ op: "keep", word }));
+  const title = prev ? align(prev.title, d.title) : plain(d.title);
+  const body = prev ? align(prev.body, d.body) : plain(d.body);
   return {
     when: WHEN[DRAFTS.length - 1 - k],
-    title: runs(prev ? diff(prev.title, d.title) : plain(d.title)),
-    body: runs(prev ? diff(prev.body, d.body) : plain(d.body)),
+    title: runs(tag(title)),
+    body: runs(tag(body)),
+    change: fit(prev ? [...edits(title), ...edits(body)] : [{ to: d.title }], WHEN[DRAFTS.length - 1 - k]),
   };
 }).reverse();
 

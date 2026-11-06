@@ -135,6 +135,20 @@
   white-space: nowrap;
 }
 
+/* One line tall, holding two: the title above, the change below. --front
+   rolls them through the window, so a card coming forward turns its spine
+   over to the title the way a counter turns a digit. Clipped, never faded. */
+.versions-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 20px;
+  overflow: hidden;
+}
+
+.versions-label > * {
+  transform: translateY(calc((var(--front, 1) - 1) * 20px));
+}
+
 .versions-title {
   margin: 0;
   font-size: var(--text-heading);
@@ -142,6 +156,43 @@
   letter-spacing: var(--text-heading--letter-spacing);
   font-weight: var(--text-heading--font-weight);
   text-wrap: balance;
+}
+
+/* The spine's proof line, on the same 20px line as the title it replaces.
+   The words a save wrote are in the emphasis serif at full ink. */
+.versions-change {
+  margin: 0;
+  font-size: var(--text-heading);
+  line-height: 20px;
+  letter-spacing: var(--text-heading--letter-spacing);
+  font-weight: var(--font-weight-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.versions-edit {
+  font-family: var(--versions-serif), "Iowan Old Style", Georgia, serif;
+  font-style: italic;
+  font-size: var(--versions-serif-size);
+  font-weight: var(--font-weight-serif);
+  letter-spacing: var(--versions-serif-track);
+  font-variation-settings: var(--versions-serif-opsz);
+  line-height: 1;
+  color: var(--versions-ink);
+}
+
+/* Taken out: struck in the caret's red, the word itself left at full ink
+   so it can still be read. */
+.versions-struck {
+  text-decoration-line: line-through;
+  text-decoration-color: var(--versions-cut);
+  text-decoration-thickness: 0.08em;
+}
+
+.versions-arrow,
+.versions-sep {
+  color: var(--versions-ink);
 }
 
 .versions-body {

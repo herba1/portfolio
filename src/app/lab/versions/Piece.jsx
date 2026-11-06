@@ -7,7 +7,7 @@ import { COUNT, VERSIONS } from "./versionsData";
 import "./versions.css";
 
 const LABEL =
-  "A short note with twelve earlier saves stacked behind it in depth. Drag or scroll up to bring older versions forward, down to return; the arrow keys step one save at a time. On the front card, words that save added are set in a serif and a red caret marks where words were removed.";
+  "A short note with twelve earlier saves stacked behind it in depth, each labelled with the words that save changed. Drag or scroll up to bring older versions forward, down to return; the arrow keys step one save at a time. On the front card, words that save added are set in a serif and a red caret marks where words were removed.";
 
 // Newsreader (Production Type, OFL) for the mark-up: a real optical-size
 // axis, so "opsz" 10 sets the sturdy small-text cut beside the grotesk.
@@ -37,6 +37,31 @@ function Words({ diff }) {
   });
   if (diff.removedAfter > 0) out.push(<Cut key="end" />);
   return out;
+}
+
+// A spine's line: what that save changed, as a proofreader lists marginal
+// corrections, each closed off from the next by a slash. Words written are
+// set in the serif; one word swapped for another reads "old → new"; words
+// only taken out are struck through.
+function Change({ edits }) {
+  return edits.map((e, k) => (
+    <Fragment key={k}>
+      {k > 0 ? <span className="versions-sep"> / </span> : null}
+      {e.more ? (
+        <span className="versions-sep">…</span>
+      ) : e.cut != null ? (
+        <s className="versions-edit versions-struck">{e.cut}</s>
+      ) : e.from != null ? (
+        <>
+          <span className="versions-edit">{e.from}</span>
+          <span className="versions-arrow"> → </span>
+          <span className="versions-edit">{e.to}</span>
+        </>
+      ) : (
+        <span className="versions-edit">{e.to}</span>
+      )}
+    </Fragment>
+  ));
 }
 
 export default function Piece({ embedded = false }) {
@@ -77,9 +102,18 @@ export default function Piece({ embedded = false }) {
           {VERSIONS.map((v, i) => (
             <article key={i} className="versions-card" data-i={i} aria-hidden={i === 0 ? undefined : "true"}>
               <div className="versions-head">
-                <h2 className="versions-title">
-                  <Words diff={v.title} />
-                </h2>
+                {/* The title shows once, on the front card; every save
+                    behind it names its own change instead. The two lines
+                    share one line box and roll past each other as a card
+                    comes forward. */}
+                <div className="versions-label">
+                  <h2 className="versions-title">
+                    <Words diff={v.title} />
+                  </h2>
+                  <p className="versions-change" aria-hidden="true">
+                    <Change edits={v.change} />
+                  </p>
+                </div>
                 <span className="versions-stamp">{v.when}</span>
               </div>
               <p className="versions-body">
