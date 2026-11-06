@@ -119,16 +119,14 @@ window.render = async ({ t, T, src, phase }) => {
 
   spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
   spring(cur.press, cur.down ? 1 : 0, 30, dt);
-  // Free rotation: the arrow turns to point the way it is travelling, all the
-  // way round if it has to, and keeps that heading when it stops.
+  // Free rotation: while moving, the arrow lerps round (any amount, no limit)
+  // to point the way it travels; as it slows it lerps back to its upright rest.
   const speed = Math.hypot(cur.x.v, cur.y.v);
-  if (speed > 140) {
-    let want = Math.atan2(cur.y.v, cur.x.v) - ARROW_HEADING;
-    while (want - cur.tilt.x > Math.PI) want -= 2 * Math.PI;
-    while (want - cur.tilt.x < -Math.PI) want += 2 * Math.PI;
-    cur.heading = want;
-  }
-  spring(cur.tilt, cur.heading ?? 0, 9, dt);
+  const near = (a) => { while (a - cur.tilt.x > Math.PI) a -= 2 * Math.PI; while (a - cur.tilt.x < -Math.PI) a += 2 * Math.PI; return a; };
+  const rest = near(0);
+  const heading = speed > 1 ? near(Math.atan2(cur.y.v, cur.x.v) - ARROW_HEADING) : rest;
+  const w = smooth((speed - 80) / 260); // 0 at a crawl, 1 at full glide
+  spring(cur.tilt, rest + (heading - rest) * w, 10, dt);
   if (cur.alpha.x > 0.01) drawPointer((cur.x.x - x0) * k, (cur.y.x - y0) * k, K * Math.pow(z, 0.35), clamp(cur.alpha.x, 0, 1), cur.press.x, cur.tilt.x);
 
   // intro: fade up from the page's own ground colour. outro: fade back into it.
