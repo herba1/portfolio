@@ -138,8 +138,10 @@ void main(){
   // the deepest, most saturated blue and the sky pales towards the roofs.
   float ze = smoothstep(0.4, 1.0, e);
   lum *= exp2(uZenDeep * (0.45 - ze));
-  // Cloud: the plate's own texture, as a luminance ratio; the denser parts
-  // catch the last warm light, later the city's glow.
+  // Cloud: a luminance ratio over the smooth sky; the denser parts catch the
+  // last warm light, later the city's glow. Overhead it is not the plate's:
+  // its pole-pinched zenith was swapped offline for a clean sky's, so the
+  // vanishing point is the clearest, deepest part of the shaft.
   float w = smoothstep(-0.1, 0.5, lr);
   vec3 sky = col * lum * exp2(lr * uCloudK);
   sky = mix(sky, vec3(dot(sky, LUMA)) * uCloudTint, w * uCloudW);
