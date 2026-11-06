@@ -1,0 +1,23 @@
+{
+  "title": "Overexpose",
+  "description": "A summer sky through a pine, developed live on colour negative film. Drag up to overexpose it by as much as three stops. A phone sensor would clip the clouds to flat white; the negative's long shoulder and the print paper's toe fold the light in instead, so the cobalt thins to powder blue, the shadows open into pastel, and the cumulus keep their shape all the way up. Halation and diffusion grow as the shadows they land on lift out of the toe.",
+  "tags": ["WebGL", "Film", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T19:00:00.000Z",
+  "intent": "Genre spec idea 5, after Rinko Kawauchi's overexposed 6x6 colour (Utatane, Illuminance): show why film looks dreamy and digital looks cheap with one gesture, exposure, on real linear radiance through per-layer H&D curves and a print curve. Reference: https://en.wikipedia.org/wiki/Rinko_Kawauchi",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.7], "to": [0.5, 0.25] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.5, 0.72], [0.5, 0.3]], "ms": 1800 },
+    { "idle": 1400 },
+    { "drag": [[0.5, 0.3], [0.5, 0.62]], "ms": 1200 },
+    { "idle": 1200 }
+  ],
+  "sources": [
+    "HDRI: Tree Lined Driveway, Poly Haven, photographed by Dimitrios Savva, processed by Jarod Guest, CC0. https://polyhaven.com/a/tree_lined_driveway (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/tree_lined_driveway_8k.hdr). Rectilinear crop: yaw -118 deg from the panorama centre, pitch +36 deg, 72 deg field, 1536 px square, one stitching patch in the pine cloned over; shipped as log2 radiance -8.5..+0.7 in 8 bits with TPDF dither (scene.webp), with the diffusion and halation blurs baked from the same radiance (optics.png).",
+    "https://en.wikipedia.org/wiki/Rinko_Kawauchi",
+    "https://en.wikipedia.org/wiki/Sensitometry",
+    "https://rassokhin-video.pages.dev/articles/what-is-halation-effect-dehancer-guide"
+  ]
+}
