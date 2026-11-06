@@ -1,0 +1,11 @@
+{
+  "title": "Sheet",
+  "description": "A phone with a record open on it and a bottom sheet of song credits resting at its lowest detent. Drag the sheet and it stays exactly under your finger; let go and the speed you let go at is projected forward to choose peek, half or full, then a spring carries that speed in, and you can catch it mid-flight. Past full it rubber-bands. As it rises from half to full the album page behind steps back the way iOS does it: it scales to 0.94, its corners round, it dims a little and the status bar turns light over the black that opens above it, all in step with your finger, so dragging down from full brings the page forward continuously. At full the credits scroll, and a drag that scrolls them back to the top keeps going and pulls the sheet down in the same gesture. A click on the header steps up, Escape and the arrow keys step through the detents.",
+  "tags": ["Gesture", "Spring", "Interface"],
+  "status": "draft",
+  "createdAt": "2026-11-06T14:00:00.000Z",
+  "intent": "Emil Kowalski's Vaul drawer (https://vaul.emilkowal.ski/, https://emilkowal.ski/ui/building-a-drawer-component) and iOS sheets with detents: the drag follows the pointer one to one, release velocity picks the detent, damping past the edge instead of a hard stop, the presenting page scaling back with rounded corners, and scroll handing off to the drag only at the top.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".sh-sheet", "from": [0.5, 0.9], "to": [0.5, 0.2] },
+  "sources": ["https://vaul.emilkowal.ski/", "https://emilkowal.ski/ui/building-a-drawer-component", "https://developer.apple.com/design/human-interface-guidelines/sheets"]
+}
