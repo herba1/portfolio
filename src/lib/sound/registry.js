@@ -14,6 +14,7 @@ export const TAKES = {
   "lab/iris/irisTakes": () => import("../../app/lab/iris/irisTakes.js"),
   "lab/justify/justifyTakes": () => import("../../app/lab/justify/justifyTakes.js"),
   "lab/kern/kernTakes": () => import("../../app/lab/kern/kernTakes.js"),
+  "lab/ligature/ligatureTakes": () => import("../../app/lab/ligature/ligatureTakes.js"),
   "lab/moire/moireTakes": () => import("../../app/lab/moire/moireTakes.js"),
   "lab/pull-vinyl/vinylTakes": () => import("../../app/lab/pull-vinyl/vinylTakes.js"),
   "lab/refractor/refractorTakes": () => import("../../app/lab/refractor/refractorTakes.js"),

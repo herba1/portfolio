@@ -1,0 +1,11 @@
+{
+  "title": "Ligature",
+  "description": "One word in heavy geometric capitals drawn from straight stems and a single shared diagonal slope, set with ordinary loose spacing. Push it together and the letters slide in on springs; as each pair meets, their diagonals slot into one another and the shared stroke becomes a single stroke: the A's leg is the V's leg, the T's arm caps the N - each lock landing with a small settle. Let go and the word springs back open.",
+  "tags": ["Type", "Physics", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Herb Lubalin's Avant Garde logotype and the ITC Avant Garde ligatures (https://eyemagazine.com/feature/article/up-close-and-tight): geometric capitals fitted so tight they interlock and become one shape. Make that fit the endpoint of a gesture, so loose spacing tightening into a true ligature is felt rather than shown.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.2, 0.5], "to": [0.62, 0.5] },
+  "sources": ["https://eyemagazine.com/feature/article/up-close-and-tight", "https://en.wikipedia.org/wiki/ITC_Avant_Garde"]
+}
