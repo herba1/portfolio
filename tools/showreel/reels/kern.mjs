@@ -22,11 +22,11 @@ const reel = {
   cursor: { from: [0.7, 0.86], visible: true },
   formats: ["feed", "landscape", "vertical"],
   beats: [
-    { click: letter(4), duration: 650, settle: 100, pause: 900 },          // heavy
+    { click: off(4, 0.8, 0.68), duration: 650, settle: 260, pause: 900 },  // land in the t's open corner (on paper, not ink, so the press shows), a beat, press: heavy
     { press: letter(8), duration: 600, settle: 80 },
     { move: off(8, 3.6, 0.35), duration: 650, arc: 0.04, pause: 250 },     // stretch
     { lift: true, pause: 900 },                                           // snap back, re-kern
-    { click: letter(1), duration: 650, settle: 100, pause: 800 },         // light
+    { click: off(1, 0.5, 0.6), duration: 650, settle: 260, pause: 800 },   // same tap inside the o's counter: light
     { press: letter(5), duration: 600, settle: 80 },
     { move: off(5, 0.5, -1.7), duration: 330, arc: 0, pause: 60 },
     { move: off(5, 0.5, 2.2), duration: 280, arc: 0 },

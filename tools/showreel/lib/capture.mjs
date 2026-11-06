@@ -181,7 +181,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     click: async (target, b) => {
       if (target !== "cursor") await glide(await resolve(target, b), b.duration ?? 850, b.arc);
       await clock.wait(b.settle ?? 120);
-      await press(); await clock.wait(b.hold ?? 90); await release();
+      await press(); await clock.wait(b.hold ?? 160); await release();   // long enough for the press to read on screen
     },
     // Long press. `then` drags somewhere while still held (slide-to-choose).
     hold: async (target, b) => {

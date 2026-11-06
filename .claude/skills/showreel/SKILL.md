@@ -125,6 +125,7 @@ Pixel-coordinate targets only hold for the viewport they were written for; give 
 - **Story first.** Arrive on the piece, do the one move it exists for, do it again bigger or differently, return to the start.
 - **Intros and outros live in the piece.** Whatever it does as it mounts is the opening shot. If a piece has no entrance, give it one in the piece rather than faking it in the edit. Trim only the empty frames before it.
 - **Zoom for detail, not motion.** 1.2–1.5 onto the thing that changes, then `camera: "reset"` before a big move. To carry something across the frame, use `follow`.
+- **Make every tap read.** With no ripples, the press itself has to show: the arrow sinks 20% about its tip and its shadow pulls in (`pressDepth`), a click holds for 160ms, and the pointer should land and rest a beat first (`settle: 250`). Aim taps at open paper inside the target (`{ sel, at: [fx, fy] }`, e.g. a letter's counter), never on a black stroke where the black arrow disappears.
 - **Pauses are the edit.** About a second for each reaction to land; the pointer idles while the piece performs.
 - **Check it** with a contact sheet before posting: `ffmpeg -i out/x/feed.mp4 -vf "fps=2,scale=240:-1,tile=6x4" -frames:v 1 sheet.png`. Look hardest at the first frame and at the loop seam.
 

@@ -187,7 +187,7 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   }
 
   spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
-  spring(cur.press, cur.down ? 1 : 0, 30, dt);
+  spring(cur.press, cur.down ? 1 : 0, cur.down ? 34 : 20, dt); // in quick, out a touch slower so the release reads
   // Free rotation: while moving, the arrow lerps round (any amount, no limit)
   // to point the way it travels; as it slows it lerps back to its upright rest.
   const speed = Math.hypot(cur.x.v, cur.y.v);
@@ -221,14 +221,15 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
 
 // A Mac-style arrow made soft: the black body is a slightly inset arrow
 // stroked with a fat round join, so every corner is a real radius, and the
-// white rim is the same shape stroked wider. A press only nudges it smaller.
+// white rim is the same shape stroked wider. A press pushes it into the page:
+// smaller about its tip, and its shadow pulls in tight as it touches down.
 // The direction the unrotated arrow points (from its body to its tip).
 const ARROW_HEADING = Math.atan2(-13, -5.5);
 const ARROW = new Path2D("M1.2 1.9 L1.2 15.6 L4.9 12.4 L7.4 17.9 L9.5 17.0 L7.1 11.6 L11.6 11.6 Z");
 const layer = document.createElement("canvas");
 const lctx = layer.getContext("2d");
 function drawPointer(x, y, k, a, press, tilt) {
-  const s = k * (S.cursorSize ?? 1.7) * (1 - 0.08 * press);
+  const s = k * (S.cursorSize ?? 1.7) * (1 - (S.pressDepth ?? 0.2) * press);
   // Draw it opaque on its own layer, then lay that down at the fade's alpha:
   // fading the rim and body separately lets the white show through the black.
   const R = Math.ceil(34 * s);
@@ -236,7 +237,7 @@ function drawPointer(x, y, k, a, press, tilt) {
   lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, R * 2, R * 2);
   lctx.translate(R, R); lctx.rotate(tilt); lctx.scale(s, s);
   lctx.lineJoin = "round"; lctx.lineCap = "round";
-  lctx.shadowColor = "rgba(0,0,0,0.26)"; lctx.shadowBlur = 8 * s; lctx.shadowOffsetY = 1.8 * s;
+  lctx.shadowColor = `rgba(0,0,0,${0.26 + 0.12 * press})`; lctx.shadowBlur = (8 - 5.5 * press) * s; lctx.shadowOffsetY = (1.8 - 1.4 * press) * s;
   lctx.lineWidth = 6.4; lctx.strokeStyle = "#fff"; lctx.stroke(ARROW);
   lctx.shadowColor = "transparent";
   lctx.lineWidth = 2.6; lctx.strokeStyle = "#151517"; lctx.stroke(ARROW);
