@@ -118,20 +118,19 @@ window.render = async ({ t, T, src, phase }) => {
   spring(cur.y, cur.raw.y, lag, dt);
 
   // camera
-  // follow: the camera drifts after the pointer, never 1:1. It takes only a
-  // share of each move (followAmount) through a heavy spring, so the pointer
-  // travels across the frame while the frame leans along behind it.
+  // follow: the camera goes everywhere the pointer goes, just not at once.
+  // It chases through a soft spring, so it arrives a beat later and eases in.
   if (shot?.follow) {
-    const f = S.followAmount ?? 0.35;
-    spring(lead.x, shot.to.x + (cur.x.x - shot.to.x) * f, 2.6, dt);
-    spring(lead.y, shot.to.y + (cur.y.x - shot.to.y) * f, 2.6, dt);
+    const f = S.followAmount ?? 1, w = S.followSpring ?? 3.2;
+    spring(lead.x, shot.to.x + (cur.x.x - shot.to.x) * f, w, dt);
+    spring(lead.y, shot.to.y + (cur.y.x - shot.to.y) * f, w, dt);
   } else { lead.x.x = cam.x; lead.y.x = cam.y; lead.x.v = lead.y.v = 0; }
   if (shot) {
     if (shot.t0 == null) shot.t0 = T;
     const p = (T - shot.t0) / shot.dur, e = inOut(p);
     const to = shot.follow ? { ...shot.to, x: lead.x.x, y: lead.y.x } : shot.to;
     const dx = to.x - shot.from.x, dy = to.y - shot.from.y, d = Math.hypot(dx, dy);
-    const arc = Math.sin(Math.PI * clamp(p, 0, 1));
+    const arc = shot.follow ? 0 : Math.sin(Math.PI * clamp(p, 0, 1));
     // bow upward (or outward on a vertical move), like the pointer does
     const nx = d ? -dy / d : 0, ny = d ? dx / d : 0;
     const side = Math.abs(ny) > 0.2 ? Math.sign(-ny) : Math.sign(nx) || 1;

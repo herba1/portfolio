@@ -8,13 +8,13 @@ const reel = {
   css: ".sticker-peel-head, .sticker-peel-live { visibility: hidden; }",
   stage: { rect: [0.3, 0.02, 0.56, 0.94] },   // the record and the air above it, not the empty desk
   ready: ".sticker-peel-stage[data-ready]",
-  intro: { hold: 1700, zoom: 1, fade: 900 },   // open on the whole piece as it appears, then begin
+  intro: { hold: 500, zoom: 1, fade: 350 },   // feed first: the piece is there at once and the hand is in within a second
   tempo: 1.2,
   outro: { hold: 2000, fade: 900 },
   cursor: { from: [0.86, 0.9] },
   formats: ["landscape"],
   beats: [
-    { move: [798, 262], duration: 900, zoom: 1.45, zoomOn: [880, 225], pause: 250 },
+    { move: [798, 262], duration: 750, zoom: 1.45, zoomOn: [880, 225], pause: 250 },
     { press: "cursor", settle: 80 },
     { move: [880, 236], duration: 650, arc: 0.04, pause: 300 },            // glue strands
     { move: [1090, 190], duration: 700, arc: 0.04, pause: 200 },           // lets go

@@ -12,7 +12,7 @@ const reel = {
   css: ".kern-title { visibility: hidden; }",
   stage: { sel: ".kern-stage text", pad: 0.06 },
   ready: ".kern-stage text",
-  intro: { hold: 1900, zoom: 1, fade: 900 },   // let it pluck itself in full view first
+  intro: { hold: 1000, zoom: 1, fade: 350 },   // catch the pluck on load, then straight in
   tempo: 1.2,
   outro: { hold: 2000, fade: 900 },
   cursor: { from: [0.78, 0.9] },
