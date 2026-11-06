@@ -67,6 +67,11 @@ const HEDGE = { yaw0: 43, yaw1: 120.5, el0: 15, el1: -1.4, gap: 62 };
 const GROUND = { y0: -0.004, y1: -0.335, x0: -0.95, period: 1.65 };
 const POLE = { l: -0.18, r: 0.18, b: -0.23, t: 1.44, n: 4, rot: [1.22, 1.22, -1.22, -1.22] };
 const LEVELS = 7;
+const POLE_TEX_H = 1670; // poles.webp height (texels)
+// Sky grade (see the shader): cloud highlight push in stops, how much local
+// form and top-lit relief steer it, the warm-neutral shoulder, and the
+// luminance the push eases toward (x the print exposure, just under white).
+const SKY_GRADE = { push: 1.1, form: 0.45, relief: 0.7, warm: 1, tint: [1.1, 1.0, 0.8], top: 2.35 };
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -99,14 +104,19 @@ uniform float uSkyDrift;
 uniform float uExpo;
 uniform float uGrad;
 uniform float uPol;
+uniform vec4 uSkyPush;   // highlight push (stops), local form, relief, warm share
+uniform vec3 uSkyWarm;   // the sunlit-top tint (luminance 1)
+uniform float uSkyTop;   // the pushed cloud's luminance ceiling
 uniform vec4 uPole[8];  // per candidate pole: screen x, sprite index, attach flip, unused
 uniform int uPoleN;
 uniform int uDbg;
+uniform vec3 uHalo;     // pole-edge halation, linear
 
 const float LO = ${LO.toFixed(2)};
 const float HI = ${HI.toFixed(2)};
 const float H = ${CAM_H.toFixed(3)};
 const float DEG = 57.29578;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
 vec3 dec(vec3 v) { return exp2(v * (HI - LO) + LO); }
 
@@ -142,6 +152,7 @@ vec4 NAME(float u, float v, float len, float wrap) { \
 }
 BLUR(blurGround, uGround, uGroundLv, 10)
 BLUR(blurPoles, uPoles, uPolesLv, 16)
+BLUR(spreadPoles, uPoles, uPolesLv, 6)
 
 // The hedge is tiled H | mirror(H) | gap; every tap finds its own tile.
 vec4 hedgeAt(float yawDeg, float v, float lenDeg, float lv) {
@@ -194,6 +205,51 @@ void main() {
   // darkens and deepens, cloud white keeps.
   float A = clamp((0.9 * col.b - col.r) / 0.5, 0.0, col.b);
   col = col - A * vec3(0.30, 0.45, 0.9) * uPol + A * vec3(0.0, 0.30, 0.66) * uPol;
+
+  // Sky grade, before the film. The plate's cumulus sit a stop under where a
+  // print wants them and carry the HDRI's blue cast, so the film's shoulder
+  // squeezes them to a dull blue-grey. Cloud (not the clear blue) gets a
+  // highlight-only exposure push, scaled by its local form: brighter than its
+  // ~3° neighbourhood and with darker sky above than below (a sunlit top)
+  // pushes more; the reverse (a base or a fold) holds back. Then the top of
+  // the push rolls off to warm-neutral sunlight while undersides and shadows
+  // keep the skylight blue they are lit by.
+  {
+    float sl = dot(col, LUMA);
+    // Whiteness: the clear blue is ~0.3 after the polariser, cloud 0.75-0.9.
+    // The thin blue-white margin of a puff is only half cloud, so it gets
+    // little push and none of the warm tint (blue plus warm is mauve).
+    float wr = col.r / max(col.b, 1e-4);
+    float cloud = smoothstep(0.45, 0.78, wr);
+    cloud *= cloud;
+    float core = smoothstep(0.68, 0.86, wr);
+    float ml = dot(dec(textureLod(uSky, su, 6.0).rgb), LUMA);
+    // top-lit relief at two scales: a puff's own top, and the top of the
+    // low bank behind the tree line (which otherwise has no form at all)
+    float up = dot(dec(textureLod(uSky, su - vec2(0.0, 0.022), 5.0).rgb), LUMA);
+    float dn = dot(dec(textureLod(uSky, su + vec2(0.0, 0.022), 5.0).rgb), LUMA);
+    float upC = dot(dec(textureLod(uSky, su - vec2(0.0, 0.05), 6.0).rgb), LUMA);
+    float dnC = dot(dec(textureLod(uSky, su + vec2(0.0, 0.05), 6.0).rgb), LUMA);
+    float relief = clamp(0.6 * (dn - up) / (dn + up + 1e-3) + 0.8 * (dnC - upC) / (dnC + upC + 1e-3), -1.0, 1.0);
+    float st = log2(max(sl, 1e-4));
+    float lift = uSkyPush.x * smoothstep(-1.6, 0.4, st)
+               + uSkyPush.y * clamp(log2(max(sl, 1e-4) / max(ml, 1e-4)), -1.0, 1.0)
+               + uSkyPush.z * relief;
+    col *= exp2(cloud * lift);
+    // Soft shoulder on the pushed cloud: luminance eases toward uSkyTop
+    // instead of running into the film's white, so the brightest tops glow
+    // without clipping (and without a halation hot spot).
+    float sl2 = dot(col, LUMA);
+    float knee = 0.55 * uSkyTop;
+    float over = max(sl2 - knee, 0.0);
+    float sl3 = sl2 > knee ? knee + over / (1.0 + over / (uSkyTop - knee)) : sl2;
+    col *= mix(1.0, sl3 / max(sl2, 1e-4), cloud);
+    sl2 = dot(col, LUMA);
+    float warm = core * smoothstep(0.65, 1.6, sl2);
+    col = mix(col, sl2 * uSkyWarm, warm * uSkyPush.w);
+    float shade = cloud * (1.0 - smoothstep(0.4, 1.15, sl2));
+    col = mix(col, sl2 * vec3(0.74, 0.96, 1.38), shade * 0.6);
+  }
 
   // Far tree line and farmland, mirrored.
   float dYaw = yaw + 6.0 + (uS / ${D_DIST.toFixed(1)}) * DEG;
@@ -291,7 +347,26 @@ void main() {
     float cellW = 1.0 / ${POLE.n.toFixed(1)};
     float lenTex = (lenM / ${D_POLE.toFixed(1)}) / ${(POLE.r - POLE.l).toFixed(3)} * cellW * uPolesLv[0].y;
     vec4 pc = blurPoles((cell + uc) * cellW, v, lenTex, 0.0);
-    if ((uDbg & 4) == 0) col = col * (1.0 - pc.a) + pc.rgb;
+    if ((uDbg & 4) == 0) {
+      // Halation: where the dark pole crosses bright cloud, light that went
+      // through the emulsion and bounced off the film base comes back
+      // through the red layer just inside the pole's edge, a thin warm ring.
+      // The edge is where the pole's coverage over a ~12-texel neighbourhood
+      // (along the smear, and a few texels above and below for the arms)
+      // falls short of its coverage here.
+      float bgL = dot(col, LUMA);
+      float hot = smoothstep(0.6, 1.7, bgL);
+      col = col * (1.0 - pc.a) + pc.rgb;
+      if (hot > 0.0 && pc.a > 0.01) {
+        float u0 = (cell + uc) * cellW;
+        float dv = 5.0 / ${POLE_TEX_H.toFixed(1)};
+        float nA = 0.5 * spreadPoles(u0, v, lenTex + 12.0, 0.0).a
+                 + 0.25 * tapLv(uPoles, uPolesLv[3], u0, v - dv).a
+                 + 0.25 * tapLv(uPoles, uPolesLv[3], u0, v + dv).a;
+        float ring = pc.a * clamp(2.2 * (pc.a - nA) + 0.6 * (1.0 - nA), 0.0, 1.0);
+        col += uHalo * ring * hot;
+      }
+    }
   }
 
   // A soft graduated ND over the sky, then exposure.
@@ -728,9 +803,13 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
     gl.uniform1f(u.uExpo, 1.15 * 2 ** expoStops);
     gl.uniform1f(u.uGrad, 0.35);
     gl.uniform1f(u.uPol, 0.85);
+    gl.uniform4f(u.uSkyPush, SKY_GRADE.push, SKY_GRADE.form, SKY_GRADE.relief, SKY_GRADE.warm);
+    gl.uniform3fv(u.uSkyWarm, SKY_GRADE.tint);
+    gl.uniform1f(u.uSkyTop, SKY_GRADE.top);
     gl.uniform4fv(u.uPole, poleBuf);
     gl.uniform1i(u.uPoleN, count);
     gl.uniform1i(u.uDbg, dbg);
+    gl.uniform3f(u.uHalo, 0.34, 0.12, 0.035);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -741,6 +820,8 @@ export async function createTrainWindow(host, { embedded = false } = {}) {
         ...FILM_PRESETS.summer,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         whitePoint: 2.2,
+        halation: 0.22,
+        halationColor: [1, 0.42, 0.18],
         grainSeed,
       },
       filmT.fbo,
