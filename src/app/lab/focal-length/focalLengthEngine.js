@@ -60,8 +60,9 @@ void main() {
   float r = length(p);
   float th = uK * atan(r / (uF * uK));
   vec2 d2 = r > 1e-4 ? p / r : vec2(0.0);
-  // camera looks up the world's +y; screen right is +x, screen up is +z
-  vec3 w = vec3(sin(th) * d2.x, cos(th), sin(th) * d2.y);
+  // camera looks up the world's +y; screen right is +x, screen up is -z,
+  // the plate's own up, so the picture is never mirrored (signage reads)
+  vec3 w = vec3(sin(th) * d2.x, cos(th), -sin(th) * d2.y);
   float ca = cos(uRot.x), sa = sin(uRot.x);
   w = vec3(w.x, w.y * ca - w.z * sa, w.y * sa + w.z * ca);
   float cb = cos(uRot.y), sb = sin(uRot.y);
@@ -190,7 +191,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   const held = qmm != null && qmm !== "" && Number.isFinite(+qmm);
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
-  // ---- DOM: a portrait print on the page, its focal length beneath it.
+  // ---- DOM: the picture fills the box, its focal length set bottom-left.
   const box = host.closest(".piece-box") || host;
   const print = document.createElement("div");
   print.className = "fl-print";
@@ -230,7 +231,7 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   const film = createFilm(gl, { width: 2, height: 2 });
 
   // ---- layout and the scene target
-  let W = 1; // print size, css px
+  let W = 1; // frame size, css px
   let H = 1;
   let dpr = 1;
   let tex = null;
@@ -266,34 +267,28 @@ export async function createFocalLength(host, { embedded = false } = {}) {
     dirty = true;
   };
 
+  // Full bleed: the frame is the box, so the towers run off every edge. The
+  // lens is set by the frame's diagonal (full frame's 43.3 mm), so a
+  // landscape window is a camera held level and a phone is one held upright.
+  const MAX_PX = 3840 * 2160; // device px the scene and film are rendered at
   const layout = () => {
-    const r = box.getBoundingClientRect();
-    const bw = Math.max(1, r.width);
-    const bh = Math.max(1, r.height);
-    const gutter = Math.max(16, Math.round(bw * 0.06));
-    const below = 44; // room for the mark under the print
-    let h = Math.round(Math.min(bh * 0.78, bh - 2 * below));
-    let w = Math.round(h * 0.8);
-    if (w > bw - 2 * gutter) {
-      w = Math.round(bw - 2 * gutter);
-      h = Math.round(w * 1.25);
-    }
-    // whole pixels on a 4px rhythm
-    h = Math.max(4, h - (h % 4));
-    w = Math.max(4, w - (w % 4));
+    const r = print.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width));
+    const h = Math.max(1, Math.round(r.height));
     W = w;
     H = h;
-    const left = Math.round((bw - w) / 2);
-    const top = Math.round((bh - h) / 2) - ((Math.round((bh - h) / 2)) % 4);
-    Object.assign(print.style, { width: `${w}px`, height: `${h}px`, left: `${left}px`, top: `${top}px` });
-    Object.assign(mark.style, { left: `${left}px`, top: `${top + h + 12}px` });
-    dpr = Math.min(2, window.devicePixelRatio || 1);
-    canvas.width = Math.round(w * dpr);
-    canvas.height = Math.round(h * dpr);
+    // Render at the screen's own density, so the bigger surface stays sharp.
+    dpr = Math.min(3, window.devicePixelRatio || 1, Math.sqrt(MAX_PX / (w * h)));
+    const cw = Math.max(1, Math.round(w * dpr));
+    const ch = Math.max(1, Math.round(h * dpr));
+    if (cw === canvas.width && ch === canvas.height && tex) return;
+    canvas.width = cw;
+    canvas.height = ch;
     build();
   };
   const ro = new ResizeObserver(layout);
   ro.observe(box);
+  ro.observe(print);
   layout();
 
   // ---- state
@@ -313,7 +308,8 @@ export async function createFocalLength(host, { embedded = false } = {}) {
   let wheelPending = false;
 
   const pointer = { x: 0, y: 0, inside: false, vx: 0, t: 0 };
-  const dragScale = () => Math.max(W * 1.35, 320); // px for the whole 50 -> 10 turn
+  // px for the whole 50 -> 10 turn: about a hand's sweep, whatever the width
+  const dragScale = () => clamp(W * 0.55, 360, 720);
 
   const local = (e) => {
     const r = print.getBoundingClientRect();
