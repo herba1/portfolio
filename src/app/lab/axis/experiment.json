@@ -1,0 +1,11 @@
+{
+  "title": "Axis",
+  "description": "One word set very large in Geist's variable font, black on warm white and running off the edges. Moving across it sweeps the weight from hairline to black, and the change travels through the word like a wave, each letter a beat behind its neighbour nearer the pointer. Press and drag to lean the letters from upright to oblique; let go and they spring back. Every letter's advance is re-measured at its own weight each frame, so the spacing is set correctly at every point of the sweep.",
+  "tags": ["Type", "Variable fonts", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Grilli Type's GT Haptik minisite (https://www.itsnicethat.com/articles/grilli-type-1): a specimen that teaches the weight axis with one gesture. Pointer x is the weight axis; a drag shears the glyphs about their x-height centre into a sane oblique; spacing follows the house tracking law on real per-weight advances and kerning.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.62, 0.5] },
+  "sources": ["https://www.grillitype.com/typeface/gt-haptik", "https://www.itsnicethat.com/articles/grilli-type-1", "https://vercel.com/font"]
+}
