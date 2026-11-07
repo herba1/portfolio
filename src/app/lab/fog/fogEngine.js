@@ -4,9 +4,10 @@ import { createStage, clamp } from "../_kit/stage";
 // cumulus sky, with real air applied per pixel through its real distance.
 // Drag sets the visibility, from a clear 50 km day down to a 200 m haze.
 //
-// The plate is two Poly Haven HDRIs (CC0) rendered through the same
-// stereographic rays: the towers from canary_wharf, the sky from docklands_01,
-// graded to a cobalt zenith with unclipped cumulus. Depth Anything V2 gives
+// The plate is two Poly Haven HDRIs (CC0, both from their 16k captures) rendered
+// at 3840 through the same stereographic rays: the towers from canary_wharf, the
+// sky from docklands_01, graded to a cobalt zenith with cumulus split-toned
+// warm-neutral on the sunlit tops and skylight blue in the folds, unclipped. Depth Anything V2 gives
 // relative inverse depth, edge-snapped and turned into metres offline (the
 // glass corner ~30 m, the far tower down the street ~380 m); the sky sits at
 // the far end through its matte. tools/depth/bakes/fog/ builds both.
@@ -28,9 +29,11 @@ import { createStage, clamp } from "../_kit/stage";
 const COLOR_SRC = "/lab/fog/plate.webp";
 const AUX_SRC = "/lab/fog/aux.png"; // r log distance, g sky matte, b elevation
 const ASPECT = 3 / 2;
+const PLATE_W = 3840; // plate.webp width; the forward-scatter blur is tuned in its levels
 const D_MIN = 10;
 const D_MAX = 4000;
 const HS = 500; // haze scale height, metres
+const HS_SKY = 200; // the column the sky is seen through
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 200; // visibility at fog 1
 const K_RGB = [0.82, 1.0, 1.24];
@@ -76,8 +79,12 @@ float vnoise(vec3 p) {
 vec3 tauAt(vec2 uv, vec4 aux) {
   float d = distAt(aux);
   float s = max(sin(radians(aux.b * 90.0)), 0.06);
-  // Air in a haze layer that thins with height.
-  float L = ${HS.toFixed(1)} / s * (1.0 - exp(-d * s / ${HS.toFixed(1)}));
+  // Air in a haze layer that thins with height. The street's own haze sits
+  // lower than the layer the towers stand in, so the sky above is looked at
+  // through a thinner column: it is veiled, and still there overhead when the
+  // towers are going.
+  float hs = mix(${HS.toFixed(1)}, ${HS_SKY.toFixed(1)}, aux.g);
+  float L = hs / s * (1.0 - exp(-d * s / hs));
   // Banks of haze: low-frequency noise, advected sideways, living at depths.
   vec3 q = vec3(uv.x * uAspect * 1.4 - uTime * 0.012, uv.y * 1.2, log(d) * 0.4);
   float n = vnoise(q) * 0.64 + vnoise(q * 2.03 + vec3(uTime * 0.008, 0.0, 3.1)) * 0.36;
@@ -161,10 +168,23 @@ uniform float uGrain;   // grain seed, stepped at 24 fps
 ${COMMON}
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+// Only the haze's own lift needs catching: the plate already rolls its cloud
+// tops off under 1.0, so the knee sits above them and they keep their warmth.
 vec3 shoulder(vec3 x) {
-  vec3 k = vec3(0.62);
+  vec3 k = vec3(0.86);
   vec3 over = max(x - k, 0.0);
-  return min(x, k) + (0.92 - k) * (1.0 - exp(-over / (0.92 - k)));
+  return min(x, k) + (0.99 - k) * (1.0 - exp(-over / (0.99 - k)));
+}
+
+// The plate, linear. It is larger than most screens draw it, so the sharp
+// level is a box over this pixel's footprint (four bilinear taps of level 0)
+// rather than a trilinear blend toward the half-size level, which would soften
+// the glass; extra levels only for the haze's forward scatter.
+vec3 plate(vec2 uv, float lod) {
+  vec2 q = 0.25 / uRect.zw;
+  vec3 c = textureLod(uColor, uv + vec2(-q.x, -q.y), lod).rgb + textureLod(uColor, uv + vec2(q.x, -q.y), lod).rgb
+    + textureLod(uColor, uv + vec2(-q.x, q.y), lod).rgb + textureLod(uColor, uv + vec2(q.x, q.y), lod).rgb;
+  return pow(c * 0.25, vec3(2.2));
 }
 
 void main() {
@@ -173,9 +193,11 @@ void main() {
   vec4 aux = texture(uAux, uv);
   vec3 T = exp(-tauAt(uv, aux));
 
-  // Forward scatter softens what the air has nearly taken.
-  float soft = (1.0 - T.g) * (1.0 - T.g);
-  vec3 scene = pow(textureLod(uColor, uv, soft * 1.6).rgb, vec3(2.2));
+  // Forward scatter softens what the air has nearly taken: the towers only.
+  // The sky behind the haze is veiled by the in-scatter below, never blurred
+  // (convolving the clouds reads as a lens, not as air).
+  float soft = (1.0 - T.g) * (1.0 - T.g) * (1.0 - smoothstep(0.02, 0.5, aux.g));
+  vec3 scene = plate(uv, soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)});
 
   // The air is lit by the sky: its colour is the sky's own light nearby.
   vec4 a = texture(uAir, uv);
@@ -460,8 +482,10 @@ export async function createFog(host, { embedded = false } = {}) {
   gl.uniform1i(P.air.u.uAux, 1);
   gl.uniform1f(P.air.u.uLod, Math.log2(colorImg.naturalHeight / down[0].h));
   quadDraw(down[0]);
-  // Mostly wide: the air is lit by the whole sky, a little by the sky nearby.
-  const air = chain([0.15, 0.25, 0.4, 0.6, 0.8]);
+  // Broadest only: the air is lit by the whole sky and which part of it is
+  // brighter, never by one cloud. Any finer level prints a blurred copy of the
+  // cumulus into the haze, and the sky behind reads as lens-blurred, not veiled.
+  const air = chain([0, 0, 0, 0, 0.35]);
 
   const draw = () => {
     gl.bindVertexArray(vao);
