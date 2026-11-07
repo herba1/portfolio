@@ -1,7 +1,7 @@
 // The chrome is a height field over the page: a sum of compact metaball
 // kernels (the liquid), a surface-tension profile that stands its edge up
-// like a meniscus, and slow swells carried along with the liquid. A hard
-// studio environment is reflected in it. The result is never shown as tone:
+// like a meniscus, and slow swells carried along with the liquid. A broad,
+// soft studio is reflected in it. The result is never shown as tone:
 // it is printed as one line screen whose phase is displaced by the surface,
 // so every line bends over the forms and crowds where the surface turns, and
 // whose width carries the tone. A lavender plate printed a hair out of
@@ -41,7 +41,9 @@ float vnoise(vec2 p){
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
 
-// Slow relief: a few long crossing swells, with an exact gradient.
+// Slow relief: a few long crossing swells, with an exact gradient. Only the
+// long ones: short swells make the lines wiggle like a texture laid over
+// the tone, where a burin would sweep round the whole mass.
 vec3 relief(vec2 q){
   vec3 r = vec3(0.0);
   // Ridges laid across the flow (the sheet runs low-left to high-right), so
@@ -51,12 +53,13 @@ vec3 relief(vec2 q){
   const vec4 W[5] = vec4[5](
     vec4( 0.41,  0.91, 3.2, 0.0), vec4( 0.15,  0.99, 4.9, 1.7), vec4( 0.62,  0.78, 6.6, 4.1),
     vec4( 0.25,  0.97, 8.8, 5.3), vec4( 0.91, -0.41, 2.2, 2.3));
-  const float A[5] = float[5](0.5, 0.4, 0.26, 0.12, 0.14);
+  const float A[5] = float[5](0.5, 0.4, 0.1, 0.0, 0.14);
   for (int j = 0; j < 5; j++){
+    if (A[j] == 0.0) continue;
     vec2 k = W[j].xy * W[j].z * 0.75;
     vec2 kw = AX * (1.6 + 0.7 * float(j));
     float wp = dot(q, kw) + float(j) * 2.1 + uTime * 0.04;
-    float wa = j < 4 ? 1.1 : 0.0;
+    float wa = j < 4 ? 0.8 : 0.0;
     float ph = dot(q, k) + wa * sin(wp) + W[j].w + uTime * (0.05 + 0.02 * float(j));
     vec2 gph = k + wa * cos(wp) * kw;
     r.x += A[j] * sin(ph);
@@ -66,42 +69,38 @@ vec3 relief(vec2 q){
 }
 
 // The studio, seen from the chrome. Stereographic coordinates around the
-// zenith: |s| = 1 is the horizon. Grey walls, two big softboxes and a strip,
-// black flags between them, and a black floor below the horizon.
+// zenith: |s| = 1 is the horizon. A broad studio, not hard boards: a sky
+// that falls from a bright key side to a dim far side, one large softbox
+// and one long strip, both with wide falloff, a single soft flag, a lit
+// cyclorama glow at the horizon and a dark floor under it. Nothing in it
+// has an edge, so the reflection is all long ramps, and the line width has
+// a whole range of midtone to carry instead of ink-or-paper.
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
-  float L = 0.8 + 0.12 * s.x - 0.08 * s.y;
-  float d;
-  // Softboxes: white. Their edges and the flags cross right around the
-  // zenith, so the gentle swells of a flat pool already break into islands.
-  d = sdBox(rot(s - vec2(-0.22, 0.02), 0.3), vec2(0.2, 0.3));
-  L = mix(L, 1.0, smoothstep(soft, -soft, d));
-  d = sdBox(rot(s - vec2(0.36, -0.24), -0.2), vec2(0.16, 0.26));
-  L = mix(L, 1.0, smoothstep(soft, -soft, d));
-  d = sdBox(rot(s - vec2(0.18, 0.5), 0.1), vec2(0.5, 0.07));
-  L = mix(L, 1.0, smoothstep(soft, -soft, d));
-  // Black flags: long boards, not discs, so a small drop reads as chrome
-  // rather than growing a face.
-  d = sdBox(rot(s - vec2(0.14, 0.12), -0.5), vec2(0.2, 0.05)) - 0.03;
-  L = mix(L, 0.02, smoothstep(soft, -soft, d));
-  d = abs(dot(s - vec2(0.0, -0.34), normalize(vec2(-0.3, 1.0)))) - 0.085;
-  L = mix(L, 0.03, smoothstep(soft, -soft, d));
-  d = sdBox(rot(s - vec2(-0.5, 0.4), 0.7), vec2(0.24, 0.045));
-  L = mix(L, 0.03, smoothstep(soft, -soft, d));
-  d = sdBox(rot(s - vec2(0.6, 0.18), 0.9), vec2(0.18, 0.05));
-  L = mix(L, 0.04, smoothstep(soft, -soft, d));
-  // Low round the walls runs a lit cyclorama band, broken by two black
-  // panels; below the horizon the floor is black but for a white bounce
-  // card. So a rim reads as a bright band and then a black line, and the
-  // line opens where the rim faces the card.
-  float ang = atan(s.y, s.x);
   float ls = length(s);
-  float panel = smoothstep(0.32, 0.22, abs(ang + 1.75)) + smoothstep(0.25, 0.15, abs(ang - 0.5));
-  float cyc = mix(0.97, 0.06, clamp(panel, 0.0, 1.0));
-  L = mix(L, cyc, smoothstep(0.7 - soft, 0.74 + soft, ls));
-  float card = smoothstep(0.5, 0.3, abs(ang - 2.3)) + smoothstep(0.35, 0.2, abs(ang + 0.6)) * 0.85;
-  float floorL = mix(0.0, 0.92, clamp(card, 0.0, 1.0));
-  L = mix(L, floorL, smoothstep(0.9 - soft, 0.94 + soft, ls));
+  float sw = 0.3 + soft;
+  // Sky: a slow ramp from the key side (up and left) to the far side.
+  float L = 0.66 + 0.6 * dot(s, normalize(vec2(-0.55, -0.83))) - 0.1 * ls * ls;
+  float d;
+  // The big softbox, just off the zenith: a wide bloom, not a board.
+  d = length((s - vec2(-0.16, -0.1)) * vec2(1.0, 1.3)) - 0.13;
+  L = mix(L, 1.0, smoothstep(sw, -0.6 * sw, d));
+  // A long strip on the right, softer still.
+  d = sdBox(rot(s - vec2(0.42, 0.06), 0.35), vec2(0.06, 0.42));
+  L = mix(L, 0.94, 0.85 * smoothstep(sw, -0.5 * sw, d));
+  // One broad, soft flag below the zenith: it gives the forms their deep
+  // tones as a swell into ink and back, never a cut-out.
+  d = sdBox(rot(s - vec2(0.12, 0.34), -0.25), vec2(0.34, 0.04));
+  L = mix(L, 0.06, 0.9 * smoothstep(sw, -0.4 * sw, d));
+  L = clamp(L, 0.04, 1.0);
+  // Low round the walls the cyclorama glows, brightest on the key side; so
+  // a rim reads as a bright band and then the dark floor below it.
+  float ang = atan(s.y, s.x);
+  float glow = 0.55 + 0.4 * cos(ang + 2.2);
+  L = mix(L, glow, smoothstep(0.62 - soft, 0.86 + soft, ls));
+  // The floor: dark, lifting a little toward a bounce on the key side.
+  float floorL = 0.04 + 0.3 * smoothstep(0.2, 1.0, cos(ang - 2.4));
+  L = mix(L, floorL, smoothstep(0.9 - soft, 1.06 + soft, ls));
   return L;
 }
 
@@ -174,6 +173,9 @@ vec4 surface(vec2 p){
   float Ls = env(r, 0.22);
 
   float S = uK.w;
+  // The reflection pushes the lines by the normal: across a dome that adds
+  // to the screen, so the lines sweep over the tops and crowd where the
+  // surface turns hard, at the rims and necks.
   float Dsp = uK.x * h + uK.y * S * 4.0 * dot(n.xy, vec2(0.35, 1.0)) + uK.z * S * Ls;
   float tf = 380.0 + 260.0 * (h / H) + 120.0 * n.z;
   return vec4(clamp(sd, -64.0, 64.0), Dsp, L, tf);
@@ -195,16 +197,11 @@ vec3 printAt(vec2 p, vec4 sf){
 
   float T = 1.0 - L;
   float w = mix(0.08, 1.04, pow(T, 1.6));
-  // A cut line is never perfectly even: it swells and thins along its run,
-  // which breaks the hairlines into dashes in the highlights.
-  float idx = floor(phi + 0.5);
-  float along = dot(p, T0) / (S * 1.7);
-  w += (vnoise(vec2(along, idx * 7.13)) - 0.5) * 0.22 * (1.0 - T * 0.6);
   // The burin rocks as it cuts, so midtone lines are beaded at about their
   // own pitch; where the lines crowd, the beads of neighbours fall in and
   // out of step, which is the moire.
   float mid = 4.0 * T * (1.0 - T);
-  w *= 1.0 + 0.32 * mid * cos(6.2832 * dot(p, T0) / (S * 1.15));
+  w *= 1.0 + 0.16 * mid * cos(6.2832 * dot(p, T0) / (S * 1.15));
 
   // Two plates: the black key, and a lavender plate printed a hair out of
   // register, which only shows on the light.
@@ -215,7 +212,7 @@ vec3 printAt(vec2 p, vec4 sf){
   vec2 N1 = normalize(vec2(-0.52, 1.0));
   float phi2 = (dot(p, N1) + 0.6 * sf.y) / (S * 0.92);
   float fpx2 = max(length(vec2(dFdx(phi2), dFdy(phi2))), 1e-4);
-  float cross = plate(phi2, 0.42 * mid, fpx2) * smoothstep(0.15, 0.4, T) * smoothstep(0.92, 0.7, T);
+  float cross = plate(phi2, 0.3 * mid, fpx2) * smoothstep(0.5, 0.7, T) * smoothstep(0.92, 0.78, T);
   cK = max(cK, cross * 0.85);
   float lit = smoothstep(0.35, 0.95, L);
   float cV = plate(phi + 0.12 * lit, 0.12 + w * 0.6, fpx) * lit;
