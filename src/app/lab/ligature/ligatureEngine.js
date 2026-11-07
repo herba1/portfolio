@@ -30,7 +30,6 @@ const DP = D * (1 + O); // half-width of A and V at their open end
 const W = SD * Math.sqrt(1 + D * D); // horizontal width of a diagonal stroke
 const NW = 0.86;
 const TW = 0.94;
-const SB = 0.17; // loose, ordinary side bearing at rest
 const CB = 0.62; // A crossbar top, low enough to leave the counter open
 
 const N_DIAG = (() => {
@@ -42,23 +41,59 @@ const N_DIAG = (() => {
 // The advance at which a diagonal of one letter lands exactly on the
 // matching diagonal of its neighbour: both outer edges shift by a stroke.
 const NEST = DP + D * O - W;
+// Horizontal run per unit of perpendicular distance between two parallel
+// diagonals: paper between diagonals is measured square to the strokes.
+const K = Math.sqrt(1 + D * D);
+
+// Spacing is one number. g is the paper between neighbours, measured at
+// their closest point, shared by every pair at every moment, so the word is
+// evenly tracked whether it is loose, half shut or a hair from touching. The
+// squeeze only ever moves g; each pair finds its own advance from it.
+const G0 = 0.22; // the open word: an ordinary, generous fit
+const SHUT = 0.96; // the squeeze at which g reaches nothing
+// The V and the second A never fuse (that leaves the V as nothing but the
+// notch between two A's). They close to a hairline channel instead and the
+// lock seats them into it, so their paper bottoms out a hair before g does.
+const VA_SEAT = 0.034;
+const VA_CH = 0.022;
+// Equal paper is not equal space, though. Two parallel diagonals enclose
+// a band of paper exactly as wide as the gap, but a foot meeting a stem
+// opens into a wedge above it, and the T's arm overhangs a well of paper
+// below it. Those pairs read as looser than their closest point, so they
+// carry less of g. The weights are by eye, and every pair still reaches
+// nothing at the same moment.
+const WEIGHT = { AV: 1, VA: 1, AN: 0.56, NT: 0.5 };
+// Advance (left edge to left edge) at which a pair sits at the shared gap g.
+const ADVANCE = {
+  // AV, VA: the gap between the parallel diagonals, square to the strokes
+  AV: (g) => DP + D * O + g * K,
+  VA: (g) => DP + D * O + Math.max(g, VA_SEAT) * K,
+  // AN: the A's right foot to the N's stem, at the baseline
+  AN: (g) => 2 * DP + g * WEIGHT.AN,
+  // NT: the N's right stem to the tip of the T's arm, at the cap line
+  NT: (g) => NW + g * WEIGHT.NT,
+};
 
 const WORD = ["A", "V", "A", "N", "T"];
 const WIDTH = { A: 2 * DP, V: 2 * DP, N: NW, T: TW };
 // Left-edge to left-edge advance when a pair is locked.
 const LOCK = {
   AV: NEST, // A's right leg and V's left leg become one band
-  // The V keeps its right leg. Against the second A it stops one stroke
-  // short of nesting, leaving a channel exactly as wide as the stroke:
-  // ink, paper, ink in equal parallel bands, so the V stays a V. (Fusing
-  // both legs leaves the V as nothing but the notch between two A's.)
-  VA: NEST + 2 * W,
+  // The V keeps its right leg, seated against the second A's left leg
+  // with a hairline of paper between: one heavy diagonal with an inline.
+  VA: NEST + W + VA_CH * K,
   AN: 2 * DP - S, // the A's foot leans flush into the N's stem
   NT: NW - S, // the T's arm caps the N's right stem
 };
-// The order the pairs give: the NT and AN locks come early, the deep AV
-// nests last (t at which each pair reaches its lock).
-const AT = [0.94, 0.72, 0.5, 0.3];
+// When g reaches nothing the pairs seat one after another, outside in:
+// NT, AN, VA, then the deep AV nest last. One cascade of four settles about
+// 50 ms apart. Each pair is released (ms after g runs out) so that it lands
+// on its stop in that order: the VA only has a hair to travel, so it goes
+// late; the AV nest drags both its letters at once, so it travels fast.
+const RELEASE = { NT: 0, AN: 66, VA: 200, AV: 184 };
+// A seating pair is driven a little past its stop so it lands on it with
+// some speed and settles, instead of easing in and never quite arriving.
+const PRESS = 0.12;
 
 const rect = (x0, y0, x1, y1) => [
   [x0, y0],
@@ -178,8 +213,7 @@ export function createLigature(host, { embedded = false } = {}) {
 
   const pairs = WORD.slice(0, -1).map((ch, i) => {
     const key = ch + WORD[i + 1];
-    const rest = WIDTH[ch] + SB;
-    return { key, rest, lock: LOCK[key], at: AT[i], locked: false, contact: false, lastClick: 0 };
+    return { key, advance: ADVANCE[key], rest: ADVANCE[key](G0), lock: LOCK[key], release: RELEASE[key], locked: false, inside: false, contact: false, lastClick: 0 };
   });
   const letters = WORD.map(() => ({ x: 0, v: 0 }));
 
@@ -187,19 +221,29 @@ export function createLigature(host, { embedded = false } = {}) {
   let size = 100;
   let held = false;
 
-  // Where each pair wants to be for a given squeeze, with a detent: a pair
-  // close to its lock is pulled the rest of the way in, and once in it
-  // holds until the squeeze lets off a little further.
+  // The shared paper gap for a squeeze: straight down from the open fit to
+  // nothing, so every pair closes at the same visible rate.
+  const gapAt = (squeeze) => Math.max(0, G0 * (1 - squeeze / SHUT));
+
+  // Where each pair wants to be for a given squeeze. Once g is gone the
+  // pairs seat into their locks in a quick cascade from the outside in; a
+  // seated pair holds until the squeeze lets off a little.
+  let shutAt = null;
   function gapsFor(squeeze, latch) {
-    return pairs.map((p) => {
-      const raw = squeeze / p.at;
-      if (latch) {
-        if (!p.locked && raw > 0.9) p.locked = true;
-        else if (p.locked && raw < 0.8) p.locked = false;
+    const g = gapAt(squeeze);
+    if (latch) {
+      const now = performance.now();
+      if (squeeze < SHUT - 0.06) {
+        shutAt = null;
+        for (const p of pairs) p.locked = false;
+      } else if (g <= 0) {
+        if (shutAt == null) shutAt = now;
+        for (const p of pairs) {
+          if (still != null || now - shutAt >= p.release) p.locked = true;
+        }
       }
-      const prog = p.locked ? 1 : clamp(raw, -0.2, 1);
-      return p.rest - (p.rest - p.lock) * prog;
-    });
+    }
+    return pairs.map((p) => (p.locked ? p.lock - (still == null ? PRESS : 0) : p.advance(g)));
   }
 
   function targets(squeeze, latch) {
@@ -294,14 +338,28 @@ export function createLigature(host, { embedded = false } = {}) {
         l.v += (k * (goal[i] - l.x) - c * l.v) * h;
         l.x += l.v * h;
       }
-      // A locked pair cannot pass through itself: contact is a stop with a
-      // little give, which is the settle.
+      // Until it is seated a pair stops at touching (the VA at its seat): a
+      // knock from a neighbour's settle cannot shove it in early. Seated, a
+      // pair cannot pass through itself: contact is a stop with a little
+      // give, which is the settle.
       for (let i = 0; i < pairs.length; i += 1) {
         const p = pairs[i];
         const a = letters[i];
         const b = letters[i + 1];
         const gap = b.x - a.x;
-        if (gap < p.lock) {
+        const seat = p.advance(0);
+        if (p.locked) p.inside = true;
+        else if (gap >= seat) p.inside = false;
+        if (!p.inside && gap < seat) {
+          const fix = (seat - gap) / 2;
+          a.x -= fix;
+          b.x += fix;
+          const vrel = b.v - a.v;
+          if (vrel < 0) {
+            a.v += vrel / 2;
+            b.v -= vrel / 2;
+          }
+        } else if (gap < p.lock) {
           const fix = (p.lock - gap) / 2;
           a.x -= fix;
           b.x += fix;
