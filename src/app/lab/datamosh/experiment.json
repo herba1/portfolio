@@ -1,0 +1,30 @@
+{
+  "title": "Datamosh",
+  "description": "Nine seconds out of a train window on a summer afternoon, played through a video codec that runs live: an encoder and a decoder rebuilding every frame from the one before, block by block along real motion vectors, with residuals through an 8x8 DCT and an I-frame every three seconds. The decoder tunes in mid-stream, so the picture first assembles out of the paper from nothing but what moves. Press and hold and the I-frames and residuals stop reaching it: the train's real motion keeps pushing a picture that is no longer there, the tree line drags up into the sky and low cloud tears into strips on the macroblock grid, while a pole that has passed stays standing. Drag while you hold and the clip runs faster under your hand. Let go and a column of intra blocks sweeps it clean.",
+  "tags": ["generative", "WebGL", "Video", "Codec"],
+  "status": "draft",
+  "createdAt": "2026-11-07T05:30:00.000Z",
+  "intent": "Datamoshing as the actual codec process rather than a glitch shader, after Takeshi Murata's Monster Movie (2005, https://www.eai.org/titles/monster-movie) and Rosa Menkman's A Vernacular of File Formats (2010, https://li-ma.nl/article/vernacular-of-file-formats-summary), and herb's generative references 2 (a street photo whose region is smeared into strips while the rest stays intact) and 3 (real analog artefacts from a real signal model). Motion vectors are baked offline by block matching on the shipped VP9 frames (tools/depth/bakes/datamosh/mv.py: 16x16 macroblocks, 8x8 partitions where the SAD saving beats a split cost, hierarchical full search to +-56 px, H.264-style rate term toward the neighbours' median vector, half-pel refinement, intra where the best prediction is worse than DC), packed as per-MB modes plus median-predicted vector differences. Live in WebGL2 an encoder and a decoder run frame by frame: H.264 six-tap half-pel motion compensation, residual against the encoder's own reconstruction through a separable 8x8 DCT with a dead-zone quantiser (QP 30), closed loop, I-frames every 90 frames. The decoder joins between I-frames from blank paper; a hold drops its I-frames and lets the residual go within 0.2 s; a release runs an intra refresh across the macroblock columns. Stills: ?t=seconds stops the stream there, ?hold=seconds of hold before it, ?release=seconds before it lets go (the refresh mid-sweep), ?join=1 shows the opening, ?qp= sets the quantiser.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.55, 0.5], "to": [0.4, 0.52] },
+  "probe": [
+    { "idle": 4500 },
+    { "drag": [[0.55, 0.5], [0.52, 0.52]], "ms": 3000 },
+    { "idle": 1500 },
+    { "drag": [[0.6, 0.5], [0.2, 0.55]], "ms": 2400 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    {
+      "url": "https://pixabay.com/videos/train-railway-journey-travel-120479/",
+      "file": "https://cdn.pixabay.com/video/2022/06/15/120479-720880603_large.mp4",
+      "author": "ChristianBodhi",
+      "licence": "Pixabay Content License",
+      "note": "3840x2160, 30 fps, 27.2 s, out of a train window; location not given. Seconds 17.5-26.5 used: scaled to 1280x720 (Lanczos), two-pass VP9 at 1.5 Mb/s with a single keyframe (clip.webm, 270 frames); motion vectors and modes baked from those decoded frames by tools/depth/bakes/datamosh/mv.py (clip.mv, gzip)."
+    },
+    "https://www.eai.org/titles/monster-movie",
+    "https://li-ma.nl/article/vernacular-of-file-formats-summary",
+    "https://en.wikipedia.org/wiki/Rosa_Menkman",
+    "https://en.wikipedia.org/wiki/Advanced_Video_Coding"
+  ]
+}
