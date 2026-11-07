@@ -39,7 +39,22 @@ import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./stri
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
-const FOCUS = [0.85, 0.5]; // where a narrow screen crops toward: the feeder, the far pole
+// The view: one anchor. The plate is shown VIEW.zoom past cover and pinned to
+// the photograph's upper right, so the mast top stands in the left third,
+// the truss is the single diagonal and the big sunlit cumulus fills the upper
+// right; the caged platform, the transformer, the far pole's foot and the
+// tangle of wires low on the left fall off the edges. Image px of the
+// 6000 x 4000 photograph. A box narrower than the 16:10 crop keeps the
+// crop's width down to its height (4:3 shows more sky below, not less mast);
+// a portrait box covers at its height and still holds the mast top at
+// poleAt of the width, running the rest up the truss into the feeder.
+const VIEW = {
+  zoom: 1.3, // past cover, on a 16:10 box
+  left: 1385, // the widest crop's left edge: the mast top with a margin
+  top: 120, // the crop's top edge
+  pole: 1915, // the mast top
+  poleAt: 0.11, // the furthest left it may sit, as a share of the width
+};
 
 
 const FILM = {
@@ -83,7 +98,9 @@ const FILM = {
 //    sky and where steel and wires cross it); blurred wide, screened in at
 //    DIFFUSE, it veils the cobalt near the cloud.
 const STRUCT = 0.88;
-const STRUCT_GAIN = 1.1;
+// Dark: the one silhouette has to stand off the cloud, about rgb(62,66,70)
+// on its lit face after the print, its rust and banding still in it.
+const STRUCT_GAIN = 0.45;
 const STRUCT_FLOOR = 0.006;
 const STRUCT_TINT = [1.06, 1, 0.9]; // linear, luminance-normalised
 const CLOUD_TOP = [0xf3, 0xee, 0xe4];
@@ -466,7 +483,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
   let sceneTex = null;
   let sceneFbo = null;
   let lastKey = "";
-  let map = { ox: 0, oy: 0, k: 1 };
+  let map = { ox: 0, oy: 0, k: 1, kRef: 1 };
   const build = () => {
     const w = stage.canvas.width;
     const h = stage.canvas.height;
@@ -492,9 +509,16 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     film.resize(w, h);
-    // Cover the box with the photograph, cropping toward the mast.
-    const k = Math.max(w / IW, h / IH);
-    map = { ox: (w - IW * k) * FOCUS[0], oy: (h - IH * k) * FOCUS[1], k };
+    // Cover the box with the photograph, then crop in to the view.
+    const cover = Math.max(w / IW, h / IH);
+    const k = Math.max(cover, Math.min(cover * VIEW.zoom, w / (IW - VIEW.left)));
+    const vw = w / k;
+    const vh = h / k;
+    const x0 = clamp(Math.min(IW - vw, VIEW.pole - VIEW.poleAt * vw), 0, IW - vw);
+    const y0 = clamp(VIEW.top, 0, IH - vh);
+    // kRef: the scale the motion is tuned at (cover, as before the crop), so
+    // a pull, the breeze and the sound read the same against the photograph.
+    map = { ox: -x0 * k, oy: -y0 * k, k, kRef: cover };
     lastKey = "";
   };
   stage.onResize(build);
@@ -504,13 +528,14 @@ export async function createCatenary(host, { embedded = false } = {}) {
     const d = stage.dpr;
     return [(x * d - map.ox) / map.k, (y * d - map.oy) / map.k];
   };
-  // A reach measured on a 1280 px box, in image px for this box.
-  const reachOf = (w) => (w.tune.reach * stage.dpr * clamp(stage.width / 1280, 0.6, 1.4)) / map.k;
+  // A reach measured on a 1280 px box showing the whole photograph, in image
+  // px for this box: the same draw against the wire whatever the crop.
+  const reachOf = (w) => (w.tune.reach * stage.dpr * clamp(stage.width / 1280, 0.6, 1.4)) / map.kRef;
 
   // ---- physics
   const STEP = 1 / 720;
   let wind = 0; // 0..1 breeze strength (fades in after the reveal)
-  const step = (h) => world.step(h, { wind, k: map.k });
+  const step = (h) => world.step(h, { wind, k: map.kRef });
 
   // ---- interaction
   let hoverWire = null;
@@ -521,7 +546,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     if (!cg) return;
     w.caught = null;
     // How far the string was drawn, in device px: the sound follows it.
-    const drawn = Math.abs(sampleY(w, cg.j) * w.lead(cg.j * w.ds)) * map.k;
+    const drawn = Math.abs(sampleY(w, cg.j) * w.lead(cg.j * w.ds)) * map.kRef;
     sound.pluck({ wire: w.index, drawn, at: cg.j / w.N, f1: w.tune.f1, speed });
   };
 
