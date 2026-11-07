@@ -66,14 +66,17 @@ const law = (size) => -0.043 * (size - 12);
 // The forme. x, y are the baseline-left (or rule top-left) of each line as composed.
 const FORME = [
   { text: "The Beatles", size: 20, w: "strong", x: 4, y: 52 },
-  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 476 },
+  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 556 },
   { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
   { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
   { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
   // The rule is made up from brass pieces of the lengths a case actually holds,
-  // and runs out across the red, between the colon's points.
-  { rule: true, pieces: [96, 144, 72, 120, 48, 96, 72, 96], thick: 12, x: 0, y: 388 },
-  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 436 },
+  // and runs out across the head of the red. Its first piece is short, under
+  // the "t" alone, so the sort beside it can step down past the margin piece;
+  // the short pieces first let it fall as fast as the letters above it, the
+  // long ones after let it run out under and across the red.
+  { rule: true, pieces: [48, 48, 60, 72, 72, 96, 96, 120, 96, 144], thick: 12, x: 0, y: 400 },
+  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 472 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
   { text: "Apple Records", size: 13, w: "body", x: 700, y: 136 },
@@ -170,6 +173,11 @@ export async function createWeingart(host) {
     for (const s of slugs) {
       s.vec = s.units.map(() => 0);
       s.pitch = (s.units[s.units.length - 1].x + s.units[s.units.length - 1].w) / s.units.length;
+      // Each sort's place on the lever, counted in printing sorts from the
+      // margin: a word space is lead that prints nothing, so it rides on the
+      // tread of the sort before it and never spends a step of its own.
+      let n = -1;
+      s.ord = s.units.map((u) => (u.vis ? ++n : Math.max(n, 0)));
     }
   };
   cut();
@@ -177,11 +185,21 @@ export async function createWeingart(host) {
   // A line's state is one whole step per sort, counted from where it was
   // composed. The first sort never moves: it is locked on the margin, and
   // the line is a lever hinged on it. Push sort j one step (dir) and the
-  // line swings until j sits that step further on; every other sort takes
-  // the whole steps its place along the lever reaches, so the stairs come
-  // out uneven (0, 0, 1, 2, then 0, 1, 2, 4) the way hand-set steps do. No
-  // line swings steeper than STEEP: past that it is locked. Returns false
-  // if the push cannot be made.
+  // line swings until j sits that step further on. The drop is shared out
+  // over the printing sorts between the margin and j in whole steps, the
+  // small ones first, so every sort steps at least as far below its
+  // neighbour as that one stepped below the one before it: 0, 1, 2, 3, then
+  // 0, 1, 2, 4, then 0, 1, 3, 5. A stair never has a flat tread in it, so a
+  // line broken at all is broken into sorts all the way along: a lever too
+  // short to give every sort a step of its own snaps to one step each, and
+  // back flat. Sorts past j run on a step each. No line swings steeper
+  // than STEEP: past that it is locked.
+  const lever = (s, D, J) => {
+    const a = Math.abs(D);
+    const q = Math.floor(a / J);
+    const r = a - q * J;
+    return s.ord.map((n) => Math.sign(D) * (n <= J ? n * q + Math.max(0, n - (J - r)) : a + n - J));
+  };
   // A sort's ink at offset o steps, with a hair of clearance.
   const inkRect = (s, u, o) => ({
     x: s.x + u.x + o * s.sx + u.ink.x0 - 1,
@@ -209,34 +227,63 @@ export async function createWeingart(host) {
 
   // No sort may sit more than its reach from its left neighbour either: the
   // run stays in contact the way real lead does, and past that it locks.
+  // Returns false if the push cannot be made.
   const shove = (s, v, j, dir) => {
-    if (j <= 0) return false;
-    const k = (v[j] + dir) / j;
-    if (Math.abs(k) * s.sy > STEEP * s.pitch) return false;
+    const J = s.ord[j];
+    if (j <= 0 || J <= 0) return false;
+    let D = v[j] + dir;
+    if (D !== 0 && Math.abs(D) < J) D = Math.sign(D) === dir ? dir * J : 0;
+    if ((Math.abs(D) / J) * s.sy > STEEP * s.pitch) return false;
+    const to = lever(s, D, J);
     const w = v.slice();
+    const sd = Math.sign(D) || dir;
+    let p = 0;
     for (let i = 1; i < w.length; i++) {
-      const at = Math.trunc(i * k + dir * 1e-6);
-      w[i] = dir > 0 ? Math.max(w[i], at) : Math.min(w[i], at);
+      w[i] = dir > 0 ? Math.max(w[i], to[i]) : Math.min(w[i], to[i]);
+      // A broken line has no flat tread: each printing sort a step on from the last.
+      if (D !== 0 && s.units[i].vis && sd * (w[i] - w[p]) < 1) w[i] = w[p] + sd;
+      if (!s.units[i].vis) w[i] = w[p];
+      else p = i;
       if (Math.abs(w[i] - w[i - 1]) > s.reach) return false;
     }
     if (clash(s, w)) return false;
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
-  // A line that is shoved is not swung: the sort it is hit on goes down
-  // (dir) one step, and carries with it every sort ahead of it that sits on
-  // its level, so a stair ahead keeps its treads and the line breaks
-  // exactly where it was hit. A sort may not hang more than its reach from
-  // the sort behind it, so where the step would part them, the sort behind
-  // comes too, back toward the margin. If that reaches the first sort the
-  // margin holds and the run locks. Returns false then.
+  // A line that is shoved is not swung: the sort it is hit on goes a step
+  // on (dir), and only as much else as the staircase needs. Every printing
+  // sort ahead of it steps at least once more than the one before, so the
+  // run ahead stays a stair; behind it, each sort keeps its place unless it
+  // would hang more than its reach above the next, or would leave the stair
+  // without a step of its own, and then it comes too, back toward the
+  // margin. A line broken for the first time is broken into one step per
+  // sort, from the margin to the sort that was hit. Hit on its first sort,
+  // the margin holds and the run locks. Returns false then.
   const carry = (s, v, j, dir) => {
-    if (j <= 0) return false;
-    const w = v.slice();
-    w[j] += dir;
-    for (let i = j + 1; i < w.length; i++) w[i] = dir > 0 ? Math.max(w[i], w[i - 1]) : Math.min(w[i], w[i - 1]);
-    for (let i = j; i > 0 && Math.abs(w[i] - w[i - 1]) > s.reach; i--) w[i - 1] = w[i] - dir * s.reach;
-    if (w[0] !== v[0] || clash(s, w)) return false;
+    const J = s.ord[j];
+    if (j <= 0 || J <= 0) return false;
+    // Worked in the direction the line is broken: sd turns it the right way up.
+    const sd = v[j] * dir >= 0 ? dir : -dir;
+    const u = v.map((x) => x * sd);
+    if (dir * sd < 0 && u[j] - 1 < J) return false;
+    u[j] = Math.max(u[j] + dir * sd, J);
+    let p = j;
+    for (let i = j + 1; i < u.length; i++) {
+      if (!s.units[i].vis) continue;
+      u[i] = Math.max(u[i], u[p] + 1);
+      p = i;
+    }
+    let nx = j;
+    for (let i = j - 1; i > 0; i--) {
+      if (!s.units[i].vis) continue;
+      u[i] = Math.min(Math.max(u[i], s.ord[i], u[nx] - s.reach), u[nx] - 1);
+      nx = i;
+    }
+    // A word space rides on the tread of the sort before it.
+    for (let i = 1; i < u.length; i++) if (!s.units[i].vis) u[i] = u[i - 1];
+    for (let i = 1; i < u.length; i++) if (Math.abs(u[i] - u[i - 1]) > s.reach) return false;
+    const w = u.map((x) => x * sd);
+    if (clash(s, w)) return false;
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
