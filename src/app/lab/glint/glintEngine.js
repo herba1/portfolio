@@ -29,7 +29,13 @@ import META from "./meta.json";
 // That light is HDR and goes to the film unclipped, whose halation and
 // diffusion give the glint its bloom. The sky round the sun (the aureole) and
 // the sunward edges of the cumulus brighten with it, in the sky itself and in
-// every reflection of it. Where the sun is in open sky it has a small blown
+// every reflection of it. The cumulus seen directly is relit from the
+// photograph's own reading of it (density and thickness, from how white and
+// how grey it is inside the sky matte): forward scattering (Henyey-Greenstein,
+// g = 0.7) gives the thin margins near the sun a warm silver lining and turns
+// the thick cores in front of it dark, and the edges facing the sun are the
+// lit ones, so the whole cumulus reorganises round wherever the sun is put.
+// Where the sun is in open sky it has a small blown
 // core and veiling glare, and each wall's mirror image of it veils the glass
 // round it, a tenth as bright; behind a tower the sun is hidden by the tower.
 // Everything but the sun and its glints is held inside the film's shoulder by
@@ -37,7 +43,7 @@ import META from "./meta.json";
 // keeps its modelling. At the photographer's sun the frame hands back to the
 // photograph's own pixels. Developed through the shared film kit (summer).
 //
-// Query: ?sun=x,y holds the sun at that point of the print (0..1, y down);
+// Query (also ?debug=4/5 show the cloud field and its gain): ?sun=x,y holds the sun at that point of the print (0..1, y down);
 // ?sun=photo holds it at the photographer's sun; ?still=1 skips the reveal
 // and the idle drift; ?film=0 shows the frame before the film.
 
@@ -92,6 +98,96 @@ const meanLight = (s) => {
   return a / w;
 };
 
+// ---- the cumulus, read off the photograph for the sun to light
+// At a quarter of the plate: where there is cloud (white against the blue:
+// red over blue, inside the sky matte) and how thick it is there. Thickness
+// is how deep a pixel sits inside its cloud (cloud density blurred over ~80
+// plate px) and how grey the photograph has it (a cumulus core is grey
+// because little light gets through it; a thin margin is white). Towers are
+// not counted as "no cloud" (every blur is normalised by the sky), so a
+// tower's silhouette never reads as a cloud edge.
+const smooth = (a, b, x) => {
+  const t = Math.min(1, Math.max(0, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+};
+const s2lin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
+// separable box blur of v weighted by w, repeated (3 passes ~ a gaussian)
+function blurW(v, w, W, H, r, passes) {
+  let a = Float32Array.from(v, (x, i) => x * w[i]);
+  let b = Float32Array.from(w);
+  const tmp = new Float32Array(W * H);
+  const pass = (src) => {
+    for (let y = 0; y < H; y++) {
+      let s = 0;
+      const o = y * W;
+      for (let x = -r; x <= r; x++) s += src[o + Math.min(W - 1, Math.max(0, x))];
+      for (let x = 0; x < W; x++) {
+        tmp[o + x] = s;
+        s += src[o + Math.min(W - 1, x + r + 1)] - src[o + Math.max(0, x - r)];
+      }
+    }
+    const out = new Float32Array(W * H);
+    for (let x = 0; x < W; x++) {
+      let s = 0;
+      for (let y = -r; y <= r; y++) s += tmp[Math.min(H - 1, Math.max(0, y)) * W + x];
+      for (let y = 0; y < H; y++) {
+        out[y * W + x] = s;
+        s += tmp[Math.min(H - 1, y + r + 1) * W + x] - tmp[Math.max(0, y - r) * W + x];
+      }
+    }
+    return out;
+  };
+  for (let p = 0; p < passes; p++) {
+    a = pass(a);
+    b = pass(b);
+  }
+  return a.map((x, i) => (b[i] > 1e-6 ? x / b[i] : 0));
+}
+function cloudField(photoImg, geoPx, W, H) {
+  const c = document.createElement("canvas");
+  c.width = W;
+  c.height = H;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.imageSmoothingEnabled = true;
+  x.imageSmoothingQuality = "high";
+  x.drawImage(photoImg, 0, 0, W, H);
+  const px = x.getImageData(0, 0, W, H).data;
+  const N = W * H;
+  const sky = new Float32Array(N);
+  const dens = new Float32Array(N);
+  const lum = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const r = s2lin(px[i * 4] / 255);
+    const g = s2lin(px[i * 4 + 1] / 255);
+    const b = s2lin(px[i * 4 + 2] / 255);
+    sky[i] = smooth(0.3, 0.7, geoPx[i * 4 + 2] / 255);
+    dens[i] = smooth(0.4, 0.82, r / (b + 1e-4));
+    lum[i] = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+  }
+  const d1 = blurW(dens, sky, W, H, 1, 2);
+  const deep = blurW(dens, sky, W, H, 7, 3);
+  const dm = Float32Array.from(dens, (d, i) => d * sky[i]);
+  const lc = blurW(lum, dm, W, H, 2, 2);
+  const thick0 = new Float32Array(N);
+  for (let i = 0; i < N; i++) {
+    const grey = 1 - smooth(0.36, 0.8, lc[i]);
+    thick0[i] = Math.min(1, 0.5 * smooth(0.35, 1, deep[i]) + 0.5 * grey) * smooth(0.15, 0.6, d1[i]);
+  }
+  const thick = blurW(thick0, sky, W, H, 1, 2);
+  const mid = blurW(dens, sky, W, H, 4, 2);
+  // the sky's own smooth level (towers left out), to tell a bright puff
+  // from its surround without a tower's dark edge reading as one
+  const ls = blurW(lum, sky, W, H, 2, 1);
+  const out = new Uint8Array(N * 4);
+  for (let i = 0; i < N; i++) {
+    out[i * 4] = Math.round(d1[i] * 255);
+    out[i * 4 + 1] = Math.round(thick[i] * 255);
+    out[i * 4 + 2] = Math.round(mid[i] * 255);
+    out[i * 4 + 3] = Math.round(Math.sqrt(Math.min(1, ls[i])) * 255);
+  }
+  return out;
+}
+
 const VERT = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
@@ -112,6 +208,7 @@ uniform sampler2D uMat;
 uniform sampler2D uEnv;
 uniform sampler2D uEnvM;
 uniform sampler2D uPatch;
+uniform sampler2D uCloud; // quarter plate: density, thickness, density over ~16 px, sqrt sky level
 uniform vec2 uPlate;
 uniform float uF;
 uniform vec2 uC;
@@ -172,6 +269,49 @@ float skyGain(vec3 d, vec3 s) {
   return 1.0 + aure * (1.0 - 0.5 * c) + 0.55 * edge * c + lining;
 }
 
+// Veiling glare round a visible sun: a tight core (a few disc radii), then
+// a short, faint skirt. Kept compact so the sun reads as a point of fire with
+// the cloud round it still modelled, not as a white wash.
+float veilOf(float gs) {
+  return 7.0 * exp(-gs / 0.007) + 0.3 * exp(-gs / 0.03) + 0.1 * exp(-gs / 0.14) + 0.04 * exp(-gs / 0.5);
+}
+
+// Henyey-Greenstein, normalised to 1 straight at the sun.
+float hgN(float cosT, float g) {
+  float g2 = g * g;
+  float p = (1.0 - g2) / pow(1.0 + g2 - 2.0 * g * cosT, 1.5);
+  return p * (1.0 - g) * (1.0 - g) / (1.0 + g);
+}
+
+// The cumulus seen directly, lit by a sun in direction s. Water droplets
+// scatter forward (HG, g = 0.7): looking toward the sun, a thin margin glows
+// with the sun's own light (the silver lining) while a thick core, which the
+// light cannot get through, goes darker. Off to the side, the edge that faces
+// the sun is the lit one. Returns the gain on the photograph's cloud (x), the
+// warm light the margins add (y), and the forward lobe (z).
+vec3 cloudLight(vec3 v, vec2 px, vec4 cl, vec3 s) {
+  float c = cl.r;
+  float th = cl.g;
+  float cosT = dot(v, s);
+  float fwd = hgN(cosT, 0.7);
+  float side = hgN(cosT, 0.3);
+  // which way the sun is from here, on the print: the great circle toward s,
+  // projected through the camera
+  vec3 td = s - v * cosT;
+  vec2 dp = (td.xy - v.xy * td.z / v.z) / v.z;
+  float ld = length(dp);
+  vec2 dir = ld > 1e-6 ? dp / ld : vec2(0.0);
+  // density here against density a little toward the sun: > 0 on the
+  // sunward edge of a cloud, < 0 on the far side of one
+  float ahead = textureLod(uCloud, (px + dir * 26.0) / uPlate, 0.0).b;
+  float behind = textureLod(uCloud, (px - dir * 26.0) / uPlate, 0.0).b;
+  float e = clamp((behind - ahead) * 1.6, -1.0, 1.0);
+  float thin = c * (1.0 - th);
+  float gain = (1.0 + 0.55 * e * c * (0.35 + 0.65 * side)) * (1.0 - 0.72 * c * smoothstep(0.1, 0.8, th) * pow(fwd, 0.5));
+  float lining = fwd * thin * (1.0 - th) * (0.6 + 0.8 * max(e, 0.0));
+  return vec3(gain, lining, fwd);
+}
+
 void main() {
   vec2 px = vec2(vUv.x, 1.0 - vUv.y) * uPlate;
   vec2 t = px / uPlate;
@@ -198,22 +338,57 @@ void main() {
   // ---- sky: the photograph, relit by where the sun is now
   float gNow = skyGain(v, uS);
   float g0 = skyGain(v, uS0);
-  vec3 sky = base * clamp(gNow / g0, 0.35, 3.0);
+  float away = 1.0 - uPhotoW;
+  // the cumulus seen directly is relit below, from the photograph's own
+  // reading of it; the dome's coarser gain is kept for the clear sky
+  vec4 cl = texture(uCloud, t);
+  float skyR = mix(clamp(gNow / g0, 0.35, 3.0), 1.0, 0.85 * cl.r);
+  vec3 sky = base * skyR;
+  // the cumulus, relit: the photograph's own forward scattering (round the
+  // photographer's sun) divided out, the sun's now put in
+  // (sharpened per pixel: cloud where the photograph is white against the
+  // blue, and a puff brighter than its surround is thinner than it, so the
+  // lining follows the cloud's own drawing, not the quarter-plate field)
+  float Lpx = dot(base, LUMA_C);
+  float Ls = cl.a * cl.a;
+  float det = clamp((Lpx - Ls) / max(Ls, 0.05), -0.6, 0.6);
+  float cPix = mix(cl.r, smoothstep(0.4, 0.82, base.r / (base.b + 1e-4)), 0.7);
+  vec4 clp = vec4(cPix, clamp(cl.g - 1.2 * det, 0.0, 1.0), cl.ba);
+  vec3 cNow = cloudLight(v, px, clp, uS);
+  vec3 cPh = cloudLight(v, px, clp, uS0);
+  float cGain = clamp(cNow.x / cPh.x, 0.4, 2.2);
+  const vec3 LINING_C = vec3(1.0, 0.9, 0.76);
+  vec3 cAdd = LINING_C * 2.0 * cNow.y * away;
+  // the core the light cannot get through goes a cool grey (it sees only the
+  // sky); the thin cloud the sun lights from close by takes its warmth
+  float cShade = clamp(1.0 - cGain, 0.0, 1.0) * cl.r;
+  vec3 cTint = mix(vec3(1.0), vec3(0.96, 1.0, 1.05), cShade);
+  cTint *= mix(vec3(1.0), vec3(1.05, 1.0, 0.9), cl.r * (1.0 - cl.g) * cNow.z * away);
+  sky = sky * cGain * cTint + cAdd;
   // the disc itself, where open sky shows it (behind a tower, the tower wins)
   float gs = acos(clamp(dot(v, uS), -1.0, 1.0));
   float pxa = 1.0 / uF;
   float disc = 1.0 - smoothstep(SUN_R - pxa, SUN_R + pxa, gs);
   float limb = 0.6 + 0.4 * sqrt(max(0.0, 1.0 - (gs * gs) / (SUN_R * SUN_R)));
-  float away = 1.0 - uPhotoW;
   // HDR that must reach the film unclipped by the scene's own shoulder: the
   // sun's disc and its mirror images in the glass (halation draws their bloom)
   vec3 hot = vec3(1.0, 0.97, 0.92) * uSunL * 0.12 * disc * limb * away * step(0.5, skyM);
+  // round the disc, what the eye and the film make of it: a small blown core
+  // and, a few disc radii out, a thin warm ring where light that went through
+  // the emulsion came back off the film base (halation)
+  float ringR = SUN_R * 6.0;
+  float ringW = SUN_R * 1.7;
+  vec3 sunHot = vec3(1.0, 0.97, 0.92) * 3.0 * (1.0 - smoothstep(SUN_R * 1.6, SUN_R * 2.6, gs))
+              + vec3(1.0, 0.6, 0.3) * 0.65 * exp(-0.5 * pow((gs - ringR) / ringW, 2.0));
   // the aureole: forward scattering by haze brightens the sky round the sun
   // by a factor (so the cumulus keeps its modelling) plus a little light of
   // its own, warm-neutral, not grey-blue
   float au = aureole(gs) - 0.9 * exp(-gs / 0.3);
-  sky *= 1.0 + 0.035 * au * away;
-  sky += vec3(1.0, 0.95, 0.87) * 0.02 * au * away;
+  // (in cloud the droplets' own forward scattering, above, takes over: the
+  // aureole is the clear air's)
+  float auK = 1.0 + 0.035 * au * away * (1.0 - 0.8 * cl.r);
+  sky *= auK;
+  sky += vec3(1.0, 0.95, 0.87) * 0.02 * au * away * (1.0 - 0.8 * cl.r);
 
   // ---- towers
   vec3 col = sky;
@@ -301,7 +476,7 @@ void main() {
     vec3 tower = mix(frameC, glassC, glass);
     col = mix(tower, sky, skyM);
     if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, run * glass, pil * glass);
-    if (uDebug > 2.5) col = vec3(mt.r, mt.g, glass * 0.3);
+    if (uDebug > 2.5 && uDebug < 3.5) col = vec3(mt.r, mt.g, glass * 0.3);
   }
   // veiling glare: a sun in open sky is too bright to look at. Its light
   // scatters in the air, the lens and the emulsion into a broad warm bloom
@@ -321,9 +496,13 @@ void main() {
       vis += inP * texture(uGeo, q).b;
     }
     vis = smoothstep(0.1, 0.9, vis / 9.0) * away;
-    float veil = 7.0 * exp(-gs / 0.008) + 0.55 * exp(-gs / 0.035) + 0.16 * exp(-gs / 0.16) + 0.05 * exp(-gs / 0.5);
+    float veil = veilOf(gs);
     col += vec3(1.0, 0.95, 0.86) * veil * vis;
     sunVis = vis;
+    // a thick cumulus in front of the disc takes most of it (its glow
+    // through the cloud, the veil, stays)
+    vec4 cs = texture(uCloud, sp / uPlate);
+    hot += sunHot * vis * mix(1.0, 0.3, cs.r * smoothstep(0.35, 0.9, cs.g));
   }
   // and the sun's mirror image in a curtain wall is a second sun, a tenth as
   // bright: it veils the panes and the sky round it the same way, so the
@@ -333,6 +512,7 @@ void main() {
     float gv = 0.7 * exp(-gk / 0.012) + 0.18 * exp(-gk / 0.05);
     col += vec3(1.0, 0.93, 0.82) * gv * uGlintK[k] * away;
   }
+  if (uDebug > 3.5) col = vec3(cl.r, cl.g, cGain * 0.5) * skyM;
   if (uDebug > 1.5 && uDebug < 2.5) col = vec3(gNow / g0 * 0.5, texture(uEnvM, envUv(v)).g, texture(uEnvM, envUv(v)).r);
   // The film's shoulder. Everything but the sun and its mirror images is
   // held inside it, so the sky round an open sun rolls off to a warm white
@@ -343,15 +523,17 @@ void main() {
   // a few disc radii of a visible sun the core is let through to blow out.
   col *= uExpo;
   vec3 lb = s2l(textureLod(uPhoto, t, 4.5).rgb);
-  float Lsm = dot(lb, LUMA_C) * (skyM > 0.5 ? clamp(gNow / g0, 0.35, 3.0) * (1.0 + 0.035 * au * away) : 1.0);
-  Lsm += 0.02 * au * away * skyM;
-  Lsm += (7.0 * exp(-gs / 0.008) + 0.55 * exp(-gs / 0.035) + 0.16 * exp(-gs / 0.16) + 0.05 * exp(-gs / 0.5)) * sunVis;
+  float Lsm = dot(lb, LUMA_C) * (skyM > 0.5 ? skyR * auK * cGain : 1.0);
+  Lsm += (0.02 * au * away * (1.0 - 0.8 * cl.r) + dot(cAdd, LUMA_C)) * skyM;
+  Lsm += veilOf(gs) * sunVis;
   Lsm *= uExpo;
   // (a ceiling that falls off with the angle from the sun, not a disc with
   // an edge: the blown core is a few disc radii and fades into the glow)
   float core = 6.0 * exp(-gs / 0.009) * sunVis;
   float K = 0.72;
-  float M = 0.92 + core;
+  // (the silver lining is let a little way past the shoulder: thin cloud
+  // toward the sun is the brightest thing in the sky after the sun)
+  float M = 0.92 + core + 0.3 * dot(cAdd, LUMA_C) * skyM;
   float Ls2 = Lsm > K ? K + (M - K) * (1.0 - exp(-(Lsm - K) / (M - K))) : Lsm;
   // (at the photographer's sun the frame is the photograph, untouched)
   Ls2 = mix(Ls2, Lsm, uPhotoW);
@@ -370,6 +552,7 @@ void main() {
   hx *= hl > 0.0 ? HM * (1.0 - exp(-hl / HM)) / hl : 0.0;
   hx += hot * uExpo * disc * away; // the disc itself stays a sun
   outColor = vec4(col + hx, 1.0);
+  if (uDebug > 4.5) outColor = vec4(cGain * 0.5, dot(cAdd, LUMA_C), cl.g, 1.0) * skyM;
 }`;
 
 const BLIT = `#version 300 es
@@ -509,7 +692,16 @@ export async function createGlint(host, { embedded = false } = {}) {
     env: imageTexture(gl, imgs[4], { mips: true }),
     envm: imageTexture(gl, imgs[5], { mips: true }),
     patch: imageTexture(gl, imgs[6]),
+    cloud: gl.createTexture(),
   };
+  gl.bindTexture(gl.TEXTURE_2D, T0.cloud);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, cloudField(imgs[0], geoPx, GW, GH));
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -634,13 +826,29 @@ export async function createGlint(host, { embedded = false } = {}) {
     }
   };
 
+  // how much open sky is round a point of the plate (the sun's), 0..1
+  const openSky = (p) => {
+    const gx = Math.round(p[0] / GQ);
+    const gy = Math.round(p[1] / GQ);
+    let a = 0;
+    for (let y = gy - 3; y <= gy + 3; y++) {
+      for (let x = gx - 3; x <= gx + 3; x++) {
+        if (x >= 0 && y >= 0 && x < GW && y < GH) a += geoPx[(y * GW + x) * 4 + 2] / 255;
+      }
+    }
+    return a / 49;
+  };
+
   const draw = (expoStops, fade) => {
     const s = dirOf(sun[0], sun[1]);
     const ang = Math.acos(clamp(dot3(s, SUN0), -1, 1));
     const photoW = Math.exp(-((ang / 0.012) ** 2));
     // exposure follows the light half way, as a photographer would
     const pk = peakLight(SUN0) / peakLight(s);
-    const expo = Math.pow(meanLight(SUN0) / meanLight(s), 0.5) * Math.pow(Math.min(1, pk), 0.7) * 2 ** expoStops;
+    // and with the sun itself in open sky, the meter sees it and holds the
+    // exposure down: the sky keeps its depth and the sun its fire
+    const sunOpen = openSky(sun) * (1 - photoW);
+    const expo = Math.pow(meanLight(SUN0) / meanLight(s), 0.5) * Math.pow(Math.min(1, pk), 0.7) * (1 - 0.22 * sunOpen) * 2 ** expoStops;
 
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
@@ -655,6 +863,7 @@ export async function createGlint(host, { embedded = false } = {}) {
     bindTex(4, T0.env, u.uEnv);
     bindTex(5, T0.envm, u.uEnvM);
     bindTex(6, T0.patch, u.uPatch);
+    bindTex(7, T0.cloud, u.uCloud);
     gl.uniform2f(u.uPlate, PW, PH);
     gl.uniform1f(u.uF, F);
     gl.uniform2f(u.uC, CX, CY);
@@ -695,6 +904,8 @@ export async function createGlint(host, { embedded = false } = {}) {
           shoulder: 0.92,
           halation: 0.7,
           halationThreshold: 1.1,
+          // amber, not red: a red fringe on a glint reads as a lens fault
+          halationColor: [1, 0.46, 0.2],
           bloom: 0.24,
           softness: 0.45,
           vignette: 0.18,
