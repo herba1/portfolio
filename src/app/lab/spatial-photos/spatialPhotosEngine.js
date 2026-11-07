@@ -1,7 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Spatial photos: five summer photographs as spatial scenes, swiped through
+// Spatial photos: five Japanese summer photographs as spatial scenes, swiped through
 // the way Photos does it full screen.
 //
 // Each photo was cut offline (tools/depth/bakes/spatial-photos) into depth
@@ -26,14 +26,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // ?tilt=x,y in -1..1.
 
 const BASE = "/lab/spatial-photos/";
-const SCENES = ["pole-deepblue-diagonal", "signal-cumulonimbus", "wormseye-towers-clouds", "smokestack-cumulus", "osaka-cumulus-wires"];
-// The Ricoh's ultramarine leans violet (median hue 218, a tail past 225);
-// turn it back to cyan-cobalt before the film deepens it.
-const HUE = { "pole-deepblue-diagonal": -12 };
-// Two phone photos were shot right at clipping on the sunlit cloud; printed
-// a touch down, their tops keep texture and the halation stays a warm breath
-// instead of a red line round the cloud.
-const GAIN = { "osaka-cumulus-wires": 0.84, "wormseye-towers-clouds": 0.88 };
+const SCENES = ["kyoto-crossing-lowangle", "signal-cumulonimbus", "ine-catenary-clouds", "smokestack-cumulus", "crossing-summer"];
+const HUE = {};
+const GAIN = {};
 
 const GAP = 24; // css px between photos, as Photos leaves between pages
 const ZOOM = 1.06; // crop, the room the orbit moves in (Spatial Scenes crops in too)

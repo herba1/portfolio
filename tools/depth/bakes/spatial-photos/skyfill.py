@@ -1,188 +1,167 @@
 """Inpaint the sky behind poles, wires and towers.
 
-A sky with cumulus is smooth at large scale and textured at small scale, and
-the holes left by a pole or a wire are strips. So each hole pixel is filled
-across its strip: from its nearest edge, march on in the same direction to the
-far edge, and blend the sky just outside the two edges by distance (in log
-light, so a cloud edge stays a cloud edge rather than a grey average). Then
-put back fine texture mirrored across the near edge, fading inward, and photo-
-matched grain. Hole pixels with no far edge within reach (deep inside a tower)
-take a push-pull fill plus multi-scale cloud residual, which the swipe never
-uncovers far.
+What a swipe or an orbit uncovers is a band beside each silhouette, and the
+eye reads it as the same sky seen a little further on. Anything the fill
+invents there that is sharper than the photo (a copied cloud edge, a facet
+where two directions meet, a hard ramp from blue to cloud) shows up at once
+as a pasted shape. So the fill is deliberately soft: a membrane in linear
+light (a harmonic fill, smooth, no streaks) from the clear sky round the hole,
+which carries a cloud's brightness a little way behind a pole and lets it
+fade into the blue, mixed as light mixes (no cyan where cumulus meets the
+blue), and then the photo's own grain on top so the fill has the same tooth
+as the pixels next to it. Never sharper than the photo; never empty.
 """
 import numpy as np
 import cv2
 
-from common import pushpull
+
+GAMMA = 2.2
 
 
-def skyfill(img, known, reach=420, seed=0):
+def membrane(col, known, iters=80):
+    """Harmonic fill: each unknown pixel the average of its neighbours, known
+    pixels held. Solved coarse to fine (each level starts from the one
+    below), so a wide hole takes the colour of its whole rim weighted by how
+    much of it each part sees, and a pyramid average of the area round it
+    (a big cloud nearby) cannot wash in. col HxWxC, known HxW bool."""
+    col = col.astype(np.float32)
+    w = known.astype(np.float32)
+    pyr = [(col * w[..., None], w)]
+    while min(pyr[-1][1].shape) > 24:
+        c, ww = pyr[-1]
+        sz = (max(1, c.shape[1] // 2), max(1, c.shape[0] // 2))
+        pyr.append((cv2.resize(c, sz, interpolation=cv2.INTER_AREA), cv2.resize(ww, sz, interpolation=cv2.INTER_AREA)))
+    K4 = np.array([[0, 0.25, 0], [0.25, 0, 0.25], [0, 0.25, 0]], np.float32)
+    est = None
+    for li in range(len(pyr) - 1, -1, -1):
+        c, ww = pyr[li]
+        # a coarse cell is held only when all of it is known: a cell half
+        # over a cloud top and half over the hole would pin the hole to a
+        # pale mean and grow a cone from it
+        kn = ww > (0.999 if li == 0 else 0.98)
+        val = c / np.maximum(ww, 1e-6)[..., None]
+        if est is None:
+            est = np.where(kn[..., None], val, (c.sum((0, 1)) / max(ww.sum(), 1e-6))[None, None])
+            n = 400
+        else:
+            est = cv2.resize(est, (c.shape[1], c.shape[0]), interpolation=cv2.INTER_LINEAR)
+            n = iters
+        est = np.where(kn[..., None], val, est)
+        for _ in range(n):
+            est = cv2.filter2D(est, -1, K4, borderType=cv2.BORDER_REPLICATE)
+            est = np.where(kn[..., None], val, est)
+    return est
+
+
+def smoothstep(a, b, x):
+    t = np.clip((x - a) / (b - a), 0, 1)
+    return t * t * (3 - 2 * t)
+
+
+def local_mean(v, m, sigma):
+    """Mean of v over mask m in a Gaussian window (sigma px); global mean
+    where the window holds none of m."""
+    mf = m.astype(np.float32)
+    num = cv2.GaussianBlur(v * mf, (0, 0), sigma)
+    den = cv2.GaussianBlur(mf, (0, 0), sigma)
+    g = float(v[m].mean()) if m.any() else float(v.mean())
+    return np.where(den > 1e-3, num / np.maximum(den, 1e-6), g).astype(np.float32)
+
+
+def skyfill(img, known, seed=0):
+    """img HxWx3 0..1 (sRGB); known HxW bool, the sky the fill learns from."""
     H, W = known.shape
-    unk = (~known).astype(np.uint8)
+    seen = known
+    # learn only from what looks like sky: a lamp's dark face or a post's
+    # shadow side that the labels let through would pin the membrane to a
+    # dark point and grow a grey bruise round it; and no lone specks
+    # "dark" is measured against the sky round it, not the whole frame: the
+    # slate base of a storm cloud is sky, and a fill that may not learn from
+    # it paints the gap behind a gantry in it as a pale, hard-edged cut-out
+    lumi = img @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+    known = known & (lumi > 0.55 * local_mean(lumi, known, 0.04 * max(H, W)))
+    n, cc, st, _ = cv2.connectedComponentsWithStats(known.astype(np.uint8), 4)
+    big = np.zeros(n, bool)
+    big[1:] = st[1:, cv2.CC_STAT_AREA] >= 200
+    known = known & big[cc]
+    # denoised before it goes linear: averaged in linear light, grain on a
+    # near-black channel (the red of a deep blue sky) comes out lifted, and
+    # the filled sky would sit paler and greyer than the sky round it
     kf = known.astype(np.float32)
-    lg = np.log(np.maximum(img, 1e-3))
-    # smooth known sky (normalised blur) for the edge samples
-    sm = cv2.GaussianBlur(lg * kf[..., None], (0, 0), 3) / np.maximum(cv2.GaussianBlur(kf, (0, 0), 3), 1e-4)[..., None]
-    low = pushpull(lg, kf)
-    sm = np.where(np.isfinite(sm), sm, low)
-    lowk = cv2.GaussianBlur(lg * kf[..., None], (0, 0), 6) / np.maximum(cv2.GaussianBlur(kf, (0, 0), 6), 1e-4)[..., None]
-    detail = np.where(known[..., None], lg - lowk, 0)
-
-    dist, lab = cv2.distanceTransformWithLabels(unk, cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
-    zs = np.argwhere(unk == 0)
-    ys, xs = np.nonzero(unk)
-    nb = zs[lab[ys, xs] - 1]
-    dy = (ys - nb[:, 0]).astype(np.float32)
-    dx = (xs - nb[:, 1]).astype(np.float32)
-    ln = np.hypot(dx, dy)
-    ln[ln == 0] = 1
-    dx /= ln
-    dy /= ln
-    far = np.full(len(ys), -1.0, np.float32)
-    cy = ys.astype(np.float32)
-    cx = xs.astype(np.float32)
-    todo = np.arange(len(ys))
-    for st in range(1, reach, 2):
-        if not len(todo):
-            break
-        yy = np.round(cy[todo] + dy[todo] * st).astype(np.int32)
-        xx = np.round(cx[todo] + dx[todo] * st).astype(np.int32)
-        out = (yy < 0) | (yy >= H) | (xx < 0) | (xx >= W)
-        yy = np.clip(yy, 0, H - 1)
-        xx = np.clip(xx, 0, W - 1)
-        hit = (unk[yy, xx] == 0) & ~out
-        far[todo[hit]] = st
-        todo = todo[~hit & ~out]
-    ok = far > 0
-
-    def samp(y, x):
-        return sm[np.clip(np.round(y).astype(np.int32), 0, H - 1), np.clip(np.round(x).astype(np.int32), 0, W - 1)]
-
-    o1 = samp(nb[:, 0] - dy * 3, nb[:, 1] - dx * 3)
-    o2 = samp(cy + dy * (far + 3), cx + dx * (far + 3))
-    d1 = ln
-    d2 = np.where(ok, far, 1)
-    t = (d1 / (d1 + d2))[:, None]
-    # Mostly the near side's sky, meeting the far side's in a narrow band at
-    # the middle: a cloud edge that ran behind the pole carries on as an
-    # edge, instead of a wide blue-to-white ramp (which reads as a cyan glow)
-    t = np.clip((t - 0.3) / 0.4, 0, 1)
-    t = t * t * (3 - 2 * t)
-    across = np.where(ok[:, None], o1 * (1 - t) + o2 * t, low[ys, xs])
-
-    # deep holes: the clear sky's own smooth gradient (a quadratic fitted to
-    # the clear blue in log light), plus the cloud structure spread in from
-    # around. Cloud is brighter than that sky; how much of it carries on
-    # behind a wide occluder is unknown, so it thins out with distance from
-    # where it was seen, and a wide hole goes to clear sky.
-    r_, g_, b_ = img[..., 0], img[..., 1], img[..., 2]
-    clear = known & (b_ - r_ > 0.06) & ((img.max(2) - img.min(2)) / np.maximum(img.max(2), 1e-3) > 0.3)
-    if clear.sum() < 500:
+    den_ = cv2.GaussianBlur(img * kf[..., None], (0, 0), 2.0) / np.maximum(cv2.GaussianBlur(kf, (0, 0), 2.0), 1e-4)[..., None]
+    lin = np.power(np.clip(np.where(known[..., None], den_, img), 0, 1), GAMMA)
+    # What the membrane carries in from the edge is partly cloud, and how
+    # far a cloud goes on behind a wide occluder is unknown, so that part
+    # thins out with depth into the hole: a strip behind a wire keeps its
+    # cloud, the inside of a signal box goes to the sky round it instead of
+    # a pale cone off a cloud top. Cloud is what stands brighter than the
+    # sky's local floor (a pale hazy sky is sky, not cloud); the clear sky is
+    # a membrane of its own, so nothing is extrapolated.
+    L = max(H, W)
+    q = 8
+    sm = cv2.resize(np.where(known, lumi, 2.0), (W // q, H // q), interpolation=cv2.INTER_AREA)
+    kq = cv2.resize(known.astype(np.float32), (W // q, H // q), interpolation=cv2.INTER_AREA) > 0.5
+    sm = np.where(kq, sm, 2.0)
+    r = max(2, int(0.05 * L / q))
+    floor_ = cv2.erode(sm, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    floor_ = np.where(floor_ > 1.5, np.nan, floor_)
+    floor_ = np.where(np.isnan(floor_), np.nanmedian(floor_), floor_).astype(np.float32)
+    floor_ = cv2.GaussianBlur(floor_, (0, 0), r)
+    floor_ = cv2.resize(floor_, (W, H), interpolation=cv2.INTER_LINEAR)
+    cloud = lumi > floor_ + 0.07
+    # the clear sky keeps well off the cloud: a cumulus's soft rim is
+    # brighter than the blue but under the threshold, and on the clear
+    # membrane it would rise into the hole above a cloud top as a pale beam
+    clear = known & ~(cv2.dilate(cloud.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * int(0.006 * L) + 1,) * 2)) > 0)
+    if clear.sum() < 0.02 * known.sum():
         clear = known
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    u, v = xx / W - 0.5, yy / H - 0.5
-    basis = np.stack([np.ones_like(u), u, v, u * u, u * v, v * v], -1)
-    cy_, cx_ = np.nonzero(clear)
-    sel = np.random.default_rng(1).choice(len(cy_), min(len(cy_), 60000), replace=False)
-    Bm = basis[cy_[sel], cx_[sel]]
-    coef = np.linalg.lstsq(Bm, lg[cy_[sel], cx_[sel]], rcond=None)[0]
-    skym = basis @ coef
-    r0 = lg - skym
-    res = np.zeros_like(lg)
-    for sg in (96, 32, 12):
-        num = cv2.GaussianBlur(r0 * kf[..., None], (0, 0), sg)
-        den = cv2.GaussianBlur(kf, (0, 0), sg)
-        k = np.clip(den / 0.15, 0, 1)[..., None]
-        res = res * (1 - k) + num / np.maximum(den, 1e-5)[..., None] * k
-    dist_k = cv2.distanceTransform(unk, cv2.DIST_L2, 5)
-    pos = np.maximum(res, 0) * np.exp(-np.maximum(dist_k - 8, 0) / (0.025 * max(H, W)))[..., None]
-    deep = skym + np.minimum(res, 0) * 0.5 + pos
-    # blend: strips use the across fill; past ~reach/2 wide, the deep one
-    wide = np.clip((d1 + d2 - reach * 0.3) / (reach * 0.3), 0, 1)[:, None]
-    # a far edge that is a lot brighter than the near one is cloud seen past
-    # a wide occluder, not the other side of a wire: trust it less
-    jump = np.clip((o2 - o1).max(1) / 0.6, 0, 1)[:, None] * np.clip((d1 + d2) / (reach * 0.15), 0, 1)[:, None]
-    wide = np.maximum(wide, jump * 0.85)
-    val = across * (1 - wide) + deep[ys, xs] * wide
-
-    # Each pixel took its own nearest edge, so neighbouring pixels can face
-    # different ways and the fill breaks into facets. Relax it: a diffusion
-    # inside the hole (known pixels held), stronger away from the edges.
-    cur = lg.copy()
-    cur[ys, xs] = val
-    wy = np.clip((d1 - 3) / 18.0, 0, 1)
-    for sg in (10, 6, 3):
-        bl = cv2.GaussianBlur(cur, (0, 0), sg)
-        cur[ys, xs] = cur[ys, xs] * (1 - wy[:, None]) + bl[ys, xs] * wy[:, None]
-    val = cur[ys, xs]
-
-    # mirrored texture from across the near edge, fading inward
-    qy = np.clip(2 * nb[:, 0] - ys, 0, H - 1)
-    qx = np.clip(2 * nb[:, 1] - xs, 0, W - 1)
-    okq = known[qy, qx]
-    det = np.where(okq[:, None], np.clip(detail[qy, qx], -0.12, 0.12), 0)
-    fade = np.exp(-np.maximum(d1 - 2, 0) / 28.0)[:, None]
-    val = val + det * fade
-
-    out = lg.copy()
-    out[ys, xs] = val
-    out = np.exp(out)
-    # grain where the texture has faded, matched to the photo's own noise
+    clm = membrane(lin, clear)
+    # the cloud on its own: what the known sky has above the clear-sky fill,
+    # filled harmonically. Filled as a residual it is zero over open blue,
+    # so a coarse level that cannot see a small pocket of blue between the
+    # bars of a gantry has nothing pale to carry into it.
+    extra = membrane(np.where(known[..., None], lin - clm, 0), known)
+    d = cv2.distanceTransform((~known).astype(np.uint8), cv2.DIST_L2, 5)
+    # how far: a pole standing in a cloud has cloud all round it and the
+    # cloud goes on behind it; a box above a cloud top has blue round it and
+    # the cloud should stop short, not rise into it as a pale beam. So the
+    # reach is set by how much of the hole's own rim is cloud, as the
+    # hole sees it (a harmonic fill of the cloud mask): all round, the cloud
+    # goes on; only at one tip of the rim (a signal box's point resting on a
+    # cloud top), it stops within a soft cloud edge's width instead of
+    # fanning up into the box as a pale cone.
+    cf = np.clip(membrane(np.repeat(cloud.astype(np.float32)[..., None], 3, 2), known, iters=60)[..., 0], 0, 1)
+    # measured over a patch of the hole, not at the pixel: right next to a
+    # rim the harmonic share is just that bit of rim, so the tip of a box
+    # resting on a cloud top would read as "all cloud" and grow a puff
+    cf = local_mean(cf, ~known, 0.015 * L)
+    reach = L * (0.006 + 0.045 * smoothstep(0.3, 0.9, cf) ** 1.5)
+    decay = np.exp(-np.maximum(d - 0.003 * L, 0) / reach)[..., None]
+    # and the cloud is carried in only off a rim that is cloud: the harmonic
+    # fill of a hole with cloud on one side and blue on the other is not
+    # fully solved next to the blue (the coarse levels see the cloud, not a
+    # small pocket of blue), and would lay a pale band along it
+    _, nidx = cv2.distanceTransformWithLabels((~known).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    ky, kx = np.nonzero(known)
+    cloc = local_mean(cloud.astype(np.float32), known, 0.004 * L)
+    lut = np.zeros(nidx.max() + 1, np.float32)
+    lut[nidx[ky, kx]] = cloc[ky, kx]
+    gate = cv2.GaussianBlur(smoothstep(0.15, 0.6, lut[nidx]), (0, 0), 0.006 * L)[..., None]
+    gate = np.where(known[..., None], 1.0, gate)
+    fill = clm + np.where(extra > 0, extra * decay * gate, extra)
+    out = np.power(np.clip(fill, 0, 1), 1 / GAMMA)
+    # grain: the photo's own noise level, measured on the clear sky
     rng = np.random.default_rng(seed)
-    hp = np.where(known, img.mean(2) - cv2.GaussianBlur(img.mean(2), (0, 0), 1.2), 0)
-    sigma = float(np.sqrt((hp[known] ** 2).mean())) if known.any() else 0.004
+    m = img.mean(2)
+    hp = m - cv2.GaussianBlur(m, (0, 0), 1.2)
+    # local, and robust: a cloud's crisp edges are not grain, and the noise
+    # of a bright cloud top laid on deep blue greys it (clipped at black, the
+    # red channel only ever goes up) into a pale patch with a visible rim
+    mad = float(np.median(np.abs(hp[known]))) * 1.4826 if known.any() else 0.004
+    hp2 = np.minimum(hp * hp, (3 * mad) ** 2)
+    sigma = np.sqrt(local_mean(hp2, known, 0.02 * L))
     nz = cv2.GaussianBlur(rng.standard_normal((H, W)).astype(np.float32), (0, 0), 0.6) * sigma * 2.0
-    g = np.zeros((H, W), np.float32)
-    g[ys, xs] = (1 - fade[:, 0])
+    g = np.clip(d / 3, 0, 1)
     out = out + (nz * g)[..., None]
+    out = np.where(seen[..., None], img, out)
     return np.clip(out, 0, 1).astype(np.float32)
-
-
-def across(vals, known, need, reach=80):
-    """Carry a plane across the occluders in front of it: each `need` pixel
-    takes the value just outside its nearest edge and the value just outside
-    the far edge in the same direction, blended by distance. A wire that runs
-    behind a post comes out the other side, so it continues behind it. Pixels
-    with no far edge within `reach` get nothing (zeros). vals: HxWxC."""
-    H, W = known.shape
-    unk = (~known).astype(np.uint8)
-    out = np.zeros_like(vals)
-    _, lab = cv2.distanceTransformWithLabels(unk, cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
-    zs = np.argwhere(unk == 0)
-    ys, xs = np.nonzero(need & ~known)
-    if not len(ys) or not len(zs):
-        return out
-    nb = zs[lab[ys, xs] - 1]
-    dy = (ys - nb[:, 0]).astype(np.float32)
-    dx = (xs - nb[:, 1]).astype(np.float32)
-    ln = np.hypot(dx, dy)
-    ln[ln == 0] = 1
-    dx /= ln
-    dy /= ln
-    far = np.full(len(ys), -1.0, np.float32)
-    todo = np.arange(len(ys))
-    for st in range(1, reach):
-        if not len(todo):
-            break
-        yy = np.round(ys[todo] + dy[todo] * st).astype(np.int32)
-        xx = np.round(xs[todo] + dx[todo] * st).astype(np.int32)
-        out_ = (yy < 0) | (yy >= H) | (xx < 0) | (xx >= W)
-        yy = np.clip(yy, 0, H - 1)
-        xx = np.clip(xx, 0, W - 1)
-        hit = (unk[yy, xx] == 0) & ~out_
-        far[todo[hit]] = st
-        todo = todo[~hit & ~out_]
-    ok = far > 0
-
-    def samp(y, x):
-        return vals[np.clip(np.round(y).astype(np.int32), 0, H - 1), np.clip(np.round(x).astype(np.int32), 0, W - 1)]
-
-    o1 = samp(nb[:, 0] - dy * 1.5, nb[:, 1] - dx * 1.5)
-    o2 = samp(ys + dy * (far + 1.5), xs + dx * (far + 1.5))
-    t = (ln / (ln + np.maximum(far, 1)))[:, None]
-    v = o1 * (1 - t) + o2 * t
-    # only where both sides agree there is something: a wire, not a wire end
-    both = np.minimum(o1[:, -1], o2[:, -1])
-    v = v * (both / np.maximum(v[:, -1], 1e-4)).clip(0, 1)[:, None]
-    out[ys[ok], xs[ok]] = v[ok]
-    return out

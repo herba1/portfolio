@@ -7,7 +7,7 @@ colour and the depth map together: Depth Anything V2 is good on the objects
 but bleeds a soft halo into the sky round every near silhouette, so in
 "colour" mode a pixel is sky when it is sky-coloured (blue, or bright cloud)
 and not a thin dark line, unless the depth is sure it is near. In "depth"
-mode (the worm's-eye towers, whose glass mirrors the sky) the depth decides.
+mode (for a photo whose glass mirrors the sky) the depth decides.
 The rest is cut at depth valleys chosen by eye per photo (CONFIG).
 
 Writes <workdir>/labels.npz and a labels.jpg preview.
@@ -19,23 +19,25 @@ import numpy as np
 import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import box, dilate, erode, disk  # noqa: E402
+from common import box, dilate, erode, disk, pushpull  # noqa: E402
 
 SLUG, PHOTO, DEPTH, WORK = sys.argv[1:5]
 os.makedirs(WORK, exist_ok=True)
 LONG = 2400
 
 CONFIG = {
-    # concrete pole and transformer leaning into ultramarine; wires fan out
-    "pole-deepblue-diagonal": dict(mode="colour", near=0.42, near_blue=0.72, th=[], wire_plane=None, sky_lum=0.5, stroke_bh=0.025),
     # crossing signal, catenary and gantry against a cumulonimbus
     "signal-cumulonimbus": dict(mode="colour", near=0.35, th=[0.5], near_min_area=6000, stroke_bh=0.06, wire_plane=None, sky_lum=0.0, cloud_sat=0.75, cloud_warm=1.0, sky_any_lum=0.09, sky_any_near=1.01, near_blue=1.01),
-    # towers converging on the zenith
-    "wormseye-towers-clouds": dict(mode="depth", near=0.045, th=[0.3, 0.62], wire_plane=None, sky_lum=0.0),
     # cumulus banks over a factory roof, smokestack, a pole and its wires
     "smokestack-cumulus": dict(mode="colour", near=0.25, th=[0.43, 0.62], wire_plane=None, sky_lum=0.0),
-    # a fan of power lines in front of a towering cumulus, a building corner
-    "osaka-cumulus-wires": dict(mode="colour", near=0.4, th=[0.5], wire_plane=1, sky_lum=0.0),
+    # catenary mast, its platform and girder, straight up into scattered cumulus
+    # (the mast, its girder and every wire are one structure a few metres
+    # across: wires split between two planes by a noisy depth tear apart)
+    "ine-catenary-clouds": dict(mode="colour", near=0.35, near_blue=0.5, sky_sat=0.3, th=[0.45], wire_plane=2, sky_lum=0.3, reclaim=0.06, one_plane=True),
+    # crossbuck and lamps over a tiled roof, wires across a pale summer sky
+    "kyoto-crossing-lowangle": dict(mode="colour", near=0.3, near_blue=0.7, blue_lum=0.3, th=[0.5], wire_plane=None, sky_lum=0.3),
+    # fumikiri, poles and catenary, houses and greenery under cyan sky
+    "crossing-summer": dict(mode="colour", near=0.14, blue_lum=0.3, th=[0.3, 0.55], wire_plane=None, sky_lum=0.3),
 }
 cfg = CONFIG[SLUG]
 
@@ -76,7 +78,7 @@ longc[1:] = (ext[1:] > 0.06 * LONG) & (fill[1:] < 0.35) & (dmean[1:] > cfg.get("
 strokes = (cand > 0) & longc[cc]
 
 if cfg["mode"] == "colour":
-    blue = (b - r > 0.06) & (b > g - 0.02) & (b > 0.15)
+    blue = (b - r > 0.06) & (b > g - 0.02) & (b > 0.15) & (lum > cfg.get("blue_lum", 0.0))
     cloud = (lum > 0.4) & (sat < cfg.get("cloud_sat", 0.45)) & (b >= r - cfg.get("cloud_warm", 0.03))
     skycol = blue | cloud
     sky0 = skycol & ~strokes & (dep < cfg["near"])
@@ -85,7 +87,7 @@ if cfg["mode"] == "colour":
     if cfg.get("sky_any_lum"):
         sky0 |= (lum > cfg["sky_any_lum"]) & ~strokes & (dep < cfg.get("sky_any_near", cfg["near"]))
     if cfg["sky_lum"]:
-        sky0 &= ~((lum > cfg["sky_lum"]) & (dep > cfg["near"] * 0.8) & (sat < 0.12))
+        sky0 &= ~((lum > cfg["sky_lum"]) & (dep > cfg["near"] * 0.8) & (sat < cfg.get("sky_sat", 0.12)))
 else:
     sky0 = (dep < cfg["near"]) & ~strokes
 
@@ -102,6 +104,10 @@ pocket[1:] = (st2[1:, cv2.CC_STAT_AREA] > 150) & (bluefrac[1:] > 0.9)
 sky |= pocket[cc2]
 # pinholes (jpeg specks) close; wires stay open
 sky = sky | (erode(dilate(sky, 1), 1) & (bh < 0.02))
+# a thick insulator or a lit wire is grey on its sunny side, and a pale
+# enough grey passes for cloud: a sliver of "sky" inside a stroke would stay
+# behind on the sky plane as a dark-edged line when the wire moves off it
+sky &= ~(cv2.morphologyEx((~sky).astype(np.uint8), cv2.MORPH_CLOSE, disk(3)).astype(bool) & dilate(strokes, 6))
 
 # ---- wires: thin non-sky structure with sky on both sides
 nonsky = ~sky
@@ -137,6 +143,74 @@ for k in range(K - 2, 0, -1):
     rim = (lab == k) & dilate(lab == k + 1, 3) & ~strokes
     core = erode(lab == k, 2)
     lab[rim & ~dilate(core, 1)] = k + 1
+# A wire is one thing at one depth. Pixel by pixel it takes the plane of
+# whatever solid it passes closest to, so a catenary wire running past a
+# signal turns into dashes: near plane by the post, far plane between. Find
+# each long straight run (Hough) and give all of it the plane most of it has.
+w8 = (wires & (lab > 0)).astype(np.uint8) * 255
+segs = cv2.HoughLinesP(w8, 1, np.pi / 720, threshold=60, minLineLength=int(0.08 * LONG), maxLineGap=int(0.02 * LONG))
+longw = np.zeros((H, W), bool)
+if segs is not None:
+    segs = sorted(segs.reshape(-1, 4), key=lambda l: np.hypot(l[2] - l[0], l[3] - l[1]))
+    for x1, y1, x2, y2 in segs:
+        m = np.zeros((H, W), np.uint8)
+        cv2.line(m, (int(x1), int(y1)), (int(x2), int(y2)), 1, 5)
+        # never the body of a post the line passes over
+        on = (m > 0) & wires & (lab > 0) & ~solid
+        if on.sum() < 40:
+            continue
+        lab[on] = np.bincount(lab[on], minlength=K).argmax()
+        longw |= on
+# Short thin members hanging off a nearer object (a cage's bars, a girder's
+# lattice, a bracket) are that object, whatever the halo-blurred depth says:
+# left on the plane behind, they slide off it as a scribble of outlines.
+for k in range(K - 2, 0, -1):
+    n, cc, stats, _ = cv2.connectedComponentsWithStats(((lab == k) & ~longw).astype(np.uint8), 8)
+    if n < 2:
+        continue
+    touch = np.bincount(cc.ravel(), weights=dilate(lab == k + 1, 2).ravel().astype(np.float64), minlength=n) > 0
+    # a straight run of wire that merely ends on the object stays a wire
+    cr = cc.ravel()
+    area = np.maximum(stats[:, cv2.CC_STAT_AREA], 1).astype(np.float64)
+    mx_ = np.bincount(cr, xx.ravel(), n) / area
+    my_ = np.bincount(cr, yy.ravel(), n) / area
+    sxx = np.bincount(cr, (xx * xx).ravel(), n) / area - mx_ ** 2
+    syy = np.bincount(cr, (yy * yy).ravel(), n) / area - my_ ** 2
+    sxy = np.bincount(cr, (xx * yy).ravel(), n) / area - mx_ * my_
+    tr, det = sxx + syy, sxx * syy - sxy ** 2
+    disc = np.sqrt(np.maximum(tr * tr / 4 - det, 0))
+    l1, l2 = tr / 2 + disc, np.maximum(tr / 2 - disc, 0)
+    # (a wire is a few px across; a straight thing as thick as a barrier
+    # arm is a rigid body and goes with what it is fixed to, or the arm
+    # tears in two as the planes move)
+    straight = (np.sqrt(l1) > 0.02 * LONG) & (np.sqrt(l2 / np.maximum(l1, 1e-6)) < 0.04) & (np.sqrt(l2) < 2.0)
+    move = np.zeros(n, bool)
+    move[1:] = touch[1:] & ~straight[1:] & (stats[1:, cv2.CC_STAT_AREA] < 0.002 * W * H)
+    lab[(lab == k) & ~longw & move[cc]] = k + 1
+# A barrier arm or a pipe is long and straight like a wire, and the Hough
+# pass above holds it as one; but it is a rigid body as thick as a finger
+# of the signal it is fixed to, and half of it on the plane behind tears
+# off as the planes move. The part of it that touches the nearer plane
+# goes over to it.
+for k in range(K - 2, 0, -1):
+    n, cc, stats, _ = cv2.connectedComponentsWithStats((lab == k).astype(np.uint8), 8)
+    if n < 2:
+        continue
+    cr = cc.ravel()
+    area = np.maximum(stats[:, cv2.CC_STAT_AREA], 1).astype(np.float64)
+    touch = np.bincount(cr, weights=dilate(lab == k + 1, 2).ravel().astype(np.float64), minlength=n) > 0
+    mx_ = np.bincount(cr, xx.ravel(), n) / area
+    my_ = np.bincount(cr, yy.ravel(), n) / area
+    sxx = np.bincount(cr, (xx * xx).ravel(), n) / area - mx_ ** 2
+    syy = np.bincount(cr, (yy * yy).ravel(), n) / area - my_ ** 2
+    sxy = np.bincount(cr, (xx * yy).ravel(), n) / area - mx_ * my_
+    tr, det = sxx + syy, sxx * syy - sxy ** 2
+    disc = np.sqrt(np.maximum(tr * tr / 4 - det, 0))
+    l1, l2 = tr / 2 + disc, np.maximum(tr / 2 - disc, 0)
+    rod = (np.sqrt(l1) > 0.02 * LONG) & (np.sqrt(l2 / np.maximum(l1, 1e-6)) < 0.1) & (np.sqrt(l2) >= 2.0)
+    move = np.zeros(n, bool)
+    move[1:] = touch[1:] & rod[1:] & (stats[1:, cv2.CC_STAT_AREA] < 0.002 * W * H)
+    lab[(lab == k) & move[cc]] = k + 1
 # The nearest plane is one object (a signal, a pole): bits of wire that the
 # depth halo lifted past the threshold go back to the plane behind.
 if cfg.get("near_min_area"):
@@ -146,6 +220,33 @@ if cfg.get("near_min_area"):
     small[1:] = stats[1:, cv2.CC_STAT_AREA] < cfg["near_min_area"]
     lab[(lab == kn) & small[cc]] = kn - 1
 
+# Blobs of sky that the depth halo lifted onto an object plane (a patch of
+# cloud beside a mast, sky seen through a cage) would slide over the sky as
+# pale ghosts: a mid-sized island that is sky-coloured through and through
+# and not a wire is sky.
+skylike = ((b - r > 0.04) & (b > 0.25)) | ((lum > 0.5) & (sat < 0.3) & (b >= r - 0.03))
+for k in range(1, K):
+    n, cc, stats, _ = cv2.connectedComponentsWithStats((lab == k).astype(np.uint8), 8)
+    if n < 2:
+        continue
+    frac = np.bincount(cc.ravel(), weights=skylike.ravel().astype(np.float64), minlength=n) / np.maximum(stats[:, cv2.CC_STAT_AREA], 1)
+    wfrac = np.bincount(cc.ravel(), weights=wires.ravel().astype(np.float64), minlength=n) / np.maximum(stats[:, cv2.CC_STAT_AREA], 1)
+    ghost = np.zeros(n, bool)
+    ghost[1:] = (stats[1:, cv2.CC_STAT_AREA] < 0.0015 * W * H) & (frac[1:] > 0.85) & (wfrac[1:] < 0.2)
+    lab[(lab == k) & ghost[cc]] = 0
+# Cloud the depth halo lifted onto a pale mast is part of the mast's
+# component, so the island rule above cannot see it: wherever an object
+# plane holds a patch the colour of the sky right round it (not a wire),
+# that patch is sky. Only for a photo whose objects are not sky-pale.
+if cfg.get("reclaim"):
+    skyc = pushpull(img, erode(lab == 0, 2).astype(np.float32))
+    like = (np.linalg.norm(img - skyc, axis=2) < cfg["reclaim"]) & (lab > 0) & ~dilate(wires | strokes, 1)
+    like = cv2.morphologyEx(like.astype(np.uint8), cv2.MORPH_OPEN, disk(2)) > 0
+    n, cc, stats, _ = cv2.connectedComponentsWithStats(like.astype(np.uint8), 8)
+    keep = np.zeros(n, bool)
+    keep[1:] = stats[1:, cv2.CC_STAT_AREA] > 60
+    lab[keep[cc]] = 0
+    print("reclaimed", int(keep[cc].sum()), "px of sky")
 # No confetti: small islands join what surrounds them.
 for it in range(2):
     for k in range(1, K):
@@ -170,6 +271,22 @@ for it in range(2):
             if nb.size:
                 lab[y0:y1, x0:x1][m] = np.bincount(nb, minlength=K).argmax()
 
+# Crumbs of a wire left between the parts of a nearer object (a wire
+# running just along a signal arm shows only in the gaps) are dashes the
+# moment the arm slides off them: they go with the object they hug.
+for k in range(K - 2, 0, -1):
+    n, cc, stats, _ = cv2.connectedComponentsWithStats((lab == k).astype(np.uint8), 8)
+    if n < 2:
+        continue
+    touch = np.bincount(cc.ravel(), weights=dilate(lab > k, 2).ravel().astype(np.float64), minlength=n) > 0
+    crumb = np.zeros(n, bool)
+    crumb[1:] = touch[1:] & (stats[1:, cv2.CC_STAT_AREA] < 160)
+    lab[(lab == k) & crumb[cc]] = k + 1
+if cfg.get("one_plane"):
+    # one structure against the sky: whatever bits of it the depth put a
+    # plane further back would tear off it as it turns
+    lab[lab > 0] = 1
+sky = lab == 0  # the islands given back to the sky above
 np.savez_compressed(os.path.join(WORK, "labels.npz"), lab=lab, img=img, dep=dep, sky=sky, wires=wires)
 
 cols = np.array([[150, 200, 230], [60, 200, 60], [230, 80, 60], [230, 200, 30], [200, 60, 200]], np.float32) / 255

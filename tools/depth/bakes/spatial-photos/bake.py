@@ -7,9 +7,13 @@ Reads <workdir>/labels.npz from labels.py. Adapted from the crossing bake
 
   * The sky plane is complete. During a swipe the sky lags the nearer
     planes by up to ~8% of the frame, so whatever stood in front of it is
-    uncovered: the sky behind every pole, wire and tower is inpainted with
-    real cloud texture (shift-map copies from the same sky, carrying the
-    smooth sky gradient of a push-pull fill), not a smear.
+    uncovered: the sky behind every pole, wire and box is filled soft
+    (skyfill.py: a harmonic membrane in linear light from the clear sky
+    round it, cloud thinning out with depth into a wide hole, the photo's
+    grain on top), never sharper than the photo. The photo is shown only
+    where the sky is seen clear of every rim, so no wire leaves a ghost.
+  * Wires carry on behind the posts in front of them as straight runs
+    (wires.py), never as fans or dashes.
   * Every plane carries its own smooth depth map (depth.png, one plane per
     channel), so the viewer draws each plane as a mesh displaced by depth:
     a leaning pole or a tower turns in 3D, but no mesh ever spans a depth
@@ -40,13 +44,14 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import guided, dilate, erode, pushpull, smoothstep  # noqa: E402
 from shiftfill import shiftfill  # noqa: E402
-from skyfill import skyfill, across  # noqa: E402
+from skyfill import skyfill, local_mean  # noqa: E402
+from wires import bridge_wires  # noqa: E402
 
-# Sky fill: "across" (default; skyfill.py, no model) or "lama" (tools/depth/
+# Sky fill: "soft" (default; skyfill.py, no model) or "lama" (tools/depth/
 # fill.py). LaMa continues a cloud edge better, but the whole occluded sky of
 # a photo is many onion-peel calls: it ran past an hour per photo on the
-# shared bake machine, so the shipped planes use "across".
-SKYFILL = os.environ.get("SKYFILL", "across")
+# shared bake machine, so the shipped planes use "soft".
+SKYFILL = os.environ.get("SKYFILL", "soft")
 if SKYFILL == "lama":
     sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
     from fill import Lama, fill as lama_fill  # noqa: E402
@@ -66,7 +71,14 @@ print("planes", K, "size", W, H)
 
 # ---- coverages A[k] = matte of (lab >= k)
 A = [np.ones((H, W), np.float32)]
-Bsky = pushpull(img, erode(sky, 2).astype(np.float32))
+# The sky seen clear of everything: a wire's anti-aliased rim, its JPEG
+# ringing and the depth halo all sit within a few px of it. The sky plane
+# shows the photo only here and fills the rest, and the mattes are unmixed
+# against this same sky, so a rim belongs to the wire (and moves with it)
+# instead of staying behind on the sky as a faint double line.
+RIM = 6
+sky_clear = sky & ~dilate(lab > 0, RIM)
+Bsky = pushpull(img, erode(sky_clear, 1).astype(np.float32))
 dist_sky = np.linalg.norm(img - Bsky, axis=2)
 wF = (~sky) & (dist_sky > 0.14)
 Fobj = pushpull(img, wF.astype(np.float32))
@@ -75,7 +87,7 @@ den = (FB * FB).sum(2)
 acol = ((img - Bsky) * FB).sum(2) / (den + 1e-4)
 acol = smoothstep(0.06, 0.94, acol)
 M1 = lab >= 1
-band = dilate(M1, 3) & ~erode(M1, 3)
+band = dilate(M1, RIM) & ~erode(M1, 3)
 g1 = np.clip(guided(img, M1.astype(np.float32), 2, 2e-3), 0, 1)
 A1 = M1.astype(np.float32)
 use_col = band & (den > 0.02)
@@ -109,6 +121,15 @@ for k in range(1, K):
     thin_all |= m & ~op
 
 # ---- per plane alpha, colour, depth
+# The skyline, column by column (the lowest sky in each), and what lies
+# well below it: there, what is behind a near post is ground, not sky.
+skyo = erode(sky, 3)
+rows = np.arange(H)[:, None]
+line = np.where(skyo.any(0), (H - 1 - np.argmax(skyo[::-1], 0)), -1).astype(np.float32)
+line = cv2.dilate(line[None], np.ones((1, int(0.03 * L) | 1), np.uint8))
+line = cv2.GaussianBlur(line, (0, 0), sigmaX=0.02 * L, sigmaY=0.1, borderType=cv2.BORDER_REPLICATE)[0]
+below = smoothstep(0.01 * L, 0.04 * L, rows - line[None])
+
 layers = []
 behind = np.zeros_like(img)
 meta = []
@@ -125,6 +146,14 @@ for k in range(K):
         solid = cv2.morphologyEx(own.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0
         if solid.sum() < 0.2 * own.sum():
             solid = own  # a plane of wires: they are what it has
+        # only real bodies (a building, a pole) go on behind what is in front
+        # of them; a ladder rung or a clamp grown into a blob is what pulls
+        # and tears when the nearer plane slides off it
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats(solid.astype(np.uint8), 8)
+        bigs = np.zeros(n_, bool)
+        bigs[1:] = st_[1:, cv2.CC_STAT_AREA] >= 0.0004 * H * W
+        if bigs.any():
+            solid = solid & bigs[cc_]
         d = cv2.distanceTransform((~solid).astype(np.uint8), cv2.DIST_L2, 5)
         occl = lab > k
         # Who lies behind the occluder: vote by the nearest visible pixel, but
@@ -134,7 +163,14 @@ for k in range(K):
         vy, vx = np.nonzero(~occl)
         vl = np.zeros(vidx.max() + 1, np.uint8)
         vl[vidx[vy, vx]] = vote[vy, vx]
-        mine = ((vl[vidx] == k) & (d < EXT)).astype(np.float32)
+        mine = (vl[vidx] == k) & (d < EXT)
+        if k == 1 and K > 2:
+            # the farthest ground plane is behind everything nearer below
+            # the skyline, whoever is nearest: left to the vote, the gap
+            # behind a signal post with a box and a sign beside it goes to
+            # nobody, and a swipe opens it onto the sky plane's blur
+            mine |= (below > 0.5) & (d < EXT)
+        mine = mine.astype(np.float32)
         mine = cv2.GaussianBlur(mine, (0, 0), 4)
         # strictly under the occluder: a soft edge here would leave a ghost
         # outline of the nearer object riding on this plane
@@ -145,39 +181,84 @@ for k in range(K):
         # really there: peeling noise between two mattes, not a picture
         ring = dilate(occl, 4) & ~occl & ~dilate(own, 1)
         a[ring] = 0
-        # wires carry on behind the posts in front of them
-        seen = ~occl & ~ring
-        pre = np.dstack([img * a[..., None], a])
-        carried = across(pre, seen, occl, reach=int(0.05 * L))
-        wire_a = carried[..., 3]
-        wire_c = carried[..., :3] / np.maximum(wire_a, 1e-4)[..., None]
+        # wires carry on behind the posts in front of them (wires.py), in
+        # the wire's own core colour, never the sky its rim mixes in
+        wire_a, wire_c = bridge_wires(own & thin_all & (a > 0.2), occl, img, int(0.08 * L), L)
         wire = occl & (wire_a > a)
     pure = own & (a > 0.98) & (vis > 0.98)
     pure = erode(pure, 1) if k > 0 else erode(pure, 2)
     if k == 0:
-        # no dark specks (insulators, wire ends) taken as sky texture
-        for _ in range(2):
-            sm = pushpull(img, pure.astype(np.float32)) @ LW
-            sm = cv2.GaussianBlur(sm, (0, 0), 10)
-            pure &= ~dilate((img @ LW) < sm - 0.05, 3)
+        # no dark specks (insulators, wire ends, a frayed bit of rim) taken
+        # as sky texture or left on the sky: small dark things only, so the
+        # broad shading of a cloud stays what the fill learns from
+        lum_ = cv2.GaussianBlur(img @ LW, (0, 0), 0.8)
+        speck = (cv2.morphologyEx(lum_, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) - lum_) > 0.035
+        speck = dilate(speck, 2)
+        pure &= ~speck
     base = pushpull(img, pure.astype(np.float32))
     need = (a > 0.01) & ~pure
     if k == 0:
         need &= ~(own & (vis > 0.98))
     if k == 0:
-        # across each strip, from the sky on both sides
+        # the photo only where the sky is seen clear of every rim; the rest
+        # (rims, wire strips, everything behind a pole) is filled, and the
+        # fill learns only from that clear sky, minus dark specks
+        seen0 = sky_clear & (vis > 0.98) & ~(speck & dilate(lab > 0, 24))
+        # and nothing a lot darker than the sky (a sign, an antenna, a bird)
+        # rides on it: it would trail behind its own plane as a dark speck
+        # (small things only: the dark base of a storm cloud is sky)
+        lsky = img @ LW
+        dark = (lsky < 0.45 * local_mean(lsky, seen0, 0.04 * L)) & sky
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats(dark.astype(np.uint8), 8)
+        small_ = np.zeros(n_, bool)
+        small_[1:] = st_[1:, cv2.CC_STAT_AREA] < 0.0005 * H * W
+        seen0 &= ~dilate(dark & small_[cc_], 2)
+        pure = pure & seen0
+        need = ~seen0
         if SKYFILL == "lama":
             # LaMa (tools/depth/fill.py): continues a cloud edge behind a
             # pole instead of blending across it
             fill = lama_fill(img, need, method="lama", lama=Lama(threads=3), log=lambda *a: None)
         else:
-            fill = skyfill(img, pure, reach=int(0.18 * L), seed=7)
+            fill = skyfill(img, pure, seed=7)
     else:
         fill = shiftfill(img, pure, need, base, seed=k, T=128, q=4, cands=500, R=int(0.06 * L))
+        if k == 1 and K > 2:
+            # deep behind a post, copied texture brings copied things (a
+            # second signal, half a sign) that read as pasted the moment a
+            # swipe opens them: past a short band of texture at the edge,
+            # the ground there is a soft blur of the ground round it
+            dd = cv2.distanceTransform((~own).astype(np.uint8), cv2.DIST_L2, 5)
+            wb = smoothstep(0.03 * L, 0.07 * L, dd)[..., None]
+            fill = fill * (1 - wb) + cv2.GaussianBlur(base, (0, 0), 0.008 * L) * wb
     if k == 0:
         # the photo wherever the sky is seen; `pure` only chose what the fill
         # may learn from (no dark specks), it must not repaint cloud shading
-        seen0 = own & (vis > 0.98)
+        # Far below the skyline the sky plane is behind the ground, not the
+        # sky: anything a near plane uncovers there that the planes behind
+        # it do not hold should read as a soft blur of that ground, never as
+        # a cut-out of cyan sky.
+        # Only below the skyline: a signal box or a gantry hanging in the sky
+        # is sky all round, and a blur of its own dark body there is a smudge
+        # that trails the box when it moves.
+        dsky = cv2.distanceTransform((~sky).astype(np.uint8), cv2.DIST_L2, 5)
+        # and only where that ground is what lies round the hole: under a
+        # signal's foot with sky on one side and a far roof on the other the
+        # blur of the roof would be a dark smudge standing in open sky
+        # (the ground is every plane but the nearest: that one is what moves
+        # off the hole, the rest is what stands behind it)
+        far1 = (lab >= 1) & (lab < max(K - 1, 2)) & ~thin_all
+        sg_ = 0.03 * L
+        fg_ = cv2.GaussianBlur(far1.astype(np.float32), (0, 0), sg_)
+        fs_ = cv2.GaussianBlur(sky.astype(np.float32), (0, 0), sg_)
+        # (far from both, as deep inside a near wall, it is sky: a ratio of
+        # two vanishing blurs would flip there with a hard edge)
+        gfrac = fg_ / np.maximum(fg_ + fs_, 0.05)
+        wg = (smoothstep(0.02 * L, 0.06 * L, dsky) * below * smoothstep(0.35, 0.75, gfrac))[..., None]
+        if wg.max() > 0:
+            ground = pushpull(img, far1.astype(np.float32)) if far1.any() else img
+            ground = cv2.GaussianBlur(ground, (0, 0), 0.006 * L)
+            fill = fill * (1 - wg) + ground * wg
         col = np.where(seen0[..., None], img, fill)
     else:
         col = np.where(pure[..., None], img, fill)
@@ -237,6 +318,12 @@ for k, (col, a) in enumerate(layers):
     meta[k]["rect"] = [round(x0 / W, 5), round(y0 / H, 5), round(x1 / W, 5), round(y1 / H, 5)]
     meta[k]["px"] = [int(x1 - x0), int(y1 - y0)]
     print("wrote", path, os.path.getsize(path) // 1024, "KB", meta[k]["px"])
+
+# a re-bake with fewer planes leaves no stale plane behind
+for k in range(K, 8):
+    stale = os.path.join(OUT, f"p{k}.webp")
+    if os.path.exists(stale):
+        os.remove(stale)
 
 DW, DH = (DEPTH_LONG, round(DEPTH_LONG * H / W)) if W >= H else (round(DEPTH_LONG * W / H), DEPTH_LONG)
 dpack = np.zeros((DH, DW, 4), np.float32)
