@@ -38,6 +38,7 @@ LAM = 12.0  # SAD units per half-pel of vector difference (per 8x8 block)
 SPLIT = 256.0  # extra cost of coding four vectors instead of one
 INTRA_K = 1.05  # intra if inter SAD > K * DC-predicted SAD + bias
 INTRA_B = 400.0
+FLAT = 64.0  # SAD per 8x8 block a zero vector may lose by and still win
 
 probe = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate", "-of", "csv=p=0", src], capture_output=True, text=True).stdout.strip()
 num, den = probe.split("/")
@@ -218,6 +219,19 @@ for cur in frames():
         best8[m8] = s8[m8]
         bestv[m] = cand[m]
     vh = np.clip(bestv, -120, 120)
+    # --- flat blocks: where standing still predicts about as well as the
+    # vector found, take zero, the way x264 always tries the zero vector.
+    # Featureless sky (the winter shot's overcast) matches anything, and
+    # without this a vector found once in its noise, at the edge of the
+    # search range, rides the temporal predictor for the rest of the shot:
+    # a rigid column of 56 px vectors that a held decoder tiles into a comb.
+    zero = np.zeros_like(vh)
+    s0 = half_sad(cur, prev, 8, zero)
+    sv = half_sad(cur, prev, 8, vh)
+    still8 = s0 <= sv + FLAT
+    still16 = blocksum(s0, 2) <= blocksum(sv, 2) + 4 * FLAT
+    still = np.where(split8, still8, np.repeat(np.repeat(still16, 2, 0), 2, 1))
+    vh[still] = 0
     best = half_sad(cur, prev, 8, vh)
     # --- intra decision per MB: DC-predicted SAD vs best inter SAD
     mb = cur.reshape(MH, 16, MW, 16)
@@ -226,13 +240,13 @@ for cur in frames():
     intra = inter > INTRA_K * dc + INTRA_B
     mode = np.where(intra, 2, np.where(split, 1, 0)).astype(np.uint8)
     records.append((mode, vh.astype(np.int16)))
-    stats.append((float(np.median(vh[..., 0])) / 2, float(split.mean()), float(intra.mean()), float(np.mean(best) / 64)))
+    stats.append((float(np.median(vh[..., 0])) / 2, float(split.mean()), float(intra.mean()), float(np.mean(best) / 64), float(still.mean())))
     prev_v = vh
     prev = cur
     n += 1
     if n % 30 == 0:
         a = np.array(stats[-29:])
-        print(f"frame {n}: med dx {a[:, 0].mean():6.1f} px, split {a[:, 1].mean():.2f}, intra {a[:, 2].mean():.3f}, mean abs err {a[:, 3].mean():.2f}", flush=True)
+        print(f"frame {n}: med dx {a[:, 0].mean():6.1f} px, split {a[:, 1].mean():.2f}, intra {a[:, 2].mean():.3f}, mean abs err {a[:, 3].mean():.2f}, still {a[:, 4].mean():.2f}", flush=True)
 proc.wait()
 
 # --- pack like a bitstream: per MB a mode, then vector differences against

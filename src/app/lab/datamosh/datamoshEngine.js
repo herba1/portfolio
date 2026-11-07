@@ -13,7 +13,8 @@ import { readWebm } from "./webm";
 // macroblock of every frame, found offline by block matching
 // (tools/depth/bakes/datamosh/mv.py: 16x16 macroblocks split into 8x8
 // partitions where that pays, half-pel vectors, a rate cost toward the
-// neighbours' median, intra where nothing matches).
+// neighbours' median, the zero vector where standing still does as well,
+// intra where nothing matches).
 //
 // The browser then runs both halves of a codec, frame by frame, on the GPU.
 //
@@ -32,7 +33,10 @@ import { readWebm } from "./webm";
 // blocks either: each one is turned into an inter block along the median of
 // its neighbours' vectors, the way a datamosher strips them (ffglitch's
 // mb_type rewrite, Murata's I-frame and intra removal), so the error stays
-// one continuous smear instead of squares of the true picture.
+// one continuous smear instead of squares of the true picture. A held
+// decoder also reads its own picture in whole pels, nearest, with no
+// half-pel filter (see mcPel), so the smear stays hard-edged however long
+// the hold runs.
 //
 // It tunes in the way a set joins a broadcast: between I-frames, with no
 // picture. Until the first I-frame arrives (three seconds) it builds what it
@@ -117,6 +121,20 @@ vec3 mc(sampler2D ref, vec2 p, vec4 m) {
   }
   return a / 32.0;
 }
+// A held decoder copies whole pels instead: every vector rounded to the
+// pixel grid and the block lifted straight out of the reference, nearest,
+// no filter. The six-tap read is right for a decoder whose residual mends
+// it every frame, but a held picture is read again on every frame of the
+// hold, and hundreds of half-pel passes low-pass a bloom into airbrush.
+// Copied whole, the photo's grain and the 16x16 and 8x8 block edges stay
+// as sharp on the three hundredth frame as on the first, and the smear
+// moves in hard stepped strips that tear on the macroblock grid. An odd
+// (half-pel) vector rounds down on even frames and up on odd ones, so a
+// half-pixel drift still moves a whole pixel every other frame.
+vec3 mcPel(sampler2D ref, vec2 p, vec4 m, int phase) {
+  ivec2 v = ivec2(m.yz);
+  return px(ref, ivec2(floor(p)) + ((v + phase) >> 1));
+}
 `;
 
 // residual against the encoder's own prediction
@@ -175,6 +193,8 @@ uniform sampler2D uD;
 uniform sampler2D uRes;     // dequantised residual
 uniform int uIframe;        // this frame is an I-frame
 uniform int uHeld;          // the decoder is not getting I-frames
+uniform int uPel;           // held: whole-pel copies (see mcPel)
+uniform int uPhase;         // frame parity, for rounding half-pel vectors
 uniform float uGain;        // how much residual the decoder still applies
 uniform float uRefresh;     // macroblock columns refreshed (intra), 0..80
 layout(location=0) out vec4 oE;
@@ -188,6 +208,7 @@ void main() {
   vec3 e = (uIframe == 1 || intra) ? s : mc(uE, p, m) + r;
   e = clamp(e, vec3(0.0, -0.5, -0.5), vec3(1.0, 0.5, 0.5));
   vec3 d;
+  vec3 dm = uPel == 1 ? mcPel(uD, p, m, uPhase) : mc(uD, p, m);
   bool fresh = floor(p.x / 16.0) < uRefresh;
   if (uIframe == 1) {
     // an I-frame: only a decoder that receives it starts again
@@ -199,9 +220,9 @@ void main() {
     // a starved decoder gets no intra blocks either: each one is turned
     // into an inter block along its neighbours' median vector, predicted
     // from the moshed picture, with no residual (it never had an inter one)
-    d = mc(uD, p, m);
+    d = dm;
   } else {
-    d = mc(uD, p, m) + uGain * r;
+    d = dm + uGain * r;
   }
   d = clamp(d, vec3(0.0, -0.5, -0.5), vec3(1.0, 0.5, 0.5));
   oE = vec4(e, 1.0);
@@ -219,7 +240,12 @@ void main() {
   vec2 dpx = vec2(gl_FragCoord.x, uCanvasH - gl_FragCoord.y);
   vec2 l = (dpx - uPrint.xy) / uPrint.zw;
   if (any(lessThan(l, vec2(0.0))) || any(greaterThanEqual(l, vec2(1.0)))) { o = vec4(uPaper, 1.0); return; }
-  vec3 c = toRgb(texture(uD, l).rgb);
+  // sharp bilinear: each codec pixel is a flat square on the print, blended
+  // only across its own edge, so block edges stay hard at any print scale
+  vec2 sz = vec2(textureSize(uD, 0));
+  vec2 t = l * sz - 0.5;
+  vec2 k = clamp((fract(t) - 0.5) * (uPrint.zw / sz) + 0.5, 0.0, 1.0);
+  vec3 c = toRgb(texture(uD, (floor(t) + 0.5 + k) / sz).rgb);
   o = vec4(mix(uPaper, clamp(c, 0.0, 1.0), uOn), 1.0);
 }`;
 
@@ -531,7 +557,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
 
   // ---- one frame through the codec
   let cur = 0; // E[cur], D[cur] hold the last reconstruction
-  const codecStep = (idx, { iframe, held, gain, refresh }) => {
+  const codecStep = (idx, { iframe, held, pel, phase, gain, refresh }) => {
     mv.unpack(idx, mvField);
     gl.bindTexture(gl.TEXTURE_2D, mvTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, mv.GW, mv.GH, gl.RGBA, gl.FLOAT, mvField);
@@ -567,6 +593,8 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     bindTex(step, 4, mvTex, "uMv");
     gl.uniform1i(step.u.uIframe, iframe ? 1 : 0);
     gl.uniform1i(step.u.uHeld, held ? 1 : 0);
+    gl.uniform1i(step.u.uPel, pel ? 1 : 0);
+    gl.uniform1i(step.u.uPhase, phase);
     gl.uniform1f(step.u.uGain, gain);
     gl.uniform1f(step.u.uRefresh, refresh);
     draw(target(E[nxt], D[nxt]), W, H);
@@ -677,7 +705,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     // (the scene cut): a held decoder drops them all
     const iframe = idx % GOP === 0 || webm.frames[idx].key || seq === 0 || (still && seq === warmFrom);
     if (joining && iframe && seq > 0) joining = false;
-    codecStep(idx, { iframe, held: held || joining, gain, refresh });
+    codecStep(idx, { iframe, held: held || joining, pel: held, phase: seq & 1, gain, refresh });
     seq++;
     return true;
   };
