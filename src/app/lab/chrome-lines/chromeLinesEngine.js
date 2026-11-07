@@ -101,7 +101,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
 
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
-  const K = [num("gmin", 0.3), num("kr", 4.2), num("kl", 0.5), num("sp", 6.1)];
+  const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 3.5)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   const K2 = [num("H2", 0.07), num("Hr", 0.14), 0, 0];
   const still = q.has("t") || q.has("pull");

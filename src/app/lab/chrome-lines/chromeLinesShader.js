@@ -1,7 +1,7 @@
 // The chrome is a height field over the page: a sum of compact metaball
 // kernels (the liquid), a surface-tension profile that stands its edge up
-// like a meniscus, and slow swells carried along with the liquid. A broad,
-// soft studio is reflected in it. The result is never shown as tone:
+// like a meniscus, and slow swells carried along with the liquid. A hard
+// studio is reflected in it. The result is never shown as tone:
 // it is printed as one line screen whose phase is displaced by the surface,
 // so every line bends over the forms and crowds where the surface turns, and
 // whose width carries the tone. A lavender plate printed a hair out of
@@ -69,39 +69,56 @@ vec3 relief(vec2 q){
 }
 
 // The studio, seen from the chrome. Stereographic coordinates around the
-// zenith: |s| = 1 is the horizon. A broad studio, not hard boards: a sky
-// that falls from a bright key side to a dim far side, one large softbox
-// and one long strip, both with wide falloff, a single soft flag, a lit
-// cyclorama glow at the horizon and a dark floor under it. Nothing in it
-// has an edge, so the reflection is all long ramps, and the line width has
-// a whole range of midtone to carry instead of ink-or-paper.
+// zenith: |s| = 1 is the horizon. A hard studio: a grey sky ramp, two crisp
+// rectangular softboxes (the key, split by its frame, and a long strip) that
+// clip to paper white, black flags with cut edges, a cyclorama lit on the
+// key side only, and a black floor with white boards lying on it.
+// Every boundary is a cut, about 0.02 wide plus what the pixel needs, so the
+// chrome reflects bold shapes the line screen has to thicken across and
+// crowd into. soft widens every edge (the displacement reads a soft copy).
+float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
   float ls = length(s);
-  float sw = 0.3 + soft;
-  // Sky: a slow ramp from the key side (up and left) to the far side.
-  float L = 0.66 + 0.6 * dot(s, normalize(vec2(-0.55, -0.83))) - 0.1 * ls * ls;
+  // Anti-aliasing only: what one sample of the surface spans in s.
+  float aa = min(0.5 * length(fwidth(s)), 0.12);
+  float ew = 0.02 + soft + aa;
+  // Sky: grey, a little lighter toward the key side (up and left).
+  float L = 0.5 + 0.18 * dot(s, normalize(vec2(-0.55, -0.83)));
   float d;
-  // The big softbox, just off the zenith: a wide bloom, not a board.
-  d = length((s - vec2(-0.16, -0.1)) * vec2(1.0, 1.3)) - 0.13;
-  L = mix(L, 1.0, smoothstep(sw, -0.6 * sw, d));
-  // A long strip on the right, softer still.
-  d = sdBox(rot(s - vec2(0.42, 0.06), 0.35), vec2(0.06, 0.42));
-  L = mix(L, 0.94, 0.85 * smoothstep(sw, -0.5 * sw, d));
-  // One broad, soft flag below the zenith: it gives the forms their deep
-  // tones as a swell into ink and back, never a cut-out.
-  d = sdBox(rot(s - vec2(0.12, 0.34), -0.25), vec2(0.34, 0.04));
-  L = mix(L, 0.06, 0.9 * smoothstep(sw, -0.4 * sw, d));
-  L = clamp(L, 0.04, 1.0);
-  // Low round the walls the cyclorama glows, brightest on the key side; so
-  // a rim reads as a bright band and then the dark floor below it.
-  float ang = atan(s.y, s.x);
-  float glow = 0.55 + 0.4 * cos(ang + 2.2);
-  L = mix(L, glow, smoothstep(0.62 - soft, 0.86 + soft, ls));
-  // The floor: dark, lifting a little toward a bounce on the key side.
-  float floorL = 0.04 + 0.3 * smoothstep(0.2, 1.0, cos(ang - 2.4));
-  L = mix(L, floorL, smoothstep(0.9 - soft, 1.06 + soft, ls));
-  return L;
+  // The key: a big rectangular softbox up and left of the zenith, blown to
+  // paper, split by its frame into two panels.
+  vec2 qk = rot(s - vec2(-0.2, -0.17), 0.22);
+  d = sdBox(qk, vec2(0.2, 0.12));
+  float frame = cut(abs(qk.x) - 0.012, ew) * cut(d + 0.012, ew);
+  L = mix(L, 1.0, cut(d, ew) * (1.0 - frame));
+  // A long strip on the right, also blown.
+  d = sdBox(rot(s - vec2(0.44, 0.02), 0.35), vec2(0.05, 0.4));
+  L = mix(L, 1.0, cut(d, ew));
+  // The flags: a long black board across below the zenith (every flat top
+  // carries a bold black band) and a tall one on the far left.
+  d = sdBox(rot(s - vec2(0.06, 0.23), -0.25), vec2(0.46, 0.065));
+  L = mix(L, 0.02, cut(d, ew));
+  d = sdBox(rot(s - vec2(-0.56, 0.18), 0.1), vec2(0.11, 0.34));
+  L = mix(L, 0.02, cut(d, ew));
+  // The cyclorama low round the walls: lit white on the key side, dark grey
+  // elsewhere, the two meeting in a cut.
+  vec2 sn = s / max(ls, 1e-4);
+  float keySide = cut(0.35 - dot(sn, normalize(vec2(-0.75, -0.66))), ew / max(ls, 0.3));
+  float wall = mix(0.18, 0.96, keySide);
+  L = mix(L, wall, cut(0.74 - ls, ew));
+  // The floor: black past the horizon, with white boards laid on it at two
+  // bearings, in a wide ring under the horizon. A rim sweeps out through
+  // the floor to its very edge, so its dark band breaks into a white bar
+  // where it faces a board and still ends in a black outline beyond it.
+  float fl = 0.02;
+  float ring = cut(1.02 - ls, ew) * cut(ls - 4.0, ew * 4.0);
+  d = 0.955 - dot(sn, normalize(vec2(-0.86, 0.5)));
+  fl = mix(fl, 0.97, cut(d, ew * 0.5) * ring);
+  d = 0.975 - dot(sn, normalize(vec2(0.8, 0.6)));
+  fl = mix(fl, 0.9, cut(d, ew * 0.5) * ring);
+  L = mix(L, fl, cut(0.95 - ls, ew));
+  return clamp(L, 0.0, 1.0);
 }
 
 // Coverage of one plate's line at phase ph, width w (fraction of a period),
@@ -169,7 +186,7 @@ vec4 surface(vec2 p){
 
   vec3 v = normalize(vec3((p - uRes * 0.5) / (uScale * 2.6), -1.0));
   vec3 r = reflect(v, n);
-  float L = env(r, 0.05);
+  float L = env(r, 0.0);
   float Ls = env(r, 0.22);
 
   // The reflection pushes the lines by the normal: across a dome that adds
