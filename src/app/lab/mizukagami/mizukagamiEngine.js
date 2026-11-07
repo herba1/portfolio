@@ -257,7 +257,8 @@ void main() {
     vec3 wcol = mix(WIRE * (0.6 + 0.4 * col), col, clamp(haze, 0.0, 0.7));
     col = mix(col, uDebug > 0.5 ? vec3(1.0, 0.0, 1.0) : wcol, clamp(wireA, 0.0, 1.0));
   }
-  outColor = vec4(col, 1.0);
+  // alpha: 0 where the mirror holds open sky, 1 where it holds a thing
+  outColor = vec4(col, hit ? 1.0 : clamp(wireA, 0.0, 1.0));
 }`;
 
 // ---------------------------------------------------------------- compose
@@ -274,7 +275,9 @@ uniform float uRipple;   // 0..1
 uniform float uWetLine;  // highest recent level, m
 uniform float uExpo;
 uniform vec3 uSigma;     // extinction per metre
+uniform vec3 uSigmaBot;  // extinction per metre on the way to the bottom and back
 uniform vec3 uMurk;      // in-scattered colour of the water body
+uniform float uVeil;     // airlight taken out of the mirrored sky
 uniform vec3 uSkyCol;    // sky near the horizon (for the meniscus)
 ${COMMON}
 
@@ -293,6 +296,14 @@ float fresnel(float ci) {
   float rs = (ci - n * ct) / (ci + n * ct);
   float rp = (n * ci - ct) / (n * ci + ct);
   return 0.5 * (rs * rs + rp * rp);
+}
+
+// The scan's sky sits at a teal 189 degrees; Superia would have printed it
+// cyan-cobalt. Only clear blue is moved (toward ~204 degrees): cloud, grey and
+// warm surfaces stay as they are.
+vec3 skyGrade(vec3 c) {
+  float skyness = smoothstep(0.3, 0.75, (c.b - c.r) / (c.b + 1e-4)) * step(c.r, c.g);
+  return c * vec3(1.0, 1.0 - 0.26 * skyness, 1.0 + 0.05 * skyness);
 }
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -344,6 +355,7 @@ void main() {
   bool groundPx = !sky && flag > 0.3 && flag < 0.7;
   float hw = fwidth(min(h, 1.0));
   vec3 col = base;
+  float wa = 0.0;  // water coverage, graded on its own
 
   vec3 d = rayDir(p);
   float nd = dot(uN, d);
@@ -387,7 +399,13 @@ void main() {
     float lod = log2(1.0 + rp.z * 400.0);
     // a ripple can tip the mirror image past the print's edge: fold back
     ruv = 1.0 - abs(1.0 - abs(ruv));
-    vec3 refl = textureLod(uRefl, ruv, lod).rgb;
+    vec4 rs = textureLod(uRefl, ruv, lod);
+    // The low sky in the scan is pale: airlight and the lens's own veil over
+    // the brightest part of the frame. Against black water the mirror carries
+    // none of that veil, so the open sky it holds is taken down to its colour
+    // (clouds keep their light), then given the same cobalt grade as the frame.
+    vec3 skyR = max(rs.rgb - uVeil, 0.0) / (1.0 - uVeil);
+    vec3 refl = skyGrade(mix(skyR, rs.rgb, rs.a));
 
     // the bottom, through the refracted ray
     vec3 T = refract(d, nw, 1.0 / 1.333);
@@ -403,18 +421,19 @@ void main() {
     vec3 bot = base;
     if (heightAt(pb) < uLevel) bot = texture(uPlateTex, pb / uPlate).rgb;
     bot = wetten(bot, 1.0);
-    vec3 ext = exp(-uSigma * (path + depthW * 1.15));
-    vec3 trans = bot * ext + uMurk * (1.0 - exp(-uSigma * 0.8 * path));
+    // Street water is a dark body: a couple of centimetres still show the
+    // asphalt, past ~8 cm it is gone into near-black, so the sky the surface
+    // holds sits on black and the depth reads as darkening.
+    vec3 ext = exp(-uSigmaBot * (path + depthW * 1.15));
+    vec3 trans = bot * ext + uMurk * (1.0 - exp(-uSigmaBot * 0.8 * path));
     vec3 water = F * refl + (1.0 - F) * trans;
     // the shoreline: a feather one pixel wide in height
     float a = smoothstep(0.0, max(0.0015, 1.5 * hw), depthW);
     col = mix(col, water, a);
+    wa = a;
   }
-  // The scan's sky sits at a teal 189 degrees; Superia would have printed
-  // it cyan-cobalt. Only clear blue is moved (toward ~204 degrees), so cloud,
-  // grey and warm surfaces, and the same blue in the water, stay consistent.
-  float skyness = smoothstep(0.3, 0.75, (col.b - col.r) / (col.b + 1e-4)) * step(col.r, col.g);
-  col *= vec3(1.0, 1.0 - 0.26 * skyness, 1.0 + 0.05 * skyness);
+  // the dry frame takes the same sky grade (the water already has it)
+  col = mix(skyGrade(col), col, wa);
   outColor = vec4(col * uExpo, 1.0);
 }`;
 
@@ -744,7 +763,9 @@ export async function createMizukagami(host, { embedded = false } = {}) {
     gl.uniform1f(u.uWetLine, wetLine);
     gl.uniform1f(u.uExpo, 2 ** expoStops);
     gl.uniform3f(u.uSigma, 3.6, 4.1, 5.6);
-    gl.uniform3f(u.uMurk, 0.035, 0.04, 0.03);
+    gl.uniform3f(u.uSigmaBot, 12, 11.5, 11);
+    gl.uniform3f(u.uMurk, 0.012, 0.02, 0.03);
+    gl.uniform1f(u.uVeil, 0.24);
     gl.uniform3fv(u.uSkyCol, SKY);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
@@ -758,7 +779,10 @@ export async function createMizukagami(host, { embedded = false } = {}) {
         ...FILM_PRESETS.summer,
         // the scan already carries its grade; the film adds the optics
         contrast: 1.1,
-        toe: 0.02,
+        // a low black floor and a lighter mist: the water is the darkest,
+        // most contrasty surface in the frame and must not go grey
+        toe: 0.008,
+        bloom: 0.18,
         saturation: 1.06,
         blueDepth: 0.6,
         whitePoint: 1.22,
