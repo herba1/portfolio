@@ -244,14 +244,30 @@ vec2 cylHit(vec3 ro, vec3 rd, vec3 c, float r) {
 }
 
 // ---------------------------------------------------------------- paint
+// the paint's grain: the direction the highlight smears along (a pole's
+// axis, the rim's circumference, the arm), or zero for none
+vec3 grainDir(vec3 p, float id) {
+  if (id == 4.0 || id == 5.0) return vec3(0.0, 1.0, 0.0);
+  if (id == 3.0) return uHz;
+  if (id == 1.0) {
+    vec3 q = toLocal(p);
+    vec3 rad = uX * q.x + uU * q.y;
+    return cross(uN, rad / max(length(rad), 1e-4));
+  }
+  return vec3(0.0);
+}
+
 vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 q = toLocal(p);
-  // traffic orange, a few summers old
-  vec3 alb = vec3(0.76, 0.13, 0.022);
+  // JIS road-mirror orange after a decade of Kyoto summers: the binder has
+  // chalked, so the colour sits under a faint white bloom, lower in chroma
+  // than the can, and bleached further toward salmon where it faces the sky
+  vec3 alb = vec3(0.72, 0.165, 0.026);
   float upF = clamp(n.y, 0.0, 1.0);
-  // sun-bleached where it faces the sky: chalky, toward salmon
-  float bleach = 0.25 + 0.5 * upF;
-  alb = mix(alb, vec3(0.74, 0.27, 0.12), bleach * 0.25);
+  float bleach = 0.3 + 0.5 * upF;
+  alb = mix(alb, vec3(0.72, 0.3, 0.1), bleach * 0.22);
+  float chalk = 0.03 + 0.06 * upF;
+  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.08, 1.0, 0.8), chalk);
   // world-space coordinates for wear (on the pole: height and angle)
   vec2 wc = id == 4.0 || id == 5.0 ? vec2(atan(p.x - uPivot.x, p.z - uPivot.z) * POLE_R, p.y) : id == 3.0 ? vec2(dot(p - uHinge, uHz) + dot(p - uHinge, uX), p.y) : q.xy;
   float n1 = fbm(wc * 38.0);
@@ -260,12 +276,14 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float streak = smoothstep(0.55, 0.85, n2) * (id == 1.0 || id == 2.0 ? smoothstep(0.1, -0.35, q.y / A) : 0.0);
   float under = id == 1.0 ? smoothstep(0.2, -0.9, dot(n, uU)) * 0.6 : 0.0;
   float contact = 0.0;
-  if (id == 4.0) contact = smoothstep(0.22, 0.0, uPivot.y - 0.1 - p.y) * 0.8 + smoothstep(0.4, 0.0, p.y - uGround) * 0.9;
-  if (id == 5.0) contact = 0.7;
+  // on the pole: run-off from the clamp, and road dirt splashed up the
+  // lower two metres, heaviest at the base
+  if (id == 4.0) contact = smoothstep(0.3, 0.0, uPivot.y - 0.1 - p.y) * 0.8 + smoothstep(2.1, 0.0, p.y - uGround) * 0.75;
+  if (id == 5.0) contact = 0.75;
   if (id == 3.0) contact = 0.5;
   if (id == 4.0) streak = smoothstep(0.5, 0.9, fbm(wc * vec2(90.0, 2.5) + 11.0)) * 0.8;
   float grime = clamp(0.35 * streak + under + contact * (0.6 + 0.4 * n1) + 0.15 * smoothstep(0.55, 0.8, n1), 0.0, 1.0);
-  alb = mix(alb, alb * vec3(0.42, 0.38, 0.34) + vec3(0.03, 0.025, 0.02), grime * 0.75);
+  alb = mix(alb, alb * vec3(0.46, 0.42, 0.38) + vec3(0.03, 0.026, 0.021), grime * 0.75);
   // chips, rust-dark specks
   float chip = step(0.86, vnoise(wc * 260.0)) * (0.3 + 0.7 * contact);
   alb = mix(alb, vec3(0.16, 0.08, 0.05), chip * 0.6);
@@ -275,20 +293,64 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float gasket = id == 1.0 ? smoothstep(A + 0.009, A + 0.004, length(q.xy)) : 0.0;
   alb = mix(alb, vec3(0.035, 0.034, 0.033), gasket);
 
+  // Lit as the house is: the measured sun, a hard Lambert terminator (the
+  // wall's own shadow edges are crisp, so no wrap and a sharp self-shadow).
+  // The sun's strength is the plate's: sunlit plaster on the house reads
+  // 3.9x its shade, which with the panorama's skylight on that wall puts the
+  // direct sun at about 1.2x the glass's nominal figure.
+  float sunE = uSunE * 1.2;
   float ndl = max(dot(n, uSun), 0.0);
-  float sh = ndl > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 24.0) : 0.0;
+  float sh = ndl > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 64.0) : 0.0;
   float occ = ao(p, n);
-  vec3 diff = alb * (uSunE / PI * ndl * sh + irradiance(n) / PI * occ);
-  // semi-gloss, weathered: a broad sheen and a soft sun highlight
-  float rough = 0.32 + 0.3 * grime + 0.2 * bleach;
+  // The shade side is lit by the sky: the panorama's irradiance at this
+  // normal, its colour taken from the hemisphere above it, so a surface
+  // turned from the sun goes skylight blue, not a flat grey ambient.
+  vec3 Ei = irradiance(n);
+  vec3 Es = irradiance(normalize(n + vec3(0.0, 1.1, 0.0)));
+  vec3 Esky = Es * (dot(Ei, LUMA) / max(dot(Es, LUMA), 1e-4));
+  vec3 amb = mix(Ei, Esky, 0.3) * occ;
+  vec3 sunC = vec3(1.0, 0.96, 0.88);
+  vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
+
+  // Semi-gloss enamel, chalked: the sky's sheen with a roughness-aware
+  // Fresnel and Smith masking, so a rough weathered silhouette does not light
+  // up with a mirror-bright rim of sky.
+  float ndv = max(dot(n, v), 1e-3);
+  float rough = 0.42 + 0.3 * grime + 0.15 * bleach;
+  float a = rough * rough;
+  float F0 = 0.04;
+  float Fr = F0 + (max(1.0 - rough, F0) - F0) * pow(1.0 - ndv, 5.0);
+  // and the chalk's own masking: at grazing a powdery film shows no gloss,
+  // so the silhouette stays the paint's colour, darkening into the plate
+  float Gv = 2.0 * ndv / (ndv + sqrt(a * a + (1.0 - a * a) * ndv * ndv)) * smoothstep(0.04, 0.4, ndv);
   vec3 r = reflect(-v, n);
-  float fres = 0.05 + 0.95 * pow(1.0 - max(dot(n, v), 0.0), 5.0);
-  vec3 spec = env(r, 4.0 + 4.0 * rough) * fres * occ * (1.0 - 0.5 * grime);
+  vec3 spec = env(r, 4.0 + 4.0 * rough) * Fr * Gv * occ * (1.0 - 0.5 * grime) * (1.0 - 0.6 * chalk / 0.09) * 0.6;
+
+  // The sun's highlight. Pipe and rim are drawn and brushed along their
+  // length, and rain has worn them the same way: the lobe is anisotropic,
+  // long along the grain and narrow across it, so on the pole it is a streak
+  // running down the cylinder and on the rim it follows the top curve.
   vec3 h = normalize(uSun + v);
-  float a2 = rough * rough * rough * rough;
-  float dn = max(dot(n, h), 0.0);
-  float ggx = a2 / (PI * pow(dn * dn * (a2 - 1.0) + 1.0, 2.0));
-  spec += vec3(1.0, 0.97, 0.92) * uSunE * ndl * sh * ggx * fres * 0.25;
+  float ndh = max(dot(n, h), 0.0);
+  float vdh = max(dot(v, h), 0.0);
+  vec3 g = grainDir(p, id);
+  float D;
+  if (dot(g, g) > 0.0) {
+    vec3 T = normalize(g - n * dot(g, n) + vec3(1e-5));
+    vec3 B = cross(n, T);
+    // the rim's section is only 13 mm round: a wider lobe across it, so the
+    // highlight lies along its top as a band, not a hairline on the silhouette
+    float at = 0.55 + 0.3 * grime, ab = (id == 1.0 ? 0.13 : 0.075) + 0.08 * grime + 0.04 * bleach;
+    float th = dot(T, h) / at, bh = dot(B, h) / ab;
+    float k = th * th + bh * bh + ndh * ndh;
+    D = 1.0 / (PI * at * ab * k * k);
+  } else {
+    float a2 = a * a;
+    D = a2 / (PI * pow(ndh * ndh * (a2 - 1.0) + 1.0, 2.0));
+  }
+  float Fs = F0 + (1.0 - F0) * pow(1.0 - vdh, 5.0);
+  float Gl = 2.0 * ndl / (ndl + sqrt(a * a + (1.0 - a * a) * ndl * ndl));
+  spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (1.0 - 0.6 * grime) * (1.0 - 0.4 * chalk / 0.09);
   return diff + spec;
 }
 
@@ -431,7 +493,10 @@ void main() {
       t += max(h, 0.0004);
       if (t > t1) break;
     }
-    float cover = hit ? 1.0 : clamp(1.0 - best, 0.0, 1.0);
+    // coverage from the closest approach, ramped over ~1.3 px: about the
+    // plate's own diffusion, so the silhouette goes soft into the photo
+    // the way the house's edges do, and never as a hard stair
+    float cover = hit ? 1.0 : 1.0 - smoothstep(0.25, 1.55, best);
     if (cover > 0.0) {
       float tt = hit ? t : bestT;
       vec3 x = d * tt;
