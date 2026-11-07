@@ -34,7 +34,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    reflected at its crown and its shadow on it, a dark contact band where
 //    the lip holds it, a little waviness, dust and one thumb smudge, which
 //    scatter the sun when it is in the glass;
-//  - the assembly's shadow falls on the photograph through its point map.
+//  - the assembly's shadow falls on the photograph through its point map;
+//  - it is composited with real coverage: a geometry pass classifies every
+//    pixel centre, and wherever that changes from one pixel to the next (its
+//    silhouette, the glass meeting the frame, the hood seen in the glass)
+//    eight rays are traced and shaded across the pixel and resolved
+//    premultiplied over the photo; that edge band alone then takes the
+//    photo's own edge spread and a thin warm halation from bright sky.
 // The shared film kit develops the result.
 //
 // Query: ?aim=yaw,pitch (degrees) holds the mirror still, no reveal;
@@ -492,6 +498,28 @@ vec3 headSeen(vec3 nl) {
   return alb * (E + vec3(1.0, 0.96, 0.88) * uSunE * max(dot(n, uSun), 0.0) * 0.5) / PI;
 }
 
+// How much of the hood a reflected ray r from face-local q meets, over a
+// footprint of spread (rad); xh where it met (or passed closest).
+// gHoodK narrows the footprint for one of several rays across a pixel, so
+// that the pixel's coverage of the hood comes from the rays themselves.
+float gHoodK = 1.0;
+float hoodSeen(vec3 q, vec3 r, float spread, out vec3 xh) {
+  vec3 rl = vec3(dot(r, uX), dot(r, uU), dot(r, uN));
+  float th = 0.003, bestA = 1e9, bestT = th;
+  float sp = max(spread, 5e-5);
+  bool hh = false;
+  for (int i = 0; i < 48; i++) {
+    float h = sdHead(q + rl * th);
+    if (h / th < bestA) { bestA = h / th; bestT = th; }
+    if (h < 0.25 * sp * th) { hh = true; break; }
+    th += max(h, 0.0004);
+    if (th > 0.32) break;
+  }
+  if (!hh) th = bestT;
+  xh = q + rl * th;
+  return hh ? 1.0 : 1.0 - smoothstep(0.25 * sp, 1.55 * sp, bestA);
+}
+
 // spread: the angular footprint of a pixel in the reflection; aa: of the face
 // in metres; both taken in main, where every pixel of the quad runs them
 vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
@@ -526,21 +554,9 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   // not sky: traced against the frame and hood, anti-aliased by its closest
   // pass against this pixel's spread, so the crown of the reflection carries
   // the hood's dark underside, as every real one does.
-  vec3 rl = vec3(dot(r, uX), dot(r, uU), dot(r, uN));
-  float th = 0.003, bestA = 1e9, bestT = th;
-  float sp = max(spread, 2e-4);
-  bool hh = false;
-  for (int i = 0; i < 40; i++) {
-    float h = sdHead(q + rl * th);
-    if (h / th < bestA) { bestA = h / th; bestT = th; }
-    if (h < 0.25 * sp * th) { hh = true; break; }
-    th += max(h, 0.0005);
-    if (th > 0.32) break;
-  }
-  if (!hh) th = bestT;
-  float hoodC = hh ? 1.0 : 1.0 - smoothstep(0.25 * sp, 1.55 * sp, bestA);
+  vec3 xh;
+  float hoodC = hoodSeen(q, r, spread * gHoodK, xh);
   if (hoodC > 0.0) {
-    vec3 xh = q + rl * th;
     const vec2 k = vec2(1.0, -1.0);
     const float e = 0.0008;
     vec3 nl = normalize(k.xyy * sdHead(xh + k.xyy * e) + k.yyx * sdHead(xh + k.yyx * e) + k.yxy * sdHead(xh + k.yxy * e) + k.xxx * sdHead(xh + k.xxx * e));
@@ -668,10 +684,82 @@ vec3 acrylicWall(vec3 p, vec3 n, vec3 v) {
   return mix(vec3(0.02, 0.021, 0.022), c, smoothstep(0.08, 0.4, ndv) * side);
 }
 
+// ---------------------------------------------------------------- coverage
+// the geometry pass's record of a pixel centre: x the distance along its ray,
+// y what it meets (0 the photo, 1..5 the painted parts, 6 the acrylic's wall,
+// 7 the glass, 8 the glass where it shows the hood)
+uniform sampler2D uGeo;
+uniform vec2 uRes;         // render target size
+vec2 geoAt(ivec2 ip) {
+  vec4 g = texelFetch(uGeo, ip, 0);
+  return vec2((g.g * 255.0 * 256.0 + g.b * 255.0) / 65535.0 * 16.0, floor(g.r * 8.0 + 0.5));
+}
+
+// One ray against the assembly, hit or miss, nothing in between: x the
+// distance, y the part (0 for none). Coverage is counted from many of these,
+// never guessed from how close one passed.
+vec2 trace(vec3 d) {
+  vec3 hc = uFace - uN * 0.09;
+  vec2 hs = sphereHit(vec3(0.0), d, hc, A + 0.08);
+  vec2 hp = cylHit(vec3(0.0), d, uPivot, POLE_R + 0.03);
+  float t0 = min(max(hs.x, 0.0), max(hp.x, 0.0));
+  float t1 = max(hs.y, hp.y);
+  if (t1 <= t0) return vec2(0.0);
+  float t = t0;
+  vec2 r = vec2(1e9, 0.0);
+  for (int i = 0; i < 128; i++) {
+    r = sdScene(d * t);
+    if (r.x < 0.05 * uPx * t) return vec2(t, r.y);
+    t += max(r.x, 0.0004);
+    if (t > t1) return vec2(0.0);
+  }
+  // a ray still creeping along a grazing face when the steps run out
+  return r.x < 0.5 * uPx * t ? vec2(t, r.y) : vec2(0.0);
+}
+// what a traced ray sees: the glass where the exact cap is in front (its
+// solid's field is a depth, not a distance, so at grazing the march stops
+// short of the dome; only outside the rim is it the wall), else the paint or
+// the wall, premultiplied by whether it hit at all
+vec4 objectRay(vec3 d, vec2 tr, float spread, float capAA) {
+  if (tr.y < 0.5) return vec4(0.0);
+  vec3 S = uFace - uN * RC;
+  vec2 sh = sphereHit(vec3(0.0), d, S, RC);
+  vec3 Pf = d * sh.x;
+  if (sh.x > 0.0 && length(toLocal(Pf).xy) < A && (tr.y == 6.0 || sh.x < tr.x + 0.003)) return vec4(glass(Pf, d, S, spread, capAA), 1.0);
+  vec3 x = d * tr.x;
+  vec3 n = sdNormal(x);
+  return vec4(tr.y == 6.0 ? acrylicWall(x, n, -d) : paint(x, n, tr.y, -d), 1.0);
+}
+
 void main() {
   vec2 p = vec2(uView.x + vUv.x * uView.z, uView.y + (1.0 - vUv.y) * uView.w);
   vec3 dc = normalize(vec3((p.x - uC.x) / uF, -(p.y - uC.y) / uF, -1.0));
   vec3 d = uR * dc;
+
+  // the exact sphere cap, and its derivatives, here where every pixel of a
+  // quad takes them (inside a branch they would be undefined at the rim)
+  vec3 S = uFace - uN * RC;
+  vec2 sh = sphereHit(vec3(0.0), d, S, RC);
+  vec3 Pf = d * sh.x;
+  float capRho = length(toLocal(Pf).xy);
+  vec3 rCap = reflect(d, normalize(Pf - S));
+  float spread = max(length(dFdx(rCap)), length(dFdy(rCap)));
+  float capAA = max(fwidth(capRho), 1e-5);
+
+#ifdef GEO
+  // the geometry pass: what the pixel centre meets, and how far; on the
+  // glass, whether it shows the hood's underside (that boundary is an edge
+  // as hard as any silhouette)
+  vec2 tr = trace(d);
+  float idc = tr.y;
+  if (tr.y > 0.5 && sh.x > 0.0 && capRho < A && (tr.y == 6.0 || sh.x < tr.x + 0.003)) {
+    vec3 xh;
+    idc = hoodSeen(toLocal(Pf), rCap, spread * 0.3, xh) > 0.5 ? 8.0 : 7.0;
+    tr.x = sh.x;
+  }
+  float tq = floor(clamp(tr.x / 16.0, 0.0, 1.0) * 65535.0 + 0.5);
+  outColor = vec4(idc / 8.0, floor(tq / 256.0) / 255.0, mod(tq, 256.0) / 255.0, 1.0);
+#else
 
   // the photograph
   vec3 col = texture(uPhoto, p / uPhotoSize).rgb;
@@ -697,85 +785,117 @@ void main() {
     }
   }
 
-  // the exact sphere cap, and its derivatives, here where every pixel of a
-  // quad takes them (inside a branch they would be undefined at the rim)
-  vec3 S = uFace - uN * RC;
-  vec2 sh = sphereHit(vec3(0.0), d, S, RC);
-  vec3 Pf = d * sh.x;
-  float capRho = length(toLocal(Pf).xy);
-  vec3 rCap = reflect(d, normalize(Pf - S));
-  float spread = max(length(dFdx(rCap)), length(dFdy(rCap)));
-  float capAA = max(fwidth(capRho), 1e-5);
 
-  // the mirror assembly
-  vec3 hc = uFace - uN * 0.09;
-  vec2 hs = sphereHit(vec3(0.0), d, hc, A + 0.08);
-  vec2 hp = cylHit(vec3(0.0), d, uPivot, POLE_R + 0.03);
-  float t0 = min(max(hs.x, 0.0), max(hp.x, 0.0));
-  float t1 = max(hs.y, hp.y);
-  if (t1 > t0) {
-    float t = t0;
-    float best = 1e9, bestT = t0;
-    // and the closest pass of everything but the acrylic: where the visor's
-    // or the frame's edge crosses the glass, how much of the pixel it covers
-    float bestNF = 1e9, bestNFT = t0;
-    bool hit = false;
-    for (int i = 0; i < 96; i++) {
-      vec3 x = d * t;
-      float nf;
-      float h = sdSceneNF(x, nf).x;
-      float ratio = h / (uPx * t);
-      if (ratio < best) { best = ratio; bestT = t; }
-      float rnf = nf / (uPx * t);
-      if (rnf < bestNF) { bestNF = rnf; bestNFT = t; }
-      if (h < 0.25 * uPx * t) { hit = true; break; }
-      t += max(h, 0.0004);
-      if (t > t1) break;
-    }
-    // coverage from the closest approach, ramped over ~1.3 px: about the
-    // plate's own diffusion, so the silhouette goes soft into the photo
-    // the way the house's edges do, and never as a hard stair
-    float cover = hit ? 1.0 : 1.0 - smoothstep(0.25, 1.55, best);
-    if (cover > 0.0) {
-      float tt = hit ? t : bestT;
-      vec3 x = d * tt;
-      vec2 id = sdScene(x);
-      // the exact sphere cap: it wins over whatever the march found behind
-      // it, and over the acrylic solid wherever its hit lies inside the rim
-      // (the solid's field is a depth, not a distance, so at grazing the
-      // march stops short of the dome; only outside the rim is it the wall)
-      bool onCap = sh.x > 0.0 && capRho < A && (id.y == 6.0 || sh.x < tt + 0.003);
-      // over the glass, the frame or visor takes the part of the pixel its
-      // closest pass covers (the same ramp as the silhouette's), shaded where
-      // it passed
-      float occW = 1.0;
-      vec3 g = vec3(0.0);
-      if (onCap) {
-        g = glass(Pf, d, S, spread, capAA);
-        occW = bestNFT < sh.x ? 1.0 - smoothstep(0.25, 1.55, bestNF) : 0.0;
-        x = d * bestNFT;
-        id = sdScene(x);
-      }
-      vec3 pnt = vec3(0.0);
-      if (occW > 0.0) {
-        vec3 n = sdNormal(x);
-        pnt = id.y == 6.0 ? acrylicWall(x, n, -d) : paint(x, n, id.y, -d);
-      }
-      vec3 obj = mix(g, pnt, occW);
-      // The plate's tooth. The photograph carries its sensor's noise and
-      // its resample's softness at its own pixel pitch, and a render is clean:
-      // the object takes the same, a luminance grain correlated over about
-      // two photo pixels (value noise at the photo's pitch), at the level
-      // measured on the plate's flat sunlit plaster and sky, rising in the
-      // shadows as a sensor's does, so the film's grain lands on both alike.
-      float gl = vnoise(p * 0.62) + vnoise(p * 0.62 + vec2(41.3, 17.9)) - 1.0;
-      vec3 gc = vec3(vnoise(p * 0.5 + 3.7), vnoise(p * 0.5 + 9.1), vnoise(p * 0.5 + 23.3)) - 0.5;
-      float ol = dot(obj, LUMA);
-      obj *= 1.0 + (0.05 + 0.05 * smoothstep(0.2, 0.02, ol)) * gl + 0.025 * gc;
-      col = mix(col, obj, cover);
+  // The assembly, with real coverage. The geometry pass has classified every
+  // pixel centre (what it meets, and how far). Where the centre and its eight
+  // neighbours agree, the pixel lies inside one surface or out in the photo,
+  // and one ray shades it. Where they disagree (a silhouette against the
+  // photo, the glass meeting the frame, the visor over the shell, the pole
+  // past the clamp), the pixel straddles an edge: eight rays across its
+  // area, each traced and shaded on its own, resolved premultiplied, so the
+  // photo shows through exactly the share the object leaves uncovered, and
+  // no colour from either side bleeds into the other's.
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  ivec2 hi = ivec2(uRes) - 1;
+  vec2 g0 = geoAt(ip);
+  bool edge = false;
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      if (i == 0 && j == 0) continue;
+      vec2 gn = geoAt(clamp(ip + ivec2(i, j), ivec2(0), hi));
+      // a different surface, or the same part folding behind itself
+      if (gn.y != g0.y || (g0.y > 0.5 && g0.y < 6.5 && abs(gn.x - g0.x) > 0.025)) edge = true;
     }
   }
-  outColor = vec4(col * uExpo, 1.0);
+  vec4 obj = vec4(0.0);
+  if (edge) {
+    // rotated eight-rooks pattern: eight distinct offsets on either axis, so
+    // an edge at any angle resolves to eight levels
+    const vec2 SS[8] = vec2[8](vec2(1, -3), vec2(-1, 3), vec2(5, 1), vec2(-3, -5), vec2(-5, 5), vec2(-7, -1), vec2(3, 7), vec2(7, -7));
+    float k = uView.z / uRes.x;
+    gHoodK = 0.3;
+    for (int s = 0; s < 8; s++) {
+      vec2 ps = p + SS[s] / 16.0 * k;
+      vec3 ds = uR * normalize(vec3((ps.x - uC.x) / uF, -(ps.y - uC.y) / uF, -1.0));
+      obj += objectRay(ds, trace(ds), spread, capAA);
+    }
+    obj /= 8.0;
+  } else if (g0.y > 0.5) {
+    // inside one surface: its stored depth, polished by a few steps
+    vec2 tr = vec2(g0.x, g0.y);
+    if (g0.y > 6.5) tr = vec2(sh.x, 6.0);
+    else for (int i = 0; i < 4; i++) tr.x += sdf(d * tr.x);
+    obj = objectRay(d, tr, spread, capAA);
+  }
+  if (obj.a > 0.0) {
+    // The plate's tooth. The photograph carries its sensor's noise and
+    // its resample's softness at its own pixel pitch, and a render is clean:
+    // the object takes the same, a luminance grain correlated over about
+    // two photo pixels (value noise at the photo's pitch), at the level
+    // measured on the plate's flat sunlit plaster and sky, rising in the
+    // shadows as a sensor's does, so the film's grain lands on both alike.
+    float gl = vnoise(p * 0.62) + vnoise(p * 0.62 + vec2(41.3, 17.9)) - 1.0;
+    vec3 gc = vec3(vnoise(p * 0.5 + 3.7), vnoise(p * 0.5 + 9.1), vnoise(p * 0.5 + 23.3)) - 0.5;
+    float ol = dot(obj.rgb, LUMA) / obj.a;
+    obj.rgb *= 1.0 + (0.05 + 0.05 * smoothstep(0.2, 0.02, ol)) * gl + 0.025 * gc;
+  }
+  // premultiplied over
+  col = col * (1.0 - obj.a) + obj.rgb;
+  // alpha carries the coverage, and whether this pixel straddles an edge,
+  // for the optics pass
+  outColor = vec4(col * uExpo, (edge ? 0.5 : 0.0) + 0.49 * obj.a);
+#endif
+}`;
+
+// The optics pass: only the band the scene pass flagged as straddling an
+// edge. The photograph's own edges (the crossing's poles and crossbuck against
+// the sky) are measured: a one-pixel step in the plate, which its resample
+// and the texture filter spread to about 0.6 photo px (sigma) on screen. A
+// supersampled edge is a one-render-pixel box; this adds the rest, a small
+// Gaussian, so the object's outline has the plate's MTF. And where paint
+// meets bright sky, a little of that sky spills into it, warm (the light the
+// emulsion scatters at an edge, red layer first): a thin halation inside the
+// outline that dissolves it into the sky the way the real poles are.
+const OPTICS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uIn;
+uniform float uSig;   // edge spread to add, render px (sigma)
+uniform float uHalR;  // halation reach, render px (sigma)
+uniform float uHal;   // halation strength
+uniform vec3 uHalC;   // its tint
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+float cover(float a) { return clamp((a >= 0.495 ? a - 0.5 : a) / 0.49, 0.0, 1.0); }
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  ivec2 hi = textureSize(uIn, 0) - 1;
+  vec4 c0 = texelFetch(uIn, ip, 0);
+  bool band = false;
+  for (int j = -1; j <= 1; j++)
+    for (int i = -1; i <= 1; i++)
+      if (texelFetch(uIn, clamp(ip + ivec2(i, j), ivec2(0), hi), 0).a >= 0.495) band = true;
+  if (!band) { outColor = vec4(c0.rgb, 1.0); return; }
+  vec3 acc = vec3(0.0);
+  float ws = 0.0, halo = 0.0, hw = 0.0;
+  float is2 = 0.5 / max(uSig * uSig, 1e-4), ih2 = 0.5 / max(uHalR * uHalR, 1e-4);
+  for (int j = -3; j <= 3; j++) {
+    for (int i = -3; i <= 3; i++) {
+      vec4 cn = texelFetch(uIn, clamp(ip + ivec2(i, j), ivec2(0), hi), 0);
+      float r2 = float(i * i + j * j);
+      float w = r2 <= 4.0 ? exp(-r2 * is2) : 0.0;
+      acc += cn.rgb * w;
+      ws += w;
+      // the bright photo round the edge (sky, a lit wall), not the object
+      float L = dot(cn.rgb, LUMA);
+      float wh = exp(-r2 * ih2);
+      halo += wh * (1.0 - cover(cn.a)) * L * smoothstep(0.04, 0.15, L);
+      hw += wh;
+    }
+  }
+  vec3 col = acc / ws;
+  col += uHalC * uHal * cover(c0.a) * halo / hw;
+  outColor = vec4(col, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -900,6 +1020,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   const sceneP = program(gl, VERT, SCENE);
+  const geoP = program(gl, VERT, SCENE.replace("precision highp float;", "#define GEO\nprecision highp float;"));
+  const opticsP = program(gl, VERT, OPTICS);
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
 
@@ -953,8 +1075,11 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   // ---------------------------------------------------------------- layout
   const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2, rw: 2, rh: 2 };
   const V = { x: 0, y: 0, w: PW, h: PH };
+  let geoT = null;
   let sceneT = null;
+  let opticsT = null;
   let filmT = null;
+  let linear = false;
   let scale = 1;
   let lastBox = null;
   const layout = (W, H, dpr) => {
@@ -997,12 +1122,15 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     L.ph = Math.max(2, Math.round(L.h * dpr));
     L.rw = Math.max(2, Math.round(L.pw * scale));
     L.rh = Math.max(2, Math.round(L.ph * scale));
-    for (const t of [sceneT, filmT]) freeTarget(gl, t);
+    for (const t of [geoT, sceneT, opticsT, filmT]) freeTarget(gl, t);
+    geoT = target(gl, L.rw, L.rh, false);
     sceneT = target(gl, L.rw, L.rh, floatOk);
-    if (!sceneT.ok) {
+    linear = floatOk && sceneT.ok;
+    if (!linear) {
       freeTarget(gl, sceneT);
       sceneT = target(gl, L.rw, L.rh, false);
     }
+    opticsT = target(gl, L.rw, L.rh, linear);
     filmT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
     dirty = true;
@@ -1080,8 +1208,6 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
-    gl.useProgram(sceneP.p);
-    const u = sceneP.u;
     const yaw = aim[0] + sway[0];
     const pitch = aim[1] + sway[1];
     const n = axis(yaw, pitch);
@@ -1091,33 +1217,57 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     const hzY = norm([n[0], 0, n[2]]);
     const hinge = [pivot[0] + hzY[0] * ARM, pivot[1] + POLE_DROP, pivot[2] + hzY[2] * ARM];
     const face = add(hinge, n, HINGE);
-    gl.uniform4f(u.uView, V.x, V.y, V.w, V.h);
-    gl.uniform2f(u.uPhotoSize, PW, PH);
-    gl.uniform1f(u.uF, scene.f);
-    gl.uniform2f(u.uC, scene.c[0], scene.c[1]);
-    gl.uniformMatrix3fv(u.uR, false, Rmat);
-    gl.uniform3fv(u.uM, M);
-    gl.uniform3fv(u.uFace, face);
-    gl.uniform3fv(u.uN, n);
-    gl.uniform3fv(u.uU, up);
-    gl.uniform3fv(u.uX, xr);
-    gl.uniform3fv(u.uPivot, pivot);
-    gl.uniform3fv(u.uHinge, hinge);
-    gl.uniform3fv(u.uHz, hzY);
-    gl.uniform1f(u.uGround, ground);
-    gl.uniform3fv(u.uSun, SUN);
-    gl.uniform1f(u.uSunE, 3.6);
-    gl.uniform1f(u.uSunDisc, 1.0);
-    gl.uniform3fv(u.uSH, shFlat);
-    gl.uniform2f(u.uDist, Math.log2(scene.dist[0]), Math.log2(scene.dist[1]));
-    gl.uniform1f(u.uEnvW, scene.env[0]);
-    gl.uniform1f(u.uExpo, 2 ** expoStops);
-    gl.uniform1f(u.uPx, V.w / L.rw / scene.f);
-    bindTex(0, photo, u.uPhoto);
-    bindTex(1, envT, u.uEnv);
-    bindTex(2, envD, u.uEnvD);
-    bindTex(3, aux, u.uAux);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+    // three passes: what each pixel centre meets; the scene, supersampled
+    // where that changes; the plate's optics on the edge band
+    for (const [P, T] of [
+      [geoP, geoT],
+      [sceneP, sceneT],
+    ]) {
+      gl.useProgram(P.p);
+      const u = P.u;
+      gl.uniform4f(u.uView, V.x, V.y, V.w, V.h);
+      gl.uniform2f(u.uPhotoSize, PW, PH);
+      gl.uniform1f(u.uF, scene.f);
+      gl.uniform2f(u.uC, scene.c[0], scene.c[1]);
+      gl.uniformMatrix3fv(u.uR, false, Rmat);
+      gl.uniform3fv(u.uM, M);
+      gl.uniform3fv(u.uFace, face);
+      gl.uniform3fv(u.uN, n);
+      gl.uniform3fv(u.uU, up);
+      gl.uniform3fv(u.uX, xr);
+      gl.uniform3fv(u.uPivot, pivot);
+      gl.uniform3fv(u.uHinge, hinge);
+      gl.uniform3fv(u.uHz, hzY);
+      gl.uniform1f(u.uGround, ground);
+      gl.uniform3fv(u.uSun, SUN);
+      gl.uniform1f(u.uSunE, 3.6);
+      gl.uniform1f(u.uSunDisc, 1.0);
+      gl.uniform3fv(u.uSH, shFlat);
+      gl.uniform2f(u.uDist, Math.log2(scene.dist[0]), Math.log2(scene.dist[1]));
+      gl.uniform1f(u.uEnvW, scene.env[0]);
+      gl.uniform1f(u.uExpo, 2 ** expoStops);
+      gl.uniform1f(u.uPx, V.w / L.rw / scene.f);
+      bindTex(0, photo, u.uPhoto);
+      bindTex(1, envT, u.uEnv);
+      bindTex(2, envD, u.uEnvD);
+      bindTex(3, aux, u.uAux);
+      if (P === sceneP) bindTex(4, geoT.tex, u.uGeo);
+      gl.uniform2f(u.uRes, L.rw, L.rh);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
+      gl.viewport(0, 0, L.rw, L.rh);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+    }
+    gl.useProgram(opticsP.p);
+    const o = opticsP.u;
+    // render px per photo px; the photo's edge is ~0.6 photo px (sigma) on
+    // screen, a supersampled one a 1 px box (0.29)
+    const k = L.rw / V.w;
+    gl.uniform1f(o.uSig, Math.sqrt(Math.max((0.6 * k) ** 2 - 0.29 ** 2, 0.01)));
+    gl.uniform1f(o.uHalR, Math.max(0.9, 1.1 * k));
+    gl.uniform1f(o.uHal, 0.3);
+    gl.uniform3f(o.uHalC, 1.0, 0.62, 0.38);
+    bindTex(0, sceneT.tex, o.uIn);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, opticsT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
@@ -1125,7 +1275,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   let grainSeed = 0;
   const develop = (fade) => {
     film.render(
-      sceneT.tex,
+      opticsT.tex,
       {
         ...FILM_PRESETS.summer,
         // the scan carries its own grade; the film adds the optics
@@ -1139,8 +1289,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
         halationThreshold: 1.4,
         // wires in the glass take the sky's halo, not a red fringe of their own
         halationLocal: 1,
-        input: floatOk && sceneT.ok ? "linear" : "srgb",
-        headroom: floatOk && sceneT.ok ? 0.6 : 1.4,
+        input: linear ? "linear" : "srgb",
+        headroom: linear ? 0.6 : 1.4,
         grainSeed,
       },
       filmT.fbo,
@@ -1256,9 +1406,9 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     destroy() {
       host.removeEventListener("keydown", onKey);
       film.destroy();
-      for (const t of [sceneT, filmT]) freeTarget(gl, t);
+      for (const t of [geoT, sceneT, opticsT, filmT]) freeTarget(gl, t);
       for (const t of [photo, envT, envD, aux]) gl.deleteTexture(t);
-      for (const pr of [sceneP, blit]) gl.deleteProgram(pr.p);
+      for (const pr of [sceneP, geoP, opticsP, blit]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       stage.destroy();
