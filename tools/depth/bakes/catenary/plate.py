@@ -468,6 +468,10 @@ for mm in meta:
         span=w.Lspan,
         exit=w.sx,
         pts=[[round(float(x), 2), round(float(y), 2)] for x, y in pts],
+        # The fitted catenary itself, so the page can draw the rest shape
+        # analytically between the nodes (pts are it sampled at linspace(0, span, 97)).
+        cat=dict(P0=[float(v) for v in w.P0], t=[float(v) for v in w.t], n=[float(v) for v in w.n],
+                 a0=float(w.a0), a1=float(w.a1), g=float(w.g), c=float(w.c), m=float(w.m)),
         w=[round(v, 3) for v in mm["knots"]["w"]],
         sig=[round(v, 3) for v in mm["knots"]["sig"]],
         o=[round(v, 3) for v in mm["knots"]["o"]],

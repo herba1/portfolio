@@ -1,7 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createPluckSound } from "./pluck";
-import { NODES, createWorld, locate, offsetAt, sampleY } from "./strings";
+import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./strings";
 
 // Catenary: the overhead wires of a Japanese railway mast, photographed from
 // underneath against summer cumulus, are real strings.
@@ -24,10 +24,12 @@ import { NODES, createWorld, locate, offsetAt, sampleY } from "./strings";
 // run out, reflect at the insulators upside down and ring down into the low
 // modes. The supports are not rigid: each structure (the mast, the far pole)
 // is a stiff damped mass the wires pull on, so a hard pluck shows faintly in
-// the neighbours. A slow, zero-mean breeze keeps them alive at rest. The
+// the neighbours. A slow, zero-mean breeze keeps them alive at rest. A hand
+// is a pad, not a point, so a pull rounds into a crown instead of a V. The
 // wires are drawn analytically (erf of a blurred box, the measured shade) in
-// linear light at device resolution, then the frame is developed through the
-// shared film kit (summer).
+// linear light at device resolution, along the fitted catenary evaluated
+// exactly plus a cubic through the nodes' displacement, then the frame is
+// developed through the shared film kit (summer).
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
@@ -338,7 +340,9 @@ export async function createCatenary(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  const SUB = 4; // render samples per node segment
+  // Render samples per node segment: ~2.5 device px apart on the feeder, so
+  // the strip follows the curve, not a polyline.
+  const SUB = 8;
   const STRIDE = 9;
   const maxVerts = (NODES * SUB + 2) * 2;
   const wireBuf = gl.createBuffer();
@@ -429,7 +433,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     if (!cg) return;
     w.caught = null;
     // How far the string was drawn, in device px: the sound follows it.
-    const drawn = Math.abs(sampleY(w, cg.j)) * map.k;
+    const drawn = Math.abs(sampleY(w, cg.j) * w.lead(cg.j * w.ds)) * map.k;
     sound.pluck({ wire: w.index, drawn, at: cg.j / w.N, f1: w.tune.f1, speed });
   };
 
@@ -438,19 +442,22 @@ export async function createCatenary(host, { embedded = false } = {}) {
     for (const w of wires) {
       const hit = locate(w, x, y);
       if (!hit) continue;
-      const jMin = 0.6;
+      const jMin = Math.max(0.6, w.jGrip);
       const inRun = hit.j > jMin && hit.j < w.jExit - 0.3;
       if (w.caught) {
-        // Slide along with the hand; let go past the reach.
+        // Slide along with the hand; let go past the reach. The hand sets
+        // where the wire is drawn; the string under a drawing ease (the
+        // feeder's clamp) is pulled that much further.
         w.caught.j = clamp(hit.j, jMin, w.jExit - 0.3);
         const off = offsetAt(w, w.caught.j, x, y);
         const reach = reachOf(w);
+        const gain = 1 / Math.max(0.2, w.lead(w.caught.j * w.ds));
         if (Math.abs(off) > reach || !inRun) {
-          w.caught.target = clamp(off, -reach, reach);
+          w.caught.target = clamp(off, -reach, reach) * gain;
           release(w, Math.hypot(p.vx, p.vy));
           // The hand is now past the wire: only coming back crosses it.
           w.prevSide = off;
-        } else w.caught.target = off;
+        } else w.caught.target = off * gain;
         continue;
       }
       if (!p.down || !inRun) {
@@ -459,7 +466,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       }
       const crossed = w.prevSide != null && Math.sign(w.prevSide) !== Math.sign(hit.side) && hit.dist < reachOf(w) * 3;
       if ((isDown && hit.dist < catchRadius()) || crossed) {
-        w.caught = { j: hit.j, target: offsetAt(w, hit.j, x, y) };
+        w.caught = { j: hit.j, target: offsetAt(w, hit.j, x, y) / Math.max(0.2, w.lead(hit.j * w.ds)) };
         sound.wake();
       }
       w.prevSide = hit.side;
@@ -490,9 +497,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     const tAfter = holdPull ? 0 : num("t", 0.18);
     const settle = () => {
       const jc = clamp(at * w.jExit, 1, w.N - 1);
-      const A = reachOf(w) * amp;
-      for (let j = 0; j <= w.N; j++) w.y[j] = j <= jc ? (A * j) / jc : (A * (w.N - j)) / (w.N - jc);
-      w.v.fill(0);
+      pullShape(w, jc, reachOf(w) * amp);
       let t = 0;
       while (t < tAfter) {
         step(STEP);
@@ -534,17 +539,11 @@ export async function createCatenary(host, { embedded = false } = {}) {
       const ho = w.def.handoff;
       for (let js = 0; js <= jEnd * SUB; js++) {
         const j = js / SUB;
-        const i = Math.min(w.N - 1, Math.floor(j));
-        const t = j - i;
-        const rx = w.px[i] + (w.px[i + 1] - w.px[i]) * t;
-        const ry = w.py[i] + (w.py[i + 1] - w.py[i]) * t;
-        let nxx = w.nx[i] + (w.nx[i + 1] - w.nx[i]) * t;
-        let nyy = w.ny[i] + (w.ny[i + 1] - w.ny[i]) * t;
-        const nl = Math.hypot(nxx, nyy) || 1;
-        nxx /= nl;
-        nyy /= nl;
-        const yy = sampleY(w, j);
         const s = j * w.ds;
+        // Rest: the catenary itself at s; displacement: a cubic through the
+        // simulation nodes, eased in where the photograph keeps its wire.
+        const [rx, ry, nxx, nyy] = w.rest(s);
+        const yy = sampleY(w, j) * w.lead(s);
         // Fitted widths read ~0.6 px wide of the photograph at display size.
         const hw = ((w.knot(w.def.w, s) - WIDTH_TRIM) / 2) * k;
         const sig = w.knot(w.def.sig, s) * k;
@@ -587,10 +586,10 @@ export async function createCatenary(host, { embedded = false } = {}) {
       // Insulators that ride the wire move with it.
       for (const r of w.def.riders) {
         const jc = r.sc / w.ds;
-        const yy = sampleY(w, jc);
-        const i = Math.floor(jc);
-        const dx = w.nx[i] * yy;
-        const dy = w.ny[i] * yy;
+        const yy = sampleY(w, jc) * w.lead(r.sc);
+        const [, , rnx, rny] = w.rest(r.sc);
+        const dx = rnx * yy;
+        const dy = rny * yy;
         const [x0, y0, x1, y1] = r.box;
         const [ax, ay, aw, ah] = r.atlas;
         const corners = [
@@ -641,7 +640,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       let near = null;
       for (const w of wires) {
         const hit = locate(w, x, y);
-        if (hit && hit.dist < catchRadius() * 1.4 && hit.j > 0.6 && hit.j < w.jExit - 0.3) near = w;
+        if (hit && hit.dist < catchRadius() * 1.4 && hit.j > Math.max(0.6, w.jGrip) && hit.j < w.jExit - 0.3) near = w;
       }
       if (near !== hoverWire) {
         hoverWire = near;
