@@ -40,7 +40,11 @@ import { readWebm } from "./webm";
 // half-way rope is already bent, pulled left at two rows through the
 // windows, so along each row the slope swings above 1/v (the train folded
 // back on itself: mirrored X-shaped windows) and below it (doors and
-// pillars drawn out), and the bends drift slowly. Press anywhere and the rope
+// pillars drawn out), and the bends drift slowly. The rope also sets each
+// row's moment (ROW_T): a row whose rope is pulled left is later, so the
+// front cuts through the end of the train along a curve that follows the
+// rope, and at the rest moment (CLOCK0, the tail in the frame) the train is a
+// carved silhouette with the empty station showing through it. Press anywhere and the rope
 // comes to you, held most strongly at the row you hold, so a drag bends the
 // local slope above 1/v (the train mirrored) on one side of the hand and
 // below it (compressed) on the other; held, the whole front steepens. Let go
@@ -51,7 +55,7 @@ import { readWebm } from "./webm";
 // undercarriage is held in rigid strips of constant time, so it never
 // streaks.
 //
-// Query (stills): ?t=seconds holds the clock; ?front=flat shows the clip as
+// Query (stills): ?t=seconds holds the clock (the hero is ?t=9.15); ?front=flat shows the clip as
 // shot; ?slit=x,lean sets the resting front; ?depth (or ?delay)=seconds also
 // sets the ramp's width (deeper is wider, still matched); ?bend=y,x;... sets
 // the rest pose, pulling the rope near row y to x (0..1 of the print), in
@@ -311,11 +315,29 @@ const REST_BENDS = [
   { y: 0.6, x: 0.38, ax: 0.045, ay: 0.03, period: 17.5 },
 ];
 const BEND_W = 0.2; // the rope's reach above and below a bend, print heights
+// The rope also sets each row's moment. Every row is offset in time by
+// ROW_T seconds per print width that its rope stands right of the line's
+// centre: where the rope is pulled left the row is later, where it lies right
+// the row is earlier. The bent rows and the rows beside them sit 0.3 to 2 s
+// apart, so the time front cuts through the train's tail along a curve that
+// follows the rope: some rows already show the empty station where the train
+// has gone, others still carry carriage, folded into mirrored windows at the
+// edge. Drag the rope and that boundary moves with it.
+const ROW_T = 6;
+// the clock at rest, and the still: the moment the tail is in the frame
+const CLOCK0 = 9.15;
+// Between the tail leaving every row (~9.85 s) and the nose reaching the
+// front (~2.25 s, across the loop's seam) the rest pose is only the empty
+// station, which is one still plate: the clock runs through it SKIP times
+// faster, so nothing visible is skipped and the loop is mostly train.
+const EMPTY = [9.85, 2.25];
+const SKIP = 6;
 // the red stripe's lower edge, source rows of the print at its left and right
 const CAP = [616, 581];
 // 0 -> 1 with slope 1 between the knees and a quadratic hand-off at the ends
 const soft0 = (s) => (s <= -KNEE ? 0 : s >= KNEE ? s : ((s + KNEE) * (s + KNEE)) / (4 * KNEE));
 const ramp = (s) => soft0(s) - soft0(s - 1);
+const smooth = (x) => (x <= 0 ? 0 : x >= 1 ? 1 : x * x * (3 - 2 * x));
 // the train's typical speed, px per second of the source
 const trainSpeed = (meta) => {
   const v = meta.v.map((x) => Math.abs(x)).filter((x) => x > 0.5).sort((a, b) => a - b);
@@ -534,11 +556,12 @@ export async function createSlitScan(host, { embedded = false } = {}) {
       const k = 1 / (1 - m) - 2;
       const g0 = (1 - m) / m;
       const g1 = m / (1 - m);
+      const rowT = flat ? 0 : ROW_T * (curve[j] - x0);
       const jr = j * MW;
       for (let i = 0; i < MW; i++) {
         const s = ((i + 0.5) / MW - a) / span;
         const g = s <= 0 ? s * g0 : s >= 1 ? 1 + (s - 1) * g1 : s / (k * (1 - s) + 1);
-        field[jr + i] = depth * ramp(g);
+        field[jr + i] = depth * ramp(g) + rowT;
       }
     }
   };
@@ -584,7 +607,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   let ready = false;
   let on = 0; // time field eased in (ease-out) once the ring is complete
   let onT = 0;
-  let clock = holdT ?? 0;
+  let clock = holdT ?? CLOCK0;
   const held = holdT != null;
   if (held) on = onT = 1;
 
@@ -668,7 +691,14 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   let breath = 0;
   const frame = (dt) => {
     if (!L) return;
-    if (!held) clock = (clock + dt) % LOOP;
+    // the clock waits for the ring and for the front to ease in, so the first
+    // whole picture is the rest moment
+    if (!held && ready && onT >= 1) {
+      const span = LOOP - EMPTY[0] + EMPTY[1];
+      const u = (clock - EMPTY[0] + LOOP) % LOOP;
+      const w = u < span ? smooth(u / 0.3) * smooth((span - u) / 0.3) : 0;
+      clock = (clock + dt * (1 + (SKIP - 1) * w)) % LOOP;
+    }
     if (ready && breathing) {
       // the rest pose drifts, and the rope rides along with it
       breath += dt * on;
