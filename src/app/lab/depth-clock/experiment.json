@@ -1,6 +1,6 @@
 {
   "title": "Depth Clock",
-  "description": "Roman stone pines from straight below, their trunks rising from every edge to the zenith, and the time set very large in the open well of air between them and the cumulus. The crowns overlap the figures because the figures really sit behind them, and the cloud drifts behind the figures: the photo is split by its depth into trees and a plane for the time, the matte cut down to single needles, a second capture's fair-weather cumulus is set behind them under the same sun, and every plane moves by its own parallax as you tilt. The figures are pale and sky-lit, never white, and bleed a little light into the air as a diffusion filter would; the whole frame is developed like daylight negative film. The minutes tick over with a small roll.",
+  "description": "Tall conifers from straight below, their trunks rising from every edge to a cobalt zenith, and the time set very large across the open well of air between them and the cumulus. The crowns come in over the ends of the figures and dip their lowest needles into their tops because the figures really sit behind them, and the cloud drifts behind the figures, through the counters of the 0 and the 4: the photo is taken back to scene light, split by its depth into trees and a plane for the time, the matte cut down to single needles, fair-weather cumulus from a second capture is set behind them under the same low sun, and every plane moves by its own parallax as you tilt. The figures are pale and sky-lit, never white, and bleed a little light into the air as a diffusion filter would; the whole frame is developed like daylight negative film. The minutes tick over with a small roll.",
   "tags": ["WebGL", "Depth", "Photography", "Type"],
   "status": "draft",
   "createdAt": "2026-11-06T20:00:00.000Z",
@@ -16,18 +16,18 @@
   ],
   "sources": [
     {
-      "url": "https://polyhaven.com/a/piazza_martin_lutero",
-      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k/piazza_martin_lutero_16k.hdr",
-      "author": "Greg Zaal, Rico Cilliers",
-      "licence": "CC0",
-      "note": "The pines. Zenith view straight up (pitch -90, yaw 25) through a stereographic lens (132 degrees across a centred frame, shifted 0.12 frame widths toward the open sky) from the 16k HDRI, scene-linear (shoot.py); depth by Depth Anything V2; matte by unmixing each pixel between a fitted sky and the local foreground colour (bake.py)."
+      "url": "https://unsplash.com/photos/looking-up-at-tall-trees-and-blue-sky-ixbaI3YQIeI",
+      "file": "https://images.unsplash.com/photo-1750047265862-382eebbad476?w=4000&h=4000&fit=max&q=90&fm=jpg",
+      "author": "Troy Olson (@city2forest)",
+      "licence": "Unsplash License",
+      "note": "The conifers, Farragut State Park, Idaho: a phone ultra-wide pointed straight up (4000 x 3000). Taken back to scene-linear light with the edit's vignette partly lifted and its contrast eased, and modelled as a rectilinear camera of about 108 degrees centred on the trunks' vanishing point (plate.py); depth by Depth Anything V2 Small (tools/depth/depth_hr.py); matte by unmixing each pixel between the local sky, found by colour and depth in the gaps between needles, and the local foreground colour (bake.py)."
     },
     {
       "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
-      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
       "author": "Greg Zaal (sky edits: Jarod Guest)",
       "licence": "CC0",
-      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky), reprojected through the pines' own stereographic zenith camera with the dome turned so its sun sits on the pines' sun (elevation 24, azimuth 36), left unspun about that axis, which already sets the cumulus in the open well; clear blue matched to the pines' sky, cloud held under its real light with a soft shoulder so nothing clips (bake_clouds.py, CLOUD=0.6 KNEE=0.42 LIMIT=0.74)."
+      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky) at 16k, reprojected through the conifers' own camera with the dome turned so its sun sits on theirs (elevation 20, past the frame's lower right corner) and spun -30 degrees about that axis, which sends a cloud behind the figures and up the well; clear blue matched to the conifers' cobalt, cloud held under its real light with a soft shoulder so nothing clips (bake_clouds.py, SPIN=-30 CLOUD=0.65 KNEE=0.3 LIMIT=0.8 SHADE=0.15)."
     }
   ]
 }

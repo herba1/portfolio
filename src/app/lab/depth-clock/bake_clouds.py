@@ -1,17 +1,21 @@
 # Bake the depth-clock sky plane from a Poly Haven pure-sky HDRI.
-#   DEP0=0.07 python3 -I bake_clouds.py kloofendal_48d_partly_cloudy_puresky_8k.hdr public/lab/depth-clock 0
+#   python3 -I bake_clouds.py kloofendal_48d_partly_cloudy_puresky_16k.hdr public/lab/depth-clock -30
 #
-# The trees come from piazza_martin_lutero (shoot.py, bake.py), whose own sky
-# is a clean clear blue. This puts fair-weather cumulus behind them instead:
-#   1. the cloud HDRI is reprojected through the trees' own camera (shoot.py:
-#      straight up, stereographic, shifted toward the open sky), so the sky
-#      sits at infinity exactly where the trees' sky did, and the cumulus
-#      foreshortens toward the horizon ring the way the trunks do;
-#   2. the cloud dome is turned so its sun lands exactly on the pines' sun
-#      (azimuth and elevation, below the frame's lower edge), so the cloud's
-#      lit flanks face the lit bark; SPIN turns the clouds about that sun axis,
-#      which picks the composition without moving the light;
-#   3. the clear blue is matched to the pines' seen sky (per channel), while
+# The trees are Troy Olson's conifers (plate.py, bake.py), whose own sky is a
+# clean clear cobalt. This puts fair-weather cumulus behind them instead:
+#   1. the cloud HDRI (the 16k, so the cloud is drawn finer than the frame,
+#      never magnified to it) is reprojected through the trees' own camera
+#      (plate.py: straight up, rectilinear ultra-wide, centred on the trunks'
+#      vanishing point), so the sky sits at infinity exactly where the trees'
+#      sky did, and the cumulus stretches toward the frame's edges the way the
+#      trunks do;
+#   2. the cloud dome is turned so its sun lands on the conifers' sun (low,
+#      past the frame's lower right edge: the bark and the crowns facing that
+#      way are lit, the far side is in silhouette, and the sky pales toward
+#      it), so the cloud's lit flanks face the lit bark; SPIN turns the clouds
+#      about that sun axis, which picks the composition without moving the
+#      light;
+#   3. the clear blue is matched to the conifers' seen sky (per channel), while
 #      cloud is matched in light only, never tinted blue, and its sunlit side
 #      takes the same warm sun the numerals use;
 #   4. the cloud is held a little under its real light and a soft shoulder
@@ -23,13 +27,16 @@ import numpy as np, cv2
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import shoot  # noqa: E402  the trees' camera
+import plate  # noqa: E402  the trees' camera
 
 src, out = sys.argv[1], sys.argv[2]
 SPIN = float(sys.argv[3]) if len(sys.argv) > 3 else 0.0
-SLUG = os.environ.get('SLUG', 'pines-zenith-stereo')
-PINES_SUN = (24.2, 35.9)  # piazza_martin_lutero's sun, elevation / azimuth (sun_dir on its 4k HDRI)
-W, H = shoot.W, shoot.H
+SLUG = os.environ.get('SLUG', 'conifers-zenith')
+# The conifers' sun, elevation / azimuth in plate.py's world (azimuth 90 is
+# image right, 0 image down): read off the lit bark and the paling sky, and
+# low enough that its glare stays past the frame's corner.
+PLATE_SUN = (20.0, 60.0)
+W, H = plate.W, plate.H
 ENC = 2.0
 PICKS = '/tmp/claude-0/imgs/picks/'
 
@@ -56,19 +63,22 @@ def sun_dir(eq):
 
 eq = cv2.imread(src, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32)
 lat, lon = sun_dir(eq)
-plat, plon = PINES_SUN
-print('cloud sun: elevation %.1f, azimuth %.1f; pines sun: elevation %.1f, azimuth %.1f' % (lat, lon, plat, plon))
+plat, plon = PLATE_SUN
+print('cloud sun: elevation %.1f, azimuth %.1f; plate sun: elevation %.1f, azimuth %.1f' % (lat, lon, plat, plon))
 a, b = dir_of(plat, plon), dir_of(lat, lon)
 R = axis_angle(b, np.radians(SPIN)) @ axis_angle(np.cross(a, b), np.arccos(np.clip(a @ b, -1, 1)))
 assert np.allclose(R @ a, b, atol=1e-6)
-sky = shoot.render(eq, R=R)
+# the 16k is finer than the frame needs at its centre: take the excess off
+# before resampling, so the cloud's edges never alias
+eq = cv2.GaussianBlur(eq, (0, 0), 0.7)
+sky = plate.render(eq, R=R)
 del eq
 sky = np.maximum(sky, 0)
 
-# Reference: the pines' own seen sky (bake.py's sky core).
+# Reference: the conifers' own seen sky (bake.py's sky core).
 ref = cv2.imread(PICKS + SLUG + '-linear.hdr', cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32)
 dep = cv2.imread(PICKS + SLUG + '-depth.png', cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
-DEP0 = float(os.environ.get('DEP0', 0.07))  # as bake.py
+DEP0 = float(os.environ.get('DEP0', 0))  # as bake.py
 dep = np.clip((dep - DEP0) / (1 - DEP0), 0, 1)
 refCore = cv2.erode((dep < 0.07).astype(np.uint8), np.ones((17, 17), np.uint8)).astype(bool)
 refCore &= (ref[..., 2] > ref[..., 1] * 1.15) & (ref[..., 1] > ref[..., 0])
@@ -89,32 +99,36 @@ gc = np.median(ref[refCore], 0) / np.median(sky[clear], 0)  # clear blue, per ch
 # cumulus is 3-4x the blue around it, which on film leaves nothing above it
 # for the numerals. Held down, the cloud keeps its skylit undersides and the
 # pale figures stay the brightest thing in the air.
-CLOUD = float(os.environ.get('CLOUD', 0.6))
+CLOUD = float(os.environ.get('CLOUD', 0.65))
 gl = CLOUD * float(np.median(ref[refCore] @ LUMA) / np.median(sky[clear] @ LUMA))
 print('clear gain', gc.round(3), 'light gain %.3f' % gl)
 # Which side of the cloud faces the sun: brighter than the cloud's median.
 Ls = sky @ LUMA
 cl = Ls[w > 0.6]
 lit = np.clip((Ls - np.median(cl)) / max(np.percentile(cl, 99) - np.median(cl), 1e-4), 0, 1)
-# Clear blue takes the pines' sky colour; cloud keeps its own, except that its
+# Clear blue takes the conifers' sky colour; cloud keeps its own, except that its
 # shadowed side is lit by that same blue sky, so it takes part of its colour
-# (otherwise it reads mauve against the cyan-leaning blue).
-SHADE = 0.45
+# (otherwise it reads mauve against the cyan-leaning blue). The conifers'
+# cobalt is so deep (its red is a tenth of the cloud sky's) that a large share
+# turns the cloud cyan: a little is enough to set its shade in the same air.
+SHADE = float(os.environ.get('SHADE', 0.15))
 k = 1 - w * (1 - SHADE * (1 - lit))  # share of the per-channel (sky colour) gain
 lgc = np.log(gc / (gc @ LUMA))  # the colour part of gc, light removed
 gain = gl ** w[..., None] * (gc @ LUMA) ** (1 - w[..., None]) * np.exp(lgc[None, None, :] * k[..., None])
 sky = sky * gain
-# ... and its sunlit side takes the pines' warm sun.
+# ... and its sunlit side takes the plate's warm sun.
 sun = np.array([1.0, 0.975, 0.94], np.float32)
 sky = sky * (1 + (lit * w)[..., None] * (sun - 1))
-# The 8k source is a little soft at this scale: give the cloud back some edge.
+# A touch of local contrast in the cloud only, as a lens with some bite
+# draws it (the 16k already carries the detail; SHARP 0 leaves it as shot).
+SHARP = float(os.environ.get('SHARP', 0.25))
 blur = cv2.GaussianBlur(sky, (0, 0), 2.5)
-sky = np.maximum(sky + 0.45 * (sky - blur) * w[..., None], 0)
+sky = np.maximum(sky + SHARP * (sky - blur) * w[..., None], 0)
 
 # Soft shoulder on the largest channel: everything under KNEE untouched, the
 # brightest cloud approaches LIMIT and never reaches the file's ceiling (ENC),
 # so no channel clips and the hue of a bright edge holds.
-KNEE, LIMIT = float(os.environ.get('KNEE', 0.42)), float(os.environ.get('LIMIT', 0.74))
+KNEE, LIMIT = float(os.environ.get('KNEE', 0.3)), float(os.environ.get('LIMIT', 0.8))
 Ls = sky.max(2)
 Lc = np.where(Ls > KNEE, KNEE + (LIMIT - KNEE) * np.tanh((Ls - KNEE) / (LIMIT - KNEE)), Ls)
 sky = sky * (Lc / np.maximum(Ls, 1e-6))[..., None]

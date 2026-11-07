@@ -3,16 +3,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Depth Clock: the iOS 16 Lock Screen depth effect, made literal.
 //
-// One Poly Haven capture (Roman stone pines, CC0) is taken straight up, as a
-// worm's-eye zenith shot through a stereographic lens (shoot.py, beside this
-// file): every trunk rises from the frame's edge on a straight radial line to
-// the zenith, the crowns ring the frame, and the open sky between them is
-// where the time sits. It is split offline (bake.py) into planes, and the
-// sky behind them is replaced
-// with fair-weather cumulus from a second Poly Haven capture (bake_clouds.py):
-//   clouds.webp the sky: a pure-sky HDRI reprojected through the trees' own
-//               camera, turned so its sun sits on the pines' sun, the clear
-//               blue matched to the pines' sky and the cloud never clipped
+// One photograph (Troy Olson's conifers in Farragut State Park, Idaho, on
+// Unsplash) is taken straight up on a phone's ultra-wide: every trunk rises
+// from the frame's edge on a straight line to the zenith, the crowns ring the
+// frame, and the open well of sky between them is where the time sits. It is
+// taken back to scene-linear light (plate.py, beside this file), split
+// offline (bake.py) into planes, and the sky behind them is replaced with
+// fair-weather cumulus from a Poly Haven capture (bake_clouds.py):
+//   clouds.webp the sky: a 16k pure-sky HDRI reprojected through the trees'
+//               own camera, turned so its sun sits on the conifers' sun, the
+//               clear blue matched to their cobalt and the cloud never clipped
 //   fg.webp     the trees, colour unmixed from their sky: P = a F + (1 - a) S,
 //               so a is an exact matte down to single needles and F carries
 //               no blue fringe when it passes over something brighter
@@ -38,18 +38,22 @@ const IMG_H = 3000;
 const ENC = 2;
 
 // Where the frame looks, as a share of the image (landscape boxes). The
-// zenith, where the trunks converge, sits at (2480, 1540): right of the
-// numerals, under the nearest crown.
-const ANCHOR = [0.5, 0.44];
+// zenith, where the trunks converge, sits at (2090, 1520): just under the
+// numerals, so the trunks rise toward the time from every edge.
+const ANCHOR = [0.5, 0.46];
 // The numerals: centre of the figures and their em size, in image pixels.
-// They sit in the open well of sky beside the zenith.
-const NUM = { cx: 1530, cy: 760, size: 600 };
+// They sit across the upper well, wider than it: the sunlit crown on the left
+// and the dark crown on the right come in over their ends, and the crown
+// overhead dips its lowest needles into their tops.
+const NUM = { cx: 2010, cy: 780, size: 560 };
 
 const SKY_D = 0.04; // the sky's disparity in the depth map
 const NUM_D = 0.2; // the numerals' plane: in front of the sky, behind every tree
 const FOCUS = 0.12; // the plane that holds still
-const AMP = 0.035; // image widths of shift per unit disparity at full tilt
-const ZOOM = 1 + 2 * AMP * 0.8; // overscan so no plane's edge ever shows
+const AMP = 0.05; // image widths of shift per unit disparity at full tilt
+// Overscan so no plane's edge ever shows: the nearest bark (disparity 1)
+// travels AMP * (1 - FOCUS) each way at full tilt.
+const ZOOM = 1 / (1 - 2 * AMP * (1 - FOCUS));
 
 const FILM = {
   ...FILM_PRESETS.summer,
@@ -127,9 +131,10 @@ void main() {
   }
 
   // The trees: each pixel moves by its own disparity. Solve uv + shift(D(uv))
-  // = target by fixed-point iteration; D is smooth, so four steps settle.
+  // = target by fixed-point iteration; D's slope is bounded (bake.py) so the
+  // step contracts, and eight steps settle even at full tilt.
   vec2 u = b + shift(texture(uDepth, b).r);
-  for (int i = 0; i < 4; i++) u = b + shift(texture(uDepth, u).r);
+  for (int i = 0; i < 8; i++) u = b + shift(texture(uDepth, u).r);
   vec4 fg = texture(uFg, u);
   col = mix(col, fg.rgb * uEnc, fg.a);
 

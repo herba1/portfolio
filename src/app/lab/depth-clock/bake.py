@@ -1,7 +1,8 @@
-# Bake depth-clock layers from a Poly Haven pick: linear HDR + depth map.
-#   DEP0=0.07 python3 -I bake.py pines-zenith-stereo public/lab/depth-clock 0 3000 0.003
-# (the pick is shoot.py's zenith view; DEP0 is the depth model's floor, taken
-# off so the clear sky sits near 0.04 as every threshold below expects)
+# Bake depth-clock layers from a pick: linear HDR + depth map.
+#   python3 -I bake.py conifers-zenith public/lab/depth-clock 0 3000 0.0025
+# (the pick is plate.py's linearised conifers and the library's depth map,
+# whose clear sky already sits under 0.04 as every threshold below expects;
+# DEP0 takes a depth model's floor off when it does not)
 # Writes fg.webp (foreground, colour unmixed from the sky, alpha = exact
 # matte) and depth.webp (foreground disparity, extended past the matte and
 # smoothed for warping). The fitted clear sky is only the unmix's background
@@ -63,43 +64,21 @@ skyCore = cv2.erode(skyCore, np.ones((17, 17), np.uint8))
 b_dom = (hdr[..., 2] > hdr[..., 1] * 1.15) & (hdr[..., 1] > hdr[..., 0])
 skyCore = skyCore.astype(bool) & b_dom
 
-# 2. Sky model S: a clear sky is smooth, so fit it (log light, 2D polynomial,
-#    robust to stray leaves), then add back the seen sky's slow residual.
-def polyfit_sky(img, mask, deg=6, step=8):
-    ys, xs = np.mgrid[0:H:step, 0:W:step]
-    m = mask[::step, ::step]
-    u, v = xs / W * 2 - 1, ys / H * 2 - 1
-    terms = [(i, j) for i in range(deg + 1) for j in range(deg + 1 - i)]
-    A = np.stack([u[m] ** i * v[m] ** j for i, j in terms], 1)
-    L = np.log(np.maximum(img[::step, ::step][m], 1e-4))
-    keep = np.ones(len(A), bool)
-    for _ in range(4):
-        coef, *_ = np.linalg.lstsq(A[keep], L[keep], rcond=None)
-        r = np.abs(L - A @ coef).max(1)
-        keep = r < max(0.02, 3.0 * np.median(r))
-    print('sky fit rms', float(np.sqrt(np.mean((L[keep] - A[keep] @ coef) ** 2))), 'kept', keep.mean())
-    yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
-    uu, vv = xx / W * 2 - 1, yy / H * 2 - 1
-    out = np.zeros((H, W, 3), np.float32)
-    for k, (i, j) in enumerate(terms):
-        out += (uu ** i * vv ** j)[..., None] * coef[k][None, None, :]
-    return np.exp(out)
-
-
-Sfit = polyfit_sky(hdr, skyCore)
-ratio = np.where(skyCore[..., None], hdr / Sfit, 1.0)
-ratio = np.clip(ratio, 0.85, 1.15)
-rs = pushpull(ratio, skyCore.astype(np.float32))
-rs = cv2.GaussianBlur(rs, (0, 0), 24)
-S = Sfit * rs
-# far from any seen sky the polynomial extrapolates wildly: hold it instead
-trust = cv2.dilate(skyCore.astype(np.uint8), np.ones((5, 5), np.uint8), iterations=50).astype(np.float32)
-Sh = pushpull(S, trust)
-S = np.where(trust[..., None] > 0, S, cv2.GaussianBlur(Sh, (0, 0), 30))
-core = hdr[skyCore]
-for c in (0, 1):
-    lim = np.percentile(core[:, c] / np.maximum(core[:, 2], 1e-4), 99.5)
-    S[..., c] = np.minimum(S[..., c], S[..., 2] * lim)
+# 2. Sky model S, local: the sky seen anywhere, in the open well or in the
+#    gaps between needles, carried into the crowns from its nearest samples.
+#    A fitted global sky fails on a phone frame: the light runs from deep
+#    cobalt at the zenith to a pale haze toward the sun, which the depth model
+#    even takes for something solid. So the sky is found by colour as well as
+#    by depth: blue-dominant, bright enough not to be a dark needle with a blue
+#    cast, and the brightest blue in its neighbourhood (so a pixel half sky,
+#    half needle never sets the sky's own light).
+B = hdr[..., 2]
+seen = (B > hdr[..., 1] * 1.25) & (B > hdr[..., 0] * 1.8) & (B > 0.06)
+seen &= B >= 0.85 * cv2.dilate(B, np.ones((25, 25), np.uint8))
+seen |= skyCore
+print('sky seen %.3f (core %.3f)' % (seen.mean(), skyCore.mean()))
+S = pushpull(hdr, seen.astype(np.float32))
+S = cv2.GaussianBlur(S, (0, 0), 6)
 S = np.where(skyCore[..., None], hdr, S)
 
 # 3. Foreground colour model F: pixels that are clearly not sky.
