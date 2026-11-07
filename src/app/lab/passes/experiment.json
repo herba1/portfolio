@@ -1,11 +1,15 @@
 {
   "title": "Passes",
-  "description": "Herb in Times Square at night, printed on warm paper with the passes a renderer keeps underneath it. Drag across the print and the photograph peels back: first the street relit by a warm lamp that follows your hand, so herb and the pavement catch a light that was never there, then the street cast in plaster from the surface normals the depth implies, and the depth itself printed in contours, warm black far to paper white near. The sheets' edges step around herb where they cross him, and spring back when you let go.",
+  "description": "Tokyo Tower seen from the street between two building faces, printed on warm paper with the passes a renderer keeps underneath it. Drag across the print and the photograph peels back: first the canyon relit by a warm lamp that follows your hand, so the concrete and the tower's paint catch a light that was never there, then the walls cast in plaster from their surface normals, and the depth itself printed in contours, warm black for the sky to paper white for the nearest wall. The sheets' edges step around the tower where they cross it, and spring back when you let go.",
   "tags": ["WebGL", "Light", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-06T18:00:00.000Z",
-  "intent": "Reality pieces: the layers under a captured image, after Unreal's buffer visualization (https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine), photogrammetry tools like Polycam and RealityScan, and Thomas Ruff's jpegs, where the image's structure becomes the image. Depth by Depth Anything V2, normals baked from it offline.",
+  "intent": "Reality pieces: the layers under a captured image, after Unreal's buffer visualization (https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine), photogrammetry tools like Polycam and RealityScan, and Thomas Ruff's jpegs, where the image's structure becomes the image. Photo by Jakob Owens on Unsplash. Depth by Depth Anything V2, normals by MoGe-2, mattes by SAM 2.1, baked offline.",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.5], "to": [0.4, 0.5] },
-  "sources": ["https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine", "https://depth-anything-v2.github.io/"]
+  "photo": {
+    "name": "Jakob Owens, Tokyo Tower framed by surrounding buildings (Unsplash)",
+    "url": "https://unsplash.com/photos/tokyo-tower-is-framed-by-surrounding-buildings-e5tHWAAj8gA"
+  },
+  "sources": ["https://unsplash.com/photos/tokyo-tower-is-framed-by-surrounding-buildings-e5tHWAAj8gA", "https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine", "https://depth-anything-v2.github.io/", "https://wangrc.site/MoGe2Page/"]
 }
