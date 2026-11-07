@@ -12,8 +12,10 @@ import { createStage, clamp } from "../_kit/stage";
 // hand, so a re-map rolls across the grid as a wave and every cell
 // interpolates its parameters rather than crossfading. A click promotes a
 // cell: that variant is pasted into the sheet as a full-width band, its
-// edges stepping out along the rules hairline by hairline, columns first and
-// then rows, clearing the cells it takes over; it holds, and goes back.
+// edges stepping out along the rules hairline by hairline, a column and a
+// row at a time, so the band keeps the word's proportion and the logotype is
+// re-set to fill it at every step; the cells it reaches give way, re-set in
+// what is left of them. It holds, and goes back.
 //
 // The cells take their proportion from the word itself: the bold cut's
 // advance against its ascender plus the rule allowance, so at its default
@@ -23,6 +25,11 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // Type follows the house law at every rendered size, including every size
 // passed through while a cell grows: tracking = -0.043 x (size - 12) px.
+// The law is calibrated for text; pushed out to a display size the heavy
+// cuts close up until the tail of the a runs into the s. So the law has a
+// floor: tracking never closes the word's tightest pair below a hairline of
+// clearance (CLEAR, in em), measured from the glyphs' own ink at each
+// weight. At text sizes the law is always looser and wins.
 // Resting weights are read from the --font-weight-* ladder tokens.
 
 const FAMILY = "ProgrammeGeist";
@@ -31,11 +38,12 @@ const INK = "#0d0d0c";
 const GROUND = "#f5f4f0";
 const RED = "#d9261c";
 const lawPx = (s) => -0.043 * (s - 12);
+const CLEAR = 0.016; // em, the least ink clearance between neighbouring letters
 
 const OMEGA = 12; // cell spring
 const ZETA = 0.86; // a touch under critical: one soft settle, no bounce
 const DELAY = 0.055; // seconds of wave lag per cell of distance
-const STEP_T = 0.26; // seconds the band takes per hairline it crosses
+const STEP_T = 0.34; // seconds the band takes per hairline it crosses
 const STEP_MOVE = 0.62; // share of each step spent moving; the rest it rests on the rule
 const HOLD = 2.2; // seconds a promoted cell is held before it goes back
 
@@ -160,22 +168,122 @@ export async function createProgramme(host, { embedded = false } = {}) {
   mctx.fontKerning = "normal";
   const fontAt = (w, s) => `${w} ${s}px ${FAMILY}`;
   const mcache = new Map();
+  // Each letter's origin, carrying the font's own kerning, at the context's
+  // current font: the run up to and including the letter, less the letter's
+  // own advance. (The run up to the letter alone would leave out the kern
+  // into it and hand it to the next letter instead: Geist kerns r to a
+  // hard, and the a would slide into the s.) The last entry is the advance
+  // of the whole word.
+  const origins = (c) => {
+    const o = [];
+    for (let i = 0; i < nL; i += 1) o.push(c.measureText(WORD.slice(0, i + 1)).width - c.measureText(chars[i]).width);
+    o.push(c.measureText(WORD).width);
+    return o;
+  };
+  // The word's tightest pair at zero tracking: per scanline, the ink of
+  // each letter set at its kerned origin, and the least gap between one
+  // letter's right edge and the next one's left, in em. Measured on a
+  // coarse weight grid and interpolated, since a weight in motion passes
+  // through every integer.
+  const INK_REF = 240;
+  const INK_STEP = 20;
+  const inkCanvas = document.createElement("canvas");
+  const ictx = inkCanvas.getContext("2d", { willReadFrequently: true });
+  const gcache = new Map();
+  const inkGapAt = (w) => {
+    let g = gcache.get(w);
+    if (g !== undefined) return g;
+    const S = INK_REF;
+    const ox = Math.ceil(S * 0.3);
+    const cw = Math.ceil(S * 1.3);
+    const chh = Math.ceil(S * 1.4);
+    const base = Math.ceil(S * 1.05);
+    inkCanvas.width = cw;
+    inkCanvas.height = chh;
+    ictx.font = fontAt(w, S);
+    ictx.fontKerning = "normal";
+    ictx.textBaseline = "alphabetic";
+    const prefix = origins(ictx);
+    // Per letter: leftmost and rightmost ink of each row, from its origin.
+    const prof = chars.map((ch) => {
+      ictx.clearRect(0, 0, cw, chh);
+      ictx.fillStyle = "#000";
+      ictx.fillText(ch, ox, base);
+      const d = ictx.getImageData(0, 0, cw, chh).data;
+      const lo = new Float32Array(chh).fill(NaN);
+      const hi = new Float32Array(chh).fill(NaN);
+      for (let y = 0; y < chh; y += 1) {
+        const row = y * cw * 4 + 3;
+        for (let x = 0; x < cw; x += 1) {
+          if (d[row + x * 4] > 96) {
+            lo[y] = x - ox;
+            break;
+          }
+        }
+        for (let x = cw - 1; x >= 0; x -= 1) {
+          if (d[row + x * 4] > 96) {
+            hi[y] = x - ox;
+            break;
+          }
+        }
+      }
+      return { lo, hi };
+    });
+    g = Infinity;
+    for (let i = 0; i < nL - 1; i += 1) {
+      const a = prof[i];
+      const b = prof[i + 1];
+      for (let y = 0; y < chh; y += 1) {
+        if (Number.isNaN(a.hi[y]) || Number.isNaN(b.lo[y])) continue;
+        g = Math.min(g, prefix[i + 1] + b.lo[y] - (prefix[i] + a.hi[y]));
+      }
+    }
+    g = Number.isFinite(g) ? g / S : 0.05;
+    gcache.set(w, g);
+    return g;
+  };
+  const inkGap = (w) => {
+    const a = Math.floor(w / INK_STEP) * INK_STEP;
+    const t = (w - a) / INK_STEP;
+    const ga = inkGapAt(a);
+    return t > 0 ? ga + (inkGapAt(a + INK_STEP) - ga) * t : ga;
+  };
   const metrics = (w) => {
     let m = mcache.get(w);
     if (!m) {
       mctx.font = fontAt(w, REF);
-      // Prefix widths carry the font's own kerning.
-      const prefix = [0];
-      for (let i = 1; i <= nL; i += 1) prefix.push(mctx.measureText(WORD.slice(0, i)).width / REF);
+      const prefix = origins(mctx).map((v) => v / REF);
       const tm = mctx.measureText(WORD);
-      m = { prefix, asc: tm.actualBoundingBoxAscent / REF };
+      // The floor: the tightest tracking, in em, that still leaves CLEAR
+      // between the closest pair of this cut.
+      // Each letter's own ink, left and right of its origin, so a colour
+      // edge in motion can cross the whole glyph and leave no sliver behind.
+      const ink = chars.map((ch) => {
+        const t = mctx.measureText(ch);
+        return [-t.actualBoundingBoxLeft / REF, t.actualBoundingBoxRight / REF];
+      });
+      m = { prefix, ink, asc: tm.actualBoundingBoxAscent / REF, floor: CLEAR - inkGap(w) };
       mcache.set(w, m);
     }
     return m;
   };
+  // Tracking at a rendered size: the law, held at the cut's floor.
+  const trackOf = (S, m) => Math.max(lawPx(S), m.floor * S);
+  // The size at which this cut, tracked by trackOf, measures `width`
+  // (slant included). Width grows with size on both branches of the max,
+  // so the fit is the smaller of the two branch solutions.
+  const sizeForWidth = (width, m, tan) => {
+    const n1 = nL - 1;
+    const ext = m.prefix[nL] + tan * m.asc;
+    const byLaw = (width - n1 * 0.043 * 12) / (ext - 0.043 * n1);
+    const byFloor = width / (ext + m.floor * n1);
+    return Math.min(byLaw, byFloor);
+  };
   const mBold = metrics(L.bold);
   // The word's own box, in em: the bold advance (tracking at display size
   // is ~ -0.043 em a gap) against its ascender plus the rule allowance.
+  // The sheet is proportioned on the law alone; where the floor holds the
+  // bold cut a little open, the fit gives it back in size, not in width.
   const advEm = (m) => m.prefix[nL] - 0.043 * (nL - 1);
   const ASPECT = ((1 - 2 * PAD) * advEm(mBold)) / (mBold.asc + RULE_K) + 2 * PAD;
 
@@ -334,37 +442,41 @@ export async function createProgramme(host, { embedded = false } = {}) {
   // ── Input ──────────────────────────────────────────────────────────
   const promo = { cell: -1, g: 0, target: 0, until: 0 };
 
-  // The band a promoted cell grows into, in grid units. Its edges travel
-  // along the rules one hairline at a time: the columns first, out to both
-  // sides of the sheet, then the rows, up and down to a block as many rows
-  // deep as there are columns (the cell's own proportion), centred on the
-  // cell's row. Each step eases onto its hairline and rests there before
-  // the next, so the band is always a whole number of cells at rest.
-  const stair = (s, n) => {
-    if (s >= n) return n;
-    const f = Math.floor(s);
-    const t = clamp((s - f) / STEP_MOVE, 0, 1);
-    return f + t * t * t * (t * (t * 6 - 15) + 10);
+  // The band a promoted cell grows into, in grid units. It grows out
+  // along the rules one hairline at a time, a column and a row together on
+  // every step, to the full width of the sheet and a block as many rows
+  // deep as there are columns. The cell has the word's proportion, so a
+  // band n cells by n cells has it too: at every step, and at every instant
+  // between steps, the band is the cell scaled up, and the logotype re-set
+  // inside it grows with it instead of sitting small in an open strip.
+  // Each step eases onto its hairline and rests there before the next, so
+  // the band is always a whole number of cells at rest.
+  const ease = (s) => {
+    const t = clamp(s / STEP_MOVE, 0, 1);
+    return t * t * t * (t * (t * 6 - 15) + 10);
+  };
+  // One axis: nLo cells to take on one side, nHi on the other, nA steps.
+  // Each step moves exactly one of the two edges, the near side paced so
+  // that both sides reach the sheet's edge together.
+  const grow = (s, nA, nLo, nHi) => {
+    if (nA <= 0) return [0, 0];
+    const lo = (m) => (m >= nA ? nLo : Math.round((m * nLo) / nA));
+    const f = Math.min(nA, Math.floor(s));
+    const t = f >= nA ? 0 : ease(s - f);
+    const l = lo(f) + (lo(f + 1) - lo(f)) * t;
+    const h = f - lo(f) + (f + 1 - lo(f + 1) - (f - lo(f))) * t;
+    return [l, Math.min(nHi, h)];
   };
   const bandOf = (c, g) => {
     const k = Math.min(rows, cols);
     const top = clamp(c.j - Math.floor((k - 1) / 2), 0, rows - k);
-    const nl = c.i;
-    const nr = cols - 1 - c.i;
-    const nt = c.j - top;
-    const nb = top + k - 1 - c.j;
-    const nC = Math.max(nl, nr);
-    const nR = Math.max(nt, nb);
-    const s = clamp(g, 0, 1) * (nC + nR);
-    const sc = Math.min(s, nC);
-    const sr = Math.max(0, s - nC);
-    return {
-      i0: c.i - stair(sc, nl),
-      i1: c.i + 1 + stair(sc, nr),
-      j0: c.j - stair(sr, nt),
-      j1: c.j + 1 + stair(sr, nb),
-      n: nC + nR,
-    };
+    const nC = cols - 1;
+    const nR = k - 1;
+    const n = Math.max(nC, nR);
+    const s = clamp(g, 0, 1) * n;
+    const [l, r] = grow((s * nC) / Math.max(1, n), nC, c.i, cols - 1 - c.i);
+    const [t, b] = grow((s * nR) / Math.max(1, n), nR, c.j - top, top + k - 1 - c.j);
+    return { i0: c.i - l, i1: c.i + 1 + r, j0: c.j - t, j1: c.j + 1 + b, n };
   };
   let drag = null;
   let touched = false;
@@ -422,7 +534,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
   // ── Drawing ────────────────────────────────────────────────────────
   const hair = (v, dpr) => (Math.round(v * dpr) + 0.5) / dpr;
 
-  const drawCell = (r, P, dpr) => {
+  const drawCell = (r, P, dpr, centre = false) => {
     const pad = Math.max(1, Math.round(Math.min(r.w, r.h) * PAD));
     const innerW = r.w - 2 * pad;
     // Bottom margin: the pad, opening to the rule's clearance as the rule
@@ -431,25 +543,26 @@ export async function createProgramme(host, { embedded = false } = {}) {
     const innerH = r.h - pad - clr;
     const wt = Math.round(P.weight);
     const m = metrics(wt);
-    const n1 = nL - 1;
     const tan = Math.tan((P.slope * Math.PI) / 180);
     // Size that sets this cut flush across the inner measure, tracking and
     // slant included, bounded by the height the word and its rule need.
     // The cell has the bold word's proportion, so at size 1 every variant
     // meets the pad on the sides, and the top and bottom as nearly as its
     // cut allows.
-    const widthFit = (innerW - n1 * 0.043 * 12) / (advEm(m) + tan * m.asc);
+    const widthFit = sizeForWidth(innerW, m, tan);
     const heightFit = innerH / (m.asc + RULE_K * P.rule);
     const fit = Math.min(widthFit, heightFit);
     const S = Math.max(4, P.size * fit);
-    const track = lawPx(S);
+    const track = trackOf(S, m);
     const xs = new Array(nL + 1);
     for (let i = 0; i <= nL; i += 1) xs[i] = m.prefix[i] * S + i * track;
     const wordW = xs[nL] - track;
     const visW = wordW + tan * m.asc * S;
     // Past size 1 the word runs off the cell and is cropped by it: it grows
-    // from the side it is aligned to, and up from the baseline.
-    const x0 = r.x + pad + P.align * (innerW - visW);
+    // from the side it is aligned to, and up from the baseline. A centred
+    // setting (the promoted band) splits any measure the cut leaves over
+    // evenly about the same inset, so the logotype sits square in its box.
+    const x0 = r.x + pad + (centre && visW <= innerW ? 0.5 : P.align) * (innerW - visW);
     const blockH = (m.asc + RULE_K * P.rule) * S;
     const spare = Math.max(0, innerH - blockH);
     const by = r.y + r.h - clr - RULE_K * P.rule * S - spare / 2;
@@ -457,7 +570,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
     // Red runs from the left, letter by letter. At rest whole glyphs take
     // the colour, so a letter that overlaps its neighbour under tight
     // tracking never shows a sliver of the other ink; in motion the edge
-    // crosses each letter's own advance. The rule's edge sits in the middle
+    // crosses each letter's own ink. The rule's edge sits in the middle
     // of the gap.
     const rf = P.red * nL;
     const edgeAt = (k) => (k <= 0 ? -track * 0.5 - S : k >= nL ? xs[nL] + S : xs[k] - track * 0.5);
@@ -495,7 +608,8 @@ export async function createProgramme(host, { embedded = false } = {}) {
         if (red ? f < 0.0005 : f > 0.9995) continue;
         const gx = x0 + xs[i];
         if (f > 0.0005 && f < 0.9995) {
-          const ex = gx + f * (xs[i + 1] - xs[i]);
+          const [il, ir] = m.ink[i];
+          const ex = gx + (il + f * (ir - il)) * S;
           ctx.save();
           ctx.beginPath();
           if (red) ctx.rect(gx - S, r.y - r.h, ex - gx + S, r.h * 3);
@@ -544,9 +658,32 @@ export async function createProgramme(host, { embedded = false } = {}) {
     const E = 1e-3;
     const covered = (c) => band && c.i >= band.i0 - E && c.i + 1 <= band.i1 + E && c.j >= band.j0 - E && c.j + 1 <= band.j1 + E;
 
+    // A cell the moving band has begun to enter is re-set in the box it
+    // has left, so it gives way to the band, narrowing or shortening, and
+    // is never cut through a letter. Where the band's corner takes a bite
+    // out of a cell, it is set in the larger of the two strips left.
+    const leftOf = (c) => {
+      const r = { x: G.x + c.i * G.cw, y: G.y + c.j * G.ch, w: G.cw, h: G.ch };
+      if (!band) return r;
+      const bx0 = G.x + band.i0 * G.cw;
+      const bx1 = G.x + band.i1 * G.cw;
+      const by0 = G.y + band.j0 * G.ch;
+      const by1 = G.y + band.j1 * G.ch;
+      const ox = Math.min(r.x + r.w, bx1) - Math.max(r.x, bx0);
+      const oy = Math.min(r.y + r.h, by1) - Math.max(r.y, by0);
+      if (ox <= 0.01 || oy <= 0.01) return r;
+      // Strips beside the band (full height) and above or below it (full width).
+      const sx = bx0 > r.x + 0.01 ? { x: r.x, w: bx0 - r.x } : { x: bx1, w: r.x + r.w - bx1 };
+      const sy = by0 > r.y + 0.01 ? { y: r.y, h: by0 - r.y } : { y: by1, h: r.y + r.h - by1 };
+      const horiz = { x: sx.x, y: r.y, w: Math.max(0, sx.w), h: r.h };
+      const vert = { x: r.x, y: sy.y, w: r.w, h: Math.max(0, sy.h) };
+      return horiz.w * horiz.h >= vert.w * vert.h ? horiz : vert;
+    };
     for (const c of cells) {
       if (covered(c)) continue;
-      drawCell({ x: G.x + c.i * G.cw, y: G.y + c.j * G.ch, w: G.cw, h: G.ch }, paramsOf(c), dpr);
+      const r = leftOf(c);
+      if (r.w < 1 || r.h < 1) continue;
+      drawCell(r, paramsOf(c), dpr);
     }
 
     // Ruled grid: one device pixel, full ink.
@@ -575,7 +712,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
       const rr = { x: px(r.x), y: px(r.y), w: px(r.x + r.w) - px(r.x), h: px(r.y + r.h) - px(r.y) };
       ctx.fillStyle = GROUND;
       ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
-      drawCell(rr, paramsOf(cells[promo.cell]), dpr);
+      drawCell(rr, paramsOf(cells[promo.cell]), dpr, true);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = INK;
       ctx.lineWidth = 1 / dpr;
