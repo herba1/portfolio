@@ -19,6 +19,64 @@ const GAMMA = 0.55; // broadband damping, 1/s: the fundamental rings ~3.5 s
 const VOIGT = 0.0045; // high modes die first (rate ~ VOIGT (n pi)^2 / 2)
 export const STRUCT = { omega: 2 * Math.PI * 4.2, zeta: 0.3, gain: 0.8 };
 
+// ---------------------------------------------------------------- the view
+
+// The camera turned further up about its own centre. A pinhole camera
+// rotated about its centre sees the same rays, only re-projected, so the
+// new frame is exactly a homography of the photograph, H = K R K^-1, with no
+// depth needed: verticals that already lean toward a vanishing point above
+// the frame lean harder, and the whole scene drops toward the bottom edge.
+// The photograph carries no EXIF; K assumes the a7 IV's full-frame sensor
+// (35.9 mm wide, 6000 px) behind a 24 mm lens, principal point at the centre.
+// "View" px are image px of that turned camera (identical at pitch 0).
+export const LENS = { mm: 24, sensor: 35.9 };
+
+const mul3 = (A, B) => {
+  const C = new Array(9);
+  for (let r = 0; r < 3; r++) {
+    for (let c = 0; c < 3; c++) C[r * 3 + c] = A[r * 3] * B[c] + A[r * 3 + 1] * B[3 + c] + A[r * 3 + 2] * B[6 + c];
+  }
+  return C;
+};
+
+export function pitchView(IW, IH, pitchDeg, { mm = LENS.mm, sensor = LENS.sensor } = {}) {
+  const f = (mm / sensor) * IW;
+  const cx = IW / 2;
+  const cy = IH / 2;
+  const t = (pitchDeg * Math.PI) / 180;
+  const c = Math.cos(t);
+  const s = Math.sin(t);
+  const K = [f, 0, cx, 0, f, cy, 0, 0, 1];
+  const Ki = [1 / f, 0, -cx / f, 0, 1 / f, -cy / f, 0, 0, 1];
+  // R_x(t): the turned camera's axis, (0, 0, 1) in its own frame, is
+  // (0, -sin t, cos t) in the photograph's (image y runs down, so up).
+  const R = [1, 0, 0, 0, c, -s, 0, s, c];
+  const Rt = [1, 0, 0, 0, c, s, 0, -s, c];
+  const toImg = mul3(K, mul3(R, Ki)); // view px -> image px
+  const toView = mul3(K, mul3(Rt, Ki)); // image px -> view px
+  const apply = (M, x, y) => {
+    const w = M[6] * x + M[7] * y + M[8];
+    return [(M[0] * x + M[1] * y + M[2]) / w, (M[3] * x + M[4] * y + M[5]) / w, w];
+  };
+  const M = toView;
+  return {
+    pitch: pitchDeg,
+    f,
+    toImg,
+    toView,
+    // Each returns [x, y, w]; w is the homogeneous divisor, positive in view.
+    img: (x, y) => apply(toImg, x, y),
+    view: (x, y) => apply(toView, x, y),
+    // d view / d image at an image point, row-major [a, b, c, d].
+    jac(x, y) {
+      const w = M[6] * x + M[7] * y + M[8];
+      const px = (M[0] * x + M[1] * y + M[2]) / w;
+      const py = (M[3] * x + M[4] * y + M[5]) / w;
+      return [(M[0] - px * M[6]) / w, (M[1] - px * M[7]) / w, (M[3] - py * M[6]) / w, (M[4] - py * M[7]) / w];
+    },
+  };
+}
+
 // ---------------------------------------------------------------- strings
 
 // The rest shape of a wire, as a function of s (image px along its chord

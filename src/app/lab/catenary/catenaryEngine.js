@@ -1,7 +1,7 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createPluckSound } from "./pluck";
-import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./strings";
+import { NODES, createWorld, locate, offsetAt, pitchView, pullShape, sampleY } from "./strings";
 
 // Catenary: the overhead wires of a Japanese railway mast, photographed from
 // underneath against summer cumulus, are real strings.
@@ -33,27 +33,37 @@ import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./stri
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
+// ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
 // structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, diffuse, zenith, polar, polarSat, polarHue,
 // vib, vibFloor, vibHue, vibV override the grade.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
-// The view: one anchor. The plate is shown VIEW.zoom past cover and pinned to
-// the photograph's upper right, so the mast top stands in the left third,
-// the truss is the single diagonal and the big sunlit cumulus fills the upper
-// right; the caged platform, the transformer, the far pole's foot and the
-// tangle of wires low on the left fall off the edges. Image px of the
-// 6000 x 4000 photograph. A box narrower than the 16:10 crop keeps the
-// crop's width down to its height (4:3 shows more sky below, not less mast);
-// a portrait box covers at its height and still holds the mast top at
-// poleAt of the width, running the rest up the truss into the feeder.
+// The view: a worm's-eye. The photograph looks up at about 30 degrees (its
+// verticals meet some 7000 px above its centre); the virtual camera turns
+// PITCH further up about its own centre (pitchView in strings.js: a pure
+// rotation, so the homography H = K R K^-1 is exact without depth). The mast
+// and the far pole then converge hard on a vanishing point just above the
+// frame, the scene drops, and the droppers, hooks and caged platform low in
+// the photograph fall out of the bottom. Everything drawn goes through the
+// same H: the plate (per pixel, in PLATE), the wires (each sample of the
+// fitted catenary plus its displacement, the profile across the projected
+// tangent), the insulators (their corners, perspective-correct). The strings
+// themselves stay in the photograph's plane: physics in image px.
+// The crop sits inside the turned photograph (a trapezoid, narrow at the
+// top), VIEW.zoom past cover on a 16:10 box, its top edge at the
+// photograph's row VIEW.top and the mast top at poleAt of the width; it
+// zooms further only if a corner would leave the plate. A box narrower than
+// 16:10 keeps the crop's width down to its height (4:3 shows more sky below,
+// not less mast); a portrait box covers at its height.
+const PITCH = 18; // degrees
 const VIEW = {
-  zoom: 1.3, // past cover, on a 16:10 box
-  left: 1385, // the widest crop's left edge: the mast top with a margin
-  top: 120, // the crop's top edge
-  pole: 1915, // the mast top
+  zoom: 1.45, // past cover, on a 16:10 box
+  top: 120, // the crop's top edge, a row of the photograph
+  mast: [1915, 360], // the mast top, image px
   poleAt: 0.11, // the furthest left it may sit, as a share of the width
+  inset: 4, // image px kept clear of the plate's edge
 };
 
 
@@ -163,7 +173,8 @@ precision highp float;
 out vec4 outColor;
 uniform sampler2D uPlate;
 uniform vec2 uRes;   // device px
-uniform vec3 uMap;   // ox, oy, k (device px per image px)
+uniform vec3 uMap;   // ox, oy, k (device px per view px)
+uniform mat3 uHom;   // view px -> image px: the turned camera
 uniform vec2 uImg;   // image px
 uniform sampler2D uKey; // R structure, G cloud light thin, B cloud light wide
 uniform vec4 uStruct;  // amount, gain, floor, zenith
@@ -189,7 +200,8 @@ vec3 hsv2rgb(vec3 c) {
 ${GRAPHITE}
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
-  vec2 uv = (p - uMap.xy) / uMap.z / uImg;
+  vec3 hq = uHom * vec3((p - uMap.xy) / uMap.z, 1.0);
+  vec2 uv = hq.xy / hq.z / uImg;
   vec3 c = texture(uPlate, uv).rgb;
   vec3 key = texture(uKey, uv).rgb;
 
@@ -360,14 +372,16 @@ void main() {
   outColor = vec4(col, a);
 }`;
 
+// The sprite's corners go through the homography; w is its divisor, so the
+// atlas is interpolated perspective-correct, linear in the photograph.
 const RIDER_V = `#version 300 es
-layout(location = 0) in vec2 aPos;    // device px
+layout(location = 0) in vec3 aPos;    // device px, homogeneous w
 layout(location = 1) in vec2 aUv;     // atlas uv
 uniform vec2 uRes;
 out vec2 vUv;
 void main() {
   vUv = aUv;
-  gl_Position = vec4(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0, 0.0, 1.0);
+  gl_Position = vec4(aPos.x / uRes.x * 2.0 - 1.0, 1.0 - aPos.y / uRes.y * 2.0, 0.0, 1.0) * aPos.z;
 }`;
 
 const RIDER_F = `#version 300 es
@@ -478,6 +492,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     bitmap(`${ASSET}key.webp`),
   ]);
   const [IW, IH] = meta.image;
+  const view = pitchView(IW, IH, clamp(num("pitch", PITCH), -10, 30));
   const plateTex = upload(gl, plateBm);
   const atlasTex = upload(gl, atlasBm);
   const keyTex = upload(gl, keyBm, { mips: false, linear: true });
@@ -524,15 +539,15 @@ export async function createCatenary(host, { embedded = false } = {}) {
   gl.vertexAttribPointer(3, 2, gl.FLOAT, false, STRIDE * F, 7 * F);
 
   const riderBuf = gl.createBuffer();
-  const riderData = new Float32Array(6 * 4);
+  const riderData = new Float32Array(6 * 5);
   const riderVao = gl.createVertexArray();
   gl.bindVertexArray(riderVao);
   gl.bindBuffer(gl.ARRAY_BUFFER, riderBuf);
   gl.bufferData(gl.ARRAY_BUFFER, riderData.byteLength, gl.DYNAMIC_DRAW);
   gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 16, 0);
+  gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 20, 0);
   gl.enableVertexAttribArray(1);
-  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 16, 8);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 20, 12);
   gl.bindVertexArray(null);
 
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
@@ -566,13 +581,36 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     film.resize(w, h);
-    // Cover the box with the photograph, then crop in to the view.
+    // Cover the box with the photograph, then crop in to the view, inside
+    // the turned photograph. Rows stay rows under a pitch, so the plate's
+    // outline in view px is a trapezoid with level top and bottom.
     const cover = Math.max(w / IW, h / IH);
-    const k = Math.max(cover, Math.min(cover * VIEW.zoom, w / (IW - VIEW.left)));
-    const vw = w / k;
-    const vh = h / k;
-    const x0 = clamp(Math.min(IW - vw, VIEW.pole - VIEW.poleAt * vw), 0, IW - vw);
-    const y0 = clamp(VIEW.top, 0, IH - vh);
+    const e = VIEW.inset;
+    const [tl, tr, bl, br] = [
+      [e, e],
+      [IW - e, e],
+      [e, IH - e],
+      [IW - e, IH - e],
+    ].map(([x, y]) => view.view(x, y));
+    const sideAt = (a, b, y) => a[0] + ((b[0] - a[0]) * (y - a[1])) / (b[1] - a[1]);
+    const yT = Math.max(tl[1], tr[1]);
+    const yB = Math.min(bl[1], br[1]);
+    const top = view.view(VIEW.mast[0], VIEW.top)[1];
+    const mastX = view.view(VIEW.mast[0], VIEW.mast[1])[0];
+    let k = Math.max(cover, Math.min(cover * VIEW.zoom, (w * VIEW.zoom) / IW));
+    let x0 = 0;
+    let y0 = 0;
+    for (let it = 0; it < 400; it++, k *= 1.01) {
+      const vw = w / k;
+      const vh = h / k;
+      if (yB - vh < yT) continue;
+      y0 = clamp(top, yT, yB - vh);
+      const lo = Math.max(sideAt(tl, bl, y0), sideAt(tl, bl, y0 + vh));
+      const hi = Math.min(sideAt(tr, br, y0), sideAt(tr, br, y0 + vh));
+      if (hi - lo < vw) continue;
+      x0 = clamp(mastX - VIEW.poleAt * vw, lo, hi - vw);
+      break;
+    }
     // kRef: the scale the motion is tuned at (cover, as before the crop), so
     // a pull, the breeze and the sound read the same against the photograph.
     map = { ox: -x0 * k, oy: -y0 * k, k, kRef: cover };
@@ -580,10 +618,21 @@ export async function createCatenary(host, { embedded = false } = {}) {
   };
   stage.onResize(build);
 
-  // css px -> image px
+  // css px -> image px, back through the turned camera
   const toImage = (x, y) => {
     const d = stage.dpr;
-    return [(x * d - map.ox) / map.k, (y * d - map.oy) / map.k];
+    return view.img((x * d - map.ox) / map.k, (y * d - map.oy) / map.k);
+  };
+  // image px -> device px [x, y, w]
+  const toDevice = (x, y) => {
+    const [vx, vy, vw] = view.view(x, y);
+    return [map.ox + vx * map.k, map.oy + vy * map.k, vw];
+  };
+  // Device px per image px around an image point (the turned camera
+  // magnifies the bottom of the frame more than the top).
+  const scaleAt = (x, y) => {
+    const [a, b, c, dd] = view.jac(x, y);
+    return map.k * Math.sqrt(Math.abs(a * dd - b * c));
   };
   // A reach measured on a 1280 px box showing the whole photograph, in image
   // px for this box: the same draw against the wire whatever the crop.
@@ -596,7 +645,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
 
   // ---- interaction
   let hoverWire = null;
-  const catchRadius = () => (5 * stage.dpr) / map.k;
+  const catchRadius = (x, y) => (5 * stage.dpr) / scaleAt(x, y);
 
   const release = (w, speed = 0) => {
     const cg = w.caught;
@@ -635,7 +684,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
         continue;
       }
       const crossed = w.prevSide != null && Math.sign(w.prevSide) !== Math.sign(hit.side) && hit.dist < reachOf(w) * 3;
-      if ((isDown && hit.dist < catchRadius()) || crossed) {
+      if ((isDown && hit.dist < catchRadius(x, y)) || crossed) {
         w.caught = { j: hit.j, target: offsetAt(w, hit.j, x, y) / Math.max(0.2, w.lead(hit.j * w.ds)) };
         sound.wake();
       }
@@ -702,6 +751,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform1i(plateP.u.uPlate, 0);
     gl.uniform2f(plateP.u.uRes, W, H);
     gl.uniform3f(plateP.u.uMap, map.ox, map.oy, map.k);
+    gl.uniformMatrix3fv(plateP.u.uHom, true, view.toImg);
     gl.uniform2f(plateP.u.uImg, IW, IH);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, keyTex);
@@ -727,25 +777,44 @@ export async function createCatenary(host, { embedded = false } = {}) {
         // simulation nodes, eased in where the photograph keeps its wire.
         const [rx, ry, nxx, nyy] = w.rest(s);
         const yy = sampleY(w, j) * w.lead(s);
+        // The string's point in the photograph, through the turned camera.
+        const ix = rx + nxx * yy;
+        const iy = ry + nyy * yy;
+        const [vx, vy] = view.view(ix, iy);
+        const cx = map.ox + vx * k;
+        const cy = map.oy + vy * k;
+        // Across the drawn wire: perpendicular to its projected tangent, and
+        // the width a strip of the photograph's wire takes there (area scale
+        // over length scale of the local map).
+        const [ja, jb, jc, jd] = view.jac(ix, iy);
+        const tx = ja * nyy - jb * nxx;
+        const ty = jc * nyy - jd * nxx;
+        const tl = Math.hypot(tx, ty) || 1;
+        const ux = -ty / tl;
+        const uy = tx / tl;
+        const across = (Math.abs(ja * jd - jb * jc) / tl) * k;
         // Fitted widths read ~0.6 px wide of the photograph at display size.
-        const hw = ((w.knot(w.def.w, s) - WIDTH_TRIM) / 2) * k;
-        const sig = w.knot(w.def.sig, s) * k;
+        const hw = ((w.knot(w.def.w, s) - WIDTH_TRIM) / 2) * across;
+        const sig = w.knot(w.def.sig, s) * across;
         const o = w.knot(w.def.o, s);
         const r = ho[1] > ho[0] ? clamp((s - ho[0]) / (ho[1] - ho[0]), 0, 1) : 1;
         const ext = hw + 3 * sig + 2;
-        const cx = map.ox + (rx + nxx * yy) * k;
-        const cy = map.oy + (ry + nyy * yy) * k;
         for (const sgn of [-1, 1]) {
           const b = n * STRIDE;
-          wireData[b] = cx + nxx * ext * sgn;
-          wireData[b + 1] = cy + nyy * ext * sgn;
+          const ex = ux * ext * sgn;
+          const ey = uy * ext * sgn;
+          // The rest point under this vertex, in the photograph: the key and
+          // the insulator mask are looked up there.
+          const [qx, qy] = view.img(vx + ex / k, vy + ey / k);
+          wireData[b] = cx + ex;
+          wireData[b + 1] = cy + ey;
           wireData[b + 2] = ext * sgn;
           wireData[b + 3] = hw;
           wireData[b + 4] = sig;
           wireData[b + 5] = o;
           wireData[b + 6] = r;
-          wireData[b + 7] = rx + (nxx * ext * sgn) / k;
-          wireData[b + 8] = ry + (nyy * ext * sgn) / k;
+          wireData[b + 7] = qx - nxx * yy;
+          wireData[b + 8] = qy - nyy * yy;
           n++;
         }
       }
@@ -790,10 +859,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
         const order = [0, 1, 2, 2, 1, 3];
         order.forEach((ci, m) => {
           const c = corners[ci];
-          riderData[m * 4] = map.ox + (c[0] + dx) * k;
-          riderData[m * 4 + 1] = map.oy + (c[1] + dy) * k;
-          riderData[m * 4 + 2] = c[2] / meta.atlas[0];
-          riderData[m * 4 + 3] = c[3] / meta.atlas[1];
+          const [px, py, pw] = toDevice(c[0] + dx, c[1] + dy);
+          riderData[m * 5] = px;
+          riderData[m * 5 + 1] = py;
+          riderData[m * 5 + 2] = pw;
+          riderData[m * 5 + 3] = c[2] / meta.atlas[0];
+          riderData[m * 5 + 4] = c[3] / meta.atlas[1];
         });
         gl.useProgram(riderP.p);
         gl.uniform2f(riderP.u.uRes, W, H);
@@ -829,7 +900,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       let near = null;
       for (const w of wires) {
         const hit = locate(w, x, y);
-        if (hit && hit.dist < catchRadius() * 1.4 && hit.j > Math.max(0.6, w.jGrip) && hit.j < w.jExit - 0.3) near = w;
+        if (hit && hit.dist < catchRadius(x, y) * 1.4 && hit.j > Math.max(0.6, w.jGrip) && hit.j < w.jExit - 0.3) near = w;
       }
       if (near !== hoverWire) {
         hoverWire = near;
