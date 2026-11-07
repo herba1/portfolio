@@ -6,8 +6,9 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // The plate is two Poly Haven HDRIs (CC0, both from their 16k captures) rendered
 // at 3840 through the same stereographic rays: the towers from canary_wharf, the
-// sky from docklands_01, graded to a cobalt zenith with cumulus split-toned
-// warm-neutral on the sunlit tops and skylight blue in the folds, unclipped. Depth Anything V2 gives
+// sky from docklands_01: a radial cobalt, pale cyan where it meets the towers,
+// under cumulus unmixed from the capture's own blue and split-toned cyan-grey in
+// the folds to warm-neutral on the sunlit tops, unclipped. Depth Anything V2 gives
 // relative inverse depth, edge-snapped and turned into metres offline (the
 // glass corner ~30 m, the far tower down the street ~380 m); the sky sits at
 // the far end through its matte. tools/depth/bakes/fog/ builds both.
@@ -33,12 +34,22 @@ const PLATE_W = 3840; // plate.webp width; the forward-scatter blur is tuned in 
 const D_MIN = 10;
 const D_MAX = 4000;
 const HS = 500; // haze scale height, metres
-const HS_SKY = 200; // the column the sky is seen through
+const HS_SKY = 140; // the column the sky is seen through
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 200; // visibility at fog 1
+// The drag moves the transmittance of a 130 m sight line evenly, not log V:
+// air's response to log V is an S that spends half the range on nothing and
+// the last third on everything. Over this frame's distances an even step in
+// that transmittance is an even step in the haze you see, and the first half
+// of the gesture is the far towers turning blue.
+const D_REF = 130;
+const T_CLEAR = Math.exp((-3.912 * D_REF) / V_CLEAR);
+const T_THICK = Math.exp((-3.912 * D_REF) / V_THICK);
+const visibility = (f) => (-3.912 * D_REF) / Math.log(T_CLEAR + (T_THICK - T_CLEAR) * f);
 const K_RGB = [0.82, 1.0, 1.24];
-const REST = 0.92; // arrival: a white-blue field of haze
-const ROLL = 0.5; // it clears to here
+const K_SKY = [1.04, 1.0, 0.98];
+const REST = 0.88; // arrival: a white-blue field of haze (~370 m)
+const ROLL = 0.2; // it clears to here (~2.4 km: the far towers already blue)
 const LEVELS = 6;
 const DRIFT_FPS = 20;
 
@@ -92,7 +103,12 @@ vec3 tauAt(vec2 uv, vec4 aux) {
   // It gathers where the pointer rests.
   vec2 p = (uv - uBreath.xy) * vec2(uAspect, 1.0);
   b *= 1.0 + uBreath.z * exp(-dot(p, p) / 0.06);
-  return b * L * vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")});
+  // Blue goes first along the street. Over the sky the column is short and
+  // the light it takes away is the cloud's warm-white, which a Rayleigh
+  // spread turns lilac under the blue veil; there the haze is near-grey and
+  // the veil keeps the skylight's cyan.
+  vec3 k = mix(vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")}), vec3(${K_SKY.map((k) => k.toFixed(2)).join(", ")}), aux.g);
+  return b * L * k;
 }
 `;
 
@@ -286,14 +302,15 @@ void main() {
   // The film's shoulder, per channel.
   c = tone(c);
 
-  // Its top end is warm-neutral: the cumulus tops land near #FFF1E2. The shade
-  // in the clouds leans to skylight blue, hue 210.
+  // Its top end is warm-neutral: the cumulus tops land near #FFF1E2, in clear
+  // air only (veiled, a warm top under blue haze goes lilac). The shade in the
+  // clouds leans to the skylight's cyan-grey, #B7C5C5.
   l = luma(c);
   float hi = smoothstep(0.72, 0.95, l);
-  c = mix(c, l * vec3(1.05, 0.993, 0.931), hi * 0.85 * mix(0.2, 1.0, smoothstep(0.35, 0.85, clear)));
+  c = mix(c, l * vec3(1.05, 0.993, 0.931), hi * 0.85 * smoothstep(0.35, 0.85, clear));
   float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
   float shade = smoothstep(0.5, 0.68, l) * (1.0 - smoothstep(0.78, 0.92, l)) * (1.0 - smoothstep(0.1, 0.3, sat)) * (1.0 - solid);
-  c *= mix(vec3(1.0), vec3(0.95, 0.995, 1.05), shade);
+  c *= mix(vec3(1.0), vec3(0.97, 1.0, 0.99), shade);
 
   // Halation: light through the base bouncing back into the red layer, just
   // outside each highlight edge.
@@ -590,8 +607,11 @@ export async function createFog(host, { embedded = false } = {}) {
   quadDraw(down[0]);
   // Broadest only: the air is lit by the whole sky and which part of it is
   // brighter, never by one cloud. Any finer level prints a blurred copy of the
-  // cumulus into the haze, and the sky behind reads as lens-blurred, not veiled.
-  const air = chain([0, 0, 0, 0, 0.35]);
+  // cumulus into the haze: in thick air that copy is what you see where the
+  // clouds were, soft white blobs, and the sky behind reads as lens-blurred,
+  // not veiled. The veil over the sky is this field alone, so the cumulus
+  // under it lose contrast with their edges as sharp as the plate's.
+  const air = chain([0, 0, 0, 0, 0]);
 
   // The film finish works on the whole frame, so its targets follow the canvas:
   // the scene at full size, and a pyramid from half size for the halation
@@ -629,7 +649,7 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
     const t = fxTargets();
-    const vis = V_CLEAR * Math.pow(V_THICK / V_CLEAR, fog.x);
+    const vis = visibility(fog.x);
     const dpr = stage.dpr;
     gl.useProgram(P.composite.p);
     bind(0, colorTex);
