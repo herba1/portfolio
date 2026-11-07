@@ -1,6 +1,6 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, BAND, JUMP, U0, DW, DH, fwd, demoMask, bake } from "./sortCore";
+import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, JUMP, U0, DW, DH, fwd, demoMask, bake } from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
@@ -13,13 +13,15 @@ import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, BAND, JUMP, U0, DW, DH, fwd
 // texel per pixel), so every sort line is one row of a "domain" texture and
 // the sort itself is plain row sorting.
 //
-// Spans (ASDF). A position on a row belongs to a span when the brush mask
-// there is on and the pixel's luminance lies inside the interval
-// [lo(m), hi]; lo falls as the mask value m rises, so brushing longer or
-// harder lets darker pixels join and spans lengthen and merge. Two
-// neighbours share a span only if both qualify and they lie in the same
-// depth band of the photo's depth map (Depth Anything V2), so a span stops
-// at a pole's edge and never smears across it.
+// Spans (ASDF). A span may only start at grass: a position on a row belongs
+// to a span when it lies within reach of the last green pixel before it on
+// its line, the brush mask m there is on, and its luminance lies inside
+// [lo(m), hi]. Reach and lo both follow m, so brushing longer or harder lets
+// a span run further past the grass (out of the verge, up and over the sky)
+// and lets darker pixels join. A span breaks only at a true silhouette: the
+// outline of a pole, a sign or a cabinet in the photo's depth map (Depth
+// Anything V2), or a step in depth between neighbours. So the curl's lines
+// carry runs of green up into the sky as one wave, and never smear a pole.
 //
 // The sort. Odd-even transposition sort in WebGL2 fragment passes over a
 // R16UI permutation texture: each texel holds the home index of the pixel
@@ -37,16 +39,17 @@ import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, BAND, JUMP, U0, DW, DH, fwd
 // a few hundred thousand comparisons once instead of ~1500 full passes.
 //
 // Display. The photo goes through film.js (summer, light) once per resize.
-// A pixel still at home shows that developed print at full device
-// resolution; a moved pixel shows its home print pixel as one hard block,
-// so the sorted strips stay digital and crisp.
+// The sort grid is the print's own 2400x1600, so a sort line is one device
+// pixel tall at full size and every sorted run lands as a hard 1 px strip;
+// a pixel still at home shows the developed print untouched.
 //
 // Query: ?mask=demo|none &amount=0..1 holds the resting wave at that amount.
 
 const ASSET = "/lab/sort/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const PASSES = 12; // odd-even passes per frame
-const BUDGET = 2600; // passes to keep running after the last mask change
+const BUDGET = 4000; // passes to keep running after the last mask change
+const SG = GW / 1200; // grid px per layout unit
 
 const FILM = {
   ...FILM_PRESETS.summer,
@@ -92,13 +95,12 @@ precision highp float;
 precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
-uniform sampler2D uField;   // lum hi, lum lo, depth, valid
-uniform sampler2D uMask;    // R8, one texel per mask cell
+uniform sampler2D uField;   // lum hi, lum lo, depth (255 = silhouette), reach (0 = off the photo)
+uniform sampler2D uMask;    // R8, one texel per mask cell, LINEAR
 uniform int uPhase;
 uniform float uLo0;
 uniform float uLo1;
 uniform float uHi;
-uniform float uBand;
 uniform float uJump;
 uniform float uCell;
 uniform ivec2 uActive;      // [x0, x1): pairs reaching outside never swap
@@ -108,12 +110,12 @@ out uvec4 o;
 float lum(vec4 f) { return (floor(f.r * 255.0 + 0.5) * 256.0 + floor(f.g * 255.0 + 0.5)) / 65535.0; }
 float maskAt(int i, int j) {
   vec2 p = curlInv(uU0 + float(i) + 0.5, float(j) + 0.5);
-  ivec2 ms = textureSize(uMask, 0);
-  ivec2 c = clamp(ivec2(floor(p / uCell)), ivec2(0), ms - 1);
-  return texelFetch(uMask, c, 0).r;
+  return texture(uMask, p / (uCell * vec2(textureSize(uMask, 0)))).r;
 }
 bool inSpan(vec4 f, float m) {
-  if (f.a < 0.5 || f.b > 0.999 || m < 0.002) return false;
+  float a = floor(f.a * 255.0 + 0.5);
+  if (a < 0.5 || f.b > 0.999 || m < 0.5 / 255.0) return false;
+  if ((a - 1.0) / 253.0 > m) return false; // out of reach of the grass
   float l = lum(f);
   return l >= mix(uLo0, uLo1, m) && l <= uHi;
 }
@@ -130,7 +132,7 @@ void main() {
   vec4 fr = texelFetch(uField, ivec2(right, q.y), 0);
   float dl = floor(fl.b * 255.0 + 0.5);
   float dr = floor(fr.b * 255.0 + 0.5);
-  bool open = floor(dl / uBand) == floor(dr / uBand) && abs(dl - dr) < uJump
+  bool open = abs(dl - dr) < uJump
     && inSpan(fl, maskAt(left, q.y)) && inSpan(fr, maskAt(right, q.y));
   bool sw;
   if (open) {
@@ -259,7 +261,7 @@ export async function createSort(host, { embedded = false } = {}) {
     return t;
   };
   const fieldTex = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, DW, DH, field);
-  const maskTex = tex(gl.R8, gl.RED, gl.UNSIGNED_BYTE, MW, MH, mask8);
+  const maskTex = tex(gl.R8, gl.RED, gl.UNSIGNED_BYTE, MW, MH, mask8, gl.LINEAR);
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {
     const f = gl.createFramebuffer();
@@ -368,6 +370,7 @@ export async function createSort(host, { embedded = false } = {}) {
   growActive();
   let budget = 0;
   let phase = 0;
+  let load = passes; // odd-even passes this frame, adapted to frame time
   const runPasses = (n) => {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
@@ -382,7 +385,6 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.uniform1f(u.uLo0, LO0);
     gl.uniform1f(u.uLo1, LO1);
     gl.uniform1f(u.uHi, HI);
-    gl.uniform1f(u.uBand, BAND);
     gl.uniform1f(u.uJump, JUMP);
     gl.uniform1f(u.uCell, CELL);
     gl.uniform2i(u.uActive, active.x0, active.x1);
@@ -451,22 +453,32 @@ export async function createSort(host, { embedded = false } = {}) {
     unsort = null;
   });
 
-  const brush = (gx, gy, radius, fn) => {
-    const c0 = Math.max(0, Math.floor((gx - radius) / CELL));
-    const c1 = Math.min(MW - 1, Math.floor((gx + radius) / CELL));
-    const r0 = Math.max(0, Math.floor((gy - radius) / CELL));
-    const r1 = Math.min(MH - 1, Math.floor((gy + radius) / CELL));
-    for (let cy = r0; cy <= r1; cy++) {
-      for (let cx = c0; cx <= c1; cx++) {
-        const d = Math.hypot((cx + 0.5) * CELL - gx, (cy + 0.5) * CELL - gy) / radius;
-        if (d >= 1) continue;
-        const i = cy * MW + cx;
-        const w = 1 - d * d;
-        const v = fn(mask[i], w * w);
-        if (v !== mask[i]) {
-          mask[i] = v;
-          maskDirty = true;
-        }
+  // Every mask cell's place on the curl, so a stroke can paint along the
+  // sort lines rather than as a disc.
+  const cellU = new Float32Array(MW * MH);
+  const cellR = new Float32Array(MW * MH);
+  for (let i = 0; i < MW * MH; i++) {
+    const [uu, r] = fwd(((i % MW) + 0.5) * CELL, (Math.floor(i / MW) + 0.5) * CELL);
+    cellU[i] = uu;
+    cellR[i] = r;
+  }
+  // The brush: a comet laid along the sort lines through the pointer, a short
+  // head upstream and a long tail downstream, so the span it opens runs on
+  // from the grass under the hand out over whatever lies further up the curl.
+  const brush = (gx, gy, radius, tail, fn) => {
+    const [u0, r0] = fwd(gx, gy);
+    for (let i = 0; i < mask.length; i++) {
+      const a = (cellR[i] - r0) / radius;
+      if (a <= -1 || a >= 1) continue;
+      const du = cellU[i] - u0;
+      const b = du < 0 ? -du / radius : du / tail;
+      const d = Math.hypot(a, b);
+      if (d >= 1) continue;
+      const w = 1 - d * d;
+      const v = fn(mask[i], w * w);
+      if (v !== mask[i]) {
+        mask[i] = v;
+        maskDirty = true;
       }
     }
   };
@@ -482,7 +494,7 @@ export async function createSort(host, { embedded = false } = {}) {
         const ua = (now - unsort.t0) / 1000;
         // The erased disc grows from the press point; inside it the mask
         // drains, so the darkest pixels leave their spans first.
-        const R = 40 + 1500 * (1 - Math.exp(-ua * 0.8));
+        const R = (40 + 1500 * (1 - Math.exp(-ua * 0.8))) * SG;
         for (let i = 0; i < mask.length; i++) {
           const cx = ((i % MW) + 0.5) * CELL;
           const cy = (Math.floor(i / MW) + 0.5) * CELL;
@@ -492,9 +504,11 @@ export async function createSort(host, { embedded = false } = {}) {
           }
         }
       } else if (press.moved || age < 0.42) {
-        // Dwell and pressure both feed the mask: lo(m) falls, spans lengthen.
+        // Dwell and pressure both feed the mask: reach grows, lo(m) falls,
+        // spans lengthen; a held press lets the tail run on up the curl.
         const rate = (1.6 + 4 * press.pressure) * (press.moved ? 1 : 0.35);
-        brush(gx, gy, 54, (m, w) => Math.min(1, m + dt * rate * w));
+        const tail = (260 + 520 * Math.min(1, age / 2.5)) * SG;
+        brush(gx, gy, 90 * SG, tail, (m, w) => Math.min(1, m + dt * rate * w));
       }
     }
     if (maskDirty) {
@@ -506,8 +520,11 @@ export async function createSort(host, { embedded = false } = {}) {
       budget = BUDGET;
     }
     if (budget > 0) {
+      // The grid is the full print, so a slow GPU sheds passes rather than
+      // frames: the sort runs slower but the brush stays under the hand.
+      load = dt > 0.04 ? Math.max(2, load - 2) : dt < 0.022 ? Math.min(passes, load + 2) : load;
       // Un-sorting runs at half rate so the flow home stays legible.
-      const n = unsort ? Math.max(2, (passes >> 2) << 1) : passes;
+      const n = unsort ? Math.max(2, (load >> 2) << 1) : load;
       runPasses(n);
       budget -= n;
       dirty = true;
