@@ -11,8 +11,11 @@ import { createNib } from "./penAudio";
 // The pen is a thing on the table: take the nib and pull it out and let go,
 // and the arm swings from where you dropped it; take the paper and throw it,
 // and the table circles. Lifting the nib starts a new figure, and the old one
-// settles back into the sheet as a ghost. The pen lifts itself once the
-// swing has wound in, so the centre of every figure stays open.
+// is pulled into the sheet as an impression in a spot ink, the next of a
+// small fixed set each time, overprinted and a hair out of register, so the
+// sheet builds up as a riso or letterpress print with the pen's near-black
+// key always on top. The pen lifts itself once the swing has wound in, so
+// the centre of every figure stays open.
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
 // beads where its segments meet. Width and density follow the pen's speed:
@@ -112,10 +115,21 @@ function makePaperTexture(wPx, hPx, seed = 7) {
 const LIFT = 0.16;
 const DROP = 0.24;
 const TAPER = 1.8;
-// The table's share of the reach, and how pale a settled figure becomes.
+// The table's share of the reach.
 const TABLE = 0.24;
-const GHOST = 0.1;
 const SETTLE_S = 1.6;
+// The sheet is a two-colour (then three-, four-colour) print. The pen draws
+// the key in near-black; when it comes down on a new figure, the one it
+// finished is pulled into the sheet as an impression in the next spot ink,
+// at full strength and overprinted (multiply), each plate a fraction of a
+// millimetre out of register with the key, as a riso or a jobbing
+// letterpress lays it. The key always prints last, over every spot.
+const SPOTS = [
+  { rgb: [232, 78, 44], mx: 1.5, my: -1.1 }, // vermilion
+  { rgb: [0, 112, 186], mx: -1.3, my: 1.4 }, // process blue
+  { rgb: [255, 76, 150], mx: 1.2, my: 1.5 }, // fluorescent pink
+  { rgb: [0, 128, 120], mx: -1.6, my: -1.2 }, // teal
+];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
 // The pen arm is drawn as a hairline from the nib toward its gimbal, and
@@ -137,27 +151,35 @@ const layer = (w, h) => {
 };
 
 export async function createHarmonograph(host) {
-  // Three layers. The ground and the sheet are DOM: the sheet is its own
-  // canvas that is only ever inked a stroke at a time, and the table moves
-  // it with a compositor transform. Over them the stage canvas carries the
-  // pen arm (repainted in its own small rectangle) and a sheet being torn.
-  // The arm is only a hairline and a ring at the nib: the drawing is the
-  // only figure on the sheet.
+  // Three layers. The ground and the sheet are DOM: the sheet is two
+  // canvases the table moves together with a compositor transform, the
+  // printed sheet (paper and the spot impressions) and over it the key plate
+  // the pen is inking now, a stroke at a time, which the compositor
+  // overprints (multiply) so the sheet never has to be recomposed for it.
+  // Over them the stage canvas carries the pen arm (repainted in its own
+  // small rectangle) and a sheet being torn. The arm is only a hairline and
+  // a ring at the nib: the drawing is the only figure on the sheet.
   const stage = createStage(host, { dpr: 2, alpha: true });
   const ctx = stage.ctx;
   const deck = document.createElement("div");
   deck.className = "kit-canvas";
   deck.style.background = GROUND;
-  const comp = document.createElement("canvas");
-  Object.assign(comp.style, {
+  const pad = document.createElement("div");
+  Object.assign(pad.style, {
     position: "absolute",
     left: "0px",
     top: "0px",
-    background: `rgb(${PAPER.join(",")})`,
+    isolation: "isolate",
     boxShadow: "0 1px 2px rgba(40,32,20,0.07), 0 1px 0 rgba(60,48,30,0.05), 0 2px 0 rgba(60,48,30,0.035)",
     willChange: "transform",
   });
-  deck.appendChild(comp);
+  const fill = { position: "absolute", left: "0px", top: "0px", width: "100%", height: "100%", display: "block" };
+  const comp = document.createElement("canvas");
+  Object.assign(comp.style, fill, { background: `rgb(${PAPER.join(",")})` });
+  const key = document.createElement("canvas");
+  Object.assign(key.style, fill, { mixBlendMode: "multiply" });
+  pad.append(comp, key);
+  deck.appendChild(pad);
   host.insertBefore(deck, stage.canvas);
   const compCtx = comp.getContext("2d");
   let shownOff = "";
@@ -195,20 +217,24 @@ export async function createHarmonograph(host) {
   let pivotY = 0;
   let dpr = 2;
   let paperTex = null;
-  // The sheet in three layers: settled ghosts baked into the paper, the
-  // figure now settling, and the live figure.
+  // The sheet in layers: the impressions already pulled, baked into the
+  // paper; the figure now being pulled (its key, and the same line in its
+  // spot ink); and the live key on its own canvas. The printed sheet is
+  // composed only while a figure is being pulled; a steady frame is the pen
+  // inking the key.
   let base = null;
   let baseCtx = null;
   let prev = null;
   let prevCtx = null;
-  let cur = null;
-  let curCtx = null;
-  // What the screen shows of the sheet: all three composed. The pen inks it
-  // directly, so a steady frame is one blit; it is recomposed only while a
-  // figure is settling.
-  let settleT = 1; // 0..1 while the previous figure fades into the paper
+  let spot = null;
+  let spotCtx = null;
+  const cur = key;
+  const curCtx = key.getContext("2d");
+  let settleT = 1; // 0..1 while the previous figure is pulled into the sheet
   let prevInk = false;
   let curInk = false;
+  let pull = 0; // impressions pulled so far; the next takes SPOTS[pull % n]
+  let pulling = SPOTS[0];
 
   // Pen.
   let pen = "down"; // down | up
@@ -260,44 +286,67 @@ export async function createHarmonograph(host) {
     last = null;
     compose();
   };
+  // The printed sheet: paper and pulled impressions, then the figure being
+  // pulled. Its key lets go as its spot ink comes up and slips the last
+  // fraction of a millimetre out of register.
   const compose = () => {
     compCtx.setTransform(1, 0, 0, 1, 0, 0);
+    compCtx.globalCompositeOperation = "source-over";
     compCtx.globalAlpha = 1;
     compCtx.drawImage(base, 0, 0);
     if (prevInk) {
-      compCtx.globalAlpha = GHOST + (1 - GHOST) * (1 - ease(settleT));
-      compCtx.drawImage(prev, 0, 0);
+      const e = ease(settleT);
+      compCtx.globalCompositeOperation = "multiply";
+      const k = 1 - smooth(0.2, 1, settleT);
+      if (k > 0) {
+        compCtx.globalAlpha = k;
+        compCtx.drawImage(prev, 0, 0);
+      }
+      compCtx.globalAlpha = smooth(0, 0.55, settleT);
+      compCtx.drawImage(spot, pulling.mx * e * dpr, pulling.my * e * dpr);
       compCtx.globalAlpha = 1;
+      compCtx.globalCompositeOperation = "source-over";
     }
-    compCtx.drawImage(cur, 0, 0);
   };
-  const inks = () => (settleT < 1 ? [curCtx] : [curCtx, compCtx]);
+  const inks = () => [curCtx];
 
-  // The settling figure goes into the paper for good: older ghosts fade a
-  // little further each time, so the sheet never silts up.
+  // The key of a finished figure, as a plate in spot ink. The line is laid
+  // twice before it is flooded with colour: a little ink gain, so the
+  // hairlines print at full strength instead of as a pale tint.
+  const tint = () => {
+    wipe(spotCtx);
+    spotCtx.drawImage(prev, 0, 0);
+    spotCtx.drawImage(prev, 0, 0);
+    spotCtx.globalCompositeOperation = "source-in";
+    spotCtx.fillStyle = `rgb(${pulling.rgb.join(",")})`;
+    spotCtx.fillRect(0, 0, spot.width, spot.height);
+    spotCtx.globalCompositeOperation = "source-over";
+  };
+
+  // The impression goes into the sheet for good, overprinting whatever was
+  // pulled before it.
   const bake = () => {
     if (!prevInk) return;
     baseCtx.setTransform(1, 0, 0, 1, 0, 0);
-    baseCtx.globalAlpha = 0.3;
-    baseCtx.drawImage(paperTex, 0, 0);
-    baseCtx.globalAlpha = GHOST;
-    baseCtx.drawImage(prev, 0, 0);
-    baseCtx.globalAlpha = 1;
+    baseCtx.globalCompositeOperation = "multiply";
+    baseCtx.drawImage(spot, pulling.mx * dpr, pulling.my * dpr);
+    baseCtx.globalCompositeOperation = "source-over";
     wipe(prevCtx);
     prevInk = false;
     settleT = 1;
     compose();
   };
-  // A new figure begins: the live one starts settling.
+  // A new figure begins: the live one is pulled into the sheet in the next
+  // ink, and the key is clean for the pen.
   const settle = () => {
     if (!curInk) return;
     bake();
-    const t = prev;
-    prev = cur;
-    prevCtx = curCtx;
-    cur = t;
-    curCtx = t.getContext("2d");
+    wipe(prevCtx);
+    prevCtx.drawImage(cur, 0, 0);
     wipe(curCtx);
+    pulling = SPOTS[pull % SPOTS.length];
+    pull++;
+    tint();
     prevInk = true;
     curInk = false;
     settleT = 0;
@@ -318,16 +367,23 @@ export async function createHarmonograph(host) {
     pivotX = Math.min(w - 24, sheetX + side + Math.max(36, (w - sheetX - side) * 0.5));
     pivotY = sheetY + side * 0.62;
     const n = Math.round(side * dpr);
-    const keep = base ? [base, prev, cur] : null;
+    let keep = null;
+    if (base) {
+      const k = layer(cur.width, cur.height);
+      k.getContext("2d").drawImage(cur, 0, 0);
+      keep = [base, prev, k];
+    }
     base = layer(n, n);
     baseCtx = base.getContext("2d");
     prev = layer(n, n);
     prevCtx = prev.getContext("2d");
-    cur = layer(n, n);
-    curCtx = cur.getContext("2d");
+    spot = layer(n, n);
+    spotCtx = spot.getContext("2d");
     comp.width = n;
     comp.height = n;
-    Object.assign(comp.style, { width: `${side}px`, height: `${side}px`, left: `${sheetX}px`, top: `${sheetY}px` });
+    key.width = n;
+    key.height = n;
+    Object.assign(pad.style, { width: `${side}px`, height: `${side}px`, left: `${sheetX}px`, top: `${sheetY}px` });
     shownOff = "";
     dirtyAll = true;
     paperTex = makePaperTexture(n, n);
@@ -338,6 +394,7 @@ export async function createHarmonograph(host) {
       prevCtx.drawImage(keep[1], 0, 0, n, n);
       curCtx.drawImage(keep[2], 0, 0, n, n);
       ({ prevInk, curInk, settleT } = ink);
+      if (prevInk) tint();
       compose();
       for (const o of all) scaleOsc(o, R / prevR);
     }
@@ -462,12 +519,10 @@ export async function createHarmonograph(host) {
 
   const simulate = (seconds) => {
     const n = Math.max(1, Math.round(seconds / H));
-    for (const c of [curCtx, compCtx]) {
-      c.setTransform(1, 0, 0, 1, 0, 0);
-      c.globalAlpha = 1;
-      c.lineCap = "round";
-      c.lineJoin = "round";
-    }
+    curCtx.setTransform(1, 0, 0, 1, 0, 0);
+    curCtx.globalAlpha = 1;
+    curCtx.lineCap = "round";
+    curCtx.lineJoin = "round";
     const inking = pen === "down" && lift < 0.06;
     const held = hold && (hold.kind === "pen" || hold.taken) ? hold.kind : null;
     let [x0, y0] = penPos();
@@ -610,7 +665,10 @@ export async function createHarmonograph(host) {
   const tear = () => {
     if (leaving) return;
     const snap = layer(comp.width, comp.height);
-    snap.getContext("2d").drawImage(comp, 0, 0);
+    const sc = snap.getContext("2d");
+    sc.drawImage(comp, 0, 0);
+    sc.globalCompositeOperation = "multiply";
+    sc.drawImage(cur, 0, 0);
     const [ox, oy] = tableOff();
     leaving = { canvas: snap, t: 0, ox, oy };
     clearSheet();
@@ -735,7 +793,7 @@ export async function createHarmonograph(host) {
     const [ox, oy] = tableOff();
     const off = `translate3d(${ox}px, ${oy}px, 0)`;
     if (off !== shownOff) {
-      comp.style.transform = off;
+      pad.style.transform = off;
       shownOff = off;
     }
 
