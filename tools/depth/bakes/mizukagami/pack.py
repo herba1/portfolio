@@ -7,9 +7,10 @@
 #                            filled by LaMa: the sky dome for rays that escape,
 #                            and what a reflected ray sees behind a pole
 #   aux.png     3000 x 2400  r  height above the road, -0.1..0.6 m (255 = higher)
-#                            g  log2 range, 2..2000 m (255 = sky); read unfiltered
+#                            g  log2 range, 2..2000 m (255 = sky, and cable specks); read unfiltered
 #                            b  sky pixels: wire alpha; others: 128 road, 255 thin
-#   aux2.png     750 x 600   r  log2 range of the wire surface
+#   aux2.png     750 x 600   r  log2 range of the wire surface (the shader now solves the
+#                               10 m sheet exactly and no longer reads it)
 #                            g  log2 range behind thin things
 #   scene.json               camera, plane and code ranges for the shader
 import sys, json, os, numpy as np, cv2
@@ -38,6 +39,23 @@ r = np.where(h > HMAX, 255, r).astype(np.uint8)
 gch = dcode(D)
 sky = gch == 255
 b = np.where(sky, np.round(np.clip(wire, 0, 1) * 255), np.where(thin, 255, np.where(ground, 128, 0))).astype(np.uint8)
+# Cables: MoGe gives a depth to stretches of the thick cables, so the matte
+# has holes there and the reflect pass meets them as scattered solid specks,
+# not as wire. Any isolated non-sky speck in the open sky no taller than
+# 12 px goes to the wire layer, its alpha (and the alpha the matte dropped
+# around it) taken from the sky matte, so every cable is one continuous line.
+H0 = 1688
+skym = cv2.imread(wd + "/sky.png", cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+ns = ~sky & (np.arange(H)[:, None] < H0) & (b != 128)
+n, lab, st, _ = cv2.connectedComponentsWithStats(ns.astype(np.uint8), connectivity=8)
+keep = np.array([i > 0 and st[i, 3] <= 12 and st[i, 4] <= 4000 and st[i, 1] + st[i, 3] < H0 - 2 for i in range(n)])
+cab = keep[lab]
+near = cv2.dilate(cab.astype(np.uint8), np.ones((7, 7), np.uint8)).astype(bool)
+alpha = np.pad(np.clip(1 - skym, 0, 1), ((0, H - skym.shape[0]), (0, 0))) * 255
+bf = np.where(near & (cab | sky), np.maximum(np.where(cab, 0, b), alpha), b)
+b = np.round(np.where(cab, np.maximum(bf, 200), bf)).astype(np.uint8)
+gch[cab] = 255
+print("cable specks to the wire layer: %d (%d px)" % (keep.sum(), cab.sum()))
 cv2.imwrite(out + "/aux.png", np.dstack([b, gch, r]), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
 sw, sh = 750, 600

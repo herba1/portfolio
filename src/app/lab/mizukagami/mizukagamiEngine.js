@@ -19,9 +19,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    point map in screen space (inverse depth linear along the path, 96
 //    steps, then bisection). Solid things stop it; thin things (poles, lamp
 //    standards, people) stop it only within their thickness, and behind them
-//    it meets the LaMa-filled background; wires are a smooth surface of known
-//    height that the ray crosses once. A ray that escapes reads the filled
-//    sky in its own direction.
+//    it meets the LaMa-filled background. Wires hang on one horizontal sheet
+//    10 m up, solved exactly: the pixel's footprint maps to a parallelogram
+//    on the sheet and the matte is averaged over it, so a reflected wire is
+//    one continuous, anti-aliased line, hazed by distance, weaker where
+//    Fresnel is. A ray that escapes, or leaves the frame, reads the filled
+//    sky in its own mirrored direction, never a clamped edge texel.
 //  - compose: water wherever the surface is below the level. Fresnel for
 //    n = 1.333 by the angle of view; the bottom seen through the refracted
 //    ray, darkened wet and lost to Beer-Lambert extinction and in-scatter by
@@ -81,6 +84,10 @@ ${COMMON}
 
 const int STEPS = 96;
 const vec3 WIRE = vec3(0.03, 0.034, 0.04);
+// The bake hangs every wire on one horizontal sheet this high above the road
+// (geo.py): the crossarms measure 10-12.5 m, the lower lines a little under.
+const float WIRE_H = 10.0;
+const int WIRE_N = 12;   // samples along a pixel's footprint on the wire sheet
 
 // scene range at a plate pixel: x = range (m, 1e9 for sky), y = flag (b)
 vec2 sceneAt(vec2 s) {
@@ -91,17 +98,62 @@ vec2 sceneAt(vec2 s) {
   return vec2(decodeRange(g / 254.0), a.b);
 }
 vec3 plateAt(vec2 s) { return textureLod(uPlateTex, s / uPlate, 0.0).rgb; }
+bool inPhoto(vec2 s) { return s.x >= 0.0 && s.y >= 0.0 && s.x <= uPhoto.x && s.y <= uPhoto.y; }
 vec3 cleanAt(vec2 s) {
   vec2 q = clamp(s, vec2(0.5), uPhoto - 0.5);
   return textureLod(uClean, q / uPhoto, 0.0).rgb;
 }
-vec2 aux2At(vec2 s) {
-  vec2 a = textureLod(uAux2, clamp(s / uPlate, 0.0, 1.0), 0.0).gr; // back, wire
-  return vec2(exp2(mix(uDRange.x, uDRange.y, a.x)), exp2(mix(uDRange.x, uDRange.y, a.y)));
+// The filled sky in a direction. Out of the photo there is no data: rather
+// than smear its edge texel into streaks, take the sky in the same column
+// just inside the frame, softened, which is what the sky there is like.
+vec3 skyDir(vec2 s) {
+  if (inPhoto(s)) return cleanAt(s);
+  vec2 q = clamp(s, vec2(24.0), uPhoto - 24.0);
+  return textureLod(uClean, q / uPhoto, 4.0).rgb;
+}
+float backAt(vec2 s) {
+  float a = textureLod(uAux2, clamp(s / uPlate, 0.0, 1.0), 0.0).g; // range behind thin things
+  return exp2(mix(uDRange.x, uDRange.y, a));
+}
+// Wire alpha, bilinear, from sky pixels only (elsewhere b carries flags).
+float wireAt(vec2 s) {
+  vec2 f = s - 0.5;
+  ivec2 i = ivec2(floor(f));
+  vec2 t = fract(f);
+  ivec2 hi = ivec2(uPlate) - 1;
+  float a = 0.0;
+  for (int k = 0; k < 4; k++) {
+    ivec2 o = ivec2(k & 1, k >> 1);
+    vec4 x = texelFetch(uAux, clamp(i + o, ivec2(0), hi), 0);
+    float w = (o.x == 1 ? t.x : 1.0 - t.x) * (o.y == 1 ? t.y : 1.0 - t.y);
+    a += w * (x.g * 255.0 > 254.5 ? x.b : 0.0);
+  }
+  return a;
+}
+// Where the reflected ray of water pixel p crosses the wire sheet: plate px,
+// and the reflected path length from the water to it (m).
+vec3 wireCross(vec2 p) {
+  vec3 d = rayDir(p);
+  float nd = min(dot(uN, d), -2e-4);
+  vec3 Wp = d * ((uLevel - uCamH) / nd);
+  vec3 r = reflect(d, uN);
+  float t = (WIRE_H - uLevel) / max(dot(uN, r), 1e-4);
+  vec3 X = Wp + r * t;
+  return vec3(projectP(X), t);
+}
+float fresnelW(float ci) {
+  float n = 1.333;
+  float st2 = (1.0 - ci * ci) / (n * n);
+  float ct = sqrt(max(1.0 - st2, 0.0));
+  float rs = (ci - n * ct) / (ci + n * ct);
+  float rp = (n * ci - ct) / (n * ci + ct);
+  return 0.5 * (rs * rs + rp * rp);
 }
 
 void main() {
   vec2 p = platePx(vUv);
+  // one output pixel, in plate px (taken before any branch)
+  vec2 px = vec2(abs(dFdx(p.x)), abs(dFdy(p.y)));
   vec3 d = rayDir(p);
   float nd = dot(uN, d);
   if (nd > -2e-4) { outColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
@@ -112,43 +164,48 @@ void main() {
   vec2 s1 = vec2(uC.x + uF * r.x / max(-r.z, 1e-4), uC.y - uF * r.y / max(-r.z, 1e-4));
   float z0 = -Wp.z;
 
+  // The wires, solved, not marched: the sheet is a plane, so the reflected
+  // ray meets it at one exact point, and the pixel's whole footprint maps to
+  // a small parallelogram on it. The wire's coverage is the matte averaged
+  // over that parallelogram: a continuous, anti-aliased line however much
+  // the mirror squeezes it.
+  vec3 wc = wireCross(p);
+  vec2 sx = wc.xy;
+  float uWire = 1.0 - z0 / max(-(Wp.z + r.z * wc.z), 1e-3); // its place along the march
+  vec2 ey = wireCross(p + vec2(0.0, 0.5 * px.y)).xy - wireCross(p - vec2(0.0, 0.5 * px.y)).xy;
+  vec2 ex = wireCross(p + vec2(0.5 * px.x, 0.0)).xy - wireCross(p - vec2(0.5 * px.x, 0.0)).xy;
+  float wireA = 0.0;
+  if (sx.y > 0.0 && sx.y < uPhoto.y && sx.x > 0.0 && sx.x < uPhoto.x) {
+    int n = int(clamp(ceil(length(ey) / 0.75), 1.0, float(WIRE_N)));
+    float acc = 0.0;
+    for (int i = 0; i < WIRE_N; i++) {
+      if (i >= n) break;
+      float f = (float(i) + 0.5) / float(n) - 0.5;
+      vec2 c = sx + ey * f;
+      acc += wireAt(c - 0.25 * ex) + wireAt(c + 0.25 * ex);
+    }
+    float cov = acc / float(2 * n);
+    // below a few percent coverage a wire is matte noise, not a line
+    cov *= smoothstep(0.05, 0.14, cov);
+    // Fresnel: where the eye looks steeply down, the mirror is weak and the
+    // wires go with it (the sky they cross stays, being far brighter)
+    float F = fresnelW(clamp(-dot(d, uN), 0.0, 1.0));
+    cov *= mix(0.45, 1.0, smoothstep(0.06, 0.4, F));
+    wireA = cov;
+  }
+
   vec3 col = vec3(0.0);
   bool hit = false;
-  float wireA = 0.0;
-  bool crossed = false;
+  float uHit = 1.0;
   float prevU = 0.0;
-  float prevW = -1.0; // ray depth minus the wire surface's, at the last step
   float du = 1.0 / float(STEPS);
   for (int i = 1; i < STEPS; i++) {
     float u = float(i) * du;
     vec2 s = mix(s0, s1, u);
     if (s.y < 0.0 || s.x < 0.0 || s.x > uPlate.x) break;
     float zr = z0 / (1.0 - u);
-    float dz = zr * zr / z0 * du;
     float ax = axial(s);
     vec2 sc = sceneAt(s);
-    vec2 a2 = aux2At(s);
-    // wires: a smooth surface of known height, crossed once on the way up
-    float sw = zr - a2.y / ax;
-    if (!crossed && sw >= 0.0) {
-      crossed = true;
-      // exact crossing: z(u) = z0 / (1 - u) meets the sheet; a few fixed-point
-      // steps, since the sheet's range varies smoothly along the path
-      float uc = mix(prevU, u, clamp(-prevW / max(sw - prevW, 1e-4), 0.0, 1.0));
-      for (int j = 0; j < 4; j++) {
-        vec2 sj = mix(s0, s1, uc);
-        uc = clamp(1.0 - z0 / (aux2At(sj).y / axial(sj)), prevU, u);
-      }
-      vec2 sx = mix(s0, s1, uc);
-      if (texelFetch(uAux, ivec2(sx), 0).g * 255.0 > 254.5) {
-        // a wire is 1-3 px: take the strongest of the pixel and its vertical neighbours
-        float a0 = textureLod(uAux, sx / uPlate, 0.0).b;
-        float a1 = textureLod(uAux, (sx + vec2(0.0, 0.7)) / uPlate, 0.0).b;
-        float a2 = textureLod(uAux, (sx - vec2(0.0, 0.7)) / uPlate, 0.0).b;
-        wireA = max(a0, 0.8 * max(a1, a2));
-      }
-    }
-    prevW = sw;
     if (sc.x < 1e8) {
       float zs = sc.x / ax;
       bool thin = sc.y > 0.75;
@@ -172,23 +229,34 @@ void main() {
         col = plateAt(sh);
         if (uDebug > 0.5) col = thin ? vec3(0.0, 1.0, 0.0) : vec3(1.0, 0.0, 0.0) * fract(log2(zs));
         hit = true;
+        uHit = u;
         break;
       }
       if (thin && zr > zs) {
         // behind a pole: the filled background is there
-        float zb = a2.x / ax;
+        float zb = backAt(s) / ax;
         if (zr >= zb) {
-          col = cleanAt(s);
+          col = inPhoto(s) ? cleanAt(s) : skyDir(s1);
           if (uDebug > 0.5) col = vec3(0.0, 0.0, 1.0);
           hit = true;
+          uHit = u;
           break;
         }
       }
     }
     prevU = u;
   }
-  if (!hit) col = uDebug > 0.5 ? vec3(0.1) : cleanAt(s1);
-  if (wireA > 0.0) col = mix(col, uDebug > 0.5 ? vec3(1.0, 0.0, 1.0) : WIRE * (0.6 + 0.4 * col), clamp(wireA, 0.0, 1.0));
+  // A ray that escapes, or leaves the frame, reads the filled sky in its own
+  // mirrored direction, never a clamped edge texel.
+  if (!hit) col = uDebug > 0.5 ? vec3(0.1) : skyDir(s1);
+  // a wire shows only where the ray reaches the sheet before anything solid
+  wireA *= 1.0 - smoothstep(uHit - 0.01, uHit, uWire);
+  if (wireA > 0.0) {
+    // far wires are hazed toward the sky they hang in
+    float haze = 1.0 - exp(-(length(Wp) + wc.z) / 420.0);
+    vec3 wcol = mix(WIRE * (0.6 + 0.4 * col), col, clamp(haze, 0.0, 0.7));
+    col = mix(col, uDebug > 0.5 ? vec3(1.0, 0.0, 1.0) : wcol, clamp(wireA, 0.0, 1.0));
+  }
   outColor = vec4(col, 1.0);
 }`;
 
@@ -317,7 +385,9 @@ void main() {
     pm.y = max(pm.y, uC.y + 1.0);
     vec2 ruv = vec2((pm.x - uView.x) / uView.z, 1.0 - (pm.y - uView.y) / uView.w);
     float lod = log2(1.0 + rp.z * 400.0);
-    vec3 refl = textureLod(uRefl, clamp(ruv, vec2(0.0), vec2(1.0)), lod).rgb;
+    // a ripple can tip the mirror image past the print's edge: fold back
+    ruv = 1.0 - abs(1.0 - abs(ruv));
+    vec3 refl = textureLod(uRefl, ruv, lod).rgb;
 
     // the bottom, through the refracted ray
     vec3 T = refract(d, nw, 1.0 / 1.333);
@@ -325,6 +395,11 @@ void main() {
     float path = depthW / ct;
     vec3 B = Wp + T * path;
     vec2 pb = B.z < -1e-3 ? projectP(B) : p;
+    // The refracted ray meets the bottom nearer the lens than the water point,
+    // so for the last rows it lands below the plate. The road there is the
+    // same asphalt: fold back into it instead of smearing the edge row.
+    if (pb.y > uPlate.y - 1.0) pb.y = 2.0 * (uPlate.y - 1.0) - pb.y;
+    pb.x = clamp(pb.x, 0.5, uPlate.x - 0.5);
     vec3 bot = base;
     if (heightAt(pb) < uLevel) bot = texture(uPlateTex, pb / uPlate).rgb;
     bot = wetten(bot, 1.0);
