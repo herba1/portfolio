@@ -1,0 +1,77 @@
+{
+  "title": "Slit-Scan",
+  "description": "Ten seconds of a two-car train running past an old wooden country station in low evening sun, shown so that every point of the picture is at its own moment. A slit runs through the frame: left of it is now, right of it is a few seconds ago, and across it those seconds are packed into a band where the train comes out compressed, mirrored and leaning. Press and drag and the slit follows your hand like a rope, so you sculpt the time front; where it climbs exactly as fast as the train runs, one sliver of the train is pulled into rigid ribbons. Hold and it deepens. The station, the fence and the parked cars never moved, so they stay perfectly sharp whatever you do. Let go and it eases back.",
+  "tags": [
+    "generative",
+    "WebGL",
+    "Video",
+    "Time"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-07T02:00:00.000Z",
+  "intent": "Time displacement after Zbigniew Rybczyński's time-slicing work and Adam Magyar's Stainless (2010-11, https://nautil.us/a-photographer-who-tinkers-with-time-234772), and herb's generative reference 2 (a street photo whose region is pulled into rigid strips). One process pushed to the edge: a real slit-scan over real footage. The stabilised clip's moving band is decoded with WebCodecs into a ring of 157 frames (luma full-res, chroma half) and every output pixel samples t = clock - D(x, y), with D a single sculpted time front (depth x smoothstep across a slit curve c(y) that the pointer drags like a rope), read through a cubic B-spline so the train's magnification has no kinks. Between ring frames the fetch follows the train's measured velocity inside its hand-fitted front and tail, with an occluder mask for the fence and grass in front of it, so time is continuous and the ribbons are straight instead of stepped; static pixels are drawn from a median plate of the empty station, so nothing that stood still ever moves. ?t=seconds holds the clock, ?front=flat shows the clip as shot, ?slit=x,lean, ?depth=seconds, ?bend=y,x;... bends the slit for a still.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.52,
+      0.5
+    ],
+    "to": [
+      0.28,
+      0.32
+    ]
+  },
+  "probe": [
+    {
+      "idle": 5000
+    },
+    {
+      "drag": [
+        [
+          0.52,
+          0.5
+        ],
+        [
+          0.28,
+          0.32
+        ]
+      ],
+      "ms": 2400
+    },
+    {
+      "idle": 2500
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.8
+        ],
+        [
+          0.75,
+          0.7
+        ]
+      ],
+      "ms": 1800
+    },
+    {
+      "idle": 3500
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://pixabay.com/videos/train-vehicle-station-traffic-84908/",
+      "file": "https://cdn.pixabay.com/video/2021/08/13/84908-587646663_large.mp4",
+      "author": "Luster2739",
+      "licence": "Pixabay Content License",
+      "note": "1920x1080 29.97 fps; Ohmi Railway, Koka, Shiga. Seconds 14-32 used: stabilised (phase correlation on the station roof, Lanczos warp), median plate from 14-21 s, band rows 256-704 of 21.5-32 s at 15 fps as VP9 (and H.264 fallback), occluder mask and train track (tools/depth/bakes/slit-scan/)."
+    },
+    "https://nautil.us/a-photographer-who-tinkers-with-time-234772",
+    "https://en.wikipedia.org/wiki/Slit-scan_photography",
+    "https://en.wikipedia.org/wiki/Zbigniew_Rybczy%C5%84ski"
+  ]
+}
