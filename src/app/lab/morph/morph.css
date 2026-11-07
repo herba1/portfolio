@@ -200,9 +200,9 @@
 }
 
 /* the lead wheel's 1: Geist's proportional figure, a stem and flag with no
-   slab foot, in its proportional advance. paint() narrows the lead wheel's
-   slot to it, so "1:23" is spaced as the face spaces it, at the law's
-   tracking, while every rolling wheel keeps its tabular slot. */
+   slab foot. paint() sets the lead wheel's slot and the colon's from the
+   figures' optical edges, so the colon stands in an even gap, ink to ink,
+   while every rolling wheel keeps its tabular drum. */
 .mp-fig-1 {
   font-variant-numeric: proportional-nums;
   font-feature-settings: "kern" 1;

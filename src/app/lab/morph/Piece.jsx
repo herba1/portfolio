@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
-import { BODY, FADE, LEAD_ADV, LEAD_LSB, PANEL, REMAIN_W, ROW, flat, isFade, layout, leadOf, trackPx } from "./states";
+import { BODY, COLON_L, COLON_R, FADE, GAP_EM, LEAD_LSB, LEAD_OPT_R, OPT_L, OPT_R, PANEL, REMAIN_W, ROW, colonSpan, flat, isFade, layout, leadOf, trackPx } from "./states";
 import { squircle } from "./squircle";
 
 import "./morph.css";
@@ -34,11 +34,12 @@ const WHEELS = {
 const WHEEL_ZETA = 0.78;
 
 // The clock hangs flush on the text column by its ink, not its box: it
-// slides left by the lead figure's left side bearing (LEAD_LSB, measured
-// from rendered pixels at the clock's weight, in em so it holds as the clock
-// grows). The lead wheel's slot is that figure's own advance (LEAD_ADV): the
-// tabular slot for every figure but the 1, which is drawn footless at its
-// proportional width. Both follow the lead wheel through a roll.
+// slides left by the lead figure's left side bearing (LEAD_LSB, in em so it
+// holds as the clock grows). The colon is spaced optically, ink to ink: the
+// figure before it and the seconds wheels keep their drums, and the colon's
+// slot is set every frame from the optical edges of the figures either side
+// of it, followed through a roll, so its two gaps stay equal as the wheels
+// turn (see colonSpan in states.js).
 
 // The fallback catalogue carries no lengths, so each title gets a stable one
 // in a plausible range rather than a random one per visit.
@@ -169,6 +170,7 @@ export default function Piece() {
   const ruleRef = useRef(null);
   const titleRef = useRef(null);
   const wheelRefs = useRef({});
+  const colonRef = useRef(null);
 
   const [mode, setMode] = useState("idle");
   const [idx, setIdx] = useState(0);
@@ -264,25 +266,47 @@ export default function Piece() {
     const clock = elapsedRef.current;
     const Lw = live.current;
     const size = v("es");
-    let bearing = 0;
+    // each wheel rolls its strip; `at` reads a per-digit metric at the
+    // wheel's current, possibly mid-roll, position
+    const pos = {};
     for (const key in WHEELS) {
       const el = wheelRefs.current[key];
       const w = Lw.wheels?.[key];
       if (!el || !w) continue;
       const { m } = WHEELS[key];
-      const pos = ((w.x % m) + m) % m;
-      el.style.transform = `translate3d(0,${-pos}em,0)`;
-      // the lead wheel's slot and ink bearing, followed through the roll; the
-      // other wheels keep their tabular slots
-      if (key === (Lw.elapsed >= 600 ? "mt" : "mu")) {
-        const i = Math.floor(pos);
-        const f = pos - i;
-        const a = i % m;
-        const b = (i + 1) % m;
-        bearing = LEAD_LSB[a] * (1 - f) + LEAD_LSB[b] * f;
-        el.parentNode.style.width = `${LEAD_ADV[a] * (1 - f) + LEAD_ADV[b] * f + trackEm(size)}em`;
-      } else el.parentNode.style.width = "";
+      pos[key] = ((w.x % m) + m) % m;
+      el.style.transform = `translate3d(0,${-pos[key]}em,0)`;
     }
+    const at = (table, key) => {
+      const p = pos[key] ?? 0;
+      const { m } = WHEELS[key];
+      const i = Math.floor(p);
+      const f = p - i;
+      return table[i % m] * (1 - f) + table[(i + 1) % m] * f;
+    };
+    const two = Lw.elapsed >= 600;
+    const lead = two ? "mt" : "mu";
+    const bearing = at(LEAD_LSB, lead);
+    const gap = GAP_EM + trackEm(size);
+    const slot = (key, em) => {
+      const el = wheelRefs.current[key]?.parentNode;
+      if (el) el.style.width = em == null ? "" : `${em}em`;
+    };
+    // tens of minutes, from ten minutes up: the lead keeps the gap of "23" to
+    // the minutes figure, drawn for a 2, so the minutes drum keeps its place
+    if (two) slot("mt", at(LEAD_OPT_R, "mt") + gap - OPT_L[2]);
+    // The colon between the figure before it and the seconds tens: its span
+    // is fixed for the figure before it (the lead's own edge, or a 2 for a
+    // tabular minutes drum), so the seconds keep their address, and the
+    // colon's dots centre in what the span leaves, so the gap from the
+    // stem to the dots always equals the gap from the dots to the bowl.
+    const r = two ? at(OPT_R, "mu") : at(LEAD_OPT_R, "mu");
+    const span = colonSpan(two ? OPT_R[2] : r, size);
+    const g2 = (span + at(OPT_L, "st") - r - (COLON_R - COLON_L)) / 2;
+    const colonAt = r + g2 - COLON_L;
+    slot("mu", colonAt);
+    if (colonRef.current) colonRef.current.style.width = `${span - colonAt}em`;
+    slot("st", null);
     // the type column follows the lead figure: its left edge and measure
     const cl = v("cl");
     const cw = v("cw");
@@ -679,7 +703,7 @@ export default function Piece() {
             <span className="mp-clock" aria-hidden="true">
               {(sec >= 600 ? ["mt", "mu", ":", "st", "su"] : ["mu", ":", "st", "su"]).map((key, k) =>
                 key === ":" ? (
-                  <span key={key} className="mp-colon">
+                  <span key={key} ref={colonRef} className="mp-colon">
                     :
                   </span>
                 ) : (

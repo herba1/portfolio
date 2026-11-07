@@ -50,37 +50,57 @@ const clockTop = (s, top) => top - FIG_TOP * s;
 const clockMid = (s) => ((FIG_TOP + FIG_BASE) / 2) * s;
 
 // The figures' metrics, in em at the clock's weight, measured from rendered
-// pixels. The rolling wheels are tabular (0.611em each), so a figure that
-// turns never shifts its neighbours. The lead wheel is the exception for one
-// figure: Geist's tabular 1 grows a slab foot to fill its tabular slot, and
-// at headline size that foot sits on the rule and the slot leaves a hole
-// before the colon. So the lead wheel draws its 1 as the proportional,
-// footless figure, a stem and a flag. Its proportional advance (0.403em)
-// still leaves a 0.108em right bearing, nearly twice the 2's left one, so
-// the colon would sit off centre between them; the slot is closed to the
-// 1's ink (0.295em) plus the 2's left bearing (0.051em), so the colon stands
-// in an even gap, and the law's tracking then applies to it like every other
-// figure. LEAD_ADV and LEAD_LSB are per lead digit: its slot, and its ink's
-// left side bearing, by which the clock hangs flush on the column.
+// pixels (Geist 490, line-height 1, at 400px). The rolling wheels are tabular
+// (0.611em each), so a figure that turns never shifts its neighbours. The
+// lead wheel is the exception for one figure: Geist's tabular 1 grows a slab
+// foot to fill its tabular slot, so the lead wheel draws its 1 as the
+// proportional, footless figure, a stem and a flag.
 export const TAB_ADV = 0.611;
-export const LEAD_ADV = [0.611, 0.295 + 0.051, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611];
-export const LEAD_LSB = [0.038, 0.039, 0.05, 0.042, 0.03, 0.046, 0.048, 0.05, 0.032, 0.048];
-// After the lead figure: the colon's advance, a tabular figure, and the last
-// figure out to its ink (the 3 of "1:23"; any other last figure moves the
-// ink by a pixel or so).
-const TAIL = 0.301 + TAB_ADV + 0.57;
-export const trackPx = (s) => -0.043 * (s - 12);
+// each lead digit's ink left edge, by which the clock hangs flush on the column
+export const LEAD_LSB = [0.038, 0.04, 0.05, 0.042, 0.03, 0.046, 0.048, 0.05, 0.032, 0.048];
 
-// The figures from the lead's ink to the last figure's ink, with the three
-// gaps of tracking the law sets between the four at this size.
-const figureWidth = (s, lead) => (LEAD_ADV[lead] - LEAD_LSB[lead] + TAIL) * s + 3 * trackPx(s);
-// The column for a lead figure: "1:23" is 235px, "2:23" 271px.
+// The colon is spaced optically, ink to ink, not by advance. A gap is read
+// at the colon's own height, across its two dots, so every figure gets an
+// optical edge on each side measured over those rows only: the mean of its
+// ink edge across them, with any hollow counted no deeper than one stem
+// (0.1em; the 1's stem is 0.107em). That is why the 2 needs it: its bowl
+// leaves a deep hollow beside the upper dot, so by bounding box a colon
+// spaced evenly between 1 and 2 still reads as "1:" then a hole then "23".
+// The colon's dots are a flat-sided box, 0.0875em to 0.215em in its slot.
+export const COLON_L = 0.0875;
+export const COLON_R = 0.215;
+// optical left and right edges of each tabular figure, in its slot
+export const OPT_L = [0.0822, 0.1585, 0.0965, 0.1195, 0.13, 0.0872, 0.0887, 0.15, 0.0915, 0.0773];
+export const OPT_R = [0.5286, 0.4515, 0.5436, 0.5135, 0.495, 0.4912, 0.4898, 0.4605, 0.5182, 0.5222];
+// the lead wheel's: its 1 is the footless one, a flat stem facing the colon
+export const LEAD_OPT_R = OPT_R.map((r, d) => (d === 1 ? 0.295 : r));
+// The one gap, used on both sides of the colon: the optical gap the face
+// itself sets between a tabular 2 and 3 over the same rows (0.187em), plus
+// the law's tracking for the size, so it is the gap of "23" in "1:23".
+export const GAP_EM = TAB_ADV - OPT_R[2] + OPT_L[3];
+export const trackPx = (s) => -0.043 * (s - 12);
+const REF = 2; // the seconds-tens figure the colon's span is drawn for
+
+// The colon's span: from the figure before it (its optical right edge, `r`)
+// to the slot of the seconds-tens wheel, in em from the start of that figure's
+// slot. It holds two gaps and the colon, drawn for a 2 after it, so the
+// seconds wheels keep a fixed address while they roll; the colon then
+// centres itself in whatever that span leaves (see paint), so its two gaps
+// are always equal, and exactly the gap of "23" whenever a 2 follows it.
+export const colonSpan = (r, size) => r + 2 * (GAP_EM + trackPx(size) / size) + (COLON_R - COLON_L) - OPT_L[REF];
+
+// The figures from the lead's ink to the last figure's ink: the lead's ink,
+// the colon's span, then a tabular seconds-tens slot and the last figure out
+// to its ink (the 3 of "1:23"; any other last figure moves the ink by a pixel
+// or so).
+const figureWidth = (s, lead) => (colonSpan(LEAD_OPT_R[lead], s) - LEAD_LSB[lead] + TAB_ADV + 0.57) * s + trackPx(s);
+// The column for a lead figure: "1:23" is 243px, "2:23" 277px.
 const colW = (lead) => Math.round(figureWidth(CLOCK, lead));
 
 export const ART = 160; // the sleeve: figure top to artist baseline
 const panelW = (lead) => PAD + ART + GAP + colW(lead) + PAD;
 // the widest the panel gets, which is what the stage fits
-export const PANEL = { W: Math.max(...LEAD_ADV.map((_, d) => panelW(d))), H: PAD + ART + PAD };
+export const PANEL = { W: Math.max(...LEAD_LSB.map((_, d) => panelW(d))), H: PAD + ART + PAD };
 
 // The clock's lead figure for a time in seconds: tens of minutes from ten
 // minutes up, otherwise minutes.
