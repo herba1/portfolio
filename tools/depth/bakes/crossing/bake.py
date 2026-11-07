@@ -18,7 +18,13 @@ Reads <workdir>/labels.npz from labels.py. For every plane, far to near:
              hidden parts are inpainted: smooth colour from a push-pull
              pyramid plus real texture mirrored across the occlusion edge.
 
-Writes <outdir>/p0.webp .. p6.webp (RGBA, cropped to each plane's extent),
+  overscan   every card that meets the frame carries on past it (PAD): the
+             sky card outpainted, the rest carried on from their edges (with
+             copied texture below and right of the town), the wires carried
+             on straight, so the engine's front mat never shows a card edge.
+
+Writes <outdir>/p0.webp .. p6.webp (RGBA, cropped to each plane's extent,
+which may run past the photo: rects in layers.json go below 0 and above 1),
 <outdir>/mattes.png (each plane's alpha at 512 wide, stacked) and
 <outdir>/layers.json (crop rects, depth, sizes), plus previews in workdir.
 """
@@ -91,8 +97,10 @@ for k in range(1, K - 1):
 for k in range(K - 1, 0, -1):  # nearer coverage never exceeds farther
     A[k] = np.maximum(A[k], A[k + 1])
 print("coverages done")
+del Bsky, dist_sky, Fobj, FB, den, acol, g1, use_col, band  # keep the bake lean
 
 WIRE_K = 2  # the plane that holds the overhead wires
+TOWN_K = 1  # the far houses: the street's back flat
 # Big holes with structure behind them (the house wall and fence behind the
 # camellia, the far houses behind the lamp heads) go to LaMa through
 # tools/depth/fill.py when the model is present; shiftfill otherwise.
@@ -177,7 +185,7 @@ def wire_through(a, own, occl, angles=np.arange(-30, -7.5, 0.5), run=60, reach=6
 
 
 # ---- per plane alpha, colour; composite back to front
-yy_full = np.mgrid[0:H, 0:W][0]
+yy_full = np.arange(H, dtype=np.float32)[:, None].repeat(W, 1)
 layers = []
 behind = np.zeros_like(img)
 meta = []
@@ -235,9 +243,25 @@ for k in range(K):
             # hold for EXT px then stop
             dist_known = np.abs(cols[:, None] - known[None, :: max(1, len(known) // 4000)]).min(1)
             filled = np.where(has | (dist_known < EXT) | ((cols > known.min()) & (cols < known.max())), filled, H)
+            filled_near = filled
+            if k == TOWN_K:
+                # the town is the back flat of the street: it runs on behind
+                # the old house to the left edge (and on past it, by the
+                # overscan below) at the height of its own left end
+                left = known[known < known.min() + 120]
+                hold = float(np.median(top[left]))
+                filled = np.where(cols < known.min(), hold, filled)
         else:
-            filled = top
-        ext = occl & (yy_full > filled[None, :]) & ((mine > 0.5) | (yy_full > H * 0.45)) & (d < EXT_DOWN)
+            filled = filled_near = top
+        lower = (mine > 0.5) | (yy_full > H * 0.45)
+        if k == TOWN_K:
+            # what a swing uncovers near the town's own edges (filled by LaMa)
+            # and the rest of the flat (texture copied from that fill)
+            ext_n = occl & (yy_full > filled_near[None, :]) & lower & (d < EXT_DOWN)
+            a_near = np.maximum(a, cv2.GaussianBlur(ext_n.astype(np.float32), (0, 0), 0.8) * (A[k + 1] > 0.02))
+            ext = occl & (yy_full > filled[None, :]) & lower
+        else:
+            ext = occl & (yy_full > filled[None, :]) & lower & (d < EXT_DOWN)
         ext = ext.astype(np.float32)
         ext = cv2.GaussianBlur(ext, (0, 0), 0.8)
         a = np.maximum(a, ext * (A[k + 1] > 0.02))
@@ -253,6 +277,8 @@ for k in range(K):
     if k > 0:
         keep_own = own_w if k == WIRE_K else own
         a = np.where((a < 0.6) & ~dilate(keep_own, 3), 0, a).astype(np.float32)
+        if k == TOWN_K:
+            a_near = np.where((a_near < 0.6) & ~dilate(keep_own, 3), 0, a_near).astype(np.float32)
     # pure pixels: seen whole, nothing in front
     pure = own & (a > 0.98) & (vis > 0.98)
     pure = erode(pure, 1) if k > 0 else erode(pure, 2)
@@ -289,11 +315,19 @@ for k in range(K):
         fill = pushpull(img, (own & (A[k] > 0.7) & (vis > 0.98)).astype(np.float32))
     else:
         need = (a > 0.01) & ~pure
+        need_l = (a_near > 0.01) & ~pure if k == TOWN_K else need
         fill = None
         if k in LAMA_PLANES and os.path.exists(LAMA_MODEL):
-            fill = lama_fill(img, pure, need, k)
+            fill = lama_fill(img, pure, need_l, k)
         if fill is None:
             fill = shiftfill(img, pure, need, base, seed=k)
+        elif k == TOWN_K:
+            # the far flat behind the old house: real texture from the town
+            # and its LaMa fill, on the fill's smooth colour field
+            known = pure | (dilate(need_l, 48) & ~pure)
+            rest = need & ~known
+            if rest.any():
+                fill = shiftfill(fill, known, rest, pushpull(fill, known.astype(np.float32)), seed=k)
     col = np.where(pure[..., None], img, fill)
     # edges seen with nothing in front: un-mix from what is behind
     edge = own | (a > 0.02)
@@ -305,7 +339,7 @@ for k in range(K):
         wdec = (sky & ~erode(sky, 2))[..., None] * 0.0
     col = col * (1 - wdec) + dec * wdec
     behind = a[..., None] * col + (1 - a[..., None]) * behind
-    layers.append((col, a))
+    layers.append((col.astype(np.float16), a))
     med = float(np.median(dep[own])) if own.any() else 0.0
     meta.append({"k": k, "depth": round(med, 4), "share": round(float(own.mean()), 4)})
     print("plane", k, "alpha area", round(float((a > 0.01).mean()), 3), "depth", round(med, 3))
@@ -317,19 +351,180 @@ print("PSNR", round(psnr, 2))
 ev = cv2.resize(err, (1500, 1000), interpolation=cv2.INTER_AREA)
 cv2.imwrite(os.path.join(WORK, "err.png"), np.clip(ev * 4 * 255, 0, 255).astype(np.uint8))
 
+del A
+
+# ---- overscan
+# The engine puts a paper mat with the photo's rectangle cut out of it at the
+# nearest plane's depth, like the front sheet of a tunnel book. Every card
+# behind it that meets the frame then carries on past the frame, so that a
+# camera swing slides more card into the window instead of a card edge and
+# bare paper; the engine clamps the swing to what these margins cover.
+# Fractions of the frame per side: left, top, right, bottom.
+PAD = {
+    0: (0.25, 0.25, 0.25, 0.25),  # sky: outpainted gradient and cloud
+    1: (0.15, 0.0, 0.15, 0.15),  # town
+    2: (0.0, 0.0, 0.22, 0.0),  # wires: carried on straight to the right
+    3: (0.0, 0.0, 0.15, 0.15),  # boom and mast
+    4: (0.15, 0.0, 0.0, 0.15),  # old house
+    5: (0.0, 0.0, 0.0, 0.15),  # signal post
+    6: (0.0, 0.0, 0.0, 0.1),  # camellia (at the mat's own depth)
+}
+
+
+def outpaint_sky(col, pure, pl, pt, pr, pb):
+    """The sky card past the frame: the sky's own colour field, fitted as a
+    quadratic in (u, v) and continued to first order past the edge (so the
+    gradient keeps its slope across the seam without bending away), plus
+    the clouds' residual mirrored across the edge and fading with distance.
+    Works at whatever size `col` is (the export size)."""
+    H, W = pure.shape
+    s = max(1, W // 400)
+    sm = cv2.resize(col, (W // s, H // s), interpolation=cv2.INTER_AREA)
+    ws = cv2.resize(pure.astype(np.float32), (W // s, H // s), interpolation=cv2.INTER_AREA) + 0.05
+    vv, uu = np.mgrid[0:H // s, 0:W // s].astype(np.float32)
+    uu = (uu + 0.5) / (W // s)
+    vv = (vv + 0.5) / (H // s)
+    B = np.stack([np.ones_like(uu), uu, vv, uu * uu, uu * vv, vv * vv], -1).reshape(-1, 6)
+    sw = np.sqrt(ws.reshape(-1))[:, None]
+    coef = np.linalg.lstsq(B * sw, sm.reshape(-1, 3) * sw, rcond=None)[0]  # 6x3
+
+    def Q(u, v):
+        u, v = u[..., None], v[..., None]
+        return coef[0] + u * coef[1] + v * coef[2] + u * u * coef[3] + u * v * coef[4] + v * v * coef[5]
+
+    Hp, Wp = H + pt + pb, W + pl + pr
+    u = ((np.arange(Wp, dtype=np.float32) - pl + 0.5) / W)[None, :].repeat(Hp, 0)
+    v = ((np.arange(Hp, dtype=np.float32) - pt + 0.5) / H)[:, None].repeat(Wp, 1)
+    uc, vc = np.clip(u, 0, 1), np.clip(v, 0, 1)
+    eu, ev = (u - uc)[..., None], (v - vc)[..., None]
+    # the slope carries on, but saturates a tenth of the frame out, so the
+    # colour does not run off toward violet or white at the far margins
+    eu, ev = 0.1 * np.tanh(eu / 0.1), 0.1 * np.tanh(ev / 0.1)
+    field = Q(uc, vc)
+    field += (coef[1] + 2 * uc[..., None] * coef[3] + vc[..., None] * coef[4]) * eu
+    field += (coef[2] + uc[..., None] * coef[4] + 2 * vc[..., None] * coef[5]) * ev
+    del eu, ev
+    vi, ui = np.mgrid[0:H, 0:W].astype(np.float32)
+    resid = col - Q((ui + 0.5) / W, (vi + 0.5) / H)
+    # the residual's broad part (haze, the brighter band low down) carries
+    # straight on from the edge, so the colour has no step at the seam; its
+    # fine part (cloud) is mirrored across the seam for a few px only (further
+    # out a mirrored cloud reads as a mirror)
+    lf = cv2.GaussianBlur(resid, (0, 0), 0.03 * W)
+    hf = resid - lf
+    dist = np.hypot((u - uc) * W, (v - vc) * H)
+    out = field
+    out += cv2.copyMakeBorder(lf, pt, pb, pl, pr, cv2.BORDER_REPLICATE) * np.exp(-dist / (0.25 * W))[..., None]
+    out += cv2.copyMakeBorder(hf, pt, pb, pl, pr, cv2.BORDER_REFLECT_101) * np.exp(-((dist / (0.012 * W)) ** 2))[..., None]
+    out = np.clip(out, 0, 1)
+    out[pt:pt + H, pl:pl + W] = col
+    return out.astype(np.float32)
+
+
+def extend_wires(a, pr, band=260, span=110, R=12):
+    """Carry every wire that leaves the frame on the right on as a straight
+    line for pr px: a weighted line fit over its last `band` px, and its
+    cross-section (one wire, or a close pair) averaged along that run."""
+    out = np.zeros((H, pr), np.float32)
+    x0 = W - band
+    crop = a[:, x0:]
+    n, cc, st, _ = cv2.connectedComponentsWithStats((crop > 0.25).astype(np.uint8), 8)
+    ds = np.arange(-R, R + 0.25, 0.25, dtype=np.float32)
+    yy, xx = np.mgrid[0:H, 0:pr].astype(np.float32)
+    xx += W
+    for i in range(1, n):
+        if st[i, cv2.CC_STAT_LEFT] + st[i, cv2.CC_STAT_WIDTH] < band - 3 or st[i, cv2.CC_STAT_WIDTH] < span:
+            continue
+        ys, xs = np.nonzero(cc == i)
+        w = crop[ys, xs]
+        xs = xs.astype(np.float32) + x0
+        m, b = (float(v) for v in np.polyfit(xs, ys.astype(np.float32), 1, w=w))
+        # cross-section along the last 80 px
+        sx = np.arange(W - 80, W - 2, dtype=np.float32)
+        mx = np.repeat(sx[None, :], len(ds), 0)
+        my = ((m * mx + b) + ds[:, None]).astype(np.float32)
+        prof = cv2.remap(a, mx, my, cv2.INTER_LINEAR, borderMode=cv2.BORDER_CONSTANT, borderValue=0).mean(1)
+        prof[0] = prof[-1] = 0
+        d = yy - (m * xx + b)
+        val = np.interp(d.ravel(), ds, prof, left=0, right=0).reshape(d.shape)
+        out = np.maximum(out, val.astype(np.float32))
+        print("  wire", i, "slope", round(float(m), 3), "peak", round(float(prof.max()), 2))
+    return np.concatenate([a, out], 1)
+
+
 # ---- export
 EH = round(EXPORT_W * H / W)
 MH = round(MATTE_W * H / W)
+SC = EXPORT_W / W
 mattes = []
+sky_pure = cv2.resize((sky & ~dilate(~sky, 8)).astype(np.float32), (EXPORT_W, EH), interpolation=cv2.INTER_AREA) > 0.99
 for k, (col, a) in enumerate(layers):
-    pre = cv2.resize(col * a[..., None], (EXPORT_W, EH), interpolation=cv2.INTER_AREA)
-    ae = cv2.resize(a, (EXPORT_W, EH), interpolation=cv2.INTER_AREA)
-    ce = cv2.resize(col, (EXPORT_W, EH), interpolation=cv2.INTER_AREA)
-    c = np.where((ae > 1 / 255)[..., None], pre / np.maximum(ae, 1e-4)[..., None], ce)
+    # down to the export size first (premultiplied), then overscan there
+    col = col.astype(np.float32)
+    if k == WIRE_K:
+        a_full = extend_wires(a, round(PAD[k][2] * W))
+        col = cv2.copyMakeBorder(col, 0, 0, 0, a_full.shape[1] - W, cv2.BORDER_REPLICATE)
+        ew = round(a_full.shape[1] * SC)
+    else:
+        a_full = a
+        ew = EXPORT_W
+    pre = cv2.resize(col * a_full[..., None], (ew, EH), interpolation=cv2.INTER_AREA)
+    ae = cv2.resize(a_full, (ew, EH), interpolation=cv2.INTER_AREA)
+    ce = cv2.resize(col, (ew, EH), interpolation=cv2.INTER_AREA)
+    c = np.where((ae > 1 / 255)[..., None], pre / np.maximum(ae, 1e-4)[..., None], ce).astype(np.float32)
+    del pre, ce, col
+    l, t, r, b = PAD[k]
+    pl, pt, pr, pb = round(l * EXPORT_W), round(t * EH), round(r * EXPORT_W), round(b * EH)
+    if k == 0:
+        c = outpaint_sky(c, sky_pure, pl, pt, pr, pb)
+        ae = np.ones(c.shape[:2], np.float32)
+    elif k != WIRE_K:
+        # Carried straight on from the edge row or column: posts and fence
+        # boards run on down, the house's beams, roof line and the town's
+        # skyline run on sideways (a mirror would fold them into chevrons).
+        # The photo's outermost pixels are darkened and soft, so carry from a
+        # few px in. The margin softens with distance so nothing invented
+        # looks sharp.
+        e = 3
+        for side, n in (("l", pl), ("t", pt), ("r", pr), ("b", pb)):
+            if not n:
+                continue
+            for arr in (c, ae):
+                if side == "l":
+                    arr[:, :e] = arr[:, e:e + 1]
+                elif side == "r":
+                    arr[:, -e:] = arr[:, -e - 1:-e]
+                elif side == "t":
+                    arr[:e] = arr[e:e + 1]
+                else:
+                    arr[-e:] = arr[-e - 1:-e]
+        c = cv2.copyMakeBorder(c, pt, pb, pl, pr, cv2.BORDER_REPLICATE)
+        ae = cv2.copyMakeBorder(ae, pt, pb, pl, pr, cv2.BORDER_REPLICATE)
+        ph, pw = ae.shape
+        if k == TOWN_K:
+            # below and right of the town (sheds, a hedge, trees, gables)
+            # carried rows read as streaks: give that margin real texture
+            # copied from inside, on the carried colour
+            inner = np.zeros((ph, pw), bool)
+            inner[pt:pt + EH, pl:pl + EXPORT_W] = True
+            below = np.zeros((ph, pw), bool)
+            below[pt + EH:] = True
+            below[:, pl + EXPORT_W:] = True
+            need_b = below & (ae > 0.01)
+            sf = shiftfill(c, inner & (ae > 0.95), need_b, cv2.GaussianBlur(c, (0, 0), 8), seed=k)
+            c = np.where(need_b[..., None], sf, c)  # shiftfill also smooths what it was not asked to fill
+            del sf
+        yy, xx = np.mgrid[0:ph, 0:pw].astype(np.float32)
+        out = np.maximum(np.maximum(pl - xx, xx - (pw - 1 - pr)), np.maximum(pt - yy, yy - (ph - 1 - pb)))
+        t_ = np.clip(out / (0.12 * EXPORT_W), 0, 1)[..., None]
+        soft = cv2.GaussianBlur(c, (0, 0), 5)
+        c = c * (1 - t_) + soft * t_
+        del yy, xx, out, t_, soft
+    eh, ew = ae.shape
     ys, xs = np.nonzero(ae > 1 / 255)
     pad = 8
-    x0, x1 = max(0, xs.min() - pad), min(EXPORT_W, xs.max() + 1 + pad)
-    y0, y1 = max(0, ys.min() - pad), min(EH, ys.max() + 1 + pad)
+    x0, x1 = max(0, xs.min() - pad), min(ew, xs.max() + 1 + pad)
+    y0, y1 = max(0, ys.min() - pad), min(eh, ys.max() + 1 + pad)
     rgba = np.dstack([c, ae])[y0:y1, x0:x1]
     # triangular dither before quantising
     rng = np.random.default_rng(k)
@@ -342,10 +537,14 @@ for k, (col, a) in enumerate(layers):
         Image.fromarray(q[..., :3], "RGB").save(path, quality=90, method=6)
     else:
         im.save(path, quality=90, alpha_quality=100, method=6, exact=False)
-    meta[k]["rect"] = [round(x0 / EXPORT_W, 5), round(y0 / EH, 5), round(x1 / EXPORT_W, 5), round(y1 / EH, 5)]
+    ox, oy = pl, pt  # the frame's origin in this export
+    meta[k]["rect"] = [round(float(x0 - ox) / EXPORT_W, 5), round(float(y0 - oy) / EH, 5), round(float(x1 - ox) / EXPORT_W, 5), round(float(y1 - oy) / EH, 5)]
     meta[k]["px"] = [int(x1 - x0), int(y1 - y0)]
     mattes.append(cv2.resize(a, (MATTE_W, MH), interpolation=cv2.INTER_AREA))
-    print("wrote", path, os.path.getsize(path) // 1024, "KB", meta[k]["px"])
+    print("wrote", path, os.path.getsize(path) // 1024, "KB", meta[k]["px"], meta[k]["rect"])
+    if k in (0, 1, 2, 4):
+        pv = ae[..., None] * c + (1 - ae[..., None]) * 0.5
+        cv2.imwrite(os.path.join(WORK, f"pad{k}.jpg"), (np.clip(cv2.resize(pv, (900, round(eh * 900 / ew)), interpolation=cv2.INTER_AREA)[:, :, ::-1], 0, 1) * 255).astype(np.uint8))
 
 # the flat photograph that lies on top at rest
 ph = cv2.resize(img, (EXPORT_W, EH), interpolation=cv2.INTER_AREA)

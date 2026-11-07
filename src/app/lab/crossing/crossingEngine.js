@@ -26,24 +26,44 @@ import { createFilm } from "../_kit/film";
 // plane, CoC = A * |z - z_focus| / z, opening as the stack spreads. Release
 // and it springs back flat. The frame then goes through film.js (summer).
 //
-// Query: ?split=0..1&yaw=deg&pitch=deg&focus=0..6 holds a still.
+// It is built as a tunnel book: a front mat of the page's paper, with the
+// photo's rectangle cut out, stands at the nearest card's depth and throws a
+// soft shadow in through the window. Every card that meets the frame was
+// overscanned in the bake (the sky outpainted a quarter past each side, the
+// town and house a sixth past the left and bottom, the wires carried on), and
+// the swing is clamped so that the window never slides past any card's
+// overscan: no card edge and no bare paper can show inside it.
+//
+// Query: ?split=0..1&yaw=deg&pitch=deg&focus=0..6 holds a still (the swing is
+// clamped to the window like a live one).
 
 const ASSET = "/lab/crossing/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const PHOTO = [2048, 1356];
 const MATTE = [512, 339];
-// From layers.json (bake.py): each plane's crop rect in photo uv.
+// From layers.json (bake.py): each plane's crop rect in photo uv. Cards
+// that meet the frame are overscanned past it, so their rects run past 0..1.
 const PLANES = [
-  { rect: [0, 0, 1, 1], o: 0.66 }, // sky
-  { rect: [0.18262, 0.28171, 1, 1], o: 0.38 }, // far houses, trees
-  { rect: [0.25879, 0.18879, 1, 0.92625], o: 0.2 }, // wires
-  { rect: [0.85742, 0.15708, 1, 1], o: 0.08 }, // barrier boom, mast
-  { rect: [0, 0.44248, 0.51025, 1], o: -0.06 }, // the old house
-  { rect: [0.50732, 0.15192, 0.83545, 1], o: -0.24 }, // the signal
-  { rect: [0.01367, 0.83038, 0.37988, 1], o: -0.42 }, // camellia
+  { rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
+  { rect: [-0.1499, 0.28171, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
+  { rect: [0.25879, 0.03466, 1.22021, 0.92625], o: 0.2 }, // wires
+  { rect: [0.85742, 0.15708, 1.1499, 1.14971], o: 0.08 }, // barrier boom, mast
+  { rect: [-0.1499, 0.44248, 0.51025, 1.14971], o: -0.06 }, // the old house
+  { rect: [0.50732, 0.15192, 0.83545, 1.14971], o: -0.24 }, // the signal
+  { rect: [0.01367, 0.83038, 0.37988, 1.10029], o: -0.42 }, // camellia
 ];
 const N = PLANES.length;
-const PIVOT_O = 0.0; // the camera swings round this depth (between the boom and the house)
+// The front mat sits at the nearest plane's depth, and the camera swings
+// round the middle of its window: the window holds still and the street
+// slides behind it.
+const MAT_K = N - 1;
+const PIVOT_O = PLANES[MAT_K].o;
+// Where each card must keep covering the window: the sides that meet the
+// frame were overscanned by the bake (their rects run past 0..1), and the
+// window may not slide past them. Sides that end inside the photo are cut-out
+// silhouettes and may show.
+const SAFE = PLANES.map(({ rect: r }) => [r[0] < 0.002 ? r[0] : -Infinity, r[1] < 0.002 ? r[1] : -Infinity, r[2] > 0.998 ? r[2] : Infinity, r[3] > 0.998 ? r[3] : Infinity]);
+const MAT_RECT = [-1.5, -2.5, 2.5, 3.5]; // the paper sheet, in photo uv: past every edge of the screen
 const SPREAD = 1.0; // plane offsets are o * SPREAD * print width at split 1
 const FOVY = 30; // degrees
 const MAX_YAW = 21;
@@ -102,6 +122,10 @@ uniform float uShadow;
 uniform float uPrintW;
 uniform float uHaze;
 uniform vec3 uHazeColor;
+uniform int uMat;                // 1: the front mat, paper with the window cut out
+uniform vec3 uPaper;
+uniform float uMatZ;
+uniform vec2 uMatHalf;
 out vec4 o;
 
 vec4 tap(vec2 uv, float lod) {
@@ -112,6 +136,13 @@ vec4 tap(vec2 uv, float lod) {
 
 void main() {
   vec2 dx = dFdx(vUv), dy = dFdy(vUv);
+  if (uMat == 1) {
+    // Paper everywhere but the photo's rectangle, the cut edge antialiased.
+    vec2 d = min(vUv, 1.0 - vUv) / max(fwidth(vUv), vec2(1e-6));
+    float a = 1.0 - clamp(min(d.x, d.y) + 0.5, 0.0, 1.0);
+    o = vec4(uPaper * a, a);
+    return;
+  }
   vec4 c;
   if (uCoc < 0.6) {
     vec2 t = (vUv - uCrop.xy) / (uCrop.zw - uCrop.xy);
@@ -162,16 +193,27 @@ void main() {
       float w = max(1.0, max(pen, cocM));
       float lod = log2(w);
       float a = textureLod(uMattes, vec3(uvj, float(j)), lod + 0.5).r;
-      // thin things (wires) blur away instead of veiling the card, and the
-      // card's own extent fades rather than cutting a rectangle
+      // thin things (wires) blur away instead of veiling the card; past the
+      // photo the matte holds its edge, as the overscanned cards run on
       a = smoothstep(0.18, 0.7, a);
-      vec2 e = smoothstep(vec2(0.0), vec2(0.04), uvj) * smoothstep(vec2(0.0), vec2(0.04), 1.0 - uvj);
-      a *= e.x * e.y;
       float g = gap / uPrintW; // gaps in print widths, so a phone matches a desktop
       lit *= 1.0 - a * smoothstep(0.0, 0.05, g) * exp(-g / 0.3);
     }
     // Sunlight blocked leaves skylight: shadows go blue, not black.
     vec3 shade = mix(vec3(0.64, 0.72, 0.84), vec3(1.0), lit);
+    // The front mat throws its own shadow in through the window: a soft band
+    // inside the edges that face the sun, wider the further back the card.
+    // Paper-white sheets bounce light into it, so it is greyer and lighter.
+    float mgap = uZ[uK] - uMatZ;
+    if (mgap > 1.0) {
+      vec2 q = p + uLight.xy * mgap / uLight.z;
+      vec2 in2 = uMatHalf - abs(q);
+      float din = min(in2.x, in2.y);
+      float pen = max(1.5, mgap * 0.06);
+      float g = mgap / uPrintW;
+      float m = (1.0 - smoothstep(-pen, pen, din)) * smoothstep(0.0, 0.04, g) * (0.4 + 0.35 * exp(-g / 0.4));
+      shade *= mix(vec3(1.0), vec3(0.74, 0.76, 0.79), m);
+    }
     c.rgb *= mix(vec3(1.0), shade, uShadow);
   }
   // Summer sky toward cobalt: pull the green out of saturated blues only
@@ -413,6 +455,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   let lastKey = "";
   let lastGrain = -1;
   let breathe = 0;
+  const swing = { yaw: 0, pitch: 0 }; // what is drawn, after the window's clamp
 
   const geometry = (s) => {
     const L = layout();
@@ -425,7 +468,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   // through the swung camera into each plane's matte.
   const pick = (px, py) => {
     const G = geometry(split.x);
-    const R = rotation(yaw.x + hover.x, pitch.x + hover.y).rows;
+    const R = rotation(swing.yaw, swing.pitch).rows;
     const d = [px - G.W / 2, -(py - G.H / 2), -G.f];
     // inverse rotation (transpose) about the pivot
     const D = [0, 1, 2].map((i) => R[0][i] * d[0] + R[1][i] * d[1] + R[2][i] * d[2]);
@@ -447,6 +490,51 @@ export async function createCrossing(host, { embedded = false } = {}) {
       if (mattePx[((k * MATTE[1] + my) * MATTE[0] + mx) * 4] > 128) return k;
     }
     return 0;
+  };
+
+  // The largest share t of a swing (yaw, pitch) for which the mat's window,
+  // seen from the swung camera, still falls inside every card's safe extent.
+  // The window and each card are planar rectangles, so the four corners of
+  // the window cast onto each card decide it. A defocused card's edge is soft
+  // over its circle of confusion, so the margin keeps that clear too.
+  const swingLimit = (G, yawDeg, pitchDeg, cocs) => {
+    const zm = G.zs[MAT_K];
+    const hmx = (G.printW / 2) * (zm / G.f);
+    const hmy = (G.printH / 2) * (zm / G.f);
+    const corners = [
+      [-hmx, -hmy],
+      [hmx, -hmy],
+      [-hmx, hmy],
+      [hmx, hmy],
+    ];
+    const fits = (t) => {
+      const R = rotation(yawDeg * t, pitchDeg * t).rows;
+      // the camera in the cards' frame: R^T (0 - c) + c, c = (0, 0, -pivot)
+      const O = [R[2][0] * G.pivot, R[2][1] * G.pivot, R[2][2] * G.pivot - G.pivot];
+      for (let k = 0; k < MAT_K; k++) {
+        const S = SAFE[k];
+        const zk = G.zs[k];
+        const hx = (G.printW / 2) * (zk / G.f);
+        const hy = (G.printH / 2) * (zk / G.f);
+        const inset = 0.008 + cocs[k] / (stage.dpr * G.printW);
+        for (const [px, py] of corners) {
+          const tt = (-zk - O[2]) / (-zm - O[2]);
+          const u = (O[0] + tt * (px - O[0])) / (2 * hx) + 0.5;
+          const v = 0.5 - (O[1] + tt * (py - O[1])) / (2 * hy);
+          if (u < S[0] + inset || v < S[1] + inset || u > S[2] - inset || v > S[3] - inset) return false;
+        }
+      }
+      return true;
+    };
+    if (fits(1)) return 1;
+    let lo = 0;
+    let hi = 1;
+    for (let i = 0; i < 14; i++) {
+      const m = (lo + hi) / 2;
+      if (fits(m)) lo = m;
+      else hi = m;
+    }
+    return lo;
   };
 
   const degPerPx = () => (2 * MAX_YAW) / Math.max(320, stage.width * 0.7);
@@ -517,6 +605,10 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.uniform3f(U.uLight, LIGHT[0], LIGHT[1], LIGHT[2]);
     gl.uniform1f(U.uPrintW, G.printW);
     gl.uniform3f(U.uHazeColor, HAZE[0], HAZE[1], HAZE[2]);
+    gl.uniform1i(U.uMat, 0);
+    gl.uniform3f(U.uPaper, PAPER[0], PAPER[1], PAPER[2]);
+    gl.uniform1f(U.uMatZ, G.zs[MAT_K]);
+    gl.uniform2f(U.uMatHalf, halves[MAT_K * 2], halves[MAT_K * 2 + 1]);
     gl.uniform1i(U.uTex, 0);
     gl.uniform1i(U.uMattes, 1);
     gl.activeTexture(gl.TEXTURE1);
@@ -560,6 +652,17 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, photoTex.t);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
+    // The front mat: a sheet of the page's own paper with the photo's
+    // rectangle cut out of it, at the nearest card's depth. It puts paper
+    // back in colour (so the film's blur sees paper round the window) and
+    // takes coverage away, so the page shows through it untouched.
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+    gl.uniform1i(U.uMat, 1);
+    gl.uniform4f(U.uRect, MAT_RECT[0], MAT_RECT[1], MAT_RECT[2], MAT_RECT[3]);
+    gl.uniform3f(U.uPlane, halves[MAT_K * 2], halves[MAT_K * 2 + 1], G.zs[MAT_K]);
+    gl.uniform1f(U.uOpacity, 1);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.uniform1i(U.uMat, 0);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
   };
@@ -644,8 +747,25 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const k1 = Math.min(N - 1, k0 + 1);
     const focusZ = G.zs[k0] + (G.zs[k1] - G.zs[k0]) * (fk - k0);
 
-    const yawDeg = yaw.x + hover.x + by;
-    const pitchDeg = pitch.x + hover.y + bp;
+    let yawDeg = yaw.x + hover.x + by;
+    let pitchDeg = pitch.x + hover.y + bp;
+    // The window: the swing stops where a card's overscan runs out, so no
+    // card edge ever comes into it. A hand that pushes further is held at
+    // the edge, as by the mat itself.
+    const cocs = G.zs.map((z) => APERTURE * s * (Math.abs(z - focusZ) / z) * stage.dpr);
+    const lim = swingLimit(G, yawDeg, pitchDeg, cocs);
+    if (lim < 1) {
+      yawDeg *= lim;
+      pitchDeg *= lim;
+      if (!held) {
+        yaw.x = yawDeg - hover.x - by;
+        pitch.x = pitchDeg - hover.y - bp;
+        yaw.v = 0;
+        pitch.v = 0;
+      }
+    }
+    swing.yaw = yawDeg;
+    swing.pitch = pitchDeg;
     const key = `${s.toFixed(5)}|${yawDeg.toFixed(4)}|${pitchDeg.toFixed(4)}|${focusZ.toFixed(2)}`;
     if (key !== lastKey || dirty) {
       drawScene(s, yawDeg, pitchDeg, focusZ);
