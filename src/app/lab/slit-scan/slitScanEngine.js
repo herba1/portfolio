@@ -29,9 +29,15 @@ import { readWebm } from "./webm";
 // ribbon the strata are rigid slices of carriage set side by side. The
 // rounding's threshold steps through eight phases down every eight slit
 // rows, a little either side of the half, so each seam between two moments
-// is struck into single-slit striations. Anything that matches the empty
-// station, or lies on the occluder mask (fence posts and grass in front of
-// the train, found in the bake), is drawn from the plate.
+// is struck into single-slit striations. Where the isochrones run across
+// the rows rather than down them (where the front cuts the train's end) a
+// whole frame would move the end ~44 px at a time, a staircase; there each
+// stratum's frame is read where the train stood at the stratum's own moment
+// (shifted by the train's measured run over the remainder, never blended),
+// with the tracked nose and tail deciding train from station, so the cut is a
+// smooth curve that frays only in those striations. Anything that matches
+// the empty station, or lies on the occluder mask (fence posts and grass in
+// front of the train, found in the bake), is drawn from the plate.
 //
 // The front. D is a single time front: 0 on the left, `depth` seconds on
 // the right, climbing across a ramp as wide as the distance the train runs in
@@ -53,9 +59,10 @@ import { readWebm } from "./webm";
 // and it eases back to rest. Hovering, it leans a little towards the
 // pointer. D is sampled with a cubic B-spline, so the isochrones that bound
 // the strata run without kinks. Rows above the train's body never take the
-// sculpted time, so nothing rises onto the canopy; below the red stripe the
-// undercarriage is held in rigid strips of constant time, so it never
-// streaks.
+// sculpted time, so nothing rises onto the canopy; below the red stripe
+// every slit column is held at the moment of the stripe directly above it,
+// so the undercarriage never streaks and follows the body's cut sliver for
+// sliver.
 //
 // Query (stills): ?t=seconds holds the clock (the hero is ?t=8.8); ?front=flat shows the clip as
 // shot; ?slit=x,lean sets the resting front; ?depth (or ?delay)=seconds also
@@ -114,6 +121,7 @@ uniform vec2 uBand;           // band rows in print px: top, height
 uniform vec2 uBody;           // the train's body rows, where the sculpted time applies (print px)
 uniform vec2 uCap;            // the red stripe's lower edge: row at x = 0, rise across the print
 uniform sampler2D uInv;       // R32F NP x 1: frame time at each distance the train has run
+uniform sampler2D uTrack;     // RGBA32F N x 1: per ring frame, the train's run (px per frame), nose and tail x
 uniform float uRun;           // distance the train has run at the clock, px
 uniform float uRunLoop;       // ... over the whole loop
 uniform float uSpeed;         // px per second that one second of D stands for
@@ -122,7 +130,6 @@ uniform int uN;
 uniform float uOn;            // 0..1, eases the time field in
 uniform float uReady;         // ring complete
 out vec4 o;
-const float STRIP = 72.0;     // source px: the undercarriage's held strips
 const float STRATUM = 2.0;    // device px: one slit cell, one ring frame
 const float JAG = 0.4;        // frames: how far the seams between moments fray
 
@@ -136,7 +143,9 @@ vec3 ring(vec2 p, int f) {
   vec2 c = texture(uC, vec3(uv, float(f))).rg;
   return yuv2rgb(y, c);
 }
-vec3 plate(vec2 p) { return texture(uPlate, p / uSrc).rgb; }
+// level 0 always: the print is never smaller than the source, and a read
+// that jumps at a seam must not fall to a blurred mip
+vec3 plate(vec2 p) { return textureLod(uPlate, p / uSrc, 0.0).rgb; }
 
 // cubic B-spline from 4 bilinear taps
 float delayAt(vec2 uv) {
@@ -180,33 +189,65 @@ void main() {
   // horizontal edge of the train, at the same row in every frame (it leans
   // a little with the perspective), so cutting time there leaves no seam.
   // Below it the undercarriage would only be pulled into dark streaks, with
-  // the fence wires and the grass dragged in: there time is held in rigid
-  // strips instead, each the train as shot at the moment of the stripe just
-  // above its middle, so wheels and bogies stay crisp and the train is there
-  // exactly where its body is.
+  // the fence wires and the grass dragged in: there each slit column is held
+  // at the moment of the stripe's slit directly above it (the same frame,
+  // threshold phase and shift), so wheels and bogies stay crisp, the train
+  // is there exactly where its body is, and its cut runs on down as fine
+  // vertical slivers.
   float cap = uCap.x + uCap.y * l.x;
   bool under = p.y >= cap;
   // D is read once per slit cell, STRATUM device px square, so every seam
   // between two moments lands on the pixel grid, hard
-  vec2 lD = ((floor((dpx - uPrint.xy) / STRATUM) + 0.5) * STRATUM) / uPrint.zw;
-  if (under) {
-    lD = vec2((floor(p.x / STRIP) + 0.5) * STRIP / uSrc.x, (cap - 1.5) / uSrc.y);
-  }
+  vec2 cell = floor((dpx - uPrint.xy) / STRATUM);
+  if (under) cell.y = floor(((cap - 1.5) / uSrc.y) * uPrint.w / STRATUM);
+  vec2 lD = (cell + 0.5) * STRATUM / uPrint.zw;
   float D = delayAt(lD) * uOn;
   float q = mod(uRun - D * uSpeed, uRunLoop);
   int np = textureSize(uInv, 0).x;
   float qi = q / uRunLoop * float(np - 1);
   int q0 = min(int(floor(qi)), np - 2);
   float t = mix(texelFetch(uInv, ivec2(q0, 0), 0).r, texelFetch(uInv, ivec2(q0 + 1, 0), 0).r, qi - float(q0));
-  // Time comes in strata: every pixel is locked to one whole ring frame,
-  // the nearest, never blended or followed along the motion.
-  // The rounding's threshold steps through eight phases down every eight
-  // slit rows, a little either side of the half, so where two moments meet
-  // the seam is struck into hard single-slit striations.
-  int ki = int(mod(floor(dpx.y / STRATUM), 8.0));
+  int ki = int(mod(cell.y, 8.0));
   float h = (float(((ki & 1) << 2) | (ki & 2) | ((ki >> 2) & 1)) + 0.5) / 8.0;
+  // Every pixel is drawn from one whole ring frame, the nearest, never
+  // blended. Where the isochrone runs down the rows (the ribbons, D climbing
+  // along x) that is all: each stratum is a rigid slice of carriage and the
+  // seams between them are clean vertical cuts. Where it runs across the rows
+  // (D changing down the picture, as where the front cuts the train's end)
+  // whole frames would move the end ~44 px at a time, a staircase, so there
+  // the frame is read where the train stands at the stratum's own moment: it
+  // is shifted by the train's measured run over the remainder, never resampled
+  // in time. The cut then follows the isochrone as a smooth curve, and frays
+  // only where the threshold's phases put a slit on the neighbouring moment.
+  vec2 e = 3.0 / uSrc;
+  vec2 g = vec2(delayAt(lD + vec2(e.x, 0.0)) - delayAt(lD - vec2(e.x, 0.0)),
+                delayAt(lD + vec2(0.0, e.y)) - delayAt(lD - vec2(0.0, e.y))) / (e * uPrint.zw);
+  float follow = smoothstep(0.4, 0.5, g.y * g.y / (dot(g, g) + 1e-12));
+  int f0 = int(floor(t + 0.5));
   int f = int(floor(t + 0.5 + JAG * (h - 0.5))) % uN;
+  float v = texelFetch(uTrack, ivec2(f0 % uN, 0), 0).r;
+  float sx = follow * v * (t - float(f0));
+  vec2 ps = vec2(p.x - sx, p.y);
   vec3 col = ring(p, f);
+  vec3 ref = still;
+  if (abs(sx) > 0.25) {
+    // Which of the two the pixel shows is decided by where the train stands
+    // in that frame (its tracked nose and tail), not by comparing against the
+    // plate, whose exposure drifts from the late frames: shifted, a false
+    // match would draw the station displaced.
+    vec2 ex = texelFetch(uTrack, ivec2(f, 0), 0).gb;
+    bool atS = ps.x >= ex.x && ps.x <= ex.y;
+    bool atP = p.x >= ex.x && p.x <= ex.y;
+    bool post = texture(uOcc, vec2(ps.x / uSrc.x, by / uBand.y)).r >= 0.5;
+    if (atS && !post) {
+      // the train at the stratum's own moment
+      col = ring(ps, f);
+      ref = plate(ps);
+    } else if (atP && !post) {
+      // the train had already left this pixel at that moment
+      col = still;
+    }
+  }
   bool rows = p.y > uBody.x && p.y < uBody.y;
   if (!rows) {
     // Above and below the train's body rows, where the front is sculpted
@@ -215,11 +256,11 @@ void main() {
     // roof and pantograph show as they were.
     float e = 4.0 / uSrc.x;
     float slope = abs(delayAt(l + vec2(e, 0.0)) - delayAt(l - vec2(e, 0.0))) * uOn * uSpeed / 8.0;
-    col = mix(col, still, smoothstep(0.04, 0.2, slope));
+    col = mix(col, ref, smoothstep(0.04, 0.2, slope));
   }
-  if (occ >= 0.5) col = still;
+  if (occ >= 0.5) col = ref;
   // static pixels come from the plate, at full quality
-  float m = smoothstep(0.035, 0.085, diff(col, still));
+  float m = smoothstep(0.035, 0.085, diff(col, ref));
   o = vec4(mix(still, col, m), 1.0);
 }`;
 
@@ -484,6 +525,14 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     inv[j] = i + clamp((d - run[i]) / (run[i + 1] - run[i]), 0, 1);
   }
   const invTex = tex2d(gl.R32F, gl.RED, gl.FLOAT, NP, 1, inv, gl.NEAREST);
+  // per ring frame: the train's run, and where its nose and tail stand
+  // (an empty frame has no extent)
+  const trackData = new Float32Array(N * 4);
+  for (let i = 0; i < N; i++) {
+    const [a, b] = meta.x[i] || [0, 0];
+    trackData.set([meta.v[i] || 0, a, b > a ? b : -1, 0], i * 4);
+  }
+  const trackTex = tex2d(gl.RGBA32F, gl.RGBA, gl.FLOAT, N, 1, trackData, gl.NEAREST);
 
   // the delay field, drawn from the slit curve
   const field = new Float32Array(MW * MH);
@@ -597,6 +646,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     bind(3, gl.TEXTURE_2D, delayTex, "uDelay");
     bind(5, gl.TEXTURE_2D, occTex, "uOcc");
     bind(6, gl.TEXTURE_2D, invTex, "uInv");
+    bind(7, gl.TEXTURE_2D, trackTex, "uTrack");
     gl.uniform4f(u.uPrint, L.px, L.py, L.pw, L.ph);
     gl.uniform1f(u.uCanvasH, stage.canvas.height);
     gl.uniform3f(u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
@@ -747,7 +797,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   return {
     destroy() {
       destroyed = true;
-      for (const t of [yTex, cTex, srcTex, plateTex, delayTex, occTex, invTex]) gl.deleteTexture(t);
+      for (const t of [yTex, cTex, srcTex, plateTex, delayTex, occTex, invTex, trackTex]) gl.deleteTexture(t);
       gl.deleteFramebuffer(fbo);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
