@@ -133,7 +133,11 @@ for k in range(K):
     dn = float(toward.dot(XA))
     # card disparity at every matte pixel, vs the solid front under it
     # (cables crossing it do not count: they may pass behind)
-    sel = (a > 0.5) & (aS > 0.5) & (wireA < 0.1)
+    # (nor does what the plate filled in under the objects, or the mast's
+    # conduit strip the platform's beams crossed: that was behind them,
+    # whatever its depth guess says)
+    behind = hole | (z["tube_0"] if "tube_0" in z.files else False)
+    sel = (a > 0.5) & (aS > 0.5) & (wireA < 0.1) & ~behind
     yy, xx = np.nonzero(sel)
     rays = Kinv @ np.stack([xx, yy, np.ones_like(xx)]).astype(np.float64)
     zc = dn / (toward @ rays)

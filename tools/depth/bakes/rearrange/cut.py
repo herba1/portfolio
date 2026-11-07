@@ -16,6 +16,11 @@ the sky between the platform floor's slats, and leaves no blue fringe on the cut
 Where the object meets something solid (the platform's box against the
 mast) the matte is a colour guided filter of the hard cut, and it stops
 where the thing that stays (keep_k: the mast, the girder's chords) begins.
+Where that thing stays *behind* it (the mast behind the platform and the
+lamp) the object gets a finished back edge: a hard matte in the last 8 px,
+each member carried on along its own axis up to the mast in its own colour,
+and closed with a shaded end face, so a lifted object ends like a whole
+object and not in a smeared slice.
 Where something that stays crosses in front of the object (a cable over the
 platform's railing, the girder's chords over the far pole) the matte is
 completed across it (fill_k) and the object's own colour carried in.
@@ -124,6 +129,105 @@ for k in range(K):
     seen = (a > 0.05) & ~dilate(fill, 4)
     fg = np.where((a >= 0.97)[..., None], I, unmixed)
     fg = np.where(seen[..., None], fg, pushpull(fg, seen.astype(np.float32) * (0.2 + 0.8 * (a > 0.5))))
+    # The back edge: where the object meets something that stays behind it
+    # (the platform against the mast and its conduit, the lamp against the
+    # mast) the guided filter's falloff smears the stay's grey into a soft
+    # column, and the object ends in a slice. There the matte is hard, and
+    # the object is finished: each member is carried on along its own axis
+    # across the few px up to what stays, in its own colour, and closed with
+    # a shaded end face. (The far pole's girder crosses in front: fill_2.)
+    kb = z[f"keep_{k}"][y0:y1, x0:x1] & ~dilate(c, 2)
+    if k != 2 and (dilate(c, 6) & kb).any():
+        BE = 8.0  # the band next to what stays, px
+        dk = cv2.distanceTransform((~kb).astype(np.uint8), cv2.DIST_L2, 5)
+        band = (dk <= BE) & ~kb
+        # (1) inside the band the core is the matte: 0 or 1, no falloff, and
+        # its colour the photo's (an un-mix of an edge pixel at full alpha
+        # comes out garish)
+        fg = np.where((band & c & (a < 0.97))[..., None], I, fg)
+        a = np.where(band & c, 1.0, a)
+        # a smooth distance to what stays, for the end's own antialiasing
+        # (the raw one steps a px at a time along a leaning mast)
+        sds = cv2.GaussianBlur(dk - cv2.distanceTransform(kb.astype(np.uint8), cv2.DIST_L2, 5), (0, 0), 1.2)
+        # (2) the member's axis, from the core's own side edges a little way
+        # off the cut (the cut's own edge would say "parallel to the mast")
+        g_ = cv2.GaussianBlur(c.astype(np.float32), (0, 0), 1.0)
+        gx = cv2.Sobel(g_, cv2.CV_32F, 1, 0, ksize=3)
+        gy = cv2.Sobel(g_, cv2.CV_32F, 0, 1, ksize=3)
+        wt = ((dk > 6.5) & (dk < BE + 22)).astype(np.float32)
+        nrm = cv2.GaussianBlur(wt, (0, 0), 4.0) + 1e-6
+        Jxx = cv2.GaussianBlur(gx * gx * wt, (0, 0), 4.0) / nrm
+        Jxy = cv2.GaussianBlur(gx * gy * wt, (0, 0), 4.0) / nrm
+        Jyy = cv2.GaussianBlur(gy * gy * wt, (0, 0), 4.0) / nrm
+        en = Jxx + Jyy
+        coh = np.sqrt((Jxx - Jyy) ** 2 + 4 * Jxy ** 2) / np.maximum(en, 1e-6)
+        phi = 0.5 * np.arctan2(2 * Jxy, Jxx - Jyy)  # edge normal
+        vx, vy = -np.sin(phi), np.cos(phi)  # along the edge: the axis
+        # away from what stays
+        nx = cv2.Sobel(dk, cv2.CV_32F, 1, 0, ksize=3)
+        ny = cv2.Sobel(dk, cv2.CV_32F, 0, 1, ksize=3)
+        nn = np.maximum(np.hypot(nx, ny), 1e-6)
+        nx, ny = nx / nn, ny / nn
+        sgn = np.where(vx * nx + vy * ny < 0, -1.0, 1.0)
+        vx, vy = vx * sgn, vy * sgn
+        # inside a wide solid (the box's face) there are no side edges: the
+        # face is carried straight back to what stays
+        weak = (en < 0.02 * np.percentile(en[wt > 0], 99)) | (coh < 0.45)
+        vx, vy = np.where(weak, nx, vx), np.where(weak, ny, vy)
+        gap = band & ~c
+        gy_, gx_ = np.nonzero(gap)
+        dvx, dvy = vx[gy_, gx_], vy[gy_, gx_]
+        dot_ = dvx * nx[gy_, gx_] + dvy * ny[gy_, gx_]
+        # a member running alongside what stays (a post, the box's dark
+        # back) is carried straight across instead
+        par = dot_ <= 0.3
+        dvx = np.where(par, nx[gy_, gx_], dvx)
+        dvy = np.where(par, ny[gy_, gx_], dvy)
+        ok_ = np.ones(len(gy_), bool)
+        srcx = np.zeros(len(gy_), np.float32)
+        srcy = np.zeros(len(gy_), np.float32)
+        hit = np.zeros(len(gy_), bool)
+        d0 = dk[gy_, gx_]
+        for s_ in np.arange(0.5, 2.5 * BE, 0.5):
+            qx = gx_ + dvx * s_
+            qy = gy_ + dvy * s_
+            ix = np.clip(np.round(qx).astype(int), 0, c.shape[1] - 1)
+            iy = np.clip(np.round(qy).astype(int), 0, c.shape[0] - 1)
+            # entered the core, and it goes on along the axis (not a corner)
+            jx = np.clip(np.round(qx + dvx * 1.5).astype(int), 0, c.shape[1] - 1)
+            jy = np.clip(np.round(qy + dvy * 1.5).astype(int), 0, c.shape[0] - 1)
+            inn = ok_ & ~hit & c[iy, ix] & c[jy, jx]
+            srcx[inn], srcy[inn] = qx[inn] + dvx[inn], qy[inn] + dvy[inn]
+            hit |= inn
+            # walked out of the band without meeting the object: nothing
+            ok_ &= ~(~c[iy, ix] & (dk[iy, ix] > BE + 3))
+        ea = np.zeros(len(gy_), np.float32)
+        ef = np.zeros((len(gy_), 3), np.float32)
+        if hit.any():
+            mx = srcx[hit].reshape(-1, 1)
+            my = srcy[hit].reshape(-1, 1)
+            ea[hit] = cv2.remap(c.astype(np.float32), mx, my, cv2.INTER_LINEAR)[:, 0]
+            ef[hit] = cv2.remap(fg.astype(np.float32), mx, my, cv2.INTER_LINEAR)[:, 0]
+        # the end: antialiased against what stays, and its last px a face
+        # turned away from the sun (the members end facing the mast, away
+        # from the light), in the member's own colour
+        e0 = sds[gy_, gx_]
+        ea *= np.clip(e0 - 0.5, 0, 1)
+        cap = np.clip(2.5 - e0, 0, 1)
+        ef *= (1 - 0.38 * cap)[:, None]
+        a[gy_, gx_] = ea
+        fg[gy_, gx_] = np.where(hit[:, None], ef, fg[gy_, gx_])
+        a[kb] = 0
+        # no hairs on the finished edge: a 1-2 px whisker (a cable end, a
+        # bracket's lip) left in the band is not the object's
+        hard_ = (a > 0.5).astype(np.uint8)
+        whisker = band & (hard_ > 0) & (cv2.morphologyEx(hard_, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8)) == 0)
+        a[whisker] = 0
+        n_, cc_, st_, _ = cv2.connectedComponentsWithStats((a > 0).astype(np.uint8), 8)
+        small = np.zeros(n_, bool)
+        small[1:] = st_[1:, cv2.CC_STAT_AREA] < (150 if k == 0 else 40)
+        a[small[cc_]] = 0
+        print(f"  back edge {k}: band {int(band.sum())} px, carried {int(hit.sum())} of {len(gy_)}")
     if k == 2:
         # The far pole is the same concrete all the way up: under the girder
         # and the cables it is cloned from itself along its own axis (the

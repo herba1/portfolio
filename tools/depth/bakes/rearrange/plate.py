@@ -263,6 +263,9 @@ ori = ((ori + 90) % 180 - 90).astype(np.float32)
 good = (wA > 0.25) & (coh > 0.8)
 ori[~((wA > 0.06) & (coh > 0.5))] = 999
 wfill = np.zeros_like(wA)
+# the mast's own hardware kept beside a hole (its conduit, the cable from its
+# top clamp) is not a street cable: it never seeds one across the hole
+wA_seed = wA * ~dilate(z["hw_0"], 3) if "hw_0" in z.files else wA
 # the structure that stays and that cables are clamped to (the mast)
 solid_kept = erode(z["mast"] & ~sky & (wA < 0.1), 2) & ~need
 for k in range(K):
@@ -276,7 +279,7 @@ for k in range(K):
     peaks = [edges[i] + 0.5 for i in range(180) if hist[i] >= max(8, 0.01 * ring_.sum())]
     angles = np.unique(np.round(np.concatenate([np.arange(p_ - 2.0, p_ + 2.01, 0.2) for p_ in peaks]), 2))
     print("hole", k, "cable angles", len(peaks), "bins")
-    wfill = np.maximum(wfill, continue_lines(wA, ~need, nk, angles, ori, solid_kept))
+    wfill = np.maximum(wfill, continue_lines(wA_seed, ~need, nk, angles, ori, solid_kept))
     T.mark(f"cables across {k}")
 wireA = np.where(need, wfill, wA)
 T.mark("cables across")
@@ -328,6 +331,35 @@ cmask[ty[both], tx[both]] = 1
 cmask = np.minimum(cv2.GaussianBlur(cmask, (0, 0), 0.8) * 1.4, 1) * cmask.astype(bool)
 final = final * (1 - cmask[..., None]) + carry * cmask[..., None]
 T.mark("bundles carried")
+
+# ---- 5. the mast's conduit, which ran behind the deck's beam and struts,
+# goes on down the mast where they were: each pixel of it in the hole is
+# taken from the nearest clear stretch above and below, along its own
+# line, at the same offset from its centre (tube, rim and the sky beside it).
+if "tube_0" in z.files:
+    TL = z["tube_0_line"]
+    tube = z["tube_0"]
+    # where a member of the deck crossed it, and the member's rim
+    tgt = tube & dilate(z["core_0"], 2)
+    src_ok = tube & ~dilate(tgt, 1)
+    ty, tx = np.nonzero(tgt)
+    off = tx - np.interp(ty, TL[:, 1], TL[:, 0])
+    acc = np.zeros((len(ty), 3), np.float32)
+    wsum = np.zeros(len(ty), np.float32)
+    for sgn in (1, -1):
+        found = np.zeros(len(ty), bool)
+        for t in range(1, 120):
+            sy = ty + sgn * t
+            sx = np.round(np.interp(sy, TL[:, 1], TL[:, 0]) + off).astype(int)
+            ok = ~found & (sy >= 0) & (sy < H) & (sx >= 0) & (sx < W)
+            ok[ok] = src_ok[sy[ok], sx[ok]]
+            acc[ok] += final[sy[ok], sx[ok]] / t
+            wsum[ok] += 1.0 / t
+            found |= ok
+    got = wsum > 0
+    final[ty[got], tx[got]] = acc[got] / wsum[got][:, None]
+    print("  conduit carried", int(got.sum()), "of", len(ty))
+    T.mark("conduit carried")
 
 # ---- depth of the plate: non-sky, non-cable depth carried into the holes
 dw = (~sky & (wire < 0.05) & ~hole).astype(np.float32)

@@ -10,8 +10,11 @@ at 2400x1600. Writes <workdir>/masks.npz:
   sky     bool    clean sky (blue or cloud), wires excluded
   wire    float32 wire coverage 0..1 (thin dark lines over the sky)
   core_k  bool    object k's hard cut (objects listed in NAMES)
-  keep_k  bool    what must stay on the plate inside object k's box (the mast,
-                  the girder chords that cross in front of the far pole)
+  keep_k  bool    what must stay on the plate inside object k's box (the mast
+                  and its hardware, the girder chords that cross in front of
+                  the far pole)
+  tube_0  bool    the mast's conduit under the deck, where the plate carries
+                  it on across the deck's members
 
 Objects are cut the way a retoucher would: a hand-placed region says *which*
 thing, depth and colour say *where its edge is*. Every loose thing here hangs
@@ -142,7 +145,66 @@ core0 = cv2.morphologyEx(core0.astype(np.uint8), cv2.MORPH_OPEN, disk(1)) > 0
 # the cables cut the railing's posts in two; whether a piece belongs is
 # decided with them bridged
 core0 = biggest(core0 | (P0 & cable & nonsky & (xx < mast_l(yy) - 2)), keep=1) & core0
-keep0 = mast
+# Mast hardware the platform's region takes by mistake. They are the mast's,
+# so they stay on the plate (keep0) and never ride along with the deck:
+#  - the conduit that runs down the mast's left side from under the deck
+#    and out of the frame (a thin tube, 6-9 px, a few px clear of the mast);
+#  - the clamp round the mast where the left strut ends;
+#  - the bolt plate under the deck's beam;
+#  - the cable that loops from the mast's top clamp down into the box.
+# The deck's own members cross the conduit in front (the beam, the big
+# diagonal, the left strut's end): wherever a row of the core is wider than
+# a conduit it is a member, and the member keeps it.
+TUBE = [(659, 990), (655, 1010), (652, 1030), (650, 1070), (648, 1090), (647, 1150), (646.5, 1200),
+        (644, 1220), (640.5, 1260), (636.5, 1300), (632, 1340), (627, 1400), (622, 1460)]
+tube_band = np.zeros((H, W), np.uint8)
+cv2.polylines(tube_band, [np.round(np.array(TUBE)).astype(np.int32)], False, 1, 13)
+tube_band = tube_band > 0
+# the left strut, which runs into the clamp past the conduit: the band
+# round its axis is the strut's whatever its row's width
+SA, SV = np.array([571.5, 1250.0]), np.array([0.536, 0.844])
+sperp = np.abs((xx - SA[0]) * SV[1] - (yy - SA[1]) * SV[0])
+strut_l = (sperp < 6.5) & (yy > 1200)
+# horizontal run length of the core (members are wide, the conduit is not)
+wnd = (slice(960, 1420), slice(590, 700))
+cw = (core0 & ~strut_l)[wnd].astype(np.int32)
+left = np.zeros_like(cw)
+for x_ in range(cw.shape[1]):
+    left[:, x_] = (left[:, x_ - 1] + 1) * cw[:, x_] if x_ else cw[:, x_]
+right = np.zeros_like(cw)
+for x_ in range(cw.shape[1] - 1, -1, -1):
+    right[:, x_] = (right[:, x_ + 1] + 1) * cw[:, x_] if x_ < cw.shape[1] - 1 else cw[:, x_]
+runl = (left + right - 1) * cw
+narrow = np.zeros((H, W), bool)
+narrow[wnd] = (runl > 0) & (runl <= 11)
+hw0 = core0 & tube_band & narrow & ~strut_l
+# and the lips of the mast's brackets beside it that reach the cut
+hw0 |= core0 & narrow & (xx > mast_l(yy) - 14) & (yy > 990) & ~strut_l
+# the bolt plate under the deck's beam, on the mast's edge (it stands clear
+# of the deck's members, so it would ride along as a floating block)
+hw0 |= core0 & boxm(638, 1084, 720, 1126)
+# the clamp: everything past the left strut's end, cut square to its axis
+send = np.array([624.0, 1338.0])
+hw0 |= core0 & (((xx - send[0]) * SV[0] + (yy - send[1]) * SV[1]) > 0) & boxm(598, 1300, 680, 1430)
+hw0 |= core0 & boxm(655, 590, 720, 711)  # the cable from the top clamp
+core0 &= ~hw0
+# the plate keeps them with their soft rim, right up to the deck's members
+# (where a member crossed the conduit plate.py carries the conduit on)
+keep0 = mast | (dilate(hw0, 2) & ~core0 & ~sky) | hw0
+# the cable from the top clamp whole, its thin stretches too (the core only
+# had its thicker ones), and the sky round it as the photo has it, so the
+# plate shows it unbroken
+keep0 |= boxm(655, 590, 720, 708) & ~dilate(core0, 3)
+# Below the deck the strip from the conduit to the mast is the photo's own
+# (the conduit, the sliver of sky behind it, the mast's edge): it stays as
+# it is, and where the deck's members crossed in front of it the strip is
+# carried on along the conduit's line (plate.py), so neither a pale halo nor
+# a gap is painted there.
+TC = np.array(TUBE, np.float32)
+tcx = np.interp(yy, TC[:, 1], TC[:, 0])
+strip = (xx > tcx) & (xx < mast_l(yy)) & (yy > 990)
+keep0 |= strip & ~core0
+tube0 = (tube_band | strip) & (yy > 990)
 
 # ---- 1: the lamp on the bracket's far end, right of the mast
 P1 = poly([(806, 1118), (850, 1112), (885, 1150), (880, 1215), (776, 1222), (776, 1124)])
@@ -191,7 +253,8 @@ for k, c in enumerate(cores):
     print(k, NAMES[k], int(c.sum()), "px")
 
 np.savez_compressed(os.path.join(WORK, "masks.npz"), img=img, dep=dep, sky=sky, wire=wire, mast=mast, cable=cable, cable_ang=cable_ang,
-                    **{f"core_{k}": c for k, c in enumerate(cores)}, **{f"keep_{k}": c for k, c in enumerate(keeps)}, **{f"fill_{k}": c for k, c in enumerate(fills)}, region_0=P0 & (xx < mast_l(yy) - 2),
+                    **{f"core_{k}": c for k, c in enumerate(cores)}, **{f"keep_{k}": c for k, c in enumerate(keeps)}, **{f"fill_{k}": c for k, c in enumerate(fills)},
+                    tube_0=tube0, tube_0_line=np.array(TUBE, np.float32), hw_0=hw0, region_0=P0 & (xx < mast_l(yy) - 2),
                     region_2=((np.abs(across) < 31 + 0.004 * (yy - 850)) & (yy > 810)) | (boxm(1600, 800, 2200, 1600) & (np.abs(across) < 70) & ~sky & ~cable0 & (wire < 0.5)))
 
 # preview: objects tinted, sky blue, wires red
