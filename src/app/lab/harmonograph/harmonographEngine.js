@@ -358,47 +358,104 @@ export async function createHarmonograph(host) {
     o.v = s * u - o.g * o.x;
   };
 
-  // Segments are batched into one path per ink level (width and density
-  // quantised), so a frame strokes a handful of paths, not a hundred.
-  let runLevel = -1;
+  // One pen line. The ink is batched into runs of a single width and tone,
+  // and a run only changes when the pen has really changed pace: the tone is
+  // smoothed, must move well past its level (hysteresis) after the level has
+  // been held for a stretch, then walks there a level at a time. A run that
+  // continues (a new frame, a new level)
+  // starts one segment back with a butt cap, so the overlap hides the join
+  // and no round cap is dropped mid-line as a bead.
+  const LEVELS = 5;
+  const HYSTERESIS = 1.5; // levels the tone must move before the width steps
+  const HOLD = 40; // segments a level is held at least
+  const RAMP = 10; // ... or, once it is moving, per step of a swell
+  // Pen speed in reaches per second.
+  const PACE_SLOW = 6; // and slower: the full, darkest line
+  const PACE_FAST = 13; // and faster: the hairline
+  const PRESS = 0.6; // reach (share of R) inside which the nib presses less
+  let runLevel = -1; // quantised tone of the run, 0..LEVELS
+  let runTaper = -1; // quantised lift taper, 0..3
+  let runSegs = 0;
+  let ramping = false;
   let runOpen = false;
+  let firstRun = true; // the line's first run keeps its round start
+  let tone = -1; // smoothed 0 (fast, fine) .. 1 (slow, full)
+  let back = null; // the point before `last`, where a continuing run starts
   const flush = () => {
     if (runOpen) for (const c of inks()) c.stroke();
     runOpen = false;
   };
-  const LEVELS = 12;
-  const deposit = (x, y, speed, taper) => {
+  const deposit = (x, y, speed, taper, rch) => {
     if (!last) {
       last = { x, y };
+      back = null;
+      firstRun = true;
+      runLevel = -1;
+      ramping = false;
+      tone = -1;
       return;
     }
     const dx = x - last.x;
     const dy = y - last.y;
     if (dx * dx + dy * dy < 1.1) return;
     speedAvg += (speed - speedAvg) * 0.5;
-    // Fast pen: ~0.5px, slightly grey. Slow pen: up to ~1.3px, near black.
-    // Near the lift the nib eases off the paper and the line fines away.
-    const f0 = Math.exp(-speedAvg / 70) * (0.35 + 0.65 * taper);
-    const level = Math.round(f0 * LEVELS) * 4 + Math.round(taper * 3);
-    if (level !== runLevel || !runOpen) {
+    // Fast pen: a 0.45px hairline, slightly grey. Slow pen: up to 1.8px,
+    // near black. Pace is read against the swing's own reach, so each loop
+    // swells where it turns and runs fine through its middle, at any sheet
+    // size. As the swing winds in, the loops crowd together and the nib
+    // presses less, so the centre stays open; near the lift it eases off
+    // the paper and the line fines away.
+    const reachNow = Math.max(rch, 1);
+    const pace = Math.log((PACE_FAST * reachNow) / Math.max(1e-3, speedAvg)) / Math.log(PACE_FAST / PACE_SLOW);
+    const press = 0.3 + 0.7 * smooth(LIFT * R, PRESS * R, reachNow);
+    const f0 = clamp(pace, 0, 1) * press * (0.35 + 0.65 * taper);
+    tone = tone < 0 ? f0 : tone + (f0 - tone) * 0.12;
+    const want = tone * LEVELS;
+    const tq = Math.round(taper * 3);
+    let change = !runOpen || tq !== runTaper;
+    if (runLevel < 0) {
+      runLevel = Math.round(want);
+      change = true;
+    } else {
+      // Past the hysteresis the width walks one level at a time toward the
+      // pen's pace, so a swell reads as a swell, not a step.
+      const gap = want - runLevel;
+      if (Math.abs(gap) <= 0.5) ramping = false;
+      else if (runSegs >= (ramping ? RAMP : HOLD) && (ramping || Math.abs(gap) > HYSTERESIS)) {
+        runLevel += Math.sign(gap);
+        runSegs = 0;
+        ramping = true;
+        change = true;
+      }
+    }
+    if (change) {
       flush();
-      runLevel = level;
-      const f = Math.round(f0 * LEVELS) / LEVELS;
-      const width = (0.5 + 0.35 * f + 0.45 * f * f * f) * (0.4 + 0.6 * (Math.round(taper * 3) / 3));
+      runTaper = tq;
+      const f = runLevel / LEVELS;
+      const width = (0.45 + 1.35 * Math.pow(f, 1.3)) * (0.4 + 0.6 * (tq / 3));
       const k = Math.min(1, f * 1.6);
       const r = INK_FAST[0] + (INK_DARK[0] - INK_FAST[0]) * k;
       const g = INK_FAST[1] + (INK_DARK[1] - INK_FAST[1]) * k;
       const b = INK_FAST[2] + (INK_DARK[2] - INK_FAST[2]) * k;
+      const from = !firstRun && back ? back : last;
       for (const c of inks()) {
         c.strokeStyle = `rgb(${r | 0},${g | 0},${b | 0})`;
         c.lineWidth = width * dpr;
+        c.lineCap = firstRun ? "round" : "butt";
         c.beginPath();
-        c.moveTo(last.x * dpr, last.y * dpr);
+        c.moveTo(from.x * dpr, from.y * dpr);
+        if (from !== last) c.lineTo(last.x * dpr, last.y * dpr);
       }
+      firstRun = false;
       runOpen = true;
     }
     for (const c of inks()) c.lineTo(x * dpr, y * dpr);
+    runSegs++;
     curInk = true;
+    if (back) {
+      back.x = last.x;
+      back.y = last.y;
+    } else back = { x: last.x, y: last.y };
     last.x = x;
     last.y = y;
   };
@@ -431,7 +488,7 @@ export async function createHarmonograph(host) {
       y0 = y;
       if (!inking) continue;
       const rch = reach();
-      deposit(x, y, d / H, smooth(LIFT * R, TAPER * LIFT * R, rch));
+      deposit(x, y, d / H, smooth(LIFT * R, TAPER * LIFT * R, rch), rch);
     }
     flush();
     penSpeed = travelled / Math.max(1e-6, n * H);
