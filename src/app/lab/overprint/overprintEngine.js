@@ -245,8 +245,9 @@ function bakeAtlas() {
     const cw = c.w + pad * 2;
     const ch = c.h + pad * 2;
     x.fillText(c.d, ox + pad + c.t.actualBoundingBoxLeft, (H - ch) / 2 + pad + c.t.actualBoundingBoxAscent);
-    // ink: the share of the cell the figure itself covers across, for spacing.
-    const r = { u: ox / W, v: (H - ch) / 2 / H, du: cw / W, dv: ch / H, aspect: cw / ch, ink: c.w / cw, ox, oy: (H - ch) / 2, cw, ch };
+    // ink / tall: the share of the cell the figure itself covers across and
+    // up, for spacing and for sizing it to bleed off the sheet.
+    const r = { u: ox / W, v: (H - ch) / 2 / H, du: cw / W, dv: ch / H, aspect: cw / ch, ink: c.w / cw, tall: c.h / ch, ox, oy: (H - ch) / 2, cw, ch };
     ox += cw;
     return r;
   });
@@ -393,16 +394,24 @@ export async function createOverprint(host) {
   const frozen = Number.isFinite(still);
 
   // The register grid, as fractions of the track's cross height. At rest the
-  // three plates run as one lockup: each on its own grid line, each figure
-  // tucked over the one before it by a quarter of its own width, so red prints
-  // over blue and blue over yellow on every frame, not only on a lucky one.
+  // three plates run as one lockup on the centre line (the climb of the track
+  // already steps them up the sheet), each figure tucked over the one before
+  // it by a share of its own width, so red prints over blue and blue over
+  // yellow on every frame, not only on a lucky one. Sizes are relative: the
+  // sheet sets the scale (see onResize).
   const GRID = [-0.2, -0.1, 0, 0.1, 0.2];
   const LANES = [
-    { size: 0.6, y: 0.1, lean: 0.1 },
-    { size: 0.46, y: 0, lean: 0.14 },
-    { size: 0.53, y: -0.1, lean: 0.12 },
+    { size: 1, y: 0, lean: 0.1 },
+    { size: 0.93, y: 0, lean: 0.14 },
+    { size: 0.97, y: 0, lean: 0.12 },
   ];
-  const TUCK = 0.25;
+  const TUCK = 0.34;
+  // Every figure runs off the head and the foot of the sheet, as on the
+  // posters: its ink is this much taller than the sheet, clear of its lane.
+  const BLEED = 1.12;
+  // ...but one period of the run never outgrows the track by more than this,
+  // so on a narrow sheet the figures give way before the lockup does.
+  const RUN = 1.14;
   // The lockup cruises at one shared pace.
   const CRUISE = reduced ? 0 : 160;
   // Pulled out of register, a plate falls back into its slot on a critically
@@ -442,12 +451,12 @@ export async function createOverprint(host) {
   let TW = 1; // track length across the box
   let TH = 1; // track cross height
   let G = 0; // the lockup's anchor along the track, never wrapped
-  let P = 1; // one lap: exactly the track across the box
+  let P = 1; // one lap: the lockup's own advance, 5 + 0 + 8 and one tuck
+  let S = 1; // the sheet's scale: a size-1 figure's height, css px
   const slot = [0, 0, 0];
   let placed = false;
   let stillFrames = 0;
-  const short = () => Math.min(H, W * 0.62);
-  const height = (n) => n.lane.size * short();
+  const height = (n) => n.lane.size * S;
   const width = (n) => height(n) * atlas.rects[n.i].aspect;
   const inkWidth = (n) => width(n) * atlas.rects[n.i].ink;
   // Real type, never stretched: pace shows in the rules, not in the figure.
@@ -462,10 +471,10 @@ export async function createOverprint(host) {
     return [cx * axis[0] + cy * axis[1], -cx * axis[1] + cy * axis[0]];
   };
   const unit = () => Math.min(H, TH);
-  // Into [c - P/2, c + P/2). The track is a loop exactly as long as the box
-  // is wide, like a printed band: a plate running off one edge is already
-  // printing at the other, so the lockup never leaves the sheet and both its
-  // overprints are on it in every frame, whole or split across the edge.
+  // Into [c - P/2, c + P/2). The track is a printed run, not a lap of the
+  // sheet: the lockup repeats every P, 5-0-8-5-0-8, so a plate running off
+  // one edge is a copy of the one already printing behind it. There is never
+  // stock between the figures, and both overprints are on the sheet whole.
   const lap = (u, c = 0) => u - c - P * Math.floor((u - c + P / 2) / P) + c;
 
   // One step of a plate that is not in the hand.
@@ -508,12 +517,20 @@ export async function createOverprint(host) {
     H = h;
     TW = w * Math.abs(axis[0]) + h * Math.abs(axis[1]);
     TH = w * Math.abs(axis[1]) + h * Math.abs(axis[0]);
-    P = TW;
     paperDirty = true;
     stillFrames = 0;
+    // Scale: big enough that every figure bleeds off the head and foot of the
+    // sheet, unless one period of the run would outgrow the track by more
+    // than RUN; then the run wins, so a tall, narrow sheet still shows most
+    // of the lockup, though never at less than 62% of its height.
+    const advance1 = nums.reduce((s, n) => s + n.lane.size * atlas.rects[n.i].aspect * atlas.rects[n.i].ink, 0) * (1 - TUCK);
+    const bleed = Math.max(...nums.map((n) => (BLEED * H + 2 * Math.abs(n.lane.y) * Math.min(H, TH)) / (n.lane.size * atlas.rects[n.i].tall)));
+    S = Math.min(bleed, Math.max((RUN * TW) / advance1, 0.62 * H));
     // The lockup: each figure overprints the one before by TUCK of its own
-    // width, and the whole group is centred on the track.
+    // width, and the whole group is centred on the track. The period carries
+    // the same tuck from the 8 over the next 5, so the run tiles seamlessly.
     const [a, b, c] = nums.map(inkWidth);
+    P = (a + b + c) * (1 - TUCK);
     slot[0] = 0;
     slot[1] = a / 2 + b * (0.5 - TUCK);
     slot[2] = slot[1] + b / 2 + c * (0.5 - TUCK);
@@ -539,8 +556,7 @@ export async function createOverprint(host) {
       // over the edge behind it.
       for (const n of nums) {
         n.shown = CRUISE + n.rv;
-        const x = lap(G + slot[n.i] + n.off);
-        n.trail = n.shown >= 0 ? x + P / 2 : P / 2 - x;
+        n.trail = 4 * P;
       }
     }
     for (const n of nums) n.x = lap(G + slot[n.i] + n.off);
@@ -727,13 +743,18 @@ export async function createOverprint(host) {
       const halfW = (h * asp * st) / 2 + (Math.abs(ln) * h) / 2 + 4;
       const pad = 4;
       const trail = nums[i].trail;
-      // A plate that has just lapped still trails its rules off the far
-      // edge, so it prints once more a lap away wherever that shows. Rules
-      // are what the plate has printed on this sheet: they reach back no
-      // further than where it was picked up, nor past the edge it came in
-      // over, so they never wrap round ahead of it.
-      for (const cx of [x - P, x, x + P]) {
-        const clip = v > 0 ? Math.max(-P / 2, cx - trail) : Math.min(P / 2, cx + trail);
+      // The run repeats every P, so the plate prints at every period that
+      // shows. Rules are what the plate has printed on this sheet: they reach
+      // back no further than where it was picked up, nor past the edge it
+      // came in over, nor into its own copy one period behind, so a plate
+      // never prints over itself.
+      const reach = TW / 2 + halfW + L + pad;
+      const k0 = Math.ceil((-reach - x) / P);
+      const k1 = Math.floor((reach - x) / P);
+      for (let k = k0; k <= k1; k++) {
+        const cx = x + k * P;
+        const own = P - halfW - h * 0.05;
+        const clip = v > 0 ? Math.max(-TW / 2, cx - trail, cx - own) : Math.min(TW / 2, cx + trail, cx + own);
         const back = v > 0 ? clamp(cx - halfW - clip, 0, L) : 0;
         const front = v > 0 ? 0 : clamp(clip - (cx + halfW), 0, L);
         const x0 = cx - halfW - back - 4;
