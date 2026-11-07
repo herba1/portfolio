@@ -20,7 +20,7 @@ const reel = {
   outro: { hold: 500 },
   loop: true,                                   // ends on its own first frame: the light cut, the hand back where it began
   cursor: { from: [0.7, 0.86], visible: true },
-  formats: ["feed", "landscape"],                // X and LinkedIn: 4:5 for the phone feed, 16:9 for desktop
+  formats: ["feed"],                            // one clip per piece: 4:5, the feed format for X and LinkedIn
   beats: [
     // Mostly the thin cut, which is the prettier one. Lead with the stretch so
     // the springs read within a second, then the flick, then a quick blink of

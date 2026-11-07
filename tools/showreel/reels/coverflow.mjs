@@ -8,9 +8,11 @@ const reel = {
   stage: { sel: "[data-cf-stage]", pad: 0.1 },  // frame the shelf, not the page
   css: ".cf-heading { visibility: hidden; }",
   ready: ".cf-item[data-lit]",          // first sleeve has faded up
-  intro: { hold: 1600, zoom: 1.12 },     // open slightly close, settle out while the sleeves fade up
-  cursor: { from: [0.78, 0.86] },
-  formats: ["landscape", "vertical"],
+  intro: { hold: 1600, zoom: 1, fade: 0, trim: 1500 },
+  outro: { hold: 700 },
+  loop: { fade: 700 },
+  cursor: { from: [0.74, 0.86], visible: true },
+  formats: ["feed"],
   beats: [
     { drag: [[0.66, 0.42], [0.22, 0.44]], duration: 520, approach: 900, pause: 1500 },
     { click: prev, duration: 900, pause: 450 },
@@ -23,6 +25,7 @@ const reel = {
     { click: next, duration: 900, pause: 1500 },
   ],
   per: {
+    feed: null, // filled below
     // Narrow layout: same story, one sleeve wide, so drag less and zoom less.
     vertical: {
       beats: [
@@ -38,4 +41,5 @@ const reel = {
   },
 };
 
+reel.per.feed = reel.per.vertical;
 export default reel;

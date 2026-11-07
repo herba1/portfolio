@@ -16,7 +16,7 @@ const reel = {
   // the sleeve, record, camera and pointer land on frame one exactly.
   loop: { fade: 1000 },
   cursor: { from: [0.78, 0.62], visible: true },
-  formats: ["landscape"],
+  formats: ["feed"],
   beats: [
     { move: [798, 262], duration: 650, zoom: 1.45, zoomOn: [880, 225], pause: 250 },
     { press: "cursor", settle: 80 },
@@ -30,4 +30,21 @@ const reel = {
   ],
 };
 
+// The 4:5 layout stacks the record lower and narrower; same story in viewport fractions.
+reel.per = {
+  feed: {
+    stage: { rect: [0.06, 0.22, 0.88, 0.62] },
+    beats: [
+      { move: [0.53, 0.46], duration: 650, zoom: 1.4, zoomOn: [0.62, 0.4], pause: 250 },
+      { press: "cursor", settle: 80 },
+      { move: [0.62, 0.43], duration: 650, arc: 0.04, pause: 300 },
+      { move: [0.86, 0.3], duration: 700, arc: 0.04, pause: 200 },
+      { camera: { zoom: 1.15, on: "cursor", follow: true } },
+      { move: [0.42, 0.66], duration: 1000, arc: 0.14, pause: 150 },
+      { lift: true, pause: 300 },
+      { camera: "reset" },
+      { move: [0.74, 0.86], duration: 900, pause: 400 },
+    ],
+  },
+};
 export default reel;

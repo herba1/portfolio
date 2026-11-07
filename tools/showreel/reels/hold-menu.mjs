@@ -24,11 +24,13 @@ const reel = {
   stage: { sel: ".hm-cell", pad: 0.14 },  // the shelf of covers, centred,
   css: ".hm-head { visibility: hidden; }",
   ready: ".hm-cover img",
-  intro: { hold: 1400, zoom: 1.1 },
-  cursor: { from: [0.8, 0.9] },
-  formats: ["landscape", "vertical"],
+  intro: { hold: 1400, zoom: 1, fade: 0, trim: 1300 },
+  outro: { hold: 700 },
+  loop: { fade: 700 },
+  cursor: { from: [0.74, 0.86], visible: true },
+  formats: ["feed"],
   beats: beats(".hm-cell:nth-child(7) .hm-cover"),
-  per: { vertical: { beats: beats(".hm-cell:nth-child(3) .hm-cover") } },
+  per: { vertical: { beats: beats(".hm-cell:nth-child(3) .hm-cover") }, feed: { beats: beats(".hm-cell:nth-child(3) .hm-cover") } },
 };
 
 export default reel;

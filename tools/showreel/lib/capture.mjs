@@ -24,7 +24,8 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   const browser = await chromium.launch({
     headless: !headed,
     channel: process.env.CHANNEL || undefined,
-    args: native ? ["--ignore-gpu-blocklist", "--enable-gpu-rasterization"] : SOFT_GPU,
+    // reel.args: extra Chromium flags, e.g. a fake microphone for pieces that listen.
+    args: [...(native ? ["--ignore-gpu-blocklist", "--enable-gpu-rasterization"] : SOFT_GPU), ...(reel.args ?? [])],
   });
   const vp = format.viewport;
   const context = await browser.newContext({
