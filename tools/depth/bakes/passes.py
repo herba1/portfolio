@@ -10,6 +10,7 @@
 #   python3 -I tools/depth/segment.py sky $P $B/sky.png --depth $D  # sky matte
 #   python3 -I tools/depth/normals.py $P $B/moge --snap              # MoGe-2 normals, 2048x1536
 #   python3 -I tools/depth/bakes/passes.py $B
+#   python3 -I tools/depth/bakes/passes-gaps.py   # then: the lattice's sky (matte B), the albedo unmixed
 #
 # Outputs in public/lab/passes, 2048 x 1536:
 #   photo.webp    the plate
