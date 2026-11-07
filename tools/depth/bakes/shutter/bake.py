@@ -41,7 +41,12 @@ Steps
      (mask-tower.png, made on a frame of the plate with tools/depth/segment.py
      prompt --box 70,130,800,1080 --point 480,840 --point 420,420
      --point 160,950 --neg 100,100 --neg 1080,600), snapped to the mean
-     plate's own edges with a guided filter. It is not grown into the sky.
+     plate's own edges with a guided filter, then cut by the sky's own
+     motion: SAM takes the crown's open strut lattice as one solid, sky
+     pockets and all, so above the top floor every pixel whose linear-light
+     variance over the loop says it sees moving sky is taken out (see
+     "Stillness matte"). Eroded 1 px, feathered ~1 px. It is not grown into
+     the sky.
 """
 import argparse
 import json
@@ -58,6 +63,12 @@ sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
 from grade import grade, lin2srgb, srgb2lin  # noqa: E402
 from kit import guided, pushpull  # noqa: E402
+
+# The crown: the open strut lattice above the tower's top floor slab (1080p
+# px; the line runs through the slab, which is solid). Only here does the
+# variance test cut the matte: lower down the glass reflects the moving
+# cloud, and its variance is the sky's.
+CROWN = np.array([[150, 384], [610, 267], [610, 100], [150, 100]], np.int32)
 
 ap = argparse.ArgumentParser()
 ap.add_argument("src")
@@ -188,6 +199,106 @@ def to8(lin, dither=True):
     return np.clip(np.round(s), 0, 255).astype(np.uint8)
 
 
+def thin(img):
+    """Zhang-Suen thinning of a 0/1 uint8 image: its one-pixel skeleton."""
+    a = np.pad(img.astype(np.uint8), 1)
+    while True:
+        changed = False
+        for step in (0, 1):
+            p = [a[1:-1, 1:-1], a[:-2, 1:-1], a[:-2, 2:], a[1:-1, 2:], a[2:, 2:], a[2:, 1:-1], a[2:, :-2], a[1:-1, :-2], a[:-2, :-2]]
+            p1, p2, p3, p4, p5, p6, p7, p8, p9 = [x.astype(np.int32) for x in p]
+            nb = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9
+            ring = [p2, p3, p4, p5, p6, p7, p8, p9, p2]
+            trans = sum(((ring[k] == 0) & (ring[k + 1] == 1)).astype(np.int32) for k in range(8))
+            if step == 0:
+                c = (p2 * p4 * p6 == 0) & (p4 * p6 * p8 == 0)
+            else:
+                c = (p2 * p4 * p8 == 0) & (p2 * p6 * p8 == 0)
+            d = (p1 == 1) & (nb >= 2) & (nb <= 6) & (trans == 1) & c
+            if d.any():
+                a[1:-1, 1:-1][d] = 0
+                changed = True
+        if not changed:
+            return a[1:-1, 1:-1]
+
+
+# Stillness matte. SAM sees the crown's strut lattice as one solid, and the
+# sky through it was frozen with the tower: at a long exposure the pockets
+# between the struts kept the mean's half-integrated cloud while the open sky
+# around them went to silk. The matte is cut by the sky's own motion instead.
+# One pass over the loop: per pixel, the mean (the still plate) and the
+# variance of the graded linear light. A pixel that mixes a fraction f of
+# moving sky with still structure has a standard deviation f times the
+# open sky's there (the sky's own, push-pulled in from outside the tower), so
+# f = (sd - noise) / (sd_sky - noise), the noise floor read off the solid
+# spire and slab. Inside the crown, a pixel that is mostly sky (f > 0.6: a
+# variance above about a third of the open sky's, ~0.04 linear here) is sky
+# and integrates; the struts are what is left. Then the whole matte is
+# eroded 1 px (the mixed edge pixel that carries frozen sky goes to the sky;
+# a strut thinner than 3 px keeps its one-pixel skeleton, so none vanishes)
+# and feathered outward by a 0.8 px Gaussian (about 1.5 px of falloff past
+# the eroded edge).
+still_acc = np.zeros((CH, CW, 3), np.float64)
+sq_acc = np.zeros((CH, CW, 3), np.float64)
+for i, f in frames(S, S + N):
+    full = prep(f, i)
+    still_acc += full
+    sq_acc += np.square(full, dtype=np.float64)
+still_lin = (still_acc / N).astype(np.float32)
+sd = np.sqrt(np.maximum(sq_acc / N - np.square(still_acc / N), 0).max(-1)).astype(np.float32)
+del still_acc, sq_acc
+still_rgb = to8(still_lin)
+guide = still_rgb.astype(np.float32) / 255
+
+zone = np.zeros((CH, CW), np.uint8)
+cv2.fillPoly(zone, [CROWN], 1)
+zone = zone > 0
+open_sky = (cv2.dilate((mask > 0.02).astype(np.uint8), np.ones((5, 5), np.uint8)) == 0).astype(np.float32)
+sd_sky = pushpull(sd, open_sky)
+noise = float(np.median(sd[(inner > 0) & zone]))
+cover = np.clip((sd - noise) / np.maximum(sd_sky - noise, 1e-3), 0, 1)  # f: the sky's share
+snap = np.clip(guided(guide, mask, 4, 1e-3), 0, 1)
+snap = np.clip((snap - 0.5) * 1.6 + 0.5, 0, 1)  # tighten the guided ramp back to ~2 px
+# SAM's outline of the crown also misses stretches of the thin rail strut
+# where it runs a pixel or two off the slab, so inside the crown the motion
+# draws the structure, bounded by SAM's mask grown 7 px; elsewhere SAM's.
+near = cv2.dilate((mask > 0.5).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))) > 0
+solid = np.where(zone, near & (cover <= 0.6), snap > 0.5)
+# Specks inside the crown: a crumb of strut under 6 px is noise, and a sky
+# pocket under 16 px (the knuckle where struts meet) prints as a dark dot
+# in the white, so it stays with the strut.
+for val, least in ((1, 6), (0, 16)):
+    n_cc, lab_cc, st_cc, _ = cv2.connectedComponentsWithStats((solid == val).astype(np.uint8), connectivity=8)
+    small = np.zeros(n_cc, bool)
+    small[1:] = st_cc[1:, cv2.CC_STAT_AREA] < least
+    solid[small[lab_cc] & zone] = not val
+solid = solid.astype(np.uint8)
+core = cv2.erode(solid, cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)))
+x0, y0 = CROWN[:, 0].min() - 4, CROWN[:, 1].min() - 4
+x1, y1 = CROWN[:, 0].max() + 4, CROWN[:, 1].max() + 4
+skel = np.zeros_like(solid)
+skel[y0:y1, x0:x1] = thin(solid[y0:y1, x0:x1])
+core |= skel & zone
+matte = np.maximum(core.astype(np.float32), cv2.GaussianBlur(core.astype(np.float32), (0, 0), 0.8))  # the feather falls outward
+# The struts' own light. A crown pixel the matte keeps is still part sky (a
+# truss is open work, and its edge pixels straddle the sky): its mean is
+# (1 - f) strut + f mean sky, and printed whole that sky is frozen in it, a
+# grey-blue cast that reads as a ghost of the strut against the silk. So
+# the strut's colour is unmixed, F = (mean - g sky) / (1 - g), the mean sky
+# push-pulled in from the crown's sky pockets and the open sky around it.
+# Half way: g = f / 2, f capped at 0.6 (the matte's own threshold). The
+# truss's shaded side is lit by that same blue sky, so a full unmix strips
+# its skylight too and turns the struts cream.
+sky_w = ((open_sky > 0) | (zone & (cover > 0.9))).astype(np.float32)
+sky_mean = pushpull(still_lin, sky_w)
+fz = 0.5 * np.minimum(cover, 0.6)[..., None]
+unmix = np.maximum((still_lin - fz * sky_mean) / (1 - fz), 0)
+still_lin = np.where((zone & (matte > 0))[..., None], unmix, still_lin).astype(np.float32)
+print("crown: noise sd %.3f, sky px cut from SAM %d, strut px %d (skeleton-kept %d)" % (
+    noise, int((zone & (snap > 0.5) & (solid == 0)).sum()), int((solid > 0)[zone].sum()), int((skel & ~cv2.erode(solid, np.ones((3, 3), np.uint8)) & zone).sum())))
+
+
+
 # 2-3. The shutter of each frame. A time-lapse frame is a short exposure
 # taken every few seconds: the cloud jumps ~1% of the frame between frames, so
 # a mean of raw frames is a strobe of separate copies, not a smear. Each frame
@@ -201,7 +312,7 @@ def to8(lin, dither=True):
 M = 16
 dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
 gy, gx = np.mgrid[0:VH, 0:VW].astype(np.float32)
-tmask = cv2.resize(mask, (VW, VH), interpolation=cv2.INTER_AREA)[..., None]
+tmask = cv2.resize(matte, (VW, VH), interpolation=cv2.INTER_AREA)[..., None]
 
 
 def gray8(lin):
@@ -231,12 +342,9 @@ enc = subprocess.Popen([
 pre = []  # blurred pre-roll: the loop's cross-fade partner
 blk_acc = np.zeros((BH, BW, 3), np.float64)
 blocks = []
-still_acc = np.zeros((CH, CW, 3), np.float64)
 prev = None
 for i, f in frames(S - K, S + N + 1):
     full = prep(f, i)
-    if S <= i < S + N:
-        still_acc += full
     cur = cv2.resize(full, (VW, VH), interpolation=cv2.INTER_AREA)
     if prev is not None:
         pi, pa = prev
@@ -262,19 +370,22 @@ enc.wait()
 cap.release()
 print("blocks", len(blocks))
 
-# Stillness matte, snapped to the mean plate's edges.
-still_lin = (still_acc / N).astype(np.float32)
+# The still plate (the crown's struts unmixed), the stillness matte in its
+# alpha.
 still_rgb = to8(still_lin)
-guide = still_rgb.astype(np.float32) / 255
-alpha = np.clip(guided(guide, mask, 4, 1e-3), 0, 1)
-alpha = np.clip((alpha - 0.5) * 1.6 + 0.5, 0, 1)  # tighten the guided ramp back to ~2 px
+alpha = matte
 a8 = np.clip(np.round(alpha * 255), 0, 255).astype(np.uint8)
 Image.fromarray(np.dstack([still_rgb, a8])).save(os.path.join(args.out, "still.webp"), "WEBP", quality=92, exact=True, method=6)
 prev = guide * (1 - 0.45 * alpha[..., None]) + np.array([1, 0.1, 0.1], np.float32) * 0.45 * alpha[..., None]
 cv2.imwrite(os.path.join(args.work, "debug-matte.jpg"), cv2.cvtColor((prev * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
+cz = (slice(CROWN[:, 1].min(), CROWN[:, 1].max() + 120), slice(CROWN[:, 0].min(), CROWN[:, 0].max() + 40))
+cv2.imwrite(os.path.join(args.work, "debug-crown.png"), cv2.resize(np.hstack([
+    cv2.cvtColor(still_rgb[cz], cv2.COLOR_RGB2BGR),
+    cv2.cvtColor((alpha[cz] * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR),
+    cv2.cvtColor(((1 - cover[cz]) * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)]), None, fx=2, fy=2, interpolation=cv2.INTER_NEAREST))
 
 # Tower out of the blocks: push-pull of each block's own sky.
-hole = cv2.resize(mask, (BW, BH), interpolation=cv2.INTER_AREA)
+hole = cv2.resize(matte, (BW, BH), interpolation=cv2.INTER_AREA)
 hole = cv2.dilate((hole > 0.02).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
 keep = 1.0 - hole.astype(np.float32)
 filled = []
