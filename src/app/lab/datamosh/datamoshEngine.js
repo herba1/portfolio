@@ -4,8 +4,9 @@ import { readWebm } from "./webm";
 // Datamosh: a video codec run live, so its reference frame can be lost.
 //
 // Nine seconds of a rail journey in two shots and a hard cut. Six seconds
-// out of a train window on a summer afternoon: cumulus, wires, poles, a
-// belt of trees running past, all of it one slow lateral pan. Then three
+// out of a train window on a summer afternoon: cumulus over a low belt of
+// trees, wires and poles, then a stand of oaks running in from the right
+// until their leaves fill the frame, all of it one lateral pan. Then three
 // seconds down the line in winter, the track coming at the camera out of a
 // vanishing point between pines: close, fast, and every vector radial. The
 // clip ships twice over: once as a plain VP9 file (the pictures), and once
@@ -42,8 +43,8 @@ import { readWebm } from "./webm";
 // It tunes in the way a set joins a broadcast: between I-frames, with no
 // picture. Until the first I-frame arrives (three seconds) it builds what it
 // can on blank paper from the vectors and the residuals, so only what
-// moves or changes appears: the tree line, the edges of the
-// drifting cloud, a pole, set into the paper.
+// moves or changes appears: the tree line, the fence, a pole, set into the
+// paper.
 //
 // Press and drag and the hand paints a mask of starved macroblocks, a soft
 // brush a few blocks across dragged along its path, each block tearing at
@@ -53,9 +54,12 @@ import { readWebm } from "./webm";
 // so the tear barely shows. The real event is the cut. Its I-frame (and the
 // loop seam's, the cut back) is the one that matters to drop: the winter
 // shot arrives everywhere else, while inside the stroke its vectors find
-// nothing of their own to move and push the summer picture instead, sky and
-// tree line streaming out of the vanishing point in stepped strips on the
-// macroblock grid, cut into a winter frame that stays whole around it. Over
+// nothing of their own to move and push the summer picture instead: the
+// oak leaves under the vanishing point stream out of it in long stepped
+// strips on the macroblock grid, cut into a winter frame that stays whole
+// around them. Only what sits at the vanishing point survives the run:
+// everything further out moves faster, every frame a little further, and
+// is replaced from behind within a few frames. Over
 // the seam it runs the other way. Drag while holding and the clip is fed
 // faster than real time, so it reaches the cut sooner. Let go and the mask
 // fades from its edges in; a block fed again carries its mosh along the
@@ -68,8 +72,9 @@ import { readWebm } from "./webm";
 // for that long before t; ?release=seconds lets go that long before t (the
 // refresh mid-sweep); ?join=1 shows the opening (?join=0 skips it live);
 // ?qp= sets the encoder's quantiser. A still's hold paints a fixed stroke
-// (STROKE) through the centre left. ?t=8&hold=4 holds it over the cut
-// (6 s): the hero still; ?t=6.3&hold=0.6 is the cut a moment after.
+// (STROKE) down the lower third, out of the vanishing point both ways.
+// ?t=8&hold=4 holds it over the cut (6 s): the hero still; ?t=6.3&hold=0.6
+// is the cut a moment after.
 
 const ASSET = "/lab/datamosh/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -79,17 +84,22 @@ const LET_GO = 0.2; // s over which a hold lets the residual go
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
 const BRUSH = 6; // brush radius, macroblocks (about five torn across)
 const FADE = 1.6; // s: time constant of the starved mask once the hand lifts
-// The hero stroke a still paints while its hold runs: through the centre
-// left, from the fence up across the tree line and the sky, through where
-// the winter shot's vanishing point will sit and a little past it, so the
-// bloom streams out of it both ways (frame fractions, top-left origin).
+// The hero stroke a still paints while its hold runs: a V through the lower
+// third, up from the fence at the left to the winter shot's vanishing point
+// (0.38, 0.34) and down again to the fence at the right, both arms along
+// its radial vectors, where they run longest (frame fractions, top-left
+// origin). Under it at the cut is the oak stand, leaves and the sky between
+// them, so the vectors drag high-frequency texture into the strips. A
+// stroke in the lower third that stops short of the vanishing point tears
+// nothing that lasts: its vectors pull the true winter picture in from
+// behind it within a few frames. The apex has to sit on the vanishing
+// point, where nothing moves, so the leaves there are the ones that run.
 const STROKE = [
-  [0.06, 0.97],
-  [0.16, 0.76],
-  [0.27, 0.57],
+  [0.05, 0.95],
+  [0.22, 0.68],
   [0.38, 0.4],
-  [0.47, 0.25],
-  [0.55, 0.12],
+  [0.56, 0.68],
+  [0.74, 0.95],
 ];
 const STROKE_S = 0.3; // s the still's hand takes to draw it
 
