@@ -6,15 +6,19 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // product (Beer-Lambert, so density is an exponent, not a mix). Draw order
 // can't matter, exactly as on a press.
 //
-// Speed is printed the way Huber printed it: flat, hard-edged bands of the
-// same ink, never a blur. Each numeral is cut into horizontal strips, and at
-// speed every strip runs out behind it as a solid rule of its own length.
+// Speed is printed the way Huber printed it: flat, hard-edged rules of the
+// same ink, never a blur. Each numeral is cut into horizontal strips, and when
+// it is thrown every strip runs out behind it as a rule of its own weight and
+// length, heavy at the centre and hairline at the edges.
 
 const FAMILY = "OverprintGeist";
 const DIGITS = ["5", "0", "8"];
 const CELL_H = 1100;
 const STRIPES = 5;
 const GAP = 0.06; // paper between rules, as a fraction of a strip
+const HAIR = 0.14; // weight of the outermost rules against the centre one
+// How far each strip's rule runs, as a share of the tail: a ragged edge.
+const REACH = [0.72, 0.9, 1.0, 0.55, 0.8];
 // The track runs on a shallow climb, the diagonal of the posters.
 const ANGLE = -0.105;
 
@@ -64,6 +68,8 @@ out vec4 o;
 
 const float N = ${STRIPES.toFixed(1)};
 const float GAP = ${GAP.toFixed(3)};
+const float HAIR = ${HAIR.toFixed(3)};
+const float REACH[5] = float[5](${REACH.map((r) => r.toFixed(2)).join(", ")});
 
 // Coverage of the numeral in its own frame (d = offset from centre, css px),
 // sharpened back to a crisp edge after the atlas is magnified.
@@ -99,25 +105,32 @@ void main(){
   float sharp = max(1.0, h * uDpr / ${CELL_H.toFixed(1)} * 1.6);
   float cov = glyph(d, h, sharp, 0.0);
 
-  // Speed bands: the strip of the numeral this row belongs to, run out
-  // behind its back edge as a flat rule. Every rule stops on the same
-  // slanted line, so together they print as one band cut by paper.
-  if (L > h * 0.08) {
+  // Speed bands, graded the way Huber ruled them: a heavy rule out of the
+  // middle of the numeral, thinning to hairlines at its top and bottom. Each
+  // rule runs out behind its own strip of the silhouette to its own length,
+  // so the ends recede raggedly instead of stopping on one cut line.
+  if (L > h * 0.1) {
     float qy = d.y / h + 0.5;
     float s = floor(qy * N);
     if (s >= 0.0 && s < N) {
       vec4 st = texelFetch(uBands, ivec2(int(s), uI), 0); // back edge L, R, top, bottom (cell uv)
-      float top = max(st.z, (s + GAP) / N);
-      float bot = min(st.w, (s + 1.0 - GAP) / N);
-      if (top < bot) {
+      float lo = max(st.z, (s + GAP) / N);
+      float hi = min(st.w, (s + 1.0 - GAP) / N);
+      if (lo < hi) {
         float xe = ((dir > 0.0 ? st.x : st.y) - 0.5) * h * b.w * m.y;
         float back = -dir * h * b.w * m.y * 0.5;
         float behind = (xe - d.x * m.y) * dir;
-        float len = L + (xe - back) * dir;
-        float dv = min(qy - top, bot - qy) * h;
         float gap = h * 0.05;
+        // Each numeral takes the stagger from a different place, so no two
+        // plates carry the same edge.
+        float len = L * REACH[int(mod(s + float(uI) * 2.0, N))] + (xe - back) * dir;
+        // A rule draws out at a hairline and only reaches full weight once
+        // it is about seven times longer than it is thick.
+        float w = mix(1.0, HAIR, pow(abs(s - 2.0) / 2.0, 0.8));
+        float hw = min(w * (hi - lo) * 0.5 * h, max(len - gap, 0.0) * 0.07);
+        float dv = hw - abs(qy - (lo + hi) * 0.5) * h;
         float dh = min(behind - gap, len - behind);
-        cov = max(cov, clamp(min(dv, dh) * uDpr + 0.5, 0.0, 1.0));
+        if (hw * uDpr > 0.6) cov = max(cov, clamp(min(dv, dh) * uDpr + 0.5, 0.0, 1.0));
       }
     }
   }
@@ -398,8 +411,9 @@ export async function createOverprint(host) {
   const width = (n) => height(n) * atlas.rects[n.i].aspect;
   const stretchOf = (v) => 1 + clamp(Math.abs(v) / 3000, 0, 0.3);
   const leanOf = (n, v) => Math.sign(v || 1) * (n.lane.lean + clamp(Math.abs(v) / 4000, 0, 0.16));
-  // Bands only appear once the plate is really moving, and grow with pace.
-  const tailOf = (v) => clamp((Math.abs(v) - 150) * 1.1, 0, W * 0.75);
+  // Rules only print once a plate has been thrown: at cruising pace a
+  // numeral is a clean figure. Past that they grow with pace.
+  const tailOf = (v) => clamp((Math.abs(v) - 400) * 1.1, 0, W * 0.75);
   const toTrack = (x, y) => {
     const cx = x - W / 2;
     const cy = y - H / 2;
