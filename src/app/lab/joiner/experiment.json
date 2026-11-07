@@ -1,0 +1,28 @@
+{
+  "title": "Joiner",
+  "description": "Lying on a Dublin quay looking straight up, taken one Polaroid at a time. Drag across the empty table and each stretch of the drag shoots an instant print aimed where you point: a real rectilinear view of the sky above the quay, metered by its own electric eye, with its own little error in aim, roll, exposure and dye, and its own moment, so the cumulus have drifted between one print and the next and disagree across the borders while the walls and lamp posts line up. The prints fall on to the pile with a slight paper bounce and settle into a fractured but coherent worm's-eye sky. Long-press to sweep them off.",
+  "tags": ["WebGL", "Photography", "Film", "Projection"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "After David Hockney's photo joiners, especially Pearblossom Hwy., 11-18th April 1986 (#2) and his 1982 Polaroid composites: every print is its own camera and its own moment, and the disagreement at the borders is the content (https://www.edwardtufte.com/notebook/space-time-joiner-photographs/). The table is a stereographic map of the sky with the zenith at its centre; each print is an exact gnomonic view along the direction under the pointer, focal length matched to the map's local scale, advected on a cloud deck for its moment, and developed through src/app/lab/_kit/film.js. ?prints=N&seed=S lays down a pre-built joiner; ?t=seconds freezes the newest print mid-fall; ?ev= sets exposure.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.35], "to": [0.7, 0.55] },
+  "probe": [
+    { "idle": 1800 },
+    { "drag": [[0.3, 0.3], [0.7, 0.32]], "ms": 1400 },
+    { "idle": 900 },
+    { "drag": [[0.68, 0.6], [0.32, 0.62]], "ms": 1400 },
+    { "idle": 1600 }
+  ],
+  "photo": {
+    "name": "Savva Zakharov, Docklands 01 (Poly Haven HDRI, CC0)",
+    "url": "https://polyhaven.com/a/docklands_01"
+  },
+  "sources": [
+    "HDRI: Docklands 01, Poly Haven, by Savva Zakharov, CC0. https://polyhaven.com/a/docklands_01 (8k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/docklands_01_8k.hdr). Baked to a 4096 px zenith-centred azimuthal-equidistant disk (120 degrees at the rim) as log2 radiance -8..+5 in 8 bits with TPDF dither (scene.webp), a sky matte from tools/depth/segment.py sky repaired for cloud interiors (mask.webp), and a 1024 px sky-only plate with the structures push-pull filled (sky.webp). Bake: tools/depth/bakes/joiner (crop.py, skyfix.py, bake.py).",
+    "https://www.edwardtufte.com/notebook/space-time-joiner-photographs/",
+    "https://en.wikipedia.org/wiki/David_Hockney#Photocollages",
+    "https://en.wikipedia.org/wiki/Polaroid_SX-70",
+    "https://en.wikipedia.org/wiki/Stereographic_projection"
+  ]
+}
