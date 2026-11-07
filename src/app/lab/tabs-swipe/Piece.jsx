@@ -20,6 +20,8 @@ const EDGE = spring(0.42, 1); // scroll rubber band returning
 const STEP = 1 / 240;
 
 const STAGGER = 0.034; // s between neighbours as the grid closes up
+const OUT = 0.9; // share of the way off its old row at which a wrapping tab has faded out
+const SHRINK = 0.06; // a wrapping tab is at 0.94 while it is between rows
 const LABEL = 24; // caption under each tab: 8px gap + 16px line
 const ROW_GAP = 24; // caption to the next row of tabs
 const TALL = 1.32; // the tallest a tab gets: a phone page
@@ -67,6 +69,7 @@ export default function Piece() {
       i,
       present: true, gone: false,
       lx: 0, ly: 0, lvx: 0, lvy: 0, tx: 0, ty: 0, pending: null,
+      leg: null, vis: 1, vvis: 0, // changing rows: out along the old row, in along the new
       x: 0, vx: 0, mode: "rest", // rest | drag | fly | back
       dragV: 0, rot: 0, vrot: 0, pivot: 0,
       enter: 1, venter: 0, enterAt: 0,
@@ -87,7 +90,8 @@ export default function Piece() {
     // Everyone in the grid gets a new slot. The ones nearest the gap move
     // first, in reading order, so the grid closes up like a wave rather than
     // all at once: along the row, then the first tab of the next row wraps
-    // up to the end of this one, and so on down the sheet.
+    // up to the end of this one, and so on down the sheet. Nothing moves
+    // between rows in the open: see `go`.
     const reflow = (from, instant = false) => {
       const list = order();
       const at = list.findIndex((c) => c.i >= from);
@@ -95,9 +99,11 @@ export default function Piece() {
         const [x, y] = slot(k);
         if (instant) {
           c.tx = c.lx = x; c.ty = c.ly = y; c.lvx = c.lvy = 0; c.pending = null;
+          c.leg = null; c.vis = 1; c.vvis = 0;
           return;
         }
         if (x === c.tx && y === c.ty && !c.pending) return;
+        if (c.leg && x === c.leg.x && y === c.leg.y && !c.pending) return;
         const delay = at < 0 ? 0 : Math.max(0, k - at) * STAGGER;
         c.pending = { x, y, at: s.time + delay };
       });
@@ -139,11 +145,48 @@ export default function Piece() {
 
     const flyTarget = (c) => -(s.left + c.lx + s.cw + 80);
 
-    const crossing = (c) => Math.abs(c.ly - c.ty) > 1 || (c.pending && c.pending.y !== c.ty);
+    // A tab's move starts. Along its row it simply slides. To another row it
+    // never cuts across the sheet: it keeps going the way the row is moving,
+    // out past the end of its old row while it fades and shrinks to 0.94,
+    // then comes in from one slot short of its new place and settles. Both
+    // legs ride the same layout spring, so it stays part of the wave.
+    const go = (c, x, y) => {
+      if (y === c.ty) {
+        c.leg = null;
+        c.tx = x;
+        return;
+      }
+      const step = s.cw + s.gap;
+      // Up a row is backwards in reading order: out to the left, in from the right.
+      const dir = y < c.ty ? -1 : 1;
+      const out = dir < 0 ? -step : s.cols * step;
+      c.leg = { out: true, dir, x, y, x0: c.lx, x1: out, vis0: c.vis };
+      c.vvis = 0;
+      c.tx = out;
+    };
+
+    const legStep = (c) => {
+      const L = c.leg;
+      const span = L.x1 - L.x0;
+      const p = Math.abs(span) < 1 ? 1 : clamp((c.lx - L.x0) / span, 0, 1);
+      if (L.out) {
+        c.vis = L.vis0 * clamp(1 - p / OUT, 0, 1);
+        if (p < OUT) return;
+        // Gone from the old row: it reappears a slot short of its new one,
+        // still moving the same way at the speed it left with.
+        const from = L.x - L.dir * (s.cw + s.gap);
+        L.out = false; L.x0 = from; L.x1 = L.x;
+        c.lx = from; c.ly = L.y; c.lvy = 0;
+        c.tx = L.x; c.ty = L.y;
+        c.vis = 0;
+        return;
+      }
+      c.vis = p;
+      if (p > 0.995) c.leg = null;
+    };
 
     const paint = () => {
       layer.style.transform = `translate3d(${s.left}px, ${-s.sy}px, 0)`;
-      const shown = cards.filter((c) => !c.gone);
       for (const c of cards) {
         const el = els[c.i];
         const lb = labels[c.i];
@@ -153,46 +196,31 @@ export default function Piece() {
           continue;
         }
         el.style.visibility = lb.style.visibility = "";
-        const sc = 0.94 + 0.06 * c.enter;
+        const vis = clamp(c.vis, 0, 1);
+        const sc = 1 - SHRINK * (1 - c.enter) - SHRINK * (1 - vis);
         el.style.transform =
           `translate3d(${(c.lx + c.x).toFixed(2)}px, ${c.ly.toFixed(2)}px, 0) rotate(${c.rot.toFixed(3)}deg) scale(${sc.toFixed(4)})`;
-        const enter = clamp(c.enter, 0, 1);
-        el.style.opacity = c.enter < 0.999 ? enter.toFixed(3) : "";
+        const enter = clamp(c.enter, 0, 1) * vis;
+        el.style.opacity = enter < 0.999 ? enter.toFixed(3) : "";
         // A tab pulled sideways lets go of its caption, so it never slides
         // across the neighbour's title; it comes back as the tab settles.
         const held = clamp(1 - Math.abs(c.x) / (s.cw * 0.4), 0, 1);
         const lo = enter * held;
         lb.style.opacity = lo < 0.999 ? lo.toFixed(3) : "";
         // The caption rides under the card but never tilts with it: the glass
-        // leans, the type under it stays level.
+        // leans, the type under it stays level. It keeps its gap to the glass
+        // as the glass shrinks.
+        const lift = (1 - sc) * s.ch * (0.5 - 0.5 * c.pivot);
         lb.style.transform =
-          `translate3d(${(c.lx + c.x).toFixed(2)}px, ${(c.ly + s.ch).toFixed(2)}px, 0)`;
+          `translate3d(${(c.lx + c.x).toFixed(2)}px, ${(c.ly + s.ch - lift).toFixed(2)}px, 0)`;
         el.style.transformOrigin = `50% ${(50 + c.pivot * 50).toFixed(1)}%`;
         const lifted = c.mode === "drag" || c.mode === "fly";
         if (lifted !== (el.dataset.lifted !== undefined)) {
           if (lifted) el.dataset.lifted = "";
           else delete el.dataset.lifted;
         }
-        // A tab changing rows travels over the tabs sliding along a row, but
-        // under every caption (z 2), so no title is ever covered on the way.
-        // Only a tab in the hand rises above the captions.
-        el.style.zIndex = lifted ? 4 : c.mode === "back" ? 3 : crossing(c) ? 1 : 0;
-        lb.style.zIndex = lifted || c.mode === "back" ? 4 : 2;
-        // When a caption and another tab cross (one changing rows passes under
-        // it, or it rides over a neighbour), it takes a ground-coloured backing
-        // so it reads as a tag on the glass, not type on type.
-        const lx = c.lx + c.x;
-        const ly = c.ly + s.ch + 8;
-        const over = shown.some(
-          (m) =>
-            m !== c &&
-            m.lx + m.x < lx + s.cw && m.lx + m.x + s.cw > lx &&
-            m.ly < ly + 16 && m.ly + s.ch > ly,
-        );
-        if (over !== (lb.dataset.over !== undefined)) {
-          if (over) lb.dataset.over = "";
-          else delete lb.dataset.over;
-        }
+        // Only a tab in the hand, or on its way out or home, sits above the rest.
+        el.style.zIndex = lb.style.zIndex = lifted || c.mode === "back" ? 1 : "";
       }
     };
 
@@ -203,10 +231,17 @@ export default function Piece() {
         for (const c of cards) {
           if (c.gone) continue;
           if (c.pending && s.time >= c.pending.at) {
-            c.tx = c.pending.x; c.ty = c.pending.y; c.pending = null;
+            go(c, c.pending.x, c.pending.y);
+            c.pending = null;
           }
           [c.lx, c.lvx] = stepSpring(c.lx, c.lvx, c.tx, LAYOUT, h);
           [c.ly, c.lvy] = stepSpring(c.ly, c.lvy, c.ty, LAYOUT, h);
+          if (c.leg) legStep(c);
+          else if (c.vis !== 1) {
+            // A leg called off half way: it comes back to full on the same spring.
+            [c.vis, c.vvis] = stepSpring(c.vis, c.vvis, 1, LAYOUT, h);
+            if (Math.abs(1 - c.vis) < 0.001 && Math.abs(c.vvis) < 0.01) { c.vis = 1; c.vvis = 0; }
+          }
 
           let v = c.dragV;
           if (c.mode === "fly") {
@@ -255,6 +290,7 @@ export default function Piece() {
       s.restoreAt = -1;
       cards.forEach((c, k) => {
         c.present = true; c.gone = false; c.mode = "rest";
+        c.leg = null; c.vis = 1; c.vvis = 0;
         c.x = c.vx = c.rot = c.vrot = 0;
         c.enter = 0; c.venter = 0; c.enterAt = s.time + k * 0.05;
       });
@@ -271,7 +307,7 @@ export default function Piece() {
       cards.some(
         (c) =>
           !c.gone &&
-          (c.mode !== "rest" || c.pending || c.enter < 0.999 ||
+          (c.mode !== "rest" || c.pending || c.leg || c.vis !== 1 || c.enter < 0.999 ||
             Math.abs(c.rot) > 0.01 || Math.abs(c.vrot) > 0.05 ||
             Math.abs(c.lx - c.tx) > 0.1 || Math.abs(c.ly - c.ty) > 0.1 ||
             Math.abs(c.lvx) > 1 || Math.abs(c.lvy) > 1),
