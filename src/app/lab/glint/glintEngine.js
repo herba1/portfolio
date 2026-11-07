@@ -22,16 +22,20 @@ import META from "./meta.json";
 //
 // Live, per pixel: the wall's diffuse light turns with the sun (Lambert sun +
 // skylight, the same law the albedo was divided by); glass reflects the sun
-// disc through its own pane's normal with Fresnel, as a mirror widened only by
-// the pixel's footprint and the pane's roughness; the sky round the sun (the
-// aureole) and the sunward edges of the cumulus brighten with it, in the sky
-// itself and in every reflection of it. Where the sun is in open sky it is
-// drawn as a disc with the veiling glare of a sun nobody can look at, and
-// each wall's mirror image of it veils the glass round it the same way, a
-// tenth as bright; behind a tower the sun is hidden by the tower. At the
-// photographer's sun the frame hands back to the photograph's own pixels.
-// Then developed through the shared film kit (summer), whose halation and
-// diffusion give the glint its bloom.
+// through its own pane's normal with Fresnel, as a sharp mirror image plus two
+// lobes over the pane normals: a pillow lobe (a pane's bow sweeps it across
+// the pane) and a run, longer up the tower than across, so a curtain wall
+// facing the sun lights a streak of neighbouring panes, each a moment apart.
+// That light is HDR and goes to the film unclipped, whose halation and
+// diffusion give the glint its bloom. The sky round the sun (the aureole) and
+// the sunward edges of the cumulus brighten with it, in the sky itself and in
+// every reflection of it. Where the sun is in open sky it has a small blown
+// core and veiling glare, and each wall's mirror image of it veils the glass
+// round it, a tenth as bright; behind a tower the sun is hidden by the tower.
+// Everything but the sun and its glints is held inside the film's shoulder by
+// a gain judged on the light's smooth level, so the cumulus round an open sun
+// keeps its modelling. At the photographer's sun the frame hands back to the
+// photograph's own pixels. Developed through the shared film kit (summer).
 //
 // Query: ?sun=x,y holds the sun at that point of the print (0..1, y down);
 // ?sun=photo holds it at the photographer's sun; ?still=1 skips the reveal
@@ -126,6 +130,7 @@ uniform float uDebug;
 uniform vec3 uGlintD[2]; // where the sun's mirror image sits in the two brightest walls
 uniform float uGlintK[2]; // and how bright it is there, in suns
 
+const vec3 LUMA_C = vec3(0.2126, 0.7152, 0.0722);
 const float SUN_R = 0.0047;   // angular radius of the sun, rad
 const vec3 SKY_C = vec3(0.80, 0.90, 1.08); // skylight on a wall: blue
 const vec3 SUN_C = vec3(1.0, 0.93, 0.82);  // the sun: warm
@@ -200,8 +205,15 @@ void main() {
   float disc = 1.0 - smoothstep(SUN_R - pxa, SUN_R + pxa, gs);
   float limb = 0.6 + 0.4 * sqrt(max(0.0, 1.0 - (gs * gs) / (SUN_R * SUN_R)));
   float away = 1.0 - uPhotoW;
-  sky += vec3(1.0, 0.97, 0.92) * uSunL * 0.12 * disc * limb * away;
-  sky += vec3(0.62, 0.7, 0.78) * 0.05 * (aureole(gs) - 0.9 * exp(-gs / 0.3)) * away;
+  // HDR that must reach the film unclipped by the scene's own shoulder: the
+  // sun's disc and its mirror images in the glass (halation draws their bloom)
+  vec3 hot = vec3(1.0, 0.97, 0.92) * uSunL * 0.12 * disc * limb * away * step(0.5, skyM);
+  // the aureole: forward scattering by haze brightens the sky round the sun
+  // by a factor (so the cumulus keeps its modelling) plus a little light of
+  // its own, warm-neutral, not grey-blue
+  float au = aureole(gs) - 0.9 * exp(-gs / 0.3);
+  sky *= 1.0 + 0.035 * au * away;
+  sky += vec3(1.0, 0.95, 0.87) * 0.02 * au * away;
 
   // ---- towers
   vec3 col = sky;
@@ -213,6 +225,7 @@ void main() {
       n0 = -normalize(vh);
     }
     vec3 tH = normalize(cross(n0, uUp));
+    vec3 tU = normalize(cross(tH, n0));
     float LIM = radians(2.0);
     vec2 j = (mt.rg * 2.0 - 1.0) * LIM;
     vec3 n = normalize(n0 + j.x * uUp + j.y * tH);
@@ -253,14 +266,41 @@ void main() {
     // spreads one glint into a patchwork of lit panes
     float ga = th;
     float gg = sqrt(ga * ga + sr * sr);
-    vec3 aur = vec3(0.62, 0.7, 0.78) * 0.12 * (60.0 * exp(-gg / 0.025) + 12.0 * exp(-gg / 0.08) + 1.5 * exp(-gg / 0.3)) * front;
+    vec3 aur = vec3(0.62, 0.7, 0.78) * 0.12 * (12.0 * exp(-gg / 0.08) + 1.5 * exp(-gg / 0.3)) * front;
 
-    vec3 spec = fr * (dE + glint + aur);
+    // The glint proper. A curtain wall is a field of slightly different
+    // mirrors, so the sun is not seen in one pane but in a run of them: every
+    // pane whose normal lies near the half vector between the eye and the
+    // sun catches it. Two lobes over the pane normals (tilt and pillow
+    // included), in the face's own frame: a pillow lobe, narrow enough that a
+    // pane's bow sweeps it bright from one side to the other, and the run
+    // itself, longer up the tower than across it (insulated units pillow
+    // and sit off plumb more than they twist), so the lit panes line up
+    // into a streak that slides pane by pane as the sun moves.
+    // (the run reads each pane's tilt and bow at twice the bake's, which is
+    // what sets one lit pane apart from the next inside it)
+    vec3 hv = normalize(uS - v);
+    vec3 dh = hv - n;
+    float du = dot(dh, tU);
+    float dv = dot(dh, tH);
+    float pil = exp(-(du * du + dv * dv) / (2.0 * 0.008 * 0.008));
+    vec3 dr = hv - normalize(n0 + 2.0 * (j.x * uUp + j.y * tH));
+    float ru = dot(dr, tU) / 0.05;
+    float rv = dot(dr, tH) / 0.024;
+    float run = exp(-0.5 * (ru * ru + rv * rv));
+    float gfr = fr * front * glass * away;
+    // radiance in units of the scene, through Fresnel: a mirror of the sun is
+    // far brighter than anything else in the frame
+    float hdr = gfr * (10.0 * pil + 26.0 * run);
+    hot += vec3(1.0, 0.95, 0.86) * hdr * (1.0 - skyM);
+    hot += fr * glint * glass * (1.0 - skyM);
+
+    vec3 spec = fr * (dE + aur);
     vec3 glassC = base + spec;
-    vec3 frameC = wall + spec * 0.6;
+    vec3 frameC = wall + spec * 0.6 + fr * glint * 0.6;
     vec3 tower = mix(frameC, glassC, glass);
     col = mix(tower, sky, skyM);
-    if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, glass, fr);
+    if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, run * glass, pil * glass);
     if (uDebug > 2.5) col = vec3(mt.r, mt.g, glass * 0.3);
   }
   // veiling glare: a sun in open sky is too bright to look at. Its light
@@ -269,6 +309,7 @@ void main() {
   // towers in front, all from where the disc is. A tower over the disc takes
   // it away (the sky matte at the sun, over a few disc radii, says how much
   // of the sun shows).
+  float sunVis = 0.0;
   if (uS.z > 0.05) {
     vec2 sp = uC + uF * uS.xy / uS.z;
     float vis = 0.0;
@@ -280,19 +321,55 @@ void main() {
       vis += inP * texture(uGeo, q).b;
     }
     vis = smoothstep(0.1, 0.9, vis / 9.0) * away;
-    float veil = 7.0 * exp(-gs / 0.01) + 1.4 * exp(-gs / 0.045) + 0.32 * exp(-gs / 0.16) + 0.06 * exp(-gs / 0.5);
+    float veil = 7.0 * exp(-gs / 0.008) + 0.55 * exp(-gs / 0.035) + 0.16 * exp(-gs / 0.16) + 0.05 * exp(-gs / 0.5);
     col += vec3(1.0, 0.95, 0.86) * veil * vis;
+    sunVis = vis;
   }
   // and the sun's mirror image in a curtain wall is a second sun, a tenth as
   // bright: it veils the panes and the sky round it the same way, so the
   // glint blooms instead of sitting in the glass as a pattern
   for (int k = 0; k < 2; k++) {
     float gk = acos(clamp(dot(v, uGlintD[k]), -1.0, 1.0));
-    float gv = 2.2 * exp(-gk / 0.03) + 0.5 * exp(-gk / 0.08);
+    float gv = 0.7 * exp(-gk / 0.012) + 0.18 * exp(-gk / 0.05);
     col += vec3(1.0, 0.93, 0.82) * gv * uGlintK[k] * away;
   }
   if (uDebug > 1.5 && uDebug < 2.5) col = vec3(gNow / g0 * 0.5, texture(uEnvM, envUv(v)).g, texture(uEnvM, envUv(v)).r);
-  outColor = vec4(col * uExpo, 1.0);
+  // The film's shoulder. Everything but the sun and its mirror images is
+  // held inside it, so the sky round an open sun rolls off to a warm white
+  // instead of clipping into a flat disc. The roll-off is judged on the
+  // light's smooth level (the photograph a few texels wide, relit the same
+  // way), and applied as a gain, so the cumulus keeps its modelling inside
+  // it; then a gentle per-pixel shoulder takes what detail pokes out. Within
+  // a few disc radii of a visible sun the core is let through to blow out.
+  col *= uExpo;
+  vec3 lb = s2l(textureLod(uPhoto, t, 4.5).rgb);
+  float Lsm = dot(lb, LUMA_C) * (skyM > 0.5 ? clamp(gNow / g0, 0.35, 3.0) * (1.0 + 0.035 * au * away) : 1.0);
+  Lsm += 0.02 * au * away * skyM;
+  Lsm += (7.0 * exp(-gs / 0.008) + 0.55 * exp(-gs / 0.035) + 0.16 * exp(-gs / 0.16) + 0.05 * exp(-gs / 0.5)) * sunVis;
+  Lsm *= uExpo;
+  // (a ceiling that falls off with the angle from the sun, not a disc with
+  // an edge: the blown core is a few disc radii and fades into the glow)
+  float core = 6.0 * exp(-gs / 0.009) * sunVis;
+  float K = 0.72;
+  float M = 0.92 + core;
+  float Ls2 = Lsm > K ? K + (M - K) * (1.0 - exp(-(Lsm - K) / (M - K))) : Lsm;
+  // (at the photographer's sun the frame is the photograph, untouched)
+  Ls2 = mix(Ls2, Lsm, uPhotoW);
+  col *= Ls2 / max(Lsm, 1e-4);
+  float Lp = max(dot(col, LUMA_C), max(col.r, max(col.g, col.b)) * 0.85);
+  float K2 = 0.95;
+  float M2 = 1.1 + core;
+  float Lp2 = Lp > K2 ? K2 + (M2 - K2) * (1.0 - exp(-(Lp - K2) / (M2 - K2))) : Lp;
+  Lp2 = mix(Lp2, Lp, uPhotoW);
+  col *= Lp2 / max(Lp, 1e-4);
+  // the glints: HDR straight to the film, with a soft ceiling so a run of
+  // panes blooms through the halation without a hard white slab
+  vec3 hx = hot * uExpo;
+  float hl = dot(hx, LUMA_C);
+  float HM = 2.2;
+  hx *= hl > 0.0 ? HM * (1.0 - exp(-hl / HM)) / hl : 0.0;
+  hx += hot * uExpo * disc * away; // the disc itself stays a sun
+  outColor = vec4(col + hx, 1.0);
 }`;
 
 const BLIT = `#version 300 es
