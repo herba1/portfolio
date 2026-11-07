@@ -1,40 +1,45 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Rearrange: a summer photograph of a Kyoto level crossing whose objects are
-// loose. Pick up the crossbuck, a signal lamp, the barrier boom or the
-// ridge-end tile and slide it somewhere else; let go and it settles.
-// Double-tap and everything goes home.
+// Rearrange: a summer photograph taken straight up a catenary mast at Ine,
+// whose loose things come away from it. Pick up the maintenance platform,
+// the lamp, the far pole or an insulator and slide it across the sky; let
+// go and it settles. Double-tap and everything goes home.
 //
 // tools/depth/bakes/rearrange cut the photo offline: every loose object has
-// its own matte (solved against the sky colour at its edge, so a cable's
-// sub-pixel rim survives and no blue fringe travels with it), and the clean
-// plate behind them was filled with LaMa, the cables drawn back through
-// each hole along their own lines. The plate is split into a front layer
-// (roofs, mast, trees, cables, with their disparity) and the sky behind.
+// its own matte (solved against the sky colour at its edge, so the railing's
+// thin bars and the sky between the floor's slats survive and no blue fringe
+// travels with it; where a cable crossed it, it is completed underneath),
+// and the clean plate behind them was filled with LaMa, tile by tile at
+// close to native resolution, the cables drawn back through each hole along
+// their own lines. The plate is split into a front layer (mast, girder,
+// cables, with their disparity) and the sky behind.
 //
 // Physics, in camera space (OpenCV axes, f from the lens, the up direction
-// from the photo's vertical vanishing point):
+// from the poles' vertical vanishing point, high above the frame: the lens
+// looks up ~33 degrees):
 //  - A moved object keeps its height above the ground. The point you hold
 //    slides on that horizontal plane, so its distance, and the object's
-//    size, follow from where it is on screen: it recedes and shrinks toward
-//    the horizon line and grows overhead, exactly as the photo's own cables
-//    and eaves converge. Each object is a vertical card facing the camera,
-//    so the move is one homography H = K (I + t n^T / d) K^-1, which also
-//    leans it toward the vertical vanishing point wherever it goes.
+//    size, follow from where it is on screen: it grows as it comes overhead
+//    and shrinks as it slides down toward the horizon far below the frame,
+//    exactly as the two poles converge. Each object is a vertical card
+//    facing the camera, so the move is one homography
+//    H = K (I + t n^T / d) K^-1, which also leans it toward the vertical
+//    vanishing point wherever it goes.
 //  - Occlusion is per pixel by disparity: the card's own depth against the
-//    front layer's. Slide the crossbuck down and away and it slips behind
-//    the mast and under the cables; lift it and it comes in front.
+//    front layer's. Slide the far pole left and it passes behind the girder
+//    and the cables; bring the platform across and it comes in front of
+//    them.
 //  - Shadows are cast, not drawn: from each lit surface a ray to the sun
-//    (fitted from the shading of the mast) is intersected with each card
-//    and the card's matte looked up there, blurred by the distance (the
-//    penumbra), plus a contact shadow where a card nearly touches a
+//    (fitted from the shading of the two poles) is intersected with each
+//    card and the card's matte looked up there, blurred by the distance
+//    (the penumbra), plus a contact shadow where a card nearly touches a
 //    surface. Only the change from the photo is applied, so at rest the
 //    frame is the photograph exactly.
 // The frame then goes through film.js (summer).
 //
-// Query: ?move=k,dx,dy holds object k (0 crossbuck, 1 upper lamp, 2 lower
-// lamp, 3 barrier boom, 4 ridge tile) lifted mid-move, dx/dy in photo
+// Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
+// 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
 // widths/heights from where it was; several are joined with ";".
 // &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
 
@@ -327,8 +332,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
     const right = [fwd[1] * UP[2] - fwd[2] * UP[1], fwd[2] * UP[0] - fwd[0] * UP[2], fwd[0] * UP[1] - fwd[1] * UP[0]];
     const rl = Math.hypot(...right);
     const r = right.map((v) => -v / rl);
-    const az = ((num("sunAz") ?? 98) * Math.PI) / 180;
-    const el = ((num("sunEl") ?? 50) * Math.PI) / 180;
+    const az = ((num("sunAz") ?? -60) * Math.PI) / 180;
+    const el = ((num("sunEl") ?? 58) * Math.PI) / 180;
     SUN = [0, 1, 2].map((i) => Math.cos(el) * (Math.cos(az) * N[i] + Math.sin(az) * r[i]) + Math.sin(el) * UP[i]);
   }
   const SKYD = meta.skyD;
@@ -747,20 +752,43 @@ export async function createRearrange(host, { embedded = false } = {}) {
   let lastKey = "";
   let lastGrain = -1;
   let hint = 0; // 0 waiting, 1 lifted, 2 done
+  // A machine that cannot keep up (software GL, a starved tab) stops the
+  // grain's 24 fps crawl rather than spend every frame on it: the print
+  // then redraws only when something moves.
+  let slow = 0;
+  let still = false;
+  let lastWall = 0;
   const frame = (dt, t) => {
+    // the stage caps dt, so the wall clock says how slow frames really are
+    const wall = performance.now();
+    slow = lastWall && wall - lastWall > 200 ? slow + 1 : 0;
+    lastWall = wall;
+    if (slow >= 2) still = true;
+    if (still && hint < 2 && !touched) {
+      // and it skips the intro's lift: at seconds a frame it would take
+      // minutes to settle, and the photograph is what should be there
+      const o = objs[0];
+      if (o.ref) {
+        Object.assign(o.pos, { x: o.ref.home[0], y: o.ref.home[1], vx: 0, vy: 0, tx: o.ref.home[0], ty: o.ref.home[1] });
+        Object.assign(o.lift, { x: 0, v: 0, to: 0 });
+        o.moving = false;
+        o.t = [0, 0, 0];
+      }
+      hint = 2;
+    }
     if (!sceneT) return;
     const now = performance.now();
     const age = (now - born) / 1000;
     const p = stage.pointer;
 
     // Intro: the print develops out of an overexposed white-blue; then the
-    // crossbuck lifts a little off its post and sets back, to show it is loose.
+    // platform lifts a little off its mast and sets back, to show it is loose.
     if (!touched && !reduced && !held) {
       const o = objs[0];
       if (hint === 0 && age > 2.5) {
         o.ref = refAt(o, ...o.meta.anchor);
         Object.assign(o.pos, { x: o.meta.anchor[0], y: o.meta.anchor[1], vx: 0, vy: 0 });
-        const [tu, tv] = constrain(o, o.meta.anchor[0] + 70, o.meta.anchor[1] - 36);
+        const [tu, tv] = constrain(o, o.meta.anchor[0] - 60, o.meta.anchor[1] - 40);
         o.pos.tx = tu;
         o.pos.ty = tv;
         o.lift.to = LIFT;
@@ -818,7 +846,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
       lastGrain = -1;
     }
     // film at 24 fps: the grain moves at the rate film did
-    const tick = reduced || held ? 0 : Math.floor(t * 24);
+    const tick = reduced || held || still ? 0 : Math.floor(t * 24);
     if (tick !== lastGrain || exposure > 1e-3) {
       film.render(sceneT.tex, { ...FILM, exposure, grainSeed: tick * 7.31 }, filmT.fbo);
       present();

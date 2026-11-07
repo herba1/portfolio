@@ -2,20 +2,21 @@
 
     python3 -I tools/depth/bakes/rearrange/masks.py <photo.jpg> <depth16.png> <workdir>
 
-Works at 2464x1632 (half the 4928x3264 original; the piece shows the print
-at up to ~2200 device px wide). Writes <workdir>/masks.npz:
+The photo is PJH's worm's-eye of a catenary mast at Ine (6000x4000), worked
+at 2400x1600. Writes <workdir>/masks.npz:
 
   img     float32 HxWx3 sRGB 0..1
   dep     float32 HxW   Depth Anything V2 relative disparity (white = near)
   sky     bool    clean sky (blue or cloud), wires excluded
   wire    float32 wire coverage 0..1 (thin dark lines over the sky)
-  core_k  bool    object k's hard cut (objects listed in OBJECTS)
-  brk     bool    the crossbuck's bracket where it shows (stays on the plate)
+  core_k  bool    object k's hard cut (objects listed in NAMES)
+  keep_k  bool    what must stay on the plate inside object k's box (the mast,
+                  the girder chords that cross in front of the far pole)
 
-Objects are cut the way a retoucher would: a hand-placed region (polygon or
-box) says *which* thing, depth and colour say *where its edge is*. The
-crossbuck's arms are straight boards, so they are drawn as two exact
-quadrilaterals; everything else is the depth map's near blob inside its box.
+Objects are cut the way a retoucher would: a hand-placed region says *which*
+thing, depth and colour say *where its edge is*. Every loose thing here hangs
+in open sky, so its own matte is solved against the sky later (cut.py); here
+it only needs a generous hard core.
 """
 import sys
 import os
@@ -23,12 +24,13 @@ import os
 import numpy as np
 import cv2
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "crossing"))
-from common import box, dilate, erode, disk  # noqa: E402
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", ".."))
+from kit import box, dilate, disk  # noqa: E402
 
 PHOTO, DEPTH, WORK = sys.argv[1:4]
 os.makedirs(WORK, exist_ok=True)
-W, H = 2464, 1632
+W, H = 2400, 1600
+NAMES = ["platform", "lamp", "far pole", "pull-off", "insulators"]
 
 img = cv2.imread(PHOTO)[:, :, ::-1]
 img = cv2.resize(img, (W, H), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
@@ -38,33 +40,67 @@ r, g, b = img[..., 0], img[..., 1], img[..., 2]
 lum = img @ np.array([0.2126, 0.7152, 0.0722], np.float32)
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 
-# ---- wires: thin dark lines. A black-hat (closing minus image) lights up
-# anything darker than its surroundings and narrower than the kernel.
+# ---- sky: far and blue-or-cloud, not a thin dark line. The structure here
+# is all near (disparity > 0.3) and the sky all far (~0.07), but the depth
+# map glows a little round the mast, so colour has the last word near it.
 closed = cv2.morphologyEx(lum, cv2.MORPH_CLOSE, disk(8))
 bh = closed - lum
-# the sky colour a wire pixel would have without the wire
-skyish = (dep < 0.3)
-# ---- sky: far and blue-or-cloud, not a thin dark line
-blue = (b - r > 0.08) & (lum > 0.35)
-cloud = (lum > 0.62) & (b - r > -0.01) & (np.abs(g - b) < 0.12)
-sky0 = (dep < 0.24) & (blue | cloud) & (bh < 0.03)
-# keep the connected sky, not blue patches on walls or windows
-n, cc, stats, _ = cv2.connectedComponentsWithStats(dilate(sky0, 2).astype(np.uint8), 8)
+blue = (b - r > 0.16) & (lum > 0.3)
+cloud = (lum > 0.5) & (b - r > -0.03) & (np.abs(g - b) < 0.2)
+# far is sky unless it is a thin dark line; near the structure (the depth
+# glow) it has to look like sky as well
+sky0 = (((dep < 0.16) & (lum > 0.3)) | ((blue | cloud) & (dep < 0.5))) & (bh < 0.035)
+sky0 |= (dep < 0.12) & (bh < 0.06) & (lum > 0.3)
+# keep the open sky, and the small windows of it between the girder's
+# members (blue through and through, unlike a lit steel face)
+n, cc, stats, _ = cv2.connectedComponentsWithStats(sky0.astype(np.uint8), 8)
+bluefrac = np.bincount(cc.ravel(), weights=(blue | cloud).ravel().astype(np.float64), minlength=n) / np.maximum(stats[:, cv2.CC_STAT_AREA], 1)
 big = np.zeros(n, bool)
-big[1:] = stats[1:, cv2.CC_STAT_AREA] > 3000
+big[1:] = (stats[1:, cv2.CC_STAT_AREA] > 3000) | ((bluefrac[1:] > 0.85) & (stats[1:, cv2.CC_STAT_AREA] > 20))
 sky = sky0 & big[cc]
 
 # wire coverage: how far below the local clean-sky luminance a pixel is,
-# relative to a wire's own darkness (the cables are near-black)
-WIRE_L = 0.09
-skyL = cv2.blur(np.where(sky, lum, 0), (31, 31)) / np.maximum(cv2.blur(sky.astype(np.float32), (31, 31)), 1e-4)
-skyL = np.where(cv2.blur(sky.astype(np.float32), (31, 31)) > 0.02, skyL, lum)
+# relative to a cable's own darkness
+WIRE_L = 0.06
+fs = cv2.blur(sky.astype(np.float32), (31, 31))
+skyL = cv2.blur(np.where(sky, lum, 0), (31, 31)) / np.maximum(fs, 1e-4)
+skyL = np.where(fs > 0.02, skyL, lum)
 cov = np.clip((skyL - lum) / np.maximum(skyL - WIRE_L, 0.1), 0, 1)
 near_sky = box(sky.astype(np.float32), 5) > 0.25
-wire = np.where(near_sky & (bh > 0.012) & (dep < 0.5), cov, 0).astype(np.float32)
-# thin only: drop blobs thicker than a cable
-thick = cv2.morphologyEx((wire > 0.35).astype(np.uint8), cv2.MORPH_OPEN, disk(5)) > 0
+wire = np.where(near_sky & (bh > 0.015), cov, 0).astype(np.float32)
+# thin only: drop blobs thicker than a cable (the girder, the mast)
+thick = cv2.morphologyEx((wire > 0.35).astype(np.uint8), cv2.MORPH_OPEN, disk(6)) > 0
 wire[dilate(thick, 2)] = 0
+nonsky = ~sky
+
+# The cables: long straight dark lines. Inside an object's box a cable and a
+# railing look the same, so the cables are found as lines first (Hough on
+# the thin dark pixels, kept only if most of their length runs over open
+# sky) and drawn as stripes the objects must not take.
+thin = ((bh > 0.05) & (lum < 0.4)).astype(np.uint8) * 255
+lines = cv2.HoughLinesP(thin, 1, np.pi / 720, 200, minLineLength=400, maxLineGap=30).reshape(-1, 4)
+skyish = sky | (wire > 0.3)
+cable = np.zeros((H, W), np.uint8)
+cable_ang = np.full((H, W), 999, np.float32)  # the stripe's direction, deg
+ncab = 0
+for x0, y0, x1, y1 in lines:
+    n_ = int(np.hypot(x1 - x0, y1 - y0))
+    ts = np.linspace(0, 1, n_)
+    px = np.clip(np.round(x0 + (x1 - x0) * ts).astype(int), 0, W - 1)
+    py = np.clip(np.round(y0 + (y1 - y0) * ts).astype(int), 0, H - 1)
+    near = dilate(skyish, 3)[py, px]
+    if near.mean() > 0.7:
+        cv2.line(cable, (int(x0), int(y0)), (int(x1), int(y1)), 1, 9)
+        cv2.line(cable_ang, (int(x0), int(y0)), (int(x1), int(y1)), float(np.degrees(np.arctan2(y1 - y0, x1 - x0)) % 180), 9)
+        ncab += 1
+cable = cable > 0
+cable0 = cable.copy()
+# a bundle is several cables side by side: its outer strands, thin and dark
+# next to a stripe, belong to it too
+side = dilate(cable, 10) & ~cable & (wire > 0.15)
+cable_ang = np.where(side & (cable_ang > 900), cv2.dilate(np.where(cable, cable_ang, 0), disk(10)), cable_ang)
+cable |= side
+print("cables", ncab)
 
 
 def poly(pts):
@@ -73,167 +109,97 @@ def poly(pts):
     return m > 0
 
 
-def poly_aa(pts, ss=8):
-    """Anti-aliased polygon coverage (supersampled)."""
-    m = np.zeros((H, W), np.uint8)
-    cv2.fillPoly(m, [np.round(np.array(pts, np.float64) * ss).astype(np.int32)], 255, lineType=cv2.LINE_AA, shift=3)
-    return m.astype(np.float32) / 255
-
-
 def boxm(x0, y0, x1, y1):
     return (xx >= x0) & (xx < x1) & (yy >= y0) & (yy < y1)
 
 
-nonsky = ~sky & (wire < 0.3)
-
-# ---- 0: the crossbuck. Two boards, measured off the photo (px at 2464).
-# Only the painted X travels. The pale pressed bracket behind its crossing
-# and the rusty clamp across it are the mast's: they bolt the boards to the
-# pole, so they stay on the plate, and the part of them the boards hid is
-# filled there (plate.py). Cutting them with the boards hung a grey shell in
-# the sky behind every moved sign.
-ARM_A = [(1660, 260), (1718, 296), (1313, 878), (1266, 826)]
-ARM_B = [(1295, 504), (1782, 570), (1745, 683), (1262, 588)]
-xb_aa = np.maximum(poly_aa(ARM_A), poly_aa(ARM_B))
-core0 = xb_aa > 0.5
-# brk: the bracket (a ribbed pale shell) and its clamp where they show,
-# between the two arms. brk_zone: the whole bracket, seen or hidden. Its
-# flat top runs on left under the upper arm to the mast, where the clamp
-# meets the pole; its rim keeps the curve it has where it goes under the
-# lower arm and rounds off there, narrowing back to the pole above the
-# pipe's shoulder (y 604).
-brk = poly([(1540, 474), (1566, 458), (1612, 464), (1666, 508), (1704, 560), (1704, 590), (1540, 590)]) & ~sky & (xb_aa < 0.5)
-HIDDEN = [(1502, 486), (1530, 470), (1599, 463), (1700, 575), (1694, 592), (1670, 602), (1620, 606), (1560, 597), (1502, 566)]
-_pts = np.concatenate([cv2.findNonZero(brk.astype(np.uint8)).reshape(-1, 2), np.array(HIDDEN)]).astype(np.int32)
-brk_zone = np.zeros((H, W), np.uint8)
-cv2.fillPoly(brk_zone, [cv2.convexHull(_pts)], 1)
-brk_zone = brk_zone > 0
-
-# ---- 1: the upper lamp (hood, lens and housing), cut from its arm at the
-# bracket. The lamp is the nearest thing in that part of the frame.
-lampU_box = boxm(1655, 780, 1965, 1090)
-core1 = lampU_box & (dep > 0.70) & nonsky
-# the arm stub that joins the mast stays with the mast
-core1 &= ~(boxm(1560, 800, 1672, 900))
+def biggest(m, keep=1, min_area=0):
+    n, cc, stats, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+    if n <= 1:
+        return m
+    order = np.argsort(-stats[1:, cv2.CC_STAT_AREA]) + 1
+    ok = np.zeros(n, bool)
+    for i in order[:keep]:
+        if stats[i, cv2.CC_STAT_AREA] >= min_area:
+            ok[i] = True
+    return ok[cc]
 
 
-def hull(m):
-    pts = cv2.findNonZero(m.astype(np.uint8))
-    h = cv2.convexHull(pts)
-    out = np.zeros((H, W), np.uint8)
-    cv2.fillPoly(out, [h], 1)
-    return out > 0
+# the mast (near pole, left): its two edges, measured off the photo
+mast_l = lambda y: 693.0 - 0.0625 * (y - 600)  # noqa: E731
+mast_r = lambda y: 806.0 - 0.050 * (y - 600)  # noqa: E731
+mast = (xx > mast_l(yy) - 1) & (xx < mast_r(yy) + 1)
 
+# ---- 0: the maintenance platform: railing, slatted floor, its grey box and
+# the two struts down to the mast clamp. Everything near (the cables that
+# cross it are farther and thinner) left of the mast.
+P0 = poly([(225, 600), (720, 600), (720, 1400), (600, 1400), (420, 1180), (225, 1110)])
+core0 = P0 & (xx < mast_l(yy) - 5) & nonsky & (dep > 0.12) & ~cable
+# bits of bright cloud caught between the railing's bars are not steel (the
+# grey box, lit, is the one pale thing that is)
+core0 &= ~((lum > 0.5) & ~boxm(555, 690, 700, 900))
+core0 = cv2.morphologyEx(core0.astype(np.uint8), cv2.MORPH_OPEN, disk(1)) > 0
+# the cables cut the railing's posts in two; whether a piece belongs is
+# decided with them bridged
+core0 = biggest(core0 | (P0 & cable & nonsky & (xx < mast_l(yy) - 2)), keep=1) & core0
+keep0 = mast
 
-# the housing's shadowed back reads farther in the depth map than the lens;
-# a lamp is convex, so its hull says what belongs to it, and depth (or not
-# being sky) decides the hull's rim
-def lamp(core, rim_ok):
-    n, cc, stats, _ = cv2.connectedComponentsWithStats(core.astype(np.uint8), 8)
-    big = np.argmax(stats[1:, cv2.CC_STAT_AREA]) + 1
-    hl = hull(cc == big)
-    return hl & (erode(hl, 10) | rim_ok)
+# ---- 1: the lamp on the bracket's far end, right of the mast
+P1 = poly([(806, 1118), (850, 1112), (885, 1150), (880, 1215), (776, 1222), (776, 1124)])
+core1 = P1 & (xx > mast_r(yy) - 4) & nonsky & (dep > 0.45)
+core1 = biggest(core1, keep=1)
+keep1 = mast | (yy < 1124) & (xx < 840)
 
+# ---- 2: the far pole on the right, with its clamps and the two strain
+# insulators bolted to it; the girder's end stays (it is bolted to the
+# pole, but it is the girder's)
+cx = lambda y: 1786.0 + 0.308 * (y - 850)  # noqa: E731
+across = xx - cx(yy)
+band = (np.abs(across) < 44) & (yy > 800)
+hard = boxm(1830, 1150, 1910, 1300)  # insulators and clamp on its right
+core2 = (band | hard) & nonsky & (dep > 0.35) & ~cable0
+# the girder's chords cross in front of it between y 870 and 1130: three
+# straight steel members, drawn from the photo
+girder = np.zeros((H, W), np.uint8)
+for (ax, ay, bx, by, t) in [(1690, 872, 1868, 975, 22), (1690, 1043, 1925, 1126, 20), (1690, 950, 1812, 1013, 11)]:
+    cv2.line(girder, (ax, ay), (bx, by), 1, t)
+girder = (girder > 0) & ~sky
+# under the chords the pole goes on: its matte is completed there (a
+# straight concrete pole), its colour carried in from either side
+fill2 = (girder | cable0) & (np.abs(across) < 25.5 + 0.004 * (yy - 850)) & (yy > 818)
+core2 = biggest((core2 & ~girder) | fill2, keep=1) & ~girder & ~cable0
+keep2 = girder
 
-core1 = lamp(core1, nonsky & (dep > 0.6)) & ~boxm(1560, 800, 1672, 900)
+# ---- 3: the pull-off insulator hanging off the girder's left end
+P3 = poly([(950, 780), (995, 778), (1040, 842), (1036, 870), (996, 872), (950, 820)])
+core3 = P3 & nonsky & (dep > 0.3) & ~cable
+core3 = biggest(core3, keep=1)
+keep3 = np.zeros((H, W), bool)
 
-# ---- 2: the lower lamp, in front of the far houses.
-lampL_box = boxm(1716, 1170, 2050, 1500)
-core2 = lampL_box & (dep > 0.86)
-core2 &= ~(boxm(1560, 1150, 1730, 1260))
-core2 = lamp(core2, dep > 0.8) & ~boxm(1560, 1150, 1730, 1260)
-
-# ---- 3: the raised barrier boom on the right, with its rope and the bent
-# rod hanging off it. A band along its axis; depth says pole vs not.
-P0 = np.array([2130, 262], np.float32)
-P1 = np.array([2392, 1632], np.float32)
-d = P1 - P0
-L = np.linalg.norm(d)
-u = d / L
-nrm = np.array([-u[1], u[0]])
-rel_x = xx - P0[0]
-rel_y = yy - P0[1]
-along = rel_x * u[0] + rel_y * u[1]
-across = rel_x * nrm[0] + rel_y * nrm[1]
-# the boom is nearer (and wider) toward the bottom of the frame, and down
-# there it stands in front of trees and a house rather than sky, so the
-# depth cut is stricter (the trees read 0.1-0.3, the boom 0.5-0.6)
-halfw = 30 + 26 * np.clip(along / L, 0, 1)
-band = (np.abs(across) < halfw) & (along > -20) & (along < L + 60)
-rod = poly([(2200, 620), (2244, 620), (2312, 870), (2296, 892), (2262, 890)])
-dcut = np.where(yy > 1050, 0.36, 0.25)
-core3 = (band | rod) & ~sky & (dep > dcut)
-# keep only the component(s) touching the axis
-n, cc, stats, _ = cv2.connectedComponentsWithStats(core3.astype(np.uint8), 8)
-axis = (np.abs(across) < 6) & (along > 0) & (along < L)
-keep = np.unique(cc[axis & core3])
-core3 = np.isin(cc, keep[keep > 0])
-# wire stubs: the cables cross the boom, and inside the band they look like
-# little black spurs. The boom is 20-40 px across, a cable under 7.
-opened = cv2.morphologyEx(core3.astype(np.uint8), cv2.MORPH_OPEN, disk(4)) > 0
-core3 = opened | (core3 & dilate(opened, 3) & (wire < 0.15))
-core3 = cv2.morphologyEx(core3.astype(np.uint8), cv2.MORPH_CLOSE, disk(2)) > 0
-# The boom is a straight tube: its edges are two smooth lines along the
-# axis. Measure them in short bins, median them along the axis, and allow
-# the matte only inside that envelope (+ the rod and the chunky clamps), so
-# no cable stub survives at the silhouette.
-body = core3 & ~dilate(rod, 3)
-bins = np.round(along / 8).astype(np.int32)
-nb = int(L / 8) + 12
-lo = np.full(nb, np.nan)
-hi = np.full(nb, np.nan)
-for i in range(nb):
-    sel = body & (bins == i)
-    if sel.sum() > 20:
-        a_ = across[sel]
-        lo[i], hi[i] = np.percentile(a_, 3), np.percentile(a_, 97)
-idx = np.arange(nb)
-ok = ~np.isnan(lo)
-lo = np.interp(idx, idx[ok], lo[ok])
-hi = np.interp(idx, idx[ok], hi[ok])
-lo = np.array([np.median(lo[max(0, i - 6):i + 7]) for i in range(nb)])
-hi = np.array([np.median(hi[max(0, i - 6):i + 7]) for i in range(nb)])
-bi = np.clip(along / 8, 0, nb - 1)
-loP = np.interp(bi, idx, lo)
-hiP = np.interp(bi, idx, hi)
-env = np.clip(np.minimum(across - loP, hiP - across) + 1.5, 0, 1)
-chunky = dilate(cv2.morphologyEx(core3.astype(np.uint8), cv2.MORPH_OPEN, disk(6)) > 0, 2)
-env3 = np.maximum(env, (chunky | dilate(rod, 2)).astype(np.float32))
-core3 &= env3 > 0.5
-# what hangs off it: the rope tag, the strap, the rods, all warm-coloured
-# (cables are near-black), joined to the boom
-wide = (np.abs(across) < halfw + 60) & (along > -20) & (along < L + 60)
-warm = wide & ~sky & (r - b > 0.08) & (dep > dcut - 0.05)
-n, cc, stats, _ = cv2.connectedComponentsWithStats((warm | core3).astype(np.uint8), 8)
-keep = np.unique(cc[core3])
-hang = np.isin(cc, keep[keep > 0]) & warm & ~core3
-core3 |= hang
-env3 = np.maximum(env3, dilate(hang, 2).astype(np.float32))
-# everything of the boom that comes out of the plate, including the cable
-# stubs where cables cross in front (the cables are drawn back across)
-extra3 = dilate((band | rod) & ~sky & (dep > dcut), 3) | dilate(hang, 3)
-# loose bits of strap and rope near the boom that its matte did not reach
-# leave with it rather than float in the sky where it stood
-extra3 |= dilate(wide & ~sky & (r - b > 0.04) & (yy < 1150), 3)
-
-# ---- 4: the onigawara (the ridge-end tile on the near roof's corner).
-ONI = [(660, 778), (690, 742), (700, 726), (742, 704), (790, 706), (808, 724), (830, 772),
-       (846, 790), (842, 800), (680, 806), (652, 806)]
-core4 = poly(ONI) & ~sky
+# ---- 4: the insulator pair hanging under the girder's middle
+P4 = poly([(1368, 896), (1392, 893), (1412, 904), (1434, 945), (1434, 976), (1400, 980), (1366, 925)])
+core4 = P4 & nonsky & (dep > 0.3) & ~cable
+core4 = biggest(core4, keep=2, min_area=40)
+keep4 = np.zeros((H, W), bool)
 
 cores = [core0, core1, core2, core3, core4]
+# where a cable crosses an object (in front or behind), the object's matte
+# is completed across the cable's stripe in cut.py
+fills = [P0 & cable, np.zeros((H, W), bool), fill2, np.zeros((H, W), bool), np.zeros((H, W), bool)]
+keeps = [keep0, keep1, keep2, keep3, keep4]
 for k, c in enumerate(cores):
-    print(k, int(c.sum()), "px")
+    print(k, NAMES[k], int(c.sum()), "px")
 
-np.savez_compressed(os.path.join(WORK, "masks.npz"), img=img, dep=dep, sky=sky, wire=wire, xb_aa=xb_aa, brk=brk, brk_zone=brk_zone,
-                    env3=env3, extra3=extra3,
-                    **{f"core_{k}": c for k, c in enumerate(cores)})
+np.savez_compressed(os.path.join(WORK, "masks.npz"), img=img, dep=dep, sky=sky, wire=wire, mast=mast, cable=cable, cable_ang=cable_ang,
+                    **{f"core_{k}": c for k, c in enumerate(cores)}, **{f"keep_{k}": c for k, c in enumerate(keeps)}, **{f"fill_{k}": c for k, c in enumerate(fills)}, region_0=P0 & (xx < mast_l(yy) - 2),
+                    region_2=((np.abs(across) < 31 + 0.004 * (yy - 850)) & (yy > 810)) | (boxm(1600, 800, 2200, 1600) & (np.abs(across) < 70) & ~sky & ~cable0 & (wire < 0.5)))
 
 # preview: objects tinted, sky blue, wires red
 pv = img.copy()
-cols = [(1, 0, 1), (0, 1, 0), (0, 1, 1), (1, 0.5, 0), (1, 1, 0)]
-for k, c in enumerate(cores):
-    pv[c] = pv[c] * 0.4 + np.array(cols[k]) * 0.6
+cols = [(1, 0, 1), (0, 1, 0), (1, 0.5, 0), (1, 1, 0), (0, 1, 1)]
 pv[sky] = pv[sky] * 0.7 + np.array([0, 0, 1]) * 0.3
 pv = pv * (1 - wire[..., None]) + np.array([1, 0, 0]) * wire[..., None]
+pv[cable & ~sky] = pv[cable & ~sky] * 0.5 + np.array([1, 0.6, 0.6]) * 0.5
+for k, c in enumerate(cores):
+    pv[c] = pv[c] * 0.4 + np.array(cols[k]) * 0.6
 cv2.imwrite(os.path.join(WORK, "masks.jpg"), (np.clip(pv, 0, 1)[..., ::-1] * 255).astype(np.uint8))
