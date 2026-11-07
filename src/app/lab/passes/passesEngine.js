@@ -32,6 +32,9 @@ out vec4 o;
 float hash(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
 
 const float ROWS = 2048.0;
+// The depth PNG's red channel at its 2nd and 98th percentile (0 and 232 of 255).
+const float DEPTH_LO = 0.0;
+const float DEPTH_HI = 0.9098;
 float pxU, pxR;   // one canvas pixel in u, and in photo rows
 
 vec2 herbRow(float r){
@@ -99,13 +102,47 @@ void main(){
 
   vec3 photo = texture(uPhoto, uv).rgb;
 
-  // Depth: a soft greyscale with a breath of warmth, dithered against banding.
-  float dv = smoothstep(0.0, 1.0, pow(D, 0.6));
-  vec3 depth = mix(vec3(0.13, 0.128, 0.135), vec3(0.955, 0.945, 0.925), dv);
+  // Depth, printed rather than dumped. The raw map piles everything near
+  // into one pale card, so stretch it to the PNG's own 2nd-98th percentile,
+  // then lift the near end with a 0.6 gamma on distance (1 - D) so the
+  // street, the truck and herb pull apart in tone. Warm black for far, paper
+  // white for near, and an iso-depth line every twelfth of the range, faded
+  // out where the depth jumps (a silhouette, not a slope) so lines only
+  // ever run across surfaces.
+  float dn = clamp((D - DEPTH_LO) / (DEPTH_HI - DEPTH_LO), 0.0, 1.0);
+  float dt = 1.0 - pow(1.0 - dn, 0.6);
+  vec3 depth = mix(vec3(0.11, 0.1, 0.095), vec3(0.955, 0.945, 0.925), dt);
+  // The lines are drawn on a softened copy of the depth: the PNG holds 256
+  // levels, and on a near-flat surface a contour traced through raw levels
+  // steps along their ledges instead of running smooth.
+  float Ds = 0.0;
+  for (int k = 0; k < 8; k++) {
+    float a = float(k) * 2.39996;
+    float r = sqrt((float(k) + 0.5) / 8.0) * 6.0;
+    Ds += texture(uDepth, uv + vec2(cos(a), sin(a)) * r / vec2(1536.0, 2048.0)).r;
+  }
+  Ds = clamp((Ds / 8.0 - DEPTH_LO) / (DEPTH_HI - DEPTH_LO), 0.0, 1.0);
+  float iso = (1.0 - pow(1.0 - Ds, 0.6)) * 12.0;
+  float fw = fwidth(iso);
+  float line = (1.0 - smoothstep(0.0, 1.0, abs(fract(iso + 0.5) - 0.5) / max(fw * 1.2, 1e-4)))
+    * (1.0 - smoothstep(0.06, 0.3, fw));
+  depth *= 1.0 - 0.2 * line;
   depth += (hash(frag) - 0.5) / 255.0;
 
+  // Normals as a plaster cast: one warm-grey albedo, a fixed raking light
+  // from the upper left at 30 degrees, a little sky fill, so the street,
+  // the cars and herb read as relief, not as the RGB encoding. Where depth
+  // jumps the baked normals swing sideways across a silhouette that isn't a
+  // surface; settle them toward the camera, and let the far side of the jump
+  // sink a little, the way plaster darkens in the crease behind a figure.
   vec3 n = normalize(texture(uNormal, uv).rgb * 2.0 - 1.0);
-  vec3 normal = mix(n * 0.5 + 0.5, vec3(0.97, 0.96, 0.95), 0.3);
+  float crease = smoothstep(0.06, 0.26, -bend);
+  vec3 nc = normalize(mix(n, vec3(0.0, 0.0, 1.0), max(crease, 0.5 * smoothstep(0.35, 0.6, bend))));
+  const vec3 RAKE = vec3(-0.6124, 0.6124, 0.5);
+  float ndl = clamp((dot(nc, RAKE) + 0.1) / 1.1, 0.0, 1.0);
+  vec3 clay = vec3(0.6121, 0.5708, 0.508) * (0.9 * ndl + 0.16 + 0.08 * nc.y);
+  clay *= 1.0 - 0.3 * smoothstep(0.0, 0.3, -bend);
+  vec3 normal = pow(clay, vec3(1.0 / 2.2)) + (hash(frag + 7.0) - 0.5) / 255.0;
 
   // Relit: the photograph's own surfaces under one warm lamp that was never
   // in the street. Albedo is the photo itself, taken to linear light, so the
