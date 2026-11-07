@@ -49,15 +49,21 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    frame is the photograph exactly.
 // The sky is regraded on its own (gradeSky): a dense cyan-cobalt that
 // deepens toward the top of the frame, cloud warm-neutral with skylight-blue
-// undersides. Then the frame goes through film.js (summer), with its global
-// saturation and blue push off, and a black point that keeps the steel a
-// near-black silhouette.
+// undersides, its density held back in the midtones. Then the whole
+// composited frame, moved objects and live cables included, is developed
+// as one print: local contrast taken out of the surfaces (the photo was a
+// sharpened digital file), a thin red-leaning halation ring wherever bright
+// sky meets dark steel, film.js (summer: Pro-Mist diffusion, dye-cloud
+// softness, a soft shoulder that rolls cloud off warm-neutral), a lifted
+// teal black, and grain at 24 fps whose clumps are filtered by the
+// emulsion's MTF.
 //
 // Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
 // 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
 // widths/heights from where it was; several are joined with ";".
 // &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
-// &grade=0 shows the plate's own sky.
+// &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
+// the print's (PRINT); 0 turns each off.
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -86,28 +92,52 @@ const SKY = {
   curve: 1.0,
   cloud: [0.26, 0.6],
   // #F2F0EA, warmed against the film's cool highlight tint (.95, 1, 1.05)
-  warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.05, 1, 0.95][i]),
+  warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.06, 1, 0.93][i]),
   under: lin(hex("#A4C4E2")),
   underRange: [0.5, 0.8, 0.9],
+  // The density of the graded sky, as an exponent on its linear light in
+  // the midtones (1 is the ramp as aimed, 0.84 takes ~16% of the density
+  // back): a negative's blue, not a phone's. Hue stays within a degree.
+  density: 0.84,
 };
-// Black point of the print, after the film: the steel against the sky goes
-// to a near-black silhouette instead of sitting on a lifted grey.
-const BLACK = 0.012;
+
+// The print: what happens to the whole composited frame (plate, moved
+// objects, live cables alike) before and after film.js, so an edit sits
+// inside the photograph rather than on top of it. See DEVELOP_FS.
+const PRINT = {
+  // local contrast taken out of the plate: detail inside a surface (the
+  // grime on the mast, the platform's paint) is pulled this share toward an
+  // edge-aware local mean; steel against sky is an edge and keeps its line
+  flatten: 0.42,
+  flattenRange: 1.1, // stops: what counts as the same surface
+  // halation: red-leaning light round wherever bright sky meets dark steel
+  halation: 0.45,
+  halationColor: [1, 0.2, 0.12],
+  halationRadius: 0.0035, // of the frame height: a thin ring
+  // the scan's black: steel lands near L* 12-15, a little teal, not crushed
+  lift: [0.1, 0.12, 0.135],
+  // grain, after everything (see FINAL_FS)
+  grain: 0.17,
+  grainSize: 1.15, // x 1/1100 of the frame height
+};
 
 const FILM = {
   ...FILM_PRESETS.summer,
-  headroom: 1.0,
-  halation: 0.24,
-  halationThreshold: 0.92,
-  bloom: 0.1,
-  softness: 0.45,
-  contrast: 1.16,
-  toe: 0.008,
+  headroom: 2.6,
+  // the ring is the print's own (above); film.js's would tint the clear sky
+  halation: 0,
+  // Pro-Mist diffusion: cloud light veils into the steel and rolls off
+  bloom: 0.27,
+  softness: 0.75,
+  contrast: 1.14,
+  shoulder: 0.9,
+  whitePoint: 1.35,
+  toe: 0,
   // colour density comes from the sky grade, not from a global push
   saturation: 1.0,
   blueDepth: 0,
-  grain: 0.3,
-  vignette: 0.12,
+  grain: 0,
+  vignette: 0.16,
 };
 
 const QUAD_VS = `#version 300 es
@@ -166,6 +196,7 @@ uniform vec3 uWarmCloud;      // linear, relative
 uniform vec3 uUnderBlue;      // linear, relative
 uniform vec3 uUnder;          // luminance range of the underside tint, amount
 uniform float uGrade;
+uniform float uDensity;      // exponent on the graded sky's midtones
 uniform sampler2D uWire;      // the live cables: a coverage, r disparity x coverage
 uniform vec3 uCable;          // their colour, linear
 uniform vec4 uPinA[${MAXK}];  // pinned member: fixed end (photo px), its axis at rest
@@ -237,7 +268,12 @@ vec3 gradeSky(vec3 c, vec2 uv) {
   float under = (1.0 - smoothstep(uUnder.x, uUnder.y, yc)) * uUnder.z;
   vec3 tint = mix(uWarmCloud, uUnderBlue, under);
   vec3 C = yc * tint / dot(tint, vec3(0.2126, 0.7152, 0.0722));
-  return mix(S, C, w);
+  vec3 g = mix(S, C, w);
+  // density held back in the midtones (the clear blue and the cloud's
+  // shadowed undersides), the brightest cloud left where it is
+  float yg = dot(g, vec3(0.2126, 0.7152, 0.0722));
+  float mid = smoothstep(0.01, 0.06, yg) * (1.0 - smoothstep(0.45, 0.8, yg));
+  return pow(max(g, 0.0), vec3(mix(1.0, uDensity, mid)));
 }
 
 vec3 toSrgb(vec3 c) {
@@ -358,19 +394,141 @@ void main() {
   o = vec4(s, cover);
 }`;
 
+// The development, between the composite and film.js, on the whole frame:
+// whatever is in it (plate, a moved card, a live cable) goes through the
+// same optics, so nothing pasted keeps a digital edge the plate lacks.
+//  1. Local contrast out. The source is a sharpened digital file, and its
+//     surfaces (the mast's grime, the platform's paint) carry a crunch film
+//     never had. Each pixel's log luminance is pulled toward an edge-aware
+//     local mean (two rings at ~6 and ~14 px, weighted by how near they are
+//     in stops), so texture inside a surface flattens while steel against
+//     sky, several stops apart, keeps its line and grows no halo.
+//  2. Halation: light from the bright sky and cloud round a pixel, at a thin
+//     ring's radius, comes back through the red layer; it shows only where
+//     the pixel itself is dark, so it rims the steel and leaves the sky's
+//     hue alone.
+const DEVELOP_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uScene;   // the composited frame: sRGB in RGBA8, mipmapped
+uniform vec2 uTexel;
+uniform float uPx;          // device px per px of a 1600 px tall frame
+uniform float uFlatten;
+uniform float uRange;
+uniform float uHal;
+uniform vec3 uHalColor;
+uniform float uHalR;        // ring radius, device px
+out vec4 o;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 toSrgb(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+vec3 at(vec2 off, float lod) {
+  return toLin(textureLod(uScene, vUv + off * uTexel, lod).rgb);
+}
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+void main() {
+  vec4 s = textureLod(uScene, vUv, 0.0);
+  vec3 c = toLin(s.rgb);
+  float y = dot(c, LUMA);
+  float ly = log2(y + 0.003);
+
+  float acc = ly;
+  float wsum = 1.0;
+  float lodF = log2(max(uPx * 3.0, 1.0));
+  for (int i = 0; i < 16; i++) {
+    float outer = i >= 8 ? 1.0 : 0.0;
+    float a = float(i) * 0.7853982 + outer * 0.3926991;
+    vec2 off = vec2(cos(a), sin(a)) * mix(6.0, 14.0, outer) * uPx;
+    float ln = log2(dot(at(off, lodF), LUMA) + 0.003);
+    float d = (ln - ly) / uRange;
+    float w = exp(-d * d);
+    acc += w * ln;
+    wsum += w;
+  }
+  c *= exp2((acc / wsum - ly) * uFlatten);
+  y = dot(c, LUMA);
+
+  // How much of the ring is bright decides where it lands: half (the
+  // steel's edge against the sky) takes the full ring; all of it (a cable,
+  // a hairline wholly inside the sky) keeps its own dark blue-grey and
+  // only a trace of red, as herb's wires do; none (deep in the mast) nothing.
+  float yr = 0.0;
+  float lit = 0.0;
+  float lodH = log2(max(uHalR * 0.6, 1.0));
+  for (int i = 0; i < 12; i++) {
+    float a = float(i) * 0.5235988;
+    float r = uHalR * (i % 2 == 0 ? 1.0 : 1.8);
+    float yi = dot(at(vec2(cos(a), sin(a)) * r, lodH), LUMA);
+    yr += yi;
+    lit += smoothstep(0.04, 0.1, yi);
+  }
+  yr /= 12.0;
+  lit /= 12.0;
+  float edge = mix(0.04, 1.0, 1.0 - smoothstep(0.3, 0.72, lit)) * smoothstep(0.0, 0.15, lit);
+  float src = smoothstep(0.03, 0.2, yr) * yr;
+  float dark = 1.0 - smoothstep(0.02, 0.12, y);
+  c += uHalColor * src * dark * edge * uHal;
+
+  vec3 e = toSrgb(c) + (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 5.1) - 1.0) / 255.0;
+  o = vec4(e, s.a);
+}`;
+
+// After film.js: the scan's lifted black, then grain, the last thing to
+// touch the print, so it lies over the moved objects and the plate alike.
+// The grain is clumps of silver at about 1/1100 of the frame height, three
+// octaves of value noise weighted by the emulsion's MTF (a Lorentzian,
+// 1 / (1 + (f / f50)^2), f50 at the clump size): the coarse clumps pass,
+// the finest roll off, so no single device pixel sparkles the way a
+// digital noise does. Strongest in the mids, thinner in the highlights,
+// mostly monochrome with a little dye. It is redrawn at 24 fps.
 const FINAL_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
 uniform sampler2D uFilm;
 uniform sampler2D uScene;
 uniform vec3 uPaper;
-uniform float uBlack;
+uniform vec3 uLift;
+uniform float uGrain;
+uniform float uGrainPx;
+uniform float uSeed;
 out vec4 o;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+float hash(vec2 p) {
+  vec3 p3 = fract(vec3(p.xyx) * 0.1031);
+  p3 += dot(p3, p3.yzx + 33.33);
+  return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y) - 0.5;
+}
 void main() {
   float cov = texture(uScene, vUv).a;
   vec3 f = texture(uFilm, vUv).rgb;
-  f = max(f - uBlack, 0.0) / (1.0 - uBlack);
-  o = vec4(mix(uPaper, f, cov), 1.0);
+  // a toe, not a veil: the black comes up, the sky's midtones barely move
+  float yf = clamp(dot(f, LUMA), 0.0, 1.0);
+  f += uLift * pow(1.0 - yf, 6.0);
+
+  vec2 gp = gl_FragCoord.xy / uGrainPx + uSeed * vec2(17.13, 31.71);
+  // octaves at 0.5x, 1x, 2x the clump frequency; MTF weights 0.8, 0.5, 0.2
+  float g = (0.8 * vnoise(gp * 0.5 + 3.1) + 0.5 * vnoise(gp) + 0.2 * vnoise(gp * 2.0 + 7.7)) / 0.97;
+  vec3 gc = vec3(vnoise(gp * 0.7 + 41.0), vnoise(gp * 0.7 + 83.0), vnoise(gp * 0.7 + 127.0));
+  float ly = dot(f, LUMA);
+  float amp = uGrain * 0.22 * (0.3 + 0.7 * smoothstep(0.05, 0.3, ly) * (1.0 - 0.6 * smoothstep(0.5, 0.95, ly)));
+  f += (vec3(g) + gc * 0.35) * amp;
+  f += (hash(gl_FragCoord.xy + uSeed) - 0.5) / 255.0;
+  o = vec4(mix(uPaper, clamp(f, 0.0, 1.0), cov), 1.0);
 }`;
 
 // The live cables, drawn as strips in device px into their own target:
@@ -610,6 +768,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   for (const bm of [plateBm, frontBm, skyBm, ...objBms]) bm.close?.();
 
   const scene = compile(gl, PRINT_VS, SCENE_FS);
+  const dev = compile(gl, QUAD_VS, DEVELOP_FS);
   const fin = compile(gl, QUAD_VS, FINAL_FS);
   const wireP = compile(gl, WIRE_VS, WIRE_FS);
   // their colour: the cables' own, measured where each one is solid
@@ -660,16 +819,21 @@ export async function createRearrange(host, { embedded = false } = {}) {
     return { tex, fbo };
   };
   let sceneT = null;
+  let devT = null;
   let filmT = null;
   let wireT = null;
   let dirty = true;
   const build = () => {
-    for (const t of [sceneT, filmT, wireT]) {
+    for (const t of [sceneT, devT, filmT, wireT]) {
       if (!t) continue;
       gl.deleteTexture(t.tex);
       gl.deleteFramebuffer(t.fbo);
     }
     sceneT = target();
+    // the development reads the composite through its mip chain
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    devT = target();
     filmT = target();
     wireT = target(floatTarget);
     film.resize(stage.canvas.width, stage.canvas.height);
@@ -1118,6 +1282,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform3fv(U.uUnderBlue, SKY.under);
     gl.uniform3fv(U.uUnder, SKY.underRange);
     gl.uniform1f(U.uGrade, num("grade") ?? 1);
+    gl.uniform1f(U.uDensity, SKY.density);
     const texs = [
       [gl.TEXTURE_2D, plateTex, U.uPlate],
       [gl.TEXTURE_2D, frontTex, U.uFront],
@@ -1140,7 +1305,32 @@ export async function createRearrange(host, { embedded = false } = {}) {
     return mapPoint(o, o.t, a);
   }
 
-  const present = () => {
+  // the composite -> the development (see DEVELOP_FS), ready for film.js
+  const develop = () => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, devT.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.useProgram(dev.p);
+    gl.bindVertexArray(vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(dev.u.uScene, 0);
+    gl.uniform2f(dev.u.uTexel, 1 / w, 1 / h);
+    gl.uniform1f(dev.u.uPx, h / 1600);
+    gl.uniform1f(dev.u.uFlatten, num("flatten") ?? PRINT.flatten);
+    gl.uniform1f(dev.u.uRange, PRINT.flattenRange);
+    gl.uniform1f(dev.u.uHal, num("halation") ?? PRINT.halation);
+    gl.uniform3fv(dev.u.uHalColor, PRINT.halationColor);
+    gl.uniform1f(dev.u.uHalR, Math.max(1.5, PRINT.halationRadius * h));
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+  };
+
+  const present = (seed) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.disable(gl.BLEND);
@@ -1153,7 +1343,10 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1i(fin.u.uFilm, 0);
     gl.uniform1i(fin.u.uScene, 1);
     gl.uniform3f(fin.u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
-    gl.uniform1f(fin.u.uBlack, BLACK);
+    gl.uniform3fv(fin.u.uLift, PRINT.lift);
+    gl.uniform1f(fin.u.uGrain, num("grain") ?? PRINT.grain);
+    gl.uniform1f(fin.u.uGrainPx, Math.max(0.75, (stage.canvas.height / 1100) * PRINT.grainSize));
+    gl.uniform1f(fin.u.uSeed, seed % 997);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);
@@ -1249,17 +1442,24 @@ export async function createRearrange(host, { embedded = false } = {}) {
     }
 
     const key = `${objs.map((o) => o.t.map((v) => v.toFixed(6)).join(",")).join("|")}|${stage.canvas.width}`;
+    let developed = false;
     if (key !== lastKey || dirty) {
       drawScene();
+      develop();
       lastKey = key;
       dirty = false;
+      developed = true;
+    }
+    // the print is developed only when the scene changes (or while the
+    // intro's exposure runs); the grain over it moves at 24 fps, the rate
+    // film did
+    if (developed || exposure > 1e-3) {
+      film.render(devT.tex, { ...FILM, exposure }, filmT.fbo);
       lastGrain = -1;
     }
-    // film at 24 fps: the grain moves at the rate film did
     const tick = reduced || held || still ? 0 : Math.floor(t * 24);
-    if (tick !== lastGrain || exposure > 1e-3) {
-      film.render(sceneT.tex, { ...FILM, exposure, grainSeed: tick * 7.31 }, filmT.fbo);
-      present();
+    if (tick !== lastGrain) {
+      present(tick * 7.31);
       lastGrain = tick;
     }
   };
@@ -1276,7 +1476,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   return {
     destroy() {
       film.destroy();
-      for (const t of [sceneT, filmT, wireT]) {
+      for (const t of [sceneT, devT, filmT, wireT]) {
         if (!t) continue;
         gl.deleteTexture(t.tex);
         gl.deleteFramebuffer(t.fbo);
@@ -1289,6 +1489,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
       gl.deleteProgram(wireP.p);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(fin.p);
+      gl.deleteProgram(dev.p);
       stage.destroy();
     },
   };
