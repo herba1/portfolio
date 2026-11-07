@@ -1,21 +1,26 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Fade: a Kyoto noodle shop in an autumn afternoon, and the thirty years of
-// sun that come after it. Drag forward and every surface ages by the light it
-// actually receives.
+// Fade: a Dutch signpost seen from its foot, against a March sky, and the
+// thirty years of sun that come after it. Drag forward and every board ages by
+// the light it actually receives. The photo already holds both ends of the
+// clock: painted boards beside boards whose paint is long gone and whose wood
+// has weathered silver.
 //
-// The bake (tools/depth/bakes/fade) takes Pincalo's photograph apart:
+// The bake (tools/depth/bakes/fade) takes Jan van der Wolf's photograph apart:
 //  - light.webp R: the annual solar dose per pixel. MoGe-2's metric point map
-//    is marched toward 144 sun positions over a year at 35 N (12 days x 12
-//    hours, clear-sky beam x Kyoto's sunshine fraction) plus the sky-view
-//    factor x diffuse, normalised so an open south wall is 1. The eaves, the
-//    lower roof and the awning carve the shade out of it.
-//  - light.webp G: the photo's own illumination (sun term marched at its sun,
-//    Nov 15 14:30, plus sky), calibrated on the sunlit sign and the shaded
-//    menu, so albedo = photo / S.
-//  - mat.webp: how each pixel ages (SAM masks): printed ink, wood, chalking
-//    paint and fabric, and what is inert (sky, glass, fired tile, leaves).
+//    is marched toward 144 sun positions over a year at 52 N (12 days x 12
+//    hours, clear-sky beam x De Bilt's sunshine fraction) plus the sky-view
+//    factor x diffuse, normalised so an open south wall is 1. The camera
+//    looks up, so world up is recovered from the boards themselves (every
+//    face is vertical), and the boards' facing from the photo's own sun,
+//    fitted on the grey wood's shading. The post and the crossing boards
+//    carve the shade out of it.
+//  - light.webp G: the photo's own illumination: every face the camera sees
+//    is sunlit, so one sun level (the yellow board reflecting 0.85) plus a
+//    sky share by view factor, and albedo = photo / S.
+//  - mat.webp: how each pixel ages: the painted boards (SAM masks) fade per
+//    pigment and chalk, the bare wood greys, the sky and clouds are inert.
 //
 // Live, per pixel, with e = years x dose x susceptibility:
 //  - ink: albedo -> optical density per channel; the neutral part is carbon
@@ -23,16 +28,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
 //    so reds and yellows go first and old signs drift to cyan;
 //  - wood: lignin breaks down and brown boards go silver grey;
-//  - chalk: the binder erodes and TiO2 powders out, lifting matte paint and
-//    fabric towards a pale flat white;
+//  - chalk: the binder erodes and TiO2 powders out, lifting the paint
+//    towards a pale flat white;
 // then photo + S x (aged albedo - albedo), developed by the shared film kit.
 //
 // Query: ?years=0..30 holds the clock; ?still=1 skips the reveal; ?film=0
 // shows the aged frame before the film; ?debug=dose shows the dose map.
 
 const BASE = "/lab/fade/";
-const PW = 1440;
-const PH = 1800;
+const PW = 2000;
+const PH = 1500;
 const YEARS = 30;
 const OPEN_AT = 3.2;
 // Fade rates per unit dose-year (1 = a year on an open south wall).
@@ -239,7 +244,7 @@ export async function createFade(host, { embedded = false } = {}) {
   const P = { age: program(gl, VERT, AGE), blit: program(gl, VERT, BLIT) };
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  // The print: 4:5, alone on the paper, as large as the box allows.
+  // The print: 4:3, alone on the paper, as large as the box allows.
   const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2 };
   const T = { scene: null, film: null };
   let dirty = true;

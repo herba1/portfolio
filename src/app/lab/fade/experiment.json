@@ -1,10 +1,10 @@
 {
   "title": "Fade",
-  "description": "A noodle shop in Kyoto on an autumn afternoon, and the thirty years of sun that come after it. Drag forward and every surface ages by the light it actually receives: the sign and the awning out in the open bleach first, the menu under the awning keeps its colour, the boards go silver and the matte paint chalks. Reds and yellows leave before blue, so the vending machine's red goes pale and the maiko's kimono stays.",
+  "description": "A signpost in a Dutch nature reserve, seen from its foot against a March sky, and the thirty years of sun that come after it. Drag forward and every board ages by the light it actually receives: the faces turned to the sun bleach first, the strips in the post's shadow keep their colour, and the painted boards go the way of the bare ones beside them, which have already weathered silver. Reds and yellows leave before blue, so the green boards drift to a pale cyan and only the blue remains.",
   "tags": ["WebGL", "Light", "Film", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-07T02:00:00.000Z",
-  "intent": "Reality pieces, technique 8 (Fade): manipulate a real photograph physically. One photograph is baked into an annual solar dose per pixel (MoGe-2 metric point map; 144 sun directions over a year at 35 N, each with a screen-space depth-march visibility test, clear-sky beam x Kyoto's sunshine fraction, plus sky-view factor x diffuse, at 1/4 resolution on CPU), the photo's own illumination (to recover albedo), and SAM material masks. Live, albedo becomes optical density, split into carbon black and cyan / magenta / yellow dye, each fading exponentially with dose (yellow and magenta about 4x faster than cyan); wood greys, matte paint and fabric chalk. On old Japanese signboards 'only the blue remains': https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/ ; yellow and magenta process inks are the least lightfast: https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
+  "intent": "Reality pieces, technique 8 (Fade): manipulate a real photograph physically. One photograph is baked into an annual solar dose per pixel (MoGe-2 metric point map; world up recovered from the boards' vertical faces, the boards' facing from the photo's own sun fitted on the grey wood's shading; 144 sun directions over a year at 52 N, each with a screen-space depth-march visibility test, clear-sky beam x De Bilt's sunshine fraction, plus sky-view factor x diffuse, at 1/4 resolution on CPU), the photo's own illumination (to recover albedo), and SAM material masks of the painted boards. Live, albedo becomes optical density, split into carbon black and cyan / magenta / yellow pigment, each fading exponentially with dose (yellow and magenta about 4x faster than cyan); bare wood greys and the paint film chalks. On old painted signs 'only the blue remains': https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/ ; yellow and magenta process inks are the least lightfast: https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.75, 0.5] },
   "probe": [
@@ -17,12 +17,13 @@
     { "idle": 1400 }
   ],
   "sources": [
-    "Photograph: 'Traditional Japanese Storefront with Vending Machine' by Pincalo (https://www.pexels.com/@pincalo/) on Pexels, Pexels License (https://www.pexels.com/license/). https://www.pexels.com/photo/traditional-japanese-storefront-with-vending-machine-33163084/ (file: https://images.pexels.com/photos/33163084/pexels-photo-33163084.jpeg, 2374x3561). Cropped to 4:5 (lower 2968 rows), resampled to 1440x1800, a passer-by removed with LaMa (tools/depth/fill.py). Normals, metric depth and sky by MoGe-2 (tools/depth/normals.py); masks by SAM 2.1 (tools/depth/segment.py); maps baked by tools/depth/bakes/fade (prep.py, dose.py, mat.py) into plate.webp, light.webp and mat.webp.",
+    "Photograph: 'Colorful Directional Signpost Against Clear Sky' by Jan van der Wolf (https://www.pexels.com/@jan-van-der-wolf-11680885/) on Pexels, Pexels License (https://www.pexels.com/license/). https://www.pexels.com/photo/colorful-directional-signpost-against-clear-sky-28588774/ (file: https://images.pexels.com/photos/28588774/pexels-photo-28588774.jpeg, 6000x4000, Nikon D7100, 28 mm, 24 March 2019). Cropped to 4:3 (right-hand 5333 columns), resampled to 2000x1500. Normals, metric depth and sky by MoGe-2 (tools/depth/normals.py); painted-board masks by SAM 2.1 (tools/depth/segment.py); maps baked by tools/depth/bakes/fade (prep.py, dose.py, mat.py) into plate.webp, light.webp and mat.webp.",
     "https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/",
     "https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
     "https://en.wikipedia.org/wiki/Air_mass_(solar_energy)",
     "https://en.wikipedia.org/wiki/Sky_view_factor",
     "https://en.wikipedia.org/wiki/Chalking_(paint)",
-    "https://en.wikipedia.org/wiki/Wood_preservation#Weathering"
+    "https://en.wikipedia.org/wiki/Wood_preservation#Weathering",
+    "https://en.wikipedia.org/wiki/Sunshine_duration"
   ]
 }
