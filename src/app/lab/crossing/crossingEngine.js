@@ -17,25 +17,33 @@ import { createFilm } from "../_kit/film";
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
 // exactly however far apart the planes are. Dragging (or tilting a phone)
-// spreads them in z and swings the camera round a pivot inside the stack, so
-// the separation becomes visible as real perspective: the planes slide past
-// each other, the sky card stands far back, the signal floats forward, and
+// spreads them in z and moves the eye, so the separation becomes visible as
+// real perspective: the planes slide past each other behind a window that
+// holds still, the sky card stands far back, the signal floats forward, and
 // each card throws a soft, skylight-blue shadow on the cards behind it,
 // sharp near and wider as the gap grows. The lens focuses on the plane under
 // the pointer with a disc-shaped (not Gaussian) circle of confusion per
 // plane, CoC = A * |z - z_focus| / z, opening as the stack spreads. Release
 // and it springs back flat. The frame then goes through film.js (summer).
 //
-// It is built as a tunnel book: a front mat of the page's paper, with the
-// photo's rectangle cut out, stands at the nearest card's depth and throws a
-// soft shadow in through the window. Every card that meets the frame was
-// overscanned in the bake (the sky outpainted a quarter past each side, the
-// town and house a sixth past the left and bottom, the wires carried on), and
-// the swing is clamped so that the window never slides past any card's
-// overscan: no card edge and no bare paper can show inside it.
+// It is built as a tunnel book seen through a window: the page's paper, with
+// a rectangle cut out of it nearly edge to edge, is the front of the box. The
+// window is locked to the screen (same place, same size, same aspect at every
+// swing) and is the image plane of an off-axis frustum: the camera does not
+// turn, the eye moves, as a head does in front of a real window. Yaw slides
+// the eye sideways and pitch up or down, so a swing shows up purely as
+// parallax between the cards behind a still frame; pitching down puts the eye
+// lower and the window looks further up into the sky. The window sits at the
+// nearest card's depth and throws a soft shadow in on the cards behind it.
+// Every card that meets the frame was overscanned in the bake (the sky
+// outpainted a quarter past each side, the town and house a sixth past the
+// left and bottom, the wires carried on), and the eye is clamped so that no
+// window corner ever looks past any card's overscan: no card edge and no bare
+// paper can show inside it.
 //
-// Query: ?split=0..1&yaw=deg&pitch=deg&focus=0..6 holds a still (the swing is
-// clamped to the window like a live one).
+// Query: ?split=0..1&yaw=deg&pitch=deg&focus=0..6 holds a still. yaw and pitch
+// are the angle of the eye off the window's axis, seen from the window's
+// centre (clamped to the overscan like a live one).
 
 const ASSET = "/lab/crossing/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -57,31 +65,43 @@ const PLANES = [
   // the mechanism box is cut by the right edge and ends a few px past
   // it (bake.py): that side is a cut-out end, not overscan to keep covered
   { rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
-  { rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06 }, // the old house
+  // the house's margin is its edge column carried straight on (bake.py), which
+  // holds as the beams running on for a short way and then reads as streaks
+  { rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06, clean: [-0.03, null, null, null] }, // the old house
   { rect: [0.50732, 0.15192, 0.83545, 1.14971], o: -0.24 }, // the signal
   { rect: [0.01416, 0.8326, 0.37988, 1.10029], o: -0.42 }, // camellia
 ];
 const N = PLANES.length;
-// The front mat sits at the nearest plane's depth, and the camera swings
-// round the middle of its window: the window holds still and the street
-// slides behind it.
+// The window is the image plane, at the nearest plane's depth: the eye moves
+// in front of it, the window holds still and the street slides behind it.
 const MAT_K = N - 1;
 const PIVOT_O = PLANES[MAT_K].o;
 // Where each card must keep covering the window: the sides that meet the
 // frame were overscanned by the bake (their rects run past 0..1), and the
-// window may not slide past them. Sides that end inside the photo are cut-out
-// silhouettes and may show.
-const SAFE = PLANES.map(({ rect: r, ends = [] }) => [
-  r[0] < 0.002 && !ends[0] ? r[0] : -Infinity,
-  r[1] < 0.002 && !ends[1] ? r[1] : -Infinity,
-  r[2] > 0.998 && !ends[2] ? r[2] : Infinity,
-  r[3] > 0.998 && !ends[3] ? r[3] : Infinity,
-]);
-const MAT_RECT = [-1.5, -2.5, 2.5, 3.5]; // the paper sheet, in photo uv: past every edge of the screen
+// window may not look past them, nor past the part of a margin that holds up
+// (clean). Sides that end inside the photo are cut-out silhouettes and may
+// show.
+const SAFE = PLANES.map(({ rect: r, ends = [], clean = [] }) =>
+  [
+    r[0] < 0.002 && !ends[0] ? r[0] : -Infinity,
+    r[1] < 0.002 && !ends[1] ? r[1] : -Infinity,
+    r[2] > 0.998 && !ends[2] ? r[2] : Infinity,
+    r[3] > 0.998 && !ends[3] ? r[3] : Infinity,
+  ].map((v, i) => clean[i] ?? v),
+);
 const SPREAD = 1.0; // plane offsets are o * SPREAD * print width at split 1
 const FOVY = 30; // degrees
 const MAX_YAW = 21;
-const MAX_PITCH = 11;
+const MAX_PITCH = 14;
+// The window: nearly full bleed, inset by an even paper margin. Its aspect
+// follows the screen's, held within these bounds of the photo's (a phone held
+// upright gets a shorter window rather than a sliver of the photo); the photo
+// covers it, so the window's own edges always fall inside every card.
+const MARGIN = [0.03, 12, 28]; // share of the shorter side, min and max css px
+const ASPECT_RANGE = [1 / 1.2, 1.3];
+// The print is a little larger than the window, so the eye has real photo to
+// look into on every side before any card has to lean on its overscan.
+const ZOOM = 1.05;
 const APERTURE = 15; // CoC in css px for a plane at |z - zf| / z = 1, at split 1
 const LIGHT = normalize([0.18, 0.28, 1]); // toward the sun: up, right (the eave's shadow on the wall), toward us
 const HAZE = [0.86, 0.93, 0.95];
@@ -104,22 +124,30 @@ const PLANE_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
 uniform vec4 uRect;     // quad extent in photo uv (x0, y0, x1, y1), y down
 uniform vec3 uPlane;    // half width, half height (world px), distance
-uniform mat3 uRot;      // orbit, applied about the pivot
-uniform float uPivot;
+uniform vec2 uEye;      // the eye's offset from the window's axis (world px)
+uniform float uWinZ;    // the window's distance: the image plane
 uniform vec2 uProj;     // f / half viewport, per axis
-uniform vec2 uShift;    // print centre in clip space
+uniform int uMat;       // 1: the paper round the window, drawn in screen space
 out vec2 vUv;
 void main() {
+  if (uMat == 1) {
+    vUv = aPos;
+    gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0);
+    return;
+  }
   vec2 uv = mix(uRect.xy, uRect.zw, aPos);
-  vec3 p = vec3((uv.x - 0.5) * 2.0 * uPlane.x, (0.5 - uv.y) * 2.0 * uPlane.y, -uPlane.z);
-  vec3 c = vec3(0.0, 0.0, -uPivot);
-  vec3 q = uRot * (p - c) + c;
-  gl_Position = vec4(q.x * uProj.x + uShift.x * -q.z, q.y * uProj.y + uShift.y * -q.z, 0.0, -q.z);
+  vec2 p = vec2((uv.x - 0.5) * 2.0 * uPlane.x, (0.5 - uv.y) * 2.0 * uPlane.y);
+  // Off-axis projection through the window: cast from the eye onto the
+  // window's plane, then scale that plane to the screen. A point on the
+  // window's plane lands in the same place wherever the eye is.
+  float z = uPlane.z;
+  gl_Position = vec4((p + uEye * (z / uWinZ - 1.0)) * uProj, 0.0, z);
   vUv = uv;
 }`;
 
 const PLANE_FS = `#version 300 es
 precision highp float;
+precision highp int;
 precision mediump sampler2DArray;
 in vec2 vUv;
 uniform sampler2D uTex;          // this plane, premultiplied, cropped
@@ -137,6 +165,7 @@ uniform float uPrintW;
 uniform float uHaze;
 uniform vec3 uHazeColor;
 uniform int uMat;                // 1: the front mat, paper with the window cut out
+uniform vec4 uWin;               // the window in device px (x0, y0, x1, y1), GL origin
 uniform vec3 uPaper;
 uniform float uMatZ;
 uniform vec2 uMatHalf;
@@ -151,8 +180,9 @@ vec4 tap(vec2 uv, float lod) {
 void main() {
   vec2 dx = dFdx(vUv), dy = dFdy(vUv);
   if (uMat == 1) {
-    // Paper everywhere but the photo's rectangle, the cut edge antialiased.
-    vec2 d = min(vUv, 1.0 - vUv) / max(fwidth(vUv), vec2(1e-6));
+    // Paper everywhere but the window, the cut edge antialiased.
+    vec2 fc = gl_FragCoord.xy;
+    vec2 d = min(fc - uWin.xy, uWin.zw - fc);
     float a = 1.0 - clamp(min(d.x, d.y) + 0.5, 0.0, 1.0);
     o = vec4(uPaper * a, a);
     return;
@@ -310,22 +340,11 @@ async function loadBitmap(src, premultiply) {
   return createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: premultiply ? "premultiply" : "none" });
 }
 
-// Rotation that swings the camera: yaw about y, then pitch about x.
-function rotation(yawDeg, pitchDeg) {
-  const y = (yawDeg * Math.PI) / 180;
-  const p = (pitchDeg * Math.PI) / 180;
-  const cy = Math.cos(y), sy = Math.sin(y), cp = Math.cos(p), sp = Math.sin(p);
-  // R = Rx(p) * Ry(y), column-major for GLSL
-  // Ry = [cy 0 sy; 0 1 0; -sy 0 cy], Rx = [1 0 0; 0 cp -sp; 0 sp cp]
-  const m = [
-    [cy, 0, sy],
-    [sp * sy, cp, -sp * cy],
-    [-cp * sy, sp, cp * cy],
-  ]; // rows
-  return {
-    rows: m,
-    gl: new Float32Array([m[0][0], m[1][0], m[2][0], m[0][1], m[1][1], m[2][1], m[0][2], m[1][2], m[2][2]]),
-  };
+// The eye for a swing: yaw and pitch are its angle off the window's axis,
+// seen from the window's centre at distance D. Positive yaw moves it left (the
+// far cards slide left), negative pitch moves it down (the window looks up).
+function eyeFor(D, yawDeg, pitchDeg) {
+  return [-D * Math.tan((yawDeg * Math.PI) / 180), D * Math.tan((pitchDeg * Math.PI) / 180)];
 }
 
 export async function createCrossing(host, { embedded = false } = {}) {
@@ -432,15 +451,24 @@ export async function createCrossing(host, { embedded = false } = {}) {
   };
   stage.onResize(build);
 
-  // ---- layout: the print at rest, and the lens that sees it 1:1
+  // ---- layout: the window, the print that covers it, and the lens
   const layout = () => {
     const W = stage.width;
     const H = stage.height;
-    const narrow = W < 700;
-    const printW = Math.min(W * (narrow ? 0.7 : 0.6), H * (narrow ? 0.5 : 0.62) * (PHOTO[0] / PHOTO[1]));
-    const printH = (printW * PHOTO[1]) / PHOTO[0];
+    const A = PHOTO[0] / PHOTO[1];
+    const dpr = stage.dpr;
+    const margin = Math.round(clamp(Math.min(W, H) * MARGIN[0], MARGIN[1], MARGIN[2]));
+    let winW = W - 2 * margin;
+    let winH = H - 2 * margin;
+    if (winW / winH > A * ASPECT_RANGE[1]) winW = winH * A * ASPECT_RANGE[1];
+    if (winW / winH < A * ASPECT_RANGE[0]) winH = winW / (A * ASPECT_RANGE[0]);
+    // whole device pixels, the same margin on both sides
+    winW = (2 * Math.round((winW * dpr) / 2)) / dpr;
+    winH = (2 * Math.round((winH * dpr) / 2)) / dpr;
+    const printW = Math.max(winW, winH * A) * ZOOM;
+    const printH = printW / A;
     const f = H / 2 / Math.tan(((FOVY / 2) * Math.PI) / 180);
-    return { W, H, printW, printH, f };
+    return { W, H, winW, winH, printW, printH, f };
   };
 
   // ---- state
@@ -457,7 +485,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   let lastKey = "";
   let lastGrain = -1;
   let breathe = 0;
-  const swing = { yaw: 0, pitch: 0 }; // what is drawn, after the window's clamp
+  const swing = { yaw: 0, pitch: 0 }; // what is drawn, after the overscan clamp
 
   const geometry = (s) => {
     const L = layout();
@@ -466,26 +494,24 @@ export async function createCrossing(host, { embedded = false } = {}) {
     return { ...L, zs, pivot };
   };
 
-  // Which plane is under the pointer (nearest first), by casting the ray back
-  // through the swung camera into each plane's matte.
+  // Where the ray from the eye through screen point (sx, sy) (css px from the
+  // centre, y up) meets plane k, in that plane's photo uv.
+  const castUv = (G, E, sx, sy, k) => {
+    const zk = G.zs[k];
+    const t = zk / G.pivot;
+    const x = E[0] + ((sx * G.pivot) / G.f - E[0]) * t;
+    const y = E[1] + ((sy * G.pivot) / G.f - E[1]) * t;
+    const sc = zk / G.f;
+    return [x / (G.printW * sc) + 0.5, 0.5 - y / (G.printH * sc)];
+  };
+
+  // Which plane is under the pointer (nearest first), by casting the ray from
+  // the eye through the window into each plane's matte.
   const pick = (px, py) => {
     const G = geometry(split.x);
-    const R = rotation(swing.yaw, swing.pitch).rows;
-    const d = [px - G.W / 2, -(py - G.H / 2), -G.f];
-    // inverse rotation (transpose) about the pivot
-    const D = [0, 1, 2].map((i) => R[0][i] * d[0] + R[1][i] * d[1] + R[2][i] * d[2]);
-    const c = [0, 0, -G.pivot];
-    const o0 = [0 - c[0], 0 - c[1], 0 - c[2]];
-    const O = [0, 1, 2].map((i) => R[0][i] * o0[0] + R[1][i] * o0[1] + R[2][i] * o0[2] + c[i]);
+    const E = eyeFor(G.pivot, swing.yaw, swing.pitch);
     for (let k = N - 1; k >= 1; k--) {
-      const z = -G.zs[k];
-      if (Math.abs(D[2]) < 1e-6) continue;
-      const t = (z - O[2]) / D[2];
-      const x = O[0] + t * D[0];
-      const y = O[1] + t * D[1];
-      const sc = G.zs[k] / G.f;
-      const u = x / (G.printW * sc) + 0.5;
-      const v = 0.5 - y / (G.printH * sc);
+      const [u, v] = castUv(G, E, px - G.W / 2, -(py - G.H / 2), k);
       if (u < 0 || u > 1 || v < 0 || v > 1) continue;
       const mx = Math.min(MATTE[0] - 1, Math.floor(u * MATTE[0]));
       const my = Math.min(MATTE[1] - 1, Math.floor(v * MATTE[1]));
@@ -494,35 +520,29 @@ export async function createCrossing(host, { embedded = false } = {}) {
     return 0;
   };
 
-  // The largest share t of a swing (yaw, pitch) for which the mat's window,
-  // seen from the swung camera, still falls inside every card's safe extent.
-  // The window and each card are planar rectangles, so the four corners of
-  // the window cast onto each card decide it. A defocused card's edge is soft
-  // over its circle of confusion, so the margin keeps that clear too.
+  // The largest share t of a swing (yaw, pitch) for which every corner of the
+  // window, seen from the moved eye, still looks onto every card's safe
+  // extent. The window is fixed on screen and the cards are planar, so the
+  // rays through its four corners decide it; each lands on a card at a point
+  // linear in the eye, so the share is found by bisection. A defocused card's
+  // edge is soft over its circle of confusion, so the margin keeps that clear
+  // too. The nearest card lies in the window's plane and never moves.
   const swingLimit = (G, yawDeg, pitchDeg, cocs) => {
-    const zm = G.zs[MAT_K];
-    const hmx = (G.printW / 2) * (zm / G.f);
-    const hmy = (G.printH / 2) * (zm / G.f);
+    const hx = G.winW / 2;
+    const hy = G.winH / 2;
     const corners = [
-      [-hmx, -hmy],
-      [hmx, -hmy],
-      [-hmx, hmy],
-      [hmx, hmy],
+      [-hx, -hy],
+      [hx, -hy],
+      [-hx, hy],
+      [hx, hy],
     ];
     const fits = (t) => {
-      const R = rotation(yawDeg * t, pitchDeg * t).rows;
-      // the camera in the cards' frame: R^T (0 - c) + c, c = (0, 0, -pivot)
-      const O = [R[2][0] * G.pivot, R[2][1] * G.pivot, R[2][2] * G.pivot - G.pivot];
+      const E = eyeFor(G.pivot, yawDeg * t, pitchDeg * t);
       for (let k = 0; k < MAT_K; k++) {
         const S = SAFE[k];
-        const zk = G.zs[k];
-        const hx = (G.printW / 2) * (zk / G.f);
-        const hy = (G.printH / 2) * (zk / G.f);
         const inset = 0.008 + cocs[k] / (stage.dpr * G.printW);
-        for (const [px, py] of corners) {
-          const tt = (-zk - O[2]) / (-zm - O[2]);
-          const u = (O[0] + tt * (px - O[0])) / (2 * hx) + 0.5;
-          const v = 0.5 - (O[1] + tt * (py - O[1])) / (2 * hy);
+        for (const [sx, sy] of corners) {
+          const [u, v] = castUv(G, E, sx, sy, k);
           if (u < S[0] + inset || v < S[1] + inset || u > S[2] - inset || v > S[3] - inset) return false;
         }
       }
@@ -593,10 +613,13 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.useProgram(plane.p);
     gl.bindVertexArray(vao);
     const U = plane.u;
-    gl.uniformMatrix3fv(U.uRot, false, rotation(yawDeg, pitchDeg).gl);
-    gl.uniform1f(U.uPivot, G.pivot);
+    const E = eyeFor(G.pivot, yawDeg, pitchDeg);
+    gl.uniform2f(U.uEye, E[0], E[1]);
+    gl.uniform1f(U.uWinZ, G.pivot);
     gl.uniform2f(U.uProj, G.f / (G.W / 2), G.f / (G.H / 2));
-    gl.uniform2f(U.uShift, 0, 0);
+    const wx = Math.round(((G.W - G.winW) / 2) * dpr);
+    const wy = Math.round(((G.H - G.winH) / 2) * dpr);
+    gl.uniform4f(U.uWin, wx, wy, w - wx, h - wy);
     gl.uniform1fv(U.uZ, new Float32Array(G.zs));
     const halves = new Float32Array(N * 2);
     G.zs.forEach((z, k) => {
@@ -610,7 +633,8 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.uniform1i(U.uMat, 0);
     gl.uniform3f(U.uPaper, SURROUND[0], SURROUND[1], SURROUND[2]);
     gl.uniform1f(U.uMatZ, G.zs[MAT_K]);
-    gl.uniform2f(U.uMatHalf, halves[MAT_K * 2], halves[MAT_K * 2 + 1]);
+    // the window's half extent in the nearest card's plane
+    gl.uniform2f(U.uMatHalf, (G.winW / 2) * (G.pivot / G.f), (G.winH / 2) * (G.pivot / G.f));
     gl.uniform1i(U.uTex, 0);
     gl.uniform1i(U.uMattes, 1);
     gl.activeTexture(gl.TEXTURE1);
@@ -654,16 +678,14 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, photoTex.t);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
-    // The front mat: a sheet of the page's own paper with the photo's
-    // rectangle cut out of it, at the nearest card's depth. It only takes
+    // The front mat: the page's own paper with the window cut out of it,
+    // locked to the screen (the window is the image plane). It only takes
     // coverage away, so the page shows through it untouched (FINAL_FS). The
     // colour round the window is left as the overscanned cards drew it, so
     // the film's bloom and halation see the sky carry on past the cut, as a
     // lens would: no paper or grey veil creeping in to desaturate the edges.
     gl.blendFuncSeparate(gl.ZERO, gl.ONE, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(U.uMat, 1);
-    gl.uniform4f(U.uRect, MAT_RECT[0], MAT_RECT[1], MAT_RECT[2], MAT_RECT[3]);
-    gl.uniform3f(U.uPlane, halves[MAT_K * 2], halves[MAT_K * 2 + 1], G.zs[MAT_K]);
     gl.uniform1f(U.uOpacity, 1);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.uniform1i(U.uMat, 0);
@@ -731,7 +753,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
       split.x = Math.max(0, split.x);
     }
 
-    // Hover: the flat print leans a degree toward the pointer.
+    // Hover: the eye drifts a little with the pointer (parallax once open).
     const live = !grab && p.inside && !reduced && !held;
     hover.x = damp(hover.x, live ? (p.x / L.W - 0.5) * 3 : 0, 1 / 0.35, dt);
     hover.y = damp(hover.y, live ? -(p.y / L.H - 0.5) * 2 : 0, 1 / 0.35, dt);
@@ -753,7 +775,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
 
     let yawDeg = yaw.x + hover.x + by;
     let pitchDeg = pitch.x + hover.y + bp;
-    // The window: the swing stops where a card's overscan runs out, so no
+    // The window: the eye stops where a card's overscan runs out, so no
     // card edge ever comes into it. A hand that pushes further is held at
     // the edge, as by the mat itself.
     const cocs = G.zs.map((z) => APERTURE * s * (Math.abs(z - focusZ) / z) * stage.dpr);
