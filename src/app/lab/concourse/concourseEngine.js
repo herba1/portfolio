@@ -32,7 +32,7 @@ const THICK = 0.07; // slab thickness, m
 const LIFT = [0.22, 0.62]; // per-tile lift range at full split, m
 const DOLLY = 0.8; // the camera backs off along the window's centre ray, as a share of its distance
 const WHITE = [1.0, 0.94, 0.86];
-const RED = [1.0, 0.16, 0.07];
+const RED = [1.0, 0.07, 0.03];
 const RED_TILES = [9, 17, 22];
 
 const FILM = {
@@ -94,8 +94,14 @@ void main() {
   o = vec4(c * uLights, 1.0);
 }`;
 
-// Light leaking out from under a lifted slab onto the road: falls off with
-// distance from the slab's edge, and grows with the gap it escapes through.
+// Light leaking out from under a lifted slab onto the road. The slab's
+// underside is a panel of the tile's own emission, a gap's height above the
+// road: the road right under its rim takes almost all of it, and it falls off
+// with the inverse square of the distance out from the rim, measured against
+// that height, so a slab barely off the ground throws a tight bright line and
+// one held high throws a wide, faint pool. What it lights is the real road
+// (the painted-out photograph), so the asphalt grain and the stripes show up
+// in the pool and nowhere else.
 const GLOW_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
 ${COMMON}
@@ -104,21 +110,28 @@ uniform vec3 uE2;
 uniform vec4 uRect;  // tile in floor axes (u0, v0, u1, v1), m
 uniform float uPad;
 out vec2 vUv;
+out vec3 vRest;
 void main() {
   vec2 lo = uRect.xy - uPad, hi = uRect.zw + uPad;
   vec2 uv = mix(lo, hi, aPos);
   vUv = uv;
   vec3 X = uE1 * uv.x + uE2 * uv.y;
   X -= uN * (dot(uN, X) + uD);
+  vRest = X;
   gl_Position = uProj * uView * vec4(X, 1.0);
 }`;
 
 const GLOW_FS = `#version 300 es
 precision highp float;
+${COMMON}
 in vec2 vUv;
+in vec3 vRest;
+uniform sampler2D uFloor;
+uniform vec2 uPhoto;
 uniform vec4 uRect;
-uniform vec3 uLight;
-uniform float uGap;
+uniform vec3 uLight;  // the panel's colour
+uniform float uEmit;  // the panel's emission (glow, hover)
+uniform float uH;     // height of the slab's underside above the road, m
 uniform float uPad;
 uniform float uAmp;
 out vec4 o;
@@ -126,15 +139,23 @@ void main() {
   vec2 c = (uRect.xy + uRect.zw) * 0.5, h = (uRect.zw - uRect.xy) * 0.5;
   vec2 q = abs(vUv - c) - h;
   float sd = length(max(q, 0.0)) + min(max(q.x, q.y), 0.0);
-  // brightest at the slab's rim, where the light gets out; under the
-  // middle of the slab the ground is in its shade
-  // a soft pool, its plateau tucked under the slab so no edge of it shows
-  // as the slab rises and the view swings
-  float r = 0.06 + 0.08 * uGap;
-  float x = max(sd + 0.12, 0.0) / r;
-  float g = 1.0 / (1.0 + x * x);
-  g *= 1.0 - smoothstep(uPad * 0.5, uPad, sd); // true black before the quad ends
-  o = vec4(uLight * g * uGap * uAmp, 0.0);
+  // irradiance from a lit rim a height H up: H^2 / (H^2 + x^2), cubed for
+  // the cosines at both ends. Under the slab the road is in the slab's own
+  // shade, so from an angle a lifted slab shows a dark footprint ringed by
+  // the light that got out round its edge.
+  // the light leaves through the gap at a grazing angle, so the pool is a
+  // fraction of the gap wide, not the gap itself
+  float H = 0.04 + 0.22 * max(uH, 0.0);
+  float x = max(sd, 0.0);
+  float k = H * H / (H * H + x * x);
+  float g = k * k * k * exp(min(sd, 0.0) / (0.06 + 0.3 * H));
+  // the gap the light escapes through: none while the slab sits on the road
+  g *= smoothstep(0.0, 0.12, uH);
+  g *= 1.0 - smoothstep(uPad * 0.55, uPad, sd); // true black before the quad ends
+  vec3 albedo = texture(uFloor, photoPx(vRest) / uPhoto).rgb;
+  // asphalt is dark: a little of the light comes back off its sheen as well
+  vec3 lit = uLight * uEmit * g * uAmp * (albedo + 0.04);
+  o = vec4(lit, 0.0);
 }`;
 
 // The slab: a unit box whose top is the tile's own patch of road.
@@ -174,25 +195,43 @@ uniform sampler2D uFloor;
 uniform vec2 uPhoto;
 uniform vec3 uLight;
 uniform float uGlow;   // 0 the photograph .. 1 lit
-uniform float uHover;
+uniform float uEmit;   // the panel's emission (glow, hover)
+uniform float uRed;
 out vec4 o;
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 void main() {
   if (vFace < 0.5) {
-    vec3 a = texture(uFloor, photoPx(vRest) / uPhoto).rgb;
-    // a lightbox: the road's own albedo lit through from below, the light
-    // a touch stronger in the middle of the panel than at its frame
-    vec2 e = min(vUv, 1.0 - vUv);
-    float frame = smoothstep(0.0, 0.18, min(e.x, e.y));
-    float gain = uGlow * (1.7 + 2.6 * uHover) * (0.82 + 0.18 * frame);
-    // a red panel is still mostly white light through grey asphalt; the red
-    // shows where the light escapes (the edge, the spill, the bloom)
-    vec3 Lt = mix(uLight, vec3(1.0, 0.95, 0.9), 0.6);
-    vec3 lit = a * (1.0 + gain * Lt) + Lt * uGlow * (0.035 + 0.05 * uHover);
-    o = vec4(lit, 1.0);
+    vec2 uv = photoPx(vRest) / uPhoto;
+    vec3 a = texture(uFloor, uv).rgb;
+    // A lightbox: a diffuser lit evenly from inside. The road's tone is
+    // compressed almost flat (a fifteenth power keeps about 15% of the
+    // asphalt's grain and the stripes' contrast) ...
+    float l = luma(a);
+    float detail = pow(clamp(l / 0.34, 0.2, 3.0), 0.15);
+    // ... and the only real dark on it is the person's own shadow, read
+    // from a softened copy of the road (sunlit asphalt sits near 0.3, a
+    // shadow under 0.05) and laid on as a soft multiply
+    float ls = luma(texture(uFloor, uv, 3.0).rgb);
+    float shade = 1.0 - smoothstep(0.035, 0.17, ls);
+    detail = mix(detail, 1.0, shade); // the grain inside a shadow is the shadow's
+    float shadow = mix(1.0, 0.42, shade);
+    // brightest in the middle of the panel, easing off towards its frame
+    vec2 r = (vUv - 0.5) * 2.0;
+    float d2 = dot(r * r, vec2(0.5)) + 0.5 * max(r.x * r.x, r.y * r.y);
+    float grad = 1.06 - 0.24 * d2;
+    float frame = smoothstep(0.0, 0.035, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y)));
+    grad *= 0.8 + 0.2 * frame;
+    // white panels are a warm paper white; a red gel runs hot in the middle,
+    // where the light through it is strongest
+    vec3 Lt = uRed > 0.5 ? mix(vec3(1.1, 0.035, 0.018), vec3(1.45, 0.15, 0.07), smoothstep(0.8, 0.0, d2)) : uLight * 1.5;
+    vec3 panel = Lt * uEmit * detail * shadow * grad;
+    // the road goes to the panel as the lights go out
+    float lb = smoothstep(0.08, 0.8, uGlow);
+    o = vec4(mix(a, panel, lb), 1.0);
   } else if (vFace < 1.5) {
     // the edge of the acrylic glows with the light inside it
     float t = mix(0.35, 1.0, vZ);
-    o = vec4(uLight * uGlow * (0.55 + 0.9 * uHover) * t * (uLight.g < 0.5 ? 2.2 : 1.0), 1.0);
+    o = vec4(uLight * uEmit * 0.55 * t * (uRed > 0.5 ? 2.2 : 1.0), 1.0);
   } else {
     o = vec4(0.0, 0.0, 0.0, 1.0);
   }
@@ -231,7 +270,8 @@ uniform vec4 uRect;
 uniform vec2 uAt;
 uniform vec3 uLight;
 uniform float uGlow;
-uniform float uHover;
+uniform float uEmit;  // their panel's emission
+uniform float uRed;
 uniform float uDim;
 out vec4 o;
 void main() {
@@ -244,9 +284,22 @@ void main() {
   // stripe), which reads as a halo once the road is gone
   c.a = clamp((c.a - 0.22) / 0.78, 0.0, 1.0);
   if (c.a < 0.004) discard;
-  // bounce from the panel under their feet: shoes and hems pick it up
-  vec3 under = c.rgb * uLight * uGlow * (0.9 + 0.9 * uHover) * exp(-vH / 0.32);
-  o = vec4((c.rgb + under) * c.a * uDim, c.a);
+  // Up-light from the panel under their feet: strongest at the shoes, gone
+  // by the waist; a red gel reaches further and washes them in its colour.
+  // The street's daylight goes out with the lights, so above it they settle.
+  float reach = uRed > 0.5 ? 0.7 : 0.34;
+  float f = exp(-vH / reach);
+  vec3 day = c.rgb * mix(1.0, 0.68 + 0.32 * f, uGlow);
+  vec3 up = uLight * uEmit * f;
+  // the light wraps round their outline (trouser seams, shoe edges, hems):
+  // a rim wherever the matte thins out within a few pixels
+  vec2 at = (q + uAt) / uAtlasSize, px = 3.0 / uAtlasSize;
+  float m = min(min(texture(uAtlas, at + vec2(px.x, 0.0)).a, texture(uAtlas, at - vec2(px.x, 0.0)).a),
+                min(texture(uAtlas, at + vec2(0.0, px.y)).a, texture(uAtlas, at - vec2(0.0, px.y)).a));
+  float rim = 1.0 - smoothstep(0.3, 0.95, m);
+  float red = uRed > 0.5 ? 1.0 : 0.0;
+  vec3 lit = day * (1.0 + up * mix(1.6, 3.0, red)) + up * (mix(0.12, 0.7, red) + rim * mix(0.7, 2.4, red));
+  o = vec4(lit * c.a * uDim, c.a);
 }`;
 
 // ------------------------------------------------------------------ math
@@ -650,6 +703,10 @@ export async function createConcourse(host, { embedded = false } = {}) {
   // Full page only: on the index a wheel over the tile must scroll the page.
   if (!embedded) stage.canvas.addEventListener("wheel", onWheel, { passive: false });
 
+  // A panel's light: one number drives its face, the light under it and the
+  // up-light on whoever stands on it.
+  const emitOf = (T, glow) => glow * (1 + 0.55 * T.hover.x);
+
   const draw = (s, yawDeg, pitchDeg, glow) => {
     const cam = camera(s, yawDeg, pitchDeg);
     const w = stage.canvas.width, h = stage.canvas.height;
@@ -691,18 +748,21 @@ export async function createConcourse(host, { embedded = false } = {}) {
       common(progGlow);
       gl.uniform3f(progGlow.u.uE1, E1[0], E1[1], E1[2]);
       gl.uniform3f(progGlow.u.uE2, E2[0], E2[1], E2[2]);
-      gl.uniform1f(progGlow.u.uPad, 0.6);
+      gl.uniform1f(progGlow.u.uPad, 0.7);
+      gl.uniform2f(progGlow.u.uPhoto, PW, PH);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, floorTex);
+      gl.uniform1i(progGlow.u.uFloor, 0);
       gl.bindVertexArray(quadVao);
       tiles.forEach((T) => {
         const L = T.red ? RED : WHITE;
-        const gap = clamp(T.lift.x / LIFT[1], 0, 1.3) * glow * (1 + 0.8 * T.hover.x);
-        if (gap < 0.002) return;
+        const H = T.lift.x - clamp(T.lift.x * 0.5, 0, THICK);
+        if (H < 0.002) return;
         gl.uniform4f(progGlow.u.uRect, T.r[0], T.r[1], T.r[2], T.r[3]);
         gl.uniform3f(progGlow.u.uLight, L[0], L[1], L[2]);
-        gl.uniform1f(progGlow.u.uGap, gap);
-        // white light on black asphalt reads as grey haze; only the red gel
-        // throws a pool you can see as colour
-        gl.uniform1f(progGlow.u.uAmp, T.red ? 0.42 : 0.015);
+        gl.uniform1f(progGlow.u.uEmit, emitOf(T, glow));
+        gl.uniform1f(progGlow.u.uH, H);
+        gl.uniform1f(progGlow.u.uAmp, T.red ? 1.15 : 0.32);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       });
       gl.disable(gl.BLEND);
@@ -727,7 +787,8 @@ export async function createConcourse(host, { embedded = false } = {}) {
       gl.uniform1f(progSlab.u.uThick, clamp(T.lift.x * 0.5, 0, THICK));
       gl.uniform3f(progSlab.u.uLight, L[0], L[1], L[2]);
       gl.uniform1f(progSlab.u.uGlow, glow);
-      gl.uniform1f(progSlab.u.uHover, T.hover.x);
+      gl.uniform1f(progSlab.u.uEmit, emitOf(T, glow));
+      gl.uniform1f(progSlab.u.uRed, T.red ? 1 : 0);
       gl.drawArrays(gl.TRIANGLES, 0, 30);
     });
 
@@ -754,7 +815,8 @@ export async function createConcourse(host, { embedded = false } = {}) {
       gl.uniform1f(progPerson.u.uLift, T ? T.lift.x : 0);
       gl.uniform3f(progPerson.u.uLight, L[0], L[1], L[2]);
       gl.uniform1f(progPerson.u.uGlow, T ? glow : 0);
-      gl.uniform1f(progPerson.u.uHover, T ? T.hover.x : 0);
+      gl.uniform1f(progPerson.u.uEmit, T ? emitOf(T, glow) : 0);
+      gl.uniform1f(progPerson.u.uRed, T?.red ? 1 : 0);
       gl.uniform1f(progPerson.u.uDim, T ? 1 : lights);
       gl.drawElements(gl.TRIANGLES, gi.length, gl.UNSIGNED_SHORT, 0);
     }
@@ -851,8 +913,10 @@ export async function createConcourse(host, { embedded = false } = {}) {
     if (tick !== lastGrain) {
       film.render(sceneT.tex, {
         ...FILM,
-        bloom: FILM.bloom + 0.28 * glow,
-        halation: 0.5 * glow,
+        // the spill under each slab carries the light now; the lens only
+        // softens it
+        bloom: FILM.bloom + 0.16 * glow,
+        halation: 0.32 * glow,
         headroom: 0,
         grain: FILM.grain + 0.12 * glow,
         grainSeed: tick * 7.31,
