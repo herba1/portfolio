@@ -26,19 +26,17 @@ const ART_IDLE = 24;
 // its own top-left corner into a square that stands from the figures' top to
 // the artist's baseline. Everything else, clock, rule, title, artist, hangs
 // flush left off one line, COL, immediately to its right. Two columns:
-// image square / type. Every vertical address is on the 4px grid.
+// image square / type, and the type column is exactly as wide as the
+// figures: they own the measure, ink to ink, and the rule runs under them
+// end to end. Every vertical address is on the 4px grid.
 const PAD = 24;
-export const ART = 140; // the sleeve: figure top to artist baseline
 const GAP = 28; // sleeve to type
-export const COL_W = 320; // the type column's measure, which the rule runs
-export const PANEL = { W: PAD + ART + GAP + COL_W + PAD, H: PAD + ART + PAD };
-export const COL = -PANEL.W / 2 + PAD + ART + GAP; // the text column's left edge
 
 // Clock sizes. Open, the figures are the column's headline: Geist's tabular
-// lining figures are 0.71em, so 115px figures stand 81.7px, their top on the
-// sleeve's top edge and their round overshoot just clear of the rule at 108.
+// lining figures are 0.71em, so 143px figures stand 101.5px, their top on the
+// sleeve's top edge and their round overshoot just clear of the rule at 128.
 export const CLOCK_PILL = 13;
-export const CLOCK = 115;
+export const CLOCK = 143;
 
 // Geist's tabular figures with line-height 1, measured from rendered pixels
 // at the clock's weight: flat figure top and baseline as a fraction of the
@@ -48,18 +46,37 @@ export const FIG_BASE = 0.854;
 const clockTop = (s, top) => top - FIG_TOP * s;
 const clockMid = (s) => ((FIG_TOP + FIG_BASE) / 2) * s;
 
-// The figures' baseline lands at PAD + 81.7 = 105.7. The rule is laid on it,
-// just clear of the round figures' overshoot so it lands on the grid at 108;
-// the time left stands on the same baseline at the rule's far end, in the
-// 13px body step (a 16px line, baseline 12.6px down). The title's 24px line
-// sits 16px under the rule and the artist straight beneath.
+// "1:23" from the 1's ink to the 3's ink, measured from rendered pixels at
+// the clock's weight: 1.9938em of outline, less the three gaps of tracking
+// the law sets between the four figures at this size. The figures are
+// tabular, so every time the clock can show is this wide; only the last
+// figure's own right bearing moves its ink by a pixel or so.
+const FIG_INK = 1.9938;
+const figureWidth = (s) => FIG_INK * s + 3 * -0.043 * (s - 12);
+export const COL_W = Math.round(figureWidth(CLOCK)); // 268: the figures, and the rule under them
+
+export const ART = 160; // the sleeve: figure top to artist baseline
+export const PANEL = { W: PAD + ART + GAP + COL_W + PAD, H: PAD + ART + PAD };
+export const COL = -PANEL.W / 2 + PAD + ART + GAP; // the text column's left edge
+
+// The figures' baseline lands at PAD + 101.5 = 125.5. The rule is laid on it,
+// just clear of the round figures' overshoot so it lands on the grid at 128.
+// The title's 24px line sits 16px under the rule (its baseline 19px down)
+// and the artist straight beneath. The time left stands under the rule's far
+// end, set flush right on the title's baseline in the 13px body step (whose
+// baseline is 12px down its 16px line), so the column's second line reads as
+// one line: what is playing, and how long it has left.
 export const CLOCK_BASE = PAD + (FIG_BASE - FIG_TOP) * CLOCK;
+const TITLE_BASE = 19;
+const REMAIN_BASE = 12;
 export const ROW = {
-  rule: 108,
-  remain: CLOCK_BASE - 12.6,
-  title: 124,
-  artist: 148,
+  rule: 128,
+  title: 144,
+  remain: 144 + TITLE_BASE - REMAIN_BASE,
+  artist: 168,
 };
+// the title gives way to the time left: its measure stops short of it
+export const REMAIN_W = 48;
 
 // The idle pill's geometry, which the open panel borrows to park the
 // waveform where it already is: it doesn't travel, it folds flat in place.

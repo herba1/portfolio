@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
-import { BODY, COL, COL_W, FADE, PANEL, ROW, flat, isFade, layout } from "./states";
+import { BODY, COL, COL_W, FADE, PANEL, REMAIN_W, ROW, flat, isFade, layout } from "./states";
 import { squircle } from "./squircle";
 
 import "./morph.css";
@@ -689,8 +689,9 @@ export default function Piece() {
             <span className="mp-btn-face">{Icon.next}</span>
           </button>
 
-          {/* expanded only: the rule on the figures' baseline, the time left at
-              its far end, and the title and artist under it */}
+          {/* expanded only: the rule on the figures' baseline, the title and
+              artist under it, and the time left under the rule's far end, on
+              the title's baseline */}
           <div
             ref={ruleRef}
             data-at={at("expanded", COL, ROW.rule - 8)}
@@ -708,16 +709,18 @@ export default function Piece() {
             </div>
           </div>
 
+          <div data-at={at("expanded", COL, ROW.title)} className="mp-layer mp-meta" style={{ width: COL_W }}>
+            <div className="mp-title" style={{ width: COL_W - REMAIN_W }}>
+              {track?.title}
+            </div>
+            <div className="mp-artist">{track?.artist}</div>
+          </div>
+
           <div data-at={at("expanded", COL, ROW.remain)} className="mp-layer mp-time mp-remain" style={{ width: COL_W }}>
             <span aria-label={`${fmt(dur - sec)} remaining`}>
               {MINUS}
               {fmt(dur - sec)}
             </span>
-          </div>
-
-          <div data-at={at("expanded", COL, ROW.title)} className="mp-layer mp-meta" style={{ width: COL_W }}>
-            <div className="mp-title">{track?.title}</div>
-            <div className="mp-artist">{track?.artist}</div>
           </div>
 
           {/* toast only */}
