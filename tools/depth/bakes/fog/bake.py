@@ -134,6 +134,26 @@ cloud = Yc[..., None] * tint
 behind = gap + (s2l('#6a9fb4') - gap) * smooth(0.05, 0.7, alpha)[..., None]
 skyg = behind * (1 - alpha[..., None]) + cloud * alpha[..., None]
 
+# Retouch: one dark grey speck inside the right-hand cumulus (a bird or a mark
+# in the docklands capture, ~15 px at 3840; the clarity above sharpens it into
+# a hole). Only the dot itself, found as what is much darker than its own
+# closing, is filled from the cloud around it; the fold leading to it stays.
+SPECKS = [(2493, 1007)]  # at the 3840 plate
+for sx, sy in SPECKS:
+    cx, cy, R = int(sx * W / 3840), int(sy * H / 2560), int(16 * W / 3840)
+    x0, y0, x1, y1 = cx - 4 * R, cy - 4 * R, cx + 4 * R, cy + 4 * R
+    win = skyg[y0:y1, x0:x1]
+    Yw = win @ LUMA
+    k = int(2 * R) | 1
+    closed = cv2.morphologyEx(Yw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+    yy, xx = np.mgrid[y0:y1, x0:x1]
+    hole = ((closed - Yw) / (closed + 1e-5) > 0.2) & ((xx - cx) ** 2 + (yy - cy) ** 2 < R * R)
+    hole = cv2.dilate(hole.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))).astype(np.float32)
+    fill = nblur(win, 1 - hole, 0.8 * R)
+    f = np.minimum(cv2.GaussianBlur(hole, (0, 0), 3.0) * 1.6, 1)[..., None]
+    skyg[y0:y1, x0:x1] = win * (1 - f) + fill * f
+    print('retouch', (sx, sy), int(hole.sum()), 'px')
+
 # ---------------------------------------------------------------- the towers
 Yb = city @ LUMA
 expo = 0.2 / np.median(Yb[matte < 0.1])
