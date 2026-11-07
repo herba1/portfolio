@@ -29,14 +29,15 @@ import { readWebm } from "./webm";
 // The decoder D receives exactly what E sent: the I-frames, the vectors,
 // the intra blocks and the quantised residuals, and rebuilds the picture
 // from its own last frame. While nothing goes wrong D is E, bit for bit.
-// A decoder that is not being fed honestly (joining, or held) gets no intra
-// blocks either: each one is turned into an inter block along the median of
-// its neighbours' vectors, the way a datamosher strips them (ffglitch's
-// mb_type rewrite, Murata's I-frame and intra removal), so the error stays
-// one continuous smear instead of squares of the true picture. A held
-// decoder also reads its own picture in whole pels, nearest, with no
-// half-pel filter (see mcPel), so the smear stays hard-edged however long
-// the hold runs.
+// It is starved one macroblock at a time, under the hand. A starved block
+// gets no I-frame, no residual and no intra blocks: each intra block is
+// turned into an inter block along the median of its neighbours' vectors,
+// the way a datamosher strips them (ffglitch's mb_type rewrite, Murata's
+// I-frame and intra removal), so the error stays one continuous smear
+// instead of squares of the true picture, and it reads its own picture in
+// whole pels, nearest, with no half-pel filter (see mcPel), so the smear
+// stays hard-edged however long the hold runs. Every other block is fed
+// and decodes the true frame, so the mosh is a tear in an intact picture.
 //
 // It tunes in the way a set joins a broadcast: between I-frames, with no
 // picture. Until the first I-frame arrives (three seconds) it builds what it
@@ -44,28 +45,31 @@ import { readWebm } from "./webm";
 // moves or changes appears: the tree line, the edges of the
 // drifting cloud, a pole, set into the paper.
 //
-// Press and hold and the I-frames stop reaching the decoder, and within a
-// fifth of a second the residuals stop too. Only the vectors are left. In
-// the first shot they shove a picture that is no longer the one they were
-// measured on: the tree line drags into the sky, the fence combs out. The
-// real event is the cut. Its I-frame (and the loop seam's, the cut back) is
-// the one that matters to drop: the winter shot's vectors then arrive with
-// nothing of their own to move, and push the summer picture instead. The
-// sky blooms out of the vanishing point over the whole frame, cloud pours
-// down the sides in radial strips on the macroblock grid, and the rails are
-// drawn in moving sky and tree. Over the seam it runs the other way: the
-// lateral pan drags the winter picture sideways. Drag while holding and the
-// clip is fed faster than real time, so it reaches the cut sooner and its
-// motion pushes harder. Let go and a column of intra blocks sweeps the
-// macroblock columns, as a periodic intra refresh does, and the picture is
-// clean again behind it.
+// Press and drag and the hand paints a mask of starved macroblocks, a soft
+// brush a few blocks across dragged along its path, each block tearing at
+// its own level so the edge breaks raggedly on the grid. Under it the
+// I-frames stop, and within a fifth of a second the residuals too. Only the
+// vectors are left. In the first shot they still fit the picture they move,
+// so the tear barely shows. The real event is the cut. Its I-frame (and the
+// loop seam's, the cut back) is the one that matters to drop: the winter
+// shot arrives everywhere else, while inside the stroke its vectors find
+// nothing of their own to move and push the summer picture instead, sky and
+// tree line streaming out of the vanishing point in stepped strips on the
+// macroblock grid, cut into a winter frame that stays whole around it. Over
+// the seam it runs the other way. Drag while holding and the clip is fed
+// faster than real time, so it reaches the cut sooner. Let go and the mask
+// fades from its edges in; a block fed again carries its mosh along the
+// true vectors (an honest decode of a damaged reference) until a column of
+// intra blocks sweeps the macroblock columns, as a periodic intra refresh
+// does, and it is clean behind it.
 //
 // Query (stills): ?t=seconds stops the stream at that clip time (decoded
 // frame by frame from the start, as fast as it can); ?hold=seconds holds it
 // for that long before t; ?release=seconds lets go that long before t (the
 // refresh mid-sweep); ?join=1 shows the opening (?join=0 skips it live);
-// ?qp= sets the encoder's quantiser. ?t=8&hold=4 holds over the cut (6 s):
-// the hero still.
+// ?qp= sets the encoder's quantiser. A still's hold paints a fixed stroke
+// (STROKE) through the centre left. ?t=8&hold=4 holds it over the cut
+// (6 s): the hero still; ?t=6.3&hold=0.6 is the cut a moment after.
 
 const ASSET = "/lab/datamosh/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -73,6 +77,21 @@ const GOP = 90; // frames between I-frames (the cut, frame 180, is one too)
 const QP0 = 30; // encoder quantiser (H.264 scale)
 const LET_GO = 0.2; // s over which a hold lets the residual go
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
+const BRUSH = 6; // brush radius, macroblocks (about five torn across)
+const FADE = 1.6; // s: time constant of the starved mask once the hand lifts
+// The hero stroke a still paints while its hold runs: through the centre
+// left, from the fence up across the tree line and the sky, through where
+// the winter shot's vanishing point will sit and a little past it, so the
+// bloom streams out of it both ways (frame fractions, top-left origin).
+const STROKE = [
+  [0.06, 0.97],
+  [0.16, 0.76],
+  [0.27, 0.57],
+  [0.38, 0.4],
+  [0.47, 0.25],
+  [0.55, 0.12],
+];
+const STROKE_S = 0.3; // s the still's hand takes to draw it
 
 const QUAD_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -131,9 +150,19 @@ vec3 mc(sampler2D ref, vec2 p, vec4 m) {
 // moves in hard stepped strips that tear on the macroblock grid. An odd
 // (half-pel) vector rounds down on even frames and up on odd ones, so a
 // half-pixel drift still moves a whole pixel every other frame.
+// A vector that reaches past the frame edge is read mirrored back into the
+// picture, not edge-extended: an edge-extended copy repeats the last row or
+// column, and a held block re-reading it every frame combs out into
+// one-pixel streaks along the edge.
+ivec2 mirror(ivec2 q, ivec2 n) {
+  q = ivec2(q.x < 0 ? -q.x - 1 : q.x, q.y < 0 ? -q.y - 1 : q.y);   // -1 -> 0, -2 -> 1
+  q = ivec2(q.x >= n.x ? 2 * n.x - 1 - q.x : q.x, q.y >= n.y ? 2 * n.y - 1 - q.y : q.y);
+  return clamp(q, ivec2(0), n - 1);
+}
 vec3 mcPel(sampler2D ref, vec2 p, vec4 m, int phase) {
   ivec2 v = ivec2(m.yz);
-  return px(ref, ivec2(floor(p)) + ((v + phase) >> 1));
+  ivec2 q = ivec2(floor(p)) + ((v + phase) >> 1);
+  return texelFetch(ref, mirror(q, textureSize(ref, 0)), 0).rgb;
 }
 `;
 
@@ -186,16 +215,24 @@ void main() {
 }`;
 
 // the step: encoder and decoder reconstructions, side by side (MRT)
+//
+// The decoder is starved one macroblock at a time. uState holds, per
+// macroblock, what reaches it this frame: 0 fed (it decodes the true
+// frame, the encoder's reconstruction), 1 fed again after being starved
+// (it decodes honestly from its own picture, so the damage drifts along the
+// true vectors until an intra block, an I-frame or the refresh column
+// reaches it), 2 starved (no I-frame, no intra, the residual gone within
+// LET_GO: stripped intra, whole-pel copies), with .y the residual a
+// starved block still gets.
 const STEP_FS = `${COMMON}${MC}
 uniform sampler2D uSrc;
 uniform sampler2D uE;
 uniform sampler2D uD;
 uniform sampler2D uRes;     // dequantised residual
+uniform sampler2D uState;   // MW x MH: x 0 fed, 1 drifting, 2 starved; y gain
 uniform int uIframe;        // this frame is an I-frame
-uniform int uHeld;          // the decoder is not getting I-frames
-uniform int uPel;           // held: whole-pel copies (see mcPel)
+uniform int uJoin;          // the decoder has not had an I-frame yet
 uniform int uPhase;         // frame parity, for rounding half-pel vectors
-uniform float uGain;        // how much residual the decoder still applies
 uniform float uRefresh;     // macroblock columns refreshed (intra), 0..80
 layout(location=0) out vec4 oE;
 layout(location=1) out vec4 oD;
@@ -207,22 +244,29 @@ void main() {
   bool intra = m.x > 1.5;
   vec3 e = (uIframe == 1 || intra) ? s : mc(uE, p, m) + r;
   e = clamp(e, vec3(0.0, -0.5, -0.5), vec3(1.0, 0.5, 0.5));
-  vec3 d;
-  vec3 dm = uPel == 1 ? mcPel(uD, p, m, uPhase) : mc(uD, p, m);
+  vec4 st = texelFetch(uState, ivec2(floor(p / 16.0)), 0);
+  int state = int(st.x + 0.5);
   bool fresh = floor(p.x / 16.0) < uRefresh;
-  if (uIframe == 1) {
-    // an I-frame: only a decoder that receives it starts again
-    d = uHeld == 1 ? texelFetch(uD, ivec2(p), 0).rgb : e;
-  } else if (fresh || (intra && uHeld == 0)) {
-    // an intra block carries the true picture to a decoder that is fed
-    d = e;
-  } else if (intra) {
-    // a starved decoder gets no intra blocks either: each one is turned
-    // into an inter block along its neighbours' median vector, predicted
-    // from the moshed picture, with no residual (it never had an inter one)
-    d = dm;
+  vec3 d;
+  if (uJoin == 1) {
+    // tuning in: vectors and residuals onto paper, intra stripped, until the
+    // first I-frame arrives
+    d = uIframe == 1 ? texelFetch(uD, ivec2(p), 0).rgb : mc(uD, p, m) + (intra ? vec3(0.0) : r);
+  } else if (state == 2) {
+    // starved: the I-frame never arrives (the block keeps its old picture),
+    // an intra block is turned into an inter one along its neighbours'
+    // median vector with no residual, and everything else is a whole-pel
+    // copy of the moshed picture with the residual running out
+    vec3 dm = mcPel(uD, p, m, uPhase);
+    if (uIframe == 1) d = texelFetch(uD, ivec2(p), 0).rgb;
+    else if (intra) d = dm;
+    else d = dm + st.y * r;
+  } else if (state == 1) {
+    // fed again, still carrying the mosh: an honest decode drifts it along
+    // the true vectors until something intra lands on it
+    d = (uIframe == 1 || intra || fresh) ? e : mc(uD, p, m) + r;
   } else {
-    d = dm + uGain * r;
+    d = e;
   }
   d = clamp(d, vec3(0.0, -0.5, -0.5), vec3(1.0, 0.5, 0.5));
   oE = vec4(e, 1.0);
@@ -509,6 +553,10 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   const D = [tex(F16, W, H, gl.LINEAR), tex(F16, W, H, gl.LINEAR)];
   const R = [tex(F16, W, H, gl.NEAREST), tex(F16, W, H, gl.NEAREST)];
   const mvField = new Float32Array(mv.GW * mv.GH * 4);
+  const MW = mv.MW;
+  const MH = mv.MH;
+  const stateTex = tex(gl.RGBA32F, MW, MH, gl.NEAREST);
+  const stateField = new Float32Array(MW * MH * 4);
 
   const fbos = new Map();
   let texIds = 0;
@@ -557,10 +605,11 @@ export async function createDatamosh(host, { embedded = false } = {}) {
 
   // ---- one frame through the codec
   let cur = 0; // E[cur], D[cur] hold the last reconstruction
-  const codecStep = (idx, { iframe, held, pel, phase, gain, refresh }) => {
-    mv.unpack(idx, mvField);
+  const codecStep = (idx, { iframe, join, phase, refresh }) => {
     gl.bindTexture(gl.TEXTURE_2D, mvTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, mv.GW, mv.GH, gl.RGBA, gl.FLOAT, mvField);
+    gl.bindTexture(gl.TEXTURE_2D, stateTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MW, MH, gl.RGBA, gl.FLOAT, stateField);
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
     // residual against the encoder's prediction
@@ -591,11 +640,10 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     bindTex(step, 2, D[cur], "uD");
     bindTex(step, 3, R[0], "uRes");
     bindTex(step, 4, mvTex, "uMv");
+    bindTex(step, 5, stateTex, "uState");
     gl.uniform1i(step.u.uIframe, iframe ? 1 : 0);
-    gl.uniform1i(step.u.uHeld, held ? 1 : 0);
-    gl.uniform1i(step.u.uPel, pel ? 1 : 0);
+    gl.uniform1i(step.u.uJoin, join ? 1 : 0);
     gl.uniform1i(step.u.uPhase, phase);
-    gl.uniform1f(step.u.uGain, gain);
     gl.uniform1f(step.u.uRefresh, refresh);
     draw(target(E[nxt], D[nxt]), W, H);
     cur = nxt;
@@ -648,8 +696,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   let seq = 0; // frames through the codec
   let acc = 0;
   let press = false;
-  let heldFrames = 0; // frames since the hold began
-  let refreshAt = -1; // frame index of the release (refresh sweep), -1 none
+  let refreshAt = -1; // frame the running refresh sweep began, -1 none
   const still = stillT != null;
   const stopAt = still ? Math.max(1, Math.round(stillT * FPS)) : Infinity;
   const holdFrom = still && holdQ != null ? stopAt - Math.round(holdQ * FPS) : Infinity;
@@ -670,6 +717,58 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   }
 
+  // ---- the starved mask: one value per macroblock, painted by the hand while
+  // it is held (a soft brush dragged along its path), fading after it lifts
+  const mask = new Float32Array(MW * MH);
+  const age = new Uint16Array(MW * MH);
+  const dirty = new Uint8Array(MW * MH);
+  // each block starves at its own level, so the edge of a stroke tears
+  // raggedly along the macroblock grid instead of tracing a smooth outline
+  const thresh = new Float32Array(MW * MH);
+  for (let id = 0; id < MW * MH; id++) {
+    const h = Math.sin(id * 12.9898 + 78.233) * 43758.5453;
+    thresh[id] = 0.3 + 0.32 * (h - Math.floor(h));
+  }
+  const stamp = (cx, cy) => {
+    const r = BRUSH;
+    for (let j = Math.max(0, Math.floor(cy - r)); j < Math.min(MH, Math.ceil(cy + r)); j++) {
+      for (let i = Math.max(0, Math.floor(cx - r)); i < Math.min(MW, Math.ceil(cx + r)); i++) {
+        const d = Math.hypot(i + 0.5 - cx, j + 0.5 - cy) / r;
+        if (d >= 1) continue;
+        const v = 1 - d * d * (3 - 2 * d);
+        const id = j * MW + i;
+        if (v > mask[id]) mask[id] = v;
+      }
+    }
+  };
+  let brushLast = null;
+  const paintTo = (pt) => {
+    if (!pt) return;
+    const from = brushLast ?? pt;
+    const n = Math.max(1, Math.ceil(Math.hypot(pt[0] - from[0], pt[1] - from[1]) / 0.5));
+    for (let k = 1; k <= n; k++) stamp(from[0] + ((pt[0] - from[0]) * k) / n, from[1] + ((pt[1] - from[1]) * k) / n);
+    brushLast = pt;
+  };
+  // the pointer, in macroblocks
+  const brushAt = () => {
+    if (!L) return null;
+    const p = stage.pointer;
+    return [((p.x * stage.dpr - L.px) / L.pw) * MW, ((p.y * stage.dpr - L.py) / L.ph) * MH];
+  };
+  // the still's stroke, drawn as far as k (0..1) along its length
+  const paintPath = (path, k) => {
+    const pts = path.map(([x, y]) => [x * MW, y * MH]);
+    const lens = pts.slice(1).map((p, i) => Math.hypot(p[0] - pts[i][0], p[1] - pts[i][1]));
+    let left = k * lens.reduce((a, b) => a + b, 0);
+    brushLast = null;
+    paintTo(pts[0]);
+    for (let i = 0; i < lens.length && left > 0; i++) {
+      const f = Math.min(1, left / lens[i]);
+      paintTo([pts[i][0] + (pts[i + 1][0] - pts[i][0]) * f, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * f]);
+      left -= lens[i];
+    }
+  };
+
   const tick = () => {
     const frame = stream.queue.shift();
     if (!frame) return false;
@@ -686,26 +785,53 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     const idx = seq % N;
     let held = press;
     if (still) held = seq >= holdFrom && seq < releaseFrom;
-    if (held) heldFrames++;
-    else if (heldFrames > 0) {
-      heldFrames = 0;
-      refreshAt = seq;
+    if (held && still) {
+      // the still's hand draws the hero stroke over its first STROKE_S
+      const k = clamp((seq - holdFrom + 1) / Math.max(1, Math.round(STROKE_S * FPS)), 0, 1);
+      paintPath(STROKE, k);
+    } else if (held) paintTo(brushAt());
+    else {
+      brushLast = null;
+      const f = Math.exp(-1 / FPS / FADE);
+      for (let id = 0; id < MW * MH; id++) mask[id] *= f;
     }
-    // the refresh sweeps the macroblock columns, quick then settling
+    const iframe = idx % GOP === 0 || webm.frames[idx].key || seq === 0 || (still && seq === warmFrom);
+    if (joining && iframe && seq > 0) joining = false;
+    mv.unpack(idx, mvField);
+    // per macroblock: starved where the mask is over its (ragged) threshold,
+    // drifting where it was starved and nothing intra has reached it since
+    let dirtyN = 0;
+    for (let id = 0; id < MW * MH; id++) {
+      const on = mask[id] > thresh[id];
+      age[id] = on ? age[id] + 1 : 0;
+      if (on) {
+        dirty[id] = 1;
+      } else if (dirty[id]) dirtyN++;
+      stateField[id * 4] = on ? 2 : dirty[id] ? 1 : 0;
+      stateField[id * 4 + 1] = 1 - clamp(age[id] / FPS / LET_GO, 0, 1);
+    }
+    // Once the hand lifts, an intra refresh column sweeps the macroblock
+    // columns, quick then settling, and goes round again while anything fed
+    // is still carrying the mosh.
+    if (refreshAt < 0 && dirtyN > 0 && !held) refreshAt = seq;
     let refresh = 0;
     if (refreshAt >= 0) {
       const k = (seq - refreshAt + 1) / REFRESH;
-      refresh = k >= 1 ? 0 : Math.ceil((1 - (1 - k) ** 2) * mv.MW);
+      refresh = Math.ceil((1 - (1 - Math.min(k, 1)) ** 2) * MW);
       if (k >= 1) refreshAt = -1;
     }
-    if (held) refresh = 0;
-    const heldS = heldFrames / FPS;
-    const gain = held ? 1 - clamp(heldS / LET_GO, 0, 1) : 1;
-    // I-frames on the GOP and wherever the stream itself has a keyframe
-    // (the scene cut): a held decoder drops them all
-    const iframe = idx % GOP === 0 || webm.frames[idx].key || seq === 0 || (still && seq === warmFrom);
-    if (joining && iframe && seq > 0) joining = false;
-    codecStep(idx, { iframe, held: held || joining, pel: held, phase: seq & 1, gain, refresh });
+    codecStep(idx, { iframe, join: joining, phase: seq & 1, refresh });
+    // what landed: an I-frame, an intra block or the refresh column cleans a
+    // fed block
+    if (dirtyN > 0) {
+      for (let j = 0; j < MH; j++) {
+        for (let i = 0; i < MW; i++) {
+          const id = j * MW + i;
+          if (stateField[id * 4] !== 1) continue;
+          if (iframe || i < refresh || mvField[(j * 2 * mv.GW + i * 2) * 4] === 2) dirty[id] = 0;
+        }
+      }
+    }
     seq++;
     return true;
   };
@@ -785,7 +911,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     destroy() {
       destroyed = true;
       stream.close();
-      for (const t of [srcTex, mvTex, ...E, ...D, ...R]) gl.deleteTexture(t);
+      for (const t of [srcTex, mvTex, stateTex, ...E, ...D, ...R]) gl.deleteTexture(t);
       for (const f of fbos.values()) gl.deleteFramebuffer(f);
       if (fence) gl.deleteSync(fence);
       gl.deleteBuffer(quad);
