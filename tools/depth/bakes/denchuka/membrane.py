@@ -1,4 +1,4 @@
-# Denchuka: the membrane (push-pull) fill shared by resid.py and plates.py.
+# Denchuka: the membrane (push-pull) fill shared by plates.py.
 import numpy as np, cv2
 import fill  # tools/depth/fill.py (the caller puts tools/depth on the path)
 
@@ -18,18 +18,12 @@ def push_pull(img, w):
     return C
 
 
-def sky_fill(img, hole, M):
-    """The part of the hole inside the sky envelope, filled with a membrane of the
-    clear sky round it, and the photo's grain. Against the sky this beats LaMa:
-    given the tangle at a pole head LaMa draws dark junk shaped like crossarms."""
-    known = M["env"] & (M["o"] < 0.04) & ~hole
-    in_sky = hole & M["env"]
+def sky_fill(img, hole, sky, seed=0):
+    """The hole filled with a membrane of the clear sky round it (sky: the pixels that
+    are clear sky, nothing in front of them), and the photo's grain. Against an open
+    sky this beats LaMa, which, given the tangle at a pole head, draws dark junk
+    shaped like crossarms back into the hole."""
+    known = sky & ~hole
     mem = push_pull(img, known.astype(np.float32))
-    a = cv2.GaussianBlur(in_sky.astype(np.float32), (0, 0), 1.0)
-    a = np.where(in_sky, 1.0, np.where(hole, 0, a))[..., None]
-    return fill.match_grain(img * (1 - a) + mem * a, img, in_sky)
-
-
-def keep_closed(keep):
-    """The keep mask closed along upright posts (41 px), over the gaps a cable band cut."""
-    return cv2.morphologyEx(keep.astype(np.uint8), cv2.MORPH_CLOSE, np.ones((41, 1), np.uint8)) > 0
+    a = hole.astype(np.float32)[..., None]
+    return fill.match_grain(img * (1 - a) + mem * a, img, hole, seed=seed)

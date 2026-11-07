@@ -2,35 +2,39 @@ import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Denchuka (無電柱化): Japan's slow programme of putting the overhead lines
-// underground, run forward through one Kyoto street.
+// underground, run forward under one concrete pole.
 //
-// The bake (tools/depth/bakes/denchuka) takes Richard Tao's photograph apart
-// element by element: 41 wires (the sky matte's sub-pixel alpha, carried on
-// below the skyline by ridge tracking, and a second pass for the faint far
-// ones), the crossarms, transformers and insulators of eight poles, and the
-// poles themselves (SAM 2.1 plus a fitted cylinder). The clean plates: no
-// wires; no wires or hardware; nothing overhead at all. Against the sky they
-// are a membrane of the sky round each hole; below it, LaMa; the bare shafts
-// are the poles straightened and interpolated along their own length. So every
-// in-between state is two neighbouring clean plates that agree everywhere but
-// under the element. The pole that carries the left signal keeps standing for
-// it, stripped, as an undergrounded street's signal poles do.
+// The bake (tools/depth/bakes/denchuka) takes ky kim's worm's-eye photograph
+// of a pole head apart element by element: fourteen wires (the sky matte's
+// sub-pixel alpha; Hough segments grown into whole spans, and the bundle that
+// runs up out of the top of the frame), the hardware in three pieces (the two
+// lower transformers with their clamps and jumper loops, the upper transformer,
+// the crossarms with their cutouts; SAM 2.1 for the transformers), and the
+// shaft (a cone fitted to SAM's mask). The clean plates: no wires; no wires or
+// hardware, the bare shaft standing; nothing overhead at all. Against the sky
+// every hole is a membrane of the sky round it; the bare shaft is rebuilt from
+// its own clean run below the hardware (shading across it, brightness along it,
+// its concrete mirrored up), with a rounded end. So every in-between state is
+// two neighbouring clean plates that agree everywhere but under the element.
 //
 // Live: drag sideways through the years. Each element has its year. A wire
 // loses its tension and sags, then falls out of the frame under gravity
-// (motion-blurred over the frame interval); the hardware is lowered down its
-// pole and into the ground; then the poles themselves go down along their own
-// axes, far ones first, the big wooden one on the corner last. Pulled back,
-// everything returns the way it went. A moving piece is drawn from its own
-// plate, unmixed against the plate behind it (photo = a x object + (1 - a) x
-// plate), so it carries none of the street with it, and it passes behind the
-// signals and road signs that stand in front of it.
+// (motion-blurred over the frame interval); then the hardware is lowered down
+// the pole, bottom piece first; then the pole itself goes down its own axis
+// into the ground below the frame. Gravity is the camera's: the frame looks
+// ~55 degrees up, so "down" is away from the zenith's vanishing point above the
+// frame, where the pole's axis meets it (MoGe-2's gravity from the pole's own
+// normals, snapped onto that axis), and each wire falls along the converging
+// verticals where it hangs. Pulled back, everything returns the way it went. A
+// moving piece is drawn from its own plate, unmixed against the plate behind
+// it (photo = a x object + (1 - a) x plate), so it carries no sky with it.
 //
-// The scan came with a teal film-preset sky. It is regraded live, through the
-// sky matte (sky.png: the photo's matte plus every hole the plates fill with
-// sky, times whatever still stands in front), to a summer cobalt that deepens
-// toward the top edge, with skylight-blue shade and warm sunlit tops on the
-// cloud; the film then adds only its optics.
+// The scan's sky is a pale cyan-azure, the same from the bottom of the frame to
+// the top. It is regraded live, through the sky matte (sky.png R: the photo's
+// matte plus every hole the plates fill with sky, times whatever still stands
+// in front), to a summer cobalt that deepens with elevation (sky.png G: how far
+// up the sky each pixel looks, from the camera), with skylight-blue shade and
+// warm sunlit tops on the cloud; the film then adds only its optics.
 //
 // Query: ?year=0..1 holds the years (elements caught mid-motion, as a still);
 // ?film=0 shows the plates before the film.
@@ -40,8 +44,6 @@ const PW = 2400;
 const PH = 1600;
 const MAX_W = 24;
 const MAX_P = 8;
-// plate row of the hills: the sky grade is palest here and deepest at the top edge
-const SKYLINE = 1060;
 
 // seconds each kind of element takes to go
 const DUR = { wire: 0.95, hw: 1.25, pole: 1.9 };
@@ -75,19 +77,19 @@ uniform sampler2D uP2;
 uniform sampler2D uP3;
 uniform highp sampler2D uIds;
 uniform sampler2D uAlpha;
-uniform sampler2D uSky;           // the sky with everything overhead gone (1 = sky)
-uniform highp sampler2D uState;   // x: wire id, row 0 wires / 1 hardware / 2 poles: 1 = in place
+uniform sampler2D uSky;           // r: the sky with everything overhead gone (1 = sky); g: elevation
+uniform highp sampler2D uState;   // x: id, row 0 wires / 1 hardware / 2 poles: 1 = in place
 uniform vec2 uPlate;
 uniform int uNW;
-uniform vec4 uW[${MAX_W}];        // xa, xb, sag, fall
+uniform vec4 uW[${MAX_W}];        // span start, end (x, or y for a steep wire), sag, fall
 uniform vec4 uW2[${MAX_W}];       // id, y0, y1, lead
-uniform vec4 uW3[${MAX_W}];       // sag, fall at the previous frame (motion blur)
+uniform vec4 uW3[${MAX_W}];       // sag, fall at the previous frame (motion blur); fall slant dx/dy; steep
 uniform int uNP;
 uniform vec4 uPo[${MAX_P}];       // id, k, c, offset
-uniform vec4 uPo2[${MAX_P}];      // top, base, previous offset, 0
+uniform vec4 uPo2[${MAX_P}];      // top, base, reach from the axis, 0
 uniform int uNH;
 uniform vec4 uHw[${MAX_P}];       // id, k, c, offset
-uniform vec4 uHw2[${MAX_P}];      // hwTop, base, previous offset, hwBottom
+uniform vec4 uHw2[${MAX_P}];      // top, base, reach from the axis, bottom
 
 ivec4 ids(ivec2 p) {
   vec3 v = texelFetch(uIds, clamp(p, ivec2(0), ivec2(uPlate) - 1), 0).rgb * 255.0 + 0.5;
@@ -117,30 +119,28 @@ vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
-// The scan's sky is a teal film preset (hue ~189, the same pale value from the
-// hills to the top edge). A summer sky is cobalt and deepens toward the
-// zenith: the clear blue is turned to ~207 and, going up the frame, gains
-// saturation and loses value, left pale over the hills. The cloud is lit from
-// high right: its shadow sides take the blue of the sky that lights them, its
-// sunlit tops go warm-neutral.
-vec3 skyGrade(vec3 c, float y) {
+// The scan's sky is a pale cyan-azure (hue ~206, value ~0.8) and flat from the
+// bottom of the frame to the top. A summer sky is cobalt and deepens toward the
+// zenith: the clear blue is turned to ~210 and, going up the sky (zen: 0 at 30
+// degrees elevation, 1 at 85), toward ~216 and gains saturation and loses
+// value. The cloud is lit from high right: its shadow sides take the blue of
+// the sky that lights them, its sunlit tops go warm-neutral.
+vec3 skyGrade(vec3 c, float zen) {
   vec3 h = rgb2hsv(c);
   float deg = h.x * 360.0;
-  float zen = smoothstep(0.0, 1.0, clamp(1.0 - y / ${SKYLINE}.0, 0.0, 1.0));
-  // clear sky: the teal band, turned
-  float band = smoothstep(150.0, 168.0, deg) * (1.0 - smoothstep(232.0, 248.0, deg));
-  float blue = smoothstep(0.1, 0.3, h.y) * band;
-  float hue = mix(deg, 211.0 + (deg - 189.0) * 0.4, band);
-  float sat = clamp(h.y * mix(1.0, 1.1, zen) + 0.03 * zen, 0.0, 1.0);
-  float val = h.z * mix(1.0, 0.84, zen * zen);
+  // clear sky: the azure band, turned
+  float band = smoothstep(168.0, 184.0, deg) * (1.0 - smoothstep(236.0, 250.0, deg));
+  float blue = smoothstep(0.12, 0.34, h.y) * band;
+  float hue = mix(deg, 209.0 + (deg - 206.0) * 0.5 + 5.0 * zen, band);
+  float sat = clamp(h.y * mix(0.96, 1.08, zen), 0.0, 0.9);
+  float val = h.z * mix(1.0, 0.86, zen);
   vec3 sky = hsv2rgb(vec3(hue / 360.0, sat, val));
-  // cloud: shade sides to skylight blue, sunlit tops to warm white
-  // more range, and the low cloud lit by the haze round it
-  float v = clamp(0.84 + (h.z - 0.84) * 1.6 + 0.03 * (1.0 - zen), 0.0, 1.0);
-  float shade = smoothstep(0.93, 0.74, h.z);
-  float top = smoothstep(0.87, 0.96, h.z);
-  vec3 shadeC = hsv2rgb(vec3(212.0 / 360.0, 0.07 + 0.1 * shade, v));
-  vec3 sunC = hsv2rgb(vec3(38.0 / 360.0, 0.075, v));
+  // cloud: more range; shade sides to skylight blue, sunlit tops to warm white
+  float v = clamp(0.86 + (h.z - 0.86) * 1.5, 0.0, 1.0);
+  float shade = smoothstep(0.94, 0.76, h.z);
+  float top = smoothstep(0.88, 0.97, h.z);
+  vec3 shadeC = hsv2rgb(vec3(213.0 / 360.0, 0.1 + 0.14 * shade, v * mix(1.0, 0.94, shade)));
+  vec3 sunC = hsv2rgb(vec3(36.0 / 360.0, 0.08, v));
   vec3 cloud = mix(shadeC, sunC, top);
   return mix(cloud, sky, blue);
 }
@@ -159,7 +159,6 @@ void main() {
   ivec2 ip = ivec2(floor(pp));
   ivec4 e = ids(ip);
   int rk = e.w / 64;
-  bool front = (e.w / 32) % 2 == 1;
 
   int s = 3;
   if (e.z > 0 && rest(2, e.z)) s = 2;
@@ -177,10 +176,11 @@ void main() {
   // (photo = a x object + (1 - a) x sky), so only the sky's share is moved,
   // by the grade of the sky behind everything (p3). Grading the mixed rim
   // pixel itself leaves the teal in it: a green outline round every shaft.
-  float skyA = texture(uSky, pp / uPlate).r * (1.0 - cov);
+  vec2 sk = texture(uSky, pp / uPlate).rg;
+  float skyA = sk.r * (1.0 - cov);
   if (skyA > 0.002) {
     vec3 behind = plate(3, pp, rk);
-    col = clamp(col + skyA * (skyGrade(behind, pp.y) - behind), 0.0, 1.0);
+    col = clamp(col + skyA * (skyGrade(behind, sk.g) - behind), 0.0, 1.0);
   }
 
   // poles going down their own axes, into the ground
@@ -189,7 +189,7 @@ void main() {
     vec4 a = uPo[j];
     vec4 b = uPo2[j];
     float ax = a.y * pp.y + a.z;
-    if (abs(pp.x - ax) > 24.0 || pp.y > b.y || front) continue;
+    if (abs(pp.x - ax) > b.z || pp.y > b.y) continue;
     vec2 dir = normalize(vec2(a.y, 1.0));
     vec2 src = pp - dir * a.w;
     if (src.y < b.x - 2.0) continue;
@@ -201,13 +201,13 @@ void main() {
     col = mix(col, obj, al);
   }
 
-  // crossarms, transformers and insulators lowered down the pole
+  // transformers, crossarms and cutouts lowered down the pole
   for (int j = 0; j < ${MAX_P}; j++) {
     if (j >= uNH) break;
     vec4 a = uHw[j];
     vec4 b = uHw2[j];
     float ax = a.y * pp.y + a.z;
-    if (abs(pp.x - ax) > 170.0 || pp.y > b.y || front) continue;
+    if (abs(pp.x - ax) > b.z || pp.y > b.y) continue;
     // locked to the axis: the piece keeps its offset from the shaft at every
     // row it passes, so it slides down the pole and never off it
     float dy = a.w / sqrt(1.0 + a.y * a.y);
@@ -222,27 +222,33 @@ void main() {
     col = mix(col, obj, al);
   }
 
-  // wires: slack, then the fall, blurred over the frame interval. The sweep
-  // is sampled at most 1 px apart (3 px at the longest), each pixel's samples
-  // shifted by its own noise, so what steps are left dither into grain, not
-  // copies. Falling, a pixel takes how much wire crossed it over the frame
-  // (the coverage summed along the travel, in px of wire), weighted toward
-  // the end of the frame: the wire where it is now, with a tail up the way
-  // it came that thins out (a smear, not a stack of see-through wires), the
-  // whole of it fainter the faster it goes.
+  // wires: slack, then the fall, blurred over the frame interval. Both go
+  // along gravity where the wire hangs (dx/dy = slant: away from the zenith's
+  // vanishing point). The sweep is sampled at most 1 px apart (3 px at the
+  // longest), each pixel's samples shifted by its own noise, so what steps are
+  // left dither into grain, not copies. Falling, a pixel takes how much wire
+  // crossed it over the frame (the coverage summed along the travel, in px of
+  // wire), weighted toward the end of the frame: the wire where it is now, with
+  // a tail up the way it came that thins out (a smear, not a stack of
+  // see-through wires), the whole of it fainter the faster it goes.
   for (int j = 0; j < ${MAX_W}; j++) {
     if (j >= uNW) break;
     vec4 a = uW[j];
     vec4 b = uW2[j];
     vec4 c = uW3[j];
-    float u = clamp((pp.x - a.x) / (a.y - a.x), 0.0, 1.0);
+    float g = c.z;
+    // where along its span this pixel's wire came from (the bow is small
+    // against the drop, so the drop alone places it)
+    float drop = a.w * 0.86;
+    float along = c.w > 0.5 ? pp.y - drop : pp.x - g * drop;
+    float u = clamp((along - a.x) / (a.y - a.x), 0.0, 1.0);
     float bow = 4.0 * u * (1.0 - u);
     float lead = b.w > 0.5 ? mix(1.0, 0.72, u) : mix(0.72, 1.0, u);
     float dy1 = a.z * bow + a.w * lead;
     float dy0 = c.x * bow + c.y * lead;
     if (pp.y - min(dy0, dy1) < b.y - 2.0 || pp.y - max(dy0, dy1) > b.z + 2.0) continue;
     int id = int(b.x + 0.5);
-    float travel = abs(dy1 - dy0);
+    float travel = abs(dy1 - dy0) * sqrt(1.0 + g * g);
     float n = clamp(ceil(travel), 1.0, ${WIRE_SAMPLES}.0);
     float jit = ign(vec2(ip) + vec2(float(id) * 5.588, float(id) * 3.137));
     // at a crawl (the slack) every instant counts the same; falling, the tail
@@ -254,7 +260,9 @@ void main() {
     for (int t = 0; t < ${WIRE_SAMPLES}; t++) {
       if (float(t) >= n) break;
       float f = (float(t) + jit) / n;
-      vec2 src = vec2(pp.x, pp.y - mix(dy0, dy1, f));
+      float d = mix(dy0, dy1, f);
+      vec2 src = vec2(pp.x - g * d, pp.y - d);
+      if (src.x < 0.0 || src.y < 0.0 || src.x >= uPlate.x || src.y >= uPlate.y) continue;
       ivec2 si = ivec2(floor(src));
       ivec4 se = ids(si);
       if (se.x != id) continue;
@@ -371,7 +379,7 @@ const num = (q, k) => {
 // A wire's state at progress a (0 in place, 1 gone): first the tension goes
 // and it bows, then it drops under gravity, one end a little ahead.
 function wireShape(w, a) {
-  const span = w.xb - w.xa;
+  const span = w.b - w.a;
   const slackMax = clamp(0.028 * span, 8, 64);
   const S0 = 0.32;
   if (a <= S0) {
@@ -405,8 +413,8 @@ export async function createDenchuka(host, { embedded = false } = {}) {
 
   // Element table.
   const wires = els.wires.map((w) => ({ ...w, a: 0, prev: 0, kind: "wire" }));
-  const poles = els.poles.map((p) => ({ ...p, a: 0, prev: 0, ha: 0, hprev: 0 }));
-  const maxWire = wires.reduce((m, w) => Math.max(m, w.id), 0);
+  const hardware = els.hardware.map((h) => ({ ...h, a: 0, prev: 0 }));
+  const poles = els.poles.map((p) => ({ ...p, a: 0, prev: 0 }));
 
   // State texture: rows wires / hardware / poles, 1 = in place.
   const SW = 256;
@@ -522,14 +530,17 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       w.a = adv(w.a, target, DUR.wire);
       if (w.a !== w.prev) moving = true;
     }
+    for (const h of hardware) {
+      h.prev = h.a;
+      const target = still ? span(h.year, STILL_SPAN.hw) : year >= h.year ? 1 : 0;
+      h.a = adv(h.a, target, DUR.hw);
+      if (h.a !== h.prev) moving = true;
+    }
     for (const p of poles) {
-      p.hprev = p.ha;
       p.prev = p.a;
-      const th = still ? span(p.hwYear, STILL_SPAN.hw) : year >= p.hwYear ? 1 : 0;
-      const tp = still ? span(p.year, STILL_SPAN.pole) : year >= p.year ? 1 : 0;
-      p.ha = adv(p.ha, th, DUR.hw);
-      p.a = adv(p.a, tp, DUR.pole);
-      if (p.ha !== p.hprev || p.a !== p.prev) moving = true;
+      const target = still ? span(p.year, STILL_SPAN.pole) : year >= p.year ? 1 : 0;
+      p.a = adv(p.a, target, DUR.pole);
+      if (p.a !== p.prev) moving = true;
     }
     return moving;
   };
@@ -546,10 +557,8 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     // state rows
     stateData.fill(0);
     for (const w of wires) if (w.a <= 0) stateData[w.id * 4] = 255;
-    for (const p of poles) {
-      if (p.ha <= 0) stateData[(SW + p.id) * 4] = 255;
-      if (p.a <= 0) stateData[(2 * SW + p.id) * 4] = 255;
-    }
+    for (const h of hardware) if (h.a <= 0) stateData[(SW + h.id) * 4] = 255;
+    for (const p of poles) if (p.a <= 0) stateData[(2 * SW + p.id) * 4] = 255;
     gl.bindTexture(gl.TEXTURE_2D, stateTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, SW, 3, gl.RGBA, gl.UNSIGNED_BYTE, stateData);
 
@@ -563,26 +572,27 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       const da = FRAME / DUR.wire;
       const back = still ? Math.max(0, w.a - da) : clamp(w.prev, w.a - da, w.a + da);
       const [s0, f0] = wireShape(w, back);
-      uW.set([w.xa, w.xb, s1, f1], nw * 4);
+      uW.set([w.a, w.b, s1, f1], nw * 4);
       uW2.set([w.id, w.y0, w.y1, w.id % 2], nw * 4);
-      uW3.set([s0, f0, 0, 0], nw * 4);
+      uW3.set([s0, f0, w.g, w.steep ? 1 : 0], nw * 4);
       nw++;
     }
     let np = 0;
     let nh = 0;
+    // down the axis until the top has gone under the bottom edge
     for (const p of poles) {
-      if (p.a > 0 && p.a < 1 && np < MAX_P) {
-        const travel = p.base - p.top + 6;
-        uPo.set([p.id, p.k, p.c, easeInOut(p.a) * travel], np * 4);
-        uPo2.set([p.top, p.base, easeInOut(p.prev) * travel, 0], np * 4);
-        np++;
-      }
-      if (p.ha > 0 && p.ha < 1 && nh < MAX_P) {
-        const travel = p.base - p.hwTop + 6;
-        uHw.set([p.id, p.k, p.c, easeInOut(p.ha) * travel], nh * 4);
-        uHw2.set([p.hwTop, p.base, easeInOut(p.hprev) * travel, p.hwBottom], nh * 4);
-        nh++;
-      }
+      if (p.a <= 0 || p.a >= 1 || np >= MAX_P) continue;
+      const travel = (p.base - p.top + 6) * Math.hypot(p.k, 1);
+      uPo.set([p.id, p.k, p.c, easeInOut(p.a) * travel], np * 4);
+      uPo2.set([p.top, p.base, p.reach, 0], np * 4);
+      np++;
+    }
+    for (const h of hardware) {
+      if (h.a <= 0 || h.a >= 1 || nh >= MAX_P) continue;
+      const travel = (h.base - h.top + 6) * Math.hypot(h.k, 1);
+      uHw.set([h.id, h.k, h.c, easeInOut(h.a) * travel], nh * 4);
+      uHw2.set([h.top, h.base, h.reach, h.bottom], nh * 4);
+      nh++;
     }
 
     gl.bindVertexArray(vao);

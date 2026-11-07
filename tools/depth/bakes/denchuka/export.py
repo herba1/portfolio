@@ -1,4 +1,4 @@
-# Denchuka, step 5: the web assets and the element table.
+# Denchuka, step 4: the web assets and the element table.
 #
 #   python3 -I export.py <workdir> <public/lab/denchuka>
 #
@@ -6,45 +6,87 @@
 # p1..p3.webp      the clean plates, kept only where they differ from the one
 #                  before (R1 c R2 c R3, each its holes grown 6 px); flat grey
 #                  elsewhere, so they cost little
-# ids.png          R  wire id (grown over its hole, so the hole follows the wire)
-#                  G  hardware pole id * 16 + shaft pole id (grown over their holes)
+# ids.png          R  wire id (over its hole, so the hole follows the wire)
+#                  G  hardware piece id * 16 + shaft id (over their holes)
 #                  B  plate region (0 none, 1..3: first plate that differs) * 64
-#                     + 32 if something stands in front of a moving pole here
 # alpha.png        coverage of the element itself, for drawing it while it moves:
-#                  R wire, G hardware, B shaft. Against sky this is the sky
-#                  matte's alpha; elsewhere a difference matte against the next
-#                  clean plate (photo = a * object + (1 - a) * plate), so a moving
-#                  piece carries no building with it.
-# sky.png          the sky matte of the street with everything overhead gone:
-#                  the photo's sky matte, plus every hole against the sky (what
-#                  the clean plates fill with sky). The live grade multiplies it
-#                  by whatever is still standing in front, so only sky is graded.
-# elements.json    every element with its geometry and its year (a pole that
-#                  stays, the one carrying the left signal, has year 2)
+#                  R wire, G hardware, B shaft (the rebuilt bare shaft where the
+#                  hardware hid it). Against the sky it is the sky matte's alpha;
+#                  a moving piece is unmixed against the plate behind it
+#                  (photo = a * object + (1 - a) * plate).
+# sky.png          R  the sky matte with everything overhead gone (1 = sky); the
+#                     live grade multiplies it by whatever still stands in front
+#                  G  how far up the sky this is: elevation above the horizon,
+#                     30 -> 0 .. 85 deg -> 1, from the camera (below)
+# elements.json    every element with its geometry and its year
+#
+# The camera. MoGe-2 (normals.py) gives the focal length; gravity comes from the
+# pole itself: a concrete pole is a vertical cylinder, so MoGe's normals over its
+# clean run are all horizontal, and the direction they leave out (the smallest
+# singular vector) is up. It is snapped onto the plane through the camera and
+# the pole's fitted axis (the pole is vertical, so the zenith lies on its axis
+# line). That puts the camera ~55 deg up and the zenith's vanishing point above
+# the frame on the pole's axis; everything that falls, falls away from it (the
+# verticals converge there), so a wire's drop is along the converging verticals
+# where it hangs, not straight down the frame.
 import sys, json, numpy as np, cv2
 
 wd = sys.argv[1].rstrip("/") + "/"
 out = sys.argv[2].rstrip("/") + "/"
 M = np.load(wd + "masks.npz")
 info = json.load(open(wd + "masks.json"))
+pole = info["pole"]
 Pn = [cv2.imread(wd + ("photo.png" if k == 0 else f"p{k}.png"))[:, :, ::-1].astype(np.float32) / 255 for k in range(4)]
 H, W = Pn[0].shape[:2]
 ys, xs = np.mgrid[0:H, 0:W]
 holes = [None] + [cv2.imread(wd + f"hole{k}.png", 0) > 127 for k in (1, 2, 3)]
+SA = np.load(wd + "shaft_alpha_bare.npy")
 
 def grow(m, r):
     return cv2.dilate(m.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1))) > 0
 
-def grow_labels(lab, r):
-    """Nearest-label dilation by r px."""
-    if r <= 0:
-        return lab
+def grow_labels(lab, r, within=None):
+    """Nearest-label dilation by r px (r None: as far as it takes)."""
     known = lab > 0
     d, idx = cv2.distanceTransformWithLabels((~known).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
     src = np.zeros((idx.max() + 1,), lab.dtype)
     src[idx[known]] = lab[known]
     g = src[idx]
-    return np.where(known | (d <= r), g, 0).astype(lab.dtype)
+    keep = known | (d <= r) if r is not None else np.ones_like(known)
+    if within is not None:
+        keep &= within
+    return np.where(keep, g, 0).astype(lab.dtype)
+
+# ---------------------------------------------------------------- the camera
+cam = json.load(open(wd + "moge/camera.json"))
+f = cam["fx"] * W / cam["size"][0]
+cx, cy = (cam["cx"] + 0.5) * W / cam["size"][0] - 0.5, (cam["cy"] + 0.5) * H / cam["size"][1] - 0.5
+nrm = cv2.imread(wd + "moge/normal.png", -1)[:, :, ::-1].astype(np.float32) / 65535 * 2 - 1
+nrm = cv2.resize(nrm, (W, H), interpolation=cv2.INTER_NEAREST)
+sel = M["shaft"] & (ys > info["hw_bottom_row"] + 20)
+N = nrm[sel]
+N /= np.linalg.norm(N, axis=1, keepdims=True)
+up = np.linalg.svd(N, full_matrices=False)[2][2]
+def ray(x, y):  # OpenGL camera: x right, y up, looking down -z
+    return np.array([(x - cx) / f, -(y - cy) / f, -1.0])
+ya, yb = 200.0, 1500.0
+nP = np.cross(ray(pole["k"] * ya + pole["c"], ya), ray(pole["k"] * yb + pole["c"], yb))
+nP /= np.linalg.norm(nP)
+up = up - up.dot(nP) * nP
+up /= np.linalg.norm(up)
+if up[1] < 0:
+    up = -up
+pitch = np.degrees(np.arcsin(up.dot([0, 0, -1])))
+vp = (cx + f * up[0] / -up[2], cy - f * up[1] / -up[2])
+print(f"camera: f {f:.0f} px, pitch {pitch:.1f} deg, zenith vanishing point {vp[0]:.0f}, {vp[1]:.0f}")
+R3 = np.stack([(xs - cx) / f, -(ys - cy) / f, -np.ones_like(xs, dtype=np.float64)], -1)
+elev = np.degrees(np.arcsin((R3 @ up) / np.linalg.norm(R3, axis=-1)))
+print(f"elevation: {elev.min():.1f} .. {elev.max():.1f} deg")
+zen = np.clip((elev - 30) / 55, 0, 1)
+
+def fall_slant(x, y):
+    """dx per dy of 'down' at (x, y): away from the zenith's vanishing point."""
+    return float((x - vp[0]) / max(1.0, y - vp[1]))
 
 # ---------------------------------------------------------------- regions
 R = [None]
@@ -56,150 +98,85 @@ rk = np.zeros((H, W), np.uint8)
 for k in (3, 2, 1):
     rk[R[k]] = k
 
-# ---------------------------------------------------------------- ids, grown over their holes
+# ---------------------------------------------------------------- ids, over their holes
 wire_id = M["wire_id"].astype(np.int32)
 wire_id[M["wire_alpha"] < 0.04] = 0
-wid = grow_labels(wire_id, 2)
-wid[~holes[1]] = 0
-hw_id = M["hw_id"].astype(np.int32)
-hw_id[M["hw_alpha"] < 0.04] = 0
-hid = grow_labels(hw_id, 3)
-hid[~holes[2]] = 0
-shaft = M["shaft"]
-sid = np.where(shaft.max(0) > 0.04, shaft.argmax(0), 0).astype(np.int32)
-sid = grow_labels(sid, 3)
-sid[~holes[3]] = 0
+wid = grow_labels(wire_id, 3, within=holes[1])
+# every pixel p2 changes belongs to a hardware piece, so it changes when that piece goes
+hid = grow_labels(M["hw_id"].astype(np.int32), None, within=holes[2])
+shaft_any = M["shaft"] | (SA > 0)
+sid = (grow(shaft_any, 4) & holes[3]).astype(np.int32)
 
 # ---------------------------------------------------------------- alphas
-env = M["env"]
-def diff_matte(A, B, obj_mask, r_core):
-    """a with A = a C + (1 - a) B; C from the object's own core (median over 15 px rows)."""
-    core = cv2.erode(obj_mask.astype(np.uint8), np.ones((r_core, r_core), np.uint8)) > 0
-    C = np.zeros_like(A)
-    for ch in range(3):
-        num = cv2.GaussianBlur(A[..., ch] * core, (0, 0), 6)
-        den = cv2.GaussianBlur(core.astype(np.float32), (0, 0), 6)
-        C[..., ch] = np.where(den > 1e-3, num / np.maximum(den, 1e-3), A[..., ch])
-    d = C - B
-    a = ((A - B) * d).sum(2) / np.maximum((d * d).sum(2), 2e-3)
-    return np.clip(a, 0, 1)
-
-wa = np.where(wid > 0, np.maximum(M["wire_alpha"], 0), 0)
-def edge_matte(A, B, a0, inside):
-    """Against the sky: the matte grown 2 px with a feathered edge, and all of it
-    unmixed against the plate behind (A = a O + (1 - a) B). The sky matte runs
-    a px or two wide of a thin crossarm or shaft, stops short of others, and
-    calls a pale rod against pale sky solid: where it is wide, a moving piece
-    unmixes sky into its rim and a standing one keeps the scan's teal there
-    ungraded (a dark green dashed outline once the sky round it is regraded);
-    where it is short, the rim stays behind on the plate when the piece moves.
-    O, the object's own colour, is spread out from its most certain pixels
-    (solid in the matte and well apart from B). A part brighter than the sky
-    (a porcelain insulator) projects below 0 onto a dark O, so there its plain
-    distance from the sky counts, against O's. Below the skyline, where B is LaMa's
-    guess at a wall, the matte stands as it is."""
-    m = a0 > 0.04
-    dist = cv2.distanceTransform((~m).astype(np.uint8), cv2.DIST_L2, 5)
-    feather = np.clip(2.5 - dist, 0, 1)  # whole to 1.5 px out, gone by 2.5 px
-    sep = np.sqrt(((A - B) ** 2).sum(2))
-    w = (np.clip((a0 - 0.3) / 0.4, 0, 1) * np.clip(sep / 0.12, 0, 1)).astype(np.float32)
-    O = np.zeros_like(A)
-    den3 = cv2.GaussianBlur(w, (0, 0), 3)
-    den9 = cv2.GaussianBlur(w, (0, 0), 9)
-    for ch in range(3):
-        n3 = cv2.GaussianBlur(A[..., ch] * w, (0, 0), 3)
-        n9 = cv2.GaussianBlur(A[..., ch] * w, (0, 0), 9)
-        O[..., ch] = np.where(den3 > 0.02, n3 / np.maximum(den3, 1e-4), np.where(den9 > 1e-3, n9 / np.maximum(den9, 1e-4), A[..., ch]))
-    d = O - B
-    dot = ((A - B) * d).sum(2)
-    a = np.clip(dot / np.maximum((d * d).sum(2), 4e-3), 0, 1)
-    # a part on the far side of the sky from O (projects below 0): its distance
-    # from the sky, against O's
-    a_far = np.clip((sep - 0.02) / np.maximum(np.sqrt((d * d).sum(2)), 0.12), 0, 1)
-    a = np.where(dot < 0, a_far, a) * feather
-    a[a < 0.05] = 0
-    return np.where(inside, np.where(env, a, a0), 0).astype(np.float32)
-
-
-wa = np.where(wid > 0, np.maximum(M["wire_alpha"], 0), 0)
-hm = hid > 0
-# below the skyline the matte is a difference matte already (SAM and contrast
-# masks are near binary); against the sky, the sky matte's alpha
-h0 = np.where(env, M["hw_alpha"], np.maximum(diff_matte(Pn[1], Pn[2], M["hw_alpha"] > 0.5, 3), 0.0) * (M["hw_alpha"] > 0.04))
-ha = edge_matte(Pn[1], Pn[2], h0, hm)
-sm = sid > 0
-s0 = np.where(env, shaft.max(0), diff_matte(Pn[2], Pn[3], shaft.max(0) > 0.5, 5) * (shaft.max(0) > 0.02))
-sa = edge_matte(Pn[2], Pn[3], s0, sm)
-
-# ---------------------------------------------------------------- front of moving poles
-front = np.zeros((H, W), bool)
-keep = M["keep"]
-for p in info["poles"]:
-    ax = p["k"] * ys + p["c"]
-    sweep = (np.abs(xs - ax) < 160) & (ys >= p["top"]) & (ys <= p["base"])
-    front |= sweep & keep
-# road signs and fences cut out of the shafts are in front of them
-front |= (shaft.max(0) == 0) & grow(shaft.max(0) > 0.5, 2) & ~env & ~grow(M["hw_alpha"] > 0.3, 2)
-FRONT_BOX = [(516, 1238, 576, 1356), (920, 1210, 966, 1276), (300, 1440, 345, 1500)]
-for x0, y0, x1, y1 in FRONT_BOX:
-    front[y0:y1, x0:x1] = True
-front &= ~(sm & (sa > 0.5))
+o = M["o"]
+wa = np.where(wid > 0, M["wire_alpha"], 0)
+ha = np.where(hid > 0, M["hw_alpha"], 0)
+JOIN = info["hw_bottom_row"] + 6
+sa = np.where(ys < JOIN, SA, np.maximum(SA, np.where(M["shaft"], o, 0)))
+sa = np.where(sid > 0, sa, 0)
 
 # ---------------------------------------------------------------- write images
 import os
 os.makedirs(out, exist_ok=True)
 def webp(path, rgb, q):
     cv2.imwrite(path, (np.clip(rgb, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, q])
-webp(out + "p0.webp", Pn[0], 90)
+webp(out + "p0.webp", Pn[0], 92)
 grey = np.array([0.5, 0.5, 0.5], np.float32)
 for k in (1, 2, 3):
     # a 3 px band of the photo outside the region, so bilinear taps at its edge never reach the grey
     band = grow(R[k], 3)[..., None]
     webp(out + f"p{k}.webp", np.where(R[k][..., None], Pn[k], np.where(band, Pn[0], grey)), 92)
-ids = np.stack([np.clip(wid, 0, 255), hid * 16 + sid, rk.astype(np.int32) * 64 + front.astype(np.int32) * 32], -1).astype(np.uint8)
+ids = np.stack([np.clip(wid, 0, 255), hid * 16 + sid, rk.astype(np.int32) * 64], -1).astype(np.uint8)
 cv2.imwrite(out + "ids.png", ids[:, :, ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
-sky = cv2.imread(wd + "sky.png", 0).astype(np.float32) / 255
-sky = np.where(env & grow(holes[1] | holes[2] | holes[3], 1), 1.0, sky) * grow(env, 3)
-cv2.imwrite(out + "sky.png", (np.clip(sky, 0, 1) * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
+a = cv2.imread(wd + "sky.png", 0).astype(np.float32) / 255
+sky = np.where(holes[1] | holes[2] | holes[3], 1.0, a)
+sk = np.stack([sky, zen, np.zeros_like(sky)], -1)
+cv2.imwrite(out + "sky.png", (np.clip(sk, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 al = np.stack([wa, ha, sa], -1)
 cv2.imwrite(out + "alpha.png", (np.clip(al, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
 # ---------------------------------------------------------------- the element table and its years
-poles = []
-for p in info["poles"]:
-    m = hid == p["id"]
-    hy = ys[m]
-    poles.append(dict(id=p["id"], k=round(p["k"], 5), c=round(p["c"], 2), top=p["top"], base=p["base"],
-                      hwTop=int(hy.min()) if m.any() else p["top"], hwBottom=int(hy.max()) if m.any() else p["top"]))
+k, c = pole["k"], pole["c"]
+hardware = []
+for g in sorted(set(np.unique(hid)) - {0}):
+    m = (hid == g) & (ha > 0.04)
+    hy, hx = ys[m], xs[m]
+    reach = float(np.abs(hx - (k * hy + c)).max())
+    hardware.append(dict(id=int(g), k=round(k, 5), c=round(c, 2), top=int(hy.min()), bottom=int(hy.max()), base=H - 1,
+                         reach=round(reach + 8, 1)))
+poles = [dict(id=1, k=round(k, 5), c=round(c, 2), top=int(pole["top"]), base=H - 1,
+              reach=round(pole["hk"] * H + pole["hc"] + 100, 1))]
 wires = []
 for w in info["wires"]:
     m = wid == w["id"]
     if not m.any():
         continue
     wx, wy = xs[m], ys[m]
-    x0, x1 = int(wx.min()), int(wx.max())
-    span = x1 - x0
-    # off-frame ends hang from poles out of shot: extend the span there
-    xa = x0 - (0.35 * span if x0 <= 2 else 0)
-    xb = x1 + (0.35 * span if x1 >= W - 3 else 0)
-    wires.append(dict(id=w["id"], x0=x0, x1=x1, y0=int(wy.min()), y1=int(wy.max()), xa=round(xa, 1), xb=round(xb, 1),
-                      ym=round(float(wy.mean()), 1), px=int(m.sum())))
-# years: wires (lowest first, the long sky spans last), then hardware and poles,
-# far to near, the big wooden pole on the corner last of all
-wires.sort(key=lambda w: -w["ym"])
-for i, w in enumerate(wires):
-    w["year"] = round(0.05 + 0.36 * i / max(1, len(wires) - 1), 4)
-far_to_near = [8, 7, 6, 5, 4, 3, 2, 1]
-for p in poles:
-    r = far_to_near.index(p["id"])
-    p["hwYear"] = round(0.46 + 0.18 * r / 7, 4)
-    p["year"] = round(0.70 + 0.25 * r / 7, 4)
-pole_stays = {p["id"] for p in info["poles"] if p.get("stays")}
-for p in poles:
-    if p["id"] in pole_stays:
-        # the signal pole: its wires and hardware go, it stays (year past the end)
-        p["year"] = 2.0
-        p["stays"] = True
-json.dump(dict(size=[W, H], wires=wires, poles=poles), open(out + "elements.json", "w"), indent=1)
-for f in sorted(os.listdir(out)):
-    print(f, os.path.getsize(out + f) // 1024, "KB")
+    x0, x1, y0, y1 = int(wx.min()), int(wx.max()), int(wy.min()), int(wy.max())
+    steep = w["steep"]
+    lo, hi = (y0, y1) if steep else (x0, x1)
+    edge = H if steep else W
+    span = hi - lo
+    # an end at the frame edge hangs from something out of shot: extend the span there
+    a_ = lo - (0.35 * span if lo <= 2 else 0)
+    b_ = hi + (0.35 * span if hi >= edge - 3 else 0)
+    mx_, my_ = float(wx.mean()), float(wy.mean())
+    wires.append(dict(id=w["id"], steep=steep, x0=x0, x1=x1, y0=y0, y1=y1, a=round(a_, 1), b=round(b_, 1),
+                      g=round(fall_slant(mx_, my_), 4), ym=round(my_, 1), xm=round(mx_, 1), px=int(m.sum())))
+# years: the five spans off to the right first, then the long spans down to the
+# left (lowest first), then the bundle that runs up out of the top of the frame;
+# then the hardware, bottom piece first; then the pole
+right = sorted([w for w in wires if not w["steep"] and w["xm"] > k * w["ym"] + c], key=lambda w: -w["ym"])
+left = sorted([w for w in wires if not w["steep"] and w["xm"] <= k * w["ym"] + c], key=lambda w: -w["ym"])
+steep = sorted([w for w in wires if w["steep"]], key=lambda w: -w["xm"])
+order = right + left + steep
+for i, w in enumerate(order):
+    w["year"] = round(0.04 + 0.36 * i / max(1, len(order) - 1), 4)
+hw_years = {1: 0.48, 2: 0.56, 3: 0.64}
+for h in hardware:
+    h["year"] = hw_years.get(h["id"], 0.64)
+poles[0]["year"] = 0.78
+json.dump(dict(size=[W, H], camera=dict(f=round(f, 1), pitch=round(pitch, 1), zenith=[round(vp[0], 1), round(vp[1], 1)]),
+               wires=order, hardware=hardware, poles=poles), open(out + "elements.json", "w"), indent=1)
+for fn in sorted(os.listdir(out)):
+    print(fn, os.path.getsize(out + fn) // 1024, "KB")
