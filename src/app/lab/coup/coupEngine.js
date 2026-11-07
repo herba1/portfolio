@@ -2,9 +2,13 @@
 // springs. A thread is one body: its lines ride at fixed offsets from it, so
 // it travels, turns and lands whole.
 // A sweep across the spread is the throw. Each throw composes a new
-// constellation under fixed rules: the four great capitals step down the
-// spread on the diagonal, the minor lines cluster around them, aligned to
-// each other's edges, and only the capitals may cross the gutter.
+// constellation under fixed rules on a hidden fourteen-column grid: the four
+// great capitals step down the spread on the diagonal, standing on column
+// lines; a capital that reaches the fold either takes the spine dead centre
+// or stands a column clear of it; each minor thread lands where it shares the
+// most edges with the capitals (a left edge, a right edge, a baseline, a cap
+// height, a column line), with whitespace only breaking ties; and only the
+// capitals may cross the gutter.
 //
 // ?t=0.4 freezes the scene that many seconds after a scripted throw.
 // ?seed=n picks the constellation.
@@ -143,6 +147,51 @@ export async function createCoup(host, { embedded = false } = {}) {
     return wv;
   };
 
+  // Alignment is read off the ink, not the box: a capital at 84px stands a
+  // few pixels inside its own left edge, and a 14px line beside it barely
+  // does. These are the glyph extents of a line at rest, relative to its box.
+  const family = tok.fontFamily;
+  const TIER2_W = [wt("--font-weight-meta", 440), wt("--font-weight-body-sm", 490)];
+  const restWeight = (tier, size) => (tier === 2 ? TIER2_W[size <= 13 ? 1 : 0] : REST_W[tier]);
+  const pen = document.createElement("canvas").getContext("2d");
+  const inks = new Map();
+  const ink = (item, size) => {
+    const key = `${item.i}|${size}`;
+    let v = inks.get(key);
+    if (v == null) {
+      pen.font = `${restWeight(item.tier, size)} ${size}px ${family}`;
+      if ("letterSpacing" in pen) pen.letterSpacing = `${lawPx(size).toFixed(3)}px`;
+      const m = pen.measureText(item.text);
+      v = { l: -m.actualBoundingBoxLeft, r: m.actualBoundingBoxRight };
+      if (!Number.isFinite(v.l) || !Number.isFinite(v.r)) v = { l: 0, r: measure(item, size) };
+      inks.set(key, v);
+    }
+    return v;
+  };
+
+  // Where the baseline falls inside a line box, and how tall the capitals
+  // stand on it, per em. The line box centres the font's content area, so
+  // the baseline sits at half the line plus half of (ascent - descent).
+  let baseK = 0.36;
+  let capK = 0.7;
+  {
+    const probe = document.createElement("div");
+    probe.className = "coup-measure";
+    probe.style.cssText = "font-size:100px;line-height:200px;";
+    probe.textContent = "H";
+    const mark = document.createElement("span");
+    mark.style.cssText = "display:inline-block;width:0;height:0;vertical-align:baseline;";
+    probe.appendChild(mark);
+    host.appendChild(probe);
+    const top = mark.getBoundingClientRect().top - probe.getBoundingClientRect().top;
+    if (Number.isFinite(top) && top > 100 && top < 200) baseK = (top - 100) / 100;
+    probe.remove();
+    pen.font = `${REST_W[0]} 100px ${family}`;
+    const cap = pen.measureText("H").actualBoundingBoxAscent / 100;
+    if (Number.isFinite(cap) && cap > 0.4 && cap < 1) capK = cap;
+  }
+  const baseOff = (size) => lineHeight(size) / 2 + baseK * size;
+
   let W = 1;
   let H = 1;
   let u = 1;
@@ -175,7 +224,10 @@ export async function createCoup(host, { embedded = false } = {}) {
   function composeBigOnce(rng, mX, mY) {
     const big = items.filter((it) => it.tier === 0);
     let base = Math.round(Math.min(84 * u, H * 0.11));
-    const room = W * (spread ? 0.5 : 0.86);
+    const { col, lines } = grid(mX);
+    // Some throws let a capital outgrow its page, and that one must take the
+    // spine; the rest keep every capital to a page, a column clear of it.
+    const room = spread ? (rng() < 0.6 ? W * 0.5 : W / 2 - mX - col) : W * 0.86;
     const sizes = big.map(() => 0.5 + rng() * 0.5);
     // one of them always carries the full weight of the page
     sizes[Math.floor(rng() * 4)] = 1;
@@ -209,9 +261,12 @@ export async function createCoup(host, { embedded = false } = {}) {
     const xEnd = W - mX - ws[3] - rng() * W * 0.12;
     const steps = [0.3 + rng(), 0.3 + rng(), 0.3 + rng()];
     const stepSum = steps.reduce((a, b) => a + b, 0);
+    const S = W / 2;
     let acc = 0;
     const out = [];
     let prevX = -Infinity;
+    let prevInk = -Infinity;
+    let centred = false;
     big.forEach((it, j) => {
       if (j > 0) acc += steps[j - 1] / stepSum;
       let x = x0 + (Math.max(x0, xEnd) - x0) * acc;
@@ -219,9 +274,50 @@ export async function createCoup(host, { embedded = false } = {}) {
       x = Math.min(x, W - mX - ws[j]);
       x = Math.max(mX, x);
       prevX = x;
-      out.push({ it, x: Math.round(x), y: ys[j], s: px[j], w: ws[j], h: hs[j] });
+      // the capital's ink stands on a column line, the nearest one that
+      // keeps it inside the margins
+      const g = ink(it, px[j]);
+      const span = g.r - g.l;
+      const fits = (a) => a >= mX - 0.5 && a + span <= W - mX + 0.5;
+      const onCols = lines.filter(fits);
+      let a = onCols.length ? onCols.reduce((p, q) => (Math.abs(q - (x + g.l)) < Math.abs(p - (x + g.l)) ? q : p)) : Math.max(mX, Math.min(x + g.l, W - mX - span));
+      // The fold: a capital either sits centred on the spine, on purpose,
+      // or stands at least one column clear of it. Nothing in between.
+      if (spread && a + span > S - col + 0.5 && a < S + col - 0.5) {
+        // one capital at most takes the spine: it is the throw's decision
+        const opts = centred ? [] : [{ a: S - span / 2, centred: true }];
+        // clearing it, the capital takes one of the first columns that do,
+        // so the far side of the fold is not one long axis every throw
+        const left = onCols.filter((q) => q + span <= S - col + 0.5);
+        if (left.length) opts.push({ a: left[Math.max(0, left.length - 1 - Math.floor(rng() * 2))] });
+        const right = onCols.filter((q) => q >= S + col - 0.5);
+        if (right.length) opts.push({ a: right[Math.min(right.length - 1, Math.floor(rng() * 3))] });
+        // taking the spine is a decision, not the nearest fix: it has to
+        // win against a column's worth of doubt
+        const doubt = col * (1 + rng() * 2.5);
+        const cost = (o) =>
+          Math.abs(o.a - a) +
+          (o.centred ? doubt : 0) +
+          // the diagonal steps forward; it never steps back past the last
+          (o.a < prevInk - 0.5 ? W : 0);
+        if (!opts.length) opts.push({ a: S - span / 2, centred: true });
+        const pick = opts.reduce((p, q) => (cost(q) < cost(p) ? q : p));
+        a = pick.a;
+        centred = centred || !!pick.centred;
+      }
+      prevInk = a;
+      x = a - g.l;
+      out.push({ it, x, y: ys[j], s: px[j], w: ws[j], h: hs[j], ink: { l: a, r: a + span } });
     });
     return out;
+  }
+
+  // The hidden grid: fourteen columns across the live area, so on a spread
+  // the spine is the seventh line and each page carries seven.
+  function grid(mX) {
+    const cols = 14;
+    const col = (W - mX * 2) / cols;
+    return { cols, col, lines: Array.from({ length: cols + 1 }, (_, k) => mX + k * col) };
   }
 
   function composeOnce(rng) {
@@ -229,80 +325,122 @@ export async function createCoup(host, { embedded = false } = {}) {
     const mY = snap4(H * 0.09);
     const out = new Array(items.length);
     const rects = [];
+    const { col, lines: colLines } = grid(mX);
+
+    // Every capital edge a thread can share. A thread's left ink can stand
+    // on a capital's left edge or start where a capital stops; its right ink
+    // can hang from a capital's right edge; its first baseline can sit on a
+    // capital's baseline or on its cap height, the line the tops of the
+    // capitals make. Threads relate to the capitals, never to each other, so
+    // the minor lines gather into constellations instead of one long column.
+    const capLefts = [];
+    const capRights = [];
+    const capRows = [];
 
     for (const b of composeBig(rng, mX, mY)) {
       out[b.it.i] = { x: b.x, y: b.y, s: b.s };
       rects.push({ x: b.x, y: b.y, w: b.w, h: b.h, big: true });
+      const base = b.y + baseOff(b.s);
+      capLefts.push(b.ink.l, b.ink.r);
+      capRights.push(b.ink.r);
+      capRows.push(base, base - capK * b.s);
     }
 
-    // The threads, larger first, each placed near something already set.
+    // The threads, shuffled, then ordered.
     const blocks = BLOCKS.map((b, bi) => ({ ...b, bi, items: items.filter((it) => it.block === bi) })).filter((b) => b.tier !== 0);
     for (let j = blocks.length - 1; j > 0; j--) {
       const k = Math.floor(rng() * (j + 1));
       [blocks[j], blocks[k]] = [blocks[k], blocks[j]];
     }
-    blocks.sort((a, b) => a.tier - b.tier);
+    // the longest cascade first, so it finds open water to step down before
+    // the single lines take it; then the larger tier first
+    blocks.sort((a, b) => b.items.length - a.items.length || a.tier - b.tier);
 
+    const on = (v, list) => list.some((q) => Math.abs(q - v) < 0.75);
     const gutterPad = 20 * u;
-    const cols = 14;
     const scale = Math.min(1, Math.max(0.7, u));
+    const yLo = mY * 0.6;
     let failed = 0;
     for (const blk of blocks) {
       const sizes = blk.tier === 1 ? TIER1_SIZES : TIER2_SIZES;
       const size = Math.max(10, Math.round(sizes[Math.floor(rng() * sizes.length)] * scale));
       const h = lineHeight(size);
+      const bo = baseOff(size);
       const many = blk.items.length > 1;
       const prefersStair = many && (blk.items.length > 3 || rng() < 0.6);
+      const g = blk.items.map((it) => ink(it, size));
+      const ws = blk.items.map((it) => measure(it, size));
+      // A cascade steps onto the grid: each line starts on the first column
+      // line past where the one above it stopped. If that will not fit, it
+      // steps on half columns; then freely; then it hangs flush; then it
+      // loosens its spacing, but never below the hard clearance.
+      const passes = prefersStair
+        ? [["grid", 1], ["half", 1], ["stair", 1], ["flush", 1], ["flush", 0.6], ["flush", 0]]
+        : [["flush", 1], ["flush", 0.6], ["flush", 0]];
       let best = null;
       let rel = [];
-      // if the thread will not fit as drawn, hang it flush, then loosen the
-      // spacing, but never below the hard clearance
-      for (const [stair, loose] of [[prefersStair, 1], [false, 1], [false, 0.6], [false, 0]]) {
+      for (const [cut, loose] of passes) {
+        const stair = cut !== "flush";
         const pitch = stair ? h + snap4(h * 0.5) : h;
         const space = size * 0.32;
-        rel = [];
-        let rx = 0;
-        let bw = 0;
-        blk.items.forEach((it, n) => {
-          const w = measure(it, size);
-          rel.push({ dx: rx, dy: n * pitch, w });
-          bw = Math.max(bw, rx + w);
-          if (stair) rx += w + space;
-        });
+        // each line's ink left, relative to the first line's
+        const L = [0];
+        for (let n = 1; n < blk.items.length; n++) {
+          const prevR = L[n - 1] + g[n - 1].r - g[n - 1].l;
+          if (cut === "grid") L.push(Math.ceil((prevR + space) / col - 1e-6) * col);
+          else if (cut === "half") L.push(Math.ceil((prevR + space) / (col / 2) - 1e-6) * (col / 2));
+          else if (cut === "stair") L.push(prevR + space);
+          else L.push(0);
+        }
+        rel = blk.items.map((it, n) => ({ dx: L[n] + g[0].l - g[n].l, dy: n * pitch }));
+        const bw = Math.max(...rel.map((r, n) => r.dx + ws[n]));
+        const inkR = Math.max(...rel.map((r, n) => r.dx + g[n].r)) - g[0].l;
         const bh = (blk.items.length - 1) * pitch + h;
         const padY = Math.max(GAP_Y(), Math.max(16, h) * loose);
-        const padX = Math.max(GAP_X(), 32 * u * loose);
+        const padX = Math.max(GAP_X(), 40 * u * loose);
         const want = (16 + rng() * 110) * u;
-        let bestScore = Infinity;
-        for (let n = 0; n < 320; n++) {
-          let x;
-          const pick = rng();
-          const anchor = rects[Math.floor(rng() * rects.length)];
-          if (pick < 0.4) x = anchor.x;
-          else if (pick < 0.6) x = anchor.x + anchor.w + padX * (1 + rng());
-          else if (pick < 0.7) x = anchor.x + anchor.w - bw;
-          else x = mX + Math.floor(rng() * cols) * ((W - mX * 2) / cols);
-          x = Math.round(x);
-          const y = snap4(mY * 0.6 + rng() * (H - mY * 1.2 - bh));
+
+        // Candidates: the left ink on every column line and every edge, or
+        // the right ink hung from a right edge; the first baseline on every
+        // row, plus a scatter of free heights so open water stays possible.
+        const xs = [...colLines, ...capLefts, ...capRights.map((r) => r - inkR)];
+        for (let n = 0; n < 12 && rects.length; n++) {
+          const r = rects[Math.floor(rng() * rects.length)];
+          xs.push(r.x + r.w + padX * (1 + rng()));
+        }
+        const ys = capRows.map((b) => b - bo);
+        for (let y = snap4(yLo + rng() * 8); y + bh <= H - yLo; y += 8) ys.push(y);
+
+        let bestKey = null;
+        for (const aL of xs) {
+          const x = aL - g[0].l;
           if (x < mX * 0.6 || x + bw > W - mX * 0.6) continue;
           // only the capitals may cross the fold; a thread stays on its page
           if (spread && x < W / 2 + gutterPad && x + bw > W / 2 - gutterPad) continue;
-          let ok = true;
-          let near = Infinity;
-          for (const r of rects) {
-            const dx = Math.max(r.x - (x + bw), x - (r.x + r.w), 0);
-            const dy = Math.max(r.y - (y + bh), y - (r.y + r.h), 0);
-            if (dx < padX && dy < padY) {
-              ok = false;
-              break;
+          const aR = aL + inkR;
+          const nX = on(aL, colLines) + on(aL, capLefts) + on(aR, capRights);
+          for (const y of ys) {
+            if (y < yLo || y + bh > H - yLo) continue;
+            let ok = true;
+            let near = Infinity;
+            for (const r of rects) {
+              const dx = Math.max(r.x - (x + bw), x - (r.x + r.w), 0);
+              const dy = Math.max(r.y - (y + bh), y - (r.y + r.h), 0);
+              if (dx < padX && dy < padY) {
+                ok = false;
+                break;
+              }
+              near = Math.min(near, Math.hypot(dx, dy));
             }
-            near = Math.min(near, Math.hypot(dx, dy));
-          }
-          if (!ok) continue;
-          const score = Math.abs(near - want) + rng() * 10;
-          if (score < bestScore) {
-            bestScore = score;
-            best = { x, y, bw, bh };
+            if (!ok) continue;
+            const b0 = y + bo;
+            const count = nX + on(b0, capRows);
+            // the most shared edges wins; whitespace only breaks a tie
+            const air = Math.abs(near - want) + rng() * 10;
+            if (!bestKey || count > bestKey.count || (count === bestKey.count && air < bestKey.air)) {
+              bestKey = { count, air };
+              best = { x, y, bw, bh };
+            }
           }
         }
         if (best) break;
@@ -310,7 +448,7 @@ export async function createCoup(host, { embedded = false } = {}) {
       if (!best) failed += 1;
       blk.items.forEach((it, n) => {
         if (!best) out[it.i] = { x: -9999, y: snap4(H * 0.5), s: size, hidden: true };
-        else out[it.i] = { x: Math.round(best.x + rel[n].dx), y: best.y + rel[n].dy, s: size };
+        else out[it.i] = { x: best.x + rel[n].dx, y: best.y + rel[n].dy, s: size };
       });
       if (best) rects.push({ x: best.x, y: best.y, w: best.bw, h: best.bh });
     }
@@ -703,7 +841,22 @@ export async function createCoup(host, { embedded = false } = {}) {
       const { hits, boxes } = overlaps(12, 8);
       const out = boxes.filter((b) => b.x < 0 || b.y < 0 || b.x + b.w > W || b.y + b.h > H).map((b) => b.t);
       const big = bodies.filter((b) => b.tier === 0).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.s)]);
-      report.push({ seed: baseSeed + k, hits, out, hidden: bodies.filter((b) => b.hidden).length, big, moved });
+      // each capital against the fold: centred on it, clear of it by a
+      // column, or (never) somewhere in between
+      const mX = Math.round(W * 0.065);
+      const { col } = grid(mX);
+      const fold = !spread
+        ? []
+        : bodies
+            .filter((b) => b.tier === 0)
+            .map((b) => {
+              const g = ink(b.lines[0], b.ts);
+              const l = b.x + g.l;
+              const r = b.x + g.r;
+              if (Math.abs((l + r) / 2 - W / 2) < 1) return "centre";
+              return r <= W / 2 - col + 1 || l >= W / 2 + col - 1 ? "clear" : "near";
+            });
+      report.push({ seed: baseSeed + k, hits, out, hidden: bodies.filter((b) => b.hidden).length, big, moved, fold });
     }
     window.__coupAudit = report;
   }
