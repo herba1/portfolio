@@ -3,30 +3,36 @@
     python3 -I tools/depth/bakes/crossing/cumulus.py <bakedir> <hdr> <outdir>
 
 The photo's own clouds are faint, torn wisps: lifted and lit by bake.py they
-still read as small white scraps on an empty cobalt field. This puts real
+still read as small white scraps on an empty cobalt field. This puts a real
 cumulus behind the street instead, from a Poly Haven summer HDRI
-(kloofendal_48d_partly_cloudy_puresky, CC0, 16k .hdr), and gives them a card
-of their own so a swing slides them against the rooftops.
+(kloofendal_48d_partly_cloudy_puresky, CC0, 16k .hdr), on a card of its own so
+a swing slides it against the rooftops.
 
   sky        the sky card becomes the designed clear gradient alone
-             (skygrad.sky_gradient, which the bake's card already is under
-             its clouds to within 1 LSB), so the zenith stays deep cobalt.
-  cumulus    a rectilinear view out of the HDRI's equirectangular, aimed and
-             scaled so its big side-lit cumulus rises from behind the old
-             house's roof and the far houses, in the lower-middle third. The
-             camera pitch matches the photo's look-up. Keyed in linear light:
-             the clear sky is filled under the clouds by push-pull from the
-             pixels that are clearly sky (blue chroma, low luminance), and
+             (skygrad.sky_gradient), so the zenith stays deep cobalt.
+  cumulus    the HDRI's big side-lit cumulus (lon 127-153, lat 19-37; the
+             sun is up and to its right, as in the photo), keyed in the
+             equirect at its native resolution: the clear sky is filled under
+             the cloud by push-pull from the pixels that are clearly sky, and
              each pixel is solved for the mix of that sky and cloud, from
-             chroma and from luminance (the stronger wins; a cumulus is
-             opaque, a fringe is not). The cloud colour un-mixed from it is
-             relit: its HDR luminance, relative to the brightest top, places
-             it between a warm sunlit white that rolls off below clipping
-             and a skylight-blue shade (about 205 deg), so the tops glow and
-             the undersides take the sky's colour, with the HDRI's own
-             billows as the drawing. Only the clouds in the lower part of the
-             view are kept, and their bases thin into the haze behind the
-             roofs.
+             chroma and from luminance. Only that cloud, its puff on the right
+             and the low cluster to its left (which sits behind the old
+             house) are kept, by connected component: the rows of small
+             cumulus and the horizon haze under them are gone, so the alpha
+             is 0 below the cloud base and nothing veils the roofs or the town.
+             Relit with real contrast: the HDR luminance, its billows
+             sharpened (a local-contrast boost in log luminance, so the
+             cauliflower holds on the lit edges), runs from a saturated
+             skylight blue-grey in the shaded lobes and toward the base to a
+             warm near-white on the sunlit tops that rolls off below clipping.
+             Projected onto the card through a rectilinear view, stretched
+             upright (STRETCH) and scaled so the cloud towers from behind the
+             roofs to well above the crossbuck's arms, in the middle of the
+             frame. The card is baked at SS times the photo's resolution, so
+             the edges stay crisp under the print's magnification.
+  card       the cloud sits on a wide transparent margin (PAD) and the alpha
+             is feathered to 0 well inside all four edges besides, so no
+             straight card edge can show at any split, yaw or pitch.
   photo      the flat photograph that lies on top at rest gets the same sky
              where the sky shows (1 - the coverage of planes 1..6), so the
              stack opening out of it does not pop.
@@ -65,23 +71,35 @@ RECTS = [
     [0.50732, 0.15192, 0.83545, 1.14971],
     [0.01416, 0.8326, 0.37988, 1.10029],
 ]
-# The clouds card, in photo uv: wide enough for the swing (it is a cut-out,
-# transparent at its edges, so it never has to cover the window).
-CR = [-0.22, 0.12, 1.22, 1.0]
-# The view out of the HDRI: where the frame's centre looks (deg; lon is the
-# equirect's x / width * 360) and the focal length in photo px. The big
-# cumulus sits at about lon 141, lat 29, side-lit from the right and above
-# (the HDRI's sun is at about lon 212, lat 48): the engine's light.
-LON0, LAT0, FOCAL = 152.3, 32.0, 2700.0
-# Relit cloud, sRGB: a warm sunlit white (the film lands it about 240, not
-# clipped) and a skylight-blue shade (205 deg).
-CLOUD_TOP = (0xFF, 0xFB, 0xF2)
-CLOUD_SHADE = (0x8A, 0xAD, 0xC8)
-CLOUD_GAMMA = 1.45
-KEEP_V = 0.24  # keep clouds whose top is below this (photo v): zenith stays clear
-MIN_AREA = 20000  # card px: cumulus, not the scraps and puffs round them
-BASE_FADE = (0.80, 0.93)  # bases thin into the haze behind the roofs
+SS = 3  # the clouds card's px per 2 photo px (1.5x): crisp under magnification
+# Where the view is laid out, in photo uv: the region searched for the cloud
+# (it is cropped to the cloud plus PAD afterwards).
+# Even photo px, so the card's 3 px land on whole pairs of photo px.
+CR = [-614 / EW, -272 / EH, 2662 / EW, 1628 / EH]
+# The view out of the HDRI: the direction (lon, lat, deg) that lands at photo
+# (UC, VC); FOCAL in photo px; STRETCH scales it upright. The cloud's base
+# (lat 19.5) lands about v 0.93, behind the roofs and the town; its tower
+# (lat 36.5) about v 0.15, above the crossbuck's arms.
+LON0, LAT0, UC, VC = 140.0, 28.0, 0.42, 0.62
+FOCAL, STRETCH = 2700.0, 1.3
+# Which of the HDRI's clouds are kept: components lying wholly inside this
+# window of the sky (deg). The rows of small cumulus below lat 16 and the
+# horizon haze are left out.
+KEEP_LON, KEEP_LAT = (125.0, 165.0), (17.0, 40.0)
+MIN_AREA = 30000  # pano px: cumulus, not the scraps round them
+PAD = 0.07  # transparent margin round the cloud, photo widths
+# Relit cloud, sRGB: a warm sunlit white that the film lands just under
+# clipping, and a saturated skylight blue-grey for the shaded lobes.
+CLOUD_TOP = (0xFF, 0xF8, 0xEA)
+CLOUD_SHADE = (0x8F, 0xB3, 0xD9)
+DETAIL = (2.3, 1.3)  # local-contrast boost of the billows (log luminance): lobes, then cauliflower
+BASE_SHADE = (31.0, 21.0, 0.6)  # toward the base (lat), the cloud darkens by up to this
+FORM = 0.55  # how much the silhouette's own relief, lit from the sun, models it
+SUN2D = (0.62, -0.78)  # the sun's direction across the view (x right, y down): up and right
+RIM = (8, 22, 0.85)  # sun-facing edges: within these px of the silhouette, lit to this share of the lobe inside
+SHARPEN = 0.5  # unsharp mask on the card, inside the cloud
 LW = np.array([0.2126, 0.7152, 0.0722], np.float32)
+PX_DEG = 16384 / 360  # the 16k pano's px per degree
 
 
 def load(name, mode=None):
@@ -89,111 +107,10 @@ def load(name, mode=None):
     return np.asarray(im.convert(mode) if mode else im).astype(np.float32) / 255
 
 
-def card_grid(rect, w, h):
-    u = rect[0] + (np.arange(w, dtype=np.float32) + 0.5) / EW
-    v = rect[1] + (np.arange(h, dtype=np.float32) + 0.5) / EH
+def card_grid(rect, w, h, ss=1.0):
+    u = rect[0] + (np.arange(w, dtype=np.float32) + 0.5) / (EW * ss)
+    v = rect[1] + (np.arange(h, dtype=np.float32) + 0.5) / (EH * ss)
     return np.meshgrid(u, v)
-
-
-# ---- the HDRI view
-print("reading", HDR)
-pano = cv2.imread(HDR, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
-if pano is None:
-    sys.exit("cannot read " + HDR)
-PH, PW = pano.shape[:2]
-cw, ch = round((CR[2] - CR[0]) * EW), round((CR[3] - CR[1]) * EH)
-U, V = card_grid(CR, cw, ch)
-X, Y = (U - 0.5) * EW, (V - 0.5) * EH
-d = np.stack([X, -Y, np.full_like(X, FOCAL)], -1)
-d /= np.linalg.norm(d, axis=-1, keepdims=True)
-a_ = np.radians(LAT0)
-y2 = d[..., 1] * np.cos(a_) + d[..., 2] * np.sin(a_)
-z2 = -d[..., 1] * np.sin(a_) + d[..., 2] * np.cos(a_)
-lat = np.arcsin(np.clip(y2, -1, 1))
-lon = np.radians(LON0) + np.arctan2(d[..., 0], z2)
-pu = ((lon / (2 * np.pi)) % 1.0) * PW - 0.5
-pv = (0.5 - lat / np.pi) * PH - 0.5
-x0, x1 = int(pu.min()) - 4, int(pu.max()) + 5
-y0, y1 = max(0, int(pv.min()) - 4), min(PH, int(pv.max()) + 5)
-sub = np.ascontiguousarray(pano[y0:y1, x0:x1, ::-1]).astype(np.float32)
-del pano
-sub = np.minimum(np.nan_to_num(sub, posinf=50.0), 50.0)
-# the pano's 16k is about 45 px/deg, the card about 32: prefilter, then sample
-sub = cv2.GaussianBlur(sub, (0, 0), 0.6)
-view = cv2.remap(sub, (pu - x0).astype(np.float32), (pv - y0).astype(np.float32), cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
-view = np.maximum(view, 1e-5)
-del sub
-
-# ---- key the cumulus out of its sky
-L = view @ LW
-chroma = (view[..., 2] - view[..., 0]) / (view[..., 2] + view[..., 0] + 1e-6)
-clear = (chroma > 0.36) & (L < np.percentile(L, 60) * 1.35)
-clear = erode(clear, 3)
-B = pushpull(view, clear.astype(np.float32))
-B = cv2.GaussianBlur(B, (0, 0), 6)
-LB = B @ LW
-sB = (B[..., 2] - B[..., 0]) / (B[..., 2] + B[..., 0] + 1e-6)
-S_CLOUD = 0.07  # a sunlit cumulus's own chroma
-a_s = np.clip((sB - chroma) / np.maximum(sB - S_CLOUD, 0.05), 0, 1)
-a_l = np.clip((L - LB) / np.maximum(1.4 * LB, 1e-3), 0, 1)
-alpha = np.maximum(a_s, a_l)
-# a cumulus is opaque inside: fill the body, keep the fringe's own alpha
-alpha = np.where(alpha < 0.04, 0, alpha)
-# the cloud colour, un-mixed from its sky (by the alpha it was mixed with)
-F = B + (view - B) / np.maximum(alpha, 0.08)[..., None]
-F = np.maximum(F, 0)
-# A cumulus is opaque: its shaded flank is nearly the sky's colour, so the
-# key reads it as thin, and a pocket of shade inside reads as a hole. Holes
-# in the body are filled, and the alpha is firmed up so a shaded flank is
-# solid cloud in its own (blue) shade, not a see-through veil; only the
-# outermost fringe stays soft.
-solid = (alpha > 0.3).astype(np.uint8)
-flood = np.pad(solid, 1)
-mask = np.zeros((flood.shape[0] + 2, flood.shape[1] + 2), np.uint8)
-cv2.floodFill(flood, mask, (0, 0), 2)
-holes = flood[1:-1, 1:-1] == 0
-body = cv2.GaussianBlur((solid.astype(bool) | holes).astype(np.float32), (0, 0), 2)
-alpha = np.maximum(smoothstep(0.06, 0.5, alpha), body * (alpha > 0.0))
-alpha = np.maximum(alpha, holes.astype(np.float32))
-F = np.where(holes[..., None], pushpull(F, (~holes & (alpha > 0.9)).astype(np.float32)), F)
-del view
-
-# which clouds: the ones in the lower part of the view, by component
-comp = (alpha > 0.2).astype(np.uint8)
-n, lab, st, _ = cv2.connectedComponentsWithStats(dilate(comp, 6).astype(np.uint8), 8)
-keep = np.zeros(n, bool)
-for i in range(1, n):
-    top = CR[1] + st[i, cv2.CC_STAT_TOP] / EH
-    left, w_ = st[i, cv2.CC_STAT_LEFT], st[i, cv2.CC_STAT_WIDTH]
-    edge = left <= 2 or left + w_ >= cw - 2  # cut by the view's side
-    keep[i] = top > KEEP_V and st[i, cv2.CC_STAT_AREA] > MIN_AREA and not edge
-    print("  cloud %2d  top %.2f  u %.2f..%.2f  area %6d %s" % (i, top, CR[0] + left / EW, CR[0] + (left + w_) / EW, st[i, cv2.CC_STAT_AREA], "keep" if keep[i] else ""))
-sel = keep[lab].astype(np.float32)
-sel = cv2.GaussianBlur(sel, (0, 0), 4)
-alpha = alpha * np.clip(sel * 1.5, 0, 1)
-alpha *= 1 - smoothstep(BASE_FADE[0], BASE_FADE[1], V)
-print("cumulus: kept", int(keep.sum()), "of", n - 1, "clouds; cover in frame", round(float(alpha[(U >= 0) & (U <= 1)].mean()), 3))
-
-# ---- relight
-LF = cv2.GaussianBlur(F @ LW, (0, 0), 0.8)
-inside = alpha > 0.9
-top = float(np.percentile(LF[inside], 99.5)) if inside.any() else float(LF.max())
-low = float(np.percentile(LF[inside], 3)) if inside.any() else 0.0
-t = np.clip((LF - low) / max(top - low, 1e-3), 0, 1.1)
-# A gamma pushes the body of the cloud down toward the shade so the billows
-# keep their modelling through the lens's defocus; the sunlit tops reach the
-# lit white (the film lands it at about 238) and roll off into it.
-k = 1.25 * t ** CLOUD_GAMMA
-k = np.where(k > 0.88, 0.88 + 0.12 * np.tanh((k - 0.88) / 0.12), k)
-lit = _lin(np.array(CLOUD_TOP, np.float32) / 255)
-shade = _lin(np.array(CLOUD_SHADE, np.float32) / 255)
-col = shade + (lit - shade) * k[..., None]
-# a little of the HDRI's own warmth and coolness through the relight
-ratio = F / np.maximum(F @ LW, 1e-4)[..., None]
-ratio = cv2.GaussianBlur(ratio, (0, 0), 3)
-col = col * np.clip(1 + 0.12 * (ratio - 1), 0.9, 1.1)
-col = _enc(col)
-print("cumulus: hdr top", round(top, 3), "low", round(low, 3))
 
 
 def blue_noise(shape, seed):
@@ -204,17 +121,200 @@ def blue_noise(shape, seed):
     return np.clip(n, -1.5, 1.5) / 255
 
 
-# ---- the clouds card
-ys, xs = np.nonzero(alpha > 1 / 255)
-pad = 8
+# ---- the card's view into the HDRI
+SSF = SS / 2
+cw, ch = round((CR[2] - CR[0]) * EW * SSF), round((CR[3] - CR[1]) * EH * SSF)
+U, V = card_grid(CR, cw, ch, SSF)
+X, Y = (U - UC) * EW, (V - VC) * EH / STRETCH
+d = np.stack([X, -Y, np.full_like(X, FOCAL)], -1)
+d /= np.linalg.norm(d, axis=-1, keepdims=True)
+a_ = np.radians(LAT0)
+y2 = d[..., 1] * np.cos(a_) + d[..., 2] * np.sin(a_)
+z2 = -d[..., 1] * np.sin(a_) + d[..., 2] * np.cos(a_)
+LAT = np.degrees(np.arcsin(np.clip(y2, -1, 1)))
+LON = LON0 + np.degrees(np.arctan2(d[..., 0], z2))
+del d, y2, z2, X, Y
+
+# ---- the HDRI around the cloud, at its native resolution
+print("reading", HDR)
+pano = cv2.imread(HDR, cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLOR)
+if pano is None:
+    sys.exit("cannot read " + HDR)
+PH, PW = pano.shape[:2]
+lo0, lo1 = KEEP_LON[0] - 8, KEEP_LON[1] + 8
+la0, la1 = KEEP_LAT[0] - 10, KEEP_LAT[1] + 8
+x0, x1 = int(lo0 / 360 * PW), int(lo1 / 360 * PW)
+y0, y1 = int((0.5 - la1 / 180) * PH), int((0.5 - la0 / 180) * PH)
+sub = np.ascontiguousarray(pano[y0:y1, x0:x1, ::-1]).astype(np.float32)
+del pano
+sub = np.maximum(np.minimum(np.nan_to_num(sub, posinf=50.0), 50.0), 1e-5)
+sh_, sw_ = sub.shape[:2]
+slon = lo0 + (np.arange(sw_, dtype=np.float32) + 0.5) / PW * 360
+slat = 90 - (y0 + np.arange(sh_, dtype=np.float32) + 0.5) / PH * 180
+SLON, SLAT = np.meshgrid(slon, slat)
+
+# ---- key the cumulus out of its sky (in the equirect)
+L = sub @ LW
+chroma = (sub[..., 2] - sub[..., 0]) / (sub[..., 2] + sub[..., 0] + 1e-6)
+clear = (chroma > 0.36) & (L < np.percentile(L, 60) * 1.35)
+clear = erode(clear, 4)
+B = pushpull(sub, clear.astype(np.float32))
+B = cv2.GaussianBlur(B, (0, 0), 8)
+LB = B @ LW
+sB = (B[..., 2] - B[..., 0]) / (B[..., 2] + B[..., 0] + 1e-6)
+S_CLOUD = 0.07  # a sunlit cumulus's own chroma
+a_s = np.clip((sB - chroma) / np.maximum(sB - S_CLOUD, 0.05), 0, 1)
+a_l = np.clip((L - LB) / np.maximum(1.4 * LB, 1e-3), 0, 1)
+alpha = np.maximum(a_s, a_l)
+alpha = np.where(alpha < 0.04, 0, alpha)
+F = B + (sub - B) / np.maximum(alpha, 0.08)[..., None]
+F = np.maximum(F, 0)
+del sub
+# A cumulus is opaque: holes in the body (pockets of shade the key reads as
+# sky) are filled, and the shaded flanks are firmed up into solid cloud in
+# their own blue shade; only the outermost fringe stays soft.
+solid = (alpha > 0.3).astype(np.uint8)
+flood = np.pad(solid, 1)
+mask = np.zeros((flood.shape[0] + 2, flood.shape[1] + 2), np.uint8)
+cv2.floodFill(flood, mask, (0, 0), 2)
+holes = flood[1:-1, 1:-1] == 0
+body = cv2.GaussianBlur((solid.astype(bool) | holes).astype(np.float32), (0, 0), 2.5)
+# (the body's blur is faded out with the key's own alpha, never cut where the
+# key ends: a cut there leaves a translucent plateau with a hard outer edge,
+# a pale halo round the cloud)
+alpha = np.maximum(smoothstep(0.08, 0.5, alpha), body * smoothstep(0.04, 0.25, alpha))
+alpha = np.maximum(alpha, holes.astype(np.float32))
+F = np.where(holes[..., None], pushpull(F, (~holes & (alpha > 0.9)).astype(np.float32)), F)
+
+# which clouds: the components wholly inside the keep window
+comp = (alpha > 0.15).astype(np.uint8)
+n, lab, st, _ = cv2.connectedComponentsWithStats(dilate(comp, 8).astype(np.uint8), 8)
+keep = np.zeros(n, bool)
+for i in range(1, n):
+    l, t_, w_, h_ = st[i, cv2.CC_STAT_LEFT], st[i, cv2.CC_STAT_TOP], st[i, cv2.CC_STAT_WIDTH], st[i, cv2.CC_STAT_HEIGHT]
+    lonA, lonB = slon[l], slon[min(sw_ - 1, l + w_ - 1)]
+    latT, latB = slat[t_], slat[min(sh_ - 1, t_ + h_ - 1)]
+    inside = lonA > KEEP_LON[0] and lonB < KEEP_LON[1] and latB > KEEP_LAT[0] and latT < KEEP_LAT[1]
+    keep[i] = inside and st[i, cv2.CC_STAT_AREA] > MIN_AREA
+    if st[i, cv2.CC_STAT_AREA] > MIN_AREA / 4:
+        print("  cloud %3d  lon %.1f..%.1f  lat %.1f..%.1f  area %7d %s" % (i, lonA, lonB, latB, latT, st[i, cv2.CC_STAT_AREA], "keep" if keep[i] else ""))
+sel = cv2.GaussianBlur(keep[lab].astype(np.float32), (0, 0), 3)
+alpha = alpha * np.clip(sel * 1.6, 0, 1)
+alpha = np.where(alpha < 0.02, 0, alpha)  # no faint veil anywhere off the cloud
+inside = alpha > 0.9
+
+# ---- relight
+LF = np.maximum(F @ LW, 1e-4)
+# the billows: a local-contrast boost in log luminance, at the scale of the
+# lobes and again at the scale of the cauliflower, measured inside the cloud
+# only (the sky round it would pull the edges down into a dark rim)
+lg = np.log(LF)
+for sig, amt in zip((14.0, 3.0), DETAIL):
+    wgt = cv2.GaussianBlur(alpha, (0, 0), sig) + 1e-4
+    base = cv2.GaussianBlur(lg * alpha, (0, 0), sig) / wgt
+    lg = base + amt * (lg - base)
+LF = np.exp(lg)
+# The HDRI's silhouette is dim all round (thin cloud, and the body firmed up
+# over it): kept as it is, it draws a blue-grey band round the cloud, a cut-out
+# rim. Along the edges that face the sun it takes the brightness of the lobe
+# just inside it, so a sunlit turret is lit right to its edge; the edges that
+# face away keep their shade.
+inner = (alpha > 0.5).astype(np.uint8)
+dist = cv2.distanceTransform(np.pad(inner, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
+hgt = cv2.GaussianBlur(inner.astype(np.float32), (0, 0), 10.0)
+gx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3)
+gy = cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3)
+facing = np.clip((-gx * SUN2D[0] - gy * SUN2D[1]) / (np.sqrt(gx * gx + gy * gy) + 1e-4), 0, 1)
+facing = cv2.GaussianBlur(facing, (0, 0), 4)
+rim = (1 - smoothstep(RIM[0], RIM[1], dist)) * smoothstep(0.0, 0.6, facing)
+env = cv2.GaussianBlur(cv2.dilate(LF, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * RIM[1] + 1, 2 * RIM[1] + 1))), (0, 0), 4)
+LF = np.maximum(LF, LF + rim * (RIM[2] * env - LF))
+top = float(np.percentile(LF[inside], 96))
+low = float(np.percentile(LF[inside], 8))
+t = np.clip((np.log(LF) - np.log(low)) / (np.log(top) - np.log(low)), 0, 1.3)
+# The HDRI's shaded flank is low in contrast (it is lit by the sky alone). The
+# silhouette's relief (its blurred coverage, at the scale of the big lobes and
+# of the billows), lit from the sun's side, puts the form back: the turrets'
+# upper right faces catch the sun, their lower left falls into shade.
+rel = np.zeros_like(alpha)
+for sig, w in ((90.0, 0.5), (36.0, 0.5), (12.0, 0.4)):
+    hgt = cv2.GaussianBlur((alpha > 0.5).astype(np.float32), (0, 0), sig)
+    gx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3) / 8 * sig * 2.5
+    gy = cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3) / 8 * sig * 2.5
+    # a surface rising toward the inside faces outward: the normal leans
+    # against the gradient
+    nx, ny = -gx, -gy
+    lam = (nx * SUN2D[0] + ny * SUN2D[1]) / np.sqrt(1 + nx * nx + ny * ny)
+    rel += w * lam
+t = t + FORM * rel
+# toward the base the cloud is in its own shadow: blue-grey underneath
+t = t * (1 - BASE_SHADE[2] * smoothstep(BASE_SHADE[0], BASE_SHADE[1], SLAT))
+# mixed in sRGB (perceptual) so the middle of the range is a real blue-grey
+# and not already white; the tops roll off into the lit white with no
+# shoulder that clips (the film lands it about 240)
+t = np.clip(t, 0, 1.3)
+k = 0.5 * t ** 1.25 + 0.5 * smoothstep(0.08, 1.0, t)
+k = np.where(k > 0.8, 0.8 + 0.2 * np.tanh((k - 0.8) / 0.2), k)
+if WORK:
+    os.makedirs(WORK, exist_ok=True)
+    for nm, im in (("k", k), ("rel", 0.5 + rel), ("t0", np.clip((np.log(LF) - np.log(low)) / (np.log(top) - np.log(low)), 0, 1))):
+        cv2.imwrite(os.path.join(WORK, nm + ".jpg"), (np.clip(im * (alpha > 0.02), 0, 1) * 255).astype(np.uint8)[::2, ::2])
+lit = np.array(CLOUD_TOP, np.float32) / 255
+shade = np.array(CLOUD_SHADE, np.float32) / 255
+col = _lin(shade + (lit - shade) * k[..., None])
+# The fringe's colour is un-mixed from very little cloud and comes out as
+# dark specks: it takes the colour of the cloud just inside it instead.
+wf = smoothstep(0.5, 0.95, alpha)[..., None]
+col = col * wf + pushpull(col, (alpha > 0.95).astype(np.float32)) * (1 - wf)
+print("cumulus: hdr top", round(top, 3), "low", round(low, 3))
+
+# ---- onto the card: premultiplied, through the view
+mu = (LON - lo0) / 360 * PW - 0.5
+mv = (90 - LAT) / 180 * PH - y0 - 0.5
+pm = np.dstack([col * alpha[..., None], alpha]).astype(np.float32)
+del col, F, B
+card = cv2.remap(pm, mu.astype(np.float32), mv.astype(np.float32), cv2.INTER_CUBIC, borderMode=cv2.BORDER_CONSTANT, borderValue=0)
+del pm, mu, mv
+ca_ = np.clip(card[..., 3], 0, 1)
+ca_ = np.where(ca_ < 1 / 255, 0, ca_)
+cc_ = np.clip(card[..., :3] / np.maximum(card[..., 3:], 1e-4), 0, 1)
+cc_ = np.where(ca_[..., None] > 0, cc_, _lin(shade))  # under no cloud: the shade (never seen)
+del card
+col = _enc(cc_)
+# the pano is upsampled about 1.7x onto the card: an unsharp mask on the
+# card's own scale brings the lit edges of the cauliflower back to crisp
+core = cv2.GaussianBlur(erode(ca_ > 0.6, 3).astype(np.float32), (0, 0), 2)
+col = np.clip(col + SHARPEN * core[..., None] * (col - cv2.GaussianBlur(col, (0, 0), 1.6)), 0, 1)
+alpha = ca_
+del cc_, ca_
+
+# ---- the clouds card: the cloud on a wide transparent margin, its alpha
+# feathered to 0 well inside every edge, origin and size on whole photo px
+ys, xs = np.nonzero(alpha > 0)
+pad = round(PAD * EW * SSF)
 cx0, cx1 = max(0, xs.min() - pad), min(cw, xs.max() + 1 + pad)
 cy0, cy1 = max(0, ys.min() - pad), min(ch, ys.max() + 1 + pad)
-rgba = np.dstack([col + blue_noise(col.shape[:2], 7), alpha])[cy0:cy1, cx0:cx1]
+cx0, cy0 = cx0 - cx0 % SS, cy0 - cy0 % SS
+cx1, cy1 = cx1 - (cx1 - cx0) % SS, cy1 - (cy1 - cy0) % SS
+alpha = alpha[cy0:cy1, cx0:cx1]
+col = col[cy0:cy1, cx0:cx1]
+hh, ww = alpha.shape
+fx = smoothstep(0.25 * pad, 0.75 * pad, np.minimum(np.arange(ww), ww - 1 - np.arange(ww)).astype(np.float32))
+fy = smoothstep(0.25 * pad, 0.75 * pad, np.minimum(np.arange(hh), hh - 1 - np.arange(hh)).astype(np.float32))
+alpha = alpha * fy[:, None] * fx[None, :]
+rgba = np.dstack([col + blue_noise(col.shape[:2], 7), alpha])
 q = np.clip(np.round(rgba * 255), 0, 255).astype(np.uint8)
+q[..., :3] = np.where(q[..., 3:] == 0, 0, q[..., :3])  # webp keeps no colour under 0 alpha
 os.makedirs(OUT, exist_ok=True)
 Image.fromarray(q, "RGBA").save(os.path.join(OUT, "clouds.webp"), quality=90, alpha_quality=100, method=6, exact=False)
-rect = [round(float(CR[0] + cx0 / EW), 5), round(float(CR[1] + cy0 / EH), 5), round(float(CR[0] + cx1 / EW), 5), round(float(CR[1] + cy1 / EH), 5)]
-print("wrote clouds.webp", q.shape[1], "x", q.shape[0], "rect", rect)
+rect = [round(float(CR[0] + cx0 / (EW * SSF)), 5), round(float(CR[1] + cy0 / (EH * SSF)), 5), round(float(CR[0] + cx1 / (EW * SSF)), 5), round(float(CR[1] + cy1 / (EH * SSF)), 5)]
+print("wrote clouds.webp", ww, "x", hh, "rect", rect)
+print("cumulus: edge alpha max", float(max(alpha[0].max(), alpha[-1].max(), alpha[:, 0].max(), alpha[:, -1].max())), "cover in frame", round(float(alpha.mean()), 3))
+# at photo resolution, for the flat photograph and the matte
+pw_, ph_ = ww * 2 // SS, hh * 2 // SS
+a_ph = cv2.resize(alpha, (pw_, ph_), interpolation=cv2.INTER_AREA)
+c_ph = cv2.resize(col * alpha[..., None], (pw_, ph_), interpolation=cv2.INTER_AREA) / np.maximum(a_ph, 1e-4)[..., None]
+cx0p, cy0p = round(CR[0] * EW + cx0 * 2 / SS), round(CR[1] * EH + cy0 * 2 / SS)  # photo px of the card's origin
 
 # ---- the sky card: the clear gradient alone
 p0 = load("p0.webp", "RGB")
@@ -230,13 +330,12 @@ photo = load("photo.webp", "RGB")
 ox, oy = round(-RECTS[0][0] * EW), round(-RECTS[0][1] * EH)
 old_back = p0[oy:oy + EH, ox:ox + EW]
 new_back = G[oy:oy + EH, ox:ox + EW].copy()
-fx, fy = round(-CR[0] * EW) - cx0, round(-CR[1] * EH) - cy0  # the photo's origin in the clouds card
 ca = np.zeros((EH, EW), np.float32)
 cc = np.zeros((EH, EW, 3), np.float32)
-r0, r1 = max(0, -fy), min(EH, q.shape[0] - fy)
-c0, c1 = max(0, -fx), min(EW, q.shape[1] - fx)
-ca[r0:r1, c0:c1] = alpha[cy0:cy1, cx0:cx1][r0 + fy:r1 + fy, c0 + fx:c1 + fx]
-cc[r0:r1, c0:c1] = col[cy0:cy1, cx0:cx1][r0 + fy:r1 + fy, c0 + fx:c1 + fx]
+r0, r1 = max(0, cy0p), min(EH, cy0p + ph_)
+c0, c1 = max(0, cx0p), min(EW, cx0p + pw_)
+ca[r0:r1, c0:c1] = a_ph[r0 - cy0p:r1 - cy0p, c0 - cx0p:c1 - cx0p]
+cc[r0:r1, c0:c1] = c_ph[r0 - cy0p:r1 - cy0p, c0 - cx0p:c1 - cx0p]
 new_back = new_back * (1 - ca[..., None]) + cc * ca[..., None]
 clear_share = np.ones((EH, EW), np.float32)
 for k_ in range(1, 7):
@@ -271,13 +370,10 @@ print("wrote mattes.png (8 planes)")
 
 if WORK:
     os.makedirs(WORK, exist_ok=True)
-    pv = G[:, :, :]
-    pv = cv2.resize(pv, (sw // 3, sh // 3), interpolation=cv2.INTER_AREA)
-    a3 = cv2.resize(alpha, (cw // 3, ch // 3), interpolation=cv2.INTER_AREA)
-    c3 = cv2.resize(col, (cw // 3, ch // 3), interpolation=cv2.INTER_AREA)
-    oxx, oyy = round((CR[0] - RECTS[0][0]) * EW / 3), round((CR[1] - RECTS[0][1]) * EH / 3)
-    hh, ww = a3.shape
-    pv[oyy:oyy + hh, oxx:oxx + ww] = pv[oyy:oyy + hh, oxx:oxx + ww] * (1 - a3[..., None]) + c3 * a3[..., None]
+    pv = G.copy()
+    oxx, oyy = cx0p - round(RECTS[0][0] * EW), cy0p - round(RECTS[0][1] * EH)
+    pv[oyy:oyy + ph_, oxx:oxx + pw_] = pv[oyy:oyy + ph_, oxx:oxx + pw_] * (1 - a_ph[..., None]) + c_ph * a_ph[..., None]
+    pv = cv2.resize(pv, (sw // 2, sh // 2), interpolation=cv2.INTER_AREA)
     cv2.imwrite(os.path.join(WORK, "sky.jpg"), (np.clip(pv[:, :, ::-1], 0, 1) * 255).astype(np.uint8))
-    cv2.imwrite(os.path.join(WORK, "alpha.jpg"), (np.clip(a3, 0, 1) * 255).astype(np.uint8))
+    cv2.imwrite(os.path.join(WORK, "alpha.jpg"), (np.clip(a_ph, 0, 1) * 255).astype(np.uint8))
     cv2.imwrite(os.path.join(WORK, "photo.jpg"), (np.clip(cv2.resize(ph, (1024, 678), interpolation=cv2.INTER_AREA)[:, :, ::-1], 0, 1) * 255).astype(np.uint8))

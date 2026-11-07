@@ -67,9 +67,13 @@ const PLANES = [
   { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
   // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
   // between the sky and the town so a swing slides it against the roofs.
-  // A cut-out that fades out before its edges, so it need not cover the
-  // window; it throws no shadow on the sky behind it (a cloud is not paper).
-  { file: "clouds", rect: [-0.03299, 0.2874, 0.68332, 0.93121], o: 0.53, ends: [true, true, true, true], cast: false },
+  // A cut-out on a wide transparent margin, feathered to 0 well inside every
+  // edge, so it need not cover the window; it throws no shadow on the sky
+  // behind it (a cloud is not paper). It is far off, almost at infinity: it
+  // takes only a share of the lens's defocus (dof), of the air's haze and of
+  // the shadows the cards in front throw (shade), so focused on the near
+  // planes it stays a lit, glowing form, not a smear.
+  { file: "clouds", rect: [0.09375, 0.0944, 0.93555, 1.10324], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
@@ -669,7 +673,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
       if (opened <= 0) break; // flat: the photograph alone
       const P = PLANES[k];
       const z = G.zs[k];
-      const coc = APERTURE * s * (Math.abs(z - focusZ) / z) * dpr;
+      const coc = APERTURE * s * (Math.abs(z - focusZ) / z) * dpr * (P.dof ?? 1);
       // the quad grows by the blur so a defocused edge is not cut
       const m = coc / dpr / G.printW;
       const r = P.rect;
@@ -679,8 +683,8 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.uniform3f(U.uPlane, halves[k * 2], halves[k * 2 + 1], z);
       gl.uniform1f(U.uCoc, coc);
       gl.uniform1i(U.uK, k);
-      gl.uniform1f(U.uShadow, shadow);
-      gl.uniform1f(U.uHaze, clamp(((z - frontZ) / G.printW) * 0.09 * s, 0, 0.14));
+      gl.uniform1f(U.uShadow, shadow * (P.shade ?? 1));
+      gl.uniform1f(U.uHaze, clamp(((z - frontZ) / G.printW) * 0.09 * s, 0, 0.14) * (P.haze ?? 1));
       gl.uniform1f(U.uOpacity, 1);
       gl.bindTexture(gl.TEXTURE_2D, planeTex[k].t);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
@@ -800,7 +804,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     // The window: the eye stops where a card's overscan runs out, so no
     // card edge ever comes into it. A hand that pushes further is held at
     // the edge, as by the mat itself.
-    const cocs = G.zs.map((z) => APERTURE * s * (Math.abs(z - focusZ) / z) * stage.dpr);
+    const cocs = G.zs.map((z, k) => APERTURE * s * (Math.abs(z - focusZ) / z) * stage.dpr * (PLANES[k].dof ?? 1));
     const lim = swingLimit(G, yawDeg, pitchDeg, cocs);
     if (lim < 1) {
       yawDeg *= lim;
