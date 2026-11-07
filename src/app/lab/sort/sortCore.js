@@ -21,7 +21,24 @@ export const LO1 = 0.0;
 export const HI = 1.0;
 export const JUMP = 16; // a depth step this large between neighbours breaks a span
 export const EDGE = 18; // depth step (0..255 over 4 layout px) that marks a silhouette
-export const REACH = 760 * S; // how far past the last blade of grass a span may run, at m = 1
+export const REACH = 760 * S; // a sort line's reach at m = 1, before the clamp below
+// Span exit clamp: a span ends once it has run this fraction of its line's
+// reach through pixels that are not vegetation since the last one that was.
+// So the wave carries its own green out of the verge and over a gap (the
+// road, a wall, a strip of sky) but never drags a long tail of sky behind it.
+export const EXIT = 0.15;
+// Sort key: luminance pulled down by greenness, so within a span the greens
+// sort first (they stay rooted where the span starts and fill the line up the
+// curl) and the sky and wall highlights are pushed out to the crest.
+export const GREEN_W = 0.5;
+export const VEG_RUN = 4; // green texels in a row that count as grass
+export const GREEN_FULL = 32; // g over max(r, b), in 8-bit steps, that counts as fully green
+export function sortKey(r, g, b) {
+  const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
+  const green = clamp((g - Math.max(r, b)) / GREEN_FULL, 0, 1);
+  // Offset so the key stays in 0..1 for 16-bit storage.
+  return clamp((l - GREEN_W * green + GREEN_W) / (1 + GREEN_W), 0, 1);
+}
 
 export const U0 = -CX; // u of domain texel 0's left edge
 export const RMAX = Math.ceil(Math.max(Math.hypot(GW - CX, CY), Math.hypot(GW - CX, GH - CY), GH - CY, CY)) + 1;
@@ -127,10 +144,11 @@ const isVeg = (r, g, b) => g > r + 6 && g > b + 12;
 //
 // Field, per sort-line texel: R,G luminance (16 bit), B depth (255 on a
 // silhouette, never in a span), A reach: 0 off the photo, else 1 + 253 x how
-// far this texel lies past the last vegetation on its line, as a fraction of
-// that line's reach (255 = out of reach). A span may only enter at grass and
-// run on, through sky and whatever else, as far as the mask allows (m >= reach)
-// and until a silhouette or a depth jump. So grass is carried out of the verge
+// many non-vegetation pixels lie between this texel and the last vegetation on
+// its line, as a fraction of EXIT x that line's reach (255 = out of reach).
+// key: the sort key (sortKey above, 16 bit) of the pixel at each texel. A span
+// may only enter at grass and run on, through sky and whatever else, as far as
+// the mask allows (m >= reach) and until a silhouette or a depth jump. So grass is carried out of the verge
 // and over the sky, and a pole or a sign, with no grass of its own, is never
 // entered.
 export function bake(photoPx, depthPx, mask8, sorted) {
@@ -210,6 +228,7 @@ export function bake(photoPx, depthPx, mask8, sorted) {
   const N = DW * DH;
   const field = new Uint8Array(N * 4);
   const lum16 = new Uint16Array(N);
+  const key16 = new Uint16Array(N);
   const depth = new Uint8Array(N);
   const reachQ = new Uint8Array(N);
   const mval = new Uint8Array(N);
@@ -218,6 +237,7 @@ export function bake(photoPx, depthPx, mask8, sorted) {
     const arc = Math.PI * r;
     let last = -1e9; // u of the last grass on this line
     let prevD = -1;
+    let vegRun = 0; // consecutive vegetation texels up to here
     for (let i = 0; i < DW; i++) {
       // inv(), inlined: this loop runs ~10M times at load.
       const u = U0 + i + 0.5;
@@ -236,6 +256,7 @@ export function bake(photoPx, depthPx, mask8, sorted) {
       }
       if (x < 0 || y < 0 || x >= GW || y >= GH) {
         prevD = -1;
+        vegRun = 0;
         continue;
       }
       const k = j * DW + i;
@@ -248,10 +269,14 @@ export function bake(photoPx, depthPx, mask8, sorted) {
       const d = edge[p] ? 255 : Math.min(254, dep[p]);
       // A silhouette or a depth jump ends whatever run of grass came before.
       if (d === 255 || (prevD >= 0 && Math.abs(d - prevD) >= JUMP)) last = -1e9;
-      if (d < 255 && isVeg(photoPx[s], photoPx[s + 1], photoPx[s + 2])) last = u;
+      // Grass, as a span root, is a few green texels in a row: a lone green
+      // speck in the asphalt roots nothing, so the road grows no strips.
+      vegRun = d < 255 && isVeg(photoPx[s], photoPx[s + 1], photoPx[s + 2]) ? vegRun + 1 : 0;
+      if (vegRun >= VEG_RUN) last = u;
       prevD = d;
-      const rq = 1 + Math.round((253 * (u - last)) / reach[j]);
+      const rq = 1 + Math.round((253 * (u - last)) / (EXIT * reach[j]));
       lum16[k] = l16;
+      key16[k] = Math.round(sortKey(photoPx[s], photoPx[s + 1], photoPx[s + 2]) * 65535);
       depth[k] = d;
       reachQ[k] = rq > 254 ? 255 : rq;
       if (sorted) mval[k] = Math.round(maskAt(mask8, x, y) * 255);
@@ -265,7 +290,7 @@ export function bake(photoPx, depthPx, mask8, sorted) {
   // ---- the resting sort, on the CPU: same spans, keys and tie-break as PASS_FS
   const state = new Uint16Array(N);
   for (let k = 0; k < N; k++) state[k] = k % DW;
-  if (!sorted) return { field, state };
+  if (!sorted) return { field, key: key16, state };
   const inSpan = (k) => {
     const rq = reachQ[k];
     if (rq === 0 || depth[k] === 255 || mval[k] < 1) return false;
@@ -293,9 +318,10 @@ export function bake(photoPx, depthPx, mask8, sorted) {
       }
       i++;
       if (run.length < 2) continue;
-      const order = run.slice().sort((a, b) => lum16[row + b] - lum16[row + a] || a - b);
+      // Greenest and darkest first, ties by home index.
+      const order = run.slice().sort((a, b) => key16[row + a] - key16[row + b] || a - b);
       for (let n = 0; n < run.length; n++) state[row + run[n]] = order[n];
     }
   }
-  return { field, state };
+  return { field, key: key16, state };
 }

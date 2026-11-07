@@ -13,12 +13,14 @@ import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, JUMP, U0, DW, DH, fwd, demo
 // texel per pixel), so every sort line is one row of a "domain" texture and
 // the sort itself is plain row sorting.
 //
-// Spans (ASDF). A span may only start at grass: a position on a row belongs
-// to a span when it lies within reach of the last green pixel before it on
-// its line, the brush mask m there is on, and its luminance lies inside
-// [lo(m), hi]. Reach and lo both follow m, so brushing longer or harder lets
-// a span run further past the grass (out of the verge, up and over the sky)
-// and lets darker pixels join. A span breaks only at a true silhouette: the
+// Spans (ASDF). A span may only start at grass (a few green pixels in a row):
+// a position on a row belongs to a span when it lies within reach of the last
+// grass before it on its line, the brush mask m there is on, and its
+// luminance lies inside [lo(m), hi]. The reach is short: a span ends once it
+// has run 15% of its line's reach through anything that is not vegetation,
+// so it bridges a gap (the road, a wall, a strip of sky) but never trails a
+// long tail of sky. Reach and lo both follow m, so brushing longer or harder
+// lets a span run further past the grass and lets darker pixels join. A span breaks only at a true silhouette: the
 // outline of a pole, a sign or a cabinet in the photo's depth map (Depth
 // Anything V2), or a step in depth between neighbours. So the curl's lines
 // carry runs of green up into the sky as one wave, and never smear a pole.
@@ -27,12 +29,14 @@ import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, JUMP, U0, DW, DH, fwd, demo
 // R16UI permutation texture: each texel holds the home index of the pixel
 // now sitting there. Every pass compares disjoint neighbour pairs (odd pairs,
 // then even pairs). Inside a span the pair is ordered by the home pixel's
-// luminance, brightest first (ties by home index), so light pools where a sort
-// line starts and the dark greens are carried up the curl into the sky; everywhere else it is ordered by home
-// index, which is the identity, so any pixel outside a span flows back home
-// one position per pass. Erasing the mask (a long press) therefore un-sorts
-// by the same network: the darkest pixels leave their spans first and every
-// pixel slides back to where it came from.
+// sort key, luminance pulled down by greenness, smallest first (ties by home
+// index): the greens stay rooted where the span starts and fill the line as
+// one body up the curl, and the sky and wall highlights are pushed out to the
+// crest as pale tips. Everywhere else the pair is ordered by home index, which
+// is the identity, so any pixel outside a span flows back home one position
+// per pass. Erasing the mask (a long press) therefore un-sorts by the same
+// network: the darkest pixels leave their spans first and every pixel slides
+// back to where it came from.
 //
 // The resting wave is the same sort run to completion on the CPU at load
 // (identical keys and tie-break, so it is a fixed point of the GPU network):
@@ -96,6 +100,7 @@ precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
 uniform sampler2D uField;   // lum hi, lum lo, depth (255 = silhouette), reach (0 = off the photo)
+uniform usampler2D uKey;    // R16UI sort key of the pixel at home on each texel: greenest and darkest first
 uniform sampler2D uMask;    // R8, one texel per mask cell, LINEAR
 uniform int uPhase;
 uniform float uLo0;
@@ -136,9 +141,9 @@ void main() {
     && inSpan(fl, maskAt(left, q.y)) && inSpan(fr, maskAt(right, q.y));
   bool sw;
   if (open) {
-    float ka = lum(texelFetch(uField, ivec2(int(a), q.y), 0));
-    float kb = lum(texelFetch(uField, ivec2(int(b), q.y), 0));
-    sw = ka < kb || (ka == kb && a > b);
+    uint ka = texelFetch(uKey, ivec2(int(a), q.y), 0).r;
+    uint kb = texelFetch(uKey, ivec2(int(b), q.y), 0).r;
+    sw = ka > kb || (ka == kb && a > b);
   } else {
     sw = a > b;
   }
@@ -245,7 +250,7 @@ export async function createSort(host, { embedded = false } = {}) {
   };
   syncMask8();
 
-  const { field, state } = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH), mask8, qMask !== "none");
+  const { field, key, state } = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH), mask8, qMask !== "none");
   depthBm.close?.();
 
   // ---- GL resources
@@ -261,6 +266,7 @@ export async function createSort(host, { embedded = false } = {}) {
     return t;
   };
   const fieldTex = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, DW, DH, field);
+  const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, key);
   const maskTex = tex(gl.R8, gl.RED, gl.UNSIGNED_BYTE, MW, MH, mask8, gl.LINEAR);
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {
@@ -391,6 +397,9 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.uniform1i(u.uState, 0);
     gl.uniform1i(u.uField, 1);
     gl.uniform1i(u.uMask, 2);
+    gl.uniform1i(u.uKey, 3);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, keyTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, fieldTex);
     gl.activeTexture(gl.TEXTURE2);
@@ -549,7 +558,7 @@ export async function createSort(host, { embedded = false } = {}) {
         gl.deleteTexture(filmT.tex);
         gl.deleteFramebuffer(filmT.fbo);
       }
-      for (const t of [...stateTex, fieldTex, maskTex, photoTex]) gl.deleteTexture(t);
+      for (const t of [...stateTex, fieldTex, keyTex, maskTex, photoTex]) gl.deleteTexture(t);
       for (const f of stateFbo) gl.deleteFramebuffer(f);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
