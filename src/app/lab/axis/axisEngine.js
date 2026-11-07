@@ -1,9 +1,11 @@
 import { createStage, clamp } from "../_kit/stage";
 
 // One word on Geist's weight axis. Pointer x is the axis: hairline at the
-// left edge, black at the right. Each letter follows the pointer on a
-// spring that softens with its distance from the pointer, so a sweep
-// travels through the word as a wave. A drag shears the letters into an oblique
+// left edge, black at the right. That weight is a crest under the pointer
+// that falls to hairline a few letters away, so the word always holds a
+// gradient through the axis, and each letter springs onto its own weight
+// a beat behind its neighbour nearer the pointer, so a sweep travels
+// through the word as a wave. A drag shears the letters into an oblique
 // about their x-height centre; release springs them upright.
 //
 // Spacing is set, not approximated: every letter's advance and every pair's
@@ -21,7 +23,14 @@ const lawPx = (s) => -0.043 * (s - 12);
 
 const MAX_LEAN = (12 * Math.PI) / 180; // a real oblique, not a cartoon
 const BACK_LEAN = (4 * Math.PI) / 180; // backslant kept modest
-const SPREAD = 3.2; // how much slower a letter a box-width away responds
+const SPREAD = 3.2; // how much slower the lean is a box-width away
+// The wave, in letter widths: the pointer's weight is held at full strength
+// under the hand and falls to hairline over REACH letters either side, so
+// any frame holds hairline and black in the same word.
+const REACH = 4.5;
+const LAG = 0.55; // how much slower each letter-width further out responds
+const REST = 0.84; // where the intro leaves the pointer
+const smooth = (u) => u * u * (3 - 2 * u);
 
 let fontPromise = null;
 function loadFont() {
@@ -48,7 +57,7 @@ export async function createAxis(host, { embedded = false } = {}) {
   const params = new URLSearchParams(location.search);
   const still = params.has("t") ? clamp(+params.get("t") || 0, 0, 1) : null;
   const stillLean = params.has("lean") ? +params.get("lean") : 0;
-  const stillAt = params.has("at") ? +params.get("at") : 0.3;
+  const stillAt = params.has("at") ? +params.get("at") : 0.2;
   const stillDur = params.has("dur") ? Math.max(0.05, +params.get("dur")) : 0.55;
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
 
@@ -105,6 +114,7 @@ export async function createAxis(host, { embedded = false } = {}) {
   let size = 200;
   let track = 0;
   let baseline = 0;
+  let unit = 1; // one average letter advance in px, at a book weight
   let lastSig = "";
   stage.onResize((w, h) => {
     lastSig = ""; // the canvas was cleared
@@ -117,6 +127,7 @@ export async function createAxis(host, { embedded = false } = {}) {
     size = (target - (n - 1) * 0.043 * 12) / (em900 - 0.043 * (n - 1));
     size = Math.min(size, (H * 0.74) / capH);
     track = lawPx(size);
+    unit = (layoutEm(chars.map(() => 500))[n] * size + track * (n - 1)) / n;
     baseline = Math.round(H / 2 + (capH * size) / 2);
   });
 
@@ -178,7 +189,8 @@ export async function createAxis(host, { embedded = false } = {}) {
       weightX = fx;
       lean = simT > 0.8 ? stillLean * (Math.PI / 180) * ease(u * 1.4) : 0;
     } else if (!touched || (embedded && stage.idleFor() > 5000)) {
-      // Intro: from hairline across to black and back to a book weight;
+      // Intro: from hairline across to black, then settle just short of it
+      // so the word rests as a ramp from hairline W to a black t;
       // embedded tiles keep drifting slowly when nobody is there.
       const t = embedded && touched ? simT : simT;
       const period = 7.5;
@@ -187,25 +199,28 @@ export async function createAxis(host, { embedded = false } = {}) {
       px = fx;
       weightX = fx;
       if (!embedded && !touched && simT > period * 0.5 + 0.2) {
-        // On the page the intro runs once and comes to rest mid-axis.
+        // On the page the intro runs once and comes to rest.
         const r = clamp((simT - period * 0.5 - 0.2) / 2.2, 0, 1);
-        px = weightX = 0.9 - (0.9 - 0.42) * easeInOut(r);
+        px = weightX = 0.9 - (0.9 - REST) * easeInOut(r);
       }
     }
 
-    // The wave: every letter is a spring onto the pointer's weight, stiffer
-    // the nearer it sits, so a change starts under the pointer and rolls out
-    // through the word. (A spring per letter rather than a delay line: it is
-    // interruptible, and a reversal never has to finish an old wave first.)
+    // The wave: the pointer's weight is a crest that falls to hairline over
+    // REACH letter widths, so the word always reads as a gradient through
+    // the axis. Each letter springs onto its own target, softer the further
+    // out it sits, so the crest trails a moving hand by a beat per letter.
+    // (A spring rather than a delay line: it is interruptible, and a
+    // reversal never has to finish an old wave first.)
     const tw = weightOf(weightX);
     const pX = px * W;
     for (let i = 0; i < n; i += 1) {
       const g = glyphs[i];
+      const dl = Math.abs(centres[i] - pX) / unit; // in letter widths
+      const target = tw + (W_MIN - tw) * smooth(clamp(dl / REACH, 0, 1));
       const d = reduced ? 0 : Math.min(1, Math.abs(centres[i] - pX) / Math.max(1, W));
-      const reach = 1 + SPREAD * d;
       // Weight: critically damped, so it never overshoots past the axis.
-      const om = 24 / reach;
-      const a = om * om * (tw - g.w) - 2 * om * g.wv;
+      const om = reduced ? 30 : 22 / (1 + LAG * dl);
+      const a = om * om * (target - g.w) - 2 * om * g.wv;
       g.wv += a * dt;
       g.w = clamp(g.w + g.wv * dt, W_MIN, W_MAX);
       // Lean: held firmly under the hand; on release a little under
