@@ -18,9 +18,13 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG } from "./grass";
 //
 // The sky behind (sky.webp) is a real summer cumulus sky cut from an HDRI
 // looking up into the dome, aimed so its sun sits on the photograph's
-// (tools/depth/bakes/kaze/sky_hdri.py): sunlit warm-white domes, skylight-blue
-// shaded flanks. It drifts with a two-phase flow map (Vlachos 2010), faster
-// toward the zenith, and the clouds lean after your gusts.
+// (tools/depth/bakes/kaze/sky_hdri.py) and turned so the frame's middle and
+// top are open cobalt: the sun burns through the edge of the big cumulus in
+// the top left (its shaded base pushed into that corner), and a lit dome
+// rises behind the grass. Sunlit tops roll off to a warm cream white, the
+// shaded flanks go skylight blue. It drifts with a two-phase flow map
+// (Vlachos 2010), faster toward the zenith, and the clouds lean after your
+// gusts.
 //
 // Query: ?gust=demo throws a scripted gust; ?t=seconds runs the wind that long
 // at a fixed step and holds it (a still); ?breeze=0..2 scales the idle air;
@@ -114,10 +118,14 @@ void main() {
   zen *= zen;
   sky *= mix(vec3(1.0), vec3(0.72, 0.9, 1.0), 0.7 * zen * blue);
   // A print's white is not the sun's: the near-white of the lit cloud carries
-  // on past paper white, into the shoulder, pale warm. Away from the sun only;
-  // the sun's own light is the glow below.
-  float hl = smoothstep(0.55, 1.0, max(sky.r, max(sky.g, sky.b)));
-  sky *= 1.0 + vec3(0.2, 0.18, 0.14) * hl * hl * smoothstep(0.06, 0.2, r);
+  // on past paper white, into the shoulder, and rolls off warm. The film's
+  // per-channel curve bleaches whatever reaches it there back toward neutral
+  // (and its highlight split tone leans cool), so the warmth is set here,
+  // ahead of it, at the strength that lands the brightest domes and the
+  // sun's surround on a cream about #FFF3E2 rather than a cool grey. Cloud
+  // only: the open blue (which also reaches these levels) is left alone.
+  float hl = smoothstep(0.55, 1.0, max(sky.r, max(sky.g, sky.b))) * (1.0 - blue);
+  sky *= 1.0 + vec3(0.34, 0.16, -0.03) * hl * hl;
   // The sun: a small hot core and a smooth exponential roll-off, three
   // widths summed, warm white, added over the sky so the cloud texture runs
   // on through it, with no edge anywhere for a ring to form on.

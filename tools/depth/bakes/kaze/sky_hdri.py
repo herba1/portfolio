@@ -7,10 +7,19 @@ Poly Haven's "Kloofendal 48d Partly Cloudy (Pure Sky)" (Greg Zaal, Jarod
 Guest; CC0, https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky):
 a pinhole camera pitched up into the dome, aimed so that the HDRI's sun
 lands where the photograph's sun is (SUN in kazeEngine.js), and rolled about
-that sun so the big sunlit cumulus fills the frame to its right.
+that sun (ROLL -25) so the camera looks down the sun's side of the dome, away
+from the big cumulus: the sun burns through that cloud's sunlit edge in the
+top-left corner with its shaded base pushed up off the frame, and the middle
+and top of the frame are open deep blue with a lit cumulus dome rising from
+the grass below. (Rolled the other way, toward +25, the big cloud's shaded
+underside fills the middle of the frame as a flat blue-grey.) At this roll the
+zenith is just off the top-left of the frame, so the sky's up runs with the
+grass's convergence.
 
 The HDRI is linear radiance. It is printed with a smooth shoulder so the lit
-domed tops keep their modelling instead of clipping, and the sun's own core
+domed tops keep their modelling instead of clipping, and up that shoulder the
+colour is drawn round to a warm paper white (#FFF3E2) so the sun's surround
+and the sunlit domes roll off cream, never a cool grey. The sun's own core
 is held down (the engine draws the sun and its glow analytically).
 
   python tools/depth/bakes/kaze/sky_hdri.py path/to/kloofendal_48d_partly_cloudy_puresky_8k.hdr [out_dir]
@@ -25,7 +34,7 @@ from PIL import Image
 W, H = 3600, 2400  # finer than the plate: the crop is magnified about 1.5x on a wide screen
 SUN = (0.145, 0.2318)          # image uv of the photograph's sun
 HFOV = float(os.environ.get("HFOV", 78))
-ROLL = float(os.environ.get("ROLL", 25))
+ROLL = float(os.environ.get("ROLL", -25))
 EXPO = float(os.environ.get("EXPO", 0.34))
 SCALE = float(os.environ.get("SCALE", 1.0))   # preview scale
 SHADE = float(os.environ.get("SHADE", 0.55))   # skylight blue in the shaded cloud
@@ -36,6 +45,10 @@ EDGE = float(os.environ.get("EDGE", 14))       # px at 3600 wide: how far the li
 LIFT = float(os.environ.get("LIFT", 1.0))      # luminance gamma under the shoulder
 KNEE = float(os.environ.get("KNEE", 0.5))
 SUNR = float(os.environ.get("SUNR", 6))      # degrees: the aureole eased to white
+WARMS = float(os.environ.get("WARMS", 1.0))    # how far the shoulder is drawn to the warm white
+# the shoulder's white, #FFF3E2 in linear light, and the same at unit luminance
+WARM_WHITE = np.array([1.0, 0.896, 0.761], np.float32)
+WARM_UNIT = WARM_WHITE / float(WARM_WHITE @ np.array([0.2126, 0.7152, 0.0722], np.float32))
 
 
 def load(path):
@@ -133,9 +146,17 @@ def tone(L):
     # the blue beside it
     Yt = np.power(np.clip(Yt, 0, None), LIFT)
     out = L * (Yt / Y)[..., None]
-    # what passes white desaturates to white rather than clipping per channel
+    # The shoulder's colour. Up the shoulder the light is the sun's, on the
+    # domes and in the aureole alike: it is drawn round to a warm paper white
+    # (about #FFF3E2) at its own luminance, so the sunlit tops and the sun's
+    # surround roll off cream rather than bleaching to the cool grey of a
+    # per-channel clip. Below the knee nothing moves.
+    w = (smooth(k, 1.0, Yt) ** 1.5 * WARMS)[..., None]
+    out = out * (1 - w) + Yt[..., None] * WARM_UNIT * w
+    # and what passes white desaturates to that same white rather than
+    # clipping per channel
     m = np.maximum(out.max(-1, keepdims=True), 1e-6)
-    return np.clip(np.where(m > 1, out / m + (1 - 1 / m), out), 0, 1)
+    return np.clip(np.where(m > 1, out / m + (1 - 1 / m) * WARM_WHITE, out), 0, 1)
 
 
 def smooth(e0, e1, x):
@@ -185,10 +206,10 @@ def grade(T, ang):
     return cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
 
 
-def main():
-    hdr, HH = load(sys.argv[1])
-    out = sys.argv[2] if len(sys.argv) > 2 else None
+def bake(hdr):
+    """The print, from the upper hemisphere as load() returns it."""
     WW = hdr.shape[1]
+    HH = 2 * (hdr.shape[0] - 64)
     Y = hdr @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     iy, ix = np.unravel_index(np.argmax(cv2.GaussianBlur(Y, (0, 0), 3)), Y.shape)
     sun = dir_of((ix + 0.5) / WW, (iy + 0.5) / HH)
@@ -221,7 +242,13 @@ def main():
     Ls = L @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     print("lum pct 5/50/95/99.5", [round(float(np.percentile(Ls, p)), 3) for p in (5, 50, 95, 99.5)])
     s = grade(tone(L * EXPO), ang)
-    img = (s * 255 + 0.5).astype(np.uint8)
+    return (s * 255 + 0.5).astype(np.uint8)
+
+
+def main():
+    hdr, _ = load(sys.argv[1])
+    out = sys.argv[2] if len(sys.argv) > 2 else None
+    img = bake(hdr)
     if out:
         Image.fromarray(img).save(os.path.join(out, "sky.webp"), quality=90, method=6)
     else:
