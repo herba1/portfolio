@@ -17,8 +17,10 @@ import { createWind, GX, GY, GY0 } from "./wind";
 // of a stalk hardly moves and its tip moves most, a smooth displacement field
 // reads as stalks bending, not sliding, and they cross the clouds as they go.
 //
-// The sky behind (sky.webp, the photograph where it is surely sky and filled
-// behind the grass) drifts with a two-phase flow map (Vlachos 2010), faster
+// The sky behind (sky.webp) is a real summer cumulus sky cut from an HDRI
+// looking up into the dome, aimed so its sun sits on the photograph's
+// (tools/depth/bakes/kaze/sky_hdri.py): sunlit warm-white domes, skylight-blue
+// shaded flanks. It drifts with a two-phase flow map (Vlachos 2010), faster
 // toward the zenith, and the clouds lean after your gusts.
 //
 // Query: ?gust=demo throws a scripted gust; ?t=seconds runs the wind that long
@@ -56,7 +58,7 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uPlate;  // the grass, sky unmixed out of it
 uniform sampler2D uSky;    // the sky behind it
-uniform sampler2D uAux;    // r coverage, g lever, b highlight diffusion (sqrt)
+uniform sampler2D uAux;    // r coverage, g lever (b, the old sky's diffusion, is unused)
 uniform sampler2D uLever;  // aux.g with its slope limited (see leverTexture)
 uniform sampler2D uWind;   // GX x GY: bend.xy, wind.xy (m/s)
 uniform float uTime;
@@ -64,6 +66,7 @@ uniform float uCloudT;     // cloud flow clock
 uniform vec2 uCloudV;      // cloud drift at the top of the frame, uv / s
 uniform float uExpo;
 uniform float uLod;
+uniform vec2 uSkyLod;      // the sky's own: x its sharp level, y uLod at its size (for the blurs)
 uniform float uDebug;
 uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
@@ -132,8 +135,8 @@ void main() {
   const float CP = 18.0;
   float c0 = fract(uCloudT / CP);
   float c1 = fract(uCloudT / CP + 0.5);
-  vec3 a0 = textureLod(uSky, uv - v * (c0 * CP), uLod).rgb;
-  vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uLod).rgb;
+  vec3 a0 = textureLod(uSky, uv - v * (c0 * CP), uSkyLod.x).rgb;
+  vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.x).rgb;
   float cw = abs(1.0 - 2.0 * c0);
   vec3 sky = toLin(mix(a1, a0, cw));
   // ---- the sky's grade (the sky layer only; the grass is never touched) ----
@@ -141,46 +144,36 @@ void main() {
   // clouds drift past it, so round it the sky is read where it was shot.
   vec2 sd = (uv - SUN) * vec2(${ASPECT.toFixed(2)}, 1.0);
   float r = length(sd);
-  // The photograph's sun is a clipped disc with a stepped flare ring round
-  // it; within a few radii it is read heavily blurred, so the disc and the
-  // ring melt into one smooth mound for the glow below to sit on.
-  vec3 near = toLin(textureLod(uSky, uv, uLod + 5.0).rgb);
-  sky = mix(sky, near, exp(-r * r / (2.0 * 0.05 * 0.05)));
-  // Where the flare veils the blue round the sun the photograph went a grey
-  // cream. Take the veil back out where it is dull (lit cloud, brighter than
-  // the veil, is left as it is): the grey under the veil is the sky's blue.
-  float Y0 = dot(sky, vec3(0.2126, 0.7152, 0.0722));
-  float dull = 1.0 - smoothstep(0.45, 0.8, Y0);
-  float veil = 0.55 * exp(-r / 0.16) * dull * smoothstep(0.03, 0.09, r);
-  sky = max((sky - veil * vec3(0.5, 0.5, 0.46)) / (1.0 - veil), vec3(0.0));
-  // Form in the cloud: the bake's fill behind the grass is soft, so the
-  // sky's local contrast is lifted a little (its luminance against a wide
-  // blur of itself, in log), and the cumulus get back their lit tops and
-  // shaded bellies. Only gently: the 8-bit sky must not band.
-  vec3 b0 = textureLod(uSky, uv - v * (c0 * CP), uLod + 4.0).rgb;
-  vec3 b1 = textureLod(uSky, uv - v * (c1 * CP), uLod + 4.0).rgb;
-  float Yb = dot(toLin(mix(b1, b0, cw)), vec3(0.2126, 0.7152, 0.0722));
-  float Yd = dot(sky, vec3(0.2126, 0.7152, 0.0722));
-  sky *= clamp(pow((Yd + 0.02) / (Yb + 0.02), 0.3), 0.75, 1.3) * (1.0 - exp(-r * r / (2.0 * 0.07 * 0.07))) + exp(-r * r / (2.0 * 0.07 * 0.07));
+  // Right at the sun the HDRI's core is clipped (sky_hdri.py holds it to the
+  // brightest cloud); within a radius or two it is read softened, so the
+  // clipped core melts into a smooth mound for the glow below to sit on,
+  // and the cloud round it keeps its own texture.
+  vec3 near = toLin(textureLod(uSky, uv, uSkyLod.y + 3.0).rgb);
+  sky = mix(sky, near, exp(-r * r / (2.0 * 0.025 * 0.025)));
+  // No local-contrast lift and no veil removal: the cumulus are real and
+  // already modelled, and a lift against a wide blur rings every cloud edge
+  // with a dark halo against the blue.
   // How much of a pixel is open blue sky rather than cloud: the blue's lead
   // over red, in linear light. Linear in the colour, so a cloud's edge, half
   // blue and half white, takes half the grade and no contour forms there.
   float blue = clamp((sky.b - sky.r) / 0.4, 0.0, 1.0);
   float Y = dot(sky, vec3(0.2126, 0.7152, 0.0722));
-  // The lit cloud is pale warm white, not the photograph's cream: its
-  // colour eased toward a faintly warm neutral at its own luminance.
-  float lit = smoothstep(0.3, 0.75, Y) * (1.0 - blue);
-  sky = mix(sky, Y * vec3(1.03, 1.0, 0.93), 0.55 * lit);
+  // The lit cloud is pale warm white: the bake already turns the sunlit
+  // domes warm and the shaded flanks skylight blue; this only holds the
+  // brightest tops off the blue the film adds.
+  float lit = smoothstep(0.45, 0.85, Y) * (1.0 - blue);
+  sky = mix(sky, Y * vec3(1.03, 1.0, 0.93), 0.25 * lit);
   // Midtone saturation, about a quarter more: the blue and the grey-blue of
   // the cloud shadows; the lit cloud tops above stay pale.
   float mid = smoothstep(0.015, 0.08, Y) * (1.0 - smoothstep(0.3, 0.65, Y));
   sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.25 * mid), vec3(0.0));
-  // The zenith: straight up the sky is deepest, toward cobalt (#0b4fa8),
-  // easing out over the top of the frame. Multiplied, so the sky's own
-  // texture runs on through it.
+  // The zenith: straight up the sky is deepest. The HDRI already falls off
+  // toward it; this only leans the top of the frame a little further, toward
+  // a clean film blue rather than slate. Multiplied, so the sky's own
+  // gradient runs on through it.
   float zen = 1.0 - smoothstep(0.02, 0.58, uv.y);
   zen *= zen;
-  sky *= mix(vec3(1.0), vec3(0.16, 0.5, 0.88), 0.9 * zen * blue);
+  sky *= mix(vec3(1.0), vec3(0.72, 0.9, 1.0), 0.7 * zen * blue);
   // A print's white is not the sun's: the near-white of the lit cloud carries
   // on past paper white, into the shoulder, pale warm. Away from the sun only;
   // the sun's own light is the glow below.
@@ -200,7 +193,7 @@ void main() {
   // Halation on the blades: a thin blade standing against lit cloud or the
   // sun takes a little of its light through the emulsion as a warm bleed;
   // the dense mat (high coverage all round) does not.
-  float glow = smoothstep(0.5, 1.1, dot(textureLod(uSky, uv - v * (c0 * CP), uLod + 3.0).rgb, vec3(0.2126, 0.7152, 0.0722)));
+  float glow = smoothstep(0.5, 1.1, dot(textureLod(uSky, uv - v * (c0 * CP), uSkyLod.y + 3.0).rgb, vec3(0.2126, 0.7152, 0.0722)));
   float thin = 1.0 - textureLod(uAux, gu, uLod + 2.5).r;
   grass += vec3(1.0, 0.5, 0.22) * 0.1 * glow * thin;
   vec3 col = mix(sky, grass, a);
@@ -209,12 +202,14 @@ void main() {
   float rim = clamp(4.0 * a * (1.0 - a), 0.0, 1.0);
   col += vec3(1.0, 0.42, 0.16) * 0.16 * glow * rim;
   // The highlight shoulder's diffusion: only the light above the threshold
-  // (the sun, the lit cloud tops; baked, aux.b) spreads, warm, over the sky
-  // and never over the blades in front of it, so they hold as crisp dark
-  // silhouettes with the sun bleeding round them. Nothing below it is lifted.
-  // Round the sun it is the analytic glow above that spreads, not the bake's.
-  float dif = textureLod(uAux, uv, uLod).b;
-  dif *= dif * smoothstep(0.08, 0.35, r);
+  // (the lit cloud tops, read from the drifting sky heavily blurred, so the
+  // bloom goes with its cloud) spreads, warm, over the sky and never over the
+  // blades in front of it, so they hold as crisp dark silhouettes. Nothing
+  // below it is lifted. Round the sun it is the analytic glow above.
+  vec3 h0 = textureLod(uSky, uv - v * (c0 * CP), uSkyLod.y + 5.0).rgb;
+  vec3 h1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.y + 5.0).rgb;
+  float dif = smoothstep(0.5, 0.9, dot(toLin(mix(h1, h0, cw)), vec3(0.2126, 0.7152, 0.0722)));
+  dif *= dif * 0.6 * smoothstep(0.08, 0.35, r);
   col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * (1.0 - a);
   if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
@@ -559,6 +554,10 @@ export async function createKaze(host) {
     gl.uniform2f(u.uCloudV, reduce ? 0 : 0.0009 + lean, reduce ? 0 : -0.00006);
     gl.uniform1f(u.uExpo, 1.0 * 2 ** expoStops);
     gl.uniform1f(u.uLod, Math.max(0, Math.log2((2400 * view()[2]) / L.rw)));
+    // the sky is baked finer than the plate (sky_hdri.py), for the
+    // magnified crop on a wide screen
+    const skyK = Math.log2(skyImg.naturalWidth / 2400);
+    gl.uniform2f(u.uSkyLod, Math.max(0, Math.log2((skyImg.naturalWidth * view()[2]) / L.rw)), Math.max(0, Math.log2((2400 * view()[2]) / L.rw)) + skyK);
     gl.uniform1f(u.uDebug, debug);
     const v = view();
     gl.uniform4f(u.uView, v[0], v[1], v[2], v[3]);
@@ -571,7 +570,7 @@ export async function createKaze(host) {
       {
         ...FILM_PRESETS.summer,
         // No global veil: the diffusion is the scene's own thresholded
-        // highlight shoulder (aux.b), so the blacks stay down and the grass
+        // highlight shoulder (the lit cloud tops), so the blacks stay down and the grass
         // keeps its colour. A little optical softness and dye-cloud bleed,
         // and a halation threshold low enough that the cloud tops and the
         // sunlit edges of the blades against them take a thin warm ring.
