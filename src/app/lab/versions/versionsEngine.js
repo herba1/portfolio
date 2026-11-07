@@ -143,10 +143,9 @@ export function createVersions(root, { embedded = false } = {}) {
       if (d >= 0) {
         z = -d * DZ * s;
         y = -d * DY * s;
-        // Light enough that every head line stays readable: the haze only
-        // starts to soften type past the seventh save back, and never by
-        // more than a pixel's blur.
-        blur = clamp((d - 7) * 0.12, 0, 0.6) * s;
+        // Saves behind stay sharp: the haze only tints their paper toward
+        // the ground (see .versions-card), never the type on it.
+        blur = 0;
         fog = Math.min(0.36, Math.pow(d, 1.15) * 0.026) * s;
         alpha = 1;
       } else {

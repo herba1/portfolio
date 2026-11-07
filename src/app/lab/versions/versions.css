@@ -3,6 +3,8 @@
   --versions-paper: #fcfbf8;
   --versions-ink: var(--color-ink);
   --versions-line: rgb(26 24 20 / 0.16);
+  /* The sheet's single hairline edge. */
+  --versions-edge: rgb(26 24 20 / 0.2);
   /* Pencil: what a correction looks like before it is inked, at the
      secondary ink's strength (never fainter), warmed to the paper. */
   --versions-pencil: #6b665e;
@@ -87,27 +89,15 @@
   width: 440px;
   margin-left: -220px;
   padding: 16px 32px 28px;
-  border-radius: 14px;
-  background: var(--versions-paper);
-  box-shadow:
-    0 0 0 1px rgb(40 32 20 / 0.06),
-    0 1px 2px rgb(40 32 20 / 0.05),
-    0 12px 28px -12px rgb(40 32 20 / 0.16),
-    0 32px 64px -32px rgb(40 32 20 / 0.18);
+  /* A galley sheet, not an app card: square to within a hair, one ruled
+     edge, no cast shadow. Depth comes from the perspective alone. */
+  border-radius: 2px;
+  /* Depth haze tints the paper only, toward the ground, so the sheets
+     separate by tone while every spine's type stays at full ink. */
+  background: color-mix(in srgb, var(--versions-ground) calc(var(--fog, 0) * 100%), var(--versions-paper));
+  box-shadow: 0 0 0 1px var(--versions-edge);
   transform-origin: 50% 0;
   backface-visibility: hidden;
-}
-
-/* Depth haze: the card stays opaque, so the stack never shows through
-   itself; distance mixes it toward the ground instead. */
-.versions-card::after {
-  content: "";
-  position: absolute;
-  inset: -1px;
-  border-radius: inherit;
-  background: var(--versions-ground);
-  opacity: var(--fog, 0);
-  pointer-events: none;
 }
 
 /* The head line is the spine: the only part of an older save that shows
@@ -120,8 +110,10 @@
   gap: 16px;
   margin: 0 0 16px;
   padding: 0 0 16px;
-  /* The rule is drawn inside the padding so the head stays on the grid. */
-  box-shadow: inset 0 -1px 0 var(--versions-line);
+  /* The rule is drawn inside the padding so the head stays on the grid,
+     as a one-pixel background strip: an inset shadow leaves faint seams at
+     the box's sides once the card is in perspective. */
+  background: linear-gradient(var(--versions-line), var(--versions-line)) 0 100% / 100% 1px no-repeat;
 }
 
 .versions-stamp {
@@ -158,27 +150,23 @@
   text-wrap: balance;
 }
 
-/* The spine's proof line, on the same 20px line as the title it replaces.
-   The words a save wrote are in the emphasis serif at full ink. */
+/* The spine's proof line, on the same 20px line as the title it replaces,
+   set quiet: the grotesk at the meta rung, full ink, so the stack reads as
+   a ruled index of corrections behind the sheet and the front card leads.
+   The serif is kept for the front card, where it marks the words that save
+   actually wrote. */
 .versions-change {
   margin: 0;
-  font-size: var(--text-heading);
+  font-size: var(--text-ui-lg);
   line-height: 20px;
-  letter-spacing: var(--text-heading--letter-spacing);
-  font-weight: var(--font-weight-body);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .versions-edit {
-  font-family: var(--versions-serif), "Iowan Old Style", Georgia, serif;
-  font-style: italic;
-  font-size: var(--versions-serif-size);
-  font-weight: var(--font-weight-serif);
-  letter-spacing: var(--versions-serif-track);
-  font-variation-settings: var(--versions-serif-opsz);
-  line-height: 1;
   color: var(--versions-ink);
 }
 
