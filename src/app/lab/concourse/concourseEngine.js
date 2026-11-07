@@ -14,11 +14,11 @@ import { createFilm } from "../_kit/film";
 // with people walking together sharing one tile. It also painted the people
 // out of the road (LaMa), so the world that dims behind them holds no ghosts.
 //
-// Everything is drawn in the photographer's own camera. A person is not a
-// card: each pixel of their matte sits on its own camera ray, at the height
-// where that ray passes the vertical through their feet, so from the lens
-// they are exactly the photograph and from a few degrees off they stand up
-// out of their tile. Tiles are real slabs (top, four sides) that rise on
+// Everything is drawn in the photographer's own camera. Each person is a
+// card hinged at their feet, every pixel of it on its own camera ray, so from
+// the lens they are exactly the photograph; swing round and the card turns
+// on its feet to face you, leaning a little, so they stand up out of their
+// tile instead of lying flat. Tiles are real slabs (top, four sides) that rise on
 // their own springs; the light under them spills onto the dark road, and
 // film.js blooms it. A few are lit warm red.
 //
@@ -34,6 +34,9 @@ const DOLLY = 0.8; // the camera backs off along the window's centre ray, as a s
 const WHITE = [1.0, 0.94, 0.86];
 const RED = [1.0, 0.07, 0.03];
 const RED_TILES = [9, 17, 22];
+const LEAN_MAX = (26 * Math.PI) / 180; // how far back a person's card may lean
+const LEAN_FOLLOW = 0.55; // share of the camera's climb the lean follows
+const TOP_MAX = 2.1; // a card is never taller than this, m
 
 const FILM = {
   exposure: 0,
@@ -237,32 +240,58 @@ void main() {
   }
 }`;
 
+// A person is a card hinged at their feet. At rest each pixel of the matte
+// sits on its own camera ray, so from the photographer's lens they are
+// exactly the photograph: the part of the matte below the feet lies on the
+// tile (shoes and the ground they touch), the rest sits on a card standing
+// upright on the feet, leaning back (away from the lens) only if that is what
+// it takes to bring a figure seen from high above down to a person's height.
+// Live, the card keeps those coordinates and turns about the vertical through
+// the feet to face wherever the camera now is, and leans back by part of how
+// far the camera has climbed (capped), so it is never seen edge-on and a
+// steeper view foreshortens it instead of flattening it to a sliver.
 const PERSON_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
 ${COMMON}
 uniform vec4 uRect;   // matte rect in photo px
 uniform vec3 uFeet;   // on the floor
+uniform vec3 uR0;     // rest card: across (horizontal)
+uniform vec3 uG0;     //            away from the lens (horizontal)
+uniform vec3 uU0;     //            up the card
+uniform vec3 uR;      // live card
+uniform vec3 uG;
+uniform vec3 uU;
+uniform float uTop;   // the card's height cap, m
 uniform float uLift;
-out vec3 vRest;
+out vec2 vQ;
 out float vH;
 void main() {
   vec2 p = mix(uRect.xy, uRect.zw, aPos);
+  vQ = p - uRect.xy;
   vec3 d = vec3((p.x - uK.y) / uK.x, (p.y - uK.z) / uK.x, 1.0);
-  // closest approach of this pixel's ray and the vertical through the feet
-  vec3 w0 = -uFeet;
-  float a = dot(d, d), b = dot(d, uN), dd = dot(d, w0), e = dot(uN, w0);
-  float t = clamp((a * e - b * dd) / (a - b * b), 0.0, 2.3);
-  float s = (t - uD) / dot(uN, d);
-  vec3 X = d * s;
-  vRest = X;
-  vH = t;
-  gl_Position = uProj * uView * vec4(X + uN * (uLift + 0.002), 1.0);
+  vec3 nc = cross(uR0, uU0);
+  vec3 rel = d * (dot(uFeet, nc) / dot(d, nc)) - uFeet;
+  float a = dot(rel, uR0), b = dot(rel, uU0);
+  vec3 base = uFeet + uN * (uLift + 0.002);
+  vec3 P;
+  if (b < 0.0) {
+    // below the hinge: the ray reaches the road first
+    rel = d * (-uD / dot(uN, d)) - uFeet;
+    a = dot(rel, uR0);
+    P = base + uR * a + uG * dot(rel, uG0);
+    vH = 0.0;
+  } else {
+    b = min(b, uTop);
+    P = base + uR * a + uU * b;
+    vH = b * dot(uU, uN);
+  }
+  gl_Position = uProj * uView * vec4(P, 1.0);
 }`;
 
 const PERSON_FS = `#version 300 es
 precision highp float;
 ${COMMON}
-in vec3 vRest;
+in vec2 vQ;
 in float vH;
 uniform sampler2D uAtlas;
 uniform vec2 uAtlasSize;
@@ -275,8 +304,7 @@ uniform float uRed;
 uniform float uDim;
 out vec4 o;
 void main() {
-  vec2 p = photoPx(vRest);
-  vec2 q = p - uRect.xy;
+  vec2 q = vQ;
   vec2 sz = uRect.zw - uRect.xy;
   if (q.x < 0.0 || q.y < 0.0 || q.x > sz.x || q.y > sz.y) discard;
   vec4 c = texture(uAtlas, (q + uAt) / uAtlasSize);
@@ -509,7 +537,39 @@ export async function createConcourse(host, { embedded = false } = {}) {
       return sub(X, scl(N, dot(N, X) + D));
     })(),
   }));
-  const people = S.people.map((p) => ({ ...p }));
+  // Each person's card at rest: across and away are horizontal, measured from
+  // the lens to the feet; it leans back away from the lens only as far as it
+  // takes to bring the top of the matte down to a person's height.
+  const cardAxes = (G, lean) => {
+    const R = norm(cross(N, G));
+    const U = add(scl(N, Math.cos(lean)), scl(G, Math.sin(lean)));
+    return { R, G, U };
+  };
+  const horiz = (v) => norm(sub(v, scl(N, dot(N, v))));
+  const elev = (v) => Math.asin(clamp(-dot(norm(v), N), -1, 1));
+  const restHeight = (p, ax) => {
+    const d = rayOf((p.rect[0] + p.rect[2]) / 2, p.rect[1]);
+    const nc = cross(ax.R, ax.U);
+    return dot(sub(scl(d, dot(p.feet, nc) / dot(d, nc)), p.feet), ax.U);
+  };
+  const people = S.people.map((p) => {
+    const G0 = horiz(p.feet);
+    const want = clamp(p.head, 1.45, 1.85);
+    let lean = 0;
+    while (lean < LEAN_MAX && restHeight(p, cardAxes(G0, lean)) > want) lean += Math.PI / 360;
+    lean = Math.min(lean, LEAN_MAX);
+    const rest = cardAxes(G0, lean);
+    // a little headroom: the matte's top corners sit a touch above its top centre
+    const top = Math.min(TOP_MAX, Math.max(restHeight(p, rest), 0.2) + 0.08);
+    return { ...p, rest, lean, top, e0: elev(p.feet), live: rest };
+  });
+  // The live card: turned about the vertical through the feet to face the
+  // camera, leaning by part of the camera's climb.
+  const liveCard = (p, C) => {
+    const v = sub(p.feet, C);
+    const lean = clamp(p.lean + LEAN_FOLLOW * (elev(v) - p.e0), 0, LEAN_MAX);
+    return cardAxes(horiz(v), lean);
+  };
 
   // ---- targets
   let sceneT = null;
@@ -596,7 +656,9 @@ export async function createConcourse(host, { embedded = false } = {}) {
     // rows: [ax 0 bx 0] [0 -ay -by 0] [0 0 A B] [0 0 1 0]; column-major
     const proj = new Float32Array([ax, 0, 0, 0, 0, -ay, 0, 0, bx, -by, A, 1, 0, 0, B, 0]);
     void pivotRay;
-    return { view, proj, R, t, Wn };
+    // the camera's centre in the photographer's frame
+    const C = scl(app3([[R[0][0], R[1][0], R[2][0]], [R[0][1], R[1][1], R[2][1]], [R[0][2], R[1][2], R[2][2]]], t), -1);
+    return { view, proj, R, t, C, Wn };
   };
   // world -> css px of the box
   const toScreen = (cam, X) => {
@@ -605,13 +667,20 @@ export async function createConcourse(host, { embedded = false } = {}) {
     const py = (F * Y[1]) / Y[2] + S.cy;
     return [((px - cam.Wn.wcx) / cam.Wn.ww + 0.5) * stage.width, ((py - cam.Wn.wcy) / cam.Wn.wh + 0.5) * stage.height, Y[2]];
   };
+  // PERSON_VS, for picking
   const personPoint = (p, px, py, lift) => {
     const d = rayOf(px, py);
-    const w0 = scl(p.feet, -1);
-    const a = dot(d, d), b = dot(d, N), dd = dot(d, w0), e = dot(N, w0);
-    const t = clamp((a * e - b * dd) / (a - b * b), 0, 2.3);
-    const X = scl(d, (t - D) / dot(N, d));
-    return add(X, scl(N, lift));
+    const { R: R0, G: G0, U: U0 } = p.rest;
+    const L = p.live;
+    const nc = cross(R0, U0);
+    let rel = sub(scl(d, dot(p.feet, nc) / dot(d, nc)), p.feet);
+    const b = dot(rel, U0);
+    const base = add(p.feet, scl(N, lift + 0.002));
+    if (b < 0) {
+      rel = sub(scl(d, -D / dot(N, d)), p.feet);
+      return add(base, add(scl(L.R, dot(rel, R0)), scl(L.G, dot(rel, G0))));
+    }
+    return add(base, add(scl(L.R, dot(rel, R0)), scl(L.U, Math.min(b, p.top))));
   };
 
   // ---- state
@@ -812,6 +881,17 @@ export async function createConcourse(host, { embedded = false } = {}) {
       gl.uniform4f(progPerson.u.uRect, p.rect[0], p.rect[1], p.rect[2], p.rect[3]);
       gl.uniform2f(progPerson.u.uAt, p.at[0], p.at[1]);
       gl.uniform3f(progPerson.u.uFeet, p.feet[0], p.feet[1], p.feet[2]);
+      p.live = liveCard(p, cam.C);
+      for (const [k, v] of [
+        ["uR0", p.rest.R],
+        ["uG0", p.rest.G],
+        ["uU0", p.rest.U],
+        ["uR", p.live.R],
+        ["uG", p.live.G],
+        ["uU", p.live.U],
+      ])
+        gl.uniform3f(progPerson.u[k], v[0], v[1], v[2]);
+      gl.uniform1f(progPerson.u.uTop, p.top);
       gl.uniform1f(progPerson.u.uLift, T ? T.lift.x : 0);
       gl.uniform3f(progPerson.u.uLight, L[0], L[1], L[2]);
       gl.uniform1f(progPerson.u.uGlow, T ? glow : 0);
