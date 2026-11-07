@@ -85,8 +85,9 @@ uniform highp sampler2D uState;   // x: id, row 0 wires / 1 hardware / 2 poles: 
 uniform vec2 uPlate;
 uniform int uNW;
 uniform vec4 uW[${MAX_W}];        // span start, end (x, or y for a steep wire), sag, fall
-uniform vec4 uW2[${MAX_W}];       // id, y0, y1, lead
+uniform vec4 uW2[${MAX_W}];       // id, y0, y1, this pole's end (1: at the span's end, 0: its start)
 uniform vec4 uW3[${MAX_W}];       // sag, fall when the shutter opened; fall slant dx/dy; steep
+uniform vec4 uW4[${MAX_W}];       // the far end's fall, now and when the shutter opened
 uniform int uNP;
 uniform vec4 uPo[${MAX_P}];       // id, k, c, offset
 uniform vec4 uPo2[${MAX_P}];      // top, base, reach from the axis, 0
@@ -244,27 +245,47 @@ void main() {
     col = mix(col, obj, al);
   }
 
-  // wires: slack, then the fall, both along gravity where the wire hangs
-  // (dx/dy = slant: away from the zenith's vanishing point). The wire is drawn
-  // where it is now, at its own matte (bilinear, so a sub-pixel drop moves it
-  // smoothly) and full ink: a thin dark arc. Behind it, back toward where it
-  // was when the shutter opened, a short streak whose density runs down from
-  // the wire to nothing; its sides are the wire's own soft matte edges.
+  // wires: slack, then the swing, both along gravity where the wire hangs
+  // (dx/dy = slant: away from the zenith's vanishing point). Let go at this
+  // pole, a wire swings from its far end: that end holds, this end falls, and
+  // every point between falls in proportion to how far it is from the far
+  // end, with the slack bow on top. The wire is drawn where it is now, at its
+  // own matte (bilinear, so a sub-pixel drop moves it smoothly) and full ink: a
+  // thin dark arc. Behind it, back toward where it was when the shutter
+  // opened, a short streak whose density runs down from the wire to nothing;
+  // its sides are the wire's own soft matte edges.
   for (int j = 0; j < ${MAX_W}; j++) {
     if (j >= uNW) break;
     vec4 a = uW[j];
     vec4 b = uW2[j];
     vec4 c = uW3[j];
+    vec4 e = uW4[j];
     float g = c.z;
-    // where along its span this pixel's wire came from (the bow is small
-    // against the drop, so the drop alone places it)
-    float drop = a.w * 0.86;
-    float along = c.w > 0.5 ? pp.y - drop : pp.x - g * drop;
-    float u = clamp((along - a.x) / (a.y - a.x), 0.0, 1.0);
+    bool steep = c.w > 0.5;
+    // where along its span this pixel's wire came from: the point s whose own
+    // fall dy(s) carries it here, s + k dy(s) = here. Each point falls by a
+    // different amount now, so it is solved, by bisection (the engine keeps
+    // the swing short of folding the wire over, so there is one root).
+    float k = steep ? 1.0 : g;
+    float here = steep ? pp.y : pp.x;
+    float span = a.y - a.x;
+    float reach = abs(k) * (abs(a.z) + max(a.w, e.x)) + 2.0;
+    float lo = here - reach;
+    float hi = here + reach;
+    for (int it = 0; it < 20; it++) {
+      float s = 0.5 * (lo + hi);
+      float us = clamp((s - a.x) / span, 0.0, 1.0);
+      float ls = b.w > 0.5 ? us : 1.0 - us;
+      float h = s + k * (a.z * 4.0 * us * (1.0 - us) + a.w * ls + e.x * (1.0 - ls)) - here;
+      if (h > 0.0) hi = s;
+      else lo = s;
+    }
+    float u = clamp((0.5 * (lo + hi) - a.x) / span, 0.0, 1.0);
     float bow = 4.0 * u * (1.0 - u);
-    float lead = b.w > 0.5 ? mix(1.0, 0.72, u) : mix(0.72, 1.0, u);
-    float dy1 = a.z * bow + a.w * lead;
-    float dy0 = c.x * bow + c.y * lead;
+    // 0 at the far end, which holds; 1 at this pole, where it was let go
+    float lead = b.w > 0.5 ? u : 1.0 - u;
+    float dy1 = a.z * bow + a.w * lead + e.x * (1.0 - lead);
+    float dy0 = c.x * bow + c.y * lead + e.y * (1.0 - lead);
     // the streak, in rows of drop: the shutter's travel, capped in length
     float slantL = sqrt(1.0 + g * g);
     float path = abs(dy1 - dy0) * slantL;
@@ -393,17 +414,127 @@ const num = (q, k) => {
 };
 
 // A wire's state at progress a (0 in place, 1 gone): first the tension goes
-// and it bows, then it drops under gravity, one end a little ahead.
+// and it bows, then it is let go at this pole and swings down from its far
+// end, which holds, its slack deepening as it goes, until its loose end has
+// gone out through the bottom of the frame. [sag, fall at this pole, fall at
+// the far end (0 unless the far end has to let go too, see fitWires)]
+const S0 = 0.32;
+const SLACK_GROW = 2.2;
+const slackOf = (w) => clamp(0.028 * (w.b - w.from), 8, 64);
 function wireShape(w, a) {
-  const span = w.b - w.a;
-  const slackMax = clamp(0.028 * span, 8, 64);
-  const S0 = 0.32;
+  const slackMax = slackOf(w);
   if (a <= S0) {
     const k = a / S0;
-    return [slackMax * (1 - (1 - k) * (1 - k)), 0];
+    return [slackMax * (1 - (1 - k) * (1 - k)), 0, 0];
   }
   const t = (a - S0) / (1 - S0);
-  return [slackMax, (PH - w.y0 + 160) * t * t];
+  const slack = slackMax * (1 + (SLACK_GROW - 1) * (1 - (1 - t) * (1 - t)));
+  const fall = w.fall * t * t;
+  return [slack, fall, Math.max(0, fall - w.hold)];
+}
+
+// Each wire's line in the plate, fitted to its own pixels in the id map (R:
+// wire id), and from it which end of its span is at this pole (the end nearer
+// the pole's axis; the other runs to a neighbouring pole off the frame), and
+// how far that end has to fall for the whole wire to have gone out of the
+// frame. A wire that cannot swing clear (its far end would leave it hanging
+// across the frame, as the bundle running up out of the top would, or the
+// swing would carry it over past its far end first) swings as far as it can,
+// and then its far end lets go too and follows, so it still drops out.
+function fitWires(img, wires, pole) {
+  const cv = document.createElement("canvas");
+  cv.width = PW;
+  cv.height = PH;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(img, 0, 0);
+  const px = cx.getImageData(0, 0, PW, PH).data;
+  // per id: n, sum along, sum across, sum along^2, sum along x across
+  const acc = new Map(wires.map((w) => [w.id, { steep: w.steep, s: [0, 0, 0, 0, 0] }]));
+  for (let y = 0, i = 0; y < PH; y++) {
+    for (let x = 0; x < PW; x++, i += 4) {
+      const id = px[i];
+      if (!id) continue;
+      const e = acc.get(id);
+      if (!e) continue;
+      const al = e.steep ? y : x;
+      const ac = e.steep ? x : y;
+      const s = e.s;
+      s[0]++;
+      s[1] += al;
+      s[2] += ac;
+      s[3] += al * al;
+      s[4] += al * ac;
+    }
+  }
+  const M = 6;
+  const inFrame = (p) => p[0] >= 0 && p[0] < PW && p[1] >= 0 && p[1] < PH;
+  for (const w of wires) {
+    const [n, sa, sc, saa, sac] = acc.get(w.id).s;
+    const den = n * saa - sa * sa;
+    const m = n > 1 && Math.abs(den) > 1e-6 ? (n * sac - sa * sc) / den : 0;
+    const q = n > 0 ? (sc - m * sa) / n : 0;
+    const span = w.b - w.from;
+    const at = (u) => {
+      const al = w.from + u * span;
+      const ac = m * al + q;
+      return w.steep ? [ac, al] : [al, ac];
+    };
+    const off = (p) => Math.abs(p[0] - (pole.k * p[1] + pole.c));
+    w.pe = off(at(1)) < off(at(0)) ? 1 : 0;
+    const k = w.steep ? 1 : w.g;
+    const slack = slackOf(w) * SLACK_GROW;
+    const N = 240;
+    // where every point of the wire in the frame is with this pole's end
+    // fallen fp and the far end ff; gone: none of it is left in the frame;
+    // folded: some stretch of it has been carried past its neighbour along the
+    // span (the swing has overshot the far end)
+    const test = (fp, ff) => {
+      let gone = true;
+      let folded = false;
+      let prev = null;
+      for (let i = 0; i <= N; i++) {
+        const u = i / N;
+        const lead = w.pe ? u : 1 - u;
+        const d = slack * 4 * u * (1 - u) + fp * lead + ff * (1 - lead);
+        const along = w.from + u * span + k * d;
+        const p0 = at(u);
+        if (!inFrame(p0)) {
+          prev = null;
+          continue;
+        }
+        if (prev != null && along - prev < 0.15 * (span / N)) folded = true;
+        prev = along;
+        const x = p0[0] + w.g * d;
+        const y = p0[1] + d;
+        if (x > -M && x < PW + M && y > -M && y < PH + M) gone = false;
+      }
+      return { gone, folded };
+    };
+    // a swing that only clears the frame by stretching the wire far past the
+    // drop to the bottom edge is no swing: the far end lets go too
+    const toBottom = PH - at(w.pe)[1] + 80;
+    let fold = Infinity;
+    w.hold = Infinity;
+    w.fall = 0;
+    for (let f = 0; f <= 1.75 * toBottom; f += 10) {
+      const r = test(f, 0);
+      if (r.folded) {
+        fold = f;
+        break;
+      }
+      if (r.gone) {
+        w.fall = f + 80;
+        break;
+      }
+    }
+    if (!w.fall) {
+      // swing as far as it can, then the far end follows, keeping the swing
+      w.hold = Math.min(0.85 * fold, toBottom);
+      let f = 0;
+      while (f < 8000 && !test(f, Math.max(0, f - w.hold)).gone) f += 10;
+      w.fall = f + 80;
+    }
+  }
 }
 
 export async function createDenchuka(host, { embedded = false } = {}) {
@@ -428,7 +559,9 @@ export async function createDenchuka(host, { embedded = false } = {}) {
   const skyTex = imageTexture(gl, imgs[6]);
 
   // Element table.
-  const wires = els.wires.map((w) => ({ ...w, a: 0, prev: 0, kind: "wire" }));
+  // a is the element's progress here, so the span's start is kept as from
+  const wires = els.wires.map((w) => ({ ...w, from: w.a, a: 0, prev: 0, kind: "wire" }));
+  fitWires(imgs[4], wires, els.poles[0]);
   const hardware = els.hardware.map((h) => ({ ...h, a: 0, prev: 0 }));
   const poles = els.poles.map((p) => ({ ...p, a: 0, prev: 0 }));
 
@@ -564,6 +697,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
   const uW = new Float32Array(MAX_W * 4);
   const uW2 = new Float32Array(MAX_W * 4);
   const uW3 = new Float32Array(MAX_W * 4);
+  const uW4 = new Float32Array(MAX_W * 4);
   const uPo = new Float32Array(MAX_P * 4);
   const uPo2 = new Float32Array(MAX_P * 4);
   const uHw = new Float32Array(MAX_P * 4);
@@ -581,15 +715,16 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     let nw = 0;
     for (const w of wires) {
       if (w.a <= 0 || w.a >= 1 || nw >= MAX_W) continue;
-      const [s1, f1] = wireShape(w, w.a);
+      const [s1, f1, q1] = wireShape(w, w.a);
       // where it was when the shutter opened: half a 24 fps frame back along
       // the way it is going (the still is always going forward)
       const dir = still ? 1 : Math.sign(w.a - w.prev);
       const back = clamp(w.a - dir * SHUTTER * (FRAME / DUR.wire), 0, 1);
-      const [s0, f0] = wireShape(w, back);
-      uW.set([w.a, w.b, s1, f1], nw * 4);
-      uW2.set([w.id, w.y0, w.y1, w.id % 2], nw * 4);
+      const [s0, f0, q0] = wireShape(w, back);
+      uW.set([w.from, w.b, s1, f1], nw * 4);
+      uW2.set([w.id, w.y0, w.y1, w.pe], nw * 4);
       uW3.set([s0, f0, w.g, w.steep ? 1 : 0], nw * 4);
+      uW4.set([q1, q0, 0, 0], nw * 4);
       nw++;
     }
     let np = 0;
@@ -626,6 +761,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     gl.uniform4fv(u.uW, uW);
     gl.uniform4fv(u.uW2, uW2);
     gl.uniform4fv(u.uW3, uW3);
+    gl.uniform4fv(u.uW4, uW4);
     gl.uniform1i(u.uNP, np);
     gl.uniform4fv(u.uPo, uPo);
     gl.uniform4fv(u.uPo2, uPo2);
