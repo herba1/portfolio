@@ -357,6 +357,30 @@ export async function createJoiner(host, { embedded = false } = {}) {
     return meterLum[v * METER_N + u];
   };
 
+  // A print's electric eye, in log2 luminance. Centre-weighted, but it reads
+  // highlights first: the reading is the brighter of the weighted mean and the
+  // 80th percentile, so the brightest sky in frame sets the exposure and a
+  // dark wall cannot talk it into blowing that sky out.
+  const meterPrint = (c, R, D, F, span) => {
+    const k = 3;
+    const v = [];
+    let m = 0;
+    let wsum = 0;
+    for (let j = -k; j <= k; j++)
+      for (let i = -k; i <= k; i++) {
+        const sx = (i / k) * 0.45 * span;
+        const sy = (j / k) * 0.45 * span;
+        const d = norm([c[0] * F + R[0] * sx + D[0] * sy, c[1] * F + R[1] * sx + D[1] * sy, c[2] * F + R[2] * sx + D[2] * sy]);
+        const l = meterAt(d);
+        const w = 1 / (1 + 0.6 * ((i * i + j * j) * 4) / (k * k));
+        m += l * w;
+        wsum += w;
+        v.push(l);
+      }
+    v.sort((x, y) => x - y);
+    return Math.max(m / wsum, v[Math.floor(0.8 * (v.length - 1))]);
+  };
+
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
@@ -542,20 +566,12 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSrgb, rawLinear ? 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
-    // the electric eye: centre-weighted, it corrects about a third of the difference
-    let m = 0;
-    let wsum = 0;
-    for (let j = -2; j <= 2; j++)
-      for (let i = -2; i <= 2; i++) {
-        const sx = (i / 2) * 0.45 * (img / f);
-        const sy = (j / 2) * 0.45 * (img / f);
-        const d = norm([c[0] * F + R[0] * sx + D[0] * sy, c[1] * F + R[1] * sx + D[1] * sy, c[2] * F + R[2] * sx + D[2] * sy]);
-        const w = 1 / (1 + 0.6 * (i * i + j * j));
-        m += meterAt(d) * w;
-        wsum += w;
-      }
-    m /= wsum;
-    const ev = ev0 - 0.3 * (m - zenithMeter) + p.dev;
+    // the electric eye, against the zenith print: it opens up for a darker
+    // frame by a third of the difference but never past a quarter stop, so a
+    // print that is mostly wall keeps the cloud in its strip of sky; it closes
+    // down harder for a brighter one (the sun side of the street), to a floor
+    const m = meterPrint(c, R, D, F, img / f) - zenithMeter;
+    const ev = ev0 + clamp(-(m > 0 ? 0.45 : 0.3) * m, -1.25, 0.25) + p.dev;
     film.render(
       rawTex,
       {
@@ -795,21 +811,8 @@ export async function createJoiner(host, { embedded = false } = {}) {
   // --- start ----------------------------------------------------------------
   // Size first so the opening prints are cut for this box.
   await new Promise((r) => stage.onResize((w, h, d) => (resize(w, h, d), r())));
-  zenithMeter = meterAt([0, 0, 1]);
-  {
-    // calibrate the meter on a print aimed straight up
-    let m = 0;
-    let ws = 0;
-    for (let j = -2; j <= 2; j++)
-      for (let i = -2; i <= 2; i++) {
-        const sx = (i / 2) * 0.45 * FIELD;
-        const sy = (j / 2) * 0.45 * FIELD;
-        const w = 1 / (1 + 0.6 * (i * i + j * j));
-        m += meterAt(norm([sx, sy, 1])) * w;
-        ws += w;
-      }
-    zenithMeter = m / ws;
-  }
+  // calibrate the meter on a print aimed straight up
+  zenithMeter = meterPrint([0, 0, 1], [1, 0, 0], [0, 1, 0], 1, FIELD);
 
   const lay = (n, seed, centre, animate) => {
     const L = layout(n, seed, centre);
