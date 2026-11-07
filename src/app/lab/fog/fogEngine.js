@@ -31,7 +31,14 @@ import { createStage, clamp } from "../_kit/stage";
 //                  so far towers go blue and keep their glass; in front of
 //                  the sky, the sky blurred wide (a normalised blur of the sky
 //                  pixels only), clamped to a clear cyan, through the sky's
-//                  airmass, with the clouds' local detail kept through the veil
+//                  airmass, with the clouds' local detail kept through the veil;
+//                  plus the sun's light scattered forward (Henyey-Greenstein,
+//                  g 0.6, warm-white), strong toward the sun past the top edge
+//                  and next to nothing in the low sky, which looks away from it;
+//                  held off the deepest shadows of what is still clearly seen
+//   split grade    after the haze, by the luminance it left, weighted by how
+//                  much of the light is the sun's: veiled cumulus tops still
+//                  roll off warm, the open sky keeps the air's cyan
 //   breath         the haze gathers a little thicker where the pointer rests,
 //                  and banks of it drift slowly through the street
 
@@ -85,7 +92,41 @@ const DETAIL_K = 0.65;
 const AIR_LOW = "#9fc4d6";
 const AIR_CAP = "#d6e4e8";
 const hex = (h) => [1, 3, 5].map((i) => (parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4)).join(", ");
+// A display colour as a tint: scaled to unit luminance, so a grade toward it
+// sets the hue at a pixel's own luminance and lifts nothing.
+const tint = (h) => {
+  const c = [1, 3, 5].map((i) => parseInt(h.slice(i, i + 2), 16) / 255);
+  const y = c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722;
+  return c.map((v) => (v / y).toFixed(4)).join(", ");
+};
 const DRIFT_FPS = 20;
+// The air is lit twice: by the sky (the ambient term above) and by the sun,
+// which haze scatters mostly forward (Henyey-Greenstein, g ~0.6), so the air
+// toward the sun glows warm-white and the air away from it stays the sky's.
+// The sun is docklands_01's, behind thin cloud at azimuth ~37 deg, elevation
+// ~29 deg in the capture; the sky was rendered at yaw 8 + 192, pitch -62,
+// through a 118 deg stereographic frame (tools/depth/bakes/fog/render.py), so
+// it sits just past the top edge of the plate, a little left of centre.
+const SUN = { lon: 37.5, lat: 28.8, yaw: 200, pitch: -62 };
+const HFOV = 118;
+const SUN_G = 0.6;
+const SUN_COL = "#FFF1E2";
+const SUN_K = 0.13; // the lobe's strength against the sky's light (its mean over the sphere)
+const SUN_SKY = 0.4; // over the open sky, in the sky's own colour
+// The deepest shadows keep their black: the air's light is held off what is
+// darker than this (linear) on a solid that is still clearly seen, so the
+// near glass keeps its blacks while a far tower still fades to the sky.
+const SHADOW_LIN = 0.18;
+const SHADOW_K = 0.9;
+// The sun's direction in the plate's camera frame (x right, y down, z forward).
+const sunDir = () => {
+  const r = Math.PI / 180;
+  const [lo, la, t, p] = [SUN.lon * r, SUN.lat * r, SUN.yaw * r, SUN.pitch * r];
+  const d = [Math.cos(la) * Math.sin(lo), -Math.sin(la), Math.cos(la) * Math.cos(lo)];
+  // camera = (Ry(yaw) Rx(pitch))^T d
+  const v = [Math.cos(t) * d[0] - Math.sin(t) * d[2], d[1], Math.sin(t) * d[0] + Math.cos(t) * d[2]];
+  return [v[0], Math.cos(p) * v[1] - Math.sin(p) * v[2], Math.sin(p) * v[1] + Math.cos(p) * v[2]];
+};
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -231,7 +272,24 @@ uniform vec2 uCanvas;
 uniform vec3 uSkyMean;  // display-encoded, the fallback where the blur saw no sky
 uniform vec3 uSkyLow;   // display-encoded: the open sky low over the street (~20 deg)
 uniform vec3 uSkyMid;   // and at mid height (~32 deg), before it deepens to cobalt
+uniform vec3 uSun;      // the sun's direction in the plate's camera frame
 ${COMMON}
+
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// This pixel's ray, through the plate's stereographic projection (zenith of
+// the lens at the plate's centre, y down).
+vec3 rayDir(vec2 uv) {
+  vec2 p = vec2(uv.x - 0.5, (uv.y - 0.5) / ${ASPECT.toFixed(4)});
+  float r = length(p);
+  float th = 2.0 * atan(r / (2.0 * ${(0.25 / Math.tan(((HFOV / 4) * Math.PI) / 180)).toFixed(5)}));
+  return vec3(r > 0.0 ? p * sin(th) / r : vec2(0.0), cos(th));
+}
+// Henyey-Greenstein, normalised to a mean of 1 over the sphere.
+float phase(float c) {
+  float g = ${SUN_G.toFixed(2)};
+  float k = 1.0 + g * g - 2.0 * g * c;
+  return (1.0 - g * g) / (k * sqrt(k));
+}
 
 // The plate, linear. It is larger than most screens draw it, so the sharp
 // level is a box over this pixel's footprint (four bilinear taps of level 0)
@@ -283,9 +341,25 @@ void main() {
   // turns the towers to milk). Clamped to the mid sky: the deep cobalt
   // overhead is the thinnest air in the frame and lights the least of it.
   vec3 open = pow(mix(uSkyLow, uSkyMid, smoothstep(18.0, 34.0, aux.b * 90.0)), vec3(2.2));
+  // And the sun's light, scattered forward: strongest toward the sun, just
+  // past the top of the frame, and next to nothing in the low sky down the
+  // street, which looks away from it and keeps the sky's cyan.
+  float lobe = ${SUN_K.toFixed(3)} * phase(dot(rayDir(uv), uSun));
+  vec3 sun = pow(vec3(${hex(SUN_COL)}), vec3(2.2)) * lobe;
+  // Over the open sky the lobe is the sky's own light, brightened toward the
+  // sun, and lighter: a warm-white laid over cobalt reads lilac, not as glare.
+  // Over a cumulus (bright and near-neutral in the plate) it is the sun's
+  // warm-white, so a veiled top keeps its warmth instead of taking the cyan.
+  vec3 pd = pow(scene, vec3(1.0 / 2.2));
+  float cloud = smoothstep(0.42, 0.66, luma(pd)) * (1.0 - smoothstep(0.06, 0.2, pd.b - pd.r));
+  vec3 sunSky = mix(air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}, sun, cloud);
 
-  vec3 tower = scene * Tt + open * (1.0 - Tt);
-  vec3 sky = scene * Ts + air * (1.0 - Ts);
+  // The deepest shadows of a solid still clearly seen keep their black: the
+  // air's light is held off them (the near glass stays inked; a far tower,
+  // its transmittance gone, still fades whole into the sky).
+  float deep = (1.0 - smoothstep(0.0, ${SHADOW_LIN.toFixed(3)}, luma(scene))) * Tt.g;
+  vec3 tower = scene * Tt + (open + sun) * (1.0 - Tt) * (1.0 - ${SHADOW_K.toFixed(2)} * deep);
+  vec3 sky = scene * Ts + (air + sunSky) * (1.0 - Ts);
   // The veil over the sky keeps the cumulus' forms: their local detail (the
   // plate less its blur at the scale of a cloud's forms) comes back over the
   // in-scatter, so at least ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and
@@ -294,14 +368,21 @@ void main() {
   vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
   sky += ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
   vec3 col = mix(tower, sky, cov);
-  vec3 T = mix(Tt, Ts, cov);
+  // How much of this pixel's light is the sun's, for the split grade the
+  // finish runs over the composite: a cumulus' own light (sunlit, near-neutral
+  // in the plate) as far as the air lets it through, and the sun's share of
+  // the air in front of it. So a veiled top still lands on the warm end of the
+  // grade, by its luminance after the haze, while the open sky, cyan in the
+  // plate and lit by the sky alone, takes none of it. On a tower, the clear
+  // air in front of its light stone and glints, as before.
+  float share = luma(sun) / (luma(sun) + luma(air) + 1e-4);
+  float warm = mix(smoothstep(0.35, 0.85, Tt.g), cloud * (Ts.g + (1.0 - Ts.g) * mix(0.3, 1.0, share)), cov);
   // Display-encoded and untoned, for the film finish. Alpha packs two
   // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
   // tower still seen through the air (the glass grade's weight, so far towers
-  // keep the blue the haze gave them), and how clear the air in front of it is
-  // (the warm top end is the sun on the cumulus, not on the haze).
+  // keep the blue the haze gave them), and the split grade's weight above.
   float solid = Tt.g * (1.0 - cov);
-  outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), (floor(solid * 15.0 + 0.5) * 16.0 + floor(T.g * 15.0 + 0.5)) / 255.0);
+  outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), (floor(solid * 15.0 + 0.5) * 16.0 + floor(warm * 15.0 + 0.5)) / 255.0);
 }`;
 
 // The film's response, shared by the halation threshold and the finish. In
@@ -371,7 +452,7 @@ void main() {
   vec4 s = texture(uScene, vUv);
   float packed = floor(s.a * 255.0 + 0.5);
   float solid = floor(packed / 16.0) / 15.0;
-  float clear = mod(packed, 16.0) / 15.0;
+  float warm = mod(packed, 16.0) / 15.0;
   vec3 lin = pow(max(s.rgb, 0.0), vec3(2.2));
 
   // Diffusion: the emulsion and the scanner both spread a little light, so the
@@ -391,12 +472,17 @@ void main() {
   // The film's shoulder, per channel.
   c = tone(c);
 
-  // Its top end is warm-neutral: the cumulus tops land near #FFF1E2, in clear
-  // air only (veiled, a warm top under blue haze goes lilac). The shade in the
-  // clouds leans to the skylight's cyan-grey, #B7C5C5.
+  // The split grade, after the haze and the shoulder, by the luminance the
+  // composite left: cyan-grey #B7C5C5 in the shaded folds, #DFE1DE through the
+  // middle, warm-neutral #FFF1E2 on the tops, each at its own luminance (a
+  // tint, not a lift). Weighted by how much of the light is the sun's, so a
+  // cumulus top seen through the haze still rolls off warm, and the open sky
+  // keeps the colour the air gave it.
   l = luma(c);
-  float hi = smoothstep(0.72, 0.95, l);
-  c = mix(c, l * vec3(1.05, 0.993, 0.931), hi * 0.85 * smoothstep(0.35, 0.85, clear));
+  vec3 tint = mix(vec3(${tint("#B7C5C5")}), vec3(${tint("#DFE1DE")}), smoothstep(0.5, 0.7, l));
+  tint = mix(tint, vec3(${tint("#FFF1E2")}), smoothstep(0.72, 0.95, l));
+  // On a tower only the top end, as the glass grade above owns its mids.
+  c = mix(c, l * tint, mix(smoothstep(0.42, 0.6, l), smoothstep(0.72, 0.95, l), solid) * 0.85 * warm);
   float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
   float shade = smoothstep(0.5, 0.68, l) * (1.0 - smoothstep(0.78, 0.92, l)) * (1.0 - smoothstep(0.1, 0.3, sat)) * (1.0 - solid);
   c *= mix(vec3(1.0), vec3(0.97, 1.0, 0.99), shade);
@@ -543,6 +629,7 @@ export async function createFog(host, { embedded = false } = {}) {
   const auxTex = imageTexture(gl, auxImg, false);
   const skyLin = skyMean(colorImg, auxImg);
   const skyOpen = openSky(colorImg, auxImg);
+  const sun = sunDir();
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -791,6 +878,7 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.uniform3f(cu.uSkyMean, skyLin[0], skyLin[1], skyLin[2]);
     gl.uniform3f(cu.uSkyLow, skyOpen.low[0], skyOpen.low[1], skyOpen.low[2]);
     gl.uniform3f(cu.uSkyMid, skyOpen.mid[0], skyOpen.mid[1], skyOpen.mid[2]);
+    gl.uniform3f(cu.uSun, sun[0], sun[1], sun[2]);
     gl.uniform4f(cu.uRect, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr);
     gl.uniform2f(cu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
     quadDraw(t.scene);
