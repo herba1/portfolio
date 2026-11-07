@@ -34,23 +34,28 @@ import { readWebm } from "./webm";
 //
 // The front. D is a single time front: 0 on the left, `depth` seconds on
 // the right, climbing across a ramp as wide as the distance the train runs in
-// those seconds (depth x v, ~1600 source px at rest). So at rest its slope is
-// exactly 1/v and most of the print is one leaning slice of the train held
-// still and drawn out into rigid horizontal ribbons; D is spent along the
-// train's measured run rather than the wall clock, so the ribbons stay rigid
-// while the train speeds up. Press anywhere and the front's half-way rope
+// those seconds (depth x v, ~1600 source px), so on average it climbs at
+// exactly 1/v; D is spent along the train's measured run rather than the
+// wall clock, so that holds while the train speeds up. At rest the front's
+// half-way rope is already bent, pulled left at two rows through the
+// windows, so along each row the slope swings above 1/v (the train folded
+// back on itself: mirrored X-shaped windows) and below it (doors and
+// pillars drawn out), and the bends drift slowly. Press anywhere and the rope
 // comes to you, held most strongly at the row you hold, so a drag bends the
 // local slope above 1/v (the train mirrored) on one side of the hand and
 // below it (compressed) on the other; held, the whole front steepens. Let go
 // and it eases back to rest. Hovering, it leans a little towards the
 // pointer. D is sampled with a cubic B-spline, so its slope (the train's
-// magnification) has no kinks. Rows above and below the train's body never
-// take the sculpted time, so nothing rises onto the canopy.
+// magnification) has no kinks. Rows above the train's body never take the
+// sculpted time, so nothing rises onto the canopy; below the red stripe the
+// undercarriage is held in rigid strips of constant time, so it never
+// streaks.
 //
 // Query (stills): ?t=seconds holds the clock; ?front=flat shows the clip as
 // shot; ?slit=x,lean sets the resting front; ?depth (or ?delay)=seconds also
-// sets the ramp's width (deeper is wider, still matched); ?bend=y,x;... pulls
-// the rope near row y to x (0..1 of the print).
+// sets the ramp's width (deeper is wider, still matched); ?bend=y,x;... sets
+// the rest pose, pulling the rope near row y to x (0..1 of the print), in
+// place of the built-in bends (?bend=none for the plain 1/v ramp).
 
 const ASSET = "/lab/slit-scan/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -102,6 +107,7 @@ uniform vec3 uPaper;
 uniform vec2 uSrc;            // source px of the print: 1920, 800
 uniform vec2 uBand;           // band rows in print px: top, height
 uniform vec2 uBody;           // rows where the train's motion applies (print px)
+uniform vec2 uCap;            // the red stripe's lower edge: row at x = 0, rise across the print
 uniform sampler2D uInv;       // R32F NP x 1: frame time at each distance the train has run
 uniform float uRun;           // distance the train has run at the clock, px
 uniform float uRunLoop;       // ... over the whole loop
@@ -111,6 +117,7 @@ uniform int uN;
 uniform float uOn;            // 0..1, eases the time field in
 uniform float uReady;         // ring complete
 out vec4 o;
+const float STRIP = 72.0;     // source px: the undercarriage's held strips
 
 vec3 yuv2rgb(float y, vec2 c) {
   float cb = c.x - 0.5, cr = c.y - 0.5;
@@ -161,7 +168,21 @@ void main() {
   // D is read in the train's own time: D seconds back is D x speed px of
   // the train's run back, so where D climbs at 1/speed the same column of
   // the train is held exactly, however the train speeds up
-  float D = delayAt(l) * uOn;
+  // The sculpted rows stop at the bottom of the red stripe. It is a hard
+  // horizontal edge of the train, at the same row in every frame (it leans
+  // a little with the perspective), so cutting time there leaves no seam.
+  // Below it the undercarriage would only be pulled into dark streaks, with
+  // the fence wires and the grass dragged in: there time is held in rigid
+  // strips instead, each the train as shot at the moment of the stripe just
+  // above its middle, so wheels and bogies stay crisp and the train is there
+  // exactly where its body is.
+  float cap = uCap.x + uCap.y * l.x;
+  bool under = p.y >= cap;
+  vec2 lD = l;
+  if (under) {
+    lD = vec2((floor(p.x / STRIP) + 0.5) * STRIP / uSrc.x, (cap - 1.5) / uSrc.y);
+  }
+  float D = delayAt(lD) * uOn;
   float q = mod(uRun - D * uSpeed, uRunLoop);
   int np = textureSize(uInv, 0).x;
   float qi = q / uRunLoop * float(np - 1);
@@ -260,11 +281,10 @@ async function loadBitmap(src) {
 }
 
 // ---- the time front. D climbs from 0 to `depth` across a ramp whose width
-// is the distance the train covers in those seconds (depth x v), so at rest
-// its slope is exactly 1/v: across most of the print one column of the train
-// is held still and drawn out into rigid horizontal ribbons, and only the
-// knees at either end hand back to the train as shot (now on the left, ago on
-// the right). The ramp leans with the rest curve, so each row holds a
+// is the distance the train covers in those seconds (depth x v), so left
+// alone its slope is exactly 1/v: one column of the train held still and
+// drawn out into rigid horizontal ribbons, with knees at either end that hand
+// back to the train as shot (now on the left, ago on the right). The ramp leans with the rest curve, so each row holds a
 // slightly different column and the ribbons carry the train's windows and
 // doors as colour. The rope c(y) is where D is half way: drag it and that
 // row's front is bent (a bias curve, smooth and monotone), steeper than 1/v
@@ -279,6 +299,20 @@ const HOLD = 1.6; // a held press deepens the front by this much (steeper than 1
 const X0 = 0.525;
 const LEAN = 0.8;
 const restCurve = (y, x0 = X0, lean = LEAN) => x0 + lean * (y - 0.5);
+// The rest pose is not the flat ramp: the rope is already bent, pulled left
+// at two rows through the windows, so across them the front's slope swings
+// above 1/v (the train folded back on itself: the windows come out as
+// mirrored X shapes) and below it (doors and pillars drawn out), crossing 1/v
+// again at every row the rope leans through. It breathes: each bend drifts a
+// little, on its own slow period. ?bend replaces these (?bend=none for the
+// plain ramp).
+const REST_BENDS = [
+  { y: 0.45, x: 0.3, ax: 0.05, ay: 0.025, period: 13 },
+  { y: 0.6, x: 0.38, ax: 0.045, ay: 0.03, period: 17.5 },
+];
+const BEND_W = 0.2; // the rope's reach above and below a bend, print heights
+// the red stripe's lower edge, source rows of the print at its left and right
+const CAP = [616, 581];
 // 0 -> 1 with slope 1 between the knees and a quadratic hand-off at the ends
 const soft0 = (s) => (s <= -KNEE ? 0 : s >= KNEE ? s : ((s + KNEE) * (s + KNEE)) / (4 * KNEE));
 const ramp = (s) => soft0(s) - soft0(s - 1);
@@ -289,12 +323,13 @@ const trainSpeed = (meta) => {
 };
 
 function parseBend(s) {
+  if (s == null) return REST_BENDS;
   if (!s) return [];
   return s
     .split(";")
     .map((d) => d.split(",").map(Number))
     .filter((d) => d.length === 2 && d.every(Number.isFinite))
-    .map(([y, x]) => ({ y, x }));
+    .map(([y, x]) => ({ y, x, ax: 0, ay: 0, period: 1 }));
 }
 
 // ---- the ring: decode every frame of the band into Y / CbCr layers
@@ -463,18 +498,27 @@ export async function createSlitScan(host, { embedded = false } = {}) {
 
   // the delay field, drawn from the slit curve
   const field = new Float32Array(MW * MH);
-  const rest = new Float32Array(MH);
+  const line = new Float32Array(MH); // the ramp's centre: the plain leaning line
+  const rest = new Float32Array(MH); // the rope at rest: the line, bent
   const curve = new Float32Array(MH);
   const tmp = new Float32Array(MH);
-  for (let j = 0; j < MH; j++) rest[j] = restCurve((j + 0.5) / MH, x0, lean);
-  curve.set(rest);
-  // a still can hold the slit bent: each ?bend=y,x pulls the rows near y to x
-  for (const b of bends) {
-    for (let j = 0; j < MH; j++) {
-      const g = Math.exp(-((((j + 0.5) / MH - b.y) / 0.2) ** 2));
-      curve[j] += (b.x - curve[j]) * g;
+  // the rest pose at breath time tb: the leaning line, with each bend
+  // pulling the rows near its y to its x (at tb = 0 exactly where it is set)
+  const pose = (tb) => {
+    rest.set(line);
+    for (const b of bends) {
+      const ph = (tb / b.period) * Math.PI * 2;
+      const bx = b.x + b.ax * Math.sin(ph);
+      const by = b.y + b.ay * Math.sin(ph * 0.5 + 1.1) - b.ay * Math.sin(1.1);
+      for (let j = 0; j < MH; j++) {
+        const g = Math.exp(-((((j + 0.5) / MH - by) / BEND_W) ** 2));
+        rest[j] += (bx - rest[j]) * g;
+      }
     }
-  }
+  };
+  for (let j = 0; j < MH; j++) line[j] = restCurve((j + 0.5) / MH, x0, lean);
+  pose(0);
+  curve.set(rest);
   let depth = flat ? 0 : clamp(depthQ ?? DEPTH0, 0, (RUN / SPEED / HOLD) * 0.9);
   const depthRest = depth;
   // the ramp's half width, print widths: half the distance the train runs in
@@ -482,7 +526,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   const halfW = Math.max(0.05, ((depthRest || DEPTH0) * SPEED) / (2 * SW));
   const drawField = () => {
     for (let j = 0; j < MH; j++) {
-      const a = rest[j] - halfW;
+      const a = line[j] - halfW;
       const span = 2 * halfW;
       // where the rope holds this row's half-way point, 0..1 of the ramp
       const m = clamp((curve[j] - a) / span, 0.07, 0.93);
@@ -570,6 +614,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     gl.uniform2f(u.uSrc, SW, SH);
     gl.uniform2f(u.uBand, meta.band[0] - meta.crop[0], BH);
     gl.uniform2f(u.uBody, meta.body[0] - meta.crop[0], meta.body[1] - meta.crop[0]);
+    gl.uniform2f(u.uCap, CAP[0], CAP[1] - CAP[0]);
     gl.uniform1f(u.uRun, runAt(clock));
     gl.uniform1f(u.uRunLoop, RUN);
     gl.uniform1f(u.uSpeed, SPEED);
@@ -619,9 +664,19 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   });
 
   let settled = held;
+  const breathing = !held && bends.some((b) => b.ax || b.ay);
+  let breath = 0;
   const frame = (dt) => {
     if (!L) return;
     if (!held) clock = (clock + dt) % LOOP;
+    if (ready && breathing) {
+      // the rest pose drifts, and the rope rides along with it
+      breath += dt * on;
+      for (let j = 0; j < MH; j++) tmp[j] = rest[j];
+      pose(breath);
+      for (let j = 0; j < MH; j++) curve[j] += rest[j] - tmp[j];
+      settled = false;
+    }
     if (ready && onT < 1) {
       onT = held ? 1 : Math.min(1, onT + dt / 1.6);
       on = 1 - (1 - onT) ** 3;
@@ -650,7 +705,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
         dev = Math.max(dev, Math.abs(curve[j] - rest[j]));
       }
       if (!flat) depth += ((press ? depthRest * HOLD : depthRest) - depth) * (1 - Math.exp(-dt / (press ? 2.5 : 3)));
-      settled = !press && !inside && dev < 5e-4 && Math.abs(depth - depthRest) < 2e-3;
+      settled = !breathing && !press && !inside && dev < 5e-4 && Math.abs(depth - depthRest) < 2e-3;
       drawField();
       fieldDirty = true;
     }
