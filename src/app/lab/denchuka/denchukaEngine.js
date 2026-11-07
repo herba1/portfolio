@@ -26,6 +26,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // plate), so it carries none of the street with it, and it passes behind the
 // signals and road signs that stand in front of it.
 //
+// The scan came with a teal film-preset sky. It is regraded live, through the
+// sky matte (sky.png: the photo's matte plus every hole the plates fill with
+// sky, times whatever still stands in front), to a summer cobalt that deepens
+// toward the top edge, with skylight-blue shade and warm sunlit tops on the
+// cloud; the film then adds only its optics.
+//
 // Query: ?year=0..1 holds the years (elements caught mid-motion, as a still);
 // ?film=0 shows the plates before the film.
 
@@ -34,6 +40,8 @@ const PW = 2400;
 const PH = 1600;
 const MAX_W = 24;
 const MAX_P = 8;
+// plate row of the hills: the sky grade is palest here and deepest at the top edge
+const SKYLINE = 1060;
 
 // seconds each kind of element takes to go
 const DUR = { wire: 0.95, hw: 1.25, pole: 1.9 };
@@ -59,6 +67,7 @@ uniform sampler2D uP2;
 uniform sampler2D uP3;
 uniform highp sampler2D uIds;
 uniform sampler2D uAlpha;
+uniform sampler2D uSky;           // the sky with everything overhead gone (1 = sky)
 uniform highp sampler2D uState;   // x: wire id, row 0 wires / 1 hardware / 2 poles: 1 = in place
 uniform vec2 uPlate;
 uniform int uNW;
@@ -89,6 +98,44 @@ vec3 plate(int s, vec2 px, int rk) {
   if (s == 2) return texture(uP2, uv).rgb;
   return texture(uP3, uv).rgb;
 }
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-6)), d / (q.x + 1e-6), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+// The scan's sky is a teal film preset (hue ~189, the same pale value from the
+// hills to the top edge). A summer sky is cobalt and deepens toward the
+// zenith: the clear blue is turned to ~207 and, going up the frame, gains
+// saturation and loses value, left pale over the hills. The cloud is lit from
+// high right: its shadow sides take the blue of the sky that lights them, its
+// sunlit tops go warm-neutral.
+vec3 skyGrade(vec3 c, float y) {
+  vec3 h = rgb2hsv(c);
+  float deg = h.x * 360.0;
+  float zen = smoothstep(0.0, 1.0, clamp(1.0 - y / ${SKYLINE}.0, 0.0, 1.0));
+  // clear sky: the teal band, turned
+  float band = smoothstep(150.0, 168.0, deg) * (1.0 - smoothstep(232.0, 248.0, deg));
+  float blue = smoothstep(0.1, 0.3, h.y) * band;
+  float hue = mix(deg, 211.0 + (deg - 189.0) * 0.4, band);
+  float sat = clamp(h.y * mix(1.0, 1.1, zen) + 0.03 * zen, 0.0, 1.0);
+  float val = h.z * mix(1.0, 0.84, zen * zen);
+  vec3 sky = hsv2rgb(vec3(hue / 360.0, sat, val));
+  // cloud: shade sides to skylight blue, sunlit tops to warm white
+  // more range, and the low cloud lit by the haze round it
+  float v = clamp(0.84 + (h.z - 0.84) * 1.6 + 0.03 * (1.0 - zen), 0.0, 1.0);
+  float shade = smoothstep(0.93, 0.74, h.z);
+  float top = smoothstep(0.87, 0.96, h.z);
+  vec3 shadeC = hsv2rgb(vec3(212.0 / 360.0, 0.07 + 0.1 * shade, v));
+  vec3 sunC = hsv2rgb(vec3(38.0 / 360.0, 0.075, v));
+  vec3 cloud = mix(shadeC, sunC, top);
+  return mix(cloud, sky, blue);
+}
 // the object alone: photo = a * object + (1 - a) * behind
 vec3 unmix(vec3 withIt, vec3 behind, float a) {
   return clamp((withIt - (1.0 - a) * behind) / max(a, 0.2), 0.0, 1.0);
@@ -106,6 +153,12 @@ void main() {
   if (e.y > 0 && rest(1, e.y)) s = 1;
   if (e.x > 0 && rest(0, e.x)) s = 0;
   vec3 col = plate(s, pp, rk);
+  // how much of what stands in front of the sky is still there
+  vec3 al0 = texelFetch(uAlpha, ip, 0).rgb;
+  float cov = 0.0;
+  if (e.x > 0 && s == 0) cov = max(cov, al0.r);
+  if (e.y > 0 && rest(1, e.y)) cov = max(cov, al0.g);
+  if (e.z > 0 && rest(2, e.z)) cov = max(cov, al0.b);
 
   // poles going down their own axes, into the ground
   for (int j = 0; j < ${MAX_P}; j++) {
@@ -123,6 +176,7 @@ void main() {
     int srk = se.w / 64;
     vec3 obj = unmix(plate(2, src, srk), plate(3, src, srk), al);
     col = mix(col, obj, al);
+    cov += (1.0 - cov) * al;
   }
 
   // crossarms, transformers and insulators lowered down the pole
@@ -141,6 +195,7 @@ void main() {
     int srk = se.w / 64;
     vec3 obj = unmix(plate(1, src, srk), plate(2, src, srk), al);
     col = mix(col, obj, al);
+    cov += (1.0 - cov) * al;
   }
 
   // wires: slack, then the fall, blurred over the frame interval
@@ -174,7 +229,11 @@ void main() {
     acc /= n;
     accA /= n;
     col = col * (1.0 - accA) + acc;
+    cov += (1.0 - cov) * accA;
   }
+
+  float skyW = texture(uSky, pp / uPlate).r * (1.0 - cov);
+  if (skyW > 0.002) col = mix(col, skyGrade(col, pp.y), skyW);
 
   outColor = vec4(col, 1.0);
 }`;
@@ -298,11 +357,12 @@ export async function createDenchuka(host, { embedded = false } = {}) {
 
   const [els, ...imgs] = await Promise.all([
     fetch(BASE + "elements.json").then((r) => r.json()),
-    ...["p0.webp", "p1.webp", "p2.webp", "p3.webp", "ids.png", "alpha.png"].map((f) => loadImage(BASE + f)),
+    ...["p0.webp", "p1.webp", "p2.webp", "p3.webp", "ids.png", "alpha.png", "sky.png"].map((f) => loadImage(BASE + f)),
   ]);
   const plates = imgs.slice(0, 4).map((im) => imageTexture(gl, im));
   const idsTex = imageTexture(gl, imgs[4], true);
   const alphaTex = imageTexture(gl, imgs[5], true);
+  const skyTex = imageTexture(gl, imgs[6]);
 
   // Element table.
   const wires = els.wires.map((w) => ({ ...w, a: 0, prev: 0, kind: "wire" }));
@@ -491,6 +551,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     bindTex(4, idsTex, u.uIds);
     bindTex(5, alphaTex, u.uAlpha);
     bindTex(6, stateTex, u.uState);
+    bindTex(7, skyTex, u.uSky);
     gl.uniform2f(u.uPlate, PW, PH);
     gl.uniform1i(u.uNW, nw);
     gl.uniform4fv(u.uW, uW);
@@ -516,10 +577,14 @@ export async function createDenchuka(host, { embedded = false } = {}) {
           contrast: 1.14,
           toe: 0.0,
           saturation: 1.1,
-          blueDepth: 0.6,
+          blueDepth: 0.45,
           shadowTint: [0.97, 1, 1.03],
           highlightTint: [0.99, 1, 1.01],
           vignette: 0.22,
+          // the sunlit cloud is brighter against a deeper blue now: keep the
+          // red fringe off its edge
+          halation: 0.22,
+          halationThreshold: 0.96,
           whitePoint: 1.25,
           grainSeed: seed,
         },
@@ -620,7 +685,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [...plates, idsTex, alphaTex, stateTex].forEach((t) => gl.deleteTexture(t));
+      [...plates, idsTex, alphaTex, skyTex, stateTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);

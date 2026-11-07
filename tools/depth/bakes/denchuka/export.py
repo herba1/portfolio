@@ -15,6 +15,10 @@
 #                  matte's alpha; elsewhere a difference matte against the next
 #                  clean plate (photo = a * object + (1 - a) * plate), so a moving
 #                  piece carries no building with it.
+# sky.png          the sky matte of the street with everything overhead gone:
+#                  the photo's sky matte, plus every hole against the sky (what
+#                  the clean plates fill with sky). The live grade multiplies it
+#                  by whatever is still standing in front, so only sky is graded.
 # elements.json    every element with its geometry and its year (a pole that
 #                  stays, the one carrying the left signal, has year 2)
 import sys, json, numpy as np, cv2
@@ -117,6 +121,9 @@ for k in (1, 2, 3):
     webp(out + f"p{k}.webp", np.where(R[k][..., None], Pn[k], np.where(band, Pn[0], grey)), 92)
 ids = np.stack([np.clip(wid, 0, 255), hid * 16 + sid, rk.astype(np.int32) * 64 + front.astype(np.int32) * 32], -1).astype(np.uint8)
 cv2.imwrite(out + "ids.png", ids[:, :, ::-1], [cv2.IMWRITE_PNG_COMPRESSION, 9])
+sky = cv2.imread(wd + "sky.png", 0).astype(np.float32) / 255
+sky = np.where(env & grow(holes[1] | holes[2] | holes[3], 1), 1.0, sky) * grow(env, 3)
+cv2.imwrite(out + "sky.png", (np.clip(sky, 0, 1) * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 al = np.stack([wa, ha, sa], -1)
 cv2.imwrite(out + "alpha.png", (np.clip(al, 0, 1)[:, :, ::-1] * 255 + 0.5).astype(np.uint8), [cv2.IMWRITE_PNG_COMPRESSION, 9])
 
