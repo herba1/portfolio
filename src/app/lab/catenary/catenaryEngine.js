@@ -299,12 +299,14 @@ void main() {
   int i0 = int(floor(u));
   int i1 = min(i0 + 1, 24);
   vec3 col = mix(uShade[i0], uShade[i1], fract(u));
-  // The same graphite as the steel; where the wire crosses lit cloud, the
-  // cloud's halation and veil lie over it too, masked off the steel exactly
-  // as the plate masks them, so a live wire matches the plate's own.
+  // The same graphite as the steel. A live wire is steel too, but it was
+  // painted out of the plate, so the key's steel mask (key.r) never reaches
+  // it: hold it at the steel's residue directly. The cloud's halation and
+  // veil then barely touch the wire body (it stays a dark silhouette across
+  // lit cumulus), while the plate's own rim term still glows around it.
   col = mix(col, graphite(col), uStruct.x);
   vec3 key = texture(uKey, vRest / uImg).rgb;
-  float bare = 1.0 - 0.85 * key.r;
+  float bare = 0.15;
   col += uHalTint * uGlow.y * key.g * 0.35 * bare;
   col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.z * bare);
   outColor = vec4(col, a);
