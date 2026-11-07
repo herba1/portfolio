@@ -1,6 +1,6 @@
 {
   "title": "Blue Note",
-  "description": "A record sleeve in the manner of Reid Miles: two inks on warm board, a photograph from Let It Be screened into two halftone plates and the title set huge in heavy Geist, cropped hard against the edges. Drag inside the square and the layout re-composes in big moves, the type scaling, turning and running off the edge, then settling on springs into the nearest of six finished sleeves.",
+  "description": "A record sleeve in the manner of Reid Miles: two inks on warm board, a photograph from Let It Be screened into two halftone plates and the title set huge in heavy Geist, cropped hard against the edges. Drag inside the square and the sleeve is re-set rather than morphed: the photograph's crop moves first, then each word slides off past its own edge about 40ms after the last, and the next sleeve's words come in from the edges nearest their places, on paths chosen so no two words ever touch.",
   "tags": ["Canvas", "Typography", "Print", "Music"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
