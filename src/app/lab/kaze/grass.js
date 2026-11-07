@@ -113,8 +113,17 @@ const PROFILE = {
   spike: (s) => (s < 0.75 ? Math.pow(Math.sin(Math.PI * (0.08 + (0.84 * s) / 0.75)), 0.7) : (0.16 * (1 - s)) / 0.25),
 };
 
-// Vertex layout: P(3) S(3) tip(3) col(3) lever, trans, phase.
-const STRIDE = 15;
+// Vertex layout: P(3) S(3) tip(3) col(3) lever, trans, phase, then the
+// shading frame: along (0 root .. 1 tip), across (-1 .. 1), the plant's seed.
+export const STRIDE = 18;
+
+// A seed in 0..1 from a plant's phase, so every ribbon of one plant (stem,
+// leaves, panicle) shares its hue and value without drawing on the layout's
+// random stream.
+const seedOf = (ph) => {
+  const x = Math.sin(ph * 91.7 + 3.1) * 43758.5453;
+  return x - Math.floor(x);
+};
 
 function builder(cam) {
   const v = [];
@@ -122,8 +131,10 @@ function builder(cam) {
   let nv = 0;
   // ribbon: points + tangents, half width per point, the wind's reference
   // point (the culm or blade tip) and the lever per point (metres of tip
-  // travel per unit of bend), colours base -> tip.
-  const ribbon = ({ pts, tan }, hw, tip, lever, c0, c1, trans, phase) => {
+  // travel per unit of bend), colours base -> tip; the plant's seed and where
+  // along its own length each point stands, for the fragment shading (a
+  // constant for the hanging panicle, which has no root of its own to darken).
+  const ribbon = ({ pts, tan }, hw, tip, lever, c0, c1, trans, phase, seed = seedOf(phase), along = (s) => s) => {
     const n = pts.length;
     for (let i = 0; i < n; i++) {
       const s = i / (n - 1);
@@ -132,8 +143,9 @@ function builder(cam) {
       const w = hw(s);
       const col = mix3(c0, c1, Math.pow(s, 1.3));
       const lv = lever(s);
+      const al = along(s);
       for (const sg of [-1, 1]) {
-        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase);
+        v.push(P[0], P[1], P[2], side[0] * w * sg, side[1] * w * sg, side[2] * w * sg, tip[0], tip[1], tip[2], col[0], col[1], col[2], lv, trans, phase, al, sg, seed);
       }
       if (i < n - 1) {
         const a = nv + i * 2;
@@ -154,10 +166,11 @@ const AMP = 0.32;
 function culmWithHead(b, R, o) {
   const { root, az, lean, L, w0, cStem, cTip, cHead, trans, segs, leaves = 1 } = o;
   const phase = R() * 6.283;
+  const seed = seedOf(phase);
   const stem = curve(root, az, lean, o.nod ?? 0.75, 5, L, segs);
   const tip = stem.pts[stem.pts.length - 1];
   const lever = (s) => AMP * L * s * s;
-  b.ribbon(stem, (s) => w0 * PROFILE.culm(s), tip, lever, cStem, cTip, trans * 0.5, phase);
+  b.ribbon(stem, (s) => w0 * PROFILE.culm(s), tip, lever, cStem, cTip, trans * 0.5, phase, seed);
   // leaves off the lower nodes
   for (let k = 0; k < leaves; k++) {
     const sN = 0.08 + 0.18 * k + 0.08 * R();
@@ -166,7 +179,7 @@ function culmWithHead(b, R, o) {
     const LL = L * (0.3 + 0.2 * R());
     const lc = curve(at, laz, 0.35 + 0.3 * R(), 1.1 + R() * 0.8, 1.8, LL, Math.max(8, Math.round(segs * 0.5)));
     const ltip = lc.pts[lc.pts.length - 1];
-    b.ribbon(lc, (s) => w0 * (o.leafW ?? 1.6) * PROFILE.leaf(s), ltip, (s) => AMP * (L * sN * sN + LL * s * s * 0.6), cStem, cTip, trans, phase + 1.3);
+    b.ribbon(lc, (s) => w0 * (o.leafW ?? 1.6) * PROFILE.leaf(s), ltip, (s) => AMP * (L * sN * sN + LL * s * s * 0.6), cStem, cTip, trans, phase + 1.3, seed, (s) => 0.15 + 0.85 * s);
   }
   // the panicle: whorls on the top fifth of the culm, the pedicels spread and
   // droop, the spikelets hang from them
@@ -182,7 +195,7 @@ function culmWithHead(b, R, o) {
       const ped = curve(at, paz, 0.7 + 0.5 * R(), 1.4 + R() * 0.8, 1.2, PL, 8);
       const pend = ped.pts[ped.pts.length - 1];
       const plv = (s) => AMP * L * sN * sN + AMP * 0.6 * PL * s * s;
-      b.ribbon(ped, () => 0.00028, tip, plv, cHead, cHead, trans, phase + j);
+      b.ribbon(ped, () => 0.00028, tip, plv, cHead, cHead, trans, phase + j, seed, () => 0.85);
       const dir = ped.tan[ped.tan.length - 1];
       const SL = (0.022 + 0.012 * R()) * (o.big ?? 1);
       const hz = norm([dir[0], dir[1], 0]);
@@ -190,7 +203,7 @@ function culmWithHead(b, R, o) {
       const sp = curve(pend, 0, a0, 0.3, 1, SL, 12, hz);
       const end = AMP * L * sN * sN + AMP * 0.6 * PL;
       const SW = (0.0019 + 0.0008 * R()) * (o.big ?? 1);
-      b.ribbon(sp, (s) => SW * PROFILE.spike(s), tip, (s) => end + AMP * 0.8 * SL * s, cHead, cHead, trans, phase + j);
+      b.ribbon(sp, (s) => SW * PROFILE.spike(s), tip, (s) => end + AMP * 0.8 * SL * s, cHead, cHead, trans, phase + j, seed, (s) => 0.8 + 0.2 * s);
     }
   }
 }
@@ -201,7 +214,8 @@ function leaf(b, R, o) {
   const tip = lc.pts[lc.pts.length - 1];
   const tw = R() * 6.283;
   const twr = (R() - 0.5) * 5;
-  b.ribbon(lc, (s) => w0 * PROFILE.leaf(s) * (0.3 + 0.7 * Math.abs(Math.cos(tw + twr * s))), tip, (s) => AMP * L * s * s, c0, c1, trans, R() * 6.283);
+  const ph = R() * 6.283;
+  b.ribbon(lc, (s) => w0 * PROFILE.leaf(s) * (0.3 + 0.7 * Math.abs(Math.cos(tw + twr * s))), tip, (s) => AMP * L * s * s, c0, c1, trans, ph);
 }
 
 // Is any of a stalk (root to its top, standing) in frame for a wide or a tall
@@ -334,6 +348,7 @@ in vec3 aS;      // signed half-width, world, facing the lens
 in vec3 aTip;    // the stalk's tip: where it reads the wind
 in vec3 aCol;    // linear colour
 in vec3 aK;      // lever (m of travel per unit bend), translucency, phase
+in vec3 aB;      // along (0 root .. 1 tip), across (-1 .. 1), the plant's seed
 uniform vec3 uCam;
 uniform vec3 uR;
 uniform vec3 uU;
@@ -344,15 +359,26 @@ uniform vec4 uView;        // image uv on screen (for the wind grid)
 uniform sampler2D uWind;
 uniform float uTime;
 uniform float uDebug;
+uniform vec2 uSun;         // the sun on screen, NDC
 out vec3 vCol;
 out float vA;
 out float vTrans;
 out vec2 vNdc;
+out float vAlong;
+out float vAcross;
+out float vSunward;
 
 vec2 proj(vec3 P) {
   vec3 d = normalize(P - uCam);
   vec3 c = vec3(dot(d, uR), dot(d, uU), dot(d, uF));
   return 2.0 * c.xy / max(1.0 + c.z, 1e-3) * uK;
+}
+
+// A hue turn about the grey axis (Rodrigues), radians.
+vec3 hueTurn(vec3 c, float a) {
+  const vec3 k = vec3(0.57735);
+  float cs = cos(a);
+  return c * cs + cross(k, c) * sin(a) + k * dot(k, c) * (1.0 - cs);
 }
 
 void main() {
@@ -385,9 +411,22 @@ void main() {
   }
   vec2 ndc = c0 + sp / (uRes * 0.5);
   vNdc = ndc;
-  vCol = aCol;
+  // Each plant its own: about +-6 deg of hue and +-10% of value, so the
+  // field reads as separate blades rather than one olive.
+  float h1 = fract(aB.z * 13.731);
+  float h2 = fract(aB.z * 71.377 + 0.31);
+  vCol = max(hueTurn(aCol, (h1 - 0.5) * 2.0 * 0.105), vec3(0.0)) * (0.9 + 0.2 * h2);
   if (uDebug > 0.5) vCol = mix(vCol, vec3(1.0, 0.2, 0.1), clamp(length(b) * lv * 6.0, 0.0, 1.0));
   vTrans = aK.y;
+  vAlong = aB.x;
+  vAcross = aB.y;
+  // Which edge faces the sun: this vertex's offset from the centreline
+  // against the way to the sun, on screen. The pair's offsets are opposite,
+  // so across the width it runs from +1 on the sunward edge to -1, faded
+  // out where the blade points at the sun and neither edge faces it.
+  vec2 toSun = (uSun - c0) * uRes * 0.5;
+  float q = dot(sp / max(length(sp), 1e-6), toSun / max(length(toSun), 1e-6));
+  vSunward = sign(q) * smoothstep(0.15, 0.6, abs(q));
   gl_Position = vec4(ndc, 0.0, 1.0);
 }`;
 
@@ -397,14 +436,49 @@ in vec3 vCol;
 in float vA;
 in float vTrans;
 in vec2 vNdc;
+in float vAlong;
+in float vAcross;
+in float vSunward;
 uniform vec2 uSun;        // the sun on screen, NDC
 uniform float uAspect;
+uniform vec4 uView;       // image uv on screen
+uniform sampler2D uSky;   // the sky photograph, sRGB
+uniform float uSkyLod;    // a soft level of it: what is behind, not its texture
 out vec4 outColor;
+
+vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
+
 void main() {
-  // Backlit, a thin leaf near the sun lets a little of it through: a cool
-  // yellow-green, never the warm of the halation.
+  // A grass leaf against the light, not a flat ribbon.
+  // Root to tip: the base sits in the shade of the sward and is thick; the
+  // tip is thin and up in the light.
+  float s = clamp(vAlong, 0.0, 1.0);
+  float lift = mix(0.55, 1.15, smoothstep(0.0, 1.0, pow(s, 0.8)));
+  vec3 c = vCol * lift;
+  float x = clamp(vAcross, -1.0, 1.0);
+
+  // What is behind the leaf: the sky photograph at this point, softened.
+  // Lit cloud is what shines through; open blue (no red in it) barely does.
+  vec2 uv = uView.xy + vec2(vNdc.x * 0.5 + 0.5, 0.5 - vNdc.y * 0.5) * uView.zw;
+  vec3 sky = toLin(textureLod(uSky, uv, uSkyLod).rgb);
+  float cloud = smoothstep(0.12, 0.7, min(sky.r, sky.g));
   vec2 d = (vNdc - uSun) * vec2(uAspect, 1.0);
-  float sn = exp(-dot(d, d) / 0.12);
-  vec3 c = vCol + vTrans * sn * vec3(0.022, 0.03, 0.004);
+  float sn = exp(-dot(d, d) / 0.35);
+  float behind = max(cloud, 0.45 * sn);
+  // Transmission: a thin blade with bright sky behind glows a translucent
+  // yellow-green (#9DB04A), stronger toward the thin tip, less down the
+  // thicker midrib. The anchors carry none and stay ink.
+  const vec3 TRANS = vec3(0.337, 0.431, 0.069);
+  float tw = vTrans * behind * mix(0.35, 1.0, s);
+  c = mix(c, TRANS * mix(0.55, 1.0, s), 0.72 * tw);
+  // Across, over both: a shallow trough read as a cylinder, the edges about
+  // a quarter darker, and a soft paler midrib down the centre.
+  float cyl = mix(0.75, 1.0, sqrt(max(0.0, 1.0 - x * x)));
+  float rib = 1.0 + 0.12 * exp(-x * x / 0.02);
+  c *= cyl * rib;
+  // The sun-facing edge: a thin brighter rim where the light grazes through
+  // the leaf's margin, strongest with bright sky behind.
+  float rim = smoothstep(0.5, 0.92, vSunward);
+  c += TRANS * rim * (0.08 + 0.34 * behind) * (0.04 + 0.96 * vTrans) * mix(0.5, 1.0, s);
   outColor = vec4(c * vA, vA);
 }`;

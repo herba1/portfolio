@@ -1,7 +1,7 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createWind, GX, GY } from "./wind";
-import { buildGrass, camera, GRASS_VERT, GRASS_FRAG } from "./grass";
+import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 
 // Kaze: lying in the long grass in July, looking up, and the wind is yours.
 //
@@ -358,6 +358,7 @@ export async function createKaze(host) {
     ["aTip", 3, 6],
     ["aCol", 3, 9],
     ["aK", 3, 12],
+    ["aB", 3, 15],
   ];
   const layerVao = (geo) => {
     const vao = gl.createVertexArray();
@@ -369,7 +370,7 @@ export async function createKaze(host) {
       const loc = gl.getAttribLocation(grassP.p, name);
       if (loc < 0) continue;
       gl.enableVertexAttribArray(loc);
-      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, 15 * 4, off * 4);
+      gl.vertexAttribPointer(loc, size, gl.FLOAT, false, STRIDE * 4, off * 4);
     }
     const ib = gl.createBuffer();
     gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib);
@@ -532,6 +533,12 @@ export async function createKaze(host) {
     gl.uniform1f(u.uDebug, debug);
     gl.uniform2f(u.uSun, ((SUN[0] - v[0]) / v[2]) * 2 - 1, 1 - ((SUN[1] - v[1]) / v[3]) * 2);
     gl.uniform1f(u.uAspect, L.w / L.h);
+    // the sky behind, softened, for the light through the leaves
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, skyTex);
+    gl.uniform1i(u.uSky, 1);
+    gl.uniform1f(u.uSkyLod, Math.max(0, Math.log2((skyImg.naturalWidth * v[2]) / L.rw)) + 3);
+    gl.activeTexture(gl.TEXTURE0);
     gl.bindVertexArray(layer.vao);
     gl.drawElements(gl.TRIANGLES, layer.count, gl.UNSIGNED_INT, 0);
     gl.disable(gl.BLEND);
