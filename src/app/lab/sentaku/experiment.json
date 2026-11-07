@@ -1,0 +1,28 @@
+{
+  "title": "Sentaku",
+  "description": "Laundry on a line seen from underneath against a cobalt sky, the sun hidden behind a sheer polka-dot dress. Every garment was cut out of the photograph and hangs as its own sheet of cloth from its pegs, and the pointer is the wind: sweep across and a gust runs down the line from that side, the dresses billow and lift, the folds that turn to the sun catch it, the line swings under the load, and the sun shows through the dress, or past it, wherever it really is. Left alone, a summer breeze keeps them breathing.",
+  "tags": ["WebGL", "Simulation", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-07T15:00:00.000Z",
+  "intent": "Washing on a Japanese balcony line from below, Sugimoto-quiet, crossed with iOS Spatial Scenes (https://www.macrumors.com/how-to/ios-3d-lock-screen-effect-spatial-scenes/): a real photograph broken into layers and given real physics. Each garment is a SAM 2.1 cut-out (guided-filter matte, colour unmixed against the plate) on a coarse XPBD cloth grid (small steps, Macklin et al. 2019, https://mmacklin.com/smallsteps.pdf) pinned where it meets the line, the photographed drape taken as the equilibrium of weight and tension (away from it, weight pulls each vertex back as on a pendulum the length of its hang, g / hang), driven by a quadratic wind pressure on each triangle; the line's sag plane swings as a damped pendulum toward atan(lateral load / weight). The plate behind is a smooth sky fit with LaMa grain and the sun modelled back under the dress from its visible glare. The dress is sheer: it is stored as fabric plus a share of the sky behind it, so the sun shows through it where the sun is. Lit per vertex from the cloth's normal against its rest normal (sun behind the line, sky above), graded with the shared film kit (summer). ?gust=0..1 holds a steady gust (&dir=-1|1, &t=seconds), ?still=1 shows the photograph.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.2, 0.5], "to": [0.8, 0.48] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.15, 0.55], [0.85, 0.5]], "ms": 450 },
+    { "idle": 3500 },
+    { "drag": [[0.9, 0.45], [0.2, 0.5]], "ms": 400 },
+    { "idle": 3000 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/clothes-hanging-on-a-clothesline-against-a-bright-blue-sky-BNIdkggOFvQ",
+      "file": "https://images.unsplash.com/photo-1782908199925-15d46fd1d9d4?w=4000&h=4000&fit=max&q=90&fm=jpg",
+      "author": "Liosha Shyp (@liosha_shyp), Unsplash",
+      "licence": "Unsplash License",
+      "note": "Cropped to the upper line (top 3080 of 4000 px) and worked at 1400 px wide. Garment mattes by tools/depth/segment.py prompt (SAM 2.1 Hiera-Tiny, Apache-2.0), hole filled by tools/depth/fill.py (LaMa big-lama ONNX by Carve, Apache-2.0) for grain, the clothesline fitted as a curve. Bakes: tools/depth/bakes/sentaku/."
+    },
+    "https://mmacklin.com/smallsteps.pdf",
+    "https://www.macrumors.com/how-to/ios-3d-lock-screen-effect-spatial-scenes/"
+  ]
+}
