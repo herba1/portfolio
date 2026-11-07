@@ -17,6 +17,8 @@ const CELL_H = 1100;
 const STRIPES = 5;
 const GAP = 0.06; // paper between rules, as a fraction of a strip
 const HAIR = 0.14; // weight of the outermost rules against the centre one
+// How far a plate's edge swells in and out, css px peak to peak.
+const SWELL = 1.2;
 // How far each strip's rule runs, as a share of the tail: a ragged edge.
 const REACH = [0.72, 0.9, 1.0, 0.55, 0.8];
 // The track runs on a shallow climb, the diagonal of the posters.
@@ -69,7 +71,15 @@ out vec4 o;
 const float N = ${STRIPES.toFixed(1)};
 const float GAP = ${GAP.toFixed(3)};
 const float HAIR = ${HAIR.toFixed(3)};
+const float SWELL = ${SWELL.toFixed(2)};
 const float REACH[5] = float[5](${REACH.map((r) => r.toFixed(2)).join(", ")});
+
+float vhash(vec2 p){ p = fract(p * vec2(123.34, 456.21)); p += dot(p, p + 45.32); return fract(p.x * p.y); }
+float vnoise(vec2 p){
+  vec2 i = floor(p), f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  return mix(mix(vhash(i), vhash(i + vec2(1, 0)), u.x), mix(vhash(i + vec2(0, 1)), vhash(i + vec2(1, 1)), u.x), u.y);
+}
 
 // Coverage of the numeral in its own frame (d = offset from centre, css px),
 // sharpened back to a crisp edge after the atlas is magnified.
@@ -85,8 +95,6 @@ void main(){
   vec2 px = vec2(gl_FragCoord.x, uRes.y * uDpr - gl_FragCoord.y) / uDpr; // css px, y down
   vec4 stock = texelFetch(uPaper, ivec2(gl_FragCoord.xy), 0);
   float tooth = stock.g;
-  // Ink lands a hair irregular at the edge, not on a vector line.
-  vec2 jit = (stock.ba - 0.5) * 0.9;
   vec2 c = px - uRes * 0.5;
   vec2 tp = vec2(dot(c, uAxis), dot(c, vec2(-uAxis.y, uAxis.x)));
 
@@ -98,6 +106,13 @@ void main(){
   vec2 ctr = b.xy;
   float L = m.w;
   float dir = sign(m.x);
+
+  // The edge is a press edge: crisp, with only a slow swell where the slug
+  // took a touch more ink. The swell rides with the plate (one undulation
+  // every forty px or so); the paper adds no more than a hair of grain.
+  vec2 sp = (tp - ctr) / 40.0 + uSeed * 31.0;
+  vec2 swell = vec2(vnoise(sp), vnoise(sp + 17.3)) - 0.5;
+  vec2 jit = swell * SWELL + (stock.ba - 0.5) * 0.2;
 
   vec2 d = tp + jit - ctr;
   d.x += m.z * d.y;            // lean into the direction of travel
@@ -147,7 +162,7 @@ void main(){
 }`;
 
 // The stock, baked once per size: an uncoated warm white with cloud and
-// fibre. r = brightness, g = tooth, ba = a small edge jitter field.
+// fibre. r = brightness, g = tooth, ba = a fine grain the ink edge picks up.
 const PAPER_FS = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -409,7 +424,8 @@ export async function createOverprint(host) {
   const short = () => Math.min(H, W * 0.62);
   const height = (n) => n.lane.size * short();
   const width = (n) => height(n) * atlas.rects[n.i].aspect;
-  const stretchOf = (v) => 1 + clamp(Math.abs(v) / 3000, 0, 0.3);
+  // Real type, never stretched: pace shows in the rules, not in the figure.
+  const stretchOf = () => 1;
   const leanOf = (n, v) => Math.sign(v || 1) * (n.lane.lean + clamp(Math.abs(v) / 4000, 0, 0.16));
   // Rules only print once a plate has been thrown: at cruising pace a
   // numeral is a clean figure. Past that they grow with pace.
