@@ -33,13 +33,16 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    than a pixel. Above the water, a wet band wicks a few cm up every surface
 //    and dries slowly after the water goes down, and a thin bright meniscus
 //    lies along every waterline.
-// Then the shared film kit develops it.
+// Then the shared film kit develops it, and the print grades its own open
+// sky after the film: deeper toward the zenith, cloud split-toned.
 //
 // Query: ?level=0..1 holds the water (0..35 cm), glass-still, no reveal;
 // with ?ripple=0..1 it holds that much stirring at a frozen instant.
 
 const BASE = "/lab/mizukagami/";
 const LEVEL_MAX = 0.35;
+// the film's lifted black (sRGB); the print takes it back out of the sky
+const FILM_TOE = 0.008;
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
 const VERT = `#version 300 es
@@ -301,8 +304,11 @@ float fresnel(float ci) {
 // The scan's sky sits at a teal 189 degrees; Superia would have printed it
 // cyan-cobalt. Only clear blue is moved (toward ~204 degrees): cloud, grey and
 // warm surfaces stay as they are.
+float skynessOf(vec3 c) {
+  return smoothstep(0.3, 0.75, (c.b - c.r) / (c.b + 1e-4)) * step(c.r, c.g);
+}
 vec3 skyGrade(vec3 c) {
-  float skyness = smoothstep(0.3, 0.75, (c.b - c.r) / (c.b + 1e-4)) * step(c.r, c.g);
+  float skyness = skynessOf(c);
   return c * vec3(1.0, 1.0 - 0.26 * skyness, 1.0 + 0.05 * skyness);
 }
 
@@ -432,9 +438,31 @@ void main() {
     col = mix(col, water, a);
     wa = a;
   }
+  // The open sky is marked for the print (alpha): 0 off it, 0.5 on cloud,
+  // up to 1 on clear blue, by the same skyness that grades the mirror.
+  float skyA = 0.0;
+  if (wa < 0.5) {
+    // A wire is not sky, but it hangs in it and is seen through the same air,
+    // and its anti-aliased edge drags the sky beside it toward grey: anything
+    // thin with clear blue either side is graded as that blue, or the wires
+    // would print as pale streaks across the cobalt.
+    const float o = 4.0;
+    float sn = sky ? skynessOf(col) : 0.0;
+    bool thin = false;
+    for (int i = 0; i < 2; i++) {
+      vec2 e = i == 0 ? vec2(0.0, o) : vec2(o, 0.0);
+      if (skyAt(p + e) && skyAt(p - e)) {
+        thin = true;
+        float a1 = skynessOf(texture(uPlateTex, (p + e) / uPlate).rgb);
+        float a2 = skynessOf(texture(uPlateTex, (p - e) / uPlate).rgb);
+        sn = max(sn, min(a1, a2));
+      }
+    }
+    if (sky || thin) skyA = 0.5 + 0.5 * sn;
+  }
   // the dry frame takes the same sky grade (the water already has it)
   col = mix(skyGrade(col), col, wa);
-  outColor = vec4(col * uExpo, 1.0);
+  outColor = vec4(col * uExpo, skyA);
 }`;
 
 const BLIT = `#version 300 es
@@ -442,10 +470,71 @@ precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uTex;
+uniform sampler2D uMask;  // the scene: a marks the open sky
 uniform float uFade;
 uniform vec3 uPaper;
+uniform vec4 uView;       // plate px: x0, y0 (top), w, h
+uniform float uToe;       // the film's lifted black, sRGB
+
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0.0, -1.0 / 3.0, 2.0 / 3.0, -1.0);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y);
+  return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + 1e-10)), d / (q.x + 1e-10), q.x);
+}
+vec3 hsv2rgb(vec3 c) {
+  vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
+  return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
+}
+// highlights roll off softly into 0.98 (250), never into a flat clip
+vec3 shoulder(vec3 x) {
+  const float k = 0.9, r = 0.08;
+  return mix(x, k + r * (1.0 - exp(-(x - k) / r)), step(k, x));
+}
+
+// The print's own sky. On Superia at noon the open sky darkens and fills
+// toward the zenith, cobalt-cyan overhead, pale cyan at the skyline, and it
+// is printed without the scan's lifted black or the mist's milk (the water
+// was given the same exemption). Cloud is split-toned: sunlit tops warm and
+// glowing, shadow sides lit by the blue sky around them.
+vec3 skyPrint(vec3 c, float a, float py) {
+  float region = clamp(a * 2.0, 0.0, 1.0);
+  float sn = clamp(a * 2.0 - 1.0, 0.0, 1.0);
+  c = mix(c, max(c - uToe, 0.0) / (1.0 - uToe), region);
+  // height in the sky: 1 over the top third, 0 at the rooftops and hills
+  float z = 1.0 - smoothstep(420.0, 1180.0, py);
+  z = z * z * (3.0 - 2.0 * z);
+
+  // clear blue: hue, saturation and value graded toward the zenith
+  vec3 hsv = rgb2hsv(c);
+  float k = region * sn;
+  float hT = mix(198.0, 207.0, z) / 360.0;
+  float sT = mix(0.25, 0.59, z);
+  float vT = mix(0.84, 0.69, z);
+  hsv.x = mix(hsv.x, hT, k);
+  // (a dark wire keeps its own colour; only its light goes the sky's way)
+  hsv.y = mix(hsv.y, sT, k * 0.9 * smoothstep(0.25, 0.55, hsv.z));
+  hsv.z *= mix(1.0, vT / 0.79, k);
+  vec3 blue = hsv2rgb(hsv);
+
+  // cloud: split tone on luminance
+  float cw = region * (1.0 - sn);
+  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  // (the scan's veil puts the shadow sides at 0.7-0.82 here, not lower)
+  float hi = smoothstep(0.76, 0.88, y);
+  float sh = smoothstep(0.4, 0.5, y) * (1.0 - smoothstep(0.7, 0.84, y));
+  // sunlit tops: the cyan cast of the scan taken out to a warm white
+  vec3 cl = mix(c, vec3(y) * vec3(1.03, 1.0, 0.95), 0.75 * hi) * (1.0 + 0.085 * hi);
+  cl *= mix(vec3(1.0), vec3(0.9, 0.97, 1.05), sh);
+  cl = shoulder(cl);
+  return mix(blue, cl, cw);
+}
+
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
+  float a = texture(uMask, vUv).a;
+  if (a > 0.0) c = skyPrint(c, a, uView.y + (1.0 - vUv.y) * uView.w);
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
 }`;
 
@@ -781,7 +870,7 @@ export async function createMizukagami(host, { embedded = false } = {}) {
         contrast: 1.1,
         // a low black floor and a lighter mist: the water is the darkest,
         // most contrasty surface in the frame and must not go grey
-        toe: 0.008,
+        toe: FILM_TOE,
         bloom: 0.18,
         saturation: 1.06,
         blueDepth: 0.6,
@@ -805,6 +894,11 @@ export async function createMizukagami(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
     gl.uniform1i(blit.u.uTex, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(blit.u.uMask, 1);
+    gl.uniform4f(blit.u.uView, V.x, V.y, V.w, V.h);
+    gl.uniform1f(blit.u.uToe, FILM_TOE);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
