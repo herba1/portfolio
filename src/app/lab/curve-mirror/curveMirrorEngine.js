@@ -20,8 +20,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    reflected off it, corrected for parallax across the face with the
 //    panorama's distances, filtered by its own spread (ray differentials);
 //  - the frame, back shell, bracket and pole are signed distance fields,
-//    lit by the panorama's irradiance (SH9) and the sun, with soft shadows,
-//    contact grime, rain streaks and sun-bleached paint;
+//    lit by the panorama's irradiance (SH9) and the sun, with soft shadows;
+//    their paint is a decade-faded vermilion, chalked, chipped to dark steel,
+//    streaked by rain and dirtied where the AO says it is sheltered, its fine
+//    tooth taken from the photo's own plaster, with a roughness map that
+//    breaks up the sun's anisotropic streak down the pole and along the rim;
+//  - the object takes the plate's grain at the photo's pixel pitch, so the
+//    film develops it and the photograph alike;
 //  - the face is second-surface acrylic: a Fresnel-weighted front sheen over
 //    the aluminised back, darkening toward the rim, a little waviness, dust
 //    and one thumb smudge, which scatter the sun when it is in the glass;
@@ -257,38 +262,86 @@ vec3 grainDir(vec3 p, float id) {
   return vec3(0.0);
 }
 
+// The photograph's own dirt. The sunlit plaster under the house's eave
+// (photo px 95..265 x 1285..1405) is shot at 2.7 mm a pixel from 4.3 m, the
+// scale the mirror's paint is seen at, so its stipple and stains, high-passed
+// against their own 16 px mean, are the grime's fine texture: the same tooth
+// as the wall the pole stands in front of. Mirrored to tile; > 0 is darker.
+float photoDirt(vec2 m) {
+  vec2 px = m * 370.0;
+  const vec2 R = vec2(170.0, 120.0);
+  vec2 t = abs(mod(px, 2.0 * R) - R);
+  vec2 uv = (vec2(95.0, 1285.0) + t) / uPhotoSize;
+  float l = dot(textureLod(uPhoto, uv, 0.6).rgb, LUMA);
+  float l4 = dot(textureLod(uPhoto, uv, 4.0).rgb, LUMA);
+  return clamp(1.0 - l / max(l4, 1e-3), -1.0, 1.0);
+}
+
 vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 q = toLocal(p);
-  // JIS road-mirror orange after a decade of Kyoto summers: the binder has
-  // chalked, so the colour sits under a faint white bloom, lower in chroma
-  // than the can, and bleached further toward salmon where it faces the sky
-  vec3 alb = vec3(0.72, 0.165, 0.026);
+  float occ = ao(p, n);
+  // Road-mirror orange after a decade of Kyoto summers is no longer orange:
+  // the pigment has faded to a dull vermilion, redder and far lower in chroma
+  // than the can, and the binder has chalked to a pale bloom over it,
+  // heaviest where it faces the sky.
+  vec3 alb = vec3(0.56, 0.16, 0.06);
   float upF = clamp(n.y, 0.0, 1.0);
-  float bleach = 0.3 + 0.5 * upF;
-  alb = mix(alb, vec3(0.72, 0.3, 0.1), bleach * 0.22);
-  float chalk = 0.03 + 0.06 * upF;
-  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.08, 1.0, 0.8), chalk);
-  // world-space coordinates for wear (on the pole: height and angle)
-  vec2 wc = id == 4.0 || id == 5.0 ? vec2(atan(p.x - uPivot.x, p.z - uPivot.z) * POLE_R, p.y) : id == 3.0 ? vec2(dot(p - uHinge, uHz) + dot(p - uHinge, uX), p.y) : q.xy;
-  float n1 = fbm(wc * 38.0);
-  float n2 = fbm(wc * vec2(140.0, 12.0) + 3.0);
-  // grime: rain streaks run down from the frame and the clamp
-  float streak = smoothstep(0.55, 0.85, n2) * (id == 1.0 || id == 2.0 ? smoothstep(0.1, -0.35, q.y / A) : 0.0);
-  float under = id == 1.0 ? smoothstep(0.2, -0.9, dot(n, uU)) * 0.6 : 0.0;
-  float contact = 0.0;
-  // on the pole: run-off from the clamp, and road dirt splashed up the
-  // lower two metres, heaviest at the base
-  if (id == 4.0) contact = smoothstep(0.3, 0.0, uPivot.y - 0.1 - p.y) * 0.8 + smoothstep(2.1, 0.0, p.y - uGround) * 0.75;
-  if (id == 5.0) contact = 0.75;
-  if (id == 3.0) contact = 0.5;
-  if (id == 4.0) streak = smoothstep(0.5, 0.9, fbm(wc * vec2(90.0, 2.5) + 11.0)) * 0.8;
-  float grime = clamp(0.35 * streak + under + contact * (0.6 + 0.4 * n1) + 0.15 * smoothstep(0.55, 0.8, n1), 0.0, 1.0);
-  alb = mix(alb, alb * vec3(0.46, 0.42, 0.38) + vec3(0.03, 0.026, 0.021), grime * 0.75);
-  // chips, rust-dark specks
-  float chip = step(0.86, vnoise(wc * 260.0)) * (0.3 + 0.7 * contact);
-  alb = mix(alb, vec3(0.16, 0.08, 0.05), chip * 0.6);
-  // the clamp band and bracket are galvanised steel under the paint's wear
-  if (id == 5.0 || id == 3.0) alb = mix(alb, vec3(0.32, 0.31, 0.29), 0.35);
+  float bleach = 0.35 + 0.5 * upF;
+  alb = mix(alb, vec3(0.58, 0.3, 0.14), bleach * 0.25);
+  float chalk = 0.07 + 0.1 * upF;
+  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.12, 1.0, 0.8), chalk);
+
+  // surface coordinates in metres: on the pole and band its unrolled
+  // circumference and height, on the arm along it, on the frame ring its
+  // unrolled circumference and the section (radius, then depth round the
+  // lip, so a chip on the lip is not a stripe drawn straight through it), on
+  // the shell face-local with its depth folded in
+  bool tube = id == 4.0 || id == 5.0;
+  float rq = length(q.xy);
+  vec2 wc = tube ? vec2(atan(p.x - uPivot.x, p.z - uPivot.z) * POLE_R, p.y)
+    : id == 3.0 ? vec2(dot(p - uHinge, uHz) + dot(p - uHinge, uX), p.y)
+    : id == 1.0 ? vec2(atan(q.y, q.x) * (A + 0.02), rq - q.z)
+    : q.xy + q.z;
+  // which way is down on this surface (rain runs that way)
+  float down = tube ? p.y : q.y;
+  float dirt = photoDirt(wc + vec2(id * 0.37, 0.0));
+  float n1 = fbm(wc * 22.0);
+  // Grime. Rain runs down off the frame and the clamp and leaves streaks a
+  // centimetre or two wide and tens long; dust and soot sit in what the AO
+  // says is sheltered (under the rim, in the band's seam, the back of the
+  // shell); road splash climbs the pole's lower two metres.
+  float run = fbm(vec2(wc.x * 55.0, down * 2.2) + 5.0 + id);
+  float streak = smoothstep(0.5, 0.78, run);
+  if (id == 1.0 || id == 2.0) streak *= smoothstep(0.25, -0.3, q.y / A);   // below the top of the head
+  if (id == 4.0) streak *= 0.45 + 0.55 * smoothstep(0.9, 0.0, uPivot.y - p.y); // freshest under the clamp
+  float sheltered = 1.0 - occ;
+  float under = id == 1.0 ? smoothstep(0.1, -0.9, dot(n, uU)) * 0.45 : 0.0;
+  float splash = id == 4.0 ? smoothstep(2.1, 0.0, p.y - uGround) * 0.55 : 0.0;
+  float band = id == 5.0 ? 0.55 : id == 3.0 ? 0.4 : 0.0;
+  // run-off from the clamp: the band's bolts bleed a thin brown stain down the pole
+  float bleed = id == 4.0 ? smoothstep(0.012, 0.0, abs(wc.x - 0.035 + 0.006 * sin(p.y * 9.0))) * smoothstep(0.75, 0.0, uPivot.y - p.y) : 0.0;
+  float grime = clamp(0.5 * streak + under + splash + band + 1.2 * sheltered + 1.5 * max(dirt, 0.0) + 0.15 * smoothstep(0.5, 0.8, n1), 0.0, 1.0);
+  alb = mix(alb, alb * vec3(0.52, 0.47, 0.42) + vec3(0.026, 0.023, 0.02), grime * 0.6);
+  alb = mix(alb, vec3(0.12, 0.06, 0.035), bleed * 0.55);
+  // and the plaster's own stipple, faintly, everywhere: the paint is not a
+  // flat colour but has the wall's tooth
+  alb *= 1.0 - 0.6 * clamp(dirt, -0.25, 0.25);
+
+  // Chips: paint knocked off to dark, weathered steel, a few millimetres to
+  // two centimetres, with a rust-brown rim where it lifts; most at exposed
+  // edges (the frame's outer lip, the band) and low on the pole where things
+  // hit it, never on a sheltered face.
+  float edge = id == 1.0 ? smoothstep(0.3, 0.9, abs(dot(n, uN))) * 0.3 + smoothstep(A + 0.03, A + 0.045, length(q.xy)) : 0.0;
+  float chipBias = id == 4.0 ? 0.25 * smoothstep(1.4, 0.0, p.y - uGround) + 0.12 : id == 5.0 ? 0.4 : id == 3.0 ? 0.3 : id == 1.0 ? 0.06 + 0.16 * edge : 0.08;
+  vec2 cw = wc * 48.0;
+  cw += vec2(fbm(cw * 0.7 + 3.1), fbm(cw * 0.7 + 8.4)) * 1.4;
+  float cn = fbm(cw) + 0.35 * dirt + chipBias * 0.45;
+  float chip = smoothstep(0.775, 0.8, cn) * occ;
+  float chipRim = smoothstep(0.725, 0.775, cn) * (1.0 - chip) * occ;
+  alb = mix(alb, alb * vec3(0.55, 0.42, 0.35), chipRim * 0.6);
+  alb = mix(alb, vec3(0.07, 0.058, 0.05) * (0.8 + 0.4 * n1), chip);
+  // the clamp band and bracket: castings, painted with the pole but worn darker
+  if (id == 5.0 || id == 3.0) alb = mix(alb, vec3(0.13, 0.12, 0.11), 0.3);
   // the black rubber gasket where the frame meets the acrylic
   float gasket = id == 1.0 ? smoothstep(A + 0.009, A + 0.004, length(q.xy)) : 0.0;
   alb = mix(alb, vec3(0.035, 0.034, 0.033), gasket);
@@ -301,7 +354,6 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float sunE = uSunE * 1.2;
   float ndl = max(dot(n, uSun), 0.0);
   float sh = ndl > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 64.0) : 0.0;
-  float occ = ao(p, n);
   // The shade side is lit by the sky: the panorama's irradiance at this
   // normal, its colour taken from the hemisphere above it, so a surface
   // turned from the sun goes skylight blue, not a flat grey ambient.
@@ -312,24 +364,26 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 sunC = vec3(1.0, 0.96, 0.88);
   vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
 
-  // Semi-gloss enamel, chalked: the sky's sheen with a roughness-aware
-  // Fresnel and Smith masking, so a rough weathered silhouette does not light
-  // up with a mirror-bright rim of sky.
-  float ndv = max(dot(n, v), 1e-3);
-  float rough = 0.42 + 0.3 * grime + 0.15 * bleach;
+  // The roughness map: the enamel keeps its gloss only where it is intact.
+  // Chalk, grime, the plaster-tooth dirt and every chip take it away, so the
+  // sun's streak breaks up along the pole instead of running like chrome.
+  float rough = clamp(0.3 + 0.35 * grime + 0.6 * chalk + 0.5 * chip + 0.25 * chipRim + 1.2 * max(dirt, 0.0) + 0.12 * (n1 - 0.5), 0.2, 1.0);
+  float gloss = 1.0 - smoothstep(0.35, 0.85, rough);
   float a = rough * rough;
   float F0 = 0.04;
+  float ndv = max(dot(n, v), 1e-3);
   float Fr = F0 + (max(1.0 - rough, F0) - F0) * pow(1.0 - ndv, 5.0);
   // and the chalk's own masking: at grazing a powdery film shows no gloss,
   // so the silhouette stays the paint's colour, darkening into the plate
   float Gv = 2.0 * ndv / (ndv + sqrt(a * a + (1.0 - a * a) * ndv * ndv)) * smoothstep(0.04, 0.4, ndv);
   vec3 r = reflect(-v, n);
-  vec3 spec = env(r, 4.0 + 4.0 * rough) * Fr * Gv * occ * (1.0 - 0.5 * grime) * (1.0 - 0.6 * chalk / 0.09) * 0.6;
+  vec3 spec = env(r, 4.0 + 4.0 * rough) * Fr * Gv * occ * (0.25 + 0.75 * gloss) * 0.6;
 
   // The sun's highlight. Pipe and rim are drawn and brushed along their
   // length, and rain has worn them the same way: the lobe is anisotropic,
   // long along the grain and narrow across it, so on the pole it is a streak
-  // running down the cylinder and on the rim it follows the top curve.
+  // running down the sun side of the cylinder and on the rim it lies along
+  // the top curve, broken wherever the roughness map says the gloss is gone.
   vec3 h = normalize(uSun + v);
   float ndh = max(dot(n, h), 0.0);
   float vdh = max(dot(v, h), 0.0);
@@ -340,7 +394,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
     vec3 B = cross(n, T);
     // the rim's section is only 13 mm round: a wider lobe across it, so the
     // highlight lies along its top as a band, not a hairline on the silhouette
-    float at = 0.55 + 0.3 * grime, ab = (id == 1.0 ? 0.13 : 0.075) + 0.08 * grime + 0.04 * bleach;
+    float at = 0.55 + 0.25 * (1.0 - gloss), ab = (id == 1.0 ? 0.16 : 0.12) + 0.12 * (1.0 - gloss);
     float th = dot(T, h) / at, bh = dot(B, h) / ab;
     float k = th * th + bh * bh + ndh * ndh;
     D = 1.0 / (PI * at * ab * k * k);
@@ -348,9 +402,13 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
     float a2 = a * a;
     D = a2 / (PI * pow(ndh * ndh * (a2 - 1.0) + 1.0, 2.0));
   }
+  // Its strength is set against the plate, not the enamel's 4 % Fresnel
+  // alone: the crossing's own poles carry a sun-side band clearly brighter
+  // than their paint, the binder's glaze where rain has polished it, so the
+  // lobe is given 3x (and a dirtier, matte patch still loses most of it).
   float Fs = F0 + (1.0 - F0) * pow(1.0 - vdh, 5.0);
   float Gl = 2.0 * ndl / (ndl + sqrt(a * a + (1.0 - a * a) * ndl * ndl));
-  spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (1.0 - 0.6 * grime) * (1.0 - 0.4 * chalk / 0.09);
+  spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (0.15 + 0.85 * gloss) * (1.0 - gasket) * 3.0;
   return diff + spec;
 }
 
@@ -513,6 +571,16 @@ void main() {
         vec3 n = sdNormal(x);
         obj = paint(x, n, id.y, -d);
       }
+      // The plate's tooth. The photograph carries its sensor's noise and
+      // its resample's softness at its own pixel pitch, and a render is clean:
+      // the object takes the same, a luminance grain correlated over about
+      // two photo pixels (value noise at the photo's pitch), at the level
+      // measured on the plate's flat sunlit plaster and sky, rising in the
+      // shadows as a sensor's does, so the film's grain lands on both alike.
+      float gl = vnoise(p * 0.62) + vnoise(p * 0.62 + vec2(41.3, 17.9)) - 1.0;
+      vec3 gc = vec3(vnoise(p * 0.5 + 3.7), vnoise(p * 0.5 + 9.1), vnoise(p * 0.5 + 23.3)) - 0.5;
+      float ol = dot(obj, LUMA);
+      obj *= 1.0 + (0.05 + 0.05 * smoothstep(0.2, 0.02, ol)) * gl + 0.025 * gc;
       col = mix(col, obj, cover);
     }
   }
