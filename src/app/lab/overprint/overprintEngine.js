@@ -23,6 +23,10 @@ const SWELL = 1.2;
 const REACH = [0.72, 0.9, 1.0, 0.55, 0.8];
 // The track runs on a shallow climb, the diagonal of the posters.
 const ANGLE = -0.105;
+// Only the fastest plate rules its pace at full length. Every slower plate
+// prints a short hairline at this share of its own tail, so a sheet with all
+// three running still reads as one race and not three piled-up inks.
+const CALM_LEN = 0.3;
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos; out vec2 vUv;
@@ -63,7 +67,7 @@ uniform int uI;
 uniform vec4 uRect;   // atlas uv rect
 uniform vec4 uBody;   // cx, cy (track frame), height, aspect
 uniform vec4 uMove;   // signed speed, stretch, lean, band length
-uniform vec4 uLift;   // elevation, track x where the rules stop, unused x2
+uniform vec4 uLift;   // elevation, track x where the rules stop, calm (0 leads, 1 hairline), unused
 uniform vec3 uInk;    // linear transmittance at full density
 uniform float uSeed;
 out vec4 o;
@@ -143,6 +147,8 @@ void main(){
         // it is about seven times longer than it is thick.
         float w = mix(1.0, HAIR, pow(abs(s - 2.0) / 2.0, 0.8));
         float hw = min(w * (hi - lo) * 0.5 * h, max(len - gap, 0.0) * 0.07);
+        // A plate that is not leading the race rules only a hairline.
+        hw = mix(hw, min(hw, max(0.9, h * 0.0032)), uLift.z);
         float dv = hw - abs(qy - (lo + hi) * 0.5) * h;
         // Square off at the edge of what this plate has printed.
         float dh = min(min(behind - gap, len - behind), (tp.x - uLift.y) * dir);
@@ -406,14 +412,26 @@ export async function createOverprint(host) {
     { size: 0.97, y: 0, lean: 0.12 },
   ];
   const TUCK = 0.34;
-  // Every figure runs off the head and the foot of the sheet, as on the
-  // posters: its ink is this much taller than the sheet, clear of its lane.
-  const BLEED = 1.12;
-  // ...but one period of the run never outgrows the track by more than this,
-  // so on a narrow sheet the figures give way before the lockup does.
-  const RUN = 1.14;
-  // The lockup cruises at one shared pace.
+  // The tallest figure's ink stands this share of the sheet's height, so the
+  // lockup sits on open stock with paper above and below it to set its scale
+  // against. It bleeds only along the track, the way it travels.
+  const BLEED = 0.78;
+  // ...and the whole lockup, 5-0-8 once, never takes more than this share of
+  // the track, so a narrow sheet shrinks the figures before it crops them.
+  const RUN = 0.8;
+  // Where the lockup comes to rest: the share of the spare stock that opens
+  // up behind it, on the side its rules run into.
+  const BEHIND = 0.7;
+  // The lockup cruises at one shared pace, and the sheet rides along with it:
+  // the lockup holds its place on the stock, and only a plate that breaks
+  // away from it moves across the sheet.
   const CRUISE = reduced ? 0 : 160;
+  // Left alone, the sheet throws a plate itself every so often, one after
+  // another, so the race is the sheet's resting condition: one fast plate
+  // ruling its pace into open stock while the other two hold the lockup.
+  const IDLE = 3.2;
+  const SERVE = [0, 2, 1];
+  const SERVE_V = [1900, 1500, 1700];
   // Pulled out of register, a plate falls back into its slot on a critically
   // damped spring: settled in about 600ms, with no bounce.
   const OMEGA = 8;
@@ -439,6 +457,7 @@ export async function createOverprint(host) {
       ty: l.y,
       shown: CRUISE + rv,
       trail: 0, // how far it has run on this sheet since it was picked up
+      calm: 0, // 0 while it leads the race and rules at full length, 1 for a hairline
       held: false,
       e: liftQ[0] === i && Number.isFinite(liftQ[1]) ? liftQ[1] : 0,
       ev: 0,
@@ -450,8 +469,9 @@ export async function createOverprint(host) {
   let H = 1;
   let TW = 1; // track length across the box
   let TH = 1; // track cross height
-  let G = 0; // the lockup's anchor along the track, never wrapped
-  let P = 1; // one lap: the lockup's own advance, 5 + 0 + 8 and one tuck
+  let idle = 0; // seconds the sheet has sat settled with no hand on it
+  let served = 0;
+  let P = 1; // one lap of the run: the lockup and the open stock after it
   let S = 1; // the sheet's scale: a size-1 figure's height, css px
   const slot = [0, 0, 0];
   let placed = false;
@@ -471,10 +491,9 @@ export async function createOverprint(host) {
     return [cx * axis[0] + cy * axis[1], -cx * axis[1] + cy * axis[0]];
   };
   const unit = () => Math.min(H, TH);
-  // Into [c - P/2, c + P/2). The track is a printed run, not a lap of the
-  // sheet: the lockup repeats every P, 5-0-8-5-0-8, so a plate running off
-  // one edge is a copy of the one already printing behind it. There is never
-  // stock between the figures, and both overprints are on the sheet whole.
+  // Into [c - P/2, c + P/2). The track is a printed run one sheet long: as
+  // the lockup runs off the leading edge, the next impression of it comes in
+  // over the trailing one, with open stock between the two.
   const lap = (u, c = 0) => u - c - P * Math.floor((u - c + P / 2) / P) + c;
 
   // One step of a plate that is not in the hand.
@@ -519,22 +538,27 @@ export async function createOverprint(host) {
     TH = w * Math.abs(axis[1]) + h * Math.abs(axis[0]);
     paperDirty = true;
     stillFrames = 0;
-    // Scale: big enough that every figure bleeds off the head and foot of the
-    // sheet, unless one period of the run would outgrow the track by more
-    // than RUN; then the run wins, so a tall, narrow sheet still shows most
-    // of the lockup, though never at less than 62% of its height.
-    const advance1 = nums.reduce((s, n) => s + n.lane.size * atlas.rects[n.i].aspect * atlas.rects[n.i].ink, 0) * (1 - TUCK);
-    const bleed = Math.max(...nums.map((n) => (BLEED * H + 2 * Math.abs(n.lane.y) * Math.min(H, TH)) / (n.lane.size * atlas.rects[n.i].tall)));
-    S = Math.min(bleed, Math.max((RUN * TW) / advance1, 0.62 * H));
+    // Scale: the tallest figure stands BLEED of the sheet, unless the lockup
+    // would then take more than RUN of the track; then the run wins, so
+    // 5-0-8 always reads whole once with stock around it.
+    const ink1 = nums.map((n) => n.lane.size * atlas.rects[n.i].aspect * atlas.rects[n.i].ink);
+    const span1 = ink1[0] + (ink1[1] + ink1[2]) * (1 - TUCK);
+    const tall1 = Math.max(...nums.map((n) => n.lane.size * atlas.rects[n.i].tall));
+    S = Math.min((BLEED * H) / tall1, (RUN * TW) / span1);
     // The lockup: each figure overprints the one before by TUCK of its own
-    // width, and the whole group is centred on the track. The period carries
-    // the same tuck from the 8 over the next 5, so the run tiles seamlessly.
+    // width. One lap of the run is the track, so the next impression only
+    // comes in over the trailing edge as this one leaves by the leading one.
     const [a, b, c] = nums.map(inkWidth);
-    P = (a + b + c) * (1 - TUCK);
+    const span = a + (b + c) * (1 - TUCK);
+    P = Math.max(TW, span / RUN);
     slot[0] = 0;
     slot[1] = a / 2 + b * (0.5 - TUCK);
     slot[2] = slot[1] + b / 2 + c * (0.5 - TUCK);
-    const mid = (slot[0] - a / 2 + slot[2] + c / 2) / 2;
+    // At rest it sits forward on the sheet, BEHIND of the spare stock open
+    // at its back for the rules to run into. Spare is measured along the
+    // centre line, where the sheet is narrower than the track's full reach.
+    const spare = Math.max(0, W / Math.abs(axis[0]) - span);
+    const mid = (slot[0] - a / 2 + slot[2] + c / 2) / 2 - spare * (BEHIND - 0.5);
     for (let k = 0; k < 3; k++) slot[k] -= mid;
     for (const n of nums) {
       if (!placed && Number.isFinite(startX[n.i])) n.off = TW * (startX[n.i] - 0.5) - slot[n.i];
@@ -544,7 +568,6 @@ export async function createOverprint(host) {
       // A still: let the race run for t seconds from the start line.
       const dt = 1 / 120;
       for (let t = 0; t < still; t += dt) {
-        G += CRUISE * dt;
         for (const n of nums) {
           // Hold the thrown plates' energy, so the still shows them racing.
           const f = n.free;
@@ -559,7 +582,7 @@ export async function createOverprint(host) {
         n.trail = 4 * P;
       }
     }
-    for (const n of nums) n.x = lap(G + slot[n.i] + n.off);
+    for (const n of nums) n.x = lap(slot[n.i] + n.off);
     placed = true;
   });
 
@@ -613,7 +636,7 @@ export async function createOverprint(host) {
     // The throw sets its pace, within what a press could print. It runs on
     // that while the throw lasts, then falls back into the lockup.
     const v = clamp(p.vx * axis[0] + p.vy * axis[1], -MAX_V, MAX_V);
-    n.rv = v - (frozen ? 0 : CRUISE);
+    n.rv = v;
     n.free = energyOf(n.rv);
     n.engaged = false;
     // Meanwhile it rides the register line nearest where it was let go.
@@ -641,7 +664,20 @@ export async function createOverprint(host) {
     // A still holds the lockup where it is; only a plate you move, and its
     // fall back into register, play out.
     const cruise = frozen ? 0 : CRUISE;
-    G += cruise * dt;
+    if (!frozen && !reduced) {
+      const calm = !grab && nums.every((n) => n.free <= 0 && Math.abs(n.off) < 1 && Math.abs(n.rv) < 5);
+      idle = calm ? idle + dt : 0;
+      if (idle > IDLE) {
+        const n = nums[SERVE[served % 3]];
+        n.rv = SERVE_V[served % 3];
+        n.free = energyOf(n.rv);
+        n.engaged = false;
+        n.ty = n.lane.y;
+        n.trail = 0;
+        served++;
+        idle = 0;
+      }
+    }
     for (const n of nums) {
       if (n.held) {
         const [px, py] = toTrack(stage.pointer.x, stage.pointer.y);
@@ -649,15 +685,15 @@ export async function createOverprint(host) {
         const nx = n.x + lap(px + grab.dx - n.x) * (1 - Math.exp(-30 * dt));
         const vNow = (nx - n.x) / Math.max(dt, 1e-3);
         // Out of register by however far the hand has pulled it.
-        n.off += lap(nx - (G + slot[n.i] + n.off));
-        n.rv = damp(n.rv, vNow - cruise, 14, dt);
+        n.off += lap(nx - (slot[n.i] + n.off));
+        n.rv = damp(n.rv, vNow, 14, dt);
         n.y = damp(n.y, clamp(py + grab.dy, -lim, lim), 30, dt);
         n.yv = 0;
       } else if (!frozen || n.free <= 0) {
         advance(n, dt, cruise);
       }
       const was = n.x;
-      n.x = lap(G + slot[n.i] + n.off);
+      n.x = lap(slot[n.i] + n.off);
       n.trail = Math.min(n.trail + Math.abs(lap(n.x - was)), 4 * P);
       // The plate is lifted on a spring, and lands with a touch of overshoot:
       // it presses home and settles back into register.
@@ -674,7 +710,17 @@ export async function createOverprint(host) {
       const e = n.e;
       body.set([n.x, n.y, height(n), atlas.rects[i].aspect], i * 4);
       move.set([n.shown || 0.001, stretchOf(n.shown), leanOf(n, n.shown), tailOf(n.shown)], i * 4);
-      lift.set([e, 0, 0, 0], i * 4);
+      lift.set([e, 0, 0, n.calm], i * 4);
+    }
+    // Only the fastest plate rules its pace in full; the others drop to short
+    // hairlines, easing over as the lead changes hands.
+    let lead = -1;
+    for (let i = 0; i < 3; i++) if (move[i * 4 + 3] > 0 && (lead < 0 || move[i * 4 + 3] > move[lead * 4 + 3])) lead = i;
+    for (const n of nums) {
+      const target = lead >= 0 && n.i !== lead ? 1 : 0;
+      n.calm = frozen && !grab ? target : damp(n.calm, target, 10, dt);
+      move[n.i * 4 + 3] *= 1 - (1 - CALM_LEN) * n.calm;
+      lift[n.i * 4 + 3] = n.calm;
     }
 
     // Render only on change.
@@ -765,7 +811,7 @@ export async function createOverprint(host) {
         gl.uniform1i(U.uI, i);
         gl.uniform4fv(U.uRect, rect.subarray(o, o + 4));
         gl.uniform4fv(U.uMove, move.subarray(o, o + 4));
-        gl.uniform4f(U.uLift, e, clip, 0, 0);
+        gl.uniform4f(U.uLift, e, clip, lift[o + 3], 0);
         gl.uniform3fv(U.uInk, ink.subarray(i * 3, i * 3 + 3));
         gl.uniform1f(U.uSeed, seeds[i]);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
