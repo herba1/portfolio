@@ -1,6 +1,6 @@
 {
   "title": "Rearrange",
-  "description": "A summer photograph taken looking steeply up a catenary mast in Ine, Kyoto, in which the things are loose. Pick up the maintenance platform, the lamp, the far pole or an insulator and slide it across the sky: where it was, the sky and cumulus behind are there, cables and all; where it goes, it keeps its height above the ground, so it grows as it comes overhead and shrinks as it slides down toward the horizon, slips behind the girder and under the cables or comes in front of them, and throws its shadow away from the sun that lit the photo. The cables fastened to it come along, pulled taut or sagging as it goes, and the platform stays braced to the mast. Let go and it settles. Double-tap and everything goes home.",
+  "description": "A summer photograph taken looking steeply up a catenary mast in Ine, Kyoto, in which the things are loose. Pick up the maintenance platform, the far pole or an insulator and slide it across the sky: where it was, the sky and cumulus behind are there, cables and all; where it goes, it keeps its height above the ground, so it grows as it comes overhead and shrinks as it slides down toward the horizon, slips behind the girder and under the cables or comes in front of them, and throws its shadow away from the sun that lit the photo. The cables fastened to it come along, pulled taut or sagging as it goes, and the platform stays braced to the mast. The lamp is clamped to its mast with its bracket: it runs only up and down the pole, its feed cable paying out of the conduit behind it. Let go and it settles. Double-tap and everything goes home.",
   "tags": ["WebGL", "Photo", "Depth"],
   "status": "draft",
   "createdAt": "2026-11-06T23:30:00.000Z",
@@ -11,7 +11,7 @@
     { "idle": 4200 },
     { "drag": [[0.253, 0.585], [0.23, 0.34]], "ms": 1600 },
     { "idle": 900 },
-    { "drag": [[0.727, 0.75], [0.58, 0.75]], "ms": 1800 },
+    { "drag": [[0.787, 0.8], [0.65, 0.8]], "ms": 1800 },
     { "idle": 1400 }
   ],
   "sources": [
@@ -20,7 +20,7 @@
       "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "6000x4000 original, Ine, Kyoto Prefecture, Sony a7 IV, worked at 2400x1600. Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; sky and cable mattes, per-object mattes solved against the sky, LaMa clean plate (tiled near native resolution), cable continuation, and camera/sun fit from the two poles baked by tools/depth/bakes/rearrange (masks.py, cut.py, plate.py, export.py)."
+      "note": "6000x4000 original, Ine, Kyoto Prefecture, Sony a7 IV, worked at 2400x1600. Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; sky and cable mattes, per-object mattes solved against the sky, LaMa clean plate (tiled near native resolution), cable continuation, and camera/sun fit from the two poles baked by tools/depth/bakes/rearrange (masks.py, cut.py, plate.py, wires.py, export.py, lamp.py)."
     },
     "https://github.com/advimman/lama",
     "https://vcai.mpi-inf.mpg.de/projects/DragGAN/",

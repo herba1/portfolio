@@ -3,8 +3,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Rearrange: a summer photograph taken straight up a catenary mast at Ine,
 // whose loose things come away from it. Pick up the maintenance platform,
-// the lamp, the far pole or an insulator and slide it across the sky; let
-// go and it settles. Double-tap and everything goes home.
+// the far pole or an insulator and slide it across the sky, or run the
+// lamp up and down its mast; let go and it settles. Double-tap and
+// everything goes home. The photograph fills the view.
 //
 // tools/depth/bakes/rearrange cut the photo offline: every loose object has
 // its own matte (solved against the sky colour at its edge, so the railing's
@@ -25,6 +26,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // and brace are pinned the same way, between their clamps on the mast and
 // the deck, stretched along their own axis (their end fittings keep their
 // size).
+//
+// The lamp is a fitting, not a loose thing: its shade hangs from an
+// angle-iron bracket clamped round the mast, and the two were cut out
+// together (lamp.py). It only slides along its own mast (meta "slide":
+// the held point keeps to the vertical line through it, the line toward
+// the poles' vanishing point), so it can never be left in open sky; its
+// feed cable, run up the mast's conduit into the bracket, is a live cable
+// like the rest and pays out behind it.
 //
 // Physics, in camera space (OpenCV axes, f from the lens, the up direction
 // from the poles' vertical vanishing point, high above the frame: the lens
@@ -60,7 +69,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //
 // Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
 // 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
-// widths/heights from where it was; several are joined with ";".
+// widths/heights from where it was (the lamp takes the nearest point of
+// its mast, so only dy counts); several are joined with ";".
 // &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
 // &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
 // the print's (PRINT); 0 turns each off.
@@ -69,6 +79,9 @@ const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const MAXK = 10; // objects, then the pinned members
 const LIFT = 0.045; // held: the card comes this share of its distance toward the lens
+// where a cropped view (a phone held upright) centres: on the near mast,
+// so the platform, the lamp and the girder's root stay in it
+const FOCUS = [0.3, 0.5];
 const S_MIN = 0.42; // smallest and largest size relative to where it was
 const S_MAX = 1.75;
 const SKYLIGHT = [0.4, 0.46, 0.6]; // what is left in a shadow on a clear day: the blue sky
@@ -841,18 +854,18 @@ export async function createRearrange(host, { embedded = false } = {}) {
   };
   stage.onResize(build);
 
-  // ---- layout: one large print, centred, on the paper
+  // ---- layout: the photograph fills the view (cover), the sky to every
+  // edge. Where the view is narrower than the frame it is cropped round
+  // the masts (FOCUS), never past the photo's own edge.
   const layout = () => {
     const W = stage.width;
     const H = stage.height;
-    const narrow = W < 700;
-    const pw = Math.min(W - 2 * Math.max(16, W * (narrow ? 0.04 : 0.07)), (H * (narrow ? 0.62 : 0.8) * PW) / PH);
     const dpr = stage.dpr;
-    // whole device pixels, so the print's edge is one crisp step
-    const wd = Math.round(pw * dpr);
-    const hd = Math.round((wd * PH) / PW);
-    const xd = Math.round((W * dpr - wd) / 2);
-    const yd = Math.round((H * dpr - hd) / 2);
+    const sc = Math.max(W / PW, H / PH);
+    const wd = Math.round(PW * sc * dpr);
+    const hd = Math.round(PH * sc * dpr);
+    const xd = Math.round(clamp(W * dpr * 0.5 - FOCUS[0] * wd, W * dpr - wd, 0));
+    const yd = Math.round(clamp(H * dpr * 0.5 - FOCUS[1] * hd, H * dpr - hd, 0));
     return { x: xd / dpr, y: yd / dpr, w: wd / dpr, h: hd / dpr, dev: [xd, yd, wd, hd], s: wd / dpr / PW };
   };
 
@@ -873,6 +886,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
       lift: spring(0),
       pos: { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0 },
       ref: null, // the held point: its 3D position, height, t when grabbed
+      travel: null, // a fitting on its mast: how far it may slide (s along UP)
       held: false,
       moving: false,
     };
@@ -964,6 +978,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   // Keep the held point inside the print and its size within reason (both
   // with rubber), and the barrier's cut end below the frame.
   const constrain = (o, u, v) => {
+    if (o.travel) return slideTo(o, u, v);
     const g0 = o.ref.g0;
     const g = gOf(u, v);
     const sRel = g / g0;
@@ -990,7 +1005,56 @@ export async function createRearrange(host, { embedded = false } = {}) {
     return [u, v];
   };
 
+  // A fitting clamped to its mast (meta "slide") only slides along it: the
+  // held point moves on the vertical line through it, which in the photo
+  // is the line toward the poles' vanishing point. s is how far along UP.
+  // From an image point on that line: the two projective equations
+  // (p - c) (X + s UP).z = f (X + s UP).xy, least squares in s.
+  const slideS = (X, [pu, pv]) => {
+    const a1 = F * X[0] - (pu - CX) * X[2];
+    const b1 = (pu - CX) * UP[2] - F * UP[0];
+    const a2 = F * X[1] - (pv - CY) * X[2];
+    const b2 = (pv - CY) * UP[2] - F * UP[1];
+    return (a1 * b1 + a2 * b2) / (b1 * b1 + b2 * b2);
+  };
+  const along = (X, s) => [X[0] + UP[0] * s, X[1] + UP[1] * s, X[2] + UP[2] * s];
+  // the point of the slide line nearest (u, v), kept within the travel
+  // (rubber past it); travel is in s from rest
+  const slideTo = (o, u, v) => {
+    const X = o.ref.X;
+    const p0 = proj(X);
+    const p1 = proj(along(X, 0.05 * X[2]));
+    const dl = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+    const dx = (p1[0] - p0[0]) / dl;
+    const dy = (p1[1] - p0[1]) / dl;
+    const k = (u - p0[0]) * dx + (v - p0[1]) * dy;
+    const s = slideS(X, [p0[0] + dx * k, p0[1] + dy * k]);
+    const s0 = dot3(UP, o.ref.t0);
+    // a clamp on a pole: past its travel it gives only a little
+    const sC = rubber(s0 + s, o.travel[0], o.travel[1], 0.12);
+    return proj(along(X, sC - s0));
+  };
+  const liftOf = (o) => (o.travel ? 0 : LIFT);
+  // its travel, given in the manifest as photo px its anchor may go up
+  // (negative) and down from rest, as s along UP
+  objs.forEach((o) => {
+    const sl = o.meta.slide;
+    if (!sl) return;
+    const Xa = onCard(o, ...o.meta.anchor);
+    const sOf = (dv) => {
+      const pv = o.meta.anchor[1] + dv - CY;
+      return (F * Xa[1] - pv * Xa[2]) / (pv * UP[2] - F * UP[1]);
+    };
+    const a = sOf(sl[0]);
+    const b = sOf(sl[1]);
+    o.travel = [Math.min(a, b), Math.max(a, b)];
+  });
+
   const translation = (o, u, v, lift) => {
+    if (o.travel) {
+      const s = slideS(o.ref.X, [u, v]);
+      return [0, 1, 2].map((i) => o.ref.t0[i] + UP[i] * s);
+    }
     const r = kinv(u, v);
     const g = dot3(UP, r);
     const X = r.map((c) => (c * o.ref.h) / Math.max(g, 1e-3) * (1 - lift));
@@ -1077,7 +1141,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     for (const part of held.split(/[;|_]/)) {
       const [k, dx, dy] = part.split(",").map(Number);
       if (!objs[k] || !Number.isFinite(dx) || !Number.isFinite(dy)) continue;
-      setMove(objs[k], dx * PW, dy * PH, liftQ ?? LIFT);
+      setMove(objs[k], dx * PW, dy * PH, liftQ ?? liftOf(objs[k]));
     }
   }
 
@@ -1119,7 +1183,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     Object.assign(o.pos, { x: u, y: v, vx: 0, vy: 0, tx: u, ty: v });
     o.held = true;
     o.moving = true;
-    o.lift.to = LIFT;
+    o.lift.to = liftOf(o);
     grab = { k, du: 0, dv: 0 };
     stage.canvas.style.cursor = "grabbing";
   });
@@ -1394,7 +1458,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
         const [tu, tv] = constrain(o, o.meta.anchor[0] - 60, o.meta.anchor[1] - 40);
         o.pos.tx = tu;
         o.pos.ty = tv;
-        o.lift.to = LIFT;
+        o.lift.to = liftOf(o);
         o.moving = true;
         hint = 1;
       } else if (hint === 1 && age > 3.5) {
