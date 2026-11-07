@@ -248,6 +248,98 @@ void main() {
   outColor = vec4(col * alpha, alpha);
 }`;
 
+// The cumulus, developed. The shared film grade renders a GoPro's cloud as
+// grey mush: its highlight tint and toe pull every white cool, and the
+// Pro-Mist folds the blue around a cloud back into it, so the domed cores
+// stop at a cold 230 and the shadowed folds go violet. This pass, after the
+// film, is keyed to the cloud alone: low-chroma, bright pixels of the sky
+// layer where nothing (the tree, the post, him) stands in front of it.
+// Inside that key
+//   - a large-radius unsharp (about 30 px, amount 0.3) gives the cauliflower
+//     tops back the volume the diffusion took;
+//   - a filmic shoulder lifts the cloud: midtones up to the airy 205-212 of
+//     a summer negative, the cores rolled off to 238-246 and never to paper
+//     white, so the brightest cloud keeps its texture;
+//   - colour by tier: the cores warm-neutral (sunlit, R at least B), the
+//     body neutral, and the darker half of the cloud the cyan of the
+//     skylight that fills it (about 160/184/195), not violet-blue.
+const GRADE_FRAG = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uFilm;  // the developed frame (display sRGB)
+uniform sampler2D uSky;   // the sky layer alone, as projected (before film, mipmapped)
+uniform sampler2D uScene; // the scene before film; alpha: what stands in front of the sky
+uniform vec2 uTexel;      // 1 / target px
+uniform float uPx;        // device px per CSS px
+out vec4 outColor;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// shoulder on display luma: 0.5 stays (the key's edge), the body lifts and
+// the top rolls off towards 0.968, so no channel of a core reaches 255
+float shoulder(float y) {
+  if (y <= 0.5) return y;
+  float s = y - 0.5;
+  float g = 0.5 + s * 1.65 / (1.0 + 1.311 * s);
+  // soft ceiling
+  float top = 0.968;
+  float k = 0.035;
+  return g < top - k ? g : top - k * exp(-(g - (top - k)) / k);
+}
+void main() {
+  vec3 col = texture(uFilm, vUv).rgb;
+  vec3 sky = texture(uSky, vUv).rgb;
+  vec4 scene = texture(uScene, vUv);
+  float mx = max(sky.r, max(sky.g, sky.b));
+  float chroma = (mx - min(sky.r, min(sky.g, sky.b))) / max(mx, 1e-3);
+  // what stands in front of the sky, unless it is itself cloud in front of
+  // cloud, near in tone (the strip of cloud the near layer's matte carried
+  // along between the two wires)
+  float smx = max(scene.r, max(scene.g, scene.b));
+  float schroma = (smx - min(scene.r, min(scene.g, scene.b))) / max(smx, 1e-3);
+  float cloudy = (1.0 - smoothstep(0.12, 0.2, schroma)) * smoothstep(0.55, 0.65, dot(scene.rgb, LUMA))
+    * (1.0 - smoothstep(0.12, 0.2, chroma)) * (1.0 - smoothstep(0.12, 0.25, length(scene.rgb - sky)));
+  float front = scene.a * (1.0 - cloudy);
+  // the body of the cloud (chroma under ~0.18, luma over ~0.55), with a
+  // softer reach into the thin skirt where cloud turns to sky, so that
+  // fringe takes the skylight too instead of staying violet
+  float inner = (1.0 - smoothstep(0.15, 0.22, chroma)) * smoothstep(0.5, 0.58, dot(sky, LUMA));
+  float skirt = (1.0 - smoothstep(0.22, 0.4, chroma)) * smoothstep(0.38, 0.55, dot(sky, LUMA));
+  float key = max(inner, 0.9 * skirt) * (1.0 - front);
+  if (key < 1e-3) {
+    outColor = vec4(col, 1.0);
+    return;
+  }
+  // local contrast: the sky layer's own luma against a ~30 px gaussian of
+  // it, so the dark things in front (a wire, a leaf, his arm) cast no halo
+  // into the cloud beside them
+  float r = 15.0 * uPx;
+  float lod = log2(max(r * 0.6, 1.0));
+  float wsum = 0.0;
+  float blur = 0.0;
+  for (int i = 0; i < 13; i++) {
+    float fi = float(i);
+    float ring = i == 0 ? 0.0 : (i < 7 ? 1.0 : 2.0);
+    float ang = (i < 7 ? fi : fi + 0.5) * 1.0471976;
+    vec2 o = ring * r * vec2(cos(ang), sin(ang)) * uTexel;
+    float w = exp(-ring * ring * 0.5);
+    blur += dot(textureLod(uSky, vUv + o, lod).rgb, LUMA) * w;
+    wsum += w;
+  }
+  blur /= wsum;
+  float y0 = dot(col, LUMA);
+  float y = y0 + clamp(0.3 * (dot(sky, LUMA) - blur), -0.05, 0.05);
+  float yo = shoulder(y);
+  // colour by tier, as a ratio to luma
+  vec3 shade = vec3(0.875, 1.025, 1.1);   // skylit fold, ~(160, 184, 195)
+  vec3 body = vec3(0.974, 1.007, 1.007);  // ~(205, 212, 212)
+  vec3 core = vec3(1.006, 1.0, 0.978);    // sunlit top, ~(241, 240, 236)
+  vec3 tint = mix(shade, body, smoothstep(0.66, 0.82, yo));
+  tint = mix(tint, core, smoothstep(0.84, 0.94, yo));
+  // a little of the cloud's own colour survives, so the folds keep their drawing
+  vec3 own = (col - y0) * (yo / max(y0, 1e-3));
+  vec3 graded = yo * tint + own * mix(0.2, 0.15, smoothstep(0.6, 0.85, yo));
+  outColor = vec4(mix(col, graded, key), 1.0);
+}`;
+
 function compile(gl, vs, fs, attrib = "aGrid") {
   const p = gl.createProgram();
   for (const [type, src] of [
@@ -374,6 +466,7 @@ export async function createMoment(host, { embedded = false } = {}) {
   const progLayer = compile(gl, LAYER_VERT, LAYER_FRAG);
   const progSubj = compile(gl, SUBJ_VERT, SUBJ_FRAG);
   const progBlend = compile(gl, QUAD_VERT, BLEND_FRAG, "aPos");
+  const progGrade = compile(gl, QUAD_VERT, GRADE_FRAG, "aPos");
   const film = createFilm(gl, { width: 2, height: 2 });
 
   const gSky = grid(gl, SKY_GRID, Math.round((SKY_GRID * PH) / PW));
@@ -450,6 +543,11 @@ export async function createMoment(host, { embedded = false } = {}) {
     Object.assign(frame, { w: fw, h: fh, x: (w - fw) / 2, y: (h - fh) / 2 });
     freeTargets();
     targets.scene = makeTarget(box.pw, box.ph, false);
+    targets.sky = makeTarget(box.pw, box.ph, false);
+    targets.film = makeTarget(box.pw, box.ph, false);
+    // the sky alone is mipmapped, for the cloud pass's wide unsharp
+    gl.bindTexture(gl.TEXTURE_2D, targets.sky.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     targets.a = makeTarget(box.pw, box.ph, true);
     targets.b = makeTarget(box.pw, box.ph, true);
     film.resize(box.pw, box.ph);
@@ -596,13 +694,9 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.SCISSOR_TEST);
 
-    // 2. sky, then the near layer, into the scene
-    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.scene.fbo);
-    gl.viewport(0, 0, pw, ph);
-    gl.clearColor(0, 0, 0, 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    // 2. sky, then the near layer, into the scene. The scene's alpha keeps
+    // what stands in front of the sky (the sky itself writes none), and the
+    // sky is also drawn alone, for the cloud key.
     gl.useProgram(progLayer.p);
     setProjection(progLayer.u, cm, pw, ph);
     gl.uniform1i(progLayer.u.uTex, 0);
@@ -614,7 +708,18 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, tex.sky);
     gl.uniform1f(progLayer.u.uUseDepth, 0);
     gl.bindVertexArray(gSky.vao);
+    gl.clearColor(0, 0, 0, 0);
+    gl.viewport(0, 0, pw, ph);
+    gl.disable(gl.BLEND);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.sky.fbo);
+    gl.clear(gl.COLOR_BUFFER_BIT);
     gl.drawElements(gl.TRIANGLES, gSky.count, gl.UNSIGNED_INT, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, targets.scene.fbo);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.enable(gl.BLEND);
+    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE);
+    gl.drawElements(gl.TRIANGLES, gSky.count, gl.UNSIGNED_INT, 0);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.bindTexture(gl.TEXTURE_2D, tex.near);
     gl.uniform1f(progLayer.u.uUseDepth, 1);
     gl.bindVertexArray(gNear.vao);
@@ -642,7 +747,27 @@ export async function createMoment(host, { embedded = false } = {}) {
     const k = clamp(exposureAge / (reduce ? 0.3 : 2.1), 0, 1);
     const ease = 1 - Math.pow(1 - k, 4);
     const exposure = 0.12 + (reduce ? 0 : 2.4 * (1 - ease));
-    film.render(targets.scene.tex, { ...FILM, exposure, grainSeed });
+    film.render(targets.scene.tex, { ...FILM, exposure, grainSeed }, targets.film.fbo);
+
+    // 5. the cumulus, keyed and developed past the film's grey (GRADE_FRAG)
+    gl.bindTexture(gl.TEXTURE_2D, targets.sky.tex);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, pw, ph);
+    gl.disable(gl.BLEND);
+    gl.useProgram(progGrade.p);
+    gl.bindVertexArray(quadVao);
+    for (const [unit, t2] of [targets.film.tex, targets.sky.tex, targets.scene.tex].entries()) {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, t2);
+    }
+    gl.uniform1i(progGrade.u.uFilm, 0);
+    gl.uniform1i(progGrade.u.uSky, 1);
+    gl.uniform1i(progGrade.u.uScene, 2);
+    gl.uniform2f(progGrade.u.uTexel, 1 / pw, 1 / ph);
+    gl.uniform1f(progGrade.u.uPx, dpr);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
 
     // the ground round the print stays clean black
     const fx0 = Math.round(frame.x * dpr);
@@ -746,7 +871,7 @@ export async function createMoment(host, { embedded = false } = {}) {
       gSubj.free();
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(quadVao);
-      for (const p of [progLayer, progSubj, progBlend]) gl.deleteProgram(p.p);
+      for (const p of [progLayer, progSubj, progBlend, progGrade]) gl.deleteProgram(p.p);
       stage.destroy();
     },
   };
