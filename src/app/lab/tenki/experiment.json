@@ -24,7 +24,7 @@
       "file": "https://images.unsplash.com/photo-1501696226977-1fbff6555a97?w=6000&fit=max&q=95&fm=jpg",
       "author": "Dina Lydia, Unsplash",
       "licence": "Unsplash License",
-      "note": "3593x2736, worked at 2400x1828. Sky matte by tools/depth/segment.py sky, then tools/depth/bakes/tenki/matte.py (enclosed sky pockets found by colour back-projection, edges unmixed on the colour line between local sky and local cable colour, in linear light); foreground decontaminated F = (I - aB)/(1 - a); normals, metric depth and focal length by MoGe-2 ViT-S (tools/depth/normals.py, MIT). Bake: tools/depth/bakes/tenki (prep, matte, light, export, pack); tools/depth/bakes/tenki/oldlight.py (the old light in colour, and its residual on the trunk: shade.webp, trunk.webp)."
+      "note": "3593x2736, worked at 2400x1828. Sky matte by tools/depth/segment.py sky, then tools/depth/bakes/tenki/matte.py (enclosed sky pockets found by colour back-projection, edges unmixed on the colour line between local sky and local cable colour, in linear light); foreground decontaminated F = (I - aB)/(1 - a); normals, metric depth and focal length by MoGe-2 ViT-S (tools/depth/normals.py, MIT). Bake: tools/depth/bakes/tenki (prep, matte, light, export, pack); tools/depth/bakes/tenki/oldlight.py (the old light in colour, and its residual on the trunk: shade.webp, trunk.webp); tools/depth/bakes/tenki/restraint.py (one warm accent: the yellow tags, rust boxes, amber glints and two of the three red tape bands pulled to the colour of the sheath, steel or box around them, luminance kept, so only the red band where the cables wrap the pole stays)."
     },
     {
       "url": "https://polyhaven.com/a/rustig_koppie_puresky",
