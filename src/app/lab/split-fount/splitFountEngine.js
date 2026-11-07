@@ -135,29 +135,12 @@ vec3 proof(vec2 l, vec3 A0, vec3 A1, vec3 A2, vec4 P, vec4 Q){
   // every proof.
   float nk = fbm(l * 0.06 + 31.0);
   float nick = smoothstep(0.80, 0.82, nk) * smoothstep(0.95, 0.99, m.b);
-  float pin = smoothstep(0.93, 0.95, noise(l * 0.35 + 77.0)) * smoothstep(0.8, 0.98, m.b);
+  float pin = smoothstep(0.955, 0.97, noise(l * 0.35 + 77.0)) * smoothstep(0.62, 0.72, fbm(l * 0.02 + 41.0)) * smoothstep(0.8, 0.98, m.b);
   a *= 1.0 - max(nick * 0.7, pin * 0.6);
   if (a * printed <= 0.0) return col;
 
   // Squeeze: ink pushed to the letter's edge sits thicker there.
   float rim = smoothstep(0.5, 0.6, m.g) * (1.0 - smoothstep(0.66, 0.95, m.g));
-
-  // Coverage: streaks along the travel from the roller's tracks, the wood's
-  // grain running up the letters, and a mottle of thin patches.
-  float streak = fbm(vec2(dot(c, perp) * 0.06, along * 0.004) + seed);
-  float grain = fbm(vec2(l.x * 0.22, l.y * 0.012) + 5.0);
-  float mottle = fbm(l * 0.03 + seed * 1.7);
-  float cov = 0.98 - (1.0 - streak) * 0.1 - grain * 0.06 - smoothstep(0.5, 0.8, mottle) * 0.08;
-  // Speckle: where coverage runs thin, the paper's tooth breaks through,
-  // as salt: fine points, never blotches. Just behind the nip the roller
-  // has not yet laid its full film, so the salt is heavy there and the
-  // streaks along the travel show.
-  float thin = clamp((0.93 - cov) * 5.0, 0.0, 1.0);
-  float sp = noise(l * 1.6 + seed * 3.1) * 0.7 + noise(l * 3.3 - seed) * 0.3;
-  float th = max(thin * 0.16, starve * (0.42 + (streak - 0.5) * 0.5));
-  float hole = smoothstep(0.8 - th, 0.84 - th, sp) * (1.0 - rim * ramp);
-  float film = mix(0.3, 1.0, ramp * ramp);
-  float d = a * printed * film * cov * (1.0 - hole * 0.9) * (1.0 + rim * 0.45 * ramp);
 
   // The fountain: three inks across the roller's axis, blended at their
   // borders by the oscillation, wider every pass.
@@ -169,6 +152,34 @@ vec3 proof(vec2 l, vec3 A0, vec3 A1, vec3 A2, vec4 P, vec4 Q){
   float w2 = smoothstep(P.y - w, P.y + w, s);
   float w1 = max(0.0, 1.0 - w0 - w2);
   float ws = w0 + w1 + w2;
+
+  // Coverage. A wood type solid off a well charged roller is flat and
+  // dense: the film is full everywhere, with only the faintest grain of the
+  // block running up the letters and the roller's tracks along the travel.
+  // Thin ink, and the salt of paper tooth breaking through it, has a cause
+  // and a place, never an even sprinkle over the whole solid:
+  //  - the starved ramp just behind the nip, before the film is laid;
+  //  - a thin band along each fount border, where the roller is still
+  //    working two inks into each other and lays them a little short;
+  //  - a slow patch where the roller ran short on this pull, a different
+  //    place on every proof, drawn out along the travel.
+  float streak = fbm(vec2(across * 0.06, along * 0.004) + seed);
+  float grain = fbm(vec2(l.x * 0.22, l.y * 0.012) + 5.0);
+  float bw = 0.03 + w * 0.22;
+  float seam = exp(-pow((s - P.x) / bw, 2.0)) + exp(-pow((s - P.y) / bw, 2.0));
+  seam *= smoothstep(0.2, 0.75, noise(vec2(along * 0.03, seed + 3.0)) * 0.7 + noise(vec2(along * 0.11, across * 0.4 + seed)) * 0.3);
+  float shortN = fbm(vec2(across * 0.0045, along * 0.0016) + seed * 0.37 + 11.0);
+  float short_ = smoothstep(0.58, 0.74, shortN);
+  float cov = 1.0 - grain * 0.035 - (1.0 - streak) * 0.03 - short_ * (0.1 + (1.0 - streak) * 0.12) - seam * 0.04;
+  // Salt: fine points of tooth, never blotches. Across the full body it is
+  // capped to a stray point here and there; it is spent where the ink is short.
+  float sp = noise(l * 1.6 + seed * 3.1) * 0.7 + noise(l * 3.3 - seed) * 0.3;
+  float th = seam * 0.12 + short_ * (0.2 + (streak - 0.5) * 0.3);
+  th = max(th, starve * (0.5 + (streak - 0.5) * 0.5));
+  float hole = smoothstep(0.9 - th, 0.94 - th, sp) * (1.0 - rim * ramp);
+  float film = mix(0.3, 1.0, ramp * ramp);
+  float d = a * printed * film * cov * (1.0 - hole * 0.9) * (1.0 + rim * 0.45 * ramp);
+
   vec3 A = (w0 * A0 + w1 * A1 + w2 * A2) / ws;
   // Pigments mixed on a roller sit between a dye's darkening and a plain
   // average of the inks, so a red and a blue blend to violet, not mud.
