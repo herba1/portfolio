@@ -52,13 +52,15 @@ const P_MAX = 0.72;
 // that takes the 5400 K capture's cloud to warm-neutral.
 const SKY_DYE = [0.03 * 1.3, 0.42 * 1.3, 1.3];
 const WB = [1.1, 0.97, 0.97];
-// The print: 1.2 stops over the plate's old exposure, so cloud bodies sit
-// high on the print, then a log-logistic negative-to-print curve (contrast n,
-// half-density exposure s, in plate units after that exposure) reaching
-// paper white at 8 plate units.
-const PRINT_STOPS = 1.2;
+// The print: 0.9 stops over the plate's old exposure, then a log-logistic
+// negative-to-print curve (contrast n, half-density exposure s, in plate units
+// after that exposure) reaching paper white at 8 plate units. The half-density
+// point sits high enough that cloud bodies land on the steep middle of the
+// curve, not its shoulder, so their lobes keep their modelling and only the
+// sunlit tops roll off.
+const PRINT_STOPS = 0.9;
 const PRINT_WHITE = 8;
-const PRINT_CURVE = [2.2, 0.75];
+const PRINT_CURVE = [2.0, 1.1];
 // Cloud split tone, multipliers on the print (unit luminance): skylight blue
 // in the shadowed underside (hue ~205), warm-neutral on the sunlit top.
 const SHADE = [0.8, 1.0, 1.2];
@@ -214,8 +216,10 @@ void main() {
   // shadowed underside only by the open sky around it, so it goes blue-grey
   // (hue ~205) while the tops roll off warm. Only the neutral, non-Rayleigh
   // share of an open-sky pixel is cloud; the quay and the mast are left alone.
+  // The gate opens across the cloud bodies' mid-tones, so the blue-grey reaches
+  // up into the shaded flanks of each lobe rather than only the darkest base.
   float cloud = aux.r * clamp(1.0 - A / max(C.b, 1e-4), 0.0, 1.0);
-  float lit = smoothstep(0.68, 0.88, dot(print, LUMA));
+  float lit = smoothstep(0.4, 0.85, dot(print, LUMA));
   print *= mix(vec3(1.0), mix(uShade, uSunlit, lit), cloud);
   // Paper white: the print's base never scans as a full 255.
   print = clamp(print, 0.0, 1.0) * 0.985;
