@@ -1,6 +1,6 @@
 {
   "title": "Polariser",
-  "description": "Lying back on a Dublin quay and looking almost straight up, between two glass and concrete buildings and a red mast, into a March cumulus sky, through a circular polariser. Turn the ring and the band of sky ninety degrees from the sun deepens toward ultramarine while the cumulus stays and steps forward, unevenly across the wide frame, the way a real polariser darkens a wide sky. The reflections on the glass curtain wall fade on one face and hold on the other as the filter's axis crosses each one's angle of reflection. Each pixel's polarisation comes from its exact view direction and the sun's position in the HDRI.",
+  "description": "Lying back on a Dublin quay and looking straight up into a canyon of glass and concrete towers and a red mast, into a March cumulus sky, through a circular polariser. Turn the ring and the band of sky ninety degrees from the sun deepens toward ultramarine while the cumulus stays and steps forward, unevenly across the wide frame, the way a real polariser darkens a wide sky. The reflections on the glass curtain wall fade on one face and hold on the other as the filter's axis crosses each one's angle of reflection. Each pixel's polarisation comes from its exact view direction and the sun's position in the HDRI.",
   "tags": ["WebGL", "Photography", "Optics", "Film"],
   "status": "draft",
   "createdAt": "2026-11-06T18:30:00.000Z",
@@ -12,7 +12,7 @@
     "url": "https://polyhaven.com/a/docklands_01"
   },
   "sources": [
-    "https://polyhaven.com/a/docklands_01 (Savva Zakharov, CC0): HDRI rendered to a stereographic worm's-eye plate, 84° up, 120° horizontal field on a 4:5 print",
+    "https://polyhaven.com/a/docklands_01 (Savva Zakharov, CC0): HDRI rendered to a stereographic worm's-eye plate, 89° up, 140° horizontal field on a 4:5 print",
     "https://en.wikipedia.org/wiki/Polarizing_filter_(photography)",
     "https://en.wikipedia.org/wiki/Rayleigh_sky_model",
     "https://en.wikipedia.org/wiki/Fresnel_equations",

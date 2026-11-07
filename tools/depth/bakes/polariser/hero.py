@@ -15,7 +15,7 @@ def proj(v):
 e = np.cross(S, d); e /= np.linalg.norm(e, axis=-1, keepdims=True)
 a = proj(d); b = proj(d + e * 0.02); v = b - a
 psi = np.arctan2(v[..., 1], v[..., 0])
-cg = d @ S; P = 0.72 * (1 - cg ** 2) / (1 + cg ** 2)
+cg = d @ S; P = 0.55 * (1 - cg ** 2) / (1 + cg ** 2)
 A = np.clip((0.85 * C[..., 2] - C[..., 0]) / 0.56, 0, None); A = np.minimum(A, C[..., 2]) * sky
 H, W = A.shape
 m = 0.92

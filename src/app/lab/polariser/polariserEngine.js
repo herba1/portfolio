@@ -20,9 +20,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The plate is a fixed stereographic render of Poly Haven's docklands_01
 // HDRI (linear, unclipped; sun at az 38°, alt 28.8°, found from its
 // brightest point and checked against the time and place of capture): a
-// worm's-eye view 84° up, 6° off the zenith toward the quay, so the
-// buildings and the red mast lean in from the left, bottom and right edges
-// and the dark band 90° from the sun arcs across the open sky above them.
+// worm's-eye view 89° up, a degree off the zenith, rolled so the towers wrap
+// the frame: the big apartment block leans in across the top and left edges,
+// the pointed tower from the left, the glass block and the red mast from the
+// bottom and a second glass block from the bottom right, and the dark band
+// 90° from the sun arcs across the open sky in the middle of that canyon.
 // Each pixel's view direction is rebuilt from the camera through the same
 // projection, so γ is exact.
 //
@@ -35,8 +37,8 @@ const AUX = "/lab/polariser/aux.png";
 // Camera the plate was rendered with (tools/depth/bakes/polariser/plate.py):
 // stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
 // horizontal edge at hfov / 2 from the axis. The 4:5 print crops 92% of it,
-// a 120° horizontal field on the page.
-const CAM = { yaw: 82, pitch: 84, roll: -6, hfov: 128.44206917476762, aspect: 2400 / 1920 };
+// a 140° horizontal field on the page.
+const CAM = { yaw: 17, pitch: 89, roll: 135, hfov: 149.09834806856665, aspect: 2400 / 1920 };
 // The print crops this share of the plate.
 const CROP = 0.92;
 const SUN = { lon: 38.12255859375, lat: 28.762207031249996 };
@@ -45,12 +47,20 @@ const GLASS_B = [-0.54538212, 0, -0.83818754];
 // Plate encoding: v = (x / (1 + x))^(1/2.2), x = L * K.
 const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
-// lowest there); the hero still and the end of the reveal.
-const HERO = 0.74;
-const P_MAX = 0.72;
+// lowest there, tools/depth/bakes/polariser/hero.py); the hero still and the
+// end of the reveal.
+const HERO = 0.14;
+// Effective maximum degree of polarisation. A clean Rayleigh sky reaches about
+// 0.75, but a March cumulus sky is multiply scattered off bright cloud and a
+// real circular polariser does not extinguish fully, so the band 90° from the
+// sun deepens to cobalt rather than to navy.
+const P_MAX = 0.55;
 // Clear-sky dye (linear, per unit of the plate's blue) and the white balance
-// that takes the 5400 K capture's cloud to warm-neutral.
-const SKY_DYE = [0.03 * 1.3, 0.42 * 1.3, 1.3];
+// that takes the 5400 K capture's cloud to warm-neutral. The zenith the plate
+// now looks at is the darkest blue in the dome, so the dye is lifted to keep
+// the deepest frame in cobalt; its green is held back a touch so the washed
+// angle stays cerulean, not electric cyan.
+const SKY_DYE = [0.03 * 2, 0.37 * 2, 2];
 const WB = [1.1, 0.97, 0.97];
 // The print: 0.9 stops over the plate's old exposure, then a log-logistic
 // negative-to-print curve (contrast n, half-density exposure s, in plate units
@@ -421,7 +431,8 @@ export async function createPolariser(host, { embedded = false } = {}) {
   };
 
   // State.
-  let phi = held ? clamp(+polQ, 0, 1) * Math.PI : HERO * Math.PI + Math.PI / 2;
+  // ?still=1 without ?pol shows the hero; the reveal starts from the washed angle.
+  let phi = held ? clamp(+polQ, 0, 1) * Math.PI : HERO * Math.PI + (still ? 0 : Math.PI / 2);
   let omega = 0; // rad/s, carried after release
   let dragging = false;
   let touched = held;
@@ -489,7 +500,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
 
-    // Crop: cover-fit the print aspect into the 4:5 plate at 92%, a 120°
+    // Crop: cover-fit the print aspect into the 4:5 plate at 92%, a 140°
     // stereographic field across the print, with room left to breathe.
     const pa = L.pw / L.ph;
     const plateA = 1 / CAM.aspect;
