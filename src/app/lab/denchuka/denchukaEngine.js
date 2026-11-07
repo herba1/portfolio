@@ -47,6 +47,14 @@ const SKYLINE = 1060;
 const DUR = { wire: 0.95, hw: 1.25, pole: 1.9 };
 // the still: how much of the year axis one element's motion spans
 const STILL_SPAN = { wire: 0.035, hw: 0.04, pole: 0.05 };
+// a falling wire is blurred over at most one 24 fps frame of its fall, sampled
+// at most a pixel apart (3 px at the longest)
+const FRAME = 1 / 24;
+const WIRE_SAMPLES = 32;
+// the travel (plate px) over which a falling wire's streak halves
+const WIRE_FADE = 24;
+// a wire's thickness (plate px) for its swept coverage
+const WIRE_THICK = "3.0";
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -136,6 +144,11 @@ vec3 skyGrade(vec3 c, float y) {
   vec3 cloud = mix(shadeC, sunC, top);
   return mix(cloud, sky, blue);
 }
+// interleaved gradient noise: a per-pixel offset whose neighbours differ, so
+// leftover sampling steps read as fine grain
+float ign(vec2 p) {
+  return fract(52.9829189 * fract(dot(p, vec2(0.06711056, 0.00583715))));
+}
 // the object alone: photo = a * object + (1 - a) * behind
 vec3 unmix(vec3 withIt, vec3 behind, float a) {
   return clamp((withIt - (1.0 - a) * behind) / max(a, 0.2), 0.0, 1.0);
@@ -198,7 +211,14 @@ void main() {
     cov += (1.0 - cov) * al;
   }
 
-  // wires: slack, then the fall, blurred over the frame interval
+  // wires: slack, then the fall, blurred over the frame interval. The sweep
+  // is sampled at most 1 px apart (3 px at the longest), each pixel's samples
+  // shifted by its own noise, so what steps are left dither into grain, not
+  // copies. Falling, a pixel takes how much wire crossed it over the frame
+  // (the coverage summed along the travel, in px of wire), weighted toward
+  // the end of the frame: the wire where it is now, with a tail up the way
+  // it came that thins out (a smear, not a stack of see-through wires), the
+  // whole of it fainter the faster it goes.
   for (int j = 0; j < ${MAX_W}; j++) {
     if (j >= uNW) break;
     vec4 a = uW[j];
@@ -211,25 +231,37 @@ void main() {
     float dy0 = c.x * bow + c.y * lead;
     if (pp.y - min(dy0, dy1) < b.y - 2.0 || pp.y - max(dy0, dy1) > b.z + 2.0) continue;
     int id = int(b.x + 0.5);
-    float n = clamp(ceil(abs(dy1 - dy0) / 1.5), 1.0, 6.0);
-    vec3 acc = vec3(0.0);
-    float accA = 0.0;
-    for (int t = 0; t < 6; t++) {
+    float travel = abs(dy1 - dy0);
+    float n = clamp(ceil(travel), 1.0, ${WIRE_SAMPLES}.0);
+    float jit = ign(vec2(ip) + vec2(float(id) * 5.588, float(id) * 3.137));
+    // at a crawl (the slack) every instant counts the same; falling, the tail
+    float comet = smoothstep(2.0, 16.0, travel);
+    vec3 accC = vec3(0.0);
+    float accW = 0.0;
+    float peak = 0.0;
+    float swept = 0.0;
+    for (int t = 0; t < ${WIRE_SAMPLES}; t++) {
       if (float(t) >= n) break;
-      float dy = mix(dy0, dy1, (float(t) + 0.5) / n);
-      vec2 src = vec2(pp.x, pp.y - dy);
+      float f = (float(t) + jit) / n;
+      vec2 src = vec2(pp.x, pp.y - mix(dy0, dy1, f));
       ivec2 si = ivec2(floor(src));
       ivec4 se = ids(si);
       if (se.x != id) continue;
       float al = texelFetch(uAlpha, si, 0).r;
+      float k = al * mix(1.0, f * f, comet);
+      if (k <= 0.0) continue;
       int srk = se.w / 64;
-      acc += unmix(plate(0, src, srk), plate(1, src, srk), al) * al;
-      accA += al;
+      accC += unmix(plate(0, src, srk), plate(1, src, srk), al) * k * k;
+      accW += k * k;
+      peak = max(peak, k);
+      swept += k;
     }
-    acc /= n;
-    accA /= n;
-    col = col * (1.0 - accA) + acc;
-    cov += (1.0 - cov) * accA;
+    if (peak <= 0.0) continue;
+    // px of wire that went over this pixel, against a wire's own thickness
+    float sweptA = min(1.0, swept * (travel / n) / ${WIRE_THICK});
+    float A = mix(peak, sweptA, comet) / (1.0 + travel / ${WIRE_FADE}.0);
+    col = mix(col, accC / accW, A);
+    cov += (1.0 - cov) * A;
   }
 
   float skyW = texture(uSky, pp / uPlate).r * (1.0 - cov);
@@ -518,7 +550,12 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     for (const w of wires) {
       if (w.a <= 0 || w.a >= 1 || nw >= MAX_W) continue;
       const [s1, f1] = wireShape(w, w.a);
-      const [s0, f0] = wireShape(w, still ? Math.max(0, w.a - 0.02) : w.prev);
+      // where it was a frame ago: the last drawn frame, but never more than a
+      // 24 fps frame of travel (a slow frame would smear it across the sky);
+      // the still takes exactly that frame
+      const da = FRAME / DUR.wire;
+      const back = still ? Math.max(0, w.a - da) : clamp(w.prev, w.a - da, w.a + da);
+      const [s0, f0] = wireShape(w, back);
       uW.set([w.xa, w.xb, s1, f1], nw * 4);
       uW2.set([w.id, w.y0, w.y1, w.id % 2], nw * 4);
       uW3.set([s0, f0, 0, 0], nw * 4);

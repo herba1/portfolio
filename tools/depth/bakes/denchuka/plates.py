@@ -2,6 +2,7 @@
 #
 #   python3 -I plates.py <workdir> 1     p1: the photograph with every wire filled (LaMa)
 #   python3 -I resid.py  <workdir>       the faint wires the matte missed, filled into p1
+#   python3 -I gaps.py   <workdir>       the bits of far wire between its pieces, filled into p1
 #   python3 -I plates.py <workdir> 2     p3 and p2 (below)
 #
 #   p0 = the photograph
