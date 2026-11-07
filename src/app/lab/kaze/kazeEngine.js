@@ -117,20 +117,27 @@ void main() {
   float zen = 1.0 - smoothstep(0.02, 0.58, uv.y);
   zen *= zen;
   sky *= mix(vec3(1.0), vec3(0.72, 0.9, 1.0), 0.7 * zen * blue);
-  // A print's white is not the sun's: the near-white of the lit cloud carries
-  // on past paper white, into the shoulder, and rolls off warm. The film's
-  // per-channel curve bleaches whatever reaches it there back toward neutral
-  // (and its highlight split tone leans cool), so the warmth is set here,
-  // ahead of it, at the strength that lands the brightest domes and the
-  // sun's surround on a cream about #FFF3E2 rather than a cool grey. Cloud
-  // only: the open blue (which also reaches these levels) is left alone.
+  // A print's white is not the sun's: the near-white of the lit cloud rolls
+  // off warm, a cream about #FFF3E2 rather than a cool grey (the film's
+  // highlight split tone leans cool, so it is set here, ahead of it). Set as
+  // a hue, not a gain: the brightest cloud keeps its luminance and only its
+  // colour leans to cream, so no channel is pushed toward the clip on its
+  // own; the shoulder at the end decides how bright. Cloud only: the open
+  // blue (which also reaches these levels) is left alone.
   float hl = smoothstep(0.55, 1.0, max(sky.r, max(sky.g, sky.b))) * (1.0 - blue);
-  sky *= 1.0 + vec3(0.34, 0.16, -0.03) * hl * hl;
+  const vec3 CREAM = vec3(1.0, 0.86, 0.66);
+  float Yh = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  sky = mix(sky, Yh * CREAM / dot(CREAM, vec3(0.2126, 0.7152, 0.0722)), 0.7 * hl * hl);
+  // and carried up into the shoulder as a whole (one gain on all three
+  // channels, so the hue holds): the brightest tops spread over its upper
+  // reach instead of bunching at the knee, and keep their modelling there.
+  sky *= 1.0 + 0.12 * hl * hl;
   // The sun: a small hot core and a smooth exponential roll-off, three
   // widths summed, warm white, added over the sky so the cloud texture runs
-  // on through it, with no edge anywhere for a ring to form on.
-  vec3 sunC = vec3(1.0, 0.9, 0.74);
-  sky += sunC * (1.6 * exp(-r / 0.012) + 0.42 * exp(-r / 0.045) + 0.1 * exp(-r / 0.15));
+  // on through it, with no edge anywhere for a ring to form on. Kept low:
+  // the shoulder below carries it the rest of the way to white.
+  vec3 sunC = vec3(1.0, 0.86, 0.66);
+  sky += sunC * (0.7 * exp(-r / 0.012) + 0.25 * exp(-r / 0.06) + 0.1 * exp(-r / 0.15));
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
@@ -144,8 +151,9 @@ void main() {
   // the sun's light bounced back off the film base spills a few pixels in
   // over the dark edge of the blade as a thin red-orange ring (the coverage
   // here less the coverage a few pixels round: only the blade's rim), and
-  // nowhere else. Round the sun the sky is clipped white anyway; the ring
-  // shows on the dark side, as it does on film.
+  // nowhere else. The shoulder below takes it in with the rest, keeping
+  // its hue, so it reads as a thin orange rim against the cream round the
+  // sun; the ring shows on the dark side, as it does on film.
   float ab = 1.0 - (1.0 - textureLod(uRest, vUv, 1.0).a) * (1.0 - textureLod(uNear, vUv, 2.0).a);
   // (a sliver thinner than the ring is left alone: all rim, it would only
   // turn brown)
@@ -162,6 +170,18 @@ void main() {
   float dif = smoothstep(0.5, 0.9, dot(toLin(mix(h1, h0, cw)), vec3(0.2126, 0.7152, 0.0722)));
   dif *= dif * 0.6 * smoothstep(0.08, 0.35, r);
   col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * (1.0 - a);
+  // The shoulder: one roll-off on the brightest channel, the colour scaled
+  // by it as a whole, so a hot pixel keeps its hue and bleeds to cream
+  // instead of clipping channel by channel. Linear to the knee, then an
+  // exponential ease (slope-continuous) toward an asymptote just under the
+  // film's white point (1.3), so at rest the sun lands near #FFF3E2 with
+  // red under the clip, and the cloud round it keeps its drawing all the way
+  // in. Set before the exposure, so the reveal still opens overexposed.
+  float m = max(col.r, max(col.g, col.b));
+  const float KNEE = 0.7;
+  const float TOP = 1.38;
+  float sm = m < KNEE ? m : KNEE + (TOP - KNEE) * (1.0 - exp(-(m - KNEE) / (TOP - KNEE)));
+  col *= sm / max(m, 1e-5);
   outColor = vec4(col * uExpo, 1.0);
 }`;
 
