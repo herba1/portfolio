@@ -217,6 +217,14 @@ export default function Piece() {
     const H = Math.max(1, v("H"));
     const R = Math.max(0, v("R"));
     const cx = W / 2;
+    // the stage: the pill at its own scale, the open panel at the frame's,
+    // zoomed between them on the edge's own spring, hanging from one top edge
+    const F = live.current.fit;
+    const anchor = anchorRef.current;
+    if (F && anchor) {
+      const z = F.rest + (F.open - F.rest) * v("z");
+      anchor.style.transform = `translate3d(0,${F.top}px,0) scale(${z})`;
+    }
     const surf = surfRef.current;
     if (surf) {
       const path = squircle(W, H, R);
@@ -472,16 +480,19 @@ export default function Piece() {
       const w = box.clientWidth;
       const h = box.clientHeight;
       L.box = { w, h };
-      const k = Math.min(1, (w - 32) / PANEL.W, (h - 32) / PANEL.H);
-      const anchor = anchorRef.current;
+      // At rest the pill keeps its own size, only ever shrinking to fit. Open,
+      // the panel owns the frame: it is scaled up until its widest form takes
+      // 70% of the width, so the figures are set as a poster, not a widget.
+      const rest = Math.min(1, (w - 32) / PANEL.W, (h - 32) / PANEL.H);
+      const open = Math.max(rest, Math.min((w * 0.7) / PANEL.W, (w - 32) / PANEL.W, (h - 64) / PANEL.H));
       // the surface hangs from a fixed top edge, like the island does, set so
       // the open panel sits on the optical centre
-      anchor.style.transform = `translate3d(0,${Math.round(h * 0.47 - (PANEL.H / 2) * k)}px,0) scale(${k})`;
+      L.fit = { rest, open, top: Math.round(h * 0.47 - (PANEL.H / 2) * open) };
+      paint(performance.now());
     };
     fit();
     const ro = new ResizeObserver(fit);
     ro.observe(box);
-    paint(performance.now());
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

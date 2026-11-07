@@ -31,7 +31,6 @@
   width: 0;
   height: 0;
   transform-origin: 0 0;
-  filter: drop-shadow(0 1px 1px rgb(40 30 10 / 0.1)) drop-shadow(0 12px 28px rgb(40 30 10 / 0.12));
 }
 
 .mp-surface {
@@ -61,7 +60,8 @@
 
 .mp-edge path {
   fill: none;
-  stroke: rgb(255 255 255 / 0.08);
+  /* no rim and no shadow: the slab sits flat on the paper, a printed block */
+  stroke: transparent;
   stroke-width: 1.5;
   transition: stroke 200ms var(--mp-ease);
 }

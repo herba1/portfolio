@@ -148,6 +148,9 @@ export function layout(state, { hover = false, press = false, lead = 1 } = {}) {
       H,
       col,
       R: 32,
+      // open, the panel takes the frame: the stage zooms from the pill's
+      // scale to the panel's on this channel (see fit in Piece.jsx)
+      z: 1,
       art: { x: -W / 2 + PAD, y: PAD, s: ART, r: 8, o: 1 },
       // the waveform has no place in the open panel: it folds flat where it was
       wave: { x: WAVE_IDLE.x, y: WAVE_IDLE.y, o: 0 },
@@ -166,6 +169,7 @@ export function layout(state, { hover = false, press = false, lead = 1 } = {}) {
       H,
       col,
       R: 28,
+      z: 0,
       art: { x: L, y: 10, s: 36, r: 10, o: 1 },
       wave: { x: W / 2 - 12 - 32 - 30, y: 20, o: 0 },
       elapsed: { x: L + 48, y: H / 2 - clockMid(CLOCK_PILL), s: CLOCK_PILL, o: 0 },
@@ -176,12 +180,17 @@ export function layout(state, { hover = false, press = false, lead = 1 } = {}) {
   // idle: the pill breathes up a touch under the pointer and gives under a press
   const W = PILL_W + (hover ? 8 : 0) - (press ? 8 : 0);
   const H = PILL_H + (hover ? 4 : 0) - (press ? 4 : 0);
-  const L = -W / 2 + (H - ART_IDLE) / 2;
+  // The thumbnail stands 4px further in from the end than from the top: a
+  // rounded square in a round end clears the curve least at its corner, and
+  // at 12px in, that corner gap (about 8px) matches the 8px above it and
+  // the bars' 14px inset across the pill reads as the same margin.
+  const L = -W / 2 + (H - ART_IDLE) / 2 + 4;
   return {
     W,
     H,
     col,
     R: H / 2,
+    z: 0,
     art: { x: L, y: (H - ART_IDLE) / 2, s: ART_IDLE, r: 7, o: 1 },
     wave: { x: W / 2 - 14 - 22, y: (H - 16) / 2, o: 1 },
     elapsed: { x: L + 32, y: H / 2 - clockMid(CLOCK_PILL), s: CLOCK_PILL, o: 1 },
@@ -196,6 +205,7 @@ export function flat(l) {
     W: l.W,
     H: l.H,
     R: l.R,
+    z: l.z,
     cl: l.col.x,
     cw: l.col.w,
     ax: l.art.x,
