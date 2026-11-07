@@ -210,19 +210,19 @@ function edits(ops) {
     });
 }
 
-// A spine has one line, shared with its timestamp, so the edits are set
-// until the line is full and no further. Cut only at a word: a long phrase
-// keeps its first words and an ellipsis, and edits that no longer fit are
-// left as a closing "…" after the last slash. The budget is in characters of
-// the serif at its spine size, less the timestamp's share of the line (the
-// mono is wider per character); CSS still ellipsises if a guess runs over.
-const LINE = 46;
+// A spine has one line, its whole measure (the date sits out in the
+// margin), so the edits are set until the line is full and no further. Cut
+// only at a word: a long phrase keeps its first words and an ellipsis, and
+// edits that no longer fit are left as a closing "…" after the last slash.
+// The budget is in characters of the grotesk at the meta rung across the
+// card's 376px measure; CSS still ellipsises if a guess runs over.
+const LINE = 50;
 // A shortened phrase never ends on a word that leans on the next one.
 const WEAK = new Set(["a", "an", "the", "i", "it", "is", "at", "in", "of", "to", "and", "for", "so"]);
 const SEP = 2; // a spaced slash or arrow, in characters
 const len = (e) => (e.cut ?? "").length + (e.from != null ? e.from.length + SEP : 0) + (e.to ?? "").length;
-function fit(list, when) {
-  let room = LINE - Math.ceil(when.length * 1.1);
+function fit(list) {
+  let room = LINE;
   const out = [];
   for (const e of list) {
     const need = len(e) + (out.length ? SEP : 0);
@@ -261,7 +261,7 @@ export const VERSIONS = DRAFTS.map((d, k) => {
     when: WHEN[DRAFTS.length - 1 - k],
     title: runs(tag(title)),
     body: runs(tag(body)),
-    change: fit(prev ? [...edits(title), ...edits(body)] : [{ to: d.title }], WHEN[DRAFTS.length - 1 - k]),
+    change: fit(prev ? [...edits(title), ...edits(body)] : [{ to: d.title }]),
   };
 }).reverse();
 

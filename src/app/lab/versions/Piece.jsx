@@ -3,7 +3,7 @@
 import { Newsreader } from "next/font/google";
 import { Fragment, useEffect, useRef } from "react";
 
-import { COUNT, VERSIONS } from "./versionsData";
+import { VERSIONS } from "./versionsData";
 import "./versions.css";
 
 const LABEL =
@@ -105,30 +105,39 @@ export default function Piece({ embedded = false }) {
                 {/* The title shows once, on the front card; every save
                     behind it names its own change instead. The two lines
                     share one line box and roll past each other as a card
-                    comes forward. */}
+                    comes forward. When it was saved is set once, out in
+                    the margin, on this line's baseline. */}
                 <div className="versions-label">
                   <h2 className="versions-title">
+                    <span className="versions-base" />
                     <Words diff={v.title} />
                   </h2>
                   <p className="versions-change" aria-hidden="true">
+                    <span className="versions-base" />
                     <Change edits={v.change} />
                   </p>
                 </div>
-                <span className="versions-stamp">{v.when}</span>
               </div>
               <p className="versions-body">
                 <Words diff={v.body} />
               </p>
             </article>
           ))}
+          {/* The stack's printed margin: one hairline beside the front
+              sheet, a tick on each spine's baseline and the date set
+              against the rule, like the times down a tracklist. */}
+          <div className="versions-timeline" role="group" aria-label="Saved versions">
+            <span className="versions-rule" aria-hidden="true" />
+            {VERSIONS.map((v, i) => (
+              <button key={i} type="button" className="versions-tick" data-i={i} aria-label={v.when}>
+                <span className="versions-when" aria-hidden="true">
+                  <span className="versions-base" />
+                  {v.when}
+                </span>
+              </button>
+            ))}
+          </div>
         </div>
-      </div>
-      <div className="versions-timeline" role="group" aria-label="Saved versions">
-        {VERSIONS.map((v, i) => (
-          <button key={i} type="button" className="versions-tick" data-i={i} style={{ top: `${(COUNT - 1 - i) * 16}px` }} aria-label={v.when}>
-            <span className="versions-when">{v.when}</span>
-          </button>
-        ))}
       </div>
     </Root>
   );

@@ -101,13 +101,10 @@
 }
 
 /* The head line is the spine: the only part of an older save that shows
-   above the one in front of it, so it carries the title and when it was
-   saved, and a hairline closes it off from the text. */
+   above the one in front of it, so it carries one line, the title or what
+   that save changed, and a hairline closes it off from the text. When it
+   was saved is set in the margin, on this line's baseline. */
 .versions-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
   margin: 0 0 16px;
   padding: 0 0 16px;
   /* The rule is drawn inside the padding so the head stays on the grid,
@@ -116,23 +113,10 @@
   background: linear-gradient(var(--versions-line), var(--versions-line)) 0 100% / 100% 1px no-repeat;
 }
 
-.versions-stamp {
-  flex: none;
-  font-family: var(--font-mono);
-  font-size: var(--text-ui-xs);
-  line-height: 20px;
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
-  font-variant-numeric: tabular-nums;
-  white-space: nowrap;
-}
-
 /* One line tall, holding two: the title above, the change below. --front
    rolls them through the window, so a card coming forward turns its spine
    over to the title the way a counter turns a digit. Clipped, never faded. */
 .versions-label {
-  flex: 1 1 auto;
-  min-width: 0;
   height: 20px;
   overflow: hidden;
 }
@@ -256,72 +240,81 @@
   transform-origin: 50% 100%;
 }
 
-/* The timeline: one hairline tick per save, Now at the foot, older above.
-   Ticks near the current version swell like a dock. */
+/* A zero-size mark on a line's baseline, so the engine can read where the
+   baseline falls without guessing at the font's metrics. */
+.versions-base {
+  display: inline-block;
+  width: 0;
+  height: 0;
+}
+
+/* The margin: the stack's own index, laid out in the scene's flat plane so
+   the dates never take the perspective. One hairline a gutter clear of the
+   front sheet, running the stack's height; a tick on each spine's baseline
+   reaching back toward it; the date set against the rule. Positions are set
+   from the stack's geometry in versionsEngine.js. */
 .versions-timeline {
   position: absolute;
-  right: 28px;
-  top: 50%;
-  height: 208px;
-  margin-top: -104px;
-  width: 132px;
-  touch-action: none;
-  cursor: ns-resize;
-  zoom: var(--fit, 1);
+  left: 0;
+  top: 0;
+  width: 0;
+  height: 0;
+  z-index: 3000;
+}
+
+.versions-rule {
+  position: absolute;
+  left: var(--versions-rule, 568px);
+  top: 0;
+  width: 1px;
+  background: var(--versions-edge);
 }
 
 .versions-tick {
   position: absolute;
-  right: 0;
-  width: 132px;
-  height: 16px;
+  left: calc(var(--versions-rule, 568px) - var(--versions-gutter, 28px));
+  top: 0;
+  height: 20px;
   margin: 0;
-  padding: 0;
+  padding: 0 0 0 calc(var(--versions-gutter, 28px) + var(--versions-gap, 8px));
   border: 0;
   background: none;
-  cursor: inherit;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
   outline: none;
   -webkit-tap-highlight-color: transparent;
 }
 
+/* A leader drawn from the rule back to its spine's right edge, as
+   perspective has set that edge in, on the spine's baseline. The current
+   save's is inked; the rest are the sheets' own hairline. */
 .versions-tick::before {
   content: "";
   position: absolute;
-  right: 0;
-  top: 7px;
+  left: calc(var(--versions-gutter, 28px) + 1px);
+  top: var(--versions-tick-at, 15px);
   height: 1px;
-  width: 20px;
-  border-radius: 1px;
-  background: var(--versions-ink);
-  opacity: calc(0.18 + 0.82 * var(--near, 0));
-  transform: scaleX(calc(0.4 + 0.6 * var(--near, 0)));
-  transform-origin: 100% 50%;
+  width: var(--reach, var(--versions-reach, 8px));
+  background: color-mix(in srgb, var(--versions-ink) calc(var(--near, 0) * 100%), var(--versions-edge));
+  transform: translateX(-100%);
 }
 
-.versions-tick:focus-visible::before {
-  background: var(--color-accent, #2563eb);
-  opacity: 1;
+.versions-tick:focus-visible .versions-when {
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 4px;
 }
 
 .versions-when {
-  position: absolute;
-  right: 32px;
-  top: 0;
-  font-family: var(--font-mono);
-  font-size: var(--text-ui-xs);
-  line-height: 16px;
-  letter-spacing: var(--text-ui-xs--letter-spacing);
-  font-weight: var(--text-ui-xs--font-weight);
+  position: relative;
+  display: block;
+  font-size: var(--text-ui-lg);
+  line-height: 20px;
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  text-align: left;
   color: var(--versions-ink);
-  opacity: var(--show, 0);
-  transform: translateX(calc((1 - var(--show, 0)) * 6px));
-  pointer-events: none;
-}
-
-@container (max-width: 640px) {
-  .versions-timeline {
-    right: 16px;
-  }
 }

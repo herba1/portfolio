@@ -5,7 +5,7 @@ import { createTicks } from "./tick";
 // is. 0 shows the current note; 12 shows the first draft. Card i sits at
 // depth d = i - p. At d > 0 it recedes into the stack; as d goes negative it
 // flies forward past the viewer and dissolves. Every input (drag, wheel,
-// keys, the timeline) moves `p`, and a spring settles it on a whole version.
+// keys, a date in the margin) moves `p`, and a spring settles it on a whole version.
 
 const LAST = COUNT - 1;
 // Depth and lift together set how much of each older save shows above the
@@ -22,6 +22,14 @@ const TOP = 336; // px from the scene's head to the front card's top edge
 const REACH = 1170;
 const ORIGIN = TOP + (DY * PERSP) / DZ - REACH;
 const SCENE = 640; // px, the scene's own height
+const CARD_L = 100; // px, the front card's left edge in the scene
+const CARD_R = 540; // px, and its right edge
+// The margin: one hairline GUTTER px clear of the front card's right edge,
+// ticks reaching back toward the spines, dates set GAP px past the rule.
+const GUTTER = 28;
+const RULE = CARD_R + GUTTER;
+const TICK = 8; // px, a tick's reach back from the rule
+const GAP = 8; // px, from the rule to the date
 const DRAG_PX = 150; // px of drag per version, at fit 1
 const WHEEL_PX = 110; // px of wheel delta per version
 const PROJECT = 0.22; // s of flick velocity carried into the landing
@@ -64,6 +72,7 @@ export function createVersions(root, { embedded = false } = {}) {
   const cards = [...root.querySelectorAll(".versions-card")];
   const ticks = [...root.querySelectorAll(".versions-tick")];
   const timeline = root.querySelector(".versions-timeline");
+  const rule = root.querySelector(".versions-rule");
   const box = root.closest(".piece-box") || root;
   const sound = createTicks();
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)");
@@ -77,6 +86,13 @@ export function createVersions(root, { embedded = false } = {}) {
   let mode = held != null ? "held" : "spring";
   let fit = 1;
   let heights = cards.map(() => 0);
+  // Baselines, in px from a card's top edge, of its title and of its change
+  // line (laid out one line below the title, rolled up into its place), and
+  // of a date from the top of its own line.
+  let titleBase = 31;
+  let changeBase = 51;
+  let dateBase = 15;
+  let shiftX = 0;
   let raf = 0;
   let lastT = 0;
   let shown = Math.round(p);
@@ -89,6 +105,10 @@ export function createVersions(root, { embedded = false } = {}) {
   space.style.perspective = `${PERSP}px`;
   space.style.perspectiveOrigin = `50% ${ORIGIN}px`;
   space.style.setProperty("--versions-top", `${TOP}px`);
+  space.style.setProperty("--versions-rule", `${RULE}px`);
+  space.style.setProperty("--versions-gutter", `${GUTTER}px`);
+  space.style.setProperty("--versions-reach", `${TICK}px`);
+  space.style.setProperty("--versions-gap", `${GAP}px`);
 
   // Drag state.
   let drag = null;
@@ -104,6 +124,22 @@ export function createVersions(root, { embedded = false } = {}) {
     // scene's own pixels.
     root.style.setProperty("--fit", "1");
     heights = cards.map((c) => c.offsetHeight);
+    const base = (el) => {
+      let y = 0;
+      for (let n = el; n && n !== el.closest(".versions-card, .versions-tick"); n = n.offsetParent) y += n.offsetTop;
+      return y;
+    };
+    const head = cards[0];
+    titleBase = base(head.querySelector(".versions-title .versions-base"));
+    changeBase = base(head.querySelector(".versions-change .versions-base"));
+    dateBase = base(ticks[0].querySelector(".versions-base"));
+    space.style.setProperty("--versions-tick-at", `${dateBase}px`);
+    // The front sheet and its margin are one block: centre that, so the
+    // sheet itself sits left of the axis and the dates hang to its right.
+    const wide = Math.max(...ticks.map((t) => t.querySelector(".versions-when").offsetWidth));
+    const right = RULE + GAP + wide;
+    shiftX = SCENE / 2 - (CARD_L + right) / 2;
+    fit = clamp(Math.min((r.width - 48) / Math.max(600, right - CARD_L + 48), (r.height - 24) / 600), 0.3, 1);
     root.style.setProperty("--fit", fit.toFixed(4));
   };
 
@@ -120,18 +156,21 @@ export function createVersions(root, { embedded = false } = {}) {
     const h = heights[lo] + (heights[hi] - heights[lo]) * (at - lo);
     const top = lift(LAST - at, s);
     const shift = SCENE / 2 - (top + TOP + h) / 2;
-    space.style.transform = `translate3d(0, ${shift.toFixed(2)}px, 0)`;
+    space.style.transform = `translate3d(${shiftX.toFixed(2)}px, ${shift.toFixed(2)}px, 0)`;
+    return top;
   };
 
   const render = () => {
     const q = reduced?.matches && mode !== "held" ? Math.round(p) : p;
     const s = spread;
-    centre(q, s);
+    const top = centre(q, s);
+    let foot = null;
     for (let i = 0; i < COUNT; i += 1) {
       const c = cards[i];
       const d = i - q;
       if (d < -1.02) {
         c.style.visibility = "hidden";
+        ticks[i].style.visibility = "hidden";
         continue;
       }
       c.style.visibility = "visible";
@@ -161,23 +200,39 @@ export function createVersions(root, { embedded = false } = {}) {
         alpha = (1 - Math.min(1, k / 0.38)) ** 2;
       }
       c.style.transform = `translate3d(0, ${y.toFixed(2)}px, ${z.toFixed(2)}px)`;
+      // The date rides its spine: its tick and baseline sit where the
+      // spine's baseline lands after perspective, and it leaves with it.
+      const front = d <= 0 ? 1 : 1 - smooth(0.08, 0.5, d);
+      const lineBase = titleBase * front + (changeBase - 20) * (1 - front);
+      const at = ORIGIN + ((TOP + y + lineBase - ORIGIN) * PERSP) / (PERSP - z);
+      ticks[i].style.visibility = "visible";
+      ticks[i].style.transform = `translate3d(0, ${(at - dateBase).toFixed(2)}px, 0)`;
+      ticks[i].style.opacity = alpha.toFixed(3);
+      // A leader from the spine's right edge, as perspective has drawn it in,
+      // out to the rule: the date and its line read as one row.
+      const edge = SCENE / 2 + ((CARD_R - SCENE / 2) * PERSP) / (PERSP - z);
+      // The rule runs the stack's full height, from the oldest sheet still
+      // behind to the foot of the front one, wherever perspective has it.
+      if (foot == null && d >= 0) foot = ORIGIN + ((TOP + y + heights[i] - ORIGIN) * PERSP) / (PERSP - z);
+      ticks[i].style.setProperty("--reach", `${Math.max(TICK, RULE + 1 - edge).toFixed(2)}px`);
       c.style.filter = blur > 0.02 ? `blur(${blur.toFixed(2)}px)` : "none";
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));
       c.style.setProperty("--fog", fog.toFixed(3));
       // 1 on the front card (its head carries the title), 0 on every save
       // behind it (its head names what that save changed).
-      c.style.setProperty("--front", (d <= 0 ? 1 : 1 - smooth(0.08, 0.5, d)).toFixed(3));
+      c.style.setProperty("--front", front.toFixed(3));
       // Eased out, so the stroke starts quick at the caret and slows into
       // the last letters.
       const f = 1 - (1 - ink[i]) ** 3;
       c.style.setProperty("--f", f.toFixed(3));
     }
+    rule.style.top = `${top.toFixed(2)}px`;
+    rule.style.height = `${Math.max(0, (foot ?? top) - top).toFixed(2)}px`;
+    // The current save's leader is drawn in full ink.
     for (let i = 0; i < COUNT; i += 1) {
-      const near = Math.exp(-((i - q) ** 2) / 1.4);
-      const show = 1 - smooth(0, 0.5, Math.abs(i - q));
+      const near = 1 - smooth(0, 0.6, Math.abs(i - q));
       ticks[i].style.setProperty("--near", near.toFixed(3));
-      ticks[i].style.setProperty("--show", show.toFixed(3));
     }
     cards.forEach((c, i) => {
       const front = Math.round(q) === i;
@@ -330,31 +385,16 @@ export function createVersions(root, { embedded = false } = {}) {
     sound.wake();
   };
 
-  // ── The timeline: press and slide along the ticks to scrub.
-  let scrub = null;
-  const fromY = (clientY) => {
-    const r = timeline.getBoundingClientRect();
-    const local = (clientY - r.top) / (r.height / (COUNT * 16));
-    return LAST - (local - 8) / 16;
+  // ── The margin: a date takes you to its save. Pressed here, the stack
+  // underneath must not start a drag.
+  const onTickDown = (e) => {
+    if (e.target.closest(".versions-tick")) e.stopPropagation();
   };
-  const onScrubDown = (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    sound.wake();
-    timeline.setPointerCapture(e.pointerId);
-    scrub = e.pointerId;
-    snapTo(fromY(e.clientY));
-  };
-  const onScrubMove = (e) => {
-    if (scrub !== e.pointerId) return;
-    snapTo(fromY(e.clientY));
-  };
-  const onScrubUp = (e) => {
-    if (scrub === e.pointerId) scrub = null;
-  };
-  const onTickKey = (e) => {
+  const onTick = (e) => {
     const t = e.target.closest(".versions-tick");
-    if (t && e.detail === 0) snapTo(Number(t.dataset.i));
+    if (!t) return;
+    sound.wake();
+    snapTo(Number(t.dataset.i), 0);
   };
 
   stage.addEventListener("pointerdown", onDown);
@@ -363,11 +403,8 @@ export function createVersions(root, { embedded = false } = {}) {
   stage.addEventListener("pointercancel", onUp);
   stage.addEventListener("keydown", onKey);
   root.addEventListener("wheel", onWheel, { passive: false });
-  timeline.addEventListener("pointerdown", onScrubDown);
-  timeline.addEventListener("pointermove", onScrubMove);
-  timeline.addEventListener("pointerup", onScrubUp);
-  timeline.addEventListener("pointercancel", onScrubUp);
-  timeline.addEventListener("click", onTickKey);
+  timeline.addEventListener("pointerdown", onTickDown);
+  timeline.addEventListener("click", onTick);
 
   const ro = new ResizeObserver(() => {
     measure();
@@ -398,11 +435,8 @@ export function createVersions(root, { embedded = false } = {}) {
       stage.removeEventListener("pointercancel", onUp);
       stage.removeEventListener("keydown", onKey);
       root.removeEventListener("wheel", onWheel);
-      timeline.removeEventListener("pointerdown", onScrubDown);
-      timeline.removeEventListener("pointermove", onScrubMove);
-      timeline.removeEventListener("pointerup", onScrubUp);
-      timeline.removeEventListener("pointercancel", onScrubUp);
-      timeline.removeEventListener("click", onTickKey);
+      timeline.removeEventListener("pointerdown", onTickDown);
+      timeline.removeEventListener("click", onTick);
       sound.destroy();
     },
   };
