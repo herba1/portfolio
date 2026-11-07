@@ -20,6 +20,7 @@ import cv2
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import box, dilate, erode, disk, pushpull  # noqa: E402
+from wires import hangers  # noqa: E402
 
 SLUG, PHOTO, DEPTH, WORK = sys.argv[1:5]
 os.makedirs(WORK, exist_ok=True)
@@ -33,7 +34,8 @@ CONFIG = {
     # catenary mast, its platform and girder, straight up into scattered cumulus
     # (the mast, its girder and every wire are one structure a few metres
     # across: wires split between two planes by a noisy depth tear apart)
-    "ine-catenary-clouds": dict(mode="colour", near=0.35, near_blue=0.5, sky_sat=0.3, th=[0.45], wire_plane=2, sky_lum=0.3, reclaim=0.06, one_plane=True),
+    # (its droppers are white glass rods between the wire pairs: hangers)
+    "ine-catenary-clouds": dict(mode="colour", near=0.35, near_blue=0.5, sky_sat=0.3, th=[0.45], wire_plane=2, sky_lum=0.3, reclaim=0.06, one_plane=True, hangers=True),
     # crossbuck and lamps over a tiled roof, wires across a pale summer sky
     "kyoto-crossing-lowangle": dict(mode="colour", near=0.3, near_blue=0.7, blue_lum=0.3, th=[0.5], wire_plane=None, sky_lum=0.3),
     # fumikiri, poles and catenary, houses and greenery under cyan sky
@@ -282,12 +284,29 @@ for k in range(K - 2, 0, -1):
     crumb = np.zeros(n, bool)
     crumb[1:] = touch[1:] & (stats[1:, cv2.CC_STAT_AREA] < 160)
     lab[(lab == k) & crumb[cc]] = k + 1
+# Droppers and hangers: short upright members between the wires, which the
+# long-stroke pass cannot see (wires.hangers). They go with the structure
+# they hang from, at the plane of the nearest labelled pixel.
+hang = np.zeros((H, W), bool)
+hang_a = np.zeros((H, W), np.float32)
+if cfg.get("hangers"):
+    hang, hang_a = hangers(img, lab > 0, LONG)
+    hang &= lab == 0
+    hang_a[~hang] = 0
+    if hang.any():
+        _, idx = cv2.distanceTransformWithLabels((lab == 0).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+        oy, ox = np.nonzero(lab > 0)
+        lut = np.zeros(idx.max() + 1, np.uint8)
+        lut[idx[oy, ox]] = lab[oy, ox]
+        lab[hang] = lut[idx][hang]
+        wires |= hang
+    print("hangers", int(hang.sum()), "px")
 if cfg.get("one_plane"):
     # one structure against the sky: whatever bits of it the depth put a
     # plane further back would tear off it as it turns
     lab[lab > 0] = 1
 sky = lab == 0  # the islands given back to the sky above
-np.savez_compressed(os.path.join(WORK, "labels.npz"), lab=lab, img=img, dep=dep, sky=sky, wires=wires)
+np.savez_compressed(os.path.join(WORK, "labels.npz"), lab=lab, img=img, dep=dep, sky=sky, wires=wires, hang=hang, hang_a=hang_a)
 
 cols = np.array([[150, 200, 230], [60, 200, 60], [230, 80, 60], [230, 200, 30], [200, 60, 200]], np.float32) / 255
 v = 0.35 * img + 0.65 * cols[lab]

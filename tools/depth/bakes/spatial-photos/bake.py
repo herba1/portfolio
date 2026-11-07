@@ -7,11 +7,13 @@ Reads <workdir>/labels.npz from labels.py. Adapted from the crossing bake
 
   * The sky plane is complete. During a swipe the sky lags the nearer
     planes by up to ~8% of the frame, so whatever stood in front of it is
-    uncovered: the sky behind every pole, wire and box is filled soft
-    (skyfill.py: a harmonic membrane in linear light from the clear sky
-    round it, cloud thinning out with depth into a wide hole, the photo's
-    grain on top), never sharper than the photo. The photo is shown only
-    where the sky is seen clear of every rim, so no wire leaves a ghost.
+    uncovered: the sky behind every pole, wire and box is filled in two
+    bands (skyfill.py: the sky's broad light as a smooth membrane in linear
+    light, cloud texture by PatchMatch from the clear sky nearby, the
+    photo's grain on top), never sharper than the photo and with no
+    direction to smear along. The photo is shown only where the sky is seen
+    clear of every rim (and of droppers, wires.hangers), so no wire leaves
+    a ghost.
   * Wires carry on behind the posts in front of them as straight runs
     (wires.py), never as fans or dashes.
   * Every plane carries its own smooth depth map (depth.png, one plane per
@@ -93,6 +95,12 @@ A1 = M1.astype(np.float32)
 use_col = band & (den > 0.02)
 A1[band] = g1[band]
 A1[use_col] = acol[use_col]
+# a dropper's white glass rod (labels.py, wires.hangers) is paler than the
+# sky, not darker: unmixed against the dark hardware it comes out clear, and
+# the rod would lose its body to the sky fill; and the solid cut of it is a
+# px or two wider than the rod. It carries its own matte.
+if "hang" in z.files and z["hang"].any():
+    A1[z["hang"]] = z["hang_a"][z["hang"]]
 A.append(A1)
 for k in range(2, K):
     Mk = lab >= k
@@ -213,6 +221,10 @@ for k in range(K):
         small_ = np.zeros(n_, bool)
         small_[1:] = st_[1:, cv2.CC_STAT_AREA] < 0.0005 * H * W
         seen0 &= ~dilate(dark & small_[cc_], 2)
+        # and no slivers: between two wires a few px apart the clear sky is a
+        # line a px or two wide, darkened by both wires' halos, and between
+        # two filled strips it reads as a dark dash of wire left on the sky
+        seen0 &= cv2.morphologyEx(seen0.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0
         pure = pure & seen0
         need = ~seen0
         if SKYFILL == "lama":
@@ -220,7 +232,7 @@ for k in range(K):
             # pole instead of blending across it
             fill = lama_fill(img, need, method="lama", lama=Lama(threads=3), log=lambda *a: None)
         else:
-            fill = skyfill(img, pure, seed=7)
+            fill = skyfill(img, pure, seed=7, log=print)
     else:
         fill = shiftfill(img, pure, need, base, seed=k, T=128, q=4, cands=500, R=int(0.06 * L))
         if k == 1 and K > 2:
@@ -247,7 +259,10 @@ for k in range(K):
         # blur of the roof would be a dark smudge standing in open sky
         # (the ground is every plane but the nearest: that one is what moves
         # off the hole, the rest is what stands behind it)
-        far1 = (lab >= 1) & (lab < max(K - 1, 2)) & ~thin_all
+        # (a photo of one structure has no ground plane at all: its one
+        # object plane is the nearest, and a blur of it laid into the sky
+        # plane under a pole is a grey ghost of the pole left standing there)
+        far1 = (lab >= 1) & (lab < K - 1) & ~thin_all
         sg_ = 0.03 * L
         fg_ = cv2.GaussianBlur(far1.astype(np.float32), (0, 0), sg_)
         fs_ = cv2.GaussianBlur(sky.astype(np.float32), (0, 0), sg_)
