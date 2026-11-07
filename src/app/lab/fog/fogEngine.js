@@ -2,7 +2,8 @@ import { createStage, clamp } from "../_kit/stage";
 
 // Fog: a worm's-eye view up between the Canary Wharf towers into a summer
 // cumulus sky, with real air applied per pixel through its real distance.
-// Drag sets the visibility, from a clear 50 km day down to a 200 m haze.
+// Drag sets the visibility, from a clear 50 km day down to a 150 m haze,
+// through air that is swept clearer close to the eye.
 //
 // The plate is two Poly Haven HDRIs (CC0, both from their 16k captures) rendered
 // at 3840 through the same stereographic rays: the towers from canary_wharf, the
@@ -42,21 +43,35 @@ const HS = 500; // haze scale height, metres
 // The sky is seen through the haze along its own airmass: the column overhead
 // is this deep, and a ray at elevation e crosses 1 / sin e of it (floored at
 // 0.15, about 8.6 degrees, where the flat-layer law stops being true).
-const HS_SKY = 260;
+const HS_SKY = 160;
 const AIRMASS_FLOOR = 0.15;
 const V_CLEAR = 50000; // visibility at fog 0, metres
-const V_THICK = 200; // visibility at fog 1
-// The hand moves log V along an S that is steep at both ends and long in the
-// middle. A clear day's 50 km to 10 km changes nothing in a frame whose far
-// tower is 400 m off, so a square-root front skips it; the long middle is the
-// far towers' sight line going from clear to about half (fog 0.72), turning
-// them the blue of the sky they stand in while the sky veils over; the last
-// quarter takes the near towers and the street down to 200 m.
-const visibility = (f) => V_CLEAR * Math.pow(V_THICK / V_CLEAR, 0.55 * Math.sqrt(f) + 0.45 * Math.pow(f, 5));
+const V_THICK = 150; // visibility at fog 1
+// The hand moves log V so that what you see changes evenly along the drag. In a
+// frame whose far tower is 400 m off, the clear day's kilometres change little,
+// so log V runs fast at the front and slows toward the thick end: 50 km at 0,
+// ~1.3 km at 0.3 (the far towers half blue), ~350 m at 0.5 (they are cobalt
+// silhouettes, the low sky veiled), ~180 m at 0.7. Past that the visibility
+// barely moves; what the last stretch takes is the clear pocket around the
+// viewer (below), so the near towers go last.
+const V_CURVE = 2.8;
+const visibility = (f) => V_CLEAR * Math.pow(V_THICK / V_CLEAR, 1 - Math.pow(1 - f, V_CURVE));
+// The street is swept: the air in the canyon around the viewer is clearer, the
+// haze lying out along the street. Density rises from nothing at the eye to
+// full beyond about this distance (rho = s / (s + d0), so a ray to d crosses
+// d - d0 ln(1 + d / d0) of full haze): the glass corner 30 m off sees a fifth
+// of its straight-line air, the far tower at 380 m two thirds. The pocket
+// holds until the far towers are gone (fog 0.5) and closes over the second
+// half of the drag, which is when the near towers fade.
+const D_CLEAR = 60;
+const clearPocket = (f) => {
+  const t = clamp((f - 0.5) / 0.5, 0, 1);
+  return D_CLEAR * (1 - t * t * (3 - 2 * t));
+};
 const K_RGB = [0.82, 1.0, 1.24];
 const K_SKY = [1.04, 1.0, 0.98];
-const REST = 0.95; // arrival: a white-blue field of haze (~380 m)
-const ROLL = 0.7; // it clears to here (~2.5 km: the far towers already blue)
+const REST = 0.95; // arrival: a white-blue field of haze (~150 m, the pocket closed)
+const ROLL = 0.25; // it clears to here (~2 km: the far towers turning blue)
 const LEVELS = 6;
 // The sky's light at the scale of a cumulus' forms (a normalised blur of the
 // sky pixels, levels 3 and 4 of the pyramid, ~100-200 plate px): the plate minus
@@ -82,6 +97,7 @@ void main() {
 const COMMON = `
 uniform sampler2D uAux;
 uniform float uBeta;      // extinction at 550 nm, per metre (3.912 / V)
+uniform float uClear;     // the clear pocket around the viewer, metres (d0)
 uniform vec3 uBreath;     // xy in print uv, z strength
 uniform float uAspect;    // print w / h
 uniform float uTime;
@@ -109,6 +125,8 @@ vec3 tauAt(vec2 uv, vec4 aux) {
   float s = max(sin(radians(aux.b * 90.0)), 0.06);
   // Air in a haze layer that thins with height, along the ray to a tower.
   float L = ${HS.toFixed(1)} / s * (1.0 - exp(-d * s / ${HS.toFixed(1)}));
+  // Less of it near the eye: the swept street, d - d0 ln(1 + d / d0) of d.
+  L *= 1.0 - uClear / d * log(1.0 + d / max(uClear, 1e-3));
   // The sky is looked at through the whole column, by airmass: a thin one
   // overhead, so the zenith stays clear, thickening gradually toward the
   // low sky down the street (1 / cos of the zenith angle, floored).
@@ -737,6 +755,7 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.uniform1i(cu.uAir, 2);
     gl.uniform1i(cu.uDetail, 3);
     gl.uniform1f(cu.uBeta, 3.912 / vis);
+    gl.uniform1f(cu.uClear, clearPocket(fog.x));
     gl.uniform3f(cu.uBreath, bx.x, by.x, breath.x * 0.9);
     gl.uniform1f(cu.uAspect, ASPECT);
     gl.uniform1f(cu.uTime, time);
