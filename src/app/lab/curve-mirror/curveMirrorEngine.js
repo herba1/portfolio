@@ -22,8 +22,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - the frame, back shell, bracket and pole are signed distance fields,
 //    lit by the panorama's irradiance (SH9) and the sun, with soft shadows,
 //    contact grime, rain streaks and sun-bleached paint;
-//  - the face carries a cool acrylic tint, a little waviness, dust and one
-//    thumb smudge, which scatter the sun when it is in the glass;
+//  - the face is second-surface acrylic: a Fresnel-weighted front sheen over
+//    the aluminised back, darkening toward the rim, a little waviness, dust
+//    and one thumb smudge, which scatter the sun when it is in the glass;
 //  - the assembly's shadow falls on the photograph through its point map.
 // The shared film kit develops the result.
 //
@@ -267,7 +268,7 @@ float dustAt(vec2 q) {
   float specks = smoothstep(0.78, 0.95, vnoise(q * 900.0)) * 0.6 + smoothstep(0.7, 0.9, vnoise(q * 2300.0 + 7.0)) * 0.4;
   float film = fbm(q * 9.0) * 0.5 + 0.35 * smoothstep(0.1, -0.4, q.y / A);   // settles low
   float rim = smoothstep(A - 0.08, A, length(q));
-  return clamp(0.25 * film + 0.5 * specks * (0.4 + film) + 0.5 * rim * film, 0.0, 1.0);
+  return clamp(0.25 * film + 0.5 * specks * (0.4 + film) + 0.25 * rim * film, 0.0, 1.0);
 }
 float smudgeAt(vec2 q) {
   vec2 c = vec2(0.17, -0.13);
@@ -295,18 +296,45 @@ vec3 glass(vec3 P, vec3 d, vec3 S) {
     float t = envDist(dir);
     dir = normalize(o + r * t);
   }
-  // footprint of this pixel in the panorama (ray differentials)
+  // footprint of this pixel in the panorama (ray differentials); a little
+  // sharper than the box footprint, so a wire stays one dark hairline
   vec3 dx = dFdx(r), dy = dFdy(r);
   float spread = max(length(dx), length(dy));
-  float lod = log2(max(spread * uEnvW / (2.0 * PI), 1.0));
+  float lod = max(log2(max(spread * uEnvW / (2.0 * PI), 1.0)) - 0.7, 0.0);
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
   vec3 c = env(dir, lod + 2.5 * smudge);
-  // aluminised acrylic: ~85 %, a cool grey-blue cast from the dome
+  // the panorama was shot under cloud: what the aluminium returns of it is
+  // given the photo's own snap (a filmic contrast about mid grey, a touch of
+  // colour), so the glass reads as a mirror, not a print behind a sheet
+  float cl = dot(c, LUMA);
+  c *= pow(max(cl, 1e-4) / 0.32, 0.32);
+  c = max(mix(vec3(dot(c, LUMA)), c, 1.15), 0.0);
+
+  // Second-surface acrylic, n 1.49: the front face reflects F (4 % square
+  // on, rising at grazing), the aluminised back ~88 % of what gets through,
+  // twice through 3 mm of faintly cool acrylic. The longer path at grazing
+  // and the frame's lip darken the rim: the face vignettes toward its edge.
   float cosi = max(dot(-d, Nn), 0.0);
-  float fr = 0.84 + 0.12 * pow(1.0 - cosi, 5.0);
-  vec3 tint = vec3(0.90, 0.95, 1.0);
-  c *= fr * tint;
+  float F = 0.039 + 0.961 * pow(1.0 - cosi, 5.0);
+  float cost = sqrt(1.0 - (1.0 - cosi * cosi) / (1.49 * 1.49));
+  vec3 absorb = exp(-vec3(0.05, 0.035, 0.02) * 2.0 / cost);
+  float rr = length(q.xy) / A;
+  float lip = 1.0 - 0.5 * smoothstep(0.15, 1.0, rr * rr) - 0.22 * smoothstep(0.9, 1.0, rr);
+  vec3 back = c * 0.88 * (1.0 - F) * (1.0 - F) * absorb * lip;
+  // the front face: weathered acrylic, hazed by years of wiper-less rain, so
+  // its own reflection is a soft, Fresnel-weighted sheen of the bright sky
+  // that gathers on the side of the dome turned to it and toward the rim
+  vec3 sheenL = env(r, 6.5);
+  float fr = 0.88 * (1.0 - F) * (1.0 - F) * lip + F;
+  c = back + sheenL * (F * 1.3 + 0.02 * smoothstep(0.2, 1.0, rr)) * (0.45 + 0.55 * smoothstep(-0.3, 0.6, Nn.y));
+  // and the haze's broad lobe of the sun: a soft glow that sits where the
+  // dome turns toward it and slides across the face as it turns
+  vec3 hv = normalize(uSun - d);
+  float nh = max(dot(Nn, hv), 0.0);
+  const float HA2 = 0.035;
+  float lobe = HA2 / (PI * pow(nh * nh * (HA2 - 1.0) + 1.0, 2.0));
+  c += vec3(1.0, 0.97, 0.92) * uSunE * max(dot(Nn, uSun), 0.0) * lobe * F * 0.3;
 
   // the sun in the glass: its disc, never smaller than a pixel, energy kept
   float ang = acos(clamp(dot(r, uSun), -1.0, 1.0));
@@ -320,8 +348,8 @@ vec3 glass(vec3 P, vec3 d, vec3 S) {
   float lit = max(dot(Nn, uSun), 0.0);
   float fwd = exp(-ang / 0.035) * 10.0 + exp(-ang / 0.12) * 1.5 + exp(-ang / 0.4) * 0.25 + 0.03;
   vec3 sky = irradiance(Nn) / PI;
-  vec3 scat = (dust * 0.05 + smudge * 0.08) * sky + (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * fwd * 0.12 * vec3(1.0, 0.97, 0.93);
-  c = c * (1.0 - 0.12 * dust - 0.15 * smudge) + scat;
+  vec3 scat = (dust * 0.03 + smudge * 0.07) * sky + (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * fwd * 0.12 * vec3(1.0, 0.97, 0.93);
+  c = c * (1.0 - 0.1 * dust - 0.15 * smudge) + scat;
   return c;
 }
 
@@ -748,7 +776,10 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
         blueDepth: 0.65,
         whitePoint: 1.2,
         vignette: 0.2,
-        halation: 0.5,
+        halation: 0.22,
+        halationThreshold: 1.4,
+        // wires in the glass take the sky's halo, not a red fringe of their own
+        halationLocal: 1,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         headroom: floatOk && sceneT.ok ? 0.6 : 1.4,
         grainSeed,
