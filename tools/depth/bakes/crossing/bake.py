@@ -12,7 +12,11 @@ Reads <workdir>/labels.npz from labels.py. For every plane, far to near:
   alpha      peeled from the coverages so that compositing the planes back
              to front reproduces the photo; behind the nearer planes each
              plane continues for a band (what a camera swing can uncover),
-             with a soft outer edge.
+             with a soft outer edge. A card holds its own object and nothing
+             else: no soft edge that is only background at partial alpha (a
+             veil that slides over the cards behind as a ghost contour), the
+             wires' alpha measured as how far each pixel is darkened toward
+             the wire, and the town solid inside its outline.
   colour     the photo where the plane is seen; its edge pixels are
              un-mixed from what lies behind them (no sky fringe on a pole);
              hidden parts are inpainted: smooth colour from a push-pull
@@ -171,6 +175,7 @@ img, SKY_G = regrade_sky(img, 1 - A[1])
 
 WIRE_K = 2  # the plane that holds the overhead wires
 TOWN_K = 1  # the far houses: the street's back flat
+BOOM_K = 3  # the barrier boom, its mast and mechanism
 # Big holes with structure behind them (the house wall and fence behind the
 # camellia, the far houses behind the lamp heads) go to LaMa through
 # tools/depth/fill.py when the model is present; shiftfill otherwise.
@@ -187,13 +192,21 @@ def lama_fill(img, pure, need, k):
     src = os.path.join(WORK, f"lama{k}-src.png")
     msk = os.path.join(WORK, f"lama{k}-hole.png")
     out = os.path.join(WORK, f"lama{k}-out.png")
-    # a rerun with the same hole reuses the last fill (LaMa takes minutes)
-    if os.path.exists(out) and os.path.exists(msk) and os.path.getmtime(out) > os.path.getmtime(msk):
+    # Nor, further out, the poles and wires: the barrier mast above the
+    # town's skyline, left in the context, was carried on down behind itself
+    # as a second, ghost pole. They give way to what is round them.
+    ctx = pure | ~dilate(np.isin(lab, (WIRE_K, BOOM_K, 5)) & (lab != k), 3)
+    src_img = np.where(ctx[..., None], img, pushpull(img, ctx.astype(np.float32)))
+    src8 = (np.clip(src_img[:, :, ::-1], 0, 1) * 255 + 0.5).astype(np.uint8)
+    # a rerun with the same hole and context reuses the last fill (LaMa takes
+    # minutes)
+    if os.path.exists(out) and os.path.exists(msk) and os.path.exists(src) and os.path.getmtime(out) > os.path.getmtime(msk):
         old = cv2.imread(msk, cv2.IMREAD_GRAYSCALE)
-        if old is not None and old.shape == hole.shape and np.array_equal(old > 127, hole):
+        old_src = cv2.imread(src)
+        if old is not None and old.shape == hole.shape and np.array_equal(old > 127, hole) and old_src is not None and np.array_equal(old_src, src8):
             f = cv2.imread(out)[:, :, ::-1].astype(np.float32) / 255
             return np.where(pure[..., None], img, f)
-    cv2.imwrite(src, (np.clip(img[:, :, ::-1], 0, 1) * 255 + 0.5).astype(np.uint8))
+    cv2.imwrite(src, src8)
     cv2.imwrite(msk, hole.astype(np.uint8) * 255)
     r = subprocess.run([sys.executable, "-I", FILL, src, msk, out, "--model", LAMA_MODEL], capture_output=True, text=True)
     if r.returncode != 0 or not os.path.exists(out):
@@ -349,6 +362,25 @@ for k in range(K):
         a = np.where((a < 0.6) & ~dilate(keep_own, 3), 0, a).astype(np.float32)
         if k == TOWN_K:
             a_near = np.where((a_near < 0.6) & ~dilate(keep_own, 3), 0, a_near).astype(np.float32)
+    if k == TOWN_K:
+        # The town is the back flat: solid card wherever it is town. Inside
+        # its outline a dip in alpha (a seam where two of the peeled mattes
+        # meet, along a lamp head's or a pole's edge, or a pinhole between
+        # tiles) is not sky seen through the roofs, though it shows as a
+        # faint sky-blue contour once the cards in front move off it. Fill
+        # what the outline encloses, if it is thin or small (a real gap
+        # between the trees stays open).
+        body = a > 0.5
+        nb, ccb, stb, _ = cv2.connectedComponentsWithStats((~body).astype(np.uint8), 4)
+        outer = np.zeros(nb, bool)
+        outer[np.unique(np.concatenate([ccb[0], ccb[-1], ccb[:, 0], ccb[:, -1]]))] = True
+        hole = ~outer[ccb]
+        thin_hole = hole & ~(cv2.morphologyEx(hole.astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))) > 0)
+        hole = thin_hole | (hole & (stb[:, cv2.CC_STAT_AREA] < 1200)[ccb])
+        solid_t = erode(body | hole, 2) & (body | hole)
+        print("  town: pinholes and seams filled", int((solid_t & (a < 0.99)).sum()), "px")
+        a = np.where(solid_t, 1.0, a).astype(np.float32)
+        a_near = np.maximum(a_near, a * solid_t)
     # pure pixels: seen whole, nothing in front
     pure = own & (a > 0.98) & (vis > 0.98)
     pure = erode(pure, 1) if k > 0 else erode(pure, 2)
@@ -415,6 +447,52 @@ for k in range(K):
     if k == 0:
         wdec = (sky & ~erode(sky, 2))[..., None] * 0.0
     col = col * (1 - wdec) + dec * wdec
+    if k == WIRE_K:
+        # A wire is one dark colour, and how much of a pixel it covers is how
+        # far the photo there is darkened from what lies around the wire (sky,
+        # a roof): measure that, in the photo as shot, and carry the wire's
+        # own colour at that share. The colour-unmixed edges held something
+        # else wherever the unmixing missed (faint wires against bright cloud
+        # kept the photo's pale sky, the regrade moved only the sky's share):
+        # background at partial alpha, a pale veil that slides across the
+        # town as the card moves, roof lines and all, and a sunlit tile edge
+        # cut in with the wires that run along it (brighter than its surround:
+        # no wire share at all). What is thick enough to be solid (the pale
+        # cable on the right, the insulators) is kept as it was, and so is the
+        # wire carried on behind the poles (not seen, nothing to measure).
+        wire_px = own_w | (a > 0.02)
+        around_w = (~dilate(wire_px, 2)).astype(np.float32)
+        B0 = cv2.GaussianBlur(pushpull(img0, around_w), (0, 0), 1.0)
+        core = own & (a > 0.7) & (vis > 0.98) & ((B0 - img0).sum(2) > 0.3)
+        C0 = pushpull(img0, core.astype(np.float32))
+        d = C0 - B0
+        dd = (d * d).sum(2)
+        rel = img0 - B0
+        t = (rel * d).sum(2) / np.maximum(dd, 1e-4)
+        # (and the cable and insulators thick enough to be solid stay solid)
+        # against the sky (over the roofs a thick 'wire' is a tile edge), where
+        # its colour is its own: off the line from the sky to the wire (two
+        # wires run close together cut as one band hold sky between them)
+        perp = np.linalg.norm(rel - t[..., None] * d, axis=2)
+        thick = dilate(cv2.morphologyEx((own & (a > 0.6)).astype(np.uint8), cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))) > 0, 2)
+        thick &= (B0[..., 2] - B0[..., 0] > 0.05) & (cv2.GaussianBlur(perp, (0, 0), 1.5) > 0.06)
+        meas = wire_px & (vis > 0.9) & (dd > 0.12 ** 2) & ~thick
+        a_w = np.where(meas, np.clip(t, 0, 1) * dilate(wire_px, 1), a)
+        a_w = np.where(a_w < 0.06, 0, a_w).astype(np.float32)
+        print("  wires: alpha re-measured on", int(meas.sum()), "px, mass", round(float(a.sum()), 0), "->", round(float(a_w.sum()), 0))
+        # at the colour of the darkest wire nearby (a faint wire's own pale
+        # pixels are mostly sky)
+        col = np.where(meas[..., None], C0, col)
+        a = a_w
+    elif k > 0:
+        # A cut-out holds its object only: a soft edge whose colour is just
+        # what lies behind it (sky, cloud, the town) is that background at
+        # partial alpha, a veil and a ghost contour once the card moves.
+        seen = vis > 0.5
+        bg = np.linalg.norm(col - behind, axis=2) < 0.06
+        veil = seen & bg & (a < 0.97) & (a > 0)
+        print("  veil removed", int(veil.sum()), "px")
+        a = np.where(veil, 0, a).astype(np.float32)
     behind = a[..., None] * col + (1 - a[..., None]) * behind
     layers.append((col.astype(np.float16), a))
     med = float(np.median(dep[own])) if own.any() else 0.0
@@ -505,7 +583,6 @@ def extend_wires(a, pr, band=260, span=110, R=12):
     return np.concatenate([a, out], 1)
 
 
-BOOM_K = 3  # the barrier boom, its mast and mechanism
 
 
 def lama_outpaint(c, ae, inner, need, k):

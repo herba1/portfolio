@@ -71,7 +71,10 @@ const PLANES = [
   // window; it throws no shadow on the sky behind it (a cloud is not paper).
   { file: "clouds", rect: [-0.03299, 0.2874, 0.68332, 0.93121], o: 0.53, ends: [true, true, true, true], cast: false },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
-  { file: "p2", rect: [0.25879, 0.03466, 1.22021, 0.92699], o: 0.2 }, // wires
+  // the wires' overscan runs on along each wire's own slope, so past the
+  // photo their matte (for shadows) does not hold its edge: it would draw
+  // each wire on as a horizontal shadow band with a hard lower edge
+  { file: "p2", rect: [0.25879, 0.03466, 1.22021, 0.92552], o: 0.2, hold: false }, // wires
   // the mechanism box is cut by the right edge and ends a few px past
   // it (bake.py): that side is a cut-out end, not overscan to keep covered
   { file: "p3", rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
@@ -170,6 +173,7 @@ uniform sampler2DArray uMattes;  // every plane's alpha, 512 wide
 uniform float uZ[${N}];
 uniform vec2 uHalf[${N}];
 uniform float uCast[${N}];       // 0: this plane throws no shadow
+uniform float uHold[${N}];       // 0: its matte ends at the photo's edge
 uniform vec3 uLight;
 uniform float uShadow;
 uniform float uPrintW;
@@ -248,6 +252,8 @@ void main() {
       float w = max(1.0, max(pen, cocM));
       float lod = log2(w);
       float a = textureLod(uMattes, vec3(uvj, float(j)), lod + 0.5).r;
+      vec2 past = max(-uvj, uvj - 1.0);
+      if (uHold[j] < 0.5) a *= 1.0 - smoothstep(0.0, 0.004, max(past.x, past.y));
       // thin things (wires) blur away instead of veiling the card; past the
       // photo the matte holds its edge, as the overscanned cards run on
       a = smoothstep(0.18, 0.7, a);
@@ -642,6 +648,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     });
     gl.uniform2fv(U.uHalf, halves);
     gl.uniform1fv(U.uCast, new Float32Array(PLANES.map((P) => (P.cast === false ? 0 : 1))));
+    gl.uniform1fv(U.uHold, new Float32Array(PLANES.map((P) => (P.hold === false ? 0 : 1))));
     gl.uniform3f(U.uLight, LIGHT[0], LIGHT[1], LIGHT[2]);
     gl.uniform1f(U.uPrintW, G.printW);
     gl.uniform3f(U.uHazeColor, HAZE[0], HAZE[1], HAZE[2]);

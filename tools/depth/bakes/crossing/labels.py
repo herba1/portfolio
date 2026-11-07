@@ -195,6 +195,62 @@ for i in range(1, n):
 kept = keep[cc]
 lab[(lab == 2) & ~(kept | (near & dilate(kept, 10)))] = 0
 
+# One thing, one card. Pieces of an object cut onto another plane's card
+# slide off it when the planes part and read as ghosts: a second, translucent
+# outline beside the real one.
+# The barrier's grey post (its cone cap, the two cross-arms, the mechanism
+# box and the pipe off the right edge) came out speckled between the town and
+# the boom: it is one piece of hardware, and goes whole onto the boom's card.
+# Inside its outline everything that is not sky, wire or foliage (yellow-green
+# leaves have green above blue; the weathered grey concrete does not).
+foliage = (g > b + 0.03) | ((g > b) & (lum < 0.25))
+post_zone = (band(1451, 638, 1505, 840, 12) | boxmask(1462, 718, 1500, 736) | boxmask(1425, 756, 1500, 786)
+             | boxmask(1418, 784, 1468, 860) | band(1440, 848, 1500, 900, 16))
+post = post_zone & ~foliage & np.isin(lab, (1, 3, 6))
+post = (cv2.morphologyEx(post.astype(np.uint8), cv2.MORPH_CLOSE, disk(2)) > 0) & post_zone & (lab != 0) & (lab != 2)
+n, cc, stats, _ = cv2.connectedComponentsWithStats(post.astype(np.uint8), 8)
+lab[(stats[:, cv2.CC_STAT_AREA] > 400)[cc] & (cc > 0)] = 3
+# and the pale cloud beside it, cut as town, is sky
+lab[(lab == 1) & boxmask(1430, 620, 1500, 748) & ~foliage] = 0
+# Under the old house's eave: its lamp bracket (cut as town) is the house's,
+# the camellia's bare twig climbing past the post (cut as town) is the
+# camellia's, and the dark lip of the soffit (cut as wire, it is long, thin and
+# dark) is the house's. Left on the town and wire cards they hang in the air
+# as stubs off the eave once the house moves forward.
+lab[(lab == 1) & boxmask(398, 828, 432, 853)] = 4
+lab[(lab == 1) & band(394, 930, 426, 876, 3) & (yy < 905 * S) & (lum < 0.45)] = 6
+lab[(lab == 2) & boxmask(420, 812, 480, 837) & dilate(lab == 4, 10)] = 4
+# The far house's upper ridge (its dark capping run) was cut as wire.
+lab[(lab == 2) & boxmask(795, 722, 945, 773)] = 1
+# Up in the sky nothing is far town, low down either: a crumb of town with
+# sky or wire all round it is cloud (or a wire, if long).
+n, cc, stats, _ = cv2.connectedComponentsWithStats((lab == 1).astype(np.uint8), 8)
+for i in range(1, n):
+    x, y, w, h, area = stats[i]
+    if area > 2500:
+        continue
+    x0, y0, x1, y1 = max(0, x - 3), max(0, y - 3), min(W, x + w + 3), min(H, y + h + 3)
+    m = cc[y0:y1, x0:x1] == i
+    ring = lab[y0:y1, x0:x1][dilate(m, 2) & ~m]
+    if ring.size and np.isin(ring, (0, 2)).mean() > 0.6:
+        lab[y0:y1, x0:x1][m] = 2 if max(w, h) > 60 else 0
+# and the other way: specks of sky inside a solid thing (the bright glints
+# between the far ridge's tiles) are that thing, or the card has pinholes the
+# sky shows through once it moves.
+n, cc, stats, _ = cv2.connectedComponentsWithStats((lab == 0).astype(np.uint8), 4)
+for i in range(1, n):
+    x, y, w, h, area = stats[i]
+    if area > 400:
+        continue
+    x0, y0, x1, y1 = max(0, x - 3), max(0, y - 3), min(W, x + w + 3), min(H, y + h + 3)
+    m = cc[y0:y1, x0:x1] == i
+    ring = lab[y0:y1, x0:x1][dilate(m, 2) & ~m]
+    ring = ring[ring != 2]
+    if ring.size:
+        k = np.bincount(ring, minlength=7).argmax()
+        if k not in (0, 2) and (ring == k).mean() > 0.8:
+            lab[y0:y1, x0:x1][m] = k
+
 sky = lab == 0
 wires = lab == 2
 np.savez_compressed(os.path.join(WORK, "labels.npz"), lab=lab, img=img, dep=dep, sky=sky, wires=wires)
