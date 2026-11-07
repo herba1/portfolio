@@ -18,8 +18,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //   - its clouds are where they were at the moment it was taken: the sky is
 //     advected on a cloud deck by a gentle wind (and a little shear), so the
 //     cumulus disagree across the borders while walls and lamp posts do not.
-// Each frame is developed through the shared film kit (summer preset, nudged
-// per print towards integral instant film: lifted, slightly cyan blacks).
+// Each frame is developed through the shared film kit (summer preset, graded
+// for a June sky: a polariser deepens the open blue to cobalt, sunlit cumulus
+// sit just under paper white on a warm shoulder, blacks barely lifted).
 //
 // Drag to shoot prints where you point. Long-press to sweep the table.
 // Query: ?prints=N&seed=S lays down a pre-built joiner of N prints;
@@ -47,19 +48,32 @@ const TABLE = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const FILM_BASE = {
   ...FILM_PRESETS.summer,
   input: "linear",
-  toe: 0.068,
-  toeColor: [0.78, 1, 1.16],
-  contrast: 1.2,
-  shoulder: 0.9,
-  whitePoint: 3.2,
-  saturation: 1.32,
+  toe: 0.04,
+  toeColor: [0.92, 1, 1.06],
+  contrast: 1.4,
+  shoulder: 0.85,
+  whitePoint: 4,
+  saturation: 1.45,
   blueDepth: 1,
-  bloom: 0.24,
+  warmth: 0.4,
+  highlightTint: [1.06, 0.96, 0.92],
+  shadowTint: [0.82, 0.92, 1.12],
+  bloom: 0.18,
   halation: 0.34,
+  halationThreshold: 3,
   softness: 0.36,
-  vignette: 0.5,
+  vignette: 0.2,
   grain: 0.32,
 };
+
+// A polariser on the lens: open blue sky goes deeper and loses its green
+// (cyan to cobalt), white cloud and everything off the sky matte are left alone.
+// Per channel, in scene light, scaled by how blue the sky is.
+const POLARIZER = [0.44, 0.5, 0.78];
+
+// Without float targets the raw view is stored 8-bit; it keeps this much gain
+// (stops) so cloud has headroom there, and the film adds the rest back.
+const RAW8_EV = -1.7;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -86,6 +100,7 @@ uniform float uSrgb;
 const float THMAX = ${THMAX.toFixed(6)};
 const float LO = ${LO.toFixed(1)};
 const float HI = ${HI.toFixed(1)};
+const vec3 POL = vec3(${POLARIZER.map((v) => v.toFixed(3)).join(", ")});
 
 vec2 diskUv(vec3 d) {
   float th = acos(clamp(d.z, -1.0, 1.0));
@@ -117,6 +132,8 @@ void main() {
     float m2 = texture(uMask, uv2).r;
     vec3 sky = mix(fill, moved, smoothstep(0.55, 0.98, m2));
     col = mix(base, sky, m);
+    float blue = smoothstep(0.4, 0.85, (col.b - col.r) / (col.b + 1e-4));
+    col *= mix(vec3(1.0), POL, blue * m);
   }
   col *= uGain;
   if (uSrgb > 0.5) col = pow(clamp(col, 0.0, 1.0), vec3(1.0 / 2.2));
@@ -293,7 +310,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
   const seed0 = Number.isFinite(+q.get("seed")) && q.get("seed") !== null ? +q.get("seed") : 7;
   const qt = q.get("t");
   const freezeT = qt != null && qt !== "" && Number.isFinite(+qt) ? +qt : null;
-  const ev0 = Number.isFinite(+q.get("ev")) && q.get("ev") !== null ? +q.get("ev") : -1.72;
+  const ev0 = Number.isFinite(+q.get("ev")) && q.get("ev") !== null ? +q.get("ev") : -0.5;
   // Any numeric film parameter can be overridden from the query for stills.
   const film0 = { ...FILM_BASE };
   for (const key of Object.keys(FILM_BASE)) {
@@ -521,7 +538,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     gl.uniform1f(u.uHalf, (0.5 * img) / f);
     gl.uniform2f(u.uWind, WIND[0] * p.wind, WIND[1] * p.wind);
     gl.uniform3fv(u.uShear, p.shear);
-    gl.uniform1f(u.uGain, rawLinear ? 1 : 2 ** ev0);
+    gl.uniform1f(u.uGain, rawLinear ? 1 : 2 ** RAW8_EV);
     gl.uniform1f(u.uSrgb, rawLinear ? 0 : 1);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
 
@@ -544,10 +561,10 @@ export async function createJoiner(host, { embedded = false } = {}) {
       {
         ...film0,
         input: rawLinear ? "linear" : "srgb",
-        exposure: rawLinear ? ev : ev - ev0,
-        warmth: 0.06 + p.warm,
-        highlightTint: [0.96 + p.dye, 1, 1.04 - p.dye],
-        shadowTint: [0.9 - p.dye * 0.6, 1, 1.08 + p.dye * 0.6],
+        exposure: rawLinear ? ev : ev - RAW8_EV,
+        warmth: film0.warmth + p.warm,
+        highlightTint: [film0.highlightTint[0] + p.dye, film0.highlightTint[1], film0.highlightTint[2] - p.dye],
+        shadowTint: [film0.shadowTint[0] - p.dye * 0.6, film0.shadowTint[1], film0.shadowTint[2] + p.dye * 0.6],
         grainSize: 1100 / cell,
         grainSeed: p.grain,
       },
