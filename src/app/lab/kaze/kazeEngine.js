@@ -47,7 +47,7 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uPlate;  // the grass, sky unmixed out of it
 uniform sampler2D uSky;    // the sky behind it
-uniform sampler2D uAux;    // r coverage, g lever
+uniform sampler2D uAux;    // r coverage, g lever, b highlight diffusion (sqrt)
 uniform sampler2D uWind;   // GX x GY: bend.xy, wind.xy (m/s)
 uniform float uTime;
 uniform float uCloudT;     // cloud flow clock
@@ -132,9 +132,9 @@ void main() {
   float blue = smoothstep(0.02, 0.15, sky.b - sky.r);
   sky *= mix(vec3(1.0), vec3(0.94, 0.97, 1.0), blue * zen);
   // A print's white is not the sun's: the near-white of the lit cloud and
-  // the sun's disc carry on past paper white, so they glow and scatter.
+  // the sun's disc carry on past paper white, into the shoulder, warm.
   float hl = smoothstep(0.6, 1.0, max(sky.r, max(sky.g, sky.b)));
-  sky *= 1.0 + 0.25 * hl * hl;
+  sky *= 1.0 + vec3(0.3, 0.27, 0.2) * hl * hl;
 
   // The grass a touch cooler, the way Superia keeps greens under a deep sky;
   // its colour is left whole, so the diffusion veil over it bleeds green.
@@ -150,6 +150,13 @@ void main() {
   // thin warm ring: the light bounced back off the base, just past the edge.
   float rim = clamp(4.0 * a * (1.0 - a), 0.0, 1.0);
   col += vec3(1.0, 0.42, 0.16) * 0.16 * glow * rim;
+  // The highlight shoulder's diffusion: only the light above the threshold
+  // (the sun, the lit cloud tops; baked, aux.b) spreads, warm, over the sky
+  // and a little over the blades in front of it, so they hold as dark
+  // silhouettes with the sun bleeding round them. Nothing below it is lifted.
+  float dif = textureLod(uAux, uv, uLod).b;
+  dif *= dif;
+  col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * mix(1.0, 0.35, a);
   if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
 }`;
@@ -434,20 +441,23 @@ export async function createKaze(host) {
       sceneT.tex,
       {
         ...FILM_PRESETS.summer,
-        // Soft, bleeding colour, not a phone's clarity: a wider diffusion
-        // veil and dye-cloud bleed, and a halation threshold low enough that
-        // the cloud tops and the sunlit edges of the blades against them take
-        // a thin warm ring. The sky's depth is in the bake, so the stock's
-        // blue deepening is kept light.
-        bloom: 0.24,
-        softness: 0.7,
+        // No global veil: the diffusion is the scene's own thresholded
+        // highlight shoulder (aux.b), so the blacks stay down and the grass
+        // keeps its colour. A little optical softness and dye-cloud bleed,
+        // and a halation threshold low enough that the cloud tops and the
+        // sunlit edges of the blades against them take a thin warm ring.
+        // The sky's depth is in the bake, so the stock's blue deepening is
+        // kept light.
+        bloom: 0,
+        softness: 0.45,
         halation: 0.6,
         halationThreshold: 0.6,
         halationColor: [1, 0.32, 0.12],
         halationLocal: 0.4,
-        contrast: 1.12,
+        contrast: 1.14,
+        toe: 0.022,
         blueDepth: 0.25,
-        saturation: 1.0,
+        saturation: 1.1,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         grainSeed,
       },

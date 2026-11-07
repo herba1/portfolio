@@ -45,7 +45,7 @@
       "file": "https://upload.wikimedia.org/wikipedia/commons/6/62/Tall_grass_against_partly_cloudy_skies_on_the_Tally_Lake_Ranger_District_%2850744528757%29.jpg",
       "author": "Forest Service, Northern Region (USDA), via Wikimedia Commons",
       "licence": "Public domain",
-      "note": "Tall grass against partly cloudy skies, Tally Lake Ranger District, Flathead National Forest, Montana: camera at blade height pitched up. Display P3 converted to sRGB, worked at 2400x1600. Sky matte by tools/depth/segment.py sky (colour unmixing for thin blades), firmed by colour (sunlit brome is greener than the sky behind it) and darkness; grass colour unmixed against a push-pull sky so a F + (1 - a) S recomposes the photograph. Bake: tools/depth/bakes/kaze/bake.py."
+      "note": "Tall grass against partly cloudy skies, Tally Lake Ranger District, Flathead National Forest, Montana: camera at blade height pitched up. Display P3 converted to sRGB, worked at 2400x1600. Sky matte by tools/depth/segment.py sky (colour unmixing for thin blades), firmed by colour (sunlit brome is greener than the sky behind it) and darkness, and by a dark-object prior (a thin line clearly darker or greener than the sky inpainted behind it by a grey closing is all blade, so the brome crossing the sun stands solid); the sky behind thin grass is that closing, so the cloud texture runs on round the sun, which rolls off to warm white with its diffusion baked above a threshold; grass colour unmixed against a push-pull sky so a F + (1 - a) S recomposes the photograph. Bake: tools/depth/bakes/kaze/bake.py."
     },
     "https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/ns.pdf",
     "https://alex.vlachos.com/graphics/Vlachos-SIGGRAPH10-WaterFlow.pdf",

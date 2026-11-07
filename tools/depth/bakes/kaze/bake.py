@@ -24,7 +24,10 @@ Outputs (public/lab/kaze/):
                   G lever, how far that pixel swings when the stalk bends:
                   grows with height in the frame (the roots are below it) and
                   with how open the sky is around it (lone stalks and seed heads
-                  swing, the dense mat at the bottom barely moves), B 0
+                  swing, the dense mat at the bottom barely moves), B the
+                  highlight shoulder's diffusion (sqrt): only the light above a
+                  threshold (the sun, the lit cloud tops) spread wide, so the
+                  runtime glows the sun without a veil over the whole frame
 
 The grade. The source is a phone photo with clarity and sharpening on it: a
 dark teal sky, crunchy cloud, gritty olive grass. The bake takes the local
@@ -86,6 +89,7 @@ yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 box = kit.smoothstep(0.77 * W, 0.8 * W, xx) * (1 - kit.smoothstep(0.235 * H, 0.255 * H, yy))
 s = np.maximum(s, box)
 a = 1 - s
+aseg = a.copy()
 L = lin(rgb)
 
 # ---- the matte, firmed by what the photo says ----
@@ -120,20 +124,89 @@ asun = kit.smoothstep(0.03, 0.1, warm) * (0.4 + 0.6 * bs) + 0.6 * bs * kit.smoot
 asun = kit.blur(np.clip(asun, 0, 1), 0.6)
 a = np.maximum(a, asun * sun)
 
+# ---- the sky behind, as the photograph has it ----
+# A grey closing lifts every thin dark thing (blade, awn, seed head) out of
+# the photo and keeps the cloud's own texture round it: the sky that was
+# behind them, not a smooth blot. Where the closing still leaves something
+# greener or darker than the smooth fill (a blade too broad for it), the
+# smooth fill stands.
+YS0 = np.maximum(kit.luma(S0), 1e-3)
+halo = 1 - kit.smoothstep(0.03 * W, 0.22 * W, rr)
+hz = (1 - kit.smoothstep(0.2 * W, 0.28 * W, rr))[..., None]
+# (in the sun's halo the sky is near white, so a closing that went grey
+# behind a tuft is caught sooner)
+dlo, dhi = 0.1 - 0.06 * hz[..., 0], 0.25 - 0.13 * hz[..., 0]
+
+
+def unsky(C):
+    """Where a closing still holds grass: greener or darker than the fill."""
+    Ce = enc(C)
+    m = np.maximum(
+        kit.smoothstep(0.02, 0.06, (Ce[..., 1] - Ce[..., 2]) - (S0e[..., 1] - S0e[..., 2])),
+        np.clip(((YS0 - kit.luma(C)) / YS0 - dlo) / (dhi - dlo), 0, 1),
+    )
+    return kit.blur(kit.dilate(m > 0.5, 3).astype(np.float32), 2)[..., None]
+
+
+Cl = cv2.morphologyEx(L, cv2.MORPH_CLOSE, kit.disk(7))
+bad = unsky(Cl)
+# (in the sun's halo, a wider closing first: the seed heads there are broad,
+# and the smooth fill would set grey-blue blots in the lit cloud)
+Cl2 = cv2.morphologyEx(L, cv2.MORPH_CLOSE, kit.disk(15))
+w2 = hz * (1 - unsky(Cl2))
+B = Cl * (1 - bad) + (Cl2 * w2 + S0 * (1 - w2)) * bad
+
+# The dark-object prior. Against a near-white sky the unmixing reads a dark
+# blade as half sky (it is half as bright as the cloud behind it), so the
+# brome and seed heads over the sun and the lit cloud came out as ghosts.
+# A blade is opaque: where a pixel the matte already calls grass is clearly
+# darker, or clearly greener, than the sky inpainted behind it, it is all
+# blade. The ramps leave the outermost edge pixel its share.
+YB = np.maximum(kit.luma(B), 1e-3)
+Be = enc(B)
+dk = (YB - kit.luma(L)) / YB
+gr = gb - (Be[..., 1] - Be[..., 2])
+# (and the darkness has to be a blade's: thin, a line darker than what is on
+# either side of it, not the grey shading of a cloud that the segmenter
+# smeared round a stalk)
+YL = kit.luma(L)
+Yc = cv2.morphologyEx(YL, cv2.MORPH_CLOSE, kit.disk(5))
+dks = (Yc - YL) / np.maximum(Yc, 1e-3)
+force = np.maximum(kit.smoothstep(0.07, 0.18, dk) * kit.smoothstep(0.05, 0.12, dks), kit.smoothstep(0.03, 0.08, gr))
+# (only on what is already grass by the segmenter, by colour or in the sun's
+# flare: never a dark cell of cloud the darkness test alone flagged)
+# a stalk, not a speck: the segmenter's lone flecks in a cloud stay as they were
+seen = ((aseg > 0.3) | (acol > 0.5)).astype(np.uint8)
+n, lab, stats, _ = cv2.connectedComponentsWithStats(seen, connectivity=8)
+big = (stats[:, cv2.CC_STAT_AREA] >= 400) & (np.arange(n) > 0)
+grassy = big[lab] | (asun * sun > 0.12)
+force = force * kit.dilate(grassy, 1) * (1 - box)
+a = np.maximum(a, force)
+
 # ---- the sky: only where it is surely open, filled behind everything else ----
 # (no unmixed remainder: that is what drew the blades' ghosts into the sky)
 # (in the sun's flare, the faint ends of the blades as well)
 sure = kit.erode((a < 0.04) & ~kit.dilate((bh > 0.02) & (sun > 0.05), 2), 2).astype(np.float32)
-S = kit.pushpull(L, sure)
-# the fill behind the grass is soft haze and cloud, not blotches
+P = kit.pushpull(L, sure)
 fillk = 1 - kit.blur(sure, 3)
-S = S * (1 - fillk[..., None]) + kit.blur(S, 9) * fillk[..., None]
-# and the photo's own sky comes back in only where enough of it is open: a
-# lone gap of cloud between blades, set in the soft fill, read as a sparkle
-# (and feathered in, so a gap does not come back as a hard-edged blot)
-dens = kit.smoothstep(0.2, 0.6, kit.blur(sure, 10))
-wsky = np.minimum(sure, kit.blur(sure * dens, 2.5))[..., None]
+P = P * (1 - fillk[..., None]) + kit.blur(P, 9) * fillk[..., None]
+# Behind thin grass the sky is the closing's (the cloud texture runs on
+# behind the blade); behind a mass too broad for it, the soft fill.
+thick = kit.blur(kit.dilate(kit.erode(a > 0.5, 7), 9).astype(np.float32), 4)[..., None]
+Bs = cv2.morphologyEx(B, cv2.MORPH_OPEN, kit.disk(1))
+S = kit.blur(Bs, 1.2) * (1 - thick) + P * thick
+# and the photo's own sky comes back in wherever it is surely open
+# (feathered in, so a gap does not come back as a hard-edged blot)
+wsky = np.minimum(sure, kit.blur(sure, 1.5))[..., None]
 S = L * wsky + S * (1 - wsky)
+# In the sun's halo, any seed or awn too faint for the matte would hang
+# still in the glare as a dark speck: the closing's sky takes its place.
+spk = kit.smoothstep(0.02, 0.07, dk) * hz[..., 0]
+spk = kit.blur(spk.astype(np.float32), 1.0)[..., None]
+S = S * (1 - spk) + kit.blur(Bs, 1.2) * spk
+# and a backlit hair of a stalk the matte missed (a thin line brighter than
+# the sky) is lifted out by a small opening
+S = S * (1 - hz) + cv2.morphologyEx(S, cv2.MORPH_OPEN, kit.disk(2)) * hz
 # the last specks of seed and awn the matte let through are cloud, not grass
 # (they would hang still while the grass moves): a small closing lifts them
 S = cv2.morphologyEx(S, cv2.MORPH_CLOSE, kit.disk(2))
@@ -145,8 +218,12 @@ wF = kit.smoothstep(0.55, 0.95, a)
 F = kit.pushpull(Fu, wF)
 F = np.where(a[..., None] > 0.95, L, F)
 # Blades crossing the sun are backlit: darker than the flare, warm.
-sunb = (sun * kit.smoothstep(0.1, 0.4, asun))[..., None]
-F = F * (1 - sunb) + np.minimum(F, L * 0.42 * np.array([1.0, 0.9, 0.62], np.float32)) * sunb
+# The flare's veil is taken back off them, most at the disc, so the brome
+# and seed heads crossing the sun stand as solid dark silhouettes (the film
+# pass's threshold diffusion then bleeds a little of the sun back over them).
+sunb = np.maximum(sun * kit.smoothstep(0.1, 0.4, asun), halo * force)[..., None]
+deep = (0.22 + 0.26 * kit.smoothstep(0.02 * W, 0.2 * W, rr))[..., None]
+F = F * (1 - sunb) + np.minimum(F, L * deep * np.array([1.0, 0.9, 0.72], np.float32)) * sunb
 
 # Re-solve the coverage against the decontaminated grass and the clean sky,
 # so a F + (1 - a) S still recomposes the photograph wherever the colours
@@ -160,6 +237,20 @@ an = proj * conf + a * (1 - conf)
 # colour as a blade does not become grass), and the sun's blades as found
 an = np.minimum(an, a + 0.1)
 an = np.where(sunb[..., 0] > 0.05, np.maximum(an, a * sunb[..., 0]), an)
+# and what the dark-object prior called solid stays solid
+an = np.maximum(an, force)
+# The converse: a bright, neutral pixel with no line in it (lit cloud) that
+# the segmenter smeared round a stalk is sky, whatever the matte said, or it
+# rides along with the stalk as a pale blot when the wind takes it.
+cloudish = kit.smoothstep(0.35, 0.55, YL) * (1 - kit.smoothstep(0.04, 0.1, dks)) * (1 - kit.smoothstep(0.02, 0.06, gr))
+cloudish = cloudish * (1 - force) * (1 - hz[..., 0])
+an = an * (1 - 0.9 * cloudish)
+# In the glare, the loose flecks the flare detector found (a few pixels of
+# seed or awn on their own) read as dust on the print, not as grass: they go
+# to the sky, where the closing has already lifted them out.
+n, lab, stats, _ = cv2.connectedComponentsWithStats((an > 0.3).astype(np.uint8), connectivity=8)
+fleck = ((stats[:, cv2.CC_STAT_AREA] < 60) & (np.arange(n) > 0))[lab]
+an = np.where(fleck & (hz[..., 0] > 0.5), 0, an)
 # a whisker of erosion: the outermost, faintest edge goes to the sky
 an = np.clip((an - 0.03) / 0.97, 0, 1)
 a = an
@@ -184,6 +275,15 @@ blue = rgb_of(hb, sb, vb)
 shade = 1 - kit.smoothstep(0.55, 0.96, v)
 cloud = rgb_of(np.full_like(v, 207), 0.3 * shade, v + 0.06 * shade * (1 - v))
 Se = cloud * (1 - wb[..., None]) + blue * wb[..., None]
+# The sun's quadrant: the cloud and the pale sky in its halo keep their own
+# texture and take its colour, rolling off through warm white (#FFF3DE) to a
+# white-hot disc, instead of the grade's neutral cloud white.
+core = 1 - kit.smoothstep(0.012 * W, 0.045 * W, rr)
+hot = kit.smoothstep(0.45, 0.95, kit.luma(Se)) * (1 - kit.smoothstep(0.02 * W, 0.24 * W, rr))
+tint = np.array([1.0, 0.93, 0.8], np.float32) * (1 - core[..., None]) + np.array([1.0, 0.99, 0.965], np.float32) * core[..., None]
+warmS = Se * tint
+warmS = warmS + (1 - warmS) * (0.5 * core)[..., None] * tint
+Se = Se * (1 - hot[..., None]) + warmS * hot[..., None]
 S = lin(Se)
 # Halation, the thin part of it: light through the emulsion bounced back off
 # the base comes up as a fine warm ring just outside the lit cloud tops. (The
@@ -215,8 +315,17 @@ lever = kit.blur(lever.astype(np.float32), 10)
 
 Image.fromarray((enc(F) * 255 + 0.5).astype(np.uint8)).save(os.path.join(out, "plate.webp"), quality=90, method=6)
 Image.fromarray((enc(S) * 255 + 0.5).astype(np.uint8)).save(os.path.join(out, "sky.webp"), quality=88, method=6)
-aux = np.dstack([a, lever, np.zeros_like(a)])
+# The highlight shoulder's diffusion. Only light above a threshold scatters
+# (a Pro-Mist over a summer sun, not a veil over everything): what the open
+# sky lets through of the sun and the lit cloud tops, the disc itself carried
+# far past paper white, spread at three widths. The runtime adds it warm, so
+# the blacks and the grass keep their depth away from the light.
+glowsrc = np.maximum(kit.luma(S) - 0.62, 0) * (1 - a) * (1 + 14 * core)
+glow = 0.3 * kit.blur(glowsrc, 0.006 * W) + 0.35 * kit.blur(glowsrc, 0.025 * W) + 0.35 * kit.blur(glowsrc, 0.07 * W)
+gmax = float(glow.max())
+glow = np.sqrt(np.clip(glow / gmax, 0, 1))
+aux = np.dstack([a, lever, glow])
 Image.fromarray((np.clip(aux, 0, 1) * 255 + 0.5).astype(np.uint8)).save(os.path.join(out, "aux.webp"), lossless=True, method=6)
-print("sun at %d,%d; sky %.1f%%, lever mean %.2f" % (sx, sy, s.mean() * 100, lever.mean()))
+print("sun at %d,%d; sky %.1f%%, lever mean %.2f, glow max %.3f" % (sx, sy, s.mean() * 100, lever.mean(), gmax))
 for f in sorted(os.listdir(out)):
     print("  %-12s %7.1f KB" % (f, os.path.getsize(os.path.join(out, f)) / 1024))
