@@ -19,7 +19,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    radius of curvature (a real acrylic road mirror's), the view ray
 //    reflected off it, corrected for parallax across the face with the
 //    panorama's distances, filtered by its own spread (ray differentials);
-//  - the frame, back shell, bracket and pole are signed distance fields,
+//  - the frame (a deep band with a visor over its top), back shell, bracket
+//    and pole are signed distance fields,
 //    lit by the panorama's irradiance (SH9) and the sun, with soft shadows;
 //    their paint is a decade-faded vermilion, chalked, chipped to dark steel,
 //    streaked by rain and dirtied where the AO says it is sheltered, its fine
@@ -27,9 +28,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    breaks up the sun's anisotropic streak down the pole and along the rim;
 //  - the object takes the plate's grain at the photo's pixel pitch, so the
 //    film develops it and the photograph alike;
-//  - the face is second-surface acrylic: a Fresnel-weighted front sheen over
-//    the aluminised back, darkening toward the rim, a little waviness, dust
-//    and one thumb smudge, which scatter the sun when it is in the glass;
+//  - the face is a second-surface acrylic dome standing proud of the frame
+//    on its own wall: a Schlick sheen of cool sky that climbs toward the rim,
+//    the zenith's broad gloss over the upper bulge, the hood's underside
+//    reflected at its crown and its shadow on it, a dark contact band where
+//    the lip holds it, a little waviness, dust and one thumb smudge, which
+//    scatter the sun when it is in the glass;
 //  - the assembly's shadow falls on the photograph through its point map.
 // The shared film kit develops the result.
 //
@@ -48,13 +52,25 @@ const RC = 1.6; // radius of curvature
 // yoke that holds the hinge knuckle bolted to the shell's back. The head
 // pitches about that knuckle and turns (yaw) with the arm round the pole, so
 // the pole stands ARM behind the shell's back and stops below the hinge: the
-// lower rim, swinging back as the head tips down, clears it (by 5 cm at the
-// stop, still 1 cm at the rubber band's far limit), and nothing ever passes
-// through the glass.
+// lower rim, swinging back as the head tips down, clears it (the frame's back
+// edge by 7 cm at the stop, still 2 cm at the rubber band's far limit), and
+// nothing ever passes through the glass.
 const HINGE = 0.18; // hinge axis behind the face apex (just behind the shell's back)
 const ARM = 0.3; // pole axis behind the hinge, horizontally
 const POLE_DROP = 0.05; // pole top below the hinge
 const POLE_R = 0.0381; // 76.3 mm pipe
+// The head's profile, as the real ones are pressed: the acrylic dome's sag
+// at its rim, then a short straight wall of the same sheet standing PROUD of
+// the frame's front; the frame a deep steel band (FRAME_D deep, FRAME_W
+// across its front face) closed by a shallow back shell; and a visor (フード)
+// over the top, HOOD long at its crown, swept back to nothing HOOD_ARC
+// degrees either side.
+const SAG = RC - Math.sqrt(RC * RC - A * A);
+const PROUD = 0.012;
+const FRAME_D = 0.07;
+const FRAME_W = 0.036;
+const HOOD = 0.11;
+const HOOD_ARC = 80;
 // rest aim (relative to facing the lens) and limits, degrees
 const REST = [20, -15];
 const YAW_LIM = [-78, 78];
@@ -110,6 +126,13 @@ const float HINGE = ${HINGE.toFixed(4)};
 const float ARM = ${ARM.toFixed(4)};
 const float POLE_DROP = ${POLE_DROP.toFixed(4)};
 const float POLE_R = ${POLE_R.toFixed(4)};
+const float SAG = ${SAG.toFixed(5)};
+const float ZF = ${(-SAG - PROUD).toFixed(5)};  // the frame's front face, face-local z
+const float FRAME_D = ${FRAME_D.toFixed(4)};
+const float FRAME_W = ${FRAME_W.toFixed(4)};
+const float HOOD = ${HOOD.toFixed(4)};
+const float HOOD_C0 = ${Math.cos(HOOD_ARC * DEG).toFixed(5)};
+const float HOOD_C1 = ${Math.cos(HOOD_ARC * 0.45 * DEG).toFixed(5)};
 const float PI = 3.14159265;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
@@ -170,16 +193,33 @@ float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
 }
 vec3 toLocal(vec3 p) { vec3 d = p - uFace; return vec3(dot(d, uX), dot(d, uU), dot(d, uN)); }
 
-// part ids: 1 frame ring, 2 back shell, 3 bracket, 4 pole, 5 clamp, 6 face
-vec2 sdScene(vec3 p) {
+// The frame and its visor, face-local. The frame is a revolved section: a
+// band FRAME_D deep and FRAME_W across, its inner edge tucked 2 mm over the
+// acrylic's wall. The visor is the band's outer skin carried forward, a 5 mm
+// sheet, HOOD long over the crown and swept back to the frame at HOOD_ARC.
+float sdHead(vec3 q) {
+  float rho = length(q.xy);
+  vec2 sec = vec2(rho - (A + 0.5 * (FRAME_W - 0.002)), q.z - (ZF - 0.5 * FRAME_D));
+  float frame = sdRoundBox2(sec, vec2(0.5 * (FRAME_W + 0.002), 0.5 * FRAME_D), 0.007);
+  float cphi = q.y / max(rho, 1e-4);
+  float reach = HOOD * smoothstep(HOOD_C0, HOOD_C1, cphi);
+  float hood = max(abs(rho - (A + FRAME_W - 0.0025)) - 0.0025, max(q.z - ZF - reach, ZF - 0.02 - q.z));
+  return min(frame, hood * 0.85 - 0.0006);
+}
+
+// part ids: 1 frame band and visor, 2 back shell, 3 bracket, 4 pole, 5 clamp, 6 face
+// nf: the distance to everything but the acrylic
+vec2 sdSceneNF(vec3 p, out float nf) {
   vec3 q = toLocal(p);
   float rho = length(q.xy);
-  // frame ring: a revolved rounded section hugging the acrylic's edge
-  float ring = sdRoundBox2(vec2(rho - (A + 0.02), q.z + 0.06), vec2(0.026, 0.028), 0.013);
-  // the acrylic, as a solid (its true surface is traced exactly)
-  float face = max(rho - A, max(q.z - (RC - sqrt(max(RC * RC - rho * rho, 0.0))) * -1.0, -q.z - 0.07));
-  // back shell: half an ellipsoid
-  float shell = max(sdEllipsoid(q - vec3(0.0, 0.0, -0.075), vec3(A + 0.012, A + 0.012, 0.085)), q.z + 0.075);
+  // frame band and visor
+  float ring = sdHead(q);
+  // the acrylic, as a solid (its true surface is traced exactly): the dome,
+  // and below its rim the sheet's straight wall, PROUD of the frame's face
+  float face = max(rho - A, max(q.z - (RC - sqrt(max(RC * RC - rho * rho, 0.0))) * -1.0, ZF - 0.006 - q.z));
+  // back shell: a shallow half ellipsoid closing the band
+  float zb = ZF - FRAME_D + 0.01;
+  float shell = max(sdEllipsoid(q - vec3(0.0, 0.0, zb), vec3(A + FRAME_W - 0.004, A + FRAME_W - 0.004, 0.045)), q.z - zb);
   // the mounting plate bolted to the shell's back, under the knuckle
   shell = min(shell, max(rho - 0.1, abs(q.z + HINGE - 0.0185) - 0.0045) - 0.002);
   // the bracket, in the arm's frame (s toward the head, w across, y up from
@@ -201,9 +241,11 @@ vec2 sdScene(vec3 p) {
   if (arm < r.x) r = vec2(arm, 3.0);
   if (pole < r.x) r = vec2(pole, 4.0);
   if (clampB < r.x) r = vec2(clampB, 5.0);
+  nf = r.x;
   if (face < r.x) r = vec2(face, 6.0);
   return r;
 }
+vec2 sdScene(vec3 p) { float nf; return sdSceneNF(p, nf); }
 float sdf(vec3 p) { return sdScene(p).x; }
 vec3 sdNormal(vec3 p) {
   const vec2 k = vec2(1.0, -1.0);
@@ -331,7 +373,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   // two centimetres, with a rust-brown rim where it lifts; most at exposed
   // edges (the frame's outer lip, the band) and low on the pole where things
   // hit it, never on a sheltered face.
-  float edge = id == 1.0 ? smoothstep(0.3, 0.9, abs(dot(n, uN))) * 0.3 + smoothstep(A + 0.03, A + 0.045, length(q.xy)) : 0.0;
+  float edge = id == 1.0 ? smoothstep(0.3, 0.9, abs(dot(n, uN))) * 0.3 + smoothstep(A + FRAME_W - 0.008, A + FRAME_W, length(q.xy)) : 0.0;
   float chipBias = id == 4.0 ? 0.25 * smoothstep(1.4, 0.0, p.y - uGround) + 0.12 : id == 5.0 ? 0.4 : id == 3.0 ? 0.3 : id == 1.0 ? 0.06 + 0.16 * edge : 0.08;
   vec2 cw = wc * 48.0;
   cw += vec2(fbm(cw * 0.7 + 3.1), fbm(cw * 0.7 + 8.4)) * 1.4;
@@ -361,6 +403,14 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 Es = irradiance(normalize(n + vec3(0.0, 1.1, 0.0)));
   vec3 Esky = Es * (dot(Ei, LUMA) / max(dot(Es, LUMA), 1e-4));
   vec3 amb = mix(Ei, Esky, 0.3) * occ;
+  // under the visor the paint faces the dome, and the dome throws the sky
+  // back up into it: the hood's underside is the frame's colour in shade,
+  // not a black slot
+  if (id == 1.0) {
+    vec3 rad = normalize(uX * q.x + uU * q.y + vec3(1e-5));
+    float inner = smoothstep(0.2, -0.7, dot(n, rad)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
+    amb += irradiance(uN) * vec3(0.9, 1.0, 1.08) * 0.45 * inner;
+  }
   vec3 sunC = vec3(1.0, 0.96, 0.88);
   vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
 
@@ -432,12 +482,24 @@ float smudgeAt(vec2 q) {
   return clamp((oval * ridges + wipe) * (0.7 + 0.6 * fbm(q * 60.0)), 0.0, 1.0);
 }
 
-vec3 glass(vec3 P, vec3 d, vec3 S) {
-  vec3 Nn = normalize(P - S);
+// The visor's underside and the frame, as the glass sees them: the same
+// faded, grimed paint in shade, lit by what reaches under the hood: the
+// ground's bounce, and the sky the dome itself throws back up into it
+vec3 headSeen(vec3 nl) {
+  vec3 n = normalize(uX * nl.x + uU * nl.y + uN * nl.z);
+  vec3 alb = vec3(0.4, 0.15, 0.075);
+  vec3 E = irradiance(n) * 0.6 + irradiance(uN) * vec3(0.9, 1.0, 1.08) * 0.45;
+  return alb * (E + vec3(1.0, 0.96, 0.88) * uSunE * max(dot(n, uSun), 0.0) * 0.5) / PI;
+}
+
+// spread: the angular footprint of a pixel in the reflection; aa: of the face
+// in metres; both taken in main, where every pixel of the quad runs them
+vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
+  vec3 Ng = normalize(P - S);
   vec3 q = toLocal(P);
   // acrylic is thermoformed, never perfect: a slow waviness of the normal
   vec2 w = vec2(sin(q.x * 31.0 + q.y * 7.0) + 0.6 * sin(q.y * 47.0 - q.x * 13.0), sin(q.y * 29.0 - q.x * 11.0) + 0.6 * sin(q.x * 53.0 + q.y * 5.0));
-  Nn = normalize(Nn + (uX * w.x + uU * w.y) * 0.0009);
+  vec3 Nn = normalize(Ng + (uX * w.x + uU * w.y) * 0.0009);
   vec3 r = reflect(d, Nn);
   // parallax: the panorama is centred on the mirror at rest, the face is 0.8 m wide
   vec3 o = P - uM;
@@ -448,8 +510,6 @@ vec3 glass(vec3 P, vec3 d, vec3 S) {
   }
   // footprint of this pixel in the panorama (ray differentials); a little
   // sharper than the box footprint, so a wire stays one dark hairline
-  vec3 dx = dFdx(r), dy = dFdy(r);
-  float spread = max(length(dx), length(dy));
   float lod = max(log2(max(spread * uEnvW / (2.0 * PI), 1.0)) - 0.7, 0.0);
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
@@ -461,30 +521,111 @@ vec3 glass(vec3 P, vec3 d, vec3 S) {
   c *= pow(max(cl, 1e-4) / 0.32, 0.32);
   c = max(mix(vec3(dot(c, LUMA)), c, 1.15), 0.0);
 
-  // Second-surface acrylic, n 1.49: the front face reflects F (4 % square
-  // on, rising at grazing), the aluminised back ~88 % of what gets through,
-  // twice through 3 mm of faintly cool acrylic. The longer path at grazing
-  // and the frame's lip darken the rim: the face vignettes toward its edge.
+  // The mirror sees its own head. A reflected ray that runs up under the
+  // visor (or, from the very rim, back across the frame's face) meets paint,
+  // not sky: traced against the frame and hood, anti-aliased by its closest
+  // pass against this pixel's spread, so the crown of the reflection carries
+  // the hood's dark underside, as every real one does.
+  vec3 rl = vec3(dot(r, uX), dot(r, uU), dot(r, uN));
+  float th = 0.003, bestA = 1e9, bestT = th;
+  float sp = max(spread, 2e-4);
+  bool hh = false;
+  for (int i = 0; i < 40; i++) {
+    float h = sdHead(q + rl * th);
+    if (h / th < bestA) { bestA = h / th; bestT = th; }
+    if (h < 0.25 * sp * th) { hh = true; break; }
+    th += max(h, 0.0005);
+    if (th > 0.32) break;
+  }
+  if (!hh) th = bestT;
+  float hoodC = hh ? 1.0 : 1.0 - smoothstep(0.25 * sp, 1.55 * sp, bestA);
+  if (hoodC > 0.0) {
+    vec3 xh = q + rl * th;
+    const vec2 k = vec2(1.0, -1.0);
+    const float e = 0.0008;
+    vec3 nl = normalize(k.xyy * sdHead(xh + k.xyy * e) + k.yyx * sdHead(xh + k.yyx * e) + k.yxy * sdHead(xh + k.yxy * e) + k.xxx * sdHead(xh + k.xxx * e));
+    c = mix(c, headSeen(nl), hoodC);
+  }
+
+  // How much of the sun reaches this point of the face: the visor and the
+  // frame's lip throw their shadow onto the top of the dome.
+  float lit = max(dot(Nn, uSun), 0.0);
+  float sunVis = lit > 0.0 ? softShadow(P + Ng * 0.003, uSun, 0.006, 0.6, 24.0) : 0.0;
+
+  // The lip. Where the dome meets the frame the sheet turns into its wall,
+  // the aluminising stops and the gasket holds it: a dark contact band 3 mm
+  // wide; and inside it the frame and visor take sky from the glass, a soft
+  // occlusion over the outer centimetres, deepest under the hood.
+  float rq = length(q.xy);
+  float rr = rq / A;
+  float edgeM = A - rq;
+  float topW = smoothstep(-0.3, 0.75, q.y / A);
+  float cw = max(0.003, 1.2 * aa);
+  float contact = mix(0.2, 1.0, smoothstep(cw * 0.4, cw + aa, edgeM));
+  float lipAO = 1.0 - (0.14 + 0.3 * topW) * exp(-edgeM / 0.016);
+
+  // Second-surface acrylic, n 1.49: the aluminised back returns ~88 % of
+  // what gets through the front, twice through 3 mm of faintly cool acrylic,
+  // a little dimmer toward the rim where the path through the sheet is longer.
   float cosi = max(dot(-d, Nn), 0.0);
   float F = 0.039 + 0.961 * pow(1.0 - cosi, 5.0);
   float cost = sqrt(1.0 - (1.0 - cosi * cosi) / (1.49 * 1.49));
   vec3 absorb = exp(-vec3(0.05, 0.035, 0.02) * 2.0 / cost);
-  float rr = length(q.xy) / A;
-  float lip = 1.0 - 0.5 * smoothstep(0.15, 1.0, rr * rr) - 0.22 * smoothstep(0.9, 1.0, rr);
-  vec3 back = c * 0.88 * (1.0 - F) * (1.0 - F) * absorb * lip;
-  // the front face: weathered acrylic, hazed by years of wiper-less rain, so
-  // its own reflection is a soft, Fresnel-weighted sheen of the bright sky
-  // that gathers on the side of the dome turned to it and toward the rim
-  vec3 sheenL = env(r, 6.5);
-  float fr = 0.88 * (1.0 - F) * (1.0 - F) * lip + F;
-  c = back + sheenL * (F * 1.3 + 0.02 * smoothstep(0.2, 1.0, rr)) * (0.45 + 0.55 * smoothstep(-0.3, 0.6, Nn.y));
+  float vig = 1.0 - 0.16 * smoothstep(0.3, 1.0, rr * rr);
+  vec3 back = c * 0.88 * (1.0 - F) * (1.0 - F) * absorb * vig * mix(1.0, lipAO, 0.5);
+
+  // The front face is a dome, and it has to read as one. Its own reflection
+  // is Schlick-weighted on the dome's curvature: the face's 14 degrees of
+  // tilt at the rim, read three times over (the weathered surface's haze
+  // spreads the grazing lobe inward), so the reflectance climbs toward the
+  // rim, most on the side turned away from the eye, as a faint, cool sheen
+  // of the sky over the image, the brightening a curved sheet has and a
+  // flat print does not.
+  vec3 tilt = Ng - uN * dot(Ng, uN);
+  vec3 Nb = normalize(uN + tilt * 3.0);
+  float cb = max(dot(-d, Nb), 0.0);
+  float Fb = 0.04 + 0.96 * pow(1.0 - cb, 5.0);
+  vec3 skyC = irradiance(normalize(Nb + vec3(0.0, 0.8, 0.0))) / PI * vec3(0.9, 1.0, 1.1);
+  vec3 sheenL = mix(env(r, 6.5), skyC, 0.45);
+  float rimF = 1.6 * (Fb - 0.04) + 0.02 + 0.16 * pow(smoothstep(0.45, 1.0, rr), 2.0);
+  float fr = 0.88 * (1.0 - F) * (1.0 - F) * vig + F;
+  c = back + sheenL * (F * 1.3 + rimF * 0.9) * (0.5 + 0.5 * smoothstep(-0.3, 0.6, Nb.y)) * lipAO * (1.0 - 0.85 * hoodC);
+
+  // The zenith's broad specular: the bright sky overhead laid across the
+  // upper bulge as one soft gloss lobe (GGX, alpha 0.7, on the dome's
+  // curvature), so the dome is lit from above like any rounded thing
+  // outdoors: a veil over the upper half that fades down the face, sliding
+  // over it as it tips, cut off where the visor hangs over it.
+  vec3 zen = env(vec3(0.0, 1.0, 0.0), 7.5);
+  vec3 hz = normalize(vec3(0.0, 1.0, 0.0) - d);
+  float nz = max(dot(Nb, hz), 0.0);
+  const float ZA2 = 0.5;
+  float zl = ZA2 * ZA2 / pow(nz * nz * (ZA2 - 1.0) + 1.0, 2.0);
+  float upper = smoothstep(-0.6, 0.7, q.y / A);
+  c += mix(zen, skyC, 0.3) * zl * upper * (0.22 + 2.0 * (Fb - 0.04)) * lipAO * (1.0 - hoodC);
+
+  // The shoulder: the last centimetre of the dome, where the thermoformed
+  // sheet rolls over into its wall. Its normal turns out toward the rim, so
+  // at near-grazing it catches whatever is beside the mirror, sky mostly, in
+  // a thin bright line just inside the dark contact band: the edge of a sheet
+  // with thickness, not the edge of a print.
+  vec3 radial = (uX * q.x + uU * q.y) / max(rq, 1e-4);
+  float roll = smoothstep(0.011, 0.0035, edgeM);
+  float shoulder = roll * smoothstep(cw * 0.6, cw * 1.5 + aa, edgeM);
+  vec3 nS = normalize(Ng + radial * 2.2 * roll);
+  vec3 rS = reflect(d, nS);
+  float cS = max(dot(-d, nS), 0.0);
+  float FS = 0.04 + 0.96 * pow(1.0 - cS, 5.0);
+  vec3 lS = mix(env(rS, 3.5), skyC, 0.35);
+  c += lS * (0.12 + FS) * shoulder * (1.0 - 0.75 * topW);
+
   // and the haze's broad lobe of the sun: a soft glow that sits where the
   // dome turns toward it and slides across the face as it turns
   vec3 hv = normalize(uSun - d);
   float nh = max(dot(Nn, hv), 0.0);
   const float HA2 = 0.035;
   float lobe = HA2 / (PI * pow(nh * nh * (HA2 - 1.0) + 1.0, 2.0));
-  c += vec3(1.0, 0.97, 0.92) * uSunE * max(dot(Nn, uSun), 0.0) * lobe * F * 0.3;
+  c += vec3(1.0, 0.97, 0.92) * uSunE * lit * sunVis * lobe * F * 0.3;
 
   // the sun in the glass: its disc, never smaller than a pixel, energy kept
   float ang = acos(clamp(dot(r, uSun), -1.0, 1.0));
@@ -492,15 +633,39 @@ vec3 glass(vec3 P, vec3 d, vec3 S) {
   float rEff = max(sunR, spread * 0.75);
   float disc = smoothstep(rEff, rEff * 0.6, ang) * (sunR * sunR) / (rEff * rEff);
   float sunL = uSunE / (PI * sunR * sunR);    // radiance of the disc
-  c += vec3(1.0, 0.96, 0.9) * sunL * disc * fr * uSunDisc * (1.0 - 0.6 * smudge);
+  c += vec3(1.0, 0.96, 0.9) * sunL * disc * fr * uSunDisc * sunVis * (1.0 - hoodC) * (1.0 - 0.6 * smudge);
   // dust and smudge scatter the light that reaches the face: the sky a
   // little, the sun a lot when it is near the mirrored direction
-  float lit = max(dot(Nn, uSun), 0.0);
   float fwd = exp(-ang / 0.035) * 10.0 + exp(-ang / 0.12) * 1.5 + exp(-ang / 0.4) * 0.25 + 0.03;
   vec3 sky = irradiance(Nn) / PI;
-  vec3 scat = (dust * 0.03 + smudge * 0.07) * sky + (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * fwd * 0.12 * vec3(1.0, 0.97, 0.93);
+  vec3 scat = (dust * 0.03 + smudge * 0.07) * sky * lipAO + (dust * 0.25 + smudge * 0.5) * uSunE / PI * lit * sunVis * fwd * 0.12 * vec3(1.0, 0.97, 0.93);
   c = c * (1.0 - 0.1 * dust - 0.15 * smudge) + scat;
-  return c;
+  return c * contact;
+}
+
+// The acrylic's wall, standing proud of the frame: clear sheet seen side on.
+// A glossy Fresnel reflection, the frame's dark throat through it, and the
+// light the sheet pipes along itself escaping at the bend into the dome, a
+// thin bright line that draws the dome's edge.
+vec3 acrylicWall(vec3 p, vec3 n, vec3 v) {
+  vec3 q = toLocal(p);
+  float ndv = max(dot(n, v), 0.0);
+  float F = 0.04 + 0.96 * pow(1.0 - ndv, 5.0);
+  vec3 refl = env(reflect(-v, n), 3.0);
+  vec3 E = irradiance(n) / PI;
+  vec3 throat = E * vec3(0.12, 0.13, 0.13);
+  float bend = smoothstep(-SAG - 0.005, -SAG - 0.0005, q.z);
+  vec3 glow = (E * 0.5 + irradiance(uU) / PI * 0.3) * vec3(0.8, 0.95, 0.92) * bend;
+  float lit = max(dot(n, uSun), 0.0);
+  vec3 sun = vec3(1.0, 0.96, 0.9) * uSunE / PI * lit * 0.12 * (0.4 + bend);
+  vec3 c = refl * F + (throat + glow + sun) * (1.0 - F);
+  // where the wall turns edge-on it is thinner than a pixel, and its grazing
+  // sheen would only alias into a dotted line: it goes to the gasket's dark
+  // there, which is also what the eye sees of a sheet's edge at that angle
+  // and a ray that only skims the dome's rim from its far side meets the
+  // corner, not the wall: that is the dark contact line too
+  float side = smoothstep(0.45, 0.2, abs(dot(n, uN)));
+  return mix(vec3(0.02, 0.021, 0.022), c, smoothstep(0.08, 0.4, ndv) * side);
 }
 
 void main() {
@@ -532,6 +697,16 @@ void main() {
     }
   }
 
+  // the exact sphere cap, and its derivatives, here where every pixel of a
+  // quad takes them (inside a branch they would be undefined at the rim)
+  vec3 S = uFace - uN * RC;
+  vec2 sh = sphereHit(vec3(0.0), d, S, RC);
+  vec3 Pf = d * sh.x;
+  float capRho = length(toLocal(Pf).xy);
+  vec3 rCap = reflect(d, normalize(Pf - S));
+  float spread = max(length(dFdx(rCap)), length(dFdy(rCap)));
+  float capAA = max(fwidth(capRho), 1e-5);
+
   // the mirror assembly
   vec3 hc = uFace - uN * 0.09;
   vec2 hs = sphereHit(vec3(0.0), d, hc, A + 0.08);
@@ -541,12 +716,18 @@ void main() {
   if (t1 > t0) {
     float t = t0;
     float best = 1e9, bestT = t0;
+    // and the closest pass of everything but the acrylic: where the visor's
+    // or the frame's edge crosses the glass, how much of the pixel it covers
+    float bestNF = 1e9, bestNFT = t0;
     bool hit = false;
     for (int i = 0; i < 96; i++) {
       vec3 x = d * t;
-      float h = sdf(x);
+      float nf;
+      float h = sdSceneNF(x, nf).x;
       float ratio = h / (uPx * t);
       if (ratio < best) { best = ratio; bestT = t; }
+      float rnf = nf / (uPx * t);
+      if (rnf < bestNF) { bestNF = rnf; bestNFT = t; }
       if (h < 0.25 * uPx * t) { hit = true; break; }
       t += max(h, 0.0004);
       if (t > t1) break;
@@ -559,18 +740,28 @@ void main() {
       float tt = hit ? t : bestT;
       vec3 x = d * tt;
       vec2 id = sdScene(x);
-      // the exact sphere cap: it wins over whatever the march found behind it
-      vec3 S = uFace - uN * RC;
-      vec2 sh = sphereHit(vec3(0.0), d, S, RC);
-      vec3 Pf = d * sh.x;
-      bool onCap = sh.x > 0.0 && length(toLocal(Pf).xy) < A && sh.x < tt - 0.001;
-      vec3 obj;
-      if (id.y == 6.0 || onCap) {
-        obj = glass(Pf, d, S);
-      } else {
-        vec3 n = sdNormal(x);
-        obj = paint(x, n, id.y, -d);
+      // the exact sphere cap: it wins over whatever the march found behind
+      // it, and over the acrylic solid wherever its hit lies inside the rim
+      // (the solid's field is a depth, not a distance, so at grazing the
+      // march stops short of the dome; only outside the rim is it the wall)
+      bool onCap = sh.x > 0.0 && capRho < A && (id.y == 6.0 || sh.x < tt + 0.003);
+      // over the glass, the frame or visor takes the part of the pixel its
+      // closest pass covers (the same ramp as the silhouette's), shaded where
+      // it passed
+      float occW = 1.0;
+      vec3 g = vec3(0.0);
+      if (onCap) {
+        g = glass(Pf, d, S, spread, capAA);
+        occW = bestNFT < sh.x ? 1.0 - smoothstep(0.25, 1.55, bestNF) : 0.0;
+        x = d * bestNFT;
+        id = sdScene(x);
       }
+      vec3 pnt = vec3(0.0);
+      if (occW > 0.0) {
+        vec3 n = sdNormal(x);
+        pnt = id.y == 6.0 ? acrylicWall(x, n, -d) : paint(x, n, id.y, -d);
+      }
+      vec3 obj = mix(g, pnt, occW);
       // The plate's tooth. The photograph carries its sensor's noise and
       // its resample's softness at its own pixel pitch, and a render is clean:
       // the object takes the same, a luminance grain correlated over about
