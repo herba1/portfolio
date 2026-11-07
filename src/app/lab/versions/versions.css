@@ -116,6 +116,10 @@
 /* One line tall, holding two: the title above, the change below. --front
    rolls them through the window, so a card coming forward turns its spine
    over to the title the way a counter turns a digit. Clipped, never faded. */
+/* The label is the one part of a card that does not take its depth: the
+   engine projects its place and cancels the card's scale on it, so every
+   spine is set at the same size on the same left axis while the paper
+   recedes behind it. */
 .versions-label {
   height: 20px;
   overflow: hidden;
@@ -132,6 +136,9 @@
   letter-spacing: var(--text-heading--letter-spacing);
   font-weight: var(--text-heading--font-weight);
   text-wrap: balance;
+  /* As wide as its words, so the leader can start where they end. */
+  width: max-content;
+  max-width: 100%;
 }
 
 /* The spine's proof line, on the same 20px line as the title it replaces,
@@ -148,6 +155,8 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  width: max-content;
+  max-width: 100%;
 }
 
 .versions-edit {
@@ -286,9 +295,9 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* A leader drawn from the rule back to its spine's right edge, as
-   perspective has set that edge in, on the spine's baseline. The current
-   save's is inked; the rest are the sheets' own hairline. */
+/* A leader drawn from the rule back to the end of its spine's line, through
+   the middle of the lower case, so change, leader and date read as one row.
+   The current save's is inked; the rest are the sheets' own hairline. */
 .versions-tick::before {
   content: "";
   position: absolute;
