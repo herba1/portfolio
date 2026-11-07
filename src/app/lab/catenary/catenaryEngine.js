@@ -29,14 +29,15 @@ import { NODES, createWorld, locate, offsetAt, pitchView, pullShape, sampleY } f
 // wires are drawn analytically (erf of a blurred box, the measured shade) in
 // linear light at device resolution, along the fitted catenary evaluated
 // exactly plus a cubic through the nodes' displacement, then the frame is
-// developed through the shared film kit (summer).
+// haloed through the shared film kit (summer).
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
 // ?pitch=<degrees> turns the camera (default PITCH; 0 is the photograph).
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
-// structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, diffuse, zenith, polar, polarSat, polarHue,
-// vib, vibFloor, vibHue, vibV override the grade.
+// structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, halNarrow, halWide,
+// diffuse, zenith, polar, polarSat, polarHue, vib, vibFloor, vibHue, vibV
+// override the grade; halThr sets the HALO pass's threshold.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -85,7 +86,8 @@ const FILM = {
   vignette: 0.2,
   // Low enough that the sunlit cloud (scene luma ~0.75-0.85) feeds the halo,
   // high enough that the polarised sky (~0.2) does not: a thin warm ring
-  // where the steel and the wires cross bright cloud.
+  // where the steel and the wires cross bright cloud. (The piece's own,
+  // thin halation pass, HALO, has its own threshold: HAL_THRESHOLD.)
   halationThreshold: 0.6,
   // The summer preset cools its highlights; the plate lifts the cloud tops to
   // warm-neutral itself, so the print leaves them as they come.
@@ -106,10 +108,10 @@ const FILM = {
 //    the headroom left and draw toward warm-neutral paper (CLOUD_TOP,
 //    #f3eee4), bending toward white and never reaching it; the shade masses
 //    sink toward the blue-grey of skylight (CLOUD_SHADE).
-//  - Halation and diffusion: the cloud light, blurred thin, minus the cloud
-//    itself, is laid on in a warm tint at HAL (a fine glow where cloud meets
-//    sky and where steel and wires cross it); blurred wide, screened in at
-//    DIFFUSE, it veils the cobalt near the cloud.
+//  - Diffusion: the cloud light, blurred wide, screened in at DIFFUSE, veils
+//    the cobalt near the cloud. Halation is not in the plate: it is a pass of
+//    its own over the finished scene (see HALO), so the steel, the live wires
+//    and the insulators all bleed the same way.
 const STRUCT = 0.88;
 // Dark: the one silhouette has to stand off the cloud, about rgb(62,66,70)
 // on its lit face after the print, its rust and banding still in it.
@@ -129,9 +131,34 @@ const CLOUD_FROM = 0.6;
 const SCULPT = 0.8;
 const SHADE_TINT = 0.35;
 const CLOUD_SHADE = [0xa6, 0xb6, 0xc8];
-const HAL = 0.7;
-const HAL_TINT = [1, 0.7, 0.45]; // linear
 const DIFFUSE = 0.18;
+// Halation, the film's own optics rather than its grade: light that went
+// through the emulsion, bounced off the base (no remjet) and came back
+// through the red layer a little way off. Over the finished linear scene,
+// plate, live wires and insulators together: the light past HAL_THRESHOLD
+// (scene luminance, a soft knee) is blurred at two radii, HAL_NARROW and HAL_WIDE (gaussian sigma in device px at DPR 2,
+// scaled with the DPR), weighted, tinted HAL_TINT and added at HAL, in
+// proportion to how dark the pixel it lands on is (1 - its luma). So it
+// shows where sunlit cloud meets dark steel: a 1-3 px warm orange-red fringe
+// on the steel's side of the edge and a faint warm bleed into it, nothing on
+// steel against plain sky (the sky never reaches the threshold), and almost
+// nothing on the cloud itself. The wide radius stays low so it never reads
+// as a glow or a chroma smear.
+const HAL = 1;
+// Measured on the scene: the open sky never passes 0.3, even beside cloud;
+// the cumulus behind the truss sits at 0.38-0.55 and only its cores reach
+// the film's own halationThreshold (0.6), the sunlit masses upper right and
+// lower left 0.55-0.85. So the pass starts lower than the film's wide halo,
+// low enough that the truss's cloud throws a fringe, with the sky still a
+// full 0.07 below the knee.
+const HAL_THRESHOLD = 0.42;
+const HAL_TINT = [1, 0.7, 0.45]; // linear
+const HAL_CAP = 0.62;
+// The narrow radius carries the fringe; the wide one only a breath of warmth
+// into the steel, so a 16 px feeder over the brightest cloud is lifted a few
+// levels, not turned into a lit tube.
+const HAL_NARROW = [3, 1]; // sigma (device px at DPR 2), weight
+const HAL_WIDE = [12, 0.08];
 // The open sky deepens toward the zenith (the top edge): on top of the
 // polariser, it loses up to ZENITH of its value there.
 const ZENITH = 0.1;
@@ -180,10 +207,9 @@ uniform sampler2D uKey; // R structure, G cloud light thin, B cloud light wide
 uniform vec4 uStruct;  // amount, gain, floor, zenith
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop; // linear
-uniform vec3 uGlow;     // cloud lift, halation, diffusion
+uniform vec2 uGlow;     // cloud lift, diffusion
 uniform vec3 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint
 uniform vec3 uCloudShade; // linear
-uniform vec3 uHalTint;
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 vec3 rgb2hsv(vec3 c) {
@@ -278,18 +304,13 @@ void main() {
   c *= ratio;
   c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), 0.8 * lit);
   c = mix(c, uCloudShade * (yt / dot(uCloudShade, LUMA)), uSculpt.z * shade);
-  float top = lit;
-  float yg = pow(dot(c, LUMA), 1.0 / 2.2);
 
-  // Halation: the thin cloud light past the cloud's own edge, warm. Wide
-  // diffusion: screened, so it lifts the cobalt and never clips.
-  float self = smoothstep(0.62, 0.9, yg) * (1.0 - key.r);
-  float rim = max(key.g - self, 0.0);
-  // Both masked off the steel: the mast stays graphite where it crosses lit
-  // cloud, one sharp silhouette against the soft cloud light.
+  // Wide diffusion: screened, so it lifts the cobalt and never clips. Masked
+  // off the steel: the mast stays graphite where it crosses lit cloud, one
+  // sharp silhouette against the soft cloud light. (Halation is its own pass,
+  // over the whole scene: HALO.)
   float bare = 1.0 - 0.85 * key.r;
-  c += uHalTint * uGlow.y * rim * (1.0 - top) * 0.35 * bare;
-  vec3 veil = uCloudTop * key.b * key.b * uGlow.z * bare;
+  vec3 veil = uCloudTop * key.b * key.b * uGlow.y * bare;
   c = 1.0 - (1.0 - c) * (1.0 - veil);
   outColor = vec4(c, 1.0);
 }`;
@@ -328,8 +349,7 @@ uniform vec2 uImg;
 uniform vec4 uStruct;
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop;
-uniform vec3 uGlow;
-uniform vec3 uHalTint;
+uniform vec2 uGlow;
 ${GRAPHITE}
 float erf_(float x) {
   float s = sign(x);
@@ -361,14 +381,14 @@ void main() {
   vec3 col = mix(uShade[i0], uShade[i1], fract(u));
   // The same graphite as the steel. A live wire is steel too, but it was
   // painted out of the plate, so the key's steel mask (key.r) never reaches
-  // it: hold it at the steel's residue directly. The cloud's halation and
-  // veil then barely touch the wire body (it stays a dark silhouette across
-  // lit cumulus), while the plate's own rim term still glows around it.
+  // it: hold it at the steel's residue directly. The cloud's veil then barely
+  // touches the wire body (it stays a dark silhouette across lit cumulus);
+  // its halation comes from the HALO pass over the finished scene, exactly
+  // as the plate's steel takes it, wherever the wire has moved to.
   col = mix(col, graphite(col), uStruct.x);
   vec3 key = texture(uKey, vRest / uImg).rgb;
   float bare = 0.15;
-  col += uHalTint * uGlow.y * key.g * 0.35 * bare;
-  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.z * bare);
+  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.y * bare);
   outColor = vec4(col, a);
 }`;
 
@@ -390,6 +410,85 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uAtlas;
 void main() { outColor = texture(uAtlas, vUv); }`;
+
+// HALO, 1: the light that reaches the base. The scene luminance (linear) of
+// whatever is past the threshold, all of it, not just the excess (a cloud at
+// 0.5 throws a halo in proportion to 0.5), gated with a soft knee so the halo
+// grows in without a step, and held under HAL_CAP: the red layer saturates,
+// so the sunlit masses (0.85) bleed only a little more than the cumulus
+// behind the truss (0.5) and a wire crossing them keeps its silhouette. One
+// channel, the red layer's exposure.
+const HALO_SRC = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform vec2 uThr;   // threshold, cap
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+void main() {
+  float y = dot(max(texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb, 0.0), LUMA);
+  outColor = vec4(min(y, uThr.y) * smoothstep(uThr.x - 0.05, uThr.x + 0.1, y), 0.0, 0.0, 1.0);
+}`;
+
+// Gaussian at two radii, separable. Narrow: a tap per px out to 3 sigma.
+// Wide: pairs of px in one bilinear tap, weighted so the pair is exact.
+const HALO_BLUR = `
+uniform vec2 uSig;   // narrow, wide sigma, device px
+uniform vec2 uStep;  // one px along the blur, uv
+float gw(float i, float s) { return exp(-0.5 * i * i / (s * s)); }
+vec2 blur(sampler2D t, vec2 uv, bool second) {
+  float n = 0.0, nw = 0.0, m = 0.0, mw = 0.0;
+  int rn = int(ceil(3.0 * uSig.x));
+  for (int i = -rn; i <= rn; i++) {
+    float w = gw(float(i), uSig.x);
+    n += w * texture(t, uv + uStep * float(i)).r;
+    nw += w;
+  }
+  int rw = int(ceil(3.0 * uSig.y));
+  for (int i = -rw; i <= rw; i += 2) {
+    float a = gw(float(i), uSig.y);
+    float b = gw(float(i + 1), uSig.y);
+    vec4 s = texture(t, uv + uStep * (float(i) + b / (a + b)));
+    m += (a + b) * (second ? s.g : s.r);
+    mw += a + b;
+  }
+  return vec2(n / nw, m / mw);
+}`;
+
+// 2: across. R narrow, G wide.
+const HALO_H = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uSrc;
+${HALO_BLUR}
+void main() {
+  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uSrc, 0));
+  outColor = vec4(blur(uSrc, uv, false), 0.0, 1.0);
+}`;
+
+// 3: down, and onto the scene: tinted, weighted, and laid on in proportion
+// to how dark the pixel is, so it shows on the dark side of a bright edge.
+const HALO_C = `#version 300 es
+precision highp float;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform sampler2D uSrc;
+uniform vec3 uHal;   // gain, narrow weight, wide weight
+uniform vec3 uHalTint;
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+${HALO_BLUR}
+void main() {
+  vec3 c = texelFetch(uScene, ivec2(gl_FragCoord.xy), 0).rgb;
+  vec2 uv = gl_FragCoord.xy / vec2(textureSize(uSrc, 0));
+  vec2 h = blur(uSrc, uv, true);
+  // Laid on by how dark the pixel is (1 - luma, eased to nothing by 0.5):
+  // dark steel beside the cloud (y ~0.03) takes all of it, the sky past a
+  // cloud's edge (y ~0.25) half, the cloud itself (y 0.4 and up) next to
+  // none, so it never warms the highlight it came from.
+  float halo = uHal.x * (uHal.y * h.x + uHal.z * h.y);
+  float y = clamp(dot(max(c, 0.0), LUMA), 0.0, 1.0);
+  c += uHalTint * halo * (1.0 - smoothstep(0.0, 0.5, y));
+  outColor = vec4(c, 1.0);
+}`;
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -461,7 +560,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
     clamp(num("zenith", ZENITH), 0, 0.5),
   ];
   const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
-  const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("hal", HAL), 0, 2), clamp(num("diffuse", DIFFUSE), 0, 1)];
+  const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("diffuse", DIFFUSE), 0, 1)];
+  const halo = [
+    clamp(num("hal", HAL), 0, 4),
+    clamp(num("halNarrow", HAL_NARROW[1]), 0, 2),
+    clamp(num("halWide", HAL_WIDE[1]), 0, 2),
+  ];
+  const halThr = clamp(num("halThr", HAL_THRESHOLD), 0.05, 4);
   const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1)];
   const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
   const polar = clamp(num("polar", POLAR), 0, 0.6);
@@ -509,6 +614,9 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const plateP = compile(gl, VERT_FULL, PLATE);
   const wireP = compile(gl, WIRE_V, WIRE_F, ["aPos", "aAcross", "aProf", "aRest"]);
   const riderP = compile(gl, RIDER_V, RIDER_F, ["aPos", "aUv"]);
+  const haloSrcP = compile(gl, VERT_FULL, HALO_SRC);
+  const haloHP = compile(gl, VERT_FULL, HALO_H);
+  const haloCP = compile(gl, VERT_FULL, HALO_C);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -552,34 +660,60 @@ export async function createCatenary(host, { embedded = false } = {}) {
 
   const half = !!(gl.getExtension("EXT_color_buffer_float") || gl.getExtension("EXT_color_buffer_half_float"));
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
-  let sceneTex = null;
-  let sceneFbo = null;
-  let lastKey = "";
-  let map = { ox: 0, oy: 0, k: 1, kRef: 1 };
-  const build = () => {
-    const w = stage.canvas.width;
-    const h = stage.canvas.height;
-    if (sceneTex) gl.deleteTexture(sceneTex);
-    if (sceneFbo) gl.deleteFramebuffer(sceneFbo);
-    sceneTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, sceneTex);
-    sceneFbo = gl.createFramebuffer();
-    let ok = false;
-    if (half) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
-      ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-    }
-    if (!ok) {
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, sceneTex, 0);
+  // Render targets, half float when the GPU can draw to it (linear light
+  // with headroom), else 8 bit (sRGB for the colour, so it stays linear to
+  // sample). The scene, then the HALO pass: its source (one channel), the
+  // across blur (narrow, wide), and the scene with the halo on it.
+  const FORMATS = {
+    rgba: [
+      [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT],
+      [gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE],
+    ],
+    rg: [
+      [gl.RG16F, gl.RG, gl.HALF_FLOAT],
+      [gl.RG8, gl.RG, gl.UNSIGNED_BYTE],
+    ],
+    r: [
+      [gl.R16F, gl.RED, gl.HALF_FLOAT],
+      [gl.R8, gl.RED, gl.UNSIGNED_BYTE],
+    ],
+  };
+  const target = (w, h, kind) => {
+    const tex = gl.createTexture();
+    const fbo = gl.createFramebuffer();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    for (const [fi, [internal, format, type]] of FORMATS[kind].entries()) {
+      if (fi === 0 && !half) continue;
+      gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE) break;
     }
     for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex, fbo };
+  };
+  const free = (t) => {
+    if (!t) return;
+    gl.deleteTexture(t.tex);
+    gl.deleteFramebuffer(t.fbo);
+  };
+  let scene = null;
+  let haloSrc = null;
+  let haloH = null;
+  let haloed = null;
+  let lastKey = "";
+  let map = { ox: 0, oy: 0, k: 1, kRef: 1 };
+  const build = () => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    [scene, haloSrc, haloH, haloed].forEach(free);
+    scene = target(w, h, "rgba");
+    haloSrc = target(w, h, "r");
+    haloH = target(w, h, "rg");
+    haloed = target(w, h, "rgba");
     film.resize(w, h);
     // Cover the box with the photograph, then crop in to the view, inside
     // the turned photograph. Rows stay rows under a pitch, so the plate's
@@ -731,15 +865,14 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform4fv(pr.u.uStruct, struct);
     gl.uniform3fv(pr.u.uStructTint, STRUCT_TINT);
     gl.uniform3fv(pr.u.uCloudTop, cloudTop);
-    gl.uniform3fv(pr.u.uGlow, glow);
+    gl.uniform2fv(pr.u.uGlow, glow);
     gl.uniform3fv(pr.u.uSculpt, sculpt);
     gl.uniform3fv(pr.u.uCloudShade, cloudShade);
-    gl.uniform3fv(pr.u.uHalTint, HAL_TINT);
   };
   const drawScene = () => {
     const W = stage.canvas.width;
     const H = stage.canvas.height;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneFbo);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, scene.fbo);
     gl.viewport(0, 0, W, H);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.SCISSOR_TEST);
@@ -879,6 +1012,49 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
 
+  // HALO over the finished scene: source, across, then down and onto it.
+  const halation = () => {
+    const W = stage.canvas.width;
+    const H = stage.canvas.height;
+    const d = stage.dpr / 2;
+    const sig = [Math.max(0.5, HAL_NARROW[0] * d), Math.max(1, HAL_WIDE[0] * d)];
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, W, H);
+    gl.bindVertexArray(quadVao);
+    gl.activeTexture(gl.TEXTURE0);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, haloSrc.fbo);
+    gl.useProgram(haloSrcP.p);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+    gl.uniform1i(haloSrcP.u.uScene, 0);
+    gl.uniform2f(haloSrcP.u.uThr, halThr, HAL_CAP);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, haloH.fbo);
+    gl.useProgram(haloHP.p);
+    gl.bindTexture(gl.TEXTURE_2D, haloSrc.tex);
+    gl.uniform1i(haloHP.u.uSrc, 0);
+    gl.uniform2fv(haloHP.u.uSig, sig);
+    gl.uniform2f(haloHP.u.uStep, 1 / W, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    gl.bindFramebuffer(gl.FRAMEBUFFER, haloed.fbo);
+    gl.useProgram(haloCP.p);
+    gl.bindTexture(gl.TEXTURE_2D, haloH.tex);
+    gl.uniform1i(haloCP.u.uSrc, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, scene.tex);
+    gl.uniform1i(haloCP.u.uScene, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform2fv(haloCP.u.uSig, sig);
+    gl.uniform2f(haloCP.u.uStep, 0, 1 / H);
+    gl.uniform3fv(haloCP.u.uHal, halo);
+    gl.uniform3fv(haloCP.u.uHalTint, HAL_TINT);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.bindVertexArray(null);
+  };
+
   let born = performance.now();
   let acc = 0;
   let lastGrain = -1;
@@ -919,7 +1095,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
     const tick = still ? 0 : Math.floor(t * 24);
     if (key !== lastKey || tick !== lastGrain) {
       drawScene();
-      film.render(sceneTex, { ...film0, exposure, grainSeed: tick * 7.31 });
+      halation();
+      film.render(haloed.tex, { ...film0, exposure, grainSeed: tick * 7.31 });
       lastKey = key;
       lastGrain = tick;
     }
@@ -928,7 +1105,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
 
   await new Promise((r) => requestAnimationFrame(() => r()));
   if (stage.canvas.width > 1) {
-    if (!sceneTex) build();
+    if (!scene) build();
     frame(1 / 60, performance.now() / 1000);
   }
   born = performance.now();
@@ -938,14 +1115,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
     destroy() {
       sound.destroy();
       film.destroy();
-      if (sceneTex) gl.deleteTexture(sceneTex);
-      if (sceneFbo) gl.deleteFramebuffer(sceneFbo);
+      [scene, haloSrc, haloH, haloed].forEach(free);
       gl.deleteTexture(plateTex);
       gl.deleteTexture(atlasTex);
       gl.deleteTexture(keyTex);
       for (const b of [quad, wireBuf, riderBuf]) gl.deleteBuffer(b);
       for (const v of [quadVao, wireVao, riderVao]) gl.deleteVertexArray(v);
-      for (const pr of [plateP, wireP, riderP]) gl.deleteProgram(pr.p);
+      for (const pr of [plateP, wireP, riderP, haloSrcP, haloHP, haloCP]) gl.deleteProgram(pr.p);
       stage.destroy();
     },
   };
