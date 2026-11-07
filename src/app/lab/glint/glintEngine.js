@@ -26,7 +26,9 @@ import META from "./meta.json";
 // the pixel's footprint and the pane's roughness; the sky round the sun (the
 // aureole) and the sunward edges of the cumulus brighten with it, in the sky
 // itself and in every reflection of it. Where the sun is in open sky it is
-// drawn as a disc; behind a tower it is hidden by the tower. At the
+// drawn as a disc with the veiling glare of a sun nobody can look at, and
+// each wall's mirror image of it veils the glass round it the same way, a
+// tenth as bright; behind a tower the sun is hidden by the tower. At the
 // photographer's sun the frame hands back to the photograph's own pixels.
 // Then developed through the shared film kit (summer), whose halation and
 // diffusion give the glint its bloom.
@@ -121,6 +123,8 @@ uniform vec2 uFaceK[${NF}];
 uniform float uExpo;
 uniform float uSunL;
 uniform float uDebug;
+uniform vec3 uGlintD[2]; // where the sun's mirror image sits in the two brightest walls
+uniform float uGlintK[2]; // and how bright it is there, in suns
 
 const float SUN_R = 0.0047;   // angular radius of the sun, rad
 const vec3 SKY_C = vec3(0.80, 0.90, 1.08); // skylight on a wall: blue
@@ -259,6 +263,34 @@ void main() {
     if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, glass, fr);
     if (uDebug > 2.5) col = vec3(mt.r, mt.g, glass * 0.3);
   }
+  // veiling glare: a sun in open sky is too bright to look at. Its light
+  // scatters in the air, the lens and the emulsion into a broad warm bloom
+  // that washes the sky round it, lifts the cloud beside it and veils the
+  // towers in front, all from where the disc is. A tower over the disc takes
+  // it away (the sky matte at the sun, over a few disc radii, says how much
+  // of the sun shows).
+  if (uS.z > 0.05) {
+    vec2 sp = uC + uF * uS.xy / uS.z;
+    float vis = 0.0;
+    for (int i = 0; i < 9; i++) {
+      float a = float(i) * 2.39996;
+      float rr = (i == 0 ? 0.0 : sqrt(float(i) / 8.0)) * SUN_R * uF * 2.5;
+      vec2 q = (sp + rr * vec2(cos(a), sin(a))) / uPlate;
+      float inP = step(0.0, q.x) * step(q.x, 1.0) * step(0.0, q.y) * step(q.y, 1.0);
+      vis += inP * texture(uGeo, q).b;
+    }
+    vis = smoothstep(0.1, 0.9, vis / 9.0) * away;
+    float veil = 7.0 * exp(-gs / 0.01) + 1.4 * exp(-gs / 0.045) + 0.32 * exp(-gs / 0.16) + 0.06 * exp(-gs / 0.5);
+    col += vec3(1.0, 0.95, 0.86) * veil * vis;
+  }
+  // and the sun's mirror image in a curtain wall is a second sun, a tenth as
+  // bright: it veils the panes and the sky round it the same way, so the
+  // glint blooms instead of sitting in the glass as a pattern
+  for (int k = 0; k < 2; k++) {
+    float gk = acos(clamp(dot(v, uGlintD[k]), -1.0, 1.0));
+    float gv = 2.2 * exp(-gk / 0.03) + 0.5 * exp(-gk / 0.08);
+    col += vec3(1.0, 0.93, 0.82) * gv * uGlintK[k] * away;
+  }
   if (uDebug > 1.5 && uDebug < 2.5) col = vec3(gNow / g0 * 0.5, texture(uEnvM, envUv(v)).g, texture(uEnvM, envUv(v)).r);
   outColor = vec4(col * uExpo, 1.0);
 }`;
@@ -376,6 +408,22 @@ export async function createGlint(host, { embedded = false } = {}) {
 
   const files = ["photo.webp", "albedo.webp", "geo.webp", "mat.webp", "env.webp", "envmask.webp", "patch.webp"];
   const imgs = await Promise.all(files.map((f) => loadImage(BASE + f)));
+  // face ids and glass at a quarter of the plate, to find on the CPU where
+  // the sun's mirror image lands in each wall
+  const GQ = 4;
+  const GW = Math.round(PW / GQ);
+  const GH = Math.round(PH / GQ);
+  const readSmall = (img) => {
+    const c = document.createElement("canvas");
+    c.width = GW;
+    c.height = GH;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.imageSmoothingEnabled = false;
+    x.drawImage(img, 0, 0, GW, GH);
+    return x.getImageData(0, 0, GW, GH).data;
+  };
+  const geoPx = readSmall(imgs[2]);
+  const matPx = readSmall(imgs[3]);
   const T0 = {
     photo: imageTexture(gl, imgs[0], { mips: true }),
     alb: imageTexture(gl, imgs[1], { mips: true }),
@@ -469,6 +517,46 @@ export async function createGlint(host, { embedded = false } = {}) {
   let t0 = -1;
   let lastSunKey = "";
 
+  // The two brightest mirror images of the sun: for each flat wall lit from
+  // the front, the direction the sun is seen in it, and how much lit glass of
+  // that wall is round that point (Fresnel x glass share).
+  const glintD = new Float32Array(6);
+  const glintK = new Float32Array(2);
+  const findGlints = (s) => {
+    const best = [];
+    META.faces.forEach((fc, i) => {
+      if (fc.cyl) return;
+      const n = fc.normal;
+      const c = dot3(n, s);
+      if (c < 0.03) return;
+      const d = [s[0] - 2 * c * n[0], s[1] - 2 * c * n[1], s[2] - 2 * c * n[2]];
+      if (d[2] < 0.05) return;
+      const [px, py] = pxOf(d);
+      const gx = Math.round(px / GQ);
+      const gy = Math.round(py / GQ);
+      let sum = 0;
+      let cnt = 0;
+      for (let y = gy - 4; y <= gy + 4; y++) {
+        for (let x = gx - 4; x <= gx + 4; x++) {
+          cnt++;
+          if (x < 0 || y < 0 || x >= GW || y >= GH) continue;
+          const o = (y * GW + x) * 4;
+          if (geoPx[o] === i && geoPx[o + 2] < 128) sum += matPx[o + 2] / 255;
+        }
+      }
+      if (!sum) return;
+      const f0 = FACE_K[i * 2];
+      const fr = f0 + (1 - f0) * Math.pow(1 - c, 5);
+      best.push({ d, k: 4 * fr * (sum / cnt) });
+    });
+    best.sort((a, b) => b.k - a.k);
+    for (let k = 0; k < 2; k++) {
+      const g = best[k];
+      glintD.set(g ? g.d : [0, 0, -1], k * 3);
+      glintK[k] = g ? g.k : 0;
+    }
+  };
+
   const draw = (expoStops, fade) => {
     const s = dirOf(sun[0], sun[1]);
     const ang = Math.acos(clamp(dot3(s, SUN0), -1, 1));
@@ -505,6 +593,9 @@ export async function createGlint(host, { embedded = false } = {}) {
     gl.uniform1f(u.uExpo, expo);
     gl.uniform1f(u.uSunL, 1200);
     gl.uniform1f(u.uDebug, debug);
+    findGlints(s);
+    gl.uniform3fv(u.uGlintD, glintD);
+    gl.uniform1fv(u.uGlintK, glintK);
     gl.bindFramebuffer(gl.FRAMEBUFFER, T.scene.fbo);
     gl.viewport(0, 0, T.scene.w, T.scene.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -525,9 +616,9 @@ export async function createGlint(host, { embedded = false } = {}) {
           highlightTint: [0.99, 1, 1.01],
           whitePoint: 1.18,
           shoulder: 0.92,
-          halation: 0.5,
+          halation: 0.7,
           halationThreshold: 1.1,
-          bloom: 0.2,
+          bloom: 0.24,
           softness: 0.45,
           vignette: 0.18,
           grain: 0.3,
@@ -558,8 +649,8 @@ export async function createGlint(host, { embedded = false } = {}) {
   // Reveal: the print comes up two stops over, an airy white-blue, and
   // settles; then the sun walks off the photographer's spot to show it can.
   const REVEAL = 2.0;
-  const WALK_AT = 1.6;
-  const WALK = 2.6;
+  const WALK_AT = 0.8;
+  const WALK = 2.2;
   let lastNow = 0;
   stage.onFrame((dt) => {
     if (!T.scene) return;
