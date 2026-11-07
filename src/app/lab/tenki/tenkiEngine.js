@@ -23,9 +23,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - Each recorded sky (five Poly Haven HDRIs, CC0) is rendered through the
 //    photo's lens and reduced to light: SH9 irradiance of the sky plus a sunlit
 //    ground, and the sun's direction, irradiance and angular spread. At hour h
-//    the recorded sun is moved to the sun's position then and carried through
-//    that hour's air mass; the skylight's SH9 is turned about the vertical
-//    with it. The foreground is albedo x (SH9(n) x sky view + sun x
+//    the recorded sun is moved to the sun's position then, held at a clear
+//    sky's ~5:1 over the skylight on a face turned to it, and carried through
+//    that hour's air mass (Kasten-Young), which reddens and weakens it; the
+//    skylight's SH9 is turned about the vertical with it, dims as the sun
+//    drops and gains a warm lobe round a low sun, and the clouds take the
+//    sun's colour. The foreground is albedo x (SH9(n) x sky view + sun x
 //    OrenNayar(n, l) x shadow) + GGX sun specular x shadow.
 //  - Between two skies (?sky= fractions, the up / down keys) everything is a
 //    crossfade of light, in linear light.
@@ -45,15 +48,26 @@ const START = 4; // building cumulus
 const LAT = (35.7 * Math.PI) / 180;
 const DEC = (20.5 * Math.PI) / 180;
 const DAY = [7, 18.5];
-// Clear-air optical depth (Rayleigh + a little aerosol) at the film's R, G, B:
-// the sun's colour and strength through the air mass at its height.
-const TAU = [0.13, 0.2, 0.36];
+// Optical depth at the film's R, G, B: Rayleigh (as 1 / lambda^4) plus a humid
+// July's haze (Angstrom ~1.3): the sun's colour and strength through the air
+// mass at its height.
+const TAU = [0.14, 0.22, 0.44];
 // The bake balanced every sky's sun alone to the film's white. Daylight film
 // is balanced for sun and sky together, which is bluer than the sun, and a July
 // afternoon sun through humid air is warmer again (~4800 K against 5500 K): it
 // is that warm offset against the blue skylight that tells sun from shade on a
 // grey pole.
 const KEY = [1.12, 1.0, 0.8];
+// Direct to diffuse on a face turned to a clear sun at air mass 1.
+const CLEAR_RATIO = 5;
+// The warm sky round a low sun, as a share of the sky's light on a face
+// turned to the sun.
+const AUREOLE = 0.6;
+// How hard the clouds take the sun's colour (1 = as the beam has it), the
+// share of their light that is the sky's, and that skylight's colour.
+const CLOUD_WARM = 2;
+const CLOUD_FILL = 0.25;
+const CLOUD_SKY = [0.78, 0.97, 1.32];
 // The HDRIs are open-field skies. Lying in a residential street, the pole
 // sees the sun but not the whole sky: houses, wires and trees take the lower
 // band of it (a sky-view factor of ~0.6 for a vertical face in a street of
@@ -205,8 +219,9 @@ uniform vec3 uOldSun;     // the photo's own sun and sky colours (luminance 1)
 uniform vec3 uOldSky;
 uniform vec3 uVeil;       // the lens's veiling glare in the photograph (linear)
 uniform vec3 uKeyDir;     // the dominant sun now (camera space), for the clouds
-uniform vec3 uCloudTint;  // cloud colour now / at the recorded hour
+uniform vec3 uCloudTint;  // cloud colour now / under a high sun
 uniform float uRim;       // strength of the sun side of each cloud
+uniform float uSkyDim;    // the blue sky's light now / at the recorded hour
 uniform float uExpo;      // reveal exposure, linear factor
 uniform float uLinearOut;
 uniform float uDbg;
@@ -311,7 +326,9 @@ void main() {
     vec3 cl = sky * uCloudTint;
     cl *= 1.0 + uRim * lit * normalize(uCloudTint) * 1.732;
     cl *= mix(vec3(1.0), vec3(0.78, 0.86, 1.0), uRim * shd);
-    sky = mix(sky, cl, c);
+    // the blue between them is skylight, and dims with it; the clouds are
+    // lit by the sun, and go with the key
+    sky = mix(sky * uSkyDim, cl, c);
   }
 
   vec4 f = texture(uFg, pu);
@@ -470,6 +487,37 @@ const airmass = (el) => {
   return 1 / (Math.sin((deg * Math.PI) / 180) + 0.50572 * Math.pow(deg + 6.07995, -1.6364));
 };
 const beam = (el) => TAU.map((t) => Math.exp(-t * airmass(el)));
+// the beam's luminance transmittance at sun height el
+const beamL = (el) => dot3(beam(el), LUM);
+// the skylight follows the sun's height: a low sun lights less of the sky
+const skyGainAt = (el) => clamp(Math.pow(Math.max(0.02, Math.sin(el)), 0.6), 0.25, 1);
+// how far the camera opens for the light at sun height el (1 at air mass 1)
+const meterAt = (el) => {
+  const k = beamL(el) / BEAM_Z;
+  return Math.min(1.6, Math.pow((CLEAR_RATIO + 1) / (CLEAR_RATIO * k + skyGainAt(el)), 0.45));
+};
+// SH9 irradiance in direction v (heading frame), rgb
+const SHY = [
+  () => 0.282095,
+  (x, y) => 0.488603 * y,
+  (x, y, z) => 0.488603 * z,
+  (x) => 0.488603 * x,
+  (x, y) => 1.092548 * x * y,
+  (x, y, z) => 1.092548 * y * z,
+  (x, y) => 0.315392 * (3 * y * y - 1),
+  (x, y, z) => 1.092548 * x * z,
+  (x, y, z) => 0.546274 * (x * x - z * z),
+];
+// clamped-cosine convolution per band (Ramamoorthi and Hanrahan)
+const SHA = [Math.PI, (2 * Math.PI) / 3, (2 * Math.PI) / 3, (2 * Math.PI) / 3, Math.PI / 4, Math.PI / 4, Math.PI / 4, Math.PI / 4, Math.PI / 4];
+function shAt(sh, v) {
+  const out = [0, 0, 0];
+  for (let i = 0; i < 9; i++) {
+    const b = SHY[i](v[0], v[1], v[2]);
+    for (let c = 0; c < 3; c++) out[c] += sh[i][c] * b;
+  }
+  return out;
+}
 // the hour on the day's arc whose sun is nearest a recorded one
 function hourOf(sun) {
   let best = DAY[0];
@@ -510,6 +558,10 @@ function turnSH(sh, a, out) {
 }
 const LUM = [0.2126, 0.7152, 0.0722];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+// the beam's luminance at air mass 1 (the zenith), and at noon on our day
+// against it
+const BEAM_Z = dot3(TAU.map((t) => Math.exp(-t)), LUM);
+const NOON_TRL = beamL(solar(12).el) / BEAM_Z;
 // R maps camera -> heading; its transpose maps heading -> camera.
 const tmul = (R, v) => [0, 1, 2].map((i) => R[0][i] * v[0] + R[1][i] * v[1] + R[2][i] * v[2]);
 
@@ -564,8 +616,24 @@ export async function createTenki(host, { embedded = false } = {}) {
     // the hour this sky was recorded at, on our day's arc
     s.hour = hourOf(s.sun);
     s.phi = Math.atan2(s.sun[0], s.sun[2]);
-    s.beam0 = beam(Math.asin(clamp(s.sun[1], 0.05, 1)));
+    s.el0 = Math.asin(clamp(s.sun[1], 0.05, 1));
+    s.beam0 = beam(s.el0);
     s.shT = s.sh.map((c) => c.slice());
+    // The key against the skylight. The bake gives each sun's irradiance as
+    // the HDRI recorded it, which for a clear sun is anything from 3:1 to 11:1
+    // over the sky on a face turned to it, depending on how the HDRI was
+    // stitched. A clear summer sky at the zenith is ~5:1 direct to diffuse on a
+    // sun-facing face (DNI ~850 W/m2 against ~170 of sky and ground), so a
+    // clear sun is put there at air mass 1 and carried through the air from
+    // it; a veiled one keeps the ratio it was recorded at.
+    const g0 = SKY_VIEW / Math.sqrt(Math.max(0.02, s.sun[1]));
+    s.skyRef = dot3(shAt(s.sh, s.sun), LUM) * g0;
+    const sunL = dot3(s.sunE, LUM);
+    const r1 = (sunL / s.skyRef) * (BEAM_Z / beamL(s.el0));
+    const clear = clamp((1.0 - s.spread) / 0.6, 0, 1);
+    s.ratio1 = Math.exp((1 - clear) * Math.log(r1) + clear * Math.log(CLEAR_RATIO));
+    s.sunChroma = s.sunE.map((v) => v / sunL);
+    s.skyGain0 = skyGainAt(s.el0);
   }
   const sunO = tmul(R, data.orig.sun);
   // Albedo in absolute terms: the photo divided by its own light averages 1 on
@@ -708,15 +776,28 @@ export async function createTenki(host, { embedded = false } = {}) {
     const b = skies[i0 + 1];
     // one camera, metered for each sky at its own hour: exposure blends in
     // stops; the light adds in linear units
-    const expo = Math.exp((1 - w) * Math.log(a.expo) + w * Math.log(b.expo));
-    const sun = solar(hr);
+    const expo0 = Math.exp((1 - w) * Math.log(a.expo) + w * Math.log(b.expo));
+    // the rubber band past dawn and dusk is the hand's, not the sun's
+    const sun = solar(clamp(hr, DAY[0], DAY[1]));
     const cam = tmul(R, sun.dir);
     const tr = beam(sun.el);
+    const tr1 = TAU.map((t) => Math.exp(-t));
     const phi = Math.atan2(sun.dir[0], sun.dir[2]);
-    // skylight follows the sun's height a little (it is mostly the sky's own)
-    const skyGain = clamp(Math.sqrt(Math.max(0.02, Math.sin(sun.el))), 0.35, 1);
+    const skyGain = skyGainAt(sun.el);
+    // Kasten-Young all the way through: the beam's colour against the zenith
+    // sun (air mass 1, which daylight film is balanced near), luminance 1
+    const trel = tr.map((v, c) => v / tr1[c]);
+    const trl = dot3(trel, LUM);
+    const sunCol = trel.map((v, c) => (v / trl) * KEY[c]);
+    // how far into the evening (or the early morning) the air has got
+    const low = clamp((airmass(sun.el) - 1.15) / 2.6, 0, 1);
+    // The camera meets the hour part way (each sky as it was exposed at its
+    // own hour): as the sun drops the skylight falls faster than the key, and
+    // the exposure opens a little for what is left, so a late afternoon is
+    // warmer and richer, not only darker.
+    const expo = expo0 * Math.exp(Math.log(meterAt(sun.el)) - ((1 - w) * Math.log(meterAt(a.el0)) + w * Math.log(meterAt(b.el0))));
     SH.fill(0);
-    const key = [0, 0, 0];
+    let skyDim = 0;
     for (const [sk, k, j] of [
       [a, (1 - w) * a.scale * expo * cal, 0],
       [b, w * b.scale * expo * cal, 1],
@@ -724,27 +805,40 @@ export async function createTenki(host, { embedded = false } = {}) {
       const g = (SKY_VIEW * skyGain) / Math.sqrt(Math.max(0.02, sk.sun[1]));
       turnSH(sk.sh, phi - sk.phi, sk.shT);
       for (let i = 0; i < 9; i++) for (let c = 0; c < 3; c++) SH[i * 3 + c] += sk.shT[i][c] * k * g;
+      // the sky warms with the sun: the bright, reddened sky round a low sun
+      // (aureole and the horizon band under it) as a warm cosine lobe toward
+      // it. It lights the sun side; the shade side keeps the blue zenith.
+      const aur = AUREOLE * low * sk.skyRef * skyGain * k;
+      for (let i = 0; i < 9; i++) {
+        const yb = SHA[i] * SHY[i](sun.dir[0], sun.dir[1], sun.dir[2]) * aur;
+        for (let c = 0; c < 3; c++) SH[i * 3 + c] += yb * sunCol[c] * sunCol[c];
+      }
+      // the key: a clear sun at its physical ratio to the sky, carried to this
+      // hour's air mass and coloured by it
+      const sunL = sk.ratio1 * sk.skyRef * trl;
       for (let c = 0; c < 3; c++) {
         sunDir[j * 3 + c] = cam[c];
-        // the recorded sun, carried to this hour's air mass
-        sunE[j * 3 + c] = sk.sunE[c] * (tr[c] / sk.beam0[c]) * KEY[c] * k;
-        key[c] += sunE[j * 3 + c];
+        sunE[j * 3 + c] = sunL * sunCol[c] * sk.sunChroma[c] * k;
       }
       sunSoft[j] = sk.soft;
       spread[j] = sk.spreadRad;
+      skyDim += (j ? w : 1 - w) * Math.min(1, skyGain / sk.skyGain0);
     }
     keyDir[0] = cam[0];
     keyDir[1] = cam[1];
     keyDir[2] = cam[2];
-    // clouds take the sun's colour now against the hour they were recorded at
-    const ref = a.beam0.map((v, c) => v * (1 - w) + b.beam0[c] * w);
-    const rel = tr.map((v, c) => v / ref[c]);
-    const rl = dot3(rel, LUM);
-    const lift = Math.pow(rl, 0.35);
-    for (let c = 0; c < 3; c++) cloudTint[c] = (rel[c] / rl) ** 0.6 * lift;
-    // sky: decoded x = L K (median .5); shown at the photo's sky median, times the exposure
+    // clouds take the sun's colour: white under a high sun (the HDRIs were
+    // balanced so), warming and dimming with it through the air as it drops.
+    // A cloud is lit by the sun and, a quarter of it, by the blue sky round
+    // it, which keeps an evening cloud peach rather than yellow.
+    const rl = Math.min(1, trl / NOON_TRL);
+    const ct = trel.map((v) => (v / trl) ** CLOUD_WARM);
+    const ctl = dot3(ct, LUM);
+    for (let c = 0; c < 3; c++) cloudTint[c] = ((1 - CLOUD_FILL) * (ct[c] / ctl) * Math.pow(rl, 0.6) + CLOUD_FILL * CLOUD_SKY[c] * skyDim) / ((1 - CLOUD_FILL) + CLOUD_FILL * CLOUD_SKY[c]);
+    // sky: decoded x = L K (median .5); shown at the photo's sky median, times
+    // the exposure; the blue of it dims with the skylight
     const gs = (data.skyMed / 0.5) * expo;
-    return { i0, w, skyK: [(1 - w) * gs, w * gs] };
+    return { i0, w, skyK: [(1 - w) * gs, w * gs], skyDim };
   };
 
   const renderVis = (lt, moving) => {
@@ -850,6 +944,7 @@ export async function createTenki(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uKeyDir, keyDir);
     gl.uniform3fv(u.uCloudTint, cloudTint);
     gl.uniform1f(u.uRim, RIM);
+    gl.uniform1f(u.uSkyDim, lt.skyDim);
     gl.uniform1f(u.uDbg, dbg);
     gl.uniform1f(u.uCal, cal);
     gl.uniform1f(u.uExpo, 2 ** expoStops);
