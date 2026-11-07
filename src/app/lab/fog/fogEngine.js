@@ -87,10 +87,13 @@ const LEVELS = 6;
 // this is the cloud's local detail, which the veil keeps.
 const DETAIL_W = [0, 0, 0, 1];
 const DETAIL_K = 0.65;
-// The in-scatter over the sky, display-encoded: pulled to a clear cyan low in
-// the sky, and never lifted past a pale blue-grey, so the veil cannot go milky.
-const AIR_LOW = "#9fc4d6";
-const AIR_CAP = "#d6e4e8";
+// The in-scatter over the sky keeps the open sky's own saturation at each
+// elevation: below about 36 deg it is the open blue measured between the
+// clouds (uSkyLow, ~#5a9fcc, deepening to uSkyMid, ~#2f7fb8), easing into the
+// wide blur only higher up, where that blur is the cobalt itself. Nothing
+// lifts it toward white, so the low sky veils to a deep cyan-blue, not milk.
+const AIR_OPEN_TOP = [36, 58]; // degrees: open-sky colour below, the blur above
+const SKY_GAIN = 1.22; // the low sky's longer column, brighter than a tower's air
 const hex = (h) => [1, 3, 5].map((i) => (parseInt(h.slice(i, i + 2), 16) / 255).toFixed(4)).join(", ");
 // A display colour as a tint: scaled to unit luminance, so a grade toward it
 // sets the hue at a pixel's own luminance and lifts nothing.
@@ -329,18 +332,31 @@ void main() {
   // cumulus' white averaged in, and nowhere is it lifted past a pale
   // blue-grey: a veil that brightens toward milk takes the clouds' value
   // range with it.
-  vec4 a = texture(uAir, uv);
-  vec3 air = (a.rgb + uSkyMean * 0.02) / (a.a + 0.02);
-  air = mix(vec3(${hex(AIR_LOW)}), air, smoothstep(16.0, 60.0, aux.b * 90.0));
-  // Thick haze scatters more often and lifts toward the brighter horizon.
-  float thick = 1.0 - Ts.g;
-  air = pow(min(air * (1.0 + 0.08 * thick), vec3(${hex(AIR_CAP)})), vec3(2.2));
   // In front of a tower it is the open sky at that tower's own elevation: a
   // far tower fades into the blue it stands in, never toward the pale rim or
   // the cloud beside it (the wide blur is mostly cumulus down there, and
   // turns the towers to milk). Clamped to the mid sky: the deep cobalt
   // overhead is the thinnest air in the frame and lights the least of it.
-  vec3 open = pow(mix(uSkyLow, uSkyMid, smoothstep(18.0, 34.0, aux.b * 90.0)), vec3(2.2));
+  float elev = aux.b * 90.0;
+  vec3 openD = mix(uSkyLow, uSkyMid, smoothstep(18.0, 34.0, elev));
+  vec3 open = pow(openD, vec3(2.2));
+  // In front of the sky it is the same open blue, low and mid: the wide blur
+  // down there is mostly cumulus and would print a milky wash where the low
+  // sky should stay deep. Only higher, where the blur is the cobalt opening
+  // itself, does it take over, so the zenith keeps its gradient. Nothing is
+  // lifted toward white: the veil holds the sky's saturation at every height.
+  vec4 a = texture(uAir, uv);
+  vec3 blur = (a.rgb + uSkyMean * 0.02) / (a.a + 0.02);
+  // Where the two meet, the blur is held to the open blue's luminance, so a
+  // cloud bank averaged into it cannot pale the band above the low sky; high
+  // overhead it is the blur as it is, the cumulus' own field.
+  blur *= mix(min(1.0, luma(openD) / max(luma(blur), 1e-3)), 1.0, smoothstep(${AIR_OPEN_TOP[0].toFixed(1)}, ${AIR_OPEN_TOP[1].toFixed(1)}, elev));
+  // The low sky is seen through the longest column, which gathers more light
+  // than the short path to a tower: the same hue and saturation, a little
+  // brighter (a gain, not a lift toward white), so a far tower veiled to the
+  // open blue at its height still reads as a deeper silhouette against it.
+  openD = min(openD * mix(${SKY_GAIN.toFixed(2)}, 1.0, smoothstep(24.0, 44.0, elev)), vec3(1.0));
+  vec3 air = pow(mix(openD, blur, smoothstep(${AIR_OPEN_TOP[0].toFixed(1)}, ${AIR_OPEN_TOP[1].toFixed(1)}, elev)), vec3(2.2));
   // And the sun's light, scattered forward: strongest toward the sun, just
   // past the top of the frame, and next to nothing in the low sky down the
   // street, which looks away from it and keeps the sky's cyan.
@@ -366,7 +382,11 @@ void main() {
   // the low cloud reads as cloud through the air, not as a flat wash.
   vec4 dtl = texture(uDetail, uv);
   vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
-  sky += ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
+  vec3 kept = ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
+  sky += kept;
+  // How much of the sky's light is still the cloud's own: what the air lets
+  // through, and the sunlit detail the veil keeps over the air's blue.
+  float own = clamp(luma(scene * Ts + max(kept, 0.0)) / max(luma(sky), 1e-4), 0.0, 1.0);
   vec3 col = mix(tower, sky, cov);
   // How much of this pixel's light is the sun's, for the split grade the
   // finish runs over the composite: a cumulus' own light (sunlit, near-neutral
@@ -376,7 +396,7 @@ void main() {
   // plate and lit by the sky alone, takes none of it. On a tower, the clear
   // air in front of its light stone and glints, as before.
   float share = luma(sun) / (luma(sun) + luma(air) + 1e-4);
-  float warm = mix(smoothstep(0.35, 0.85, Tt.g), cloud * (Ts.g + (1.0 - Ts.g) * mix(0.3, 1.0, share)), cov);
+  float warm = mix(smoothstep(0.35, 0.85, Tt.g), cloud * (own + (1.0 - own) * mix(0.3, 1.0, share)), cov);
   // Display-encoded and untoned, for the film finish. Alpha packs two
   // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
   // tower still seen through the air (the glass grade's weight, so far towers
@@ -388,14 +408,21 @@ void main() {
 // The film's response, shared by the halation threshold and the finish. In
 // display terms: the mids and the sky are left where the plate put them, the
 // upper range opens so the cumulus tops come up to a warm white, and a soft
-// shoulder lands everything under 0.985 (the film never clips).
+// shoulder lands everything under 0.985 (the film never clips). The top of
+// that shoulder is warm: above about 0.9 in luminance the light rolls off
+// toward cream #FFF1E2 at its own (slightly compressed) luminance, so the
+// brightest cumulus tops and glints print cream, never neutral paper-white.
+const SHOULDER_COL = "#FFF1E2";
 const TONE = `
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 vec3 tone(vec3 x) {
   vec3 y = x + 0.11 * smoothstep(0.5, 0.88, x);
   vec3 k = vec3(0.9);
-  return min(y, k) + 0.085 * (1.0 - exp(-max(y - k, 0.0) / 0.085));
+  y = min(y, k) + 0.085 * (1.0 - exp(-max(y - k, 0.0) / 0.085));
+  float l = luma(y);
+  float top = l - 0.4 * max(l - 0.9, 0.0);
+  return mix(y, top * vec3(${tint(SHOULDER_COL)}), smoothstep(0.86, 0.96, l));
 }
-float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 // What exposes the halation: the toned highlights, above about 0.8, that are
 // light rather than sky: the sunlit cumulus and glints, near-neutral to warm.
 // The pale cyan of the low sky in haze is bright too, but it is a cool field,
@@ -480,7 +507,7 @@ void main() {
   // keeps the colour the air gave it.
   l = luma(c);
   vec3 tint = mix(vec3(${tint("#B7C5C5")}), vec3(${tint("#DFE1DE")}), smoothstep(0.5, 0.7, l));
-  tint = mix(tint, vec3(${tint("#FFF1E2")}), smoothstep(0.72, 0.95, l));
+  tint = mix(tint, vec3(${tint("#FFF1E2")}), smoothstep(0.68, 0.92, l));
   // On a tower only the top end, as the glass grade above owns its mids.
   c = mix(c, l * tint, mix(smoothstep(0.42, 0.6, l), smoothstep(0.72, 0.95, l), solid) * 0.85 * warm);
   float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
