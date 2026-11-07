@@ -18,8 +18,8 @@ export function createPluckSound() {
       const now = performance.now();
       if (now - last < 24) return;
       last = now;
-      // drawn is device px; a full pull is ~20.
-      const s = Math.min(1, drawn / 20);
+      // drawn is device px; a full pull is ~40.
+      const s = Math.min(1, drawn / 40);
       if (s < 0.08) return;
       const gain = -20 + 16 * Math.sqrt(s) + Math.min(2, speed / 1500) + (Math.random() * 2 - 1) * 0.8;
       const rate = (f1 / 1.5) ** 0.35 * (0.98 + Math.random() * 0.04);

@@ -34,7 +34,7 @@ import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./stri
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
 // Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
-// structFloor, cloudLift, hal, diffuse, zenith, polar, polarSat, polarHue,
+// structFloor, cloudLift, cloudFrom, sculpt, shadeTint, hal, diffuse, zenith, polar, polarSat, polarHue,
 // vib, vibFloor, vibHue, vibV override the grade.
 
 const ASSET = "/lab/catenary/";
@@ -90,9 +90,12 @@ const FILM = {
 //    toward graphite, STRUCT of the way, keeping its own luminance texture,
 //    lifted (y * STRUCT_GAIN + STRUCT_FLOOR) and given a slight warm bias
 //    that the film's cool toe and shadow tint bring back to near neutral.
-//  - Cloud: past a knee the lit masses take CLOUD_LIFT of the headroom left
-//    and draw toward warm-neutral paper (CLOUD_TOP, #f3eee4); a share of the
-//    headroom, so it bends toward white and never reaches it.
+//  - Cloud: modelled at low frequency, never per pixel (a per-pixel knee
+//    steepened every edge into a hard rim). An S-curve over the cloud's own
+//    range, driven by the blurred plate: the lit masses take CLOUD_LIFT of
+//    the headroom left and draw toward warm-neutral paper (CLOUD_TOP,
+//    #f3eee4), bending toward white and never reaching it; the shade masses
+//    sink toward the blue-grey of skylight (CLOUD_SHADE).
 //  - Halation and diffusion: the cloud light, blurred thin, minus the cloud
 //    itself, is laid on in a warm tint at HAL (a fine glow where cloud meets
 //    sky and where steel and wires cross it); blurred wide, screened in at
@@ -107,7 +110,15 @@ const CLOUD_TOP = [0xf3, 0xee, 0xe4];
 // The print bleaches colour on its shoulder (saturation eases off toward
 // white), so the plate aims this much warmer (linear) to land on CLOUD_TOP.
 const CLOUD_AIM = [1.03, 1, 0.9];
-const CLOUD_LIFT = 0.4;
+const CLOUD_LIFT = 0.48;
+// The cloud's modelling (see PLATE): where its range starts (blurred luma,
+// gamma), how far the S-curve goes (0 straight, 1 the doubled smoothstep),
+// and how far the shade masses draw toward CLOUD_SHADE, the blue-grey of a
+// cumulus underside lit only by the sky.
+const CLOUD_FROM = 0.6;
+const SCULPT = 0.8;
+const SHADE_TINT = 0.35;
+const CLOUD_SHADE = [0xa6, 0xb6, 0xc8];
 const HAL = 0.7;
 const HAL_TINT = [1, 0.7, 0.45]; // linear
 const DIFFUSE = 0.18;
@@ -159,6 +170,8 @@ uniform vec4 uStruct;  // amount, gain, floor, zenith
 uniform vec3 uStructTint;
 uniform vec3 uCloudTop; // linear
 uniform vec3 uGlow;     // cloud lift, halation, diffusion
+uniform vec3 uSculpt;   // cloud range floor (gamma), S-curve amount, shade tint
+uniform vec3 uCloudShade; // linear
 uniform vec3 uHalTint;
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
@@ -183,9 +196,14 @@ void main() {
   // Polariser. The mask reads the plate a mip up (about 2 image px, under a
   // device px here) so the film grain in thin cloud does not speckle it.
   vec3 g = pow(c, vec3(1.0 / 2.2));
-  vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.0).rgb, vec3(1.0 / 2.2)));
+  // The saturation gate is wide (S 0.08 to 0.44, about linear between): a
+  // cloud's fringe is cloud and sky mixed, so it takes the grade in
+  // proportion. A narrow gate (it was 0.26-0.38) graded the whole fringe as
+  // sky and let go of it all at once a few px further in, a darkened,
+  // over-saturated cobalt ring hard against every cumulus: the HDR rim.
+  vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.5).rgb, vec3(1.0 / 2.2)));
   float hue = hm.x * 360.0;
-  float sky = smoothstep(0.26, 0.38, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
+  float sky = smoothstep(0.08, 0.44, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
             * smoothstep(0.25, 0.4, hm.z) * (1.0 - key.r);
   // Toward the zenith: the top edge, leaning to the upper right.
   vec2 f = p / uRes;
@@ -210,16 +228,46 @@ void main() {
   // Structure: graphite, not cobalt.
   c = mix(c, graphite(c), key.r * uStruct.x);
 
-  // Sunlit cloud: past the knee, a share of the headroom left, drawn toward
-  // warm-neutral paper. Blue sky (chroma), the shade side of the cloud
-  // (luminance) and the steel are left alone.
+  // Cloud modelling, low frequency. The light is read off the plate a long
+  // way down its mips (about 25 plate px of blur), so the curve shapes the
+  // cloud's masses, not its edges or grain: each pixel takes the ratio the
+  // blurred light earns, its own detail riding on it unchanged. Over the
+  // cloud's own range (blurred luma, gamma, CLOUD_FROM to 0.94) a doubled
+  // smoothstep: the shade masses sink toward blue-grey skylight, the sunlit
+  // masses take CLOUD_LIFT of the headroom left toward warm-neutral paper
+  // (CLOUD_TOP). At the fringe the blurred light is a sky-and-cloud mix
+  // below the range, so the curve is identity there: no step, no rim.
+  vec2 ts = vec2(24.0) / vec2(textureSize(uPlate, 0));
+  vec3 lo = vec3(0.0);
+  for (int j = -1; j <= 1; j++) {
+    for (int i = -1; i <= 1; i++) {
+      float wt = (i == 0 ? 2.0 : 1.0) * (j == 0 ? 2.0 : 1.0);
+      lo += wt * textureLod(uPlate, uv + vec2(float(i), float(j)) * ts, 4.5).rgb;
+    }
+  }
+  lo /= 16.0;
+  float yl = dot(lo, LUMA);
+  float ylg = pow(yl, 1.0 / 2.2);
+  float lmx = max(lo.r, max(lo.g, lo.b));
+  float lch = (lmx - min(lo.r, min(lo.g, lo.b))) / max(lmx, 1e-4);
+  float mass = (1.0 - smoothstep(0.32, 0.55, lch)) * (1.0 - key.r);
+  float s = clamp((ylg - uSculpt.x) / (0.94 - uSculpt.x), 0.0, 1.0);
+  float s1 = s * s * (3.0 - 2.0 * s);
+  float s2 = s1 * s1 * (3.0 - 2.0 * s1);
+  float lit = mass * s2;
+  // Shade: in from the fringe (it starts at s ~0.12), deepest mid-range.
+  float shade = mass * smoothstep(0.0, 0.25, s) * (1.0 - s2);
+  float yc = uSculpt.x + (0.94 - uSculpt.x) * mix(s, s2, uSculpt.y);
+  yc += (1.0 - yc) * uGlow.x * s2;
+  yc = mix(ylg, yc, mass * step(uSculpt.x, ylg));
+  float ratio = pow(yc / max(ylg, 1e-4), 2.2);
   float y = dot(c, LUMA);
-  float yg = pow(y, 1.0 / 2.2);
-  float mx = max(c.r, max(c.g, c.b));
-  float chroma = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-4);
-  float top = smoothstep(0.6, 0.92, yg) * (1.0 - smoothstep(0.3, 0.5, chroma)) * (1.0 - key.r);
-  float yt = y + (1.0 - y) * uGlow.x * top;
-  c = mix(c * (yt / max(y, 1e-5)), uCloudTop * (yt / dot(uCloudTop, LUMA)), top);
+  float yt = y * ratio;
+  c *= ratio;
+  c = mix(c, uCloudTop * (yt / dot(uCloudTop, LUMA)), 0.8 * lit);
+  c = mix(c, uCloudShade * (yt / dot(uCloudShade, LUMA)), uSculpt.z * shade);
+  float top = lit;
+  float yg = pow(dot(c, LUMA), 1.0 / 2.2);
 
   // Halation: the thin cloud light past the cloud's own edge, warm. Wide
   // diffusion: screened, so it lifts the cobalt and never clips.
@@ -400,6 +448,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
   ];
   const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
   const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("hal", HAL), 0, 2), clamp(num("diffuse", DIFFUSE), 0, 1)];
+  const sculpt = [clamp(num("cloudFrom", CLOUD_FROM), 0.3, 0.9), clamp(num("sculpt", SCULPT), 0, 1), clamp(num("shadeTint", SHADE_TINT), 0, 1)];
+  const cloudShade = CLOUD_SHADE.map((v) => toLin(v / 255));
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
@@ -633,6 +683,8 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform3fv(pr.u.uStructTint, STRUCT_TINT);
     gl.uniform3fv(pr.u.uCloudTop, cloudTop);
     gl.uniform3fv(pr.u.uGlow, glow);
+    gl.uniform3fv(pr.u.uSculpt, sculpt);
+    gl.uniform3fv(pr.u.uCloudShade, cloudShade);
     gl.uniform3fv(pr.u.uHalTint, HAL_TINT);
   };
   const drawScene = () => {
