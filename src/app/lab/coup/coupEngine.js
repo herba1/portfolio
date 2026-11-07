@@ -16,20 +16,24 @@
 // Mallarmé breaks his phrases into cascades: a thread of one size and cut,
 // each line starting where the last one stopped ("stair") or hanging under
 // it ("flush"). The minor lines move as these threads.
+//
+// And the page speaks in two voices. The main sentence, RIEN and EXCEPTÉ
+// stand in the roman grotesk; the subordinate threads answer in the serif
+// italic. The voice belongs to the thread, so it survives every throw.
 const BLOCKS = [
-  { tier: 0, lines: ["UN COUP DE DÉS"] },
-  { tier: 0, lines: ["JAMAIS"] },
-  { tier: 0, lines: ["N’ABOLIRA"] },
-  { tier: 0, lines: ["LE HASARD"] },
-  { tier: 1, lines: ["RIEN", "N’AURA EU LIEU", "QUE LE LIEU"] },
-  { tier: 1, lines: ["EXCEPTÉ", "PEUT-ÊTRE", "UNE CONSTELLATION"] },
-  { tier: 1, lines: ["COMME SI"] },
-  { tier: 1, lines: ["DU FOND D’UN NAUFRAGE"] },
-  { tier: 2, lines: ["soit", "que", "l’Abîme", "blanchi", "étale", "furieux"] },
-  { tier: 2, lines: ["une insinuation simple", "au silence enroulée avec ironie"] },
-  { tier: 2, lines: ["Toute Pensée émet un Coup de Dés"] },
+  { tier: 0, voice: "roman", lines: ["UN COUP DE DÉS"] },
+  { tier: 0, voice: "roman", lines: ["JAMAIS"] },
+  { tier: 0, voice: "roman", lines: ["N’ABOLIRA"] },
+  { tier: 0, voice: "roman", lines: ["LE HASARD"] },
+  { tier: 1, voice: "roman", lines: ["RIEN", "N’AURA EU LIEU", "QUE LE LIEU"] },
+  { tier: 1, voice: "roman", lines: ["EXCEPTÉ", "PEUT-ÊTRE", "UNE CONSTELLATION"] },
+  { tier: 1, voice: "italic", lines: ["COMME SI"] },
+  { tier: 1, voice: "roman", lines: ["DU FOND D’UN NAUFRAGE"] },
+  { tier: 2, voice: "italic", lines: ["soit", "que", "l’Abîme", "blanchi", "étale", "furieux"] },
+  { tier: 2, voice: "italic", lines: ["une insinuation simple", "au silence enroulée avec ironie"] },
+  { tier: 2, voice: "italic", lines: ["Toute Pensée émet un Coup de Dés"] },
 ];
-const LINES = BLOCKS.flatMap((b, bi) => b.lines.map((text, li) => ({ text, tier: b.tier, block: bi, line: li })));
+const LINES = BLOCKS.flatMap((b, bi) => b.lines.map((text, li) => ({ text, tier: b.tier, voice: b.voice, block: bi, line: li })));
 
 const TIER1_SIZES = [20, 24, 28];
 const TIER2_SIZES = [13, 14, 16, 18];
@@ -38,6 +42,20 @@ const TIER2_SIZES = [13, 14, 16, 18];
 const lawPx = (size) => -0.043 * (size - 12);
 const tracking = (size) => (size < 20 ? `${lawPx(size).toFixed(3)}px` : `${(lawPx(size) / size).toFixed(4)}em`);
 const lineHeight = (size) => Math.max(4, Math.round((size * 1.08) / 4) * 4);
+
+// The italic is emphasis against the roman at the thread's size, so it takes
+// the four compensations together: 1.07em, the 430 cut, "opsz" 10 (all in
+// the CSS), and its tracking opened 0.16px past the law's answer. Its lines
+// are set on the leading of the italic's own size, on the 4px grid.
+const SERIF_SIZE = 1.07;
+const SERIF_OPEN = 0.16;
+const isItalic = (voice) => voice === "italic";
+const trackingFor = (voice, size) => {
+  if (!isItalic(voice)) return tracking(size);
+  const px = lawPx(size) + SERIF_OPEN;
+  return size < 20 ? `${px.toFixed(3)}px` : `${(px / size).toFixed(4)}em`;
+};
+const leadFor = (voice, size) => lineHeight(isItalic(voice) ? size * SERIF_SIZE : size);
 const snap4 = (v) => Math.round(v / 4) * 4;
 
 function mulberry32(a) {
@@ -72,11 +90,13 @@ export async function createCoup(host, { embedded = false } = {}) {
     const el = document.createElement("div");
     el.className = "coup-thread";
     el.dataset.tier = String(b.tier);
+    el.dataset.voice = b.voice;
     el.setAttribute("role", "presentation");
     host.appendChild(el);
     return {
       bi,
       tier: b.tier,
+      voice: b.voice,
       el,
       lines: [],
       x: 0, y: 0, s: 16, r: 0, m: 1,
@@ -111,12 +131,15 @@ export async function createCoup(host, { embedded = false } = {}) {
 
   // Make sure every cut is loaded before anything is measured.
   try {
-    const family = getComputedStyle(host).fontFamily;
+    const cs = getComputedStyle(host);
+    const family = cs.fontFamily;
+    const serifFamily = cs.getPropertyValue("--coup-serif").trim();
     await Promise.all([
       document.fonts.load(`700 80px ${family}`, "UN COUP DE DÉS"),
-      document.fonts.load(`600 24px ${family}`, "COMME SI"),
+      document.fonts.load(`600 24px ${family}`, "RIEN"),
       document.fonts.load(`440 16px ${family}`, "soit"),
       document.fonts.load(`490 13px ${family}`, "soit"),
+      serifFamily && document.fonts.load(`italic 430 16px ${serifFamily}`, "soit l’Abîme COMME SI"),
     ]);
     await document.fonts.ready;
   } catch {
@@ -129,6 +152,8 @@ export async function createCoup(host, { embedded = false } = {}) {
   const wt = (name, fb) => parseFloat(tok.getPropertyValue(name)) || fb;
   const REST_W = [wt("--font-weight-bold", 700), wt("--font-weight-semibold", 600)];
   const FLIGHT_W = wt("--font-weight-meta", 440);
+  const SERIF_W = wt("--font-weight-serif", 430);
+  const serif = tok.getPropertyValue("--coup-serif").trim() || "serif";
 
   const widths = new Map();
   const measure = (item, size) => {
@@ -136,10 +161,13 @@ export async function createCoup(host, { embedded = false } = {}) {
     let wv = widths.get(key);
     if (wv == null) {
       measurer.dataset.tier = String(item.tier);
+      measurer.dataset.voice = item.voice;
       if (item.tier === 2 && size <= 13) measurer.dataset.small = "";
       else delete measurer.dataset.small;
-      measurer.style.fontSize = `${size}px`;
-      measurer.style.letterSpacing = tracking(size);
+      measurer.style.fontSize = `${isItalic(item.voice) ? size * SERIF_SIZE : size}px`;
+      // resolved to px here: the measurer is set at the italic's own size,
+      // which an em would be read against
+      measurer.style.letterSpacing = isItalic(item.voice) ? `${(lawPx(size) + SERIF_OPEN).toFixed(3)}px` : tracking(size);
       measurer.textContent = item.text;
       wv = measurer.getBoundingClientRect().width;
       widths.set(key, wv);
@@ -159,10 +187,14 @@ export async function createCoup(host, { embedded = false } = {}) {
     const key = `${item.i}|${size}`;
     let v = inks.get(key);
     if (v == null) {
-      pen.font = `${restWeight(item.tier, size)} ${size}px ${family}`;
-      if ("letterSpacing" in pen) pen.letterSpacing = `${lawPx(size).toFixed(3)}px`;
+      const it = isItalic(item.voice);
+      pen.font = it ? `italic ${SERIF_W} ${size * SERIF_SIZE}px ${serif}` : `${restWeight(item.tier, size)} ${size}px ${family}`;
+      if ("letterSpacing" in pen) pen.letterSpacing = `${(lawPx(size) + (it ? SERIF_OPEN : 0)).toFixed(3)}px`;
       const m = pen.measureText(item.text);
       v = { l: -m.actualBoundingBoxLeft, r: m.actualBoundingBoxRight };
+      // the canvas cannot set "opsz", so the italic's advance is read off the
+      // page and only its side bearings off the canvas
+      if (it) v.r = measure(item, size) - (m.width - m.actualBoundingBoxRight);
       if (!Number.isFinite(v.l) || !Number.isFinite(v.r)) v = { l: 0, r: measure(item, size) };
       inks.set(key, v);
     }
@@ -172,11 +204,10 @@ export async function createCoup(host, { embedded = false } = {}) {
   // Where the baseline falls inside a line box, and how tall the capitals
   // stand on it, per em. The line box centres the font's content area, so
   // the baseline sits at half the line plus half of (ascent - descent).
-  let baseK = 0.36;
-  let capK = 0.7;
-  {
+  const probeBase = (voice, fb) => {
     const probe = document.createElement("div");
-    probe.className = "coup-measure";
+    probe.className = "coup-thread coup-measure";
+    probe.dataset.voice = voice;
     probe.style.cssText = "font-size:100px;line-height:200px;";
     probe.textContent = "H";
     const mark = document.createElement("span");
@@ -184,13 +215,19 @@ export async function createCoup(host, { embedded = false } = {}) {
     probe.appendChild(mark);
     host.appendChild(probe);
     const top = mark.getBoundingClientRect().top - probe.getBoundingClientRect().top;
-    if (Number.isFinite(top) && top > 100 && top < 200) baseK = (top - 100) / 100;
     probe.remove();
+    return Number.isFinite(top) && top > 100 && top < 200 ? (top - 100) / 100 : fb;
+  };
+  const baseK = probeBase("roman", 0.36);
+  const baseKSerif = probeBase("italic", baseK);
+  let capK = 0.7;
+  {
     pen.font = `${REST_W[0]} 100px ${family}`;
     const cap = pen.measureText("H").actualBoundingBoxAscent / 100;
     if (Number.isFinite(cap) && cap > 0.4 && cap < 1) capK = cap;
   }
-  const baseOff = (size) => lineHeight(size) / 2 + baseK * size;
+  const baseOff = (size, voice) =>
+    isItalic(voice) ? leadFor(voice, size) / 2 + baseKSerif * size * SERIF_SIZE : lineHeight(size) / 2 + baseK * size;
 
   let W = 1;
   let H = 1;
@@ -364,24 +401,30 @@ export async function createCoup(host, { embedded = false } = {}) {
     for (const blk of blocks) {
       const sizes = blk.tier === 1 ? TIER1_SIZES : TIER2_SIZES;
       const size = Math.max(10, Math.round(sizes[Math.floor(rng() * sizes.length)] * scale));
-      const h = lineHeight(size);
-      const bo = baseOff(size);
+      const h = leadFor(blk.voice, size);
+      const bo = baseOff(size, blk.voice);
       const many = blk.items.length > 1;
       const prefersStair = many && (blk.items.length > 3 || rng() < 0.6);
+      const italic = isItalic(blk.voice);
       const g = blk.items.map((it) => ink(it, size));
       const ws = blk.items.map((it) => measure(it, size));
       // A cascade steps onto the grid: each line starts on the first column
       // line past where the one above it stopped. If that will not fit, it
       // steps on half columns; then freely; then it hangs flush; then it
       // loosens its spacing, but never below the hard clearance.
-      const passes = prefersStair
-        ? [["grid", 1], ["half", 1], ["stair", 1], ["flush", 1], ["flush", 0.6], ["flush", 0]]
-        : [["flush", 1], ["flush", 0.6], ["flush", 0]];
+      // An italic descent is not stepped at all: each word hangs from the
+      // last one's ink, its ink starting where the last one's stops, one
+      // line lower, with nothing added. The words' own lengths make the fall.
+      const passes = !prefersStair
+        ? [["flush", 1], ["flush", 0.6], ["flush", 0]]
+        : italic
+          ? [["ink", 1], ["ink", 0.6], ["flush", 1], ["flush", 0.6], ["flush", 0]]
+          : [["grid", 1], ["half", 1], ["stair", 1], ["flush", 1], ["flush", 0.6], ["flush", 0]];
       let best = null;
       let rel = [];
       for (const [cut, loose] of passes) {
         const stair = cut !== "flush";
-        const pitch = stair ? h + snap4(h * 0.5) : h;
+        const pitch = stair && cut !== "ink" ? h + snap4(h * 0.5) : h;
         const space = size * 0.32;
         // each line's ink left, relative to the first line's
         const L = [0];
@@ -390,6 +433,7 @@ export async function createCoup(host, { embedded = false } = {}) {
           if (cut === "grid") L.push(Math.ceil((prevR + space) / col - 1e-6) * col);
           else if (cut === "half") L.push(Math.ceil((prevR + space) / (col / 2) - 1e-6) * (col / 2));
           else if (cut === "stair") L.push(prevR + space);
+          else if (cut === "ink") L.push(prevR);
           else L.push(0);
         }
         rel = blk.items.map((it, n) => ({ dx: L[n] + g[0].l - g[n].l, dy: n * pitch }));
@@ -610,8 +654,8 @@ export async function createCoup(host, { embedded = false } = {}) {
       if (Math.abs(s - b.shown) > 0.01) {
         b.shown = s;
         el.style.fontSize = `${s.toFixed(2)}px`;
-        el.style.letterSpacing = tracking(s);
-        el.style.lineHeight = `${lineHeight(s)}px`;
+        el.style.letterSpacing = trackingFor(b.voice, s);
+        el.style.lineHeight = `${leadFor(b.voice, s)}px`;
         if (b.tier === 2 && s <= 13.5) el.dataset.small = "";
         else delete el.dataset.small;
       }
@@ -627,7 +671,8 @@ export async function createCoup(host, { embedded = false } = {}) {
       const v = Math.hypot(b.vx, b.vy);
       let f = Math.min(1, Math.max(d / (110 * Math.max(0.6, u)), v / (520 * Math.max(0.6, u))));
       f = f * f * (3 - 2 * f);
-      if (b.tier < 2) {
+      // the italic is already the light cut; only the roman thins in flight
+      if (b.tier < 2 && !isItalic(b.voice)) {
         const w = Math.round(REST_W[b.tier] - (REST_W[b.tier] - FLIGHT_W) * f);
         if (w !== b.shownW) {
           b.shownW = w;
@@ -729,7 +774,7 @@ export async function createCoup(host, { embedded = false } = {}) {
       if (b.hidden) continue;
       const size = Math.round(b.ts);
       const w = Math.max(...b.lines.map((it, n) => b.to[n].x * b.s + measure(it, size)));
-      const h = (b.to[b.to.length - 1]?.y || 0) * b.s + lineHeight(b.s);
+      const h = (b.to[b.to.length - 1]?.y || 0) * b.s + leadFor(b.voice, b.s);
       const cx = b.x + w / 2;
       const cy = b.y + h / 2;
       const d2 = (cx - x) ** 2 + (cy - y) ** 2;

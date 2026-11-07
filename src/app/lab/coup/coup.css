@@ -2,6 +2,13 @@
   --coup-ground: #fcfbf8;
   --coup-ink: #151514;
   --coup-gutter: #e9e7e1;
+  /* The second voice: the serif italic, and its four compensations against
+     the grotesk (CLAUDE.md, Emphasis). The tracking opening is added to
+     the law's answer in the engine, which knows the size. */
+  --coup-serif: var(--coup-serif-face), "Iowan Old Style", Georgia, serif;
+  --font-weight-serif: 430;
+  --coup-serif-size: 1.07em;
+  --coup-serif-opsz: "opsz" 10;
   position: absolute;
   inset: 0;
   overflow: clip;
@@ -89,6 +96,25 @@
 
 .coup-thread[data-tier="2"][data-small] {
   font-weight: var(--font-weight-body-sm);
+}
+
+/* The subordinate threads speak in the italic. The voice belongs to the
+   thread, so it holds through every throw and through flight. */
+.coup-thread[data-voice="italic"] .coup-line {
+  font-family: var(--coup-serif);
+  font-style: italic;
+  font-size: var(--coup-serif-size);
+  font-weight: var(--font-weight-serif);
+  font-variation-settings: var(--coup-serif-opsz);
+  font-feature-settings: normal;
+}
+
+.coup-thread.coup-measure[data-voice="italic"] {
+  font-family: var(--coup-serif);
+  font-style: italic;
+  font-weight: var(--font-weight-serif);
+  font-variation-settings: var(--coup-serif-opsz);
+  font-feature-settings: normal;
 }
 
 .coup-measure {

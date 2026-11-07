@@ -1,8 +1,16 @@
 "use client";
 
+import { Newsreader } from "next/font/google";
 import { useEffect, useRef, useState } from "react";
 
 import "./coup.css";
+
+// The poem's second voice. Mallarmé's page is roman against italic: the
+// main sentence and its capitals in one cut, the subordinate threads in
+// another, so they read as counter-melodies. Newsreader (Production Type,
+// OFL) carries a real optical-size axis, so "opsz" 10 sets the sturdy
+// small-text italic beside the grotesk.
+const serif = Newsreader({ subsets: ["latin"], axes: ["opsz"], style: ["italic"], display: "block", variable: "--coup-serif-face" });
 
 export default function Piece({ embedded = false }) {
   const ref = useRef(null);
@@ -40,7 +48,7 @@ export default function Piece({ embedded = false }) {
   return (
     <Root
       ref={ref}
-      className="coup"
+      className={`coup ${serif.variable}`}
       data-ready={ready ? "" : undefined}
       lang="fr"
       aria-label="Un coup de dés jamais n’abolira le hasard"
