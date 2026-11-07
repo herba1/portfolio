@@ -33,8 +33,9 @@ import { NODES, createWorld, locate, offsetAt, pullShape, sampleY } from "./stri
 //
 // Query: ?still=1 (no breeze), ?pluck=<wire 0-5>&t=<seconds after release>
 // [&at=<0..1 along the visible run>&amp=<0..1>], ?pull=<wire> holds the pull.
-// Any numeric FILM key (exposure, whitePoint, ...), warmTop and polar,
-// polarSat, polarHue, vib, vibFloor, vibHue, vibV override the grade.
+// Any numeric FILM key (exposure, whitePoint, ...), struct, structGain,
+// structFloor, cloudLift, hal, diffuse, zenith, polar, polarSat, polarHue,
+// vib, vibFloor, vibHue, vibV override the grade.
 
 const ASSET = "/lab/catenary/";
 const WIDTH_TRIM = 0.6; // image px
@@ -61,11 +62,41 @@ const FILM = {
   // high enough that the polarised sky (~0.2) does not: a thin warm ring
   // where the steel and the wires cross bright cloud.
   halationThreshold: 0.6,
+  // The summer preset cools its highlights; the plate lifts the cloud tops to
+  // warm-neutral itself, so the print leaves them as they come.
+  highlightTint: [1, 1, 1],
 };
-// Warm cast on the sunlit cloud tops (see PLATE): red up 0.8x this, blue
-// down by it, eased in over the shoulder, so the brightest cloud rolls off
-// warm-neutral instead of grey. The sky and its cobalt depth are untouched.
-const WARM_TOP = 0.16;
+// The plate is split three ways before the film (see PLATE), on a baked key
+// (tools/depth/bakes/catenary/key.py): R is the structure, the depth map's
+// near field snapped to the steel's edges; G and B are the sunlit cloud,
+// blurred thin and wide.
+//  - Structure (mast, truss, platform, poles, and the live wires): as shot it
+//    carries the sky's cyan-cobalt, so the anchor sinks into it. It is drawn
+//    toward graphite, STRUCT of the way, keeping its own luminance texture,
+//    lifted (y * STRUCT_GAIN + STRUCT_FLOOR) and given a slight warm bias
+//    that the film's cool toe and shadow tint bring back to near neutral.
+//  - Cloud: past a knee the lit masses take CLOUD_LIFT of the headroom left
+//    and draw toward warm-neutral paper (CLOUD_TOP, #f3eee4); a share of the
+//    headroom, so it bends toward white and never reaches it.
+//  - Halation and diffusion: the cloud light, blurred thin, minus the cloud
+//    itself, is laid on in a warm tint at HAL (a fine glow where cloud meets
+//    sky and where steel and wires cross it); blurred wide, screened in at
+//    DIFFUSE, it veils the cobalt near the cloud.
+const STRUCT = 0.88;
+const STRUCT_GAIN = 1.1;
+const STRUCT_FLOOR = 0.006;
+const STRUCT_TINT = [1.06, 1, 0.9]; // linear, luminance-normalised
+const CLOUD_TOP = [0xf3, 0xee, 0xe4];
+// The print bleaches colour on its shoulder (saturation eases off toward
+// white), so the plate aims this much warmer (linear) to land on CLOUD_TOP.
+const CLOUD_AIM = [1.03, 1, 0.9];
+const CLOUD_LIFT = 0.4;
+const HAL = 0.7;
+const HAL_TINT = [1, 0.7, 0.45]; // linear
+const DIFFUSE = 0.18;
+// The open sky deepens toward the zenith (the top edge): on top of the
+// polariser, it loses up to ZENITH of its value there.
+const ZENITH = 0.1;
 // Graduated sky density, the way a polariser deepens a summer sky toward the
 // zenith (here the top and upper right of the frame). Only the open blue
 // sky takes it: a chroma mask (saturation over ~0.3, hue 190-220 in the
@@ -87,6 +118,14 @@ const VIB_FLOOR = 0.85;
 const VIB_HUE = 208;
 const VIB_V = 0.045;
 
+// Structure toward graphite: luminance kept, lifted out of the black, a
+// slight warm bias. Shared by the plate and the live wires.
+const GRAPHITE = `const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 graphite(vec3 c) {
+  float y = dot(c, LUMA);
+  return (y * uStruct.y + uStruct.z) * uStructTint / dot(uStructTint, LUMA);
+}`;
+
 const VERT_FULL = `#version 300 es
 in vec2 aPos;
 void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
@@ -98,7 +137,12 @@ uniform sampler2D uPlate;
 uniform vec2 uRes;   // device px
 uniform vec3 uMap;   // ox, oy, k (device px per image px)
 uniform vec2 uImg;   // image px
-uniform vec3 uTopTint; // linear multiplier on the sunlit cloud
+uniform sampler2D uKey; // R structure, G cloud light thin, B cloud light wide
+uniform vec4 uStruct;  // amount, gain, floor, zenith
+uniform vec3 uStructTint;
+uniform vec3 uCloudTop; // linear
+uniform vec3 uGlow;     // cloud lift, halation, diffusion
+uniform vec3 uHalTint;
 uniform vec3 uPolar;   // value loss at the top, saturation gain, hue (0..1)
 uniform vec4 uVib;     // amount, saturation floor, hue (0..1), value loss
 vec3 rgb2hsv(vec3 c) {
@@ -112,10 +156,12 @@ vec3 hsv2rgb(vec3 c) {
   vec3 p = abs(fract(c.xxx + vec3(1.0, 2.0 / 3.0, 1.0 / 3.0)) * 6.0 - 3.0);
   return c.z * mix(vec3(1.0), clamp(p - 1.0, 0.0, 1.0), c.y);
 }
+${GRAPHITE}
 void main() {
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
   vec2 uv = (p - uMap.xy) / uMap.z / uImg;
   vec3 c = texture(uPlate, uv).rgb;
+  vec3 key = texture(uKey, uv).rgb;
 
   // Polariser. The mask reads the plate a mip up (about 2 image px, under a
   // device px here) so the film grain in thin cloud does not speckle it.
@@ -123,7 +169,7 @@ void main() {
   vec3 hm = rgb2hsv(pow(texture(uPlate, uv, 1.0).rgb, vec3(1.0 / 2.2)));
   float hue = hm.x * 360.0;
   float sky = smoothstep(0.26, 0.38, hm.y) * smoothstep(188.0, 198.0, hue) * (1.0 - smoothstep(218.0, 228.0, hue))
-            * smoothstep(0.25, 0.4, hm.z);
+            * smoothstep(0.25, 0.4, hm.z) * (1.0 - key.r);
   // Toward the zenith: the top edge, leaning to the upper right.
   vec2 f = p / uRes;
   float z = clamp(0.82 * (1.0 - f.y) + 0.18 * f.x, 0.0, 1.0);
@@ -134,20 +180,38 @@ void main() {
   h.x = fract(h.x + dh * 0.6 * w);
   h.y = clamp(h.y * (1.0 + uPolar.y * w), 0.0, 1.0);
   h.z *= 1.0 - uPolar.x * w;
+  // Zenith: straight top-down, so the sky is deepest at the top edge.
+  float zt = 1.0 - f.y;
+  h.z *= 1.0 - uStruct.w * sky * zt * zt;
   // Vibrance floor: the whole open sky, not graduated.
   float dv = fract(uVib.z - h.x + 0.5) - 0.5;
   h.x = fract(h.x + dv * 0.8 * sky);
   h.y = mix(h.y, max(h.y, mix(h.y, uVib.y, uVib.x)), sky);
   h.z *= 1.0 - uVib.w * sky * smoothstep(0.6, 0.8, h.z);
   c = pow(hsv2rgb(h), vec3(2.2));
-  // Sunlit cloud tops: bright and near neutral. They take a warm cast on the
-  // shoulder so they glow instead of reading grey; blue sky (chroma) and the
-  // shade side of the cloud (luminance) are left as shot.
-  float y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+
+  // Structure: graphite, not cobalt.
+  c = mix(c, graphite(c), key.r * uStruct.x);
+
+  // Sunlit cloud: past the knee, a share of the headroom left, drawn toward
+  // warm-neutral paper. Blue sky (chroma), the shade side of the cloud
+  // (luminance) and the steel are left alone.
+  float y = dot(c, LUMA);
+  float yg = pow(y, 1.0 / 2.2);
   float mx = max(c.r, max(c.g, c.b));
   float chroma = (mx - min(c.r, min(c.g, c.b))) / max(mx, 1e-4);
-  float top = smoothstep(0.45, 0.92, y) * (1.0 - smoothstep(0.3, 0.5, chroma));
-  outColor = vec4(c * mix(vec3(1.0), uTopTint, top), 1.0);
+  float top = smoothstep(0.6, 0.92, yg) * (1.0 - smoothstep(0.3, 0.5, chroma)) * (1.0 - key.r);
+  float yt = y + (1.0 - y) * uGlow.x * top;
+  c = mix(c * (yt / max(y, 1e-5)), uCloudTop * (yt / dot(uCloudTop, LUMA)), top);
+
+  // Halation: the thin cloud light past the cloud's own edge, warm. Wide
+  // diffusion: screened, so it lifts the cobalt and never clips.
+  float self = smoothstep(0.62, 0.9, yg) * (1.0 - key.r);
+  float rim = max(key.g - self, 0.0);
+  c += uHalTint * uGlow.y * rim * (1.0 - top) * 0.35;
+  vec3 veil = uCloudTop * key.b * key.b * uGlow.z;
+  c = 1.0 - (1.0 - c) * (1.0 - veil);
+  outColor = vec4(c, 1.0);
 }`;
 
 // One strip per wire. Positions arrive in device px (top-left origin); the
@@ -179,6 +243,14 @@ uniform sampler2D uAtlas;
 uniform vec2 uAtlasSize;
 uniform vec4 uRiderBox;   // image px; zero size when none
 uniform vec2 uRiderAt;    // atlas px of the box's corner
+uniform sampler2D uKey;
+uniform vec2 uImg;
+uniform vec4 uStruct;
+uniform vec3 uStructTint;
+uniform vec3 uCloudTop;
+uniform vec3 uGlow;
+uniform vec3 uHalTint;
+${GRAPHITE}
 float erf_(float x) {
   float s = sign(x);
   x = abs(x);
@@ -207,6 +279,12 @@ void main() {
   int i0 = int(floor(u));
   int i1 = min(i0 + 1, 24);
   vec3 col = mix(uShade[i0], uShade[i1], fract(u));
+  // The same graphite as the steel; where the wire crosses lit cloud, the
+  // cloud's halation and veil lie over it too.
+  col = mix(col, graphite(col), uStruct.x);
+  vec3 key = texture(uKey, vRest / uImg).rgb;
+  col += uHalTint * uGlow.y * key.g * 0.35;
+  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.z);
   outColor = vec4(col, a);
 }`;
 
@@ -260,11 +338,11 @@ async function bitmap(src) {
   return createImageBitmap(await res.blob(), { colorSpaceConversion: "none", premultiplyAlpha: "none" });
 }
 
-function upload(gl, bm, { mips = true } = {}) {
+function upload(gl, bm, { mips = true, linear = false } = {}) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   const levels = mips ? Math.floor(Math.log2(Math.max(bm.width, bm.height))) + 1 : 1;
-  gl.texStorage2D(gl.TEXTURE_2D, levels, gl.SRGB8_ALPHA8, bm.width, bm.height);
+  gl.texStorage2D(gl.TEXTURE_2D, levels, linear ? gl.RGBA8 : gl.SRGB8_ALPHA8, bm.width, bm.height);
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
@@ -289,8 +367,15 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const holdPull = q.get("pull") != null;
   const held = pluckQ != null || q.get("still") != null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-  const warmTop = num("warmTop", WARM_TOP);
-  const topTint = [1 + 0.8 * warmTop, 1, 1 - warmTop];
+  const toLin = (v) => (v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+  const struct = [
+    clamp(num("struct", STRUCT), 0, 1),
+    clamp(num("structGain", STRUCT_GAIN), 0, 4),
+    clamp(num("structFloor", STRUCT_FLOOR), 0, 0.1),
+    clamp(num("zenith", ZENITH), 0, 0.5),
+  ];
+  const cloudTop = CLOUD_TOP.map((v, i) => toLin(v / 255) * CLOUD_AIM[i]);
+  const glow = [clamp(num("cloudLift", CLOUD_LIFT), 0, 1), clamp(num("hal", HAL), 0, 2), clamp(num("diffuse", DIFFUSE), 0, 1)];
   const polar = clamp(num("polar", POLAR), 0, 0.6);
   const polarSat = num("polarSat", POLAR_SAT);
   const polarHue = num("polarHue", POLAR_HUE);
@@ -312,16 +397,19 @@ export async function createCatenary(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
 
-  const [meta, plateBm, atlasBm] = await Promise.all([
+  const [meta, plateBm, atlasBm, keyBm] = await Promise.all([
     fetch(`${ASSET}wires.json`).then((r) => r.json()),
     bitmap(`${ASSET}plate.webp`),
     bitmap(`${ASSET}riders.png`),
+    bitmap(`${ASSET}key.webp`),
   ]);
   const [IW, IH] = meta.image;
   const plateTex = upload(gl, plateBm);
   const atlasTex = upload(gl, atlasBm);
+  const keyTex = upload(gl, keyBm, { mips: false, linear: true });
   plateBm.close?.();
   atlasBm.close?.();
+  keyBm.close?.();
 
   const world = createWorld(meta.wires);
   const { wires, groups } = world;
@@ -508,6 +596,13 @@ export async function createCatenary(host, { embedded = false } = {}) {
   }
 
   // ---- render
+  const setGrade = (pr) => {
+    gl.uniform4fv(pr.u.uStruct, struct);
+    gl.uniform3fv(pr.u.uStructTint, STRUCT_TINT);
+    gl.uniform3fv(pr.u.uCloudTop, cloudTop);
+    gl.uniform3fv(pr.u.uGlow, glow);
+    gl.uniform3fv(pr.u.uHalTint, HAL_TINT);
+  };
   const drawScene = () => {
     const W = stage.canvas.width;
     const H = stage.canvas.height;
@@ -524,7 +619,11 @@ export async function createCatenary(host, { embedded = false } = {}) {
     gl.uniform2f(plateP.u.uRes, W, H);
     gl.uniform3f(plateP.u.uMap, map.ox, map.oy, map.k);
     gl.uniform2f(plateP.u.uImg, IW, IH);
-    gl.uniform3fv(plateP.u.uTopTint, topTint);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, keyTex);
+    gl.uniform1i(plateP.u.uKey, 1);
+    gl.activeTexture(gl.TEXTURE0);
+    setGrade(plateP);
     gl.uniform3f(plateP.u.uPolar, polar, polarSat, polarHue / 360);
     gl.uniform4fv(plateP.u.uVib, vib);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -573,6 +672,12 @@ export async function createCatenary(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, atlasTex);
       gl.uniform1i(wireP.u.uAtlas, 0);
       gl.uniform2f(wireP.u.uAtlasSize, meta.atlas[0], meta.atlas[1]);
+      gl.activeTexture(gl.TEXTURE1);
+      gl.bindTexture(gl.TEXTURE_2D, keyTex);
+      gl.uniform1i(wireP.u.uKey, 1);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.uniform2f(wireP.u.uImg, IW, IH);
+      setGrade(wireP);
       const rd = w.def.riders[0];
       if (rd) {
         gl.uniform4f(wireP.u.uRiderBox, rd.box[0], rd.box[1], rd.box[2], rd.box[3]);
@@ -682,6 +787,7 @@ export async function createCatenary(host, { embedded = false } = {}) {
       if (sceneFbo) gl.deleteFramebuffer(sceneFbo);
       gl.deleteTexture(plateTex);
       gl.deleteTexture(atlasTex);
+      gl.deleteTexture(keyTex);
       for (const b of [quad, wireBuf, riderBuf]) gl.deleteBuffer(b);
       for (const v of [quadVao, wireVao, riderVao]) gl.deleteVertexArray(v);
       for (const pr of [plateP, wireP, riderP]) gl.deleteProgram(pr.p);
