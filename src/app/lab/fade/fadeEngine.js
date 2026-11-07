@@ -1,35 +1,39 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Fade: a Dutch signpost seen from its foot, against a March sky, and the
-// thirty years of sun that come after it. Drag forward and every board ages by
-// the light it actually receives. The photo already holds both ends of the
-// clock: painted boards beside boards whose paint is long gone and whose wood
-// has weathered silver.
+// Fade: a lane in Cinque Terre seen from the cobbles, looking straight up
+// between painted houses into a summer sky, and the thirty years of sun that
+// come after it. Drag forward and every wall ages by the light it actually
+// receives: the top floors, open to the whole sky, bleach and chalk first;
+// the low storeys, which see only the slot of sky between the eaves, keep
+// their colour longest.
 //
-// The bake (tools/depth/bakes/fade) takes Jan van der Wolf's photograph apart:
+// The bake (tools/depth/bakes/fade) takes Victor Rosario's photograph apart:
 //  - light.webp R: the annual solar dose per pixel. MoGe-2's metric point map
-//    is marched toward 144 sun positions over a year at 52 N (12 days x 12
-//    hours, clear-sky beam x De Bilt's sunshine fraction) plus the sky-view
-//    factor x diffuse, normalised so an open south wall is 1. The camera
-//    looks up, so world up is recovered from the boards themselves (every
-//    face is vertical), and the boards' facing from the photo's own sun,
-//    fitted on the grey wood's shading. The post and the crossing boards
-//    carve the shade out of it.
-//  - light.webp G: the photo's own illumination: every face the camera sees
-//    is sunlit, so one sun level (the yellow board reflecting 0.85) plus a
-//    sky share by view factor, and albedo = photo / S.
-//  - mat.webp: how each pixel ages: the painted boards (SAM masks) fade per
-//    pigment and chalk, the bare wood greys, the sky and clouds are inert.
+//    is marched toward 144 sun positions over a year at 44 N (12 days x 12
+//    hours, clear-sky beam x the Ligurian coast's sunshine fraction) plus the
+//    sky-view factor x diffuse, normalised so an open south wall is 1. The
+//    camera looks almost straight up, so world up is recovered from the walls
+//    themselves (every facade is vertical), and the lane's orientation from
+//    the photo's own sun, fitted on the walls' shading one paint at a time.
+//    The houses across the lane carve the shade out of it.
+//  - light.webp G: the photo's own illumination: the lane is in high sun, so
+//    one sun level (the white trim reflecting 0.85) plus a sky share by view
+//    factor, and albedo = photo / S.
+//  - mat.webp: how each pixel ages: the render fades per pigment and its
+//    lime binder chalks, the one bare stone wall barely moves, the sky and
+//    its cloud are inert.
 //
 // Live, per pixel, with e = years x dose x susceptibility:
 //  - ink: albedo -> optical density per channel; the neutral part is carbon
 //    black, the rest is cyan (absorbs red), magenta (green) and yellow (blue),
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
-//    so reds and yellows go first and old signs drift to cyan;
-//  - wood: lignin breaks down and brown boards go silver grey;
-//  - chalk: the binder erodes and TiO2 powders out, lifting the paint
-//    towards a pale flat white;
+//    so reds and yellows go first (dark shutter green is mostly neutral
+//    density, which barely moves);
+//  - wood: lignin breaks down and brown wood goes silver grey (unused here:
+//    every surface in this photo is painted or stone);
+//  - chalk: the binder erodes and the white pigment powders out, lifting the
+//    paint towards a pale flat white;
 // then photo + S x (aged albedo - albedo), developed by the shared film kit.
 //
 // Query: ?years=0..30 holds the clock; ?still=1 skips the reveal; ?film=0
@@ -51,6 +55,8 @@ const CHALK_MAX = 0.4;
 const INDUCTION = 2.5;
 // Chalking needs the film itself to erode: only well-exposed paint gets there.
 const CHALK_INDUCTION = 7;
+// The render under the pigment: lime and sand, a warm off-white.
+const RENDER = [0.7, 0.68, 0.63];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -75,6 +81,7 @@ uniform float uKChalk;
 uniform float uChalkMax;
 uniform float uInduction;
 uniform float uChalkInduction;
+uniform vec3 uBase;
 uniform float uDebug;
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 toSrgb(vec3 c) {
@@ -106,7 +113,10 @@ void main() {
   vec3 cmy = dens - k;
   // dye loss: each ink by its own rate; carbon black barely moves
   vec3 lost = cmy * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
-  vec3 aInk = min(a * exp(lost * LN10), 1.0);
+  // what the pigment leaves behind is the lime render's own warm off-white,
+  // not paper white: a fading colour climbs to it and stops (a surface that
+  // is already lighter, like the white trim, keeps its own albedo)
+  vec3 aInk = min(a * exp(lost * LN10), max(a, uBase));
 
   // wood: lignin goes, cellulose stays: silver grey, a touch lighter
   float y = dot(a, LUMA);
@@ -118,7 +128,7 @@ void main() {
   float ec = max(e0 - uChalkInduction, 0.0);
   float c = m.b * uChalkMax * (1.0 - exp(-uKChalk * ec));
   vec3 chalkWhite = vec3(0.74, 0.745, 0.735);
-  aged = mix(aged, max(aged, chalkWhite * (0.55 + 0.45 * dot(aged, LUMA) / 0.6)), c);
+  aged = mix(aged, max(aged, chalkWhite * min(0.55 + 0.45 * dot(aged, LUMA) / 0.6, 1.0)), c);
   aged = mix(aged, vec3(dot(aged, LUMA)), c * 0.35);
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
@@ -348,6 +358,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uChalkMax, CHALK_MAX);
     gl.uniform1f(u.uInduction, INDUCTION);
     gl.uniform1f(u.uChalkInduction, CHALK_INDUCTION);
+    gl.uniform3fv(u.uBase, RENDER);
     gl.uniform1f(u.uDebug, debugDose ? 1 : 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, T.scene.fbo);
     gl.viewport(0, 0, T.scene.w, T.scene.h);

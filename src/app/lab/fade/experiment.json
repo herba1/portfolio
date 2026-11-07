@@ -1,10 +1,10 @@
 {
   "title": "Fade",
-  "description": "A signpost in a Dutch nature reserve, seen from its foot against a March sky, and the thirty years of sun that come after it. Drag forward and every board ages by the light it actually receives: the faces turned to the sun bleach first, the strips in the post's shadow keep their colour, and the painted boards go the way of the bare ones beside them, which have already weathered silver. Reds and yellows leave before blue, so the green boards drift to a pale cyan and only the blue remains.",
+  "description": "A lane in Cinque Terre seen from the cobbles, looking straight up between painted houses into a summer sky, and the thirty years of sun that come after it. Drag forward and every wall ages by the light it actually receives: the top floors, open to the whole sky, bleach and chalk first, while the low storeys, which see only the slot of sky between the eaves, keep their colour longest. The pink and orange walls turned to the sun go to pale plaster within a generation; the coral wall across the lane faces north, sees only its slot of sky, and keeps its red.",
   "tags": ["WebGL", "Light", "Film", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-07T02:00:00.000Z",
-  "intent": "Reality pieces, technique 8 (Fade): manipulate a real photograph physically. One photograph is baked into an annual solar dose per pixel (MoGe-2 metric point map; world up recovered from the boards' vertical faces, the boards' facing from the photo's own sun fitted on the grey wood's shading; 144 sun directions over a year at 52 N, each with a screen-space depth-march visibility test, clear-sky beam x De Bilt's sunshine fraction, plus sky-view factor x diffuse, at 1/4 resolution on CPU), the photo's own illumination (to recover albedo), and SAM material masks of the painted boards. Live, albedo becomes optical density, split into carbon black and cyan / magenta / yellow pigment, each fading exponentially with dose (yellow and magenta about 4x faster than cyan); bare wood greys and the paint film chalks. On old painted signs 'only the blue remains': https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/ ; yellow and magenta process inks are the least lightfast: https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
+  "intent": "Reality pieces, technique 8 (Fade): manipulate a real photograph physically. One photograph is baked into an annual solar dose per pixel (MoGe-2 metric point map; world up recovered from the facades' vertical faces, the lane's orientation from the photo's own sun fitted on the walls' shading one paint colour at a time; 144 sun directions over a year at 44 N, each with a screen-space depth-march visibility test against the houses across the lane, clear-sky beam x the Ligurian coast's sunshine fraction, plus sky-view factor x diffuse, at 1/4 resolution on CPU), the photo's own illumination (to recover albedo), and a SAM mask of the one bare stone wall. Live, albedo becomes optical density, split into carbon black and cyan / magenta / yellow pigment, each fading exponentially with dose (yellow and magenta about 4x faster than cyan), and the lime render chalks. On old painted signs 'only the blue remains': https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/ ; yellow and magenta process inks are the least lightfast: https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.75, 0.5] },
   "probe": [
@@ -17,13 +17,13 @@
     { "idle": 1400 }
   ],
   "sources": [
-    "Photograph: 'Colorful Directional Signpost Against Clear Sky' by Jan van der Wolf (https://www.pexels.com/@jan-van-der-wolf-11680885/) on Pexels, Pexels License (https://www.pexels.com/license/). https://www.pexels.com/photo/colorful-directional-signpost-against-clear-sky-28588774/ (file: https://images.pexels.com/photos/28588774/pexels-photo-28588774.jpeg, 6000x4000, Nikon D7100, 28 mm, 24 March 2019). Cropped to 4:3 (right-hand 5333 columns), resampled to 2000x1500. Normals, metric depth and sky by MoGe-2 (tools/depth/normals.py); painted-board masks by SAM 2.1 (tools/depth/segment.py); maps baked by tools/depth/bakes/fade (prep.py, dose.py, mat.py) into plate.webp, light.webp and mat.webp.",
+    "Photograph: 'Low angle view of colorful Mediterranean buildings surrounding a bright blue sky' by Victor Rosario (https://unsplash.com/@victor_rosario) on Unsplash, Unsplash License (https://unsplash.com/license). https://unsplash.com/photos/colorful-mediterranean-buildings-under-blue-sky-9rFrYPdisXU (file: https://images.unsplash.com/photo-1787152171273-de25142325a1, 6192x4128, Sony ILCE-6700, Cinque Terre). Cropped to 4:3 (columns 200 to 5704), resampled to 2000x1500. Normals, metric depth and sky by MoGe-2 (tools/depth/normals.py); the stone wall's mask by SAM 2.1 (tools/depth/segment.py); maps baked by tools/depth/bakes/fade (prep.py, dose.py, mat.py) into plate.webp, light.webp and mat.webp.",
     "https://www.maru-sin.co.jp/en/news_sanpo/january-2023_01/",
     "https://printing.org/content/2018/03/28/a-customer-has-complained-that-a-poster-is-fading-almost-immediately-with-exposure-to",
     "https://en.wikipedia.org/wiki/Air_mass_(solar_energy)",
     "https://en.wikipedia.org/wiki/Sky_view_factor",
+    "https://en.wikipedia.org/wiki/Street_canyon",
     "https://en.wikipedia.org/wiki/Chalking_(paint)",
-    "https://en.wikipedia.org/wiki/Wood_preservation#Weathering",
     "https://en.wikipedia.org/wiki/Sunshine_duration"
   ]
 }

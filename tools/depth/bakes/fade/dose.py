@@ -5,47 +5,52 @@
 # Geometry is MoGe-2's metric point map (normals.py, 800x600), taken to 1/4 of
 # the plate (500x375).
 #
-# The camera looks up at the signpost from its foot, so camera space is not
-# the world: "up" is recovered from the photo itself. Every board face and the
-# post are vertical, so their normals all lie in the horizontal plane, and up
-# is the direction the normals avoid: the smallest eigenvector of sum(n n^T)
-# over the surfaces, refined by dropping the few non-vertical faces (board
-# edges). It comes out 15 deg of pitch and 5 deg of roll.
+# The camera lies at the foot of the houses and looks almost straight up, so
+# camera space is not the world: "up" is recovered from the photo itself.
+# Every facade is vertical, so their normals all lie in the horizontal plane,
+# and up is the direction the normals avoid: the smallest eigenvector of
+# sum(n n^T) over the surfaces, refined by dropping the few non-vertical
+# faces (eaves, sills, open shutters). It comes out at 52 deg of pitch and
+# 6 of roll: with a 61 deg vertical field, the top of the frame is 8 deg
+# short of the zenith.
 #
-# The photo's own sun is fitted from the shading of the bare grey wood (one
-# albedo, many orientations): the direction s that best explains its
-# luminance as a * max(n.s, 0) + b. It lands behind the camera's left
-# shoulder, 117 deg round from where the camera looks. The photo was taken on
-# 24 March 2019; with the sun at solar noon that puts the camera looking
-# west-north-west and the boards facing ESE (FACING = 117).
+# The photo's own sun is fitted from the shading of the walls. Each paint has
+# one albedo seen at many orientations, so the walls are split by colour (k-
+# means on chroma) and the direction s is the one that best explains every
+# colour's luminance at once as a_k * max(n.s, 0) + b_k. The camera's look
+# and the sun at solar noon then give the street's orientation: the sun
+# stands `left` deg anticlockwise of where the camera looks, so the camera
+# looks at azimuth 180 + left (the date is not known; noon is the
+# assumption). The fit explains a third of the walls' variance and puts the
+# sun 60 deg up, 100 deg to the right of the look: a summer midday.
 #
-# For each pixel, over a year at the Netherlands' latitude (52.1 N):
+# For each pixel, over a year at Cinque Terre's latitude (44.1 N):
 #   dose = sum_days sum_hours [ f_sun * DNI(s) * max(n.s, 0) * vis(p, s)
 #                               + DHI(s) * svf_n(p) ] * dt
 # 12 days (the 21st of each month) x 12 steps of hour angle between sunrise
 # and sunset = 144 sun directions. DNI is Meinel's clear-sky beam from the air
-# mass (Kasten-Young), f_sun = 0.37 is De Bilt's sunshine fraction (about
-# 1650 of 4450 possible hours), and the diffuse is weighted heavily because
-# fading is driven by UV, which is half sky light.
+# mass (Kasten-Young), f_sun = 0.55 is the Ligurian coast's sunshine fraction
+# (about 2400 of 4450 possible hours), and the diffuse is weighted heavily
+# because fading is driven by UV, which is half sky light.
 # vis(p, s) marches the ray from the point toward the sun through the depth
 # map in screen space (a hit is a sample that lands 0..thick metres behind the
-# visible surface: the boards are a few cm thick and the post 20 cm, so
-# thick is 0.3 m); svf_n is the cosine-weighted visible sky over the
-# surface's own hemisphere (256 directions over the world's upper half, same
-# march), 1 for an open horizontal top, 0.5 for an open wall.
+# visible surface: houses are solid, so thick is 8 m); svf_n is the cosine-
+# weighted visible sky over the surface's own hemisphere (256 directions over
+# the world's upper half, same march), 1 for an open horizontal top, 0.5 for
+# an open wall. The lane is the point: the walls face each other across a few
+# metres, so the low storeys see a slot of sky and the top floors see it all.
+# Rays that leave the frame count as open sky (the houses behind the camera
+# are not in the photo), which is generous to the lowest storeys.
 # dose is normalised by the same sum for an unshaded south wall, so 1.0 is
 # "a south wall in the open".
-# The fitted sun only sets the orientation. It explains about half the grey
-# wood's variance, and marched per pixel it puts false shadows on boards
-# that are plainly sunlit (MoGe's normals on thin boards are rough), so it is
-# not used for the photo's light: in this photo every face turned to the
-# camera is in sun, and mat.py treats the light as even.
 import sys, json, numpy as np, cv2
 from PIL import Image
 
 wd = sys.argv[1]
-LAT = 52.1
-F_SUN = 0.37
+LAT = 44.1
+F_SUN = 0.55
+THICK = 8.0
+TMAX = 60.0
 cam = json.load(open(wd + "/moge/camera.json"))
 dmax = cam["depth_max"]
 depth0 = cv2.imread(wd + "/moge/depth.png", cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535.0 * dmax
@@ -60,7 +65,8 @@ N = nrm0[core] / (np.linalg.norm(nrm0[core], axis=1, keepdims=True) + 1e-6)
 wgt = np.ones(len(N), np.float32)
 for _ in range(6):
     w, V = np.linalg.eigh((N * wgt[:, None]).T @ N / wgt.sum())
-    UP = V[:, 0] * np.sign(V[1, 0])
+    # the camera looks up: world up is ahead of it (-z) and toward the top of the frame (+y)
+    UP = V[:, 0] * np.sign(V[1, 0] - V[2, 0])
     wgt = (np.abs(N @ UP) < np.sin(np.radians(25))).astype(np.float32)
 UP = UP.astype(np.float32)
 # the level frame the camera sits in: right, up, back (toward the viewer)
@@ -69,21 +75,34 @@ RT /= np.linalg.norm(RT)
 BK = np.cross(RT, UP)
 print("up", UP.round(4), "pitch", np.degrees(np.arcsin(-UP[2])).round(1), "roll", np.degrees(np.arctan2(-UP[0], UP[1])).round(1))
 
-# ---- the photo's sun, fitted on the bare grey wood
+# ---- the photo's sun, fitted on the walls: one albedo per paint colour
 lin0 = np.where(plate <= 0.04045, plate / 12.92, ((plate + 0.055) / 1.055) ** 2.4)
-sat0 = cv2.cvtColor((plate * 255).astype(np.uint8), cv2.COLOR_RGB2HSV)[..., 1] / 255.0
-grey = core & (sat0 < 0.22)
-Ng = nrm0[grey] / (np.linalg.norm(nrm0[grey], axis=1, keepdims=True) + 1e-6)
-Lg = lin0[grey] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+lab0 = cv2.cvtColor(plate.astype(np.float32), cv2.COLOR_RGB2Lab)
+walls = core & (np.abs(nrm0 @ UP) < np.sin(np.radians(25))) & (plate.max(2) > 0.25)
+ab = lab0[walls][:, 1:].astype(np.float32)
+crit = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 50, 0.1)
+_, lab_k, _ = cv2.kmeans(ab, 6, None, crit, 4, cv2.KMEANS_PP_CENTERS)
+lab_k = lab_k.ravel()
+Ng = nrm0[walls] / (np.linalg.norm(nrm0[walls], axis=1, keepdims=True) + 1e-6)
+Lg = lin0[walls] @ np.array([0.2126, 0.7152, 0.0722], np.float32)
+groups = [np.flatnonzero(lab_k == g) for g in range(6)]
+groups = [g for g in groups if len(g) > 500]
 k = np.arange(4000) + 0.5
 ph, th = np.arccos(1 - 2 * k / 4000), np.pi * (1 + 5**0.5) * k
 cand = np.stack([np.sin(ph) * np.cos(th), np.cos(ph), np.sin(ph) * np.sin(th)], -1).astype(np.float32)
+cand = cand[cand @ UP > 0.05]
 best = (-1, None)
 for dvec in cand:
     x = np.clip(Ng @ dvec, 0, None)
-    A = np.stack([x, np.ones_like(x)], 1)
-    c = np.linalg.lstsq(A, Lg, rcond=None)[0]
-    r2 = 1 - (Lg - A @ c).var() / Lg.var()
+    res = tot = 0.0
+    for g in groups:
+        A = np.stack([x[g], np.ones(len(g), np.float32)], 1)
+        c = np.linalg.lstsq(A, Lg[g], rcond=None)[0]
+        if c[0] < 0:
+            c = np.array([0, Lg[g].mean()])
+        res += ((Lg[g] - A @ c) ** 2).sum()
+        tot += ((Lg[g] - Lg[g].mean()) ** 2).sum()
+    r2 = 1 - res / tot
     if r2 > best[0]:
         best = (r2, dvec)
 s_photo = best[1]
@@ -92,8 +111,8 @@ rel = np.degrees(np.arctan2(-(hz @ RT), hz @ BK))  # deg round from "behind the 
 left = float(180 - rel)
 print("photo sun (camera space)", s_photo.round(3), "r2", round(best[0], 3), "elevation", np.degrees(np.arcsin(s_photo @ UP)).round(1), "deg left of the camera's look", round(left, 1))
 # The sun stands `left` deg anticlockwise of the look direction. At solar
-# noon (azimuth 180) the camera looks at 180 + left, and the boards, which
-# face the camera, face the opposite way: azimuth `left`.
+# noon (azimuth 180) the camera looks at 180 + left, and the level frame's
+# "back" axis (BK) points the opposite way: azimuth `left`.
 FACING = left % 360
 print("FACING", round(FACING, 1))
 
@@ -133,7 +152,7 @@ def geometry(W, H):
     return P, n, v, d, (f, cx, cy)
 
 
-def march(P, n, d, K, s, steps=36, tmax=20.0, thick=0.3):
+def march(P, n, d, K, s, steps=36, tmax=TMAX, thick=THICK):
     """1 where the ray P + s t (t > 0) reaches the sky, per point (N,3) -> (N,)."""
     f, cx, cy = K
     H, W = d.shape
@@ -151,7 +170,7 @@ def march(P, n, d, K, s, steps=36, tmax=20.0, thick=0.3):
         vi = np.clip(np.round(v).astype(np.int32), 0, H - 1)
         ds = d[vi, ui]
         behind = z - ds
-        hit = inside & (behind > 0.02 + 0.004 * z) & (behind < thick + 0.01 * z)
+        hit = inside & (behind > 0.05 + 0.004 * z) & (behind < thick + 0.01 * z)
         vis[hit] = 0
     return vis
 
