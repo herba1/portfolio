@@ -34,7 +34,8 @@ which may run past the photo: rects in layers.json go below 0 and above 1),
 <outdir>/mattes.png (each plane's alpha at 512 wide, stacked) and
 <outdir>/layers.json (crop rects, depth, sizes), plus previews in workdir.
 Then cumulus.py re-plates the sky with real cumulus on a card of its own
-(clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match.
+(clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match, and
+wires.py redraws p2.webp with every wire as one whole catenary.
 """
 import sys
 import os

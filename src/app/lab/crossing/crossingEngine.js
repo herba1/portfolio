@@ -77,8 +77,12 @@ const PLANES = [
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
-  // each wire on as a horizontal shadow band with a hard lower edge
-  { file: "p2", rect: [0.25879, 0.03466, 1.22021, 0.92552], o: 0.2, hold: false }, // wires
+  // each wire on as a horizontal shadow band with a hard lower edge.
+  // Each wire is one whole catenary (wires.py): on the left and below it
+  // runs on under the old house far past the frame and ends there, behind
+  // the house's own overscan, so those sides are ends, not margin to keep
+  // covered (they would only narrow the swing)
+  { file: "p2", rect: [-0.2998, 0.03466, 1.22021, 1.19027], o: 0.2, hold: false, ends: [true, false, false, true] }, // wires
   // the mechanism box is cut by the right edge and ends a few px past
   // it (bake.py): that side is a cut-out end, not overscan to keep covered
   { file: "p3", rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
