@@ -36,12 +36,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    (the penumbra), plus a contact shadow where a card nearly touches a
 //    surface. Only the change from the photo is applied, so at rest the
 //    frame is the photograph exactly.
-// The frame then goes through film.js (summer).
+// The sky is regraded on its own (gradeSky): a dense cyan-cobalt that
+// deepens toward the top of the frame, cloud warm-neutral with skylight-blue
+// undersides. Then the frame goes through film.js (summer), with its global
+// saturation and blue push off, and a black point that keeps the steel a
+// near-black silhouette.
 //
 // Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
 // 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
 // widths/heights from where it was; several are joined with ";".
 // &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
+// &grade=0 shows the plate's own sky.
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -51,16 +56,39 @@ const S_MIN = 0.42; // smallest and largest size relative to where it was
 const S_MAX = 1.75;
 const SKYLIGHT = [0.4, 0.46, 0.6]; // what is left in a shadow on a clear day: the blue sky
 
+const hex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
+const lin = (c) => c.map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
+// The sky grade (see gradeSky): herb's cyan-cobalt, dense at the zenith and
+// paler toward the horizon far below the frame; cloud warm-neutral, its
+// shadowed undersides skylight blue.
+const SKY = {
+  // the film's curve lifts and spreads these a little: aimed so the print
+  // lands near #1F62A8 at the top edge and #5A9BD0 at the bottom
+  top: hex("#0E5AA2"),
+  low: hex("#5A9BD0"),
+  curve: 1.0,
+  cloud: [0.26, 0.6],
+  // #F2F0EA, warmed against the film's cool highlight tint (.95, 1, 1.05)
+  warm: lin(hex("#F2F0EA")).map((v, i) => v * [1.05, 1, 0.95][i]),
+  under: lin(hex("#A4C4E2")),
+  underRange: [0.5, 0.8, 0.9],
+};
+// Black point of the print, after the film: the steel against the sky goes
+// to a near-black silhouette instead of sitting on a lifted grey.
+const BLACK = 0.012;
+
 const FILM = {
   ...FILM_PRESETS.summer,
   headroom: 1.0,
   halation: 0.24,
   halationThreshold: 0.92,
-  bloom: 0.18,
+  bloom: 0.1,
   softness: 0.45,
   contrast: 1.16,
-  saturation: 1.1,
-  blueDepth: 0.72,
+  toe: 0.008,
+  // colour density comes from the sky grade, not from a global push
+  saturation: 1.0,
+  blueDepth: 0,
   grain: 0.3,
   vignette: 0.12,
 };
@@ -70,16 +98,19 @@ layout(location=0) in vec2 aPos;
 out vec2 vUv;
 void main() { vUv = aPos; gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0); }`;
 
-// The print: a quad in device px, uv over the photo with y down.
+// The print, drawn over the whole canvas: uv over the photo with y down,
+// running past 0..1 outside the print, where the photo's edge is extended
+// (and the coverage is 0) so the film's diffusion sees more of the photo at
+// the print's edge rather than the paper, which would veil it white.
 const PRINT_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
 uniform vec4 uPrint;   // x, y, w, h in device px, y down
 uniform vec2 uView;
 out vec2 vUv;
 void main() {
-  vUv = aPos;
-  vec2 px = uPrint.xy + aPos * uPrint.zw;
-  gl_Position = vec4(px.x / uView.x * 2.0 - 1.0, 1.0 - px.y / uView.y * 2.0, 0.0, 1.0);
+  vec2 px = vec2(aPos.x, 1.0 - aPos.y) * uView;
+  vUv = (px - uPrint.xy) / uPrint.zw;
+  gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0);
 }`;
 
 const SCENE_FS = `#version 300 es
@@ -109,6 +140,15 @@ uniform vec2 uLayer;          // array layer size, px
 uniform float uShadow;
 uniform vec3 uSkylight;
 uniform float uSeed;
+uniform vec3 uSkyTop;         // sRGB, clear sky at the top edge
+uniform vec3 uSkyLow;         // and at the bottom edge (toward the horizon)
+uniform float uSkyCurve;
+uniform sampler2D uClear;     // the plate's clear-sky luminance x2 (coarse)
+uniform vec2 uCloudY;         // cloud starts this far above the clear sky; unmix contrast
+uniform vec3 uWarmCloud;      // linear, relative
+uniform vec3 uUnderBlue;      // linear, relative
+uniform vec3 uUnder;          // luminance range of the underside tint, amount
+uniform float uGrade;
 out vec4 o;
 
 vec4 objLod(int k, vec2 q, float lod) {
@@ -145,6 +185,39 @@ float contactBy(int k, vec3 P, vec2 p, float dn, mat3 Hinv) {
   return a * exp(-g * 1.6);
 }
 
+vec3 toLin(vec3 c) {
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+
+// The sky's own density, in place of a global saturation push: wherever the
+// plate is sky (the front layer's matte, the clean plate where it is empty),
+// the clear blue is rebuilt as a dense cobalt that deepens with height in the
+// frame, and the cloud keeps its luminance but goes warm-neutral, its
+// undersides lit by that blue. Steel, cable and the loose objects never pass
+// through here.
+vec3 gradeSky(vec3 c, vec2 uv) {
+  float Y = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  // How much of the pixel is cloud: a linear unmix on luminance between the
+  // plate's own clear blue here and the dimmest cloud. (Luminance, not
+  // chroma: the plate's colour is coarser than its drawing, and a chroma key
+  // blotches.) A little contrast on it, so thin haze stays sky.
+  float ySky = 0.5 * texture(uClear, uv).r;
+  float yCl = ySky + uCloudY.x;
+  float w = clamp((Y - ySky) / (yCl - ySky), 0.0, 1.0);
+  w = mix(w, w * w * (3.0 - 2.0 * w), uCloudY.y);
+  // clear sky: the ramp, deepest at the top, keeping a little of the plate's
+  // own modulation
+  vec3 tgt = toLin(mix(uSkyTop, uSkyLow, pow(uv.y, uSkyCurve)));
+  vec3 S = tgt * clamp(pow(Y / ySky, 0.6), 0.75, 1.0);
+  // cloud at its own luminance (within the unmix range it is the dimmest
+  // cloud), warm-neutral where lit, skylight blue in its shadowed undersides
+  float yc = max(Y, yCl);
+  float under = (1.0 - smoothstep(uUnder.x, uUnder.y, yc)) * uUnder.z;
+  vec3 tint = mix(uWarmCloud, uUnderBlue, under);
+  vec3 C = yc * tint / dot(tint, vec3(0.2126, 0.7152, 0.0722));
+  return mix(S, C, w);
+}
+
 vec3 toSrgb(vec3 c) {
   c = max(c, 0.0);
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
@@ -157,16 +230,19 @@ float hash(vec2 p) {
 }
 
 void main() {
-  vec2 p = vUv * uSize;
+  vec2 uv = clamp(vUv, 0.0, 1.0);
+  float cover = step(0.0, vUv.x) * step(0.0, vUv.y) * step(vUv.x, 1.0) * step(vUv.y, 1.0);
+  vec2 p = uv * uSize;
   vec3 ray = vec3((p - uC) / uF, 1.0);
-  vec4 fr = texture(uFront, vUv);
+  vec4 fr = texture(uFront, uv);
   float aF = fr.r;
   float dF = fr.g;
   float recv = fr.b;
-  vec3 plate = texture(uPlate, vUv).rgb;
-  vec3 skyc = texture(uSky, vUv).rgb;
+  vec3 plate = texture(uPlate, uv).rgb;
+  vec3 skyc = texture(uSky, uv).rgb;
   bool thin = aF < 0.02;
   vec3 B = thin ? plate : skyc;
+  B = mix(B, gradeSky(B, uv), uGrade);
   vec3 Fpm = thin ? vec3(0.0) : plate - (1.0 - aF) * skyc;
 
   // shadows that the moved objects now throw on the street (only what
@@ -225,7 +301,7 @@ void main() {
   if (fDone < 0.5) col = Fpm + (1.0 - aF) * col;
   vec3 s = toSrgb(col);
   s += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 7.3) - 1.0) / 255.0;
-  o = vec4(s, 1.0);
+  o = vec4(s, cover);
 }`;
 
 const FINAL_FS = `#version 300 es
@@ -234,10 +310,12 @@ in vec2 vUv;
 uniform sampler2D uFilm;
 uniform sampler2D uScene;
 uniform vec3 uPaper;
+uniform float uBlack;
 out vec4 o;
 void main() {
   float cov = texture(uScene, vUv).a;
   vec3 f = texture(uFilm, vUv).rgb;
+  f = max(f - uBlack, 0.0) / (1.0 - uBlack);
   o = vec4(mix(uPaper, f, cov), 1.0);
 }`;
 
@@ -304,6 +382,53 @@ function pixels(bm) {
   return x.getImageData(0, 0, bm.width, bm.height).data;
 }
 
+// The plate's clear-sky luminance, as a coarse field: per cell the dim end of
+// the sky's luminance (the blue between the clouds), spread from cells that
+// are all cloud by a min, then smoothed. Linear luminance x2, in a byte.
+function clearSky(px, w, h) {
+  const C = 25;
+  const gw = Math.ceil(w / C);
+  const gh = Math.ceil(h / C);
+  const L = new Float32Array(256);
+  for (let i = 0; i < 256; i++) {
+    const c = i / 255;
+    L[i] = c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+  }
+  let g = new Float32Array(gw * gh);
+  const vals = [];
+  for (let gy = 0; gy < gh; gy++) {
+    for (let gx = 0; gx < gw; gx++) {
+      vals.length = 0;
+      for (let y = gy * C; y < Math.min(h, gy * C + C); y += 2) {
+        for (let x = gx * C; x < Math.min(w, gx * C + C); x += 2) {
+          const i = (y * w + x) * 4;
+          vals.push(0.2126 * L[px[i]] + 0.7152 * L[px[i + 1]] + 0.0722 * L[px[i + 2]]);
+        }
+      }
+      vals.sort((a, b) => a - b);
+      g[gy * gw + gx] = vals[Math.floor(vals.length * 0.1)];
+    }
+  }
+  const pass = (f) => {
+    const o = new Float32Array(gw * gh);
+    for (let y = 0; y < gh; y++) {
+      for (let x = 0; x < gw; x++) {
+        const n = [];
+        for (let dy = -1; dy <= 1; dy++) {
+          for (let dx = -1; dx <= 1; dx++) n.push(g[clamp(y + dy, 0, gh - 1) * gw + clamp(x + dx, 0, gw - 1)]);
+        }
+        o[y * gw + x] = f(n);
+      }
+    }
+    g = o;
+  };
+  pass((n) => Math.min(...n));
+  for (let i = 0; i < 3; i++) pass((n) => n.reduce((a, b) => a + b, 0) / n.length);
+  const data = new Uint8Array(gw * gh);
+  for (let i = 0; i < data.length; i++) data[i] = clamp(Math.round(g[i] * 2 * 255), 0, 255);
+  return { data, w: gw, h: gh };
+}
+
 export async function createRearrange(host, { embedded = false } = {}) {
   const q = new URLSearchParams(window.location.search);
   const num = (k) => {
@@ -352,6 +477,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     return { a, w: bm.width, h: bm.height };
   });
   const frontPx = pixels(frontBm);
+  const clear = clearSky(pixels(skyBm), skyBm.width, skyBm.height);
 
   // ---- textures
   const tex2d = (bm, internal, mips) => {
@@ -371,6 +497,15 @@ export async function createRearrange(host, { embedded = false } = {}) {
   const plateTex = tex2d(plateBm, gl.SRGB8_ALPHA8, true);
   const frontTex = tex2d(frontBm, gl.RGBA8, false);
   const skyTex = tex2d(skyBm, gl.SRGB8_ALPHA8, false);
+  const clearTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, clearTex);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, clear.w, clear.h, 0, gl.RED, gl.UNSIGNED_BYTE, clear.data);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const LW = Math.max(...objBms.map((b) => b.width));
   const LH = Math.max(...objBms.map((b) => b.height));
   const objTex = gl.createTexture();
@@ -711,10 +846,19 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1f(U.uShadow, num("shadow") ?? 1);
     gl.uniform3fv(U.uSkylight, SKYLIGHT);
     gl.uniform1f(U.uSeed, 0.37);
+    gl.uniform3fv(U.uSkyTop, SKY.top);
+    gl.uniform3fv(U.uSkyLow, SKY.low);
+    gl.uniform1f(U.uSkyCurve, SKY.curve);
+    gl.uniform2fv(U.uCloudY, SKY.cloud);
+    gl.uniform3fv(U.uWarmCloud, SKY.warm);
+    gl.uniform3fv(U.uUnderBlue, SKY.under);
+    gl.uniform3fv(U.uUnder, SKY.underRange);
+    gl.uniform1f(U.uGrade, num("grade") ?? 1);
     const texs = [
       [gl.TEXTURE_2D, plateTex, U.uPlate],
       [gl.TEXTURE_2D, frontTex, U.uFront],
       [gl.TEXTURE_2D, skyTex, U.uSky],
+      [gl.TEXTURE_2D, clearTex, U.uClear],
       [gl.TEXTURE_2D_ARRAY, objTex, U.uObj],
     ];
     texs.forEach(([type, t, loc], i) => {
@@ -744,6 +888,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1i(fin.u.uFilm, 0);
     gl.uniform1i(fin.u.uScene, 1);
     gl.uniform3f(fin.u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
+    gl.uniform1f(fin.u.uBlack, BLACK);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);
@@ -871,7 +1016,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
         gl.deleteTexture(t.tex);
         gl.deleteFramebuffer(t.fbo);
       }
-      for (const t of [plateTex, frontTex, skyTex, objTex]) gl.deleteTexture(t);
+      for (const t of [plateTex, frontTex, skyTex, clearTex, objTex]) gl.deleteTexture(t);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       gl.deleteProgram(scene.p);
