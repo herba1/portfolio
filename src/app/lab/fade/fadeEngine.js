@@ -33,7 +33,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - wood: lignin breaks down and brown wood goes silver grey (unused here:
 //    every surface in this photo is painted or stone);
 //  - chalk: the binder erodes and the white pigment powders out, lifting the
-//    paint towards a pale flat white;
+//    paint towards the lime's own warm cream (never paper white), at most a
+//    quarter of the way, so the top floors keep a trace of their hue;
+//  - and the dose itself is taken down to the scale of a ledge: every sill,
+//    cornice and eave (an edge across the wall's vertical, found by marching
+//    up the plate toward the verticals' vanishing point) shelters a ragged
+//    strip below it that keeps its paint, and the open wall weathers in
+//    patches (the wash's uneven coats, the wall's own stains off the plate);
 // then photo + S x (aged albedo - albedo), developed by the shared film kit.
 //
 // The sky, last: the photo's own is a pale, hazy powder blue, which leaves
@@ -51,7 +57,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //
 // Query: ?years=0..30 holds the clock; ?still=1 skips the reveal; ?film=0
 // shows the aged frame before the film; ?debug=dose shows the dose map;
-// ?sky=0 shows the sky as shot.
+// ?debug=local shows the dose with its ledge shelter and patches; ?sky=0
+// shows the sky as shot.
 
 const BASE = "/lab/fade/";
 const PW = 2000;
@@ -65,12 +72,24 @@ const K_INK = [0.03, 0.13, 0.16]; // cyan, magenta, yellow
 const K_BLACK = 0.004;
 const K_WOOD = 0.1;
 const K_CHALK = 0.07;
-const CHALK_MAX = 0.4;
+// At most a quarter of the surface powders to bare lime: even the most exposed
+// top floor keeps a trace of its own hue under the bloom.
+const CHALK_MAX = 0.25;
 const INDUCTION = 2.5;
 // Chalking needs the film itself to erode: only well-exposed paint gets there.
 const CHALK_INDUCTION = 7;
-// The render under the pigment: lime and sand, a warm off-white.
-const RENDER = [0.7, 0.68, 0.63];
+// The render under the pigment, and what the binder powders to: lime and
+// sand, a warm cream (sRGB hue, saturation, value), never paper white.
+const RENDER = [35, 0.12, 0.86];
+// Where the light falls at the scale of a ledge. Every sill, cornice and eave
+// shelters a strip of wall below it from sun and driving rain, out to about
+// its own depth; world up is toward the verticals' vanishing point, which the
+// photo puts above the frame (the corner of the yellow house and the left
+// edge of the orange one meet there), in plate pixels.
+const VANISH = [940, -1650];
+const SHELTER = 0.85;
+// Lime wash goes in patches: coats of uneven thickness, a wall's own stains.
+const MOTTLE = 0.75;
 // The polarised sky, as sRGB hue (deg), saturation, value: the zenith at the
 // frame's centre, and the rim of the slot down by the eaves.
 const SKY_ZENITH = [206, 0.85, 0.51];
@@ -122,6 +141,10 @@ uniform vec3 uZenith;
 uniform vec3 uRim;
 uniform vec3 uClear;
 uniform vec2 uRes;
+uniform vec2 uPlateSize;
+uniform vec2 uVanish;
+uniform float uShelter;
+uniform float uMottle;
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 toSrgb(vec3 c) {
   c = max(c, 0.0);
@@ -136,6 +159,65 @@ float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
   p3 += dot(p3, p3.yzx + 33.33);
   return fract((p3.x + p3.y) * p3.z);
+}
+float vnoise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  float a = hash12(i), b = hash12(i + vec2(1, 0)), c = hash12(i + vec2(0, 1)), d = hash12(i + vec2(1, 1));
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+// log luminance of the plate, at plate pixel P, read soft at a mip level
+float logY(vec2 P, float lod) {
+  return log(dot(toLin(textureLod(uPlate, P / uPlateSize, lod).rgb), LUMA) + 0.02);
+}
+// How sheltered a pixel is by a ledge above it. March up the wall (toward
+// the verticals' vanishing point) at a fixed pitch and look for an edge that
+// crosses the march: a sill, a cornice, a string course, an eave against the
+// sky. Only an edge whose gradient points up the wall counts; one running
+// along the march (a shutter's stile, a drainpipe, a cable) is not a ledge.
+// The strip a ledge protects reaches about its own depth below it, ragged
+// where the rain drips off it.
+float shelterAt(vec2 P) {
+  vec2 toV = uVanish - P;
+  vec2 up = normalize(toV);
+  vec2 side = vec2(-up.y, up.x);
+  // nearer walls (out toward the frame's edges) are larger in the frame
+  float near = clamp(length(P - 0.5 * uPlateSize) / (0.5 * length(uPlateSize)), 0.0, 1.0);
+  float ang = atan(toV.x, -toV.y) * 2400.0;
+  float drip = 0.65 * vnoise(vec2(ang / 11.0, 0.5)) + 0.35 * vnoise(vec2(ang / 4.0, 7.5));
+  float reach = min(mix(16.0, 36.0, near) * (0.5 + drip), 48.0);
+  // three columns a hand's width apart: a ledge runs across all of them, a
+  // nail or a hook in the wall does not
+  const float H = 3.0;
+  const float W = 6.0;
+  float s = 0.0;
+  vec3 y0 = vec3(logY(P - side * W, 1.5), logY(P, 1.5), logY(P + side * W, 1.5));
+  vec2 Q1 = P + up * H;
+  vec3 y1 = vec3(logY(Q1 - side * W, 1.5), logY(Q1, 1.5), logY(Q1 + side * W, 1.5));
+  for (int i = 1; i <= 16; i++) {
+    float d = float(i) * H;
+    if (d > reach) break;
+    vec2 Q = P + up * d;
+    vec2 Q2 = Q + up * H;
+    vec3 y2 = vec3(logY(Q2 - side * W, 1.5), logY(Q2, 1.5), logY(Q2 + side * W, 1.5));
+    vec3 g = abs(y2 - y0);
+    float gu = min(g.x, min(g.y, g.z));
+    float gs = abs(logY(Q + side * H, 1.5) - logY(Q - side * H, 1.5));
+    float ledge = smoothstep(0.18, 0.45, gu) * smoothstep(0.5, 0.8, gu / (gu + gs + 1e-3));
+    s = max(s, ledge * (1.0 - smoothstep(0.4 * reach, reach, d)));
+    y0 = y1;
+    y1 = y2;
+  }
+  return s;
+}
+// Patches: the wash's own unevenness (two octaves of noise at the scale of a
+// few hand-widths) and the wall's own stains and repairs, read off the plate
+// as how much lighter or darker it is than its surround.
+float mottleAt(vec2 P) {
+  float n = vnoise(P / 46.0) * 0.6 + vnoise(P / 17.0 + 13.1) * 0.28 + vnoise(P / 7.0 + 41.7) * 0.12 - 0.5;
+  float own = clamp((logY(P, 2.5) - logY(P, 5.0)) * 1.4, -0.5, 0.5);
+  return clamp(n * 2.4 + own * 0.8, -1.0, 1.0);
 }
 // The sky through a polariser. Clouds are near neutral, so the share of the
 // clear sky's blue chroma (b - r) a pixel still holds is how much of it is
@@ -178,12 +260,25 @@ void main() {
   vec3 L = texture(uLight, uv).rgb;
   float dose = L.r * 2.0;
   float S = max(L.g * L.g * 1.5, 0.02);
-  if (uDebug > 0.5) {
+  if (uDebug > 0.5 && uDebug < 1.5) {
     outColor = vec4(toSrgb(vec3(dose * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
     return;
   }
+  // the dose at the scale of a ledge: sheltered strips under every sill and
+  // cornice keep their paint; the open wall fades in patches
+  vec2 P = uv * uPlateSize;
+  float mot = 0.0;
+  float local = 1.0;
+  if (m.a > 0.01) {
+    mot = mottleAt(P);
+    local = exp(uMottle * mot) * (1.0 - uShelter * shelterAt(P));
+  }
+  if (uDebug > 1.5) {
+    outColor = vec4(toSrgb(vec3(dose * m.a * local * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
+    return;
+  }
   // effective dose after induction, with a soft knee (softplus)
-  float e0 = uYears * dose * m.a;
+  float e0 = uYears * dose * m.a * local;
   float e = uInduction * log(1.0 + exp(e0 / uInduction - 1.0)) - uInduction * log(1.0 + exp(-1.0));
   e = max(e, 0.0);
 
@@ -193,7 +288,10 @@ void main() {
   float k = min(min(dens.r, dens.g), dens.b) * 0.9;
   vec3 cmy = dens - k;
   // dye loss: each ink by its own rate; carbon black barely moves
-  vec3 lost = cmy * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
+  // no coat gives up all its colour, and a thick one (a patch that weathers
+  // slower) holds a good part of it
+  float keep = mix(0.25, 0.92, smoothstep(-0.7, 0.7, mot));
+  vec3 lost = cmy * keep * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
   // what the pigment leaves behind is the lime render's own warm off-white,
   // not paper white: a fading colour climbs to it and stops (a surface that
   // is already lighter, like the white trim, keeps its own albedo)
@@ -207,10 +305,10 @@ void main() {
   vec3 aged = a + m.r * (aInk - a) + m.g * (aWood - a);
   // chalk: the binder erodes and the white pigment powders the surface
   float ec = max(e0 - uChalkInduction, 0.0);
-  float c = m.b * uChalkMax * (1.0 - exp(-uKChalk * ec));
-  vec3 chalkWhite = vec3(0.74, 0.745, 0.735);
-  aged = mix(aged, max(aged, chalkWhite * min(0.55 + 0.45 * dot(aged, LUMA) / 0.6, 1.0)), c);
-  aged = mix(aged, vec3(dot(aged, LUMA)), c * 0.35);
+  // to the lime's own warm cream, in patches, the bloom heavier where the
+  // wash was thin
+  float c = m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * mot);
+  aged = mix(aged, max(aged, uBase * min(0.55 + 0.45 * dot(aged, LUMA) / 0.6, 1.0)), c);
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
@@ -342,11 +440,13 @@ export async function createFade(host, { embedded = false } = {}) {
   const held = yearsQ != null;
   const still = held || q.get("still") === "1";
   const raw = q.get("film") === "0";
-  const debugDose = q.get("debug") === "dose";
+  const debugQ = q.get("debug");
+  const debugDose = debugQ === "dose" || debugQ === "local";
   const polar = q.get("sky") === "0" ? 0 : 1;
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
   const clearSky = hsvLin(SKY_CLEAR);
+  const render = hsvLin(RENDER);
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
@@ -502,8 +602,12 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uChalkMax, CHALK_MAX);
     gl.uniform1f(u.uInduction, INDUCTION);
     gl.uniform1f(u.uChalkInduction, CHALK_INDUCTION);
-    gl.uniform3fv(u.uBase, RENDER);
-    gl.uniform1f(u.uDebug, debugDose ? 1 : 0);
+    gl.uniform3fv(u.uBase, render);
+    gl.uniform2f(u.uPlateSize, PW, PH);
+    gl.uniform2f(u.uVanish, VANISH[0], VANISH[1]);
+    gl.uniform1f(u.uShelter, SHELTER);
+    gl.uniform1f(u.uMottle, MOTTLE);
+    gl.uniform1f(u.uDebug, debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
