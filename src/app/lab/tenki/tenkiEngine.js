@@ -2,38 +2,69 @@ import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Tenki: lying under a wooden utility pole and looking up it, its wires
-// crossing over you, and the weather changing overhead. Drag across and the
-// sky becomes another real, recorded sky (five Poly Haven HDRIs, CC0: a clear
-// low-sun sky, high cirrus, a mackerel sky of altocumulus, fair-weather
-// cumulus, and building cumulus), and the pole, the crossarm and the cables are
-// lit by that sky and no other:
+// crossing over you, under building summer cumulus. Drag across and the hour
+// moves: the sun goes round behind you on its real path for late July at
+// 35.7 N, and the pole, the crossarm, the hardware and the cables are lit by
+// it, from the east in the morning and the west in the evening: a warm key on
+// the sunlit face, blue skylight in the shade, the terminator crossing the
+// pole, cable shadows marched through the depth map, the sheath and the
+// galvanised steel catching it. Toward evening the sun reddens and weakens
+// through the air mass, and the clouds take its colour.
 //
 //  - The photograph is taken apart offline (tools/depth/bakes/tenki): a sky
 //    matte that keeps every wire (thin-structure trimap, then colour-line
 //    unmixing between the local sky and the local cable colour, in linear
 //    light), the foreground decontaminated of its old sky, MoGe-2 normals and
 //    metric depth, and the photo's own light on the pole fitted as a function
-//    of the normal so it can be divided out (albedo = I / S_orig).
-//  - Each sky is rendered through the photo's lens (MoGe-2's focal length, the
-//    pole's axis as the vertical) and reduced to light: SH9 irradiance of the
-//    sky plus a sunlit ground, and the sun's direction, irradiance and angular
-//    spread. The foreground is albedo x (SH9(n) + sun max(n.l, 0) x shadow),
-//    with shadows marched through the depth map toward that sky's sun.
-//  - Between two skies everything is a crossfade of light: the sky radiance,
-//    the irradiance and both suns add with weights, in linear light, so the
-//    terminator on the pole and the shadows of the cables fade across rather
-//    than slide.
+//    of the normal so it can be divided out: albedo = (I - glare) / S_orig,
+//    S_orig in colour (its sun against its sky) and corrected on the trunk by
+//    what the fit missed (oldlight.py), then put in absolute terms (weathered
+//    pole wood, ~0.14).
+//  - Each recorded sky (five Poly Haven HDRIs, CC0) is rendered through the
+//    photo's lens and reduced to light: SH9 irradiance of the sky plus a sunlit
+//    ground, and the sun's direction, irradiance and angular spread. At hour h
+//    the recorded sun is moved to the sun's position then and carried through
+//    that hour's air mass; the skylight's SH9 is turned about the vertical
+//    with it. The foreground is albedo x (SH9(n) x sky view + sun x
+//    OrenNayar(n, l) x shadow) + GGX sun specular x shadow.
+//  - Between two skies (?sky= fractions, the up / down keys) everything is a
+//    crossfade of light, in linear light.
 //
-// Query: ?sky=0..4 holds the weather (fractions are mid-crossfade);
-// ?still=1 skips the reveal; ?grain=0 for static grain.
+// Query: ?sky=0..4 holds the weather at the hour it was recorded (4, building
+// cumulus, is the default sky; 0 clear low sun, 1 cirrus, 2 mackerel,
+// 3 fair-weather cumulus); ?t=7..18.5 holds the hour; ?still=1 skips the
+// reveal; ?grain=0 for static grain; ?raw=1 the light without the film;
+// ?dbg=1 grey albedo, 2 sun visibility, 3 sun only, 4 albedo.
 
 const BASE = "/lab/tenki/";
 const SKY_FILES = ["clear", "cirrus", "mackerel", "cumulus", "tower"];
-const START = 3;
+const START = 4; // building cumulus
+// The day: lying at the pole's foot, facing north, at 35.7 N (Tokyo) in late
+// July (solar declination +20.5). The drag is the hour, in local solar time;
+// the sun's path never crosses the frame (it stays behind and to the sides).
+const LAT = (35.7 * Math.PI) / 180;
+const DEC = (20.5 * Math.PI) / 180;
+const DAY = [7, 18.5];
+// Clear-air optical depth (Rayleigh + a little aerosol) at the film's R, G, B:
+// the sun's colour and strength through the air mass at its height.
+const TAU = [0.13, 0.2, 0.36];
+// The bake balanced every sky's sun alone to the film's white. Daylight film
+// is balanced for sun and sky together, which is bluer than the sun, and a July
+// afternoon sun through humid air is warmer again (~4800 K against 5500 K): it
+// is that warm offset against the blue skylight that tells sun from shade on a
+// grey pole.
+const KEY = [1.12, 1.0, 0.8];
+// The HDRIs are open-field skies. Lying in a residential street, the pole
+// sees the sun but not the whole sky: houses, wires and trees take the lower
+// band of it (a sky-view factor of ~0.6 for a vertical face in a street of
+// two-storey houses), so the skylight that fills the shadows is that much less.
+const SKY_VIEW = 0.6;
 // Exposure: each sky is first exposed for its own sky (median at the photo's
 // sky value); then the camera meets the pole half way, the way a negative is
 // exposed for the whole frame. 0 = expose for the sky, 1 = for the pole.
-const METER = 0.5;
+const METER = 0;
+const RHO_POLE = 0.14;
+const VEIL = 0.025;
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 // Print: 4:3, cropped a little into the photo so the frame can breathe.
 const PRINT_ASPECT = 4 / 3;
@@ -47,12 +78,111 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
+// Sun visibility, once per change of light, in photo space (half res): from
+// each foreground point a ray toward the sun, marched in screen space through
+// the depth map with perspective-correct depth, steps growing with distance
+// (a far occluder's shadow is as wide as the sun's penumbra there anyway). A
+// cable, a bolt or the crossarm is in the way when the depth map there is
+// nearer than the ray by more than the noise and less than its thickness. A
+// veiled sun's shadow melts: an occluder of ~6 cm blocks only thickness /
+// penumbra of the sun once the penumbra is wider than it.
+const SUNVIS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uFg;
+uniform sampler2D uNd;
+uniform sampler2D uTrunk; // the trunk, which does not shade itself
+uniform vec2 uSize;
+uniform float uFx;
+uniform vec2 uZ;
+uniform vec3 uSunDir[2];
+uniform float uSpread[2]; // sun's angular radius, rad
+uniform vec2 uOn;
+uniform float uRays;      // 1 while the sun is moving, 2 at rest
+
+float depthAt(vec2 uv) {
+  float l = texture(uNd, uv).a;
+  return uZ.x * pow(uZ.y / uZ.x, l);
+}
+
+vec2 projectPx(vec3 P) {
+  return vec2(0.5 * uSize.x + uFx * P.x / -P.z, 0.5 * uSize.y - uFx * P.y / -P.z);
+}
+
+float march(vec3 P, vec3 L, float spread, float jit) {
+  float T = 7.0;
+  if (L.z > 1e-4) T = min(T, (-0.2 - P.z) / L.z);
+  if (T <= 0.02) return 1.0;
+  vec3 E = P + L * T;
+  vec2 a = projectPx(P);
+  vec2 b = projectPx(E);
+  vec2 ab = b - a;
+  float len = length(ab);
+  if (len < 1.0) return 1.0;
+  float iz0 = 1.0 / -P.z;
+  float iz1 = 1.0 / -E.z;
+  float occ = 0.0;
+  float s = 1.0;
+  for (int i = 0; i < 120; i++) {
+    float st = 1.5 + 0.032 * s;
+    float sj = s + st * jit; // each ray samples at its own fraction of every step
+    s += st;
+    if (sj >= len) break;
+    float f = sj / len;
+    vec2 q = a + ab * f;
+    if (q.x < 0.0 || q.y < 0.0 || q.x > uSize.x || q.y > uSize.y) break;
+    vec2 uv = q / uSize;
+    float iz = mix(iz0, iz1, f);
+    float zr = 1.0 / iz;
+    float t = T * f * iz1 / iz; // distance along the ray (m)
+    float cov = texture(uFg, uv).a * (1.0 - texture(uTrunk, uv).r);
+    float dz = zr - depthAt(uv);
+    float eps = 0.035 + 0.03 * t;
+    // a cable, bolt or the crossarm is ~3 to 12 cm through; a ray that passes
+    // further behind it than that went behind it, not through it
+    float hit = cov * smoothstep(eps, eps * 1.6, dz) * (1.0 - smoothstep(eps + 0.1, eps + 0.16, dz));
+    float pen = 2.0 * spread * t;
+    occ = max(occ, hit * min(1.0, 0.06 / max(pen, 1e-4)));
+    if (occ > 0.99) break;
+  }
+  return 1.0 - occ;
+}
+
+void main() {
+  vec2 pu = vec2(vUv.x, 1.0 - vUv.y);
+  vec4 f = texture(uFg, pu);
+  if (f.a < 0.002) { outColor = vec4(1.0); return; }
+  vec2 px = pu * uSize;
+  vec3 d = normalize(vec3((px.x - 0.5 * uSize.x) / uFx, -(px.y - 0.5 * uSize.y) / uFx, -1.0));
+  vec4 nd = texture(uNd, pu);
+  vec3 n = normalize(nd.rgb * 2.0 - 1.0);
+  float z = uZ.x * pow(uZ.y / uZ.x, nd.a);
+  // start a hair off the surface, toward the camera, so the pole does not shade itself
+  vec3 P = d * (z / -d.z);
+  P += n * 0.012;
+  float jit = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+  // two rays a half step apart, so thin cables are not stepped over
+  vec2 v = vec2(1.0);
+  for (int k = 0; k < 2; k++) {
+    if ((k == 0 ? uOn.x : uOn.y) < 0.5 || dot(n, uSunDir[k]) < -0.2) continue;
+    float a = march(P, uSunDir[k], uSpread[k], jit);
+    if (uRays > 1.5) a = 0.5 * (a + march(P, uSunDir[k], uSpread[k], fract(jit + 0.5)));
+    if (k == 0) v.x = a;
+    else v.y = a;
+  }
+  outColor = vec4(v, 1.0, 1.0);
+}`;
+
 const SCENE = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uFg;    // rgb: foreground (sRGB texture -> linear), a: coverage
 uniform sampler2D uNd;    // rgb: camera normal * .5 + .5, a: log depth
+uniform sampler2D uVis;   // r, g: sun visibility for sun 0, 1 (photo space)
+uniform sampler2D uShade; // what the fitted old light missed on the trunk: log rgb, .5 = none
+uniform sampler2D uTrunk; // the trunk (wood: rough, whatever its cracks look like)
 uniform sampler2D uSky0;
 uniform sampler2D uSky1;
 uniform vec4 uCrop;       // photo uv (y down) = (x, 1 - y) * crop.xy + crop.zw
@@ -63,16 +193,24 @@ uniform vec2 uZ;          // zNear, zFar (m)
 uniform mat3 uR;          // camera -> heading frame (y up)
 uniform vec3 uUp;         // world up, camera space
 uniform float uDrift;     // sky yaw drift (rad)
-uniform vec3 uSH[9];      // combined irradiance, photo units
+uniform vec3 uSH[9];      // combined skylight irradiance (turned with the sun), photo units
 uniform vec3 uSunDir[2];  // camera space
-uniform vec3 uSunE[2];    // photo units (weights folded in)
+uniform vec3 uSunE[2];    // photo units (weights, airmass folded in)
 uniform float uSunSoft[2];
 uniform vec2 uSkyK;       // sky gains (weights folded in)
 uniform float uSHo[9];    // the photo's own light (luminance): sky part
 uniform vec3 uSunO;       // and its sun, camera space
 uniform float uSunOK;
+uniform vec3 uOldSun;     // the photo's own sun and sky colours (luminance 1)
+uniform vec3 uOldSky;
+uniform vec3 uVeil;       // the lens's veiling glare in the photograph (linear)
+uniform vec3 uKeyDir;     // the dominant sun now (camera space), for the clouds
+uniform vec3 uCloudTint;  // cloud colour now / at the recorded hour
+uniform float uRim;       // strength of the sun side of each cloud
 uniform float uExpo;      // reveal exposure, linear factor
 uniform float uLinearOut;
+uniform float uDbg;
+uniform float uCal;       // albedo 1 -> radiance (the relight's calibration)
 
 
 vec3 shEval(vec3 d) {
@@ -104,41 +242,47 @@ vec3 rot(vec3 v, vec3 k, float a) {
   return v * c + cross(k, v) * s + k * dot(k, v) * (1.0 - c);
 }
 
-float depthAt(vec2 uv) {
-  float l = texture(uNd, uv).a;
-  return uZ.x * pow(uZ.y / uZ.x, l);
+// Oren-Nayar (rough, sigma ~ .45): weathered wood and cable sheath are not
+// Lambertian; the lit side stays flatter and falls off harder at the
+// terminator, and a sun behind the camera lights them back toward it.
+float orenNayar(vec3 n, vec3 l, vec3 v) {
+  float nl = dot(n, l);
+  float nv = max(dot(n, v), 1e-3);
+  if (nl <= 0.0) return 0.0;
+  const float A = 1.0 - 0.5 * 0.2025 / (0.2025 + 0.33);
+  const float B = 0.45 * 0.2025 / (0.2025 + 0.09);
+  float s = dot(l, v) - nl * nv;
+  float t = s > 0.0 ? max(nl, nv) : 1.0;
+  return nl * (A + B * s / t);
 }
 
-vec2 project(vec3 P) {
-  return vec2(0.5 * uSize.x + uFx * P.x / -P.z, 0.5 * uSize.y - uFx * P.y / -P.z) / uSize;
+// GGX sun specular (Smith-Schlick, Schlick Fresnel): cable sheath is glossy
+// polyethylene, the hardware galvanised steel, the wood rough. Per unit sun
+// irradiance, times n.l.
+float ggx(vec3 n, vec3 l, vec3 v, float rough, float f0) {
+  float nl = dot(n, l);
+  float nv = max(dot(n, v), 1e-3);
+  if (nl <= 0.0) return 0.0;
+  vec3 h = normalize(l + v);
+  float nh = max(dot(n, h), 0.0);
+  float a = rough * rough;
+  float a2 = a * a;
+  float dd = nh * nh * (a2 - 1.0) + 1.0;
+  float D = a2 / (3.14159265 * dd * dd);
+  float k = a * 0.5;
+  float G = nl / (nl * (1.0 - k) + k) * nv / (nv * (1.0 - k) + k);
+  float F = f0 + (1.0 - f0) * pow(1.0 - max(dot(h, v), 0.0), 5.0);
+  return D * G * F / (4.0 * nl * nv) * nl;
 }
 
-// Sun visibility through the depth map: march toward the sun in camera space;
-// a cable or the crossarm is in the way when the depth there is nearer than the
-// ray and within a plausible thickness.
-float sunVis(vec3 P, vec3 L, float soft, vec2 jit) {
-  vec3 t1 = normalize(cross(L, vec3(0.0, 0.0, 1.0)));
-  vec3 t2 = cross(L, t1);
-  float vis = 0.0;
-  for (int k = 0; k < 3; k++) {
-    float ang = 6.2831853 * (float(k) / 3.0 + jit.x);
-    vec3 Lk = normalize(L + (t1 * cos(ang) + t2 * sin(ang)) * soft);
-    float occ = 0.0;
-    float t = 0.03 + 0.02 * jit.y;
-    for (int i = 0; i < 14; i++) {
-      vec3 Q = P + Lk * t;
-      if (Q.z > -0.05) break;
-      vec2 uv = project(Q);
-      if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) break;
-      vec4 f = texture(uFg, uv);
-      float zq = depthAt(uv);
-      float dz = -Q.z - zq;
-      occ = max(occ, f.a * step(0.02 + 0.02 * t, dz) * step(dz, 0.6));
-      t *= 1.32;
-    }
-    vis += 1.0 - occ;
-  }
-  return vis / 3.0;
+vec2 skyUv(vec3 ds) {
+  return vec2(0.5) + vec2(ds.x / -ds.z, -ds.y / -ds.z) * uFx / uSize / uMargin;
+}
+
+// how much of a sky pixel is cloud: white against the polarised cobalt
+float cloudAt(vec2 su, float lod) {
+  vec3 v = textureLod(uSky0, su, lod).rgb * uSkyK.x + textureLod(uSky1, su, lod).rgb * uSkyK.y;
+  return smoothstep(0.42, 0.86, v.r / max(v.b, 1e-3));
 }
 
 void main() {
@@ -148,33 +292,66 @@ void main() {
 
   // sky: the same lens, drifting slowly about the vertical
   vec3 ds = rot(d, uUp, uDrift);
-  vec2 su = vec2(0.5) + vec2(ds.x / -ds.z, -ds.y / -ds.z) * uFx / uSize / uMargin;
-  su = clamp(su, vec2(0.001), vec2(0.999));
+  vec2 su = clamp(skyUv(ds), vec2(0.001), vec2(0.999));
   vec3 sky = decodeSky(texture(uSky0, su).rgb) * uSkyK.x + decodeSky(texture(uSky1, su).rgb) * uSkyK.y;
+  // the clouds take the hour's sun: the side of each cloud that faces it
+  // lifts in the sun's colour, the side away from it falls to skylight blue
+  {
+    vec3 Ls = rot(uKeyDir, uUp, uDrift);
+    vec2 sb = skyUv(normalize(ds + 0.04 * (Ls - ds * dot(ds, Ls))));
+    vec2 toSun = sb - skyUv(ds);
+    toSun /= max(length(toSun), 1e-6);
+    vec2 o = vec2(5.0) / vec2(textureSize(uSky0, 0));
+    float c = cloudAt(su, 0.0);
+    vec2 g = vec2(cloudAt(su + vec2(o.x, 0.0), 2.0) - cloudAt(su - vec2(o.x, 0.0), 2.0),
+                  cloudAt(su + vec2(0.0, o.y), 2.0) - cloudAt(su - vec2(0.0, o.y), 2.0));
+    float face = -dot(g, toSun) * 3.0;
+    float lit = clamp(face, 0.0, 1.0);
+    float shd = clamp(-face, 0.0, 1.0);
+    vec3 cl = sky * uCloudTint;
+    cl *= 1.0 + uRim * lit * normalize(uCloudTint) * 1.732;
+    cl *= mix(vec3(1.0), vec3(0.78, 0.86, 1.0), uRim * shd);
+    sky = mix(sky, cl, c);
+  }
 
   vec4 f = texture(uFg, pu);
   vec3 col = sky;
   if (f.a > 0.002) {
     vec4 nd = texture(uNd, pu);
     vec3 n = normalize(nd.rgb * 2.0 - 1.0);
-    float z = uZ.x * pow(uZ.y / uZ.x, nd.a);
-    vec3 P = d * (z / -d.z);
     // the photo's own light, divided out (grey; the albedo keeps its colour)
-    float So = max(shEvalO(uR * n) + uSunOK * max(dot(n, uSunO), 0.0), 1e-4);
-    vec3 albedo = f.rgb / So; // the sRGB texture decodes to linear
-    vec3 E = max(shEval(uR * n), vec3(0.0));
-    vec2 jit = fract(px * vec2(0.0671, 0.0583) + vec2(0.31, 0.77) * fract(px.yx * 0.0137));
+    float oSun = uSunOK * max(dot(n, uSunO), 0.0);
+    float So = max(shEvalO(uR * n) + oSun, 1e-4);
+    vec3 Sc = So * mix(uOldSky, uOldSun, oSun / So);
+    Sc *= exp((texture(uShade, pu).rgb - 0.5) * 2.7725887);
+    // (the sRGB texture decodes to linear; the glare that lifted every dark
+    // thing against the bright sky comes off first, or black cables relight grey)
+    vec3 albedo = max(f.rgb - uVeil, f.rgb * 0.15) / Sc;
+    if (abs(uDbg - 1.0) < 0.5) albedo = vec3(1.0);
+    vec2 vis = texture(uVis, vec2(pu.x, 1.0 - pu.y)).rg;
+    vec3 E = uDbg > 2.5 ? vec3(0.0) : max(shEval(uR * n), vec3(0.0));
+    // material from the albedo: dark and grey is cable sheath (glossy), light
+    // and grey is galvanised steel, the rest wood (rough, barely specular)
+    float al = dot(albedo, vec3(0.2126, 0.7152, 0.0722));
+    float sat = (max(albedo.r, max(albedo.g, albedo.b)) - min(albedo.r, min(albedo.g, albedo.b))) / max(al, 1e-4);
+    float wood = texture(uTrunk, pu).r;
+    float cable = (1.0 - smoothstep(0.35, 0.7, al)) * (1.0 - smoothstep(0.3, 0.6, sat)) * (1.0 - wood);
+    float steel = smoothstep(1.6, 2.6, al) * (1.0 - smoothstep(0.15, 0.35, sat)) * (1.0 - wood);
+    float rough = mix(mix(0.8, 0.38, cable), 0.45, steel);
+    float f0 = mix(0.04, 0.35, steel);
+    vec3 spec = vec3(0.0);
     for (int k = 0; k < 2; k++) {
-      float e = dot(uSunE[k], vec3(0.2126, 0.7152, 0.0722));
-      if (e <= 1e-6) continue;
-      vec3 L = uSunDir[k];
       float s = uSunSoft[k];
-      float ndl = clamp((dot(n, L) + s) / (1.0 + s), 0.0, 1.0);
-      if (ndl <= 0.0) continue;
-      float v = sunVis(P, L, 0.01 + s * 0.6, jit);
-      E += uSunE[k] * ndl * v;
+      // a veiled sun wraps a little; a clear one is Oren-Nayar
+      float wrap = clamp((dot(n, uSunDir[k]) + s) / (1.0 + s), 0.0, 1.0);
+      float ndl = mix(orenNayar(n, uSunDir[k], -d), wrap, clamp(s * 4.0, 0.0, 1.0));
+      float vk = k == 0 ? vis.r : vis.g;
+      E += uSunE[k] * ndl * vk;
+      spec += uSunE[k] * ggx(n, uSunDir[k], -d, rough, f0) * vk;
     }
-    vec3 fgc = albedo * E;
+    vec3 fgc = albedo * E + spec / uCal * mix(vec3(1.0), albedo / max(al, 1e-4), steel);
+    if (abs(uDbg - 2.0) < 0.5) fgc = vec3(vis.r * vis.g * 0.6);
+    if (abs(uDbg - 4.0) < 0.5) fgc = albedo * 0.1;
     col = mix(sky, fgc, f.a);
   }
   col *= uExpo;
@@ -277,6 +454,60 @@ const freeTarget = (gl, t) => {
 };
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+
+// The sun at hour h: direction in the heading frame (y up, +z north, -x east,
+// as the photo's camera sees it), and its elevation (rad).
+function solar(h) {
+  const H = ((h - 12) * 15 * Math.PI) / 180;
+  const sinEl = Math.sin(LAT) * Math.sin(DEC) + Math.cos(LAT) * Math.cos(DEC) * Math.cos(H);
+  const el = Math.asin(sinEl);
+  const az = Math.atan2(-Math.sin(H) * Math.cos(DEC), Math.cos(LAT) * Math.sin(DEC) - Math.sin(LAT) * Math.cos(DEC) * Math.cos(H));
+  return { el, dir: [-Math.sin(az) * Math.cos(el), sinEl, Math.cos(az) * Math.cos(el)] };
+}
+// Kasten-Young air mass, and the direct beam's transmittance through it
+const airmass = (el) => {
+  const deg = Math.max(0.5, (el * 180) / Math.PI);
+  return 1 / (Math.sin((deg * Math.PI) / 180) + 0.50572 * Math.pow(deg + 6.07995, -1.6364));
+};
+const beam = (el) => TAU.map((t) => Math.exp(-t * airmass(el)));
+// the hour on the day's arc whose sun is nearest a recorded one
+function hourOf(sun) {
+  let best = DAY[0];
+  let bd = -2;
+  for (let h = DAY[0]; h <= DAY[1] + 1e-6; h += 0.01) {
+    const c = dot3(solar(h).dir, sun);
+    if (c > bd) {
+      bd = c;
+      best = h;
+    }
+  }
+  return best;
+}
+// SH9 irradiance (y the polar axis) turned about the vertical by a, in place
+// of rotating the sky: the bright side of the skylight goes round with the sun.
+function turnSH(sh, a, out) {
+  const c = Math.cos(a);
+  const sn = Math.sin(a);
+  const c2 = Math.cos(2 * a);
+  const s2 = Math.sin(2 * a);
+  for (let ch = 0; ch < 3; ch++) {
+    const g = (i) => sh[i][ch];
+    out[0][ch] = g(0);
+    out[1][ch] = g(1);
+    out[6][ch] = g(6);
+    // (x, z) and y(x, z) pairs: f(phi - a)
+    out[3][ch] = g(3) * c + g(2) * sn;
+    out[2][ch] = g(2) * c - g(3) * sn;
+    out[4][ch] = g(4) * c + g(5) * sn;
+    out[5][ch] = g(5) * c - g(4) * sn;
+    // xz and (x^2 - z^2) / 2 go as sin 2phi and -cos 2phi
+    const p = g(7);
+    const q = -g(8);
+    out[7][ch] = p * c2 + q * s2;
+    out[8][ch] = -(q * c2 - p * s2);
+  }
+  return out;
+}
 const LUM = [0.2126, 0.7152, 0.0722];
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
 // R maps camera -> heading; its transpose maps heading -> camera.
@@ -284,9 +515,15 @@ const tmul = (R, v) => [0, 1, 2].map((i) => R[0][i] * v[0] + R[1][i] * v[1] + R[
 
 export async function createTenki(host, { embedded = false } = {}) {
   const q = new URLSearchParams(window.location.search);
-  const skyQ = q.get("sky");
-  const held = skyQ != null && skyQ !== "" && Number.isFinite(+skyQ);
+  const num = (k) => {
+    const v = q.get(k);
+    return v != null && v !== "" && Number.isFinite(+v) ? +v : null;
+  };
+  const skyQ = num("sky");
+  const hourQ = num("t");
+  const held = skyQ != null || hourQ != null;
   const still = held || q.get("still") === "1";
+  const dbg = num("dbg") ?? 0;
   const grainOn = q.get("grain") !== "0";
   const raw = q.get("raw") === "1";
   // ?hal= / ?bloom= / ?expo= tune the print while looking at a still
@@ -300,14 +537,18 @@ export async function createTenki(host, { embedded = false } = {}) {
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
   stage.canvas.style.cursor = "grab";
 
-  const [data, fgImg, ndImg, ...skyImgs] = await Promise.all([
+  const [data, fgImg, ndImg, shadeImg, trunkImg, ...skyImgs] = await Promise.all([
     fetch(`${BASE}tenki.json`).then((r) => r.json()),
     loadImage(`${BASE}fg.webp`),
     loadImage(`${BASE}nd.webp`),
+    loadImage(`${BASE}shade.webp`),
+    loadImage(`${BASE}trunk.webp`),
     ...SKY_FILES.map((n) => loadImage(`${BASE}sky-${n}.webp`)),
   ]);
   const fgTex = imageTexture(gl, fgImg, { srgb: true });
   const ndTex = imageTexture(gl, ndImg, { mips: false });
+  const shadeTex = imageTexture(gl, shadeImg, { mips: false });
+  const trunkTex = imageTexture(gl, trunkImg, { mips: false });
   const skyTex = skyImgs.map((img) => imageTexture(gl, img));
   const N = skyTex.length;
 
@@ -318,11 +559,31 @@ export async function createTenki(host, { embedded = false } = {}) {
   const geo = Math.exp(skies.reduce((a, s) => a + Math.log(s.ePoleL), 0) / N);
   for (const s of skies) {
     s.expo = Math.pow(s.ePoleL / geo, -METER);
-    s.sunCam = tmul(R, s.sun);
     s.soft = clamp(Math.sin((s.spread * Math.PI) / 180) * 3, 0, 0.35);
+    s.spreadRad = Math.max((0.27 * Math.PI) / 180, (s.spread * Math.PI) / 180);
+    // the hour this sky was recorded at, on our day's arc
+    s.hour = hourOf(s.sun);
+    s.phi = Math.atan2(s.sun[0], s.sun[2]);
+    s.beam0 = beam(Math.asin(clamp(s.sun[1], 0.05, 1)));
+    s.shT = s.sh.map((c) => c.slice());
   }
   const sunO = tmul(R, data.orig.sun);
-  const cal = data.fitMean / (skies.reduce((a, s) => a + s.ePoleL * s.expo, 0) / N);
+  // Albedo in absolute terms: the photo divided by its own light averages 1 on
+  // the lower pole, and that pole is creosoted, weathered wood (~0.14). The
+  // bake's own calibration matched the relit pole to the photograph's, which
+  // was exposed for the sky and left the pole near black (an albedo of ~0.02);
+  // at its real albedo a sunlit face stands up against the sky and the shadow
+  // side falls away from it, as it does lying under a pole on a summer day.
+  // Veiling glare: a small, sky-coloured share of the photo's sky added over
+  // everything; taken off before the division, the pole is renormalised.
+  const veil = [0.78, 0.97, 1.32].map((c) => c * VEIL * data.skyMed);
+  // The photo's own light in colour: its sun taken as the bake's film white
+  // (every recorded sun was balanced to it), its sky that over orig.sunTint, as
+  // fitted on the trunk by oldlight.py.
+  const norm = (v) => v.map((x) => x / dot3(v, LUM));
+  const oldSun = norm([1, 0.97, 0.92]);
+  const oldSky = norm(oldSun.map((x, c) => x / (data.orig.sunTint?.[c] ?? 1)));
+  const cal = RHO_POLE / Math.PI / (1 - (VEIL * data.skyMed) / data.fitMean);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -333,6 +594,7 @@ export async function createTenki(host, { embedded = false } = {}) {
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
   const scene = program(gl, VERT, SCENE);
+  const sunvis = program(gl, VERT, SUNVIS);
   const blit = program(gl, VERT, BLIT);
   const rawP = program(gl, VERT, RAW);
   const film = createFilm(gl, { width: 2, height: 2 });
@@ -340,6 +602,9 @@ export async function createTenki(host, { embedded = false } = {}) {
   const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2 };
   let sceneT = null;
   let filmT = null;
+  // sun visibility lives in photo space, at the depth map's resolution
+  const visT = target(gl, data.size[0] >> 1, data.size[1] >> 1, false);
+  let visKey = "";
   let dirty = true;
   const layout = (W, H, dpr) => {
     if (embedded) {
@@ -375,28 +640,36 @@ export async function createTenki(host, { embedded = false } = {}) {
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
-  // ---- the weather: one continuous position s in [0, N - 1]
-  let s = held ? clamp(+skyQ, 0, N - 1) : START;
-  let vel = 0; // skies per second
+  // ---- the weather: a position s in [0, N - 1] (?sky=, or the up / down
+  // keys; fractions are mid-crossfade), and the hour h, which the drag moves.
+  let s = skyQ != null ? clamp(skyQ, 0, N - 1) : START;
+  let h = hourQ != null ? clamp(hourQ, DAY[0], DAY[1]) : skies[Math.round(s)].hour;
+  let vel = 0; // hours per second
+  let sVel = 0;
   let dragging = false;
   let last = null;
-  const perSky = () => Math.max(120, L.w / (N - 1)) * 1.15; // px of drag per sky
+  let goal = null; // an hour the keys asked for
+  let sGoal = null; // a sky the keys asked for
+  // px of drag per hour: the whole day is a little more than the print's width
+  const perHour = () => Math.max(40, (L.w * 1.25) / (DAY[1] - DAY[0]));
 
   stage.on("down", (p) => {
     dragging = true;
     vel = 0;
+    goal = null;
     last = { x: p.x, t: performance.now() };
     stage.canvas.style.cursor = "grabbing";
   });
   stage.on("move", (p) => {
     if (!dragging || !last) return;
     const now = performance.now();
-    let ds = (p.x - last.x) / perSky();
-    // rubber band past the first and last sky
-    if ((s <= 0 && ds < 0) || (s >= N - 1 && ds > 0)) ds *= 0.4;
-    s += ds;
+    // the sun follows the hand: drag right and it goes back toward the east
+    let dh = -(p.x - last.x) / perHour();
+    // rubber band past dawn and dusk
+    if ((h <= DAY[0] && dh < 0) || (h >= DAY[1] && dh > 0)) dh *= 0.3;
+    h += dh;
     const dt = Math.max(1, now - last.t) / 1000;
-    vel += (ds / dt - vel) * Math.min(1, dt / 0.05);
+    vel += (dh / dt - vel) * Math.min(1, dt / 0.05);
     last = { x: p.x, t: now };
     dirty = true;
   });
@@ -407,48 +680,103 @@ export async function createTenki(host, { embedded = false } = {}) {
     last = null;
   });
   host.tabIndex = embedded ? -1 : 0;
-  let goal = null;
   const onKey = (e) => {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
-    e.preventDefault();
-    const base = goal ?? Math.round(s);
-    goal = clamp(base + (e.key === "ArrowRight" ? 1 : -1), 0, N - 1);
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      e.preventDefault();
+      goal = clamp((goal ?? h) + (e.key === "ArrowLeft" ? 1 : -1), DAY[0], DAY[1]);
+    } else if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+      e.preventDefault();
+      sGoal = clamp((sGoal ?? Math.round(s)) + (e.key === "ArrowUp" ? 1 : -1), 0, N - 1);
+    } else return;
     dirty = true;
   };
   host.addEventListener("keydown", onKey);
 
-  // uniforms for the light at position s
+  // uniforms for the light of sky position pos at hour hr
   const SH = new Float32Array(27);
   const sunDir = new Float32Array(6);
   const sunE = new Float32Array(6);
   const sunSoft = new Float32Array(2);
-  const lightAt = (pos) => {
+  const spread = new Float32Array(2);
+  const keyDir = [0, 1, 0];
+  const cloudTint = [1, 1, 1];
+  const lightAt = (pos, hr) => {
     const p = clamp(pos, 0, N - 1);
     const i0 = Math.min(N - 2, Math.floor(p));
     const w = p - i0;
     const a = skies[i0];
     const b = skies[i0 + 1];
-    // one camera: exposure blends in stops; the light adds in linear units
+    // one camera, metered for each sky at its own hour: exposure blends in
+    // stops; the light adds in linear units
     const expo = Math.exp((1 - w) * Math.log(a.expo) + w * Math.log(b.expo));
-    const ka = (1 - w) * a.scale * expo * cal;
-    const kb = w * b.scale * expo * cal;
-    for (let i = 0; i < 9; i++)
-      for (let c = 0; c < 3; c++) SH[i * 3 + c] = a.sh[i][c] * ka + b.sh[i][c] * kb;
-    for (let c = 0; c < 3; c++) {
-      sunDir[c] = a.sunCam[c];
-      sunDir[3 + c] = b.sunCam[c];
-      sunE[c] = a.sunE[c] * ka;
-      sunE[3 + c] = b.sunE[c] * kb;
+    const sun = solar(hr);
+    const cam = tmul(R, sun.dir);
+    const tr = beam(sun.el);
+    const phi = Math.atan2(sun.dir[0], sun.dir[2]);
+    // skylight follows the sun's height a little (it is mostly the sky's own)
+    const skyGain = clamp(Math.sqrt(Math.max(0.02, Math.sin(sun.el))), 0.35, 1);
+    SH.fill(0);
+    const key = [0, 0, 0];
+    for (const [sk, k, j] of [
+      [a, (1 - w) * a.scale * expo * cal, 0],
+      [b, w * b.scale * expo * cal, 1],
+    ]) {
+      const g = (SKY_VIEW * skyGain) / Math.sqrt(Math.max(0.02, sk.sun[1]));
+      turnSH(sk.sh, phi - sk.phi, sk.shT);
+      for (let i = 0; i < 9; i++) for (let c = 0; c < 3; c++) SH[i * 3 + c] += sk.shT[i][c] * k * g;
+      for (let c = 0; c < 3; c++) {
+        sunDir[j * 3 + c] = cam[c];
+        // the recorded sun, carried to this hour's air mass
+        sunE[j * 3 + c] = sk.sunE[c] * (tr[c] / sk.beam0[c]) * KEY[c] * k;
+        key[c] += sunE[j * 3 + c];
+      }
+      sunSoft[j] = sk.soft;
+      spread[j] = sk.spreadRad;
     }
-    sunSoft[0] = a.soft;
-    sunSoft[1] = b.soft;
+    keyDir[0] = cam[0];
+    keyDir[1] = cam[1];
+    keyDir[2] = cam[2];
+    // clouds take the sun's colour now against the hour they were recorded at
+    const ref = a.beam0.map((v, c) => v * (1 - w) + b.beam0[c] * w);
+    const rel = tr.map((v, c) => v / ref[c]);
+    const rl = dot3(rel, LUM);
+    const lift = Math.pow(rl, 0.35);
+    for (let c = 0; c < 3; c++) cloudTint[c] = (rel[c] / rl) ** 0.6 * lift;
     // sky: decoded x = L K (median .5); shown at the photo's sky median, times the exposure
-    const g = (data.skyMed / 0.5) * expo;
-    return { i0, skyK: [(1 - w) * g, w * g] };
+    const gs = (data.skyMed / 0.5) * expo;
+    return { i0, w, skyK: [(1 - w) * gs, w * gs] };
+  };
+
+  const renderVis = (lt, moving) => {
+    const k = `${s.toFixed(4)}|${h.toFixed(4)}|${moving ? 1 : 2}`;
+    if (k === visKey) return;
+    visKey = k;
+    gl.useProgram(sunvis.p);
+    const u = sunvis.u;
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, fgTex);
+    gl.uniform1i(u.uFg, 0);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, ndTex);
+    gl.uniform1i(u.uNd, 1);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, trunkTex);
+    gl.uniform1i(u.uTrunk, 2);
+    gl.uniform2f(u.uSize, data.size[0], data.size[1]);
+    gl.uniform1f(u.uFx, data.fx);
+    gl.uniform2f(u.uZ, data.zNear, data.zFar);
+    gl.uniform3fv(u.uSunDir, sunDir);
+    gl.uniform1fv(u.uSpread, spread);
+    gl.uniform2f(u.uOn, lt.w < 1 ? 1 : 0, lt.w > 0 ? 1 : 0);
+    gl.uniform1f(u.uRays, moving ? 1 : 2);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, visT.fbo);
+    gl.viewport(0, 0, visT.w, visT.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
   let time = 0;
   let t0 = -1;
+  let moving = false;
   let grainClock = 0;
   let grainSeed = 0;
 
@@ -474,7 +802,8 @@ export async function createTenki(host, { embedded = false } = {}) {
     const oy = clamp(0.5 - sy / 2 + br[1], 0, 1 - sy);
     const drift = reduce || still ? 0 : (Math.sin((time * 2 * Math.PI) / 150) * 1.4 * Math.PI) / 180;
 
-    const lt = lightAt(s);
+    const lt = lightAt(s, h);
+    renderVis(lt, moving);
     const u = scene.u;
     gl.useProgram(scene.p);
     gl.activeTexture(gl.TEXTURE0);
@@ -489,6 +818,15 @@ export async function createTenki(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, skyTex[lt.i0 + 1]);
     gl.uniform1i(u.uSky1, 3);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, visT.tex);
+    gl.uniform1i(u.uVis, 4);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, shadeTex);
+    gl.uniform1i(u.uShade, 5);
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, trunkTex);
+    gl.uniform1i(u.uTrunk, 6);
     gl.uniform4f(u.uCrop, sx, sy, ox, oy);
     gl.uniform2f(u.uSize, PW, PH);
     gl.uniform1f(u.uFx, data.fx);
@@ -506,6 +844,14 @@ export async function createTenki(host, { embedded = false } = {}) {
     gl.uniform1fv(u.uSHo, data.orig.sh);
     gl.uniform3fv(u.uSunO, sunO);
     gl.uniform1f(u.uSunOK, data.orig.sunK);
+    gl.uniform3fv(u.uVeil, veil);
+    gl.uniform3fv(u.uOldSun, oldSun);
+    gl.uniform3fv(u.uOldSky, oldSky);
+    gl.uniform3fv(u.uKeyDir, keyDir);
+    gl.uniform3fv(u.uCloudTint, cloudTint);
+    gl.uniform1f(u.uRim, RIM);
+    gl.uniform1f(u.uDbg, dbg);
+    gl.uniform1f(u.uCal, cal);
     gl.uniform1f(u.uExpo, 2 ** expoStops);
     gl.uniform1f(u.uLinearOut, floatOk && sceneT.ok ? 1 : 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
@@ -573,25 +919,41 @@ export async function createTenki(host, { embedded = false } = {}) {
     }
 
     if (!dragging && !held) {
-      if (goal == null && Math.abs(vel) > 0.05) {
-        // carried by the throw, with friction
-        s += vel * dt;
-        vel *= Math.exp(-dt / 0.22);
-        if (s < 0 || s > N - 1) vel *= Math.exp(-dt / 0.06);
-        dirty = true;
-      } else {
-        const target = goal ?? clamp(Math.round(s), 0, N - 1);
-        const x = s - target;
-        if (Math.abs(x) > 1e-4 || Math.abs(vel) > 1e-4) {
-          const acc = -OMEGA * OMEGA * x - 2 * ZETA * OMEGA * vel;
-          vel += acc * dt;
-          s += vel * dt;
+      // the hour: carried by a throw, with friction, or eased to a key's hour
+      if (goal != null) {
+        const x = h - goal;
+        if (Math.abs(x) > 1e-3 || Math.abs(vel) > 1e-3) {
+          vel += (-OMEGA * OMEGA * x - 2 * ZETA * OMEGA * vel) * dt;
+          h += vel * dt;
           dirty = true;
         } else {
-          s = target;
+          h = goal;
           vel = 0;
           goal = null;
         }
+      } else if (Math.abs(vel) > 0.01 || h < DAY[0] || h > DAY[1]) {
+        h += vel * dt;
+        vel *= Math.exp(-dt / 0.3);
+        // past dawn or dusk, a spring brings the sun back
+        const over = h < DAY[0] ? h - DAY[0] : h > DAY[1] ? h - DAY[1] : 0;
+        if (over) vel += (-OMEGA * OMEGA * over - 2 * ZETA * OMEGA * vel) * dt;
+        if (Math.abs(vel) <= 0.01 && Math.abs(over) < 1e-3) {
+          vel = 0;
+          h = clamp(h, DAY[0], DAY[1]);
+        }
+        dirty = true;
+      }
+      // the weather settles on a whole sky
+      const target = sGoal ?? clamp(Math.round(s), 0, N - 1);
+      const x = s - target;
+      if (Math.abs(x) > 1e-4 || Math.abs(sVel) > 1e-4) {
+        sVel += (-OMEGA * OMEGA * x - 2 * ZETA * OMEGA * sVel) * dt;
+        s += sVel * dt;
+        dirty = true;
+      } else {
+        s = target;
+        sVel = 0;
+        sGoal = null;
       }
     }
 
@@ -605,6 +967,11 @@ export async function createTenki(host, { embedded = false } = {}) {
         dirty = true;
       }
     }
+    // while the sun moves its shadows are marched with one ray; once it rests,
+    // once more with two
+    const was = moving;
+    moving = dragging || goal != null || sGoal != null || Math.abs(vel) > 0.01 || Math.abs(sVel) > 1e-3;
+    if (was && !moving) dirty = true;
     if (!dirty) return;
     dirty = false;
     draw(expo, fade);
@@ -616,8 +983,10 @@ export async function createTenki(host, { embedded = false } = {}) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
-      for (const t of [fgTex, ndTex, ...skyTex]) gl.deleteTexture(t);
+      freeTarget(gl, visT);
+      for (const t of [fgTex, ndTex, shadeTex, trunkTex, ...skyTex]) gl.deleteTexture(t);
       gl.deleteProgram(scene.p);
+      gl.deleteProgram(sunvis.p);
       gl.deleteProgram(blit.p);
       gl.deleteProgram(rawP.p);
       gl.deleteBuffer(quad);
@@ -626,6 +995,9 @@ export async function createTenki(host, { embedded = false } = {}) {
     },
   };
 }
+
+// The sun side of each cloud: how far it lifts toward the sun's colour.
+const RIM = 1.0;
 
 // The print: Superia-ish summer, developed from a linear render. The scene
 // already sits on the photo's own exposure, so the curve is gentle; the sky's
@@ -638,7 +1010,7 @@ const FILM = {
   shoulder: 0.94,
   blueDepth: 0.5,
   saturation: 1.12,
-  halation: 0.16,
+  halation: 0.26,
   halationThreshold: 0.85,
   halationLocal: 0,
   bloom: 0.12,
@@ -646,4 +1018,9 @@ const FILM = {
   toe: 0.05,
   grain: 0.32,
   vignette: 0.18,
+  // a warm roll-off, and shadows only a breath cooler: the cool side of the
+  // pole is the skylight's to give, and the key's warmth must survive the print
+  shadowTint: [0.96, 1, 1.03],
+  highlightTint: [1.03, 1, 0.95],
+  toeColor: [0.85, 1, 1.1],
 };
