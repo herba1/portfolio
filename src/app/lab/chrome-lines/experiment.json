@@ -1,0 +1,23 @@
+{
+  "title": "Chrome Lines",
+  "description": "A pool of liquid chrome on acid yellow-green paper, drawn only in engraved lines. Each line is a stripe of one screen bent by the surface it lies on, so the lines wrap the forms, thicken where the chrome reflects the black of the studio and thin to a violet hairline where it catches a softbox, and crowd into moiré where the surface turns fast. Pull it and it behaves like mercury: a drop necks off on a thread, holds, and snaps back into the pool when you let go; at rest it breathes.",
+  "tags": ["generative", "WebGL", "Halftone", "Physics"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "herb's generative art reference 1 (liquid chrome blob as a directional line halftone on acid yellow-green). One process pushed to the edge: a height field of spring-driven metaballs is lit by a hard studio environment and then printed as a single line screen whose phase is displaced by the surface, with per-plate misregistration giving the iridescent fringe.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.42, 0.5], "to": [0.3, 0.2] },
+  "probe": [
+    { "idle": 1500 },
+    { "drag": [[0.42, 0.5], [0.3, 0.2]], "ms": 1600 },
+    { "idle": 1800 },
+    { "drag": [[0.7, 0.45], [0.75, 0.8]], "ms": 1400 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    "herb generative art reference 1: liquid chrome line halftone on acid ground",
+    "https://en.wikipedia.org/wiki/Metaballs",
+    "https://en.wikipedia.org/wiki/Line_engraving",
+    "https://en.wikipedia.org/wiki/Thin-film_interference"
+  ]
+}
