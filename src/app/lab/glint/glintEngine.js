@@ -26,8 +26,9 @@ import META from "./meta.json";
 // lobes over the pane normals: a pillow lobe (a pane's bow sweeps it across
 // the pane) and a run, longer up the tower than across, so a curtain wall
 // facing the sun lights a streak of neighbouring panes, each a moment apart.
-// That light is HDR and goes to the film unclipped, whose halation and
-// diffusion give the glint its bloom. The sky round the sun (the aureole) and
+// That light is HDR and goes to the film unclipped: only light above an HDR
+// threshold is diffused (and haloed), so the glint blooms while mullions,
+// roof edges and cloud margins keep the scan's sharpness. The sky round the sun (the aureole) and
 // the sunward edges of the cumulus brighten with it, in the sky itself and in
 // every reflection of it. The cumulus seen directly is relit from the
 // photograph's own reading of it (density and thickness, from how white and
@@ -40,7 +41,9 @@ import META from "./meta.json";
 // round it, a tenth as bright; behind a tower the sun is hidden by the tower.
 // Everything but the sun and its glints is held inside the film's shoulder by
 // a gain judged on the light's smooth level, so the cumulus round an open sun
-// keeps its modelling. At the photographer's sun the frame hands back to the
+// keeps its modelling, and inside the cloud a local contrast and a split tone
+// (skylight-blue shadows, warm-white tops) develop it as a volume. At the
+// photographer's sun the frame hands back to the
 // photograph's own pixels. Developed through the shared film kit (summer).
 //
 // Query (also ?debug=4/5 show the cloud field and its gain): ?sun=x,y holds the sun at that point of the print (0..1, y down);
@@ -178,14 +181,21 @@ function cloudField(photoImg, geoPx, W, H) {
   // the sky's own smooth level (towers left out), to tell a bright puff
   // from its surround without a tower's dark edge reading as one
   const ls = blurW(lum, sky, W, H, 2, 1);
+  // the cloud's own level a long way round (~30 plate px, gaussian), for the
+  // unsharp mask that gives each puff back its modelling: the towers are
+  // left out, so a tower's silhouette never rings into the cloud
+  const lw = blurW(lum, sky, W, H, 7, 3);
   const out = new Uint8Array(N * 4);
+  const wide = new Uint8Array(N * 4);
   for (let i = 0; i < N; i++) {
     out[i * 4] = Math.round(d1[i] * 255);
     out[i * 4 + 1] = Math.round(thick[i] * 255);
     out[i * 4 + 2] = Math.round(mid[i] * 255);
     out[i * 4 + 3] = Math.round(Math.sqrt(Math.min(1, ls[i])) * 255);
+    wide[i * 4] = Math.round(Math.sqrt(Math.min(1, lw[i])) * 255);
+    wide[i * 4 + 3] = 255;
   }
-  return out;
+  return { out, wide };
 }
 
 const VERT = `#version 300 es
@@ -209,6 +219,7 @@ uniform sampler2D uEnv;
 uniform sampler2D uEnvM;
 uniform sampler2D uPatch;
 uniform sampler2D uCloud; // quarter plate: density, thickness, density over ~16 px, sqrt sky level
+uniform sampler2D uCloudW; // quarter plate: sqrt sky level over ~30 px (r)
 uniform vec2 uPlate;
 uniform float uF;
 uniform vec2 uC;
@@ -231,6 +242,14 @@ const vec3 LUMA_C = vec3(0.2126, 0.7152, 0.0722);
 const float SUN_R = 0.0047;   // angular radius of the sun, rad
 const vec3 SKY_C = vec3(0.80, 0.90, 1.08); // skylight on a wall: blue
 const vec3 SUN_C = vec3(1.0, 0.93, 0.82);  // the sun: warm
+// the cumulus's split tone, as linear colours of unit luma: the shadows
+// skylight blue (sRGB 125/142/155: hue 205, 19% saturated), the tops the
+// sun's warm white (sRGB 255/248/236)
+const vec3 CLOUD_SH = vec3(0.76, 1.04, 1.32);
+const vec3 CLOUD_TOP = vec3(1.07, 0.99, 0.86);
+const float SPLIT_SH = 1.0;
+const float SPLIT_TOP = 1.0;
+const float USM_K = 0.28; // local contrast: +28% in log light
 // Radiance of the sky round the sun, in units of the clear sky, against the
 // angle from it: the solar aureole (forward scattering by haze and droplets)
 // is tens of times the sky a few degrees out and falls off fast.
@@ -389,6 +408,23 @@ void main() {
   float auK = 1.0 + 0.035 * au * away * (1.0 - 0.8 * cl.r);
   sky *= auK;
   sky += vec3(1.0, 0.95, 0.87) * 0.02 * au * away * (1.0 - 0.8 * cl.r);
+  // ---- the cumulus, developed as a volume, not a grey smear. Inside the
+  // cloud only: local contrast against the cloud's own level ~30 px round
+  // (an unsharp mask, in log light so it is a ratio and keeps the hue), then
+  // a split tone. The cloud's shadows see only the blue sky, so they take
+  // skylight's colour (hue ~205, a fifth saturated); its sunlit tops roll
+  // off to the sun's warm white, never to the scan's grey.
+  float cm = smoothstep(0.15, 0.6, cPix);
+  float Lw = texture(uCloudW, t).r;
+  Lw *= Lw;
+  float usm = clamp(pow(max(Lpx, 1e-3) / max(Lw, 0.02), USM_K), 0.72, 1.35);
+  sky *= mix(1.0, usm, cm);
+  float Ly = dot(sky, LUMA_C);
+  float Ld = Ly * uExpo;
+  float wSh = cm * smoothstep(0.06, 0.16, Ld) * (1.0 - smoothstep(0.42, 0.68, Ld));
+  float wTop = cm * smoothstep(0.5, 0.95, Ld);
+  sky = mix(sky, Ly * CLOUD_SH, wSh * SPLIT_SH);
+  sky = mix(sky, Ly * CLOUD_TOP, wTop * SPLIT_TOP) * (1.0 + 0.14 * wTop);
 
   // ---- towers
   vec3 col = sky;
@@ -555,6 +591,82 @@ void main() {
   if (uDebug > 4.5) outColor = vec4(cGain * 0.5, dot(cAdd, LUMA_C), cl.g, 1.0) * skyM;
 }`;
 
+// ---- diffusion, on the highlights only. The film's own Pro-Mist spreads a
+// share of all the light, which takes the bite out of every mullion, roof
+// edge and cloud margin at once. Here only the light above an HDR threshold
+// (the sun, its mirror images in the glass, the brightest cloud tops) leaves
+// the image and lands spread out, energy conserving, over two scales (~12 and
+// ~48 px); everything below it keeps the scan's own sharpness.
+const HI_T = 0.85; // scene-linear luma where diffusion starts
+const HI_K = 0.32; // share of the highlight's light that is spread
+const HI_FN = `
+const vec3 LUMA_H = vec3(0.2126, 0.7152, 0.0722);
+uniform float uThr;
+vec3 hiOf(vec3 c) {
+  c = max(c, 0.0);
+  float l = dot(c, LUMA_H);
+  float k = uThr * 0.25;
+  float x = clamp(l - uThr + k, 0.0, 2.0 * k);
+  float h = max(x * x / (4.0 * k + 1e-5), l - uThr);
+  // (a soft ceiling: the sun's disc is thousands of times the sky, and its
+  // own glare is drawn in the scene; spread whole it would blow a slab)
+  h = 16.0 * (1.0 - exp(-h / 16.0));
+  return c * (h / max(l, 1e-4));
+}`;
+// full -> quarter (the highlight part), or quarter -> sixteenth (as is):
+// four bilinear taps cover the 4x4 block
+const HI_DOWN = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uTexel;
+uniform float uCut;
+${HI_FN}
+vec3 tap(vec2 o) {
+  vec3 c = texture(uSrc, vUv + o * uTexel).rgb;
+  return uCut > 0.5 ? hiOf(c) : c;
+}
+void main() {
+  outColor = vec4(0.25 * (tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0))), 1.0);
+}`;
+// separable gaussian, 9 taps in 5 bilinear fetches, spaced by uDir
+const HI_BLUR = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uSrc;
+uniform vec2 uDir;
+void main() {
+  vec3 c = texture(uSrc, vUv).rgb * 0.227027;
+  c += (texture(uSrc, vUv + uDir * 1.384615).rgb + texture(uSrc, vUv - uDir * 1.384615).rgb) * 0.316216;
+  c += (texture(uSrc, vUv + uDir * 3.230769).rgb + texture(uSrc, vUv - uDir * 3.230769).rgb) * 0.070270;
+  outColor = vec4(c, 1.0);
+}`;
+const HI_COMP = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform sampler2D uNear;
+uniform sampler2D uWide;
+uniform vec2 uNearTexel;
+uniform vec2 uWideTexel;
+uniform float uK;
+${HI_FN}
+void main() {
+  vec3 c = texture(uScene, vUv).rgb;
+  // tent upsampling (four bilinear taps): a bilinear one draws the bright
+  // core of a spread highlight as a square
+  vec2 n = uNearTexel * 0.5;
+  vec3 near = 0.25 * (texture(uNear, vUv + vec2(-n.x, -n.y)).rgb + texture(uNear, vUv + vec2(n.x, -n.y)).rgb
+            + texture(uNear, vUv + vec2(-n.x, n.y)).rgb + texture(uNear, vUv + vec2(n.x, n.y)).rgb);
+  vec2 o = uWideTexel * 0.5;
+  vec3 wide = 0.25 * (texture(uWide, vUv + vec2(-o.x, -o.y)).rgb + texture(uWide, vUv + vec2(o.x, -o.y)).rgb
+            + texture(uWide, vUv + vec2(-o.x, o.y)).rgb + texture(uWide, vUv + vec2(o.x, o.y)).rgb);
+  outColor = vec4(max(c + uK * (0.5 * near + 0.5 * wide - hiOf(c)), 0.0), 1.0);
+}`;
+
 const BLIT = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -693,15 +805,22 @@ export async function createGlint(host, { embedded = false } = {}) {
     envm: imageTexture(gl, imgs[5], { mips: true }),
     patch: imageTexture(gl, imgs[6]),
     cloud: gl.createTexture(),
+    cloudW: gl.createTexture(),
   };
-  gl.bindTexture(gl.TEXTURE_2D, T0.cloud);
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, cloudField(imgs[0], geoPx, GW, GH));
-  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  const cf = cloudField(imgs[0], geoPx, GW, GH);
+  [
+    [T0.cloud, cf.out],
+    [T0.cloudW, cf.wide],
+  ].forEach(([tex, data]) => {
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, GW, GH, 0, gl.RGBA, gl.UNSIGNED_BYTE, data);
+    gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  });
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -711,12 +830,18 @@ export async function createGlint(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  const P = { scene: program(gl, VERT, SCENE), blit: program(gl, VERT, BLIT) };
+  const P = {
+    scene: program(gl, VERT, SCENE),
+    blit: program(gl, VERT, BLIT),
+    hiDown: program(gl, VERT, HI_DOWN),
+    hiBlur: program(gl, VERT, HI_BLUR),
+    hiComp: program(gl, VERT, HI_COMP),
+  };
   const film = createFilm(gl, { width: 2, height: 2 });
 
   // The print: the whole 3:4 plate, as tall as the box allows.
   const L = { x: 0, y: 0, w: 1, h: 1 };
-  const T = { scene: null, film: null };
+  const T = { scene: null, film: null, comp: null, q1: null, q2: null, s1: null, s2: null };
   let dirty = true;
   const layout = (W, H, dpr) => {
     const ar = PW / PH;
@@ -742,6 +867,17 @@ export async function createGlint(host, { embedded = false } = {}) {
       T.scene = target(gl, L.pw, L.ph, false);
     }
     T.film = target(gl, L.pw, L.ph, false);
+    if (T.scene.ok && floatOk) {
+      const qw = Math.max(2, Math.round(L.pw / 4));
+      const qh = Math.max(2, Math.round(L.ph / 4));
+      const sw = Math.max(2, Math.round(qw / 4));
+      const sh = Math.max(2, Math.round(qh / 4));
+      T.comp = target(gl, L.pw, L.ph, true);
+      T.q1 = target(gl, qw, qh, true);
+      T.q2 = target(gl, qw, qh, true);
+      T.s1 = target(gl, sw, sh, true);
+      T.s2 = target(gl, sw, sh, true);
+    } else Object.assign(T, { comp: null, q1: null, q2: null, s1: null, s2: null });
     film.resize(L.pw, L.ph);
     dirty = true;
   };
@@ -864,6 +1000,7 @@ export async function createGlint(host, { embedded = false } = {}) {
     bindTex(5, T0.envm, u.uEnvM);
     bindTex(6, T0.patch, u.uPatch);
     bindTex(7, T0.cloud, u.uCloud);
+    bindTex(8, T0.cloudW, u.uCloudW);
     gl.uniform2f(u.uPlate, PW, PH);
     gl.uniform1f(u.uF, F);
     gl.uniform2f(u.uC, CX, CY);
@@ -887,9 +1024,52 @@ export async function createGlint(host, { embedded = false } = {}) {
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     const linear = floatOk && T.scene.ok;
+    // the highlights' diffusion (linear HDR only; an 8-bit frame has no
+    // highlights above white, and keeps the film's own Pro-Mist instead)
+    const split = linear && T.comp && T.comp.ok;
+    if (split && !raw && !debug) {
+      const pass = (prog, dst, setup) => {
+        gl.useProgram(prog.p);
+        setup(prog.u);
+        gl.bindFramebuffer(gl.FRAMEBUFFER, dst.fbo);
+        gl.viewport(0, 0, dst.w, dst.h);
+        gl.drawArrays(gl.TRIANGLES, 0, 3);
+      };
+      const down = (src, dst, cut) =>
+        pass(P.hiDown, dst, (u2) => {
+          bindTex(0, src.tex, u2.uSrc);
+          gl.uniform2f(u2.uTexel, 1 / src.w, 1 / src.h);
+          gl.uniform1f(u2.uCut, cut);
+          gl.uniform1f(u2.uThr, HI_T);
+        });
+      const blur = (a, b) => {
+        // spaced 1.5 texels apart: a gaussian of ~3 texels
+        pass(P.hiBlur, b, (u2) => {
+          bindTex(0, a.tex, u2.uSrc);
+          gl.uniform2f(u2.uDir, 1.5 / a.w, 0);
+        });
+        pass(P.hiBlur, a, (u2) => {
+          bindTex(0, b.tex, u2.uSrc);
+          gl.uniform2f(u2.uDir, 0, 1.5 / b.h);
+        });
+      };
+      down(T.scene, T.q1, 1);
+      blur(T.q1, T.q2);
+      down(T.q1, T.s1, 0);
+      blur(T.s1, T.s2);
+      pass(P.hiComp, T.comp, (u2) => {
+        bindTex(0, T.scene.tex, u2.uScene);
+        bindTex(1, T.q1.tex, u2.uNear);
+        bindTex(2, T.s1.tex, u2.uWide);
+        gl.uniform2f(u2.uNearTexel, 1 / T.q1.w, 1 / T.q1.h);
+        gl.uniform2f(u2.uWideTexel, 1 / T.s1.w, 1 / T.s1.h);
+        gl.uniform1f(u2.uK, HI_K);
+        gl.uniform1f(u2.uThr, HI_T);
+      });
+    }
     if (!raw && !debug) {
       film.render(
-        T.scene.tex,
+        split ? T.comp.tex : T.scene.tex,
         {
           ...FILM_PRESETS.summer,
           // The scan already carries its grade; the film adds the optics.
@@ -906,8 +1086,10 @@ export async function createGlint(host, { embedded = false } = {}) {
           halationThreshold: 1.1,
           // amber, not red: a red fringe on a glint reads as a lens fault
           halationColor: [1, 0.46, 0.2],
-          bloom: 0.24,
-          softness: 0.45,
+          // no veil over the whole frame: the highlights have had theirs
+          // above, and below them the drawing keeps the scan's sharpness
+          bloom: split ? 0 : 0.24,
+          softness: split ? 0.12 : 0.45,
           vignette: 0.18,
           grain: 0.3,
           input: linear ? "linear" : "srgb",
