@@ -213,13 +213,22 @@ export function createLigature(host, { embedded = false } = {}) {
 
   const pairs = WORD.slice(0, -1).map((ch, i) => {
     const key = ch + WORD[i + 1];
-    return { key, advance: ADVANCE[key], rest: ADVANCE[key](G0), lock: LOCK[key], release: RELEASE[key], locked: false, inside: false, contact: false, lastClick: 0 };
+    return { key, advance: ADVANCE[key], lock: LOCK[key], release: RELEASE[key], locked: false, inside: false, contact: false, lastClick: 0 };
   });
   const letters = WORD.map(() => ({ x: 0, v: 0 }));
 
   let t = still ?? 0; // squeeze target, 0..1 (a little below 0 stretches)
-  let size = 100;
+  let size = 100; // px per cap height, sprung toward fitSize()
+  let sizeV = 0;
   let held = false;
+
+  // The word is set to a measure, not a size, the way a compositor sets a
+  // line to fit: its outer width is held, so as the squeeze takes paper out
+  // the type grows to fill the line, and the locked ligature lands at sleeve
+  // scale instead of shrinking to a mark in the middle of the paper.
+  const measure = () => stage.width * (embedded ? 0.84 : 0.78);
+  const outerWidth = () => letters[letters.length - 1].x - letters[0].x + WIDTH[WORD[WORD.length - 1]];
+  const fitSize = () => Math.min(measure() / outerWidth(), stage.height * 0.42);
 
   // The shared paper gap for a squeeze: straight down from the open fit to
   // nothing, so every pair closes at the same visible rate.
@@ -259,15 +268,18 @@ export function createLigature(host, { embedded = false } = {}) {
     letters[i].x = x;
   });
 
-  stage.onResize((w, h) => {
-    const restWidth = pairs.reduce((s, p) => s + p.rest, 0) + WIDTH.T;
-    size = Math.min((w * (embedded ? 0.74 : 0.66)) / restWidth, h * 0.3);
+  // A resize is not a gesture: the size jumps straight to the new fit.
+  stage.onResize(() => {
+    size = fitSize();
+    sizeV = 0;
   });
 
   // Input: push the word in from either end, or pinch it.
   const touches = new Map();
   let start = null;
-  const span = () => stage.width * 0.36;
+  // The drag is measured against the line's measure, which holds still while
+  // the type grows, so the gesture keeps one gain all the way to the lock.
+  const span = () => measure() * 0.46;
   const rubber = (v) => {
     if (v >= 0 && v <= 1) return v;
     const over = v < 0 ? -v : v - 1;
@@ -380,6 +392,20 @@ export function createLigature(host, { embedded = false } = {}) {
           p.contact = false;
         }
       }
+      // The size follows the live width on its own spring, softer than the
+      // letters, so the scale trails the spacing: each lock settle comes
+      // through as a small step up, never as a flutter. Let go, the letters
+      // spring open faster than any size could follow, so the size answers
+      // more firmly on the way out, and the word never spills off the paper.
+      const sk = held ? 160 : 300;
+      const sc = 2 * Math.sqrt(sk) * 0.9;
+      sizeV += (sk * (fitSize() - size) - sc * sizeV) * h;
+      size += sizeV * h;
+      const most = (stage.width * 0.94) / outerWidth();
+      if (size > most) {
+        size = most;
+        sizeV = Math.min(sizeV, 0);
+      }
     }
   }
 
@@ -432,6 +458,7 @@ export function createLigature(host, { embedded = false } = {}) {
 
   stage.onFrame((dt) => {
     if (still == null) step(dt);
+    else size = fitSize();
     draw();
   });
 
