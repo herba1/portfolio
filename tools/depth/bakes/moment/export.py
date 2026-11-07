@@ -17,8 +17,9 @@ Layers, back to front:
                alpha = the sky matte, edges decontaminated.
   depth.png    disparity (1/m) of the near layer, / scene.dmax, pushed out
                past its silhouettes so its mesh never tears or drags sky.
-  a.webp b.webp  the jumper at the two shutter presses, alpha = SAM matte,
-               cropped to the rect both share.
+  a.webp b.webp  the jumper at the two shutter presses, alpha = SAM matte
+               pulled in 2.5 px (less on thin limbs), cropped to the rect
+               both share.
   ma.png mb.png  per crop pixel at half res: R,G = flow to the other shutter
                frame (128 +- 127 = +- scene.flowRange px), B = disparity at
                that frame (/ scene.dmax). No alpha, so a browser never
@@ -55,6 +56,10 @@ GAIN = 0.79  # a third of a stop down, in linear light
 BOX_Z = 2.6
 SUBJ_Z = 2.1
 FILL = 1.32
+NEAR_SOFT = 1.0  # px, Gaussian on the near layer (see below)
+ERODE = 2.5  # px the jumper's matte is pulled in before it is warped
+ERODE_KEEP = 1.5  # px of half-width no erosion may take a limb below
+FEATHER = 1.5  # px, the soft ramp left at the eroded edge
 
 
 def lin(c):
@@ -153,6 +158,13 @@ solid = kit.erode(alpha > 0.97, 1).astype(np.float32)
 inner = kit.pushpull(lin(g), solid)
 F = np.where(a3 < 0.06, inner, F)
 near = np.where((alpha > 0.97)[..., None], lin(g), F)
+# de-sharpen: the GoPro's in-camera sharpening rings every leaf with a dark
+# and a light halo a pixel out and posterises the clusters. A 1 px Gaussian
+# on the near layer's colour (the sky layer and the jumper keep theirs)
+# takes the rings out before the film grade sees them, so its diffusion and
+# halation have a soft edge to work on instead of a crunchy one. The colour
+# is already unmixed from the sky, so blurring it pulls in no blue.
+near = cv2.GaussianBlur(near.astype(np.float32), (0, 0), NEAR_SOFT)
 save_webp(f"{OUT}/near.webp", enc(near), alpha, q=90)
 
 # near disparity
@@ -206,9 +218,55 @@ zA0, zB0 = SUBJ_Z, SUBJ_Z / s_fit
 print("jumper scale A->B", round(s_fit, 4), "z", zA0, "->", round(zB0, 3), "m")
 
 
+def erode_matte(m):
+    """The matte pulled in ERODE px, by signed distance, at 4x for a clean ramp.
+
+    The outer ring of a SAM matte is where the sky was mixed into the edge;
+    carried along the flow it travels with a limb as a pale rim, and where
+    the two frames' rings do not line up they show the plate through as a
+    translucent sliver. Pulled in, every edge pixel is the jumper's own. A
+    finger is only a few px wide, so the erosion is capped by the local
+    half-width (the largest inside distance within 6 px): nothing is thinned
+    below ERODE_KEEP px either side of its middle, and nothing disappears.
+    """
+    h, w = m.shape
+    U = 4
+    mu = cv2.resize(m.astype(np.float32), (w * U, h * U), interpolation=cv2.INTER_LINEAR)
+    inside = (mu > 0.5).astype(np.uint8)
+    din = cv2.distanceTransform(inside, cv2.DIST_L2, 5) / U
+    dout = cv2.distanceTransform(1 - inside, cv2.DIST_L2, 5) / U
+    sd = np.where(inside > 0, din - 0.5 / U, -(dout - 0.5 / U))
+    half = cv2.dilate(din, kit.disk(6 * U))
+    e = np.clip(half - ERODE_KEEP, 0.0, ERODE)
+    a = kit.smoothstep(e - FEATHER / 2, e + FEATHER / 2, sd).astype(np.float32)
+    return cv2.resize(a, (w, h), interpolation=cv2.INTER_AREA)
+
+
 def subject(f, m, flow, moge, z0):
     m = np.clip(kit.guided(f, m, 2, 1e-4), 0, 1)
     m[m < 0.02] = 0
+    # the matte that ships is pulled in; colour, flow and depth below are
+    # all built from the full one, so they reach past the new edge
+    me = erode_matte(m)
+    # sky SAM kept inside him (the slits between the fingers of an open
+    # hand, a sliver under an arm) is keyed out against the clean plate:
+    # where the plate behind is bright sky or cloud and this frame shows
+    # the same colour there, it is not him. Dark plate (the tree) is never
+    # keyed, so a hand against the leaves stays whole.
+    # Motion blur tints those slits pink with his skin, so "the same" is
+    # judged by brightness (he is a silhouette: nothing of him comes within
+    # 75 % of the cloud behind), and held to his outer 10 px, never the
+    # middle of him (the white print on his shirt, over a white cloud).
+    fr = f[:CROP_H]
+    lp = kit.luma(plate)
+    lf = kit.blur(kit.luma(fr).astype(np.float32), 0.6)
+    bright = kit.smoothstep(0.35, 0.5, lp)
+    same = kit.smoothstep(0.68, 0.8, lf / np.maximum(lp, 1e-3))
+    rim = 1 - kit.smoothstep(7, 10, cv2.distanceTransform((m[:CROP_H] > 0.5).astype(np.uint8), cv2.DIST_L2, 5))
+    key = np.ones_like(m)
+    key[:CROP_H] = 1 - bright * same * rim
+    me = me * key
+    me[me < 0.02] = 0
     # a little fill on the jumper (+0.4 stop, more in his shadows), as a
     # reflector on the grass would have given: against a summer sky the
     # GoPro left his skin a muddy grey, and the warm of it is the picture's
@@ -230,14 +288,14 @@ def subject(f, m, flow, moge, z0):
     d = kit.pushpull(d, ((m > 0.9) & v).astype(np.float32))
     d = cv2.medianBlur(d.astype(np.float32), 5)
     d = kit.blur(d, 3)
-    return enc(col)[sl], m[sl], fl[sl], d[sl]
+    return enc(col)[sl], me[sl], fl[sl], d[sl], m[sl]
 
 
-cA, aA, flA, dA = subject(fA, mA, fab, "moge_078", zA0)
-cB, aB, flB, dB = subject(fB, mB, fba, "moge_090", zB0)
+cA, aA, flA, dA, fullA = subject(fA, mA, fab, "moge_078", zA0)
+cB, aB, flB, dB, fullB = subject(fB, mB, fba, "moge_090", zB0)
 save_webp(f"{OUT}/a.webp", cA, aA, q=92)
 save_webp(f"{OUT}/b.webp", cB, aB, q=92)
-RANGE = float(np.ceil(max(np.abs(flA[aA > 0.02]).max(), np.abs(flB[aB > 0.02]).max()) / 8) * 8)
+RANGE = float(np.ceil(max(np.abs(flA[fullA > 0.02]).max(), np.abs(flB[fullB > 0.02]).max()) / 8) * 8)
 ch, cw = (y1 - y0) // 2, (x1 - x0) // 2
 
 

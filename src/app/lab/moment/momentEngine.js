@@ -18,9 +18,20 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Each frame of the jumper is a dense mesh. At time t the first is carried
 // forward t of the way along its flow and the second back (1 - t) of the
 // way along its own, each in its own buffer with a depth test (a hand in
-// front of the chest stays in front), and the two are blended by t. Because
-// both have been moved to the same place, the blend never shows two of him:
-// it is the motion, not a dissolve.
+// front of the chest stays in front). Each mesh vertex also knows how far
+// to trust its own warp: whether its flow, followed all the way, lands on
+// the other frame's body, and whether the other frame's flow from there
+// comes back to it (forward-backward consistency), and how far the warp
+// stretches it. The two buffers are then composited by coverage, not
+// cross-faded by t: the jumper's matte is the union of the two warped
+// mattes, each believed where its warp is trusted, so a limb only one
+// frame covers is there at full strength instead of half there over the
+// sky; colour inside it is weighted by each frame's own warped alpha and
+// trust (and by t). Because both have been moved to the same place, the
+// blend never shows two of him: it is the motion, not a dissolve. The
+// mattes were pulled in 2.5 px at the bake, so only his own pixels travel,
+// and the one soft pixel left at the edge is the only place he meets the
+// plate.
 //
 // While time moves the camera moves too: a small orbit round a point two
 // metres out (where he is), a few degrees, every layer reprojected through
@@ -107,6 +118,8 @@ const SUBJ_VERT = `#version 300 es
 precision highp float;
 in vec2 aGrid;
 uniform sampler2D uMotion;  // rg flow to the other frame, b disparity
+uniform sampler2D uMotionO; // the other frame's flow back to this one
+uniform sampler2D uTexO;    // the other frame (its alpha is its matte)
 uniform vec4 uRect;         // jumper rect, plate px (x0, y0, x1, y1)
 uniform float uRange;
 uniform float uDMax;
@@ -114,9 +127,13 @@ uniform float uW;           // share of the flow travelled
 uniform float uDScale;      // disparity factor at this time
 out vec2 vUv;
 out float vTrust;
+out float vConf;
 ${PROJECT}
 vec2 flowAt(vec2 uv) {
   return (textureLod(uMotion, uv, 0.0).rg * 255.0 - 128.0) / 127.0 * uRange;
+}
+vec2 flowBack(vec2 uv) {
+  return (textureLod(uMotionO, uv, 0.0).rg * 255.0 - 128.0) / 127.0 * uRange;
 }
 void main() {
   vUv = aGrid;
@@ -130,8 +147,33 @@ void main() {
   vec2 dx = (flowAt(aGrid + vec2(tx.x, 0.0)) - flowAt(aGrid - vec2(tx.x, 0.0))) / (2.0 * span.x);
   vec2 dy = (flowAt(aGrid + vec2(0.0, tx.y)) - flowAt(aGrid - vec2(0.0, tx.y))) / (2.0 * span.y);
   float det = (1.0 + uW * dx.x) * (1.0 + uW * dy.y) - uW * dx.y * uW * dy.x;
-  float k = clamp(1.0 / max(det, 1e-3), 0.0, 1.0);
-  vTrust = max(k * k * k, 0.04);
+  // a fold (the warp turning a cell inside out, det < 0: the edge of a
+  // foot overtaking itself) is no more to be trusted than a tear
+  float k = det > 0.0 ? clamp(1.0 / det, 0.0, 1.0) * smoothstep(0.0, 0.25, det) : 0.0;
+  // and a sliver: a cell drawn out one way and squeezed the other keeps
+  // its area (det near 1) but prints as a needle off a shoe's edge. Its
+  // shape, over one texel either side, from the warp's singular values.
+  vec2 t1 = tx * 0.5;
+  vec2 s1 = span * 0.5;
+  vec2 ex = (flowAt(aGrid + vec2(t1.x, 0.0)) - flowAt(aGrid - vec2(t1.x, 0.0))) / (2.0 * s1.x);
+  vec2 ey = (flowAt(aGrid + vec2(0.0, t1.y)) - flowAt(aGrid - vec2(0.0, t1.y))) / (2.0 * s1.y);
+  float ja = 1.0 + uW * ex.x, jb = uW * ey.x, jc = uW * ex.y, jd = 1.0 + uW * ey.y;
+  float q1 = ja * ja + jb * jb + jc * jc + jd * jd;
+  float q2 = sqrt(max(pow(ja * ja + jb * jb - jc * jc - jd * jd, 2.0) + 4.0 * pow(ja * jc + jb * jd, 2.0), 0.0));
+  float sMax = sqrt(0.5 * (q1 + q2));
+  float sMin = sqrt(max(0.5 * (q1 - q2), 1e-6));
+  float shape = (1.0 - smoothstep(1.35, 2.0, sMax)) * (1.0 - smoothstep(1.8, 3.0, sMax / sMin));
+  // flow confidence: followed all the way, this point must land on the
+  // other frame's body, and that frame's flow must bring it back here
+  vec2 size = uRect.zw - uRect.xy;
+  vec2 uvO = aGrid + flow / size;
+  vec2 inside = step(vec2(0.0), uvO) * step(uvO, vec2(1.0));
+  float onBody = smoothstep(0.05, 0.5, textureLod(uTexO, uvO, 1.0).a) * inside.x * inside.y;
+  float err = length(flow + flowBack(uvO));
+  float agree = exp(-err * err / (2.0 * 18.0 * 18.0));
+  float conf = onBody * agree;
+  vTrust = max(k * k * k * mix(0.3, 1.0, conf), 0.02);
+  vConf = conf * smoothstep(0.3, 0.7, k) * shape;
   // nearer wins the depth test
   gl_Position = project(p, d, 1.0 - d);
 }`;
@@ -140,14 +182,19 @@ const SUBJ_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
 in float vTrust;
+in float vConf;
 uniform sampler2D uTex;
-layout(location = 0) out vec4 outColor;  // premultiplied, weighted by trust
-layout(location = 1) out vec4 outCover;  // plain coverage
+layout(location = 0) out vec4 outColor;  // premultiplied
+layout(location = 1) out vec4 outCover;  // r coverage, g flow confidence, b colour trust
 void main() {
   vec4 c = texture(uTex, vUv);
   if (c.a < 0.004) discard;
-  outColor = c * vTrust;
-  outCover = vec4(c.a);
+  outColor = c;
+  outCover = vec4(c.a, vConf, vTrust, 1.0);
+  // the soft edge of a nearer limb loses the depth test to solid body
+  // behind it (the rim of a hand over the chest), so no half-covered pixel
+  // ever opens a seam inside him; where nothing is behind it still lands
+  gl_FragDepth = min(gl_FragCoord.z + (1.0 - c.a) * 0.5, 0.9999);
 }`;
 
 const QUAD_VERT = `#version 300 es
@@ -158,7 +205,16 @@ void main() {
   gl_Position = vec4(aPos, 0.0, 1.0);
 }`;
 
-// The bidirectional blend: both frames already sit where the jumper is at t.
+// The bidirectional composite: both frames already sit where the jumper is
+// at t. His matte is the union of the two warped mattes, not their t-mix:
+// wherever one frame covers him and the other does not (the gap between
+// the legs closing, a sole one frame sees edge-on), the covered one wins at
+// full opacity, so no limb turns to glass over the sky. Each frame's
+// coverage is believed fully near its own end of the half second and,
+// towards the other end, only as far as its flow is trusted, so a finger
+// the flow lost (stretched into streaks, or carried off the other frame's
+// body) drops out and the frame that saw it whole draws it. The two ends
+// stay exactly the shutter frames.
 const BLEND_FRAG = `#version 300 es
 precision highp float;
 in vec2 vUv;
@@ -169,18 +225,26 @@ uniform sampler2D uCB;
 uniform float uT;
 out vec4 outColor;
 void main() {
-  vec4 a = texture(uA, vUv);
+  vec4 a = texture(uA, vUv);   // premultiplied
   vec4 b = texture(uB, vUv);
-  float ca = texture(uCA, vUv).r;
-  float cb = texture(uCB, vUv).r;
-  float wa = (1.0 - uT) * a.a;
-  float wb = uT * b.a;
-  // a sliver only one frame covers (the gap between the legs closing as
-  // they come forward) leans towards being there: half-covered reads as a
-  // translucent ghost, a little extra body never does
-  float m = mix(ca, cb, uT);
-  float alpha = 1.0 - (1.0 - m) * (1.0 - m);
-  vec3 col = (wa + wb) > 1e-6 ? ((1.0 - uT) * a.rgb + uT * b.rgb) / (wa + wb) : vec3(0.0);
+  vec3 qa = texture(uCA, vUv).rgb; // warped coverage, flow confidence, colour trust
+  vec3 qb = texture(uCB, vUv).rgb;
+  float ta = 1.0 - uT;
+  float tb = uT;
+  float ka = mix(smoothstep(0.2, 0.5, qa.g), 1.0, smoothstep(0.2, 0.7, ta)) * smoothstep(0.0, 0.08, ta);
+  float kb = mix(smoothstep(0.2, 0.5, qb.g), 1.0, smoothstep(0.2, 0.7, tb)) * smoothstep(0.0, 0.08, tb);
+  // where both frames cover him he is simply there (a dark shirt gives the
+  // flow little to hold, and two doubtful frames that agree are not two
+  // ghosts); only what one frame alone covers is held to its trust
+  float alpha = max(min(qa.r, qb.r), max(qa.r * ka, qb.r * kb));
+  // colour: each frame by its own warped alpha and trust, then by t; a
+  // pixel only one frame covers takes that frame's colour whole
+  float sa = ta * qa.b;
+  float sb = tb * qb.b;
+  float wa = sa * a.a;
+  float wb = sb * b.a;
+  vec3 col = wa + wb > 1e-5 ? (sa * a.rgb + sb * b.rgb) / (wa + wb)
+    : (a.a + b.a > 1e-5 ? (a.rgb + b.rgb) / (a.a + b.a) : vec3(0.0));
   outColor = vec4(col * alpha, alpha);
 }`;
 
@@ -327,8 +391,9 @@ export async function createMoment(host, { embedded = false } = {}) {
 
   // ---- targets: the scene, and one buffer per shutter frame (with depth)
   const targets = {};
-  // Jumper buffers hold trust-weighted colour, which can be small: half
-  // float where the GPU renders to it.
+  // Jumper buffers: premultiplied colour (half float where the GPU renders
+  // to it, so a soft edge keeps its colour when it is unpremultiplied) and,
+  // beside it, coverage, flow confidence and colour trust.
   const halfOk = !!gl.getExtension("EXT_color_buffer_float");
   const colorTex = (w, h, half) => {
     const t = gl.createTexture();
@@ -507,6 +572,8 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.uniform1f(progSubj.u.uDMax, scene.dmax);
     gl.uniform1i(progSubj.u.uTex, 0);
     gl.uniform1i(progSubj.u.uMotion, 1);
+    gl.uniform1i(progSubj.u.uMotionO, 2);
+    gl.uniform1i(progSubj.u.uTexO, 3);
     for (const k of ["a", "b"]) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, targets[k].fbo);
       gl.viewport(0, 0, pw, ph);
@@ -517,6 +584,10 @@ export async function createMoment(host, { embedded = false } = {}) {
       gl.bindTexture(gl.TEXTURE_2D, tex[k]);
       gl.activeTexture(gl.TEXTURE1);
       gl.bindTexture(gl.TEXTURE_2D, k === "a" ? tex.ma : tex.mb);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D, k === "a" ? tex.mb : tex.ma);
+      gl.activeTexture(gl.TEXTURE3);
+      gl.bindTexture(gl.TEXTURE_2D, k === "a" ? tex.b : tex.a);
       // raw t: past either end the motion carries on a little (rubber band)
       gl.uniform1f(progSubj.u.uW, k === "a" ? t : 1 - t);
       gl.uniform1f(progSubj.u.uDScale, k === "a" ? 1 + (S - 1) * tt : 1 / S + (1 - 1 / S) * tt);
@@ -549,7 +620,7 @@ export async function createMoment(host, { embedded = false } = {}) {
     gl.bindVertexArray(gNear.vao);
     gl.drawElements(gl.TRIANGLES, gNear.count, gl.UNSIGNED_INT, 0);
 
-    // 3. the jumper over it, both frames blended where they already agree
+    // 3. the jumper over it: one matte (the trusted union), colour blended inside it
     gl.enable(gl.SCISSOR_TEST);
     gl.useProgram(progBlend.p);
     gl.bindVertexArray(quadVao);
