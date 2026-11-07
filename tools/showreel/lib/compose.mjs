@@ -79,7 +79,7 @@ export async function compose(cap, dir, outFile, { fps = 60, reel = {}, log = ()
     const k = loop ? Math.min(1, Math.max(0, 1 - (total - i) / ((loop.home / 1000) * fps))) : 0;
     const home = k * k * k * (k * (k * 6 - 15) + 10);
     const kf = loop?.fade ? Math.min(1, Math.max(0, 1 - (total - i) / ((loop.fade / 1000) * fps))) : 0;
-    const pageMix = kf * kf * (3 - 2 * kf);
+    const pageMix = kf; // linear: the compositor eases each half of the dip itself
     await page.evaluate((a) => window.render(a), { t: phase === "outro" ? T - outroStart : tOut, T, src: `${ORIGIN}/${frames[fi].file}`, phase, first: i === 0, home, pageMix });
     const { data } = await cdp.send("Page.captureScreenshot", shot);
     const buf = Buffer.from(data, "base64");

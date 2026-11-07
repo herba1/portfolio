@@ -16,7 +16,7 @@ const reel = {
   // spring the hand drives. So the word sits still until the pointer touches it.
   reducedMotion: "reduce",
   intro: { hold: 1500, zoom: 1, fade: 0, trim: 1400 },  // skip the grow-in: open on the still word, hand at rest; the first tap lands by ~1.2s
-  tempo: 1.1,
+  tempo: 0.95,
   outro: { hold: 500 },
   loop: true,                                   // ends on its own first frame: the light cut, the hand back where it began
   cursor: { from: [0.7, 0.86], visible: true },

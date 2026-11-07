@@ -155,7 +155,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   // upward (or outward on a vertical move), never zig-zags. Samples follow the
   // capture clock, so a slow page never stretches the motion. The compositor
   // lerps the drawn pointer behind these samples for extra softness.
-  const glide = async (to, duration = 900, arc = 0.2) => {
+  const glide = async (to, duration = 650, arc = 0.12) => {
     show();
     const from = { x: cur.x, y: cur.y };
     const dx = to.x - from.x, dy = to.y - from.y;
@@ -184,7 +184,7 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   const verbs = {
     wait: async (ms) => clock.wait(ms),
     waitFor: async (sel) => clock.waitFor(sel),
-    move: async (target, b) => glide(await resolve(target, b), b.duration ?? 900, b.arc),
+    move: async (target, b) => glide(await resolve(target, b), b.duration ?? 650, b.arc),
     click: async (target, b) => {
       if (target !== "cursor") await glide(await resolve(target, b), b.duration ?? 850, b.arc);
       await clock.wait(b.settle ?? 120);
@@ -284,6 +284,11 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     if (typeof beat.wait === "number") beat.wait *= tempo;
     const verb = Object.keys(verbs).find((k) => k in beat);
     if (!verb) throw new Error(`Beat has no verb: ${JSON.stringify(beat)}`);
+    // travel < 1 quickens just the trips between gestures (getting there),
+    // never the gesture itself: a drag keeps the speed the piece reacts to.
+    const travel = reel.travel ?? 1;
+    if (typeof beat.approach === "number" || verb === "drag") beat.approach = (beat.approach ?? 800 * tempo) * travel;
+    if (["move", "click", "hold", "tap"].includes(verb)) beat.duration = (beat.duration ?? 650 * tempo) * travel;
     try {
       if (beat.zoom) await verbs.camera({ zoom: beat.zoom, on: beat.zoomOn ?? (typeof beat[verb] === "string" ? beat[verb] : "cursor"), follow: beat.follow });
       await verbs[verb](beat[verb], beat);

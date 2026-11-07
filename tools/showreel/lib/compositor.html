@@ -114,8 +114,12 @@ window.sample = async (url) => {
   const b = await bitmap(url), o = new OffscreenCanvas(b.width, b.height).getContext("2d");
   o.drawImage(b, 0, 0);
   const px = (x, y) => o.getImageData(x, y, 1, 1).data;
-  const pts = [[4, b.height - 4], [b.width - 4, b.height - 4], [b.width / 2, b.height - 4], [4, b.height / 2]].map(([x, y]) => px(Math.round(x), Math.round(y)));
-  return [0, 1, 2].map((i) => Math.round(pts.reduce((s, p) => s + p[i], 0) / pts.length));
+  // Median of the edges, so one glow or reflection near an edge can't tint the ground.
+  const pts = [[4, 4], [b.width - 4, 4], [b.width / 2, 4], [4, b.height - 4], [b.width - 4, b.height - 4], [b.width / 2, b.height - 4], [4, b.height / 2], [b.width - 4, b.height / 2]].map(([x, y]) => px(Math.round(x), Math.round(y)));
+  const lum = (p) => 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+  pts.sort((p, q) => lum(p) - lum(q));
+  const m = pts[Math.floor(pts.length / 2) - 1];
+  return [m[0], m[1], m[2]];
 };
 
 // Loop mode: the clip has to come back to its own first frame, exactly.
@@ -135,7 +139,7 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   // pointer: lerp the drawn position behind the real one (critically damped,
   // so it trails smoothly into each stop and never overshoots a target)
   // Tighter while a button is down, so a dragged thing never slips from under the tip.
-  const lag = cur.down ? 40 : S.cursorLag ?? 16;
+  const lag = cur.down ? 40 : S.cursorLag ?? 22;
   spring(cur.x, cur.raw.x, lag, dt);
   spring(cur.y, cur.raw.y, lag, dt);
 
@@ -146,7 +150,7 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   if (shot) {
     const f = !shot.follow ? 0 : shot.home ? S.restFollow ?? 0.45 : S.followAmount ?? 1;
     const ax = shot.to.x + (cur.x.x - shot.to.x) * f, ay = shot.to.y + (cur.y.x - shot.to.y) * f;
-    const w = S.cameraSpring ?? 3.2;           // ~1.4s to settle: a beat behind, never 1:1
+    const w = S.cameraSpring ?? 4.2;           // ~1.1s to settle: a beat behind, never 1:1
     spring(rig.x, ax, w, dt); spring(rig.y, ay, w, dt);
     spring(rig.z, shot.to.z, S.zoomSpring ?? 2.8, dt);
   }
@@ -157,15 +161,15 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   spring(sway.x, clamp(Math.abs(vy) * ka, 0, 70), 6, dt);
   spring(sway.y, clamp(-Math.abs(vx) * ka, -70, 0), 6, dt);
   cam.x = rig.x.x + sway.x.x; cam.y = rig.y.x + sway.y.x;
-  // ease back a touch while travelling fast, like an operator pulling focus wide
-  cam.z = rig.z.x - 0.05 * Math.min(1, sp / 700);
+  // Zoom only changes when a beat asks for it: no pulse on travel.
+  cam.z = rig.z.x;
   // The frame breathes: a slow sub-1% push and drift so a held moment never
   // reads as a frozen picture.
   const b = lt / 1000, br = S.breathe ?? 1;
   // never below 1x, with a rounded corner so a dip into the floor doesn't stop dead
   let camX = cam.x, camY = cam.y, camZ = cam.z;
   if (s0 && home > 0) { camX += (s0.camX - camX) * home; camY += (s0.camY - camY) * home; camZ += (s0.camZ - camZ) * home; }
-  const ez = Math.exp(camZ), z = (ez < 1.06 ? 1 + 0.06 * Math.exp((ez - 1.06) / 0.06) : ez) * (1 + 0.009 * br * (1 + Math.sin(b * hz(0.55))));
+  const ez = Math.exp(camZ), z = (ez < 1.06 ? 1 + 0.06 * Math.exp((ez - 1.06) / 0.06) : ez) * (1 + 0.004 * br * (1 + Math.sin(b * hz(0.55))));
   cam.dx = 0.004 * br * vw * Math.sin(b * hz(0.37) + 1.1); cam.dy = 0.004 * br * vh * Math.sin(b * hz(0.31) + 0.2);
   const hw = vw / z / 2, hh = vh / z / 2;
   const cx = softClamp(camX + cam.dx, hw, vw - hw), cy = softClamp(camY + cam.dy, hh, vh - hh);
@@ -177,13 +181,14 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   ctx.globalAlpha = 1;
   ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H);
   ctx.drawImage(img, x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H);
-  // Loop with a page that can't put itself back exactly: dissolve only the
-  // page toward its first frame, under the same camera. Whatever already
-  // matches (the sleeve, the record) doesn't change; only what moved fades.
+  // Loop with a page that can't put itself back exactly: the page dips out to
+  // its own ground, then comes back up already on its first frame, under the
+  // same camera. Never a crossfade between two states: it leaves, then
+  // re-enters. The pointer stays on top, already home.
   if (pageMix > 0 && firstSrc) {
-    ctx.globalAlpha = pageMix;
-    ctx.drawImage(await bitmap(firstSrc), x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H);
-    ctx.globalAlpha = 1;
+    if (pageMix >= 0.5) { ctx.fillRect(0, 0, W, H); ctx.drawImage(await bitmap(firstSrc), x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H); }
+    const dip = pageMix < 0.5 ? smooth(pageMix * 2) : 1 - smooth((pageMix - 0.5) * 2);
+    ctx.globalAlpha = dip; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
   }
 
   spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);

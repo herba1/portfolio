@@ -9,7 +9,7 @@ const reel = {
   stage: { rect: [0.3, 0.02, 0.56, 0.94] },   // the record and the air above it, not the empty desk
   ready: ".sticker-peel-stage[data-ready]",
   intro: { hold: 900, zoom: 1, fade: 0, trim: 820 },   // loop: open on the settled record, hand at rest; the reach starts at once
-  tempo: 1.2,
+  tempo: 1,
   outro: { hold: 1400 },
   // The sticker can't be put back exactly, so at the end the page alone dissolves
   // to frame one: the sticker fades off the cover and back onto its corner while
