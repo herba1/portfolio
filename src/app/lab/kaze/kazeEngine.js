@@ -125,17 +125,31 @@ void main() {
   vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uLod).rgb;
   float cw = abs(1.0 - 2.0 * c0);
   vec3 sky = toLin(mix(a1, a0, cw));
-  // Grade toward the natsu sky: the photograph's hazy teal deepens to cobalt
-  // toward the zenith and loses its green; cloud (neutral) is left alone.
-  float blue = smoothstep(0.01, 0.12, sky.b - sky.r);
-  float zen = smoothstep(0.95, 0.0, uv.y);
-  sky = mix(sky, sky * mix(vec3(0.6, 0.72, 1.06), vec3(0.3, 0.45, 1.12), zen), blue);
+  // The sky's grade (cyan-cobalt, deeper toward the zenith; skylight blue in
+  // the cloud shadows) is baked into sky.webp; only a last breath of depth
+  // toward the zenith here.
+  float zen = smoothstep(0.9, 0.0, uv.y);
+  float blue = smoothstep(0.02, 0.15, sky.b - sky.r);
+  sky *= mix(vec3(1.0), vec3(0.94, 0.97, 1.0), blue * zen);
+  // A print's white is not the sun's: the near-white of the lit cloud and
+  // the sun's disc carry on past paper white, so they glow and scatter.
+  float hl = smoothstep(0.6, 1.0, max(sky.r, max(sky.g, sky.b)));
+  sky *= 1.0 + 0.25 * hl * hl;
 
-  // The grass a touch quieter and cooler, the way Superia keeps greens under
-  // a deep sky.
-  float gl = dot(grass, vec3(0.2126, 0.7152, 0.0722));
-  grass = mix(vec3(gl), grass, 0.9) * vec3(0.97, 1.0, 1.0);
+  // The grass a touch cooler, the way Superia keeps greens under a deep sky;
+  // its colour is left whole, so the diffusion veil over it bleeds green.
+  grass *= vec3(0.96, 1.0, 0.98);
+  // Halation on the blades: a thin blade standing against lit cloud or the
+  // sun takes a little of its light through the emulsion as a warm bleed;
+  // the dense mat (high coverage all round) does not.
+  float glow = smoothstep(0.5, 1.1, dot(textureLod(uSky, uv - v * (c0 * CP), uLod + 3.0).rgb, vec3(0.2126, 0.7152, 0.0722)));
+  float thin = 1.0 - textureLod(uAux, gu, uLod + 2.5).r;
+  grass += vec3(1.0, 0.5, 0.22) * 0.1 * glow * thin;
   vec3 col = mix(sky, grass, a);
+  // ...and its edge, where blade and bright sky share the pixel, carries the
+  // thin warm ring: the light bounced back off the base, just past the edge.
+  float rim = clamp(4.0 * a * (1.0 - a), 0.0, 1.0);
+  col += vec3(1.0, 0.42, 0.16) * 0.16 * glow * rim;
   if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
 }`;
@@ -420,6 +434,19 @@ export async function createKaze(host) {
       sceneT.tex,
       {
         ...FILM_PRESETS.summer,
+        // Soft, bleeding colour, not a phone's clarity: a wider diffusion
+        // veil and dye-cloud bleed, and a halation threshold low enough that
+        // the cloud tops and the sunlit edges of the blades against them take
+        // a thin warm ring. The sky's depth is in the bake, so the stock's
+        // blue deepening is kept light.
+        bloom: 0.24,
+        softness: 0.7,
+        halation: 0.6,
+        halationThreshold: 0.6,
+        halationColor: [1, 0.32, 0.12],
+        halationLocal: 0.4,
+        contrast: 1.12,
+        blueDepth: 0.25,
         saturation: 1.0,
         input: floatOk && sceneT.ok ? "linear" : "srgb",
         grainSeed,
