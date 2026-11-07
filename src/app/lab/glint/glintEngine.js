@@ -22,13 +22,16 @@ import META from "./meta.json";
 //
 // Live, per pixel: the wall's diffuse light turns with the sun (Lambert sun +
 // skylight, the same law the albedo was divided by); glass reflects the sun
-// through its own pane's normal with Fresnel, as a sharp mirror image plus two
-// lobes over the pane normals: a pillow lobe (a pane's bow sweeps it across
-// the pane) and a run, longer up the tower than across, so a curtain wall
-// facing the sun lights a streak of neighbouring panes, each a moment apart.
-// That light is HDR and goes to the film unclipped: only light above an HDR
-// threshold is diffused (and haloed), so the glint blooms while mullions,
-// roof edges and cloud margins keep the scan's sharpness. The sky round the sun (the aureole) and
+// pane by pane: a pane is lit only when its own normal (tilt and bow) lies
+// on the half vector between the eye and the sun, so a curtain wall facing
+// the sun shows a broken scatter of whole lit panes that runs pane by pane
+// as the sun moves, never a soft smear. That light is HDR (tens of scene
+// whites, warm) and goes to the film unclipped, which rolls it to a warm
+// near-white; a thin amber halation ring is drawn round each lit pane, and
+// only light above an HDR threshold is diffused, so the glint blooms while
+// mullions, roof edges and cloud margins keep their drawing. The scan's
+// phone-HDR local contrast is taken down on the towers (a share of each
+// pixel is its neighbourhood, in linear light), toward film. The sky round the sun (the aureole) and
 // the sunward edges of the cumulus brighten with it, in the sky itself and in
 // every reflection of it. The cumulus seen directly is relit from the
 // photograph's own reading of it (density and thickness, from how white and
@@ -72,12 +75,13 @@ const SUN0_PX = pxOf(SUN0);
 // Face table: normals and how glassy each kind of wall is at normal incidence.
 const F0 = { glass: 0.07, punched: 0.05, stone: 0.04 };
 const FACE_N = new Float32Array(NF * 3);
-const FACE_K = new Float32Array(NF * 2);
+const FACE_K = new Float32Array(NF * 3);
 META.faces.forEach((fc, i) => {
   FACE_N.set(fc.normal, i * 3);
   // dark bronze glass of the 1960s tower reflects more than clear glass
   const f0 = fc.name.startsWith("dark") ? 0.1 : F0[fc.kind] ?? 0.05;
-  FACE_K.set([f0, fc.cyl ? 1 : 0], i * 2);
+  // (z: punched windows, set back in a wall, share the wall's light)
+  FACE_K.set([f0, fc.cyl ? 1 : 0, fc.kind === "punched" ? 1 : 0], i * 3);
 });
 // Mean diffuse light over the walls, for the photographer-style exposure.
 const AREA_W = META.faces.map((fc) => (fc.kind === "glass" ? 0.4 : 1));
@@ -231,7 +235,7 @@ uniform vec3 uS0;     // photographer's sun
 uniform float uPhotoW; // 1 at the photographer's sun
 uniform vec4 uPatchR; // x, y, w, h (plate px)
 uniform vec3 uFaceN[${NF}];
-uniform vec2 uFaceK[${NF}];
+uniform vec3 uFaceK[${NF}];
 uniform float uExpo;
 uniform float uSunL;
 uniform float uDebug;
@@ -250,6 +254,14 @@ const vec3 CLOUD_TOP = vec3(1.07, 0.99, 0.86);
 const float SPLIT_SH = 1.0;
 const float SPLIT_TOP = 1.0;
 const float USM_K = 0.28; // local contrast: +28% in log light
+// the per-pane glint: tilt and bow read at PANE_A x the bake's, the window
+// on the pane normal (rad) up the tower and across it, the lit pane's
+// radiance in scene whites, and its colour (the sun's, a little warm)
+const float PANE_A = 5.5;
+const float PANE_WU = 0.1;
+const float PANE_WH = 0.015;
+const float PANE_L = 140.0;
+const vec3 PANE_C = vec3(1.0, 0.86, 0.66);
 // Radiance of the sky round the sun, in units of the clear sky, against the
 // angle from it: the solar aureole (forward scattering by haze and droplets)
 // is tens of times the sky a few degrees out and falls off fast.
@@ -326,7 +338,10 @@ vec3 cloudLight(vec3 v, vec2 px, vec4 cl, vec3 s) {
   float behind = textureLod(uCloud, (px - dir * 26.0) / uPlate, 0.0).b;
   float e = clamp((behind - ahead) * 1.6, -1.0, 1.0);
   float thin = c * (1.0 - th);
-  float gain = (1.0 + 0.55 * e * c * (0.35 + 0.65 * side)) * (1.0 - 0.72 * c * smoothstep(0.1, 0.8, th) * pow(fwd, 0.5));
+  // (the core in front of the sun loses a little, only where it is really
+  // thick and only close to the sun: lit from behind, a cumulus glows more
+  // than it greys, and a grey core a third of the sky wide reads as smear)
+  float gain = (1.0 + 0.55 * e * c * (0.35 + 0.65 * side)) * (1.0 - 0.26 * c * smoothstep(0.4, 0.9, th) * fwd);
   float lining = fwd * thin * (1.0 - th) * (0.6 + 0.8 * max(e, 0.0));
   return vec3(gain, lining, fwd);
 }
@@ -339,10 +354,11 @@ void main() {
   vec3 photo = texture(uPhoto, t).rgb;
   // the photographer's glare, cut out once the sun moves off
   vec2 pq = (px - uPatchR.xy) / uPatchR.zw;
+  float pm = 0.0;
   if (all(greaterThanEqual(pq, vec2(0.0))) && all(lessThan(pq, vec2(1.0)))) {
     vec2 pt = vec2(pq.x * 0.5, pq.y);
     vec3 fill = texture(uPatch, pt).rgb;
-    float pm = texture(uPatch, pt + vec2(0.5, 0.0)).r;
+    pm = texture(uPatch, pt + vec2(0.5, 0.0)).r;
     photo = mix(photo, fill, pm * (1.0 - uPhotoW));
   }
   vec3 base = s2l(photo);
@@ -375,13 +391,13 @@ void main() {
   vec4 clp = vec4(cPix, clamp(cl.g - 1.2 * det, 0.0, 1.0), cl.ba);
   vec3 cNow = cloudLight(v, px, clp, uS);
   vec3 cPh = cloudLight(v, px, clp, uS0);
-  float cGain = clamp(cNow.x / cPh.x, 0.4, 2.2);
+  float cGain = clamp(cNow.x / cPh.x, 0.82, 2.2);
   const vec3 LINING_C = vec3(1.0, 0.9, 0.76);
   vec3 cAdd = LINING_C * 2.0 * cNow.y * away;
   // the core the light cannot get through goes a cool grey (it sees only the
   // sky); the thin cloud the sun lights from close by takes its warmth
   float cShade = clamp(1.0 - cGain, 0.0, 1.0) * cl.r;
-  vec3 cTint = mix(vec3(1.0), vec3(0.96, 1.0, 1.05), cShade);
+  vec3 cTint = mix(vec3(1.0), vec3(0.985, 1.0, 1.02), cShade);
   cTint *= mix(vec3(1.0), vec3(1.05, 1.0, 0.9), cl.r * (1.0 - cl.g) * cNow.z * away);
   sky = sky * cGain * cTint + cAdd;
   // the disc itself, where open sky shows it (behind a tower, the tower wins)
@@ -391,7 +407,10 @@ void main() {
   float limb = 0.6 + 0.4 * sqrt(max(0.0, 1.0 - (gs * gs) / (SUN_R * SUN_R)));
   // HDR that must reach the film unclipped by the scene's own shoulder: the
   // sun's disc and its mirror images in the glass (halation draws their bloom)
-  vec3 hot = vec3(1.0, 0.97, 0.92) * uSunL * 0.12 * disc * limb * away * step(0.5, skyM);
+  // (a thick cumulus in front of it hides the disc: its light comes through
+  // as the glow round it, below, never as a white blob drawn on the cloud)
+  float thickHere = cPix * smoothstep(0.3, 0.75, clp.g);
+  vec3 hot = vec3(1.0, 0.97, 0.92) * uSunL * 0.12 * disc * limb * away * step(0.5, skyM) * (1.0 - 0.97 * thickHere);
   // round the disc, what the eye and the film make of it: a small blown core
   // and, a few disc radii out, a thin warm ring where light that went through
   // the emulsion came back off the film base (halation)
@@ -428,9 +447,10 @@ void main() {
 
   // ---- towers
   vec3 col = sky;
+  float glintA = 0.0; // the panes' own HDR, for the halation ring
   if (id < 255 && skyM < 0.999) {
     vec3 n0 = uFaceN[id];
-    vec2 k = uFaceK[id];
+    vec3 k = uFaceK[id];
     if (k.y > 0.5) {
       vec3 vh = v - dot(v, uUp) * uUp;
       n0 = -normalize(vh);
@@ -446,10 +466,21 @@ void main() {
     vec3 e0 = SKY_C + 5.0 * max(dot(n0, uS0), 0.0) * SUN_C;
     vec3 alb = s2l(texture(uAlb, t).rgb) * 2.0;
     vec3 wall = alb * e;
-    vec3 photoWall = base;
+    // Film, not a phone. The scan is an ultra-wide HDR merge: every mullion
+    // and reflection sharpened against its neighbours until the glass reads
+    // as electronics. Light spreading in the emulsion takes some of that back:
+    // a share of each pixel is the light ~3 plate px round it, in linear
+    // light, so a bright reflection bleeds a little into its frame and the
+    // dark slots open up. Most on glass, where the merge bit hardest; not
+    // inside the photographer's glare patch (its blur would bring the glare
+    // back).
+    vec3 bl = s2l(textureLod(uPhoto, t, 1.6).rgb);
+    float softK = mix(0.26, 0.42, glass) * (1.0 - pm * away);
+    vec3 baseS = mix(base, bl, softK);
+    vec3 photoWall = baseS;
     // a wall pixel is the photo times the change of light (exact at the
     // photographer's sun, and free of the albedo's 8-bit steps there)
-    wall = mix(wall, photoWall * (e / e0), 0.6);
+    wall = mix(wall, photoWall * (e / e0), 0.85);
 
     // specular: the photo already holds the reflected sky; add what the sun
     // changes in it, and the sun's own mirror image
@@ -457,14 +488,17 @@ void main() {
     float cosI = clamp(-dot(v, n), 0.0, 1.0);
     float f0 = mix(0.04, k.x, glass);
     float fr = f0 + (1.0 - f0) * pow(1.0 - cosI, 5.0);
-    vec2 envT = envUv(r);
+    // the sky the sun relights, through a calmer normal: a pane's tilt read
+    // at full strength on a pane two or three pixels wide turns the change of
+    // sky into a dither, not glass
+    vec3 rs = reflect(v, normalize(n0 + 0.45 * (j.x * uUp + j.y * tH)));
+    vec2 envT = envUv(rs);
     vec3 envC = s2l(texture(uEnv, envT).rgb);
     float envSky = texture(uEnvM, envT).r;
-    float gr = skyGain(r, uS) / skyGain(r, uS0) - 1.0;
+    float gr = skyGain(rs, uS) / skyGain(rs, uS0) - 1.0;
     vec3 dE = envC * envSky * clamp(gr, -0.6, 2.5);
 
-    // the sun's image: a disc, widened by roughness and by how far the
-    // reflected ray turns across this pixel (pane edges, distance)
+    // the sun's image in the frames (anodised metal, rough): a soft sheen
     float sr = rough * rough * 0.6;
     float fp = length(fwidth(r)) * 0.6;
     float sig2 = SUN_R * SUN_R * 0.5 + sr * sr + fp * fp;
@@ -473,45 +507,59 @@ void main() {
     // the sun must be in front of the face to be seen in it
     float front = smoothstep(-0.02, 0.05, dot(n0, uS));
     vec3 glint = vec3(1.0, 0.96, 0.9) * uSunL * lobe * front;
-    // and the bright sky round it, through the same pane: this is what
-    // spreads one glint into a patchwork of lit panes
-    float ga = th;
-    float gg = sqrt(ga * ga + sr * sr);
-    vec3 aur = vec3(0.62, 0.7, 0.78) * 0.12 * (12.0 * exp(-gg / 0.08) + 1.5 * exp(-gg / 0.3)) * front;
+    // and the bright sky round it, through the same pane (tight: float glass
+    // is a mirror, not a satin)
+    float ths = acos(clamp(dot(rs, uS), -1.0, 1.0));
+    vec3 aur = vec3(0.62, 0.7, 0.78) * 0.05 * (12.0 * exp(-ths / 0.05) + 1.5 * exp(-ths / 0.3)) * front;
 
-    // The glint proper. A curtain wall is a field of slightly different
-    // mirrors, so the sun is not seen in one pane but in a run of them: every
-    // pane whose normal lies near the half vector between the eye and the
-    // sun catches it. Two lobes over the pane normals (tilt and pillow
-    // included), in the face's own frame: a pillow lobe, narrow enough that a
-    // pane's bow sweeps it bright from one side to the other, and the run
-    // itself, longer up the tower than across it (insulated units pillow
-    // and sit off plumb more than they twist), so the lit panes line up
-    // into a streak that slides pane by pane as the sun moves.
-    // (the run reads each pane's tilt and bow at twice the bake's, which is
-    // what sets one lit pane apart from the next inside it)
+    // The glint proper: pane by pane. Float glass is a near-perfect mirror
+    // (a lobe a fraction of a degree wide), but no curtain wall is flat:
+    // every insulated unit sits a little off plumb and bows with the air
+    // sealed inside it. So the sun is seen in the panes whose own normal
+    // lies on the half vector between the eye and the sun, and nowhere else:
+    // a scatter of whole lit panes round where a flat wall would mirror it,
+    // each one on or off, the bow sliding the light across it. The bake's
+    // tilt (0.5 deg) is read at 5.5x here, about what a real wall of sealed
+    // units runs to (and what spreads the image over tens of panes, not one);
+    // the window is longer up the tower than across it (units sit off plumb
+    // more than they twist), so the lit panes gather into a broken streak
+    // that runs pane by pane as the sun moves.
     vec3 hv = normalize(uS - v);
-    vec3 dh = hv - n;
-    float du = dot(dh, tU);
-    float dv = dot(dh, tH);
-    float pil = exp(-(du * du + dv * dv) / (2.0 * 0.008 * 0.008));
-    vec3 dr = hv - normalize(n0 + 2.0 * (j.x * uUp + j.y * tH));
-    float ru = dot(dr, tU) / 0.05;
-    float rv = dot(dr, tH) / 0.024;
-    float run = exp(-0.5 * (ru * ru + rv * rv));
-    float gfr = fr * front * glass * away;
-    // radiance in units of the scene, through Fresnel: a mirror of the sun is
-    // far brighter than anything else in the frame
-    float hdr = gfr * (10.0 * pil + 26.0 * run);
-    hot += vec3(1.0, 0.95, 0.86) * hdr * (1.0 - skyM);
-    hot += fr * glint * glass * (1.0 - skyM);
-
+    vec3 np = normalize(n0 + PANE_A * (j.x * uUp + j.y * tH));
+    vec3 dh = hv - np;
+    float pu = dot(dh, tU) / PANE_WU;
+    float pv = dot(dh, tH) / PANE_WH;
+    float pe = pu * pu + pv * pv;
+    // a plateau with a short shoulder: a pane is lit or it is not
+    float pane = 1.0 - smoothstep(0.45, 1.0, pe);
+    pane *= pane;
+    // (the whole pane, out to its frame: the glass mask is soft at its edges)
+    float gfr = fr * front * smoothstep(0.15, 0.6, glass) * away * (1.0 - skyM);
+    // HDR: the sun in a mirror is thousands of times the sky; Fresnel and the
+    // bow (which spreads the disc over the pane) bring it to tens of times
+    // the scene's white, warm, and the film's shoulder rolls it to a warm
+    // near-white with the halation ring round it
+    float paneL = gfr * pane * PANE_L;
+    hot += PANE_C * paneL;
+    glintA = paneL;
     vec3 spec = fr * (dE + aur);
-    vec3 glassC = base + spec;
-    vec3 frameC = wall + spec * 0.6 + fr * glint * 0.6;
-    vec3 tower = mix(frameC, glassC, glass);
+    // a punched window is set back in its wall and shares some of the wall's
+    // change of light; kept bright while the wall round it darkens, a field
+    // of small windows turns into a speckle
+    float eR = clamp(dot(e, LUMA_C) / dot(e0, LUMA_C), 0.3, 3.0);
+    vec3 glassC = baseS * mix(1.0, eR, 0.6 * k.z) + spec;
+    vec3 frameC = wall + spec * 0.6 + fr * glint * 0.3;
+    // (glass against frame by coverage over ~3 plate px, not the nearest
+    // texel: on a wall seen edge-on a pane is two or three pixels wide, and
+    // with the sun moved off the frames darken while the glass does not, so
+    // a per-texel mask turns into a dark dither across the face)
+    vec2 mtx = 1.0 / uPlate;
+    float glassS = 0.25 * (texture(uMat, t + vec2(-mtx.x, -mtx.y)).b + texture(uMat, t + vec2(mtx.x, -mtx.y)).b
+                 + texture(uMat, t + vec2(-mtx.x, mtx.y)).b + texture(uMat, t + vec2(mtx.x, mtx.y)).b);
+    glassS = mix(glassS, glass, 0.35);
+    vec3 tower = mix(frameC, glassC, glassS);
     col = mix(tower, sky, skyM);
-    if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, run * glass, pil * glass);
+    if (uDebug > 0.5 && uDebug < 1.5) col = vec3(lobe, pane * glass, glass * 0.2);
     if (uDebug > 2.5 && uDebug < 3.5) col = vec3(mt.r, mt.g, glass * 0.3);
   }
   // veiling glare: a sun in open sky is too bright to look at. Its light
@@ -538,14 +586,14 @@ void main() {
     // a thick cumulus in front of the disc takes most of it (its glow
     // through the cloud, the veil, stays)
     vec4 cs = texture(uCloud, sp / uPlate);
-    hot += sunHot * vis * mix(1.0, 0.3, cs.r * smoothstep(0.35, 0.9, cs.g));
+    hot += sunHot * vis * mix(1.0, 0.04, cs.r * smoothstep(0.3, 0.75, cs.g));
   }
   // and the sun's mirror image in a curtain wall is a second sun, a tenth as
   // bright: it veils the panes and the sky round it the same way, so the
   // glint blooms instead of sitting in the glass as a pattern
   for (int k = 0; k < 2; k++) {
     float gk = acos(clamp(dot(v, uGlintD[k]), -1.0, 1.0));
-    float gv = 0.7 * exp(-gk / 0.012) + 0.18 * exp(-gk / 0.05);
+    float gv = 0.35 * exp(-gk / 0.01) + 0.05 * exp(-gk / 0.04);
     col += vec3(1.0, 0.93, 0.82) * gv * uGlintK[k] * away;
   }
   if (uDebug > 3.5) col = vec3(cl.r, cl.g, cGain * 0.5) * skyM;
@@ -587,7 +635,7 @@ void main() {
   float HM = 2.2;
   hx *= hl > 0.0 ? HM * (1.0 - exp(-hl / HM)) / hl : 0.0;
   hx += hot * uExpo * disc * away; // the disc itself stays a sun
-  outColor = vec4(col + hx, 1.0);
+  outColor = vec4(col + hx, glintA * uExpo);
   if (uDebug > 4.5) outColor = vec4(cGain * 0.5, dot(cAdd, LUMA_C), cl.g, 1.0) * skyM;
 }`;
 
@@ -599,6 +647,7 @@ void main() {
 // ~48 px); everything below it keeps the scan's own sharpness.
 const HI_T = 0.85; // scene-linear luma where diffusion starts
 const HI_K = 0.32; // share of the highlight's light that is spread
+const HI_RING = 0.14; // the halation ring round a lit pane, in scene whites
 const HI_FN = `
 const vec3 LUMA_H = vec3(0.2126, 0.7152, 0.0722);
 uniform float uThr;
@@ -623,12 +672,13 @@ uniform sampler2D uSrc;
 uniform vec2 uTexel;
 uniform float uCut;
 ${HI_FN}
-vec3 tap(vec2 o) {
-  vec3 c = texture(uSrc, vUv + o * uTexel).rgb;
-  return uCut > 0.5 ? hiOf(c) : c;
+// (alpha carries the lit panes' own light down the chain, for the ring)
+vec4 tap(vec2 o) {
+  vec4 c = texture(uSrc, vUv + o * uTexel);
+  return uCut > 0.5 ? vec4(hiOf(c.rgb), c.a) : c;
 }
 void main() {
-  outColor = vec4(0.25 * (tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0))), 1.0);
+  outColor = 0.25 * (tap(vec2(-1.0, -1.0)) + tap(vec2(1.0, -1.0)) + tap(vec2(-1.0, 1.0)) + tap(vec2(1.0, 1.0)));
 }`;
 // separable gaussian, 9 taps in 5 bilinear fetches, spaced by uDir
 const HI_BLUR = `#version 300 es
@@ -638,10 +688,10 @@ out vec4 outColor;
 uniform sampler2D uSrc;
 uniform vec2 uDir;
 void main() {
-  vec3 c = texture(uSrc, vUv).rgb * 0.227027;
-  c += (texture(uSrc, vUv + uDir * 1.384615).rgb + texture(uSrc, vUv - uDir * 1.384615).rgb) * 0.316216;
-  c += (texture(uSrc, vUv + uDir * 3.230769).rgb + texture(uSrc, vUv - uDir * 3.230769).rgb) * 0.070270;
-  outColor = vec4(c, 1.0);
+  vec4 c = texture(uSrc, vUv) * 0.227027;
+  c += (texture(uSrc, vUv + uDir * 1.384615) + texture(uSrc, vUv - uDir * 1.384615)) * 0.316216;
+  c += (texture(uSrc, vUv + uDir * 3.230769) + texture(uSrc, vUv - uDir * 3.230769)) * 0.070270;
+  outColor = c;
 }`;
 const HI_COMP = `#version 300 es
 precision highp float;
@@ -653,18 +703,33 @@ uniform sampler2D uWide;
 uniform vec2 uNearTexel;
 uniform vec2 uWideTexel;
 uniform float uK;
+uniform float uRing;
+uniform sampler2D uRingSrc;
 ${HI_FN}
 void main() {
-  vec3 c = texture(uScene, vUv).rgb;
+  vec4 c4 = texture(uScene, vUv);
+  vec3 c = c4.rgb;
   // tent upsampling (four bilinear taps): a bilinear one draws the bright
   // core of a spread highlight as a square
   vec2 n = uNearTexel * 0.5;
-  vec3 near = 0.25 * (texture(uNear, vUv + vec2(-n.x, -n.y)).rgb + texture(uNear, vUv + vec2(n.x, -n.y)).rgb
-            + texture(uNear, vUv + vec2(-n.x, n.y)).rgb + texture(uNear, vUv + vec2(n.x, n.y)).rgb);
+  vec4 near4 = 0.25 * (texture(uNear, vUv + vec2(-n.x, -n.y)) + texture(uNear, vUv + vec2(n.x, -n.y))
+            + texture(uNear, vUv + vec2(-n.x, n.y)) + texture(uNear, vUv + vec2(n.x, n.y)));
+  vec3 near = near4.rgb;
   vec2 o = uWideTexel * 0.5;
   vec3 wide = 0.25 * (texture(uWide, vUv + vec2(-o.x, -o.y)).rgb + texture(uWide, vUv + vec2(o.x, -o.y)).rgb
             + texture(uWide, vUv + vec2(-o.x, o.y)).rgb + texture(uWide, vUv + vec2(o.x, o.y)).rgb);
-  outColor = vec4(max(c + uK * (0.5 * near + 0.5 * wide - hiOf(c)), 0.0), 1.0);
+  vec3 o3 = max(c + uK * (0.5 * near + 0.5 * wide - hiOf(c)), 0.0);
+  // Halation round each lit pane: light that went through the emulsion came
+  // back off the film base a little way out, red-amber, as a thin ring that
+  // hugs the pane (the pane itself is already white; the ring sits outside
+  // it, and between neighbouring lit panes, in the mullions)
+  // (read off the quarter frame before its blur, tent-sampled: ~4-6 px,
+  // where the blurred levels are too wide for a ring this thin)
+  float ra = 0.25 * (texture(uRingSrc, vUv + vec2(-n.x, -n.y)).a + texture(uRingSrc, vUv + vec2(n.x, -n.y)).a
+           + texture(uRingSrc, vUv + vec2(-n.x, n.y)).a + texture(uRingSrc, vUv + vec2(n.x, n.y)).a);
+  float ring = (1.0 - exp(-ra * 4.0)) * (1.0 - smoothstep(0.02, 0.4, c4.a));
+  o3 += vec3(1.0, 0.64, 0.28) * ring * uRing;
+  outColor = vec4(o3, 1.0);
 }`;
 
 const BLIT = `#version 300 es
@@ -841,7 +906,7 @@ export async function createGlint(host, { embedded = false } = {}) {
 
   // The print: the whole 3:4 plate, as tall as the box allows.
   const L = { x: 0, y: 0, w: 1, h: 1 };
-  const T = { scene: null, film: null, comp: null, q1: null, q2: null, s1: null, s2: null };
+  const T = { scene: null, film: null, comp: null, q1: null, q2: null, q3: null, s1: null, s2: null };
   let dirty = true;
   const layout = (W, H, dpr) => {
     const ar = PW / PH;
@@ -875,9 +940,10 @@ export async function createGlint(host, { embedded = false } = {}) {
       T.comp = target(gl, L.pw, L.ph, true);
       T.q1 = target(gl, qw, qh, true);
       T.q2 = target(gl, qw, qh, true);
+      T.q3 = target(gl, qw, qh, true);
       T.s1 = target(gl, sw, sh, true);
       T.s2 = target(gl, sw, sh, true);
-    } else Object.assign(T, { comp: null, q1: null, q2: null, s1: null, s2: null });
+    } else Object.assign(T, { comp: null, q1: null, q2: null, q3: null, s1: null, s2: null });
     film.resize(L.pw, L.ph);
     dirty = true;
   };
@@ -950,7 +1016,7 @@ export async function createGlint(host, { embedded = false } = {}) {
         }
       }
       if (!sum) return;
-      const f0 = FACE_K[i * 2];
+      const f0 = FACE_K[i * 3];
       const fr = f0 + (1 - f0) * Math.pow(1 - c, 5);
       best.push({ d, k: 4 * fr * (sum / cnt) });
     });
@@ -1012,7 +1078,7 @@ export async function createGlint(host, { embedded = false } = {}) {
     gl.uniform1f(u.uPhotoW, photoW);
     gl.uniform4fv(u.uPatchR, META.patch);
     gl.uniform3fv(u.uFaceN, FACE_N);
-    gl.uniform2fv(u.uFaceK, FACE_K);
+    gl.uniform3fv(u.uFaceK, FACE_K);
     gl.uniform1f(u.uExpo, expo);
     gl.uniform1f(u.uSunL, 1200);
     gl.uniform1f(u.uDebug, debug);
@@ -1054,6 +1120,8 @@ export async function createGlint(host, { embedded = false } = {}) {
         });
       };
       down(T.scene, T.q1, 1);
+      // (the lit panes at a quarter, unblurred, for their halation ring)
+      down(T.scene, T.q3, 1);
       blur(T.q1, T.q2);
       down(T.q1, T.s1, 0);
       blur(T.s1, T.s2);
@@ -1065,6 +1133,8 @@ export async function createGlint(host, { embedded = false } = {}) {
         gl.uniform2f(u2.uWideTexel, 1 / T.s1.w, 1 / T.s1.h);
         gl.uniform1f(u2.uK, HI_K);
         gl.uniform1f(u2.uThr, HI_T);
+        gl.uniform1f(u2.uRing, HI_RING);
+        bindTex(3, T.q3.tex, u2.uRingSrc);
       });
     }
     if (!raw && !debug) {
@@ -1082,8 +1152,11 @@ export async function createGlint(host, { embedded = false } = {}) {
           highlightTint: [0.99, 1, 1.01],
           whitePoint: 1.18,
           shoulder: 0.92,
-          halation: 0.7,
-          halationThreshold: 1.1,
+          // (the film's own halation is wide, 1-3% of the frame: kept for the
+          // sun itself; the lit panes draw their own thin ring above, and a
+          // cluster of them must not wash the sky beside the tower pink)
+          halation: 0.42,
+          halationThreshold: 1.6,
           // amber, not red: a red fringe on a glint reads as a lens fault
           halationColor: [1, 0.46, 0.2],
           // no veil over the whole frame: the highlights have had theirs
