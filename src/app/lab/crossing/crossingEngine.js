@@ -13,6 +13,11 @@ import { createFilm } from "../_kit/film";
 // front of it with inpainted texture, so a gap shows what was really there;
 // the wires run on whole behind the post and lamps, and the sky is one
 // opaque back card filled from a dilated matte, with no ghost of a wire.
+// The photo's own clouds were faint torn wisps, so the sky card holds the
+// clear cobalt gradient alone and an eighth card between it and the far
+// houses carries real cumulus (cumulus.py, from a Poly Haven summer HDRI):
+// sunlit warm tops that roll off below clipping, skylight-blue undersides,
+// rising from behind the old house's roof and the town.
 //
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
@@ -59,17 +64,22 @@ const MATTE = [512, 339];
 // From layers.json (bake.py): each plane's crop rect in photo uv. Cards
 // that meet the frame are overscanned past it, so their rects run past 0..1.
 const PLANES = [
-  { rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
-  { rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
-  { rect: [0.25879, 0.03466, 1.22021, 0.92699], o: 0.2 }, // wires
+  { file: "p0", rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
+  // The cumulus (cumulus.py): real cloud from a summer HDRI, its own card
+  // between the sky and the town so a swing slides it against the roofs.
+  // A cut-out that fades out before its edges, so it need not cover the
+  // window; it throws no shadow on the sky behind it (a cloud is not paper).
+  { file: "clouds", rect: [-0.03299, 0.2874, 0.68332, 0.93121], o: 0.53, ends: [true, true, true, true], cast: false },
+  { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
+  { file: "p2", rect: [0.25879, 0.03466, 1.22021, 0.92699], o: 0.2 }, // wires
   // the mechanism box is cut by the right edge and ends a few px past
   // it (bake.py): that side is a cut-out end, not overscan to keep covered
-  { rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
+  { file: "p3", rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
   // the house's margin is its edge column carried straight on (bake.py), which
   // holds as the beams running on for a short way and then reads as streaks
-  { rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06, clean: [-0.03, null, null, null] }, // the old house
-  { rect: [0.50732, 0.15192, 0.83545, 1.14971], o: -0.24 }, // the signal
-  { rect: [0.01416, 0.8326, 0.37988, 1.10029], o: -0.42 }, // camellia
+  { file: "p4", rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06, clean: [-0.03, null, null, null] }, // the old house
+  { file: "p5", rect: [0.50732, 0.15192, 0.83545, 1.14971], o: -0.24 }, // the signal
+  { file: "p6", rect: [0.01416, 0.8326, 0.37988, 1.10029], o: -0.42 }, // camellia
 ];
 const N = PLANES.length;
 // The window is the image plane, at the nearest plane's depth: the eye moves
@@ -159,6 +169,7 @@ uniform int uK;
 uniform sampler2DArray uMattes;  // every plane's alpha, 512 wide
 uniform float uZ[${N}];
 uniform vec2 uHalf[${N}];
+uniform float uCast[${N}];       // 0: this plane throws no shadow
 uniform vec3 uLight;
 uniform float uShadow;
 uniform float uPrintW;
@@ -224,7 +235,7 @@ void main() {
     vec2 p = vec2((vUv.x - 0.5) * 2.0 * h.x, (0.5 - vUv.y) * 2.0 * h.y);
     float lit = 1.0;
     for (int j = 0; j < ${N}; j++) {
-      if (j <= uK) continue;
+      if (j <= uK || uCast[j] < 0.5) continue;
       float gap = uZ[uK] - uZ[j];
       if (gap < 1.0) continue;
       vec2 q = p + uLight.xy * gap / uLight.z;
@@ -368,7 +379,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
   const [photoBm, matteBm, ...planeBms] = await Promise.all([
     loadBitmap(`${ASSET}photo.webp`, false),
     loadBitmap(`${ASSET}mattes.png`, false),
-    ...PLANES.map((_, k) => loadBitmap(`${ASSET}p${k}.webp`, true)),
+    ...PLANES.map((P) => loadBitmap(`${ASSET}${P.file}.webp`, true)),
   ]);
 
   // Matte pixels for picking the plane under the pointer.
@@ -475,8 +486,11 @@ export async function createCrossing(host, { embedded = false } = {}) {
   const split = spring(held ? clamp(qSplit, 0, 1) : 0);
   const yaw = spring(held ? num("yaw") ?? 0 : 0);
   const pitch = spring(held ? num("pitch") ?? 0 : 0);
-  const focusDefault = 5;
-  const focusQ = num("focus");
+  // ?focus counts the photograph's own seven planes (0 sky ... 5 signal, 6
+  // camellia), as it did before the cumulus card went in between 0 and 1.
+  const focusDefault = 6; // the signal
+  const fq = num("focus");
+  const focusQ = fq == null ? null : fq < 1 ? Math.max(0, fq) * 2 : fq + 1;
   const focusK = { x: focusQ ?? focusDefault, to: focusQ ?? focusDefault };
   const hover = { x: 0, y: 0 };
   let grab = null;
@@ -627,6 +641,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
       halves[k * 2 + 1] = (G.printH / 2) * (z / G.f);
     });
     gl.uniform2fv(U.uHalf, halves);
+    gl.uniform1fv(U.uCast, new Float32Array(PLANES.map((P) => (P.cast === false ? 0 : 1))));
     gl.uniform3f(U.uLight, LIGHT[0], LIGHT[1], LIGHT[2]);
     gl.uniform1f(U.uPrintW, G.printW);
     gl.uniform3f(U.uHazeColor, HAZE[0], HAZE[1], HAZE[2]);

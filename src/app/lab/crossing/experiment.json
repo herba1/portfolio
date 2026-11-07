@@ -22,6 +22,13 @@
       "licence": "Unsplash License",
       "note": "Ukyo, Kyoto; 4928x3264 original (Ricoh GR II). Plated from the curated low-angle library frame kyoto-crossing-lowangle (4000x2649; chosen over setagaya-wires-up as the steeper, about 35 degrees up, and more cobalt frame). Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; planes, mattes and inpainting baked by tools/depth/bakes/crossing (labels.py, bake.py): the sky card filled from a dilated matte and outpainted a quarter past each side, wires carried on behind the signal and past the frame, hidden house and town texture and the town card's overscan margin by LaMa (tools/depth/fill.py), every card that meets the frame overscanned so the front mat never shows an edge."
     },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
+      "author": "Greg Zaal (Poly Haven)",
+      "licence": "CC0",
+      "note": "The cumulus behind the street: a rectilinear view out of the 16k equirectangular, aimed at its big side-lit cumulus (lon 141, lat 29; the sun is up and to the right, as in the photo), keyed from its sky in linear light and relit warm-white on top and skylight-blue underneath by tools/depth/bakes/crossing/cumulus.py, on a card of its own between the sky and the far houses. The photo's own torn cloud wisps are gone from the sky card, which is now the clear gradient alone."
+    },
     "https://en.wikipedia.org/wiki/Multiplane_camera"
   ]
 }

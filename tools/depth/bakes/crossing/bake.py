@@ -29,6 +29,8 @@ Writes <outdir>/p0.webp .. p6.webp (RGBA, cropped to each plane's extent,
 which may run past the photo: rects in layers.json go below 0 and above 1),
 <outdir>/mattes.png (each plane's alpha at 512 wide, stacked) and
 <outdir>/layers.json (crop rects, depth, sizes), plus previews in workdir.
+Then cumulus.py re-plates the sky with real cumulus on a card of its own
+(clouds.webp) and rewrites p0.webp, photo.webp and mattes.png to match.
 """
 import sys
 import os
@@ -42,6 +44,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import box, guided, dilate, erode, pushpull, smoothstep  # noqa: E402
 from shiftfill import shiftfill  # noqa: E402
+from skygrad import sky_gradient  # noqa: E402
 
 WORK, OUT = sys.argv[1:3]
 os.makedirs(OUT, exist_ok=True)
@@ -103,61 +106,12 @@ del Bsky, dist_sky, Fobj, FB, den, acol, g1, use_col, band  # keep the bake lean
 
 
 # ---- sky regrade
-# The photo's sky is a pale, slightly lavender summer haze (206-226 deg, S
-# 0.04-0.34, greying out low down). The card gets a designed sky instead: one
-# continuous gradient that deepens toward the zenith (the top of the frame:
-# the camera looks up), saturated cobalt above running to a pale but still
-# cyan horizon, every hue inside 200-212 deg so nothing reads violet. The
-# stops are what the card holds; the engine's film (contrast 1.16, sat 1.12,
-# blueDepth 0.25) lands them at about #1f66ae (209 deg, S 0.83) and #b9dcef
-# (201 deg, S 0.23). Interpolated in OKLab so the middle stays clean.
-SKY_ZENITH = (0x25, 0x62, 0xA6)  # 211 deg, S 0.78
-SKY_HORIZON = (0xBE, 0xE4, 0xFA)  # 203 deg, S 0.24
-SKY_V1 = 0.95  # where the photo's lowest sky sits (frame heights)
-SKY_GAMMA = 2.5  # deep for most of the frame, paling fast near the horizon
-SKY_SUN = 0.1  # a little paler toward the sun (up and right)
+# The sky card's clear gradient (SKY_*, sky_gradient) lives in skygrad.py.
 # Cloud: a warm-neutral sunlit top and a skylight-blue underside (212 deg).
 CLOUD_LIT = (0xF5, 0xF2, 0xEA)
 CLOUD_SHADE = (0xB0, 0xC5, 0xDD)
 CLOUD_LIFT = 1.35  # the photo's wisps are faint: carry them further to white
 SUN_DIR = (0.54, -0.84)  # toward the sun in image space (LIGHT in the engine)
-
-_OK1 = np.array([[0.4122214708, 0.5363325363, 0.0514459929], [0.2119034982, 0.6806995451, 0.1073969566], [0.0883024619, 0.2817188376, 0.6299787005]], np.float32)
-_OK2 = np.array([[0.2104542553, 0.7936177850, -0.0040720468], [1.9779984951, -2.4285922050, 0.4505937099], [0.0259040371, 0.7827717662, -0.8086757660]], np.float32)
-
-
-def _lin(c):
-    c = np.clip(np.asarray(c, np.float32), 0, 1)
-    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
-
-
-def _enc(c):
-    c = np.clip(c, 0, 1)
-    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
-
-
-def to_oklab(c):
-    return np.cbrt(_lin(c) @ _OK1.T) @ _OK2.T
-
-
-def from_oklab(o):
-    return _enc(((o @ np.linalg.inv(_OK2).T) ** 3) @ np.linalg.inv(_OK1).T).astype(np.float32)
-
-
-def sky_gradient(u, v):
-    """The card's clear-sky colour at frame position (u, v), 0..1 inside the
-    photo (y down). Monotone from zenith to horizon in every column. Past
-    the top it deepens a little further (the card is overscanned), past the
-    horizon and the sides it holds."""
-    # t^g (g + 1 - g t): rises from the zenith like t^g, eases into the
-    # horizon colour with no kink, and is monotone on 0..1
-    t = np.clip(v / SKY_V1, -0.2, 1)
-    g = SKY_GAMMA
-    t = np.sign(t) * np.abs(t) ** g * (g + 1 - g * np.maximum(t, 0))
-    w = t + SKY_SUN * np.clip(u, 0, 1) * (1 - np.maximum(t, 0))
-    z = to_oklab(np.array(SKY_ZENITH, np.float32) / 255)
-    h = to_oklab(np.array(SKY_HORIZON, np.float32) / 255)
-    return from_oklab(z + (h - z) * w[..., None])
 
 
 def regrade_sky(img, a_sky):
