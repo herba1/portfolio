@@ -44,3 +44,4 @@
 {"run":"climb-17","date":"2026-11-07","results":{"catenary":"6 (3 kept: smooth feeder catenary at last, warm-neutral regrade, recomposed crop; eval drifts 6.5->5.5, judges preferred each)","crossing":"4->5 (kept rounds incl. re-plate)"}}
 {"run":"climb-19","date":"2026-11-07","results":{"datamosh":"5.5->5/6 (3 kept: real cut mismatch, stripped intra, whole-pel hold copies)","fog":"6->6.5 (3 kept)","fade":"5.5->7.5 (2 kept; new top piece)","miniature":"5 (r1 rejected)"}}
 {"run":"climb-18","date":"2026-11-07","results":{"yuudachi":"4 (worm-eye re-plate rejected: muddy composited storm clouds; idea: keep new viewpoint, fix clouds)","rearrange":"4.5->6 (3 kept: re-plated on a worm-eye catenary gantry, clean cut edges, sky grade)"}}
+{"run":"climb-20","date":"2026-11-07","results":{"shutter":"5->4.5-6 (2 kept: re-plated on a twisted-tower time-lapse, variance stillness matte; r3 pitch-up rejected)","spatial-photos":"6 (r1 wire-plane fix rejected)","kaze":"6 (2 kept)"}}
