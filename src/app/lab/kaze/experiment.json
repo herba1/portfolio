@@ -1,30 +1,54 @@
 {
   "title": "Kaze",
-  "description": "A highland meadow in July under small fair-weather cumulus, and the wind is yours. Brush across the grass and your stroke becomes a gust: it runs out across the field, slowing and narrowing as it goes, the grass lies over under it and springs back, and the meadow shows honami, the bright waves where bent blades turn their glossy faces to the sky. Behind, the clouds drift by their distance and lean a little after your gusts. Left alone, a light breeze keeps moving through.",
+  "description": "Lying in the long grass in July, looking up past the stalks into a deep summer sky, and the wind is yours. Brush across the frame and your stroke becomes a gust: it runs on through the grass, the tall brome and seed heads lean over under it across the clouds and swing back with a little overshoot, and the clouds behind drift faster after it. Left alone, a light breeze keeps them moving.",
   "tags": ["WebGL", "Film", "Photography", "Simulation"],
   "status": "draft",
   "createdAt": "2026-11-07T02:00:00.000Z",
-  "intent": "Technique 10, Kaze (factory/reality/techniques.md): an Eulerian motion field you author live. A 96x40 stable-fluids velocity grid (Stam 1999, https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/ns.pdf) carries the air in metres per second on the ground, rescaled by perspective as it moves; the grass is a field of damped springs driven by dynamic pressure; the visible wave is a Kajiya-Kay sheen on the blade tangent (MoGe-2 canopy normal tilted by the bend), applied as the change from rest so the still meadow is the photograph; fine gust streaks and the cumulus drift are two-phase flow maps (Vlachos 2010) so nothing smears or seams. ?gust=demo throws a scripted gust, ?t=seconds runs the wind that long and holds it, ?breeze=0..2 scales the idle air, ?debug=bend overlays the bend field.",
-  "tile": { "shape": "wide" },
-  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.15, 0.85], "to": [0.6, 0.75] },
+  "intent": "Technique 10, Kaze (factory/reality/techniques.md): an Eulerian motion field you author live. A 96x64 stable-fluids velocity grid (Stam 1999, https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/ns.pdf) carries the air in metres per second over the whole frame; each cell's grass is a damped spring driven by dynamic pressure. The plate is a worm's-eye photograph from inside the grass, split in the bake into the grass alone (the sky unmixed out of every edge pixel, so the still recomposes to the photograph) and the sky behind it. The wind is drawn as per-blade bend: every grass pixel is displaced by the local bend times its lever (height above the roots below the frame, and how freely it stands), so stalks bend about their roots and cross the clouds. The cumulus drift is a two-phase flow map (Vlachos 2010), faster toward the zenith, and leans after the gusts. ?gust=demo throws a scripted gust, ?t=seconds runs the wind that long and holds it, ?breeze=0..2 scales the idle air, ?debug=bend overlays the bend field.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [0.1, 0.72],
+    "to": [0.75, 0.45]
+  },
   "probe": [
-    { "idle": 3000 },
-    { "drag": [[0.12, 0.88], [0.62, 0.74]], "ms": 700 },
-    { "idle": 4000 },
-    { "drag": [[0.85, 0.8], [0.4, 0.7]], "ms": 500 },
-    { "idle": 3000 }
+    {
+      "idle": 3000
+    },
+    {
+      "drag": [
+        [0.08, 0.75],
+        [0.7, 0.42]
+      ],
+      "ms": 700
+    },
+    {
+      "idle": 4000
+    },
+    {
+      "drag": [
+        [0.9, 0.5],
+        [0.35, 0.62]
+      ],
+      "ms": 500
+    },
+    {
+      "idle": 3000
+    }
   ],
   "sources": [
     {
-      "url": "https://unsplash.com/photos/C5iY89PaJWQ",
-      "file": "https://images.unsplash.com/photo-1628826988862-4b3d37bbc2fd",
-      "author": "Syuhei Inoue, Unsplash",
-      "licence": "Unsplash License",
-      "note": "Highland meadow (Kirigamine-like plateau, Nagano), 5561x3707, worked at 2400x1600. Sky matte by a column scan (tools/depth/bakes/kaze/skymask.py) on Depth Anything V2 Small depth (tools/depth/depth_hr.py); sky plate filled below the skyline by push-pull; normals, metric depth and FOV (93.8 deg) from MoGe-2 ViT-S (tools/depth/normals.py); trees found as large dark blobs. Bake: tools/depth/bakes/kaze/bake.py."
+      "url": "https://commons.wikimedia.org/wiki/File:Tall_grass_against_partly_cloudy_skies_on_the_Tally_Lake_Ranger_District_(50744528757).jpg",
+      "file": "https://upload.wikimedia.org/wikipedia/commons/6/62/Tall_grass_against_partly_cloudy_skies_on_the_Tally_Lake_Ranger_District_%2850744528757%29.jpg",
+      "author": "Forest Service, Northern Region (USDA), via Wikimedia Commons",
+      "licence": "Public domain",
+      "note": "Tall grass against partly cloudy skies, Tally Lake Ranger District, Flathead National Forest, Montana: camera at blade height pitched up. Display P3 converted to sRGB, worked at 2400x1600. Sky matte by tools/depth/segment.py sky (colour unmixing for thin blades), firmed by colour (sunlit brome is greener than the sky behind it) and darkness; grass colour unmixed against a push-pull sky so a F + (1 - a) S recomposes the photograph. Bake: tools/depth/bakes/kaze/bake.py."
     },
     "https://www.dgp.toronto.edu/public_user/stam/reality/Research/pdf/ns.pdf",
     "https://alex.vlachos.com/graphics/Vlachos-SIGGRAPH10-WaterFlow.pdf",
-    "https://eulerian.cs.washington.edu/",
-    "https://en.wikipedia.org/wiki/Kajiya%E2%80%93Kay_model"
+    "https://eulerian.cs.washington.edu/"
   ]
 }

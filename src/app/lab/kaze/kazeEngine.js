@@ -2,23 +2,24 @@ import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createWind, GX, GY, GY0 } from "./wind";
 
-// Kaze: a highland meadow in July (Kirigamine, Nagano), and the wind is yours.
+// Kaze: lying in the long grass in July, looking up, and the wind is yours.
 //
-// Brush across the grass and the stroke becomes a gust: a small stable-fluids
-// velocity field (wind.js) carries it out across the field, slowing and
-// narrowing with distance, and the grass lies over under it and springs back.
-// What makes wind on grass visible from far away is not the bending itself but
-// honami, the bright waves where bent blades turn their glossy faces to the
-// sky. Here that is an anisotropic (Kajiya-Kay) sheen on each blade's tangent:
-// the canopy normal from MoGe-2 tilted by the local bend, lit by the sun and
-// seen from the camera, applied as the change from the blade at rest, so the
-// still meadow is exactly the photograph.
+// The photograph is taken from inside the grass: the camera at blade height,
+// pitched up, tall brome and seed heads standing against a summer sky with
+// sunlit cumulus. Brush across it and the stroke becomes a gust: a small
+// stable-fluids velocity field (wind.js) carries it on through the stalks,
+// each one a damped spring that lies over under it and swings back with a
+// little overshoot. What you see is the bend itself: the grass is its own
+// layer, unmixed from the sky in the bake (plate.webp, coverage in aux.webp),
+// and every pixel of it is displaced by the local bend times its lever, how
+// far it sits from the roots below the frame and how freely it stands (a lone
+// seed head swings, the dense mat at the bottom barely moves). Since the base
+// of a stalk hardly moves and its tip moves most, a smooth displacement field
+// reads as stalks bending, not sliding, and they cross the clouds as they go.
 //
-// The motion is drawn with two-phase flow maps (Vlachos 2010): fine gust
-// streaks in the grass and the cumulus behind are advected by their velocity
-// fields in two copies half a period apart and cross-faded, so nothing smears
-// or seams however long it runs. The clouds drift by distance (overhead ones
-// fastest, the ones on the skyline barely), and lean a little after your gusts.
+// The sky behind (sky.webp, the photograph where it is surely sky and filled
+// behind the grass) drifts with a two-phase flow map (Vlachos 2010), faster
+// toward the zenith, and the clouds lean after your gusts.
 //
 // Query: ?gust=demo throws a scripted gust; ?t=seconds runs the wind that long
 // at a fixed step and holds it (a still); ?breeze=0..2 scales the idle air;
@@ -26,10 +27,11 @@ import { createWind, GX, GY, GY0 } from "./wind";
 
 const PLATE = "/lab/kaze/plate.webp";
 const SKY = "/lab/kaze/sky.webp";
-const AUX = "/lab/kaze/aux.png";
-const NRM = "/lab/kaze/normal.webp";
-const SKY_H = 0.64; // the sky plate covers the top 64% of the frame
+const AUX = "/lab/kaze/aux.webp";
 const ASPECT = 1.5;
+// The frame shows the middle of the photograph: a margin all round that the
+// bent stalks and the drifting sky can be pulled in from.
+const OVER = 0.035;
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -43,29 +45,25 @@ const SCENE = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 outColor;
-uniform sampler2D uPlate;
-uniform sampler2D uSky;
-uniform sampler2D uAux;
-uniform sampler2D uNrm;
-uniform sampler2D uWind;   // GX x GY: bend.xz, wind.xz (m/s)
+uniform sampler2D uPlate;  // the grass, sky unmixed out of it
+uniform sampler2D uSky;    // the sky behind it
+uniform sampler2D uAux;    // r coverage, g lever
+uniform sampler2D uWind;   // GX x GY: bend.xy, wind.xy (m/s)
 uniform float uTime;
 uniform float uCloudT;     // cloud flow clock
-uniform vec2 uCloudV;      // cloud drift at the zenith side, uv / s
+uniform vec2 uCloudV;      // cloud drift at the top of the frame, uv / s
 uniform float uExpo;
 uniform float uLod;
-uniform float uRW;      // render width, px
 uniform float uDebug;
-uniform vec4 uView;      // the part of the image on screen: x0, y0, w, h (uv)
-uniform vec2 uDir;       // smoothed mean wind direction (streak orientation)
+uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
 const vec2 GRID = vec2(${GX}.0, ${GY}.0);
 const float GY0 = ${GY0.toFixed(3)};
-const float SKY_H = ${SKY_H.toFixed(3)};
 
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
 // Cubic B-spline sample of the wind grid from four bilinear taps, so the
-// 96x40 field has no visible cells or creases in the sheen.
+// 96x64 field has no visible cells or creases in the bend.
 vec4 windAt(vec2 uv) {
   vec2 g = vec2(uv.x, (uv.y - GY0) / (1.0 - GY0)) * GRID - 0.5;
   vec2 i = floor(g);
@@ -93,122 +91,52 @@ float vnoise(vec2 p) {
   f = f * f * (3.0 - 2.0 * f);
   return mix(mix(hash12(i), hash12(i + vec2(1, 0)), f.x), mix(hash12(i + vec2(0, 1)), hash12(i + vec2(1, 1)), f.x), f.y);
 }
-// Gust bands on the ground: the canopy's mixing-layer eddies roll over it as
-// waves across the wind, ~3.4 m apart, wandering in phase and broken into
-// finite crests.
-float streaks(vec2 P, vec2 dir) {
-  vec2 q = vec2(dot(P, dir), dot(P, vec2(-dir.y, dir.x)));
-  float ph = q.x / 3.4 + 1.7 * vnoise(q * vec2(1.0 / 6.0, 1.0 / 9.0));
-  float band = 0.5 + 0.5 * sin(6.2831853 * ph);
-  band *= band;
-  float env = smoothstep(0.25, 0.75, vnoise(q * vec2(1.0 / 7.0, 1.0 / 13.0) + 5.3));
-  return clamp(band * (0.35 + 0.65 * env) + 0.15 * env, 0.0, 1.0);
-}
-
-// Kajiya-Kay sheen of a blade with tangent T.
-float sheen(vec3 T, vec3 H, float e) {
-  float th = dot(T, H);
-  return pow(max(1.0 - th * th, 0.0), e * 0.5);
-}
 
 void main() {
   vec2 uv = uView.xy + vec2(vUv.x, 1.0 - vUv.y) * uView.zw;
-  vec4 aux = texture(uAux, uv);
-  float p = aux.r;        // perspective scale, 1 at the nearest grass
-  float skyM = aux.g;
-  float comp = aux.b;     // how freely it moves (grass 1, trees ~0.1)
 
-  vec3 col;
-  float bendMag = 0.0;
+  // ---- the stalks ----
+  vec4 W = windAt(uv);
+  vec2 b = W.xy;          // bend: across (+ right), and up-wind / lifting (+)
+  float ws = length(W.zw);
+  float lever = textureLod(uAux, uv, 0.0).g;
+  // Flutter: the thin leaves and seed heads quiver in the stronger air, a
+  // slow travelling ripple along the stalks rather than per-pixel noise.
+  float fl = vnoise(uv * vec2(14.0, 7.0) + vec2(-uTime * (0.6 + 0.12 * ws), uTime * 0.21)) - 0.5;
+  float flAmt = smoothstep(1.5, 9.0, ws);
+  // A stalk bends about its root, below the frame: the tip goes downwind and,
+  // as it lies over, comes down a little; air from below lifts it.
+  vec2 d = vec2(b.x * 0.065 + fl * 0.007 * flAmt, 0.02 * dot(b, b) - 0.012 * b.y) * lever;
+  vec2 gu = uv - d;
+  float a = textureLod(uAux, gu, uLod).r;
+  vec3 grass = toLin(textureLod(uPlate, gu, uLod).rgb);
+  // Blades turned by the gust show their lit undersides a touch more.
+  grass *= 1.0 + 0.18 * clamp(abs(b.x) * lever, 0.0, 1.0);
 
-  // ---- ground ----
-  vec3 ground = vec3(0.0);
-  if (skyM < 0.999) {
-    vec4 W = uv.y > GY0 ? windAt(uv) : vec4(0.0);
-    vec2 b = W.xy;        // bend: across, into the field
-    vec2 w = W.zw;        // wind, m/s
-    float pc = max(p, 0.03);
-    float ws = length(w);
-    // Streaks are oriented by the mean wind, not the local one: rotating a
-    // pattern by a direction that varies in space tears it.
-    vec2 wd = uDir;
+  // ---- the sky ----
+  // Toward the zenith (the top of the frame) cloud is nearer overhead and
+  // crosses faster; near the grass it barely moves.
+  float k = 0.35 + 0.65 * pow(clamp(1.0 - uv.y, 0.0, 1.0), 1.2);
+  vec2 v = uCloudV * k;
+  const float CP = 18.0;
+  float c0 = fract(uCloudT / CP);
+  float c1 = fract(uCloudT / CP + 0.5);
+  vec3 a0 = textureLod(uSky, uv - v * (c0 * CP), uLod).rgb;
+  vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uLod).rgb;
+  float cw = abs(1.0 - 2.0 * c0);
+  vec3 sky = toLin(mix(a1, a0, cw));
+  // Grade toward the natsu sky: the photograph's hazy teal deepens to cobalt
+  // toward the zenith and loses its green; cloud (neutral) is left alone.
+  float blue = smoothstep(0.01, 0.12, sky.b - sky.r);
+  float zen = smoothstep(0.95, 0.0, uv.y);
+  sky = mix(sky, sky * mix(vec3(0.6, 0.72, 1.06), vec3(0.3, 0.45, 1.12), zen), blue);
 
-    // Ground position (m): across, and distance.
-    vec2 P = vec2((uv.x - 0.5) * ${GX}.0 / (5.6 * pc), 8.0 / pc);
-    // Two-phase flow map: the streak pattern rides the wind; two copies half
-    // a period apart, each reset while its weight is zero.
-    const float PER = 1.6;
-    float t0 = fract(uTime / PER);
-    float t1 = fract(uTime / PER + 0.5);
-    float n0 = streaks(P - w * (t0 * PER), wd);
-    float n1 = streaks(P + vec2(31.7, 11.3) - w * (t1 * PER), wd);
-    float wt = abs(1.0 - 2.0 * t0);
-    float n = mix(n1, n0, wt);
-    // Fade the streaks out where a band would be under ~5 px.
-    float px = 1.6 * 5.6 * pc / ${GX}.0 * uRW;
-    float detail = smoothstep(4.0, 12.0, px) * smoothstep(0.4, 2.5, ws);
-    float g = mix(1.0, 0.2 + 1.7 * n, detail);
-    vec2 bf = b * g * comp;
-    bendMag = length(bf);
-
-    // Displacement: tips go downwind and, lying over, drop a little.
-    vec2 d = vec2(bf.x * 0.0085 * pc, (-bf.y * 0.003 + 0.004 * dot(bf, bf)) * pow(pc, 1.5));
-    d *= smoothstep(0.0, 0.25, 1.0 - skyM);
-    ground = toLin(textureLod(uPlate, uv - d, uLod).rgb);
-
-    // Honami. A blade is a thin glossy ribbon; Kajiya-Kay gives its sheen
-    // from the tangent alone. At rest the tangent stands up the canopy (the
-    // vertical, eased toward the MoGe-2 canopy normal on the slopes); a gust
-    // tilts it along the bend. The light it reflects is the sky dome, so the
-    // lobe sits between the view and the zenith: blades laid away from you
-    // turn their faces to the sky and flash pale, blades blown toward you go
-    // dark, sideways ones in between.
-    vec3 N = normalize(texture(uNrm, uv).rgb * 2.0 - 1.0);
-    vec3 up = normalize(mix(vec3(0.0, 1.0, 0.0), N, 0.35));
-    vec3 Vv = normalize(vec3((0.5 - uv.x) * 2.15, (uv.y - 0.5) * 1.43, 1.0));
-    vec3 L = normalize(vec3(0.18, 1.0, -0.12));
-    vec3 Hh = normalize(Vv + L);
-    vec3 bend3 = vec3(bf.x, 0.0, -bf.y);
-    vec3 T = normalize(up + bend3 * 1.2);
-    float s1 = sheen(T, Hh, 3.0);
-    float s0 = sheen(up, Hh, 3.0);
-    // plus the plain fact that a lying canopy shows more lit blade and less
-    // shadow between
-    float ds = clamp((0.9 * (s1 - s0) + 0.35 * max(length(bf) - 0.3, 0.0)) * comp, -0.4, 0.9);
-    // The faces turned up are waxy and take the sky: brighter, and paler (a
-    // little silver-yellow) rather than whiter.
-    float lum = dot(ground, vec3(0.2126, 0.7152, 0.0722));
-    ground *= 1.0 + 1.45 * ds;
-    ground = mix(ground, lum * (1.0 + 0.6 * ds) * vec3(0.98, 1.07, 0.82), 0.3 * clamp(ds * 1.6, 0.0, 1.0));
-  }
-
-  // ---- sky ----
-  vec3 sky = vec3(0.0);
-  if (skyM > 0.001) {
-    // Overhead cloud is nearest and crosses fastest; the skyline barely moves.
-    float k = pow(clamp((0.62 - uv.y) / 0.62, 0.0, 1.0), 1.3);
-    vec2 v = uCloudV * (0.06 + 0.94 * k);
-    const float CP = 18.0;
-    float c0 = fract(uCloudT / CP);
-    float c1 = fract(uCloudT / CP + 0.5);
-    vec2 su = vec2(1.0, 1.0 / SKY_H);
-    vec3 a0 = textureLod(uSky, (uv - v * (c0 * CP)) * su, uLod).rgb;
-    vec3 a1 = textureLod(uSky, (uv - v * (c1 * CP)) * su, uLod).rgb;
-    float cw = abs(1.0 - 2.0 * c0);
-    sky = toLin(mix(a1, a0, cw));
-    // Grade toward the natsu sky: the clear blue deepens to cobalt toward the
-    // zenith and loses its green; cloud (neutral) is left alone.
-    float blue = smoothstep(0.03, 0.22, sky.b - sky.r);
-    float zen = smoothstep(0.66, 0.0, uv.y);
-    sky = mix(sky, sky * mix(vec3(0.6, 0.8, 1.0), vec3(0.22, 0.46, 0.9), zen), blue);
-  }
-
-  // The meadow's greens, a touch quieter and cooler, the way Superia keeps
-  // them under a deep sky.
-  float gl = dot(ground, vec3(0.2126, 0.7152, 0.0722));
-  ground = mix(vec3(gl), ground, 0.84) * vec3(0.95, 1.0, 1.05);
-  col = mix(ground, sky, skyM);
-  if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(bendMag, 0.0, 1.0) * (1.0 - skyM));
+  // The grass a touch quieter and cooler, the way Superia keeps greens under
+  // a deep sky.
+  float gl = dot(grass, vec3(0.2126, 0.7152, 0.0722));
+  grass = mix(vec3(gl), grass, 0.9) * vec3(0.97, 1.0, 1.0);
+  vec3 col = mix(sky, grass, a);
+  if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
 }`;
 
@@ -297,42 +225,12 @@ const freeTarget = (gl, t) => {
   gl.deleteFramebuffer(t.fbo);
 };
 
-// Perspective scale per wind cell, read from aux.png's red channel (ground
-// only; sky cells get 0).
-function gridPerspective(img) {
-  const c = document.createElement("canvas");
-  c.width = GX * 4;
-  c.height = GY * 4;
-  const x = c.getContext("2d", { willReadFrequently: true });
-  const sy = img.height * GY0;
-  x.drawImage(img, 0, sy, img.width, img.height - sy, 0, 0, c.width, c.height);
-  const d = x.getImageData(0, 0, c.width, c.height).data;
-  const out = new Float32Array(GX * GY);
-  for (let j = 0; j < GY; j++) {
-    for (let i = 0; i < GX; i++) {
-      let s = 0;
-      let n = 0;
-      for (let b = 0; b < 4; b++) {
-        for (let a = 0; a < 4; a++) {
-          const o = ((j * 4 + b) * c.width + i * 4 + a) * 4;
-          if (d[o + 1] < 128) {
-            s += d[o] / 255;
-            n++;
-          }
-        }
-      }
-      out[j * GX + i] = n ? s / n : 0;
-    }
-  }
-  return out;
-}
-
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
-// The scripted gust for ?gust=demo: a quick sweep up from the near grass,
-// left to right and away, 0.2-0.75 s.
-const DEMO = { t0: 0.2, t1: 0.75, from: [0.16, 0.98], to: [0.66, 0.72] };
+// The scripted gust for ?gust=demo: a quick sweep through the stalks, left
+// to right and rising, 0.2-0.75 s.
+const DEMO = { t0: 0.2, t1: 0.75, from: [0.06, 0.74], to: [0.8, 0.42] };
 const demoAt = (t) => {
   const u = clamp((t - DEMO.t0) / (DEMO.t1 - DEMO.t0), 0, 1);
   const e = u * u * (3 - 2 * u);
@@ -341,7 +239,7 @@ const demoAt = (t) => {
   return [x, y];
 };
 
-export async function createKaze(host, { embedded = false } = {}) {
+export async function createKaze(host) {
   const q = new URLSearchParams(window.location.search);
   const timeQ = q.get("t");
   const frozen = timeQ != null && timeQ !== "" && Number.isFinite(+timeQ);
@@ -356,13 +254,12 @@ export async function createKaze(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [plateImg, skyImg, auxImg, nrmImg] = await Promise.all([loadImage(PLATE), loadImage(SKY), loadImage(AUX), loadImage(NRM)]);
+  const [plateImg, skyImg, auxImg] = await Promise.all([loadImage(PLATE), loadImage(SKY), loadImage(AUX)]);
   const plate = imageTexture(gl, plateImg, true);
   const skyTex = imageTexture(gl, skyImg, true);
-  const aux = imageTexture(gl, auxImg, false);
-  const nrm = imageTexture(gl, nrmImg, false);
+  const aux = imageTexture(gl, auxImg, true);
 
-  const wind = createWind(gridPerspective(auxImg));
+  const wind = createWind();
   const breeze = reduce ? 0 : breezeQ != null && Number.isFinite(+breezeQ) ? clamp(+breezeQ, 0, 2) : 1;
   wind.setBreeze(breeze);
 
@@ -390,7 +287,8 @@ export async function createKaze(host, { embedded = false } = {}) {
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  // Layout, css px of the box: a 3:2 print, or full bleed when embedded.
+  // Layout: the photograph covers the box, full bleed, cropped to its aspect
+  // (css px of the box).
   const L = { x: 0, y: 0, w: 1, h: 1 };
   let sceneT = null;
   let filmT = null;
@@ -398,23 +296,7 @@ export async function createKaze(host, { embedded = false } = {}) {
   let lastBox = null;
   const layout = (W, H, dpr) => {
     lastBox = [W, H, dpr];
-    if (embedded) {
-      Object.assign(L, { x: 0, y: 0, w: W, h: H });
-    } else if (W / H < 0.9) {
-      const side = Math.max(16, Math.round(W * 0.06));
-      const w = W - side * 2;
-      const h = w / ASPECT;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
-    } else {
-      const side = Math.max(24, W * 0.07);
-      const w = Math.min(W - side * 2, H * 0.76 * ASPECT);
-      const h = w / ASPECT;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
-    }
-    L.x = Math.round(L.x * dpr) / dpr;
-    L.y = Math.round(L.y * dpr) / dpr;
-    L.w = Math.round(L.w * dpr) / dpr;
-    L.h = Math.round(L.h * dpr) / dpr;
+    Object.assign(L, { x: 0, y: 0, w: W, h: H });
     L.pw = Math.max(2, Math.round(L.w * dpr));
     L.ph = Math.max(2, Math.round(L.h * dpr));
     L.rw = Math.max(2, Math.round(L.pw * scale));
@@ -429,17 +311,20 @@ export async function createKaze(host, { embedded = false } = {}) {
     filmT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
   };
+  // The part of the photograph on screen, in image uv: cover-crop to the
+  // box, inside the overscan margin.
+  const view = () => {
+    const a = L.w / L.h;
+    let v = a > ASPECT ? [0, 0.5 - ASPECT / a / 2, 1, ASPECT / a] : [0.5 - a / ASPECT / 2, 0, a / ASPECT, 1];
+    const k = 1 - 2 * OVER;
+    return [OVER + v[0] * k, OVER + v[1] * k, v[2] * k, v[3] * k];
+  };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
-  // The print may be letterboxed inside the box: pointer -> image uv. When
-  // embedded the 3:2 image covers the box.
+  // pointer -> image uv
   const toUv = (px, py) => {
-    const fx = (px - L.x) / L.w;
-    const fy = (py - L.y) / L.h;
-    if (!embedded) return [fx, fy];
-    const a = L.w / L.h;
-    if (a > ASPECT) return [fx, 0.5 + (fy - 0.5) * (ASPECT / a)];
-    return [0.5 + (fx - 0.5) * (a / ASPECT), fy];
+    const v = view();
+    return [v[0] + ((px - L.x) / L.w) * v[2], v[1] + ((py - L.y) / L.h) * v[3]];
   };
 
   // Brushing: every move over the print is a stroke; a held drag blows
@@ -449,7 +334,7 @@ export async function createKaze(host, { embedded = false } = {}) {
   const brush = (ptr) => {
     const now = performance.now();
     const [u, v] = toUv(ptr.x, ptr.y);
-    const inside = u >= -0.02 && u <= 1.02 && v >= -0.02 && v <= 1.02;
+    const inside = u >= 0 && u <= 1 && v >= 0 && v <= 1;
     if (!inside) {
       last = null;
       return;
@@ -508,8 +393,8 @@ export async function createKaze(host, { embedded = false } = {}) {
     gl.disable(gl.SCISSOR_TEST);
     const u = scene.u;
     gl.useProgram(scene.p);
-    const texs = [plate, skyTex, aux, nrm, windTex];
-    const names = ["uPlate", "uSky", "uAux", "uNrm", "uWind"];
+    const texs = [plate, skyTex, aux, windTex];
+    const names = ["uPlate", "uSky", "uAux", "uWind"];
     texs.forEach((t, i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -517,18 +402,16 @@ export async function createKaze(host, { embedded = false } = {}) {
     });
     gl.uniform1f(u.uTime, simT);
     gl.uniform1f(u.uCloudT, cloudT);
-    // ~1% of the frame per 10 s overhead, plus the gusts' lean
-    const lean = reduce ? 0 : 0.00012 * cloudLean;
-    gl.uniform2f(u.uCloudV, reduce ? 0 : 0.0009 + lean, 0.00008);
-    gl.uniform1f(u.uExpo, 1.18 * 2 ** expoStops);
-    gl.uniform1f(u.uLod, Math.max(0, Math.log2(2400 / L.rw)));
+    // ~1% of the frame per 10 s overhead, plus the gusts' lean: a strong
+    // gust run across the grass sets the clouds going visibly faster its way
+    // for a while after
+    const lean = reduce ? 0 : clamp(0.00045 * cloudLean, -0.0009, 0.0009);
+    gl.uniform2f(u.uCloudV, reduce ? 0 : 0.0009 + lean, reduce ? 0 : -0.00006);
+    gl.uniform1f(u.uExpo, 1.0 * 2 ** expoStops);
+    gl.uniform1f(u.uLod, Math.max(0, Math.log2((2400 * view()[2]) / L.rw)));
     gl.uniform1f(u.uDebug, debug);
-    gl.uniform1f(u.uRW, L.rw);
-    // cover-crop the 3:2 image into the box (only differs when embedded)
-    const a = L.w / L.h;
-    if (a > ASPECT) gl.uniform4f(u.uView, 0, 0.5 - ASPECT / a / 2, 1, ASPECT / a);
-    else gl.uniform4f(u.uView, 0.5 - a / ASPECT / 2, 0, a / ASPECT, 1);
-    gl.uniform2f(u.uDir, wind.dir[0], wind.dir[1]);
+    const v = view();
+    gl.uniform4f(u.uView, v[0], v[1], v[2], v[3]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -547,12 +430,7 @@ export async function createKaze(host, { embedded = false } = {}) {
     gl.bindVertexArray(vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
-    gl.clearColor(PAPER[0], PAPER[1], PAPER[2], 1);
-    gl.clear(gl.COLOR_BUFFER_BIT);
-    const dpr = stage.dpr;
-    const vx = Math.round(L.x * dpr);
-    const vy = stage.canvas.height - Math.round(L.y * dpr) - L.ph;
-    gl.viewport(vx, vy, L.pw, L.ph);
+    gl.viewport(0, 0, L.pw, L.ph);
     gl.useProgram(blit.p);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
@@ -626,7 +504,7 @@ export async function createKaze(host, { embedded = false } = {}) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
-      [plate, skyTex, aux, nrm, windTex].forEach((t) => gl.deleteTexture(t));
+      [plate, skyTex, aux, windTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);

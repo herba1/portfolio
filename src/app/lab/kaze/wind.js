@@ -1,12 +1,12 @@
-// Wind over the meadow: a small stable-fluids velocity field (Stam 1999) that
+// Wind in the grass: a small stable-fluids velocity field (Stam 1999) that
 // the pointer authors, the idle breeze laid over it, and the grass answering
 // it as damped springs.
 //
-// The grid covers the ground half of the photograph in screen space, but the
-// velocity it carries is the air's, in metres per second on the ground. Each
-// cell moves it across the screen at that cell's perspective scale, so a gust
-// you throw across the near grass slows and narrows as it runs out towards the
-// far slopes, the way a real one does seen from where you stand.
+// The camera lies in the grass looking up, so the grid covers the whole frame
+// in screen space: a sheet of air just above the seed heads, seen from below.
+// The velocity it carries is the air's, in metres per second, at a fixed
+// scale of CX cells per metre (the stalks nearest the lens are about a metre
+// from it, and everything in frame is within a few metres of that).
 //
 // Per cell, the grass is a damped spring (natural frequency ~0.75 Hz, damping
 // ratio 0.3) pulled toward a bend that grows with dynamic pressure (∝ |w|²)
@@ -14,14 +14,13 @@
 // which is what makes the wave behind a gust read as a wave.
 
 export const GX = 96;
-export const GY = 40;
-export const GY0 = 0.44; // grid top, image uv (y down)
+export const GY = 64;
+export const GY0 = 0; // grid top, image uv (y down): the grid covers the frame
 
-// Cells per metre at perspective scale p = Z_near / Z.
-const CX = 5.6; // across: ∝ p
-const CY = 3.4; // into the field: ∝ p^1.5 (ground foreshortening, eased for slopes)
-const cx = (p) => CX * p;
-const cy = (p) => CY * p * Math.sqrt(p);
+// Cells per metre, the same both ways: no ground plane to foreshorten.
+const CX = 5.6;
+const cx = () => CX;
+const cy = () => CX;
 
 const N = GX * GY;
 const idx = (i, j) => j * GX + i;
@@ -45,12 +44,11 @@ function vnoise(x, y) {
   return a + (b - a) * u + (c - a) * v + (a - b - c + d) * u * v;
 }
 
-export function createWind(perspective) {
-  // perspective: Float32Array(N) of p per cell (0 in the sky).
-  const P = new Float32Array(N);
-  for (let k = 0; k < N; k++) P[k] = Math.max(0.06, perspective[k]);
-  const ground = new Float32Array(N);
-  for (let k = 0; k < N; k++) ground[k] = perspective[k] > 0.005 ? 1 : 0;
+export function createWind() {
+  // Every cell carries air; P is the (uniform) scale kept per cell so the
+  // advection and the stroke read the same way they would with perspective.
+  const P = new Float32Array(N).fill(1);
+  const ground = new Float32Array(N).fill(1);
 
   const U = new Float32Array(N); // air velocity on the ground, m/s (across)
   const V = new Float32Array(N); // m/s, toward the camera (screen down)
@@ -67,9 +65,10 @@ export function createWind(perspective) {
   const wz = new Float32Array(N);
   const out = new Float32Array(N * 4);
 
-  // Breeze: a light air from the left and slightly away (2-4 m/s, Beaufort 2-3),
-  // with gust cells ~9 m across drifting with it.
-  const BDIR = [0.94, 0.34];
+  // Breeze: a light air from the left, lifting a little as it comes over the
+  // seed heads (2-4 m/s, Beaufort 2-3), with gust cells ~9 m across drifting
+  // with it.
+  const BDIR = [0.96, 0.28];
   let breeze = 1;
   let time = 0;
   let gustMean = 0; // smoothed lateral wind of the gusts, for the clouds
@@ -242,7 +241,7 @@ export function createWind(perspective) {
         U[k] *= fade;
         V[k] *= fade;
         const p = P[k];
-        // gust air, in m/s on the ground (V is screen-down, away is up)
+        // gust air, m/s (V is screen-down; the second component is screen-up)
         let gu = U[k];
         let gv = -V[k];
         const gm = Math.hypot(gu, gv);
@@ -254,13 +253,13 @@ export function createWind(perspective) {
           mean += gu;
           cnt++;
         }
-        // breeze at this cell's ground position
+        // breeze at this cell's position in the air sheet, metres
         const X = (i - GX / 2) / cx(p);
-        const Z = 8 / p;
+        const Z = (j - GY / 2) / cy(p);
         const a = X * BDIR[0] + Z * BDIR[1] - time * 3.2;
         const c = -X * BDIR[1] + Z * BDIR[0];
         const n = vnoise(a / 9, c / 14) * 0.65 + vnoise(a / 4.2 + 7.1, c / 6 + 3.3) * 0.35;
-        const bs = breeze * (1.6 + 4.6 * Math.max(0, n - 0.32) / 0.68);
+        const bs = breeze * (1.6 + (4.6 * Math.max(0, n - 0.32)) / 0.68);
         const w0 = gu + BDIR[0] * bs;
         const w1 = gv + BDIR[1] * bs;
         wx[k] = w0;
