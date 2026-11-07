@@ -38,12 +38,25 @@ const DEG = Math.PI / 180;
 // mirror geometry, metres
 const A = 0.4; // face radius (800 mm)
 const RC = 1.6; // radius of curvature
-const PIV = 0.2; // pole axis behind the face apex
+// The mount, as real ones are built: the pole ends in a capped top with a
+// clamp band; a bracket arm runs forward from the band, rising a little, to a
+// yoke that holds the hinge knuckle bolted to the shell's back. The head
+// pitches about that knuckle and turns (yaw) with the arm round the pole, so
+// the pole stands ARM behind the shell's back and stops below the hinge: the
+// lower rim, swinging back as the head tips down, clears it (by 5 cm at the
+// stop, still 1 cm at the rubber band's far limit), and nothing ever passes
+// through the glass.
+const HINGE = 0.18; // hinge axis behind the face apex (just behind the shell's back)
+const ARM = 0.3; // pole axis behind the hinge, horizontally
+const POLE_DROP = 0.05; // pole top below the hinge
 const POLE_R = 0.0381; // 76.3 mm pipe
 // rest aim (relative to facing the lens) and limits, degrees
 const REST = [20, -15];
 const YAW_LIM = [-78, 78];
 const PITCH_LIM = [-32, 40];
+// how far a drag can push past each stop (degrees, asymptotic): the lower stop
+// is the shell's own, firm, so the rim never comes within a centimetre of the pole
+const OVER = { yaw: 18, up: 18, down: 8 };
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -73,7 +86,9 @@ uniform vec3 uFace;        // face apex
 uniform vec3 uN;           // face axis (outward)
 uniform vec3 uU;           // face up
 uniform vec3 uX;           // face right
-uniform vec3 uPivot;       // on the pole axis
+uniform vec3 uPivot;       // the pole top, on its axis
+uniform vec3 uHinge;       // the hinge knuckle's axis centre
+uniform vec3 uHz;          // the arm's direction, pole to hinge (horizontal)
 uniform float uGround;     // road y
 uniform vec3 uSun;
 uniform float uSunE;       // sun irradiance (scene units)
@@ -86,7 +101,9 @@ uniform float uPx;         // angular size of one render pixel (rad)
 
 const float A = ${A.toFixed(4)};
 const float RC = ${RC.toFixed(4)};
-const float PIV = ${PIV.toFixed(4)};
+const float HINGE = ${HINGE.toFixed(4)};
+const float ARM = ${ARM.toFixed(4)};
+const float POLE_DROP = ${POLE_DROP.toFixed(4)};
 const float POLE_R = ${POLE_R.toFixed(4)};
 const float PI = 3.14159265;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
@@ -137,6 +154,10 @@ float sdEllipsoid(vec3 p, vec3 r) {
   float k1 = length(p / (r * r));
   return k0 * (k0 - 1.0) / max(k1, 1e-6);
 }
+float sdBox(vec3 p, vec3 b) {
+  vec3 q = abs(p) - b;
+  return length(max(q, 0.0)) + min(max(q.x, max(q.y, q.z)), 0.0);
+}
 float sdCapsule(vec3 p, vec3 a, vec3 b, float r) {
   vec3 pa = p - a, ba = b - a;
   float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
@@ -154,13 +175,22 @@ vec2 sdScene(vec3 p) {
   float face = max(rho - A, max(q.z - (RC - sqrt(max(RC * RC - rho * rho, 0.0))) * -1.0, -q.z - 0.07));
   // back shell: half an ellipsoid
   float shell = max(sdEllipsoid(q - vec3(0.0, 0.0, -0.075), vec3(A + 0.012, A + 0.012, 0.085)), q.z + 0.075);
-  float arm = sdCapsule(q, vec3(0.0, 0.0, -0.15), vec3(0.0, 0.0, -PIV + 0.035), 0.024);
-  // pole, clamp band (world vertical)
+  // the mounting plate bolted to the shell's back, under the knuckle
+  shell = min(shell, max(rho - 0.1, abs(q.z + HINGE - 0.0185) - 0.0045) - 0.002);
+  // the bracket, in the arm's frame (s toward the head, w across, y up from
+  // the hinge): knuckle (round its own axis, so it ignores the pitch), the
+  // yoke that holds it, and the arm back and down to the pole's clamp band
+  vec3 b = p - uHinge;
+  vec3 m = vec3(dot(b, uHz), dot(b, uX), b.y);
+  float knuckle = max(length(m.xz) - 0.021, abs(m.y) - 0.082);
+  float yoke = sdBox(m - vec3(-0.04, 0.0, 0.0), vec3(0.019, 0.067, 0.021)) - 0.003;
+  float arm = min(knuckle, min(yoke, sdCapsule(m, vec3(-ARM, 0.0, -POLE_DROP - 0.05), vec3(-0.045, 0.0, 0.0), 0.02)));
+  // pole with its cap, clamp band round the top (world vertical)
   vec3 pp = p - uPivot;
-  float top = 0.11;
-  float pole = max(length(pp.xz) - POLE_R, max(pp.y - top, uGround - p.y));
-  pole = min(pole, max(length(pp.xz) - POLE_R - 0.004, abs(pp.y - top - 0.004) - 0.008) - 0.002);
-  float clampB = max(length(pp.xz) - POLE_R - 0.012, abs(pp.y) - 0.05) - 0.003;
+  float pr = length(pp.xz);
+  float pole = max(pr - POLE_R, max(pp.y, uGround - p.y));
+  pole = min(pole, max(pr - POLE_R - 0.003, abs(pp.y - 0.004) - 0.006) - 0.002);
+  float clampB = max(pr - POLE_R - 0.012, abs(pp.y + 0.055) - 0.045) - 0.003;
   vec2 r = vec2(ring, 1.0);
   if (shell < r.x) r = vec2(shell, 2.0);
   if (arm < r.x) r = vec2(arm, 3.0);
@@ -223,14 +253,14 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float bleach = 0.25 + 0.5 * upF;
   alb = mix(alb, vec3(0.74, 0.27, 0.12), bleach * 0.25);
   // world-space coordinates for wear (on the pole: height and angle)
-  vec2 wc = id == 4.0 || id == 5.0 ? vec2(atan(p.x - uPivot.x, p.z - uPivot.z) * POLE_R, p.y) : q.xy;
+  vec2 wc = id == 4.0 || id == 5.0 ? vec2(atan(p.x - uPivot.x, p.z - uPivot.z) * POLE_R, p.y) : id == 3.0 ? vec2(dot(p - uHinge, uHz) + dot(p - uHinge, uX), p.y) : q.xy;
   float n1 = fbm(wc * 38.0);
   float n2 = fbm(wc * vec2(140.0, 12.0) + 3.0);
   // grime: rain streaks run down from the frame and the clamp
   float streak = smoothstep(0.55, 0.85, n2) * (id == 1.0 || id == 2.0 ? smoothstep(0.1, -0.35, q.y / A) : 0.0);
   float under = id == 1.0 ? smoothstep(0.2, -0.9, dot(n, uU)) * 0.6 : 0.0;
   float contact = 0.0;
-  if (id == 4.0) contact = smoothstep(0.16, 0.0, abs(p.y - uPivot.y)) * 0.8 + smoothstep(0.4, 0.0, p.y - uGround) * 0.9;
+  if (id == 4.0) contact = smoothstep(0.22, 0.0, uPivot.y - 0.1 - p.y) * 0.8 + smoothstep(0.4, 0.0, p.y - uGround) * 0.9;
   if (id == 5.0) contact = 0.7;
   if (id == 3.0) contact = 0.5;
   if (id == 4.0) streak = smoothstep(0.5, 0.9, fbm(wc * vec2(90.0, 2.5) + 11.0)) * 0.8;
@@ -406,12 +436,13 @@ void main() {
       float tt = hit ? t : bestT;
       vec3 x = d * tt;
       vec2 id = sdScene(x);
+      // the exact sphere cap: it wins over whatever the march found behind it
+      vec3 S = uFace - uN * RC;
+      vec2 sh = sphereHit(vec3(0.0), d, S, RC);
+      vec3 Pf = d * sh.x;
+      bool onCap = sh.x > 0.0 && length(toLocal(Pf).xy) < A && sh.x < tt - 0.001;
       vec3 obj;
-      if (id.y == 6.0) {
-        // exact sphere cap
-        vec3 S = uFace - uN * RC;
-        vec2 sh = sphereHit(vec3(0.0), d, S, RC);
-        vec3 Pf = d * sh.x;
+      if (id.y == 6.0 || onCap) {
         obj = glass(Pf, d, S);
       } else {
         vec3 n = sdNormal(x);
@@ -566,9 +597,11 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     return [Math.cos(p) * Math.sin(a), Math.sin(p), Math.cos(p) * Math.cos(a)];
   };
   const restN = axis(REST[0], REST[1]);
-  // the pole axis stands PIV behind the face at rest (horizontally)
+  // at rest the face apex sits at M (the panorama's centre): the hinge HINGE
+  // behind it, the pole ARM further back along the arm, its top POLE_DROP below
+  const hingeRest = add(M, restN, -HINGE);
   const hz = norm([restN[0], 0, restN[2]]);
-  const pivot = [M[0] - hz[0] * PIV, M[1] - 0.02, M[2] - hz[2] * PIV];
+  const pivot = [hingeRest[0] - hz[0] * ARM, hingeRest[1] - POLE_DROP, hingeRest[2] - hz[2] * ARM];
 
   // the aim that puts the sun in the middle of the glass: the face's normal
   // halves the angle between the sun and the lens
@@ -666,11 +699,10 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const inPrint = (p) => p.x >= L.x && p.x <= L.x + L.w && p.y >= L.y && p.y <= L.y + L.h;
   // degrees per css px: half the print's width turns it ~100 degrees
   const gain = () => 100 / Math.max(240, L.w * 0.5);
-  const rubber = (v, lo, hi) => {
+  const rubber = (v, lo, hi, spanLo, spanHi) => {
     const k = 0.35;
-    const span = 18;
-    if (v < lo) return lo - span * (1 - Math.exp(((v - lo) * k) / span));
-    if (v > hi) return hi + span * (1 - Math.exp((-(v - hi) * k) / span));
+    if (v < lo) return lo - spanLo * (1 - Math.exp(((v - lo) * k) / spanLo));
+    if (v > hi) return hi + spanHi * (1 - Math.exp((-(v - hi) * k) / spanHi));
     return v;
   };
   stage.on("down", (p) => {
@@ -687,8 +719,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     }
     const g = gain();
     // push the face: right turns it right, up tilts it up
-    goal[0] = rubber(drag0.yaw - (p.x - drag0.x) * g, YAW_LIM[0], YAW_LIM[1]);
-    goal[1] = rubber(drag0.pitch - (p.y - drag0.y) * g, PITCH_LIM[0], PITCH_LIM[1]);
+    goal[0] = rubber(drag0.yaw - (p.x - drag0.x) * g, YAW_LIM[0], YAW_LIM[1], OVER.yaw, OVER.yaw);
+    goal[1] = rubber(drag0.pitch - (p.y - drag0.y) * g, PITCH_LIM[0], PITCH_LIM[1], OVER.down, OVER.up);
   });
   stage.on("up", (p) => {
     if (!dragging) return;
@@ -731,9 +763,10 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     const n = axis(yaw, pitch);
     const xr = norm(cross([0, 1, 0], n));
     const up = cross(n, xr);
-    // the head turns about the pole (yaw) and its hinge (pitch)
-    const hinge = [pivot[0], pivot[1], pivot[2]];
-    const face = add(hinge, n, PIV);
+    // the arm turns about the pole (yaw), the head about its hinge (pitch)
+    const hzY = norm([n[0], 0, n[2]]);
+    const hinge = [pivot[0] + hzY[0] * ARM, pivot[1] + POLE_DROP, pivot[2] + hzY[2] * ARM];
+    const face = add(hinge, n, HINGE);
     gl.uniform4f(u.uView, V.x, V.y, V.w, V.h);
     gl.uniform2f(u.uPhotoSize, PW, PH);
     gl.uniform1f(u.uF, scene.f);
@@ -745,6 +778,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uU, up);
     gl.uniform3fv(u.uX, xr);
     gl.uniform3fv(u.uPivot, pivot);
+    gl.uniform3fv(u.uHinge, hinge);
+    gl.uniform3fv(u.uHz, hzY);
     gl.uniform1f(u.uGround, ground);
     gl.uniform3fv(u.uSun, SUN);
     gl.uniform1f(u.uSunE, 3.6);
