@@ -1,10 +1,13 @@
 // Weingart: a song credit set as a forme of metal type. Every line is a row
-// of sorts, single pieces of lead, that move only in whole diagonal steps
-// along a chase. Neighbouring sorts sit level or one step apart, never
-// more: push a sort down and each sort ahead of it drops one step below the
-// one before, while the ones behind trail a step each, so a pushed line
-// breaks into a stepped staircase. Tracking between sorts never changes;
-// only the sorts move. Sorts of the same ink are solid bodies: a staircase
+// of sorts, single pieces of lead, that move only in whole steps down and
+// to the right. A line's first sort is locked to its composed place on the
+// chase's left margin, so the Swiss axis of the forme always holds: push a
+// sort down and the line swings on that first sort like a lever, each sort
+// taking the whole steps its place along the lever reaches, so the line
+// breaks into an uneven staircase hinged on the margin. Each line steps by
+// a fraction of its own body, so big type takes big steps and small type
+// small ones, and every line fans out at its own slope. Sorts of the same
+// ink are solid bodies: a staircase
 // that comes down onto a neighbouring line shoves just the sorts it lands
 // on, which breaks that line into its own staircase, and so on down the
 // chain, until something meets the chase and the whole run locks. Only the
@@ -16,14 +19,22 @@ import { createStage, clamp } from "../_kit/stage";
 // Design space the forme is composed in, fitted into the piece box.
 const DW = 1000;
 const DH = 600;
-// One step in the chase: right and down, 2:1.
-const SX = 24;
-const SY = 12;
+// One step, as a fraction of a line's own body: display type by a twelfth
+// of its em; small type, set in word slugs, and brass rule by a third of
+// their body. A step runs right by half its drop.
+const STEP_EM = 1 / 12;
+const STEP_BODY = 1 / 3;
+const STEP_RUN = 0.5;
+// The steepest a line can swing: drop from one sort to the next over the
+// sort's average width. A line of small steps takes more of them to get there.
+const STEEP = 0.8;
 // How far a line can be dragged either way, in steps.
 const D_MAX = 48;
 // Below this size a line is set in word slugs, not single letters: a 13px
-// letter stepped 24px apart is no longer a word.
+// letter stepped apart is no longer a word.
 const LETTER_MIN = 40;
+// Sidebearing trimmed off each side of a display letter's body, in em.
+const SIDE = 0.06;
 // Lead between two bodies that touch, design px.
 const GAP = 8;
 // Body above and below a rule's face, so it never sits on a baseline as an underline.
@@ -46,11 +57,11 @@ const FORME = [
   { text: "The Beatles", size: 20, w: "strong", x: 4, y: 52 },
   { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 476 },
   { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
-  { text: "Comes", size: 108, w: "semibold", x: 48, y: 264 },
-  { text: "the Sun", size: 108, w: "semibold", x: 96, y: 360 },
+  { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
+  { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
   // The rule is made up from brass pieces of the lengths a case actually holds.
-  { rule: true, pieces: [144, 72, 96, 48, 120, 96], thick: 12, x: 0, y: 392 },
-  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 216, y: 436 },
+  { rule: true, pieces: [96, 144, 72, 120, 48, 96], thick: 12, x: 0, y: 392 },
+  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 436 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
   { text: "Apple Records", size: 13, w: "body", x: 700, y: 136 },
@@ -79,6 +90,15 @@ export async function createWeingart(host) {
 
   let held = null;
 
+  // A line's own step, to the half pixel.
+  const stepOf = (d) => {
+    const body = d.rule ? d.thick * STEP_BODY : d.size >= LETTER_MIN ? d.size * STEP_EM : d.size * STEP_BODY;
+    const sy = Math.round(body * 2) / 2;
+    // Brass drops straight down: its pieces stay butted end to end, so a
+    // broken rule still reads as one rule cut, not as a dashed line.
+    return { sy, sx: d.rule ? 0 : sy * STEP_RUN };
+  };
+
   const slugs = FORME.map((d, i) => ({
     ...d,
     id: i,
@@ -87,6 +107,7 @@ export async function createWeingart(host) {
     layer: d.ink === "red" ? "red" : "black",
     font: d.rule ? null : `${weight[d.w]} ${d.size}px ${sans}`,
     kind: d.rule ? "rule" : d.size >= LETTER_MIN ? "letter" : "word",
+    ...stepOf(d),
     cx: null,
     units: [],
   }));
@@ -125,45 +146,53 @@ export async function createWeingart(host) {
       s.units[0].first = true;
       s.units[s.units.length - 1].last = true;
     }
-    for (const s of slugs) s.vec = s.units.map(() => 0);
+    for (const s of slugs) {
+      s.vec = s.units.map(() => 0);
+      s.pitch = (s.units[s.units.length - 1].x + s.units[s.units.length - 1].w) / s.units.length;
+    }
   };
   cut();
 
   // A line's state is one whole step per sort, counted from where it was
-  // composed. Push sort j one step (dir): the sorts ahead of it that would
-  // end up above it are shoved along, and the sorts behind it trail so no
-  // two neighbours are ever more than one step apart. Pushed by its tail a
-  // line opens into a staircase; pushed by its head it travels as one.
-  const shove = (v, j, dir) => {
-    v[j] += dir;
-    if (dir > 0) {
-      // Driven down, a sort drives each sort ahead of it one step lower than the one before.
-      for (let i = j + 1; i < v.length; i++) v[i] = Math.max(v[i], v[i - 1] + 1);
-      for (let i = j - 1; i >= 0; i--) v[i] = Math.max(v[i], v[i + 1] - 1);
-    } else {
-      for (let i = j + 1; i < v.length; i++) v[i] = Math.min(v[i], v[i - 1] + 1);
-      for (let i = j - 1; i >= 0; i--) v[i] = Math.min(v[i], v[i + 1]);
+  // composed. The first sort never moves: it is locked on the margin, and
+  // the line is a lever hinged on it. Push sort j one step (dir) and the
+  // line swings until j sits that step further on; every other sort takes
+  // the whole steps its place along the lever reaches, so the stairs come
+  // out uneven (0, 0, 1, 2, then 0, 1, 2, 4) the way hand-set steps do. No
+  // line swings steeper than STEEP: past that it is locked. Returns false
+  // if the push cannot be made.
+  const shove = (s, v, j, dir) => {
+    if (j <= 0) return false;
+    const k = (v[j] + dir) / j;
+    if (Math.abs(k) * s.sy > STEEP * s.pitch) return false;
+    for (let i = 1; i < v.length; i++) {
+      const at = Math.trunc(i * k + dir * 1e-6);
+      v[i] = dir > 0 ? Math.max(v[i], at) : Math.min(v[i], at);
     }
-    return v;
+    return true;
   };
-  // A line dragged d steps from base by its sort j.
-  const dragged = (base, j, d) => {
+  // A line dragged d steps from base by its sort j, or null where it locks.
+  const dragged = (s, base, j, d) => {
     const v = base.slice();
-    for (let i = 0; i < Math.abs(d); i++) shove(v, j, Math.sign(d));
+    for (let i = 0; i < Math.abs(d); i++) if (!shove(s, v, j, Math.sign(d))) return null;
     return v;
   };
 
   // One sort's body in design space at offset o steps.
   const unitRect = (s, u, o) => {
-    const x = s.x + u.x + o * SX;
-    const y = s.y + o * SY;
+    const x = s.x + u.x + o * s.sx;
+    const y = s.y + o * s.sy;
     if (s.rule) return { x, y: y - RULE_LEAD, w: u.w, h: s.thick + RULE_LEAD * 2 };
     if (s.rev) {
       const l = u.first ? 10 : 0;
       return { x: x - l, y: y - 17, w: u.w + l + (u.last ? 10 : 0), h: 24 };
     }
     const desc = u.desc ? s.size * 0.2 : 0;
-    return { x, y: y - s.size * 0.74, w: Math.max(u.w, s.size * 0.3), h: s.size * 0.74 + desc };
+    // A letter's shoulder is trimmed to its sidebearings, so a sort can step
+    // down past the edge of one in the line below instead of catching on air.
+    const w = Math.max(u.w, s.size * 0.3);
+    const side = s.kind === "letter" ? s.size * SIDE : 0;
+    return { x: x + side, y: y - s.size * 0.74, w: w - side * 2, h: s.size * 0.74 + desc };
   };
   const rectsAt = (s, v) => {
     const out = [];
@@ -189,8 +218,9 @@ export async function createWeingart(host) {
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   };
 
+  // Bodies side by side in neighbouring lines pass; lead is only above and below.
   const touches = (a, b) =>
-    a.x < b.x + b.w + GAP && b.x < a.x + a.w + GAP && a.y < b.y + b.h + GAP && b.y < a.y + a.h + GAP;
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h + GAP && b.y < a.y + a.h + GAP;
   // Two lines touch if any sort of one touches any sort of the other.
   const touchesAny = (A, B) => {
     if (!touches(union(A), union(B))) return false;
@@ -237,8 +267,8 @@ export async function createWeingart(host) {
             if (r.j > j && touches(ua, r) && ra.some((q) => touches(q, r))) j = r.j;
           }
           if (j < 0) break;
-          shove(vo, j, dir);
-          if (n > 200 || !fits(o, vo)) return null;
+          // Landing on a line's first sort: the margin holds, the run locks.
+          if (!shove(o, vo, j, dir) || n > 200 || !fits(o, vo)) return null;
         }
         next.set(o, { v: vo, depth: Math.max(next.get(o)?.depth ?? 0, depth + 1) });
         queue.push({ a: o, depth: depth + 1 });
@@ -286,7 +316,8 @@ export async function createWeingart(host) {
     let deepest = 0;
     while (at !== d) {
       const dir = Math.sign(d - at);
-      const pl = plan(s, dragged(base, j, at + dir), dir);
+      const v = dragged(s, base, j, at + dir);
+      const pl = v && plan(s, v, dir);
       if (!pl) return { at, steps, deepest, locked: true };
       for (const [o, { v, depth }] of pl) {
         deepest = Math.max(deepest, depth);
@@ -426,8 +457,6 @@ export async function createWeingart(host) {
     return null;
   };
 
-  const DIR = [SX / Math.hypot(SX, SY), SY / Math.hypot(SX, SY)];
-  const STEP = Math.hypot(SX, SY);
   let grab = null;
 
   stage.on("down", (p) => {
@@ -441,8 +470,9 @@ export async function createWeingart(host) {
     slugs.splice(slugs.indexOf(s), 1);
     slugs.push(s);
     // Held by the sort under the hand: what is ahead of it is pushed, what
-    // is behind it trails into a staircase.
-    grab = { x: p.x, y: p.y, base: s.vec.slice(), j: h.j, d: 0 };
+    // is behind it trails into a staircase. The first sort is locked, so a
+    // hand on it works the sort beside it.
+    grab = { x: p.x, y: p.y, base: s.vec.slice(), j: Math.max(1, h.j), d: 0 };
     s.lockedAt = false;
     canvas.style.cursor = "grabbing";
   });
@@ -454,7 +484,7 @@ export async function createWeingart(host) {
     }
     const dx = (p.x - grab.x) / scale;
     const dy = (p.y - grab.y) / scale;
-    const r = (dx * DIR[0] + dy * DIR[1]) / STEP;
+    const r = (dx * held.sx + dy * held.sy) / (held.sx * held.sx + held.sy * held.sy);
     const want = clamp(Math.round(r), -D_MAX, D_MAX);
     let locked = false;
     if (want !== grab.d) {
@@ -516,8 +546,8 @@ export async function createWeingart(host) {
       if (!u.vis) continue;
       if (dens) g.globalAlpha = a0 * density(s, u);
       // The knock: a sort just seated sits a hair deep for a moment.
-      const x = s.x + u.p * SX;
-      const y = s.y + u.p * SY + u.seat * u.seat * 0.8;
+      const x = s.x + u.p * s.sx;
+      const y = s.y + u.p * s.sy + u.seat * u.seat * 0.8;
       for (let i = u.i0; i < u.i1; i++) {
         const ch = s.text[i];
         if (ch !== " ") g.fillText(ch, x + s.cx[i], y);
@@ -652,7 +682,8 @@ export async function createWeingart(host) {
     dirty = false;
     if (stillT == null) {
       for (const s of slugs) {
-        const nudge = s === held ? s.nudge : 0;
+        // The pull shows along the lever: nothing at the hinge, most at the far end.
+        const pull = s === held ? s.nudge / grab.j : 0;
         // Stiff and critically damped while held; a touch stiffer to seat.
         // Shoved sorts are stiffer than the hand, so they stay just ahead of
         // the sort pushing them instead of being passed through in transit.
@@ -666,7 +697,7 @@ export async function createWeingart(host) {
             u.wait -= dt;
             if (u.wait <= 0) u.k = u.q;
           }
-          const target = u.k + nudge;
+          const target = u.k + pull * j;
           const sub = 3;
           const h = dt / sub;
           for (let i = 0; i < sub; i++) {
