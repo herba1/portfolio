@@ -1,9 +1,8 @@
-// Kern: one huge word on springs.
+// Kern: one huge word on springs, kept mostly in its thin cut.
 //   1. the still word (its own load pluck and idle hints are off on camera)
-//   2. tap a letter: the whole word morphs into the heavy, condensed cut
-//   3. grab the g and stretch the line like a ribbon, hold, let go: it re-kerns
-//   4. tap again: back to the light cut
-//   5. flick the h up and down; it rings and settles
+//   2. grab the g and stretch the line like a ribbon, let go: it re-kerns
+//   3. flick the h up and down; it rings and settles
+//   4. tap: a quick blink of the heavy cut, tap: back to thin
 const letter = (i) => `.kern-stage text >> nth=${i}`;
 const off = (i, x, y) => ({ sel: letter(i), at: [x, y] });
 
@@ -17,22 +16,25 @@ const reel = {
   // spring the hand drives. So the word sits still until the pointer touches it.
   reducedMotion: "reduce",
   intro: { hold: 1500, zoom: 1, fade: 0, trim: 1400 },  // skip the grow-in: open on the still word, hand at rest; the first tap lands by ~1.2s
-  tempo: 1.2,
+  tempo: 1.1,
   outro: { hold: 500 },
   loop: true,                                   // ends on its own first frame: the light cut, the hand back where it began
   cursor: { from: [0.7, 0.86], visible: true },
-  formats: ["feed", "landscape", "vertical"],
+  formats: ["feed", "landscape"],                // X and LinkedIn: 4:5 for the phone feed, 16:9 for desktop
   beats: [
-    { click: off(4, 0.8, 0.68), duration: 650, settle: 260, pause: 900 },  // land in the t's open corner (on paper, not ink, so the press shows), a beat, press: heavy
-    { press: letter(8), duration: 600, settle: 80 },
-    { move: off(8, 3.6, 0.35), duration: 650, arc: 0.04, pause: 250 },     // stretch
-    { lift: true, pause: 900 },                                           // snap back, re-kern
-    { click: off(1, 0.5, 0.6), duration: 650, settle: 260, pause: 800 },   // same tap inside the o's counter: light
-    { press: letter(5), duration: 600, settle: 80 },
-    { move: off(5, 0.5, -1.7), duration: 330, arc: 0, pause: 60 },
-    { move: off(5, 0.5, 2.2), duration: 280, arc: 0 },
-    { lift: true, pause: 900 },
-    { move: [0.7, 0.86], duration: 900, pause: 300 },                    // home, for the loop
+    // Mostly the thin cut, which is the prettier one. Lead with the stretch so
+    // the springs read within a second, then the flick, then a quick blink of
+    // the heavy cut and straight back.
+    { press: letter(8), duration: 650, settle: 120 },
+    { move: off(8, 3.6, 0.35), duration: 600, arc: 0.04, pause: 220 },     // stretch the line
+    { lift: true, pause: 750 },                                           // snap back, re-kern
+    { press: letter(5), duration: 600, settle: 100 },
+    { move: off(5, 0.5, -1.7), duration: 300, arc: 0, pause: 50 },
+    { move: off(5, 0.5, 2.2), duration: 260, arc: 0 },
+    { lift: true, pause: 750 },                                           // it rings and settles
+    { click: off(4, 0.8, 0.68), duration: 550, settle: 220, pause: 650 },  // tap: heavy, briefly
+    { click: off(1, 0.5, 0.6), duration: 550, settle: 220, pause: 650 },   // tap: back to thin
+    { move: [0.7, 0.86], duration: 850, pause: 250 },                    // home, for the loop
   ],
 };
 
