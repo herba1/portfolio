@@ -21,16 +21,17 @@ import { readWebm } from "./webm";
 // seconds before the train), so static detail is never touched by video
 // compression or by time.
 //
-// Continuous time. 15 frames a second would make every ribbon a staircase
-// of 44 px steps. Between ring frames f and f+1 a pixel is fetched along the
-// train's own motion: from f at x - a v and from f+1 at x + (1 - a) v (v is
-// the train's measured velocity, px per ring frame, from the bake). Between
-// the train's fitted front and tail every pixel is train; a sample that lands
-// on the occluder mask (fence posts and grass that stand in front of the
-// train, found in the bake) is not trusted, and only within a few px of the
-// front or tail (template-matched in the bake) is colour against the empty
-// station consulted. So the posts never smear, the cab never ghosts, and D
-// is a real-valued time: the ribbons are continuous.
+// Discrete time. Nothing is blended between moments. Every pixel is locked
+// to the nearest whole ring frame, and D is read once per slit cell (2
+// device px square), so where the front moves the train the picture breaks
+// into hard strata, each one moment of the clip, bounded by the front's
+// isochrones; at 15 fps one frame is ~44 px of the train's run, so along a
+// ribbon the strata are rigid slices of carriage set side by side. The
+// rounding's threshold steps through eight phases down every eight slit
+// rows, a little either side of the half, so each seam between two moments
+// is struck into single-slit striations. Anything that matches the empty
+// station, or lies on the occluder mask (fence posts and grass in front of
+// the train, found in the bake), is drawn from the plate.
 //
 // The front. D is a single time front: 0 on the left, `depth` seconds on
 // the right, climbing across a ramp as wide as the distance the train runs in
@@ -43,19 +44,20 @@ import { readWebm } from "./webm";
 // pillars drawn out), and the bends drift slowly. The rope also sets each
 // row's moment (ROW_T): a row whose rope is pulled left is later, so the
 // front cuts through the end of the train along a curve that follows the
-// rope, and at the rest moment (CLOCK0, the tail in the frame) the train is a
-// carved silhouette with the empty station showing through it. Press anywhere and the rope
-// comes to you, held most strongly at the row you hold, so a drag bends the
+// rope; every row also sits half a second later (ROW_OFF), so at the rest
+// moment (CLOCK0) the front already cuts the tail and the train is a
+// carved silhouette with the empty station showing through it. Press
+// anywhere and the rope comes to you, held most strongly at the row you hold, so a drag bends the
 // local slope above 1/v (the train mirrored) on one side of the hand and
 // below it (compressed) on the other; held, the whole front steepens. Let go
 // and it eases back to rest. Hovering, it leans a little towards the
-// pointer. D is sampled with a cubic B-spline, so its slope (the train's
-// magnification) has no kinks. Rows above the train's body never take the
+// pointer. D is sampled with a cubic B-spline, so the isochrones that bound
+// the strata run without kinks. Rows above the train's body never take the
 // sculpted time, so nothing rises onto the canopy; below the red stripe the
 // undercarriage is held in rigid strips of constant time, so it never
 // streaks.
 //
-// Query (stills): ?t=seconds holds the clock (the hero is ?t=9.15); ?front=flat shows the clip as
+// Query (stills): ?t=seconds holds the clock (the hero is ?t=8.8); ?front=flat shows the clip as
 // shot; ?slit=x,lean sets the resting front; ?depth (or ?delay)=seconds also
 // sets the ramp's width (deeper is wider, still matched); ?bend=y,x;... sets
 // the rest pose, pulling the rope near row y to x (0..1 of the print), in
@@ -103,14 +105,13 @@ uniform sampler2DArray uY;
 uniform sampler2DArray uC;
 uniform sampler2D uPlate;     // the empty station, print crop, top row first
 uniform sampler2D uDelay;     // R16F seconds, print-normalised, top row first
-uniform sampler2D uTrack;     // RGBA32F n x 1: v, x0, x1, 0
 uniform sampler2D uOcc;       // band-sized: things standing in front of the train
 uniform vec4 uPrint;          // device px: x, y, w, h (top-left origin)
 uniform float uCanvasH;
 uniform vec3 uPaper;
 uniform vec2 uSrc;            // source px of the print: 1920, 800
 uniform vec2 uBand;           // band rows in print px: top, height
-uniform vec2 uBody;           // rows where the train's motion applies (print px)
+uniform vec2 uBody;           // the train's body rows, where the sculpted time applies (print px)
 uniform vec2 uCap;            // the red stripe's lower edge: row at x = 0, rise across the print
 uniform sampler2D uInv;       // R32F NP x 1: frame time at each distance the train has run
 uniform float uRun;           // distance the train has run at the clock, px
@@ -122,6 +123,8 @@ uniform float uOn;            // 0..1, eases the time field in
 uniform float uReady;         // ring complete
 out vec4 o;
 const float STRIP = 72.0;     // source px: the undercarriage's held strips
+const float STRATUM = 2.0;    // device px: one slit cell, one ring frame
+const float JAG = 0.4;        // frames: how far the seams between moments fray
 
 vec3 yuv2rgb(float y, vec2 c) {
   float cb = c.x - 0.5, cr = c.y - 0.5;
@@ -167,6 +170,7 @@ void main() {
   vec2 p = l * uSrc;
   vec3 still = plate(p);
   float by = p.y - uBand.x;
+  float occ = texture(uOcc, vec2(p.x / uSrc.x, by / uBand.y)).r;
   if (uReady < 0.5 || by < 0.5 || by > uBand.y - 0.5) { o = vec4(still, 1.0); return; }
 
   // D is read in the train's own time: D seconds back is D x speed px of
@@ -182,7 +186,9 @@ void main() {
   // exactly where its body is.
   float cap = uCap.x + uCap.y * l.x;
   bool under = p.y >= cap;
-  vec2 lD = l;
+  // D is read once per slit cell, STRATUM device px square, so every seam
+  // between two moments lands on the pixel grid, hard
+  vec2 lD = ((floor((dpx - uPrint.xy) / STRATUM) + 0.5) * STRATUM) / uPrint.zw;
   if (under) {
     lD = vec2((floor(p.x / STRIP) + 0.5) * STRIP / uSrc.x, (cap - 1.5) / uSrc.y);
   }
@@ -192,57 +198,19 @@ void main() {
   float qi = q / uRunLoop * float(np - 1);
   int q0 = min(int(floor(qi)), np - 2);
   float t = mix(texelFetch(uInv, ivec2(q0, 0), 0).r, texelFetch(uInv, ivec2(q0 + 1, 0), 0).r, qi - float(q0));
-  int f0 = int(floor(t)) % uN;
-  int f1 = (f0 + 1) % uN;
-  float a = fract(t);
-
-  vec3 s0 = ring(p, f0);
-  vec3 s1 = ring(p, f1);
-  float st0 = diff(s0, still);
-  float st1 = diff(s1, still);
-  vec3 col = mix(s0, s1, a);
-
-  vec4 k0 = texelFetch(uTrack, ivec2(f0, 0), 0);
-  vec4 k1 = texelFetch(uTrack, ivec2(f1, 0), 0);
-  float v = k0.x;
-  vec2 buv = vec2(p.x / uSrc.x, by / uBand.y);
-  float occ = texture(uOcc, buv).r;
-  // the train's extent at this moment (fitted front and tail; open where
-  // it runs off the frame)
-  float e0 = mix(k0.y, k1.y, a), e1 = mix(k0.z, k1.z, a);
-  e0 = e0 < 0.0 ? -1e4 : e0;
-  e1 = e1 > uSrc.x ? 1e4 : e1;
+  // Time comes in strata: every pixel is locked to one whole ring frame,
+  // the nearest, never blended or followed along the motion.
+  // The rounding's threshold steps through eight phases down every eight
+  // slit rows, a little either side of the half, so where two moments meet
+  // the seam is struck into hard single-slit striations.
+  int ki = int(mod(floor(dpx.y / STRATUM), 8.0));
+  float h = (float(((ki & 1) << 2) | (ki & 2) | ((ki >> 2) & 1)) + 0.5) / 8.0;
+  int f = int(floor(t + 0.5 + JAG * (h - 0.5))) % uN;
+  vec3 col = ring(p, f);
   bool rows = p.y > uBody.x && p.y < uBody.y;
-  bool body = abs(v) > 0.5 && rows;
-  float edge = min(p.x - e0, e1 - p.x); // > 0 inside the train
-  if (body && occ < 0.5 && edge > -6.0) {
-    // fetch along the train's motion
-    vec2 pa = p - vec2(a * v, 0.0);
-    vec2 pb = p + vec2((1.0 - a) * v, 0.0);
-    vec3 A = ring(pa, f0);
-    vec3 B = ring(pb, f1);
-    // a sample that lands on something in front of the train is not trusted
-    float ta = 1.0 - texture(uOcc, vec2(pa.x / uSrc.x, buv.y)).r;
-    float tb = 1.0 - texture(uOcc, vec2(pb.x / uSrc.x, buv.y)).r;
-    float wa = (1.0 - a) * (0.001 + ta);
-    float wb = a * (0.001 + tb);
-    vec3 W = (A * wa + B * wb) / (wa + wb);
-    // The front and tail are template-matched to the pixel in the bake. Only
-    // within a few px of them is a point allowed to be station, and then
-    // only if both samples, followed along the motion, are exactly the empty
-    // station where they landed.
-    float sa = 1.0 - smoothstep(0.03, 0.06, diff(A, plate(pa)));
-    float sb = 1.0 - smoothstep(0.03, 0.06, diff(B, plate(pb)));
-    float train = edge >= 6.0 ? 1.0 : smoothstep(-6.0, 0.0, edge) * (1.0 - sa * sb);
-    col = mix(st0 < st1 ? s0 : s1, W, train);
-  } else if (body && occ < 0.5) {
-    // ahead of or behind the train: whichever end is the station
-    col = st0 < st1 ? s0 : s1;
-  }
   if (!rows) {
-    // Above and below the train's body rows nothing is fetched along the
-    // motion, so where the front is sculpted (D changing across x) those rows
-    // keep the empty station: the ribbons stop at the train and never climb
+    // Above and below the train's body rows, where the front is sculpted
+    // (D changing across x), those rows keep the empty station: the ribbons stop at the train and never climb
     // onto the canopy. Where D is flat (the train as shot, now or ago) the
     // roof and pantograph show as they were.
     float e = 4.0 / uSrc.x;
@@ -324,13 +292,19 @@ const BEND_W = 0.2; // the rope's reach above and below a bend, print heights
 // has gone, others still carry carriage, folded into mirrored windows at the
 // edge. Drag the rope and that boundary moves with it.
 const ROW_T = 6;
-// the clock at rest, and the still: the moment the tail is in the frame
-const CLOCK0 = 9.15;
-// Between the tail leaving every row (~9.85 s) and the nose reaching the
-// front (~2.25 s, across the loop's seam) the rest pose is only the empty
+// ...and every row is half a second later than its rope alone would put it,
+// so at the rest moment the front already stands in the train's tail: the
+// rows the rope pulls left (the roof and the windows) are cut back to the
+// empty station on either side and hold carriage only where the front folds
+// it into mirrored windows, the rows below still carry the whole car.
+const ROW_OFF = -0.5;
+// the clock at rest, and the still: the moment the front cuts the tail
+const CLOCK0 = 8.8;
+// Between the tail leaving every row (~9.4 s) and the nose reaching the
+// front (~1.55 s, across the loop's seam) the rest pose is only the empty
 // station, which is one still plate: the clock runs through it SKIP times
 // faster, so nothing visible is skipped and the loop is mostly train.
-const EMPTY = [9.85, 2.25];
+const EMPTY = [9.4, 1.55];
 const SKIP = 6;
 // the red stripe's lower edge, source rows of the print at its left and right
 const CAP = [616, 581];
@@ -486,17 +460,10 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   const srcTex = tex2d(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, BW, BH, null);
   const fbo = gl.createFramebuffer();
 
-  const trackData = new Float32Array(N * 4);
-  for (let i = 0; i < N; i++) {
-    trackData[i * 4] = meta.v[i] || 0;
-    trackData[i * 4 + 1] = meta.x[i]?.[0] ?? 0;
-    trackData[i * 4 + 2] = meta.x[i]?.[1] ?? 0;
-  }
   const occTex = tex2d(gl.R8, gl.RED, gl.UNSIGNED_BYTE, BW, BH, null);
   gl.bindTexture(gl.TEXTURE_2D, occTex);
   gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, gl.RED, gl.UNSIGNED_BYTE, occBm);
   occBm.close?.();
-  const trackTex = tex2d(gl.RGBA32F, gl.RGBA, gl.FLOAT, N, 1, trackData, gl.NEAREST);
   // The train's run: run[i] is how far it has travelled by ring frame i (a
   // little creep where it stands still or is out of shot, so time never
   // stops), and inv maps distance back to frame time. D is spent along it.
@@ -556,7 +523,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
       const k = 1 / (1 - m) - 2;
       const g0 = (1 - m) / m;
       const g1 = m / (1 - m);
-      const rowT = flat ? 0 : ROW_T * (curve[j] - x0);
+      const rowT = flat ? 0 : ROW_T * (curve[j] - x0) + ROW_OFF;
       const jr = j * MW;
       for (let i = 0; i < MW; i++) {
         const s = ((i + 0.5) / MW - a) / span;
@@ -628,7 +595,6 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     bind(1, gl.TEXTURE_2D_ARRAY, cTex, "uC");
     bind(2, gl.TEXTURE_2D, plateTex, "uPlate");
     bind(3, gl.TEXTURE_2D, delayTex, "uDelay");
-    bind(4, gl.TEXTURE_2D, trackTex, "uTrack");
     bind(5, gl.TEXTURE_2D, occTex, "uOcc");
     bind(6, gl.TEXTURE_2D, invTex, "uInv");
     gl.uniform4f(u.uPrint, L.px, L.py, L.pw, L.ph);
@@ -781,7 +747,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
   return {
     destroy() {
       destroyed = true;
-      for (const t of [yTex, cTex, srcTex, plateTex, delayTex, trackTex, occTex, invTex]) gl.deleteTexture(t);
+      for (const t of [yTex, cTex, srcTex, plateTex, delayTex, occTex, invTex]) gl.deleteTexture(t);
       gl.deleteFramebuffer(fbo);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
