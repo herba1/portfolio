@@ -11,8 +11,9 @@ import { createStage, clamp } from "../_kit/stage";
 // delayed copy of the target, the delay growing with its distance from the
 // hand, so a re-map rolls across the grid as a wave and every cell
 // interpolates its parameters rather than crossfading. A click promotes a
-// cell: that variant grows into a full-width band of the sheet, holds, and
-// goes back.
+// cell: that variant is pasted into the sheet as a full-width band, its
+// edges stepping out along the rules hairline by hairline, columns first and
+// then rows, clearing the cells it takes over; it holds, and goes back.
 //
 // The cells take their proportion from the word itself: the bold cut's
 // advance against its ascender plus the rule allowance, so at its default
@@ -34,7 +35,8 @@ const lawPx = (s) => -0.043 * (s - 12);
 const OMEGA = 12; // cell spring
 const ZETA = 0.86; // a touch under critical: one soft settle, no bounce
 const DELAY = 0.055; // seconds of wave lag per cell of distance
-const P_OMEGA = 9; // promotion spring (critically damped)
+const STEP_T = 0.26; // seconds the band takes per hairline it crosses
+const STEP_MOVE = 0.62; // share of each step spent moving; the rest it rests on the rule
 const HOLD = 2.2; // seconds a promoted cell is held before it goes back
 
 let fontPromise = null;
@@ -100,6 +102,12 @@ const RULE_GAP = 0.1; // em, baseline to rule
 const RULE_TH = 0.16; // em, rule thickness
 const RULE_K = RULE_GAP + RULE_TH;
 const PAD = 0.1; // pad on every side, as a fraction of cell height
+// A ruled word keeps its rule well clear of the cell's bottom hairline, so
+// the two never stack into a hairline, a sliver of ground and a bar. The
+// clearance opens with the first trace of the rule, while it is still
+// thinner than the hairline itself.
+const RULE_CLEAR = 0.22; // fraction of cell height, rule to bottom hairline
+const RULE_OPEN = 0.15; // rule amount by which the full clearance is reached
 
 export async function createProgramme(host, { embedded = false } = {}) {
   await loadFont();
@@ -297,13 +305,13 @@ export async function createProgramme(host, { embedded = false } = {}) {
       c.ay += c.vy * h;
       if (Math.abs(c.ax - e.tx) > 1e-4 || Math.abs(c.vx) > 1e-4 || Math.abs(c.ay - e.ty) > 1e-4 || Math.abs(c.vy) > 1e-4 || e !== hist[hist.length - 1]) moving = true;
     }
-    // Promotion spring.
-    const pk = P_OMEGA * P_OMEGA;
-    const pd = 2 * P_OMEGA;
-    promo.v += (-pk * (promo.g - promo.target) - pd * promo.v) * h;
-    promo.g += promo.v * h;
-    if (Math.abs(promo.g - promo.target) > 1e-4 || Math.abs(promo.v) > 1e-4) moving = true;
-    else if (promo.target === 0) promo.cell = -1;
+    // Promotion: progress runs at an even pace, one hairline per STEP_T;
+    // the easing lives in each step, so every edge lands on its rule.
+    if (promo.cell >= 0 && promo.g !== promo.target) {
+      const rate = 1 / (Math.max(1, bandOf(cells[promo.cell], 0).n) * STEP_T);
+      promo.g = promo.target > promo.g ? Math.min(promo.target, promo.g + rate * h) : Math.max(promo.target, promo.g - rate * h);
+      moving = true;
+    } else if (promo.target === 0) promo.cell = -1;
     if (promo.target === 1 && !still && now > promo.until) promo.target = 0;
     if (moving) dirty = true;
   };
@@ -324,7 +332,40 @@ export async function createProgramme(host, { embedded = false } = {}) {
   };
 
   // ── Input ──────────────────────────────────────────────────────────
-  const promo = { cell: -1, g: 0, v: 0, target: 0, until: 0 };
+  const promo = { cell: -1, g: 0, target: 0, until: 0 };
+
+  // The band a promoted cell grows into, in grid units. Its edges travel
+  // along the rules one hairline at a time: the columns first, out to both
+  // sides of the sheet, then the rows, up and down to a block as many rows
+  // deep as there are columns (the cell's own proportion), centred on the
+  // cell's row. Each step eases onto its hairline and rests there before
+  // the next, so the band is always a whole number of cells at rest.
+  const stair = (s, n) => {
+    if (s >= n) return n;
+    const f = Math.floor(s);
+    const t = clamp((s - f) / STEP_MOVE, 0, 1);
+    return f + t * t * t * (t * (t * 6 - 15) + 10);
+  };
+  const bandOf = (c, g) => {
+    const k = Math.min(rows, cols);
+    const top = clamp(c.j - Math.floor((k - 1) / 2), 0, rows - k);
+    const nl = c.i;
+    const nr = cols - 1 - c.i;
+    const nt = c.j - top;
+    const nb = top + k - 1 - c.j;
+    const nC = Math.max(nl, nr);
+    const nR = Math.max(nt, nb);
+    const s = clamp(g, 0, 1) * (nC + nR);
+    const sc = Math.min(s, nC);
+    const sr = Math.max(0, s - nC);
+    return {
+      i0: c.i - stair(sc, nl),
+      i1: c.i + 1 + stair(sc, nr),
+      j0: c.j - stair(sr, nt),
+      j1: c.j + 1 + stair(sr, nb),
+      n: nC + nR,
+    };
+  };
   let drag = null;
   let touched = false;
   const stepPx = () => Math.max(110, G.cw * 1.25);
@@ -364,7 +405,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
         if (ci >= 0) {
           promo.cell = ci;
           promo.target = 1;
-          promo.until = now + HOLD;
+          promo.until = now + bandOf(cells[ci], 0).n * STEP_T + HOLD;
         }
       }
       dirty = true;
@@ -384,7 +425,10 @@ export async function createProgramme(host, { embedded = false } = {}) {
   const drawCell = (r, P, dpr) => {
     const pad = Math.max(1, Math.round(Math.min(r.w, r.h) * PAD));
     const innerW = r.w - 2 * pad;
-    const innerH = r.h - 2 * pad;
+    // Bottom margin: the pad, opening to the rule's clearance as the rule
+    // comes in. The word and its rule are fitted above it.
+    const clr = pad + Math.max(0, RULE_CLEAR * r.h - pad) * clamp(P.rule / RULE_OPEN, 0, 1);
+    const innerH = r.h - pad - clr;
     const wt = Math.round(P.weight);
     const m = metrics(wt);
     const n1 = nL - 1;
@@ -408,7 +452,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
     const x0 = r.x + pad + P.align * (innerW - visW);
     const blockH = (m.asc + RULE_K * P.rule) * S;
     const spare = Math.max(0, innerH - blockH);
-    const by = r.y + r.h - pad - RULE_K * P.rule * S - spare / 2;
+    const by = r.y + r.h - clr - RULE_K * P.rule * S - spare / 2;
     const blockTop = r.y + r.h - P.reversal * r.h;
     // Red runs from the left, letter by letter. At rest whole glyphs take
     // the colour, so a letter that overlaps its neighbour under tight
@@ -484,8 +528,24 @@ export async function createProgramme(host, { embedded = false } = {}) {
     ctx.textBaseline = "alphabetic";
     ctx.fontKerning = "normal";
 
+    // The promoted band, in grid units and in pixels. Its edges sit on the
+    // rules whenever it is at rest, and every cell it covers whole is left
+    // out, so the band reads as a strip of the sheet, not a card over it.
+    let band = null;
+    if (promo.cell >= 0 && promo.g > 0.0005) {
+      const b = bandOf(cells[promo.cell], promo.g);
+      const x0 = G.x + b.i0 * G.cw;
+      const y0 = G.y + b.j0 * G.ch;
+      band = {
+        ...b,
+        r: { x: x0, y: y0, w: G.x + b.i1 * G.cw - x0, h: G.y + b.j1 * G.ch - y0 },
+      };
+    }
+    const E = 1e-3;
+    const covered = (c) => band && c.i >= band.i0 - E && c.i + 1 <= band.i1 + E && c.j >= band.j0 - E && c.j + 1 <= band.j1 + E;
+
     for (const c of cells) {
-      if (c === cells[promo.cell] && promo.g > 0.999) continue;
+      if (covered(c)) continue;
       drawCell({ x: G.x + c.i * G.cw, y: G.y + c.j * G.ch, w: G.cw, h: G.ch }, paramsOf(c), dpr);
     }
 
@@ -506,32 +566,20 @@ export async function createProgramme(host, { embedded = false } = {}) {
     }
     ctx.stroke();
 
-    // The chosen logotype, growing out of its cell into a band across the
-    // whole sheet. The band keeps the cell's proportion, so it lands on the
-    // rules as many rows deep as there are columns, centred on the cell's
-    // row, and the word fills it edge to edge.
-    if (promo.cell >= 0 && promo.g > 0.0005) {
-      const c = cells[promo.cell];
-      const g = clamp(promo.g, 0, 1);
-      const sx = G.x + c.i * G.cw;
-      const sy = G.y + c.j * G.ch;
-      const k = Math.min(rows, cols);
-      const j0 = clamp(c.j - Math.floor((k - 1) / 2), 0, rows - k);
-      const ty = G.y + j0 * G.ch;
-      const th = k * G.ch;
-      const r = {
-        x: Math.round(sx + (G.x - sx) * g),
-        y: Math.round(sy + (ty - sy) * g),
-        w: Math.round(G.cw + (G.w - G.cw) * g),
-        h: Math.round(G.ch + (th - G.ch) * g),
-      };
+    // The chosen logotype, pasted into the sheet as a band. In motion an
+    // edge crosses a cell and cuts it cleanly; at rest the band is whole
+    // cells and its outline is the grid's own rules.
+    if (band) {
+      const { r } = band;
+      const px = (v) => Math.round(v * dpr) / dpr;
+      const rr = { x: px(r.x), y: px(r.y), w: px(r.x + r.w) - px(r.x), h: px(r.y + r.h) - px(r.y) };
       ctx.fillStyle = GROUND;
-      ctx.fillRect(r.x, r.y, r.w, r.h);
-      drawCell(r, paramsOf(c), dpr);
+      ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
+      drawCell(rr, paramsOf(cells[promo.cell]), dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = INK;
       ctx.lineWidth = 1 / dpr;
-      ctx.strokeRect(hair(r.x, dpr), hair(r.y, dpr), Math.round(r.w * dpr) / dpr, Math.round(r.h * dpr) / dpr);
+      ctx.strokeRect(hair(rr.x, dpr), hair(rr.y, dpr), rr.w, rr.h);
     }
   };
 
@@ -575,7 +623,6 @@ export async function createProgramme(host, { embedded = false } = {}) {
       promo.cell = promoteQ;
       promo.target = 1;
       promo.g = promoteG;
-      promo.v = 0;
     }
     frozen = true;
     dirty = true;
