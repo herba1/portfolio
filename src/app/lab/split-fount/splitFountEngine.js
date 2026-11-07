@@ -7,8 +7,12 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // fresh one is laid on top and the cylinder prints it under the pointer, and
 // the inks have mixed further on the roller, so the borders wander, the blends
 // widen and the hues slide toward a common mud from proof to proof. The run
-// is kept: the last few proofs stay in view, their heads showing above the
-// bed, so the drift reads sheet against sheet.
+// is kept: the last few proofs stay in view on the pile, each slid off the
+// sheet above it along the way it was pulled, so the strip it shows always
+// crosses the fount's bands: a sheet pulled down the bed shows its head above
+// the next, one pulled across shows the edge it came in by, top to bottom.
+// The strips are uneven and every sheet lies a little skew, as a pile of
+// pulled proofs does, so the drift reads sheet against sheet.
 //
 // The cylinder inks, it does not reveal: right behind the nip the ink arrives
 // starved and salted and builds to full over a short ramp, the nip line
@@ -24,8 +28,13 @@ const WORD = "PROOF";
 
 // Proofs of the run kept in view under the bed.
 const RUN = 4;
-// Each one's head shows this share of the sheet's height above the next.
-const STEP = 0.13;
+// How far each proof lies off the one above it, css px on a full size sheet,
+// in turn through the run: uneven, as sheets thrown on a pile are.
+const GAPS = [70, 88, 64, 95];
+const GAP_SUM = GAPS.reduce((a, b) => a + b, 0);
+// The sheet height at which the gaps are at full size; smaller sheets get
+// proportionally narrower strips.
+const GAP_REF = 420;
 // The ramp behind the nip over which the ink builds to full, css px.
 const RAMP = 22;
 // How long a pulled proof takes to settle into the run, ms.
@@ -60,7 +69,7 @@ uniform int uSN;
 uniform vec3 uSA[${(RUN + 1) * 3}];                   // inks, three per proof
 uniform vec4 uSP[${RUN + 1}];                       // b1, b2, blend width, seed
 uniform vec2 uSD[${RUN + 1}];                       // direction each was pulled in
-uniform vec4 uST[${RUN + 1}];                       // offset xy from the bed, rotation
+uniform vec4 uST[${RUN + 1}];                       // offset xy from the bed, rotation, how high it lies
 out vec4 o;
 
 uint hh(uint x){ x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }
@@ -171,10 +180,11 @@ float box(vec2 p, vec2 b, float r){ vec2 q = abs(p) - b + r; return length(max(q
 
 mat2 rot(float a){ float c = cos(a), s = sin(a); return mat2(c, s, -s, c); }
 
-// A sheet lying a hair above whatever is under it.
-float lift(vec2 q){
-  return 1.0 - 0.07 * exp(-max(box(q - vec2(0, 1.5), uHalf, 1.0), 0.0) / 5.0)
-             - 0.035 * exp(-max(box(q - vec2(0, 8.0), uHalf, 8.0), 0.0) / 26.0);
+// A sheet lying a hair above whatever is under it; k is how far, as no two
+// sheets on a pile lie quite flat.
+float lift(vec2 q, float k){
+  return 1.0 - 0.07 * k * exp(-max(box(q - vec2(0, 1.5 * k), uHalf, 1.0), 0.0) / (5.0 * k))
+             - 0.035 * k * exp(-max(box(q - vec2(0, 8.0 * k), uHalf, 8.0), 0.0) / (26.0 * k));
 }
 
 void main(){
@@ -194,7 +204,7 @@ void main(){
     }
     if (dB > -0.6) col *= 0.97;
   } else {
-    shade *= lift(qb);
+    shade *= lift(qb, 1.0);
     // The run under it, newest first.
     for (int i = 0; i < ${RUN + 1}; i++) {
       if (i >= uSN) break;
@@ -207,7 +217,7 @@ void main(){
         col *= mix(1.0, 0.955, smoothstep(-1.4, 0.5, d));
         break;
       }
-      shade *= lift(q);
+      shade *= lift(q, T.w);
     }
   }
   col *= shade;
@@ -261,7 +271,7 @@ function setForme(family, hw, hh, dpr) {
   const m = x.measureText(WORD);
   const cap = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
   // Tracking by the law at this size, set as wood type is: near touching.
-  const fitW = (hw * 2 * 0.86) / m.width;
+  const fitW = (hw * 2 * 0.9) / m.width;
   const fitH = (hh * 2 * 0.66) / cap;
   const size = 100 * Math.min(fitW, fitH);
   const track = -0.043 * (size - 12) * 0.12;
@@ -306,7 +316,23 @@ function setForme(family, hw, hh, dpr) {
     out[i * 4 + 3] = 255;
   }
   const word = [0, (base - ascent + capH / 2) / dpr - hh, total / dpr / 2, capH / dpr / 2];
-  return { W, H, out, word };
+  // How far in from each side edge the first column of type runs the full
+  // height of the line (the P's stem, the F's), css px. A proof shingled out
+  // sideways shows at least this much more than its strip, so the strip
+  // always holds a full stem and with it the fount top to bottom.
+  const y0 = Math.max(0, Math.round(base - ascent));
+  const y1 = Math.min(H, Math.round(base - ascent + capH));
+  const full = (cx) => {
+    let k = 0;
+    for (let y = y0; y < y1; y++) k += sharp[y * W + cx] > 0.5 ? 1 : 0;
+    return k >= (y1 - y0) * 0.85;
+  };
+  let lx = 0;
+  while (lx < W - 1 && !full(lx)) lx++;
+  let rx = W - 1;
+  while (rx > 0 && !full(rx)) rx--;
+  const reach = [lx / dpr, (W - 1 - rx) / dpr];
+  return { W, H, out, word, reach };
 }
 
 // ---------- the roller ---------------------------------------------------
@@ -389,23 +415,42 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   let C = [0, 0];
   let half = [1, 1];
   let word = [0, 0, 1, 1];
+  // Type's reach in from the sheet's left and right edges, and the gaps' scale.
+  let reach = [0, 0];
+  let gScale = 1;
 
   // Press state. The run holds the proofs already pulled, newest first; each
-  // eases from the bed into its place, one step further down the stack.
+  // eases from the bed into its place on the pile.
   const dirFrom = (deg) => [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)];
   const start = Number.isFinite(qn) && qn > 0 ? qn : 4;
   const cur = { n: start, dir: dirFrom(Number.isFinite(qa) ? qa : 90), passing: false };
-  // Each proof lands a few px off true and turned a little, the more so when
-  // it was pulled from off centre.
-  const landing = (n, spin) => ({
-    rot: clamp(spin * 0.6 + (rnd(n * 7.1) - 0.5) * 0.045, -0.035, 0.035),
-    jx: (rnd(n * 5.3) - 0.5) * 22,
-  });
-  // Each entry's slot s eases from where it was when the last proof was
-  // pulled (s0) to its place in the run, over SHINGLE ms of wall clock.
+  // Each proof lands turned a little, 0.4 to 1.2 degrees one way or the
+  // other, the more so when it was pulled from off centre.
+  const landing = (n, spin) => {
+    const turn = ((0.4 + 0.8 * rnd(n * 7.1)) * (rnd(n * 2.9) < 0.5 ? -1 : 1) * Math.PI) / 180;
+    return { rot: clamp(turn + spin * 0.25, -0.026, 0.026) };
+  };
+  // Which way a proof slides off the one above it: along the way it was
+  // pulled, so its exposed strip runs across the fount's bands. Pulled down
+  // or up the bed it shows its head, where the type is set; pulled across, it
+  // shows the side it came in by.
+  const sideOf = (d) => (Math.abs(d[1]) >= Math.abs(d[0]) ? [0, -1] : [d[0] > 0 ? -1 : 1, 0]);
+  // Its offset from the sheet above: an uneven gap along that side, with a
+  // little drift along the edge as a hand squares a pile only roughly.
+  const shingleOf = (e) => {
+    const [sx, sy] = sideOf(e.dir);
+    let gap = (GAPS[e.n % GAPS.length] + (rnd(e.n * 2.3) - 0.5) * 6) * gScale;
+    // Shown sideways, the strip is measured from the first full stem in
+    // from that edge, so the F's arms never stand in for the whole fount.
+    if (sx !== 0) gap += Math.max(0, reach[sx > 0 ? 1 : 0] - reach[0]);
+    const j = (rnd(e.n * 5.3) - 0.5) * 14 * gScale;
+    return [sx * gap - sy * j, sy * gap + sx * j];
+  };
+  // Each entry eases from where it lay when the last proof was pulled
+  // (x0, y0, r0) to its place on the pile, over SHINGLE ms of wall clock.
   const run = [];
   for (let k = start - 1; k >= 1 && run.length < RUN; k--) {
-    run.push({ n: k, dir: cur.dir, ...landing(k, 0), s: run.length + 1, s0: run.length + 1 });
+    run.push({ n: k, dir: cur.dir, ...landing(k, 0), x: 0, y: 0, r: 0, x0: 0, y0: 0, r0: 0 });
   }
   let shingleT0 = -1e9;
   let prog01 = 1;
@@ -430,8 +475,8 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
     const cx = gx - C[0];
     const cy = gy - C[1];
     const spin = clamp((cx * dir[1] - cy * dir[0]) / (half[0] + half[1]), -1, 1) * -0.05;
-    for (const e of run) e.s0 = e.s;
-    run.unshift({ n: cur.n, dir: cur.dir, ...landing(cur.n, spin), s: 0, s0: 0 });
+    for (const e of run) Object.assign(e, { x0: e.x, y0: e.y, r0: e.r });
+    run.unshift({ n: cur.n, dir: cur.dir, ...landing(cur.n, spin), x: 0, y: 0, r: 0, x0: 0, y0: 0, r0: 0 });
     run.length = Math.min(run.length, RUN + 1);
     shingleT0 = performance.now();
     cur.n += 1;
@@ -475,23 +520,36 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
     dirty = true;
   });
 
-  let step = 0;
+  // The right edge's extra reach past the left's, as a share of the sheet's
+  // width, from the last forme set; a guess before the first.
+  let overR = 0.1;
   stage.onResize((w, h, dpr) => {
-    // The bed and the heads of the run under it make one block.
+    // The bed and the strips of the run around it make one block, which has
+    // to fit whichever way the run was pulled: shingled up the frame, or out
+    // to either side with the right edge's extra reach.
     const portrait = w / h < 1;
-    const aspect = portrait ? 1 / 1.414 : 1.414;
-    const tall = 1 + RUN * STEP;
-    let sw = w * (portrait ? 0.84 : 0.6);
-    let shh = sw / aspect;
-    if (shh * tall > h * 0.9) {
-      shh = (h * 0.9) / tall;
-      sw = shh * aspect;
+    const aspect = portrait ? 1 / 1.414 : 1.6;
+    const scaleOf = (sw, shh) => Math.min(1, Math.min(sw, shh) / GAP_REF);
+    const fits = (sw) => {
+      const shh = sw / aspect;
+      const g = GAP_SUM * scaleOf(sw, shh);
+      return shh + g <= h * 0.9 && sw + g + RUN * overR * sw <= w * 0.92;
+    };
+    let lo = 16;
+    let hi = w * (portrait ? 0.84 : 0.6);
+    if (fits(hi)) lo = hi;
+    for (let i = 0; i < 24 && hi - lo > 0.5; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) lo = mid;
+      else hi = mid;
     }
-    half = [Math.round(sw / 2), Math.round(shh / 2)];
-    step = Math.round(half[1] * 2 * STEP);
-    C = [w / 2, Math.round((h - (half[1] * 2 + RUN * step)) / 2 + RUN * step + half[1])];
+    const sw = lo;
+    half = [Math.round(sw / 2), Math.round(sw / aspect / 2)];
+    gScale = scaleOf(half[0] * 2, half[1] * 2);
     const f = setForme(family, half[0], half[1], dpr);
     word = f.word;
+    reach = f.reach;
+    overR = Math.max(0, reach[1] - reach[0]) / (half[0] * 2);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, f.W, f.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, f.out);
@@ -517,21 +575,47 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
       if (released && prog01 > 0.998) commit();
       dirty = true;
     }
-    // Shingle the run: each proof eases one step further down the stack.
+    // Shingle the run: each proof's place on the pile is the sum of its own
+    // offset and those of every proof above it, so a fresh proof pushes the
+    // whole pile out by its own strip. The oldest, on its way out, squares up
+    // under the proof that covers it.
     const st = (performance.now() - shingleT0) / SHINGLE;
-    if (st < 1) {
-      const e = 1 - Math.pow(1 - st, 3);
-      run.forEach((r, i) => (r.s = r.s0 + (i + 1 - r.s0) * e));
-      dirty = true;
-    } else {
-      run.forEach((r, i) => (r.s = i + 1));
-      // The oldest is gone once the one above has slid over it.
-      run.length = Math.min(run.length, RUN);
+    const ease = st < 1 ? 1 - Math.pow(1 - st, 3) : 1;
+    let ox = 0;
+    let oy = 0;
+    let to = null;
+    for (let i = 0; i < run.length; i++) {
+      const e = run[i];
+      if (i < RUN) {
+        const v = shingleOf(e);
+        ox += v[0];
+        oy += v[1];
+        to = [ox, oy, e.rot];
+      }
+      e.x = e.x0 + (to[0] - e.x0) * ease;
+      e.y = e.y0 + (to[1] - e.y0) * ease;
+      e.r = e.r0 + (to[2] - e.r0) * ease;
     }
+    if (st < 1) dirty = true;
+    // The oldest is gone once the one above has slid over it.
+    else run.length = Math.min(run.length, RUN);
     if (!dirty) return;
     dirty = false;
 
     const { width: w, height: h, dpr } = stage;
+    // The front sheet and the strips of the run show as one block, centred
+    // in the frame; it settles with the pile as each proof goes onto it.
+    let x0 = -half[0];
+    let x1 = half[0];
+    let y0 = -half[1];
+    let y1 = half[1];
+    for (const e of run) {
+      x0 = Math.min(x0, e.x - half[0]);
+      x1 = Math.max(x1, e.x + half[0]);
+      y0 = Math.min(y0, e.y - half[1]);
+      y1 = Math.max(y1, e.y + half[1]);
+    }
+    C = [Math.round((w / 2 - (x0 + x1) / 2) * dpr) / dpr, Math.round((h / 2 - (y0 + y1) / 2) * dpr) / dpr];
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.useProgram(prog);
     gl.bindVertexArray(vao);
@@ -558,16 +642,7 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
       for (let j = 0; j < 3; j++) runA.set(pk.a[j], i * 9 + j * 3);
       runP.set(pk.p, i * 4);
       runD.set(e.dir, i * 2);
-      // Leaving the bed it starts square under the fresh sheet; going under
-      // the bottom of the run it squares up to the proof that covers it.
-      let rot = e.rot * clamp(e.s, 0, 1);
-      let jx = e.jx * clamp(e.s, 0, 1);
-      if (i === RUN && run[RUN - 1]) {
-        const f = clamp(e.s - RUN, 0, 1);
-        rot += (run[RUN - 1].rot - rot) * f;
-        jx += (run[RUN - 1].jx - jx) * f;
-      }
-      runT.set([jx, -Math.min(e.s, RUN) * step, rot, 0], i * 4);
+      runT.set([e.x, e.y, e.r, 0.7 + 0.6 * rnd(e.n * 4.1)], i * 4);
     }
     gl.uniform1i(uRun.n, run.length);
     gl.uniform3fv(uRun.a, runA);
