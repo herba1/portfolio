@@ -9,9 +9,11 @@ import { createStage, clamp } from "../_kit/stage";
 // sky from docklands_01: a radial cobalt, pale cyan where it meets the towers,
 // under cumulus unmixed from the capture's own blue and split-toned cyan-grey in
 // the folds to warm-neutral on the sunlit tops, unclipped. Depth Anything V2 gives
-// relative inverse depth, edge-snapped and turned into metres offline (the
-// glass corner ~30 m, the far tower down the street ~380 m); the sky sits at
-// the far end through its matte. tools/depth/bakes/fog/ builds both.
+// relative inverse depth, turned into metres offline (the glass corner ~30 m,
+// the far tower down the street ~380 m), with the distance and the sky matte
+// both stopped on the towers' silhouettes (no bleed band of sky distance
+// inside a tower's edge); the sky sits at the far end through its matte.
+// tools/depth/bakes/fog/ builds both (auxmap.py the distance and matte).
 //
 //   visibility V   the control (Koschmieder: beta = 3.912 / V at 550 nm)
 //   haze layer     density falls off with height, scale height HS, so the air
@@ -21,9 +23,11 @@ import { createStage, clamp } from "../_kit/stage";
 //   extinction     per channel, Rayleigh-leaning (blue goes first):
 //                  T = exp(-beta * K_RGB * L)
 //   in-scatter     the air is lit by the sky, so its colour is the sky's own
-//                  light, blurred wide (a normalised blur of the sky pixels
-//                  only): far towers go blue, clouds dissolve into the field
-//                  they sit in, and nothing ever turns grey
+//                  light: in front of a tower, the open sky at that tower's
+//                  elevation (mid-sky blue, never the pale rim or a cloud),
+//                  so far towers go blue and keep their glass; in front of
+//                  the sky, the sky blurred wide (a normalised blur of the sky
+//                  pixels only), so clouds dissolve into the field they sit in
 //   breath         the haze gathers a little thicker where the pointer rests,
 //                  and banks of it drift slowly through the street
 
@@ -34,22 +38,20 @@ const PLATE_W = 3840; // plate.webp width; the forward-scatter blur is tuned in 
 const D_MIN = 10;
 const D_MAX = 4000;
 const HS = 500; // haze scale height, metres
-const HS_SKY = 140; // the column the sky is seen through
+const HS_SKY = 320; // the column the sky is seen through
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 200; // visibility at fog 1
-// The drag moves the transmittance of a 130 m sight line evenly, not log V:
-// air's response to log V is an S that spends half the range on nothing and
-// the last third on everything. Over this frame's distances an even step in
-// that transmittance is an even step in the haze you see, and the first half
-// of the gesture is the far towers turning blue.
-const D_REF = 130;
-const T_CLEAR = Math.exp((-3.912 * D_REF) / V_CLEAR);
-const T_THICK = Math.exp((-3.912 * D_REF) / V_THICK);
-const visibility = (f) => (-3.912 * D_REF) / Math.log(T_CLEAR + (T_THICK - T_CLEAR) * f);
+// The hand moves log V along an S that is steep at both ends and long in the
+// middle. A clear day's 50 km to 10 km changes nothing in a frame whose far
+// tower is 400 m off, so a square-root front skips it; the long middle is the
+// far towers' sight line going from clear to about half (fog 0.72), turning
+// them the blue of the sky they stand in while the sky veils over; the last
+// quarter takes the near towers and the street down to 200 m.
+const visibility = (f) => V_CLEAR * Math.pow(V_THICK / V_CLEAR, 0.55 * Math.sqrt(f) + 0.45 * Math.pow(f, 5));
 const K_RGB = [0.82, 1.0, 1.24];
 const K_SKY = [1.04, 1.0, 0.98];
-const REST = 0.88; // arrival: a white-blue field of haze (~370 m)
-const ROLL = 0.2; // it clears to here (~2.4 km: the far towers already blue)
+const REST = 0.95; // arrival: a white-blue field of haze (~380 m)
+const ROLL = 0.7; // it clears to here (~2.5 km: the far towers already blue)
 const LEVELS = 6;
 const DRIFT_FPS = 20;
 
@@ -180,6 +182,8 @@ uniform sampler2D uAir;
 uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uSkyMean;  // display-encoded, the fallback where the blur saw no sky
+uniform vec3 uSkyLow;   // display-encoded: the open sky low over the street (~20 deg)
+uniform vec3 uSkyMid;   // and at mid height (~32 deg), before it deepens to cobalt
 ${COMMON}
 
 // The plate, linear. It is larger than most screens draw it, so the sharp
@@ -205,12 +209,20 @@ void main() {
   float soft = (1.0 - T.g) * (1.0 - T.g) * (1.0 - smoothstep(0.02, 0.5, aux.g));
   vec3 scene = plate(uv, soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)});
 
-  // The air is lit by the sky: its colour is the sky's own light nearby.
+  // The air is lit by the sky. In front of the sky it is the sky's own light
+  // nearby, blurred wide, so the cumulus veil into the field they sit in.
   vec4 a = texture(uAir, uv);
   vec3 air = pow((a.rgb + uSkyMean * 0.02) / (a.a + 0.02), vec3(2.2));
   // Thick haze scatters more often and lifts toward the brighter horizon.
   float thick = 1.0 - T.g;
   air *= 1.0 + 0.18 * thick;
+  // In front of a tower it is the open sky at that tower's own elevation: a
+  // far tower fades into the blue it stands in, never toward the pale rim or
+  // the cloud beside it (the wide blur is mostly cumulus down there, and
+  // turns the towers to milk). Clamped to the mid sky: the deep cobalt
+  // overhead is the thinnest air in the frame and lights the least of it.
+  vec3 open = pow(mix(uSkyLow, uSkyMid, smoothstep(18.0, 34.0, aux.b * 90.0)), vec3(2.2));
+  air = mix(open, air, smoothstep(0.02, 0.5, aux.g));
 
   vec3 col = scene * T + air * (1.0 - T);
   // Display-encoded and untoned, for the film finish. Alpha packs two
@@ -401,6 +413,36 @@ function skyMean(colorImg, auxImg) {
   return n ? sum.map((s) => s / n) : [0.25, 0.45, 0.7];
 }
 
+// The open sky (not cloud) at two elevations, display-encoded: the colour the
+// air takes in front of the towers.
+function openSky(colorImg, auxImg) {
+  const w = 240;
+  const h = 160;
+  const read = (img) => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(img, 0, 0, w, h);
+    return x.getImageData(0, 0, w, h).data;
+  };
+  const col = read(colorImg);
+  const aux = read(auxImg);
+  const band = (lo, hi, fallback) => {
+    const ch = [[], [], []];
+    for (let i = 0; i < w * h; i++) {
+      const e = (aux[i * 4 + 2] / 255) * 90;
+      if (aux[i * 4 + 1] < 242 || e < lo || e >= hi) continue;
+      // open sky only: clearly bluer than it is red (cloud is near-neutral)
+      if (col[i * 4 + 2] - col[i * 4] < 76) continue;
+      for (let k = 0; k < 3; k++) ch[k].push(col[i * 4 + k] / 255);
+    }
+    if (ch[0].length < 20) return fallback;
+    return ch.map((v) => v.sort((a, b) => a - b)[v.length >> 1]);
+  };
+  return { low: band(16, 24, [0.35, 0.62, 0.8]), mid: band(28, 36, [0.18, 0.5, 0.72]) };
+}
+
 // A critically damped spring: interruptible, lands without overshoot.
 function spring(x) {
   return { x, v: 0, target: x };
@@ -422,6 +464,7 @@ export async function createFog(host, { embedded = false } = {}) {
   const colorTex = imageTexture(gl, colorImg, true);
   const auxTex = imageTexture(gl, auxImg, false);
   const skyLin = skyMean(colorImg, auxImg);
+  const skyOpen = openSky(colorImg, auxImg);
 
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
@@ -664,6 +707,8 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.uniform1f(cu.uAspect, ASPECT);
     gl.uniform1f(cu.uTime, time);
     gl.uniform3f(cu.uSkyMean, skyLin[0], skyLin[1], skyLin[2]);
+    gl.uniform3f(cu.uSkyLow, skyOpen.low[0], skyOpen.low[1], skyOpen.low[2]);
+    gl.uniform3f(cu.uSkyMid, skyOpen.mid[0], skyOpen.mid[1], skyOpen.mid[2]);
     gl.uniform4f(cu.uRect, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr);
     gl.uniform2f(cu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
     quadDraw(t.scene);

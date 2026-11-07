@@ -9,16 +9,16 @@
 #               B  the ray's elevation above the horizon, 0..90 degrees
 #
 # Distances: Depth Anything V2 relative inverse depth (depth_hr.py, edge-refined)
-# turned into metres with inv = A*r + B, calibrated on the towers' real spacing
+# turned into metres with inv = A*r + B (auxmap.py), calibrated on the towers' real spacing
 # at Canary Wharf: the glass corner ~30 m, 25 Bank St ~55 m, the left tower
 # ~180 m, the far tower down the street ~400 m.
 import os, sys, numpy as np, cv2
 from PIL import Image
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import auxmap
 
 WORK = sys.argv[1] if len(sys.argv) > 1 else '/tmp/claude-0/fog-work'
 OUT = '/home/user/portfolio/public/lab/fog'
-D_MIN, D_MAX = 10.0, 4000.0
-A, B = 0.0529, -0.00464
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
 
@@ -42,19 +42,8 @@ sky = np.maximum(np.load(f'{WORK}/sky.npy').astype(np.float32), 0)
 elev = np.load(f'{WORK}/elev.npy')
 H, W = elev.shape
 S = W / 2400  # blur radii were tuned on the 2400 plate
-matte = np.asarray(Image.open(f'{WORK}/city-sky.png').convert('L'), np.float32) / 255
-if os.path.exists(f'{WORK}/city-sky-lo.png'):
-    # The full-resolution matte has crisp edges but can leak into glass that
-    # mirrors the sky; the work-resolution one does not. Take the crisp one
-    # only in a narrow band around the safe one's edges.
-    lo = np.asarray(Image.open(f'{WORK}/city-sky-lo.png').convert('L').resize((W, H), Image.BICUBIC), np.float32) / 255
-    edge = ((lo > 0.02) & (lo < 0.98)).astype(np.uint8)
-    band = cv2.dilate(edge, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 13)))
-    band = cv2.GaussianBlur(band.astype(np.float32), (0, 0), 2)
-    matte = np.clip(lo * (1 - band) + matte * band, 0, 1)
-r = np.asarray(Image.open(f'{WORK}/city-depth.png'), np.float32) / 65535
-if r.shape != (H, W):
-    r = cv2.resize(r, (W, H), interpolation=cv2.INTER_CUBIC)
+matte = auxmap.load_matte(WORK, W, H)
+r = auxmap.load_depth(WORK, W, H)
 
 # ---------------------------------------------------------------- the sky
 Y = sky @ LUMA
@@ -175,14 +164,9 @@ s8 = np.asarray(im)
 print('plate: clipped', round(float((s8.max(-1) >= 255).mean() * 100), 3), '%, near-white', round(float((s8.min(-1) >= 245).mean() * 100), 3), '%')
 
 # ---------------------------------------------------------------- distance
-inv = A * r + B
-e = 1 / 900
-inv = 0.5 * (inv + np.sqrt(inv * inv + e * e))
-d = np.clip(1 / inv, D_MIN, D_MAX)
-q = np.log(d / D_MIN) / np.log(D_MAX / D_MIN)
-# the sky sits at the far end, through the matte's own soft edge
-q = q * (1 - matte) + 1.0 * matte
-aux = np.stack([q, matte, np.clip(elev / 90, 0, 1)], -1)
-Image.fromarray(np.round(aux * 255).astype(np.uint8)).save(f'{OUT}/aux.png', optimize=True)
+# aux.png: distance, matte and elevation, snapped to the silhouettes (auxmap.py).
+# The plate above keeps the segmentation's own matte.
+aux, d = auxmap.build(r, matte, elev)
+auxmap.save(aux, OUT)
 for n, (u, v) in dict(glass=(.2, .7), rtower=(.85, .2), ltower=(.15, .25), far=(.54, .88), behind=(.37, .6), rlow=(.8, .75)).items():
     print(n, round(float(d[int(v * H), int(u * W)]), 1))
