@@ -11,8 +11,10 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // sheet above it along the way it was pulled, so the strip it shows always
 // crosses the fount's bands: a sheet pulled down the bed shows its head above
 // the next, one pulled across shows the edge it came in by, top to bottom.
-// The strips are uneven and every sheet lies a little skew, as a pile of
-// pulled proofs does, so the drift reads sheet against sheet.
+// The stock is trimmed to the forme, head and sides equal and the foot a
+// little heavier, and the pile is shingled on one constant step, the head
+// margin and a third of the cap height, so every proof shows the same strip
+// and the drift reads sheet against sheet. Each sheet lies a hair skew.
 //
 // The cylinder inks, it does not reveal: right behind the nip the ink arrives
 // starved and salted and builds to full over a short ramp, the nip line
@@ -28,13 +30,13 @@ const WORD = "PROOF";
 
 // Proofs of the run kept in view under the bed.
 const RUN = 4;
-// How far each proof lies off the one above it, css px on a full size sheet,
-// in turn through the run: uneven, as sheets thrown on a pile are.
-const GAPS = [70, 88, 64, 95];
-const GAP_SUM = GAPS.reduce((a, b) => a + b, 0);
-// The sheet height at which the gaps are at full size; smaller sheets get
-// proportionally narrower strips.
-const GAP_REF = 420;
+// The margins, as a share of the cap height: head and sides equal, the
+// foot heavier by the classic 1 : 1 : 1.4.
+const MARGIN = 0.24;
+const FOOT = 1.4;
+// The shingle's step: each proof shows its head margin and this share of
+// the cap height above the next, the same on every sheet of the run.
+const STEP = 1 / 3;
 // The ramp behind the nip over which the ink builds to full, css px.
 const RAMP = 22;
 // How long a pulled proof takes to settle into the run, ms.
@@ -268,33 +270,65 @@ function boxBlur(src, w, h, r, passes) {
   return a;
 }
 
+const formeFont = (family, px) => `400 ${px}px ${family}, Impact, "Arial Narrow", sans-serif`;
+// Wood type is set near touching: tracking by the law at this size, eased.
+const trackAt = (size) => -0.043 * (size - 12) * 0.12;
+let meter = null;
+
+// The forme's ink at a given size, css px: where each letter's pen sits from
+// the ink's left edge, the ink's width, its cap height and its ascent.
+function measureForme(family, size) {
+  meter = meter || document.createElement("canvas").getContext("2d");
+  meter.font = formeFont(family, size);
+  const track = trackAt(size);
+  const pens = [];
+  let left = Infinity;
+  let right = -Infinity;
+  for (let i = 0; i < WORD.length; i++) {
+    const px = meter.measureText(WORD.slice(0, i)).width + track * i;
+    const g = meter.measureText(WORD[i]);
+    pens.push(px);
+    left = Math.min(left, px - g.actualBoundingBoxLeft);
+    right = Math.max(right, px + g.actualBoundingBoxRight);
+  }
+  const m = meter.measureText(WORD);
+  return {
+    pens: pens.map((p) => p - left),
+    inkW: right - left,
+    capH: m.actualBoundingBoxAscent + m.actualBoundingBoxDescent,
+    ascent: m.actualBoundingBoxAscent,
+  };
+}
+
+// The job at a given type size: the stock trimmed to the forme, its margins
+// and the shingle's step, all whole css px, the step on the 4px grid.
+function jobAt(family, size) {
+  const f = measureForme(family, size);
+  const margin = Math.round(f.capH * MARGIN);
+  const hw = Math.round((f.inkW + 2 * margin) / 2);
+  const hh = Math.round((margin * (1 + FOOT) + f.capH) / 2);
+  const step = Math.max(4, Math.round((margin + f.capH * STEP) / 4) * 4);
+  return { size, f, margin, half: [hw, hh], step };
+}
+
 // Rasterise the word as wood type: each letter its own block, set tight,
-// each sitting a hair off true, the line set to the head of the sheet.
-function setForme(family, hw, hh, dpr) {
+// each sitting a hair off true, locked up with the head and side margins
+// equal and the foot heavier.
+function setForme(family, job, dpr) {
+  const [hw, hh] = job.half;
+  const { f, margin, size } = job;
   const W = Math.round(hw * 2 * dpr);
   const H = Math.round(hh * 2 * dpr);
   const cv = document.createElement("canvas");
   cv.width = W;
   cv.height = H;
   const x = cv.getContext("2d", { willReadFrequently: true });
-  const font = (px) => `400 ${px}px ${family}, Impact, "Arial Narrow", sans-serif`;
-  x.font = font(100);
-  const m = x.measureText(WORD);
-  const cap = m.actualBoundingBoxAscent + m.actualBoundingBoxDescent;
-  // Tracking by the law at this size, set as wood type is: near touching.
-  const fitW = (hw * 2 * 0.9) / m.width;
-  const fitH = (hh * 2 * 0.66) / cap;
-  const size = 100 * Math.min(fitW, fitH);
-  const track = -0.043 * (size - 12) * 0.12;
-  x.font = font(size * dpr);
-  const total = x.measureText(WORD).width + track * dpr * (WORD.length - 1);
-  const mm = x.measureText(WORD);
-  const ascent = mm.actualBoundingBoxAscent;
-  const capH = mm.actualBoundingBoxAscent + mm.actualBoundingBoxDescent;
-  const x0 = (W - total) / 2;
-  // Set to the head of the sheet, tight under the top edge, so the head of
-  // every proof in the run, showing above the next, carries type.
-  const base = H * 0.05 + ascent;
+  x.font = formeFont(family, size * dpr);
+  // Side margins split whatever the trim's rounding left over.
+  const x0 = (W - f.inkW * dpr) / 2;
+  const base = (margin + f.ascent) * dpr;
+  const ascent = f.ascent * dpr;
+  const capH = f.capH * dpr;
   x.fillStyle = "#000";
   x.fillRect(0, 0, W, H);
   x.fillStyle = "#fff";
@@ -306,7 +340,7 @@ function setForme(family, hw, hh, dpr) {
     [0.3, 0.4, 0.002],
   ];
   for (let i = 0; i < WORD.length; i++) {
-    const px = x0 + x.measureText(WORD.slice(0, i)).width + track * dpr * i;
+    const px = x0 + f.pens[i] * dpr;
     const [jx, jy, jr] = jit[i % jit.length];
     x.save();
     x.translate(px + jx * dpr, base + jy * dpr);
@@ -326,7 +360,7 @@ function setForme(family, hw, hh, dpr) {
     out[i * 4 + 2] = Math.round(broad[i] * 255);
     out[i * 4 + 3] = 255;
   }
-  const word = [0, (base - ascent + capH / 2) / dpr - hh, total / dpr / 2, capH / dpr / 2];
+  const word = [0, margin + f.capH / 2 - hh, f.inkW / 2, f.capH / 2];
   // How far in from each side edge the first column of type runs the full
   // height of the line (the P's stem, the F's), css px. A proof shingled out
   // sideways shows at least this much more than its strip, so the strip
@@ -426,35 +460,37 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   let C = [0, 0];
   let half = [1, 1];
   let word = [0, 0, 1, 1];
-  // Type's reach in from the sheet's left and right edges, and the gaps' scale.
+  // Type's reach in from the sheet's left and right edges, and the shingle's
+  // constant step.
   let reach = [0, 0];
-  let gScale = 1;
+  let step = 64;
 
   // Press state. The run holds the proofs already pulled, newest first; each
   // eases from the bed into its place on the pile.
   const dirFrom = (deg) => [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)];
   const start = Number.isFinite(qn) && qn > 0 ? qn : 4;
   const cur = { n: start, dir: dirFrom(Number.isFinite(qa) ? qa : 90), passing: false };
-  // Each proof lands turned a little, 0.4 to 1.2 degrees one way or the
-  // other, the more so when it was pulled from off centre.
+  // Each proof lands turned a hair, 0.15 to 0.45 degrees one way or the
+  // other, a little more when it was pulled from off centre: enough to read
+  // as sheets laid by hand, never so much that the strips stop measuring even.
   const landing = (n, spin) => {
-    const turn = ((0.4 + 0.8 * rnd(n * 7.1)) * (rnd(n * 2.9) < 0.5 ? -1 : 1) * Math.PI) / 180;
-    return { rot: clamp(turn + spin * 0.25, -0.026, 0.026) };
+    const turn = ((0.15 + 0.3 * rnd(n * 7.1)) * (rnd(n * 2.9) < 0.5 ? -1 : 1) * Math.PI) / 180;
+    return { rot: clamp(turn + spin * 0.1, -0.0105, 0.0105) };
   };
   // Which way a proof slides off the one above it: along the way it was
   // pulled, so its exposed strip runs across the fount's bands. Pulled down
   // or up the bed it shows its head, where the type is set; pulled across, it
   // shows the side it came in by.
   const sideOf = (d) => (Math.abs(d[1]) >= Math.abs(d[0]) ? [0, -1] : [d[0] > 0 ? -1 : 1, 0]);
-  // Its offset from the sheet above: an uneven gap along that side, with a
-  // little drift along the edge as a hand squares a pile only roughly.
+  // Its offset from the sheet above: the run's one constant step along that
+  // side, with a little drift along the edge as a hand squares a pile.
   const shingleOf = (e) => {
     const [sx, sy] = sideOf(e.dir);
-    let gap = (GAPS[e.n % GAPS.length] + (rnd(e.n * 2.3) - 0.5) * 6) * gScale;
+    let gap = step;
     // Shown sideways, the strip is measured from the first full stem in
     // from that edge, so the F's arms never stand in for the whole fount.
     if (sx !== 0) gap += Math.max(0, reach[sx > 0 ? 1 : 0] - reach[0]);
-    const j = (rnd(e.n * 5.3) - 0.5) * 14 * gScale;
+    const j = (rnd(e.n * 5.3) - 0.5) * step * 0.1;
     return [sx * gap - sy * j, sy * gap + sx * j];
   };
   // Each entry eases from where it lay when the last proof was pulled
@@ -535,29 +571,27 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   // width, from the last forme set; a guess before the first.
   let overR = 0.1;
   stage.onResize((w, h, dpr) => {
-    // The bed and the strips of the run around it make one block, which has
-    // to fit whichever way the run was pulled: shingled up the frame, or out
-    // to either side with the right edge's extra reach.
-    const portrait = w / h < 1;
-    const aspect = portrait ? 1 / 1.414 : 1.6;
-    const scaleOf = (sw, shh) => Math.min(1, Math.min(sw, shh) / GAP_REF);
-    const fits = (sw) => {
-      const shh = sw / aspect;
-      const g = GAP_SUM * scaleOf(sw, shh);
-      return shh + g <= h * 0.9 && sw + g + RUN * overR * sw <= w * 0.92;
+    // The stock is trimmed to the forme, so the type size sets the sheet and
+    // the step. Find the largest size at which the bed and the run's strips
+    // make one block that fits whichever way the run was pulled: shingled up
+    // the frame, or out to either side with the right edge's extra reach.
+    const fits = (size) => {
+      const j = jobAt(family, size);
+      const sw = j.half[0] * 2;
+      const shh = j.half[1] * 2;
+      return shh + RUN * j.step <= h * 0.88 && sw + RUN * (j.step + overR * sw) <= w * 0.92;
     };
-    let lo = 16;
-    let hi = w * (portrait ? 0.84 : 0.6);
-    if (fits(hi)) lo = hi;
-    for (let i = 0; i < 24 && hi - lo > 0.5; i++) {
+    let lo = 12;
+    let hi = Math.max(lo, Math.min(w, h));
+    for (let i = 0; i < 24 && hi - lo > 0.25; i++) {
       const mid = (lo + hi) / 2;
       if (fits(mid)) lo = mid;
       else hi = mid;
     }
-    const sw = lo;
-    half = [Math.round(sw / 2), Math.round(sw / aspect / 2)];
-    gScale = scaleOf(half[0] * 2, half[1] * 2);
-    const f = setForme(family, half[0], half[1], dpr);
+    const job = jobAt(family, lo);
+    half = job.half;
+    step = job.step;
+    const f = setForme(family, job, dpr);
     word = f.word;
     reach = f.reach;
     overR = Math.max(0, reach[1] - reach[0]) / (half[0] * 2);
