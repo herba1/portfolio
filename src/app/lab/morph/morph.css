@@ -172,9 +172,10 @@
 /* each figure is a wheel: a window onto a strip of tabular digits, rolled
    by paint() in em so it holds at every size. The window is cut to the
    figures' own band, top overshoot to bottom overshoot, so a figure rolls
-   out over the rule's edge and the next rolls up from it, like a counter's
-   drum behind its slot. It is open at the sides, where tracking would
-   otherwise shave the widest figures. */
+   out of its own slot, above the rule, and the next rolls up into it, like
+   a counter's drum behind its window. It is open at the sides, where
+   tracking would otherwise shave the widest figures, and where the lead
+   wheel's slot, narrowed to a 1, lets the next figure in as it widens. */
 .mp-clock {
   display: flex;
   align-items: flex-start;
@@ -184,7 +185,7 @@
 .mp-wheel {
   display: block;
   height: 1em;
-  clip-path: inset(0.12em -0.12em 0.124em -0.12em);
+  clip-path: inset(0.12em -0.3em 0.124em -0.3em);
 }
 
 .mp-strip {
@@ -196,6 +197,15 @@
 .mp-colon {
   display: block;
   height: 1em;
+}
+
+/* the lead wheel's 1: Geist's proportional figure, a stem and flag with no
+   slab foot, in its proportional advance. paint() narrows the lead wheel's
+   slot to it, so "1:23" is spaced as the face spaces it, at the law's
+   tracking, while every rolling wheel keeps its tabular slot. */
+.mp-fig-1 {
+  font-variant-numeric: proportional-nums;
+  font-feature-settings: "kern" 1;
 }
 
 /* paused, the colon blinks like a stopped clock: the one sign, in the type */
@@ -227,8 +237,9 @@
 
 /* Progress is one hairline from the figures' left ink to their right ink,
    which is the column: played in full ink, the rest in the panel's
-   secondary ink. The layer
-   is a 17px band round it, so the line is easy to press. */
+   secondary ink. It is its own line, two grid steps under the figures'
+   baseline, not an underline on them. The layer is a 17px band round it, so
+   the line is easy to press. */
 .mp-rule {
   height: 17px;
   cursor: pointer;

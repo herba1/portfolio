@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { useTopSongs } from "@/app/lab/_music/useTopSongs";
-import { BODY, COL, COL_W, FADE, PANEL, REMAIN_W, ROW, flat, isFade, layout } from "./states";
+import { BODY, FADE, LEAD_ADV, LEAD_LSB, PANEL, REMAIN_W, ROW, flat, isFade, layout, leadOf, trackPx } from "./states";
 import { squircle } from "./squircle";
 
 import "./morph.css";
@@ -17,7 +17,8 @@ const MINUS = "\u2212";
 
 // The tracking law, tracking_px = -0.043 x (size_px - 12), for type whose
 // size is a spring: written in em, so it holds at whatever size this frame is.
-const trackingFor = (size) => `${((-0.043 * (size - 12)) / size).toFixed(4)}em`;
+const trackEm = (size) => trackPx(size) / size;
+const trackingFor = (size) => `${trackEm(size).toFixed(4)}em`;
 
 // The clock is an odometer: every figure sits on a wheel of its own, a strip
 // of tabular digits that rolls on its own spring to the place value of the
@@ -32,14 +33,12 @@ const WHEELS = {
 };
 const WHEEL_ZETA = 0.78;
 
-// The clock hangs flush on the text column by its ink, not its box. Every
-// figure is tabular, and Geist's tabular figures are not the proportional
-// outlines centred (the tabular 1 grows a foot), and canvas cannot switch
-// tnum on to measure them, so these are measured once from rendered pixels:
-// each tabular figure's left side bearing at the clock's weight, in em, so it
-// holds as the clock grows. One entry per digit, so the bearing can follow
-// the lead wheel through a roll.
-const TNUM_BEARING = [0.038, 0.1, 0.05, 0.042, 0.03, 0.046, 0.048, 0.05, 0.032, 0.048];
+// The clock hangs flush on the text column by its ink, not its box: it
+// slides left by the lead figure's left side bearing (LEAD_LSB, measured
+// from rendered pixels at the clock's weight, in em so it holds as the clock
+// grows). The lead wheel's slot is that figure's own advance (LEAD_ADV): the
+// tabular slot for every figure but the 1, which is drawn footless at its
+// proportional width. Both follow the lead wheel through a roll.
 
 // The fallback catalogue carries no lengths, so each title gets a stable one
 // in a plausible range rather than a random one per visit.
@@ -168,6 +167,7 @@ export default function Piece() {
   const nextRef = useRef(null);
   const fillRef = useRef(null);
   const ruleRef = useRef(null);
+  const titleRef = useRef(null);
   const wheelRefs = useRef({});
 
   const [mode, setMode] = useState("idle");
@@ -188,6 +188,7 @@ export default function Piece() {
   const track = tracks[idx % count];
   const toastTrack = tracks[toastIdx % count];
   const dur = durationOf(track?.title);
+  const lead = leadOf(sec);
   const shown = mode === "toast" ? toastTrack : track;
 
   // ---- springs ---------------------------------------------------------
@@ -201,8 +202,8 @@ export default function Piece() {
   useEffect(() => {
     live.current.mode = mode;
     if (live.current.frozen) return;
-    retarget(mode, mode === "idle" ? { hover, press } : {});
-  }, [mode, hover, press, retarget]);
+    retarget(mode, mode === "idle" ? { hover, press, lead } : { lead });
+  }, [mode, hover, press, lead, retarget]);
 
   // ---- paint -------------------------------------------------------------
 
@@ -262,6 +263,7 @@ export default function Piece() {
     // bearing (in em, so it grows with it) to hang flush on the column.
     const clock = elapsedRef.current;
     const Lw = live.current;
+    const size = v("es");
     let bearing = 0;
     for (const key in WHEELS) {
       const el = wheelRefs.current[key];
@@ -270,15 +272,23 @@ export default function Piece() {
       const { m } = WHEELS[key];
       const pos = ((w.x % m) + m) % m;
       el.style.transform = `translate3d(0,${-pos}em,0)`;
-      // the lead wheel's ink bearing, followed through the roll
+      // the lead wheel's slot and ink bearing, followed through the roll; the
+      // other wheels keep their tabular slots
       if (key === (Lw.elapsed >= 600 ? "mt" : "mu")) {
         const i = Math.floor(pos);
         const f = pos - i;
-        bearing = TNUM_BEARING[i % m] * (1 - f) + TNUM_BEARING[(i + 1) % m] * f;
-      }
+        const a = i % m;
+        const b = (i + 1) % m;
+        bearing = LEAD_LSB[a] * (1 - f) + LEAD_LSB[b] * f;
+        el.parentNode.style.width = `${LEAD_ADV[a] * (1 - f) + LEAD_ADV[b] * f + trackEm(size)}em`;
+      } else el.parentNode.style.width = "";
     }
+    // the type column follows the lead figure: its left edge and measure
+    const cl = v("cl");
+    const cw = v("cw");
+    for (const el of surf ? surf.querySelectorAll(":scope > [data-col]") : []) el.style.width = `${cw}px`;
+    if (titleRef.current) titleRef.current.style.width = `${cw - REMAIN_W}px`;
     if (clock) {
-      const size = v("es");
       const o = v("eo");
       const p = clamp(o, 0, 1);
       const x = v("ex") - bearing * size;
@@ -302,7 +312,8 @@ export default function Piece() {
     if (clock) clock.style.pointerEvents = T.pe > 0.5 && P.expanded > 0.6 ? "auto" : "none";
 
     for (const el of surf ? surf.querySelectorAll(":scope > .mp-layer") : []) {
-      const [state, x, y] = el.dataset.at.split(",");
+      const [state, ax, y] = el.dataset.at.split(",");
+      const x = ax === "col" ? cl : +ax;
       const p = clamp(P[state], 0, 1);
       el.style.transform = `translate3d(${cx + +x}px,${+y}px,0) scale(${0.92 + 0.08 * p})`;
       el.style.opacity = IN[state] ? clamp((p - 0.3) / 0.7, 0, 1) ** 2 : fade(p);
@@ -411,8 +422,8 @@ export default function Piece() {
     if (held) {
       L.frozen = true;
       L.elapsed = 83;
-      const from = flat(layout(held.from));
-      const to = flat(layout(held.to));
+      const from = flat(layout(held.from, { lead: leadOf(83) }));
+      const to = flat(layout(held.to, { lead: leadOf(83) }));
       springs.current = Object.fromEntries(Object.entries(from).map(([k, x]) => [k, { x, v: 0 }]));
       target.current = to;
       const steps = Math.round(held.t * HOLD_SPAN * 240);
@@ -428,7 +439,7 @@ export default function Piece() {
       L.elapsed = Math.max(0, L.dur - TOAST_LEAD - 2.5);
       L.sec = Math.floor(L.elapsed);
       setSec(L.sec);
-      retarget("idle", {});
+      retarget("idle", { lead: leadOf(L.elapsed) });
     }
 
     const root = rootRef.current;
@@ -666,7 +677,7 @@ export default function Piece() {
             onKeyDown={onClockKey}
           >
             <span className="mp-clock" aria-hidden="true">
-              {(sec >= 600 ? ["mt", "mu", ":", "st", "su"] : ["mu", ":", "st", "su"]).map((key) =>
+              {(sec >= 600 ? ["mt", "mu", ":", "st", "su"] : ["mu", ":", "st", "su"]).map((key, k) =>
                 key === ":" ? (
                   <span key={key} className="mp-colon">
                     :
@@ -675,7 +686,10 @@ export default function Piece() {
                   <span key={key} className="mp-wheel">
                     <span ref={(el) => (wheelRefs.current[key] = el)} className="mp-strip">
                       {Array.from({ length: WHEELS[key].m + 1 }, (_, i) => (
-                        <span key={i}>{i % WHEELS[key].m}</span>
+                        // the lead wheel's 1 is the footless proportional one
+                        <span key={i} className={k === 0 && i === 1 ? "mp-fig-1" : undefined}>
+                          {i % WHEELS[key].m}
+                        </span>
                       ))}
                     </span>
                   </span>
@@ -689,14 +703,15 @@ export default function Piece() {
             <span className="mp-btn-face">{Icon.next}</span>
           </button>
 
-          {/* expanded only: the rule on the figures' baseline, the title and
-              artist under it, and the time left under the rule's far end, on
-              the title's baseline */}
+          {/* expanded only: the rule a grid step under the figures' baseline,
+              the title and artist under it, and the time left under the
+              rule's far end, on the title's baseline. All of it hangs on the
+              type column, which paint() sizes to the figures. */}
           <div
             ref={ruleRef}
-            data-at={at("expanded", COL, ROW.rule - 8)}
+            data-at={at("expanded", "col", ROW.rule - 8)}
+            data-col=""
             className="mp-layer mp-rule"
-            style={{ width: COL_W }}
             onPointerDown={onRuleDown}
             onPointerMove={scrubMove}
             onPointerUp={scrubUp}
@@ -709,14 +724,14 @@ export default function Piece() {
             </div>
           </div>
 
-          <div data-at={at("expanded", COL, ROW.title)} className="mp-layer mp-meta" style={{ width: COL_W }}>
-            <div className="mp-title" style={{ width: COL_W - REMAIN_W }}>
+          <div data-at={at("expanded", "col", ROW.title)} data-col="" className="mp-layer mp-meta">
+            <div ref={titleRef} className="mp-title">
               {track?.title}
             </div>
             <div className="mp-artist">{track?.artist}</div>
           </div>
 
-          <div data-at={at("expanded", COL, ROW.remain)} className="mp-layer mp-time mp-remain" style={{ width: COL_W }}>
+          <div data-at={at("expanded", "col", ROW.remain)} data-col="" className="mp-layer mp-time mp-remain">
             <span aria-label={`${fmt(dur - sec)} remaining`}>
               {MINUS}
               {fmt(dur - sec)}

@@ -20,48 +20,77 @@ const ART_IDLE = 24;
 // ---- the open panel's grid --------------------------------------------------
 // A record sleeve and its type, and nothing else: no buttons, no bar. The
 // figures are the control (drag them to seek, tap the sleeve to pause), and
-// progress is one hairline on the figures' baseline.
+// progress is one hairline, a grid step under the figures' baseline.
 //
 // The cover is the second shared element: the pill's thumbnail grows out of
 // its own top-left corner into a square that stands from the figures' top to
 // the artist's baseline. Everything else, clock, rule, title, artist, hangs
-// flush left off one line, COL, immediately to its right. Two columns:
+// flush left off one line, the column's left edge, immediately to its right. Two columns:
 // image square / type, and the type column is exactly as wide as the
 // figures: they own the measure, ink to ink, and the rule runs under them
-// end to end. Every vertical address is on the 4px grid.
+// end to end. The measure follows the figures, so the column is a function
+// of the clock's lead figure (see figureWidth), and the panel's width with
+// it. Every vertical address is on the 4px grid.
 const PAD = 24;
 const GAP = 28; // sleeve to type
 
-// Clock sizes. Open, the figures are the column's headline: Geist's tabular
-// lining figures are 0.71em, so 143px figures stand 101.5px, their top on the
-// sleeve's top edge and their round overshoot just clear of the rule at 128.
-export const CLOCK_PILL = 13;
-export const CLOCK = 143;
-
-// Geist's tabular figures with line-height 1, measured from rendered pixels
+// Geist's lining figures with line-height 1, measured from rendered pixels
 // at the clock's weight: flat figure top and baseline as a fraction of the
 // size from the top of the line box, and the figure centre.
 export const FIG_TOP = 0.144;
 export const FIG_BASE = 0.854;
+
+// Clock sizes. Open, the figures are the column's headline, sized so they
+// stand exactly 100px, top on the sleeve's top edge and baseline on the
+// grid at 124: the figures' baseline is a real grid line, so the rule can be
+// measured off it rather than off the clip or the round overshoot.
+export const CLOCK_PILL = 13;
+export const CLOCK = 100 / (FIG_BASE - FIG_TOP); // 140.8px
 const clockTop = (s, top) => top - FIG_TOP * s;
 const clockMid = (s) => ((FIG_TOP + FIG_BASE) / 2) * s;
 
-// "1:23" from the 1's ink to the 3's ink, measured from rendered pixels at
-// the clock's weight: 1.9938em of outline, less the three gaps of tracking
-// the law sets between the four figures at this size. The figures are
-// tabular, so every time the clock can show is this wide; only the last
-// figure's own right bearing moves its ink by a pixel or so.
-const FIG_INK = 1.9938;
-const figureWidth = (s) => FIG_INK * s + 3 * -0.043 * (s - 12);
-export const COL_W = Math.round(figureWidth(CLOCK)); // 268: the figures, and the rule under them
+// The figures' metrics, in em at the clock's weight, measured from rendered
+// pixels. The rolling wheels are tabular (0.611em each), so a figure that
+// turns never shifts its neighbours. The lead wheel is the exception for one
+// figure: Geist's tabular 1 grows a slab foot to fill its tabular slot, and
+// at headline size that foot sits on the rule and the slot leaves a hole
+// before the colon. So the lead wheel draws its 1 as the proportional,
+// footless figure, a stem and a flag. Its proportional advance (0.403em)
+// still leaves a 0.108em right bearing, nearly twice the 2's left one, so
+// the colon would sit off centre between them; the slot is closed to the
+// 1's ink (0.295em) plus the 2's left bearing (0.051em), so the colon stands
+// in an even gap, and the law's tracking then applies to it like every other
+// figure. LEAD_ADV and LEAD_LSB are per lead digit: its slot, and its ink's
+// left side bearing, by which the clock hangs flush on the column.
+export const TAB_ADV = 0.611;
+export const LEAD_ADV = [0.611, 0.295 + 0.051, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611, 0.611];
+export const LEAD_LSB = [0.038, 0.039, 0.05, 0.042, 0.03, 0.046, 0.048, 0.05, 0.032, 0.048];
+// After the lead figure: the colon's advance, a tabular figure, and the last
+// figure out to its ink (the 3 of "1:23"; any other last figure moves the
+// ink by a pixel or so).
+const TAIL = 0.301 + TAB_ADV + 0.57;
+export const trackPx = (s) => -0.043 * (s - 12);
+
+// The figures from the lead's ink to the last figure's ink, with the three
+// gaps of tracking the law sets between the four at this size.
+const figureWidth = (s, lead) => (LEAD_ADV[lead] - LEAD_LSB[lead] + TAIL) * s + 3 * trackPx(s);
+// The column for a lead figure: "1:23" is 235px, "2:23" 271px.
+const colW = (lead) => Math.round(figureWidth(CLOCK, lead));
 
 export const ART = 160; // the sleeve: figure top to artist baseline
-export const PANEL = { W: PAD + ART + GAP + COL_W + PAD, H: PAD + ART + PAD };
-export const COL = -PANEL.W / 2 + PAD + ART + GAP; // the text column's left edge
+const panelW = (lead) => PAD + ART + GAP + colW(lead) + PAD;
+// the widest the panel gets, which is what the stage fits
+export const PANEL = { W: Math.max(...LEAD_ADV.map((_, d) => panelW(d))), H: PAD + ART + PAD };
 
-// The figures' baseline lands at PAD + 101.5 = 125.5. The rule is laid on it,
-// just clear of the round figures' overshoot so it lands on the grid at 128.
-// The title's 24px line sits 16px under the rule (its baseline 19px down)
+// The clock's lead figure for a time in seconds: tens of minutes from ten
+// minutes up, otherwise minutes.
+export const leadOf = (sec) => (sec >= 600 ? Math.floor(sec / 600) : Math.floor(sec / 60)) % 10;
+
+// The figures' baseline lands on the grid at PAD + 100 = 124. The rule is its
+// own line, not an underline: two grid steps under that baseline, at 132, so
+// the round figures' overshoot (2.4px) is well clear of it and no figure
+// stands on it. The figures roll out of their slot above it, not through it.
+// The title's 24px line sits 12px under the rule (its baseline 19px down)
 // and the artist straight beneath. The time left stands under the rule's far
 // end, set flush right on the title's baseline in the 13px body step (whose
 // baseline is 12px down its 16px line), so the column's second line reads as
@@ -70,7 +99,7 @@ export const CLOCK_BASE = PAD + (FIG_BASE - FIG_TOP) * CLOCK;
 const TITLE_BASE = 19;
 const REMAIN_BASE = 12;
 export const ROW = {
-  rule: 128,
+  rule: Math.round(CLOCK_BASE) + 8,
   title: 144,
   remain: 144 + TITLE_BASE - REMAIN_BASE,
   artist: 168,
@@ -87,17 +116,22 @@ const WAVE_IDLE = { x: PILL_W / 2 - 14 - 22, y: (PILL_H - 16) / 2 };
 // pill's right end, so it comes into the toast from where the toast grows.
 const NEXT_PARK = { x: PILL_W / 2 - 14 - 32, y: (PILL_H - 32) / 2, s: 32 };
 
-export function layout(state, { hover = false, press = false } = {}) {
+export function layout(state, { hover = false, press = false, lead = 1 } = {}) {
+  // the type column for this lead figure, carried by every state so it only
+  // ever moves when the lead figure turns
+  const col = { x: -panelW(lead) / 2 + PAD + ART + GAP, w: colW(lead) };
   if (state === "expanded") {
-    const { W, H } = PANEL;
+    const W = panelW(lead);
+    const { H } = PANEL;
     return {
       W,
       H,
+      col,
       R: 32,
       art: { x: -W / 2 + PAD, y: PAD, s: ART, r: 8, o: 1 },
       // the waveform has no place in the open panel: it folds flat where it was
       wave: { x: WAVE_IDLE.x, y: WAVE_IDLE.y, o: 0 },
-      elapsed: { x: COL, y: clockTop(CLOCK, PAD), s: CLOCK, o: 1 },
+      elapsed: { x: col.x, y: clockTop(CLOCK, PAD), s: CLOCK, o: 1 },
       // no chrome open: next waits where the toast will want it
       next: { ...NEXT_PARK, o: 0 },
       p: { idle: 0, expanded: 1, toast: 0 },
@@ -110,6 +144,7 @@ export function layout(state, { hover = false, press = false } = {}) {
     return {
       W,
       H,
+      col,
       R: 28,
       art: { x: L, y: 10, s: 36, r: 10, o: 1 },
       wave: { x: W / 2 - 12 - 32 - 30, y: 20, o: 0 },
@@ -125,6 +160,7 @@ export function layout(state, { hover = false, press = false } = {}) {
   return {
     W,
     H,
+    col,
     R: H / 2,
     art: { x: L, y: (H - ART_IDLE) / 2, s: ART_IDLE, r: 7, o: 1 },
     wave: { x: W / 2 - 14 - 22, y: (H - 16) / 2, o: 1 },
@@ -140,6 +176,8 @@ export function flat(l) {
     W: l.W,
     H: l.H,
     R: l.R,
+    cl: l.col.x,
+    cw: l.col.w,
     ax: l.art.x,
     ay: l.art.y,
     as: l.art.s,
