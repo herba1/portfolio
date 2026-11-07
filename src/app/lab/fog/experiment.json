@@ -1,15 +1,17 @@
 {
   "title": "Fog",
-  "description": "herb's night photograph of Times Square, with fog that knows how far away everything is. Drag up or scroll to roll it in, down to clear it; it gathers thickest wherever the pointer rests, like breath on the glass. The far screens go first, dissolving into fields of their own colour, the street haze builds, and herb and the pedicab stay dark and sharp in front of it all. Every sign wears a soft coloured halo as wide as the fog in front of it is deep, and the air itself takes on the neon.",
+  "description": "Looking straight up between the Canary Wharf towers into a summer cumulus sky, with air that knows how far away everything is. Drag up or scroll to shorten the visibility, down to clear it; the haze gathers a little thicker wherever the pointer rests. The far towers go first, turning the blue of the sky they stand in, the clouds soften into their own field, and the glass corner overhead stays sharp in front of it all.",
   "tags": ["WebGL", "Photography", "Atmosphere", "Depth"],
   "status": "draft",
   "createdAt": "2026-11-06T17:10:00.000Z",
-  "intent": "After Michael Kenna's fog photographs (https://www.michaelkenna.com/), Todd Hido's foggy night streets in Excerpts from Silver Meadows (https://www.toddhido.com/), and the depth-true fog of Blade Runner 2049's night city, kept photographic. Beer-Lambert transmittance per pixel through a metric distance converted from a Depth Anything V2 map of herb's own photo, with in-scattered city light and depth-gated neon halos from a weighted bloom pyramid.",
+  "intent": "Aerial perspective, after Makoto Shinkai's skyward city shots and the worm's-eye summer photographs herb loves: converging towers, a cobalt zenith, cumulus. Beer-Lambert transmittance per pixel and per channel (Rayleigh-leaning, blue extinguished first) through a haze layer that thins with height, along a metric distance converted from a Depth Anything V2 map. Drag sets the meteorological visibility (Koschmieder, beta = 3.912 / V) from 50 km to 200 m. The in-scattered light comes from the sky itself: a normalised wide blur of the sky pixels only, so distance turns things blue, never grey. The plate is two Poly Haven HDRIs (CC0) rendered through the same stereographic rays: canary_wharf for the towers, docklands_01 for the sky.",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.7], "to": [0.52, 0.3] },
   "sources": [
-    "https://www.michaelkenna.com/",
-    "https://www.toddhido.com/",
+    "https://polyhaven.com/a/canary_wharf",
+    "https://polyhaven.com/a/docklands_01",
+    "https://en.wikipedia.org/wiki/Aerial_perspective",
+    "https://en.wikipedia.org/wiki/Visibility#Meteorological_visibility",
     "https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law",
     "https://github.com/DepthAnything/Depth-Anything-V2"
   ]
