@@ -19,9 +19,11 @@ Reads <workdir>/labels.npz from labels.py. For every plane, far to near:
              pyramid plus real texture mirrored across the occlusion edge.
 
   overscan   every card that meets the frame carries on past it (PAD): the
-             sky card outpainted, the rest carried on from their edges (with
-             copied texture below and right of the town), the wires carried
-             on straight, so the engine's front mat never shows a card edge.
+             sky card outpainted, the town's margin outpainted by LaMa below
+             and left and its own edge translated on to the right, the
+             rest carried on from their edges (the boom's mechanism box ends
+             in a short fade instead), the wires carried on straight, so the
+             engine's front mat never shows a card edge.
 
 Writes <outdir>/p0.webp .. p6.webp (RGBA, cropped to each plane's extent,
 which may run past the photo: rects in layers.json go below 0 and above 1),
@@ -549,6 +551,34 @@ def extend_wires(a, pr, band=260, span=110, R=12):
     return np.concatenate([a, out], 1)
 
 
+BOOM_K = 3  # the barrier boom, its mast and mechanism
+
+
+def lama_outpaint(c, ae, inner, need, k):
+    """Outpaint a card's overscan margin (`need`, outside the frame) with LaMa
+    through tools/depth/fill.py. The context is the card alone: where it is
+    transparent inside the frame (the sky above the town) its own colours are
+    pushed in, so no sky blue bleeds into the invented roofs and trees."""
+    if not os.path.exists(LAMA_MODEL):
+        return None
+    own = inner & (ae > 0.95)
+    src_c = np.where((inner & (ae > 0.5))[..., None], c, pushpull(c, own.astype(np.float32)))
+    src = os.path.join(WORK, f"lamaO{k}-src.png")
+    msk = os.path.join(WORK, f"lamaO{k}-hole.png")
+    out = os.path.join(WORK, f"lamaO{k}-out.png")
+    if os.path.exists(out) and os.path.exists(msk) and os.path.getmtime(out) > os.path.getmtime(msk):
+        old = cv2.imread(msk, cv2.IMREAD_GRAYSCALE)
+        if old is not None and old.shape == need.shape and np.array_equal(old > 127, need):
+            return cv2.imread(out)[:, :, ::-1].astype(np.float32) / 255
+    cv2.imwrite(src, (np.clip(src_c[:, :, ::-1], 0, 1) * 255 + 0.5).astype(np.uint8))
+    cv2.imwrite(msk, need.astype(np.uint8) * 255)
+    r = subprocess.run([sys.executable, "-I", FILL, src, msk, out, "--model", LAMA_MODEL], capture_output=True, text=True)
+    if r.returncode != 0 or not os.path.exists(out):
+        print("lama outpaint failed, plane", k, r.stderr[-400:])
+        return None
+    return cv2.imread(out)[:, :, ::-1].astype(np.float32) / 255
+
+
 def blue_noise(shape, seed):
     """Dither of about +-1 LSB with its energy pushed to high frequencies
     (white noise minus its own blur, per channel, renormalised): no clumps
@@ -611,18 +641,50 @@ for k, (col, a) in enumerate(layers):
         ae = cv2.copyMakeBorder(ae, pt, pb, pl, pr, cv2.BORDER_REPLICATE)
         ph, pw = ae.shape
         if k == TOWN_K:
-            # below and right of the town (sheds, a hedge, trees, gables)
-            # carried rows read as streaks: give that margin real texture
-            # copied from inside, on the carried colour
+            # Around the town (sheds, a hedge, trees, gables) carried rows
+            # read as streaks the moment a swing uncovers them: the margin is
+            # outpainted by LaMa from the town alone (shiftfill when the
+            # model is missing).
             inner = np.zeros((ph, pw), bool)
             inner[pt:pt + EH, pl:pl + EXPORT_W] = True
-            below = np.zeros((ph, pw), bool)
-            below[pt + EH:] = True
-            below[:, pl + EXPORT_W:] = True
-            need_b = below & (ae > 0.01)
-            sf = shiftfill(c, inner & (ae > 0.95), need_b, cv2.GaussianBlur(c, (0, 0), 8), seed=k)
-            c = np.where(need_b[..., None], sf, c)  # shiftfill also smooths what it was not asked to fill
+            if pr:
+                # Right of the frame the street runs on: more trees, another
+                # pole. LaMa smears a strip that narrow into streaks, so the
+                # margin is the town's own right edge again, translated (not
+                # mirrored: a mirror reads as a kaleidoscope) by the period
+                # whose copy best meets the edge, with a short cross-fade.
+                E = pl + EXPORT_W
+                band = slice(E - 32, E)
+                best = None
+                for P in range(200, 620, 4):
+                    srcb = slice(E - 32 - P, E - P)
+                    w_ = np.maximum(ae[pt:pt + EH, band], ae[pt:pt + EH, srcb])
+                    d_ = np.abs(c[pt:pt + EH, band] - c[pt:pt + EH, srcb]).sum(2) + 2 * np.abs(ae[pt:pt + EH, band] - ae[pt:pt + EH, srcb])
+                    sc = float((d_ * w_).sum() / max(w_.sum(), 1e-3))
+                    if best is None or sc < best[0]:
+                        best = (sc, P)
+                P = best[1]
+                xs_ = np.arange(E, pw)
+                sx_ = xs_ - P * ((xs_ - E) // P + 1)
+                fade = np.clip((xs_ - E) / 32, 0, 1)[None, :]
+                rows_ = slice(0, pt + EH)
+                c[rows_, E:] = c[rows_, E:] * (1 - fade[..., None]) + c[rows_][:, sx_] * fade[..., None]
+                ae[rows_, E:] = ae[rows_, E:] * (1 - fade) + ae[rows_][:, sx_] * fade
+                print("  town right margin: period", P, "px, seam", round(best[0], 4))
+            need_b = ~inner & (ae > 0.01)
+            if pr:
+                need_b[: pt + EH, pl + EXPORT_W:] = False  # translated above
+            sf = lama_outpaint(c, ae, inner, need_b, k)
+            if sf is None:
+                sf = shiftfill(c, inner & (ae > 0.95), need_b, cv2.GaussianBlur(c, (0, 0), 8), seed=k)
+            c = np.where(need_b[..., None], sf, c)  # the fills also touch what they were not asked to fill
             del sf
+        if k == BOOM_K and pr:
+            # The boom's mechanism box is cut by the right edge: carried on,
+            # its last column smears into horizontal streaks (its arm most of
+            # all). It ends instead, a few px past the frame, over the town.
+            xx_ = np.arange(pw, dtype=np.float32)[None, :]
+            ae = ae * np.clip(1 - (xx_ - (pl + EXPORT_W)) / (0.006 * EXPORT_W), 0, 1)
         yy, xx = np.mgrid[0:ph, 0:pw].astype(np.float32)
         out = np.maximum(np.maximum(pl - xx, xx - (pw - 1 - pr)), np.maximum(pt - yy, yy - (ph - 1 - pb)))
         t_ = np.clip(out / (0.12 * EXPORT_W), 0, 1)[..., None]

@@ -17,10 +17,10 @@
   "sources": [
     {
       "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
-      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=6000&fit=max&q=90&fm=jpg",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=4000&h=4000&fit=max&q=90&fm=jpg",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "Ukyo, Kyoto; 4928x3264 original (Ricoh GR II). Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; planes, mattes and inpainting baked by tools/depth/bakes/crossing (labels.py, bake.py): the sky card filled from a dilated matte and outpainted a quarter past each side, wires carried on behind the signal and past the frame, hidden house and town texture by LaMa (tools/depth/fill.py), every card that meets the frame overscanned so the front mat never shows an edge."
+      "note": "Ukyo, Kyoto; 4928x3264 original (Ricoh GR II). Plated from the curated low-angle library frame kyoto-crossing-lowangle (4000x2649; chosen over setagaya-wires-up as the steeper, about 35 degrees up, and more cobalt frame). Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; planes, mattes and inpainting baked by tools/depth/bakes/crossing (labels.py, bake.py): the sky card filled from a dilated matte and outpainted a quarter past each side, wires carried on behind the signal and past the frame, hidden house and town texture and the town card's overscan margin by LaMa (tools/depth/fill.py), every card that meets the frame overscanned so the front mat never shows an edge."
     },
     "https://en.wikipedia.org/wiki/Multiplane_camera"
   ]

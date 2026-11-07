@@ -52,12 +52,14 @@ const MATTE = [512, 339];
 // that meet the frame are overscanned past it, so their rects run past 0..1.
 const PLANES = [
   { rect: [-0.25, -0.25, 1.25, 1.25], o: 0.66 }, // sky
-  { rect: [-0.1499, 0.28171, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
-  { rect: [0.25879, 0.03466, 1.22021, 0.92625], o: 0.2 }, // wires
-  { rect: [0.85742, 0.15708, 1.1499, 1.14971], o: 0.08 }, // barrier boom, mast
-  { rect: [-0.1499, 0.44248, 0.51025, 1.14971], o: -0.06 }, // the old house
+  { rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
+  { rect: [0.25879, 0.03466, 1.22021, 0.92699], o: 0.2 }, // wires
+  // the mechanism box is cut by the right edge and ends a few px past
+  // it (bake.py): that side is a cut-out end, not overscan to keep covered
+  { rect: [0.85742, 0.15708, 1.01025, 1.14971], o: 0.08, ends: [false, false, true, false] }, // barrier boom, mast
+  { rect: [-0.1499, 0.44248, 0.50928, 1.14971], o: -0.06 }, // the old house
   { rect: [0.50732, 0.15192, 0.83545, 1.14971], o: -0.24 }, // the signal
-  { rect: [0.01367, 0.83038, 0.37988, 1.10029], o: -0.42 }, // camellia
+  { rect: [0.01416, 0.8326, 0.37988, 1.10029], o: -0.42 }, // camellia
 ];
 const N = PLANES.length;
 // The front mat sits at the nearest plane's depth, and the camera swings
@@ -69,7 +71,12 @@ const PIVOT_O = PLANES[MAT_K].o;
 // frame were overscanned by the bake (their rects run past 0..1), and the
 // window may not slide past them. Sides that end inside the photo are cut-out
 // silhouettes and may show.
-const SAFE = PLANES.map(({ rect: r }) => [r[0] < 0.002 ? r[0] : -Infinity, r[1] < 0.002 ? r[1] : -Infinity, r[2] > 0.998 ? r[2] : Infinity, r[3] > 0.998 ? r[3] : Infinity]);
+const SAFE = PLANES.map(({ rect: r, ends = [] }) => [
+  r[0] < 0.002 && !ends[0] ? r[0] : -Infinity,
+  r[1] < 0.002 && !ends[1] ? r[1] : -Infinity,
+  r[2] > 0.998 && !ends[2] ? r[2] : Infinity,
+  r[3] > 0.998 && !ends[3] ? r[3] : Infinity,
+]);
 const MAT_RECT = [-1.5, -2.5, 2.5, 3.5]; // the paper sheet, in photo uv: past every edge of the screen
 const SPREAD = 1.0; // plane offsets are o * SPREAD * print width at split 1
 const FOVY = 30; // degrees

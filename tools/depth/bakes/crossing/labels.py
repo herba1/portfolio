@@ -2,7 +2,9 @@
 
     python3 -I tools/depth/bakes/crossing/labels.py <photo.jpg> <depth16.png> <workdir>
 
-The photo is PJH's low-angle fumikiri in Ukyo, Kyoto (Unsplash lxlUQhR3GXk):
+The photo is PJH's low-angle fumikiri in Ukyo, Kyoto (Unsplash lxlUQhR3GXk),
+plated from the curated library's 4000 px frame (kyoto-crossing-lowangle)
+with its Depth Anything V2 map:
 the crossbuck and lamp heads seen from below against the summer sky, wires
 fanning up to the right, a tiled roof eave on the left, a camellia at the
 bottom edge. Writes <workdir>/labels.npz (labels at 3000 wide, image, depth,
@@ -35,6 +37,15 @@ S = W / 1500  # boxes below are in 1500-wide preview coordinates
 img = cv2.resize(src, (W, H), interpolation=cv2.INTER_AREA).astype(np.float32) / 255
 dep = cv2.imread(DEPTH, cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
 dep = cv2.resize(dep, (W, H), interpolation=cv2.INTER_AREA)
+# Level the map onto the scale the thresholds below were set on: the clear
+# zenith (the top eighth of the frame, all sky) at 0.158 and the nearest
+# leaves (99.5th percentile) at 0.942. Depth Anything's output is relative,
+# so maps from different runs (the curated library's 4000 px one sits its sky
+# at 0.05) differ by an affine level; the cut must not.
+_lo = float(np.median(dep[: H // 8]))
+_hi = float(np.percentile(dep, 99.5))
+dep = 0.158 + (dep - _lo) * (0.942 - 0.158) / max(_hi - _lo, 1e-3)
+print("depth levelled from", round(_lo, 3), round(_hi, 3))
 r, g, b = img[..., 0], img[..., 1], img[..., 2]
 lum = img @ np.array([0.2126, 0.7152, 0.0722], np.float32)
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
@@ -119,6 +130,11 @@ RULES = [
 ]
 for plane, m in RULES:
     lab[m] = plane
+# Clear blue tucked in beside the signal post (under the crossbuck's arm,
+# between the post and the upper lamp) picks up the post's depth halo and
+# passes the far-town gate; above the far roofs' ridges, left of the boom
+# mast's tower, blue with no line in it is sky.
+lab[(lab == 1) & blue & (bh < 0.022) & boxmask(0, 0, 1300, 690)] = 0
 # Up in the sky nothing is far town. Above the far roofs' skyline (per
 # column, from the town's solid parts, eased over a few columns) leftovers
 # that are not solid are wire; isolated specks the black-hat found in cloud
