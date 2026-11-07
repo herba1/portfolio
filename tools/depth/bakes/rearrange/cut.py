@@ -13,9 +13,9 @@ Against the sky the matte is solved per pixel: each edge pixel is a mix of
 the local sky colour S and the local object colour F, and alpha is where the
 pixel falls on the line from S to F. That keeps a cable's sub-pixel edge and
 the hole through the onigawara, and leaves no blue fringe on the cutout.
-Where the object meets something solid (the crossbuck over its mast, a lamp
-over a house) the matte is a colour guided filter of the hard cut, or for the
-crossbuck its exact anti-aliased board outline.
+Where the object meets something solid (a lamp over a house) the matte is a
+colour guided filter of the hard cut; the crossbuck, over its mast and the
+pale bracket that stays on it, takes its exact anti-aliased board outline.
 """
 import sys
 import os
@@ -55,17 +55,17 @@ for k in range(K):
     a_mix = np.clip(a_mix, 0, 1)
     a_gf = np.clip(guided(I, c.astype(np.float32), 3, 2e-4), 0, 1)
     if k == 0:
-        # boards: their exact outline; the white bracket behind them is
-        # near-sky in colour, so it takes the guided filter, not the solve
-        brk = c & (xb_aa[y0:y1, x0:x1] < 0.5)
-        a_gf = np.where(dilate(brk, 4) & (xb_aa[y0:y1, x0:x1] < 0.5), a_gf, xb_aa[y0:y1, x0:x1])
+        # boards: their exact outline wherever they lie over something solid
+        a_gf = xb_aa[y0:y1, x0:x1]
     # which edge pixels look onto sky
     sky_side = box(sk.astype(np.float32), 6) > 0.2
     a = np.where(sky_side, a_mix, a_gf)
     if k == 0:
-        # the boards' outline bounds the colour solve (no mast or wire leaks in)
-        a = np.minimum(a, np.clip(cv2.dilate(xb_aa[y0:y1, x0:x1], np.ones((3, 3), np.uint8)) + dilate(brk, 2) * 1.0, 0, 1))
-        a = np.where(dilate(brk, 4) & (xb_aa[y0:y1, x0:x1] < 0.5), a_gf, a)
+        # the boards' outline bounds the colour solve (no mast, bracket or
+        # wire leaks in): the near-white bracket is close to the sky colour,
+        # so where it borders a board the solve would take it for sky
+        a = np.minimum(a, cv2.dilate(xb_aa[y0:y1, x0:x1], np.ones((3, 3), np.uint8)))
+        a = np.where(dilate(z["brk"][y0:y1, x0:x1], 3), a_gf, a)
     a = np.where(inner, 1.0, np.where(outer, a, 0.0))
     if k == 3:
         a = np.minimum(a, z["env3"][y0:y1, x0:x1])

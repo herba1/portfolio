@@ -10,6 +10,7 @@ at up to ~2200 device px wide). Writes <workdir>/masks.npz:
   sky     bool    clean sky (blue or cloud), wires excluded
   wire    float32 wire coverage 0..1 (thin dark lines over the sky)
   core_k  bool    object k's hard cut (objects listed in OBJECTS)
+  brk     bool    the crossbuck's bracket where it shows (stays on the plate)
 
 Objects are cut the way a retoucher would: a hand-placed region (polygon or
 box) says *which* thing, depth and colour say *where its edge is*. The
@@ -85,14 +86,28 @@ def boxm(x0, y0, x1, y1):
 
 nonsky = ~sky & (wire < 0.3)
 
-# ---- 0: the crossbuck. Two boards, measured off the photo (px at 2464),
-# plus the white backing plate and bracket behind their crossing.
+# ---- 0: the crossbuck. Two boards, measured off the photo (px at 2464).
+# Only the painted X travels. The pale pressed bracket behind its crossing
+# and the rusty clamp across it are the mast's: they bolt the boards to the
+# pole, so they stay on the plate, and the part of them the boards hid is
+# filled there (plate.py). Cutting them with the boards hung a grey shell in
+# the sky behind every moved sign.
 ARM_A = [(1660, 260), (1718, 296), (1313, 878), (1266, 826)]
 ARM_B = [(1295, 504), (1782, 570), (1745, 683), (1262, 588)]
-PLATE = [(1566, 466), (1606, 470), (1660, 520), (1688, 556), (1680, 570), (1630, 556), (1570, 520)]
 xb_aa = np.maximum(poly_aa(ARM_A), poly_aa(ARM_B))
-plate = poly(PLATE) & ~sky
-core0 = (xb_aa > 0.5) | plate
+core0 = xb_aa > 0.5
+# brk: the bracket (a ribbed pale shell) and its clamp where they show,
+# between the two arms. brk_zone: the whole bracket, seen or hidden. Its
+# flat top runs on left under the upper arm to the mast, where the clamp
+# meets the pole; its rim keeps the curve it has where it goes under the
+# lower arm and rounds off there, narrowing back to the pole above the
+# pipe's shoulder (y 604).
+brk = poly([(1540, 474), (1566, 458), (1612, 464), (1666, 508), (1704, 560), (1704, 590), (1540, 590)]) & ~sky & (xb_aa < 0.5)
+HIDDEN = [(1502, 486), (1530, 470), (1599, 463), (1700, 575), (1694, 592), (1670, 602), (1620, 606), (1560, 597), (1502, 566)]
+_pts = np.concatenate([cv2.findNonZero(brk.astype(np.uint8)).reshape(-1, 2), np.array(HIDDEN)]).astype(np.int32)
+brk_zone = np.zeros((H, W), np.uint8)
+cv2.fillPoly(brk_zone, [cv2.convexHull(_pts)], 1)
+brk_zone = brk_zone > 0
 
 # ---- 1: the upper lamp (hood, lens and housing), cut from its arm at the
 # bracket. The lamp is the nearest thing in that part of the frame.
@@ -210,7 +225,8 @@ cores = [core0, core1, core2, core3, core4]
 for k, c in enumerate(cores):
     print(k, int(c.sum()), "px")
 
-np.savez_compressed(os.path.join(WORK, "masks.npz"), img=img, dep=dep, sky=sky, wire=wire, xb_aa=xb_aa, env3=env3, extra3=extra3,
+np.savez_compressed(os.path.join(WORK, "masks.npz"), img=img, dep=dep, sky=sky, wire=wire, xb_aa=xb_aa, brk=brk, brk_zone=brk_zone,
+                    env3=env3, extra3=extra3,
                     **{f"core_{k}": c for k, c in enumerate(cores)})
 
 # preview: objects tinted, sky blue, wires red

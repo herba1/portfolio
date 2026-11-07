@@ -191,10 +191,23 @@ for k in range(K):
             plate = lama_fill(plate, m, int(xx_.mean()), int(yy_.mean()), 512, paste=band_)
             T.mark(f"lama {k} @ {y}")
     elif k == 0:
-        # Round the mast the crossbuck hid only sky and cables (the cables
-        # come back below). LaMa, given this much hole, kept repainting a
-        # ghost of the white bracket; the clean sky field is the honest fill.
-        f = np.maximum(cv2.GaussianBlur(m.astype(np.float32), (0, 0), 1.0), m)[..., None]
+        # Only the painted boards leave (masks.py): the pale bracket and the
+        # clamp that hold them to the mast stay, and the boards hid the
+        # bracket's inner end. LaMa continues it from what shows, at full
+        # resolution, with the whole board hole masked so it never sees a
+        # board; only the bracket's zone is kept from it.
+        zone = z["brk_zone"] & m
+        if zone.any():
+            # the pole is masked from it too: shown the pole, LaMa grows a
+            # second grey pipe beside it instead of the shell
+            pole = (np.arange(W)[None, :] < nr(np.arange(H)[:, None]) + 2) & ~sky
+            yz, xz = np.nonzero(zone)
+            plate = lama_fill(plate, m | (pole & dilate(zone, 40)), int(xz.mean()), int(yz.mean()), 512, paste=zone)
+            T.mark("lama 0 bracket")
+        # Round the rest only sky and cables (the cables come back below):
+        # the clean sky field is the honest fill there.
+        rest = m & ~zone
+        f = np.maximum(cv2.GaussianBlur(rest.astype(np.float32), (0, 0), 1.0) * ~zone, rest)[..., None]
         plate = plate * (1 - f) + S * f
     else:
         size = int(np.clip(max(bw, bh) / 0.55, 512, 1100))

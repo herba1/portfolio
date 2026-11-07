@@ -81,8 +81,9 @@ r_, g_, b_ = plate[..., 0], plate[..., 1], plate[..., 2]
 blue = (b_ - r_ > 0.08) & (lum > 0.35)
 cloud = (lum > 0.62) & (b_ - r_ > -0.01) & (np.abs(g_ - b_) < 0.12)
 # outside the holes the sky is the one found in the photo; inside, filled
-# pixels that look like sky and are joined to it
-cand = sky | (hole & (blue | cloud))
+# pixels that look like sky and are joined to it (not the crossbuck's
+# bracket, filled in behind the boards: it is pale enough to pass for cloud)
+cand = sky | (hole & (blue | cloud) & ~z["brk_zone"])
 n, cc, _, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8), 8)
 touch = np.zeros(n, bool)
 touch[np.unique(cc[sky])] = True
