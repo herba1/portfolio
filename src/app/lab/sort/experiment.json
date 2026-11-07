@@ -1,0 +1,76 @@
+{
+  "title": "Sort",
+  "description": "A summer photograph of a level crossing with one wave of it pixel-sorted: along the ground the verge is combed into horizontal strips, and round the poles the grass is carried up in curling arcs into the sky, while every pole, sign and the rest of the photo stay untouched. Brush anywhere and the picture sorts under your hand, live on the GPU; the longer and harder you brush, the longer the spans grow. Press and hold and the sort runs backwards, every pixel sliding home.",
+  "tags": [
+    "generative",
+    "WebGL",
+    "Photo",
+    "Pixel sort"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:00:00.000Z",
+  "intent": "After Kim Asendorf's ASDF Pixel Sort (2010, https://github.com/kimasendorf/ASDFPixelSort) and herb's generative reference 2 (a street photo smeared into strips that curl up like grass). A real sort: spans chosen by ASDF luminance intervals and split at depth edges and depth bands (Depth Anything V2) so they never cross a pole, sorted brightest-first by odd-even transposition in WebGL2 fragment passes along a curl-shaped family of sort lines; outside a span the same network orders pixels by home index, so erasing the mask sorts every pixel back home.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.25,
+      0.3
+    ],
+    "to": [
+      0.4,
+      0.22
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1500
+    },
+    {
+      "drag": [
+        [
+          0.2,
+          0.3
+        ],
+        [
+          0.42,
+          0.26
+        ]
+      ],
+      "ms": 2400
+    },
+    {
+      "idle": 1200
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.6
+        ],
+        [
+          0.5,
+          0.6
+        ]
+      ],
+      "ms": 2200
+    },
+    {
+      "idle": 1500
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/railroad-crossing-with-barriers-and-warning-signs-b3Ow_DxiW7M",
+      "file": "https://images.unsplash.com/photo-1776586264901-f41bb46ebb3f?w=6000&fit=max&q=90&fm=jpg",
+      "author": "XS Xue (@xxs11)",
+      "licence": "Unsplash License",
+      "note": "6000x4000 original, shown at 2400x1600; depth from Depth Anything V2 Small via tools/depth/depth_hr.py, 1200x800."
+    },
+    "https://github.com/kimasendorf/ASDFPixelSort",
+    "https://en.wikipedia.org/wiki/Odd%E2%80%93even_sort"
+  ]
+}
