@@ -4,22 +4,29 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Depth Clock: the iOS 16 Lock Screen depth effect, made literal.
 //
 // One Poly Haven capture (Roman stone pines from below, CC0) is split offline
-// (bake.py, beside this file) into three planes:
-//   sky.webp    the sky, its hidden part continued as a fitted smooth gradient
-//   fg.webp     the trees, colour unmixed from the sky: P = a F + (1 - a) S,
+// (bake.py, beside this file) into planes, and the sky behind them is replaced
+// with fair-weather cumulus from a second Poly Haven capture (bake_clouds.py):
+//   clouds.webp the sky: a pure-sky HDRI reprojected through the trees' own
+//               camera, turned so its sun sits on the pines' sun, the clear
+//               blue matched to the pines' sky and the cloud never clipped
+//   fg.webp     the trees, colour unmixed from their sky: P = a F + (1 - a) S,
 //               so a is an exact matte down to single needles and F carries
 //               no blue fringe when it passes over something brighter
 //   depth.webp  the trees' disparity, carried past the matte and smoothed
 // All three store scene-linear light / ENC, sRGB-encoded.
 //
-// The time is set in Geist on a plane between them. A camera translation
-// moves each plane by its disparity (sky barely, the time a little, the
-// crowns most), so the numerals sit in the air between the pines and the
-// sky. The frame is then developed by the shared film kit (summer preset),
-// so the numerals bloom the way the sky and cloud do.
+// The time is set in Geist on a plane between them: in front of the cloud,
+// behind every needle. A camera translation moves each plane by its
+// disparity (sky barely, the time a little, the crowns most), and the cloud
+// drifts slowly on its own, so cumulus passes behind the figures while the
+// crowns cross in front. The figures are lit by the sky around them, pale and
+// never white, and bleed a little light into the air the way a diffusion
+// filter spreads a bright shape. The frame is then developed by the shared
+// film kit (summer preset).
 //
 // Query (stills): ?tilt=x,y (-1..1) holds the camera; ?time=HH:MM holds the
-// clock. ?roll=0..1 holds a minute change part way through.
+// clock. ?roll=0..1 holds a minute change part way through. ?drift=-1..1
+// holds the cloud's drift (a held camera holds it at 0).
 
 const ASSET = "/lab/depth-clock/";
 const IMG_W = 3000;
@@ -54,13 +61,15 @@ out vec4 outColor;
 uniform sampler2D uSky;
 uniform sampler2D uFg;
 uniform sampler2D uDepth;
-uniform sampler2D uText;
+uniform sampler2D uText;   // mipmapped: its coarse levels are the bleed
+uniform vec2 uWind;       // the cloud's drift, image uv
 uniform vec2 uRes;        // device px
 uniform vec4 uCrop;       // image uv: x0, y0, w, h
 uniform vec2 uCam;        // -1..1
 uniform vec4 uTextRect;   // device px, top-left origin: x0, y0, w, h
 uniform vec3 uPlane;      // amp, focus, numerals' disparity
 uniform float uNumL;      // numerals' radiance
+uniform float uBleed;     // share of the figures' light that diffuses
 uniform float uEnc;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${(IMG_W / IMG_H).toFixed(6)};
@@ -75,15 +84,22 @@ void main() {
   vec2 b = uCrop.xy + s * uCrop.zw;
 
   // Sky, at infinity (well, nearly).
-  vec2 uvS = b + shift(${SKY_D.toFixed(3)});
+  vec2 uvS = b + shift(${SKY_D.toFixed(3)}) + uWind;
   vec3 col = texture(uSky, uvS).rgb * uEnc;
 
   // The numerals' plane.
   vec2 dn = shift(uPlane.z) / uCrop.zw * uRes;
   vec2 tp = (p + dn - uTextRect.xy) / uTextRect.zw;
   float ta = 0.0;
-  if (all(greaterThanEqual(tp, vec2(0.0))) && all(lessThanEqual(tp, vec2(1.0)))) ta = texture(uText, tp).a;
-  if (ta > 0.0) {
+  float bleed = 0.0;
+  if (all(greaterThanEqual(tp, vec2(0.0))) && all(lessThanEqual(tp, vec2(1.0)))) {
+    ta = texture(uText, tp).a;
+    // Diffusion bleed: the figures' own light spread over a tight core and a
+    // wide veil, as a Pro-Mist spreads a bright shape. The core sits on the
+    // edge (it softens the cut), the veil reaches into the air around.
+    bleed = 0.55 * textureLod(uText, tp, 3.0).a + 0.3 * textureLod(uText, tp, 5.0).a + 0.15 * textureLod(uText, tp, 6.5).a;
+  }
+  if (ta > 0.0 || bleed > 0.0) {
     // Lit by the scene: sky light where the sky is around them, plain
     // sunlight where the crowns are close.
     vec3 skyl = textureLod(uSky, uvS, 7.5).rgb;
@@ -94,9 +110,13 @@ void main() {
     cool.g = mix(cool.g, 1.0, 0.4); // toward cyan, never violet
     // Brighter where the sky behind is brighter (toward the sun), dimmer
     // toward the deep zenith: the figures share the scene's light.
-    float lift = clamp(pow(dot(skyl, LUMA) / 0.14, 0.25), 0.88, 1.1);
+    // Never past uNumL: pale, never paper white, even over cloud.
+    float lift = clamp(pow(dot(skyl, LUMA) / 0.14, 0.25), 0.88, 1.0);
     vec3 n = uNumL * lift * mix(cool, sun, smoothstep(0.1, 0.8, near));
-    col = mix(col, n, ta);
+    // Bleed adds light, and less of it where the air is already as bright
+    // (over cloud it all but vanishes, so the cloud never clips).
+    vec3 glow = max(n - col, 0.0) * bleed * uBleed;
+    col = mix(col + glow, n, ta);
   }
 
   // The trees: each pixel moves by its own disparity. Solve uv + shift(D(uv))
@@ -165,6 +185,8 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   }
   const numQ = { cx: num(q.get("nx"), NUM.cx), cy: num(q.get("ny"), NUM.cy), size: num(q.get("ns"), NUM.size) };
   const numL = num(q.get("nl"), 0.85);
+  const bleedK = num(q.get("bleed"), 0.6);
+  const driftQ = q.get("drift") != null ? clamp(num(q.get("drift"), 0), -1, 1) : null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   // The colour field the sky opens from.
@@ -191,7 +213,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const gl = stage.ctx;
   if (!gl) throw new Error("no webgl2");
 
-  const [skyBm, fgBm, depthBm] = await Promise.all([loadBitmap(`${ASSET}sky.webp`), loadBitmap(`${ASSET}fg.webp`), loadBitmap(`${ASSET}depth.webp`), fontsReady]);
+  const [skyBm, fgBm, depthBm] = await Promise.all([loadBitmap(`${ASSET}clouds.webp`), loadBitmap(`${ASSET}fg.webp`), loadBitmap(`${ASSET}depth.webp`), fontsReady]);
 
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
@@ -220,7 +242,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const tctx = textCanvas.getContext("2d");
   const textTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, textTex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -239,7 +261,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
 
   // ---- layout: which part of the image the box shows, where the time sits
-  const lay = { crop: [0, 0, 1, 1], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, cell: 60, colon: 30, track: 0, baseX: 0 };
+  const lay = { crop: [0, 0, 1, 1], drift: [0, 0], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, cell: 60, colon: 30, track: 0, baseX: 0 };
   const layout = () => {
     const W = stage.width;
     const H = stage.height;
@@ -260,6 +282,13 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     const x0 = clamp(ANCHOR[0] * IMG_W - cw / 2, 0, IMG_W - cw);
     const y0 = clamp(ay - ch / 2, 0, IMG_H - ch);
     lay.crop = [x0 / IMG_W, y0 / IMG_H, cw / IMG_W, ch / IMG_H];
+    // How far the cloud may drift: what the crop leaves of the sky image,
+    // less the sky's own parallax at full tilt.
+    const par = AMP * Math.abs(SKY_D - FOCUS);
+    lay.drift = [
+      Math.max(0, Math.min(x0, IMG_W - cw - x0) / IMG_W - par) * 0.85,
+      Math.max(0, Math.min(y0, IMG_H - ch - y0) / IMG_H - par * (IMG_W / IMG_H)) * 0.85,
+    ];
     const s = (W * dpr) / cw; // device px per image px
     lay.s = s;
     // Type: an em in image px, never wider than the crop allows.
@@ -368,6 +397,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const uploadText = () => {
     gl.bindTexture(gl.TEXTURE_2D, textTex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, textCanvas);
+    gl.generateMipmap(gl.TEXTURE_2D);
   };
 
   // ---- render targets
@@ -409,6 +439,10 @@ export async function createDepthClock(host, { embedded = false } = {}) {
 
   // ---- camera: pointer, device tilt, breathing
   const cam = { x: 0, y: 0 };
+  // The cloud drifts on the wind, slowly enough to read as weather: one slow
+  // swing every DRIFT_S seconds, mostly across the frame's long sky axis.
+  const wind = { x: 0, y: 0 };
+  const DRIFT_S = 300;
   const intro = held || reduced ? null : { from: [0.55, -0.3] };
   if (held) {
     cam.x = clamp(tiltQ[0], -1, 1);
@@ -470,6 +504,8 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     gl.uniform4fv(u.uTextRect, lay.text);
     gl.uniform3f(u.uPlane, AMP, FOCUS, NUM_D);
     gl.uniform1f(u.uNumL, numL);
+    gl.uniform1f(u.uBleed, bleedK);
+    gl.uniform2f(u.uWind, wind.x, wind.y);
     gl.uniform1f(u.uEnc, ENC * enc);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
@@ -529,7 +565,10 @@ export async function createDepthClock(host, { embedded = false } = {}) {
       }
     }
 
-    const key = `${cam.x.toFixed(4)}|${cam.y.toFixed(4)}`;
+    const drift = driftQ ?? (held || reduced ? 0 : Math.sin((age * 2 * Math.PI) / DRIFT_S));
+    wind.x = -lay.drift[0] * drift;
+    wind.y = lay.drift[1] * drift;
+    const key = `${cam.x.toFixed(4)}|${cam.y.toFixed(4)}|${wind.x.toFixed(5)}|${wind.y.toFixed(5)}`;
     if (key !== lastKey || dirty) {
       renderScene();
       lastKey = key;

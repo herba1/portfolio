@@ -1,8 +1,9 @@
 # Bake depth-clock layers from a Poly Haven pick: linear HDR + depth map.
 #   python3 -I bake.py stone-pines-below public/lab/depth-clock 0 3400 0.003
-# Writes sky.webp (sky with the occluded part filled), fg.webp (foreground,
-# colour unmixed from the sky, alpha = exact matte), depth.webp (foreground
-# disparity, extended past the matte and smoothed for warping).
+# Writes fg.webp (foreground, colour unmixed from the sky, alpha = exact
+# matte) and depth.webp (foreground disparity, extended past the matte and
+# smoothed for warping). The fitted clear sky is only the unmix's background
+# now: the sky plane itself is cumulus from bake_clouds.py (clouds.webp).
 import sys, os
 import numpy as np, cv2
 from PIL import Image
@@ -130,10 +131,7 @@ Fc = np.minimum(Fc, np.maximum(F, hdr) * 1.5 + 0.02)  # tame division noise
 Ffill = pushpull(Fc, (a > 0.25).astype(np.float32) * a)
 Fc = np.where((a > 0.08)[..., None], Fc, Ffill)
 
-# 6. Sky layer: the photo where the sky is seen, S behind any tree.
-sky = np.where((a > 0.002)[..., None], S, hdr)
-
-# 7. Foreground disparity: the trees' depth, carried out past the matte so its
+# 6. Foreground disparity: the trees' depth, carried out past the matte so its
 #    edges move with the trees, smoothed so near/far crowns do not tear.
 dm = ((a > 0.3) & (dep > 0.15)).astype(np.float32)
 dfill = pushpull(dep, dm)[..., 0]
@@ -162,17 +160,11 @@ def enc(x):
     return np.where(x <= 0.0031308, x * 12.92, 1.055 * np.power(x, 1 / 2.4) - 0.055)
 
 
-def save_rgb(x, path, q=90):
-    im = Image.fromarray((enc(x) * 255 + 0.5).astype(np.uint8), 'RGB')
-    im.save(path, 'WEBP', quality=q, method=6)
-
-
-save_rgb(sky, out + '/sky.webp', 88)
 rgba = np.concatenate([(enc(Fc) * 255 + 0.5).astype(np.uint8), (a * 255 + 0.5).astype(np.uint8)[..., None]], 2)
 Image.fromarray(rgba, 'RGBA').save(out + '/fg.webp', 'WEBP', quality=90, alpha_quality=100, method=6)
 dsm = q4
 Image.fromarray((np.clip(dsm, 0, 1) * 255 + 0.5).astype(np.uint8), 'L').save(out + '/depth.webp', 'WEBP', lossless=True)
 # debug previews
-for f in ('sky.webp', 'fg.webp', 'depth.webp'):
+for f in ('fg.webp', 'depth.webp'):
     print(f, os.path.getsize(out + '/' + f) // 1024, 'KB')
 
