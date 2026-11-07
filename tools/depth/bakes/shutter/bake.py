@@ -4,6 +4,7 @@ sharp still plate with a stillness matte.
 
     python3 -I tools/depth/bakes/shutter/bake.py <plate.mp4> <out_dir> [--work dir] [--drift drift.npy]
     sh tools/depth/bakes/shutter/encode.sh <work>/plate-master.mp4 public/lab/shutter
+    python3 -I tools/depth/bakes/shutter/sky.py public/lab/shutter   (after encode: reads plate.mp4)
 
 Source: 84LENS (@84lens), "Time Lapse Video of Cloud Moving over a Building",
 Pexels 5124202, 3840x2160 24 fps, 257 frames (Evolution Tower, Moscow, from

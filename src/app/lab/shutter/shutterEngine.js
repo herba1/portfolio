@@ -24,6 +24,12 @@ import { takes } from "./shutterTakes";
 //
 // Exposure is normalised by its length: an ND filter that follows the
 // shutter, so brightness holds and only time grows, and nothing blows out.
+// Normalised, though, minutes of cumulus over cobalt average to a pale
+// lavender haze. So the integral is printed in OKLab: its lightness is kept,
+// the gaps between the streaks take their chroma and hue back from a baked
+// mean of the clear sky alone (sky.webp, tools/depth/bakes/shutter/sky.py;
+// it carries the zenith ramp), the streaks stay pale and neutral, and past
+// ~3 s the ND eases so a longer hold smooths the silk without flattening it.
 //
 // Sharpness: the moving layers are low resolution (sky is smooth, and smeared
 // sky smoother). A still plate at full resolution (the mean of the whole loop)
@@ -54,11 +60,11 @@ const framesFor = (h, N) => N * Math.min(1, (60 * h + 20 * h * h) / 1200);
 
 // The print, by exposure length. A single frame carries the whole contrast
 // of sunlit cumulus against cobalt and is metered for the cloud tops. An
-// average over minutes of sky is flatter: cloud and blue meet in a pale silk
-// that a straight print leaves grey-blue. So the long exposure is printed
-// down a little and richer, as a printer would print a long exposure: the
-// meter falls, saturation and the film's blue deepening rise, and the ramp
-// the bake put in (deeper toward the zenith) comes back through the silk.
+// average over minutes of sky is flatter, and its colour is put back before
+// development (keepSky). On top of that the long exposure is printed down a
+// little, as a printer would print one: the meter falls, and the film's blue
+// deepening and (a little) saturation rise, so the cobalt between the
+// streaks reads as deep as in a short exposure.
 // k: 0 for a single frame, ~0.5 at a 2 s hold, ~0.9 for the whole loop.
 const longness = (T, N) => 1 - Math.exp(-T / (N * 0.3));
 const METER_SHORT = -0.4;
@@ -69,13 +75,26 @@ const METER_LONG = -0.75;
 // the frame goes navy. Halation is judged from the surround and kept low: at
 // full strength its red layer rings every white edge against cobalt (the
 // tower's frame, every cloud) in magenta, which reads as an electronic fringe.
+// The clear sky's colour comes back as the exposure grows past the live
+// second (keepSky in the compose pass), and past ~3 s the hold keeps
+// smoothing the silk without the ND flattening it further: the streaks'
+// lightness about its local mean is stretched as the sqrt of the extra time,
+// the rate a mean of independent skies loses its spread.
+const keepFor = (T, N) => {
+  const t = Math.min(1, Math.max(0, (T / N - 0.11) / 0.34));
+  return t * t * (3 - 2 * t);
+};
+const HOLD_CONTRAST = 3; // s
+const gainFor = (T, N) => Math.sqrt(Math.max(1, T / framesFor(HOLD_CONTRAST, N)));
+const MEAN_FRAC = 1 / 8; // the local mean's scale, a fraction of the plate's width
+
 const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0.14, halationLocal: 1, halationColor: [1, 0.42, 0.18] };
 const develop = (T, N) => {
   const k = longness(T, N);
   return {
     ...LOOK,
     exposure: METER_SHORT + (METER_LONG - METER_SHORT) * k,
-    saturation: LOOK.saturation + 0.45 * k,
+    saturation: LOOK.saturation + 0.2 * k,
     blueDepth: LOOK.blueDepth + 0.5 * k,
   };
 };
@@ -87,6 +106,24 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 const COMMON = `
 vec3 lin(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
+vec3 toLab(vec3 c){
+  vec3 m = vec3(dot(c, vec3(0.4122214708, 0.5363325363, 0.0514459929)),
+                dot(c, vec3(0.2119034982, 0.6806995451, 0.1073969566)),
+                dot(c, vec3(0.0883024619, 0.2817188376, 0.6299787005)));
+  m = pow(max(m, 0.0), vec3(1.0 / 3.0));
+  return vec3(dot(m, vec3(0.2104542553, 0.7936177850, -0.0040720468)),
+              dot(m, vec3(1.9779984951, -2.4285922050, 0.4505937099)),
+              dot(m, vec3(0.0259040371, 0.7827717662, -0.8086757660)));
+}
+vec3 fromLab(vec3 c){
+  vec3 m = vec3(c.x + 0.3963377774 * c.y + 0.2158037573 * c.z,
+                c.x - 0.1055613458 * c.y - 0.0638541728 * c.z,
+                c.x - 0.0894841775 * c.y - 1.2914855480 * c.z);
+  m = m * m * m;
+  return vec3(4.0767416621 * m.x - 3.3077115913 * m.y + 0.2309699292 * m.z,
+              -1.2684380046 * m.x + 2.6097574011 * m.y - 0.3413193965 * m.z,
+              -0.0041960863 * m.x - 0.7034186147 * m.y + 1.7076147010 * m.z);
+}
 `;
 
 // The open interval as a weighted sum of baked block means (linear light).
@@ -143,15 +180,55 @@ uniform vec2 uSize;
 uniform vec4 uCover;       // plate uv = uv * xy + zw (full-bleed crop)
 uniform float uWB;         // blocks' share of the exposure
 uniform vec2 uLod;         // still lod at display, at frame res
+uniform sampler2D uSky;    // sRGB time-mean of the clear sky alone
+uniform float uKeep;       // how much of the clear sky's colour comes back
+uniform float uGain;       // the eased ND: streak contrast held past ~3 s
+uniform vec2 uLodM;        // local-mean lods: live mean, blocks
 out vec4 o;
 ${COMMON}
+// The long exposure's colour. The integral averages cloud into sky, and
+// normalised by its length that is a pale lavender haze with no zenith ramp.
+// But between the streaks the sky was the same cobalt at every instant, so
+// the print keeps the integral's lightness and, where it is not cloud, takes
+// its chroma from the clear sky alone (the larger of the two), while the
+// streaks keep their own pale chroma. The hue is the clear sky's throughout:
+// blue and white averaged in linear light drift violet in OKLab, which a
+// scan reads as a lavender cast on the silk.
+vec3 keepSky(vec3 sl, vec3 ml, vec2 iuv){
+  vec3 p = toLab(sl);
+  vec3 m = toLab(ml);
+  vec3 s = toLab(lin(texture(uSky, iuv).rgb));
+  // The eased ND: past ~3 s the hold keeps smoothing the silk, but the
+  // print holds its tone. More time takes in more of the slow cloud masses
+  // and the mean pales toward them, so the mean's lift over the clear sky is
+  // printed back down, and the streaks' spread about it is stretched back.
+  float Lm = s.x + max(m.x - s.x, 0.0) * inversesqrt(uGain);
+  float L = clamp(Lm + (p.x - m.x) * uGain, 0.0, 1.0);
+  // Cloud weight, from lightness: 0 on clear sky, 1 on a cloud's white,
+  // pushed apart about the local mean so the gaps between the streaks
+  // read as gaps, not as a thinner haze.
+  float span = max(0.94 - s.x, 0.1);
+  float c = clamp((L - s.x) / span, 0.0, 1.0);
+  float cm = clamp((Lm - s.x) / span, 0.0, 1.0);
+  float w = clamp(c + (c - cm) * 1.75, 0.0, 1.0);
+  float Ci = length(p.yz);
+  float Cs = length(s.yz);
+  float C = mix(max(Ci, Cs), Ci * 0.85, w);
+  vec2 ab = s.yz / max(Cs, 1e-4) * C;
+  return max(fromLab(vec3(L, mix(p.yz, ab, uKeep))), 0.0);
+}
 void main(){
   vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
   vec2 iuv = vec2(uv.x, 1.0 - uv.y);
   vec3 f = texture(uFrame, iuv).rgb;
   if (uFrameLin < 0.5) f = lin(f);
   vec3 e = texture(uExp, uv).rgb;
-  vec3 sky = enc(mix(f, e, uWB));
+  vec3 sl = mix(f, e, uWB);
+  if (uKeep > 0.0) {
+    vec3 ml = mix(textureLod(uFrame, iuv, uLodM.x).rgb, textureLod(uExp, uv, uLodM.y).rgb, uWB);
+    sl = keepSky(sl, ml, iuv);
+  }
+  vec3 sky = enc(sl);
   vec4 s = textureLod(uStill, iuv, uLod.x);
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;
   vec3 tower = mix(clamp(enc(f) + dF, 0.0, 1.0), s.rgb, uWB);
@@ -312,7 +389,7 @@ export async function createShutter(host, { embedded = false } = {}) {
   const atStart = params.has("at") ? (((parseFloat(params.get("at")) || 0) * FPS) % N + N) % N : AT;
 
   const video = makeVideo();
-  const [stillImg, ...atlasImgs] = await Promise.all([bitmap(`${BASE}still.webp`), ...meta.atlases.map((a) => bitmap(BASE + a))]);
+  const [stillImg, skyImg, ...atlasImgs] = await Promise.all([bitmap(`${BASE}still.webp`), bitmap(`${BASE}sky.webp`), ...meta.atlases.map((a) => bitmap(BASE + a))]);
   if (video.readyState < 2) await Promise.race([once(video, "loadeddata"), once(video, "error")]);
 
   host.style.background = "#f2f0eb";
@@ -343,7 +420,9 @@ export async function createShutter(host, { embedded = false } = {}) {
   };
   const stillTex = texture(gl, stillImg, { mips: true });
   const atlasTex = atlasImgs.map((img) => texture(gl, img));
+  const skyTex = texture(gl, skyImg);
   stillImg.close?.();
+  skyImg.close?.();
   atlasImgs.forEach((i) => i.close?.());
   const liveTex = texture(gl, null);
   const pressTex = texture(gl, null);
@@ -351,6 +430,16 @@ export async function createShutter(host, { embedded = false } = {}) {
   const exp = target(gl, BW, BH, half) || target(gl, BW, BH, false);
   const VH = meta.video[1];
   let acc = [0, 1].map(() => target(gl, VW, VH, half) || target(gl, VW, VH, false));
+  // The live mean and the block integral carry mips: their coarse levels
+  // are the local mean the long exposure's colour is judged against. The
+  // levels are allocated now (a mip-filtered texture without them is
+  // incomplete and samples black) and refreshed whenever they are read.
+  for (const t of [exp, ...acc]) {
+    gl.bindTexture(gl.TEXTURE_2D, t.tex);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+    gl.generateMipmap(gl.TEXTURE_2D);
+  }
+  let accMips = false;
 
   const uploadVideo = (tex) => {
     if (video.readyState < 2) return false;
@@ -453,7 +542,15 @@ export async function createShutter(host, { embedded = false } = {}) {
       gl.bindFramebuffer(gl.FRAMEBUFFER, exp.fbo);
       gl.viewport(0, 0, BW, BH);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindTexture(gl.TEXTURE_2D, exp.tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
       expDirty = false;
+    }
+    const keep = shot.any && wB > 0 ? keepFor(T, N) : 0;
+    if (keep > 0 && !accMips) {
+      gl.bindTexture(gl.TEXTURE_2D, acc[0].tex);
+      gl.generateMipmap(gl.TEXTURE_2D);
+      accMips = true;
     }
 
     // 2. Compose the latent image.
@@ -468,6 +565,12 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1i(u.uStill, 0);
     gl.uniform1i(u.uFrame, 1);
     gl.uniform1i(u.uExp, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, skyTex);
+    gl.uniform1i(u.uSky, 3);
+    gl.uniform1f(u.uKeep, keep);
+    gl.uniform1f(u.uGain, keep > 0 ? gainFor(T, N) : 1);
+    gl.uniform2f(u.uLodM, Math.log2(VW * MEAN_FRAC), Math.log2(BW * MEAN_FRAC));
     gl.uniform2f(u.uSize, comp.w, comp.h);
     gl.uniform4fv(u.uCover, cover);
     gl.uniform1f(u.uWB, wB);
@@ -533,6 +636,7 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.viewport(0, 0, VW, VH);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     acc = [acc[1], acc[0]];
+    accMips = false;
     shot.L += w;
   };
 
@@ -729,7 +833,7 @@ export async function createShutter(host, { embedded = false } = {}) {
       dev.forEach((d) => freeTarget(gl, d));
       freeTarget(gl, exp);
       acc.forEach((t) => freeTarget(gl, t));
-      [stillTex, liveTex, pressTex, ...atlasTex].forEach((t) => gl.deleteTexture(t));
+      [stillTex, skyTex, liveTex, pressTex, ...atlasTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
