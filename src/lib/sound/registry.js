@@ -22,6 +22,7 @@ export const TAKES = {
   "lab/pull-vinyl/vinylTakes": () => import("../../app/lab/pull-vinyl/vinylTakes.js"),
   "lab/refractor/refractorTakes": () => import("../../app/lab/refractor/refractorTakes.js"),
   "lab/select/selectTakes": () => import("../../app/lab/select/selectTakes.js"),
+  "lab/shutter/shutterTakes": () => import("../../app/lab/shutter/shutterTakes.js"),
   "lab/smear/smearTakes": () => import("../../app/lab/smear/smearTakes.js"),
   "lab/snap-on/snapTakes": () => import("../../app/lab/snap-on/snapTakes.js"),
   "lab/steam/steamTakes": () => import("../../app/lab/steam/steamTakes.js"),
