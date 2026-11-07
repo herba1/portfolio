@@ -20,8 +20,8 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 //
 // Each material wets by its own physics. Porous surfaces (asphalt, concrete,
 // brick) darken and deepen in colour as water replaces the air in their
-// pores; concrete does it in blotches and dries back the same way; walls take
-// only wind-driven rain and streak downward. Asphalt's film turns its micro-
+// pores, evenly across a face, with only a slow unevenness over metres; walls
+// take only wind-driven rain. Asphalt's film turns its micro-
 // roughness to a sheen that reflects the street. Metal, paint and glass hardly
 // darken but bead. Leaves go darker and glisten. Puddles are level water:
 // mirrors whose reflection is found by marching the reflected ray through the
@@ -45,8 +45,14 @@ const UP = [-0.0061, 0.97514, -0.22151];
 const RIGHT = [0.99998, 0.00626, 0];
 const FWD = [0.00139, -0.2215, -0.97516];
 const PLANE = [-0.000439, 0.043731, -1.87755];
-// Sunlit / shade luminance on the same surface, after the photo's grade.
-const SUN_K = 4.2;
+// Sun+sky over sky alone: on the asphalt this is measured by the bake
+// (meta.sunOverSky, the same asphalt either side of the right-hand block's
+// shadow). A wall takes the summer sun at a glancing angle, so less of it.
+const SUN_GROUND = 25.5;
+const SUN_WALL = 12;
+// The overcast's light relative to the clear sky's shade light: a whole sky
+// of bright cloud, against the slot of blue a shaded street sees.
+const OVERCAST = 2.5;
 const ASPECT = IMG_W / IMG_H;
 const DROPS = 16000;
 
@@ -130,18 +136,35 @@ uniform float uDbg;
 uniform vec4 uCrop;      // the part of the photo on screen: x0, y0, w, h (image uv)
 ${COMMON}
 
-const float SUN_K = ${SUN_K.toFixed(2)};
+const float SUN_GROUND = ${SUN_GROUND.toFixed(2)};
+const float SUN_WALL = ${SUN_WALL.toFixed(2)};
+const float OVERCAST = ${OVERCAST.toFixed(2)};
 
-// The rain sky: a soft grey-blue nimbostratus, paler toward the street's end,
-// with slow darker masses drifting through it.
+// The storm deck without the cumulus: slate cobalt overhead, deepening toward
+// the zenith, a paler grey low over the street's end (and in the rain veil).
+vec3 stormBase(float y) {
+  float h = clamp(y / 0.62, 0.0, 1.0);
+  return mix(vec3(0.026, 0.042, 0.066), vec3(0.17, 0.19, 0.215), pow(h, 1.3));
+}
+
+// The rain sky is the photo's own sky gone over: the clear sky (sky matte
+// filled, skyclean) with the blue taken down to the storm deck, and the
+// cumulus darkened and cooled into the storm cloud. Its billows keep their
+// structure: the sky's luminance against a blur of itself, steepened, rides
+// on top, so the cloud stays a tower and the faint cirrus stays as streaks.
 vec3 rainSky(vec2 iuv) {
-  float h = clamp(iuv.y / 0.6, 0.0, 1.0);
-  vec3 top = vec3(0.155, 0.185, 0.225);
-  vec3 low = vec3(0.30, 0.33, 0.365);
-  vec3 c = mix(top, low, h * h);
+  vec3 cl = srgbToLinear(textureLod(uClean, iuv, 0.0).rgb);
+  float Y = luma(cl);
+  float Yb = luma(srgbToLinear(textureLod(uClean, iuv, 4.5).rgb));
+  float mx = max(cl.r, max(cl.g, cl.b));
+  float sat = (mx - min(cl.r, min(cl.g, cl.b))) / max(mx, 1e-4);
+  float cloud = smoothstep(0.45, 0.15, sat);
+  vec3 body = vec3(0.085, 0.1, 0.125) * (0.55 + 0.9 * smoothstep(0.3, 1.0, Y));
+  vec3 c = mix(stormBase(iuv.y), body, cloud);
+  c *= clamp(pow(max(Y, 1e-4) / max(Yb, 1e-4), 1.6), 0.3, 3.3);
+  // and it moves: slow darker masses in the deck
   float m = fbm3(vec3(iuv * vec2(1.6, 2.4) + vec2(uTime * 0.012, 0.0), uTime * 0.02));
-  float m2 = fbm3(vec3(iuv * vec2(5.0, 7.0) + vec2(uTime * 0.02, 3.0), uTime * 0.03));
-  return c * (0.74 + 0.44 * m + 0.12 * (m2 - 0.5));
+  return c * (0.84 + 0.32 * m);
 }
 
 // How far the cloud edge is from covering this point: the sun leaves the far
@@ -166,22 +189,40 @@ float sunAt(float z, vec2 iuv) {
 // the grey of an overcast, and the sky itself becomes the rain sky.
 vec3 relit(vec2 iuv, float lod, float sunNow, out float skyA) {
   vec3 c = srgbToLinear(textureLod(uPhoto, iuv, lod).rgb);
-  skyA = texture(uSky, iuv).r;
+  skyA = textureLod(uSky, iuv, lod).r;
   vec4 m = texture(uMat, iuv);
   float glass = (1.0 - smoothstep(0.02, 0.07, m.r)) * smoothstep(0.5, 0.65, m.b) * (1.0 - smoothstep(0.18, 0.3, m.g));
-  float lit = texture(uWater, iuv).a * 2.0 - 1.0;
-  vec3 clean = srgbToLinear(texture(uClean, iuv).rgb);
+  float lit = clamp(textureLod(uWater, iuv, 0.0).a * 2.0 - 1.0, 0.0, 1.0);
+  vec3 clean = srgbToLinear(textureLod(uClean, iuv, 0.0).rgb);
   // A mixed pixel (a wire against the sky) is skyA of clear sky plus the
   // rest of the wire: take the sky's share out, keep the wire.
   vec3 fg = max(c - skyA * clean, 0.0);
   vec3 surf = fg / max(1.0 - skyA, 0.04);
-  vec3 over = surf / (1.0 + clamp(lit, 0.0, 1.0) * (SUN_K - 1.0));
-  // overcast light is flat and grey: pull chroma in, cool it a touch
-  float yo = luma(over);
-  over = mix(vec3(yo), over, 0.72) * vec3(0.97, 1.0, 1.04) * 1.12;
+  // Take the sun out. The bake's sunlight matte is soft at the shadow edges,
+  // so divide geometrically (K^lit): half-lit edge pixels come out at the
+  // shade's level instead of a dark halo. Ground (and soffits, which the
+  // sun reached only by bounce off it) by the measured ratio, walls less.
+  vec4 g4 = texelFetch(uGeo, clamp(ivec2(iuv * vec2(MAP)), ivec2(0), MAP - 1), 0);
+  vec3 N = vec3(g4.b * 2.0 - 1.0, (g4.a - 0.75) * 4.0, 0.0);
+  N.z = sqrt(max(0.0, 1.0 - dot(N.xy, N.xy)));
+  float flat_ = smoothstep(0.55, 0.85, abs(dot(N, uUp)));
+  float K = exp2(mix(log2(SUN_WALL), log2(SUN_GROUND), flat_));
+  float ys = max(luma(surf), 1e-5);
+  float yo = ys * pow(K, -lit) * OVERCAST;
+  // A balcony's underside glowed with sunlight bounced up off the street;
+  // under cloud it sees only the dark wet road below it.
+  yo *= mix(1.0, 0.35, smoothstep(0.25, 0.7, -dot(N, uUp)));
+  // Wires, pole tops and roof edges against the sky are lit by that sky
+  // alone: under the storm they go to silhouette, darker than the cloud.
+  vec3 rs = rainSky(iuv);
+  float nearSky = textureLod(uSky, iuv, 3.0).r;
+  yo = mix(yo, min(yo, 0.6 * luma(rs)), smoothstep(0.25, 0.6, nearSky));
+  // Overcast light is flat and grey. The photo's shade is lit by blue sky
+  // and graded to cyan with its red crushed, so it gives up more of its
+  // chroma than the sunlit side does; then all of it cools a touch.
+  vec3 over = yo * (1.0 + (surf / ys - 1.0) * (0.3 + 0.45 * lit)) * vec3(0.97, 1.0, 1.04);
   // glass mirrors the sky, so it greys with it
   over = mix(over, mix(vec3(yo), over, 0.3) * 0.82, glass);
-  vec3 rs = rainSky(iuv);
   // the departing cloud's edge is lit from behind: a silver rim
   float rim = sunNow * (1.0 - sunNow) * 4.0;
   rs = mix(rs, vec3(0.62, 0.64, 0.66), rim * 0.55);
@@ -274,7 +315,7 @@ void main() {
   vec3 P = viewRay(iuv) * z;
   vec4 mat = texture(uMat, iuv);
   float por = mat.r, gloss = mat.g, bead = mat.b, fol = mat.a * 2.0 - 1.0;
-  vec4 wat = texture(uWater, iuv);
+  vec4 wat = textureLod(uWater, iuv, 0.0);
   float fillT = wat.r / 0.96;
   fillT *= fillT;
   float dep = wat.g;
@@ -293,12 +334,16 @@ void main() {
   // --- how wet this surface is ------------------------------------------
   // Supply: rain that reached it (overhangs shelter, walls take less).
   float vert = 1.0 - abs(dot(N, uUp));
-  float supply = uAcc * (0.3 + 0.7 * expo) * mix(1.0, 1.25, vert);
-  // Porosity varies: concrete and brick wet and dry in blotches; on vertical
-  // faces the blotches run downward with the water.
+  // A wall takes wind-driven rain over the whole face, a little more toward
+  // the open sky above it: take only the bake's broadest trend (its per-
+  // patch exposure on walls is blotchy), so a face wets as one surface.
+  float expoW = mix(expo, 0.3 + 0.55 * textureLod(uWater, iuv, 6.0).b, smoothstep(0.3, 0.7, vert));
+  float supply = uAcc * (0.3 + 0.7 * expoW) * mix(1.0, 1.25, vert);
+  // Porosity varies slowly across a surface (a few metres; longer down a
+  // wall, where the water runs): a gentle unevenness, never patches.
   float yUp = dot(P, uUp);
-  vec3 bp = vec3(dot(P, uRight), yUp * mix(1.0, 0.5, vert), dot(P, uFwd)) * mix(1.9, 3.4, vert);
-  float blot = fbm3(bp);
+  vec3 bp = vec3(dot(P, uRight), yUp * mix(1.0, 0.45, vert), dot(P, uFwd)) * 0.22;
+  float blot = vnoise3(bp + 3.7);
   // First drops on dry ground: dark spots, one per ~13 cm cell, appearing
   // one by one until they merge (drawn a little large, ~4-9 cm, to read at print size).
   float spots = 0.0;
@@ -316,16 +361,16 @@ void main() {
       }
     spots *= 1.0 - smoothstep(18.0, 40.0, dist);
   }
-  float onset = 0.06 + 0.2 * blot * por + 0.1 * vert;
+  float onset = 0.06 + 0.12 * blot * por + 0.1 * vert;
   float wetIn = max(smoothstep(onset, onset + 0.3, supply), spots * 0.85);
   // Drying: thin films go first, in the sun first; porous concrete holds on,
   // shade holds on.
-  float cap = mix(0.16, 0.5, por * por) * (0.6 + 0.8 * blot) + 0.22 * vert;
+  float cap = mix(0.16, 0.5, por * por) * (0.8 + 0.4 * blot) + 0.22 * vert;
   cap += 0.25 * (1.0 - lit);
   float ev = uEvap * (0.55 + 0.45 * lit);
   float wet = wetIn * (1.0 - smoothstep(cap - 0.06, cap + 0.06, ev)) * surf;
   // a surface that was dry stays dry under its rain shadow
-  wet *= smoothstep(0.02, 0.2, expo + 0.05 * isGround);
+  wet *= smoothstep(0.02, 0.2, expoW + 0.05 * isGround);
 
   // --- standing water ----------------------------------------------------
   float water = 0.0;
@@ -346,7 +391,7 @@ void main() {
   vec3 c = col;
   float yl = luma(c);
   c = mix(vec3(yl), c, 1.0 + 0.45 * dark);
-  c *= 1.0 - 0.62 * dark * (0.8 + 0.4 * blot);
+  c *= 1.0 - 0.62 * dark * (0.9 + 0.2 * blot);
   // leaves: darker, greener
   c = mix(c, c * vec3(0.78, 0.86, 0.8), fol * wet * 0.6);
 
@@ -429,8 +474,9 @@ void main() {
   }
 
   // Rain veil: in a downpour the street's far end goes soft and grey.
-  float veil = (1.0 - exp(-dist / 260.0)) * uRain * surf;
-  c = mix(c, rainSky(vec2(0.5, 0.55)) * 1.05, veil * 0.78);
+  // (Not on wires and edges against the sky itself: they are already sky.)
+  float veil = (1.0 - exp(-dist / 260.0)) * uRain * surf * (1.0 - smoothstep(250.0, 400.0, dist));
+  c = mix(c, stormBase(0.6) * 1.1, veil * 0.78);
 
   // Steam, sparingly: sun on wet, warm asphalt just after the shower.
   float steam = isGround * wet * sunNow * lit * (1.0 - smoothstep(0.0, 0.6, uEvap)) * smoothstep(0.02, 0.15, uEvap);
@@ -686,11 +732,11 @@ export async function createYuudachi(host, { embedded = false } = {}) {
   );
   const tex = {
     photo: imageTexture(gl, photoImg, { mips: true }),
-    sky: imageTexture(gl, skyImg),
+    sky: imageTexture(gl, skyImg, { mips: true }),
     geo: imageTexture(gl, geoImg, { nearest: true }),
     mat: imageTexture(gl, matImg),
-    water: imageTexture(gl, waterImg),
-    clean: imageTexture(gl, cleanImg),
+    water: imageTexture(gl, waterImg, { mips: true }),
+    clean: imageTexture(gl, cleanImg, { mips: true }),
   };
 
   const quad = gl.createBuffer();
