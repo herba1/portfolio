@@ -3,13 +3,17 @@ import { readWebm } from "./webm";
 
 // Datamosh: a video codec run live, so its reference frame can be lost.
 //
-// Nine seconds out of a train window on a summer afternoon: cumulus, wires,
-// poles, a belt of trees running past. The clip ships twice over: once as a
-// plain VP9 file (the pictures), and once as what an encoder would have
-// written about it, a motion vector for every macroblock of every frame,
-// found offline by block matching (tools/depth/bakes/datamosh/mv.py: 16x16
-// macroblocks split into 8x8 partitions where that pays, half-pel vectors,
-// a rate cost toward the neighbours' median, intra where nothing matches).
+// Nine seconds of a rail journey in two shots and a hard cut. Six seconds
+// out of a train window on a summer afternoon: cumulus, wires, poles, a
+// belt of trees running past, all of it one slow lateral pan. Then three
+// seconds down the line in winter, the track coming at the camera out of a
+// vanishing point between pines: close, fast, and every vector radial. The
+// clip ships twice over: once as a plain VP9 file (the pictures), and once
+// as what an encoder would have written about it, a motion vector for every
+// macroblock of every frame, found offline by block matching
+// (tools/depth/bakes/datamosh/mv.py: 16x16 macroblocks split into 8x8
+// partitions where that pays, half-pel vectors, a rate cost toward the
+// neighbours' median, intra where nothing matches).
 //
 // The browser then runs both halves of a codec, frame by frame, on the GPU.
 //
@@ -18,8 +22,8 @@ import { readWebm } from "./webm";
 // frame, puts it through an 8x8 DCT, quantises it with a dead zone (so
 // most blocks whose prediction was good enough send nothing at all), and
 // adds the dequantised residual back: a closed loop, with an I-frame (the
-// plain picture) every three seconds and intra blocks where the bake said
-// so.
+// plain picture) every three seconds and on the cut, where the encoder put
+// its own keyframe, and intra blocks where the bake said so.
 //
 // The decoder D receives exactly what E sent: the I-frames, the vectors,
 // the intra blocks and the quantised residuals, and rebuilds the picture
@@ -31,14 +35,18 @@ import { readWebm } from "./webm";
 // so only what moves or changes appears: the tree line, the edges of the
 // drifting cloud, a pole, set into the paper.
 //
-// Press and hold and the I-frames stop reaching the decoder (the loop seam,
-// a real cut back to the start of the clip, is one of them), and within a
-// fifth of a second the residuals stop too. Only the vectors are left, and
-// the train's real motion keeps shoving a picture that is no longer the one
-// they were measured on: the tree line drags up into the sky, low cloud
-// tears into strips on the macroblock grid, the fence combs out, and a pole
-// the encoder sent as intra blocks stays standing after the train has left
-// it. Drag while holding and the clip is fed faster than real time, so its
+// Press and hold and the I-frames stop reaching the decoder, and within a
+// fifth of a second the residuals stop too. Only the vectors are left. In
+// the first shot they shove a picture that is no longer the one they were
+// measured on: the tree line drags into the sky, the fence combs out. The
+// real event is the cut. Its I-frame (and the loop seam's, the cut back) is
+// the one that matters to drop: the winter shot's vectors then arrive with
+// nothing of their own to move, and push the summer picture instead. The
+// sky blooms out of the vanishing point over the whole frame, cloud pours
+// down the sides in radial strips on the macroblock grid, and the rails are
+// drawn in moving sky and tree. Over the seam it runs the other way: the
+// lateral pan drags the winter picture sideways. Drag while holding and the
+// clip is fed faster than real time, so it reaches the cut sooner and its
 // motion pushes harder. Let go and a column of intra blocks sweeps the
 // macroblock columns, as a periodic intra refresh does, and the picture is
 // clean again behind it.
@@ -47,11 +55,11 @@ import { readWebm } from "./webm";
 // frame by frame from the start, as fast as it can); ?hold=seconds holds it
 // for that long before t; ?release=seconds lets go that long before t (the
 // refresh mid-sweep); ?join=1 shows the opening (?join=0 skips it live);
-// ?qp= sets the encoder's quantiser.
+// ?qp= sets the encoder's quantiser. ?t=8&hold=4 holds over the cut (6 s).
 
 const ASSET = "/lab/datamosh/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
-const GOP = 90; // frames between I-frames
+const GOP = 90; // frames between I-frames (the cut, frame 180, is one too)
 const QP0 = 30; // encoder quantiser (H.264 scale)
 const LET_GO = 0.2; // s over which a hold lets the residual go
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
@@ -329,7 +337,8 @@ function openStream(webm, config, onError) {
     while (!closed && queue.length + decoder.decodeQueueSize < ahead) {
       const i = fed % n;
       const f = webm.frames[i];
-      decoder.decode(new EncodedVideoChunk({ type: i === 0 ? "key" : "delta", timestamp: fed * 1000, data: f.data }));
+      // VP9 keyframes as the muxer flagged them: libvpx put one on the cut
+      decoder.decode(new EncodedVideoChunk({ type: i === 0 || f.key ? "key" : "delta", timestamp: fed * 1000, data: f.data }));
       fed++;
     }
   };
@@ -566,16 +575,17 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   const tick = () => {
     const frame = stream.queue.shift();
     if (!frame) return false;
+    // a still only needs the stream from shortly before its hold: frames
+    // before that are decoded and dropped, and the codec starts on an I-frame
+    if (still && seq < warmFrom) {
+      frame.close();
+      seq++;
+      return true;
+    }
     gl.bindTexture(gl.TEXTURE_2D, srcTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, frame);
     frame.close();
     const idx = seq % N;
-    // a still only needs the stream from shortly before its hold: frames
-    // before that are decoded and dropped, and the codec starts on an I-frame
-    if (still && seq < warmFrom) {
-      seq++;
-      return true;
-    }
     let held = press;
     if (still) held = seq >= holdFrom && seq < releaseFrom;
     if (held) heldFrames++;
@@ -593,7 +603,9 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     if (held) refresh = 0;
     const heldS = heldFrames / FPS;
     const gain = held ? 1 - clamp(heldS / LET_GO, 0, 1) : 1;
-    const iframe = idx % GOP === 0 || seq === 0 || (still && seq === warmFrom);
+    // I-frames on the GOP and wherever the stream itself has a keyframe
+    // (the scene cut): a held decoder drops them all
+    const iframe = idx % GOP === 0 || webm.frames[idx].key || seq === 0 || (still && seq === warmFrom);
     if (joining && iframe && seq > 0) joining = false;
     codecStep(idx, { iframe, held: held || joining, gain, refresh });
     seq++;
@@ -610,12 +622,31 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   let destroyed = false;
   let readyDone = false;
   let shown = 0;
+  // A still is built as fast as the GPU goes, but never further ahead of
+  // it than a few codec steps: a fence per batch, and no new batch until
+  // the last has landed. Queuing a whole hold at once on a software GL
+  // stalls the page for minutes and can take the GPU process down.
+  let fence = null;
+  const gpuBusy = () => {
+    if (!fence) return false;
+    if (gl.clientWaitSync(fence, 0, 0) === gl.TIMEOUT_EXPIRED) return true;
+    gl.deleteSync(fence);
+    fence = null;
+    return false;
+  };
+  const fenced = () => {
+    fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    gl.flush();
+  };
   const frame = (dt) => {
     if (destroyed || failed) return;
+    if (still && gpuBusy()) return;
     if (seq > 0 && on < 1) on = joining ? 1 : Math.min(1, on + dt / 0.6);
     if (still) {
-      // decode straight through to the still, then hold it
-      for (let i = 0; i < 24 && seq < stopAt; i++) if (!tick()) break;
+      // decode straight through to the still, then hold it: dropped frames
+      // are free, codec steps go a few to a batch
+      const from = Math.max(seq, warmFrom);
+      for (let i = 0; i < 48 && seq < stopAt && seq < from + 3; i++) if (!tick()) break;
       if (seq >= stopAt) on = 1;
     } else {
       // dragging while held feeds the decoder faster: the clip runs under
@@ -639,13 +670,15 @@ export async function createDatamosh(host, { embedded = false } = {}) {
     }
     if (!still) present();
     else if (seq >= stopAt && shown < 3) {
-      // a still is drawn a few times, then left alone
+      // a still is drawn a few times, then left alone; it is marked done
+      // once the GPU has caught up with the last of it
       present();
-      if (++shown === 3) {
-        stream.close();
-        host.dataset.still = "";
-      }
+      shown++;
+    } else if (seq >= stopAt && host.dataset.still == null) {
+      stream.close();
+      host.dataset.still = "";
     }
+    if (still && seq > 0 && host.dataset.still == null) fenced();
   };
   stage.onFrame(frame);
   void embedded;
@@ -656,6 +689,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
       stream.close();
       for (const t of [srcTex, mvTex, ...E, ...D, ...R]) gl.deleteTexture(t);
       for (const f of fbos.values()) gl.deleteFramebuffer(f);
+      if (fence) gl.deleteSync(fence);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       for (const s of [resid, dct, step, show]) gl.deleteProgram(s.p);

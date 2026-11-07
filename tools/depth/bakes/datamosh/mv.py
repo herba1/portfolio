@@ -1,6 +1,6 @@
 # Datamosh bake: block motion estimation, the way an encoder does it.
 #
-#   python3 -I mv.py <clip.webm> <out.bin> [range_px]
+#   python3 -I mv.py <clip.webm> <out.bin> [range_px] [vrange_px]
 #
 # Reads the shipped clip back (the exact frames the browser will decode),
 # and for every frame n >= 1 searches frame n-1 for each 16x16 macroblock,
@@ -28,6 +28,9 @@ import numpy as np
 
 src, out = sys.argv[1], sys.argv[2]
 RANGE = int(sys.argv[3]) if len(sys.argv) > 3 else 56
+# vertical search range: a lateral pan barely needs one, a shot moving into
+# depth needs it as wide as the horizontal
+VRANGE = int(sys.argv[4]) if len(sys.argv) > 4 else max(8, RANGE // 3)
 W, H = 1280, 720
 GW, GH = W // 8, H // 8
 MW, MH = W // 16, H // 16
@@ -152,7 +155,7 @@ for cur in frames():
         continue
     # --- quarter resolution full search: 4x4 blocks = 16x16 MBs
     c4, r4 = down(down(cur)), down(down(prev))
-    rx4, ry4 = RANGE // 4, max(2, RANGE // 12)
+    rx4, ry4 = RANGE // 4, max(2, VRANGE // 4)
     costs = full_search(c4, r4, 4, rx4, ry4)
     # temporal + spatial predictor: last frame's MB vectors (in quarter px)
     tp = prev_v.reshape(MH, 2, MW, 2, 2).mean(axis=(1, 3)) / 8.0
