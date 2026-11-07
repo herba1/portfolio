@@ -1,0 +1,30 @@
+{
+  "title": "Develop",
+  "description": "A railway mast in Ine, Kyoto, from underneath against summer cumulus, coming up like a print in a darkroom tray, except that the developer runs through the scene's depth rather than across the paper. It opens as a print does, the darkest, nearest steel first. Drag and a thin band of warm light carries on through the depth; start from a blank sheet on the sky and it runs the other way, from the far sky towards you. Behind it the photograph has arrived, sharp and in full colour. Ahead of it the scene is not there yet: a pale latent negative, out of focus with real disc bokeh whose size grows with the depth still to cover, its strata lifted slightly towards you and waiting to settle. Let go and the front carries your speed, then the print settles. Drag back to undo it.",
+  "tags": ["WebGL", "Depth", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "One depth-keyed reveal from herb's CrowdVolt depth research (factory/reality/crowdvolt-depth-heroes.md: a front sweeps a key 0..1 through depth; scan, focus pull, assemble, strata), finished as a title sequence with the quality of a print coming up in a darkroom tray, in the summer-film genre (factory/reality/genre-spec.md). References: Saul Bass's and Pablo Ferro's title sequences that reveal an image by a moving edge (https://www.artofthetitle.com/), and the darkroom print emerging in developer (https://en.wikipedia.org/wiki/Photographic_developer).",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.85], "to": [0.6, 0.45] },
+  "probe": [
+    { "idle": 3400 },
+    { "drag": [[0.6, 0.85], [0.6, 0.55]], "ms": 1400 },
+    { "idle": 1600 },
+    { "drag": [[0.6, 0.55], [0.6, 0.75]], "ms": 900 },
+    { "idle": 1400 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
+      "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "6000x4000, Ine, Kyoto Prefecture, Sony a7 IV, shipped at 2400x1600. Depth Anything V2 Small (tools/depth/depth_hr.py), prepared as in herb's notes (percentile normalise, median, dilate near values, slight blur). Split into two layers: the sky with every pole, girder and wire painted out (log-light normalised-convolution fill, two rounds so cloud seen through the lattice carries across the bars), and the structure as a known-background matte over it (alpha = (I-B).(F-B)/|F-B|^2; wires found by a black-hat on luma). Bake: tools/depth/bakes/develop/bake.py."
+    },
+    "factory/reality/crowdvolt-depth-heroes.md",
+    "https://en.wikipedia.org/wiki/Photographic_developer",
+    "https://en.wikipedia.org/wiki/Bokeh",
+    "https://rassokhin-video.pages.dev/articles/what-is-halation-effect-dehancer-guide"
+  ]
+}
