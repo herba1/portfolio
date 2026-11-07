@@ -1,23 +1,26 @@
 import { createStage, clamp, damp } from "../_kit/stage";
 import { createFilm } from "../_kit/film";
 
-// Crossing: a summer photograph of a Japanese level crossing that comes apart
-// into the planes it was made of, like a paper diorama or the 1937 Disney
-// multiplane camera.
+// Crossing: a summer photograph of a Japanese level crossing, taken from
+// below, that comes apart into the planes it was made of, like a paper
+// diorama or the 1937 Disney multiplane camera.
 //
-// tools/depth/bakes/crossing cut the photo offline into seven planes at its
-// depth discontinuities (sky; far town; poles, wires and hedges; the tree and
-// verge; the right barrier; the near signal; the foreground boards). Each is
-// a cut-out with a colour-unmixed matte, and continues behind the planes in
-// front of it with inpainted texture, so a gap shows what was really there.
+// The photo looks up past the crossbuck and lamp heads into the sky, the
+// wires fanning up to the right. tools/depth/bakes/crossing cut it offline
+// into seven planes at its depth discontinuities (sky; far houses; wires;
+// barrier boom; the old house on the left; the signal; the camellia). Each is
+// a cut-out with a colour-unmixed matte and continues behind the planes in
+// front of it with inpainted texture, so a gap shows what was really there;
+// the wires run on whole behind the post and lamps, and the sky is one
+// opaque back card filled from a dilated matte, with no ghost of a wire.
 //
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
 // exactly however far apart the planes are. Dragging (or tilting a phone)
 // spreads them in z and swings the camera round a pivot inside the stack, so
 // the separation becomes visible as real perspective: the planes slide past
-// each other, the sky card stands far back, the near signal floats forward,
-// and each card throws a soft, skylight-blue shadow on the cards behind it,
+// each other, the sky card stands far back, the signal floats forward, and
+// each card throws a soft, skylight-blue shadow on the cards behind it,
 // sharp near and wider as the gap grows. The lens focuses on the plane under
 // the pointer with a disc-shaped (not Gaussian) circle of confusion per
 // plane, CoC = A * |z - z_focus| / z, opening as the stack spreads. Release
@@ -27,26 +30,26 @@ import { createFilm } from "../_kit/film";
 
 const ASSET = "/lab/crossing/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
-const PHOTO = [2048, 1365];
-const MATTE = [512, 341];
+const PHOTO = [2048, 1356];
+const MATTE = [512, 339];
 // From layers.json (bake.py): each plane's crop rect in photo uv.
 const PLANES = [
-  { rect: [0, 0, 1, 0.78755], o: 0.66 }, // sky
-  { rect: [0, 0, 1, 1], o: 0.4 }, // far town
-  { rect: [0, 0, 1, 1], o: 0.12 }, // poles, wires, hedges
-  { rect: [0, 0.48718, 1, 1], o: -0.06 }, // tree, verge
-  { rect: [0, 0.1663, 1, 1], o: -0.21 }, // right barrier
-  { rect: [0.02246, 0, 1, 1], o: -0.35 }, // near signal
-  { rect: [0.18848, 0.78315, 0.9751, 1], o: -0.5 }, // foreground boards
+  { rect: [0, 0, 1, 1], o: 0.66 }, // sky
+  { rect: [0.18262, 0.28171, 1, 1], o: 0.38 }, // far houses, trees
+  { rect: [0.25879, 0.18879, 1, 0.92625], o: 0.2 }, // wires
+  { rect: [0.85742, 0.15708, 1, 1], o: 0.08 }, // barrier boom, mast
+  { rect: [0, 0.44248, 0.51025, 1], o: -0.06 }, // the old house
+  { rect: [0.50732, 0.15192, 0.83545, 1], o: -0.24 }, // the signal
+  { rect: [0.01367, 0.83038, 0.37988, 1], o: -0.42 }, // camellia
 ];
 const N = PLANES.length;
-const PIVOT_O = 0.02; // the camera swings round this depth (between poles and tree)
+const PIVOT_O = 0.0; // the camera swings round this depth (between the boom and the house)
 const SPREAD = 1.0; // plane offsets are o * SPREAD * print width at split 1
 const FOVY = 30; // degrees
 const MAX_YAW = 21;
 const MAX_PITCH = 11;
 const APERTURE = 15; // CoC in css px for a plane at |z - zf| / z = 1, at split 1
-const LIGHT = normalize([-0.17, 0.25, 1]); // toward the sun: up, left, toward us
+const LIGHT = normalize([0.18, 0.28, 1]); // toward the sun: up, right (the eave's shadow on the wall), toward us
 const HAZE = [0.86, 0.93, 0.95];
 
 const FILM = {
@@ -171,14 +174,16 @@ void main() {
     vec3 shade = mix(vec3(0.64, 0.72, 0.84), vec3(1.0), lit);
     c.rgb *= mix(vec3(1.0), shade, uShadow);
   }
-  // Summer sky toward cobalt: the photo's sky is cyan (~192 deg); pull the
-  // green out of saturated blues only (hue to ~205, deeper), leaving cloud,
-  // foliage and the yellow signals alone.
+  // Summer sky toward cobalt: pull the green out of saturated blues only
+  // (hue to ~210, deeper), leaving cloud, foliage and the yellow signals
+  // alone, and more so toward the top of the photo, which here looks up
+  // toward the zenith. Photo uv, so the flat print and the cards agree.
   if (c.a > 0.0) {
     vec3 u = c.rgb / c.a;
     float w = smoothstep(0.08, 0.34, u.b - u.r) * smoothstep(0.0, 0.1, u.b - u.g + 0.08);
-    u.g -= 0.26 * (u.b - u.r) * w;
-    u *= 1.0 - 0.08 * w;
+    float zen = 1.0 - smoothstep(0.0, 0.75, vUv.y);
+    u.g -= (0.24 + 0.1 * zen) * (u.b - u.r) * w;
+    u *= 1.0 - (0.06 + 0.1 * zen) * w;
     c.rgb = u * c.a;
   }
   // The air between the cards: farther planes take a little sky haze.
@@ -628,7 +633,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const by = breathe * 0.4 * Math.sin((t * 2 * Math.PI) / 12.1);
     const bp = breathe * 0.3 * Math.sin((t * 2 * Math.PI) / 9.7 + 1.1);
 
-    // Focus follows the plane under the pointer (or the near signal).
+    // Focus follows the plane under the pointer (or the signal).
     if (!held && (grab || p.inside) && split.x > 0.04) focusK.to = pick(p.x, p.y);
     else if (!held && split.x < 0.02) focusK.to = focusDefault;
     focusK.x = damp(focusK.x, focusK.to, 1 / 0.28, dt);

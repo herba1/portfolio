@@ -90,9 +90,14 @@ def shiftfill(img, known, need, base, seed=0, T=160, q=4, cands=500, R=150):
         w = (wy if di else 1 - wy) * (wx if dj else 1 - wx)
         sh = S[ii, jj]
         has = ~np.isnan(sh[..., 0])
-        sy = np.clip(yy + np.nan_to_num(sh[..., 0]).astype(np.int32) * q, 0, H - 1)
-        sx = np.clip(xx + np.nan_to_num(sh[..., 1]).astype(np.int32) * q, 0, W - 1)
-        ok = has & known[sy, sx] & need
+        ry = yy + np.nan_to_num(sh[..., 0]).astype(np.int32) * q
+        rx = xx + np.nan_to_num(sh[..., 1]).astype(np.int32) * q
+        # a source off the frame is no source: clamping it would smear the
+        # edge row into streaks
+        inside = (ry >= 0) & (ry < H) & (rx >= 0) & (rx < W)
+        sy = np.clip(ry, 0, H - 1)
+        sx = np.clip(rx, 0, W - 1)
+        ok = has & inside & known[sy, sx] & need
         w = w * ok + 1e-6 * ok
         acc += img[sy, sx] * w[..., None]
         wsum += w
