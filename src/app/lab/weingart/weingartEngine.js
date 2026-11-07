@@ -7,23 +7,31 @@
 // breaks into an uneven staircase hinged on the margin. Each line steps by
 // a fraction of its own body, so big type takes big steps and small type
 // small ones, and every line fans out at its own slope. Sorts of the same
-// ink are solid bodies: a staircase
-// that comes down onto a neighbouring line shoves just the sorts it lands
-// on, which breaks that line into its own staircase, and so on down the
-// chain, until something meets the chase and the whole run locks. Only the
-// red run, printed in a second pass, crosses the black, and where it does
-// the two inks make a third.
+// ink are solid bodies: a staircase that comes down onto a neighbouring
+// line shoves the sorts it lands on, and the run ahead of them, down a
+// step, which breaks that line into its own staircase, and so on down the
+// chain. Lead stays in contact: no sort ever hangs more than its own body
+// below the one before it, and the brass rule and the reversed slug step
+// as one body, each joint filled by a riser, so a full push ends as one
+// continuous staircase, never as dashes or labels. When a step would need
+// the margin to give, the whole run locks. Only the red run, printed in a
+// second pass, crosses the black, and where it does the two inks make a
+// third.
 // ?t=0..1 holds a still of "Here" pushed down through the forme.
 import { createStage, clamp } from "../_kit/stage";
 
 // Design space the forme is composed in, fitted into the piece box.
 const DW = 1000;
 const DH = 600;
-// One step, as a fraction of a line's own body: display type by a twelfth
-// of its em; small type, set in word slugs, and brass rule by a third of
-// their body. A step runs right by half its drop.
-const STEP_EM = 1 / 12;
+// One step, as a fraction of a line's own body: display type by a sixth of
+// its em, enough to read as a step on purpose and not as a sagging
+// baseline; small type, set in word slugs, by a third of its body. Brass
+// rule steps by its whole face and a reversed slug by half its ground, so
+// their steps read as cut, never as a rule or a slug knocked out of true.
+// Every step runs right by half its drop.
+const STEP_EM = 1 / 6;
 const STEP_BODY = 1 / 3;
+const STEP_GROUND = 1 / 2;
 const STEP_RUN = 0.5;
 // The steepest a line can swing: drop from one sort to the next over the
 // sort's average width. A line of small steps takes more of them to get there.
@@ -39,6 +47,9 @@ const SIDE = 0.06;
 const GAP = 8;
 // Body above and below a rule's face, so it never sits on a baseline as an underline.
 const RULE_LEAD = 6;
+// A display sort's body above the baseline, in em; a reversed slug's ground, design px.
+const CAP = 0.74;
+const REV_H = 24;
 // Seconds between neighbouring sorts seating, left to right; and between links of a chain.
 const STAGGER = 0.034;
 const STAGGER_HELD = 0.014;
@@ -59,8 +70,9 @@ const FORME = [
   { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
   { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
   { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
-  // The rule is made up from brass pieces of the lengths a case actually holds.
-  { rule: true, pieces: [96, 144, 72, 120, 48, 96], thick: 12, x: 0, y: 392 },
+  // The rule is made up from brass pieces of the lengths a case actually holds,
+  // and runs out across the red, between the colon's points.
+  { rule: true, pieces: [96, 144, 72, 120, 48, 96, 72, 96], thick: 12, x: 0, y: 388 },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 436 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
@@ -90,13 +102,16 @@ export async function createWeingart(host) {
 
   let held = null;
 
-  // A line's own step, to the half pixel.
+  // A line's own step, to the half pixel, and its reach: the most whole
+  // steps one sort can sit below (or above) its left neighbour. That is its
+  // own body height, so a sort never loses contact with the one before it:
+  // lead stays in contact, it does not float. A rule's body is its face
+  // and the lead either side of it, which the riser at each joint fills.
   const stepOf = (d) => {
-    const body = d.rule ? d.thick * STEP_BODY : d.size >= LETTER_MIN ? d.size * STEP_EM : d.size * STEP_BODY;
-    const sy = Math.round(body * 2) / 2;
-    // Brass drops straight down: its pieces stay butted end to end, so a
-    // broken rule still reads as one rule cut, not as a dashed line.
-    return { sy, sx: d.rule ? 0 : sy * STEP_RUN };
+    const step = d.rule ? d.thick : d.rev ? REV_H * STEP_GROUND : d.size >= LETTER_MIN ? d.size * STEP_EM : d.size * STEP_BODY;
+    const sy = Math.round(step * 2) / 2;
+    const body = d.rule ? d.thick + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
+    return { sy, sx: sy * STEP_RUN, reach: Math.max(1, Math.floor(body / sy + 1e-6)) };
   };
 
   const slugs = FORME.map((d, i) => ({
@@ -143,6 +158,12 @@ export async function createWeingart(host) {
           s.units.push(sort(s.cx[i0], s.cx[end] - s.cx[i0], { i0, i1, desc: /[gjpqy,]/.test(m[0]) }));
         }
       }
+      // Each sort's printed ink, from its own origin, for telling when two
+      // sorts of one line would print over each other.
+      for (const u of s.units) {
+        const m = ctx.measureText(s.text.slice(u.i0, u.i1));
+        u.ink = { x0: -m.actualBoundingBoxLeft, x1: m.actualBoundingBoxRight, y0: -m.actualBoundingBoxAscent, y1: m.actualBoundingBoxDescent };
+      }
       s.units[0].first = true;
       s.units[s.units.length - 1].last = true;
     }
@@ -161,14 +182,62 @@ export async function createWeingart(host) {
   // out uneven (0, 0, 1, 2, then 0, 1, 2, 4) the way hand-set steps do. No
   // line swings steeper than STEEP: past that it is locked. Returns false
   // if the push cannot be made.
+  // A sort's ink at offset o steps, with a hair of clearance.
+  const inkRect = (s, u, o) => ({
+    x: s.x + u.x + o * s.sx + u.ink.x0 - 1,
+    y: s.y + o * s.sy + u.ink.y0 - 1,
+    w: u.ink.x1 - u.ink.x0 + 2,
+    h: u.ink.y1 - u.ink.y0 + 2,
+  });
+  // Lead cannot pass through lead: a sort stepped up runs back left, so it
+  // can only rise until it meets the shoulder of the sort before it. (Rule
+  // and reversed ground are one body, joined by their risers.)
+  const clash = (s, w) => {
+    if (s.rule || s.rev) return false;
+    let p = -1;
+    for (let i = 0; i < w.length; i++) {
+      if (!s.units[i].vis) continue;
+      if (p >= 0 && w[i] < w[p]) {
+        const a = inkRect(s, s.units[p], w[p]);
+        const b = inkRect(s, s.units[i], w[i]);
+        if (b.x < a.x + a.w && b.y < a.y + a.h && a.y < b.y + b.h) return true;
+      }
+      p = i;
+    }
+    return false;
+  };
+
+  // No sort may sit more than its reach from its left neighbour either: the
+  // run stays in contact the way real lead does, and past that it locks.
   const shove = (s, v, j, dir) => {
     if (j <= 0) return false;
     const k = (v[j] + dir) / j;
     if (Math.abs(k) * s.sy > STEEP * s.pitch) return false;
-    for (let i = 1; i < v.length; i++) {
+    const w = v.slice();
+    for (let i = 1; i < w.length; i++) {
       const at = Math.trunc(i * k + dir * 1e-6);
-      v[i] = dir > 0 ? Math.max(v[i], at) : Math.min(v[i], at);
+      w[i] = dir > 0 ? Math.max(w[i], at) : Math.min(w[i], at);
+      if (Math.abs(w[i] - w[i - 1]) > s.reach) return false;
     }
+    if (clash(s, w)) return false;
+    for (let i = 1; i < w.length; i++) v[i] = w[i];
+    return true;
+  };
+  // A line that is shoved is not swung: the sort it is hit on goes down
+  // (dir) one step, and carries with it every sort ahead of it that sits on
+  // its level, so a stair ahead keeps its treads and the line breaks
+  // exactly where it was hit. A sort may not hang more than its reach from
+  // the sort behind it, so where the step would part them, the sort behind
+  // comes too, back toward the margin. If that reaches the first sort the
+  // margin holds and the run locks. Returns false then.
+  const carry = (s, v, j, dir) => {
+    if (j <= 0) return false;
+    const w = v.slice();
+    w[j] += dir;
+    for (let i = j + 1; i < w.length; i++) w[i] = dir > 0 ? Math.max(w[i], w[i - 1]) : Math.min(w[i], w[i - 1]);
+    for (let i = j; i > 0 && Math.abs(w[i] - w[i - 1]) > s.reach; i--) w[i - 1] = w[i] - dir * s.reach;
+    if (w[0] !== v[0] || clash(s, w)) return false;
+    for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
   // A line dragged d steps from base by its sort j, or null where it locks.
@@ -185,25 +254,53 @@ export async function createWeingart(host) {
     if (s.rule) return { x, y: y - RULE_LEAD, w: u.w, h: s.thick + RULE_LEAD * 2 };
     if (s.rev) {
       const l = u.first ? 10 : 0;
-      return { x: x - l, y: y - 17, w: u.w + l + (u.last ? 10 : 0), h: 24 };
+      return { x: x - l, y: y - 17, w: u.w + l + (u.last ? 10 : 0), h: REV_H };
     }
     const desc = u.desc ? s.size * 0.2 : 0;
     // A letter's shoulder is trimmed to its sidebearings, so a sort can step
     // down past the edge of one in the line below instead of catching on air.
     const w = Math.max(u.w, s.size * 0.3);
     const side = s.kind === "letter" ? s.size * SIDE : 0;
-    return { x: x + side, y: y - s.size * 0.74, w: w - side * 2, h: s.size * 0.74 + desc };
+    return { x: x + side, y: y - s.size * CAP, w: w - side * 2, h: s.size * CAP + desc };
   };
-  const rectsAt = (s, v) => {
+  // What prints of one sort: a rule's face without its lead, a reversed
+  // word's solid ground.
+  const faceRect = (s, u, o) => {
+    const r = unitRect(s, u, o);
+    return s.rule ? { x: r.x, y: r.y + RULE_LEAD, w: r.w, h: s.thick } : r;
+  };
+  // A rule or a reversed slug is one continuous ground, so where it steps,
+  // the joint is filled by a riser from the end of one piece to the start
+  // of the next, spanning both: a stepped rule, not a dashed one, and one
+  // reversed line cut into sorts, not a row of labels. off(u, j) is each
+  // sort's offset in steps; face=false gives the bodies, lead and all.
+  const ground = (s, off, face = true) => {
     const out = [];
-    s.units.forEach((u, j) => u.vis && out.push({ ...unitRect(s, u, v[j]), j }));
+    let prev = null;
+    s.units.forEach((u, j) => {
+      const r = { ...faceRect(s, u, off(u, j)), j };
+      if (prev) {
+        const a = prev.x + prev.w;
+        const x0 = Math.min(a, r.x);
+        const x1 = Math.max(a, r.x);
+        const y0 = Math.min(prev.y, r.y);
+        const y1 = Math.max(prev.y + prev.h, r.y + r.h);
+        if (x1 - x0 > 1e-3 || prev.y !== r.y) out.push({ x: x0, y: y0, w: Math.max(x1 - x0, 1e-3), h: y1 - y0, j, riser: true });
+      }
+      out.push(r);
+      prev = r;
+    });
+    if (face || !s.rule) return out;
+    return out.map((r) => ({ ...r, y: r.y - RULE_LEAD, h: r.h + RULE_LEAD * 2 }));
+  };
+  const rectsFor = (s, off) => {
+    if (s.rule || s.rev) return ground(s, off, false);
+    const out = [];
+    s.units.forEach((u, j) => u.vis && out.push({ ...unitRect(s, u, off(u, j)), j }));
     return out;
   };
-  const rectsNow = (s) => {
-    const out = [];
-    s.units.forEach((u, j) => u.vis && out.push({ ...unitRect(s, u, u.p), j }));
-    return out;
-  };
+  const rectsAt = (s, v) => rectsFor(s, (u, j) => v[j]);
+  const rectsNow = (s) => rectsFor(s, (u) => u.p);
   const union = (rs) => {
     let x0 = Infinity;
     let y0 = Infinity;
@@ -268,7 +365,7 @@ export async function createWeingart(host) {
           }
           if (j < 0) break;
           // Landing on a line's first sort: the margin holds, the run locks.
-          if (!shove(o, vo, j, dir) || n > 200 || !fits(o, vo)) return null;
+          if (!carry(o, vo, j, dir) || n > 200 || !fits(o, vo)) return null;
         }
         next.set(o, { v: vo, depth: Math.max(next.get(o)?.depth ?? 0, depth + 1) });
         queue.push({ a: o, depth: depth + 1 });
@@ -518,25 +615,21 @@ export async function createWeingart(host) {
   /* ---------- draw ---------- */
   const density = (s, u) => Math.min(1, (s.layer === "red" ? 0.93 : 0.95) + u.seat * 0.05);
 
+  const fillGround = (g, s) => {
+    g.beginPath();
+    for (const r of ground(s, (u) => u.p)) g.rect(r.x, r.y, r.w, r.h);
+    g.fill();
+  };
+
   // Each sort printed where it sits. With dens, each sort carries its own
   // ink density (a fresh knock prints a touch darker).
   const drawSlug = (g, s, inkStyle, dens = false) => {
     g.fillStyle = inkStyle;
     const a0 = g.globalAlpha;
     if (s.rule) {
-      // Pieces sitting on the same step abut into one run of rule, drawn as
-      // one rect so the joins never show as seams.
-      let j = 0;
-      while (j < s.units.length) {
-        const u = s.units[j];
-        let e = j + 1;
-        while (e < s.units.length && Math.abs(s.units[e].p - u.p) < 1e-3) e++;
-        const r = unitRect(s, u, u.p);
-        const last = s.units[e - 1];
-        if (dens) g.globalAlpha = a0 * density(s, u);
-        g.fillRect(r.x, r.y + RULE_LEAD, last.x + last.w - u.x, s.thick);
-        j = e;
-      }
+      // Pieces and risers filled as one path, so the joins never show as seams.
+      if (dens) g.globalAlpha = a0 * slugDensity(s);
+      fillGround(g, s);
       g.globalAlpha = a0;
       return;
     }
@@ -572,10 +665,7 @@ export async function createWeingart(host) {
   // sheet first, so the knockout shows whatever is printed under it.
   const drawRev = (g, s) => {
     g.fillStyle = BLACK;
-    for (const u of s.units) {
-      const r = unitRect(s, u, u.p);
-      g.fillRect(r.x, r.y, r.w, r.h);
-    }
+    fillGround(g, s);
     const op = g.globalCompositeOperation;
     g.globalCompositeOperation = "destination-out";
     drawSlug(g, s, "#000");
