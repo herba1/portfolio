@@ -14,9 +14,15 @@ import { createLigatureSound } from "./ligatureSound";
 // pushed together until two strokes occupy exactly the same band. All
 // strokes are filled in one path with the nonzero rule, so overlapping
 // pieces are a true union: where strokes coincide there is one stroke, not
-// two. The few corners a union would leave sticking out (the V's flat top
-// past the A's apex, the A's foot past the V's point) are trimmed by the
+// two. The few corners a union would leave sticking out (the V's flat tops
+// past the A's apexes, the A's feet past the V's point) are trimmed by the
 // neighbour's outer edge, so a locked pair is a drawn ligature.
+//
+// Locked, the V has no legs of its own: its left leg is the first A's right
+// leg and its right leg is the second A's left leg, the way Lubalin's AVANT
+// is cut. What is left of the V is the notch between two A's, and A-V-A
+// reads as one zigzag of three apexes and two points that runs straight on
+// into the N and the T.
 
 const INK = "#111110";
 const PAPER = "#f2f0eb";
@@ -51,11 +57,6 @@ const K = Math.sqrt(1 + D * D);
 // squeeze only ever moves g; each pair finds its own advance from it.
 const G0 = 0.22; // the open word: an ordinary, generous fit
 const SHUT = 0.96; // the squeeze at which g reaches nothing
-// The V and the second A never fuse (that leaves the V as nothing but the
-// notch between two A's). They close to a hairline channel instead and the
-// lock seats them into it, so their paper bottoms out a hair before g does.
-const VA_SEAT = 0.034;
-const VA_CH = 0.022;
 // Equal paper is not equal space, though. Two parallel diagonals enclose
 // a band of paper exactly as wide as the gap, but a foot meeting a stem
 // opens into a wedge above it, and the T's arm overhangs a well of paper
@@ -67,7 +68,7 @@ const WEIGHT = { AV: 1, VA: 1, AN: 0.56, NT: 0.5 };
 const ADVANCE = {
   // AV, VA: the gap between the parallel diagonals, square to the strokes
   AV: (g) => DP + D * O + g * K,
-  VA: (g) => DP + D * O + Math.max(g, VA_SEAT) * K,
+  VA: (g) => DP + D * O + g * K,
   // AN: the A's right foot to the N's stem, at the baseline
   AN: (g) => 2 * DP + g * WEIGHT.AN,
   // NT: the N's right stem to the tip of the T's arm, at the cap line
@@ -79,21 +80,25 @@ const WIDTH = { A: 2 * DP, V: 2 * DP, N: NW, T: TW };
 // Left-edge to left-edge advance when a pair is locked.
 const LOCK = {
   AV: NEST, // A's right leg and V's left leg become one band
-  // The V keeps its right leg, seated against the second A's left leg
-  // with a hairline of paper between: one heavy diagonal with an inline.
-  VA: NEST + W + VA_CH * K,
+  VA: NEST, // the V's right leg and the second A's left leg, the same
   AN: 2 * DP - S, // the A's foot leans flush into the N's stem
   NT: NW - S, // the T's arm caps the N's right stem
 };
-// When g reaches nothing the pairs seat one after another, outside in:
-// NT, AN, VA, then the deep AV nest last. One cascade of four settles about
-// 50 ms apart. Each pair is released (ms after g runs out) so that it lands
-// on its stop in that order: the VA only has a hair to travel, so it goes
-// late; the AV nest drags both its letters at once, so it travels fast.
-const RELEASE = { NT: 0, AN: 66, VA: 200, AV: 184 };
+// When g reaches nothing the pairs seat one after another, right to left
+// and then into the middle: the T's arm caps the N, the A leans into the
+// N, the first A takes the V's left leg, and last the V's right leg falls
+// into the second A, which is the fuse that makes the word one shape. One
+// cascade of four settles about 50 ms apart (they land near 105, 155, 200
+// and 250 ms). Each pair is released (ms after g runs out) so it lands on
+// its stop in that order.
+const RELEASE = { NT: 0, AN: 66, AV: 110, VA: 190 };
 // A seating pair is driven a little past its stop so it lands on it with
 // some speed and settles, instead of easing in and never quite arriving.
-const PRESS = 0.12;
+// The last fuse is driven hardest: it closes the two halves of the word on
+// each other, so it lands with nearly twice the speed of the first settle.
+const PRESS = { AV: 0.12, VA: 0.2, AN: 0.12, NT: 0.12 };
+// The last fuse is also heard as the heaviest click.
+const HEAVY = "VA";
 
 const rect = (x0, y0, x1, y1) => [
   [x0, y0],
@@ -213,7 +218,7 @@ export function createLigature(host, { embedded = false } = {}) {
 
   const pairs = WORD.slice(0, -1).map((ch, i) => {
     const key = ch + WORD[i + 1];
-    return { key, advance: ADVANCE[key], lock: LOCK[key], release: RELEASE[key], locked: false, inside: false, contact: false, lastClick: 0 };
+    return { key, advance: ADVANCE[key], lock: LOCK[key], release: RELEASE[key], press: PRESS[key], locked: false, inside: false, contact: false, lastClick: 0 };
   });
   const letters = WORD.map(() => ({ x: 0, v: 0 }));
 
@@ -252,7 +257,7 @@ export function createLigature(host, { embedded = false } = {}) {
         }
       }
     }
-    return pairs.map((p) => (p.locked ? p.lock - (still == null ? PRESS : 0) : p.advance(g)));
+    return pairs.map((p) => (p.locked ? p.lock - (still == null ? p.press : 0) : p.advance(g)));
   }
 
   function targets(squeeze, latch) {
@@ -350,7 +355,7 @@ export function createLigature(host, { embedded = false } = {}) {
         l.v += (k * (goal[i] - l.x) - c * l.v) * h;
         l.x += l.v * h;
       }
-      // Until it is seated a pair stops at touching (the VA at its seat): a
+      // Until it is seated a pair stops at touching: a
       // knock from a neighbour's settle cannot shove it in early. Seated, a
       // pair cannot pass through itself: contact is a stop with a little
       // give, which is the settle.
@@ -383,7 +388,7 @@ export function createLigature(host, { embedded = false } = {}) {
             const now = performance.now();
             if (!p.contact && now - p.lastClick > 140 && -vrel > 0.25) {
               p.lastClick = now;
-              sound.lock(clamp(-vrel / 3, 0, 1), ((a.x + b.x) / 2) * size / (stage.width / 2));
+              sound.lock(clamp(-vrel / 3, 0, 1), ((a.x + b.x) / 2) * size / (stage.width / 2), p.key === HEAVY);
             }
           }
           p.contact = true;
@@ -431,6 +436,8 @@ export function createLigature(host, { embedded = false } = {}) {
         const ax = L + DP;
         b.leftLeg = clipPoly(b.leftLeg, [ax, -O], [ax - DP, 1], -1);
       } else if (p.key === "VA") {
+        // The mirror of the AV: the V's flat top is cut back to the second
+        // A's apex, and the A's left foot stops at the V's point.
         const ax = R + DP;
         a.rightLeg = clipPoly(a.rightLeg, [ax, -O], [ax + DP, 1], 1);
         const vx = L + DP;
