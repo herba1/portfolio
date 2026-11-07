@@ -88,6 +88,20 @@ export async function createAxis(host, { embedded = false } = {}) {
     }
     return v;
   };
+  // Ink left edge of a glyph, in em from its pen position, per weight: the
+  // line is aligned on the W's ink, not its sidebearing, so the hairline
+  // stroke sits on the margin at every weight.
+  const lsbCache = new Map();
+  const lsb = (ch, w) => {
+    const k = ch + w;
+    let v = lsbCache.get(k);
+    if (v === undefined) {
+      mctx.font = fontAt(w, REF);
+      v = -mctx.measureText(ch).actualBoundingBoxLeft / REF;
+      lsbCache.set(k, v);
+    }
+    return v;
+  };
   mctx.font = fontAt(500, REF);
   const capH = mctx.measureText("H").actualBoundingBoxAscent / REF;
   const xH = mctx.measureText("x").actualBoundingBoxAscent / REF;
@@ -114,17 +128,24 @@ export async function createAxis(host, { embedded = false } = {}) {
   let size = 200;
   let track = 0;
   let baseline = 0;
+  let margin = 16; // the fixed left margin the W's ink is set against
   let unit = 1; // one average letter advance in px, at a book weight
   let lastSig = "";
   stage.onResize((w, h) => {
     lastSig = ""; // the canvas was cleared
     W = w;
     H = h;
-    // Set the size so the black cut runs a little past both edges: the word
-    // is cropped at the heavy end of the axis and breathes at the light end.
-    const em900 = layoutEm(chars.map(() => W_MAX))[n];
-    const target = W * 1.14;
-    size = (target - (n - 1) * 0.043 * 12) / (em900 - 0.043 * (n - 1));
+    // Flush left on a fixed margin, like a line of metal type locked up
+    // against the left of the chase: weight only ever pushes letters to the
+    // right. The size is set so the all-black word overruns the right edge
+    // by about an eighth of the frame, while the all-hairline word still
+    // closes inside the right margin, so the bleed belongs to the weight
+    // axis, not to the layout.
+    margin = Math.max(16, Math.round((W * 0.04) / 4) * 4);
+    const span = (w, s) => (layoutEm(chars.map(() => w))[n] - lsb(chars[0], w)) * s + lawPx(s) * (n - 1);
+    const fit = (w, right) => (right - margin - 0.043 * 12 * (n - 1)) / (layoutEm(chars.map(() => w))[n] - lsb(chars[0], w) - 0.043 * (n - 1));
+    size = fit(W_MAX, W * 1.12);
+    if (margin + span(W_MIN, size) > W - margin) size = fit(W_MIN, W - margin);
     size = Math.min(size, (H * 0.74) / capH);
     track = lawPx(size);
     unit = (layoutEm(chars.map(() => 500))[n] * size + track * (n - 1)) / n;
@@ -250,9 +271,12 @@ export async function createAxis(host, { embedded = false } = {}) {
 
     const weights = glyphs.map((g) => Math.round(g.w));
     const em = layoutEm(weights);
-    const total = em[n] * size + track * (n - 1);
-    const x0 = (W - total) / 2;
     const pivot = baseline - (xH * size) / 2;
+    // The W's top-left corner is pinned to the margin: its ink edge at its
+    // current weight, less the distance a lean carries the cap line right of
+    // the pivot. Nothing on the left ever moves; only the right side does.
+    const capTop = baseline - capH * size;
+    const x0 = margin - lsb(chars[0], weights[0]) * size - Math.tan(glyphs[0].lean) * (pivot - capTop);
     for (let i = 0; i < n; i += 1) {
       const g = glyphs[i];
       const x = x0 + em[i] * size + track * i;

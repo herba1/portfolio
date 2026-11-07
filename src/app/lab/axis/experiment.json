@@ -1,6 +1,6 @@
 {
   "title": "Axis",
-  "description": "One word set very large in Geist's variable font, black on warm white and running off the edges. The letter under the pointer takes its weight from where the pointer sits, hairline at the left and black at the right, and the letters either side fall away to hairline, so the word reads as a weight ramp. Moving across sends that ramp through the word like a wave, each letter a beat behind its neighbour nearer the pointer. Press and drag to lean the letters from upright to oblique; let go and they spring back. Every letter's advance is re-measured at its own weight each frame, so the spacing is set correctly at every point of the sweep.",
+  "description": "One word set very large in Geist's variable font, black on warm white, laid flush left on a fixed margin so that weight only pushes the line rightward and the heavy end runs off the right edge. The letter under the pointer takes its weight from where the pointer sits, hairline at the left and black at the right, and the letters either side fall away to hairline, so the word reads as a weight ramp. Moving across sends that ramp through the word like a wave, each letter a beat behind its neighbour nearer the pointer. Press and drag to lean the letters from upright to oblique; let go and they spring back. Every letter's advance is re-measured at its own weight each frame, so the spacing is set correctly at every point of the sweep.",
   "tags": ["Type", "Variable fonts", "Interaction"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
