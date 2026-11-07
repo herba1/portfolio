@@ -3,8 +3,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 // Depth Clock: the iOS 16 Lock Screen depth effect, made literal.
 //
-// One Poly Haven capture (Roman stone pines from below, CC0) is split offline
-// (bake.py, beside this file) into planes, and the sky behind them is replaced
+// One Poly Haven capture (Roman stone pines, CC0) is taken straight up, as a
+// worm's-eye zenith shot through a stereographic lens (shoot.py, beside this
+// file): every trunk rises from the frame's edge on a straight radial line to
+// the zenith, the crowns ring the frame, and the open sky between them is
+// where the time sits. It is split offline (bake.py) into planes, and the
+// sky behind them is replaced
 // with fair-weather cumulus from a second Poly Haven capture (bake_clouds.py):
 //   clouds.webp the sky: a pure-sky HDRI reprojected through the trees' own
 //               camera, turned so its sun sits on the pines' sun, the clear
@@ -29,14 +33,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // holds the cloud's drift (a held camera holds it at 0).
 
 const ASSET = "/lab/depth-clock/";
-const IMG_W = 3000;
-const IMG_H = 3400;
+const IMG_W = 4000;
+const IMG_H = 3000;
 const ENC = 2;
 
-// Where the frame looks, as a share of the image (landscape boxes).
+// Where the frame looks, as a share of the image (landscape boxes). The
+// zenith, where the trunks converge, sits at (2480, 1540): right of the
+// numerals, under the nearest crown.
 const ANCHOR = [0.5, 0.44];
 // The numerals: centre of the figures and their em size, in image pixels.
-const NUM = { cx: 1520, cy: 1250, size: 640 };
+// They sit in the open well of sky beside the zenith.
+const NUM = { cx: 1530, cy: 760, size: 600 };
 
 const SKY_D = 0.04; // the sky's disparity in the depth map
 const NUM_D = 0.2; // the numerals' plane: in front of the sky, behind every tree
@@ -277,9 +284,11 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     }
     cw /= ZOOM;
     ch /= ZOOM;
-    // Portrait boxes keep the numerals' band where landscape puts it.
+    // Narrow boxes centre on the numerals and keep their band near the top,
+    // with the well and the trunks rising below them.
     const ay = box >= 1 ? ANCHOR[1] * IMG_H : clamp(numQ.cy + ch * 0.18, ch / 2, IMG_H - ch / 2);
-    const x0 = clamp(ANCHOR[0] * IMG_W - cw / 2, 0, IMG_W - cw);
+    const ax = box >= 1.25 ? ANCHOR[0] * IMG_W : numQ.cx;
+    const x0 = clamp(ax - cw / 2, 0, IMG_W - cw);
     const y0 = clamp(ay - ch / 2, 0, IMG_H - ch);
     lay.crop = [x0 / IMG_W, y0 / IMG_H, cw / IMG_W, ch / IMG_H];
     // How far the cloud may drift: what the crop leaves of the sky image,

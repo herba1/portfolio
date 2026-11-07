@@ -1,6 +1,6 @@
 {
   "title": "Depth Clock",
-  "description": "Roman stone pines from below, and the time set very large in the air between them and the cumulus. The crowns overlap the figures because the figures really sit behind them, and the cloud drifts behind the figures: the photo is split by its depth into trees and a plane for the time, the matte cut down to single needles, a second capture's fair-weather cumulus is set behind them under the same sun, and every plane moves by its own parallax as you tilt. The figures are pale and sky-lit, never white, and bleed a little light into the air as a diffusion filter would; the whole frame is developed like daylight negative film. The minutes tick over with a small roll.",
+  "description": "Roman stone pines from straight below, their trunks rising from every edge to the zenith, and the time set very large in the open well of air between them and the cumulus. The crowns overlap the figures because the figures really sit behind them, and the cloud drifts behind the figures: the photo is split by its depth into trees and a plane for the time, the matte cut down to single needles, a second capture's fair-weather cumulus is set behind them under the same sun, and every plane moves by its own parallax as you tilt. The figures are pale and sky-lit, never white, and bleed a little light into the air as a diffusion filter would; the whole frame is developed like daylight negative film. The minutes tick over with a small roll.",
   "tags": ["WebGL", "Depth", "Photography", "Type"],
   "status": "draft",
   "createdAt": "2026-11-06T20:00:00.000Z",
@@ -20,14 +20,14 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k/piazza_martin_lutero_16k.hdr",
       "author": "Greg Zaal, Rico Cilliers",
       "licence": "CC0",
-      "note": "The pines. Rectilinear view (yaw 150, pitch -68, hfov 95) from the 16k HDRI, scene-linear; depth by Depth Anything V2; matte by unmixing each pixel between a fitted sky and the local foreground colour (bake.py)."
+      "note": "The pines. Zenith view straight up (pitch -90, yaw 25) through a stereographic lens (132 degrees across a centred frame, shifted 0.12 frame widths toward the open sky) from the 16k HDRI, scene-linear (shoot.py); depth by Depth Anything V2; matte by unmixing each pixel between a fitted sky and the local foreground colour (bake.py)."
     },
     {
       "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
       "author": "Greg Zaal (sky edits: Jarod Guest)",
       "licence": "CC0",
-      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky), reprojected through the pines' own camera with the dome turned so its sun sits on the pines' sun (elevation 24, azimuth 36), spun -30 degrees about that axis for the composition; clear blue matched to the pines' sky, cloud held under its real light with a soft shoulder so nothing clips (bake_clouds.py, CLOUD=0.6 KNEE=0.42 LIMIT=0.74)."
+      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky), reprojected through the pines' own stereographic zenith camera with the dome turned so its sun sits on the pines' sun (elevation 24, azimuth 36), left unspun about that axis, which already sets the cumulus in the open well; clear blue matched to the pines' sky, cloud held under its real light with a soft shoulder so nothing clips (bake_clouds.py, CLOUD=0.6 KNEE=0.42 LIMIT=0.74)."
     }
   ]
 }

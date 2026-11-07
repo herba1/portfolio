@@ -1,5 +1,7 @@
 # Bake depth-clock layers from a Poly Haven pick: linear HDR + depth map.
-#   python3 -I bake.py stone-pines-below public/lab/depth-clock 0 3400 0.003
+#   DEP0=0.07 python3 -I bake.py pines-zenith-stereo public/lab/depth-clock 0 3000 0.003
+# (the pick is shoot.py's zenith view; DEP0 is the depth model's floor, taken
+# off so the clear sky sits near 0.04 as every threshold below expects)
 # Writes fg.webp (foreground, colour unmixed from the sky, alpha = exact
 # matte) and depth.webp (foreground disparity, extended past the matte and
 # smoothed for warping). The fitted clear sky is only the unmix's background
@@ -18,6 +20,8 @@ hdr = cv2.imread(P + slug + '-linear.hdr', cv2.IMREAD_ANYDEPTH | cv2.IMREAD_COLO
 dep = cv2.imread(P + slug + '-depth.png', cv2.IMREAD_UNCHANGED).astype(np.float32) / 65535
 hdr = np.ascontiguousarray(hdr[Y0:Y1])
 dep = np.ascontiguousarray(dep[Y0:Y1])
+DEP0 = float(os.environ.get('DEP0', 0))
+dep = np.clip((dep - DEP0) / (1 - DEP0), 0, 1)
 H, W = dep.shape
 print('region', W, H)
 
