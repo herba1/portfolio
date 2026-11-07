@@ -27,6 +27,8 @@ const ROW_GAP = 24; // caption to the next row of tabs
 const TALL = 1.32; // the tallest a tab gets: a phone page
 const WIDE = 1.08; // the widest: past this the page reads as a box
 const SCROLL_DECAY = 0.998; // per ms, UIScrollView normal rate
+const DISSOLVE = 0.9; // card widths of travel over which a leaving tab dissolves
+const DISSOLVE_SHRINK = 0.06; // and how much smaller it is by the time it is gone
 
 // iOS rubber band: the further past the edge, the harder it pulls.
 const rubber = (x, d) => (1 - 1 / ((x * 0.55) / d + 1)) * d;
@@ -185,6 +187,14 @@ export default function Piece() {
       if (p > 0.995) c.leg = null;
     };
 
+    // How far a tab in the hand, or on its way out, has gone towards being
+    // dismissed: 0 in its slot, 1 about a column to the left, where it is
+    // gone (a pull to the right is only rubber band, and stays solid). It
+    // dissolves with distance, so the tab you threw away never crosses the
+    // grid as a slab; what is left of it slips under the neighbour.
+    const travel = (c) =>
+      c.mode === "fly" || c.mode === "drag" ? clamp(-c.x / (s.cw * DISSOLVE), 0, 1) : 0;
+
     const paint = () => {
       layer.style.transform = `translate3d(${s.left}px, ${-s.sy}px, 0)`;
       for (const c of cards) {
@@ -197,10 +207,11 @@ export default function Piece() {
         }
         el.style.visibility = lb.style.visibility = "";
         const vis = clamp(c.vis, 0, 1);
-        const sc = 1 - SHRINK * (1 - c.enter) - SHRINK * (1 - vis);
+        const k = travel(c);
+        const sc = (1 - SHRINK * (1 - c.enter) - SHRINK * (1 - vis)) * (1 - DISSOLVE_SHRINK * k);
         el.style.transform =
           `translate3d(${(c.lx + c.x).toFixed(2)}px, ${c.ly.toFixed(2)}px, 0) rotate(${c.rot.toFixed(3)}deg) scale(${sc.toFixed(4)})`;
-        const enter = clamp(c.enter, 0, 1) * vis;
+        const enter = clamp(c.enter, 0, 1) * vis * (1 - k);
         el.style.opacity = enter < 0.999 ? enter.toFixed(3) : "";
         // A tab pulled sideways lets go of its caption, so it never slides
         // across the neighbour's title; it comes back as the tab settles.
@@ -219,8 +230,9 @@ export default function Piece() {
           if (lifted) el.dataset.lifted = "";
           else delete el.dataset.lifted;
         }
-        // Only a tab in the hand, or on its way out or home, sits above the rest.
-        el.style.zIndex = lb.style.zIndex = lifted || c.mode === "back" ? 1 : "";
+        // Only a tab in the hand, or on its way out or home, sits above the
+        // rest, until it is more than half dissolved: then it goes under.
+        el.style.zIndex = lb.style.zIndex = lifted && k > 0.5 ? -1 : lifted || c.mode === "back" ? 1 : "";
       }
     };
 
@@ -247,7 +259,7 @@ export default function Piece() {
           if (c.mode === "fly") {
             [c.x, c.vx] = stepSpring(c.x, c.vx, flyTarget(c), AWAY, h);
             v = c.vx;
-            if (s.left + c.lx + c.x + s.cw * 1.2 < 0) {
+            if (travel(c) >= 1) {
               c.gone = true; c.mode = "rest"; c.x = 0; c.vx = 0; c.rot = 0; c.vrot = 0;
             }
           } else if (c.mode === "back") {
