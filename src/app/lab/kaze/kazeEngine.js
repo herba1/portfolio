@@ -29,9 +29,15 @@ const PLATE = "/lab/kaze/plate.webp";
 const SKY = "/lab/kaze/sky.webp";
 const AUX = "/lab/kaze/aux.webp";
 const ASPECT = 1.5;
-// The frame shows the middle of the photograph: a margin all round that the
-// bent stalks and the drifting sky can be pulled in from.
-const OVER = 0.035;
+// The frame is the top of the photograph, not its middle: from just under the
+// top edge down through about two thirds of it, so the dense mat and the tree
+// line at the foot of the plate fall away below the frame and what is left is
+// the steep worm's-eye, the sky and the stalk tips reaching up into it. The
+// crop sits toward the left, where the sun is. OVER is the margin kept all
+// round for the bent stalks and the drifting sky to be pulled in from; the
+// crop window (image uv) is cover-fitted to the box, held to its top edge.
+const OVER = 0.02;
+const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.68, ax: 0.05 };
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -48,6 +54,7 @@ out vec4 outColor;
 uniform sampler2D uPlate;  // the grass, sky unmixed out of it
 uniform sampler2D uSky;    // the sky behind it
 uniform sampler2D uAux;    // r coverage, g lever, b highlight diffusion (sqrt)
+uniform sampler2D uLever;  // aux.g with its slope limited (see leverTexture)
 uniform sampler2D uWind;   // GX x GY: bend.xy, wind.xy (m/s)
 uniform float uTime;
 uniform float uCloudT;     // cloud flow clock
@@ -99,7 +106,7 @@ void main() {
   vec4 W = windAt(uv);
   vec2 b = W.xy;          // bend: across (+ right), and up-wind / lifting (+)
   float ws = length(W.zw);
-  float lever = textureLod(uAux, uv, 0.0).g;
+  float lever = texture(uLever, uv).r;
   // Flutter: the thin leaves and seed heads quiver in the stronger air, a
   // slow travelling ripple along the stalks rather than per-pixel noise.
   float fl = vnoise(uv * vec2(14.0, 7.0) + vec2(-uTime * (0.6 + 0.12 * ws), uTime * 0.21)) - 0.5;
@@ -134,11 +141,13 @@ void main() {
   // A print's white is not the sun's: the near-white of the lit cloud and
   // the sun's disc carry on past paper white, into the shoulder, warm.
   float hl = smoothstep(0.6, 1.0, max(sky.r, max(sky.g, sky.b)));
-  sky *= 1.0 + vec3(0.3, 0.27, 0.2) * hl * hl;
+  sky *= 1.0 + vec3(0.2, 0.18, 0.13) * hl * hl;
 
-  // The grass a touch cooler, the way Superia keeps greens under a deep sky;
-  // its colour is left whole, so the diffusion veil over it bleeds green.
-  grass *= vec3(0.96, 1.0, 0.98);
+  // Seen from below against the sky the grass is backlit: printed for the sky,
+  // it sits about 0.7 stop under the plate, so the brome and the seed heads
+  // stand as dark silhouettes against the cloud. A touch cooler, the way
+  // Superia keeps greens under a deep sky.
+  grass *= 0.616 * vec3(0.96, 1.0, 0.98);
   // Halation on the blades: a thin blade standing against lit cloud or the
   // sun takes a little of its light through the emulsion as a warm bleed;
   // the dense mat (high coverage all round) does not.
@@ -152,11 +161,11 @@ void main() {
   col += vec3(1.0, 0.42, 0.16) * 0.16 * glow * rim;
   // The highlight shoulder's diffusion: only the light above the threshold
   // (the sun, the lit cloud tops; baked, aux.b) spreads, warm, over the sky
-  // and a little over the blades in front of it, so they hold as dark
+  // and never over the blades in front of it, so they hold as crisp dark
   // silhouettes with the sun bleeding round them. Nothing below it is lifted.
   float dif = textureLod(uAux, uv, uLod).b;
   dif *= dif;
-  col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * mix(1.0, 0.35, a);
+  col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * (1.0 - a);
   if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
 }`;
@@ -223,6 +232,68 @@ function imageTexture(gl, img, mips) {
   return t;
 }
 
+// The lever as the shader uses it. The baked lever (aux.g) climbs steeply
+// where a freely standing stalk rises out of the still mat; times a strong
+// bend, that slope is a warp that changes faster than the stalks are apart,
+// and folds the grass over itself in horizontal ribbons. Its lower slope-limited
+// envelope (no pixel more than LEVER_SLOPE per unit of image uv above any
+// other) keeps the mat as still as it was and makes the stalks rising out of
+// it lean in step with their neighbours. Worked at 1/8 of the plate, where
+// the lever is smooth anyway.
+const LEVER_W = 300;
+const LEVER_H = 200;
+const LEVER_SLOPE = 5;
+function leverTexture(gl, img) {
+  const W = LEVER_W;
+  const H = LEVER_H;
+  const cv = document.createElement("canvas");
+  cv.width = W;
+  cv.height = H;
+  const cx = cv.getContext("2d", { willReadFrequently: true });
+  cx.drawImage(img, 0, 0, W, H);
+  const px = cx.getImageData(0, 0, W, H).data;
+  const L = new Float32Array(W * H);
+  for (let i = 0; i < W * H; i++) L[i] = px[i * 4 + 1] / 255;
+  const kx = LEVER_SLOPE / W;
+  const ky = LEVER_SLOPE / H;
+  const kd = Math.hypot(kx, ky);
+  const relax = (i, j, di, dj, k) => {
+    const x = i + di;
+    const y = j + dj;
+    if (x < 0 || x >= W || y < 0 || y >= H) return;
+    const n = L[y * W + x] + k;
+    if (n < L[j * W + i]) L[j * W + i] = n;
+  };
+  for (let j = 0; j < H; j++) {
+    for (let i = 0; i < W; i++) {
+      relax(i, j, -1, 0, kx);
+      relax(i, j, 0, -1, ky);
+      relax(i, j, -1, -1, kd);
+      relax(i, j, 1, -1, kd);
+    }
+  }
+  for (let j = H - 1; j >= 0; j--) {
+    for (let i = W - 1; i >= 0; i--) {
+      relax(i, j, 1, 0, kx);
+      relax(i, j, 0, 1, ky);
+      relax(i, j, 1, 1, kd);
+      relax(i, j, -1, 1, kd);
+    }
+  }
+  const out = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) out[i] = Math.round(L[i] * 255);
+  const t = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, t);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, W, H, 0, gl.RED, gl.UNSIGNED_BYTE, out);
+  gl.pixelStorei(gl.UNPACK_ALIGNMENT, 4);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  return t;
+}
+
 function target(gl, w, h, float) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
@@ -250,8 +321,8 @@ const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
 // The scripted gust for ?gust=demo: a quick sweep through the stalks, left
-// to right and rising, 0.2-0.75 s.
-const DEMO = { t0: 0.2, t1: 0.75, from: [0.06, 0.74], to: [0.8, 0.42] };
+// to right and rising, 0.2-0.75 s (frame fractions, mapped through the view).
+const DEMO = { t0: 0.2, t1: 0.75, from: [0.04, 0.7], to: [0.86, 0.36] };
 const demoAt = (t) => {
   const u = clamp((t - DEMO.t0) / (DEMO.t1 - DEMO.t0), 0, 1);
   const e = u * u * (3 - 2 * u);
@@ -279,6 +350,7 @@ export async function createKaze(host) {
   const plate = imageTexture(gl, plateImg, true);
   const skyTex = imageTexture(gl, skyImg, true);
   const aux = imageTexture(gl, auxImg, true);
+  const leverTex = leverTexture(gl, auxImg);
 
   const wind = createWind();
   const breeze = reduce ? 0 : breezeQ != null && Number.isFinite(+breezeQ) ? clamp(+breezeQ, 0, 2) : 1;
@@ -332,13 +404,18 @@ export async function createKaze(host) {
     filmT = target(gl, L.rw, L.rh, false);
     film.resize(L.rw, L.rh);
   };
-  // The part of the photograph on screen, in image uv: cover-crop to the
-  // box, inside the overscan margin.
+  // The part of the photograph on screen, in image uv: the crop window
+  // cover-fitted to the box, held to its top edge (the zenith side) and
+  // placed across it at CROP.ax.
   const view = () => {
     const a = L.w / L.h;
-    let v = a > ASPECT ? [0, 0.5 - ASPECT / a / 2, 1, ASPECT / a] : [0.5 - a / ASPECT / 2, 0, a / ASPECT, 1];
-    const k = 1 - 2 * OVER;
-    return [OVER + v[0] * k, OVER + v[1] * k, v[2] * k, v[3] * k];
+    const ca = (CROP.w * ASPECT) / CROP.h;
+    if (a > ca) {
+      const h = (CROP.w * ASPECT) / a;
+      return [CROP.x0, CROP.y0, CROP.w, h];
+    }
+    const w = (CROP.h * a) / ASPECT;
+    return [CROP.x0 + (CROP.w - w) * CROP.ax, CROP.y0, w, CROP.h];
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
 
@@ -387,8 +464,10 @@ export async function createKaze(host) {
   const advance = (dt, t) => {
     // the scripted gust
     if (demo && t >= DEMO.t0 && t - dt <= DEMO.t1 + 0.02) {
-      const a = demoAt(t - dt);
-      const b = demoAt(t);
+      const v = view();
+      const img = (p) => [v[0] + p[0] * v[2], v[1] + p[1] * v[3]];
+      const a = img(demoAt(t - dt));
+      const b = img(demoAt(t));
       wind.stroke(a[0], a[1], b[0], b[1], (b[0] - a[0]) / dt, (b[1] - a[1]) / dt, 1);
     }
     wind.step(dt);
@@ -414,8 +493,8 @@ export async function createKaze(host) {
     gl.disable(gl.SCISSOR_TEST);
     const u = scene.u;
     gl.useProgram(scene.p);
-    const texs = [plate, skyTex, aux, windTex];
-    const names = ["uPlate", "uSky", "uAux", "uWind"];
+    const texs = [plate, skyTex, aux, windTex, leverTex];
+    const names = ["uPlate", "uSky", "uAux", "uWind", "uLever"];
     texs.forEach((t, i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
       gl.bindTexture(gl.TEXTURE_2D, t);
@@ -541,7 +620,7 @@ export async function createKaze(host) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
-      [plate, skyTex, aux, windTex].forEach((t) => gl.deleteTexture(t));
+      [plate, skyTex, aux, windTex, leverTex].forEach((t) => gl.deleteTexture(t));
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);

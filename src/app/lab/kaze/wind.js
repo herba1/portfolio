@@ -291,10 +291,42 @@ export function createWind() {
     }
   };
 
+  // What the stalks show: a stalk bends about its root below the frame and
+  // carries its whole length over together, so the bend seen at a point is
+  // the cells' bend gathered along the stalk (tall, mostly vertical on
+  // screen) and a little across its neighbours. Without it the hard edge of
+  // a strong gust shears the stalks crossing it into horizontal ribbons.
+  const KX = [1, 2, 3, 2, 1];
+  const KY = [1, 2, 3, 4, 5, 6, 7, 6, 5, 4, 3, 2, 1];
+  const tx_ = new Float32Array(N);
+  const tz_ = new Float32Array(N);
+  const blur = (src, tmp, dst, K, di, dj) => {
+    const r = (K.length - 1) / 2;
+    for (let j = 0; j < GY; j++) {
+      for (let i = 0; i < GX; i++) {
+        let s = 0;
+        let wsum = 0;
+        for (let n = -r; n <= r; n++) {
+          const ii = i + n * di;
+          const jj = j + n * dj;
+          if (ii < 0 || ii >= GX || jj < 0 || jj >= GY) continue;
+          s += src[idx(ii, jj)] * K[n + r];
+          wsum += K[n + r];
+        }
+        (dst || tmp)[idx(i, j)] = s / wsum;
+      }
+    }
+  };
+  const gx_ = new Float32Array(N);
+  const gz_ = new Float32Array(N);
   const pack = () => {
+    blur(bx, tx_, null, KX, 1, 0);
+    blur(tx_, null, gx_, KY, 0, 1);
+    blur(bz, tz_, null, KX, 1, 0);
+    blur(tz_, null, gz_, KY, 0, 1);
     for (let k = 0; k < N; k++) {
-      out[k * 4] = bx[k];
-      out[k * 4 + 1] = bz[k];
+      out[k * 4] = gx_[k];
+      out[k * 4 + 1] = gz_[k];
       out[k * 4 + 2] = wx[k];
       out[k * 4 + 3] = wz[k];
     }
