@@ -108,14 +108,39 @@ uniform sampler2D uBlur;
 uniform vec2 uSize;
 uniform float uId;
 uniform vec3 uTau;
+uniform vec2 uBand; // mirror width past the left and right frame edge, 0 = not cut there
 ${SRGB}
+const float INSET = 6.0; // the matte softens in the last pixels at the frame
+const float SHEAR = 0.8; // px of drop per px past the edge, for the print only
+float tri(float d, float b) { return b - abs(mod(d, 2.0 * b) - b); }
+float idAt(vec2 s) { return texelFetch(uIds, clamp(ivec2(s), ivec2(0), ivec2(uSize) - 1), 0).r * 255.0; }
 void main() {
-  // cloth that was outside the photograph has no pixels: it stays unseen
-  if (vRest.x < 0.5 || vRest.y < 0.5 || vRest.x > uSize.x - 0.5 || vRest.y > uSize.y - 0.5) discard;
-  ivec2 ip = clamp(ivec2(vRest), ivec2(0), ivec2(uSize) - 1);
-  float id = texelFetch(uIds, ip, 0).r * 255.0;
+  // Cloth the frame cut off has no pixels of its own: it is textured from
+  // the band just inside the edge, mirrored back and forth, matte included,
+  // so a garment swinging inward carries on past where the photograph ended.
+  // The silhouette is the plain mirror (the hem carries on as a hem); the
+  // print is read from a sheared mirror, so it does not fold into a
+  // symmetric blot about the frame line.
+  vec2 s = vRest;
+  float lo = INSET, hi = uSize.x - INSET;
+  float d = 0.0;
+  if (uBand.x > 0.0 && s.x < lo) { d = lo - s.x; s.x = lo + tri(d, uBand.x); }
+  else if (uBand.y > 0.0 && s.x > hi) { d = s.x - hi; s.x = hi - tri(d, uBand.y); }
+  if (s.x < 0.5 || s.y < 0.5 || s.x > uSize.x - 0.5 || s.y > uSize.y - 0.5) discard;
+  float id = idAt(s);
+  if (d > 0.0 && abs(id - uId) > 0.5) {
+    // the mirror ran into a neighbour on this row: hold the edge column
+    s.x = vRest.x < lo ? lo : hi;
+    id = idAt(s);
+  }
   if (abs(id - uId) > 0.5) discard;
-  vec4 L = texture(uLayers, vRest / uSize);
+  vec4 L = texture(uLayers, s / uSize);
+  if (d > 0.0) {
+    vec2 w = vec2(s.x, s.y + SHEAR * d);
+    vec4 Lw = texture(uLayers, w / uSize);
+    float keep = abs(idAt(w) - uId) < 0.5 ? smoothstep(0.6, 0.95, Lw.a) : 0.0;
+    L.rgb = mix(L.rgb, Lw.rgb, keep);
+  }
   if (L.a < 0.002) discard;
   vec3 B = texture(uBlur, clamp(vPos / uSize, 0.0, 1.0)).rgb;
   vec3 col = L.rgb * vShade.x + uTau * vShade.y * B;
@@ -218,9 +243,38 @@ export async function createSentaku(host, { embedded = false } = {}) {
   const layersTex = upload(gl, layersBm, { mips: true });
   const idsTex = upload(gl, idsBm, { srgb: false, nearest: true });
   const blurTex = upload(gl, blurBm);
+  // ids on the CPU too, to size each frame-cut garment's mirror band
+  const idPx = (() => {
+    const c = new OffscreenCanvas(IW, IH);
+    const x2 = c.getContext("2d", { willReadFrequently: true });
+    x2.drawImage(idsBm, 0, 0);
+    return x2.getImageData(0, 0, IW, IH).data;
+  })();
   for (const b of [plateBm, layersBm, idsBm, blurBm]) b.close?.();
 
   const cloth = createCloth(meta);
+  // The widest band inside a cut edge that is the garment's own on (nearly)
+  // every row it meets the frame: the phantom cloth mirrors it.
+  const bandOf = (id, right) => {
+    const e = right ? IW - 3 : 2;
+    const rows = [];
+    for (let y = 0; y < IH; y++) if (idPx[(y * IW + e) * 4] === id) rows.push(y);
+    if (!rows.length) return 0;
+    for (let B = 120; B >= 12; B -= 6) {
+      let bad = 0;
+      for (const y of rows) {
+        for (let d = 6; d <= 6 + B; d += 2) {
+          const xx = right ? IW - 1 - d : d;
+          if (idPx[(y * IW + xx) * 4] !== id) {
+            bad++;
+            break;
+          }
+        }
+      }
+      if (bad <= rows.length * 0.02) return B;
+    }
+    return 12;
+  };
   cloth.settle(2.5);
   const { N, rest, x, x0, nrm, nrm0, gid, garments } = cloth;
   const ropeY = (u) => meta.rope.poly[0] * u * u + meta.rope.poly[1] * u + meta.rope.poly[2];
@@ -274,7 +328,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
       if (gid[a] !== gm.id) continue;
       idx.push(a, cloth.tris[t * 4 + 1] | 0, cloth.tris[t * 4 + 2] | 0);
     }
-    ranges.push({ id: gm.id, start, count: idx.length - start, tau: gm.tau, sheer: Math.max(...gm.tau) > 0 });
+    const band = [gm.plan.padL ? bandOf(gm.id, false) : 0, gm.plan.padR ? bandOf(gm.id, true) : 0];
+    ranges.push({ id: gm.id, start, count: idx.length - start, tau: gm.tau, band, sheer: Math.max(...gm.tau) > 0 });
   }
   {
     const start = idx.length;
@@ -282,7 +337,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       const a = N + i * 2;
       idx.push(a, a + 2, a + 1, a + 1, a + 2, a + 3);
     }
-    ranges.push({ id: 6, start, count: idx.length - start, tau: [0, 0, 0], sheer: false });
+    ranges.push({ id: 6, start, count: idx.length - start, tau: [0, 0, 0], band: [0, 0], sheer: false });
   }
   const vbuf = gl.createBuffer();
   const ibuf = gl.createBuffer();
@@ -433,6 +488,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     for (const r of ranges) {
       gl.uniform1f(clothP.u.uId, r.id);
       gl.uniform3f(clothP.u.uTau, r.tau[0], r.tau[1], r.tau[2]);
+      gl.uniform2f(clothP.u.uBand, r.band[0], r.band[1]);
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);
     }
     gl.disable(gl.BLEND);

@@ -37,6 +37,14 @@ const SUB = 10; // substeps per 1/60 s
 const PHANTOM = 4; // cells simulated past the frame edge
 const BEND = 4e-5; // compliance across two cells
 const BEND4 = 4e-4; // and across four
+// A heavier, doubled cotton top does not crease like the sheer dress: its
+// bending compliance is scaled down, and it gets bending across the
+// diagonals too, so a full gust cannot fold its hem up into a sliver.
+const STIFF = { bw: 0.08 };
+// How far a garment may yaw (turn about the vertical, edge-on to the lens)
+// before its own width resists: past this the projection pulls it back. The
+// narrow top, pegged at one corner, would otherwise spin edge-on to a sliver.
+const YAW_MAX = { bw: 0.45, other: 0.75 }; // rad
 
 export const ROPE = { left: -320, right: 1760, sag: 0.11 };
 
@@ -57,8 +65,10 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   // count first so all garments share flat arrays
   const plans = meta.garments.map((g) => {
     // A garment the frame cuts off goes on past it: its unseen part is
-    // simulated too (and never drawn), or the visible strip would flap like
-    // a ribbon. The phantom cells copy the last full column at that edge.
+    // simulated too, or the visible strip would flap like a ribbon, and drawn
+    // too (textured by mirroring the band inside the edge), so when it swings
+    // inward the cloth carries on instead of showing the crop. The phantom
+    // cells copy the last full column at that edge.
     const IW = meta.size[0];
     const [bx0, gy0, nx0, ny] = g.grid;
     const padL = bx0 <= 0 ? PHANTOM : 0;
@@ -89,7 +99,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
         const c = (a, b) => a >= 0 && b >= 0 && a < nx && b < ny && act[b * nx + a];
         if (c(i - 1, j - 1) || c(i, j - 1) || c(i - 1, j) || c(i, j)) vid[j * (nx + 1) + i] = nv++;
       }
-    return { g, gx0, gy0, nx, ny, cov, act, vid };
+    return { g, gx0, gy0, nx, ny, cov, act, vid, padL, padR };
   });
 
   const N = nv;
@@ -113,6 +123,8 @@ export function createCloth(meta, { density = 0.32 } = {}) {
     // fraction of a flat panel's, so they swing on their cords and do not tilt
     const pom = g.name === "pom";
     const dens = density * (pom ? 7 : 1);
+    const stiff = STIFF[g.name] ?? 1;
+    const bend = BEND * stiff, bend4 = BEND4 * stiff;
     const sail = pom ? 0.2 : 1;
     const at = (i, j) => (i < 0 || j < 0 || i > nx || j > ny ? -1 : vid[j * (nx + 1) + i]);
     for (let j = 0; j <= ny; j++)
@@ -159,11 +171,13 @@ export function createCloth(meta, { density = 0.32 } = {}) {
           add(at(i + 1, j), at(i, j + 1), 4e-6);
         }
         // bending: across two cells, soft, so it folds rather than creases
-        if (cellOn(i, j) && cellOn(i + 1, j)) add(at(i, j), at(i + 2, j), BEND);
-        if (cellOn(i, j) && cellOn(i, j + 1)) add(at(i, j), at(i, j + 2), BEND);
+        if (cellOn(i, j) && cellOn(i + 1, j)) add(at(i, j), at(i + 2, j), bend);
+        if (cellOn(i, j) && cellOn(i, j + 1)) add(at(i, j), at(i, j + 2), bend);
+        if (stiff < 1 && cellOn(i, j) && cellOn(i + 1, j + 1)) add(at(i, j), at(i + 2, j + 2), bend);
+        if (stiff < 1 && cellOn(i + 1, j) && cellOn(i, j + 1)) add(at(i + 2, j), at(i, j + 2), bend);
         // and across four, so folds come at the scale of fabric, not of the grid
-        if (cellOn(i, j) && cellOn(i + 1, j) && cellOn(i + 2, j) && cellOn(i + 3, j)) add(at(i, j), at(i + 4, j), BEND4);
-        if (cellOn(i, j) && cellOn(i, j + 1) && cellOn(i, j + 2) && cellOn(i, j + 3)) add(at(i, j), at(i, j + 4), BEND4);
+        if (cellOn(i, j) && cellOn(i + 1, j) && cellOn(i + 2, j) && cellOn(i + 3, j)) add(at(i, j), at(i + 4, j), bend4);
+        if (cellOn(i, j) && cellOn(i, j + 1) && cellOn(i, j + 2) && cellOn(i, j + 3)) add(at(i, j), at(i, j + 4), bend4);
       }
     // pegs: the vertices of the cloth's top band that touch the line
     let pinned = 0;
@@ -251,6 +265,38 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       K[k] = G / Math.max(0.12, Number.isFinite(hang) ? hang : 0.5);
     }
   }
+  // per garment, the free vertices and their rest offset across the garment,
+  // for the yaw limit
+  const yawGroups = [];
+  for (const gm of garments) {
+    if (gm.name === "pom") continue;
+    const ks = [];
+    let mx = 0;
+    for (let k = 0; k < N; k++)
+      if (gid[k] === gm.id && w[k] > 0) {
+        ks.push(k);
+        mx += xr[k * 3];
+      }
+    if (ks.length < 4) continue;
+    mx /= ks.length;
+    const ix = Int32Array.from(ks);
+    const dx = Float32Array.from(ks, (k) => xr[k * 3] - mx);
+    let vx = 0;
+    for (const d of dx) vx += d * d;
+    yawGroups.push({ ix, dx, vx: vx || 1, tmax: Math.tan(YAW_MAX[gm.name] ?? YAW_MAX.other) });
+  }
+  const limitYaw = () => {
+    for (const { ix, dx, vx, tmax } of yawGroups) {
+      // the garment's turn about the vertical: depth against rest x
+      let s = 0;
+      for (let n = 0; n < ix.length; n++) s += (p[ix[n] * 3 + 2] - xt[ix[n] * 3 + 2]) * dx[n];
+      s /= vx;
+      const over = s > tmax ? s - tmax : s < -tmax ? s + tmax : 0;
+      if (!over) continue;
+      for (let n = 0; n < ix.length; n++) p[ix[n] * 3 + 2] -= 0.5 * over * dx[n];
+    }
+  };
+
   // ... and that place rides with the line as it swings
   const xt = Float32Array.from(xr);
   const followLine = () => {
@@ -338,6 +384,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       p[ia] += gx * wa; p[ia + 1] += gy * wa; p[ia + 2] += gz * wa;
       p[ib] -= gx * wb; p[ib + 1] -= gy * wb; p[ib + 2] -= gz * wb;
     }
+    limitYaw();
     const idt = 1 / dt;
     for (let k = 0; k < N * 3; k++) {
       v[k] = (p[k] - x[k]) * idt;
