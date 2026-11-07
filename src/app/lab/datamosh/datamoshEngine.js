@@ -86,19 +86,25 @@ const BRUSH = 6; // brush radius, macroblocks (about five torn across)
 const FADE = 1.6; // s: time constant of the starved mask once the hand lifts
 // The hero stroke a still paints while its hold runs: a V through the lower
 // third, up from the fence at the left to the winter shot's vanishing point
-// (0.38, 0.34) and down again to the fence at the right, both arms along
-// its radial vectors, where they run longest (frame fractions, top-left
-// origin). Under it at the cut is the oak stand, leaves and the sky between
-// them, so the vectors drag high-frequency texture into the strips. A
-// stroke in the lower third that stops short of the vanishing point tears
+// (0.385, 0.33) and down again to the fence at the right, both arms along
+// the streamlines of its vectors (traced back from the bottom edge through
+// the mean field of the first two seconds), where they run longest (frame
+// fractions, top-left origin). Under it at the cut is the oak stand, leaves
+// and the sky between them, so the vectors drag high-frequency texture into
+// the strips. A stroke that stops short of the vanishing point tears
 // nothing that lasts: its vectors pull the true winter picture in from
-// behind it within a few frames. The apex has to sit on the vanishing
-// point, where nothing moves, so the leaves there are the ones that run.
+// behind it within a few frames, and in this stretch of track the whole
+// field drifts down a little as the line crests, so even the ground just
+// under the vanishing point is fed from above it. The apex has to sit on
+// the vanishing point, where nothing moves, so the leaves there are the
+// ones that run.
 const STROKE = [
   [0.05, 0.95],
-  [0.22, 0.68],
-  [0.38, 0.4],
-  [0.56, 0.68],
+  [0.2, 0.68],
+  [0.32, 0.44],
+  [0.385, 0.33],
+  [0.45, 0.44],
+  [0.58, 0.68],
   [0.74, 0.95],
 ];
 const STROKE_S = 0.3; // s the still's hand takes to draw it

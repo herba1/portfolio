@@ -20,14 +20,14 @@
       "file": "https://cdn.pixabay.com/video/2022/06/15/120479-720880603_large.mp4",
       "author": "ChristianBodhi",
       "licence": "Pixabay Content License",
-      "note": "3840x2160, 30 fps, 27.2 s, out of a train window; location not given. Seconds 15.35-21.35 used (shot A), the lower half of the frame (1920x1080 from 960,1080) so the tree line and the oaks that run in at the end fill the picture below the sky, scaled to 1280x720 (Lanczos). Joined by a hard cut to shot B (below), then two-pass VP9 at 1.5 Mb/s with no alt-ref (clip.webm, 270 frames; libvpx keyframes at 0 and on the cut); motion vectors and modes baked from those decoded frames by tools/depth/bakes/datamosh/mv.py with a +-56 px search both ways (clip.mv, gzip)."
+      "note": "3840x2160, 30 fps, 27.2 s, out of a train window; location not given. Seconds 15.35-21.35 used (shot A), the lower half of the frame (1920x1080 from 960,1080) so the tree line and the oaks that run in at the end fill the picture below the sky, scaled to 1280x720 (Lanczos). Joined by a hard cut to shot B (below), then two-pass VP9 at 5 Mb/s with no alt-ref (clip.webm, 270 frames; libvpx keyframes at 0 and on the cut); motion vectors and modes baked from those decoded frames by tools/depth/bakes/datamosh/mv.py with a +-56 px search both ways (clip.mv, gzip)."
     },
     {
       "url": "https://pixabay.com/videos/tracks-railroad-tracks-train-rail-142723/",
       "file": "https://cdn.pixabay.com/video/2022/12/12/142723-780599564_large.mp4",
       "author": "Bonaparcik",
       "licence": "Pixabay Content License",
-      "note": "2048x922 as downloaded (2400x1080 original), 30 fps, 18 s, single track through pine forest in early winter, filmed out of the back of a train. Seconds 3-6 used (shot B, frames 180-269): cropped to 16:9 past the window pillar, scaled to 1280x720 and run backwards, so the line comes at the camera."
+      "note": "2048x922 as downloaded (2400x1080 original), 30 fps, 18 s, single track through pine forest in early winter, filmed out of the back of a train. Seconds 14.9-17.9 used (shot B, frames 180-269; source frames 447-536): the last stretch, out past the pines into open verge, where the shutter freezes the ballast, the snow and the bare birches (about twice the edge energy of the motion-blurred seconds 3-6 used before), so the strips tear against a sharp photo; cropped to 16:9 past the window pillar, scaled to 1280x720 (Lanczos) and run backwards, so the line comes at the camera."
     },
     "https://www.eai.org/titles/monster-movie",
     "https://li-ma.nl/article/vernacular-of-file-formats-summary",
