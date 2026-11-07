@@ -1,7 +1,9 @@
 import { createStage, clamp } from "../_kit/stage";
 
-// Miniature: herb's Times Square photograph with its depth map, as a print on
-// the warm ground. The pointer is the plane of focus. Depth is relative
+// Miniature: Piazza del Popolo seen from the Pincio terrace on a clear
+// morning, with its depth map, as a print on the warm ground. Looking down
+// from forty metres at people the size of rice grains is what lets a wrong
+// depth of field read as a model. The pointer is the plane of focus. Depth is relative
 // inverse depth (white = near), and the circle of confusion of a thin lens is
 // proportional to the gap in inverse depth, so |d - focus| is the physically
 // right blur measure. The plane is reverse-tilted a little, so blur grows
@@ -10,26 +12,28 @@ import { createStage, clamp } from "../_kit/stage";
 //
 //   pass 1  gather at half CSS resolution: golden-spiral scatter-as-gather,
 //           occlusion-aware (a farther sample may not spread over a nearer,
-//           sharper centre), neon pushed above white so it opens into discs.
+//           sharper centre).
 //   pass 2  full resolution: a small disc for near-focus pixels, the gathered
-//           buffer through a depth-aware joint upsample for the rest, then a
-//           gentle saturation and contrast lift.
+//           buffer through a depth-aware joint upsample for the rest, a gentle
+//           contrast lift and a print shoulder that stops short of white.
 
 const COLOR_SRC = "/lab/miniature/city.webp";
 const DEPTH_SRC = "/lab/miniature/depth.png";
-const ASPECT = 3 / 4; // print width / height
+const ASPECT = 3 / 2; // print width / height
 const GROUND = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 
-const K_COC = 0.1;
-const DOF = 0.055; // inverse depth either side of the plane that still reads as sharp // circle of confusion, in print heights per unit of inverse depth
-const MAX_COC = 0.034; // cap, in print heights
+const K_COC = 0.26; // circle of confusion, in print heights per unit of inverse depth
+const DOF = 0.06; // inverse depth either side of the plane that still reads as sharp
+const MAX_COC = 0.03; // cap, in print heights
 const TILT = 0.16; // reverse tilt of the focal plane, inverse depth per print height
 const BUF_SCALE = 0.5; // gather buffer pixels per CSS pixel
 const TAPS = 88;
 
-const HERO = { f: 0.76, y: 0.6 }; // herb
+// The depth map is baked so the piazza's middle distance sits at 0.76
+// (tools/depth/bakes/miniature/bake.py): the obelisk and the crowd round it.
+const HERO = { f: 0.76, y: 0.6 };
 
-const FAR = { f: 0.1, y: 0.4 }; // the far billboards
+const FAR = { f: 0.634, y: 0.3 }; // St Peter's dome on the horizon
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -54,17 +58,14 @@ float cocAt(vec2 uv, out float d) {
   float plane = uFocus - uTilt * (uv.y - uFocusY);
   return min(max(abs(d - plane) - uDof, 0.0) * uK, uMax);
 }
-vec3 boost(vec3 c) {
-  // Neon and lamps are clipped in the file; push them back above white so a
-  // defocused highlight carries enough energy to read as a disc.
-  float m = max(c.r, max(c.g, c.b));
-  float h = smoothstep(0.62, 1.0, m);
-  return c * (1.0 + 2.6 * h * h);
-}
+// Print white: everything above the knee rolls off towards 0.95 and never
+// reaches it, so a bright roof or a windscreen keeps its texture as it opens
+// into a disc instead of turning to flat paper.
 vec3 shoulder(vec3 x) {
-  vec3 k = vec3(0.78);
+  const float k = 0.85;
+  const float top = 0.95;
   vec3 over = max(x - k, 0.0);
-  return min(x, k) + (1.0 - k) * (1.0 - exp(-over / (1.0 - k)));
+  return min(x, vec3(k)) + (top - k) * (1.0 - exp(-over / (top - k)));
 }
 `;
 
@@ -75,11 +76,10 @@ out vec4 outColor;
 ${COMMON}
 uniform vec2 uBuf;     // gather buffer size in pixels
 uniform float uLod;
-uniform float uHead;
 void main() {
   float d0;
   float s0 = cocAt(vUv, d0);
-  vec3 c0 = boost(textureLod(uColor, vUv, uLod).rgb);
+  vec3 c0 = textureLod(uColor, vUv, uLod).rgb;
   vec3 acc = c0;
   float cacc = s0;
   float tot = 1.0;
@@ -98,12 +98,12 @@ void main() {
     // centre's own blur: sharp foreground stays clean over a soft distance.
     if (d < d0 - 0.004) s = min(s, s0 * 1.6);
     float m = smoothstep(r - 1.1, r + 0.6, s);
-    vec3 c = boost(textureLod(uColor, uv, uLod).rgb);
+    vec3 c = textureLod(uColor, uv, uLod).rgb;
     acc += mix(acc / tot, c, m);
     cacc += mix(cacc / tot, s, m);
     tot += 1.0;
   }
-  outColor = vec4(acc / tot / uHead, cacc / tot / uMax);
+  outColor = vec4(acc / tot, cacc / tot / uMax);
 }`;
 
 const COMPOSITE = `#version 300 es
@@ -120,7 +120,6 @@ uniform vec2 uView;     // viewport origin in device px
 uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uGround;
-uniform float uHead;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
 
@@ -136,7 +135,7 @@ void main() {
 
   // Near focus: a small full-resolution disc, depth-weighted so an edge
   // between two distances does not smear.
-  vec3 small = boost(texture(uColor, uv).rgb);
+  vec3 small = texture(uColor, uv).rgb;
   float ws = 1.0;
   float rs = min(s0, 4.0) * uDpr;
   if (rs > 0.35) {
@@ -147,7 +146,7 @@ void main() {
       vec2 o = vec2(cos(a), sin(a)) * r / uOut;
       float d = texture(uDepth, uv + o).r;
       float w = exp(-abs(d - d0) * 40.0);
-      small += boost(texture(uColor, uv + o).rgb) * w;
+      small += texture(uColor, uv + o).rgb * w;
       ws += w;
     }
   }
@@ -172,16 +171,15 @@ void main() {
     wb += w;
   }
   big /= wb;
-  big.rgb *= uHead;
   float spill = big.a * uMaxCss;
   float t = smoothstep(2.2, 5.0, max(s0, spill));
-  vec3 col = shoulder(mix(small, big.rgb, t));
+  vec3 col = mix(small, big.rgb, t);
 
-  // The tilt-shift print: a little more colour, a little more snap.
-  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col = mix(vec3(l), col, 1.12);
+  // The tilt-shift print: a touch more snap in the mids, no extra colour;
+  // the shoulder comes last so nothing on the print reaches white.
   col = clamp(col, 0.0, 1.0);
-  col = mix(col, col * col * (3.0 - 2.0 * col), 0.22);
+  col = mix(col, col * col * (3.0 - 2.0 * col), 0.18);
+  col = shoulder(col);
   col += (hash(frag) - 0.5) / 255.0;
   outColor = vec4(col, 1.0);
 }`;
@@ -297,10 +295,9 @@ export async function createMiniature(host) {
   const gather = compile(gl, VERT, GATHER);
   const composite = compile(gl, VERT, COMPOSITE);
 
-  // Half-float keeps the boosted highlights and the soft gradients of a deep
-  // defocus free of banding; RGBA8 with headroom is the fallback.
+  // Half-float keeps the soft gradients of a deep defocus free of banding;
+  // RGBA8 is the fallback.
   const float = !!gl.getExtension("EXT_color_buffer_float");
-  const HEAD = float ? 1 : 4;
   const blurTex = gl.createTexture();
   const fbo = gl.createFramebuffer();
   let buf = [1, 1];
@@ -310,7 +307,7 @@ export async function createMiniature(host) {
   const qf = params.get("f");
   const qy = params.get("y");
   const held = qf != null && Number.isFinite(+qf);
-  const start = held ? { f: clamp(+qf, 0, 1), y: qy != null ? clamp(+qy, 0, 1) : FAR.y } : HERO;
+  const start = held ? { f: clamp(+qf, 0, 1), y: qy != null ? clamp(+qy, 0, 1) : HERO.y } : FAR;
   const focus = ring(start.f);
   const focusY = ring(start.y);
   let locked = held;
@@ -365,14 +362,14 @@ export async function createMiniature(host) {
     }
   });
 
-  // On arrival the lens leaves herb and racks out to the far billboards,
-  // where the street turns into a model of itself.
+  // On arrival the lens is on the dome; then it racks down into the piazza,
+  // and the square turns into a model of itself.
   const intro = held
     ? 0
     : window.setTimeout(() => {
         if (touched) return;
-        focus.target = FAR.f;
-        focusY.target = FAR.y;
+        focus.target = HERO.f;
+        focusY.target = HERO.y;
       }, 1100);
 
   const draw = () => {
@@ -400,7 +397,6 @@ export async function createMiniature(host) {
     gl.uniform1f(gu.uMax, MAX_COC * ph * BUF_SCALE);
     gl.uniform2f(gu.uBuf, buf[0], buf[1]);
     gl.uniform1f(gu.uLod, Math.max(0, Math.log2(colorImg.naturalHeight / buf[1])));
-    gl.uniform1f(gu.uHead, HEAD);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // pass 2: composite (units: css pixels)
@@ -425,7 +421,6 @@ export async function createMiniature(host) {
     gl.uniform1f(cu.uDpr, dpr);
     gl.uniform4f(cu.uRect, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr);
     gl.uniform2f(cu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
-    gl.uniform1f(cu.uHead, HEAD);
     gl.uniform3f(cu.uGround, GROUND[0], GROUND[1], GROUND[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
