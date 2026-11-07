@@ -117,6 +117,21 @@ const PAD = 0.1; // pad on every side, as a fraction of cell height
 const RULE_CLEAR = 0.22; // fraction of cell height, rule to bottom hairline
 const RULE_OPEN = 0.15; // rule amount by which the full clearance is reached
 
+// The reversal is cut on named lines only, from the cell's bottom hairline
+// up: none, the baseline, half the x-height, the x-height, and the top
+// hairline (the whole cell reversed). The axis runs continuously through
+// the box, but a cell's cut never rests between lines: it holds the nearest
+// line and glides to the next with an ease-out once the axis has passed
+// most of the way to it.
+const CUTS = 5;
+const CUT_HYST = 0.6; // of a step, the axis travel that sends the cut on
+const CUT_T = 0.2; // seconds of glide, plus CUT_TS per line crossed
+const CUT_TS = 0.12;
+const cutSteps = (n) => {
+  if (n >= CUTS) return spread([0, 1, 2, 3, 4], n);
+  return [[0], [0, 4], [0, 2, 4], [0, 2, 3, 4]][Math.max(0, n - 1)];
+};
+
 export async function createProgramme(host, { embedded = false } = {}) {
   await loadFont();
   const stage = createStage(host, { dpr: 2 });
@@ -146,7 +161,9 @@ export async function createProgramme(host, { embedded = false } = {}) {
     { key: "size", def: 1, lo: 1, hi: 2, steps: lin(1, 1.9) },
     { key: "slope", def: 0, lo: 0, hi: 14, steps: lin(0, 14) },
     { key: "rule", def: 0, lo: 0, hi: 1, steps: lin(0, 1) },
-    { key: "reversal", def: 0, lo: 0, hi: 1, steps: lin(0, 1) },
+    // Reversal rests only on the cut lines (CUTS): a short axis takes the
+    // half x-height first, the cut that parts every stem.
+    { key: "reversal", def: 0, lo: 0, hi: 1, steps: (n) => cutSteps(n).map((k) => k / (CUTS - 1)) },
     // Red runs in whole letters at rest.
     { key: "red", def: 0, lo: 0, hi: 1, steps: (n) => lin(0, 1)(n).map((v) => Math.round(v * nL) / nL) },
     { key: "align", def: 0, lo: 0, hi: 1, steps: lin(0, 1) },
@@ -180,17 +197,32 @@ export async function createProgramme(host, { embedded = false } = {}) {
     o.push(c.measureText(WORD).width);
     return o;
   };
-  // The word's tightest pair at zero tracking: per scanline, the ink of
-  // each letter set at its kerned origin, and the least gap between one
-  // letter's right edge and the next one's left, in em. Measured on a
-  // coarse weight grid and interpolated, since a weight in motion passes
-  // through every integer.
+  // One pass over the word's own ink at a weight, at a reference size,
+  // gives two things, both in em:
+  //
+  // The tightest pair at zero tracking: per scanline, the ink of each
+  // letter set at its kerned origin, and the least gap between one
+  // letter's right edge and the next one's left.
+  //
+  // The lines the reversal may be cut on. A cut is a typographic line, not
+  // a fraction of the cell: the foot of the round letters' overshoot (the
+  // baseline), the top of it (the x-height), and a half x-height chosen
+  // where it crosses only stems. That last is read from the glyphs: per
+  // scanline, how many runs of ink each letter has; wherever a count
+  // changes, a terminal, a bowl, a crossbar or a junction begins or ends.
+  // The cut goes on the scanline farthest from every such change near the
+  // middle of the x-height, so it parts each stroke cleanly and leaves no
+  // tip of a terminal or edge of a crossbar as a wedge beside it.
+  //
+  // Measured on a coarse weight grid and interpolated, since a weight in
+  // motion passes through every integer; the ladder's own weights, which
+  // are rested on, are measured exactly.
   const INK_REF = 240;
   const INK_STEP = 20;
   const inkCanvas = document.createElement("canvas");
   const ictx = inkCanvas.getContext("2d", { willReadFrequently: true });
   const gcache = new Map();
-  const inkGapAt = (w) => {
+  const profileAt = (w) => {
     let g = gcache.get(w);
     if (g !== undefined) return g;
     const S = INK_REF;
@@ -204,7 +236,9 @@ export async function createProgramme(host, { embedded = false } = {}) {
     ictx.fontKerning = "normal";
     ictx.textBaseline = "alphabetic";
     const prefix = origins(ictx);
-    // Per letter: leftmost and rightmost ink of each row, from its origin.
+    const xh = ictx.measureText("x").actualBoundingBoxAscent;
+    // Per letter: leftmost and rightmost ink of each row, from its origin,
+    // the number of separate runs of ink on each row, and its ink extent.
     const prof = chars.map((ch) => {
       ictx.clearRect(0, 0, cw, chh);
       ictx.fillStyle = "#000";
@@ -212,41 +246,143 @@ export async function createProgramme(host, { embedded = false } = {}) {
       const d = ictx.getImageData(0, 0, cw, chh).data;
       const lo = new Float32Array(chh).fill(NaN);
       const hi = new Float32Array(chh).fill(NaN);
+      const runs = Array.from({ length: chh }, () => []);
+      let top = chh;
+      let bot = -1;
       for (let y = 0; y < chh; y += 1) {
         const row = y * cw * 4 + 3;
+        let on = false;
         for (let x = 0; x < cw; x += 1) {
-          if (d[row + x * 4] > 96) {
-            lo[y] = x - ox;
-            break;
-          }
-        }
-        for (let x = cw - 1; x >= 0; x -= 1) {
-          if (d[row + x * 4] > 96) {
+          const a = d[row + x * 4];
+          if (a > 96) {
+            if (Number.isNaN(lo[y])) lo[y] = x - ox;
             hi[y] = x - ox;
-            break;
           }
+          const ink = a > 127;
+          if (ink !== on) runs[y].push(x);
+          on = ink;
+        }
+        if (runs[y].length) {
+          top = Math.min(top, y);
+          bot = y;
         }
       }
-      return { lo, hi };
+      return { lo, hi, runs, top, bot };
     });
-    g = Infinity;
+    let gap = Infinity;
     for (let i = 0; i < nL - 1; i += 1) {
       const a = prof[i];
       const b = prof[i + 1];
       for (let y = 0; y < chh; y += 1) {
         if (Number.isNaN(a.hi[y]) || Number.isNaN(b.lo[y])) continue;
-        g = Math.min(g, prefix[i + 1] + b.lo[y] - (prefix[i] + a.hi[y]));
+        gap = Math.min(gap, prefix[i + 1] + b.lo[y] - (prefix[i] + a.hi[y]));
       }
     }
-    g = Number.isFinite(g) ? g / S : 0.05;
+    gap = Number.isFinite(gap) ? gap / S : 0.05;
+    // The x-height line: the top of the round letters' overshoot, so a cut
+    // on it clears every bowl and shoulder and crosses only what ascends.
+    let xTop = 0;
+    let foot = 0;
+    for (const p of prof) {
+      if (p.bot < 0) continue;
+      if (base - p.top < xh * 1.15) xTop = Math.max(xTop, base - p.top);
+      if (p.bot + 1 - base < S * 0.08) foot = Math.max(foot, p.bot + 1 - base);
+    }
+    if (!xTop) xTop = xh;
+    // The stem line, near half the x-height. A cut parts cleanly whatever
+    // it crosses near the vertical, a stem or the side of a bowl; it leaves
+    // a wedge wherever an edge runs near the horizontal close beside it:
+    // the flat of a terminal, the top or foot of a crossbar, a shallow
+    // spine, the shoulder of a bowl. So each scanline boundary is weighed
+    // by how much horizontal edge it has, the number of columns across all
+    // the letters where ink meets counter there (a stem's edge counts one,
+    // a terminal's flat its whole width), and each candidate cut is
+    // charged for every such edge within SLIVER of it, more the nearer, so
+    // it finds the band only stems pass through and sits in its middle.
+    const SLIVER = 0.06 * S;
+    const lo0 = Math.ceil(xTop * 0.22);
+    const hi0 = Math.floor(xTop * 0.72);
+    const reach = Math.ceil(SLIVER);
+    const edges = new Float32Array(hi0 + reach + 2);
+    const rowInk = (r, out) => {
+      out.fill(0);
+      for (let k = 0; k < r.length; k += 2) out.fill(1, r[k], k + 1 < r.length ? r[k + 1] : cw);
+      return out;
+    };
+    const ra = new Uint8Array(cw);
+    const rb = new Uint8Array(cw);
+    for (const p of prof) {
+      if (p.bot < 0) continue;
+      for (let hgt = Math.max(1, lo0 - reach); hgt <= hi0 + reach; hgt += 1) {
+        // Boundary between the row above (base - hgt - 1) and below.
+        const y = base - hgt;
+        if (y - 1 < 0 || y >= chh) continue;
+        rowInk(p.runs[y - 1], ra);
+        rowInk(p.runs[y], rb);
+        let n = 0;
+        for (let x = 0; x < cw; x += 1) n += ra[x] ^ rb[x];
+        edges[hgt] += n;
+      }
+    }
+    const cost = Array.from({ length: hi0 + 1 }, (_, h) => {
+      if (h < lo0) return Infinity;
+      let c = 0;
+      for (let d = -reach; d <= reach; d += 1) {
+        const k = 1 - Math.abs(d) / SLIVER;
+        if (k > 0 && h + d >= 0) c += (edges[h + d] || 0) * k * k;
+      }
+      return c / S;
+    });
+    // In em, one entry per pixel of height at the reference size.
+    g = { gap, foot: foot / S, xTop: xTop / S, cost };
     gcache.set(w, g);
     return g;
   };
-  const inkGap = (w) => {
+  // Which band of the x-height the stem line sits in is chosen once, for
+  // the whole ladder at once, so every weight is cut in the same place
+  // and a weight in motion never sends its cut across a crossbar. Each
+  // weight then settles on its own cleanest scanline within that band.
+  let stemBand = null;
+  const stemLine = (p) => {
+    if (stemBand === null) {
+      const sum = [];
+      let xt = 0;
+      const ws = [...new Set(Object.values(L))];
+      for (const lw of ws) {
+        const q = profileAt(lw);
+        xt += q.xTop / ws.length;
+        q.cost.forEach((c, i) => (sum[i] = (sum[i] || 0) + c / ws.length));
+      }
+      let best = Infinity;
+      sum.forEach((c, i) => {
+        if (!Number.isFinite(c)) return;
+        const score = c + 4 * Math.abs(i / INK_REF - xt / 2);
+        if (score < best) {
+          best = score;
+          stemBand = i;
+        }
+      });
+    }
+    const span = Math.round(0.03 * INK_REF);
+    let pick = stemBand;
+    for (let i = stemBand - span; i <= stemBand + span; i += 1) if ((p.cost[i] ?? Infinity) < p.cost[pick]) pick = i;
+    return pick / INK_REF;
+  };
+  const LADDER = new Set(Object.values(L));
+  const lines = (w) => {
+    const p = profileAt(w);
+    return { gap: p.gap, foot: p.foot, xTop: p.xTop, half: stemLine(p) };
+  };
+  const profile = (w) => {
+    if (LADDER.has(w)) return lines(w);
     const a = Math.floor(w / INK_STEP) * INK_STEP;
     const t = (w - a) / INK_STEP;
-    const ga = inkGapAt(a);
-    return t > 0 ? ga + (inkGapAt(a + INK_STEP) - ga) * t : ga;
+    const pa = lines(a);
+    if (t <= 0) return pa;
+    const pb = lines(a + INK_STEP);
+    const out = {};
+    for (const k of Object.keys(pa)) out[k] = pa[k] + (pb[k] - pa[k]) * t;
+    return out;
   };
   const metrics = (w) => {
     let m = mcache.get(w);
@@ -262,7 +398,8 @@ export async function createProgramme(host, { embedded = false } = {}) {
         const t = mctx.measureText(ch);
         return [-t.actualBoundingBoxLeft / REF, t.actualBoundingBoxRight / REF];
       });
-      m = { prefix, ink, asc: tm.actualBoundingBoxAscent / REF, floor: CLEAR - inkGap(w) };
+      const pr = profile(w);
+      m = { prefix, ink, asc: tm.actualBoundingBoxAscent / REF, floor: CLEAR - pr.gap, foot: pr.foot, half: pr.half, xTop: pr.xTop };
       mcache.set(w, m);
     }
     return m;
@@ -302,7 +439,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
     for (let j = 0; j < rows; j += 1) {
       for (let i = 0; i < cols; i += 1) {
         const prev = old[0];
-        cells.push({ i, j, ax: prev ? prev.ax : TX, vx: 0, ay: prev ? prev.ay : TY, vy: 0, P: {} });
+        cells.push({ i, j, ax: prev ? prev.ax : TX, vx: 0, ay: prev ? prev.ay : TY, vy: 0, P: {}, cut: null });
       }
     }
     stepCache = VARS.map((v) => ({ c: v.steps(cols), r: v.steps(rows) }));
@@ -412,6 +549,15 @@ export async function createProgramme(host, { embedded = false } = {}) {
       c.vy += (-k * (c.ay - e.ty) - d * c.vy) * h;
       c.ay += c.vy * h;
       if (Math.abs(c.ax - e.tx) > 1e-4 || Math.abs(c.vx) > 1e-4 || Math.abs(c.ay - e.ty) > 1e-4 || Math.abs(c.vy) > 1e-4 || e !== hist[hist.length - 1]) moving = true;
+      // The cut follows the axis from line to line, never between.
+      const u = paramsOf(c).reversal * (CUTS - 1);
+      if (!c.cut) c.cut = { a: Math.round(u), b: Math.round(u), t0: -1e9, dur: 1 };
+      if (Math.abs(u - c.cut.b) > CUT_HYST) {
+        const at = cutOf(c);
+        const b = clamp(Math.round(u), 0, CUTS - 1);
+        c.cut = { a: at, b, t0: now, dur: CUT_T + CUT_TS * Math.abs(b - at) };
+      }
+      if (now - c.cut.t0 < c.cut.dur) moving = true;
     }
     // Promotion: progress runs at an even pace, one hairline per STEP_T;
     // the easing lives in each step, so every edge lands on its rule.
@@ -425,6 +571,14 @@ export async function createProgramme(host, { embedded = false } = {}) {
   };
 
   // ── Parameters of a cell ───────────────────────────────────────────
+  // The cut, as a continuous index into the lines: eased out in time, so
+  // it leaves one line briskly and settles onto the next.
+  const cutOf = (c) => {
+    if (!c.cut) return 0;
+    const t = clamp((now - c.cut.t0) / c.cut.dur, 0, 1);
+    const e = 1 - (1 - t) ** 3;
+    return c.cut.a + (c.cut.b - c.cut.a) * e;
+  };
   const paramsOf = (c) => {
     const P = c.P;
     for (let k = 0; k < V; k += 1) {
@@ -436,6 +590,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
       if (ir > 0) x += ir * (stepCache[k].r[c.j] - v.def);
       P[v.key] = clamp(x, v.lo, v.hi);
     }
+    P.cut = cutOf(c);
     return P;
   };
 
@@ -533,7 +688,25 @@ export async function createProgramme(host, { embedded = false } = {}) {
 
   // ── Drawing ────────────────────────────────────────────────────────
   const hair = (v, dpr) => (Math.round(v * dpr) + 0.5) / dpr;
+  // Re-strokes the current path in paper, clipped to the reversed ground.
+  // A rule on a cell's left or top edge lies in its own first pixel; one on
+  // its right or bottom edge in the next cell's, so the clip reaches a pixel
+  // past those two sides.
+  const knockout = (stroke, dpr) => {
+    if (!reversed.length) return;
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const path = new Path2D();
+    for (const q of reversed) path.rect(q.x, q.y, q.w + 1 / dpr, q.h + 1 / dpr);
+    ctx.clip(path);
+    ctx.strokeStyle = GROUND;
+    ctx.lineWidth = 1 / dpr;
+    stroke();
+    ctx.restore();
+  };
 
+  // Where each cell is reversed, so the rules can be knocked out of it.
+  let reversed = [];
   const drawCell = (r, P, dpr, centre = false) => {
     const pad = Math.max(1, Math.round(Math.min(r.w, r.h) * PAD));
     const innerW = r.w - 2 * pad;
@@ -566,7 +739,14 @@ export async function createProgramme(host, { embedded = false } = {}) {
     const blockH = (m.asc + RULE_K * P.rule) * S;
     const spare = Math.max(0, innerH - blockH);
     const by = r.y + r.h - clr - RULE_K * P.rule * S - spare / 2;
-    const blockTop = r.y + r.h - P.reversal * r.h;
+    // The cut lines at this cell's size, top of the cell downwards in y,
+    // each on a device pixel and on the safe side of the ink it clears.
+    const yBot = r.y + r.h;
+    const lines = [yBot, Math.ceil((by + m.foot * S) * dpr) / dpr, Math.round((by - m.half * S) * dpr) / dpr, Math.floor((by - m.xTop * S) * dpr) / dpr, r.y];
+    for (let k = 1; k < CUTS; k += 1) lines[k] = clamp(Math.min(lines[k], lines[k - 1]), r.y, yBot);
+    const ck = clamp(P.cut, 0, CUTS - 1);
+    const k0c = Math.min(CUTS - 2, Math.floor(ck));
+    const blockTop = lines[k0c] + (lines[k0c + 1] - lines[k0c]) * (ck - k0c);
     // Red runs from the left, letter by letter. At rest whole glyphs take
     // the colour, so a letter that overlaps its neighbour under tight
     // tracking never shows a sliver of the other ink; in motion the edge
@@ -581,9 +761,10 @@ export async function createProgramme(host, { embedded = false } = {}) {
     ctx.beginPath();
     ctx.rect(r.x, r.y, r.w, r.h);
     ctx.clip();
-    if (P.reversal > 0.0005) {
+    if (yBot - blockTop > 0.01) {
       ctx.fillStyle = INK;
-      ctx.fillRect(r.x, blockTop, r.w, r.y + r.h - blockTop);
+      ctx.fillRect(r.x, blockTop, r.w, yBot - blockTop);
+      reversed.push({ x: r.x, y: blockTop, w: r.w, h: yBot - blockTop });
     }
     ctx.font = fontAt(wt, S);
     const regions = [
@@ -641,6 +822,7 @@ export async function createProgramme(host, { embedded = false } = {}) {
     ctx.fillRect(0, 0, W, H);
     ctx.textBaseline = "alphabetic";
     ctx.fontKerning = "normal";
+    reversed = [];
 
     // The promoted band, in grid units and in pixels. Its edges sit on the
     // rules whenever it is at rest, and every cell it covers whole is left
@@ -702,6 +884,10 @@ export async function createProgramme(host, { embedded = false } = {}) {
       ctx.lineTo(G.x + G.w, y);
     }
     ctx.stroke();
+    // Over a reversed cell the rules are cut out of the black in paper, a
+    // one-pixel knockout, so a run of reversed cells is still ruled into
+    // cells and never closes up into one slab.
+    knockout(() => ctx.stroke(), dpr);
 
     // The chosen logotype, pasted into the sheet as a band. In motion an
     // edge crosses a cell and cuts it cleanly; at rest the band is whole
@@ -712,11 +898,15 @@ export async function createProgramme(host, { embedded = false } = {}) {
       const rr = { x: px(r.x), y: px(r.y), w: px(r.x + r.w) - px(r.x), h: px(r.y + r.h) - px(r.y) };
       ctx.fillStyle = GROUND;
       ctx.fillRect(rr.x, rr.y, rr.w, rr.h);
+      reversed = [];
       drawCell(rr, paramsOf(cells[promo.cell]), dpr, true);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       ctx.strokeStyle = INK;
       ctx.lineWidth = 1 / dpr;
-      ctx.strokeRect(hair(rr.x, dpr), hair(rr.y, dpr), rr.w, rr.h);
+      ctx.beginPath();
+      ctx.rect(hair(rr.x, dpr), hair(rr.y, dpr), rr.w, rr.h);
+      ctx.stroke();
+      knockout(() => ctx.stroke(), dpr);
     }
   };
 
@@ -755,6 +945,8 @@ export async function createProgramme(host, { embedded = false } = {}) {
       const span = Math.hypot(cols, rows) * DELAY + 0.75;
       const steps = Math.round(((stillT ?? 1) * span) / FIXED);
       for (let s = 0; s < steps; s += 1) step(FIXED);
+      // A finished re-map lets the last cuts land on their lines.
+      if ((stillT ?? 1) >= 1) for (let s = 0; s < 240; s += 1) step(FIXED);
     }
     if (promoteQ !== null && cells[promoteQ]) {
       promo.cell = promoteQ;
