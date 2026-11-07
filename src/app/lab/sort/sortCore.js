@@ -304,7 +304,7 @@ export function bake(photoPx, depthPx) {
   const key16 = new Uint16Array(N);
   const depth = new Uint8Array(N);
   const reachQ = new Uint8Array(N);
-  const cool = new Uint8Array(N); // how much bluer than red, 8 bit: sky in a run's tail
+  const veg = new Uint8Array(N); // 1 on vegetation
   const k0 = 2 * S;
   const eRow = new Uint8Array(GW);
   for (let j = 0; j < DH; j++) {
@@ -343,10 +343,10 @@ export function bake(photoPx, depthPx) {
       key16[k] = Math.round(sortKey(photoPx[s], photoPx[s + 1], photoPx[s + 2]) * 65535);
       depth[k] = d;
       reachQ[k] = rq > 254 ? 255 : rq;
-      cool[k] = Math.max(0, photoPx[s + 2] - photoPx[s]);
+      veg[k] = isVeg(photoPx[s], photoPx[s + 1], photoPx[s + 2]) ? 1 : 0;
     }
   }
-  return { lum16, key: key16, depth, reachQ, cool };
+  return { lum16, key: key16, depth, reachQ, veg };
 }
 
 // The mask read once per band texel (on the band's centre row), 0..255.
@@ -424,243 +424,257 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 
 // ---- the wave's geometry
 // The wave is made by moving whole sorted rows, never by bending the sort.
-// At the verge the sorted runs stay where they were sorted, and everything
-// else (a pole, a sign) is left untouched. Up the curl the picture is cut
-// into its own horizontal stripes, thick at the verge and thinning toward
-// the crest (the face recedes, so its rows foreshorten), with a few hairlines
-// among them. Each stripe is lifted whole: across the envelope (the mask) it
-// shows one long sorted run from a verge band, picked by the stripe's radius
-// on the curl, stretched from cut to cut with its gradient kept, so every
-// strip ramps from the darkest green at its root to the run's bright tail at
-// the wave's edge. The further the brush has pushed the envelope, the longer
-// the stripes and the further their runs are stretched. The stripe's facing
-// (see facing()) picks both the run (a green head under the overhang, a warm
-// bright tail on the lit face) and the stretch of it the shader reads; a
-// handful of bright tails where facing peaks break off as glint tiles.
+// The curl is a stack of layers, and every layer is one of the verge's own
+// bands: below the curl centre a layer is the band's own row, straight along
+// the verge; right of the centre it bends round as an arc about it; over the
+// top it runs back and droops, so the lip hooks down. So each band's sorted
+// run, rooted where its grass starts, is carried rightward along its own row
+// and only then bends up into the hook: the verge peels into the wave.
+//
+// Every pixel of the wave is a stripe with hard ends: a band is split into
+// two or three sub-strips, each showing the band's sorted run stretched from
+// its root to its tail, each by its own stretch and with its own tail length,
+// so they come apart as they rise. Up the curl the face recedes and the
+// bands foreshorten: a 1-2 px gap of the photo opens between them. A
+// strip's length follows its run's length, so the lip and the back of the
+// wave are combed by the runs, not cut by the mask. Left of a strip's root
+// the band stays sorted in place; some sub-strips slide off their root, so
+// the source is left a sorted, partly evacuated band.
+//
+// The stripe's facing (see facing()) picks the stretch of its run the
+// shader reads, per position along the strip (never across it, so a strip
+// stays one colour across its height); a handful of bright tails where the
+// facing peaks over the top break off as glint tiles.
 export const WAVE_ON = 0.12; // the envelope: mask level where the wave begins
-// The curl's stripes show the verge bands between these rows (the green), by
-// radius: the inner edge of the curl shows the top of the verge.
-export const VERGE0 = 1000;
-export const VERGE1 = 1400;
-export const CURL_R0 = 90 * S;
-export const CURL_R1 = 330 * S;
-export const CREST_Y = CY - CURL_R1; // the top of the curl, grid px
 export const RUN_MIN = 48; // shorter verge runs are never lifted
 export const GLINT_LUM = 0.68; // a run's tail this bright...
 export const GLINT_PEAK = 0.8; // ...ending in a highlight this bright can break off
 export const GLINTS = 10; // glint tiles at most
-export const GLINT_FACE = 0.72; // only where the sheet faces the light this fully
-// Stripe height, grid px, from the verge (near) to the crest (far).
-export const STRIPE_NEAR = 14;
-export const STRIPE_FAR = 2.5;
-export const STRIPES = (() => {
-  // Cut from the bottom up, so the thick rows sit on the verge.
-  const y0 = [];
-  const h = [];
-  let y = GH;
-  for (let j = 0; y > 0; j++) {
-    const p = clamp((y - CREST_Y) / (GH - CREST_Y), 0, 1);
-    let hh = (STRIPE_FAR + (STRIPE_NEAR - STRIPE_FAR) * p ** 1.4) * (0.7 + 0.6 * hash(j, 41));
-    // A few hairlines among them, at every height.
-    if (hash(j, 43) < 0.13) hh = 1 + Math.floor(hash(j, 47) * 2);
-    hh = Math.min(y, Math.max(1, Math.round(hh)));
-    y -= hh;
-    y0.push(y);
-    h.push(hh);
+export const GLINT_FACE = 0.62; // only where the sheet faces the light this fully
+// A layer over the top sinks by over^2 / DROOP_G (grid px), as sheetT.
+export const DROOP_G = SHEET_DROOP * S;
+// Along-layer coordinates are stored offset by this, as unsigned.
+export const UOFF = 8192;
+// The gap that opens between sub-strips, grid px, as the face recedes.
+export const GAP = 2;
+// Each band holds up to PARTS sub-strips, two RGBA16UI texels each, in a
+// texture DH wide and 2 x PARTS tall: (uA + UOFF, uB + UOFF, source band + 1,
+// q0 | q1 << 5 | outermost << 10) for the sub-strip's span along its layer and its rows within
+// the band, and (x0, x1, 0, 0) for the sorted run it shows.
+export const PARTS = 8;
+
+// A point of layer rho (its verge row is CY + rho) at distance u along it
+// from the curl's foot (negative on the verge). The shader inverts this per
+// pixel, measuring u at the strip's centre layer so its pixel blocks run
+// straight across it.
+export function layerPoint(u, rho) {
+  if (u < 0) return [CX + u, CY + rho];
+  const arc = Math.PI * rho;
+  if (u <= arc) {
+    const th = u / Math.max(rho, 1e-6);
+    return [CX + rho * Math.sin(th), CY + rho * Math.cos(th)];
   }
-  const n = y0.length;
-  const of = new Uint16Array(GH);
-  const c = new Uint16Array(n);
-  for (let j = 0; j < n; j++) {
-    c[j] = y0[j] + (h[j] >> 1);
-    for (let k = 0; k < h[j]; k++) of[y0[j] + k] = j;
-  }
-  return { n, y0: Uint16Array.from(y0), h: Uint8Array.from(h), c, of };
-})();
-export const NS = STRIPES.n;
-// Each stripe holds up to PARTS lifted runs, two RGBA16UI texels each, in a
-// texture NS wide and 2 x PARTS tall: (a, b, source band + 1, reversed) for
-// the stripe's cut [a, b) and (x0, x1, 0, 0) for the run [x0, x1) shown there.
-export const PARTS = 4;
+  const over = u - arc;
+  return [CX - over, CY - (rho - (over * over) / DROOP_G)];
+}
 
 // Below the curl centre (and a ragged few rows above it) a band is verge left
 // of its split: there the runs stay in place.
+export const CURL_R0 = 90 * S;
 const vergeLow = (d) => BANDS.c[d] + 0.5 >= CY - CURL_R0 * 0.25 * hash(d, 29);
 const vergeSplit = (d) => CX + (hash(d, 23) - 0.5) * 120;
+// A root run may start this far right of the curl's foot, and a strip
+// starts no further left than ROOT_X, right of the crossing's poles.
+const ROOT_PAST = 100;
+const ROOT_X = 712;
+// A verge run in place slides toward the curl by up to this much of itself.
+const SLIDE = 0.3;
+// A root run must be this much grass to carry its own pixels up the curl.
+const VEG_MIN = 0.45;
 
 export function geometry(mask8, base, link, out = {}) {
   const geo = out.geo || new Uint16Array(DW * DH * 2);
-  const table = out.table || new Uint16Array(NS * 2 * PARTS * 4);
+  const table = out.table || new Uint16Array(DH * 2 * PARTS * 4);
   const glints = out.glints || new Float32Array(GLINTS * 8);
   geo.fill(0);
   table.fill(0);
   glints.fill(0);
   const B = BANDS;
   const r = runs(link);
+  const byBand = Array.from({ length: DH }, () => []);
+  for (let n = 0; n < r.length; n += 3) byBand[r[n]].push([r[n + 1], r[n + 2]]);
 
-  // The verge: sorted runs in place, inside the envelope.
+  // The verge: sorted runs in place, inside the envelope, each slid a
+  // hashed way toward the curl. The pixels pushed past its end have gone
+  // into the wave; the photo shows at its root, where they left from.
   const mrow = new Float32Array(GW);
   for (let d = 0; d < DH; d++) {
     if (!vergeLow(d)) continue;
     const row = d * DW;
     const split = Math.min(DW, Math.round(vergeSplit(d)));
     maskRow(mask8, B.c[d] + 0.5, mrow);
-    for (let k = 0; k < split; k++) {
-      if (!(link[row + k] || (k > 0 && link[row + k - 1]))) continue;
-      if (mrow[k] < WAVE_ON) continue;
-      geo[(row + k) * 2] = k + 1;
-      geo[(row + k) * 2 + 1] = d;
+    for (const [x0, x1] of byBand[d]) {
+      if (x0 >= split) continue;
+      const slide = Math.round((x1 - x0) * SLIDE * hash(d * 131 + x0, 93) ** 1.3 * (B.y0[d] >= CY ? 1 : 0.3));
+      for (let k = x0 + slide; k < Math.min(x1, split); k++) {
+        if (mrow[k] < WAVE_ON) continue;
+        geo[(row + k) * 2] = k - slide + 1;
+        geo[(row + k) * 2 + 1] = d;
+      }
     }
   }
 
-  // The runs that may be lifted: long verge runs, by band.
-  const lum = base.lum16;
-  const key = base.key;
-  const cand = [];
-  for (let n = 0; n < r.length; n += 3) {
-    const d = r[n];
-    const x0 = r[n + 1];
-    const x1 = r[n + 2];
-    if (B.c[d] < VERGE0 || x1 - x0 < RUN_MIN || x0 > CX) continue;
-    // The run in its sorted order (the order the network settles on): how
-    // green its head is and how bright its tail, so a stripe can be given a
-    // run that has the light its facing asks for.
-    const row = d * DW;
-    const idx = [];
-    for (let x = x0; x < x1; x++) idx.push(x);
-    idx.sort((a, b) => key[row + a] - key[row + b] || a - b);
-    const q = Math.max(2, Math.round(idx.length * 0.1));
-    let head = 0;
-    let tail = 0;
-    for (let i = 0; i < q; i++) {
-      head += 1 - key[row + idx[i]] / 65535;
-      // A tail that ends in sky is cold light: the lit face wants the warm
-      // white-gold of a dry blade or a sunlit wall.
-      const h = idx[idx.length - 1 - i];
-      tail += lum[row + h] / 65535 - (1.5 * base.cool[row + h]) / 255;
+  const vegOf = (d, x0, x1) => {
+    let n = 0;
+    for (let x = x0; x < x1; x++) n += base.veg[d * DW + x];
+    return n / Math.max(1, x1 - x0);
+  };
+  // Each verge band's layer: where the envelope lies along it, and the run
+  // rooted on it.
+  const STEP = 4;
+  const layers = [];
+  for (let d = 0; d < DH; d++) {
+    if (B.y0[d] < CY) continue;
+    const rho = B.c[d] + 0.5 - CY;
+    const segs = [];
+    let ua = null;
+    const uMax = Math.PI * rho + CX;
+    for (let u = -CX; u <= uMax; u += STEP) {
+      const [x, y] = layerPoint(u, rho);
+      const past = u > Math.PI * rho && y > CY; // drooped back down past the centre
+      const on = !past && x >= 0 && x < GW && y >= 0 && y < GH && maskAt(mask8, x, y) >= WAVE_ON;
+      if (on && ua === null) ua = u;
+      if (!on && ua !== null) {
+        segs.push([ua, u]);
+        ua = null;
+      }
+      if (past) break;
     }
-    cand.push({ d, x0, x1, y: B.c[d], head: head / q, tail: tail / q });
+    if (ua !== null) segs.push([ua, uMax]);
+    if (!segs.length) continue;
+    // The root: the rightmost long run starting on the verge (or just past
+    // the foot) inside the envelope. Its grass is what peels up the curl.
+    let root = null;
+    let longest = null;
+    for (const [x0, x1] of byBand[d]) {
+      if (x1 - x0 < RUN_MIN || x0 > CX + ROOT_PAST) continue;
+      if (vegOf(d, x0, x1) >= VEG_MIN && (!longest || x1 - x0 > longest[1] - longest[0])) longest = [x0, x1];
+      const seg = segs.find(([a, b]) => x0 - CX >= a - STEP && x0 - CX < b);
+      if (seg && (!root || x1 > root.x1)) root = { x0, x1, seg };
+    }
+    layers.push({ d, rho, segs, root, longest });
   }
-  if (!cand.length) return { geo, table, glints, glintN: 0 };
-  cand.sort((p, q) => q.x1 - q.x0 - (p.x1 - p.x0));
-  const pick = (ty, len, f, seed) => {
-    // Runs near the target row, never stretched past four times their length
-    // where a longer one is near; of the longest of them, those with the
-    // light the stripe's facing asks for: a green head under the overhang,
-    // a bright tail on the lit face.
-    // The lit face looks further afield for its light.
-    const reach = 70 + 220 * f * f;
-    let near = cand.filter((c) => Math.abs(c.y - ty) < reach);
-    if (near.length < 3) near = cand.filter((c) => Math.abs(c.y - ty) < reach + 150);
-    if (!near.length) near = cand;
-    const fit = near.filter((c) => (c.x1 - c.x0) * 4 >= len);
-    const pref = (c) => f * c.tail + (1 - f) * c.head;
-    const pool = (fit.length >= 2 ? fit : near)
-      .slice(0, 14)
-      .sort((p, q) => pref(q) - pref(p))
-      .slice(0, 3);
-    return pool[Math.floor(seed * seed * pool.length)];
+  // Strip length follows run length: a run this long reaches the envelope's end.
+  const lens = layers.filter((l) => l.root).map((l) => l.root.x1 - l.root.x0);
+  lens.sort((a, b) => a - b);
+  const lFull = lens.length ? lens[Math.floor(lens.length * 0.85)] : 1;
+  // Any run, for an envelope that the brush has opened away from a root.
+  const anyRun = (d) => {
+    for (let k = 0; k < 12; k++) {
+      for (const dd of [d - k, d + k]) {
+        if (dd < 0 || dd >= DH) continue;
+        let best = null;
+        for (const [x0, x1] of byBand[dd]) if (x1 - x0 >= RUN_MIN && (!best || x1 - x0 > best[2] - best[1])) best = [dd, x0, x1];
+        if (best) return best;
+      }
+    }
+    return null;
   };
 
-  // The curl: per stripe, its cut through the envelope, less the verge.
+  const lum = base.lum16;
   const tails = [];
-  const on = new Uint8Array(DW);
-  for (let s = 0; s < NS; s++) {
-    const y = STRIPES.c[s] + 0.5;
-    const d = B.of[STRIPES.c[s]];
-    const low = vergeLow(d);
-    const split = low ? Math.round(vergeSplit(d)) : 0;
-    on.fill(0);
-    maskRow(mask8, y, mrow);
-    for (let x = split; x < DW; x++) on[x] = mrow[x] >= WAVE_ON ? 1 : 0;
-    const parts = [];
-    for (let x = 0; x < DW; ) {
-      if (!on[x]) {
-        x++;
-        continue;
+  for (const L of layers) {
+    const { d, root } = L;
+    const h = B.h[d];
+    // The band's sub-strips: two or three, cut at hashed rows.
+    const cuts = [0];
+    if (h >= 12) cuts.push(Math.round(h * (0.24 + 0.14 * hash(d, 81))), Math.round(h * (0.58 + 0.16 * hash(d, 83))));
+    else cuts.push(Math.round(h * (0.36 + 0.28 * hash(d, 81))));
+    cuts.push(h);
+    let part = 0;
+    for (const seg of L.segs) {
+      const rooted = root && root.seg === seg;
+      let src;
+      let u0;
+      if (rooted) {
+        // A short root run, or one that is mostly road, carries the row's
+        // longest grass instead.
+        const len = root.x1 - root.x0;
+        const own = len >= 200 && vegOf(d, root.x0, root.x1) >= VEG_MIN;
+        src = !own && L.longest && L.longest[1] - L.longest[0] > len ? [d, ...L.longest] : [d, root.x0, root.x1];
+        // A strip never rises from beyond the last pole before the foot.
+        u0 = Math.max(root.x0, ROOT_X) - CX;
+      } else {
+        // Away from a root (where the brush has opened the envelope up the
+        // curl), the strip shows the nearest long run; the verge itself
+        // stays sorted in place.
+        src = anyRun(d);
+        u0 = Math.max(0, seg[0]);
+        if (seg[1] - u0 < 140) continue;
       }
-      const a = x;
-      while (x < DW && on[x]) x++;
-      const b = x;
-      if (b - a < 6) continue;
-      // Over the top the stripe roots near the curl's axis: its left half
-      // runs out to the lip, its right half out to the back of the wave.
-      const xs = Math.round(CX + (hash(s, 51) - 0.5) * 200);
-      if (a + 24 < xs && xs < b - 24) {
-        parts.push([a, xs, 1], [xs, b, 0]);
-      } else parts.push([a, b, (a + b) / 2 < CX ? 1 : 0]);
-    }
-    // Blades of different lengths: each tail stops short of the envelope by
-    // a hashed amount, more toward the crest, so the wave's edge is combed.
-    const far = 1 - clamp((y - CREST_Y) / (GH - CREST_Y), 0, 1);
-    for (let i = 0; i < Math.min(PARTS, parts.length); i++) {
-      let [a, b, rev] = parts[i];
-      const jag = Math.round(hash(s, 57 + i) ** 2 * (30 + 260 * far) * Math.min(1, (b - a) / 300));
-      if (rev) a += jag;
-      else b -= jag;
-      if (b - a < 6) continue;
-      // The stripe's facing, over its outer half. Under the overhang and in
-      // the hook the stripes stay short: the sheet's underside is a shadow
-      // the lit face reaches past.
-      const f = 0.5 * (facing(rev ? a + (b - a) * 0.25 : b - (b - a) * 0.25, y) + facing(rev ? a : b - 1, y));
-      if (y < CY) {
-        const cut = Math.round((1 - smooth(0.1, 0.6, f)) * (0.2 + 0.25 * hash(s, 59 + i)) * (b - a));
-        if (rev) a += cut;
-        else b -= cut;
-        if (b - a < 6) continue;
-      }
-      const [, rr] = fwd((a + b) / 2, y);
-      const t = clamp((rr - CURL_R0) / (CURL_R1 - CURL_R0), 0, 1);
-      const c = pick(VERGE0 + t * (VERGE1 - VERGE0), b - a, f, hash(s * 7 + i, 53));
-      const o = (s + i * 2 * NS) * 4;
-      table[o] = a;
-      table[o + 1] = b;
-      table[o + 2] = c.d + 1;
-      table[o + 3] = rev;
-      table[o + NS * 4] = c.x0;
-      table[o + NS * 4 + 1] = c.x1;
-      // Where the sheet turns full to the light, a bright tail may break
-      // off its stripe as a glint.
-      const fe = facing(rev ? a : b - 1, y);
-      if (fe >= GLINT_FACE) {
-        const row = c.d * DW;
+      if (!src) continue;
+      const len = src[2] - src[1];
+      const room = seg[1] - u0;
+      if (room < 12) continue;
+      for (let k = 0; k + 1 < cuts.length && part < PARTS; k++) {
+        const q0 = cuts[k];
+        const q1 = cuts[k + 1];
+        if (q1 <= q0) continue;
+        const hk = hash(d * 5 + k, 87);
+        // Some sub-strips slide off their root: the sorted band they leave
+        // shows behind them.
+        const slide = rooted && hash(d * 5 + k, 89) < 0.45 ? Math.round(hash(d * 5 + k, 91) ** 1.5 * 0.35 * Math.min(len, CX - (u0 + CX) + 40)) : 0;
+        const uA = u0 + Math.max(0, slide);
+        const frac = (0.66 + 0.34 * clamp(Math.sqrt(Math.min(len, root ? root.x1 - root.x0 : len) / lFull), 0, 1)) * (0.86 + 0.14 * hk);
+        const uB = Math.round(Math.min(seg[1], uA + (seg[1] - uA) * (rooted ? frac : 0.75 + 0.25 * hk)));
+        if (uB - uA < 8) continue;
+        const o = (d + part * 2 * DH) * 4;
+        table[o] = Math.round(uA) + UOFF;
+        table[o + 1] = uB + UOFF;
+        table[o + 2] = src[0] + 1;
+        // The band's outermost sub-strip carries the gap (flag 1 << 10).
+        table[o + 3] = q0 | (q1 << 5) | (q1 === h ? 1024 : 0);
+        table[o + DH * 4] = src[1];
+        table[o + DH * 4 + 1] = src[2];
+        part++;
+        // A bright tail over the top, where the sheet faces the light, may
+        // break off as a glint.
+        const rc = B.y0[d] + (q0 + q1) / 2 - CY;
+        if (uB < Math.PI * rc * 0.8) continue;
+        const [tx, ty] = layerPoint(uB, rc);
+        const fe = facing(tx, ty);
+        if (fe < GLINT_FACE) continue;
+        const row = src[0] * DW;
         let peak = 0;
         let n = 0;
-        // The sort puts the run's brightest pixels last: its tail is as long
-        // as the run has bright pixels.
-        for (let x = c.x0; x < c.x1; x++) {
+        for (let x = src[1]; x < src[2]; x++) {
           if (lum[row + x] >= GLINT_LUM * 65535) n++;
           if (lum[row + x] > peak) peak = lum[row + x];
         }
-        if (peak >= GLINT_PEAK * 65535 && n >= 2) tails.push({ s, a, b, rev, c, n, y, fe, w: hash(s, 61 + i) });
+        if (peak >= GLINT_PEAK * 65535 && n >= 2) tails.push({ tx, ty, th: Math.max(2, q1 - q0 - (q1 === h ? GAP : 0)), src, n, fe, w: hash(d, 61 + k), stretch: (uB - uA) / len });
       }
     }
   }
 
   // Glints: a handful of the bright tails where the facing peaks, spaced
-  // apart. Each is the stripe's own end, carried on a little past it and as
-  // tall as the stripe (a hairline's a few px): light running off the sheet.
+  // apart. Each is the strip's own end carried on a little past it, leftward
+  // as the strip runs over the top, as tall as the strip.
   tails.sort((p, q) => q.fe - p.fe + (q.w - p.w) * 0.08);
   let gn = 0;
   const taken = [];
   for (const g of tails) {
     if (gn >= GLINTS) break;
-    const end = g.rev ? g.a : g.b;
-    if (taken.some(([x, y]) => Math.abs(x - end) < 90 && Math.abs(y - g.y) < 40)) continue;
-    taken.push([end, g.y]);
-    const w = Math.round(clamp(g.n * ((g.b - g.a) / (g.c.x1 - g.c.x0)), 10, 40));
-    // The tile overlaps the stripe's last few px, so it never comes loose.
+    if (taken.some(([x, y]) => Math.abs(x - g.tx) < 90 && Math.abs(y - g.ty) < 40)) continue;
+    taken.push([g.tx, g.ty]);
+    const w = Math.round(clamp(g.n * g.stretch, 10, 40));
     const lap = 4;
-    const x0 = g.rev ? end - w + lap : end - lap;
-    const y1 = STRIPES.y0[g.s] + STRIPES.h[g.s];
-    const tall = Math.max(3, STRIPES.h[g.s]);
     const o = gn * 8;
-    glints[o] = x0;
-    glints[o + 1] = y1 - tall;
-    glints[o + 2] = x0 + w;
-    glints[o + 3] = y1;
-    glints[o + 4] = g.c.x1 - 1;
-    glints[o + 5] = g.c.d;
+    glints[o] = Math.round(g.tx) - w;
+    glints[o + 1] = Math.round(g.ty - g.th / 2);
+    glints[o + 2] = Math.round(g.tx) + lap;
+    glints[o + 3] = Math.round(g.ty - g.th / 2) + g.th;
+    glints[o + 4] = g.src[2] - 1;
+    glints[o + 5] = g.src[0];
     gn++;
   }
   return { geo, table, glints, glintN: gn };

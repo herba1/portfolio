@@ -9,9 +9,10 @@ import {
   DW,
   DH,
   BANDS,
-  STRIPES,
-  NS,
   PARTS,
+  UOFF,
+  GAP,
+  DROOP_G,
   GLINTS,
   CX,
   CY,
@@ -64,24 +65,26 @@ import {
 // one position per pass. Erasing the mask (a long press) therefore un-sorts
 // by the same network.
 //
-// The wave is geometry, not sort direction. Inside the envelope (the mask),
-// at the verge the sorted runs stay in place and the poles stand untouched.
-// Up the curl the picture is cut into its own stripes, about 14 px thick at
-// the verge and thinning to 2-3 px at the crest, with hairlines among them,
-// and each stripe is lifted whole: it shows one long sorted run from a verge
-// band, picked by the stripe's radius on the curl, stretched from cut to cut
-// with its gradient kept, so every strip ramps from dark green at its root to
-// the run's bright tail at the wave's edge. Its tail stops short by a hashed
-// amount, so the edge is combed like grass. The curl is lit as a surface,
-// with no filter: the light comes from the sort order. Each stripe pixel has
-// a facing from its place on the sheet (sortCore's facing(): its depth
-// through the curl's layers and how far that face turns to the sky), and the
-// facing picks the stretch of the run it reads. Under the overhang and in the
-// hook it reads the run's dark green head and the stripe stays short; on the
-// crest and the upper outer face it reads out to the warm white-gold tail and
-// lingers there. Glint tiles break off stripe ends only where facing peaks.
-// The envelope grows with the mask, so brushing stretches the runs further
-// up the curl.
+// The wave is geometry, not sort direction. The curl is a stack of layers,
+// and each layer is one of the verge's own bands: straight along its own row
+// below the curl's centre, bent round the centre as an arc, and back over
+// the top, drooping. Each band's sorted run, rooted where its grass starts,
+// is carried rightward along its row and only then bends up into the hook,
+// so the verge peels into the wave. Every wave pixel is one sorted pixel
+// with hard ends: a band rises as two or three sub-strips, each stretching
+// the run by its own amount to its own tail (so the lip is combed by the run
+// lengths), and up the curl a 1-2 px gap of the photo opens between bands as
+// the face foreshortens. Left of a strip's root the band stays sorted in
+// place, each run slid toward the curl, the photo showing where it left.
+// The curl is lit as a surface, with no filter: the light comes from the
+// sort order. Each point of a strip's centre line has a facing from its
+// place on the sheet (sortCore's facing(): its depth through the curl's
+// layers and how far that face turns to the sky), and the facing picks the
+// stretch of the run it reads, the same across the strip's height. Under the
+// overhang it reads the run's dark green head; on the crest and the upper
+// outer face it reads out to the warm bright tail and lingers there. Glint
+// tiles break off strip ends only where facing peaks. The envelope grows
+// with the mask, so brushing stretches the runs further up the curl.
 //
 // The resting wave is the same sort run to completion on the CPU at load
 // (identical keys and tie-break, so it is a fixed point of the GPU network).
@@ -149,8 +152,8 @@ precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
 uniform usampler2D uGeo;    // verge, per (x, band): source x + 1 (0 = not verge), source band
-uniform usampler2D uStripe; // curl, per stripe part: (a, b, band + 1, reversed) and (x0, x1, -, -)
-uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band; row 2: stripe of each grid row
+uniform usampler2D uStripe; // per band, per sub-strip: (uA, uB, source band + 1, q0 | q1 << 5) and (x0, x1, -, -)
+uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band; row 2: top row of each band
 uniform vec4 uGlint[${GLINTS}];    // glint tiles: x0, y0, x1, y1 in grid px
 uniform vec4 uGlintSrc[${GLINTS}]; // the run end each tile shows: x, band
 uniform int uGlintN;
@@ -199,9 +202,8 @@ void main() {
   vec3 col = texelFetch(uFilm, ivec2(fp.x, fs.y - 1 - fp.y), 0).rgb;
   ivec2 g = ivec2(floor(l * uGrid));
   ivec2 src = ivec2(-1);
-  ivec2 span = ivec2(0); // the lifted run a curl pixel reads, [x0, x1)
-  float tapStep = 2.0; // the read window's tap spacing along the run
   bool glint = false;
+  bool lifted = false;
   vec2 gc = vec2(g) + 0.5;
   for (int i = 0; i < ${GLINTS}; i++) {
     if (i >= uGlintN) break;
@@ -213,51 +215,73 @@ void main() {
     }
   }
   if (!glint) {
-    int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
-    uvec2 geo = texelFetch(uGeo, ivec2(g.x, band), 0).rg;
-    if (geo.r > 0u) {
-      src = ivec2(int(geo.r) - 1, int(geo.g));
+    // The layer this pixel lies on: its verge row is CY + rho. Below the
+    // centre and left of it, the verge's own rows; right of it, arcs about
+    // it; over the top, back and drooping.
+    vec2 dd = gc - vec2(${CX.toFixed(1)}, ${CY.toFixed(1)});
+    float rho;
+    int zone; // 0 verge, 1 arc, 2 over the top
+    float th = 0.0;
+    if (dd.x < 0.0) {
+      if (dd.y >= 0.0) { rho = dd.y; zone = 0; }
+      else { rho = -dd.y + dd.x * dd.x / ${DROOP_G.toFixed(1)}; zone = 2; }
     } else {
-      // Up the curl: the stripe's part under this pixel, its run stretched
-      // from the root end of the cut to the tail end.
-      int s = int(texelFetch(uBand, ivec2(g.y, 2), 0).r);
+      rho = length(dd);
+      th = atan(dd.x, dd.y);
+      zone = 1;
+    }
+    int vy = int(floor(${CY.toFixed(1)} + rho));
+    if (vy < ${GH}) {
+      int band = int(texelFetch(uBand, ivec2(vy, 0), 0).r);
+      float q = ${CY.toFixed(1)} + rho - float(texelFetch(uBand, ivec2(band, 2), 0).r);
       for (int k = 0; k < ${PARTS}; k++) {
-        uvec4 p = texelFetch(uStripe, ivec2(s, 2 * k), 0);
+        uvec4 p = texelFetch(uStripe, ivec2(band, 2 * k), 0);
         if (p.b == 0u) break;
-        int a = int(p.r);
-        int b = int(p.g);
-        if (g.x >= a && g.x < b) {
-          uvec2 run = texelFetch(uStripe, ivec2(s, 2 * k + 1), 0).rg;
-          int off = p.a > 0u ? b - 1 - g.x : g.x - a;
-          // Lit as a surface: the facing here picks the stretch of the run
-          // this pixel reads, root to tail. Tucked under the overhang it is
-          // the dark green head; turned to the sky, out along the run to the
-          // brightest tail.
-          float f = facing(gc);
-          vec2 win = vec2(${FACE_LO} * pow(f, 1.5), ${FACE_HI0} + ${(1 - FACE_HI0).toFixed(3)} * smoothstep(0.0, ${FACE_FULL}, f));
-          float sf = (float(off) + 0.5) / float(b - a);
-          float len = float(run.y - run.x);
-          float pr = mix(win.x, win.y, 1.0 - pow(1.0 - sf, 1.0 + 1.5 * f));
-          src = ivec2(int(run.x) + int(pr * (len - 1.0)), int(p.b) - 1);
-          tapStep = max(1.0, 2.0 * (win.y - win.x));
-          span = ivec2(run);
-          break;
+        float q0 = float(p.a & 31u);
+        float q1 = float((p.a >> 5u) & 31u);
+        if (q < q0 || q >= q1) continue;
+        // Along the strip, measured at its own centre layer, so its pixel
+        // blocks run straight across it and it is one colour top to bottom.
+        float rc = float(texelFetch(uBand, ivec2(band, 2), 0).r) + 0.5 * (q0 + q1) - ${CY.toFixed(1)};
+        float along = zone == 0 ? dd.x : zone == 1 ? rc * th : PI * rc - dd.x;
+        float uA = float(p.r) - ${UOFF.toFixed(1)};
+        float uB = float(p.g) - ${UOFF.toFixed(1)};
+        if (along < uA || along >= uB) continue;
+        // As the face recedes up the curl the bands foreshorten: a gap of
+        // the photo opens on each one's outer side.
+        if ((p.a & 1024u) != 0u) {
+          float rise = clamp(along / (PI * rc * 0.55), 0.0, 1.0);
+          float gap = floor(${GAP.toFixed(1)} * smoothstep(0.08, 0.9, rise) + 0.5);
+          if (q >= q0 + max(1.0, q1 - q0 - gap)) continue;
         }
+        uvec2 run = texelFetch(uStripe, ivec2(band, 2 * k + 1), 0).rg;
+        // Lit as a surface: the facing at this point of the strip's centre
+        // line picks the stretch of the run it reads, root to tail. Tucked
+        // under the overhang it is the dark green head; turned to the sky,
+        // out along the run to the brightest tail.
+        vec2 cp;
+        if (along < 0.0) cp = vec2(${CX.toFixed(1)} + along, ${CY.toFixed(1)} + rc);
+        else if (along <= PI * rc) { float a = along / rc; cp = vec2(${CX.toFixed(1)} + rc * sin(a), ${CY.toFixed(1)} + rc * cos(a)); }
+        else { float ov = along - PI * rc; cp = vec2(${CX.toFixed(1)} - ov, ${CY.toFixed(1)} - rc + ov * ov / ${DROOP_G.toFixed(1)}); }
+        float f = facing(cp);
+        vec2 win = vec2(${FACE_LO} * pow(f, 1.5), ${FACE_HI0} + ${(1 - FACE_HI0).toFixed(3)} * smoothstep(0.0, ${FACE_FULL}, f));
+        float sf = (along - uA) / (uB - uA);
+        float len = float(run.y - run.x);
+        float pr = mix(win.x, win.y, 1.0 - pow(1.0 - sf, 1.0 + 1.5 * f));
+        src = ivec2(int(run.x) + int(clamp(pr, 0.0, 1.0) * (len - 1.0)), int(p.b) - 1);
+        lifted = true;
+        break;
       }
     }
-  }
-  if (src.x >= 0 && span.y > span.x) {
-    // A lifted strip is read through a short window along its run: the sort
-    // has already ordered it, so the window keeps the ramp and drops the
-    // pixel-to-pixel flicker of hues that share a key.
-    int cy = int(texelFetch(uBand, ivec2(src.y, 1), 0).r);
-    vec3 acc = vec3(0.0);
-    for (int k = -3; k <= 3; k++) {
-      int x = clamp(src.x + int(float(k) * tapStep), span.x, span.y - 1);
-      acc += film(int(texelFetch(uState, ivec2(x, src.y), 0).r), cy);
+    if (!lifted) {
+      int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
+      uvec2 geo = texelFetch(uGeo, ivec2(g.x, band), 0).rg;
+      if (geo.r > 0u) src = ivec2(int(geo.r) - 1, int(geo.g));
     }
-    col = acc / 7.0;
-  } else if (src.x >= 0) {
+  }
+  if (src.x >= 0) {
+    // Every wave pixel is one sorted pixel, read where it now sits: no
+    // window, no blend, so strips keep hard ends.
     uint h = texelFetch(uState, src, 0).r;
     col = film(int(h), int(texelFetch(uBand, ivec2(src.y, 1), 0).r));
     // A glint is the run's brightest pixel caught in the light: a wall's
@@ -337,7 +361,7 @@ export async function createSort(host, { embedded = false } = {}) {
   // The spans the mask opens, and the wave's slabs, rebuilt as the mask moves.
   const bm = new Uint8Array(DW * DH);
   const link = new Uint8Array(DW * DH);
-  const wave = { geo: new Uint16Array(DW * DH * 2), table: new Uint16Array(NS * 2 * PARTS * 4), glints: new Float32Array(GLINTS * 8), glintN: 0 };
+  const wave = { geo: new Uint16Array(DW * DH * 2), table: new Uint16Array(DH * 2 * PARTS * 4), glints: new Float32Array(GLINTS * 8), glintN: 0 };
   const glintRect = new Float32Array(GLINTS * 4);
   const glintSrc = new Float32Array(GLINTS * 4);
   const rebuildCpu = () => {
@@ -356,7 +380,7 @@ export async function createSort(host, { embedded = false } = {}) {
   const bandRows = new Uint16Array(GH * 3);
   bandRows.set(BANDS.of, 0);
   bandRows.set(BANDS.c, GH);
-  bandRows.set(STRIPES.of, GH * 2);
+  bandRows.set(BANDS.y0, GH * 2);
 
   // ---- GL resources
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -373,7 +397,7 @@ export async function createSort(host, { embedded = false } = {}) {
   const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, base.key);
   const linkTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, DW, DH, link);
   const geoTex = tex(gl.RG16UI, gl.RG_INTEGER, gl.UNSIGNED_SHORT, DW, DH, wave.geo);
-  const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, NS, 2 * PARTS, wave.table);
+  const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, DH, 2 * PARTS, wave.table);
   const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 3, bandRows);
   const uploadCpu = () => {
     gl.bindTexture(gl.TEXTURE_2D, linkTex);
@@ -381,7 +405,7 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, geoTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RG_INTEGER, gl.UNSIGNED_SHORT, wave.geo);
     gl.bindTexture(gl.TEXTURE_2D, stripeTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, 2 * PARTS, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, wave.table);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DH, 2 * PARTS, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, wave.table);
   };
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {
