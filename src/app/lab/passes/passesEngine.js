@@ -1,19 +1,19 @@
 import { createStage, clamp } from "../_kit/stage";
-import { TOWER } from "./towerMatte";
 
-// One photograph and the passes under it, the way a renderer or a
-// photogrammetry tool keeps them: depth, surface normals, and the scene relit.
-// The plate is Jakob Owens' worm's-eye frame of Tokyo Tower between two
-// building faces. Everything but the light is baked offline
-// (tools/depth/bakes/passes.py): the photo; an albedo with the daylight
-// shading divided out; the Depth Anything V2 map as 16 bits across R and G,
-// with depth minus a wide blur in B, which the passes use to calm normals at
-// silhouettes; MoGe-2 normals; and mattes for the sky and the tower. The
-// sheets are cut around the tower (towerMatte.js: a SAM mask blurred and
-// re-thresholded so its contour is smooth, kept as its left and right
-// silhouette per photo row). Wherever a sheet's edge would cross it, the cut
-// steps out along the tower's silhouette and back, so the stack reads as
-// prints scissored around it.
+// One photograph, relit by a sun you can move. The plate is Jakob Owens'
+// worm's-eye frame of Tokyo Tower between two building faces, full bleed.
+// The passes a renderer keeps never show: they live only in the shader.
+// Everything but the light is baked offline (tools/depth/bakes/passes.py):
+// the photo; an albedo with the daylight shading divided out; the Depth
+// Anything V2 map as 16 bits across R and G, with depth minus a wide blur in
+// B; MoGe-2 normals; and mattes for the sky (R) and the tower (G).
+//
+// The drag is the sun: across is its azimuth around the camera (straight
+// ahead, behind the tower, in the middle; behind your shoulder at either
+// edge), up and down its elevation. The concrete faces and the tower's
+// lattice take a warm key from it, shaded by the MoGe normals and kept out of
+// the creases the depth map finds, and a cyan fill from the open sky. The sky
+// stays the photograph's, with a warm aureole where the sun stands in it.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -21,188 +21,122 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uPhoto, uAlbedo, uDepth, uNormal, uMatte;
-uniform highp sampler2D uFig;   // 1 x rows, RG = the tower's left, right silhouette in u
-uniform vec4 uFigBox;     // the tower's rows (top, bottom) in photo rows, its x range in u
+uniform sampler2D uPhoto, uAlbedo, uDepth, uNormal, uMatte, uHalo;
 uniform vec2 uRes;        // canvas px
-uniform vec4 uRect;       // print rect in canvas px: x, y (top), w, h
-uniform vec3 uEdge;       // sheet edges in image u: photo|lit, lit|normal, normal|depth
-uniform vec3 uLight;      // light in image u, v (top-down), height
-uniform vec3 uGround;
+uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
+uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
+uniform vec3 uSunCol;     // key colour times intensity, linear
+uniform vec3 uUp;         // world up, camera space
+uniform float uDay;       // 0 at the horizon, 1 with the sun high
 out vec4 o;
+
+const vec2 TEX = vec2(2048.0, 1536.0);
+const float ASPECT = 2048.0 / 1536.0;
+// Tone curve: a shoulder that rolls off before white.
+const float EXPO = 1.35;
 
 float hash(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19.19); return fract((p.x + p.y) * p.x); }
 
-const float ROWS = 1536.0;
-const vec2 TEX = vec2(2048.0, 1536.0);
-float pxU, pxR;   // one canvas pixel in u, and in photo rows
-
-// Depth, 16 bits split over R (high byte) and G (low byte). Linear filtering
-// of the two bytes recombines exactly, so the sheet has no 8-bit ledges.
-float depthAt(vec2 uv){
-  vec2 t = texture(uDepth, uv).rg;
-  return t.r * (65280.0 / 65535.0) + t.g * (255.0 / 65535.0);
-}
-
-vec2 figRow(float r){
-  if (r < uFigBox.x || r > uFigBox.y) return vec2(-1.0);
-  return texelFetch(uFig, ivec2(0, int(r - uFigBox.x)), 0).rg;
-}
-// Where a sheet's edge e is cut on a row that holds the tower from h.x to
-// h.y. It moves as one piece, never split across two sheets. The photo
-// (side < 0) gives it up as soon as its edge reaches its rightmost point: on
-// every row of the tower the cut runs back to its left silhouette. The deeper
-// sheets (side > 0) hold on to it until their edge clears its leftmost point:
-// the cut runs out to its right one. So the lit sheet keeps the tower, and no
-// cut ever runs through it; above it the edge is straight.
-float cutAt(float e, vec2 h, float side){
-  if (h.x < 0.0) return e;
-  if (side < 0.0) return (e > h.x && e < uFigBox.w) ? h.x : e;
-  return (e > uFigBox.z && e < h.y) ? h.y : e;
-}
-// How much of the sheet below edge e shows at p = (u, photo row): 0 left of
-// the cut, 1 right of it, a pixel of coverage in between, blended across rows.
-float under(float e, float side, vec2 p){
-  float r0 = floor(p.y - 0.5);
-  float t = p.y - 0.5 - r0;
-  float a = clamp((p.x - cutAt(e, figRow(r0), side)) / pxU + 0.5, 0.0, 1.0);
-  float b = clamp((p.x - cutAt(e, figRow(r0 + 1.0), side)) / pxU + 0.5, 0.0, 1.0);
-  return mix(a, b, t);
-}
-// One sheet edge as paper: coverage of the sheet below (a), a lighter cut lip
-// on the sheet above (y), and the soft shadow it throws on the sheet below
-// (z), cast down and to the right as if lit from the upper left.
-vec3 sheet(float e, float side, vec2 p){
-  float R = 16.0 * pxU;
-  bool near = abs(p.x - e) < R ||
-    (p.y > uFigBox.x - 16.0 * pxR && p.x > uFigBox.z - R && p.x < uFigBox.w + R);
-  if (!near) return vec3(clamp((p.x - e) / pxU + 0.5, 0.0, 1.0), 0.0, 0.0);
-  float a = under(e, side, p);
-  float l = 1.5;
-  float lip = (1.0 - a) * max(under(e, side, p + vec2(l * pxU, 0.0)),
-    max(under(e, side, p + vec2(0.0, l * pxR)), under(e, side, p - vec2(0.0, l * pxR))));
-  vec2 d = normalize(vec2(1.0, 0.45)) * 1.6;
-  float sh = 0.0, wsum = 0.0;
-  for (int k = 1; k <= 8; k++) {
-    float w = exp(-float(k) / 3.2);
-    sh += w * (1.0 - under(e, side, p - vec2(d.x * float(k) * pxU, d.y * float(k) * pxR)));
-    wsum += w;
-  }
-  return vec3(a, lip, a * sh / wsum);
-}
+vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
+vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
+// The linear value the tone curve maps to display value y.
+vec3 untone(vec3 y){ y = pow(clamp(y, 0.0, 0.985), vec3(2.2)); return y / (EXPO * (1.0 - y)); }
+float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
 
 void main(){
   vec2 frag = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
-  vec2 uv = (frag - uRect.xy) / uRect.zw;
-  pxU = 1.0 / uRect.z;
-  pxR = ROWS / uRect.w;
-  if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) {
-    // A soft contact shadow under the print, nothing more.
-    vec2 q = max(vec2(0.0), max(-uv, uv - 1.0)) * uRect.zw;
-    float sh = exp(-dot(q, q) / (uRect.z * uRect.z * 0.0009)) * 0.10;
-    o = vec4(uGround * (1.0 - sh), 1.0);
-    return;
-  }
-  float D = depthAt(uv);
-  float bend = (texture(uDepth, uv).b - 0.5) * 2.0;
-  vec2 mt = texture(uMatte, uv).rg;
-  float sky = mt.r;
+  vec2 uv = frag * uMap.xy + uMap.zw;
 
   vec3 photo = texture(uPhoto, uv).rgb;
+  vec2 mt = texture(uMatte, uv).rg;
+  // Sky shows through the tower's lattice inside its matte: pale, blue, and
+  // facing straight at the camera.
+  float gap = mt.g * smoothstep(0.08, 0.2, photo.b - photo.r);
+  float sky = clamp(mt.r + gap, 0.0, 1.0);
+  float tower = mt.g * (1.0 - gap);
 
-  // Depth, printed rather than dumped. The bake already stretched it to its
-  // own 2nd-99.5th percentile; a 0.6 gamma on distance (1 - D) lifts the
-  // far end so the tower, the pole and the two faces pull apart in tone.
-  // Warm black for the sky, paper white for the nearest wall, and an
-  // iso-depth line every twelfth of the range, faded out where the depth
-  // jumps (a silhouette, not a slope) so lines only ever run across surfaces.
-  float dt = 1.0 - pow(1.0 - D, 0.6);
-  vec3 depth = mix(vec3(0.11, 0.1, 0.095), vec3(0.955, 0.945, 0.925), dt);
-  float Ds = 0.0;
-  for (int k = 0; k < 8; k++) {
-    float a = float(k) * 2.39996;
-    float r = sqrt((float(k) + 0.5) / 8.0) * 3.0;
-    Ds += depthAt(uv + vec2(cos(a), sin(a)) * r / TEX);
-  }
-  float iso = (1.0 - pow(1.0 - Ds / 8.0, 0.6)) * 12.0;
-  float fw = fwidth(iso);
-  float line = (1.0 - smoothstep(0.0, 1.0, abs(fract(iso + 0.5) - 0.5) / max(fw * 1.2, 1e-4)))
-    * (1.0 - smoothstep(0.06, 0.3, fw)) * (1.0 - sky);
-  depth *= 1.0 - 0.2 * line;
-  depth += (hash(frag) - 0.5) / 255.0;
+  // The view ray through this pixel, for the aureole: a 74 degree lens.
+  vec3 V = normalize(vec3((uv.x - 0.5) * 1.5, -(uv.y - 0.5) * 1.5 / ASPECT, -1.0));
+  float cs = dot(V, uSun);
 
-  // Normals as a plaster cast: one warm-grey albedo, a fixed raking light
-  // from the upper left at 30 degrees, a little sky fill, so the walls, the
-  // pole and the tower read as relief, not as the RGB encoding. Where depth
-  // jumps a surface's far side sinks a little, the way plaster darkens in
-  // the crease behind a figure. The sky has no surface: the cast stands in
-  // front of a plain studio ground, darker toward the zenith.
+  // Sky: the photograph's, taken from a softer mip so the plate's sensor
+  // noise goes, a little deeper toward the zenith (the top of the frame),
+  // and warmed around the sun when it stands in front of the camera.
+  // Right at a silhouette the soft mip would smear the tower or a wall into
+  // the sky as a pale rim, so there the sky drops back to the sharp plate.
+  float open = smoothstep(0.985, 1.0, textureLod(uMatte, uv, 4.0).r);
+  vec3 skyP = mix(photo, textureLod(uPhoto, uv, 1.6).rgb, open);
+  skyP = pow(skyP, vec3(1.08)) * mix(vec3(0.9, 0.95, 1.02), vec3(1.0), smoothstep(0.0, 0.8, uv.y));
+  vec3 skyL = untone(skyP) * mix(0.78, 1.0, uDay);
+  float aur = exp((cs - 1.0) * 70.0) * 0.8 + exp((cs - 1.0) * 9.0) * 0.12;
+  skyL += uSunCol * vec3(1.0, 0.92, 0.8) * aur * 0.16;
+
+  // Surfaces. Albedo in linear light; the plate's grade left the concrete
+  // olive, so most of the chroma comes off the walls (not the tower's paint),
+  // and both are brought up from the shade they were photographed in.
+  // A half-step softer mip: brought up from shade, the plate's compression
+  // noise would otherwise come up with it.
+  vec3 alb = toLin(texture(uAlbedo, uv, 0.6).rgb);
+  alb = mix(vec3(luma(alb)), alb, mix(0.18, 1.0, tower)) * mix(vec3(1.0, 0.97, 0.93), vec3(1.0), tower);
+  alb = min(alb * mix(8.0, 4.2, tower), vec3(0.82));
+
   vec3 n = normalize(texture(uNormal, uv).rgb * 2.0 - 1.0);
-  const vec3 RAKE = vec3(-0.6124, 0.6124, 0.5);
-  float ndl = clamp((dot(n, RAKE) + 0.1) / 1.1, 0.0, 1.0);
-  vec3 clay = vec3(0.6121, 0.5708, 0.508) * (0.9 * ndl + 0.16 + 0.08 * n.y);
-  clay *= 1.0 - 0.3 * smoothstep(0.0, 0.3, -bend);
-  vec3 ground = mix(vec3(0.5, 0.48, 0.455), vec3(0.64, 0.62, 0.59), uv.y);
-  vec3 normal = mix(pow(clay, vec3(1.0 / 2.2)), ground, sky);
-  normal += (hash(frag + 7.0) - 0.5) / 255.0;
+  float bend = (texture(uDepth, uv).b - 0.5) * 2.0;
 
-  // Relit: the canyon's surfaces under one warm lamp that was never there.
-  // Albedo is the baked one (the day's shading divided out), in linear
-  // light, so the pool lands on the concrete and the tower's paint in their
-  // own colours. The day goes down to blue hour: a cool skylight from above
-  // is all that is left on the walls, and the sky deepens toward cobalt, so
-  // the lamp's warmth is the only warmth in the sheet.
-  float aspect = uRect.z / uRect.w;
-  vec3 P = vec3(uv.x * aspect, -uv.y, D * 0.55);
-  // The lamp hovers in the canyon in front of whatever is under the hand.
-  float Dl = depthAt(clamp(uLight.xy, 0.0, 1.0));
-  vec3 L = vec3(uLight.x * aspect, -uLight.y, max(Dl, 0.3) * 0.55 + uLight.z);
-  vec3 dl = L - P;
-  float dist2 = dot(dl, dl);
-  vec3 l = dl * inversesqrt(dist2);
-  // A touch of wrap so the terminator rolls off instead of cutting to black.
-  float lam = max((dot(n, l) + 0.15) / 1.15, 0.0);
-  float fall = 1.0 / (1.0 + dist2 * 30.0);
-  vec3 h = normalize(l + vec3(0.0, 0.0, 1.0));
-  float spec = pow(max(dot(n, h), 0.0), 24.0);
-  // The plate's grade leaves the concrete olive, and olive under a warm lamp
-  // goes green; take most of the chroma off the walls (not the tower's paint)
-  // so the lamp is what colours them.
-  vec3 albedo = pow(texture(uAlbedo, uv).rgb, vec3(2.2));
-  albedo = mix(vec3(dot(albedo, vec3(0.2126, 0.7152, 0.0722))), albedo, mix(0.35, 1.0, mt.g));
-  vec3 lamp = vec3(1.0, 0.56, 0.26);
-  float up = 0.5 + 0.5 * n.y;
-  vec3 amb = albedo * mix(vec3(0.035, 0.045, 0.07), vec3(0.09, 0.115, 0.17), up);
-  vec3 lit = amb + albedo * lamp * (lam * fall * 7.0) + lamp * spec * fall * 0.05;
-  // A shoulder that rolls off before white, so the pool never clips.
-  lit = pow(lit * 1.4 / (1.0 + lit * 1.4), vec3(1.0 / 2.2));
-  vec3 dusk = pow(photo, vec3(1.35)) * vec3(0.78, 0.86, 1.0);
-  lit = mix(lit, dusk, sky);
+  // No cast shadows: the depth map only holds what the camera saw, so a
+  // march through it finds noise, not the walls above the frame. What it can
+  // give is the creases: where a surface sits behind its surroundings (a
+  // recessed window, the wall behind the pole) the sun reaches it less.
+  vec3 L = uSun;
+  float ndl = dot(n, L);
+  float vis = 1.0 - 0.55 * smoothstep(0.04, 0.3, -bend);
+  // Key: the sun, with a touch of wrap so the terminator rolls off. Fill: the
+  // open sky, cyan, strongest on faces that look up into it, weaker in the
+  // creases behind a silhouette. Bounce: a little of the sun off the walls.
+  float key = max((ndl + 0.08) / 1.08, 0.0) * vis;
+  float skyVis = clamp(0.55 + 0.45 * dot(n, uUp), 0.0, 1.0) * (1.0 - 0.35 * smoothstep(0.0, 0.3, -bend));
+  vec3 fill = vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis;
+  vec3 bounce = uSunCol * 0.035 * (0.5 - 0.5 * dot(n, uUp));
+  vec3 h = normalize(L - V);
+  float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower);
+  vec3 lit = alb * (uSunCol * key + fill + bounce) + uSunCol * spec;
 
-  // Sheets, crisp to a pixel, cut around the tower. Each lower sheet sits in
-  // the shadow of the one above; each upper sheet's cut catches a paper lip.
-  vec2 p = vec2(uv.x, uv.y * ROWS);
-  vec3 s0 = sheet(uEdge.x, -1.0, p);
-  vec3 s1 = sheet(uEdge.y, 1.0, p);
-  vec3 s2 = sheet(uEdge.z, 1.0, p);
-  vec3 paper = vec3(0.985, 0.975, 0.955);
-  vec3 c = mix(photo, paper, 0.2 * s0.y);
-  c = mix(c, mix(lit, paper, 0.12 * s1.y) * (1.0 - 0.32 * s0.z), s0.x);
-  c = mix(c, mix(normal, paper, 0.4 * s2.y) * (1.0 - 0.26 * s1.z), s1.x);
-  c = mix(c, depth * (1.0 - 0.2 * s2.z), s2.x);
+  // Halation: the tower's sunlit white paint bleeds red into what is around
+  // it, the way a film's base throws light back through the emulsion.
+  vec2 hp = 1.0 / vec2(256.0, 192.0);
+  float hal = 0.0;
+  hal += textureLod(uHalo, uv + vec2(hp.x, hp.y) * 0.5, 2.4).r;
+  hal += textureLod(uHalo, uv + vec2(-hp.x, hp.y) * 0.5, 2.4).r;
+  hal += textureLod(uHalo, uv + vec2(hp.x, -hp.y) * 0.5, 2.4).r;
+  hal += textureLod(uHalo, uv - vec2(hp.x, hp.y) * 0.5, 2.4).r;
+  hal = hal * 0.25 * 0.7 + textureLod(uHalo, uv, 4.2).r * 0.5;
+  float towerSun = 0.35 + 0.65 * clamp(dot(vec3(0.0, 0.22, 0.85), L) * 0.5 + 0.5, 0.0, 1.0);
+  vec3 halo = vec3(1.0, 0.24, 0.07) * hal * towerSun * luma(uSunCol) * 0.22;
+
+  vec3 c = mix(lit, skyL, sky) + halo;
+  c = tone(c);
+
+  // A light film grade: a lifted toe, a breath of vignette, and fine
+  // monochrome grain from two hashes, so it is triangular, strongest in the
+  // midtones.
+  c = mix(vec3(0.018, 0.016, 0.02), vec3(1.0), c);
+  vec2 cv = (frag / uRes - 0.5);
+  c *= 1.0 - 0.16 * dot(cv, cv);
+  float g = hash(frag) + hash(frag + 17.3) - 1.0;
+  float lc = luma(c);
+  c += g * (0.044 * lc * (1.0 - lc) + 0.004);
   o = vec4(c, 1.0);
 }`;
 
 const SRC = "/lab/passes/";
 const IMG_ASPECT = 2048 / 1536;
-// The photo|lit seam sits under the hand (LEAD behind it). At rest (hand at
-// 0.4) it crosses the tower's deck, so the photo's cut steps back around the
-// tower's left side and the lit sheet holds all of it, about u 0.38-0.6.
-const LEAD = 0;
-// Lamp height above the surface under it, in the shader's scene units
-// (the whole depth range spans 0.55).
-const LAMP_Z = 0.12;
-const REST = 0.4;
+// The camera looks up this far above the horizon.
+const PITCH = (55 * Math.PI) / 180;
+// Where the sun rests, in drag coordinates (0..1 across and down the frame):
+// low in the west behind your left shoulder, so it rakes the right wall
+// gold, leaves the left one in the sky's cyan, and catches the tower's left
+// legs.
+const REST = { x: 0.15, y: 0.55 };
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -214,7 +148,56 @@ function loadImage(url) {
   });
 }
 
-export async function createPasses(host, { embedded = false } = {}) {
+// The sun for a point of the drag. Across: azimuth relative to where the
+// camera faces, from 165 degrees left through straight ahead to 165 right.
+// Down: elevation, from 78 degrees to 3. Returns its direction in camera
+// space, its colour and intensity (warmer and weaker near the horizon), and
+// how high it is.
+function sunFor(x, y) {
+  const az = (x - 0.5) * 2 * ((165 * Math.PI) / 180);
+  const el = ((78 - (78 - 3) * clamp(y, 0, 1)) * Math.PI) / 180;
+  const sx = Math.cos(el) * Math.sin(az);
+  const sh = Math.cos(el) * Math.cos(az);
+  const sy = Math.sin(el);
+  const sp = Math.sin(PITCH);
+  const cp = Math.cos(PITCH);
+  const dir = [sx, -sp * sh + cp * sy, -(cp * sh + sp * sy)];
+  const day = clamp(Math.sin(el) / 0.7, 0, 1);
+  const w = Math.sqrt(day);
+  const I = 3.1 * (0.55 + 0.45 * w);
+  const col = [1.0, 0.52 + 0.26 * w, 0.24 + 0.36 * w].map((c) => c * I);
+  return { dir, col, day };
+}
+
+// Where the tower's paint is white: the halation source, at a quarter size
+// so its mips blur it cheaply in the shader.
+function haloMask(photo, matte) {
+  const w = 512;
+  const h = 384;
+  const read = (im) => {
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    x.drawImage(im, 0, 0, w, h);
+    return x.getImageData(0, 0, w, h).data;
+  };
+  const p = read(photo);
+  const m = read(matte);
+  const out = new Uint8Array(w * h);
+  for (let i = 0; i < w * h; i++) {
+    const r = p[4 * i];
+    const g = p[4 * i + 1];
+    const b = p[4 * i + 2];
+    const lum = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+    const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+    const white = clamp((lum - 150) / 60, 0, 1) * clamp(1 - (chroma - 30) / 50, 0, 1);
+    out[i] = Math.round(255 * white * (m[4 * i + 1] / 255));
+  }
+  return { w, h, data: out };
+}
+
+export async function createPasses(host) {
   const [photo, albedo, depth, normal, matte] = await Promise.all(
     ["photo.webp", "albedo.webp", "depth.png", "normal.webp", "matte.png"].map((f) => loadImage(SRC + f)),
   );
@@ -222,9 +205,9 @@ export async function createPasses(host, { embedded = false } = {}) {
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false });
   const gl = stage.ctx;
   const params = new URLSearchParams(window.location.search);
-  const holdX = params.has("x") ? clamp(parseFloat(params.get("x")) || 0, 0, 1) : null;
-  const holdLx = params.has("lx") ? parseFloat(params.get("lx")) : null;
-  const holdLy = params.has("ly") ? parseFloat(params.get("ly")) : null;
+  const num = (k) => (params.has(k) ? clamp(parseFloat(params.get(k)) || 0, 0, 1) : null);
+  const holdX = num("x");
+  const holdY = num("y");
 
   const sh = (type, src) => {
     const s = gl.createShader(type);
@@ -239,7 +222,7 @@ export async function createPasses(host, { embedded = false } = {}) {
   gl.linkProgram(prog);
   gl.useProgram(prog);
   const U = (n) => gl.getUniformLocation(prog, n);
-  const u = { res: U("uRes"), rect: U("uRect"), edge: U("uEdge"), light: U("uLight"), ground: U("uGround"), figBox: U("uFigBox") };
+  const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay") };
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -247,136 +230,89 @@ export async function createPasses(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  const tex = (im, unit, name, mips) => {
-    const t = gl.createTexture();
-    gl.activeTexture(gl.TEXTURE0 + unit);
-    gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, im);
-    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+  const params2d = (mips) => {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  };
+  const tex = (im, unit, name, mips) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+    params2d(mips);
     gl.uniform1i(U(name), unit);
   };
   tex(photo, 0, "uPhoto", true);
   tex(depth, 1, "uDepth", false);
   tex(normal, 2, "uNormal", true);
-  tex(albedo, 4, "uAlbedo", true);
-  tex(matte, 5, "uMatte", true);
+  tex(albedo, 3, "uAlbedo", true);
+  tex(matte, 4, "uMatte", true);
 
-  // The tower's matte: per photo row, its left and right silhouette in u.
-  const raw = Uint8Array.from(atob(TOWER.data), (ch) => ch.charCodeAt(0));
-  const fig = new Float32Array(TOWER.rows * 2);
-  let fx0 = 1;
-  let fx1 = 0;
-  for (let i = 0; i < fig.length; i++) {
-    fig[i] = (raw[2 * i] | (raw[2 * i + 1] << 8)) / 16 / TOWER.w;
-    if (i % 2) fx1 = Math.max(fx1, fig[i]);
-    else fx0 = Math.min(fx0, fig[i]);
-  }
-  const figTex = gl.createTexture();
-  gl.activeTexture(gl.TEXTURE3);
-  gl.bindTexture(gl.TEXTURE_2D, figTex);
+  const halo = haloMask(photo, matte);
+  gl.activeTexture(gl.TEXTURE5);
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, 1, TOWER.rows, 0, gl.RG, gl.FLOAT, fig);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-  gl.uniform1i(U("uFig"), 3);
-  gl.uniform4f(u.figBox, TOWER.top, TOWER.top + TOWER.rows - 1, fx0, fx1);
-
-  // Ground: the page's warm white, read from the box so it matches.
-  const ground = [0.949, 0.941, 0.922];
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R8, halo.w, halo.h, 0, gl.RED, gl.UNSIGNED_BYTE, halo.data);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  params2d(true);
+  gl.uniform1i(U("uHalo"), 5);
 
   let dirty = true;
-  // Print rect in CSS px.
-  let rect = { x: 0, y: 0, w: 1, h: 1 };
-  stage.onResize((w, h) => {
-    const m = Math.max(24, Math.round(Math.min(w, h) * (embedded ? 0.07 : 0.09)));
-    let ph = h - 2 * m;
-    let pw = ph * IMG_ASPECT;
-    if (pw > w - 2 * m) {
-      pw = w - 2 * m;
-      ph = pw / IMG_ASPECT;
-    }
-    rect = { x: Math.round((w - pw) / 2), y: Math.round((h - ph) / 2), w: Math.round(pw), h: Math.round(ph) };
+  stage.onResize(() => {
     dirty = true;
   });
 
-  // Seam and the three sheet edges. Each edge is a spring chasing its place
-  // behind the one above it; the deeper the sheet, the softer its spring, so
-  // a quick drag fans the passes out and they settle back. The relit sheet
-  // comes first under the photo and takes half the room left; normals and
-  // depth share the rest.
-  let seam = holdX == null ? 1.0 : clamp(holdX - LEAD, 0, 1);
-  const SHARE = [0, 0.5, 0.75];
-  const target = (i, s) => s + (1 - s) * SHARE[i];
-  const edges = [0, 1, 2].map((i) => ({ x: target(i, seam), v: 0 }));
-  const K = [260, 170, 120];
-  const Z = [0.92, 0.88, 0.86];
-  // Light: rests in the canyon beside the tower until a pointer comes to move it.
-  const light = { x: holdLx ?? 0.5, y: holdLy ?? 0.55, tx: holdLx ?? 0.5, ty: holdLy ?? 0.55 };
-  let introAt = holdX == null ? performance.now() + 450 : 0;
+  // The sun eases toward the hand. With no hand yet it rises from low in the
+  // west to its rest, once, a moment after the plate appears.
+  const held = holdX != null || holdY != null;
+  const rest = { x: holdX ?? REST.x, y: holdY ?? REST.y };
+  const sun = held ? { ...rest } : { x: REST.x - 0.04, y: 0.9 };
+  const target = { ...rest };
+  let rate = held ? 12 : 1.6;
 
-  const toU = (p) => ({ x: (p.x - rect.x) / rect.w, y: (p.y - rect.y) / rect.h });
-  stage.on("down", (p) => {
-    introAt = 0;
+  const toU = (p) => ({ x: clamp(p.x / stage.width, 0, 1), y: clamp(p.y / stage.height, 0, 1) });
+  const aim = (p) => {
     const q = toU(p);
-    seam = clamp(q.x - LEAD, 0, 1);
-    light.tx = clamp(q.x, -0.1, 1.1);
-    light.ty = clamp(q.y, -0.1, 1.1);
-  });
+    target.x = q.x;
+    target.y = q.y;
+    rate = 9;
+  };
+  stage.on("down", aim);
   stage.on("move", (p) => {
-    const q = toU(p);
-    if (p.down) seam = clamp(q.x - LEAD, 0, 1);
-    light.tx = clamp(q.x, -0.1, 1.1);
-    light.ty = clamp(q.y, -0.1, 1.1);
+    if (p.down) aim(p);
   });
 
-  stage.onFrame((dt, t) => {
-    if (introAt && performance.now() > introAt) {
-      seam = REST;
-      introAt = 0;
+  stage.onFrame((dt) => {
+    const k = 1 - Math.exp(-dt * rate);
+    const dx = target.x - sun.x;
+    const dy = target.y - sun.y;
+    if (Math.abs(dx) + Math.abs(dy) > 2e-4) {
+      sun.x += dx * k;
+      sun.y += dy * k;
+      dirty = true;
     }
-    let moving = false;
-    for (let i = 0; i < 3; i++) {
-      const e = edges[i];
-      const k = K[i];
-      const c = 2 * Math.sqrt(k) * Z[i];
-      // Substep so the stiffest spring stays stable at low frame rates.
-      const n = 2;
-      const h = dt / n;
-      for (let s = 0; s < n; s++) {
-        const a = k * (target(i, seam) - e.x) - c * e.v;
-        e.v += a * h;
-        e.x += e.v * h;
-      }
-      if (Math.abs(e.v) > 1e-4 || Math.abs(target(i, seam) - e.x) > 1e-4) moving = true;
-      else e.x = target(i, seam);
-    }
-    const kl = 1 - Math.exp(-dt * 10);
-    // The lamp follows the pointer anywhere on the print, the tower included.
-    const dx = light.tx - light.x;
-    const dy = light.ty - light.y;
-    if (Math.abs(dx) + Math.abs(dy) > 1e-4) {
-      light.x += dx * kl;
-      light.y += dy * kl;
-      moving = true;
-    }
-    if (!moving && !dirty) return;
+    if (!dirty) return;
     dirty = false;
     draw();
   });
 
   function draw() {
-    const d = stage.dpr;
-    gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
-    gl.uniform2f(u.res, stage.canvas.width, stage.canvas.height);
-    gl.uniform4f(u.rect, rect.x * d, rect.y * d, rect.w * d, rect.h * d);
-    gl.uniform3f(u.edge, edges[0].x, edges[1].x, edges[2].x);
-    gl.uniform3f(u.light, light.x, light.y, LAMP_Z);
-    gl.uniform3f(u.ground, ground[0], ground[1], ground[2]);
+    const W = stage.canvas.width;
+    const Hc = stage.canvas.height;
+    gl.viewport(0, 0, W, Hc);
+    gl.uniform2f(u.res, W, Hc);
+    // Cover fit: the photo fills the frame, cropped evenly on the long side.
+    const s = Math.max(W / IMG_ASPECT, Hc);
+    const sw = s * IMG_ASPECT;
+    gl.uniform4f(u.map, 1 / sw, 1 / s, (sw - W) / 2 / sw, (s - Hc) / 2 / s);
+    const S = sunFor(sun.x, sun.y);
+    gl.uniform3f(u.sun, S.dir[0], S.dir[1], S.dir[2]);
+    gl.uniform3f(u.sunCol, S.col[0], S.col[1], S.col[2]);
+    gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
+    gl.uniform1f(u.day, S.day);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 

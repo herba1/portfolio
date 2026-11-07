@@ -1,6 +1,6 @@
 {
   "title": "Passes",
-  "description": "Tokyo Tower seen from the street between two building faces, printed on warm paper with the passes a renderer keeps underneath it. Drag across the print and the photograph peels back: first the canyon relit by a warm lamp that follows your hand, so the concrete and the tower's paint catch a light that was never there, then the walls cast in plaster from their surface normals, and the depth itself printed in contours, warm black for the sky to paper white for the nearest wall. The sheets' edges step around the tower where they cross it, and spring back when you let go.",
+  "description": "Tokyo Tower seen from the street between two building faces, and a sun you can move. Drag and the sun swings around the canyon: across is where it stands, from behind your left shoulder through straight ahead, behind the tower, to behind your right; up and down is how high. The concrete and the tower's lattice take its warm light from the surface normals a renderer would keep, the faces turned away fall into the sky's cyan, and when the sun stands in the frame the sky warms around it.",
   "tags": ["WebGL", "Light", "Photography"],
   "status": "draft",
   "createdAt": "2026-11-06T18:00:00.000Z",
