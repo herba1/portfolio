@@ -12,8 +12,15 @@ import { createStage, clamp } from "../_kit/stage";
 // ahead, behind the tower, in the middle; behind your shoulder at either
 // edge), up and down its elevation. The concrete faces and the tower's
 // lattice take a warm key from it, shaded by the MoGe normals and kept out of
-// the creases the depth map finds, and a cyan fill from the open sky. The sky
-// stays the photograph's, with a warm aureole where the sun stands in it.
+// the creases the depth map finds, and a cyan fill from the open sky.
+//
+// The plate's own sky was flat haze, so inside the sky matte it is replaced by
+// a photographed summer cumulus dome (Poly Haven, Kloofendal 48d Partly
+// Cloudy, CC0; tools/depth/bakes/passes-sky.py). Each pixel looks it up along
+// its true camera ray, the plate's pitch and lens, so the clouds converge on
+// the same vanishing point as the buildings. The dome turns and tilts with the
+// dragged sun so its own sun, and the sunlit sides of its clouds, stand where
+// the key light comes from.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -21,17 +28,31 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 
 const FS = `#version 300 es
 precision highp float;
-uniform sampler2D uPhoto, uAlbedo, uDepth, uNormal, uMatte, uHalo;
+uniform sampler2D uPhoto, uAlbedo, uDepth, uNormal, uMatte, uHalo, uSky, uSkyBlue, uPlateSky;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uMap;        // image uv = frag * uMap.xy + uMap.zw (cover fit)
 uniform vec3 uSun;        // unit direction to the sun, camera space (x right, y up, z to the viewer)
 uniform vec3 uSunCol;     // key colour times intensity, linear
 uniform vec3 uUp;         // world up, camera space
 uniform float uDay;       // 0 at the horizon, 1 with the sun high
+uniform mat3 uDome;       // camera ray -> (toward the dome's sun, to its right, up), as columns
 out vec4 o;
 
 const vec2 TEX = vec2(2048.0, 1536.0);
 const float ASPECT = 2048.0 / 1536.0;
+// The plate's lens, 2 tan(fov_x / 2): 55 degrees across. Its verticals meet
+// 0.9 frame heights above the centre; with the camera pitched 55 degrees up
+// (PITCH) that is where the zenith stands for this lens, so sky rays through
+// it converge with the walls.
+const float LENS = 1.034;
+// The sky dome: where its own sun stands across the equirect, its texel size,
+// and its open blue sky's chroma (luma 1).
+const float SKY_U = 0.5951;
+const vec2 SKY_TEX = vec2(8192.0, 2048.0);
+const vec3 SKY_BLUE = vec3(0.72, 1.0, 1.79);
+// The clouds' exposure against the graded blue: a sunlit top lands near
+// paper white, the way a polariser holds a cobalt sky under bright cumulus.
+const float CLOUD = 2.6;
 // Tone curve: a shoulder that rolls off before white.
 const float EXPO = 1.35;
 
@@ -39,9 +60,9 @@ float hash(vec2 p){ p = fract(p * vec2(443.897, 441.423)); p += dot(p, p.yx + 19
 
 vec3 toLin(vec3 c){ return pow(c, vec3(2.2)); }
 vec3 tone(vec3 x){ return pow(x * EXPO / (1.0 + x * EXPO), vec3(1.0 / 2.2)); }
-// The linear value the tone curve maps to display value y.
-vec3 untone(vec3 y){ y = pow(clamp(y, 0.0, 0.985), vec3(2.2)); return y / (EXPO * (1.0 - y)); }
 float luma(vec3 c){ return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// The dome's layers as stored: x = K s / (1 - s), s = y ^ 2.2.
+vec3 skyDecode(vec3 y, float k){ vec3 s = min(pow(y, vec3(2.2)), vec3(0.9975)); return k * s / (1.0 - s); }
 
 void main(){
   vec2 frag = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y);
@@ -49,27 +70,54 @@ void main(){
 
   vec3 photo = texture(uPhoto, uv).rgb;
   vec2 mt = texture(uMatte, uv).rg;
-  // Sky shows through the tower's lattice inside its matte: pale, blue, and
-  // facing straight at the camera.
-  float gap = mt.g * smoothstep(0.08, 0.2, photo.b - photo.r);
-  float sky = clamp(mt.r + gap, 0.0, 1.0);
+  // Sky shows through the tower's lattice inside its matte: where the plate
+  // there is the colour of the plate's own sky around it. (Only that: the
+  // tower's white paint in shade is blue too, and taking it for sky would
+  // let the clouds through it.)
+  float gap = mt.g * (1.0 - smoothstep(0.045, 0.1, distance(photo, texture(uPlateSky, uv).rgb)));
+  float sky = clamp((mt.r + gap - 0.02) / 0.98, 0.0, 1.0);
   float tower = mt.g * (1.0 - gap);
 
-  // The view ray through this pixel, for the aureole: a 74 degree lens.
-  vec3 V = normalize(vec3((uv.x - 0.5) * 1.5, -(uv.y - 0.5) * 1.5 / ASPECT, -1.0));
-  float cs = dot(V, uSun);
+  // The camera ray through this pixel, from the plate's lens.
+  vec3 V = normalize(vec3((uv.x - 0.5) * LENS, -(uv.y - 0.5) * LENS / ASPECT, -1.0));
 
-  // Sky: the photograph's, taken from a softer mip so the plate's sensor
-  // noise goes, a little deeper toward the zenith (the top of the frame),
-  // and warmed around the sun when it stands in front of the camera.
-  // Right at a silhouette the soft mip would smear the tower or a wall into
-  // the sky as a pale rim, so there the sky drops back to the sharp plate.
-  float open = smoothstep(0.985, 1.0, textureLod(uMatte, uv, 4.0).r);
-  vec3 skyP = mix(photo, textureLod(uPhoto, uv, 1.6).rgb, open);
-  skyP = pow(skyP, vec3(1.08)) * mix(vec3(0.9, 0.95, 1.02), vec3(1.0), smoothstep(0.0, 0.8, uv.y));
-  vec3 skyL = untone(skyP) * mix(0.78, 1.0, uDay);
-  float aur = exp((cs - 1.0) * 70.0) * 0.8 + exp((cs - 1.0) * 9.0) * 0.12;
-  skyL += uSunCol * vec3(1.0, 0.92, 0.8) * aur * 0.16;
+  // Sky: the cumulus dome along that ray. Azimuth wraps, so where the
+  // equirect's seam passes, the derivative comes from a copy shifted half a
+  // turn; otherwise the seam would pick the smallest mip as a hairline.
+  vec3 D = V * uDome;
+  vec2 st = vec2(SKY_U + atan(D.y, D.x) / 6.2831853, 1.0 - asin(clamp(D.z, -1.0, 1.0)) / 1.5707963);
+  vec2 sx = dFdx(st), sy = dFdy(st);
+  float wx = dFdx(fract(st.x + 0.5)), wy = dFdy(fract(st.x + 0.5));
+  if (abs(wx) < abs(sx.x)) sx.x = wx;
+  if (abs(wy) < abs(sy.x)) sy.x = wy;
+  // It comes in two layers, split offline: the open sky's blue (an amount
+  // of SKY_BLUE) and what the clouds and the haze round the sun add over it.
+  // They are graded apart, the way a polariser does it: the blue deepens to
+  // cobalt toward the zenith and pales to cyan along the walls and lower
+  // down, while the clouds keep their light, warmed toward the key.
+  vec3 cloud = skyDecode(textureGrad(uSky, st, sx, sy).rgb, 4.0);
+  float beta = skyDecode(textureGrad(uSkyBlue, st, sx, sy).rrr, 1.0).r;
+  float elev = asin(clamp(dot(V, uUp), -1.0, 1.0));
+  vec2 mb = 0.5 * (textureLod(uMatte, uv, 6.0).rg + textureLod(uMatte, uv, 7.5).rg);
+  float wall = 1.0 - smoothstep(0.35, 1.0, mb.r + mb.g);
+  float pale = clamp(wall * 0.55 + 1.0 - smoothstep(0.6, 1.25, elev), 0.0, 1.0);
+  vec3 blue = mix(vec3(0.014, 0.16, 0.66), vec3(0.3, 1.1, 2.0), pale * pale);
+  // The clouds' shoulder: a roll-off on their luminance ahead of the tone
+  // curve, so the tops near the sun come down to a warm paper white instead
+  // of clipping, and the sun's disc itself only just reaches it.
+  vec3 warm = mix(vec3(1.0), uSunCol / luma(uSunCol), mix(0.6, 0.3, uDay));
+  // What is left over the blue is mostly neutral; at thin edges where the
+  // dome's sky leans off SKY_BLUE the remainder turns violet, and the
+  // clouds' exposure would show it as a fringe. So it is held near grey.
+  cloud = mix(vec3(luma(cloud)), cloud, 0.3) * CLOUD * warm;
+  cloud /= 1.0 + luma(cloud) / 12.0;
+  vec3 skyL = (beta * blue + cloud) * mix(0.72, 1.0, uDay);
+  // Halation off the cloud tops: the dome a few mips softer, only what is
+  // brighter than the paper white of a cloud, thrown back red.
+  float sl = log2(max(length(sx * SKY_TEX), length(sy * SKY_TEX)));
+  vec3 rb = skyDecode(textureLod(uSky, st, max(sl, 0.0) + 2.2).rgb, 4.0);
+  float hs = max(luma(rb) * CLOUD - 2.0, 0.0);
+  skyL += vec3(1.0, 0.3, 0.08) * hs / (hs + 4.0) * 0.13 * mix(0.6, 1.0, uDay);
 
   // Surfaces. Albedo in linear light; the plate's grade left the concrete
   // olive, so most of the chroma comes off the walls (not the tower's paint),
@@ -97,8 +145,10 @@ void main(){
   float skyVis = clamp(0.55 + 0.45 * dot(n, uUp), 0.0, 1.0) * (1.0 - 0.35 * smoothstep(0.0, 0.3, -bend));
   vec3 fill = vec3(0.11, 0.27, 0.45) * mix(0.6, 1.0, uDay) * skyVis;
   vec3 bounce = uSunCol * 0.035 * (0.5 - 0.5 * dot(n, uUp));
-  vec3 h = normalize(L - V);
-  float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower);
+  // Only on faces the sun reaches: with the sun behind the tower the half
+  // vector turns round and would light the lattice from the front.
+  vec3 h = normalize(L - V + vec3(0.0, 0.0, 1e-4));
+  float spec = pow(max(dot(n, h), 0.0), 40.0) * vis * mix(0.03, 0.12, tower) * smoothstep(0.0, 0.2, ndl);
   vec3 lit = alb * (uSunCol * key + fill + bounce) + uSunCol * spec;
 
   // Halation: the tower's sunlit white paint bleeds red into what is around
@@ -109,12 +159,15 @@ void main(){
   hal += textureLod(uHalo, uv + vec2(-hp.x, hp.y) * 0.5, 2.4).r;
   hal += textureLod(uHalo, uv + vec2(hp.x, -hp.y) * 0.5, 2.4).r;
   hal += textureLod(uHalo, uv - vec2(hp.x, hp.y) * 0.5, 2.4).r;
-  hal = hal * 0.25 * 0.7 + textureLod(uHalo, uv, 4.2).r * 0.5;
+  hal = hal * 0.25 * 0.8 + textureLod(uHalo, uv, 3.4).r * 0.22;
   float towerSun = 0.35 + 0.65 * clamp(dot(vec3(0.0, 0.22, 0.85), L) * 0.5 + 0.5, 0.0, 1.0);
   vec3 halo = vec3(1.0, 0.24, 0.07) * hal * towerSun * luma(uSunCol) * 0.22;
 
-  vec3 c = mix(lit, skyL, sky) + halo;
-  c = tone(c);
+  // The sky goes over the plate after the tone curve, as a print would be
+  // matted: the dome runs to a thousand times paper white at the sun, and
+  // in linear light even the matte's last 1% inside the tower would carry
+  // it through as white blotches.
+  vec3 c = mix(tone(lit + halo), tone(skyL + halo), sky);
 
   // A light film grade: a lifted toe, a breath of vignette, and fine
   // monochrome grain from two hashes, so it is triangular, strongest in the
@@ -151,8 +204,8 @@ function loadImage(url) {
 // The sun for a point of the drag. Across: azimuth relative to where the
 // camera faces, from 165 degrees left through straight ahead to 165 right.
 // Down: elevation, from 78 degrees to 3. Returns its direction in camera
-// space, its colour and intensity (warmer and weaker near the horizon), and
-// how high it is.
+// space, its colour and intensity (warmer and weaker near the horizon), how
+// high it is, and its azimuth and elevation.
 function sunFor(x, y) {
   const az = (x - 0.5) * 2 * ((165 * Math.PI) / 180);
   const el = ((78 - (78 - 3) * clamp(y, 0, 1)) * Math.PI) / 180;
@@ -166,7 +219,44 @@ function sunFor(x, y) {
   const w = Math.sqrt(day);
   const I = 3.1 * (0.55 + 0.45 * w);
   const col = [1.0, 0.52 + 0.26 * w, 0.24 + 0.36 * w].map((c) => c * I);
-  return { dir, col, day };
+  return { dir, col, day, az, el };
+}
+
+// The sky dome's own sun stands this high (tools/depth/bakes/passes-sky.py).
+const DOME_SUN = (47.88 * Math.PI) / 180;
+// How far the dome may tilt to put its sun where the dragged one is. Beyond
+// this the frame's lower edge would look below the dome's horizon.
+const DOME_TILT = (26 * Math.PI) / 180;
+
+// The dome's orientation for a sun: turned about the zenith to the sun's
+// azimuth, then tilted in the sun's vertical plane so its own sun, and the
+// sunlit sides of its clouds, rise or fall to the sun's elevation. Returned as
+// the three columns of uDome: unit vectors, in camera space, toward the
+// dome's sun along the ground, to its right, and up.
+function domeFor(az, el) {
+  const sp = Math.sin(PITCH);
+  const cp = Math.cos(PITCH);
+  const sa = Math.sin(az);
+  const ca = Math.cos(az);
+  // Heading (0, -sp, -cp) and right (1, 0, 0) span the ground; up is (0, cp, -sp).
+  const toward = [sa, -sp * ca, -cp * ca];
+  const right = [ca, sp * sa, cp * sa];
+  const up = [0, cp, -sp];
+  const d = clamp(DOME_SUN - el, -DOME_TILT, DOME_TILT);
+  const c = Math.cos(d);
+  const s = Math.sin(d);
+  const p = toward.map((t, i) => c * t - s * up[i]);
+  const z = toward.map((t, i) => s * t + c * up[i]);
+  return [...p, ...right, ...z];
+}
+
+function readSmall(im, w, h) {
+  const c = document.createElement("canvas");
+  c.width = w;
+  c.height = h;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(im, 0, 0, w, h);
+  return x.getImageData(0, 0, w, h).data;
 }
 
 // Where the tower's paint is white: the halation source, at a quarter size
@@ -174,16 +264,8 @@ function sunFor(x, y) {
 function haloMask(photo, matte) {
   const w = 512;
   const h = 384;
-  const read = (im) => {
-    const c = document.createElement("canvas");
-    c.width = w;
-    c.height = h;
-    const x = c.getContext("2d", { willReadFrequently: true });
-    x.drawImage(im, 0, 0, w, h);
-    return x.getImageData(0, 0, w, h).data;
-  };
-  const p = read(photo);
-  const m = read(matte);
+  const p = readSmall(photo, w, h);
+  const m = readSmall(matte, w, h);
   const out = new Uint8Array(w * h);
   for (let i = 0; i < w * h; i++) {
     const r = p[4 * i];
@@ -197,9 +279,59 @@ function haloMask(photo, matte) {
   return { w, h, data: out };
 }
 
+// The plate's sky colour around each point, the sky pixels alone blurred
+// about 28 px at full size: what a gap in the tower's lattice looks like.
+// Blurred with the matte as weight, so walls and tower do not bleed in.
+function plateSky(photo, matte) {
+  const w = 256;
+  const h = 192;
+  const p = readSmall(photo, w, h);
+  const m = readSmall(matte, w, h);
+  const acc = new Float32Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const k = m[4 * i] > 250 ? 1 : 0;
+    acc[4 * i] = p[4 * i] * k;
+    acc[4 * i + 1] = p[4 * i + 1] * k;
+    acc[4 * i + 2] = p[4 * i + 2] * k;
+    acc[4 * i + 3] = k;
+  }
+  // Three box passes each way, radius 3: close to a Gaussian.
+  const tmp = new Float32Array(acc.length);
+  const box = (src, dst, step, n, lines, stride) => {
+    for (let l = 0; l < lines; l++) {
+      const o = l * stride;
+      for (let x = 0; x < n; x++) {
+        for (let c = 0; c < 4; c++) {
+          let sum = 0;
+          for (let d = -3; d <= 3; d++) {
+            const xx = Math.min(n - 1, Math.max(0, x + d));
+            sum += src[4 * (o + xx * step) + c];
+          }
+          dst[4 * (o + x * step) + c] = sum / 7;
+        }
+      }
+    }
+  };
+  for (let r = 0; r < 3; r++) {
+    box(acc, tmp, 1, w, h, w);
+    box(tmp, acc, w, h, w, 1);
+  }
+  const out = new Uint8Array(w * h * 4);
+  for (let i = 0; i < w * h; i++) {
+    const k = Math.max(acc[4 * i + 3], 1e-4);
+    out[4 * i] = Math.round(acc[4 * i] / k);
+    out[4 * i + 1] = Math.round(acc[4 * i + 1] / k);
+    out[4 * i + 2] = Math.round(acc[4 * i + 2] / k);
+    out[4 * i + 3] = 255;
+  }
+  return { w, h, data: out };
+}
+
 export async function createPasses(host) {
-  const [photo, albedo, depth, normal, matte] = await Promise.all(
-    ["photo.webp", "albedo.webp", "depth.png", "normal.webp", "matte.png"].map((f) => loadImage(SRC + f)),
+  const [photo, albedo, depth, normal, matte, skyCloud, skyBlue] = await Promise.all(
+    ["photo.webp", "albedo.webp", "depth.png", "normal.webp", "matte.png", "sky-cloud.avif", "sky-blue.avif"].map(
+      (f) => loadImage(SRC + f),
+    ),
   );
 
   const stage = createStage(host, { dpr: 2, webgl: true, antialias: false });
@@ -222,7 +354,7 @@ export async function createPasses(host) {
   gl.linkProgram(prog);
   gl.useProgram(prog);
   const U = (n) => gl.getUniformLocation(prog, n);
-  const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay") };
+  const u = { res: U("uRes"), map: U("uMap"), sun: U("uSun"), sunCol: U("uSunCol"), up: U("uUp"), day: U("uDay"), dome: U("uDome") };
 
   const vbo = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, vbo);
@@ -259,6 +391,40 @@ export async function createPasses(host) {
   gl.generateMipmap(gl.TEXTURE_2D);
   params2d(true);
   gl.uniform1i(U("uHalo"), 5);
+
+  const ps = plateSky(photo, matte);
+  gl.activeTexture(gl.TEXTURE7);
+  gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, ps.w, ps.h, 0, gl.RGBA, gl.UNSIGNED_BYTE, ps.data);
+  params2d(false);
+  gl.uniform1i(U("uPlateSky"), 7);
+
+  // The sky dome's two layers: azimuth repeats, and anisotropic filtering
+  // where the GPU has it, since the equirect stretches across toward the
+  // zenith. A GPU that cannot hold 8192 texels across gets them at half size.
+  const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+  const dome = (im, unit, name) => {
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, gl.createTexture());
+    let src = im;
+    if (gl.getParameter(gl.MAX_TEXTURE_SIZE) < im.width) {
+      src = document.createElement("canvas");
+      src.width = im.width / 2;
+      src.height = im.height / 2;
+      src.getContext("2d").drawImage(im, 0, 0, src.width, src.height);
+    }
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, src);
+    gl.generateMipmap(gl.TEXTURE_2D);
+    params2d(true);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.REPEAT);
+    if (aniso) {
+      const max = gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+      gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(8, max));
+    }
+    gl.uniform1i(U(name), unit);
+  };
+  dome(skyCloud, 6, "uSky");
+  dome(skyBlue, 8, "uSkyBlue");
 
   let dirty = true;
   stage.onResize(() => {
@@ -313,6 +479,7 @@ export async function createPasses(host) {
     gl.uniform3f(u.sunCol, S.col[0], S.col[1], S.col[2]);
     gl.uniform3f(u.up, 0, Math.cos(PITCH), -Math.sin(PITCH));
     gl.uniform1f(u.day, S.day);
+    gl.uniformMatrix3fv(u.dome, false, domeFor(S.az, S.el));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
 
