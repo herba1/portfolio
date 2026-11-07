@@ -2,7 +2,7 @@
 # Render a list of reels one after another; keep going past failures.
 # Usage: ./batch.sh [--draft] reel reel ...   (logs to out/_batch.log)
 cd "$(dirname "$0")"
-FLAGS=""; [ "$1" = "--draft" ] && { FLAGS="--draft"; shift; }
+FLAGS=""; [ "$1" = "--draft" ] && { FLAGS="--draft${FPS:+ --fps $FPS}"; shift; }
 for r in "$@"; do
   curl -s -o /dev/null --max-time 20 http://localhost:3200/ || bash /tmp/claude-0/-home-user-portfolio/2c112b93-6734-5f6c-9467-c03f471cdcfd/scratchpad/dev.sh
   start=$(date +%s)
