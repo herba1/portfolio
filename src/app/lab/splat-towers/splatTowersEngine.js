@@ -22,9 +22,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // further off (the splat hanging past its tower's edge into sky) it lets the
 // fragment go; where something nearer stood in front (a tower that has since
 // moved aside) it shows its own colour. The bake never lets one splat bridge a
-// depth step, so no colour is smeared across a silhouette. At the edges of the
-// view the splats let go of the photograph and show themselves: their own
-// colour, wider and softer.
+// depth step, so no colour is smeared across a silhouette. The bake outpaints
+// the texture and the splats ~12% past the frame, so the lookup runs right to
+// the edge of the view at any pose of the orbit. The edges go soft the way a
+// lens does: one round blur over the finished frame, growing with the square
+// of the distance from the centre (BLUR_FS).
 //
 // Query: ?yaw=&pitch= (degrees of orbit) hold a still; ?reveal=0..1 holds the
 // opening.
@@ -75,10 +77,9 @@ uniform mat3 uRot;      // world -> view
 uniform vec3 uCam;
 uniform float uF;
 uniform vec2 uC;
-uniform vec2 uSrc;
 uniform vec4 uM2;       // device offset = M2 * image offset (row major)
 uniform vec2 uRes;
-uniform vec4 uSoft;     // screen band, photo band, reveal radius, extra
+uniform vec2 uSoft;     // reveal radius, extra
 uniform int uCut;       // level-of-detail cut for the crisp field
 out vec2 vOff;
 flat out vec3 vConic;
@@ -110,15 +111,14 @@ void main() {
   vec2 img = uF * p.xy / p.z;
   vec2 dev = M2 * img + 0.5 * uRes;
 
-  // How much this splat lets go of the photograph: near the edge of the view,
-  // near the edge of the photograph, and outside the opening's radius.
-  vec2 src0 = uF * X.xy / X.z + uC;
-  float qs = min(min(dev.x, dev.y), min(uRes.x - dev.x, uRes.y - dev.y)) / min(uRes.x, uRes.y);
-  float qp = min(min(src0.x, src0.y), min(uSrc.x - src0.x, uSrc.y - src0.y)) / min(uSrc.x, uSrc.y);
-  float soft = max(1.0 - smoothstep(-0.015, uSoft.x, qs), 1.0 - smoothstep(-0.03, uSoft.y, qp));
+  // How much this splat lets go of the photograph: only outside the opening's
+  // radius, while the picture first comes up. Everywhere else, edges included,
+  // every splat keeps its shape and the photo lookup; the softness toward the
+  // frame edge is a lens blur over the finished frame (BLUR_FS), not wider
+  // splats.
   float rr = length(dev - 0.5 * uRes) / (0.5 * length(uRes));
-  soft = max(soft, smoothstep(uSoft.z - 0.3, uSoft.z, rr));
-  soft = clamp(soft + uSoft.w, 0.0, 1.0);
+  float soft = smoothstep(uSoft.x - 0.3, uSoft.x, rr);
+  soft = clamp(soft + uSoft.y, 0.0, 1.0);
   float grow = 1.0 + 1.4 * soft * soft;
 
   // Crisp field from the fine cut; soft field from the coarse one (16 px
@@ -182,7 +182,8 @@ uniform mat3 uRotT;     // view -> world
 uniform vec3 uCam;
 uniform float uF;
 uniform vec2 uC;
-uniform vec2 uSrc;
+uniform vec2 uSrc;       // the photograph's own frame, px
+uniform vec2 uPad;       // the outpainted margin round it in the texture, px
 uniform vec4 uM2inv;
 uniform vec2 uRes;
 uniform float uHeadroom;
@@ -216,7 +217,9 @@ void main() {
   vec3 P = uCam + t * dir;
   vec3 c = vCol.rgb;
   if (vTex > 0.0) {
-    vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC) / uSrc;
+    // The texture runs uPad past the frame on every side (outpainted in the
+    // bake), so a lookup the orbit carries past the frame still finds texels.
+    vec2 uv = (uF * P.xy / max(P.z, 1e-3) + uC + uPad) / (uSrc + 2.0 * uPad);
     float keep = 0.0;
     vec3 look = vec3(0.0);
     if (t > 0.0 && P.z > 0.1) {
@@ -259,6 +262,55 @@ void main() {
   c *= 1.0 + uHeadroom * e * e;
   outColor = vec4(c * alpha, alpha);
 }`;
+
+// The lens: one isotropic Gaussian over the finished frame whose sigma grows
+// with the square of the distance from the centre (field curvature, and the
+// diffusion a fast lens shows wide open), so the edges go soft the same way
+// in every direction and the middle is untouched. Gaussians are the one
+// isotropic kernel that separates, so it runs as two passes, horizontal then
+// vertical, each with the sigma of its own pixel; sigma changes slowly enough
+// across the frame that the two compose to a round blur, with no seam.
+const BLUR_VS = `#version 300 es
+layout(location = 0) in vec2 aPos;
+void main() { gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+const BLUR_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uIn;
+uniform vec2 uRes;
+uniform vec2 uDir;      // (1, 0) or (0, 1)
+uniform float uK;       // sigma in the corners, device px
+out vec4 outColor;
+void main() {
+  vec2 fc = gl_FragCoord.xy;
+  vec2 d = fc - 0.5 * uRes;
+  vec2 hd = 0.5 * uRes;
+  float sigma = uK * dot(d, d) / dot(hd, hd);
+  ivec2 ij = ivec2(fc);
+  vec4 acc = texelFetch(uIn, ij, 0);
+  if (sigma < 0.3) {
+    outColor = acc;
+    return;
+  }
+  // 2.5 sigma each side in at most 16 taps; past 6.4 px of sigma the taps
+  // spread out and the bilinear fetch prefilters between them
+  float st = max(1.0, sigma * 2.5 / 16.0);
+  int n = int(ceil(sigma * 2.5 / st));
+  float k = -0.5 / (sigma * sigma);
+  float wsum = 1.0;
+  for (int i = 1; i <= 16; i++) {
+    if (i > n) break;
+    float x = float(i) * st;
+    float w = exp(k * x * x);
+    acc += w * (texture(uIn, (fc + uDir * x) / uRes) + texture(uIn, (fc - uDir * x) / uRes));
+    wsum += 2.0 * w;
+  }
+  outColor = acc / wsum;
+}`;
+// sigma in the corners as a share of the frame's height, at rest, and how much
+// more a full swing of the camera opens it
+const BLUR_CORNER = 0.004;
+const BLUR_SWING = 0.0028;
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -309,11 +361,14 @@ const half2 = (a, b) => (toHalf(a) | (toHalf(b) << 16)) >>> 0;
 // Decode the quantised bake into GPU texels and worker positions.
 function decode(buf) {
   const dv = new DataView(buf);
-  if (dv.getUint32(0, true) !== 0x31545053) throw new Error("splats.bin: bad magic");
+  // SPT2 adds the texture's outpainted margin (x, y) to SPT1's header.
+  const magic = dv.getUint32(0, true);
+  if (magic !== 0x31545053 && magic !== 0x32545053) throw new Error("splats.bin: bad magic");
+  const nh = magic === 0x32545053 ? 10 : 8;
   const N = dv.getUint32(4, true);
-  const h = new Float32Array(buf.slice(8, 40));
-  const [W, H, F, CX, CY, M, ZMIN, ZMAX] = h;
-  let o = 40;
+  const h = new Float32Array(buf.slice(8, 8 + 4 * nh));
+  const [W, H, F, CX, CY, M, ZMIN, ZMAX, PX = 0, PY = 0] = h;
+  let o = 8 + 4 * nh;
   const qu = new Uint16Array(buf, o, N);
   o += 2 * N;
   const qv = new Uint16Array(buf, o, N);
@@ -411,7 +466,7 @@ function decode(buf) {
     pos[3 * i + 1] = Y;
     pos[3 * i + 2] = Z;
   }
-  return { N, W, H, F, CX, CY, ZMIN, ZMAX, rows, texels, pos, flags: flags.slice() };
+  return { N, W, H, F, CX, CY, PX, PY, ZMIN, ZMAX, rows, texels, pos, flags: flags.slice() };
 }
 
 // A damped spring on one value.
@@ -568,35 +623,59 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     worker.postMessage({ type: "sort", cam: cam.C, fwd: cam.fwd, cut: cam.cut, id: ++sortId });
   }
 
-  // ---- scene target + film
+  // ---- scene target, the lens's two blur targets, film
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
+  const blurProg = compile(gl, BLUR_VS, BLUR_FS);
+  const tri = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, tri);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const triVao = gl.createVertexArray();
+  gl.bindVertexArray(triVao);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
   let tex = null;
   let fbo = null;
+  let blurA = null;
+  let blurB = null;
   let dirty = true;
-  const build = () => {
-    const w = stage.canvas.width;
-    const h = stage.canvas.height;
-    if (tex) gl.deleteTexture(tex);
-    if (fbo) gl.deleteFramebuffer(fbo);
-    tex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    fbo = gl.createFramebuffer();
+  const target = (w, h) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    const f = gl.createFramebuffer();
     let ok = false;
     if (half) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
       ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
     }
     if (!ok) {
       gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, f);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
     }
     for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex: t, fbo: f };
+  };
+  const drop = (t) => {
+    if (!t) return;
+    gl.deleteTexture(t.tex);
+    gl.deleteFramebuffer(t.fbo);
+  };
+  const build = () => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    if (tex) gl.deleteTexture(tex);
+    if (fbo) gl.deleteFramebuffer(fbo);
+    drop(blurA);
+    drop(blurB);
+    ({ tex, fbo } = target(w, h));
+    blurA = target(w, h);
+    blurB = target(w, h);
     film.resize(w, h);
     dirty = true;
   };
@@ -661,16 +740,40 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     gl.uniform1f(u.uF, D.F);
     gl.uniform2f(u.uC, D.CX, D.CY);
     gl.uniform2f(u.uSrc, D.W, D.H);
+    gl.uniform2f(u.uPad, D.PX, D.PY);
     gl.uniform4fv(u.uM2, V.m);
     gl.uniform4fv(u.uM2inv, V.inv);
     gl.uniform2f(u.uRes, w, h);
-    gl.uniform4fv(u.uSoft, soft);
+    gl.uniform2fv(u.uSoft, soft);
     gl.uniform1i(u.uCut, cut);
     gl.uniform1f(u.uHeadroom, HEADROOM);
     gl.bindVertexArray(vao);
     gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, drawCount);
     gl.bindVertexArray(null);
     gl.disable(gl.BLEND);
+  };
+
+  // The lens over the composited frame: scene -> A (horizontal) -> B (vertical).
+  const renderLens = (corner) => {
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    gl.useProgram(blurProg.p);
+    gl.bindVertexArray(triVao);
+    gl.disable(gl.BLEND);
+    gl.viewport(0, 0, w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.uniform1i(blurProg.u.uIn, 0);
+    gl.uniform2f(blurProg.u.uRes, w, h);
+    gl.uniform1f(blurProg.u.uK, corner);
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, blurA.fbo);
+    gl.uniform2f(blurProg.u.uDir, 1, 0);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindTexture(gl.TEXTURE_2D, blurA.tex);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, blurB.fbo);
+    gl.uniform2f(blurProg.u.uDir, 0, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindVertexArray(null);
   };
 
   // ---- state
@@ -774,11 +877,12 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     const pd = pitch.x + hover.y + bp;
     const cam = camera(yd, pd);
 
-    // The edges breathe, and open further the further the camera swings.
+    // The lens softens the edges; they breathe, and go softer the further
+    // the camera swings.
     const swing = Math.min(1, Math.hypot(yd, pd) / MAX_DEG);
     const reveal = qReveal != null ? qReveal : held || reduced ? 1 : expoOut(clamp((age - 0.25) / 2.6, 0, 1));
-    const screenBand = 0.06 + 0.014 * breathe * Math.sin((t * 2 * Math.PI) / 9.1) + 0.035 * swing * swing;
-    const soft = [screenBand, 0.06, 0.3 + reveal * 1.25, 0];
+    const lens = stage.canvas.height * (BLUR_CORNER * (1 + 0.12 * breathe * Math.sin((t * 2 * Math.PI) / 9.1)) + BLUR_SWING * swing * swing);
+    const soft = [0.3 + reveal * 1.25, 0];
 
     // Keep the order fresh as the camera moves.
     const sk = `${cam.C.map((v) => v.toFixed(2)).join(",")}|${cut}`;
@@ -787,11 +891,12 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
       requestSort({ ...cam, cut });
     }
 
-    const key = `${yd.toFixed(4)}|${pd.toFixed(4)}|${soft.map((v) => v.toFixed(4)).join(",")}`;
+    const key = `${yd.toFixed(4)}|${pd.toFixed(4)}|${soft.map((v) => v.toFixed(4)).join(",")}|${lens.toFixed(2)}`;
     let drew = false;
     if (key !== lastKey || dirty) {
       const t0 = performance.now();
       renderSplats(cam, soft);
+      renderLens(lens);
       lastKey = key;
       dirty = false;
       drew = true;
@@ -806,7 +911,7 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
     const exposure = film0.exposure + (held ? 0 : 1.6 * (1 - reveal));
     const tick = reduced || held ? 0 : Math.floor(t * 24);
     if (drew || tick !== lastGrain) {
-      film.render(tex, { ...film0, exposure, grainSeed: tick * 7.31 });
+      film.render(blurB.tex, { ...film0, exposure, grainSeed: tick * 7.31 });
       lastGrain = tick;
     }
   };
@@ -830,6 +935,11 @@ export async function createSplatTowers(host, { embedded = false } = {}) {
       film.destroy();
       if (tex) gl.deleteTexture(tex);
       if (fbo) gl.deleteFramebuffer(fbo);
+      drop(blurA);
+      drop(blurB);
+      gl.deleteBuffer(tri);
+      gl.deleteVertexArray(triVao);
+      gl.deleteProgram(blurProg.p);
       gl.deleteTexture(dataTex);
       gl.deleteTexture(photo);
       gl.deleteTexture(depthTex);
