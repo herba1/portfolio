@@ -465,7 +465,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
   // in units of f, so the joiner survives a resize.
   const makePrint = (ix, iy, opts = {}) => {
     const rnd = mulberry((opts.seed ?? seed0 * 7919 + serial * 104729) >>> 0);
-    const rot = clamp(gauss(rnd) * 0.042, -0.09, 0.09);
+    const rot = clamp(gauss(rnd) * 0.075, -0.16, 0.16);
     // the frame centre sits below the image centre the pointer aimed at
     const offY = IMG_OFF * (img / f);
     const cx = ix + Math.sin(rot) * offY;
@@ -602,28 +602,36 @@ export async function createJoiner(host, { embedded = false } = {}) {
     return 2 * Math.abs(((t + 0.25) % 2) - 1) - 1; // triangle, -1..1
   };
 
-  // A pre-built joiner: a loose Hockney grid, nearest cells to a point,
-  // shot row by row so later rows overlap the bottom borders of earlier ones.
-  const layout = (n, seed, centre = [0.12, -0.18]) => {
+  // A pre-built joiner: a loose Hockney grid, nearest cells to the zenith,
+  // shot row by row so each print lies over the white bottom margin of the
+  // one above and the side margin of the one before it, and the sky, not the
+  // paper, fills the table. The image centres sit a hair above the zenith so
+  // the frames, not the images, are centred.
+  const layout = (n, seed, centre = [0, IMG_OFF * FIELD]) => {
     const rnd = mulberry(seed * 31 + 5);
     const s = img / f;
-    const sx = FW * s * 0.9;
-    const sy = FH * s * 0.86;
+    const sx = FW * s * 0.78;
+    const sy = FH * s * 0.74;
     const cells = [];
     for (let j = -5; j <= 5; j++)
       for (let i = -7; i <= 7; i++) {
         const x = centre[0] + i * sx + (j % 2 ? sx * 0.18 : 0);
         const y = centre[1] + j * sy;
-        const dx = (x - centre[0]) / 1.35;
+        // near circular, so the ring stays in the sky and tall facades and
+        // never reaches the pavement towards the disk's rim
+        const dx = (x - centre[0]) / 1.1;
         const dy = y - centre[1];
-        cells.push({ i, j, x, y, d: Math.hypot(dx, dy) + rnd() * sx * 0.35 });
+        // a print shot mostly off the edge of the table is a print wasted:
+        // those cells only fill in once the table itself is covered
+        const off = Math.abs(x) > W / 2 / f - 0.05 * s || Math.abs(y) > H / 2 / f - 0.05 * s;
+        cells.push({ i, j, x, y, d: Math.hypot(dx, dy) + rnd() * sx * 0.35 + (off ? 100 : 0) });
       }
     cells.sort((a, b) => a.d - b.d);
     const pick = cells.slice(0, n);
     pick.sort((a, b) => a.j - b.j || (a.j % 2 ? b.i - a.i : a.i - b.i));
     return pick.map((c, k) => ({
-      ix: c.x + gauss(rnd) * sx * 0.05,
-      iy: c.y + gauss(rnd) * sy * 0.04,
+      ix: c.x + gauss(rnd) * sx * 0.09,
+      iy: c.y + gauss(rnd) * sy * 0.07,
       moment: -1 + (2 * k) / Math.max(1, n - 1),
       seed: seed * 1009 + k * 7 + 1,
     }));
@@ -633,7 +641,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
     W = w;
     H = h;
     dpr = d;
-    img = clamp(Math.min(w, h) * (Math.min(w, h) < 600 ? 0.24 : 0.16), 60, 160);
+    img = clamp(Math.min(w, h) * (Math.min(w, h) < 600 ? 0.24 : 0.25), 60, 200);
     f = img / FIELD;
     const nc = Math.min(512, Math.ceil((img * d) / 8) * 8);
     if (nc !== cell || !rawTex) {
@@ -867,7 +875,7 @@ export async function createJoiner(host, { embedded = false } = {}) {
       for (const p of prints) p.frozen = true;
     }
   } else {
-    lay(3, seed0, [0.1, -0.32], true);
+    lay(3, seed0, undefined, true);
   }
 
   stage.onFrame((dt) => {
