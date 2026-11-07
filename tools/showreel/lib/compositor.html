@@ -1,0 +1,252 @@
+<!doctype html>
+<meta charset="utf-8" />
+<style>
+  html, body { margin: 0; background: #000; overflow: hidden; }
+  canvas { display: block; }
+</style>
+<canvas id="c"></canvas>
+<script>
+// Pass 2 renderer. compose.mjs calls setup() once, then render() for every
+// output frame in order. All motion is integrated frame by frame from the
+// capture's timeline, so the output is smooth at any frame rate no matter
+// how unevenly the browser painted during capture.
+//
+// Deliberately wordless: no captions, keycaps, titles or click pulses. The
+// piece and the pointer are the whole picture.
+const c = document.getElementById("c");
+const ctx = c.getContext("2d");
+let S, W, H, K, vw, vh, look;
+const bitmaps = new Map();
+
+// Critically damped spring: starts from rest, eases in and out, never overshoots.
+const spring = (s, target, omega, dt) => {
+  const x = s.x - target, v = s.v;
+  const e = Math.exp(-omega * dt);
+  s.x = target + (x + (v + omega * x) * dt) * e;
+  s.v = (v - omega * (v + omega * x) * dt) * e;
+};
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// A clamp with rounded corners: near the frame edge the camera eases into the
+// limit instead of hitting it, so an arc never flattens into a straight slide.
+const softClamp = (v, a, b) => {
+  if (b - a < 1e-6) return (a + b) / 2;
+  const m = Math.min(60, (b - a) / 2);
+  if (v < a + m) return a + m - m * (1 - Math.exp((v - a - m) / m));
+  if (v > b - m) return b - m + m * (1 - Math.exp(-(v - b + m) / m));
+  return v;
+};
+const smooth = (p) => { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); };
+
+// Camera state (log zoom, centre in css px) and the shot it is aiming at.
+// The camera is a rig on critically damped springs: it never jumps, never
+// overshoots, and a new shot picks up from whatever the rig is already doing,
+// so its velocity carries through every change of plan instead of snapping.
+const cam = { z: 0, x: 0, y: 0 };
+const rig = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, z: { x: 0, v: 0 } };
+const sway = { x: { x: 0, v: 0 }, y: { x: 0, v: 0 } };
+let shot = null;
+function startShot(t0, to, follow = false) { shot = { t0, to, follow }; }
+// raw: where the real pointer is. x/y: where it is drawn, lerped behind raw.
+const cur = { raw: { x: 0, y: 0 }, x: { x: 0, v: 0 }, y: { x: 0, v: 0 }, alpha: { x: 0, v: 0 }, press: { x: 0, v: 0 }, tilt: { x: 0, v: 0 }, idle: { x: 0, v: 0 } };
+let ev = 0, lastT = 0, base;
+
+window.setup = async (spec) => {
+  S = spec; [W, H] = spec.out; vw = spec.viewport.width; vh = spec.viewport.height;
+  K = W / vw; // output px per css px at zoom 1
+  look = spec.look;
+  c.width = W; c.height = H;
+  // Resting frame: the stage (the piece itself) fitted with a little air,
+  // or the whole viewport when the reel names none.
+  const st = spec.timeline.find((e) => e.type === "stage");
+  base = { z: 1, x: vw / 2, y: vh / 2 };
+  if (st) {
+    const z = Math.min(vw / (st.width * (1 + 2 * st.pad)), vh / (st.height * (1 + 2 * st.pad)));
+    base = { z: clamp(z, 1, spec.maxBase ?? 2.2), x: st.x + st.width / 2, y: st.y + st.height / 2 };
+  }
+
+  const intro = spec.intro ?? {};
+  cam.z = Math.log(base.z * (intro.zoom ?? 1.08)); cam.x = base.x; cam.y = base.y;
+  rig.x.x = cam.x; rig.y.x = cam.y; rig.z.x = cam.z;
+  startShot(0, { z: Math.log(base.z), x: base.x, y: base.y }, S.follow !== false); shot.home = true;
+  const first = spec.timeline.find((e) => e.type === "cursor" && e.visible);
+  cur.raw.x = cur.x.x = first?.x ?? vw * 0.66; cur.raw.y = cur.y.x = first?.y ?? vh * 0.82;
+  // A pointer that is on screen from frame one is simply there, not fading in.
+  if (first && first.t <= (spec.timeline.find((e) => e.type === "start")?.t ?? 0)) cur.alpha.x = 1;
+  // Start already settled on where the chase would put it, so frame one is a
+  // camera at rest (and a loop can come back to exactly that).
+  if (shot.follow) { const f = S.restFollow ?? 0.45; rig.x.x = cam.x = base.x + (cur.x.x - base.x) * f; rig.y.x = cam.y = base.y + (cur.y.x - base.y) * f; }
+  return true;
+};
+
+async function bitmap(url) {
+  if (!bitmaps.has(url)) {
+    bitmaps.set(url, fetch(url).then((r) => r.blob()).then(createImageBitmap));
+    if (bitmaps.size > 6) { const [k, v] = bitmaps.entries().next().value; bitmaps.delete(k); v.then((b) => b.close()); }
+  }
+  return bitmaps.get(url);
+}
+
+// Advance the timeline to absolute capture time T.
+function consume(T) {
+  const tl = S.timeline;
+  while (ev < tl.length && tl[ev].t <= T) {
+    const e = tl[ev++];
+    if (e.type === "move") { cur.raw.x = e.x; cur.raw.y = e.y; }
+    else if (e.type === "cursor") {
+      cur.visible = e.visible;
+      if (e.x != null) { cur.raw.x = cur.x.x = e.x; cur.raw.y = cur.y.x = e.y; cur.x.v = cur.y.v = 0; }
+    }
+    else if (e.type === "down") cur.down = true;
+    else if (e.type === "up") cur.down = false;
+    else if (e.type === "camera") {
+      const home = e.zoom === 1 && e.x == null;
+      const to = home ? { z: Math.log(base.z), x: base.x, y: base.y } : { z: Math.log(Math.max(1, base.z * e.zoom)), x: e.x ?? cur.raw.x, y: e.y ?? cur.raw.y };
+      // The camera is never parked: every shot keeps chasing the pointer once
+      // it lands, unless the beat says follow: false (or the reel does).
+      startShot(e.t, to, !e.still && S.follow !== false);
+      shot.home = home;
+    }
+  }
+}
+
+// The page's ground colour, read from a settled frame, for the fades.
+window.sample = async (url) => {
+  const b = await bitmap(url), o = new OffscreenCanvas(b.width, b.height).getContext("2d");
+  o.drawImage(b, 0, 0);
+  const px = (x, y) => o.getImageData(x, y, 1, 1).data;
+  // Median of the edges, so one glow or reflection near an edge can't tint the ground.
+  const pts = [[4, 4], [b.width - 4, 4], [b.width / 2, 4], [4, b.height - 4], [b.width - 4, b.height - 4], [b.width / 2, b.height - 4], [4, b.height / 2], [b.width - 4, b.height / 2]].map(([x, y]) => px(Math.round(x), Math.round(y)));
+  const lum = (p) => 0.2126 * p[0] + 0.7152 * p[1] + 0.0722 * p[2];
+  pts.sort((p, q) => lum(p) - lum(q));
+  const m = pts[Math.floor(pts.length / 2) - 1];
+  return [m[0], m[1], m[2]];
+};
+
+// Loop mode: the clip has to come back to its own first frame, exactly.
+// Ambient motion runs on loop time with each frequency rounded to a whole
+// number of cycles per loop, and over the last stretch every moving part
+// (camera, pointer, tilt) eases home to the state it had on frame one. The
+// frame after the last one is frame one again: no fade, no crossfade.
+let T0 = null, s0 = null;
+const hz = (f) => (S.loopLen ? (Math.max(1, Math.round((f * S.loopLen) / 1000 / (2 * Math.PI))) * 2 * Math.PI * 1000) / S.loopLen : f);
+let firstSrc = null;
+window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
+  if (first) { T0 = T; firstSrc = src; }
+  const lt = S.loopLen ? T - T0 : T;
+  const dt = Math.min(0.05, (T - lastT) / 1000 || 1 / S.fps); lastT = T;
+  consume(T);
+
+  // pointer: lerp the drawn position behind the real one (critically damped,
+  // so it trails smoothly into each stop and never overshoots a target)
+  // Tighter while a button is down, so a dragged thing never slips from under the tip.
+  const lag = cur.down ? 40 : S.cursorLag ?? 22;
+  spring(cur.x, cur.raw.x, lag, dt);
+  spring(cur.y, cur.raw.y, lag, dt);
+
+  // camera
+  // Aim: the shot's framing, pulled toward the pointer when following.
+  // Zoomed in it goes everywhere the pointer goes; at the resting frame it
+  // leans toward the pointer without letting the piece drift off.
+  if (shot) {
+    const f = !shot.follow ? 0 : shot.home ? S.restFollow ?? 0.45 : S.followAmount ?? 1;
+    const ax = shot.to.x + (cur.x.x - shot.to.x) * f, ay = shot.to.y + (cur.y.x - shot.to.y) * f;
+    const w = S.cameraSpring ?? 4.2;           // ~1.1s to settle: a beat behind, never 1:1
+    spring(rig.x, ax, w, dt); spring(rig.y, ay, w, dt);
+    spring(rig.z, shot.to.z, S.zoomSpring ?? 2.8, dt);
+  }
+  // Arc: the rig lifts off its line of travel in proportion to its speed,
+  // rising on sideways moves and bowing out on vertical ones, so no pan ever
+  // runs on a rail. Smoothed again so the bow itself has no corners.
+  const vx = rig.x.v, vy = rig.y.v, sp = Math.hypot(vx, vy), ka = S.followArc ?? 0.12;
+  spring(sway.x, clamp(Math.abs(vy) * ka, 0, 70), 6, dt);
+  spring(sway.y, clamp(-Math.abs(vx) * ka, -70, 0), 6, dt);
+  cam.x = rig.x.x + sway.x.x; cam.y = rig.y.x + sway.y.x;
+  // Zoom only changes when a beat asks for it: no pulse on travel.
+  cam.z = rig.z.x;
+  // The frame breathes: a slow sub-1% push and drift so a held moment never
+  // reads as a frozen picture.
+  const b = lt / 1000, br = S.breathe ?? 1;
+  // never below 1x, with a rounded corner so a dip into the floor doesn't stop dead
+  let camX = cam.x, camY = cam.y, camZ = cam.z;
+  if (s0 && home > 0) { camX += (s0.camX - camX) * home; camY += (s0.camY - camY) * home; camZ += (s0.camZ - camZ) * home; }
+  const ez = Math.exp(camZ), z = (ez < 1.06 ? 1 + 0.06 * Math.exp((ez - 1.06) / 0.06) : ez) * (1 + 0.004 * br * (1 + Math.sin(b * hz(0.55))));
+  cam.dx = 0.004 * br * vw * Math.sin(b * hz(0.37) + 1.1); cam.dy = 0.004 * br * vh * Math.sin(b * hz(0.31) + 0.2);
+  const hw = vw / z / 2, hh = vh / z / 2;
+  const cx = softClamp(camX + cam.dx, hw, vw - hw), cy = softClamp(camY + cam.dy, hh, vh - hh);
+  const x0 = cx - hw, y0 = cy - hh, k = K * z;
+  (window.camPath ??= []).push([+cx.toFixed(2), +cy.toFixed(2), +z.toFixed(4)]);
+
+  const img = await bitmap(src);
+  const d = img.width / vw; // source px per css px
+  ctx.globalAlpha = 1;
+  ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H);
+  ctx.drawImage(img, x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H);
+  // Loop with a page that can't put itself back exactly: the page dips out to
+  // its own ground, then comes back up already on its first frame, under the
+  // same camera. Never a crossfade between two states: it leaves, then
+  // re-enters. The pointer stays on top, already home.
+  if (pageMix > 0 && firstSrc) {
+    if (pageMix >= 0.5) { ctx.fillRect(0, 0, W, H); ctx.drawImage(await bitmap(firstSrc), x0 * d, y0 * d, hw * 2 * d, hh * 2 * d, 0, 0, W, H); }
+    const dip = pageMix < 0.5 ? smooth(pageMix * 2) : 1 - smooth((pageMix - 0.5) * 2);
+    ctx.globalAlpha = dip; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
+  }
+
+  spring(cur.alpha, cur.visible && phase !== "outro" ? 1 : 0, 9, dt);
+  spring(cur.press, cur.down ? 1 : 0, cur.down ? 34 : 20, dt); // in quick, out a touch slower so the release reads
+  // Free rotation: while moving, the arrow lerps round (any amount, no limit)
+  // to point the way it travels; as it slows it lerps back to its upright rest.
+  const speed = Math.hypot(cur.x.v, cur.y.v);
+  const near = (a) => { while (a - cur.tilt.x > Math.PI) a -= 2 * Math.PI; while (a - cur.tilt.x < -Math.PI) a += 2 * Math.PI; return a; };
+  const rest = near(0);
+  const heading = speed > 1 ? near(Math.atan2(cur.y.v, cur.x.v) - ARROW_HEADING) : rest;
+  const w = smooth((speed - 80) / 260); // 0 at a crawl, 1 at full glide
+  spring(cur.tilt, rest + (heading - rest) * w, 10, dt);
+  // A resting hand is never still: when the pointer has stopped (and nothing
+  // is held) it drifts on a slow, small, looping wander instead of freezing.
+  const s1 = lt / 1000;
+  spring(cur.idle, !cur.down && speed < 60 ? 1 : 0, 3, dt);
+  const amp = (S.idleDrift ?? 5) * cur.idle.x;
+  const ix = amp * (0.65 * Math.sin(s1 * hz(1.27) + 0.4) + 0.35 * Math.sin(s1 * hz(2.61) + 2.1));
+  const iy = amp * (0.6 * Math.sin(s1 * hz(1.06) + 1.7) + 0.4 * Math.sin(s1 * hz(2.23) + 0.3));
+  let px = cur.x.x + ix, py = cur.y.x + iy, pa = clamp(cur.alpha.x, 0, 1), pp = cur.press.x, pt = cur.tilt.x;
+  if (first && S.loopLen) s0 = { camX, camY, camZ: cam.z, px, py, pa, pp, pt };
+  if (s0 && home > 0) {
+    let t0 = s0.pt; while (t0 - pt > Math.PI) t0 -= 2 * Math.PI; while (t0 - pt < -Math.PI) t0 += 2 * Math.PI;
+    px += (s0.px - px) * home; py += (s0.py - py) * home; pa += (s0.pa - pa) * home; pp += (s0.pp - pp) * home; pt += (t0 - pt) * home;
+  }
+  if (pa > 0.01) drawPointer((px - x0) * k, (py - y0) * k, K * Math.pow(z, 0.35), pa, pp, pt);
+
+  // intro: fade up from the page's own ground colour. outro: fade back into it.
+  let veil = 0;
+  if (phase === "intro" && (S.intro?.fade ?? 500) > 0) veil = 1 - smooth(t / (S.intro?.fade ?? 500));
+  if (phase === "outro") veil = smooth(t / (S.outro?.fade ?? 700));
+  if (veil > 0) { ctx.globalAlpha = veil; ctx.fillStyle = look.bg; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1; }
+  return true;
+};
+
+// A Mac-style arrow made soft: the black body is a slightly inset arrow
+// stroked with a fat round join, so every corner is a real radius, and the
+// white rim is the same shape stroked wider. A press pushes it into the page:
+// smaller about its tip, and its shadow pulls in tight as it touches down.
+// The direction the unrotated arrow points (from its body to its tip).
+const ARROW_HEADING = Math.atan2(-13, -5.5);
+const ARROW = new Path2D("M1.2 1.9 L1.2 15.6 L4.9 12.4 L7.4 17.9 L9.5 17.0 L7.1 11.6 L11.6 11.6 Z");
+const layer = document.createElement("canvas");
+const lctx = layer.getContext("2d");
+function drawPointer(x, y, k, a, press, tilt) {
+  const s = k * (S.cursorSize ?? 1.7) * (1 - (S.pressDepth ?? 0.2) * press);
+  // Draw it opaque on its own layer, then lay that down at the fade's alpha:
+  // fading the rim and body separately lets the white show through the black.
+  const R = Math.ceil(34 * s);
+  if (layer.width !== R * 2) { layer.width = layer.height = R * 2; }
+  lctx.setTransform(1, 0, 0, 1, 0, 0); lctx.clearRect(0, 0, R * 2, R * 2);
+  lctx.translate(R, R); lctx.rotate(tilt); lctx.scale(s, s);
+  lctx.lineJoin = "round"; lctx.lineCap = "round";
+  lctx.shadowColor = `rgba(0,0,0,${0.26 + 0.12 * press})`; lctx.shadowBlur = (8 - 5.5 * press) * s; lctx.shadowOffsetY = (1.8 - 1.4 * press) * s;
+  lctx.lineWidth = 6.4; lctx.strokeStyle = "#fff"; lctx.stroke(ARROW);
+  lctx.shadowColor = "transparent";
+  lctx.lineWidth = 2.6; lctx.strokeStyle = "#151517"; lctx.stroke(ARROW);
+  lctx.fillStyle = "#151517"; lctx.fill(ARROW);
+  ctx.save(); ctx.globalAlpha = a; ctx.drawImage(layer, x - R, y - R); ctx.restore();
+}
+</script>
