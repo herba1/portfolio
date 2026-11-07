@@ -16,10 +16,19 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    camera looks almost straight up, so world up is recovered from the walls
 //    themselves (every facade is vertical), and the lane's orientation from
 //    the photo's own sun, fitted on the walls' shading one paint at a time.
-//    The houses across the lane carve the shade out of it.
+//    The houses across the lane carve the shade out of it. Then the thin
+//    things that have hung there for decades (the open shutter leaves, the
+//    lanterns and their brackets, the gelato sign, the drying lines, hooks
+//    and rods: SAM masks and black-hat lines, stood off their walls) are
+//    marched again at half the plate's resolution, each wall pixel along
+//    its own dose-weighted (summer-heavy) mean sun and over its sky, so
+//    every one leaves a crisp, offset tan line of unfaded paint: the
+//    "something hung here for thirty years" mark, readable in one still.
 //  - light.webp G: the photo's own illumination: the lane is in high sun, so
 //    one sun level (the white trim reflecting 0.85) plus a sky share by view
 //    factor, and albedo = photo / S.
+//  - light.webp B: the share of the dose those thin occluders take (the tan
+//    lines), which also keeps the wash's wear off the paint behind them.
 //  - mat.webp: how each pixel ages: the render fades per pigment and its
 //    lime binder chalks, the one bare stone wall barely moves, the sky and
 //    its cloud are inert.
@@ -392,7 +401,15 @@ void main() {
   vec3 lin = toLin(texture(uPlate, uv).rgb);
   vec4 m = texture(uMat, uv);
   vec3 L = texture(uLight, uv).rgb;
-  float dose = L.r * 2.0;
+  // the dose map's tan lines are baked crisp at half the plate; four taps
+  // 1.5 plate px off soften their edges by about 3 px, no more, so a ghost
+  // stays sharp beside the soft drips and tails
+  vec2 lt = 0.75 / vec2(textureSize(uLight, 0));
+  vec2 tl = 0.25 * (texture(uLight, uv + lt).rb + texture(uLight, uv - lt).rb
+    + texture(uLight, uv + vec2(lt.x, -lt.y)).rb + texture(uLight, uv + vec2(-lt.x, lt.y)).rb);
+  float dose = tl.x * 2.0;
+  // the share of the dose a thin occluder took: its tan line
+  float tanLine = tl.y;
   float S = max(L.g * L.g * 1.5, 0.02);
   if (uDebug > 0.5 && uDebug < 1.5) {
     outColor = vec4(toSrgb(vec3(dose * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
@@ -417,6 +434,9 @@ void main() {
     // how worn the coat is, for how much colour it can give up and how it
     // chalks: the same drips and tails, the sheltered strip least
     wear = clamp(uMottle * mot + 0.4 * st + 2.2 * lc.g - 1.0 * lc.r, -1.0, 1.0);
+    // behind a leaf or a lantern the wall is out of the driving rain too:
+    // its tan line keeps its colour like the strip under a sill
+    wear = mix(wear, -1.0, clamp(tanLine * 1.6, 0.0, 1.0));
   }
   if (uDebug > 1.5) {
     outColor = vec4(toSrgb(vec3(dose * m.a * local * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);

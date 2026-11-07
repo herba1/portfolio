@@ -25,10 +25,16 @@
 #                 B chalk  binder erodes, the white pigment powders out
 #                 A sens   overall susceptibility (0: sky and cloud)
 #   light.webp  lossless RGB at 1000x750:
-#                 R annual dose / 2 (1.0 = an open south wall)
+#                 R annual dose / 2 (1.0 = an open south wall), from
+#                   dose.py's half-res dose_hi: the 1/4-res dose with the
+#                   tan lines of the thin occluders carved out of it
 #                 G the photo's own illumination S at that pixel, / 1.5, as
 #                   sqrt, so albedo = linear photo / S
-#                 B sky view factor
+#                 B the tan lines: the share of the dose that the thin
+#                   occluders (dose.py) take, 0 elsewhere. The paint behind a
+#                   shutter leaf or a lantern is out of the driving rain as
+#                   well as the sun, so the engine also takes the wash's wear
+#                   off it. (Without dose_hi, the old sky view factor.)
 import sys, numpy as np, cv2
 from PIL import Image
 
@@ -89,10 +95,11 @@ S = E * (0.82 + 0.35 * svf)
 print(f"E {E:.3f}; paint {float((paint > 0.5).mean()) * 100:.1f}% stone {float((stone > 0.5).mean()) * 100:.1f}% sky {float((sky > 0.5).mean()) * 100:.1f}%")
 S = np.maximum(S, 0.02)
 S = cv2.resize(S, (LW, LH), interpolation=cv2.INTER_AREA)
+dose_l = z["dose_hi"] if "dose_hi" in z else cv2.resize(dose, (LW, LH), interpolation=cv2.INTER_AREA)
 light = np.stack([
-    np.clip(cv2.resize(dose, (LW, LH), interpolation=cv2.INTER_AREA) / 2, 0, 1),
+    np.clip(dose_l / 2, 0, 1),
     np.sqrt(np.clip(S / 1.5, 0, 1)),
-    np.clip(cv2.resize(svf, (LW, LH), interpolation=cv2.INTER_AREA), 0, 1),
+    np.clip(z["tan"] / np.maximum(dose_l + z["tan"], 1e-3), 0, 1) if "tan" in z else np.clip(cv2.resize(svf, (LW, LH), interpolation=cv2.INTER_AREA), 0, 1),
 ], -1)
 Image.fromarray((light * 255 + 0.5).astype(np.uint8), "RGB").save(out + "/light.webp", lossless=True, quality=100, method=6)
 Image.fromarray((img * 255 + 0.5).astype(np.uint8)).save(out + "/plate.webp", quality=90, method=6)

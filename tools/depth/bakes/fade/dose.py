@@ -1,6 +1,8 @@
 # Fade, step 2: the annual solar dose of every surface in the photograph.
 #
-#   python3 -I dose.py <workdir>          (reads plate-fill.png, moge/, writes dose.npz)
+#   python3 -I dose.py <workdir> [--tan]  (reads plate-fill.png, moge/, m/occ-*.png,
+#                                          writes dose.npz; --tan redoes only the
+#                                          tan lines on the cached coarse march)
 #
 # Geometry is MoGe-2's metric point map (normals.py, 800x600), taken to 1/4 of
 # the plate (500x375).
@@ -181,51 +183,68 @@ P, n, valid, d, K = geometry(W, H)
 idx = np.flatnonzero(valid.ravel())
 Pv, nv = P.reshape(-1, 3)[idx], n.reshape(-1, 3)[idx]
 
-# sky-view factor over the surface's own hemisphere (cosine weighted), with
-# the directions spread over the world's upper half
-k = np.arange(512) + 0.5
-phi = np.arccos(1 - 2 * k / 512)
-th = np.pi * (1 + 5**0.5) * k
-lv = np.stack([np.sin(phi) * np.cos(th), np.cos(phi), np.sin(phi) * np.sin(th)], -1)
-lv = lv[lv[:, 1] > 0.02]
-dirs = (lv[:, :1] * RT + lv[:, 1:2] * UP + lv[:, 2:3] * BK).astype(np.float32)
-svf = np.zeros(len(idx), np.float32)
-for dvec in dirs:
-    c = np.clip(nv @ dvec, 0, None)
-    m = c > 0
-    if not m.any():
-        continue
-    vis = np.zeros(len(idx), np.float32)
-    vis[m] = march(Pv[m], nv[m], d, K, dvec, steps=28)
-    svf += c * vis
-# normalise so an open horizontal surface is 1
-norm_h = np.clip(lv[:, 1], 0, None).sum()
-svf /= norm_h
-print("svf: median", np.median(svf).round(3), "p5", np.percentile(svf, 5).round(3), "p95", np.percentile(svf, 95).round(3))
 
-days = [21, 52, 80, 111, 141, 172, 202, 233, 264, 294, 325, 355]
-direct = np.zeros(len(idx), np.float32)
-diffuse_sum = 0.0
-south_wall = 0.0
-for day in days:
-    dec = np.radians(23.44) * np.sin(np.radians(360 / 365 * (284 + day)))
-    ws = np.degrees(np.arccos(-np.tan(np.radians(LAT)) * np.tan(dec)))
-    for j in range(12):
-        hw = -ws + (j + 0.5) * 2 * ws / 12
-        dt = 2 * ws / 12 / 15
-        s, el, az = solar(day, 12 + hw / 15)
-        if el <= np.radians(1):
-            continue
-        dni, dhi = irradiance(el)
-        c = np.clip(nv @ s, 0, None)
+def coarse():
+    # sky-view factor over the surface's own hemisphere (cosine weighted), with
+    # the directions spread over the world's upper half
+    k = np.arange(512) + 0.5
+    phi = np.arccos(1 - 2 * k / 512)
+    th = np.pi * (1 + 5**0.5) * k
+    lv = np.stack([np.sin(phi) * np.cos(th), np.cos(phi), np.sin(phi) * np.sin(th)], -1)
+    lv = lv[lv[:, 1] > 0.02]
+    dirs = (lv[:, :1] * RT + lv[:, 1:2] * UP + lv[:, 2:3] * BK).astype(np.float32)
+    svf = np.zeros(len(idx), np.float32)
+    for dvec in dirs:
+        c = np.clip(nv @ dvec, 0, None)
         m = c > 0
+        if not m.any():
+            continue
         vis = np.zeros(len(idx), np.float32)
-        if m.any():
-            vis[m] = march(Pv[m], nv[m], d, K, s)
-        direct += dni * c * vis * dt
-        diffuse_sum += dhi * dt
-        south_wall += (dni * max(float(np.cos(el) * np.cos(az - np.pi)), 0) + dhi * 0.5) * dt
-    print("day", day, "done", flush=True)
+        vis[m] = march(Pv[m], nv[m], d, K, dvec, steps=28)
+        svf += c * vis
+    # normalise so an open horizontal surface is 1
+    norm_h = np.clip(lv[:, 1], 0, None).sum()
+    svf /= norm_h
+    print("svf: median", np.median(svf).round(3), "p5", np.percentile(svf, 5).round(3), "p95", np.percentile(svf, 95).round(3))
+
+    days = [21, 52, 80, 111, 141, 172, 202, 233, 264, 294, 325, 355]
+    direct = np.zeros(len(idx), np.float32)
+    # the dose-weighted mean sun each surface sees (summer-heavy: long days, high
+    # beam), the direction the thin occluders' shadows are thrown along below
+    svec = np.zeros((len(idx), 3), np.float32)
+    diffuse_sum = 0.0
+    south_wall = 0.0
+    for day in days:
+        dec = np.radians(23.44) * np.sin(np.radians(360 / 365 * (284 + day)))
+        ws = np.degrees(np.arccos(-np.tan(np.radians(LAT)) * np.tan(dec)))
+        for j in range(12):
+            hw = -ws + (j + 0.5) * 2 * ws / 12
+            dt = 2 * ws / 12 / 15
+            s, el, az = solar(day, 12 + hw / 15)
+            if el <= np.radians(1):
+                continue
+            dni, dhi = irradiance(el)
+            c = np.clip(nv @ s, 0, None)
+            m = c > 0
+            vis = np.zeros(len(idx), np.float32)
+            if m.any():
+                vis[m] = march(Pv[m], nv[m], d, K, s)
+            direct += dni * c * vis * dt
+            svec += (dni * c * vis * dt)[:, None] * s[None]
+            diffuse_sum += dhi * dt
+            south_wall += (dni * max(float(np.cos(el) * np.cos(az - np.pi)), 0) + dhi * 0.5) * dt
+        print("day", day, "done", flush=True)
+    return svf, direct, svec, diffuse_sum, south_wall
+
+
+# --tan reuses the coarse march (dose-coarse.npz) and redoes only the tan lines
+if "--tan" in sys.argv:
+    zc = np.load(wd + "/dose-coarse.npz")
+    svf, direct, svec, diffuse_sum, south_wall = (zc[k] for k in ("svf", "direct", "svec", "diffuse_sum", "south_wall"))
+else:
+    svf, direct, svec, diffuse_sum, south_wall = coarse()
+    np.savez_compressed(wd + "/dose-coarse.npz", svf=svf, direct=direct, svec=svec, diffuse_sum=diffuse_sum, south_wall=south_wall)
+
 dose_v = (direct + diffuse_sum * svf) / south_wall
 dose = np.zeros(H * W, np.float32)
 dose[idx] = dose_v
@@ -235,5 +254,203 @@ svf_img[idx] = svf
 svf_img = svf_img.reshape(H, W)
 print("dose: median", np.median(dose_v).round(3), "p5", np.percentile(dose_v, 5).round(3), "p95", np.percentile(dose_v, 95).round(3), "max", dose_v.max().round(3))
 
-np.savez_compressed(wd + "/dose.npz", dose=dose, svf=svf_img, valid=valid, normal=n, s0=s_photo, up=UP)
+
+def grid(a):
+    out = np.zeros((H * W,) + a.shape[1:], np.float32)
+    out[idx] = a
+    return out.reshape((H, W) + a.shape[1:])
+
+
+# ---- tan lines: the shade of thin things that have hung there for decades
+# The 1/4-res march sees the houses and the lane; everything thin slips
+# through it. So the open shutter leaves, the lantern and its bracket on the
+# coral wall, the gelato sign, the second lantern low on the orange wall
+# (SAM 2.1 masks, m/occ-*.png) and the drying lines, iron hooks and rods on
+# the pink wall (thin dark lines found by a black-hat inside hand-placed
+# boxes) are put back at half the plate's resolution (1000x750) as thin slabs
+# standing off their wall, and every wall pixel within reach is marched again
+# against them:
+#  - the wall behind: MoGe's depth with everything smaller than 45 px closed
+#    over (a morphological closing fills near bumps, which is what an object
+#    off its wall is), so the wall points sit on the plaster, not on the
+#    object's blurred edge;
+#  - each occluder stands off that wall by what MoGe measures (median of
+#    wall - depth over its core) when it resolves it (>= 0.25 m), else by its
+#    kind's typical standoff, and is a slab a few tens of cm deep;
+#  - the beam: one ray per wall pixel along its own dose-weighted mean sun
+#    (the sum of the sun directions it actually receives, weighted by their
+#    beam: summer-heavy, long days and a high sun), so each occluder throws
+#    one crisp, offset silhouette and the wall's whole direct dose is lost
+#    inside it;
+#  - the sky: 128 directions over the surface's hemisphere, the share of its
+#    cosine-weighted sky the object takes, lost from the diffuse dose (a soft
+#    halo hugging the object).
+# The result is the dose at 1000x750 (dose_hi), the coarse dose upsampled
+# with those losses carved out of it: the paint behind and below every leaf
+# keeps its colour while the wall around it bleaches.
+from glob import glob
+
+HW, HH = 1000, 750
+Ph, nh, vh, dh, Kh = geometry(HW, HH)
+draw = cv2.resize(depth0, (HW, HH), interpolation=cv2.INTER_AREA)
+vf = vh.astype(np.float32)
+fill = cv2.GaussianBlur(draw * vf, (0, 0), 25) / np.maximum(cv2.GaussianBlur(vf, (0, 0), 25), 1e-4)
+dfill = np.where(vh, draw, fill).astype(np.float32)
+dwall = cv2.morphologyEx(dfill, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (45, 45)))
+ys, xs = np.mgrid[0:HH, 0:HW].astype(np.float32)
+fh, cxh, cyh = Kh
+ray = np.stack([(xs - cxh) / fh, -(ys - cyh) / fh, -np.ones_like(xs)], -1)
+
+# the wall's own normal under each object: MoGe's, with the objects taken out
+# and the hole filled from the wall around
+plate_full = np.asarray(Image.open(wd + "/plate-fill.png").convert("RGB")).astype(np.float32) / 255
+masks = []
+for f in sorted(glob(wd + "/m/occ-*.png")):
+    a = np.asarray(Image.open(f).convert("L").resize((HW, HH), Image.BILINEAR)).astype(np.float32) / 255
+    masks.append((f.split("/")[-1][4:-4], (a > 0.5) & vh))
+
+# thin dark lines: drying lines a few cm off the pink wall's plaster, iron
+# hooks and rods sticking out from the pink, orange and yellow walls (box in plate px, and the span of
+# distances off the wall it occupies, m)
+THIN = [("lines", (110, 0, 345, 665), (0.05, 0.07)), ("rod", (390, 395, 482, 437), (0.04, 0.4)), ("rod", (168, 583, 297, 637), (0.04, 0.4)),
+        ("hook", (172, 278, 242, 312), (0.03, 0.15)), ("hook", (158, 533, 217, 562), (0.03, 0.15)),
+        ("hook", (418, 168, 462, 197), (0.03, 0.15)), ("hook", (393, 358, 427, 380), (0.03, 0.15)),
+        ("rod", (360, 1022, 495, 1046), (0.04, 0.4)),
+        ("hook", (1470, 1250, 1496, 1280), (0.03, 0.12)), ("hook", (1592, 1264, 1616, 1294), (0.03, 0.12)),
+        ("hook", (1414, 1092, 1440, 1116), (0.03, 0.12)), ("hook", (1204, 1274, 1228, 1292), (0.03, 0.12)),
+        ("hook", (1124, 1349, 1146, 1367), (0.03, 0.12))]
+Lf = plate_full @ np.array([0.299, 0.587, 0.114], np.float32)
+kb = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
+bh = cv2.morphologyEx(Lf, cv2.MORPH_BLACKHAT, kb)
+hsv_c = cv2.cvtColor((cv2.morphologyEx(plate_full, cv2.MORPH_CLOSE, kb) * 255).astype(np.uint8), cv2.COLOR_RGB2HSV).astype(np.float32)
+hc, sc, vc = hsv_c[..., 0] * 2, hsv_c[..., 1] / 255, hsv_c[..., 2] / 255
+warm = cv2.erode((((hc < 50) | (hc > 330)) & (sc > 0.15) & (vc > 0.55)).astype(np.uint8), np.ones((25, 25), np.uint8)) > 0
+thin = []
+for name, (x0, y0, x1, y1), span in THIN:
+    t = np.zeros(Lf.shape, np.uint8)
+    t[y0:y1, x0:x1] = (bh[y0:y1, x0:x1] > 0.07) & warm[y0:y1, x0:x1]
+    nlab, lab, st, _ = cv2.connectedComponentsWithStats(t, 8)
+    keep = np.zeros(nlab, bool)
+    for i in range(1, nlab):
+        if st[i, 4] < 10 or max(st[i, 2], st[i, 3]) < 10:
+            continue
+        # the drying lines hang along the wall's vertical: a long line far
+        # off it is the shadow of a wire across the lane, not a thing
+        if name == "lines" and st[i, 4] > 60:
+            ys_i, xs_i = np.nonzero(lab == i)
+            _, v_ = np.linalg.eigh(np.cov(np.stack([xs_i, ys_i]).astype(np.float32)))
+            if abs(v_[0, 1]) > np.sin(np.radians(25)):
+                continue
+        keep[i] = True
+    hard = cv2.resize(keep[lab].astype(np.float32), (HW, HH), interpolation=cv2.INTER_AREA) > 0.2
+    hard = cv2.dilate(hard.astype(np.uint8), np.ones((2, 2), np.uint8)) > 0
+    thin.append((name, hard & vh, span))
+
+occ = np.zeros((HH, HW), bool)
+for _, m in masks:
+    occ |= m
+for _, m, _ in thin:
+    occ |= m
+wt = (vh & ~occ).astype(np.float32)
+nfill = cv2.GaussianBlur(nh * wt[..., None], (0, 0), 20) / np.maximum(cv2.GaussianBlur(wt, (0, 0), 20), 1e-4)[..., None]
+nfill /= np.linalg.norm(nfill, axis=2, keepdims=True) + 1e-6
+# n . ray for a point on the wall plane: an object a metres off the wall
+# along its normal sits at camera depth dwall + a / (n . ray) on this pixel's
+# ray (the camera sees the walls at a slant, so 0.5 m off a wall is metres of
+# camera depth)
+ndr = np.minimum((nfill * ray).sum(-1), -0.25)
+occ_z0 = np.zeros((HH, HW), np.float32)
+occ_z1 = np.zeros((HH, HW), np.float32)
+# how far off its wall each object stands (m): a leaf is hinged at the wall
+# and swings out across the lane about its own width; the lantern hangs off
+# the end of its bracket
+SPAN = {"leaf": (0.04, 0.5), "lantern": (0.35, 0.8), "bracket": (0.04, 0.8)}
+
+
+def put(hard, span):
+    lo, hi = span
+    occ_z0[hard] = (dwall + hi / ndr)[hard] - 0.03
+    occ_z1[hard] = (dwall + lo / ndr)[hard] + 0.03
+
+
+ring_k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (31, 31))
+for name, hard in masks:
+    ring = (cv2.dilate(hard.astype(np.uint8), ring_k) > 0) & ~occ & vh
+    wall = float(np.median(draw[ring])) if ring.any() else 0.0
+    own = float(np.median(draw[hard])) if hard.any() else 0.0
+    if wall - own > 1.0:
+        # MoGe resolves it as its own thing, well off any wall (the gelato
+        # sign stands in the lane, metres in front of the house behind it)
+        occ_z0[hard] = draw[hard] - 0.1
+        occ_z1[hard] = draw[hard] + 0.4
+        how = "own depth"
+    else:
+        put(hard, SPAN.get(name.rstrip("0123456789"), (0.04, 0.5)))
+        how = "on its wall"
+    print("occluder", name, "px", int(hard.sum()), "MoGe: wall", round(wall, 2), "object", round(own, 2), "->", how)
+for name, hard, span in thin:
+    put(hard, span)
+print("occluders: px at 1/2 res", int(occ.sum()))
+
+# the wall points within reach, on the plaster behind
+band = cv2.dilate(occ.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (241, 241))) > 0
+band &= vh & ~occ
+zb = np.where(dwall - draw > 0.15, dwall, draw)
+Pw = ray * zb[..., None]
+nw = cv2.GaussianBlur(nh * wt[..., None], (0, 0), 4) / np.maximum(cv2.GaussianBlur(wt, (0, 0), 4), 1e-3)[..., None]
+nw /= np.linalg.norm(nw, axis=2, keepdims=True) + 1e-6
+bi = np.flatnonzero(band.ravel())
+Pb, nb = Pw.reshape(-1, 3)[bi], nw.reshape(-1, 3)[bi]
+print("tan-line band: px", len(bi))
+occ_f, oz0_f, oz1_f = occ.ravel(), occ_z0.ravel(), occ_z1.ravel()
+
+
+def occ_march(P, s, steps=96, tmax=3.0):
+    """1 where the ray P + s t meets an occluder slab before tmax."""
+    ts = np.linspace(0.02, tmax, steps)
+    hit = np.zeros(len(P), bool)
+    for t in ts:
+        Q = P + s * t
+        z = -Q[:, 2]
+        u = cxh + fh * Q[:, 0] / np.maximum(z, 1e-3)
+        v = cyh - fh * Q[:, 1] / np.maximum(z, 1e-3)
+        inside = (z > 0.3) & (u >= 0) & (u <= HW - 1) & (v >= 0) & (v <= HH - 1)
+        j = np.clip(np.round(v).astype(np.int32), 0, HH - 1) * HW + np.clip(np.round(u).astype(np.int32), 0, HW - 1)
+        hit |= inside & occ_f[j] & (z > oz0_f[j]) & (z < oz1_f[j])
+    return hit
+
+
+up_lin = lambda a: cv2.resize(a, (HW, HH), interpolation=cv2.INTER_LINEAR)
+dose_up = up_lin(dose)
+dir_up = up_lin(grid(direct / south_wall))
+dif_up = up_lin(grid(diffuse_sum * svf / south_wall))
+sv = up_lin(grid(svec)).reshape(-1, 3)[bi]
+sbar = sv / (np.linalg.norm(sv, axis=1, keepdims=True) + 1e-9)
+has_sun = np.linalg.norm(sv, axis=1) > 1e-6
+O = Pb + nb * 0.03
+beam = np.zeros(len(bi), np.float32)
+beam[has_sun] = occ_march(O[has_sun], sbar[has_sun])
+skyb = np.zeros(len(bi), np.float32)
+csum = np.zeros(len(bi), np.float32)
+k = np.arange(256) + 0.5
+phi = np.arccos(1 - 2 * k / 256)
+th = np.pi * (1 + 5**0.5) * k
+lv = np.stack([np.sin(phi) * np.cos(th), np.cos(phi), np.sin(phi) * np.sin(th)], -1)
+lv = lv[lv[:, 1] > 0.02]
+for dvec in (lv[:, :1] * RT + lv[:, 1:2] * UP + lv[:, 2:3] * BK).astype(np.float32):
+    c = np.clip(nb @ dvec, 0, None)
+    m = c > 0
+    if not m.any():
+        continue
+    csum += c
+    skyb[m] += c[m] * occ_march(O[m], dvec[None], steps=48, tmax=2.0)
+skyb /= np.maximum(csum, 1e-6)
+loss = np.zeros(HH * HW, np.float32)
+loss[bi] = dir_up.ravel()[bi] * beam + dif_up.ravel()[bi] * skyb
+loss = loss.reshape(HH, HW)
+dose_hi = np.maximum(dose_up - loss, 0)
+print("tan lines: beam-shaded px", int(beam.sum()), "mean sky taken", skyb[skyb > 0.01].mean().round(3) if (skyb > 0.01).any() else 0, "max loss", loss.max().round(3))
+
+np.savez_compressed(wd + "/dose.npz", dose=dose, svf=svf_img, valid=valid, normal=n, s0=s_photo, up=UP, dose_hi=dose_hi, tan=loss, occ=occ)
+
 print("wrote dose.npz")
