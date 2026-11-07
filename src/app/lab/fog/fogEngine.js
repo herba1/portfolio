@@ -164,17 +164,7 @@ uniform sampler2D uAir;
 uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uSkyMean;  // display-encoded, the fallback where the blur saw no sky
-uniform float uGrain;   // grain seed, stepped at 24 fps
 ${COMMON}
-
-float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
-// Only the haze's own lift needs catching: the plate already rolls its cloud
-// tops off under 1.0, so the knee sits above them and they keep their warmth.
-vec3 shoulder(vec3 x) {
-  vec3 k = vec3(0.86);
-  vec3 over = max(x - k, 0.0);
-  return min(x, k) + (0.99 - k) * (1.0 - exp(-over / (0.99 - k)));
-}
 
 // The plate, linear. It is larger than most screens draw it, so the sharp
 // level is a box over this pixel's footprint (four bilinear taps of level 0)
@@ -207,14 +197,119 @@ void main() {
   air *= 1.0 + 0.18 * thick;
 
   vec3 col = scene * T + air * (1.0 - T);
-  col = shoulder(col);
-  col = pow(col, vec3(1.0 / 2.2));
-  // Film: a little toe, fine grain strongest in the midtones, then dither.
-  col = mix(col, col * col * (3.0 - 2.0 * col), 0.1);
-  float l = dot(col, vec3(0.2126, 0.7152, 0.0722));
-  col += (hash(floor(frag / 1.25) + uGrain) - 0.5) * 0.045 * l * (1.0 - l);
-  col += (hash(frag + 17.0) - 0.5) / 255.0;
-  outColor = vec4(clamp(col, 0.0, 1.0), 1.0);
+  // Display-encoded and untoned, for the film finish. Alpha packs two
+  // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
+  // tower still seen through the air (the glass grade's weight, so far towers
+  // keep the blue the haze gave them), and how clear the air in front of it is
+  // (the warm top end is the sun on the cumulus, not on the haze).
+  float solid = T.g * (1.0 - smoothstep(0.02, 0.5, aux.g));
+  outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), (floor(solid * 15.0 + 0.5) * 16.0 + floor(T.g * 15.0 + 0.5)) / 255.0);
+}`;
+
+// The film's response, shared by the halation threshold and the finish. In
+// display terms: the mids and the sky are left where the plate put them, the
+// upper range opens so the cumulus tops come up to a warm white, and a soft
+// shoulder lands everything under 0.985 (the film never clips).
+const TONE = `
+vec3 tone(vec3 x) {
+  vec3 y = x + 0.11 * smoothstep(0.5, 0.88, x);
+  vec3 k = vec3(0.9);
+  return min(y, k) + 0.085 * (1.0 - exp(-max(y - k, 0.0) / 0.085));
+}
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+// What exposes the halation: the toned highlights, above about 0.8.
+float highlight(vec3 display) { return smoothstep(0.8, 0.94, luma(tone(display))); }
+`;
+
+// The finish's sources at half size: rgb the scene, linear, for the diffusion
+// bloom; a the highlights that expose the halation.
+const BRIGHT = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uScene;
+${TONE}
+void main() {
+  vec3 c = texture(uScene, vUv).rgb; // one bilinear tap: the 2x2 box below it
+  outColor = vec4(pow(max(c, 0.0), vec3(2.2)), highlight(c));
+}`;
+
+// The last stage: the scene as summer film, scanned. A diffusion bloom and
+// scan softness, a filmic shoulder whose top end is warm-neutral, cloud shade
+// toward skylight blue, glass graded away from the sky's blue, a thin red
+// halation under the highlight edges, and 24 fps grain at scan scale.
+const FINISH = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2D uScene;
+uniform sampler2D uHal;
+uniform sampler2D uBloom;
+uniform vec2 uNorm;    // halation, bloom chain weight sums
+uniform float uGrain;  // grain seed, a new frame of grain every 2 frames at 24 fps
+uniform float uGrainPx; // grain size in device pixels
+${TONE}
+float hash(vec2 p) {
+  vec3 q = fract(vec3(p.xyx) * 0.1031);
+  q += dot(q, q.yzx + 33.33);
+  return fract((q.x + q.y) * q.z);
+}
+// Value noise at the scan's sampling pitch: soft clumps, not square cells.
+float grain(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y) - 0.5;
+}
+
+void main() {
+  vec4 s = texture(uScene, vUv);
+  float packed = floor(s.a * 255.0 + 0.5);
+  float solid = floor(packed / 16.0) / 15.0;
+  float clear = mod(packed, 16.0) / 15.0;
+  vec3 lin = pow(max(s.rgb, 0.0), vec3(2.2));
+
+  // Diffusion: the emulsion and the scanner both spread a little light, so the
+  // image sits in a faint glow of itself and the finest edges go soft.
+  vec3 bloom = texture(uBloom, vUv).rgb / uNorm.y;
+  lin = mix(lin, bloom, 0.12) + max(bloom - lin, 0.0) * 0.1;
+  vec3 c = pow(lin, vec3(1.0 / 2.2));
+
+  // Glass, in its midtones, away from the sky's blue toward a cool green; its
+  // light stone and lit mullions a touch warm.
+  float l = luma(c);
+  float mid = smoothstep(0.08, 0.3, l) * (1.0 - smoothstep(0.45, 0.75, l));
+  float top = smoothstep(0.45, 0.8, l);
+  c *= mix(vec3(1.0), vec3(0.96, 1.03, 0.945), mid * solid);
+  c *= mix(vec3(1.0), vec3(1.05, 1.0, 0.92), top * solid);
+
+  // The film's shoulder, per channel.
+  c = tone(c);
+
+  // Its top end is warm-neutral: the cumulus tops land near #FFF1E2. The shade
+  // in the clouds leans to skylight blue, hue 210.
+  l = luma(c);
+  float hi = smoothstep(0.72, 0.95, l);
+  c = mix(c, l * vec3(1.05, 0.993, 0.931), hi * 0.85 * mix(0.2, 1.0, smoothstep(0.35, 0.85, clear)));
+  float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
+  float shade = smoothstep(0.5, 0.68, l) * (1.0 - smoothstep(0.78, 0.92, l)) * (1.0 - smoothstep(0.1, 0.3, sat)) * (1.0 - solid);
+  c *= mix(vec3(1.0), vec3(0.95, 0.995, 1.05), shade);
+
+  // Halation: light through the base bouncing back into the red layer, just
+  // outside each highlight edge.
+  float hal = max(texture(uHal, vUv).a / uNorm.x - highlight(s.rgb), 0.0);
+  // Red, with the little green that makes it read red-orange over the blue.
+  c += hal * vec3(0.42, 0.08, 0.0);
+
+  // A little toe, then grain: luminance only, strongest in the midtones.
+  c = mix(c, c * c * (3.0 - 2.0 * c), 0.1);
+  l = luma(c);
+  vec2 g = gl_FragCoord.xy / uGrainPx + uGrain * vec2(37.0, 17.0);
+  float n = grain(g) * 0.75 + grain(g * 1.7 + 11.0) * 0.45;
+  c += n * 0.075 * (0.25 + 2.6 * l * (1.0 - l)) * (1.0 - 0.7 * smoothstep(0.85, 1.0, l));
+  c += (hash(gl_FragCoord.xy + 17.0) - 0.5) / 255.0;
+  // Grain rides on the shoulder, never through it: the print does not clip.
+  outColor = vec4(clamp(c, 0.0, 0.99), 1.0);
 }`;
 
 function loadImage(src) {
@@ -324,6 +419,8 @@ export async function createFog(host, { embedded = false } = {}) {
     down: compile(gl, VERT, DOWN),
     up: compile(gl, VERT, UP),
     composite: compile(gl, VERT, COMPOSITE),
+    bright: compile(gl, VERT, BRIGHT),
+    finish: compile(gl, VERT, FINISH),
   };
 
   const float = !!gl.getExtension("EXT_color_buffer_float");
@@ -450,27 +547,36 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, tex);
   };
-  const chain = (weights) => {
-    // Down the pyramid from level 0 (already written), then back up.
+  // Down a pyramid from level 0 (already written).
+  const descend = (dn) => {
     gl.useProgram(P.down.p);
     gl.uniform1i(P.down.u.uSrc, 0);
-    for (let i = 1; i < LEVELS; i++) {
-      bind(0, down[i - 1].tex);
-      gl.uniform2f(P.down.u.uTexel, 1 / down[i - 1].w, 1 / down[i - 1].h);
-      quadDraw(down[i]);
+    for (let i = 1; i < dn.length; i++) {
+      bind(0, dn[i - 1].tex);
+      gl.uniform2f(P.down.u.uTexel, 1 / dn[i - 1].w, 1 / dn[i - 1].h);
+      quadDraw(dn[i]);
     }
+  };
+  // Back up from level n - 1 (whole) through the finer levels, each adding its
+  // own share by weight. The result sums to 1 + the weights.
+  const ascend = (dn, ups, weights) => {
+    const n = weights.length + 1;
     gl.useProgram(P.up.p);
     gl.uniform1i(P.up.u.uLevel, 0);
     gl.uniform1i(P.up.u.uCoarse, 2);
-    for (let i = LEVELS - 2; i >= 0; i--) {
-      const coarse = i === LEVELS - 2 ? down[LEVELS - 1] : up[i + 1];
-      bind(0, down[i].tex);
+    for (let i = n - 2; i >= 0; i--) {
+      const coarse = i === n - 2 ? dn[n - 1] : ups[i + 1];
+      bind(0, dn[i].tex);
       bind(2, coarse.tex);
       gl.uniform2f(P.up.u.uTexel, 1 / coarse.w, 1 / coarse.h);
       gl.uniform1f(P.up.u.uW, weights[i]);
-      quadDraw(up[i]);
+      quadDraw(ups[i]);
     }
-    return up[0];
+    return ups[0];
+  };
+  const chain = (weights) => {
+    descend(down);
+    return ascend(down, up, weights);
   };
 
   gl.bindVertexArray(vao);
@@ -487,9 +593,42 @@ export async function createFog(host, { embedded = false } = {}) {
   // cumulus into the haze, and the sky behind reads as lens-blurred, not veiled.
   const air = chain([0, 0, 0, 0, 0.35]);
 
+  // The film finish works on the whole frame, so its targets follow the canvas:
+  // the scene at full size, and a pyramid from half size for the halation
+  // (its three finest levels, about 0.4% of the frame) and the bloom (all).
+  const FX_LEVELS = 6;
+  const HAL_W = [0.5, 1.0];
+  const BLOOM_W = [0.6, 0.4, 0.4, 0.6, 0.8];
+  const sum = (w) => 1 + w.reduce((a, b) => a + b, 0);
+  let fx = null;
+  const fxTargets = () => {
+    const w = gl.drawingBufferWidth;
+    const h = gl.drawingBufferHeight;
+    if (fx && fx.w === w && fx.h === h) return fx;
+    if (fx) [fx.scene, ...fx.down, ...fx.hal, ...fx.bloom].forEach(free);
+    const dn = [];
+    let bw = Math.max(2, Math.round(w / 2));
+    let bh = Math.max(2, Math.round(h / 2));
+    for (let i = 0; i < FX_LEVELS; i++) {
+      dn.push(target(bw, bh));
+      bw = Math.max(2, Math.round(bw / 2));
+      bh = Math.max(2, Math.round(bh / 2));
+    }
+    fx = {
+      w,
+      h,
+      scene: target(w, h),
+      down: dn,
+      hal: HAL_W.map((_, i) => target(dn[i].w, dn[i].h)),
+      bloom: BLOOM_W.map((_, i) => target(dn[i].w, dn[i].h)),
+    };
+    return fx;
+  };
+
   const draw = () => {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
+    const t = fxTargets();
     const vis = V_CLEAR * Math.pow(V_THICK / V_CLEAR, fog.x);
     const dpr = stage.dpr;
     gl.useProgram(P.composite.p);
@@ -504,10 +643,32 @@ export async function createFog(host, { embedded = false } = {}) {
     gl.uniform3f(cu.uBreath, bx.x, by.x, breath.x * 0.9);
     gl.uniform1f(cu.uAspect, ASPECT);
     gl.uniform1f(cu.uTime, time);
-    gl.uniform1f(cu.uGrain, reduced ? 0 : Math.floor(time * 24) % 64);
     gl.uniform3f(cu.uSkyMean, skyLin[0], skyLin[1], skyLin[2]);
     gl.uniform4f(cu.uRect, rect.x * dpr, rect.y * dpr, rect.w * dpr, rect.h * dpr);
     gl.uniform2f(cu.uCanvas, gl.drawingBufferWidth, gl.drawingBufferHeight);
+    quadDraw(t.scene);
+
+    // The finish: its sources at half size, blurred twice, then the frame.
+    gl.useProgram(P.bright.p);
+    bind(0, t.scene.tex);
+    gl.uniform1i(P.bright.u.uScene, 0);
+    quadDraw(t.down[0]);
+    descend(t.down);
+    const hal = ascend(t.down, t.hal, HAL_W);
+    const bloom = ascend(t.down, t.bloom, BLOOM_W);
+
+    gl.useProgram(P.finish.p);
+    bind(0, t.scene.tex);
+    bind(1, hal.tex);
+    bind(2, bloom.tex);
+    const fu = P.finish.u;
+    gl.uniform1i(fu.uScene, 0);
+    gl.uniform1i(fu.uHal, 1);
+    gl.uniform1i(fu.uBloom, 2);
+    gl.uniform2f(fu.uNorm, sum(HAL_W), sum(BLOOM_W));
+    // 24 fps grain, each frame of it held for 2 (a new one every 1/12 s).
+    gl.uniform1f(fu.uGrain, reduced ? 0 : Math.floor(time * 12) % 97);
+    gl.uniform1f(fu.uGrainPx, 0.75 * dpr);
     quadDraw(null);
   };
 
@@ -533,6 +694,7 @@ export async function createFog(host, { embedded = false } = {}) {
       stage.canvas.removeEventListener("pointerleave", onLeave);
       stage.canvas.removeEventListener("wheel", onWheel);
       [...down, ...up].forEach(free);
+      if (fx) [fx.scene, ...fx.down, ...fx.hal, ...fx.bloom].forEach(free);
       stage.destroy();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
     },
