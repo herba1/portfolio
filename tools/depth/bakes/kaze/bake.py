@@ -70,6 +70,15 @@ def rgb_of(h, s, v):
     return cv2.cvtColor(np.dstack([h % 360, np.clip(s, 0, 1), np.clip(v, 0, 1)]).astype(np.float32), cv2.COLOR_HSV2RGB)
 
 
+def line(n, th):
+    """A one-pixel line n long (odd) at angle th, as a structuring element."""
+    k = np.zeros((n, n), np.uint8)
+    c = n // 2
+    dx, dy = c * np.cos(th), c * np.sin(th)
+    cv2.line(k, (int(round(c - dx)), int(round(c - dy))), (int(round(c + dx)), int(round(c + dy))), 1, 1)
+    return k
+
+
 def declarity(c, sigma, keep):
     """Take local contrast back out: log luma's departure from its own blur
     is scaled to `keep`, the colour ratio carried along."""
@@ -245,14 +254,60 @@ an = np.maximum(an, force)
 cloudish = kit.smoothstep(0.35, 0.55, YL) * (1 - kit.smoothstep(0.04, 0.1, dks)) * (1 - kit.smoothstep(0.02, 0.06, gr))
 cloudish = cloudish * (1 - force) * (1 - hz[..., 0])
 an = an * (1 - 0.9 * cloudish)
-# In the glare, the loose flecks the flare detector found (a few pixels of
-# seed or awn on their own) read as dust on the print, not as grass: they go
-# to the sky, where the closing has already lifted them out.
-n, lab, stats, _ = cv2.connectedComponentsWithStats((an > 0.3).astype(np.uint8), connectivity=8)
-fleck = ((stats[:, cv2.CC_STAT_AREA] < 60) & (np.arange(n) > 0))[lab]
-an = np.where(fleck & (hz[..., 0] > 0.5), 0, an)
 # a whisker of erosion: the outermost, faintest edge goes to the sky
 an = np.clip((an - 0.03) / 0.97, 0, 1)
+
+# ---- the sun's halo: whole stalks or nothing ----
+# Against the flare a blade is either one continuous dark silhouette or gone.
+# The loose seeds, awns and broken lengths of stalk the matte found there
+# (their pedicels washed out by the glare) read as dust on the scan, not as
+# backlit grass: only a piece that is long, or that runs out of the halo into
+# a real stalk, stays; the rest goes to the sky, which is the clean fill there.
+hzm = hz[..., 0] > 0.3
+n, lab, stats, _ = cv2.connectedComponentsWithStats((an > 0.3).astype(np.uint8), connectivity=8)
+joined = np.bincount(lab[~hzm], minlength=n) > 0
+keep = (stats[:, cv2.CC_STAT_AREA] >= 800) | joined
+keep[0] = False
+kept = keep[lab]
+# (their faint rims go with them: nothing in the halo but what is near a stalk)
+an = an * (1 - hz[..., 0] * ~kit.dilate(kept, 3))
+# The kept stalks' own gaps (where the glare ate a length of one) are bridged
+# along the stalk: a closing with a thin line at eight angles. Each angle
+# closes only what runs that way (the opening by the same line first), so two
+# collinear lengths of one stalk join, and two blades lying side by side, or
+# crossing, are never webbed together. Over the sun they stand solid.
+km = kept.astype(np.uint8)
+bridge = np.zeros_like(kept)
+for i in range(8):
+    k = line(15, i * np.pi / 8)
+    add = cv2.morphologyEx(cv2.morphologyEx(km, cv2.MORPH_OPEN, k), cv2.MORPH_CLOSE, k) & (1 - km)
+    # (a bridge is a stalk's width, no wider: what the closing filled broader
+    # than that, across the line, is the wedge between two converging blades)
+    wide = cv2.morphologyEx(add, cv2.MORPH_OPEN, line(7, i * np.pi / 8 + np.pi / 2))
+    bridge |= (add > 0) & ~kit.dilate(wide > 0, 1)
+# (and it has to be in the photo: a line however faint, darker than what is
+# either side of it, or on the disc itself, where the stalk is washed out
+# entirely)
+ev = (dks > 0.03) | (rr < 0.06 * W)
+# (only for a stalk out on its own across the glare: in the mat the gaps
+# between blades are sky, not a stalk's lost length)
+ev &= kit.blur(km.astype(np.float32), 12) < 0.4
+# the stalks' bodies and the bridges come up solid; their soft edges stay
+whole = (bridge & ev | kept & (an > 0.5)) & hzm
+floor = 0.9 * kit.blur(whole.astype(np.float32), 0.7) * hz[..., 0]
+grown = (floor > an + 0.2) & (an < 0.6)
+an = np.maximum(an, floor)
+# the bridged lengths take the colour of the stalk either side of them
+Fk = kit.pushpull(F, (kept & (an > 0.6) & ~grown).astype(np.float32))
+F = np.where(grown[..., None], Fk, F)
+# The sky in the halo. The closings above go grey there: every seed they lift
+# leaves a blot of the cloud's darker texture behind it, and the flare came
+# out mottled grey-blue and posterised. (They stay what the coverage was
+# solved against, which needs the sky the photo had right behind each blade.)
+# What shows is the smooth fill instead (from the sky the matte was sure of,
+# which never held a seed or awn, so the dropped flecks leave nothing behind),
+# softened, so the flare is one clean warm gradient under the stalks.
+S = S * (1 - hz) + kit.blur(P, 6) * hz
 a = an
 s = 1 - a
 
