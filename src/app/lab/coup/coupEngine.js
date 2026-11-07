@@ -1,4 +1,6 @@
-// Coup de dés: Mallarmé's lines as bodies on critically damped springs.
+// Coup de dés: Mallarmé's threads as rigid bodies on critically damped
+// springs. A thread is one body: its lines ride at fixed offsets from it, so
+// it travels, turns and lands whole.
 // A sweep across the spread is the throw. Each throw composes a new
 // constellation under fixed rules: the four great capitals step down the
 // spread on the diagonal, the minor lines cluster around them, aligned to
@@ -57,31 +59,50 @@ export async function createCoup(host, { embedded = false } = {}) {
   host.appendChild(gutter);
 
   const measurer = document.createElement("span");
-  measurer.className = "coup-line coup-measure";
+  measurer.className = "coup-thread coup-measure";
   measurer.setAttribute("aria-hidden", "true");
   host.appendChild(measurer);
 
-  const items = LINES.map((line, i) => {
-    const el = document.createElement("p");
-    el.className = "coup-line";
-    el.dataset.tier = String(line.tier);
-    el.textContent = line.text;
+  // One element per thread; the lines are spans inside it.
+  const bodies = BLOCKS.map((b, bi) => {
+    const el = document.createElement("div");
+    el.className = "coup-thread";
+    el.dataset.tier = String(b.tier);
+    el.setAttribute("role", "presentation");
     host.appendChild(el);
     return {
-      ...line,
-      i,
+      bi,
+      tier: b.tier,
       el,
-      x: 0, y: 0, s: 16, r: 0,
-      vx: 0, vy: 0, vs: 0, vr: 0,
+      lines: [],
+      x: 0, y: 0, s: 16, r: 0, m: 1,
+      vx: 0, vy: 0, vs: 0, vr: 0, vm: 0,
       tx: 0, ty: 0, ts: 16,
+      // the thread's shape: line offsets in em, from the last layout to the
+      // next, crossed by m as the body flies
+      from: [],
+      to: [],
       next: null,
       at: 0,
       k: 120,
-      mass: line.tier === 0 ? 0.42 : line.tier === 1 ? 0.75 : 1,
+      mass: b.tier === 0 ? 0.42 : b.tier === 1 ? 0.75 : 1,
+      hidden: false,
       shown: -1,
       shownW: -1,
       shownZ: -1,
+      shownM: -1,
     };
+  });
+
+  const items = LINES.map((line, i) => {
+    const el = document.createElement("span");
+    el.className = "coup-line";
+    el.textContent = line.text;
+    const body = bodies[line.block];
+    body.el.appendChild(el);
+    const it = { ...line, i, el, body };
+    body.lines.push(it);
+    return it;
   });
 
   // Make sure every cut is loaded before anything is measured.
@@ -313,15 +334,36 @@ export async function createCoup(host, { embedded = false } = {}) {
     return remember(fallback.out);
   }
 
-  function place(layout) {
-    for (const it of items) {
+  // A layout is set line by line; a body takes its first line's place as
+  // its own and keeps the rest as offsets in em, so they scale with it.
+  function target(layout, body) {
+    const head = layout[body.lines[0].i];
+    const rel = body.lines.map((it) => {
       const t = layout[it.i];
-      it.tx = it.x = t.x;
-      it.ty = it.y = t.y;
-      it.ts = it.s = t.s;
-      it.vx = it.vy = it.vs = it.vr = it.r = 0;
-      it.next = null;
-      it.hidden = !!t.hidden;
+      return { x: (t.x - head.x) / head.s, y: (t.y - head.y) / head.s };
+    });
+    return { x: head.x, y: head.y, s: head.s, rel, hidden: body.lines.some((it) => layout[it.i].hidden) };
+  }
+
+  // Where the thread's lines sit right now, in em.
+  const shapeNow = (b) => b.to.map((p, n) => {
+    const q = b.from[n] || p;
+    return { x: q.x + (p.x - q.x) * b.m, y: q.y + (p.y - q.y) * b.m };
+  });
+
+  function place(layout) {
+    for (const b of bodies) {
+      const t = target(layout, b);
+      b.tx = b.x = t.x;
+      b.ty = b.y = t.y;
+      b.ts = b.s = t.s;
+      b.from = t.rel;
+      b.to = t.rel;
+      b.m = 1;
+      b.vx = b.vy = b.vs = b.vr = b.vm = b.r = 0;
+      b.next = null;
+      b.hidden = t.hidden;
+      b.shownM = -1;
     }
   }
 
@@ -337,28 +379,26 @@ export async function createCoup(host, { embedded = false } = {}) {
     const nx = dirX / len;
     const ny = dirY / len;
     // The capitals tumble one after another, in reading order; the threads
-    // let go once the first capital is on its way, each line of a thread a
-    // beat behind the one above it, so a cascade lands as a cascade.
+    // let go once the first capital is on its way. The stagger is between
+    // bodies, never inside one: a thread leaves and lands as one piece.
     const blockAt = BLOCKS.map(() => 0.22 + rngMotion() * 0.36);
-    for (const it of items) {
+    for (const b of bodies) {
       const rnd = rngMotion;
-      const t = layout[it.i];
-      it.next = t;
-      if (it.tier === 0) {
-        const j = it.block;
-        it.at = clock + 0.04 + j * 0.15;
-        it.k = 44 + j * 4 + rnd() * 6;
+      b.next = target(layout, b);
+      if (b.tier === 0) {
+        b.at = clock + 0.04 + b.bi * 0.15;
+        b.k = 44 + b.bi * 4 + rnd() * 6;
       } else {
-        it.at = clock + blockAt[it.block] + it.line * 0.05;
-        it.k = 72 + rnd() * 48;
+        b.at = clock + blockAt[b.bi];
+        b.k = 72 + rnd() * 48;
       }
-      const sp = power * (0.55 + rnd() * 0.9) * it.mass;
+      const sp = power * (0.55 + rnd() * 0.9) * b.mass;
       const side = (rnd() - 0.5) * 0.9;
-      it.vx += (nx - ny * side) * sp;
-      it.vy += (ny + nx * side) * sp;
-      // a capital turns over as it falls; small lines only rock
-      const spin = it.tier === 0 ? (rnd() < 0.5 ? -1 : 1) * (22 + rnd() * 18) : (rnd() - 0.5) * 70 * it.mass;
-      it.vr += spin;
+      b.vx += (nx - ny * side) * sp;
+      b.vy += (ny + nx * side) * sp;
+      // a capital turns over as it falls; a thread only rocks
+      const spin = b.tier === 0 ? (rnd() < 0.5 ? -1 : 1) * (22 + rnd() * 18) : (rnd() - 0.5) * 40 * b.mass;
+      b.vr += spin;
     }
     wake();
   }
@@ -366,86 +406,107 @@ export async function createCoup(host, { embedded = false } = {}) {
   function step(dt) {
     clock += dt;
     let moving = false;
-    for (const it of items) {
-      if (it.next && clock >= it.at) {
-        const t = it.next;
-        it.tx = t.x;
-        it.ty = t.y;
-        it.ts = t.s;
-        if (it.hidden && !t.hidden) {
-          it.x = t.x;
-          it.y = t.y;
-          it.s = t.s;
+    for (const b of bodies) {
+      if (b.next && clock >= b.at) {
+        const t = b.next;
+        b.tx = t.x;
+        b.ty = t.y;
+        b.ts = t.s;
+        if (b.hidden && !t.hidden) {
+          b.x = t.x;
+          b.y = t.y;
+          b.s = t.s;
+          b.from = t.rel;
+          b.m = 1;
+        } else {
+          // the shape it has now is where its re-forming starts
+          b.from = shapeNow(b);
+          b.m = 0;
         }
-        it.hidden = !!t.hidden;
-        it.next = null;
+        b.vm = 0;
+        b.to = t.rel;
+        b.hidden = t.hidden;
+        b.next = null;
       }
-      const k = it.k;
+      const k = b.k;
       const c = 2 * Math.sqrt(k); // critically damped: no overshoot
-      it.vx += (-k * (it.x - it.tx) - c * it.vx) * dt;
-      it.vy += (-k * (it.y - it.ty) - c * it.vy) * dt;
-      it.vs += (-k * (it.s - it.ts) - c * it.vs) * dt;
+      b.vx += (-k * (b.x - b.tx) - c * b.vx) * dt;
+      b.vy += (-k * (b.y - b.ty) - c * b.vy) * dt;
+      b.vs += (-k * (b.s - b.ts) - c * b.vs) * dt;
+      // the thread re-forms on the body's own spring, so its shape arrives
+      // with it and never on a clock of its own
+      b.vm += (-k * (b.m - 1) - c * b.vm) * dt;
       const kr = k * 1.6;
       // a capital leans into its flight and rights itself as it arrives
-      const rT = it.tier === 0 ? Math.max(-6, Math.min(6, ((it.x - it.tx) / W) * 14 + ((it.ty - it.y) / H) * 4)) : 0;
-      it.vr += (-kr * (it.r - rT) - 2 * Math.sqrt(kr) * it.vr) * dt;
-      it.x += it.vx * dt;
-      it.y += it.vy * dt;
-      it.s += it.vs * dt;
-      it.r += it.vr * dt;
-      const off = Math.abs(it.x - it.tx) + Math.abs(it.y - it.ty) + Math.abs(it.s - it.ts) * 4 + Math.abs(it.r) * 20;
-      const vel = Math.abs(it.vx) + Math.abs(it.vy) + Math.abs(it.vs) + Math.abs(it.vr);
-      if (it.next || off > 0.08 || vel > 0.5) moving = true;
+      const rT = b.tier === 0 ? Math.max(-6, Math.min(6, ((b.x - b.tx) / W) * 14 + ((b.ty - b.y) / H) * 4)) : 0;
+      b.vr += (-kr * (b.r - rT) - 2 * Math.sqrt(kr) * b.vr) * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
+      b.s += b.vs * dt;
+      b.m = Math.min(1, b.m + b.vm * dt);
+      b.r += b.vr * dt;
+      const off = Math.abs(b.x - b.tx) + Math.abs(b.y - b.ty) + Math.abs(b.s - b.ts) * 4 + Math.abs(b.r) * 20 + (1 - b.m) * 40;
+      const vel = Math.abs(b.vx) + Math.abs(b.vy) + Math.abs(b.vs) + Math.abs(b.vr);
+      if (b.next || off > 0.08 || vel > 0.5) moving = true;
       else {
-        it.x = it.tx;
-        it.y = it.ty;
-        it.s = it.ts;
-        it.r = 0;
-        it.vx = it.vy = it.vs = it.vr = 0;
+        b.x = b.tx;
+        b.y = b.ty;
+        b.s = b.ts;
+        b.r = 0;
+        b.m = 1;
+        b.vx = b.vy = b.vs = b.vr = b.vm = 0;
       }
     }
     return moving;
   }
 
   function render() {
-    for (const it of items) {
-      const el = it.el;
-      if (it.hidden) {
+    for (const b of bodies) {
+      const el = b.el;
+      if (b.hidden) {
         el.style.visibility = "hidden";
         continue;
       }
       el.style.visibility = "";
-      const s = Math.max(6, it.s);
-      if (Math.abs(s - it.shown) > 0.01) {
-        it.shown = s;
+      const s = Math.max(6, b.s);
+      if (Math.abs(s - b.shown) > 0.01) {
+        b.shown = s;
         el.style.fontSize = `${s.toFixed(2)}px`;
         el.style.letterSpacing = tracking(s);
         el.style.lineHeight = `${lineHeight(s)}px`;
-        if (it.tier === 2 && s <= 13.5) el.dataset.small = "";
+        if (b.tier === 2 && s <= 13.5) el.dataset.small = "";
         else delete el.dataset.small;
       }
-      const d = Math.hypot(it.x - it.tx, it.y - it.ty) + Math.abs(it.s - it.ts) * 3;
-      const v = Math.hypot(it.vx, it.vy);
+      if (b.m !== b.shownM) {
+        b.shownM = b.m;
+        shapeNow(b).forEach((p, n) => {
+          const ls = b.lines[n].el.style;
+          ls.left = `${p.x.toFixed(4)}em`;
+          ls.top = `${p.y.toFixed(4)}em`;
+        });
+      }
+      const d = Math.hypot(b.x - b.tx, b.y - b.ty) + Math.abs(b.s - b.ts) * 3;
+      const v = Math.hypot(b.vx, b.vy);
       let f = Math.min(1, Math.max(d / (110 * Math.max(0.6, u)), v / (520 * Math.max(0.6, u))));
       f = f * f * (3 - 2 * f);
-      if (it.tier < 2) {
-        const w = Math.round(REST_W[it.tier] - (REST_W[it.tier] - FLIGHT_W) * f);
-        if (w !== it.shownW) {
-          it.shownW = w;
-          el.style.fontWeight = w === REST_W[it.tier] ? "" : String(w);
+      if (b.tier < 2) {
+        const w = Math.round(REST_W[b.tier] - (REST_W[b.tier] - FLIGHT_W) * f);
+        if (w !== b.shownW) {
+          b.shownW = w;
+          el.style.fontWeight = w === REST_W[b.tier] ? "" : String(w);
         }
       }
-      // landed lines sit above lines still travelling, and a halo of ground
-      // around every letter makes a crossing read as one line passing under
-      // another rather than two lines printed on top of each other
-      const z = (f < 0.08 ? 4 : 1) + (it.tier === 0 ? 1 : 0);
-      if (z !== it.shownZ) {
-        it.shownZ = z;
+      // Stacking is the only depth there is: a landed thread lies above any
+      // thread still in the air, and a capital above a thread of its state.
+      // Each line is an opaque slip, so the one beneath is simply covered.
+      const z = (f < 0.08 ? 4 : 1) + (b.tier === 0 ? 1 : 0);
+      if (z !== b.shownZ) {
+        b.shownZ = z;
         el.style.zIndex = String(z);
       }
-      const lim = it.tier === 0 ? 7 : 2.2;
-      const r = Math.max(-lim, Math.min(lim, it.r));
-      el.style.transform = `translate3d(${it.x.toFixed(2)}px, ${it.y.toFixed(2)}px, 0) rotate(${r.toFixed(3)}deg)`;
+      const lim = b.tier === 0 ? 7 : 2.2;
+      const r = Math.max(-lim, Math.min(lim, b.r));
+      el.style.transform = `translate3d(${b.x.toFixed(2)}px, ${b.y.toFixed(2)}px, 0) rotate(${r.toFixed(3)}deg)`;
     }
   }
 
@@ -467,11 +528,11 @@ export async function createCoup(host, { embedded = false } = {}) {
   function wake() {
     if (freezeT != null || destroyed) return;
     if (reduced) {
-      for (const it of items) if (it.next) it.at = clock;
+      for (const b of bodies) if (b.next) b.at = clock;
       step(0);
-      for (const it of items) {
-        it.x = it.tx; it.y = it.ty; it.s = it.ts; it.r = 0;
-        it.vx = it.vy = it.vs = it.vr = 0;
+      for (const b of bodies) {
+        b.x = b.tx; b.y = b.ty; b.s = b.ts; b.r = 0; b.m = 1;
+        b.vx = b.vy = b.vs = b.vr = b.vm = 0;
       }
       render();
       return;
@@ -526,17 +587,19 @@ export async function createCoup(host, { embedded = false } = {}) {
     const sigma = Math.max(W, H) * 0.2;
     const gain = Math.min(1, speed / 1400) * 9;
     let touched = false;
-    for (const it of items) {
-      if (it.hidden) continue;
-      const w = measure(it, Math.round(it.ts));
-      const cx = it.x + w / 2;
-      const cy = it.y + lineHeight(it.s) / 2;
+    for (const b of bodies) {
+      if (b.hidden) continue;
+      const size = Math.round(b.ts);
+      const w = Math.max(...b.lines.map((it, n) => b.to[n].x * b.s + measure(it, size)));
+      const h = (b.to[b.to.length - 1]?.y || 0) * b.s + lineHeight(b.s);
+      const cx = b.x + w / 2;
+      const cy = b.y + h / 2;
       const d2 = (cx - x) ** 2 + (cy - y) ** 2;
       const f = Math.exp(-d2 / (2 * sigma * sigma));
       if (f < 0.02) continue;
-      it.vx += dx * gain * f * it.mass;
-      it.vy += dy * gain * f * it.mass;
-      it.vr += ((x - cx) * dy - (y - cy) * dx) / (w + 40) * 0.6 * f * it.mass * Math.min(1, speed / 900);
+      b.vx += dx * gain * f * b.mass;
+      b.vy += dy * gain * f * b.mass;
+      b.vr += ((x - cx) * dy - (y - cy) * dx) / (w + 40) * 0.6 * f * b.mass * Math.min(1, speed / 900);
       touched = true;
     }
     if (touched) wake();
@@ -583,7 +646,7 @@ export async function createCoup(host, { embedded = false } = {}) {
     u = spread ? Math.min(W / 1280, H / 800) : Math.min(1, W / 600, H / 800);
     gutter.style.display = spread ? "" : "none";
     widths.clear();
-    for (const it of items) it.shown = -1;
+    for (const b of bodies) b.shown = -1;
     if (freezeT != null) seed = baseSeed;
     lastBig = null;
     place(compose(mulberry32(seed)));
@@ -604,7 +667,7 @@ export async function createCoup(host, { embedded = false } = {}) {
   function overlaps(mx, my) {
     const hr = host.getBoundingClientRect();
     const boxes = items
-      .filter((it) => !it.hidden)
+      .filter((it) => !it.body.hidden)
       .map((it) => {
         const r = it.el.getBoundingClientRect();
         return { t: it.text, blk: it.block, x: r.left - hr.left, y: r.top - hr.top, w: r.width, h: r.height };
@@ -639,8 +702,8 @@ export async function createCoup(host, { embedded = false } = {}) {
       render();
       const { hits, boxes } = overlaps(12, 8);
       const out = boxes.filter((b) => b.x < 0 || b.y < 0 || b.x + b.w > W || b.y + b.h > H).map((b) => b.t);
-      const big = items.filter((it) => it.tier === 0).map((it) => [Math.round(it.x), Math.round(it.y), Math.round(it.s)]);
-      report.push({ seed: baseSeed + k, hits, out, hidden: items.filter((it) => it.hidden).length, big, moved });
+      const big = bodies.filter((b) => b.tier === 0).map((b) => [Math.round(b.x), Math.round(b.y), Math.round(b.s)]);
+      report.push({ seed: baseSeed + k, hits, out, hidden: bodies.filter((b) => b.hidden).length, big, moved });
     }
     window.__coupAudit = report;
   }

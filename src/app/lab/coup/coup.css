@@ -28,40 +28,66 @@
   width: 1px;
   background: var(--coup-gutter);
   pointer-events: none;
+  /* the fold is in the paper: it runs over the slips, which are paper too,
+     and vanishes under ink */
+  z-index: 10;
+  mix-blend-mode: multiply;
 }
 
-.coup-line {
+/* A thread is one rigid body: the element that moves, scales, turns and
+   stacks. Its lines sit inside it at fixed offsets in em, so a thread can
+   never pile onto itself. */
+.coup-thread {
   position: absolute;
   top: 0;
   left: 0;
   margin: 0;
   white-space: nowrap;
-  transform-origin: 0 50%;
+  transform-origin: 0 0;
   will-change: transform;
   opacity: 0;
   pointer-events: none;
-  -webkit-text-stroke: 0.16em var(--coup-ground);
-  paint-order: stroke fill;
 }
 
-.coup[data-ready] .coup-line {
+.coup[data-ready] .coup-thread {
   opacity: 1;
   transition: opacity 400ms cubic-bezier(0.23, 1, 0.32, 1);
 }
 
-.coup-line[data-tier="0"] {
+/* Each line lies on a slip of the page: opaque ground, cut a hair past its
+   glyphs. Stacking alone decides which thread passes under which, so a
+   crossing reads as one slip sliding beneath another, never as two lines
+   printed into each other. The slip sits at z -1 inside its thread, so a
+   thread's slips all paint under all of its own ink and never clip a
+   neighbouring line of the same thread. */
+.coup-line {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+}
+
+.coup-line::before {
+  content: "";
+  position: absolute;
+  inset: -0.1em -0.12em;
+  z-index: -1;
+  background: var(--coup-ground);
+}
+
+.coup-thread[data-tier="0"] {
   font-weight: var(--font-weight-bold);
 }
 
-.coup-line[data-tier="1"] {
+.coup-thread[data-tier="1"] {
   font-weight: var(--font-weight-semibold);
 }
 
-.coup-line[data-tier="2"] {
+.coup-thread[data-tier="2"] {
   font-weight: var(--font-weight-meta);
 }
 
-.coup-line[data-tier="2"][data-small] {
+.coup-thread[data-tier="2"][data-small] {
   font-weight: var(--font-weight-body-sm);
 }
 
