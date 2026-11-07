@@ -13,6 +13,18 @@ import {
   NS,
   PARTS,
   GLINTS,
+  CX,
+  CY,
+  SHEET_R0,
+  SHEET_R1,
+  SHEET_DROOP,
+  LIGHT_X,
+  LIGHT_Y,
+  FACE_INNER,
+  FACE_HIGH,
+  FACE_LO,
+  FACE_HI0,
+  FACE_FULL,
   fwd,
   demoMask,
   bake,
@@ -60,9 +72,16 @@ import {
 // band, picked by the stripe's radius on the curl, stretched from cut to cut
 // with its gradient kept, so every strip ramps from dark green at its root to
 // the run's bright tail at the wave's edge. Its tail stops short by a hashed
-// amount, so the edge is combed like grass. A handful of the brightest tails
-// near the crest break off as glint tiles, white and gold. The envelope grows
-// with the mask, so brushing stretches the runs further up the curl.
+// amount, so the edge is combed like grass. The curl is lit as a surface,
+// with no filter: the light comes from the sort order. Each stripe pixel has
+// a facing from its place on the sheet (sortCore's facing(): its depth
+// through the curl's layers and how far that face turns to the sky), and the
+// facing picks the stretch of the run it reads. Under the overhang and in the
+// hook it reads the run's dark green head and the stripe stays short; on the
+// crest and the upper outer face it reads out to the warm white-gold tail and
+// lingers there. Glint tiles break off stripe ends only where facing peaks.
+// The envelope grows with the mask, so brushing stretches the runs further
+// up the curl.
 //
 // The resting wave is the same sort run to completion on the CPU at load
 // (identical keys and tie-break, so it is a fixed point of the GPU network).
@@ -145,6 +164,32 @@ out vec4 o;
 vec3 film(int gx, int gy) {
   return texelFetch(uClean, ivec2(gx, int(uGrid.y) - 1 - gy), 0).rgb;
 }
+// The sheet's light, as sortCore's facing(): depth through the sheet, its
+// gradient for the outer face's normal, lit from the sky.
+const float PI = 3.14159265;
+const float SG = ${(GW / 1200).toFixed(1)};
+float sheetT(vec2 p) {
+  vec2 dd = p - vec2(${CX.toFixed(1)}, ${CY.toFixed(1)});
+  float u;
+  float r;
+  if (dd.x < 0.0) {
+    if (dd.y >= 0.0) { u = dd.x; r = dd.y; } else { r = -dd.y; u = PI * r - dd.x; }
+  } else {
+    r = length(dd);
+    u = r * atan(dd.x, dd.y);
+  }
+  float over = max(0.0, u - PI * r) / SG;
+  return (r / SG + over * over / ${SHEET_DROOP.toFixed(1)} - ${SHEET_R0.toFixed(1)}) / ${(SHEET_R1 - SHEET_R0).toFixed(1)};
+}
+float facing(vec2 p) {
+  float t = sheetT(p);
+  vec2 gr = vec2(sheetT(p + vec2(6.0, 0.0)) - sheetT(p - vec2(6.0, 0.0)), sheetT(p + vec2(0.0, 6.0)) - sheetT(p - vec2(0.0, 6.0)));
+  float d = dot(gr, vec2(${LIGHT_X}, ${LIGHT_Y})) / max(length(gr), 1e-6);
+  float outer = 0.5 + 0.5 * d;
+  float inner = (0.5 - 0.5 * d) * ${FACE_INNER};
+  float high = clamp((${CY.toFixed(1)} - p.y) / ${(330 * (GW / 1200)).toFixed(1)}, 0.0, 1.0);
+  return clamp(mix(inner, outer, smoothstep(-0.2, 0.75, t)) + ${FACE_HIGH} * (high - 0.3), 0.0, 1.0);
+}
 void main() {
   vec2 d = vec2(gl_FragCoord.x, uCanvasH - gl_FragCoord.y);
   vec2 l = (d - uPrint.xy) / uPrint.zw;
@@ -155,6 +200,7 @@ void main() {
   ivec2 g = ivec2(floor(l * uGrid));
   ivec2 src = ivec2(-1);
   ivec2 span = ivec2(0); // the lifted run a curl pixel reads, [x0, x1)
+  float tapStep = 2.0; // the read window's tap spacing along the run
   bool glint = false;
   vec2 gc = vec2(g) + 0.5;
   for (int i = 0; i < ${GLINTS}; i++) {
@@ -183,7 +229,17 @@ void main() {
         if (g.x >= a && g.x < b) {
           uvec2 run = texelFetch(uStripe, ivec2(s, 2 * k + 1), 0).rg;
           int off = p.a > 0u ? b - 1 - g.x : g.x - a;
-          src = ivec2(int(run.x) + (off * int(run.y - run.x)) / (b - a), int(p.b) - 1);
+          // Lit as a surface: the facing here picks the stretch of the run
+          // this pixel reads, root to tail. Tucked under the overhang it is
+          // the dark green head; turned to the sky, out along the run to the
+          // brightest tail.
+          float f = facing(gc);
+          vec2 win = vec2(${FACE_LO} * pow(f, 1.5), ${FACE_HI0} + ${(1 - FACE_HI0).toFixed(3)} * smoothstep(0.0, ${FACE_FULL}, f));
+          float sf = (float(off) + 0.5) / float(b - a);
+          float len = float(run.y - run.x);
+          float pr = mix(win.x, win.y, 1.0 - pow(1.0 - sf, 1.0 + 1.5 * f));
+          src = ivec2(int(run.x) + int(pr * (len - 1.0)), int(p.b) - 1);
+          tapStep = max(1.0, 2.0 * (win.y - win.x));
           span = ivec2(run);
           break;
         }
@@ -197,7 +253,7 @@ void main() {
     int cy = int(texelFetch(uBand, ivec2(src.y, 1), 0).r);
     vec3 acc = vec3(0.0);
     for (int k = -3; k <= 3; k++) {
-      int x = clamp(src.x + k * 2, span.x, span.y - 1);
+      int x = clamp(src.x + int(float(k) * tapStep), span.x, span.y - 1);
       acc += film(int(texelFetch(uState, ivec2(x, src.y), 0).r), cy);
     }
     col = acc / 7.0;
