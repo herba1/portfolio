@@ -1,0 +1,854 @@
+import { createStage, clamp, damp } from "../_kit/stage";
+import { createFilm, FILM_PRESETS } from "../_kit/film";
+
+// Rearrange: a summer photograph of a Kyoto level crossing whose objects are
+// loose. Pick up the crossbuck, a signal lamp, the barrier boom or the
+// ridge-end tile and slide it somewhere else; let go and it settles.
+// Double-tap and everything goes home.
+//
+// tools/depth/bakes/rearrange cut the photo offline: every loose object has
+// its own matte (solved against the sky colour at its edge, so a cable's
+// sub-pixel rim survives and no blue fringe travels with it), and the clean
+// plate behind them was filled with LaMa, the cables drawn back through
+// each hole along their own lines. The plate is split into a front layer
+// (roofs, mast, trees, cables, with their disparity) and the sky behind.
+//
+// Physics, in camera space (OpenCV axes, f from the lens, the up direction
+// from the photo's vertical vanishing point):
+//  - A moved object keeps its height above the ground. The point you hold
+//    slides on that horizontal plane, so its distance, and the object's
+//    size, follow from where it is on screen: it recedes and shrinks toward
+//    the horizon line and grows overhead, exactly as the photo's own cables
+//    and eaves converge. Each object is a vertical card facing the camera,
+//    so the move is one homography H = K (I + t n^T / d) K^-1, which also
+//    leans it toward the vertical vanishing point wherever it goes.
+//  - Occlusion is per pixel by disparity: the card's own depth against the
+//    front layer's. Slide the crossbuck down and away and it slips behind
+//    the mast and under the cables; lift it and it comes in front.
+//  - Shadows are cast, not drawn: from each lit surface a ray to the sun
+//    (fitted from the shading of the mast) is intersected with each card
+//    and the card's matte looked up there, blurred by the distance (the
+//    penumbra), plus a contact shadow where a card nearly touches a
+//    surface. Only the change from the photo is applied, so at rest the
+//    frame is the photograph exactly.
+// The frame then goes through film.js (summer).
+//
+// Query: ?move=k,dx,dy holds object k (0 crossbuck, 1 upper lamp, 2 lower
+// lamp, 3 barrier boom, 4 ridge tile) lifted mid-move, dx/dy in photo
+// widths/heights from where it was; several are joined with ";".
+// &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
+
+const ASSET = "/lab/rearrange/";
+const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
+const MAXK = 5;
+const LIFT = 0.045; // held: the card comes this share of its distance toward the lens
+const S_MIN = 0.42; // smallest and largest size relative to where it was
+const S_MAX = 1.75;
+const SKYLIGHT = [0.4, 0.46, 0.6]; // what is left in a shadow on a clear day: the blue sky
+
+const FILM = {
+  ...FILM_PRESETS.summer,
+  headroom: 1.0,
+  halation: 0.24,
+  halationThreshold: 0.92,
+  bloom: 0.18,
+  softness: 0.45,
+  contrast: 1.16,
+  saturation: 1.1,
+  blueDepth: 0.72,
+  grain: 0.3,
+  vignette: 0.12,
+};
+
+const QUAD_VS = `#version 300 es
+layout(location=0) in vec2 aPos;
+out vec2 vUv;
+void main() { vUv = aPos; gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0); }`;
+
+// The print: a quad in device px, uv over the photo with y down.
+const PRINT_VS = `#version 300 es
+layout(location=0) in vec2 aPos;
+uniform vec4 uPrint;   // x, y, w, h in device px, y down
+uniform vec2 uView;
+out vec2 vUv;
+void main() {
+  vUv = aPos;
+  vec2 px = uPrint.xy + aPos * uPrint.zw;
+  gl_Position = vec4(px.x / uView.x * 2.0 - 1.0, 1.0 - px.y / uView.y * 2.0, 0.0, 1.0);
+}`;
+
+const SCENE_FS = `#version 300 es
+precision highp float;
+precision highp sampler2DArray;
+in vec2 vUv;
+uniform sampler2D uPlate;     // clean plate (sRGB texture: reads linear)
+uniform sampler2D uFront;     // r coverage, g disparity, b shadow receiver
+uniform sampler2D uSky;       // sky behind the front layer (sRGB)
+uniform sampler2DArray uObj;  // the loose objects, straight alpha (sRGB)
+uniform vec2 uSize;           // photo px
+uniform float uF;
+uniform vec2 uC;
+uniform vec3 uN;              // card normal (horizontal, toward the lens)
+uniform vec3 uSun;            // toward the sun
+uniform float uSkyD;
+uniform int uCount;
+uniform int uOrder[${MAXK}];
+uniform mat3 uHinv[${MAXK}];  // moved photo px -> original photo px
+uniform float uDn[${MAXK}];   // card plane n.X = d, now
+uniform float uDn0[${MAXK}];  // and at rest
+uniform vec3 uT[${MAXK}];     // translation, camera space
+uniform float uBias[${MAXK}];
+uniform float uActive[${MAXK}];
+uniform vec4 uRect[${MAXK}];  // crop rect in photo px
+uniform vec2 uLayer;          // array layer size, px
+uniform float uShadow;
+uniform vec3 uSkylight;
+uniform float uSeed;
+out vec4 o;
+
+vec4 objLod(int k, vec2 q, float lod) {
+  vec2 t = (q - uRect[k].xy) / uLayer;
+  vec2 hi = (uRect[k].zw - uRect[k].xy) / uLayer;
+  float inside = step(0.0, t.x) * step(0.0, t.y) * step(t.x, hi.x) * step(t.y, hi.y);
+  return textureLod(uObj, vec3(t, float(k)), lod) * inside;
+}
+
+// Matte of card k where the ray from P toward the sun crosses it, blurred
+// by how far it travelled (the sun is a disc, not a point).
+float castBy(int k, vec3 P, float dn, vec3 t) {
+  float sd = dot(uN, uSun);
+  if (abs(sd) < 1e-3) return 0.0;
+  float s = (dn - dot(uN, P)) / sd;
+  if (s <= 0.0) return 0.0;
+  vec3 Q0 = P + s * uSun - t;
+  if (Q0.z < 0.05) return 0.0;
+  vec2 q = uF * Q0.xy / Q0.z + uC;
+  float rpx = s * 0.022 * uF / Q0.z + 1.5;
+  return objLod(k, q, log2(rpx)).a;
+}
+
+// Contact: a card close in front of a surface darkens it softly round its
+// silhouette, fading with the gap.
+float contactBy(int k, vec3 P, vec2 p, float dn, mat3 Hinv) {
+  float gap = dn - dot(uN, P);   // > 0: the surface is behind the card
+  if (gap <= 0.0) return 0.0;
+  float z = P.z;
+  float g = gap / (0.14 * z);
+  vec3 h = Hinv * vec3(p, 1.0);
+  // tight and dark where it nearly touches, wider and fainter further off
+  float a = objLod(k, h.xy / h.z, 2.5 + 3.0 * clamp(g, 0.0, 1.0)).a;
+  return a * exp(-g * 1.6);
+}
+
+vec3 toSrgb(vec3 c) {
+  c = max(c, 0.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+
+float hash(vec2 p) {
+  p = fract(p * vec2(443.897, 441.423) + uSeed);
+  p += dot(p, p.yx + 19.19);
+  return fract((p.x + p.y) * p.x);
+}
+
+void main() {
+  vec2 p = vUv * uSize;
+  vec3 ray = vec3((p - uC) / uF, 1.0);
+  vec4 fr = texture(uFront, vUv);
+  float aF = fr.r;
+  float dF = fr.g;
+  float recv = fr.b;
+  vec3 plate = texture(uPlate, vUv).rgb;
+  vec3 skyc = texture(uSky, vUv).rgb;
+  bool thin = aF < 0.02;
+  vec3 B = thin ? plate : skyc;
+  vec3 Fpm = thin ? vec3(0.0) : plate - (1.0 - aF) * skyc;
+
+  // shadows that the moved objects now throw on the street (only what
+  // changed from the photo: at rest this is zero)
+  float zF = 1.0 / max(dF - uSkyD, 0.02);
+  vec3 PF = ray * zF;
+  float shF = 0.0;
+  if (recv > 0.01) {
+    for (int k = 0; k < ${MAXK}; k++) {
+      if (k >= uCount) break;
+      if (uActive[k] < 0.5) continue;
+      float now = max(castBy(k, PF, uDn[k], uT[k]), 0.8 * contactBy(k, PF, p, uDn[k], uHinv[k]));
+      float rest = max(castBy(k, PF, uDn0[k], vec3(0.0)), 0.8 * contactBy(k, PF, p, uDn0[k], mat3(1.0)));
+      shF = 1.0 - (1.0 - shF) * (1.0 - max(now - rest, 0.0));
+    }
+  }
+  // a surface already in shade has little sun left to lose
+  float lumP = dot(plate, vec3(0.2126, 0.7152, 0.0722));
+  float sunlit = smoothstep(0.03, 0.22, lumP);
+  Fpm *= mix(vec3(1.0), uSkylight, clamp(shF * recv * sunlit * uShadow, 0.0, 1.0));
+
+  vec3 col = B;
+  float fDone = 0.0;
+  for (int i = 0; i < ${MAXK}; i++) {
+    if (i >= uCount) break;
+    int k = uOrder[i];
+    vec3 h = uHinv[k] * vec3(p, 1.0);
+    vec2 q = h.xy / h.z;
+    vec2 t = (q - uRect[k].xy) / uLayer;
+    vec2 hi = (uRect[k].zw - uRect[k].xy) / uLayer;
+    vec4 ob = textureGrad(uObj, vec3(t, float(k)), dFdx(t), dFdy(t));
+    ob.a *= step(0.0, t.x) * step(0.0, t.y) * step(t.x, hi.x) * step(t.y, hi.y);
+    // the card's own depth here
+    float zk = uDn[k] / dot(uN, ray);
+    float Dk = uSkyD + 1.0 / zk + uBias[k];
+    if (fDone < 0.5 && Dk > dF) {
+      col = Fpm + (1.0 - aF) * col;
+      fDone = 1.0;
+    }
+    if (ob.a < 0.002) continue;
+    // shadows the other cards throw on this one (change from the photo)
+    float sh = 0.0;
+    vec3 Pk = ray * zk;
+    vec3 Pk0 = Pk - uT[k];
+    for (int j = 0; j < ${MAXK}; j++) {
+      if (j >= uCount) break;
+      if (j == k || (uActive[j] < 0.5 && uActive[k] < 0.5)) continue;
+      float now = castBy(j, Pk, uDn[j], uT[j]);
+      float rest = castBy(j, Pk0, uDn0[j], vec3(0.0));
+      sh = 1.0 - (1.0 - sh) * (1.0 - max(now - rest, 0.0));
+    }
+    float lo = dot(ob.rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec3 c = ob.rgb * mix(vec3(1.0), uSkylight, clamp(sh * smoothstep(0.03, 0.22, lo) * uShadow, 0.0, 1.0));
+    col = c * ob.a + (1.0 - ob.a) * col;
+  }
+  if (fDone < 0.5) col = Fpm + (1.0 - aF) * col;
+  vec3 s = toSrgb(col);
+  s += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 7.3) - 1.0) / 255.0;
+  o = vec4(s, 1.0);
+}`;
+
+const FINAL_FS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+uniform sampler2D uFilm;
+uniform sampler2D uScene;
+uniform vec3 uPaper;
+out vec4 o;
+void main() {
+  float cov = texture(uScene, vUv).a;
+  vec3 f = texture(uFilm, vUv).rgb;
+  o = vec4(mix(uPaper, f, cov), 1.0);
+}`;
+
+// ---------------------------------------------------------------- small math
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+function spring(x) {
+  return { x, v: 0, to: x };
+}
+function stepSpring(s, omega, zeta, dt) {
+  const n = Math.ceil(dt / (1 / 240));
+  const h = dt / n;
+  for (let i = 0; i < n; i++) {
+    const a = -omega * omega * (s.x - s.to) - 2 * zeta * omega * s.v;
+    s.v += a * h;
+    s.x += s.v * h;
+  }
+}
+// Past a limit the hand meets resistance, like a held rubber band.
+function rubber(v, lo, hi, k = 0.32) {
+  if (v < lo) return lo - (lo - v) * k;
+  if (v > hi) return hi + (v - hi) * k;
+  return v;
+}
+
+function compile(gl, vs, fs) {
+  const p = gl.createProgram();
+  for (const [type, src] of [
+    [gl.VERTEX_SHADER, vs],
+    [gl.FRAGMENT_SHADER, fs],
+  ]) {
+    const s = gl.createShader(type);
+    gl.shaderSource(s, src);
+    gl.compileShader(s);
+    if (!gl.getShaderParameter(s, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(s));
+    gl.attachShader(p, s);
+    gl.deleteShader(s);
+  }
+  gl.bindAttribLocation(p, 0, "aPos");
+  gl.linkProgram(p);
+  if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
+  const u = {};
+  const n = gl.getProgramParameter(p, gl.ACTIVE_UNIFORMS);
+  for (let i = 0; i < n; i++) {
+    const info = gl.getActiveUniform(p, i);
+    u[info.name.replace(/\[0\]$/, "")] = gl.getUniformLocation(p, info.name);
+  }
+  return { p, u };
+}
+
+async function loadBitmap(src) {
+  const res = await fetch(src);
+  if (!res.ok) throw new Error(`${src}: ${res.status}`);
+  const blob = await res.blob();
+  return createImageBitmap(blob, { colorSpaceConversion: "none", premultiplyAlpha: "none" });
+}
+
+function pixels(bm) {
+  const c = document.createElement("canvas");
+  c.width = bm.width;
+  c.height = bm.height;
+  const x = c.getContext("2d", { willReadFrequently: true });
+  x.drawImage(bm, 0, 0);
+  return x.getImageData(0, 0, bm.width, bm.height).data;
+}
+
+export async function createRearrange(host, { embedded = false } = {}) {
+  const q = new URLSearchParams(window.location.search);
+  const num = (k) => {
+    const v = q.get(k);
+    return v != null && v !== "" && Number.isFinite(+v) ? +v : null;
+  };
+  const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+
+  host.style.background = `rgb(${PAPER.map((c) => Math.round(c * 255)).join(",")})`;
+  const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
+  const gl = stage.ctx;
+  if (!gl) throw new Error("no webgl2");
+
+  const meta = await (await fetch(`${ASSET}meta.json`)).json();
+  const OBJ = meta.objects.slice(0, MAXK);
+  const K = OBJ.length;
+  const [PW, PH] = meta.size;
+  const F = meta.f;
+  const [CX, CY] = meta.c;
+  const UP = meta.up;
+  const N = meta.toward;
+  let SUN = meta.sun;
+  if (num("sunAz") != null || num("sunEl") != null) {
+    // rebuild from azimuth (from the lens, toward the right) and elevation
+    const fwd = N.map((v) => -v);
+    const right = [fwd[1] * UP[2] - fwd[2] * UP[1], fwd[2] * UP[0] - fwd[0] * UP[2], fwd[0] * UP[1] - fwd[1] * UP[0]];
+    const rl = Math.hypot(...right);
+    const r = right.map((v) => -v / rl);
+    const az = ((num("sunAz") ?? 98) * Math.PI) / 180;
+    const el = ((num("sunEl") ?? 50) * Math.PI) / 180;
+    SUN = [0, 1, 2].map((i) => Math.cos(el) * (Math.cos(az) * N[i] + Math.sin(az) * r[i]) + Math.sin(el) * UP[i]);
+  }
+  const SKYD = meta.skyD;
+
+  const [plateBm, frontBm, skyBm, ...objBms] = await Promise.all([
+    loadBitmap(`${ASSET}plate.webp`),
+    loadBitmap(`${ASSET}front.webp`),
+    loadBitmap(`${ASSET}sky.webp`),
+    ...OBJ.map((_, k) => loadBitmap(`${ASSET}o${k}.webp`)),
+  ]);
+  // CPU copies for picking: each object's matte, and the front layer
+  const objA = objBms.map((bm) => {
+    const px = pixels(bm);
+    const a = new Uint8Array(bm.width * bm.height);
+    for (let i = 0; i < a.length; i++) a[i] = px[i * 4 + 3];
+    return { a, w: bm.width, h: bm.height };
+  });
+  const frontPx = pixels(frontBm);
+
+  // ---- textures
+  const tex2d = (bm, internal, mips) => {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
+    gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
+    gl.texImage2D(gl.TEXTURE_2D, 0, internal, gl.RGBA, gl.UNSIGNED_BYTE, bm);
+    if (mips) gl.generateMipmap(gl.TEXTURE_2D);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, mips ? gl.LINEAR_MIPMAP_LINEAR : gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+  const plateTex = tex2d(plateBm, gl.SRGB8_ALPHA8, true);
+  const frontTex = tex2d(frontBm, gl.RGBA8, false);
+  const skyTex = tex2d(skyBm, gl.SRGB8_ALPHA8, false);
+  const LW = Math.max(...objBms.map((b) => b.width));
+  const LH = Math.max(...objBms.map((b) => b.height));
+  const objTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D_ARRAY, objTex);
+  gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.SRGB8_ALPHA8, LW, LH, K, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  objBms.forEach((bm, k) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, k, bm.width, bm.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, bm));
+  gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  for (const bm of [plateBm, frontBm, skyBm, ...objBms]) bm.close?.();
+
+  const scene = compile(gl, PRINT_VS, SCENE_FS);
+  const fin = compile(gl, QUAD_VS, FINAL_FS);
+  const quad = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quad);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
+  const vao = gl.createVertexArray();
+  gl.bindVertexArray(vao);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bindVertexArray(null);
+
+  const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
+  const target = () => {
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stage.canvas.width, stage.canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    return { tex, fbo };
+  };
+  let sceneT = null;
+  let filmT = null;
+  let dirty = true;
+  const build = () => {
+    for (const t of [sceneT, filmT]) {
+      if (!t) continue;
+      gl.deleteTexture(t.tex);
+      gl.deleteFramebuffer(t.fbo);
+    }
+    sceneT = target();
+    filmT = target();
+    film.resize(stage.canvas.width, stage.canvas.height);
+    dirty = true;
+  };
+  stage.onResize(build);
+
+  // ---- layout: one large print, centred, on the paper
+  const layout = () => {
+    const W = stage.width;
+    const H = stage.height;
+    const narrow = W < 700;
+    const pw = Math.min(W - 2 * Math.max(16, W * (narrow ? 0.04 : 0.07)), (H * (narrow ? 0.62 : 0.8) * PW) / PH);
+    const dpr = stage.dpr;
+    // whole device pixels, so the print's edge is one crisp step
+    const wd = Math.round(pw * dpr);
+    const hd = Math.round((wd * PH) / PW);
+    const xd = Math.round((W * dpr - wd) / 2);
+    const yd = Math.round((H * dpr - hd) / 2);
+    return { x: xd / dpr, y: yd / dpr, w: wd / dpr, h: hd / dpr, dev: [xd, yd, wd, hd], s: wd / dpr / PW };
+  };
+
+  // ---- camera
+  const kinv = (u, v) => [(u - CX) / F, (v - CY) / F, 1];
+  const proj = (X) => [(F * X[0]) / X[2] + CX, (F * X[1]) / X[2] + CY];
+  const gOf = (u, v) => dot3(UP, kinv(u, v)); // > 0 above the horizon
+  const gradG = [UP[0] / F, UP[1] / F];
+
+  // per object: rest card plane, and the live state
+  const objs = OBJ.map((o) => {
+    const zA = 1 / Math.max(o.D - SKYD, 0.02);
+    const XA = kinv(...o.anchor).map((v) => v * zA);
+    return {
+      meta: o,
+      dn0: dot3(N, XA),
+      t: [0, 0, 0],
+      lift: spring(0),
+      pos: { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0 },
+      ref: null, // the held point: its 3D position, height, t when grabbed
+      held: false,
+      moving: false,
+    };
+  });
+
+  // the point of card k under photo point (u, v), and how it is held
+  const refAt = (o, u, v) => {
+    const r = kinv(u, v);
+    const dn = o.dn0 + dot3(N, o.t);
+    const z = dn / dot3(N, r);
+    const X = r.map((c) => c * z);
+    const X0 = [X[0] - o.t[0], X[1] - o.t[1], X[2] - o.t[2]];
+    return { X, h: dot3(UP, X), t0: o.t.slice(), home: proj(X0), g0: gOf(...proj(X0)) };
+  };
+
+  // Keep the held point inside the print and its size within reason (both
+  // with rubber), and the barrier's cut end below the frame.
+  const constrain = (o, u, v) => {
+    const g0 = o.ref.g0;
+    const g = gOf(u, v);
+    const sRel = g / g0;
+    const sC = rubber(sRel, S_MIN, S_MAX);
+    if (sC !== sRel) {
+      const dg = sC * g0 - g;
+      const gl2 = gradG[0] * gradG[0] + gradG[1] * gradG[1];
+      u += (dg * gradG[0]) / gl2;
+      v += (dg * gradG[1]) / gl2;
+    }
+    u = rubber(u, 6, PW - 6);
+    v = rubber(v, 6, PH - 6);
+    const cut = o.meta.cut;
+    if (cut) {
+      // its cut end (at the frame's bottom edge in the photo) must stay out
+      // of the frame: walk the held point up until it does
+      for (let i = 0; i < 6; i++) {
+        const t = translation(o, u, v, 0);
+        const e = mapPoint(o, t, cut);
+        if (e[1] >= PH + 1) break;
+        v -= (PH + 2 - e[1]) * 0.9;
+      }
+    }
+    return [u, v];
+  };
+
+  const translation = (o, u, v, lift) => {
+    const r = kinv(u, v);
+    const g = dot3(UP, r);
+    const X = r.map((c) => (c * o.ref.h) / Math.max(g, 1e-3) * (1 - lift));
+    return [0, 1, 2].map((i) => o.ref.t0[i] + X[i] - o.ref.X[i]);
+  };
+  // where the original photo point (u, v) of card o lands under translation t
+  const mapPoint = (o, t, [u, v]) => {
+    const r = kinv(u, v);
+    const z = o.dn0 / dot3(N, r);
+    return proj([r[0] * z + t[0], r[1] * z + t[1], r[2] * z + t[2]]);
+  };
+  // H^-1 = K (I - t n^T / (d + n.t)) K^-1, column-major for GLSL
+  const hinv = (o) => {
+    const t = o.t;
+    const d = o.dn0 + dot3(N, t);
+    const M = [0, 1, 2].map((i) => [0, 1, 2].map((j) => (i === j ? 1 : 0) - (t[i] * N[j]) / d));
+    const Kc = [
+      [F, 0, CX],
+      [0, F, CY],
+      [0, 0, 1],
+    ];
+    const Ki = [
+      [1 / F, 0, -CX / F],
+      [0, 1 / F, -CY / F],
+      [0, 0, 1],
+    ];
+    const mul = (A, B) => A.map((row, i) => [0, 1, 2].map((j) => row[0] * B[0][j] + row[1] * B[1][j] + row[2] * B[2][j]));
+    const R = mul(mul(Kc, M), Ki);
+    return [R[0][0], R[1][0], R[2][0], R[0][1], R[1][1], R[2][1], R[0][2], R[1][2], R[2][2]];
+  };
+  const applyH = (m, u, v) => {
+    const x = m[0] * u + m[3] * v + m[6];
+    const y = m[1] * u + m[4] * v + m[7];
+    const w = m[2] * u + m[5] * v + m[8];
+    return [x / w, y / w];
+  };
+  const cardD = (o, u, v) => SKYD + dot3(N, kinv(u, v)) / (o.dn0 + dot3(N, o.t)) + o.meta.bias;
+
+  // The nearest object whose matte is under photo point (u, v) and that is
+  // not hidden there by something in front of it.
+  const pick = (u, v) => {
+    const iu = clamp(Math.round(u), 0, PW - 1);
+    const iv = clamp(Math.round(v), 0, PH - 1);
+    const fi = (iv * PW + iu) * 4;
+    const aF = frontPx[fi] / 255;
+    const dF = frontPx[fi + 1] / 255;
+    let best = -1;
+    let bestD = -1;
+    objs.forEach((o, k) => {
+      const [qx, qy] = applyH(hinv(o), u, v);
+      const r = o.meta.rect;
+      const x = Math.round(qx - r[0]);
+      const y = Math.round(qy - r[1]);
+      const A = objA[k];
+      if (x < 0 || y < 0 || x >= A.w || y >= A.h) return;
+      if (A.a[y * A.w + x] < 110) return;
+      const D = cardD(o, u, v);
+      if (aF > 0.6 && dF > D) return;
+      if (D > bestD) {
+        bestD = D;
+        best = k;
+      }
+    });
+    return best;
+  };
+
+  const toPhoto = (p) => {
+    const L = layout();
+    return [(p.x - L.x) / L.s, (p.y - L.y) / L.s];
+  };
+
+  // ---- still: ?move=k,dx,dy[;k,dx,dy]
+  const held = q.get("move");
+  const liftQ = num("lift");
+  const setMove = (o, du, dv, liftTo) => {
+    o.ref = refAt(o, ...o.meta.anchor);
+    const [u, v] = constrain(o, o.meta.anchor[0] + du, o.meta.anchor[1] + dv);
+    Object.assign(o.pos, { x: u, y: v, vx: 0, vy: 0, tx: u, ty: v });
+    o.lift.x = o.lift.to = liftTo;
+    o.t = translation(o, u, v, o.lift.x);
+    o.moving = true;
+  };
+  if (held) {
+    for (const part of held.split(/[;|_]/)) {
+      const [k, dx, dy] = part.split(",").map(Number);
+      if (!objs[k] || !Number.isFinite(dx) || !Number.isFinite(dy)) continue;
+      setMove(objs[k], dx * PW, dy * PH, liftQ ?? LIFT);
+    }
+  }
+
+  // ---- input
+  let grab = null;
+  let lastDown = { t: -1e9, x: 0, y: 0 };
+  let touched = !!held;
+  let born = performance.now();
+
+  const goHome = () => {
+    for (const o of objs) {
+      if (!o.ref) continue;
+      o.held = false;
+      o.pos.tx = o.ref.home[0];
+      o.pos.ty = o.ref.home[1];
+      o.lift.to = 0;
+      o.moving = true;
+    }
+  };
+
+  stage.on("down", (p, e) => {
+    touched = true;
+    // the event's own time: a busy frame must not stretch a double-tap
+    const now = e?.timeStamp ?? performance.now();
+    const dbl = now - lastDown.t < 320 && Math.hypot(p.x - lastDown.x, p.y - lastDown.y) < 28;
+    lastDown = { t: now, x: p.x, y: p.y };
+    if (dbl) {
+      if (grab) objs[grab.k].held = false;
+      grab = null;
+      goHome();
+      stage.canvas.style.cursor = "";
+      return;
+    }
+    const [u, v] = toPhoto(p);
+    const k = pick(u, v);
+    if (k < 0) return;
+    const o = objs[k];
+    o.ref = refAt(o, u, v);
+    Object.assign(o.pos, { x: u, y: v, vx: 0, vy: 0, tx: u, ty: v });
+    o.held = true;
+    o.moving = true;
+    o.lift.to = LIFT;
+    grab = { k, du: 0, dv: 0 };
+    stage.canvas.style.cursor = "grabbing";
+  });
+  stage.on("up", (p) => {
+    if (!grab) return;
+    const o = objs[grab.k];
+    grab = null;
+    o.held = false;
+    // carry a little of the hand's speed, then settle (friction ~0.2 s)
+    const L = layout();
+    const [tu, tv] = constrain(o, o.pos.x + (p.vx / L.s) * 0.2, o.pos.y + (p.vy / L.s) * 0.2);
+    o.pos.tx = tu;
+    o.pos.ty = tv;
+    o.pos.vx = p.vx / L.s;
+    o.pos.vy = p.vy / L.s;
+    o.lift.to = 0;
+    stage.canvas.style.cursor = "grab";
+  });
+  stage.on("move", (p) => {
+    if (grab) return;
+    const [u, v] = toPhoto(p);
+    const k = u >= 0 && v >= 0 && u < PW && v < PH ? pick(u, v) : -1;
+    stage.canvas.style.cursor = k >= 0 ? "grab" : "";
+  });
+
+  // ---- draw
+  const order = new Int32Array(MAXK);
+  const drawScene = () => {
+    const L = layout();
+    const w = stage.canvas.width;
+    const h = stage.canvas.height;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.BLEND);
+    gl.clearColor(PAPER[0], PAPER[1], PAPER[2], 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(scene.p);
+    gl.bindVertexArray(vao);
+    const U = scene.u;
+    gl.uniform4f(U.uPrint, ...L.dev);
+    gl.uniform2f(U.uView, w, h);
+    gl.uniform2f(U.uSize, PW, PH);
+    gl.uniform1f(U.uF, F);
+    gl.uniform2f(U.uC, CX, CY);
+    gl.uniform3fv(U.uN, N);
+    gl.uniform3fv(U.uSun, SUN);
+    gl.uniform1f(U.uSkyD, SKYD);
+    gl.uniform1i(U.uCount, K);
+    // far to near, by the card's disparity at its anchor
+    const ds = objs.map((o, k) => [k, cardD(o, ...applyHInvPoint(o, o.meta.anchor))]);
+    ds.sort((a, b) => a[1] - b[1]);
+    ds.forEach(([k], i) => (order[i] = k));
+    gl.uniform1iv(U.uOrder, order);
+    const H = new Float32Array(9 * MAXK);
+    const dn = new Float32Array(MAXK);
+    const dn0 = new Float32Array(MAXK);
+    const T = new Float32Array(3 * MAXK);
+    const bias = new Float32Array(MAXK);
+    const act = new Float32Array(MAXK);
+    const rect = new Float32Array(4 * MAXK);
+    objs.forEach((o, k) => {
+      H.set(hinv(o), k * 9);
+      dn[k] = o.dn0 + dot3(N, o.t);
+      dn0[k] = o.dn0;
+      T.set(o.t, k * 3);
+      bias[k] = o.meta.bias;
+      act[k] = Math.hypot(...o.t) > 1e-5 ? 1 : 0;
+      rect.set(o.meta.rect, k * 4);
+    });
+    gl.uniformMatrix3fv(U.uHinv, false, H);
+    gl.uniform1fv(U.uDn, dn);
+    gl.uniform1fv(U.uDn0, dn0);
+    gl.uniform3fv(U.uT, T);
+    gl.uniform1fv(U.uBias, bias);
+    gl.uniform1fv(U.uActive, act);
+    gl.uniform4fv(U.uRect, rect);
+    gl.uniform2f(U.uLayer, LW, LH);
+    gl.uniform1f(U.uShadow, num("shadow") ?? 1);
+    gl.uniform3fv(U.uSkylight, SKYLIGHT);
+    gl.uniform1f(U.uSeed, 0.37);
+    const texs = [
+      [gl.TEXTURE_2D, plateTex, U.uPlate],
+      [gl.TEXTURE_2D, frontTex, U.uFront],
+      [gl.TEXTURE_2D, skyTex, U.uSky],
+      [gl.TEXTURE_2D_ARRAY, objTex, U.uObj],
+    ];
+    texs.forEach(([type, t, loc], i) => {
+      gl.activeTexture(gl.TEXTURE0 + i);
+      gl.bindTexture(type, t);
+      gl.uniform1i(loc, i);
+    });
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
+  };
+  // the moved position of an object's anchor (for depth sorting)
+  function applyHInvPoint(o, a) {
+    return mapPoint(o, o.t, a);
+  }
+
+  const present = () => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
+    gl.disable(gl.BLEND);
+    gl.useProgram(fin.p);
+    gl.bindVertexArray(vao);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, sceneT.tex);
+    gl.uniform1i(fin.u.uFilm, 0);
+    gl.uniform1i(fin.u.uScene, 1);
+    gl.uniform3f(fin.u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.bindVertexArray(null);
+    gl.activeTexture(gl.TEXTURE0);
+  };
+
+  let lastKey = "";
+  let lastGrain = -1;
+  let hint = 0; // 0 waiting, 1 lifted, 2 done
+  const frame = (dt, t) => {
+    if (!sceneT) return;
+    const now = performance.now();
+    const age = (now - born) / 1000;
+    const p = stage.pointer;
+
+    // Intro: the print develops out of an overexposed white-blue; then the
+    // crossbuck lifts a little off its post and sets back, to show it is loose.
+    if (!touched && !reduced && !held) {
+      const o = objs[0];
+      if (hint === 0 && age > 2.5) {
+        o.ref = refAt(o, ...o.meta.anchor);
+        Object.assign(o.pos, { x: o.meta.anchor[0], y: o.meta.anchor[1], vx: 0, vy: 0 });
+        const [tu, tv] = constrain(o, o.meta.anchor[0] + 70, o.meta.anchor[1] - 36);
+        o.pos.tx = tu;
+        o.pos.ty = tv;
+        o.lift.to = LIFT;
+        o.moving = true;
+        hint = 1;
+      } else if (hint === 1 && age > 3.5) {
+        o.pos.tx = o.ref.home[0];
+        o.pos.ty = o.ref.home[1];
+        o.lift.to = 0;
+        hint = 2;
+      }
+    }
+    const expT = reduced ? clamp(age / 0.3, 0, 1) : expoOut(clamp(age / 2.0, 0, 1));
+    const exposure = (FILM.exposure ?? 0) + (held ? 0 : 2.4 * (1 - expT));
+
+    for (const o of objs) {
+      if (!o.moving || !o.ref) continue;
+      if (o.held && grab) {
+        // 1:1 under the hand
+        const [u, v] = constrain(o, ...toPhoto(p));
+        o.pos.vx = (u - o.pos.x) / Math.max(dt, 1e-3);
+        o.pos.vy = (v - o.pos.y) / Math.max(dt, 1e-3);
+        o.pos.x = u;
+        o.pos.y = v;
+        stepSpring(o.lift, 22, 0.9, dt);
+      } else if (!held) {
+        const sx = { x: o.pos.x, v: o.pos.vx, to: o.pos.tx };
+        const sy = { x: o.pos.y, v: o.pos.vy, to: o.pos.ty };
+        stepSpring(sx, 15, 0.86, dt);
+        stepSpring(sy, 15, 0.86, dt);
+        o.pos.x = sx.x;
+        o.pos.vx = sx.v;
+        o.pos.y = sy.x;
+        o.pos.vy = sy.v;
+        // set down: a soft landing, slightly under-damped
+        stepSpring(o.lift, 16, 0.78, dt);
+        const still = Math.hypot(o.pos.x - o.pos.tx, o.pos.y - o.pos.ty) < 0.05 && Math.hypot(o.pos.vx, o.pos.vy) < 0.5 && Math.abs(o.lift.x - o.lift.to) < 1e-5 && Math.abs(o.lift.v) < 1e-4;
+        if (still) {
+          o.pos.x = o.pos.tx;
+          o.pos.y = o.pos.ty;
+          o.lift.x = o.lift.to;
+          o.moving = false;
+        }
+      }
+      o.t = translation(o, o.pos.x, o.pos.y, o.lift.x);
+      // back home exactly: drop the residue so the frame is the photograph
+      if (!o.moving && Math.hypot(o.pos.x - o.ref.home[0], o.pos.y - o.ref.home[1]) < 0.05 && o.lift.x === 0) o.t = [0, 0, 0];
+    }
+
+    const key = `${objs.map((o) => o.t.map((v) => v.toFixed(6)).join(",")).join("|")}|${stage.canvas.width}`;
+    if (key !== lastKey || dirty) {
+      drawScene();
+      lastKey = key;
+      dirty = false;
+      lastGrain = -1;
+    }
+    // film at 24 fps: the grain moves at the rate film did
+    const tick = reduced || held ? 0 : Math.floor(t * 24);
+    if (tick !== lastGrain || exposure > 1e-3) {
+      film.render(sceneT.tex, { ...FILM, exposure, grainSeed: tick * 7.31 }, filmT.fbo);
+      present();
+      lastGrain = tick;
+    }
+  };
+  stage.onFrame(frame);
+
+  await new Promise((r) => requestAnimationFrame(() => r()));
+  if (stage.canvas.width > 1) {
+    if (!sceneT) build();
+    frame(1 / 60, performance.now() / 1000);
+  }
+  born = performance.now();
+  void embedded;
+
+  return {
+    destroy() {
+      film.destroy();
+      for (const t of [sceneT, filmT]) {
+        if (!t) continue;
+        gl.deleteTexture(t.tex);
+        gl.deleteFramebuffer(t.fbo);
+      }
+      for (const t of [plateTex, frontTex, skyTex, objTex]) gl.deleteTexture(t);
+      gl.deleteBuffer(quad);
+      gl.deleteVertexArray(vao);
+      gl.deleteProgram(scene.p);
+      gl.deleteProgram(fin.p);
+      stage.destroy();
+    },
+  };
+}

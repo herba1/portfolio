@@ -1,0 +1,29 @@
+{
+  "title": "Rearrange",
+  "description": "A summer photograph of a Kyoto level crossing in which the things are loose. Pick up the crossbuck, a signal lamp, the raised barrier or the ridge tile off the roof and slide it somewhere else: where it was, the street behind is there, cables and all; where it goes, it keeps its height above the ground, so it shrinks as it recedes toward the horizon and grows overhead, slips behind the mast and under the cables or comes in front of them, and throws its shadow away from the sun that lit the photo. Let go and it settles. Double-tap and everything goes home.",
+  "tags": ["WebGL", "Photo", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "Manipulate, layer, move, add, change reality in a realistic manner. After the drag-to-move object editors (DragGAN, https://vcai.mpi-inf.mpg.de/projects/DragGAN/ ; DiffEditor, https://arxiv.org/abs/2402.02583 ; Apple Photos Clean Up, https://support.apple.com/guide/iphone/use-clean-up-iph8ef6ae6c4/ios) and Thomas Demand's reconstructed photographs (https://www.moma.org/artists/7766): a real photograph whose objects are separate pieces, each moved by the same camera that took the picture, so the move keeps the photo's perspective, occlusion and light.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.58, 0.32], "to": [0.42, 0.24] },
+  "probe": [
+    { "idle": 4200 },
+    { "drag": [[0.585, 0.32], [0.4, 0.22]], "ms": 1600 },
+    { "idle": 900 },
+    { "drag": [[0.69, 0.6], [0.55, 0.78]], "ms": 1800 },
+    { "idle": 1400 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "4928x3264 original, Ukyo, Kyoto, Ricoh GR II. Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; mattes, LaMa clean plate, cable continuation and camera/sun fit baked by tools/depth/bakes/rearrange (masks.py, cut.py, plate.py, export.py)."
+    },
+    "https://github.com/advimman/lama",
+    "https://vcai.mpi-inf.mpg.de/projects/DragGAN/",
+    "https://www.moma.org/artists/7766"
+  ]
+}
