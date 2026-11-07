@@ -93,12 +93,14 @@
     0 12px 24px -8px rgb(40 30 15 / 0.08);
 }
 
+/* Lifted is one step up from resting, not a drop: the leaving tab is the
+   same glass as its neighbours, only moving faster. */
 .ts-card::after {
   opacity: 0;
   box-shadow:
-    0 2px 4px rgb(40 30 15 / 0.06),
-    0 12px 24px -6px rgb(40 30 15 / 0.12),
-    0 32px 56px -16px rgb(40 30 15 / 0.2);
+    0 1px 2px rgb(40 30 15 / 0.06),
+    0 6px 14px -4px rgb(40 30 15 / 0.08),
+    0 16px 28px -10px rgb(40 30 15 / 0.1);
 }
 
 .ts-card[data-lifted]::before {

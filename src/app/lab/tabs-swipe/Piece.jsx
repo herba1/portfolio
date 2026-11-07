@@ -71,7 +71,7 @@ export default function Piece() {
       lx: 0, ly: 0, lvx: 0, lvy: 0, tx: 0, ty: 0, pending: null,
       leg: null, vis: 1, vvis: 0, // changing rows: out along the old row, in along the new
       x: 0, vx: 0, mode: "rest", // rest | drag | fly | back
-      dragV: 0, rot: 0, vrot: 0, pivot: 0,
+      dragV: 0, rot: 0, vrot: 0, pivot: 0, flat: false,
       enter: 1, venter: 0, enterAt: 0,
     }));
 
@@ -257,8 +257,12 @@ export default function Piece() {
               c.x = 0; c.vx = 0; c.mode = "rest";
             }
           } else if (c.mode === "rest") v = 0;
-          // Tilt follows how fast it is moving, about the point that was held.
-          const tilt = clamp(-v * 0.0032 * (0.35 + 0.65 * Math.abs(c.pivot)) * (c.pivot < 0 ? -1 : 1), -6, 6);
+          // Tilt follows how fast it is moving, about the point that was held,
+          // but only just: the glass is a sheet sliding off, not a card being
+          // tossed, so even a hard flick leans under a degree and a half. A
+          // press has no grip point, so a tab closed by button or key leans
+          // not at all.
+          const tilt = c.flat ? 0 : clamp(-v * 0.0012 * (0.35 + 0.65 * Math.abs(c.pivot)) * (c.pivot < 0 ? -1 : 1), -1.5, 1.5);
           [c.rot, c.vrot] = stepSpring(c.rot, c.vrot, tilt, TILT, h);
 
           if (s.time >= c.enterAt) [c.enter, c.venter] = stepSpring(c.enter, c.venter, 1, ENTER, h);
@@ -347,11 +351,12 @@ export default function Piece() {
       return [(b.x - a.x) / dt, (b.y - a.y) / dt];
     };
 
-    const close = (c, vx, pivot) => {
+    const close = (c, vx, pivot, flat = false) => {
       if (!c.present) return;
       c.present = false;
       c.mode = "fly";
       c.vx = vx;
+      c.flat = flat;
       if (pivot !== undefined) c.pivot = pivot;
       reflow(c.i);
       kick();
@@ -389,6 +394,7 @@ export default function Piece() {
         // Where the card was held: above or below its middle.
         const top = c.ly - s.sy;
         c.pivot = clamp(((py - top) / s.ch) * 2 - 1, -1, 1);
+        c.flat = false;
         if (c.mode === "fly" || c.mode === "back") {
           // Caught mid-flight: it stops in the hand, and the grid opens for it again.
           if (!c.present) {
@@ -471,8 +477,9 @@ export default function Piece() {
       e.preventDefault();
       e.stopPropagation();
       const c = cards[+btn.dataset.index];
-      // The same move the swipe makes, so the button teaches the gesture.
-      if (c && c.present) close(c, -1500, -0.85);
+      // The same move the swipe makes, so the button teaches the gesture:
+      // the same speed and the same wave behind it, slid off dead level.
+      if (c && c.present) close(c, -1500, -0.85, true);
     };
     const onKey = (e) => {
       if (e.key !== "Backspace" && e.key !== "Delete") return;
@@ -480,7 +487,7 @@ export default function Piece() {
       if (!c || !c.present) return;
       e.preventDefault();
       const next = els[order().find((o) => o.i > c.i)?.i ?? -1];
-      close(c, -1500, 0);
+      close(c, -1500, 0, true);
       next?.focus({ preventScroll: true });
     };
 
@@ -495,9 +502,7 @@ export default function Piece() {
       c.pivot = 0.45;
       c.x = -s.cw * 0.42;
       c.dragV = -1400;
-      for (let i = 0; i < 200; i++) {
-        [c.rot, c.vrot] = stepSpring(c.rot, c.vrot, clamp(1400 * 0.0032 * (0.35 + 0.65 * 0.45), -6, 6), TILT, STEP);
-      }
+      c.rot = c.vrot = 0;
       c.dragV = 0;
       close(c, -1400);
       advance(stillT);
