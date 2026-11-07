@@ -15,6 +15,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // their own lines. The plate is split into a front layer (mast, girder,
 // cables, with their disparity) and the sky behind.
 //
+// What ties an object to the things that stay moves with it. Every cable
+// span that meets one (the far pole's strain chains and clamps, its spool
+// insulators, the pull-off's steady wire) was lifted out of the plate with
+// its fixed end (an insulator, a junction, a fitting) and where it is
+// fastened on the object; here it is drawn live, as a cable of its own
+// length hung between the two: pulled straight when its object goes
+// away, sagging into a catenary when it comes closer. The platform's strut
+// and brace are pinned the same way, between their clamps on the mast and
+// the deck, stretched along their own axis (their end fittings keep their
+// size).
+//
 // Physics, in camera space (OpenCV axes, f from the lens, the up direction
 // from the poles' vertical vanishing point, high above the frame: the lens
 // looks up ~33 degrees):
@@ -50,11 +61,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
-const MAXK = 5;
+const MAXK = 10; // objects, then the pinned members
 const LIFT = 0.045; // held: the card comes this share of its distance toward the lens
 const S_MIN = 0.42; // smallest and largest size relative to where it was
 const S_MAX = 1.75;
 const SKYLIGHT = [0.4, 0.46, 0.6]; // what is left in a shadow on a clear day: the blue sky
+const SEG = 40; // points along a live cable
+// A live cable goes behind a card or the front layer only where that is
+// clearly nearer than the cable (the platform, the lamp, the mast): its
+// own object, the girder it runs past and the pole it is clamped to are
+// all at about its depth, and it lies over them as in the photo.
+const WIRE_MARGIN = 0.15;
 
 const hex = (h) => [0, 2, 4].map((i) => parseInt(h.slice(i + 1, i + 3), 16) / 255);
 const lin = (c) => c.map((v) => (v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4)));
@@ -149,6 +166,11 @@ uniform vec3 uWarmCloud;      // linear, relative
 uniform vec3 uUnderBlue;      // linear, relative
 uniform vec3 uUnder;          // luminance range of the underside tint, amount
 uniform float uGrade;
+uniform sampler2D uWire;      // the live cables: a coverage, r disparity x coverage
+uniform vec3 uCable;          // their colour, linear
+uniform vec4 uPinA[${MAXK}];  // pinned member: fixed end (photo px), its axis at rest
+uniform vec4 uPinB[${MAXK}];  // its axis now, length at rest, length now (0: not a pin)
+uniform float uPinEnd[${MAXK}];
 out vec4 o;
 
 vec4 objLod(int k, vec2 q, float lod) {
@@ -264,13 +286,40 @@ void main() {
   float sunlit = smoothstep(0.03, 0.22, lumP);
   Fpm *= mix(vec3(1.0), uSkylight, clamp(shF * recv * sunlit * uShadow, 0.0, 1.0));
 
+  // the live cables, and where they sit between the front layer and the
+  // cards (see WIRE_MARGIN)
+  vec4 wv = texelFetch(uWire, ivec2(gl_FragCoord.xy), 0);
+  float aW = clamp(wv.a, 0.0, 1.0);
+  float dW = aW > 1e-4 ? wv.r / wv.a + ${WIRE_MARGIN.toFixed(3)} : 0.0;
+  bool frontFirst = dF <= dW;
+  float dA = min(dF, dW);
+  float dB = max(dF, dW);
   vec3 col = B;
-  float fDone = 0.0;
+  float n1 = 0.0;
+  float n2 = 0.0;
   for (int i = 0; i < ${MAXK}; i++) {
     if (i >= uCount) break;
     int k = uOrder[i];
-    vec3 h = uHinv[k] * vec3(p, 1.0);
-    vec2 q = h.xy / h.z;
+    vec2 q;
+    if (uPinB[k].z > 0.0) {
+      // a pinned member: from its fixed end along its axis now, back to
+      // where that lies on it at rest; its end fittings keep their length
+      // and its bar between them takes up the stretch
+      vec2 a = uPinA[k].xy;
+      vec2 e0 = uPinA[k].zw;
+      vec2 e1 = uPinB[k].xy;
+      float L0 = uPinB[k].z;
+      float L1 = uPinB[k].w;
+      vec2 d = p - a;
+      float s1 = dot(d, e1);
+      float r = dot(d, vec2(-e1.y, e1.x));
+      float e = min(uPinEnd[k], 0.5 * L1);
+      float s0 = s1 < e ? s1 : (s1 > L1 - e ? L0 - (L1 - s1) : e + (s1 - e) * (L0 - 2.0 * e) / max(L1 - 2.0 * e, 1e-3));
+      q = a + e0 * s0 + vec2(-e0.y, e0.x) * r;
+    } else {
+      vec3 h = uHinv[k] * vec3(p, 1.0);
+      q = h.xy / h.z;
+    }
     vec2 t = (q - uRect[k].xy) / uLayer;
     vec2 hi = (uRect[k].zw - uRect[k].xy) / uLayer;
     vec4 ob = textureGrad(uObj, vec3(t, float(k)), dFdx(t), dFdy(t));
@@ -278,9 +327,13 @@ void main() {
     // the card's own depth here
     float zk = uDn[k] / dot(uN, ray);
     float Dk = uSkyD + 1.0 / zk + uBias[k];
-    if (fDone < 0.5 && Dk > dF) {
-      col = Fpm + (1.0 - aF) * col;
-      fDone = 1.0;
+    if (n1 < 0.5 && Dk > dA) {
+      col = frontFirst ? Fpm + (1.0 - aF) * col : mix(col, uCable, aW);
+      n1 = 1.0;
+    }
+    if (n2 < 0.5 && Dk > dB) {
+      col = frontFirst ? mix(col, uCable, aW) : Fpm + (1.0 - aF) * col;
+      n2 = 1.0;
     }
     if (ob.a < 0.002) continue;
     // shadows the other cards throw on this one (change from the photo)
@@ -298,7 +351,8 @@ void main() {
     vec3 c = ob.rgb * mix(vec3(1.0), uSkylight, clamp(sh * smoothstep(0.03, 0.22, lo) * uShadow, 0.0, 1.0));
     col = c * ob.a + (1.0 - ob.a) * col;
   }
-  if (fDone < 0.5) col = Fpm + (1.0 - aF) * col;
+  if (n1 < 0.5) col = frontFirst ? Fpm + (1.0 - aF) * col : mix(col, uCable, aW);
+  if (n2 < 0.5) col = frontFirst ? mix(col, uCable, aW) : Fpm + (1.0 - aF) * col;
   vec3 s = toSrgb(col);
   s += (hash(gl_FragCoord.xy) + hash(gl_FragCoord.yx + 7.3) - 1.0) / 255.0;
   o = vec4(s, cover);
@@ -317,6 +371,38 @@ void main() {
   vec3 f = texture(uFilm, vUv).rgb;
   f = max(f - uBlack, 0.0) / (1.0 - uBlack);
   o = vec4(mix(uPaper, f, cov), 1.0);
+}`;
+
+// The live cables, drawn as strips in device px into their own target:
+// coverage in a (a box of the cable's width, antialiased over a px, faded
+// in over 6 px from the fixed end where the plate's cable hands over) and
+// disparity x coverage in r, so overlapping cables keep the nearer's depth
+// roughly and their coverage adds like film.
+const WIRE_VS = `#version 300 es
+layout(location=0) in vec2 aPos;    // device px, y down
+layout(location=1) in vec4 aWire;   // across (device px), half width, from a, from b (photo px)
+layout(location=2) in vec2 aCov;    // coverage, disparity
+uniform vec2 uView;
+out vec4 vWire;
+out vec2 vCov;
+void main() {
+  vWire = aWire;
+  vCov = aCov;
+  gl_Position = vec4(aPos.x / uView.x * 2.0 - 1.0, 1.0 - aPos.y / uView.y * 2.0, 0.0, 1.0);
+}`;
+
+const WIRE_FS = `#version 300 es
+precision highp float;
+in vec4 vWire;
+in vec2 vCov;
+out vec4 o;
+void main() {
+  float d = abs(vWire.x);
+  float hw = vWire.y;
+  float wd = max(2.0 * hw, 1.0);
+  float cov = vCov.x * (2.0 * hw / wd) * clamp(0.5 * wd + 0.5 - d, 0.0, 1.0);
+  cov *= smoothstep(-3.0, 3.0, vWire.z) * smoothstep(-3.0, 3.0, vWire.w);
+  o = vec4(cov * vCov.y, 0.0, 0.0, cov);
 }`;
 
 // ---------------------------------------------------------------- small math
@@ -445,6 +531,9 @@ export async function createRearrange(host, { embedded = false } = {}) {
   const meta = await (await fetch(`${ASSET}meta.json`)).json();
   const OBJ = meta.objects.slice(0, MAXK);
   const K = OBJ.length;
+  const PINS = (meta.pins ?? []).slice(0, MAXK - K);
+  const WIRES = meta.wires ?? [];
+  const NL = K + PINS.length; // layers: the objects, then the pins
   const [PW, PH] = meta.size;
   const F = meta.f;
   const [CX, CY] = meta.c;
@@ -468,9 +557,10 @@ export async function createRearrange(host, { embedded = false } = {}) {
     loadBitmap(`${ASSET}front.webp`),
     loadBitmap(`${ASSET}sky.webp`),
     ...OBJ.map((_, k) => loadBitmap(`${ASSET}o${k}.webp`)),
+    ...PINS.map((_, i) => loadBitmap(`${ASSET}o${K + i}.webp`)),
   ]);
   // CPU copies for picking: each object's matte, and the front layer
-  const objA = objBms.map((bm) => {
+  const objA = objBms.slice(0, K).map((bm) => {
     const px = pixels(bm);
     const a = new Uint8Array(bm.width * bm.height);
     for (let i = 0; i < a.length; i++) a[i] = px[i * 4 + 3];
@@ -510,7 +600,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
   const LH = Math.max(...objBms.map((b) => b.height));
   const objTex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D_ARRAY, objTex);
-  gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.SRGB8_ALPHA8, LW, LH, K, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+  gl.texImage3D(gl.TEXTURE_2D_ARRAY, 0, gl.SRGB8_ALPHA8, LW, LH, NL, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
   objBms.forEach((bm, k) => gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, k, bm.width, bm.height, 1, gl.RGBA, gl.UNSIGNED_BYTE, bm));
   gl.generateMipmap(gl.TEXTURE_2D_ARRAY);
   gl.texParameteri(gl.TEXTURE_2D_ARRAY, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
@@ -521,6 +611,30 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   const scene = compile(gl, PRINT_VS, SCENE_FS);
   const fin = compile(gl, QUAD_VS, FINAL_FS);
+  const wireP = compile(gl, WIRE_VS, WIRE_FS);
+  // their colour: the cables' own, measured where each one is solid
+  const cableCol = lin([0, 1, 2].map((i) => {
+    const v = WIRES.map((w) => w.col[i]).sort((a, b) => a - b);
+    return v.length ? v[v.length >> 1] : 0.1;
+  }));
+  // vertex buffer for the cable strips: 8 floats a vertex, 2 a point
+  const WSTRIDE = 8;
+  const wireData = new Float32Array(Math.max(1, WIRES.length) * SEG * 2 * WSTRIDE);
+  const wireBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, wireBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, wireData.byteLength, gl.DYNAMIC_DRAW);
+  const wireVao = gl.createVertexArray();
+  gl.bindVertexArray(wireVao);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, WSTRIDE * 4, 0);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 4, gl.FLOAT, false, WSTRIDE * 4, 8);
+  gl.enableVertexAttribArray(2);
+  gl.vertexAttribPointer(2, 2, gl.FLOAT, false, WSTRIDE * 4, 24);
+  gl.bindVertexArray(null);
+  // half-float target where it can be rendered to (the disparity needs more
+  // than 8 bits at a cable's antialiased edge)
+  const floatTarget = !!gl.getExtension("EXT_color_buffer_float");
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
@@ -531,10 +645,11 @@ export async function createRearrange(host, { embedded = false } = {}) {
   gl.bindVertexArray(null);
 
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
-  const target = () => {
+  const target = (half = false) => {
     const tex = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stage.canvas.width, stage.canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+    if (half) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, stage.canvas.width, stage.canvas.height, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, stage.canvas.width, stage.canvas.height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
     for (const k of [gl.TEXTURE_MIN_FILTER, gl.TEXTURE_MAG_FILTER]) gl.texParameteri(gl.TEXTURE_2D, k, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
@@ -546,15 +661,17 @@ export async function createRearrange(host, { embedded = false } = {}) {
   };
   let sceneT = null;
   let filmT = null;
+  let wireT = null;
   let dirty = true;
   const build = () => {
-    for (const t of [sceneT, filmT]) {
+    for (const t of [sceneT, filmT, wireT]) {
       if (!t) continue;
       gl.deleteTexture(t.tex);
       gl.deleteFramebuffer(t.fbo);
     }
     sceneT = target();
     filmT = target();
+    wireT = target(floatTarget);
     film.resize(stage.canvas.width, stage.canvas.height);
     dirty = true;
   };
@@ -596,6 +713,79 @@ export async function createRearrange(host, { embedded = false } = {}) {
       moving: false,
     };
   });
+
+  // ---- live cables: the fixed end and the fastening in camera space, and
+  // the length between them (the photo's cables hang taut: the length is
+  // the rest chord). A span leaves its object roughly across the view, so
+  // its fixed end is taken on the object's card at rest (the depth map has
+  // no say on a 2 px line): a sideways move then lengthens or slackens it
+  // as it would a real cable.
+  const sub3 = (a, b) => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+  const len3 = (a) => Math.hypot(a[0], a[1], a[2]);
+  const onCard = (o, u, v) => {
+    const r = kinv(u, v);
+    const zc = o.dn0 / dot3(N, r);
+    return r.map((c) => c * zc);
+  };
+  const wires = WIRES.map((w) => {
+    const o = w.k >= 0 && w.k < K ? objs[w.k] : null;
+    if (!o) return { ...w, o };
+    const A3 = onCard(o, ...w.a);
+    const B30 = onCard(o, ...w.b);
+    return { ...w, o, A3, B30, L0: len3(sub3(B30, A3)), dA: SKYD + 1 / A3[2] + o.meta.bias };
+  });
+  // a cable's points (photo px) and disparity at each, as its object is now
+  const sagPts = new Float32Array(SEG * 3);
+  const cablePoints = (w) => {
+    if (!w.o) {
+      for (let i = 0; i < SEG; i++) {
+        const s = i / (SEG - 1);
+        sagPts[i * 3] = w.a[0] + (w.b[0] - w.a[0]) * s;
+        sagPts[i * 3 + 1] = w.a[1] + (w.b[1] - w.a[1]) * s;
+        sagPts[i * 3 + 2] = w.aD;
+      }
+      return;
+    }
+    const t = w.o.t;
+    const B3 = [w.B30[0] + t[0], w.B30[1] + t[1], w.B30[2] + t[2]];
+    const C = sub3(B3, w.A3);
+    const at = (s, h) => {
+      const g = 4 * h * s * (1 - s);
+      return [w.A3[0] + C[0] * s - UP[0] * g, w.A3[1] + C[1] * s - UP[1] * g, w.A3[2] + C[2] * s - UP[2] * g];
+    };
+    // brought closer than its length, it sags (straight down, a parabola
+    // is a catenary at these spans) until its arc is that length again;
+    // taken further, it pulls straight
+    let h = 0;
+    if (len3(C) < w.L0 * 0.9999) {
+      const arc = (hh) => {
+        let L = 0;
+        let prev = w.A3;
+        for (let i = 1; i <= 24; i++) {
+          const P = at(i / 24, hh);
+          L += len3(sub3(P, prev));
+          prev = P;
+        }
+        return L;
+      };
+      let lo = 0;
+      let hi = w.L0;
+      for (let it = 0; it < 32; it++) {
+        const mid = (lo + hi) / 2;
+        if (arc(mid) < w.L0) lo = mid;
+        else hi = mid;
+      }
+      h = lo;
+    }
+    const dB = cardD(w.o, ...mapPoint(w.o, t, w.b));
+    for (let i = 0; i < SEG; i++) {
+      const s = i / (SEG - 1);
+      const P = proj(at(s, h));
+      sagPts[i * 3] = P[0];
+      sagPts[i * 3 + 1] = P[1];
+      sagPts[i * 3 + 2] = w.dA + (dB - w.dA) * s;
+    }
+  };
 
   // the point of card k under photo point (u, v), and how it is held
   const refAt = (o, u, v) => {
@@ -793,10 +983,59 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   // ---- draw
   const order = new Int32Array(MAXK);
+  const drawWires = (L, w, h) => {
+    const sx = L.dev[2] / PW;
+    let n = 0;
+    for (const wi of wires) {
+      cablePoints(wi);
+      const hw = (wi.w / 2) * sx;
+      const ext = hw + 1.5;
+      let along = 0;
+      const total = (() => {
+        let T = 0;
+        for (let i = 1; i < SEG; i++) T += Math.hypot(sagPts[i * 3] - sagPts[i * 3 - 3], sagPts[i * 3 + 1] - sagPts[i * 3 - 2]);
+        return T;
+      })();
+      for (let i = 0; i < SEG; i++) {
+        const i0 = Math.max(0, i - 1);
+        const i1 = Math.min(SEG - 1, i + 1);
+        let tx = sagPts[i1 * 3] - sagPts[i0 * 3];
+        let ty = sagPts[i1 * 3 + 1] - sagPts[i0 * 3 + 1];
+        const tl = Math.hypot(tx, ty) || 1;
+        tx /= tl;
+        ty /= tl;
+        if (i > 0) along += Math.hypot(sagPts[i * 3] - sagPts[i * 3 - 3], sagPts[i * 3 + 1] - sagPts[i * 3 - 2]);
+        const x = L.dev[0] + sagPts[i * 3] * sx;
+        const y = L.dev[1] + sagPts[i * 3 + 1] * sx;
+        // fade in from the fixed end; a cable fixed at both ends fades at both
+        const fromB = wi.o ? 1e4 : total - along;
+        for (const sgn of [-1, 1]) {
+          wireData.set([x - ty * ext * sgn, y + tx * ext * sgn, ext * sgn, hw, along, fromB, wi.c, sagPts[i * 3 + 2]], n);
+          n += WSTRIDE;
+        }
+      }
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, wireT.fbo);
+    gl.viewport(0, 0, w, h);
+    gl.clearColor(0, 0, 0, 0);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    if (!wires.length) return;
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(wireP.p);
+    gl.uniform2f(wireP.u.uView, w, h);
+    gl.bindVertexArray(wireVao);
+    gl.bindBuffer(gl.ARRAY_BUFFER, wireBuf);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, wireData, 0, n);
+    for (let i = 0; i < wires.length; i++) gl.drawArrays(gl.TRIANGLE_STRIP, i * SEG * 2, SEG * 2);
+    gl.bindVertexArray(null);
+    gl.disable(gl.BLEND);
+  };
   const drawScene = () => {
     const L = layout();
     const w = stage.canvas.width;
     const h = stage.canvas.height;
+    drawWires(L, w, h);
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, w, h);
     gl.disable(gl.BLEND);
@@ -813,9 +1052,11 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform3fv(U.uN, N);
     gl.uniform3fv(U.uSun, SUN);
     gl.uniform1f(U.uSkyD, SKYD);
-    gl.uniform1i(U.uCount, K);
-    // far to near, by the card's disparity at its anchor
+    gl.uniform1i(U.uCount, NL);
+    // far to near, by the card's disparity at its anchor; a pinned member
+    // just behind the deck it holds up
     const ds = objs.map((o, k) => [k, cardD(o, ...applyHInvPoint(o, o.meta.anchor))]);
+    PINS.forEach((pn, i) => ds.push([K + i, ds[pn.k][1] - 1e-4]));
     ds.sort((a, b) => a[1] - b[1]);
     ds.forEach(([k], i) => (order[i] = k));
     gl.uniform1iv(U.uOrder, order);
@@ -835,6 +1076,29 @@ export async function createRearrange(host, { embedded = false } = {}) {
       act[k] = Math.hypot(...o.t) > 1e-5 ? 1 : 0;
       rect.set(o.meta.rect, k * 4);
     });
+    const pinA = new Float32Array(4 * MAXK);
+    const pinB = new Float32Array(4 * MAXK);
+    const pinE = new Float32Array(MAXK);
+    PINS.forEach((pn, i) => {
+      const k = K + i;
+      const o = objs[pn.k];
+      const [ax, ay] = pn.a;
+      const b1 = mapPoint(o, o.t, pn.b);
+      const L0 = Math.hypot(pn.b[0] - ax, pn.b[1] - ay);
+      const L1 = Math.hypot(b1[0] - ax, b1[1] - ay);
+      pinA.set([ax, ay, (pn.b[0] - ax) / L0, (pn.b[1] - ay) / L0], k * 4);
+      pinB.set([(b1[0] - ax) / L1, (b1[1] - ay) / L1, L0, L1], k * 4);
+      pinE[k] = pn.end;
+      H.set([1, 0, 0, 0, 1, 0, 0, 0, 1], k * 9);
+      dn[k] = o.dn0 + dot3(N, o.t);
+      dn0[k] = o.dn0;
+      bias[k] = o.meta.bias;
+      rect.set(pn.rect, k * 4);
+    });
+    gl.uniform4fv(U.uPinA, pinA);
+    gl.uniform4fv(U.uPinB, pinB);
+    gl.uniform1fv(U.uPinEnd, pinE);
+    gl.uniform3fv(U.uCable, cableCol);
     gl.uniformMatrix3fv(U.uHinv, false, H);
     gl.uniform1fv(U.uDn, dn);
     gl.uniform1fv(U.uDn0, dn0);
@@ -860,6 +1124,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
       [gl.TEXTURE_2D, skyTex, U.uSky],
       [gl.TEXTURE_2D, clearTex, U.uClear],
       [gl.TEXTURE_2D_ARRAY, objTex, U.uObj],
+      [gl.TEXTURE_2D, wireT.tex, U.uWire],
     ];
     texs.forEach(([type, t, loc], i) => {
       gl.activeTexture(gl.TEXTURE0 + i);
@@ -1011,14 +1276,17 @@ export async function createRearrange(host, { embedded = false } = {}) {
   return {
     destroy() {
       film.destroy();
-      for (const t of [sceneT, filmT]) {
+      for (const t of [sceneT, filmT, wireT]) {
         if (!t) continue;
         gl.deleteTexture(t.tex);
         gl.deleteFramebuffer(t.fbo);
       }
       for (const t of [plateTex, frontTex, skyTex, clearTex, objTex]) gl.deleteTexture(t);
       gl.deleteBuffer(quad);
+      gl.deleteBuffer(wireBuf);
       gl.deleteVertexArray(vao);
+      gl.deleteVertexArray(wireVao);
+      gl.deleteProgram(wireP.p);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(fin.p);
       stage.destroy();

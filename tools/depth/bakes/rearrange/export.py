@@ -1,4 +1,4 @@
-"""Step 4 of the rearrange bake: the layers the piece composites, and the
+"""Step 5 of the rearrange bake: the layers the piece composites, and the
 camera they are seen through.
 
     python3 -I tools/depth/bakes/rearrange/export.py <workdir> <outdir>
@@ -11,7 +11,9 @@ Writes to <outdir> (public/lab/rearrange):
                of it that can receive a shadow (solid things, not cables)
   sky.webp     the clean sky behind that front layer, at half size
   o0..o4.webp  each object, straight RGBA, cropped to its rect
-  meta.json    camera, sun, and per object: rect, anchor, rest disparity
+  o5..         each pinned member (wires.py), the same way
+  meta.json    camera, sun, and per object: rect, anchor, rest disparity;
+               the live cables and the pins (wires.py)
 
 Camera. The two catenary poles are vertical; their axes meet at one
 vanishing point well above the frame (898, -2034 at 2400 wide). The lens is
@@ -49,6 +51,16 @@ S = c["S"]
 plate, wireA, dispP, hole = p["plate"], p["wireA"], p["dispP"], p["hole"]
 H, W = sky.shape
 K = len([k for k in c.files if k.startswith("alpha_")])
+# wires.py (when run): the plate with the live cables lifted out, the far
+# pole's matte with the girder's fittings on it, the platform's without
+# its pinned members, and the cables and pins themselves
+WIRES = None
+over = {}
+if os.path.exists(os.path.join(WORK, "wires.npz")):
+    w_ = np.load(os.path.join(WORK, "wires.npz"))
+    plate, wireA, hole = w_["plate"], w_["wireA"], w_["hole"]
+    over = {k_: w_[k_] for k_ in w_.files}
+    WIRES = json.load(open(os.path.join(WORK, "wires.json")))
 
 SKY_D = float(np.median(dep[erode(sky, 6)]))
 print("sky disparity", round(SKY_D, 3))
@@ -116,9 +128,9 @@ Kinv = np.array([[1 / F, 0, -CX / F], [0, 1 / F, -CY / F], [0, 0, 1]])
 objs = []
 names = ["platform", "lamp", "far pole", "pull-off", "insulators"]
 for k in range(K):
-    a = c[f"alpha_{k}"]
+    a = over.get(f"alpha_{k}", c[f"alpha_{k}"])
     x0, y0, x1, y1 = [int(v) for v in c[f"rect_{k}"]]
-    fg = c[f"fg_{k}"][y0:y1, x0:x1]
+    fg = over.get(f"fg_{k}", c[f"fg_{k}"])[y0:y1, x0:x1]
     ak = a[y0:y1, x0:x1]
     rgba = np.dstack([np.clip(fg, 0, 1), ak])
     Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA").save(os.path.join(OUT, f"o{k}.webp"), lossless=True, method=6)
@@ -166,6 +178,12 @@ for k in range(K):
     objs.append(obj)
     print(k, obj)
 
+if WIRES:
+    # the pinned members: a layer each, after the objects
+    for i, pin in enumerate(WIRES["pins"]):
+        rgba = np.dstack([np.clip(over[f"pin_fg_{i}"], 0, 1), over[f"pin_a_{i}"]])
+        Image.fromarray((rgba * 255 + 0.5).astype(np.uint8), "RGBA").save(os.path.join(OUT, f"o{K + i}.webp"), lossless=True, method=6)
+
 meta = {
     "size": [W, H],
     "f": F,
@@ -176,6 +194,9 @@ meta = {
     "skyD": round(SKY_D, 4),
     "objects": objs,
 }
+if WIRES:
+    meta["wires"] = WIRES["wires"]
+    meta["pins"] = WIRES["pins"]
 json.dump(meta, open(os.path.join(OUT, "meta.json"), "w"), indent=1)
 tot = sum(os.path.getsize(os.path.join(OUT, f)) for f in os.listdir(OUT))
 print("total bytes", tot)
