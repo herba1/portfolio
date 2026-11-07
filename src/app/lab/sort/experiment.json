@@ -1,6 +1,6 @@
 {
   "title": "Sort",
-  "description": "A summer photograph of a level crossing with one wave of it pixel-sorted: the verge is combed into hard one-pixel strips that run along the ground, rise past the poles and lift the grass off the ground in one curling surface, its tips breaking pale where the sky and the walls are pushed out to the crest, while every pole and sign stays untouched. Brush anywhere and the picture sorts under your hand, live on the GPU; the longer and harder you brush, the longer the spans grow. Press and hold and the sort runs backwards, every pixel sliding home.",
+  "description": "A summer photograph of a level crossing with one wave of it pixel-sorted: the verge is combed into solid horizontal strips, and up the curl the grass is lifted in stacked slabs that climb from the ground and arch over the crossing, a staircase of hard-ended bands with pale glints breaking off their ends, while every pole and sign at the verge stays untouched. Brush anywhere and the picture sorts under your hand, live on the GPU; the longer and harder you brush, the longer the spans grow and the higher the grass is pulled. Press and hold and the sort runs backwards, every pixel sliding home.",
   "tags": [
     "generative",
     "WebGL",
@@ -9,7 +9,7 @@
   ],
   "status": "draft",
   "createdAt": "2026-11-06T23:00:00.000Z",
-  "intent": "After Kim Asendorf's ASDF Pixel Sort (2010, https://github.com/kimasendorf/ASDFPixelSort) and herb's generative reference 2 (a street photo smeared into strips that curl up like grass). A real sort at the print's full 2400x1600: spans may only start on grass and run on, within a reach and an ASDF luminance interval that both grow with the brush, ending once they have run 15% of their reach through anything but vegetation, or at a silhouette in the depth map (Depth Anything V2) or a depth step, so they never cross a pole; sorted greenest and darkest first (luminance minus greenness) by odd-even transposition in WebGL2 fragment passes along a curl-shaped family of sort lines; outside a span the same network orders pixels by home index, so erasing the mask sorts every pixel back home.",
+  "intent": "After Kim Asendorf's ASDF Pixel Sort (2010, https://github.com/kimasendorf/ASDFPixelSort) and herb's generative reference 2 (a street photo smeared into horizontal strips that curl up like grass). The print's 2400x1600 is cut into bands 8-14 px tall; each is sorted once along its centre row and that row is written down the whole band, so every run is a solid rectangle. Spans may only start on grass and run on, within a reach and an ASDF luminance interval that both grow with the brush, ending once they have run 15% of their reach through anything but vegetation, or at a silhouette in the depth map (Depth Anything V2) or a depth step, so they never cross a pole; sorted greenest first in a few tiers, darkest first within a tier, by odd-even transposition in WebGL2 fragment passes; outside a span the same network orders pixels by home index, so erasing the mask sorts every pixel back home. The wave is geometry: up the curl each block-cut slab is lifted to show a verge band picked by its radius, runs laid end to end from its outer cut, and bright run tails break off as one- or two-band glint tiles.",
   "tile": {
     "shape": "wide"
   },

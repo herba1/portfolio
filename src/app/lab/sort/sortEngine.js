@@ -1,57 +1,57 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CX, CY, CELL, MW, MH, LO0, LO1, HI, JUMP, U0, DW, DH, fwd, demoMask, bake } from "./sortCore";
+import { GW, GH, CELL, MW, MH, DW, DH, BANDS, fwd, demoMask, bake, bandMask, links, restSort, geometry } from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
 //
-// Sort lines. Pixels are not sorted along image rows but along a curl: a
-// family of parallel curves that run left to right along the bottom of the
-// frame, turn up round a centre C as concentric arcs, and come back over the
-// top heading left, the way the grass in the reference rides up a ramp. The
-// curl is parameterised by arc length u and radius r (an equal-area map, one
-// texel per pixel), so every sort line is one row of a "domain" texture and
-// the sort itself is plain row sorting.
+// Bands. The picture is cut into horizontal bands 8-14 px tall, each height
+// from a hash. A band is sorted once, along its centre row, and that one
+// sorted row is written down the band's full height, so every sorted run is
+// a solid rectangle with hard ends, never a comb of independent 1 px lines.
 //
 // Spans (ASDF). A span may only start at grass (a few green pixels in a row):
-// a position on a row belongs to a span when it lies within reach of the last
-// grass before it on its line, the brush mask m there is on, and its
-// luminance lies inside [lo(m), hi]. The reach is short: a span ends once it
-// has run 15% of its line's reach through anything that is not vegetation,
-// so it bridges a gap (the road, a wall, a strip of sky) but never trails a
-// long tail of sky. Reach and lo both follow m, so brushing longer or harder
-// lets a span run further past the grass and lets darker pixels join. A span breaks only at a true silhouette: the
-// outline of a pole, a sign or a cabinet in the photo's depth map (Depth
-// Anything V2), or a step in depth between neighbours. So the curl's lines
-// carry runs of green up into the sky as one wave, and never smear a pole.
+// a position on a band belongs to a span when it lies within reach of the
+// last grass before it, the brush mask m there is on, and its luminance lies
+// inside [lo(m), hi]. The reach is short: a span ends once it has run 15% of
+// its band's reach through anything that is not vegetation, so it bridges a
+// gap but never trails a long tail of sky. Reach and lo both follow m, so
+// brushing longer or harder lets a span run further and lets darker pixels
+// join. A span breaks only at a true silhouette: the outline of a pole, a sign
+// or a cabinet in the photo's depth map (Depth Anything V2), or a depth step.
 //
 // The sort. Odd-even transposition sort in WebGL2 fragment passes over a
-// R16UI permutation texture: each texel holds the home index of the pixel
-// now sitting there. Every pass compares disjoint neighbour pairs (odd pairs,
-// then even pairs). Inside a span the pair is ordered by the home pixel's
-// sort key, luminance pulled down by greenness, smallest first (ties by home
-// index): the greens stay rooted where the span starts and fill the line as
-// one body up the curl, and the sky and wall highlights are pushed out to the
-// crest as pale tips. Everywhere else the pair is ordered by home index, which
-// is the identity, so any pixel outside a span flows back home one position
-// per pass. Erasing the mask (a long press) therefore un-sorts by the same
-// network: the darkest pixels leave their spans first and every pixel slides
-// back to where it came from.
+// R16UI permutation texture, one row per band: each texel holds the home
+// index of the pixel now sitting there. Every pass compares disjoint
+// neighbour pairs (odd pairs, then even pairs). Across an open link (both
+// texels in one span) the pair is ordered by the home pixel's sort key,
+// luminance pulled down by greenness, smallest first (ties by home index):
+// greens stay rooted where the span starts and the sky and wall highlights
+// are pushed out to the run's end. Everywhere else the pair is ordered by home
+// index, which is the identity, so any pixel outside a span flows back home
+// one position per pass. Erasing the mask (a long press) therefore un-sorts
+// by the same network.
+//
+// The wave is geometry, not sort direction. Inside the envelope (the mask)
+// each band is cut into blocks and slabs. At the verge the sorted runs stay
+// in place and the poles stand untouched. Up the curl, every slab is lifted:
+// it shows the runs of a verge band further down, picked by the slab's
+// radius on the curl, laid end to end from its outer cut inward, so the slab
+// is solid sorted colour from cut to cut and the region becomes a staircase
+// of stacked horizontal slabs that climbs and arches over, replacing the
+// photo beneath it. Where a run ends in bright pixels, that tail breaks off as
+// one solid tile, one or two bands tall: the white and gold glints. The lift
+// grows with the mask, so brushing pulls the grass up the curl.
 //
 // The resting wave is the same sort run to completion on the CPU at load
-// (identical keys and tie-break, so it is a fixed point of the GPU network):
-// a few hundred thousand comparisons once instead of ~1500 full passes.
-//
-// Display. The photo goes through film.js (summer, light) once per resize.
-// The sort grid is the print's own 2400x1600, so a sort line is one device
-// pixel tall at full size and every sorted run lands as a hard 1 px strip;
-// a pixel still at home shows the developed print untouched.
+// (identical keys and tie-break, so it is a fixed point of the GPU network).
 //
 // Query: ?mask=demo|none &amount=0..1 holds the resting wave at that amount.
 
 const ASSET = "/lab/sort/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
-const PASSES = 12; // odd-even passes per frame
+const PASSES = 24; // odd-even passes per frame
+const REGEO = 90; // ms between rebuilds of the links and the wave while brushing
 const BUDGET = 4000; // passes to keep running after the last mask change
 const SG = GW / 1200; // grid px per layout unit
 
@@ -69,27 +69,6 @@ const FILM = {
   flipY: true,
 };
 
-const GLSL_MAP = `
-const float PI = 3.14159265358979;
-uniform vec2 uC;
-uniform float uU0;
-vec2 curlFwd(vec2 p) {
-  vec2 d = p - uC;
-  if (d.x < 0.0) return d.y >= 0.0 ? d : vec2(PI * -d.y - d.x, -d.y);
-  float r = length(d);
-  return vec2(r * atan(d.x, d.y), r);
-}
-vec2 curlInv(float u, float r) {
-  if (u < 0.0) return uC + vec2(u, r);
-  float arc = PI * r;
-  if (u <= arc) {
-    float th = u / max(r, 1e-6);
-    return uC + r * vec2(sin(th), cos(th));
-  }
-  return uC + vec2(-(u - arc), -r);
-}
-`;
-
 const QUAD_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
 void main() { gl_Position = vec4(aPos * 2.0 - 1.0, 0.0, 1.0); }`;
@@ -99,48 +78,21 @@ precision highp float;
 precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
-uniform sampler2D uField;   // lum hi, lum lo, depth (255 = silhouette), reach (0 = off the photo)
+uniform usampler2D uLink;   // R8UI: 1 where texels x and x + 1 lie in one span
 uniform usampler2D uKey;    // R16UI sort key of the pixel at home on each texel: greenest and darkest first
-uniform sampler2D uMask;    // R8, one texel per mask cell, LINEAR
 uniform int uPhase;
-uniform float uLo0;
-uniform float uLo1;
-uniform float uHi;
-uniform float uJump;
-uniform float uCell;
-uniform ivec2 uActive;      // [x0, x1): pairs reaching outside never swap
-${GLSL_MAP}
 out uvec4 o;
-
-float lum(vec4 f) { return (floor(f.r * 255.0 + 0.5) * 256.0 + floor(f.g * 255.0 + 0.5)) / 65535.0; }
-float maskAt(int i, int j) {
-  vec2 p = curlInv(uU0 + float(i) + 0.5, float(j) + 0.5);
-  return texture(uMask, p / (uCell * vec2(textureSize(uMask, 0)))).r;
-}
-bool inSpan(vec4 f, float m) {
-  float a = floor(f.a * 255.0 + 0.5);
-  if (a < 0.5 || f.b > 0.999 || m < 0.5 / 255.0) return false;
-  if ((a - 1.0) / 253.0 > m) return false; // out of reach of the grass
-  float l = lum(f);
-  return l >= mix(uLo0, uLo1, m) && l <= uHi;
-}
 void main() {
   ivec2 q = ivec2(gl_FragCoord.xy);
   int W = textureSize(uState, 0).x;
   int left = ((q.x + uPhase) & 1) == 0 ? q.x : q.x - 1;
   int right = left + 1;
   uint self = texelFetch(uState, q, 0).r;
-  if (left < max(0, uActive.x) || right >= min(W, uActive.y)) { o = uvec4(self, 0u, 0u, 0u); return; }
+  if (left < 0 || right >= W) { o = uvec4(self, 0u, 0u, 0u); return; }
   uint a = texelFetch(uState, ivec2(left, q.y), 0).r;
   uint b = texelFetch(uState, ivec2(right, q.y), 0).r;
-  vec4 fl = texelFetch(uField, ivec2(left, q.y), 0);
-  vec4 fr = texelFetch(uField, ivec2(right, q.y), 0);
-  float dl = floor(fl.b * 255.0 + 0.5);
-  float dr = floor(fr.b * 255.0 + 0.5);
-  bool open = abs(dl - dr) < uJump
-    && inSpan(fl, maskAt(left, q.y)) && inSpan(fr, maskAt(right, q.y));
   bool sw;
-  if (open) {
+  if (texelFetch(uLink, ivec2(left, q.y), 0).r > 0u) {
     uint ka = texelFetch(uKey, ivec2(int(a), q.y), 0).r;
     uint kb = texelFetch(uKey, ivec2(int(b), q.y), 0).r;
     sw = ka > kb || (ka == kb && a > b);
@@ -156,13 +108,18 @@ precision highp float;
 precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
+uniform usampler2D uGeo;    // per (x, band): source x + 1 (0 = photo), source band, glint end + 1, glint band
+uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
+uniform sampler2D uClean;   // the photo developed at grid size without grain, for the slabs
 uniform vec4 uPrint;        // x, y, w, h in device px, top-left origin
 uniform float uCanvasH;
 uniform vec3 uPaper;
 uniform vec2 uGrid;
-${GLSL_MAP}
 out vec4 o;
+vec3 film(int gx, int gy) {
+  return texelFetch(uClean, ivec2(gx, int(uGrid.y) - 1 - gy), 0).rgb;
+}
 void main() {
   vec2 d = vec2(gl_FragCoord.x, uCanvasH - gl_FragCoord.y);
   vec2 l = (d - uPrint.xy) / uPrint.zw;
@@ -170,17 +127,18 @@ void main() {
   ivec2 fs = textureSize(uFilm, 0);
   ivec2 fp = ivec2(d - uPrint.xy);
   vec3 col = texelFetch(uFilm, ivec2(fp.x, fs.y - 1 - fp.y), 0).rgb;
-  vec2 p = l * uGrid;
-  vec2 ur = curlFwd(p);
-  ivec2 ds = textureSize(uState, 0);
-  ivec2 t = ivec2(floor(ur.x - uU0), floor(ur.y));
-  if (t.x >= 0 && t.y >= 0 && t.x < ds.x && t.y < ds.y) {
-    uint h = texelFetch(uState, t, 0).r;
-    if (int(h) != t.x) {
-      vec2 ph = curlInv(uU0 + float(h) + 0.5, float(t.y) + 0.5);
-      ivec2 hp = clamp(ivec2(floor(ph / uGrid * vec2(fs))), ivec2(0), fs - 1);
-      col = texelFetch(uFilm, ivec2(hp.x, fs.y - 1 - hp.y), 0).rgb;
-    }
+  ivec2 g = ivec2(floor(l * uGrid));
+  int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
+  uvec4 geo = texelFetch(uGeo, ivec2(g.x, band), 0);
+  if (geo.r > 0u) {
+    // A glint tile shows its run's last texel; a slab shows its source.
+    bool glint = geo.b > 0u;
+    ivec2 src = glint ? ivec2(int(geo.b) - 1, int(geo.a)) : ivec2(int(geo.r) - 1, int(geo.g));
+    uint h = texelFetch(uState, src, 0).r;
+    col = film(int(h), int(texelFetch(uBand, ivec2(src.y, 1), 0).r));
+    // A glint is the run's brightest pixel caught in the light: a wall's
+    // beige goes gold-white, a cloud's grey goes white.
+    if (glint) col = mix(col, vec3(1.0, 0.97, 0.9), 0.5);
   }
   o = vec4(col, 1.0);
 }`;
@@ -250,8 +208,22 @@ export async function createSort(host, { embedded = false } = {}) {
   };
   syncMask8();
 
-  const { field, key, state } = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH), mask8, qMask !== "none");
+  const base = bake(pixels(photoBm, GW, GH), pixels(depthBm, GW, GH));
   depthBm.close?.();
+  // The spans the mask opens, and the wave's slabs, rebuilt as the mask moves.
+  const bm = new Uint8Array(DW * DH);
+  const link = new Uint8Array(DW * DH);
+  const geo = new Uint16Array(DW * DH * 4);
+  const rebuildCpu = () => {
+    bandMask(mask8, bm);
+    links(base, bm, link);
+    geometry(mask8, base, link, geo);
+  };
+  rebuildCpu();
+  const state = qMask === "none" ? restSort(base, new Uint8Array(DW * DH)) : restSort(base, link);
+  const bandRows = new Uint16Array(GH * 2);
+  bandRows.set(BANDS.of, 0);
+  bandRows.set(BANDS.c, GH);
 
   // ---- GL resources
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -265,9 +237,16 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return t;
   };
-  const fieldTex = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, DW, DH, field);
-  const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, key);
-  const maskTex = tex(gl.R8, gl.RED, gl.UNSIGNED_BYTE, MW, MH, mask8, gl.LINEAR);
+  const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, base.key);
+  const linkTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, DW, DH, link);
+  const geoTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, DW, DH, geo);
+  const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 2, bandRows);
+  const uploadCpu = () => {
+    gl.bindTexture(gl.TEXTURE_2D, linkTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RED_INTEGER, gl.UNSIGNED_BYTE, link);
+    gl.bindTexture(gl.TEXTURE_2D, geoTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, geo);
+  };
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {
     const f = gl.createFramebuffer();
@@ -319,91 +298,56 @@ export async function createSort(host, { embedded = false } = {}) {
     const py = Math.round((H * dpr - ph) / 2);
     return { W, H, dpr, pw, ph, px, py };
   };
+  const dropFilm = () => {
+    for (const f of filmT || []) {
+      gl.deleteTexture(f.tex);
+      gl.deleteFramebuffer(f.fbo);
+    }
+    filmT = null;
+  };
   const build = () => {
     L = layout();
-    if (filmT) {
-      gl.deleteTexture(filmT.tex);
-      gl.deleteFramebuffer(filmT.fbo);
-    }
-    const t = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, L.pw, L.ph, null);
-    const fbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    filmT = { tex: t, fbo };
-    if (!film) film = createFilm(gl, { width: L.pw, height: L.ph });
-    film.resize(L.pw, L.ph);
-    film.render(photoTex, FILM, fbo);
+    dropFilm();
+    // Two developments of the photo: the print, shown where the photo is
+    // untouched, and one at the grid's own resolution without grain that the
+    // slabs take their colour from, texel for texel. A slab pixel must be
+    // the very pixel its key was read from: a print-sized texel blends its
+    // neighbours, which would break every sorted stretch into flicker, and
+    // grain repeated down a band would streak.
+    filmT = [
+      [L.pw, L.ph, FILM],
+      [GW, GH, { ...FILM, grain: 0 }],
+    ].map(([w, h, look]) => {
+      const t = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, w, h, null);
+      const fbo = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+      if (!film) film = createFilm(gl, { width: w, height: h });
+      film.resize(w, h);
+      film.render(photoTex, look, fbo);
+      return { tex: t, fbo };
+    });
     dirty = true;
   };
   stage.onResize(build);
 
   // ---- the sort network
-  // The active rect: the domain bbox of every mask cell that has ever been on.
-  // It only grows, so both ping-pong textures always agree outside it.
-  const active = { x0: 0, x1: 0, y0: 0, y1: 0 };
-  const everOn = new Uint8Array(MW * MH);
-  const raw = { x0: 0, x1: 0, y0: 0, y1: 0, empty: true };
-  const growActive = () => {
-    let { x0, x1, y0, y1, empty } = raw;
-    for (let i = 0; i < mask.length; i++) {
-      if (mask[i] <= 0 || everOn[i]) continue;
-      everOn[i] = 1;
-      const cx = (i % MW) * CELL;
-      const cy = Math.floor(i / MW) * CELL;
-      for (const [x, y] of [[cx, cy], [cx + CELL, cy], [cx, cy + CELL], [cx + CELL, cy + CELL], [cx + CELL / 2, cy + CELL / 2]]) {
-        const [uu, r] = fwd(x, y);
-        const tx = uu - U0;
-        if (empty) {
-          x0 = x1 = tx;
-          y0 = y1 = r;
-          empty = false;
-        }
-        x0 = Math.min(x0, tx);
-        x1 = Math.max(x1, tx);
-        y0 = Math.min(y0, r);
-        y1 = Math.max(y1, r);
-      }
-    }
-    if (empty) return;
-    Object.assign(raw, { x0, x1, y0, y1, empty });
-    const M = CELL + 4;
-    active.x0 = clamp(Math.floor((x0 - M) / 2) * 2, 0, DW);
-    active.x1 = clamp(Math.ceil((x1 + M) / 2) * 2, 0, DW);
-    active.y0 = clamp(Math.floor(y0 - M), 0, DH);
-    active.y1 = clamp(Math.ceil(y1 + M), 0, DH);
-  };
-  growActive();
   let budget = 0;
   let phase = 0;
   let load = passes; // odd-even passes this frame, adapted to frame time
   const runPasses = (n) => {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
-    if (active.x1 <= active.x0) return;
-    // Only the part of the domain that has ever held a span can change.
-    gl.enable(gl.SCISSOR_TEST);
-    gl.scissor(active.x0, active.y0, active.x1 - active.x0, active.y1 - active.y0);
     gl.useProgram(pass.p);
     const u = pass.u;
-    gl.uniform2f(u.uC, CX, CY);
-    gl.uniform1f(u.uU0, U0);
-    gl.uniform1f(u.uLo0, LO0);
-    gl.uniform1f(u.uLo1, LO1);
-    gl.uniform1f(u.uHi, HI);
-    gl.uniform1f(u.uJump, JUMP);
-    gl.uniform1f(u.uCell, CELL);
-    gl.uniform2i(u.uActive, active.x0, active.x1);
     gl.uniform1i(u.uState, 0);
-    gl.uniform1i(u.uField, 1);
-    gl.uniform1i(u.uMask, 2);
-    gl.uniform1i(u.uKey, 3);
-    gl.activeTexture(gl.TEXTURE3);
+    gl.uniform1i(u.uLink, 1);
+    gl.uniform1i(u.uKey, 2);
+    gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, keyTex);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, fieldTex);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D, maskTex);
+    gl.bindTexture(gl.TEXTURE_2D, linkTex);
     gl.viewport(0, 0, DW, DH);
     for (let k = 0; k < n; k++) {
       gl.activeTexture(gl.TEXTURE0);
@@ -414,7 +358,6 @@ export async function createSort(host, { embedded = false } = {}) {
       cur = 1 - cur;
       phase = 1 - phase;
     }
-    gl.disable(gl.SCISSOR_TEST);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.activeTexture(gl.TEXTURE0);
   };
@@ -429,11 +372,18 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, stateTex[cur]);
     gl.activeTexture(gl.TEXTURE1);
-    gl.bindTexture(gl.TEXTURE_2D, filmT.tex);
+    gl.bindTexture(gl.TEXTURE_2D, filmT[0].tex);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, filmT[1].tex);
+    gl.activeTexture(gl.TEXTURE2);
+    gl.bindTexture(gl.TEXTURE_2D, geoTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, bandTex);
     gl.uniform1i(u.uState, 0);
     gl.uniform1i(u.uFilm, 1);
-    gl.uniform2f(u.uC, CX, CY);
-    gl.uniform1f(u.uU0, U0);
+    gl.uniform1i(u.uClean, 4);
+    gl.uniform1i(u.uGeo, 2);
+    gl.uniform1i(u.uBand, 3);
     gl.uniform4f(u.uPrint, L.px, L.py, L.pw, L.ph);
     gl.uniform1f(u.uCanvasH, stage.canvas.height);
     gl.uniform3f(u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
@@ -448,6 +398,8 @@ export async function createSort(host, { embedded = false } = {}) {
   let press = null; // { x, y, t, moved, pressure }
   let unsort = null; // { gx, gy, t0 }
   let maskDirty = false;
+  let cpuDirty = false;
+  let lastCpu = 0;
   stage.on("down", (p, e) => {
     press = { x: p.x, y: p.y, t: performance.now(), moved: false, pressure: e.pressure > 0 ? e.pressure : 0.5 };
     unsort = null;
@@ -521,12 +473,19 @@ export async function createSort(host, { embedded = false } = {}) {
       }
     }
     if (maskDirty) {
-      syncMask8();
-      gl.bindTexture(gl.TEXTURE_2D, maskTex);
-      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, MW, MH, gl.RED, gl.UNSIGNED_BYTE, mask8);
       maskDirty = false;
-      growActive();
+      cpuDirty = true;
       budget = BUDGET;
+    }
+    // The links and the slabs follow the mask, at most every REGEO ms while
+    // it moves (a rebuild is a few tens of ms of CPU).
+    if (cpuDirty && now - lastCpu >= REGEO) {
+      syncMask8();
+      rebuildCpu();
+      uploadCpu();
+      cpuDirty = false;
+      lastCpu = now;
+      dirty = true;
     }
     if (budget > 0) {
       // The grid is the full print, so a slow GPU sheds passes rather than
@@ -554,11 +513,8 @@ export async function createSort(host, { embedded = false } = {}) {
   return {
     destroy() {
       film?.destroy();
-      if (filmT) {
-        gl.deleteTexture(filmT.tex);
-        gl.deleteFramebuffer(filmT.fbo);
-      }
-      for (const t of [...stateTex, fieldTex, keyTex, maskTex, photoTex]) gl.deleteTexture(t);
+      dropFilm();
+      for (const t of [...stateTex, keyTex, linkTex, geoTex, bandTex, photoTex]) gl.deleteTexture(t);
       for (const f of stateFbo) gl.deleteFramebuffer(f);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
