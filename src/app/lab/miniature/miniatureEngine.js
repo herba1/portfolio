@@ -22,8 +22,12 @@ import { createStage, clamp } from "../_kit/stage";
 //   pass 3  full resolution: a small disc for near-focus pixels, the
 //           background buffer through a depth-aware joint upsample for the
 //           rest, the foreground layer composited over it with no depth test
-//           (it spills over whatever is behind it by its full CoC), a gentle
-//           contrast lift and a print shoulder that stops short of white.
+//           (it spills over whatever is behind it by its full CoC). Before
+//           the foreground goes over, a depth-masked summer film sky grade
+//           (deep blue at the top to an open haze line, real clouds kept and
+//           toned); then a gentle contrast lift, a print toe that lifts black
+//           to 40/255, a thin amber halation ring round the brightest stone
+//           and a print shoulder that stops short of white.
 
 const COLOR_SRC = "/lab/miniature/city.webp";
 const DEPTH_SRC = "/lab/miniature/depth.png";
@@ -242,6 +246,76 @@ uniform vec2 uCanvas;
 uniform vec3 uGround;
 
 float hash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
+float hsvSat(vec3 c) { float m = max(c.r, max(c.g, c.b)); return (m - min(c.r, min(c.g, c.b))) / max(m, 1e-4); }
+
+// The photograph's own clear sky down the frame (print height 0 at the top),
+// measured off city.webp: a pale, flat baby blue.
+vec3 skySource(float y) {
+  vec3 a = vec3(125.0, 175.0, 231.0) / 255.0;
+  vec3 b = vec3(138.0, 185.0, 232.0) / 255.0;
+  vec3 c = vec3(161.0, 198.0, 230.0) / 255.0;
+  vec3 d = vec3(175.0, 202.0, 226.0) / 255.0;
+  float t = clamp(y, 0.0, 0.3) * 10.0;
+  return t < 1.0 ? mix(a, b, t) : t < 2.0 ? mix(b, c, t - 1.0) : mix(c, d, t - 2.0);
+}
+// The summer film sky it is remapped to: deep at the top, open at the haze
+// line, hue held between 205 and 212. The anchors are herb's measured
+// #0a4f8c / #1f74ad / #5e9cc0 with green nudged up a touch, so that after
+// the print curve's lifted toe (which raises red most) they land at hue
+// 209 / 210 / 206 and saturation about 0.70 / 0.71 / 0.51 on screen. A
+// quadratic through the three, so the gradient has no kink at mid-sky.
+vec3 skyFilm(float y) {
+  vec3 top = vec3(10.0, 90.0, 140.0) / 255.0;   // #0a5a8c
+  vec3 mid = vec3(30.0, 113.0, 174.0) / 255.0;  // #1e71ae
+  vec3 haze = vec3(94.0, 152.0, 195.0) / 255.0; // #5e98c3
+  float t = clamp(y / 0.33, 0.0, 1.0);
+  return top * (2.0 * (t - 0.5) * (t - 1.0)) + mid * (4.0 * t * (1.0 - t)) + haze * (2.0 * t * (t - 0.5));
+}
+// The grade itself, on one colour. far: the pixel is within a CoC of sky
+// depth. nearness: the pixel itself is nearer than the sky (a pine's rim, or
+// sky the gather filled in behind it). clear: nothing near it, so a pale
+// bright patch may be a cloud. up: how much brighter the image is just below
+// than just above, which marks a cloud's sunlit top.
+vec3 gradeSky(vec3 col, float y, float far, float nearness, float clear, float up) {
+  vec3 src = skySource(y);
+  float ls = luma(src);
+  float lum = luma(col);
+  // How much of this pixel is sky, read as a mix of the clear sky at this
+  // height and whatever else is in it: its colour projected from that other
+  // tone onto the source sky, so a pixel that is half sky takes half the
+  // grade and lands halfway between the new sky and the other thing, with no
+  // dark or pale rim. At sky depth the other thing is the dull blue-grey of
+  // the far hills along the horizon (as far as the sky, much darker), which
+  // keep their own tone; nearer it is a typical foliage-and-shadow tone.
+  vec3 ref = mix(vec3(0.4, 0.45, 0.51), vec3(0.25, 0.26, 0.22), nearness);
+  float share = clamp(dot(col - ref, src - ref) / dot(src - ref, src - ref) / 0.9, 0.0, 1.0);
+  float sky = far                             // farthest depth
+    * share * smoothstep(0.3, 0.45, lum)      // bright
+    * smoothstep(-0.01, 0.05, col.b - col.r); // and blue: warm stone stays out
+  // Shift, not replace: the photograph's own luminance detail rides on the
+  // new gradient, so the real clouds and the haze keep their shape.
+  vec3 graded = col + (skyFilm(y) - src) * sky;
+  // Clouds: brighter than the clear sky at that height and paler than it,
+  // and clear of anything near (the photograph's bright sharpening fringe
+  // along the pine tops is not a cloud). Linear ramps, so a blurred cloud's
+  // flank eases into the sky instead of ending on an outline. Brightness
+  // within the cloud, plus which way it brightens down the frame, picks the
+  // tone: the sunlit top goes warm neutral, the dimmer flanks and the base
+  // a cool cyan grey lit by the blue around it.
+  float cloud = clamp((lum - ls) / 0.16, 0.0, 1.0) * clamp((hsvSat(src) - hsvSat(col)) / 0.26, 0.0, 1.0) * clear;
+  float lit = clamp((lum - ls) / (0.9 - ls) + 3.0 * up, 0.0, 1.0);
+  vec3 cloudCol = mix(vec3(0.718, 0.773, 0.773), vec3(0.875, 0.882, 0.871), lit);
+  return mix(graded, cloudCol, cloud * sky);
+}
+// Highlight on the stone, for halation: the image as the composite shows it
+// (sharp or through the blur buffer by its own CoC), sky and haze left out.
+float stoneLight(vec2 q) {
+  float d;
+  float s = cocAt(q, d);
+  vec3 c = mix(textureLod(uColor, q, 1.0).rgb, texture(uBlur, q).rgb, smoothstep(2.2, 5.0, s));
+  return smoothstep(0.64, 0.86, luma(c)) * smoothstep(0.66, 0.7, d);
+}
 
 void main() {
   vec2 frag = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
@@ -301,12 +375,56 @@ void main() {
   float spill = big.a * uMaxCss;
   float t = smoothstep(2.2, 5.0, max(s0, spill));
   vec3 col = mix(small, big.rgb, t);
+
+  // Summer film sky, graded on the background layer before the foreground
+  // goes over it, so a blurred pine's rim stays pine. The mask is the
+  // farthest depth AND bright AND blue, all read off the image as the lens
+  // already drew it, so it is feathered by the same blur as the sky itself.
+  // Depth: the nearest-to-infinity value within one CoC cap, so the sky the
+  // gather filled in behind a defocused pine counts as sky.
+  vec2 cssUv = uDpr / uOut;
+  float dOwn = textureLod(uDepth, uv, 1.0).r;
+  float dFar = textureLod(uDepth, uv, 2.0).r;
+  float dNear = dFar;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.785398 + 0.39;
+    float dt = textureLod(uDepth, uv + vec2(cos(a), sin(a)) * uMaxCss * cssUv, 2.0).r;
+    dFar = min(dFar, dt);
+    dNear = max(dNear, dt);
+  }
+  float far = smoothstep(0.675, 0.645, dFar);
+  vec2 dy = vec2(0.0, 0.014);
+  float up = luma(textureLod(uColor, uv + dy, 4.0).rgb) - luma(textureLod(uColor, uv - dy, 4.0).rgb);
+  col = gradeSky(col, uv.y, far, smoothstep(0.66, 0.7, dOwn), smoothstep(0.69, 0.655, dNear), up);
+  // The foreground layer gets the same grade, as all-near and never cloud:
+  // its silhouette is snapped a little outward, so a blurred pine against
+  // the sky carries some source sky in its rim, which would otherwise come
+  // back as a pale baby-blue halo round the pine.
+  if (near.a > 1e-3) near.rgb = gradeSky(near.rgb / near.a, uv.y, far, 1.0, 0.0, 0.0) * near.a;
+
   col = col * (1.0 - near.a) + near.rgb;
 
-  // The tilt-shift print: a touch more snap in the mids, no extra colour;
-  // the shoulder comes last so nothing on the print reaches white.
+  // The tilt-shift print: a touch more snap in the mids, no extra colour.
   col = clamp(col, 0.0, 1.0);
   col = mix(col, col * col * (3.0 - 2.0 * col), 0.18);
+  // Print curve: a toe that lifts black to 40/255 and leaves the mids almost
+  // where they were, the way a print's paper never goes fully black.
+  vec3 inv = 1.0 - col;
+  col += (40.0 / 255.0) * inv * inv * inv * inv * inv * inv;
+  // Halation: light from the brightest stone scattered back through the film
+  // base, a thin amber ring about 0.6% of the print's width round it and
+  // none on the stone itself.
+  vec2 ringUv = vec2(0.006, 0.006 * uRect.z / uRect.w);
+  float halo = 0.0;
+  for (int i = 0; i < 24; i++) {
+    float fi = float(i);
+    float r = 0.4 + 0.6 * float(i / 8) / 2.0;
+    float a = fi * 0.785398 + float(i / 8) * 0.26;
+    halo += stoneLight(uv + vec2(cos(a), sin(a)) * r * ringUv);
+  }
+  halo = min(halo / 24.0 * 2.5, 1.0) * (1.0 - stoneLight(uv));
+  col += vec3(1.0, 0.62, 0.28) * 0.08 * halo;
+  // The shoulder comes last so nothing on the print reaches white.
   col = shoulder(col);
   col += (hash(frag) - 0.5) / 255.0;
   outColor = vec4(col, 1.0);
