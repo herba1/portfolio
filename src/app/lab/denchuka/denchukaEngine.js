@@ -172,6 +172,16 @@ void main() {
   if (e.x > 0 && s == 0) cov = max(cov, al0.r);
   if (e.y > 0 && rest(1, e.y)) cov = max(cov, al0.g);
   if (e.z > 0 && rest(2, e.z)) cov = max(cov, al0.b);
+  // The sky is regraded under whatever still stands in front of it, not
+  // through it: a standing piece's rim is a mix of it and the scan's teal sky
+  // (photo = a x object + (1 - a) x sky), so only the sky's share is moved,
+  // by the grade of the sky behind everything (p3). Grading the mixed rim
+  // pixel itself leaves the teal in it: a green outline round every shaft.
+  float skyA = texture(uSky, pp / uPlate).r * (1.0 - cov);
+  if (skyA > 0.002) {
+    vec3 behind = plate(3, pp, rk);
+    col = clamp(col + skyA * (skyGrade(behind, pp.y) - behind), 0.0, 1.0);
+  }
 
   // poles going down their own axes, into the ground
   for (int j = 0; j < ${MAX_P}; j++) {
@@ -189,7 +199,6 @@ void main() {
     int srk = se.w / 64;
     vec3 obj = unmix(plate(2, src, srk), plate(3, src, srk), al);
     col = mix(col, obj, al);
-    cov += (1.0 - cov) * al;
   }
 
   // crossarms, transformers and insulators lowered down the pole
@@ -199,8 +208,11 @@ void main() {
     vec4 b = uHw2[j];
     float ax = a.y * pp.y + a.z;
     if (abs(pp.x - ax) > 170.0 || pp.y > b.y || front) continue;
-    vec2 dir = normalize(vec2(a.y, 1.0));
-    vec2 src = pp - dir * a.w;
+    // locked to the axis: the piece keeps its offset from the shaft at every
+    // row it passes, so it slides down the pole and never off it
+    float dy = a.w / sqrt(1.0 + a.y * a.y);
+    float sy = pp.y - dy;
+    vec2 src = vec2(pp.x - (ax - (a.y * sy + a.z)), sy);
     if (src.y < b.x - 2.0 || src.y > b.w + 2.0) continue;
     ivec4 se = ids(ivec2(floor(src)));
     if (se.y != int(a.x + 0.5)) continue;
@@ -208,7 +220,6 @@ void main() {
     int srk = se.w / 64;
     vec3 obj = unmix(plate(1, src, srk), plate(2, src, srk), al);
     col = mix(col, obj, al);
-    cov += (1.0 - cov) * al;
   }
 
   // wires: slack, then the fall, blurred over the frame interval. The sweep
@@ -261,11 +272,7 @@ void main() {
     float sweptA = min(1.0, swept * (travel / n) / ${WIRE_THICK});
     float A = mix(peak, sweptA, comet) / (1.0 + travel / ${WIRE_FADE}.0);
     col = mix(col, accC / accW, A);
-    cov += (1.0 - cov) * A;
   }
-
-  float skyW = texture(uSky, pp / uPlate).r * (1.0 - cov);
-  if (skyW > 0.002) col = mix(col, skyGrade(col, pp.y), skyW);
 
   outColor = vec4(col, 1.0);
 }`;

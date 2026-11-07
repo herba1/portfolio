@@ -85,14 +85,51 @@ def diff_matte(A, B, obj_mask, r_core):
     return np.clip(a, 0, 1)
 
 wa = np.where(wid > 0, np.maximum(M["wire_alpha"], 0), 0)
+def edge_matte(A, B, a0, inside):
+    """Against the sky: the matte grown 2 px with a feathered edge, and all of it
+    unmixed against the plate behind (A = a O + (1 - a) B). The sky matte runs
+    a px or two wide of a thin crossarm or shaft, stops short of others, and
+    calls a pale rod against pale sky solid: where it is wide, a moving piece
+    unmixes sky into its rim and a standing one keeps the scan's teal there
+    ungraded (a dark green dashed outline once the sky round it is regraded);
+    where it is short, the rim stays behind on the plate when the piece moves.
+    O, the object's own colour, is spread out from its most certain pixels
+    (solid in the matte and well apart from B). A part brighter than the sky
+    (a porcelain insulator) projects below 0 onto a dark O, so there its plain
+    distance from the sky counts, against O's. Below the skyline, where B is LaMa's
+    guess at a wall, the matte stands as it is."""
+    m = a0 > 0.04
+    dist = cv2.distanceTransform((~m).astype(np.uint8), cv2.DIST_L2, 5)
+    feather = np.clip(2.5 - dist, 0, 1)  # whole to 1.5 px out, gone by 2.5 px
+    sep = np.sqrt(((A - B) ** 2).sum(2))
+    w = (np.clip((a0 - 0.3) / 0.4, 0, 1) * np.clip(sep / 0.12, 0, 1)).astype(np.float32)
+    O = np.zeros_like(A)
+    den3 = cv2.GaussianBlur(w, (0, 0), 3)
+    den9 = cv2.GaussianBlur(w, (0, 0), 9)
+    for ch in range(3):
+        n3 = cv2.GaussianBlur(A[..., ch] * w, (0, 0), 3)
+        n9 = cv2.GaussianBlur(A[..., ch] * w, (0, 0), 9)
+        O[..., ch] = np.where(den3 > 0.02, n3 / np.maximum(den3, 1e-4), np.where(den9 > 1e-3, n9 / np.maximum(den9, 1e-4), A[..., ch]))
+    d = O - B
+    dot = ((A - B) * d).sum(2)
+    a = np.clip(dot / np.maximum((d * d).sum(2), 4e-3), 0, 1)
+    # a part on the far side of the sky from O (projects below 0): its distance
+    # from the sky, against O's
+    a_far = np.clip((sep - 0.02) / np.maximum(np.sqrt((d * d).sum(2)), 0.12), 0, 1)
+    a = np.where(dot < 0, a_far, a) * feather
+    a[a < 0.05] = 0
+    return np.where(inside, np.where(env, a, a0), 0).astype(np.float32)
+
+
+wa = np.where(wid > 0, np.maximum(M["wire_alpha"], 0), 0)
 hm = hid > 0
-ha_d = diff_matte(Pn[1], Pn[2], M["hw_alpha"] > 0.5, 3)
-ha = np.where(env, M["hw_alpha"], np.maximum(ha_d, 0.0) * (M["hw_alpha"] > 0.04))
-ha = np.where(hm, ha, 0)
+# below the skyline the matte is a difference matte already (SAM and contrast
+# masks are near binary); against the sky, the sky matte's alpha
+h0 = np.where(env, M["hw_alpha"], np.maximum(diff_matte(Pn[1], Pn[2], M["hw_alpha"] > 0.5, 3), 0.0) * (M["hw_alpha"] > 0.04))
+ha = edge_matte(Pn[1], Pn[2], h0, hm)
 sm = sid > 0
-sa_d = diff_matte(Pn[2], Pn[3], shaft.max(0) > 0.5, 5)
-sa = np.where(env, shaft.max(0), sa_d * (shaft.max(0) > 0.02))
-sa = np.where(sm, sa, 0)
+s0 = np.where(env, shaft.max(0), diff_matte(Pn[2], Pn[3], shaft.max(0) > 0.5, 5) * (shaft.max(0) > 0.02))
+sa = edge_matte(Pn[2], Pn[3], s0, sm)
 
 # ---------------------------------------------------------------- front of moving poles
 front = np.zeros((H, W), bool)

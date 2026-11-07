@@ -63,7 +63,7 @@
     }
   ],
   "sources": [
-    "Photograph: street intersection in Japanese town (Kyoto, Sony a7 II) by Richard Tao (@richardtao28) on Unsplash, Unsplash License. https://unsplash.com/photos/street-intersection-in-japanese-town-jlJFU9QBfFc (file: https://images.unsplash.com/photo-1583200786218-ccee132a8567). Cropped to 3:2 and resampled to 2400x1600. Taken apart by tools/depth/bakes/denchuka (prep.py, masks.py, plates.py, resid.py, membrane.py, shadows.py, export.py) with tools/depth segment.py (SAM 2.1 Hiera-Tiny, Apache-2.0; sky matte), fill.py (LaMa, Apache-2.0) and normals.py (MoGe-2 ViT-S, MIT).",
+    "Photograph: street intersection in Japanese town (Kyoto, Sony a7 II) by Richard Tao (@richardtao28) on Unsplash, Unsplash License. https://unsplash.com/photos/street-intersection-in-japanese-town-jlJFU9QBfFc (file: https://images.unsplash.com/photo-1583200786218-ccee132a8567). Cropped to 3:2 and resampled to 2400x1600. Taken apart by tools/depth/bakes/denchuka (prep.py, masks.py, plates.py, resid.py, gaps.py, crowns.py, membrane.py, shadows.py, export.py) with tools/depth segment.py (SAM 2.1 Hiera-Tiny, Apache-2.0; sky matte), fill.py (LaMa, Apache-2.0) and normals.py (MoGe-2 ViT-S, MIT).",
     "https://en.wikipedia.org/wiki/Undergrounding",
     "https://www.mlit.go.jp/road/road/traffic/chicyuka/",
     "https://www.japantimes.co.jp/opinion/2019/10/12/editorials/expedite-burying-power-cables"
