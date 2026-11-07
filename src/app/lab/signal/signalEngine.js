@@ -2,15 +2,23 @@
 // chain, in WebGL2. Every pass is a stage of the real chain:
 //
 //   scene radiance (HDR, sun included)
-//   -> camera: lens glare, CCD wells, overflow bloom, vertical-register smear,
-//      retained overflow (lag), gamma, knee, white clip
+//   -> camera: lens glare, complementary-mosaic CCD wells, overflow bloom,
+//      vertical-register smear, retained overflow (lag), gamma, knee, a hot
+//      super-white clip (reference white is a quarter of the well)
 //   -> encoder: Y 4.2 MHz, I 1.3 MHz, Q 0.4 MHz, 3.58 MHz subcarrier, sync, burst
 //   -> VCR record: luma trap + LPF, chroma synchronously demodulated to a
-//      +/-500 kHz colour-under band, luma pre-emphasis and clip, FM modulator
-//      (3.4 MHz sync tip to 4.4 MHz white), phase integrated along the line
+//      +/-500 kHz colour-under band, RC pre-emphasis and clip, FM modulator
+//      (3.4 MHz sync tip to 4.4 MHz white), phase run on from line to line
 //   -> tape: RF from the head's own track and the same-azimuth track two over,
-//      band-limited RF noise, head-response loss, dropouts, head switch,
-//      timebase error per line; FM discriminator; de-emphasis
+//      head-amp noise, spacing flutter, the channel's spacing loss and steep
+//      top edge, dropouts, head switch, timebase error per line; limiter and
+//      pulse-count discriminator; de-emphasis
+//
+// Noise is kept to its mechanisms: in track the picture is nearly clean. A
+// carrier driven past the top of the channel (super-white, pre-emphasis
+// overshoot) sinks toward the limiter's slicing level, and only there does
+// the discriminator fail: crossings bunch, go missing, and white turns into
+// black streaks that de-emphasis drags out to the right.
 //   -> VCR playback: dropout compensator (1H substitution), 1H chroma comb,
 //      chroma re-modulated with the AFC/APC phase error
 //   -> TV: sync from the flywheel PLL, luma notch, chroma demod against the
@@ -170,29 +178,50 @@ void main(){
 }`;
 
 // Readout and camera processing; second target keeps overflow for the next field.
+// The CCD is a complementary mosaic (Ye, Cy, Mg wells): each well fills with a
+// sum of two primaries, so at the edge of a blown highlight they clip one at a
+// time and the matrix back to RGB swings into false colour, magenta first.
 const FS_CAMOUT = `${HEAD}
 uniform sampler2D uQ; uniform sampler2D uB; uniform sampler2D uCol;
-uniform float uSmear; uniform float uLag; uniform float uLagCap;
+uniform float uSmear; uniform float uLag; uniform float uLagCap; uniform float uWhite; uniform float uFalse;
 layout(location = 1) out vec4 o2;
+vec3 charge(int x, int y){
+  x = clamp(x, 0, ${CAM_W - 1});
+  vec3 q = texelFetch(uQ, ivec2(x, y), 0).rgb;
+  return min(q, vec3(2.0)) + texelFetch(uB, ivec2(x, y), 0).rgb + uSmear * texelFetch(uCol, ivec2(x, 0), 0).rgb;
+}
+vec3 well(vec3 x){ return min(mix(x, 1.0 - 0.15 * exp(-(x - 0.85) / 0.15), step(0.85, x)), vec3(1.0)); }
 void main(){
   ivec2 p = ivec2(gl_FragCoord.xy);
   vec3 q = texelFetch(uQ, p, 0).rgb;
-  vec3 b = texelFetch(uB, p, 0).rgb;
-  vec3 col = texelFetch(uCol, ivec2(p.x, 0), 0).rgb;
-  vec3 s = min(q, vec3(1.0)) + b + uSmear * col;
-  // well capacity: linear, then a short shoulder into hard saturation
-  s = mix(s, 1.0 - 0.15 * exp(-(s - 0.85) / 0.15), step(0.85, s));
-  s = min(s, vec3(1.0));
-  // shot and amplifier noise
+  // the Ye, Cy and Mg sites sit side by side, a CCD cell (~2 samples) apart.
+  // The optical low-pass makes them agree while the wells are linear; once a
+  // well clips and its neighbour does not they disagree, and at a blown edge
+  // the rising side decodes cyan and the falling side magenta-red
+  vec3 cL = charge(p.x - 2, p.y), c = charge(p.x, p.y), cR = charge(p.x + 2, p.y);
+  vec3 e0 = 0.5 * vec3(c.r + c.g, c.g + c.b, c.r + c.b); // Ye, Cy, Mg
+  vec3 e1 = 0.5 * vec3(cL.r + cL.g, cR.g + cR.b, c.r + c.b);
+  float clip = smoothstep(0.6, 1.0, max(max(max(e0.x, e0.y), e0.z), max(max(e1.x, e1.y), e1.z)));
+  vec3 w = well(e0);
+  vec3 wx = well(mix(e0, e1, clip));
+  vec3 s = max(vec3(w.x + w.z - w.y, w.x + w.y - w.z, w.y + w.z - w.x), 0.0);
+  vec3 sx = vec3(wx.x + wx.z - wx.y, wx.x + wx.y - wx.z, wx.y + wx.z - wx.x);
+  // the colour-difference path never sees the luma's knee or white clip (no
+  // highlight chroma suppression on a cheap camera), so the false colour
+  // rides out of the blown edge at full strength
+  vec3 fd = sx - s;
+  fd -= dot(fd, vec3(0.3, 0.59, 0.11));
+  // shot and amplifier noise: a few electrons' worth, not a texture
   vec2 n = gauss2(p.x, p.y, uFrame * 3 + 1);
-  s += (sqrt(s * 0.00012) + 0.0015) * vec3(n.x, n.x * 0.7 + n.y * 0.3, n.y);
+  s += (sqrt(s * 0.00002) + 0.0004) * vec3(n.x, n.x * 0.7 + n.y * 0.3, n.y);
   // camera colour matrix: camcorders ran their primaries hot
   float ly = dot(s, vec3(0.3, 0.59, 0.11));
-  vec3 v = max((ly + (s - ly) * 1.35) * 1.08, 0.0);
-  // gamma with a linear toe (0.45), then the knee and white clip
+  // reference white is a quarter of the well: only the sun fills one
+  vec3 v = max((ly + (s - ly) * 1.35) * 4.3, 0.0);
+  // gamma with a linear toe (0.45), then the knee and a hot white clip
   vec3 g = mix(4.5 * v, 1.099 * pow(v, vec3(0.45)) - 0.099, step(0.018, v));
   g = mix(g, 0.86 + (g - 0.86) * 0.32, step(0.86, g));
-  g = min(g, vec3(1.07));
+  g = min(g, vec3(uWhite)) + uFalse * fd;
   o = vec4(g, 1.0);
   o2 = vec4(min(max(q - 1.0, 0.0), vec3(uLagCap)) * uLag, 1.0);
 }`;
@@ -257,21 +286,24 @@ void main(){
   o = vec4(Y, uv, 1.0);
 }`;
 
-// Pre-emphasis, clip, FM modulator frequency.
+// Pre-emphasis (an RC high-shelf, so causal: the overshoot sits just after a
+// rising edge), white and dark clip, FM modulator frequency.
 const FS_FM = `${HEAD}
-uniform sampler2D uRec; uniform float uKE[25]; uniform float uEmph; uniform vec2 uClip;
+uniform sampler2D uRec; uniform float uKE[33]; uniform vec2 uClip;
 void main(){
   int x = int(gl_FragCoord.x); int row = int(gl_FragCoord.y);
   vec4 r = texelFetch(uRec, ivec2(x, row), 0);
-  float lp = 0.0;
-  for (int k = -12; k <= 12; k++) lp += uKE[k + 12] * texelFetch(uRec, ivec2(clamp(x + k, 0, LW - 1), row), 0).r;
-  float y = r.r + uEmph * (r.r - lp);
+  float y = 0.0;
+  for (int k = 0; k < 33; k++) y += uKE[k] * texelFetch(uRec, ivec2(max(x - k, 0), row), 0).r;
   y = clamp(y, uClip.x, uClip.y);
   float fm = 3.4 + (y + 40.0) / 140.0;
   o = vec4(fm / FS, r.g, r.b, fm);
 }`;
 
-// FM phase: prefix sum along the line in two passes (blocks of 32).
+// FM phase: prefix sum along the line in two passes (blocks of 32). The
+// first pass also keeps the carrier's mean frequency over the playback
+// channel's memory (~0.6 us): a brief pre-emphasis spike is mostly sideband
+// and gets through, a carrier parked up there does not.
 const FS_PREFIX_A = `${HEAD}
 uniform sampler2D uFm;
 void main(){
@@ -280,7 +312,9 @@ void main(){
   float s = 0.0;
   for (int i = b0; i <= x; i++) s += texelFetch(uFm, ivec2(i, row), 0).r;
   vec4 r = texelFetch(uFm, ivec2(x, row), 0);
-  o = vec4(fract(s), r.g, r.b, r.a);
+  float fa = 0.0;
+  for (int k = -4; k <= 4; k++) fa += texelFetch(uFm, ivec2(clamp(x + k, 0, LW - 1), row), 0).a;
+  o = vec4(fract(s), r.g, r.b, fa / 9.0);
 }`;
 const FS_PREFIX_B = `${HEAD}
 uniform sampler2D uA;
@@ -293,10 +327,23 @@ void main(){
   o = vec4(fract(s), r.g, r.b, r.a);
 }`;
 
+// The carrier's phase runs on through blanking from line to line: each row's
+// starting phase is the sum of every whole line before it in the field.
+const FS_ROWOFF = `${HEAD}
+uniform sampler2D uPhi;
+void main(){
+  int row = int(gl_FragCoord.y);
+  int fb = (row / FHL) * FHL;
+  float s = 0.0;
+  for (int r = fb; r < row; r++) s = fract(s + texelFetch(uPhi, ivec2(LW - 1, r), 0).r);
+  o = vec4(s, 0.0, 0.0, 1.0);
+}`;
+
 // Head, tape and FM discriminator.
 const FS_TAPE = `${HEAD}
-uniform sampler2D uPhi; uniform sampler2D uP;
-uniform float uHR; uniform float uCNoise; uniform float uCDelay; uniform float uNoiseK[9];
+uniform sampler2D uPhi; uniform sampler2D uP; uniform sampler2D uOff;
+uniform float uHR; uniform float uCNoise; uniform float uCDelay;
+uniform vec2 uEdge; uniform float uLim; uniform float uFlutter;
 vec4 par(int c, int row){ return texelFetch(uP, ivec2(c, row), 0); }
 float dropMul(float x, vec4 d, float dep0, float dep1){
   float m = 1.0;
@@ -305,53 +352,89 @@ float dropMul(float x, vec4 d, float dep0, float dep1){
   return m;
 }
 vec2 cis(float a){ return vec2(cos(a), sin(a)); }
+// continuous carrier phase (cycles) at stream position s of a row
+float pc(int row, int i){
+  int fb = (row / FHL) * FHL;
+  if (i < 0) { i += LW; row -= 1; } else if (i >= LW) { i -= LW; row += 1; }
+  if (row < fb || row >= fb + FHL) return 0.0;
+  return texelFetch(uPhi, ivec2(i, row), 0).r + texelFetch(uOff, ivec2(0, row), 0).r;
+}
+float phaseC(int row, float s){ float fl = floor(s); int i = int(fl); float a = pc(row, i); float b = pc(row, i + 1); float d = b - a; d -= floor(d + 0.5); return a + (s - fl) * d; }
+// the carrier's mean frequency over the channel's memory (see FS_PREFIX_A)
+float fAvg(int row, float s){ return sinterp(uPhi, row, s).w; }
+// playback response: spacing loss tilts it, then the top of the channel (head
+// resonance, the luma band-pass skirt) closes steeply
+float hrf(float f){ float r = max(f - 3.4, 0.0) / (uEdge.x - 3.4); return exp(-uHR * max(f - 3.4, 0.0)) * inversesqrt(1.0 + pow(r, 2.0 * uEdge.y)); }
 void main(){
   int x = int(gl_FragCoord.x); int row = int(gl_FragCoord.y);
   int f = row / FHL; int l = row - f * FHL;
   vec4 p0 = par(0, row), p1 = par(1, row), p2 = par(2, row), p3 = par(3, row), p4 = par(4, row);
   float e = p0.x, A = p0.y, B = p0.z, dFar = p0.w;
   float sigma = p3.x, xs = p3.y, jump = p3.z;
-  vec2 ph = hash2(row, 77, uFrame);
+  // the far track is another recording: its own field-start phase
+  float phFar = hash2(f, 77, uFrame).y;
   // H-alignment: the same-azimuth track two over carries the picture three
   // field lines away at this point of the scan
   int rowF = clamp(row + 3, f * FHL, f * FHL + FHL - 1);
-  // band-limited RF noise around the carrier (2-6 MHz)
-  vec2 w[10];
-  for (int j = 0; j < 10; j++) w[j] = gauss2(x - 5 + j, row, uFrame * 7 + 3);
-  float om = TAU * 3.9 / FS;
-  vec2 n1 = vec2(0.0), n0 = vec2(0.0);
-  for (int k = -4; k <= 4; k++) {
-    vec2 h = uNoiseK[k + 4] * cis(om * float(k));
-    vec2 a = w[5 - k], b = w[4 - k];
-    n1 += vec2(h.x * a.x - h.y * a.y, h.x * a.y + h.y * a.x);
-    n0 += vec2(h.x * b.x - h.y * b.y, h.x * b.y + h.y * b.x);
-  }
-  vec2 rf[2];
-  for (int q = 0; q < 2; q++) {
+  vec2 rf[3];
+  for (int q = 0; q < 3; q++) {
     float xp = float(x - 1 + q);
     float ee = (xs >= 0.0 && xp >= xs) ? e + jump : e;
     float xr = xp - ee;
-    float phO = phaseAt(uPhi, row, xr);
-    float fO = sinterp(uPhi, row, xr).w;
-    float phF = phaseAt(uPhi, rowF, xr - dFar);
-    float fF = sinterp(uPhi, rowF, xr - dFar).w;
+    float phO = phaseC(row, xr);
+    float phF = phaseC(rowF, xr - dFar) + phFar;
     float dm = dropMul(xp, p2, p3.w, p4.w);
-    // spacing loss: the playback falls off exponentially with frequency
-    float a = A * exp(-uHR * (fO - 3.4)) * dm;
-    float b = B * exp(-uHR * (fF - 3.4)) * dm;
+    float a = A * hrf(fAvg(row, xr)) * dm;
+    float b = B * hrf(fAvg(rowF, xr - dFar)) * dm;
     float sg = sigma * (1.0 + ((xs >= 0.0 && abs(xp - xs) < 14.0) ? 9.0 : 0.0));
-    rf[q] = a * cis(TAU * (phO + ph.x)) + b * cis(TAU * (phF + ph.y)) + sg * (q == 1 ? n1 : n0);
+    // head-to-tape spacing flutters with the tape's surface: a few dB of AM,
+    // which FM shrugs off until the carrier is marginal
+    float sp = xp / 9.0;
+    float sf = floor(sp);
+    float h0 = hash2(int(sf), row, uFrame * 13 + 5).x, h1 = hash2(int(sf) + 1, row, uFrame * 13 + 5).x;
+    float fu = sp - sf;
+    a *= 1.0 - uFlutter * mix(h0, h1, fu * fu * (3.0 - 2.0 * fu));
+    // head-amp noise, band-limited a little by the RF amplifier
+    vec2 nz = gauss2(x - 1 + q, row, uFrame * 7 + 3) * 0.6 + gauss2(x + q, row, uFrame * 7 + 3) * 0.8;
+    rf[q] = a * cis(TAU * phO) + b * cis(TAU * phF) + sg * nz;
   }
-  float d = atan(rf[1].y, rf[1].x) - atan(rf[0].y, rf[0].x);
-  d -= TAU * floor(d / TAU + 0.5);
-  float fq = d / TAU * FS;
+  // limiter + pulse-count discriminator: a pulse at every crossing of the
+  // limiter's slicing level, and the pulse rate is the frequency. The level
+  // sits a little off zero (offset, hysteresis), set against the RF the AGC
+  // expects. A carrier that has sunk below it makes no crossings at all and
+  // the output falls toward zero frequency: white goes black. Just above it
+  // the crossings bunch into pairs and the carrier itself leaks through.
+  float lim = uLim * (A + B) * exp(-uHR * 0.6);
+  // The limiter's state is read off each sample's own value, so the two
+  // intervals that share a sample always agree on it; between samples the
+  // carrier is followed in quarter steps (a pair of crossings closer than
+  // that is too short a pulse for the one-shot and is lost, as in the deck).
+  float n = 0.0;
+  for (int iv = 0; iv < 2; iv++) {
+    vec2 z0 = rf[iv], z1 = rf[iv + 1];
+    float a0 = length(z0), a1 = length(z1);
+    float t0 = atan(z0.y, z0.x);
+    float dth = atan(z1.y, z1.x) - t0;
+    dth -= TAU * floor(dth / TAU + 0.5);
+    float v = z0.x - lim;
+    for (int j = 1; j <= 4; j++) {
+      float u = float(j) * 0.25;
+      float v1 = j == 4 ? z1.x - lim : mix(a0, a1, u) * cos(t0 + dth * u) - lim;
+      if ((v > 0.0) != (v1 > 0.0)) {
+        float uc = (float(j - 1) + v / (v - v1)) * 0.25;
+        n += iv == 0 ? uc : 1.0 - uc;
+      }
+      v = v1;
+    }
+  }
+  float fq = n * 0.5 * FS;
   float Y = (fq - 3.4) * 140.0 - 40.0;
 
   // colour-under: own track, the far track, and the adjacent track's
   // crosstalk (phase-rotated 90 degrees a line by PS, so the comb removes it)
   float xc = float(x) - e - uCDelay;
   float dm = dropMul(float(x), p2, p3.w, p4.w);
-  float far = max(B - 0.08 * p4.z, 0.0);
+  float far = max(B - 0.04 * p4.z, 0.0);
   vec2 uvO = sinterp(uPhi, row, xc).yz;
   vec2 uvF = sinterp(uPhi, rowF, xc - dFar).yz;
   float ps = (l & 1) == 0 ? 1.0 : -1.0;
@@ -363,19 +446,20 @@ void main(){
   float th = p1.y + p1.z * float(x);
   float ct = cos(th), st = sin(th);
   vec2 rot = vec2(uv.x * ct - uv.y * st, uv.y * ct + uv.x * st);
-  float flag = (dm < 0.1) ? 1.0 : 0.0;
+  float flag = dm < 0.1 ? 1.0 : 0.0;
   o = vec4(Y, rot, flag);
 }`;
 
-// Playback luma LPF + de-emphasis, chroma LPF.
+// Playback luma LPF and trap, then de-emphasis. De-emphasis is the inverse RC
+// shelf, so it is causal too: a click leaves a tail running off to the right.
 const FS_POST = `${HEAD}
-uniform sampler2D uT; uniform float uKP[33]; uniform float uKCp[33];
+uniform sampler2D uT; uniform float uKP[96]; uniform float uKCp[33];
 void main(){
   int x = int(gl_FragCoord.x); int row = int(gl_FragCoord.y);
   float Y = 0.0; vec2 uv = vec2(0.0); float fl = 0.0;
+  for (int j = 0; j < 96; j++) Y += uKP[j] * texelFetch(uT, ivec2(clamp(x + 16 - j, 0, LW - 1), row), 0).r;
   for (int k = -16; k <= 16; k++) {
     vec4 t = texelFetch(uT, ivec2(clamp(x + k, 0, LW - 1), row), 0);
-    Y += uKP[k + 16] * clamp(t.r, -400.0, 400.0);
     uv += uKCp[k + 16] * t.gb;
     if (k >= -8 && k <= -3) fl = max(fl, t.a);
   }
@@ -466,6 +550,17 @@ export async function createSignal(host, { embedded = false } = {}) {
   const stillT = parseFloat(query.get("t") || "4");
   const raw = query.has("raw");
   const glare = parseFloat(query.get("glare") || "0.08");
+  // The over-white failure, as numbers. The camcorder clips white at 120%
+  // (super-white); its colour-difference gain at a blown edge; the top of the
+  // playback channel (MHz) and how steeply it closes; and the limiter's
+  // slicing level against the RF the AGC expects. Together they put a parked
+  // super-white carrier just above the slicing level, so flutter and
+  // crosstalk tip it under, while 100 IRE white stays six times clear.
+  const WHITE = 1.2;
+  const FALSE_C = 10;
+  const EDGE_F = 4.46;
+  const EDGE_N = 16;
+  const LIM = 0.12;
 
   // ---- GL helpers
   const compile = (type, src) => {
@@ -582,6 +677,7 @@ export async function createSignal(host, { embedded = false } = {}) {
     fm: program(FS_FM),
     pa: program(FS_PREFIX_A),
     pb: program(FS_PREFIX_B),
+    rowoff: program(FS_ROWOFF),
     tape: program(FS_TAPE),
     post: program(FS_POST),
     play: program(FS_PLAY),
@@ -632,6 +728,7 @@ export async function createSignal(host, { embedded = false } = {}) {
   const S = [0, 1, 2, 3, 4].map(() => f32(SIG_W, SIG_H));
   const tvTex = f16(CAM_W, CAM_H, gl.LINEAR);
   const paramTex = f32(PARAM_COLS, SIG_H);
+  const offTex = f32(1, SIG_H);
 
   // ---- fixed kernels
   const K = {
@@ -640,32 +737,50 @@ export async function createSignal(host, { embedded = false } = {}) {
     Q: kernel(gaussLP(0.4), 14),
     Yr: kernel((f) => gaussLP(3.1)(f) * notch(3.58, 0.45, 0.97)(f), 8),
     Cr: kernel(gaussLP(0.5), 14),
-    E: kernel(gaussLP(0.75), 12),
     N: kernel((f) => notch(3.58, 0.6, 0.96)(f) * gaussLP(3.8)(f) * (1 + 0.35 * Math.sin(Math.min(1, f / 2.6) * Math.PI)), 10),
     Ct: kernel(gaussLP(0.85), 10),
   };
-  const noiseK = new Float32Array(9);
-  {
-    let ss = 0;
-    for (let k = -4; k <= 4; k++) {
-      noiseK[k + 4] = Math.exp(-(k * k) / (2 * 1.1 * 1.1));
-      ss += noiseK[k + 4] ** 2;
-    }
-    for (let k = 0; k < 9; k++) noiseK[k] /= Math.sqrt(ss);
-  }
+  // VHS emphasis: a high-shelf of +10 dB with an RC corner near 0.45 MHz on
+  // record, and its exact inverse on playback. Both are one-pole networks.
   const EMPH = 2.2;
+  const EA = Math.exp((-2 * Math.PI * 0.45) / FS);
+  const preEmph = new Float32Array(33);
+  {
+    let neg = 0;
+    for (let k = 1; k < 33; k++) neg += (preEmph[k] = -EMPH * (1 - EA) * Math.pow(EA, k));
+    preEmph[0] = 1 + EMPH - EMPH * (1 - EA);
+    const sc = (preEmph[0] - 1) / -neg; // exact unity at DC after truncation
+    for (let k = 1; k < 33; k++) preEmph[k] *= sc;
+  }
+  const deEmph = new Float64Array(64);
+  {
+    for (let n = 0; n < 64; n++) {
+      let v = n === 0 ? 1 : 0;
+      for (let k = 1; k <= Math.min(n, 32); k++) v -= preEmph[k] * deEmph[n - k];
+      deEmph[n] = v / preEmph[0];
+    }
+    const sum = deEmph.reduce((a, b) => a + b, 0);
+    for (let n = 0; n < 64; n++) deEmph[n] /= sum;
+  }
+  // a symmetric FIR (taps -16..16) followed by the causal de-emphasis, as one
+  // kernel over delays -16..79
+  const withDeEmph = (h) => {
+    const out = new Float32Array(96);
+    for (let i = 0; i < 33; i++) for (let n = 0; n < 64; n++) out[i + n] += h[i] * deEmph[n];
+    return out;
+  };
   let wearKernels = null;
   let wearKey = -1;
   const kernelsFor = (g) => {
     const key = Math.round(g * 40);
     if (key === wearKey) return wearKernels;
     wearKey = key;
-    const ge = gaussLP(0.75);
     const fcY = 2.9 / Math.pow(g, 0.4);
     const fcC = 0.5 / Math.pow(g, 0.3);
     wearKernels = {
-      // playback luma: LPF, the 3.58 MHz trap before Y and C are recombined, de-emphasis
-      P: kernel((f) => (butter(fcY, 6)(f) * notch(3.58, 0.75, 0.97)(f)) / (1 + EMPH * (1 - ge(f))), 16),
+      // playback luma: LPF and a shallow 3.58 MHz trap (a cheap deck), then
+      // de-emphasis. What the trap lets by, the TV decodes as colour.
+      P: withDeEmph(kernel((f) => butter(fcY, 4)(f) * notch(3.58, 0.6, 0.75)(f), 16)),
       Cp: kernel(gaussLP(fcC), 16),
     };
     return wearKernels;
@@ -751,7 +866,7 @@ export async function createSignal(host, { embedded = false } = {}) {
       a.t("uRad", radTex);
       a.t("uRes", rIn);
       a.f("uSway", ...sway);
-      a.f("uE", 0.42);
+      a.f("uE", 0.42 / 4);
       a.t("uGl", glTex);
       a.f("uGlare", glare);
     });
@@ -768,6 +883,8 @@ export async function createSignal(host, { embedded = false } = {}) {
       a.f("uSmear", 1.1e-6);
       a.f("uLag", 0.55);
       a.f("uLagCap", 6);
+      a.f("uWhite", WHITE);
+      a.f("uFalse", FALSE_C);
     });
     run(P.encode, [S[0]], (a) => {
       a.t("uCam", camTex);
@@ -783,19 +900,22 @@ export async function createSignal(host, { embedded = false } = {}) {
     });
     run(P.fm, [S[2]], (a) => {
       a.t("uRec", S[1]);
-      a.f("uKE", K.E);
-      a.f("uEmph", EMPH);
+      a.f("uKE", preEmph);
       a.f("uClip", -40 - 38, 100 + 62);
     });
     run(P.pa, [S[3]], (a) => a.t("uFm", S[2]));
     run(P.pb, [S[4]], (a) => a.t("uA", S[3]));
+    run(P.rowoff, [offTex], (a) => a.t("uPhi", S[4]));
     run(P.tape, [S[0]], (a) => {
       a.t("uPhi", S[4]);
       a.t("uP", paramTex);
+      a.t("uOff", offTex);
+      a.f("uEdge", EDGE_F, EDGE_N);
+      a.f("uLim", LIM);
+      a.f("uFlutter", 0.45 + 0.3 * wearS);
       a.f("uHR", 0.3 + 0.85 * wearS);
-      a.f("uCNoise", 5 * Math.sqrt(g));
-      a.f("uCDelay", 5 + 2.5 * (g - 1));
-      a.f("uNoiseK", noiseK);
+      a.f("uCNoise", 1.2 * g);
+      a.f("uCDelay", 7 + 2.5 * (g - 1));
     });
     run(P.post, [S[1]], (a) => {
       a.t("uT", S[0]);

@@ -88,7 +88,10 @@ export function createModel(seed = 7) {
     const sg = Math.sqrt(g);
     const slope = 0.62 + 0.5 * wear; // track-angle mismatch over a field (pitches)
     const jitter = 0.22 * sg;
-    const sigma = 0.011 * sg;
+    // head-amp and tape noise. A good tape in track is nearly clean: the
+    // noise only shows where the carrier itself has sunk (mistracking, wear,
+    // or a carrier deviated past the top of the band).
+    const sigma = 0.0026 * Math.pow(g, 1.3);
     const kappa = 7; // samples of skew per unit tension error per line
     // Turning the tracking knob is the capstan slipping phase: a momentary
     // tape-speed change, which shifts the line rate (writing speed 5.8 m/s
@@ -152,7 +155,8 @@ export function createModel(seed = 7) {
         const A = overlap(off, 0);
         const adj = overlap(off, 1) + overlap(off, -1);
         const far = overlap(off, 2) + overlap(off, -2);
-        const B = far + 0.08 * adj;
+        // the neighbour's opposite azimuth costs it ~28 dB at the carrier
+        const B = far + 0.04 * adj;
         const dFar = dFarBase + (off > 0 ? 1 : -1) * 0.8;
 
         // TV sync separator
