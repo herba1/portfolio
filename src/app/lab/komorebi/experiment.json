@@ -21,6 +21,13 @@
       "author": "Greg Zaal (HDRI), Rico Cilliers (backplates)",
       "licence": "CC0",
       "note": "16K linear HDRI, reprojected offline to a stereographic view (yaw 36, pitch 64 up, 140 degrees), lens veil and diffraction spikes removed, sky rebuilt, trees split into three depth layers with Depth Anything V2. Sun measured at azimuth 35.9, altitude 24.2; drawn about 5 degrees left of it (it stood in an open gap), just behind the ragged edge of a cypress."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
+      "author": "Greg Zaal (original), Jarod Guest (sky edits)",
+      "licence": "CC0",
+      "note": "The cumulus. 8K linear puresky HDRI, reprojected to the same stereographic upward view and turned so its sun lands exactly on the drawn sun (tilted 24 degrees down, rolled 15 degrees about the sun axis), so every cloud is lit from where the sun is drawn. Clouds unmixed from their clear sky by blue excess, relit to the scene's sun and skylight, highlights rolled off below the film's clip, composited behind the needle mattes."
     }
   ]
 }

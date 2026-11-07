@@ -13,6 +13,15 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // part filled in behind the nearer layers so a moving crown uncovers foliage
 // or sky, never a hole.
 //
+// The cumulus come from a second capture, Poly Haven's
+// kloofendal_48d_partly_cloudy_puresky, reprojected to the same upward view
+// and turned so its sun lands on the drawn sun: every cloud keeps its true
+// lighting, sunlit tops towards the sun and skylight-blue undersides, and the
+// edge of the big cumulus beside the sun glows. Offline the clouds were
+// unmixed from their own pale sky (cover and premultiplied light), relit to
+// this sun and skylight, and rolled off below the film's clip; here they lie
+// over the deep Roman sky and behind every needle.
+//
 // Wind: every layer is split into a few branches, each a damped spring with
 // its own natural frequency (big near crowns slow and wide, far trees quick
 // and small), driven by the drag of the air at its centre. At rest a breeze
@@ -35,6 +44,9 @@ const AH = 2100;
 const ASPECT = AW / AH; // 0.8, a 4:5 print
 const SKY = [210, 262];
 const LOG = [-14, 2]; // canopy.webp: v = (log2(c) - LO) / (HI - LO)
+// clouds.webp: rgb = log2(P + 2^LO) mapped LO..HI, P the cloud light
+// premultiplied by its cover; a = cover.
+const CLOUD_LOG = [-9, 6];
 
 // Sun, in asset uv (y down): placed just behind the cypress edge; the
 // capture's sun was at (0.4502, 0.8798).
@@ -99,6 +111,8 @@ uniform sampler2D uCanopy;   // log-encoded foliage light, unpremultiplied
 uniform sampler2D uLayers;   // r far, g mid, b near: coverage
 uniform sampler2D uBranches; // three tiles stacked: per-layer branch weights
 uniform sampler2D uSky;      // linear sky, no sun, no lens veil
+uniform sampler2D uClouds;   // cumulus: log premultiplied light, cover in a
+uniform vec2 uCLog;
 uniform vec4 uCrop;          // asset uv origin xy, size zw
 uniform vec2 uRes;           // target px
 uniform vec2 uOff[12];       // branch offsets, asset widths (x) and widths (y)
@@ -135,6 +149,11 @@ void main() {
   float cover = 1.0 - smoothstep(1.0 - edge, 1.0 + edge, d);
   float mu = sqrt(max(1.0 - d * d, 0.0));
   col += uSunL * (uSunR * uSunR) / (r * r) * cover * (0.4 + 0.6 * mu) / 0.8;
+
+  // Cumulus, in front of the sky and behind every needle.
+  vec4 cl = texture(uClouds, uv);
+  vec3 cP = exp2(uCLog.x + cl.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
+  col = col * (1.0 - cl.a) + cP * smoothstep(0.0, 2.0 / 255.0, cl.a);
 
   // Back to front; each layer bends with its own branches.
   vec2 d0 = disp(0, uv);
@@ -363,7 +382,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
   if (!gl) throw new Error("webgl2 unavailable");
   const floatOk = !!gl.getExtension("EXT_color_buffer_float");
 
-  const [canopyImg, layersImg, branchImg, skyBuf, branchMeta] = await Promise.all([
+  const [canopyImg, layersImg, branchImg, skyBuf, branchMeta, cloudImg] = await Promise.all([
     bitmap(`${ASSET}canopy.webp`),
     bitmap(`${ASSET}layers.webp`),
     bitmap(`${ASSET}branches.png`),
@@ -372,10 +391,12 @@ export async function createKomorebi(host, { embedded = false } = {}) {
       return r.arrayBuffer();
     }),
     fetch(`${ASSET}branches.json`).then((r) => r.json()),
+    bitmap(`${ASSET}clouds.webp`),
   ]);
   const texCanopy = imageTexture(gl, canopyImg);
   const texLayers = imageTexture(gl, layersImg);
   const texBranches = imageTexture(gl, branchImg);
+  const texClouds = imageTexture(gl, cloudImg);
   const texSky = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texSky);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
@@ -579,6 +600,8 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     bind(1, texLayers, "uLayers");
     bind(2, texBranches, "uBranches");
     bind(3, texSky, "uSky");
+    bind(4, texClouds, "uClouds");
+    gl.uniform2f(u.uCLog, CLOUD_LOG[0], CLOUD_LOG[1]);
     gl.uniform4fv(u.uCrop, L.crop);
     gl.uniform2f(u.uRes, L.pw, L.ph);
     gl.uniform2fv(u.uOff, offs);
@@ -688,7 +711,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
       film.destroy();
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
-      for (const t of [texCanopy, texLayers, texBranches, texSky]) gl.deleteTexture(t);
+      for (const t of [texCanopy, texLayers, texBranches, texSky, texClouds]) gl.deleteTexture(t);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);
