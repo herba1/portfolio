@@ -16,8 +16,11 @@ Layers (2400x1600):
                  structure colour (from dark core pixels only); the depth map
               decides only where to look; islands and sky-bright
               "structure" dropped
-              key.png G: cloud masses of the fill (blurred), which lead the
-              sky key a little
+              key.png B, G: sky key, 0 far .. 1 near, 16 bit (B high byte,
+                 G low): cloud density blurred to the scale of the masses, a
+                 third distance by elevation, rank-equalised over the open
+                 sky. 16 bit because the front is a soft band across a
+                 smooth field: at 8 bits it terraces into contour lines.
 
 Depth prep as in herb's CrowdVolt notes: percentile normalise, median filter,
 dilate near values (3 px at 1280, so 6 px here), slight blur so the shader
@@ -189,19 +192,49 @@ cloud = (1 - smoothstep(0.35, 0.75, sat)) * smoothstep(0.15, 0.5, y)
 cloud = cv2.GaussianBlur(cloud.astype(np.float32), (0, 0), 48)
 cloud = (cloud - cloud.min()) / max(1e-4, cloud.max() - cloud.min())
 
+# --- sky key, 0 far .. 1 near (B) ----------------------------------------
+# The developer reaches a cumulus core before its edge and the blue beyond,
+# so the sky's key is mostly cloud density. Read at the scale of the curds it
+# makes the front an iso-contour round every puff: dozens of islands, each
+# outlined. Blurred to the scale of the masses (sigma 3% of the width) it
+# makes a few large, smooth lobes that thread the cumulus. Then a third from
+# distance (cloud at a fixed height is nearer overhead, ~ 1 / sin(elevation)),
+# and rank-equalised over the open sky so the front covers it at an even pace.
+KD_W = 0.35
+PITCH, VFOV = np.radians(34), np.radians(40)
+wh = fill.min(2) / np.maximum(fill.max(2), 1e-4)
+dens = smoothstep(0.15, 0.9, wh) * smoothstep(0.12, 0.7, y)
+dens = cv2.GaussianBlur(dens.astype(np.float32), (0, 0), 0.03 * W)
+sky_px = alpha < 0.5
+lo, hi = np.percentile(dens[sky_px], 1), np.percentile(dens[sky_px], 99)
+dens = np.clip((dens - lo) / max(1e-4, hi - lo), 0, 1)
+vv = (np.arange(H, dtype=np.float32) + 0.5) / H
+el = PITCH + np.arctan((0.5 - vv) * 2 * np.tan(VFOV / 2))
+dist = np.log(1 / np.sin(el))
+kd = ((dist[-1] - dist) / (dist[-1] - dist[0]))[:, None] * np.ones((1, W), np.float32)
+ks = (KD_W * kd + (1 - KD_W) * dens).astype(np.float32)
+order = np.sort(ks[sky_px])
+sky_key = (np.searchsorted(order, ks, side="left") / max(1, len(order) - 1)).astype(np.float32)
+sky_key = cv2.GaussianBlur(sky_key, (0, 0), 4)
+
 os.makedirs(OUT, exist_ok=True)
 cv2.imwrite(os.path.join(OUT, "plate.webp"), np.round(srgb[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
 cv2.imwrite(os.path.join(OUT, "fill.webp"), np.round(l2s(fill)[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
 # alpha at full size (wires stay crisp); key and cloudness are smooth, so half
 save8(os.path.join(OUT, "alpha.png"), alpha)
-kc = np.stack([key_full, cloud, np.zeros_like(cloud)], 2)
-kc = cv2.resize(kc, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
-save8(os.path.join(OUT, "key.png"), kc[:, :, ::-1])
+ks = cv2.resize(sky_key, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
+ks16 = np.clip(np.round(ks * 65535), 0, 65535).astype(np.uint32)
+kr = cv2.resize(key_full, (W // 2, H // 2), interpolation=cv2.INTER_AREA)
+kr8 = np.clip(np.round(kr * 255), 0, 255).astype(np.uint8)
+# BGR on disk: B = sky high byte, G = sky low byte, R = structure key
+kc = np.stack([(ks16 >> 8).astype(np.uint8), (ks16 & 255).astype(np.uint8), kr8], 2)
+cv2.imwrite(os.path.join(OUT, "key.png"), kc)
 
 # previews
 save8(os.path.join(WK, "p-alpha.png"), alpha)
 save8(os.path.join(WK, "p-key.png"), key_full)
 save8(os.path.join(WK, "p-cloud.png"), cloud)
+save8(os.path.join(WK, "p-skykey.png"), sky_key)
 save8(os.path.join(WK, "p-fill.png"), l2s(fill)[:, :, ::-1])
 prem = np.clip(lin - (1 - alpha[..., None]) * fill, 0, 1)
 save8(os.path.join(WK, "p-fg.png"), l2s(prem + (1 - alpha[..., None]) * np.array([0.9, 0.2, 0.9]))[:, :, ::-1])
