@@ -5,6 +5,11 @@ import { createLigatureSound } from "./ligatureSound";
 // diagonal slope shared by every letter, pointed apexes. Units are cap
 // heights; y runs from the cap line (0) down to the baseline (1).
 //
+// Drawn, not constructed: the A's apex and the V's point overshoot the cap
+// line and baseline (a point that stops on the line looks short), and the
+// diagonals are a little lighter than the stems on the perpendicular (a
+// diagonal at full stem weight reads heavier than the stem beside it).
+//
 // Because every diagonal has the same slope, a pair of neighbours can be
 // pushed together until two strokes occupy exactly the same band. All
 // strokes are filled in one path with the nonzero rule, so overlapping
@@ -17,29 +22,38 @@ const INK = "#111110";
 const PAPER = "#f2f0eb";
 
 const S = 0.185; // stem
+const SD = S * 0.9; // diagonal stroke, measured on the perpendicular
 const HB = 0.16; // horizontal bars, a touch lighter
-const D = 0.56; // half-width of A and V at the baseline: the one slope
-const W = S * Math.sqrt(1 + D * D); // horizontal width of a diagonal stroke
+const D = 0.56; // the one slope: horizontal run per cap height
+const O = 0.016; // overshoot of the A's apex and the V's point
+const DP = D * (1 + O); // half-width of A and V at their open end
+const W = SD * Math.sqrt(1 + D * D); // horizontal width of a diagonal stroke
 const NW = 0.86;
 const TW = 0.94;
 const SB = 0.17; // loose, ordinary side bearing at rest
-const CB = 0.6; // A crossbar top
+const CB = 0.62; // A crossbar top, low enough to leave the counter open
 
 const N_DIAG = (() => {
-  let wd = S;
-  for (let i = 0; i < 8; i += 1) wd = S * Math.sqrt(1 + (NW - wd) * (NW - wd));
+  let wd = SD;
+  for (let i = 0; i < 8; i += 1) wd = SD * Math.sqrt(1 + (NW - wd) * (NW - wd));
   return wd;
 })();
 
+// The advance at which a diagonal of one letter lands exactly on the
+// matching diagonal of its neighbour: both outer edges shift by a stroke.
+const NEST = DP + D * O - W;
+
 const WORD = ["A", "V", "A", "N", "T"];
-const WIDTH = { A: 2 * D, V: 2 * D, N: NW, T: TW };
+const WIDTH = { A: 2 * DP, V: 2 * DP, N: NW, T: TW };
 // Left-edge to left-edge advance when a pair is locked.
 const LOCK = {
-  AV: D - W, // A's right leg and V's left leg become one band
-  // The V keeps one stroke of its own: against the second A it closes to a
-  // hairline channel, tight but not touching, so it still reads as a V.
-  VA: D + 0.045,
-  AN: 2 * D - S, // the A's foot leans flush into the N's stem
+  AV: NEST, // A's right leg and V's left leg become one band
+  // The V keeps its right leg. Against the second A it stops one stroke
+  // short of nesting, leaving a channel exactly as wide as the stroke:
+  // ink, paper, ink in equal parallel bands, so the V stays a V. (Fusing
+  // both legs leaves the V as nothing but the notch between two A's.)
+  VA: NEST + 2 * W,
+  AN: 2 * DP - S, // the A's foot leans flush into the N's stem
   NT: NW - S, // the T's arm caps the N's right stem
 };
 // The order the pairs give: the NT and AN locks come early, the deep AV
@@ -56,21 +70,21 @@ const rect = (x0, y0, x1, y1) => [
 // Each primitive: { pts, clip: [] } where clip is filled per frame.
 function glyph(ch, L) {
   if (ch === "A") {
-    const ax = L + D;
-    const j = W / D;
-    const lc = (y) => ax - D * y + W / 2;
-    const rc = (y) => ax + D * y - W / 2;
+    const ax = L + DP;
+    const j = W / D - O;
+    const lc = (y) => ax - D * (y + O) + W / 2;
+    const rc = (y) => ax + D * (y + O) - W / 2;
     return {
       leftLeg: [
-        [ax, 0],
-        [ax - D, 1],
-        [ax - D + W, 1],
+        [ax, -O],
+        [ax - DP, 1],
+        [ax - DP + W, 1],
         [ax, j],
       ],
       rightLeg: [
-        [ax, 0],
-        [ax + D, 1],
-        [ax + D - W, 1],
+        [ax, -O],
+        [ax + DP, 1],
+        [ax + DP - W, 1],
         [ax, j],
       ],
       bar: [
@@ -82,20 +96,20 @@ function glyph(ch, L) {
     };
   }
   if (ch === "V") {
-    const vx = L + D;
-    const j = 1 - W / D;
+    const vx = L + DP;
+    const j = 1 + O - W / D;
     return {
       leftLeg: [
-        [vx - D, 0],
-        [vx - D + W, 0],
+        [vx - DP, 0],
+        [vx - DP + W, 0],
         [vx, j],
-        [vx, 1],
+        [vx, 1 + O],
       ],
       rightLeg: [
-        [vx + D, 0],
-        [vx + D - W, 0],
+        [vx + DP, 0],
+        [vx + DP - W, 0],
         [vx, j],
-        [vx, 1],
+        [vx, 1 + O],
       ],
     };
   }
@@ -328,15 +342,15 @@ export function createLigature(host, { embedded = false } = {}) {
       const a = prims[i];
       const b = prims[i + 1];
       if (p.key === "AV") {
-        const vx = R + D;
-        a.rightLeg = clipPoly(a.rightLeg, [vx + D, 0], [vx, 1], 1);
-        const ax = L + D;
-        b.leftLeg = clipPoly(b.leftLeg, [ax, 0], [ax - D, 1], -1);
+        const vx = R + DP;
+        a.rightLeg = clipPoly(a.rightLeg, [vx + DP, 0], [vx, 1 + O], 1);
+        const ax = L + DP;
+        b.leftLeg = clipPoly(b.leftLeg, [ax, -O], [ax - DP, 1], -1);
       } else if (p.key === "VA") {
-        const ax = R + D;
-        a.rightLeg = clipPoly(a.rightLeg, [ax, 0], [ax + D, 1], 1);
-        const vx = L + D;
-        b.leftLeg = clipPoly(b.leftLeg, [vx - D, 0], [vx, 1], -1);
+        const ax = R + DP;
+        a.rightLeg = clipPoly(a.rightLeg, [ax, -O], [ax + DP, 1], 1);
+        const vx = L + DP;
+        b.leftLeg = clipPoly(b.leftLeg, [vx - DP, 0], [vx, 1 + O], -1);
       } else if (p.key === "AN") {
         a.rightLeg = clipPoly(a.rightLeg, [R + S, 0], [R + S, 1], 1);
       }
