@@ -17,6 +17,11 @@ import { createCloth, project, PX, ROPE } from "./cloth";
 // see-through: the bake split it into its fabric and a share of whatever is
 // behind it, so the sun shows through it wherever the sun really is.
 //
+// The sun: each frame samples how much of the disc the cloth leaves in view.
+// That share scales a lens veil over everything, lights the rims of the dress
+// and the black-and-white top that face it, and pulls the exposure down a
+// quarter stop on a spring, so a gust that uncovers it flares, then adapts.
+//
 // Query: ?gust=0..1 holds a steady gust (with ?dir=-1|1 and ?t=seconds of it,
 // default 2.4), simulated deterministically and frozen, for stills.
 // ?still=1 is the photograph with no wind. Numeric FILM keys override the grade.
@@ -42,7 +47,10 @@ const FILM = {
   bloomThreshold: 0.5,
   softness: 0.4,
   halation: 0.38,
-  halationThreshold: 0.75,
+  // low, so the blown disc's light reaches the red layer; inside the bright
+  // aureole the kit keeps halation off, so the plate paints the disc's thin
+  // warm ring itself
+  halationThreshold: 0.6,
   whitePoint: 1.25,
   contrast: 1.15,
   saturation: 1.04,
@@ -51,6 +59,39 @@ const FILM = {
   vignette: 0.18,
   highlightTint: [1, 1, 1],
 };
+
+// The sun. The plate's own glow is the photograph's: a grey-white veil over
+// the sky, with the disc the bake modelled back under the dress as a hard dot.
+// HALO is that glow's excess over the smooth sky (linear rgb, mean over 8 px
+// rings about meta.sun), measured off plate.webp against the bake's far-field
+// quadratic sky. The plate pass lifts it off and puts back an aureole that
+// glows cyan, a warm disc that blows out and rolls off, and a lens veil that
+// is only there when the disc is in view.
+const HALO_STEP = 8;
+const HALO = new Float32Array([
+  0.895, 0.851, 0.687, 0.689, 0.771, 0.638, 0.589, 0.668, 0.556, 0.562, 0.637, 0.529, 0.537, 0.608, 0.501,
+  0.507, 0.576, 0.478, 0.477, 0.543, 0.453, 0.449, 0.509, 0.426, 0.422, 0.476, 0.399, 0.396, 0.447, 0.373,
+  0.371, 0.421, 0.349, 0.342, 0.393, 0.325, 0.308, 0.365, 0.303, 0.28, 0.339, 0.284, 0.255, 0.315, 0.266, 0.234,
+  0.295, 0.249, 0.217, 0.277, 0.236, 0.2, 0.26, 0.223, 0.185, 0.244, 0.211, 0.171, 0.23, 0.2, 0.159, 0.217,
+  0.19, 0.147, 0.204, 0.178, 0.137, 0.193, 0.17, 0.127, 0.182, 0.16, 0.118, 0.173, 0.153, 0.11, 0.165, 0.147,
+  0.102, 0.155, 0.139, 0.096, 0.146, 0.134, 0.091, 0.139, 0.127, 0.086, 0.132, 0.121, 0.082, 0.126, 0.116,
+  0.077, 0.119, 0.11, 0.072, 0.113, 0.103, 0.067, 0.107, 0.097, 0.063, 0.1, 0.092, 0.06, 0.096, 0.089, 0.055,
+  0.09, 0.084, 0.052, 0.085, 0.08, 0.049, 0.081, 0.077, 0.045, 0.077, 0.075, 0.042, 0.072, 0.072, 0.04, 0.069,
+  0.069, 0.037, 0.065, 0.067, 0.035, 0.062, 0.064, 0.033, 0.059, 0.061, 0.031, 0.056, 0.058, 0.029, 0.053,
+  0.055, 0.027, 0.05, 0.052, 0.025, 0.048, 0.049, 0.024, 0.046, 0.047, 0.022, 0.044, 0.044, 0.021, 0.041, 0.042,
+  0.019, 0.038, 0.04, 0.018, 0.036, 0.038, 0.017, 0.034, 0.036, 0.016, 0.033, 0.035, 0.014, 0.031, 0.033, 0.014,
+  0.029, 0.031, 0.013, 0.028, 0.029, 0.012, 0.027, 0.028, 0.011, 0.025, 0.027, 0.011, 0.024, 0.025, 0.011,
+  0.023, 0.024, 0.01, 0.022, 0.022, 0.009, 0.021, 0.021, 0.009, 0.02, 0.021, 0.008, 0.019, 0.02, 0.008, 0.018,
+  0.019, 0.007, 0.017, 0.018, 0.007, 0.016, 0.017, 0.007, 0.015, 0.016, 0.006, 0.014, 0.015, 0.005, 0.013,
+  0.015, 0.005, 0.012, 0.014, 0.005, 0.011, 0.012, 0.004, 0.01, 0.011, 0.004, 0.009, 0.011, 0.004, 0.009, 0.01,
+  0.003, 0.008, 0.009, 0.003, 0.007, 0.008, 0.003, 0.006, 0.007, 0.002, 0.006, 0.006, 0.002, 0.005, 0.006,
+  0.002, 0.004, 0.005, 0.001, 0.004, 0.004, 0.001, 0.003, 0.003, 0.001, 0.002, 0.002, 0.001, 0.002, 0.002,
+  0.001, 0.001, 0.001, 0, 0.001, 0.001, 0, 0, 0
+]);
+const DISC = 20; // px, the disc the coverage is sampled over
+const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the lens
+const ADAPT = 0.25; // stops the exposure gives back with the disc in clear view
+const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -65,20 +106,73 @@ vec3 encode(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }`;
 
+// Lens veil: flare scattered in the lens, over the sky and the cloth alike, in
+// proportion to how much of the disc the cloth leaves in view. A broad pale
+// cyan lobe about a third of the frame across, and a tighter, whiter one.
+const SUN_GLSL = `
+uniform vec2 uSun;    // image px
+uniform float uGlare; // the disc in view, the dress counting for a little
+vec3 veil(vec2 p) {
+  vec2 d = p - uSun;
+  float r2 = dot(d, d);
+  return uGlare * (vec3(0.13, 0.25, 0.29) * exp(-r2 / (240.0 * 240.0)) + vec3(0.06, 0.08, 0.075) * exp(-r2 / (64.0 * 64.0)));
+}`;
+
 const PLATE_F = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uPlate;
+uniform vec2 uSize;
+uniform vec3 uHalo[${HALO.length / 3}];
+${SUN_GLSL}
 ${SRGB}
-void main() { o = vec4(encode(texture(uPlate, vec2(vUv.x, 1.0 - vUv.y)).rgb), 1.0); }`;
+const int NH = ${HALO.length / 3 - 1};
+vec3 haloAt(float r) {
+  float f = clamp(r / ${HALO_STEP.toFixed(1)} - 0.5, 0.0, float(NH));
+  int i = int(f);
+  return mix(uHalo[i], uHalo[min(i + 1, NH)], f - float(i));
+}
+void main() {
+  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
+  vec2 p = uv * uSize;
+  float r = distance(p, uSun);
+  vec3 h = haloAt(r);
+  // the sky with the photograph's grey veil lifted off
+  vec3 c = max(texture(uPlate, uv).rgb - h, 0.0);
+  // the aureole put back: the same falloff, pale cyan, eased off close in so
+  // the disc stands out of it
+  c += h.g * mix(0.45, 1.0, smoothstep(24.0, 360.0, r)) * vec3(0.5, 1.0, 1.1);
+  // the disc: warm-neutral, blown out to about 20 px, rolling off through a
+  // hot shoulder; a thin warm ring at its foot, where the sky is too bright
+  // for the film's own halation to show
+  c += vec3(1.0, 0.93, 0.8) * 2.4 * exp(-r * r / (15.0 * 15.0));
+  c += vec3(1.0, 0.8, 0.6) * 1.1 / (1.0 + r * r / (20.0 * 20.0));
+  float ring = (r - 30.0) / 7.0;
+  float wr = exp(-ring * ring);
+  c = mix(c, c * vec3(1.0, 0.84, 0.7) + vec3(0.1, 0.035, 0.0), 0.75 * wr);
+  c += veil(p);
+  o = vec4(encode(c), 1.0);
+}`;
 
 const BLIT_F = `#version 300 es
 precision highp float;
 in vec2 vUv;
 out vec4 o;
 uniform sampler2D uTex;
-void main() { o = vec4(texture(uTex, vUv).rgb, 1.0); }`;
+uniform vec2 uSunUv;  // the disc, in the print's uv
+uniform vec2 uRes;    // the print, device px
+uniform float uScale; // device px per image px
+uniform float uBlow;  // 0 for the raw view
+// The negative's shoulder: the disc is a hundred thousand times the sky, so
+// whatever the grade leaves near white at the sun goes to paper white, warm.
+void main() {
+  vec3 c = texture(uTex, vUv).rgb;
+  float d = length((vUv - uSunUv) * uRes) / uScale;
+  float l = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float blow = smoothstep(0.76, 0.97, l) * (1.0 - smoothstep(20.0, 40.0, d)) * uBlow;
+  o = vec4(mix(c, vec3(1.0, 0.982, 0.95), blow), 1.0);
+}`;
 
 // Cloth and rope: drawn where they are now, textured from where they were.
 const CLOTH_V = `#version 300 es
@@ -109,11 +203,15 @@ uniform vec2 uSize;
 uniform float uId;
 uniform vec3 uTau;
 uniform vec2 uBand; // mirror width past the left and right frame edge, 0 = not cut there
+uniform float uRim;  // how strongly this garment's edge catches the sun
+uniform float uOpen; // the share of the disc in clear view
+${SUN_GLSL}
 ${SRGB}
 const float INSET = 6.0; // the matte softens in the last pixels at the frame
 const float SHEAR = 0.8; // px of drop per px past the edge, for the print only
 float tri(float d, float b) { return b - abs(mod(d, 2.0 * b) - b); }
 float idAt(vec2 s) { return texelFetch(uIds, clamp(ivec2(s), ivec2(0), ivec2(uSize) - 1), 0).r * 255.0; }
+float alphaAt(vec2 s) { return abs(idAt(s) - uId) < 0.5 ? texture(uLayers, s / uSize).a : 0.0; }
 void main() {
   // Cloth the frame cut off has no pixels of its own: it is textured from
   // the band just inside the edge, mirrored back and forth, matte included,
@@ -144,6 +242,16 @@ void main() {
   if (L.a < 0.002) discard;
   vec3 B = texture(uBlur, clamp(vPos / uSize, 0.0, 1.0)).rgb;
   vec3 col = L.rgb * vShade.x + uTau * vShade.y * B;
+  if (uRim * uOpen > 0.0) {
+    // Rim: the edge that faces the sun, where the matte falls away towards
+    // it, catches the light coming round it; strongest close to the disc.
+    vec2 ts = uSun - vPos;
+    float ds = length(ts);
+    vec2 dir = ts / max(ds, 1.0);
+    float edge = clamp(L.a - 0.5 * (alphaAt(s + dir * 3.0) + alphaAt(s + dir * 9.0)), 0.0, 1.0);
+    col += vec3(1.0, 0.9, 0.74) * edge * exp(-ds / 380.0) * uOpen * uRim;
+  }
+  col += veil(vPos);
   o = vec4(encode(col) * L.a, L.a);
 }`;
 
@@ -362,6 +470,65 @@ export async function createSentaku(host, { embedded = false } = {}) {
   };
   const CAM = cloth.CAM;
 
+  // ---- the sun in view: sample the disc against the cloth where it is now
+  const sunPx = meta.sun;
+  const discPts = [];
+  for (let j = -3; j <= 3; j++) for (let i = -3; i <= 3; i++) if (i * i + j * j <= 10) discPts.push([sunPx[0] + (i * DISC) / 3, sunPx[1] + (j * DISC) / 3]);
+  const clothTris = idx.length - (ropeN - 1) * 6; // the rope is last, and ignored
+  const discT = new Float32Array(discPts.length);
+  let open = 0; // share of the disc no cloth covers
+  let glare = 0; // the same, the dress letting DRESS_T through
+  const coverage = () => {
+    const bx0 = sunPx[0] - DISC - 1;
+    const bx1 = sunPx[0] + DISC + 1;
+    const by0 = sunPx[1] - DISC - 1;
+    const by1 = sunPx[1] + DISC + 1;
+    discT.fill(1);
+    for (let t = 0; t < clothTris; t += 3) {
+      const a = idx[t] * 6;
+      const b = idx[t + 1] * 6;
+      const c = idx[t + 2] * 6;
+      const ax = vdata[a], ay = vdata[a + 1], bx = vdata[b], by = vdata[b + 1], cx = vdata[c], cy = vdata[c + 1];
+      if (Math.max(ax, bx, cx) < bx0 || Math.min(ax, bx, cx) > bx1 || Math.max(ay, by, cy) < by0 || Math.min(ay, by, cy) > by1) continue;
+      const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
+      if (Math.abs(den) < 1e-6) continue;
+      const id = gid[idx[t]];
+      for (let p = 0; p < discPts.length; p++) {
+        const [px, py] = discPts[p];
+        const w0 = ((by - cy) * (px - cx) + (cx - bx) * (py - cy)) / den;
+        const w1 = ((cy - ay) * (px - cx) + (ax - cx) * (py - cy)) / den;
+        const w2 = 1 - w0 - w1;
+        if (w0 < 0 || w1 < 0 || w2 < 0) continue;
+        // where on the photograph this point of cloth came from: is it the
+        // garment's own matte there, or the empty corner of a grid cell?
+        const ru = Math.round(w0 * vdata[a + 2] + w1 * vdata[b + 2] + w2 * vdata[c + 2]);
+        const rv = Math.round(w0 * vdata[a + 3] + w1 * vdata[b + 3] + w2 * vdata[c + 3]);
+        if (ru < 0 || rv < 0 || ru >= IW || rv >= IH || idPx[(rv * IW + ru) * 4] !== id) continue;
+        discT[p] = Math.min(discT[p], id === 3 ? DRESS_T : 0);
+      }
+    }
+    let o = 0;
+    let g = 0;
+    for (const v of discT) {
+      o += v === 1 ? 1 : 0;
+      g += v;
+    }
+    open = o / discT.length;
+    glare = g / discT.length;
+  };
+  // The exposure adapts to the disc on a spring, a beat behind the flare.
+  let adapt = 0;
+  let adaptV = 0;
+  const stepAdapt = (dt) => {
+    const w = 4.5;
+    const z = 0.72;
+    const n = Math.max(1, Math.ceil(dt * 60));
+    for (let i = 0; i < n; i++) {
+      adaptV += (w * w * (-ADAPT * open - adapt) - 2 * z * w * adaptV) * (dt / n);
+      adapt += adaptV * (dt / n);
+    }
+  };
+
   // ---- the wind
   const HIST = 240;
   const histA = new Float32Array(HIST);
@@ -466,6 +633,10 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, plateTex);
     gl.uniform1i(plateP.u.uPlate, 0);
+    gl.uniform2f(plateP.u.uSize, IW, IH);
+    gl.uniform2f(plateP.u.uSun, sunPx[0], sunPx[1]);
+    gl.uniform1f(plateP.u.uGlare, glare);
+    gl.uniform3fv(plateP.u["uHalo[0]"], HALO);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
@@ -473,6 +644,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     gl.useProgram(clothP.p);
     gl.uniform2f(clothP.u.uSize, IW, IH);
+    gl.uniform2f(clothP.u.uSun, sunPx[0], sunPx[1]);
+    gl.uniform1f(clothP.u.uGlare, glare);
+    gl.uniform1f(clothP.u.uOpen, open);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, layersTex);
     gl.uniform1i(clothP.u.uLayers, 0);
@@ -489,6 +663,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
       gl.uniform1f(clothP.u.uId, r.id);
       gl.uniform3f(clothP.u.uTau, r.tau[0], r.tau[1], r.tau[2]);
       gl.uniform2f(clothP.u.uBand, r.band[0], r.band[1]);
+      gl.uniform1f(clothP.u.uRim, RIM[r.id] ?? 0);
       gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);
     }
     gl.disable(gl.BLEND);
@@ -500,8 +675,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
   const render = (exposure = film0.exposure) => {
     if (!scene) build();
     writeVerts();
+    coverage();
     drawScene();
-    if (!rawView) film.render(scene.tex, { ...film0, exposure, grainSeed: tick * 7.31 }, developed.fbo);
+    if (!rawView) film.render(scene.tex, { ...film0, exposure: exposure + adapt, grainSeed: tick * 7.31 }, developed.fbo);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.disable(gl.SCISSOR_TEST);
@@ -513,6 +689,10 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, rawView ? scene.tex : developed.tex);
     gl.uniform1i(blitP.u.uTex, 0);
+    gl.uniform2f(blitP.u.uSunUv, sunPx[0] / IW, 1 - sunPx[1] / IH);
+    gl.uniform2f(blitP.u.uRes, rect.w, rect.h);
+    gl.uniform1f(blitP.u.uScale, rect.w / IW);
+    gl.uniform1f(blitP.u.uBlow, rawView ? 0 : 1);
     gl.bindVertexArray(quadVao);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
     gl.bindVertexArray(null);
@@ -532,6 +712,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
       pushGust(holdGust, dir);
       cloth.step(1 / 60, windFn);
       simT += 1 / 60;
+      writeVerts();
+      coverage();
+      stepAdapt(1 / 60);
     }
   }
 
@@ -554,6 +737,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
         acc -= STEP;
       }
     }
+    if (!held) stepAdapt(Math.min(dt, 0.1));
     const reveal = held || reduced ? 1 : expoOut(clamp(age / 2.1, 0, 1));
     const exposure = film0.exposure + 2.5 * (1 - reveal);
     const nextTick = held ? 0 : Math.floor(t * 24);
