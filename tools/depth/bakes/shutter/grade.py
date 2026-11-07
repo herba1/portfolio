@@ -1,11 +1,17 @@
-"""Shutter grade: the plate's phone/GoPro colour into a Superia-ish summer scan.
+"""Shutter grade: the stock plate's electric cobalt into a Superia-ish summer scan.
 
-Works in linear light and OKLab. The source sky is a clipped, violet-leaning
-cobalt (sRGB ~ #001884, HSV hue ~229 deg, R channel at 0); the genre target is
-cyan-cobalt (#044984 at the zenith, #0466a3 mid; HSV hue 200-215). Blues are
-rotated toward the target hue and their chroma eased, everything else is left
-alone. Shadows get a small linear lift so the crushed silhouettes keep a little
-colour for the film toe to tint.
+Works in linear light and OKLab. The source (Pexels 5124202) is already graded
+hot: a flat, clipped-red sky of sRGB ~ (0, 108, 203), OKLab L 0.53-0.56, C 0.165,
+h ~252, the same at the top of the frame as at the bottom (a telephoto sees a
+small patch of sky, and the stock grade flattened what gradient there was).
+
+The genre target is cyan-cobalt that deepens toward the zenith: #044984 at
+the top (L 0.40, C 0.116, h 252) to #0466a3 lower down (L 0.49, C 0.124, h 246).
+The camera points up the tower, so the top of the frame is the zenith side and
+the bottom is toward the horizon. Blues are pulled to that ramp: lightness
+scaled down by a vertical ramp, chroma eased, hue nudged a few degrees cyan as
+the ramp falls. Low-chroma pixels (cloud, the tower's white frame) are left
+alone, so a thin veil of cloud over blue takes the grade in proportion.
 """
 import numpy as np
 
@@ -44,36 +50,42 @@ def hue_of_srgb(c):
     return np.degrees(np.arctan2(lab[2], lab[1])) % 360, np.hypot(lab[1], lab[2])
 
 
-# Hue targets in OKLab degrees, measured from the genre spec's hexes.
-TARGET_H = 238.0
+# Ramp, top of frame -> bottom: lightness scale, chroma scale, hue (OKLab deg).
+TOP = (0.82, 0.74, 249.0)
+BOTTOM = (0.98, 0.80, 244.0)
 
 
-def grade(lin, strength=1.0, chroma=0.86, lift=0.006):
+def grade(lin, lift=0.004):
     """lin: HxWx3 float32 linear sRGB -> graded linear sRGB."""
+    H, W = lin.shape[:2]
     lab = lin2oklab(lin)
     L, a, b = lab[..., 0], lab[..., 1], lab[..., 2]
     C = np.hypot(a, b)
     h = np.degrees(np.arctan2(b, a)) % 360
-    # Blue window: OKLab hue 225..290 (cyan through violet-blue), full weight
-    # from 240 to 280.
-    w = np.clip((h - 225) / 15, 0, 1) * np.clip((295 - h) / 15, 0, 1)
-    w *= np.clip((C - 0.02) / 0.05, 0, 1)
-    dh = (TARGET_H - h) * strength * w
-    h2 = np.radians(h + dh)
-    C2 = C * (1 + (chroma - 1) * w)
-    lab2 = np.stack([L, C2 * np.cos(h2), C2 * np.sin(h2)], -1)
-    out = oklab2lin(lab2.astype(np.float32))
-    out = np.maximum(out, 0)
-    # Gentle linear lift of the crushed blacks (cool), before the film toe.
+    # Blue window: OKLab hue 225..290, full weight from 238 to 275, and only
+    # where there is real chroma (a cloud's white is left alone).
+    w = np.clip((h - 225) / 13, 0, 1) * np.clip((290 - h) / 15, 0, 1)
+    w *= np.clip((C - 0.03) / 0.06, 0, 1)
+    # Vertical ramp, eased so the deepening gathers toward the top.
+    y = np.linspace(0, 1, H, dtype=np.float32)[:, None]
+    t = y * y * (3 - 2 * y)
+    kL = TOP[0] + (BOTTOM[0] - TOP[0]) * t
+    kC = TOP[1] + (BOTTOM[1] - TOP[1]) * t
+    hT = TOP[2] + (BOTTOM[2] - TOP[2]) * t
+    L2 = L * (1 + (kL - 1) * w)
+    C2 = C * (1 + (kC - 1) * w)
+    h2 = np.radians(h + (hT - h) * w)
+    lab2 = np.stack([L2, C2 * np.cos(h2), C2 * np.sin(h2)], -1)
+    out = np.maximum(oklab2lin(lab2.astype(np.float32)), 0)
+    # A small cool lift of the blacks, before the film toe.
     out = out * (1 - lift) + lift * np.array([0.8, 1.0, 1.15], np.float32)
     return out.astype(np.float32)
 
 
 if __name__ == "__main__":
-    for c in ([0, 24, 132], [30, 78, 159], [4, 73, 132], [4, 102, 163], [32, 129, 172], [4, 90, 150]):
+    for c in ([0, 108, 203], [4, 73, 132], [4, 102, 163]):
         print(c, hue_of_srgb(c))
-    print("target", TARGET_H)
-    for c in ([0, 24, 132], [30, 78, 159], [250, 248, 246], [10, 12, 17]):
-        lin = srgb2lin(np.array(c, np.float32)[None, None] / 255)
-        g = grade(lin)
-        print(c, '->', (lin2srgb(g)[0, 0] * 255).round())
+    for c in ([0, 108, 203], [0, 120, 208], [250, 248, 246], [180, 200, 230]):
+        lin = np.tile(srgb2lin(np.array(c, np.float32)[None, None] / 255), (3, 1, 1))
+        g = lin2srgb(grade(lin)) * 255
+        print(c, "top", g[0, 0].round(), "mid", g[1, 0].round(), "bottom", g[2, 0].round())

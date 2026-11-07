@@ -1,55 +1,84 @@
 import { createStage } from "../_kit/stage";
-import { createFilm, FILM_PRESETS } from "../_kit/film";
+import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 import { createSound } from "@/lib/sound/engine";
 import { takes } from "./shutterTakes";
 
-// Shutter. A locked-off time-lapse of cumulus over a Tokyo street, looked up
-// at from the pavement. Press and hold and the shutter opens on bulb: the
-// frame integrates the recorded light for as long as you hold, so the clouds
-// smear into silk along their real wind while everything that stood still
-// (the towers, the lamp, the trees) stays sharp. Let go and the long exposure
-// stays on the print until the next press.
+// Shutter. A locked-off time-lapse from the foot of a tower, looking almost
+// straight up its glass into summer cumulus. Press and hold and the shutter
+// opens on bulb: the frame integrates the recorded light for as long as you
+// hold, so the clouds smear into silk along their real wind while the tower,
+// which never moved, stays sharp. Let go and the long exposure stays on the
+// print until the next press.
 //
 // The integral is real. Offline (tools/depth/bakes/shutter/bake.py) the
-// graded, looped plate is cut into blocks of 24 frames and each block's
-// linear-light mean is baked (a time pyramid at block resolution). Any open
+// graded, looped plate is cut into blocks of 8 frames and each block's
+// linear-light mean is baked (a time pyramid at block resolution), with the
+// tower filled out of it from its own sky. Any open
 // interval [a, a + T] is then a weighted sum of the blocks it covers, with
 // partial weights at its ends: a prefix-sum query, done here in one pass at
 // block resolution into a half-float target. The opening of an exposure is
 // integrated live instead: from the frame the shutter opened on, every frame
 // the viewfinder video decodes is added (by the time it covers) to a running
 // mean at video resolution, so a short exposure is exactly what you saw,
-// smearing frame by frame, and the blocks take over past the first second
-// and a half.
+// smearing frame by frame, and the blocks take over past the first second.
 //
 // Exposure is normalised by its length: an ND filter that follows the
 // shutter, so brightness holds and only time grows, and nothing blows out.
 //
 // Sharpness: the moving layers are low resolution (sky is smooth, and smeared
-// sky smoother). A still plate at full resolution carries a stillness matte
-// in alpha; where the picture never moved, its own high frequencies are added
-// back over the moving layer at the matching blur, so the still world stays
-// razor sharp at any exposure.
+// sky smoother). A still plate at full resolution (the mean of the whole loop)
+// carries a stillness matte in alpha. Under the matte the print is the tower:
+// for the live part of an exposure the live mean's light with the still's own
+// fine detail added back at the matching blur (so the glass still shows its
+// passing reflections in the viewfinder), for the blocks' part the still
+// itself. Outside it the print is sky alone; the blocks carry no tower, so no
+// low-resolution tower light can bleed into the smeared sky as a glow. No
+// sharpening anywhere: the edge is the matte's, a pixel or two wide.
+//
+// Presented full-bleed: the plate covers the box (cropped at its long side),
+// as a print would be trimmed to the frame.
 //
 // Develop: _kit/film.js, summer preset (halation, Pro-Mist bloom, colour
 // bleed, curve, 24 fps grain).
 
 const BASE = "/lab/shutter/";
-const TAU = 3; // frames: the opening frame's share of a still (?open)
-const LIVE_CAP = 45; // frames integrated live before the blocks take over
+const TAU = 1; // frames: the opening frame's share of a still (?open); each frame already carries its own interval
+const LIVE_CAP = 24; // frames integrated live before the blocks take over
+const AT = 96; // the plate frame a ?open still starts on, unless ?at= (seconds)
 
 // Hold seconds -> exposure length in plate frames. Accelerating, like
-// turning a shutter dial while you wait: a breath is a few seconds of real
-// sky, six seconds is the whole loop.
-const framesFor = (h, N) => Math.min(N, 60 * h + 20 * h * h);
+// turning a shutter dial while you wait: a breath is a few minutes of real
+// sky, six seconds is nearly the whole loop (one plate frame is several
+// seconds of wind here, the cloud crossing ~1% of the frame per frame).
+const framesFor = (h, N) => N * Math.min(1, (60 * h + 20 * h * h) / 1200);
 
-// The meter, in stops, by exposure length. A single frame carries the whole
-// contrast of sunlit cumulus against cobalt and is metered for the cloud
-// tops; an average over minutes of sky is flatter (cloud and blue meet in a
-// pale silk) and is printed up a little, as a printer would.
-const meterEV = (T) => METER_SHORT + (METER_LONG - METER_SHORT) * (1 - Math.exp(-T / 160));
+// The print, by exposure length. A single frame carries the whole contrast
+// of sunlit cumulus against cobalt and is metered for the cloud tops. An
+// average over minutes of sky is flatter: cloud and blue meet in a pale silk
+// that a straight print leaves grey-blue. So the long exposure is printed
+// down a little and richer, as a printer would print a long exposure: the
+// meter falls, saturation and the film's blue deepening rise, and the ramp
+// the bake put in (deeper toward the zenith) comes back through the silk.
+// k: 0 for a single frame, ~0.5 at a 2 s hold, ~0.9 for the whole loop.
+const longness = (T, N) => 1 - Math.exp(-T / (N * 0.3));
 const METER_SHORT = -0.4;
-const METER_LONG = 0.1;
+const METER_LONG = -0.75;
+
+// The summer develop, eased for this plate. The bake already deepens the sky
+// toward the zenith, so the film's own blue deepening is cut, or the top of
+// the frame goes navy. Halation is judged from the surround and kept low: at
+// full strength its red layer rings every white edge against cobalt (the
+// tower's frame, every cloud) in magenta, which reads as an electronic fringe.
+const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0.14, halationLocal: 1, halationColor: [1, 0.42, 0.18] };
+const develop = (T, N) => {
+  const k = longness(T, N);
+  return {
+    ...LOOK,
+    exposure: METER_SHORT + (METER_LONG - METER_SHORT) * k,
+    saturation: LOOK.saturation + 0.45 * k,
+    blueDepth: LOOK.blueDepth + 0.5 * k,
+  };
+};
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -111,22 +140,22 @@ uniform sampler2D uFrame;  // the live mean (linear), or the viewfinder (sRGB)
 uniform float uFrameLin;
 uniform sampler2D uExp;    // linear block integral (GL orientation)
 uniform vec2 uSize;
+uniform vec4 uCover;       // plate uv = uv * xy + zw (full-bleed crop)
 uniform float uWB;         // blocks' share of the exposure
-uniform vec3 uLod;         // still lod at display, at frame res, at block res
+uniform vec2 uLod;         // still lod at display, at frame res
 out vec4 o;
 ${COMMON}
 void main(){
-  vec2 uv = gl_FragCoord.xy / uSize;
+  vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
   vec2 iuv = vec2(uv.x, 1.0 - uv.y);
   vec3 f = texture(uFrame, iuv).rgb;
   if (uFrameLin < 0.5) f = lin(f);
   vec3 e = texture(uExp, uv).rgb;
-  vec3 m = enc(mix(f, e, uWB));
+  vec3 sky = enc(mix(f, e, uWB));
   vec4 s = textureLod(uStill, iuv, uLod.x);
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;
-  vec3 dB = s.rgb - textureLod(uStill, iuv, uLod.z).rgb;
-  vec3 d = mix(dF, dB, uWB) * s.a;
-  o = vec4(clamp(m + d, 0.0, 1.0), 1.0);
+  vec3 tower = mix(clamp(enc(f) + dF, 0.0, 1.0), s.rgb, uWB);
+  o = vec4(mix(sky, tower, s.a), 1.0);
 }`;
 
 // Print onto the page: the developed frame, and the last one fading out
@@ -137,9 +166,10 @@ uniform sampler2D uCur;
 uniform sampler2D uPrev;
 uniform float uMix;        // 1 = all current
 uniform vec4 uRect;
+uniform float uZoom;       // the print giving under the finger, < 1 zooms in
 out vec4 o;
 void main(){
-  vec2 uv = (gl_FragCoord.xy - uRect.xy) / uRect.zw;
+  vec2 uv = 0.5 + ((gl_FragCoord.xy - uRect.xy) / uRect.zw - 0.5) * uZoom;
   vec3 c = texture(uCur, uv).rgb;
   if (uMix < 1.0) c = mix(texture(uPrev, uv).rgb, c, uMix);
   o = vec4(c, 1.0);
@@ -279,7 +309,7 @@ export async function createShutter(host, { embedded = false } = {}) {
   const [BW, BH] = meta.blockSize;
   const [, , SW, SH] = meta.crop;
   const [VW] = meta.video;
-  const atStart = params.has("at") ? (((parseFloat(params.get("at")) || 0) * FPS) % N + N) % N : 330;
+  const atStart = params.has("at") ? (((parseFloat(params.get("at")) || 0) * FPS) % N + N) % N : AT;
 
   const video = makeVideo();
   const [stillImg, ...atlasImgs] = await Promise.all([bitmap(`${BASE}still.webp`), ...meta.atlases.map((a) => bitmap(BASE + a))]);
@@ -332,23 +362,23 @@ export async function createShutter(host, { embedded = false } = {}) {
     return true;
   };
 
-  // The print: 3:2, as large as the box allows with paper around it.
+  // The print: full-bleed. The plate covers the box, cropped at its long side.
   const rect = { x: 0, y: 0, w: 1, h: 1 };
+  const cover = [1, 1, 0, 0];
   let film = null;
   let comp = null;
   let dev = [null, null]; // developed frames: current, previous
   const layout = (w, h, dpr) => {
-    const gutter = Math.max(16, w * 0.06);
-    let pw = Math.min(w - gutter * 2, 1400);
-    let ph = pw / 1.5;
-    if (ph > h * 0.8) {
-      ph = h * 0.8;
-      pw = ph * 1.5;
-    }
-    rect.w = Math.round(pw);
-    rect.h = Math.round(ph);
-    rect.x = Math.round((w - rect.w) / 2);
-    rect.y = Math.round((h - rect.h) / 2);
+    rect.w = Math.max(1, Math.round(w));
+    rect.h = Math.max(1, Math.round(h));
+    rect.x = 0;
+    rect.y = 0;
+    const box = rect.w / rect.h;
+    const plate = SW / SH;
+    cover[0] = box < plate ? box / plate : 1;
+    cover[1] = box < plate ? 1 : plate / box;
+    cover[2] = (1 - cover[0]) / 2;
+    cover[3] = (1 - cover[1]) / 2;
     const dw = Math.round(rect.w * dpr);
     const dh = Math.round(rect.h * dpr);
     freeTarget(gl, comp);
@@ -439,16 +469,18 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1i(u.uFrame, 1);
     gl.uniform1i(u.uExp, 2);
     gl.uniform2f(u.uSize, comp.w, comp.h);
+    gl.uniform4fv(u.uCover, cover);
     gl.uniform1f(u.uWB, wB);
     gl.uniform1f(u.uFrameLin, shot.any ? 1 : 0);
-    const lodD = Math.max(0, Math.log2(SW / comp.w));
-    gl.uniform3f(u.uLod, lodD, Math.max(lodD, Math.log2(SW / VW)), Math.max(lodD, Math.log2(SW / BW)));
+    const lodD = Math.max(0, Math.log2((SW * cover[0]) / comp.w));
+    gl.uniform2f(u.uLod, lodD, Math.max(lodD, Math.log2(SW / VW)));
     gl.bindFramebuffer(gl.FRAMEBUFFER, comp.fbo);
     gl.viewport(0, 0, comp.w, comp.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
     // 3. Develop.
-    film.render(comp.tex, { ...FILM_PRESETS.summer, exposure: exposureEV + meterEV(T), grainSeed: seed }, dev[0].fbo);
+    const look = develop(T, N);
+    film.render(comp.tex, { ...look, exposure: exposureEV + look.exposure, grainSeed: seed }, dev[0].fbo);
 
     // 4. Print onto the paper.
     gl.bindVertexArray(vao);
@@ -458,11 +490,10 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.viewport(0, 0, cw, ch);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
-    const s = press.s;
-    const pw = Math.round(rect.w * dpr * s);
-    const ph = Math.round(rect.h * dpr * s);
-    const px = Math.round((rect.x + rect.w / 2) * dpr - pw / 2);
-    const py = ch - Math.round((rect.y + rect.h / 2) * dpr + ph / 2);
+    const pw = Math.round(rect.w * dpr);
+    const ph = Math.round(rect.h * dpr);
+    const px = Math.round(rect.x * dpr);
+    const py = ch - Math.round(rect.y * dpr) - ph;
     gl.viewport(px, py, pw, ph);
     const b = P.blit.u;
     gl.useProgram(P.blit.p);
@@ -474,6 +505,7 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1i(b.uPrev, 1);
     gl.uniform1f(b.uMix, fade);
     gl.uniform4f(b.uRect, px, py, pw, ph);
+    gl.uniform1f(b.uZoom, press.s);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 

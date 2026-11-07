@@ -1,37 +1,47 @@
-"""Shutter bake: a locked-off cumulus time-lapse -> a looping viewfinder video,
-a time pyramid of block means for the long exposure, and a sharp still plate.
+"""Shutter bake: a locked-off cumulus time-lapse looking up a tower -> a looping
+viewfinder video, a time pyramid of block means for the long exposure, and a
+sharp still plate with a stillness matte.
 
-    python3 -I tools/depth/bakes/shutter/bake.py <plate.mp4> <out_dir> [--start 1300 --frames 1200]
+    python3 -I tools/depth/bakes/shutter/bake.py <plate.mp4> <out_dir> [--work dir] [--drift drift.npy]
+    sh tools/depth/bakes/shutter/encode.sh <work>/plate-master.mp4 public/lab/shutter
 
-Source: Hiro Nakamura (@tybo), "Time Lapse Footage of a Sky on the City",
-Pexels 5338574, 1920x1080 29.97 fps, 3644 frames (GoPro time-lapse, Tokyo),
-Pexels License. https://www.pexels.com/video/time-lapse-footage-of-a-sky-on-the-city-5338574/
+Source: 84LENS (@84lens), "Time Lapse Video of Cloud Moving over a Building",
+Pexels 5124202, 3840x2160 24 fps, 257 frames (Evolution Tower, Moscow, from
+its foot, looking up), Pexels License.
+https://www.pexels.com/video/time-lapse-video-of-cloud-moving-over-a-building-5124202/
 
 Steps
-1. Stabilisation check: phase correlation of the building band (the bottom
-   third, where nothing moves but light) between frames across the clip. The
-   plate is a tripod time-lapse; the measured drift is printed, and frames are
-   shifted only if it exceeds 0.25 px.
-2. Each frame: crop 3:2 (1620x1080 from x0), sRGB -> linear, grade at the
-   output resolution (grade.py:
-   blues rotated from the source's violet cobalt to cyan-cobalt, a small
-   cool lift of the crushed blacks). Everything after this is linear light.
-3. Loop: the segment [start, start+N) with its last K frames cross-faded (in
-   linear light) into the K frames before start, so it loops without a jump.
-4. Outputs (all from the same looped, graded, linear sequence):
-   - plate.mp4 / plate.webm: the viewfinder, 1080x720, re-encoded sRGB.
-     An intermediate near-lossless x264 (plate-master.mp4) is kept in the
-     bake dir so the final encodes can be retuned without re-baking.
-   - blocks-<k>.webp: the time pyramid. The linear mean of every BLOCK
-     consecutive frames, 600x400, sRGB-encoded with TPDF dither, 5x5 per
-     atlas. The live shader integrates any open interval [a, b] as the
-     weighted sum of the blocks it covers (partial weights at the ends), i.e.
-     a prefix-sum query at block resolution.
-   - still.webp: 1620x1080, the linear mean of every 6th frame (so buildings
-     carry their average light, noise-free), with a stillness matte in alpha:
-     255 where the picture never moves (buildings, lamp, trees), 0 in the sky.
-     The shader adds the still's own high frequencies back over the low-res
-     moving layers where the matte is set: anything still stays sharp.
+1. Stabilisation: corners on the tower tracked from the first frame to every
+   frame, the translation taken as the mode of their motions (see below; the
+   glass reflects moving cloud, so anything that averages the tower chases
+   the sky). The path is smoothed and applied sub-pixel at 4K when it drifts
+   more than 0.25 px (here it creeps about 2 px at 1080p over the clip).
+2. Each frame: 4K sRGB -> linear, shifted, area-downscaled to 1920x1080 in
+   linear light (no sharpening anywhere: the stock master is clean, and the
+   downscale alone keeps the tower's edges crisp), graded (grade.py: the flat
+   electric cobalt pulled to a zenith-deepening cyan-cobalt ramp).
+3. Shutter: every frame becomes the integral over its own interval, sampled
+   16 times along the optical flow to the next frame (the raw time-lapse
+   jumps ~1% of the frame per frame; a mean of raw frames is a strobe of
+   copies, not a smear).
+   Loop: [start, start+N) with its last K frames cross-faded, in linear
+   light, into the K frames before start.
+4. Outputs, all from that looped, graded, linear sequence:
+   - plate-master.mp4 (work dir, near-lossless x264 4:4:4, 1280x720): the
+     viewfinder before encode.sh makes plate.webm / plate.mp4 from it.
+   - blocks-<k>.webp: the time pyramid. The linear mean of every BLOCK frames
+     at 640x360, sRGB with TPDF dither, 5x5 per atlas. The tower is filled
+     out of every block (push-pull from that block's own sky, inside the
+     matte grown by 6 px): a long exposure is a picture of the sky alone, and
+     the still plate supplies the tower, so no low-resolution tower light
+     bleeds into the smeared sky as a glow at its edge.
+   - still.webp: 1920x1080, the linear mean of the whole loop (the tower
+     carries its average light and its glass the average of its reflections,
+     noise-free), with the stillness matte in alpha: the SAM 2.1 tower mask
+     (mask-tower.png, made on a frame of the plate with tools/depth/segment.py
+     prompt --box 70,130,800,1080 --point 480,840 --point 420,420
+     --point 160,950 --neg 100,100 --neg 1080,600), snapped to the mean
+     plate's own edges with a guided filter. It is not grown into the sky.
 """
 import argparse
 import json
@@ -43,38 +53,54 @@ import cv2
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+sys.path.insert(0, os.path.join(HERE, "..", ".."))
 from grade import grade, lin2srgb, srgb2lin  # noqa: E402
+from kit import guided, pushpull  # noqa: E402
 
 ap = argparse.ArgumentParser()
 ap.add_argument("src")
 ap.add_argument("out")
-ap.add_argument("--start", type=int, default=1300)
-ap.add_argument("--frames", type=int, default=1200)
-ap.add_argument("--fade", type=int, default=48)
-ap.add_argument("--block", type=int, default=24)
-ap.add_argument("--x0", type=int, default=120)
-ap.add_argument("--work", default=None, help="dir for the intermediate master")
+ap.add_argument("--mask", default=os.path.join(HERE, "mask-tower.png"))
+ap.add_argument("--start", type=int, default=24)
+ap.add_argument("--frames", type=int, default=232)
+ap.add_argument("--fade", type=int, default=24)
+ap.add_argument("--block", type=int, default=8)
+ap.add_argument("--work", default=HERE, help="dir for the master and debug images")
+ap.add_argument("--drift", default=None, help="reuse a drift.npy from an earlier run of the same range")
 args = ap.parse_args()
 
 os.makedirs(args.out, exist_ok=True)
-work = args.work or os.path.dirname(os.path.abspath(__file__))
-N, K, B = args.frames, args.fade, args.block
+os.makedirs(args.work, exist_ok=True)
+N, K, B, S = args.frames, args.fade, args.block, args.start
 assert N % B == 0, "frames must be a multiple of block"
-S = args.start
-CW, CH = 1620, 1080
-VW, VH = 1080, 720
-BW, BH = 600, 400
+CW, CH = 1920, 1080
+VW, VH = 1280, 720
+BW, BH = 640, 360
 NB = N // B
 rng = np.random.default_rng(7)
 
 cap = cv2.VideoCapture(args.src)
 total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-print("source frames", total)
+SW = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+fps = cap.get(cv2.CAP_PROP_FPS)
+print("source frames", total, "fps", fps)
 assert S - K >= 0 and S + N <= total
 
+mask = cv2.imread(args.mask, cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+mask = cv2.resize(mask, (CW, CH), interpolation=cv2.INTER_AREA)
+# Close SAM's cracks: every gap in the tower smaller than 2000 px is filled
+# (a crack runs down the seam between the shaded and the sunlit face, and the
+# bottom edge is ragged), except the sky pockets between the crown's struts,
+# which sit above row 400 and are real sky.
+n_cc, lab_cc, st_cc, _ = cv2.connectedComponentsWithStats((mask < 0.5).astype(np.uint8), connectivity=4)
+for c in range(1, n_cc):
+    if st_cc[c, cv2.CC_STAT_AREA] < 2000 and st_cc[c, cv2.CC_STAT_TOP] > 400:
+        mask[lab_cc == c] = 1.0
 
-def read_range(i0, i1):
+
+def frames(i0, i1):
     cap.set(cv2.CAP_PROP_POS_FRAMES, i0)
     for i in range(i0, i1):
         ok, f = cap.read()
@@ -83,37 +109,76 @@ def read_range(i0, i1):
         yield i, f
 
 
-# 1. Stabilisation check on the building band.
-def band(f):
-    g = cv2.cvtColor(f, cv2.COLOR_BGR2GRAY).astype(np.float32)
-    g = g[720:1080, :]
-    g = g - cv2.GaussianBlur(g, (0, 0), 8)
-    return g
+# 1. Stabilisation, measured on the tower. Its glass reflects the moving
+# cloud, so a correlation of the whole tower chases the sky (it read 150 px
+# here). Instead: corners on the tower (inside the eroded matte) tracked from
+# the first frame to each frame (Lucas-Kanade, forward-backward checked to
+# 0.3 px), and the translation taken as the mode of their motions (the mean
+# of the tracks within 1 px of it, iterated from the median): the frame and
+# mullions agree, the reflections scatter. Frames where fewer than 120 tracks
+# agree (a sun glint sweeping the glass) are interpolated, then the path is
+# smoothed over 15 frames.
+inner = cv2.erode((mask > 0.5).astype(np.uint8) * 255, np.ones((9, 9), np.uint8))
 
 
-refs = {}
-for i in (S - K, S + N // 3, S + 2 * N // 3, S + N - 1):
-    cap.set(cv2.CAP_PROP_POS_FRAMES, i)
-    ok, f = cap.read()
-    refs[i] = band(f)
-win = cv2.createHanningWindow(refs[S - K].shape[::-1], cv2.CV_32F)
-drift = []
-for i, g in refs.items():
-    (dx, dy), _ = cv2.phaseCorrelate(refs[S - K], g, win)
-    drift.append((i, round(dx, 3), round(dy, 3)))
-print("drift (frame, dx, dy):", drift)
-maxd = max(max(abs(d[1]), abs(d[2])) for d in drift)
+def gray(f):
+    return cv2.cvtColor(cv2.resize(f, (CW, CH), interpolation=cv2.INTER_AREA), cv2.COLOR_BGR2GRAY)
+
+
+def measure():
+    ref = p0 = None
+    ids, raw, good = [], [], []
+    for i, f in frames(S - K, S + N + 1):
+        g = gray(f)
+        if ref is None:
+            ref = g
+            p0 = cv2.goodFeaturesToTrack(ref, 1500, 0.005, 5, mask=inner)
+        p1, st, _ = cv2.calcOpticalFlowPyrLK(ref, g, p0, None, winSize=(15, 15), maxLevel=2)
+        pb, st2, _ = cv2.calcOpticalFlowPyrLK(g, ref, p1, None, winSize=(15, 15), maxLevel=2)
+        ok = (st[:, 0] == 1) & (st2[:, 0] == 1) & (np.linalg.norm((pb - p0)[:, 0], axis=1) < 0.3)
+        d = (p1 - p0)[ok][:, 0]
+        c = np.median(d, 0) if len(d) else np.zeros(2)
+        n = 0
+        for _ in range(6):
+            sel = np.linalg.norm(d - c, axis=1) < 1.0
+            n = int(sel.sum())
+            if n < 10:
+                break
+            c = d[sel].mean(0)
+        ids.append(i)
+        raw.append(c)
+        good.append(n >= 120)
+    raw = np.array(raw, np.float64)
+    good = np.array(good)
+    t = np.arange(len(ids))
+    for c in range(2):
+        raw[~good, c] = np.interp(t[~good], t[good], raw[good, c])
+    k = np.ones(15) / 15
+    pad = np.pad(raw, ((7, 7), (0, 0)), mode="edge")
+    smooth = np.stack([np.convolve(pad[:, c], k, mode="valid") for c in range(2)], -1)
+    print("tracked frames %d/%d" % (good.sum(), len(good)))
+    return smooth
+
+
+smooth = np.load(args.drift) if args.drift else measure()
+np.save(os.path.join(args.work, "drift.npy"), smooth)
+ids = list(range(S - K, S + N + 1))
+assert len(smooth) == len(ids)
+maxd = float(np.abs(smooth).max())
 stabilise = maxd > 0.25
-print("stabilise" if stabilise else "locked off, no stabilisation needed")
+print("drift (1080p px) max %.2f" % maxd, "-> stabilise" if stabilise else "-> locked off")
+shift = {i: smooth[n] * (SW / CW) for n, i in enumerate(ids)}  # in source px
 
 
 def prep(f, i):
+    lin = srgb2lin(f[:, :, ::-1].astype(np.float32) / 255)
     if stabilise:
-        (dx, dy), _ = cv2.phaseCorrelate(refs[S - K], band(f), win)
+        dx, dy = shift[i]
         M = np.float32([[1, 0, -dx], [0, 1, -dy]])
-        f = cv2.warpAffine(f, M, (f.shape[1], f.shape[0]), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REFLECT)
-    c = f[:, args.x0:args.x0 + CW, ::-1].astype(np.float32) / 255
-    return srgb2lin(c)
+        lin = cv2.warpAffine(lin, M, (lin.shape[1], lin.shape[0]), flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REFLECT)
+        lin = np.maximum(lin, 0)
+    lin = cv2.resize(lin, (CW, CH), interpolation=cv2.INTER_AREA)
+    return grade(lin)
 
 
 def to8(lin, dither=True):
@@ -123,112 +188,122 @@ def to8(lin, dither=True):
     return np.clip(np.round(s), 0, 255).astype(np.uint8)
 
 
-# 2-3. Pre-roll frames (for the loop cross-fade), kept small: K at full crop.
-pre = []
-for i, f in read_range(S - K, S):
-    pre.append(grade(cv2.resize(prep(f, i), (VW, VH), interpolation=cv2.INTER_AREA)).astype(np.float16))
-print("pre-roll", len(pre))
+# 2-3. The shutter of each frame. A time-lapse frame is a short exposure
+# taken every few seconds: the cloud jumps ~1% of the frame between frames, so
+# a mean of raw frames is a strobe of separate copies, not a smear. Each frame
+# of the viewfinder is therefore made the integral over its own interval
+# [j, j+1): M samples interpolated along the optical flow to frame j+1 (DIS,
+# at half size; each sample a flow-warped mix of both frames), averaged in
+# linear light. Accumulating frames, live or in blocks, then integrates
+# continuous time. The tower barely moves in the flow and is kept from the
+# frame itself under the matte; the still plate is the mean of the unblurred
+# frames.
+M = 16
+dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+gy, gx = np.mgrid[0:VH, 0:VW].astype(np.float32)
+tmask = cv2.resize(mask, (VW, VH), interpolation=cv2.INTER_AREA)[..., None]
 
-master = os.path.join(work, "plate-master.mp4")
+
+def gray8(lin):
+    return np.clip(lin2srgb(lin @ np.array([0.2126, 0.7152, 0.0722], np.float32)) * 255, 0, 255).astype(np.uint8)
+
+
+def shutter(a, b):
+    """Mean of [a, b) along the flow; a, b: VHxVWx3 linear."""
+    ga, gb = gray8(cv2.resize(a, (VW // 2, VH // 2), interpolation=cv2.INTER_AREA)), gray8(cv2.resize(b, (VW // 2, VH // 2), interpolation=cv2.INTER_AREA))
+    fl = cv2.resize(dis.calc(ga, gb, None), (VW, VH), interpolation=cv2.INTER_LINEAR) * 2
+    fx, fy = fl[..., 0], fl[..., 1]
+    acc = np.zeros_like(a)
+    for k in range(M):
+        t = k / M
+        wa = cv2.remap(a, gx - t * fx, gy - t * fy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        wb = cv2.remap(b, gx + (1 - t) * fx, gy + (1 - t) * fy, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        acc += wa * (1 - t) + wb * t
+    return acc / M * (1 - tmask) + a * tmask
+
+
+master = os.path.join(args.work, "plate-master.mp4")
 enc = subprocess.Popen([
-    "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{VW}x{VH}", "-r", "30000/1001",
-    "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "10", "-pix_fmt", "yuv444p", master,
+    "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{VW}x{VH}", "-r", f"{round(fps)}",
+    "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "8", "-pix_fmt", "yuv444p", master,
 ], stdin=subprocess.PIPE)
 
+pre = []  # blurred pre-roll: the loop's cross-fade partner
 blk_acc = np.zeros((BH, BW, 3), np.float64)
 blocks = []
 still_acc = np.zeros((CH, CW, 3), np.float64)
-still_n = 0
-# Stillness: temporal statistics of the high-pass luminance. A building's
-# fine structure only scales with its light; the sky's is replaced outright.
-hp_sum = np.zeros((CH, CW), np.float64)
-hp_sq = np.zeros((CH, CW), np.float64)
-hp_abs = np.zeros((CH, CW), np.float64)
-lum_sum = np.zeros((CH, CW), np.float64)
-lum_sq = np.zeros((CH, CW), np.float64)
-stat_n = 0
-
-for j, (i, f) in enumerate(read_range(S, S + N)):
-    lin = prep(f, i)
-    # The grade is per pixel, so it is applied at the output resolutions:
-    # every frame at video size, every 6th at full size for the still plate.
-    small = grade(cv2.resize(lin, (VW, VH), interpolation=cv2.INTER_AREA))
-    if j >= N - K:
-        k = j - (N - K)
-        w = (k + 1) / (K + 1)
-        small = small * (1 - w) + pre[k].astype(np.float32) * w
-    enc.stdin.write(to8(small).tobytes())
-    blk_acc += cv2.resize(small, (BW, BH), interpolation=cv2.INTER_AREA)
-    if (j + 1) % B == 0:
-        blocks.append(to8((blk_acc / B).astype(np.float32)))
-        blk_acc[:] = 0
-    if j % 6 == 0:
-        lin = grade(lin)
-        still_acc += lin
-        still_n += 1
-        y = (lin @ np.array([0.2126, 0.7152, 0.0722], np.float32))
-        ys = lin2srgb(y)
-        hp = ys - cv2.GaussianBlur(ys, (0, 0), 2.0)
-        hp_sum += hp
-        hp_sq += hp * hp
-        hp_abs += np.abs(hp)
-        lum_sum += ys
-        lum_sq += ys * ys
-        stat_n += 1
-    if j % 100 == 0:
-        print("frame", j, flush=True)
-
+prev = None
+for i, f in frames(S - K, S + N + 1):
+    full = prep(f, i)
+    if S <= i < S + N:
+        still_acc += full
+    cur = cv2.resize(full, (VW, VH), interpolation=cv2.INTER_AREA)
+    if prev is not None:
+        pi, pa = prev
+        mb = shutter(pa, cur)
+        if pi < S:
+            pre.append(mb.astype(np.float16))
+        else:
+            j = pi - S
+            if j >= N - K:
+                q = j - (N - K)
+                w = (q + 1) / (K + 1)
+                mb = mb * (1 - w) + pre[q].astype(np.float32) * w
+            enc.stdin.write(to8(mb).tobytes())
+            blk_acc += cv2.resize(mb, (BW, BH), interpolation=cv2.INTER_AREA)
+            if (j + 1) % B == 0:
+                blocks.append((blk_acc / B).astype(np.float32))
+                blk_acc[:] = 0
+            if j % 40 == 0:
+                print("frame", j, flush=True)
+    prev = (i, cur)
 enc.stdin.close()
 enc.wait()
 cap.release()
-print("blocks", len(blocks), "still frames", still_n)
+print("blocks", len(blocks))
 
-# Stillness matte.
-n = stat_n
-hp_mean = hp_sum / n
-hp_std = np.sqrt(np.maximum(hp_sq / n - hp_mean ** 2, 0))
-lum_std = np.sqrt(np.maximum(lum_sq / n - (lum_sum / n) ** 2, 0))
-# Moving texture: the high-pass changes far more than a light change explains.
-r = hp_std / (np.abs(hp_mean) + 0.004)
-moving = (r > 0.9) | ((lum_std > 0.06) & (r > 0.6))
-moving = moving.astype(np.uint8) * 255
-moving = cv2.medianBlur(moving, 5)
-# Sky is one connected region from the top; close small holes, then keep the
-# still areas a touch generous so their edges carry the still's detail.
-moving = cv2.morphologyEx(moving, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
-still = 255 - moving
-still = cv2.morphologyEx(still, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-still = cv2.dilate(still, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
-still = cv2.GaussianBlur(still, (0, 0), 1.2)
-cv2.imwrite(os.path.join(work, "debug-ratio.png"), np.clip(r * 60, 0, 255).astype(np.uint8))
+# Stillness matte, snapped to the mean plate's edges.
+still_lin = (still_acc / N).astype(np.float32)
+still_rgb = to8(still_lin)
+guide = still_rgb.astype(np.float32) / 255
+alpha = np.clip(guided(guide, mask, 4, 1e-3), 0, 1)
+alpha = np.clip((alpha - 0.5) * 1.6 + 0.5, 0, 1)  # tighten the guided ramp back to ~2 px
+a8 = np.clip(np.round(alpha * 255), 0, 255).astype(np.uint8)
+Image.fromarray(np.dstack([still_rgb, a8])).save(os.path.join(args.out, "still.webp"), "WEBP", quality=92, exact=True, method=6)
+prev = guide * (1 - 0.45 * alpha[..., None]) + np.array([1, 0.1, 0.1], np.float32) * 0.45 * alpha[..., None]
+cv2.imwrite(os.path.join(args.work, "debug-matte.jpg"), cv2.cvtColor((prev * 255).astype(np.uint8), cv2.COLOR_RGB2BGR))
 
-still_rgb = to8((still_acc / still_n).astype(np.float32))
-rgba = np.dstack([still_rgb, still])
-# exact: keep the colour under transparent pixels (the shader blurs across
-# the matte edge).
-Image.fromarray(rgba).save(os.path.join(args.out, "still.webp"), "WEBP", quality=92, exact=True, method=6)
-cv2.imwrite(os.path.join(work, "debug-still.png"), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
+# Tower out of the blocks: push-pull of each block's own sky.
+hole = cv2.resize(mask, (BW, BH), interpolation=cv2.INTER_AREA)
+hole = cv2.dilate((hole > 0.02).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3)))
+keep = 1.0 - hole.astype(np.float32)
+filled = []
+for b in blocks:
+    fill = pushpull(b, keep)
+    filled.append(to8(b * keep[..., None] + fill * (1 - keep[..., None])))
+cv2.imwrite(os.path.join(args.work, "debug-block0.jpg"), cv2.cvtColor(filled[0], cv2.COLOR_RGB2BGR))
 
-# Atlases: 5x5 blocks each.
 per = 25
 atl = []
 for a in range((NB + per - 1) // per):
     canvas = np.zeros((BH * 5, BW * 5, 3), np.uint8)
-    for k in range(per):
-        idx = a * per + k
+    for q in range(per):
+        idx = a * per + q
         if idx >= NB:
             break
-        cx, cy = k % 5, k // 5
-        canvas[cy * BH:(cy + 1) * BH, cx * BW:(cx + 1) * BW] = blocks[idx]
+        cx, cy = q % 5, q // 5
+        canvas[cy * BH:(cy + 1) * BH, cx * BW:(cx + 1) * BW] = filled[idx]
     name = f"blocks-{a}.webp"
-    cv2.imwrite(os.path.join(args.out, name), canvas[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 86])
+    cv2.imwrite(os.path.join(args.out, name), canvas[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 88])
     atl.append(name)
 
 meta = {
-    "source": "Pexels 5338574, Hiro Nakamura (@tybo)",
-    "start": S, "frames": N, "fade": K, "block": B, "blocks": NB, "fps": 30000 / 1001,
-    "crop": [args.x0, 0, CW, CH], "video": [960, 640],  # encode.sh scales the master to this "blockSize": [BW, BH], "atlas": [5, 5], "atlases": atl,
-    "stabilised": bool(stabilise), "drift": drift,
+    "source": "Pexels 5124202, 84LENS (@84lens)",
+    "start": S, "frames": N, "fade": K, "block": B, "blocks": NB, "fps": round(fps, 6),
+    "crop": [0, 0, CW, CH],
+    "video": [VW, VH],  # encode.sh keeps the master's size
+    "blockSize": [BW, BH], "atlas": [5, 5], "atlases": atl,
+    "stabilised": bool(stabilise), "maxShift": round(maxd, 3),
 }
 with open(os.path.join(args.out, "bake.json"), "w") as fh:
     json.dump(meta, fh, indent=1)

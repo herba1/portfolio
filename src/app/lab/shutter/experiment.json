@@ -1,6 +1,6 @@
 {
   "title": "Shutter",
-  "description": "Cumulus crossing a Tokyo sky, seen from the pavement between two towers, on a locked-off time-lapse. Press and hold and the shutter opens on bulb: the frame integrates the light for as long as you hold, so the clouds smear into silk along their real wind while the towers, the lamp post and the trees, which never moved, stay sharp. An ND filter follows the shutter, so the brightness holds and only time grows. Let go and the long exposure stays on the print until the next press.",
+  "description": "Summer cumulus racing past the top of a glass tower, seen from its foot, looking almost straight up, on a locked-off time-lapse. Press and hold and the shutter opens on bulb: the frame integrates the light for as long as you hold, so the clouds smear into silk along their real wind while the tower, which never moved, stays sharp. An ND filter follows the shutter, so the brightness holds and only time grows. Let go and the long exposure stays on the print until the next press.",
   "tags": ["WebGL", "Film", "Photography", "Time"],
   "status": "draft",
   "createdAt": "2026-11-07T01:00:00.000Z",
@@ -13,7 +13,7 @@
     { "idle": 2000 }
   ],
   "sources": [
-    "Plate: \"Time Lapse Footage of a Sky on the City\" by Hiro Nakamura (Pexels @tybo), Pexels 5338574, 1920x1080 29.97 fps, 2:02, GoPro time-lapse; Pexels License (free to use, no attribution required). https://www.pexels.com/video/time-lapse-footage-of-a-sky-on-the-city-5338574/ (file: https://videos.pexels.com/video-files/5338574/5338574-hd_1920_1080_30fps.mp4). Used: frames 1300-2499, cropped 3:2 (x 120-1740), stabilised by phase correlation of the building band (it drifts about 0.9 px), graded in OKLab (the source's violet cobalt rotated to cyan-cobalt), looped with a 48-frame linear-light cross-fade. Bake: tools/depth/bakes/shutter/bake.py.",
+    "Plate: \"Time Lapse Video of Cloud Moving over a Building\" by 84LENS (Pexels @84lens), Pexels 5124202, 3840x2160 24 fps, 257 frames, the Evolution Tower, Moscow, from its foot; Pexels License (free to use, no attribution required). https://www.pexels.com/video/time-lapse-video-of-cloud-moving-over-a-building-5124202/ (file: https://videos.pexels.com/video-files/5124202/5124202-uhd_3840_2160_24fps.mp4). Used: frames 24-255, full frame, stabilised on tracked corners of the tower (it creeps about 2 px), area-downscaled to 1920x1080 in linear light with no sharpening, graded in OKLab (the stock's flat electric cobalt pulled to a cyan-cobalt that deepens toward the zenith), looped with a 24-frame linear-light cross-fade; stillness matte from a SAM 2.1 mask of the tower. Bake: tools/depth/bakes/shutter/bake.py.",
     "https://en.wikipedia.org/wiki/Boulevard_du_Temple_(photograph)",
     "https://en.wikipedia.org/wiki/Bulb_(photography)"
   ]

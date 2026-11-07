@@ -1,24 +1,24 @@
 {
- "source": "Pexels 5338574, Hiro Nakamura (@tybo)",
- "start": 1300,
- "frames": 1200,
- "fade": 48,
- "block": 24,
- "blocks": 50,
- "fps": 29.97002997002997,
+ "source": "Pexels 5124202, 84LENS (@84lens)",
+ "start": 24,
+ "frames": 232,
+ "fade": 24,
+ "block": 8,
+ "blocks": 29,
+ "fps": 24.0,
  "crop": [
-  120,
   0,
-  1620,
+  0,
+  1920,
   1080
  ],
  "video": [
-  960,
-  640
+  1280,
+  720
  ],
  "blockSize": [
-  600,
-  400
+  640,
+  360
  ],
  "atlas": [
   5,
@@ -29,26 +29,5 @@
   "blocks-1.webp"
  ],
  "stabilised": true,
- "drift": [
-  [
-   1252,
-   0.0,
-   0.0
-  ],
-  [
-   1700,
-   0.072,
-   -0.911
-  ],
-  [
-   2100,
-   -0.146,
-   -0.517
-  ],
-  [
-   2499,
-   0.138,
-   -0.761
-  ]
- ]
+ "maxShift": 2.888
 }
