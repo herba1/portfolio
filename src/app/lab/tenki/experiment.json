@@ -1,0 +1,31 @@
+{
+  "title": "Tenki",
+  "description": "Lying at the foot of a wooden utility pole and looking straight up it, the cables crossing over you, while the weather changes. Drag across and the sky becomes another real, recorded sky: a clear afternoon with a low sun, high cirrus, a mackerel sky, fair-weather cumulus, building cumulus. The pole, the crossarm and the cables are lit again by each one, from its own irradiance and its own sun, so the light swings round the pole, its shadows sharpen or melt, and the wires stay hair-fine against every sky. Between two skies the light itself crossfades.",
+  "tags": ["WebGL", "Photography", "Relighting", "Film"],
+  "status": "draft",
+  "createdAt": "2026-11-07T03:30:00.000Z",
+  "intent": "Factory reality technique 12, 'Tenki' (factory/reality/techniques.md): sky replacement with consistent relight. A sky matte that keeps the wires (thin-structure trimap, colour-line unmixing in linear light), the foreground decontaminated of its old sky, MoGe-2 normals and metric depth, and for each Poly Haven _puresky HDRI an SH9 irradiance plus its sun (direction, irradiance, angular spread); albedo = photo / fitted old light, times the new light, with sun shadows marched through the depth map. References: herb-refs 3 (utility pole against summer cumulus), https://en.wikipedia.org/wiki/Spherical_harmonic_lighting , https://graphics.stanford.edu/papers/envmap/ (Ramamoorthi and Hanrahan, an efficient representation for irradiance environment maps), https://people.csail.mit.edu/alevin/papers/Matting-Levin-Lischinski-Weiss-CVPR06.pdf (closed-form matting, colour-line model). ?sky=0..4 holds the weather (fractions mid-crossfade), ?still=1 skips the reveal.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.7, 0.5], "to": [0.35, 0.52] },
+  "photo": {
+    "name": "Dina Lydia, utility pole from below (Unsplash)",
+    "url": "https://unsplash.com/photos/mqnQ_vmLIGU"
+  },
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/mqnQ_vmLIGU",
+      "file": "https://images.unsplash.com/photo-1501696226977-1fbff6555a97?w=6000&fit=max&q=95&fm=jpg",
+      "author": "Dina Lydia, Unsplash",
+      "licence": "Unsplash License",
+      "note": "3593x2736, worked at 2400x1828. Sky matte by tools/depth/segment.py sky, then tools/depth/bakes/tenki/matte.py (enclosed sky pockets found by colour back-projection, edges unmixed on the colour line between local sky and local cable colour, in linear light); foreground decontaminated F = (I - aB)/(1 - a); normals, metric depth and focal length by MoGe-2 ViT-S (tools/depth/normals.py, MIT). Bake: tools/depth/bakes/tenki (prep, matte, light, export, pack)."
+    },
+    { "url": "https://polyhaven.com/a/rustig_koppie_puresky", "author": "Greg Zaal, Jarod Guest (Poly Haven)", "licence": "CC0", "note": "clear, low sun" },
+    { "url": "https://polyhaven.com/a/kloppenheim_03_puresky", "author": "Greg Zaal, Jarod Guest (Poly Haven)", "licence": "CC0", "note": "high cirrus" },
+    { "url": "https://polyhaven.com/a/aristea_wreck_puresky", "author": "Greg Zaal, Jarod Guest (Poly Haven)", "licence": "CC0", "note": "mackerel sky (altocumulus), veiled sun" },
+    { "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky", "author": "Greg Zaal, Jarod Guest (Poly Haven)", "licence": "CC0", "note": "fair-weather cumulus" },
+    { "url": "https://polyhaven.com/a/sunflowers_puresky", "author": "Sergej Majboroda, Jarod Guest (Poly Haven)", "licence": "CC0", "note": "building cumulus" },
+    "https://graphics.stanford.edu/papers/envmap/",
+    "https://people.csail.mit.edu/alevin/papers/Matting-Levin-Lischinski-Weiss-CVPR06.pdf",
+    "https://github.com/microsoft/MoGe"
+  ]
+}
