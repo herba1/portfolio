@@ -10,11 +10,19 @@ import { createStage, clamp } from "../_kit/stage";
 // faster up and down the frame than any lens at this scale would allow: the
 // tilt-shift miniature.
 //
-//   pass 1  gather at half CSS resolution: golden-spiral scatter-as-gather,
-//           occlusion-aware (a farther sample may not spread over a nearer,
-//           sharper centre).
-//   pass 2  full resolution: a small disc for near-focus pixels, the gathered
-//           buffer through a depth-aware joint upsample for the rest, a gentle
+//   pass 1  near CoC at half CSS resolution, max-dilated by its own radius:
+//           every buffer pixel learns the largest foreground disc that
+//           reaches it (Jimenez's near field, as in the tuxedolabs bokeh).
+//   pass 2  gather at half CSS resolution, two layers at once. Background:
+//           golden-spiral scatter-as-gather of everything at or behind the
+//           plane, occlusion-aware (a farther sample may not spread over a
+//           nearer, sharper centre). Foreground: only samples nearer than the
+//           plane, each spread over its own disc, written premultiplied with
+//           its coverage as alpha, so a blurred pine has a soft rim.
+//   pass 3  full resolution: a small disc for near-focus pixels, the
+//           background buffer through a depth-aware joint upsample for the
+//           rest, the foreground layer composited over it with no depth test
+//           (it spills over whatever is behind it by its full CoC), a gentle
 //           contrast lift and a print shoulder that stops short of white.
 
 const COLOR_SRC = "/lab/miniature/city.webp";
@@ -28,6 +36,10 @@ const MAX_COC = 0.03; // cap, in print heights
 const TILT = 0.16; // reverse tilt of the focal plane, inverse depth per print height
 const BUF_SCALE = 0.5; // gather buffer pixels per CSS pixel
 const TAPS = 88;
+const NEAR_TAPS = 48;
+const SNAP = 0.02; // near-field silhouette search, in print heights
+const SNAP_TAPS = 16;
+const DILATE_TAPS = 40;
 
 // The depth map is baked so the piazza's middle distance sits at 0.76
 // (tools/depth/bakes/miniature/bake.py): the obelisk and the crowd round it.
@@ -53,10 +65,17 @@ uniform float uTilt;
 uniform float uK;     // coc per unit inverse depth, in output units
 uniform float uMax;   // coc cap, in output units
 uniform float uDof;
+float planeAt(vec2 uv) {
+  return uFocus - uTilt * (uv.y - uFocusY);
+}
 float cocAt(vec2 uv, out float d) {
   d = texture(uDepth, uv).r;
-  float plane = uFocus - uTilt * (uv.y - uFocusY);
-  return min(max(abs(d - plane) - uDof, 0.0) * uK, uMax);
+  return min(max(abs(d - planeAt(uv)) - uDof, 0.0) * uK, uMax);
+}
+// Circle of confusion of the near field only: zero for anything at or behind
+// the plane (white = near, so nearer means larger d).
+float nearCoc(vec2 uv, float d) {
+  return min(max(d - planeAt(uv) - uDof, 0.0) * uK, uMax);
 }
 // Print white: everything above the knee rolls off towards 0.95 and never
 // reaches it, so a bright roof or a windscreen keeps its texture as it opens
@@ -69,20 +88,78 @@ vec3 shoulder(vec3 x) {
 }
 `;
 
+// Near-field CoC, snapped to the photograph's silhouette. A monocular depth
+// map draws a near object's edge a little inside it: the outermost foliage of
+// the pine below the terrace still reads as mid distance. Taking the nearest
+// depth within a short radius moves the foreground's edge out to where the
+// photograph puts it, so its blur starts there and not a hand's width inside.
+const SNAP_PASS = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outCoc;
+${COMMON}
+uniform vec2 uBuf;
+uniform float uSnap;  // buffer px
+void main() {
+  vec2 px = 1.0 / uBuf;
+  float d = texture(uDepth, vUv).r;
+  for (int i = 0; i < ${SNAP_TAPS}; i++) {
+    float fi = float(i);
+    float r = uSnap * sqrt((fi + 0.5) / ${SNAP_TAPS}.0);
+    float a = fi * 2.39996323;
+    d = max(d, texture(uDepth, vUv + vec2(cos(a), sin(a)) * r * px).r);
+  }
+  outCoc = vec4(nearCoc(vUv, d) / uMax, 0.0, 0.0, 1.0);
+}`;
+
+// Near-field CoC, max-dilated by its own radius: a pixel takes the largest
+// near CoC whose disc reaches it. The foreground gather then searches that far,
+// so a blurred pine's rim reaches out over the sharp ridge behind it.
+// Fixed spiral, no per-pixel spin: the radius it hands on must not be noisy.
+const DILATE = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outCoc;
+${COMMON}
+uniform sampler2D uNear0;  // snapped near CoC / uMax
+uniform vec2 uBuf;
+float nearCocAt(vec2 uv) { return texture(uNear0, uv).r * uMax; }
+void main() {
+  vec2 px = 1.0 / uBuf;
+  float best = nearCocAt(vUv);
+  for (int i = 0; i < ${DILATE_TAPS}; i++) {
+    float fi = float(i);
+    float r = (uMax + 1.0) * sqrt((fi + 0.5) / ${DILATE_TAPS}.0);
+    float a = fi * 2.39996323;
+    float s = nearCocAt(vUv + vec2(cos(a), sin(a)) * r * px);
+    if (s >= r - 1.0) best = max(best, s);
+  }
+  outCoc = vec4(best / uMax, 0.0, 0.0, 1.0);
+}`;
+
 const GATHER = `#version 300 es
 precision highp float;
 in vec2 vUv;
-out vec4 outColor;
+layout(location = 0) out vec4 outColor; // background: rgb, mean coc / uMax
+layout(location = 1) out vec4 outNear;  // foreground: premultiplied rgb, coverage
 ${COMMON}
+uniform sampler2D uNear0;    // snapped near CoC / uMax
+uniform sampler2D uNearCoc;  // the same, dilated by its own radius
 uniform vec2 uBuf;     // gather buffer size in pixels
+float nearCocAt(vec2 uv) { return texture(uNear0, uv).r * uMax; }
 uniform float uLod;
 void main() {
   float d0;
   float s0 = cocAt(vUv, d0);
+  float n0 = nearCocAt(vUv);
+  bool nearC = n0 > 0.0;
   vec3 c0 = textureLod(uColor, vUv, uLod).rgb;
   vec3 acc = c0;
   float cacc = s0;
   float tot = 1.0;
+  // What lies behind the foreground: the nearest non-foreground samples.
+  vec3 hid = vec3(0.0);
+  float nh = 0.0;
   vec2 px = 1.0 / uBuf;
   // Interleaved-gradient rotation per pixel: the spiral's structure turns to
   // fine grain instead of a visible pattern inside the discs.
@@ -98,12 +175,54 @@ void main() {
     // centre's own blur: sharp foreground stays clean over a soft distance.
     if (d < d0 - 0.004) s = min(s, s0 * 1.6);
     float m = smoothstep(r - 1.1, r + 0.6, s);
+    bool nearS = nearCocAt(uv) > 0.0;
+    // Foreground spreads in its own layer, not into the background's.
+    if (!nearC && nearS) m = 0.0;
     vec3 c = textureLod(uColor, uv, uLod).rgb;
+    if (!nearS) {
+      float w = 1.0 - r / (uMax + 1.0);
+      hid += c * w;
+      nh += w;
+    }
     acc += mix(acc / tot, c, m);
     cacc += mix(cacc / tot, s, m);
     tot += 1.0;
   }
-  outColor = vec4(acc / tot, cacc / tot / uMax);
+  vec3 bg = acc / tot;
+  // Inside a defocused foreground object the background layer is what it
+  // hides, filled in from the background around it. The foreground's rim is
+  // then a true overlap: half pine and half the ridge behind on the
+  // silhouette, all pine a CoC inside it, all ridge a CoC outside.
+  if (nearC) bg = mix(bg, hid / max(nh, 1e-6), smoothstep(1.2, 2.5, n0) * smoothstep(0.0, 1.5, nh));
+  outColor = vec4(bg, cacc / tot / uMax);
+
+  // Foreground layer, Jimenez's near field. Each pixel gathers over the
+  // dilated near CoC, so it searches as far as the widest foreground disc that
+  // reaches it. A sample joins if its own dilated CoC spans the gap (a small
+  // near object beside a big one keeps its own size), carrying its colour
+  // premultiplied by how far it is into the near field. The covered share of
+  // the disc is the coverage: one inside a blurred pine, a half on its
+  // silhouette, falling to nothing a full CoC outside it.
+  float R = texture(uNearCoc, vUv).r * uMax;
+  vec3 fc = vec3(0.0);
+  float fa = 0.0;
+  if (R > 0.25) {
+    for (int i = 0; i < ${NEAR_TAPS}; i++) {
+      float fi = float(i);
+      float r = R * sqrt((fi + 0.5) / ${NEAR_TAPS}.0);
+      float a = fi * 2.39996323 + spin;
+      vec2 uv = vUv + vec2(cos(a), sin(a)) * r * px;
+      float reach = texture(uNearCoc, uv).r * uMax;
+      float m = smoothstep(r - 1.1, r + 0.6, reach) * smoothstep(0.0, 1.5, nearCocAt(uv));
+      fc += textureLod(uColor, uv, uLod).rgb * m;
+      fa += m;
+    }
+  }
+  float alpha = fa / ${NEAR_TAPS}.0;
+  vec3 fcol = fc / max(fa, 1e-6);
+  // Barely-defocused foreground is the full-resolution small disc's job.
+  alpha *= smoothstep(0.9, 2.2, R);
+  outNear = vec4(fcol * alpha, alpha);
 }`;
 
 const COMPOSITE = `#version 300 es
@@ -112,6 +231,7 @@ in vec2 vUv;
 out vec4 outColor;
 ${COMMON}
 uniform sampler2D uBlur;
+uniform sampler2D uNear;
 uniform vec2 uBuf;
 uniform vec2 uOut;      // print size in device pixels
 uniform float uDpr;
@@ -158,6 +278,8 @@ void main() {
   vec2 i0 = floor(p) - 1.0;
   vec4 big = vec4(0.0);
   float wb = 0.0;
+  vec4 near = vec4(0.0);
+  float wn = 0.0;
   float sharpness = 24.0 / (1.0 + s0 * 0.25);
   for (int j = 0; j < 16; j++) {
     vec2 t = i0 + vec2(float(j & 3), float(j >> 2));
@@ -169,11 +291,17 @@ void main() {
     float w = g * (exp(-abs(d - d0) * sharpness) + 0.002);
     big += texture(uBlur, tuv) * w;
     wb += w;
+    // The foreground layer is upsampled with no depth test: it belongs over
+    // whatever sits behind it.
+    near += texture(uNear, tuv) * g;
+    wn += g;
   }
   big /= wb;
+  near /= wn;
   float spill = big.a * uMaxCss;
   float t = smoothstep(2.2, 5.0, max(s0, spill));
   vec3 col = mix(small, big.rgb, t);
+  col = col * (1.0 - near.a) + near.rgb;
 
   // The tilt-shift print: a touch more snap in the mids, no extra colour;
   // the shoulder comes last so nothing on the print reaches white.
@@ -292,6 +420,8 @@ export async function createMiniature(host) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
+  const snap = compile(gl, VERT, SNAP_PASS);
+  const dilate = compile(gl, VERT, DILATE);
   const gather = compile(gl, VERT, GATHER);
   const composite = compile(gl, VERT, COMPOSITE);
 
@@ -299,7 +429,12 @@ export async function createMiniature(host) {
   // RGBA8 is the fallback.
   const float = !!gl.getExtension("EXT_color_buffer_float");
   const blurTex = gl.createTexture();
+  const nearTex = gl.createTexture();
+  const cocTex = gl.createTexture();
+  const snapTex = gl.createTexture();
   const fbo = gl.createFramebuffer();
+  const cocFbo = gl.createFramebuffer();
+  const snapFbo = gl.createFramebuffer();
   let buf = [1, 1];
   let rect = { x: 0, y: 0, w: 1, h: 1 };
 
@@ -325,15 +460,23 @@ export async function createMiniature(host) {
     }
     rect = { x: Math.round((w - pw) / 2), y: Math.round((h - ph) / 2), w: Math.round(pw), h: Math.round(ph) };
     buf = [Math.max(8, Math.round(rect.w * BUF_SCALE)), Math.max(8, Math.round(rect.h * BUF_SCALE))];
-    gl.bindTexture(gl.TEXTURE_2D, blurTex);
-    if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, buf[0], buf[1], 0, gl.RGBA, gl.HALF_FLOAT, null);
-    else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, buf[0], buf[1], 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    for (const t of [blurTex, nearTex, cocTex, snapTex]) {
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      if (float) gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, buf[0], buf[1], 0, gl.RGBA, gl.HALF_FLOAT, null);
+      else gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, buf[0], buf[1], 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, snapFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, snapTex, 0);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cocFbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, cocTex, 0);
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, blurTex, 0);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, nearTex, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     dirty = true;
   };
@@ -378,37 +521,65 @@ export async function createMiniature(host) {
     gl.bindVertexArray(vao);
     gl.disable(gl.BLEND);
 
-    // pass 1: gather (units: buffer pixels)
-    gl.useProgram(gather.p);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.viewport(0, 0, buf[0], buf[1]);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, colorTex);
     gl.activeTexture(gl.TEXTURE1);
     gl.bindTexture(gl.TEXTURE_2D, depthTex);
+    // Uniforms shared by the two buffer passes (units: buffer pixels).
+    const bufferUniforms = (u) => {
+      gl.uniform1i(u.uColor, 0);
+      gl.uniform1i(u.uDepth, 1);
+      gl.uniform1f(u.uFocus, focus.x);
+      gl.uniform1f(u.uFocusY, focusY.x);
+      gl.uniform1f(u.uTilt, TILT);
+      gl.uniform1f(u.uDof, DOF);
+      gl.uniform1f(u.uK, K_COC * ph * BUF_SCALE);
+      gl.uniform1f(u.uMax, MAX_COC * ph * BUF_SCALE);
+      gl.uniform2f(u.uBuf, buf[0], buf[1]);
+    };
+    gl.viewport(0, 0, buf[0], buf[1]);
+
+    // pass 1: near CoC, snapped to the silhouette
+    gl.useProgram(snap.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, snapFbo);
+    bufferUniforms(snap.u);
+    gl.uniform1f(snap.u.uSnap, SNAP * ph * BUF_SCALE);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // pass 2: near CoC, dilated by its own radius
+    gl.useProgram(dilate.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, cocFbo);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, snapTex);
+    bufferUniforms(dilate.u);
+    gl.uniform1i(dilate.u.uNear0, 4);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // pass 3: gather, background and foreground layers
+    gl.useProgram(gather.p);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, cocTex);
     const gu = gather.u;
-    gl.uniform1i(gu.uColor, 0);
-    gl.uniform1i(gu.uDepth, 1);
-    gl.uniform1f(gu.uFocus, focus.x);
-    gl.uniform1f(gu.uFocusY, focusY.x);
-    gl.uniform1f(gu.uTilt, TILT);
-    gl.uniform1f(gu.uDof, DOF);
-    gl.uniform1f(gu.uK, K_COC * ph * BUF_SCALE);
-    gl.uniform1f(gu.uMax, MAX_COC * ph * BUF_SCALE);
-    gl.uniform2f(gu.uBuf, buf[0], buf[1]);
+    bufferUniforms(gu);
+    gl.uniform1i(gu.uNear0, 4);
+    gl.uniform1i(gu.uNearCoc, 3);
     gl.uniform1f(gu.uLod, Math.max(0, Math.log2(colorImg.naturalHeight / buf[1])));
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // pass 2: composite (units: css pixels)
+    // pass 4: composite (units: css pixels)
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, gl.drawingBufferWidth, gl.drawingBufferHeight);
     gl.useProgram(composite.p);
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, blurTex);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, nearTex);
     const cu = composite.u;
     gl.uniform1i(cu.uColor, 0);
     gl.uniform1i(cu.uDepth, 1);
     gl.uniform1i(cu.uBlur, 2);
+    gl.uniform1i(cu.uNear, 3);
     gl.uniform1f(cu.uFocus, focus.x);
     gl.uniform1f(cu.uFocusY, focusY.x);
     gl.uniform1f(cu.uTilt, TILT);
