@@ -4,7 +4,6 @@ export default piece({
   url: "/lab/dandelion", ready: "canvas",
   hide: [".dandelion__faces", ".dandelion__mic"],
   beats: [
-    { move: [0.25, 0.55], duration: 800, pause: 300 },
-    { move: [0.78, 0.42], duration: 500, arc: 0.1, pause: 3500 },
+    { drag: [[0.25, 0.6], [0.5, 0.5], [0.8, 0.4]], duration: 600, approach: 800, pause: 3800 },
   ],
 });

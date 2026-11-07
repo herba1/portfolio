@@ -48,6 +48,9 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   }, `nextjs-portal { display: none !important; } ${reel.css ?? ""}`);
   // Recordings should not count as visits.
   await context.route(/posthog|vercel-insights|\/_vercel\/(insights|speed-insights)/, (r) => r.abort());
+  // reel.mock: [{ url, json }] answers a request locally, for pieces that need
+  // a live API the recording machine can't reach (song search, say).
+  for (const m of reel.mock ?? []) await context.route(m.url, (r) => r.fulfill({ json: typeof m.json === "function" ? m.json(r.request().url()) : m.json }));
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
 
