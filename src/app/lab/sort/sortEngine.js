@@ -1,6 +1,26 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
-import { GW, GH, CELL, MW, MH, DW, DH, BANDS, fwd, demoMask, bake, bandMask, links, restSort, geometry } from "./sortCore";
+import {
+  GW,
+  GH,
+  CELL,
+  MW,
+  MH,
+  DW,
+  DH,
+  BANDS,
+  STRIPES,
+  NS,
+  PARTS,
+  GLINTS,
+  fwd,
+  demoMask,
+  bake,
+  bandMask,
+  links,
+  restSort,
+  geometry,
+} from "./sortCore";
 
 // Sort: a real pixel sort, after Kim Asendorf's ASDF Pixel Sort (2010), run
 // on the GPU over a summer photograph of a Japanese level crossing.
@@ -13,7 +33,7 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, fwd, demoMask, bake, bandMask, lin
 // Spans (ASDF). A span may only start at grass (a few green pixels in a row):
 // a position on a band belongs to a span when it lies within reach of the
 // last grass before it, the brush mask m there is on, and its luminance lies
-// inside [lo(m), hi]. The reach is short: a span ends once it has run 15% of
+// inside [lo(m), hi]. The reach is short: a span ends once it has run 30% of
 // its band's reach through anything that is not vegetation, so it bridges a
 // gap but never trails a long tail of sky. Reach and lo both follow m, so
 // brushing longer or harder lets a span run further and lets darker pixels
@@ -32,16 +52,17 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, fwd, demoMask, bake, bandMask, lin
 // one position per pass. Erasing the mask (a long press) therefore un-sorts
 // by the same network.
 //
-// The wave is geometry, not sort direction. Inside the envelope (the mask)
-// each band is cut into blocks and slabs. At the verge the sorted runs stay
-// in place and the poles stand untouched. Up the curl, every slab is lifted:
-// it shows the runs of a verge band further down, picked by the slab's
-// radius on the curl, laid end to end from its outer cut inward, so the slab
-// is solid sorted colour from cut to cut and the region becomes a staircase
-// of stacked horizontal slabs that climbs and arches over, replacing the
-// photo beneath it. Where a run ends in bright pixels, that tail breaks off as
-// one solid tile, one or two bands tall: the white and gold glints. The lift
-// grows with the mask, so brushing pulls the grass up the curl.
+// The wave is geometry, not sort direction. Inside the envelope (the mask),
+// at the verge the sorted runs stay in place and the poles stand untouched.
+// Up the curl the picture is cut into its own stripes, about 14 px thick at
+// the verge and thinning to 2-3 px at the crest, with hairlines among them,
+// and each stripe is lifted whole: it shows one long sorted run from a verge
+// band, picked by the stripe's radius on the curl, stretched from cut to cut
+// with its gradient kept, so every strip ramps from dark green at its root to
+// the run's bright tail at the wave's edge. Its tail stops short by a hashed
+// amount, so the edge is combed like grass. A handful of the brightest tails
+// near the crest break off as glint tiles, white and gold. The envelope grows
+// with the mask, so brushing stretches the runs further up the curl.
 //
 // The resting wave is the same sort run to completion on the CPU at load
 // (identical keys and tie-break, so it is a fixed point of the GPU network).
@@ -103,13 +124,17 @@ void main() {
   o = uvec4(v, 0u, 0u, 0u);
 }`;
 
-const SHOW_FS = `#version 300 es
+const SHOW_FS = /* glsl */ `#version 300 es
 precision highp float;
 precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
-uniform usampler2D uGeo;    // per (x, band): source x + 1 (0 = photo), source band, glint end + 1, glint band
-uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
+uniform usampler2D uGeo;    // verge, per (x, band): source x + 1 (0 = not verge), source band
+uniform usampler2D uStripe; // curl, per stripe part: (a, b, band + 1, reversed) and (x0, x1, -, -)
+uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band; row 2: stripe of each grid row
+uniform vec4 uGlint[${GLINTS}];    // glint tiles: x0, y0, x1, y1 in grid px
+uniform vec4 uGlintSrc[${GLINTS}]; // the run end each tile shows: x, band
+uniform int uGlintN;
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
 uniform sampler2D uClean;   // the photo developed at grid size without grain, for the slabs
 uniform vec4 uPrint;        // x, y, w, h in device px, top-left origin
@@ -128,12 +153,55 @@ void main() {
   ivec2 fp = ivec2(d - uPrint.xy);
   vec3 col = texelFetch(uFilm, ivec2(fp.x, fs.y - 1 - fp.y), 0).rgb;
   ivec2 g = ivec2(floor(l * uGrid));
-  int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
-  uvec4 geo = texelFetch(uGeo, ivec2(g.x, band), 0);
-  if (geo.r > 0u) {
-    // A glint tile shows its run's last texel; a slab shows its source.
-    bool glint = geo.b > 0u;
-    ivec2 src = glint ? ivec2(int(geo.b) - 1, int(geo.a)) : ivec2(int(geo.r) - 1, int(geo.g));
+  ivec2 src = ivec2(-1);
+  ivec2 span = ivec2(0); // the lifted run a curl pixel reads, [x0, x1)
+  bool glint = false;
+  vec2 gc = vec2(g) + 0.5;
+  for (int i = 0; i < ${GLINTS}; i++) {
+    if (i >= uGlintN) break;
+    vec4 r = uGlint[i];
+    if (gc.x >= r.x && gc.x < r.z && gc.y >= r.y && gc.y < r.w) {
+      src = ivec2(uGlintSrc[i].xy);
+      glint = true;
+      break;
+    }
+  }
+  if (!glint) {
+    int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
+    uvec2 geo = texelFetch(uGeo, ivec2(g.x, band), 0).rg;
+    if (geo.r > 0u) {
+      src = ivec2(int(geo.r) - 1, int(geo.g));
+    } else {
+      // Up the curl: the stripe's part under this pixel, its run stretched
+      // from the root end of the cut to the tail end.
+      int s = int(texelFetch(uBand, ivec2(g.y, 2), 0).r);
+      for (int k = 0; k < ${PARTS}; k++) {
+        uvec4 p = texelFetch(uStripe, ivec2(s, 2 * k), 0);
+        if (p.b == 0u) break;
+        int a = int(p.r);
+        int b = int(p.g);
+        if (g.x >= a && g.x < b) {
+          uvec2 run = texelFetch(uStripe, ivec2(s, 2 * k + 1), 0).rg;
+          int off = p.a > 0u ? b - 1 - g.x : g.x - a;
+          src = ivec2(int(run.x) + (off * int(run.y - run.x)) / (b - a), int(p.b) - 1);
+          span = ivec2(run);
+          break;
+        }
+      }
+    }
+  }
+  if (src.x >= 0 && span.y > span.x) {
+    // A lifted strip is read through a short window along its run: the sort
+    // has already ordered it, so the window keeps the ramp and drops the
+    // pixel-to-pixel flicker of hues that share a key.
+    int cy = int(texelFetch(uBand, ivec2(src.y, 1), 0).r);
+    vec3 acc = vec3(0.0);
+    for (int k = -3; k <= 3; k++) {
+      int x = clamp(src.x + k * 2, span.x, span.y - 1);
+      acc += film(int(texelFetch(uState, ivec2(x, src.y), 0).r), cy);
+    }
+    col = acc / 7.0;
+  } else if (src.x >= 0) {
     uint h = texelFetch(uState, src, 0).r;
     col = film(int(h), int(texelFetch(uBand, ivec2(src.y, 1), 0).r));
     // A glint is the run's brightest pixel caught in the light: a wall's
@@ -213,17 +281,26 @@ export async function createSort(host, { embedded = false } = {}) {
   // The spans the mask opens, and the wave's slabs, rebuilt as the mask moves.
   const bm = new Uint8Array(DW * DH);
   const link = new Uint8Array(DW * DH);
-  const geo = new Uint16Array(DW * DH * 4);
+  const wave = { geo: new Uint16Array(DW * DH * 2), table: new Uint16Array(NS * 2 * PARTS * 4), glints: new Float32Array(GLINTS * 8), glintN: 0 };
+  const glintRect = new Float32Array(GLINTS * 4);
+  const glintSrc = new Float32Array(GLINTS * 4);
   const rebuildCpu = () => {
     bandMask(mask8, bm);
     links(base, bm, link);
-    geometry(mask8, base, link, geo);
+    wave.glintN = geometry(mask8, base, link, wave).glintN;
+    for (let i = 0; i < GLINTS; i++) {
+      for (let c = 0; c < 4; c++) {
+        glintRect[i * 4 + c] = wave.glints[i * 8 + c];
+        glintSrc[i * 4 + c] = wave.glints[i * 8 + 4 + c];
+      }
+    }
   };
   rebuildCpu();
   const state = qMask === "none" ? restSort(base, new Uint8Array(DW * DH)) : restSort(base, link);
-  const bandRows = new Uint16Array(GH * 2);
+  const bandRows = new Uint16Array(GH * 3);
   bandRows.set(BANDS.of, 0);
   bandRows.set(BANDS.c, GH);
+  bandRows.set(STRIPES.of, GH * 2);
 
   // ---- GL resources
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -239,13 +316,16 @@ export async function createSort(host, { embedded = false } = {}) {
   };
   const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, base.key);
   const linkTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, DW, DH, link);
-  const geoTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, DW, DH, geo);
-  const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 2, bandRows);
+  const geoTex = tex(gl.RG16UI, gl.RG_INTEGER, gl.UNSIGNED_SHORT, DW, DH, wave.geo);
+  const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, NS, 2 * PARTS, wave.table);
+  const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 3, bandRows);
   const uploadCpu = () => {
     gl.bindTexture(gl.TEXTURE_2D, linkTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RED_INTEGER, gl.UNSIGNED_BYTE, link);
     gl.bindTexture(gl.TEXTURE_2D, geoTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, geo);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RG_INTEGER, gl.UNSIGNED_SHORT, wave.geo);
+    gl.bindTexture(gl.TEXTURE_2D, stripeTex);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, NS, 2 * PARTS, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, wave.table);
   };
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {
@@ -379,11 +459,17 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, geoTex);
     gl.activeTexture(gl.TEXTURE3);
     gl.bindTexture(gl.TEXTURE_2D, bandTex);
+    gl.activeTexture(gl.TEXTURE5);
+    gl.bindTexture(gl.TEXTURE_2D, stripeTex);
     gl.uniform1i(u.uState, 0);
     gl.uniform1i(u.uFilm, 1);
     gl.uniform1i(u.uClean, 4);
     gl.uniform1i(u.uGeo, 2);
     gl.uniform1i(u.uBand, 3);
+    gl.uniform1i(u.uStripe, 5);
+    gl.uniform4fv(u.uGlint, glintRect);
+    gl.uniform4fv(u.uGlintSrc, glintSrc);
+    gl.uniform1i(u.uGlintN, wave.glintN);
     gl.uniform4f(u.uPrint, L.px, L.py, L.pw, L.ph);
     gl.uniform1f(u.uCanvasH, stage.canvas.height);
     gl.uniform3f(u.uPaper, PAPER[0], PAPER[1], PAPER[2]);
@@ -514,7 +600,7 @@ export async function createSort(host, { embedded = false } = {}) {
     destroy() {
       film?.destroy();
       dropFilm();
-      for (const t of [...stateTex, keyTex, linkTex, geoTex, bandTex, photoTex]) gl.deleteTexture(t);
+      for (const t of [...stateTex, keyTex, linkTex, geoTex, stripeTex, bandTex, photoTex]) gl.deleteTexture(t);
       for (const f of stateFbo) gl.deleteFramebuffer(f);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);

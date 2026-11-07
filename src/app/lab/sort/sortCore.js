@@ -25,21 +25,19 @@ export const REACH = 760 * S; // a band's reach at m = 1, before the clamp below
 // reach through pixels that are not vegetation since the last one that was.
 // So the wave carries its own green out of the verge and over a gap (the
 // road, a wall, a strip of sky) but never drags a long tail of sky behind it.
-export const EXIT = 0.15;
-// Sort key: greenness in a few tiers first, luminance within a tier. So a
-// sorted run is a handful of long, even stretches (the greenest, darkest
-// first, rooted where the span starts), each one hue, rather than a single
-// luminance ramp whose hues flicker from pixel to pixel; and the sky and wall
-// highlights, the least green, are pushed out to the run's far end.
-export const GREEN_TIERS = 4;
+export const EXIT = 0.3;
+// Sort key: luminance, pulled down by greenness. So a sorted run is one
+// long ramp from its darkest, greenest pixels (rooted where the span starts)
+// to its brightest, least green ones (the sky and wall highlights) out at its
+// far end, rather than a scatter of hues.
+export const GREEN_PULL = 0.5;
 export const VEG_RUN = 4; // green texels in a row that count as grass
 export const GREEN_FULL = 32; // g over max(r, b), in 8-bit steps, that counts as fully green
 export function sortKey(r, g, b) {
   const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
   const green = clamp((g - Math.max(r, b)) / GREEN_FULL, 0, 1);
-  const tier = GREEN_TIERS - 1 - Math.min(GREEN_TIERS - 1, Math.floor(green * GREEN_TIERS));
   // Stays in 0..1 for 16-bit storage.
-  return (tier + clamp(l, 0, 0.999)) / GREEN_TIERS;
+  return clamp(l * (1 - GREEN_PULL) + (1 - green) * GREEN_PULL, 0, 1);
 }
 
 // Small deterministic hash noise.
@@ -130,6 +128,30 @@ export function maskAt(mask8, x, y) {
   return (a + (b - a) * ty) / 255;
 }
 
+// The mask along grid row y, every column, as maskAt would read it.
+export function maskRow(mask8, y, out = new Float32Array(GW)) {
+  const fy = clamp(y / CELL - 0.5, 0, MH - 1);
+  const y0 = Math.floor(fy);
+  const y1 = Math.min(MH - 1, y0 + 1);
+  const ty = fy - y0;
+  const cell = (cx) => (mask8[y0 * MW + cx] + (mask8[y1 * MW + cx] - mask8[y0 * MW + cx]) * ty) / 255;
+  // Between cell centres the mask is linear in x: walk it a cell at a time.
+  const h = CELL / 2;
+  let c0 = cell(0);
+  out.fill(c0, 0, Math.min(GW, h));
+  for (let cx = 0; cx < MW - 1; cx++) {
+    const c1 = cell(cx + 1);
+    const xa = cx * CELL + h;
+    const xb = Math.min(GW, xa + CELL);
+    if (c0 === c1) out.fill(c0, xa, xb);
+    else for (let x = xa; x < xb; x++) out[x] = c0 + ((c1 - c0) * (x + 0.5 - xa)) / CELL;
+    c0 = c1;
+  }
+  const xe = (MW - 1) * CELL + h;
+  if (xe < GW) out.fill(c0, xe, GW);
+  return out;
+}
+
 // The resting wave: a broad region that enters low along the verge, rides up
 // round the curl and breaks over the sky, thinning into fragments at its
 // crest. Drawn on the 1200x800 layout sheet.
@@ -145,7 +167,10 @@ export function demoMask(amount) {
       const [u0, r0] = fwd(x * S, y * S);
       const u = u0 / S;
       const r = r0 / S;
-      const t = (r - R0) / (R1 - R0);
+      // Over the top the lines droop as they run out, so the lip arches
+      // and hooks down over the crossing instead of ending in a flat shelf.
+      const over = Math.max(0, u - Math.PI * r);
+      const t = (r + (over * over) / 900 - R0) / (R1 - R0);
       const n = vnoise(x / 90, y / 90) - 0.5;
       // Start at the left edge of the verge; finish over the crest, inner lines curling furthest.
       const start = -cx0 - 40 + n * 120;
@@ -348,185 +373,201 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 }
 
 // ---- the wave's geometry
-// The wave is made by moving whole slabs, never by bending the sort. Every
-// band is cut into blocks along x (16-48 px, from a hash, so the cuts never
-// line up from band to band); each block of the region is a rigid
-// horizontal rectangle that shows a band lower down (a whole-pixel lift) a
-// whole number of px along (a shift). The lift and shift follow the curl:
-// the block's place on the curl is read off the curl map, and its source is
-// that same place unrolled flat onto the verge, scaled by how far the wave
-// has been pushed there (the mask). So at the verge, where the curl is flat,
-// both are zero; up the face they rise block by block toward the crest, and
-// the region becomes a staircase of stacked slabs that climbs and curls. Cut
-// at the envelope (the mask), it replaces the photo beneath it outright.
-//
-// geo, per display texel (x, band d), four u16: source x + 1 (0 = the photo,
-// untouched), source band, glint run end + 1 (0 = none), glint band.
-export const WAVE_ON = 0.12; // the envelope: mask level where a block joins the wave
-export const MIN_RUN = 20; // shorter runs are left out of the lifted slabs
-// The curl's slabs show the verge bands between these rows (the green), by
+// The wave is made by moving whole sorted rows, never by bending the sort.
+// At the verge the sorted runs stay where they were sorted, and everything
+// else (a pole, a sign) is left untouched. Up the curl the picture is cut
+// into its own horizontal stripes, thick at the verge and thinning toward
+// the crest (the face recedes, so its rows foreshorten), with a few hairlines
+// among them. Each stripe is lifted whole: across the envelope (the mask) it
+// shows one long sorted run from a verge band, picked by the stripe's radius
+// on the curl, stretched from cut to cut with its gradient kept, so every
+// strip ramps from the darkest green at its root to the run's bright tail at
+// the wave's edge. The further the brush has pushed the envelope, the longer
+// the stripes and the further their runs are stretched. A handful of the
+// brightest tails near the crest break off as glint tiles.
+export const WAVE_ON = 0.12; // the envelope: mask level where the wave begins
+// The curl's stripes show the verge bands between these rows (the green), by
 // radius: the inner edge of the curl shows the top of the verge.
 export const VERGE0 = 1000;
 export const VERGE1 = 1400;
 export const CURL_R0 = 90 * S;
 export const CURL_R1 = 330 * S;
-export const GLINT_LUM = 0.68; // a run's tail this bright breaks off as a tile...
-export const GLINT_PEAK = 0.76; // ...when its brightest pixel reads as a highlight
-export const GLINT_MAX = 64; // longest glint tile, px
-export const blockOf = (() => {
-  // Per band, the block start for every x: brick-like cuts.
-  const starts = new Uint16Array(DW * DH);
-  for (let d = 0; d < DH; d++) {
-    let x = -Math.floor(hash(d, 5) * 48);
-    let b = 0;
-    while (x < DW) {
-      const w = 16 + Math.floor(hash(d * 131 + b, 9) * 33);
-      for (let k = Math.max(0, x); k < Math.min(DW, x + w); k++) starts[d * DW + k] = Math.max(0, x);
-      x += w;
-      b++;
-    }
+export const CREST_Y = CY - CURL_R1; // the top of the curl, grid px
+export const RUN_MIN = 48; // shorter verge runs are never lifted
+export const GLINT_LUM = 0.68; // a run's tail this bright...
+export const GLINT_PEAK = 0.8; // ...ending in a highlight this bright can break off
+export const GLINTS = 10; // glint tiles at most
+// Stripe height, grid px, from the verge (near) to the crest (far).
+export const STRIPE_NEAR = 14;
+export const STRIPE_FAR = 2.5;
+export const STRIPES = (() => {
+  // Cut from the bottom up, so the thick rows sit on the verge.
+  const y0 = [];
+  const h = [];
+  let y = GH;
+  for (let j = 0; y > 0; j++) {
+    const p = clamp((y - CREST_Y) / (GH - CREST_Y), 0, 1);
+    let hh = (STRIPE_FAR + (STRIPE_NEAR - STRIPE_FAR) * p ** 1.4) * (0.7 + 0.6 * hash(j, 41));
+    // A few hairlines among them, at every height.
+    if (hash(j, 43) < 0.13) hh = 1 + Math.floor(hash(j, 47) * 2);
+    hh = Math.min(y, Math.max(1, Math.round(hh)));
+    y -= hh;
+    y0.push(y);
+    h.push(hh);
   }
-  return starts;
+  const n = y0.length;
+  const of = new Uint16Array(GH);
+  const c = new Uint16Array(n);
+  for (let j = 0; j < n; j++) {
+    c[j] = y0[j] + (h[j] >> 1);
+    for (let k = 0; k < h[j]; k++) of[y0[j] + k] = j;
+  }
+  return { n, y0: Uint16Array.from(y0), h: Uint8Array.from(h), c, of };
 })();
-const blockEnd = (d, x) => {
-  let e = x;
-  while (e < DW && blockOf[d * DW + e] === blockOf[d * DW + x]) e++;
-  return e;
-};
+export const NS = STRIPES.n;
+// Each stripe holds up to PARTS lifted runs, two RGBA16UI texels each, in a
+// texture NS wide and 2 x PARTS tall: (a, b, source band + 1, reversed) for
+// the stripe's cut [a, b) and (x0, x1, 0, 0) for the run [x0, x1) shown there.
+export const PARTS = 4;
 
-export function geometry(mask8, base, link, geo = new Uint16Array(DW * DH * 4)) {
+// Below the curl centre (and a ragged few rows above it) a band is verge left
+// of its split: there the runs stay in place.
+const vergeLow = (d) => BANDS.c[d] + 0.5 >= CY - CURL_R0 * 0.25 * hash(d, 29);
+const vergeSplit = (d) => CX + (hash(d, 23) - 0.5) * 120;
+
+export function geometry(mask8, base, link, out = {}) {
+  const geo = out.geo || new Uint16Array(DW * DH * 2);
+  const table = out.table || new Uint16Array(NS * 2 * PARTS * 4);
+  const glints = out.glints || new Float32Array(GLINTS * 8);
   geo.fill(0);
+  table.fill(0);
+  glints.fill(0);
   const B = BANDS;
   const r = runs(link);
-  // Each band's runs long enough to read as a strip, right to left, as
-  // [x0, x1) pairs.
-  const byBand = Array.from({ length: DH }, () => []);
-  for (let n = r.length - 3; n >= 0; n -= 3) if (r[n + 2] - r[n + 1] >= MIN_RUN) byBand[r[n]].push(r[n + 1], r[n + 2]);
-  const on = new Uint8Array(DW);
+
+  // The verge: sorted runs in place, inside the envelope.
+  const mrow = new Float32Array(GW);
   for (let d = 0; d < DH; d++) {
-    const yc = B.c[d] + 0.5;
+    if (!vergeLow(d)) continue;
     const row = d * DW;
-    // The band's cut: its blocks inside the envelope.
-    on.fill(0);
-    for (let x = 0; x < DW; ) {
-      const x1 = blockEnd(d, x);
-      if (maskAt(mask8, (x + x1) / 2, yc) >= WAVE_ON) on.fill(1, x, x1);
-      x = x1;
+    const split = Math.min(DW, Math.round(vergeSplit(d)));
+    maskRow(mask8, B.c[d] + 0.5, mrow);
+    for (let k = 0; k < split; k++) {
+      if (!(link[row + k] || (k > 0 && link[row + k - 1]))) continue;
+      if (mrow[k] < WAVE_ON) continue;
+      geo[(row + k) * 2] = k + 1;
+      geo[(row + k) * 2 + 1] = d;
     }
-    // Each stretch of the cut is a slab; below the curl centre the verge
-    // part (left of it) and the face (right of it) are separate slabs, split
-    // at a block cut near the centre so the face's inner edge steps too.
-    let split = blockOf[row + clamp(Math.round(CX + (hash(d, 23) - 0.5) * 120), 0, DW - 1)];
-    if (split === 0) split = CX;
-    // Just above the centre, inside the curl's hollow, the rows still count
-    // as verge: the lip's underside steps instead of cutting straight.
-    const low = yc >= CY || CY - yc < CURL_R0 * (0.55 + 0.45 * hash(d, 29));
+  }
+
+  // The runs that may be lifted: long verge runs, by band.
+  const lum = base.lum16;
+  const cand = [];
+  for (let n = 0; n < r.length; n += 3) {
+    const d = r[n];
+    const x0 = r[n + 1];
+    const x1 = r[n + 2];
+    if (B.c[d] < VERGE0 || x1 - x0 < RUN_MIN || x0 > CX) continue;
+    cand.push({ d, x0, x1, y: B.c[d] });
+  }
+  if (!cand.length) return { geo, table, glints, glintN: 0 };
+  cand.sort((p, q) => q.x1 - q.x0 - (p.x1 - p.x0));
+  const pick = (ty, len, seed) => {
+    // Runs near the target row; the longer, the likelier, never stretched
+    // past four times its length where a longer one is near.
+    let near = cand.filter((c) => Math.abs(c.y - ty) < 70);
+    if (near.length < 3) near = cand.filter((c) => Math.abs(c.y - ty) < 220);
+    if (!near.length) near = cand;
+    const fit = near.filter((c) => (c.x1 - c.x0) * 4 >= len);
+    const pool = (fit.length >= 2 ? fit : near).slice(0, 6);
+    return pool[Math.floor(seed * seed * pool.length)];
+  };
+
+  // The curl: per stripe, its cut through the envelope, less the verge.
+  const tails = [];
+  const on = new Uint8Array(DW);
+  for (let s = 0; s < NS; s++) {
+    const y = STRIPES.c[s] + 0.5;
+    const d = B.of[STRIPES.c[s]];
+    const low = vergeLow(d);
+    const split = low ? Math.round(vergeSplit(d)) : 0;
+    on.fill(0);
+    maskRow(mask8, y, mrow);
+    for (let x = split; x < DW; x++) on[x] = mrow[x] >= WAVE_ON ? 1 : 0;
+    const parts = [];
     for (let x = 0; x < DW; ) {
       if (!on[x]) {
         x++;
         continue;
       }
-      const x0 = x;
-      const verge = low && x0 < split;
-      while (x < DW && on[x] && (!low || x < split === verge)) x++;
-      const x1 = x;
-      if (verge) {
-        // At the verge the sorted runs stay in place, and everything else
-        // (a pole, a sign) is left untouched.
-        for (let k = x0; k < x1; k++) {
-          if (link[row + k] || (k > 0 && link[row + k - 1])) {
-            geo[(row + k) * 4] = k + 1;
-            geo[(row + k) * 4 + 1] = d;
-          }
-        }
-        continue;
-      }
-      // Up the curl: the slab's place on the curl (its radius) picks the
-      // verge band it shows, the curl folded flat onto the green rows, and
-      // the lift to it grows with how hard the brush has pushed the wave.
-      const xm = (x0 + x1) / 2;
-      const [, rr] = fwd(xm, yc);
-      const a = smooth(WAVE_ON, 0.9, maskAt(mask8, xm, yc));
+      const a = x;
+      while (x < DW && on[x]) x++;
+      const b = x;
+      if (b - a < 6) continue;
+      // Over the top the stripe roots near the curl's axis: its left half
+      // runs out to the lip, its right half out to the back of the wave.
+      const xs = Math.round(CX + (hash(s, 51) - 0.5) * 200);
+      if (a + 24 < xs && xs < b - 24) {
+        parts.push([a, xs, 1], [xs, b, 0]);
+      } else parts.push([a, b, (a + b) / 2 < CX ? 1 : 0]);
+    }
+    // Blades of different lengths: each tail stops short of the envelope by
+    // a hashed amount, more toward the crest, so the wave's edge is combed.
+    const far = 1 - clamp((y - CREST_Y) / (GH - CREST_Y), 0, 1);
+    for (let i = 0; i < Math.min(PARTS, parts.length); i++) {
+      let [a, b, rev] = parts[i];
+      const jag = Math.round(hash(s, 57 + i) ** 2 * (30 + 260 * far) * Math.min(1, (b - a) / 300));
+      if (rev) a += jag;
+      else b -= jag;
+      if (b - a < 6) continue;
+      const [, rr] = fwd((a + b) / 2, y);
       const t = clamp((rr - CURL_R0) / (CURL_R1 - CURL_R0), 0, 1);
-      const ty = VERGE0 + t * (VERGE1 - VERGE0);
-      const lift = Math.round((ty - yc) * a);
-      const s0 = B.of[clamp(Math.round(yc + lift), 0, GH - 1)];
-      // The slab fills from its outer (right) cut inward with that band's
-      // runs laid end to end, each a whole-pixel shift of itself: the gaps
-      // between them (the poles) drop out and the slab is solid sorted
-      // colour from cut to cut. When that band's runs are used up, the next
-      // band down carries on.
-      let s = s0;
-      let list = byBand[s];
-      // Most slabs start on their source's last run, its bright tail out at
-      // the face; the rest skip in a run or two so the run ends never stack
-      // into columns.
-      let ri = Math.min(list.length, 2 * Math.floor(hash(d, x0) * hash(d, 3) * 3));
-      let xs = ri < list.length ? list[ri + 1] : 0;
-      for (let k = x1 - 1; k >= x0; k--) {
-        while (ri >= list.length || xs <= list[ri]) {
-          if (ri < list.length) {
-            ri += 2;
-            if (ri < list.length) xs = list[ri + 1];
-            continue;
-          }
-          if (s + 1 >= DH || s - s0 >= 6) break;
-          s++;
-          list = byBand[s];
-          ri = 0;
-          xs = list.length ? list[1] : 0;
+      const c = pick(VERGE0 + t * (VERGE1 - VERGE0), b - a, hash(s * 7 + i, 53));
+      const o = (s + i * 2 * NS) * 4;
+      table[o] = a;
+      table[o + 1] = b;
+      table[o + 2] = c.d + 1;
+      table[o + 3] = rev;
+      table[o + NS * 4] = c.x0;
+      table[o + NS * 4 + 1] = c.x1;
+      // A bright tail out at the crest may break off as a glint.
+      if (y < CY - CURL_R0) {
+        const row = c.d * DW;
+        let peak = 0;
+        let n = 0;
+        // The sort puts the run's brightest pixels last: its tail is as long
+        // as the run has bright pixels.
+        for (let x = c.x0; x < c.x1; x++) {
+          if (lum[row + x] >= GLINT_LUM * 65535) n++;
+          if (lum[row + x] > peak) peak = lum[row + x];
         }
-        if (ri >= list.length) break;
-        xs--;
-        geo[(row + k) * 4] = xs + 1;
-        geo[(row + k) * 4 + 1] = s;
+        if (peak >= GLINT_PEAK * 65535 && n >= 2) tails.push({ s, a, b, rev, c, n, y, w: hash(s, 61 + i) });
       }
     }
   }
-  // Glints: where a run ends in bright pixels, that tail breaks off as one
-  // solid tile the colour of the run's brightest end, one or two bands tall.
-  // The sort puts a run's brightest, least green pixels last, so the tail is
-  // as long as the run has bright pixels.
-  const tail = new Int32Array(DW * DH).fill(-1); // run end x, per band texel in a tail
-  const lum = base.lum16;
-  const lim = Math.round(GLINT_LUM * 65535);
-  for (let n = 0; n < r.length; n += 3) {
-    const row = r[n] * DW;
-    const x0 = r[n + 1];
-    const x1 = r[n + 2];
-    let c = 0;
-    let peak = 0;
-    for (let x = x0; x < x1; x++) {
-      const l = lum[row + x];
-      if (l >= lim) c++;
-      if (l > peak) peak = l;
-    }
-    if (peak < GLINT_PEAK * 65535) continue;
-    c = Math.min(c, GLINT_MAX, x1 - x0 - 1);
-    if (c < 4) continue;
-    // Block-quantised, so the tile's hard edge reads as a cut.
-    c = Math.max(4, (c >> 2) << 2);
-    for (let x = x1 - c; x < x1; x++) tail[row + x] = x1 - 1;
+
+  // Glints: a handful of the bright tails, the highest first, spaced apart.
+  tails.sort((p, q) => p.y - q.y + (p.w - q.w) * 60);
+  let gn = 0;
+  const taken = [];
+  for (const g of tails) {
+    if (gn >= GLINTS) break;
+    const end = g.rev ? g.a : g.b;
+    if (taken.some(([x, y]) => Math.abs(x - end) < 90 && Math.abs(y - g.y) < 40)) continue;
+    taken.push([end, g.y]);
+    const w = Math.round(clamp(g.n * ((g.b - g.a) / (g.c.x1 - g.c.x0)), 14, 56));
+    const gap = 3 + Math.floor(hash(g.s, 67) * 8);
+    const tall = 8 + Math.floor(hash(g.s, 71) * 10);
+    const x0 = g.rev ? end - gap - w : end + gap;
+    const y1 = STRIPES.y0[g.s] + STRIPES.h[g.s];
+    const o = gn * 8;
+    glints[o] = x0;
+    glints[o + 1] = y1 - tall;
+    glints[o + 2] = x0 + w;
+    glints[o + 3] = y1;
+    glints[o + 4] = g.c.x1 - 1;
+    glints[o + 5] = g.c.d;
+    gn++;
   }
-  for (let d = 0; d < DH; d++) {
-    for (let x = 0; x < DW; x++) {
-      const o = (d * DW + x) * 4;
-      if (!geo[o]) continue;
-      const s = geo[o + 1];
-      const xs = geo[o] - 1;
-      const e = tail[s * DW + xs];
-      if (e < 0) continue;
-      geo[o + 2] = e + 1;
-      geo[o + 3] = s;
-      // Taller tiles reach up into the band above.
-      if (d > 0 && hash(s, e) < 0.5) {
-        const p = ((d - 1) * DW + x) * 4;
-        if (geo[p]) {
-          geo[p + 2] = e + 1;
-          geo[p + 3] = s;
-        }
-      }
-    }
-  }
-  return geo;
+  return { geo, table, glints, glintN: gn };
 }
