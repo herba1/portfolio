@@ -39,3 +39,15 @@ def tm(x, ev=0.0):
     x = np.maximum(x, 0) * 2**ev
     a = x / (1 + x)
     return np.clip(a ** (1/2.2) * 255, 0, 255).astype(np.uint8)
+def dirs_stereo(W, H, yaw, pitch, hfov, roll=0.0):
+    # Stereographic: plane point p = 2 d_perp / (1 + d.f); the horizontal edge
+    # sits at hfov/2 from the axis, i.e. |p| = 2 tan(hfov/4).
+    f, right, up = basis(yaw, pitch, roll)
+    X = 2 * np.tan(np.radians(hfov) / 4)
+    xs = ((np.arange(W) + 0.5) / W * 2 - 1) * X
+    ys = (1 - (np.arange(H) + 0.5) / H * 2) * X * H / W
+    x, y = np.meshgrid(xs, ys)
+    r2 = x * x + y * y
+    a = 4 / (4 + r2)
+    d = (a * x)[..., None] * right + (a * y)[..., None] * up + ((4 - r2) / (4 + r2))[..., None] * f
+    return d / np.linalg.norm(d, axis=-1, keepdims=True)

@@ -1,8 +1,8 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Polariser: a circular polarising filter on a wide lens pointed up past two
-// Dublin quay buildings into a March cumulus sky. Turning the ring turns the
+// Polariser: a circular polarising filter on a wide lens pointed almost
+// straight up, between two Dublin quay buildings, into a March cumulus sky. Turning the ring turns the
 // filter's transmission axis in the image plane, and every pixel answers it
 // with real optics:
 //
@@ -17,10 +17,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    angle of incidence (each face has a measured normal), so its reflection
 //    is partially polarised and fades on one face while the other holds.
 //
-// The plate is a fixed rectilinear render of Poly Haven's docklands_01 HDRI
-// (linear, unclipped; sun at az 38°, alt 28.8°, found from its brightest
-// point and checked against the time and place of capture). Each pixel's
-// view direction is rebuilt from the camera, so γ is exact.
+// The plate is a fixed stereographic render of Poly Haven's docklands_01
+// HDRI (linear, unclipped; sun at az 38°, alt 28.8°, found from its
+// brightest point and checked against the time and place of capture): a
+// worm's-eye view 84° up, 6° off the zenith toward the quay, so the
+// buildings and the red mast lean in from the left, bottom and right edges
+// and the dark band 90° from the sun arcs across the open sky above them.
+// Each pixel's view direction is rebuilt from the camera through the same
+// projection, so γ is exact.
 //
 // Query: ?pol=0..1 holds the filter angle (0..180°); ?still=1 skips the
 // reveal; ?grain=0 for static grain.
@@ -28,8 +32,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 const PLATE = "/lab/polariser/plate.jpg";
 const AUX = "/lab/polariser/aux.png";
 
-// Camera the plate was rendered with (scripts in the piece notes).
-const CAM = { yaw: 118.12255859375, pitch: 48, hfov: 110, aspect: 1600 / 2400 };
+// Camera the plate was rendered with (tools/depth/bakes/polariser/plate.py):
+// stereographic, so a plane point p = 2 d⊥ / (1 + d·f), with the plate's
+// horizontal edge at hfov / 2 from the axis. The 4:5 print crops 92% of it,
+// a 120° horizontal field on the page.
+const CAM = { yaw: 82, pitch: 84, roll: -6, hfov: 128.44206917476762, aspect: 2400 / 1920 };
+// The print crops this share of the plate.
+const CROP = 0.92;
 const SUN = { lon: 38.12255859375, lat: 28.762207031249996 };
 const GLASS_A = [-0.85284216, 0, 0.5221688];
 const GLASS_B = [-0.54538212, 0, -0.83818754];
@@ -37,7 +46,7 @@ const GLASS_B = [-0.54538212, 0, -0.83818754];
 const K = 0.6;
 // The filter angle that deepens this frame most (mean sky transmission is
 // lowest there); the hero still and the end of the reveal.
-const HERO = 0.0833;
+const HERO = 0.74;
 const P_MAX = 0.72;
 // Clear-sky dye (linear, per unit of the plate's blue) and the white balance
 // that takes the 5400 K capture's cloud to warm-neutral.
@@ -47,12 +56,18 @@ const WB = [1.1, 0.97, 0.97];
 const rad = (d) => (d * Math.PI) / 180;
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
-function cameraBasis({ yaw, pitch }) {
+function cameraBasis({ yaw, pitch, roll = 0 }) {
   const y = rad(yaw);
   const p = rad(pitch);
   const f = [Math.cos(p) * Math.sin(y), Math.sin(p), Math.cos(p) * Math.cos(y)];
-  const r = [Math.cos(y), 0, -Math.sin(y)];
-  return { f, r, u: cross(f, r) };
+  const r0 = [Math.cos(y), 0, -Math.sin(y)];
+  const u0 = cross(f, r0);
+  // Roll turns right and up about the forward axis.
+  const c = Math.cos(rad(roll));
+  const s = Math.sin(rad(roll));
+  const r = r0.map((v, i) => c * v + s * u0[i]);
+  const u = u0.map((v, i) => -s * r0[i] + c * v);
+  return { f, r, u };
 }
 
 const VERT = `#version 300 es
@@ -72,7 +87,7 @@ uniform sampler2D uPlate;
 uniform sampler2D uAux;
 uniform vec4 uCrop;      // plate uv = (x, 1 - y) * crop.xy + crop.zw
 uniform vec3 uF, uR, uU; // camera basis
-uniform float uT;        // tan(hfov / 2)
+uniform float uX;        // 2 tan(hfov / 4): stereographic half-width
 uniform float uAsp;      // plate h / w
 uniform vec3 uSun;
 uniform vec3 uNA, uNB;   // glass face normals
@@ -87,12 +102,15 @@ vec3 decode(vec3 v) {
   vec3 y = pow(v, vec3(2.2));
   return y / max(1.0 - y, 0.004) * ${(1 / K).toFixed(6)};
 }
-// Image angle (y down) of a direction e tangent to the sphere at d.
+// Stereographic projection of a direction to the image plane (y down).
+vec2 project(vec3 d) {
+  d = normalize(d);
+  return 2.0 * vec2(dot(d, uR), -dot(d, uU)) / (1.0 + dot(d, uF));
+}
+// Image angle (y down) of a direction e tangent to the sphere at d, through
+// the plate's own projection, so sky and glass E-vectors land true.
 float imageAngle(vec3 d, vec3 e) {
-  vec3 q = d + e * 0.02;
-  vec2 a = vec2(dot(d, uR), -dot(d, uU)) / dot(d, uF);
-  vec2 b = vec2(dot(q, uR), -dot(q, uU)) / dot(q, uF);
-  vec2 v = b - a;
+  vec2 v = project(d + e * 0.02) - project(d);
   return atan(v.y, v.x);
 }
 // Degree of polarisation of light reflected off glass (n = 1.52) at
@@ -113,8 +131,11 @@ void main() {
   vec2 puv = vec2(vUv.x, 1.0 - vUv.y) * uCrop.xy + uCrop.zw;
   vec3 C = decode(texture(uPlate, puv).rgb);
   vec3 aux = texture(uAux, puv).rgb;
+  // Inverse stereographic: p on the plane, back to the unit sphere.
   vec2 s = puv * 2.0 - 1.0;
-  vec3 d = normalize(uF + s.x * uT * uR - s.y * uT * uAsp * uU);
+  vec2 p = vec2(s.x, -s.y * uAsp) * uX;
+  float r2 = dot(p, p);
+  vec3 d = normalize(4.0 * (p.x * uR + p.y * uU) + (4.0 - r2) * uF);
 
   // Sky: the clear-blue (Rayleigh) part of the pixel, unmixed from the
   // neutral (Mie, cloud) part by chroma, carries the polarisation.
@@ -300,20 +321,17 @@ export async function createPolariser(host, { embedded = false } = {}) {
   const layout = (W, H, dpr) => {
     if (embedded) {
       Object.assign(L, { x: 0, y: 0, w: W, h: H });
-    } else if (W / H < 0.9) {
-      // Phone: a 4:5 print, looking up is naturally vertical.
-      const side = Math.max(16, Math.round(W * 0.06));
+    } else {
+      // A 4:5 print on every screen: looking straight up is a vertical
+      // picture, the quay at its foot and the sky opening above.
+      const side = W / H < 0.9 ? Math.max(16, Math.round(W * 0.06)) : Math.max(24, W * 0.07);
       let w = W - side * 2;
       let h = w * 1.25;
-      if (h > H * 0.74) {
-        h = H * 0.74;
+      const hMax = H * (W / H < 0.9 ? 0.74 : 0.84);
+      if (h > hMax) {
+        h = hMax;
         w = h / 1.25;
       }
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
-    } else {
-      const side = Math.max(24, W * 0.07);
-      let w = Math.min(W - side * 2, H * 0.76 * 1.5);
-      let h = w / 1.5;
       Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 - 12 });
     }
     // Snap to device pixels so the print edge is crisp.
@@ -407,20 +425,21 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
 
-    // Crop: cover-fit the print aspect into the 3:2 plate at 90%, which keeps
-    // the rectilinear field at a 14 mm-like 104° and leaves room to breathe.
+    // Crop: cover-fit the print aspect into the 4:5 plate at 92%, a 120°
+    // stereographic field across the print, with room left to breathe.
     const pa = L.pw / L.ph;
-    const m = 0.9;
+    const plateA = 1 / CAM.aspect;
+    const m = CROP;
     let sx;
     let sy;
-    if (pa >= 1.5) {
+    if (pa >= plateA) {
       sx = m;
-      sy = (m * 1.5) / pa;
+      sy = (m * plateA) / pa;
     } else {
       sy = m;
-      sx = (m * pa) / 1.5;
+      sx = (m * pa) / plateA;
     }
-    const cxp = pa >= 1.5 ? 0.5 : 0.56;
+    const cxp = 0.5;
     const b = reduce || still ? [0, 0] : [Math.sin(time * ((2 * Math.PI) / 11)) * 0.0028, Math.sin(time * ((2 * Math.PI) / 13.7) + 1.1) * 0.0022];
     const ox = clamp(cxp - sx / 2 + b[0], 0, 1 - sx);
     const oy = clamp(0.5 - sy / 2 + b[1], 0, 1 - sy);
@@ -437,7 +456,7 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uF, cam.f);
     gl.uniform3fv(u.uR, cam.r);
     gl.uniform3fv(u.uU, cam.u);
-    gl.uniform1f(u.uT, Math.tan(rad(CAM.hfov) / 2));
+    gl.uniform1f(u.uX, 2 * Math.tan(rad(CAM.hfov) / 4));
     gl.uniform1f(u.uAsp, CAM.aspect);
     gl.uniform3fv(u.uSun, sun);
     gl.uniform3fv(u.uNA, GLASS_A);

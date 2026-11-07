@@ -1,7 +1,9 @@
 import sys, json, numpy as np
 sys.path.insert(0, '.')
 from cam import basis
-J = json.load(open('plate.json'))
+# The glass normals were measured on the rectilinear plate (pitch 48); they
+# are world-space, so the stereographic plate uses them unchanged.
+J = {'yaw': 118.12255859375, 'pitch': 48, 'hfov': 110, 'W': 2400, 'H': 1600, 'sun_lon': 38.12255859375, 'sun_lat': 28.762207031249996}
 W, H = J['W'], J['H']
 f, right, up = basis(J['yaw'], J['pitch'])
 t = np.tan(np.radians(J['hfov']) / 2)
