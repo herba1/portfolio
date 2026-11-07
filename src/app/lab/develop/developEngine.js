@@ -8,10 +8,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Offline (tools/depth/bakes/develop/bake.py) the photo is taken apart into
 // two layers: the sky with every pole, girder and wire painted out, and the
 // structure as a premultiplied matte over it, with a depth key for each.
-//  - Sky key: cloud at a fixed height is nearer overhead than towards the
-//    horizon (distance ~ 1 / sin(elevation)), so the sky's depth runs from
-//    the bottom of the frame (far) to the top (near), and cloud sits a little
-//    nearer than the blue between it.
+//  - Sky key: mostly the cloud itself (density from the fill's whiteness and
+//    light, at three scales), so a cumulus core is nearer than its edge and
+//    its edge nearer than the blue; a third from distance (cloud at a fixed
+//    height is nearer overhead, ~ 1 / sin(elevation)). Rank-equalised, so the
+//    front threads the cumulus at an even pace instead of wiping by row.
 //  - Structure key: Depth Anything V2, percentile-normalised, median-
 //    filtered, near values dilated, half rank-equalised so the front spends
 //    its time evenly along the girder.
@@ -21,7 +22,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - defocus, a real disc gather (scatter-as-gather, highlight-weighted,
 //    cat's-eye towards the corners) whose circle of confusion grows with the
 //    depth still to cover;
-//  - the latent image: a pale, under-exposed negative on paper white;
+//  - the latent image: the scene itself, faint, low in contrast, washed into
+//    a cool white-blue, its sunlit curds lifted so their discs read;
 //  - the strata lifted towards you in z (a scale about the principal point
 //    in proportion to nearness), held clean by the fill behind them.
 // The front itself is a thin band of light, which the film's halation turns
@@ -40,6 +42,9 @@ const ASPECT = 1.5;
 // Key layout: sky 0..SKY_SPAN, structure FG_LO..1.
 const SKY_SPAN = 0.5;
 const FG_LO = 0.54;
+const KD_W = 0.35; // sky key: weight of distance by elevation; the rest is cloud density
+const SKY_Q = [0.0093, 0.094, 0.1691, 0.2464, 0.2886, 0.3147, 0.3321, 0.3468, 0.3695, 0.4103, 0.4534, 0.5053, 0.5697, 0.6389, 0.7187, 0.8289, 0.9763];
+const SKY_COC = 1.55; // the sky's circle of confusion over the structure's
 const AHEAD = 0.36; // key distance over which a layer goes from just-ahead to fully latent
 const SIGMA = 0.016; // band half-width in key units
 const F_START = -0.1;
@@ -94,13 +99,47 @@ const float PITCH = ${f(PITCH)};
 const float TANH = ${f(Math.tan(VFOV / 2))};
 const float LB = ${f(LB)};
 const float LT = ${f(LT)};
+const float KD_W = ${f(KD_W)};
+const float SKY_COC = ${f(SKY_COC)};
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 
+// How much cloud stands in front of the blue here, 0 open sky .. 1 a thick
+// core: whiteness (min/max of the linear light, high for cloud, low for the
+// saturated blue) and brightness of the fill, read at two scales so the
+// masses lead and their curds fray the edge, over the bake's cloud masses.
+float cloudAt(vec2 iuv, float lod) {
+  vec3 c = textureLod(uFill, iuv, lod).rgb;
+  float w = min(c.r, min(c.g, c.b)) / max(max(c.r, c.g), max(c.b, 1e-4));
+  return smoothstep(0.15, 0.9, w) * smoothstep(0.12, 0.7, dot(c, LUMA));
+}
+float cloudDensity(vec2 iuv) {
+  float m = cloudAt(iuv, 4.5);
+  float d = cloudAt(iuv, 2.5);
+  float e = cloudAt(iuv, 1.0);
+  float g = texture(uKey, iuv).g;
+  return clamp(0.3 * m + 0.35 * d + 0.2 * e + 0.15 * g, 0.0, 1.0);
+}
+// Rank of a raw sky key among the sky's own pixels (17 quantiles, measured
+// on the fill with this same cloudDensity), so the front spends its time
+// evenly: cloud is bimodal, and unequalised the front would sit in the gap
+// between the cores and the blue for a third of the drag.
+const float SKY_Q[17] = float[](${SKY_Q.map(f).join(", ")});
+float skyRank(float k) {
+  for (int i = 1; i < 17; i++) {
+    if (k <= SKY_Q[i] || i == 16) {
+      float t = clamp((k - SKY_Q[i - 1]) / max(1e-4, SKY_Q[i] - SKY_Q[i - 1]), 0.0, 1.0);
+      return (float(i - 1) + t) / 16.0;
+    }
+  }
+  return 1.0;
+}
 float skyKey(vec2 iuv) {
-  float c = texture(uKey, iuv).g;
   float e = PITCH + atan((0.5 - iuv.y) * 2.0 * TANH);
   float kd = (LB - log(1.0 / sin(e))) / (LB - LT);
-  return SKY_SPAN * (0.9 * kd + 0.1 * c);
+  // A cloud's core is nearer, and denser, than its edge or the blue beyond
+  // it: the developer reaches it first and the front threads the cumulus.
+  float k = KD_W * kd + (1.0 - KD_W) * cloudDensity(iuv);
+  return SKY_SPAN * mix(k, skyRank(k), 0.85);
 }
 float toFg(float k8) { return FG_LO + (1.0 - FG_LO) * k8; }
 float ahead(float k) { return (uDir > 0.0 ? k : 1.0 - k) - uFront; }
@@ -133,8 +172,17 @@ layout(location = 1) out vec4 o1;
 ${COMMON}
 void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
-  o0 = vec4(texture(uFill, iuv).rgb, 1.0);
-  o1 = vec4(cocOf(ahead(skyKey(iuv))) / 32.0, 0.0, 0.0, 1.0);
+  vec3 c = texture(uFill, iuv).rgb;
+  float d = ahead(skyKey(iuv));
+  // A real sky's highlights run past paper white: the sunlit curds, brighter
+  // than the cloud round them, get that headroom ahead of the front, so the
+  // lens spreads each into a disc you can see.
+  float l = dot(c, LUMA);
+  float lm = dot(textureLod(uFill, iuv, 3.5).rgb, LUMA);
+  float hi = smoothstep(0.015, 0.09, l - lm) * smoothstep(0.3, 0.6, l);
+  c *= 1.0 + 7.0 * smoothstep(0.0, AHEAD * 0.4, d) * hi;
+  o0 = vec4(c, 1.0);
+  o1 = vec4(min(31.0, SKY_COC * cocOf(d)) / 32.0, 0.0, 0.0, 1.0);
 }`;
 
 const PREP_FG = `#version 300 es
@@ -202,7 +250,8 @@ uniform sampler2D uFgBlur;
 uniform float uSig;
 uniform float uBand;
 ${COMMON}
-const vec3 PAPER = vec3(0.958, 0.951, 0.93);
+// The cool white-blue an overexposed sky washes out to (linear).
+const vec3 WASH = vec3(0.66, 0.77, 0.92);
 const vec3 LEAK = vec3(1.0, 0.8, 0.58);
 
 float hash12(vec2 p) {
@@ -225,26 +274,27 @@ vec3 toLin(vec3 c) {
 }
 
 // One layer's state at key distance d past the front (d < 0: developed).
-vec3 develop(vec3 c, float d, vec2 iuv) {
-  float dev = 1.0 - smoothstep(-0.3 * uSig, 0.7 * uSig, d);
+// band scales the front's light; soft widens the front in key units.
+vec3 develop(vec3 c, float d, vec2 iuv, float band, float soft) {
+  float sig = uSig * soft;
+  float dev = 1.0 - smoothstep(-0.3 * sig, 0.7 * sig, d);
   float an = clamp(d / AHEAD, 0.0, 1.0);
-  // The latent image: a negative at low density on paper white, thinner the
-  // further it is from the developer.
-  vec3 ds = toSrgb(c);
-  float st = mix(0.15, 0.07, an);
-  // (lifted a little in linear so, through the film's curve, it lands on
-  // the paper it is printed on, not a shade under it)
-  vec3 lat = toLin(PAPER * (1.0 - st * ds)) * 1.12;
+  // The latent image: the scene itself, a positive at low contrast on a
+  // cool white-blue wash, fainter the further it is from the developer.
+  // Clouds stay the brightest thing in it, so the cores that develop first
+  // come up as cloud, not as grey on a paler sheet.
+  float k = mix(0.55, 0.3, an);
+  vec3 lat = mix(WASH, c, k);
   // Density builds (it is not a cross-fade): interpolate in log light, so
   // the darks come up through clean tones rather than a grey mix.
   vec3 r = exp(mix(log(max(lat, 1e-4)), log(max(c, 1e-4)), dev));
   // The front: light where developer meets paper, trailing a little behind.
-  float w = d >= 0.0 ? uSig : uSig * 1.3;
+  float w = d >= 0.0 ? sig : sig * 1.3;
   float b = exp(-(d * d) / (w * w));
   float leak = 0.78 + 0.22 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
   // Light adds, but the paper is near white already: let it roll off there.
   float room = 1.0 - 0.5 * smoothstep(0.5, 1.1, dot(r, LUMA));
-  return r + LEAK * (b * uBand * leak * room);
+  return r + LEAK * (b * uBand * band * leak * room);
 }
 
 void main() {
@@ -252,8 +302,10 @@ void main() {
 
   // Sky.
   float dB = ahead(skyKey(iuv));
-  vec3 sky = mix(texture(uFill, iuv).rgb, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, cocOf(dB)));
-  sky = develop(sky, dB, iuv);
+  vec3 sky = mix(texture(uFill, iuv).rgb, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, SKY_COC * cocOf(dB)));
+  // (the sky's front runs round every cloud, where cloud density is steep:
+  // wider in key and lighter there, or it draws a tide line round each)
+  sky = develop(sky, dB, iuv, 0.16, 2.4);
 
   // Structure, lifted.
   vec2 q = fgWarp(iuv);
@@ -262,7 +314,7 @@ void main() {
   pm = min(pm, vec3(a)) * step(0.004, a);
   float dF = ahead(toFg(texture(uKey, q).r));
   vec4 fg = mix(vec4(pm, a), texture(uFgBlur, vUv), smoothstep(0.25, 1.25, cocOf(dF)));
-  vec3 fc = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv);
+  vec3 fc = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, 1.0, 1.0);
 
   o = vec4(fc * fg.a + sky * (1.0 - fg.a), 1.0);
 }`;
