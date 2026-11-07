@@ -225,8 +225,11 @@ void main() {
   // diffusion: screened, so it lifts the cobalt and never clips.
   float self = smoothstep(0.62, 0.9, yg) * (1.0 - key.r);
   float rim = max(key.g - self, 0.0);
-  c += uHalTint * uGlow.y * rim * (1.0 - top) * 0.35;
-  vec3 veil = uCloudTop * key.b * key.b * uGlow.z;
+  // Both masked off the steel: the mast stays graphite where it crosses lit
+  // cloud, one sharp silhouette against the soft cloud light.
+  float bare = 1.0 - 0.85 * key.r;
+  c += uHalTint * uGlow.y * rim * (1.0 - top) * 0.35 * bare;
+  vec3 veil = uCloudTop * key.b * key.b * uGlow.z * bare;
   c = 1.0 - (1.0 - c) * (1.0 - veil);
   outColor = vec4(c, 1.0);
 }`;
@@ -297,11 +300,13 @@ void main() {
   int i1 = min(i0 + 1, 24);
   vec3 col = mix(uShade[i0], uShade[i1], fract(u));
   // The same graphite as the steel; where the wire crosses lit cloud, the
-  // cloud's halation and veil lie over it too.
+  // cloud's halation and veil lie over it too, masked off the steel exactly
+  // as the plate masks them, so a live wire matches the plate's own.
   col = mix(col, graphite(col), uStruct.x);
   vec3 key = texture(uKey, vRest / uImg).rgb;
-  col += uHalTint * uGlow.y * key.g * 0.35;
-  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.z);
+  float bare = 1.0 - 0.85 * key.r;
+  col += uHalTint * uGlow.y * key.g * 0.35 * bare;
+  col = 1.0 - (1.0 - col) * (1.0 - uCloudTop * key.b * key.b * uGlow.z * bare);
   outColor = vec4(col, a);
 }`;
 
