@@ -185,8 +185,9 @@ print('plate: clipped', round(float((s8.max(-1) >= 255).mean() * 100), 3), '%, n
 
 # ---------------------------------------------------------------- distance
 # aux.png: distance, matte and elevation, snapped to the silhouettes (auxmap.py).
-# The plate above keeps the segmentation's own matte.
-aux, d = auxmap.build(r, matte, elev)
+# The plate above keeps the segmentation's own matte; the aux matte is the
+# snapped one as coverage on the plate's own edges.
+aux, d = auxmap.build(r, matte, elev, srgb)
 auxmap.save(aux, OUT)
 for n, (u, v) in dict(glass=(.2, .7), rtower=(.85, .2), ltower=(.15, .25), far=(.54, .88), behind=(.37, .6), rlow=(.8, .75)).items():
     print(n, round(float(d[int(v * H), int(u * W)]), 1))

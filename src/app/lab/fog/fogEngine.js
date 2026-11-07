@@ -13,7 +13,9 @@ import { createStage, clamp } from "../_kit/stage";
 // relative inverse depth, turned into metres offline (the glass corner ~30 m,
 // the far tower down the street ~380 m), with the distance and the sky matte
 // both stopped on the towers' silhouettes (no bleed band of sky distance
-// inside a tower's edge); the sky sits at the far end through its matte.
+// inside a tower's edge). The matte is sub-pixel coverage on the plate's own
+// edges, and the tower's distance runs out across them, so an edge pixel is
+// its tower's air and the sky's by coverage, never a per-pixel switch.
 // tools/depth/bakes/fog/ builds both (auxmap.py the distance and matte).
 //
 //   visibility V   the control (Koschmieder: beta = 3.912 / V at 550 nm)
@@ -34,7 +36,7 @@ import { createStage, clamp } from "../_kit/stage";
 //                  and banks of it drift slowly through the street
 
 const COLOR_SRC = "/lab/fog/plate.webp";
-const AUX_SRC = "/lab/fog/aux.png"; // r log distance, g sky matte, b elevation
+const AUX_SRC = "/lab/fog/aux.png"; // r log distance, g sky coverage, b elevation
 const ASPECT = 3 / 2;
 const PLATE_W = 3840; // plate.webp width; the forward-scatter blur is tuned in its levels
 const D_MIN = 10;
@@ -119,33 +121,42 @@ float vnoise(vec3 p) {
     mix(mix(hash3(i + vec3(0, 0, 1)), hash3(i + vec3(1, 0, 1)), f.x), mix(hash3(i + vec3(0, 1, 1)), hash3(i + vec3(1, 1, 1)), f.x), f.y),
     f.z);
 }
-// Optical depth along the ray through this pixel, per channel.
-vec3 tauAt(vec2 uv, vec4 aux) {
+// Extinction along a ray at elevation sine s through haze at log-distance
+// depth z (the noise lives at depths), weighted w by the pointer's breath.
+float betaAt(vec2 uv, float z, float w) {
+  // Banks of haze: low-frequency noise, advected sideways, living at depths.
+  vec3 q = vec3(uv.x * uAspect * 1.4 - uTime * 0.012, uv.y * 1.2, z * 0.4);
+  float n = vnoise(q) * 0.64 + vnoise(q * 2.03 + vec3(uTime * 0.008, 0.0, 3.1)) * 0.36;
+  float b = uBeta * mix(0.7, 1.3, n);
+  // It gathers where the pointer rests.
+  vec2 p = (uv - uBreath.xy) * vec2(uAspect, 1.0);
+  return b * (1.0 + uBreath.z * w * exp(-dot(p, p) / 0.06));
+}
+// Optical depth, per channel, along the ray to the tower this pixel is (or,
+// in the band along a silhouette, the tower it partly is: aux.r carries the
+// tower's distance out across its edge).
+vec3 tauTower(vec2 uv, vec4 aux) {
   float d = distAt(aux);
   float s = max(sin(radians(aux.b * 90.0)), 0.06);
   // Air in a haze layer that thins with height, along the ray to a tower.
   float L = ${HS.toFixed(1)} / s * (1.0 - exp(-d * s / ${HS.toFixed(1)}));
   // Less of it near the eye: the swept street, d - d0 ln(1 + d / d0) of d.
   L *= 1.0 - uClear / d * log(1.0 + d / max(uClear, 1e-3));
+  // Blue goes first along the street.
+  return betaAt(uv, log(d), 1.0) * L * vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")});
+}
+// And to the sky through it.
+vec3 tauSky(vec2 uv, vec4 aux) {
+  float s = max(sin(radians(aux.b * 90.0)), 0.06);
   // The sky is looked at through the whole column, by airmass: a thin one
   // overhead, so the zenith stays clear, thickening gradually toward the
   // low sky down the street (1 / cos of the zenith angle, floored).
-  float Ls = ${HS_SKY.toFixed(1)} / max(s, ${AIRMASS_FLOOR.toFixed(2)});
-  L = mix(L, Ls, aux.g);
-  // Banks of haze: low-frequency noise, advected sideways, living at depths.
-  vec3 q = vec3(uv.x * uAspect * 1.4 - uTime * 0.012, uv.y * 1.2, log(d) * 0.4);
-  float n = vnoise(q) * 0.64 + vnoise(q * 2.03 + vec3(uTime * 0.008, 0.0, 3.1)) * 0.36;
-  float b = uBeta * mix(0.7, 1.3, n);
-  // It gathers where the pointer rests.
-  vec2 p = (uv - uBreath.xy) * vec2(uAspect, 1.0);
-  // Over the sky it gathers at half strength: a breath, not a bank.
-  b *= 1.0 + uBreath.z * mix(1.0, 0.5, aux.g) * exp(-dot(p, p) / 0.06);
-  // Blue goes first along the street. Over the sky the column is short and
-  // the light it takes away is the cloud's warm-white, which a Rayleigh
-  // spread turns lilac under the blue veil; there the haze is near-grey and
-  // the veil keeps the skylight's cyan.
-  vec3 k = mix(vec3(${K_RGB.map((k) => k.toFixed(2)).join(", ")}), vec3(${K_SKY.map((k) => k.toFixed(2)).join(", ")}), aux.g);
-  return b * L * k;
+  float L = ${HS_SKY.toFixed(1)} / max(s, ${AIRMASS_FLOOR.toFixed(2)});
+  // Over the sky it gathers at half strength: a breath, not a bank. The
+  // column is short and the light it takes away is the cloud's warm-white,
+  // which a Rayleigh spread turns lilac under the blue veil; there the haze
+  // is near-grey and the veil keeps the skylight's cyan.
+  return betaAt(uv, ${Math.log(D_MAX).toFixed(4)}, 0.5) * L * vec3(${K_SKY.map((k) => k.toFixed(2)).join(", ")});
 }
 `;
 
@@ -237,12 +248,21 @@ void main() {
   vec2 frag = vec2(gl_FragCoord.x, uCanvas.y - gl_FragCoord.y);
   vec2 uv = clamp((frag - uRect.xy) / uRect.zw, 0.0, 1.0);
   vec4 aux = texture(uAux, uv);
-  vec3 T = exp(-tauAt(uv, aux));
+  // How much of this pixel is open sky: the aux coverage, boxed over the
+  // pixel's footprint like the plate (the aux map is drawn smaller than 1:1,
+  // and one bilinear tap of it would alias the silhouettes again).
+  vec2 q = 0.25 / uRect.zw;
+  float cov = 0.25 * (texture(uAux, uv + vec2(-q.x, -q.y)).g + texture(uAux, uv + vec2(q.x, -q.y)).g
+    + texture(uAux, uv + vec2(-q.x, q.y)).g + texture(uAux, uv + vec2(q.x, q.y)).g);
+  // Two rays share an edge pixel: one stops on the tower, one goes on to the
+  // sky. Each has its own air, and the pixel is the two by coverage.
+  vec3 Tt = exp(-tauTower(uv, aux));
+  vec3 Ts = exp(-tauSky(uv, aux));
 
   // Forward scatter softens what the air has nearly taken: the towers only.
   // The sky behind the haze is veiled by the in-scatter below, never blurred
   // (convolving the clouds reads as a lens, not as air).
-  float soft = (1.0 - T.g) * (1.0 - T.g) * (1.0 - smoothstep(0.02, 0.5, aux.g));
+  float soft = (1.0 - Tt.g) * (1.0 - Tt.g) * (1.0 - cov);
   vec3 scene = plate(uv, soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)});
 
   // The air is lit by the sky. In front of the sky it is the sky's own light
@@ -255,7 +275,7 @@ void main() {
   vec3 air = (a.rgb + uSkyMean * 0.02) / (a.a + 0.02);
   air = mix(vec3(${hex(AIR_LOW)}), air, smoothstep(16.0, 60.0, aux.b * 90.0));
   // Thick haze scatters more often and lifts toward the brighter horizon.
-  float thick = 1.0 - T.g;
+  float thick = 1.0 - Ts.g;
   air = pow(min(air * (1.0 + 0.08 * thick), vec3(${hex(AIR_CAP)})), vec3(2.2));
   // In front of a tower it is the open sky at that tower's own elevation: a
   // far tower fades into the blue it stands in, never toward the pale rim or
@@ -263,23 +283,24 @@ void main() {
   // turns the towers to milk). Clamped to the mid sky: the deep cobalt
   // overhead is the thinnest air in the frame and lights the least of it.
   vec3 open = pow(mix(uSkyLow, uSkyMid, smoothstep(18.0, 34.0, aux.b * 90.0)), vec3(2.2));
-  air = mix(open, air, smoothstep(0.02, 0.5, aux.g));
 
-  vec3 col = scene * T + air * (1.0 - T);
+  vec3 tower = scene * Tt + open * (1.0 - Tt);
+  vec3 sky = scene * Ts + air * (1.0 - Ts);
   // The veil over the sky keeps the cumulus' forms: their local detail (the
   // plate less its blur at the scale of a cloud's forms) comes back over the
   // in-scatter, so at least ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and
   // the low cloud reads as cloud through the air, not as a flat wash.
   vec4 dtl = texture(uDetail, uv);
   vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
-  float skyW = smoothstep(0.5, 1.0, aux.g) * smoothstep(0.05, 0.3, dtl.a);
-  col += ${DETAIL_K.toFixed(2)} * (1.0 - T) * (scene - forms) * skyW;
+  sky += ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
+  vec3 col = mix(tower, sky, cov);
+  vec3 T = mix(Tt, Ts, cov);
   // Display-encoded and untoned, for the film finish. Alpha packs two
   // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
   // tower still seen through the air (the glass grade's weight, so far towers
   // keep the blue the haze gave them), and how clear the air in front of it is
   // (the warm top end is the sun on the cumulus, not on the haze).
-  float solid = T.g * (1.0 - smoothstep(0.02, 0.5, aux.g));
+  float solid = Tt.g * (1.0 - cov);
   outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), (floor(solid * 15.0 + 0.5) * 16.0 + floor(T.g * 15.0 + 0.5)) / 255.0);
 }`;
 
@@ -294,8 +315,15 @@ vec3 tone(vec3 x) {
   return min(y, k) + 0.085 * (1.0 - exp(-max(y - k, 0.0) / 0.085));
 }
 float luma(vec3 c) { return dot(c, vec3(0.2126, 0.7152, 0.0722)); }
-// What exposes the halation: the toned highlights, above about 0.8.
-float highlight(vec3 display) { return smoothstep(0.8, 0.94, luma(tone(display))); }
+// What exposes the halation: the toned highlights, above about 0.8, that are
+// light rather than sky: the sunlit cumulus and glints, near-neutral to warm.
+// The pale cyan of the low sky in haze is bright too, but it is a cool field,
+// not a highlight, and a ring of red round every tower against it reads as a
+// chroma fringe.
+float highlight(vec3 display) {
+  float cool = smoothstep(0.03, 0.1, display.b - display.r);
+  return smoothstep(0.8, 0.94, luma(tone(display))) * (1.0 - cool);
+}
 `;
 
 // The finish's sources at half size: rgb the scene, linear, for the diffusion
@@ -313,7 +341,7 @@ void main() {
 
 // The last stage: the scene as summer film, scanned. A diffusion bloom and
 // scan softness, a filmic shoulder whose top end is warm-neutral, cloud shade
-// toward skylight blue, glass graded away from the sky's blue, a thin red
+// toward skylight blue, glass graded away from the sky's blue, a thin amber
 // halation under the highlight edges, and 24 fps grain at scan scale.
 const FINISH = `#version 300 es
 precision highp float;
@@ -376,8 +404,9 @@ void main() {
   // Halation: light through the base bouncing back into the red layer, just
   // outside each highlight edge.
   float hal = max(texture(uHal, vUv).a / uNorm.x - highlight(s.rgb), 0.0);
-  // Red, with the little green that makes it read red-orange over the blue.
-  c += hal * vec3(0.42, 0.08, 0.0);
+  // A warm amber: red with half as much green, so over the cyan sky it warms
+  // the ring toward the cloud's white instead of printing magenta.
+  c += hal * vec3(0.3, 0.15, 0.02);
 
   // A little toe, then grain: luminance only, strongest in the midtones.
   c = mix(c, c * c * (3.0 - 2.0 * c), 0.1);
