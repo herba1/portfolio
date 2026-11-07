@@ -44,8 +44,9 @@ import { takes } from "./shutterTakes";
 // Presented full-bleed: the plate covers the box (cropped at its long side),
 // as a print would be trimmed to the frame.
 //
-// Develop: _kit/film.js, summer preset (halation, Pro-Mist bloom, colour
-// bleed, curve, 24 fps grain).
+// Develop: _kit/film.js, summer preset (Pro-Mist bloom, colour bleed, curve,
+// 24 fps grain), then the print's top end (FINISH_FS): paper white, sunlit
+// cream, and a narrow warm halation ring in place of the film's wide one.
 
 const BASE = "/lab/shutter/";
 const TAU = 1; // frames: the opening frame's share of a still (?open); each frame already carries its own interval
@@ -72,9 +73,10 @@ const METER_LONG = -0.75;
 
 // The summer develop, eased for this plate. The bake already deepens the sky
 // toward the zenith, so the film's own blue deepening is cut, or the top of
-// the frame goes navy. Halation is judged from the surround and kept low: at
-// full strength its red layer rings every white edge against cobalt (the
-// tower's frame, every cloud) in magenta, which reads as an electronic fringe.
+// the frame goes navy. The film's own halation is off: it is wide (1-3% of
+// the frame), and over cobalt its red layer rings every white edge (the
+// tower's frame, every cloud) in magenta, an electronic fringe. The narrow
+// warm ring of FINISH_FS takes its place.
 // The clear sky's colour comes back as the exposure grows past the live
 // second (keepSky in the compose pass), and past ~3 s the hold keeps
 // smoothing the silk without the ND flattening it further: the streaks'
@@ -88,7 +90,20 @@ const HOLD_CONTRAST = 3; // s
 const gainFor = (T, N) => Math.sqrt(Math.max(1, T / framesFor(HOLD_CONTRAST, N)));
 const MEAN_FRAC = 1 / 8; // the local mean's scale, a fraction of the plate's width
 
-const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0.14, halationLocal: 1, halationColor: [1, 0.42, 0.18] };
+const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0 };
+// The top end (FINISH_FS): the highlights above the knee are printed back up
+// by the stops the meter fell, so the tower lands on the same paper white at
+// every hold.
+const KNEE = 0.78;
+const PAPER = 0.966;
+const LIFT = 0.1; // stops over the meter-down
+const STREAK_LIFT = 0.45; // the streaks' share of those stops
+const GLINT_DETAIL = 0.5;
+const CREAM_HUE = (80 * Math.PI) / 180;
+const CREAM_C = 0.013;
+const RING_PX = 3; // at DPR 2
+const RING_C = 0.05;
+const RING_HUE = (48 * Math.PI) / 180;
 const develop = (T, N) => {
   const k = longness(T, N);
   return {
@@ -233,6 +248,108 @@ void main(){
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;
   vec3 tower = mix(clamp(enc(f) + dF, 0.0, 1.0), s.rgb, uWB);
   o = vec4(mix(sky, tower, s.a), 1.0);
+}`;
+
+// The print's top end, after development, in OKLab. The long exposure is
+// metered down (so minutes of cloud do not pale the sky), and a meter that
+// falls takes the white tower and the cloud tops down with it into a
+// blue-grey card. A printer would hold the paper white: above L ~0.78 the
+// neutral highlights are printed back up in linear light by the stops the
+// meter fell and rolled into it on a shoulder (a gain, so the glass's
+// texture inside a highlight keeps its steps), and the near-whites turn from the
+// film's cool to sunlit cream (hue ~80 deg, a hair of chroma). Coloured light
+// (the cobalt, the cyan, the glass) is gated out by its chroma and never
+// moves; the silk's pale streaks take only part of the lift, so the sky's
+// tone holds.
+// Halation, here, is the narrow kind: a 2-4 device-px warm ring on the
+// bright side of the tower's sunlit edge against the sky and round the sun's
+// glint on the glass, where the red layer has taken extra light. It sits on
+// the white, never on the cobalt, so it cannot read as a magenta fringe. The
+// glint's blown centre goes to a hot paper white; its edge keeps the mullions.
+const FINISH_FS = `#version 300 es
+precision highp float;
+uniform sampler2D uDev;    // developed print (sRGB, GL orientation)
+uniform sampler2D uStill;  // sRGB still plate, stillness matte in a
+uniform vec2 uSize;
+uniform vec4 uCover;
+uniform float uLodS;       // still lod at display
+uniform vec2 uLift;        // highlight gain (linear); the streaks' share of its stops
+uniform vec2 uKnee;        // lightness where the shoulder starts, paper white
+uniform float uDetail;     // the glint's mullions put back
+uniform vec3 uCream;       // cream: hue (rad), chroma, strength
+uniform vec3 uRing;        // ring: radius (device px), chroma, hue (rad)
+out vec4 o;
+${COMMON}
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec4 stillAt(vec2 iuv){ return textureLod(uStill, iuv, uLodS); }
+float lumaOf(vec3 s){ return dot(lin(s), LUMA); }
+void main(){
+  vec2 fc = gl_FragCoord.xy;
+  vec3 c = max(lin(texture(uDev, fc / uSize).rgb), 0.0);
+  vec3 p = toLab(c);
+  vec2 uv = fc / uSize * uCover.xy + uCover.zw;
+  vec2 iuv = vec2(uv.x, 1.0 - uv.y);
+  vec4 s = stillAt(iuv);
+  float m = s.a;
+  float C = length(p.yz);
+  float neutral = 1.0 - smoothstep(0.03, 0.07, C);
+
+  // The shoulder. In linear light the neutral highlights are printed
+  // back up by the stops the meter fell (uLift.x), the silk's streaks by a
+  // share of them, then rolled into paper white: ratios hold, so the
+  // glass's steps inside a highlight survive the lift.
+  // On the tower the weight is judged on the still (grain-free, sharp), so
+  // the shoulder follows the cladding and the glass, not the grain.
+  float Y = p.x * p.x * p.x;
+  float Ys = lumaOf(s.rgb);
+  float wl = mix(smoothstep(uKnee.x - 0.04, uKnee.x + 0.04, p.x) * neutral, smoothstep(0.45, 0.88, Ys), m);
+  float g = pow(uLift.x, mix(uLift.y, 1.0, m));
+  float Yl = Y * mix(1.0, g, wl);
+  float Yp = uKnee.y * uKnee.y * uKnee.y;
+  Yl = Yl / pow(1.0 + pow(Yl / Yp, 8.0), 0.125);
+  float L = mix(p.x, pow(Yl, 1.0 / 3.0), wl);
+
+  // Sunlit cream on the near-whites.
+  float wc = smoothstep(uKnee.x + 0.04, uKnee.y - 0.03, L) * neutral * mix(0.6, 1.0, m) * uCream.z;
+  vec2 ab = mix(p.yz, vec2(cos(uCream.x), sin(uCream.x)) * uCream.y, wc);
+
+  // Where the still is a sunlit white (cladding, the glint), and how much of
+  // it the ring sees: the tower's edge against the sky, and the edge of the
+  // glint's blown core.
+  float lit = smoothstep(0.72, 0.9, Ys) * m;
+  // The glint is the one white wider than the cladding's bands: at 1/32 of
+  // the plate it alone stays near white.
+  float core = smoothstep(0.8, 0.9, lumaOf(textureLod(uStill, iuv, uLodS + 5.0).rgb)) * m;
+  vec2 st = uRing.x / uSize * uCover.xy * vec2(1.0, -1.0);
+  float mA = 0.0;
+  float yA = 0.0;
+  for (int i = 0; i < 8; i++) {
+    float a = float(i) * 0.785398 + 0.39;
+    vec4 t = stillAt(iuv + vec2(cos(a), sin(a)) * st);
+    mA += t.a;
+    yA += smoothstep(0.82, 0.97, lumaOf(t.rgb)) * t.a;
+  }
+  mA /= 8.0;
+  yA /= 8.0;
+  float edge = clamp((m - mA) * 2.5, 0.0, 1.0);
+  float hot = smoothstep(0.82, 0.97, Ys) * m;
+  float rim = clamp((hot - yA) * 2.0, 0.0, 1.0) * core;
+  // Kept inside the matte, where the pixel is all white: on a pixel the
+  // sky shares, orange over cobalt would be the magenta fringe again.
+  float ring = lit * max(edge, rim) * smoothstep(0.6, 0.95, m);
+
+  // The glint: its blown centre a hot white, and round it the mullions the
+  // develop's glare washed out, put back from the still's own fine detail
+  // (only here, and only in the highlight).
+  float blown = smoothstep(0.9, 0.95, Ys) * core;
+  float d = Ys - lumaOf(textureLod(uStill, iuv, uLodS + 1.5).rgb);
+  L += uDetail * d * core * smoothstep(uKnee.x, uKnee.y, L) * (1.0 - blown);
+  L = mix(L, max(L, uKnee.y + 0.022), blown);
+  ab *= 1.0 - 0.7 * blown;
+
+  ab = mix(ab, vec2(cos(uRing.z), sin(uRing.z)) * uRing.y, ring);
+  L -= 0.025 * ring;
+  o = vec4(enc(max(fromLab(vec3(L, ab)), 0.0)), 1.0);
 }`;
 
 // Print onto the page: the developed frame, and the last one fading out
@@ -416,6 +533,7 @@ export async function createShutter(host, { embedded = false } = {}) {
     expose: compile(gl, VS, EXPOSE_FS),
     acc: compile(gl, VS, ACC_FS),
     compose: compile(gl, VS, COMPOSE_FS),
+    finish: compile(gl, VS, FINISH_FS),
     blit: compile(gl, VS, BLIT_FS),
   };
   const stillTex = texture(gl, stillImg, { mips: true });
@@ -456,6 +574,7 @@ export async function createShutter(host, { embedded = false } = {}) {
   const cover = [1, 1, 0, 0];
   let film = null;
   let comp = null;
+  let raw = null; // the developed frame before its top end is printed
   let dev = [null, null]; // developed frames: current, previous
   const layout = (w, h, dpr) => {
     rect.w = Math.max(1, Math.round(w));
@@ -471,6 +590,8 @@ export async function createShutter(host, { embedded = false } = {}) {
     const dw = Math.round(rect.w * dpr);
     const dh = Math.round(rect.h * dpr);
     freeTarget(gl, comp);
+    freeTarget(gl, raw);
+    raw = target(gl, dw, dh, false);
     dev.forEach((d) => freeTarget(gl, d));
     comp = target(gl, dw, dh, false);
     dev = [target(gl, dw, dh, false), target(gl, dw, dh, false)];
@@ -583,9 +704,31 @@ export async function createShutter(host, { embedded = false } = {}) {
 
     // 3. Develop.
     const look = develop(T, N);
-    film.render(comp.tex, { ...look, exposure: exposureEV + look.exposure, grainSeed: seed }, dev[0].fbo);
+    film.render(comp.tex, { ...look, exposure: exposureEV + look.exposure, grainSeed: seed }, raw.fbo);
 
-    // 4. Print onto the paper.
+    // 4. The top end: paper white, cream, the narrow halation ring.
+    gl.bindVertexArray(vao);
+    const fu = P.finish.u;
+    gl.useProgram(P.finish.p);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, raw.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, stillTex);
+    gl.uniform1i(fu.uDev, 0);
+    gl.uniform1i(fu.uStill, 1);
+    gl.uniform2f(fu.uSize, raw.w, raw.h);
+    gl.uniform4fv(fu.uCover, cover);
+    gl.uniform1f(fu.uLodS, lodD);
+    gl.uniform2f(fu.uLift, 2 ** (LIFT - look.exposure), STREAK_LIFT);
+    gl.uniform1f(fu.uDetail, GLINT_DETAIL);
+    gl.uniform2f(fu.uKnee, KNEE, PAPER);
+    gl.uniform3f(fu.uCream, CREAM_HUE, CREAM_C, 1);
+    gl.uniform3f(fu.uRing, RING_PX * (dpr / 2), RING_C, RING_HUE);
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dev[0].fbo);
+    gl.viewport(0, 0, dev[0].w, dev[0].h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+
+    // 5. Print onto the paper.
     gl.bindVertexArray(vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     const cw = canvas.width;
@@ -830,6 +973,7 @@ export async function createShutter(host, { embedded = false } = {}) {
       sound?.destroy();
       film?.destroy();
       freeTarget(gl, comp);
+      freeTarget(gl, raw);
       dev.forEach((d) => freeTarget(gl, d));
       freeTarget(gl, exp);
       acc.forEach((t) => freeTarget(gl, t));
