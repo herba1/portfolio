@@ -39,6 +39,13 @@ import { createFilm } from "../_kit/film";
 
 const ASSET = "/lab/crossing/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
+// What the film sees round the window. The page's paper is bright enough to
+// fire the film's halation, and its red-orange halo laid over the blue sky
+// at the card's edges read as a magenta fringe in the corners. The film gets
+// a neutral grey there instead (below the halation threshold, no hue), so the
+// only thing it brings into the edges is a little neutral veil; the page
+// itself still shows the real paper (FINAL_FS).
+const SURROUND = [0.78, 0.78, 0.78];
 const PHOTO = [2048, 1356];
 const MATTE = [512, 339];
 // From layers.json (bake.py): each plane's crop rect in photo uv. Cards
@@ -81,7 +88,7 @@ const FILM = {
   softness: 0.45,
   contrast: 1.16,
   saturation: 1.12,
-  blueDepth: 0.7,
+  blueDepth: 0.25, // the bake paints the cobalt into the sky card; more here turns it cyan
   grain: 0.3,
   vignette: 0,
 };
@@ -215,18 +222,6 @@ void main() {
       shade *= mix(vec3(1.0), vec3(0.74, 0.76, 0.79), m);
     }
     c.rgb *= mix(vec3(1.0), shade, uShadow);
-  }
-  // Summer sky toward cobalt: pull the green out of saturated blues only
-  // (hue to ~210, deeper), leaving cloud, foliage and the yellow signals
-  // alone, and more so toward the top of the photo, which here looks up
-  // toward the zenith. Photo uv, so the flat print and the cards agree.
-  if (c.a > 0.0) {
-    vec3 u = c.rgb / c.a;
-    float w = smoothstep(0.08, 0.34, u.b - u.r) * smoothstep(0.0, 0.1, u.b - u.g + 0.08);
-    float zen = 1.0 - smoothstep(0.0, 0.75, vUv.y);
-    u.g -= (0.24 + 0.1 * zen) * (u.b - u.r) * w;
-    u *= 1.0 - (0.06 + 0.1 * zen) * w;
-    c.rgb = u * c.a;
   }
   // The air between the cards: farther planes take a little sky haze.
   c.rgb = mix(c.rgb, uHazeColor * c.a, uHaze);
@@ -584,7 +579,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     const dpr = stage.dpr;
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, w, h);
-    gl.clearColor(PAPER[0], PAPER[1], PAPER[2], 0);
+    gl.clearColor(SURROUND[0], SURROUND[1], SURROUND[2], 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
@@ -606,7 +601,7 @@ export async function createCrossing(host, { embedded = false } = {}) {
     gl.uniform1f(U.uPrintW, G.printW);
     gl.uniform3f(U.uHazeColor, HAZE[0], HAZE[1], HAZE[2]);
     gl.uniform1i(U.uMat, 0);
-    gl.uniform3f(U.uPaper, PAPER[0], PAPER[1], PAPER[2]);
+    gl.uniform3f(U.uPaper, SURROUND[0], SURROUND[1], SURROUND[2]);
     gl.uniform1f(U.uMatZ, G.zs[MAT_K]);
     gl.uniform2f(U.uMatHalf, halves[MAT_K * 2], halves[MAT_K * 2 + 1]);
     gl.uniform1i(U.uTex, 0);
@@ -653,10 +648,12 @@ export async function createCrossing(host, { embedded = false } = {}) {
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     }
     // The front mat: a sheet of the page's own paper with the photo's
-    // rectangle cut out of it, at the nearest card's depth. It puts paper
-    // back in colour (so the film's blur sees paper round the window) and
-    // takes coverage away, so the page shows through it untouched.
-    gl.blendFuncSeparate(gl.ONE, gl.ONE_MINUS_SRC_ALPHA, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
+    // rectangle cut out of it, at the nearest card's depth. It only takes
+    // coverage away, so the page shows through it untouched (FINAL_FS). The
+    // colour round the window is left as the overscanned cards drew it, so
+    // the film's bloom and halation see the sky carry on past the cut, as a
+    // lens would: no paper or grey veil creeping in to desaturate the edges.
+    gl.blendFuncSeparate(gl.ZERO, gl.ONE, gl.ZERO, gl.ONE_MINUS_SRC_ALPHA);
     gl.uniform1i(U.uMat, 1);
     gl.uniform4f(U.uRect, MAT_RECT[0], MAT_RECT[1], MAT_RECT[2], MAT_RECT[3]);
     gl.uniform3f(U.uPlane, halves[MAT_K * 2], halves[MAT_K * 2 + 1], G.zs[MAT_K]);

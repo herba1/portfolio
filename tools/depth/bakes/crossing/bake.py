@@ -99,6 +99,120 @@ for k in range(K - 1, 0, -1):  # nearer coverage never exceeds farther
 print("coverages done")
 del Bsky, dist_sky, Fobj, FB, den, acol, g1, use_col, band  # keep the bake lean
 
+
+# ---- sky regrade
+# The photo's sky is a pale, slightly lavender summer haze (206-226 deg, S
+# 0.04-0.34, greying out low down). The card gets a designed sky instead: one
+# continuous gradient that deepens toward the zenith (the top of the frame:
+# the camera looks up), saturated cobalt above running to a pale but still
+# cyan horizon, every hue inside 200-212 deg so nothing reads violet. The
+# stops are what the card holds; the engine's film (contrast 1.16, sat 1.12,
+# blueDepth 0.25) lands them at about #1f66ae (209 deg, S 0.83) and #b9dcef
+# (201 deg, S 0.23). Interpolated in OKLab so the middle stays clean.
+SKY_ZENITH = (0x25, 0x62, 0xA6)  # 211 deg, S 0.78
+SKY_HORIZON = (0xBE, 0xE4, 0xFA)  # 203 deg, S 0.24
+SKY_V1 = 0.95  # where the photo's lowest sky sits (frame heights)
+SKY_GAMMA = 2.5  # deep for most of the frame, paling fast near the horizon
+SKY_SUN = 0.1  # a little paler toward the sun (up and right)
+# Cloud: a warm-neutral sunlit top and a skylight-blue underside (212 deg).
+CLOUD_LIT = (0xF5, 0xF2, 0xEA)
+CLOUD_SHADE = (0xB0, 0xC5, 0xDD)
+CLOUD_LIFT = 1.35  # the photo's wisps are faint: carry them further to white
+SUN_DIR = (0.54, -0.84)  # toward the sun in image space (LIGHT in the engine)
+
+_OK1 = np.array([[0.4122214708, 0.5363325363, 0.0514459929], [0.2119034982, 0.6806995451, 0.1073969566], [0.0883024619, 0.2817188376, 0.6299787005]], np.float32)
+_OK2 = np.array([[0.2104542553, 0.7936177850, -0.0040720468], [1.9779984951, -2.4285922050, 0.4505937099], [0.0259040371, 0.7827717662, -0.8086757660]], np.float32)
+
+
+def _lin(c):
+    c = np.clip(np.asarray(c, np.float32), 0, 1)
+    return np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4)
+
+
+def _enc(c):
+    c = np.clip(c, 0, 1)
+    return np.where(c <= 0.0031308, c * 12.92, 1.055 * c ** (1 / 2.4) - 0.055)
+
+
+def to_oklab(c):
+    return np.cbrt(_lin(c) @ _OK1.T) @ _OK2.T
+
+
+def from_oklab(o):
+    return _enc(((o @ np.linalg.inv(_OK2).T) ** 3) @ np.linalg.inv(_OK1).T).astype(np.float32)
+
+
+def sky_gradient(u, v):
+    """The card's clear-sky colour at frame position (u, v), 0..1 inside the
+    photo (y down). Monotone from zenith to horizon in every column. Past
+    the top it deepens a little further (the card is overscanned), past the
+    horizon and the sides it holds."""
+    # t^g (g + 1 - g t): rises from the zenith like t^g, eases into the
+    # horizon colour with no kink, and is monotone on 0..1
+    t = np.clip(v / SKY_V1, -0.2, 1)
+    g = SKY_GAMMA
+    t = np.sign(t) * np.abs(t) ** g * (g + 1 - g * np.maximum(t, 0))
+    w = t + SKY_SUN * np.clip(u, 0, 1) * (1 - np.maximum(t, 0))
+    z = to_oklab(np.array(SKY_ZENITH, np.float32) / 255)
+    h = to_oklab(np.array(SKY_HORIZON, np.float32) / 255)
+    return from_oklab(z + (h - z) * w[..., None])
+
+
+def regrade_sky(img, a_sky):
+    """Repaint the sky: the designed gradient plus the photo's own clouds,
+    lifted and lit. a_sky is how much of each pixel is sky (1 - coverage of
+    everything else), so a wire's or pole's soft edge has its sky share moved
+    by the same amount and stays clean against the new colour."""
+    LWr = np.array([0.2126, 0.7152, 0.0722], np.float32)
+    clear = sky & ~dilate(~sky, 4)
+    ref = pushpull(img, clear.astype(np.float32))  # the sky, carried under the objects
+    L = cv2.GaussianBlur(ref @ LWr, (0, 0), 1.2)
+    # the clear sky under the clouds: a low envelope of the sky's luminance
+    base = clear.copy()
+    for _ in range(3):
+        Lb = cv2.GaussianBlur(pushpull(np.repeat(L[..., None], 3, 2), base.astype(np.float32))[..., 0], (0, 0), 40)
+        base = clear & (L < Lb + 0.012)
+    Lw = max(float(np.percentile(L[clear], 99.7)), float(Lb[clear].max()) + 0.05)
+    c = np.clip((L - Lb) / np.maximum(Lw - Lb, 1e-3), 0, 1)
+    # Thin lines are not cloud: a sunlit wire's bright edge left in the sky
+    # label would turn white against the deeper blue (and double the real
+    # wire once the planes part), and a wire across a cloud would cut it.
+    # Long thin components of the top-hat / black-hat go back to the
+    # opened / closed cover.
+    k7 = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+
+    def lines(m):
+        n, cc, st, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), 8)
+        span = np.maximum(st[:, cv2.CC_STAT_WIDTH], st[:, cv2.CC_STAT_HEIGHT])
+        keep = (span > 60) & (st[:, cv2.CC_STAT_AREA] < 8 * span)
+        keep[0] = False
+        return dilate(keep[cc], 2)
+
+    c_open = cv2.morphologyEx(c, cv2.MORPH_OPEN, k7)
+    c = np.where(lines(c - c_open > 0.06), c_open, c)
+    c_close = cv2.morphologyEx(c, cv2.MORPH_CLOSE, k7)
+    c = np.where(lines(c_close - c > 0.06), c_close, c)
+    c = np.clip(c * CLOUD_LIFT, 0, 1)
+    # self-shadowing: cloud lying between this point and the sun shades it
+    g = cv2.GaussianBlur(c, (0, 0), 4)
+    occl = np.zeros_like(g)
+    for d in (6, 12, 24, 40):
+        Mt = np.float32([[1, 0, -SUN_DIR[0] * d], [0, 1, -SUN_DIR[1] * d]])
+        occl += cv2.warpAffine(g, Mt, (W, H), flags=cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    shade = smoothstep(0.08, 0.5, occl / 4)[..., None]
+    lit = np.array(CLOUD_LIT, np.float32) / 255
+    dark = np.array(CLOUD_SHADE, np.float32) / 255
+    cloud = lit * (1 - shade) + dark * shade
+    vv, uu = np.mgrid[0:H, 0:W].astype(np.float32)
+    G = sky_gradient((uu + 0.5) / W, (vv + 0.5) / H)
+    new = G * (1 - c[..., None]) + cloud * c[..., None]
+    print("sky regrade: cloud cover", round(float(c[clear].mean()), 3), "white", round(Lw, 3))
+    return np.clip(img + a_sky[..., None] * (new - ref), 0, 1).astype(np.float32), G
+
+
+img0 = img  # the photo as shot: the sky card's line and speck finders are tuned on it
+img, SKY_G = regrade_sky(img, 1 - A[1])
+
 WIRE_K = 2  # the plane that holds the overhead wires
 TOWN_K = 1  # the far houses: the street's back flat
 # Big holes with structure behind them (the house wall and fence behind the
@@ -291,7 +405,7 @@ for k in range(K):
         # and no line too faint to have been cut as a wire either: anything
         # long and thin that is a shade darker than the sky round it
         LWs = np.array([0.2126, 0.7152, 0.0722], np.float32)
-        ls = cv2.GaussianBlur(img @ LWs, (0, 0), 1.5)
+        ls = cv2.GaussianBlur(img0 @ LWs, (0, 0), 1.5)
         bhs = cv2.morphologyEx(ls, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))) - ls
         cand = sky & (bhs > 0.008)
         n, cc, st, _ = cv2.connectedComponentsWithStats(cand.astype(np.uint8), 8)
@@ -303,13 +417,20 @@ for k in range(K):
         # darker than the smooth sky round it
         LW = np.array([0.2126, 0.7152, 0.0722], np.float32)
         for _ in range(2):
-            sm = pushpull(img, pure.astype(np.float32)) @ LW
+            sm = pushpull(img0, pure.astype(np.float32)) @ LW
             sm = cv2.GaussianBlur(sm, (0, 0), 12)
-            pure &= ~dilate((img @ LW) < sm - 0.06, 3)
+            pure &= ~dilate((img0 @ LW) < sm - 0.06, 3)
     # fill: smooth base + mirrored texture across the edge
     base = pushpull(img, pure.astype(np.float32))
     if k == 0:
-        fill = base  # the sky stays smooth: no wires copied back into it
+        # the sky stays smooth: no wires copied back into it. Under the
+        # objects it is the clear gradient; a cloud cut by a roof or a pole
+        # carries on a little way behind it and thins out, rather than
+        # smearing its grey across everything the push-pull reaches.
+        d_pure = cv2.distanceTransform((~pure).astype(np.uint8), cv2.DIST_L2, 5)
+        resid = pushpull(img - SKY_G, pure.astype(np.float32))
+        fill = SKY_G + resid * np.exp(-d_pure / 40)[..., None]
+        del d_pure, resid
     elif k == WIRE_K:
         # a wire is one dark colour along its length: carry it, not texture
         fill = pushpull(img, (own & (A[k] > 0.7) & (vis > 0.98)).astype(np.float32))
@@ -372,49 +493,25 @@ PAD = {
 
 
 def outpaint_sky(col, pure, pl, pt, pr, pb):
-    """The sky card past the frame: the sky's own colour field, fitted as a
-    quadratic in (u, v) and continued to first order past the edge (so the
-    gradient keeps its slope across the seam without bending away), plus
-    the clouds' residual mirrored across the edge and fading with distance.
+    """The sky card past the frame: the designed gradient (sky_gradient) is
+    the field, so it carries on past every edge with no seam and no fitted
+    curve running off toward violet or white; on it, the clouds' residual
+    (what the card holds above the clear gradient) carries on from the edge
+    for a short way, its broad part straight on and its fine part mirrored
+    for a few px only (further out a mirrored cloud reads as a mirror).
     Works at whatever size `col` is (the export size)."""
     H, W = pure.shape
-    s = max(1, W // 400)
-    sm = cv2.resize(col, (W // s, H // s), interpolation=cv2.INTER_AREA)
-    ws = cv2.resize(pure.astype(np.float32), (W // s, H // s), interpolation=cv2.INTER_AREA) + 0.05
-    vv, uu = np.mgrid[0:H // s, 0:W // s].astype(np.float32)
-    uu = (uu + 0.5) / (W // s)
-    vv = (vv + 0.5) / (H // s)
-    B = np.stack([np.ones_like(uu), uu, vv, uu * uu, uu * vv, vv * vv], -1).reshape(-1, 6)
-    sw = np.sqrt(ws.reshape(-1))[:, None]
-    coef = np.linalg.lstsq(B * sw, sm.reshape(-1, 3) * sw, rcond=None)[0]  # 6x3
-
-    def Q(u, v):
-        u, v = u[..., None], v[..., None]
-        return coef[0] + u * coef[1] + v * coef[2] + u * u * coef[3] + u * v * coef[4] + v * v * coef[5]
-
     Hp, Wp = H + pt + pb, W + pl + pr
     u = ((np.arange(Wp, dtype=np.float32) - pl + 0.5) / W)[None, :].repeat(Hp, 0)
     v = ((np.arange(Hp, dtype=np.float32) - pt + 0.5) / H)[:, None].repeat(Wp, 1)
-    uc, vc = np.clip(u, 0, 1), np.clip(v, 0, 1)
-    eu, ev = (u - uc)[..., None], (v - vc)[..., None]
-    # the slope carries on, but saturates a tenth of the frame out, so the
-    # colour does not run off toward violet or white at the far margins
-    eu, ev = 0.1 * np.tanh(eu / 0.1), 0.1 * np.tanh(ev / 0.1)
-    field = Q(uc, vc)
-    field += (coef[1] + 2 * uc[..., None] * coef[3] + vc[..., None] * coef[4]) * eu
-    field += (coef[2] + uc[..., None] * coef[4] + 2 * vc[..., None] * coef[5]) * ev
-    del eu, ev
-    vi, ui = np.mgrid[0:H, 0:W].astype(np.float32)
-    resid = col - Q((ui + 0.5) / W, (vi + 0.5) / H)
-    # the residual's broad part (haze, the brighter band low down) carries
-    # straight on from the edge, so the colour has no step at the seam; its
-    # fine part (cloud) is mirrored across the seam for a few px only (further
-    # out a mirrored cloud reads as a mirror)
+    field = sky_gradient(u, v)
+    resid = col - field[pt:pt + H, pl:pl + W]
     lf = cv2.GaussianBlur(resid, (0, 0), 0.03 * W)
     hf = resid - lf
+    uc, vc = np.clip(u, 0, 1), np.clip(v, 0, 1)
     dist = np.hypot((u - uc) * W, (v - vc) * H)
     out = field
-    out += cv2.copyMakeBorder(lf, pt, pb, pl, pr, cv2.BORDER_REPLICATE) * np.exp(-dist / (0.25 * W))[..., None]
+    out += cv2.copyMakeBorder(lf, pt, pb, pl, pr, cv2.BORDER_REPLICATE) * np.exp(-dist / (0.06 * W))[..., None]
     out += cv2.copyMakeBorder(hf, pt, pb, pl, pr, cv2.BORDER_REFLECT_101) * np.exp(-((dist / (0.012 * W)) ** 2))[..., None]
     out = np.clip(out, 0, 1)
     out[pt:pt + H, pl:pl + W] = col
@@ -450,6 +547,18 @@ def extend_wires(a, pr, band=260, span=110, R=12):
         out = np.maximum(out, val.astype(np.float32))
         print("  wire", i, "slope", round(float(m), 3), "peak", round(float(prof.max()), 2))
     return np.concatenate([a, out], 1)
+
+
+def blue_noise(shape, seed):
+    """Dither of about +-1 LSB with its energy pushed to high frequencies
+    (white noise minus its own blur, per channel, renormalised): no clumps
+    for the eye to read as texture, and it breaks up the steps of an 8-bit
+    gradient."""
+    rng = np.random.default_rng(1000 + seed)
+    n = rng.random(tuple(shape) + (3,), dtype=np.float32) - 0.5
+    n -= cv2.GaussianBlur(n, (0, 0), 1.2)
+    n *= 0.6 / max(float(n.std()), 1e-6)
+    return np.clip(n, -1.5, 1.5) / 255
 
 
 # ---- export
@@ -526,15 +635,19 @@ for k, (col, a) in enumerate(layers):
     x0, x1 = max(0, xs.min() - pad), min(ew, xs.max() + 1 + pad)
     y0, y1 = max(0, ys.min() - pad), min(eh, ys.max() + 1 + pad)
     rgba = np.dstack([c, ae])[y0:y1, x0:x1]
-    # triangular dither before quantising
-    rng = np.random.default_rng(k)
-    dith = (rng.random(rgba.shape[:2] + (3,)) - rng.random(rgba.shape[:2] + (3,))) / 255
-    rgba[..., :3] = rgba[..., :3] + dith
+    # dither before quantising: blue noise on the sky card (its long, slow
+    # gradient is where banding shows), triangular on the rest
+    if k == 0:
+        rgba[..., :3] = rgba[..., :3] + blue_noise(rgba.shape[:2], k)
+    else:
+        rng = np.random.default_rng(k)
+        dith = (rng.random(rgba.shape[:2] + (3,)) - rng.random(rgba.shape[:2] + (3,))) / 255
+        rgba[..., :3] = rgba[..., :3] + dith
     q = np.clip(np.round(rgba * 255), 0, 255).astype(np.uint8)
     im = Image.fromarray(q, "RGBA")
     path = os.path.join(OUT, f"p{k}.webp")
     if k == 0:
-        Image.fromarray(q[..., :3], "RGB").save(path, quality=90, method=6)
+        Image.fromarray(q[..., :3], "RGB").save(path, quality=95, method=6)
     else:
         im.save(path, quality=90, alpha_quality=100, method=6, exact=False)
     ox, oy = pl, pt  # the frame's origin in this export
@@ -547,7 +660,7 @@ for k, (col, a) in enumerate(layers):
         cv2.imwrite(os.path.join(WORK, f"pad{k}.jpg"), (np.clip(cv2.resize(pv, (900, round(eh * 900 / ew)), interpolation=cv2.INTER_AREA)[:, :, ::-1], 0, 1) * 255).astype(np.uint8))
 
 # the flat photograph that lies on top at rest
-ph = cv2.resize(img, (EXPORT_W, EH), interpolation=cv2.INTER_AREA)
+ph = cv2.resize(img, (EXPORT_W, EH), interpolation=cv2.INTER_AREA) + blue_noise((EH, EXPORT_W), 99)
 Image.fromarray(np.clip(np.round(ph * 255), 0, 255).astype(np.uint8), "RGB").save(os.path.join(OUT, "photo.webp"), quality=92, method=6)
 
 strip = np.concatenate(mattes, 0)
