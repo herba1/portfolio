@@ -38,6 +38,9 @@ const ASPECT = 1.5;
 // crop window (image uv) is cover-fitted to the box, held to its top edge.
 const OVER = 0.02;
 const CROP = { x0: OVER, y0: OVER, w: 1 - 2 * OVER, h: 0.68, ax: 0.05 };
+// The sun's disc in the photograph (image uv): the centroid of its clipped
+// pixels in sky.webp, about 0.031 image heights across in radius.
+const SUN = [0.145, 0.2318];
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -66,6 +69,7 @@ uniform vec4 uView;        // the part of the image on screen: x0, y0, w, h (uv)
 
 const vec2 GRID = vec2(${GX}.0, ${GY}.0);
 const float GY0 = ${GY0.toFixed(3)};
+const vec2 SUN = vec2(${SUN[0].toFixed(4)}, ${SUN[1].toFixed(4)});
 
 vec3 toLin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
 
@@ -132,16 +136,61 @@ void main() {
   vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uLod).rgb;
   float cw = abs(1.0 - 2.0 * c0);
   vec3 sky = toLin(mix(a1, a0, cw));
-  // The sky's grade (cyan-cobalt, deeper toward the zenith; skylight blue in
-  // the cloud shadows) is baked into sky.webp; only a last breath of depth
-  // toward the zenith here.
-  float zen = smoothstep(0.9, 0.0, uv.y);
-  float blue = smoothstep(0.02, 0.15, sky.b - sky.r);
-  sky *= mix(vec3(1.0), vec3(0.94, 0.97, 1.0), blue * zen);
-  // A print's white is not the sun's: the near-white of the lit cloud and
-  // the sun's disc carry on past paper white, into the shoulder, warm.
-  float hl = smoothstep(0.6, 1.0, max(sky.r, max(sky.g, sky.b)));
-  sky *= 1.0 + vec3(0.2, 0.18, 0.13) * hl * hl;
+  // ---- the sky's grade (the sky layer only; the grass is never touched) ----
+  // Distance from the sun, in image heights. The sun stands still while the
+  // clouds drift past it, so round it the sky is read where it was shot.
+  vec2 sd = (uv - SUN) * vec2(${ASPECT.toFixed(2)}, 1.0);
+  float r = length(sd);
+  // The photograph's sun is a clipped disc with a stepped flare ring round
+  // it; within a few radii it is read heavily blurred, so the disc and the
+  // ring melt into one smooth mound for the glow below to sit on.
+  vec3 near = toLin(textureLod(uSky, uv, uLod + 5.0).rgb);
+  sky = mix(sky, near, exp(-r * r / (2.0 * 0.05 * 0.05)));
+  // Where the flare veils the blue round the sun the photograph went a grey
+  // cream. Take the veil back out where it is dull (lit cloud, brighter than
+  // the veil, is left as it is): the grey under the veil is the sky's blue.
+  float Y0 = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  float dull = 1.0 - smoothstep(0.45, 0.8, Y0);
+  float veil = 0.55 * exp(-r / 0.16) * dull * smoothstep(0.03, 0.09, r);
+  sky = max((sky - veil * vec3(0.5, 0.5, 0.46)) / (1.0 - veil), vec3(0.0));
+  // Form in the cloud: the bake's fill behind the grass is soft, so the
+  // sky's local contrast is lifted a little (its luminance against a wide
+  // blur of itself, in log), and the cumulus get back their lit tops and
+  // shaded bellies. Only gently: the 8-bit sky must not band.
+  vec3 b0 = textureLod(uSky, uv - v * (c0 * CP), uLod + 4.0).rgb;
+  vec3 b1 = textureLod(uSky, uv - v * (c1 * CP), uLod + 4.0).rgb;
+  float Yb = dot(toLin(mix(b1, b0, cw)), vec3(0.2126, 0.7152, 0.0722));
+  float Yd = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  sky *= clamp(pow((Yd + 0.02) / (Yb + 0.02), 0.3), 0.75, 1.3) * (1.0 - exp(-r * r / (2.0 * 0.07 * 0.07))) + exp(-r * r / (2.0 * 0.07 * 0.07));
+  // How much of a pixel is open blue sky rather than cloud: the blue's lead
+  // over red, in linear light. Linear in the colour, so a cloud's edge, half
+  // blue and half white, takes half the grade and no contour forms there.
+  float blue = clamp((sky.b - sky.r) / 0.4, 0.0, 1.0);
+  float Y = dot(sky, vec3(0.2126, 0.7152, 0.0722));
+  // The lit cloud is pale warm white, not the photograph's cream: its
+  // colour eased toward a faintly warm neutral at its own luminance.
+  float lit = smoothstep(0.3, 0.75, Y) * (1.0 - blue);
+  sky = mix(sky, Y * vec3(1.03, 1.0, 0.93), 0.55 * lit);
+  // Midtone saturation, about a quarter more: the blue and the grey-blue of
+  // the cloud shadows; the lit cloud tops above stay pale.
+  float mid = smoothstep(0.015, 0.08, Y) * (1.0 - smoothstep(0.3, 0.65, Y));
+  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.25 * mid), vec3(0.0));
+  // The zenith: straight up the sky is deepest, toward cobalt (#0b4fa8),
+  // easing out over the top of the frame. Multiplied, so the sky's own
+  // texture runs on through it.
+  float zen = 1.0 - smoothstep(0.02, 0.58, uv.y);
+  zen *= zen;
+  sky *= mix(vec3(1.0), vec3(0.16, 0.5, 0.88), 0.9 * zen * blue);
+  // A print's white is not the sun's: the near-white of the lit cloud carries
+  // on past paper white, into the shoulder, pale warm. Away from the sun only;
+  // the sun's own light is the glow below.
+  float hl = smoothstep(0.55, 1.0, max(sky.r, max(sky.g, sky.b)));
+  sky *= 1.0 + vec3(0.2, 0.18, 0.14) * hl * hl * smoothstep(0.06, 0.2, r);
+  // The sun: a small hot core and a smooth exponential roll-off, three
+  // widths summed, warm white, added over the sky so the cloud texture runs
+  // on through it, with no edge anywhere for a ring to form on.
+  vec3 sunC = vec3(1.0, 0.9, 0.74);
+  sky += sunC * (1.6 * exp(-r / 0.012) + 0.42 * exp(-r / 0.045) + 0.1 * exp(-r / 0.15));
 
   // Seen from below against the sky the grass is backlit: printed for the sky,
   // it sits about 0.7 stop under the plate, so the brome and the seed heads
@@ -163,8 +212,9 @@ void main() {
   // (the sun, the lit cloud tops; baked, aux.b) spreads, warm, over the sky
   // and never over the blades in front of it, so they hold as crisp dark
   // silhouettes with the sun bleeding round them. Nothing below it is lifted.
+  // Round the sun it is the analytic glow above that spreads, not the bake's.
   float dif = textureLod(uAux, uv, uLod).b;
-  dif *= dif;
+  dif *= dif * smoothstep(0.08, 0.35, r);
   col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * (1.0 - a);
   if (uDebug > 0.5) col = mix(col, vec3(1.0, 0.2, 0.1), clamp(length(b) * lever * 1.5, 0.0, 1.0) * a);
   outColor = vec4(col * uExpo, 1.0);
