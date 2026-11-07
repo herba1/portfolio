@@ -24,10 +24,14 @@ const H = 1 / 1600; // physics substep, seconds
 const U = TAU * 0.9; // one ratio unit, rad/s
 
 // Ratio sets, alternating per sheet. Detuning is what makes the figure
-// precess as it winds in, instead of retracing one closed curve.
+// precess as it winds in, instead of retracing one closed curve. ax and ay
+// are each sheet's opening swing as a share of the pen's reach: the pair
+// that runs near unison with the table adds to it in quadrature, so it takes
+// the fuller swing, and the first loops come to within about 8% of the
+// sheet's edges either way.
 const SETS = [
-  { x: 2, y: 3 * 1.0021, p: 2 * 0.9984, gx: 0.03, gy: 0.034, gp: 0.026 },
-  { x: 3, y: 4 * 1.0018, p: 4 * 0.9986, gx: 0.031, gy: 0.035, gp: 0.027 },
+  { x: 2, y: 3 * 1.0021, p: 2 * 0.9984, gx: 0.03, gy: 0.034, gp: 0.026, ax: 1, ay: 0.92 },
+  { x: 3, y: 4 * 1.0018, p: 4 * 0.9986, gx: 0.031, gy: 0.035, gp: 0.027, ax: 0.92, ay: 1 },
 ];
 
 const GROUND = "#ebe8e1";
@@ -112,8 +116,13 @@ const TAPER = 1.8;
 const TABLE = 0.24;
 const GHOST = 0.1;
 const SETTLE_S = 1.6;
-const NIB_GRAB = 26; // CSS px around the collar
+const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
+// The pen arm is drawn as a hairline from the nib toward its gimbal, and
+// fades out over its last third long before it gets there.
+const ROD_LEN = 0.3; // share of the sheet's side
+const ROD_MIN = 0.14;
+const RING = 4.5; // CSS px
 
 const ease = (t) => 1 - (1 - t) ** 3;
 const smooth = (a, b, x) => {
@@ -132,6 +141,8 @@ export async function createHarmonograph(host) {
   // canvas that is only ever inked a stroke at a time, and the table moves
   // it with a compositor transform. Over them the stage canvas carries the
   // pen arm (repainted in its own small rectangle) and a sheet being torn.
+  // The arm is only a hairline and a ring at the nib: the drawing is the
+  // only figure on the sheet.
   const stage = createStage(host, { dpr: 2, alpha: true });
   const ctx = stage.ctx;
   const deck = document.createElement("div");
@@ -215,12 +226,12 @@ export async function createHarmonograph(host) {
   // Tear.
   let leaving = null; // { canvas, t, ox, oy }
 
-  const preset = () => {
+  const preset = (i = setIndex) => {
     const s = R;
     const k = 1 - TABLE;
     px.x = 0;
-    px.v = 0.66 * k * s * px.wd;
-    py.x = 0.6 * k * s;
+    px.v = SETS[i].ax * k * s * px.wd;
+    py.x = SETS[i].ay * k * s;
     py.v = 0;
     qx.x = TABLE * s;
     qx.v = 0;
@@ -301,8 +312,9 @@ export async function createHarmonograph(host) {
     side = Math.round(Math.min(h * 0.78, w * 0.54));
     sheetX = Math.round((w - side) / 2);
     sheetY = Math.round((h - side) / 2);
-    R = side * 0.43;
-    // The gimbal stands on the frame to the right of the table.
+    R = side * 0.45;
+    // The gimbal stands on the frame to the right of the table. It is never
+    // drawn; the arm's hairline points toward it and fades out first.
     pivotX = Math.min(w - 24, sheetX + side + Math.max(36, (w - sheetX - side) * 0.5));
     pivotY = sheetY + side * 0.62;
     const n = Math.round(side * dpr);
@@ -443,15 +455,29 @@ export async function createHarmonograph(host) {
   // keeps the hand's velocity when let go.
   // Near the collar, or on the outer part of the rod: a swinging pen is
   // hard to catch, so the whole arm is a handle.
-  const onPen = (x, y) => {
+  // The arm as drawn: from the nib toward the gimbal, for as far as it runs
+  // before it would leave the sheet (never shorter than ROD_MIN).
+  const arm = () => {
     const [nx, ny] = nibScreen();
+    const dx = pivotX - nx;
+    const dy = pivotY - ny;
+    const d = Math.hypot(dx, dy) || 1;
+    const ux = dx / d;
+    const uy = dy / d;
+    const [ox, oy] = tableOff();
+    const x0 = sheetX + ox;
+    const y0 = sheetY + oy;
+    const tx = ux > 0 ? (x0 + side - nx) / ux : ux < 0 ? (x0 - nx) / ux : Infinity;
+    const ty = uy > 0 ? (y0 + side - ny) / uy : uy < 0 ? (y0 - ny) / uy : Infinity;
+    const len = Math.min(d, side * ROD_LEN, Math.max(side * ROD_MIN, Math.min(tx, ty) - 8));
+    return { nx, ny, ux, uy, len };
+  };
+  const onPen = (x, y) => {
+    const { nx, ny, ux, uy, len } = arm();
     if (Math.hypot(x - nx, y - ny) < NIB_GRAB) return true;
-    const ax = nx - pivotX;
-    const ay = ny - pivotY;
-    const l2 = ax * ax + ay * ay || 1;
-    const f = ((x - pivotX) * ax + (y - pivotY) * ay) / l2;
-    if (f < 0.3 || f > 1) return false;
-    return Math.hypot(x - (pivotX + ax * f), y - (pivotY + ay * f)) < ROD_GRAB;
+    const f = (x - nx) * ux + (y - ny) * uy;
+    if (f < 0 || f > len) return false;
+    return Math.hypot(x - (nx + ux * f), y - (ny + uy * f)) < ROD_GRAB;
   };
 
   stage.on("down", (p) => {
@@ -555,146 +581,50 @@ export async function createHarmonograph(host) {
     ctx.globalAlpha = 1;
   };
 
-  // The pen: a steel rod from a brass gimbal on the frame, ending in a brass
-  // collar that clamps the pen upright. Seen from above, with its shadow on
-  // whatever is under it; the shadow opens out as the nib lifts.
-  const STEEL = "rgb(74,78,88)";
-  const STEEL_HI = "rgba(236,238,242,0.9)";
-  const BRASS = "rgb(184,150,88)";
-  const BRASS_DK = "rgb(128,98,50)";
-  const BRASS_HI = "rgba(250,232,190,0.95)";
-  const drawPen = () => {
-    const [nx, ny] = nibScreen();
-    const ax = nx - pivotX;
-    const ay = ny - pivotY;
-    const len = Math.hypot(ax, ay) || 1;
-    const ux = ax / len;
-    const uy = ay / len;
-    const collar = 6.5;
-    // The rod stops at the collar's rim.
-    const ex = nx - ux * collar;
-    const ey = ny - uy * collar;
-
-    // Shadow: rod and collar, cast down and to the right.
-    const sh = 2 + 7 * lift;
-    ctx.save();
-    ctx.translate(sh * 0.6, sh);
-    // Two soft passes stand in for a blur: a wide faint penumbra and a
-    // narrower core, both opening out as the nib rises.
-    for (const [wid, a] of [
-      [3 + 5 * lift, 0.022 - 0.01 * lift],
-      [2 + 3 * lift, 0.03 - 0.014 * lift],
-      [1.2 + 1 * lift, 0.045 - 0.025 * lift],
-    ]) {
-      ctx.strokeStyle = ctx.fillStyle = `rgba(40,32,20,${a})`;
-      ctx.lineWidth = wid;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(pivotX, pivotY);
-      ctx.lineTo(ex, ey);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(nx, ny, collar + wid * 0.4, 0, TAU);
-      ctx.fill();
-    }
-    ctx.restore();
-
-    // The frame post the gimbal stands on: a small plate, two screws.
-    ctx.fillStyle = "rgb(222,218,210)";
-    ctx.strokeStyle = "rgba(60,48,30,0.2)";
-    ctx.lineWidth = 0.75;
+  // The pen, seen from above: a ring of ink round the nib, and the arm as a
+  // half-pixel hairline in the same ink that fades out over its last third.
+  // The ring opens a touch as the nib lifts, and the dot of the nib on the
+  // paper goes with it.
+  const INK = `rgb(${INK_DARK.join(",")})`;
+  const PAPER_INK = `rgb(${PAPER.join(",")})`;
+  const drawPen = (a) => {
+    const { nx, ny, ux, uy, len } = a;
+    const r = RING + 0.75 * lift;
+    const sx = nx + ux * r;
+    const sy = ny + uy * r;
+    const ex = nx + ux * len;
+    const ey = ny + uy * len;
+    const grad = ctx.createLinearGradient(sx, sy, ex, ey);
+    const [ir, ig, ib] = INK_DARK;
+    grad.addColorStop(0, `rgba(${ir},${ig},${ib},1)`);
+    grad.addColorStop(0.667, `rgba(${ir},${ig},${ib},1)`);
+    grad.addColorStop(1, `rgba(${ir},${ig},${ib},0)`);
+    ctx.lineCap = "butt";
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 0.5;
     ctx.beginPath();
-    ctx.roundRect(pivotX - 8.5, pivotY - 20, 17, 40, 2.5);
-    ctx.fill();
-    ctx.stroke();
-    for (const sy of [pivotY - 14.5, pivotY + 14.5]) {
-      ctx.fillStyle = "rgb(176,178,184)";
-      ctx.beginPath();
-      ctx.arc(pivotX, sy, 1.9, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = "rgb(110,114,122)";
-      ctx.lineWidth = 0.5;
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.moveTo(pivotX - 1.3, sy);
-      ctx.lineTo(pivotX + 1.3, sy);
-      ctx.stroke();
-    }
-
-    // Gimbal on the frame.
-    ctx.lineCap = "round";
-    ctx.fillStyle = BRASS_DK;
-    ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 8, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = BRASS;
-    ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 7, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = BRASS_HI;
-    ctx.lineWidth = 0.75;
-    ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 5.6, Math.PI * 1.05, Math.PI * 1.6);
-    ctx.stroke();
-
-    // Rod: a dark body with a hairline of light along its upper edge.
-    ctx.strokeStyle = STEEL;
-    ctx.lineWidth = 2;
-    ctx.beginPath();
-    ctx.moveTo(pivotX, pivotY);
+    ctx.moveTo(sx, sy);
     ctx.lineTo(ex, ey);
     ctx.stroke();
-    ctx.strokeStyle = STEEL_HI;
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.moveTo(pivotX + uy * 0.45, pivotY - ux * 0.45);
-    ctx.lineTo(ex + uy * 0.45, ey - ux * 0.45);
-    ctx.stroke();
 
-    // Axle cap over the rod's end at the gimbal.
-    ctx.fillStyle = "rgb(206,209,214)";
+    // A paper knockout either side of the ring, as a printer would leave
+    // round a mark laid over a dense tint, so it reads over the figure.
     ctx.beginPath();
-    ctx.arc(pivotX, pivotY, 2.6, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgb(96,100,110)";
-    ctx.lineWidth = 0.6;
+    ctx.arc(nx, ny, r, 0, TAU);
+    ctx.strokeStyle = PAPER_INK;
+    ctx.lineWidth = 2.5;
     ctx.stroke();
-
-    // The collar: brass ring, the pen's dark barrel inside, a steel set
-    // screw on the far side from the rod.
-    const c = collar * (1 + 0.05 * lift);
-    ctx.fillStyle = BRASS_DK;
-    ctx.beginPath();
-    ctx.arc(nx, ny, c + 0.6, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = BRASS;
-    ctx.beginPath();
-    ctx.arc(nx, ny, c, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = BRASS_HI;
-    ctx.lineWidth = 0.7;
-    ctx.beginPath();
-    ctx.arc(nx, ny, c - 0.9, Math.PI * 1.02, Math.PI * 1.62);
+    ctx.strokeStyle = INK;
+    ctx.lineWidth = 0.75;
     ctx.stroke();
-    // The pen's barrel, capped in black ebonite, a fine bevel round it.
-    ctx.fillStyle = "rgb(44,46,54)";
-    ctx.beginPath();
-    ctx.arc(nx, ny, c * 0.5, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgba(255,255,255,0.16)";
-    ctx.lineWidth = 0.5;
-    ctx.beginPath();
-    ctx.arc(nx, ny, c * 0.5 - 0.6, Math.PI * 1.05, Math.PI * 1.55);
-    ctx.stroke();
-    const sx = nx + ux * (c + 1.2);
-    const sy = ny + uy * (c + 1.2);
-    ctx.fillStyle = "rgb(150,154,162)";
-    ctx.beginPath();
-    ctx.arc(sx, sy, 1.7, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = "rgb(84,88,98)";
-    ctx.lineWidth = 0.5;
-    ctx.stroke();
+    if (lift < 0.98) {
+      ctx.fillStyle = INK;
+      ctx.globalAlpha = 1 - lift;
+      ctx.beginPath();
+      ctx.arc(nx, ny, 0.9, 0, TAU);
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    }
   };
 
   stage.onResize((w, h, d) => {
@@ -704,7 +634,7 @@ export async function createHarmonograph(host) {
       if (preGhost) {
         // A figure already drawn and settled into the sheet.
         applySet(1);
-        preset();
+        preset(1);
         for (let t = 0; t < 70; t += 1 / 30) simulate(1 / 30);
         applySet(setIndex);
         settle();
@@ -719,7 +649,7 @@ export async function createHarmonograph(host) {
       }
       if (preT != null) {
         // Hold the figure partway into its decay, to the lift.
-        const target = preT * (Math.log(0.88 / LIFT) / 0.03);
+        const target = preT * (Math.log(reach() / R / LIFT) / 0.03);
         for (let t = 0; t < target; t += 1 / 30) simulate(1 / 30);
       }
       if (preHold) lift = 1;
@@ -758,10 +688,12 @@ export async function createHarmonograph(host) {
     if (dirtyAll || leaving) ctx.clearRect(0, 0, W, Hh);
     else if (box) ctx.clearRect(box[0], box[1], box[2] - box[0], box[3] - box[1]);
     dirtyAll = !!leaving;
-    const [nx, ny] = nibScreen();
-    const m = 24;
-    box = [Math.floor(Math.min(nx, pivotX) - m), Math.floor(Math.min(ny, pivotY) - m), Math.ceil(Math.max(nx, pivotX) + m), Math.ceil(Math.max(ny, pivotY) + m)];
-    drawPen();
+    const a = arm();
+    const ex = a.nx + a.ux * a.len;
+    const ey = a.ny + a.uy * a.len;
+    const m = 12;
+    box = [Math.floor(Math.min(a.nx, ex) - m), Math.floor(Math.min(a.ny, ey) - m), Math.ceil(Math.max(a.nx, ex) + m), Math.ceil(Math.max(a.ny, ey) + m)];
+    drawPen(a);
 
     // The torn sheet leaving: lifts, then is pulled up and away, over the pen.
     if (leaving) {
