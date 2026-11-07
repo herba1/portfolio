@@ -50,10 +50,27 @@ const HERO = 0.74;
 const P_MAX = 0.72;
 // Clear-sky dye (linear, per unit of the plate's blue) and the white balance
 // that takes the 5400 K capture's cloud to warm-neutral.
-const SKY_DYE = [0.03 * 1.3, 0.33 * 1.3, 1.3];
+const SKY_DYE = [0.03 * 1.3, 0.42 * 1.3, 1.3];
 const WB = [1.1, 0.97, 0.97];
+// The print: 1.2 stops over the plate's old exposure, so cloud bodies sit
+// high on the print, then a log-logistic negative-to-print curve (contrast n,
+// half-density exposure s, in plate units after that exposure) reaching
+// paper white at 8 plate units.
+const PRINT_STOPS = 1.2;
+const PRINT_WHITE = 8;
+const PRINT_CURVE = [2.2, 0.75];
+// Cloud split tone, multipliers on the print (unit luminance): skylight blue
+// in the shadowed underside (hue ~205), warm-neutral on the sunlit top.
+const SHADE = [0.8, 1.0, 1.2];
+const SHADE_DEPTH = 0.9;
+const SUNLIT = [1.0, 0.965, 0.9];
+const VIGNETTE = 0.28;
 
 const rad = (d) => (d * Math.PI) / 180;
+const lumNorm = (c) => {
+  const y = 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  return c.map((v) => v / y);
+};
 const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
 
 function cameraBasis({ yaw, pitch, roll = 0 }) {
@@ -97,6 +114,28 @@ uniform float uExpo;
 uniform float uLinearOut;
 uniform vec3 uSkyDye;
 uniform vec3 uWB;
+uniform vec2 uPrint;     // print curve: contrast n, half-density exposure s
+uniform float uVignette; // lens cos^4 falloff, before the emulsion
+uniform float uPrintAsp; // print w / h
+uniform vec3 uShade;     // cloud split tone: skylight-lit shadow, sunlit top
+uniform vec3 uSunlit;
+
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// Negative to print. Print density is a sigmoid in log exposure, so the
+// print's transmission is a log-logistic of scene light: a toe that holds
+// the quay's shadows, a steep middle where cloud bodies sit, and a short
+// shoulder that rolls the sunlit tops to paper white at 8 plate units
+// instead of clipping them.
+vec3 printCurve(vec3 x) {
+  vec3 xn = pow(max(x, 0.0), vec3(uPrint.x));
+  float sn = pow(uPrint.y, uPrint.x);
+  float wn = pow(${PRINT_WHITE.toFixed(1)}, uPrint.x);
+  return min(xn / (xn + sn) * ((wn + sn) / wn), 1.0);
+}
+vec3 srgbEncode(vec3 c) {
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
 
 vec3 decode(vec3 v) {
   vec3 y = pow(v, vec3(2.2));
@@ -155,12 +194,33 @@ void main() {
   Cout += C * refl * aux.b * gb.x * cos(2.0 * (uPhi - gb.y));
 
   Cout = max(Cout, 0.0) * uExpo * uWB;
-  // The plate's brightest cloud edges sit ~15x above the sky: roll them into
-  // the film's shoulder instead of letting them clip.
-  float m = max(Cout.r, max(Cout.g, Cout.b));
-  float knee = 1.6;
-  if (m > knee) Cout *= (knee + log(1.0 + (m - knee) * 0.9) / 0.9) / m;
-  outColor = vec4(uLinearOut > 0.5 ? Cout : pow(clamp(Cout / 4.0, 0.0, 1.0), vec3(1.0 / 2.2)), 1.0);
+  // The lens's cos^4 falloff reaches the emulsion before the print curve, so
+  // it compresses in the cloud tops the way it does on a real print.
+  vec2 rv = (vUv - 0.5) * vec2(uPrintAsp, 1.0);
+  float t2 = dot(rv, rv) / (0.25 * (uPrintAsp * uPrintAsp + 1.0)) * uVignette * uVignette;
+  Cout /= (1.0 + t2) * (1.0 + t2);
+
+  vec3 print = printCurve(Cout);
+  // A saturated blue taken through a steep per-channel curve swings its hue:
+  // blue reaches the shoulder while green is still on the straight line, so
+  // a bright, washed sky would go electric cyan. Hold the clear sky's hue by
+  // grading half its Rayleigh share on its brightest channel.
+  float mc = max(Cout.r, max(Cout.g, Cout.b));
+  vec3 held = Cout * (printCurve(vec3(mc)).r / max(mc, 1e-5));
+  float rayleigh = clamp(A / max(C.b, 1e-4), 0.0, 1.0) * aux.r;
+  print = mix(print, held, 0.5 * rayleigh);
+
+  // Split tone the cumulus. A cloud's sunlit top is lit by the low sun; its
+  // shadowed underside only by the open sky around it, so it goes blue-grey
+  // (hue ~205) while the tops roll off warm. Only the neutral, non-Rayleigh
+  // share of an open-sky pixel is cloud; the quay and the mast are left alone.
+  float cloud = aux.r * clamp(1.0 - A / max(C.b, 1e-4), 0.0, 1.0);
+  float lit = smoothstep(0.68, 0.88, dot(print, LUMA));
+  print *= mix(vec3(1.0), mix(uShade, uSunlit, lit), cloud);
+  // Paper white: the print's base never scans as a full 255.
+  print = clamp(print, 0.0, 1.0) * 0.985;
+
+  outColor = vec4(uLinearOut > 0.5 ? print : srgbEncode(print), 1.0);
 }`;
 
 // The developed print on paper.
@@ -463,7 +523,12 @@ export async function createPolariser(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uNB, GLASS_B);
     gl.uniform1f(u.uPhi, phi);
     gl.uniform1f(u.uPmax, P_MAX);
-    gl.uniform1f(u.uExpo, 0.5 * 2 ** expoStops);
+    gl.uniform1f(u.uExpo, 0.5 * 2 ** (PRINT_STOPS + expoStops));
+    gl.uniform2fv(u.uPrint, PRINT_CURVE);
+    gl.uniform1f(u.uVignette, VIGNETTE);
+    gl.uniform1f(u.uPrintAsp, L.pw / L.ph);
+    gl.uniform3fv(u.uShade, lumNorm(SHADE).map((v) => v * SHADE_DEPTH));
+    gl.uniform3fv(u.uSunlit, SUNLIT);
     gl.uniform3fv(u.uSkyDye, SKY_DYE);
     gl.uniform3fv(u.uWB, WB);
     gl.uniform1f(u.uLinearOut, floatOk && sceneT.ok ? 1 : 0);
@@ -475,21 +540,27 @@ export async function createPolariser(host, { embedded = false } = {}) {
       sceneT.tex,
       {
         ...FILM_PRESETS.summer,
+        // The scene pass hands over the finished print (display light, 0..1),
+        // so the film's own curve is the identity: Lottes with contrast 1,
+        // shoulder 1 and white at 1 is y = x. The film adds only what happens
+        // in the emulsion and the scan: softness, Pro-Mist, halation, grain.
+        // Pro-Mist is halved: on display light it would veil cloud with sky.
         input: floatOk && sceneT.ok ? "linear" : "srgb",
+        headroom: 0,
         exposure: 0,
-        whitePoint: 5.5,
-        contrast: 1.18,
-        shoulder: 0.97,
+        whitePoint: 1,
+        contrast: 1,
+        shoulder: 1,
         blueDepth: 0.25,
-        highlightTint: [1.02, 1, 0.97],
+        highlightTint: [1, 0.99, 0.97],
         saturation: 1.12,
         halation: 0.32,
-        halationThreshold: 1.6,
-        bloom: 0.2,
+        halationThreshold: 0.8,
+        bloom: 0.1,
         softness: 0.45,
         toe: 0.04,
         grain: 0.32,
-        vignette: 0.28,
+        vignette: 0,
         grainSeed,
       },
       filmT.fbo,
