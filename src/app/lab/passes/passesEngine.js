@@ -18,7 +18,7 @@ precision highp float;
 uniform sampler2D uPhoto, uDepth, uNormal;
 uniform vec2 uRes;        // canvas px
 uniform vec4 uRect;       // print rect in canvas px: x, y (top), w, h
-uniform vec3 uEdge;       // sheet edges in image u: photo|depth, depth|normal, normal|lit
+uniform vec3 uEdge;       // sheet edges in image u: photo|lit, lit|normal, normal|depth
 uniform vec3 uLight;      // light in image u, v (top-down), height
 uniform vec3 uGround;
 out vec4 o;
@@ -53,34 +53,50 @@ void main(){
   vec3 n = normalize(texture(uNormal, uv).rgb * 2.0 - 1.0);
   vec3 normal = mix(n * 0.5 + 0.5, vec3(0.97, 0.96, 0.95), 0.3);
 
-  // Relit: the photograph's own geometry under one warm lamp. The lamp sits
-  // in front of the scene at the pointer; distance and facing do the rest.
+  // Relit: the photograph's own surfaces under one warm lamp that was never
+  // in the street. Albedo is the photo itself, taken to linear light, so the
+  // pool lands on his coat and the pavement in their own colours. Where the
+  // depth jumps (|bend| large) the baked normals swing sideways across a
+  // silhouette that isn't a surface; ease them back to facing the camera
+  // there so edges don't ring with dark halos. The bad normals live on the
+  // far side of the jump (bend < 0, the street hugging his outline); on the
+  // near side (bend > 0) his coat really does turn away, so it keeps most
+  // of its shape. The far field gets the same treatment: back there depth
+  // is a sliver, its normals are noise, and the street reads as a backdrop.
   float aspect = uRect.z / uRect.w;
+  float settle = max(smoothstep(0.06, 0.26, -bend), 0.5 * smoothstep(0.35, 0.6, bend));
+  settle = max(settle, 1.0 - smoothstep(0.06, 0.22, D));
+  vec3 nl = normalize(mix(n, vec3(0.0, 0.0, 1.0), settle));
   vec3 P = vec3(uv.x * aspect, -uv.y, D * 0.55);
-  vec3 L = vec3(uLight.x * aspect, -uLight.y, uLight.z);
+  // The lamp hovers a hand's height above whatever surface is under it, so
+  // it stays close enough to throw a pool rather than a flat wash.
+  float Dl = texture(uDepth, clamp(uLight.xy, 0.0, 1.0)).r;
+  vec3 L = vec3(uLight.x * aspect, -uLight.y, Dl * 0.55 + uLight.z);
   vec3 dl = L - P;
   float dist2 = dot(dl, dl);
   vec3 l = dl * inversesqrt(dist2);
-  float lam = max(dot(n, l), 0.0);
-  float fall = 1.0 / (1.0 + dist2 * 22.0);
+  // A touch of wrap so the terminator rolls off instead of cutting to black.
+  float lam = max((dot(nl, l) + 0.15) / 1.15, 0.0);
+  float fall = 1.0 / (1.0 + dist2 * 5.0);
   vec3 h = normalize(l + vec3(0.0, 0.0, 1.0));
-  float spec = pow(max(dot(n, h), 0.0), 40.0) * 0.35;
-  float luma = dot(photo, vec3(0.3, 0.55, 0.15));
-  vec3 albedo = mix(vec3(luma), photo, 0.7);
-  albedo = mix(vec3(0.86, 0.84, 0.81), pow(albedo, vec3(0.5)), 0.5);
-  vec3 lamp = vec3(1.0, 0.86, 0.68);
-  float sky = 0.5 + 0.5 * n.y;
-  vec3 amb = albedo * mix(vec3(0.05, 0.05, 0.06), vec3(0.1, 0.11, 0.13), sky);
-  vec3 lit = photo * 0.05 + amb + albedo * lamp * (lam * fall * 4.0) + lamp * spec * fall;
-  lit = lit / (1.0 + lit * 0.35);
+  float spec = pow(max(dot(nl, h), 0.0), 24.0);
+  // Linear albedo, lifted a touch so his black coat still answers the lamp.
+  vec3 albedo = pow(photo, vec3(2.2)) * 0.9 + 0.015;
+  vec3 lamp = vec3(1.0, 0.62, 0.32);
+  float sky = 0.5 + 0.5 * nl.y;
+  // The street's own lights go out: a cool, low ambient, so the lamp's
+  // warmth is the only warmth left in the sheet.
+  vec3 amb = albedo * mix(vec3(0.1, 0.115, 0.14), vec3(0.12, 0.135, 0.165), sky);
+  vec3 lit = amb + albedo * lamp * (lam * fall * 7.0) + lamp * spec * fall * 0.12;
+  lit = pow(lit / (1.0 + lit * 0.45), vec3(1.0 / 2.2));
 
   // Sheets, crisp to a pixel, each one casting a thin shadow on the next.
   float a0 = clamp((x - uEdge.x) / px + 0.5, 0.0, 1.0);
   float a1 = clamp((x - uEdge.y) / px + 0.5, 0.0, 1.0);
   float a2 = clamp((x - uEdge.z) / px + 0.5, 0.0, 1.0);
-  vec3 c = mix(photo, depth, a0);
+  vec3 c = mix(photo, lit, a0);
   c = mix(c, normal, a1);
-  c = mix(c, lit, a2);
+  c = mix(c, depth, a2);
   float s0 = a0 * exp(-max(0.0, x - uEdge.x) / (px * 5.0));
   float s1 = a1 * exp(-max(0.0, x - uEdge.y) / (px * 5.0));
   float s2 = a2 * exp(-max(0.0, x - uEdge.z) / (px * 5.0));
@@ -91,7 +107,14 @@ void main(){
 
 const SRC = "/lab/passes/";
 const IMG_ASPECT = 1536 / 2048;
-const REST = 0.16;
+// The photo|lit seam trails the hand by LEAD, so the lamp under your finger
+// always sits over the relit sheet. At rest (hand at 0.4) the lit sheet spans
+// herb, about u 0.3-0.65.
+const LEAD = 0.1;
+// Lamp height above the surface under it, in the shader's scene units
+// (the whole depth range spans 0.55).
+const LAMP_Z = 0.2;
+const REST = 0.3;
 
 function loadImage(url) {
   return new Promise((resolve, reject) => {
@@ -171,27 +194,30 @@ export async function createPasses(host, { embedded = false } = {}) {
 
   // Seam and the three sheet edges. Each edge is a spring chasing its place
   // behind the one above it; the deeper the sheet, the softer its spring, so
-  // a quick drag fans the passes out and they settle back into even bands.
-  let seam = holdX ?? 1.0;
-  const target = (i, s) => s + ((1 - s) * i) / 3;
+  // a quick drag fans the passes out and they settle back. The relit sheet
+  // comes first under the photo and takes half the room left; normals and
+  // depth share the rest.
+  let seam = holdX == null ? 1.0 : clamp(holdX - LEAD, 0, 1);
+  const SHARE = [0, 0.5, 0.75];
+  const target = (i, s) => s + (1 - s) * SHARE[i];
   const edges = [0, 1, 2].map((i) => ({ x: target(i, seam), v: 0 }));
   const K = [260, 170, 120];
   const Z = [0.92, 0.88, 0.86];
-  // Light: rests over the lit sheet until a pointer comes to move it.
-  const light = { x: holdLx ?? 0.8, y: holdLy ?? 0.42, tx: holdLx ?? 0.8, ty: holdLy ?? 0.42 };
+  // Light: rests just in front of herb's chest until a pointer comes to move it.
+  const light = { x: holdLx ?? 0.44, y: holdLy ?? 0.62, tx: holdLx ?? 0.44, ty: holdLy ?? 0.62 };
   let introAt = holdX == null ? performance.now() + 450 : 0;
 
   const toU = (p) => ({ x: (p.x - rect.x) / rect.w, y: (p.y - rect.y) / rect.h });
   stage.on("down", (p) => {
     introAt = 0;
-    seam = clamp(toU(p).x, 0, 1);
     const q = toU(p);
+    seam = clamp(q.x - LEAD, 0, 1);
     light.tx = clamp(q.x, -0.1, 1.1);
     light.ty = clamp(q.y, -0.1, 1.1);
   });
   stage.on("move", (p) => {
     const q = toU(p);
-    if (p.down) seam = clamp(q.x, 0, 1);
+    if (p.down) seam = clamp(q.x - LEAD, 0, 1);
     light.tx = clamp(q.x, -0.1, 1.1);
     light.ty = clamp(q.y, -0.1, 1.1);
   });
@@ -218,9 +244,8 @@ export async function createPasses(host, { embedded = false } = {}) {
       else e.x = target(i, seam);
     }
     const kl = 1 - Math.exp(-dt * 10);
-    // The lamp lives over the lit sheet: it follows the pointer, but never
-    // further left than just inside that sheet's edge.
-    const dx = Math.max(light.tx, edges[2].x + 0.08) - light.x;
+    // The lamp follows the pointer anywhere on the print, herb included.
+    const dx = light.tx - light.x;
     const dy = light.ty - light.y;
     if (Math.abs(dx) + Math.abs(dy) > 1e-4) {
       light.x += dx * kl;
@@ -238,7 +263,7 @@ export async function createPasses(host, { embedded = false } = {}) {
     gl.uniform2f(u.res, stage.canvas.width, stage.canvas.height);
     gl.uniform4f(u.rect, rect.x * d, rect.y * d, rect.w * d, rect.h * d);
     gl.uniform3f(u.edge, edges[0].x, edges[1].x, edges[2].x);
-    gl.uniform3f(u.light, light.x, light.y, 0.78);
+    gl.uniform3f(u.light, light.x, light.y, LAMP_Z);
     gl.uniform3f(u.ground, ground[0], ground[1], ground[2]);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   }
