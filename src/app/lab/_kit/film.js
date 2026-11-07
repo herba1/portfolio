@@ -28,6 +28,10 @@
 //                kept off the highlight itself, so it shows at its edges.  0.45
 //   halationThreshold  scene luminance where halation starts               0.9
 //   halationColor      [r,g,b] linear tint                      [1, .26, .1]
+//   halationLocal      0..1  judge "already saturated" from the surround (1/4
+//                res) instead of the pixel itself, so a hairline (a wire, a
+//                twig) inside a bright field takes the field's halo in
+//                proportion to its own light, not a red fringe of its own. 0
 //   bloom        0..1  Pro-Mist diffusion: a share of all the light is spread
 //                through a 6-level pyramid (energy conserving), so bright
 //                areas veil softly into nearby shadows and lift them.     0.28
@@ -76,6 +80,7 @@ export const FILM_DEFAULTS = {
   halation: 0.45,
   halationThreshold: 0.9,
   halationColor: [1, 0.26, 0.1],
+  halationLocal: 0,
   bloom: 0.28,
   softness: 0.55,
   contrast: 1.2,
@@ -272,6 +277,7 @@ uniform float uExposure;   // linear multiplier
 uniform float uBloom;
 uniform float uHal;
 uniform vec3 uHalColor;
+uniform float uHalLocal;
 uniform float uSoft;
 uniform float uSat;
 uniform float uBlue;
@@ -335,7 +341,11 @@ void main() {
 
   // Halation: extra red exposure from light bounced off the base, kept off the
   // highlight itself (the source has already saturated there).
-  float halo = max(wide.a - b0.a * 0.7, 0.0) * (1.0 - smoothstep(0.12, 0.6, ys));
+  float yl1 = dot(b1, LUMA);
+  float yh = mix(ys, max(ys, yl1), uHalLocal);
+  float halo = max(wide.a - b0.a * 0.7, 0.0) * (1.0 - smoothstep(0.12, 0.6, yh));
+  // a hairline darker than its surround keeps its share of darkness
+  halo *= mix(1.0, clamp((ys + 0.02) / (yl1 + 0.02), 0.0, 1.0), uHalLocal);
   col += uHalColor * halo * uHal;
 
   // Optical vignette, cos^4 of the field angle.
@@ -584,6 +594,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform1f(c.uBloom, Math.min(1, Math.max(0, p.bloom)) * 0.45);
     gl.uniform1f(c.uHal, Math.max(0, p.halation) * 1.6);
     gl.uniform3fv(c.uHalColor, p.halationColor);
+    gl.uniform1f(c.uHalLocal, Math.min(1, Math.max(0, p.halationLocal)));
     gl.uniform1f(c.uSoft, Math.min(1, Math.max(0, p.softness)));
     gl.uniform1f(c.uSat, p.saturation);
     gl.uniform1f(c.uBlue, Math.min(1, Math.max(0, p.blueDepth)));
