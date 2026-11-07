@@ -11,9 +11,8 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // degrees), the house's shading gives the sun. Offline, everything the mirror
 // can see is gathered into one panorama centred on it: in front of the lens,
 // the photograph's own pixels re-projected from where the mirror stands; behind
-// the lens and below the frame, a Poly Haven HDRI of a narrow old street,
-// turned to the photo's sun and given the photo's sky (bake:
-// tools/depth/bakes/curve-mirror).
+// the lens and below the frame, a 360 of a Japanese residential street, poles
+// and wires, given the photo's summer sky (bake: tools/depth/bakes/curve-mirror).
 //
 // Every frame, per pixel:
 //  - the mirror is traced exactly: a sphere cap, 800 mm across with a 1.6 m

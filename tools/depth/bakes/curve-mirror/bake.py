@@ -2,7 +2,15 @@
 
     python3 -I tools/depth/bakes/curve-mirror/bake.py WORK OUT
       WORK: photo.png (2464x1632), moge/ (normals.py), sky.png (segment.py sky),
-            up.json (vp.py), and the Poly Haven HDRI path in HDRI below
+            up.json (vp.py)
+      env:  PANO (the world behind the lens: a Poly Haven .hdr, sun-matched, or an
+            8-bit equirect photo), PANO_ROT (turns, 8-bit only), PANO_SKY (its
+            segment.py sky matte, 8-bit only)
+
+    As shipped:
+      PANO=hashi-3840.jpg PANO_SKY=hashi-sky.png PANO_ROT=0
+      (Commons "HashiNoMisasagi Kofun, Funkyu South 360-degree.jpg", CC0, 3840 px
+      thumbnail; sky: segment.py sky on it)
       OUT:  public/lab/curve-mirror (photo.webp, env.webp, envd.png, aux.png)
             + scene.json
 
@@ -16,10 +24,12 @@ photo's vertical vanishing point):
     pixel is splatted into the panorama from the mirror's position with a
     z-buffer, so the house and the crossbuck are seen from where the mirror
     is, not from where the lens was. The photo's sky is at infinity.
-  - behind the camera and below the frame, Poly Haven's Venetian Crossroads
-    (CC0), turned so its sun's azimuth matches the photo's, its exposure and
-    white balance matched to the photo's sky at the same elevation, its sun
-    disc taken out (the engine draws the sun analytically, at HDR).
+  - behind the camera and below the frame, a 360 of a Japanese residential
+    street (two lanes, utility poles and wires; CC0, Wikimedia Commons), exposed
+    to the photo's sunlit walls, its overcast sky replaced by a fit of the
+    photo's own clear sky by elevation with the wires kept. (A Poly Haven .hdr
+    also works: turned to the photo's sun, its sun disc taken out; the engine
+    draws the sun analytically, at HDR.)
   - the seam is feathered over ~9 degrees inside the photo's coverage.
 
 Also: a distance panorama (for parallax across the 0.8 m face), SH9 irradiance
@@ -37,7 +47,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."
 import kit  # noqa: E402
 
 WORK, OUT = sys.argv[1], sys.argv[2]
-HDRI = "/tmp/claude-0/dl-curve-mirror/venetian_crossroads_4k.hdr"
+# the world behind the lens: a Poly Haven HDRI (sun-matched) or an 8-bit 360 photo
+PANO = os.environ.get("PANO", "/tmp/claude-0/dl-curve-mirror/venetian_crossroads_4k.hdr")
+PANO_ROT = float(os.environ.get("PANO_ROT", "0"))
+PANO_SKY = os.environ.get("PANO_SKY", "")  # sky matte of an 8-bit pano (segment.py sky)
 EW, EH = 3072, 1536
 K = 0.62  # MoGe metric -> real metres (crossbuck board ~0.22 m wide, pole ~0.2 m)
 CAM_H = 1.45  # lens height above the road, m (the frame shows no ground)
@@ -172,35 +185,78 @@ alpha_w = kit.smoothstep(0, EW * 11 / 360, dt)
 T.mark("cover")
 
 # ---------------------------------------------------------------- HDRI layer
-hdr = cv2.imread(HDRI, cv2.IMREAD_UNCHANGED)[..., ::-1].astype(np.float32)
-hh, hw = hdr.shape[:2]
-hl = kit.luma(hdr)
-sy, sx = np.unravel_index(np.argmax(cv2.GaussianBlur(hl, (0, 0), 3)), hl.shape)
-h_lon = (sx + 0.5) / hw - 0.5
-h_el = 90 - (sy + 0.5) / hh * 180
-# rotate so its sun sits at our sun's azimuth
 s_lon = np.arctan2(sun[0], -sun[2]) / (2 * np.pi)
-rot = s_lon - h_lon
-print("hdri sun el %.1f, lon %.3f -> rotate %.3f turns" % (h_el, h_lon, rot))
-# take out the sun disc and its corona core (the engine draws the sun)
-yy, xx = np.mgrid[0:hh, 0:hw]
-dsun = np.hypot((xx - sx + hw / 2) % hw - hw / 2, yy - sy)
-core = dsun < hh * 6 / 180
-ring = (dsun >= hh * 6 / 180) & (dsun < hh * 9 / 180)
-lim = np.percentile(hl[ring], 60)
-over = hl > lim * 1.0
-hole = core & over
-hdr_c = hdr.copy()
-hdr_c[hole] = 0
-filled = kit.pushpull(np.log(hdr_c + 1e-4), (~hole).astype(np.float32))
-hdr_c[hole] = np.exp(filled[hole])
-del filled
+if PANO.endswith(".hdr"):
+    hdr = cv2.imread(PANO, cv2.IMREAD_UNCHANGED)[..., ::-1].astype(np.float32)
+    hh, hw = hdr.shape[:2]
+    hl = kit.luma(hdr)
+    sy, sx = np.unravel_index(np.argmax(cv2.GaussianBlur(hl, (0, 0), 3)), hl.shape)
+    h_lon = (sx + 0.5) / hw - 0.5
+    h_el = 90 - (sy + 0.5) / hh * 180
+    # rotate so its sun sits at our sun's azimuth
+    rot = s_lon - h_lon
+    print("hdri sun el %.1f, lon %.3f -> rotate %.3f turns" % (h_el, h_lon, rot))
+    # take out the sun disc and its corona core (the engine draws the sun)
+    yy, xx = np.mgrid[0:hh, 0:hw]
+    dsun = np.hypot((xx - sx + hw / 2) % hw - hw / 2, yy - sy)
+    core = dsun < hh * 6 / 180
+    ring = (dsun >= hh * 6 / 180) & (dsun < hh * 9 / 180)
+    lim = np.percentile(hl[ring], 60)
+    over = hl > lim * 1.0
+    hole = core & over
+    hdr_c = hdr.copy()
+    hdr_c[hole] = 0
+    filled = kit.pushpull(np.log(hdr_c + 1e-4), (~hole).astype(np.float32))
+    hdr_c[hole] = np.exp(filled[hole])
+    del filled
+else:
+    # an 8-bit equirect photo (no sun disc in it: an overcast-bright sky).
+    # Read at half size if over 8000 px, linearised; turned by PANO_ROT so its streets
+    # sit behind the lens; no sun to remove (the engine draws the photo's).
+    big = cv2.imread(PANO, cv2.IMREAD_COLOR)
+    if big.shape[1] > 8000:
+        big = cv2.imread(PANO, cv2.IMREAD_REDUCED_COLOR_2)
+    if big.shape[1] > 6144:
+        big = cv2.resize(big, (6144, 3072), interpolation=cv2.INTER_AREA)
+    c = big[..., ::-1].astype(np.float32) / 255
+    del big
+    hdr = np.where(c <= 0.04045, c / 12.92, ((c + 0.055) / 1.055) ** 2.4).astype(np.float32)
+    del c
+    hh, hw = hdr.shape[:2]
+    rot = PANO_ROT
+    h_el = -SUN_EL  # "its sun" opposite ours, so the corona and glare steps do nothing
+    h_lon = s_lon + 0.5 - rot
+    hole = np.zeros((hh, hw), bool)
+    hdr_c = hdr
+    # its sky (overcast) becomes the photo's summer sky, keeping the wires:
+    # segment.py's sky matte, limited to what is connected to the zenith
+    # down each column (a white apartment wall is not sky), wires bridged
+    m = cv2.resize(kit.load_gray(PANO_SKY), (hw, hh), interpolation=cv2.INTER_LINEAR)
+    mb = cv2.morphologyEx((m > 0.3).astype(np.uint8), cv2.MORPH_CLOSE, np.ones((15, 5), np.uint8))
+    stop = np.full(hw, hh, np.int32)
+    run = np.zeros(hw, np.int32)
+    for y in range(hh):
+        run = np.where(mb[y] == 0, run + 1, 0)
+        hit = (run >= 6) & (stop == hh)
+        stop[hit] = y - 5
+    yy = np.arange(hh)[:, None]
+    p_sky = (yy < stop[None, :]).astype(np.float32) * np.where(yy > stop[None, :] - 14, np.clip(m * 1.4, 0, 1), 1.0)
+    p_sky = cv2.GaussianBlur(p_sky, (0, 0), 1.0)
+    L = kit.luma(hdr)
+    Lc = cv2.morphologyEx(L, cv2.MORPH_CLOSE, np.ones((9, 9), np.uint8))
+    # only thin, sharply darker lines are wires; cloud edges are not
+    p_wire = (1 - 0.85 * kit.smoothstep(0.86, 0.55, L / np.maximum(Lc, 1e-4))).astype(np.float32)
+    p_wire = cv2.GaussianBlur(p_wire, (0, 0), 0.6)
+    print("pano %dx%d, rotate %.3f turns" % (hw, hh, rot))
 
 E = dirs(EW, EH)
 Eu, Ev = to_uv(E)
 Hx = ((Eu - rot) % 1.0) * hw - 0.5
 Hy = Ev * hh - 0.5
 env_h = cv2.remap(hdr_c, Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+if not PANO.endswith(".hdr"):
+    rm = lambda a: cv2.remap(a, Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
+    sky_e, wire_e = rm(p_sky), rm(p_wire)
 hole_e = cv2.remap(cv2.dilate(hole.astype(np.uint8), np.ones((9, 9), np.uint8)).astype(np.float32), Hx.astype(np.float32), Hy.astype(np.float32), cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 del hdr, hdr_c
 T.mark("hdri")
@@ -215,6 +271,8 @@ hsky = kit.smoothstep(0.12, 0.3, hchroma) * kit.smoothstep(-2, 6, elev) * kit.sm
 hsky = cv2.dilate(hsky.astype(np.float32), np.ones((5, 5), np.uint8))
 hsky = np.maximum(hsky, np.clip(hole_e * 1.5, 0, 1))
 hsky = cv2.GaussianBlur(hsky, (0, 0), 1.2)
+if not PANO.endswith(".hdr"):
+    hsky = sky_e
 hsurf = (hsky < 0.2) & (elev < 60)
 psurf = lin[surf_all]
 expo = np.percentile(kit.luma(psurf), 97) / np.percentile(hl[hsurf], 97)
@@ -251,6 +309,9 @@ g_h = np.degrees(np.arccos(np.clip(E @ h_sun, -1, 1)))
 # the old sun's corona (bright, white) is sky too
 glare = kit.smoothstep(16, 9, g_h) * kit.smoothstep(0.9, 1.3, kit.luma(env_h) / np.maximum(kit.luma(skym), 1e-4))
 hsky = np.maximum(hsky, cv2.GaussianBlur(glare.astype(np.float32), (0, 0), 2))
+if not PANO.endswith(".hdr"):
+    hsky = sky_e
+    skym = skym * wire_e[..., None]
 env_h = skym * hsky[..., None] + env_h * (1 - hsky[..., None])
 # the HDRI sun's glare on its walls goes (its sun is gone)
 near = kit.smoothstep(26, 8, g_h) * (1 - hsky)
@@ -311,11 +372,11 @@ T.mark("aux")
 
 # ---------------------------------------------------------------- write
 enc = lambda c: np.where(c <= 0.0031308, c * 12.92, 1.055 * np.power(np.clip(c, 0.0031308, None), 1 / 2.4) - 0.055)
-kit.save_rgb(f"{OUT}/env.webp", enc(env), quality=90)
+kit.save_rgb(f"{OUT}/env.webp", enc(env), quality=84)
 kit.save_gray(f"{OUT}/envd.png", code)
 q = np.clip(np.round(aux * 255), 0, 255).astype(np.uint8)
 cv2.imwrite(f"{OUT}/aux.png", q[..., ::-1])
-cv2.imwrite(f"{OUT}/photo.webp", cv2.imread(f"{WORK}/photo.png"), [cv2.IMWRITE_WEBP_QUALITY, 92])
+cv2.imwrite(f"{OUT}/photo.webp", cv2.imread(f"{WORK}/photo.png"), [cv2.IMWRITE_WEBP_QUALITY, 88])
 scene = {
     "photo": [W, H],
     "f": fx,
