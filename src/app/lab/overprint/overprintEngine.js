@@ -63,7 +63,7 @@ uniform int uI;
 uniform vec4 uRect;   // atlas uv rect
 uniform vec4 uBody;   // cx, cy (track frame), height, aspect
 uniform vec4 uMove;   // signed speed, stretch, lean, band length
-uniform vec4 uLift;   // elevation, unused x3
+uniform vec4 uLift;   // elevation, track x where the rules stop, unused x2
 uniform vec3 uInk;    // linear transmittance at full density
 uniform float uSeed;
 out vec4 o;
@@ -144,7 +144,8 @@ void main(){
         float w = mix(1.0, HAIR, pow(abs(s - 2.0) / 2.0, 0.8));
         float hw = min(w * (hi - lo) * 0.5 * h, max(len - gap, 0.0) * 0.07);
         float dv = hw - abs(qy - (lo + hi) * 0.5) * h;
-        float dh = min(behind - gap, len - behind);
+        // Square off at the edge of what this plate has printed.
+        float dh = min(min(behind - gap, len - behind), (tp.x - uLift.y) * dir);
         if (hw * uDpr > 0.6) cov = max(cov, clamp(min(dv, dh) * uDpr + 0.5, 0.0, 1.0));
       }
     }
@@ -244,7 +245,8 @@ function bakeAtlas() {
     const cw = c.w + pad * 2;
     const ch = c.h + pad * 2;
     x.fillText(c.d, ox + pad + c.t.actualBoundingBoxLeft, (H - ch) / 2 + pad + c.t.actualBoundingBoxAscent);
-    const r = { u: ox / W, v: (H - ch) / 2 / H, du: cw / W, dv: ch / H, aspect: cw / ch, ox, oy: (H - ch) / 2, cw, ch };
+    // ink: the share of the cell the figure itself covers across, for spacing.
+    const r = { u: ox / W, v: (H - ch) / 2 / H, du: cw / W, dv: ch / H, aspect: cw / ch, ink: c.w / cw, ox, oy: (H - ch) / 2, cw, ch };
     ox += cw;
     return r;
   });
@@ -382,32 +384,52 @@ export async function createOverprint(host) {
   const INKS = [lin("#e0283f"), lin("#327cc4"), lin("#f6cd24")];
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
-  // ?t=seconds holds a still; ?lift=i,e holds numeral i up off the paper.
+  // ?t=seconds holds a still; ?v=a,b,c starts each numeral at that pace, as if
+  // it had just been thrown; ?x= places a numeral as a fraction of the track;
+  // ?lift=i,e holds numeral i up off the paper.
   const override = (params.get("v") || "").split(",").map(parseFloat);
   const startX = (params.get("x") || "").split(",").map(parseFloat);
   const liftQ = (params.get("lift") || "").split(",").map(parseFloat);
+  const frozen = Number.isFinite(still);
 
-  // Lanes are fractions of the track's cross height; sizes of the short side.
-  // Lanes sit on a register grid; a numeral thrown off its lane lands on the
-  // nearest line.
+  // The register grid, as fractions of the track's cross height. At rest the
+  // three plates run as one lockup: each on its own grid line, each figure
+  // tucked over the one before it by a quarter of its own width, so red prints
+  // over blue and blue over yellow on every frame, not only on a lucky one.
   const GRID = [-0.2, -0.1, 0, 0.1, 0.2];
   const LANES = [
-    { size: 0.5, y: 0.06, base: 110, lean: 0.1 },
-    { size: 0.36, y: -0.13, base: 270, lean: 0.14 },
-    { size: 0.42, y: 0.16, base: 390, lean: 0.12 },
+    { size: 0.6, y: 0.1, lean: 0.1 },
+    { size: 0.46, y: 0, lean: 0.14 },
+    { size: 0.53, y: -0.1, lean: 0.12 },
   ];
+  const TUCK = 0.25;
+  // The lockup cruises at one shared pace.
+  const CRUISE = reduced ? 0 : 160;
+  // Pulled out of register, a plate falls back into its slot on a critically
+  // damped spring: settled in about 600ms, with no bounce.
+  const OMEGA = 8;
+  const MAX_V = 3200;
+  // A thrown plate races on at its own pace for as long as the throw lasts.
+  const energyOf = (rv) => (reduced || frozen ? 0 : clamp(Math.abs(rv) / 1200, 0, 1.8));
+
   const axis = [Math.cos(ANGLE), Math.sin(ANGLE)];
   const nums = LANES.map((l, i) => {
-    const v = Number.isFinite(override[i]) ? override[i] : reduced ? 0 : l.base;
+    const thrown = Number.isFinite(override[i]);
+    const rv = thrown ? override[i] - CRUISE : 0;
     return {
       i,
       lane: l,
-      x: 0,
+      x: 0, // where it prints, along the track
       y: 0,
+      yv: 0,
+      off: 0, // how far out of register: its distance from its slot in the lockup
+      rv, // its pace relative to the lockup
+      free: thrown ? Math.max(energyOf(rv), frozen ? 1 : 0) : 0,
+      engaged: !thrown, // whether it has started falling back in
+      w: thrown ? 0 : 1, // how firmly the spring holds it, eased in
       ty: l.y,
-      v,
-      base: v,
-      shown: v,
+      shown: CRUISE + rv,
+      trail: 0, // how far it has run on this sheet since it was picked up
       held: false,
       e: liftQ[0] === i && Number.isFinite(liftQ[1]) ? liftQ[1] : 0,
       ev: 0,
@@ -419,11 +441,15 @@ export async function createOverprint(host) {
   let H = 1;
   let TW = 1; // track length across the box
   let TH = 1; // track cross height
+  let G = 0; // the lockup's anchor along the track, never wrapped
+  let P = 1; // one lap: exactly the track across the box
+  const slot = [0, 0, 0];
   let placed = false;
   let stillFrames = 0;
   const short = () => Math.min(H, W * 0.62);
   const height = (n) => n.lane.size * short();
   const width = (n) => height(n) * atlas.rects[n.i].aspect;
+  const inkWidth = (n) => width(n) * atlas.rects[n.i].ink;
   // Real type, never stretched: pace shows in the rules, not in the figure.
   const stretchOf = () => 1;
   const leanOf = (n, v) => Math.sign(v || 1) * (n.lane.lean + clamp(Math.abs(v) / 4000, 0, 0.16));
@@ -435,38 +461,90 @@ export async function createOverprint(host) {
     const cy = y - H / 2;
     return [cx * axis[0] + cy * axis[1], -cx * axis[1] + cy * axis[0]];
   };
+  const unit = () => Math.min(H, TH);
+  // Into [c - P/2, c + P/2). The track is a loop exactly as long as the box
+  // is wide, like a printed band: a plate running off one edge is already
+  // printing at the other, so the lockup never leaves the sheet and both its
+  // overprints are on it in every frame, whole or split across the edge.
+  const lap = (u, c = 0) => u - c - P * Math.floor((u - c + P / 2) / P) + c;
 
-  const laneY = (n) => n.ty * Math.min(H, TH);
-
-  // Off one end, bands and all, and back in at the other.
-  const wrap = (n) => {
-    const half = (width(n) * stretchOf(n.shown)) / 2 + height(n) * 0.25;
-    const tail = tailOf(n.shown);
-    const span = TW + half * 2 + tail;
-    if (n.v > 0 && n.x - half - tail > TW / 2) n.x -= span;
-    else if (n.v < 0 && n.x + half + tail < -TW / 2) n.x += span;
+  // One step of a plate that is not in the hand.
+  const advance = (n, dt, cruise) => {
+    const steps = Math.max(1, Math.ceil(dt * 240));
+    const h = dt / steps;
+    for (let s = 0; s < steps; s++) {
+      let target = n.lane.y * unit();
+      if (n.free > 0) {
+        // Still carrying the throw: its own pace, barely fading, on the
+        // register line nearest where it was let go.
+        n.free -= h;
+        n.rv *= Math.exp(-0.35 * h);
+        target = n.ty * unit();
+      } else {
+        if (!n.engaged) {
+          // Out of energy. A plate a little ahead of its slot eases back into
+          // it; one a long way ahead laps and catches the lockup up from
+          // behind rather than running backwards down the track.
+          n.off = lap(n.off, cruise > 0 ? -0.3 * P : 0);
+          n.engaged = true;
+          n.w = 0;
+        }
+        n.w = Math.min(1, n.w + h / 0.25);
+        n.rv += (-n.w * OMEGA * OMEGA * n.off - 2 * OMEGA * Math.sqrt(n.w) * n.rv) * h;
+        // Easing back it never outruns its own rules: below the pace where
+        // they print, it reads as a plate sliding home, not a race backwards.
+        if (cruise > 0) n.rv = Math.max(n.rv, -cruise - 400);
+      }
+      n.rv = clamp(n.rv, -MAX_V, MAX_V);
+      n.off += n.rv * h;
+      n.yv += (-OMEGA * OMEGA * (n.y - target) - 2 * OMEGA * n.yv) * h;
+      n.y += n.yv * h;
+    }
   };
+  const settled = (n) => n.free > 0 || (Math.abs(n.off) < 0.05 && Math.abs(n.rv) < 0.05 && Math.abs(n.yv) < 0.05);
 
   stage.onResize((w, h) => {
     W = w;
     H = h;
     TW = w * Math.abs(axis[0]) + h * Math.abs(axis[1]);
     TH = w * Math.abs(axis[1]) + h * Math.abs(axis[0]);
+    P = TW;
     paperDirty = true;
     stillFrames = 0;
-    nums.forEach((n) => {
-      if (!placed) n.x = TW * ((Number.isFinite(startX[n.i]) ? startX[n.i] : [0.375, 0.493, 0.647][n.i]) - 0.5);
-      n.y = laneY(n);
-    });
-    placed = true;
-    if (Number.isFinite(still)) {
+    // The lockup: each figure overprints the one before by TUCK of its own
+    // width, and the whole group is centred on the track.
+    const [a, b, c] = nums.map(inkWidth);
+    slot[0] = 0;
+    slot[1] = a / 2 + b * (0.5 - TUCK);
+    slot[2] = slot[1] + b / 2 + c * (0.5 - TUCK);
+    const mid = (slot[0] - a / 2 + slot[2] + c / 2) / 2;
+    for (let k = 0; k < 3; k++) slot[k] -= mid;
+    for (const n of nums) {
+      if (!placed && Number.isFinite(startX[n.i])) n.off = TW * (startX[n.i] - 0.5) - slot[n.i];
+      if (!n.held) n.y = (n.free > 0 ? n.ty : n.lane.y) * unit();
+    }
+    if (!placed && frozen) {
       // A still: let the race run for t seconds from the start line.
+      const dt = 1 / 120;
+      for (let t = 0; t < still; t += dt) {
+        G += CRUISE * dt;
+        for (const n of nums) {
+          // Hold the thrown plates' energy, so the still shows them racing.
+          const f = n.free;
+          advance(n, dt, CRUISE);
+          if (f > 0) n.free = Math.max(n.free, 1e-3);
+        }
+      }
+      // Caught mid-race: it has been printing its rules since it came in
+      // over the edge behind it.
       for (const n of nums) {
-        n.x += n.v * still;
-        n.shown = n.v;
-        for (let k = 0; k < 6; k++) wrap(n);
+        n.shown = CRUISE + n.rv;
+        const x = lap(G + slot[n.i] + n.off);
+        n.trail = n.shown >= 0 ? x + P / 2 : P / 2 - x;
       }
     }
+    for (const n of nums) n.x = lap(G + slot[n.i] + n.off);
+    placed = true;
   });
 
   // Hit test against the glyph itself (no bands), topmost by depth of ink.
@@ -476,7 +554,7 @@ export async function createOverprint(host) {
     for (const n of nums) {
       const h = height(n);
       const r = atlas.rects[n.i];
-      let dx = px - n.x;
+      let dx = lap(px - n.x);
       const dy = py - n.y;
       dx += leanOf(n, n.shown) * dy;
       dx /= stretchOf(n.shown);
@@ -503,8 +581,9 @@ export async function createOverprint(host) {
     const n = hit(p.x, p.y);
     if (!n) return;
     const [px, py] = toTrack(p.x, p.y);
-    grab = { n, dx: n.x - px, dy: n.y - py };
+    grab = { n, dx: -lap(px - n.x), dy: n.y - py };
     n.held = true;
+    n.trail = 0;
     n.lift = 1;
     stage.canvas.style.cursor = "grabbing";
   });
@@ -515,14 +594,16 @@ export async function createOverprint(host) {
   stage.on("up", (p) => {
     if (!grab) return;
     const n = grab.n;
-    // The throw sets the pace, along the track, within what a press could print.
-    const v = clamp(p.vx * axis[0] + p.vy * axis[1], -3200, 3200);
-    const floor = reduced ? 0 : 60;
-    n.v = Math.abs(v) < floor ? Math.sign(n.v || v || 1) * floor : v;
-    n.base = reduced ? 0 : clamp(Math.abs(n.v), 90, 900) * Math.sign(n.v);
-    // Lay it back down on the nearest register line.
-    const q = n.y / Math.min(H, TH);
+    // The throw sets its pace, within what a press could print. It runs on
+    // that while the throw lasts, then falls back into the lockup.
+    const v = clamp(p.vx * axis[0] + p.vy * axis[1], -MAX_V, MAX_V);
+    n.rv = v - (frozen ? 0 : CRUISE);
+    n.free = energyOf(n.rv);
+    n.engaged = false;
+    // Meanwhile it rides the register line nearest where it was let go.
+    const q = n.y / unit();
     n.ty = GRID.reduce((a, g) => (Math.abs(g - q) < Math.abs(a - q) ? g : a), GRID[0]);
+    n.yv = 0;
     n.held = false;
     n.lift = 0;
     grab = null;
@@ -540,26 +621,28 @@ export async function createOverprint(host) {
   const seeds = new Float32Array([3.1, 17.7, 41.3]);
 
   stage.onFrame((dt) => {
-    const frozen = Number.isFinite(still);
-    if (frozen && !grab && !paperDirty && stillFrames++ > 3 && nums.every((n) => Math.abs(n.e - n.lift) < 1e-3 && Math.abs(n.ev) < 1e-3)) return;
+    if (frozen && !grab && !paperDirty && stillFrames++ > 3 && nums.every((n) => settled(n) && Math.abs(n.e - n.lift) < 1e-3 && Math.abs(n.ev) < 1e-3)) return;
+    // A still holds the lockup where it is; only a plate you move, and its
+    // fall back into register, play out.
+    const cruise = frozen ? 0 : CRUISE;
+    G += cruise * dt;
     for (const n of nums) {
       if (n.held) {
         const [px, py] = toTrack(stage.pointer.x, stage.pointer.y);
-        const lim = Math.min(H, TH) * 0.3;
-        const nx = damp(n.x, px + grab.dx, 30, dt);
+        const lim = unit() * 0.3;
+        const nx = n.x + lap(px + grab.dx - n.x) * (1 - Math.exp(-30 * dt));
         const vNow = (nx - n.x) / Math.max(dt, 1e-3);
-        n.x = nx;
+        // Out of register by however far the hand has pulled it.
+        n.off += lap(nx - (G + slot[n.i] + n.off));
+        n.rv = damp(n.rv, vNow - cruise, 14, dt);
         n.y = damp(n.y, clamp(py + grab.dy, -lim, lim), 30, dt);
-        n.v = damp(n.v, vNow, 14, dt);
-      } else {
-        if (!frozen) {
-          // A hard throw slowly settles to a fast cruise; it never stops racing.
-          n.v = damp(n.v, n.base, 0.14, dt);
-          n.x += n.v * dt;
-          wrap(n);
-        }
-        n.y = damp(n.y, laneY(n), 7, dt);
+        n.yv = 0;
+      } else if (!frozen || n.free <= 0) {
+        advance(n, dt, cruise);
       }
+      const was = n.x;
+      n.x = lap(G + slot[n.i] + n.off);
+      n.trail = Math.min(n.trail + Math.abs(lap(n.x - was)), 4 * P);
       // The plate is lifted on a spring, and lands with a touch of overshoot:
       // it presses home and settles back into register.
       const k = n.lift ? 520 : 380;
@@ -570,7 +653,7 @@ export async function createOverprint(host) {
         n.ev += (k * (n.lift - n.e) - c * n.ev) * (dt / steps);
         n.e += n.ev * (dt / steps);
       }
-      if (!frozen || n.held) n.shown = damp(n.shown, n.v, 9, dt);
+      if (!frozen || n.held || n.free <= 0) n.shown = damp(n.shown, CRUISE + n.rv, 9, dt);
       const i = n.i;
       const e = n.e;
       body.set([n.x, n.y, height(n), atlas.rects[i].aspect], i * 4);
@@ -643,18 +726,29 @@ export async function createOverprint(host) {
       const h = h0 * (1 + 0.025 * Math.max(e, 0));
       const halfW = (h * asp * st) / 2 + (Math.abs(ln) * h) / 2 + 4;
       const pad = 4;
-      const cx = x;
-      const back = v > 0 ? L : 0;
-      const front = v > 0 ? 0 : L;
-      gl.uniform4f(U.uBox, cx - halfW - back - 4, y - h / 2 - 4, x + halfW + front + pad, y + h / 2 + pad);
-      gl.uniform1i(U.uI, i);
-      gl.uniform4fv(U.uRect, rect.subarray(o, o + 4));
-      gl.uniform4fv(U.uBody, body.subarray(o, o + 4));
-      gl.uniform4fv(U.uMove, move.subarray(o, o + 4));
-      gl.uniform4fv(U.uLift, lift.subarray(o, o + 4));
-      gl.uniform3fv(U.uInk, ink.subarray(i * 3, i * 3 + 3));
-      gl.uniform1f(U.uSeed, seeds[i]);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      const trail = nums[i].trail;
+      // A plate that has just lapped still trails its rules off the far
+      // edge, so it prints once more a lap away wherever that shows. Rules
+      // are what the plate has printed on this sheet: they reach back no
+      // further than where it was picked up, nor past the edge it came in
+      // over, so they never wrap round ahead of it.
+      for (const cx of [x - P, x, x + P]) {
+        const clip = v > 0 ? Math.max(-P / 2, cx - trail) : Math.min(P / 2, cx + trail);
+        const back = v > 0 ? clamp(cx - halfW - clip, 0, L) : 0;
+        const front = v > 0 ? 0 : clamp(clip - (cx + halfW), 0, L);
+        const x0 = cx - halfW - back - 4;
+        const x1 = cx + halfW + front + pad;
+        if (x1 < -TW / 2 || x0 > TW / 2) continue;
+        gl.uniform4f(U.uBox, x0, y - h / 2 - 4, x1, y + h / 2 + pad);
+        gl.uniform4f(U.uBody, cx, y, h0, asp);
+        gl.uniform1i(U.uI, i);
+        gl.uniform4fv(U.uRect, rect.subarray(o, o + 4));
+        gl.uniform4fv(U.uMove, move.subarray(o, o + 4));
+        gl.uniform4f(U.uLift, e, clip, 0, 0);
+        gl.uniform3fv(U.uInk, ink.subarray(i * 3, i * 3 + 3));
+        gl.uniform1f(U.uSeed, seeds[i]);
+        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      }
     }
   });
 
