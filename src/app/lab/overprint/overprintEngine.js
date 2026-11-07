@@ -126,7 +126,9 @@ void main(){
   vec2 lp = (tp - ctr) / h;
   float mottle = texture(uMottle, lp * 0.9 + uSeed).r * 0.65 + texture(uMottle, lp * 2.3 + uSeed * 1.7).r * 0.35;
   // Held up off the stock, the plate stops catching its tooth.
-  float dens = 0.9 + 0.14 * mottle - 0.08 * tooth * (1.0 - el);
+  // Full density sits near 0.85, not 1: a solid that still lets the plates
+  // under it through, so every overlap prints as a secondary, never a black.
+  float dens = 0.78 + 0.12 * mottle - 0.07 * tooth * (1.0 - el);
   vec3 t = pow(uInk, vec3(cov * dens));
   o = vec4(pow(t, vec3(1.0 / 2.2)), 1.0);
 }`;
@@ -344,9 +346,12 @@ export async function createOverprint(host) {
     params2D(gl.LINEAR, gl.LINEAR, gl.REPEAT);
   });
 
-  // Process inks as filters: red (magenta + yellow), a cyan-leaning blue, and
-  // a warm yellow, the three plates of a Huber poster.
-  const INKS = [lin("#e2312a"), lin("#1f62b0"), lin("#f6cd24")];
+  // Process inks as filters: a red pulled toward magenta, a cyan-leaning
+  // process blue that still passes some red light, and a warm yellow, the
+  // three plates of a Huber poster. Tuned on the overlaps, not the solids:
+  // red over blue prints aubergine, red over yellow vermilion, blue over
+  // yellow green, and all three a warm brown-black.
+  const INKS = [lin("#e0283f"), lin("#327cc4"), lin("#f6cd24")];
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
   // ?t=seconds holds a still; ?lift=i,e holds numeral i up off the paper.
