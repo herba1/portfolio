@@ -28,11 +28,16 @@ import { readWebm } from "./webm";
 // The decoder D receives exactly what E sent: the I-frames, the vectors,
 // the intra blocks and the quantised residuals, and rebuilds the picture
 // from its own last frame. While nothing goes wrong D is E, bit for bit.
+// A decoder that is not being fed honestly (joining, or held) gets no intra
+// blocks either: each one is turned into an inter block along the median of
+// its neighbours' vectors, the way a datamosher strips them (ffglitch's
+// mb_type rewrite, Murata's I-frame and intra removal), so the error stays
+// one continuous smear instead of squares of the true picture.
 //
 // It tunes in the way a set joins a broadcast: between I-frames, with no
 // picture. Until the first I-frame arrives (three seconds) it builds what it
-// can on blank paper from the vectors, the intra blocks and the residuals,
-// so only what moves or changes appears: the tree line, the edges of the
+// can on blank paper from the vectors and the residuals, so only what
+// moves or changes appears: the tree line, the edges of the
 // drifting cloud, a pole, set into the paper.
 //
 // Press and hold and the I-frames stop reaching the decoder, and within a
@@ -55,7 +60,8 @@ import { readWebm } from "./webm";
 // frame by frame from the start, as fast as it can); ?hold=seconds holds it
 // for that long before t; ?release=seconds lets go that long before t (the
 // refresh mid-sweep); ?join=1 shows the opening (?join=0 skips it live);
-// ?qp= sets the encoder's quantiser. ?t=8&hold=4 holds over the cut (6 s).
+// ?qp= sets the encoder's quantiser. ?t=8&hold=4 holds over the cut (6 s):
+// the hero still.
 
 const ASSET = "/lab/datamosh/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
@@ -186,8 +192,14 @@ void main() {
   if (uIframe == 1) {
     // an I-frame: only a decoder that receives it starts again
     d = uHeld == 1 ? texelFetch(uD, ivec2(p), 0).rgb : e;
-  } else if (intra || fresh) {
+  } else if (fresh || (intra && uHeld == 0)) {
+    // an intra block carries the true picture to a decoder that is fed
     d = e;
+  } else if (intra) {
+    // a starved decoder gets no intra blocks either: each one is turned
+    // into an inter block along its neighbours' median vector, predicted
+    // from the moshed picture, with no residual (it never had an inter one)
+    d = mc(uD, p, m);
   } else {
     d = mc(uD, p, m) + uGain * r;
   }
@@ -312,6 +324,64 @@ async function readVectors(url) {
           out[o + 2] = vy[q];
           out[o + 3] = 0;
         }
+      }
+    }
+    conceal(m, out);
+  };
+  // Every intra macroblock also gets a vector of its own, the way a mosher
+  // strips intra blocks out of a P-frame (ffglitch's mb_type rewrite): the
+  // component-wise median of its eight neighbours' partition vectors, filled
+  // inward over clusters of intra blocks, zero (a skip) where there is
+  // nothing around it to borrow. A decoder that is being fed honestly never
+  // reads it; a held one predicts the block from its own picture along it.
+  const done = new Uint8Array(MW * MH);
+  const xs = [];
+  const ys = [];
+  const median = (a) => {
+    a.sort((p, q) => p - q);
+    const h = a.length >> 1;
+    return a.length & 1 ? a[h] : Math.round((a[h - 1] + a[h]) / 2);
+  };
+  const conceal = (m, out) => {
+    let left = 0;
+    for (let id = 0; id < MW * MH; id++) {
+      done[id] = m[id] === 2 ? 0 : 1;
+      if (!done[id]) left++;
+    }
+    for (let pass = 0; left > 0 && pass < 12; pass++) {
+      const filled = [];
+      for (let j = 0; j < MH; j++) {
+        for (let i = 0; i < MW; i++) {
+          if (done[j * MW + i]) continue;
+          xs.length = 0;
+          ys.length = 0;
+          for (let dj = -1; dj <= 1; dj++) {
+            for (let di = -1; di <= 1; di++) {
+              const jj = j + dj;
+              const ii = i + di;
+              if ((!di && !dj) || jj < 0 || ii < 0 || jj >= MH || ii >= MW || !done[jj * MW + ii]) continue;
+              for (let q = 0; q < 4; q++) {
+                const o = (((jj * 2 + (q >> 1)) * GW) + ii * 2 + (q & 1)) * 4;
+                xs.push(out[o + 1]);
+                ys.push(out[o + 2]);
+              }
+            }
+          }
+          if (xs.length) filled.push(j * MW + i, median(xs), median(ys));
+        }
+      }
+      if (!filled.length) break;
+      for (let k = 0; k < filled.length; k += 3) {
+        const id = filled[k];
+        const i = id % MW;
+        const j = (id - i) / MW;
+        for (let q = 0; q < 4; q++) {
+          const o = (((j * 2 + (q >> 1)) * GW) + i * 2 + (q & 1)) * 4;
+          out[o + 1] = filled[k + 1];
+          out[o + 2] = filled[k + 2];
+        }
+        done[id] = 1;
+        left--;
       }
     }
   };
@@ -558,7 +628,7 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   const releaseFrom = still && releaseQ != null ? stopAt - Math.round(releaseQ * FPS) : Infinity;
   // The decoder joins the stream the way a set tunes into a broadcast: with
   // no picture, between I-frames. Until the first one arrives it builds what
-  // it can from paper, the vectors, the intra blocks and the residuals.
+  // it can from paper, the vectors and the residuals.
   const joinQ = q.get("join");
   let joining = still ? joinQ === "1" : joinQ !== "0";
   const warmFrom = still && !joining ? Math.max(0, Math.min(stopAt, holdFrom) - 4) : 0;
