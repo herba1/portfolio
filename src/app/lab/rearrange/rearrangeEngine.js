@@ -35,6 +35,18 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // feed cable, run up the mast's conduit into the bracket, is a live cable
 // like the rest and pays out behind it.
 //
+// The far pole carries the girder's tip: the girder's last bay is clamped
+// round it, so the two are one assembly (pole.py). The pole slides only
+// along the girder's own axis (meta "track", the line toward its chords'
+// vanishing point), and the bay, lifted out of the plate as a layer of its
+// own (meta "spans"), is drawn between the last cross member, where it
+// stays, and the clamp on the pole: each of its points is found on the
+// bay's plane and its distance along the axis stretched or taken in
+// between the two ends, so the chords are drawn out to the moved clamp as
+// a cable is between its fittings. Its travel keeps the clamp on the bay,
+// so the pole can never leave the truss's tip in the sky or stand in its
+// span.
+//
 // Physics, in camera space (OpenCV axes, f from the lens, the up direction
 // from the poles' vertical vanishing point, high above the frame: the lens
 // looks up ~33 degrees):
@@ -70,14 +82,15 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // Query: ?move=k,dx,dy holds object k (0 platform, 1 lamp, 2 far pole,
 // 3 pull-off insulator, 4 insulator pair) lifted mid-move, dx/dy in photo
 // widths/heights from where it was (the lamp takes the nearest point of
-// its mast, so only dy counts); several are joined with ";".
+// its mast, the far pole the nearest point of its girder's axis); several
+// are joined with ";".
 // &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
 // &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
 // the print's (PRINT); 0 turns each off.
 
 const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
-const MAXK = 10; // objects, then the pinned members
+const MAXK = 12; // objects, then the pinned members, then the spans
 const LIFT = 0.045; // held: the card comes this share of its distance toward the lens
 // where a cropped view (a phone held upright) centres: on the near mast,
 // so the platform, the lamp and the girder's root stay in it
@@ -215,6 +228,12 @@ uniform vec3 uCable;          // their colour, linear
 uniform vec4 uPinA[${MAXK}];  // pinned member: fixed end (photo px), its axis at rest
 uniform vec4 uPinB[${MAXK}];  // its axis now, length at rest, length now (0: not a pin)
 uniform float uPinEnd[${MAXK}];
+uniform int uSpanK;           // the span's layer (-1: none)
+uniform vec4 uSpanN;          // its plane: n.X = d
+uniform vec3 uSpanO;          // origin on it (the pole's edge), camera space
+uniform vec3 uSpanG;          // the girder's axis
+uniform vec3 uSpanUp;         // the vertical
+uniform vec4 uSpanCut;        // fixed end s = x + y h; z the pole's travel along the axis; w G.UP
 out vec4 o;
 
 vec4 objLod(int k, vec2 q, float lod) {
@@ -350,7 +369,25 @@ void main() {
     if (i >= uCount) break;
     int k = uOrder[i];
     vec2 q;
-    if (uPinB[k].z > 0.0) {
+    if (k == uSpanK) {
+      // the girder's last bay: found on its own plane, then its distance
+      // along the axis stretched between the fixed end (the cut, s_in) and
+      // the pole's edge (s = 0 at rest, the travel now), where the clamp
+      // carries it on rigidly
+      vec3 X = ray * (uSpanN.w / dot(uSpanN.xyz, ray));
+      vec3 Y = X - uSpanO;
+      float ga = dot(Y, uSpanG);
+      float ub = dot(Y, uSpanUp);
+      float gu = uSpanCut.w;
+      float det = 1.0 - gu * gu;
+      float s1 = (ga - gu * ub) / det;
+      float hh = (ub - gu * ga) / det;
+      float si = uSpanCut.x + uSpanCut.y * hh;
+      float dl = uSpanCut.z;
+      float s0 = s1 < si ? s1 : (s1 >= dl ? s1 - dl : si - (s1 - si) * si / max(dl - si, 1e-4));
+      vec3 X0 = X - (s1 - s0) * uSpanG;
+      q = uF * X0.xy / X0.z + uC;
+    } else if (uPinB[k].z > 0.0) {
       // a pinned member: from its fixed end along its axis now, back to
       // where that lies on it at rest; its end fittings keep their length
       // and its bar between them takes up the stretch
@@ -704,7 +741,9 @@ export async function createRearrange(host, { embedded = false } = {}) {
   const K = OBJ.length;
   const PINS = (meta.pins ?? []).slice(0, MAXK - K);
   const WIRES = meta.wires ?? [];
-  const NL = K + PINS.length; // layers: the objects, then the pins
+  const SPANS = (meta.spans ?? []).slice(0, Math.max(0, Math.min(1, MAXK - K - PINS.length)));
+  const SPAN0 = K + PINS.length; // the span's layer
+  const NL = SPAN0 + SPANS.length; // layers: the objects, the pins, the span
   const [PW, PH] = meta.size;
   const F = meta.f;
   const [CX, CY] = meta.c;
@@ -729,9 +768,10 @@ export async function createRearrange(host, { embedded = false } = {}) {
     loadBitmap(`${ASSET}sky.webp`),
     ...OBJ.map((_, k) => loadBitmap(`${ASSET}o${k}.webp`)),
     ...PINS.map((_, i) => loadBitmap(`${ASSET}o${K + i}.webp`)),
+    ...SPANS.map((_, i) => loadBitmap(`${ASSET}o${SPAN0 + i}.webp`)),
   ]);
   // CPU copies for picking: each object's matte, and the front layer
-  const objA = objBms.slice(0, K).map((bm) => {
+  const objA = [...objBms.slice(0, K), ...objBms.slice(SPAN0)].map((bm) => {
     const px = pixels(bm);
     const a = new Uint8Array(bm.width * bm.height);
     for (let i = 0; i < a.length; i++) a[i] = px[i * 4 + 3];
@@ -886,7 +926,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
       lift: spring(0),
       pos: { x: 0, y: 0, vx: 0, vy: 0, tx: 0, ty: 0 },
       ref: null, // the held point: its 3D position, height, t when grabbed
-      travel: null, // a fitting on its mast: how far it may slide (s along UP)
+      travel: null, // a fitting on its mast, a pole on its girder: how far it may slide (s along axis)
+      axis: UP, // the line it slides on, if it does
       held: false,
       moving: false,
     };
@@ -1007,32 +1048,36 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   // A fitting clamped to its mast (meta "slide") only slides along it: the
   // held point moves on the vertical line through it, which in the photo
-  // is the line toward the poles' vanishing point. s is how far along UP.
-  // From an image point on that line: the two projective equations
-  // (p - c) (X + s UP).z = f (X + s UP).xy, least squares in s.
-  const slideS = (X, [pu, pv]) => {
+  // is the line toward the poles' vanishing point. The far pole (meta
+  // "track") only slides along the girder clamped to it: the line toward
+  // the chords' vanishing point. s is how far along that axis D. From an
+  // image point on the line: the two projective equations
+  // (p - c) (X + s D).z = f (X + s D).xy, least squares in s.
+  const slideS = (X, [pu, pv], D) => {
     const a1 = F * X[0] - (pu - CX) * X[2];
-    const b1 = (pu - CX) * UP[2] - F * UP[0];
+    const b1 = (pu - CX) * D[2] - F * D[0];
     const a2 = F * X[1] - (pv - CY) * X[2];
-    const b2 = (pv - CY) * UP[2] - F * UP[1];
+    const b2 = (pv - CY) * D[2] - F * D[1];
     return (a1 * b1 + a2 * b2) / (b1 * b1 + b2 * b2);
   };
-  const along = (X, s) => [X[0] + UP[0] * s, X[1] + UP[1] * s, X[2] + UP[2] * s];
+  const along = (X, s, D) => [X[0] + D[0] * s, X[1] + D[1] * s, X[2] + D[2] * s];
   // the point of the slide line nearest (u, v), kept within the travel
   // (rubber past it); travel is in s from rest
   const slideTo = (o, u, v) => {
     const X = o.ref.X;
+    const D = o.axis;
     const p0 = proj(X);
-    const p1 = proj(along(X, 0.05 * X[2]));
+    const p1 = proj(along(X, 0.05 * X[2], D));
     const dl = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
     const dx = (p1[0] - p0[0]) / dl;
     const dy = (p1[1] - p0[1]) / dl;
     const k = (u - p0[0]) * dx + (v - p0[1]) * dy;
-    const s = slideS(X, [p0[0] + dx * k, p0[1] + dy * k]);
-    const s0 = dot3(UP, o.ref.t0);
-    // a clamp on a pole: past its travel it gives only a little
+    const s = slideS(X, [p0[0] + dx * k, p0[1] + dy * k], D);
+    const s0 = dot3(D, o.ref.t0);
+    // a clamp on a pole, a pole on its girder: past its travel it gives
+    // only a little
     const sC = rubber(s0 + s, o.travel[0], o.travel[1], 0.12);
-    return proj(along(X, sC - s0));
+    return proj(along(X, sC - s0, D));
   };
   const liftOf = (o) => (o.travel ? 0 : LIFT);
   // its travel, given in the manifest as photo px its anchor may go up
@@ -1052,8 +1097,8 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   const translation = (o, u, v, lift) => {
     if (o.travel) {
-      const s = slideS(o.ref.X, [u, v]);
-      return [0, 1, 2].map((i) => o.ref.t0[i] + UP[i] * s);
+      const s = slideS(o.ref.X, [u, v], o.axis);
+      return [0, 1, 2].map((i) => o.ref.t0[i] + o.axis[i] * s);
     }
     const r = kinv(u, v);
     const g = dot3(UP, r);
@@ -1093,6 +1138,62 @@ export async function createRearrange(host, { embedded = false } = {}) {
   };
   const cardD = (o, u, v) => SKYD + dot3(N, kinv(u, v)) / (o.dn0 + dot3(N, o.t)) + o.meta.bias;
 
+  // The far pole and the girder's tip are one assembly: the pole slides
+  // only along the girder's axis (meta "track": its chords' vanishing point,
+  // and the travel along it, in camera units, that keeps the clamp on the
+  // girder's last bay), and never so far in that its cut end, at the
+  // frame's bottom edge, comes into view.
+  objs.forEach((o) => {
+    const tr = o.meta.track;
+    if (!tr) return;
+    const D = kinv(...tr.vp);
+    const dl = Math.hypot(...D);
+    o.axis = D.map((v) => v / dl);
+    let lo = tr.range[0];
+    const cut = o.meta.cut;
+    if (cut) {
+      const low = (s) => mapPoint(o, o.axis.map((v) => v * s), cut)[1] >= PH + 1;
+      if (!low(lo)) {
+        let a = lo;
+        let b = 0;
+        for (let i = 0; i < 30; i++) {
+          const m = (a + b) / 2;
+          if (low(m)) b = m;
+          else a = m;
+        }
+        lo = b;
+      }
+    }
+    o.travel = [lo, tr.range[1]];
+  });
+
+  // The girder's last bay (meta "spans"): drawn between its fixed end and
+  // the pole it is clamped to (see the shader). Its depth is the pole's,
+  // set back (to D at rest) behind the cables that cross it, which in the
+  // photo run in front of the steel.
+  const spans = SPANS.map((sp, i) => {
+    const o = objs[sp.k];
+    return { ...sp, o, layer: SPAN0 + i, A: objA[K + i], gu: dot3(sp.axis, UP), back: sp.D - o.meta.D };
+  });
+  const travelOf = (sp) => dot3(sp.axis, sp.o.t);
+  // where photo point (u, v) of the bay, as it is drawn now, was in the photo
+  const spanQ = (sp, u, v) => {
+    const r = kinv(u, v);
+    const n = sp.plane;
+    const z = n[3] / (n[0] * r[0] + n[1] * r[1] + n[2] * r[2]);
+    const X = r.map((c) => c * z);
+    const Y = sub3(X, sp.origin);
+    const ga = dot3(Y, sp.axis);
+    const ub = dot3(Y, UP);
+    const det = 1 - sp.gu * sp.gu;
+    const s1 = (ga - sp.gu * ub) / det;
+    const hh = (ub - sp.gu * ga) / det;
+    const si = sp.cut[0] + sp.cut[1] * hh;
+    const dl = travelOf(sp);
+    const s0 = s1 < si ? s1 : s1 >= dl ? s1 - dl : si - ((s1 - si) * si) / Math.max(dl - si, 1e-4);
+    return proj(X.map((c, i) => c - (s1 - s0) * sp.axis[i]));
+  };
+
   // The nearest object whose matte is under photo point (u, v) and that is
   // not hidden there by something in front of it.
   const pick = (u, v) => {
@@ -1118,6 +1219,19 @@ export async function createRearrange(host, { embedded = false } = {}) {
         best = k;
       }
     });
+    // the girder's bay is part of the pole that carries it
+    for (const sp of spans) {
+      const [qx, qy] = spanQ(sp, u, v);
+      const x = Math.round(qx - sp.rect[0]);
+      const y = Math.round(qy - sp.rect[1]);
+      if (x < 0 || y < 0 || x >= sp.A.w || y >= sp.A.h || sp.A.a[y * sp.A.w + x] < 110) continue;
+      const D = cardD(sp.o, u, v) + sp.back;
+      if (aF > 0.6 && dF > D) continue;
+      if (D > bestD) {
+        bestD = D;
+        best = sp.k;
+      }
+    }
     return best;
   };
 
@@ -1285,6 +1399,9 @@ export async function createRearrange(host, { embedded = false } = {}) {
     // just behind the deck it holds up
     const ds = objs.map((o, k) => [k, cardD(o, ...applyHInvPoint(o, o.meta.anchor))]);
     PINS.forEach((pn, i) => ds.push([K + i, ds[pn.k][1] - 1e-4]));
+    // the girder's bay just behind the pole that carries it (the pole's
+    // face covers the chords' ends where they run onto it)
+    spans.forEach((sp) => ds.push([sp.layer, ds[sp.k][1] - 1e-4]));
     ds.sort((a, b) => a[1] - b[1]);
     ds.forEach(([k], i) => (order[i] = k));
     gl.uniform1iv(U.uOrder, order);
@@ -1323,6 +1440,23 @@ export async function createRearrange(host, { embedded = false } = {}) {
       bias[k] = o.meta.bias;
       rect.set(pn.rect, k * 4);
     });
+    let spanK = -1;
+    spans.forEach((sp) => {
+      const k = sp.layer;
+      const o = sp.o;
+      spanK = k;
+      H.set([1, 0, 0, 0, 1, 0, 0, 0, 1], k * 9);
+      dn[k] = o.dn0 + dot3(N, o.t);
+      dn0[k] = o.dn0;
+      bias[k] = o.meta.bias + sp.back;
+      rect.set(sp.rect, k * 4);
+      gl.uniform4f(U.uSpanN, ...sp.plane);
+      gl.uniform3fv(U.uSpanO, sp.origin);
+      gl.uniform3fv(U.uSpanG, sp.axis);
+      gl.uniform3fv(U.uSpanUp, UP);
+      gl.uniform4f(U.uSpanCut, sp.cut[0], sp.cut[1], travelOf(sp), sp.gu);
+    });
+    gl.uniform1i(U.uSpanK, spanK);
     gl.uniform4fv(U.uPinA, pinA);
     gl.uniform4fv(U.uPinB, pinB);
     gl.uniform1fv(U.uPinEnd, pinE);
