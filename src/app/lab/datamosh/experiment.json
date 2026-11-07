@@ -1,0 +1,37 @@
+{
+  "title": "Datamosh",
+  "description": "Nine seconds of a rail journey in two shots, played through a video codec that runs live: an encoder and a decoder rebuilding every frame from the one before, block by block along real motion vectors, with residuals through an 8x8 DCT and an I-frame every three seconds and on the cut. Six seconds out of a summer train window, a slow lateral pan, then a hard cut to three seconds of winter track rushing at the camera out of a vanishing point. The decoder tunes in mid-stream, so the picture first assembles out of the paper from nothing but what moves. Press and drag and the codec breaks only under your hand: the macroblocks you paint stop getting I-frames and residuals, and every intra block in them is turned into an inter block along its neighbours' vectors, the way a datamosher strips them, while the rest of the picture decodes true. Paint over the cut and the winter shot arrives everywhere but your stroke, where its vectors find nothing of their own to move and push the summer picture instead: sky and tree line stream out of the vanishing point in stepped strips on the macroblock grid, torn into an intact winter frame. Dragging also runs the clip faster under your hand. Let go and the tear fades from its edges, drifts, and a column of intra blocks sweeps it clean.",
+  "tags": ["generative", "WebGL", "Video", "Codec"],
+  "status": "draft",
+  "createdAt": "2026-11-07T05:30:00.000Z",
+  "intent": "Datamoshing as the actual codec process rather than a glitch shader, after Takeshi Murata's Monster Movie (2005, https://www.eai.org/titles/monster-movie) and Rosa Menkman's A Vernacular of File Formats (2010, https://li-ma.nl/article/vernacular-of-file-formats-summary), and herb's generative references 2 (a street photo whose region is smeared into strips while the rest stays intact) and 3 (real analog artefacts from a real signal model). Motion vectors are baked offline by block matching on the shipped VP9 frames (tools/depth/bakes/datamosh/mv.py: 16x16 macroblocks, 8x8 partitions where the SAD saving beats a split cost, hierarchical full search to +-56 px, H.264-style rate term toward the neighbours' median vector, half-pel refinement, the zero vector wherever standing still predicts about as well (so featureless overcast does not carry a vector found once in its noise for the rest of the shot), intra where the best prediction is worse than DC), packed as per-MB modes plus median-predicted vector differences. Live in WebGL2 an encoder and a decoder run frame by frame: H.264 six-tap half-pel motion compensation, residual against the encoder's own reconstruction through a separable 8x8 DCT with a dead-zone quantiser (QP 30), closed loop, I-frames every 90 frames and wherever the stream carries a keyframe. The clip is two shots with a hard cut at frame 180, on an I-frame, so the I-frame a hold drops is a real scene change: the second shot (a forward run down a single track, every vector radial out of the vanishing point) moves the first shot's pixels, the reference/motion mismatch that makes a P-frame bloom. The seam back to the start is the same cut the other way: the lateral pan drags the winter picture sideways. The decoder joins between I-frames from blank paper. The hand starves it one macroblock at a time (herb's ref 2: the smear bounded by an untouched photo): a per-macroblock mask painted by a soft brush about five blocks across along the pointer path while held, each block with its own threshold so the edge tears raggedly on the grid, fading with a 1.6 s time constant after release. A starved block drops its I-frames, lets the residual go within 0.2 s, and strips its intra blocks the way ffglitch and Murata strip them: each intra macroblock in a P-frame becomes an inter one along the median of its neighbours' vectors (filled inward over clusters, zero where nothing is near), predicted from the moshed picture with no residual, and every held block is copied in whole pels with no interpolation (half-pel vectors rounded down and up on alternate frames), so the photo's grain and the block edges stay sharp through hundreds of frames and the smear moves in hard stepped strips instead of the six-tap filter low-passing it into airbrush, so the bloom is one continuous flow-driven smear rather than scattered squares of the true picture; every other block is fed and decodes the true frame. Vectors that reach past the frame edge are read mirrored back in rather than edge-extended, so a starved block at the border does not comb into one-pixel streaks. A block fed again after being starved decodes honestly from its damaged reference, so the mosh drifts along the true vectors until an intra block, an I-frame or the intra refresh that sweeps the macroblock columns after a release cleans it. Stills paint a fixed stroke through the centre left over the first 0.3 s of their hold: ?t=8&hold=4 (the hero) holds it across the cut, ?t=6.3&hold=0.6 a moment after it; ?t=seconds stops the stream there, ?hold=seconds of hold before it, ?release=seconds before it lets go (the refresh mid-sweep), ?join=1 shows the opening, ?qp= sets the quantiser.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.55, 0.5], "to": [0.4, 0.52] },
+  "probe": [
+    { "idle": 2500 },
+    { "drag": [[0.55, 0.5], [0.5, 0.53]], "ms": 4500 },
+    { "idle": 1500 },
+    { "drag": [[0.6, 0.5], [0.2, 0.55]], "ms": 2400 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    {
+      "url": "https://pixabay.com/videos/train-railway-journey-travel-120479/",
+      "file": "https://cdn.pixabay.com/video/2022/06/15/120479-720880603_large.mp4",
+      "author": "ChristianBodhi",
+      "licence": "Pixabay Content License",
+      "note": "3840x2160, 30 fps, 27.2 s, out of a train window; location not given. Seconds 17.5-23.5 used (shot A), scaled to 1280x720 (Lanczos). Joined by a hard cut to shot B (below), then two-pass VP9 at 1.5 Mb/s with no alt-ref (clip.webm, 270 frames; libvpx keyframes at 0 and on the cut); motion vectors and modes baked from those decoded frames by tools/depth/bakes/datamosh/mv.py with a +-56 px search both ways (clip.mv, gzip)."
+    },
+    {
+      "url": "https://pixabay.com/videos/tracks-railroad-tracks-train-rail-142723/",
+      "file": "https://cdn.pixabay.com/video/2022/12/12/142723-780599564_large.mp4",
+      "author": "Bonaparcik",
+      "licence": "Pixabay Content License",
+      "note": "2048x922 as downloaded (2400x1080 original), 30 fps, 18 s, single track through pine forest in early winter, filmed out of the back of a train. Seconds 3-6 used (shot B, frames 180-269): cropped to 16:9 past the window pillar, scaled to 1280x720 and run backwards, so the line comes at the camera."
+    },
+    "https://www.eai.org/titles/monster-movie",
+    "https://li-ma.nl/article/vernacular-of-file-formats-summary",
+    "https://en.wikipedia.org/wiki/Rosa_Menkman",
+    "https://en.wikipedia.org/wiki/Advanced_Video_Coding"
+  ]
+}

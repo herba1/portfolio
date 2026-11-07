@@ -1,0 +1,96 @@
+.vanish {
+  --vanish-ground: #f2f0eb;
+  --vanish-ink: #1c1b19;
+  --vanish-placeholder: #a29f98;
+  --vanish-rule: #c4bfb5;
+  --vanish-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--vanish-ground);
+  color: var(--vanish-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* No container: the line of type is the whole object, set at display size
+   on one hairline rule drawn through its baseline, like a ruled sheet. */
+.vanish-field {
+  position: relative;
+  /* Sit a touch below the geometric centre: the
+     dust rises into the space above it. */
+  margin-top: 80px;
+  width: min(720px, 100cqw - 48px);
+}
+
+.vanish-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  height: var(--text-title-xl--line-height);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  appearance: none;
+  background: transparent;
+  color: var(--vanish-ink);
+  caret-color: var(--vanish-ink);
+  font: inherit;
+  font-size: var(--text-title-xl);
+  line-height: var(--text-title-xl--line-height);
+  letter-spacing: var(--text-title-xl--letter-spacing);
+  font-weight: var(--text-title-xl--font-weight);
+  font-kerning: normal;
+  transition: caret-color 320ms var(--vanish-ease);
+}
+
+.vanish-input::placeholder {
+  color: var(--vanish-placeholder);
+  opacity: 1;
+  transition: opacity 360ms var(--vanish-ease);
+}
+
+/* The baseline rule. The engine measures the face and sets
+   --vanish-baseline, so the letters stand on it and descenders cross it.
+   It takes the ink when the field has focus: the focus state is the rule. */
+.vanish-rule {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--vanish-baseline, 36px);
+  height: 1px;
+  background: var(--vanish-rule);
+  pointer-events: none;
+  transition: background-color 240ms var(--vanish-ease);
+}
+
+.vanish-field:focus-within .vanish-rule {
+  background: var(--vanish-ink);
+}
+
+/* While the line dissolves the field holds its breath: no caret, no
+   placeholder. Typing returns it to idle immediately. */
+.vanish[data-phase="vanishing"] .vanish-input {
+  caret-color: transparent;
+  transition-duration: 0ms;
+}
+
+.vanish[data-phase="vanishing"] .vanish-input::placeholder {
+  opacity: 0;
+  transition-duration: 0ms;
+}
+
+.vanish-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}

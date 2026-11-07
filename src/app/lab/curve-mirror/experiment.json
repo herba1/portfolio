@@ -1,0 +1,34 @@
+{
+  "title": "Curve Mirror",
+  "description": "A roadside convex mirror on an orange pole, standing over an old house at a level crossing in Kyoto. Drag to turn it on its bracket and the glass sweeps everything the photograph never showed: the street behind you, the road below, the sky over your head, and, turned far enough, the house and the crossing you are looking at, seen from where the mirror stands. At one angle it catches the sun.",
+  "tags": ["WebGL", "Optics", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-07T02:00:00.000Z",
+  "intent": "The Japanese curve mirror (カーブミラー, https://ja.wikipedia.org/wiki/カーブミラー), the convex road mirror at every blind corner, composited into a real photograph as a physical object, and reflecting correctly. Reality pieces research (factory/reality/techniques.md, idea 7, Curve mirror). The photograph is measured: MoGe-2 metric point map, the true vertical from the poles' vanishing point, the sun from the house's shading. The mirror is a traced sphere cap (800 mm, 1.6 m radius of curvature) reflecting one panorama centred on it: the photo's own pixels re-projected from the mirror's position in front of the lens, a CC0 360 of a Japanese residential street, given the photo's summer sky, behind it. Frame, shell, bracket and pole are lit by that panorama and the sun, cast their shadow on the house through the point map, and the glass carries dust and a smudge that scatter the sun. Developed through the lab's summer film. ?aim=yaw,pitch holds the aim (degrees), ?aim=sun holds the sun in the glass.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.4], "to": [0.6, 0.3] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.3, 0.4], [0.62, 0.28]], "ms": 2200 },
+    { "idle": 1600 },
+    { "drag": [[0.6, 0.3], [0.2, 0.55]], "ms": 2000 },
+    { "idle": 1600 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "Ukyo, Kyoto (Ricoh GR II): a low-angle fumikiri crossbuck and lamps over an old tiled house. Resampled to 2464x1632 (photo.webp). Point map, normals and field of view: MoGe-2 ViT-S normal (Microsoft, MIT, https://huggingface.co/Ruicheng/moge-2-vits-normal-onnx) via tools/depth/normals.py; sky matte tools/depth/segment.py sky. Baked by tools/depth/bakes/curve-mirror (vp.py vertical, bake.py panorama, distances, SH9, shadow aux)."
+    },
+    {
+      "url": "https://commons.wikimedia.org/wiki/File:HashiNoMisasagi_Kofun,_Funkyu_South_360-degree.jpg",
+      "file": "https://upload.wikimedia.org/wikipedia/commons/9/9c/HashiNoMisasagi_Kofun%2C_Funkyu_South_360-degree.jpg",
+      "author": "AsPJT (Wikimedia Commons)",
+      "licence": "CC0",
+      "note": "端陵神社・端陵古墳（南）, March 2025: a 360 at a Japanese residential junction, two lanes, utility poles and wires. The hemisphere behind the lens (3840 px thumbnail): exposed to the photo's sunlit walls, its overcast sky (segment.py sky matte, kept to what connects to the zenith) replaced by a fit of the photo's own clear sky by elevation, with the wires kept."
+    },
+    "https://en.wikipedia.org/wiki/Curved_mirror#Convex_mirrors"
+  ]
+}

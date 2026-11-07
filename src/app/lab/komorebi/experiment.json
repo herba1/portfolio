@@ -1,0 +1,33 @@
+{
+  "title": "Komorebi",
+  "description": "Lying under the stone pines of a Roman piazza, looking up through the canopy at a low sun. The pointer is a breath of wind: the crowns sway on their own springs, near ones slow and wide, far ones quick and small, layered by depth so they slide past each other. Where the needles part, the sun's real radiance leaks through and blooms on the film, so the light flickers and glints between the branches. At rest a breeze rolls through.",
+  "tags": ["WebGL", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:00:00.000Z",
+  "intent": "Summer-film genre: komorebi (sunlight filtering through leaves) seen from directly below a canopy, after herb's worm's-eye references (factory/reality/herb-refs/2-wormseye-skyscrapers.png, 3-lightpole-cumulus.png): deep cyan-cobalt sky, extreme upward perspective, soft film colour. Reference: https://en.wikipedia.org/wiki/Komorebi and https://polyhaven.com/a/piazza_martin_lutero",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.75], "to": [0.7, 0.55] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.25, 0.8], [0.65, 0.6]], "ms": 700 },
+    { "idle": 2500 },
+    { "drag": [[0.7, 0.4], [0.35, 0.7]], "ms": 500 },
+    { "idle": 2500 }
+  ],
+  "sources": [
+    {
+      "url": "https://polyhaven.com/a/piazza_martin_lutero",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/piazza_martin_lutero_16k.hdr",
+      "author": "Greg Zaal (HDRI), Rico Cilliers (backplates)",
+      "licence": "CC0",
+      "note": "16K linear HDRI, reprojected offline to a stereographic view (yaw 36, pitch 64 up, 140 degrees), lens veil and diffraction spikes removed, sky rebuilt, trees split into three depth layers with Depth Anything V2. Sun measured at azimuth 35.9, altitude 24.2; drawn about 5 degrees left of it (it stood in an open gap), just behind the ragged edge of a cypress."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/8k/kloofendal_48d_partly_cloudy_puresky_8k.hdr",
+      "author": "Greg Zaal (original), Jarod Guest (sky edits)",
+      "licence": "CC0",
+      "note": "The cumulus. 8K linear puresky HDRI, reprojected to the same stereographic upward view and turned so its sun lands exactly on the drawn sun (tilted 24 degrees down, rolled 15 degrees about the sun axis), so every cloud is lit from where the sun is drawn. Clouds unmixed from their clear sky by blue excess, relit to the scene's sun and skylight, highlights rolled off below the film's clip, composited behind the needle mattes."
+    }
+  ]
+}

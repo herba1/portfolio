@@ -1,0 +1,32 @@
+{
+  "title": "Overprint",
+  "description": "Three huge numerals in process red, blue and yellow race up a shallow diagonal across paper-white stock, each a translucent ink laid over the others. Where they cross the inks multiply like a real press run: red over blue goes aubergine, red over yellow goes vermilion, blue over yellow goes green, all three go a warm brown-black. At speed a numeral prints its pace the way Huber did, as flat hard-edged bands of its own ink trailing behind it. At rest the three stand as one locked 5-0-8 on open stock, each figure tucked over the next so the mixes are always printing, with paper above, below and behind them for the rules to run into. Every few seconds one plate breaks away and races off the leading edge, laps in over the trailing one and drops back into its slot; only the fastest plate rules its pace in full, the others print short hairlines. Pick one up and its plate comes up a touch, flat ink still, no shadow; pull it out of register or throw it, and it races on at the pace you gave it, then falls back into its slot.",
+  "tags": [
+    "WebGL",
+    "Print",
+    "Typography"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Max Huber's Monza race posters (Gran Premio dell'Autodromo 1948, 500 Miglia di Monza 1957), where transparent primary inks overprint so numbers and speed bands mix into new colours as they cross. https://a-g-i.org/design/500-miglia-di-monza",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.45,
+      0.5
+    ],
+    "to": [
+      0.8,
+      0.5
+    ]
+  },
+  "sources": [
+    "https://a-g-i.org/design/500-miglia-di-monza",
+    "https://archiviograficaitaliana.com/project/23/500migliadimonza",
+    "https://en.wikipedia.org/wiki/Max_Huber_(graphic_designer)"
+  ]
+}

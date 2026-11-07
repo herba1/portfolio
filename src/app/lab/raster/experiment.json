@@ -1,0 +1,18 @@
+{
+  "title": "Raster",
+  "description": "A song title set in letters drawn only from horizontal and vertical strokes with 45-degree corners, sitting on the dot raster they are built from. Drag up or down and the raster refines or coarsens, from five cells across a letter to twenty, and every stroke slides on a spring to the nearest cells of the new grid, so the word rebuilds itself and stays readable at every resolution. Type to change the title.",
+  "tags": ["Type", "Grid", "Canvas"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Wim Crouwel's New Alphabet (1967), https://en.wikipedia.org/wiki/New_Alphabet, and his Vormgevers poster grid: accept the raster completely and let the letterforms come from it. Own glyphs, not the font.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.7], "to": [0.5, 0.3] },
+  "probe": [
+    { "idle": 1200 },
+    { "drag": [[0.5, 0.7], [0.5, 0.3]], "ms": 2400 },
+    { "idle": 1200 },
+    { "drag": [[0.5, 0.3], [0.5, 0.8]], "ms": 2000 },
+    { "idle": 1400 }
+  ],
+  "sources": ["https://en.wikipedia.org/wiki/New_Alphabet", "https://www.stedelijk.nl/en/collection/14788-wim-crouwel-vormgevers"]
+}

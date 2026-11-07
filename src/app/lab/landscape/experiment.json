@@ -1,0 +1,15 @@
+{
+  "title": "Landscape",
+  "description": "The making of one record, set as an information landscape: a title far off, four chapters of the year standing on their own planes in front of it, entries small beside their chapter, and notes smaller still beside the entries. Scroll or drag and the camera flies on a spring through the space from one readable viewpoint to the next, turning to face each plane so it settles flat and sharp at its true size, while the layers it left recede into translucency and soft depth of field.",
+  "tags": ["Type", "3D", "Camera"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Muriel Cooper and the MIT Visible Language Workshop's Information Landscapes (TED5, 1994; https://www.moma.org/calendar/exhibitions/1654, https://peterme.com/?p=1010): typography placed in an infinite 3D space at many scales, where zooming and flying between layers, with translucency and depth, reveals structure. Real DOM text on projective planes, resolved to a flat 2D matrix at each viewpoint so it lands crisp at its true size, with tracking per the site's law at that rendered size.",
+  "tile": { "shape": "wide" },
+  "sources": [
+    "https://www.moma.org/calendar/exhibitions/1654",
+    "https://peterme.com/?p=1010",
+    "https://en.wikipedia.org/wiki/Muriel_Cooper",
+    "https://www.media.mit.edu/posts/muriel-cooper-lasting-imprint/"
+  ]
+}

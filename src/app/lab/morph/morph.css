@@ -1,0 +1,383 @@
+.mp-root {
+  --mp-ground: #f2f0eb;
+  --mp-black: #0b0b0a;
+  --mp-ink: #ffffff;
+  /* the panel's secondary ink: its own white let down into its own black to
+     the contrast the site's secondary ink holds on the page (about 4.4:1),
+     so it is a step of this palette, not a light-theme slate on black */
+  --mp-ink-secondary: color-mix(in oklab, var(--mp-ink) 50%, var(--mp-black));
+  --mp-hover: #1e1d1c;
+  --mp-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--mp-ground);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.mp-anchor {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  width: 0;
+  height: 0;
+  transform-origin: 0 0;
+  filter: drop-shadow(0 1px 1px rgb(40 30 10 / 0.1)) drop-shadow(0 12px 28px rgb(40 30 10 / 0.12));
+}
+
+.mp-surface {
+  position: absolute;
+  left: 0;
+  top: 0;
+  background: var(--mp-black);
+  color: var(--mp-ink);
+  cursor: pointer;
+  outline: none;
+  touch-action: manipulation;
+  --mp-tint: #e9e4da;
+}
+
+.mp-root[data-mode="expanded"] .mp-surface {
+  cursor: default;
+}
+
+.mp-edge {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.mp-edge path {
+  fill: none;
+  stroke: rgb(255 255 255 / 0.08);
+  stroke-width: 1.5;
+  transition: stroke 200ms var(--mp-ease);
+}
+
+.mp-surface:focus-visible .mp-edge path {
+  stroke: var(--mp-tint);
+  stroke-width: 3;
+}
+
+.mp-surface > * {
+  position: absolute;
+  left: 0;
+  top: 0;
+  will-change: transform, opacity;
+}
+
+/* ---- shared ---------------------------------------------------------- */
+
+.mp-art {
+  overflow: hidden;
+  background: #222120;
+  transform-origin: 0 0;
+}
+
+/* a printed sleeve's edge: a hairline so the square reads as an object laid
+   on the black, not a hole cut in it */
+.mp-art::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  box-shadow: inset 0 0 0 1px rgb(255 255 255 / 0.1);
+  pointer-events: none;
+}
+
+.mp-art-img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  pointer-events: none;
+}
+
+.mp-art-img[data-fresh] {
+  animation: mp-art-in 440ms var(--mp-ease) both;
+}
+
+@keyframes mp-art-in {
+  from {
+    opacity: 0;
+    filter: blur(6px);
+    transform: scale(1.08);
+  }
+}
+
+.mp-wave {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 22px;
+  height: 16px;
+  pointer-events: none;
+}
+
+.mp-wave i {
+  display: block;
+  width: 3px;
+  height: 16px;
+  border-radius: 2px;
+  background: var(--mp-tint);
+  transform: scaleY(0.25);
+  transition: background-color 600ms var(--mp-ease);
+}
+
+.mp-time {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--text-ui--font-weight);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--font-features-numeric);
+  white-space: nowrap;
+}
+
+/* The clock is the one element that changes size: paint() sets its font
+   size and law-derived tracking every frame. Line-height 1 keeps its box
+   exactly one size tall, so its figures can be placed by their own metrics.
+   Open, it is also the scrubber, so it takes a sideways drag. */
+.mp-elapsed {
+  line-height: 1;
+  font-weight: var(--font-weight-body-sm);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: var(--font-features-numeric);
+  white-space: nowrap;
+  color: var(--mp-ink);
+  pointer-events: none;
+  cursor: ew-resize;
+  touch-action: pan-y;
+  outline: none;
+  z-index: 1;
+}
+
+.mp-elapsed[data-active] {
+  cursor: grabbing;
+}
+
+/* each figure is a wheel: a window onto a strip of tabular digits, rolled
+   by paint() in em so it holds at every size. The window is cut to the
+   figures' own band, top overshoot to bottom overshoot, so a figure rolls
+   out of its own slot, above the rule, and the next rolls up into it, like
+   a counter's drum behind its window. It is open at the sides, where
+   tracking would otherwise shave the widest figures, and where the lead
+   wheel's slot, narrowed to a 1, lets the next figure in as it widens. */
+.mp-clock {
+  display: flex;
+  align-items: flex-start;
+  height: 1em;
+}
+
+.mp-wheel {
+  display: block;
+  height: 1em;
+  clip-path: inset(0.12em -0.3em 0.124em -0.3em);
+}
+
+.mp-strip {
+  display: block;
+  will-change: transform;
+}
+
+.mp-strip > span,
+.mp-colon {
+  display: block;
+  height: 1em;
+}
+
+/* the lead wheel's 1: Geist's proportional figure, a stem and flag with no
+   slab foot, in its proportional advance. paint() narrows the lead wheel's
+   slot to it, so "1:23" is spaced as the face spaces it, at the law's
+   tracking, while every rolling wheel keeps its tabular slot. */
+.mp-fig-1 {
+  font-variant-numeric: proportional-nums;
+  font-feature-settings: "kern" 1;
+}
+
+/* paused, the colon blinks like a stopped clock: the one sign, in the type */
+.mp-root[data-paused] .mp-colon {
+  animation: mp-blink 1.2s steps(1, end) infinite;
+}
+
+@keyframes mp-blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+.mp-elapsed:focus-visible .mp-clock {
+  outline: 2px solid var(--mp-tint);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+/* time left, under the rule's far end, flush right on the title's
+   baseline, in the 13px body step: quieter by size and weight, at full ink */
+.mp-remain {
+  text-align: right;
+  color: var(--mp-ink);
+  pointer-events: none;
+}
+
+/* ---- the rule ------------------------------------------------------------ */
+
+/* Progress is one hairline from the figures' left ink to their right ink,
+   which is the column: played in full ink, the rest in the panel's
+   secondary ink. It is its own line, two grid steps under the figures'
+   baseline, not an underline on them. The layer is a 17px band round it, so
+   the line is easy to press. */
+.mp-rule {
+  height: 17px;
+  cursor: pointer;
+  touch-action: pan-y;
+}
+
+.mp-rule-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 8px;
+  height: 1px;
+  background: var(--mp-ink-secondary);
+}
+
+.mp-rule-fill {
+  position: absolute;
+  inset: 0;
+  background: var(--mp-ink);
+  transform-origin: 0 50%;
+  transform: scaleX(0);
+}
+
+/* ---- buttons ------------------------------------------------------------ */
+
+.mp-btn {
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--mp-ink);
+  cursor: pointer;
+  outline: none;
+}
+
+.mp-btn-face {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  transition:
+    transform 160ms var(--mp-ease),
+    background-color 160ms var(--mp-ease);
+}
+
+.mp-btn svg {
+  width: 22px;
+  height: 22px;
+  fill: currentColor;
+}
+
+@media (hover: hover) {
+  .mp-btn:hover .mp-btn-face {
+    background: var(--mp-hover);
+  }
+}
+
+.mp-btn:active .mp-btn-face {
+  transform: scale(0.88);
+}
+
+.mp-btn:focus-visible .mp-btn-face {
+  box-shadow: inset 0 0 0 2px var(--mp-tint);
+}
+
+/* ---- expanded ---------------------------------------------------------- */
+
+.mp-root[data-mode="expanded"] .mp-art {
+  cursor: pointer;
+}
+
+.mp-title,
+.mp-artist,
+.mp-up-title,
+.mp-up-label {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* The ladder under the clock: title 20px at 600, artist 14px at 440, time
+   left 13px at 490. Each step down is a weight step as well as a size step,
+   and all of it at full ink. The title's leading is pulled from the token's
+   25px to 24px so the column below the clock stays on the 4px grid. */
+.mp-title {
+  font-size: var(--text-title-sm);
+  line-height: 24px;
+  letter-spacing: var(--text-title-sm--letter-spacing);
+  font-weight: var(--text-title-sm--font-weight);
+  color: var(--mp-ink);
+  text-wrap: balance;
+}
+
+.mp-artist {
+  font-size: var(--text-ui-lg);
+  line-height: var(--text-ui-lg--line-height);
+  letter-spacing: var(--text-ui-lg--letter-spacing);
+  font-weight: var(--text-ui-lg--font-weight);
+  color: var(--mp-ink);
+}
+
+/* ---- toast ------------------------------------------------------------- */
+
+.mp-up {
+  width: 192px;
+}
+
+.mp-up-label {
+  font-size: var(--text-ui);
+  line-height: var(--text-ui--line-height);
+  letter-spacing: var(--text-ui--letter-spacing);
+  font-weight: var(--font-weight-meta);
+  color: var(--mp-ink);
+  animation: mp-label-in 360ms var(--mp-ease) both;
+}
+
+@keyframes mp-label-in {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(4px);
+  }
+}
+
+.mp-up-title {
+  font-size: var(--text-heading-sm);
+  line-height: var(--text-heading-sm--line-height);
+  letter-spacing: var(--text-heading-sm--letter-spacing);
+  font-weight: var(--text-heading-sm--font-weight);
+  color: var(--mp-ink);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mp-art-img[data-fresh],
+  .mp-up-label,
+  .mp-root[data-paused] .mp-colon {
+    animation: none;
+  }
+}

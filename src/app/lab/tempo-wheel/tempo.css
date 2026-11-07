@@ -1,0 +1,104 @@
+.tempo-root {
+  --tempo-ground: rgb(0 0 0);
+  --tempo-ink: rgb(242 240 235);
+  --tempo-tick: rgb(242 240 235);
+  /* The numeral sits on the body rung of the ladder: at this size it reads
+     as an instrument, not a headline. */
+  --tempo-weight: 460;
+  --tempo-size: 160px;
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  background: var(--tempo-ground);
+  color: var(--tempo-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  cursor: ew-resize;
+  outline: none;
+  color-scheme: dark;
+}
+
+.tempo-stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  /* Optical centre: a touch above the middle. */
+  margin-top: -2cqh;
+  opacity: 0;
+  transition: opacity 700ms cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+.tempo-root[data-ready] .tempo-stack {
+  opacity: 1;
+}
+
+.tempo-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--tempo-ink);
+  opacity: 0.18;
+  margin-top: 16px;
+  will-change: opacity, transform;
+}
+
+.tempo-number {
+  display: flex;
+  font-size: var(--tempo-size);
+  line-height: 1;
+  font-weight: var(--tempo-weight);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+  /* The tracking law, exactly, at whatever size the box gives:
+     -0.043 x (size - 12px). */
+  --tempo-track: calc(0.516px - 0.043em);
+  will-change: transform;
+}
+
+.tempo-wheel {
+  position: relative;
+  display: block;
+  /* The window is taller than one face so a turning digit fades away
+     over the drum's shoulder instead of being cut by a hard edge. */
+  height: 1.25em;
+  overflow: hidden;
+  margin-inline-end: var(--tempo-track);
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, #000 19%, #000 80%, transparent 100%);
+  mask-image: linear-gradient(to bottom, transparent 0, #000 19%, #000 80%, transparent 100%);
+}
+
+.tempo-wheel:last-child {
+  margin-inline-end: 0;
+}
+
+.tempo-strip {
+  padding-top: 0.125em;
+  display: flex;
+  flex-direction: column;
+  will-change: transform;
+}
+
+.tempo-face {
+  display: block;
+  height: 1em;
+  line-height: 1;
+  text-align: center;
+}
+
+.tempo-ruler {
+  display: block;
+  width: min(100%, 1040px);
+  height: 48px;
+  margin-top: 8px;
+}

@@ -1,0 +1,21 @@
+{
+  "title": "Train Window",
+  "description": "Looking up and out of a local train on a summer afternoon, from a low seat: the sky fills the window and the poles of the line beside the track climb out of its top edge. Drag sideways to set the train's speed and direction: the field slides past row by row, each at the speed its distance gives it, the wooden poles smear into soft bars, the hedge and the barn behind it drift, and the cumulus over the far tree line barely move. Every layer is blurred by the same 1/40 s shutter at its own screen speed. Let go and the train coasts down to a crawl.",
+  "tags": ["WebGL", "Parallax", "Film", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:30:00.000Z",
+  "intent": "Genre spec idea 8, Train Window (Natsu, moving): Shinkai's 5 Centimeters per Second and Japanese local-line summer imagery. The gesture is the train's speed; motion parallax and shutter blur follow from each layer's distance (blur = screen velocity x shutter). Reference: https://en.wikipedia.org/wiki/Parallax#Motion_parallax",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.6], "to": [0.4, 0.6] },
+  "probe": [
+    { "idle": 2600 },
+    { "drag": [[0.6, 0.6], [0.36, 0.6]], "ms": 2600 },
+    { "idle": 3200 }
+  ],
+  "sources": [
+    "Field, hedge, barn and far tree line: HDRI 'Rural Asphalt Road', Poly Haven, by Alexander Scholten, CC0. https://polyhaven.com/a/rural_asphalt_road (16k .hdr). Reprojected square out of the road: the field onto a ground plane (rectilinear, each row at its distance), the hedge and far tree line as cylindrical strips cut with Depth Anything V2 (tools/depth/depth_hr.py) and a colour key. Shipped as log2 radiance -8..+1.5 in 8 bits with TPDF dither.",
+    "Sky: HDRI 'Kloofendal 48d Partly Cloudy (Pure Sky)', Poly Haven, by Greg Zaal (sky edits Jarod Guest), CC0. https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky (8k .hdr), rotated so its sun agrees with the field plate's.",
+    "Poles: 3D model 'Modular Electricity Poles', Poly Haven, by James Ray Cock, CC0. https://polyhaven.com/a/modular_electricity_poles (2k glTF), scaled to an 11.5 m pole, rendered in perspective from the train's camera (1.7 m up, 8 m off) and lit by the field plate's HDRI.",
+    "https://en.wikipedia.org/wiki/Parallax#Motion_parallax"
+  ]
+}

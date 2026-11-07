@@ -1,0 +1,8 @@
+.kit-glint {
+  background: #f2f0eb;
+  outline: none;
+}
+
+.kit-glint .kit-canvas {
+  cursor: default;
+}

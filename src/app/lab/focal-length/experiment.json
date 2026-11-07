@@ -1,0 +1,33 @@
+{
+  "title": "Focal Length",
+  "description": "Lying on the pavement between towers, looking straight up. Turn the zoom ring from 50 mm to 10 mm: at the long end there is only cumulus; as it widens the towers lean in from the edges and the corners stretch like a real rectilinear ultra-wide, and below 16 mm the drawing eases toward stereographic so the towers bend into spokes round the sky. The camera never moves, so nothing about the perspective changes, only how much of it the lens takes in and how it is drawn. One 360 capture, projected exactly through r = f k tan(theta / k), developed like daylight negative film.",
+  "tags": ["WebGL", "Perspective", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T19:30:00.000Z",
+  "intent": "Summer-film genre spec, idea 6 (Focal Length), adapted to a worm's-eye view: herb's reference 2 (factory/reality/herb-refs/2-wormseye-skyscrapers.png), towers converging into a cumulus sky, reached by turning a zoom ring rather than tilting. Projection family from https://en.wikipedia.org/wiki/Fisheye_lens#Mapping_function",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-focal-length", "from": [0.35, 0.5], "to": [0.68, 0.5] },
+  "probe": [
+    { "idle": 3200 },
+    { "drag": [[0.5, 0.5], [0.3, 0.52]], "ms": 1600 },
+    { "idle": 1400 },
+    { "drag": [[0.3, 0.52], [0.72, 0.5]], "ms": 1800 },
+    { "idle": 1600 }
+  ],
+  "sources": [
+    {
+      "url": "https://polyhaven.com/a/canary_wharf",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/canary_wharf_16k.hdr",
+      "author": "Andreas Mischok",
+      "licence": "CC0",
+      "note": "16K HDR, the towers and street. Reprojected to a zenith cap (azimuthal equidistant, 95 degrees) and re-lit by the new sky's sun: facade normals from the floor lines give each face a sun incidence, sun-facing faces get about a stop of warm-neutral light, faces turned away go toward near-black with a little skylight blue, and cranes stay backlit silhouettes."
+    },
+    {
+      "url": "https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky",
+      "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
+      "author": "Greg Zaal (original), Jarod Guest (sky edits)",
+      "licence": "CC0",
+      "note": "16K HDR cumulus sky, set in behind the towers with a luminance matte (sky at infinity, so the composite is geometrically exact), rotated so the sun sits behind a tower, and regraded as clear sky plus cloud light on a smooth, dithered ramp from cyan 200 degrees at the horizon to cobalt 212 degrees at the zenith, saturation capped so no gap goes ultramarine. The cumulus is then relit by the same sun: a cloud matte from the unmixed cloud share, isolated stray puffs dropped, the top of the cloud luminance range pushed toward warm-neutral #FFF4E6 under a soft per-channel shoulder that rolls off near 245, the lower half pulled toward skylight blue (208 degrees, S 0.25), and every edge given a thin translucent fringe of the local sky colour. The matte is unmixed at true coverage, then choked and feathered about 2.5 px round the tower crowns. Stored as scene light / 2, sRGB webp: a 4096 cap to 95 degrees and a native 2048 inset of the centre 23.75 degrees."
+    }
+  ]
+}

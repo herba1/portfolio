@@ -1,0 +1,12 @@
+.kit-denchuka {
+  background: #f2f0eb;
+  outline: none;
+}
+
+.kit-denchuka .kit-canvas {
+  cursor: ew-resize;
+}
+
+.kit-denchuka[data-dragging] .kit-canvas {
+  cursor: grabbing;
+}

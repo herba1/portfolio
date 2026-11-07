@@ -1,0 +1,11 @@
+{
+  "title": "Phase",
+  "description": "One spoken phrase set twice in large Geist on warm white, both copies looping sideways at very slightly different speeds. As the second drifts out of step it slides off the first: the words double, smear into each other, echo a word behind, and slowly walk back into exact unison, where the two inks multiply into one. Drag sideways to push the second loop ahead or hold it back; let go and it settles into its own drift. A pair of identical clicks, one per loop, phases along with it.",
+  "tags": ["Type", "Motion", "Sound"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Steve Reich's It's Gonna Rain (1965): two identical tape loops of one phrase run at slightly different speeds and drift out of phase, so a single process makes something rich and changing out of one fragment. https://www.npr.org/sections/deceptivecadence/2015/01/27/381575433/fifty-years-of-steve-reichs-its-gonna-rain",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.55, 0.5] },
+  "sources": ["https://www.npr.org/sections/deceptivecadence/2015/01/27/381575433/fifty-years-of-steve-reichs-its-gonna-rain"]
+}

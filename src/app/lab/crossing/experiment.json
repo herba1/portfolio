@@ -1,0 +1,27 @@
+{
+  "title": "Crossing",
+  "description": "A summer photograph of a Japanese level crossing, seen from below and looking up past the crossbuck into the sky, that turns out to be built like a paper tunnel book, seen through a window cut in the page. Drag, or tilt your phone, and it comes apart behind that window into its real depth planes: the sky card stands back, the wires hang in the middle, the crossbuck and its lamps float forward, each a cut-out with the street continued behind it, throwing soft shadows on the cards behind. The lens focuses on whichever plane is under your finger. Let go and it closes back into one flat photograph.",
+  "tags": ["WebGL", "Photo", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T21:00:00.000Z",
+  "intent": "Multiple layers of an image, the physical world inside the computer. After Disney's multiplane camera (1937, https://en.wikipedia.org/wiki/Multiplane_camera) and paper tunnel books (https://en.wikipedia.org/wiki/Tunnel_book): one low-angle photo cut offline into seven matted, inpainted planes that separate in z with true perspective, each scaled so that from the lens axis the stack is still exactly the photograph.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.5, 0.5], "to": [0.72, 0.42] },
+  "probe": [
+    { "idle": 3800 },
+    { "drag": [[0.5, 0.5], [0.74, 0.42]], "ms": 1800 },
+    { "idle": 400 },
+    { "drag": [[0.74, 0.42], [0.3, 0.56]], "ms": 2000 },
+    { "idle": 1800 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/a-railroad-crossing-signal-against-a-blue-sky-lxlUQhR3GXk",
+      "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "Ukyo, Kyoto; 4928x3264 original (Ricoh GR II). Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; planes, mattes and inpainting baked by tools/depth/bakes/crossing (labels.py, bake.py): the sky card filled from a dilated matte and outpainted a quarter past each side, wires carried on behind the signal and past the frame, hidden house and town texture by LaMa (tools/depth/fill.py), every card that meets the frame overscanned so the front mat never shows an edge."
+    },
+    "https://en.wikipedia.org/wiki/Multiplane_camera"
+  ]
+}

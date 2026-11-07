@@ -1,0 +1,10 @@
+{
+  "title": "Vanish",
+  "description": "A single text field on warm white. Type a line and press Enter: the words come apart from left to right, pixel by pixel, each speck of the actual letters lifting up and to the right on a slow curl of air, thinning as it goes, until the field is empty again and the caret and placeholder come back. Keep typing while it happens; the field is never locked.",
+  "tags": ["Interface", "Type", "Input"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Rauno Freiberg's Vanish input (https://rauno.me/craft/vanish-input): submitting a prompt dissolves its own glyph pixels like ink into air and resets the field for the next one, interruptible, real <input>, canvas only for the vanish.",
+  "tile": { "shape": "wide" },
+  "sources": ["https://rauno.me/craft/vanish-input"]
+}

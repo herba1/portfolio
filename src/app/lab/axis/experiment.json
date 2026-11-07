@@ -1,0 +1,11 @@
+{
+  "title": "Axis",
+  "description": "One word set very large in Geist's variable font, black on warm white, laid flush left on a fixed margin so that weight only pushes the line rightward and the heavy end runs off the right edge. The letter under the pointer takes its weight from where the pointer sits, hairline at the left and black at the right, and the letters either side fall away to hairline, so the word reads as a weight ramp. Moving across sends that ramp through the word like a wave, each letter a beat behind its neighbour nearer the pointer. Press to hold the crest on a letter at black, then drag to change how far the ramp reaches: wide, the word is a specimen gradient from hairline to black; narrow, one black letter stands among hairlines. Let go and the ramp springs back. Every frame is the real font at a real weight, and every letter's advance is re-measured at its own weight, so the spacing is set correctly at every point of the sweep.",
+  "tags": ["Type", "Variable fonts", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Grilli Type's GT Haptik minisite (https://www.itsnicethat.com/articles/grilli-type-1): a specimen that teaches the weight axis with one gesture. Pointer x is the weight axis; a press pins the crest at black and a drag sets the ramp's reach, from a hard step to a full gradient, so the second gesture stays on the same real axis instead of synthesising an oblique. Spacing follows the house tracking law on real per-weight advances and kerning.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.3, 0.5], "to": [0.62, 0.5] },
+  "sources": ["https://www.grillitype.com/typeface/gt-haptik", "https://www.itsnicethat.com/articles/grilli-type-1", "https://vercel.com/font"]
+}

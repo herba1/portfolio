@@ -1,0 +1,18 @@
+{
+  "title": "Dots",
+  "description": "A song title set as a dot-matrix poster: every letter is a two-dot stroke on one strict grid of round dots. Drag across it and a removal pattern sweeps through the word, alternate rows, then columns, then a chequerboard, then diagonals, each dot shrinking away or swelling back on its own spring as the front passes. The letters never move a dot; only which dots are present changes. Let go and the pattern holds.",
+  "tags": ["Canvas", "Type", "Grid"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After MuirMcNeil's TwoPoint type system (https://muirmcneil.com/project/twopoint/): one two-dot stroke form, with dot rows, columns or diagonals removed, and every variant sharing exact positions so styles swap without anything moving.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.15, 0.5], "to": [0.85, 0.5] },
+  "probe": [
+    { "idle": 1200 },
+    { "drag": [[0.1, 0.5], [0.9, 0.55]], "ms": 2200 },
+    { "idle": 1200 },
+    { "drag": [[0.1, 0.4], [0.55, 0.4]], "ms": 1400 },
+    { "idle": 1600 }
+  ],
+  "sources": ["https://muirmcneil.com/project/twopoint/"]
+}

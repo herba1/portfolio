@@ -1,0 +1,11 @@
+{
+  "title": "Blue Note",
+  "description": "A record sleeve in the manner of Reid Miles: two inks on warm board, a photograph from Let It Be screened into two halftone plates and the title set huge in heavy Geist, cropped hard against the edges. Drag inside the square and the sleeve is re-set rather than morphed: the photograph's crop moves first, then each word slides off past its own edge about 40ms after the last, and the next sleeve's words come in from the edges nearest their places, on paths chosen so no two words ever touch.",
+  "tags": ["Canvas", "Typography", "Print", "Music"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Reference: Reid Miles' Blue Note covers (Unit Structures, Out to Lunch, The Freedom Rider, Hub-Tones), https://readymag.com/designstories/reid-miles/never-settle-into-typeface. Scale, crop and two-ink overprint do the swinging; every resting state is a finished sleeve.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.5], "to": [0.4, 0.5] },
+  "sources": ["https://readymag.com/designstories/reid-miles/never-settle-into-typeface", "https://fontsinuse.com/uses/9751/monk-thelonious-monk-with-sonny-rollins-and-f"]
+}

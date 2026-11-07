@@ -1,0 +1,95 @@
+.gm {
+  --gm-ground: #f2f0eb;
+  --gm-ink: #151514;
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 100cqh;
+  overflow: clip;
+  isolation: isolate;
+  background: var(--gm-ground);
+  color: var(--gm-ink);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+.gm[data-embedded] {
+  min-height: 100%;
+}
+
+.gm-stage {
+  position: absolute;
+  inset: 0;
+}
+
+.gm-surface {
+  position: absolute;
+  inset: 0;
+  outline: none;
+  cursor: pointer;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  opacity: 0;
+  transition: opacity 500ms var(--ease-entrance);
+}
+
+.gm-surface[data-ready] {
+  opacity: 1;
+}
+
+.gm-word {
+  position: absolute;
+  inset: 0;
+}
+
+/* Every glyph is set alone at the position the browser gave it inside the
+   whole word, so kerning and tracking come from the real line. */
+.gm-glyph,
+.gm-meter {
+  font-family: var(--font-sans);
+  font-weight: var(--font-weight-semibold);
+  font-feature-settings: "kern" 1, "liga" 0, "calt" 0;
+  font-variant-ligatures: none;
+  white-space: pre;
+}
+
+.gm-glyph {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-kerning: none;
+  letter-spacing: 0;
+  will-change: transform, opacity, filter;
+}
+
+.gm-meter {
+  position: absolute;
+  top: 0;
+  left: -99999px;
+  visibility: hidden;
+  font-kerning: normal;
+  pointer-events: none;
+}
+
+.gm-probe {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
+}
+
+.gm-sr {
+  margin: 0;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

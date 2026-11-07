@@ -1,0 +1,73 @@
+{
+  "title": "Fore-edge",
+  "description": "A plain cloth octavo with a gilt edge. Draw your thumb across the edge and the leaves fan in steps, the gold breaks into hairlines, and a Turner seascape opens across the strips of page between them. Let go and it closes flush under the gold again. Fore-edge paintings were painted on the fanned leaves and then gilded over, so the picture hides in the edge itself.",
+  "tags": [
+    "WebGL",
+    "Paper",
+    "Print"
+  ],
+  "status": "draft",
+  "verdict": "rejected by herb",
+  "createdAt": "2026-11-06T06:00:00.000Z",
+  "intent": "Factory run 4, the only idea to score 8 from both critics. One object holding a secret that a held gesture reveals.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.4,
+      0.6
+    ],
+    "to": [
+      0.7,
+      0.6
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1200
+    },
+    {
+      "drag": [
+        [
+          0.4,
+          0.6
+        ],
+        [
+          0.58,
+          0.62
+        ],
+        [
+          0.74,
+          0.6
+        ]
+      ],
+      "ms": 2800
+    },
+    {
+      "idle": 2000
+    },
+    {
+      "drag": [
+        [
+          0.45,
+          0.6
+        ],
+        [
+          0.6,
+          0.6
+        ]
+      ],
+      "ms": 1500
+    },
+    {
+      "idle": 1500
+    }
+  ],
+  "sources": [
+    "https://en.wikipedia.org/wiki/Fore-edge_painting",
+    "Painting: J. M. W. Turner, The Shipwreck (1805), public domain"
+  ]
+}

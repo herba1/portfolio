@@ -1,0 +1,15 @@
+{
+  "title": "Albers",
+  "description": "One silkscreen plate on warm white, after Josef Albers: two flat grounds side by side, each holding the same small square, and the two squares plainly look like different colours. Drag one across the seam and it changes colour as it crosses; tap a square and a strip of the same ink bridges the two, and they are suddenly one colour. Tap the ground to pull the next plate through.",
+  "tags": ["Colour", "Perception", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T16:00:00.000Z",
+  "intent": "Translate Josef Albers' Interaction of Color 'one colour appears as two' plates (https://www.fastcompany.com/1673122/a-bible-of-color-theory-is-now-an-app): exact flat inks, the illusion made by the neighbours alone, and the bridge that dissolves it.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".al-plate", "from": [0.25, 0.5], "to": [0.62, 0.5] },
+  "sources": [
+    "https://www.fastcompany.com/1673122/a-bible-of-color-theory-is-now-an-app",
+    "https://yalebooks.yale.edu/book/9780300179354/interaction-of-color/",
+    "https://en.wikipedia.org/wiki/Interaction_of_Color"
+  ]
+}

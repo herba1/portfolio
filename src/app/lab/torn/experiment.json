@@ -1,0 +1,11 @@
+{
+  "title": "Torn",
+  "description": "A sheet of red paper on white. Press on it and drag: your path is the spine of a strip you tear out of the sheet, so drawing a lowercase letter tears that letter out by hand. The strip pivots up off its hole as the tear runs, then lifts, turns a few degrees and lays down on the white with a quiet spring. Every torn edge wobbles at two scales and shows the paper's white core and loose fibres, on the piece along one stretch and on the hole along the next, the way a real tear splits the sheet through its thickness. Two letters at most; a third tear sends the oldest back into the hole it came from.",
+  "tags": ["Canvas", "Paper", "Typography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "After Willem Sandberg's Experimenta Typographica and Stedelijk catalogues, letters torn by hand from coloured paper beside clean sans text on white. https://maharam.com/stories/rawsthorn_willem-sandbergs-experimenta-typografica",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.72, 0.4], "to": [0.72, 0.7] },
+  "sources": ["https://maharam.com/stories/rawsthorn_willem-sandbergs-experimenta-typografica", "https://en.wikipedia.org/wiki/Willem_Sandberg"]
+}

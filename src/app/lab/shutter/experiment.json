@@ -1,0 +1,20 @@
+{
+  "title": "Shutter",
+  "description": "Summer cumulus racing past the top of a glass tower, seen from its foot, looking almost straight up, on a locked-off time-lapse. Press and hold and the shutter opens on bulb: the frame integrates the light for as long as you hold, so the clouds smear into silk along their real wind while the tower, which never moved, stays sharp. An ND filter follows the shutter, so the brightness holds and only time grows. Let go and the long exposure stays on the print until the next press.",
+  "tags": ["WebGL", "Film", "Photography", "Time"],
+  "status": "draft",
+  "createdAt": "2026-11-07T01:00:00.000Z",
+  "intent": "After Louis Daguerre's Boulevard du Temple (1838, https://en.wikipedia.org/wiki/Boulevard_du_Temple_(photograph)): the street in that plate looks empty because the exposure ran for minutes and the walkers and carriages never stayed in one place long enough to register; only a man having his boots polished stood still and was kept. A photograph keeps what stays. Here the exposure is a real temporal integral of recorded frames in linear light, offline-baked as a time pyramid of block means so any open interval is a cheap weighted sum, developed through the summer-film pipeline (factory/reality/techniques.md, piece 1).",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "hold", "on": ".kit-canvas", "at": [0.5, 0.5] },
+  "probe": [
+    { "idle": 3000 },
+    { "drag": [[0.5, 0.5], [0.5, 0.5]], "ms": 4200 },
+    { "idle": 2000 }
+  ],
+  "sources": [
+    "Plate: \"Time Lapse Video of Cloud Moving over a Building\" by 84LENS (Pexels @84lens), Pexels 5124202, 3840x2160 24 fps, 257 frames, the Evolution Tower, Moscow, from its foot; Pexels License (free to use, no attribution required). https://www.pexels.com/video/time-lapse-video-of-cloud-moving-over-a-building-5124202/ (file: https://videos.pexels.com/video-files/5124202/5124202-uhd_3840_2160_24fps.mp4). Used: frames 24-255, full frame, stabilised on tracked corners of the tower (it creeps about 2 px), area-downscaled to 1920x1080 in linear light with no sharpening, graded in OKLab (the stock's flat electric cobalt pulled to a cyan-cobalt that deepens toward the zenith), looped with a 24-frame linear-light cross-fade; stillness matte from a SAM 2.1 mask of the tower. Bake: tools/depth/bakes/shutter/bake.py.",
+    "https://en.wikipedia.org/wiki/Boulevard_du_Temple_(photograph)",
+    "https://en.wikipedia.org/wiki/Bulb_(photography)"
+  ]
+}

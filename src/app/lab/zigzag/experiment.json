@@ -1,0 +1,11 @@
+{
+  "title": "Zigzag",
+  "description": "A thick black zigzag inside a hairline frame, after the Whitney's responsive W. Drag any edge or corner and the W re-proportions live: its four strokes keep one weight, every mitre is solved exactly, and its tips and ends always land on all four sides of the frame, however tall, flat or narrow you make it. Let go and the frame springs back to its rest proportion.",
+  "tags": ["Identity", "Geometry", "Canvas"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "Translate Experimental Jetset's 2013 responsive W for the Whitney: one rule, a line that touches every edge of its frame, makes a mark that fits any format. https://www.designboom.com/design/new-whitney-museum-identity-by-experimental-jetset/",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.74, 0.5], "to": [0.9, 0.5] },
+  "sources": ["https://www.designboom.com/design/new-whitney-museum-identity-by-experimental-jetset/", "https://whitney.org/newidentity"]
+}

@@ -1,0 +1,88 @@
+{
+  "title": "Signal",
+  "description": "A sunny park shot straight into the sun on a camcorder and played back off a worn VHS tape into an old TV, all of it modelled rather than drawn: the CCD blooms and smears, the luma rides an FM carrier that breaks into sparkles where it is driven too white, and the colour travels as a narrow band that smears and slips. Drag sideways to turn the tracking knob and the picture tears, rolls and runs into rainbows until you find the track again; drag down to wear the tape.",
+  "tags": [
+    "generative",
+    "WebGL",
+    "Video",
+    "Signal"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "herb's generative reference 3 (analog flare plant, /tmp/claude-0/gen-refs/3-analog-flare-plant.png): a real analog video picture with a blown flare, chroma bleed, head-switching wobble and dropouts. Rebuilt as a physical composite NTSC chain instead of a VHS filter: HDR scene with the sun's true energy, CCD bloom, smear and lag, YIQ encoder with a 3.58 MHz subcarrier, VHS FM luma with pre-emphasis and a real discriminator, colour-under chroma, tracking geometry across azimuth tracks, dropouts and DOC, flywheel sync and burst-locked colour in the TV, and a scanned monitor raster.",
+  "tile": {
+    "shape": "wide"
+  },
+  "sources": [
+    "Photograph: Sunny Vondelpark HDRI by Greg Zaal, Poly Haven, CC0 1.0, https://polyhaven.com/a/sunny_vondelpark (4:3 view reprojected from the equirectangular HDR, sun kept at its true radiance)",
+    "https://en.wikipedia.org/wiki/NTSC",
+    "https://en.wikipedia.org/wiki/VHS#Technical_details",
+    "https://en.wikipedia.org/wiki/Charge-coupled_device#Blooming",
+    "https://en.wikipedia.org/wiki/Dot_crawl"
+  ],
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.4,
+      0.5
+    ],
+    "to": [
+      0.62,
+      0.5
+    ]
+  },
+  "probe": [
+    {
+      "idle": 1500
+    },
+    {
+      "drag": [
+        [
+          0.4,
+          0.5
+        ],
+        [
+          0.7,
+          0.52
+        ]
+      ],
+      "ms": 1600
+    },
+    {
+      "idle": 1200
+    },
+    {
+      "drag": [
+        [
+          0.7,
+          0.52
+        ],
+        [
+          0.42,
+          0.5
+        ]
+      ],
+      "ms": 1400
+    },
+    {
+      "idle": 1500
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.3
+        ],
+        [
+          0.5,
+          0.8
+        ]
+      ],
+      "ms": 1500
+    },
+    {
+      "idle": 1500
+    }
+  ]
+}

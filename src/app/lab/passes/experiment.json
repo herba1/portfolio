@@ -1,0 +1,11 @@
+{
+  "title": "Passes",
+  "description": "Herb in Times Square at night, printed on warm paper with the passes a renderer keeps underneath it. Drag across the print and the photograph peels back: first the street relit by a warm lamp that follows your hand, so herb and the pavement catch a light that was never there, then the street cast in plaster from the surface normals the depth implies, and the depth itself printed in contours, warm black far to paper white near. The sheets' edges step around herb where they cross him, and spring back when you let go.",
+  "tags": ["WebGL", "Light", "Photography"],
+  "status": "draft",
+  "createdAt": "2026-11-06T18:00:00.000Z",
+  "intent": "Reality pieces: the layers under a captured image, after Unreal's buffer visualization (https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine), photogrammetry tools like Polycam and RealityScan, and Thomas Ruff's jpegs, where the image's structure becomes the image. Depth by Depth Anything V2, normals baked from it offline.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.6, 0.5], "to": [0.4, 0.5] },
+  "sources": ["https://dev.epicgames.com/documentation/en-us/unreal-engine/viewport-modes-in-unreal-engine", "https://depth-anything-v2.github.io/"]
+}

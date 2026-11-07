@@ -1,0 +1,11 @@
+{
+  "title": "Glyph Morph",
+  "description": "One Beatles word set huge in Geist on warm white. Click or press space and it becomes the next one, letter by letter: Help becomes Hello becomes Yellow becomes Yes, Blackbird sheds its Black and is Bird. Every glyph the two words share slides on a spring to its new place in the new word, keeping the font's kerning and the house tracking, while the letters that leave blur out where they stood and the new ones blur in. Advance again mid-morph and it turns from wherever it is.",
+  "tags": ["Type", "Motion", "Interface"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "From the Family wallet's Continue-to-Confirm label (https://benji.org/family-values): keep the shared letters and animate only what changes, so a state change reads without the noise of a crossfade. Here the label is the whole page.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "tap", "on": ".gm-surface", "at": [0.5, 0.5] },
+  "sources": ["https://benji.org/family-values", "https://vercel.com/font"]
+}

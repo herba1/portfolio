@@ -1,0 +1,77 @@
+{
+  "title": "Moment",
+  "description": "A GoPro lies on the grass looking straight up into a summer sky, and a man jumps over it. Two frames, half a second apart, are all there is: drag across the picture and you move through the instant between them, his arms opening and his feet coming at you along their real motion, while the camera drifts a few degrees round him so the tree, the post and the hotel slide against the cumulus. Nothing between the two presses was filmed; it is rebuilt from depth, layers and flow.",
+  "tags": [
+    "WebGL",
+    "Photo",
+    "Depth",
+    "Flow",
+    "Film"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-07T05:00:00.000Z",
+  "intent": "3D Moments (Wang et al., CVPR 2022, https://3d-moments.github.io/ , Apache-2.0): space-time view synthesis from two near-duplicate photos, done DIY on CPU after factory/reality/techniques.md section 11 and herb's depth research (factory/reality/crowdvolt-depth-heroes.md). Clean plate from the clip's own frames (LaMa only for the last 0.25 %), sky deepened toward the zenith, sky/near layers with MoGe-2 depth, SAM 2.1 mattes, DIS flow chained through the frames between the two presses, bidirectional mesh warp in the shader, shared film grade (summer). ?t=0..1 time, ?cam=-1..1 orbit.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.3,
+      0.5
+    ],
+    "to": [
+      0.7,
+      0.5
+    ]
+  },
+  "probe": [
+    {
+      "idle": 3200
+    },
+    {
+      "drag": [
+        [
+          0.3,
+          0.5
+        ],
+        [
+          0.72,
+          0.5
+        ]
+      ],
+      "ms": 2200
+    },
+    {
+      "idle": 1200
+    },
+    {
+      "drag": [
+        [
+          0.72,
+          0.5
+        ],
+        [
+          0.35,
+          0.52
+        ]
+      ],
+      "ms": 1600
+    },
+    {
+      "idle": 1500
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://www.pexels.com/video/low-angle-shot-of-man-jumping-11805400/",
+      "file": "https://videos.pexels.com/video-files/11805400/11805400-uhd_1920_1440_24fps.mp4",
+      "author": "Marc Espejo (Pexels @badkz777)",
+      "licence": "Pexels License (free to use, no attribution required)",
+      "note": "1920x1440, 24 fps, 6.5 s, GoPro on the ground. Frames 78 and 90 are the two shutter presses that ship; frames 0-120 were used only to clear the plate behind the jumper (YOLO boxes say which frames may lend a pixel) and to track his motion (DIS flow chained frame to frame). Registered by phase correlation (about 2 px of drift); the hotel's name on its canopy (LaMa) and the birds (Telea) removed; clipped cloud cores domed; shown as a 4:5 crop. Bake: tools/depth/bakes/moment/ (analyse, people, plate, flow, cleanup, export)."
+    },
+    "https://3d-moments.github.io/",
+    "https://github.com/google-research/3d-moments"
+  ]
+}

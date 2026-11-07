@@ -1,0 +1,11 @@
+{
+  "title": "Versions",
+  "description": "A short note on a warm white ground with its twelve earlier saves stacked behind it, receding in real perspective into a soft haze, each one's spine naming in a serif what that save changed, like the margin of a proof. Drag or scroll and you fly back through them: the front card swells and dissolves past you, the next save comes forward and settles on a soft spring with a small tick, and only the card at the front marks what that save changed, what it wrote inked in from the caret as a serif correction, the way a proofreader marks a page, and a fine red caret where words were taken out. A hairline timeline at the edge swells around the current save and names when it was made.",
+  "tags": ["UI", "Motion", "Type"],
+  "status": "draft",
+  "createdAt": "2026-11-06T20:00:00.000Z",
+  "intent": "After macOS Time Machine's receding stack of window versions (https://support.apple.com/guide/mac-help/restore-files-mh11422/mac) and the Time Machine stack pattern on devouringdetails.com (https://devouringdetails.com): versions recede into depth and scrolling brings older states forward, here applied to the saves of one document with the diff shown only where you are looking.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".versions-stage", "from": [0.5, 0.35], "to": [0.5, 0.7] },
+  "sources": ["https://support.apple.com/guide/mac-help/restore-files-mh11422/mac", "https://devouringdetails.com"]
+}

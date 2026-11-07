@@ -1,0 +1,11 @@
+{
+  "title": "New Alphabet",
+  "description": "A word drawn in an original raster alphabet: only horizontal and vertical strokes and 45-degree corners, every vertex sitting on a visible dot grid. Drag across the field and the raster coarsens or refines; each letter rebuilds itself stroke by stroke, its strokes sliding along the grid to their new dots, so the word stays legible from a five-dot screen to a fine one. Type to set a new word.",
+  "tags": ["Type", "Grid", "Interaction"],
+  "status": "draft",
+  "createdAt": "2026-11-06T12:00:00.000Z",
+  "intent": "After Wim Crouwel's New Alphabet (1967), https://en.wikipedia.org/wiki/New_Alphabet: accept the screen's raster completely and make the letterforms a system of it. Here the raster is the variable, and the system has to hold at every pitch.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.35, 0.5], "to": [0.65, 0.5] },
+  "sources": ["https://en.wikipedia.org/wiki/New_Alphabet"]
+}

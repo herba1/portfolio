@@ -1,0 +1,29 @@
+{
+  "title": "Rearrange",
+  "description": "A summer photograph taken looking steeply up a catenary mast in Ine, Kyoto, in which the things are loose. Pick up the maintenance platform, the lamp, the far pole or an insulator and slide it across the sky: where it was, the sky and cumulus behind are there, cables and all; where it goes, it keeps its height above the ground, so it grows as it comes overhead and shrinks as it slides down toward the horizon, slips behind the girder and under the cables or comes in front of them, and throws its shadow away from the sun that lit the photo. The cables fastened to it come along, pulled taut or sagging as it goes, and the platform stays braced to the mast. Let go and it settles. Double-tap and everything goes home.",
+  "tags": ["WebGL", "Photo", "Depth"],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:30:00.000Z",
+  "intent": "Manipulate, layer, move, add, change reality in a realistic manner. After the drag-to-move object editors (DragGAN, https://vcai.mpi-inf.mpg.de/projects/DragGAN/ ; DiffEditor, https://arxiv.org/abs/2402.02583 ; Apple Photos Clean Up, https://support.apple.com/guide/iphone/use-clean-up-iph8ef6ae6c4/ios) and Thomas Demand's reconstructed photographs (https://www.moma.org/artists/7766): a real photograph whose objects are separate pieces, each moved by the same camera that took the picture, so the move keeps the photo's perspective, occlusion and light.",
+  "tile": { "shape": "wide" },
+  "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.253, 0.585], "to": [0.23, 0.36] },
+  "probe": [
+    { "idle": 4200 },
+    { "drag": [[0.253, 0.585], [0.23, 0.34]], "ms": 1600 },
+    { "idle": 900 },
+    { "drag": [[0.727, 0.75], [0.58, 0.75]], "ms": 1800 },
+    { "idle": 1400 }
+  ],
+  "sources": [
+    {
+      "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
+      "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
+      "author": "PJH (@dokae)",
+      "licence": "Unsplash License",
+      "note": "6000x4000 original, Ine, Kyoto Prefecture, Sony a7 IV, worked at 2400x1600. Depth from Depth Anything V2 Small via tools/depth/depth_hr.py; sky and cable mattes, per-object mattes solved against the sky, LaMa clean plate (tiled near native resolution), cable continuation, and camera/sun fit from the two poles baked by tools/depth/bakes/rearrange (masks.py, cut.py, plate.py, export.py)."
+    },
+    "https://github.com/advimman/lama",
+    "https://vcai.mpi-inf.mpg.de/projects/DragGAN/",
+    "https://www.moma.org/artists/7766"
+  ]
+}
