@@ -1,0 +1,57 @@
+{
+  "title": "Mizukagami",
+  "description": "A summer crossroads in Kyoto under poles, wires and cumulus, and still water you raise by hand. Drag up and the street floods, from a film in the hollows of the asphalt to thirty-five centimetres over the kerbs and the feet of the poles. The water is a true mirror: the poles hang upside down beneath themselves, the wires and the cumulus lie in it where they should, and the deeper it gets the darker the road goes under it, until the lower half of the frame is a second sky. It ripples only while it moves, and settles back to glass.",
+  "tags": [
+    "WebGL",
+    "Optics",
+    "Film",
+    "Photography"
+  ],
+  "status": "draft",
+  "createdAt": "2026-11-06T23:55:00.000Z",
+  "intent": "Mizukagami, the 'water mirror' of Japan's flooded rice paddies in early summer, when still water holds the sky (https://en.wikipedia.org/wiki/Rice_paddy ; Shirakawa-go and Tsunan's paddies are the famous ones), and the flooded, sky-doubling Tokyo of Makoto Shinkai's Weathering With You (2019, https://en.wikipedia.org/wiki/Weathering_with_You). The gesture is the water level in centimetres. The photograph is measured: MoGe-2 metric point map, a RANSAC ground plane, a level camera recovered from it (1.40 m above the road), so the water is a true horizontal plane in metres; the mirror is traced in 3D through the point map, with LaMa filling what hides behind the poles, Fresnel for n = 1.333, Beer-Lambert turbidity by depth, a wet band and a meniscus at every waterline. Developed through the lab's summer film.",
+  "tile": {
+    "shape": "wide"
+  },
+  "demo": {
+    "gesture": "drag",
+    "on": ".kit-canvas",
+    "from": [
+      0.5,
+      0.8
+    ],
+    "to": [
+      0.5,
+      0.35
+    ]
+  },
+  "probe": [
+    {
+      "idle": 3200
+    },
+    {
+      "drag": [
+        [
+          0.5,
+          0.8
+        ],
+        [
+          0.5,
+          0.3
+        ]
+      ],
+      "ms": 2400
+    },
+    {
+      "idle": 3600
+    }
+  ],
+  "sources": [
+    "Photo: 'Street intersection in Japanese town' by Richard Tao (@richardtao28), Kyoto, Unsplash License. https://unsplash.com/photos/street-intersection-in-japanese-town-jlJFU9QBfFc",
+    "Road in front of the lens (below the photo's frame): Aerial Asphalt 01 by Rob Tuytel, Poly Haven, CC0. https://polyhaven.com/a/aerial_asphalt_01 — laid on the fitted road plane at its true 15 m scale.",
+    "Geometry: MoGe-2 ViT-B normal (Microsoft, MIT), https://huggingface.co/Ruicheng/moge-2-vitb-normal-onnx ; fill behind poles and wires: LaMa (Apache-2.0 ONNX, https://huggingface.co/Carve/LaMa-ONNX). Bake scripts: tools/depth/bakes/mizukagami/.",
+    "https://en.wikipedia.org/wiki/Fresnel_equations",
+    "https://en.wikipedia.org/wiki/Beer%E2%80%93Lambert_law",
+    "https://en.wikipedia.org/wiki/Weathering_with_You"
+  ]
+}
