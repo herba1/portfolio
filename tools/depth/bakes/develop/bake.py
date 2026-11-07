@@ -157,12 +157,83 @@ alpha = np.where(alpha < 0.04, 0.0, alpha).astype(np.float32)
 # keep partial alpha only where it rims something solid.
 near_solid = cv2.dilate((alpha > 0.5).astype(np.uint8), disk(4)) > 0
 alpha = np.where(near_solid, alpha, 0.0).astype(np.float32)
+
+# Bright hardware: the dropper hangers (bare metal rods) and the porcelain
+# rims of the insulators are lighter than the sky behind them, so the matte
+# above (dark steel) drops them as "sky-like" and they stayed in the fill,
+# where the latent sky's highlight boost blew them into white blooms. Find
+# them as narrow, neutral, brighter-than-the-local-sky features attached to
+# the structure but not in a small cell of it (sky seen through the platform's
+# grating is enclosed, a hanger between two wires is not), grown by
+# hysteresis to their soft edges, and matte them against the painted sky.
+def _bright_hardware(alpha):
+    solid = alpha > 0.5
+    th = cv2.morphologyEx(yl, cv2.MORPH_TOPHAT, disk(7))
+    sat_p = (srgb.max(2) - srgb.min(2)) / np.maximum(srgb.max(2), 1e-3)
+    kf = (~(cv2.dilate(((alpha > 0.01) | (th > 0.02)).astype(np.uint8), disk(2)) > 0)).astype(np.float32)
+    bg = cv2.GaussianBlur(yl * kf, (0, 0), 6) / np.maximum(cv2.GaussianBlur(kf, (0, 0), 6), 1e-4)
+    # open sky: the large cells between the steel and wires (sky seen
+    # through the platform's grating or the girder's lattice comes in small
+    # enclosed cells)
+    wall = cv2.dilate(solid.astype(np.uint8), disk(1))
+    n, lab, st_, _ = cv2.connectedComponentsWithStats((1 - wall).astype(np.uint8), connectivity=4)
+    big = st_[:, cv2.CC_STAT_AREA] > 0.004 * W * H
+    big[0] = False
+    cells = big[lab] & (wall == 0)
+    open_sky = cv2.dilate(cells.astype(np.uint8), disk(2)) > 0
+    base = ~solid & open_sky & (sat_p < 0.35)
+    # the rods seen against cloud are outlined dark rather than lit: take
+    # those too, as anything narrow that departs from the sky either way
+    bh_ = cv2.morphologyEx(yl, cv2.MORPH_BLACKHAT, disk(7))
+    lit = base & (th > 0.04) & ((yl - bg) > 0.05)
+    dark = base & (bh_ > 0.06)
+    weak = base & (((th > 0.015) & ((yl - bg) > 0.02)) | (bh_ > 0.025))
+    touch = cv2.dilate(solid.astype(np.uint8), disk(6)) > 0
+
+    def attached(m, rod_only):
+        n, lab, st_, _ = cv2.connectedComponentsWithStats(m.astype(np.uint8), connectivity=8)
+        att = np.zeros(n, bool)
+        np.logical_or.at(att, lab[touch & m], True)
+        # hardware is a rod (long and thin) or a small fitting; a puff of
+        # cloud, or the blue between two curds, that touches the steel is not
+        area = st_[:, cv2.CC_STAT_AREA].astype(np.float32)
+        span = np.hypot(st_[:, cv2.CC_STAT_WIDTH], st_[:, cv2.CC_STAT_HEIGHT]).astype(np.float32)
+        rod = (area < 5.0 * span) & (span > 16)
+        att &= rod if rod_only else (rod | (area < 160))
+        att[0] = False
+        return att[lab]
+
+    seed = attached(lit, False) | attached(dark, True)
+    n, lab, _, _ = cv2.connectedComponentsWithStats(weak.astype(np.uint8), connectivity=8)
+    keep = np.zeros(n, bool)
+    np.logical_or.at(keep, lab[seed & weak], True)
+    keep[0] = False
+    # grown only to the rods' own soft edges, not into cloud beside them
+    grown = keep[lab] & (cv2.dilate(seed.astype(np.uint8), disk(3)) > 0)
+    return seed, grown | seed
+
+
+hw_core, hw = _bright_hardware(alpha)
+hole = cv2.dilate(((alpha > 0.01) | hw).astype(np.uint8), disk(3)) > 0
+B = sky_fill(~hole)
+# known-background matte for the bright parts, F their own core colour
+Fb = pushpull(lin, hw_core.astype(np.float32))
+dFB = Fb - B
+den = (dFB * dFB).sum(2)
+a_hw = np.clip(((lin - B) * dFB).sum(2) / np.maximum(den, 1e-5), 0, 1) * smoothstep(0.002, 0.01, den)
+a_hw = np.where(cv2.dilate(hw.astype(np.uint8), disk(1)) > 0, a_hw, 0.0)
+alpha = np.maximum(alpha, cv2.GaussianBlur(a_hw.astype(np.float32), (0, 0), 0.5)).astype(np.float32)
+alpha = np.where(alpha < 0.04, 0.0, alpha).astype(np.float32)
+print("bright hardware px", int(hw.sum()))
+
 # and a last fill with every pixel now called clear as a source
 known3 = ~(cv2.dilate((alpha > 0.01).astype(np.uint8), disk(2)) > 0)
 B = sky_fill(known3)
 
-# fill equals the plate wherever nothing covers it
-cover = cv2.dilate((alpha > 0.01).astype(np.uint8), disk(1)) > 0
+# The fill is the painted-out sky across the matte's whole soft edge (and a
+# few pixels past it), never the plate: anything left there is hardware or a
+# fringe of it, which the latent sky would lift and bloom.
+cover = cv2.dilate((alpha > 0.01).astype(np.uint8), disk(3)) > 0
 fill = np.where(cover[..., None], B, lin)
 
 # --- structure depth key, 0 far .. 1 near --------------------------------

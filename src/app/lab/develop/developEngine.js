@@ -27,7 +27,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    cat's-eye towards the corners) whose circle of confusion grows with the
 //    depth still to cover;
 //  - the latent image: the scene itself, faint, low in contrast, washed into
-//    a cool white-blue, its sunlit curds lifted so their discs read;
+//    a cool white-blue, its sunlit curds lifted so their discs read; never
+//    brighter than the finished print (the lift is held under the developed
+//    cloud's luminance round each pixel), and none of the sky's latent terms
+//    (lift, highlight boost, halation) inside the structure's matte, dilated
+//    a few pixels, so wires, hangers and insulators never pick them up;
 //  - the strata lifted towards you in z (a scale about the principal point
 //    in proportion to nearness), held clean by the fill behind them.
 // On the structure the front is a thin band of light, which the film's
@@ -128,6 +132,14 @@ float skyKey(vec2 iuv) {
   return SKY_SPAN * dot(hl, vec2(65280.0, 255.0) / 65535.0);
 }
 float toFg(float k8) { return FG_LO + (1.0 - FG_LO) * k8; }
+// Where the structure is, dilated by a few pixels (a coarser mip of the
+// matte, pushed up), so a two-pixel wire, a hanger or an insulator rim is
+// fully inside it: nothing of the latent sky's treatment may land there.
+float cover(vec2 uv) {
+  float a0 = texture(uAlpha, uv).r;
+  float a1 = textureLod(uAlpha, uv, 1.5).r;
+  return clamp(max(a0, 3.0 * a1), 0.0, 1.0);
+}
 float ahead(float k) { return (uDir > 0.0 ? k : 1.0 - k) - uFront; }
 float cocOf(float d) {
   float t = smoothstep(0.0, AHEAD, d);
@@ -166,6 +178,9 @@ void main() {
   float l = dot(c, LUMA);
   float lm = dot(textureLod(uFill, iuv, 3.5).rgb, LUMA);
   float hi = smoothstep(0.015, 0.09, l - lm) * smoothstep(0.3, 0.6, l);
+  // Never on or beside the structure: a fleck of hardware left in the fill
+  // would otherwise bloom into a white flare.
+  hi *= 1.0 - cover(iuv);
   c *= 1.0 + 7.0 * smoothstep(0.0, AHEAD * 0.4, d) * hi;
   o0 = vec4(c, 1.0);
   o1 = vec4(min(31.0, SKY_COC * cocOf(d)) / 32.0, 0.0, 0.0, 1.0);
@@ -279,28 +294,59 @@ vec3 latent(vec3 c, float d, float dev) {
   return exp(mix(log(max(lat, 1e-4)), log(max(c, 1e-4)), dev));
 }
 
+// The developed cloud round a pixel: the brightest of the print within a
+// mass's reach of it (32 px cells, on two rings, smoothly filtered so the
+// level never steps), the level its whites come up to.
+float cloudWhite(vec2 iuv) {
+  vec2 px = vec2(1.0 / 2400.0, 1.0 / 1600.0);
+  float m = dot(textureLod(uFill, iuv, 5.0).rgb, LUMA);
+  for (int i = 0; i < 6; i++) {
+    float an = float(i) * 1.047198 + 0.4;
+    vec2 dir = vec2(cos(an), sin(an)) * px;
+    m = max(m, dot(textureLod(uFill, iuv + dir * 70.0, 5.0).rgb, LUMA));
+    m = max(m, dot(textureLod(uFill, iuv + dir.yx * vec2(1.5, 0.667) * 170.0, 5.5).rgb, LUMA));
+  }
+  return m;
+}
+
+// Never brighter than the finished print: the latent lift (from the
+// developed light c to lat) goes only as far as keeps its luminance at or
+// under cap. It is the lift that is held, not the light: over cap the
+// latent tone falls back towards the print's own, never towards grey.
+vec3 liftUnder(vec3 c, vec3 lat, float cap) {
+  float lc = dot(c, LUMA);
+  float ll = dot(lat, LUMA);
+  float t = ll > lc + 1e-4 ? clamp((max(cap, lc) - lc) / (ll - lc), 0.0, 1.0) : 1.0;
+  return c + (lat - c) * t;
+}
+
 // The sky at key distance d past the front. A soft band, SKY_BAND of the
 // sky's key wide, widened by the key's gradient on screen so it stays soft
 // where the key is steep; no light of its own, only a faint amber halation
-// in its middle, warming what is under it.
-vec3 developSky(vec3 c, float d, vec2 iuv) {
+// in its middle, warming what is under it. c is the sky as the lens sees it
+// (developed light, defocused); every undeveloped term (the white-blue lift,
+// the halation) is gated by 1 - cov, the dilated structure, and the lift is
+// capped at the developed print's luminance there.
+vec3 developSky(vec3 c, float d, vec2 iuv, float cov, float cap) {
   float w = max(SKY_BAND * SKY_SPAN * uSig / SIGMA, SKY_PX * fwidth(d));
   float dev = 1.0 - smoothstep(-0.5 * w, 0.5 * w, d);
-  vec3 r = latent(c, d, dev);
+  float open = 1.0 - cov;
+  vec3 r = liftUnder(c, mix(c, latent(c, d, dev), open), cap);
   float h = 4.0 * dev * (1.0 - dev);
   float leak = 0.7 + 0.3 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
   // Halation is the red layer's own glow: on a cool sky it has to take a
   // little blue out as well as add amber, or it reads as lilac, not warm.
-  float g = h * (uBand / BAND) * leak;
+  float g = h * (uBand / BAND) * leak * open;
   r = mix(r, r * WARM, 0.32 * g);
   return r + AMBER * (g * HALO);
 }
 
 // The structure at key distance d past the front (d < 0: developed).
-vec3 develop(vec3 c, float d, vec2 iuv) {
+vec3 develop(vec3 c, float d, vec2 iuv, float cap) {
   float sig = uSig;
   float dev = 1.0 - smoothstep(-0.3 * sig, 0.7 * sig, d);
-  vec3 r = latent(c, d, dev);
+  // the latent steel may come up towards the sky's tone, never past it
+  vec3 r = liftUnder(c, latent(c, d, dev), cap);
   // The front: light where developer meets paper, trailing a little behind.
   float w = d >= 0.0 ? sig : sig * 1.3;
   float b = exp(-(d * d) / (w * w));
@@ -313,21 +359,29 @@ vec3 develop(vec3 c, float d, vec2 iuv) {
 void main() {
   vec2 iuv = vec2(vUv.x, 1.0 - vUv.y);
 
-  // Sky.
-  float dB = ahead(skyKey(iuv));
-  vec3 sky = mix(texture(uFill, iuv).rgb, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, SKY_COC * cocOf(dB)));
-  sky = developSky(sky, dB, iuv);
-
-  // Structure, lifted.
+  // Structure, lifted: premultiplied, with its own matte.
   vec2 q = fgWarp(iuv);
   float a = texture(uAlpha, q).r;
   vec3 pm = max(texture(uPlate, q).rgb - (1.0 - a) * texture(uFill, q).rgb, 0.0);
   pm = min(pm, vec3(a)) * step(0.004, a);
   float dF = ahead(toFg(texture(uKey, q).r));
   vec4 fg = mix(vec4(pm, a), texture(uFgBlur, vUv), smoothstep(0.25, 1.25, cocOf(dF)));
-  vec3 fc = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv);
+  // where the structure is on screen and where it was baked, dilated
+  float cov = max(cover(q), cover(iuv));
 
-  o = vec4(fc * fg.a + sky * (1.0 - fg.a), 1.0);
+  // Sky, as the lens sees it. The cap: the developed cloud's luminance here,
+  // the brightest the finished print reaches round this pixel, so the
+  // latent wash and its discs can come up to the cloud they belong to but
+  // never outshine it.
+  float dB = ahead(skyKey(iuv));
+  float rB = SKY_COC * cocOf(dB);
+  vec3 skyDev = texture(uFill, iuv).rgb;
+  float cap = max(dot(skyDev, LUMA), cloudWhite(iuv));
+  vec3 sky = mix(skyDev, texture(uBgBlur, vUv).rgb, smoothstep(0.25, 1.25, rB));
+  sky = developSky(sky, dB, iuv, cov, cap);
+
+  vec3 fgP = develop(fg.rgb / max(fg.a, 1e-3), dF, iuv, cap) * fg.a;
+  o = vec4(fgP + sky * (1.0 - fg.a), 1.0);
 }`;
 
 const BLIT = `#version 300 es
