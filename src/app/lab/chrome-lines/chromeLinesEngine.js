@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { VS, FS_ONE, FS_SURF, FS_PRINT, MAXB } from "./chromeLinesShader";
+import { VS, FS_ONE, FS_SURF, FS_MONO, FS_PRINT, MAXB } from "./chromeLinesShader";
 
 // A pool of mercury on acid paper, printed as a line engraving.
 //
@@ -101,7 +101,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
 
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
-  const K = [num("kh", 0.05), num("kr", 4.2), num("kl", 0.5), num("sp", 3.6)];
+  const K = [num("gmin", 0.3), num("kr", 4.2), num("kl", 0.5), num("sp", 6.1)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   const K2 = [num("H2", 0.07), num("Hr", 0.14), 0, 0];
   const still = q.has("t") || q.has("pull");
@@ -120,27 +120,37 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     for (const n of NAMES) u[n] = gl.getUniformLocation(p, n);
     return { p, u };
   };
-  const progs = twoPass ? [make(FS_SURF), make(FS_PRINT)] : [make(FS_ONE)];
-  let surfTex = null;
-  let surfFbo = null;
+  // Surface, then the pass that irons the line phase monotone, then the print.
+  const progs = twoPass ? [make(FS_SURF), make(FS_MONO), make(FS_PRINT)] : [make(FS_ONE)];
+  const surfTex = [null, null];
+  const surfFbo = [null, null];
   let surfW = 0;
   let surfH = 0;
+  const freeSurf = () => {
+    for (let i = 0; i < 2; i++) {
+      if (surfTex[i]) gl.deleteTexture(surfTex[i]);
+      if (surfFbo[i]) gl.deleteFramebuffer(surfFbo[i]);
+    }
+  };
   const ensureSurf = (w, h) => {
     if (!twoPass || (w === surfW && h === surfH)) return;
     surfW = w;
     surfH = h;
-    if (surfTex) gl.deleteTexture(surfTex);
-    if (surfFbo) gl.deleteFramebuffer(surfFbo);
-    surfTex = gl.createTexture();
-    gl.bindTexture(gl.TEXTURE_2D, surfTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    surfFbo = gl.createFramebuffer();
-    gl.bindFramebuffer(gl.FRAMEBUFFER, surfFbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, surfTex, 0);
+    freeSurf();
+    for (let i = 0; i < 2; i++) {
+      const t = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, t);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, w, h, 0, gl.RGBA, gl.HALF_FLOAT, null);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      const fb = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fb);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+      surfTex[i] = t;
+      surfFbo[i] = fb;
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   };
   const vao = gl.createVertexArray();
@@ -434,16 +444,23 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     if (twoPass) {
       // One surface sample per css pixel.
       ensureSurf(Math.max(1, Math.round(W)), Math.max(1, Math.round(H)));
-      gl.bindFramebuffer(gl.FRAMEBUFFER, surfFbo);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, surfFbo[0]);
       gl.viewport(0, 0, surfW, surfH);
       const u0 = bind(progs[0]);
       gl.uniform2f(u0.uSurfRes, surfW, surfH);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      // The line phase, ironed monotone across the screen.
+      gl.bindFramebuffer(gl.FRAMEBUFFER, surfFbo[1]);
+      const um = bind(progs[1]);
+      gl.uniform2f(um.uSurfRes, surfW, surfH);
+      gl.activeTexture(gl.TEXTURE0);
+      gl.bindTexture(gl.TEXTURE_2D, surfTex[0]);
+      gl.uniform1i(um.uSurf, 0);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       gl.bindFramebuffer(gl.FRAMEBUFFER, null);
       gl.viewport(0, 0, cw, ch);
-      const u1 = bind(progs[1]);
-      gl.activeTexture(gl.TEXTURE0);
-      gl.bindTexture(gl.TEXTURE_2D, surfTex);
+      const u1 = bind(progs[2]);
+      gl.bindTexture(gl.TEXTURE_2D, surfTex[1]);
       gl.uniform1i(u1.uSurf, 0);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     } else {
@@ -476,8 +493,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
 
   return {
     destroy: () => {
-      if (surfTex) gl.deleteTexture(surfTex);
-      if (surfFbo) gl.deleteFramebuffer(surfFbo);
+      freeSurf();
       stage.destroy();
     },
   };

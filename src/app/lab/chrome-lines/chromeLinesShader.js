@@ -24,7 +24,7 @@ uniform float uDpr;
 uniform float uScale;
 uniform float uTime;
 uniform float uEnvRot;
-uniform vec4 uK;            // line displacement by height, by reflection, by tone; spacing (css px)
+uniform vec4 uK;            // least line density (monotone floor), displacement by reflection, by tone; spacing (css px)
 uniform vec4 uK2;           // body height per unit field, -, -, -
 uniform vec4 uS;            // relief amount, height (scale units), profile softness, threshold
 out vec4 o;
@@ -172,17 +172,19 @@ vec4 surface(vec2 p){
   float L = env(r, 0.05);
   float Ls = env(r, 0.22);
 
-  float S = uK.w;
   // The reflection pushes the lines by the normal: across a dome that adds
   // to the screen, so the lines sweep over the tops and crowd where the
-  // surface turns hard, at the rims and necks.
-  float Dsp = uK.x * h + uK.y * S * 4.0 * dot(n.xy, vec2(0.35, 1.0)) + uK.z * S * Ls;
+  // surface turns hard, at the rims and necks. Nothing by height: a term in
+  // h closes on itself round every bump top into a bullseye. The print pass
+  // keeps the whole displacement monotone across the screen.
+  float Dsp = uK.y * 14.4 * dot(n.xy, vec2(0.35, 1.0)) + uK.z * 3.6 * Ls;
   float tf = 380.0 + 260.0 * (h / H) + 120.0 * n.z;
   return vec4(clamp(sd, -64.0, 64.0), Dsp, L, tf);
 }
 
 // The print: one line screen, displaced by the surface, its width carrying
 // the tone, over acid stock.
+// sf.y is the line displacement D, already made monotone (see FS_MONO).
 vec3 printAt(vec2 p, vec4 sf){
   float sd = sf.x;
   float L = sf.z;
@@ -191,7 +193,8 @@ vec3 printAt(vec2 p, vec4 sf){
   float S = uK.w;
   vec2 N0 = normalize(vec2(0.24, 1.0));
   vec2 T0 = vec2(N0.y, -N0.x);
-  float phi = (dot(p, N0) + sf.y) / S;
+  float D = sf.y;
+  float phi = (dot(p, N0) + D) / S;
   vec2 gp = vec2(dFdx(phi), dFdy(phi));
   float fpx = max(length(gp), 1e-4);
 
@@ -210,7 +213,7 @@ vec3 printAt(vec2 p, vec4 sf){
   // displaced by the same surface but less: where the two run nearly
   // together they beat into the dotted moire of the reference.
   vec2 N1 = normalize(vec2(-0.52, 1.0));
-  float phi2 = (dot(p, N1) + 0.6 * sf.y) / (S * 0.92);
+  float phi2 = (dot(p, N1) + 0.6 * D) / (S * 0.92);
   float fpx2 = max(length(vec2(dFdx(phi2), dFdy(phi2))), 1e-4);
   float cross = plate(phi2, 0.3 * mid, fpx2) * smoothstep(0.5, 0.7, T) * smoothstep(0.92, 0.78, T);
   cK = max(cK, cross * 0.85);
@@ -248,7 +251,13 @@ vec3 printAt(vec2 p, vec4 sf){
 export const FS_ONE = FS_HEAD + COMMON + `
 void main(){
   vec2 p = vec2(gl_FragCoord.x, uRes.y * uDpr - gl_FragCoord.y) / uDpr;
-  o = vec4(printAt(p, surface(p)), 1.0);
+  vec4 sf = surface(p);
+  // Without the ironing pass, a local stand-in: where the screen would fold
+  // (dD/dy, from the quad, below -(1 - floor)), ease the displacement down.
+  vec2 N0 = normalize(vec2(0.24, 1.0));
+  float x = max(-(dFdx(sf.y) * N0.x - dFdy(sf.y) * N0.y) * uDpr, 0.0) / (1.0 - uK.x);
+  sf.y *= pow(1.0 + x * x * x * x, -0.25);
+  o = vec4(printAt(p, sf), 1.0);
 }`;
 
 // Two passes: the surface at one sample per css pixel into a half-float
@@ -260,6 +269,48 @@ uniform vec2 uSurfRes;
 void main(){
   vec2 p = vec2(gl_FragCoord.x, uSurfRes.y - gl_FragCoord.y) * (uRes / uSurfRes);
   o = surface(p);
+}`;
+
+// Ironing the screen. The phase is (y + D) / S, y running across the screen
+// (along N0). A line closes into a ring only round an extremum of the phase,
+// and there is none while the phase keeps climbing down the screen. Write
+// the phase as uK.x * y + X, where X = (1 - uK.x) * y + D: if X never falls
+// going down the screen, the phase climbs at least uK.x per pixel and the
+// lines can only crowd, never turn back. So X is replaced by its running
+// (soft) maximum over a reach up the screen. Where the surface would fold
+// the screen back on itself (troughs, saddles, under the rims) the lines
+// crowd to the fold, run on at the floor's pitch across it, and pick the
+// surface up again where it climbs past them: open strokes bunching into
+// moire, never a bullseye. Elsewhere X is already rising and D is untouched.
+export const FS_MONO = FS_HEAD + `
+uniform sampler2D uSurf;
+uniform vec2 uSurfRes;
+void main(){
+  vec2 uv = gl_FragCoord.xy / uSurfRes;
+  vec4 sf = texture(uSurf, uv);
+  const int NS = 44;
+  const float STEP = 2.0;               // css px
+  const float TAU = 3.0;                // softness of the max, css px
+  float c = 1.0 - uK.x;
+  vec2 N0 = normalize(vec2(0.24, 1.0));
+  vec2 du = vec2(-N0.x, N0.y) * STEP / uSurfRes;   // one step up the screen
+  // Online log-sum-exp of X(y - k) - X(y), and of the same for flat chrome.
+  // The reach ends, softly, where it leaves the chrome: past the rim there
+  // are no lines to follow, and a ray that only grazes a rim must not tear
+  // the screen beside one that crosses it.
+  float m = 0.0, acc = 1.0, ref = 1.0, vis = 1.0;
+  for (int k = 1; k <= NS; k++){
+    float dk = c * STEP * float(k);
+    ref += exp(-dk / TAU);
+    vec4 s = texture(uSurf, uv + du * float(k));
+    vis *= smoothstep(-2.0, 12.0, s.x);
+    if (vis < 1e-4) break;
+    float v = s.y - sf.y - dk + TAU * log(vis);
+    if (v > m){ acc = acc * exp((m - v) / TAU) + 1.0; m = v; }
+    else acc += exp((v - m) / TAU);
+  }
+  sf.y += m + TAU * log(acc / ref);
+  o = sf;
 }`;
 
 export const FS_PRINT = FS_HEAD + COMMON + `
