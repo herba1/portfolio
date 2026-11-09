@@ -258,10 +258,12 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
   // piece, not a word still growing in. (The compositor frames from the start.)
   await clock.wait(reel.intro?.hold ?? 1200);
   // The stage is what the camera frames at rest: the piece, not the page.
+  let stage = null;
   if (reel.stage?.rect) {
     // A fixed region in viewport fractions [x, y, w, h], for pieces drawn on one canvas.
     const [x, y, w, h] = reel.stage.rect;
-    mark("stage", { x: x * vp.width, y: y * vp.height, width: w * vp.width, height: h * vp.height, pad: reel.stage.pad ?? 0 });
+    stage = { x: x * vp.width, y: y * vp.height, width: w * vp.width, height: h * vp.height, pad: reel.stage.pad ?? 0 };
+    mark("stage", stage);
   } else if (reel.stage) {
     const sel = typeof reel.stage === "string" ? reel.stage : reel.stage.sel;
     await clock.waitFor(sel);
@@ -272,13 +274,37 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
       const x = Math.min(...rs.map((r) => r.left)), y = Math.min(...rs.map((r) => r.top));
       return { x, y, width: Math.max(...rs.map((r) => r.right)) - x, height: Math.min(innerHeight, Math.max(...rs.map((r) => r.bottom))) - y };
     });
-    mark("stage", { ...box, pad: reel.stage.pad ?? 0.12 });
+    stage = { ...box, pad: reel.stage.pad ?? 0.12 };
+    mark("stage", stage);
   }
+
+  // Step aside: after a click, drag or hold, a person moves the hand off what
+  // they just changed so it can be seen, then comes back for the next touch.
+  // The spot is just outside the piece, inside the resting frame, on the side
+  // nearest the hand; with no room around the piece, the low corner nearest.
+  const asideSpot = () => {
+    const box = stage ?? { x: 0, y: 0, width: vp.width, height: vp.height, pad: 0 };
+    const z = Math.min(2.2, Math.max(1, Math.min(vp.width / (box.width * (1 + 2 * box.pad)), vp.height / (box.height * (1 + 2 * box.pad)))));
+    const cx = box.x + box.width / 2, cy = box.y + box.height / 2;
+    const hw = vp.width / z / 2, hh = vp.height / z / 2;
+    const fx0 = Math.max(0, Math.min(vp.width - 2 * hw, cx - hw)), fy0 = Math.max(0, Math.min(vp.height - 2 * hh, cy - hh));
+    const f = { l: fx0, t: fy0, r: fx0 + 2 * hw, b: fy0 + 2 * hh };
+    const m = 18, clampX = (x) => Math.min(f.r - m, Math.max(f.l + m, x)), clampY = (y) => Math.min(f.b - m, Math.max(f.t + m, y));
+    const sides = [
+      { room: f.b - (box.y + box.height), at: () => ({ x: clampX(cur.x), y: (box.y + box.height + f.b) / 2 }) },
+      { room: box.x - f.l, at: () => ({ x: (f.l + box.x) / 2, y: clampY(cur.y) }) },
+      { room: f.r - (box.x + box.width), at: () => ({ x: (box.x + box.width + f.r) / 2, y: clampY(cur.y) }) },
+      { room: box.y - f.t, at: () => ({ x: clampX(cur.x), y: (f.t + box.y) / 2 }) },
+    ].filter((sd) => sd.room >= 28).map((sd) => ({ ...sd, p: sd.at() }));
+    if (sides.length) return sides.sort((a, b) => Math.hypot(a.p.x - cur.x, a.p.y - cur.y) - Math.hypot(b.p.x - cur.x, b.p.y - cur.y))[0].p;
+    return { x: cur.x < (f.l + f.r) / 2 ? f.l + (f.r - f.l) * 0.16 : f.l + (f.r - f.l) * 0.84, y: f.t + (f.b - f.t) * 0.88 };
+  };
+  let zoomed = false;
 
   // tempo > 1 slows every motion and hold in the reel by that factor.
   const TIMED = ["duration", "pause", "settle", "hold", "press", "approach", "release", "between", "dragDuration", "gap", "delay"];
   const tempo = reel.tempo ?? 1;
-  for (const raw of reel.beats) {
+  for (const [bi, raw] of reel.beats.entries()) {
     const beat = { ...raw };
     for (const k of TIMED) if (typeof beat[k] === "number") beat[k] *= tempo;
     if (typeof beat.wait === "number") beat.wait *= tempo;
@@ -291,8 +317,18 @@ export async function capture(reel, format, dir, { base, headed = false, log = (
     if (["move", "click", "hold", "tap"].includes(verb)) beat.duration = (beat.duration ?? 650 * tempo) * travel;
     try {
       if (beat.zoom) await verbs.camera({ zoom: beat.zoom, on: beat.zoomOn ?? (typeof beat[verb] === "string" ? beat[verb] : "cursor"), follow: beat.follow });
+      if (beat.zoom || (verb === "camera" && beat.camera !== "reset")) zoomed = true;
+      if (verb === "camera" && beat.camera === "reset") zoomed = false;
       await verbs[verb](beat[verb], beat);
-      if (beat.pause) await clock.wait(beat.pause);
+      const next = reel.beats[bi + 1];
+      const touched = ["click", "drag", "hold", "lift"].includes(verb);
+      const leave = beat.aside ?? (reel.aside !== false && touched && !zoomed && (beat.pause ?? 0) >= 500 && next && !("move" in next));
+      if (leave) {
+        const t = Math.min(520, beat.pause * 0.5);
+        await clock.wait(140);   // let the release land before the hand goes
+        await glide(asideSpot(), t, 0.1);
+        await clock.wait(Math.max(0, beat.pause - t - 140));
+      } else if (beat.pause) await clock.wait(beat.pause);
     } catch (err) {
       // Leave a picture of where it got stuck next to the frames so far.
       await page.screenshot({ path: path.join(dir, "failed.png") }).catch(() => {});

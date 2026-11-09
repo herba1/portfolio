@@ -74,7 +74,7 @@ window.setup = async (spec) => {
   if (first && first.t <= (spec.timeline.find((e) => e.type === "start")?.t ?? 0)) cur.alpha.x = 1;
   // Start already settled on where the chase would put it, so frame one is a
   // camera at rest (and a loop can come back to exactly that).
-  if (shot.follow) { const f = S.restFollow ?? 0.45; rig.x.x = cam.x = base.x + (cur.x.x - base.x) * f; rig.y.x = cam.y = base.y + (cur.y.x - base.y) * f; }
+  if (shot.follow) { const f = S.restFollow ?? 0; rig.x.x = cam.x = base.x + (cur.x.x - base.x) * f; rig.y.x = cam.y = base.y + (cur.y.x - base.y) * f; }
   return true;
 };
 
@@ -146,9 +146,9 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   // camera
   // Aim: the shot's framing, pulled toward the pointer when following.
   // Zoomed in it goes everywhere the pointer goes; at the resting frame it
-  // leans toward the pointer without letting the piece drift off.
+  // holds still and shows the whole piece (a pan with no zoom is just noise).
   if (shot) {
-    const f = !shot.follow ? 0 : shot.home ? S.restFollow ?? 0.45 : S.followAmount ?? 1;
+    const f = !shot.follow ? 0 : shot.home ? S.restFollow ?? 0 : S.followAmount ?? 1;
     const ax = shot.to.x + (cur.x.x - shot.to.x) * f, ay = shot.to.y + (cur.y.x - shot.to.y) * f;
     const w = S.cameraSpring ?? 4.2;           // ~1.1s to settle: a beat behind, never 1:1
     spring(rig.x, ax, w, dt); spring(rig.y, ay, w, dt);
@@ -165,7 +165,7 @@ window.render = async ({ t, T, src, phase, first, home = 0, pageMix = 0 }) => {
   cam.z = rig.z.x;
   // The frame breathes: a slow sub-1% push and drift so a held moment never
   // reads as a frozen picture.
-  const b = lt / 1000, br = S.breathe ?? 1;
+  const b = lt / 1000, br = S.breathe ?? 0;
   // never below 1x, with a rounded corner so a dip into the floor doesn't stop dead
   let camX = cam.x, camY = cam.y, camZ = cam.z;
   if (s0 && home > 0) { camX += (s0.camX - camX) * home; camY += (s0.camY - camY) * home; camZ += (s0.camZ - camZ) * home; }
