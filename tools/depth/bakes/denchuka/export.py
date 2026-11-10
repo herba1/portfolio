@@ -102,6 +102,9 @@ for k in (3, 2, 1):
 wire_id = M["wire_id"].astype(np.int32)
 wire_id[M["wire_alpha"] < 0.04] = 0
 wid = grow_labels(wire_id, 3, within=holes[1])
+# a wire's tail (masks.py RUNS), and the 3 px round it that wid grew onto it
+lead = M["wire_lead"] if "wire_lead" in M.files else np.zeros((H, W), bool)
+tail = grow(lead, 3) & ~((M["wire_id"] > 0) & ~lead)
 # every pixel p2 changes belongs to a hardware piece, so it changes when that piece goes
 hid = grow_labels(M["hw_id"].astype(np.int32), None, within=holes[2])
 shaft_any = M["shaft"] | (SA > 0)
@@ -146,6 +149,7 @@ for g in sorted(set(np.unique(hid)) - {0}):
                          reach=round(reach + 8, 1)))
 poles = [dict(id=1, k=round(k, 5), c=round(c, 2), top=int(pole["top"]), base=H - 1,
               reach=round(pole["hk"] * H + pole["hc"] + 100, 1))]
+k_, c_ = pole["k"], pole["c"]
 wires = []
 for w in info["wires"]:
     m = wid == w["id"]
@@ -154,15 +158,32 @@ for w in info["wires"]:
     wx, wy = xs[m], ys[m]
     x0, x1, y0, y1 = int(wx.min()), int(wx.max()), int(wy.min()), int(wy.max())
     steep = w["steep"]
-    lo, hi = (y0, y1) if steep else (x0, x1)
+    # the span alone, without its tail (grip, connector, leads): where it hangs,
+    # its order among the others and its straight line in the plate (the engine
+    # tests that line for when the wire has gone out of the frame)
+    sm = m & ~tail
+    sx, sy = xs[sm].astype(np.float64), ys[sm].astype(np.float64)
+    al_, ac_ = (sy, sx) if steep else (sx, sy)
+    fk, fq = np.polyfit(al_, ac_, 1)
+    # the span runs over the span's own pixels; past its pole end the tail
+    # falls with that end (the engine clamps there), so y0..y1 cover both
+    lo, hi = (int(sy.min()), int(sy.max())) if steep else (int(sx.min()), int(sx.max()))
     edge = H if steep else W
     span = hi - lo
     # an end at the frame edge hangs from something out of shot: extend the span there
     a_ = lo - (0.35 * span if lo <= 2 else 0)
     b_ = hi + (0.35 * span if hi >= edge - 3 else 0)
-    mx_, my_ = float(wx.mean()), float(wy.mean())
+    mx_, my_ = float(sx.mean()), float(sy.mean())
+    # rise: how far the tail stands above the span's pole end (it falls with
+    # that end, so the wire is gone only once the tail is too)
+    rise = 0.0
+    tm = m & tail
+    if tm.any() and not steep:
+        end = lo if abs(lo - (k_ * np.polyval([fk, fq], lo) + c_)) < abs(hi - (k_ * np.polyval([fk, fq], hi) + c_)) else hi
+        rise = max(0.0, float(np.polyval([fk, fq], end) - ys[tm].min()))
     wires.append(dict(id=w["id"], steep=steep, x0=x0, x1=x1, y0=y0, y1=y1, a=round(a_, 1), b=round(b_, 1),
-                      g=round(fall_slant(mx_, my_), 4), ym=round(my_, 1), xm=round(mx_, 1), px=int(m.sum())))
+                      g=round(fall_slant(mx_, my_), 4), ym=round(my_, 1), xm=round(mx_, 1), px=int(sm.sum()),
+                      fit=[round(float(fk), 6), round(float(fq), 2)], rise=round(rise, 1)))
 # years: the five spans off to the right first, then the long spans down to the
 # left (lowest first), then the bundle that runs up out of the top of the frame;
 # then the hardware, bottom piece first; then the pole

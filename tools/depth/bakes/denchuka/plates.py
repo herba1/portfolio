@@ -63,8 +63,11 @@ plant = o > 0.04
 sky = (o < 0.03) & ~kit.dilate(plant, 14)
 
 # ---------------------------------------------------------------- p1: no wires
+# (a wire here is its span and its tail: grip, connector, the leads it feeds;
+# masks.py RUNS. Their strip of sky is filled like the span's.) A wire across a
+# transformer is also the transformer's (masks.py), so it is filled from it.
 hole1 = kit.dilate(wires, 3)
-on_obj = hole1 & kit.dilate((hw | shaft) & ~wires, 3)
+on_obj = hole1 & (kit.dilate((hw | shaft) & ~wires, 3) | hw | shaft)
 P1 = sky_fill(img, hole1 & ~on_obj, sky, seed=1)
 u8 = (np.clip(P1, 0, 1) * 255 + 0.5).astype(np.uint8)
 P1 = np.where(on_obj[..., None], cv2.inpaint(u8, on_obj.astype(np.uint8), 4, cv2.INPAINT_TELEA).astype(np.float32) / 255, P1)

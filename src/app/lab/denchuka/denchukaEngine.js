@@ -7,9 +7,12 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // The bake (tools/depth/bakes/denchuka) takes ky kim's worm's-eye photograph
 // of a pole head apart element by element: fourteen wires (the sky matte's
 // sub-pixel alpha; Hough segments grown into whole spans, and the bundle that
-// runs up out of the top of the frame), the hardware in three pieces (the two
-// lower transformers with their clamps and jumper loops, the upper transformer,
-// the crossarms with their cutouts; SAM 2.1 for the transformers), and the
+// runs up out of the top of the frame; each carries its own tail, the grip,
+// connector and jumper or drop leads past its span, so it leaves nothing
+// hanging off the hardware), the hardware in three pieces (the two lower
+// transformers with their brackets and loops, the upper transformer, the
+// crossarms with their insulators, strain clamps and cutouts; SAM 2.1 for the
+// transformers), and the
 // shaft (a cone fitted to SAM's mask). The clean plates: no wires; no wires or
 // hardware, the bare shaft standing; nothing overhead at all. Against the sky
 // every hole is a membrane of the sky round it; the bare shaft is rebuilt from
@@ -469,10 +472,13 @@ function fitWires(img, wires, pole) {
   const M = 6;
   const inFrame = (p) => p[0] >= 0 && p[0] < PW && p[1] >= 0 && p[1] < PH;
   for (const w of wires) {
+    // the span's own line: the bake's fit to the span without its tail (grip,
+    // connector, leads), else the fit to every pixel of it in the id map
     const [n, sa, sc, saa, sac] = acc.get(w.id).s;
     const den = n * saa - sa * sa;
-    const m = n > 1 && Math.abs(den) > 1e-6 ? (n * sac - sa * sc) / den : 0;
-    const q = n > 0 ? (sc - m * sa) / n : 0;
+    let m = n > 1 && Math.abs(den) > 1e-6 ? (n * sac - sa * sc) / den : 0;
+    let q = n > 0 ? (sc - m * sa) / n : 0;
+    if (w.fit) [m, q] = w.fit;
     const span = w.b - w.from;
     const at = (u) => {
       const al = w.from + u * span;
@@ -523,7 +529,7 @@ function fitWires(img, wires, pole) {
         break;
       }
       if (r.gone) {
-        w.fall = f + 80;
+        w.fall = f + 80 + (w.rise || 0);
         break;
       }
     }
@@ -532,7 +538,7 @@ function fitWires(img, wires, pole) {
       w.hold = Math.min(0.85 * fold, toBottom);
       let f = 0;
       while (f < 8000 && !test(f, Math.max(0, f - w.hold)).gone) f += 10;
-      w.fall = f + 80;
+      w.fall = f + 80 + (w.rise || 0);
     }
   }
 }
