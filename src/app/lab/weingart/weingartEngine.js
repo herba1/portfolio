@@ -23,7 +23,9 @@
 // baseline rule, from the 3 to the 5. When a
 // step would need the margin to give, the whole run locks. Only the red
 // run, printed in a second pass, crosses the black, and where it does the
-// two inks make a third.
+// two inks make a third. At rest the forme is strict: the title on the
+// margin, the colophon flush on the red's edge, hung from the cap line of
+// "Here". Every stair on the page is one a push made.
 // ?t=0..1 holds a still of "Here" pushed down through the forme; t=1 is the
 // last even stair before the run locks.
 import { createStage, clamp } from "../_kit/stage";
@@ -53,8 +55,10 @@ const D_MAX = 48;
 const LETTER_MIN = 40;
 // Sidebearing trimmed off each side of a display letter's body, in em.
 const SIDE = 0.06;
-// Lead between two bodies that touch, design px.
+// Lead between two bodies that touch, design px; between two lines of the
+// colophon, set solid on their own small leading, less.
 const GAP = 8;
+const GAP_SMALL = 2;
 // Body above and below a rule's face, so it never sits on a baseline as an underline.
 const RULE_LEAD = 6;
 // A display sort's body above the baseline, in em; a reversed slug's ground, design px.
@@ -96,11 +100,20 @@ const FORME = [
   // that datum, so a full push seats it with a full step.
   { rule: true, pieces: [36, 36, 72, 72, 72, 72, 72, 48, 156], thick: UNIT, x: 0, y: 400, fit: "red" },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
-  { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
-  { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
-  { text: "Apple Records", size: 13, w: "body", x: 700, y: 136 },
-  { text: "London, 26 September 1969", size: 13, w: "body", x: 724, y: 156 },
+  // The colophon is set flush left on the red's axis, the left edge of the
+  // "3", where the rule's last piece starts, and hangs from the cap line of
+  // "Here": its first line's caps stand on that line (see hang). Below it the
+  // lines are set on whole-pixel leading of the 4px grid (lead, baseline to
+  // baseline). At rest it is a plain flush-left block, so the page has two
+  // verticals, the title margin and the figure edge; it breaks only as any
+  // other line does, locked at its first sort to that axis, one riser at a time.
+  { text: "Abbey Road", size: 20, w: "strong", hang: "red" },
+  { text: "Side two, track one", size: 13, w: "body", hang: "red", lead: 24 },
+  { text: "Apple Records", size: 13, w: "body", hang: "red", lead: 20 },
+  { text: "London, 26 September 1969", size: 13, w: "body", hang: "red", lead: 20 },
 ];
+// The line the colophon hangs from: the cap line of this one.
+const HANG_FROM = "Here";
 
 export async function createWeingart(host) {
   const stage = createStage(host, { dpr: 2 });
@@ -131,7 +144,7 @@ export async function createWeingart(host) {
   // riser of the same brass stood on end, so a rule can drop three faces at
   // a joint and still read as one stroke.
   const stepOf = (d) => {
-    const step = d.rule || d.rev || d.size >= LETTER_MIN ? UNIT : d.size * STEP_BODY;
+    const step = d.rule || d.rev || d.hang || d.size >= LETTER_MIN ? UNIT : d.size * STEP_BODY;
     const sy = Math.round(step * 2) / 2;
     const body = d.rule ? d.thick + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
     const sx = d.rev ? sy * STEP_RUN : 0;
@@ -160,12 +173,33 @@ export async function createWeingart(host) {
   // baseline: that many faces below the rule, the brass seats on the line
   // the figure stands on and goes no deeper, so a full push ends with the
   // last tread as the figure's own baseline rule.
-  const fitRule = (s) => {
-    const red = slugs.find((o) => o.layer === s.fit);
-    ctx.font = red.font;
+  // A glyph measured as large as it can be without leaving the size the
+  // browser draws it at (its ink bounds come back in whole pixels, and change
+  // outline past about 256px), so an edge is placed to a fraction of a pixel.
+  const measure = (s, ch) => {
+    const k = Math.max(1, Math.floor(240 / s.size));
+    ctx.font = `${weight[s.w]} ${s.size * k}px ${sans}`;
+    const m = ctx.measureText(ch);
+    return { left: m.actualBoundingBoxLeft / k, cap: m.actualBoundingBoxAscent / k };
+  };
+  const bearing = (s, ch) => measure(s, ch).left;
+  // A figure's measured ink, left and right, in design space.
+  const inkSpan = (layer) => {
+    const red = slugs.find((o) => o.layer === layer);
     const n = red.text.length;
-    const l = red.x + red.cx[0] - ctx.measureText(red.text[0]).actualBoundingBoxLeft - s.x;
-    const r = red.x + red.cx[n - 1] + ctx.measureText(red.text[n - 1]).actualBoundingBoxRight - s.x;
+    ctx.font = red.font;
+    const r = red.x + red.cx[n - 1] + ctx.measureText(red.text[n - 1]).actualBoundingBoxRight;
+    return {
+      red,
+      l: red.x + red.cx[0] - bearing(red, red.text[0]),
+      r,
+    };
+  };
+  const fitRule = (s) => {
+    const span = inkSpan(s.fit);
+    const red = span.red;
+    const l = span.l - s.x;
+    const r = span.r - s.x;
     const us = s.units;
     const lead = us[us.length - 1].x;
     // The last piece of case length before the figure is trimmed or packed to
@@ -187,6 +221,22 @@ export async function createWeingart(host) {
   const shownAt = (s, v, j) => {
     if (!s.fit || j !== s.units.length - 1) return v[j];
     return v[j] >= s.datum ? s.datum : 0;
+  };
+  // Lines set on a figure's axis: each line's first ink flush on the
+  // figure's left ink edge, the first line's caps on the cap line of
+  // HANG_FROM, the rest a whole lead below the line before. Placed once, with
+  // the forme; the lever and the chain work on them from there.
+  const capOf = (s) => measure(s, "H").cap;
+  const hang = () => {
+    const from = slugs.find((o) => o.text === HANG_FROM);
+    let y = null;
+    for (const s of slugs) {
+      if (!s.hang) continue;
+      const { l } = inkSpan(s.hang);
+      s.x = l + bearing(s, s.text[0]);
+      y = y == null ? Math.round(from.y - capOf(from) + capOf(s)) : y + s.lead;
+      s.y = y;
+    }
   };
   const cut = () => {
     for (const s of slugs) {
@@ -226,6 +276,7 @@ export async function createWeingart(host) {
       s.units[s.units.length - 1].last = true;
     }
     for (const s of slugs) if (s.fit) fitRule(s);
+    hang();
     for (const s of slugs) {
       s.vec = s.units.map(() => 0);
       s.pitch = (s.units[s.units.length - 1].x + s.units[s.units.length - 1].w) / s.units.length;
@@ -454,12 +505,13 @@ export async function createWeingart(host) {
   };
 
   // Bodies side by side in neighbouring lines pass; lead is only above and below.
-  const touches = (a, b) =>
-    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h + GAP && b.y < a.y + a.h + GAP;
+  const touches = (a, b, g = GAP) =>
+    a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h + g && b.y < a.y + a.h + g;
+  const gapOf = (a, b) => (a.hang && b.hang ? GAP_SMALL : GAP);
   // Two lines touch if any sort of one touches any sort of the other.
-  const touchesAny = (A, B) => {
-    if (!touches(union(A), union(B))) return false;
-    for (const a of A) for (const b of B) if (touches(a, b)) return true;
+  const touchesAny = (A, B, g = GAP) => {
+    if (!touches(union(A), union(B), g)) return false;
+    for (const a of A) for (const b of B) if (touches(a, b, g)) return true;
     return false;
   };
 
@@ -491,7 +543,8 @@ export async function createWeingart(host) {
       for (const o of slugs) {
         if (o === a || o.layer !== a.layer) continue;
         const v0 = stateOf(o);
-        if (!touchesAny(ra, rectsAt(o, v0))) continue;
+        const g = gapOf(a, o);
+        if (!touchesAny(ra, rectsAt(o, v0), g)) continue;
         // A body behind the push can never be cleared by shoving it on.
         if (o === s) return null;
         const vo = v0.slice();
@@ -500,7 +553,7 @@ export async function createWeingart(host) {
         for (let n = 0; ; n++) {
           let j = -1;
           for (const r of rectsAt(o, vo)) {
-            if (r.j > j && touches(ua, r) && ra.some((q) => touches(q, r))) j = r.j;
+            if (r.j > j && touches(ua, r, g) && ra.some((q) => touches(q, r, g))) j = r.j;
           }
           if (j < 0) break;
           // Landing on a line's first sort: the margin holds, the run locks.
@@ -515,7 +568,7 @@ export async function createWeingart(host) {
     for (const [m, { v }] of next) {
       const rm = rectsAt(m, v);
       for (const o of slugs) {
-        if (o !== m && o.layer === m.layer && touchesAny(rm, rectsAt(o, stateOf(o)))) return null;
+        if (o !== m && o.layer === m.layer && touchesAny(rm, rectsAt(o, stateOf(o)), gapOf(m, o))) return null;
       }
     }
     return next;
