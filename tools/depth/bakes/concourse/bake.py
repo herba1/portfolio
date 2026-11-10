@@ -29,7 +29,8 @@ Order: detect.py, segment.py, tools/depth/normals.py <photo> <workdir>/moge
 --model vits, plate.py, plate_fix.py <workdir> 15 26 31, then this.
 
 Writes <outdir>/floor.webp, people.webp (an atlas: the photo's colour over
-each person's rect, their matte in alpha) and scene.json, plus tiles.jpg
+each person's rect, their matte in alpha, choked and
+decontaminated by defringe.py) and scene.json, plus tiles.jpg
 (a preview) in workdir.
 """
 import sys
@@ -42,8 +43,10 @@ from PIL import Image
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
+sys.path.insert(0, HERE)
 import kit  # noqa: E402
 import fill as fillmod  # noqa: E402
+from defringe import defringe  # noqa: E402
 
 PHOTO, WORK, OUT = sys.argv[1:4]
 os.makedirs(OUT, exist_ok=True)
@@ -390,6 +393,9 @@ for it in items:
     h, w = it["a"].shape
     atlas[ay:ay + h, ax:ax + w, :3] = it["rgb"]
     atlas[ay:ay + h, ax:ax + w, 3] = it["a"]
+# choke the matte 1.5 px and bleed the person's own colour into its rim, so
+# no road (a white stripe, sunlit asphalt) rides along as a halo
+atlas = defringe(atlas, 1.5)
 Image.fromarray((np.clip(atlas, 0, 1) * 255 + 0.5).astype(np.uint8), "RGBA").save(os.path.join(OUT, "people.webp"), quality=92, alpha_quality=100, method=6)
 print("atlas", ATW, ATH)
 

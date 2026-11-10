@@ -206,28 +206,26 @@ void main() {
   if (vFace < 0.5) {
     vec2 uv = photoPx(vRest) / uPhoto;
     vec3 a = texture(uFloor, uv).rgb;
-    // A lightbox: a diffuser lit evenly from inside. The road's tone is
-    // compressed almost flat (a fifteenth power keeps about 15% of the
-    // asphalt's grain and the stripes' contrast) ...
-    float l = luma(a);
-    float detail = pow(clamp(l / 0.34, 0.2, 3.0), 0.15);
-    // ... and the only real dark on it is the person's own shadow, read
-    // from a softened copy of the road (sunlit asphalt sits near 0.3, a
-    // shadow under 0.05) and laid on as a soft multiply
-    float ls = luma(texture(uFloor, uv, 3.0).rgb);
-    float shade = 1.0 - smoothstep(0.035, 0.17, ls);
-    detail = mix(detail, 1.0, shade); // the grain inside a shadow is the shadow's
-    float shadow = mix(1.0, 0.42, shade);
-    // brightest in the middle of the panel, easing off towards its frame
+    // A lightbox: the tile's patch of road is a transparency on a diffuser
+    // lit from inside. What comes through is the road itself, its asphalt
+    // (about 0.26 linear) and its stripes (about 0.78) scaled by the panel's
+    // gain, so the grain, the stripe edges and the person's own shadow all
+    // stay in the print ...
     vec2 r = (vUv - 0.5) * 2.0;
     float d2 = dot(r * r, vec2(0.5)) + 0.5 * max(r.x * r.x, r.y * r.y);
-    float grad = 1.06 - 0.24 * d2;
+    // ... the lamp behind it sits in the middle, so the panel is hottest
+    // there and falls off softly towards its frame ...
+    float centre = exp(-1.9 * d2);
+    float gain = (uRed > 0.5 ? 2.2 : 1.85) * (0.68 + 0.6 * centre);
+    // ... with a little of the lamp showing straight through the print
+    vec3 gel = uRed > 0.5 ? vec3(1.3, 0.05, 0.025) : uLight;
+    vec3 x = gel * uEmit * (a * gain + 0.07 * centre);
+    // the diffuser saturates softly: the stripes land near paper white
+    // without flattening, the asphalt stays a grainy light grey
+    const float W = 1.02;
+    vec3 panel = W * (1.0 - exp(-x / W));
     float frame = smoothstep(0.0, 0.035, min(min(vUv.x, 1.0 - vUv.x), min(vUv.y, 1.0 - vUv.y)));
-    grad *= 0.8 + 0.2 * frame;
-    // white panels are a warm paper white; a red gel runs hot in the middle,
-    // where the light through it is strongest
-    vec3 Lt = uRed > 0.5 ? mix(vec3(1.1, 0.035, 0.018), vec3(1.45, 0.15, 0.07), smoothstep(0.8, 0.0, d2)) : uLight * 1.5;
-    vec3 panel = Lt * uEmit * detail * shadow * grad;
+    panel *= 0.82 + 0.18 * frame;
     // the road goes to the panel as the lights go out
     float lb = smoothstep(0.08, 0.8, uGlow);
     o = vec4(mix(a, panel, lb), 1.0);
@@ -308,25 +306,19 @@ void main() {
   vec2 sz = uRect.zw - uRect.xy;
   if (q.x < 0.0 || q.y < 0.0 || q.x > sz.x || q.y > sz.y) discard;
   vec4 c = texture(uAtlas, (q + uAt) / uAtlasSize);
-  // choke the matte's outer tenth: that rim is part road (often a white
-  // stripe), which reads as a halo once the road is gone
-  c.a = clamp((c.a - 0.22) / 0.78, 0.0, 1.0);
+  // the bake choked the matte and bled the person's own colour into its rim
+  // (defringe.py); a last small choke keeps the very edge off the road
+  c.a = clamp((c.a - 0.1) / 0.9, 0.0, 1.0);
   if (c.a < 0.004) discard;
-  // Up-light from the panel under their feet: strongest at the shoes, gone
-  // by the waist; a red gel reaches further and washes them in its colour.
-  // The street's daylight goes out with the lights, so above it they settle.
-  float reach = uRed > 0.5 ? 0.7 : 0.34;
-  float f = exp(-vH / reach);
-  vec3 day = c.rgb * mix(1.0, 0.68 + 0.32 * f, uGlow);
-  vec3 up = uLight * uEmit * f;
-  // the light wraps round their outline (trouser seams, shoe edges, hems):
-  // a rim wherever the matte thins out within a few pixels
-  vec2 at = (q + uAt) / uAtlasSize, px = 3.0 / uAtlasSize;
+  // They keep the photograph's colour: the panel lights the road, not them.
+  // All it gives them is a thin rim where the light grazes their lower
+  // outline (shoe edges, hems), gone by the knee.
+  vec2 at = (q + uAt) / uAtlasSize, px = 1.5 / uAtlasSize;
   float m = min(min(texture(uAtlas, at + vec2(px.x, 0.0)).a, texture(uAtlas, at - vec2(px.x, 0.0)).a),
                 min(texture(uAtlas, at + vec2(0.0, px.y)).a, texture(uAtlas, at - vec2(0.0, px.y)).a));
-  float rim = 1.0 - smoothstep(0.3, 0.95, m);
-  float red = uRed > 0.5 ? 1.0 : 0.0;
-  vec3 lit = day * (1.0 + up * mix(1.6, 3.0, red)) + up * (mix(0.12, 0.7, red) + rim * mix(0.7, 2.4, red));
+  float rim = 1.0 - smoothstep(0.35, 0.95, m);
+  float low = exp(-vH / 0.12);
+  vec3 lit = c.rgb + uLight * uEmit * rim * low * (uRed > 0.5 ? 1.1 : 0.45);
   o = vec4(lit * c.a * uDim, c.a);
 }`;
 
