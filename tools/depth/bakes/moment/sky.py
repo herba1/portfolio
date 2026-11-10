@@ -118,6 +118,35 @@ na = cv2.imread(f"{OUT}/near.webp", cv2.IMREAD_UNCHANGED)
 alpha = na[..., 3].astype(np.float32) / 255
 skym = 1 - alpha
 clear = (skym > 0.97) & ~kit.dilate(skym < 0.97, 3)
+# The birch (matte.py re-pulled its matte and opened the leaf gaps that
+# export.py had painted shut). A gap's sky is this bake's own merge there,
+# every frame a leaf swung across already left out, so it is kept down to
+# 1 px from the leaves instead of 3. Behind the leaves themselves the sky is
+# matte.py's estimate of it (solved from the gaps round each leaf) in place
+# of the leaf the frames saw, developed below with the rest of the sky, so
+# what a few degrees of orbit uncovers is the sky that was there, not one
+# pushed in from outside the tree (where a pixel is mostly leaf the
+# estimate has nothing to stand on, and the sky is pushed in from the
+# gaps round it). The first bake has only that pushed-in
+# sky there, so none of its pixels are used under the birch.
+ne = f"{WORK}/near_export.webp"
+bf = f"{WORK}/behind.npy"
+under = np.zeros_like(clear)
+gap = np.zeros_like(clear)
+if os.path.exists(ne) and os.path.exists(bf):
+    behind = np.load(bf).astype(np.float32)
+    have = np.isfinite(behind[..., 0])
+    under = have & kit.dilate(cv2.imread(ne, cv2.IMREAD_UNCHANGED)[..., 3] > 127, 2)
+    gap = under & (skym > 0.97) & ~kit.dilate(skym < 0.97, 1)
+    lw = np.where(under, kit.smoothstep(0.03, 0.3, alpha), 0)
+    hdr = np.where(under[..., None], np.nan_to_num(behind) * lw[..., None] + hdr * (1 - lw[..., None]), hdr)
+    hot = np.where(lw > 0.5, 0, hot)
+    del behind
+    # the estimate is only solved where a pixel is at most half leaf; under
+    # denser foliage it is pushed in from those, as before from outside
+    under = under & (alpha < 0.5)
+clear_w = kit.erode(clear, 2) | under
+clear = clear | under
 
 # ---------------------------------------------------------------- 2. the cloud, despeckled
 g = hdr * GAIN
@@ -202,10 +231,42 @@ if not os.path.exists(first):
     shutil.copy(f"{OUT}/sky.webp", first)
 old = lin(cv2.imread(first)[:, :, ::-1].astype(np.float32) / 255)
 rep = kit.blur(kit.dilate(cloud > 0.25, 5).astype(np.float32), 3)
-rep = np.maximum(rep, cloud)[..., None]
+rep = np.maximum(rep, cloud)
+rep = np.maximum(rep, kit.blur(under.astype(np.float32), 2))[..., None]
 g = g * rep + old * (1 - rep)
 
-w = kit.erode(clear, 2).astype(np.float32)
+# flecks: anything darker than its 9 px closing by more than the noise is
+# not sky. In the open blue that is a bird's last trace or the ghost of a
+# wire beside the near layer's own (small pieces only: the long shadow line
+# along the hotel's edge stays where the hotel covers it); in a leaf gap it
+# is a leaf the matte let through. Either is pushed over from the sky round it.
+Yb = enc(g) @ LUMA
+bh = cv2.morphologyEx(Yb.astype(np.float32), cv2.MORPH_CLOSE, kit.disk(4).astype(np.uint8)) - Yb
+dark = (bh > 0.035).astype(np.uint8)
+k, lab, st, _ = cv2.connectedComponentsWithStats(dark & ((cloud < 0.25) & clear).astype(np.uint8), connectivity=8)
+small = np.zeros(k, bool)
+small[1:] = st[1:, cv2.CC_STAT_AREA] < 150
+# and under the birch, whatever is not sky-coloured (bright, or clearly
+# blue) is a leaf the estimate could not see past
+ge = enc(g)
+skylike = (Yb > 0.55) | ((ge[..., 2] - ge[..., 0] > 0.15) & (Yb > 0.3))
+fleck = kit.dilate(small[lab] | (dark.astype(bool) & under), 2) | kit.dilate(under & ~skylike, 1)
+clear &= ~fleck
+clear_w &= ~fleck
+# under the birch every kept pixel is also held to the sky round it: one
+# pass of push-pull, smoothed, gives the local sky, and a pixel more than
+# a little darker than that is a leaf's shadow in the estimate (left in,
+# it would spread into a grey blot under the leaves and print in a gap;
+# blue is darker than the cloud round it and is still sky)
+if under.any():
+    ref = kit.blur((enc(kit.pushpull(g, clear_w.astype(np.float32))) @ LUMA).astype(np.float32), 6)
+    leafy = under & (Yb < ref - 0.04) & ~(ge[..., 2] - ge[..., 0] > 0.12)
+    clear &= ~leafy
+    clear_w &= ~leafy
+    fleck |= leafy
+print("flecks pushed over", int(fleck.sum()), "px")
+
+w = clear_w.astype(np.float32)
 sky = kit.pushpull(g, w)
 sky = np.where(clear[..., None], g, sky)
 out = np.clip(np.round(enc(sky) * 255), 0, 255).astype(np.uint8)[:, :, ::-1]
