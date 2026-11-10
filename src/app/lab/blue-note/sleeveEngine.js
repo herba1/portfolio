@@ -14,7 +14,8 @@ import { loadCover } from "../_kit/covers";
 // near edge behind them, arriving while the last outgoing word is still on
 // the square. Every word travels at the one speed along the one axis, and
 // the timing is planned so that each frame still holds a whole word of the
-// title and at most one word caught by an edge. The photograph's crop moves
+// title, at most one word caught by an edge, and only ever one credit: the
+// outgoing credit is off the square before the incoming one touches it. The photograph's crop moves
 // underneath, one pair of edges and then the other. Each ink is drawn on its
 // own plate and overprinted (multiply), the black plate a hair out of
 // register with the colour.
@@ -53,6 +54,13 @@ const tracking = (px) => -0.043 * (px - 12);
 // All lengths are in sleeve widths. Words anchor at their baseline-left.
 // k / c: whether the black / colour plate prints a word; a word neither
 // plate prints is reversed out of whatever ink it sits on.
+//
+// The credit is set, not dropped in: every sleeve keeps at least one credit
+// cap-height of clear board or ink between the credit's ink and every title
+// word's ink box, the photograph, the edges of a colour field and the edges
+// of the sleeve (creditAir checks it), and it hangs off a line the sleeve
+// already has: the left of a title word's ink, the photograph's edge, the
+// top of a stem.
 function layouts(adv) {
   const W = (x, y, s, o = {}) => ({ x, y, s, sx: 1, r: 0, k: 1, c: 0, ...o });
   const line = (x, y, s, o = {}, gap = 0.26) => {
@@ -69,41 +77,51 @@ function layouts(adv) {
       photo: photo(0, 0, 1, 0.6, 0, 0.5, 0.42, 1.06),
       block: null,
       words: line(-0.012, 0.968, 0.38),
-      credit: W(0.05, 0.672, 0.042, { k: 0, c: 1 }),
+      // Centred in the band between the picture and the title's ascenders.
+      credit: W(0.05, 0.662, 0.042, { k: 0, c: 1 }),
     },
     // 1. Unit Structures: the title stacked down the left, a tall portrait.
     {
       photo: photo(0.5, 0, 0.5, 1, 1, 0.47, 0.5, 1),
       block: null,
       words: [W(0.03, 0.43, 0.44), W(0.03, 0.75, 0.44, { k: 0, c: 1 }), W(0.03, 1.07, 0.44)],
-      credit: W(0.04, 0.085, 0.042, { k: 0, c: 1 }),
+      // Flush with the left of "let"'s ink, clear above its ascender.
+      credit: W(0.056, 0.075, 0.042, { k: 0, c: 1 }),
     },
-    // 2. Out to Lunch: one letter pair at the scale of the sleeve.
+    // 2. Out to Lunch: one letter pair at the scale of the sleeve. The small
+    // title's ascenders top out on the photograph's top edge, and the credit
+    // hangs flush with it in the band above the giant "be".
     {
       photo: photo(0.06, 0.06, 0.4, 0.4, 0, 0.4, 0.42, 1.55),
       block: null,
-      words: [W(0.52, 0.205, 0.17), W(0.52 + 0.17 * (adv.let + 0.26), 0.205, 0.17), W(-0.1, 1.17, 1.22, { k: 0, c: 1 })],
-      credit: W(0.522, 0.27, 0.042),
+      words: [W(0.52, 0.182, 0.17), W(0.52 + 0.17 * (adv.let + 0.26), 0.182, 0.17), W(-0.1, 1.19, 1.22, { k: 0, c: 1 })],
+      credit: W(0.529, 0.25, 0.042),
     },
-    // 3. The title turned up the spine, the picture taking the rest.
+    // 3. The title turned up the spine, the picture taking the rest of the
+    // square but the foot: the credit sits on the board there, flush with
+    // the picture's left edge, its baseline where the title's ink begins.
     {
-      photo: photo(0.33, 0, 0.67, 1, 3, 0.5, 0.5, 1),
+      photo: photo(0.33, 0, 0.67, 0.9, 3, 0.5, 0.5, 1),
       block: null,
       words: line(0.285, 0.985, 0.33, { r: -90, k: 0, c: 1 }).map((w) => ({ ...w, x: 0.285, y: 0.985 - (w.x - 0.285) })),
-      credit: W(0.375, 0.955, 0.042, { k: 1, c: 0 }),
+      credit: W(0.3287, 0.964, 0.042, { k: 1, c: 0 }),
     },
     // 4. The Freedom Rider: a field of colour and the title on one baseline,
     // read left to right: "let", then "it" at the scale of the field and
-    // reversed out of it, then "be". The small words overprint black.
+    // reversed out of it, then "be". The small words overprint black. The
+    // top edge crops through the middle of the i's tittle, so the dot is cut
+    // but still a dot and the word still reads "it". The credit is flush with
+    // the left of "let"'s ink, its baseline on the line where the i's stem
+    // begins, and ends a credit cap-height short of the stem.
     {
       photo: photo(0, 0.56, 1, 0.44, 2, 0.5, 0.36, 1.02),
       block: { x: 0, y: 0, w: 1, h: 0.56 },
       words: [
         W(0.05, 0.52, 0.15, { k: 1, c: 1 }),
-        W(0.215, 0.52, 0.86, { k: 0, c: 0 }),
-        W(0.215 + 0.86 * adv.it + 0.035, 0.52, 0.15, { k: 1, c: 1 }),
+        W(0.252, 0.52, 0.77, { k: 0, c: 0 }),
+        W(0.252 + 0.77 * adv.it + 0.06, 0.52, 0.15, { k: 1, c: 1 }),
       ],
-      credit: W(0.05, 0.075, 0.042, { k: 0, c: 0 }),
+      credit: W(0.058, 0.108, 0.042, { k: 0, c: 0 }),
     },
     // 5. Hub-Tones: picture square in the corner, the title stretched wide
     // and the last word sitting on the bottom edge.
@@ -111,7 +129,8 @@ function layouts(adv) {
       photo: photo(0.5, 0.04, 0.46, 0.46, 1, 0.55, 0.45, 1.25),
       block: null,
       words: [W(0.04, 0.705, 0.27, { sx: 1.3, k: 0, c: 1 }), W(0.04 + 0.27 * 1.3 * (adv.let + 0.22), 0.705, 0.27, { sx: 1.3, k: 0, c: 1 }), W(0.035, 1.0, 0.36, { sx: 1.3 })],
-      credit: W(0.045, 0.1, 0.042),
+      // Cap height on the photograph's top edge, flush with "let"'s ink.
+      credit: W(0.0606, 0.0702, 0.042),
     },
   ];
 }
@@ -139,6 +158,34 @@ function wordBox(w, m) {
       y1 = Math.max(y1, Y);
     }
   return [x0, y0, x1, y1];
+}
+
+// The credit's clear space at rest: what it keeps at least a credit
+// cap-height of air from, and by how much it falls short of that. Boxes are
+// [x0, y0, x1, y1] in sleeve widths; a title word bigger than the square is
+// measured by the part of it on the square.
+function creditAir(S, cap) {
+  const c = S.boxes[3];
+  // The gap between two boxes (negative when they overlap), and how far a
+  // box sits inside another.
+  const apart = (a, b) => Math.max(a[0] - b[2], b[0] - a[2], a[1] - b[3], b[1] - a[3]);
+  const within = (a, r) => Math.min(a[0] - r[0], a[1] - r[1], r[2] - a[2], r[3] - a[3]);
+  const short = [];
+  const need = (what, gap) => {
+    if (gap < cap - 1e-4) short.push({ what, gap: +gap.toFixed(4), cap: +cap.toFixed(4) });
+  };
+  need("sleeve edge", within(c, [0, 0, 1, 1]));
+  for (let i = 0; i < 3; i++) {
+    const b = onSquare(S.boxes[i]);
+    if (b) need(TEXT[i], apart(c, b));
+  }
+  const ph = S.photo;
+  need("photo", apart(c, [ph.x, ph.y, ph.x + ph.w, ph.y + ph.h]));
+  if (S.block) {
+    const r = [S.block.x, S.block.y, S.block.x + S.block.w, S.block.y + S.block.h];
+    need("field edge", shared(c, r) > 0 ? within(c, r) : apart(c, r));
+  }
+  return short;
 }
 
 // ---------------------------------------------------------------- the push
@@ -212,10 +259,12 @@ const nickTimes = (e) => e.nicks.map(([a, b]) => (e.out ? [e.t + softInv(a), e.t
 // Plan the push from sleeve A to sleeve B along pv. Outgoing words are picked
 // up front first and incoming words set down front first, each as early as
 // it can go without touching a word of the other sleeve and without a second
-// word being nicked at the same moment. A colour field travels as one piece
-// with the knocked-out words in it. If that leaves a moment with no whole
-// title word on the square, the last title word out is held back until an
-// incoming one has arrived.
+// word being nicked at the same moment. The credit is planned as a word like
+// the others, and there is only ever one credit on the sleeve: the incoming
+// credit does not touch the square until the outgoing one has left it. A
+// colour field travels as one piece with the knocked-out words in it. If
+// that leaves a moment with no whole title word on the square, the last
+// title word out is held back until an incoming one has arrived.
 function planPush(A, B, pv) {
   const make = (S, out) => {
     const els = S.words.map((w, i) => {
@@ -288,17 +337,28 @@ function planPush(A, B, pv) {
       const r = a.block;
       r.t = Math.max(0, ...r.inside.map((e) => e.t - (e.q[0] - r.q[0]) + 0.01));
     }
+    // The incoming credit is set down no sooner than its front edge can
+    // reach the square once the outgoing credit is clear of it.
+    const oldCredit = a.els.find((e) => !e.title);
+    const newCredit = b.els.find((e) => !e.title);
+    const creditGone = oldCredit ? oldCredit.t + softInv(1 + CLEAR - oldCredit.q[0]) : 0;
+    const creditFrom = newCredit ? creditGone + softInv(newCredit.q[1]) : 0;
     // Incoming, front first, none before the first word has started to leave.
     const firstOff = Math.min(...a.els.map((e) => e.t + softInv(Math.max(0, 1 - e.q[1]))));
     if (b.block) {
       const r = b.block;
-      place(r, Math.max(softInv(r.q[1] + CLEAR), firstOff + softInv(r.q[1])));
+      // A credit reversed out of the field waits with the whole field, so
+      // the field still comes in as one piece with its words.
+      const wait = r.inside.includes(newCredit) ? creditFrom : 0;
+      place(r, Math.max(softInv(r.q[1] + CLEAR), firstOff + softInv(r.q[1]), wait));
     }
     // Words of one lane arrive front first because they may not pass
     // through each other; words of different lanes arrive as soon as they can.
     for (const e of b.els) {
       let from = Math.max(softInv(e.q[1] + CLEAR), firstOff + softInv(e.q[1]));
       if (b.block && b.block.inside.includes(e)) from = Math.max(from, b.block.t);
+      // Its front edge reaches the square softInv(q1) before it is set down.
+      if (e === newCredit) from = Math.max(from, creditFrom);
       place(e, from);
     }
     const end = Math.max(...all.map((e) => life(e)[1]));
@@ -343,9 +403,9 @@ function wholeThroughout(plan) {
 const planTime = (plan, u) => clamp((u - PUSH[0]) / (PUSH[1] - PUSH[0]), 0, 1) * plan.end;
 
 // The check, at the resolution a reviewer would scrub at: from u = 0 to 1 in
-// steps of 0.05, at least one whole title word is on the square, and no more
+// steps of 0.05, at least one whole title word is on the square, no more
 // than one piece (the word in hand, crossing an edge) is cut by an edge by
-// less than NICK of its length. Returns the failures.
+// less than NICK of its length, and never two credits. Returns the failures.
 function auditPlan(plan, step = 0.05) {
   const bad = [];
   for (let k = 0; k <= Math.round(1 / step); k++) {
@@ -356,6 +416,7 @@ function auditPlan(plan, step = 0.05) {
     const nicked = st.filter(({ s }) => s.vis && s.nicked);
     if (!whole) bad.push({ u: +u.toFixed(2), why: "no whole title word" });
     if (nicked.length > 1) bad.push({ u: +u.toFixed(2), why: `${nicked.length} words nicked` });
+    if (st.filter(({ e, s }) => s.vis && !e.title).length > 1) bad.push({ u: +u.toFixed(2), why: "two credits" });
   }
   return bad;
 }
@@ -563,6 +624,8 @@ export async function createSleeve(host) {
     return { w: t.width / REF, l: t.actualBoundingBoxLeft / REF, r: t.actualBoundingBoxRight / REF, a: t.actualBoundingBoxAscent / REF, d: t.actualBoundingBoxDescent / REF };
   };
   const metrics = TEXT.map((_, i) => metric(i));
+  meas.font = `${CREDIT_WEIGHT} ${REF}px ${family}`;
+  const capH = meas.measureText("H").actualBoundingBoxAscent / REF;
   const adv = { let: metrics[0].w, it: metrics[1].w, be: metrics[2].w };
   const sleeves = layouts(adv).map((L, idx) => {
     const words = [...L.words, L.credit];
@@ -608,7 +671,9 @@ export async function createSleeve(host) {
     }
     const failed = report.filter((r) => r.bad.length || !r.overlap);
     console.log(`blue-note check: ${report.length - failed.length}/${report.length} handoffs pass, planned in ${Math.round(performance.now() - t0)}ms`, JSON.stringify(report));
-    host.dataset.check = failed.length ? "fail" : "pass";
+    const air = sleeves.map((S) => ({ sleeve: S.idx, short: creditAir(S, capH * S.credit.s) })).filter((r) => r.short.length);
+    console.log(`blue-note credit air: ${sleeves.length - air.length}/${sleeves.length} sleeves clear`, JSON.stringify(air));
+    host.dataset.check = failed.length || air.length ? "fail" : "pass";
   }
   // Which pair of crop edges moves first: the order whose first move runs
   // the picture under less of the outgoing words, which are still there.
