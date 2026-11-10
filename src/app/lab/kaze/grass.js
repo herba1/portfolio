@@ -238,12 +238,14 @@ export function buildGrass() {
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
 
   // ---- the anchors: three brome culms at your shoulder ----
+  // All nod downwind (the breeze runs to +x, az 70-120), at staggered lengths,
+  // so their heads hang at three heights and fan one way, never meeting.
   const ink = lin(0x1c2414);
   const inkTip = lin(0x232d18);
   const anchors = [
-    { D: 0.17, phi: -40, L: 0.98, az: 60, lean: 0.07, nod: 1.6, leaves: 0 },
-    { D: 0.22, phi: -16, L: 0.9, az: 100, lean: 0.05, nod: 1.4, leaves: 0 },
-    { D: 0.2, phi: 30, L: 0.95, az: -70, lean: 0.06, nod: 1.7, leaves: 0 },
+    { D: 0.17, phi: -40, L: 0.92, az: 70, lean: 0.07, nod: 1.1, leaves: 0 },
+    { D: 0.22, phi: -16, L: 0.68, az: 80, lean: 0.05, nod: 0.7, leaves: 0 },
+    { D: 0.2, phi: 30, L: 1.0, az: 120, lean: 0.06, nod: 1.2, leaves: 0 },
   ];
   for (const a of anchors) {
     culmWithHead(near, R, {
