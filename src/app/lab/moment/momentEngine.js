@@ -334,6 +334,10 @@ void main() {
   vec3 core = vec3(1.006, 1.0, 0.978);    // sunlit top, ~(241, 240, 236)
   vec3 tint = mix(shade, body, smoothstep(0.66, 0.82, yo));
   tint = mix(tint, core, smoothstep(0.84, 0.94, yo));
+  // the sky layer carries its own split tone from the bake (warm tops,
+  // skylit undersides): most of the hue is its, the tiers only steady it
+  vec3 baked = sky / max(dot(sky, LUMA), 1e-3);
+  tint = mix(tint, baked, 0.6);
   // a little of the cloud's own colour survives, so the folds keep their drawing
   vec3 own = (col - y0) * (yo / max(y0, 1e-3));
   vec3 graded = yo * tint + own * mix(0.2, 0.15, smoothstep(0.6, 0.85, yo));

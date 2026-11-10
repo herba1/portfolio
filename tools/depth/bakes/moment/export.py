@@ -9,7 +9,8 @@ MoGe-2 metric depth and camera), stab/f078.png f090.png (the two shutter
 frames, registered), sam/m078.png m090.png (SAM 2.1 mattes), flowAB.npy /
 flowBA.npy (chained DIS flow).
 
-Layers, back to front:
+Layers, back to front (sky.py then re-bakes sky.webp from the source
+frames, keeping this one's open blue sky; run it after this step):
   sky.webp     the sky alone, opaque; under the tree, the post and the hotel
                it is the sky pushed in from around them (push-pull), which is
                all a few degrees of orbit ever uncovers.
