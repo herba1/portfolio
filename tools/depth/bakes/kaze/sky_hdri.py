@@ -7,23 +7,28 @@ Poly Haven's "Kloofendal 48d Partly Cloudy (Pure Sky)" (Greg Zaal, Jarod
 Guest; CC0, https://polyhaven.com/a/kloofendal_48d_partly_cloudy_puresky):
 a pinhole camera pitched up into the dome, aimed so that the HDRI's sun
 lands where the photograph's sun is (SUN in kazeEngine.js), and rolled about
-that sun (ROLL -25) so the camera looks down the sun's side of the dome, away
-from the big cumulus: the sun burns through that cloud's sunlit edge in the
-top-left corner with its shaded base pushed up off the frame, and the middle
-and top of the frame are open deep blue with a lit cumulus dome rising from
-the grass below. (Rolled the other way, toward +25, the big cloud's shaded
-underside fills the middle of the frame as a flat blue-grey.) At this roll the
-zenith is just off the top-left of the frame, so the sky's up runs with the
-grass's convergence.
+that sun (ROLL -16) so the big cumulus lies along the top of the frame: the
+sun burns through its sunlit edge at the top left, the lit rim of billows runs
+off to the right through the upper third with the cloud's shaded underside
+above it (grey here, skylight blue once the engine's grade has it), and the
+middle of the frame is open deep cobalt down to a lit cumulus dome rising
+from the grass. (At -25 the big cloud was pushed off the top and only its
+sun-blown edge showed, a cream wash; toward 0 and past it the shaded
+underside fills the top half as a flat blue-grey.)
 
-The HDRI is linear radiance. It is printed with a soft log-log shoulder
-(every stop above the knee becomes HGAM of a stop) so the lit domed tops, and
-the silver-lit billows for degrees round the sun, keep their modelling
-instead of bunching into one cream value, and up that shoulder the
-colour is drawn round to a warm paper white (#FFF3E2) so the sun's surround
-and the sunlit domes roll off cream, never a cool grey. The sun's own core
-is held down, softly and well above the brightest cloud (the engine draws
-the sun and its glow analytically).
+The HDRI is linear radiance. A shoulder applied pixel by pixel cannot both
+bring the sunward cloud under white and keep its billows (the old soft
+log-log print squeezed the whole silver lining into one blurred cream
+value), so the print is local: log luminance is split by an edge-aware blur
+into the cloud's light (base) and its billows (detail); only the base goes up
+a filmic shoulder, with headroom left above it, and the detail goes back on
+amplified before a last roll to the print's white, a warm paper white
+(#FFF3E2) at about 0.92 display value: the lit domes keep their modelling
+and roll off cream, never a cool grey, and nothing reaches 255. The open sky
+is printed about 2/3 stop darker than it was, so the zenith lands a deep
+cobalt (about rgb 20, 80, 160 on screen). The sun's own core is held down,
+softly and well above the brightest cloud (the engine draws the sun and its
+glow analytically).
 
   python tools/depth/bakes/kaze/sky_hdri.py path/to/kloofendal_48d_partly_cloudy_puresky_8k.hdr [out_dir]
 """
@@ -37,18 +42,22 @@ from PIL import Image
 W, H = 3600, 2400  # finer than the plate: the crop is magnified about 1.5x on a wide screen
 SUN = (0.145, 0.2318)          # image uv of the photograph's sun
 HFOV = float(os.environ.get("HFOV", 78))
-ROLL = float(os.environ.get("ROLL", -25))
+ROLL = float(os.environ.get("ROLL", -16))
 EXPO = float(os.environ.get("EXPO", 0.34))
 SCALE = float(os.environ.get("SCALE", 1.0))   # preview scale
-SHADE = float(os.environ.get("SHADE", 0.55))   # skylight blue in the shaded cloud
-HUE = float(os.environ.get("HUE", 208))
-SATB = float(os.environ.get("SATB", 0.3))
-VALB = float(os.environ.get("VALB", 0.35))
+SHADE = float(os.environ.get("SHADE", 0.15))   # skylight blue in the shaded cloud (the engine adds the rest)
+HUE = float(os.environ.get("HUE", 218))
+SATB = float(os.environ.get("SATB", 0.6))
+VALB = float(os.environ.get("VALB", 0.05))   # open-sky lift; 0.35 printed it about 2/3 stop too light
 EDGE = float(os.environ.get("EDGE", 14))       # px at 3600 wide: how far the lift reaches into a cloud edge
-LIFT = float(os.environ.get("LIFT", 1.0))      # luminance gamma under the shoulder
-KNEE = float(os.environ.get("KNEE", 0.6))
+KNEE = float(os.environ.get("KNEE", 0.4))     # the shoulder's knee, as a fraction of its white
+TOPW = float(os.environ.get("TOPW", 0.92))     # the print's white (display value) the shoulder rolls to
+BASER = float(os.environ.get("BASER", 0.06))  # the base layer's reach, as a fraction of the width
+BEPS = float(os.environ.get("BEPS", 0.4))     # its edge stop, in squared stops
+BTOP = float(os.environ.get("BTOP", 0.65))     # the base's own white, as a fraction of the print's: the headroom left for the billows
+DETG = float(os.environ.get("DETG", 2.4))      # the detail's gain at the bottom of the shoulder
+DETH = float(os.environ.get("DETH", 0.5))     # and how much more it gains at the top
 CAPX = float(os.environ.get("CAPX", 3.5))     # the sun's hold, in multiples of the sky's 99.7th percentile
-HGAM = float(os.environ.get("HGAM", 0.3))     # contrast kept above the knee, in log luminance
 HSOFT = float(os.environ.get("HSOFT", 0.35))  # stops: how soft the knee's turn is
 SUNR = float(os.environ.get("SUNR", 6))      # degrees: the aureole eased to white
 WARMS = float(os.environ.get("WARMS", 1.0))    # how far the shoulder is drawn to the warm white
@@ -140,38 +149,68 @@ def enc(c):
     return np.where(c <= 0.0031308, 12.92 * c, 1.055 * np.power(c, 1 / 2.4) - 0.055)
 
 
+def guided(I, p, r, eps):
+    # He et al.'s guided filter, self-guided: an edge-aware blur that keeps a
+    # cloud's rim where it is and smooths only within it
+    k = (2 * r + 1, 2 * r + 1)
+    mI = cv2.boxFilter(I, -1, k)
+    mp = cv2.boxFilter(p, -1, k)
+    a = (cv2.boxFilter(I * p, -1, k) - mI * mp) / (cv2.boxFilter(I * I, -1, k) - mI * mI + eps)
+    b = mp - a * mI
+    return cv2.boxFilter(a, -1, k) * I + cv2.boxFilter(b, -1, k)
+
+
+def shoulder(Y, knee, top):
+    # linear to the knee, then an exponential ease with slope 1 at the knee
+    # into the asymptote: a film's shoulder, smooth to every order
+    return np.where(Y < knee, Y, knee + (top - knee) * (1 - np.exp(-(Y - knee) / (top - knee))))
+
+
 def tone(L):
-    # A print's shoulder on luminance, hue kept: linear to the midtones, then
-    # rolling smoothly into white so the domed tops keep their modelling.
+    """A filmic print on luminance, hue kept, that keeps the lit dome's texture.
+
+    A shoulder applied pixel by pixel cannot both bring the sunward cloud
+    down under white and keep its billows: every curve that rolls three
+    stops of silver lining into the top tenth of the range also squeezes
+    the half-stop of modelling inside it to nothing, and the old log-log
+    hinge printed the whole sunward cumulus as one blurred cream wash. So
+    the shoulder is laid on the cloud's light, not its texture: log
+    luminance is split by an edge-aware blur into a base (how lit this part
+    of the cloud is) and a detail (each billow against its neighbours). Only
+    the base goes up the shoulder, which rolls to a warm white at TOPW
+    (display value, about 0.92); the detail goes back on at full strength,
+    a little more toward the top where the shoulder flattens most, and the
+    sum rolls off once more so no billow passes that white.
+    """
     Y = L @ np.array([0.2126, 0.7152, 0.0722], np.float32)
-    Y = np.maximum(Y, 1e-6)
-    # The shoulder is a soft hinge in log-log: below the knee luminance
-    # passes through, above it every stop becomes HGAM of a stop. An
-    # exponential ease into 1.0 (slope 1 at the knee) squeezed the sunlit
-    # cumulus, nearly two stops of real billow and shadow between the knee
-    # and the held sun, into one flat cream value; a constant ratio in log
-    # keeps its local contrast all the way up. With the sun held at the cap
-    # (bake()), the top of the range lands just under white.
-    k = KNEE                     # where the shoulder starts
-    x = np.log2(Y / k)
-    hinge = 0.5 * (np.sqrt(x * x + HSOFT * HSOFT) + x)
-    Yt = k * np.exp2(x - (1 - HGAM) * hinge)
-    # and a gentle lift under it, the same for cloud and sky so a cloud's thin
-    # grey edge keeps its place between the two and never rings darker than
-    # the blue beside it
-    Yt = np.power(np.clip(Yt, 0, None), LIFT)
+    Y = np.maximum(Y, 1e-6).astype(np.float32)
+    lg = np.log2(Y)
+    r = max(2, int(round(BASER * Y.shape[1])))
+    base = guided(lg, lg, r, BEPS)
+    det = lg - base
+    top = float(dec(TOPW)) / float(WARM_UNIT.max())  # luminance whose warm white peaks at TOPW
+    Yb = np.exp2(base)
+    Tb = shoulder(Yb, KNEE * top * BTOP, top * BTOP)
+    # the detail's gain rises up the shoulder, where the base was squeezed
+    g = DETG * (1 + DETH * smooth(KNEE * top, top, Tb))
+    Yt = shoulder(Tb * np.exp2(det * g), KNEE * top, top)
     out = L * (Yt / Y)[..., None]
-    # The shoulder's colour. Up the shoulder the light is the sun's, on the
-    # domes and in the aureole alike: it is drawn round to a warm paper white
-    # (about #FFF3E2) at its own luminance, so the sunlit tops and the sun's
-    # surround roll off cream rather than bleaching to the cool grey of a
-    # per-channel clip. Below the knee nothing moves.
-    w = (smooth(k, 1.0, Yt) ** 1.5 * WARMS)[..., None]
+    # The shoulder's colour: up it the light is the sun's, on the domes and
+    # in the aureole alike, drawn round to the warm paper white (#FFF3E2) at
+    # its own luminance, so the sunlit tops roll off cream rather than
+    # bleaching to the cool grey of a per-channel clip. Below the knee
+    # nothing moves.
+    w = (smooth(KNEE * top, top, Yt) ** 1.5 * WARMS)[..., None]
     out = out * (1 - w) + Yt[..., None] * WARM_UNIT * w
-    # and what passes white desaturates to that same white rather than
-    # clipping per channel
+    # and nothing passes the print's white in any channel
     m = np.maximum(out.max(-1, keepdims=True), 1e-6)
-    return np.clip(np.where(m > 1, out / m + (1 - 1 / m) * WARM_WHITE, out), 0, 1)
+    lim = float(dec(TOPW))
+    return np.clip(np.where(m > lim, out * (lim / m), out), 0, 1)
+
+
+def dec(v):
+    # display value to linear
+    return np.where(v <= 0.04045, v / 12.92, np.power((v + 0.055) / 1.055, 2.4))
 
 
 def smooth(e0, e1, x):
@@ -196,7 +235,7 @@ def grade(T, ang):
     open_ = (1 - cloud) * away
     cloud = cloud * away
     Yc = Y[..., None]
-    shade = (cloud * (1 - smooth(0.3, 0.78, Y)))[..., None]
+    shade = (cloud * (1 - smooth(0.35, 0.85, Y)))[..., None]
     lit = (cloud * smooth(0.4, 0.8, Y))[..., None]
     sky_blue = np.array([0.60, 1.06, 1.59], np.float32)   # hue ~205, linear, unit luminance
     warm = np.array([1.05, 1.0, 0.9], np.float32)

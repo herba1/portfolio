@@ -18,11 +18,12 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 //
 // The sky behind (sky.webp) is a real summer cumulus sky cut from an HDRI
 // looking up into the dome, aimed so its sun sits on the photograph's
-// (tools/depth/bakes/kaze/sky_hdri.py) and turned so the frame's middle and
-// top are open cobalt: the sun burns through the edge of the big cumulus in
-// the top left (its shaded base pushed into that corner), and a lit dome
-// rises behind the grass. Sunlit tops roll off to a warm cream white, the
-// shaded flanks go skylight blue. It drifts with a two-phase flow map
+// (tools/depth/bakes/kaze/sky_hdri.py) and turned so the big cumulus lies
+// along the top: the sun burns through its sunlit edge at the top left, the
+// lit rim runs through the upper third under a skylight-blue shaded
+// underside, the middle is open deep cobalt, and a lit dome rises behind the
+// grass. The bake prints the lit cloud locally, so its billows keep their
+// modelling up to a warm cream white just under the print's white. It drifts with a two-phase flow map
 // (Vlachos 2010), faster toward the zenith, and the clouds lean after your
 // gusts.
 //
@@ -174,8 +175,9 @@ void main() {
   float ring = clamp(a - ab, 0.0, 1.0) * smoothstep(0.55, 0.95, a);
   float sunK = exp(-r / 0.04);
   col += vec3(1.0, 0.36, 0.12) * 3.5 * ring * sunK;
-  // The highlight shoulder's diffusion (kept low: at full strength it
-  // stacked on the cream and the sun and flattened the sunward cloud): only the light above the threshold
+  // The highlight shoulder's diffusion (kept low, and lower still now the
+  // bake keeps the lit billows' texture: a wide warm veil over them washed
+  // that texture back out into a cream glow): only the light above the threshold
   // (the lit cloud tops, read from the drifting sky heavily blurred, so the
   // bloom goes with its cloud) spreads, warm, over the sky and never over the
   // blades in front of it, so they hold as crisp dark silhouettes. Nothing
@@ -184,7 +186,7 @@ void main() {
   vec3 h1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.y + 5.0).rgb;
   float dif = smoothstep(0.5, 0.9, dot(toLin(mix(h1, h0, cw)), vec3(0.2126, 0.7152, 0.0722)));
   dif *= dif * 0.6 * smoothstep(0.08, 0.35, r);
-  col += vec3(1.0, 0.8, 0.55) * 0.275 * dif * (1.0 - a);
+  col += vec3(1.0, 0.8, 0.55) * 0.12 * dif * (1.0 - a);
   // The shoulder: one roll-off on the brightest channel, the colour scaled
   // by it as a whole, so a hot pixel keeps its hue and bleeds to cream
   // instead of clipping channel by channel. Linear to the knee, then an
