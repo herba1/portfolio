@@ -16,8 +16,11 @@
 // more than its own body below the one before it, and the brass rule and
 // the reversed slug step as one body, each joint filled by a riser, so they
 // break as continuous stairs, never as dashes or labels. The rule is cut to the
-// red's measure and seats on the red's baseline: a full push ends with its
-// last tread as the red's own baseline rule, from the 3 to the 5. When a
+// red's measure: its last piece is never set across the figure's face. It
+// holds over the red's cap line as a head rule while the run behind it
+// steps, and when the push brings it to its datum it seats on the red's
+// baseline in one knock, so a full push ends with it as the red's own
+// baseline rule, from the 3 to the 5. When a
 // step would need the margin to give, the whole run locks. Only the red
 // run, printed in a second pass, crosses the black, and where it does the
 // two inks make a third.
@@ -73,7 +76,7 @@ const law = (size) => -0.043 * (size - 12);
 // The forme. x, y are the baseline-left (or rule top-left) of each line as composed.
 const FORME = [
   { text: "The Beatles", size: 20, w: "strong", x: 4, y: 52 },
-  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 568 },
+  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 592 },
   { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
   { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
   { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
@@ -86,9 +89,12 @@ const FORME = [
   // short pieces first let it fall as fast as the letters above it. Where it
   // is shoved, the run ahead takes on the riser of the line above, so a full
   // push carries it down to its datum as a fourth stair parallel to the
-  // title, and seats the last piece there. The red stands a whole number of
-  // risers below the rule, so the last step is a full one.
-  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 156], thick: UNIT, x: 0, y: 400, fit: "red" },
+  // title. The last piece holds over the red's cap line until the run
+  // reaches its datum, then seats there in one knock. The red stands a whole
+  // number of faces below the rule, its cap line just under the rule's face,
+  // and two faces a joint across the pieces before it come out at exactly
+  // that datum, so a full push seats it with a full step.
+  { rule: true, pieces: [36, 36, 72, 72, 72, 72, 72, 48, 156], thick: UNIT, x: 0, y: 400, fit: "red" },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
@@ -163,13 +169,24 @@ export async function createWeingart(host) {
     const us = s.units;
     const lead = us[us.length - 1].x;
     // The last piece of case length before the figure is trimmed or packed to
-    // meet it. The joint sits half a face in, so when the rule steps there its
-    // riser (centred on the joint) stands flush with the figure's left edge.
-    const at = l + s.thick / 2;
+    // meet it. The joint sits half a face out, so when the rule steps there its
+    // riser (centred on the joint) stands against the figure's left edge, not
+    // on it: no brass prints over the figure except its own baseline rule.
+    const at = l - s.thick / 2;
     us[us.length - 2].w += at - lead;
     us[us.length - 1].x = at;
     us[us.length - 1].w = r - at;
     s.datum = Math.round((red.y - s.y) / s.thick);
+  };
+  // The last piece of a fitted rule is the figure's own rule, so it is
+  // never set across the figure's face: it holds where it was composed, a
+  // head rule over the cap line, while the run behind it steps, and only
+  // when the push brings it to the datum does it go, in one knock, to the
+  // baseline. Its place in the line's state is still counted as the lever
+  // and the chain move it; this is where it is printed.
+  const shownAt = (s, v, j) => {
+    if (!s.fit || j !== s.units.length - 1) return v[j];
+    return v[j] >= s.datum ? s.datum : 0;
   };
   const cut = () => {
     for (const s of slugs) {
@@ -390,9 +407,13 @@ export async function createWeingart(host) {
   const ground = (s, off, face = true) => {
     const out = [];
     let prev = null;
+    const last = s.units.length - 1;
     s.units.forEach((u, j) => {
       const r = { ...faceRect(s, u, off(u, j)), j };
-      if (prev) {
+      // A fitted rule's last piece held above the run behind it stands
+      // alone, its own piece of brass: no riser climbs back up to it.
+      const alone = prev && s.fit && j === last && r.y < prev.y;
+      if (prev && !alone) {
         const a = prev.x + prev.w;
         // A brass rule drops straight down at its joints, so its riser is a
         // piece of the same rule stood on end, as thick as its face, centred
@@ -416,7 +437,7 @@ export async function createWeingart(host) {
     s.units.forEach((u, j) => u.vis && out.push({ ...unitRect(s, u, off(u, j)), j }));
     return out;
   };
-  const rectsAt = (s, v) => rectsFor(s, (u, j) => v[j]);
+  const rectsAt = (s, v) => rectsFor(s, (u, j) => shownAt(s, v, j));
   const rectsNow = (s) => rectsFor(s, (u) => u.p);
   const union = (rs) => {
     let x0 = Infinity;
@@ -508,15 +529,16 @@ export async function createWeingart(host) {
     s.vec = vec;
     const stagger = s === held ? STAGGER_HELD : STAGGER;
     s.units.forEach((u, j) => {
+      const to = shownAt(s, vec, j);
       if (!animate) {
-        u.p = u.k = u.q = vec[j];
+        u.p = u.k = u.q = to;
         u.v = 0;
         u.wait = 0;
         u.settled = true;
         return;
       }
-      if (vec[j] === u.q) return;
-      u.q = vec[j];
+      if (to === u.q) return;
+      u.q = to;
       u.settled = false;
       // Already queued: keep its place in the sequence, it takes the newest step when it goes.
       if (u.wait <= 0) u.wait = depth * LINK + j * stagger + 1e-6;
