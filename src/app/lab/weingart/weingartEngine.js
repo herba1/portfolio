@@ -1,16 +1,16 @@
 // Weingart: a song credit set as a forme of metal type. Every line is a row
-// of sorts, single pieces of lead, that move only in whole steps down and
-// to the right. A line's first sort is locked to its composed place on the
-// chase's left margin, so the Swiss axis of the forme always holds: push a
-// sort down and the line swings on that first sort like a lever, each sort
-// taking the whole steps its place along the lever reaches, so the line
-// breaks into an uneven staircase hinged on the margin. Each line steps by
-// a fraction of its own body, so big type takes big steps and small type
-// small ones, and every line fans out at its own slope. Sorts of the same
-// ink are solid bodies: a staircase that comes down onto a neighbouring
-// line shoves the sorts it lands on, and the run ahead of them, down a
-// step, which breaks that line into its own staircase, and so on down the
-// chain. Lead stays in contact: no sort ever hangs more than its own body
+// of sorts, single pieces of lead, that move only in whole steps, straight
+// down, so a word keeps its shape while its baseline breaks. A line's first
+// sort is locked to its composed place on the chase's left margin, so the
+// Swiss axis of the forme always holds: push a sort down and the line
+// swings on that first sort like a lever, a step at a time, its far end
+// first, so the line bends before it breaks into an uneven staircase
+// hinged on the margin. Each line steps by a fraction of its own body, so
+// big type takes big steps and small type small ones. Sorts of the same
+// ink are solid bodies: a line that comes down onto a neighbouring line
+// shoves the sorts it lands on a step, the line bends to them from the
+// margin and runs on shallower past them, a knee of its own, and so on
+// down the chain, so every line breaks to its own rhythm. Lead stays in contact: no sort ever hangs more than its own body
 // below the one before it, and the brass rule and the reversed slug step
 // as one body, each joint filled by a riser, so a full push ends as one
 // continuous staircase, never as dashes or labels. When a step would need
@@ -28,11 +28,17 @@ const DH = 600;
 // baseline; small type, set in word slugs, by a third of its body. Brass
 // rule steps by its whole face and a reversed slug by half its ground, so
 // their steps read as cut, never as a rule or a slug knocked out of true.
-// Every step runs right by half its drop.
+// Type and rule drop straight down: sorts stay butted at their set widths,
+// so a word keeps its shape and its word spaces and only the baseline
+// breaks. Only the reversed slug runs right as it steps, by half the drop,
+// so its blocks fall as a shallow, wide stair of their own.
 const STEP_EM = 1 / 6;
 const STEP_BODY = 1 / 3;
 const STEP_GROUND = 1 / 2;
 const STEP_RUN = 0.5;
+// A shoved line runs on past its knee at this fraction of the slope from
+// the margin to where it was hit: steep, then shallow, never one diagonal.
+const TAIL = 6;
 // The steepest a line can swing: drop from one sort to the next over the
 // sort's average width. A line of small steps takes more of them to get there.
 const STEEP = 0.8;
@@ -75,8 +81,8 @@ const FORME = [
   // the "t" alone, so the sort beside it can step down past the margin piece;
   // the short pieces first let it fall as fast as the letters above it, the
   // long ones after let it run out under and across the red.
-  { rule: true, pieces: [48, 48, 60, 72, 72, 96, 96, 120, 96, 144], thick: 12, x: 0, y: 400 },
-  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 472 },
+  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 120, 96, 156], thick: 12, x: 0, y: 400 },
+  { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
   { text: "Apple Records", size: 13, w: "body", x: 700, y: 136 },
@@ -108,13 +114,15 @@ export async function createWeingart(host) {
   // A line's own step, to the half pixel, and its reach: the most whole
   // steps one sort can sit below (or above) its left neighbour. That is its
   // own body height, so a sort never loses contact with the one before it:
-  // lead stays in contact, it does not float. A rule's body is its face
-  // and the lead either side of it, which the riser at each joint fills.
+  // lead stays in contact, it does not float. A rule's joint is filled by a
+  // riser of the same brass stood on end, so a rule can drop three faces at
+  // a joint and still read as one stroke.
   const stepOf = (d) => {
     const step = d.rule ? d.thick : d.rev ? REV_H * STEP_GROUND : d.size >= LETTER_MIN ? d.size * STEP_EM : d.size * STEP_BODY;
     const sy = Math.round(step * 2) / 2;
     const body = d.rule ? d.thick + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
-    return { sy, sx: sy * STEP_RUN, reach: Math.max(1, Math.floor(body / sy + 1e-6)) };
+    const sx = d.rev ? sy * STEP_RUN : 0;
+    return { sy, sx, reach: d.rule ? 3 : Math.max(1, Math.floor(body / sy + 1e-6)) };
   };
 
   const slugs = FORME.map((d, i) => ({
@@ -187,13 +195,13 @@ export async function createWeingart(host) {
   // the line is a lever hinged on it. Push sort j one step (dir) and the
   // line swings until j sits that step further on. The drop is shared out
   // over the printing sorts between the margin and j in whole steps, the
-  // small ones first, so every sort steps at least as far below its
-  // neighbour as that one stepped below the one before it: 0, 1, 2, 3, then
-  // 0, 1, 2, 4, then 0, 1, 3, 5. A stair never has a flat tread in it, so a
-  // line broken at all is broken into sorts all the way along: a lever too
-  // short to give every sort a step of its own snaps to one step each, and
-  // back flat. Sorts past j run on a step each. No line swings steeper
-  // than STEEP: past that it is locked.
+  // far ones first: 0, 0, 0, 1, then 0, 0, 1, 2, then 0, 1, 2, 3, then
+  // 0, 1, 2, 4. So a line bends a step at a time: one step on "Here" drops
+  // only its last letter, the next tips the middle too, and only a long
+  // pull breaks it into a full staircase. Flat treads are allowed: a word
+  // stays a word until it is pushed far enough to come apart. Sorts past j
+  // run on a step each. No line swings steeper than STEEP: past that it is
+  // locked.
   const lever = (s, D, J) => {
     const a = Math.abs(D);
     const q = Math.floor(a / J);
@@ -231,17 +239,13 @@ export async function createWeingart(host) {
   const shove = (s, v, j, dir) => {
     const J = s.ord[j];
     if (j <= 0 || J <= 0) return false;
-    let D = v[j] + dir;
-    if (D !== 0 && Math.abs(D) < J) D = Math.sign(D) === dir ? dir * J : 0;
+    const D = v[j] + dir;
     if ((Math.abs(D) / J) * s.sy > STEEP * s.pitch) return false;
     const to = lever(s, D, J);
     const w = v.slice();
-    const sd = Math.sign(D) || dir;
     let p = 0;
     for (let i = 1; i < w.length; i++) {
       w[i] = dir > 0 ? Math.max(w[i], to[i]) : Math.min(w[i], to[i]);
-      // A broken line has no flat tread: each printing sort a step on from the last.
-      if (D !== 0 && s.units[i].vis && sd * (w[i] - w[p]) < 1) w[i] = w[p] + sd;
       if (!s.units[i].vis) w[i] = w[p];
       else p = i;
       if (Math.abs(w[i] - w[i - 1]) > s.reach) return false;
@@ -250,33 +254,35 @@ export async function createWeingart(host) {
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
-  // A line that is shoved is not swung: the sort it is hit on goes a step
-  // on (dir), and only as much else as the staircase needs. Every printing
-  // sort ahead of it steps at least once more than the one before, so the
-  // run ahead stays a stair; behind it, each sort keeps its place unless it
-  // would hang more than its reach above the next, or would leave the stair
-  // without a step of its own, and then it comes too, back toward the
-  // margin. A line broken for the first time is broken into one step per
-  // sort, from the margin to the sort that was hit. Hit on its first sort,
-  // the margin holds and the run locks. Returns false then.
+  // A line that is shoved is not swung by a hand: the sort it is hit on goes
+  // a step on (dir), and only as much else as it needs. Behind it, the sorts
+  // back to the margin bend down to it along the lever, never further than
+  // their reach from the next; ahead of it, the run rides on at its level
+  // unless it already sits deeper. So a shoved line bends where it was hit
+  // and runs on flat from there: a knee, not the same diagonal as the line
+  // that hit it, and every line in the chain breaks to a rhythm of its own.
+  // Hit on its first sort, the margin holds and the run locks. Returns
+  // false then.
   const carry = (s, v, j, dir) => {
     const J = s.ord[j];
     if (j <= 0 || J <= 0) return false;
     // Worked in the direction the line is broken: sd turns it the right way up.
     const sd = v[j] * dir >= 0 ? dir : -dir;
     const u = v.map((x) => x * sd);
-    if (dir * sd < 0 && u[j] - 1 < J) return false;
-    u[j] = Math.max(u[j] + dir * sd, J);
+    const deeper = dir * sd > 0;
+    if (!deeper && u[j] < 1) return false;
+    u[j] += deeper ? 1 : -1;
+    const to = lever(s, u[j], J);
     let p = j;
     for (let i = j + 1; i < u.length; i++) {
       if (!s.units[i].vis) continue;
-      u[i] = Math.max(u[i], u[p] + 1);
+      if (deeper) u[i] = Math.max(u[i], u[p], u[j] + Math.floor(((s.ord[i] - J) * u[j]) / (J * TAIL)));
       p = i;
     }
     let nx = j;
     for (let i = j - 1; i > 0; i--) {
       if (!s.units[i].vis) continue;
-      u[i] = Math.min(Math.max(u[i], s.ord[i], u[nx] - s.reach), u[nx] - 1);
+      u[i] = deeper ? Math.min(Math.max(u[i], to[i], u[nx] - s.reach), u[nx]) : Math.min(u[i], u[nx]);
       nx = i;
     }
     // A word space rides on the tread of the sort before it.
@@ -328,8 +334,12 @@ export async function createWeingart(host) {
       const r = { ...faceRect(s, u, off(u, j)), j };
       if (prev) {
         const a = prev.x + prev.w;
-        const x0 = Math.min(a, r.x);
-        const x1 = Math.max(a, r.x);
+        // A brass rule drops straight down at its joints, so its riser is a
+        // piece of the same rule stood on end, as thick as its face, centred
+        // on the joint: one stroke weight all along the stair.
+        const half = s.rule && prev.y !== r.y ? s.thick / 2 : 0;
+        const x0 = Math.min(a, r.x) - half;
+        const x1 = Math.max(a, r.x) + half;
         const y0 = Math.min(prev.y, r.y);
         const y1 = Math.max(prev.y + prev.h, r.y + r.h);
         if (x1 - x0 > 1e-3 || prev.y !== r.y) out.push({ x: x0, y: y0, w: Math.max(x1 - x0, 1e-3), h: y1 - y0, j, riser: true });
