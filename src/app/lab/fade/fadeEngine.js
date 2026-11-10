@@ -56,12 +56,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    black, the rest is cyan (absorbs red), magenta (green) and yellow (blue),
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
 //    so reds and yellows go first (dark shutter green is mostly neutral
-//    density, which barely moves);
+//    density, which barely moves); what the inks' differential rates do to a
+//    coat's hue is capped at a few degrees (in Oklab), and a residual tint of
+//    the paint always stays, so a coat loses chroma and gains value but
+//    keeps its family;
 //  - wood: lignin breaks down and brown wood goes silver grey (unused here:
 //    every surface in this photo is painted or stone);
 //  - chalk: the binder erodes and the white pigment powders out, lifting the
-//    paint towards a pale lime cream (never paper white), most of the way on
-//    the top floors, which keep only a trace of their hue under the bloom,
+//    paint towards a lime render's white (#EEE8DD: neutral, a touch warm,
+//    never paper white), most of the way on the top floors, which keep a
+//    residual tint at their own hue under the bloom (pale dusty pink, pale
+//    apricot, not one cream for every house),
 //    and hardly at all on what is dark in the photo (window voids, the gaps
 //    behind shutters), which is not render. It comes in with the dose on a
 //    soft knee and climbs slowly, so a wall grades from bloom under its eave
@@ -122,12 +127,19 @@ const CHALK_INDUCTION = 6;
 // an open south wall, hardly starts.
 const DOSE_GAMMA = 2.4;
 const DOSE_PIVOT = 0.17;
-// The render under the pigment, and what the binder powders to: lime and
-// sand, a warm cream (sRGB hue, saturation, value), never paper white.
-const RENDER = [35, 0.12, 0.86];
-// What the chalk blooms to: the powdered lime and white pigment scatter, so
-// the bloom is lighter than the render under it, a pale lime cream.
-const BLOOM = [44, 0.15, 0.94];
+// Where the fade ends up: a lime render's white, measured off sun-bleached
+// Ligurian plaster as a neutral, slightly warm off-white (#EEE8DD), never
+// paper white and never cream. The pigment's loss climbs to it and the
+// chalk's bloom powders over it.
+const LIME = [0xee, 0xe8, 0xdd];
+// What the chalked coat keeps of its own paint: a share of the original
+// chroma, at the original hue, so a pink wall bleaches to a pale dusty pink
+// and an orange one to a pale apricot, not all of them to one cream.
+const RESIDUAL = 0.4;
+// The differential fade (the inks' own rates, the lime's warmth) may turn a
+// coat's hue by at most this much (Oklab hue, degrees): it loses chroma and
+// gains value, and keeps its family.
+const HUE_CAP = 3;
 // Where the light falls at the scale of a ledge. Every sill, cornice and eave
 // shelters a strip of wall below it from sun and driving rain, out to about
 // its own depth; world up is toward the verticals' vanishing point, which the
@@ -368,8 +380,9 @@ uniform float uInduction;
 uniform float uChalkInduction;
 uniform float uDoseGamma;
 uniform float uDosePivot;
-uniform vec3 uBase;
-uniform vec3 uBloom;
+uniform vec3 uLime;
+uniform float uResidual;
+uniform float uHueCap;
 uniform float uDebug;
 uniform float uPolar;
 uniform vec3 uZenith;
@@ -389,6 +402,23 @@ vec3 toSrgb(vec3 c) {
 }
 const float LN10 = 2.302585;
 const float CHALK_KNEE = 3.0;
+// Oklab, to fade a colour along lightness and chroma while holding its hue
+vec3 oklab(vec3 c) {
+  vec3 lms = mat3(0.4122214708, 0.2119034982, 0.0883024619, 0.5363325363, 0.6806995451, 0.2817188376, 0.0514459929, 0.1073969566, 0.6299787005) * max(c, 0.0);
+  lms = pow(lms, vec3(1.0 / 3.0));
+  return mat3(0.2104542553, 1.9779984951, 0.0259040371, 0.7936177850, -2.4285922050, 0.7827717662, -0.0040720468, 0.4505937099, -0.8086757660) * lms;
+}
+vec3 oklabToLin(vec3 o) {
+  vec3 lms = mat3(1.0, 1.0, 1.0, 0.3963377774, -0.1055613458, -0.0894841775, 0.2158037573, -0.0638541728, -1.2914855480) * o;
+  lms = lms * lms * lms;
+  return mat3(4.0767416621, -1.2684380046, -0.0041960863, -3.3077115913, 2.6097574011, -0.7034186147, 0.2309699292, -0.3413193965, 1.7076147010) * lms;
+}
+// the hue of ab turned back to within uHueCap of the hue h0
+float capHue(vec2 ab, float h0) {
+  float d = atan(ab.y, ab.x) - h0;
+  d = mod(d + 3.14159265, 6.2831853) - 3.14159265;
+  return h0 + clamp(d, -uHueCap, uHueCap);
+}
 float skyMask(vec4 m, vec3 lin) {
   return clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0) * smoothstep(-0.03, 0.01, (lin.b - lin.r) / max(lin.b, 1e-3));
 }
@@ -513,10 +543,24 @@ void main() {
   // under a ledge and a tan line (wear near -1) hold their colour firmly.
   float keep = mix(0.3, 0.95, smoothstep(-2.0, 1.6, wear));
   vec3 lost = cmy * keep * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
-  // what the pigment leaves behind is the lime render's own warm off-white,
-  // not paper white: a fading colour climbs to it and stops (a surface that
-  // is already lighter, like the white trim, keeps its own albedo)
-  vec3 aInk = min(a * exp(lost * LN10), max(a, uBase));
+  // what the pigment leaves behind is the lime render's own off-white, not
+  // paper white: a fading colour climbs to it and stops (a surface that is
+  // already lighter, like the white trim, keeps its own albedo)
+  vec3 aInk = min(a * exp(lost * LN10), max(a, uLime));
+  // and it keeps its family: the inks' differential rates and the lime's
+  // warmth take chroma and give value, but turn the hue by at most uHueCap
+  // (a near-neutral surface has no hue to hold)
+  vec3 o0 = oklab(a);
+  float C0 = length(o0.yz);
+  float h0 = atan(o0.z, o0.y);
+  float held = smoothstep(0.012, 0.035, C0);
+  // and no coat gives up all of its colour: a residual tint of the paint
+  // stays at its own hue under whatever the sun takes
+  vec3 oi = oklab(aInk);
+  float hi = capHue(oi.yz, h0);
+  float Ci = max(length(oi.yz), uResidual * C0);
+  oi.yz = mix(oi.yz, Ci * vec2(cos(hi), sin(hi)), held);
+  aInk = oklabToLin(oi);
 
   // wood: lignin goes, cellulose stays: silver grey, a touch lighter
   float y = dot(a, LUMA);
@@ -528,7 +572,7 @@ void main() {
   // with a soft knee (softplus, a few dose-years wide): the bloom comes in
   // with the dose, never at a contour
   float ec = max(CHALK_KNEE * (log(1.0 + exp((e0 - uChalkInduction) / CHALK_KNEE)) - log(1.0 + exp(-uChalkInduction / CHALK_KNEE))), 0.0);
-  // to the bloom's pale lime cream, heavier where the water runs. What is
+  // to the lime white, heavier where the water runs. What is
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
@@ -538,7 +582,18 @@ void main() {
     outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
     return;
   }
-  aged = mix(aged, max(aged, uBloom * min(0.4 + 0.6 * dot(aged, LUMA) / 0.5, 1.0)), c);
+  // The bloom only lifts: lightness climbs to the lime's, chroma falls to
+  // the lime's own warmth plus a residual tint of the paint, and the hue
+  // stays the paint's (within uHueCap), so a pink wall chalks to a pale dusty
+  // pink and an orange one to pale apricot, never to one cream.
+  vec3 oa = oklab(aged);
+  vec3 ol = oklab(uLime * min(0.4 + 0.6 * dot(aged, LUMA) / 0.5, 1.0));
+  float Ca = length(oa.yz);
+  vec2 abMix = mix(oa.yz, ol.yz, c);
+  float Cc = mix(Ca, min(Ca, length(ol.yz) + uResidual * C0), c);
+  float hc = capHue(abMix, h0);
+  vec2 abHeld = Cc * vec2(cos(hc), sin(hc));
+  aged = oklabToLin(vec3(mix(oa.x, max(oa.x, ol.x), c), mix(abMix, abHeld, held)));
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
@@ -676,8 +731,7 @@ export async function createFade(host, { embedded = false } = {}) {
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
   const clearSky = hsvLin(SKY_CLEAR);
-  const render = hsvLin(RENDER);
-  const bloom = hsvLin(BLOOM);
+  const lime = LIME.map((c) => srgbToLin(c / 255));
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
@@ -885,8 +939,9 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uChalkInduction, CHALK_INDUCTION);
     gl.uniform1f(u.uDoseGamma, DOSE_GAMMA);
     gl.uniform1f(u.uDosePivot, DOSE_PIVOT);
-    gl.uniform3fv(u.uBase, render);
-    gl.uniform3fv(u.uBloom, bloom);
+    gl.uniform3fv(u.uLime, lime);
+    gl.uniform1f(u.uResidual, RESIDUAL);
+    gl.uniform1f(u.uHueCap, (HUE_CAP * Math.PI) / 180);
     gl.uniform2f(u.uPlateSize, PW, PH);
     gl.uniform2f(u.uVanish, VANISH[0], VANISH[1]);
     gl.uniform1f(u.uShelter, SHELTER);
