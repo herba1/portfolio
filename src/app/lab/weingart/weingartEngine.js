@@ -5,42 +5,41 @@
 // Swiss axis of the forme always holds: push a sort down and the line
 // swings on that first sort like a lever, a step at a time, its far end
 // first, so the line bends before it breaks into an uneven staircase
-// hinged on the margin. Each line steps by a fraction of its own body, so
-// big type takes big steps and small type small ones. Sorts of the same
-// ink are solid bodies: a line that comes down onto a neighbouring line
-// shoves the sorts it lands on a step, the line bends to them from the
-// margin and runs on shallower past them, a knee of its own, and so on
-// down the chain, so every line breaks to its own rhythm. Lead stays in contact: no sort ever hangs more than its own body
-// below the one before it, and the brass rule and the reversed slug step
-// as one body, each joint filled by a riser, so a full push ends as one
-// continuous staircase, never as dashes or labels. The rule is cut to the
+// hinged on the margin. Display type, brass and the reversed slug all step
+// by one unit, the brass rule's face, so every riser in the forme is a whole
+// number of the same piece of brass. Sorts of the same ink are solid
+// bodies: a line that comes down onto a neighbouring line shoves the sorts
+// it lands on a step, the line bends to them from the margin, and past that
+// knee it takes on the shoving line's own riser, sort for sort, and hands it
+// on down the chain, so a full push nests every line and the rule as
+// parallel stairs of one pitch. Lead stays in contact: no sort ever hangs
+// more than its own body below the one before it, and the brass rule and
+// the reversed slug step as one body, each joint filled by a riser, so they
+// break as continuous stairs, never as dashes or labels. The rule is cut to the
 // red's measure and seats on the red's baseline: a full push ends with its
 // last tread as the red's own baseline rule, from the 3 to the 5. When a
-// step would need the margin to give, the whole run locks. Only the red run, printed in a
-// second pass, crosses the black, and where it does the two inks make a
-// third.
-// ?t=0..1 holds a still of "Here" pushed down through the forme.
+// step would need the margin to give, the whole run locks. Only the red
+// run, printed in a second pass, crosses the black, and where it does the
+// two inks make a third.
+// ?t=0..1 holds a still of "Here" pushed down through the forme; t=1 is the
+// last even stair before the run locks.
 import { createStage, clamp } from "../_kit/stage";
 
 // Design space the forme is composed in, fitted into the piece box.
 const DW = 1000;
 const DH = 600;
-// One step, as a fraction of a line's own body: display type by a sixth of
-// its em, enough to read as a step on purpose and not as a sagging
-// baseline; small type, set in word slugs, by a third of its body. Brass
-// rule steps by its whole face and a reversed slug by half its ground, so
-// their steps read as cut, never as a rule or a slug knocked out of true.
+// One step. Small type, set in word slugs, steps by a third of its body.
 // Type and rule drop straight down: sorts stay butted at their set widths,
 // so a word keeps its shape and its word spaces and only the baseline
 // breaks. Only the reversed slug runs right as it steps, by half the drop,
 // so its blocks fall as a shallow, wide stair of their own.
-const STEP_EM = 1 / 6;
 const STEP_BODY = 1 / 3;
-const STEP_GROUND = 1 / 2;
 const STEP_RUN = 0.5;
-// A shoved line runs on past its knee at this fraction of the slope from
-// the margin to where it was hit: steep, then shallow, never one diagonal.
-const TAIL = 6;
+// The forme's one riser: the brass rule's face. Display type, brass and the
+// reversed slug all step by it, so every stair in the forme, type or rule,
+// rises in whole multiples of the same piece of brass and they nest as one
+// system instead of three pitches colliding.
+const UNIT = 12;
 // The steepest a line can swing: drop from one sort to the next over the
 // sort's average width. A line of small steps takes more of them to get there.
 const STEEP = 0.8;
@@ -74,7 +73,7 @@ const law = (size) => -0.043 * (size - 12);
 // The forme. x, y are the baseline-left (or rule top-left) of each line as composed.
 const FORME = [
   { text: "The Beatles", size: 20, w: "strong", x: 4, y: 52 },
-  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 556 },
+  { text: "3:05", size: 244, w: "semibold", ink: "red", x: 476, y: 568 },
   { text: "Here", size: 108, w: "semibold", x: 0, y: 168 },
   { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
   { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
@@ -85,9 +84,11 @@ const FORME = [
   // measure head rule over the red. Its first piece is short, under the "t"
   // alone, so the sort beside it can step down past the margin piece; the
   // short pieces first let it fall as fast as the letters above it. Where it
-  // is shoved, the run ahead falls on at twice a type line's slope (tail), so
-  // a full push carries it down to its datum and seats the last piece there.
-  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 156], thick: 12, x: 0, y: 400, fit: "red", tail: 3 },
+  // is shoved, the run ahead takes on the riser of the line above, so a full
+  // push carries it down to its datum as a fourth stair parallel to the
+  // title, and seats the last piece there. The red stands a whole number of
+  // risers below the rule, so the last step is a full one.
+  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 156], thick: UNIT, x: 0, y: 400, fit: "red" },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
@@ -124,7 +125,7 @@ export async function createWeingart(host) {
   // riser of the same brass stood on end, so a rule can drop three faces at
   // a joint and still read as one stroke.
   const stepOf = (d) => {
-    const step = d.rule ? d.thick : d.rev ? REV_H * STEP_GROUND : d.size >= LETTER_MIN ? d.size * STEP_EM : d.size * STEP_BODY;
+    const step = d.rule || d.rev || d.size >= LETTER_MIN ? UNIT : d.size * STEP_BODY;
     const sy = Math.round(step * 2) / 2;
     const body = d.rule ? d.thick + RULE_LEAD * 2 : d.rev ? REV_H : d.size * CAP;
     const sx = d.rev ? sy * STEP_RUN : 0;
@@ -301,13 +302,12 @@ export async function createWeingart(host) {
   // A line that is shoved is not swung by a hand: the sort it is hit on goes
   // a step on (dir), and only as much else as it needs. Behind it, the sorts
   // back to the margin bend down to it along the lever, never further than
-  // their reach from the next; ahead of it, the run rides on at its level
+  // their reach from the next; ahead of it, the run steps on by the riser it was handed (rise, design px) for every sort,
   // unless it already sits deeper. So a shoved line bends where it was hit
-  // and runs on flat from there: a knee, not the same diagonal as the line
-  // that hit it, and every line in the chain breaks to a rhythm of its own.
+  // and runs on parallel to the line that hit it: one pitch down the forme.
   // Hit on its first sort, the margin holds and the run locks. Returns
   // false then.
-  const carry = (s, v, j, dir) => {
+  const carry = (s, v, j, dir, rise = 0) => {
     const J = s.ord[j];
     if (j <= 0 || J <= 0) return false;
     // Worked in the direction the line is broken: sd turns it the right way up.
@@ -317,10 +317,13 @@ export async function createWeingart(host) {
     if (!deeper && u[j] < 1) return false;
     u[j] += deeper ? 1 : -1;
     const to = lever(s, u[j], J);
+    // Past the knee the run takes on the shoving line's riser, sort for
+    // sort, so the two lines nest as parallel stairs.
+    const R = Math.min(s.reach, Math.max(0, Math.round(rise / s.sy)));
     let p = j;
     for (let i = j + 1; i < u.length; i++) {
       if (!s.units[i].vis) continue;
-      if (deeper) u[i] = Math.max(u[i], u[p], u[j] + Math.floor(((s.ord[i] - J) * u[j]) / (J * (s.tail ?? TAIL))));
+      if (deeper) u[i] = Math.max(u[i], u[p] + R * (s.ord[i] - s.ord[p]));
       p = i;
     }
     let nx = j;
@@ -336,6 +339,19 @@ export async function createWeingart(host) {
     if (!seat(s, w, j) || clash(s, w)) return false;
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
+  };
+  // A line's pitch: its steepest riser between printing sorts, in design px.
+  // A line it shoves takes this on past its knee, and hands it on down the
+  // chain, so the whole forme stairs to the riser of the line in the hand.
+  const riseOf = (s, v) => {
+    let r = 0;
+    let p = 0;
+    for (let i = 1; i < v.length; i++) {
+      if (!s.units[i].vis) continue;
+      r = Math.max(r, Math.abs(v[i] - v[p]));
+      p = i;
+    }
+    return r * s.sy;
   };
   // A line dragged d steps from base by its sort j, or null where it locks.
   const dragged = (s, base, j, d) => {
@@ -440,7 +456,7 @@ export async function createWeingart(host) {
   // to leave the chase the move is refused: the run is locked up. Returns
   // the new state and chain depth of every line that moves, or null.
   const plan = (s, vec, dir) => {
-    const next = new Map([[s, { v: vec, depth: 0 }]]);
+    const next = new Map([[s, { v: vec, depth: 0, rise: riseOf(s, vec) }]]);
     const queue = [{ a: s, depth: 0 }];
     const stateOf = (o) => (next.has(o) ? next.get(o).v : o.vec);
     let guard = 0;
@@ -450,6 +466,7 @@ export async function createWeingart(host) {
       if (!fits(a, stateOf(a))) return null;
       const ra = rectsAt(a, stateOf(a));
       const ua = union(ra);
+      const rise = next.get(a).rise;
       for (const o of slugs) {
         if (o === a || o.layer !== a.layer) continue;
         const v0 = stateOf(o);
@@ -466,9 +483,10 @@ export async function createWeingart(host) {
           }
           if (j < 0) break;
           // Landing on a line's first sort: the margin holds, the run locks.
-          if (!carry(o, vo, j, dir) || n > 200 || !fits(o, vo)) return null;
+          if (!carry(o, vo, j, dir, rise) || n > 200 || !fits(o, vo)) return null;
         }
-        next.set(o, { v: vo, depth: Math.max(next.get(o)?.depth ?? 0, depth + 1) });
+        const was = next.get(o);
+        next.set(o, { v: vo, depth: Math.max(was?.depth ?? 0, depth + 1), rise: Math.max(was?.rise ?? 0, rise) });
         queue.push({ a: o, depth: depth + 1 });
       }
     }
@@ -567,7 +585,8 @@ export async function createWeingart(host) {
 
   // Still: from the composed forme, push "Here" down the chase by its last
   // sort and let it shove everything below it. t is the fraction of the way
-  // to where the whole run locks against the chase; t=1 is locked solid.
+  // to where the whole run locks against the chase; t=1 is the last even
+  // stair short of that lock.
   const applyStill = () => {
     const here = slugs.find((s) => s.text === "Here");
     const tail = here.units.length - 1;
@@ -578,7 +597,11 @@ export async function createWeingart(host) {
     reset();
     const all = drag(here, here.vec, tail, 0, D_MAX, false).steps;
     reset();
-    drag(here, here.vec, tail, 0, Math.round(stillT * all), false);
+    // A full push holds the last even stair before the lock: "Here" one
+    // riser per sort, so the lines it shoves take that riser on.
+    const J = here.ord[tail];
+    const at = Math.round(stillT * all);
+    drag(here, here.vec, tail, 0, stillT === 1 ? at - (at % J) : at, false);
   };
 
   stage.onResize((w, h, d) => {
