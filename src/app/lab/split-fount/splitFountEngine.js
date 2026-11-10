@@ -12,13 +12,17 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // crosses the fount's bands: a sheet pulled down the bed shows its head above
 // the next, one pulled across shows the edge it came in by, top to bottom.
 // The word is set big, tight to the stock as poster shops set wood type: it
-// runs nine tenths of the sheet's width, head and sides equal, and the sheet
-// stands about four fifths of the frame tall with the foot running on below.
-// The pile is squared by hand, not by machine: each proof shows its head
-// margin and about a third of the cap height above the next, give or take a
-// fifth, and lies half a degree to a degree and a half off true, so the
-// strips never line up like rows. The frame holds the fresh proof and a
-// couple of strips of the run; the older ones run off the top of the frame.
+// runs nine tenths of the sheet's width, head and sides equal, and the foot
+// just heavier than the head, so the word sits at the sheet's optical centre
+// and every proof is a finished sheet, not a crop of one. The fresh proof
+// lies whole in the frame, its four edges on the ground; above it the run
+// climbs the frame as a column of strips, each a different fount, stacked
+// like a specimen sheet. The pile is squared by hand, not by machine: each
+// proof shows its head margin and about a third of the cap height above the
+// next, give or take a fifth, and lies half a degree to a degree and a half
+// off true, so the strips never line up like rows. The frame holds the fresh
+// proof and three and a half strips of the run; the older ones run off the
+// top of the frame.
 //
 // The cylinder inks, it does not reveal: right behind the nip the ink arrives
 // starved and salted and builds to full over a short ramp, the nip line
@@ -39,10 +43,11 @@ const RUN = 4;
 const WORD_SHARE = 0.9;
 const FOOT = 1.4;
 // The sheet's height as a share of the frame's, and its cap: never more foot
-// than this share of the cap height, so a tall frame does not leave a long
-// empty tail of stock under the word.
-const SHEET_H = 0.8;
-const FOOT_MAX = 0.8;
+// than this share of the cap height, so the foot stays just heavier than the
+// head and the word sits at the sheet's optical centre, never above a slab of
+// empty stock.
+const SHEET_H = 0.45;
+const FOOT_MAX = 0.25;
 // The shingle's step: each proof shows its head margin and about this share
 // of the cap height above the next, give or take STEP_VAR as a hand squares
 // the pile.
@@ -50,7 +55,7 @@ const STEP = 1 / 3;
 const STEP_VAR = 0.2;
 // Strips of the run held in the frame beside the fresh proof; the rest run
 // off its edge.
-const FRAME = 2.5;
+const FRAME = 3.5;
 // The ramp behind the nip over which the ink builds to full, css px.
 const RAMP = 22;
 // How long a pulled proof takes to settle into the run, ms.
@@ -329,7 +334,8 @@ function jobAt(family, size, frameH) {
   const f = measureForme(family, size);
   const margin = Math.round((f.inkW * (1 / WORD_SHARE - 1)) / 2);
   const hw = Math.round((f.inkW + 2 * margin) / 2);
-  const tall = clamp(frameH * SHEET_H, margin * (1 + FOOT) + f.capH, margin + f.capH * (1 + FOOT_MAX));
+  const short = margin * (1 + FOOT) + f.capH;
+  const tall = clamp(frameH * SHEET_H, short, Math.max(short, margin + f.capH * (1 + FOOT_MAX)));
   const hh = Math.round(tall / 2);
   const step = margin + f.capH * STEP;
   return { size, f, margin, half: [hw, hh], step };
@@ -533,6 +539,8 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   let released = true;
   let dirty = true;
 
+  // Ground left round the fresh proof, css px.
+  const groundOf = (m) => Math.max(16, Math.round(m * 0.75));
   const extent = (d) => Math.abs(d[0]) * half[0] * 2 + Math.abs(d[1]) * half[1] * 2;
   // The nip starts just off the sheet and runs past its far edge by the
   // ramp, so the last of the sheet is inked to full before the pass ends.
@@ -597,12 +605,11 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   stage.onResize((w, h, dpr) => {
     // The type size sets the sheet's width and the step. Find the largest
     // size at which the sheet fits the frame's width, and a pile pulled down
-    // the bed still shows a couple of strips above the fresh proof's word and
-    // the start of its foot below.
+    // the bed holds the whole fresh proof, a little ground under its foot and
+    // FRAME strips of the run above it.
     const fits = (size) => {
       const j = jobAt(family, size, h);
-      const head = j.margin * (2 + FOOT) + j.f.capH;
-      return j.half[0] * 2 <= w * 0.92 && head + 1.8 * j.step <= h * 0.98;
+      return j.half[0] * 2 <= w * 0.92 && j.half[1] * 2 + FRAME * j.step + 2 * groundOf(j.margin) <= h;
     };
     let lo = 12;
     let hi = Math.max(lo, Math.min(w, h));
@@ -673,9 +680,9 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
     const { width: w, height: h, dpr } = stage;
     // Frame the fresh proof with the first FRAME strips of the run as one
     // block, centred; older proofs run off the frame's edge. Where the block
-    // is bigger than the frame it bleeds off both ends, but never so far that
-    // the fresh proof's word, its side margins and the start of its foot
-    // leave the frame. It settles with the pile as each proof goes onto it.
+    // is bigger than the frame it bleeds off, but only the run does: the
+    // fresh proof keeps its four edges and a little ground on the frame. It
+    // settles with the pile as each proof goes onto it.
     let x0 = -half[0];
     let x1 = half[0];
     let y0 = -half[1];
@@ -695,8 +702,9 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
       py = e.y;
     }
     const place = (S, lo, hi, wl, wr, tail) => Math.min(Math.max((S - lo - hi) / 2, tail - wl), S - tail - wr);
-    const cx = place(w, x0, x1, -word[2], word[2], margin + 12);
-    const cy = place(h, y0, y1, word[1] - word[3], word[1] + word[3], margin * FOOT);
+    const g = groundOf(margin);
+    const cx = place(w, x0, x1, -half[0], half[0], g);
+    const cy = place(h, y0, y1, -half[1], half[1], g);
     C = [Math.round(cx * dpr) / dpr, Math.round(cy * dpr) / dpr];
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.useProgram(prog);
