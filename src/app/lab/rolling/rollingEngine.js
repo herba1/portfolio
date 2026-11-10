@@ -3,7 +3,7 @@ import { createStage, clamp } from "../_kit/stage";
 // Rolling. A 1980s SANYO senpuki in a tatami room, seen through a phone's
 // CMOS sensor. The fan is a real photograph, cut tight to the fan head and
 // cut in three: the plate (the back of the guard and the motor, the room
-// behind pulled down to a dim ground, as if a flash had lit the fan; behind
+// behind pulled down to a dim ground lit only by the ceiling lamp; behind
 // the blades the rear guard is drawn, its spokes and rings as clean lines in
 // the disc plane over the motor housing), the rotor (the three blades as transmissive
 // acrylic: a signed distance to one smooth outline per blade, a low-frequency
@@ -14,7 +14,7 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // The sensor is a rolling shutter: it reads its rows one after another, top
 // to bottom, over READOUT seconds, and starts a new frame every 1 / FPS
-// seconds. Every frame here is captured that way. Output row s of a frame
+// seconds (29.97 fps). Every frame here is captured that way. Output row s of a frame
 // that starts at t0 is exposed over [t0 + s * READOUT, + EXPOSURE], and the
 // rotor is drawn at its angle at those instants (EXPOSURE is integrated in
 // linear light over a few sub-samples, so a fast blade tip smears exactly as
@@ -23,6 +23,16 @@ import { createStage, clamp } from "../_kit/stage";
 // during a readout the bottom of the frame sees it. Nothing is warped; the
 // blades bend into curls, break into floating segments and stand still at
 // the frame-rate's stroboscopic speeds only because of when each row looked.
+//
+// The room is lit by a ring fluorescent on the same 60 Hz mains that drives
+// the motor, so its light pulses at 120 Hz, and every row integrates it over
+// its own exposure window too. Four lamp cycles fit the 1/30 s readout, so the
+// frame carries four soft bright and dark bands: the readout itself, drawn
+// in the picture's own light. They lie along the sensor's rows (they turn
+// when the phone turns), they light the plate, the acrylic and the guard
+// through the same linear composite, and at 29.97 fps the 120 Hz lamp gains
+// 0.004 of a cycle a frame, so they creep up the frame while the torn
+// blades creep backwards.
 //
 // The fan: an induction motor that pushes toward its set speed (it cannot
 // brake), quadratic air drag, viscous and dry bearing friction. Left alone
@@ -38,13 +48,26 @@ import { createStage, clamp } from "../_kit/stage";
 //
 // Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
 // the rotor at a steady rpm; the hero is ?rpm=3590&t=0.4, the mains speed.
-// ?scan=deg sets the readout direction.
+// ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
+// is 1/4000: long exposures blur the blades and wash the bands out, and at
+// 1/120 s the bands vanish).
 
 const BASE = "/lab/rolling/";
-const FPS = 30; // sensor frame rate
-const READOUT = 1 / 30; // top row to bottom row
-const EXPOSURE = 1 / 8000; // each row's open time (a flash-bright scene; the tips smear ~30 device px at 4800 rpm)
-const SUB = 10; // exposure sub-samples, so that smear is a ramp, not a stack of copies
+const FPS = 30000 / 1001; // sensor frame rate: NTSC 29.97, a hair under 30
+const READOUT = 1 / 30; // top row to bottom row (fits inside the 1 / 29.97 s frame)
+const EXPOSURE = 1 / 4000; // each row's open time (?exp=N for 1 / N s)
+const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrated as ramps, not stacks of copies
+// The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor.
+// The tube's discharge goes out and re-strikes every half cycle, so its light
+// pulses at 120 Hz; each phosphor holds it for its own decay time, so each
+// channel keeps its own share of the ripple and lags by its own angle (a
+// first-order decay: depth 1 / sqrt(1 + (w tau)^2), lag atan(w tau)). Blue
+// decays fastest and ripples most, so the bright bands run cool and the dark
+// ones warm, as real flicker bands do.
+const MAINS = 60;
+const LAMP = 2 * MAINS; // Hz
+const RIPPLE = 0.85; // the discharge's own ripple before the phosphors smooth it
+const DECAY = [0.0011, 0.0013, 0.0007]; // phosphor decay, s (r, g, b)
 const H = 1 / 960; // physics step and angle-history spacing
 const NANG = 48; // angle samples per frame (covers READOUT + EXPOSURE)
 const RPM = (2 * Math.PI) / 60;
@@ -93,6 +116,9 @@ uniform float uPx;
 uniform float uSdf;
 uniform float uRim;
 uniform float uTint;
+uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
+uniform vec3 uLampDepth;
+uniform vec3 uLampLag;
 out vec4 o;
 
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -101,6 +127,19 @@ float angAt(float tau){
   float f = tau / uStep;
   int i = clamp(int(floor(f)), 0, ${NANG - 2});
   return uBase + mix(uAng[i], uAng[i + 1], clamp(f - float(i), 0.0, 1.0));
+}
+
+// The lamp's light at tau seconds into the frame, mean 1 per channel.
+vec3 lampAt(float tau){
+  float ph = 6.2831853 * (uLamp0 + ${LAMP.toFixed(1)} * tau);
+  return 1.0 - uLampDepth * cos(vec3(ph) - uLampLag);
+}
+
+// ...and its mean over a row's exposure [tau, tau + uExpo], exactly.
+vec3 lampOver(float tau){
+  float w = 6.2831853 * ${LAMP.toFixed(1)};
+  vec3 a = vec3(6.2831853 * (uLamp0 + ${LAMP.toFixed(1)} * tau)) - uLampLag;
+  return 1.0 - uLampDepth * (sin(a + w * uExpo) - sin(a)) / (w * uExpo);
 }
 
 void main(){
@@ -116,12 +155,16 @@ void main(){
   // the picture sees as the guard rim's ellipse.
   vec2 d = uToDisc * (p - uHub);
   vec4 f = texture(uFront, q);
+  // Everything in the room is lit by the lamp, so every row sees it at the
+  // brightness of its own exposure window: the readout drawn as bands.
+  vec3 lit = lampOver(s * uReadout);
   // Beyond the blade tips (0.83 of the rim) nothing turns.
-  if (dot(d, d) > 0.81) { o = vec4(enc(mix(plate, f.rgb, f.a)), 1.0); return; }
+  if (dot(d, d) > 0.81) { o = vec4(enc(mix(plate, f.rgb, f.a) * lit), 1.0); return; }
   // The rotor is transmissive acrylic: per sub-sample, coverage c from the
   // signed distance to the blade's outline (anti-aliased over AA device px),
   // the plate passed through it tinted, T = 1 - c + c (1 - A) tint, and
-  // what it sends back, E = c (A body + rim). Linear light throughout.
+  // what it sends back, E = c (A body + rim). Linear light throughout, and
+  // each sub-sample lit by the lamp at that instant.
   vec3 accT = vec3(0.0);
   vec3 accE = vec3(0.0);
   for (int k = 0; k < ${SUB}; k++) {
@@ -132,12 +175,13 @@ void main(){
     vec2 sh = texture(uShape, r).rg;
     float cov = clamp((sh.r * 255.0 - 128.0) / uSdf * uPx / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
     vec4 t = texture(uRotor, r);
+    vec3 L = lampAt(tau);
     vec3 tint = pow(t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4), vec3(uTint));
-    accT += 1.0 - cov + cov * (1.0 - t.a) * tint;
-    accE += cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint));
+    accT += L * (1.0 - cov + cov * (1.0 - t.a) * tint);
+    accE += L * cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint));
   }
   vec3 col = (plate * accT + accE) / float(${SUB});
-  col = mix(col, f.rgb, f.a);
+  col = mix(col, f.rgb * lit, f.a);
   o = vec4(enc(col), 1.0);
 }`;
 
@@ -178,6 +222,11 @@ export async function createRolling(host, { embedded = false } = {}) {
   const stillRpm = num("rpm");
   const stillT = num("t");
   const scanQ = num("scan");
+  const expQ = num("exp");
+  // Never longer than the angle history covers past the last row.
+  const expo = expQ && expQ > 0 ? clamp(1 / expQ, 1e-5, 1 / 100) : EXPOSURE;
+  const lampDepth = DECAY.map((d) => RIPPLE / Math.hypot(1, 2 * Math.PI * LAMP * d));
+  const lampLag = DECAY.map((d) => Math.atan(2 * Math.PI * LAMP * d));
 
   host.style.background = `rgb(${PAPER.map((c) => Math.round(c * 255)).join(",")})`;
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
@@ -281,19 +330,27 @@ export async function createRolling(host, { embedded = false } = {}) {
   let frameIndex = Math.floor((simT + 1e-9) * FPS);
   let lastFrame = null; // { base, ang }
   const angs = new Float32Array(NANG);
-  const capture = (t0Step, constant) => {
+  // A frame starts at t0 = frameIndex / 29.97 s, between two physics steps:
+  // the rotor's history is read at t0 + j H exactly (interpolated), so the
+  // rotor and the lamp keep one clock and the bands creep without jitter.
+  const capture = (t0, constant) => {
     let base;
     if (constant) {
       const w = omega;
-      const th0 = w * stillT;
+      const th0 = w * t0;
       base = th0 % (2 * Math.PI);
       for (let j = 0; j < NANG; j++) angs[j] = w * j * H;
     } else {
-      const th0 = ring[t0Step & 4095];
+      const x = t0 / H;
+      const i = Math.floor(x);
+      const fr = x - i;
+      const at = (k) => ring[(i + k) & 4095] + fr * (ring[(i + k + 1) & 4095] - ring[(i + k) & 4095]);
+      const th0 = at(0);
       base = th0 % (2 * Math.PI);
-      for (let j = 0; j < NANG; j++) angs[j] = ring[(t0Step + j) & 4095] - th0;
+      for (let j = 0; j < NANG; j++) angs[j] = at(j) - th0;
     }
-    lastFrame = { base, ang: Float32Array.from(angs), scan };
+    // The lamp's phase (cycles) at the first row.
+    lastFrame = { base, ang: Float32Array.from(angs), scan, lamp: (t0 * LAMP) % 1 };
     draw();
   };
 
@@ -331,7 +388,10 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDir, meta.dir);
     gl.uniform1f(u.uStep, H);
     gl.uniform1f(u.uReadout, READOUT);
-    gl.uniform1f(u.uExpo, EXPOSURE);
+    gl.uniform1f(u.uExpo, expo);
+    gl.uniform1f(u.uLamp0, lastFrame.lamp);
+    gl.uniform3f(u.uLampDepth, ...lampDepth);
+    gl.uniform3f(u.uLampLag, ...lampLag);
     // Readout direction: rows run along (cos, sin) of the scan angle's
     // perpendicular; s grows down the frame at scan = 0.
     const a = lastFrame.scan;
@@ -362,7 +422,7 @@ export async function createRolling(host, { embedded = false } = {}) {
     if (holding) {
       holding = false;
       // Live from the still's moment.
-      simT = frameIndex / FPS + READOUT + EXPOSURE + H;
+      simT = frameIndex / FPS + READOUT + expo + H;
       step = Math.round(simT / H);
       theta = omega * simT;
       for (let j = 0; j < 4096; j++) ring[(step - j) & 4095] = theta - omega * j * H;
@@ -407,12 +467,12 @@ export async function createRolling(host, { embedded = false } = {}) {
   layout();
   if (holding) {
     frameIndex = Math.floor(stillT * FPS + 1e-6);
-    capture(0, true);
+    capture(stillT, true);
   } else {
     // Start with a full history at the resting speed.
     for (let j = 0; j < 4096; j++) ring[(step - j) & 4095] = theta - omega * j * H;
   }
-  const SPAN = Math.ceil((READOUT + EXPOSURE) / H) + 1;
+  const SPAN = Math.ceil((READOUT + expo) / H) + 2;
   stage.onFrame((dt) => {
     // The phone turns with a little weight.
     scan += (scanTarget - scan) * (1 - Math.exp(-dt * 14));
@@ -423,12 +483,12 @@ export async function createRolling(host, { embedded = false } = {}) {
       physics();
     }
     // Develop every frame whose readout (and its last row's exposure) is done.
-    const t0Step = Math.round((frameIndex / FPS) / H);
+    const t0Step = Math.floor(frameIndex / FPS / H);
     if (step >= t0Step + SPAN) {
       // Skip frames lost to a stall; a sensor does not catch up.
       const latest = Math.floor((step - SPAN) * H * FPS);
       frameIndex = Math.max(frameIndex, latest);
-      capture(Math.round(frameIndex / FPS / H), false);
+      capture(frameIndex / FPS, false);
       frameIndex += 1;
     }
   });

@@ -58,7 +58,8 @@ centre of the guard whose slots show the green blade roots turning behind it.
           (a quiet Telea fill: nothing of it survives). Then the ground:
           every pixel that is not steel (a lightness top-hat, about neutral,
           inside the rim) is pulled to a dim, nearly grey version of itself,
-          as if a flash had lit the fan and the room fell off behind it.
+          the room lit only by its ceiling lamp, whose 120 Hz flicker the
+          engine adds per sensor row (rollingEngine.js).
           Behind the blades, where the readout tears them open, the rear
           guard is drawn, not inpainted (reveal.py): its radial spokes and
           concentric rings as anti-aliased lines in the rim ellipse's tilted
@@ -488,8 +489,8 @@ w_dt = np.clip((sdf - DT_IN * k) / (2 * k), 0, 1) * (rr > RB - 12 * k) * (stk_d 
 # it). It is kept as it is, not pulled down with the room.
 slot_dt = np.repeat(bg_g[..., None], 3, 2)
 
-# --- ground: the room, pulled down. The fan is lit and the room behind it
-# falls off, as if the phone's flash had fired: every pixel that is not steel
+# --- ground: the room, pulled down. The fan is near the lamp and the room
+# behind it falls off into the dark: every pixel that is not steel
 # (the brown wall, the blue cloth, the bamboo blind, the tatami, and the
 # room seen between the rear guard's wires) keeps its texture but loses most
 # of its colour and light, so the steel and the green stand on one calm,
