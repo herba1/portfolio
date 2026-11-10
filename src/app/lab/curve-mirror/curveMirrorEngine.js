@@ -21,13 +21,19 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    panorama's distances, filtered by its own spread (ray differentials);
 //  - the frame (a deep band with a visor over its top), back shell, bracket
 //    and pole are signed distance fields,
-//    lit by the panorama's irradiance (SH9) and the sun, with soft shadows;
-//    their paint is a decade-faded vermilion, chalked, chipped to dark steel,
+//    lit as the crossing's own poles are: the measured sun at full strength
+//    with a hard terminator, and on the shade side only a dim, cyan skylight
+//    fill (the panorama's SH9 cut to the sky's share), an order of magnitude
+//    down, as the crossbuck pole's lit and shaded halves measure;
+//    their paint is the road mirror's vermilion enamel, chipped to dark steel,
 //    streaked by rain and dirtied where the AO says it is sheltered, its fine
 //    tooth taken from the photo's own plaster, with a roughness map that
 //    breaks up the sun's anisotropic streak down the pole and along the rim;
 //  - the object takes the plate's grain at the photo's pixel pitch, so the
 //    film develops it and the photograph alike;
+//  - the street the glass shows is under the same sun: the 360's surfaces
+//    (shot under cloud) take the sun's exposure, up to the photo's own
+//    sunlit walls; its fitted sky and the photograph's own pixels keep theirs;
 //  - the face is a second-surface acrylic dome standing proud of the frame
 //    on its own wall: a Schlick sheen of cool sky that climbs toward the rim,
 //    the zenith's broad gloss over the upper bulge, the hood's underside
@@ -328,16 +334,14 @@ float photoDirt(vec2 m) {
 vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   vec3 q = toLocal(p);
   float occ = ao(p, n);
-  // Road-mirror orange after a decade of Kyoto summers is no longer orange:
-  // the pigment has faded to a dull vermilion, redder and far lower in chroma
-  // than the can, and the binder has chalked to a pale bloom over it,
-  // heaviest where it faces the sky.
-  vec3 alb = vec3(0.56, 0.16, 0.06);
+  // カーブミラー vermilion: the road mirror's baked enamel, #E8541E as
+  // linear albedo (before the film's grade). It holds its chroma: only the
+  // faces turned to the sky carry a thin chalk bloom, and grime and chips
+  // below darken it rather than wash it toward tan.
+  vec3 alb = vec3(0.807, 0.089, 0.0123);
   float upF = clamp(n.y, 0.0, 1.0);
-  float bleach = 0.35 + 0.5 * upF;
-  alb = mix(alb, vec3(0.58, 0.3, 0.14), bleach * 0.25);
-  float chalk = 0.07 + 0.1 * upF;
-  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.12, 1.0, 0.8), chalk);
+  float chalk = 0.015 + 0.06 * upF;
+  alb = mix(alb, vec3(dot(alb, LUMA)) * vec3(1.6, 1.0, 0.75), chalk);
 
   // surface coordinates in metres: on the pole and band its unrolled
   // circumference and height, on the arm along it, on the frame ring its
@@ -369,7 +373,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   // run-off from the clamp: the band's bolts bleed a thin brown stain down the pole
   float bleed = id == 4.0 ? smoothstep(0.012, 0.0, abs(wc.x - 0.035 + 0.006 * sin(p.y * 9.0))) * smoothstep(0.75, 0.0, uPivot.y - p.y) : 0.0;
   float grime = clamp(0.5 * streak + under + splash + band + 1.2 * sheltered + 1.5 * max(dirt, 0.0) + 0.15 * smoothstep(0.5, 0.8, n1), 0.0, 1.0);
-  alb = mix(alb, alb * vec3(0.52, 0.47, 0.42) + vec3(0.026, 0.023, 0.02), grime * 0.6);
+  alb = mix(alb, alb * vec3(0.62, 0.5, 0.45) + vec3(0.012, 0.009, 0.006), grime * 0.4);
   alb = mix(alb, vec3(0.12, 0.06, 0.035), bleed * 0.55);
   // and the plaster's own stipple, faintly, everywhere: the paint is not a
   // flat colour but has the wall's tooth
@@ -394,28 +398,31 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   float gasket = id == 1.0 ? smoothstep(A + 0.009, A + 0.004, length(q.xy)) : 0.0;
   alb = mix(alb, vec3(0.035, 0.034, 0.033), gasket);
 
-  // Lit as the house is: the measured sun, a hard Lambert terminator (the
-  // wall's own shadow edges are crisp, so no wrap and a sharp self-shadow).
-  // The sun's strength is the plate's: sunlit plaster on the house reads
-  // 3.9x its shade, which with the panorama's skylight on that wall puts the
-  // direct sun at about 1.2x the glass's nominal figure.
-  float sunE = uSunE * 1.2;
+  // Lit as the crossing is: the measured sun at full strength, a hard Lambert
+  // terminator (the wall's own shadow edges are crisp, so no wrap and a sharp
+  // self-shadow). Its strength is the plate's: the sunlit plaster under the
+  // eave reads 0.57 linear facing the sun at 60 degrees, which for lime
+  // plaster puts the direct sun at 1.45x the glass's nominal figure.
+  float sunE = uSunE * 1.45;
   float ndl = max(dot(n, uSun), 0.0);
   float sh = ndl > 0.0 ? softShadow(p + n * 0.003, uSun, 0.004, 3.0, 64.0) : 0.0;
-  // The shade side is lit by the sky: the panorama's irradiance at this
-  // normal, its colour taken from the hemisphere above it, so a surface
-  // turned from the sun goes skylight blue, not a flat grey ambient.
+  // The shade side is lit by the sky alone, and it is dim and cold: the
+  // crossbuck pole's yellow reads 0.25-0.9 linear red on its sun side and
+  // 0.085 in its shade, an order of magnitude, so the panorama's irradiance
+  // (which still holds the lit street's bounce) is cut to the open sky's
+  // share and cooled toward its cyan. Vermilion in that light is near black.
   vec3 Ei = irradiance(n);
   vec3 Es = irradiance(normalize(n + vec3(0.0, 1.1, 0.0)));
   vec3 Esky = Es * (dot(Ei, LUMA) / max(dot(Es, LUMA), 1e-4));
-  vec3 amb = mix(Ei, Esky, 0.3) * occ;
+  const vec3 FILL = vec3(0.4, 0.56, 0.78);
+  vec3 amb = mix(Ei, Esky, 0.5) * FILL * occ;
   // under the visor the paint faces the dome, and the dome throws the sky
   // back up into it: the hood's underside is the frame's colour in shade,
   // not a black slot
   if (id == 1.0) {
     vec3 rad = normalize(uX * q.x + uU * q.y + vec3(1e-5));
     float inner = smoothstep(0.2, -0.7, dot(n, rad)) * smoothstep(ZF - 0.01, ZF + 0.015, q.z);
-    amb += irradiance(uN) * vec3(0.9, 1.0, 1.08) * 0.45 * inner;
+    amb += irradiance(uN) * FILL * 0.45 * inner;
   }
   vec3 sunC = vec3(1.0, 0.96, 0.88);
   vec3 diff = alb * (sunC * sunE / PI * ndl * sh + amb / PI);
@@ -433,7 +440,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   // so the silhouette stays the paint's colour, darkening into the plate
   float Gv = 2.0 * ndv / (ndv + sqrt(a * a + (1.0 - a * a) * ndv * ndv)) * smoothstep(0.04, 0.4, ndv);
   vec3 r = reflect(-v, n);
-  vec3 spec = env(r, 4.0 + 4.0 * rough) * Fr * Gv * occ * (0.25 + 0.75 * gloss) * 0.6;
+  vec3 spec = env(r, 4.0 + 4.0 * rough) * Fr * Gv * occ * (0.25 + 0.75 * gloss) * 0.35;
 
   // The sun's highlight. Pipe and rim are drawn and brushed along their
   // length, and rain has worn them the same way: the lobe is anisotropic,
@@ -450,7 +457,7 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
     vec3 B = cross(n, T);
     // the rim's section is only 13 mm round: a wider lobe across it, so the
     // highlight lies along its top as a band, not a hairline on the silhouette
-    float at = 0.55 + 0.25 * (1.0 - gloss), ab = (id == 1.0 ? 0.16 : 0.12) + 0.12 * (1.0 - gloss);
+    float at = 0.55 + 0.25 * (1.0 - gloss), ab = (id == 1.0 ? 0.13 : 0.07) + 0.1 * (1.0 - gloss);
     float th = dot(T, h) / at, bh = dot(B, h) / ab;
     float k = th * th + bh * bh + ndh * ndh;
     D = 1.0 / (PI * at * ab * k * k);
@@ -461,10 +468,11 @@ vec3 paint(vec3 p, vec3 n, float id, vec3 v) {
   // Its strength is set against the plate, not the enamel's 4 % Fresnel
   // alone: the crossing's own poles carry a sun-side band clearly brighter
   // than their paint, the binder's glaze where rain has polished it, so the
-  // lobe is given 3x (and a dirtier, matte patch still loses most of it).
+  // lobe is given 2x (and a dirtier, matte patch still loses most of it):
+  // a narrow white streak on the vermilion, not a pink wash across it.
   float Fs = F0 + (1.0 - F0) * pow(1.0 - vdh, 5.0);
   float Gl = 2.0 * ndl / (ndl + sqrt(a * a + (1.0 - a * a) * ndl * ndl));
-  spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (0.15 + 0.85 * gloss) * (1.0 - gasket) * 3.0;
+  spec += sunC * sunE * sh * D * Fs * Gv * Gl / (4.0 * ndv) * (0.15 + 0.85 * gloss) * (1.0 - gasket) * 2.0;
   return diff + spec;
 }
 
@@ -493,9 +501,9 @@ float smudgeAt(vec2 q) {
 // ground's bounce, and the sky the dome itself throws back up into it
 vec3 headSeen(vec3 nl) {
   vec3 n = normalize(uX * nl.x + uU * nl.y + uN * nl.z);
-  vec3 alb = vec3(0.4, 0.15, 0.075);
-  vec3 E = irradiance(n) * 0.6 + irradiance(uN) * vec3(0.9, 1.0, 1.08) * 0.45;
-  return alb * (E + vec3(1.0, 0.96, 0.88) * uSunE * max(dot(n, uSun), 0.0) * 0.5) / PI;
+  vec3 alb = vec3(0.807, 0.089, 0.0123) * 0.7;
+  vec3 E = (irradiance(n) * 0.6 + irradiance(uN) * 0.45) * vec3(0.4, 0.56, 0.78);
+  return alb * (E + vec3(1.0, 0.96, 0.88) * uSunE * 1.45 * max(dot(n, uSun), 0.0) * 0.5) / PI;
 }
 
 // How much of the hood a reflected ray r from face-local q meets, over a
@@ -542,6 +550,31 @@ vec3 glass(vec3 P, vec3 d, vec3 S, float spread, float aa) {
   float dust = dustAt(q.xy);
   float smudge = smudgeAt(q.xy);
   vec3 c = env(dir, lod + 2.5 * smudge);
+  // The 360 behind the lens was shot under cloud: its walls and road sit at
+  // 0.02-0.13 linear where the photo's own sunlit walls read 0.52 (median of
+  // the sunlit matte). The street the mirror sees is under the photo's noon
+  // sun, so the 360's surfaces take the sun's exposure: 5x at the road's
+  // grey, opened in contrast (a sunlit street has the spread an overcast one
+  // lacks), warmed to the sun's colour, and rolled off on a shoulder so a
+  // white wall lands at sunlit plaster, not clip. Not its sky (already the
+  // photo's fitted sky, blue and bright in its neighbourhood, so the wires
+  // across it stay dark), and not the photograph's own re-projected pixels,
+  // which carry their own sun. The 360's distances only hold below the
+  // horizon (above it everything is "far"), so above it the surfaces are told
+  // from the sky by their neighbourhood: grey and dim, not blue and bright.
+  float dE = envDist(dir);
+  vec3 cam = transpose(uR) * (uM + dir * dE);
+  vec2 ppx = uC + uF * vec2(cam.x, -cam.y) / max(-cam.z, 1e-4);
+  float pin = min(min(ppx.x, uPhotoSize.x - ppx.x), min(ppx.y, uPhotoSize.y - ppx.y));
+  float fromPhoto = cam.z < 0.0 ? smoothstep(0.0, 160.0, pin) : 0.0;
+  vec3 nb = env(dir, 5.0);
+  float nbC = (nb.b - nb.r) / max(nb.b, 1e-3);
+  float above = smoothstep(0.28, 0.15, nbC) * smoothstep(0.45, 0.3, dot(nb, LUMA));
+  float street = (1.0 - fromPhoto) * max(1.0 - smoothstep(120.0, 600.0, dE), above);
+  float cl0 = max(dot(c, LUMA), 1e-4);
+  float Lg = 5.0 * cl0 * pow(cl0 / 0.12, 0.25);
+  vec3 cs = c * vec3(1.04, 1.0, 0.93) * (0.8 * (1.0 - exp(-Lg / 0.8)) / cl0);
+  c = mix(c, cs, street);
   // the panorama was shot under cloud: what the aluminium returns of it is
   // given the photo's own snap (a filmic contrast about mid grey, a touch of
   // colour), so the glass reads as a mirror, not a print behind a sheet
