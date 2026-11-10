@@ -4,8 +4,10 @@ import { createStage, clamp } from "../_kit/stage";
 // CMOS sensor. The fan is a real photograph, cut tight to the fan head and
 // cut in three: the plate (the back of the guard and the motor, with the
 // blades filled out of it by LaMa, and the room behind pulled down to a dim
-// ground, as if a flash had lit the fan), the rotor (the three translucent green blades, keyed on their
-// greenness with the front guard's wires taken out of them), and the front
+// ground, as if a flash had lit the fan; behind the blades it keeps the photo's
+// own rear guard, de-tinted), the rotor (the three blades as transmissive
+// acrylic: a signed distance to one smooth outline per blade, a low-frequency
+// body colour and opacity, a thin specular rim), and the front
 // (the guard's wires and centre badge that cross in front of the blades).
 // The head is turned, so the rotor turns in its own tilted plane: the guard
 // rim's ellipse maps picture to disc and back (tools/depth/bakes/rolling).
@@ -50,6 +52,8 @@ const SLIP = 6; // motor torque per rad/s of slip below the set speed
 const TORQUE = 115; // motor torque cap
 const PX_PER_RPM = 0.42; // drag distance (CSS px) per rpm of set speed
 
+const AA = 1.25; // the blade outline's anti-aliasing width, device px
+
 const PAPER = [0.949, 0.941, 0.922]; // #f2f0eb
 
 const VS = `#version 300 es
@@ -60,6 +64,7 @@ const FS = `#version 300 es
 precision highp float;
 uniform sampler2D uPlate;
 uniform sampler2D uRotor;
+uniform sampler2D uShape;
 uniform sampler2D uFront;
 uniform vec2 uView;
 uniform vec4 uRect;
@@ -77,6 +82,10 @@ uniform vec2 uScan;
 uniform vec2 uScanRange;
 uniform float uRows;
 uniform vec3 uPaper;
+uniform float uPx;
+uniform float uSdf;
+uniform float uRim;
+uniform float uTint;
 out vec4 o;
 
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -102,17 +111,25 @@ void main(){
   vec4 f = texture(uFront, q);
   // Beyond the blade tips (0.83 of the rim) nothing turns.
   if (dot(d, d) > 0.81) { o = vec4(enc(mix(plate, f.rgb, f.a)), 1.0); return; }
-  vec4 acc = vec4(0.0);
+  // The rotor is transmissive acrylic: per sub-sample, coverage c from the
+  // signed distance to the blade's outline (anti-aliased over AA device px),
+  // the plate passed through it tinted, T = 1 - c + c (1 - A) tint, and
+  // what it sends back, E = c (A body + rim). Linear light throughout.
+  vec3 accT = vec3(0.0);
+  vec3 accE = vec3(0.0);
   for (int k = 0; k < ${SUB}; k++) {
     float tau = s * uReadout + uExpo * (float(k) + 0.5) / float(${SUB});
     float a = uDir * angAt(tau);
     float c = cos(a), sn = sin(a);
-    vec2 r = uFromDisc * vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y) + uHub;
-    vec4 t = texture(uRotor, r / uImg);
-    acc += vec4(t.rgb * t.a, t.a);
+    vec2 r = (uFromDisc * vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y) + uHub) / uImg;
+    vec2 sh = texture(uShape, r).rg;
+    float cov = clamp((sh.r * 255.0 - 128.0) / uSdf * uPx / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
+    vec4 t = texture(uRotor, r);
+    vec3 tint = pow(t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4), vec3(uTint));
+    accT += 1.0 - cov + cov * (1.0 - t.a) * tint;
+    accE += cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint));
   }
-  acc /= float(${SUB});
-  vec3 col = plate * (1.0 - acc.a) + acc.rgb;
+  vec3 col = (plate * accT + accE) / float(${SUB});
   col = mix(col, f.rgb, f.a);
   o = vec4(enc(col), 1.0);
 }`;
@@ -161,10 +178,11 @@ export async function createRolling(host, { embedded = false } = {}) {
   if (!gl) throw new Error("no webgl2");
   stage.canvas.style.cursor = "ns-resize";
 
-  const [meta, plateBm, rotorBm, frontBm] = await Promise.all([
+  const [meta, plateBm, rotorBm, shapeBm, frontBm] = await Promise.all([
     fetch(`${BASE}meta.json`).then((r) => r.json()),
     loadBitmap(`${BASE}plate.webp`),
     loadBitmap(`${BASE}rotor.webp`),
+    loadBitmap(`${BASE}rotor-shape.webp`),
     loadBitmap(`${BASE}front.webp`),
   ]);
   const IW = meta.width;
@@ -179,10 +197,11 @@ export async function createRolling(host, { embedded = false } = {}) {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-  const texFrom = (bm) => {
+  // Colour is sRGB; the rotor's shape (signed distance and rim) is data.
+  const texFrom = (bm, srgb = true) => {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.SRGB8_ALPHA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
+    gl.texImage2D(gl.TEXTURE_2D, 0, srgb ? gl.SRGB8_ALPHA8 : gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, bm);
     gl.generateMipmap(gl.TEXTURE_2D);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
@@ -193,6 +212,7 @@ export async function createRolling(host, { embedded = false } = {}) {
   };
   const plateTex = texFrom(plateBm);
   const rotorTex = texFrom(rotorBm);
+  const shapeTex = texFrom(shapeBm, false);
   const frontTex = texFrom(frontBm);
 
   const prog = program(gl, VS, FS);
@@ -286,6 +306,13 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.activeTexture(gl.TEXTURE2);
     gl.bindTexture(gl.TEXTURE_2D, frontTex);
     gl.uniform1i(u.uFront, 2);
+    gl.activeTexture(gl.TEXTURE3);
+    gl.bindTexture(gl.TEXTURE_2D, shapeTex);
+    gl.uniform1i(u.uShape, 3);
+    gl.uniform1f(u.uPx, rect[2] / IW);
+    gl.uniform1f(u.uSdf, meta.sdf);
+    gl.uniform1f(u.uRim, meta.rim);
+    gl.uniform1f(u.uTint, meta.tint);
     gl.uniform2f(u.uView, cw, ch);
     gl.uniform4f(u.uRect, rect[0], rect[1], rect[2], rect[3]);
     gl.uniform2f(u.uImg, IW, IH);

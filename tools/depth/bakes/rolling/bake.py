@@ -30,25 +30,38 @@ centre of the guard whose slots show the green blade roots turning behind it.
           surroundings (a lightness top-hat), so the room showing at the
           blade's edge leaves no ghost outline once the blade turns away.
   badge   a circle fitted to the badge's outer chrome ring. Inside it the
-          badge is static (front, alpha 1) except its slots, which are keyed
-          green and left open onto the rotor; the SANYO emblem at the centre
-          stays static whatever its colour.
-  rotor   RGBA: the clean blade colour (no front wire) spread by normalised
-          convolution (finest scale with support), with a quarter of the
-          photo's own clean texture laid back over it: through the acrylic
-          the photo shows the rear guard, which must not turn with the blade.
-          Under the badge, in disc-polar coordinates, each blade is carried
-          straight in from the first radius the photo shows it at, smoothed
-          across about 2 degrees so it leaves no radial streaks, to a solid
-          spinner. Nothing beyond the blade tips (0.87 of the rim) is kept.
+          badge is static (front, alpha 1) except its slots: an elliptical
+          annulus fitted between the outer and middle rings, open whatever
+          its colour (green root or dark motor) except the chrome spokes and
+          bevels, so the rotor and the plate show through and nothing flat
+          stays behind. Green caught at the ring's edge is keyed out too.
+  rotor   transmissive acrylic, in two files. rotor.webp: RGB the blade's
+          low-frequency body colour (the blades' mean green, with a mild
+          share of the local light; the sticker as photographed), A its
+          opacity (0.42; 1 for the paper sticker). rotor-shape.webp
+          (lossless, linear): R a signed distance to one smooth closed
+          outline per blade (the greenness edge, closed over the wire
+          notches, contours smoothed along their length, filled 4x
+          supersampled), G a thin specular rim just inside it plus the broad
+          gloss bands of the photo's band-pass. The engine composites
+          plate x T + E per exposure sub-sample with
+          T = 1 - c + c (1 - A) tint and E = c (A body + rim). Under the
+          badge, in disc-polar coordinates, each blade is carried straight
+          in from the first radius the photo shows it at, ramping to the
+          blades' mean colour, to a solid hub. Nothing beyond the blade tips
+          (0.87 of the rim) is kept.
   plate   RGB: the photo with the rotor's hole (hull and hub disc) filled by
-          LaMa (tools/depth/fill.py): what the guard's back, the motor and
-          the room look like behind the blades. Then the ground: every
-          pixel that is not steel (a lightness top-hat, about neutral, inside
-          the rim) is pulled to a dim, nearly grey version of itself, as if
-          a flash had lit the fan and the room fell off behind it.
+          LaMa (tools/depth/fill.py). Then the ground: every pixel that is
+          not steel (a lightness top-hat, about neutral, inside the rim) is
+          pulled to a dim, nearly grey version of itself, as if a flash had
+          lit the fan and the room fell off behind it. Behind the blades the
+          photo's own rear guard is kept: the blade's emission taken out and
+          its transmission divided out (de-tinted), its steel laid over
+          LaMa's ground. The slots show the de-tinted photo; the sticker's
+          place is copied from the same radius round the disc.
   front   RGBA: the photo's own pixels for the wires crossing the hull and
-          the badge's chrome, alpha from the wire matte and the badge.
+          the badge's chrome, alpha from the wire matte (with the moulded
+          edge's bright line taken out of it) and the badge.
 
 meta.json carries the print size, the hub (rotation centre, px), the disc
 (the rim ellipse's axes e1, e2 and semi-axes, so the engine turns the rotor in
@@ -61,7 +74,6 @@ import numpy as np, cv2
 ap = argparse.ArgumentParser()
 ap.add_argument("photo"); ap.add_argument("work"); ap.add_argument("out")
 ap.add_argument("--fill", default="lama")
-ap.add_argument("--keep-tex", type=float, default=0.25)
 a = ap.parse_args()
 os.makedirs(a.work, exist_ok=True); os.makedirs(a.out, exist_ok=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -115,7 +127,15 @@ du, dv = to_disc(xx, yy)
 rho = np.hypot(du, dv)
 phi = np.arctan2(dv, du)
 EMBLEM = 42 * k
-KEEP_TEX = a.keep_tex
+# the acrylic: opacity (the rest is transmitted, tinted by the body's own hue
+# raised to TINT_POW), the body's gain over the photo's mean blade colour,
+# the scale of its low-frequency colour field (1280 px units)
+A_BLADE, TINT_POW, BODY_GAIN, BODY_SIG = 0.42, 1.0, 1.0, 14
+# the outline's smoothing along its length (1280 px units); the rim's base,
+# its share of the photo's edge light, the gloss bands' gain, and their
+# encoding; the de-tinted plate starts DT_IN px inside the outline
+DT_STEEL_LO, DT_STEEL_GAIN, STICKER_FILL_ROT = 0.04, 1.5, -0.7
+OUTLINE_SIG, RIM_BASE, RIM_EDGE, GLOSS, GLOSS_LO, RIM_MAX, SDF_SCALE, DT_IN = 5, 0.1, 1.2, 1.5, 6, 0.5, 8, 3
 # the print, in the 1280 px crop's coordinates: the guard's rim and its hinge
 # with a narrow margin of room
 PRINT = (55, 0, 885, 880)
@@ -180,45 +200,96 @@ wire[hub > 0] = 0
 st_wire = (wire > 0.3) & sticker
 wire[np.hypot(xx - STICKER[0], yy - STICKER[1]) < STICKER[2] + 3 * k] = 0  # paper, not wire: it turns with the blade
 
-# --- badge: static except its green slots
-slot = ((green > 0.045) & (rr < RB - 3 * k) & (rr > EMBLEM)).astype(np.uint8)
-slot = cv2.morphologyEx(slot, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+
+# --- badge: static except its slots. Between the outer chrome ring and the
+# middle ring the badge is open: eight slots, divided by chrome spokes, through
+# which the blade roots turn (green) and the motor shows between them (dark).
+# The badge is a dome, so its rings are not concentric in the picture: the
+# slots' band is an elliptical annulus fitted to the outer ring's inner edge
+# and the middle ring's outer edge. Inside it everything but the spokes and
+# the rings' bevels (bright, neutral chrome) is open, whatever its colour, so
+# no flat black or green blob is left static over the turning rotor. Round
+# the outer ring's edge the blade green that the circle fit catches is keyed
+# out too, or it stays behind as a green fringe.
+def ell(c, ax):
+    return np.hypot((xx - HUB[0] - c[0] * k) / (ax[0] * k), (yy - HUB[1] - c[1] * k) / (ax[1] * k))
+SLOT_OUT = ((6, -4), (99.5, 103.5))
+SLOT_IN = ((6.5, -0.5), (77, 82))
+band_s = (ell(*SLOT_OUT) < 1) & (ell(*SLOT_IN) > 1)
+chrome = ((f.mean(2) > 0.5) & (f.max(2) - f.min(2) < 0.16) & (green < 0.03) & band_s).astype(np.uint8)
+chrome = cv2.morphologyEx(chrome, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
+chrome = cv2.dilate(chrome, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+slot = (band_s & (chrome == 0)).astype(np.uint8)
+slot = cv2.morphologyEx(slot, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(4.5 * k) | 1,) * 2))
 slot_soft = cv2.GaussianBlur(slot.astype(np.float32), (0, 0), 0.8)
-badge_a = np.where(rr < RB + 2 * k, 1 - slot_soft, 0).astype(np.float32)
+rim_green = np.clip((green - 0.02) / 0.04, 0, 1) * (rr > RB - 5 * k)
+rim_green = cv2.GaussianBlur(rim_green.astype(np.float32), (0, 0), 0.8)
+badge_a = np.where(rr < RB + 2 * k, (1 - slot_soft) * (1 - rim_green), 0).astype(np.float32)
 badge_a[rr < EMBLEM] = 1
 front_a = np.clip(np.maximum(wire, badge_a), 0, 1)
 
-# --- rotor colour: translucent acrylic is smooth, so its colour is the clean
-# blade pixels (no front wire) spread by normalised convolution, finest scale
-# that has support wins; the hub under the badge takes the slots' green. The
-# photo's own blade pixels are not kept as they are: through the acrylic they
-# show the rear guard and the room, which would turn with the blade, and
-# wherever the wire matte is not perfect they leave pits. A light share of
-# the clean texture is kept for the acrylic's own grain and gloss.
-clean = (((hullb > 0) & (ratio > 0.82) & (wire < 0.05) & (hub == 0)) | (slot > 0)).astype(np.float32)
+# --- rotor: a clean transmissive acrylic blade, not a smeared albedo. Each
+# blade is one moulded sheet, so it is cut in three parts that the engine
+# composites in linear light, per exposure sub-sample:
+#
+#   plate x T + E,  T = 1 - c + c (1 - A) tint,  E = c (A body + rim)
+#
+#   c     coverage, from a signed distance to one smooth closed outline per
+#         blade, anti-aliased over about 1.25 device px in the engine;
+#   body  the blade's low-frequency colour (its mean green, spread over the
+#         sheet by normalised convolution at a broad scale) with opacity A:
+#         about 0.42 for the acrylic, so the plate (the rear guard's wires and
+#         the motor, which do not turn) shows through, tinted by the body's
+#         own hue as a transmission colour; 1 for the paper sticker;
+#   rim   a thin specular line just inside the outline, as bright as the
+#         photo's own moulded edge there, and the blade's broad gloss bands
+#         (the photo's band-pass with the wires opened out of it). Both turn
+#         with the blade.
+#
+# None of the photo's fine texture is carried: through the acrylic it shows
+# the rear guard and the room, which must not turn. That texture goes to the
+# plate instead (below), de-tinted.
+lin = f ** 2.2
+stk_d = np.hypot(xx - STICKER[0], yy - STICKER[1])
+clean = ((hullb > 0) & (ratio > 0.82) & (wire < 0.05) & (hub == 0) & (stk_d > STICKER[2] + 3 * k)).astype(np.float32)
 cv2.imwrite(f"{a.work}/clean.png", (clean * 255).astype(np.uint8))
-lin = (crop.astype(np.float32) / 255) ** 2.2
-rot_lin = np.zeros_like(lin); have = np.zeros(lin.shape[:2], np.float32)
-for sig in (2, 4, 8, 16, 40):
-    sk = sig * k
-    num = cv2.GaussianBlur(lin * clean[..., None], (0, 0), sk)
-    den = cv2.GaussianBlur(clean, (0, 0), sk)
-    ok = (den > 0.12) & (have == 0)
-    rot_lin[ok] = num[ok] / den[ok][:, None]
-    have[ok] = 1
-rem = have == 0
-rot_lin[rem] = (lin * clean[..., None]).sum((0, 1)) / clean.sum()
-# the smooth field is stitched from four scales; one more pass of the finest
-# blur takes out the steps where one scale hands over to the next
-rot_lin = cv2.GaussianBlur(rot_lin, (0, 0), 1.5 * k)
-keepw = KEEP_TEX * np.clip((ratio - 0.9) / 0.08, 0, 1) * (hullb > 0) * (hub == 0)
-rot_lin = lin * keepw[..., None] + rot_lin * (1 - keepw[..., None])
-# keep the sticker as photographed (it is paper, not acrylic), wires painted out
-st_paint = cv2.inpaint(crop, st_wire.astype(np.uint8) * 255, 3 * k, cv2.INPAINT_TELEA)
-rot_lin[sticker] = (st_paint[sticker].astype(np.float32) / 255) ** 2.2
+
+
+def blur(im, sig):
+    """A Gaussian blur; wide ones run on a 4x smaller copy."""
+    if sig < 16:
+        return cv2.GaussianBlur(im, (0, 0), sig)
+    hh, ww = im.shape[:2]
+    sm = cv2.resize(im, (ww // 4, hh // 4), interpolation=cv2.INTER_AREA)
+    return cv2.resize(cv2.GaussianBlur(sm, (0, 0), sig / 4), (ww, hh), interpolation=cv2.INTER_LINEAR)
+
+
+def nconv(img, wgt, sigmas, thr=0.12):
+    """Normalised convolution, the finest scale with support wins."""
+    img3 = img if img.ndim == 3 else img[..., None]
+    out = np.zeros_like(img3); have = np.zeros(wgt.shape, bool)
+    for sig in sigmas:
+        num = blur(img3 * wgt[..., None], sig * k).reshape(img3.shape)
+        den = blur(wgt, sig * k)
+        ok = (den > thr) & ~have
+        out[ok] = num[ok] / den[ok][:, None]
+        have |= ok
+    out[~have] = (img3 * wgt[..., None]).sum((0, 1)) / max(wgt.sum(), 1)
+    return out if img.ndim == 3 else out[..., 0]
+
+
+mean_lin = blur(nconv(lin, clean, (BODY_SIG, 2 * BODY_SIG, 4 * BODY_SIG, 120)), BODY_SIG / 2 * k)
+# One acrylic, one hue: where the room behind is bright the photo's mean
+# goes grey, which is the room, not the blade. The body keeps the blades'
+# overall colour and only a mild share of the local light.
+blade_mean = (lin * clean[..., None]).sum((0, 1)) / clean.sum()
+LUM = np.array([0.0722, 0.7152, 0.2126], np.float32)  # BGR
+lum_ratio = np.clip((mean_lin @ LUM) / float(blade_mean @ LUM), 0.75, 1.35)
+blade_mean = np.clip(blade_mean * BODY_GAIN, 0, 1)
+body = np.clip(blade_mean * lum_ratio[..., None], 0, 1)
 # Under the badge the blades are hidden, but turned they come out from under
 # it. In disc-polar coordinates each blade is carried straight in from the
-# first radius the photo shows it at, to a solid spinner at rho < HUB_R.
+# first radius the photo shows it at, to a solid hub at rho < HUB_R.
 NP, NR, RMAX = 1440, 400, 0.9
 pp, rq = np.meshgrid(np.linspace(-np.pi, np.pi, NP, endpoint=False), np.linspace(0, RMAX, NR))
 cu, cv_ = rq * np.cos(pp), rq * np.sin(pp)
@@ -226,9 +297,10 @@ mapx = (AXIS[0] + cu * RIM_AX[0] * E1[0] + cv_ * RIM_AX[1] * E2[0]).astype(np.fl
 mapy = (AXIS[1] + cu * RIM_AX[0] * E1[1] + cv_ * RIM_AX[1] * E2[1]).astype(np.float32)
 hid_p = cv2.remap((rr < RB + 4 * k).astype(np.float32), mapx, mapy, cv2.INTER_LINEAR) > 0.01
 a_p = cv2.remap(rotor_a.astype(np.float32), mapx, mapy, cv2.INTER_LINEAR)
-c_p = cv2.remap(rot_lin.astype(np.float32), mapx, mapy, cv2.INTER_LINEAR)
+c_p = cv2.remap(body.astype(np.float32), mapx, mapy, cv2.INTER_LINEAR)
 HUB_R = 0.16
 carried = np.zeros((NR, NP), bool)
+srcs = np.zeros(NP)
 for j in range(NP):
     col = hid_p[:, j]
     vis = np.nonzero(~col)[0]
@@ -238,30 +310,124 @@ for j in range(NP):
     a_p[:src, j] = a_p[src:src + 6, j].mean()
     c_p[:src, j] = c_p[src:src + 6, j].mean(0)
     carried[:src, j] = True
-# each angle carried in on its own leaves radial streaks (the blade's
-# colour at one radius varies from angle to angle); smooth them across the
-# angle, about 2 degrees
+    srcs[j] = src
+# each angle carried in on its own leaves radial streaks; smooth them across
+# the angle, about 2 degrees
 c_s = cv2.GaussianBlur(np.concatenate([c_p[:, -60:], c_p, c_p[:, :60]], 1), (0, 0), sigmaX=8, sigmaY=0.01)[:, 60:-60]
 c_p = np.where(carried[..., None], c_s, c_p)
 hubrow = int(HUB_R / RMAX * NR)
 a_p[:hubrow] = 1
-c_p[:hubrow] = c_p[hubrow:hubrow + 4].mean((0, 1)) * 0.7
-# back to the image, only where the badge hides the photo
+c_p[:hubrow] = c_p[hubrow:hubrow + 4].mean((0, 1))
+# the carried colour is read just clear of the badge's chrome, whose shadow
+# and reflections grey it; the hub is the same acrylic as the blades, so it
+# ramps to their mean colour
+w_hub = np.clip((srcs[None, :] - np.arange(NR)[:, None]) / 30, 0, 1)[..., None]
+hub_col = (body * clean[..., None]).sum((0, 1)) / clean.sum()
+c_p = c_p * (1 - w_hub) + hub_col * w_hub
 idx_r = np.clip(rho / RMAX * NR, 0, NR - 1).astype(np.float32)
 idx_p = ((phi + np.pi) / (2 * np.pi) * NP).astype(np.float32) % NP
 a_back = cv2.remap(a_p, idx_p, idx_r, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 c_back = cv2.remap(c_p, idx_p, idx_r, cv2.INTER_LINEAR, borderMode=cv2.BORDER_WRAP)
 under = (rr < RB + 3 * k) & (rho < RMAX)
 rotor_a = np.where(under, a_back, rotor_a)
-rot_lin = np.where(under[..., None], c_back, rot_lin)
-bled = np.clip(rot_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
+body = np.where(under[..., None], c_back, body)
 
-# --- front colour: the wire's own colour with the blade's green taken out of
-# its soft edge, I = a F + (1 - a) B, so no green halo stays behind.
-al = np.clip(front_a, 1e-3, 1)[..., None]
-fr_lin = np.where(front_a[..., None] < 0.999, (lin - (1 - al) * rot_lin) / al, lin)
-fr_lin = np.where((wire > 0)[..., None] & (badge_a < 0.5)[..., None], np.clip(fr_lin, 0, 1), lin)
-fr_rgb = np.clip(fr_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
+# --- the outline: one smooth closed curve per blade. The hull above is grown
+# for the wires and the plate's hole; the blade's own edge is tighter: the
+# greenness blurred only 2 px, cut at 0.05, which lies on the moulded edge's
+# bright line. Inside the hull (and the sticker, and under the badge, where
+# the carried blades are) it is closed over the notches the front wires cut,
+# its contours resampled every half pixel and smoothed along their own length
+# (a periodic Gaussian, so the tips keep their shape), then filled 4x
+# supersampled with sub-pixel vertices and turned into an exact signed
+# distance (+ inside, image px).
+gb_e = cv2.GaussianBlur(gpos, (0, 0), 2 * k)
+mb = ((gb_e > 0.05) & (cv2.dilate(hullb, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(8 * k) | 1,) * 2)) > 0)
+      & (rotor_a > 0.02) & (rr > RB + 2 * k))
+mb |= (stk_d < STICKER[2]) | (under & (rotor_a > 0.5))
+mb = mb.astype(np.uint8)
+mb = cv2.morphologyEx(mb, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(9 * k) | 1,) * 2))
+mb = cv2.morphologyEx(mb, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (int(6 * k) | 1,) * 2))
+n_, lab_, st_, _ = cv2.connectedComponentsWithStats(mb, 8)
+mb = np.isin(lab_, [i for i in range(1, n_) if st_[i, cv2.CC_STAT_AREA] > 2000 * k * k]).astype(np.uint8)
+# the blades have no holes: pits the key leaves (a wire crossing on a dark
+# patch of room) are filled
+n_, lab_, st_, _ = cv2.connectedComponentsWithStats(1 - mb, 4)
+mb[np.isin(lab_, [i for i in range(1, n_) if st_[i, cv2.CC_STAT_AREA] < 4000 * k * k])] = 1
+cnts, hier = cv2.findContours(mb, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_NONE)
+
+
+def smooth_closed(c, sig):
+    p = c[:, 0, :].astype(np.float64)
+    pc = np.vstack([p, p[:1]])
+    s = np.concatenate([[0], np.cumsum(np.hypot(*np.diff(pc, axis=0).T))])
+    n = max(32, int(s[-1] / 0.5))
+    t = np.linspace(0, s[-1], n, endpoint=False)
+    q = np.stack([np.interp(t, s, pc[:, 0]), np.interp(t, s, pc[:, 1])], 1)
+    fr = np.fft.fftfreq(n, d=s[-1] / n)
+    return np.real(np.fft.ifft(np.fft.fft(q, axis=0) * np.exp(-0.5 * (2 * np.pi * fr * sig) ** 2)[:, None], axis=0))
+
+
+SS = 4
+m4 = np.zeros((h * SS, w * SS), np.uint8)
+order = sorted(range(len(cnts)), key=lambda i: hier[0][i][3] != -1)  # outer first, then holes
+for i in order:
+    if len(cnts[i]) < 8 or cv2.contourArea(cnts[i]) < 30 * k * k:
+        continue
+    q = smooth_closed(cnts[i], OUTLINE_SIG * k)
+    g = np.round((q * SS + (SS - 1) / 2) * 16).astype(np.int32)
+    cv2.fillPoly(m4, [g], 0 if hier[0][i][3] != -1 else 1, lineType=cv2.LINE_8, shift=4)
+d_in = cv2.distanceTransform(m4, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+d_out = cv2.distanceTransform(1 - m4, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+sdf4 = np.where(m4 > 0, d_in - 0.5, 0.5 - d_out) / SS
+del d_in, d_out, m4
+sdf = cv2.resize(sdf4, (w, h), interpolation=cv2.INTER_AREA)
+del sdf4
+cov = np.clip(sdf / 1.25 + 0.5, 0, 1)
+
+# --- the wire matte at the outline. The moulded edge's bright line runs
+# along the outline and the key above takes bits of it for wire; left in the
+# front, they stay behind as a ghost arc when the blade turns away. The front
+# wires cross the edge running in toward the badge, so near the outline a
+# pixel stays wire only if the matte is there a few px inward and outward
+# along that direction too.
+ex, ey = (xx - HUB[0]) / np.maximum(rr, 1), (yy - HUB[1]) / np.maximum(rr, 1)
+wire_t = cv2.dilate(wire, np.ones((3, 3), np.uint8))
+step = 6 * k
+w_in = cv2.remap(wire_t, (xx - ex * step).astype(np.float32), (yy - ey * step).astype(np.float32), cv2.INTER_LINEAR)
+w_out = cv2.remap(wire_t, (xx + ex * step).astype(np.float32), (yy + ey * step).astype(np.float32), cv2.INTER_LINEAR)
+near_edge = cv2.GaussianBlur(((np.abs(sdf) < 4 * k) & (rr > RB + 16 * k)).astype(np.float32), (0, 0), 1 * k)
+wire = wire * (1 - near_edge) + np.minimum(wire, np.minimum(w_in, w_out)) * near_edge
+front_a = np.clip(np.maximum(wire, badge_a), 0, 1)
+
+# --- opacity and the sticker. The sticker is paper on the blade's root:
+# opaque, kept as photographed with the wires painted out.
+stk_a = cv2.GaussianBlur((stk_d < STICKER[2] - 1 * k).astype(np.float32), (0, 0), 0.8 * k)
+st_paint = cv2.inpaint(crop, st_wire.astype(np.uint8) * 255, 3 * k, cv2.INPAINT_TELEA)
+st_lin = (st_paint.astype(np.float32) / 255) ** 2.2
+body = body * (1 - stk_a[..., None]) + st_lin * stk_a[..., None]
+opac = A_BLADE + (1 - A_BLADE) * stk_a
+tint = np.clip(body / np.maximum(body.max(2, keepdims=True), 1e-4), 0, 1) ** TINT_POW
+
+# --- the rim. The photo's moulded edge: how much brighter (green channel)
+# the band just inside the outline is than the blade's mean, spread along
+# the edge so every edge carries one continuous line; drawn as a Gaussian
+# line about 1.6 px wide centred 1.2 px inside the outline. The gloss: the
+# green channel opened wider than a wire (front and rear guard wires gone),
+# band-passed between GLOSS_LO and 24 px, the positive part: broad bands
+# only, so nothing finer than the outline turns with the blade.
+Lg = lin[..., 1]
+edge_w = ((sdf > 0.5) & (sdf < 2.5 * k) & (wire < 0.05) & (stk_d > STICKER[2] + 3 * k) & ~under).astype(np.float32)
+edge_x = np.maximum(Lg - mean_lin[..., 1], 0)
+edge_str = nconv(edge_x, edge_w, (3, 6, 12, 24, 60), thr=0.05)
+rim = (RIM_BASE + RIM_EDGE * edge_str) * np.exp(-0.5 * ((sdf - 1.2) / 0.7) ** 2)
+ow2 = int(6 * k) | 1
+Lop = cv2.morphologyEx(Lg, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ow2, ow2)))
+gw = ((sdf > 3 * k) & (rr > RB + 14 * k) & (stk_d > STICKER[2] + 3 * k)).astype(np.float32)
+gloss = np.maximum(nconv(Lop, gw, (GLOSS_LO,), thr=0.3) - nconv(Lop, gw, (24, 48, 120)), 0)
+gloss *= np.clip((sdf - 3 * k) / (3 * k), 0, 1) * (gw > 0) * (1 - stk_a)
+rim = rim + GLOSS * gloss
+rim *= (1 - stk_a)
 
 # --- plate: fill the rotor's hole
 hole = ((rotor_a > 0.02) | (hullb > 0)).astype(np.uint8)
@@ -272,6 +438,20 @@ if not os.path.exists(plate_p):
     subprocess.run([sys.executable, "-I", os.path.join(TOOLS, "fill.py"), f"{a.work}/crop.png", f"{a.work}/hole.png", plate_p,
                     "--method", a.fill], check=True)
 plate = cv2.imread(plate_p, cv2.IMREAD_COLOR)
+# Behind the blade the photo itself shows what is there: the rear guard's
+# wires and the room, seen through the acrylic. Undo the blade there (take
+# its emission out, divide by its transmission in the green, where the
+# acrylic passes most): bg_g, the light behind it, as a grey. Its steel (the
+# rear guard's wires: a top-hat, as for the ground below, but stricter, since
+# the division raises the photo's noise) is laid over the ground, below.
+E_g = opac * body[..., 1] + rim
+T_g = (1 - opac) * tint[..., 1]
+bg_g = cv2.GaussianBlur(np.clip((Lg - E_g) / np.maximum(T_g, 0.2), 0, 1), (0, 0), 0.6 * k)
+w_dt = np.clip((sdf - DT_IN * k) / (2 * k), 0, 1) * (rr > RB - 12 * k) * (stk_d > STICKER[2] + 3 * k)
+# In the badge's slots the same: what the photo shows there, de-tinted, is
+# what is behind the hub (the motor's dark face and the light that comes past
+# it). It is kept as it is, not pulled down with the room.
+slot_dt = np.repeat(bg_g[..., None], 3, 2)
 
 # --- ground: the room, pulled down. The fan is lit and the room behind it
 # falls off, as if the phone's flash had fired: every pixel that is not steel
@@ -302,6 +482,48 @@ ground = (lum[..., None] + (pl_lin - lum[..., None]) * GROUND_SAT) * GROUND_GAIN
 pl_lin = pl_lin * steel[..., None] + ground * (1 - steel[..., None])
 plate = np.clip(pl_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 cv2.imwrite(f"{a.work}/steel.png", (steel * 255).astype(np.uint8))
+# behind the blades: LaMa's room as ground (none of its guessed steel), the
+# photo's own rear guard over it
+ow3 = int(9 * k) | 1
+bg_s = bg_g ** (1 / 2.2)
+top_dt = bg_s - cv2.GaussianBlur(cv2.morphologyEx(bg_s, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ow3, ow3))), (0, 0), 1.5 * k)
+steel_dt = np.clip((top_dt - DT_STEEL_LO) / STEEL_RAMP, 0, 1)
+# the front wires are in the photo too; the front layer covers them where
+# they are, so the plate keeps only the rear guard (nothing to copy round
+# the disc below, nothing doubled at a front wire's soft edge)
+fw = cv2.GaussianBlur(cv2.dilate((wire > 0.1).astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32), (0, 0), 0.7)
+steel_dt = (steel_dt * (1 - fw))[..., None]
+pl_dt = ground * (1 - steel_dt) + bg_g[..., None] * DT_STEEL_GAIN * steel_dt
+pl_lin = pl_lin * (1 - w_dt[..., None]) + pl_dt * w_dt[..., None]
+# The sticker's place on the plate: LaMa keeps a ghost of it. The rear guard
+# is close to symmetric about the axis, so the plate there is copied from the
+# same radius a little round the disc.
+ang_s = STICKER_FILL_ROT
+cs_, sn_ = np.cos(ang_s), np.sin(ang_s)
+su_, sv_ = cs_ * du - sn_ * dv, sn_ * du + cs_ * dv
+smx = (AXIS[0] + su_ * RIM_AX[0] * E1[0] + sv_ * RIM_AX[1] * E2[0]).astype(np.float32)
+smy = (AXIS[1] + su_ * RIM_AX[0] * E1[1] + sv_ * RIM_AX[1] * E2[1]).astype(np.float32)
+st_w = cv2.GaussianBlur((stk_d < STICKER[2] + 5 * k).astype(np.float32), (0, 0), 2 * k)[..., None] * (rr > RB + 3 * k)[..., None]
+pl_lin = pl_lin * (1 - st_w) + cv2.remap(pl_lin, smx, smy, cv2.INTER_LINEAR) * st_w
+
+# Under the badge only the slots show the plate: the motor's front, in shadow.
+# No steel there (LaMa's guess at it would glint through the slots).
+under_badge = cv2.GaussianBlur((rr < RB - 12 * k).astype(np.float32), (0, 0), 2 * k)
+pl_lin = pl_lin * (1 - under_badge[..., None]) + ground * 0.5 * under_badge[..., None]
+slot_w = cv2.GaussianBlur(cv2.dilate(slot, np.ones((5, 5), np.uint8)).astype(np.float32), (0, 0), 1 * k)[..., None]
+pl_lin = pl_lin * (1 - slot_w) + slot_dt * slot_w
+plate = np.clip(pl_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
+
+# --- front colour: the wire's own colour with what was behind it at home
+# (the blade over the plate, as the engine composites it) taken out of its
+# soft edge, I = a F + (1 - a) B, so no green halo stays behind.
+rim_col = 0.5 + 0.5 * tint
+T_home = 1 - cov[..., None] + cov[..., None] * (1 - opac[..., None]) * tint
+B_home = pl_lin * T_home + cov[..., None] * (opac[..., None] * body + rim[..., None] * rim_col)
+al = np.clip(front_a, 1e-3, 1)[..., None]
+fr_lin = np.where(front_a[..., None] < 0.999, (lin - (1 - al) * B_home) / al, lin)
+fr_lin = np.where((front_a > 0)[..., None], np.clip(fr_lin, 0, 1), lin)
+fr_rgb = np.clip(fr_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 # --- the print: cut tight to the fan head, so the guard and the blades fill
 # the frame. The engine draws it at most one photo pixel to one device pixel.
@@ -310,23 +532,33 @@ PX1, PY1 = min(PX1, w), min(PY1, h)
 cut = lambda im: im[PY0:PY1, PX0:PX1]
 
 # --- write
+#   rotor.webp        RGB the body colour (sRGB), A the opacity
+#   rotor-shape.webp  lossless, linear: R the signed distance to the outline,
+#                     128 + SDF_SCALE x px (+ inside); G the rim, 255 = RIM_MAX
 def webp(path, img, q=92):
     cv2.imwrite(path, img, [cv2.IMWRITE_WEBP_QUALITY, q])
+enc = lambda x: np.clip(x ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 webp(f"{a.out}/plate.webp", cut(plate), 92)
-rot = np.dstack([bled, (rotor_a * 255).astype(np.uint8)])
-webp(f"{a.out}/rotor.webp", cut(rot), 95)
+webp(f"{a.out}/rotor.webp", cut(np.dstack([enc(body), np.clip(opac * 255 + 0.5, 0, 255).astype(np.uint8)])), 92)
+shape = np.dstack([np.zeros((h, w), np.uint8),
+                   np.clip(rim / RIM_MAX * 255 + 0.5, 0, 255).astype(np.uint8),
+                   np.clip(128 + sdf * SDF_SCALE + 0.5, 0, 255).astype(np.uint8)])  # BGR
+webp(f"{a.out}/rotor-shape.webp", cut(shape), 101)
 webp(f"{a.out}/front.webp", cut(np.dstack([fr_rgb, (front_a * 255).astype(np.uint8)])), 95)
 json.dump({"width": PX1 - PX0, "height": PY1 - PY0,
            "hub": [round(float(AXIS[0] - PX0), 2), round(float(AXIS[1] - PY0), 2)], "dir": -1, "blades": 3,
            "disc": [round(float(v), 6) for v in (E1[0], E1[1], E2[0], E2[1], RIM_AX[0], RIM_AX[1])],
+           "sdf": SDF_SCALE, "rim": RIM_MAX, "tint": TINT_POW,
            "source": "SANYO EF-C30N, Wikimedia Commons, CC0"}, open(f"{a.out}/meta.json", "w"))
-# preview
+# preview: the photo with the outline, the plate, the rotor at home over the
+# plate, and the front's alpha
 pv = crop.copy()
-pv[hullb > 0] = (pv[hullb > 0] * 0.5 + np.array([255, 0, 255]) * 0.5).astype(np.uint8)
+pv[np.abs(sdf) < 0.75] = (255, 0, 255)
 cv2.circle(pv, (int(HUB[0]), int(HUB[1])), int(RB), (0, 0, 255), 1)
 top = np.concatenate([pv, plate], 1)
+home = enc(B_home * (1 - front_a[..., None]) + fr_lin * front_a[..., None])
 fa = cv2.cvtColor((front_a * 255).astype(np.uint8), cv2.COLOR_GRAY2BGR)
-ra = (bled.astype(np.float32) * rotor_a[..., None] + 255 * (1 - rotor_a[..., None])).astype(np.uint8)
-bot = np.concatenate([ra, fa], 1)
+bot = np.concatenate([home, fa], 1)
 cv2.imwrite(f"{a.work}/sheet.jpg", cv2.resize(np.concatenate([top, bot], 0), None, fx=0.5, fy=0.5, interpolation=cv2.INTER_AREA))
+cv2.imwrite(f"{a.work}/home.png", home)
 print("ok", w, h)
