@@ -277,11 +277,12 @@ def grid(a):
 #  - each occluder stands off that wall by what MoGe measures (median of
 #    wall - depth over its core) when it resolves it (>= 0.25 m), else by its
 #    kind's typical standoff, and is a slab a few tens of cm deep;
-#  - the beam: one ray per wall pixel along its own dose-weighted mean sun
-#    (the sum of the sun directions it actually receives, weighted by their
-#    beam: summer-heavy, long days and a high sun), so each occluder throws
-#    one crisp, offset silhouette and the wall's whole direct dose is lost
-#    inside it;
+#  - the beam: one ray per wall pixel along each of 72 sun directions over
+#    the year (six days by twelve hours), weighted by their beam on the
+#    wall's plane, so the share of the direct dose an occluder takes is the
+#    share of the sun's path it covers: a broad leaf hinged at its wall keeps
+#    a firm tan of its own shape, a drying line a few cm out, whose shadow
+#    sweeps a hand's width either way through the day, only a faint trace;
 #  - the sky: 128 directions over the surface's hemisphere, the share of its
 #    cosine-weighted sky the object takes, lost from the diffuse dose (a soft
 #    halo hugging the object).
@@ -312,6 +313,12 @@ for f in sorted(glob(wd + "/m/occ-*.png")):
 # thin dark lines: drying lines a few cm off the pink wall's plaster, iron
 # hooks and rods sticking out from the pink, orange and yellow walls (box in plate px, and the span of
 # distances off the wall it occupies, m)
+# How thick each kind really is (m). The black-hat finds a thin thing with
+# its own shadow beside it, and a texel at half res is a few cm on these
+# walls, so the mask is many times wider than a 5 mm cord: the cord is
+# marched as that mask, partly see-through, opaque in the share of it that
+# is cord.
+REAL = {"lines": 0.005, "rod": 0.015, "hook": 0.012}
 THIN = [("lines", (110, 0, 345, 665), (0.05, 0.07)), ("rod", (390, 395, 482, 437), (0.04, 0.4)), ("rod", (168, 583, 297, 637), (0.04, 0.4)),
         ("hook", (172, 278, 242, 312), (0.03, 0.15)), ("hook", (158, 533, 217, 562), (0.03, 0.15)),
         ("hook", (418, 168, 462, 197), (0.03, 0.15)), ("hook", (393, 358, 427, 380), (0.03, 0.15)),
@@ -345,6 +352,18 @@ for name, (x0, y0, x1, y1), span in THIN:
     hard = cv2.resize(keep[lab].astype(np.float32), (HW, HH), interpolation=cv2.INTER_AREA) > 0.2
     hard = cv2.dilate(hard.astype(np.uint8), np.ones((2, 2), np.uint8)) > 0
     thin.append((name, hard & vh, span))
+
+occ_a = np.ones((HH, HW), np.float32)
+for name, m, _ in thin:
+    # the mask is about three texels across (the cord, its shadow beside it,
+    # the dilation), in metres on the wall behind
+    occ_a[m] = np.minimum(occ_a[m], np.clip(REAL[name] / (3.0 * dwall[m] / fh), 0.0, 1.0))
+for k in REAL:
+    mk = np.zeros((HH, HW), bool)
+    for name, m, _ in thin:
+        mk |= m if name == k else False
+    if mk.any():
+        print("thin", k, "px", int(mk.sum()), "opacity median", np.median(occ_a[mk]).round(3))
 
 occ = np.zeros((HH, HW), bool)
 for _, m in masks:
@@ -402,13 +421,14 @@ nw /= np.linalg.norm(nw, axis=2, keepdims=True) + 1e-6
 bi = np.flatnonzero(band.ravel())
 Pb, nb = Pw.reshape(-1, 3)[bi], nw.reshape(-1, 3)[bi]
 print("tan-line band: px", len(bi))
-occ_f, oz0_f, oz1_f = occ.ravel(), occ_z0.ravel(), occ_z1.ravel()
+occ_f, oz0_f, oz1_f, occa_f = occ.ravel(), occ_z0.ravel(), occ_z1.ravel(), occ_a.ravel()
 
 
 def occ_march(P, s, steps=96, tmax=3.0):
-    """1 where the ray P + s t meets an occluder slab before tmax."""
+    """The share of the ray P + s t that an occluder slab stops before tmax
+    (1 for a solid one, a cord's own share of its mask for a thin line)."""
     ts = np.linspace(0.02, tmax, steps)
-    hit = np.zeros(len(P), bool)
+    hit = np.zeros(len(P), np.float32)
     for t in ts:
         Q = P + s * t
         z = -Q[:, 2]
@@ -416,7 +436,7 @@ def occ_march(P, s, steps=96, tmax=3.0):
         v = cyh - fh * Q[:, 1] / np.maximum(z, 1e-3)
         inside = (z > 0.3) & (u >= 0) & (u <= HW - 1) & (v >= 0) & (v <= HH - 1)
         j = np.clip(np.round(v).astype(np.int32), 0, HH - 1) * HW + np.clip(np.round(u).astype(np.int32), 0, HW - 1)
-        hit |= inside & occ_f[j] & (z > oz0_f[j]) & (z < oz1_f[j])
+        hit = np.maximum(hit, (inside & occ_f[j] & (z > oz0_f[j]) & (z < oz1_f[j])) * occa_f[j])
     return hit
 
 
@@ -424,12 +444,32 @@ up_lin = lambda a: cv2.resize(a, (HW, HH), interpolation=cv2.INTER_LINEAR)
 dose_up = up_lin(dose)
 dir_up = up_lin(grid(direct / south_wall))
 dif_up = up_lin(grid(diffuse_sum * svf / south_wall))
-sv = up_lin(grid(svec)).reshape(-1, 3)[bi]
-sbar = sv / (np.linalg.norm(sv, axis=1, keepdims=True) + 1e-9)
-has_sun = np.linalg.norm(sv, axis=1) > 1e-6
 O = Pb + nb * 0.03
+# the beam over the sun's real path: six days through the year (the solstices'
+# declinations and four between) by twelve hours, each weighted by its beam on
+# the wall pixel's own plane. A thin thing standing off its wall throws a
+# shadow that sweeps the wall through the day and the year, so a drying line a
+# few cm out takes only a few per cent from any one pixel, a faint soft trace,
+# while a shutter leaf hinged at the wall, as large as its standoff, still
+# keeps a broad, firm tan of its own shape.
 beam = np.zeros(len(bi), np.float32)
-beam[has_sun] = occ_march(O[has_sun], sbar[has_sun])
+wsum = np.zeros(len(bi), np.float32)
+for day in (21, 80, 141, 172, 264, 355):
+    dec = np.radians(23.44) * np.sin(np.radians(360 / 365 * (284 + day)))
+    ws = np.degrees(np.arccos(-np.tan(np.radians(LAT)) * np.tan(dec)))
+    for j in range(12):
+        hw = -ws + (j + 0.5) * 2 * ws / 12
+        s, el, az = solar(day, 12 + hw / 15)
+        if el <= np.radians(1):
+            continue
+        dni, _ = irradiance(el)
+        w = dni * np.clip(nb @ s, 0, None) * (2 * ws / 12 / 15)
+        m = w > 0
+        if not m.any():
+            continue
+        wsum += w
+        beam[m] += w[m] * occ_march(O[m], s[None])
+beam /= np.maximum(wsum, 1e-6)
 skyb = np.zeros(len(bi), np.float32)
 csum = np.zeros(len(bi), np.float32)
 k = np.arange(256) + 0.5
@@ -449,7 +489,7 @@ loss = np.zeros(HH * HW, np.float32)
 loss[bi] = dir_up.ravel()[bi] * beam + dif_up.ravel()[bi] * skyb
 loss = loss.reshape(HH, HW)
 dose_hi = np.maximum(dose_up - loss, 0)
-print("tan lines: beam-shaded px", int(beam.sum()), "mean sky taken", skyb[skyb > 0.01].mean().round(3) if (skyb > 0.01).any() else 0, "max loss", loss.max().round(3))
+print("tan lines: beam share > 0.5 px", int((beam > 0.5).sum()), "mean sky taken", skyb[skyb > 0.01].mean().round(3) if (skyb > 0.01).any() else 0, "max loss", loss.max().round(3))
 
 np.savez_compressed(wd + "/dose.npz", dose=dose, svf=svf_img, valid=valid, normal=n, s0=s_photo, up=UP, dose_hi=dose_hi, tan=loss, occ=occ)
 

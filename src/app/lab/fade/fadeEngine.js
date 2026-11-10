@@ -21,9 +21,13 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    lanterns and their brackets, the gelato sign, the drying lines, hooks
 //    and rods: SAM masks and black-hat lines, stood off their walls) are
 //    marched again at half the plate's resolution, each wall pixel along
-//    its own dose-weighted (summer-heavy) mean sun and over its sky, so
-//    every one leaves a crisp, offset tan line of unfaded paint: the
-//    "something hung here for thirty years" mark, readable in one still.
+//    72 suns over the year (six days by twelve hours, weighted by their beam
+//    on its plane) and over its sky, so each takes the share of the sun's
+//    path it covers: a shutter leaf or a lantern leaves a firm tan of its own
+//    shape, the "something hung here for thirty years" mark, while a drying
+//    cord a few cm off the plaster, whose shadow sweeps a hand's width either
+//    way through the day (and is marched at its own 5 mm, not the width of
+//    the black-hat line that found it), leaves only a faint soft trace.
 //    The march only sees what is in the frame, and the frame holds almost
 //    none of the low storeys across the lane, so it was generous to the low
 //    storeys of every wall. The far wall is put back analytically (canyon.py):
@@ -59,7 +63,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    paint towards a pale lime cream (never paper white), most of the way on
 //    the top floors, which keep only a trace of their hue under the bloom,
 //    and hardly at all on what is dark in the photo (window voids, the gaps
-//    behind shutters), which is not render;
+//    behind shutters), which is not render. It comes in with the dose on a
+//    soft knee and climbs slowly, so a wall grades from bloom under its eave
+//    to its own colour down its storeys instead of saturating into patches;
 //  - and the dose itself is taken down to the scale of a ledge, baked once at
 //    load in the wall's own frame (up is toward the verticals' vanishing
 //    point, across is the angle around it): every sill, cornice and eave (an
@@ -100,13 +106,13 @@ const OPEN_AT = 3.2;
 const K_INK = [0.03, 0.13, 0.16]; // cyan, magenta, yellow
 const K_BLACK = 0.004;
 const K_WOOD = 0.1;
-const K_CHALK = 0.2;
+const K_CHALK = 0.08;
 // Most of the most exposed surface powders to bare lime: the top floor goes to
 // pale plaster, a trace of its own hue still under the bloom.
 const CHALK_MAX = 0.85;
 const INDUCTION = 2.5;
 // Chalking needs the film itself to erode: only well-exposed paint gets there.
-const CHALK_INDUCTION = 5;
+const CHALK_INDUCTION = 6;
 // Fading is not linear in dose: below a threshold the UV absorbers and the
 // binder hold, above it the film erodes and each year takes more. The dose
 // that feeds the clock is the baked one on a power curve about DOSE_PIVOT, so
@@ -382,15 +388,19 @@ vec3 toSrgb(vec3 c) {
   return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
 }
 const float LN10 = 2.302585;
+const float CHALK_KNEE = 3.0;
 float skyMask(vec4 m, vec3 lin) {
   return clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0) * smoothstep(-0.03, 0.01, (lin.b - lin.r) / max(lin.b, 1e-3));
 }
 // Patches: the wash's own unevenness (two octaves of noise at the scale of a
 // few hand-widths) and the wall's own stains and repairs, read off the plate
 // as how much lighter or darker it is than its surround.
+// Both are read low-passed (no octave finer than a hand, the plate's own
+// stains at a few hand-widths), so the wear they feed grades across the wall
+// instead of breaking into hard-edged islands at the steep end of the fade.
 float mottleAt(vec2 P) {
-  float n = vnoise(P / 46.0) * 0.6 + vnoise(P / 17.0 + 13.1) * 0.28 + vnoise(P / 7.0 + 41.7) * 0.12 - 0.5;
-  float own = clamp((logY(P, 2.5) - logY(P, 5.0)) * 1.4, -0.5, 0.5);
+  float n = vnoise(P / 46.0) * 0.68 + vnoise(P / 17.0 + 13.1) * 0.32 - 0.5;
+  float own = clamp((logY(P, 3.5) - logY(P, 5.5)) * 1.4, -0.5, 0.5);
   return clamp(n * 2.4 + own * 0.8, -1.0, 1.0);
 }
 // The sky through a polariser. Clouds are near neutral, so the share of the
@@ -462,7 +472,7 @@ void main() {
   // drips down its vertical (a faint trace of patches under them)
   vec2 P = uv * uPlateSize;
   vec3 lc = texture(uLocal, uv).rgb;
-  if (uDebug > 2.5) {
+  if (uDebug > 2.5 && uDebug < 3.5) {
     outColor = vec4(lc * m.a, 1.0);
     return;
   }
@@ -481,7 +491,7 @@ void main() {
     local = mix(local, 1.0, sign);
     wear = mix(wear, 0.0, sign);
   }
-  if (uDebug > 1.5) {
+  if (uDebug > 1.5 && uDebug < 2.5) {
     outColor = vec4(toSrgb(vec3(dose * m.a * local * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
     return;
   }
@@ -498,7 +508,10 @@ void main() {
   // dye loss: each ink by its own rate; carbon black barely moves
   // no coat gives up all its colour, and one the water has not worked on
   // (under a ledge, between the drips) holds a good part of it
-  float keep = mix(0.3, 0.95, smoothstep(-0.8, 0.8, wear));
+  // The curve is wide: wear only tilts how much a coat gives up, it never
+  // switches it, so the open wall grades with its dose and only the strip
+  // under a ledge and a tan line (wear near -1) hold their colour firmly.
+  float keep = mix(0.3, 0.95, smoothstep(-2.0, 1.6, wear));
   vec3 lost = cmy * keep * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
   // what the pigment leaves behind is the lime render's own warm off-white,
   // not paper white: a fading colour climbs to it and stops (a surface that
@@ -512,12 +525,19 @@ void main() {
 
   vec3 aged = a + m.r * (aInk - a) + m.g * (aWood - a);
   // chalk: the binder erodes and the white pigment powders the surface
-  float ec = max(e0 - uChalkInduction, 0.0);
+  // with a soft knee (softplus, a few dose-years wide): the bloom comes in
+  // with the dose, never at a contour
+  float ec = max(CHALK_KNEE * (log(1.0 + exp((e0 - uChalkInduction) / CHALK_KNEE)) - log(1.0 + exp(-uChalkInduction / CHALK_KNEE))), 0.0);
   // to the bloom's pale lime cream, heavier where the water runs. What is
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
   float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.9) * smoothstep(0.02, 0.2, ya);
+  if (uDebug > 3.5) {
+    // R: how worn the coat is, G: the chalk, B: the ink's clock
+    outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
+    return;
+  }
   aged = mix(aged, max(aged, uBloom * min(0.4 + 0.6 * dot(aged, LUMA) / 0.5, 1.0)), c);
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
@@ -651,7 +671,7 @@ export async function createFade(host, { embedded = false } = {}) {
   const still = held || q.get("still") === "1";
   const raw = q.get("film") === "0";
   const debugQ = q.get("debug");
-  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff";
+  const debugDose = debugQ === "dose" || debugQ === "local" || debugQ === "runoff" || debugQ === "wear";
   const polar = q.get("sky") === "0" ? 0 : 1;
   const zenith = hsvLin(SKY_ZENITH);
   const rim = hsvLin(SKY_RIM);
@@ -873,7 +893,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uStreak, STREAK);
     gl.uniform1f(u.uRunoff, RUNOFF);
     gl.uniform1f(u.uMottle, MOTTLE);
-    gl.uniform1f(u.uDebug, debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
+    gl.uniform1f(u.uDebug, debugQ === "wear" ? 4 : debugQ === "runoff" ? 3 : debugQ === "local" ? 2 : debugDose ? 1 : 0);
     gl.uniform1f(u.uPolar, polar);
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
