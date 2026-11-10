@@ -1,6 +1,7 @@
 """Rolling: cut the SANYO EF-C30N photo into plate, rotor and front.
 
-    python3 -I tools/depth/bakes/rolling/bake.py photo.png work/ public/lab/rolling/ [--fill lama|telea]
+    python3 -I tools/depth/bakes/rolling/bake.py photo.png work/ public/lab/rolling/ [--fill telea|lama]
+    python3 -I tools/depth/bakes/rolling/bake.py --rebuild public/lab/rolling/ public/lab/rolling/
 
 The photo is Wikimedia Commons' 3840 px rendition (CC0; the 2560 px size is
 not served), area-resampled to 2560 px wide before the bake:
@@ -37,31 +38,44 @@ centre of the guard whose slots show the green blade roots turning behind it.
           stays behind. Green caught at the ring's edge is keyed out too.
   rotor   transmissive acrylic, in two files. rotor.webp: RGB the blade's
           low-frequency body colour (the blades' mean green, with a mild
-          share of the local light; the sticker as photographed), A its
-          opacity (0.42; 1 for the paper sticker). rotor-shape.webp
+          share of the local light), A its opacity (reveal.A_BLADE; the
+          paper sticker is taken out, it smeared into a ghost at speed).
+          rotor-shape.webp
           (lossless, linear): R a signed distance to one smooth closed
           outline per blade (the greenness edge, closed over the wire
           notches, contours smoothed along their length, filled 4x
           supersampled), G a thin specular rim just inside it plus the broad
-          gloss bands of the photo's band-pass. The engine composites
+          gloss bands of the photo's band-pass, masked to the outline's
+          interior minus an erosion and faded out before the badge. The
+          engine composites
           plate x T + E per exposure sub-sample with
           T = 1 - c + c (1 - A) tint and E = c (A body + rim). Under the
           badge, in disc-polar coordinates, each blade is carried straight
           in from the first radius the photo shows it at, ramping to the
           blades' mean colour, to a solid hub. Nothing beyond the blade tips
           (0.87 of the rim) is kept.
-  plate   RGB: the photo with the rotor's hole (hull and hub disc) filled by
-          LaMa (tools/depth/fill.py). Then the ground: every pixel that is
-          not steel (a lightness top-hat, about neutral, inside the rim) is
-          pulled to a dim, nearly grey version of itself, as if a flash had
-          lit the fan and the room fell off behind it. Behind the blades the
-          photo's own rear guard is kept: the blade's emission taken out and
-          its transmission divided out (de-tinted), its steel laid over
-          LaMa's ground. The slots show the de-tinted photo; the sticker's
-          place is copied from the same radius round the disc.
+  plate   RGB: the photo with the rotor's hole (hull and hub disc) filled
+          (a quiet Telea fill: nothing of it survives). Then the ground:
+          every pixel that is not steel (a lightness top-hat, about neutral,
+          inside the rim) is pulled to a dim, nearly grey version of itself,
+          as if a flash had lit the fan and the room fell off behind it.
+          Behind the blades, where the readout tears them open, the rear
+          guard is drawn, not inpainted (reveal.py): its radial spokes and
+          concentric rings as anti-aliased lines in the rim ellipse's tilted
+          plane, about the point they converge on, over a clean motor
+          housing disc and the dim ground; the spoke count, phase, width and
+          colour are measured from the photo's rear-guard steel round the
+          blades. The gaps between the blade roots by the badge are drawn
+          too.
   front   RGBA: the photo's own pixels for the wires crossing the hull and
           the badge's chrome, alpha from the wire matte (with the moulded
-          edge's bright line taken out of it) and the badge.
+          edge's bright line taken out of it) and the badge. Where the matte
+          breaks a wire or misses it (bright room behind a blade, the
+          sticker) it is joined along the wire's own direction and continued
+          from where it holds (reveal.py).
+
+--rebuild SRC OUT re-runs only the reveal on a published print (the photo
+is not needed), so the reveal can be tuned without re-fetching it.
 
 meta.json carries the print size, the hub (rotation centre, px), the disc
 (the rim ellipse's axes e1, e2 and semi-axes, so the engine turns the rotor in
@@ -71,13 +85,37 @@ is the rotor grown 4 px, so no blade edge is left behind in the plate.
 import sys, os, json, subprocess, argparse
 import numpy as np, cv2
 
-ap = argparse.ArgumentParser()
-ap.add_argument("photo"); ap.add_argument("work"); ap.add_argument("out")
-ap.add_argument("--fill", default="lama")
-a = ap.parse_args()
-os.makedirs(a.work, exist_ok=True); os.makedirs(a.out, exist_ok=True)
 HERE = os.path.dirname(os.path.abspath(__file__))
 TOOLS = os.path.normpath(os.path.join(HERE, "..", ".."))
+sys.path.insert(0, HERE)
+import reveal  # noqa: E402
+
+# The fan's geometry, in 1280 px crop units (see below).
+RIM_C0 = (457.41, 436.88)
+RIM_AX0 = (721.42 / 2, 810.65 / 2)
+RIM_ANG = np.deg2rad(160.80)
+E1 = np.array([np.cos(RIM_ANG), np.sin(RIM_ANG)])
+E2 = np.array([-np.sin(RIM_ANG), np.cos(RIM_ANG)])
+AXIS_T = 0.2
+PRINT = (55, 0, 885, 880)
+STICKER0 = (538, 432, 27)
+
+ap = argparse.ArgumentParser()
+ap.add_argument("photo", nargs="?"); ap.add_argument("work", nargs="?"); ap.add_argument("out", nargs="?")
+# The plate's hole only needs a quiet fill now: everything in it is redrawn
+# by reveal.py (the rear guard), so LaMa is no longer needed.
+ap.add_argument("--fill", default="telea")
+ap.add_argument("--rebuild", nargs=2, metavar=("SRC", "OUT"),
+                help="re-run only the reveal (reveal.py) on a published print")
+a = ap.parse_args()
+if a.rebuild:
+    meta, _ = reveal.rebuild_assets(a.rebuild[0], a.rebuild[1], dict(
+        RIM_C=RIM_C0, RIM_AX=np.array(RIM_AX0), E1=E1, E2=E2, PRINT=PRINT, STICKER=STICKER0, AXIS_T=AXIS_T))
+    print("rebuilt", meta["rear"], meta["badge"])
+    sys.exit(0)
+if not (a.photo and a.work and a.out):
+    ap.error("photo, work and out are required (or --rebuild SRC OUT)")
+os.makedirs(a.work, exist_ok=True); os.makedirs(a.out, exist_ok=True)
 
 im = cv2.imread(a.photo, cv2.IMREAD_COLOR)
 H0, W0 = im.shape[:2]
@@ -114,12 +152,9 @@ GUARD = 410 * k
 # parallel to it about a centre on the line from the rim's centre to the
 # badge's (the axis seen at an angle): at 0.2 of the way the three blade tips
 # reach the same disc radius (0.83 of the rim, spread 1 %).
-RIM_C = np.array([457.41, 436.88]) * k
-RIM_AX = (721.42 * k / 2, 810.65 * k / 2)
-RIM_ANG = np.deg2rad(160.80)
-E1 = np.array([np.cos(RIM_ANG), np.sin(RIM_ANG)])
-E2 = np.array([-np.sin(RIM_ANG), np.cos(RIM_ANG)])
-AXIS = RIM_C + 0.2 * (np.array(HUB) - RIM_C)
+RIM_C = np.array(RIM_C0) * k
+RIM_AX = (RIM_AX0[0] * k, RIM_AX0[1] * k)
+AXIS = RIM_C + AXIS_T * (np.array(HUB) - RIM_C)
 def to_disc(x, y):
     dx, dy = x - AXIS[0], y - AXIS[1]
     return (dx * E1[0] + dy * E1[1]) / RIM_AX[0], (dx * E2[0] + dy * E2[1]) / RIM_AX[1]
@@ -136,9 +171,8 @@ A_BLADE, TINT_POW, BODY_GAIN, BODY_SIG = 0.42, 1.0, 1.0, 14
 # encoding; the de-tinted plate starts DT_IN px inside the outline
 DT_STEEL_LO, DT_STEEL_GAIN, STICKER_FILL_ROT = 0.04, 1.5, -0.7
 OUTLINE_SIG, RIM_BASE, RIM_EDGE, GLOSS, GLOSS_LO, RIM_MAX, SDF_SCALE, DT_IN = 5, 0.1, 1.2, 1.5, 6, 0.5, 8, 3
-# the print, in the 1280 px crop's coordinates: the guard's rim and its hinge
-# with a narrow margin of room
-PRINT = (55, 0, 885, 880)
+# the print (PRINT, above), in the 1280 px crop's coordinates: the guard's
+# rim and its hinge with a narrow margin of room
 STEEL_LO, STEEL_RAMP = 0.03, 0.14
 GROUND_SAT, GROUND_GAIN = 0.3, 0.09
 GROUND_TINT = np.array([0.004, 0.0045, 0.005], np.float32)  # linear BGR, a warm black
@@ -153,7 +187,7 @@ weak = ((gb > 0.045) & (rr < GUARD) & (rr > RB + 1 * k)).astype(np.uint8)
 n, lab = cv2.connectedComponents(weak, connectivity=8)
 seeds = np.unique(lab[(gb > 0.07) & (weak > 0)])
 hull = np.isin(lab, seeds[seeds > 0]).astype(np.uint8)
-STICKER = (538 * k, 432 * k, 27 * k)
+STICKER = (STICKER0[0] * k, STICKER0[1] * k, STICKER0[2] * k)
 hull[np.hypot(xx - STICKER[0], yy - STICKER[1]) < STICKER[2]] = 1
 n, lab, st, _ = cv2.connectedComponentsWithStats(hull, 8)
 keep = np.zeros_like(hull)
@@ -420,7 +454,8 @@ Lg = lin[..., 1]
 edge_w = ((sdf > 0.5) & (sdf < 2.5 * k) & (wire < 0.05) & (stk_d > STICKER[2] + 3 * k) & ~under).astype(np.float32)
 edge_x = np.maximum(Lg - mean_lin[..., 1], 0)
 edge_str = nconv(edge_x, edge_w, (3, 6, 12, 24, 60), thr=0.05)
-rim = (RIM_BASE + RIM_EDGE * edge_str) * np.exp(-0.5 * ((sdf - 1.2) / 0.7) ** 2)
+rim_line = (RIM_BASE + RIM_EDGE * edge_str) * np.exp(-0.5 * ((sdf - 1.2) / 0.7) ** 2)
+rim = rim_line
 ow2 = int(6 * k) | 1
 Lop = cv2.morphologyEx(Lg, cv2.MORPH_OPEN, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (ow2, ow2)))
 gw = ((sdf > 3 * k) & (rr > RB + 14 * k) & (stk_d > STICKER[2] + 3 * k)).astype(np.float32)
@@ -482,7 +517,7 @@ ground = (lum[..., None] + (pl_lin - lum[..., None]) * GROUND_SAT) * GROUND_GAIN
 pl_lin = pl_lin * steel[..., None] + ground * (1 - steel[..., None])
 plate = np.clip(pl_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 cv2.imwrite(f"{a.work}/steel.png", (steel * 255).astype(np.uint8))
-# behind the blades: LaMa's room as ground (none of its guessed steel), the
+# behind the blades (superseded below by the drawn rear guard, reveal.py): the fill's room as ground, the
 # photo's own rear guard over it
 ow3 = int(9 * k) | 1
 bg_s = bg_g ** (1 / 2.2)
@@ -512,6 +547,21 @@ under_badge = cv2.GaussianBlur((rr < RB - 12 * k).astype(np.float32), (0, 0), 2 
 pl_lin = pl_lin * (1 - under_badge[..., None]) + ground * 0.5 * under_badge[..., None]
 slot_w = cv2.GaussianBlur(cv2.dilate(slot, np.ones((5, 5), np.uint8)).astype(np.float32), (0, 0), 1 * k)[..., None]
 pl_lin = pl_lin * (1 - slot_w) + slot_dt * slot_w
+
+# --- the reveal (reveal.py). At speed the readout tears the blades open, so
+# what they cover is seen and every edge of them is: the plate behind the
+# blades is redrawn (the rear guard's spokes and rings in the disc plane over
+# the motor housing and the dim ground), the rotor keeps only what it owns
+# (one body colour, gloss inside its outline, no sticker), and the front
+# wires the matte missed are continued along their own direction.
+geo = reveal.Geo(h, w, k, 0, 0, E1, E2, RIM_AX, HUB, RB)
+body, opac, rim = reveal.clean_rotor(geo, body, opac, rim_line * (1 - stk_a), GLOSS * gloss * (1 - stk_a), sdf, STICKER)
+tint = np.clip(body / np.maximum(body.max(2, keepdims=True), 1e-4), 0, 1) ** TINT_POW
+hull_m = hullb > 0
+hull_sd = np.where(hull_m, cv2.distanceTransform(hull_m.astype(np.uint8), cv2.DIST_L2, 5),
+                   -cv2.distanceTransform((~hull_m).astype(np.uint8), cv2.DIST_L2, 5)).astype(np.float32)
+pl_lin, REAR = reveal.rebuild_plate(geo, pl_lin, np.clip(pl_lin, 0, 1) ** (1 / 2.2), hull_sd, sdf)
+print("rear guard", REAR)
 plate = np.clip(pl_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 # --- front colour: the wire's own colour with what was behind it at home
@@ -523,6 +573,7 @@ B_home = pl_lin * T_home + cov[..., None] * (opac[..., None] * body + rim[..., N
 al = np.clip(front_a, 1e-3, 1)[..., None]
 fr_lin = np.where(front_a[..., None] < 0.999, (lin - (1 - al) * B_home) / al, lin)
 fr_lin = np.where((front_a > 0)[..., None], np.clip(fr_lin, 0, 1), lin)
+fr_lin, front_a, _ = reveal.complete_front(geo, fr_lin.astype(np.float32), front_a.astype(np.float32), hull_m, STICKER)
 fr_rgb = np.clip(fr_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 # --- the print: cut tight to the fan head, so the guard and the blades fill
@@ -549,7 +600,9 @@ json.dump({"width": PX1 - PX0, "height": PY1 - PY0,
            "hub": [round(float(AXIS[0] - PX0), 2), round(float(AXIS[1] - PY0), 2)], "dir": -1, "blades": 3,
            "disc": [round(float(v), 6) for v in (E1[0], E1[1], E2[0], E2[1], RIM_AX[0], RIM_AX[1])],
            "sdf": SDF_SCALE, "rim": RIM_MAX, "tint": TINT_POW,
-           "source": "SANYO EF-C30N, Wikimedia Commons, CC0"}, open(f"{a.out}/meta.json", "w"))
+           "source": "SANYO EF-C30N, Wikimedia Commons, CC0",
+           "badge": [round(float(HUB[0] - PX0), 2), round(float(HUB[1] - PY0), 2), round(RB, 2)],
+           "rear": REAR}, open(f"{a.out}/meta.json", "w"))
 # preview: the photo with the outline, the plate, the rotor at home over the
 # plate, and the front's alpha
 pv = crop.copy()

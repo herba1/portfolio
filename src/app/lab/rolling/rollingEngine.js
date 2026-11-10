@@ -2,10 +2,10 @@ import { createStage, clamp } from "../_kit/stage";
 
 // Rolling. A 1980s SANYO senpuki in a tatami room, seen through a phone's
 // CMOS sensor. The fan is a real photograph, cut tight to the fan head and
-// cut in three: the plate (the back of the guard and the motor, with the
-// blades filled out of it by LaMa, and the room behind pulled down to a dim
-// ground, as if a flash had lit the fan; behind the blades it keeps the photo's
-// own rear guard, de-tinted), the rotor (the three blades as transmissive
+// cut in three: the plate (the back of the guard and the motor, the room
+// behind pulled down to a dim ground, as if a flash had lit the fan; behind
+// the blades the rear guard is drawn, its spokes and rings as clean lines in
+// the disc plane over the motor housing), the rotor (the three blades as transmissive
 // acrylic: a signed distance to one smooth outline per blade, a low-frequency
 // body colour and opacity, a thin specular rim), and the front
 // (the guard's wires and centre badge that cross in front of the blades).
