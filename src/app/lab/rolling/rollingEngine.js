@@ -25,32 +25,39 @@ import { createStage, clamp } from "../_kit/stage";
 // the frame-rate's stroboscopic speeds only because of when each row looked.
 //
 // The fan: an induction motor that pushes toward its set speed (it cannot
-// brake), quadratic air drag, viscous and dry bearing friction. It rests on
-// its low notch. Drag up (or scroll up) to turn it up; let go and the motor
-// falls back to low and the rotor coasts down on drag alone. Drag sideways
-// to turn the phone: the sensor's readout direction rotates with it.
+// brake), quadratic air drag, viscous and dry bearing friction. Left alone
+// it runs as a two-pole motor straight off 60 Hz mains, just under its
+// 3600 rpm synchronous speed: almost two whole turns per readout, so every
+// blade is read several times over, as curls and islands torn off it, and
+// the three blades pass at just under 6 x 30 Hz, so that torn pattern holds
+// still against the frame rate and creeps slowly backwards. Drag up (or
+// scroll up) to overdrive it; drag down to drop the set speed and let it
+// coast down through the hooks and the wagon-wheel speeds; let go and it
+// returns to the mains speed. Drag sideways to turn the phone: the sensor's
+// readout direction rotates with it.
 //
-// Stills: ?rpm=1100&t=0.4 holds the frame that starts at t (seconds) with
-// the rotor at a steady rpm; ?scan=deg sets the readout direction.
+// Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
+// the rotor at a steady rpm; the hero is ?rpm=3590&t=0.4, the mains speed.
+// ?scan=deg sets the readout direction.
 
 const BASE = "/lab/rolling/";
 const FPS = 30; // sensor frame rate
 const READOUT = 1 / 30; // top row to bottom row
-const EXPOSURE = 1 / 4000; // each row's open time (a bright window; the tips smear ~10 px at 1100 rpm)
-const SUB = 6; // exposure sub-samples
+const EXPOSURE = 1 / 8000; // each row's open time (a flash-bright scene; the tips smear ~30 device px at 4800 rpm)
+const SUB = 10; // exposure sub-samples, so that smear is a ramp, not a stack of copies
 const H = 1 / 960; // physics step and angle-history spacing
 const NANG = 48; // angle samples per frame (covers READOUT + EXPOSURE)
 const RPM = (2 * Math.PI) / 60;
 
 // Fan dynamics, in rad/s and rad/s^2 (per unit rotor inertia).
-const LOW = 590; // the low notch, rpm: 3 blades pass 29.5 times a second, so at 30 fps they creep backwards
-const MAX = 1500; // rpm
-const DRAG = 0.0031; // quadratic air drag
+const REST = 3590; // mains speed, rpm: just under 3600, so 3 blades pass just under 180 = 6 x 30 times a second and creep backwards
+const MAX = 5400; // rpm, overdriven
+const DRAG = 0.0005; // quadratic air drag
 const VISC = 0.06; // viscous bearing loss
 const DRY = 0.5; // dry friction
 const SLIP = 6; // motor torque per rad/s of slip below the set speed
-const TORQUE = 115; // motor torque cap
-const PX_PER_RPM = 0.42; // drag distance (CSS px) per rpm of set speed
+const TORQUE = 260; // motor torque cap
+const PX_PER_RPM = 0.15; // drag distance (CSS px) per rpm of set speed
 
 const AA = 1.25; // the blade outline's anti-aliasing width, device px
 
@@ -244,8 +251,8 @@ export async function createRolling(host, { embedded = false } = {}) {
 
   // ---- the fan
   let theta = 0; // rad, unwrapped
-  let omega = (stillRpm ?? LOW) * RPM;
-  const rest = stillRpm ?? LOW;
+  let omega = (stillRpm ?? REST) * RPM;
+  const rest = stillRpm ?? REST;
   let setRpm = rest;
   let simT = stillT ?? 0;
   const ring = new Float64Array(4096); // theta at simT steps: ring[(step) & 4095]
