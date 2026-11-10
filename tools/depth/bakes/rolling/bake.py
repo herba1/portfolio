@@ -60,20 +60,24 @@ centre of the guard whose slots show the green blade roots turning behind it.
           inside the rim) is pulled to a dim, nearly grey version of itself,
           the room lit only by its ceiling lamp, whose 120 Hz flicker the
           engine adds per sensor row (rollingEngine.js).
-          Behind the blades, where the readout tears them open, the rear
-          guard is drawn, not inpainted (reveal.py): its radial spokes and
-          concentric rings as anti-aliased lines in the rim ellipse's tilted
-          plane, about the point they converge on, over a clean motor
-          housing disc and the dim ground; the spoke count, phase, width and
-          colour are measured from the photo's rear-guard steel round the
-          blades. The gaps between the blade roots by the badge are drawn
-          too.
+          Inside the disc the rotor sweeps nothing of the photo is kept
+          (reveal.py): the room continues through, the rear guard is drawn
+          (its radial spokes and concentric rings as anti-aliased lines in
+          the rim ellipse's tilted plane, about the point they converge on,
+          darker than the front and a little out of focus) over the dim
+          room, with the motor housing behind the hub; the spoke count,
+          phase and width are measured from the photo's rear-guard steel
+          round the blades. So no blade-shaped patch is left in the plate.
   front   RGBA: the photo's own pixels for the wires crossing the hull and
           the badge's chrome, alpha from the wire matte (with the moulded
           edge's bright line taken out of it) and the badge. Where the matte
           breaks a wire or misses it (bright room behind a blade, the
           sticker) it is joined along the wire's own direction and continued
           from where it holds (reveal.py).
+          Between the photographed blades the front wires were in the plate:
+          they are found by a ridge filter steered along the front wires'
+          own direction (the rear guard's cross them well off it), traced
+          as whole wires through the crossings and drawn into the front.
 
 --rebuild SRC OUT re-runs only the reveal on a published print (the photo
 is not needed), so the reveal can be tuned without re-fetching it.
@@ -555,13 +559,14 @@ pl_lin = pl_lin * (1 - slot_w) + slot_dt * slot_w
 # the motor housing and the dim ground), the rotor keeps only what it owns
 # (one body colour, gloss inside its outline, no sticker), and the front
 # wires the matte missed are continued along their own direction.
-geo = reveal.Geo(h, w, k, 0, 0, E1, E2, RIM_AX, HUB, RB)
+geo = reveal.Geo(h, w, k, 0, 0, E1, E2, RIM_AX, HUB, RB, AXIS)
 body, opac, rim = reveal.clean_rotor(geo, body, opac, rim_line * (1 - stk_a), GLOSS * gloss * (1 - stk_a), sdf, STICKER)
 tint = np.clip(body / np.maximum(body.max(2, keepdims=True), 1e-4), 0, 1) ** TINT_POW
 hull_m = hullb > 0
-hull_sd = np.where(hull_m, cv2.distanceTransform(hull_m.astype(np.uint8), cv2.DIST_L2, 5),
-                   -cv2.distanceTransform((~hull_m).astype(np.uint8), cv2.DIST_L2, 5)).astype(np.float32)
-pl_lin, REAR = reveal.rebuild_plate(geo, pl_lin, np.clip(pl_lin, 0, 1) ** (1 / 2.2), hull_sd, sdf)
+# the plate as graded from the photo: between the blades it still holds the
+# front wires, which front_in_gaps lifts into the front below
+pl_photo = pl_lin.copy()
+pl_lin, REAR = reveal.rebuild_disc(geo, pl_lin, np.clip(pl_lin, 0, 1) ** (1 / 2.2), sdf)
 print("rear guard", REAR)
 plate = np.clip(pl_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 
@@ -575,6 +580,8 @@ al = np.clip(front_a, 1e-3, 1)[..., None]
 fr_lin = np.where(front_a[..., None] < 0.999, (lin - (1 - al) * B_home) / al, lin)
 fr_lin = np.where((front_a > 0)[..., None], np.clip(fr_lin, 0, 1), lin)
 fr_lin, front_a, _ = reveal.complete_front(geo, fr_lin.astype(np.float32), front_a.astype(np.float32), hull_m, STICKER)
+fr_lin, front_a, GAPS = reveal.front_in_gaps(geo, pl_photo, np.clip(pl_photo, 0, 1) ** (1 / 2.2), fr_lin, front_a, sdf)
+print("front wires between the blades", GAPS)
 fr_rgb = np.clip(fr_lin ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
 
 # --- the print: cut tight to the fan head, so the guard and the blades fill
@@ -603,7 +610,7 @@ json.dump({"width": PX1 - PX0, "height": PY1 - PY0,
            "sdf": SDF_SCALE, "rim": RIM_MAX, "tint": TINT_POW,
            "source": "SANYO EF-C30N, Wikimedia Commons, CC0",
            "badge": [round(float(HUB[0] - PX0), 2), round(float(HUB[1] - PY0), 2), round(RB, 2)],
-           "rear": REAR}, open(f"{a.out}/meta.json", "w"))
+           "rear": REAR, "gaps": GAPS}, open(f"{a.out}/meta.json", "w"))
 # preview: the photo with the outline, the plate, the rotor at home over the
 # plate, and the front's alpha
 pv = crop.copy()
