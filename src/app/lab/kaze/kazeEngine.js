@@ -110,6 +110,20 @@ void main() {
   // the cloud shadows; the lit cloud tops above stay pale.
   float mid = smoothstep(0.015, 0.08, Y) * (1.0 - smoothstep(0.3, 0.65, Y));
   sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.25 * mid), vec3(0.0));
+  // The shaded cloud: the underside and flanks of the cumulus, lit only by
+  // the sky. They read as a slate grey unless they carry the skylight's own
+  // cobalt, as on film. Saturation raised about 0.6 more, and the hue leaned
+  // toward cobalt at constant luminance, so the shadow is not darkened. The
+  // lit tops (bright) and the open blue (which is not cloud) are left alone.
+  // The open blue, deep toward the zenith, also falls in this luminance band
+  // with some red in it; its chroma (the blue's lead over red, as a share of
+  // the blue) runs well above the cloud shadow's, so that is held out.
+  float cb = (sky.b - sky.r) / max(sky.b, 1e-4);
+  float shade = (1.0 - blue) * smoothstep(0.08, 0.2, Y) * (1.0 - smoothstep(0.4, 0.6, Y));
+  shade *= 1.0 - smoothstep(0.72, 0.84, cb);
+  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.9 * shade), vec3(0.0));
+  const vec3 SKYSH = vec3(0.80, 0.95, 1.18);
+  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.7 * shade);
   // The zenith: straight up the sky is deepest. The HDRI already falls off
   // toward it; this only leans the top of the frame a little further, toward
   // a clean film blue rather than slate. Multiplied, so the sky's own
