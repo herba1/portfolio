@@ -1,9 +1,10 @@
 import { createStage, clamp } from "../_kit/stage";
 
-// Rolling. A 1980s SANYO senpuki on a tatami floor, seen through a phone's
-// CMOS sensor. The fan is a real photograph cut in three: the plate (room,
-// stand, the back of the guard and the motor, with the blades filled out of
-// it by LaMa), the rotor (the three translucent green blades, keyed on their
+// Rolling. A 1980s SANYO senpuki in a tatami room, seen through a phone's
+// CMOS sensor. The fan is a real photograph, cut tight to the fan head and
+// cut in three: the plate (the back of the guard and the motor, with the
+// blades filled out of it by LaMa, and the room behind pulled down to a dim
+// ground, as if a flash had lit the fan), the rotor (the three translucent green blades, keyed on their
 // greenness with the front guard's wires taken out of them), and the front
 // (the guard's wires and centre badge that cross in front of the blades).
 // The head is turned, so the rotor turns in its own tilted plane: the guard
@@ -209,10 +210,13 @@ export async function createRolling(host, { embedded = false } = {}) {
     const W = stage.width;
     const Hh = stage.height;
     const dpr = stage.dpr;
-    const m = embedded ? 0.08 : 0.1;
-    const mh = Math.max(24, Hh * m);
-    const mw = Math.max(24, W * 0.06);
-    const s = Math.min((W - 2 * mw) / IW, (Hh - 2 * mh) / IH);
+    // The print is cut tight to the fan head, so it can sit close to the
+    // paper's edges. It is never drawn larger than the photo's own pixels
+    // (one image px to one device px at most), so the guard stays crisp.
+    const m = embedded ? 0.05 : 0.07;
+    const mh = Math.max(16, Hh * m);
+    const mw = Math.max(16, W * 0.05);
+    const s = Math.min((W - 2 * mw) / IW, (Hh - 2 * mh) / IH, 1 / dpr);
     const w = Math.round(IW * s * dpr);
     const h = Math.round(IH * s * dpr);
     rect = [Math.round((W * dpr - w) / 2), Math.round((Hh * dpr - h) / 2), w, h];
