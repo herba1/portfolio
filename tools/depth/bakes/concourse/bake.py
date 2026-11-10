@@ -13,13 +13,17 @@ Needs <workdir>/people.json (detect.py), mattes.npz (segment.py) and
             median person stands 1.64 m tall (head measured as the height
             where the camera ray through the top of the matte passes the
             vertical through the feet).
-  feet      the matte pixels nearest the nadir vanishing point (where
-            verticals converge, below the frame), back-projected to the floor.
-  tile      the person's footprint: every matte pixel is placed on its ray at
-            the height where that ray passes the vertical through the feet,
-            then dropped straight down to the floor. Its bounding rectangle in
-            stripe-aligned floor axes, plus a margin, is the tile. Tiles that
-            overlap become one shared tile (people walking together).
+  feet      the median of the matte's lowest pixels (lowest toward the nadir
+            vanishing point, where verticals converge below the frame),
+            back-projected to the floor. A figure cut by the frame, or whose
+            matte stops well short of a person's height (feet hidden behind
+            someone nearer the lens), has no feet and no slab.
+  slab      one per person, a square centred on their feet, squared to the
+            stripes, SLAB_K x their shoulder width (clamped near the median,
+            capped at SLAB_CAP x the median). Neighbours that would touch are
+            pushed apart while the feet stay on their own slab; what the push
+            cannot clear is trimmed at the midpoint between the two people's
+            feet, so GAP of black runs between every pair.
   floor     the photo with every person removed, so the road that stays behind
   plate     as the world dims holds no ghosts: <workdir>/plate.png from
             plate.py (LaMa, one person at a time) and plate_fix.py; without
@@ -52,8 +56,11 @@ PHOTO, WORK, OUT = sys.argv[1:4]
 os.makedirs(OUT, exist_ok=True)
 EXPORT = 0.75  # export scale of the 4016x6016 photo (3012 wide; a 1280 css box at DPR 2 is 2560)
 PERSON_H = 1.64
-MARGIN = (0.22, 0.20)  # tile margin round the footprint, m, along stripes / across
-MIN_TILE = (0.95, 0.8)
+SHOULDER_H = 1.35  # m, where shoulder width is measured
+SLAB_K = 1.6  # slab side as a multiple of shoulder width
+SLAB_MIN = 0.55  # m
+SLAB_CAP = 2.0  # no slab bigger than this times the median
+GAP = 0.12  # m of black kept between any two slabs
 
 img8 = cv2.imread(PHOTO)[:, :, ::-1]
 FH, FW = img8.shape[:2]
@@ -199,6 +206,12 @@ if e2[1] > 0:  # point "up the image" (away from the camera's foot)
     e2 = -e2
 
 # ---- per person
+# Every person owns one slab, built round where they touch the road. The
+# feet are the median of the matte's lowest pixels (lowest toward the nadir
+# vanishing point, where verticals meet), dropped onto the road plane. A
+# figure whose feet cannot be found (cut by the frame, hidden behind someone
+# in front) gets no slab and goes dark with the street rather than floating
+# in it.
 info = []
 for i, r in enumerate(rects):
     if f"a{i}" not in MATTE:
@@ -211,14 +224,23 @@ for i, r in enumerate(rects):
     down = vp - c
     down /= np.linalg.norm(down)
     s = (np.stack([px, py], -1) - c) @ down
-    foot = s > np.percentile(s, 96)
+    span = s.max() - s.min()
+    foot = s > s.max() - 0.14 * span
     head = s < np.percentile(s, 3)
-    fx_, fy_ = px[foot].mean(), py[foot].mean()
+    fx_, fy_ = float(np.median(px[foot])), float(np.median(py[foot]))
     F = on_floor(fx_, fy_)
     hh = closest_height(px[head], py[head], F).mean()
+    # shoulders: the band a fifth to two fifths of the way down from the head
+    sh = (s > s.min() + 0.18 * span) & (s < s.min() + 0.4 * span)
     # a figure cut by the frame stays part of the street: no tile of its own
     edge = x0 <= 3 or y0 <= 3 or x1 >= FW - 3 or y1 >= FH - 3
-    info.append(dict(i=i, rect=[x0, y0, x1, y1], feet_px=[fx_, fy_], F=F, head=hh, px=px, py=py, area=len(px), edge=edge))
+    why = "edge" if edge else None
+    if why is None and foot.sum() < 12:
+        why = "no feet"
+    if why is None and not (F[2] > 0):
+        why = "feet off the road"
+    info.append(dict(i=i, rect=[x0, y0, x1, y1], feet_px=[fx_, fy_], F=F, head=hh, px=px, py=py, area=len(px),
+                     edge=edge, why=why, sh=sh if sh.sum() > 20 else None))
 heights = np.array([p["head"] for p in info if not p["edge"]])
 k = PERSON_H / np.median(heights)
 print("raw head heights", np.round(heights, 2), "-> scale", round(k, 3))
@@ -226,71 +248,86 @@ d0 *= k
 for p in info:
     p["F"] = p["F"] * k
     p["head"] *= k
+    p["uv"] = np.array([p["F"] @ e1, p["F"] @ e2])
+    # shoulder width in metres: the shoulder band laid on a plane at shoulder height, its extent along
+    # the stripes (the camera's own x, so not foreshortened by the band's
+    # height the way the across axis is)
+    if p["sh"] is not None:
+        qu = on_floor(p["px"][p["sh"]], p["py"][p["sh"]], h=SHOULDER_H) @ e1
+        p["shoulder"] = float(np.percentile(qu, 97) - np.percentile(qu, 3))
+    else:
+        p["shoulder"] = np.nan
+    # a matte that stops well short of a person's height stops above the
+    # road: the feet are behind someone nearer the lens
+    if p["why"] is None and p["head"] < 0.75 * PERSON_H:
+        p["why"] = "feet hidden"
+    if p["why"]:
+        print(f"  person {p['i']}: no slab ({p['why']})")
 
-# footprints
-for p in info:
-    sub = slice(None, None, max(1, len(p["px"]) // 4000))
-    px, py = p["px"][sub], p["py"][sub]
-    t = np.clip(closest_height(px, py, p["F"]), 0, 2.1)
-    Q = on_floor(px, py, t)
-    Qf = Q - n[None] * (Q @ n + d0)[:, None]
-    u = (Qf - p["F"]) @ e1
-    v = (Qf - p["F"]) @ e2
-    lo = np.array([np.percentile(u, 1), np.percentile(v, 1)])
-    hi = np.array([np.percentile(u, 99), np.percentile(v, 99)])
-    cen = (lo + hi) / 2
-    half = np.maximum((hi - lo) / 2 + np.array(MARGIN), np.array(MIN_TILE) / 2)
-    p["tile"] = [p["F"] @ e1 + cen[0] - half[0], p["F"] @ e2 + cen[1] - half[1], p["F"] @ e1 + cen[0] + half[0], p["F"] @ e2 + cen[1] + half[1]]
+# ---- slabs: one per person, a square round the feet
+own = [j for j, p in enumerate(info) if p["why"] is None]
+sw = np.array([info[j]["shoulder"] for j in own])
+sw_med = np.nanmedian(sw)
+sw = np.where(np.isfinite(sw), sw, sw_med)
+side = np.clip(SLAB_K * np.clip(sw, 0.85 * sw_med, 1.3 * sw_med), SLAB_MIN, SLAB_CAP * SLAB_K * sw_med)
+print(f"shoulders median {sw_med:.2f} m; slab sides {np.round(side, 2)}")
+cen = np.array([info[j]["uv"] for j in own], np.float64)
+feet = cen.copy()
+half = np.stack([side / 2, side / 2], -1)
+# keep the feet this far in from any edge of their own slab, m
+FOOT_IN = 0.16
 
-# Tiles that overlap a lot become one shared tile (people walking together);
-# a smaller overlap is split down the middle, leaving a hairline gap, so
-# neighbours stand on adjacent panels.
-GAP = 0.05
-groups = [[j] for j in range(len(info)) if not info[j]["edge"]]
-boxes = [list(info[j]["tile"]) for j in range(len(info)) if not info[j]["edge"]]
-area = lambda B: (B[2] - B[0]) * (B[3] - B[1])  # noqa: E731
-changed = True
-while changed:
-    changed = False
+
+def clamp_to_feet(c, h, f):
+    lim = np.maximum(h - FOOT_IN, 0)
+    return np.clip(c, f - lim, f + lim)
+
+
+# relaxation: neighbours that would touch push apart along the axis that
+# needs the smaller move, each slab staying under its own feet
+for it in range(300):
+    moved = 0.0
+    for a_ in range(len(own)):
+        for b_ in range(a_ + 1, len(own)):
+            dlt = cen[b_] - cen[a_]
+            need = half[a_] + half[b_] + GAP - np.abs(dlt)
+            if need[0] <= 0 or need[1] <= 0:
+                continue
+            ax_ = 0 if need[0] < need[1] else 1
+            sgn = 1.0 if dlt[ax_] >= 0 else -1.0
+            mv = 0.5 * need[ax_] * 0.6
+            cen[a_, ax_] -= sgn * mv
+            cen[b_, ax_] += sgn * mv
+            moved += mv
+    for j in range(len(own)):
+        cen[j] = clamp_to_feet(cen[j], half[j], feet[j])
+    if moved < 1e-4:
+        break
+# what the push could not clear, a shrink does: the shared edge goes to the
+# midpoint between the two people's feet, with a sliver of black either side
+boxes = [[cen[j, 0] - half[j, 0], cen[j, 1] - half[j, 1], cen[j, 0] + half[j, 0], cen[j, 1] + half[j, 1]] for j in range(len(own))]
+for _ in range(6):
+    clean = True
     for a_ in range(len(boxes)):
         for b_ in range(a_ + 1, len(boxes)):
             A, B = boxes[a_], boxes[b_]
-            ox = min(A[2], B[2]) - max(A[0], B[0])
-            oy = min(A[3], B[3]) - max(A[1], B[1])
-            if ox > 0 and oy > 0 and ox * oy > 0.4 * min(area(A), area(B)):
-                boxes[a_] = [min(A[0], B[0]), min(A[1], B[1]), max(A[2], B[2]), max(A[3], B[3])]
-                groups[a_] += groups[b_]
-                del boxes[b_], groups[b_]
-                changed = True
-                break
-        if changed:
-            break
-for _ in range(4):
-    for a_ in range(len(boxes)):
-        for b_ in range(len(boxes)):
-            if a_ == b_:
+            ox = min(A[2], B[2]) - max(A[0], B[0]) + GAP
+            oy = min(A[3], B[3]) - max(A[1], B[1]) + GAP
+            if ox <= 0 or oy <= 0:
                 continue
-            A, B = boxes[a_], boxes[b_]
-            ox = min(A[2], B[2]) - max(A[0], B[0])
-            oy = min(A[3], B[3]) - max(A[1], B[1])
-            if ox <= -GAP or oy <= -GAP:
-                continue
-            # split along the axis of least overlap
-            if ox < oy:
-                if (A[0] + A[2]) < (B[0] + B[2]):
-                    m = (max(A[0], B[0]) + min(A[2], B[2])) / 2
-                    A[2], B[0] = m - GAP / 2, m + GAP / 2
-                else:
-                    m = (max(A[0], B[0]) + min(A[2], B[2])) / 2
-                    B[2], A[0] = m - GAP / 2, m + GAP / 2
-            else:
-                if (A[1] + A[3]) < (B[1] + B[3]):
-                    m = (max(A[1], B[1]) + min(A[3], B[3])) / 2
-                    A[3], B[1] = m - GAP / 2, m + GAP / 2
-                else:
-                    m = (max(A[1], B[1]) + min(A[3], B[3])) / 2
-                    B[3], A[1] = m - GAP / 2, m + GAP / 2
-# keep every tile inside the photograph (its top is the photo's own road)
+            clean = False
+            fa, fb = feet[a_], feet[b_]
+            # split across the axis where the feet are furthest apart
+            ax_ = 0 if abs(fa[0] - fb[0]) * (oy + 1e-6) >= abs(fa[1] - fb[1]) * (ox + 1e-6) else 1
+            lo_, hi_ = (A, B) if fa[ax_] <= fb[ax_] else (B, A)
+            m = (fa[ax_] + fb[ax_]) / 2
+            lo_[2 + ax_] = min(lo_[2 + ax_], m - GAP / 2)
+            hi_[ax_] = max(hi_[ax_], m + GAP / 2)
+    if clean:
+        break
+
+
+# keep every slab inside the photograph (its top is the photo's own road)
 def corner_px(u, v):
     X = u * e1 + v * e2 - n * d0
     return f * X[0] / X[2] + cx, f * X[1] / X[2] + cy
@@ -299,7 +336,7 @@ def corner_px(u, v):
 for B in boxes:
     for _ in range(400):
         moved = False
-        for (u, v, iu, iv) in [(B[0], B[1], 0, 1), (B[2], B[1], 2, 1), (B[2], B[3], 2, 3), (B[0], B[3], 0, 3)]:
+        for (u, v) in [(B[0], B[1]), (B[2], B[1]), (B[2], B[3]), (B[0], B[3])]:
             x_, y_ = corner_px(u, v)
             if x_ < 4:
                 B[0] += 0.01
@@ -315,7 +352,20 @@ for B in boxes:
                 moved = True
         if not moved:
             break
-print(len(info), "people on", len(boxes), "tiles")
+# check: feet on their own slab, every pair apart
+for j, B in enumerate(boxes):
+    fu, fv = feet[j]
+    inset = min(fu - B[0], B[2] - fu, fv - B[1], B[3] - fv)
+    if inset < 0.05:
+        print(f"  warning: person {info[own[j]]['i']} feet {inset:.2f} m from their slab's edge")
+gaps = []
+for a_ in range(len(boxes)):
+    for b_ in range(a_ + 1, len(boxes)):
+        A, B = boxes[a_], boxes[b_]
+        gaps.append(max(max(A[0], B[0]) - min(A[2], B[2]), max(A[1], B[1]) - min(A[3], B[3])))
+print(f"min gap between slabs {min(gaps):.3f} m")
+groups = [[j] for j in own]
+print(len(info), "people,", len(boxes), "slabs")
 
 # ---- clean floor plate (people removed) at export size
 EW, EH = round(FW * EXPORT), round(FH * EXPORT)

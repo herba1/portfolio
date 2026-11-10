@@ -4,7 +4,7 @@
   "tags": ["generative", "WebGL", "Photo", "Segmentation"],
   "status": "draft",
   "createdAt": "2026-11-06T23:30:00.000Z",
-  "intent": "herb's generative-art reference 4 (people cut out of an overhead crowd photo, each on their own glowing patch of floor, everything else black). One process pushed to the edge: real instance segmentation and a real floor plane. Every person was found (YOLOv10), cut with SAM 2.1 on their own crop, and stood on the road plane fitted to a MoGe-2 point map; each tile is their footprint dropped onto that plane, squared to the zebra stripes, and the people are painted out of the road with LaMa so nothing ghosts as it dims.",
+  "intent": "herb's generative-art reference 4 (people cut out of an overhead crowd photo, each on their own glowing patch of floor, everything else black). One process pushed to the edge: real instance segmentation and a real floor plane. Every person was found (YOLOv10), cut with SAM 2.1 on their own crop, and stood on the road plane fitted to a MoGe-2 point map; each person owns one small slab centred on where their feet meet that plane, squared to the zebra stripes and kept apart from every other by a sliver of black, and the people are painted out of the road with LaMa so nothing ghosts as it dims.",
   "tile": { "shape": "wide" },
   "demo": { "gesture": "drag", "on": ".kit-canvas", "from": [0.4, 0.5], "to": [0.62, 0.44] },
   "probe": [

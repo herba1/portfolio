@@ -9,13 +9,17 @@ import { createFilm } from "../_kit/film";
 //
 // tools/depth/bakes/concourse found every person (YOLOv10), cut each one with
 // SAM 2.1 on their own crop, fitted the road plane to a MoGe-2 point map,
-// measured each person's feet on it and cut their tile: the footprint of the
-// body dropped straight down onto the road, squared to the zebra stripes,
-// with people walking together sharing one tile. It also painted the people
-// out of the road (LaMa), so the world that dims behind them holds no ghosts.
+// found where each person touches it (the median of the matte's lowest
+// pixels, dropped onto the plane) and cut them a slab of their own round that
+// point: about one and a half shoulder widths, squared to the zebra stripes,
+// pushed apart (or trimmed) so a sliver of black always runs between two
+// slabs. Anyone whose feet it could not find has no slab and goes dark with
+// the street. It also painted the people out of the road (LaMa), so the world
+// that dims behind them holds no ghosts.
 //
 // Everything is drawn in the photographer's own camera. Each person is a
-// card hinged at their feet, every pixel of it on its own camera ray, so from
+// card hinged at their feet, which are the middle of their own slab's top
+// and ride up with it, every pixel of the card on its own camera ray, so from
 // the lens they are exactly the photograph; swing round and the card turns
 // on its feet to face you, leaning a little, so they stand up out of their
 // tile instead of lying flat. Tiles are real slabs (top, four sides) that rise on
@@ -33,7 +37,7 @@ const LIFT = [0.22, 0.62]; // per-tile lift range at full split, m
 const DOLLY = 0.8; // the camera backs off along the window's centre ray, as a share of its distance
 const WHITE = [1.0, 0.94, 0.86];
 const RED = [1.0, 0.07, 0.03];
-const RED_TILES = [9, 17, 22];
+const RED_TILES = [9, 15, 26]; // scene.json tile indices, one person each
 const LEAN_MAX = (26 * Math.PI) / 180; // how far back a person's card may lean
 const LEAN_FOLLOW = 0.55; // share of the camera's climb the lean follows
 const TOP_MAX = 2.1; // a card is never taller than this, m
@@ -155,9 +159,12 @@ void main() {
   // the gap the light escapes through: none while the slab sits on the road
   g *= smoothstep(0.0, 0.12, uH);
   g *= 1.0 - smoothstep(uPad * 0.55, uPad, sd); // true black before the quad ends
+  // The road it falls on is dark and mostly even: only a trace of the
+  // photograph's own road comes through, so the pool reads as light on black
+  // and not as the street showing through a soft mask (no stripes, no
+  // chevrons, no cast shadows floating in the dark).
   vec3 albedo = texture(uFloor, photoPx(vRest) / uPhoto).rgb;
-  // asphalt is dark: a little of the light comes back off its sheen as well
-  vec3 lit = uLight * uEmit * g * uAmp * (albedo + 0.04);
+  vec3 lit = uLight * uEmit * g * uAmp * (0.26 + 0.18 * albedo);
   o = vec4(lit, 0.0);
 }`;
 
