@@ -147,12 +147,21 @@ vec3 proof(vec2 l, vec3 A0, vec3 A1, vec3 A2, vec4 P, vec4 Q){
     aS = smoothstep(0.5 - aa * 2.0, 0.5 + aa * 2.0, gs) * (1.0 - a);
   }
   a += aS * 0.42;
-  // Fixed to the block: nicks and dents in the wood face, the same on
-  // every proof.
-  float nk = fbm(l * 0.06 + 31.0);
-  float nick = smoothstep(0.80, 0.82, nk) * smoothstep(0.95, 0.99, m.b);
-  float pin = smoothstep(0.955, 0.97, noise(l * 0.35 + 77.0)) * smoothstep(0.62, 0.72, fbm(l * 0.02 + 41.0)) * smoothstep(0.8, 0.98, m.b);
-  a *= 1.0 - max(nick * 0.7, pin * 0.6);
+  // Fixed to the block: wood type wears at its edges, never in its face.
+  // Long, slow noise picks the stretches of contour that have taken knocks;
+  // there the edge is bitten back by up to a couple of px, measured on the
+  // broad blur so a convex corner (a bowl's shoulder, the foot of a stem, an
+  // arm's tip) loses more than a straight run does. The face stays a flat
+  // slab: any light in it comes from the ink, not the wood.
+  // On a straight run the broad blur climbs about 0.6 as fast as the light
+  // one going in from the edge; where it lags, the point sits on a convex
+  // corner, and corners are where a block takes its knocks.
+  float corner = smoothstep(0.03, 0.12, 0.5 + 0.6 * (m.g - 0.5) - m.b);
+  float nk = fbm(l * vec2(0.034, 0.029) + vec2(31.0, 7.0));
+  float nick = smoothstep(0.7 - corner * 0.34, 0.78 - corner * 0.34, nk);
+  float lip = (noise(l * 0.4 + 57.0) - 0.5) * 0.09 + (noise(l * 1.2 + 19.0) - 0.5) * 0.025;
+  float bite = smoothstep(-0.015, 0.015, 0.5 + nick * 0.22 + lip - m.b) * smoothstep(0.0, 0.2, nick);
+  a *= 1.0 - bite;
   if (a * printed <= 0.0) return col;
 
   // Squeeze: ink pushed to the letter's edge sits thicker there.
