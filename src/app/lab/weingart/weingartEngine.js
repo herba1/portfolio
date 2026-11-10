@@ -13,8 +13,10 @@
 // down the chain, so every line breaks to its own rhythm. Lead stays in contact: no sort ever hangs more than its own body
 // below the one before it, and the brass rule and the reversed slug step
 // as one body, each joint filled by a riser, so a full push ends as one
-// continuous staircase, never as dashes or labels. When a step would need
-// the margin to give, the whole run locks. Only the red run, printed in a
+// continuous staircase, never as dashes or labels. The rule is cut to the
+// red's measure and seats on the red's baseline: a full push ends with its
+// last tread as the red's own baseline rule, from the 3 to the 5. When a
+// step would need the margin to give, the whole run locks. Only the red run, printed in a
 // second pass, crosses the black, and where it does the two inks make a
 // third.
 // ?t=0..1 holds a still of "Here" pushed down through the forme.
@@ -77,11 +79,15 @@ const FORME = [
   { text: "Comes", size: 108, w: "semibold", x: 0, y: 264 },
   { text: "the Sun", size: 108, w: "semibold", x: 0, y: 360 },
   // The rule is made up from brass pieces of the lengths a case actually holds,
-  // and runs out across the head of the red. Its first piece is short, under
-  // the "t" alone, so the sort beside it can step down past the margin piece;
-  // the short pieces first let it fall as fast as the letters above it, the
-  // long ones after let it run out under and across the red.
-  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 120, 96, 156], thick: 12, x: 0, y: 400 },
+  // and is fitted to the red: its pieces run from the margin to the left edge
+  // of the "3", and its last piece is cut to the measure of the figure, from
+  // the "3" to the right edge of the "5" (see fitRule). At rest it is a full
+  // measure head rule over the red. Its first piece is short, under the "t"
+  // alone, so the sort beside it can step down past the margin piece; the
+  // short pieces first let it fall as fast as the letters above it. Where it
+  // is shoved, the run ahead falls on at twice a type line's slope (tail), so
+  // a full push carries it down to its datum and seats the last piece there.
+  { rule: true, pieces: [36, 36, 72, 72, 72, 96, 96, 156], thick: 12, x: 0, y: 400, fit: "red", tail: 3 },
   { text: "Written by George Harrison", size: 13, w: "strong", rev: true, x: 10, y: 520 },
   { text: "Abbey Road", size: 20, w: "strong", x: 652, y: 92 },
   { text: "Side two, track one", size: 13, w: "body", x: 676, y: 116 },
@@ -141,6 +147,29 @@ export async function createWeingart(host) {
   // Cut each line into its sorts. Prefix advances keep the font's own
   // kerning; the law's tracking is added once per letter and never changes.
   const sort = (x, w, extra) => ({ x, w, p: 0, v: 0, k: 0, q: 0, wait: 0, seat: 0, settled: true, vis: true, ...extra });
+  // A rule fitted to a figure is locked up to its measured ink: the joint
+  // before its last piece is cut to the figure's left edge, and the last
+  // piece runs to the figure's right edge. Its datum is the figure's
+  // baseline: that many faces below the rule, the brass seats on the line
+  // the figure stands on and goes no deeper, so a full push ends with the
+  // last tread as the figure's own baseline rule.
+  const fitRule = (s) => {
+    const red = slugs.find((o) => o.layer === s.fit);
+    ctx.font = red.font;
+    const n = red.text.length;
+    const l = red.x + red.cx[0] - ctx.measureText(red.text[0]).actualBoundingBoxLeft - s.x;
+    const r = red.x + red.cx[n - 1] + ctx.measureText(red.text[n - 1]).actualBoundingBoxRight - s.x;
+    const us = s.units;
+    const lead = us[us.length - 1].x;
+    // The last piece of case length before the figure is trimmed or packed to
+    // meet it. The joint sits half a face in, so when the rule steps there its
+    // riser (centred on the joint) stands flush with the figure's left edge.
+    const at = l + s.thick / 2;
+    us[us.length - 2].w += at - lead;
+    us[us.length - 1].x = at;
+    us[us.length - 1].w = r - at;
+    s.datum = Math.round((red.y - s.y) / s.thick);
+  };
   const cut = () => {
     for (const s of slugs) {
       if (s.rule) {
@@ -178,6 +207,7 @@ export async function createWeingart(host) {
       s.units[0].first = true;
       s.units[s.units.length - 1].last = true;
     }
+    for (const s of slugs) if (s.fit) fitRule(s);
     for (const s of slugs) {
       s.vec = s.units.map(() => 0);
       s.pitch = (s.units[s.units.length - 1].x + s.units[s.units.length - 1].w) / s.units.length;
@@ -233,6 +263,20 @@ export async function createWeingart(host) {
     return false;
   };
 
+  // A line with a datum seats on it: sorts ahead of the one pushed come to
+  // rest there and run on along it, and the pushed sort itself cannot pass
+  // it, so the run locks. False when the push would drive j through it.
+  const seat = (s, w, j) => {
+    if (s.datum == null) return true;
+    for (let i = 1; i < w.length; i++) {
+      if (w[i] <= s.datum) continue;
+      if (i <= j) return false;
+      w[i] = s.datum;
+    }
+    for (let i = 1; i < w.length; i++) if (Math.abs(w[i] - w[i - 1]) > s.reach) return false;
+    return true;
+  };
+
   // No sort may sit more than its reach from its left neighbour either: the
   // run stays in contact the way real lead does, and past that it locks.
   // Returns false if the push cannot be made.
@@ -250,7 +294,7 @@ export async function createWeingart(host) {
       else p = i;
       if (Math.abs(w[i] - w[i - 1]) > s.reach) return false;
     }
-    if (clash(s, w)) return false;
+    if (!seat(s, w, j) || clash(s, w)) return false;
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
@@ -276,7 +320,7 @@ export async function createWeingart(host) {
     let p = j;
     for (let i = j + 1; i < u.length; i++) {
       if (!s.units[i].vis) continue;
-      if (deeper) u[i] = Math.max(u[i], u[p], u[j] + Math.floor(((s.ord[i] - J) * u[j]) / (J * TAIL)));
+      if (deeper) u[i] = Math.max(u[i], u[p], u[j] + Math.floor(((s.ord[i] - J) * u[j]) / (J * (s.tail ?? TAIL))));
       p = i;
     }
     let nx = j;
@@ -289,7 +333,7 @@ export async function createWeingart(host) {
     for (let i = 1; i < u.length; i++) if (!s.units[i].vis) u[i] = u[i - 1];
     for (let i = 1; i < u.length; i++) if (Math.abs(u[i] - u[i - 1]) > s.reach) return false;
     const w = u.map((x) => x * sd);
-    if (clash(s, w)) return false;
+    if (!seat(s, w, j) || clash(s, w)) return false;
     for (let i = 1; i < w.length; i++) v[i] = w[i];
     return true;
   };
