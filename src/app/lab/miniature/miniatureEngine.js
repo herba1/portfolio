@@ -298,14 +298,24 @@ vec3 gradeSky(vec3 col, float y, float far, float nearness, float clear, float u
   vec3 graded = col + (skyFilm(y) - src) * sky;
   // Clouds: brighter than the clear sky at that height and paler than it,
   // and clear of anything near (the photograph's bright sharpening fringe
-  // along the pine tops is not a cloud). Linear ramps, so a blurred cloud's
-  // flank eases into the sky instead of ending on an outline. Brightness
-  // within the cloud, plus which way it brightens down the frame, picks the
-  // tone: the sunlit top goes warm neutral, the dimmer flanks and the base
-  // a cool cyan grey lit by the blue around it.
-  float cloud = clamp((lum - ls) / 0.16, 0.0, 1.0) * clamp((hsvSat(src) - hsvSat(col)) / 0.26, 0.0, 1.0) * clear;
-  float lit = clamp((lum - ls) / (0.9 - ls) + 3.0 * up, 0.0, 1.0);
-  vec3 cloudCol = mix(vec3(0.718, 0.773, 0.773), vec3(0.875, 0.882, 0.871), lit);
+  // along the pine tops is not a cloud). A cloud is graded as an excess over
+  // the sky, never as a colour of its own: the new sky at that height plus
+  // the pixel's brightness above the source sky, carried toward a warm
+  // neutral white. Brightness within the cloud, plus which way it brightens
+  // down the frame, sets how far: the sunlit top goes most of the way, the
+  // base and the shadowed flanks stay near the blue that lights them. With
+  // no excess the cloud colour is the new sky itself, so a defocused flank
+  // runs from the cobalt to a pale highlight, lighter at every step and
+  // never through grey.
+  float excess = max(lum - ls, 0.0);
+  float cloud = clamp(excess / 0.05, 0.0, 1.0) * clamp((hsvSat(src) - hsvSat(col)) / 0.14, 0.0, 1.0) * clear;
+  float lit = clamp(excess / (0.9 - ls) * clamp(1.0 + 5.0 * up, 0.6, 1.6), 0.0, 1.0);
+  // The white it heads for is itself the sky's pale tint until the very top
+  // of the climb, so the hue holds near 205 all the way up and turns warm
+  // only where the saturation is already gone: a straight line from cobalt
+  // to a warm white would cross cyan on the way.
+  vec3 white = mix(vec3(0.8, 0.86, 0.93), vec3(0.89, 0.882, 0.858), lit * lit * lit);
+  vec3 cloudCol = mix(skyFilm(y), white, lit);
   return mix(graded, cloudCol, cloud * sky);
 }
 // Highlight on the stone, for halation: the image as the composite shows it
