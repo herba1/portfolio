@@ -3,10 +3,13 @@
 // it travels, turns and lands whole.
 // A sweep across the spread is the throw. Each throw composes a new
 // constellation under fixed rules on a hidden fourteen-column grid: the four
-// great capitals step down the spread on the diagonal, standing on column
-// lines; one of them is the throw's thunderclap, near a quarter of the page
-// high, and takes the spine dead centre, while the other three fall away to
-// about a third of its size and each stands on a page, a column clear of it; each minor thread lands where it shares the
+// great capitals step down the spread on one diagonal, standing on column
+// lines, each one's left ink at least two columns right of the last, so the
+// sentence falls across the fold in order; one of them is the throw's
+// thunderclap, as large as its place on that diagonal allows (near a quarter
+// of the page high when it can take the spine dead centre), while the other
+// three fall away to at most half its size and each stands on a page, a
+// column clear of the spine; each minor thread lands where it shares the
 // most edges with the capitals (a left edge, a right edge, a baseline, a cap
 // height, a column line), with whitespace only breaking ties; and only the
 // capitals may cross the gutter.
@@ -289,14 +292,97 @@ export async function createCoup(host, { embedded = false } = {}) {
     let px = sizes.map((f, j) => (j === loud ? top : fit(j, Math.round(top * f), pageRoom)));
     // fit the four rows plus breathing room into the page height
     const avail = H - mY * 2;
-    let hs = px.map(lineHeight);
     const minGap = GAP_Y() * 2;
+    const rows = (p) => p.map(lineHeight).reduce((a, b) => a + b, 0) + minGap * 3;
     // shrinking keeps the ratio, so the shout stays a shout
-    while (hs.reduce((a, b) => a + b, 0) + minGap * 3 > avail * 0.86 && px.some((s) => s > 20)) {
-      px = px.map((s) => Math.max(20, Math.floor(s * 0.96)));
-      hs = px.map(lineHeight);
+    while (rows(px) > avail * 0.86 && px.some((s) => s > 20)) px = px.map((s) => Math.max(20, Math.floor(s * 0.96)));
+
+    // The diagonal is one sentence falling across the spread: each capital's
+    // left ink stands at least two columns right of the one before it, so
+    // UN COUP DE DÉS, JAMAIS, N'ABOLIRA, LE HASARD read in order, top left to
+    // bottom right, and no two of them share an axis. Each stands on a column
+    // line; across the fold it either sits centred on the spine (the
+    // thunderclap only, and only as a decision) or clears it by a column.
+    const S = W / 2;
+    const x0 = mX + rng() * W * 0.2;
+    const endPull = rng() * W * 0.12;
+    const steps = [0.3 + rng(), 0.3 + rng(), 0.3 + rng()];
+    const stepSum = steps.reduce((a, b) => a + b, 0);
+    const acc = [0, steps[0] / stepSum, (steps[0] + steps[1]) / stepSum, 1];
+    // taking the spine has to win against a column's worth of doubt
+    const doubt = col * (1 + rng() * 2.5);
+    const spanOf = (j, s) => {
+      const g = ink(big[j], s);
+      return g.r - g.l;
+    };
+    const optionsFor = (j, s) => {
+      const span = spanOf(j, s);
+      const opts = [];
+      for (const q of lines) {
+        if (q < mX - 0.5 || q + span > W - mX + 0.5) continue;
+        if (spread && q + span > S - col + 0.5 && q < S + col - 0.5) continue;
+        opts.push({ a: q });
+      }
+      if (spread && j === loud && S - span / 2 >= mX - 0.5) opts.push({ a: S - span / 2, centred: true });
+      return opts;
+    };
+    // The cheapest walk down the diagonal for these sizes: every capital as
+    // near its stride target as the step allows. Null if the pages cannot
+    // hold the step at these sizes.
+    const plan = (sz, step) => {
+      const end = W - mX - spanOf(3, sz[3]) - endPull;
+      const target = acc.map((f) => x0 + (Math.max(x0, end) - x0) * f);
+      let prev = [{ a: -Infinity, c: 0, path: [] }];
+      for (let j = 0; j < 4; j++) {
+        const next = [];
+        for (const o of optionsFor(j, sz[j])) {
+          let from = null;
+          for (const p of prev) if (o.a >= p.a + step - 0.5 && (!from || p.c < from.c)) from = p;
+          if (from) next.push({ a: o.a, c: from.c + Math.abs(o.a - target[j]) + (o.centred ? doubt : 0), path: [...from.path, o] });
+        }
+        if (!next.length) return null;
+        prev = next;
+      }
+      return prev.reduce((p, q) => (q.c < p.c ? q : p)).path;
+    };
+    // When a page cannot hold the step, the capitals shrink before the step
+    // collapses: first the shout, as little as it must with the quiet ones
+    // at their floor, then each quiet one grows back as far as the step lets
+    // it. Only if nothing fits at the smallest cut does the step shorten.
+    // A quiet capital keeps the size it was given against the full shout,
+    // but never more than half the shout as it is finally set, so
+    // a shout that had to shrink to fit the step still shouts.
+    const quietAt = (L, j) => Math.max(20, Math.min(px[j], Math.round(L * 0.5)));
+    const floorAt = (L, j) => Math.min(quietAt(L, j), Math.max(20, Math.round(L * 0.24)));
+    let path = null;
+    let sz = px;
+    for (let step = col * 2; !path && step >= 0; step -= col / 2) {
+      for (let L = px[loud]; ; L = Math.max(20, Math.floor(L * 0.94))) {
+        sz = big.map((_, j) => (j === loud ? L : floorAt(L, j)));
+        path = plan(sz, step);
+        if (path || L === 20) break;
+      }
+      if (!path) continue;
+      for (let j = 0; j < 4; j++) {
+        if (j === loud) continue;
+        for (let s = quietAt(sz[loud], j); s > sz[j]; s = Math.max(sz[j], Math.floor(s * 0.94))) {
+          const trial = sz.map((v, k) => (k === j ? s : v));
+          const p = plan(trial, step);
+          if (p) {
+            sz = trial;
+            path = p;
+            break;
+          }
+        }
+      }
     }
-    const free = avail - hs.reduce((a, b) => a + b, 0) - minGap * 3;
+    px = sz;
+    // nothing fits even at the smallest cut on the narrowest step: hold each
+    // capital at its target, inside the margins
+    if (!path) path = px.map((s, j) => ({ a: Math.max(mX, Math.min(x0 + (W - mX * 2 - x0) * acc[j] * 0.5, W - mX - spanOf(j, s))) }));
+
+    const hs = px.map(lineHeight);
+    const free = avail - rows(px);
     // top margin, three gaps, bottom margin, each a random share of the slack
     const wts = [0.2 + rng() * 0.8, 0.4 + rng() * 1.6, 0.4 + rng() * 1.6, 0.4 + rng() * 1.6, 0.2 + rng() * 0.8];
     const sum = wts.reduce((a, b) => a + b, 0);
@@ -306,62 +392,11 @@ export async function createCoup(host, { embedded = false } = {}) {
       ys.push(snap4(y));
       y = snap4(y) + hs[j] + minGap + (j < 3 ? (free * wts[j + 1]) / sum : 0);
     }
-    const ws = px.map((s, j) => measure(big[j], s));
-    // stride: a start and an end on the diagonal, with uneven steps between
-    const x0 = mX + rng() * W * 0.2;
-    const xEnd = W - mX - ws[3] - rng() * W * 0.12;
-    const steps = [0.3 + rng(), 0.3 + rng(), 0.3 + rng()];
-    const stepSum = steps.reduce((a, b) => a + b, 0);
-    const S = W / 2;
-    let acc = 0;
-    const out = [];
-    let prevX = -Infinity;
-    let prevInk = -Infinity;
-    let centred = false;
-    big.forEach((it, j) => {
-      if (j > 0) acc += steps[j - 1] / stepSum;
-      let x = x0 + (Math.max(x0, xEnd) - x0) * acc;
-      x = Math.max(prevX + W * 0.04, x);
-      x = Math.min(x, W - mX - ws[j]);
-      x = Math.max(mX, x);
-      prevX = x;
-      // the capital's ink stands on a column line, the nearest one that
-      // keeps it inside the margins
+    return big.map((it, j) => {
       const g = ink(it, px[j]);
-      const span = g.r - g.l;
-      const fits = (a) => a >= mX - 0.5 && a + span <= W - mX + 0.5;
-      const onCols = lines.filter(fits);
-      let a = onCols.length ? onCols.reduce((p, q) => (Math.abs(q - (x + g.l)) < Math.abs(p - (x + g.l)) ? q : p)) : Math.max(mX, Math.min(x + g.l, W - mX - span));
-      // The fold: a capital either sits centred on the spine, on purpose,
-      // or stands at least one column clear of it. Nothing in between.
-      if (spread && a + span > S - col + 0.5 && a < S + col - 0.5) {
-        // one capital at most takes the spine: it is the throw's decision,
-        // and the thunderclap's, which is too wide for a page
-        const opts = centred || j !== loud ? [] : [{ a: S - span / 2, centred: true }];
-        // clearing it, the capital takes one of the first columns that do,
-        // so the far side of the fold is not one long axis every throw
-        const left = onCols.filter((q) => q + span <= S - col + 0.5);
-        if (left.length) opts.push({ a: left[Math.max(0, left.length - 1 - Math.floor(rng() * 2))] });
-        const right = onCols.filter((q) => q >= S + col - 0.5);
-        if (right.length) opts.push({ a: right[Math.min(right.length - 1, Math.floor(rng() * 3))] });
-        // taking the spine is a decision, not the nearest fix: it has to
-        // win against a column's worth of doubt
-        const doubt = col * (1 + rng() * 2.5);
-        const cost = (o) =>
-          Math.abs(o.a - a) +
-          (o.centred ? doubt : 0) +
-          // the diagonal steps forward; it never steps back past the last
-          (o.a < prevInk - 0.5 ? W : 0);
-        if (!opts.length) opts.push({ a: S - span / 2, centred: true });
-        const pick = opts.reduce((p, q) => (cost(q) < cost(p) ? q : p));
-        a = pick.a;
-        centred = centred || !!pick.centred;
-      }
-      prevInk = a;
-      x = a - g.l;
-      out.push({ it, x, y: ys[j], s: px[j], w: ws[j], h: hs[j], ink: { l: a, r: a + span } });
+      const a = path[j].a;
+      return { it, x: a - g.l, y: ys[j], s: px[j], w: measure(it, px[j]), h: hs[j], ink: { l: a, r: a + g.r - g.l } };
     });
-    return out;
   }
 
   // The hidden grid: fourteen columns across the live area, so on a spread
@@ -916,7 +951,9 @@ export async function createCoup(host, { embedded = false } = {}) {
               if (Math.abs((l + r) / 2 - W / 2) < 1) return "centre";
               return r <= W / 2 - col + 1 || l >= W / 2 + col - 1 ? "clear" : "near";
             });
-      report.push({ seed: baseSeed + k, hits, out, hidden: bodies.filter((b) => b.hidden).length, big, moved, fold });
+      // each capital's left ink, so the stride of the diagonal can be read in columns
+      const inkL = bodies.filter((b) => b.tier === 0).map((b) => b.x + ink(b.lines[0], b.ts).l);
+      report.push({ seed: baseSeed + k, hits, out, hidden: bodies.filter((b) => b.hidden).length, big, moved, fold, inkL, col });
     }
     window.__coupAudit = report;
   }
