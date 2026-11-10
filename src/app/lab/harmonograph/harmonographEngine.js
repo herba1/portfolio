@@ -12,9 +12,9 @@ import { createNib } from "./penAudio";
 // and the arm swings from where you dropped it; take the paper and throw it,
 // and the table circles. Lifting the nib starts a new figure, and the old one
 // is pulled into the sheet as an impression in a spot ink, the next of a
-// small fixed set each time, overprinted and a hair out of register, so the
-// sheet builds up as a riso or letterpress print with the pen's near-black
-// key always on top. The pen lifts itself once the swing has wound in, so
+// small fixed set each time: a broad, flat mark of ink, not a second pen
+// line, overprinted and a hair out of register, so the sheet builds up as a
+// riso or letterpress print with the pen's near-black key always on top. The pen lifts itself once the swing has wound in, so
 // the centre of every figure stays open.
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
@@ -111,6 +111,50 @@ function makePaperTexture(wPx, hPx, seed = 7) {
   }
   g.putImageData(img, 0, 0);
   return c;
+}
+
+// The ink film's own unevenness, as a density multiplier per device pixel:
+// a slow mottle across the sheet (the drum or the block never inks quite
+// flat), a finer one, tooth, and the odd pinhole where the paper didn't take
+// the ink. Made once per sheet size and shared by every plate.
+let grainCache = null;
+function inkGrain(n, seed = 31) {
+  if (grainCache && grainCache.n === n) return grainCache.g;
+  let s = seed >>> 0;
+  const rnd = () => {
+    s = (s + 0x6d2b79f5) >>> 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const field = (cells) => {
+    const v = new Float32Array((cells + 1) * (cells + 1)).map(() => rnd());
+    return (x, y) => {
+      const fx = (x / n) * cells;
+      const fy = (y / n) * cells;
+      const ix = fx | 0;
+      const iy = fy | 0;
+      let tx = fx - ix;
+      let ty = fy - iy;
+      tx = tx * tx * (3 - 2 * tx);
+      ty = ty * ty * (3 - 2 * ty);
+      const o = iy * (cells + 1) + ix;
+      return (v[o] * (1 - tx) + v[o + 1] * tx) * (1 - ty) + (v[o + cells + 1] * (1 - tx) + v[o + cells + 2] * tx) * ty;
+    };
+  };
+  const slow = field(5);
+  const mid = field(40);
+  const g = new Float32Array(n * n);
+  for (let y = 0; y < n; y++) {
+    for (let x = 0; x < n; x++) {
+      let v = 0.8 + 0.16 * slow(x, y) + 0.08 * mid(x, y) + (rnd() - 0.5) * 0.12;
+      if (rnd() < 0.0025) v *= 0.35;
+      g[y * n + x] = Math.min(1, v);
+    }
+  }
+  grainCache = { n, g };
+  return g;
 }
 
 // The pen lifts when the swing has wound in to this share of the reach, and
@@ -222,7 +266,7 @@ export async function createHarmonograph(host) {
   let dpr = 2;
   let paperTex = null;
   // The sheet in layers: the impressions already pulled, baked into the
-  // paper; the figure now being pulled (its key, and the same line in its
+  // paper; the figure now being pulled (its key, and its impression in
   // spot ink); and the live key on its own canvas. The printed sheet is
   // composed only while a figure is being pulled; a steady frame is the pen
   // inking the key.
@@ -322,21 +366,9 @@ export async function createHarmonograph(host) {
   };
   const inks = () => [curCtx];
 
-  // The key of a finished figure, as a plate in spot ink. The plate is a
-  // ground, not a second figure: the figure is fully determined by the
-  // pendulums, so its path is replayed and engraved as one even hairline,
-  // PLATE device px wide whatever the pen's pace, with butt ends. It is
-  // stroked as a single path, so where the line crosses itself it never
-  // doubles into a bead.
-  const PLATE = 0.7; // device px
-  const tint = () => {
-    wipe(spotCtx);
-    spotCtx.strokeStyle = `rgb(${pulling.rgb.join(",")})`;
-    spotCtx.lineWidth = PLATE;
-    spotCtx.lineCap = "butt";
-    spotCtx.lineJoin = "round";
-    spotCtx.beginPath();
-    const k = side * dpr;
+  // The finished figure as one path, at k device px to the sheet's side.
+  const plotPath = (k) => {
+    const path = new Path2D();
     let down = false;
     for (let i = 0; i < prevPath.length; i += 2) {
       const x = prevPath[i];
@@ -344,11 +376,84 @@ export async function createHarmonograph(host) {
         down = false;
         continue;
       }
-      if (down) spotCtx.lineTo(x * k, prevPath[i + 1] * k);
-      else spotCtx.moveTo(x * k, prevPath[i + 1] * k);
+      if (down) path.lineTo(x * k, prevPath[i + 1] * k);
+      else path.moveTo(x * k, prevPath[i + 1] * k);
       down = true;
     }
-    spotCtx.stroke();
+    return path;
+  };
+
+  // The key of a finished figure, as a plate in spot ink. The plate is not
+  // a second pen: it is ink coverage, the kind of mark a riso drum or an
+  // inked block leaves. The figure is fully determined by the pendulums, so
+  // its path is replayed as one broad, flat stroke, several times the key's
+  // width, and then inked: the film is a little uneven across the sheet
+  // (formation, mottle and the odd pinhole), it lays heavier where the loops
+  // crowd into a solid, and it squashes out past the stroke there as a faint
+  // halo into the paper between the turns. Multiplied under the key, the
+  // black line sits on it as a fine engraved line over a field of colour.
+  const PLATE = 2.4; // CSS px, the impression's width (the key is 0.45-1.8)
+  const tint = () => {
+    const n = spot.width;
+    // Coverage: the stroke at full strength, one path so its crossings never
+    // double up.
+    const mask = layer(n, n);
+    const mc = mask.getContext("2d", { willReadFrequently: true });
+    mc.strokeStyle = "#000";
+    mc.lineWidth = PLATE * dpr;
+    mc.lineCap = "round";
+    mc.lineJoin = "round";
+    const path = plotPath(side * dpr);
+    mc.stroke(path);
+    // The squash: the press pushes the ink out to the edge of the mark, so
+    // its rim prints a shade heavier than its middle. The middle is the same
+    // path at half the width.
+    const core = layer(n, n);
+    const cc = core.getContext("2d", { willReadFrequently: true });
+    cc.strokeStyle = "#000";
+    cc.lineWidth = PLATE * 0.5 * dpr;
+    cc.lineCap = "round";
+    cc.lineJoin = "round";
+    cc.stroke(path);
+    // Crowding: the coverage averaged over a few millimetres, by stepping it
+    // down and back up (a soft blur that needs no canvas filter).
+    const s1 = Math.max(1, Math.round(n / 4));
+    const s2 = Math.max(1, Math.round(n / 14));
+    const a = layer(s1, s1);
+    const b = layer(s2, s2);
+    const blur = layer(n, n);
+    for (const c of [a, b, blur]) {
+      const g = c.getContext("2d", { willReadFrequently: true });
+      g.imageSmoothingEnabled = true;
+      g.imageSmoothingQuality = "high";
+    }
+    a.getContext("2d").drawImage(mask, 0, 0, s1, s1);
+    b.getContext("2d").drawImage(a, 0, 0, s2, s2);
+    blur.getContext("2d").drawImage(b, 0, 0, n, n);
+    const M = mc.getImageData(0, 0, n, n).data;
+    const C = cc.getImageData(0, 0, n, n).data;
+    const B = blur.getContext("2d").getImageData(0, 0, n, n).data;
+    const out = spotCtx.createImageData(n, n);
+    const d = out.data;
+    const [r, g, bl] = pulling.rgb;
+    const grain = inkGrain(n);
+    for (let i = 0, p = 0; p < n * n; i += 4, p++) {
+      const m = M[i + 3] / 255;
+      const crowd = B[i + 3] / 255;
+      const heavy = crowd < 0.3 ? 0 : crowd > 0.85 ? 1 : (crowd - 0.3) / 0.55;
+      // Flat ink, a touch lighter in open loops and full in the solids; the
+      // halo only where the turns crowd, and only into the paper.
+      const rim = Math.max(0, m - C[i + 3] / 255);
+      const film = m * (0.78 + 0.2 * heavy) + rim * 0.14;
+      const halo = (1 - m) * 0.3 * heavy * heavy;
+      const al = Math.min(1, (film + halo) * grain[p]);
+      d[i] = r;
+      d[i + 1] = g;
+      d[i + 2] = bl;
+      d[i + 3] = al * 255;
+    }
+    spotCtx.setTransform(1, 0, 0, 1, 0, 0);
+    spotCtx.putImageData(out, 0, 0);
   };
 
   // The impression goes into the sheet for good, overprinting whatever was
@@ -417,6 +522,7 @@ export async function createHarmonograph(host) {
     shownOff = "";
     dirtyAll = true;
     paperTex = makePaperTexture(n, n);
+    inkGrain(n); // made now, so the first pull doesn't wait on it
     const ink = { prevInk, curInk, settleT };
     clearSheet();
     if (keep) {
