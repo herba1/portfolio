@@ -11,10 +11,14 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // sheet above it along the way it was pulled, so the strip it shows always
 // crosses the fount's bands: a sheet pulled down the bed shows its head above
 // the next, one pulled across shows the edge it came in by, top to bottom.
-// The stock is trimmed to the forme, head and sides equal and the foot a
-// little heavier, and the pile is shingled on one constant step, the head
-// margin and a third of the cap height, so every proof shows the same strip
-// and the drift reads sheet against sheet. Each sheet lies a hair skew.
+// The word is set big, tight to the stock as poster shops set wood type: it
+// runs nine tenths of the sheet's width, head and sides equal, and the sheet
+// stands about four fifths of the frame tall with the foot running on below.
+// The pile is squared by hand, not by machine: each proof shows its head
+// margin and about a third of the cap height above the next, give or take a
+// fifth, and lies half a degree to a degree and a half off true, so the
+// strips never line up like rows. The frame holds the fresh proof and a
+// couple of strips of the run; the older ones run off the top of the frame.
 //
 // The cylinder inks, it does not reveal: right behind the nip the ink arrives
 // starved and salted and builds to full over a short ramp, the nip line
@@ -30,13 +34,23 @@ const WORD = "PROOF";
 
 // Proofs of the run kept in view under the bed.
 const RUN = 4;
-// The margins, as a share of the cap height: head and sides equal, the
-// foot heavier by the classic 1 : 1 : 1.4.
-const MARGIN = 0.24;
+// The word's share of the sheet's width; head and sides take what is left,
+// equal, and the foot is at least this much heavier than the head.
+const WORD_SHARE = 0.9;
 const FOOT = 1.4;
-// The shingle's step: each proof shows its head margin and this share of
-// the cap height above the next, the same on every sheet of the run.
+// The sheet's height as a share of the frame's, and its cap: never more foot
+// than this share of the cap height, so a tall frame does not leave a long
+// empty tail of stock under the word.
+const SHEET_H = 0.8;
+const FOOT_MAX = 0.8;
+// The shingle's step: each proof shows its head margin and about this share
+// of the cap height above the next, give or take STEP_VAR as a hand squares
+// the pile.
 const STEP = 1 / 3;
+const STEP_VAR = 0.2;
+// Strips of the run held in the frame beside the fresh proof; the rest run
+// off its edge.
+const FRAME = 2.5;
 // The ramp behind the nip over which the ink builds to full, css px.
 const RAMP = 22;
 // How long a pulled proof takes to settle into the run, ms.
@@ -300,14 +314,15 @@ function measureForme(family, size) {
   };
 }
 
-// The job at a given type size: the stock trimmed to the forme, its margins
-// and the shingle's step, all whole css px, the step on the 4px grid.
-function jobAt(family, size) {
+// The job at a given type size in a frame frameH tall: the sheet, its
+// margins and the shingle's mean step, all whole css px.
+function jobAt(family, size, frameH) {
   const f = measureForme(family, size);
-  const margin = Math.round(f.capH * MARGIN);
+  const margin = Math.round((f.inkW * (1 / WORD_SHARE - 1)) / 2);
   const hw = Math.round((f.inkW + 2 * margin) / 2);
-  const hh = Math.round((margin * (1 + FOOT) + f.capH) / 2);
-  const step = Math.max(4, Math.round((margin + f.capH * STEP) / 4) * 4);
+  const tall = clamp(frameH * SHEET_H, margin * (1 + FOOT) + f.capH, margin + f.capH * (1 + FOOT_MAX));
+  const hh = Math.round(tall / 2);
+  const step = margin + f.capH * STEP;
   return { size, f, margin, half: [hw, hh], step };
 }
 
@@ -460,37 +475,40 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
   let C = [0, 0];
   let half = [1, 1];
   let word = [0, 0, 1, 1];
-  // Type's reach in from the sheet's left and right edges, and the shingle's
-  // constant step.
+  // Type's reach in from the sheet's left and right edges, the shingle's
+  // mean step and the head margin.
   let reach = [0, 0];
   let step = 64;
+  let margin = 16;
 
   // Press state. The run holds the proofs already pulled, newest first; each
   // eases from the bed into its place on the pile.
   const dirFrom = (deg) => [Math.cos((deg * Math.PI) / 180), Math.sin((deg * Math.PI) / 180)];
   const start = Number.isFinite(qn) && qn > 0 ? qn : 4;
   const cur = { n: start, dir: dirFrom(Number.isFinite(qa) ? qa : 90), passing: false };
-  // Each proof lands turned a hair, 0.15 to 0.45 degrees one way or the
-  // other, a little more when it was pulled from off centre: enough to read
-  // as sheets laid by hand, never so much that the strips stop measuring even.
+  // Each proof lands turned 0.5 to 1.5 degrees one way or the other, a
+  // little more when it was pulled from off centre, as sheets laid by hand.
   const landing = (n, spin) => {
-    const turn = ((0.15 + 0.3 * rnd(n * 7.1)) * (rnd(n * 2.9) < 0.5 ? -1 : 1) * Math.PI) / 180;
-    return { rot: clamp(turn + spin * 0.1, -0.0105, 0.0105) };
+    const turn = ((0.5 + rnd(n * 7.1)) * (rnd(n * 2.9) < 0.5 ? -1 : 1) * Math.PI) / 180;
+    return { rot: clamp(turn + spin * 0.1, -0.03, 0.03) };
   };
+  // Proof n's own step, squared by hand: the mean step give or take a fifth,
+  // whole px.
+  const stepOf = (n) => Math.max(4, Math.round(step * (1 + STEP_VAR * (2 * rnd(n * 8.3 + 1.7) - 1))));
   // Which way a proof slides off the one above it: along the way it was
   // pulled, so its exposed strip runs across the fount's bands. Pulled down
   // or up the bed it shows its head, where the type is set; pulled across, it
   // shows the side it came in by.
   const sideOf = (d) => (Math.abs(d[1]) >= Math.abs(d[0]) ? [0, -1] : [d[0] > 0 ? -1 : 1, 0]);
-  // Its offset from the sheet above: the run's one constant step along that
-  // side, with a little drift along the edge as a hand squares a pile.
+  // Its offset from the sheet above: its own step along that side, with a
+  // little drift along the edge as a hand squares a pile.
   const shingleOf = (e) => {
     const [sx, sy] = sideOf(e.dir);
-    let gap = step;
+    let gap = stepOf(e.n);
     // Shown sideways, the strip is measured from the first full stem in
     // from that edge, so the F's arms never stand in for the whole fount.
     if (sx !== 0) gap += Math.max(0, reach[sx > 0 ? 1 : 0] - reach[0]);
-    const j = (rnd(e.n * 5.3) - 0.5) * step * 0.1;
+    const j = (rnd(e.n * 5.3) - 0.5) * step * 0.16;
     return [sx * gap - sy * j, sy * gap + sx * j];
   };
   // Each entry eases from where it lay when the last proof was pulled
@@ -567,19 +585,15 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
     dirty = true;
   });
 
-  // The right edge's extra reach past the left's, as a share of the sheet's
-  // width, from the last forme set; a guess before the first.
-  let overR = 0.1;
   stage.onResize((w, h, dpr) => {
-    // The stock is trimmed to the forme, so the type size sets the sheet and
-    // the step. Find the largest size at which the bed and the run's strips
-    // make one block that fits whichever way the run was pulled: shingled up
-    // the frame, or out to either side with the right edge's extra reach.
+    // The type size sets the sheet's width and the step. Find the largest
+    // size at which the sheet fits the frame's width, and a pile pulled down
+    // the bed still shows a couple of strips above the fresh proof's word and
+    // the start of its foot below.
     const fits = (size) => {
-      const j = jobAt(family, size);
-      const sw = j.half[0] * 2;
-      const shh = j.half[1] * 2;
-      return shh + RUN * j.step <= h * 0.88 && sw + RUN * (j.step + overR * sw) <= w * 0.92;
+      const j = jobAt(family, size, h);
+      const head = j.margin * (2 + FOOT) + j.f.capH;
+      return j.half[0] * 2 <= w * 0.92 && head + 1.8 * j.step <= h * 0.98;
     };
     let lo = 12;
     let hi = Math.max(lo, Math.min(w, h));
@@ -588,13 +602,13 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
       if (fits(mid)) lo = mid;
       else hi = mid;
     }
-    const job = jobAt(family, lo);
+    const job = jobAt(family, lo, h);
     half = job.half;
     step = job.step;
+    margin = job.margin;
     const f = setForme(family, job, dpr);
     word = f.word;
     reach = f.reach;
-    overR = Math.max(0, reach[1] - reach[0]) / (half[0] * 2);
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, f.W, f.H, 0, gl.RGBA, gl.UNSIGNED_BYTE, f.out);
@@ -648,19 +662,33 @@ export async function createSplitFount(host, { family = "sans-serif" } = {}) {
     dirty = false;
 
     const { width: w, height: h, dpr } = stage;
-    // The front sheet and the strips of the run show as one block, centred
-    // in the frame; it settles with the pile as each proof goes onto it.
+    // Frame the fresh proof with the first FRAME strips of the run as one
+    // block, centred; older proofs run off the frame's edge. Where the block
+    // is bigger than the frame it bleeds off both ends, but never so far that
+    // the fresh proof's word, its side margins and the start of its foot
+    // leave the frame. It settles with the pile as each proof goes onto it.
     let x0 = -half[0];
     let x1 = half[0];
     let y0 = -half[1];
     let y1 = half[1];
-    for (const e of run) {
-      x0 = Math.min(x0, e.x - half[0]);
-      x1 = Math.max(x1, e.x + half[0]);
-      y0 = Math.min(y0, e.y - half[1]);
-      y1 = Math.max(y1, e.y + half[1]);
+    let px = 0;
+    let py = 0;
+    for (let i = 0; i < run.length && i < FRAME; i++) {
+      const e = run[i];
+      const k = Math.min(1, FRAME - i);
+      const x = px + (e.x - px) * k;
+      const y = py + (e.y - py) * k;
+      x0 = Math.min(x0, x - half[0]);
+      x1 = Math.max(x1, x + half[0]);
+      y0 = Math.min(y0, y - half[1]);
+      y1 = Math.max(y1, y + half[1]);
+      px = e.x;
+      py = e.y;
     }
-    C = [Math.round((w / 2 - (x0 + x1) / 2) * dpr) / dpr, Math.round((h / 2 - (y0 + y1) / 2) * dpr) / dpr];
+    const place = (S, lo, hi, wl, wr, tail) => Math.min(Math.max((S - lo - hi) / 2, tail - wl), S - tail - wr);
+    const cx = place(w, x0, x1, -word[2], word[2], margin + 12);
+    const cy = place(h, y0, y1, word[1] - word[3], word[1] + word[3], margin * FOOT);
+    C = [Math.round(cx * dpr) / dpr, Math.round(cy * dpr) / dpr];
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.useProgram(prog);
     gl.bindVertexArray(vao);
