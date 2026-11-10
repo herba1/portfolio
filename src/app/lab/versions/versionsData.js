@@ -214,26 +214,22 @@ function edits(ops) {
 // margin), so the edits are set until the line is full and no further. Cut
 // only at a word: a long phrase keeps its first words and an ellipsis, and
 // edits that no longer fit are left as a closing "…" after the last slash.
-// The budget is in characters of the grotesk at the meta rung, at most LINE
-// on the front card's 376px measure. Spine type does not shrink with its
-// sheet, so a save deep in the stack has only the measure its receding
-// sheet leaves, at about CH px a character: each save is budgeted for the
-// deepest place it sits, its depth when the current note is in front. CSS
-// still ellipsises if a guess runs over.
+// The budget is in characters of the grotesk at the meta rung, LINE on the
+// front card's 376px measure. Spine type recedes with its sheet, so every
+// save keeps the whole measure at whatever depth it sits. CSS still
+// ellipsises if a guess runs over.
 const LINE = 50;
-const MEASURE = 376;
-const CH = 6.5;
 // The stack's depth, shared with versionsEngine.js: perspective and the
-// depth between saves, and so how much a sheet at depth d is scaled.
+// depth between saves, so a sheet twelve saves back is set at about half
+// size.
 export const PERSP = 1000;
-export const DZ = 40;
-const scaleAt = (d) => PERSP / (PERSP + d * DZ);
+export const DZ = 70;
 // A shortened phrase never ends on a word that leans on the next one.
 const WEAK = new Set(["a", "an", "the", "i", "it", "is", "at", "in", "of", "to", "and", "for", "so"]);
 const SEP = 2; // a spaced slash or arrow, in characters
 const len = (e) => (e.cut ?? "").length + (e.from != null ? e.from.length + SEP : 0) + (e.to ?? "").length;
-function fit(list, depth) {
-  let room = Math.min(LINE, Math.floor((MEASURE * scaleAt(depth)) / CH));
+function fit(list) {
+  let room = LINE;
   const out = [];
   for (const e of list) {
     const need = len(e) + (out.length ? SEP : 0);
@@ -272,7 +268,7 @@ export const VERSIONS = DRAFTS.map((d, k) => {
     when: WHEN[DRAFTS.length - 1 - k],
     title: runs(tag(title)),
     body: runs(tag(body)),
-    change: fit(prev ? [...edits(title), ...edits(body)] : [{ to: d.title }], DRAFTS.length - 1 - k),
+    change: fit(prev ? [...edits(title), ...edits(body)] : [{ to: d.title }]),
   };
 }).reverse();
 

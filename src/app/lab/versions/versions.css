@@ -1,6 +1,6 @@
 .versions {
-  --versions-ground: #f2f0eb;
-  --versions-paper: #fcfbf8;
+  --versions-ground: #efede7;
+  --versions-paper: #fefdfa;
   --versions-ink: var(--color-ink);
   --versions-line: rgb(26 24 20 / 0.16);
   /* The sheet's single hairline edge. */
@@ -89,13 +89,15 @@
   width: 440px;
   margin-left: -220px;
   padding: 16px 32px 28px;
-  /* A galley sheet, not an app card: square to within a hair, one ruled
-     edge, no cast shadow. Depth comes from the perspective alone. */
+  /* A galley sheet, not an app card: square to within a hair, no cast
+     shadow. Depth comes from the perspective alone. */
   border-radius: 2px;
-  /* Depth haze tints the paper only, toward the ground, so the sheets
-     separate by tone while every spine's type stays at full ink. */
+  /* Haze is fog on the sheet: with distance the paper closes over into the
+     ground, so the sheets separate by tone while every spine's type stays
+     at full ink. Only the sheet you are reading carries a ruled edge (--rim
+     is 1 at the front and 0 a save back). */
   background: color-mix(in srgb, var(--versions-ground) calc(var(--fog, 0) * 100%), var(--versions-paper));
-  box-shadow: 0 0 0 1px var(--versions-edge);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--versions-edge) calc(var(--rim, 1) * 100%), transparent);
   transform-origin: 50% 0;
   backface-visibility: hidden;
 }
@@ -110,16 +112,16 @@
   /* The rule is drawn inside the padding so the head stays on the grid,
      as a one-pixel background strip: an inset shadow leaves faint seams at
      the box's sides once the card is in perspective. */
-  background: linear-gradient(var(--versions-line), var(--versions-line)) 0 100% / 100% 1px no-repeat;
+  --versions-head-rule: color-mix(in srgb, var(--versions-line) calc(var(--rim, 1) * 100%), transparent);
+  background: linear-gradient(var(--versions-head-rule), var(--versions-head-rule)) 0 100% / 100% 1px no-repeat;
 }
 
 /* One line tall, holding two: the title above, the change below. --front
    rolls them through the window, so a card coming forward turns its spine
    over to the title the way a counter turns a digit. Clipped, never faded. */
-/* The label is the one part of a card that does not take its depth: the
-   engine projects its place and cancels the card's scale on it, so every
-   spine is set at the same size on the same left axis while the paper
-   recedes behind it. */
+/* The label takes its card's depth like everything else on the sheet: a
+   spine further back is set smaller because it is further away. The engine
+   only lifts it into the lip of paper that shows. */
 .versions-label {
   height: 20px;
   overflow: hidden;
@@ -295,9 +297,10 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* A leader drawn from the rule back to the end of its spine's line, through
-   the middle of the lower case, so change, leader and date read as one row.
-   The current save's is inked; the rest are the sheets' own hairline. */
+/* A leader drawn from the rule back to its own sheet's edge, through the
+   middle of the lower case, so change, leader and date read as one row and
+   no leader ever crosses paper. The current save's is inked; the rest are
+   the sheets' own hairline. */
 .versions-tick::before {
   content: "";
   position: absolute;

@@ -9,17 +9,18 @@ import { createTicks } from "./tick";
 
 const LAST = COUNT - 1;
 // Depth and lift together set how much of each older save shows above the
-// one in front of it. A shallow DZ keeps every card near full size and a
-// tall DY lifts it clear, so each save shows its whole head line (title and
-// time) like a spine in a crate. The perspective origin is placed so the
-// stack would converge REACH px above the front card's top edge: the lips
-// then run from about 45px at the front to 22px at the back, which still
-// clears the head line of a card shrunk to two thirds.
+// one in front of it. Each save sits DZ px further back in real depth, so
+// its sheet and the type on its spine shrink together toward the vanishing
+// point, to about half size at the back, and DY lifts it clear of the one in
+// front. The perspective origin is placed six saves up the stack, so the
+// tops converge on it from below and above alike: the lips run from about
+// 53px at the front to 17px at the back, and stay over 30px at the sheet's
+// own scale, which clears the spine's 20px line at every depth.
 // PERSP (px, the scene's perspective) and DZ (px of depth between saves)
-// live in versionsData.js, which budgets each spine's line by its depth.
-const DY = 32; // px each save sits higher, before perspective
+// live in versionsData.js.
+const DY = 40; // px each save sits higher, before perspective
 const TOP = 336; // px from the scene's head to the front card's top edge
-const REACH = 1170;
+const REACH = 811;
 const ORIGIN = TOP + (DY * PERSP) / DZ - REACH;
 const SCENE = 640; // px, the scene's own height
 const CARD_L = 100; // px, the front card's left edge in the scene
@@ -37,7 +38,8 @@ const GUTTER = 28;
 const RULE = CARD_R + GUTTER;
 const TICK = 8; // px, a tick's reach back from the rule
 const GAP = 8; // px, from the rule to the date
-const LEAD = 12; // px, from the end of a spine's line to its leader
+// Haze: how many saves deep the paper is two thirds of the way to the ground.
+const HAZE = 4;
 const DRAG_PX = 150; // px of drag per version, at fit 1
 const WHEEL_PX = 110; // px of wheel delta per version
 const PROJECT = 0.22; // s of flick velocity carried into the landing
@@ -99,11 +101,6 @@ export function createVersions(root, { embedded = false } = {}) {
   // of a date from the top of its own line.
   let titleBase = 31;
   let dateBase = 15;
-  // Where the label's own line box starts in a card, and the natural width
-  // of each card's title and change line, in px at the meta rung.
-  let labelTop = 16;
-  let titleW = cards.map(() => 0);
-  let changeW = cards.map(() => 0);
   let shiftX = 0;
   let raf = 0;
   let lastT = 0;
@@ -114,6 +111,7 @@ export function createVersions(root, { embedded = false } = {}) {
   if (held != null && Math.abs(p - Math.round(p)) < INK_LEAVE) ink[Math.round(p)] = 1;
   const born = performance.now();
   const labels = cards.map((c) => c.querySelector(".versions-label"));
+  const whens = ticks.map((t) => t.querySelector(".versions-when"));
 
   space.style.perspective = `${PERSP}px`;
   space.style.perspectiveOrigin = `${AXIS}px ${ORIGIN}px`;
@@ -144,17 +142,13 @@ export function createVersions(root, { embedded = false } = {}) {
     };
     const head = cards[0];
     titleBase = base(head.querySelector(".versions-title .versions-base"));
-    labelTop = base(labels[0]);
     dateBase = base(ticks[0].querySelector(".versions-base"));
-    // The leader runs through the middle of the lower case, so it meets the
-    // date and the line it joins rather than underlining them.
-    space.style.setProperty("--versions-tick-at", `${dateBase - 4}px`);
+    whens.forEach((w) => {
+      w.style.transformOrigin = `0 ${dateBase}px`;
+    });
     labels.forEach((l) => {
       l.style.width = `${MEASURE}px`;
-      l.style.transformOrigin = `0 ${titleBase - labelTop}px`;
     });
-    titleW = labels.map((l) => l.querySelector(".versions-title").scrollWidth);
-    changeW = labels.map((l) => l.querySelector(".versions-change").scrollWidth);
     // The front sheet and its margin are one block: centre that, so the
     // sheet itself sits left of the axis and the dates hang to its right.
     const wide = Math.max(...ticks.map((t) => t.querySelector(".versions-when").offsetWidth));
@@ -200,14 +194,19 @@ export function createVersions(root, { embedded = false } = {}) {
       let x = 0;
       let blur;
       let fog;
+      let rim;
       let alpha;
       if (d >= 0) {
         z = -d * DZ * s;
         y = -d * DY * s;
-        // Saves behind stay sharp: the haze only tints their paper toward
-        // the ground (see .versions-card), never the type on it.
+        // Saves behind stay sharp: the haze is fog on the sheet, closing
+        // the paper over into the ground with distance (see
+        // .versions-card), never on the type, which keeps full ink. Only
+        // the sheet you are reading has a ruled edge; it lifts as the sheet
+        // steps back, and the paper alone says where an older one lies.
         blur = 0;
-        fog = Math.min(0.36, Math.pow(d, 1.15) * 0.026) * s;
+        fog = (1 - Math.exp(-d / HAZE)) * s;
+        rim = 1 - smooth(0, 0.6, d * s);
         alpha = 1;
       } else {
         const k = -d;
@@ -222,34 +221,39 @@ export function createVersions(root, { embedded = false } = {}) {
         x = ((SCENE / 2 - AXIS) * -z) / PERSP;
         blur = k * 16;
         fog = 0;
+        rim = 1;
         alpha = (1 - Math.min(1, k / 0.38)) ** 2;
       }
       c.style.transform = `translate3d(${x.toFixed(2)}px, ${y.toFixed(2)}px, ${z.toFixed(2)}px)`;
       const front = d <= 0 ? 1 : 1 - smooth(0.08, 0.5, d);
-      // The paper recedes; the type on its spine does not. Only the
-      // label's place is projected: the card's scale is cancelled on the
-      // label itself, so every spine is set at the meta rung, hung from the
-      // one axis, and given the measure its sheet has left at that depth.
-      // A card flying off past the eye keeps its scale, title and all.
+      // The sheet and the type on its spine recede together: a save further
+      // back is set smaller because it is further away, on the one left
+      // axis the stack converges on. sc is the card's scale at its depth.
       const sc = PERSP / (PERSP - z);
-      const kc = d >= 0 ? sc : 1;
       const edge = ORIGIN + (TOP + y - ORIGIN) * sc;
       // The baseline: the title's on the front sheet; deeper in, where the
-      // lip of paper showing is shorter than the head, the line is set in
-      // the lip, never down into the sheet in front.
+      // lip of paper showing is shorter than the head, the line is lifted
+      // into the lip, never down into the sheet in front.
       let off = titleBase * sc;
-      if (d >= 1) off = clamp(lift(d - 1, s) - lift(d, s) - 6, 15, off);
-      labels[i].style.width = `${(MEASURE * kc).toFixed(2)}px`;
-      labels[i].style.transform = `translate3d(0, ${((off - titleBase * sc) / sc).toFixed(2)}px, 0) scale(${(1 / kc).toFixed(4)})`;
-      // The date rides its spine, on the same baseline, and leaves with it.
+      if (d >= 1) off = clamp(lift(d - 1, s) - lift(d, s) - 6 * sc, 16 * sc, off);
+      labels[i].style.transform = `translate3d(0, ${((off - titleBase * sc) / sc).toFixed(2)}px, 0)`;
+      // The date rides its spine, on the same baseline and at the same size,
+      // so a row is one line from spine to margin, and leaves with it. The
+      // rule itself stays upright in the flat plane.
       const at = edge + off;
+      const kd = Math.min(1, sc);
       ticks[i].style.visibility = "visible";
       ticks[i].style.transform = `translate3d(0, ${(at - dateBase).toFixed(2)}px, 0)`;
+      whens[i].style.transform = kd < 0.999 ? `scale(${kd.toFixed(4)})` : "none";
+      // The leader runs through the middle of the lower case, so it meets
+      // the date and the line it joins rather than underlining them.
+      ticks[i].style.setProperty("--versions-tick-at", `${(dateBase - 4 * kd).toFixed(2)}px`);
       ticks[i].style.opacity = alpha.toFixed(3);
-      // A leader from the end of the spine's line out to the rule: the
-      // change and its date read as one row, like a contents page.
-      const wide = Math.min(MEASURE * kc, titleW[i] * front + changeW[i] * (1 - front));
-      const end = AXIS + (x + wide / kc) * sc + LEAD;
+      // A leader from the sheet's own edge out to the rule, on the spine's
+      // line: the change and its date read as one row, like a contents page.
+      // It starts where its paper ends, so it never runs over a sheet,
+      // its own or another, and the margin stands clear of the stack.
+      const end = AXIS + (x + CARD_R - AXIS) * sc;
       // The rule runs the stack's full height, from the oldest sheet still
       // behind to the foot of the front one, wherever perspective has it.
       if (foot == null && d >= 0) foot = edge + heights[i] * sc;
@@ -258,6 +262,7 @@ export function createVersions(root, { embedded = false } = {}) {
       c.style.opacity = alpha.toFixed(3);
       c.style.zIndex = String(1000 - Math.round(d * 40));
       c.style.setProperty("--fog", fog.toFixed(3));
+      c.style.setProperty("--rim", rim.toFixed(3));
       // 1 on the front card (its head carries the title), 0 on every save
       // behind it (its head names what that save changed).
       c.style.setProperty("--front", front.toFixed(3));
