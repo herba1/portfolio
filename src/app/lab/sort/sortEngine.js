@@ -35,18 +35,20 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_LIFT, F_GLINT, demoMask, 
 // The wave is geometry, not sort direction, and it is never bent: after
 // herb's reference 2 the curl is a staircase of straight strips. The verge's
 // bands are sorted in place and are the root; every band row above them is a
-// layer of the stack, and each shows one verge band's sorted run lifted to
-// it, a hard-edged horizontal rectangle stepped right by a smooth function of
-// its height (sortCore's stackLeft). The stack leans over as it climbs, the
-// crest runs on to the right and a lip of shorter strips hangs from its end,
-// so the hook's silhouette is only the staircase of the strips' ends. Strips
-// are as long as their runs (hundreds of px, stretched at most 3x), so the
-// stack's right side is combed by the run lengths, and poles and signs stand
-// in front of it (a holdout from the depth map and the photo).
+// layer of the stack, cut into its own rows (mostly hairlines, now and then a
+// chunky block, sortCore's ROWS). Each row is an opaque, hard-edged strip
+// from the stack's inner edge, stepped right by a smooth function of its
+// height (sortCore's stackLeft), to its outer edge, tiled end to end from the
+// sorted runs of several verge bands until it is full: a woven sheet, no sky
+// between rows. The stack leans over as it climbs, the crest runs on to the
+// right and a lip hangs from its end, and the hook's silhouette is where the
+// solid mass ends. Poles and signs stand in front of it (a holdout from the
+// depth map and the photo).
 //
-// Each strip is its run's luminance ramp, root to tail, lit by the sort
+// Each row is one luminance ramp, inner edge to outer edge, lit by the sort
 // order: its facing (low under the lean, high at the crest) picks the
-// stretch of the run it reads. Low strips read only the dark green heads; the
+// stretch of the runs it reads, and each tile rides that ramp with a short
+// ramp of its own, so its seams stay hard. Low rows read only the dark green heads; the
 // crest reads out to the run's tail, whose brightest pixels go white-gold,
 // and glint tiles break off the crest's strip ends. A run's few grey, beige
 // or blue pixels (road, wall, sky) are graded onto the green ramp by their
@@ -120,8 +122,8 @@ precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
 uniform usampler2D uGeo;    // in place, per (x, band): source x + 1 (0 = not sorted here), source band
-uniform usampler2D uStripe; // per band, per strip: (x0, x1, source band + 1, q0 | q1 << 4 | flags << 8) and (run x0, run x1, facing, vegetation share)
-uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band; row 2: top row of each band
+uniform usampler2D uStripe; // per grid row, per tile: (x0, x1, source band + 1, flags), (run x0, run x1, facing, vegetation share), (row x0, row x1, tile ramp depth, 0)
+uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
 uniform usampler2D uHold;   // 255 where a pole or a sign stands in front of the stack
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
 uniform sampler2D uClean;   // the photo developed at grid size without grain, for the strips
@@ -147,28 +149,30 @@ void main() {
   float f = 0.0;
   float pr = 0.0;
   int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
-  int q = g.y - int(texelFetch(uBand, ivec2(band, 2), 0).r);
   bool held = texelFetch(uHold, g, 0).r > 0u;
   for (int k = 0; k < ${PARTS}; k++) {
-    uvec4 a = texelFetch(uStripe, ivec2(band, 2 * k), 0);
+    uvec4 a = texelFetch(uStripe, ivec2(g.y, 3 * k), 0);
     if (a.b == 0u) break;
-    int q0 = int(a.a & 15u);
-    int q1 = int((a.a >> 4u) & 15u);
-    uint fl = a.a >> 8u;
-    if (q < q0 || q >= q1 || g.x < int(a.r) || g.x >= int(a.g)) continue;
+    uint fl = a.a;
+    if (g.x < int(a.r) || g.x >= int(a.g)) continue;
     // A pole or a sign stands in front of the stack.
     if ((fl & ${F_LIFT}u) != 0u && held) continue;
-    uvec4 b = texelFetch(uStripe, ivec2(band, 2 * k + 1), 0);
+    uvec4 b = texelFetch(uStripe, ivec2(g.y, 3 * k + 1), 0);
+    uvec4 c = texelFetch(uStripe, ivec2(g.y, 3 * k + 2), 0);
     f = float(b.b) / 65535.0;
     float vf = clamp(float(b.a) / 65535.0, 0.35, 1.0);
     glint = (fl & ${F_GLINT}u) != 0u;
-    // The strip is its run's ramp, head to tail, stretched over its length.
-    // Its facing picks the stretch it reads: low and tucked, the dark green
-    // head; at the crest, on out past the grass into the brightest tail.
-    float sf = (float(g.x - int(a.r)) + 0.5) / float(a.g - a.r);
+    // The row is one ramp, inner edge to outer edge, tiled from several
+    // runs end to end. Its facing picks the stretch it reads: low and tucked,
+    // the dark green heads; at the crest, on out past the grass into the
+    // brightest tails. Each tile rides that ramp with a short ramp of its
+    // own (depth w), so it reads as its own sorted block with a hard seam.
+    float sr = (float(g.x - int(c.r)) + 0.5) / float(c.g - c.r);
+    float st = (float(g.x - int(a.r)) + 0.5) / float(a.g - a.r);
+    float w = float(c.b) / 65535.0;
     float lo = 0.42 * pow(f, 1.6) * vf;
     float hi = mix(0.62 * vf, vf, smoothstep(0.0, 0.6, f)) + (1.0 - vf) * smoothstep(0.62, 1.0, f);
-    pr = glint ? 0.985 + 0.015 * sf : mix(lo, hi, sf);
+    pr = glint ? 0.985 + 0.015 * st : mix(lo, hi, sr) * (1.0 - w * (1.0 - st));
     float len = float(b.g - b.r);
     src = ivec2(int(b.r) + int(clamp(pr, 0.0, 1.0) * (len - 1.0)), int(a.b) - 1);
     lifted = true;
@@ -277,7 +281,7 @@ export async function createSort(host, { embedded = false } = {}) {
   // The spans the mask opens, and the wave's slabs, rebuilt as the mask moves.
   const bm = new Uint8Array(DW * DH);
   const link = new Uint8Array(DW * DH);
-  const wave = { geo: new Uint16Array(DW * DH * 2), table: new Uint16Array(DH * 2 * PARTS * 4) };
+  const wave = { geo: new Uint16Array(DW * DH * 2), table: new Uint16Array(GH * 3 * PARTS * 4) };
   const rebuildCpu = () => {
     const plan = liftPlan(mask8);
     liftMask(mask8, plan, bm);
@@ -286,10 +290,9 @@ export async function createSort(host, { embedded = false } = {}) {
   };
   rebuildCpu();
   const state = qMask === "none" ? restSort(base, new Uint8Array(DW * DH)) : restSort(base, link);
-  const bandRows = new Uint16Array(GH * 3);
+  const bandRows = new Uint16Array(GH * 2);
   bandRows.set(BANDS.of, 0);
   bandRows.set(BANDS.c, GH);
-  bandRows.set(BANDS.y0, GH * 2);
 
   // ---- GL resources
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 1);
@@ -306,8 +309,8 @@ export async function createSort(host, { embedded = false } = {}) {
   const keyTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, base.key);
   const linkTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, DW, DH, link);
   const geoTex = tex(gl.RG16UI, gl.RG_INTEGER, gl.UNSIGNED_SHORT, DW, DH, wave.geo);
-  const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, DH, 2 * PARTS, wave.table);
-  const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 3, bandRows);
+  const stripeTex = tex(gl.RGBA16UI, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, GH, 3 * PARTS, wave.table);
+  const bandTex = tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, GH, 2, bandRows);
   const holdTex = tex(gl.R8UI, gl.RED_INTEGER, gl.UNSIGNED_BYTE, GW, GH, base.hold);
   const uploadCpu = () => {
     gl.bindTexture(gl.TEXTURE_2D, linkTex);
@@ -315,7 +318,7 @@ export async function createSort(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, geoTex);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DW, DH, gl.RG_INTEGER, gl.UNSIGNED_SHORT, wave.geo);
     gl.bindTexture(gl.TEXTURE_2D, stripeTex);
-    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DH, 2 * PARTS, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, wave.table);
+    gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, GH, 3 * PARTS, gl.RGBA_INTEGER, gl.UNSIGNED_SHORT, wave.table);
   };
   const stateTex = [0, 1].map(() => tex(gl.R16UI, gl.RED_INTEGER, gl.UNSIGNED_SHORT, DW, DH, state));
   const stateFbo = stateTex.map((t) => {

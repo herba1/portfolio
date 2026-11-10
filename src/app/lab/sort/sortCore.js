@@ -17,6 +17,7 @@ export const LO0 = 0.5;
 export const LO1 = 0.0;
 export const HI = 1.0;
 export const HOLD_DEPTH = 44; // nearer than this (0..255), and not grass or sky, stands in front of the stack
+export const HOLD_TALL = 34; // a holdout must run this many grid rows unbroken
 export const JUMP = 16; // a depth step this large between neighbours breaks a span
 export const EDGE = 18; // depth step (0..255 over 4 layout px) that marks a silhouette
 export const REACH = 760 * S; // a band's reach at m = 1, before the clamp below
@@ -122,7 +123,6 @@ export const LIP_W = 400; // its width at the crest, tapering to a point
 export const LIP_TOP = 160; // the outer edge rounds in by this over the shoulder...
 export const LIP_IN = 320; // ...and curls back in by this to the tip
 export const HOLLOW = 70; // room left between the face and the lip
-export const STRETCH_MAX = 3; // a run is never drawn longer than this times itself
 export const stackT = (y) => (VERGE_TOP - y) / (VERGE_TOP - CREST);
 export const stackLeft = (t) => X_ROOT + LEAN * Math.max(0, t) ** LEAN_POW;
 // The lip's span on row y: its outer edge rounds over the shoulder and
@@ -139,6 +139,32 @@ export function lipSpan(y) {
 // Mask level a layer at height t needs before it lifts: the stack climbs as
 // the brush works.
 export const liftAt = (t) => WAVE_ON + (0.97 - WAVE_ON) * clamp(t, 0, 1);
+
+// The stack's rows. The stack is not cut on the sort's bands: from the crest
+// down to the verge it is cut into its own rows, mostly thin (3-11 grid px,
+// 2-9 device px at DPR 2) with an occasional thick one (14-29 grid px, up to
+// 24 device px), each height from a hash, so the sheet mixes hairlines with
+// chunky blocks the way reference 2 does. Rows abut: no sky between them.
+export const ROW_MIN = 3;
+export const ROW_MAX = 29;
+export const ROWS = (() => {
+  const y0 = [];
+  const h = [];
+  let y = CREST;
+  let thickLast = false;
+  for (let j = 0; y < VERGE_TOP; j++) {
+    const u = hash(j, 173);
+    const thick = !thickLast && hash(j, 179) < 0.13;
+    let hh = thick ? 14 + Math.floor(u * (ROW_MAX - 14 + 1)) : ROW_MIN + Math.floor(u ** 2.2 * 9);
+    // No sliver at the foot: the last row takes what is left.
+    if (VERGE_TOP - y - hh < ROW_MIN) hh = VERGE_TOP - y;
+    y0.push(y);
+    h.push(hh);
+    y += hh;
+    thickLast = thick;
+  }
+  return { n: y0.length, y0: Uint16Array.from(y0), h: Uint8Array.from(h) };
+})();
 
 // The mask at grid point (x, y), bilinear between cell centres.
 export function maskAt(mask8, x, y) {
@@ -338,7 +364,39 @@ export function bake(photoPx, depthPx) {
     pass(b, a, false, true);
     pass(a, b, true, false);
     pass(b, hold, false, false);
-    for (let p = 0; p < GW * GH; p++) hold[p] *= 255;
+    // Only what stands tall holds out: a pole, a sign or a cabinet runs
+    // unbroken down many rows, a clump of dry leaves in a tree does not, and
+    // would punch specks of photo through the sheet. Each holdout region is
+    // kept whole (a lamp's thin bracket with it) if any of it stands tall.
+    const keep = a; // reused: 255 = kept
+    keep.fill(0);
+    const stack = [];
+    for (let x = 0; x < GW; x++) {
+      let y = 0;
+      while (y < GH) {
+        if (!hold[y * GW + x]) {
+          y++;
+          continue;
+        }
+        const y0 = y;
+        while (y < GH && hold[y * GW + x]) y++;
+        if (y - y0 >= HOLD_TALL && !keep[y0 * GW + x]) {
+          keep[y0 * GW + x] = 255;
+          stack.push(y0 * GW + x);
+        }
+      }
+    }
+    while (stack.length) {
+      const p = stack.pop();
+      const x = p % GW;
+      const nb = [x > 0 ? p - 1 : -1, x < GW - 1 ? p + 1 : -1, p - GW, p + GW];
+      for (const q of nb) {
+        if (q < 0 || q >= GW * GH || keep[q] || !hold[q]) continue;
+        keep[q] = 255;
+        stack.push(q);
+      }
+    }
+    hold.set(keep);
   }
   return { lum16, key: key16, depth, reachQ, veg, hold };
 }
@@ -420,20 +478,19 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // The wave is made by moving whole sorted rows, never by bending the sort.
 // The verge's bands are sorted in place (each long run slid a hashed way to
 // the right where it has been lifted, so the photo shows where its pixels
-// left). Every band row above the verge is a layer of the stack, and a lifted
-// layer shows one verge band's run, read from its dark green head to its
-// brightest tail, as a straight strip at the layer's own rows: left end at
-// stackLeft(t), length following the run's (stretched by at most
-// STRETCH_MAX), so the right side of the stack is combed by the run lengths.
-// Over the top a lip of strips hangs from the crest's end, tapering to a
-// point, a hollow of the photo between it and the face.
+// left). Above the verge the stack is cut into ROWS, and a lifted row is an
+// opaque straight strip from stackLeft(t) to its outer edge, tiled end to
+// end from the sorted runs of several verge bands, each read from its dark
+// green head towards its brightest tail: a woven sheet whose silhouette is
+// where the solid mass ends. Over the top a lip hangs from the crest's end,
+// tapering to a point, a hollow of the photo between it and the face.
 //
-// The stack is lit by its own sort order: each strip carries a facing (0
+// The stack is lit by its own sort order: each row carries a facing (0
 // tucked low under the lean, 1 at the crest turned to the sky), and the
-// facing picks which stretch of its run the strip reads. Low strips read the
-// dark green heads; the crest reads out to the run's tail, whose brightest
+// facing picks which stretch of its runs the row reads. Low rows read the
+// dark green heads; the crest reads out to the runs' tails, whose brightest
 // pixels the shader pushes to white-gold, and a few glint tiles break off
-// the crest's strip ends.
+// the crest's ends.
 export const WAVE_ON = 0.12; // mask level where the verge sorts in place and the stack's foot lifts
 export const RUN_MIN = 120; // shorter verge runs are never lifted
 export const SHOW_MIN = 72; // shorter runs stay photo, not sorted in place: no mosaic of stubs
@@ -441,12 +498,13 @@ export const GLINT_PEAK = 0.5; // a run whose brightest pixel is this bright can
 export const GLINTS = 16; // glint tiles at most
 // A layer's run is chosen among its source band's runs left of here.
 const SRC_X1 = ROOT_X1 + 240;
-// Each band holds up to PARTS strips, two RGBA16UI texels each, in a texture
-// DH wide and 2 x PARTS tall: (x0, x1, source band + 1, q0 | q1 << 4 | flags
-// << 8) for the strip's span and its rows within the band, and (run x0, run
-// x1, facing x 65535, vegetation share of the run x 65535). The first strip
-// that holds a pixel draws it, so glints and the lip are written first.
-export const PARTS = 8;
+// Each grid row holds up to PARTS tiles, three RGBA16UI texels each, in a
+// texture GH wide and 3 x PARTS tall: (x0, x1, source band + 1, flags) for
+// the tile's span, (run x0, run x1, facing x 65535, vegetation share of the
+// run x 65535), and (row x0, row x1, tile ramp depth x 65535, 0) for the
+// whole row the tile is part of. The first tile that holds a pixel draws it,
+// so glints and the lip are written first.
+export const PARTS = 12;
 export const F_LIFT = 1; // a lifted strip: held out behind poles, lit by its facing
 export const F_GLINT = 2; // a glint tile: the run's brightest pixel, white-gold
 // A verge run in place slides right by up to this much of itself where it
@@ -474,49 +532,50 @@ export function liftPlan(mask8) {
   const nv = verge.length;
   const layers = [];
   let i = 0;
-  for (let d = DH - 1; d >= 0; d--) {
-    const c = B.c[d] + 0.5;
-    if (c >= VERGE_TOP || c < CREST) continue;
+  for (let r = ROWS.n - 1; r >= 0; r--) {
+    const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const t = stackT(c);
-    const xl = stackLeft(t) + (hash(d, 31) - 0.5) * 28;
+    const xl = stackLeft(t) + (hash(r, 31) - 0.5) * 20;
     const reach = LEN0 + LEN1 * t;
     const m = Math.max(root, maskAt(mask8, xl + 0.35 * reach, c));
-    // Bottom to top the layers walk the verge in a scrambled order, so no two
-    // neighbours show the same band.
-    const src = verge[(i * 7 + Math.floor(i / nv)) % nv];
-    const L = { d, t, xl, m, on: m >= liftAt(t), src, lip: null };
+    // Bottom to top the rows walk the verge in a scrambled order, so no two
+    // neighbours start on the same band.
+    const src = (i * 7 + Math.floor(i / nv)) % nv;
+    const L = { r, t, xl, m, on: m >= liftAt(t), src, lip: null };
     const lip = lipSpan(c);
     if (lip) {
       const ml = Math.max(root, maskAt(mask8, lip[0], c));
-      if (ml >= liftAt(1)) L.lip = { xa: lip[0], xb: lip[1], s: lip[2], m: ml, src: verge[(i * 11 + 5) % nv] };
+      if (ml >= liftAt(1)) L.lip = { xa: lip[0], xb: lip[1], s: lip[2], m: ml, src: (i * 11 + 5) % nv };
     }
     layers.push(L);
     i++;
   }
-  return { root, layers };
+  return { root, layers, verge };
 }
 
 // The mask read once per band texel, as bandMask, raised on every verge band
-// a layer lifts from: the sort runs there whether or not the brush has
-// touched the verge itself.
+// once any row lifts: a row is tiled from runs of several verge bands, so the
+// sort runs on all of them whether or not the brush has touched the verge
+// itself. (Sorting a band shows nothing in place unless the mask is there.)
 export function liftMask(mask8, plan, out = new Uint8Array(DW * DH)) {
   bandMask(mask8, out);
+  let m = 0;
   for (const L of plan.layers) {
-    const lift = [];
-    if (L.on) lift.push([L.src, L.m]);
-    if (L.lip) lift.push([L.lip.src, L.lip.m]);
-    for (const [d, m] of lift) {
-      const v = Math.round(m * 255);
-      const row = d * DW;
-      for (let x = 0; x < SRC_X1; x++) if (out[row + x] < v) out[row + x] = v;
-    }
+    if (L.on) m = Math.max(m, L.m);
+    if (L.lip) m = Math.max(m, L.lip.m);
+  }
+  if (m <= 0) return out;
+  const v = Math.round(m * 255);
+  for (const d of plan.verge) {
+    const row = d * DW;
+    for (let x = 0; x < SRC_X1; x++) if (out[row + x] < v) out[row + x] = v;
   }
   return out;
 }
 
 export function geometry(mask8, base, link, plan, out = {}) {
   const geo = out.geo || new Uint16Array(DW * DH * 2);
-  const table = out.table || new Uint16Array(DH * 2 * PARTS * 4);
+  const table = out.table || new Uint16Array(GH * 3 * PARTS * 4);
   geo.fill(0);
   table.fill(0);
   const B = BANDS;
@@ -525,8 +584,8 @@ export function geometry(mask8, base, link, plan, out = {}) {
   for (let n = 0; n < r.length; n += 3) byBand[r[n]].push([r[n + 1], r[n + 2]]);
   const lifted = new Uint8Array(DH);
   for (const L of plan.layers) {
-    if (L.on) lifted[L.src] = 1;
-    if (L.lip) lifted[L.lip.src] = 1;
+    if (L.on) lifted[plan.verge[L.src]] = 1;
+    if (L.lip) lifted[plan.verge[L.lip.src]] = 1;
   }
 
   // In place: every long run under the mask, slid right where it was lifted.
@@ -560,17 +619,17 @@ export function geometry(mask8, base, link, plan, out = {}) {
     }
     return pool.get(d);
   };
-  // The run a layer shows: one of its source's two longest (by hash), or a
-  // neighbouring verge band's when its own has none.
-  const pick = (d, salt) => {
-    for (let k = 0; k < 10; k++) {
-      for (const dd of k ? [d - k, d + k] : [d]) {
-        if (dd < 0 || dd >= DH || B.c[dd] < VERGE_TOP || B.c[dd] > VERGE_BOT) continue;
-        const c = runsOf(dd);
-        if (!c.length) continue;
-        const [x0, x1] = c[c.length > 1 && hash(dd, salt) > 0.62 ? 1 : 0];
-        return { d: dd, x0, x1, vf: vegOf(dd, x0, x1) };
-      }
+  // A run for a tile: one of a verge band's two longest (by hash), or the
+  // next verge band's when it has none.
+  const verge = plan.verge;
+  const nv = verge.length;
+  const pick = (vi, salt) => {
+    for (let k = 0; k < nv; k++) {
+      const dd = verge[(vi + k) % nv];
+      const c = runsOf(dd);
+      if (!c.length) continue;
+      const [x0, x1] = c[c.length > 1 && hash(dd, salt) > 0.62 ? 1 : 0];
+      return { d: dd, x0, x1, vf: vegOf(dd, x0, x1) };
     }
     return null;
   };
@@ -581,88 +640,114 @@ export function geometry(mask8, base, link, plan, out = {}) {
     return p / 65535;
   };
 
-  const parts = new Uint8Array(DH);
-  const put = (d, x0, x1, q0, q1, flags, run, f) => {
-    if (parts[d] >= PARTS) return;
-    const a = Math.max(0, Math.round(x0));
-    const b = Math.min(GW, Math.round(x1));
-    if (b - a < 2 || q1 <= q0) return;
-    const o = (d + parts[d] * 2 * DH) * 4;
-    table[o] = a;
-    table[o + 1] = b;
-    table[o + 2] = run.d + 1;
-    table[o + 3] = q0 | (q1 << 4) | (flags << 8);
-    table[o + DH * 4] = run.x0;
-    table[o + DH * 4 + 1] = run.x1;
-    table[o + DH * 4 + 2] = Math.round(clamp(f, 0, 1) * 65535);
-    table[o + DH * 4 + 3] = Math.round(clamp(run.vf, 0, 1) * 65535);
-    parts[d]++;
+  // A tile on stack row r, written down every grid row the stack row covers.
+  const parts = new Uint8Array(ROWS.n);
+  const put = (r, x0, x1, flags, run, f, rx0, rx1, w) => {
+    if (parts[r] >= PARTS) return;
+    const a = clamp(Math.round(x0), 0, GW);
+    const b = clamp(Math.round(x1), 0, GW);
+    if (b - a < 2) return;
+    const k = parts[r]++;
+    const ra = clamp(Math.round(rx0), 0, GW);
+    const rb = Math.max(ra + 1, clamp(Math.round(rx1), 0, GW));
+    for (let y = ROWS.y0[r]; y < ROWS.y0[r] + ROWS.h[r]; y++) {
+      const o = (3 * k * GH + y) * 4;
+      const o1 = o + GH * 4;
+      const o2 = o + GH * 8;
+      table[o] = a;
+      table[o + 1] = b;
+      table[o + 2] = run.d + 1;
+      table[o + 3] = flags;
+      table[o1] = run.x0;
+      table[o1 + 1] = run.x1;
+      table[o1 + 2] = Math.round(clamp(f, 0, 1) * 65535);
+      table[o1 + 3] = Math.round(clamp(run.vf, 0, 1) * 65535);
+      table[o2] = ra;
+      table[o2 + 1] = rb;
+      table[o2 + 2] = Math.round(clamp(w, 0, 1) * 65535);
+    }
   };
 
-  // The strips, collected first so glints and the lip can be written ahead
+  // Tiling: a row of the sheet runs solid from its inner edge xa to its outer
+  // edge xb. One verge band's sorted run seldom spans that, so further runs,
+  // from verge bands further round the scrambled walk, are laid end to end
+  // along the same row until it is full; the last tile always ends exactly at
+  // xb, so the silhouette is where the solid mass ends. Each tile is its own
+  // run, a hard-edged block, and reads a short ramp of it (depth w) riding on
+  // the row's one ramp, so the row still goes dark to bright from xa to xb.
+  const TILE_MAX = 6;
+  const tile = (r, xa, xb, vi, salt, f, list) => {
+    const out = [];
+    let x = xa;
+    for (let k = 0; k < TILE_MAX && x < xb - 0.5; k++) {
+      const run = pick((vi + k * 5) % nv, salt + k);
+      if (!run) break;
+      const len = run.x1 - run.x0;
+      let tl = clamp(len * (0.55 + 0.7 * hash(r * 13 + k, salt)), 70, 560);
+      if (xb - (x + tl) < 60 || k === TILE_MAX - 1) tl = xb - x;
+      out.push([x, x + tl, run]);
+      x += tl;
+    }
+    for (const [x0, x1, run] of out) {
+      const w = clamp((0.55 * (x1 - x0)) / Math.max(1, run.x1 - run.x0), 0.14, 0.5);
+      list.push([r, x0, x1, F_LIFT, run, f, xa, xb, w]);
+    }
+    return out;
+  };
+
+  // The tiles, collected first so glints and the lip can be written ahead
   // of the face they sit on.
   const face = [];
   const lips = [];
   const tails = [];
   for (const L of plan.layers) {
-    const { d, t } = L;
-    const h = B.h[d];
+    const { r, t } = L;
+    const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const lip = L.lip;
     if (L.on) {
-      const run = pick(L.src, 41);
-      if (run) {
-        const len = run.x1 - run.x0;
-        // The topmost layers the mask has only just lifted are shorter, so a
-        // stack that has not reached its crest tapers to a point rather than
-        // ending flat.
-        const grow = 0.25 + 0.75 * smooth(0, 0.16, L.m - liftAt(t));
-        const want = (LEN0 + LEN1 * t) * (0.55 + 0.45 * L.m) * (0.8 + 0.4 * hash(d, 43)) * grow;
-        let span = Math.min(len * STRETCH_MAX, Math.max(want, Math.min(len, want * 1.3)));
-        // Under the lip the face stops short of it: the hollow.
-        if (lip && lip.s > 0.12) span = Math.min(span, lip.xa - HOLLOW * smooth(0.12, 0.4, lip.s) - L.xl);
-        // A band 6 px or taller rises as two sub-strips, each its own length,
-        // and most layers leave a 1 px gap of the photo on top: the steps.
-        const cut = h >= 6 ? Math.round(h * (0.38 + 0.24 * hash(d, 81))) : h;
-        const top = hash(d, 85) < 0.3 + 0.55 * t ? 1 : 0;
-        const f = clamp(smooth(0.12, 1, t) ** 1.2 + (hash(d, 47) - 0.5) * 0.12, 0, 1);
-        const subs = cut < h ? [[top, cut], [cut, h]] : [[top, h]];
-        subs.forEach(([q0, q1], k) => {
-          const x0 = L.xl + (k ? (hash(d, 89) - 0.3) * 30 : 0);
-          const x1 = x0 + span * (k ? 0.84 + 0.2 * hash(d, 91) : 1);
-          if (x1 - x0 < 24) return;
-          face.push([d, x0, x1, q0, q1, F_LIFT, run, f]);
-          if (t > 0.78 && (!lip || lip.s > 0.12)) tails.push({ d, x1, q0, q1, run, f, y: B.y0[d] });
-        });
+      // The topmost rows the mask has only just lifted are shorter, so a
+      // stack that has not reached its crest tapers to a point rather than
+      // ending flat. The outer edge wanders smoothly with height, with only a
+      // small step from row to row: a solid mass, not a comb of tips.
+      const grow = 0.25 + 0.75 * smooth(0, 0.16, L.m - liftAt(t));
+      const wander = 0.9 + 0.2 * vnoise(c / (34 * S), 9.1) + (hash(r, 43) - 0.5) * 0.04;
+      let W = (LEN0 + LEN1 * t) * (0.55 + 0.45 * L.m) * wander * grow;
+      if (lip) {
+        // Under the lip the face stops short of it (the hollow); over the
+        // shoulder it runs on into it, so the crest is one sheet.
+        if (lip.s > 0.12) W = Math.min(W, lip.xa - HOLLOW * smooth(0.12, 0.4, lip.s) - L.xl);
+        else W = Math.max(W, lip.xa + 8 - L.xl);
+      }
+      if (W >= 24) {
+        const f = clamp(smooth(0.12, 1, t) ** 1.2 + (hash(r, 47) - 0.5) * 0.12, 0, 1);
+        const tl = tile(r, L.xl, L.xl + W, L.src, 41, f, face);
+        if (tl.length && t > 0.78 && (!lip || lip.s > 0.12)) tails.push({ r, x1: L.xl + W, run: tl[tl.length - 1][2], f, y: ROWS.y0[r], xa: L.xl, xb: L.xl + W });
       }
     }
     if (lip) {
-      const run = pick(lip.src, 53);
-      if (run) {
-        // The lip's shoulder is turned fully to the sky; it darkens as it
-        // hangs and turns under.
-        const f = 1 - 0.62 * lip.s ** 1.2;
-        const top = hash(d, 57) < 0.6 ? 1 : 0;
-        // Its ends are combed, a little more as it hangs.
-        const xb = lip.xb - hash(d, 67) * 40 * (0.3 + lip.s);
-        lips.push([d, lip.xa + (hash(d, 59) - 0.5) * 24 * (1 - lip.s), xb, top, h, F_LIFT, run, f]);
-        if (lip.s < 0.35) tails.push({ d, x1: lip.xb, q0: top, q1: h, run, f, y: B.y0[d] });
-      }
+      // The lip's shoulder is turned fully to the sky; it darkens as it
+      // hangs and turns under.
+      const f = 1 - 0.62 * lip.s ** 1.2;
+      const xa = lip.xa + (hash(r, 59) - 0.5) * 16 * (1 - lip.s);
+      const xb = lip.xb - hash(r, 67) * 10 * (0.3 + lip.s);
+      const tl = tile(r, xa, xb, lip.src, 53, f, lips);
+      if (tl.length && lip.s < 0.35) tails.push({ r, x1: xb, run: tl[tl.length - 1][2], f, y: ROWS.y0[r], xa, xb });
     }
   }
 
   // Glints: a handful of bright tails where the facing peaks, spaced apart.
   // Each is the strip's own brightest pixel broken off past its end, after a
-  // short gap, as tall as the strip.
+  // short gap, as tall as the row.
   const glint = [];
-  tails.sort((p, q) => q.f - p.f + (hash(q.d, 61) - hash(p.d, 61)) * 0.3);
+  tails.sort((p, q) => q.f - p.f + (hash(q.r, 61) - hash(p.r, 61)) * 0.3);
   for (const g of tails) {
     if (glint.length >= GLINTS) break;
     if (peakOf(g.run) < GLINT_PEAK) continue;
     if (glint.some((o) => Math.abs(o.x - g.x1) < 60 && Math.abs(o.y - g.y) < 16)) continue;
-    const gap = 4 + Math.round(hash(g.d, 63) * 10);
-    const w = 12 + Math.round(hash(g.d, 65) * 30);
+    const gap = 4 + Math.round(hash(g.r, 63) * 10);
+    const w = 12 + Math.round(hash(g.r, 65) * 30);
     glint.push({ x: g.x1, y: g.y });
-    put(g.d, g.x1 + gap, g.x1 + gap + w, g.q0, g.q1, F_LIFT | F_GLINT, g.run, 1);
+    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0);
   }
   for (const p of lips) put(...p);
   for (const p of face) put(...p);
