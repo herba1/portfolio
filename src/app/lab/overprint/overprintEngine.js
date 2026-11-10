@@ -67,7 +67,7 @@ uniform int uI;
 uniform vec4 uRect;   // atlas uv rect
 uniform vec4 uBody;   // cx, cy (track frame), height, aspect
 uniform vec4 uMove;   // signed speed, stretch, lean, band length
-uniform vec4 uLift;   // elevation, track x where the rules stop, calm (0 leads, 1 hairline), unused
+uniform vec4 uLift;   // elevation, track x where the rules stop, calm (0 leads, 1 hairline), track x of the figure
 uniform vec3 uInk;    // linear transmittance at full density
 uniform float uSeed;
 out vec4 o;
@@ -150,8 +150,9 @@ void main(){
         // A plate that is not leading the race rules only a hairline.
         hw = mix(hw, min(hw, max(0.9, h * 0.0032)), uLift.z);
         float dv = hw - abs(qy - (lo + hi) * 0.5) * h;
-        // Square off at the edge of what this plate has printed.
-        float dh = min(min(behind - gap, len - behind), (tp.x - uLift.y) * dir);
+        // Square off at the edge of what this plate has printed, and never
+        // past the figure itself: a rule only ever runs out behind it.
+        float dh = min(min(behind - gap, len - behind), min((tp.x - uLift.y) * dir, (uLift.w - tp.x) * dir));
         if (hw * uDpr > 0.6) cov = max(cov, clamp(min(dv, dh) * uDpr + 0.5, 0.0, 1.0));
       }
     }
@@ -790,17 +791,21 @@ export async function createOverprint(host) {
       const pad = 4;
       const trail = nums[i].trail;
       // The run repeats every P, so the plate prints at every period that
-      // shows. Rules are what the plate has printed on this sheet: they reach
-      // back no further than where it was picked up, nor past the edge it
-      // came in over, nor into its own copy one period behind, so a plate
-      // never prints over itself.
+      // shows. Rules are what the plate has printed on this sheet since it
+      // last came in over the trailing edge, so only the impression at x
+      // (already lapped onto the sheet) carries them. Its copies are the same
+      // plate on its way out or on its way in: they print the figure and no
+      // rules, or the rules of the one leaving would run out ahead of the one
+      // coming in. The rules reach back no further than where it was picked
+      // up, nor past the trailing edge, nor into its own copy one period
+      // behind, so a plate never prints over itself.
       const reach = TW / 2 + halfW + L + pad;
       const k0 = Math.ceil((-reach - x) / P);
       const k1 = Math.floor((reach - x) / P);
       for (let k = k0; k <= k1; k++) {
         const cx = x + k * P;
         const own = P - halfW - h * 0.05;
-        const clip = v > 0 ? Math.max(-TW / 2, cx - trail, cx - own) : Math.min(TW / 2, cx + trail, cx + own);
+        const clip = k !== 0 ? cx : v > 0 ? Math.max(-TW / 2, cx - trail, cx - own) : Math.min(TW / 2, cx + trail, cx + own);
         const back = v > 0 ? clamp(cx - halfW - clip, 0, L) : 0;
         const front = v > 0 ? 0 : clamp(clip - (cx + halfW), 0, L);
         const x0 = cx - halfW - back - 4;
@@ -811,7 +816,7 @@ export async function createOverprint(host) {
         gl.uniform1i(U.uI, i);
         gl.uniform4fv(U.uRect, rect.subarray(o, o + 4));
         gl.uniform4fv(U.uMove, move.subarray(o, o + 4));
-        gl.uniform4f(U.uLift, e, clip, lift[o + 3], 0);
+        gl.uniform4f(U.uLift, e, clip, lift[o + 3], cx);
         gl.uniform3fv(U.uInk, ink.subarray(i * 3, i * 3 + 3));
         gl.uniform1f(U.uSeed, seeds[i]);
         gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
