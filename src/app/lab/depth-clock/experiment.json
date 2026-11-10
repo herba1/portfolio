@@ -27,7 +27,7 @@
       "file": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/kloofendal_48d_partly_cloudy_puresky_16k.hdr",
       "author": "Greg Zaal (sky edits: Jarod Guest)",
       "licence": "CC0",
-      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky) at 16k, reprojected through the conifers' own camera with the dome turned so its sun sits on theirs (elevation 20, past the frame's lower right corner) and spun -30 degrees about that axis, which sends a cloud behind the figures and up the well; clear blue matched to the conifers' cobalt, cloud held under its real light with a soft shoulder so nothing clips (bake_clouds.py, SPIN=-30 CLOUD=0.65 KNEE=0.3 LIMIT=0.8 SHADE=0.15)."
+      "note": "The cumulus. Kloofendal 48d Partly Cloudy (Pure Sky) at 16k, reprojected through the conifers' own camera with the dome turned so its sun sits on theirs (elevation 20, past the frame's lower right corner) and spun -10 degrees about that axis, which fills the well under the figures with its big sunlit cumulus, from the lower right up behind the 4 and the 1; clear blue matched to the conifers' cobalt, the cloud lit warm on its tops and skylight blue in its bellies, held just under its real light with a soft shoulder so nothing clips (bake_clouds.py, SPIN=-10 CLOUD=0.9 KNEE=0.5 LIMIT=0.92 SHADE=0.3 FORM=1.4)."
     }
   ]
 }
