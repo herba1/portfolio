@@ -28,8 +28,11 @@ import { takes } from "./shutterTakes";
 // lavender haze. So the integral is printed in OKLab: its lightness is kept,
 // the gaps between the streaks take their chroma and hue back from a baked
 // mean of the clear sky alone (sky.webp, tools/depth/bakes/shutter/sky.py;
-// it carries the zenith ramp), the streaks stay pale and neutral, and past
-// ~3 s the ND eases so a longer hold smooths the silk without flattening it.
+// it carries the zenith ramp), the gaps fall back to that sky's depth, the
+// streaks' crests are printed up toward a cloud's white, and past ~3 s the
+// ND eases so a longer hold smooths the silk without flattening it. Every
+// cloud, live or smeared, then takes its light back (cloudTone): a warm
+// sunlit side toward the sun, a skylight-blue shade turned away.
 //
 // Sharpness: the moving layers are low resolution (sky is smooth, and smeared
 // sky smoother). A still plate at full resolution (the mean of the whole loop)
@@ -66,8 +69,13 @@ const framesFor = (h, N) => N * Math.min(1, (60 * h + 20 * h * h) / 1200);
 // little, as a printer would print one: the meter falls, and the film's blue
 // deepening and (a little) saturation rise, so the cobalt between the
 // streaks reads as deep as in a short exposure.
-// k: 0 for a single frame, ~0.5 at a 2 s hold, ~0.9 for the whole loop.
-const longness = (T, N) => 1 - Math.exp(-T / (N * 0.3));
+// k: 0 for a single frame, ~0.4 at a 2 s hold, and capped at LONG_CAP
+// (reached near 3 s): past it the print stops getting longer. Printed further
+// down, the film's blue deepening turns the cobalt toward a pale cerulean and
+// the frame flattens, so a longer hold smooths the silk (gainFor) on the same
+// print instead of marbling it.
+const LONG_CAP = 0.6;
+const longness = (T, N) => Math.min(LONG_CAP, 1 - Math.exp(-T / (N * 0.3)));
 const METER_SHORT = -0.4;
 const METER_LONG = -0.75;
 
@@ -89,6 +97,14 @@ const keepFor = (T, N) => {
 const HOLD_CONTRAST = 3; // s
 const gainFor = (T, N) => Math.sqrt(Math.max(1, T / framesFor(HOLD_CONTRAST, N)));
 const MEAN_FRAC = 1 / 8; // the local mean's scale, a fraction of the plate's width
+const DEEP = 1; // the gaps' fall to the clear sky's depth, at full keep
+const CREST = 1; // the crests' rise toward a cloud's white, at full keep
+// The cloud's light (cloudTone): toward the sun is up and a little left in
+// the frame (the glint on the tower's lit face), one tap is 1.2% of the
+// plate's width; sunlit hue and chroma, and the shade's skylight chroma.
+const SUN = [-0.5, -0.866];
+const SUN_TAP = 0.012;
+const TONE = { k: 1, hue: (72 * Math.PI) / 180, warm: 0.03, shade: 0.05, edge: 0.06 };
 
 const LOOK = { ...FILM_DEFAULTS, ...FILM_PRESETS.summer, blueDepth: 0.4, halation: 0 };
 // The top end (FINISH_FS): the highlights above the knee are printed back up
@@ -199,8 +215,15 @@ uniform sampler2D uSky;    // sRGB time-mean of the clear sky alone
 uniform float uKeep;       // how much of the clear sky's colour comes back
 uniform float uGain;       // the eased ND: streak contrast held past ~3 s
 uniform vec2 uLodM;        // local-mean lods: live mean, blocks
+uniform float uDeep;       // how far the gaps between the streaks fall to the clear sky
+uniform float uCrest;      // how far the streaks' crests are printed up toward white
+uniform vec2 uSun;         // one tap toward the sun, in plate uv (y down)
+uniform vec2 uLodT;        // the tone's lightness lods: live mean, blocks
+uniform vec4 uTone;        // strength, sunlit hue (rad), sunlit chroma, shade chroma
+uniform float uEdge;       // the lightness step across the taps that reads as a whole edge
 out vec4 o;
 ${COMMON}
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 // The long exposure's colour. The integral averages cloud into sky, and
 // normalised by its length that is a pale lavender haze with no zenith ramp.
 // But between the streaks the sky was the same cobalt at every instant, so
@@ -226,11 +249,68 @@ vec3 keepSky(vec3 sl, vec3 ml, vec2 iuv){
   float c = clamp((L - s.x) / span, 0.0, 1.0);
   float cm = clamp((Lm - s.x) / span, 0.0, 1.0);
   float w = clamp(c + (c - cm) * 1.75, 0.0, 1.0);
+  // The streaks' crests, where the cloud kept passing, are printed up
+  // toward a cloud's white and out of the haze's blue (a dodge, as the gaps
+  // below are a burn), so the silk still reads as cumulus dragged along the
+  // wind, not as a blue veil.
+  float crest = smoothstep(0.25, 0.8, w) * uCrest;
+  L = mix(L, 1.0, 0.85 * crest);
+  // Between the streaks the sky was the same clear cobalt whenever the
+  // cloud was elsewhere, so the gaps keep its depth, not the mean's lift.
+  L = mix(L, min(L, s.x), (1.0 - w) * uDeep);
   float Ci = length(p.yz);
   float Cs = length(s.yz);
-  float C = mix(max(Ci, Cs), Ci * 0.85, w);
+  float C = mix(mix(max(Ci, Cs), Ci * 0.85, w), 0.012, 0.8 * crest);
   vec2 ab = s.yz / max(Cs, 1e-4) * C;
   return max(fromLab(vec3(L, mix(p.yz, ab, uKeep))), 0.0);
+}
+// The cloud's light. A normalised integral averages each cloud into a pale
+// neutral streak, and the viewfinder's soft plate is not much better: grey
+// white with no side to it. Cumulus at noon is lit from above: the side that
+// faces the sun is a warm, sunlit white and the side turned away is lit only
+// by the blue sky round it, a skylight blue a little darker. A streak is a
+// cloud dragged along the wind, so its two edges are still those two sides.
+// Which side a pixel sits on is read from the light itself: three taps
+// toward the sun and three away, on a blurred level; where the sunward taps
+// are darker (sky) and the far ones lighter (cloud), the pixel is a sunlit
+// edge, and the reverse is the shade. The tower's own light is kept out of
+// the taps by the stillness matte.
+float srcL(vec2 iuv){
+  vec3 f = textureLod(uFrame, iuv, uLodT.x).rgb;
+  if (uFrameLin < 0.5) f = lin(f);
+  vec3 e = textureLod(uExp, vec2(iuv.x, 1.0 - iuv.y), uLodT.y).rgb;
+  return pow(max(dot(mix(f, e, uWB), LUMA), 0.0), 1.0 / 3.0);
+}
+vec3 cloudTone(vec3 sl, vec2 iuv){
+  vec3 p = toLab(sl);
+  vec3 s = toLab(lin(texture(uSky, iuv).rgb));
+  float c = clamp((p.x - s.x) / max(0.94 - s.x, 0.1), 0.0, 1.0);
+  if (c <= 0.0) return sl;
+  float g = 0.0;
+  float ws = 0.0;
+  for (int i = 1; i <= 3; i++) {
+    vec2 d = uSun * float(i);
+    float w = (1.0 - textureLod(uStill, iuv - d, 4.0).a) * (1.0 - textureLod(uStill, iuv + d, 4.0).a);
+    g += w * (srcL(iuv - d) - srcL(iuv + d));
+    ws += w;
+  }
+  g /= max(ws, 1e-3);
+  float top = smoothstep(0.0, uEdge, g);
+  float under = smoothstep(0.0, uEdge, -g);
+  // Sunlit is the cloud's bright body, most of all its sun-facing edge;
+  // warmth goes only into light that is already near neutral, so a blue
+  // streak never passes through green on its way to cream, and a mid-grey
+  // never turns khaki. The rest of the cloud, its flanks and the side turned
+  // away, is the shade: skylight blue, a little darker.
+  float bright = smoothstep(0.6, 0.92, c);
+  float Cp = length(p.yz);
+  float sun = bright * clamp(0.4 + 0.6 * top - 0.4 * under, 0.0, 1.0) * (1.0 - smoothstep(0.03, 0.07, Cp));
+  float shade = smoothstep(0.06, 0.4, c) * (1.0 - bright) * (0.45 + 0.55 * under);
+  vec2 sky = s.yz / max(length(s.yz), 1e-4);
+  vec2 ab = mix(p.yz, vec2(cos(uTone.y), sin(uTone.y)) * uTone.z, sun * uTone.x);
+  ab = mix(ab, sky * max(Cp, uTone.w), shade * uTone.x);
+  float L = p.x + (0.025 * sun - 0.04 * shade) * uTone.x;
+  return max(fromLab(vec3(L, ab)), 0.0);
 }
 void main(){
   vec2 uv = gl_FragCoord.xy / uSize * uCover.xy + uCover.zw;
@@ -243,6 +323,7 @@ void main(){
     vec3 ml = mix(textureLod(uFrame, iuv, uLodM.x).rgb, textureLod(uExp, uv, uLodM.y).rgb, uWB);
     sl = keepSky(sl, ml, iuv);
   }
+  if (uTone.x > 0.0) sl = cloudTone(sl, iuv);
   vec3 sky = enc(sl);
   vec4 s = textureLod(uStill, iuv, uLod.x);
   vec3 dF = s.rgb - textureLod(uStill, iuv, uLod.y).rgb;
@@ -311,7 +392,10 @@ void main(){
 
   // Sunlit cream on the near-whites.
   float wc = smoothstep(uKnee.x + 0.04, uKnee.y - 0.03, L) * neutral * mix(0.6, 1.0, m) * uCream.z;
-  vec2 ab = mix(p.yz, vec2(cos(uCream.x), sin(uCream.x)) * uCream.y, wc);
+  // A cloud's sunlit top already carries its own warmth (cloudTone): the
+  // cream never thins it.
+  vec2 cd = vec2(cos(uCream.x), sin(uCream.x));
+  vec2 ab = mix(p.yz, cd * max(uCream.y, dot(p.yz, cd)), wc);
 
   // Where the still is a sunlit white (cladding, the glint), and how much of
   // it the ring sees: the tower's edge against the sky, and the edge of the
@@ -668,7 +752,7 @@ export async function createShutter(host, { embedded = false } = {}) {
       expDirty = false;
     }
     const keep = shot.any && wB > 0 ? keepFor(T, N) : 0;
-    if (keep > 0 && !accMips) {
+    if (shot.any && !accMips) {
       gl.bindTexture(gl.TEXTURE_2D, acc[0].tex);
       gl.generateMipmap(gl.TEXTURE_2D);
       accMips = true;
@@ -692,6 +776,14 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1f(u.uKeep, keep);
     gl.uniform1f(u.uGain, keep > 0 ? gainFor(T, N) : 1);
     gl.uniform2f(u.uLodM, Math.log2(VW * MEAN_FRAC), Math.log2(BW * MEAN_FRAC));
+    gl.uniform1f(u.uDeep, DEEP * keep);
+    gl.uniform1f(u.uCrest, CREST * keep);
+    gl.uniform2f(u.uSun, SUN[0] * SUN_TAP, SUN[1] * SUN_TAP * (SW / SH));
+    gl.uniform2f(u.uLodT, 3, 2);
+    gl.uniform4f(u.uTone, TONE.k, TONE.hue, TONE.warm, TONE.shade);
+    // The integral's edges are softer the longer it runs; the crests and
+    // gaps are printed apart (keepSky), so its edges are read finer.
+    gl.uniform1f(u.uEdge, TONE.edge * (1 - 0.7 * keep));
     gl.uniform2f(u.uSize, comp.w, comp.h);
     gl.uniform4fv(u.uCover, cover);
     gl.uniform1f(u.uWB, wB);
