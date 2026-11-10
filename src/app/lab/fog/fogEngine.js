@@ -77,14 +77,57 @@ const CANYON = 0.82;
 const V_CLEAR = 50000; // visibility at fog 0, metres
 const V_THICK = 150; // visibility at fog 1
 // The hand moves log V so that what you see changes evenly along the drag. In a
-// frame whose far tower is 400 m off, the clear day's kilometres change little,
-// so log V runs fast at the front and slows toward the thick end: 50 km at 0,
-// ~1.3 km at 0.3 (the far towers half blue), ~350 m at 0.5 (they are cobalt
-// silhouettes, the low sky veiled), ~180 m at 0.7. Past that the visibility
-// barely moves; what the last stretch takes is the clear pocket around the
-// viewer (below), so the near towers go last.
-const V_CURVE = 2.8;
-const visibility = (f) => V_CLEAR * Math.pow(V_THICK / V_CLEAR, 1 - Math.pow(1 - f, V_CURVE));
+// frame whose far tower is 400 m off (~230 m of haze along its ray, the pocket
+// open), the clear day's kilometres change nothing, so the first tenth of the
+// drag spends them: 50 km at 0, 2 km at 0.1 (the far tower's air over a third
+// of its light), 1.1 km at 0.2 (past half blue), 600 m at 0.35 (four fifths
+// blue, the low sky starting to veil), 330 m at 0.5 (a cobalt silhouette that
+// keeps its floors), 230 m at 0.6.
+// Past that the visibility barely moves; what the last stretch takes is the
+// clear pocket around the viewer (below), so the near towers go last. Knots in
+// log V, joined by a monotone cubic (Fritsch-Carlson), so the rate never jumps.
+const V_KNOTS = [
+  [0, V_CLEAR],
+  [0.1, 2000],
+  [0.2, 1100],
+  [0.35, 600],
+  [0.5, 330],
+  [0.6, 234],
+  [0.8, 172],
+  [1, V_THICK],
+];
+const visibility = (() => {
+  const x = V_KNOTS.map((k) => k[0]);
+  const y = V_KNOTS.map((k) => Math.log(k[1]));
+  const n = x.length;
+  const s = x.slice(1).map((_, i) => (y[i + 1] - y[i]) / (x[i + 1] - x[i]));
+  const m = x.map((_, i) => (i === 0 ? s[0] : i === n - 1 ? s[n - 2] : s[i - 1] * s[i] <= 0 ? 0 : (s[i - 1] + s[i]) / 2));
+  for (let i = 0; i < n - 1; i++) {
+    if (s[i] === 0) {
+      m[i] = m[i + 1] = 0;
+      continue;
+    }
+    const a = m[i] / s[i];
+    const b = m[i + 1] / s[i];
+    const h = a * a + b * b;
+    if (h > 9) {
+      const t = 3 / Math.sqrt(h);
+      m[i] = t * a * s[i];
+      m[i + 1] = t * b * s[i];
+    }
+  }
+  return (f) => {
+    const v = clamp(f, 0, 1);
+    let i = 0;
+    while (i < n - 2 && v > x[i + 1]) i++;
+    const h = x[i + 1] - x[i];
+    const t = (v - x[i]) / h;
+    const t2 = t * t;
+    const t3 = t2 * t;
+    const ly = (2 * t3 - 3 * t2 + 1) * y[i] + (t3 - 2 * t2 + t) * h * m[i] + (-2 * t3 + 3 * t2) * y[i + 1] + (t3 - t2) * h * m[i + 1];
+    return Math.exp(ly);
+  };
+})();
 // The street is swept: the air in the canyon around the viewer is clearer, the
 // haze lying out along the street. Density rises from nothing at the eye to
 // full beyond about this distance (rho = s / (s + d0), so a ray to d crosses
@@ -100,13 +143,27 @@ const clearPocket = (f) => {
 const K_RGB = [0.82, 1.0, 1.24];
 const K_SKY = [1.04, 1.0, 0.98];
 const REST = 0.95; // arrival: a white-blue field of haze (~150 m, the pocket closed)
-const ROLL = 0.25; // it clears to here (~2 km: the far towers turning blue)
+const ROLL = 0.12; // it clears to here (~2.2 km: the far towers turning blue)
 const LEVELS = 6;
 // The sky's light at the scale of a cumulus' forms (a normalised blur of the
 // sky pixels, levels 3 and 4 of the pyramid, ~100-200 plate px): the plate minus
 // this is the cloud's local detail, which the veil keeps.
 const DETAIL_W = [0, 0, 0, 1];
 const DETAIL_K = 0.65;
+// A tower the haze takes keeps its build the same way: its floors and mullions
+// (the plate less a normalised blur of the tower pixels alone, at the scale of
+// its floors, ~30 plate px on the far tower) come back over the in-scatter at
+// the square root of the transmittance, never under a quarter, so at fog 0.6
+// the far tower is a sky-tinted version of itself, faint cobalt on cobalt,
+// not a flat slab. Tower-only, so no sky bleeds in as a rim at the silhouette.
+const FLOORS_LOD = 3; // 480 x 320, then one 13-tap step down to 240 x 160
+const FLOORS_POW = 0.5;
+const FLOORS_MIN = 0.32;
+// And it sits under what is behind it: the air light in front of a tower is
+// held under this share of the hazed sky's luminance next to its silhouette
+// (the cumulus' and the gaps' light at the scale of their forms, through the
+// sky's own air), so a tower in a cloud's shadow is darker than the shadow.
+const UNDER_SKY = 0.8;
 // The open blue under the clouds: the gaps' light alone, a normalised blur
 // at a cumulus' scale and wider (levels 3 and 4, ~50-100 plate px, and the
 // whole), so a cloud's cover can be read against the cobalt it is laid over.
@@ -253,9 +310,15 @@ uniform sampler2D uColor;
 uniform sampler2D uAux;
 uniform float uLod;
 uniform float uOpen; // 1: the open gaps between the clouds only
+uniform float uSolid; // 1: the towers' light instead, for their floors' blur
 void main() {
   vec3 c = textureLod(uColor, vUv, uLod).rgb;
   float m = textureLod(uAux, vUv, 0.0).g;
+  if (uSolid > 0.5) {
+    m = 1.0 - smoothstep(0.0, 0.5, m);
+    outColor = vec4(c * m, m);
+    return;
+  }
   m = smoothstep(0.5, 1.0, m);
   // Open blue: clearly bluer than it is red, in linear light (a cumulus is
   // near-neutral, and its thin margins sit in between).
@@ -315,7 +378,8 @@ uniform sampler2D uColor;
 uniform sampler2D uAir;
 uniform sampler2D uDetail; // the sky's light at the scale of the cumulus' forms
 uniform sampler2D uGap;    // the open gaps' light alone, filled in under the clouds
-uniform vec4 uRect;     // print rect in device px (x, y, w, h), y from top
+uniform sampler2D uFloors; // the towers' light alone at the scale of their floors
+uniform vec4 uRect;    // print rect in device px (x, y, w, h), y from top
 uniform vec2 uCanvas;
 uniform vec3 uSkyMean;  // display-encoded, the fallback where the blur saw no sky
 uniform vec3 uSkyLow;   // display-encoded: the open sky low over the street (~20 deg)
@@ -455,14 +519,40 @@ void main() {
   // air's light is held off them (the near glass stays inked; a far tower,
   // its transmittance gone, still fades whole into the haze).
   float deep = (1.0 - smoothstep(0.0, ${SHADOW_LIN.toFixed(3)}, luma(scene))) * Tt.g;
-  vec3 tower = scene * Tt + (open + sunTower) * (1.0 - Tt) * (1.0 - ${SHADOW_K.toFixed(2)} * deep);
+  vec4 dtl = texture(uDetail, uv);
+  vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
+  // The tower's air sits under the sky beside it: what the sky next to the
+  // silhouette shows after its own air (its light at the scale of the
+  // cumulus' forms, veiled by the sky's column at this elevation), and the
+  // tower's in-scatter held under a share of that, so a far tower the haze
+  // has taken is a darker silhouette even against a cloud's shaded side.
+  // The cumulus there as the composite lays them out (on their long ramp,
+  // darker in the shade than the plate's narrow range), not as the plate has them.
+  float Yf = max(luma(forms), 1e-4);
+  float rf = clamp(log(Yf / ${CLOUD_Y[0].toFixed(3)}) / ${Math.log(CLOUD_Y[1] / CLOUD_Y[0]).toFixed(4)}, 0.0, 1.0);
+  float yf = pow(${CLOUD_RAMP[0].toFixed(3)} + ${CLOUD_RAMP[1].toFixed(3)} * pow(rf, ${CLOUD_RAMP[2].toFixed(2)}), 2.2);
+  float cf = 1.0 - smoothstep(0.22, 0.97, blueness(forms) / bgap);
+  vec3 behind = forms * mix(1.0, yf / Yf, cf) * Ts + (air + air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}) * (1.0 - Ts);
+  vec3 airT = open + sunTower;
+  float cap = ${UNDER_SKY.toFixed(2)} * luma(behind) / max(luma(airT), 1e-4);
+  airT *= mix(1.0, min(1.0, cap), smoothstep(0.05, 0.3, dtl.a));
+  vec3 tower = scene * Tt + airT * (1.0 - Tt) * (1.0 - ${SHADOW_K.toFixed(2)} * deep);
+  // And keeps its build: the plate's floors and mullions (the plate less the
+  // towers' own light blurred at the scale of their floors) come back over
+  // the in-scatter at the transmittance's square root, never under
+  // ${FLOORS_MIN.toFixed(2)}, so a fogged tower is a sky-tinted version of itself.
+  vec4 fl = texture(uFloors, uv);
+  // Display-encoded, as the eye reads the lines: the same share of their
+  // contrast survives on the pale haze as on the dark glass.
+  vec3 floors = fl.rgb / max(fl.a, 1e-3);
+  vec3 lines = pow(plate(uv, 0.0), vec3(1.0 / 2.2)) - floors;
+  vec3 keepF = max(pow(Tt, vec3(${FLOORS_POW.toFixed(2)})), vec3(${FLOORS_MIN.toFixed(2)})) - Tt;
+  tower = pow(max(pow(max(tower, 0.0), vec3(1.0 / 2.2)) + lines * keepF * smoothstep(0.15, 0.5, fl.a), 0.0), vec3(2.2));
   vec3 sky = scene * Ts + (air + sunSky) * (1.0 - Ts);
   // The veil over the sky keeps the cumulus' forms: their local detail (the
   // plate less its blur at the scale of a cloud's forms) comes back over the
   // in-scatter, so at least ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and
   // the low cloud reads as cloud through the air, not as a flat wash.
-  vec4 dtl = texture(uDetail, uv);
-  vec3 forms = pow(dtl.rgb / max(dtl.a, 1e-3), vec3(2.2));
   vec3 kept = ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene0 - forms) * smoothstep(0.05, 0.3, dtl.a);
   sky += kept;
   // How much of the sky's light is still the cloud's own: what the air lets
@@ -484,9 +574,10 @@ void main() {
   float warm = mix(smoothstep(0.35, 0.85, Tt.g), cloud * (own + (1.0 - own) * mix(0.1, 1.0, share)), cov);
   // Display-encoded and untoned, for the film finish. Alpha packs two
   // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
-  // tower still seen through the air (the glass grade's weight, so far towers
-  // keep the blue the haze gave them), and the split grade's weight above.
-  float solid = Tt.g * (1.0 - cov);
+  // tower still seen through the air (the glass grade's weight, squared so it
+  // lets go as soon as the air does and a far tower half taken already reads
+  // as the haze's blue, not the glass's green), and the split grade's weight.
+  float solid = Tt.g * Tt.g * (1.0 - cov);
   outColor = vec4(pow(max(col, 0.0), vec3(1.0 / 2.2)), (floor(solid * 15.0 + 0.5) * 16.0 + floor(warm * 15.0 + 0.5)) / 255.0);
 }`;
 
@@ -802,6 +893,8 @@ export async function createFog(host, { embedded = false } = {}) {
   const upDetail = [];
   const gapDown = [];
   const gapUp = [];
+  // The towers' own light at the scale of their floors, for the build the haze keeps.
+  const floorsDown = [target(PLATE_W >> FLOORS_LOD, (PLATE_W / ASPECT) >> FLOORS_LOD), target(PLATE_W >> (FLOORS_LOD + 1), (PLATE_W / ASPECT) >> (FLOORS_LOD + 1))];
   {
     let bw = 600;
     let bh = 400;
@@ -961,6 +1054,16 @@ export async function createFog(host, { embedded = false } = {}) {
   const air = ascend(down, up, [0, 0, 0, 0, 0]);
   // And at the scale of the cumulus' forms, for the detail the veil keeps.
   const detail = ascend(down, upDetail, DETAIL_W);
+  // The towers alone, a plate level at ~8 px and one 13-tap step below it.
+  gl.useProgram(P.air.p);
+  bind(0, colorTex);
+  bind(1, auxTex);
+  gl.uniform1f(P.air.u.uOpen, 0);
+  gl.uniform1f(P.air.u.uSolid, 1);
+  gl.uniform1f(P.air.u.uLod, Math.log2(colorImg.naturalHeight / floorsDown[0].h));
+  quadDraw(floorsDown[0]);
+  descend(floorsDown);
+  const floors = floorsDown[1];
 
   // The film finish works on the whole frame, so its targets follow the canvas:
   // the scene at full size, and a pyramid from half size for the halation
@@ -1006,8 +1109,10 @@ export async function createFog(host, { embedded = false } = {}) {
     bind(2, air.tex);
     bind(3, detail.tex);
     bind(4, gap.tex);
+    bind(5, floors.tex);
     const cu = P.composite.u;
     gl.uniform1i(cu.uGap, 4);
+    gl.uniform1i(cu.uFloors, 5);
     gl.uniform1i(cu.uColor, 0);
     gl.uniform1i(cu.uAux, 1);
     gl.uniform1i(cu.uAir, 2);
@@ -1070,7 +1175,7 @@ export async function createFog(host, { embedded = false } = {}) {
       window.clearTimeout(introTimer);
       stage.canvas.removeEventListener("pointerleave", onLeave);
       stage.canvas.removeEventListener("wheel", onWheel);
-      [...down, ...up, ...upDetail, ...gapDown, ...gapUp].forEach(free);
+      [...down, ...up, ...upDetail, ...gapDown, ...gapUp, ...floorsDown].forEach(free);
       if (fx) [fx.scene, ...fx.down, ...fx.hal, ...fx.bloom].forEach(free);
       stage.destroy();
       gl.getExtension("WEBGL_lose_context")?.loseContext();
