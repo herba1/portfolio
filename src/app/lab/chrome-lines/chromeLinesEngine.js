@@ -71,7 +71,16 @@ function growLayout() {
     if (ok) out.push([u, v, r, 1]);
   }
   // Loose drops thrown clear of the pool.
-  out.push([0.13, 0.24, 0.03, 1], [0.48, 0.14, 0.036, 1], [0.66, 0.79, 0.028, 1], [0.08, 0.47, 0.024, 1], [0.53, 0.84, 0.02, 1], [0.205, 0.33, 0.02, 1]);
+  // Each carries its own tilt of the studio (radians, about a horizontal
+  // axis), so their reflections land in different places.
+  out.push(
+    [0.13, 0.24, 0.03, 1, 0.75, -0.3],
+    [0.48, 0.14, 0.036, 1, -0.55, 0.45],
+    [0.66, 0.79, 0.028, 1, 0.15, -0.85],
+    [0.08, 0.47, 0.024, 1, -0.8, -0.35],
+    [0.53, 0.84, 0.02, 1, 0.5, 0.7],
+    [0.205, 0.33, 0.02, 1, -0.2, -0.75],
+  );
   return out;
 }
 const LAYOUT = growLayout();
@@ -103,7 +112,10 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
   const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 3.5)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
-  const K2 = [num("H2", 0.07), num("Hr", 0.14), 0, 0];
+  // The knuckle swells (the per-ball undulation and the slow relief) are
+  // kept low, a third of what they were; the broad body (reach and height)
+  // carries the form, so the pool reads as one heavy liquid.
+  const K2 = [num("H2", 0.023), num("Hr", 0.047), num("bw", 0.42), num("Hb", 0.12)];
   // The neck: kernel radius at its waist before it thins (scale units), and
   // how fast it drains while a stretched drop is held.
   const TH = [num("waist", 0.036), num("drain", 0.6)];
@@ -179,8 +191,8 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const SET = [[0, 0, 0.046, 0], [0, 0, 0.014, 0]];
   const FREE = SET.length * 2;
   const N = Math.min(MAXB, LAYOUT.length + FREE);
-  const balls = [...LAYOUT.slice(0, N - FREE), ...SET, ...SET].map(([u, v, r, w], i) => ({
-    u, v, r0: r, w, free: i >= N - FREE, wt: 0, held: false,
+  const balls = [...LAYOUT.slice(0, N - FREE), ...SET, ...SET].map(([u, v, r, w, tx = 0, ty = 0], i) => ({
+    u, v, r0: r, w, tx, ty, free: i >= N - FREE, wt: 0, held: false,
     x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0, rx: 0, ry: 0, R: 0, hu: 0, hv: 0,
     ph: [i * 1.71 + 0.3, i * 2.39 + 1.1, i * 0.83 + 2.0],
   }));
@@ -192,7 +204,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const TM = new Float32Array(MAXT * 4);
   const slot = () => threads.find((t) => !t.on) || threads[0];
   const B = new Float32Array(MAXB * 4);
-  const D = new Float32Array(MAXB * 2);
+  const D = new Float32Array(MAXB * 4);
 
   let W = 1;
   let H = 1;
@@ -498,8 +510,10 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       B[i * 4 + 1] = b.y;
       B[i * 4 + 2] = b.R;
       B[i * 4 + 3] = b.w;
-      D[i * 2] = b.x - b.rx;
-      D[i * 2 + 1] = b.y - b.ry;
+      D[i * 4] = b.x - b.rx;
+      D[i * 4 + 1] = b.y - b.ry;
+      D[i * 4 + 2] = b.tx;
+      D[i * 4 + 3] = b.ty;
     }
     threads.forEach((th, j) => {
       const w = th.on ? th.w : 0;
@@ -511,7 +525,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     const bind = ({ p, u }) => {
       gl.useProgram(p);
       gl.uniform4fv(u.uB, B);
-      gl.uniform2fv(u.uD, D);
+      gl.uniform4fv(u.uD, D);
       gl.uniform1i(u.uN, N);
       gl.uniform4fv(u.uTa, TA);
       gl.uniform4fv(u.uTr, TR);
