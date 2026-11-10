@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { VS, FS_ONE, FS_SURF, FS_MONO, FS_PRINT, MAXB } from "./chromeLinesShader";
+import { VS, FS_ONE, FS_SURF, FS_MONO, FS_PRINT, MAXB, MAXT } from "./chromeLinesShader";
 
 // A pool of mercury on acid paper, printed as a line engraving.
 //
@@ -71,7 +71,7 @@ function growLayout() {
     if (ok) out.push([u, v, r, 1]);
   }
   // Loose drops thrown clear of the pool.
-  out.push([0.31, 0.27, 0.03, 1], [0.44, 0.23, 0.036, 1], [0.66, 0.79, 0.028, 1], [0.08, 0.47, 0.024, 1], [0.53, 0.84, 0.02, 1], [0.205, 0.33, 0.02, 1]);
+  out.push([0.13, 0.24, 0.03, 1], [0.48, 0.14, 0.036, 1], [0.66, 0.79, 0.028, 1], [0.08, 0.47, 0.024, 1], [0.53, 0.84, 0.02, 1], [0.205, 0.33, 0.02, 1]);
   return out;
 }
 const LAYOUT = growLayout();
@@ -104,6 +104,9 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 3.5)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   const K2 = [num("H2", 0.07), num("Hr", 0.14), 0, 0];
+  // The neck: kernel radius at its waist before it thins (scale units), and
+  // how fast it drains while a stretched drop is held.
+  const TH = [num("waist", 0.036), num("drain", 0.6)];
   const still = q.has("t") || q.has("pull");
   const stillT = num("t", 2.4);
   // ?let=s lets go of the still's pull at s seconds.
@@ -113,7 +116,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // Two passes where a half-float target is renderable (nearly everywhere),
   // else one pass that does the surface per device pixel.
   const twoPass = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const NAMES = ["uB", "uD", "uN", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uSurfRes", "uSurf"];
+  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uSurfRes", "uSurf"];
   const make = (fs) => {
     const p = program(gl, VS, fs);
     const u = {};
@@ -161,22 +164,33 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  // The pool, plus four free balls kept at zero weight. A press does not
-  // tear a ball out of the pool (that would leave a hole mercury never
-  // has): it raises a drop out of the surface where the hand is, and three
-  // smaller balls string out behind it as the neck, thinnest in the middle,
-  // until it is stretched too far and snaps back into the pool.
+  // The pool, plus free balls kept at zero weight. A press does not tear a
+  // ball out of the pool (that would leave a hole mercury never has): it
+  // raises a drop out of the surface where the hand is, joined to the pool
+  // by a thread, a kernel swept along the segment from the root to the drop.
+  // Drawn out, the thread drains: its waist, just short of the drop, thins
+  // with the stretch and goes on thinning while the stretch is held, so the
+  // drop hangs off the pool as a teardrop on a filament. When the waist is
+  // gone it has pinched off: the root half recoils into the pool, the drop
+  // half is swallowed by the drop, and a satellite droplet is left where it
+  // broke. Let go before that and the drop and its thread run home.
   // Two such sets, so a second press can start while the last drop is
-  // still on its way home.
-  const SET = [[0, 0, 0.068, 0], [0, 0, 0.04, 0], [0, 0, 0.03, 0], [0, 0, 0.034, 0]];
+  // still on its way home: [drop, satellite].
+  const SET = [[0, 0, 0.046, 0], [0, 0, 0.014, 0]];
   const FREE = SET.length * 2;
-  const TRAIL = [0.26, 0.52, 0.76];
   const N = Math.min(MAXB, LAYOUT.length + FREE);
   const balls = [...LAYOUT.slice(0, N - FREE), ...SET, ...SET].map(([u, v, r, w], i) => ({
     u, v, r0: r, w, free: i >= N - FREE, wt: 0, held: false,
     x: 0, y: 0, vx: 0, vy: 0, ax: 0, ay: 0, rx: 0, ry: 0, R: 0, hu: 0, hv: 0,
     ph: [i * 1.71 + 0.3, i * 2.39 + 1.1, i * 0.83 + 2.0],
   }));
+  // Thread slots. A neck runs root -> drop; after the pinch its two halves
+  // are stubs that shrink to their ends.
+  const threads = Array.from({ length: MAXT }, () => ({ on: false, ax: 0, ay: 0, bx: 0, by: 0, ra: 0, rm: 0, rb: 0, tm: 0.7, w: 0, dx: 0, dy: 0 }));
+  const TA = new Float32Array(MAXT * 4);
+  const TR = new Float32Array(MAXT * 4);
+  const TM = new Float32Array(MAXT * 4);
+  const slot = () => threads.find((t) => !t.on) || threads[0];
   const B = new Float32Array(MAXB * 4);
   const D = new Float32Array(MAXB * 2);
 
@@ -206,15 +220,26 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   stage.onResize((w, h) => place(w, h));
 
   // The field at a point, in JS, to decide what a press takes hold of.
+  const THR = SH[3];
   const kernel = (b, x, y) => {
     const d2 = ((x - b.x) ** 2 + (y - b.y) ** 2) / (b.R * b.R);
     return d2 < 1 ? b.w * (1 - d2) ** 3 : 0;
   };
+  const tKernel = (t, x, y) => {
+    if (!t.on || t.w <= 0) return 0;
+    const abx = t.bx - t.ax;
+    const aby = t.by - t.ay;
+    const s = clamp(((x - t.ax) * abx + (y - t.ay) * aby) / Math.max(abx * abx + aby * aby, 1e-4), 0, 1);
+    const sm = (u) => u * u * (3 - 2 * u);
+    const R = s < t.tm ? t.ra + (t.rm - t.ra) * sm(s / t.tm) : t.rm + (t.rb - t.rm) * sm((s - t.tm) / (1 - t.tm));
+    const d2 = ((x - t.ax - abx * s) ** 2 + (y - t.ay - aby * s) ** 2) / (R * R);
+    return d2 < 1 ? t.w * (1 - d2) ** 3 : 0;
+  };
+  const fieldAt = (x, y) => balls.reduce((f, b) => f + kernel(b, x, y), 0) + threads.reduce((f, t) => f + tKernel(t, x, y), 0);
 
   // A press on the liquid raises a free drop there; the pool balls around
-  // it are dragged a little, less the further the pull goes (the neck).
+  // it are dragged a little, less the further the pull goes.
   let grab = null;
-  const fieldAt = (x, y) => balls.reduce((f, b) => f + kernel(b, x, y), 0);
   const takeHold = (x, y) => {
     const f = fieldAt(x, y);
     if (f < 0.22) return null;
@@ -230,34 +255,60 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       b.x = x;
       b.y = y;
       b.vx = b.vy = 0;
-      b.held = true;
+      b.held = b === free[0];
       b.wt = b === free[0] ? 1 : 0;
+      b.w = b === free[0] ? b.w : 0;
       b.R = b.r0 * 2.3 * scale;
     }
     const best = free[0];
+    const neck = slot();
+    Object.assign(neck, { on: true, kind: "neck", drop: best, toward: null, thin: 0, base: 0, drain: 0, ax: x, ay: y, bx: x, by: y, w: 0, tm: 0.62, ra: 0, rm: 0, rb: 0, dx: 0, dy: 0 });
     const near = balls
       .filter((b) => !b.free && b.w > 0)
       .map((b) => ({ b, s: Math.pow(clamp(kernel(b, x, y) / Math.max(f, 1e-3), 0, 1), 0.8) * 0.8, ox: b.x, oy: b.y }))
       .filter((e) => e.s > 0.05);
-    return { best, trail: free.slice(1), broken: false, ox: 0, oy: 0, x0: x, y0: y, x, y, near };
+    return { best, sat: free[1], neck, broken: false, thin: 0, x0: x, y0: y, x, y, near };
+  };
+  // Pinch-off at the waist: the neck becomes two stubs, and the drop leaves
+  // a satellite where it broke.
+  const pinch = (g) => {
+    g.broken = true;
+    const n = g.neck;
+    const px = n.ax + (n.bx - n.ax) * n.tm;
+    const py = n.ay + (n.by - n.ay) * n.tm;
+    const root = { ...n, kind: "stub", toward: null, bx: px, by: py, rb: n.rm * 0.8, rm: n.ra * 0.45 + n.rm * 0.55, tm: 0.5 };
+    Object.assign(n, root);
+    const tip = slot();
+    Object.assign(tip, { on: true, kind: "stub", toward: g.best, drop: null, ax: px, ay: py, bx: g.best.x, by: g.best.y, ra: n.rb, rm: n.rb * 1.3, rb: g.best.R * 0.45, tm: 0.5, w: n.w, dx: n.dx, dy: n.dy });
+    const s = g.sat;
+    s.x = px;
+    s.y = py;
+    s.vx = (g.best.vx - 0) * 0.15;
+    s.vy = (g.best.vy - 0) * 0.15;
+    s.wt = 1;
+    s.w = 0.6;
+    s.held = false;
   };
   stage.on("down", (p) => {
     if (still) return;
     grab = takeHold(p.x, p.y);
   });
-  stage.on("up", () => {
+  const release = (vx, vy) => {
     if (!grab) return;
-    // Let go: the hand's speed stays in the drop.
-    const v = stage.pointer;
-    grab.best.vx += v.vx * 0.35;
-    grab.best.vy += v.vy * 0.35;
+    if (grab.best) {
+      // Let go: the hand's speed stays in the drop.
+      grab.best.vx += vx * 0.35;
+      grab.best.vy += vy * 0.35;
+    }
     for (const b of balls) if (b.free) b.held = false;
     grab = null;
-  });
+  };
+  stage.on("up", () => release(stage.pointer.vx, stage.pointer.vy));
 
   const OMEGA = 2 * Math.PI * 0.95;
   const step = (dt, t, pointer) => {
     const breathe = scale * 0.012;
+    const g = grab && grab.best ? grab : null;
     for (const b of balls) {
       // At rest it breathes: each rest point drifts on a slow loop and the
       // pool swells and settles.
@@ -270,6 +321,56 @@ export async function createChromeLines(host, { embedded = false } = {}) {
         // A released drop, back home and nearly still, is absorbed.
         if (!b.held && Math.hypot(b.x - b.rx, b.y - b.ry) < b.R * 0.08 && Math.hypot(b.vx, b.vy) < scale * 0.05) b.wt = 0;
         b.w += (b.wt - b.w) * (1 - Math.exp(-dt * (b.wt > b.w ? 9 : 3)));
+      }
+    }
+    // The threads.
+    const ease = (r) => 1 - Math.exp(-dt * r);
+    for (const th of threads) {
+      if (!th.on) continue;
+      if (th.kind === "neck") {
+        const d = th.drop;
+        th.bx = d.x;
+        th.by = d.y;
+        const s = Math.hypot(th.bx - th.ax, th.by - th.ay) / scale;
+        // The neck drains while it is drawn out: thinning follows the
+        // stretch, and creeps on while a stretched drop is held.
+        // The drain only accumulates while it is held out, and heals
+        // quickly once the drop is let go and runs home.
+        th.base += (0.9 * clamp((s - 0.04) / 0.27, 0, 1) - th.base) * ease(5);
+        th.drain = d.held ? th.drain + dt * TH[1] * Math.max(0, s - 0.12) : th.drain * Math.exp(-dt * 4);
+        th.thin = clamp(th.base + th.drain, 0, 1);
+        const k = th.thin;
+        th.ra = scale * 0.062 * (1 - 0.3 * k);
+        th.rm = scale * TH[0] * Math.pow(1 - k, 1.3);
+        // The drop end reaches well into the drop, which draws it out into a
+        // teardrop pointing back down the thread.
+        th.rb = scale * 0.09 * (1 - 0.25 * k);
+        // It fills in only as it is drawn out, so a press alone raises one
+        // mound, and it goes with the drop when the drop is absorbed.
+        th.w = d.w * clamp(s / 0.05, 0, 1);
+        th.dx = d.x - d.rx;
+        th.dy = d.y - d.ry;
+        // Pinched once the waist is thinner than the surface can hold.
+        if (th.rm < scale * 0.003 && th.w > 0.5) {
+          if (g && g.neck === th && !g.broken) pinch(g);
+          else th.on = false;
+        } else if (!d.held && d.w < 0.01) th.on = false;
+      } else {
+        // A stub recoils into its end and drains.
+        if (th.toward) {
+          th.ax += (th.toward.x - th.ax) * ease(11);
+          th.ay += (th.toward.y - th.ay) * ease(11);
+          th.bx = th.toward.x;
+          th.by = th.toward.y;
+          th.ra *= Math.exp(-dt * 3);
+        } else {
+          th.bx += (th.ax - th.bx) * ease(9);
+          th.by += (th.ay - th.by) * ease(9);
+          th.rb *= Math.exp(-dt * 3);
+        }
+        th.rm = Math.min(th.rm, th.ra * 0.5 + th.rb * 0.5);
+        th.w *= Math.exp(-dt * 2.5);
+        if (Math.hypot(th.bx - th.ax, th.by - th.ay) < 2 || th.w < 0.02) th.on = false;
       }
     }
     for (const b of balls) {
@@ -287,41 +388,19 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       fx -= kc * dx;
       fy -= kc * dy;
       let damp = 2 * 0.88 * Math.sqrt(OMEGA * OMEGA * pull + kc);
-      if (grab && grab.best) {
-        const ddx = grab.x - grab.x0;
-        const ddy = grab.y - grab.y0;
+      if (g) {
+        const ddx = g.x - g.x0;
+        const ddy = g.y - g.y0;
         const len = Math.hypot(ddx, ddy);
-        if (b === grab.best) {
-          const tx = grab.x;
-          const ty = grab.y;
+        if (b === g.best) {
           const k = (2 * Math.PI * 3.2) ** 2;
-          fx = (tx - b.x) * k;
-          fy = (ty - b.y) * k;
+          fx = (g.x - b.x) * k;
+          fy = (g.y - b.y) * k;
           damp = 2 * 0.95 * 2 * Math.PI * 3.2;
-        } else if (b.free && b.held) {
-          // The neck: strung between the pool and the drop until it is
-          // stretched past what surface tension holds, then it snaps home.
-          const i = grab.trail.indexOf(b);
-          if (!grab.broken && len > scale * 0.3) {
-            grab.broken = true;
-            for (const t of grab.trail) t.held = false;
-          }
-          if (i >= 0 && !grab.broken) {
-            // The neck only fills in as it is drawn out, so a press alone
-            // raises one mound, not a stack.
-            b.wt = clamp(len / (scale * 0.1), 0, 1);
-            const f = TRAIL[i];
-            const tx = grab.x0 + (grab.best.x - grab.x0) * f;
-            const ty = grab.y0 + (grab.best.y - grab.y0) * f;
-            const k = (2 * Math.PI * 2.6) ** 2;
-            fx = (tx - b.x) * k;
-            fy = (ty - b.y) * k;
-            damp = 2 * 0.9 * 2 * Math.PI * 2.6;
-          }
-        } else {
-          const e = grab.near.find((n) => n.b === b);
+        } else if (!b.free) {
+          const e = g.near.find((n) => n.b === b);
           if (e) {
-            // Neighbours follow for a while, then let go: the neck.
+            // Neighbours follow for a while, then let go.
             const s = e.s * Math.exp(-len / (b.R * 0.55));
             const tx = e.ox + ddx * s * 0.9;
             const ty = e.oy + ddy * s * 0.9;
@@ -380,24 +459,22 @@ export async function createChromeLines(host, { embedded = false } = {}) {
     let start = null;
     const end = pullAt ? [pullAt[0] * W, pullAt[1] * H] : null;
     if (end) {
-      // Take hold at the deepest liquid on the way from the pool toward the
-      // target: march from the target back toward the pool's middle.
+      // Take hold just inside the pool's edge on the way out from its middle
+      // toward the target, so the pull draws liquid out of the pool.
       const cx = W * 0.5;
       const cy = H * 0.5;
       start = [cx, cy];
-      for (let k = 0; k <= 60; k++) {
-        const x = end[0] + (cx - end[0]) * (k / 60);
-        const y = end[1] + (cy - end[1]) * (k / 60);
-        if (fieldAt(x, y) > 0.55) {
-          start = [x, y];
-          break;
-        }
+      for (let k = 0; k <= 80; k++) {
+        const x = cx + (end[0] - cx) * (k / 80);
+        const y = cy + (end[1] - cy) * (k / 80);
+        const f = fieldAt(x, y);
+        if (f < THR) break;
+        if (f >= 0.5) start = [x, y];
       }
     }
     while (simT < stillT) {
       if (end && simT >= letGo && grab) {
-        for (const b of balls) if (b.free) b.held = false;
-        grab = null;
+        release(0, 0);
       } else if (end && simT >= 0.2 && simT < letGo) {
         if (!grab) grab = takeHold(start[0], start[1]) || { best: null };
         const k = easeOut((simT - 0.2) / 1.3);
@@ -424,12 +501,22 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       D[i * 2] = b.x - b.rx;
       D[i * 2 + 1] = b.y - b.ry;
     }
+    threads.forEach((th, j) => {
+      const w = th.on ? th.w : 0;
+      TA.set([th.ax, th.ay, th.bx, th.by], j * 4);
+      TR.set([Math.max(th.ra, 1), Math.max(th.rm, 0.5), Math.max(th.rb, 1), w], j * 4);
+      TM.set([th.tm, th.dx, th.dy, 0], j * 4);
+    });
     const envRot = 0.07 * Math.sin(time * 0.11) + 0.03 * Math.sin(time * 0.29);
     const bind = ({ p, u }) => {
       gl.useProgram(p);
       gl.uniform4fv(u.uB, B);
       gl.uniform2fv(u.uD, D);
       gl.uniform1i(u.uN, N);
+      gl.uniform4fv(u.uTa, TA);
+      gl.uniform4fv(u.uTr, TR);
+      gl.uniform4fv(u.uTm, TM);
+      gl.uniform1i(u.uNT, MAXT);
       gl.uniform2f(u.uRes, W, H);
       gl.uniform1f(u.uDpr, stage.dpr);
       gl.uniform1f(u.uScale, scale);

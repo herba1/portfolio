@@ -8,6 +8,8 @@
 // register on the highlights, and a thin-film tint, are the iridescence.
 
 export const MAXB = 56;
+// Threads: the neck a pulled drop draws out of the pool.
+export const MAXT = 4;
 
 export const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -16,9 +18,14 @@ void main(){ gl_Position = vec4(aPos, 0.0, 1.0); }`;
 const FS_HEAD = `#version 300 es
 precision highp float;
 #define MAXB ${MAXB}
+#define MAXT ${MAXT}
 uniform vec4 uB[MAXB];      // centre x, y (css px), kernel radius (css px), weight
 uniform vec2 uD[MAXB];      // displacement from rest (css px): carries the relief
 uniform int uN;
+uniform vec4 uTa[MAXT];     // thread: root end x, y; drop end x, y (css px)
+uniform vec4 uTr[MAXT];     // thread kernel radius at the root, at the waist, at the drop; weight
+uniform vec4 uTm[MAXT];     // where the waist sits (0 root .. 1 drop); displacement at the drop end
+uniform int uNT;
 uniform vec2 uRes;          // css px
 uniform float uDpr;
 uniform float uScale;
@@ -147,6 +154,44 @@ vec4 surface(vec2 p){
       f += b.w * k;
       g += b.w * 3.0 * m * m * (-2.0 * d / R2);
       disp += k * uD[i];
+      ws += k;
+    }
+  }
+  // The threads: a kernel swept along a segment, its radius tapering from a
+  // broad root in the pool down to a waist and up again into the drop, so
+  // the field draws a cone out of the pool, a filament, and a teardrop.
+  for (int j = 0; j < MAXT; j++){
+    if (j >= uNT) break;
+    vec4 rr = uTr[j];
+    if (rr.w <= 0.0) continue;
+    vec2 a = uTa[j].xy;
+    vec2 ab = uTa[j].zw - a;
+    float l2 = max(dot(ab, ab), 1e-4);
+    float tr = dot(p - a, ab) / l2;
+    float t = clamp(tr, 0.0, 1.0);
+    vec2 d = p - a - ab * t;
+    float tm = uTm[j].x;
+    float R, dR;
+    if (t < tm){
+      float u = t / tm;
+      R = mix(rr.x, rr.y, u * u * (3.0 - 2.0 * u));
+      dR = (rr.y - rr.x) * 6.0 * u * (1.0 - u) / tm;
+    } else {
+      float u = (t - tm) / (1.0 - tm);
+      R = mix(rr.y, rr.z, u * u * (3.0 - 2.0 * u));
+      dR = (rr.z - rr.y) * 6.0 * u * (1.0 - u) / (1.0 - tm);
+    }
+    float R2 = R * R;
+    float dd = dot(d, d);
+    float q = dd / R2;
+    if (q < 1.0){
+      float m = 1.0 - q;
+      float k = m * m * m;
+      vec2 dt = (tr > 0.0 && tr < 1.0) ? ab / l2 : vec2(0.0);
+      vec2 dq = 2.0 * d / R2 - 2.0 * dd / (R2 * R) * dR * dt;
+      f += rr.w * k;
+      g += rr.w * 3.0 * m * m * (-dq);
+      disp += k * uTm[j].yz * t;
       ws += k;
     }
   }
