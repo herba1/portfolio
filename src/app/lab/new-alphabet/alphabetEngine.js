@@ -171,33 +171,51 @@ export async function createAlphabet(host, { embedded = false } = {}) {
 
   // Live strokes: one per stroke of each glyph, keyed by slot and letter so
   // a retyped letter is a new set of strokes and an unchanged one moves.
+  // Points and targets are in px from the centre dot (cells x capH / n), so
+  // the word holds its cap height through a change of raster and the springs
+  // carry only the snap from each old dot to its new one.
   let strokes = [];
 
   const fit = () => {
     const W = stage.width;
     const H = stage.height;
+    const was = capH;
     capH = Math.min(H * 0.4, (W * 0.8) / aspect(word));
+    // Live strokes are in px: rescale them with the word, so a refit is a
+    // change of size and not something the springs have to animate.
+    const k = capH / was;
+    pitch *= k;
+    for (const st of strokes) {
+      for (const p of st.pts) Object.assign(p, { x: p.x * k, y: p.y * k, vx: p.vx * k, vy: p.vy * k });
+      st.target = st.target.map(([x, y]) => [x * k, y * k]);
+    }
   };
 
   const retarget = (spawn = false, immediate = false) => {
     const lay = layout(word, n);
+    const cell = capH / n;
     const next = [];
-    let order = 0;
-    const count = lay.reduce((s, g) => s + g.length, 0);
-    const step = Math.min(0.018, 0.3 / Math.max(1, count));
+    // The word reseats letter by letter, left to right. A letter's strokes
+    // always move together, so its joins stay registered all the way.
+    const step = Math.min(0.045, 0.3 / Math.max(1, lay.length));
+    const busy = (st) => st.born && st.due <= time && st.pts.some((p, i) => Math.abs(p.vx) + Math.abs(p.vy) > 4 || Math.abs(p.x - st.target[i][0]) + Math.abs(p.y - st.target[i][1]) > 0.5);
     lay.forEach((glyph, gi) => {
-      glyph.forEach((s, si) => {
+      const live = glyph.map((s, si) => {
         const key = `${gi}:${word[gi]}:${si}`;
-        let st = strokes.find((o) => o.key === key);
-        if (!st) {
-          const first = s.pts[0];
-          st = { key, closed: s.closed, born: immediate, pts: s.pts.map((p) => (immediate ? { x: p[0], y: p[1], vx: 0, vy: 0 } : { x: first[0], y: first[1], vx: 0, vy: 0 })) };
-        }
-        st.target = s.pts;
-        st.due = immediate ? time : time + order * step + (spawn ? 0.04 : 0);
-        order++;
-        next.push(st);
+        const target = s.pts.map(([x, y]) => [x * cell, y * cell]);
+        // A new stroke is set whole on its own dots when its turn comes,
+        // never grown out of its first point.
+        const st = strokes.find((o) => o.key === key) || { key, closed: s.closed, born: immediate, pts: target.map(([x, y]) => ({ x, y, vx: 0, vy: 0 })) };
+        return [st, target];
       });
+      // A letter still on its way is not held back again, so a drag through
+      // many rasters keeps it moving; one at rest waits its turn.
+      const due = immediate || live.some(([st]) => busy(st)) ? time : time + gi * step + (spawn ? 0.04 : 0);
+      for (const [st, target] of live) {
+        st.target = target;
+        st.due = due;
+        next.push(st);
+      }
     });
     strokes = next;
   };
@@ -226,8 +244,6 @@ export async function createAlphabet(host, { embedded = false } = {}) {
         for (let i = 0; i < at * 60; i++) simulate(1 / 60);
         frozen = true;
       }
-    } else {
-      pitch = capH / n;
     }
   });
 
@@ -283,8 +299,7 @@ export async function createAlphabet(host, { embedded = false } = {}) {
       if (time < st.due) continue;
       if (!st.born) {
         st.born = true;
-        const f = st.target[0];
-        for (const p of st.pts) Object.assign(p, { x: f[0], y: f[1], vx: 0, vy: 0 });
+        st.pts.forEach((p, i) => Object.assign(p, { x: st.target[i][0], y: st.target[i][1], vx: 0, vy: 0 }));
       }
       st.pts.forEach((p, i) => {
         const [tx, ty] = st.target[i];
@@ -377,22 +392,22 @@ export async function createAlphabet(host, { embedded = false } = {}) {
       let b = a;
       for (let j = i + step; j >= 0 && j < P.length; j += step) {
         b = P[j];
-        if (Math.abs(b.x - a.x) + Math.abs(b.y - a.y) > 1e-3) break;
+        if (Math.abs(b.x - a.x) + Math.abs(b.y - a.y) > 1e-2) break;
       }
       const dx = a.x - b.x;
       const dy = a.y - b.y;
       const l = Math.hypot(dx, dy);
-      if (l < 1e-3) return [cx + a.x * p, cy + a.y * p];
+      if (l < 1e-2) return [cx + a.x, cy + a.y];
       const e = Math.min(Math.abs(dx), Math.abs(dy)) > l * 0.2 ? 0.2 : 0.5;
-      return [cx + a.x * p + (dx / l) * sw * e, cy + a.y * p + (dy / l) * sw * e];
+      return [cx + a.x + (dx / l) * sw * e, cy + a.y + (dy / l) * sw * e];
     };
     for (const st of strokes) {
       if (!st.born) continue;
       const P = st.pts;
       const L = P.length;
       for (let i = 0; i < L; i++) {
-        let x = cx + P[i].x * p;
-        let y = cy + P[i].y * p;
+        let x = cx + P[i].x;
+        let y = cy + P[i].y;
         if (!st.closed && i === 0 && L > 1) [x, y] = ext(P, 0, 1);
         if (!st.closed && i === L - 1 && L > 1) [x, y] = ext(P, L - 1, -1);
         if (i === 0) ctx.moveTo(x, y);
