@@ -121,6 +121,7 @@ const TAPER = 1.8;
 // The table's share of the reach.
 const TABLE = 0.24;
 const SETTLE_S = 1.6;
+const PLATE_IN = 0.55; // share of the pull over which the plate inks up
 // The sheet is a two-colour (then three-, four-colour) print. The pen draws
 // the key in near-black; when it comes down on a new figure, the one it
 // finished is pulled into the sheet as an impression in the next spot ink,
@@ -238,6 +239,12 @@ export async function createHarmonograph(host) {
   let curInk = false;
   let pull = 0; // impressions pulled so far; the next takes SPOTS[pull % n]
   let pulling = SPOTS[0];
+  // The figure as the pen laid it: every point the key was inked through, as
+  // a share of the sheet's side (so it survives a resize), NaN between
+  // strokes. A finished figure is pulled into its plate from this, not from
+  // the key's raster.
+  let curPath = [];
+  let prevPath = [];
 
   // Pen.
   let pen = "down"; // down | up
@@ -305,7 +312,9 @@ export async function createHarmonograph(host) {
         compCtx.globalAlpha = k;
         compCtx.drawImage(prev, 0, 0);
       }
-      compCtx.globalAlpha = smooth(0, 0.55, settleT);
+      // The plate comes up to full strength (alpha 1, multiplied) over the
+      // first half of the pull and stays there; it is never faded.
+      compCtx.globalAlpha = smooth(0, PLATE_IN, settleT);
       compCtx.drawImage(spot, pulling.mx * e * dpr, pulling.my * e * dpr);
       compCtx.globalAlpha = 1;
       compCtx.globalCompositeOperation = "source-over";
@@ -314,30 +323,32 @@ export async function createHarmonograph(host) {
   const inks = () => [curCtx];
 
   // The key of a finished figure, as a plate in spot ink. The plate is a
-  // ground, not a second figure: the line is laid once and eroded before it
-  // is flooded with colour, so it engraves at about half the key's weight.
-  // The erosion keeps only what the raster still covers when stamped half a
-  // device pixel off each way in x and in y (a pixel off in all); half-pixel
-  // stamps, resampled, thin a hairline evenly where whole-pixel ones would
-  // break it into dashes on the pixel grid.
+  // ground, not a second figure: the figure is fully determined by the
+  // pendulums, so its path is replayed and engraved as one even hairline,
+  // PLATE device px wide whatever the pen's pace, with butt ends. It is
+  // stroked as a single path, so where the line crosses itself it never
+  // doubles into a bead.
+  const PLATE = 0.7; // device px
   const tint = () => {
     wipe(spotCtx);
-    spotCtx.drawImage(prev, 0, 0);
-    spotCtx.globalCompositeOperation = "destination-in";
-    spotCtx.imageSmoothingEnabled = true;
-    spotCtx.drawImage(prev, 0.5, 0);
-    spotCtx.drawImage(prev, -0.5, 0);
-    spotCtx.drawImage(prev, 0, 0.5);
-    spotCtx.drawImage(prev, 0, -0.5);
-    // What the erosion leaves of a hairline is pale; a little ink gain on
-    // the eroded plate brings it back to full strength without widening it.
-    spotCtx.globalCompositeOperation = "source-over";
-    spotCtx.drawImage(spot, 0, 0);
-    spotCtx.drawImage(spot, 0, 0);
-    spotCtx.globalCompositeOperation = "source-in";
-    spotCtx.fillStyle = `rgb(${pulling.rgb.join(",")})`;
-    spotCtx.fillRect(0, 0, spot.width, spot.height);
-    spotCtx.globalCompositeOperation = "source-over";
+    spotCtx.strokeStyle = `rgb(${pulling.rgb.join(",")})`;
+    spotCtx.lineWidth = PLATE;
+    spotCtx.lineCap = "butt";
+    spotCtx.lineJoin = "round";
+    spotCtx.beginPath();
+    const k = side * dpr;
+    let down = false;
+    for (let i = 0; i < prevPath.length; i += 2) {
+      const x = prevPath[i];
+      if (Number.isNaN(x)) {
+        down = false;
+        continue;
+      }
+      if (down) spotCtx.lineTo(x * k, prevPath[i + 1] * k);
+      else spotCtx.moveTo(x * k, prevPath[i + 1] * k);
+      down = true;
+    }
+    spotCtx.stroke();
   };
 
   // The impression goes into the sheet for good, overprinting whatever was
@@ -361,6 +372,8 @@ export async function createHarmonograph(host) {
     wipe(prevCtx);
     prevCtx.drawImage(cur, 0, 0);
     wipe(curCtx);
+    prevPath = curPath;
+    curPath = [];
     pulling = SPOTS[pull % SPOTS.length];
     pull++;
     tint();
@@ -470,6 +483,7 @@ export async function createHarmonograph(host) {
   const deposit = (x, y, speed, taper, rch) => {
     if (!last) {
       last = { x, y };
+      curPath.push(NaN, NaN, x / side, y / side);
       back = null;
       firstRun = true;
       runLevel = -1;
@@ -536,6 +550,7 @@ export async function createHarmonograph(host) {
       runOpen = true;
     }
     for (const c of inks()) c.lineTo(x * dpr, y * dpr);
+    curPath.push(x / side, y / side);
     runSegs++;
     curInk = true;
     if (back) {
@@ -701,6 +716,8 @@ export async function createHarmonograph(host) {
     const [ox, oy] = tableOff();
     leaving = { canvas: snap, t: 0, ox, oy };
     clearSheet();
+    curPath = [];
+    prevPath = [];
     pen = "up";
     setIndex = (setIndex + 1) % SETS.length;
     applySet(setIndex);
