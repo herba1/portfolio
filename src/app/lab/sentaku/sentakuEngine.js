@@ -15,7 +15,10 @@ import { createCloth, project, PX, ROPE } from "./cloth";
 // cloth's own normal now against its normal at rest, so the frame at rest is
 // the photograph and a fold that turns to the sun brightens. The dress is
 // see-through: the bake split it into its fabric and a share of whatever is
-// behind it, so the sun shows through it wherever the sun really is.
+// behind it, so the sun shows through it wherever the sun really is. Turned
+// edge-on it is looked through along a longer path (tau^(1/mu), from the view
+// cosine against the photograph's), so billows and rolled hems go denser and
+// rose; where it folds over itself the doubled layer is multiplied in.
 //
 // The sun: each frame samples how much of the disc the cloth leaves in view.
 // That share scales a lens veil over everything, lights the rims of the dress
@@ -92,6 +95,11 @@ const DISC = 20; // px, the disc the coverage is sampled over
 const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the lens
 const ADAPT = 0.25; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
+const VS = 7; // floats per cloth vertex
+const MU_MIN = 0.15; // the view cosine's floor: edge-on is dense, not opaque
+// The dress's belt tie, in photograph px: a strip cut square at its end, so
+// its matte is rounded there, or a flipped tie reads as a paper tab.
+const TIE = [748, 1296, 852, 1492];
 
 const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
 
@@ -178,11 +186,11 @@ void main() {
 const CLOTH_V = `#version 300 es
 in vec2 aPos;
 in vec2 aRest;
-in vec2 aShade;
+in vec3 aShade;
 uniform vec2 uSize;
 out vec2 vRest;
 out vec2 vPos;
-out vec2 vShade;
+out vec3 vShade;
 void main() {
   vRest = aRest;
   vPos = aPos;
@@ -194,7 +202,7 @@ const CLOTH_F = `#version 300 es
 precision highp float;
 in vec2 vRest;
 in vec2 vPos;
-in vec2 vShade;
+in vec3 vShade; // light, how far from rest, view cosine against the photograph's
 out vec4 o;
 uniform sampler2D uLayers;
 uniform sampler2D uIds;
@@ -205,6 +213,8 @@ uniform vec3 uTau;
 uniform vec2 uBand; // mirror width past the left and right frame edge, 0 = not cut there
 uniform float uRim;  // how strongly this garment's edge catches the sun
 uniform float uOpen; // the share of the disc in clear view
+uniform int uPass;   // 0 the cloth, 1 the second layer of a sheer fold, multiplied in
+uniform vec4 uTie;   // a strip whose square-cut matte is rounded, in photograph px
 ${SUN_GLSL}
 ${SRGB}
 const float INSET = 6.0; // the matte softens in the last pixels at the frame
@@ -212,6 +222,30 @@ const float SHEAR = 0.8; // px of drop per px past the edge, for the print only
 float tri(float d, float b) { return b - abs(mod(d, 2.0 * b) - b); }
 float idAt(vec2 s) { return texelFetch(uIds, clamp(ivec2(s), ivec2(0), ivec2(uSize) - 1), 0).r * 255.0; }
 float alphaAt(vec2 s) { return abs(idAt(s) - uId) < 0.5 ? texture(uLayers, s / uSize).a : 0.0; }
+// A sheer fabric's light through k times the photograph's thickness: its own
+// colour f, the blurred sky B behind it, and dye, the hue the single layer
+// has in the photograph. Thicker, the fabric's light takes on that hue (the
+// rose of the dress against the sky, not the peach of its threads) and is
+// filtered by it again, and dims.
+vec3 fabric(vec3 f, vec3 B, vec3 dye, float k) {
+  vec3 t = uTau * pow(max(uTau, 1e-4), vec3(k - 1.0));
+  float th = clamp(k, 1.0, 5.0);
+  vec3 W = vec3(0.2126, 0.7152, 0.0722);
+  vec3 fh = mix(f, dye * dot(f, W) / max(dot(dye, W), 1e-4), 1.0 - 1.0 / th);
+  return (fh * pow(dye, vec3(0.8 * (th - 1.0))) + t * B) * (1.0 - 0.4 * (1.0 - 1.0 / th)) + 0.35 * (uTau - t) * B;
+}
+// The matte's mean over a disc; cut at a half, its corners are rounded. A
+// straight edge stays where it is; a corner, where less than half the disc
+// is inside, pulls in to an arc of about the disc's radius.
+float discMean(vec2 s, float r) {
+  float m = 0.0;
+  for (int i = 0; i < 12; i++) {
+    float t = float(i) * 0.5236;
+    vec2 d = vec2(cos(t), sin(t));
+    m += alphaAt(s + d * r) + alphaAt(s + d * r * 0.5);
+  }
+  return m / 24.0;
+}
 void main() {
   // Cloth the frame cut off has no pixels of its own: it is textured from
   // the band just inside the edge, mirrored back and forth, matte included,
@@ -239,9 +273,47 @@ void main() {
     float keep = abs(idAt(w) - uId) < 0.5 ? smoothstep(0.6, 0.95, Lw.a) : 0.0;
     L.rgb = mix(L.rgb, Lw.rgb, keep);
   }
+  float edge = 1.0; // the tie's cross-section: 1 at its middle, less to its edges
+  if (uTie.z > uTie.x && s.x > uTie.x && s.x < uTie.z && s.y > uTie.y && s.y < uTie.w) {
+    // the tie's end widens: round it harder there than up its thin stem
+    float m = discMean(s, mix(4.0, 11.0, smoothstep(uTie.y + 60.0, uTie.w - 40.0, s.y)));
+    L.a *= mix(1.0, smoothstep(0.3, 0.7, m), vShade.y);
+    // and a tie is a strip folded and sewn, not a cut sheet: its edges roll,
+    // so they are looked through at a slant even where it faces the lens
+    // (both only once it moves: at rest the frame is the photograph)
+    edge = mix(1.0, mix(0.45, 1.0, smoothstep(0.5, 0.95, m)), vShade.y);
+  }
   if (L.a < 0.002) discard;
   vec3 B = texture(uBlur, clamp(vPos / uSize, 0.0, 1.0)).rgb;
-  vec3 col = L.rgb * vShade.x + uTau * vShade.y * B;
+  // Seen at a slant the light crosses more fabric: k = 1/mu times the
+  // photograph's. The direct transmission goes as tau^k and the matte closes
+  // as 1 - (1 - a)^k. What the fabric stops is not all lost: the fabric's
+  // own light passes the dye more times, filtered again by the colour the
+  // single layer has in the photograph and dimmed a little, and a share of
+  // the sky it no longer lets straight through comes out diffused. A billow
+  // turned edge-on goes denser, darker and a deeper rose, not paler.
+  float k = 1.0 / max(vShade.z * edge, ${MU_MIN.toFixed(2)});
+  bool sheer = uTau.b > 0.0;
+  vec3 f = L.rgb * vShade.x;
+  vec3 dye = vec3(1.0);
+  if (sheer) {
+    L.a = 1.0 - pow(1.0 - L.a, max(k, 1.0));
+    vec3 one = f + uTau * B;
+    dye = one / max(max(one.r, max(one.g, one.b)), 1e-4);
+  }
+  vec3 col = sheer ? fabric(f, B, dye, k) : f;
+  if (uPass == 1) {
+    // A fold of the sheer dress, seen through itself: what lies behind this
+    // layer is not the sky but the dress again, which the plain pass drew as
+    // if the sky were there. Two layers are twice the thickness: the ratio
+    // between that and one layer is multiplied in, so the fold reads as a
+    // darker, warmer band.
+    vec3 one = encode(col);
+    vec3 two = encode(fabric(f, B, dye, 2.0 * k));
+    vec3 r = clamp(two / max(one, vec3(1e-3)), 0.0, 1.0);
+    o = vec4(mix(vec3(1.0), r, L.a), 1.0);
+    return;
+  }
   if (uRim * uOpen > 0.0) {
     // Rim: the edge that faces the sun, where the matte falls away towards
     // it, catches the light coming round it; strongest close to the disc.
@@ -304,7 +376,7 @@ function upload(gl, bm, { srgb = true, nearest = false, mips = false } = {}) {
   return tex;
 }
 
-function target(gl, w, h) {
+function target(gl, w, h, { stencil = false } = {}) {
   const tex = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, tex);
   gl.texStorage2D(gl.TEXTURE_2D, 1, gl.RGBA8, w, h);
@@ -315,8 +387,16 @@ function target(gl, w, h) {
   const fbo = gl.createFramebuffer();
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  let rb = null;
+  if (stencil) {
+    rb = gl.createRenderbuffer();
+    gl.bindRenderbuffer(gl.RENDERBUFFER, rb);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH24_STENCIL8, w, h);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_STENCIL_ATTACHMENT, gl.RENDERBUFFER, rb);
+    gl.bindRenderbuffer(gl.RENDERBUFFER, null);
+  }
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-  return { tex, fbo, w, h };
+  return { tex, fbo, rb, w, h };
 }
 
 export async function createSentaku(host, { embedded = false } = {}) {
@@ -384,7 +464,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
     return 12;
   };
   cloth.settle(2.5);
-  const { N, rest, x, x0, nrm, nrm0, gid, garments } = cloth;
+  const { N, rest, x, x0, nrm, nrm0, mu, mu0, gid, garments } = cloth;
   const ropeY = (u) => meta.rope.poly[0] * u * u + meta.rope.poly[1] * u + meta.rope.poly[2];
 
   // ---- GL
@@ -399,17 +479,19 @@ export async function createSentaku(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
 
-  // cloth: one dynamic buffer [pos.xy, rest.xy, shade.xy] per vertex
+  // cloth: one dynamic buffer [pos.xy, rest.xy, shade.xyz] per vertex: the
+  // light, how far it has moved, and the view cosine against the rest's
   const ROPE_STEP = 12;
   const ropeU0 = -48;
   const ropeN = Math.ceil((IW + 96) / ROPE_STEP) + 1;
   const NV = N + ropeN * 2;
-  const vdata = new Float32Array(NV * 6);
+  const vdata = new Float32Array(NV * VS);
   for (let k = 0; k < N; k++) {
-    vdata[k * 6 + 2] = rest[k * 2];
-    vdata[k * 6 + 3] = rest[k * 2 + 1];
-    vdata[k * 6 + 4] = 1;
-    vdata[k * 6 + 5] = 1;
+    vdata[k * VS + 2] = rest[k * 2];
+    vdata[k * VS + 3] = rest[k * 2 + 1];
+    vdata[k * VS + 4] = 1;
+    vdata[k * VS + 5] = 0;
+    vdata[k * VS + 6] = 1;
   }
   const ropeRest = [];
   for (let i = 0; i < ropeN; i++) {
@@ -420,10 +502,11 @@ export async function createSentaku(host, { embedded = false } = {}) {
       [1, 32],
     ]) {
       const k = N + i * 2 + s;
-      vdata[k * 6 + 2] = u;
-      vdata[k * 6 + 3] = y + dv;
-      vdata[k * 6 + 4] = 1;
-      vdata[k * 6 + 5] = 0;
+      vdata[k * VS + 2] = u;
+      vdata[k * VS + 3] = y + dv;
+      vdata[k * VS + 4] = 1;
+      vdata[k * VS + 5] = 0;
+      vdata[k * VS + 6] = 1;
       ropeRest.push(u);
     }
   }
@@ -455,7 +538,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
   gl.bufferData(gl.ARRAY_BUFFER, vdata.byteLength, gl.DYNAMIC_DRAW);
   for (let i = 0; i < 3; i++) {
     gl.enableVertexAttribArray(i);
-    gl.vertexAttribPointer(i, 2, gl.FLOAT, false, 24, i * 8);
+    gl.vertexAttribPointer(i, i < 2 ? 2 : 3, gl.FLOAT, false, VS * 4, i * 8);
   }
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
@@ -468,7 +551,6 @@ export async function createSentaku(host, { embedded = false } = {}) {
     const ns = nx * SUN[0] + ny * SUN[1] + nz * SUN[2];
     return L.ka * (0.62 + 0.38 * ny) + L.kr * Math.max(0, ns) + L.kt * Math.max(0, -ns);
   };
-  const CAM = cloth.CAM;
 
   // ---- the sun in view: sample the disc against the cloth where it is now
   const sunPx = meta.sun;
@@ -485,9 +567,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
     const by1 = sunPx[1] + DISC + 1;
     discT.fill(1);
     for (let t = 0; t < clothTris; t += 3) {
-      const a = idx[t] * 6;
-      const b = idx[t + 1] * 6;
-      const c = idx[t + 2] * 6;
+      const a = idx[t] * VS;
+      const b = idx[t + 1] * VS;
+      const c = idx[t + 2] * VS;
       const ax = vdata[a], ay = vdata[a + 1], bx = vdata[b], by = vdata[b + 1], cx = vdata[c], cy = vdata[c + 1];
       if (Math.max(ax, bx, cx) < bx0 || Math.min(ax, bx, cx) > bx1 || Math.max(ay, by, cy) < by0 || Math.min(ay, by, cy) > by1) continue;
       const den = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
@@ -504,7 +586,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
         const ru = Math.round(w0 * vdata[a + 2] + w1 * vdata[b + 2] + w2 * vdata[c + 2]);
         const rv = Math.round(w0 * vdata[a + 3] + w1 * vdata[b + 3] + w2 * vdata[c + 3]);
         if (ru < 0 || rv < 0 || ru >= IW || rv >= IH || idPx[(rv * IW + ru) * 4] !== id) continue;
-        discT[p] = Math.min(discT[p], id === 3 ? DRESS_T : 0);
+        // the dress lets less through where it is seen at a slant
+        const m = Math.max(MU_MIN, w0 * vdata[a + 6] + w1 * vdata[b + 6] + w2 * vdata[c + 6]);
+        discT[p] = Math.min(discT[p], id === 3 ? Math.pow(DRESS_T, 1 / m) : 0);
       }
     }
     let o = 0;
@@ -589,8 +673,9 @@ export async function createSentaku(host, { embedded = false } = {}) {
       if (!t) continue;
       gl.deleteTexture(t.tex);
       gl.deleteFramebuffer(t.fbo);
+      if (t.rb) gl.deleteRenderbuffer(t.rb);
     }
-    scene = target(gl, w, h);
+    scene = target(gl, w, h, { stencil: true });
     developed = target(gl, w, h);
     film.resize(w, h);
     dirty = true;
@@ -605,20 +690,24 @@ export async function createSentaku(host, { embedded = false } = {}) {
     cloth.computeNormals();
     for (let k = 0; k < N; k++) {
       const i = k * 3;
-      project(rest[k * 2], rest[k * 2 + 1], x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2], cu, cv, vdata, k * 6);
+      project(rest[k * 2], rest[k * 2 + 1], x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2], cu, cv, vdata, k * VS);
       const L = lightById.get(gid[k]);
       const g = lit(L, nrm[i], nrm[i + 1], nrm[i + 2]) / lit(L, nrm0[i], nrm0[i + 1], nrm0[i + 2]);
-      vdata[k * 6 + 4] = clamp(g, 0.5, 1.8);
-      const c = Math.abs(nrm[i] * CAM[0] + nrm[i + 1] * CAM[1] + nrm[i + 2] * CAM[2]);
-      const c0 = Math.abs(nrm0[i] * CAM[0] + nrm0[i + 1] * CAM[1] + nrm0[i + 2] * CAM[2]);
-      vdata[k * 6 + 5] = clamp(Math.pow(c / Math.max(0.05, c0), 0.6), 0.3, 1.4);
+      vdata[k * VS + 4] = clamp(g, 0.5, 1.8);
+      // the view cosine, against the photograph's own: at rest the frame is
+      // the photograph, so the slant the dress was shot at is already in its
+      // bake. Turning further edge-on thickens it; turning squarer to the
+      // lens than it was shot thins it a little, as far as square on.
+      // how far it has moved from the photograph, 0 at rest and 1 by 6 cm
+      vdata[k * VS + 5] = Math.min(1, Math.hypot(x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2]) / 0.06);
+      vdata[k * VS + 6] = Math.min(1.18, 1 / Math.max(0.05, mu0[k]), mu[k] / Math.max(0.05, mu0[k]));
     }
     for (let i = 0; i < ropeN * 2; i++) {
       const k = N + i;
-      const u = vdata[k * 6 + 2];
-      const v = vdata[k * 6 + 3];
+      const u = vdata[k * VS + 2];
+      const v = vdata[k * VS + 3];
       cloth.ropeDisp((u - ROPE.left) / (ROPE.right - ROPE.left), disp);
-      project(u, v, disp[0], disp[1], disp[2], cu, cv, vdata, k * 6);
+      project(u, v, disp[0], disp[1], disp[2], cu, cv, vdata, k * VS);
     }
     void ropeRest;
   };
@@ -659,12 +748,44 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.bindVertexArray(clothVao);
     gl.bindBuffer(gl.ARRAY_BUFFER, vbuf);
     gl.bufferSubData(gl.ARRAY_BUFFER, 0, vdata);
+    gl.uniform1i(clothP.u.uPass, 0);
     for (const r of ranges) {
       gl.uniform1f(clothP.u.uId, r.id);
       gl.uniform3f(clothP.u.uTau, r.tau[0], r.tau[1], r.tau[2]);
       gl.uniform2f(clothP.u.uBand, r.band[0], r.band[1]);
       gl.uniform1f(clothP.u.uRim, RIM[r.id] ?? 0);
-      gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);
+      if (r.id === 3) gl.uniform4f(clothP.u.uTie, TIE[0], TIE[1], TIE[2], TIE[3]);
+      else gl.uniform4f(clothP.u.uTie, 0, 0, 0, 0);
+      const draw = () => gl.drawElements(gl.TRIANGLES, r.count, gl.UNSIGNED_INT, r.start * 4);
+      if (!r.sheer) {
+        draw();
+        continue;
+      }
+      // The sheer dress in two layers. Its triangles keep the photograph's
+      // winding (clockwise on screen, GL's back faces) until the cloth folds
+      // over: then the flipped part is a second layer lying over the first.
+      // The first layer marks the stencil; the flipped one is drawn over it,
+      // then drawn again where the two overlap, multiplied in.
+      gl.enable(gl.CULL_FACE);
+      gl.enable(gl.STENCIL_TEST);
+      gl.clear(gl.STENCIL_BUFFER_BIT);
+      gl.cullFace(gl.FRONT);
+      gl.stencilFunc(gl.ALWAYS, 1, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.REPLACE);
+      draw();
+      gl.cullFace(gl.BACK);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.KEEP);
+      draw();
+      // once per pixel: a third layer is rare, and would only darken twice
+      gl.stencilFunc(gl.EQUAL, 1, 0xff);
+      gl.stencilOp(gl.KEEP, gl.KEEP, gl.ZERO);
+      gl.blendFunc(gl.DST_COLOR, gl.ZERO);
+      gl.uniform1i(clothP.u.uPass, 1);
+      draw();
+      gl.uniform1i(clothP.u.uPass, 0);
+      gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
+      gl.disable(gl.STENCIL_TEST);
+      gl.disable(gl.CULL_FACE);
     }
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
@@ -761,6 +882,7 @@ export async function createSentaku(host, { embedded = false } = {}) {
         if (!t) continue;
         gl.deleteTexture(t.tex);
         gl.deleteFramebuffer(t.fbo);
+        if (t.rb) gl.deleteRenderbuffer(t.rb);
       }
       for (const t of [plateTex, layersTex, idsTex, blurTex]) gl.deleteTexture(t);
       for (const b of [quad, vbuf, ibuf]) gl.deleteBuffer(b);

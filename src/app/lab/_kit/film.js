@@ -35,6 +35,13 @@
 //   bloom        0..1  Pro-Mist diffusion: a share of all the light is spread
 //                through a 6-level pyramid (energy conserving), so bright
 //                areas veil softly into nearby shadows and lift them.     0.28
+//   bloomThreshold  scene luminance (linear) where the diffusion starts: 0
+//                spreads all the light; above 0 only the light past it (a
+//                soft knee from half to 1.5x) leaves its pixel, so a
+//                photographed sky keeps its own drawing and only the
+//                highlights veil. The dye-cloud colour bleed then reads its
+//                colour from a ~6 px spread of the input instead of the
+//                pyramid.                                                     0
 //   softness     0..1  optical softness and dye-cloud colour bleed: luma
 //                spread over 1-2 px, the colour ratio (hue, saturation) over
 //                ~8 px, so colour creeps across edges while drawing holds. 0.55
@@ -82,6 +89,7 @@ export const FILM_DEFAULTS = {
   halationColor: [1, 0.26, 0.1],
   halationLocal: 0,
   bloom: 0.28,
+  bloomThreshold: 0,
   softness: 0.55,
   contrast: 1.2,
   shoulder: 0.95,
@@ -164,7 +172,14 @@ void main() {
 const COMMON = `
 uniform float uInSRGB;
 uniform float uHeadroom;
+uniform float uMistThr;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+// The share of a pixel's light the diffusion takes: all of it, or above a
+// threshold only the highlights.
+float mistShare(vec3 s) {
+  if (uMistThr <= 0.0) return 1.0;
+  return smoothstep(uMistThr * 0.5, uMistThr * 1.5, dot(s, LUMA));
+}
 vec3 srgbToLinear(vec3 c) {
   c = clamp(c, 0.0, 1.0);
   return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
@@ -205,15 +220,19 @@ void main() {
   vec2 o = uInTexel;
   // Four bilinear taps cover a 4x4 block of the input: no shimmer on thin
   // bright edges.
-  vec3 c = toScene(texture(uIn, uv + vec2(-o.x, -o.y)).rgb) + toScene(texture(uIn, uv + vec2(o.x, -o.y)).rgb)
-         + toScene(texture(uIn, uv + vec2(-o.x, o.y)).rgb) + toScene(texture(uIn, uv + vec2(o.x, o.y)).rgb);
-  c *= 0.25;
+  vec3 t0 = toScene(texture(uIn, uv + vec2(-o.x, -o.y)).rgb);
+  vec3 t1 = toScene(texture(uIn, uv + vec2(o.x, -o.y)).rgb);
+  vec3 t2 = toScene(texture(uIn, uv + vec2(-o.x, o.y)).rgb);
+  vec3 t3 = toScene(texture(uIn, uv + vec2(o.x, o.y)).rgb);
+  vec3 c = (t0 + t1 + t2 + t3) * 0.25;
   float l = dot(c, LUMA);
+  // The light that diffuses (all of it unless there is a threshold).
+  vec3 mist = (t0 * mistShare(t0) + t1 * mistShare(t1) + t2 * mistShare(t2) + t3 * mistShare(t3)) * 0.25;
   // Soft knee so the halo grows smoothly out of the threshold.
   float k = uThreshold * 0.5;
   float x = clamp(l - uThreshold + k, 0.0, 2.0 * k);
   float h = max(x * x / (4.0 * k + 1e-5), l - uThreshold);
-  outColor = vec4(c, h) * uEnc;
+  outColor = vec4(mist, h) * uEnc;
 }`;
 
 // 13-tap downsample (Jimenez, CoD: Advanced Warfare).
@@ -334,10 +353,19 @@ void main() {
   float y = mix(ys, dot(near, LUMA), uSoft);
   vec3 hs = (sharp + E) / (ys + E);
   vec3 hb = (b1 + E) / (dot(b1, LUMA) + E);
+  if (uMistThr > 0.0) {
+    // The pyramid holds only the highlights: the colour bleed reads the
+    // input itself, about as wide as the quarter-res level.
+    vec2 q = 3.0 / uRes;
+    vec3 cb = 0.25 * (decode(texture(uIn, iuv + vec2(-q.x, -q.y)).rgb) + decode(texture(uIn, iuv + vec2(q.x, -q.y)).rgb)
+            + decode(texture(uIn, iuv + vec2(-q.x, q.y)).rgb) + decode(texture(uIn, iuv + vec2(q.x, q.y)).rgb));
+    hb = (cb + E) / (dot(cb, LUMA) + E);
+  }
   vec3 col = max(mix(hs, hb, uSoft * 0.8) * (y + E) - E, 0.0);
 
-  // Pro-Mist: a share of all the light leaves the image and lands spread out.
-  col = mix(col, wide.rgb, uBloom);
+  // Pro-Mist: a share of the light (all of it, or the highlights past the
+  // threshold) leaves the image and lands spread out.
+  col = col * (1.0 - uBloom * mistShare(toScene(texture(uIn, iuv).rgb))) + wide.rgb * uBloom;
 
   // Halation: extra red exposure from light bounced off the base, kept off the
   // highlight itself (the source has already saturated there).
@@ -543,6 +571,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform1f(P.prep.u.uEnc, enc);
     gl.uniform1f(P.prep.u.uInSRGB, inSRGB);
     gl.uniform1f(P.prep.u.uHeadroom, headroom);
+    gl.uniform1f(P.prep.u.uMistThr, Math.max(0, p.bloomThreshold));
     pass(down[0]);
 
     // 2. Down the pyramid.
@@ -589,6 +618,7 @@ export function createFilm(gl, { width = 1, height = 1 } = {}) {
     gl.uniform1f(c.uFlip, flip);
     gl.uniform1f(c.uInSRGB, inSRGB);
     gl.uniform1f(c.uHeadroom, headroom);
+    gl.uniform1f(c.uMistThr, Math.max(0, p.bloomThreshold));
     gl.uniform2f(c.uRes, W, H);
     gl.uniform1f(c.uExposure, 2 ** p.exposure);
     gl.uniform1f(c.uBloom, Math.min(1, Math.max(0, p.bloom)) * 0.45);
