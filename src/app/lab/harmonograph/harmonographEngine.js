@@ -124,14 +124,14 @@ const SETTLE_S = 1.6;
 // The sheet is a two-colour (then three-, four-colour) print. The pen draws
 // the key in near-black; when it comes down on a new figure, the one it
 // finished is pulled into the sheet as an impression in the next spot ink,
-// at full strength and overprinted (multiply), each plate a fraction of a
+// at full strength and overprinted (multiply), each plate about a
 // millimetre out of register with the key, as a riso or a jobbing
 // letterpress lays it. The key always prints last, over every spot.
 const SPOTS = [
-  { rgb: [232, 78, 44], mx: 1.5, my: -1.1 }, // vermilion
-  { rgb: [0, 112, 186], mx: -1.3, my: 1.4 }, // process blue
-  { rgb: [255, 76, 150], mx: 1.2, my: 1.5 }, // fluorescent pink
-  { rgb: [0, 128, 120], mx: -1.6, my: -1.2 }, // teal
+  { rgb: [232, 78, 44], mx: 3.5, my: -2.6 }, // vermilion
+  { rgb: [0, 112, 186], mx: -3, my: 3.3 }, // process blue
+  { rgb: [255, 76, 150], mx: 2.8, my: 3.5 }, // fluorescent pink
+  { rgb: [0, 128, 120], mx: -3.7, my: -2.8 }, // teal
 ];
 const NIB_GRAB = 26; // CSS px around the nib ring
 const ROD_GRAB = 12; // CSS px either side of the rod
@@ -313,13 +313,27 @@ export async function createHarmonograph(host) {
   };
   const inks = () => [curCtx];
 
-  // The key of a finished figure, as a plate in spot ink. The line is laid
-  // twice before it is flooded with colour: a little ink gain, so the
-  // hairlines print at full strength instead of as a pale tint.
+  // The key of a finished figure, as a plate in spot ink. The plate is a
+  // ground, not a second figure: the line is laid once and eroded before it
+  // is flooded with colour, so it engraves at about half the key's weight.
+  // The erosion keeps only what the raster still covers when stamped half a
+  // device pixel off each way in x and in y (a pixel off in all); half-pixel
+  // stamps, resampled, thin a hairline evenly where whole-pixel ones would
+  // break it into dashes on the pixel grid.
   const tint = () => {
     wipe(spotCtx);
     spotCtx.drawImage(prev, 0, 0);
-    spotCtx.drawImage(prev, 0, 0);
+    spotCtx.globalCompositeOperation = "destination-in";
+    spotCtx.imageSmoothingEnabled = true;
+    spotCtx.drawImage(prev, 0.5, 0);
+    spotCtx.drawImage(prev, -0.5, 0);
+    spotCtx.drawImage(prev, 0, 0.5);
+    spotCtx.drawImage(prev, 0, -0.5);
+    // What the erosion leaves of a hairline is pale; a little ink gain on
+    // the eroded plate brings it back to full strength without widening it.
+    spotCtx.globalCompositeOperation = "source-over";
+    spotCtx.drawImage(spot, 0, 0);
+    spotCtx.drawImage(spot, 0, 0);
     spotCtx.globalCompositeOperation = "source-in";
     spotCtx.fillStyle = `rgb(${pulling.rgb.join(",")})`;
     spotCtx.fillRect(0, 0, spot.width, spot.height);
