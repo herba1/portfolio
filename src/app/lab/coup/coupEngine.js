@@ -4,8 +4,9 @@
 // A sweep across the spread is the throw. Each throw composes a new
 // constellation under fixed rules on a hidden fourteen-column grid: the four
 // great capitals step down the spread on the diagonal, standing on column
-// lines; a capital that reaches the fold either takes the spine dead centre
-// or stands a column clear of it; each minor thread lands where it shares the
+// lines; one of them is the throw's thunderclap, near a quarter of the page
+// high, and takes the spine dead centre, while the other three fall away to
+// about a third of its size and each stands on a page, a column clear of it; each minor thread lands where it shares the
 // most edges with the capitals (a left edge, a right edge, a baseline, a cap
 // height, a column line), with whitespace only breaking ties; and only the
 // capitals may cross the gutter.
@@ -35,7 +36,9 @@ const BLOCKS = [
 ];
 const LINES = BLOCKS.flatMap((b, bi) => b.lines.map((text, li) => ({ text, tier: b.tier, voice: b.voice, block: bi, line: li })));
 
-const TIER1_SIZES = [20, 24, 28];
+// The threads in the roman whisper beside the capitals: small caps-height
+// lines at the semibold cut, thinning to the meta cut in flight.
+const TIER1_SIZES = [16, 18, 20];
 const TIER2_SIZES = [13, 14, 16, 18];
 
 // The house tracking law, applied to whatever size a line is at this frame.
@@ -176,7 +179,7 @@ export async function createCoup(host, { embedded = false } = {}) {
   };
 
   // Alignment is read off the ink, not the box: a capital at 84px stands a
-  // few pixels inside its own left edge, and a 14px line beside it barely
+  // few pixels inside its own left edge (the thunderclap many more), and a 14px line beside it barely
   // does. These are the glyph extents of a line at rest, relative to its box.
   const family = tok.fontFamily;
   const TIER2_W = [wt("--font-weight-meta", 440), wt("--font-weight-body-sm", 490)];
@@ -240,8 +243,8 @@ export async function createCoup(host, { embedded = false } = {}) {
   const GAP_X = () => Math.max(16, 24 * u);
   const GAP_Y = () => Math.max(8, 12 * u);
 
-  // The capitals take a new diagonal on every throw: their own sizes, their
-  // own stride, still stepping down the spread from left to right.
+  // The capitals take a new diagonal on every throw: a new thunderclap, their
+  // own sizes, their own stride, still stepping down the spread left to right.
   // The diagonal the capitals sit on now; a new throw must move them.
   let lastBig = null;
   const bigDistance = (a, b) => a.reduce((sum, p, j) => sum + Math.hypot(p.x - b[j].x, p.y - b[j].y) + Math.abs(p.s - b[j].s) * 4, 0) / a.length;
@@ -260,26 +263,37 @@ export async function createCoup(host, { embedded = false } = {}) {
 
   function composeBigOnce(rng, mX, mY) {
     const big = items.filter((it) => it.tier === 0);
-    let base = Math.round(Math.min(84 * u, H * 0.11));
     const { col, lines } = grid(mX);
-    // Some throws let a capital outgrow its page, and that one must take the
-    // spine; the rest keep every capital to a page, a column clear of it.
-    const room = spread ? (rng() < 0.6 ? W * 0.5 : W / 2 - mX - col) : W * 0.86;
-    const sizes = big.map(() => 0.5 + rng() * 0.5);
-    // one of them always carries the full weight of the page
-    sizes[Math.floor(rng() * 4)] = 1;
-    let px = sizes.map((f, j) => {
-      let s = Math.round(base * f);
-      const w = measure(big[j], s);
-      if (w > room) s = Math.floor((s * room) / w);
-      return Math.max(20, s);
+    // One capital per throw is the thunderclap: it stands at about a fifth of
+    // the page height and may span the whole spread. The other three step
+    // down from it along the diagonal to about a third of its size, so the
+    // spread has one shout and silence around it, not an even grey.
+    const shout = Math.round(H * 0.22);
+    const loud = Math.floor(rng() * 4);
+    const sizes = big.map((_, j) => {
+      if (j === loud) return 1;
+      const k = Math.abs(j - loud);
+      return 0.44 - k * 0.05 + (rng() - 0.5) * 0.03;
     });
+    // The thunderclap gets the live width and takes the spine; the quieter
+    // capitals each keep to a page, a column clear of it.
+    const live = spread ? W - mX * 2 : W * 0.86;
+    const pageRoom = spread ? W / 2 - mX - col : W * 0.86;
+    const fit = (j, s, room) => {
+      const w = measure(big[j], s);
+      return Math.max(20, w > room ? Math.floor((s * room) / w) : s);
+    };
+    // the quiet ones are a share of the shout as it is actually set, so a
+    // narrow page that shrinks the shout never lets them outgrow it
+    const top = fit(loud, shout, live);
+    let px = sizes.map((f, j) => (j === loud ? top : fit(j, Math.round(top * f), pageRoom)));
     // fit the four rows plus breathing room into the page height
     const avail = H - mY * 2;
     let hs = px.map(lineHeight);
     const minGap = GAP_Y() * 2;
+    // shrinking keeps the ratio, so the shout stays a shout
     while (hs.reduce((a, b) => a + b, 0) + minGap * 3 > avail * 0.86 && px.some((s) => s > 20)) {
-      px = px.map((s) => Math.max(20, s - 2));
+      px = px.map((s) => Math.max(20, Math.floor(s * 0.96)));
       hs = px.map(lineHeight);
     }
     const free = avail - hs.reduce((a, b) => a + b, 0) - minGap * 3;
@@ -321,8 +335,9 @@ export async function createCoup(host, { embedded = false } = {}) {
       // The fold: a capital either sits centred on the spine, on purpose,
       // or stands at least one column clear of it. Nothing in between.
       if (spread && a + span > S - col + 0.5 && a < S + col - 0.5) {
-        // one capital at most takes the spine: it is the throw's decision
-        const opts = centred ? [] : [{ a: S - span / 2, centred: true }];
+        // one capital at most takes the spine: it is the throw's decision,
+        // and the thunderclap's, which is too wide for a page
+        const opts = centred || j !== loud ? [] : [{ a: S - span / 2, centred: true }];
         // clearing it, the capital takes one of the first columns that do,
         // so the far side of the fold is not one long axis every throw
         const left = onCols.filter((q) => q + span <= S - col + 0.5);
