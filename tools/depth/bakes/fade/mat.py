@@ -6,7 +6,8 @@
 # Inputs: plate-fill.png (the 2000x1500 plate), m/stone.png and
 # m/stone-low.png (SAM 2.1 masks of the one wall whose render has gone,
 # leaving rough brown stone, in two pieces either side of a shutter), moge/
-# (validity: white = surface, black = sky), dose.npz (dose.py).
+# (validity: white = surface, black = sky), dose.npz (dose.py), canyon.npz
+# (canyon.py).
 #
 # The lane is painted almost everywhere: lime-and-pigment render in pink,
 # coral red, orange and ochre, white trim bands, green louvred shutters. The
@@ -24,10 +25,11 @@
 #                 G wood   lignin breakdown (none in this photo: 0)
 #                 B chalk  binder erodes, the white pigment powders out
 #                 A sens   overall susceptibility (0: sky and cloud)
-#   light.webp  lossless RGB at 1000x750:
+#   light.webp  lossless RGBA at 1000x750:
 #                 R annual dose / 2 (1.0 = an open south wall), from
 #                   dose.py's half-res dose_hi: the 1/4-res dose with the
-#                   tan lines of the thin occluders carved out of it
+#                   tan lines of the thin occluders carved out of it, times
+#                   canyon.py's slot of sky (the low storeys' far wall)
 #                 G the photo's own illumination S at that pixel, / 1.5, as
 #                   sqrt, so albedo = linear photo / S
 #                 B the tan lines: the share of the dose that the thin
@@ -35,6 +37,8 @@
 #                   shutter leaf or a lantern is out of the driving rain as
 #                   well as the sun, so the engine also takes the wash's wear
 #                   off it. (Without dose_hi, the old sky view factor.)
+#                 A 1 - sign / 2: the gelato sign (canyon.py), enamelled
+#                   metal, which fades evenly with no runoff or drips
 import sys, numpy as np, cv2
 from PIL import Image
 
@@ -96,12 +100,23 @@ print(f"E {E:.3f}; paint {float((paint > 0.5).mean()) * 100:.1f}% stone {float((
 S = np.maximum(S, 0.02)
 S = cv2.resize(S, (LW, LH), interpolation=cv2.INTER_AREA)
 dose_l = z["dose_hi"] if "dose_hi" in z else cv2.resize(dose, (LW, LH), interpolation=cv2.INTER_AREA)
+# the low storeys' slot of sky (canyon.py): the walls opposite that the frame
+# leaves out take their share of the beam and the sky; and the gelato sign's
+# own mask, which the engine keeps the runoff off
+try:
+    cz = np.load(wd + "/canyon.npz")
+    canyon, sign = cz["canyon"], cz["sign"]
+except FileNotFoundError:
+    canyon, sign = np.ones((LH, LW), np.float32), np.zeros((LH, LW), np.float32)
+dose_c = dose_l * canyon
 light = np.stack([
-    np.clip(dose_l / 2, 0, 1),
+    np.clip(dose_c / 2, 0, 1),
     np.sqrt(np.clip(S / 1.5, 0, 1)),
     np.clip(z["tan"] / np.maximum(dose_l + z["tan"], 1e-3), 0, 1) if "tan" in z else np.clip(cv2.resize(svf, (LW, LH), interpolation=cv2.INTER_AREA), 0, 1),
+    # alpha never below a half, so the browser's decode keeps RGB exact
+    1 - 0.5 * np.clip(sign, 0, 1),
 ], -1)
-Image.fromarray((light * 255 + 0.5).astype(np.uint8), "RGB").save(out + "/light.webp", lossless=True, quality=100, method=6)
+Image.fromarray((light * 255 + 0.5).astype(np.uint8), "RGBA").save(out + "/light.webp", lossless=True, quality=100, method=6, exact=True)
 Image.fromarray((img * 255 + 0.5).astype(np.uint8)).save(out + "/plate.webp", quality=90, method=6)
 np.save(wd + "/S.npy", S)
 print("wrote plate.webp, mat.webp, light.webp")

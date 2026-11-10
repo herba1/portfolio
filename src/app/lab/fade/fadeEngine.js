@@ -24,16 +24,30 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    its own dose-weighted (summer-heavy) mean sun and over its sky, so
 //    every one leaves a crisp, offset tan line of unfaded paint: the
 //    "something hung here for thirty years" mark, readable in one still.
+//    The march only sees what is in the frame, and the frame holds almost
+//    none of the low storeys across the lane, so it was generous to the low
+//    storeys of every wall. The far wall is put back analytically (canyon.py):
+//    each pixel's height above the lane from MoGe-2, a lane a few metres
+//    wide whose far wall stands as high as the skyline above it, and the
+//    share of the beam and the sky that wall takes, 1 - sin of its
+//    elevation: the slot of sky.
 //  - light.webp G: the photo's own illumination: the lane is in high sun, so
 //    one sun level (the white trim reflecting 0.85) plus a sky share by view
 //    factor, and albedo = photo / S.
 //  - light.webp B: the share of the dose those thin occluders take (the tan
 //    lines), which also keeps the wash's wear off the paint behind them.
+//  - light.webp A: 1 - sign / 2, the gelato sign's SAM mask: enamelled metal
+//    standing in the lane, which no ledge sheds water down, so it fades
+//    evenly, with no runoff tails, drips or patches.
 //  - mat.webp: how each pixel ages: the render fades per pigment and its
 //    lime binder chalks, the one bare stone wall barely moves, the sky and
 //    its cloud are inert.
 //
-// Live, per pixel, with e = years x dose x susceptibility:
+// Live, per pixel, with e = years x dose x susceptibility, where the dose is
+// the baked one on a power curve (2.4): paint holds below a threshold and
+// fails fast above it, so the top floors in the whole sky run far ahead of
+// the low storeys in their slot of it, and the coral wall facing north
+// hardly starts:
 //  - ink: albedo -> optical density per channel; the neutral part is carbon
 //    black, the rest is cyan (absorbs red), magenta (green) and yellow (blue),
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
@@ -42,8 +56,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //  - wood: lignin breaks down and brown wood goes silver grey (unused here:
 //    every surface in this photo is painted or stone);
 //  - chalk: the binder erodes and the white pigment powders out, lifting the
-//    paint towards the lime's own warm cream (never paper white), at most a
-//    quarter of the way, so the top floors keep a trace of their hue;
+//    paint towards a pale lime cream (never paper white), most of the way on
+//    the top floors, which keep only a trace of their hue under the bloom,
+//    and hardly at all on what is dark in the photo (window voids, the gaps
+//    behind shutters), which is not render;
 //  - and the dose itself is taken down to the scale of a ledge, baked once at
 //    load in the wall's own frame (up is toward the verticals' vanishing
 //    point, across is the angle around it): every sill, cornice and eave (an
@@ -84,16 +100,28 @@ const OPEN_AT = 3.2;
 const K_INK = [0.03, 0.13, 0.16]; // cyan, magenta, yellow
 const K_BLACK = 0.004;
 const K_WOOD = 0.1;
-const K_CHALK = 0.07;
-// At most a quarter of the surface powders to bare lime: even the most exposed
-// top floor keeps a trace of its own hue under the bloom.
-const CHALK_MAX = 0.25;
+const K_CHALK = 0.2;
+// Most of the most exposed surface powders to bare lime: the top floor goes to
+// pale plaster, a trace of its own hue still under the bloom.
+const CHALK_MAX = 0.85;
 const INDUCTION = 2.5;
 // Chalking needs the film itself to erode: only well-exposed paint gets there.
-const CHALK_INDUCTION = 7;
+const CHALK_INDUCTION = 5;
+// Fading is not linear in dose: below a threshold the UV absorbers and the
+// binder hold, above it the film erodes and each year takes more. The dose
+// that feeds the clock is the baked one on a power curve about DOSE_PIVOT, so
+// the sky-open top floors run far ahead of the low storeys in their slot of
+// sky (the bake's dose differs by three to five between them; the paint's
+// clock, by fifteen to fifty), and the coral wall facing north, at a tenth of
+// an open south wall, hardly starts.
+const DOSE_GAMMA = 2.4;
+const DOSE_PIVOT = 0.17;
 // The render under the pigment, and what the binder powders to: lime and
 // sand, a warm cream (sRGB hue, saturation, value), never paper white.
 const RENDER = [35, 0.12, 0.86];
+// What the chalk blooms to: the powdered lime and white pigment scatter, so
+// the bloom is lighter than the render under it, a pale lime cream.
+const BLOOM = [44, 0.15, 0.94];
 // Where the light falls at the scale of a ledge. Every sill, cornice and eave
 // shelters a strip of wall below it from sun and driving rain, out to about
 // its own depth; world up is toward the verticals' vanishing point, which the
@@ -332,7 +360,10 @@ uniform float uKChalk;
 uniform float uChalkMax;
 uniform float uInduction;
 uniform float uChalkInduction;
+uniform float uDoseGamma;
+uniform float uDosePivot;
 uniform vec3 uBase;
+uniform vec3 uBloom;
 uniform float uDebug;
 uniform float uPolar;
 uniform vec3 uZenith;
@@ -400,16 +431,26 @@ void main() {
   vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
   vec3 lin = toLin(texture(uPlate, uv).rgb);
   vec4 m = texture(uMat, uv);
-  vec3 L = texture(uLight, uv).rgb;
-  // the dose map's tan lines are baked crisp at half the plate; four taps
-  // 1.5 plate px off soften their edges by about 3 px, no more, so a ghost
-  // stays sharp beside the soft drips and tails
+  vec4 L = texture(uLight, uv);
+  // the dose map's tan lines are baked crisp at half the plate, one texel
+  // in or out of a shadow; the dose curve and the chalk make that edge a
+  // hard one, so eight taps (a diagonal ring 1.5 plate px off, a straight one
+  // 3 px off) round the texel steps of a slanting line away, and the ghost
+  // still stays sharp beside the soft drips and tails
   vec2 lt = 0.75 / vec2(textureSize(uLight, 0));
-  vec2 tl = 0.25 * (texture(uLight, uv + lt).rb + texture(uLight, uv - lt).rb
-    + texture(uLight, uv + vec2(lt.x, -lt.y)).rb + texture(uLight, uv + vec2(-lt.x, lt.y)).rb);
+  vec2 lw = 1.5 / vec2(textureSize(uLight, 0));
+  vec2 tl = 0.15 * (texture(uLight, uv + lt).rb + texture(uLight, uv - lt).rb
+    + texture(uLight, uv + vec2(lt.x, -lt.y)).rb + texture(uLight, uv + vec2(-lt.x, lt.y)).rb)
+    + 0.1 * (texture(uLight, uv + vec2(lw.x, 0.0)).rb + texture(uLight, uv - vec2(lw.x, 0.0)).rb
+    + texture(uLight, uv + vec2(0.0, lw.y)).rb + texture(uLight, uv - vec2(0.0, lw.y)).rb);
   float dose = tl.x * 2.0;
   // the share of the dose a thin occluder took: its tan line
   float tanLine = tl.y;
+  // the clock runs on the dose's power curve: the top floors far ahead
+  dose = uDosePivot * pow(max(dose, 0.0) / uDosePivot, uDoseGamma);
+  // the gelato sign (A = 1 - sign / 2) is enamelled sheet metal standing in
+  // the lane: no ledge sheds water down it, so it fades evenly
+  float sign = clamp(2.0 - 2.0 * L.a, 0.0, 1.0);
   float S = max(L.g * L.g * 1.5, 0.02);
   if (uDebug > 0.5 && uDebug < 1.5) {
     outColor = vec4(toSrgb(vec3(dose * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
@@ -437,6 +478,8 @@ void main() {
     // behind a leaf or a lantern the wall is out of the driving rain too:
     // its tan line keeps its colour like the strip under a sill
     wear = mix(wear, -1.0, clamp(tanLine * 1.6, 0.0, 1.0));
+    local = mix(local, 1.0, sign);
+    wear = mix(wear, 0.0, sign);
   }
   if (uDebug > 1.5) {
     outColor = vec4(toSrgb(vec3(dose * m.a * local * 0.5) * vec3(1.0, 0.97, 0.9)), 1.0);
@@ -470,9 +513,12 @@ void main() {
   vec3 aged = a + m.r * (aInk - a) + m.g * (aWood - a);
   // chalk: the binder erodes and the white pigment powders the surface
   float ec = max(e0 - uChalkInduction, 0.0);
-  // to the lime's own warm cream, the bloom heavier where the water runs
-  float c = m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear);
-  aged = mix(aged, max(aged, uBase * min(0.55 + 0.45 * dot(aged, LUMA) / 0.6, 1.0)), c);
+  // to the bloom's pale lime cream, heavier where the water runs. What is
+  // dark in the photo is mostly not render at all (a window's void, the
+  // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
+  float ya = dot(a, LUMA);
+  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.9) * smoothstep(0.02, 0.2, ya);
+  aged = mix(aged, max(aged, uBloom * min(0.4 + 0.6 * dot(aged, LUMA) / 0.5, 1.0)), c);
 
   vec3 outLin = max(lin + S * (aged - a), 0.0);
   // the sky is inert to the clock (A = 0), so its grade is the same every year
@@ -611,6 +657,7 @@ export async function createFade(host, { embedded = false } = {}) {
   const rim = hsvLin(SKY_RIM);
   const clearSky = hsvLin(SKY_CLEAR);
   const render = hsvLin(RENDER);
+  const bloom = hsvLin(BLOOM);
   const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
   const stage = createStage(host, { webgl: true, dpr: 2, antialias: false });
@@ -816,7 +863,10 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform1f(u.uChalkMax, CHALK_MAX);
     gl.uniform1f(u.uInduction, INDUCTION);
     gl.uniform1f(u.uChalkInduction, CHALK_INDUCTION);
+    gl.uniform1f(u.uDoseGamma, DOSE_GAMMA);
+    gl.uniform1f(u.uDosePivot, DOSE_PIVOT);
     gl.uniform3fv(u.uBase, render);
+    gl.uniform3fv(u.uBloom, bloom);
     gl.uniform2f(u.uPlateSize, PW, PH);
     gl.uniform2f(u.uVanish, VANISH[0], VANISH[1]);
     gl.uniform1f(u.uShelter, SHELTER);
