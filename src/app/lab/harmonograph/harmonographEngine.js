@@ -19,8 +19,11 @@ import { createNib } from "./penAudio";
 //
 // Ink is laid opaque on a transparent layer, so one continuous line never
 // beads where its segments meet. Width and density follow the pen's speed:
-// thin and a little grey where it races, wider and blacker where it slows,
-// tapering away as the swing nears the lift.
+// thin and a little grey where it races, wider and blacker where it slows.
+// They also follow how far the swing has wound in: the inner winds, where
+// the pen is slowest and the loops crowd closest, fine down to a hairline
+// instead of swelling, so the core resolves into moire and the spot plate
+// under it shows through.
 
 const TAU = Math.PI * 2;
 const H = 1 / 1600; // physics substep, seconds
@@ -430,8 +433,16 @@ export async function createHarmonograph(host) {
   const PACE_SLOW = 6; // and slower: the full, darkest line
   const PACE_FAST = 13; // and faster: the hairline
   const PRESS = 0.6; // reach (share of R) inside which the nib presses less
+  // Reach (share of R) inside which the line fines toward the hairline, on
+  // an eased curve so the middle third of the figure is already fine: at the
+  // lift it is HAIR wide in the fast ink whatever the pen's pace, and the
+  // slow inner turns no longer swell into a blot.
+  const WIND = 0.7;
+  const HAIR = 0.5; // CSS px
+  const WIND_STEPS = 6; // the wind-in is quantised too, so runs stay batched
   let runLevel = -1; // quantised tone of the run, 0..LEVELS
   let runTaper = -1; // quantised lift taper, 0..3
+  let runWind = -1; // quantised wind-in, 0..WIND_STEPS
   let runSegs = 0;
   let ramping = false;
   let runOpen = false;
@@ -469,7 +480,8 @@ export async function createHarmonograph(host) {
     tone = tone < 0 ? f0 : tone + (f0 - tone) * 0.12;
     const want = tone * LEVELS;
     const tq = Math.round(taper * 3);
-    let change = !runOpen || tq !== runTaper;
+    const wq = Math.round(smooth(LIFT, WIND, reachNow / R) * WIND_STEPS);
+    let change = !runOpen || tq !== runTaper || wq !== runWind;
     if (runLevel < 0) {
       runLevel = Math.round(want);
       change = true;
@@ -488,9 +500,12 @@ export async function createHarmonograph(host) {
     if (change) {
       flush();
       runTaper = tq;
+      runWind = wq;
       const f = runLevel / LEVELS;
-      const width = (0.45 + 1.35 * Math.pow(f, 1.3)) * (0.4 + 0.6 * (tq / 3));
-      const k = Math.min(1, f * 1.6);
+      const wind = (wq / WIND_STEPS) ** 1.6;
+      const full = (0.45 + 1.35 * Math.pow(f, 1.3)) * (0.4 + 0.6 * (tq / 3));
+      const width = Math.min(full, HAIR) + (full - Math.min(full, HAIR)) * wind;
+      const k = Math.min(1, f * 1.6) * wind;
       const r = INK_FAST[0] + (INK_DARK[0] - INK_FAST[0]) * k;
       const g = INK_FAST[1] + (INK_DARK[1] - INK_FAST[1]) * k;
       const b = INK_FAST[2] + (INK_DARK[2] - INK_FAST[2]) * k;
