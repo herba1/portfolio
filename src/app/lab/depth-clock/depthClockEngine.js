@@ -24,9 +24,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // disparity (sky barely, the time a little, the crowns most), and the cloud
 // drifts slowly on its own, so cumulus passes behind the figures while the
 // crowns cross in front. The figures are lit by the sky around them, pale and
-// never white, and bleed a little light into the air the way a diffusion
-// filter spreads a bright shape. The frame is then developed by the shared
-// film kit (summer preset).
+// never white, and bleed a broad, faint veil of their own light into the air.
+// The frame is then developed by the shared film kit (summer preset), whose
+// diffusion is keyed to the highlights: the figures and the cumulus share one
+// soft bloom, as from a single filter on the lens.
 //
 // Query (stills): ?tilt=x,y (-1..1) holds the camera; ?time=HH:MM holds the
 // clock. ?roll=0..1 holds a minute change part way through. ?drift=-1..1
@@ -60,6 +61,15 @@ const FILM = {
   input: "linear",
   headroom: 0,
   exposure: 0.35,
+  // One lens filter for the whole frame: the diffusion takes only the light
+  // past the clear blue (a soft knee from 0.22 to 0.68 of scene luminance),
+  // so the cumulus and the figures veil into the air around them alike while
+  // the sky and the needles keep their drawing.
+  bloom: 0.8,
+  bloomThreshold: 0.45,
+  // The all-over veil used to lift the deep crowns; the scan's black holds
+  // them where they were.
+  toe: 0.05,
 };
 
 const VERT = `#version 300 es
@@ -81,6 +91,7 @@ uniform vec4 uTextRect;   // device px, top-left origin: x0, y0, w, h
 uniform vec3 uPlane;      // amp, focus, numerals' disparity
 uniform float uNumL;      // numerals' radiance
 uniform float uBleed;     // share of the figures' light that diffuses
+uniform float uBleedLod;  // mip offset that scales the bleed with the figures
 uniform float uEnc;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${(IMG_W / IMG_H).toFixed(6)};
@@ -105,10 +116,21 @@ void main() {
   float bleed = 0.0;
   if (all(greaterThanEqual(tp, vec2(0.0))) && all(lessThanEqual(tp, vec2(1.0)))) {
     ta = texture(uText, tp).a;
-    // Diffusion bleed: the figures' own light spread over a tight core and a
-    // wide veil, as a Pro-Mist spreads a bright shape. The core sits on the
-    // edge (it softens the cut), the veil reaches into the air around.
-    bleed = 0.55 * textureLod(uText, tp, 3.0).a + 0.3 * textureLod(uText, tp, 5.0).a + 0.15 * textureLod(uText, tp, 6.5).a;
+    // Diffusion: the figures' own light spread the way a Pro-Mist spreads a
+    // bright shape, almost none of it on the edge and most of it in a broad,
+    // faint veil that falls off over about half a figure's height. Levels are
+    // picked against the figures' size (uBleedLod), and the widest is read as
+    // a tent of four taps so its coarse texels never show their corners. The
+    // pad round the figures leaves room for the veil to reach zero; the
+    // window only guarantees it.
+    float l3 = 3.0 + uBleedLod;
+    float l5 = 5.0 + uBleedLod;
+    float l7 = 7.0 + uBleedLod;
+    vec2 h7 = 0.5 * exp2(l7) / vec2(textureSize(uText, 0));
+    float wide = 0.25 * (textureLod(uText, tp + vec2(-h7.x, -h7.y), l7).a + textureLod(uText, tp + vec2(h7.x, -h7.y), l7).a
+                       + textureLod(uText, tp + vec2(-h7.x, h7.y), l7).a + textureLod(uText, tp + vec2(h7.x, h7.y), l7).a);
+    vec2 win = smoothstep(vec2(0.0), vec2(0.06), tp) * smoothstep(vec2(1.0), vec2(0.94), tp);
+    bleed = (0.15 * textureLod(uText, tp, l3).a + 0.35 * textureLod(uText, tp, l5).a + 0.5 * wide) * win.x * win.y;
   }
   if (ta > 0.0 || bleed > 0.0) {
     // Lit by the scene: sky light where the sky is around them, plain
@@ -197,7 +219,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   }
   const numQ = { cx: num(q.get("nx"), NUM.cx), cy: num(q.get("ny"), NUM.cy), size: num(q.get("ns"), NUM.size) };
   const numL = num(q.get("nl"), 0.85);
-  const bleedK = num(q.get("bleed"), 0.6);
+  const bleedK = num(q.get("bleed"), 0.4);
   const driftQ = q.get("drift") != null ? clamp(num(q.get("drift"), 0), -1, 1) : null;
   const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 
@@ -273,7 +295,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const film = createFilm(gl, { width: stage.canvas.width, height: stage.canvas.height });
 
   // ---- layout: which part of the image the box shows, where the time sits
-  const lay = { crop: [0, 0, 1, 1], drift: [0, 0], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, cell: 60, colon: 30, track: 0, baseX: 0 };
+  const lay = { crop: [0, 0, 1, 1], drift: [0, 0], s: 1, text: [0, 0, 1, 1], fontPx: 100, figH: 70, pad: 20, bleedLod: 0, cell: 60, colon: 30, track: 0, baseX: 0 };
   const layout = () => {
     const W = stage.width;
     const H = stage.height;
@@ -317,7 +339,12 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     lay.cell = cell;
     lay.colon = tctx.measureText(":").width;
     lay.figH = tctx.measureText("0").actualBoundingBoxAscent;
-    lay.pad = Math.ceil(lay.figH * 0.34);
+    // The bleed's mip levels are set for figures 280 device px tall; other
+    // sizes shift them so the veil keeps its proportion to the figures. The
+    // pad leaves room for the widest level (two and a half of its texels plus
+    // the tent) to fall to nothing inside the texture.
+    lay.bleedLod = Math.log2(Math.max(lay.figH, 1) / 280);
+    lay.pad = Math.ceil(lay.figH * 0.34 + 2.6 * 2 ** (7 + lay.bleedLod));
     lay.cx = (numQ.cx - x0) * s;
     lay.cy = (Math.min(numQ.cy, y0 + ch * 0.6) - y0) * s;
     lastText = "";
@@ -352,7 +379,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
   const drawText = (now) => {
     const W = Math.ceil(stage.width * stage.dpr);
     const span = glyphs("00:00").w + lay.cell;
-    const tw = Math.ceil(Math.min(W, span + lay.pad * 2));
+    const tw = Math.ceil(Math.min(W, span) + lay.pad * 2);
     const th = Math.ceil(lay.figH + lay.pad * 2);
     if (textCanvas.width !== tw || textCanvas.height !== th) {
       textCanvas.width = tw;
@@ -519,6 +546,7 @@ export async function createDepthClock(host, { embedded = false } = {}) {
     gl.uniform3f(u.uPlane, AMP, FOCUS, NUM_D);
     gl.uniform1f(u.uNumL, numL);
     gl.uniform1f(u.uBleed, bleedK);
+    gl.uniform1f(u.uBleedLod, lay.bleedLod);
     gl.uniform2f(u.uWind, wind.x, wind.y);
     gl.uniform1f(u.uEnc, ENC * enc);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
