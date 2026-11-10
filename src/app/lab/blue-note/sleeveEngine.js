@@ -7,15 +7,17 @@ import { loadCover } from "../_kit/covers";
 //
 // Six finished layouts sit on a 3 x 2 torus. Dragging scrubs a playhead from
 // one sleeve to the next, and nothing in between is ever a blend of two
-// sleeves: the sleeve is re-set. The photograph's crop moves first, one pair
-// of edges and then the other, so it always shares a line with one of the
-// two layouts. Then each word of the outgoing sleeve slides off past its own
-// edge of the square, a beat after the one before, and once the square holds
-// only the picture the incoming words slide in from the edges nearest their
-// new places. Every word's path is chosen so no two words ever cross, which
-// makes each frame of the drag a sleeve someone could have printed. Each ink
-// is drawn on its own plate and overprinted (multiply), the black plate a
-// hair out of register with the colour.
+// sleeves: the sleeve is re-set, the way a compositor slides type along a
+// galley. The whole handoff is one push in the direction of the drag. The
+// outgoing words are carried off the far edge in the order the push reaches
+// them, front word first, and the incoming words are carried in from the
+// near edge behind them, arriving while the last outgoing word is still on
+// the square. Every word travels at the one speed along the one axis, and
+// the timing is planned so that each frame still holds a whole word of the
+// title and at most one word caught by an edge. The photograph's crop moves
+// underneath, one pair of edges and then the other. Each ink is drawn on its
+// own plate and overprinted (multiply), the black plate a hair out of
+// register with the colour.
 
 const GROUND = "#f2f0eb";
 const BOARD = [247, 244, 237];
@@ -37,23 +39,14 @@ const ROWS = 2;
 const STEP = 0.42; // sleeve widths of drag per layout
 
 // The handoff, on a playhead u that runs 0 -> 1 from one sleeve to the next.
-// At its own pace the playhead takes TOUR_S seconds per sleeve, so a stagger
-// of STAGGER in u is about 40ms between words.
-const TOUR_S = 1;
-const STAGGER = 0.04 / TOUR_S;
+// At its own pace the playhead takes TOUR_S seconds per sleeve.
+const TOUR_S = 1.1;
 const PHOTO_END = 0.42; // the crop moves first: x edges, then y (or y, then x)
-const EXIT_AT = 0.03; // first word starts to leave
-const EXIT_LEN = 0.24;
-const BLOCK_OUT = [0.39, 0.46]; // a colour field leaves only once its words have
-const BLOCK_IN = [0.42, 0.49]; // and arrives before any word that sits in it
-const ENTER_AT = 0.5; // first word arrives once the square holds only the picture
-const ENTER_LEN = 0.32;
+const PUSH = [0.02, 0.98]; // the span of u the push is spread over
 
 const smoother = (u) => u * u * u * (u * (u * 6 - 15) + 10);
 const span = (u, a, b) => clamp((u - a) / (b - a), 0, 1);
 const lerp = (a, b, t) => a + (b - a) * t;
-const easeOut = (t) => 1 - Math.pow(1 - t, 4);
-const easeIn = (t) => t * t * t;
 const tracking = (px) => -0.043 * (px - 12);
 
 // ---------------------------------------------------------------- layouts
@@ -148,59 +141,223 @@ function wordBox(w, m) {
   return [x0, y0, x1, y1];
 }
 
-// The four ways off the square, as the shift that carries a box clear of it.
-const EXITS = [
-  (b) => [-(b[2] + 0.02), 0],
-  (b) => [1.02 - b[0], 0],
-  (b) => [0, -(b[3] + 0.02)],
-  (b) => [0, 1.02 - b[1]],
-];
-// Where word i of a sleeve sits, shifted along its way out, at progress e.
-const shifted = (b, d, e) => [b[0] + d[0] * e, b[1] + d[1] * e, b[2] + d[0] * e, b[3] + d[1] * e];
+// ---------------------------------------------------------------- the push
+// Lengths along the push are in sleeve widths; q runs 0 at the edge the new
+// sleeve comes in from to 1 at the edge the old one leaves by. Plan time is
+// in sleeve widths of travel, so every word moves at the one speed, and is
+// scaled onto u afterwards.
+const SOFT = 0.1; // a word is picked up and set down over this much travel
+const CLEAR = 0.012; // past the edge by this much, a word is gone
+// The gutter kept between a word of one sleeve and one of the next: about a
+// word space at the larger of the two sizes.
+const gutter = (p, q) => clamp(0.24 * Math.max(p.w ? p.w.s : 0, q.w ? q.w.s : 0), 0.03, 0.08);
+const NICK = 0.15; // an edge taking less than this of a word reads as a mistake
+const TS = 0.02; // plan resolution
+const soft = (d) => (d <= 0 ? 0 : d < SOFT ? (d * d) / (2 * SOFT) : d - SOFT / 2);
+const softInv = (x) => (x <= 0 ? 0 : x < SOFT / 2 ? Math.sqrt(2 * SOFT * x) : x + SOFT / 2);
+
 // The part of a box that is on the square; null when none is.
 const onSquare = (b) => {
   const c = [Math.max(0, b[0]), Math.max(0, b[1]), Math.min(1, b[2]), Math.min(1, b[3])];
   return c[2] > c[0] && c[3] > c[1] ? c : null;
 };
-// How much of two boxes share the square.
+// How much of two boxes overlap.
 const shared = (a, b) => (a && b ? Math.max(0, Math.min(a[2], b[2]) - Math.max(a[0], b[0])) * Math.max(0, Math.min(a[3], b[3]) - Math.max(a[1], b[1])) : 0);
+const grow = (b, p) => b && [b[0] - p, b[1] - p, b[2] + p, b[3] + p];
+// A box's extent along the push, and the box carried o along it.
+const along = (b, pv) => (pv[0] < 0 ? [1 - b[2], 1 - b[0]] : pv[0] > 0 ? [b[0], b[2]] : pv[1] < 0 ? [1 - b[3], 1 - b[1]] : [b[1], b[3]]);
+const carry = (b, pv, o) => [b[0] + pv[0] * o, b[1] + pv[1] * o, b[2] + pv[0] * o, b[3] + pv[1] * o];
 
-const exitProgress = (i, u) => easeIn(span(u, EXIT_AT + i * STAGGER, EXIT_AT + i * STAGGER + EXIT_LEN));
-const enterProgress = (i, u) => 1 - easeOut(span(u, ENTER_AT + i * STAGGER, ENTER_AT + i * STAGGER + ENTER_LEN));
+// The stretch of plan time over which a scheduled piece is moving.
+const life = (e) => (e.out ? [e.t, e.t + softInv(1 + CLEAR - e.q[0])] : [e.t - softInv(e.q[1] + CLEAR), e.t]);
+// Where element e of the plan sits at plan time t, as travel along the push.
+// An outgoing piece rests until it is picked up at e.t; an incoming one is
+// set down at e.t. A piece not yet planned is at rest (outgoing) or absent.
+const offsetAt = (e, t) => (e.out ? (e.t == null ? 0 : soft(t - e.t)) : e.t == null ? -Infinity : -soft(e.t - t));
+// Its state there: the box, how much of its length the push edges take,
+// whether it is whole (a title word the edges take no more of than its own
+// sleeve does: a word set bigger than the square counts while it shows at
+// least as much of itself as it does at rest) and whether it is nicked
+// (caught by an edge, but only just: the frame that reads as a mistake).
+function stateOf(e, o, pv) {
+  const box = carry(e.box, pv, o);
+  const vis = onSquare(box);
+  if (!vis) return { box, vis };
+  const [q0, q1] = e.q;
+  const cut = 1 - (Math.min(1, q1 + o) - Math.max(0, q0 + o)) / (q1 - q0);
+  const moved = Math.abs(o) > 1e-4;
+  return { box, vis, cut, moved, whole: e.title && (!moved || cut <= e.rest + 0.003), nicked: moved && cut > 0.003 && cut < NICK };
+}
 
-// Pick each word's way off so that no two words ever run into each other on
-// the square, leaving or arriving, taking the shortest total travel among
-// the ways that work. Leaving and arriving use the same way, reversed. Ink
-// boxes of a tight stack can share a sliver at rest (an i's dot under the
-// line above); a pair may never share more than that.
-function chooseExits(boxes) {
-  const n = boxes.length;
-  const rest = boxes.map((a) => boxes.map((b) => shared(onSquare(a), onSquare(b)) + 1e-5));
-  const clean = (dirs) => {
-    for (const phase of [exitProgress, enterProgress])
-      for (let s = 0; s <= 60; s++) {
-        const u = phase === exitProgress ? (s / 60) * 0.5 : 0.5 + (s / 60) * 0.5;
-        const at = boxes.map((b, i) => onSquare(shifted(b, dirs[i], phase(i, u))));
-        for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) if (shared(at[i], at[j]) > rest[i][j]) return false;
-      }
-    return true;
-  };
-  let best = null;
-  let bestCost = Infinity;
-  for (let code = 0; code < 4 ** n; code++) {
-    const dirs = [];
-    let cost = 0;
-    for (let i = 0, c = code; i < n; i++, c >>= 2) {
-      const d = EXITS[c & 3](boxes[i]);
-      dirs.push(d);
-      cost += Math.abs(d[0]) + Math.abs(d[1]);
-    }
-    if (cost < bestCost && clean(dirs)) {
-      best = dirs;
-      bestCost = cost;
+// The stretches of travel over which a piece is nicked, found once, and the
+// plan times they fall at once the piece is scheduled.
+function nickSpans(e, pv) {
+  const out = [];
+  const [lo, hi] = e.out ? [0, 1 + CLEAR - e.q[0]] : [-(e.q[1] + CLEAR), 0];
+  let open = null;
+  for (let o = lo; o <= hi + 1e-9; o += 0.001) {
+    const st = stateOf(e, o, pv);
+    const n = !!(st.vis && st.nicked);
+    if (n && open == null) open = o;
+    if (!n && open != null) {
+      out.push([open, o]);
+      open = null;
     }
   }
-  return best || boxes.map((b) => EXITS.map((f) => f(b)).sort((p, q) => Math.abs(p[0] + p[1]) - Math.abs(q[0] + q[1]))[0]);
+  if (open != null) out.push([open, hi]);
+  return out;
+}
+const nickTimes = (e) => e.nicks.map(([a, b]) => (e.out ? [e.t + softInv(a), e.t + softInv(b)] : [e.t - softInv(-a), e.t - softInv(-b)]).sort((x, y) => x - y));
+
+// Plan the push from sleeve A to sleeve B along pv. Outgoing words are picked
+// up front first and incoming words set down front first, each as early as
+// it can go without touching a word of the other sleeve and without a second
+// word being nicked at the same moment. A colour field travels as one piece
+// with the knocked-out words in it. If that leaves a moment with no whole
+// title word on the square, the last title word out is held back until an
+// incoming one has arrived.
+function planPush(A, B, pv) {
+  const make = (S, out) => {
+    const els = S.words.map((w, i) => {
+      const box = S.boxes[i];
+      const q = along(box, pv);
+      const e = { out, i, w, box, q, title: i < 3, knock: !w.k };
+      e.rest = stateOf({ ...e, rest: 0 }, 0, pv).cut || 0;
+      e.nicks = nickSpans(e, pv);
+      return e;
+    });
+    els.sort((a, b) => b.q[1] - a.q[1] || a.i - b.i);
+    let block = null;
+    if (S.block && S.block !== (out ? B.block : A.block)) {
+      const r = S.block;
+      const box = [r.x, r.y, r.x + r.w, r.y + r.h];
+      const inside = els.filter((e) => !e.w.k && !e.w.c && shared(e.box, box) > 0);
+      block = { out, block: true, box, q: along(box, pv), inside, knock: true };
+    }
+    return { els, block };
+  };
+  const run = (hold) => {
+    const a = make(A, true);
+    const b = make(B, false);
+    const all = [...a.els, ...b.els];
+    if (a.block) all.push(a.block);
+    if (b.block) all.push(b.block);
+    // Rest overlaps inside one sleeve are allowed; between sleeves, none.
+    const restShared = (p, q) => shared(onSquare(p.box), onSquare(q.box)) + 1e-5;
+    const clash = (p, q, sp, sq) => {
+      if (p.out === q.out) return !p.block && !q.block && shared(sp.vis, sq.vis) > restShared(p, q);
+      // A colour field only clashes with words that print no black.
+      if (p.block || q.block) return (p.block ? q : p).knock && shared(grow(sp.vis, gutter(p, q)), sq.vis) > 1e-5;
+      return shared(grow(sp.vis, gutter(p, q)), sq.vis) > 1e-5;
+    };
+    const fits = (e) => {
+      const [t0, t1] = life(e);
+      for (let t = Math.max(0, t0); t <= t1 + 1e-9; t += TS / 2) {
+        const se = stateOf(e, offsetAt(e, t), pv);
+        if (!se.vis) continue;
+        for (const f of all) {
+          if (f === e || (f.t == null && !f.out)) continue;
+          const sf = stateOf(f, offsetAt(f, t), pv);
+          if (sf.vis && clash(e, f, se, sf)) return false;
+        }
+      }
+      // A thin word can cross an edge between two samples, so the moments
+      // it is nicked are kept apart exactly.
+      if (e.block) return true;
+      const mine = nickTimes(e);
+      for (const f of all) {
+        if (f === e || f.block || f.t == null) continue;
+        for (const [a0, a1] of mine) for (const [b0, b1] of nickTimes(f)) if (a0 < b1 + TS / 4 && b0 < a1 + TS / 4) return false;
+      }
+      return true;
+    };
+    const place = (e, from) => {
+      for (e.t = from; !fits(e); e.t += TS) if (e.t > 12) break;
+    };
+    // Outgoing, front first.
+    let t = 0;
+    const lastTitle = a.els.filter((e) => e.title).pop();
+    for (const e of a.els) {
+      let from = t;
+      if (e === lastTitle) from = Math.max(from, hold);
+      if (a.block && a.block.inside.includes(e)) from = Math.max(from, 0);
+      place(e, from);
+      t = e.t;
+    }
+    if (a.block) {
+      const r = a.block;
+      r.t = Math.max(0, ...r.inside.map((e) => e.t - (e.q[0] - r.q[0]) + 0.01));
+    }
+    // Incoming, front first, none before the first word has started to leave.
+    const firstOff = Math.min(...a.els.map((e) => e.t + softInv(Math.max(0, 1 - e.q[1]))));
+    if (b.block) {
+      const r = b.block;
+      place(r, Math.max(softInv(r.q[1] + CLEAR), firstOff + softInv(r.q[1])));
+    }
+    // Words of one lane arrive front first because they may not pass
+    // through each other; words of different lanes arrive as soon as they can.
+    for (const e of b.els) {
+      let from = Math.max(softInv(e.q[1] + CLEAR), firstOff + softInv(e.q[1]));
+      if (b.block && b.block.inside.includes(e)) from = Math.max(from, b.block.t);
+      place(e, from);
+    }
+    const end = Math.max(...all.map((e) => life(e)[1]));
+    return { all, a, b, end, pv };
+  };
+  // Hold the last title word out until the title is never missing.
+  let plan = null;
+  for (let hold = 0; hold <= 3; hold += 0.1) {
+    plan = run(hold);
+    if (wholeThroughout(plan)) break;
+  }
+  return squeeze(plan);
+}
+// Holding a word back can leave stretches where nothing on the square
+// moves, and a drag through one would push nothing. Every piece is either
+// done before such a stretch or starts after it, so the stretch is cut out,
+// keeping only a beat, and the frames either side are exactly what they
+// were.
+const BEAT = 0.05;
+function squeeze(plan) {
+  const lives = plan.all.filter((e) => e.t != null).map(life).sort((a, b) => a[0] - b[0]);
+  const gaps = [];
+  let reach = 0;
+  for (const [a, b] of lives) {
+    if (a > reach + 1e-6) gaps.push([reach, a, reach === 0 ? 0 : BEAT]);
+    reach = Math.max(reach, b);
+  }
+  for (const [a, b, keep] of gaps.reverse()) {
+    const cut = b - a - keep;
+    if (cut <= 1e-6) continue;
+    for (const e of plan.all) if (e.t != null && life(e)[0] >= b - 1e-6) e.t -= cut;
+    plan.end -= cut;
+  }
+  plan.squeezed = gaps.reduce((n, [a, b, keep]) => n + Math.max(0, b - a - keep), 0);
+  return plan;
+}
+function wholeThroughout(plan) {
+  for (let t = 0; t <= plan.end; t += TS / 2) if (!plan.all.some((e) => !e.block && stateOf(e, offsetAt(e, t), plan.pv).whole)) return false;
+  return true;
+}
+// Plan time at playhead u.
+const planTime = (plan, u) => clamp((u - PUSH[0]) / (PUSH[1] - PUSH[0]), 0, 1) * plan.end;
+
+// The check, at the resolution a reviewer would scrub at: from u = 0 to 1 in
+// steps of 0.05, at least one whole title word is on the square, and no more
+// than one piece (the word in hand, crossing an edge) is cut by an edge by
+// less than NICK of its length. Returns the failures.
+function auditPlan(plan, step = 0.05) {
+  const bad = [];
+  for (let k = 0; k <= Math.round(1 / step); k++) {
+    const u = k * step;
+    const t = planTime(plan, u);
+    const st = plan.all.filter((e) => !e.block).map((e) => ({ e, s: stateOf(e, offsetAt(e, t), plan.pv) }));
+    const whole = st.filter(({ s }) => s.vis && s.whole).length;
+    const nicked = st.filter(({ s }) => s.vis && s.nicked);
+    if (!whole) bad.push({ u: +u.toFixed(2), why: "no whole title word" });
+    if (nicked.length > 1) bad.push({ u: +u.toFixed(2), why: `${nicked.length} words nicked` });
+  }
+  return bad;
 }
 
 // ---------------------------------------------------------------- plates
@@ -343,29 +500,23 @@ function makeBoard(px) {
   });
 }
 
-// Ink wear: blotchy density plus pinholes where the board's tooth broke the
-// ink film. Screened over the print, so it only lifts the inks.
+// Ink film: a solid laid on board is flat, so there is no cloud in it, only
+// the board's tooth showing through at the scale of its fibres, and
+// pinholes where the tooth broke the film. Screened over the print, so it
+// only lifts the inks.
 function makeWear(px) {
-  const small = noiseCanvas(48, 48, (g) => {
-    const img = g.createImageData(48, 48);
+  return noiseCanvas(px, px, (g, w, h) => {
+    const img = g.createImageData(w, h);
     let seed = 3;
     const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < 48 * 48; i++) {
-      const v = rnd() * 22;
+    for (let i = 0; i < w * h; i++) {
+      const r = rnd();
+      const v = r * r * 14;
       img.data[i * 4] = img.data[i * 4 + 1] = img.data[i * 4 + 2] = v;
       img.data[i * 4 + 3] = 255;
     }
     g.putImageData(img, 0, 0);
-  });
-  return noiseCanvas(px, px, (g, w, h) => {
-    g.imageSmoothingEnabled = true;
-    g.imageSmoothingQuality = "high";
-    g.filter = `blur(${w / 160}px)`;
-    g.drawImage(small, -w * 0.05, -h * 0.05, w * 1.1, h * 1.1);
-    g.filter = "none";
-    let seed = 5;
-    const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-    for (let i = 0; i < (w * h) / 260; i++) {
+    for (let i = 0; i < (w * h) / 320; i++) {
       const v = 40 + rnd() * 90;
       g.fillStyle = `rgb(${v},${v},${v})`;
       const r = (0.4 + rnd() * 0.9) * (w / 1200);
@@ -373,7 +524,6 @@ function makeWear(px) {
     }
   });
 }
-
 
 // ---------------------------------------------------------------- engine
 export async function createSleeve(host) {
@@ -414,11 +564,52 @@ export async function createSleeve(host) {
   };
   const metrics = TEXT.map((_, i) => metric(i));
   const adv = { let: metrics[0].w, it: metrics[1].w, be: metrics[2].w };
-  const sleeves = layouts(adv).map((L) => {
+  const sleeves = layouts(adv).map((L, idx) => {
     const words = [...L.words, L.credit];
     const boxes = words.map((w, i) => wordBox(w, metrics[i]));
-    return { ...L, words, boxes, exits: chooseExits(boxes) };
+    return { ...L, idx, words, boxes };
   });
+  // Each handoff is planned once, ahead of time where the browser has a
+  // spare moment, otherwise the first time it is played.
+  const plans = new Map();
+  const planFor = (A, B, pv) => {
+    const key = `${A.idx}>${B.idx}:${pv}`;
+    if (!plans.has(key)) plans.set(key, planPush(A, B, pv));
+    return plans.get(key);
+  };
+  // Every handoff on the torus, both ways along both axes. The push runs
+  // against the step: the sleeve to the right is reached by pushing left.
+  const handoffs = [];
+  for (const A of sleeves)
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+      const ax = A.idx % COLS;
+      const ay = Math.floor(A.idx / COLS);
+      const B = sleeves[(((ay + dy) % ROWS) + ROWS) % ROWS * COLS + ((((ax + dx) % COLS) + COLS) % COLS)];
+      handoffs.push({ A, B, pv: [-dx, -dy], label: `${A.idx}>${B.idx} ${dx + dy > 0 ? "+" : "-"}${dx ? "x" : "y"}` });
+    }
+  let alive = true;
+  const idle = window.requestIdleCallback ? (f) => window.requestIdleCallback(f, { timeout: 400 }) : (f) => setTimeout(f, 30);
+  const planAhead = (k) => {
+    if (!alive || k >= handoffs.length) return;
+    const { A, B, pv } = handoffs[k];
+    planFor(A, B, pv);
+    idle(() => planAhead(k + 1));
+  };
+  // ?check audits every handoff.
+  if (params.has("check")) {
+    const report = [];
+    const t0 = performance.now();
+    for (const { A, B, pv, label } of handoffs) {
+      const plan = planFor(A, B, pv);
+      const lastOut = Math.max(...plan.a.els.map((e) => e.t + softInv(1 + CLEAR - e.q[0])));
+      const firstIn = Math.min(...plan.b.els.map((e) => e.t - softInv(e.q[1])));
+      if (params.get("check") === "v") console.log(`plan ${label}`, plan.all.map((e) => `${e.out ? "A" : "B"}${e.block ? "block" : TEXT[e.i]}@${e.t.toFixed(2)} q${e.q.map((v) => v.toFixed(2))}`).join(" | "));
+      report.push({ pair: label, end: +plan.end.toFixed(2), squeezed: +plan.squeezed.toFixed(2), overlap: firstIn < lastOut, bad: auditPlan(plan), fine: auditPlan(plan, 0.01) });
+    }
+    const failed = report.filter((r) => r.bad.length || !r.overlap);
+    console.log(`blue-note check: ${report.length - failed.length}/${report.length} handoffs pass, planned in ${Math.round(performance.now() - t0)}ms`, JSON.stringify(report));
+    host.dataset.check = failed.length ? "fail" : "pass";
+  }
   // Which pair of crop edges moves first: the order whose first move runs
   // the picture under less of the outgoing words, which are still there.
   const firstEdges = (A, B) => {
@@ -467,7 +658,10 @@ export async function createSleeve(host) {
     const whole = Math.floor(Math.abs(p) + 1e-6);
     const u = Math.abs(p) - whole;
     const step = (k) => (axis === "x" ? sleeveAt(base.x + dir * k, base.y) : sleeveAt(base.x, base.y + dir * k));
-    return { A: step(whole), B: step(whole + 1), u: u < 1e-5 ? 0 : u };
+    // The push runs the way the finger does: a drag toward -x carries the
+    // type toward -x.
+    const pv = axis === "x" ? [-dir, 0] : [0, -dir];
+    return { A: step(whole), B: step(whole + 1), u: u < 1e-5 ? 0 : u, pv };
   };
 
   // ------------------------------------------------------------ layers
@@ -556,14 +750,14 @@ export async function createSleeve(host) {
     const v0 = clamp(fy - uh / 2, 0, 1 - uh);
     l.drawImage(plates[p], u0 * PLATE, v0 * PLATE, uw * PLATE, uh * PLATE, x * S, y * S, w * S, h * S);
   };
-  const drawWord = (l, which, i, w, d, e) => {
+  const drawWord = (l, which, i, w, d) => {
     const px = w.s * S;
     if (px < 1) return;
     // A plate prints a word or knocks it out; a word neither plate prints is
     // reversed out of the ink beneath it.
     const on = which === "k" ? w.k : w.c;
     l.save();
-    l.translate((w.x + d[0] * e) * S, (w.y + d[1] * e) * S);
+    l.translate((w.x + d[0]) * S, (w.y + d[1]) * S);
     l.rotate((w.r * Math.PI) / 180);
     l.scale(w.sx, 1);
     l.font = `${weightOf(i)} ${px}px ${family}`;
@@ -572,13 +766,12 @@ export async function createSleeve(host) {
     l.fillText(TEXT[i], 0, 0);
     l.restore();
   };
-  // A field of colour wipes off toward the edge it hangs from.
-  const drawBlock = (l, which, b, f) => {
-    if (!b || f <= 0) return;
-    const h = b.h * f;
-    const y = b.y + b.h > 0.999 ? b.y + b.h - h : b.y;
+  // A field of colour is one piece of the push, carried with the words
+  // reversed out of it.
+  const drawBlock = (l, which, b, d = [0, 0]) => {
+    if (!b) return;
     l.fillStyle = which === "c" ? `rgb(${COLOUR.join(",")})` : "#fff";
-    l.fillRect(b.x * S, y * S, b.w * S, h * S);
+    l.fillRect((b.x + d[0]) * S, (b.y + d[1]) * S, b.w * S, b.h * S);
   };
   // The crop moves first, one pair of edges at a time, so the picture always
   // shares a line with one of the two sleeves; the portrait on the press
@@ -602,31 +795,37 @@ export async function createSleeve(host) {
       p: src.p,
     };
   };
-  const drawPlate = (l, which, dpr, { A, B, u }) => {
+  const drawPlate = (l, which, dpr, { A, B, u, pv }) => {
     l.setTransform(dpr, 0, 0, dpr, 0, 0);
     l.globalAlpha = 1;
     l.fillStyle = "#fff";
     l.fillRect(0, 0, S, S);
+    const still = [0, 0];
     if (u === 0) {
-      drawBlock(l, which, A.block, 1);
       if (which === "c") drawPhoto(l, A.photo);
-      A.words.forEach((w, i) => drawWord(l, which, i, w, A.exits[i], 0));
+      drawBlock(l, which, A.block);
+      A.words.forEach((w, i) => drawWord(l, which, i, w, still));
       return;
     }
-    if (A.block === B.block) drawBlock(l, which, A.block, 1);
-    else {
-      drawBlock(l, which, A.block, 1 - smoother(span(u, ...BLOCK_OUT)));
-      drawBlock(l, which, B.block, smoother(span(u, ...BLOCK_IN)));
-    }
+    const plan = planFor(A, B, pv);
+    const t = planTime(plan, u);
+    const at = (e) => {
+      const o = offsetAt(e, t);
+      return [pv[0] * o, pv[1] * o];
+    };
+    // The crop moves under the colour field: the field is a piece of the
+    // push and keeps the words reversed out of it.
     if (which === "c") drawPhoto(l, photoAt(A, B, u));
-    A.words.forEach((w, i) => {
-      const e = exitProgress(i, u);
-      if (e < 1) drawWord(l, which, i, w, A.exits[i], e);
-    });
-    B.words.forEach((w, i) => {
-      const e = enterProgress(i, u);
-      if (e < 1) drawWord(l, which, i, w, B.exits[i], e);
-    });
+    if (A.block === B.block) drawBlock(l, which, A.block);
+    else {
+      if (plan.a.block) drawBlock(l, which, A.block, at(plan.a.block));
+      if (plan.b.block) drawBlock(l, which, B.block, at(plan.b.block));
+    }
+    for (const e of plan.all) {
+      if (e.block) continue;
+      const d = at(e);
+      if (Number.isFinite(d[0]) && Number.isFinite(d[1]) && onSquare(carry(e.box, pv, offsetAt(e, t)))) drawWord(l, which, e.i, e.w, d);
+    }
   };
 
   stage.onFrame((dt, t) => {
@@ -710,5 +909,12 @@ export async function createSleeve(host) {
     ctx.restore();
   });
 
-  return { destroy: () => stage.destroy() };
+  idle(() => planAhead(0));
+
+  return {
+    destroy: () => {
+      alive = false;
+      stage.destroy();
+    },
+  };
 }
