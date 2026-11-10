@@ -2,9 +2,10 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
-import { useTopSongs } from "@/app/lab/_music/useTopSongs";
 import { BODY, COLON_L, COLON_R, FADE, GAP_EM, LEAD_LSB, LEAD_OPT_R, OPT_L, OPT_R, PANEL, REMAIN_W, ROW, colonSpan, flat, isFade, layout, leadOf, trackPx } from "./states";
 import { squircle } from "./squircle";
+import { TRACKS } from "./records";
+import Sleeve from "./Sleeve";
 
 import "./morph.css";
 
@@ -41,9 +42,11 @@ const WHEEL_ZETA = 0.78;
 // of it, followed through a roll, so its two gaps stay equal as the wheels
 // turn (see colonSpan in states.js).
 
-// The fallback catalogue carries no lengths, so each title gets a stable one
+// Every record carries its length; anything without one gets a stable length
 // in a plausible range rather than a random one per visit.
-function durationOf(title = "") {
+function durationOf(track) {
+  if (track?.dur) return track.dur;
+  const title = track?.title || "";
   let h = 2166136261;
   for (let i = 0; i < title.length; i += 1) h = Math.imul(h ^ title.charCodeAt(i), 16777619);
   return 132 + ((h >>> 0) % 118);
@@ -64,85 +67,21 @@ const HOLD_SPAN = 0.6; // ?t=1 is this many seconds into the morph
 const TOAST_LEAD = 4.5; // seconds before the end the next track is announced
 const TOAST_HOLD = 5600; // ms the toast stays up
 
-// Mean of the most saturated quarter of an 8x8 thumbnail, lifted so it holds
-// on black: a waveform tint drawn from the record, not a theme colour.
-const tintCache = new Map();
-function tintOf(src) {
-  if (!tintCache.has(src))
-    tintCache.set(
-      src,
-      new Promise((resolve) => {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.onload = () => {
-          try {
-            const c = document.createElement("canvas");
-            c.width = c.height = 8;
-            const g = c.getContext("2d", { willReadFrequently: true });
-            g.drawImage(img, 0, 0, 8, 8);
-            const d = g.getImageData(0, 0, 8, 8).data;
-            const px = [];
-            for (let i = 0; i < d.length; i += 4) {
-              const r = d[i] / 255;
-              const gg = d[i + 1] / 255;
-              const b = d[i + 2] / 255;
-              const mx = Math.max(r, gg, b);
-              const mn = Math.min(r, gg, b);
-              px.push({ r, g: gg, b, s: mx === 0 ? 0 : (mx - mn) / mx, l: (mx + mn) / 2 });
-            }
-            px.sort((p, q) => q.s - p.s);
-            const top = px.slice(0, 16);
-            let r = 0;
-            let gg = 0;
-            let b = 0;
-            for (const p of top) {
-              r += p.r;
-              gg += p.g;
-              b += p.b;
-            }
-            r /= top.length;
-            gg /= top.length;
-            b /= top.length;
-            // to HSL, then hold lightness and saturation in a band that reads on black
-            const mx = Math.max(r, gg, b);
-            const mn = Math.min(r, gg, b);
-            let h = 0;
-            const l = (mx + mn) / 2;
-            const dd = mx - mn;
-            const s = dd === 0 ? 0 : dd / (1 - Math.abs(2 * l - 1));
-            if (dd) {
-              if (mx === r) h = ((gg - b) / dd) % 6;
-              else if (mx === gg) h = (b - r) / dd + 2;
-              else h = (r - gg) / dd + 4;
-              h *= 60;
-              if (h < 0) h += 360;
-            }
-            const S = s < 0.12 ? 0 : clamp(s * 1.2, 0.45, 0.85);
-            const L = S === 0 ? 0.86 : clamp(l, 0.64, 0.74);
-            resolve(`hsl(${Math.round(h)} ${Math.round(S * 100)}% ${Math.round(L * 100)}%)`);
-          } catch {
-            resolve(null);
-          }
-        };
-        img.onerror = () => resolve(null);
-        img.src = src;
-      }),
-    );
-  return tintCache.get(src);
-}
-
-// Cover art that never pops: a new image lands on top of the old one and
+// The sleeve never pops: a new record lands on top of the old one and
 // arrives out of a slight blur and scale; the old one is dropped once covered.
-function Art({ src }) {
-  const [layers, setLayers] = useState(() => (src ? [{ src, id: 0 }] : []));
+function Art({ track }) {
+  const id = track?.id;
+  const [layers, setLayers] = useState(() => (track ? [{ track, id: 0 }] : []));
   const n = useRef(0);
   useEffect(() => {
-    if (!src) return;
-    setLayers((ls) => (ls.length && ls[ls.length - 1].src === src ? ls : [...ls.slice(-1), { src, id: (n.current += 1) }]));
+    if (!track) return;
+    setLayers((ls) => (ls.length && ls[ls.length - 1].track.id === track.id ? ls : [...ls.slice(-1), { track, id: (n.current += 1) }]));
     const t = setTimeout(() => setLayers((ls) => ls.slice(-1)), 520);
     return () => clearTimeout(t);
-  }, [src]);
-  return layers.map((l) => <img key={l.id} src={l.src} alt="" draggable={false} className="mp-art-img" data-fresh={l.id > 0 ? "" : undefined} />);
+    // a record is its id: a fresh object for the same record is not a new sleeve
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id]);
+  return layers.map((l) => <Sleeve key={l.id} track={l.track} className="mp-art-img" data-fresh={l.id > 0 ? "" : undefined} />);
 }
 
 const Icon = {
@@ -155,7 +94,7 @@ const Icon = {
 };
 
 export default function Piece() {
-  const { tracks } = useTopSongs(12);
+  const tracks = TRACKS;
 
   const rootRef = useRef(null);
   const anchorRef = useRef(null);
@@ -180,7 +119,6 @@ export default function Piece() {
   const [hover, setHover] = useState(false);
   const [press, setPress] = useState(false);
   const [scrubbing, setScrubbing] = useState(false);
-  const [tint, setTint] = useState(null);
 
   const springs = useRef(null);
   const target = useRef(null);
@@ -189,7 +127,7 @@ export default function Piece() {
   const count = tracks.length || 1;
   const track = tracks[idx % count];
   const toastTrack = tracks[toastIdx % count];
-  const dur = durationOf(track?.title);
+  const dur = durationOf(track);
   const lead = leadOf(sec);
   const shown = mode === "toast" ? toastTrack : track;
 
@@ -450,7 +388,7 @@ export default function Piece() {
       }
     } catch {}
 
-    L.dur = durationOf(tracks[0]?.title);
+    L.dur = durationOf(tracks[0]);
     if (held) {
       L.frozen = true;
       L.elapsed = 83;
@@ -496,18 +434,6 @@ export default function Piece() {
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // tint from the art on show
-  useEffect(() => {
-    let alive = true;
-    if (shown?.image)
-      tintOf(shown.image).then((c) => {
-        if (alive && c) setTint(c);
-      });
-    return () => {
-      alive = false;
-    };
-  }, [shown?.image]);
 
   // ---- actions -------------------------------------------------------------
 
@@ -649,7 +575,8 @@ export default function Piece() {
           role="group"
           aria-label={track ? `Now playing: ${track.title}, ${track.artist}` : "Now playing"}
           tabIndex={0}
-          style={tint ? { "--mp-tint": tint } : undefined}
+          // the waveform's tint is the record's own field, lifted to hold on black
+          style={shown?.tint ? { "--mp-tint": shown.tint } : undefined}
           onClick={onSurfaceClick}
           onKeyDown={onKey}
           onPointerEnter={(e) => {
@@ -681,7 +608,7 @@ export default function Piece() {
             onPointerLeave={artUp}
             onPointerCancel={artUp}
           >
-            <Art src={shown?.imageLarge || shown?.image} />
+            <Art track={shown} />
           </div>
 
           {/* shared: waveform */}
