@@ -87,8 +87,8 @@ void main() {
   // clouds drift past it, so round it the sky is read where it was shot.
   vec2 sd = (uv - SUN) * vec2(${ASPECT.toFixed(2)}, 1.0);
   float r = length(sd);
-  // Right at the sun the HDRI's core is clipped (sky_hdri.py holds it to the
-  // brightest cloud); within a radius or two it is read softened, so the
+  // Right at the sun the HDRI's core is held (sky_hdri.py holds it softly,
+  // above the silver-lit cloud round it); within a radius or two it is read softened, so the
   // clipped core melts into a smooth mound for the glow below to sit on,
   // and the cloud round it keeps its own texture.
   vec3 near = toLin(textureLod(uSky, uv, uSkyLod.y + 3.0).rgb);
@@ -124,20 +124,20 @@ void main() {
   // colour leans to cream, so no channel is pushed toward the clip on its
   // own; the shoulder at the end decides how bright. Cloud only: the open
   // blue (which also reaches these levels) is left alone.
-  float hl = smoothstep(0.55, 1.0, max(sky.r, max(sky.g, sky.b))) * (1.0 - blue);
+  // Only the top tenth of luminance leans, and only part way: a cream mix
+  // over the whole lit cloud flattened it into one value, so the domes keep
+  // their own modelling and only their very tops warm.
+  float hl = smoothstep(0.8, 1.0, max(sky.r, max(sky.g, sky.b))) * (1.0 - blue);
   const vec3 CREAM = vec3(1.0, 0.86, 0.66);
   float Yh = dot(sky, vec3(0.2126, 0.7152, 0.0722));
-  sky = mix(sky, Yh * CREAM / dot(CREAM, vec3(0.2126, 0.7152, 0.0722)), 0.7 * hl * hl);
-  // and carried up into the shoulder as a whole (one gain on all three
-  // channels, so the hue holds): the brightest tops spread over its upper
-  // reach instead of bunching at the knee, and keep their modelling there.
-  sky *= 1.0 + 0.12 * hl * hl;
-  // The sun: a small hot core and a smooth exponential roll-off, three
-  // widths summed, warm white, added over the sky so the cloud texture runs
+  sky = mix(sky, Yh * CREAM / dot(CREAM, vec3(0.2126, 0.7152, 0.0722)), 0.35 * hl * hl);
+  // The sun: a small hot core and a smooth exponential roll-off, two
+  // widths summed (no wide lobe: it lifted the whole sunward cloud past the
+  // knee), warm white, added over the sky so the cloud texture runs
   // on through it, with no edge anywhere for a ring to form on. Kept low:
   // the shoulder below carries it the rest of the way to white.
   vec3 sunC = vec3(1.0, 0.86, 0.66);
-  sky += sunC * (0.7 * exp(-r / 0.012) + 0.25 * exp(-r / 0.06) + 0.1 * exp(-r / 0.15));
+  sky += sunC * (0.7 * exp(-r / 0.012) + 0.25 * exp(-r / 0.06));
 
   // ---- the grass, over it ----
   // Both layers are premultiplied coverage straight from the MSAA resolve:
@@ -160,7 +160,8 @@ void main() {
   float ring = clamp(a - ab, 0.0, 1.0) * smoothstep(0.55, 0.95, a);
   float sunK = exp(-r / 0.04);
   col += vec3(1.0, 0.36, 0.12) * 3.5 * ring * sunK;
-  // The highlight shoulder's diffusion: only the light above the threshold
+  // The highlight shoulder's diffusion (kept low: at full strength it
+  // stacked on the cream and the sun and flattened the sunward cloud): only the light above the threshold
   // (the lit cloud tops, read from the drifting sky heavily blurred, so the
   // bloom goes with its cloud) spreads, warm, over the sky and never over the
   // blades in front of it, so they hold as crisp dark silhouettes. Nothing
@@ -169,16 +170,18 @@ void main() {
   vec3 h1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.y + 5.0).rgb;
   float dif = smoothstep(0.5, 0.9, dot(toLin(mix(h1, h0, cw)), vec3(0.2126, 0.7152, 0.0722)));
   dif *= dif * 0.6 * smoothstep(0.08, 0.35, r);
-  col += vec3(1.0, 0.8, 0.55) * 0.55 * dif * (1.0 - a);
+  col += vec3(1.0, 0.8, 0.55) * 0.275 * dif * (1.0 - a);
   // The shoulder: one roll-off on the brightest channel, the colour scaled
   // by it as a whole, so a hot pixel keeps its hue and bleeds to cream
   // instead of clipping channel by channel. Linear to the knee, then an
   // exponential ease (slope-continuous) toward an asymptote just under the
   // film's white point (1.3), so at rest the sun lands near #FFF3E2 with
   // red under the clip, and the cloud round it keeps its drawing all the way
-  // in. Set before the exposure, so the reveal still opens overexposed.
+  // in. The knee sits high: the bake already printed the lit billows with
+  // their own log contrast, so only their very tops roll off here. Set
+  // before the exposure, so the reveal still opens overexposed.
   float m = max(col.r, max(col.g, col.b));
-  const float KNEE = 0.7;
+  const float KNEE = 0.82;
   const float TOP = 1.38;
   float sm = m < KNEE ? m : KNEE + (TOP - KNEE) * (1.0 - exp(-(m - KNEE) / (TOP - KNEE)));
   col *= sm / max(m, 1e-5);

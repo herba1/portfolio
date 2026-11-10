@@ -16,11 +16,14 @@ underside fills the middle of the frame as a flat blue-grey.) At this roll the
 zenith is just off the top-left of the frame, so the sky's up runs with the
 grass's convergence.
 
-The HDRI is linear radiance. It is printed with a smooth shoulder so the lit
-domed tops keep their modelling instead of clipping, and up that shoulder the
+The HDRI is linear radiance. It is printed with a soft log-log shoulder
+(every stop above the knee becomes HGAM of a stop) so the lit domed tops, and
+the silver-lit billows for degrees round the sun, keep their modelling
+instead of bunching into one cream value, and up that shoulder the
 colour is drawn round to a warm paper white (#FFF3E2) so the sun's surround
 and the sunlit domes roll off cream, never a cool grey. The sun's own core
-is held down (the engine draws the sun and its glow analytically).
+is held down, softly and well above the brightest cloud (the engine draws
+the sun and its glow analytically).
 
   python tools/depth/bakes/kaze/sky_hdri.py path/to/kloofendal_48d_partly_cloudy_puresky_8k.hdr [out_dir]
 """
@@ -43,7 +46,10 @@ SATB = float(os.environ.get("SATB", 0.3))
 VALB = float(os.environ.get("VALB", 0.35))
 EDGE = float(os.environ.get("EDGE", 14))       # px at 3600 wide: how far the lift reaches into a cloud edge
 LIFT = float(os.environ.get("LIFT", 1.0))      # luminance gamma under the shoulder
-KNEE = float(os.environ.get("KNEE", 0.5))
+KNEE = float(os.environ.get("KNEE", 0.6))
+CAPX = float(os.environ.get("CAPX", 3.5))     # the sun's hold, in multiples of the sky's 99.7th percentile
+HGAM = float(os.environ.get("HGAM", 0.3))     # contrast kept above the knee, in log luminance
+HSOFT = float(os.environ.get("HSOFT", 0.35))  # stops: how soft the knee's turn is
 SUNR = float(os.environ.get("SUNR", 6))      # degrees: the aureole eased to white
 WARMS = float(os.environ.get("WARMS", 1.0))    # how far the shoulder is drawn to the warm white
 # the shoulder's white, #FFF3E2 in linear light, and the same at unit luminance
@@ -139,8 +145,17 @@ def tone(L):
     # rolling smoothly into white so the domed tops keep their modelling.
     Y = L @ np.array([0.2126, 0.7152, 0.0722], np.float32)
     Y = np.maximum(Y, 1e-6)
+    # The shoulder is a soft hinge in log-log: below the knee luminance
+    # passes through, above it every stop becomes HGAM of a stop. An
+    # exponential ease into 1.0 (slope 1 at the knee) squeezed the sunlit
+    # cumulus, nearly two stops of real billow and shadow between the knee
+    # and the held sun, into one flat cream value; a constant ratio in log
+    # keeps its local contrast all the way up. With the sun held at the cap
+    # (bake()), the top of the range lands just under white.
     k = KNEE                     # where the shoulder starts
-    Yt = np.where(Y < k, Y, k + (1 - k) * (1 - np.exp(-(Y - k) / (1 - k))))
+    x = np.log2(Y / k)
+    hinge = 0.5 * (np.sqrt(x * x + HSOFT * HSOFT) + x)
+    Yt = k * np.exp2(x - (1 - HGAM) * hinge)
     # and a gentle lift under it, the same for cloud and sky so a cloud's thin
     # grey edge keeps its place between the two and never rings darker than
     # the blue beside it
@@ -217,8 +232,14 @@ def bake(hdr):
     # the sun's core: radiance far above anything else in the sky is held to
     # the brightest cloud, so the print has no hard disc for the engine's
     # glow to sit on
-    cap = np.percentile(Y, 99.7)
-    sc = np.minimum(1, cap / np.maximum(Y, 1e-6))
+    # The hold is soft (a hinge in log, like the shoulder) and set well above
+    # the brightest cloud: a hard clamp at the 99.7th percentile took in the
+    # whole silver lining for several degrees round the sun, two or three
+    # stops of billow, and printed it as one flat cream plateau.
+    cap = np.percentile(Y, 99.7) * CAPX
+    x = np.log2(np.maximum(Y, 1e-6) / cap)
+    sc = np.exp2(-0.5 * (np.sqrt(x * x + HSOFT * HSOFT) + x) + 0.5 * HSOFT)
+    sc = np.minimum(sc, 1.0)
     hdr = hdr * sc[..., None]
     roll = np.radians(ROLL)
     yaw, pitch = aim(sun, roll)
