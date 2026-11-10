@@ -22,10 +22,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // its fixed end (an insulator, a junction, a fitting) and where it is
 // fastened on the object; here it is drawn live, as a cable of its own
 // length hung between the two: pulled straight when its object goes
-// away, sagging into a catenary when it comes closer. The platform's strut
-// and brace are pinned the same way, between their clamps on the mast and
-// the deck, stretched along their own axis (their end fittings keep their
-// size).
+// away, sagging into a catenary when it comes closer. The platform's strut,
+// brace and beams stay between their clamps on the mast and the deck, but
+// as steel: the clamps slide along the mast so the frame rides with the
+// deck at its own angles, growing with it as it nears the lens (collar).
 //
 // The lamp is a fitting, not a loose thing: its shade hangs from an
 // angle-iron bracket clamped round the mast, and the two were cut out
@@ -84,7 +84,10 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // widths/heights from where it was (the lamp takes the nearest point of
 // its mast, the far pole the nearest point of its girder's axis); several
 // are joined with ";".
-// &lift=0 shows them set down. &sunAz / &sunEl (deg) override the sun.
+// &lift=0 shows them set down. ?ev holds the opening's demo at its
+// height (the platform at its highest, nearest the lens; ?ev=0.5 halfway
+// there). ?at=s stops the opening's clock at s seconds (0.2: the white-blue
+// overexposure; 3.4: the demo held up). &sunAz / &sunEl (deg) override the sun.
 // &grade=0 shows the plate's own sky. &flatten, &halation, &grain override
 // the print's (PRINT); 0 turns each off.
 
@@ -92,6 +95,13 @@ const ASSET = "/lab/rearrange/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const MAXK = 12; // objects, then the pinned members, then the spans
 const LIFT = 0.045; // held: the card comes this share of its distance toward the lens
+// The opening, once the print has developed out of its white-blue: the
+// engine takes the platform itself, with the hand's own springs, high off
+// its mast and toward the lens (du/dv in photo widths/heights from where it
+// stood, lift as LIFT), so it grows and the sky and cumulus it stood in
+// front of are there; it holds, then is let go and springs home.
+const OPEN = { stops: 3.6, hold: 0.2, develop: 2.2 };
+const DEMO = { at: 2.6, du: -0.02, dv: -0.24, lift: 0.08, hold: 1.2 };
 // where a cropped view (a phone held upright) centres: on the near mast,
 // so the platform, the lamp and the girder's root stay in it
 const FOCUS = [0.3, 0.5];
@@ -225,8 +235,9 @@ uniform float uGrade;
 uniform float uDensity;      // exponent on the graded sky's midtones
 uniform sampler2D uWire;      // the live cables: a coverage, r disparity x coverage
 uniform vec3 uCable;          // their colour, linear
-uniform vec4 uPinA[${MAXK}];  // pinned member: fixed end (photo px), its axis at rest
+uniform vec4 uPinA[${MAXK}];  // pinned member: mast end at rest (photo px), its axis at rest
 uniform vec4 uPinB[${MAXK}];  // its axis now, length at rest, length now (0: not a pin)
+uniform vec3 uPinC[${MAXK}];  // its mast end now (the clamp, slid along the mast); its scale now
 uniform float uPinEnd[${MAXK}];
 uniform int uSpanK;           // the span's layer (-1: none)
 uniform vec4 uSpanN;          // its plane: n.X = d
@@ -388,19 +399,21 @@ void main() {
       vec3 X0 = X - (s1 - s0) * uSpanG;
       q = uF * X0.xy / X0.z + uC;
     } else if (uPinB[k].z > 0.0) {
-      // a pinned member: from its fixed end along its axis now, back to
-      // where that lies on it at rest; its end fittings keep their length
-      // and its bar between them takes up the stretch
+      // a pinned member: from its clamp along its axis now, back to where
+      // that lies on it at rest. Scaled as a whole (w: section, fittings
+      // and length alike) while its length now is w times its own; only
+      // past that does the bar between the fittings take up a difference
       vec2 a = uPinA[k].xy;
       vec2 e0 = uPinA[k].zw;
       vec2 e1 = uPinB[k].xy;
       float L0 = uPinB[k].z;
       float L1 = uPinB[k].w;
-      vec2 d = p - a;
+      float w = uPinC[k].z;
+      vec2 d = p - uPinC[k].xy;
       float s1 = dot(d, e1);
-      float r = dot(d, vec2(-e1.y, e1.x));
-      float e = min(uPinEnd[k], 0.5 * L1);
-      float s0 = s1 < e ? s1 : (s1 > L1 - e ? L0 - (L1 - s1) : e + (s1 - e) * (L0 - 2.0 * e) / max(L1 - 2.0 * e, 1e-3));
+      float r = dot(d, vec2(-e1.y, e1.x)) / w;
+      float e = min(uPinEnd[k] * w, 0.5 * L1);
+      float s0 = s1 < e ? s1 / w : (s1 > L1 - e ? L0 - (L1 - s1) / w : e / w + (s1 - e) * (L0 - 2.0 * e / w) / max(L1 - 2.0 * e, 1e-3));
       q = a + e0 * s0 + vec2(-e0.y, e0.x) * r;
     } else {
       vec3 h = uHinv[k] * vec3(p, 1.0);
@@ -550,6 +563,7 @@ uniform vec3 uLift;
 uniform float uGrain;
 uniform float uGrainPx;
 uniform float uSeed;
+uniform float uOpen;   // the opening's overexposure still to come off (1 at first)
 out vec4 o;
 const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 float hash(vec2 p) {
@@ -569,6 +583,12 @@ void main() {
   // a toe, not a veil: the black comes up, the sky's midtones barely move
   float yf = clamp(dot(f, LUMA), 0.0, 1.0);
   f += uLift * pow(1.0 - yf, 6.0);
+  // the opening: a print blown past its shoulder has little colour left
+  // in it, only a white-blue cast (the sky's), and the steel comes up
+  // grey out of it before the blue does
+  float yo = dot(f, LUMA);
+  f = mix(f, vec3(yo), 0.85 * uOpen);
+  f = mix(f, vec3(0.9, 0.945, 1.0), 0.5 * uOpen * uOpen);
 
   vec2 gp = gl_FragCoord.xy / uGrainPx + uSeed * vec2(17.13, 31.71);
   // octaves at 0.5x, 1x, 2x the clump frequency; MTF weights 0.8, 0.5, 0.2
@@ -615,7 +635,7 @@ void main() {
 
 // ---------------------------------------------------------------- small math
 const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-const expoOut = (t) => (t >= 1 ? 1 : 1 - Math.pow(2, -10 * t));
+const smoother = (t) => t * t * t * (t * (t * 6 - 15) + 10);
 function spring(x) {
   return { x, v: 0, to: x };
 }
@@ -1111,6 +1131,42 @@ export async function createRearrange(host, { embedded = false } = {}) {
     const z = o.dn0 / dot3(N, r);
     return proj([r[0] * z + t[0], r[1] * z + t[1], r[2] * z + t[2]]);
   };
+  // The platform's strut, brace and beams are steel: they keep their
+  // angles and are never bent or swung into each other. Each is bolted to
+  // a band clamp round the mast, and when the deck goes the clamp slides
+  // along the mast (the line toward the poles' vertical vanishing point)
+  // to where the member, at its own angle, still meets the deck's fitting,
+  // so the frame rides up or down the mast with the deck. Brought nearer
+  // the lens the deck grows, and the members grow with it as a whole
+  // (section and fittings too, by the deck's own scale at the fitting);
+  // only the part of a move that takes the deck further out from the mast
+  // than that draws the bar between the fittings out. Rest mast end a,
+  // deck end b at rest and b1 now: the clamp now and the member's length.
+  const VPU = [(F * UP[0]) / UP[2] + CX, (F * UP[1]) / UP[2] + CY];
+  const collar = (a, b, b1) => {
+    let mx = VPU[0] - a[0];
+    let my = VPU[1] - a[1];
+    const ml = Math.hypot(mx, my) || 1;
+    mx /= ml;
+    my /= ml;
+    // how far out from the mast the deck's fitting stands, at rest and now
+    const h0 = (b[0] - a[0]) * my - (b[1] - a[1]) * mx;
+    const h1 = (b1[0] - a[0]) * my - (b1[1] - a[1]) * mx;
+    // a deck pushed in onto the mast stops taking its frame in
+    const k = Math.max(h1 / h0, 0.3);
+    const c = [b1[0] - (b[0] - a[0]) * k, b1[1] - (b[1] - a[1]) * k];
+    // kept on the mast's line
+    const off = (c[0] - a[0]) * my - (c[1] - a[1]) * mx;
+    c[0] -= off * my;
+    c[1] += off * mx;
+    return [c, Math.max(Math.hypot(b1[0] - c[0], b1[1] - c[1]), 1e-3)];
+  };
+  // how much nearer (larger) the card's point (u, v) is under translation t
+  const scaleAt = (o, t, [u, v]) => {
+    const r = kinv(u, v);
+    const z = o.dn0 / dot3(N, r);
+    return z / Math.max(z + t[2], 1e-3);
+  };
   // H^-1 = K (I - t n^T / (d + n.t)) K^-1, column-major for GLSL
   const hinv = (o) => {
     const t = o.t;
@@ -1258,26 +1314,46 @@ export async function createRearrange(host, { embedded = false } = {}) {
       setMove(objs[k], dx * PW, dy * PH, liftQ ?? liftOf(objs[k]));
     }
   }
+  // ?ev: the demo at its height, the same pose the springs carry it to
+  const evQ = q.get("ev");
+  const evS = evQ == null ? null : evQ === "" || !Number.isFinite(+evQ) ? 1 : clamp(+evQ, 0, 1);
+  if (evS != null) setMove(objs[0], DEMO.du * PW * evS, DEMO.dv * PH * evS, liftQ ?? DEMO.lift * evS);
+  // a still: no opening, no demo, no grain crawl
+  const fixed = !!held || evS != null;
+  const atQ = num("at");
 
   // ---- input
   let grab = null;
   let lastDown = { t: -1e9, x: 0, y: 0 };
-  let touched = !!held;
+  let touched = fixed;
   let born = performance.now();
+  // the opening's demo: 0 waiting, 1 lifted, 2 done (or never: a still,
+  // reduced motion, or a hand that came first)
+  let hint = fixed || reduced ? 2 : 0;
+  let liftedAt = 0;
+  let upAt = 0;
+  let shownUp = false;
+  const sendHome = (o) => {
+    o.pos.tx = o.ref.home[0];
+    o.pos.ty = o.ref.home[1];
+    o.lift.to = 0;
+    o.moving = true;
+  };
 
   const goHome = () => {
     for (const o of objs) {
       if (!o.ref) continue;
       o.held = false;
-      o.pos.tx = o.ref.home[0];
-      o.pos.ty = o.ref.home[1];
-      o.lift.to = 0;
-      o.moving = true;
+      sendHome(o);
     }
   };
 
   stage.on("down", (p, e) => {
     touched = true;
+    // the first touch ends the demo: the platform is let go where it is
+    // (or taken in hand, below)
+    if (hint === 1) sendHome(objs[0]);
+    hint = 2;
     // the event's own time: a busy frame must not stretch a double-tap
     const now = e?.timeStamp ?? performance.now();
     const dbl = now - lastDown.t < 320 && Math.hypot(p.x - lastDown.x, p.y - lastDown.y) < 28;
@@ -1423,6 +1499,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     });
     const pinA = new Float32Array(4 * MAXK);
     const pinB = new Float32Array(4 * MAXK);
+    const pinC = new Float32Array(3 * MAXK);
     const pinE = new Float32Array(MAXK);
     PINS.forEach((pn, i) => {
       const k = K + i;
@@ -1430,9 +1507,11 @@ export async function createRearrange(host, { embedded = false } = {}) {
       const [ax, ay] = pn.a;
       const b1 = mapPoint(o, o.t, pn.b);
       const L0 = Math.hypot(pn.b[0] - ax, pn.b[1] - ay);
-      const L1 = Math.hypot(b1[0] - ax, b1[1] - ay);
+      const sc = scaleAt(o, o.t, pn.b);
+      const [c, L1] = collar(pn.a, pn.b, b1);
       pinA.set([ax, ay, (pn.b[0] - ax) / L0, (pn.b[1] - ay) / L0], k * 4);
-      pinB.set([(b1[0] - ax) / L1, (b1[1] - ay) / L1, L0, L1], k * 4);
+      pinB.set([(b1[0] - c[0]) / L1, (b1[1] - c[1]) / L1, L0, L1], k * 4);
+      pinC.set([...c, sc], k * 3);
       pinE[k] = pn.end;
       H.set([1, 0, 0, 0, 1, 0, 0, 0, 1], k * 9);
       dn[k] = o.dn0 + dot3(N, o.t);
@@ -1459,6 +1538,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1i(U.uSpanK, spanK);
     gl.uniform4fv(U.uPinA, pinA);
     gl.uniform4fv(U.uPinB, pinB);
+    gl.uniform3fv(U.uPinC, pinC);
     gl.uniform1fv(U.uPinEnd, pinE);
     gl.uniform3fv(U.uCable, cableCol);
     gl.uniformMatrix3fv(U.uHinv, false, H);
@@ -1528,7 +1608,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
 
-  const present = (seed) => {
+  const present = (seed, open) => {
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
     gl.disable(gl.BLEND);
@@ -1545,6 +1625,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
     gl.uniform1f(fin.u.uGrain, num("grain") ?? PRINT.grain);
     gl.uniform1f(fin.u.uGrainPx, Math.max(0.75, (stage.canvas.height / 1100) * PRINT.grainSize));
     gl.uniform1f(fin.u.uSeed, seed % 997);
+    gl.uniform1f(fin.u.uOpen, open);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.bindVertexArray(null);
     gl.activeTexture(gl.TEXTURE0);
@@ -1552,58 +1633,86 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   let lastKey = "";
   let lastGrain = -1;
-  let hint = 0; // 0 waiting, 1 lifted, 2 done
-  // A machine that cannot keep up (software GL, a starved tab) stops the
-  // grain's 24 fps crawl rather than spend every frame on it: the print
-  // then redraws only when something moves.
+  let lastExp = -1;
+  // A frame's GL work is fenced; while the GPU is still on the last one,
+  // the next is not queued on top of it (the clock and the springs still
+  // run). A machine that cannot keep up (software GL, a starved tab) then
+  // drops frames instead of piling up seconds of them, and once it has
+  // been behind for a while it stops the grain's 24 fps crawl: the print
+  // redraws only when something moves.
+  let fence = null;
+  let behindSince = 0;
   let slow = 0;
   let still = false;
   let lastWall = 0;
+  // The opening plays only on a machine that can show it. The first frame
+  // is the developed print (drawn before the canvas fades in, so it is not
+  // seen there); if the GPU has finished it within 0.6 s, the
+  // clock restarts and the print comes up out of its white-blue. If not,
+  // a machine that takes seconds a frame would hold the white-blue for
+  // all of them: it keeps the photograph and skips the demo too.
+  let opening = fixed ? "off" : atQ != null ? "on" : "pending";
+  let firstAt = 0;
+  const gpuBehind = () => {
+    if (!fence) return false;
+    if (gl.getSyncParameter(fence, gl.SYNC_STATUS) !== gl.SIGNALED) return true;
+    gl.deleteSync(fence);
+    fence = null;
+    return false;
+  };
   const frame = (dt, t) => {
     // the stage caps dt, so the wall clock says how slow frames really are
     const wall = performance.now();
-    slow = lastWall && wall - lastWall > 200 ? slow + 1 : 0;
+    const wallDt = lastWall ? (wall - lastWall) / 1000 : dt;
+    slow = lastWall && wallDt > 0.2 ? slow + 1 : 0;
     lastWall = wall;
     if (slow >= 2) still = true;
-    if (still && hint < 2 && !touched) {
-      // and it skips the intro's lift: at seconds a frame it would take
-      // minutes to settle, and the photograph is what should be there
-      const o = objs[0];
-      if (o.ref) {
-        Object.assign(o.pos, { x: o.ref.home[0], y: o.ref.home[1], vx: 0, vy: 0, tx: o.ref.home[0], ty: o.ref.home[1] });
-        Object.assign(o.lift, { x: 0, v: 0, to: 0 });
-        o.moving = false;
-        o.t = [0, 0, 0];
-      }
-      hint = 2;
-    }
     if (!sceneT) return;
-    const now = performance.now();
-    const age = (now - born) / 1000;
+    const behind = gpuBehind();
+    if (opening === "pending" && firstAt) {
+      if (!behind && wall - firstAt < 600) {
+        opening = "on";
+        born = wall;
+      } else if (wall - firstAt >= 600) {
+        opening = "off";
+        if (hint === 0) hint = 2;
+      }
+    }
+    const age = atQ ?? (wall - born) / 1000;
     const p = stage.pointer;
+    // on a slow machine the springs run on the wall clock, so the demo
+    // takes its own time however few frames show it
+    const sdt = still ? Math.min(wallDt, 2) : dt;
 
-    // Intro: the print develops out of an overexposed white-blue; then the
-    // platform lifts a little off its mast and sets back, to show it is loose.
-    if (!touched && !reduced && !held) {
+    // The opening: the print develops out of an overexposed white-blue;
+    // then the platform is lifted high off its mast toward the lens, held,
+    // and let go, to show that the things in the photograph are loose.
+    if (hint === 0 && opening === "on" && age > DEMO.at) {
       const o = objs[0];
-      if (hint === 0 && age > 2.5) {
-        o.ref = refAt(o, ...o.meta.anchor);
-        Object.assign(o.pos, { x: o.meta.anchor[0], y: o.meta.anchor[1], vx: 0, vy: 0 });
-        const [tu, tv] = constrain(o, o.meta.anchor[0] - 60, o.meta.anchor[1] - 40);
-        o.pos.tx = tu;
-        o.pos.ty = tv;
-        o.lift.to = liftOf(o);
-        o.moving = true;
-        hint = 1;
-      } else if (hint === 1 && age > 3.5) {
-        o.pos.tx = o.ref.home[0];
-        o.pos.ty = o.ref.home[1];
-        o.lift.to = 0;
+      o.ref = refAt(o, ...o.meta.anchor);
+      Object.assign(o.pos, { x: o.meta.anchor[0], y: o.meta.anchor[1], vx: 0, vy: 0 });
+      const [tu, tv] = constrain(o, o.meta.anchor[0] + DEMO.du * PW, o.meta.anchor[1] + DEMO.dv * PH);
+      o.pos.tx = tu;
+      o.pos.ty = tv;
+      o.lift.to = DEMO.lift;
+      o.moving = true;
+      liftedAt = age;
+      hint = 1;
+    } else if (hint === 1 && atQ == null) {
+      // it holds once it is up (and has been seen up, however slow the
+      // frames), then goes home
+      const o = objs[0];
+      const up = Math.hypot(o.pos.x - o.pos.tx, o.pos.y - o.pos.ty) < 3 && Math.abs(o.lift.x - o.lift.to) < 0.01;
+      if (up && !upAt) upAt = age;
+      if (upAt && shownUp && age > Math.max(upAt + DEMO.hold, liftedAt + 1.6)) {
+        sendHome(o);
         hint = 2;
       }
     }
-    const expT = reduced ? clamp(age / 0.3, 0, 1) : expoOut(clamp(age / 2.0, 0, 1));
-    const exposure = (FILM.exposure ?? 0) + (held ? 0 : 2.4 * (1 - expT));
+    // the print comes up out of a white-blue field: held there a moment,
+    // then the steel and the cloud's shading come in, the sky last
+    const expT = opening !== "on" ? 1 : reduced ? clamp(age / 0.3, 0, 1) : smoother(clamp((age - OPEN.hold) / OPEN.develop, 0, 1));
+    const exposure = (FILM.exposure ?? 0) + OPEN.stops * (1 - expT);
 
     for (const o of objs) {
       if (!o.moving || !o.ref) continue;
@@ -1618,16 +1727,16 @@ export async function createRearrange(host, { embedded = false } = {}) {
       } else if (!held) {
         const sx = { x: o.pos.x, v: o.pos.vx, to: o.pos.tx };
         const sy = { x: o.pos.y, v: o.pos.vy, to: o.pos.ty };
-        stepSpring(sx, 15, 0.86, dt);
-        stepSpring(sy, 15, 0.86, dt);
+        stepSpring(sx, 15, 0.86, sdt);
+        stepSpring(sy, 15, 0.86, sdt);
         o.pos.x = sx.x;
         o.pos.vx = sx.v;
         o.pos.y = sy.x;
         o.pos.vy = sy.v;
         // set down: a soft landing, slightly under-damped
-        stepSpring(o.lift, 16, 0.78, dt);
-        const still = Math.hypot(o.pos.x - o.pos.tx, o.pos.y - o.pos.ty) < 0.05 && Math.hypot(o.pos.vx, o.pos.vy) < 0.5 && Math.abs(o.lift.x - o.lift.to) < 1e-5 && Math.abs(o.lift.v) < 1e-4;
-        if (still) {
+        stepSpring(o.lift, 16, 0.78, sdt);
+        const rest = Math.hypot(o.pos.x - o.pos.tx, o.pos.y - o.pos.ty) < 0.05 && Math.hypot(o.pos.vx, o.pos.vy) < 0.5 && Math.abs(o.lift.x - o.lift.to) < 1e-5 && Math.abs(o.lift.v) < 1e-4;
+        if (rest) {
           o.pos.x = o.pos.tx;
           o.pos.y = o.pos.ty;
           o.lift.x = o.lift.to;
@@ -1639,6 +1748,13 @@ export async function createRearrange(host, { embedded = false } = {}) {
       if (!o.moving && Math.hypot(o.pos.x - o.ref.home[0], o.pos.y - o.ref.home[1]) < 0.05 && o.lift.x === 0) o.t = [0, 0, 0];
     }
 
+    if (behind) {
+      if (!behindSince) behindSince = wall;
+      else if (wall - behindSince > 400) still = true;
+      return;
+    }
+    behindSince = 0;
+    let drew = false;
     const key = `${objs.map((o) => o.t.map((v) => v.toFixed(6)).join(",")).join("|")}|${stage.canvas.width}`;
     let developed = false;
     if (key !== lastKey || dirty) {
@@ -1647,18 +1763,28 @@ export async function createRearrange(host, { embedded = false } = {}) {
       lastKey = key;
       dirty = false;
       developed = true;
+      drew = true;
     }
     // the print is developed only when the scene changes (or while the
-    // intro's exposure runs); the grain over it moves at 24 fps, the rate
-    // film did
-    if (developed || exposure > 1e-3) {
+    // opening's exposure runs); the grain over it moves at 24 fps, the
+    // rate film did
+    if (developed || Math.abs(exposure - lastExp) > 1e-4) {
       film.render(devT.tex, { ...FILM, exposure }, filmT.fbo);
+      lastExp = exposure;
       lastGrain = -1;
+      drew = true;
     }
-    const tick = reduced || held || still ? 0 : Math.floor(t * 24);
+    const tick = reduced || fixed || still ? 0 : Math.floor(t * 24);
     if (tick !== lastGrain) {
-      present(tick * 7.31);
+      present(tick * 7.31, 1 - expT);
       lastGrain = tick;
+      drew = true;
+    }
+    if (drew) {
+      if (hint === 1 && upAt) shownUp = true;
+      if (!firstAt) firstAt = wall;
+      fence = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      gl.flush();
     }
   };
   stage.onFrame(frame);
@@ -1673,6 +1799,7 @@ export async function createRearrange(host, { embedded = false } = {}) {
 
   return {
     destroy() {
+      if (fence) gl.deleteSync(fence);
       film.destroy();
       for (const t of [sceneT, devT, filmT, wireT]) {
         if (!t) continue;
