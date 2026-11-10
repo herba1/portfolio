@@ -78,41 +78,54 @@ vec3 relief(vec2 q){
 
 // The studio, seen from the chrome. Stereographic coordinates around the
 // zenith: |s| = 1 is the horizon. A white studio: the chrome sits inside a
-// tent of diffuser, so nearly everything it sees is softbox, blown to paper
-// and only a shade greyer toward the horizon. Against that white, two black
-// boards: a broad horizon band bowed across below the zenith, and a tall
-// flag standing up on the left. Past the horizon the floor is white sweep
-// too, except where the band comes down to meet it, so a rim turns black
-// only where it faces the boards and stays white elsewhere. The chrome is
-// white mirror almost everywhere; it goes black only where a big curvature
-// sweeps a board across it, and that is where the lines thicken and crowd.
-// Every boundary is a cut, about 0.02 wide plus what the pixel needs. soft
-// widens every edge (the displacement reads a soft copy).
+// tent of diffuser, brightest toward the key (up and left) and falling off
+// into a long grey toward the horizon, so every slope of the body reflects
+// some middle tone. Against that white, two black boards: a broad horizon
+// band bowed across below the zenith, and a tall flag standing up on the
+// left. Past the horizon the floor is white sweep too, except where the band
+// comes down to meet it, so a rim turns black only where it faces the boards
+// and stays white elsewhere.
+// Nothing in the studio is a cut. Every board is feathered over about 0.08
+// (four times what it was) and casts a wide grey penumbra round itself, and
+// the tent shades by degrees, so the reflected tone passes through the
+// middle over large areas and the line width sweeps there instead of
+// stepping from hairline to solid. soft widens every edge further (the
+// displacement reads a soft copy).
 float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
+// A board of ink k at signed distance d: a feathered edge, and a grey
+// shoulder reaching w out from it.
+float board(float L, float d, float ew, float w, float k){
+  L *= 1.0 - 0.3 * smoothstep(w, 0.0, d);
+  return mix(L, k, cut(d, ew));
+}
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
   float ls = length(s);
   // Anti-aliasing only: what one sample of the surface spans in s.
   float aa = min(0.5 * length(fwidth(s)), 0.12);
-  float ew = 0.02 + soft + aa;
-  // The tent: white, a touch brighter toward the key (up and left), a
-  // touch greyer toward the horizon.
-  float L = 0.95 + 0.03 * dot(s, normalize(vec2(-0.55, -0.83))) - 0.07 * smoothstep(0.35, 0.95, ls);
+  float ew = 0.08 + soft + aa;
+  float pw = 0.26 + soft;
+  // The tent: near paper toward the key, a long fall to grey toward the
+  // horizon.
+  float key = dot(s, normalize(vec2(-0.55, -0.83)));
+  float L = 0.98 + 0.03 * key - 0.26 * smoothstep(0.25, 1.05, ls) - 0.08 * smoothstep(0.2, -0.9, key) * smoothstep(0.1, 0.7, ls);
   float d;
   // The horizon board: a broad black band, bowed (a straight board seen in
   // the stereographic plane is an arc), lying across below the zenith.
-  d = abs(length(s - vec2(0.1, -1.7)) - 2.05) - 0.11;
-  L = mix(L, 0.02, cut(d, ew));
+  d = abs(length(s - vec2(0.1, -1.7)) - 2.05) - 0.13;
+  L = board(L, d, ew, pw, 0.02);
   // The flag: a tall black board up and left.
   d = sdBox(rot(s - vec2(-0.52, -0.2), 0.32), vec2(0.075, 0.36));
-  L = mix(L, 0.03, cut(d, ew));
-  // The floor past the horizon: white sweep, black only on the band's side
+  L = board(L, d, ew, pw * 0.8, 0.03);
+  // The floor past the horizon: grey sweep, black only on the band's side
   // (down and a little right) and on two narrow boards behind, up left and up
-  // right, so rims shift between white and black.
+  // right, so rims shift between pale and black.
   vec2 sn = s / max(ls, 1e-4);
-  float fl = mix(0.93, 0.02, cut(0.62 - dot(sn, normalize(vec2(0.25, 1.0))), ew / max(ls, 0.3)));
-  fl = mix(fl, 0.03, cut(0.94 - dot(sn, normalize(vec2(-0.9, -0.42))), ew / max(ls, 0.3)));
-  fl = mix(fl, 0.03, cut(0.95 - dot(sn, normalize(vec2(0.55, -0.83))), ew / max(ls, 0.3)));
+  float fe = ew / max(ls, 0.3);
+  float fl = 0.78 - 0.18 * smoothstep(1.0, 1.8, ls);
+  fl = board(fl, 0.62 - dot(sn, normalize(vec2(0.25, 1.0))), fe, 0.3, 0.02);
+  fl = board(fl, 0.94 - dot(sn, normalize(vec2(-0.9, -0.42))), fe, 0.12, 0.03);
+  fl = board(fl, 0.95 - dot(sn, normalize(vec2(0.55, -0.83))), fe, 0.12, 0.03);
   L = mix(L, fl, cut(0.97 - ls, ew));
   return clamp(L, 0.0, 1.0);
 }
@@ -279,11 +292,12 @@ vec3 printAt(vec2 p, vec4 sf){
   vec2 gp = vec2(dFdx(phi), dFdy(phi));
   float fpx = max(length(gp), 1e-4);
 
-  // Width is the only tone carrier: the lines run unbroken, a hairline on
-  // the white, swelling to solid across a board. The moire is the
-  // displacement's work alone, where a curvature crowds them.
+  // Width is the only tone carrier, and it never clips: a hairline on the
+  // white that still prints, swelling to 0.8 of the period across a board,
+  // so a black field is cut by white channels and never fuses into a block.
+  // The moire is where the width or the displacement changes fast.
   float T = 1.0 - L;
-  float w = mix(0.08, 1.04, pow(T, 1.6));
+  float w = mix(0.14, 0.84, smoothstep(0.04, 0.9, T));
 
   // Two plates: the black key, and a lavender plate printed a hair out of
   // register, which only shows on the light.
