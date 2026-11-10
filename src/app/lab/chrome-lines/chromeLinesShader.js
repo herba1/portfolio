@@ -35,6 +35,7 @@ uniform float uEnvRot;
 uniform vec4 uK;            // least line density (monotone floor), displacement by reflection, by tone; spacing (css px)
 uniform vec4 uK2;           // body height per unit field, swell height, reach of the broad body (scale units), its height
 uniform vec4 uS;            // relief amount, height (scale units), profile softness, threshold
+uniform vec4 uE;            // studio edge width (stereographic units), ripple slope, screen turn by the reflection, ripple scale
 out vec4 o;
 `;
 
@@ -49,9 +50,9 @@ float vnoise(vec2 p){
   return mix(mix(hash(i), hash(i + vec2(1, 0)), u.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), u.x), u.y);
 }
 
-// Slow relief: a few long crossing swells, with an exact gradient. Only the
-// long ones: short swells make the lines wiggle like a texture laid over
-// the tone, where a burin would sweep round the whole mass.
+// Slow relief: crossing swells, with an exact gradient. The long ones carry
+// it; the two shorter ones are kept low, enough to tip the normal across
+// the hard studio's edges without making the lines wiggle like a texture.
 vec3 relief(vec2 q){
   vec3 r = vec3(0.0);
   // Ridges laid across the flow (the sheet runs low-left to high-right), so
@@ -61,7 +62,7 @@ vec3 relief(vec2 q){
   const vec4 W[5] = vec4[5](
     vec4( 0.41,  0.91, 3.2, 0.0), vec4( 0.15,  0.99, 4.9, 1.7), vec4( 0.62,  0.78, 6.6, 4.1),
     vec4( 0.25,  0.97, 8.8, 5.3), vec4( 0.91, -0.41, 2.2, 2.3));
-  const float A[5] = float[5](0.5, 0.4, 0.0, 0.0, 0.1);
+  const float A[5] = float[5](0.5, 0.4, 0.3, 0.2, 0.1);
   for (int j = 0; j < 5; j++){
     if (A[j] == 0.0) continue;
     vec2 k = W[j].xy * W[j].z * 0.75;
@@ -77,57 +78,80 @@ vec3 relief(vec2 q){
 }
 
 // The studio, seen from the chrome. Stereographic coordinates around the
-// zenith: |s| = 1 is the horizon. A white studio: the chrome sits inside a
-// tent of diffuser, brightest toward the key (up and left) and falling off
-// into a long grey toward the horizon, so every slope of the body reflects
-// some middle tone. Against that white, two black boards: a broad horizon
-// band bowed across below the zenith, and a tall flag standing up on the
-// left. Past the horizon the floor is white sweep too, except where the band
-// comes down to meet it, so a rim turns black only where it faces the boards
-// and stays white elsewhere.
-// Nothing in the studio is a cut. Every board is feathered over about 0.08
-// (four times what it was) and casts a wide grey penumbra round itself, and
-// the tent shades by degrees, so the reflected tone passes through the
-// middle over large areas and the line width sweeps there instead of
-// stepping from hairline to solid. soft widens every edge further (the
-// displacement reads a soft copy).
+// zenith: |s| = 1 is the horizon. A hard studio, cut not graded: white
+// diffuser overhead, a black ground coming up to a sharp, bowed horizon
+// below the zenith (the lower flanks of every form), three black boards
+// standing in the white (a tall flag up left, a board right, a narrow bar
+// across the zenith so even the flat tops catch black), and thin white
+// softbox slits cut into the black, so a black reflection is an island
+// with white holes in it. The floor past the horizon is black too, cut by
+// slits, so every rim goes black and breaks. Edges are cut over uE.x plus
+// what one sample spans: the reflected tone is near binary over most
+// normals. soft widens every edge (the displacement reads a soft copy).
 float cut(float d, float ew){ return smoothstep(ew, -ew, d); }
-// A board of ink k at signed distance d: a feathered edge, and a grey
-// shoulder reaching w out from it.
-float board(float L, float d, float ew, float w, float k){
-  L *= 1.0 - 0.3 * smoothstep(w, 0.0, d);
-  return mix(L, k, cut(d, ew));
-}
 float env(vec3 r, float soft){
   vec2 s = rot(r.xy / (1.0 + max(r.z, -0.95)), uEnvRot);
   float ls = length(s);
   // Anti-aliasing only: what one sample of the surface spans in s.
   float aa = min(0.5 * length(fwidth(s)), 0.12);
-  float ew = 0.08 + soft + aa;
-  float pw = 0.26 + soft;
-  // The tent: near paper toward the key, a long fall to grey toward the
-  // horizon.
-  float key = dot(s, normalize(vec2(-0.55, -0.83)));
-  float L = 0.98 + 0.03 * key - 0.26 * smoothstep(0.25, 1.05, ls) - 0.08 * smoothstep(0.2, -0.9, key) * smoothstep(0.1, 0.7, ls);
+  float ew = uE.x + soft + aa;
+  // The diffuser: white, a touch darker toward the horizon.
+  float L = 0.97 - 0.06 * smoothstep(0.4, 1.0, ls);
   float d;
-  // The horizon board: a broad black band, bowed (a straight board seen in
-  // the stereographic plane is an arc), lying across below the zenith.
-  d = abs(length(s - vec2(0.1, -1.7)) - 2.05) - 0.13;
-  L = board(L, d, ew, pw, 0.02);
+  // The ground, up to a sharp horizon bowed across below the zenith.
+  d = 2.08 - length(s - vec2(0.1, -1.7));
+  L = mix(L, 0.02, cut(d, ew));
   // The flag: a tall black board up and left.
-  d = sdBox(rot(s - vec2(-0.52, -0.2), 0.32), vec2(0.075, 0.36));
-  L = board(L, d, ew, pw * 0.8, 0.03);
-  // The floor past the horizon: grey sweep, black only on the band's side
-  // (down and a little right) and on two narrow boards behind, up left and up
-  // right, so rims shift between pale and black.
-  vec2 sn = s / max(ls, 1e-4);
-  float fe = ew / max(ls, 0.3);
-  float fl = 0.78 - 0.18 * smoothstep(1.0, 1.8, ls);
-  fl = board(fl, 0.62 - dot(sn, normalize(vec2(0.25, 1.0))), fe, 0.3, 0.02);
-  fl = board(fl, 0.94 - dot(sn, normalize(vec2(-0.9, -0.42))), fe, 0.12, 0.03);
-  fl = board(fl, 0.95 - dot(sn, normalize(vec2(0.55, -0.83))), fe, 0.12, 0.03);
-  L = mix(L, fl, cut(0.97 - ls, ew));
+  d = sdBox(rot(s - vec2(-0.5, -0.22), 0.32), vec2(0.06, 0.37)) - 0.03;
+  L = mix(L, 0.03, cut(d, ew));
+  // A board on the right, leaning the other way.
+  d = sdBox(rot(s - vec2(0.56, -0.18), -0.24), vec2(0.045, 0.31)) - 0.03;
+  L = mix(L, 0.03, cut(d, ew));
+  // Two narrow boards crossing over the zenith, so the flat tops catch
+  // black wherever the ripples tip them.
+  d = sdBox(rot(s - vec2(0.04, -0.1), 0.95), vec2(0.05, 0.2)) - 0.05;
+  L = mix(L, 0.03, cut(d, ew));
+  d = sdBox(rot(s - vec2(-0.16, 0.17), -0.5), vec2(0.04, 0.12)) - 0.05;
+  L = mix(L, 0.03, cut(d, ew));
+  // The floor past the horizon: black all round.
+  L = mix(L, 0.02, cut(0.97 - ls, ew));
+  // Softbox slits cut into the black: two long ones lying in the ground,
+  // one standing in the flag, one in the right board, and radial ones in the
+  // floor, so black rims break into islands with white holes.
+  float wl = 0.96;
+  d = sdBox(rot(s - vec2(-0.22, 0.58), 0.12), vec2(0.26, 0.022));
+  L = mix(L, wl, cut(d, ew));
+  d = sdBox(rot(s - vec2(0.42, 0.7), -0.2), vec2(0.15, 0.016));
+  L = mix(L, wl, cut(d, ew));
+  d = sdBox(rot(s - vec2(-0.47, -0.3), 0.32), vec2(0.016, 0.26));
+  L = mix(L, wl, cut(d, ew));
+  d = sdBox(rot(s - vec2(0.58, -0.12), -0.24), vec2(0.012, 0.2));
+  L = mix(L, wl, cut(d, ew));
+  // The floor: the white sweep of the studio wall seen past the horizon,
+  // a thin ring all round, so every black rim carries a white line that
+  // breaks wherever the boards cross it.
+  d = abs(ls - 1.16) - 0.035;
+  L = mix(L, wl, cut(d, ew) * smoothstep(0.5, 0.1, s.y));
   return clamp(L, 0.0, 1.0);
+}
+
+// Ripples: short swells, warped along the forms, given as a slope (the
+// gradient of a unit-amplitude height, each wave normalised to slope one).
+// They tilt the normal only, so the reflection breaks into islands and the
+// screen, which follows the reflection, turns with them.
+vec2 ripple(vec2 q){
+  vec2 g = vec2(0.0);
+  const vec4 RW[4] = vec4[4](
+    vec4( 0.38,  0.92, 1.00, 0.0), vec4( 0.96,  0.28, 1.31, 1.9),
+    vec4(-0.62,  0.78, 1.73, 3.7), vec4( 0.12, -0.99, 2.27, 5.1));
+  const float RA[4] = float[4](0.55, 0.45, 0.32, 0.22);
+  for (int j = 0; j < 4; j++){
+    vec2 k = RW[j].xy * RW[j].z * uE.w;
+    vec2 kp = vec2(-RW[j].y, RW[j].x) * uE.w * 0.31;
+    float ph = dot(q, k) + 1.1 * sin(dot(q, kp) + RW[j].w) + RW[j].w + uTime * (0.3 + 0.1 * float(j));
+    g += RA[j] * cos(ph) * normalize(k + 1.1 * cos(dot(q, kp) + RW[j].w) * kp);
+  }
+  return g;
 }
 
 // A drop's own studio: the reflection turned about a horizontal axis by the
@@ -260,6 +284,10 @@ vec4 surface(vec2 p){
   float h = H * sqrt(1.0 - e) + H2 * g2 * s2 + Hr * sat * rl.x + Hb * bb;
   float dh = H * e / (2.0 * a * sqrt(max(1.0 - e, 1e-6))) + H2 * (s2 / (1.0 + xe / 0.5) + g2 * exp(-xe / 0.35) / 0.35) + Hr * rl.x * exp(-xe / a2) / a2;
   vec2 gh = dh * gF + Hr * sat * rl.yz / uScale + Hb * gb / (1.0 + fb);
+  // The ripples ride with the liquid and die toward the rim, so the
+  // silhouette stays a clean meniscus.
+  vec3 n0 = normalize(vec3(-gh, 1.0));
+  gh += uE.y * sat * ripple((p - disp) / uScale);
   vec3 n = normalize(vec3(-gh, 1.0));
 
   vec3 v = normalize(vec3((p - uRes * 0.5) / (uScale * 2.6), -1.0));
@@ -272,7 +300,17 @@ vec4 surface(vec2 p){
   // surface turns hard, at the rims and necks. Nothing by height: a term in
   // h closes on itself round every bump top into a bullseye. The print pass
   // keeps the whole displacement monotone across the screen.
-  float Dsp = uK.y * 14.4 * dot(n.xy, vec2(0.35, 1.0)) + uK.z * 3.6 * Ls;
+  // The screen also turns with the reflected ray: a term in its sideways
+  // component tilts the lines across the forms (the ironing pass only holds
+  // the screen's climb down the page, not its slope across it), so they
+  // swing hard where the surface turns and beat against each other. The
+  // ray off the body without its ripples, so the lines sweep round the
+  // forms; the ripples reach the lines through n above, as bunching.
+  vec3 r0 = tilt(reflect(v, n0), et);
+  // It eases off toward the rim, where the ray swings fastest: there the
+  // turn would only rule the lines finer than the print can hold.
+  vec2 rs = r0.xy / (1.0 + max(r0.z, 0.0));
+  float Dsp = uK.y * 14.4 * dot(n.xy, vec2(0.35, 1.0)) + uE.z * 14.4 * rs.x * smoothstep(0.0, 0.5, x) + uK.z * 3.6 * Ls;
   float tf = 380.0 + 260.0 * (h / (H + Hb)) + 120.0 * n.z;
   return vec4(clamp(sd, -64.0, 64.0), Dsp, L, tf);
 }

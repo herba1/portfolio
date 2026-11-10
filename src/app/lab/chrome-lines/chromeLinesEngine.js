@@ -113,9 +113,13 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 3.5)];
   const SH = [num("rel", 0.1), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   // The knuckle swells (the per-ball undulation and the slow relief) are
-  // kept low, a third of what they were; the broad body (reach and height)
-  // carries the form, so the pool reads as one heavy liquid.
-  const K2 = [num("H2", 0.023), num("Hr", 0.047), num("bw", 0.42), num("Hb", 0.12)];
+  // kept below the broad body (reach and height), which carries the form,
+  // so the pool reads as one heavy liquid; but enough of them stays to
+  // break the hard studio into islands.
+  const K2 = [num("H2", 0.03), num("Hr", 0.06), num("bw", 0.42), num("Hb", 0.12)];
+  // The studio's edge (near binary), the ripples' slope and scale, and how
+  // far the reflected ray turns the screen.
+  const E = [num("ew", 0.008), num("rip", 0.34), num("kx", 7), num("rk", 56)];
   // The neck: kernel radius at its waist before it thins (scale units), and
   // how fast it drains while a stretched drop is held.
   const TH = [num("waist", 0.036), num("drain", 0.6)];
@@ -128,7 +132,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
   // Two passes where a half-float target is renderable (nearly everywhere),
   // else one pass that does the surface per device pixel.
   const twoPass = !!gl.getExtension("EXT_color_buffer_float") || !!gl.getExtension("EXT_color_buffer_half_float");
-  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uSurfRes", "uSurf"];
+  const NAMES = ["uB", "uD", "uN", "uTa", "uTr", "uTm", "uNT", "uRes", "uDpr", "uScale", "uTime", "uEnvRot", "uK", "uK2", "uS", "uE", "uSurfRes", "uSurf"];
   const make = (fs) => {
     const p = program(gl, VS, fs);
     const u = {};
@@ -539,6 +543,7 @@ export async function createChromeLines(host, { embedded = false } = {}) {
       gl.uniform4f(u.uK, K[0], K[1], K[2], K[3]);
       gl.uniform4f(u.uK2, K2[0], K2[1], K2[2], K2[3]);
       gl.uniform4f(u.uS, SH[0], SH[1], SH[2], SH[3]);
+      gl.uniform4f(u.uE, E[0], E[1], E[2], E[3]);
       return u;
     };
     gl.bindVertexArray(vao);
