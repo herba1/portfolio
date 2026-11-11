@@ -20,13 +20,17 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // near planes lead, by depth, so the two scenes keep their own space while
 // they pass.
 //
-// Everything is developed through the shared film pass (summer preset).
+// The five skies share one grade, baked into the planes (grade.py, with
+// signal-cumulonimbus as the reference), and everything is developed
+// through the shared film pass (summer preset).
 //
 // Still params: ?i=0..4 photo, ?swipe=0..1 towards the next one,
 // ?tilt=x,y in -1..1.
 
 const BASE = "/lab/spatial-photos/";
 const SCENES = ["kyoto-crossing-lowangle", "signal-cumulonimbus", "ine-catenary-clouds", "smokestack-cumulus", "crossing-summer"];
+// The photo the piece opens on: signal-cumulonimbus, the set's reference.
+const START = 1;
 const HUE = {};
 const GAIN = {};
 
@@ -234,7 +238,7 @@ export async function createSpatialPhotos(host, { embedded = false } = {}) {
   };
 
   // ---- state
-  let pos = clamp(iQ ?? 0, 0, N - 1) + clamp(swipeQ ?? 0, 0, 1);
+  let pos = clamp(iQ ?? START, 0, N - 1) + clamp(swipeQ ?? 0, 0, 1);
   pos = clamp(pos, 0, N - 1);
   let vel = 0;
   let target = Math.round(pos);

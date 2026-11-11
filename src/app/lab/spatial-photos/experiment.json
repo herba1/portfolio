@@ -84,35 +84,35 @@
       "file": "https://images.unsplash.com/photo-1769842004047-06f6429e79ca?w=6000&fit=max&q=90&fm=jpg",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "Ukyo, Kyoto, Japan, Ricoh GR II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py), worked at 2400 px on the long side."
+      "note": "Ukyo, Kyoto, Japan, Ricoh GR II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
     },
     {
       "url": "https://unsplash.com/photos/black-electric-post-under-blue-sky-and-white-clouds-during-daytime-4JKUDDo-Or4",
       "file": "https://images.unsplash.com/photo-1620233950363-7c0947527682?w=6000&fit=max&q=90&fm=jpg",
       "author": "Kanata (@tanakanata)",
       "licence": "Unsplash License",
-      "note": "Japan (fumikiri crossing signal + catenary; photographer Japanese, location not tagged), Canon EOS 60D. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py), worked at 2400 px on the long side."
+      "note": "Japan (fumikiri crossing signal + catenary; photographer Japanese, location not tagged), Canon EOS 60D. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
     },
     {
       "url": "https://unsplash.com/photos/utility-poles-and-overhead-wires-against-a-cloudy-blue-sky-6DHLBwmRkOw",
       "file": "https://images.unsplash.com/photo-1784863086604-3ba8a2c304cb?w=6000&fit=max&q=90&fm=jpg",
       "author": "PJH (@dokae)",
       "licence": "Unsplash License",
-      "note": "Ine, Kyoto Prefecture, Japan, Sony a7 IV. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py), worked at 2400 px on the long side."
+      "note": "Ine, Kyoto Prefecture, Japan, Sony a7 IV. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
     },
     {
       "url": "https://unsplash.com/photos/a-building-with-smokestacks-and-a-blue-sky-with-clouds-tysW7hTVcek",
       "file": "https://images.unsplash.com/photo-1659666431684-01afd09e0235?w=6000&fit=max&q=90&fm=jpg",
       "author": "Se. Tsuchiya (@s_tsuchiya)",
       "licence": "Unsplash License",
-      "note": "Japan ('Summer in Japan'), Sony a6400. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py), worked at 2400 px on the long side."
+      "note": "Japan ('Summer in Japan'), Sony a6400. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
     },
     {
       "url": "https://unsplash.com/photos/railroad-crossing-with-barriers-and-warning-signs-b3Ow_DxiW7M",
       "file": "https://images.unsplash.com/photo-1776586264901-f41bb46ebb3f?w=6000&fit=max&q=90&fm=jpg",
       "author": "XS Xue (@xxs11)",
       "licence": "Unsplash License",
-      "note": "Japanese fumikiri (location not tagged), Sony a7C II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py), worked at 2400 px on the long side."
+      "note": "Japanese fumikiri (location not tagged), Sony a7C II. Depth from Depth Anything V2 (tools/depth/depth_hr.py); cut into matted, inpainted depth planes by tools/depth/bakes/spatial-photos (labels.py, bake.py, skyfill.py, wires.py, grade.py: one sky grade for the set), worked at 2400 px on the long side."
     },
     "https://www.apple.com/newsroom/2025/06/apple-elevates-the-iphone-experience-with-ios-26/",
     "https://support.apple.com/guide/iphone/spatial-scenes"
