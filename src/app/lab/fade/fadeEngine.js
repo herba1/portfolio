@@ -48,10 +48,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    its cloud are inert.
 //
 // Live, per pixel, with e = years x dose x susceptibility, where the dose is
-// the baked one on a power curve (2.4): paint holds below a threshold and
-// fails fast above it, so the top floors in the whole sky run far ahead of
-// the low storeys in their slot of it, and the coral wall facing north
-// hardly starts:
+// the baked one on a cubic curve: paint holds below a threshold and fails
+// fast above it, so in thirty years the top floors in the whole sky give up
+// most of their colour (pink to chalk, orange to pale apricot, yellow to
+// cream) while the low storeys in their slot of it and the coral wall facing
+// north keep theirs:
 //  - ink: albedo -> optical density per channel; the neutral part is carbon
 //    black, the rest is cyan (absorbs red), magenta (green) and yellow (blue),
 //    each fading exponentially, yellow and magenta about 4x faster than cyan,
@@ -111,10 +112,11 @@ const OPEN_AT = 3.2;
 const K_INK = [0.03, 0.13, 0.16]; // cyan, magenta, yellow
 const K_BLACK = 0.004;
 const K_WOOD = 0.1;
-const K_CHALK = 0.08;
+const K_CHALK = 0.1;
 // Most of the most exposed surface powders to bare lime: the top floor goes to
-// pale plaster, a trace of its own hue still under the bloom.
-const CHALK_MAX = 0.85;
+// pale plaster, a trace of its own hue still under the bloom (mat.webp's B
+// is 0.85 on render, so this is a bloom of about 0.9 on open paint).
+const CHALK_MAX = 1.05;
 const INDUCTION = 2.5;
 // Chalking needs the film itself to erode: only well-exposed paint gets there.
 const CHALK_INDUCTION = 6;
@@ -123,19 +125,21 @@ const CHALK_INDUCTION = 6;
 // that feeds the clock is the baked one on a power curve about DOSE_PIVOT, so
 // the sky-open top floors run far ahead of the low storeys in their slot of
 // sky (the bake's dose differs by three to five between them; the paint's
-// clock, by fifteen to fifty), and the coral wall facing north, at a tenth of
-// an open south wall, hardly starts.
-const DOSE_GAMMA = 2.4;
-const DOSE_PIVOT = 0.17;
+// clock, by thirty to a hundred), and the coral wall facing north, at a tenth
+// of an open south wall, hardly starts. The pivot puts the open top floors
+// (a baked dose of a quarter to a third) at thirty to seventy dose-years by
+// year thirty, so they reach eighty to ninety per cent of the way to lime.
+const DOSE_GAMMA = 3;
+const DOSE_PIVOT = 0.12;
 // Where the fade ends up: a lime render's white, measured off sun-bleached
 // Ligurian plaster as a neutral, slightly warm off-white (#EEE8DD), never
 // paper white and never cream. The pigment's loss climbs to it and the
 // chalk's bloom powders over it.
 const LIME = [0xee, 0xe8, 0xdd];
-// What the chalked coat keeps of its own paint: a share of the original
-// chroma, at the original hue, so a pink wall bleaches to a pale dusty pink
-// and an orange one to a pale apricot, not all of them to one cream.
-const RESIDUAL = 0.4;
+// What the chalked coat keeps of its own paint: a small share of the
+// original chroma, at the original hue, so a pink wall bleaches to chalk with
+// a breath of pink and an orange one to a pale apricot, not all to one cream.
+const RESIDUAL = 0.15;
 // The differential fade (the inks' own rates, the lime's warmth) may turn a
 // coat's hue by at most this much (Oklab hue, degrees): it loses chroma and
 // gains value, and keeps its family.
@@ -388,7 +392,7 @@ uniform float uPolar;
 uniform vec3 uZenith;
 uniform vec3 uRim;
 uniform vec3 uClear;
-uniform vec2 uRes;
+uniform vec4 uCrop;
 uniform vec2 uPlateSize;
 uniform vec2 uVanish;
 uniform float uShelter;
@@ -456,8 +460,8 @@ vec3 polarise(vec3 lin, vec2 uv) {
   float cy2 = cy * 1.08 / (1.0 + 0.08 * cy);
   vec3 cw = cl * (cy2 / max(cy, 1e-4));
   // radial depth: the zenith sits at the frame's centre
-  vec2 d = (uv - 0.5) * vec2(uRes.x / uRes.y, 1.0);
-  float r = length(d) / (0.5 * length(vec2(uRes.x / uRes.y, 1.0)));
+  vec2 d = (uv - 0.5) * vec2(uPlateSize.x / uPlateSize.y, 1.0);
+  float r = length(d) / (0.5 * length(vec2(uPlateSize.x / uPlateSize.y, 1.0)));
   float t = smoothstep(0.05, 1.0, r);
   vec3 skyCol = mix(uZenith, uRim, t);
   // thin cloud and cloud shadow are lit by the sky around them: skylight blue
@@ -468,7 +472,8 @@ vec3 polarise(vec3 lin, vec2 uv) {
   return mix(skyCol, cw, a);
 }
 void main() {
-  vec2 uv = vec2(vUv.x, 1.0 - vUv.y);
+  // the part of the plate the screen shows (uCrop: offset, size)
+  vec2 uv = uCrop.xy + uCrop.zw * vec2(vUv.x, 1.0 - vUv.y);
   vec3 lin = toLin(texture(uPlate, uv).rgb);
   vec4 m = texture(uMat, uv);
   vec4 L = texture(uLight, uv);
@@ -541,7 +546,7 @@ void main() {
   // The curve is wide: wear only tilts how much a coat gives up, it never
   // switches it, so the open wall grades with its dose and only the strip
   // under a ledge and a tan line (wear near -1) hold their colour firmly.
-  float keep = mix(0.3, 0.95, smoothstep(-2.0, 1.6, wear));
+  float keep = mix(0.4, 1.0, smoothstep(-2.0, 1.6, wear));
   vec3 lost = cmy * keep * (1.0 - exp(-uKInk * e)) + k * (1.0 - exp(-uKBlack * e));
   // what the pigment leaves behind is the lime render's own off-white, not
   // paper white: a fading colour climbs to it and stops (a surface that is
@@ -576,7 +581,7 @@ void main() {
   // dark in the photo is mostly not render at all (a window's void, the
   // gap behind a shutter, a shadow), so it barely blooms and keeps its depth
   float ya = dot(a, LUMA);
-  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.9) * smoothstep(0.02, 0.2, ya);
+  float c = min(m.b * uChalkMax * (1.0 - exp(-uKChalk * ec)) * (1.0 + 0.8 * wear), 0.92) * smoothstep(0.02, 0.2, ya);
   if (uDebug > 3.5) {
     // R: how worn the coat is, G: the chalk, B: the ink's clock
     outColor = vec4(0.5 + 0.5 * wear, c, 1.0 - exp(-0.1 * e), 1.0);
@@ -631,10 +636,11 @@ uniform sampler2D uMat;
 uniform float uFade;
 uniform vec3 uPaper;
 uniform vec3 uToe;
+uniform vec4 uCrop;
 void main() {
   vec3 c = texture(uTex, vUv).rgb;
   // the scan's lifted black, taken back out over the sky alone
-  vec4 m = texture(uMat, vec2(vUv.x, 1.0 - vUv.y));
+  vec4 m = texture(uMat, uCrop.xy + uCrop.zw * vec2(vUv.x, 1.0 - vUv.y));
   float sky = clamp(1.0 - (2.0 * m.r - m.b / 0.85), 0.0, 1.0);
   vec3 toe = uToe * sky;
   c = max((c - toe) / (1.0 - toe), 0.0);
@@ -831,31 +837,40 @@ export async function createFade(host, { embedded = false } = {}) {
   ]);
   const film = createFilm(gl, { width: 2, height: 2 });
 
-  // The print: 4:3, alone on the paper, as large as the box allows.
-  const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2 };
+  // The view fills the box: looking up from the cobbles reads at full size,
+  // not as a print on a mount. The 4:3 plate covers the box about its centre
+  // (the zenith stays mid-frame), cropping at most a fifth of either side;
+  // past that (a tall phone) it runs edge to edge across and sits on the
+  // paper above and below. Embedded, it fills the tile's height.
+  const L = { x: 0, y: 0, w: 1, h: 1, pw: 2, ph: 2, u0: 0, v0: 0, us: 1, vs: 1, fitW: 1 };
   const T = { scene: null, film: null };
   let dirty = true;
   const layout = (W, H, dpr) => {
     const ar = PW / PH;
+    // the drag's scale stays that of the print as it sat on its mount
+    L.fitW = W / H < 0.9 ? Math.min(W - 2 * Math.max(16, Math.round(W * 0.06)), H * 0.84 * ar) : Math.min(H - 2 * Math.max(24, H * 0.07), (W - 48) / ar) * ar;
+    let dw;
+    let dh;
     if (embedded) {
-      const h = H;
-      const w = h * ar;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: 0 });
-    } else if (W / H < 0.9) {
-      const side = Math.max(16, Math.round(W * 0.06));
-      const w = Math.min(W - side * 2, H * 0.84 * ar);
-      const h = w / ar;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 });
+      dh = H;
+      dw = dh * ar;
     } else {
-      const top = Math.max(24, H * 0.07);
-      const h = Math.min(H - top * 2, (W - 48) / ar);
-      const w = h * ar;
-      Object.assign(L, { w, h, x: (W - w) / 2, y: (H - h) / 2 });
+      const s = Math.min(Math.max(W / PW, H / PH), 1.25 * Math.min(W / PW, H / PH));
+      dw = PW * s;
+      dh = PH * s;
     }
-    L.x = Math.round(L.x * dpr) / dpr;
-    L.y = Math.round(L.y * dpr) / dpr;
+    const w = Math.min(W, dw);
+    const h = Math.min(H, dh);
+    L.x = Math.round(((W - w) / 2) * dpr) / dpr;
+    L.y = Math.round(((H - h) / 2) * dpr) / dpr;
+    L.w = w;
+    L.h = h;
     L.pw = Math.max(2, Math.round(L.w * dpr));
     L.ph = Math.max(2, Math.round(L.h * dpr));
+    L.us = L.pw / (dw * dpr);
+    L.vs = L.ph / (dh * dpr);
+    L.u0 = (1 - L.us) / 2;
+    L.v0 = (1 - L.vs) / 2;
     Object.values(T).forEach((t) => freeTarget(gl, t));
     T.scene = target(gl, L.pw, L.ph);
     T.film = target(gl, L.pw, L.ph);
@@ -881,7 +896,7 @@ export async function createFade(host, { embedded = false } = {}) {
   let dragGoal = 0;
   let touched = held;
   let seed = 0;
-  const span = () => Math.max(L.w * 1.6, Math.min(stage.width * 0.7, 900));
+  const span = () => Math.max(L.fitW * 1.6, Math.min(stage.width * 0.7, 900));
 
   stage.on("down", (p) => {
     dragging = true;
@@ -953,7 +968,7 @@ export async function createFade(host, { embedded = false } = {}) {
     gl.uniform3fv(u.uZenith, zenith);
     gl.uniform3fv(u.uRim, rim);
     gl.uniform3fv(u.uClear, clearSky);
-    gl.uniform2f(u.uRes, T.scene.w, T.scene.h);
+    gl.uniform4f(u.uCrop, L.u0, L.v0, L.us, L.vs);
     gl.bindFramebuffer(gl.FRAMEBUFFER, T.scene.fbo);
     gl.viewport(0, 0, T.scene.w, T.scene.h);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -999,6 +1014,7 @@ export async function createFade(host, { embedded = false } = {}) {
     bindTex(1, mat, P.blit.u.uMat);
     const toe = raw || debugDose || !polar ? 0 : FILM_TOE;
     gl.uniform3f(P.blit.u.uToe, toe * FILM_TOE_COLOR[0], toe * FILM_TOE_COLOR[1], toe * FILM_TOE_COLOR[2]);
+    gl.uniform4f(P.blit.u.uCrop, L.u0, L.v0, L.us, L.vs);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
   };
 
