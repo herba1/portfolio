@@ -6,10 +6,13 @@ import { createStage, clamp } from "../_kit/stage";
 // behind pulled down to a dim ground lit only by the ceiling lamp; across
 // the whole disc the rotor sweeps it is redrawn, the room continuing through
 // and the rear guard's spokes and rings as soft lines in the disc plane over
-// the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as transmissive
-// acrylic: a signed distance to one smooth outline per blade, a low-frequency
-// body colour and opacity, a thin specular rim), and the front
-// (the guard's wires and centre badge that cross in front of the blades).
+// the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as
+// acrylic: a signed distance to one smooth outline per blade, cut hard; the
+// photo's own blade pixels, its veins, gloss and hub-to-tip shading, with the
+// wires that crossed it filled from the blade beside them, at 0.82 opacity;
+// a thin specular rim), and the front (the guard's wires and centre badge
+// that cross in front of the blades, drawn dark, thin and a touch out of focus
+// so the torn blades are the sharpest thing in the frame).
 // The head is turned, so the rotor turns in its own tilted plane: the guard
 // rim's ellipse maps picture to disc and back (tools/depth/bakes/rolling).
 //
@@ -50,13 +53,14 @@ import { createStage, clamp } from "../_kit/stage";
 // Stills: ?rpm=4800&t=0.25 holds the frame that starts at t (seconds) with
 // the rotor at a steady rpm; the hero is ?rpm=3590&t=0.4, the mains speed.
 // ?scan=deg sets the readout direction; ?exp=N a 1/N s exposure (the default
-// is 1/4000: long exposures blur the blades and wash the bands out, and at
+// is 1/16000, so a blade tip travels a few px while its row is open and every
+// hook keeps a hard edge: long exposures blur the blades and wash the bands out, and at
 // 1/120 s the bands vanish).
 
 const BASE = "/lab/rolling/";
 const FPS = 30000 / 1001; // sensor frame rate: NTSC 29.97, a hair under 30
 const READOUT = 1 / 30; // top row to bottom row (fits inside the 1 / 29.97 s frame)
-const EXPOSURE = 1 / 4000; // each row's open time (?exp=N for 1 / N s)
+const EXPOSURE = 1 / 16000; // each row's open time (?exp=N for 1 / N s)
 const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrated as ramps, not stacks of copies
 // The room's lamp: a ring fluorescent on the same 60 Hz mains as the motor.
 // The tube's discharge goes out and re-strikes every half cycle, so its light
@@ -83,7 +87,14 @@ const SLIP = 6; // motor torque per rad/s of slip below the set speed
 const TORQUE = 260; // motor torque cap
 const PX_PER_RPM = 0.15; // drag distance (CSS px) per rpm of set speed
 
-const AA = 1.25; // the blade outline's anti-aliasing width, device px
+const AA = 0.6; // the blade outline's anti-aliasing width, device px: a moulded edge, caught hard
+// The guard sits a hand's width in front of the blades and the phone focuses
+// on the blades, so the wires are a touch soft (FRONT_DOF image px of blur),
+// thinned (their matte's soft skirt is cut away) and dark: bare steel in a
+// dim room, not lit mint lines.
+const FRONT_DOF = 1.1;
+const FRONT_INK = 0.22; // the wires' brightness against the photo's
+const FRONT_THIN = [0.3, 0.95]; // the matte's ramp, cut to this window
 
 const PAPER = [0.949, 0.941, 0.922]; // #f2f0eb
 
@@ -120,6 +131,7 @@ uniform float uTint;
 uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
 uniform vec3 uLampDepth;
 uniform vec3 uLampLag;
+uniform vec3 uBadge; // the badge's centre and radius, image px
 out vec4 o;
 
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -143,6 +155,27 @@ vec3 lampOver(float tau){
   return 1.0 - uLampDepth * (sin(a + w * uExpo) - sin(a)) / (w * uExpo);
 }
 
+// The front, a little out of focus: a 5-tap disc over FRONT_DOF image px,
+// premultiplied, the matte thinned and the steel darkened and greyed (the
+// blade's green the matte caught at the wire's edge goes with it).
+vec4 frontAt(vec2 q, vec2 p){
+  // The badge is chrome on the guard's centre, in focus and lit: as photographed.
+  float wires = smoothstep(uBadge.z + 2.0, uBadge.z + 10.0, length(p - uBadge.xy));
+  if (wires <= 0.0) return texture(uFront, q);
+  vec2 o1 = vec2(${FRONT_DOF.toFixed(2)}) / uImg;
+  vec4 acc = vec4(0.0);
+  vec2 offs[5] = vec2[5](vec2(0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));
+  for (int i = 0; i < 5; i++) {
+    vec4 t = texture(uFront, q + offs[i] * o1);
+    acc += vec4(t.rgb * t.a, t.a) * (i == 0 ? 0.4 : 0.15);
+  }
+  vec3 rgb = acc.rgb / max(acc.a, 1e-4);
+  float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+  rgb = mix(vec3(y), rgb, 0.35) * ${FRONT_INK.toFixed(2)};
+  float a = smoothstep(${FRONT_THIN[0].toFixed(2)}, ${FRONT_THIN[1].toFixed(2)}, acc.a);
+  return mix(texture(uFront, q), vec4(rgb, a), wires);
+}
+
 void main(){
   vec2 frag = vec2(gl_FragCoord.x, uView.y - gl_FragCoord.y);
   vec2 q = (frag - uRect.xy) / uRect.zw;
@@ -155,14 +188,14 @@ void main(){
   // The fan head is turned: the blades turn in the disc's own plane, which
   // the picture sees as the guard rim's ellipse.
   vec2 d = uToDisc * (p - uHub);
-  vec4 f = texture(uFront, q);
+  vec4 f = frontAt(q, p);
   // Everything in the room is lit by the lamp, so every row sees it at the
   // brightness of its own exposure window: the readout drawn as bands.
   vec3 lit = lampOver(s * uReadout);
   // Beyond the blade tips (0.83 of the rim) nothing turns.
   if (dot(d, d) > 0.81) { o = vec4(enc(mix(plate, f.rgb, f.a) * lit), 1.0); return; }
-  // The rotor is transmissive acrylic: per sub-sample, coverage c from the
-  // signed distance to the blade's outline (anti-aliased over AA device px),
+  // The rotor is acrylic: per sub-sample, coverage c from the signed
+  // distance to the blade's outline (anti-aliased over AA device px),
   // the plate passed through it tinted, T = 1 - c + c (1 - A) tint, and
   // what it sends back, E = c (A body + rim). Linear light throughout, and
   // each sub-sample lit by the lamp at that instant.
@@ -393,6 +426,7 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1f(u.uLamp0, lastFrame.lamp);
     gl.uniform3f(u.uLampDepth, ...lampDepth);
     gl.uniform3f(u.uLampLag, ...lampLag);
+    gl.uniform3f(u.uBadge, ...meta.badge);
     // Readout direction: rows run along (cos, sin) of the scan angle's
     // perpendicular; s grows down the frame at scan = 0.
     const a = lastFrame.scan;

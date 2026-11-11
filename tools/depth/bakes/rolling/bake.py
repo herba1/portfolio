@@ -79,6 +79,10 @@ centre of the guard whose slots show the green blade roots turning behind it.
           own direction (the rear guard's cross them well off it), traced
           as whole wires through the crossings and drawn into the front.
 
+texture.py then replaces rotor.webp's flat body with the photo's own blade
+pixels (veins, gloss, shading) at a higher opacity; run it after a bake or a
+--rebuild.
+
 --rebuild SRC OUT re-runs only the reveal on a published print (the photo
 is not needed), so the reveal can be tuned without re-fetching it.
 
