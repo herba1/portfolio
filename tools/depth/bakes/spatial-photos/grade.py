@@ -30,13 +30,17 @@ cobalt sky behind a glowing cumulus) as the reference:
           run in reverse), a white balance on the ground planes, and
           posterised cloud edges re-feathered: a soft alpha along every
           cloud edge blends in a blur of that edge, so a JPEG staircase
-          reads as soft vapour again; and (shadow) the shaded side of a
-          cumulus that an HDR edit drove to sky blue goes back to a grey
-          shadow, so it is not a cobalt cut-out in the cloud.
+          reads as soft vapour again, and the cloud/sky matte itself
+          feathered (matte); (shadow) the shaded side of a cumulus that an
+          HDR edit drove to sky blue goes back to a soft cloud shadow, a
+          little under the lit cloud round it, so it is neither a cobalt
+          nor a dark matte cut-out in the cloud.
 
 The alpha of every plane is kept bit for bit (stored lossless), only colour
-changes; the thumbnail is remade from the graded planes. scene.json records
-the grade, and a graded plane set is never graded twice.
+changes, except where a preset mends a plane (mend: the slots a bake left in
+a wall behind a pole, and the windows its matte read as sky, closed and
+painted with the wall). The thumbnail is remade from the graded planes;
+scene.json records the grade, and a graded plane set is never graded twice.
 """
 import sys
 import os
@@ -49,7 +53,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import guided, pushpull, smoothstep  # noqa: E402
 
-GRADE = "sky-v2"
+GRADE = "sky-v3"
 
 # The set's sky, in HSV of the sRGB colour, from the top of the frame (t=0)
 # to the bottom (t=1). Measured off signal-cumulonimbus's clear sky (h 203,
@@ -70,8 +74,21 @@ PRESET = {
     "ine-catenary-clouds": {"veil": 0.035, "contrast": 1.03, "feather": 2.2},
     "smokestack-cumulus": {
         # a cyan HDR edit: sharpened, local contrast pushed, clipped red
-        "contrast": 0.86, "unsharp": (1.3, 0.65), "clarity": (40.0, 0.2), "shadow": 0.75, "hole": 0.04,
-        "feather": 2.6, "wb": (1.05, 1.0, 0.93), "ground_sat": 0.72,
+        # (re-developed without them: contrast down, both the fine sharpen
+        # and the broad local contrast run back out, the mottled storm
+        # band behind smoothed further, the cloud matte re-feathered, the
+        # cloud shadows given back to the cloud, the white buildings
+        # taken off their blue cast)
+        "contrast": 0.8, "unsharp": (1.4, 0.6), "clarity": (40.0, 0.3), "sky_clarity": (14.0, 0.45),
+        "shadow": 0.8, "hole": 0.05, "enclosed": 0.3, "matte": 1.5, "feather": 2.0,
+        "wb": (1.1, 1.0, 0.86), "ground_sat": 0.5, "ground_lift": 0.04,
+        # no sky is seen through these planes (walls, windows, wires): what
+        # looks like the old cyan sky there is a reflection or a sharpening
+        # fringe, and moved to cobalt it would glow
+        "near": 0,
+        # and the slots the bake left in the white walls behind the pole
+        # and the wires, mended
+        "mend": (1,), "mend_r": 0.014,
     },
     "crossing-summer": {"veil": 0.03, "feather": 2.2},
 }
@@ -101,6 +118,38 @@ def wblur(c, a, sigma):
     return np.where(den[..., None] > 1e-3, num / np.maximum(den, 1e-6)[..., None], c)
 
 
+def mend_plane(c, a, r, front):
+    """Slots the bake left in a wall where a nearer pole or wire was cut out
+    of it, and a wire's fringe the matte gave to the plane in front: closed
+    (a closing of the alpha, so only gaps narrower than 2r, inside the wall,
+    fill) and painted with the wall round them (push-pull of the wall's own
+    colour). Left open, the sky fill behind shows through them as cobalt
+    slivers on a white wall whenever the pole slides off them."""
+    k = int(round(r))
+    ker = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * k + 1, 2 * k + 1))
+    closed = cv2.morphologyEx(a, cv2.MORPH_CLOSE, ker)
+    # only behind what stands in front of it (a gap in an antenna's outline
+    # against the sky is sky, not a slot)
+    front = cv2.dilate(front, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9)))
+    gain = np.clip(closed - a, 0, 1) * front
+    # and every hole the wall closes round (a window the matte read as sky,
+    # a gap between two blocks): not connected to the sky above the plane
+    n, lab = cv2.connectedComponents((a < 0.5).astype(np.uint8), connectivity=4)
+    outside = np.unique(lab[0])
+    hole = (~np.isin(lab, outside) & (lab > 0)) | ((a < 0.5) & (lab == 0))
+    hole = cv2.GaussianBlur(cv2.dilate(hole.astype(np.uint8), np.ones((3, 3), np.uint8)).astype(np.float32), (0, 0), 1.0)
+    gain = np.maximum(gain, np.clip(hole - a, 0, 1))
+    if gain.max() <= 0:
+        return a, c
+    fill = pushpull(c, (a > 0.95).astype(np.float32))
+    # straight colour: where the alpha grew, blend toward the wall's fill by
+    # how much of the new alpha is new
+    a2 = np.clip(a + gain, 0, 1)
+    t = (gain / np.maximum(a2, 1e-3))[..., None]
+    c2 = c * (1 - t) + fill * t
+    return a2.astype(np.float32), c2.astype(np.float32)
+
+
 def ungrade_hdr(c, a, P):
     """Contrast eased about mid grey, the sharpen and local-contrast pass run
     in reverse, the veil taken out. c is sRGB straight colour, a alpha."""
@@ -112,6 +161,12 @@ def ungrade_hdr(c, a, P):
         # luminance only: the broad blur's colour would wash across edges
         y = c @ LW
         yb = wblur(y[..., None].repeat(3, 2), a, s)[..., 0]
+        c = c + (k * (yb - y))[..., None]
+    if "sky_clarity" in P:
+        # the sky only: the HDR edit's mottling of a smooth storm band
+        s, k = P["sky_clarity"]
+        y = c @ LW
+        yb = cv2.GaussianBlur(y, (0, 0), s)
         c = c + (k * (yb - y))[..., None]
     if "veil" in P:
         v = P["veil"]
@@ -194,7 +249,50 @@ def move_sky(c, B, Bt, w):
     return srgb(np.clip(L2, 0, None))
 
 
-def grade_sky(c, P, F):
+def cloud_shadows(c, w, P, seen=None):
+    """An HDR edit drives the shaded side of a cumulus to the sky's own
+    saturated blue, so by colour it is sky, and graded it would be a cobalt
+    (or, greyed, a dark matte) cut-out in the cloud. A shadow is a hole the
+    cloud closes over (cloud all round it): there it becomes the cloud's own
+    light dimmed, a soft blue-grey a fifth under the lit puffs round it,
+    with its drawing eased and its edge feathered, and it stays cloud."""
+    L_ = max(c.shape[:2])
+    cloud = (w < 0.45).astype(np.uint8)
+    r = int(P.get("hole", 0.04) * L_)
+    closed = cv2.morphologyEx(cloud, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
+    # (closed over, and cloud on most sides: a bay between two puffs, or
+    # the fill behind the buildings, is open to the sky and stays sky)
+    dens = cv2.GaussianBlur(cloud.astype(np.float32), (0, 0), r / 2)
+    holes = (closed > 0) & (cloud == 0) & (dens > P.get("enclosed", 0.5))
+    if seen is not None:
+        holes &= seen
+    holes = holes.astype(np.float32)
+    # the feather: the hole's matte opened a few pixels into the cloud round
+    # it and blurred, so its rim is a gradient, not a cut
+    inside = cv2.GaussianBlur(cv2.dilate(holes, np.ones((5, 5), np.uint8)), (0, 0), 0.004 * L_)
+    inside = np.clip(inside * 1.3, 0, 1).astype(np.float32)
+    L = lin(c)
+    y = L @ LW
+    # the lit cloud round it: its colour, blurred over cloud pixels only
+    lit = ((1 - w) * smoothstep(0.25, 0.6, y)).astype(np.float32)
+    sig = 0.012 * L_
+    num = cv2.GaussianBlur(L * lit[..., None], (0, 0), sig)
+    den = cv2.GaussianBlur(lit, (0, 0), sig)
+    Lc = num / np.maximum(den, 1e-4)[..., None]
+    Lc = np.where(den[..., None] > 1e-3, Lc, L)
+    yc = Lc @ LW
+    tone = np.array([0.89, 0.96, 1.08], np.float32)
+    # the shadow keeps its own drawing (its lumps, read against the mean of
+    # the hole round them), eased, on the cloud's light dimmed
+    sh = 0.006 * L_
+    ym = cv2.GaussianBlur(y * holes, (0, 0), sh) / np.maximum(cv2.GaussianBlur(holes, (0, 0), sh), 1e-3)
+    rel = np.clip(y / np.maximum(ym, 1e-4), 0.4, 2.5) ** 0.7
+    shade = (P["shadow"] * yc * rel)[..., None] * tone / (tone @ LW)
+    L = L + inside[..., None] * (shade - L)
+    return srgb(L), (w * (1 - inside)).astype(np.float32)
+
+
+def grade_sky(c, P, F, seen=None):
     """The sky plane. Graded everywhere by its own colour, the fill behind
     the nearer planes included: the fill is the sky's broad light plus cloud
     texture from the clear sky round it, so graded the same way it stays the
@@ -208,30 +306,13 @@ def grade_sky(c, P, F):
     # the photo's own edges, w keeps every cloud edge and drops the blocks
     w = np.clip(guided(c, w, 6, 6e-3), 0, 1).astype(np.float32)
     if "shadow" in P:
-        # an HDR edit drives the shaded side of a cumulus to the sky's own
-        # saturated blue, and graded it would be a cobalt hole cut in the
-        # cloud: inside a cloud (most of the neighbourhood cloud) the blue
-        # share is a shadow, so it goes grey-violet and lifts towards the
-        # cloud round it instead
-        L_ = max(c.shape[:2])
-        dens = cv2.GaussianBlur(1 - w, (0, 0), 0.012 * L_)
-        # (and a hole in a cloud, a shadow a puff casts on the next, is
-        # inside it however large: cloud all round it, closed over)
-        cloud = (w < 0.45).astype(np.uint8)
-        r = int(P.get("hole", 0.02) * L_)
-        closed = cv2.morphologyEx(cloud, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * r + 1, 2 * r + 1)))
-        holes = cv2.GaussianBlur(((closed > 0) & (cloud == 0)).astype(np.float32), (0, 0), 0.004 * L_)
-        inside = (np.maximum(smoothstep(0.3, 0.6, dens), np.clip(holes * 1.5, 0, 1)) * w).astype(np.float32)
-        s = P["shadow"]
-        L = lin(c)
-        y = L @ LW
-        cool = np.array([0.94, 0.98, 1.07], np.float32)
-        neutral = y[..., None] * cool / (cool @ LW)
-        L = L + (s * inside)[..., None] * (neutral - L)
-        soft = cv2.GaussianBlur(L, (0, 0), 0.006 * L_)
-        L = L + (0.6 * s * inside)[..., None] * (soft - L)
-        c = srgb(L)
-        w = w * (1 - s * inside)
+        c, w = cloud_shadows(c, w, P, seen)
+    if "matte" in P:
+        # re-matte: the cloud/sky matte of a posterised JPEG edge is a
+        # staircase; a feathered alpha (the matte blurred, its ramp eased)
+        # lets the sky into the cloud's rim softly, as vapour does
+        w = cv2.GaussianBlur(w, (0, 0), P["matte"])
+        w = smoothstep(0.0, 1.0, w).astype(np.float32)
     w = w * P.get("sky", 1.0)
     return move_sky(c, B, Bt, w), w
 
@@ -320,7 +401,19 @@ def main():
         # the grade itself takes the haze out, and lifting a hazy cloud's
         # whites would only clip them
         # (a contrast eased off, as on an HDR edit, applies to the sky too)
+        if k in P.get("mend", ()):
+            x0, y0 = round(p["rect"][0] * W), round(p["rect"][1] * H)
+            front = np.zeros((H, W), np.float32)
+            for q, rq in zip(meta["planes"], planes):
+                if q["k"] > k:
+                    qx, qy = round(q["rect"][0] * W), round(q["rect"][1] * H)
+                    sub = front[qy:qy + rq.shape[0], qx:qx + rq.shape[1]]
+                    sub[:] = np.maximum(sub, rq[:sub.shape[0], :sub.shape[1], 3])
+            front = front[y0:y0 + a.shape[0], x0:x0 + a.shape[1]]
+            a, c = mend_plane(c, a, P["mend_r"] * max(W, H), front)
         Pk = dict(P)
+        if k > 0:
+            Pk.pop("sky_clarity", None)
         if k == 0:
             Pk.pop("veil", None)
             if Pk.get("contrast", 1) > 1:
@@ -332,7 +425,7 @@ def main():
             if F is None:
                 raise SystemExit(f"{slug}: no clear sky found to grade from")
             sky0 = c
-            c, w = grade_sky(c, P, F)
+            c, w = grade_sky(c, P, F, seen)
             if "feather" in P:
                 c = feather_edges(c, w, P["feather"])
             c = roll_clouds(c, w)
@@ -344,7 +437,11 @@ def main():
             if "ground_sat" in P:
                 y = (c @ LW)[..., None]
                 c = y + (c - y) * P["ground_sat"]
-            c = grade_near(np.clip(c, 0, 1), a, (round(p["rect"][0] * W), round(p["rect"][1] * H)), sky0, sky1, near)
+            if "ground_lift" in P:
+                # the HDR edit's crushed shadows on the walls lifted a touch
+                c = P["ground_lift"] + c * (1 - P["ground_lift"])
+            if P.get("near", 1) > 0:
+                c = grade_near(np.clip(c, 0, 1), a, (round(p["rect"][0] * W), round(p["rect"][1] * H)), sky0, sky1, near * P.get("near", 1))
         c = np.clip(c, 0, 1)
         layers.append((p, c, a))
         rng = np.random.default_rng(100 + k)
