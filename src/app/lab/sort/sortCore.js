@@ -117,17 +117,21 @@ export const LEAN = 820; // ...and how far right it has stepped at the crest
 export const LEAN_POW = 2.1;
 export const LEN0 = 420; // a strip's length at the foot, before the brush scales it
 export const LEN1 = 260; // ...and what the crest adds
-export const LIP_H = 300; // the lip hangs this far below the crest
-export const LIP_X = 1720; // its outer edge at its widest
+// The lip: how far the crest's rows may reach as they run on over the top
+// and hang down. It is a reach, not an outline; each row still ends where
+// its last whole run ends.
+export const LIP_H = 420; // the lip hangs this far below the crest
+export const WELD = 0.7; // down to here (share of LIP_H) the lip is the face's own rows; below, its tip hangs free
+export const LIP_X = 1720; // its reach at its widest
 export const LIP_W = 400; // its width at the crest, tapering to a point
-export const LIP_TOP = 160; // the outer edge rounds in by this over the shoulder...
-export const LIP_IN = 320; // ...and curls back in by this to the tip
-export const HOLLOW = 70; // room left between the face and the lip
+export const LIP_TOP = 160; // the reach rounds in by this over the shoulder...
+export const LIP_IN = 380; // ...and curls back in by this to the tip
 export const stackT = (y) => (VERGE_TOP - y) / (VERGE_TOP - CREST);
 export const stackLeft = (t) => X_ROOT + LEAN * Math.max(0, t) ** LEAN_POW;
-// The lip's span on row y: its outer edge rounds over the shoulder and
-// curls back in towards the face as it hangs, so the strip ends trace a
-// hook; it tapers to a point.
+// The lip's reach on row y: it rounds over the shoulder and curls back in
+// towards the face as it hangs, so the rows' ragged ends turn a hook. Down
+// to WELD the crest's rows run on into it unbroken; below that only its tip
+// hangs, tapering, curling in over a hollow that opens downward.
 const LIP_SH = 0.22; // where the outer edge is furthest out, as a share of LIP_H
 export function lipSpan(y) {
   const s = (y - CREST) / LIP_H;
@@ -154,8 +158,13 @@ export const ROWS = (() => {
   let thickLast = false;
   for (let j = 0; y < VERGE_TOP; j++) {
     const u = hash(j, 173);
-    const thick = !thickLast && hash(j, 179) < 0.13;
-    let hh = thick ? 14 + Math.floor(u * (ROW_MAX - 14 + 1)) : ROW_MIN + Math.floor(u ** 2.2 * 9);
+    // The upper third, where the light reads into the tails, is where the
+    // chunky blocks gather: tall rows (20-29 grid px, 16-24 device px) whose
+    // blown ends stack into the crest's glowing spine.
+    const up = stackT(y) > 0.55;
+    const thick = !thickLast && hash(j, 179) < (up ? 0.3 : 0.13);
+    const t0 = up ? 20 : 14;
+    let hh = thick ? t0 + Math.floor(u * (ROW_MAX - t0 + 1)) : ROW_MIN + Math.floor(u ** 2.2 * 9);
     // No sliver at the foot: the last row takes what is left.
     if (VERGE_TOP - y - hh < ROW_MIN) hh = VERGE_TOP - y;
     y0.push(y);
@@ -479,18 +488,21 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // The verge's bands are sorted in place (each long run slid a hashed way to
 // the right where it has been lifted, so the photo shows where its pixels
 // left). Above the verge the stack is cut into ROWS, and a lifted row is an
-// opaque straight strip from stackLeft(t) to its outer edge, tiled end to
-// end from the sorted runs of several verge bands, each read from its dark
-// green head towards its brightest tail: a woven sheet whose silhouette is
-// where the solid mass ends. Over the top a lip hangs from the crest's end,
-// tapering to a point, a hollow of the photo between it and the face.
+// opaque straight strip from stackLeft(t), tiled end to end from the sorted
+// runs of several verge bands, each read from its dark green head towards
+// its brightest tail. There is no drawn outline: a row is given only a reach
+// (how far the brush lets it run), and it ends where its last whole run
+// ends, so the outer edge is ragged row by row and is the sort's own. Over
+// the top the crest's rows run on out and hang down as the lip, welded to the
+// face: one sheet curling over, no sky inside it.
 //
 // The stack is lit by its own sort order: each row carries a facing (0
 // tucked low under the lean, 1 at the crest turned to the sky), and the
 // facing picks which stretch of its runs the row reads. Low rows read the
-// dark green heads; the crest reads out to the runs' tails, whose brightest
-// pixels the shader pushes to white-gold, and a few glint tiles break off
-// the crest's ends.
+// dark green heads; across the upper third the rows read on into the tails,
+// and each row's tail lands at its end as a block gone over to white-gold.
+// The tall rows up there blow out whole at their ends, a broken column of
+// glowing blocks (the spine), and a few glint tiles break off the crest.
 export const WAVE_ON = 0.12; // mask level where the verge sorts in place and the stack's foot lifts
 export const RUN_MIN = 120; // shorter verge runs are never lifted
 export const SHOW_MIN = 72; // shorter runs stay photo, not sorted in place: no mosaic of stubs
@@ -501,12 +513,13 @@ const SRC_X1 = ROOT_X1 + 240;
 // Each grid row holds up to PARTS tiles, three RGBA16UI texels each, in a
 // texture GH wide and 3 x PARTS tall: (x0, x1, source band + 1, flags) for
 // the tile's span, (run x0, run x1, facing x 65535, vegetation share of the
-// run x 65535), and (row x0, row x1, tile ramp depth x 65535, 0) for the
-// whole row the tile is part of. The first tile that holds a pixel draws it,
-// so glints and the lip are written first.
+// run x 65535), and (row x0, row x1, tile ramp depth x 65535, blow-out x
+// 65535) for the whole row the tile is part of. The first tile that holds a pixel draws it,
+// so glints and end blocks are written first.
 export const PARTS = 12;
 export const F_LIFT = 1; // a lifted strip: held out behind poles, lit by its facing
 export const F_GLINT = 2; // a glint tile: the run's brightest pixel, white-gold
+export const F_BLOWN = 4; // a row's end block: its run's tail, gone over to white-gold
 // A verge run in place slides right by up to this much of itself where it
 // has been lifted.
 const SLIDE = 0.3;
@@ -642,7 +655,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
 
   // A tile on stack row r, written down every grid row the stack row covers.
   const parts = new Uint8Array(ROWS.n);
-  const put = (r, x0, x1, flags, run, f, rx0, rx1, w) => {
+  const put = (r, x0, x1, flags, run, f, rx0, rx1, w, blow = 0) => {
     if (parts[r] >= PARTS) return;
     const a = clamp(Math.round(x0), 0, GW);
     const b = clamp(Math.round(x1), 0, GW);
@@ -665,74 +678,105 @@ export function geometry(mask8, base, link, plan, out = {}) {
       table[o2] = ra;
       table[o2 + 1] = rb;
       table[o2 + 2] = Math.round(clamp(w, 0, 1) * 65535);
+      table[o2 + 3] = Math.round(clamp(blow, 0, 1) * 65535);
     }
   };
 
-  // Tiling: a row of the sheet runs solid from its inner edge xa to its outer
-  // edge xb. One verge band's sorted run seldom spans that, so further runs,
-  // from verge bands further round the scrambled walk, are laid end to end
-  // along the same row until it is full; the last tile always ends exactly at
-  // xb, so the silhouette is where the solid mass ends. Each tile is its own
-  // run, a hard-edged block, and reads a short ramp of it (depth w) riding on
-  // the row's one ramp, so the row still goes dark to bright from xa to xb.
-  const TILE_MAX = 6;
-  const tile = (r, xa, xb, vi, salt, f, list) => {
+  // Tiling: a row of the sheet starts at its inner edge xa and is laid end to
+  // end with sorted runs from verge bands further and further round the
+  // scrambled walk, each tile as long as its run makes it (a hashed share of
+  // the run's length). The row has no drawn outer edge: it ends where its
+  // last whole tile ends, whichever run end lies nearest the reach it was
+  // given, so row by row the ends are ragged by the runs' own lengths. Each
+  // tile is a hard-edged block reading a stretch of its run (depth w) riding
+  // on the row's one ramp, so the row still goes dark to bright, and its last
+  // tile reads on into the run's tail.
+  const TILE_MAX = 8;
+  const tile = (r, xa, reach, vi, salt, f, list) => {
     const out = [];
     let x = xa;
-    for (let k = 0; k < TILE_MAX && x < xb - 0.5; k++) {
+    for (let k = 0; k < TILE_MAX && x < reach; k++) {
       const run = pick((vi + k * 5) % nv, salt + k);
       if (!run) break;
       const len = run.x1 - run.x0;
-      let tl = clamp(len * (0.55 + 0.7 * hash(r * 13 + k, salt)), 70, 560);
-      if (xb - (x + tl) < 60 || k === TILE_MAX - 1) tl = xb - x;
+      let tl = clamp(len * (0.5 + 0.75 * hash(r * 13 + k, salt)), 48, 520);
+      // The first tile of a row that has only just lifted may be cut down,
+      // so a stack that has not reached its crest still tapers.
+      if (k === 0) tl = Math.min(tl, Math.max(40, (reach - xa) * (0.7 + 0.9 * hash(r, salt + 29))));
+      // Stop short rather than overshoot by more than the gap left.
+      else if (x + tl - reach > reach - x) break;
       out.push([x, x + tl, run]);
       x += tl;
     }
     for (const [x0, x1, run] of out) {
-      const w = clamp((0.55 * (x1 - x0)) / Math.max(1, run.x1 - run.x0), 0.14, 0.5);
-      list.push([r, x0, x1, F_LIFT, run, f, xa, xb, w]);
+      const last = x1 === x;
+      const w = last ? 0.85 : clamp((0.55 * (x1 - x0)) / Math.max(1, run.x1 - run.x0), 0.14, 0.5);
+      list.push([r, x0, x1, F_LIFT, run, f, xa, x, w]);
     }
-    return out;
+    return { tiles: out, xb: x };
   };
 
-  // The tiles, collected first so glints and the lip can be written ahead
-  // of the face they sit on.
+  // The tiles, collected first so glints and end blocks can be written
+  // ahead of the face they sit on.
   const face = [];
-  const lips = [];
+  const ends = [];
   const tails = [];
   for (const L of plan.layers) {
     const { r, t } = L;
     const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const lip = L.lip;
+    if (!L.on && !lip) continue;
+    // The row's reach: how far the brush lets it run. The topmost rows the
+    // mask has only just lifted reach less, so a stack short of its crest
+    // tapers. Over the top the crest's rows run on out to the lip's reach and
+    // hang down as it: the lip is the face's own rows, one sheet.
+    const xa = L.xl;
+    let reach = 0;
+    let f = clamp(smooth(0.06, 0.8, t) ** 1.1 + (hash(r, 47) - 0.5) * 0.12, 0, 1);
     if (L.on) {
-      // The topmost rows the mask has only just lifted are shorter, so a
-      // stack that has not reached its crest tapers to a point rather than
-      // ending flat. The outer edge wanders smoothly with height, with only a
-      // small step from row to row: a solid mass, not a comb of tips.
       const grow = 0.25 + 0.75 * smooth(0, 0.16, L.m - liftAt(t));
-      const wander = 0.9 + 0.2 * vnoise(c / (34 * S), 9.1) + (hash(r, 43) - 0.5) * 0.04;
-      let W = (LEN0 + LEN1 * t) * (0.55 + 0.45 * L.m) * wander * grow;
-      if (lip) {
-        // Under the lip the face stops short of it (the hollow); over the
-        // shoulder it runs on into it, so the crest is one sheet.
-        if (lip.s > 0.12) W = Math.min(W, lip.xa - HOLLOW * smooth(0.12, 0.4, lip.s) - L.xl);
-        else W = Math.max(W, lip.xa + 8 - L.xl);
-      }
-      if (W >= 24) {
-        const f = clamp(smooth(0.12, 1, t) ** 1.2 + (hash(r, 47) - 0.5) * 0.12, 0, 1);
-        const tl = tile(r, L.xl, L.xl + W, L.src, 41, f, face);
-        if (tl.length && t > 0.78 && (!lip || lip.s > 0.12)) tails.push({ r, x1: L.xl + W, run: tl[tl.length - 1][2], f, y: ROWS.y0[r], xa: L.xl, xb: L.xl + W });
-      }
+      reach = L.xl + (LEN0 + LEN1 * t) * (0.55 + 0.45 * L.m) * grow;
     }
-    if (lip) {
-      // The lip's shoulder is turned fully to the sky; it darkens as it
+    const tip = lip && lip.s > WELD;
+    if (lip && !tip) {
+      reach = Math.max(reach, lip.xb);
+      // The shoulder is turned fully to the sky; the lip darkens as it
       // hangs and turns under.
-      const f = 1 - 0.62 * lip.s ** 1.2;
-      const xa = lip.xa + (hash(r, 59) - 0.5) * 16 * (1 - lip.s);
-      const xb = lip.xb - hash(r, 67) * 10 * (0.3 + lip.s);
-      const tl = tile(r, xa, xb, lip.src, 53, f, lips);
-      if (tl.length && lip.s < 0.35) tails.push({ r, x1: xb, run: tl[tl.length - 1][2], f, y: ROWS.y0[r], xa, xb });
+      f = Math.max(f * (1 - 0.35 * smooth(0.4, 1, lip.s)), 1 - 0.62 * lip.s ** 1.2);
+    } else if (tip && L.on) {
+      // Under the weld the face falls away from the tip as a rounded vault,
+      // so the hollow opens downward out of the sheet, not across it.
+      const u = (lip.s - WELD) / (1 - WELD);
+      reach = Math.max(reach, lip.xa + (reach - lip.xa) * u ** 0.75);
     }
+    // The tip, hanging free under the welded sheet: its own short row,
+    // turned under and darkening, ragged at both ends.
+    if (tip) {
+      const ft = 1 - 0.62 * lip.s ** 1.2;
+      const ta = lip.xa + (hash(r, 59) - 0.5) * 24;
+      const tt = tile(r, ta, lip.xb, lip.src, 53, ft, face);
+      if (tt.tiles.length) {
+        const [, , trun] = tt.tiles[tt.tiles.length - 1];
+        const bl = clamp((tt.xb - ta) * (0.15 + 0.2 * hash(r, 73)), 10, 60);
+        ends.push([r, tt.xb - bl, tt.xb, F_LIFT | F_BLOWN, trun, ft, ta, tt.xb, 0, smooth(0.38, 0.85, ft) * 0.6]);
+      }
+    }
+    if (!L.on || reach - xa < 24) continue;
+    const { tiles, xb } = tile(r, xa, reach, L.src, 41, f, face);
+    if (!tiles.length) continue;
+    const [lx0, , run] = tiles[tiles.length - 1];
+    const h = ROWS.h[r];
+    // The run's tail lands at the row's end as a block gone over to
+    // white-gold, more of it the more the row faces the sky. The tall rows
+    // of the upper third blow out whole: the spine.
+    const blow = smooth(0.38, 0.85, f);
+    if (blow > 0.04) {
+      const spine = h >= 20 && f > 0.55;
+      const share = spine ? 0.4 + 0.3 * hash(r, 71) : 0.12 + 0.22 * hash(r, 71) * blow;
+      const bl = clamp((xb - lx0) * share, spine ? 64 : 14, spine ? 220 : 120);
+      ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0, spine ? 1 : blow]);
+    }
+    if (f > 0.6) tails.push({ r, x1: xb, run, f, y: ROWS.y0[r], xa, xb });
   }
 
   // Glints: a handful of bright tails where the facing peaks, spaced apart.
@@ -747,9 +791,9 @@ export function geometry(mask8, base, link, plan, out = {}) {
     const gap = 4 + Math.round(hash(g.r, 63) * 10);
     const w = 12 + Math.round(hash(g.r, 65) * 30);
     glint.push({ x: g.x1, y: g.y });
-    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0);
+    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0, 1);
   }
-  for (const p of lips) put(...p);
+  for (const p of ends) put(...p);
   for (const p of face) put(...p);
   return { geo, table, glintN: glint.length };
 }
