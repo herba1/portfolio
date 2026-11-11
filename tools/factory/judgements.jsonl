@@ -90,3 +90,4 @@
 {"run":"climb-66","date":"2026-11-10","results":{"axis":"5.5 eval, r1 perceptual weight map judged identical","shutter":"6 eval, r1 longness cap and warm cloud tops kept judged 4.5 vs 4; re-eval cut off","polariser":"5.5 eval, r1 stronger polariser swing rejected (greyed cobalt)"}}
 {"run":"climb-67","date":"2026-11-10","results":{"fade":"6 eval, r1 cut off by usage limit (set aside)","sort":"5 eval, r1 unjudged (usage limit, set aside)","rolling":"4.5 eval, r1 cut off by usage limit (set aside)"}}
 {"run":"climb-68","date":"2026-11-10","results":{"note":"sentaku, depth-clock, versions: no agents ran, weekly usage limit hit; climb paused until reset"}}
+{"run":"climb-68","date":"2026-11-11","results":{"sentaku":"5 eval, r1 masked sun bloom rejected (clipped sun core)","depth-clock":"6 eval, r1 numerals moved into open sky rejected (reads as overlay)","versions":"5.5 eval, r1 serif spines and flat timeline rejected"}}
