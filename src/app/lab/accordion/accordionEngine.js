@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import { createStage, clamp, damp } from "../_kit/stage";
-import { loadImage } from "../_kit/covers";
+import { paintStreet, toStock } from "./street";
 
 // An accordion-fold book after Ruscha's Sunset Strip. Eight panels hinged
 // at seven creases. Shut, it lies on the table as a small silver block.
@@ -48,12 +48,19 @@ function makeEnvironment(renderer) {
   return env;
 }
 
-// The printed strip: one street along the top, the facing side upside down
-// along the bottom, street numbers in the gutter, on warm uncoated stock.
+// The printed strip, laid out like Ruscha's: one side of the street running
+// the length of the top, the other side upside down along the bottom, and
+// between them a thin gutter of street numbers, each set under (or, for the
+// far side, over) the left edge of its frontage.
+const MARGIN = 16; // paper above and below the photographs, texture px
+const GUTTER = 112; // between the two bands: two rows of numbers, well apart
+const NUM_PX = 40; // ~11-12 CSS px on screen at the hero framing
+
 async function paintStrip() {
   const css = getComputedStyle(document.body);
-  const mono = css.getPropertyValue("--font-geist-mono").trim() || "ui-monospace, monospace";
-  const [img] = await Promise.all([loadImage("/accordion/street.jpg"), document.fonts.load(`500 16px ${mono}`).catch(() => null)]);
+  const sans = css.getPropertyValue("--font-geist-sans").trim() || "ui-sans-serif, system-ui, sans-serif";
+  const numFont = `520 ${NUM_PX}px ${sans}`;
+  await document.fonts.load(numFont, "0123456789").catch(() => null);
 
   const W = TEX_PANEL * N;
   const H = Math.round((TEX_PANEL * PH) / PW);
@@ -74,58 +81,35 @@ async function paintStrip() {
   }
   g.putImageData(tooth, 0, 0);
 
-  // Each source band is cropped to its middle rows so the strip keeps air.
-  const half = img.height / 2;
-  const sh = half * 0.74;
-  const sy = (half - sh) / 2;
-  const bandH = Math.round((W * sh) / img.width);
-  const margin = Math.round((H - 2 * bandH) * 0.24);
-  const topY = margin;
-  const botY = H - margin - bandH;
+  const bandH = (H - 2 * MARGIN - GUTTER) / 2;
+  g.font = numFont;
+  g.textBaseline = "alphabetic";
+  g.textAlign = "left";
+  const fig = g.measureText("0123456789").actualBoundingBoxAscent || NUM_PX * 0.7;
 
+  // Each side is painted in its own frame: band on top, numbers hanging
+  // below it. The far side is the same frame turned half a revolution.
+  const side = (seed, first, hills) => {
+    const { canvas, lots } = paintStreet(W, Math.round(bandH), seed, { creases: TEX_PANEL, hills });
+    g.drawImage(toStock(canvas), 0, 0, W, bandH);
+    g.font = numFont;
+    g.fillStyle = "#2b2824";
+    let num = first;
+    let prev = null;
+    for (const x of lots) {
+      if (prev != null) num += 2 * Math.max(1, Math.round((x - prev) / 70));
+      prev = x;
+      g.fillText(String(num), Math.round(x) + 3, bandH + 10 + fig);
+    }
+  };
   g.save();
-  g.filter = "grayscale(1) contrast(1.4) brightness(1.06)";
-  g.drawImage(img, 0, sy, img.width, sh, 0, topY, W, bandH);
-  g.translate(W, botY + bandH);
-  g.rotate(Math.PI);
-  g.drawImage(img, 0, half + sy, img.width, sh, 0, 0, W, bandH);
+  g.translate(0, MARGIN);
+  side(1966, 8100, true);
   g.restore();
-  // Halftone stock prints a little warm and never reaches true black.
   g.save();
-  g.globalCompositeOperation = "multiply";
-  g.fillStyle = "#efe8dc";
-  g.fillRect(0, topY, W, bandH);
-  g.fillRect(0, botY, W, bandH);
-  g.globalCompositeOperation = "screen";
-  g.fillStyle = "#141210";
-  g.fillRect(0, topY, W, bandH);
-  g.fillRect(0, botY, W, bandH);
-  g.restore();
-
-  // Street numbers, Ruscha-style: under each frontage on the near side,
-  // upside down over each frontage on the far side.
-  g.fillStyle = "#3d3933";
-  g.font = `500 15px ${mono}`;
-  g.textBaseline = "top";
-  let x = 60;
-  let num = 1520;
-  let seed = 7;
-  const rnd = () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
-  while (x < W - 80) {
-    g.fillText(String(num), x, topY + bandH + 12);
-    num += 2 + 2 * Math.floor(rnd() * 6);
-    x += 150 + rnd() * 260;
-  }
-  g.save();
-  g.translate(W, botY);
+  g.translate(W, H - MARGIN);
   g.rotate(Math.PI);
-  x = 90;
-  num = 1521;
-  while (x < W - 80) {
-    g.fillText(String(num), x, 12);
-    num += 2 + 2 * Math.floor(rnd() * 6);
-    x += 150 + rnd() * 260;
-  }
+  side(8024, 8101, false);
   g.restore();
   return c;
 }
@@ -155,12 +139,16 @@ export async function createAccordion(host) {
 
   const scene = new THREE.Scene();
   scene.environment = makeEnvironment(renderer);
-  scene.environmentIntensity = 0.35;
+  scene.environmentIntensity = 0.22;
   const camera = new THREE.PerspectiveCamera(20, 1, 0.5, 80);
 
-  scene.add(new THREE.HemisphereLight("#fffaf1", "#bdb3a3", 0.75));
-  const key = new THREE.DirectionalLight("#fff4e6", 2.6);
-  key.position.set(-7, 6.5, 3);
+  scene.add(new THREE.HemisphereLight("#fffaf1", "#bdb3a3", 0.5));
+  // The key comes in low from the left and only a little from the front.
+  // Open, the faces alternate heading about +-27 degrees; from here every
+  // left-facing face takes the sun square and every right-facing face is
+  // turned just past it, so the zig-zag reads lit, shade, lit, shade.
+  const key = new THREE.DirectionalLight("#fff4e6", 3.3);
+  key.position.set(-8, 5, 2.4);
   key.castShadow = true;
   key.shadow.mapSize.set(2048, 2048);
   Object.assign(key.shadow.camera, { left: -6, right: 6, top: 6, bottom: -6, near: 1, far: 30 });
@@ -184,7 +172,9 @@ export async function createAccordion(host) {
   const print = new THREE.MeshStandardMaterial({ map: stripTex, roughness: 0.86 });
   const paper = new THREE.MeshStandardMaterial({ color: "#f3f0e8", roughness: 0.9 });
   const edge = new THREE.MeshStandardMaterial({ color: "#e9e4d9", roughness: 0.95 });
-  const silver = new THREE.MeshStandardMaterial({ color: "#e6e6e4", metalness: 1, roughness: 0.26, envMapIntensity: 1.5 });
+  // The covers keep their own reflection strength: the room's fill was cut
+  // so the open faces could fall into shade, but the silver should not dim.
+  const silver = new THREE.MeshStandardMaterial({ color: "#e6e6e4", metalness: 1, roughness: 0.26, envMap: scene.environment, envMapIntensity: 0.53 });
 
   const book = new THREE.Group(); // centred on the table
   const tilt = new THREE.Group(); // rotates about the spine: lying to standing
