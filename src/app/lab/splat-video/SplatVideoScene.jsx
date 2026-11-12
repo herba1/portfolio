@@ -4,6 +4,7 @@ import { useFrame } from "@react-three/fiber";
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 
+import { createFilmPass } from "./filmPass";
 import OrbitStage, { aimCamera } from "./OrbitStage";
 import { createSoundClock } from "./soundClock";
 import {
@@ -156,15 +157,19 @@ function gpuBusy(context, fenceRef) {
   return false;
 }
 
-function useResolvedRender(resolveRef, scratchRef) {
+function useResolvedRender(resolveRef, scratchRef, engineRef) {
   const fenceRef = useRef(null);
+  const filmRef = useRef(null);
 
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    const film = createFilmPass();
+    filmRef.current = film;
+    return () => {
+      film.dispose();
+      filmRef.current = null;
       fenceRef.current = null;
-    },
-    [],
-  );
+    };
+  }, []);
 
   useFrame((state) => {
     const context = state.gl.getContext();
@@ -172,8 +177,21 @@ function useResolvedRender(resolveRef, scratchRef) {
     if (fenced && gpuBusy(context, fenceRef)) return;
     const resolve = resolveRef.current;
     const scratch = scratchRef.current;
+    const film = filmRef.current;
     if (!resolve || !scratch) state.gl.render(state.scene, state.camera);
-    else resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
+    else {
+      const width = Math.max(1, scratch.viewport.x);
+      const height = Math.max(1, scratch.viewport.y);
+      const drawSplats = (gl) => resolve.render(gl, state.scene, state.camera, width, height);
+      if (!film) drawSplats(state.gl);
+      else {
+        film.render(state.gl, drawSplats, width, height, {
+          time: state.clock.elapsedTime,
+          still: Boolean(engineRef.current?.reducedMotion),
+          pixelRatio: state.gl.getPixelRatio(),
+        });
+      }
+    }
     if (fenced) {
       fenceRef.current = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
       context.flush();
@@ -245,7 +263,7 @@ function SplatField({ clip, engineRef }) {
     if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
-  useResolvedRender(resolveRef, scratchRef);
+  useResolvedRender(resolveRef, scratchRef, engineRef);
 
   return <group ref={groupRef} rotation-x={Math.PI} />;
 }
@@ -313,7 +331,7 @@ function StreamField({ clip, engineRef }) {
     if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
-  useResolvedRender(resolveRef, scratchRef);
+  useResolvedRender(resolveRef, scratchRef, engineRef);
 
   return <group ref={groupRef} rotation-x={Math.PI} />;
 }

@@ -72,6 +72,29 @@ export const RENDER = {
   coverageSolid: 0.35,
 };
 
+// The film finish laid over the resolved splats, in display (sRGB) values.
+// The silhouette's paint-flat navy is lifted towards an exposed cyan-navy,
+// the cloud bleeds a thin warm halation into the dark edges beside it, and a
+// luminance-only grain held at 24 fps sits over everything. Nothing passes
+// `cap` (250 / 255), so the highlights never clip.
+export const FILM = {
+  lift: [0.042, 0.106, 0.171],
+  toe: [0.13, 0.3],
+  haloThreshold: 0.8,
+  haloKnee: 0.12,
+  haloScale: 4,
+  haloSigma: 2.2,
+  haloTint: [1, 0.478, 0.227],
+  haloGain: 0.4,
+  haloDark: [0.12, 0.42],
+  shoulder: 0.92,
+  cap: 250 / 255,
+  grain: 0.025,
+  grainFloor: 0.3,
+  grainFps: 24,
+  grainCell: 0.75,
+};
+
 export const RGBD = {
   tearRelative: 0.08,
   plateTearRelative: 0,
