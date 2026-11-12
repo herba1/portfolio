@@ -97,9 +97,11 @@ const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const GOP = 90; // frames between I-frames (the cut, frame 180, is one too)
 const QP0 = 30; // encoder quantiser (H.264 scale)
 const FOE_C = 0.01; // a frozen field diverging faster than this per px is a zoom, weighted by REACH
-const REACH = 500; // px from the centre of the motion at which a frozen vector steps at its own length
-// (the weight grows with the square of the distance: a quarter of it at half the reach)
+const REACH = 320; // px from the centre of the motion at which a frozen radial step is its own length
+// (the weight grows with the square of the distance: a quarter of it at half the reach), before STEP_MAX
 const REACH_MAX = 1.3; // and at most this many times it
+const STEP_MAX = 6; // px: a frozen partition's radial step per frame, at most (under one 8 px partition)
+const STEP_FIX = 2; // px: a radial step at least this long is rounded once and kept, not dithered
 const GROW = 0.3; // spread of the starved field per frame, per 16 px of vector
 const GROW_MAX = 0.5; // and at most this much of the upstream block's level
 const REFRESH = 14; // frames for the intra refresh to sweep the picture
@@ -191,7 +193,8 @@ vec3 mc(sampler2D ref, vec2 p, vec4 m) {
 // two frames in five, always the same way, and every pixel of the
 // partition steps together: what it drags is pulled out into one long
 // stepped streak instead of being dithered back and forth by half-pels
-// rounded alternately up and down. Copied whole, the
+// rounded alternately up and down (a fast radial step is
+// rounded once and kept whole instead: see latchFrom). Copied whole, the
 // photo's grain and the 16x16 and 8x8 block edges stay as sharp on the
 // three hundredth frame as on the first, and where two partitions' vectors
 // part, the column or row between them is drawn out again every frame.
@@ -821,29 +824,29 @@ export async function createDatamosh(host, { embedded = false } = {}) {
   // The P-frame a starved block duplicates. Until it misses an I-frame it
   // follows the stream's own vectors (still a whole-pel copy with no
   // residual); the first I-frame it misses is the one a datamosher deletes,
-  // and from then on it repeats the P-frame after it, exactly: each 8x8
-  // partition keeps its own vector from that one frame, at full magnitude,
-  // with no averaging over frames and no smoothing between neighbours, so
-  // the field keeps the radial divergence that pulls one partition away
-  // from the next. Averaged or median-filtered, neighbouring partitions
-  // step nearly alike, their copies chase each other round and the picture
-  // compounds into a uniform mottle; left as encoded, each partition reads
-  // a little further in toward the centre of the motion than the one inside
-  // it, so whatever sits near that centre is copied out along its ray again
-  // every frame, one partition further each time, and is pulled out into a
-  // long stepped streak that still carries the picture it came from: a
-  // trunk stays a dark ray, a gap of sky a pale one. Intra blocks have
-  // their concealed vector here.
+  // and from then on it repeats the P-frame after it: each 8x8 partition
+  // keeps its own vector from that one frame, with no averaging over frames
+  // and no smoothing between neighbours, so the field keeps the radial
+  // divergence that pulls one partition away from the next. Averaged or
+  // median-filtered, neighbouring partitions step nearly alike, their
+  // copies chase each other round and the picture compounds into a uniform
+  // mottle. In a zoom only the vector's radial part is kept, out of the
+  // centre of its motion (see latchFrom): each partition reads a little
+  // further in along its own ray than the one outside it, under one
+  // partition a frame, so whatever sits near that centre is copied out
+  // along its ray again every frame and is pulled out into a long straight
+  // line of one colour: a trunk becomes a dark ray, a gap of sky a pale
+  // one. Intra blocks have their concealed vector here.
   //
-  // The frozen field is also weighted by distance from the centre of its
-  // own motion (the point the frame's vectors diverge from, fitted to the
-  // field: see foeOf), so the outer partitions step further each frame than
-  // the encoder's vector alone would take them and the inner ones hardly at
-  // all. What is near the centre stays itself; further out the same
+  // The radial step is also weighted by distance from that centre (the
+  // point the frame's vectors diverge from, fitted to the field: see foeOf)
+  // and clamped to STEP_MAX: the inner partitions hardly step at all and
+  // the weight only sets how soon, going out, a partition reaches the
+  // clamp. What is near the centre stays itself; further out the same
   // content is drawn out faster than it is fed, so a ray thins from intact
   // picture into strip with distance, the way the street in ref 2 grades
   // from the photo into its smear. A field with no centre (the summer pan,
-  // over the seam) is left at its own magnitude.
+  // over the seam) is left as encoded.
   const latched = new Uint8Array(MW * MH);
   const starved = new Uint8Array(MW * MH);
   const frozen = new Uint8Array(MW * MH);
@@ -1116,7 +1119,24 @@ export async function createDatamosh(host, { embedded = false } = {}) {
       field[out[k] * 4 + 2] = out[k + 2];
     }
   };
-  // latch block id from a field: weighted when it is the duplicated frame
+  // each partition's whole-pel step this frame: the fractional vector with
+  // its own rounding remainder carried from frame to frame
+  const carry = new Float32Array(mv.GW * mv.GH * 2);
+  // Latch block id from a field. In a zoom each partition's vector is
+  // projected onto its own ray out of the fitted centre, v = ((v . r) /
+  // |r|^2) r with r = p - centre, and only that radial part is kept: the
+  // tangential part is block-matching noise, and repeated every frame it
+  // carries each copy sideways off its ray, so neighbouring partitions'
+  // copies curl round each other into an 8 px sawtooth mottle. The radial
+  // step is then clamped to STEP_MAX, under one partition, so every frame
+  // the partition re-reads its own inner edge and the strip of pixels just
+  // inside it: each pixel column is pulled out along a straight ray into a
+  // line of one colour (a trunk a dark line, a gap of sky a pale one), not
+  // jumped a partition or more and tiled. The distance weighting only sets
+  // how soon a partition reaches that clamp: by the centre it hardly steps,
+  // a few hundred px out every partition runs at STEP_MAX. Only the inward
+  // part is kept (a zoom's vectors all read from nearer the centre); one
+  // that points outward is noise too, and is read as the fit predicts it.
   const latchFrom = (id, field, f) => {
     const i = id % MW;
     const j = (id - i) / MW;
@@ -1124,14 +1144,38 @@ export async function createDatamosh(host, { embedded = false } = {}) {
       const gx = i * 2 + (q & 1);
       const gy = j * 2 + (q >> 1);
       const g = gy * mv.GW + gx;
-      const w = f && f.c ? Math.min(REACH_MAX, ((gx * 8 + 4 - f.x) ** 2 + (gy * 8 + 4 - f.y) ** 2) / REACH ** 2) : 1;
-      latchRaw[g * 2] = (field[g * 4 + 1] / 2) * w;
-      latchRaw[g * 2 + 1] = (field[g * 4 + 2] / 2) * w;
+      const vx = field[g * 4 + 1] / 2;
+      const vy = field[g * 4 + 2] / 2;
+      if (!(f && f.c)) {
+        latchRaw[g * 2] = vx;
+        latchRaw[g * 2 + 1] = vy;
+        continue;
+      }
+      const rx = gx * 8 + 4 - f.x;
+      const ry = gy * 8 + 4 - f.y;
+      const r = Math.max(1, Math.hypot(rx, ry));
+      // length of the vector along the ray, toward the centre
+      let s = -(vx * rx + vy * ry) / r;
+      if (s <= 0) s = f.c * r;
+      const w = Math.min(REACH_MAX, r ** 2 / REACH ** 2);
+      const step = Math.min(STEP_MAX, s * w);
+      // A partition that steps STEP_FIX or more takes the same whole-pel step
+      // every frame, its radial step rounded once: dithered from frame to
+      // frame, its x and y would round up on different frames from its
+      // neighbours', and each band it reads in across its inner edge would
+      // land jogged a pixel sideways from the last, a hatched, wavering
+      // line. Rounded once, a line carried through it stays dead straight
+      // (at most half a pixel a frame off its ray). Slower ones, by the
+      // centre, keep the fractional step and its remainder, carried in phase
+      // with every partition latched on the same frame.
+      const sx = (-rx / r) * step;
+      const sy = (-ry / r) * step;
+      latchRaw[g * 2] = step >= STEP_FIX ? Math.round(sx) : sx;
+      latchRaw[g * 2 + 1] = step >= STEP_FIX ? Math.round(sy) : sy;
+      carry[g * 2] = 0;
+      carry[g * 2 + 1] = 0;
     }
   };
-  // each partition's whole-pel step this frame: the fractional vector with
-  // its own rounding remainder carried from frame to frame
-  const carry = new Float32Array(mv.GW * mv.GH * 2);
   const stepOf = (g, k, v) => {
     const r = carry[g * 2 + k] + v;
     const d = Math.round(r);
