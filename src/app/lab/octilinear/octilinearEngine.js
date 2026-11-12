@@ -8,10 +8,11 @@ import { createStage, clamp } from "../_kit/stage";
 // run, a straight stub when there is room, otherwise one straight run and
 // one 45° run, and every bend is an arc of one radius. While the network
 // moves, stations are drawn where a ruling hand would put them, so a small
-// offset never becomes a tight S. Lines that share an edge (or leave a
-// station along the same run) are offset from its centreline in a fixed lane
-// order, so bundles stay parallel; bends are arcs on a common centre, so the
-// bundle turns concentrically. Dragging a station
+// offset never becomes a tight S. Lines that share a corridor hold one lane
+// each, fixed for the whole run of the corridor and kept on both sides of
+// every station in it, so bundles stay parallel and pass straight through
+// their stations; bends are arcs on a common centre, so the bundle turns
+// concentrically. Dragging a station
 // moves it freely; the routing keeps everything octilinear on the way. On
 // release a small search puts every station back on whole grid points, in
 // the cleanest octilinear layout near where the hand left it, and springs
@@ -379,10 +380,147 @@ export function createOctilinear(host) {
     }
   }
 
+  // ---- lanes ------------------------------------------------------------
+  // One lane order per corridor run, held through every station in it. A
+  // line is linked across a station when it runs straight through (in the
+  // home layout) or when it turns there together with at least one other line,
+  // so the bundle bends as one. Each maximal linked stretch of one line is a
+  // chain; chains that share an edge form a run. Every chain in a run gets one
+  // signed offset, sorted once by which side it peels off at its two ends, and
+  // keeps it on both sides of every station: a line leaving the bundle takes
+  // its lane with it and the rest do not re-centre, so they pass straight
+  // through. The run is shifted (by half lanes) to keep lone stretches on
+  // their station centreline.
+  const homeHead = (k, id) => {
+    const e = edges.get(k);
+    const a = st[e.from];
+    const b = st[e.to];
+    const pts = route(a.hx, a.hy, b.hx, b.hy);
+    const fwd = e.from === id;
+    const p0 = fwd ? pts[0] : pts[pts.length - 1];
+    const p1 = fwd ? pts[1] : pts[pts.length - 2];
+    const l = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
+    return [(p1[0] - p0[0]) / l, (p1[1] - p0[1]) / l];
+  };
+  let laneSig = "";
+  let lanePlan = new Map();
+  function planLanes() {
+    const sig = ids.map((id) => `${st[id].hx},${st[id].hy}`).join(";");
+    if (sig === laneSig) return lanePlan;
+    laneSig = sig;
+    const parent = new Map();
+    const find = (x) => {
+      while (parent.get(x) !== x) {
+        parent.set(x, parent.get(parent.get(x)));
+        x = parent.get(x);
+      }
+      return x;
+    };
+    const join = (a, b) => parent.set(find(a), find(b));
+    const node = (li, k) => `${li}#${k}`;
+    const turns = new Map();
+    LINES.forEach(({ stops: s }, li) => {
+      for (let i = 1; i < s.length; i++) parent.set(node(li, key(s[i - 1], s[i])), node(li, key(s[i - 1], s[i])));
+      for (let i = 1; i < s.length - 1; i++) {
+        const ka = key(s[i - 1], s[i]);
+        const kb = key(s[i], s[i + 1]);
+        const tk = `${s[i]}/${ka < kb ? `${ka}/${kb}` : `${kb}/${ka}`}`;
+        if (!turns.has(tk)) turns.set(tk, { id: s[i], ka, kb, lines: [] });
+        turns.get(tk).lines.push(li);
+      }
+    });
+    for (const t of turns.values()) {
+      const ha = homeHead(t.ka, t.id);
+      const hb = homeHead(t.kb, t.id);
+      if (ha[0] * hb[0] + ha[1] * hb[1] < -0.999 || t.lines.length >= 2) for (const li of t.lines) join(node(li, t.ka), node(li, t.kb));
+    }
+    // Chains, in travel order.
+    const chains = [];
+    LINES.forEach(({ stops: s }, li) => {
+      let c = null;
+      for (let i = 1; i < s.length; i++) {
+        const k = key(s[i - 1], s[i]);
+        const r = find(node(li, k));
+        if (!c || c.root !== r) chains.push((c = { li, root: r, ks: [], tau: [], i0: i - 1, i1: i }));
+        c.ks.push(k);
+        c.tau.push(edges.get(k).from === s[i - 1] ? 1 : -1);
+        c.i1 = i;
+      }
+    });
+    // Runs: chains that share an edge.
+    const onEdge = new Map();
+    chains.forEach((c, ci) => c.ks.forEach((k) => (onEdge.get(k) || onEdge.set(k, []).get(k)).push(ci)));
+    const runOf = chains.map((_, i) => i);
+    const rfind = (i) => (runOf[i] === i ? i : (runOf[i] = rfind(runOf[i])));
+    for (const cs of onEdge.values()) for (const ci of cs) runOf[rfind(ci)] = rfind(cs[0]);
+    const runs = new Map();
+    chains.forEach((_, ci) => (runs.get(rfind(ci)) || runs.set(rfind(ci), []).get(rfind(ci))).push(ci));
+    const plan = new Map();
+    for (const members of runs.values()) {
+      // Orient the run from its busiest edge outward.
+      const ks = [...new Set(members.flatMap((ci) => chains[ci].ks))];
+      ks.sort((a, b) => onEdge.get(b).length - onEdge.get(a).length);
+      const sg = new Map([[ks[0], 1]]);
+      const rho = new Map();
+      const queue = [ks[0]];
+      while (queue.length) {
+        const k = queue.shift();
+        for (const ci of onEdge.get(k)) {
+          if (rho.has(ci)) continue;
+          const c = chains[ci];
+          const r = sg.get(k) * c.tau[c.ks.indexOf(k)];
+          rho.set(ci, r);
+          c.ks.forEach((f, j) => {
+            if (!sg.has(f)) {
+              sg.set(f, r * c.tau[j]);
+              queue.push(f);
+            }
+          });
+        }
+      }
+      // Which side each chain peels off to at its ends: the signed angle of
+      // the branch it leaves by, measured from straight on, toward +normal.
+      const endSide = (c, atStart) => {
+        const s = LINES[c.li].stops;
+        const id = atStart ? s[c.i0] : s[c.i1];
+        const nb = atStart ? s[c.i0 - 1] : s[c.i1 + 1];
+        if (nb == null) return 0;
+        const k = atStart ? c.ks[0] : c.ks[c.ks.length - 1];
+        const h = homeHead(k, id);
+        const canon = edges.get(k).from === id ? h : [-h[0], -h[1]];
+        const nx = -canon[1] * sg.get(k);
+        const ny = canon[0] * sg.get(k);
+        const t = homeHead(key(id, nb), id);
+        return Math.atan2(t[0] * nx + t[1] * ny, -(t[0] * h[0] + t[1] * h[1]));
+      };
+      const side = new Map(members.map((ci) => [ci, endSide(chains[ci], true) + endSide(chains[ci], false)]));
+      members.sort((a, b) => side.get(a) - side.get(b) || chains[a].li - chains[b].li);
+      // Shift the whole run by half lanes so lone stretches sit on centre.
+      const n = members.length;
+      let best = Infinity;
+      let shift = 0;
+      for (let b = -n; b <= 1; b += 0.5) {
+        let c = Math.abs(b + (n - 1) / 2) * 1e-3;
+        members.forEach((ci, i) => {
+          for (const k of chains[ci].ks) c += Math.abs(i + b) * (onEdge.get(k).length === 1 ? 1 : 0.3);
+        });
+        if (c < best - 1e-9) {
+          best = c;
+          shift = b;
+        }
+      }
+      members.forEach((ci, i) => {
+        const c = chains[ci];
+        for (const k of c.ks) (plan.get(k) || plan.set(k, new Map()).get(k)).set(c.li, sg.get(k) * (i + shift));
+      });
+    }
+    lanePlan = plan;
+    return plan;
+  }
+
   // Build every line's offset polyline with per-vertex radii, plus where each
-  // line passes each of its stations.
-  // Lane offsets at each end of each edge, eased so a bundle that gains or
-  // loses a neighbour slides over rather than jumping.
+  // line passes each of its stations. Lane offsets at each end of each edge
+  // are eased, so a re-planned run slides over rather than jumping.
   const portEase = new Map();
   function build(dt) {
     rule(dt);
@@ -393,10 +531,16 @@ export function createOctilinear(host) {
       const b = dp[e.to];
       cl.set(k, route(a.x, a.y, b.x, b.y, choice.get(k), R));
     }
-    // Edges that leave a station on the same heading share that run, so they
-    // share one lane set there: every line through the port gets its own
-    // lane, ordered by which way its edge goes on to turn.
-    const portOff = new Map();
+    const plan = planLanes();
+    const target = new Map();
+    for (const [k, e] of edges) {
+      const m = new Map(e.members.map((li) => [li, (plan.get(k)?.get(li) ?? 0) * lane]));
+      target.set(`${k}|0`, m);
+      target.set(`${k}|1`, new Map(m));
+    }
+    // Safety net: edges of different runs that leave a station on the same
+    // heading (only ever mid-drag) would overprint, so that one port is
+    // re-laned as a single set, ordered by which way each edge goes on to turn.
     for (const id of ids) {
       const outs = [];
       for (const nb of st[id].adj) {
@@ -408,7 +552,7 @@ export function createOctilinear(host) {
         const p1 = fwd ? pts[1] : pts[pts.length - 2];
         const far = fwd ? pts[pts.length - 1] : pts[0];
         const l = Math.hypot(p1[0] - p0[0], p1[1] - p0[1]) || 1;
-        outs.push({ k, e, fwd, p0, far, tx: (p1[0] - p0[0]) / l, ty: (p1[1] - p0[1]) / l });
+        outs.push({ k, e, fwd, p0, far, tx: (p1[0] - p0[0]) / l, ty: (p1[1] - p0[1]) / l, m: target.get(`${k}|${fwd ? 0 : 1}`) });
       }
       const seen = new Set();
       for (const g of outs) {
@@ -416,25 +560,71 @@ export function createOctilinear(host) {
         const group = outs.filter((h) => !seen.has(h) && g.tx * h.tx + g.ty * h.ty > 0.999);
         group.forEach((h) => seen.add(h));
         if (group.length < 2) continue;
+        const out = (h, li) => (h.fwd ? h.m.get(li) : -h.m.get(li));
+        const taken = [];
+        let clash = false;
+        for (const h of group)
+          for (const li of h.e.members) {
+            const v = out(h, li);
+            if (taken.some(([w, hh]) => hh !== h && Math.abs(w - v) < lane * 0.9)) clash = true;
+            taken.push([v, h]);
+          }
+        if (!clash) continue;
+        // The busiest edge keeps its lanes; the others stack beside it on the
+        // side they go on to turn to, and carry that lane along their whole
+        // edge unless a line runs straight on at the far end.
         const side = (h) => (h.far[0] - h.p0[0]) * -g.ty + (h.far[1] - h.p0[1]) * g.tx;
         group.sort((p, q) => side(p) - side(q));
-        const list = group.flatMap((h) => (h.fwd ? h.e.members : h.e.members.slice().reverse()).map((li) => [h, li]));
-        list.forEach(([h, li], i) => {
-          const p = (i - (list.length - 1) / 2) * lane;
-          const pk = `${h.k}|${h.fwd ? 0 : 1}`;
-          if (!portOff.has(pk)) portOff.set(pk, new Map());
-          portOff.get(pk).set(li, h.fwd ? p : -p);
+        let ai = 0;
+        group.forEach((h, i) => {
+          if (h.e.members.length > group[ai].e.members.length) ai = i;
         });
+        const vals = group[ai].e.members.map((li) => out(group[ai], li));
+        let lo = Math.min(...vals);
+        let hi = Math.max(...vals);
+        const place = (h, li, v) => {
+          h.m.set(li, h.fwd ? v : -v);
+          const farEnd = target.get(`${h.k}|${h.fwd ? 1 : 0}`);
+          const s = LINES[li].stops;
+          const fid = h.fwd ? h.e.to : h.e.from;
+          const i = s.indexOf(fid);
+          const pts = cl.get(h.k);
+          const q0 = h.fwd ? pts[pts.length - 1] : pts[0];
+          const q1 = h.fwd ? pts[pts.length - 2] : pts[1];
+          let straightOn = false;
+          for (const j of [i - 1, i + 1]) {
+            const nb = s[j];
+            if (nb == null || key(fid, nb) === h.k) continue;
+            const ok = key(fid, nb);
+            const op = cl.get(ok);
+            const of = edges.get(ok).from === fid;
+            const r0 = of ? op[0] : op[op.length - 1];
+            const r1 = of ? op[1] : op[op.length - 2];
+            const c = ((q1[0] - q0[0]) * (r1[0] - r0[0]) + (q1[1] - q0[1]) * (r1[1] - r0[1])) / ((Math.hypot(q1[0] - q0[0], q1[1] - q0[1]) * Math.hypot(r1[0] - r0[0], r1[1] - r0[1])) || 1);
+            if (c < -0.999) straightOn = true;
+          }
+          if (!straightOn) farEnd.set(li, h.m.get(li));
+        };
+        for (let i = ai - 1; i >= 0; i--) {
+          const ls = group[i].e.members.slice().sort((p, q) => out(group[i], q) - out(group[i], p));
+          for (const li of ls) place(group[i], li, (lo -= lane));
+        }
+        for (let i = ai + 1; i < group.length; i++) {
+          const ls = group[i].e.members.slice().sort((p, q) => out(group[i], p) - out(group[i], q));
+          for (const li of ls) place(group[i], li, (hi += lane));
+        }
       }
     }
     const ke = 1 - Math.exp(-dt * 14);
-    const portAt = (k, end, li, base) => {
+    const endOff = new Map();
+    const portAt = (k, end, li) => {
       const pk = `${k}|${end}`;
-      const target = portOff.get(pk)?.get(li) ?? base;
+      const t = target.get(pk).get(li);
       const ek = `${pk}|${li}`;
-      const cur = portEase.has(ek) ? portEase.get(ek) : target;
-      const v = Math.abs(target - cur) < 0.02 ? target : cur + (target - cur) * ke;
+      const cur = portEase.has(ek) ? portEase.get(ek) : t;
+      const v = Math.abs(t - cur) < 0.02 ? t : cur + (t - cur) * ke;
       portEase.set(ek, v);
+      (endOff.get(pk) || endOff.set(pk, new Map()).get(pk)).set(li, v);
       return v;
     };
     const marks = {};
@@ -445,14 +635,14 @@ export function createOctilinear(host) {
         const b = line.stops[i];
         const k = key(a, b);
         const e = edges.get(k);
-        const n = e.members.length;
-        const base = (e.members.indexOf(li) - (n - 1) / 2) * lane;
         let pts = cl.get(k);
-        const oFrom = portAt(k, 0, li, base);
-        const oTo = portAt(k, 1, li, base);
-        // Canonical offsets per segment: the port lane on each end's run.
+        const oFrom = portAt(k, 0, li);
+        const oTo = portAt(k, 1, li);
+        // A one-run edge whose two ends disagree changes lane at its middle.
+        if (pts.length === 2 && Math.abs(oFrom - oTo) > 0.01) pts = [pts[0], [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2], pts[1]];
+        const ns = pts.length - 1;
         let offs = [];
-        for (let j = 1; j < pts.length; j++) offs.push(j === 1 && oFrom !== base ? oFrom : j === pts.length - 1 ? oTo : base);
+        for (let j = 1; j <= ns; j++) offs.push(j === 1 ? oFrom : j === ns ? oTo : (oFrom + oTo) / 2);
         if (e.from !== a) {
           pts = pts.slice().reverse();
           offs = offs.reverse().map((v) => -v);
@@ -541,7 +731,7 @@ export function createOctilinear(host) {
       }
       return real;
     });
-    return { paths, marks, cl };
+    return { paths, marks, cl, endOff };
   }
 
   // ---- drawing --------------------------------------------------------
@@ -550,7 +740,7 @@ export function createOctilinear(host) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.fillStyle = PAPER;
     ctx.fillRect(0, 0, stage.width, stage.height);
-    const { paths, marks, cl } = build(dt);
+    const { paths, marks, cl, endOff } = build(dt);
 
     ctx.lineJoin = "round";
     ctx.lineCap = "butt";
@@ -598,23 +788,39 @@ export function createOctilinear(host) {
         const ty = (p1[1] - p0[1]) / tl;
         const nx = -ty;
         const ny = tx;
+        // Span the lanes of the corridor as they stand at the station (not
+        // where bending lines happen to cross it), plus any crossing line.
+        const offs = endOff.get(`${key(e.from, e.to)}|${fwd ? 0 : 1}`);
         let lo = Infinity;
         let hi = -Infinity;
+        for (const li of e.members) {
+          const v = fwd ? offs.get(li) : -offs.get(li);
+          lo = Math.min(lo, v);
+          hi = Math.max(hi, v);
+        }
         let alo = Infinity;
         let ahi = -Infinity;
+        let cross = 0;
+        let nc = 0;
         for (const m of pts) {
           const a = (m.x - p0[0]) * nx + (m.y - p0[1]) * ny;
           const b = (m.x - p0[0]) * tx + (m.y - p0[1]) * ty;
-          lo = Math.min(lo, a);
-          hi = Math.max(hi, a);
+          if (!e.members.includes(m.li)) {
+            lo = Math.min(lo, a);
+            hi = Math.max(hi, a);
+            cross += b;
+            nc++;
+          }
           alo = Math.min(alo, b);
           ahi = Math.max(ahi, b);
         }
-        // The corridor whose cross-section holds every line most squarely.
-        const sc = ahi - alo - e.members.length * 1000;
+        // The corridor whose cross-section holds every line most squarely;
+        // on a tie, a level or upright pill over a slanted one.
+        const sc = ahi - alo - e.members.length * 1000 + (Math.abs(tx * ty) > 0.25 ? 500 : 0);
         if (sc < score) {
           score = sc;
-          const along = clamp((alo + ahi) / 2, -W, W);
+          // A line crossing the bundle pins the pill onto itself.
+          const along = clamp(nc ? cross / nc : (alo + ahi) / 2, -W, W);
           const cx = p0[0] + tx * along;
           const cy = p0[1] + ty * along;
           pa = { x: cx + nx * lo, y: cy + ny * lo };
