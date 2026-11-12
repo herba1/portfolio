@@ -1,6 +1,6 @@
 {
   "title": "Octilinear",
-  "description": "A small invented transit diagram in six flat colours, drawn only at 0, 45 and 90 degrees. Grab any station and drag it: every line through it reroutes live, staying octilinear with round bends of one radius, bundles stay parallel and evenly spaced through their shared corridors, and the neighbouring stations follow on springs. Let go and the network tidies itself back onto the grid, into the cleanest octilinear layout it can find around where you left the station.",
+  "description": "A small invented transit diagram in six flat colours, drawn only at 0, 45 and 90 degrees. Grab any station and drag it: every line through it reroutes live, staying octilinear with round bends of one radius, bundles stay parallel and evenly spaced through their shared corridors, and the neighbouring stations follow on springs. Let go and the network tidies itself back onto the grid, into the cleanest octilinear layout it can find around where you left the station. Every station is named, and as the lines move the names step out of their way, each to one of the eight positions around its mark.",
   "tags": ["Diagram", "Physics", "Interaction"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",

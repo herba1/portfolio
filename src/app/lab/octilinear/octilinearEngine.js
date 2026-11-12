@@ -17,6 +17,12 @@ import { createStage, clamp } from "../_kit/stage";
 // release a small search puts every station back on whole grid points, in
 // the cleanest octilinear layout near where the hand left it, and springs
 // carry the network there.
+//
+// Every station but a bend is named, in Geist at the ui-sm step, terminals
+// heavier. Each name stands at one of the eight octilinear positions around
+// its mark and is re-placed every frame by a small cost (clear of lines,
+// marks and other names, level with its mark if it can, and staying put
+// unless its place is blocked), so under the hand the names step aside.
 
 const STATIONS = {
   A: [2, 2], B: [5, 2], C: [8, 5], D: [11, 5], E: [14, 5], F: [17, 8], G: [20, 8],
@@ -36,6 +42,16 @@ const LINES = [
   { color: "#a43a98", stops: ["W", "X", "U", "O", "Y", "F", "G"] },
 ];
 
+// Names, invented. Terminals are set heavier; a bend in a line is not a
+// station and carries no name.
+const NAMES = {
+  A: "Ashby", Q: "Quarry", H: "Holm", W: "Wren End", M: "Moss Hill", V: "Vale",
+  C: "Canal", D: "Market", E: "Exchange", F: "Ferry", G: "Greys", O: "Orchard", Y: "Foundry",
+  L: "Lark Rise", T: "Tanner", Z: "Sedge", P: "Pier", R: "Rook Lane",
+};
+const TERM = new Set(LINES.flatMap((l) => [l.stops[0], l.stops[l.stops.length - 1]]));
+const STOP = new Set(Object.keys(NAMES).filter((id) => !TERM.has(id) && LINES.filter((l) => l.stops.includes(id)).length === 1));
+
 const INK = "#111111";
 const PAPER = "#ffffff";
 
@@ -45,6 +61,23 @@ const key = (a, b) => (a < b ? `${a}|${b}` : `${b}|${a}`);
 export function createOctilinear(host) {
   const stage = createStage(host, { dpr: 2 });
   const { ctx, canvas } = stage;
+
+  // Type from the scale: ui-sm, caption weight, terminals semibold, tracking
+  // from the law (zero at 12px).
+  const css = getComputedStyle(document.documentElement);
+  const tok = (n, f) => css.getPropertyValue(n).trim() || f;
+  const SANS = tok("--font-sans", "system-ui, sans-serif");
+  const SIZE = parseFloat(tok("--text-ui-sm", "12px")) || 12;
+  const W_STOP = tok("--font-weight-caption", "520");
+  const W_TERM = tok("--font-weight-semibold", "600");
+  const law = -0.043 * (SIZE - 12);
+  const TRACK = SIZE < 20 ? `${law.toFixed(2)}px` : `${(law / SIZE).toFixed(4)}em`;
+  let alive = true;
+  Promise.all([W_STOP, W_TERM].map((w) => document.fonts?.load(`${w} ${SIZE}px ${SANS}`)))
+    .catch(() => null)
+    .then(() => {
+      if (alive) for (const k of Object.keys(metrics)) delete metrics[k];
+    });
 
   // ---- topology -------------------------------------------------------
   const st = {};
@@ -659,7 +692,7 @@ export function createOctilinear(host) {
       // Vertices: {x, y, r, tan, stop}
       const vs = [];
       const s0 = segs[0];
-      vs.push({ x: s0.px + s0.nx * s0.o, y: s0.py + s0.ny * s0.o, r: 0, stop: line.stops[0], end: true });
+      vs.push({ x: s0.px + s0.nx * s0.o, y: s0.py + s0.ny * s0.o, r: 0, stop: line.stops[0], end: true, t: [-s0.dx, -s0.dy] });
       for (let k = 0; k < segs.length - 1; k++) {
         const s1 = segs[k];
         const s2 = segs[k + 1];
@@ -668,7 +701,7 @@ export function createOctilinear(host) {
         const dot = s1.dx * s2.dx + s1.dy * s2.dy;
         if (Math.abs(cross) < 1e-4) {
           if (dot < 0 || Math.abs(s1.o - s2.o) < 0.01) {
-            if (stop) vs.push({ x: s1.qx + s1.nx * s1.o, y: s1.qy + s1.ny * s1.o, r: 0, stop, pass: true });
+            if (stop) vs.push({ x: s1.qx + s1.nx * s1.o, y: s1.qy + s1.ny * s1.o, r: 0, stop, pass: dot > 0, t: [s1.dx, s1.dy] });
             continue;
           }
           // Lane change on a straight run: a short 45° jog.
@@ -676,7 +709,7 @@ export function createOctilinear(host) {
           const a = { x: s1.qx - s1.dx * j + s1.nx * s1.o, y: s1.qy - s1.dy * j + s1.ny * s1.o, r: lane * 0.6, tan: Math.tan(Math.PI / 8) };
           const b = { x: s1.qx + s1.dx * j + s2.nx * s2.o, y: s1.qy + s1.dy * j + s2.ny * s2.o, r: lane * 0.6, tan: Math.tan(Math.PI / 8) };
           vs.push(a, b);
-          if (stop) vs.push({ mark: true, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, stop });
+          if (stop) vs.push({ mark: true, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, stop, pass: true, t: [s1.dx, s1.dy] });
           continue;
         }
         // Miter point of the two offset segments.
@@ -693,7 +726,7 @@ export function createOctilinear(host) {
         vs.push({ x: ax + s1.dx * t, y: ay + s1.dy * t, r, tan, theta, d1: [s1.dx, s1.dy], d2: [s2.dx, s2.dy], stop });
       }
       const sl = segs[segs.length - 1];
-      vs.push({ x: sl.qx + sl.nx * sl.o, y: sl.qy + sl.ny * sl.o, r: 0, stop: line.stops[line.stops.length - 1], end: true });
+      vs.push({ x: sl.qx + sl.nx * sl.o, y: sl.qy + sl.ny * sl.o, r: 0, stop: line.stops[line.stops.length - 1], end: true, t: [sl.dx, sl.dy] });
 
       // Clamp radii to the room on the offset segments.
       // Each run is shared by the bends at its two ends in proportion to what
@@ -727,7 +760,7 @@ export function createOctilinear(host) {
           x += (bx / bl) * dist;
           y += (by / bl) * dist;
         }
-        (marks[v.stop] ||= []).push({ x, y, li });
+        (marks[v.stop] ||= []).push({ x, y, li, end: !!v.end, straight: !!v.pass, t: v.t });
       }
       return real;
     });
@@ -758,18 +791,39 @@ export function createOctilinear(host) {
       ctx.stroke();
     });
 
-    // Stations: a black dot on a single line, a white pill across a bundle.
+    // Stations. An interchange is a white pill squared across its bundle; a
+    // terminal is a short bar across the end of its line; an ordinary stop is
+    // a tick on a straight run, on the side its name is set. A bend in a line
+    // is only a bend: it carries no mark and no name.
+    clock += dt;
+    const sm = [];
     for (const id of ids) {
       const s = st[id];
       const pts = marks[id] || [];
       if (!pts.length) continue;
       const g = 1 + s.grow * 0.22;
       if (s.lines.length === 1) {
-        const p = pts[0];
-        ctx.fillStyle = INK;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, W * 0.5 * g, 0, Math.PI * 2);
-        ctx.fill();
+        const p = pts.find((m) => m.end) || pts.find((m) => m.straight) || pts[0];
+        const t = p.t || [1, 0];
+        const n = [-t[1], t[0]];
+        if (p.end) {
+          // The bar sits flush with the end of the line, across it.
+          const half = W * 1.25 * g;
+          const cx = p.x - t[0] * W * 0.5;
+          const cy = p.y - t[1] * W * 0.5;
+          const a = { x: cx + n[0] * half, y: cy + n[1] * half };
+          const b = { x: cx - n[0] * half, y: cy - n[1] * half };
+          sm.push({ id, kind: "bar", a, b, li: p.li, bb: box([a, b], W * 0.5) });
+          continue;
+        }
+        const tick = (tickOn[id] ??= 0);
+        tickOn[id] = tick + ((STOP.has(id) && p.straight ? 1 : 0) - tick) * (1 - Math.exp(-dt * 20));
+        if (!NAMES[id]) {
+          sm.push({ id, kind: "way", p, bb: box([p], W * 0.5) });
+          continue;
+        }
+        const reach = W * 0.5 + W * 1.1 * g;
+        sm.push({ id, kind: "tick", p, n, li: p.li, reach, bb: box([{ x: p.x + n[0] * reach, y: p.y + n[1] * reach }, { x: p.x - n[0] * reach, y: p.y - n[1] * reach }], W * 0.5) });
         continue;
       }
       // Square the pill across the station's busiest corridor.
@@ -830,17 +884,219 @@ export function createOctilinear(host) {
       }
       const wPill = W * 1.18 * g;
       const rim = Math.max(1.5, W * 0.26);
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(pa.x, pa.y);
-      ctx.lineTo(pb.x + (best < 0.01 ? 0.01 : 0), pb.y);
-      ctx.strokeStyle = INK;
-      ctx.lineWidth = wPill + rim * 2;
-      ctx.stroke();
-      ctx.strokeStyle = PAPER;
-      ctx.lineWidth = wPill;
-      ctx.stroke();
+      sm.push({ id, kind: "pill", pa, pb, best, wPill, rim, bb: box([pa, pb], wPill / 2 + rim) });
     }
+
+    // Names: each set at one of the eight octilinear positions around its
+    // mark, at a fixed gap, wherever it is clearest of the lines, the marks
+    // and the other names, holding its place unless that place is blocked.
+    const obstacles = flatten(paths);
+    const placed = [];
+    const clear = W * 0.5 + 3;
+    const order = sm.filter((m) => NAMES[m.id]).sort((p, q) => rank(p) - rank(q));
+    for (const m of order) {
+      const lab = (labels[m.id] ||= { pos: -1, prev: -1, t0: -1e9 });
+      const f = metric(m.id);
+      let bestPos = 0;
+      let bestCost = Infinity;
+      for (let i = 0; i < 8; i++) {
+        const r = labelRect(m.bb, i, f);
+        // A stop's name stands off the end of its tick, square to the line.
+        let c = PREF[i];
+        if (m.kind === "tick") {
+          const [dx, dy] = DIRS[i];
+          c = 2.4 * (1 - Math.abs(dx * m.n[0] + dy * m.n[1]) / Math.hypot(dx, dy));
+        }
+        for (const sg of obstacles) {
+          const len = clipLen(sg, r, clear);
+          if (len > 0) c += 30 + len;
+        }
+        for (const o of sm) if (o !== m && o.kind !== "way" && hits(r, o.bb, 2)) c += 40;
+        for (const o of placed) if (hits(r, o, 3)) c += 60;
+        if (r.x0 < 8 || r.y0 < 8 || r.x1 > stage.width - 8 || r.y1 > stage.height - 8) c += 200;
+        if (lab.pos >= 0 && i !== lab.pos) c += drag ? 10 : 1;
+        if (c < bestCost) {
+          bestCost = c;
+          bestPos = i;
+        }
+      }
+      if (lab.pos !== bestPos) {
+        lab.prev = lab.pos;
+        lab.pos = bestPos;
+        lab.t0 = lab.prev < 0 ? -1e9 : clock;
+      }
+      placed.push(labelRect(m.bb, bestPos, f));
+    }
+
+    // Marks.
+    for (const m of sm) {
+      const s = st[m.id];
+      ctx.lineCap = "butt";
+      if (m.kind === "pill") {
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(m.pa.x, m.pa.y);
+        ctx.lineTo(m.pb.x + (m.best < 0.01 ? 0.01 : 0), m.pb.y);
+        ctx.strokeStyle = INK;
+        ctx.lineWidth = m.wPill + m.rim * 2;
+        ctx.stroke();
+        ctx.strokeStyle = PAPER;
+        ctx.lineWidth = m.wPill;
+        ctx.stroke();
+      } else if (m.kind === "bar") {
+        ctx.strokeStyle = LINES[m.li].color;
+        ctx.lineWidth = W;
+        ctx.beginPath();
+        ctx.moveTo(m.a.x, m.a.y);
+        ctx.lineTo(m.b.x, m.b.y);
+        ctx.stroke();
+      } else if (m.kind === "tick") {
+        const a = tickOn[m.id];
+        if (a < 0.01) continue;
+        // The tick points to the name; a name set square along the line
+        // leaves it on the upper or right-hand side.
+        const d = DIRS[labels[m.id]?.pos ?? 2];
+        let side = Math.sign(d[0] * m.n[0] + d[1] * m.n[1]);
+        if (!side) side = m.n[1] < 0 || (!m.n[1] && m.n[0] > 0) ? 1 : -1;
+        const r0 = W * 0.5 - 0.5;
+        const r1 = r0 + (m.reach - r0) * a;
+        ctx.strokeStyle = LINES[m.li].color;
+        ctx.lineWidth = W * 0.8;
+        ctx.beginPath();
+        ctx.moveTo(m.p.x + m.n[0] * side * r0, m.p.y + m.n[1] * side * r0);
+        ctx.lineTo(m.p.x + m.n[0] * side * r1, m.p.y + m.n[1] * side * r1);
+        ctx.stroke();
+      } else if (s.grow > 0.02) {
+        // A bend is still something to hold: under the hand it shows a dot.
+        ctx.globalAlpha = Math.min(1, s.grow * 1.5);
+        ctx.fillStyle = INK;
+        ctx.beginPath();
+        ctx.arc(m.p.x, m.p.y, W * 0.5 * (1 + s.grow * 0.22), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // Lettering, over everything. A change of place is a short cross-fade:
+    // the old name draws in toward its mark and goes, the new one comes out
+    // from it, so nothing slides across a line.
+    ctx.fillStyle = INK;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "alphabetic";
+    ctx.letterSpacing = TRACK;
+    for (const m of order) {
+      const lab = labels[m.id];
+      const f = metric(m.id);
+      ctx.font = f.font;
+      const k = clamp((clock - lab.t0) / 0.16, 0, 1);
+      const e = 1 - (1 - k) ** 3;
+      const put = (pos, alpha, pull) => {
+        if (alpha < 0.01) return;
+        const r = labelRect(m.bb, pos, f);
+        const d = DIRS[pos];
+        const l = Math.hypot(d[0], d[1]);
+        ctx.globalAlpha = alpha;
+        const x = r.x0 - (d[0] / l) * pull;
+        const y = r.y0 + f.cap - (d[1] / l) * pull;
+        ctx.fillText(NAMES[m.id], x, Math.round(y * dpr) / dpr);
+      };
+      put(lab.pos, e, (1 - e) * 4);
+      if (k < 1 && lab.prev >= 0) put(lab.prev, 1 - e, e * 4);
+    }
+    ctx.globalAlpha = 1;
+    ctx.letterSpacing = "0px";
+  }
+
+  // ---- lettering ----------------------------------------------------------
+  // E, NE, N, NW, W, SW, S, SE: a preference for setting a name level with its
+  // mark, then on a corner, then above or below.
+  const DIRS = [[1, 0], [1, -1], [0, -1], [-1, -1], [-1, 0], [-1, 1], [0, 1], [1, 1]];
+  const PREF = [0, 1.2, 2.4, 1.6, 0.4, 1.6, 2.4, 1.2];
+  const GAP = 6;
+  const labels = {};
+  const tickOn = {};
+  let clock = 0;
+  const rank = (m) => (m.kind === "pill" ? 0 : TERM.has(m.id) ? 1 : 2);
+  const box = (ps, pad) => ({
+    x0: Math.min(...ps.map((p) => p.x)) - pad,
+    y0: Math.min(...ps.map((p) => p.y)) - pad,
+    x1: Math.max(...ps.map((p) => p.x)) + pad,
+    y1: Math.max(...ps.map((p) => p.y)) + pad,
+  });
+  const hits = (a, b, pad) => a.x0 < b.x1 + pad && a.x1 > b.x0 - pad && a.y0 < b.y1 + pad && a.y1 > b.y0 - pad;
+  // The name's box runs from cap height to descender. Level with the mark it
+  // centres its capitals on the mark; above, its baseline sits the gap clear.
+  function labelRect(bb, i, f) {
+    const [dx, dy] = DIRS[i];
+    const g = dx && dy ? GAP * 0.6 : GAP;
+    const x0 = dx > 0 ? bb.x1 + g : dx < 0 ? bb.x0 - g - f.w : (bb.x0 + bb.x1) / 2 - f.w / 2;
+    const y0 = dy > 0 ? bb.y1 + g : dy < 0 ? bb.y0 - g - f.cap : (bb.y0 + bb.y1) / 2 - f.cap / 2;
+    return { x0, y0, x1: x0 + f.w, y1: y0 + f.cap + f.desc };
+  }
+  // Every line as straight pieces, its bends cut to three chords of the arc.
+  // The line ends square, so its two ends are drawn in by half a stroke, or
+  // a name set beyond the end of a line would read as touching it.
+  function flatten(paths) {
+    const out = [];
+    const inset = (v, w) => {
+      const l = Math.hypot(w.x - v.x, w.y - v.y) || 1;
+      const k = Math.min(W * 0.5, l * 0.5) / l;
+      return [v.x + (w.x - v.x) * k, v.y + (w.y - v.y) * k];
+    };
+    for (const vs of paths) {
+      let [px, py] = inset(vs[0], vs[1]);
+      const to = (x, y) => {
+        out.push([px, py, x, y]);
+        px = x;
+        py = y;
+      };
+      for (let i = 1; i < vs.length; i++) {
+        const v = vs[i];
+        if (i === vs.length - 1) to(...inset(v, vs[i - 1]));
+        else if (v.r > 0.2 && v.d1) {
+          const t = v.r * v.tan;
+          const bx = v.d2[0] - v.d1[0];
+          const by = v.d2[1] - v.d1[1];
+          const bl = Math.hypot(bx, by) || 1;
+          const dm = v.r / Math.cos(v.theta / 2) - v.r;
+          to(v.x - v.d1[0] * t, v.y - v.d1[1] * t);
+          to(v.x + (bx / bl) * dm, v.y + (by / bl) * dm);
+          to(v.x + v.d2[0] * t, v.y + v.d2[1] * t);
+        } else to(v.x, v.y);
+      }
+    }
+    return out;
+  }
+  // Length of a segment inside a box grown by pad (Liang-Barsky).
+  function clipLen([ax, ay, bx, by], r, pad) {
+    const dx = bx - ax;
+    const dy = by - ay;
+    let t0 = 0;
+    let t1 = 1;
+    const p = [-dx, dx, -dy, dy];
+    const q = [ax - (r.x0 - pad), r.x1 + pad - ax, ay - (r.y0 - pad), r.y1 + pad - ay];
+    for (let i = 0; i < 4; i++) {
+      if (Math.abs(p[i]) < 1e-9) {
+        if (q[i] < 0) return 0;
+        continue;
+      }
+      const t = q[i] / p[i];
+      if (p[i] < 0) t0 = Math.max(t0, t);
+      else t1 = Math.min(t1, t);
+      if (t0 > t1) return 0;
+    }
+    return (t1 - t0) * Math.hypot(dx, dy);
+  }
+  const metrics = {};
+  function metric(id) {
+    if (metrics[id]) return metrics[id];
+    const font = `${TERM.has(id) ? W_TERM : W_STOP} ${SIZE}px ${SANS}`;
+    ctx.font = font;
+    ctx.letterSpacing = TRACK;
+    const w = ctx.measureText(NAMES[id]).width;
+    const cap = ctx.measureText("H").actualBoundingBoxAscent || SIZE * 0.71;
+    ctx.letterSpacing = "0px";
+    return (metrics[id] = { font, w, cap, desc: SIZE * 0.24 });
   }
 
   // ---- settling: the tidy hand -------------------------------------------
@@ -1090,5 +1346,10 @@ export function createOctilinear(host) {
     draw(Math.min(dt, 0.1));
   });
 
-  return { destroy: () => stage.destroy() };
+  return {
+    destroy: () => {
+      alive = false;
+      stage.destroy();
+    },
+  };
 }
