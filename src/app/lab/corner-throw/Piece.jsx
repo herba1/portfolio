@@ -17,12 +17,17 @@ const K = (2 * Math.PI / RESPONSE) ** 2;
 const C = (4 * Math.PI * DAMPING) / RESPONSE;
 const STEP = 1 / 240;
 
-const INSET = 32;
+// The sheet is a 12-column grid. Type sets in columns 3–10; the four wells are
+// columns 1–2 and 11–12, so a landed sleeve is one more block on the grid.
+// Columns are even, so the cover (two columns and a gutter) is a multiple of 4.
+const COLS = 12, GUT = 32, COL_MAX = 80;
+// Outer margin: room for the crop marks (GAP + TICK) plus a 24px bleed.
+const BLEED = 24;
 
 // Printer's crop marks: two short ticks per corner, set off the trim by GAP and
 // running outward along its lines. Half-pixel offsets keep the 1px rules on the
 // cover's own outer pixel rows, so the marks register with its edges exactly.
-const GAP = 6, TICK = 14;
+const GAP = 6, TICK = 12;
 const crop = (size) => {
   const lo = 0.5, hi = size - 0.5, a = GAP, b = GAP + TICK;
   return [
@@ -32,6 +37,8 @@ const crop = (size) => {
     `M${hi} ${size + a}V${size + b}M${size + a} ${hi}H${size + b}`,
   ].join("");
 };
+const MARGIN = GAP + TICK + BLEED;
+const floor4 = (v) => Math.floor(v / 4) * 4;
 const ALBUM = albumById("abbey-road");
 
 // The sleeve the window floats over. Side one starts with what is playing.
@@ -65,8 +72,8 @@ const SIDES = [
   },
 ];
 
-// The projection is drawn, clipped to the page with this much margin.
-const EDGE = 12;
+// The projection is drawn, clipped to the sheet inside its bleed.
+const EDGE = BLEED;
 const clipTo = (x0, y0, x1, y1, w, h) => {
   const lo = EDGE, hx = w - EDGE, hy = h - EDGE;
   let t = 1;
@@ -89,7 +96,9 @@ export default function Piece() {
   const ghostRef = useRef(null);
   const cropRef = useRef(null);
   const lineRef = useRef(null);
-  const haloRef = useRef(null);
+  const sidesRef = useRef(null);
+  const titleRef = useRef(null);
+  const baseRef = useRef(null);
   const crossRef = useRef(null);
   const edgeRef = useRef(null);
   const handRef = useRef(null);
@@ -99,7 +108,6 @@ export default function Piece() {
     const tile = tileRef.current;
     const ghost = ghostRef.current;
     const line = lineRef.current;
-    const halo = haloRef.current;
     const cross = crossRef.current;
     const edge = edgeRef.current;
     const hand = handRef.current;
@@ -110,6 +118,7 @@ export default function Piece() {
 
     const s = {
       w: 0, h: 0, size: 0,
+      wells: [[0, 0], [0, 0], [0, 0], [0, 0]],
       x: 0, y: 0, vx: 0, vy: 0,
       corner: 2, ghostCorner: 2,
       mode: "rest", // rest | drag | fly
@@ -121,12 +130,7 @@ export default function Piece() {
       trace: { ax: 0, ay: 0, px: 0, py: 0, shown: false },
     };
 
-    const corners = () => {
-      const half = s.size / 2;
-      const l = INSET + half, r = s.w - INSET - half;
-      const t = INSET + half, b = s.h - INSET - half;
-      return [[l, t], [r, t], [l, b], [r, b]];
-    };
+    const corners = () => s.wells;
     const nearest = (px, py) => {
       let best = 0, bd = Infinity;
       corners().forEach(([cx, cy], i) => {
@@ -152,12 +156,10 @@ export default function Piece() {
     const drawTrace = () => {
       const { ax, ay, px, py } = s.trace;
       const [ex, ey, clipped] = clipTo(ax, ay, px, py, s.w, s.h);
-      for (const l of [halo, line]) {
-        l.setAttribute("x1", ax);
-        l.setAttribute("y1", ay);
-        l.setAttribute("x2", ex);
-        l.setAttribute("y2", ey);
-      }
+      line.setAttribute("x1", ax);
+      line.setAttribute("y1", ay);
+      line.setAttribute("x2", ex);
+      line.setAttribute("y2", ey);
       hand.setAttribute("transform", `translate(${ax} ${ay})`);
       if (clipped) {
         // The momentum runs off the page: end on a tick across the line.
@@ -193,9 +195,45 @@ export default function Piece() {
       s.w = box.offsetWidth || r.width / k;
       s.h = box.offsetHeight || r.height / k;
       s.k = k;
-      // A PiP window is small: about a fifth of the short side.
-      s.size = Math.round(Math.max(88, Math.min(168, Math.min(s.w, s.h) * 0.21)));
+
+      // The grid: twelve even columns, centred, never closer to the edge than MARGIN.
+      let col = Math.floor((s.w - 2 * MARGIN - (COLS - 1) * GUT) / COLS);
+      col = Math.max(8, Math.min(COL_MAX, col - (col % 2)));
+      root.style.setProperty("--ct-col", `${col}px`);
+      root.style.setProperty("--ct-gutter", `${GUT}px`);
+
+      // Read the type back off the sheet (this forces the grid to lay out).
+      const r0 = box.getBoundingClientRect();
+      const rect = (el) => {
+        const b = el.getBoundingClientRect();
+        return { l: (b.left - r0.left) / k, r: (b.right - r0.left) / k, t: (b.top - r0.top) / k, b: (b.bottom - r0.top) / k };
+      };
+      const sides = rect(sidesRef.current);
+      // The title's cap line: its baseline, less the face's cap height at that size.
+      const title = titleRef.current;
+      const cs = getComputedStyle(title);
+      const ctx = document.createElement("canvas").getContext("2d");
+      ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+      const capY = Math.round(rect(baseRef.current).b - ctx.measureText("H").actualBoundingBoxAscent);
+      // The last rule: the lowest visible track's bottom pixel row.
+      let ruleY = 0;
+      for (const li of root.querySelectorAll(".ct-track")) {
+        const b = rect(li);
+        if (b.b > b.t) ruleY = Math.max(ruleY, Math.round(b.b));
+      }
+
+      // The cover is the module: two columns and a gutter. On a short sheet it
+      // shrinks (still on the 4px grid) so the top and bottom wells stay a gutter apart.
+      const top = Math.max(MARGIN, capY);
+      const bottom = Math.min(s.h - MARGIN, ruleY);
+      s.size = Math.max(40, Math.min(2 * col + GUT, floor4((bottom - top - GUT) / 2)));
       root.style.setProperty("--ct-size", `${s.size}px`);
+      const half = s.size / 2;
+      // Inner edges sit one gutter off the type columns: wells in columns 1–2 and 11–12.
+      const wl = Math.round(sides.l) - GUT - half;
+      const wr = Math.round(sides.r) + GUT + half;
+      const wt = top + half, wb = bottom - half;
+      s.wells = [[wl, wt], [wr, wt], [wl, wb], [wr, wb]];
       cropRef.current.setAttribute("d", crop(s.size));
       if (s.mode === "rest") {
         [s.x, s.y] = corners()[s.corner];
@@ -327,12 +365,24 @@ export default function Piece() {
     const ro = new ResizeObserver(measure);
     ro.observe(box);
     measure();
+    // The cap line and rules move once the face loads.
+    let live = true;
+    document.fonts?.ready.then(() => {
+      if (!live) return;
+      measure();
+      if (s.mode === "frozen") stage();
+    });
 
-    if (still !== null || stillDrag) {
-      // A held moment: picked up from the bottom-left, flung up and right.
-      s.x = corners()[2][0] + s.w * 0.22;
-      s.y = corners()[2][1] - s.h * 0.2;
-      const vx = 1250, vy = -980;
+    const stage = () => {
+      // A held moment: flung up and right from the middle of the sheet.
+      // Let go in the gutter between the two sides, low on the sheet.
+      s.x = (corners()[2][0] + corners()[3][0]) / 2;
+      s.y = corners()[2][1] + s.size * 0.15;
+      // Thrown so the momentum comes to rest just inside the top-right trim,
+      // a little short and low of its centre, as a real throw would.
+      const [tx, ty] = corners()[1];
+      const vx = (tx - s.size * 0.2 - s.x) / project(1);
+      const vy = (ty + s.size * 0.16 - s.y) / project(1);
       const c = projectedCorner(vx, vy);
       aimTrace(vx, vy, 1);
       showTrace(true);
@@ -349,7 +399,8 @@ export default function Piece() {
         paint();
         s.mode = "frozen";
       }
-    }
+    };
+    if (still !== null || stillDrag) stage();
 
     tile.addEventListener("pointerdown", onDown);
     tile.addEventListener("pointermove", onMove);
@@ -358,6 +409,7 @@ export default function Piece() {
     tile.addEventListener("keydown", onKey);
     root.dataset.ready = "";
     return () => {
+      live = false;
       ro.disconnect();
       cancelAnimationFrame(s.raf);
       tile.removeEventListener("pointerdown", onDown);
@@ -370,13 +422,20 @@ export default function Piece() {
 
   return (
     <div ref={rootRef} className="ct-root">
+      {/* The projection runs under the type; each glyph knocks a paper gap out of it. */}
+      <svg className="ct-trace" aria-hidden="true">
+        <line ref={lineRef} className="ct-line" />
+      </svg>
       <article className="ct-page">
         <div className="ct-head">
           <p className="ct-artist text-ui-lg">{ALBUM.artist}</p>
-          <h1 className="ct-title text-title-xl">{ALBUM.title}</h1>
+          <h1 ref={titleRef} className="ct-title text-title-xl">
+            <span ref={baseRef} className="ct-base" aria-hidden="true" />
+            {ALBUM.title}
+          </h1>
           <p className="ct-meta text-ui-lg tabular-nums">Apple Records PCS 7088 · 26 September 1969 · 47:03</p>
         </div>
-        <div className="ct-sides">
+        <div ref={sidesRef} className="ct-sides">
           {SIDES.map((side, si) => (
             <section key={side.name} className="ct-side">
               <h2 className="ct-side-name text-heading-sm">{side.name}</h2>
@@ -409,10 +468,6 @@ export default function Piece() {
           <path ref={cropRef} />
         </svg>
       </div>
-      <svg className="ct-trace" aria-hidden="true">
-        <line ref={haloRef} className="ct-halo" />
-        <line ref={lineRef} className="ct-line" />
-      </svg>
       <div
         ref={tileRef}
         className="ct-tile"

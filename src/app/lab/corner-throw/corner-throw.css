@@ -75,10 +75,18 @@
   transition: none;
 }
 
-/* A paper knockout under the rule, so it cuts cleanly across the type. */
-.ct-halo {
-  stroke: var(--ct-paper);
-  stroke-width: 3px;
+/* The rule runs under the type. While it is drawn, every glyph carries a 2px
+   paper halo, so the line breaks around letters instead of striking them out. */
+.ct-root[data-tracing] .ct-page {
+  text-shadow:
+    2px 0 var(--ct-paper),
+    -2px 0 var(--ct-paper),
+    0 2px var(--ct-paper),
+    0 -2px var(--ct-paper),
+    1.5px 1.5px var(--ct-paper),
+    -1.5px 1.5px var(--ct-paper),
+    1.5px -1.5px var(--ct-paper),
+    -1.5px -1.5px var(--ct-paper);
 }
 
 .ct-hand circle {
@@ -148,22 +156,31 @@
   pointer-events: none;
 }
 
-/* The sleeve underneath: a tracklist set from the scale, kept out of the corners. */
+/* The sheet: a 12-column grid (column width set from the box in JS, always even).
+   The tracklist sets in columns 3–10; columns 1–2 and 11–12 are the sleeve's wells. */
 .ct-page {
   position: absolute;
   inset: 0;
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: repeat(12, var(--ct-col, 72px));
+  column-gap: var(--ct-gutter, 24px);
   justify-content: center;
-  align-items: center;
-  padding: 32px calc(var(--ct-size, 144px) + 64px);
+  align-content: center;
   color: var(--color-ink);
 }
 
 .ct-head,
 .ct-sides {
-  width: 100%;
-  max-width: 816px;
+  grid-column: 3 / 11;
+  min-width: 0;
+}
+
+/* A zero-size probe whose bottom sits on the title's baseline. */
+.ct-base {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  vertical-align: baseline;
 }
 
 .ct-artist,
@@ -185,8 +202,9 @@
 
 .ct-sides {
   display: grid;
+  /* Two halves of eight columns: four columns and three gutters each. */
   grid-template-columns: 1fr 1fr;
-  column-gap: 32px;
+  column-gap: var(--ct-gutter, 24px);
   margin-top: 48px;
   align-items: start;
 }
