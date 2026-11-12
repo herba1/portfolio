@@ -1,19 +1,21 @@
 import { createStage, clamp } from "../_kit/stage";
 import { albumById, loadCover } from "../_kit/covers";
+import { FOILS, ditherFoils } from "./foil";
 
 // Flip sequins. Every sequin is one instanced, cupped disc with a hole in
 // the middle, lying shingled on a scrap of fabric. Brushing across a sequin
 // turns it over about the axis at right angles to the stroke, through a real
 // rotation, so its normal sweeps through the room's lights on the way. One
 // side is near-black matte charcoal that knows nothing of the picture; the
-// other is a coloured mirror whose tint is the album cover at that sequin's
-// place on the swatch. The room is dark but for a few big sharp softboxes
+// other is a mirror of coloured foil, one of a small bag of stock foils
+// (foil.js), picked for each sequin by error diffusion over the cover, so
+// the picture is a real sequin picture and not a photo cut into scales. The room is dark but for a few big sharp softboxes
 // overhead and some small, very hot ones low around it. A settled mirror has
 // no diffuse at all: it is dark tinted metal unless its lean points it at a
 // box, and then it throws back a sharp image of the box in its own colour. Each mirror is coloured metal: what it
-// throws back of a box is the box times its own tint, so a pale disc flares
-// hot and white, a sky-blue one flares cyan, and a black one only glows a
-// dim, deep version of itself. The glitter is the picture's own highlights.
+// throws back of a box is the box times its own tint, so a silver disc flares
+// hot and white, a teal one flares cyan, and a black one only glows a
+// dim, deep version of itself. The glitter is the picture's own silver.
 // The cloth itself is draped, not flat: every sequin leans with the fold it
 // lies on, so the light forms bands that follow the cloth, and the hand
 // presses a dent into it that springs back once it passes.
@@ -22,7 +24,7 @@ const VS = `#version 300 es
 layout(location=0) in vec2 aLocal;
 layout(location=1) in vec4 aPos;    // x, y, z, seed
 layout(location=2) in vec2 aTilt;   // rest lean: the drape's slope at its centre, plus its own small wobble
-layout(location=3) in vec3 aColor;  // linear cover colour
+layout(location=3) in vec3 aColor;  // the sequin's foil, as linear F0
 layout(location=4) in vec3 aFlip;   // phi, axis.x, axis.y
 layout(location=5) in vec2 aShape;  // the press: which way the cup is deeper, and by how much
 uniform vec2 uRes; uniform float uR; uniform float uCup; uniform float uZ;
@@ -231,11 +233,11 @@ void main(){
     col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.012
         + panels(R, 2.6) * 0.006 + boxes(R) * 0.0004;
   } else {
-    // Coloured metal, and a mirror: no diffuse at all. F0 is the cover's
-    // tint, and everything it reflects comes back multiplied by it. Most of
+    // Coloured metal, and a mirror: no diffuse at all. F0 is the disc's
+    // foil, and everything it reflects comes back multiplied by it. Most of
     // what a settled disc sees is the dark room, so most of the swatch is
     // dark tinted metal; where its lean points it into a softbox it throws
-    // back a sharp, hot, cover-coloured image of the box. Only at true
+    // back a sharp, hot, foil-coloured image of the box. Only at true
     // grazing does Schlick lift it toward white.
     vec3 F = vC + (1.0 - vC) * fr;
     col = (sky(R) * 1.6 + panels(R, 1.0) * uSheen + boxes(R) * ${LIGHT}) * F;
@@ -435,6 +437,8 @@ export async function createSequin(host, { embedded = false } = {}) {
     coverPx = null;
   }
   const lin = (c) => Math.pow(c / 255, 2.2);
+  // The cover as each sequin's patch of it would ask: its mean linear colour.
+  // It is never the disc's colour, only what the foil dither aims at.
   const sampleCover = (u, v, rad) => {
     if (!coverPx) return [0.6, 0.6, 0.62];
     let r = 0, g = 0, b = 0, n = 0;
@@ -448,14 +452,7 @@ export async function createSequin(host, { embedded = false } = {}) {
         r += lin(coverPx[o]); g += lin(coverPx[o + 1]); b += lin(coverPx[o + 2]); n++;
       }
     }
-    r /= n; g /= n; b /= n;
-    // The tint is the mirror's reflectance, so black stays near-black: a
-    // little more saturation, and only a hair of floor so a dark disc
-    // still answers a softbox with a deep glow of its own colour.
-    const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-    const sat = 1.15;
-    const f = (c) => clamp((l + (c - l) * sat) * 0.92 + 0.006, 0, 1);
-    return [f(r), f(g), f(b)];
+    return [r / n, g / n, b / n];
   };
 
   const prog = program(gl, VS, FS);
@@ -664,13 +661,24 @@ export async function createSequin(host, { embedded = false } = {}) {
     dentH.fill(0); dentV.fill(0); dentLive = false; dentDirty = true;
 
     const list = [];
+    const lattice = [];
     for (let r = 0; r < rows; r++) {
       const odd = r & 1;
       const n = odd ? cols - 1 : cols;
-      for (let c = 0; c < n; c++) list.push([x0 + D / 2 + c * D + (odd ? D / 2 : 0), y0 + D / 2 + r * SY, r]);
+      const row = [];
+      for (let c = 0; c < n; c++) {
+        row.push(list.length);
+        list.push([x0 + D / 2 + c * D + (odd ? D / 2 : 0), y0 + D / 2 + r * SY, r]);
+      }
+      lattice.push(row);
     }
     N = list.length;
     zScale = 1 / (rows * D * 0.32 + D * 6);
+    // Which foil each sequin is: error diffusion over the lattice, aiming at
+    // the cover. The picture lives in which foils sit next to which.
+    const foil = ditherFoils(lattice, list.length, (i) =>
+      sampleCover((list[i][0] - x0) / fw, (list[i][1] - y0) / fh, (D * 0.45) / fw),
+    );
     const rand = rng(7);
     const data = new Float32Array(N * 11);
     px = new Float32Array(N); py = new Float32Array(N); seed = new Float32Array(N);
@@ -696,7 +704,9 @@ export async function createSequin(host, { embedded = false } = {}) {
       const across = 0.6 + 0.4 * rand();
       const tx = -gx + Math.cos(a) * m * across, ty = -gy + Math.sin(a) * m + 0.03;
       const zz = z + drape(u, v) * fw;
-      const [cr, cg, cb] = sampleCover(u, v, (D * 0.45) / fw);
+      // One foil, and no two sequins off the reel quite alike.
+      const f0 = FOILS[foil[i]].f0, jit = 0.94 + 0.12 * ((s * 97.31) % 1);
+      const cr = Math.min(1, f0[0] * jit), cg = Math.min(1, f0[1] * jit), cb = Math.min(1, f0[2] * jit);
       data.set([x, y, zz, s, tx, ty, cr, cg, cb, rand() * PI, (rand() * 2 - 1) * 0.4], i * 11);
       ax[i] = 1; ay[i] = 0;
       flips[i * 3 + 1] = 1;
