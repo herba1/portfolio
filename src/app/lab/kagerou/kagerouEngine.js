@@ -33,9 +33,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    turns before reaching the road and comes back up at the angle it went
 //    down, so for anything far off the road is a mirror: the far road shows
 //    the veld, the poles and the road itself flipped about the horizon,
-//    squeezed thin toward the vanishing line at α_c. α_c is a degree or two;
-//    that band is the "wet road". The turbulence moves α_c from place to
-//    place, so the band's lower edge breaks into shards and wobbles.
+//    squeezed thin toward the vanishing line at α_c. α_c is about half a
+//    degree; that sliver is the "wet road". Its light has crossed hundreds
+//    of metres of hot air, so it arrives pale and flat, mostly low sky. The
+//    turbulence moves α_c from place to place, so the strip swells, thins and
+//    flickers.
 //
 // Query: ?heat=0..1 holds the heat; ?t=seconds freezes the shimmer clock;
 // ?still=1 skips the reveal.
@@ -54,12 +56,10 @@ const HI = -0.5;
 // Camera height above the road (m), the heated layer's top (m).
 const CAM_H = 0.3;
 const LAYER = 1.4;
-// Critical depression at full heat (radians): ~1.6°. A road 30-40 K above the
-// air gives ~0.5°; this is about three times that, so at print size the pool
-// reaches past the far veld (which stands ~0.8° above the horizon) into the
-// sky in the saddle between the mountains, the way it does on a real Karoo
-// road where the veld drops away.
-const ALPHA_MAX = 0.028;
+// Critical depression at full heat (radians): ~0.5°, the real value for a road
+// 30-40 K above the air. The mirage is a thin bright sliver on the last
+// stretch of road before the vanishing point, not a pool.
+const ALPHA_MAX = 0.009;
 const AMBIENT = 0.1;
 // The lens: visible height of the print in its own image plane (~20° tall,
 // ~30° across a 3:2 print), tipped up PITCH radians; the horizon sits
@@ -96,9 +96,12 @@ const vec4 PLATE = vec4(${PX.toFixed(4)}, ${PB.toFixed(4)}, ${PT.toFixed(4)}, 0.
 vec2 plateUv(vec2 p) {
   return vec2((p.x + PLATE.x) / (2.0 * PLATE.x), (PLATE.z - p.y) / (PLATE.z - PLATE.y));
 }
-vec3 radiance(vec2 p, float lod) {
+vec3 rawRadiance(vec2 p, float lod) {
   vec3 v = textureLod(uPlate, plateUv(p), lod).rgb;
-  vec3 c = exp2(v * ${(HI - LO).toFixed(3)} + ${LO.toFixed(3)});
+  return exp2(v * ${(HI - LO).toFixed(3)} + ${LO.toFixed(3)});
+}
+vec3 radiance(vec2 p, float lod) {
+  vec3 c = rawRadiance(p, lod);
   // A polariser on the lens: with the sun near the zenith the whole ring of
   // sky round the horizon is ~90° from it and strongly polarised, so the
   // clear (Rayleigh) blue darkens and deepens; terrain and haze-white keep.
@@ -165,22 +168,53 @@ void main() {
   // Inferior mirage on the far road.
   if (elev < 0.0 && road > 0.001 && uAlphaC > 0.0) {
     float alpha = -elev;
-    // The critical line wanders with the plumes (broad, slow) and frays where
-    // single cells cross it (fine, fast), so the pool's lower edge is crisp
-    // but broken into shards, never a soft straight ramp.
-    float n = gnoise(vec3(p.x * 55.0, uTime * 0.45, 3.0)) + 0.45 * gnoise(vec3(p.x * 150.0 + uTime * 0.2, uTime * 0.9, 9.0))
-            + 0.2 * gnoise(vec3(p.x * 420.0, uTime * 1.7, 5.0));
-    float ac = uAlphaC * (1.0 + 0.2 * n);
-    float m = smoothstep(ac, ac * 0.88, alpha + d.y * 0.6) * road;
+    // The tarmac, read softly and pulled in from its edges: only the asphalt
+    // is hot enough to bend the rays back, the gravel shoulders are not.
+    float tm = 0.0;
+    for (int i = -2; i <= 2; i++) tm += texture(uAux, plateUv(p + vec2(float(i) * 0.0022, 0.0))).g;
+    tm = smoothstep(0.5, 0.95, tm / 5.0);
+    // The critical line wanders with the plumes (broad, slow), so the strip
+    // swells and thins along its length.
+    float n = gnoise(vec3(p.x * 55.0, uTime * 0.45, 3.0)) + 0.45 * gnoise(vec3(p.x * 150.0 + uTime * 0.2, uTime * 0.9, 9.0));
+    float ac = uAlphaC * (1.0 + 0.18 * n);
+    float a = alpha + d.y * 0.6;
+    // Reflectance: near-total at the horizon, where the rays graze the hot
+    // skin at the shallowest angle, falling off over the last third of α_c as
+    // the turning point dips into the cooler air above it. No hard cut.
+    float u = clamp(a / ac, 0.0, 1.0);
+    float R = 0.97 * (1.0 - smoothstep(0.66, 1.0, u)) * (1.0 - 0.15 * u);
     // Near the vanishing line the inverted image is squeezed: the rays that
     // dip closest to α_c all turn in the same thin skin of hot air, so the
     // mirrored veld and poles thin down into the edge instead of running on.
-    float u = clamp(alpha / ac, 0.0, 1.0);
     float squeeze = 1.0 - 0.5 * smoothstep(0.4, 1.0, u);
     // The returning ray spends twice as long in the layer: double shimmer.
     vec2 pm = vec2(p.x, -p.y * squeeze) + d * 2.0;
-    vec3 refl = radiance(pm, lod + 0.25) * 0.94;
-    col = mix(col, refl, m);
+    vec3 refl = radiance(pm, lod + 0.25);
+    // The mirrored road crown (the far tarmac over the rise and its lane
+    // dashes) would print as a white stripe and a smeared blob down the
+    // strip. Its sample is clamped to the local level of the scene around it,
+    // which takes the highlights out, and leans toward the low sky the hot
+    // skin over it also mirrors.
+    vec3 local = radiance(pm, lod + 3.5);
+    refl = min(refl, local * 1.05);
+    float crown = 0.0;
+    for (int i = -2; i <= 2; i++) crown += texture(uAux, plateUv(vec2(pm.x + float(i) * 0.0065, -0.0012))).g;
+    crown = smoothstep(0.0, 1.0, crown / 5.0);
+    // The horizon sky the mirror mostly carries: the low sky over the saddle,
+    // read without the polariser (the grazing mirror light is polarised the
+    // other way and passes it) and paled by the haze of the last kilometres.
+    vec3 hsky = rawRadiance(vec2(p.x * 0.5, 0.085), 5.5);
+    hsky = mix(hsky, vec3(dot(hsky, vec3(0.2126, 0.7152, 0.0722))), 0.65) * 1.85;
+    refl = mix(refl, hsky, crown * 0.45);
+    // Light that came back through hundreds of metres of hot air arrives
+    // lighter and flatter than it left: silver water, not brown mud.
+    refl = mix(refl, hsky, 0.4) * 1.1;
+    // The fine cells crossing the critical line fray it in brightness: thin
+    // level glints that run along the strip and flicker, the way the far
+    // "water" ripples, rather than a torn edge.
+    float f = gnoise(vec3(p.x * 70.0, p.y * 2600.0 - uTime * 3.0, uTime * 1.3)) + 0.5 * gnoise(vec3(p.x * 420.0, p.y * 900.0, uTime * 1.7));
+    refl *= 1.0 + 0.22 * f * (0.4 + u);
+    col = mix(col, refl, clamp(R * tm, 0.0, 1.0));
   }
 
   outColor = vec4(col * uExpo, 1.0);
