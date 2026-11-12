@@ -9,6 +9,23 @@ import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
 
 const SRC = "/lab/film-test/street.jpg";
 
+// Summer, re-tuned for this photograph's backlit cumulus. The kit's summer
+// spreads all the light (threshold 0), cools the highlights and puts paper
+// white above the cloud, so the cloud developed into a flat grey veil. Here
+// only light past the knee scatters, so the cloud keeps its own lobes; the
+// highlights roll off warm-neutral, and the brightest cloud lands near paper
+// white instead of a stop under it. This cloud is bright but not clipped in
+// the photo, so less headroom: at the kit's 1.4 the scattered light pushed a
+// fifth of the cloud's red and green into 255 and flattened its tops.
+const SUMMER = {
+  ...FILM_PRESETS.summer,
+  headroom: 0.8,
+  bloomThreshold: 0.6,
+  highlightTint: [1.03, 1, 0.95],
+  whitePoint: 1.1,
+};
+const PRESETS = { ...FILM_PRESETS, summer: SUMMER };
+
 const VERT = `#version 300 es
 in vec2 aPos;
 out vec2 vUv;
@@ -58,7 +75,7 @@ function compile(gl, vs, fs) {
 
 function readParams(search) {
   const q = new URLSearchParams(search);
-  const preset = FILM_PRESETS[q.get("preset")] || FILM_PRESETS.summer;
+  const preset = PRESETS[q.get("preset")] || PRESETS.summer;
   const params = { ...preset };
   for (const key of Object.keys(FILM_DEFAULTS)) {
     if (typeof FILM_DEFAULTS[key] !== "number") continue;
