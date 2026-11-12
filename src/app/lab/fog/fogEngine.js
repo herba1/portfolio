@@ -8,8 +8,9 @@ import { createStage, clamp } from "../_kit/stage";
 // The plate is two Poly Haven HDRIs (CC0, both from their 16k captures) rendered
 // at 3840 through the same stereographic rays: the towers from canary_wharf, the
 // sky from docklands_01: a radial cobalt, pale cyan where it meets the towers,
-// under cumulus unmixed from the capture's own blue and split-toned cyan-grey in
-// the folds to warm-neutral on the sunlit tops, unclipped. Depth Anything V2 gives
+// under cumulus unmixed from the capture's own blue, laid back by that same
+// cover and lit again by their thickness and the sun (skylight-blue shade and
+// margins, cream sunlit tops), unclipped. Depth Anything V2 gives
 // relative inverse depth, turned into metres offline (the glass corner ~30 m,
 // the far tower down the street ~380 m), with the distance and the sky matte
 // both stopped on the towers' silhouettes (no bleed band of sky distance
@@ -37,14 +38,12 @@ import { createStage, clamp } from "../_kit/stage";
 //                  g 0.6, warm-white), strong toward the sun past the top edge
 //                  and next to nothing in the low sky, which looks away from it;
 //                  held off the deepest shadows of what is still clearly seen
-//   cumulus        unmixed from the open blue under them and laid out again on
-//                  a long ramp (skylight-blue undersides at ~0.55 display, a
-//                  grey body, cream only on the top tenth), their cover
-//                  feathered by the cover around it, so margins dissolve into
-//                  the cobalt and lone flecks drop out
-//   split grade    after the haze, by the luminance it left, weighted by how
-//                  much of the light is the sun's: veiled cumulus tops still
-//                  roll off warm, the open sky keeps the air's cyan
+//   cumulus        lit in the plate (clouds.py); here their cover is only read
+//                  back, against the open blue under them
+//   split grade    over the air the haze lays on a cloud, by the luminance it
+//                  left, weighted by how much of that light is the sun's:
+//                  veiled cumulus tops still roll off warm, a clear cloud keeps
+//                  its own light, the open sky keeps the air's cyan
 //   breath         the haze gathers a little thicker where the pointer rests,
 //                  and banks of it drift slowly through the street
 
@@ -193,21 +192,11 @@ const UNDER_SKY = 0.8;
 // at a cumulus' scale and wider (levels 3 and 4, ~50-100 plate px, and the
 // whole), so a cloud's cover can be read against the cobalt it is laid over.
 const GAP_W = [0, 0, 0, 1, 1];
-// The cumulus' own light, on a long ramp. The plate holds their folds, but
-// over a narrow range (display luminance ~0.74 to 0.91, p5 to p99), which
-// the film's shoulder lifted into one cream. Ranked on the plate's own spread
-// of cloud light (linear, p1 0.49 to p99 0.82), each cloud is laid out again
-// from a skylight-blue shade at 0.55 to the cream top at about 0.93 (display),
-// so the median fold sits at ~0.72 and only the top tenth reaches the warm end.
-const CLOUD_Y = [0.49, 0.82];
-const CLOUD_RAMP = [0.55, 0.38, 1.25]; // display: floor, span, curve
-// Cover, against the open blue, is feathered by its own surroundings: a
-// cumulus' thin margin dissolves into the cobalt over the width of a wisp,
-// and a fleck with no cloud around it (sub-threshold cover a few pixels
-// across) drops out into the sky it sits in.
-const FEATHER = [0.1, 0.6]; // cover over ~32 plate px: gone below, whole above
-const FEATHER_LOD = 5;
-const EDGE_LOD = 3; // and its margin eased out over ~8 plate px
+// The cumulus are laid out and lit in the plate itself (tools/depth/bakes/
+// fog/clouds.py: unmixed once from the capture's blue, laid back over the
+// cobalt by that same cover, and lit by their thickness and the sun), so the
+// composite takes them as they are. Their cover is only read back here, against
+// the open blue under them, to know which light is a cloud's.
 // The in-scatter over the sky keeps the open sky's own saturation at each
 // elevation: below about 36 deg it is the open blue measured between the
 // clouds (uSkyLow, ~#5a9fcc, deepening to uSkyMid, ~#2f7fb8), easing into the
@@ -472,38 +461,14 @@ void main() {
   // (convolving the clouds reads as a lens, not as air).
   float soft = (1.0 - Tt.g) * (1.0 - Tt.g) * (1.0 - cov);
   vec3 scene = plate(uv, soft * ${(1.6 + Math.log2(PLATE_W / 2400)).toFixed(3)});
-  vec3 scene0 = scene;
 
-  // The cumulus, given their volume back. Their cover is read against the
-  // open blue under them (how much of its blueness is gone), and their own
-  // light unmixed from it; then laid out again on a long ramp, ranked on the
-  // plate's spread of cloud light: folds and undersides down in a
-  // skylight-blue shade, the body a quiet grey, the sunlit tops alone up at
-  // the cream end. Thin margins sit in the shade (light passes through them,
-  // little scatters back), and their cover is feathered by the cover around
-  // them, so a margin dissolves into the cobalt and a lone fleck in the open
-  // blue, with no cloud around it, drops out.
+  // How much of this pixel is cumulus: its cover, read against the open blue
+  // under the clouds (how much of that blueness is gone). The plate's clouds
+  // run from a skylight-blue shade to cream, all well short of the gap's blue.
   vec4 gp = texture(uGap, uv);
   vec3 gapL = pow((gp.rgb + uSkyMean * 0.002) / (gp.a + 0.002), vec3(2.2));
   float bgap = max(blueness(gapL), 0.5);
   float a0 = 1.0 - smoothstep(0.22, 0.97, blueness(scene) / bgap);
-  vec3 wide = pow(textureLod(uColor, uv, ${FEATHER_LOD.toFixed(1)}).rgb, vec3(2.2));
-  float aw = 1.0 - smoothstep(0.22, 0.97, blueness(wide) / bgap);
-  vec3 near = pow(textureLod(uColor, uv, ${EDGE_LOD.toFixed(1)}).rgb, vec3(2.2));
-  float ae = 1.0 - smoothstep(0.22, 0.97, blueness(near) / bgap);
-  float af = min(a0, ae) * smoothstep(${FEATHER[0].toFixed(2)}, ${FEATHER[1].toFixed(2)}, aw);
-  vec3 ownL = max(scene - gapL * (1.0 - a0), 0.0) / max(a0, 0.35);
-  float Ycl = max(luma(ownL), 1e-4);
-  float rank = clamp(log(Ycl / ${CLOUD_Y[0].toFixed(3)}) / ${Math.log(CLOUD_Y[1] / CLOUD_Y[0]).toFixed(4)}, 0.0, 1.0);
-  rank *= mix(0.7, 1.0, smoothstep(0.3, 0.9, a0));
-  float yc = ${CLOUD_RAMP[0].toFixed(3)} + ${CLOUD_RAMP[1].toFixed(3)} * pow(rank, ${CLOUD_RAMP[2].toFixed(2)});
-  vec3 cloudL = mix(vec3(1.0), ownL / Ycl, 0.25) * pow(yc, 2.2);
-  // Between the clouds the plate's own blue, except what stands off the gap's
-  // light by more than its gentle variation (a fleck, a dot), which takes it.
-  float off = abs(log(max(luma(scene), 1e-4) / max(luma(gapL), 1e-4)));
-  float fill = max(smoothstep(0.12, 0.3, off), 1.0 - (1.0 - a0) * (1.0 - a0));
-  vec3 rebuilt = cloudL * af + mix(scene, gapL, fill) * (1.0 - af);
-  scene = mix(scene, rebuilt, smoothstep(0.7, 1.0, cov));
 
   // The air is lit by the sky, and it is one medium: every ray, to a tower or
   // on past them to the sky and its cumulus, takes on the same haze light at
@@ -547,8 +512,8 @@ void main() {
   // reads lilac, not as glare. Over a cumulus (bright and near-neutral in the
   // plate) it is the sun's warm-white, so a veiled top keeps its warmth
   // instead of taking the haze's blue.
-  vec3 pd = pow(scene0, vec3(1.0 / 2.2));
-  float cloud = smoothstep(0.42, 0.66, luma(pd)) * (1.0 - smoothstep(0.06, 0.2, pd.b - pd.r));
+  vec3 pd = pow(scene, vec3(1.0 / 2.2));
+  float cloud = smoothstep(0.3, 0.75, a0) * smoothstep(0.4, 0.6, luma(pd));
   vec3 sunSky = mix(air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}, sun, cloud);
   vec3 sunTower = open / max(luma(open), 1e-3) * lobe * ${SUN_SKY.toFixed(2)} * ${CANYON.toFixed(2)};
 
@@ -563,13 +528,7 @@ void main() {
   // cumulus' forms, veiled by the sky's column at this elevation), and the
   // tower's in-scatter held under a share of that, so a far tower the haze
   // has taken is a darker silhouette even against a cloud's shaded side.
-  // The cumulus there as the composite lays them out (on their long ramp,
-  // darker in the shade than the plate's narrow range), not as the plate has them.
-  float Yf = max(luma(forms), 1e-4);
-  float rf = clamp(log(Yf / ${CLOUD_Y[0].toFixed(3)}) / ${Math.log(CLOUD_Y[1] / CLOUD_Y[0]).toFixed(4)}, 0.0, 1.0);
-  float yf = pow(${CLOUD_RAMP[0].toFixed(3)} + ${CLOUD_RAMP[1].toFixed(3)} * pow(rf, ${CLOUD_RAMP[2].toFixed(2)}), 2.2);
-  float cf = 1.0 - smoothstep(0.22, 0.97, blueness(forms) / bgap);
-  vec3 behind = forms * mix(1.0, yf / Yf, cf) * Ts + (air + air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}) * (1.0 - Ts);
+  vec3 behind = forms * Ts + (air + air / max(luma(air), 1e-3) * lobe * ${SUN_SKY.toFixed(2)}) * (1.0 - Ts);
   vec3 airT = open + sunTower;
   float cap = ${UNDER_SKY.toFixed(2)} * luma(behind) / max(luma(airT), 1e-4);
   airT *= mix(1.0, min(1.0, cap), smoothstep(0.05, 0.3, dtl.a));
@@ -590,7 +549,7 @@ void main() {
   // plate less its blur at the scale of a cloud's forms) comes back over the
   // in-scatter, so at least ${Math.round(DETAIL_K * 100)}% of it survives any depth of haze and
   // the low cloud reads as cloud through the air, not as a flat wash.
-  vec3 kept = ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene0 - forms) * smoothstep(0.05, 0.3, dtl.a);
+  vec3 kept = ${DETAIL_K.toFixed(2)} * (1.0 - Ts) * (scene - forms) * smoothstep(0.05, 0.3, dtl.a);
   sky += kept;
   // How much of the sky's light is still the cloud's own: what the air lets
   // through, and the sunlit detail the veil keeps over the air's blue.
@@ -599,15 +558,23 @@ void main() {
   // the street, half haze, takes the haze's cool grey-blue.
   float own = clamp(luma(scene * Ts + max(kept, 0.0)) / max(luma(sky), 1e-4), 0.0, 1.0);
   own *= own;
-  vec3 col = mix(tower, sky, cov);
-  // How much of this pixel's light is the sun's, for the split grade the
-  // finish runs over the composite: a cumulus' own light (sunlit, near-neutral
-  // in the plate) as far as the air lets it through, and the sun's share of
-  // the air in front of it. So a veiled top still lands on the warm end of the
-  // grade, by its luminance after the haze, while the open sky, cyan in the
-  // plate and lit by the sky alone, takes none of it. On a tower, the clear
-  // air in front of its light stone and glints, as before.
+  // The plate's cumulus are already lit, so the split grade only takes what
+  // the air laid over them: by the luminance the haze left, the shade toward
+  // skylight blue and the brightest toward cream #FFF1E2 (a tint at the
+  // pixel's own luminance, lifting nothing), weighted by how much of the light
+  // is the air's and of that how much is the sun's. A veiled top still lands
+  // warm instead of on the air's cyan; a clear cloud keeps its own light.
   float share = luma(sun) / (luma(sun) + luma(air) + 1e-4);
+  vec3 skyD = pow(max(sky, 0.0), vec3(1.0 / 2.2));
+  float sl = luma(skyD);
+  vec3 st = mix(vec3(${tint("#A2BDD3")}), vec3(${tint("#D2DDE4")}), smoothstep(0.6, 0.76, sl));
+  st = mix(st, vec3(${tint("#FFF1E2")}), smoothstep(0.8, 0.93, sl));
+  sky = pow(mix(skyD, sl * st, cloud * (1.0 - own) * mix(0.1, 1.0, share) * 0.95), vec3(2.2));
+  vec3 col = mix(tower, sky, cov);
+  // How much of this pixel's light is a cloud's or the sun's, for the film
+  // finish: its shoulder lifts nothing there (the plate laid the cumulus out
+  // on their own range). On a tower, the clear air in front of its light
+  // stone and glints, the weight of the finish's split grade.
   float warm = mix(smoothstep(0.35, 0.85, Tt.g), cloud * (own + (1.0 - own) * mix(0.1, 1.0, share)), cov);
   // Display-encoded and untoned, for the film finish. Alpha packs two
   // sixteenths (it survives an 8-bit target): how much of this pixel is a solid
@@ -723,20 +690,18 @@ void main() {
   float lift = liftOf(s.a);
   c = tone(c, lift);
 
-  // The split grade, after the haze and the shoulder, by the luminance the
-  // composite left, along the cumulus' long ramp: skylight blue #A2BDD3 in the
-  // undersides and the folds facing away (~0.55 to 0.62), cyan-grey #B7C5C5
-  // through the shade, #DFE1DE across the body, and warm-neutral #FFF1E2 only
-  // on the sunlit tops (above ~0.84, the top tenth), each at its own luminance
-  // (a tint, not a lift). Weighted by how much of the light is the sun's, so a
-  // cumulus top seen through the haze still rolls off warm, and the open sky
-  // keeps the colour the air gave it.
+  // The split grade on the towers' light, after the haze and the shoulder, by
+  // the luminance the composite left: their pale stone toward #DFE1DE and
+  // their glints toward warm-neutral #FFF1E2, each at its own luminance (a
+  // tint, not a lift), weighted by how clearly the tower is still seen.
   l = luma(c);
   vec3 tint = mix(vec3(${tint("#A2BDD3")}), vec3(${tint("#B7C5C5")}), smoothstep(0.56, 0.68, l));
   tint = mix(tint, vec3(${tint("#DFE1DE")}), smoothstep(0.68, 0.8, l));
   tint = mix(tint, vec3(${tint("#FFF1E2")}), smoothstep(0.82, 0.93, l));
-  // On a tower only the top end, as the glass grade above owns its mids.
-  c = mix(c, l * tint, mix(smoothstep(0.3, 0.5, l), smoothstep(0.72, 0.95, l), solid) * mix(0.95, 0.85, solid) * warm);
+  // On a tower only the top end, as the glass grade above owns its mids; the
+  // sky had its grade in the composite (a solid tower that still carries a
+  // warm weight is never under two sixteenths solid).
+  c = mix(c, l * tint, mix(smoothstep(0.3, 0.5, l), smoothstep(0.72, 0.95, l), solid) * mix(0.95, 0.85, solid) * warm * smoothstep(0.05, 0.12, solid));
   float sat = max(c.r, max(c.g, c.b)) - min(c.r, min(c.g, c.b));
   float shade = smoothstep(0.5, 0.68, l) * (1.0 - smoothstep(0.78, 0.92, l)) * (1.0 - smoothstep(0.1, 0.3, sat)) * (1.0 - solid);
   c *= mix(vec3(1.0), vec3(0.97, 1.0, 0.99), shade);
@@ -1071,7 +1036,7 @@ export async function createFog(host, { embedded = false } = {}) {
   gl.uniform1i(P.air.u.uAux, 1);
   gl.uniform1f(P.air.u.uLod, Math.log2(colorImg.naturalHeight / down[0].h));
   // First the open gaps alone, filled in under the clouds: the cobalt each
-  // cumulus is laid over, for the cover the composite unmixes and feathers.
+  // cumulus is laid over, for the cover the composite reads back.
   gl.uniform1f(P.air.u.uOpen, 1);
   quadDraw(gapDown[0]);
   descend(gapDown);

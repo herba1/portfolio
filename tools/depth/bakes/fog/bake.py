@@ -2,8 +2,9 @@
 #
 #   plate.webp  the composite in display sRGB: the canary-wharf towers under the
 #               docklands cumulus, the sky graded to the natsu targets (a radial
-#               cobalt, pale where it meets the towers; cloud tops warm-neutral,
-#               folds cyan-grey) with a shoulder so nothing reaches 255.
+#               cobalt, pale where it meets the towers; the cumulus lit by their
+#               thickness and the sun, cream tops over skylight-blue shade, see
+#               clouds.py) with a shoulder so nothing reaches 255.
 #   aux.png     R  log distance in metres, D_MIN..D_MAX (sky = D_MAX)
 #               G  sky matte (white = sky): the source of the air's colour
 #               B  the ray's elevation above the horizon, 0..90 degrees
@@ -16,6 +17,7 @@ import os, sys, numpy as np, cv2
 from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import auxmap
+import clouds
 
 WORK = sys.argv[1] if len(sys.argv) > 1 else '/tmp/claude-0/fog-work'
 OUT = '/home/user/portfolio/public/lab/fog'
@@ -46,113 +48,13 @@ matte = auxmap.load_matte(WORK, W, H)
 r = auxmap.load_depth(WORK, W, H)
 
 # ---------------------------------------------------------------- the sky
-Y = sky @ LUMA
-sb = cv2.GaussianBlur(sky, (0, 0), 1.2 * S)
-blue = (sb[..., 2] - sb[..., 0]) / (sb[..., 2] + 1e-4)
-
-
-def nblur(x, w, sig):
-    """normalised blur of x over the pixels weighted w"""
-    if x.ndim == 3:
-        return cv2.GaussianBlur(x * w[..., None], (0, 0), sig) / (cv2.GaussianBlur(w, (0, 0), sig)[..., None] + 1e-5)
-    return cv2.GaussianBlur(x * w, (0, 0), sig) / (cv2.GaussianBlur(w, (0, 0), sig) + 1e-5)
-
-
-# The capture's own clear sky, filled in under the clouds: its blueness and
-# its light, smooth fields measured on the open gaps only.
-open_ = smooth(0.6, 0.68, blue) ** 2
-bgap = np.maximum(nblur(blue, open_, 40 * S), 0.5)
-Ygap = nblur(Y, open_, 40 * S)
-# Cloud cover from how much of the gap's blueness is gone. A wide, feathered
-# ramp: a cumulus edge thins over many pixels in the capture, and the sky
-# shows through it in proportion, so the cloud is laid back in the same way
-# (no cutout, no rim). The body of a cumulus keeps under ~0.2 of the gap's
-# blueness; its thin shaded margins let some of the sky through.
-bn = blue / bgap
-alpha = 1 - smooth(0.22, 0.97, bn)
-alpha = cv2.GaussianBlur(alpha, (0, 0), 0.9 * S)
-# The cloud's own light, unmixed from the blue behind it: what the capture
-# adds over its gap, per unit of cover. Graded on that, an edge pixel takes
-# the cloud's colour at its strength, not a blue-grey mix of cloud and sky.
-Yadd = np.maximum(Y - Ygap * (1 - alpha), 0)
-Ycl = np.maximum(Yadd / np.maximum(alpha, 0.35), 0.2)
-# Where the cover is thin that estimate is noise over a small number, so the
-# edge takes the light of the cloud just inside it instead (a dark rim
-# otherwise, and the clarity below would ring on it).
-inner = nblur(Ycl, alpha ** 4, 4 * S)
-Ycl = np.maximum(inner + (Ycl - inner) * smooth(0.35, 0.85, alpha), 0.2)
-
-# The clear sky: a radial gradient in the open sky between the towers, pale
-# cyan where it meets them (#2081ac on the print), deepening to cobalt at the
-# middle of the opening (#044984), and paler still low down the street.
-q8 = 8
-ms = cv2.resize(matte, (W // q8, H // q8), interpolation=cv2.INTER_AREA)
-dist = cv2.distanceTransform((ms > 0.5).astype(np.uint8), cv2.DIST_L2, 5).astype(np.float32)
-dist = cv2.GaussianBlur(dist, (0, 0), 18)
-dist = cv2.resize(dist, (W, H), interpolation=cv2.INTER_CUBIC)
-u = np.clip(dist / np.percentile(dist[matte > 0.5], 99.5), 0, 1)
-te = np.clip((elev - 25) / 60, 0, 1)
-t = np.clip(0.75 * u ** 0.8 + 0.4 * te - 0.1, 0, 1)[..., None]
-t = t * t * (3 - 2 * t)
-deep, rim, low = s2l('#00447f'), s2l('#1383b0'), s2l('#5a9fc6')
-gap = rim + (deep - rim) * t
-gap = gap + (low - gap) * smooth(45, 12, elev)[..., None]
-# keep the gaps' own gentle variation
-Yg = cv2.GaussianBlur(Y, (0, 0), 8 * S)  # wide enough to drop the capture's row noise
-Yl = cv2.GaussianBlur(Y, (0, 0), 60 * S)
-gap = gap * np.clip(Yg / (Yl + 1e-4), 0.7, 1.3)[..., None] ** 0.35
-
-# cumulus: the cloud's own light, every fold kept. A soft global power (the
-# field spans ~2.5 stops) so the body sits bright, and the modelling comes
-# back as local contrast at three scales, so the interiors carry their folds
-# instead of filling to one cream.
-lY = np.log(Ycl)
-lB = cv2.GaussianBlur(lY, (0, 0), 90 * S)
-# The capture is soft overhead (its zenith is stitched): a clarity pass on the
-# log luminance, lightly denoised first so it is not the sensor noise that
-# gets sharpened.
-lS = cv2.GaussianBlur(lY, (0, 0), 0.7 * S)
-d0 = lS - cv2.GaussianBlur(lS, (0, 0), 1.8 * S)
-d1 = lS - cv2.GaussianBlur(lS, (0, 0), 6 * S)
-d2 = lS - cv2.GaussianBlur(lS, (0, 0), 24 * S)
-lm = np.median(lY[(alpha > 0.9) & (matte > 0.5)])
-Yc = 0.58 * np.exp(0.42 * (lY - lm) + 0.25 * (lY - lB) + 0.4 * d0 + 0.55 * d1 + 0.4 * d2)
-if os.environ.get('FOG_STATS'):
-    cm = (alpha > 0.9) & (matte > 0.5)
-    print('Yc cloud pct', np.percentile(Yc[cm], [1, 5, 10, 25, 50, 75, 90, 99]).round(3))
-# split grade on the cloud's own light: the sunlit tops roll off warm-neutral
-# toward #FFF1E2, the middle a quiet grey (#dfe1de), and the folds facing away
-# take the skylight: a cyan-grey (#b7c5c5), never the lilac a blue tint lands
-# on over cobalt.
-stops = [(0.45, s2l('#b5c5c6')), (0.66, s2l('#dfe1de')), (0.98, s2l('#fff0de'))]
-tint = np.stack([np.interp(Yc, [y for y, _ in stops], [c[k] for _, c in stops]) for k in range(3)], -1).astype(np.float32)
-tint = tint / (tint @ LUMA)[..., None]
-cloud = Yc[..., None] * tint
-# What shows through a thin margin of cloud is not the cobalt of the open gap
-# but sky light already scattered once inside it: paler and greener. Laid
-# under the cloud by its cover, the shaded margins land cyan-grey.
-behind = gap + (s2l('#6a9fb4') - gap) * smooth(0.05, 0.7, alpha)[..., None]
-skyg = behind * (1 - alpha[..., None]) + cloud * alpha[..., None]
-
+# The cumulus unmixed from the capture's own blue, laid back over a radial
+# cobalt by that same cover (premultiplied, so no ring of the old sky is left
+# round them) and lit again by their thickness and the sun (clouds.py).
+skyg, alpha, _ = clouds.composite(sky, elev, matte, stats=bool(os.environ.get('FOG_STATS')))
 # Retouch: one dark grey speck inside the right-hand cumulus (a bird or a mark
-# in the docklands capture, ~15 px at 3840; the clarity above sharpens it into
-# a hole). Only the dot itself, found as what is much darker than its own
-# closing, is filled from the cloud around it; the fold leading to it stays.
-SPECKS = [(2493, 1007)]  # at the 3840 plate
-for sx, sy in SPECKS:
-    cx, cy, R = int(sx * W / 3840), int(sy * H / 2560), int(16 * W / 3840)
-    x0, y0, x1, y1 = cx - 4 * R, cy - 4 * R, cx + 4 * R, cy + 4 * R
-    win = skyg[y0:y1, x0:x1]
-    Yw = win @ LUMA
-    k = int(2 * R) | 1
-    closed = cv2.morphologyEx(Yw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
-    yy, xx = np.mgrid[y0:y1, x0:x1]
-    hole = ((closed - Yw) / (closed + 1e-5) > 0.2) & ((xx - cx) ** 2 + (yy - cy) ** 2 < R * R)
-    hole = cv2.dilate(hole.astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))).astype(np.float32)
-    fill = nblur(win, 1 - hole, 0.8 * R)
-    f = np.minimum(cv2.GaussianBlur(hole, (0, 0), 3.0) * 1.6, 1)[..., None]
-    skyg[y0:y1, x0:x1] = win * (1 - f) + fill * f
-    print('retouch', (sx, sy), int(hole.sum()), 'px')
+# in the docklands capture, ~15 px at 3840) is filled from the cloud around it.
+skyg = clouds.retouch(skyg, [(2493, 1007)], W, H)  # at the 3840 plate
 
 # ---------------------------------------------------------------- the towers
 Yb = city @ LUMA
