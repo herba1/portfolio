@@ -22,6 +22,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // this sun and skylight, and rolled off below the film's clip; here they lie
 // over the deep Roman sky and behind every needle.
 //
+// The grade, here in the shader: the rebuilt sky takes a Superia cobalt,
+// pale cyan-blue at the horizon deepening overhead; the cloud shade takes
+// the skylight, the tops facing the sun roll off to cream, and the cumulus
+// by the sun gets back the local contrast the film's shoulder would eat.
+//
 // Wind: every layer is split into a few branches, each a damped spring with
 // its own natural frequency (big near crowns slow and wide, far trees quick
 // and small), driven by the drag of the air at its centre. At rest a breeze
@@ -29,8 +34,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // the hand and fades. Branches bend from their trunks, so trunks hold still.
 //
 // The sun is drawn behind all of it with its measured radiance (about a
-// million times the blue sky beside it), about five degrees left of where it
-// stood in the capture so it sits just inside a cypress's ragged edge. What
+// million times the blue sky beside it), about four degrees left of where it
+// stood in the capture so it sits on a cypress's ragged edge: a gust bends
+// the needles across it but never buries it. What
 // leaks through the gaps is the only bright thing in the scene, and the
 // shared film look turns it into bloom and a warm halation ring; as the
 // gaps open and close it flickers.
@@ -48,12 +54,13 @@ const LOG = [-14, 2]; // canopy.webp: v = (log2(c) - LO) / (HI - LO)
 // premultiplied by its cover; a = cover.
 const CLOUD_LOG = [-9, 6];
 
-// Sun, in asset uv (y down): placed just behind the cypress edge; the
-// capture's sun was at (0.4502, 0.8798).
-const SUN = { x: 0.3994, y: 0.89429, r: 0.0028631, L: 194211, color: [1.0375, 1.006, 0.83] };
+// Sun, in asset uv (y down): placed on the ragged edge of the cypress,
+// where a gust bends needles across it but never buries it; the capture's
+// sun was at (0.4502, 0.8798).
+const SUN = { x: 0.4094, y: 0.89429, r: 0.0028631, L: 194211, color: [1.0375, 1.006, 0.83] };
 // Scene light is written at 1/16 so the sun fits a half float; film adds it back.
 const GAIN = 1 / 16;
-const SUN_ND = 0.12; // taste: how much of the sun's energy the frame gets
+const SUN_ND = 0.042; // taste: how much of the sun's energy the frame gets
 
 // Per layer: deflection per unit wind (asset widths), natural frequency,
 // damping. The branch centres the wind is sampled at come with the
@@ -87,11 +94,32 @@ const FILM = {
   halationThreshold: 2.5 * GAIN,
   bloom: 0.2,
   softness: 0.42,
-  saturation: 1.1,
-  blueDepth: 0.55,
+  saturation: 1.12,
+  blueDepth: 0.7,
   toe: 0.045,
   grain: 0.34,
   vignette: 0.22,
+};
+// The grade, in linear scene light before the film.
+// Sky: the rebuilt field keeps its own brightness (rolled off round the sun)
+// but takes the chroma of a Superia summer sky, a pale cyan-blue at the
+// horizon deepening to cobalt overhead. Chroma is per unit blue.
+const SKY_GRADE = {
+  horizon: [0.12, 0.36, 1],
+  zenith: [0.02, 0.235, 1],
+  depth: [0.92, 0.55], // luminance kept, horizon .. zenith
+  knee: 1.1, // circumsolar roll-off: Y / (1 + Y / knee)
+};
+// Cloud: shade takes the skylight, tops facing the sun roll off to cream;
+// local contrast is lifted so the cumulus by the sun keeps its drawing.
+const CLOUD_GRADE = {
+  shade: [0.44, 0.63, 1],
+  mid: [0.8, 0.87, 1],
+  cream: [1, 0.8, 0.52],
+  shadeDepth: 0.68, // the shade sits this far below its own light
+  knee: 0.9, // highlight shoulder: above it, Y * (knee / Y)^roll
+  roll: 0.4,
+  detail: 1.3, // local contrast against the cloud's own blur
 };
 const BASE_EXPOSURE = 0.35; // stops, artistic, on top of 1/GAIN
 
@@ -121,6 +149,15 @@ uniform float uSunR;
 uniform vec3 uSunL;
 uniform float uGain;
 uniform vec2 uLog;
+uniform sampler2D uCloudsBlur; // same texture, mipmapped sampler
+uniform vec3 uSkyHor;
+uniform vec3 uSkyZen;
+uniform vec3 uSkyGrade;      // depth horizon, depth zenith, knee
+uniform vec3 uCShade;
+uniform vec3 uCMid;
+uniform vec3 uCCream;
+uniform vec4 uCGrade;        // knee, roll, detail, shade depth
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
 const float ASPECT = ${ASPECT.toFixed(6)};
 
 vec3 canopy(vec2 uv) {
@@ -133,11 +170,27 @@ vec2 disp(int k, vec2 uv) {
   return vec2(d.x, d.y * ASPECT);
 }
 
+vec3 withLuma(vec3 tint, float y) {
+  return tint * (y / dot(tint, LUMA));
+}
+
 void main() {
   vec2 p = vec2(vUv.x, 1.0 - vUv.y);
   vec2 uv = uCrop.xy + p * uCrop.zw;
+  float sd = length((uv - uSun) * vec2(1.0, 1.0 / ASPECT));
 
+  // Sky: Superia cobalt, deepening from the horizon (asset bottom) to
+  // overhead (the asset's top is past the zenith).
   vec3 col = texture(uSky, uv).rgb;
+  {
+    float Y = dot(col, LUMA);
+    Y = Y / (1.0 + Y / uSkyGrade.z);
+    float h = smoothstep(0.98, 0.2, uv.y);
+    vec3 tint = mix(uSkyHor, uSkyZen, h);
+    // round the sun the sky pales a little, as it does
+    tint = mix(tint, vec3(0.5, 0.72, 1.0), 0.6 * exp(-sd / 0.07));
+    col = withLuma(tint, Y * mix(uSkyGrade.x, uSkyGrade.y, h));
+  }
 
   // The sun: a limb-darkened disc of the measured radiance. Smaller than a
   // pixel it is widened with the same energy, so it never aliases away.
@@ -153,6 +206,26 @@ void main() {
   // Cumulus, in front of the sky and behind every needle.
   vec4 cl = texture(uClouds, uv);
   vec3 cP = exp2(uCLog.x + cl.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
+  if (cl.a > 0.0) {
+    // Relight: the cloud's own light, unpremultiplied, judged against its
+    // blurred surround so the drawing survives the shoulder.
+    vec4 cb = textureLod(uCloudsBlur, uv, 4.5);
+    vec3 bP = exp2(uCLog.x + cb.rgb * (uCLog.y - uCLog.x)) - exp2(uCLog.x);
+    float Yc = max(dot(cP, LUMA) / max(cl.a, 1e-3), 1e-4);
+    float Yb = max(dot(bP, LUMA) / max(cb.a, 1e-3), 1e-4);
+    // Thin edges carry little cover: their light is noisy and their
+    // surround is mostly sky, so they keep their own drawing and colour.
+    float body = smoothstep(0.35, 0.85, cl.a) * smoothstep(0.25, 0.65, cb.a);
+    float near = exp(-sd / 0.22);
+    float detail = mix(1.0, mix(uCGrade.z, uCGrade.z + 0.45, near), body);
+    float Y = Yb * pow(Yc / Yb, detail);
+    if (Y > uCGrade.x) Y *= pow(uCGrade.x / Y, uCGrade.y);
+    float lit = smoothstep(-2.2, 0.1, log2(mix(Yb, Yc, 0.5 + 0.5 * body)));
+    Y *= mix(uCGrade.w, 1.0, max(lit, 1.0 - body));
+    vec3 tint = mix(uCShade, uCMid, smoothstep(0.3, 0.8, lit));
+    tint = mix(tint, uCCream, smoothstep(0.7, 1.0, lit) * (0.65 + 0.35 * near) * smoothstep(0.55, 0.95, cl.a));
+    cP = withLuma(tint, Y) * cl.a;
+  }
   col = col * (1.0 - cl.a) + cP * smoothstep(0.0, 2.0 / 255.0, cl.a);
 
   // Back to front; each layer bends with its own branches.
@@ -397,6 +470,15 @@ export async function createKomorebi(host, { embedded = false } = {}) {
   const texLayers = imageTexture(gl, layersImg);
   const texBranches = imageTexture(gl, branchImg);
   const texClouds = imageTexture(gl, cloudImg);
+  gl.bindTexture(gl.TEXTURE_2D, texClouds);
+  gl.generateMipmap(gl.TEXTURE_2D);
+  // The base fetch stays plain linear; the blur reads the mips through its
+  // own sampler.
+  const blurSampler = gl.createSampler();
+  gl.samplerParameteri(blurSampler, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+  gl.samplerParameteri(blurSampler, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.samplerParameteri(blurSampler, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.samplerParameteri(blurSampler, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
   const texSky = gl.createTexture();
   gl.bindTexture(gl.TEXTURE_2D, texSky);
   gl.pixelStorei(gl.UNPACK_ALIGNMENT, 2);
@@ -601,6 +683,15 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     bind(2, texBranches, "uBranches");
     bind(3, texSky, "uSky");
     bind(4, texClouds, "uClouds");
+    bind(5, texClouds, "uCloudsBlur");
+    gl.bindSampler(5, blurSampler);
+    gl.uniform3fv(u.uSkyHor, SKY_GRADE.horizon);
+    gl.uniform3fv(u.uSkyZen, SKY_GRADE.zenith);
+    gl.uniform3f(u.uSkyGrade, SKY_GRADE.depth[0], SKY_GRADE.depth[1], SKY_GRADE.knee);
+    gl.uniform3fv(u.uCShade, CLOUD_GRADE.shade);
+    gl.uniform3fv(u.uCMid, CLOUD_GRADE.mid);
+    gl.uniform3fv(u.uCCream, CLOUD_GRADE.cream);
+    gl.uniform4f(u.uCGrade, CLOUD_GRADE.knee, CLOUD_GRADE.roll, CLOUD_GRADE.detail, CLOUD_GRADE.shadeDepth);
     gl.uniform2f(u.uCLog, CLOUD_LOG[0], CLOUD_LOG[1]);
     gl.uniform4fv(u.uCrop, L.crop);
     gl.uniform2f(u.uRes, L.pw, L.ph);
@@ -613,6 +704,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.pw, L.ph);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    gl.bindSampler(5, null);
 
     film.render(
       sceneT.tex,
@@ -712,6 +804,7 @@ export async function createKomorebi(host, { embedded = false } = {}) {
       freeTarget(gl, sceneT);
       freeTarget(gl, filmT);
       for (const t of [texCanopy, texLayers, texBranches, texSky, texClouds]) gl.deleteTexture(t);
+      gl.deleteSampler(blurSampler);
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteBuffer(quad);
