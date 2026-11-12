@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoundedBoxGeometry } from "three/examples/jsm/geometries/RoundedBoxGeometry.js";
 
 import { createStage } from "../_kit/stage";
 import { paintCard, paintStrap, paintPeel } from "./lanyardArt";
@@ -7,14 +8,16 @@ import { createSim, CARD } from "./lanyardSim";
 const BG = "#f2f0eb";
 const WALL_Z = -0.85;
 
-// A soft studio for the laminate and the metal to reflect: a warm room, one
-// broad softbox above and in front, and a thin strip to the left. The
-// laminate's gloss is these panels sliding across the print as the card turns.
-function makeEnvironment(renderer) {
+// A dark studio for the laminate and the metal to reflect: a near-black room
+// with nothing in it but softboxes. The clearcoat mirrors only the panels, so
+// the print keeps its blacks and the gloss is a crisp band of light sliding
+// across it as the card turns, never a haze over the whole face. The nickel
+// gets the same panels in a dimmer grey room (`room`), so its flats stay a
+// lit metal grey under the edge highlights when the clip turns away.
+function makeEnvironment(renderer, room = "#141210") {
   const scene = new THREE.Scene();
-  const room = new THREE.Mesh(new THREE.BoxGeometry(30, 30, 30), new THREE.MeshBasicMaterial({ color: new THREE.Color("#a59d91"), side: THREE.BackSide }));
-  scene.add(room);
-  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ color: new THREE.Color("#5c564d") }));
+  scene.add(new THREE.Mesh(new THREE.BoxGeometry(30, 30, 30), new THREE.MeshBasicMaterial({ color: new THREE.Color(room), side: THREE.BackSide })));
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(30, 30), new THREE.MeshBasicMaterial({ color: new THREE.Color("#000000") }));
   floor.rotation.x = -Math.PI / 2;
   floor.position.y = -10;
   scene.add(floor);
@@ -24,15 +27,23 @@ function makeEnvironment(renderer) {
     m.lookAt(0, 0, 0);
     scene.add(m);
   };
+  // A flat card mirrors only a few degrees of the room at once, so the strips
+  // the gloss sweeps through on a turn are narrower than that and hot: each
+  // lands as one crisp band of light sliding across the print, where a broad
+  // dim panel would lay a haze over all of it. The ones hard to either side
+  // are what a full turn of the pass (about 35 degrees) looks into, and they
+  // keep the nickel lit when the clip turns away from the camera.
   panel(12, 5, new THREE.Vector3(-1, 8, 10), 5.5);
-  panel(1.6, 12, new THREE.Vector3(-12, 1, 4), 3.2);
+  panel(0.4, 12, new THREE.Vector3(-11.7, 1, 4.75), 12);
+  panel(0.6, 12, new THREE.Vector3(11.7, 2, 4.75), 6);
   panel(6, 3, new THREE.Vector3(9, 4, -6), 1.6);
-  // Behind the camera: a low band that grazes the top of the pass at rest,
-  // and a tall strip off to the left that the gloss sweeps through on a turn.
-  panel(16, 2.4, new THREE.Vector3(0, 2.2, 13), 2.6);
-  panel(1.4, 12, new THREE.Vector3(-3.4, 0.5, 12.5), 3.4);
+  // Behind the camera: a band set just above the clip's eyeline, so at rest
+  // the hardware's flats look into the dark and only its rounded edges catch
+  // it, and a strip a little to the left for the small turns of a swing.
+  panel(16, 2.4, new THREE.Vector3(0, 3.7, 13), 2.6);
+  panel(1.2, 12, new THREE.Vector3(-3.4, 0.5, 12.5), 7);
   const pmrem = new THREE.PMREMGenerator(renderer);
-  const env = pmrem.fromScene(scene, 0.015).texture;
+  const env = pmrem.fromScene(scene, 0.006).texture;
   pmrem.dispose();
   scene.traverse((o) => {
     o.geometry?.dispose();
@@ -81,13 +92,13 @@ function makeClip(metal) {
   const { H, T, PIVOT } = CARD;
   const group = new THREE.Group();
   const top = H / 2;
-  const jawGeo = new THREE.BoxGeometry(0.2, 0.15, 0.012);
+  const jawGeo = new RoundedBoxGeometry(0.2, 0.15, 0.012, 3, 0.0055);
   for (const side of [1, -1]) {
     const jaw = new THREE.Mesh(jawGeo, metal);
     jaw.position.set(0, top - 0.035, side * (T / 2 + 0.006));
     group.add(jaw);
   }
-  const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.2, 0.024, T + 0.024), metal);
+  const bridge = new THREE.Mesh(new RoundedBoxGeometry(0.2, 0.024, T + 0.024, 3, 0.008), metal);
   bridge.position.set(0, top + 0.05, 0);
   group.add(bridge);
   const rib = new THREE.Mesh(new THREE.CylinderGeometry(0.012, 0.012, 0.2, 12), metal);
@@ -117,18 +128,20 @@ export async function createLanyard(host, { embedded = false } = {}) {
   renderer.setClearColor(BG, 1);
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.NeutralToneMapping;
-  renderer.toneMappingExposure = 1;
+  // The dark studio throws plenty of light from its panels; this holds the
+  // print at its painted values (ink #1c1915, red #ad2d1b) under Neutral.
+  renderer.toneMappingExposure = 0.62;
   renderer.shadowMap.enabled = true;
   renderer.shadowMap.type = THREE.VSMShadowMap;
   const aniso = renderer.capabilities.getMaxAnisotropy();
 
   const scene = new THREE.Scene();
   scene.environment = makeEnvironment(renderer);
-  scene.environmentIntensity = 0.55;
+  scene.environmentIntensity = 1.4;
 
   const camera = new THREE.PerspectiveCamera(24, 1, 1, 60);
 
-  scene.add(new THREE.HemisphereLight("#fffaf2", "#b8ad9c", 0.9));
+  scene.add(new THREE.HemisphereLight("#fffaf2", "#b8ad9c", 0.35));
   const key = new THREE.DirectionalLight("#fff6ea", 2.4);
   key.position.set(-2.2, 4.4, 9);
   key.castShadow = true;
@@ -165,13 +178,13 @@ export async function createLanyard(host, { embedded = false } = {}) {
     map: cardTex,
     roughness: 0.62,
     clearcoat: 1,
-    clearcoatRoughness: 0.07,
+    clearcoatRoughness: 0.04,
     clearcoatNormalMap: peelTex,
-    clearcoatNormalScale: new THREE.Vector2(0.025, 0.025),
-    specularIntensity: 0.4,
+    clearcoatNormalScale: new THREE.Vector2(0.004, 0.004),
+    specularIntensity: 0.12,
   });
   const edge = new THREE.MeshPhysicalMaterial({ color: "#f3efe4", roughness: 0.25, clearcoat: 1, clearcoatRoughness: 0.1 });
-  const metal = new THREE.MeshPhysicalMaterial({ color: "#c4c0b8", metalness: 1, roughness: 0.3, envMapIntensity: 2.2 });
+  const metal = new THREE.MeshPhysicalMaterial({ color: "#c4c0b8", metalness: 1, roughness: 0.24, envMap: makeEnvironment(renderer, "#6a6866"), envMapIntensity: 1.9 });
 
   const card = new THREE.Group();
   const slab = new THREE.Mesh(cardGeometry(), [face, edge]);
@@ -218,7 +231,7 @@ export async function createLanyard(host, { embedded = false } = {}) {
   strap.frustumCulled = false;
   scene.add(strap);
 
-  const crimp = new THREE.Mesh(new THREE.BoxGeometry(CARD.STRAP + 0.02, 0.07, 0.03), metal);
+  const crimp = new THREE.Mesh(new RoundedBoxGeometry(CARD.STRAP + 0.02, 0.07, 0.03, 3, 0.012), metal);
   crimp.castShadow = true;
   scene.add(crimp);
 
@@ -397,6 +410,13 @@ export async function createLanyard(host, { embedded = false } = {}) {
     renderer.render(scene, camera);
   });
   sync();
+  if (still != null) {
+    // A still is for capture: show the held frame at once rather than
+    // fading it in, so a screenshot never catches the print half-faded.
+    canvas.style.transition = "none";
+    canvas.style.opacity = "1";
+    renderer.render(scene, camera);
+  }
 
   return {
     destroy() {
@@ -407,7 +427,7 @@ export async function createLanyard(host, { embedded = false } = {}) {
         if (Array.isArray(m)) m.forEach((x) => x.dispose());
         else m?.dispose();
       });
-      [cardTex, peelTex, strapTex, strapNor, scene.environment].forEach((t) => t?.dispose());
+      [cardTex, peelTex, strapTex, strapNor, scene.environment, metal.envMap].forEach((t) => t?.dispose());
       renderer.dispose();
     },
   };
