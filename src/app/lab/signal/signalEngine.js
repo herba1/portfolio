@@ -15,10 +15,11 @@
 //      pulse-count discriminator; de-emphasis
 //
 // Noise is kept to its mechanisms: in track the picture is nearly clean. A
-// carrier driven past the top of the channel (super-white, pre-emphasis
-// overshoot) sinks toward the limiter's slicing level, and only there does
-// the discriminator fail: crossings bunch, go missing, and white turns into
-// black streaks that de-emphasis drags out to the right.
+// carrier driven toward the top of the channel (super-white, pre-emphasis
+// overshoot) sinks toward the limiter's slicing level, and only where a
+// flutter, an asperity or crosstalk pushes it the rest of the way does the
+// discriminator fail: crossings bunch, go missing, and white turns into
+// short black comets that de-emphasis drags out to the right.
 //   -> VCR playback: dropout compensator (1H substitution), 1H chroma comb,
 //      chroma re-modulated with the AFC/APC phase error
 //   -> TV: sync from the flywheel PLL, luma notch, chroma demod against the
@@ -343,7 +344,7 @@ void main(){
 const FS_TAPE = `${HEAD}
 uniform sampler2D uPhi; uniform sampler2D uP; uniform sampler2D uOff;
 uniform float uHR; uniform float uCNoise; uniform float uCDelay;
-uniform vec2 uEdge; uniform float uLim; uniform float uFlutter;
+uniform vec2 uEdge; uniform float uLim; uniform float uFlutter; uniform float uAsp;
 vec4 par(int c, int row){ return texelFetch(uP, ivec2(c, row), 0); }
 float dropMul(float x, vec4 d, float dep0, float dep1){
   float m = 1.0;
@@ -394,6 +395,14 @@ void main(){
     float h0 = hash2(int(sf), row, uFrame * 13 + 5).x, h1 = hash2(int(sf) + 1, row, uFrame * 13 + 5).x;
     float fu = sp - sf;
     a *= 1.0 - uFlutter * mix(h0, h1, fu * fu * (3.0 - 2.0 * fu));
+    // asperities: a speck of debris or an oxide bump lifts the head for a
+    // fraction of a microsecond. Far too shallow for the dropout detector, and
+    // FM rides over it, except where the carrier was already marginal
+    float ap = xp / 7.0;
+    float af = floor(ap);
+    vec2 hA = hash2(int(af), row, uFrame * 17 + 9);
+    float bu = sin(PI * (ap - af));
+    if (hA.x < uAsp) a *= 1.0 - (0.5 + 0.25 * hA.y) * bu * bu;
     // head-amp noise, band-limited a little by the RF amplifier
     vec2 nz = gauss2(x - 1 + q, row, uFrame * 7 + 3) * 0.6 + gauss2(x + q, row, uFrame * 7 + 3) * 0.8;
     rf[q] = a * cis(TAU * phO) + b * cis(TAU * phF) + sg * nz;
@@ -550,13 +559,19 @@ export async function createSignal(host, { embedded = false } = {}) {
   const stillT = parseFloat(query.get("t") || "4");
   const raw = query.has("raw");
   const glare = parseFloat(query.get("glare") || "0.08");
-  // The over-white failure, as numbers. The camcorder clips white at 120%
-  // (super-white); its colour-difference gain at a blown edge; the top of the
-  // playback channel (MHz) and how steeply it closes; and the limiter's
-  // slicing level against the RF the AGC expects. Together they put a parked
-  // super-white carrier just above the slicing level, so flutter and
-  // crosstalk tip it under, while 100 IRE white stays six times clear.
-  const WHITE = 1.2;
+  // The over-white failure, as numbers. The camcorder clips white at 114%
+  // (super-white); the record side clips the pre-emphasised luma again at
+  // 120 IRE, as real decks do, so no carrier is ever driven far past the top
+  // of the channel; the camera's colour-difference gain at a blown edge; the top of
+  // the playback channel (MHz) and how steeply it closes; and the limiter's
+  // slicing level against the RF the AGC expects. Together they keep the
+  // sun's parked super-white carrier about three times clear of the slicing
+  // level, so the disc plays back blown white. Only the clipped overshoot at
+  // its rim, and the moments where an asperity, flutter or crosstalk dips the
+  // carrier, take it under: short black comets that de-emphasis drags off to
+  // the right. 100 IRE white stays six times clear.
+  const WHITE = 1.14;
+  const REC_WHITE = 120;
   const FALSE_C = 10;
   const EDGE_F = 4.46;
   const EDGE_N = 16;
@@ -901,7 +916,7 @@ export async function createSignal(host, { embedded = false } = {}) {
     run(P.fm, [S[2]], (a) => {
       a.t("uRec", S[1]);
       a.f("uKE", preEmph);
-      a.f("uClip", -40 - 38, 100 + 62);
+      a.f("uClip", -40 - 38, REC_WHITE);
     });
     run(P.pa, [S[3]], (a) => a.t("uFm", S[2]));
     run(P.pb, [S[4]], (a) => a.t("uA", S[3]));
@@ -913,6 +928,7 @@ export async function createSignal(host, { embedded = false } = {}) {
       a.f("uEdge", EDGE_F, EDGE_N);
       a.f("uLim", LIM);
       a.f("uFlutter", 0.45 + 0.3 * wearS);
+      a.f("uAsp", 0.012 + 0.03 * wearS);
       a.f("uHR", 0.3 + 0.85 * wearS);
       a.f("uCNoise", 1.2 * g);
       a.f("uCDelay", 7 + 2.5 * (g - 1));
