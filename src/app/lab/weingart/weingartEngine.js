@@ -5,52 +5,50 @@
 // always holds. The display lines break only at a few joins, a word space or
 // one break inside a long word (He|re, Co|mes, the |Sun); between joins the
 // sorts are locked up as one piece on one shared baseline, and each join
-// drops a whole tread, the title's x-height on the brass's own pitch. So a
+// drops a whole tread, the title's x-height on the forme's 12px pitch. So a
 // broken line is flat treads and hard risers, never a slope. Push a line
 // down and it breaks at its join; push harder and the push passes into the
 // stack under it: the line below breaks at its join, then the next, one
 // tread at a time, until the title is three stairs stacked to the foot of
 // the forme. A line that is shoved by the one above goes down whole, a tread
 // at a time, still on the margin, so lines never run into each other. Small
-// type steps by the brass body and bends in word slugs, hinged on its first
+// type steps by that pitch and bends in word slugs, hinged on its first
 // word. The brass rule is one length, never cut, from the margin to the
-// right edge of the figure, set at rest as the foot of the title. It is
-// solid and only ever moves whole: the moment a sort comes down into its
-// lead it drops in one knock to the forme's foot, its heavy face across the
-// bottom strokes of the red, just over the writer's credit, and there the
-// black overprints the red and the two inks make a third. Type that comes
-// down onto it there locks the run; when its composed place is clear again
-// it goes back. The writer's credit is set flush on the margin on the red's
-// own baseline. At rest the forme is strict: the title on the margin, the
-// colophon flush on the red's edge, hung from the cap line of "Here". Every
-// stair on the page is one a push made.
+// right edge of the figure, its face as heavy as the figure's stem, set at
+// rest as the foot of the title. It is solid and only ever moves whole: the
+// moment a sort comes down into its lead it drops in one knock to the
+// forme's foot, its face centred on the red's baseline, so the figures
+// stand on it and their feet print into it as a third, darker ink. Type
+// that comes down onto it there locks the run; when its composed place is
+// clear again it goes back. The writer's credit is set flush on the margin,
+// a clear lead under the seated brass. At rest the forme is strict: the
+// title on the margin, the colophon flush on the red's edge, hung from the
+// cap line of "Here". Every stair on the page is one a push made.
 // ?t=0..1 holds a still of "Here" pushed down through the forme, one tread
 // per push; t=1 is the last tread before the run locks.
 import { createStage, clamp } from "../_kit/stage";
 
 // Design space the forme is composed in, fitted into the piece box.
 const DW = 1000;
-const DH = 600;
+const DH = 648;
 // One step. Small type, set in word slugs, steps by a third of its body.
 // Type drops straight down: sorts stay butted at their set widths,
 // so a word keeps its shape and its word spaces and only the baseline
 // breaks.
 const STEP_BODY = 1 / 3;
-// The forme's one riser: the brass rule's body, the lead it is cast on.
-// Brass and the credit lines step by it, and display type by a tread of a
-// whole number of it (TREAD, below), so every stair in the forme, type or
-// rule, rises in whole multiples of the same piece of brass.
+// The forme's one riser, a 12px piece of lead. The colophon steps by it,
+// and display type by a tread of a whole number of it (TREAD, below), so
+// every stair the type makes rises in whole multiples of the same lead.
 const UNIT = 12;
-// What prints of the brass: a heavy face, nearly the whole body, so where
-// it crosses the red the overprint is a band of the third ink, not a
-// hairline. The step is the body's, never the face's.
-const FACE = 10;
-const FACE_AT = (UNIT - FACE) / 2;
-// Lead between the seated rule's face and the caps of the credit set under
-// it on the forme's foot, design px. The rule is composed so that, a whole
-// number of steps down, this lands its face in the solid of the figure's
-// feet, under the counters.
-const KISS = 6;
+// What prints of the brass: a face cut to the stem of the red figures,
+// measured off the "0" (see fitRule), on a body a hair deeper. Seated, the
+// face is centred on the red's baseline, so the figures stand on the brass
+// and where they cross it the third ink prints as solid, even feet.
+const FACE_LEAD = 1;
+// Clear air between the seated rule's face and the caps of the writer's
+// credit set under it, design px; the credit's baseline is then rounded down
+// the 4px grid from the red's, so it is the forme's foot line, not a caption.
+const FOOT_AIR = 24;
 // The steepest a line can swing: drop from one sort to the next over the
 // sort's average width. A line of small steps takes more of them to get there.
 const STEEP = 0.8;
@@ -97,16 +95,14 @@ const FORME = [
   // the right edge of the "5" (see cutRule). At rest it is the foot of the
   // title, a full measure over the red. It is solid and only ever moves
   // whole: the moment a sort of the title comes down into its lead it drops,
-  // in one knock, to the forme's foot, its face across the bottom of the
-  // figure just over the credit's caps (see fitRule), and there the black
-  // overprints the red. Type that comes down onto it there locks the run.
+  // in one knock, to the forme's foot, its face centred on the red's
+  // baseline (see fitRule), and there the black overprints the red. Type that comes down onto it there locks the run.
   // When its composed place is clear again it goes back.
-  { rule: true, under: "the Sun", body: UNIT, x: 0, y: 372, fit: "red" },
+  { rule: true, under: "the Sun", x: 0, y: 372, fit: "red" },
   // The writer's credit, plain small type in full ink, set flush on the
-  // title's margin (its first ink on the stem of the "H") and on the red's
-  // own baseline (see foot), so the bottom of the forme is one line: credit
-  // at the left, figure at the right, and the rule's last piece seating
-  // across the feet of the red on its final knock.
+  // title's margin (its first ink on the stem of the "H") and a clear lead
+  // under the brass seated on the red's baseline (see foot), so the bottom
+  // of the forme is the credit's own line, under the rule the figures stand on.
   { text: "Written by George Harrison", size: 13, scale: "ui", w: "small", foot: "red" },
   // The colophon is set flush left on the red's axis, the left edge of the
   // "3", where the rule's last piece starts, and hangs from the cap line of
@@ -199,15 +195,56 @@ export async function createWeingart(host) {
       r,
     };
   };
-  // The rule's seat: the deepest whole step at which its face still clears
-  // the caps of the line set on the figure's foot by KISS. There the face
-  // lies across the bottom strokes of the figure, inside its feet, so the
-  // brass overprints the red instead of underlining it, and the credit sits
-  // under it on the margin.
+  // A figure's stem: the ink across the left side of its "0" at half its
+  // height, summed in coverage so it comes to a fraction of a pixel.
+  const stemOf = (fig) => {
+    const k = 2;
+    const size = fig.size * k;
+    const c = document.createElement("canvas");
+    c.width = Math.ceil(size * 1.2);
+    c.height = Math.ceil(size * 1.2);
+    const g = c.getContext("2d", { willReadFrequently: true });
+    g.font = `${weight[fig.w]} ${size}px ${sans}`;
+    g.textBaseline = "alphabetic";
+    g.fillStyle = "#000";
+    const base = Math.round(size * 1.05);
+    g.fillText("0", Math.round(size * 0.1), base);
+    const m = g.measureText("0");
+    const y = Math.round(base - m.actualBoundingBoxAscent / 2);
+    const row = g.getImageData(0, y, c.width, 1).data;
+    let sum = 0;
+    let inked = false;
+    for (let x = 0; x < c.width; x++) {
+      const a = row[x * 4 + 3] / 255;
+      if (a > 0) inked = true;
+      else if (inked) break;
+      sum += a;
+    }
+    return sum / k || fig.size * 0.12;
+  };
+  // The rule's seat: its face, cut to the stem of the figure it is fitted
+  // to, centred on that figure's baseline. There the figures stand on the
+  // brass: their bottom strokes print into its face as the third ink, and
+  // nothing of the red is left hanging below it. The knock is one whole
+  // drop from the foot of the title to that baseline, however far it is.
   const fitRule = (s) => {
-    const foot = slugs.find((o) => o.foot === s.fit);
-    const top = foot.y - measure(foot, foot.text).cap;
-    s.datum = Math.floor((top - KISS - FACE - FACE_AT - s.y) / s.sy);
+    const fig = slugs.find((o) => o.layer === s.fit);
+    s.face = stemOf(fig);
+    s.body = s.face + FACE_LEAD * 2;
+    s.faceAt = FACE_LEAD;
+    s.datum = (fig.y - s.body / 2 - s.y) / s.sy;
+  };
+  // The writer's credit, under the seated rule: its caps a clear FOOT_AIR
+  // below the brass's bottom edge, its baseline a whole number of 4px below
+  // the red's, so the forme's foot sits on the same grid as its figure.
+  const foot = () => {
+    for (const s of slugs) {
+      if (!s.foot) continue;
+      const fig = slugs.find((o) => o.layer === s.foot);
+      const r = slugs.find((o) => o.rule && o.fit === s.foot);
+      const drop = (r ? r.face / 2 : 0) + FOOT_AIR + capOf(s);
+      s.y = fig.y + Math.ceil(drop / 4) * 4;
+    }
   };
   // Lines set on a figure's axis: each line's first ink flush on the
   // figure's left ink edge, the first line's caps on the cap line of
@@ -217,13 +254,11 @@ export async function createWeingart(host) {
   const hang = () => {
     const from = slugs.find((o) => o.text === HANG_FROM);
     // A line set on a figure's foot: its first ink flush on the title's
-    // margin, the left ink of HANG_FROM's first sort, and its baseline the
-    // figure's own, so the two stand on one line across the forme.
+    // margin, the left ink of HANG_FROM's first sort; its depth is set from
+    // the seated rule (see foot).
     for (const s of slugs) {
       if (!s.foot) continue;
-      const fig = slugs.find((o) => o.layer === s.foot);
       s.x = from.x + from.cx[0] - bearing(from, from.text[0]) + bearing(s, s.text[0]);
-      s.y = fig.y;
     }
     let y = null;
     for (const s of slugs) {
@@ -276,6 +311,7 @@ export async function createWeingart(host) {
     for (const s of slugs) if (s.rule) cutRule(s);
     hang();
     for (const s of slugs) if (s.fit) fitRule(s);
+    foot();
     for (const s of slugs) {
       s.vec = s.units.map(() => 0);
       s.pitch = (s.units[s.units.length - 1].x + s.units[s.units.length - 1].w) / s.units.length;
@@ -823,7 +859,7 @@ export async function createWeingart(host) {
   // Brass prints only its face, and seats with the same small knock as a sort.
   const fillBrass = (g, s) => {
     g.beginPath();
-    for (const u of s.units) g.rect(s.x + u.x, s.y + u.p * s.sy + u.seat * u.seat * 0.8 + FACE_AT, u.w, FACE);
+    for (const u of s.units) g.rect(s.x + u.x, s.y + u.p * s.sy + u.seat * u.seat * 0.8 + s.faceAt, u.w, s.face);
     g.fill();
   };
 
