@@ -1,6 +1,8 @@
 import * as THREE from "three";
 
 export const EXPORTS_ROOT = "/splats/4d";
+export const BUNDLED_ROOT = "/lab/splat-video";
+export const DEFAULT_CLIP = "fumikiri-sky";
 export const FALLBACK_CLIP = "fake";
 export const CLIP_NAME_RE = /^[a-z0-9][a-z0-9._-]{0,63}$/i;
 
@@ -44,8 +46,9 @@ export function leanAmount(engine) {
 export function depthOfField(engine, meta) {
   const view = engine.view;
   if (!view || engine.reducedMotion) return { aperture: 0, focusDepth: meta.camera.pivotDepth };
+  const aperture = meta.camera.aperture ?? DEPTH_OF_FIELD.aperture;
   return {
-    aperture: DEPTH_OF_FIELD.aperture * Math.pow(leanAmount(engine), DEPTH_OF_FIELD.ease),
+    aperture: aperture * Math.pow(leanAmount(engine), DEPTH_OF_FIELD.ease),
     focusDepth: meta.camera.pivotDepth * view.dolly,
   };
 }
@@ -189,6 +192,7 @@ export function createEngine() {
     reducedMotion: false,
     buffering: false,
     soundWaiting: false,
+    drawn: false,
     muted: true,
     sound: null,
     orbit: {

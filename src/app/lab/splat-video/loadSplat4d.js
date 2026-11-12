@@ -1,4 +1,4 @@
-import { CLIP_NAME_RE, EXPORTS_ROOT, FALLBACK_CLIP, HYBRID, RGBD, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
+import { BUNDLED_ROOT, CLIP_NAME_RE, DEFAULT_CLIP, EXPORTS_ROOT, HYBRID, RGBD, TEXTURE_WIDTH, clipKind } from "./splatVideoParams";
 
 const EVALUATION_PREFIX = "eval-";
 
@@ -26,31 +26,35 @@ function indexEntries(index) {
   return [];
 }
 
-async function readIndexNames(signal) {
-  const response = await fetch(`${EXPORTS_ROOT}/index.json`, { cache: "no-store", signal });
-  if (!response.ok) return [];
-  return indexEntries(await response.json())
-    .map(entryName)
-    .filter((name) => name && CLIP_NAME_RE.test(name));
+async function readIndexNames(root, signal) {
+  try {
+    const response = await fetch(`${root}/index.json`, { cache: "no-store", signal });
+    if (!response.ok) return [];
+    return indexEntries(await response.json())
+      .map(entryName)
+      .filter((name) => name && CLIP_NAME_RE.test(name));
+  } catch (error) {
+    if (error?.name === "AbortError") throw error;
+    return [];
+  }
+}
+
+// Clips that ship with the piece live next to it in public/lab/splat-video;
+// anything else is a local export in public/splats/4d.
+async function clipFolder(clip, signal) {
+  const bundled = await readIndexNames(BUNDLED_ROOT, signal);
+  return `${bundled.includes(clip) ? BUNDLED_ROOT : EXPORTS_ROOT}/${clip}`;
 }
 
 export async function resolveClip(requested, signal) {
-  if (requested) {
-    if (!CLIP_NAME_RE.test(requested)) throw new Splat4dError(`“${requested}” is not a valid clip name.`, { clip: requested });
-    return requested;
-  }
-  try {
-    const names = await readIndexNames(signal);
-    return names.find((name) => name !== FALLBACK_CLIP && !name.startsWith(EVALUATION_PREFIX)) ?? FALLBACK_CLIP;
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    return FALLBACK_CLIP;
-  }
+  if (!requested) return DEFAULT_CLIP;
+  if (!CLIP_NAME_RE.test(requested)) throw new Splat4dError(`“${requested}” is not a valid clip name.`, { clip: requested });
+  return requested;
 }
 
-async function readKind(name, signal) {
+async function readKind(folder, signal) {
   try {
-    const response = await fetch(`${EXPORTS_ROOT}/${name}/meta.json`, { cache: "no-store", signal });
+    const response = await fetch(`${folder}/meta.json`, { cache: "no-store", signal });
     if (!response.ok) return null;
     return clipKind(await response.json());
   } catch (error) {
@@ -60,15 +64,13 @@ async function readKind(name, signal) {
 }
 
 export async function listClips(signal) {
-  let names;
-  try {
-    names = [...new Set(await readIndexNames(signal))].filter((name) => !name.startsWith(EVALUATION_PREFIX));
-  } catch (error) {
-    if (error?.name === "AbortError") throw error;
-    return [];
-  }
-  const kinds = await Promise.all(names.map((name) => readKind(name, signal)));
-  return names.map((name, i) => ({ name, kind: kinds[i] }));
+  const [bundled, local] = await Promise.all([readIndexNames(BUNDLED_ROOT, signal), readIndexNames(EXPORTS_ROOT, signal)]);
+  const entries = [
+    ...bundled.map((name) => ({ name, folder: `${BUNDLED_ROOT}/${name}` })),
+    ...local.filter((name) => !bundled.includes(name)).map((name) => ({ name, folder: `${EXPORTS_ROOT}/${name}` })),
+  ].filter(({ name }, i, all) => !name.startsWith(EVALUATION_PREFIX) && all.findIndex((other) => other.name === name) === i);
+  const kinds = await Promise.all(entries.map(({ folder }) => readKind(folder, signal)));
+  return entries.map(({ name }, i) => ({ name, kind: kinds[i] }));
 }
 
 function isCount(value) {
@@ -291,6 +293,7 @@ function validateMeta(meta, clip) {
       vfovDeg: meta.camera.vfovDeg,
       aspect: meta.camera.aspect > 0 ? meta.camera.aspect : 16 / 9,
       pivotDepth: meta.camera.pivotDepth > 0 ? meta.camera.pivotDepth : Math.max(0.5, (minZ + maxZ) / 2),
+      aperture: meta.camera.aperture >= 0 ? meta.camera.aperture : undefined,
     },
   };
 }
@@ -355,7 +358,7 @@ async function streamInto({ url, name, clip, expected, write, signal, onChunk })
 }
 
 export async function loadSplat4d(clip, { signal, onProgress } = {}) {
-  const folder = `${EXPORTS_ROOT}/${clip}`;
+  const folder = await clipFolder(clip, signal);
   let response;
   try {
     response = await fetch(`${folder}/meta.json`, { cache: "no-store", signal });

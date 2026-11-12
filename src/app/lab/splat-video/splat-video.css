@@ -95,6 +95,14 @@
   isolation: isolate;
 }
 
+/* The stage is the piece box the screenshot harness isolates; it keeps its own
+   aspect-ratio sizing even if the shared piece.css is on the page. */
+.splat-video__stage.piece-box {
+  height: auto;
+  container-type: normal;
+  contain: none;
+}
+
 .splat-video__canvas {
   position: absolute;
   inset: 0;

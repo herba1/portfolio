@@ -180,6 +180,7 @@ function HybridField({ clip, engineRef, isMobile }) {
     const group = groupRef.current;
     const engine = engineRef.current;
     if (!runtime || !scratch || !group || !engine) return;
+    engine.drawn = true;
     const delta = Math.min(rawDelta, RENDER.maxDelta);
     runtime.clock.sync(engine, performance.now());
     placeSubject(runtime.subject, clip.meta, runtime.clock.frameTime(engine.time));

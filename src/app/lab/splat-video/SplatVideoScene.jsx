@@ -145,15 +145,39 @@ export function createScratch(meta) {
   };
 }
 
+// A slow GPU (software GL, an old phone) is never handed a new frame before it
+// has finished the last one, so commands cannot pile up behind the compositor.
+function gpuBusy(context, fenceRef) {
+  const fence = fenceRef.current;
+  if (!fence) return false;
+  if (context.getSyncParameter(fence, context.SYNC_STATUS) !== context.SIGNALED) return true;
+  context.deleteSync(fence);
+  fenceRef.current = null;
+  return false;
+}
+
 function useResolvedRender(resolveRef, scratchRef) {
+  const fenceRef = useRef(null);
+
+  useEffect(
+    () => () => {
+      fenceRef.current = null;
+    },
+    [],
+  );
+
   useFrame((state) => {
+    const context = state.gl.getContext();
+    const fenced = typeof context.fenceSync === "function";
+    if (fenced && gpuBusy(context, fenceRef)) return;
     const resolve = resolveRef.current;
     const scratch = scratchRef.current;
-    if (!resolve || !scratch) {
-      state.gl.render(state.scene, state.camera);
-      return;
+    if (!resolve || !scratch) state.gl.render(state.scene, state.camera);
+    else resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
+    if (fenced) {
+      fenceRef.current = context.fenceSync(context.SYNC_GPU_COMMANDS_COMPLETE, 0);
+      context.flush();
     }
-    resolve.render(state.gl, state.scene, state.camera, Math.max(1, scratch.viewport.x), Math.max(1, scratch.viewport.y));
   }, 1);
 }
 
@@ -218,6 +242,7 @@ function SplatField({ clip, engineRef }) {
 
     if (isFlipbook(meta)) runtime.want({ zRow, ...momentPlan(meta, engine.time, { reducedMotion: engine.reducedMotion }) });
     else runtime.want({ zRow, ...cursor });
+    if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
   useResolvedRender(resolveRef, scratchRef);
@@ -285,6 +310,7 @@ function StreamField({ clip, engineRef }) {
     applyDepthOfField(uniforms, engine, meta);
 
     runtime.want(zRow, plan);
+    if (!engine.drawn && runtime.mesh.geometry.instanceCount > 0) engine.drawn = true;
   });
 
   useResolvedRender(resolveRef, scratchRef);

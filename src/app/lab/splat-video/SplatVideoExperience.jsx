@@ -19,6 +19,8 @@ import {
   formatCount,
   formatDuration,
   LOOKS,
+  ORBIT,
+  clamp,
   isHybrid,
   isRgbd,
   isStream,
@@ -42,6 +44,36 @@ const subscribeMobile = subscribeMedia(MOBILE);
 const readReducedMotion = () => window.matchMedia(REDUCED_MOTION).matches;
 const readMobile = () => window.matchMedia(MOBILE).matches;
 const readOnServer = () => false;
+
+const DEG = Math.PI / 180;
+
+function readNumber(params, name) {
+  const raw = params.get(name);
+  if (raw === null || raw.trim() === "") return null;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : null;
+}
+
+// ?yaw= and ?pitch= (degrees) pin the lean, ?dolly= the distance and ?t= (seconds)
+// a paused moment, so a still of any lean can be reproduced from its URL.
+function readStill() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    yaw: readNumber(params, "yaw"),
+    pitch: readNumber(params, "pitch"),
+    dolly: readNumber(params, "dolly"),
+    time: readNumber(params, "t"),
+  };
+}
+
+function applyStill(engine, still, meta) {
+  const { orbit } = engine;
+  if (still.yaw !== null) orbit.yaw = orbit.targetYaw = clamp(still.yaw, -ORBIT.yawLimitDeg, ORBIT.yawLimitDeg) * DEG;
+  if (still.pitch !== null) orbit.pitch = orbit.targetPitch = clamp(still.pitch, -ORBIT.pitchLimitDeg, ORBIT.pitchLimitDeg) * DEG;
+  if (still.dolly !== null) orbit.dolly = orbit.targetDolly = clamp(still.dolly, ORBIT.dollyMin, ORBIT.dollyMax);
+  if (still.yaw !== null || still.pitch !== null || still.dolly !== null) orbit.lastDragAt = performance.now() + 1e9;
+  if (still.time !== null) engine.time = clamp(still.time, 0, meta.duration);
+}
 
 function isTextEntry(target) {
   if (!(target instanceof HTMLElement)) return false;
@@ -171,6 +203,7 @@ export default function SplatVideoExperience() {
   const [expanded, setExpanded] = useState(false);
   const [requested, setRequested] = useState(null);
   const [clips, setClips] = useState([]);
+  const [drawn, setDrawn] = useState(false);
   const engineRef = useRef(createEngine());
 
   const reducedMotion = useSyncExternalStore(subscribeReducedMotion, readReducedMotion, readOnServer);
@@ -197,9 +230,12 @@ export default function SplatVideoExperience() {
         engine.time = 0;
         engine.direction = 1;
         engine.muted = true;
+        engine.drawn = false;
         resetOrbit(engine);
+        const still = readStill();
+        applyStill(engine, still, data.meta);
         setMuted(true);
-        setPlaying(!window.matchMedia(REDUCED_MOTION).matches);
+        setPlaying(still.time === null && !window.matchMedia(REDUCED_MOTION).matches);
         setLoad({ status: "ready", clip: data.clip, data });
       })
       .catch((error) => {
@@ -248,6 +284,20 @@ export default function SplatVideoExperience() {
   }, [scrubbing]);
 
   const ready = load.status === "ready";
+
+  useEffect(() => {
+    if (!ready) return undefined;
+    let frame = 0;
+    const watch = () => {
+      if (engineRef.current.drawn) setDrawn(true);
+      else frame = requestAnimationFrame(watch);
+    };
+    frame = requestAnimationFrame(watch);
+    return () => {
+      cancelAnimationFrame(frame);
+      setDrawn(false);
+    };
+  }, [ready, load.clip]);
 
   const togglePlaying = useCallback(() => {
     const engine = engineRef.current;
@@ -320,8 +370,9 @@ export default function SplatVideoExperience() {
       </header>
 
       <section
-        className="splat-video__stage"
-        aria-label="Splat video stage. Drag to orbit, scroll to dolly."
+        className="splat-video__stage piece-box"
+        data-ready={ready && drawn ? "" : undefined}
+        aria-label="Splat video stage. Drag to lean, scroll to dolly."
       >
         {ready ? (
           <ClientOnly
