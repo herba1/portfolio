@@ -16,9 +16,12 @@ import { createNib } from "./penAudio";
 // line: while the pen drew, every stretch of line kept the time the nib took
 // over it and the way it was heading, and the plate is engraved from those,
 // as evenly spaced lines that run along the pen's own flow, turned by the
-// ink's angle, swelling where the slow turns crowd and fining to hairlines
-// and gaps where the loops spread, printed one fixed misregistration off the
-// key. The plates cross-hatch where they overprint, under a shared ink limit
+// ink's angle, at a pitch three or four times the key's rings, so a plate
+// reads as tone and the key as the one fine drawing. The lines swell until
+// they all but merge into solid where the nib lingered and thin away to
+// nothing where it ran fast, so every plate fades out instead of stopping,
+// printed one fixed misregistration off the key. The plates cross-hatch
+// where they overprint, under a shared ink limit
 // so the crowded core stays open. The sheet builds up as a riso or
 // letterpress print with the pen's near-black key always on top. The pen lifts itself once the swing has
 // wound in, so the centre of every figure stays open.
@@ -397,33 +400,41 @@ export async function createHarmonograph(host) {
   // resolution. One is the time the nib spent over each pixel (every stretch
   // of line carries the seconds the pen took to cross it), so the slow turns
   // and the crowded inner winds build ink and the fast open loops barely
-  // mark; it is softened only over about the spacing of the loops, so it
-  // keeps their banding. The other is the direction the pen was moving there,
+  // mark; it is softened over about a rule's pitch and a half, and held under
+  // its own broad spread so the edges of a figure run out instead of
+  // ridging. The other is the direction the pen was moving there,
   // as a doubled-angle orientation weighted by the same dwell, so the slow
   // stretches set the grain and a loop going out and coming back agree.
   // The dwell is read against a high percentile of itself (TONE_P of the
-  // inked area), not its peak, through a log curve, so the crowded core
-  // compresses instead of clipping.
+  // inked area), not its peak, through a gentle power curve, so the crowded
+  // core goes solid and the fast loops fall away to paper.
   // The plate is then cut as a line engraving: evenly spaced lines traced
   // along that flow field, turned by the ink's own angle (the first ink runs
   // with the pen, the next across it, the others on the diagonals), each
-  // line swelling with the dwell under it to at most RULE_MAX of its pitch
-  // and thinning to a hairline, then a gap, where the loops spread. Lines
+  // line swelling with the dwell under it to RULE_MAX of its pitch, near
+  // solid, and thinning to a hairline and then to nothing where the dwell
+  // falls off, so a plate's edge is its lines running out, not a cut. Lines
   // that run into each other stop, as a graver's do. The plates overprint
   // as hatching and cross-hatching, and their moire against the key comes
   // from the figure's own structure. Plates also share a total ink limit, as
   // a printer caps total area coverage: a plate gives way, line by line,
   // where earlier plates already lie heavy, so a five-drop core stays open.
-  const SIGMA = 1.8; // CSS px, the softening of the time field: about a loop's pitch
+  const SIGMA = 5.5; // CSS px, the softening of the time field: a pitch and a half
+  // The dwell is held to DWELL_HOLD times its own spread over BROAD, so the turn at
+  // a figure's very edge, where the nib slows hardest, can't stand up as a
+  // ridge the rules are cut off across: a plate builds to its solids inside
+  // the figure and runs out toward its edges and down its thin spikes.
+  const BROAD = 16; // CSS px
+  const DWELL_HOLD = 1.2;
   const FLOW_SIGMA = 6; // CSS px, the smoothing of the direction field
   const SCREEN_BIAS = 0.22; // the plain screen's share, against the pen's heading
   const SCREEN_AT = Math.PI / 4; // ... and its heading, before the ink's turn
-  const TONE_P = 0.95; // the field's own high percentile reads as full tone ...
-  const TONE_K = 18; // ... through log(1 + K x) / log(1 + K)
-  const PITCH = 2.8; // CSS px between engraved lines
-  const RULE_MAX = 0.62; // the widest line, as a share of its pitch
-  const RULE_MIN = 0.12; // device px: a narrower line breaks to a gap
-  const LIVE = 0.04; // tone under which no line is cut at all
+  const TONE_P = 0.88; // the field's own high percentile reads as full tone ...
+  const TONE_G = 1.5; // ... through x^G, so the fast loops fall away to nothing
+  const PITCH = 3.5; // CSS px between engraved lines: three or four of the key's rings
+  const RULE_MAX = 0.95; // the widest line, as a share of its pitch: next to solid
+  const RULE_MIN = 0.04; // device px: narrower than this is no ink at all
+  const LIVE = 0.012; // tone under which the graver has already run out
   const TAC = 1.45; // total tone the overprinted plates may carry at a point
   const G = 192; // the ink-limit grid, cells per side of the sheet
   let laid = new Float32Array(G * G); // tone already printed, per cell
@@ -524,6 +535,9 @@ export async function createHarmonograph(host) {
       Cy[i] += SCREEN_BIAS * D[i] * bs;
     }
     blur(F, tmp, n, Math.max(1, Math.round(SIGMA * dpr)));
+    const Fb = F.slice();
+    blur(Fb, tmp, n, Math.round(BROAD * dpr));
+    for (let i = 0; i < F.length; i++) F[i] = Math.min(F[i], DWELL_HOLD * Fb[i]);
     // The field's own spread, from a sample of the inked area: its TONE_P
     // percentile is full tone, and everything past it is the same.
     let peak = 0;
@@ -560,10 +574,9 @@ export async function createHarmonograph(host) {
       return (A[o] * (1 - fx) + A[o + 1] * fx) * (1 - fy) + (A[o + m] * (1 - fx) + A[o + m + 1] * fx) * fy;
     };
     const inv = 1 / ref;
-    const logK = 1 / Math.log1p(TONE_K);
     const toneAt = (x, y) => {
       const dens = bil(F, x, y);
-      return dens <= floor ? 0 : Math.log1p(TONE_K * Math.min(1, dens * inv)) * logK;
+      return dens <= floor ? 0 : Math.min(1, dens * inv) ** TONE_G;
     };
     // What the earlier plates leave of the ink limit here, 0..1.
     const roomAt = (x, y) => {
@@ -717,7 +730,7 @@ export async function createHarmonograph(host) {
     }
 
     // Cut the lines: each a ribbon whose half-width follows the dwell under
-    // it, cut short into separate rules wherever it fines past RULE_MIN.
+    // it; where it fines past RULE_MIN there is no ink to lay, so it is skipped.
     const [r, gr, bl] = pulling.rgb;
     spotCtx.setTransform(1, 0, 0, 1, 0, 0);
     spotCtx.clearRect(0, 0, n, n);
