@@ -19,6 +19,10 @@ import { createStage, clamp, damp } from "../_kit/stage";
 // the o keeps a whole ring. Outside the letters the rings follow the closed
 // glyph, so a line crosses a mouth instead of diving into it as a slit.
 //
+// The first few echoes hug the letters; past them the field anneals onto one
+// stadium fitted to the word, so the creases between letters die out within
+// a few rings and the outer bands are clean concentric lines to the frame.
+//
 // The pointer is a second source: a dot whose own distance field is smoothly
 // unioned with the word's, so its rings and the letters' rings meet in one
 // continuous crease. A press sends a pulse outward: a front that carries every
@@ -37,6 +41,10 @@ const RING_ROOM = 1.5;
 // Radius, in periods, of the closing the rings outside a letter follow: wide
 // enough that a line crossing a mouth runs nearly straight.
 const BRIDGE = 3;
+// Periods out from the letters over which the rings let go of the word and
+// settle onto one stadium: rings inside the first hug the type exactly,
+// rings past the second are clean concentric bands.
+const ANNEAL = [3, 9];
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -57,6 +65,8 @@ uniform float uKg;         // smooth-union width between letters, css px
 uniform vec4 uPulse[${MAX_PULSES}]; // xy origin, front radius, active
 uniform float uFront;      // pulse front width, css px
 uniform float uReveal;     // css px of field drawn so far (intro)
+uniform vec4 uBox;         // far-field stadium: centre, half size (css px)
+uniform vec2 uAnneal;      // css px: the word's field lets go over [x, y]
 uniform vec3 uInk;
 uniform vec3 uPaper;
 out vec4 o;
@@ -69,9 +79,8 @@ float smin(float a, float b, float k){
 }
 
 // One glyph per channel, bilinear by hand (float textures are not filterable
-// everywhere), then smoothly unioned. Letters sit two periods apart, wider
-// than uKg, so the union never moves a letter's own edge.
-float field(vec2 p){
+// everywhere).
+vec4 glyphs(vec2 p){
   vec2 u = p * uGrid - 0.5;
   vec2 f = fract(u);
   ivec2 i = ivec2(floor(u));
@@ -80,8 +89,13 @@ float field(vec2 p){
   vec4 b = texelFetch(uSdf, clamp(i + ivec2(1, 0), ivec2(0), m), 0);
   vec4 c = texelFetch(uSdf, clamp(i + ivec2(0, 1), ivec2(0), m), 0);
   vec4 d = texelFetch(uSdf, clamp(i + ivec2(1, 1), ivec2(0), m), 0);
-  vec4 g = mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
-  return smin(smin(smin(g.x, g.y, uKg), g.z, uKg), g.w, uKg);
+  return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
+}
+
+// The glyphs smoothly unioned over a band k wide. Letters sit two periods
+// apart, wider than uKg, so the union never moves a letter's own edge.
+float join(vec4 g, float k){
+  return smin(smin(smin(g.x, g.y, k), g.z, k), g.w, k);
 }
 
 // x: signed distance into the counter paper no ring may cross; y: the
@@ -98,9 +112,20 @@ vec2 edgeField(vec2 p){
   return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
 }
 
+// Signed distance to the stadium fitted to the word's field where the
+// anneal begins, offset so the two agree there.
+float stadium(vec2 p){
+  vec2 q = abs(p - uBox.xy) - uBox.zw + uBox.w;
+  return length(max(q, 0.0)) + min(max(q.x, q.y), 0.0) - uBox.w + uAnneal.x;
+}
+
 void main(){
   vec2 p = vec2(gl_FragCoord.x, uRes.y - gl_FragCoord.y) / uDpr;
-  float d = field(p);
+  // Anneal: close in, the rings follow the letters; a few echoes out they
+  // settle onto the stadium, so the creases between letters die out instead
+  // of running straight to the frame.
+  float dw = join(glyphs(p), uKg);
+  float d = mix(dw, stadium(p), smoothstep(uAnneal.x, uAnneal.y, dw));
   vec2 e = edgeField(p);
   float cz = e.x;
   float dc = length(p - uDot.xy) - uDot.z;
@@ -540,7 +565,67 @@ function buildField(w, h, grid, family) {
       out[k] = Math.min(out[k], d + (soft[i] - d) * t * t * (3 - 2 * t));
     }
   });
-  return { data: out, edge, W, H };
+  return { data: out, edge, W, H, box: fitStadium(out, W, H, grid, period, x0, y0, inkL, inkR, asc, desc) };
+}
+
+// The far field's stadium: fitted, least squares, to the word's field across
+// the contour where the anneal begins, so the blend starts from rings that
+// already agree and the bands it settles on are centred on the word's mass.
+// Returns centre and half size, css px, of the stadium that contour offsets.
+function fitStadium(out, W, H, grid, period, x0, y0, inkL, inkR, asc, desc) {
+  const sm = (a, b) => {
+    const k = period;
+    const t = Math.max(k - Math.abs(a - b), 0) / k;
+    return Math.min(a, b) - t * t * k * 0.25;
+  };
+  const at = ANNEAL[0] * period;
+  const band = 0.75 / grid;
+  const px = [];
+  const py = [];
+  const pt = [];
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const k = (y * W + x) * 4;
+      const t = sm(sm(sm(out[k], out[k + 1]), out[k + 2]), out[k + 3]) - at;
+      if (Math.abs(t) < band) {
+        px.push((x + 0.5) / grid);
+        py.push((y + 0.5) / grid);
+        pt.push(t);
+      }
+    }
+  }
+  const b = [(x0 + (inkL + inkR) / 2) / grid, (y0 + (desc - asc) / 2) / grid, (inkR - inkL) / 2 / grid, (asc + desc) / 2 / grid];
+  if (!pt.length) return b;
+  const loss = ([cx, cy, bx, by]) => {
+    let e = 0;
+    for (let i = 0; i < pt.length; i++) {
+      const qx = Math.abs(px[i] - cx) - bx + by;
+      const qy = Math.abs(py[i] - cy);
+      const sd = Math.hypot(Math.max(qx, 0), Math.max(qy, 0)) + Math.min(Math.max(qx, qy), 0) - by;
+      e += (sd - pt[i]) ** 2;
+    }
+    return e;
+  };
+  let best = loss(b);
+  for (let step = period; step > period / 64; step /= 2) {
+    for (let moved = true, n = 0; moved && n < 40; n++) {
+      moved = false;
+      for (let j = 0; j < 4; j++) {
+        for (const s of [step, -step]) {
+          const c = b.slice();
+          c[j] += s;
+          if (c[3] < period || c[2] < c[3]) continue;
+          const e = loss(c);
+          if (e < best) {
+            best = e;
+            b[j] = c[j];
+            moved = true;
+          }
+        }
+      }
+    }
+  }
+  return b;
 }
 
 async function loadFamily() {
@@ -587,7 +672,7 @@ export async function createRadiating(host, { embedded = false } = {}) {
   gl.linkProgram(prog);
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   const U = {};
-  for (const name of ["uSdf", "uEdge", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
+  for (const name of ["uSdf", "uEdge", "uTexSize", "uGrid", "uRes", "uDpr", "uP", "uDot", "uK", "uKg", "uPulse", "uFront", "uReveal", "uBox", "uAnneal", "uInk", "uPaper"]) U[name] = gl.getUniformLocation(prog, name);
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -743,6 +828,8 @@ export async function createRadiating(host, { embedded = false } = {}) {
     gl.uniform4fv(U.uPulse, pulseData);
     gl.uniform1f(U.uFront, front);
     gl.uniform1f(U.uReveal, reveal);
+    gl.uniform4fv(U.uBox, sdf.box);
+    gl.uniform2f(U.uAnneal, ANNEAL[0] * period, ANNEAL[1] * period);
     gl.uniform3fv(U.uInk, INK);
     gl.uniform3fv(U.uPaper, PAPER);
     gl.bindVertexArray(vao);
