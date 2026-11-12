@@ -1,10 +1,11 @@
 import { soundAllowed } from "@/lib/sound/desktopOnly";
 
-// The reader's voices: one held tone per run of ink the light finds on the
-// line. Each is a sine with a little triangle under it, through a soft
-// lowpass and a dark room, the warm end of what a photocell and an
-// oscillator bank sound like. Silent until the first touch; nothing is
-// built before it.
+// The machine's sound, one stage per strip of film. The pitch strip gives
+// one held tone per run of ink the light finds on the line; every voice
+// plays the waveform the timbre strip draws (as harmonics, a PeriodicWave),
+// with a twin a few cents sharp for warmth; the amplitude strip is a VCA on
+// all of them; the last strip sets the vibrato's depth and the send to a
+// dark room. Silent until the first touch; nothing is built before it.
 
 const SLEEP_AFTER_MS = 9000;
 
@@ -38,6 +39,20 @@ export function createOramicsSound(count) {
   let master = null;
   let voices = [];
   let lastLoud = 0;
+  let vca = null;
+  let depth = null;
+  let send = null;
+  let shape = [0.1, 0, 0.3];
+  let harmonics = null;
+
+  const applyWave = () => {
+    if (!ctx || !harmonics) return;
+    const w = ctx.createPeriodicWave(harmonics[0], harmonics[1]);
+    for (const v of voices) {
+      v.a.setPeriodicWave(w);
+      v.b.setPeriodicWave(w);
+    }
+  };
 
   const build = () => {
     ctx = new Ctx({ latencyHint: "interactive" });
@@ -52,31 +67,31 @@ export function createOramicsSound(count) {
     master.connect(comp).connect(ctx.destination);
 
     const bus = ctx.createGain();
+    bus.gain.value = 0.8;
+    vca = ctx.createGain();
+    vca.gain.value = shape[0];
+    // Open enough that a jagged waveform is heard as jagged.
     const soft = ctx.createBiquadFilter();
     soft.type = "lowpass";
-    soft.frequency.value = 1700;
-    soft.Q.value = 0.3;
-    const softer = ctx.createBiquadFilter();
-    softer.type = "lowpass";
-    softer.frequency.value = 3400;
-    softer.Q.value = 0.5;
+    soft.frequency.value = 5200;
+    soft.Q.value = 0.4;
     const low = ctx.createBiquadFilter();
     low.type = "highpass";
-    low.frequency.value = 70;
+    low.frequency.value = 60;
     low.Q.value = 0.5;
-    bus.connect(soft).connect(softer).connect(low);
+    bus.connect(vca).connect(soft).connect(low);
     low.connect(master);
     const room = ctx.createConvolver();
     room.buffer = roomImpulse(ctx);
-    const wet = ctx.createGain();
-    wet.gain.value = 0.32;
-    low.connect(room).connect(wet).connect(master);
+    send = ctx.createGain();
+    send.gain.value = 0.06 + 0.7 * shape[2];
+    low.connect(send).connect(room).connect(master);
 
-    // A slow, shallow vibrato shared by every voice, like a tape-era oscillator.
+    // The vibrato shared by every voice; its depth, in cents, is drawn.
     const lfo = ctx.createOscillator();
     lfo.frequency.value = 4.7;
-    const depth = ctx.createGain();
-    depth.gain.value = 4;
+    depth = ctx.createGain();
+    depth.gain.value = 2 + 38 * shape[1];
     lfo.connect(depth);
     const drift = ctx.createOscillator();
     drift.frequency.value = 0.17;
@@ -92,23 +107,22 @@ export function createOramicsSound(count) {
       const pan = ctx.createStereoPanner();
       pan.pan.value = 0;
       gain.connect(pan).connect(bus);
-      const sine = ctx.createOscillator();
-      sine.type = "sine";
-      const tri = ctx.createOscillator();
-      tri.type = "triangle";
-      tri.detune.value = 3 + i * 0.7;
-      const triGain = ctx.createGain();
-      triGain.gain.value = 0.3;
-      sine.connect(gain);
-      tri.connect(triGain).connect(gain);
-      for (const o of [sine, tri]) {
+      const a = ctx.createOscillator();
+      const b = ctx.createOscillator();
+      const bGain = ctx.createGain();
+      bGain.gain.value = 0.3;
+      a.connect(gain);
+      b.connect(bGain).connect(gain);
+      b.detune.value = 3 + i * 0.7;
+      for (const o of [a, b]) {
         o.frequency.value = 220;
         depth.connect(o.detune);
         driftDepth.connect(o.detune);
         o.start();
       }
-      return { gain, pan, sine, tri, level: 0 };
+      return { gain, pan, a, b, level: 0 };
     });
+    applyWave();
     master.gain.setValueAtTime(0, ctx.currentTime);
     master.gain.linearRampToValueAtTime(0.9, ctx.currentTime + 0.5);
   };
@@ -131,7 +145,7 @@ export function createOramicsSound(count) {
         lastLoud = performance.now();
         if (ctx.state === "suspended") ctx.resume().catch(() => {});
       }
-      for (const o of [v.sine, v.tri]) {
+      for (const o of [v.a, v.b]) {
         if (snap) {
           o.frequency.cancelScheduledValues(now);
           o.frequency.setValueAtTime(freq, now);
@@ -142,6 +156,21 @@ export function createOramicsSound(count) {
       v.gain.gain.setTargetAtTime(level, now, level > v.level ? 0.018 : 0.07);
       v.pan.pan.setTargetAtTime(pan, now, 0.1);
       v.level = level;
+    },
+    // The control strips at the reader: VCA gain, vibrato depth 0..1, room
+    // send 0..1, eased with the same time constants the print uses.
+    shape(env, vib, wet) {
+      shape = [env, vib, wet];
+      if (!ctx) return;
+      const now = ctx.currentTime;
+      vca.gain.setTargetAtTime(env, now, 0.015);
+      depth.gain.setTargetAtTime(2 + 38 * vib, now, 0.1);
+      send.gain.setTargetAtTime(0.06 + 0.7 * wet, now, 0.12);
+    },
+    // One cycle of the timbre strip, as cosine and sine harmonics.
+    wave(re, im) {
+      harmonics = [Float32Array.from(re), Float32Array.from(im)];
+      applyWave();
     },
     silence() {
       if (!ctx) return;
