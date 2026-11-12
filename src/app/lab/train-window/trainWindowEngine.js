@@ -25,9 +25,11 @@ import { POLE_GEOM, POLE_REGIONS, poleCells } from "./poleKeys";
 //    the same plate with Depth Anything V2 and a colour key, tiled with a
 //    mirror and a gap so the open country behind shows through;
 //  - the far tree line and farmland (~900 m), a mirrored strip;
-//  - cumulus at a few kilometres (Poly Haven `kloofendal_48d_partly_cloudy`
-//    pure sky, rotated so its sun agrees with the plate's, baked up to the
-//    zenith by tools/depth/bakes/train-window/sky.py), which barely move;
+//  - cumulus at a few kilometres, which barely move: the plate's own sky,
+//    turned so its one big heaped cumulus stands right behind the pole head
+//    and the upper wires, matted onto a clear sky that runs from pale cyan
+//    haze over the tree line to cobalt overhead, and graded (shadowed faces
+//    skylight blue, sunlit tops warm) by tools/depth/bakes/train-window/sky.py;
 //  - distribution poles every 24-44 m, 3.4 m out, so one at a time crosses
 //    the window, its head at ~71° up, near the top of the print, and between
 //    them there is open sky crossed by the wires (Poly Haven
@@ -359,9 +361,12 @@ void main() {
   float edge = smoothstep(0.012, 0.035, length(sf - sc));
   vec3 col = dec(mix(sc, sf, edge));
   // Polariser on the lens, sun ~60° off the view: the clear (Rayleigh) blue
-  // darkens and deepens, cloud white keeps.
+  // darkens and deepens, cloud white keeps. Low down the sky is haze, light
+  // scattered many times over and barely polarised, so the filter lets it go
+  // and it stays a pale cyan under the cobalt.
   float A = clamp((0.9 * col.b - col.r) / 0.5, 0.0, col.b);
-  col = col - A * vec3(0.30, 0.45, 0.9) * uPol + A * vec3(0.0, 0.30, 0.66) * uPol;
+  float pol = uPol * mix(0.2, 1.0, smoothstep(4.0, 42.0, el));
+  col = col - A * vec3(0.30, 0.45, 0.9) * pol + A * vec3(0.0, 0.30, 0.66) * pol;
 
   // Sky grade, before the film. The plate's cumulus sit a stop under where a
   // print wants them and carry the HDRI's blue cast, so the film's shoulder
@@ -405,7 +410,7 @@ void main() {
     float warm = core * smoothstep(0.65, 1.6, sl2);
     col = mix(col, sl2 * uSkyWarm, warm * uSkyPush.w);
     float shade = cloud * (1.0 - smoothstep(0.4, 1.15, sl2));
-    col = mix(col, sl2 * vec3(0.74, 0.96, 1.38), shade * 0.6);
+    col = mix(col, sl2 * vec3(0.74, 1.02, 1.26), shade * 0.6);
   }
 
   // Far tree line and farmland, mirrored.
