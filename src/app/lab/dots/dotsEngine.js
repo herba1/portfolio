@@ -151,9 +151,6 @@ export function createDots(host) {
   const py = new Float32Array(count);
   const u = new Float32Array(count); // 0..1 across the word
   const gj = new Int16Array(count); // row on the shared grid
-  let masks = [];
-  let rows = CAP;
-  let leading = -1;
 
   let settled = false;
   let dirty = true;
@@ -170,30 +167,25 @@ export function createDots(host) {
   let frontY = still ? parseFloat(params.get("y") ?? "0.5") : 0.5; // 0..1 of the block
   let lastX = 0;
 
-  // The measure runs the full width of the box, one module in from each
-  // edge; pitch is whole device pixels. The leading then opens, in steps of
-  // two modules so the removal patterns keep their phase on every line,
-  // until the margins above and below match the side margins, up to a
-  // cap-height's blank between lines. A short, wide box fits the height.
-  const MARGIN = MOD;
-  const LEAD_MIN = 2 * MOD, LEAD_MAX = 10 * MOD, LEAD_STEP = 2 * MOD;
+  // The two lines are one type block: the leading is fixed at a typographic
+  // interval, two modules (four dots) from the DRIVE baseline to the MY CAR
+  // cap line, about a quarter of the cap height, so the pair locks into a
+  // single slab. It stays a multiple of two modules so every removal pattern
+  // keeps its phase across both lines. The block then sits centred in a
+  // field of white, at least four modules (eight dots, about half a cap
+  // height, twice the line gap) clear of every edge; pitch is whole device
+  // pixels, the largest that fits whichever of width or height is tighter.
+  const LEAD = 2 * MOD;
+  const MARGIN = 4 * MOD;
+  const rows = LINES * CAP + (LINES - 1) * LEAD;
+  for (let k = 0; k < count; k++) gj[k] = cells[k][1] + cells[k][2] * (CAP + LEAD);
+  const masks = PATTERNS.map((p) => Uint8Array.from(cells, (c, k) => (p(c[0], gj[k]) ? 1 : 0)));
   stage.onResize((w, h, d) => {
     dpr = d;
     const dw = w * d, dh = h * d;
     const byW = dw / (cols + 2 * MARGIN);
-    const byH = dh / (LINES * CAP + (LINES - 1) * LEAD_MIN + 2 * MARGIN);
+    const byH = dh / (rows + 2 * MARGIN);
     pitch = Math.max(1, Math.floor(Math.min(byW, byH)));
-    const side = (dw - cols * pitch) / 2 / pitch; // side margin in dots
-    const spare = dh / pitch - LINES * CAP - 2 * side;
-    const lead = LINES > 1
-      ? clamp(Math.floor(spare / (LINES - 1) / LEAD_STEP) * LEAD_STEP, LEAD_MIN, LEAD_MAX)
-      : 0;
-    if (lead !== leading) {
-      leading = lead;
-      rows = LINES * CAP + (LINES - 1) * leading;
-      for (let k = 0; k < count; k++) gj[k] = cells[k][1] + cells[k][2] * (CAP + leading);
-      masks = PATTERNS.map((p) => Uint8Array.from(cells, (c, k) => (p(c[0], gj[k]) ? 1 : 0)));
-    }
     ox = Math.round((dw - cols * pitch) / 2);
     oy = Math.round((dh - rows * pitch) / 2);
     for (let k = 0; k < count; k++) {
