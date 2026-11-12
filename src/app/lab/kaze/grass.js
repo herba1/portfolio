@@ -121,6 +121,9 @@ function curve(p0, az, a0, bend, bp, L, n, h, bendAz) {
 const PROFILE = {
   // a grass leaf: full width most of its length, then a long point
   leaf: (s) => Math.pow(Math.min(1, (1 - s) / 0.5), 0.85) * (0.5 + 0.5 * Math.min(1, s * 5)),
+  // a plain blade: widest a little above the sheath, then tapering
+  // steadily all the way to a fine point
+  blade: (s) => Math.pow(1 - s, 0.75) * (0.7 + 0.3 * Math.min(1, s * 6)),
   // a culm: tapering a little toward the top
   culm: (s) => 1 - 0.45 * s,
   // a pedicel: hair-thin all along
@@ -239,14 +242,20 @@ function culmWithHead(b, R, o) {
   }
 }
 
-function leaf(b, R, o) {
+// A plain leaf blade, rooted below the bottom edge: nearly straight, leaning
+// out away from you along its own azimuth so it draws as a straight line into
+// the zenith; its tip droops a little, mostly outward along that same line
+// (where it stays straight on screen) and now and then across it, so a few
+// of them arc over their neighbours. A gentle twist turns it edge-on in
+// places.
+function blade(b, R, o) {
   const { root, az, L, w0, c0, c1, trans, segs } = o;
-  const lc = curve(root, az, o.lean, o.bend, 1.8, L, segs);
+  const lc = curve(root, az, o.lean, o.droop, 2.2, L, segs, null, az + o.droopTurn);
   const tip = lc.pts[lc.pts.length - 1];
   const tw = R() * 6.283;
-  const twr = (R() - 0.5) * 5;
+  const twr = (R() - 0.5) * 2.4;
   const ph = R() * 6.283;
-  b.ribbon(lc, (s) => w0 * PROFILE.leaf(s) * (0.3 + 0.7 * Math.abs(Math.cos(tw + twr * s))), tip, (s) => AMP * L * s * s, c0, c1, trans, ph);
+  b.ribbon(lc, (s) => w0 * PROFILE.blade(s) * (0.55 + 0.45 * Math.abs(Math.cos(tw + twr * s))), tip, (s) => AMP * L * s * s, c0, c1, trans, ph);
 }
 
 // Is any of a stalk (root to its top, standing) in frame for a wide or a tall
@@ -263,35 +272,30 @@ function inFrame(root, H) {
 
 export function buildGrass() {
   const cam = [0, 0, CAM.h];
-  const R = rng(7);
+  const R = rng(11);
+  // the anchor, and the few blades nearer than it (dark, wide, out of focus,
+  // drawn over it at full resolution)
   const near = builder(cam);
   const rest = builder(cam);
-  // the two brome culms at your shoulder beside the hero, drawn with the
-  // rest but over it (they are the nearest of it)
+  // the three brome culms beside the hero, drawn with the rest but over it
+  // (they are the nearest of it)
   const shoulder = builder(cam);
-  // what the thinning leaves out: built and thrown away, so the layout's
-  // random stream, and with it every blade that stays, is unchanged
-  const skip = builder(cam);
   const at = (D, phi) => [D * Math.sin(phi * DEG), D * Math.cos(phi * DEG), 0];
+  const HERO = 21;
 
-  // ---- one anchor, and two culms beside it ----
-  // The lens looks straight up, so a stalk stood upright, or leaning
-  // straight out away from you along its own azimuth, draws as a straight
-  // line into the zenith: all three do, and only their heads nod across
-  // that line, downwind (the breeze runs to +x), at staggered lengths, so
-  // the heads hang at three heights and fan one way, never meeting. Only the
-  // tall right one is the anchor: full resolution, sharp, near-black against
-  // the cumulus, a dead straight stem from the bottom edge up toward the top
-  // centre. The other two are grass against the light like the field: a dark
-  // core, a warm yellow-green rim on the side toward the sun, and the sky's
-  // value let in, half resolution, so there is one silhouette against one
-  // cloud and the rest frames it.
+  // ---- the anchor, and three seed heads beside it ----
+  // The only panicles left in the field: the hero, near-black, sharp, full
+  // resolution, and three brome culms round it, lit against the light like
+  // the field. Each stands straight out along its own line of sight, so it
+  // runs dead straight into the zenith; only the heads nod across that line,
+  // downwind (+x), at staggered heights so they never meet.
   const ink = lin(0x1c2414);
   const inkTip = lin(0x232d18);
   const anchors = [
-    { D: 0.2, phi: -44, L: 0.78, lean: 0.03, nod: 0.9, nodAz: 70, leaves: 0 },
-    { D: 0.24, phi: -14, L: 0.6, lean: 0.02, nod: 0.6, nodAz: 85, leaves: 0 },
-    { D: 0.2, phi: 21, L: 1.0, lean: 0.0, nod: 0.75, nodAz: 105, leaves: 0, hero: 1 },
+    { D: 0.25, phi: 4, L: 0.64, lean: 0.02, nod: 0.6, nodAz: 80 },
+    { D: 0.27, phi: 37, L: 0.86, lean: 0.03, nod: 0.85, nodAz: 115 },
+    { D: 0.3, phi: 52, L: 0.66, lean: 0.02, nod: 0.7, nodAz: 125 },
+    { D: 0.2, phi: HERO, L: 1.0, lean: 0.0, nod: 0.75, nodAz: 105, hero: 1 },
   ];
   for (const a of anchors) {
     const lit = !a.hero;
@@ -308,107 +312,94 @@ export function buildGrass() {
       cHead: lit ? lin(0x3c4820) : ink,
       trans: lit ? 1 : 0,
       segs: 72,
-      leaves: a.leaves,
+      leaves: 0,
       whorls: 6,
       big: lit ? 1.1 : 1.25,
     });
   }
-  // where the band of low leaves is thinned, across the middle of a wide
-  // frame, so the cumulus base and its blue underside stand clear
-  const camW = camera(16, 10);
-  const thin = (x) => x > -0.72 && x < 0.92;
-  const hash = (i) => {
-    const h = Math.sin(i * 127.1 + 311.7) * 43758.5453;
-    return h - Math.floor(h);
-  };
 
-  // ---- the rest, far to near (painter's order), half resolution ----
+  // ---- the field: plain blades, far to near (painter's order) ----
+  // Each is laid out by where its tip stands (its elevation seen from the
+  // lens) rather than its length, so the mass is heaviest along the bottom
+  // edge and thins upward as the blades run out, every one converging on the
+  // zenith. Only grass within a pace reaches into frame from 4 cm down.
   const items = [];
-  // culms with heads
-  for (let i = 0; i < 60; i++) {
-    const D = 0.32 + 1.9 * Math.pow(R(), 1.3);
-    const phi = (R() - 0.5) * 230;
-    const L = 0.55 + 0.6 * R();
-    items.push({ kind: "culm", D, phi, L });
-  }
-  // leaves, in tufts
-  for (let i = 0; i < 210; i++) {
-    const D = 0.4 + 2.9 * Math.pow(R(), 0.8);
-    const phi = (R() - 0.5) * 220;
-    const n = 2 + Math.floor(R() * 3);
-    for (let j = 0; j < n; j++) items.push({ kind: "leaf", D: D + (R() - 0.5) * 0.04, phi: phi + (R() - 0.5) * 4, L: 0.25 + 0.45 * R(), j });
-  }
-  // the field beyond: short leaves a few paces off, seen nearly edge-on,
-  // closing the foot of the frame so no horizon shows between the stalks
-  for (let i = 0; i < 280; i++) {
-    const D = 1.2 + 2.6 * R();
-    const phi = (R() - 0.5) * 200;
-    for (let j = 0; j < 2; j++) items.push({ kind: "leaf", D: D + (R() - 0.5) * 0.05, phi: phi + (R() - 0.5) * 2, L: 0.35 + 0.3 * R(), j, field: 1 });
-  }
-  // the low mat: short leaves a pace or so off, a dark fringe along the foot
-  // of the frame that the stalks rise out of
-  for (let i = 0; i < 70; i++) {
-    const D = 0.45 + 0.9 * R();
-    const phi = (R() - 0.5) * 200;
-    for (let j = 0; j < 3; j++) items.push({ kind: "leaf", D: D + (R() - 0.5) * 0.04, phi: phi + (R() - 0.5) * 5, L: 0.16 + 0.2 * R(), j, mat: 1 });
-  }
-  // one that crosses the sun, in from the left edge, for the halation to catch
-  // (its azimuth is the sun's, seen from the zenith)
-  items.push({ kind: "culm", D: 0.34, phi: -79, L: 0.9, lean: 0.0, nodAz: 150 });
-  items.forEach((it, i) => (it.n = i));
+  const put = (n, kind, D0, D1, Dp, e0, e1, ep) => {
+    for (let i = 0; i < n; i++) {
+      const D = D0 + (D1 - D0) * Math.pow(R(), Dp);
+      // gathered a little toward the middle, where the bottom edge is
+      const u = R() * 2 - 1;
+      const phi = Math.sign(u) * Math.pow(Math.abs(u), 1.25) * 88;
+      const el = (e0 + (e1 - e0) * Math.pow(R(), ep)) * DEG;
+      items.push({ kind, D, phi, L: Math.min(1.15, (D * Math.tan(el) + 0.02) / 0.985) });
+    }
+  };
+  // the field behind: thin, paler, a few paces' worth of air in front of it
+  put(190, "far", 0.42, 0.95, 1.0, 45, 64, 1.3);
+  // the body of it, round your head
+  put(230, "mid", 0.15, 0.45, 0.9, 47, 77, 1.7);
+  // a low fringe along the bottom edge, the mass the rest rises out of
+  put(480, "mat", 0.06, 0.3, 1.1, 47, 61, 1.2);
+  // one that crosses the sun, in from the left edge, for the halation (its
+  // azimuth is the sun's, seen from the zenith)
+  items.push({ kind: "sun", D: 0.34, phi: -79, L: 0.9 });
   items.sort((p, q) => q.D - p.D);
   for (const it of items) {
     const root = at(it.D, it.phi);
     if (!inFrame(root, it.L)) continue;
-    // depth tone: the nearer stalks stand dark against the sky, the field
-    // behind is a lighter, greyer olive (more sky between you and it)
-    const far = it.mat ? 0.15 : it.field ? 0.85 : Math.min(1, Math.max(0, (it.D - 0.45) / 2.3));
-    // half the low leaves in the middle of the frame go: the ones that would
-    // stand in front of the cloud's base as a curtain
-    const mid = project(camW, add(root, [0, 0, it.L * 0.6]));
-    const b = it.kind === "leaf" && thin(mid[0]) && mid[1] < 0.3 && hash(it.n) < 0.6 ? skip : rest;
-    b.st.depth = it.kind === "culm" && it.D < 0.4 ? 0.05 : it.mat ? 0.3 : Math.min(1, Math.max(0, (it.D - 0.4) / 2.6) * (it.field ? 1.1 : 1));
-    const vary = 0.82 + 0.36 * R();
-    const dry = R() < 0.12 ? 0.5 : 0;
-    const base = mix3(mix3(lin(0x24301a), lin(0x3a4824), far), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
-    const tipC = mix3(mix3(lin(0x3c4b20), lin(0x67763c), far), lin(0x7a7434), dry).map((c) => c * vary);
-    const segs = Math.round(14 + 26 * (1 - far));
-    if (it.kind === "culm") {
-      // stood up and leaning out, away from you, more or less along its own
-      // line of sight, so it runs straight in toward the zenith with the
-      // rest; its head nods across that line, downwind
-      culmWithHead(b, R, {
-        root,
-        az: (it.phi + (R() - 0.5) * 30) * DEG,
-        lean: it.lean ?? 0.02 + 0.08 * R(),
-        nod: 0.5 + 0.6 * R(),
-        nodAz: (it.nodAz ?? 90 + (R() - 0.5) * 80) * DEG,
-        L: it.L,
-        w0: it.D < 0.4 ? 0.0016 : 0.0011 + 0.0006 * R(),
-        cStem: base,
-        cTip: tipC,
-        cHead: mix3(base, lin(0x55552c), 0.35),
-        trans: 1,
-        segs,
-        leaves: R() < 0.6 ? 1 : 0,
-        whorls: 3 + Math.floor(R() * 2),
-      });
-    } else {
-      // a leaf arcs outward, away from you, so the tufts splay from the
-      // bottom edge like the stalks
-      leaf(b, R, {
-        root,
-        az: (it.phi + (R() - 0.5) * 50) * DEG,
-        lean: it.lean ?? 0.05 + 0.3 * R(),
-        bend: it.bend ?? 0.15 + 0.7 * R(),
-        L: it.L,
-        w0: (0.0017 + 0.0016 * R()) * (it.field ? 1.8 : 1),
-        c0: base,
-        c1: tipC,
-        trans: 1,
-        segs: it.field ? 10 : segs,
-      });
-    }
+    // depth: 0 at your shoulder .. 1 the field behind (more sky in front)
+    const dep = it.kind === "sun" ? 0.05 : Math.min(1, Math.max(0, (it.D - 0.15) / 0.75));
+    rest.st.depth = dep;
+    const vary = 0.8 + 0.4 * R();
+    const dry = R() < 0.1 ? 0.5 : 0;
+    const base = mix3(mix3(lin(0x1c2614), lin(0x34421f), dep), lin(0x4b4a24), dry * 0.6).map((c) => c * vary);
+    const tipC = mix3(mix3(lin(0x34441c), lin(0x5e6e36), dep), lin(0x7a7434), dry).map((c) => c * vary);
+    // mostly a droop outward, along its own line; a third of them across it
+    const across = R() < 0.35;
+    blade(rest, R, {
+      root,
+      az: (it.phi + (R() - 0.5) * 3) * DEG,
+      lean: 0.01 + 0.07 * R(),
+      droop: across ? 0.12 + 0.22 * R() : 0.08 + 0.2 * R(),
+      droopTurn: across ? (R() < 0.5 ? -1 : 1) * (0.9 + 0.5 * R()) : (R() - 0.5) * 0.5,
+      L: it.L,
+      // a leaf 3-7 mm wide; the sun-crossing one a culm-thin blade
+      w0: it.kind === "sun" ? 0.0018 : (0.0022 + 0.0024 * R()) * (it.kind === "far" ? 1.2 : it.kind === "mat" ? 1.8 : 1),
+      c0: base,
+      c1: tipC,
+      trans: 1,
+      segs: Math.round(16 + 20 * (1 - dep)),
+    });
+  }
+
+  // ---- the nearest few: at your cheek, wide and dark, out of focus ----
+  // Drawn over the anchor at full resolution (the lens defocuses them, in the
+  // shader, by their distance), and kept off its azimuth so none hides it.
+  for (let i = 0, k = 0; i < 80 && k < 14; i++) {
+    const side = k % 2 ? 1 : -1;
+    const phi = side * (22 + 50 * R()) + (side > 0 ? 8 : 0);
+    if (Math.abs(phi - HERO) < 9 || Math.abs(phi) > 74) continue;
+    const D = 0.05 + 0.07 * R();
+    const el = (52 + 22 * R()) * DEG;
+    const L = Math.min(0.9, D * Math.tan(el) + 0.02);
+    const root = at(D, phi);
+    if (!inFrame(root, L)) continue;
+    k++;
+    near.st.depth = 0;
+    const v = 0.85 + 0.3 * R();
+    blade(near, R, {
+      root,
+      az: (phi + (R() - 0.5) * 2) * DEG,
+      lean: 0.02 + 0.05 * R(),
+      droop: 0.06 + 0.12 * R(),
+      droopTurn: (R() - 0.5) * 0.6,
+      L,
+      w0: 0.005 + 0.005 * R(),
+      c0: lin(0x10150b).map((c) => c * v),
+      c1: lin(0x1d2612).map((c) => c * v),
+      trans: 0.3,
+      segs: 36,
+    });
   }
   return { near: near.out(), rest: merged(rest, shoulder) };
 }
@@ -441,6 +432,9 @@ out float vAlong;
 out float vAcross;
 out float vSunward;
 out float vDepth;
+out float vHalf;
+out float vBlur;
+out float vH;
 
 vec2 proj(vec3 P) {
   vec3 d = normalize(P - uCam);
@@ -484,6 +478,18 @@ void main() {
     vA = hw / MINW;
     sp *= MINW / max(hw, 1e-6);
   }
+  // Depth of field: the lens is focused about half a metre out, on the
+  // anchor; a blade nearer than that spreads into a disc of confusion that
+  // grows as 1/distance, so the few at your cheek go soft and wide while the
+  // anchor stays sharp. The ribbon is widened by the disc's radius and the
+  // fragment shader spreads the blade's coverage across it (a box blur of a
+  // box, exact), so a thin blade out of focus also goes thinner in value.
+  float hwp = max(hw, MINW);
+  float bl = uRes.y * 0.0042 * clamp(0.5 / length(P - uCam) - 1.0, 0.0, 6.0);
+  sp *= (hwp + bl) / hwp;
+  vHalf = hwp;
+  vBlur = bl;
+  vH = P.z;
   vec2 ndc = c0 + sp / (uRes * 0.5);
   vNdc = ndc;
   // Each plant its own: about +-6 deg of hue and +-10% of value, so the
@@ -516,6 +522,9 @@ in float vAlong;
 in float vAcross;
 in float vSunward;
 in float vDepth;
+in float vHalf;           // the blade's half-width here, px
+in float vBlur;           // its disc of confusion, px
+in float vH;              // height above the ground, m
 uniform vec2 uSun;        // the sun on screen, NDC
 uniform float uAspect;
 uniform vec4 uView;       // image uv on screen
@@ -532,7 +541,12 @@ void main() {
   float s = clamp(vAlong, 0.0, 1.0);
   float lift = mix(0.55, 1.15, smoothstep(0.0, 1.0, pow(s, 0.8)));
   vec3 c = vCol * lift;
-  float x = clamp(vAcross, -1.0, 1.0);
+  // where across the blade itself this is, px, and how much of the pixel
+  // the defocused blade covers: the overlap of the blade with the disc
+  float px = vAcross * (vHalf + vBlur);
+  float bb = max(vBlur, 1e-3);
+  float dof = vBlur < 0.05 ? 1.0 : clamp((min(vHalf, px + bb) - max(-vHalf, px - bb)) / (2.0 * bb), 0.0, 1.0);
+  float x = clamp(px / vHalf, -1.0, 1.0);
   float lit = clamp(vTrans, 0.0, 1.0);
 
   // What is behind the leaf: the sky photograph at this point, softened.
@@ -549,7 +563,12 @@ void main() {
   // thicker midrib. Held back in the body (a leaf against the light is dark
   // through its middle) and given to the rim below instead.
   const vec3 TRANS = vec3(0.337, 0.431, 0.069);
-  float tw = lit * behind * mix(0.35, 1.0, s);
+  // Down in the sward the light has come through every blade above it: the
+  // lower a stretch of leaf stands, the darker it is and the less it glows,
+  // so the field sits on a dark mass along the bottom edge.
+  float sward = smoothstep(0.06, 0.5, vH);
+  c *= mix(0.4, 1.0, sward);
+  float tw = lit * behind * mix(0.35, 1.0, s) * mix(0.25, 1.0, sward);
   c = mix(c, TRANS * mix(0.55, 1.0, s), 0.45 * tw);
   // Across, over both: a shallow trough read as a cylinder, the edges about
   // a quarter darker, and a soft paler midrib down the centre.
@@ -573,11 +592,15 @@ void main() {
   // and with bright cloud behind, warmer than the transmission in the body;
   // it is the light coming through to you, so the air dims it only a little.
   const vec3 RIM = vec3(0.62, 0.6, 0.1);
-  float rim = smoothstep(0.3, 0.85, vSunward);
+  // Only the margin itself: a couple of pixels in from the sunward edge
+  // (a little more on a wide blade), so a broad leaf near you stays dark
+  // through its body with a bright line along one side.
+  float edge = exp(-max(0.0, vHalf - abs(px)) / (1.2 + 0.1 * vHalf));
+  float rim = smoothstep(0.3, 0.85, vSunward) * edge;
   float rimK = (0.3 + 0.6 * sn + 0.45 * behind) * mix(0.55, 1.0, s) * (1.0 - 0.45 * dep);
   c += RIM * rim * rimK * (0.04 + 0.96 * lit);
   // and softer with distance: the far blades give up some coverage, so the
   // half-resolution layer reads as a haze of grass rather than flat cards
-  float cov = vA * mix(1.0, 0.5, lit * smoothstep(0.25, 1.0, dep));
+  float cov = vA * dof * mix(1.0, 0.5, lit * smoothstep(0.25, 1.0, dep));
   outColor = vec4(c * cov, cov);
 }`;
