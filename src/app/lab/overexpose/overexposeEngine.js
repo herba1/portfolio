@@ -53,6 +53,24 @@ export const FILM = {
   skyHiKeep: 0.5, // share of the highlight desaturation the sky is spared
   skyHiHue: 1.5, // extra blue compensation on lifted sky
   skyCap: 0.05, // how far under the paper white the sky's blue stays
+  // Holding the sky back. Cumulus are several times brighter than the blue
+  // around them, but once both ride the paper's shoulder they print at the
+  // same height (the sky's blue at the cap, ~236, the clouds 230-238) and part
+  // only by being less blue: milky paper cut-outs on a flat powder wash. So, as
+  // a printer burns in a sky, everything but the cloud is held back before the
+  // negative by skyHold of every stop of overexposure (about -0.9 EV at +1.67),
+  // keyed on the bake's cloud mask (scene.webp's alpha, relight.py), so a
+  // cloud's blue-lit underside is not mistaken for sky and a crown's edge is
+  // held with the sky behind it, never left as a pale outline. The dark
+  // needles take skyHoldNeedle of it. The scan's extra blue depth eases off on the held sky
+  // (to skyHoldDepth by skyHoldFull), or it would pour the held light straight
+  // back into the blue channel and pin it at the cap again. So the sky's
+  // brightest channel stays near 200-215, still deepening towards the zenith,
+  // while the clouds keep climbing the shoulder above it. 0 EV is untouched.
+  skyHold: 0.55,
+  skyHoldDepth: 1.1,
+  skyHoldNeedle: 0.35, // share of the hold the dark needles take, so the shadows still open up
+  skyHoldFull: 1.67,
 
   hiWarm: 0.025,
   bloom: 0.08,
@@ -71,8 +89,8 @@ precision highp float;
 uniform sampler2D uLog; uniform vec2 uSize;
 out vec4 o;
 void main(){
-  vec3 c = texelFetch(uLog, ivec2(gl_FragCoord.xy), 0).rgb;
-  o = vec4(exp2(c * ${(HI - LO).toFixed(4)} + ${LO.toFixed(4)}), 1.0);
+  vec4 c = texelFetch(uLog, ivec2(gl_FragCoord.xy), 0);
+  o = vec4(exp2(c.rgb * ${(HI - LO).toFixed(4)} + ${LO.toFixed(4)}), c.a); // alpha: 1 - cloud share
 }`;
 
 const FS = `#version 300 es
@@ -86,7 +104,7 @@ uniform vec3 uGamma; uniform vec3 uShoulder; uniform float uToe; uniform float u
 uniform vec3 uGref;         // negative density of the printer-light grey
 uniform vec3 uPk; uniform vec3 uPx0; uniform vec3 uDmin; uniform vec3 uDmax;
 uniform float uSat; uniform float uBlueSat; uniform vec3 uBlueHue; uniform float uHiDesat; uniform float uHiWarm;
-uniform vec2 uSkyQ; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
+uniform vec2 uSkyQ; uniform float uHold; uniform float uHoldNeedle; uniform float uHoldDepth; uniform float uSkyHiKeep; uniform float uSkyHiHue; uniform float uSkyCap;
 uniform float uBloom; uniform float uHal; uniform vec3 uHalColor;
 uniform float uGrain; uniform float uSeed; uniform float uGrainPx;
 out vec4 o;
@@ -110,8 +128,9 @@ vec3 srgb(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, 
 void main(){
   vec2 p = (gl_FragCoord.xy - uRect.xy) / uRect.zw;
   vec2 uv = vec2(p.x, 1.0 - p.y); // textures are uploaded top row first
-  vec3 L = texture(uScene, uv).rgb;
-  if (uLogIn > 0.5) L = dec(L);
+  vec4 sc = texture(uScene, uv);
+  vec3 L = uLogIn > 0.5 ? dec(sc.rgb) : sc.rgb;
+  float Ys = dot(L, LUMA);
   float hx = clamp(uv.x, 0.002, 0.998) * 0.5;
   vec3 D = dec(texture(uOptics, vec2(hx, uv.y)).rgb);
   float Yb = dec(texture(uOptics, vec2(hx + 0.5, uv.y)).rgb).g;
@@ -121,6 +140,11 @@ void main(){
   // Halation: light bounced off the base comes back through the red layer,
   // landing just outside bright areas (a ring, not a fill).
   L += uHalColor * max(Yb - dot(L, LUMA), 0.0) * uHal;
+  // The printer holds all but the cloud back (after the optics, so the hold does not
+  // read as a dark gap for the halation to fill).
+  float open = clamp((sc.a * 255.0 - 3.0) / 252.0, 0.0, 1.0); // 1 - the bake's cloud share
+  open *= mix(uHoldNeedle, 1.0, smoothstep(0.03, 0.1, Ys));
+  L *= exp2(-uHold * open);
 
   // Negative: each layer on its own H&D curve.
   vec3 H = XT * L * uExp;
@@ -140,7 +164,7 @@ void main(){
   c *= 1.0 + (uBlueHue - 1.0) * blue * blue * (1.0 + uSkyHiHue * hi0 * sky);
   float y = dot(c, LUMA);
   float hi = clamp((y - 0.45) / 0.4, 0.0, 1.0);
-  float s = uSat * (1.0 - uHiDesat * hi * (1.0 - uSkyHiKeep * sky)) * (1.0 + (uBlueSat - 1.0) * blue);
+  float s = uSat * (1.0 - uHiDesat * hi * (1.0 - uSkyHiKeep * sky)) * (1.0 + (mix(uBlueSat, uHoldDepth, open) - 1.0) * blue);
   vec3 r = max(c, 1e-5) / max(y, 1e-5);
   c = y * pow(r, vec3(s));
   c *= y / max(dot(c, LUMA), 1e-6);
@@ -431,6 +455,9 @@ export async function createOverexpose(host, { embedded = false } = {}) {
     gl.uniform1f(u.uSkyHiKeep, F.skyHiKeep);
     gl.uniform1f(u.uSkyHiHue, F.skyHiHue);
     gl.uniform1f(u.uSkyCap, F.skyCap);
+    gl.uniform1f(u.uHold, F.skyHold * Math.max(e, 0));
+    gl.uniform1f(u.uHoldNeedle, F.skyHoldNeedle);
+    gl.uniform1f(u.uHoldDepth, F.blueDepth + (F.skyHoldDepth - F.blueDepth) * clamp(e / F.skyHoldFull, 0, 1));
     gl.uniform1f(u.uBloom, F.bloom);
     gl.uniform1f(u.uHal, F.halation);
     gl.uniform3fv(u.uHalColor, F.halationColor);

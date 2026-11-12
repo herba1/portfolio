@@ -1,6 +1,7 @@
 # Worm's-eye bake (current):
 #   python3 desun.py 6 26 && python3 resun.py 0.3906 0.1706 \
 #     && python3 deepen.py <OE_WORK>/crop1536r.npy && python3 bake_wormseye.py <OE_WORK>/crop1536d.npy
+#     && python3 relight.py <copy of scene.webp> <copy of optics.png>   (cumulus relit, cloud key -> alpha)
 # (OE_WORK holds the 8k caches). bake.py is the earlier rectilinear bake, kept for reference.
 import numpy as np, io, os, sys
 from PIL import Image
