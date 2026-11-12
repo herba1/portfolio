@@ -62,6 +62,21 @@ const YAW_MAX = { bw: 0.45, dress: 0.32, other: 0.42 }; // rad
 // close past that. A row may still swing round in the frame; it may not be
 // wrung edge-on.
 const ACROSS = 0.86;
+// ... and a row may not turn past the line through its left end along the
+// rest normal (straight down the frame): the right end stays at least
+// ROW_MIN of its rest run to the right, or the pair, once crossed, would be
+// pushed further apart the wrong way and the row would be printed mirrored.
+const ROW_MIN = 0.3;
+// Down. The same along every column, from the pegs to the hem: as the lens
+// sees it, each vertex stays at least DOWN of its rest run below the one
+// above it (and the one two above). Cloth lifted toward the lens
+// foreshortens, but a hem can never come up past the cloth above it and
+// fold over it into a shelf, its underside showing as a flat band.
+const DOWN = 0.32;
+// And no vertex strays further from where it hangs than REACH of its hang
+// below the pegs: a pendulum that long, swung about 40 degrees. Past that
+// the gust is folding the cloth through itself, not lifting it.
+const REACH = 0.7;
 // Billow. A skirt is not a flat sheet: the photograph shows it gathered into
 // folds, a cone pressed flat. A gust fills it, and filled it opens. Each
 // garment's lower part (from about its waist to its hem, not its narrow ties)
@@ -177,6 +192,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   const gid = new Uint8Array(N);
   const cons = []; // [a, b, rest, compliance]
   const across = []; // [a, b]: b right of a on the same row
+  const down = []; // [a, b]: b below a in the same column
   const tris = []; // [a, b, c, area * coverage]
 
   for (const pl of plans) {
@@ -241,6 +257,11 @@ export function createCloth(meta, { density = 0.32 } = {}) {
         if (!pom && (cellOn(i, j) || cellOn(i, j - 1))) {
           if (at(i, j) >= 0 && at(i + 1, j) >= 0) across.push(at(i, j), at(i + 1, j));
           if ((cellOn(i + 1, j) || cellOn(i + 1, j - 1)) && at(i, j) >= 0 && at(i + 2, j) >= 0) across.push(at(i, j), at(i + 2, j));
+        }
+        // down: one-sided, along the column, to the next vertex and two down
+        if (!pom && (cellOn(i, j) || cellOn(i - 1, j))) {
+          if (at(i, j) >= 0 && at(i, j + 1) >= 0) down.push(at(i, j), at(i, j + 1));
+          if ((cellOn(i, j + 1) || cellOn(i - 1, j + 1)) && at(i, j) >= 0 && at(i, j + 2) >= 0) down.push(at(i, j), at(i, j + 2));
         }
         // and across four, so folds come at the scale of fabric, not of the grid
         if (cellOn(i, j) && cellOn(i + 1, j) && cellOn(i + 2, j) && cellOn(i + 3, j)) add(at(i, j), at(i + 4, j), bend4);
@@ -315,6 +336,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   // where each vertex hangs in the photograph, and how far below its pegs
   const xr = Float32Array.from(x);
   const K = new Float32Array(N);
+  const reach = new Float32Array(N); // REACH of the hang, m
   const nearS = new Float32Array(N).fill(0.5);
   {
     const pins = [];
@@ -329,7 +351,9 @@ export function createCloth(meta, { density = 0.32 } = {}) {
           nearS[k] = pinS[q];
         }
       }
-      K[k] = G / Math.max(0.12, Number.isFinite(hang) ? hang : 0.5);
+      const h = Math.max(0.12, Number.isFinite(hang) ? hang : 0.5);
+      K[k] = G / h;
+      reach[k] = REACH * h;
     }
   }
   // per garment, the free vertices and their rest offset across the garment,
@@ -419,16 +443,57 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       const d = Math.hypot(sx, sy);
       // the two outermost columns of either side may roll in further
       const rolled = (edgeO[a] && edgeS[a] < 0) || (edgeO[b] && edgeS[b] > 0);
-      const need = (rolled ? EDGE_ACROSS : ACROSS) * ACr[n >> 1];
-      if (d >= need) continue;
-      // push b from a along the seen direction (or straight across if the
-      // pair has closed to a point), in world units
-      const ux = d > 1e-3 ? sx / d : 1, uy = d > 1e-3 ? sy / d : 0;
+      const r = ACr[n >> 1];
+      const need = (rolled ? EDGE_ACROSS : ACROSS) * r;
+      const minX = (rolled ? 0.5 : 1) * ROW_MIN * r;
+      let ux, uy, short;
+      if (sx < minX) {
+        // turned past the rest normal (or about to): push b back across
+        // along the row's rest direction, not along the seen one
+        ux = 1; uy = 0; short = minX - sx + Math.max(0, need - d);
+      } else if (d < need) {
+        // closed: push b from a along the seen direction
+        ux = sx / d; uy = sy / d; short = need - d;
+      } else continue;
       const gx = kp * PX * ux, gy = -kp * PX * uy, gz = kp * PX * SY * uy;
       const g2 = gx * gx + gy * gy + gz * gz;
-      const c = (need - d) / ((wa + wb) * g2);
+      const c = short / ((wa + wb) * g2);
       p[ia] -= c * wa * gx; p[ia + 1] -= c * wa * gy; p[ia + 2] -= c * wa * gz;
       p[ib] += c * wb * gx; p[ib + 1] += c * wb * gy; p[ib + 2] += c * wb * gz;
+    }
+  };
+  const DC = Int32Array.from(down);
+  // rest run down the frame, image px, for each down pair
+  const DCr = Float32Array.from({ length: DC.length / 2 }, (_, n) => rest[DC[2 * n + 1] * 2 + 1] - rest[DC[2 * n] * 2 + 1]);
+  const holdColumns = () => {
+    for (let n = 0; n < DC.length; n += 2) {
+      const a = DC[n], b = DC[n + 1];
+      if (w[b] === 0) continue;
+      const ia = a * 3, ib = b * 3;
+      const depth = 0.5 * (CZ * (p[ia + 2] - x0[ia + 2] + p[ib + 2] - x0[ib + 2]) + CY * (p[ia + 1] - x0[ia + 1] + p[ib + 1] - x0[ib + 1]));
+      const kp = DIST / (DIST + Math.max(-0.3 * DIST, depth));
+      // how far b sits below a as the lens sees it
+      const sy = kp * (DCr[n >> 1] + PX * (-(p[ib + 1] - x0[ib + 1] - p[ia + 1] + x0[ia + 1]) + SY * (p[ib + 2] - x0[ib + 2] - p[ia + 2] + x0[ia + 2])));
+      const need = DOWN * kp * DCr[n >> 1];
+      if (sy >= need) continue;
+      // push b down the frame from a (down and away, in world units). The
+      // cloth above is held from the pegs, so b moves, not a: pushing a back
+      // up toward the lens would hoist the whole skirt by its hem.
+      const gy = -kp * PX, gz = kp * PX * SY;
+      const c = (need - sy) / (gy * gy + gz * gz);
+      p[ib + 1] += c * gy; p[ib + 2] += c * gz;
+    }
+  };
+  // no vertex further from where it hangs than its reach
+  const clampReach = () => {
+    for (let k = 0; k < N; k++) {
+      if (w[k] === 0) continue;
+      const i = k * 3;
+      const dx = p[i] - xt[i], dy = p[i + 1] - xt[i + 1], dz = p[i + 2] - xt[i + 2];
+      const d = Math.hypot(dx, dy, dz);
+      if (d <= reach[k]) continue;
+      const s = reach[k] / d;
+      p[i] = xt[i] + dx * s; p[i + 1] = xt[i + 1] + dy * s; p[i + 2] = xt[i + 2] + dz * s;
     }
   };
 
@@ -678,6 +743,8 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       p[ib] -= gx * wb; p[ib + 1] -= gy * wb; p[ib + 2] -= gz * wb;
     }
     limitYaw();
+    clampReach();
+    holdColumns();
     openRows();
     const idt = 1 / dt;
     for (let k = 0; k < N * 3; k++) {
