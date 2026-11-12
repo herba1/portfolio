@@ -1,11 +1,11 @@
 {
   "title": "Glyph Morph",
-  "description": "One Beatles word set huge in Geist on warm white. Click or press space and it becomes the next one, letter by letter: Help becomes Hello becomes Yellow becomes Yes, Blackbird sheds its Black and is Bird. Every glyph the two words share slides on a spring to its new place in the new word, keeping the font's kerning and the house tracking. Letters never cut each other: one that leaves keeps full ink where it stands and is wiped out of its own box just before the closing word reaches it, and a new one waits for its gap to open beside its kept neighbour, then wipes in inside it. Advance again mid-morph and it turns from wherever it is.",
+  "description": "One Beatles word set huge in Geist on warm white, and the chain of words is a line you scrub. Drag sideways or swipe the trackpad and Help turns into Hello under your hand, letter by letter: the glyphs the two words share slide on springs that follow the pointer, the letters that go are carried along and close up at a seam, and the new ones drop in as their gap opens. Hold anywhere and every letter is whole or gone, never cut. Let go and it finishes or springs back with the speed you gave it; flick and it runs on through Yellow, Yes, Yesterday. Tap or press space to step one word.",
   "tags": ["Type", "Motion", "Interface"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
   "intent": "From the Family wallet's Continue-to-Confirm label (https://benji.org/family-values): keep the shared letters and animate only what changes, so a state change reads without the noise of a crossfade. Here the label is the whole page.",
   "tile": { "shape": "wide" },
-  "demo": { "gesture": "tap", "on": ".gm-surface", "at": [0.5, 0.5] },
+  "demo": { "gesture": "drag", "on": ".gm-surface", "from": [0.62, 0.5], "to": [0.36, 0.5] },
   "sources": ["https://benji.org/family-values", "https://vercel.com/font"]
 }

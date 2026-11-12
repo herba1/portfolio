@@ -1,66 +1,96 @@
-// One word, morphing letter by letter into the next. Each word is laid out
-// once by the browser (real kerning, tracking from the house law), and every
-// glyph is then set alone at the x the browser gave it. A glyph two words
-// share is the same element in both: it slides on a spring from its place in
-// the old word to its place in the new one.
+// One word, morphing letter by letter into the next, under your hand. The
+// chain of words is a line you scrub: drag sideways (or swipe the trackpad)
+// and the morph from this word to the next follows the pointer, at whatever
+// point between them you hold it. Let go and a spring finishes it or puts it
+// back, carrying the speed you let go with, so a flick runs on through
+// several words.
 //
-// Glyphs never cut each other. Two glyphs' visible boxes never overlap, and a
-// glyph is either whole, gone, or shown as a piece at least MIN_PIECE wide.
+// Each word is laid out once by the browser (real kerning, tracking from the
+// house law), and every glyph is then set alone at the x the browser gave it.
+// A glyph two words share is the same element in both: its spring chases the
+// place the scrub puts it, a lerp from its place in one word to its place in
+// the other, so it lags the hand a touch and lands with a hair of overshoot.
 //
-// Exit: a glyph only in the old word stays whole, at full ink, where it
-// stands. When a live glyph's ink box is about to reach it (looked ahead on
-// the springs), it is wiped away inside its own box in EXIT_WIPE, cut from
-// the side the word closes from, so it is gone before the two could touch.
+// No glyph is ever left cut. A letter only one of the two words has is either
+// whole or gone at any point you can hold the scrub: each one has a point on
+// the scrub where it goes (a leaving letter: just before anything closes on
+// it) or comes (a new one: once the gap it needs has opened), worked out from
+// where the word will be, and crossing that point runs a short wipe in time,
+// not in scrub, so the cut passes in a few frames and never holds. Letters
+// only one word has ride a kept neighbour, so a leaving run is carried along
+// and closes at a seam like a zipper instead of leaving a hole where it stood.
+// Two glyphs' visible boxes never overlap; a new letter waits for anything in
+// its ground to be gone before it wipes in.
 //
-// Entry: a glyph only in the new word rides bound to the kept neighbour it
-// grows from, at its place in the new word, so it never lands on the moving
-// word. It shows nothing until the gap it
-// needs has opened on the side it grows from; then it wipes in out of that
-// neighbour's side, only inside the gap that has opened and inside its own ink
-// box, and is whole before the word settles.
+// ?t=0.2 is a still 0.2s into a tap from word ?w to the next; ?p=0.4 holds
+// the scrub 0.4 of the way there with every spring and wipe settled.
 
 import { isDevView } from "@/lib/viewMode";
 
 const WORDS = ["Help", "Hello", "Yellow", "Yes", "Yesterday", "Birthday", "Blackbird", "Bird", "Here", "There", "Helter"];
+const N = WORDS.length;
+const mod = (k) => ((k % N) + N) % N;
 
-// Spring for shared glyphs, in Motion's terms: settles visually in ~0.5s
-// with a hair of overshoot. Mass 1.
-const VISUAL = 0.52;
+// Glyph springs, in Motion's terms: chase the scrub, settle in ~0.34s with a
+// hair of overshoot. Mass 1.
+const VISUAL = 0.34;
 const BOUNCE = 0.12;
 const K = (2 * Math.PI / VISUAL) ** 2;
 const C = 2 * (1 - BOUNCE) * Math.sqrt(K);
+// The scrub itself once let go: critically damped, so it never runs past the
+// word it lands on.
+const K_S = (2 * Math.PI / 0.5) ** 2;
+const C_S = 2 * Math.sqrt(K_S);
+const PROJECT = 0.24; // s of the release speed the landing word is chosen by
+const FLICK = 0.6; // words/s: a release faster than this always moves on
+const MAX_CHAIN = 6; // words one flick may run through
+const SLOP = 5; // px of movement before a press becomes a drag
 // The press: a stiffer, fully damped spring on the whole word.
 const K_PRESS = 900;
 const C_PRESS = 2 * Math.sqrt(K_PRESS);
 
-const ENTER = { delay: 0.04, dur: 0.15, stagger: 0.035 };
-const EXIT_WIPE = 0.08; // s: a leaving glyph's wipe, finished before contact
-const EXIT_BEAT = 0.04; // s: between leaving glyphs that go in one wave
-const EXIT_LATE = 0.42; // s: a leaving glyph nothing closes on goes by then
+const WIPE = 0.07; // s: a letter's wipe, in or out, once its point is crossed
+const WIPE_GONE = 0.045; // s: a letter left over from a word already passed
+// Points on the scrub (0 = this word, 1 = the next).
+const GATE = {
+  out: 0.015, // a leaving letter goes this far before a shared one reaches it
+  sep: 0.05, // a new letter comes this far after one in its ground has gone
+  first: 0.05, // the first new letter beside a kept one comes no sooner
+  stagger: 0.06, // and each further one out from it this much later
+  outMin: 0.03,
+  outMax: 0.85,
+  inMax: 0.94,
+};
 const GUTTER = 0.04; // em of ground kept between any two visible glyphs
 const MIN_PIECE = 0.25; // em: no glyph is shown as a piece narrower than this
 const PAD = 0.03; // em of slack around a glyph's ink, so clip edges stay clean
+const SLACK = 0.006; // em two ink boxes may brush while a spring settles home
+// Where on the scrub the kept glyphs travel. Before it the letters that go
+// have gone; after it the word is set and the last new letters drop in, so
+// the hand can hold each phase: leaving, sliding, arriving.
+const MOVE = [0.08, 0.86];
 const STEP = 1 / 240;
-const AUTO_FIRST = 1.4;
-const AUTO_EVERY = 2.2;
-const AUTO_RESUME = 7;
+const SAMPLES = 240; // scrub points a pair's gates are worked out on
 
 const lawPx = (s) => -0.043 * (s - 12);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
-const easeOut = (t) => 1 - (1 - t) ** 3;
-const easeIn = (t) => t * t;
+const smooth = (t) => t * t * (3 - 2 * t);
 
 export async function createGlyphMorph(stage, { embedded = false, onLive = () => {} } = {}) {
   const params = new URLSearchParams(window.location.search);
   const holdT = params.has("t") ? clamp(parseFloat(params.get("t")) || 0, 0, 5) : null;
-  const startAt = clamp(parseInt(params.get("w") || "0", 10) || 0, 0, WORDS.length - 1);
+  const holdP = params.has("p") ? clamp(parseFloat(params.get("p")) || 0, -MAX_CHAIN, MAX_CHAIN) : null;
+  const startAt = clamp(parseInt(params.get("w") || "0", 10) || 0, 0, N - 1);
   const runCheck = params.has("check") && isDevView();
+  const still = holdT !== null || holdP !== null || runCheck;
   const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
   const surface = document.createElement("div");
   surface.className = "gm-surface";
-  surface.setAttribute("role", "button");
-  surface.setAttribute("aria-label", "Next word");
+  surface.setAttribute("role", "slider");
+  surface.setAttribute("aria-label", "Word");
+  surface.setAttribute("aria-valuemin", "0");
+  surface.setAttribute("aria-valuemax", String(N - 1));
   surface.tabIndex = 0;
   const wordEl = document.createElement("div");
   wordEl.className = "gm-word";
@@ -82,11 +112,26 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
   let size = 0;
   let baseTop = 0; // top of a glyph box so its baseline sits on the line
   let layouts = []; // per word: { x: absolute lefts }
-  let index = startAt;
-  let glyphs = []; // the current word, in order
-  let dying = [];
+  let D = 400; // px of drag per word
+  let field = [0, 0]; // where a glyph's ink may go: the page less a margin
+  let originY = 0;
+  let inkCtx = null;
+  let inkCache = new Map();
+
+  // The scrub: s is a place on the chain of words, base the word the current
+  // pair starts from. P = s - base runs 0..1 from WORDS[base] to the next.
+  let s = startAt;
+  let sv = 0;
+  let sTarget = startAt;
+  let mode = "rest"; // "rest" | "spring" | "drag" | "wheel"
+  let base = startAt;
+  let A = []; // glyphs of WORDS[base], in order
+  let B = []; // glyphs of WORDS[base + 1], in order
+  let glyphs = []; // A and B together
+  let leftovers = []; // glyphs of a word already passed, wiping out
+  let said = -1;
+
   let clock = 0;
-  let since = 0; // clock at the last change of word
   let raf = 0;
   let last = 0;
   let acc = 0;
@@ -94,10 +139,6 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
   let press = 1;
   let pressV = 0;
   let pressT = 1;
-  let autoTimer = 0;
-  let originY = 0;
-  let inkCtx = null;
-  let inkCache = new Map();
 
   const measureWord = (word) => {
     meter.textContent = word;
@@ -116,11 +157,11 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     return { lefts, end };
   };
 
-  const setMeter = (s) => {
-    meter.style.fontSize = `${s}px`;
-    meter.style.lineHeight = `${Math.round(s)}px`;
-    const track = lawPx(s);
-    meter.style.letterSpacing = s >= 20 ? `${(track / s).toFixed(4)}em` : `${track.toFixed(2)}px`;
+  const setMeter = (sz) => {
+    meter.style.fontSize = `${sz}px`;
+    meter.style.lineHeight = `${Math.round(sz)}px`;
+    const track = lawPx(sz);
+    meter.style.letterSpacing = sz >= 20 ? `${(track / sz).toFixed(4)}em` : `${track.toFixed(2)}px`;
     return track;
   };
 
@@ -129,10 +170,12 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     W = r.width;
     H = r.height;
     if (!W || !H) return false;
+    D = clamp(W * 0.32, 180, 440);
     // Fit the widest word: width(s) = adv100 * s / 100 + law(s) * (n - 1).
     setMeter(100);
     meter.style.letterSpacing = "0";
     const side = Math.max(24, W * (W < 640 ? 0.07 : 0.1));
+    field = [side * 0.4, W - side * 0.4];
     const room = W - side * 2;
     let fit = Infinity;
     for (const w of WORDS) {
@@ -163,16 +206,14 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       return { x: lefts.map((l) => x0 + l) };
     });
     meter.textContent = "";
-    for (const g of [...glyphs, ...dying]) styleGlyph(g);
     wordEl.style.transformOrigin = `${W / 2}px ${originY}px`;
     return true;
   };
 
   // Where a glyph's upright strokes are: runs of columns, from its ink's
   // left edge, holding an unbroken stretch of ink at least half as tall as
-  // the glyph's longest one.
-  // A cut never lands inside one, so no stem or bowl side is left as a
-  // hairline beside a clean edge.
+  // the glyph's longest one. A wipe's edge never lands inside one, so no stem
+  // or bowl side is left as a hairline beside a clean edge.
   const strokeRuns = (ch, l, r) => {
     if (!inkCtx) return [];
     const w = Math.ceil(r - l) + 2;
@@ -185,7 +226,6 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     ctx.font = inkCtx.font;
     ctx.fillText(ch, 1 - l, Math.round(size * 1.1));
     const data = ctx.getImageData(0, 0, w, h).data;
-    // Each column's longest unbroken stretch of ink.
     const cols = new Array(w).fill(0);
     for (let x = 0; x < w; x += 1) {
       let run = 0;
@@ -201,7 +241,6 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       const on = x < w && cols[x] >= tall;
       if (on && from < 0) from = x;
       if (!on && from >= 0) {
-        // In ink coordinates, widened a pixel each side for the soft edge.
         runs.push([from - 2, x]);
         from = -1;
       }
@@ -230,34 +269,50 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     g.drawn = "";
   };
 
-  // mode: "live" (whole), "enter" (waiting for its gap, then wiping in),
-  // "dying" (whole until its exit wipe starts, then gone).
+  // role: "kept" (in both words), "a" (only in this word), "b" (only in the
+  // next), "gone" (left over from a word already passed). w is how much of
+  // it shows, 0..1, and edge the side its visible part holds to while wiping.
   const makeGlyph = (ch, x) => {
     const el = document.createElement("span");
     el.className = "gm-glyph";
     el.setAttribute("aria-hidden", "true");
     el.textContent = ch;
     wordEl.append(el);
-    const g = { ch, el, x, v: 0, tx: x, anchor: null, mode: "live", side: -1, at: 0, t0: null, exit: null, vis: null, clip: null, drawn: "" };
+    const g = { ch, el, x, v: 0, xa: null, xb: null, ai: -1, bi: -1, role: "kept", anchor: null, err: 0, w: 0, edge: -1, pIn: 0, pOut: 1, vis: null, drawn: "" };
     styleGlyph(g);
     return g;
   };
 
   const inkL = (g, x = g.x) => x + g.ink.l;
   const inkR = (g, x = g.x) => x + g.ink.r;
+  // Which side of the page a glyph's ink would cross at x: 0 when inside.
+  const outside = (g, x = g.x) => (inkL(g, x) < field[0] ? -1 : inkR(g, x) > field[1] ? 1 : 0);
+  const mid = (g, x = g.x) => x + (g.ink.l + g.ink.r) / 2;
 
-  // Ground kept between two glyphs' ink boxes: the gutter, but neighbours in
-  // the new word only need what the settled word itself leaves them.
-  const gutBetween = (left, right) => {
-    const i = glyphs.indexOf(left);
-    if (i < 0 || glyphs[i + 1] !== right) return GUTTER * size;
-    return Math.min(0, inkL(right, right.tx) - inkR(left, left.tx));
+  // Ground two glyphs need between their ink boxes (l left of r): the
+  // gutter, but neighbours in either word need only what that word itself
+  // leaves them.
+  const need = (l, r) => {
+    if (l.bi >= 0 && B[l.bi + 1] === r) return Math.min(0, inkL(r, r.xb) - inkR(l, l.xb));
+    if (l.ai >= 0 && A[l.ai + 1] === r) return Math.min(0, inkL(r, r.xa) - inkR(l, l.xa));
+    return GUTTER * size;
+  };
+  // How far apart two glyphs are past the ground they need: under 0, too close.
+  const room = (g, xg, h, xh) => (mid(g, xg) <= mid(h, xh) ? inkL(h, xh) - inkR(g, xg) - need(g, h) : inkL(g, xg) - inkR(h, xh) - need(h, g));
+
+  const travel = (P) => smooth(clamp((P - MOVE[0]) / (MOVE[1] - MOVE[0]), 0, 1));
+  // Where the scrub puts a glyph at P, once its spring has caught up.
+  const target = (g, P) => {
+    if (g.role === "kept") return g.xa + (g.xb - g.xa) * travel(P);
+    if (g.role === "a") return g.anchor ? target(g.anchor.g, P) + g.anchor.off : g.xa;
+    if (g.role === "b") return g.anchor ? target(g.anchor.g, P) + g.anchor.off : g.xb;
+    return g.x;
   };
 
-  // Which glyphs of the current word carry over: the longest run of letters
-  // the two words share in order (so no glyph ever slides through another),
-  // and among equally long runs the one that moves the glyphs least.
-  const match = (from, word, xs) => {
+  // Which glyphs of a word carry over to another: the longest run of letters
+  // the two share in order (so no glyph ever slides through another), and
+  // among equally long runs the one that moves the glyphs least.
+  const match = (from, fx, word, xs) => {
     const n = from.length;
     const m = word.length;
     const best = Array.from({ length: n + 1 }, () => Array(m + 1).fill(null));
@@ -272,13 +327,13 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
         if (alt.c > pick.c || (alt.c === pick.c && alt.d < pick.d)) pick = alt;
         if (from[i].ch === word[j]) {
           const t = best[i + 1][j + 1];
-          const take = { c: t.c + 1, d: t.d + Math.abs(from[i].tx - xs[j]) };
+          const take = { c: t.c + 1, d: t.d + Math.abs(fx[i] - xs[j]) };
           if (take.c > pick.c || (take.c === pick.c && take.d < pick.d)) pick = { ...take, take: true };
         }
         best[i][j] = pick.take && pick !== best[i + 1][j] && pick !== best[i][j + 1] ? pick : { c: pick.c, d: pick.d };
       }
     }
-    const pairs = new Map(); // new index -> old glyph
+    const pairs = new Map(); // index in word -> glyph of from
     let i = 0;
     let j = 0;
     while (i < n && j < m) {
@@ -293,226 +348,303 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     return pairs;
   };
 
-  const settled = (h) => !h || (h.x === h.tx && h.v === 0 && !h.anchor);
-
-  // A riding glyph's place: its offset from its anchor's target, carried by
-  // where that anchor is.
-  const placeAt = (g, xa, xb) => {
-    const { a, b, w, oa, ob } = g.anchor;
-    const pa = a ? xa + oa : 0;
-    const pb = b ? xb + ob : 0;
-    return a && b ? pa + (pb - pa) * w : a ? pa : pb;
-  };
-  const place = (g) => {
-    const { a, b, w } = g.anchor;
-    g.x = placeAt(g, a ? a.x : 0, b ? b.x : 0);
-    g.v = a && b ? a.v + (b.v - a.v) * w : (a || b).v;
-  };
-
-  const show = (i, { instant = false } = {}) => {
-    index = (i + WORDS.length) % WORDS.length;
-    since = clock;
-    const word = WORDS[index];
-    const xs = layouts[index].x;
-    const prev = glyphs;
-    // Remember who stood beside whom, and how close the font set them.
-    prev.forEach((g, k) => {
-      const h = prev[k + 1];
-      g.was = h ? { right: h, kern: Math.max(0, inkR(g, g.tx) - inkL(h, h.tx)) } : null;
-    });
-    const pairs = instant ? new Map() : match(prev, word, xs);
-    const kept = new Set(pairs.values());
-    const sprung = []; // indices in the new word that move on their own spring
-    const next = [...word].map((ch, j) => {
+  // Set up the pair WORDS[k] -> WORDS[k + 1] around the glyphs of one of its
+  // words (the one the scrub is coming from), making the other's.
+  const buildPair = (k, from, fromIsA) => {
+    const ka = mod(k);
+    const kb = mod(k + 1);
+    const other = fromIsA ? kb : ka;
+    const word = WORDS[other];
+    const xs = layouts[other].x;
+    const fx = layouts[fromIsA ? ka : kb].x;
+    const pairs = match(from, fx, word, xs);
+    const made = [...word].map((ch, j) => {
       let g = pairs.get(j);
-      if (!g && !instant) {
-        // A glyph still whole on its way out, close by, comes back instead.
+      if (!g) {
+        // A letter still showing from a word just passed, close by, comes back.
         let near = -1;
         let nd = size * 0.35;
-        dying.forEach((o, k) => {
+        leftovers.forEach((o, q) => {
           const d = Math.abs(o.x - xs[j]);
-          if (o.ch === ch && !o.exit && d < nd) {
-            near = k;
-            nd = d;
-          }
+          if (o.ch === ch && o.w > 0 && d < nd) [near, nd] = [q, d];
         });
-        if (near >= 0) {
-          [g] = dying.splice(near, 1);
-          g.mode = "live";
-        }
-      }
-      if (g) {
-        g.tx = xs[j];
-        g.anchor = null;
-        if (instant || reduced) {
-          g.x = g.tx;
-          g.v = 0;
-        }
-        sprung.push(j);
-      } else {
-        g = makeGlyph(ch, xs[j]);
-        if (!instant) {
-          g.mode = "enter";
-          g.t0 = null;
-        }
+        if (near >= 0) [g] = leftovers.splice(near, 1);
+        else g = makeGlyph(ch, xs[j]);
       }
       return g;
     });
-    glyphs = next;
+    const prev = glyphs;
+    A = fromIsA ? from : made;
+    B = fromIsA ? made : from;
+    for (const g of [...A, ...B]) {
+      g.ai = -1;
+      g.bi = -1;
+      g.xa = null;
+      g.xb = null;
+    }
+    A.forEach((g, i) => {
+      g.ai = i;
+      g.xa = layouts[ka].x[i];
+    });
+    B.forEach((g, j) => {
+      g.bi = j;
+      g.xb = layouts[kb].x[j];
+    });
+    glyphs = [...new Set([...A, ...B])];
+    for (const g of prev) if (!glyphs.includes(g) && !leftovers.includes(g)) leftovers.push(g);
+    for (const g of leftovers) {
+      g.role = "gone";
+      g.anchor = null;
+    }
+    for (const g of glyphs) {
+      const was = g.anchor;
+      g.anchor = null;
+      g.role = g.ai >= 0 && g.bi >= 0 ? "kept" : g.ai >= 0 ? "a" : "b";
+      if (was && g.role !== "b") {
+        // It rode a kept glyph; it carries on from where it was, at its pace.
+        g.err = 0;
+      }
+    }
 
-    // New glyphs ride the kept neighbour they grow from, at their place in
-    // the new word, so each shows up already set beside it. A run of them
-    // between two kept glyphs fills the opening gap from both sides toward a
-    // seam; until the gap is fully open, the glyphs either side of the seam
-    // are the ones kept waiting, so the seam goes where they are wide enough
-    // to show a piece, as near the middle of the run as that allows.
-    if (!instant) {
-      const ride = (j, a, b, fromLeft, d) => {
-        const g = next[j];
-        g.side = fromLeft ? -1 : 1;
-        g.anchor = fromLeft ? { a, b: null, w: 0, oa: xs[j] - a.tx, ob: 0 } : { a: null, b, w: 1, oa: 0, ob: xs[j] - b.tx };
-        place(g);
-        g.at = clock + ENTER.delay + ENTER.stagger * (d - 1);
+    // Letters only one word has ride a kept neighbour of theirs in that word,
+    // at their place in it: a new one shows up already set beside the glyph
+    // it grows from, and a leaving one is carried along by the glyph it
+    // stood beside, so the word stays packed and never opens a hole. A run
+    // of them between two kept glyphs is split between both at a seam,
+    // placed where the glyphs either side of it are wide enough to show a
+    // piece, as near the middle of the run as that allows. Leaving runs
+    // close at their seam, new ones open at theirs.
+    const wide = 0.4 * size;
+    const rideRuns = (list, key, index) => {
+      const ride = (j, anchor, rank, run) => {
+        const g = list[j];
+        g.rank = rank;
+        g.run = run;
+        if (!anchor) {
+          g.edge = -1;
+          return;
+        }
+        g.edge = anchor[index] < j ? -1 : 1;
+        g.anchor = { g: anchor, off: g[key] - anchor[key] };
+        const at = anchor.x + g.anchor.off;
+        if (g.w > 0) g.err = g.x - at;
+        else {
+          g.err = 0;
+          g.x = at;
+        }
+        g.v = anchor.v;
       };
-      const wide = 0.4 * size;
-      const bounds2 = [-1, ...sprung, next.length];
-      for (let q = 0; q + 1 < bounds2.length; q += 1) {
-        const L = bounds2[q];
-        const R = bounds2[q + 1];
+      const keptAt = list.map((g, j) => (g.role === "kept" ? j : -1)).filter((j) => j >= 0);
+      const bounds = [-1, ...keptAt, list.length];
+      for (let q = 0; q + 1 < bounds.length; q += 1) {
+        const L = bounds[q];
+        const R = bounds[q + 1];
         const n = R - L - 1;
         if (n <= 0) continue;
-        const a = L >= 0 ? next[L] : null;
-        const b = R < next.length ? next[R] : null;
+        const a = L >= 0 ? list[L] : null;
+        const b = R < list.length ? list[R] : null;
         if (!a && !b) {
-          for (let j = L + 1; j < R; j += 1) {
-            next[j].side = -1;
-            next[j].at = clock + ENTER.delay + ENTER.stagger * j;
-          }
+          for (let j = L + 1; j < R; j += 1) ride(j, null, j - L, n);
           continue;
         }
-        let split = a ? n : 0; // how many grow from the left
+        let split = a ? n : 0; // how many ride the left one
         if (a && b) {
           let best = -Infinity;
-          for (let k = 0; k <= n; k += 1) {
-            const edge = [k > 0 ? next[L + k] : null, k < n ? next[L + k + 1] : null].filter(Boolean);
-            const score = Math.min(...edge.map((g) => Math.min(g.ink.w, wide))) * 100 - Math.abs(k - n / 2) - (k < n / 2 ? 0.1 : 0);
-            if (score > best) [best, split] = [score, k];
+          for (let k2 = 0; k2 <= n; k2 += 1) {
+            const edge = [k2 > 0 ? list[L + k2] : null, k2 < n ? list[L + k2 + 1] : null].filter(Boolean);
+            const score = Math.min(...edge.map((g) => Math.min(g.ink.w, wide))) * 100 - Math.abs(k2 - n / 2) - (k2 < n / 2 ? 0.1 : 0);
+            if (score > best) [best, split] = [score, k2];
           }
         }
         for (let j = L + 1; j < R; j += 1) {
-          const k = j - L - 1;
-          if (k < split) ride(j, a, b, true, j - L);
-          else ride(j, a, b, false, R - j);
+          if (j - L - 1 < split) ride(j, a, j - L, split);
+          else ride(j, b, R - j, n - split);
         }
       }
-    }
-
-    for (const g of prev) {
-      if (kept.has(g) || next.includes(g)) continue;
-      if (instant || g.mode === "enter") g.el.remove();
-      else {
-        // Stays whole, at full ink, where it stands.
-        g.mode = "dying";
-        g.anchor = null;
-        g.tx = g.x;
-        g.v = 0;
-        g.exit = null;
-        dying.push(g);
-      }
-    }
-    update();
-    onLive(word);
-    kick();
+    };
+    rideRuns(B, "xb", "bi");
+    rideRuns(A, "xa", "ai");
+    gates();
   };
 
-  // Where every live glyph will be over the next `horizon` seconds, run
-  // ahead on copies of the springs: one x per step.
-  const lookahead = (horizon) => {
-    const st = new Map();
-    for (const g of glyphs) st.set(g, { x: g.x, v: g.v, path: [g.x] });
-    const n = Math.ceil(horizon / STEP);
-    for (let k = 0; k < n; k += 1) {
-      for (const g of glyphs) {
-        if (g.anchor) continue;
-        const s = st.get(g);
-        s.v += (-K * (s.x - g.tx) - C * s.v) * STEP;
-        s.x += s.v * STEP;
-      }
-      for (const g of glyphs) {
-        const s = st.get(g);
-        if (g.anchor) {
-          const { a, b } = g.anchor;
-          s.x = placeAt(g, a ? st.get(a).x : 0, b ? st.get(b).x : 0);
+  // The points on the scrub where each letter only one word has comes or
+  // goes, worked out on where the springs are headed.
+  const gates = () => {
+    const kept = glyphs.filter((g) => g.role === "kept");
+    const aOnly = glyphs.filter((g) => g.role === "a");
+    const bOnly = glyphs.filter((g) => g.role === "b");
+    const Ps = Array.from({ length: SAMPLES + 1 }, (_, k) => k / SAMPLES);
+    const roomAt = (g, h, P) => room(g, target(g, P), h, target(h, P));
+    const sideOf = (g, h, P) => (mid(h, target(h, P)) >= mid(g, target(g, P)) ? 1 : -1);
+
+    // A leaving letter goes just before anything still showing comes nearer
+    // to it than it already is, and is cut from that side. They are settled
+    // out from the kept glyph each rides, so where two leaving runs meet the
+    // seam closes letter by letter, the outermost first. One nothing reaches
+    // peels off from the free end of its run, early, while the word slides.
+    const outOrder = [...aOnly].sort((p, q) => (p.rank || 1) - (q.rank || 1) || p.ai - q.ai);
+    const settledOut = [];
+    for (const d of outOrder) {
+      d.pOut = null;
+      const near = (h, P) => roomAt(d, h, P) < Math.min(0, roomAt(d, h, 0)) - 0.25;
+      for (const P of Ps) {
+        const hit = kept.find((h) => near(h, P)) || settledOut.find((h) => P < h.pOut && near(h, P));
+        if (hit) {
+          d.pOut = Math.max(GATE.outMin, P - GATE.out);
+          d.edge = -sideOf(d, hit, P);
+          break;
         }
-        s.path.push(s.x);
+      }
+      if (d.pOut === null) d.pOut = GATE.outMin + GATE.stagger * ((d.run || 1) - (d.rank || 1));
+      // Carried toward the edge of the page, it goes before it gets there.
+      const off = Ps.find((P) => P < d.pOut && outside(d, target(d, P)));
+      if (off !== undefined) {
+        d.pOut = Math.max(GATE.outMin, off - GATE.out);
+        d.edge = -outside(d, target(d, off));
+      }
+      settledOut.push(d);
+    }
+    // A new letter comes once its ground is clear for the rest of the way:
+    // of every kept glyph, and of every new one already set to show there.
+    // They are settled one at a time, out from the kept glyph each grows
+    // from, so the first to fit drops in first and the last waits for the
+    // ground the others leave it.
+    const order = [...bOnly].sort((p, q) => (p.rank || 1) - (q.rank || 1) || p.bi - q.bi);
+    const settledIn = [];
+    for (const e of order) {
+      let open = 0;
+      for (let k = SAMPLES; k >= 0; k -= 1) {
+        const P = Ps[k];
+        if (outside(e, target(e, P)) || kept.some((h) => roomAt(e, h, P) < -0.25) || settledIn.some((h) => P >= h.pIn && roomAt(e, h, P) < -0.25)) {
+          open = Math.min(1, (k + 1) / SAMPLES);
+          break;
+        }
+      }
+      e.pIn = Math.max(open, Math.min(GATE.inMax, GATE.first + GATE.stagger * ((e.rank || 1) - 1)));
+      settledIn.push(e);
+    }
+    // A leaving letter in a new one's ground is gone before the new one could
+    // touch it; if that would be at the very start, the new one waits.
+    for (let it = 0; it < 3; it += 1) {
+      for (const e of bOnly) {
+        for (const d of aOnly) {
+          const P = Ps.find((p) => p >= e.pIn - 1e-9 && roomAt(e, d, p) < -0.25);
+          if (P === undefined) continue;
+          const lim = P - GATE.sep;
+          if (lim < d.pOut) d.pOut = Math.max(GATE.outMin, lim);
+          if (d.pOut > lim) e.pIn = Math.max(e.pIn, d.pOut + GATE.sep);
+        }
       }
     }
-    return st;
+    for (const d of aOnly) d.pOut = clamp(d.pOut ?? GATE.late, GATE.outMin, GATE.outMax);
+    for (const e of bOnly) e.pIn = clamp(e.pIn, GATE.first, 1);
   };
 
-  const centre = (g) => g.x + (g.ink.l + g.ink.r) / 2;
-
-  // Start a leaving glyph's wipe once a live glyph (or a new one whose turn
-  // has come) is about to close on it: within EXIT_WIPE its ink box will come
-  // nearer than the gutter. The wipe is timed to be gone before the boxes
-  // could touch, and cuts from the side the word closes from.
-  const triggerExits = () => {
-    const waiting = dying.filter((g) => !g.exit);
-    if (!waiting.length) return;
-    const ahead = lookahead(EXIT_WIPE);
-    const gut = GUTTER * size;
-    const calm = glyphs.every((h) => settled(h));
-    for (const d of waiting) {
-      let best = null;
-      for (const h of glyphs) {
-        if (h.mode === "enter" && clock < h.at) continue;
-        const right = centre(h) >= centre(d);
-        const gapAt = (x) => (right ? inkL(h, x) - inkR(d) : inkL(d) - inkR(h, x));
-        const { path } = ahead.get(h);
-        if (h.mode === "enter") {
-          // A new glyph whose turn has come claims its ground: it shows
-          // nothing there until this one is gone, so the wipe takes its time.
-          const k = path.findIndex((x) => gapAt(x) < gut);
-          if (k >= 0 && (!best || k < best.k)) best = { k, side: right ? 1 : -1, dur: EXIT_WIPE };
-          continue;
-        }
-        // A live glyph: only one coming nearer than it already is counts.
-        const now = gapAt(h.x);
-        const near = Math.min(gut, now) - 0.25;
-        const touch = Math.min(0, now) - 0.25;
-        const k = path.findIndex((x) => gapAt(x) < near);
-        if (k < 0 || (best && k >= best.k)) continue;
-        let tc = path.findIndex((x) => gapAt(x) < touch);
-        if (tc < 0) tc = path.length;
-        best = { k, side: right ? 1 : -1, dur: clamp(tc * STEP, 0, EXIT_WIPE) };
-      }
-      if (!best) {
-        // Nothing closes on it. It goes in the wave of its leaving neighbour
-        // on the word's side, one beat after that one starts; with no such
-        // neighbour, once the word is calm.
-        let nd = Infinity;
-        let side = 1;
-        for (const h of glyphs) {
-          const dd = Math.abs(centre(h) - centre(d));
-          if (dd < nd) [nd, side] = [dd, centre(h) >= centre(d) ? 1 : -1];
-        }
-        const between = dying.filter((o) => o !== d && (centre(o) - centre(d)) * side > 0 && Math.abs(centre(o) - centre(d)) < nd);
-        const lead = between.sort((p, q) => Math.abs(centre(p) - centre(d)) - Math.abs(centre(q) - centre(d)))[0];
-        if (lead ? lead.exit && clock - lead.exit.t0 >= EXIT_BEAT : calm || clock - since > EXIT_LATE) best = { side, dur: EXIT_WIPE };
-      }
-      if (best) d.exit = { side: best.side, t0: clock, dur: best.dur };
+  // A fresh pair around word k, every glyph of it whole and at rest.
+  const jump = (k) => {
+    for (const g of [...glyphs, ...leftovers]) g.el.remove();
+    glyphs = [];
+    leftovers = [];
+    A = [];
+    B = [];
+    s = k;
+    sv = 0;
+    sTarget = k;
+    mode = "rest";
+    base = Math.floor(k);
+    const w = mod(base);
+    const word = [...WORDS[w]].map((ch, i) => {
+      const g = makeGlyph(ch, layouts[w].x[i]);
+      g.w = 1;
+      return g;
+    });
+    buildPair(base, word, true);
+    const P = s - base;
+    for (const g of glyphs) {
+      g.x = target(g, P);
+      g.v = 0;
     }
+    settleVis(P);
+  };
+
+  // Follow the scrub across a word: the next word's glyphs become the start
+  // of the next pair, or this word's the end of the one before.
+  const rebase = () => {
+    while (Math.floor(s) > base) {
+      base += 1;
+      buildPair(base, B, true);
+    }
+    while (Math.floor(s) < base) {
+      base -= 1;
+      buildPair(base, A, false);
+    }
+  };
+
+  // Is a glyph's ground clear of every glyph showing now?
+  const clear = (g) => !outside(g) && [...glyphs, ...leftovers].every((h) => h === g || h.w <= 0 || room(g, g.x, h, h.x) >= -0.25 - SLACK * size);
+
+  // Is a showing glyph about to reach this one within a wipe?
+  const closing = (g) => {
+    for (const h of glyphs) {
+      // A leaving letter only yields to one that stays longer than it.
+      if (h === g || h.w <= 0 || (h.role === "a" && (g.role !== "a" || h.pOut <= g.pOut))) continue;
+      const right = mid(h) >= mid(g);
+      const u = right ? g.v - h.v : h.v - g.v; // px/s it closes on g
+      const now = room(g, g.x, h, h.x);
+      if (now - Math.max(0, u) * WIPE * 1.5 < -0.25 - SLACK * size) return right ? 1 : -1;
+    }
+    return 0;
+  };
+
+  const visibility = (dt, P) => {
+    const rate = dt / WIPE;
+    const aOnly = glyphs.filter((g) => g.role === "a");
+    const bOnly = glyphs.filter((g) => g.role === "b");
+    const order = [...glyphs.filter((g) => g.role === "kept"), ...(P >= 0.5 ? [...bOnly, ...aOnly] : [...aOnly, ...bOnly]), ...leftovers];
+    for (const g of order) {
+      let want = true;
+      let from = 0;
+      if (g.role === "a") {
+        from = closing(g) || outside(g, g.x + g.v * WIPE * 1.5);
+        want = P < g.pOut && !from;
+      } else if (g.role === "b") want = P >= g.pIn;
+      else if (g.role === "gone") {
+        want = false;
+        // Run over in a flick: it is gone at once.
+        if (closing(g)) g.w = 0;
+      }
+      if (want) {
+        if (g.w < 1 && (g.w > 0 || clear(g))) g.w = Math.min(1, g.w + rate);
+      } else if (g.w > 0) {
+        if (g.w >= 1 && from) g.edge = -from;
+        if (g.w >= 1 && g.role === "gone") {
+          const h = glyphs.filter((o) => o.w > 0).sort((p, q) => Math.abs(mid(p) - mid(g)) - Math.abs(mid(q) - mid(g)))[0];
+          g.edge = h && mid(h) > mid(g) ? -1 : 1;
+        }
+        g.w = Math.max(0, g.w - (g.role === "gone" ? dt / WIPE_GONE : rate));
+      }
+    }
+  };
+
+  // Hold the scrub at P with every spring caught up and every wipe done.
+  const settleVis = (P) => {
+    for (let i = 0; i < 120; i += 1) visibility(STEP * 4, P);
+    leftovers = leftovers.filter((g) => {
+      if (g.w > 0) return true;
+      g.el.remove();
+      return false;
+    });
+    for (const g of [...glyphs, ...leftovers]) g.vis = visOf(g);
   };
 
   // A glyph's visible span, in stage px, as a closed piece of its ink box:
-  // null when hidden. Pieces under MIN_PIECE are not shown.
-  const piece = (g, A, B) => {
+  // null when hidden. Pieces under MIN_PIECE are not shown, and an edge
+  // never lands inside an upright stroke.
+  const piece = (g, A0, B0) => {
     const minW = Math.min(MIN_PIECE * size, g.ink.w);
     const o = inkL(g);
-    let a = A;
-    let b = B;
-    // Pull a cut out of any upright stroke it would split, onto the hidden
-    // side, so the stroke shows whole or not at all.
+    let a = A0;
+    let b = B0;
     for (const [r0, r1] of g.ink.runs) {
       if (a > o + 0.01 && a > o + r0 && a < o + r1) a = o + r1;
       if (b < inkR(g) - 0.01 && b > o + r0 && b < o + r1) b = o + r0;
@@ -521,102 +653,78 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     return [a, b];
   };
 
-  const visDying = (g) => {
-    if (!g.exit) return [inkL(g), inkR(g)];
-    if (g.exit.dur < 2 * STEP) return null;
-    const p = clamp((clock - g.exit.t0) / g.exit.dur, 0, 1);
-    if (p >= 1) return null;
-    if (g.ink.w < MIN_PIECE * size) return p < 0.5 ? [inkL(g), inkR(g)] : null;
-    const e = easeIn(p) * g.ink.w;
-    return g.exit.side > 0 ? piece(g, inkL(g), inkR(g) - e) : piece(g, inkL(g) + e, inkR(g));
+  const visOf = (g) => {
+    if (g.w >= 1) return [inkL(g), inkR(g)];
+    if (g.w <= 0) return null;
+    const f = smooth(g.w);
+    const minW = MIN_PIECE * size;
+    if (g.ink.w < minW) return f >= 0.5 ? [inkL(g), inkR(g)] : null;
+    const reach = minW + (g.ink.w - minW) * f;
+    return g.edge < 0 ? piece(g, inkL(g), inkL(g) + reach) : piece(g, inkR(g) - reach, inkR(g));
   };
 
-  // The ground an entering glyph may take: its ink box, less every other
-  // glyph's box and the ground kept around it.
-  const bounds = (g) => {
-    let lb = -Infinity;
-    let rb = Infinity;
-    const i = glyphs.indexOf(g);
-    glyphs.forEach((h, k) => {
-      if (h === g) return;
-      if (k < i) lb = Math.max(lb, inkR(h) + gutBetween(h, g));
-      else rb = Math.min(rb, inkL(h) - gutBetween(g, h));
-    });
-    // A leaving glyph keeps its whole box until it is gone, so a new one
-    // never grows in beside a half-wiped one.
-    for (const d of dying) {
-      if (!d.vis) continue;
-      if (centre(d) < centre(g)) lb = Math.max(lb, inkR(d) + GUTTER * size);
-      else rb = Math.min(rb, inkL(d) - GUTTER * size);
+  const release = (v) => {
+    const proj = s + v * PROJECT;
+    let t = Math.round(proj);
+    if (v > FLICK) t = Math.max(t, Math.floor(s) + 1);
+    if (v < -FLICK) t = Math.min(t, Math.ceil(s) - 1);
+    const r = Math.round(s);
+    sTarget = clamp(t, r - MAX_CHAIN, r + MAX_CHAIN);
+    sv = v;
+    mode = "spring";
+    if (reduced) {
+      s = sTarget;
+      sv = 0;
     }
-    return [lb, rb];
-  };
-
-  const visEnter = (g) => {
-    const gl = inkL(g);
-    const gr = inkR(g);
-    const w = g.ink.w;
-    const minW = Math.min(MIN_PIECE * size, w);
-    const [lb, rb] = bounds(g);
-    if (g.t0 === null) {
-      if (clock < g.at) return null;
-      // Open the gap first: the side it grows from must be clear, with room
-      // for a first piece.
-      const open = g.side < 0 ? lb <= gl + 0.01 && Math.min(rb, gr) - gl >= minW : rb >= gr - 0.01 && gr - Math.max(lb, gl) >= minW;
-      if (!open) return null;
-      g.t0 = clock;
-    }
-    const p = easeOut(clamp((clock - g.t0) / ENTER.dur, 0, 1));
-    const reach = minW + (w - minW) * p;
-    const A = Math.max(gl, lb, g.side > 0 ? gr - reach : -Infinity);
-    const B = Math.min(gr, rb, g.side < 0 ? gl + reach : Infinity);
-    // Whole once the wipe is done and no bound cuts it by a visible amount.
-    if (p >= 1 && A <= gl + 0.5 && B >= gr - 0.5) {
-      g.mode = "live";
-      return [gl, gr];
-    }
-    return piece(g, A, B);
-  };
-
-  // Settle every glyph's visible span for this instant.
-  const update = () => {
-    triggerExits();
-    for (const g of dying) g.vis = visDying(g);
-    for (const g of glyphs) {
-      if (g.mode === "enter") g.vis = visEnter(g);
-      else g.vis = [inkL(g), inkR(g)];
-    }
+    kick();
   };
 
   const step = (dt) => {
     clock += dt;
     let busy = false;
+    if (mode === "spring") {
+      sv += (-K_S * (s - sTarget) - C_S * sv) * dt;
+      s += sv * dt;
+      if (Math.abs(s - sTarget) < 1e-3 && Math.abs(sv) < 1e-2) {
+        s = sTarget;
+        sv = 0;
+        mode = "rest";
+      } else busy = true;
+    } else if (mode !== "rest") busy = true;
+    rebase();
+    const P = s - base;
     for (const g of glyphs) {
       if (g.anchor) continue;
-      const a2 = -K * (g.x - g.tx) - C * g.v;
-      g.v += a2 * dt;
+      const tx = target(g, P);
+      if (reduced) {
+        g.x = tx;
+        g.v = 0;
+        continue;
+      }
+      g.v += (-K * (g.x - tx) - C * g.v) * dt;
       g.x += g.v * dt;
-      if (Math.abs(g.x - g.tx) < 0.01 && Math.abs(g.v) < 0.01) {
-        g.x = g.tx;
+      if (Math.abs(g.x - tx) < 0.01 && Math.abs(g.v) < 0.01) {
+        g.x = tx;
         g.v = 0;
       } else busy = true;
     }
     for (const g of glyphs) {
       if (!g.anchor) continue;
-      busy = true;
-      if (settled(g.anchor.a) && settled(g.anchor.b)) {
-        g.anchor = null;
-        g.x = g.tx;
-        g.v = 0;
-      } else place(g);
+      const { g: a, off } = g.anchor;
+      g.err *= Math.exp(-dt * 30);
+      if (Math.abs(g.err) < 0.01) g.err = 0;
+      else busy = true;
+      g.x = a.x + off + g.err;
+      g.v = a.v;
     }
-    update();
-    dying = dying.filter((g) => {
-      if (g.vis || !g.exit || clock - g.exit.t0 < g.exit.dur) return true;
+    visibility(dt, P);
+    leftovers = leftovers.filter((g) => {
+      if (g.w > 0) return true;
       g.el.remove();
       return false;
     });
-    if (dying.length || glyphs.some((g) => g.mode === "enter")) busy = true;
+    for (const g of [...glyphs, ...leftovers]) g.vis = visOf(g);
+    if (leftovers.length || glyphs.some((g) => g.w > 0 && g.w < 1)) busy = true;
     pressV += (-K_PRESS * (press - pressT) - C_PRESS * pressV) * dt;
     press += pressV * dt;
     if (Math.abs(press - pressT) < 1e-4 && Math.abs(pressV) < 1e-4) {
@@ -636,9 +744,9 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       a = v[0] <= inkL(g) + 0.01 ? g.ink.l - PAD * size : v[0] - g.x;
       b = v[1] >= inkR(g) - 0.01 ? g.ink.r + PAD * size : v[1] - g.x;
     }
-    const s = !v ? "hidden" : full ? `${g.x.toFixed(2)}|full` : `${g.x.toFixed(2)}|${a.toFixed(1)}|${b.toFixed(1)}`;
-    if (s === g.drawn) return;
-    g.drawn = s;
+    const str = !v ? "hidden" : full ? `${g.x.toFixed(2)}|full` : `${g.x.toFixed(2)}|${a.toFixed(1)}|${b.toFixed(1)}`;
+    if (str === g.drawn) return;
+    g.drawn = str;
     if (!v) {
       g.el.style.visibility = "hidden";
       return;
@@ -653,10 +761,21 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     }
   };
 
+  const say = () => {
+    const k = mod(Math.round(s));
+    surface.setAttribute("aria-valuenow", String(k));
+    surface.setAttribute("aria-valuetext", WORDS[k]);
+    if (mode === "rest" && k !== said) {
+      said = k;
+      onLive(WORDS[k]);
+    }
+  };
+
   const render = () => {
     for (const g of glyphs) draw(g);
-    for (const g of dying) draw(g);
+    for (const g of leftovers) draw(g);
     wordEl.style.transform = press === 1 ? "" : `scale(${press.toFixed(4)})`;
+    say();
   };
 
   const frame = (now) => {
@@ -671,48 +790,115 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
       acc -= STEP;
     }
     render();
-    if (busy) raf = requestAnimationFrame(frame);
+    if (busy || mode === "drag" || mode === "wheel") raf = requestAnimationFrame(frame);
   };
 
   const kick = () => {
-    if (raf || destroyed || holdT !== null || runCheck) return;
+    if (raf || destroyed || still) return;
     last = performance.now();
     acc = 0;
     raf = requestAnimationFrame(frame);
   };
 
-  const schedule = (sec) => {
-    clearTimeout(autoTimer);
-    if (holdT !== null || runCheck || destroyed) return;
-    autoTimer = setTimeout(() => {
-      if (document.hidden) return schedule(AUTO_EVERY);
-      show(index + 1);
-      schedule(AUTO_EVERY);
-    }, sec * 1000);
-  };
-
+  // A tap or a key: on to the next word (or back), from wherever the scrub
+  // is headed, so pressing again mid-morph runs on.
   const advance = (dir) => {
-    show(index + dir);
-    schedule(AUTO_RESUME);
+    const from = mode === "spring" ? sTarget : Math.round(s);
+    sTarget = from + dir;
+    if (Math.abs(sTarget - s) > MAX_CHAIN) sTarget = Math.round(s) + dir * MAX_CHAIN;
+    mode = "spring";
+    if (reduced) {
+      s = sTarget;
+      sv = 0;
+    }
+    kick();
   };
 
+  // The drag: s follows the pointer, a word per D px, leftward onward.
+  let drag = null;
+  const speed = (samples) => {
+    const now = performance.now();
+    const recent = samples.filter((q) => now - q.t < 90);
+    if (recent.length < 2) return 0;
+    const [p, q] = [recent[0], recent[recent.length - 1]];
+    if (now - q.t > 60 || q.t - p.t < 8) return 0;
+    return clamp((q.s - p.s) / ((q.t - p.t) / 1000), -40, 40);
+  };
   const onDown = (e) => {
-    if (e.button !== 0) return;
+    if (e.button !== 0 || drag) return;
+    try {
+      surface.setPointerCapture(e.pointerId);
+    } catch {}
+    drag = { id: e.pointerId, x0: e.clientX, s0: s, moved: false, headed: mode === "spring" ? sTarget : null, samples: [] };
     pressT = 0.985;
     kick();
   };
-  const onUp = (e) => {
-    if (pressT === 1) return;
-    pressT = 1;
+  const onMove = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    if (!drag.moved) {
+      if (Math.abs(e.clientX - drag.x0) < SLOP) return;
+      // Catch the word where it is and take it from there.
+      drag.moved = true;
+      drag.x0 = e.clientX;
+      drag.s0 = s;
+      sv = 0;
+      mode = "drag";
+      surface.dataset.dragging = "";
+    }
+    s = drag.s0 - (e.clientX - drag.x0) / D;
+    drag.samples.push({ t: performance.now(), s });
+    if (drag.samples.length > 12) drag.samples.shift();
     kick();
-    if (e.type === "pointerup") advance(e.shiftKey ? -1 : 1);
   };
+  const onUp = (e) => {
+    if (!drag || e.pointerId !== drag.id) return;
+    const d = drag;
+    drag = null;
+    pressT = 1;
+    delete surface.dataset.dragging;
+    if (!d.moved) {
+      if (e.type === "pointerup") {
+        if (d.headed !== null) sTarget = d.headed;
+        advance(e.shiftKey ? -1 : 1);
+      }
+    } else release(e.type === "pointerup" ? speed(d.samples) : 0);
+    kick();
+  };
+
+  // The trackpad: a sideways swipe scrubs the same way; when it stops
+  // coming, the scrub is let go with the speed it had.
+  let wheelTimer = 0;
+  let wheelSamples = [];
+  const onWheel = (e) => {
+    if (Math.abs(e.deltaX) <= Math.abs(e.deltaY) || drag) return;
+    e.preventDefault();
+    const px = e.deltaMode === 1 ? e.deltaX * 16 : e.deltaMode === 2 ? e.deltaX * W : e.deltaX;
+    if (mode !== "wheel") {
+      mode = "wheel";
+      sv = 0;
+      wheelSamples = [];
+    }
+    s += px / D;
+    wheelSamples.push({ t: performance.now(), s });
+    if (wheelSamples.length > 12) wheelSamples.shift();
+    clearTimeout(wheelTimer);
+    wheelTimer = setTimeout(() => {
+      if (mode !== "wheel") return;
+      const recent = wheelSamples.filter((q) => wheelSamples[wheelSamples.length - 1].t - q.t < 100);
+      const p = recent[0];
+      const q = recent[recent.length - 1];
+      const v = recent.length > 1 && q.t > p.t ? (q.s - p.s) / ((q.t - p.t) / 1000) : 0;
+      release(clamp(v * 0.5, -20, 20));
+    }, 110);
+    kick();
+  };
+
   const onKey = (e) => {
     if (e.metaKey || e.ctrlKey || e.altKey) return;
     if (e.target !== surface && e.target !== document.body) return;
     if (e.key === " " || e.key === "Enter" || e.key === "ArrowRight") {
       e.preventDefault();
-      if (e.repeat) return;
+      if (e.repeat && e.key !== "ArrowRight") return;
       advance(1);
     } else if (e.key === "ArrowLeft") {
       e.preventDefault();
@@ -720,87 +906,120 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
     }
   };
   surface.addEventListener("pointerdown", onDown);
+  surface.addEventListener("pointermove", onMove);
   surface.addEventListener("pointerup", onUp);
-  surface.addEventListener("pointerleave", onUp);
   surface.addEventListener("pointercancel", onUp);
+  surface.addEventListener("lostpointercapture", onUp);
+  surface.addEventListener("wheel", onWheel, { passive: false });
   const keyTarget = embedded ? surface : window;
   keyTarget.addEventListener("keydown", onKey);
-
-  const reset = (w) => {
-    for (const g of [...glyphs, ...dying]) g.el.remove();
-    glyphs = [];
-    dying = [];
-    show(w, { instant: true });
-  };
 
   const ro = new ResizeObserver(() => {
     const r = box.getBoundingClientRect();
     if (Math.abs(r.width - W) < 0.5 && Math.abs(r.height - H) < 0.5) return;
     if (!layout()) return;
     // Snap to the settled word at the new size.
-    reset(index);
+    jump(mod(Math.round(sTarget)));
     render();
   });
   ro.observe(box);
 
-  // Dev check: sweep every word pair, both ways, through the first 0.6s,
-  // and flag any instant where two visible glyphs overlap (beyond what the
-  // settled word's own kerning sets), where a glyph shows as a piece under
-  // MIN_PIECE, or where a glyph is still cut once the word has settled.
+  // Dev check: every word pair, both ways, three ways of getting across.
+  // A tap (the release spring from rest); a slow scrub that stops every
+  // 0.05 of the way and holds; and a flick through several words. Flags any
+  // instant two visible glyphs overlap (beyond what either word's own
+  // kerning sets), a piece under MIN_PIECE, a glyph still cut while the
+  // scrub is held, and a word that is not whole once it has come to rest.
   const check = () => {
-    const tol = 0.5;
+    const tol = 0.5 + SLACK * size;
     const flags = [];
-    const pairs = [];
     const timing = [];
-    for (let w = 0; w < WORDS.length; w += 1) pairs.push([w, 1], [w, -1]);
-    for (const [w, dir] of pairs) {
-      reset(w);
-      const label = `${WORDS[w]}>${WORDS[(w + dir + WORDS.length) % WORDS.length]}`;
-      show(w + dir);
-      const n = Math.round(0.6 / STEP);
-      const seen = new Set();
-      const span = { pair: label, cut: 0, whole: null, rest: null };
-      timing.push(span);
-      for (let k = 0; k <= n; k += 1) {
-        if (k) step(STEP);
-        const t = +(clock - since).toFixed(3);
-        const all = [...glyphs, ...dying].filter((g) => g.vis);
-        const flag = (kind, msg) => {
-          if (seen.has(kind + msg)) return;
-          seen.add(kind + msg);
-          flags.push({ pair: label, t, kind, msg });
-        };
-        for (const g of all) {
-          const wv = g.vis[1] - g.vis[0];
-          const whole = g.vis[0] <= inkL(g) + 0.01 && g.vis[1] >= inkR(g) - 0.01;
-          if (!whole && wv < MIN_PIECE * size - tol) flag("sliver", `${g.ch} ${(wv / size).toFixed(3)}em`);
-        }
-        for (let i = 0; i < all.length; i += 1) {
-          for (let j = i + 1; j < all.length; j += 1) {
-            const [g, h] = centre(all[i]) <= centre(all[j]) ? [all[i], all[j]] : [all[j], all[i]];
-            const over = g.vis[1] - h.vis[0];
-            const gi = glyphs.indexOf(g);
-            let kern = gi >= 0 && glyphs[gi + 1] === h ? Math.max(0, inkR(g, g.tx) - inkL(h, h.tx)) : 0;
-            if (g.was && g.was.right === h) kern = Math.max(kern, g.was.kern);
-            if (over > kern + tol && h.vis[1] > g.vis[0]) flag("overlap", `${g.ch}(${g.mode})|${h.ch}(${h.mode}) ${(over / size).toFixed(3)}em`);
-          }
-        }
-        const cut = all.some((g) => g.vis[0] > inkL(g) + 0.01 || g.vis[1] < inkR(g) - 0.01) || glyphs.some((g) => !g.vis) || dying.length;
-        if (cut) {
-          span.cut += 1;
-          span.whole = null;
-        } else if (span.whole === null) span.whole = t;
-        // At rest to the eye: every glyph within half a pixel of home.
-        const still = glyphs.every((g) => Math.abs(g.x - g.tx) < 0.5 && Math.abs(g.v) < size * 0.05);
-        if (span.rest === null && still) span.rest = t;
-        if (still || k === n) {
-          for (const g of glyphs) if (g.mode === "enter") flag("unfinished", `${g.ch} still entering at rest (${g.t0 === null ? "waiting" : "wiping"})`);
-          for (const g of dying) flag("unfinished", `${g.ch} still leaving at rest (${g.exit ? "wiping" : "waiting"})`);
+    const seen = new Set();
+    let label = "";
+    const flag = (kind, msg) => {
+      if (seen.has(label + kind + msg)) return;
+      seen.add(label + kind + msg);
+      flags.push({ pair: label, t: +clock.toFixed(3), kind, msg });
+    };
+    const audit = ({ held = false } = {}) => {
+      const all = [...glyphs, ...leftovers].filter((g) => g.vis);
+      for (const g of all) {
+        const wv = g.vis[1] - g.vis[0];
+        const whole = g.vis[0] <= inkL(g) + 0.01 && g.vis[1] >= inkR(g) - 0.01;
+        if (!whole && wv < MIN_PIECE * size - tol) flag("sliver", `${g.ch} ${(wv / size).toFixed(3)}em`);
+        if (whole && outside(g, g.x) && g.vis[1] - g.vis[0] > 0) flag("off page", `${g.ch}(${g.role}) at P=${(s - base).toFixed(2)}`);
+        if (!whole && held) flag("held cut", `${g.ch}(${g.role}) at P=${(s - base).toFixed(2)}`);
+      }
+      for (let i = 0; i < all.length; i += 1) {
+        for (let j = i + 1; j < all.length; j += 1) {
+          const [g, h] = mid(all[i]) <= mid(all[j]) ? [all[i], all[j]] : [all[j], all[i]];
+          const over = g.vis[1] - h.vis[0];
+          const kern = Math.max(0, -need(g, h));
+          if (over > kern + tol && h.vis[1] > g.vis[0]) flag("overlap", `${g.ch}(${g.role})|${h.ch}(${h.role}) ${(over / size).toFixed(3)}em at P=${(s - base).toFixed(2)}`);
         }
       }
+    };
+    const restWhole = (k) => {
+      const word = WORDS[mod(k)];
+      const shown = [...glyphs, ...leftovers].filter((g) => g.w > 0);
+      const text = shown.sort((p, q) => p.x - q.x).map((g) => g.ch).join("");
+      if (text !== word || shown.some((g) => g.w < 1)) flag("unfinished", `rests as "${text}" for "${word}"`);
+    };
+    const run = (sec, each) => {
+      const n = Math.round(sec / STEP);
+      for (let k = 0; k < n; k += 1) {
+        step(STEP);
+        each?.(k);
+      }
+    };
+    for (let w = 0; w < N; w += 1) {
+      for (const dir of [1, -1]) {
+        label = `${WORDS[w]}>${WORDS[mod(w + dir)]}`;
+        // A tap.
+        jump(w);
+        const t0 = clock;
+        const span = { pair: label, cut: 0, whole: null, rest: null };
+        timing.push(span);
+        advance(dir);
+        run(0.9, () => {
+          audit();
+          const cut = [...glyphs, ...leftovers].some((g) => g.w > 0 && g.w < 1) || leftovers.length;
+          if (cut) {
+            span.cut += 1;
+            span.whole = null;
+          } else if (span.whole === null) span.whole = +(clock - t0).toFixed(3);
+          if (span.rest === null && mode === "rest" && glyphs.every((g) => Math.abs(g.x - target(g, s - base)) < 0.5)) span.rest = +(clock - t0).toFixed(3);
+        });
+        restWhole(w + dir);
+        // A slow scrub that stops and holds.
+        jump(w);
+        mode = "drag";
+        for (let q = 1; q <= 20; q += 1) {
+          const from = s;
+          const to = w + (dir * q) / 20;
+          run(0.06, (k) => {
+            s = from + (to - from) * Math.min(1, (k + 1) / Math.round(0.06 / STEP));
+            audit();
+          });
+          run(0.3);
+          audit({ held: true });
+        }
+        mode = "rest";
+        run(0.6);
+        restWhole(w + dir);
+      }
     }
-    reset(startAt);
-    const result = { ok: flags.length === 0, size, pairs: pairs.length, flags, timing };
+    // A flick through the chain, each way.
+    for (const v of [14, -14]) {
+      label = `flick ${v > 0 ? "on" : "back"}`;
+      jump(0);
+      release(v);
+      const end = sTarget;
+      run(2.5, () => audit());
+      restWhole(end);
+    }
+    jump(startAt);
+    const result = { ok: flags.length === 0, size, pairs: N * 2, flags, timing };
     window.__glyphMorphCheck = result;
     console.log(`glyph-morph check: ${result.ok ? "ok" : `${flags.length} flags`} ${JSON.stringify(result)}`);
     surface.dataset.check = result.ok ? "ok" : "fail";
@@ -808,24 +1027,35 @@ export async function createGlyphMorph(stage, { embedded = false, onLive = () =>
   };
 
   layout();
-  show(index, { instant: true });
+  jump(startAt);
   if (runCheck) check();
-  else if (holdT !== null) {
-    // A still of the morph: from word w to w + 1, t seconds in.
-    show(index + 1);
+  else if (holdP !== null) {
+    // A still held on the scrub: ?p=0.4 is 0.4 of the way from word w to
+    // the next, every spring caught up and every wipe done.
+    s = startAt + holdP;
+    rebase();
+    const P = s - base;
+    for (const g of glyphs) {
+      g.x = g.anchor ? target(g.anchor.g, P) + g.anchor.off : target(g, P);
+      g.v = 0;
+    }
+    settleVis(P);
+  } else if (holdT !== null) {
+    // A still of a tap: from word w to w + 1, t seconds in.
+    advance(1);
     const n = Math.round(holdT / STEP);
     for (let i = 0; i < n; i += 1) step(STEP);
   }
   render();
   requestAnimationFrame(() => surface.setAttribute("data-ready", ""));
-  schedule(AUTO_FIRST);
 
   return {
     destroy() {
       destroyed = true;
       cancelAnimationFrame(raf);
-      clearTimeout(autoTimer);
+      clearTimeout(wheelTimer);
       ro.disconnect();
+      surface.removeEventListener("wheel", onWheel);
       keyTarget.removeEventListener("keydown", onKey);
       surface.remove();
     },

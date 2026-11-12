@@ -1,8 +1,9 @@
 // Dev check for the glyph-morph lab piece: loads /lab/glyph-morph?check on
-// the running dev server at a few viewport sizes. The piece sweeps every word
-// pair (both ways) through the first 0.6s of the morph and flags overlapping
-// glyph clip rects, pieces narrower than 0.25em, and glyphs still cut once the
-// word has settled. Exits 1 on any flag.
+// the running dev server at a few viewport sizes. The piece runs every word
+// pair (both ways) through a tap, a slow scrub that stops and holds every 0.05
+// of the way, and a flick through several words, and flags overlapping glyph
+// clip rects, pieces narrower than 0.25em, any glyph still cut while the scrub
+// is held, and a word not whole once it has come to rest. Exits 1 on any flag.
 //
 //   node tools/depth/bakes/glyph-morph/check.mjs
 import { launch, BASE } from "../../../factory/lib.mjs";
