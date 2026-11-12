@@ -42,8 +42,9 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // On the structure the front is a thin band of light, which the film's
 // halation turns warm. On the sky it is a soft band (an eighth of the sky's
 // key, never narrower on screen than a few dozen pixels where the key is
-// steep) with no light of its own, only a faint amber halation in its middle,
-// so the edge glows instead of being drawn. Release and it carries the hand's speed with friction; the strata,
+// steep) with no light of its own, only a faint amber halation in its middle
+// where it crosses cloud, so the edge glows instead of being drawn. Release
+// and it carries the hand's speed with friction; the strata,
 // stirred by that speed, settle on a spring.
 //
 // Everything renders through _kit/film.js (summer) in linear light.
@@ -348,7 +349,7 @@ vec3 liftUnder(vec3 c, vec3 lat, float cap) {
 // The sky at key distance d past the front. A soft band, SKY_BAND of the
 // sky's key wide, widened by the key's gradient on screen so it stays soft
 // where the key is steep; no light of its own, only a faint amber halation
-// in its middle, warming what is under it. c is the sky as the lens sees it
+// in its middle where it crosses cloud, warming what is under it. c is the sky as the lens sees it
 // (developed light, defocused); every undeveloped term (the latent lift,
 // the halation) is gated by 1 - cov, the dilated structure.
 vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
@@ -360,7 +361,12 @@ vec3 developSky(vec3 c, float d, vec2 iuv, float cov) {
   float leak = 0.7 + 0.3 * vnoise(iuv * vec2(2.6, 1.8) + vec2(uTime * 0.04, -uTime * 0.03));
   // Halation is the red layer's own glow: on a cool sky it has to take a
   // little blue out as well as add amber, or it reads as lilac, not warm.
-  float g = h * (uBand / BAND) * leak * open;
+  // It is light scattered back from what is bright, so it glows where the
+  // band crosses cloud and all but vanishes over the blue: laid evenly along
+  // the band, amber over blue reads as a pale grey strip, and where the key's
+  // contours run straight (left of the pole, the top right) a seam.
+  float glow = mix(0.15, 1.0, smoothstep(0.32, 0.7, dot(c, LUMA)));
+  float g = h * (uBand / BAND) * leak * open * glow;
   r = mix(r, r * WARM, 0.32 * g);
   return r + AMBER * (g * HALO);
 }

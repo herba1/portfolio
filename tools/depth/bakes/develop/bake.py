@@ -1,14 +1,26 @@
 """Develop: bake the photograph into two layers and a depth key.
 
     python3 -I bake.py <out_dir> [work_dir]
+    python3 -I bake.py --fill-only <out_dir> [work_dir]
+
+--fill-only re-paints the sky from the plate.webp and alpha.png already in
+out_dir, and leaves the matte's edges and key.png as they are (the 6000 px
+original this was first baked from is gone, and a full bake from a smaller
+copy moves the matte by a pixel here and there). It rewrites fill.webp, and
+alpha.png only where the new fill needs more of it (see relight_fill).
 
 Layers (2400x1600):
   plate.webp  the photograph (sRGB)
   fill.webp   the sky behind the structure: every pole, girder and wire painted
-              out (log-light push-pull plus finer and finer normalised
-              convolutions, three rounds as the matte sharpens), equal
-              to the plate wherever the structure has no coverage, so
-              plate - (1 - alpha) * fill is the structure alone, premultiplied
+              out by LaMa (big-lama, ONNX) through a mask dilated well past
+              the silhouettes, matched to the sky round each hole in log
+              light; equal to the plate a few pixels clear of the structure,
+              so plate - (1 - alpha) * fill is the structure alone,
+              premultiplied. (The matte itself is pulled against a log-light
+              push-pull fill, three rounds as it sharpens: that fill is
+              exact enough for a matte, but in a hole as wide as the pole it
+              is a smooth pale smear, which the defocused latent sky shows
+              as a seam.)
   key.png     (1200x800) R  structure depth key, 0 far .. 1 near, defined everywhere
                  (pushed out from the structure so its defocus is continuous)
   alpha.png   structure alpha: known-background matte, alpha =
@@ -36,10 +48,13 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "spatial-photos"))
 from common import pushpull, smoothstep, disk  # noqa: E402
 
-SRC = "/tmp/claude-0/imgs2/picks/ine-catenary-clouds.jpg"
-DEPTH = "/tmp/claude-0/imgs2/picks/ine-catenary-clouds-depth.png"
-OUT = sys.argv[1]
-WK = sys.argv[2] if len(sys.argv) > 2 else OUT
+SRC = os.environ.get("SRC", "/tmp/claude-0/library/photos/ine-catenary-clouds.jpg")
+DEPTH = os.environ.get("DEPTH", "/tmp/claude-0/library/depth/ine-catenary-clouds.png")
+ARGS = [a for a in sys.argv[1:] if not a.startswith("--")]
+FILL_ONLY = "--fill-only" in sys.argv
+OUT = ARGS[0]
+WK = ARGS[1] if len(ARGS) > 1 else OUT
+LAMA = os.environ.get("LAMA", "/tmp/claude-0/models/lama-carve/lama_fp32.onnx")
 W, H = 2400, 1600
 LUMA = np.array([0.2126, 0.7152, 0.0722], np.float32)
 
@@ -55,6 +70,196 @@ def l2s(c):
 
 def save8(path, a):
     cv2.imwrite(path, np.clip(np.round(a * 255), 0, 255).astype(np.uint8))
+
+
+def _u8(m):
+    return m.astype(np.uint8)
+
+
+def _lama_tiled(img, hole, model):
+    """Inpaint img (sRGB 0..1, HxWx3) where hole, with LaMa's 512 px model,
+    tile by tile in raster order. Each tile keeps only the middle of its
+    overlaps and the next tile sees what it painted as known, so the tiles
+    agree."""
+    import onnxruntime as ort
+
+    sess = ort.InferenceSession(model, providers=["CPUExecutionProvider"])
+    T = 512
+    h, w = hole.shape
+
+    def starts(n):
+        if n <= T:
+            return [0]
+        k = int(np.ceil((n - T) / (T * 0.62))) + 1
+        return [int(round(i * (n - T) / (k - 1))) for i in range(k)]
+
+    img = np.where(hole[..., None], 0, img).astype(np.float32)
+    left = hole.copy()
+    xs, ys = starts(w), starts(h)
+    for iy, y0 in enumerate(ys):
+        for ix, x0 in enumerate(xs):
+            sub = left[y0:y0 + T, x0:x0 + T]
+            if not sub.any():
+                continue
+            x_lo = 0 if ix == 0 else (x0 + xs[ix - 1] + T) // 2 - x0
+            x_hi = T if ix == len(xs) - 1 else (xs[ix + 1] + x0 + T) // 2 - x0
+            y_lo = 0 if iy == 0 else (y0 + ys[iy - 1] + T) // 2 - y0
+            y_hi = T if iy == len(ys) - 1 else (ys[iy + 1] + y0 + T) // 2 - y0
+            im = img[y0:y0 + T, x0:x0 + T].transpose(2, 0, 1)[None]
+            mk = sub.astype(np.float32)[None, None]
+            out = sess.run(None, {"image": im, "mask": mk})[0][0].transpose(1, 2, 0) / 255
+            put = np.zeros_like(sub)
+            put[y_lo:y_hi, x_lo:x_hi] = True
+            put &= sub
+            img[y0:y0 + T, x0:x0 + T][put] = out[put]
+            sub[put] = False
+    return img
+
+
+def relight_fill(srgb, lin, alpha, prev, model=LAMA, scale=2):
+    """The sky with the structure painted out, for the latent, defocused sky.
+
+    The matte's own fill (a push-pull in log light) is exact enough to pull a
+    matte against, but across a hole as wide as the main pole it is a smooth
+    pale smear, a shade off the sky on either side, and it keeps residue: a
+    dark speck in the box, the sky through the grating. The latent sky lifts
+    and defocuses the fill, and that smear came up as a pale vertical seam.
+
+    So the fill is painted again by LaMa, at half size (its 512 px window then
+    sees a pole's width of sky on either side; the sky has no detail finer
+    than that a half-size paint loses, and grain matched to the photo goes
+    back on), through a mask dilated well past the silhouettes, so no fringe
+    of the steel is copied in from the edge: 20 px round anything solid wider
+    than 12 px (the poles, the masts' members, the platform), 8 px round wires,
+    the small sky cells inside the lattice, and the droppers, which the
+    matte missed (bare rods, a shade off the sky, so they stayed in the
+    sky as two thin ghosts). Then matched to the sky round each hole in log
+    light (the mismatch on a ring just outside it, carried across by a
+    push-pull), so its hue and light follow the sky's gradient.
+
+    The paint is used only 4 px past the matte (12 px past solid steel; the
+    steel's pale fringe is 3 px), with the plate beyond, so the developed
+    photograph keeps its own sky; the plate's difference from the paint just
+    outside is carried across it, so the two meet without a line. The
+    droppers, now painted out of the sky, go into the matte instead: the
+    least alpha that takes the fill back to the plate there.
+    Returns (fill, alpha), linear light."""
+    H_, W_ = alpha.shape
+    yl_ = srgb @ LUMA
+    s01 = alpha > 0.01
+    body = alpha > 0.5
+    # small sky cells enclosed by the structure
+    n, lab, st_, _ = cv2.connectedComponentsWithStats(_u8(~(cv2.dilate(_u8(s01), disk(2)) > 0)), connectivity=4)
+    small = st_[:, cv2.CC_STAT_AREA] < 900
+    small[0] = False
+    cells = small[lab]
+    thick = cv2.morphologyEx(_u8(body), cv2.MORPH_OPEN, disk(6)) > 0
+    # droppers: thin rods within ~35 degrees of vertical, coherent along
+    # their length (cloud texture is not): a horizontal second difference
+    # averaged along short oriented lines
+    dx = cv2.filter2D(yl_, -1, np.array([[-0.5, 0, 0, 1, 0, 0, -0.5]], np.float32), borderType=cv2.BORDER_REPLICATE)
+    vl = np.zeros_like(yl_)
+    L = 21
+    for ang in np.radians(np.arange(-35, 36, 7)):
+        ker = np.zeros((L, L), np.float32)
+        for t in np.linspace(-(L // 2), L // 2, 4 * L):
+            ker[int(round(L // 2 + t * np.cos(ang))), int(round(L // 2 + t * np.sin(ang)))] = 1
+        ker /= ker.sum()
+        vl = np.maximum(vl, np.abs(cv2.filter2D(dx, -1, ker, borderType=cv2.BORDER_REPLICATE)))
+    # apart from the structure (or every rod joins the wires it hangs from),
+    # but hanging off it
+    m1 = cv2.dilate(_u8(s01 | cells), disk(9)) > 0
+    near = cv2.dilate(_u8(alpha > 0.3), disk(90)) > 0
+    rod = (vl > 0.018) & (np.abs(dx) > 0.04) & near & ~m1
+    rod = cv2.dilate(_u8(rod), disk(2)) > 0
+    touch = cv2.dilate(_u8(m1), disk(8)) > 0
+    n, lab, st_, _ = cv2.connectedComponentsWithStats(_u8(rod), connectivity=8)
+    att = np.zeros(n, bool)
+    np.logical_or.at(att, lab[touch & rod], True)
+    span = np.hypot(st_[:, cv2.CC_STAT_WIDTH], st_[:, cv2.CC_STAT_HEIGHT])
+    ok = att & (span >= 12) & (st_[:, cv2.CC_STAT_AREA] < 14 * span)
+    ok[0] = False
+    rod = ok[lab]
+    # Those are the clear middles of the rods; follow each up and down to the
+    # wires (weaker, and close to the structure), within a narrow vertical
+    # corridor round what was found, so it cannot run off along a wire.
+    weak = (vl > 0.01) & (np.abs(dx) > 0.025) & ~(cv2.dilate(_u8(s01), disk(1)) > 0)
+    corridor = cv2.dilate(_u8(rod), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (13, 81))) > 0
+    rod = rod | (cv2.dilate(_u8(weak & corridor), disk(1)) > 0) & corridor
+    hole = (cv2.dilate(_u8(s01 | cells), disk(8)) > 0) | (cv2.dilate(_u8(thick), disk(20)) > 0) | (cv2.dilate(_u8(rod), disk(5)) > 0)
+    # (the paint is shown over the whole of a dropper's hole: the band round
+    # it below would carry the rest of the rod back in)
+    show = (cv2.dilate(_u8(s01), disk(4)) > 0) | (cv2.dilate(_u8(thick), disk(12)) > 0) | (cv2.dilate(_u8(rod), disk(5)) > 0)
+    print("paint: hole", round(float(hole.mean()), 3), "droppers px", int(rod.sum()))
+
+    h, w = H_ // scale, W_ // scale
+    m = cv2.resize(cv2.dilate(_u8(hole), disk(scale)).astype(np.float32), (w, h), interpolation=cv2.INTER_AREA) > 0.01
+    lama = _lama_tiled(cv2.resize(srgb, (w, h), interpolation=cv2.INTER_AREA), m, model)
+    # matched to the sky round it, in log light
+    ll = np.log(np.maximum(s2l(lama), 1e-4))
+    lo = np.log(np.maximum(cv2.resize(lin, (w, h), interpolation=cv2.INTER_AREA), 1e-4))
+    ring = (cv2.dilate(_u8(m), disk(4)) > 0) & ~m
+    dlt = pushpull(np.where(ring[..., None], lo - ll, 0), ring.astype(np.float32))
+    low = np.exp(np.where(m[..., None], ll + dlt, lo))
+    low = cv2.resize(low, (W_, H_), interpolation=cv2.INTER_CUBIC)
+    # grain matched to the photo's sky
+    hp_ = yl_ - cv2.GaussianBlur(yl_, (0, 0), 1.2)
+    sg = float(np.sqrt((hp_[~hole] ** 2).mean()))
+    nz_ = cv2.GaussianBlur(np.random.default_rng(3).standard_normal((H_, W_)).astype(np.float32), (0, 0), 0.6) * sg * 1.6
+    paint = np.clip(low * (1 + nz_[..., None]), 0, 1)
+    # The paint is shown only inside `show`, and the plate beyond. Between the
+    # two masks both are clean sky, so carry the plate's difference from the
+    # paint there across `show` (log light, push-pull): at its edge the paint
+    # is the plate, pixel for pixel, so the switch draws no line.
+    band = hole & ~show
+    lp = np.log(np.maximum(paint, 1e-4))
+    dlt = pushpull(np.where(band[..., None], np.log(np.maximum(lin, 1e-4)) - lp, 0), band.astype(np.float32))
+    fill = np.where(show[..., None], np.clip(np.exp(lp + dlt), 0, 1), lin).astype(np.float32)
+
+    # The matte was pulled against the old fill; over this one it must still
+    # give back the plate. The least alpha that does (the structure's colour
+    # free, plate - (1 - a) * fill inside 0..a) goes in wherever there is
+    # structure, where the paint is lighter than the old fill behind a
+    # partly covered edge, and on the droppers, now painted out of the sky.
+    # Only what this fill asks beyond what the matte's own fill did, so the
+    # matte is otherwise left exactly as it was.
+    def least(B_):
+        B_ = np.maximum(B_, 1e-4)
+        return np.clip(np.maximum((B_ - lin) / B_, (lin - B_) / np.maximum(1 - B_, 1e-4)).max(2), 0, 1)
+
+    a_new = least(fill)
+    a_new = np.where(a_new < 0.04, 0.0, a_new)
+    more = rod | ((alpha >= 0.04) & (a_new > np.maximum(alpha, least(prev)) + 0.01))
+    # and where the matte has a small hole inside solid steel (a pale face of
+    # the box it called sky) that the paint now covers with sky, the face
+    # goes back into the matte
+    n, lab, st_, _ = cv2.connectedComponentsWithStats(_u8(alpha < 0.04), connectivity=4)
+    ring = cv2.dilate(lab.astype(np.float32), disk(2)).astype(np.int32)
+    ring = np.where(lab == 0, ring, 0)
+    tot = np.bincount(ring.ravel(), minlength=n)
+    solid = np.bincount(ring.ravel(), weights=(alpha > 0.3).ravel(), minlength=n)
+    pit = (st_[:, cv2.CC_STAT_AREA] < 600) & (solid > 0.85 * np.maximum(tot, 1))
+    pit[0] = False
+    more |= pit[lab] & (a_new > 0.15)
+    alpha = np.where(more, np.maximum(alpha, a_new), alpha).astype(np.float32)
+    return fill, alpha
+
+
+if FILL_ONLY:
+    srgb = cv2.imread(os.path.join(OUT, "plate.webp"), cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255
+    lin = s2l(srgb)
+    alpha = cv2.imread(os.path.join(OUT, "alpha.png"), cv2.IMREAD_GRAYSCALE).astype(np.float32) / 255
+    prev = s2l(cv2.imread(os.path.join(OUT, "fill.webp"), cv2.IMREAD_COLOR)[:, :, ::-1].astype(np.float32) / 255)
+    fill, alpha2 = relight_fill(srgb, lin, alpha, prev)
+    cv2.imwrite(os.path.join(OUT, "fill.webp"), np.round(l2s(fill)[:, :, ::-1] * 255).astype(np.uint8), [cv2.IMWRITE_WEBP_QUALITY, 92])
+    a8 = np.round(alpha * 255)
+    a8n = np.round(alpha2 * 255)
+    # alpha only ever rises; the rest of the matte as it was, bit for bit
+    cv2.imwrite(os.path.join(OUT, "alpha.png"), np.where(a8n > a8, a8n, a8).astype(np.uint8))
+    os.makedirs(WK, exist_ok=True)
+    save8(os.path.join(WK, "p-fill.png"), l2s(fill)[:, :, ::-1])
+    print("fill only: wrote fill.webp, alpha.png")
+    sys.exit(0)
 
 
 bgr = cv2.imread(SRC, cv2.IMREAD_COLOR)
@@ -235,6 +440,8 @@ B = sky_fill(known3)
 # fringe of it, which the latent sky would lift and bloom.
 cover = cv2.dilate((alpha > 0.01).astype(np.uint8), disk(3)) > 0
 fill = np.where(cover[..., None], B, lin)
+# ...but in a hole as wide as the pole that is a pale smear: paint it again
+fill, alpha = relight_fill(srgb, lin, alpha, fill)
 
 # --- structure depth key, 0 far .. 1 near --------------------------------
 w = (alpha > 0.25)
