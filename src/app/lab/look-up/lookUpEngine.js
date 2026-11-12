@@ -21,7 +21,7 @@ const ASSET = "/lab/look-up/";
 const FACES = ["px", "nx", "py", "ny", "pz", "nz"];
 const ENC = 1.35; // the faces store scene light / 1.35, sRGB-encoded
 
-const YAW0 = 20; // faces the curved tower with the ticker: one warm accent
+const YAW0 = 20; // faces the curved tower; the warm accent is the sunlit stone (see grade.py)
 const FOV0 = 70;
 const FOV1 = 140;
 const AUTO_TILT = 0.14; // ~12.6 degrees: shows that it can look up

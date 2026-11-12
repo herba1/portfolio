@@ -145,6 +145,8 @@ def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
     graded_sky = np.maximum(graded_sky + (graded_sky - sh) * P['sharpA'], 0)
     # --- non-sky: exposure + slight warm, buildings keep their glass
     rest = eq * P['expo'] * np.array(P['restTint'], np.float32)
+    if P.get('bGrade', 1):
+        rest = _buildings(rest, wsky, w, P)
     out = rest + (graded_sky - rest) * wsky[..., None]
     # --- soft shoulder so nothing exceeds the encode range
     Yo = out @ LUMA
@@ -153,6 +155,58 @@ def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
     out = out * (Yn / (Yo + 1e-6))[..., None]
     return out.astype(np.float32), wsky, alpha, prof
 
+# --- towers: their own grade, under the inverse of the sky matte.
+# A split tone keyed on face luminance: each face is measured at ~half a degree
+# (a masked blur, so the bright sky never bleeds into the tower edge), its level
+# pushed apart in log space around a pivot, and its colour swung from a deep
+# navy-black (shaded faces, glass) to a pale warm stone (sunlit faces). The
+# per-pixel ratio to the face level rides on top, so the window grid survives.
+def _buildings(rest, wsky, w, P):
+    m = np.clip(1 - wsky, 0, 1).astype(np.float32)
+    Y = rest @ LUMA
+    sig = w / 360 * P['bFace']
+    lY = np.log(np.maximum(Y, 1e-4))
+    mw = smooth(0.85, 1.0, m)  # only solid tower feeds the face level
+    def mblur(a, s_):
+        return cv2.GaussianBlur(a * mw, (0, 0), s_) / (cv2.GaussianBlur(mw, (0, 0), s_) + 1e-4)
+    # the window grid averaged away first, then an edge-keeping (guided) filter
+    # at face scale, so each face gets one level and corners stay crisp
+    I = mblur(lY, w / 360 * P['bGrid'])
+    mI = mblur(I, sig); vI = np.maximum(mblur(I * I, sig) - mI * mI, 0)
+    a = vI / (vI + P['bEps']); b = mI - a * mI
+    Yf = np.exp(mblur(a, sig) * I + mblur(b, sig))
+    Yf = np.maximum(Yf, 1e-4)
+    # where the face sits between shade and sun, from its own level
+    u = smooth(np.log(P['bLo']), np.log(P['bHi']), np.log(Yf)) ** P['bGamma']
+    navy = s2l(P['bShade']) * 1.35; stone = s2l(P['bLit']) * 1.35
+    nY, sY = float(navy @ LUMA), float(stone @ LUMA) * P['bLitGain']
+    # the face level runs navy -> stone in log space, the colour with it
+    lvl = np.exp(np.log(nY) + (np.log(sY) - np.log(nY)) * u)
+    det = np.clip(Y / Yf, 0.05, 20) ** P['bDetail']
+    Yn = lvl * det
+    Yn = np.sqrt(Yn * Yn + (nY * P['bFloor']) ** 2)  # soft floor: the navy never crushes to black
+    tn = navy / nY; ts = stone / float(stone @ LUMA)
+    hl = smooth(P['bHlLo'], P['bHlHi'], u)[..., None]
+    tint = tn + (ts - tn) * u[..., None]
+    # bWarmR/B are linear gains: about +0.04 R and -0.03 B in display values at stone level
+    warm = np.array([1 + P['bWarmR'], 1, 1 - P['bWarmB']], np.float32)
+    tint = tint * (1 + (warm - 1) * hl)
+    tint = tint / (tint @ LUMA)[..., None]
+    # keep a little of the capture's own colour (glass reflecting sky), but
+    # never the saturated orange of the LED ticker
+    own = rest / (Y[..., None] + 1e-5)
+    r, g, b = rest[..., 0], rest[..., 1], rest[..., 2]
+    led = smooth(1.25, 1.7, r / (g + 1e-5)) * smooth(1.6, 2.6, r / (b + 1e-5))
+    led = cv2.GaussianBlur(led.astype(np.float32), (0, 0), max(1.0, w / 8192 * 3))
+    led = np.clip(led * 2, 0, 1)
+    keep = (P['bKeep'] * (1 - led))[..., None]
+    col = tint + (own - tint) * keep
+    col = col / np.maximum(col @ LUMA, 1e-5)[..., None]
+    # the ticker reads at its face level, not as a lit sign
+    Yn = Yn + (np.minimum(Yn, lvl) - Yn) * led
+    graded = Yn[..., None] * col
+    return rest + (graded - rest) * m[..., None]
+
 # Cloud: a wide, feathered matte (aLo..aHi, alphaBlur in degrees) and form
 # contrast near 1, so the capture's own cumulus carry through rather than
 # being redrawn from noise; no unsharp. Lit tops roll off warm-neutral
@@ -160,4 +214,6 @@ def _grade3(eq, P, w, elev, Y, wsky, bn, prof):
 P = dict(skyY=1.05, bCloud=0.40, bGap=0.66, alphaGamma=2.4,
          skyHex=['#08408f', '#1462b4', '#3b8ccc', '#8db8e2'], skyGain=0.74, gapTex=0.6,
          expo=0.36, cloudLit=[1.0, 0.97, 0.91], cloudShade=[0.78, 0.86, 0.95],
-         restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3)
+         restTint=[1.0, 1.0, 0.98], cloudContrast=1.15, formContrast=1.15, cloudGain=0.92, cloudRef=2.4, sunLift=0.25, formRoll=1.3, fineContrast=1.1, sharpR=2.5, sharpA=0.0, cloudLevel=0.8, denoise=3.0, denoiseB=3.0, gapPct=97, cloudPct=8, aLo=0.05, aHi=0.72, alphaBlur=0.12, knee=0.85, ceil=1.3,
+         bFace=1.5, bGrid=0.25, bEps=0.04, bLo=0.06, bHi=0.3, bGamma=1.5, bShade='#1b2633', bLit='#cdbfa6', bLitGain=1.0, bFloor=0.75,
+         bDetail=1.0, bHlLo=0.35, bHlHi=1.0, bWarmR=0.14, bWarmB=0.16, bKeep=0.15)
