@@ -20,11 +20,23 @@ a swing slides it against the rooftops.
              house) are kept, by connected component: the rows of small
              cumulus and the horizon haze under them are gone, so the alpha
              is 0 below the cloud base and nothing veils the roofs or the town.
-             Relit with real contrast: the HDR luminance, its billows
-             sharpened (a local-contrast boost in log luminance, so the
-             cauliflower holds on the lit edges), runs from a saturated
-             skylight blue-grey in the shaded lobes and toward the base to a
-             warm near-white on the sunlit tops that rolls off below clipping.
+  edge       the key's outermost px are thin cloud over sky: a pale rim with
+             dark-blue notches. Still at native resolution, the bays are
+             closed, the silhouette eroded by ERODE px and feathered again,
+             a little on the edges facing the sun and more on the shaded ones,
+             and the edge takes the colour of the solid body inside it.
+  light      the HDR luminance, its billows sharpened (a local-contrast boost
+             in log luminance, so the cauliflower holds), modelled by the
+             silhouette's relief lit from the sun. Only where the sun reaches
+             (the faces of the big lobes turned up and right, high in the
+             cloud) may it run up to the warm white that rolls off below
+             clipping; everywhere else the same billows stay in a skylight
+             blue-grey (hue 210-214), deeper in the lobes turned furthest
+             away, so the left flank and the lower lobes read as shade.
+  base       on the card: the underside darkens to a flatter blue-grey above
+             VBASE, then the cloud thins over BASE_FADE into the sky's own
+             horizon gradient along a wavering line, so no pale veil of it
+             hangs behind the old house's roof, the wires and the town.
              Projected onto the card through a rectilinear view, stretched
              upright (STRETCH) and scaled so the cloud towers from behind the
              roofs to well above the crossbuck's arms, in the middle of the
@@ -52,7 +64,7 @@ import numpy as np
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from common import dilate, erode, pushpull, smoothstep  # noqa: E402
+from common import dilate, disk, erode, pushpull, smoothstep  # noqa: E402
 from skygrad import _enc, _lin, sky_gradient  # noqa: E402
 
 BAKE, HDR, OUT = sys.argv[1:4]
@@ -88,15 +100,32 @@ FOCAL, STRETCH = 2700.0, 1.3
 KEEP_LON, KEEP_LAT = (125.0, 165.0), (17.0, 40.0)
 MIN_AREA = 30000  # pano px: cumulus, not the scraps round them
 PAD = 0.07  # transparent margin round the cloud, photo widths
+# The silhouette, in pano px: bays of sky narrower than 2 CLOSE_R are closed,
+# the key's thin rim is eroded by ERODE and the edge feathered again by
+# FEATHER (sigma: the sun-facing edges, the shaded ones).
+CLOSE_R, ERODE, FEATHER = 6, 5, (1.5, 4.0)
 # Relit cloud, sRGB: a warm sunlit white that the film lands just under
-# clipping, and a saturated skylight blue-grey for the shaded lobes.
-CLOUD_TOP = (0xFF, 0xF8, 0xEA)
-CLOUD_SHADE = (0x8F, 0xB3, 0xD9)
+# clipping, a skylight blue-grey for the shaded billows (k = K_SHADE) and a
+# deeper one for the lobes turned furthest from the sun (k = 0), all near
+# hue 210-214 so the shade reads as sky light, not grey.
+CLOUD_TOP = (0xFF, 0xF6, 0xE4)
+CLOUD_SHADE = (0x99, 0xAF, 0xC9)
+CLOUD_DEEP = (0x72, 0x89, 0xA6)
+K_SHADE = 0.45
 DETAIL = (2.3, 1.3)  # local-contrast boost of the billows (log luminance): lobes, then cauliflower
-BASE_SHADE = (31.0, 21.0, 0.6)  # toward the base (lat), the cloud darkens by up to this
 FORM = 0.55  # how much the silhouette's own relief, lit from the sun, models it
 SUN2D = (0.62, -0.78)  # the sun's direction across the view (x right, y down): up and right
-RIM = (8, 22, 0.85)  # sun-facing edges: within these px of the silhouette, lit to this share of the lobe inside
+# Where the sun reaches: the big lobes' relief (weight SUN_W[0]) and the
+# height in the cloud (lat SUN_LAT, weight SUN_W[1]). Out of it a lobe keeps
+# its billows but at most SHADE_CAP of the lit range.
+SUN_LAT, SUN_W, SHADE_CAP = (23.0, 33.0), (1.4, 1.6), 0.45
+# The base, in photo v: the underside darkens to CLOUD_BASE over BASE_BAND
+# above VBASE (keeping BASE_FLAT of its own broad shading, BASE_SHARE of the
+# way), then thins over BASE_FADE into the sky gradient (its colour BASE_SKY
+# of the way there as it goes), along a line that wavers by BASE_WOB.
+CLOUD_BASE = (0x7C, 0x92, 0xAE)
+VBASE, BASE_BAND, BASE_FADE, BASE_WOB = 0.66, 0.18, 0.08, 0.008
+BASE_FLAT, BASE_SHARE, BASE_SKY = 0.3, 0.9, 0.6
 SHARPEN = 0.5  # unsharp mask on the card, inside the cloud
 LW = np.array([0.2126, 0.7152, 0.0722], np.float32)
 PX_DEG = 16384 / 360  # the 16k pano's px per degree
@@ -203,6 +232,25 @@ alpha = alpha * np.clip(sel * 1.6, 0, 1)
 alpha = np.where(alpha < 0.02, 0, alpha)  # no faint veil anywhere off the cloud
 inside = alpha > 0.9
 
+# ---- the silhouette, at the HDRI's native resolution
+# The key's outermost few px are thin cloud over sky: a pale, half-transparent
+# rim with dark-blue notches where it read pockets of sky as clear. Kept, the
+# cloud is a cut-out. The notches are closed (a grey-level closing: any bay
+# narrower than CLOSE_R either side fills), the whole silhouette is eroded by
+# ERODE px so the rim goes, and it is feathered again: a little on the edges
+# that face the sun (a lit cumulus is crisp there), more on the shaded ones,
+# where the vapour thins into the sky.
+ac = cv2.morphologyEx(alpha, cv2.MORPH_CLOSE, disk(CLOSE_R))
+hgt = cv2.GaussianBlur((ac > 0.5).astype(np.float32), (0, 0), 10.0)
+gx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3)
+gy = cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3)
+facing = (-gx * SUN2D[0] - gy * SUN2D[1]) / (np.sqrt(gx * gx + gy * gy) + 1e-4)
+facing = cv2.GaussianBlur(smoothstep(-0.2, 0.6, facing), (0, 0), 6)
+ae = cv2.erode(ac, disk(ERODE))
+a_out = cv2.GaussianBlur(ae, (0, 0), FEATHER[0]) * facing + cv2.GaussianBlur(ae, (0, 0), FEATHER[1]) * (1 - facing)
+a_out = np.where(a_out < 1 / 255, 0, a_out)
+del hgt, gx, gy, facing
+
 # ---- relight
 LF = np.maximum(F @ LW, 1e-4)
 # the billows: a local-contrast boost in log luminance, at the scale of the
@@ -210,25 +258,10 @@ LF = np.maximum(F @ LW, 1e-4)
 # only (the sky round it would pull the edges down into a dark rim)
 lg = np.log(LF)
 for sig, amt in zip((14.0, 3.0), DETAIL):
-    wgt = cv2.GaussianBlur(alpha, (0, 0), sig) + 1e-4
-    base = cv2.GaussianBlur(lg * alpha, (0, 0), sig) / wgt
+    wgt = cv2.GaussianBlur(ac, (0, 0), sig) + 1e-4
+    base = cv2.GaussianBlur(lg * ac, (0, 0), sig) / wgt
     lg = base + amt * (lg - base)
 LF = np.exp(lg)
-# The HDRI's silhouette is dim all round (thin cloud, and the body firmed up
-# over it): kept as it is, it draws a blue-grey band round the cloud, a cut-out
-# rim. Along the edges that face the sun it takes the brightness of the lobe
-# just inside it, so a sunlit turret is lit right to its edge; the edges that
-# face away keep their shade.
-inner = (alpha > 0.5).astype(np.uint8)
-dist = cv2.distanceTransform(np.pad(inner, 1), cv2.DIST_L2, 5)[1:-1, 1:-1]
-hgt = cv2.GaussianBlur(inner.astype(np.float32), (0, 0), 10.0)
-gx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3)
-gy = cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3)
-facing = np.clip((-gx * SUN2D[0] - gy * SUN2D[1]) / (np.sqrt(gx * gx + gy * gy) + 1e-4), 0, 1)
-facing = cv2.GaussianBlur(facing, (0, 0), 4)
-rim = (1 - smoothstep(RIM[0], RIM[1], dist)) * smoothstep(0.0, 0.6, facing)
-env = cv2.GaussianBlur(cv2.dilate(LF, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * RIM[1] + 1, 2 * RIM[1] + 1))), (0, 0), 4)
-LF = np.maximum(LF, LF + rim * (RIM[2] * env - LF))
 top = float(np.percentile(LF[inside], 96))
 low = float(np.percentile(LF[inside], 8))
 t = np.clip((np.log(LF) - np.log(low)) / (np.log(top) - np.log(low)), 0, 1.3)
@@ -237,8 +270,9 @@ t = np.clip((np.log(LF) - np.log(low)) / (np.log(top) - np.log(low)), 0, 1.3)
 # of the billows), lit from the sun's side, puts the form back: the turrets'
 # upper right faces catch the sun, their lower left falls into shade.
 rel = np.zeros_like(alpha)
+big = np.zeros_like(alpha)
 for sig, w in ((90.0, 0.5), (36.0, 0.5), (12.0, 0.4)):
-    hgt = cv2.GaussianBlur((alpha > 0.5).astype(np.float32), (0, 0), sig)
+    hgt = cv2.GaussianBlur((ac > 0.5).astype(np.float32), (0, 0), sig)
     gx = cv2.Sobel(hgt, cv2.CV_32F, 1, 0, ksize=3) / 8 * sig * 2.5
     gy = cv2.Sobel(hgt, cv2.CV_32F, 0, 1, ksize=3) / 8 * sig * 2.5
     # a surface rising toward the inside faces outward: the normal leans
@@ -246,26 +280,43 @@ for sig, w in ((90.0, 0.5), (36.0, 0.5), (12.0, 0.4)):
     nx, ny = -gx, -gy
     lam = (nx * SUN2D[0] + ny * SUN2D[1]) / np.sqrt(1 + nx * nx + ny * ny)
     rel += w * lam
+    if sig > 30:
+        big += w * lam
+del hgt, gx, gy, nx, ny, lam
 t = t + FORM * rel
-# toward the base the cloud is in its own shadow: blue-grey underneath
-t = t * (1 - BASE_SHADE[2] * smoothstep(BASE_SHADE[0], BASE_SHADE[1], SLAT))
-# mixed in sRGB (perceptual) so the middle of the range is a real blue-grey
-# and not already white; the tops roll off into the lit white with no
-# shoulder that clips (the film lands it about 240)
+# Where the sun reaches. A cumulus is lit on the faces that turn to the sun
+# (up and right) and stands in its own shade everywhere else: the left flank,
+# the lower lobes, the underside. The big lobes' relief and the height in the
+# cloud decide it; only there may a lobe run up to the warm white, elsewhere
+# the same billows stay in the skylight blue-grey.
+hl = smoothstep(SUN_LAT[0], SUN_LAT[1], SLAT)
+sun = smoothstep(0.15, 0.85, 0.5 + SUN_W[0] * big + SUN_W[1] * (hl - 0.5))
+sun = cv2.GaussianBlur(sun, (0, 0), 6)
+t = t * (SHADE_CAP + (1 - SHADE_CAP) * sun)
+del big, hl, sun
 t = np.clip(t, 0, 1.3)
 k = 0.5 * t ** 1.25 + 0.5 * smoothstep(0.08, 1.0, t)
 k = np.where(k > 0.8, 0.8 + 0.2 * np.tanh((k - 0.8) / 0.2), k)
 if WORK:
     os.makedirs(WORK, exist_ok=True)
-    for nm, im in (("k", k), ("rel", 0.5 + rel), ("t0", np.clip((np.log(LF) - np.log(low)) / (np.log(top) - np.log(low)), 0, 1))):
-        cv2.imwrite(os.path.join(WORK, nm + ".jpg"), (np.clip(im * (alpha > 0.02), 0, 1) * 255).astype(np.uint8)[::2, ::2])
-lit = np.array(CLOUD_TOP, np.float32) / 255
+    for nm, im in (("k", k), ("rel", 0.5 + rel), ("a_out", a_out)):
+        cv2.imwrite(os.path.join(WORK, nm + ".jpg"), (np.clip(im * (ac > 0.02), 0, 1) * 255).astype(np.uint8)[::2, ::2])
+# three stops, mixed in sRGB (perceptual): the deep skylight blue-grey of the
+# lobes turned furthest from the sun, the lighter blue-grey of the shaded
+# billows, the warm white of the sunlit tops
+deep = np.array(CLOUD_DEEP, np.float32) / 255
 shade = np.array(CLOUD_SHADE, np.float32) / 255
-col = _lin(shade + (lit - shade) * k[..., None])
-# The fringe's colour is un-mixed from very little cloud and comes out as
-# dark specks: it takes the colour of the cloud just inside it instead.
-wf = smoothstep(0.5, 0.95, alpha)[..., None]
-col = col * wf + pushpull(col, (alpha > 0.95).astype(np.float32)) * (1 - wf)
+lit = np.array(CLOUD_TOP, np.float32) / 255
+k3 = k[..., None]
+lo_ = deep + (shade - deep) * np.clip(k3 / K_SHADE, 0, 1)
+col = _lin(np.where(k3 < K_SHADE, lo_, shade + (lit - shade) * np.clip((k3 - K_SHADE) / (1 - K_SHADE), 0, 1) ** 1.3))
+del k3, lo_
+# The colour at the silhouette is un-mixed from very little cloud: every px
+# off the cloud's solid body takes the colour of the body just inside it.
+wf = smoothstep(0.5, 0.95, ae)[..., None]
+col = col * wf + pushpull(col, (ae > 0.95).astype(np.float32)) * (1 - wf)
+del wf, ae
+alpha = a_out
 print("cumulus: hdr top", round(top, 3), "low", round(low, 3))
 
 # ---- onto the card: premultiplied, through the view
@@ -287,6 +338,27 @@ core = cv2.GaussianBlur(erode(ca_ > 0.6, 3).astype(np.float32), (0, 0), 2)
 col = np.clip(col + SHARPEN * core[..., None] * (col - cv2.GaussianBlur(col, (0, 0), 1.6)), 0, 1)
 alpha = ca_
 del cc_, ca_
+# ---- the base (card space): the cloud's underside is flat and in its own
+# shadow, a darker blue-grey with little of the billows' detail, and below it
+# the cloud does not go on as a pale veil behind the roofs and the wires: it
+# thins into the sky's own horizon gradient, along a base line that wavers a
+# little (vapour, not a ruler).
+rng_ = np.random.default_rng(5)
+wob = cv2.resize(rng_.standard_normal((ch // 64 + 2, cw // 64 + 2)).astype(np.float32), (cw, ch), interpolation=cv2.INTER_CUBIC)
+wob = cv2.GaussianBlur(wob, (0, 0), 24)
+wob /= max(float(wob.std()), 1e-6)
+vb = V + BASE_WOB * wob
+del wob
+under = smoothstep(VBASE - BASE_BAND, VBASE, vb)[..., None]
+flat = cv2.GaussianBlur(col, (0, 0), 18)
+base_c = np.array(CLOUD_BASE, np.float32) / 255
+col = col + under * (base_c + BASE_FLAT * (flat - base_c) - col) * BASE_SHARE
+del flat
+gone = smoothstep(VBASE - 0.01, VBASE + BASE_FADE, vb)
+col = col + (gone * BASE_SKY)[..., None] * (sky_gradient(U, V) - col)
+alpha = alpha * (1 - gone)
+alpha = np.where(alpha < 1 / 255, 0, alpha)
+del under, gone, vb
 
 # ---- the clouds card: the cloud on a wide transparent margin, its alpha
 # feathered to 0 well inside every edge, origin and size on whole photo px

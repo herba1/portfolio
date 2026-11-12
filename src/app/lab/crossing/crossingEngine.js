@@ -16,8 +16,9 @@ import { createFilm } from "../_kit/film";
 // The photo's own clouds were faint torn wisps, so the sky card holds the
 // clear cobalt gradient alone and an eighth card between it and the far
 // houses carries real cumulus (cumulus.py, from a Poly Haven summer HDRI):
-// sunlit warm tops that roll off below clipping, skylight-blue undersides,
-// rising from behind the old house's roof and the town.
+// sunlit warm tops that roll off below clipping, a skylight blue-grey left
+// flank and lower lobes, and a darker, flat base that thins into the sky's
+// horizon above the old house's roof and the town.
 //
 // Every plane k sits at its own distance z_k from the camera and is scaled by
 // z_k / f, so from the lens axis the stack projects back onto the photo
@@ -73,7 +74,7 @@ const PLANES = [
   // takes only a share of the lens's defocus (dof), of the air's haze and of
   // the shadows the cards in front throw (shade), so focused on the near
   // planes it stays a lit, glowing form, not a smear.
-  { file: "clouds", rect: [0.09375, 0.0944, 0.93555, 1.10324], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
+  { file: "clouds", rect: [0.0957, 0.09587, 0.93359, 0.85546], o: 0.53, ends: [true, true, true, true], cast: false, dof: 0.2, haze: 0.15, shade: 0 },
   { file: "p1", rect: [-0.1499, 0.18805, 1.1499, 1.14971], o: 0.38 }, // far houses, trees
   // the wires' overscan runs on along each wire's own slope, so past the
   // photo their matte (for shadows) does not hold its edge: it would draw
