@@ -56,6 +56,10 @@ skyg, alpha, _ = clouds.composite(sky, elev, matte, stats=bool(os.environ.get('F
 # Retouch: one dark grey speck inside the right-hand cumulus (a bird or a mark
 # in the docklands capture, ~15 px at 3840) is filled from the cloud around it.
 skyg = clouds.retouch(skyg, [(2493, 1007)], W, H)  # at the 3840 plate
+# And one larger blot in the big left cumulus, a hard hexagon ~70 px across
+# where the cobalt came through the body, healed from the cloud round it with
+# a donor patch's folds (clouds.BLOTS; heal_plate.py does it to a baked plate).
+skyg = clouds.heal(skyg, clouds.BLOTS, W, H)
 
 # ---------------------------------------------------------------- the towers
 Yb = city @ LUMA

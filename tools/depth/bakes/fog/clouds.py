@@ -58,6 +58,10 @@ BASE_LO, BASE_TOP = 0.55, 0.7
 DETAIL_EDGE = 16
 # The bake's luminance shoulder (bake.py), which the folds are laid on through.
 SH_K0, SH_TOP = 0.64, 0.965
+# Dark blots inside the big left cumulus, healed after the composite (heal):
+# a hard-edged hexagon ~70 px across at the 3840 plate, where the cobalt came
+# through the body (x, y, radius, donor offset x, y).
+BLOTS = [(966, 1008, 46, -150, -40)]
 LIGHT_RIM = [(0.78, '#F1F1EF'), (1.0, '#F8F7F4')]
 LIGHT = [(0.0, '#93B1CB'), (0.3, '#A9C1D6'), (0.55, '#D2DDE4'), (0.78, '#F2EFEA'), (1.0, '#FFF1E2')]
 
@@ -330,3 +334,50 @@ def retouch(skyg, specks, W, H):
         skyg[y0:y1, x0:x1] = win * (1 - f) + fill * f
         print('retouch', (sx, sy), int(hole.sum()), 'px')
     return skyg
+
+
+def heal(img, spots, W, H):
+    """Heal larger dark blots inside a cloud body (a hole the unmix let the
+    cobalt through, or a mark in the capture, laid in the plate as a hard
+    polygon): the blot is found against the cloud round it (a morphological
+    close at the blot's scale), its light filled in from the ring outside it
+    at low frequency, and its texture taken from a donor patch of the same
+    cloud, so the patch reads as more of the body, not a smooth spot.
+    spots: (x, y, radius, donor dx, donor dy) at the 3840 plate. img: linear."""
+    for sx, sy, sr, ddx, ddy in spots:
+        f = W / 3840
+        cx, cy, R = int(sx * f), int(sy * f), max(int(sr * f), 4)
+        dx, dy = int(ddx * f), int(ddy * f)
+        P = 3 * R
+        x0, y0, x1, y1 = max(cx - P, 0), max(cy - P, 0), min(cx + P, W), min(cy + P, H)
+        win = img[y0:y1, x0:x1].astype(np.float32)
+        Yw = win @ LUMA
+        k = int(2.4 * R) | 1
+        closed = cv2.morphologyEx(Yw, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k)))
+        closed = cv2.GaussianBlur(closed, (0, 0), 0.15 * R)
+        yy, xx = np.mgrid[y0:y1, x0:x1]
+        inside = ((xx - cx) ** 2 + (yy - cy) ** 2 < R * R)
+        hole = (((closed - Yw) / (closed + 1e-5) > 0.035) & inside).astype(np.uint8)
+        # close the blot's outline and take its soft dark skirt with it
+        e = max(int(0.2 * R) | 1, 3)
+        hole = cv2.morphologyEx(hole, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (e, e)))
+        hole = cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (e + 4, e + 4))).astype(np.float32)
+        # low frequency: the light of the ring round the blot, pulled in
+        sig = 0.35 * R
+        lowfill = nblur(win, 1 - hole, sig)
+        for _ in range(3):
+            lowfill = nblur(lowfill * hole[..., None] + win * (1 - hole[..., None]), np.ones_like(hole), 0.25 * R) * hole[..., None] \
+                + win * (1 - hole[..., None])
+        # texture: the donor's own folds, in log light, less its blur at the same scale
+        don = img[y0 + dy:y1 + dy, x0 + dx:x1 + dx].astype(np.float32)
+        lD = np.log(np.maximum(don @ LUMA, 1e-4))
+        hp = lD - cv2.GaussianBlur(lD, (0, 0), sig)
+        lW = np.log(np.maximum(Yw, 1e-4))
+        ring = (cv2.dilate(hole, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * e + 1, 2 * e + 1))) - hole) > 0
+        hpw = lW - cv2.GaussianBlur(lW, (0, 0), sig)
+        gain = np.clip(np.std(hpw[ring]) / (np.std(hp[hole > 0]) + 1e-5), 0.5, 1.5)
+        fill = lowfill * np.exp(np.clip(gain * hp, -0.3, 0.3))[..., None]
+        a = np.minimum(cv2.GaussianBlur(hole, (0, 0), 0.12 * R) * 1.5, 1)[..., None]
+        img[y0:y1, x0:x1] = win * (1 - a) + fill * a
+        print('heal', (sx, sy), int(hole.sum()), 'px, texture gain', round(float(gain), 2))
+    return img
