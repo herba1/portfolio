@@ -5,9 +5,12 @@ import { albumById, loadCover } from "../_kit/covers";
 // the middle, lying shingled on a scrap of fabric. Brushing across a sequin
 // turns it over about the axis at right angles to the stroke, through a real
 // rotation, so its normal sweeps through the room's lights on the way. One
-// side is matte charcoal; the other is a coloured mirror whose tint is the
-// album cover at that sequin's place on the swatch. The room is dark but for
-// a few small, very hot softboxes. Each mirror is coloured metal: what it
+// side is near-black matte charcoal that knows nothing of the picture; the
+// other is a coloured mirror whose tint is the album cover at that sequin's
+// place on the swatch. The room is dark but for a few big sharp softboxes
+// overhead and some small, very hot ones low around it. A settled mirror has
+// no diffuse at all: it is dark tinted metal unless its lean points it at a
+// box, and then it throws back a sharp image of the box in its own colour. Each mirror is coloured metal: what it
 // throws back of a box is the box times its own tint, so a pale disc flares
 // hot and white, a sky-blue one flares cyan, and a black one only glows a
 // dim, deep version of itself. The glitter is the picture's own highlights.
@@ -108,32 +111,34 @@ float panel(vec3 d, float az, float el, vec2 hs, float soft){
   float da = abs(mod(atan(d.y, d.x) - radians(az) + 3.14159265, 6.2831853) - 3.14159265) * sin(e);
   return smoothstep(hs.x + soft, hs.x - soft, da) * smoothstep(hs.y + soft, hs.y - soft, abs(e - el));
 }
-// The big diffused panels high over the table. A settled mirror leans with
-// the cloth under it, so neighbours see the same part of a panel together
-// and the light rolls over the swatch in broad bands that follow the folds.
-// widen > 1 is the same light as a matte surface sees it: the same place in
-// the sky, blurred.
-float strip(vec3 d, float az, float el, vec2 hs, float rot, float widen){
-  vec3 c = boxDir(az, el);
-  float a = dot(d, c);
-  if (a <= 0.0) return 0.0;
-  vec3 t1 = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
-  vec3 t2 = cross(t1, c);
-  vec2 q = vec2(dot(d, t1), dot(d, t2)) / a;
+// The softboxes a settled mirror sees: a few big, sharp-edged panels hung
+// high over the table. A disc at rest reflects one only if its lean points
+// its mirror straight at it, and a disc's lean is mostly the drape's slope
+// under it, which it shares with its neighbours. So whole flanks of a fold
+// catch a panel together and blaze in its colour, the flank beyond falls to
+// dark metal, and the band's edge is ragged where each disc's own wobble
+// tips it in or out. Each panel is hotter at its centre than at its rim,
+// so how bright a disc burns says how squarely it leans into the box.
+// widen > 1 is the same light as a matte surface sees it: blurred and dull.
+float sbox(vec3 d, vec2 c, vec2 hs, float rot, float soft, float widen){
+  if (d.z <= 0.05) return 0.0;
+  vec2 q = d.xy / d.z - c;
   float cr = cos(rot), sr = sin(rot);
-  q = vec2(cr * q.x + sr * q.y, -sr * q.x + cr * q.y) / (hs * widen);
-  // A diffuser's soft falloff, gaussian both ways.
-  return exp(-0.5 * dot(q, q));
+  q = vec2(cr * q.x + sr * q.y, -sr * q.x + cr * q.y);
+  vec2 hw = hs * widen;
+  float sf = soft * widen * widen;
+  vec2 e = smoothstep(hw + sf, hw - sf, abs(q));
+  vec2 n = q / hw;
+  return e.x * e.y * (1.0 - 0.45 * clamp(dot(n, n), 0.0, 1.0));
 }
-// A big warm panel up and to the left, past where a flat swatch would see
-// it, so it is the folds that find it: every flank turned toward it lights
-// in a broad band and every flank turned away falls dark. A smaller cool
-// panel opposite catches the other flanks more faintly. Over it all, the
-// ceiling's wide glow, so a disc in a fold's shadow still shows its colour.
-vec3 overhead(vec3 d, float widen){
-  return vec3(1.0, 0.97, 0.93) * 0.22 * strip(d, 250.0, 0.05, vec2(0.5, 0.45), 0.0, 1.0)
-       + vec3(1.0, 0.96, 0.9) * 1.2 * strip(d, 243.0, 0.32, vec2(0.14, 0.085), 0.8, widen)
-       + vec3(0.85, 0.93, 1.0) * 0.4 * strip(d, 43.0, 0.4, vec2(0.13, 0.09), 0.5, widen);
+vec3 panels(vec3 d, float widen){
+  // Projected positions: x is screen right, y screen down, both as tan of
+  // the angle off the zenith. A flat swatch's discs see roughly
+  // x in [-0.22, 0.22], y in [-0.3, 0.14]; the drape swings that by 0.35.
+  return vec3(1.0, 0.95, 0.88) * 1.0 * sbox(d, vec2(-0.14, -0.24), vec2(0.24, 0.1), 0.35, 0.006, widen)
+       + vec3(1.0, 0.97, 0.93) * 0.9 * sbox(d, vec2(0.21, -0.02), vec2(0.07, 0.28), -0.25, 0.005, widen)
+       + vec3(0.9, 0.95, 1.0) * 0.8 * sbox(d, vec2(-0.1, 0.16), vec2(0.26, 0.065), -0.2, 0.005, widen)
+       + vec3(1.0, 0.96, 0.9) * 0.75 * sbox(d, vec2(-0.38, -0.02), vec2(0.06, 0.22), 0.15, 0.005, widen);
 }
 vec3 sky(vec3 d){
   float up = d.z;
@@ -215,22 +220,25 @@ void main(){
   vec3 key = normalize(vec3(-0.5, -0.55, 0.67));
   vec3 col;
   if (front) {
-    // Matte charcoal: diffuse from the raking key, which leans harder on the
-    // folds than a mirror does, and a satin sheen that is the overhead panels
-    // blurred, so the same bands that roll over the mirrors roll over the
-    // grey too. The boxes are only a dull smear, never a glint.
-    vec3 alb = vec3(0.03, 0.029, 0.028);
+    // Matte charcoal, near black and the same everywhere: it knows nothing
+    // of the cover. Diffuse from the raking key, which leans a little on the
+    // folds, and the softboxes as a dull satin smear, so a fold still shows
+    // as a soft change in the black and never as a picture.
+    vec3 alb = vec3(0.016, 0.0155, 0.015);
     float kd = max(dot(N, key), 0.0);
-    float irr = 0.2 + 0.25 * N.z + 1.6 * kd * kd;
+    float irr = 0.25 + 0.25 * N.z + 1.2 * kd * kd;
     float sheen = pow(max(dot(R, key), 0.0), 5.0) * 0.3;
-    col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.035
-        + overhead(R, 1.6) * uSheen * 0.09 + boxes(R) * 0.0008;
+    col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.012
+        + panels(R, 2.6) * 0.006 + boxes(R) * 0.0004;
   } else {
-    // Coloured metal: F0 is the cover's tint, and everything it reflects,
-    // the dim room and the hot boxes alike, comes back multiplied by it.
-    // Only at true grazing does Schlick lift it toward white.
+    // Coloured metal, and a mirror: no diffuse at all. F0 is the cover's
+    // tint, and everything it reflects comes back multiplied by it. Most of
+    // what a settled disc sees is the dark room, so most of the swatch is
+    // dark tinted metal; where its lean points it into a softbox it throws
+    // back a sharp, hot, cover-coloured image of the box. Only at true
+    // grazing does Schlick lift it toward white.
     vec3 F = vC + (1.0 - vC) * fr;
-    col = (sky(R) * 2.2 + overhead(R, 1.0) * uSheen + boxes(R) * ${LIGHT}) * F + vC * 0.012;
+    col = (sky(R) * 1.6 + panels(R, 1.0) * uSheen + boxes(R) * ${LIGHT}) * F;
   }
   // The pressed rim and the punched hole catch a little less light.
   col *= mix(1.0, 0.72, smoothstep(0.84, 1.0, vRho));
@@ -355,7 +363,7 @@ function rng(seed) {
 }
 
 // A cupped annulus: rings from the hole to the rim.
-function discMesh(seg = 28, rings = [0.17, 0.45, 0.75, 1]) {
+function discMesh(seg = 24, rings = [0.17, 0.45, 0.75, 1]) {
   const v = [];
   const pt = (r, i) => {
     const a = (i / seg) * Math.PI * 2;
@@ -394,7 +402,9 @@ function drape(u, v) {
   h -= 0.01 * ridge(u, v, 0.2, 0.78, 0.3, 0.08, 0.3, 0);
   const sx = 1 - u, sy = v;
   h -= 0.03 * (sx * sy) * (sx * sy);
-  return h;
+  // Deep enough that a fold's two flanks lean well apart: a mirror doubles
+  // its lean, so a flank turns a softbox's whole reflection on or off.
+  return h * 1.3;
 }
 
 // The hand's dent: a coarse grid of heights over the swatch, each a damped
@@ -413,7 +423,7 @@ export async function createSequin(host, { embedded = false } = {}) {
 
   // Cover pixels, sampled once per sequin.
   let coverPx = null;
-  const COVER_N = 192;
+  const COVER_N = 256;
   try {
     const img = await loadCover(albumId);
     const cv = document.createElement("canvas");
@@ -623,9 +633,10 @@ export async function createSequin(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
   const EXPOSURE = 1.0;
-  // The overhead panels, against the hot boxes: bright enough that a band
-  // reads as the picture lit, dim enough that only pale discs bloom in it.
-  const SHEEN = 1.35;
+  // The overhead panels as a settled mirror sees them, against the hot boxes:
+  // bright enough that a band reads as the picture lit, dim enough that only
+  // pale discs bloom in it.
+  const SHEEN = 3.4;
 
   // Layout and per-sequin state.
   let N = 0;
@@ -637,10 +648,11 @@ export async function createSequin(host, { embedded = false } = {}) {
   let px, py, seed, phi, vel, target, rest, ax, ay, delay, flips;
 
   const build = (W, H) => {
-    // A big swatch, most of the height of the room, so a single disc's
-    // flash is something you can see.
+    // A big swatch, most of the height of the room, sewn with about eighty
+    // sequins across: fine enough that four figures on a crossing resolve,
+    // coarse enough that each disc's flash is still something you can see.
     const side = Math.round(Math.min(W * 0.92, H * 0.8, 900));
-    D = clamp(side / 34, 9, 24);
+    D = clamp(side / 80, 5, 12);
     SY = D * 0.56;
     const cols = Math.max(4, Math.floor(side / D));
     const rows = Math.max(4, Math.floor((side - D) / SY) + 1);
@@ -680,7 +692,7 @@ export async function createSequin(host, { embedded = false } = {}) {
       const gx = (drape(u + e, v) - drape(u - e, v)) / (2 * e);
       const gy = ((drape(u, v + e) - drape(u, v - e)) / (2 * e)) * (fw / fh);
       const a = rand() * PI * 2;
-      const m = 0.08 * (0.25 + 0.75 * rand());
+      const m = 0.035 * (0.25 + 0.75 * rand());
       const across = 0.6 + 0.4 * rand();
       const tx = -gx + Math.cos(a) * m * across, ty = -gy + Math.sin(a) * m + 0.03;
       const zz = z + drape(u, v) * fw;
