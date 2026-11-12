@@ -22,14 +22,14 @@ import { readWebm } from "./webm";
 // compression or by time.
 //
 // Discrete time. Nothing is blended between moments. Every pixel is locked
-// to the nearest whole ring frame, and D is read once per slit cell (2
-// device px square), so where the front moves the train the picture breaks
-// into hard strata, each one moment of the clip, bounded by the front's
-// isochrones; at 15 fps one frame is ~44 px of the train's run, so along a
-// ribbon the strata are rigid slices of carriage set side by side. The
-// rounding is the same everywhere, so each seam between two moments is one
-// clean edge along the isochrone and the strata read as wide, hard bands of
-// carriage, never as a texture of dashes. Where the isochrones run across
+// to the nearest whole ring frame, and D is read once per slit cell. A cell
+// is 2 device px tall and exactly as wide as the train runs in one ring
+// frame (at 15 fps ~44 source px, so ~44 device px on a 1:1 print): where
+// the front climbs at 1/v each cell is one frame later than the cell beside
+// it, so the train is laid in rigid vertical slices of carriage, each one
+// moment of the clip, and every seam between two moments in a row lands on
+// the cell grid as a clean vertical edge, never as the comb a finer cell
+// draws where an isochrone runs aslant. Where the isochrones run across
 // the rows rather than down them (where the front cuts the train's end) a
 // whole frame would move the end ~44 px at a time, a staircase; there each
 // stratum's frame is read where the train stood at the stratum's own moment
@@ -44,15 +44,16 @@ import { readWebm } from "./webm";
 // those seconds (depth x v, ~1600 source px), so on average it climbs at
 // exactly 1/v; D is spent along the train's measured run rather than the
 // wall clock, so that holds while the train speeds up. At rest the front's
-// half-way rope is already bent deep, pulled far left at the roof and the
-// windows and part way at the undercarriage, so along each row the slope swings above 1/v (the train folded
-// back on itself: mirrored X-shaped windows) and below it (doors and
-// pillars drawn out), and the bends drift slowly. The rope also sets each
-// row's moment (ROW_T): a row whose rope is pulled left is later, so the
-// front cuts through the end of the train along a curve that follows the
-// rope; every row also sits half a second later (ROW_OFF), so at the rest
-// moment (CLOCK0) the front already cuts the tail and the train is a
-// carved silhouette with the empty station showing through it. Press
+// half-way rope is already bent deep, pulled to the left edge at the roof
+// and the windows and part way at the stripe, so along each row the slope
+// swings above 1/v (the train folded back on itself: the windows come
+// mirrored, one to a slit cell) and below it (doors and pillars drawn out),
+// and the bends drift slowly. The rope also sets each row's moment (ROW_T):
+// a row whose rope is pulled left is later, so the front cuts through the
+// end of the train along a curve that follows the rope; every row also sits
+// 1.23 s later (ROW_OFF), so at the rest moment (CLOCK0) the left half holds
+// the carriage, folded, and the right third is carved back to the empty
+// station along a curve that sweeps from the roof down to the stripe. Press
 // anywhere and the rope comes to you, held most strongly at the row you hold, so a drag bends the
 // local slope above 1/v (the train mirrored) on one side of the hand and
 // below it (compressed) on the other; held, the whole front steepens. Let go
@@ -67,7 +68,7 @@ import { readWebm } from "./webm";
 // The print is cropped tight to the carriage (VIEW) and drawn at most one
 // device pixel per source pixel, never upsampled.
 //
-// Query (stills): ?t=seconds holds the clock (the hero is ?t=8.2); ?front=flat shows the clip as
+// Query (stills): ?t=seconds holds the clock (the hero is ?t=7.6); ?front=flat shows the clip as
 // shot; ?slit=x,lean sets the resting front; ?depth (or ?delay)=seconds also
 // sets the ramp's width (deeper is wider, still matched); ?bend=y,x;... sets
 // the rest pose, pulling the rope near row y to x (0..1 of the print), in
@@ -77,6 +78,7 @@ const ASSET = "/lab/slit-scan/";
 const PAPER = [0xf2 / 255, 0xf0 / 255, 0xeb / 255];
 const MW = 240; // delay map over the whole plate (1920 x 800, aspect 2.4)
 const MH = 100;
+const STRATUM_Y = 2; // device px: a slit cell's height
 // The print shows only these source rows: the carriage (roof ~305, wheels
 // ~672) with a little of the station's eaves above and the fence and grass
 // below, so the train is ~60% of the print's height and the process has the
@@ -140,7 +142,7 @@ uniform int uN;
 uniform float uOn;            // 0..1, eases the time field in
 uniform float uReady;         // ring complete
 out vec4 o;
-const float STRATUM = 2.0;    // device px: one slit cell, one ring frame
+uniform vec2 uCell;           // device px: one slit cell (x: one ring frame of the train's run)
 
 vec3 yuv2rgb(float y, vec2 c) {
   float cb = c.x - 0.5, cr = c.y - 0.5;
@@ -206,11 +208,12 @@ void main() {
   // vertical slivers.
   float cap = uCap.x + uCap.y * l.x;
   bool under = p.y >= cap;
-  // D is read once per slit cell, STRATUM device px square, so every seam
-  // between two moments lands on the pixel grid, hard
-  vec2 cell = floor((dpx - uPrint.xy) / STRATUM);
-  if (under) cell.y = floor(((cap - 1.5 - uView.y) / uView.w) * uPrint.w / STRATUM);
-  vec2 lD = (uView.xy + (cell + 0.5) * STRATUM / uPrint.zw * uView.zw) / uSrc;
+  // D is read once per slit cell (uCell: one ring frame of the train's run
+  // wide, 2 device px tall), so every seam between two moments lands on the
+  // cell grid: vertical edges between cells, never a comb along an isochrone
+  vec2 cell = floor((dpx - uPrint.xy) / uCell);
+  if (under) cell.y = floor(((cap - 1.5 - uView.y) / uView.w) * uPrint.w / uCell.y);
+  vec2 lD = (uView.xy + (cell + 0.5) * uCell / uPrint.zw * uView.zw) / uSrc;
   float D = delayAt(lD) * uOn;
   float q = mod(uRun - D * uSpeed, uRunLoop);
   int np = textureSize(uInv, 0).x;
@@ -310,53 +313,60 @@ async function loadBitmap(src) {
 // row's front is bent (a bias curve, smooth and monotone), steeper than 1/v
 // on one side of the hand, where the train comes out mirrored, and shallower
 // on the other, where it comes out compressed.
-const DEPTH0 = 2.4; // s at rest
+const DEPTH0 = 2.0; // s at rest
 const KNEE = 0.09; // of the ramp: the soft hand-off at either end
 const HOLD = 1.6; // a held press deepens the front by this much (steeper than 1/v)
 // The rest curve leans hard, so down the train each row holds a column
 // further along it: the ribbons cut a long diagonal through the windows,
-// doors and stripes, and come out as dense bands of the train's colours.
-const X0 = 0.525;
+// doors and stripes. Its centre sits left of the print's middle, so the
+// ramp's right knee, where D stops climbing and the train is shown as it
+// stood `depth` seconds ago, falls in the print's right third: past it the
+// front climbs slower than the train runs, and the tail is cut there.
+const X0 = 0.265;
 const LEAN = 0.8;
 const restCurve = (y, x0 = X0, lean = LEAN) => x0 + lean * (y - 0.5);
 // The rest pose is not the flat ramp: the rope is already bent deep, pulled
-// far left at the roof and through the windows and part way at the
-// undercarriage, so across them the front's slope swings
-// above 1/v (the train folded back on itself: the windows come out as
-// mirrored X shapes) and below it (doors and pillars drawn out), crossing 1/v
-// again at every row the rope leans through. It breathes: each bend drifts a
-// little, on its own slow period. They are deep enough that the still, not
-// only a drag, shows the window rows folded into mirrored X and wave strata
-// (the same as ?bend=0.3,0.15;0.55,0.2;0.75,0.45). ?bend replaces these
-// (?bend=none for the plain ramp).
+// to the print's left edge at the roof and through the windows and part way
+// at the red stripe, so across them the front's slope swings above 1/v (the
+// train folded back on itself: slit cell by slit cell the windows come
+// mirrored, one capsule window to a cell, leaning into chevrons where the
+// rows part) and below it (doors and pillars drawn out). The rope is read
+// through a bias that never puts the half-way point closer than M_MIN of the
+// ramp to either end, so the front is at most twice as steep as the train
+// at rest: steeper, consecutive cells jump so many frames that the windows
+// break into unrelated blocks. It breathes: each bend drifts a little, on its
+// own slow period (the same as ?bend=0.44,0.04;0.64,0.09;0.82,0.18).
+// ?bend replaces these (?bend=none for the plain ramp).
 const REST_BENDS = [
-  { y: 0.3, x: 0.15, ax: 0.03, ay: 0.015, period: 13 },
-  { y: 0.55, x: 0.2, ax: 0.035, ay: 0.02, period: 17.5 },
-  { y: 0.75, x: 0.45, ax: 0.03, ay: 0.02, period: 21 },
+  { y: 0.44, x: 0.04, ax: 0.03, ay: 0.012, period: 13 },
+  { y: 0.64, x: 0.09, ax: 0.03, ay: 0.015, period: 17.5 },
+  { y: 0.82, x: 0.18, ax: 0.03, ay: 0.015, period: 21 },
 ];
-const BEND_W = 0.2; // the rope's reach above and below a bend, print heights
+const BEND_W = 0.22; // the rope's reach above and below a bend, print heights
+const M_MIN = 0.34;
 // The rope also sets each row's moment. Every row is offset in time by
 // ROW_T seconds per print width that its rope stands right of the line's
 // centre: where the rope is pulled left the row is later, where it lies right
-// the row is earlier. The bent rows and the rows beside them sit 0.3 to 2 s
-// apart, so the time front cuts through the train's tail along a curve that
-// follows the rope: some rows already show the empty station where the train
-// has gone, others still carry carriage, folded into mirrored windows at the
-// edge. Drag the rope and that boundary moves with it.
-const ROW_T = 6;
-// ...and every row is half a second later than its rope alone would put it,
-// so at the rest moment the front already stands in the train's tail: the
-// rows the rope pulls left (the roof and the windows) are cut back to the
-// empty station on either side and hold carriage only where the front folds
-// it into mirrored windows, the rows below still carry the whole car.
-const ROW_OFF = -0.5;
-// the clock at rest, and the still: the moment the front cuts the tail
-const CLOCK0 = 8.2;
-// Between the tail leaving every row (~9.4 s) and the nose reaching the
-// front (~0.5 s, across the loop's seam; the deep bends bring it early) the rest pose is only the empty
-// station, which is one still plate: the clock runs through it SKIP times
-// faster, so nothing visible is skipped and the loop is mostly train.
-const EMPTY = [9.4, 0.45];
+// the row is earlier. The roof and window rows sit about 1.7 s later than
+// the line, the stripe about 0.7 s, so the time front cuts through the
+// train's tail along a curve that follows the rope: from about 0.66 of the
+// print at the roof it sweeps down and right to about 0.9 at the stripe,
+// and the empty station shows through past it. Drag the rope and that
+// boundary moves with it.
+const ROW_T = 7.6;
+// ...and every row is 1.23 s later again, so at the rest moment the
+// left half holds the carriage's middle, folded, and the right third is
+// already carved back to the platform.
+const ROW_OFF = -1.23;
+// the clock at rest, and the still: the front sits mid-carriage, the cut
+// in the right third (it holds from about 7.3 to 7.9 s, the cut sliding
+// left as the clock runs, never opening a hole on the left)
+const CLOCK0 = 7.6;
+// Between the tail leaving every row (~8.45 s) and the nose reaching the
+// first (~9.45 s) the rest pose is only the empty station, which is one still
+// plate: the clock runs through it SKIP times faster, so nothing visible is
+// skipped and the loop is mostly train.
+const EMPTY = [8.45, 9.45];
 const SKIP = 6;
 // the red stripe's lower edge, source rows of the print at its left and right
 const CAP = [616, 581];
@@ -580,7 +590,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
       const a = line[j] - halfW;
       const span = 2 * halfW;
       // where the rope holds this row's half-way point, 0..1 of the ramp
-      const m = clamp((curve[j] - a) / span, 0.07, 0.93);
+      const m = clamp((curve[j] - a) / span, M_MIN, 1 - M_MIN);
       // Schlick bias through (m, 1/2), extended linearly past the ends
       const k = 1 / (1 - m) - 2;
       const g0 = (1 - m) / m;
@@ -627,7 +637,11 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     const ph = Math.round((printW * VH * dpr) / SW);
     const px = Math.round((W * dpr - pw) / 2);
     const py = Math.round((H * dpr - ph) / 2);
-    return { W, H, dpr, pw, ph, px, py };
+    // a slit cell is as wide as the train runs in one ring frame, in device
+    // px of the print, so along a 1/v ribbon each cell is exactly one frame
+    // and every seam is a vertical edge on the cell grid
+    const cell = Math.max(STRATUM_Y, Math.round(((SPEED / meta.fps) * pw) / SW));
+    return { W, H, dpr, pw, ph, px, py, cell };
   };
   stage.onResize(() => {
     L = layout();
@@ -674,6 +688,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     gl.uniform1f(u.uRunLoop, RUN);
     gl.uniform1f(u.uSpeed, SPEED);
     gl.uniform1f(u.uFps, meta.fps);
+    gl.uniform2f(u.uCell, L.cell, STRATUM_Y);
     gl.uniform1i(u.uN, N);
     gl.uniform1f(u.uOn, on);
     gl.uniform1f(u.uReady, ready ? 1 : 0);
@@ -728,7 +743,7 @@ export async function createSlitScan(host, { embedded = false } = {}) {
     // the clock waits for the ring and for the front to ease in, so the first
     // whole picture is the rest moment
     if (!held && ready && onT >= 1) {
-      const span = LOOP - EMPTY[0] + EMPTY[1];
+      const span = (EMPTY[1] - EMPTY[0] + LOOP) % LOOP;
       const u = (clock - EMPTY[0] + LOOP) % LOOP;
       const w = u < span ? smooth(u / 0.3) * smooth((span - u) / 0.3) : 0;
       clock = (clock + dt * (1 + (SKIP - 1) * w)) % LOOP;
