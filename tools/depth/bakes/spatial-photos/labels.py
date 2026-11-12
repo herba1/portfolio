@@ -37,7 +37,9 @@ CONFIG = {
     # (its droppers are white glass rods between the wire pairs: hangers)
     "ine-catenary-clouds": dict(mode="colour", near=0.35, near_blue=0.5, sky_sat=0.3, th=[0.45], wire_plane=2, sky_lum=0.3, reclaim=0.06, one_plane=True, hangers=True),
     # crossbuck and lamps over a tiled roof, wires across a pale summer sky
-    "kyoto-crossing-lowangle": dict(mode="colour", near=0.3, near_blue=0.7, blue_lum=0.3, th=[0.5], wire_plane=None, sky_lum=0.3),
+    # (its far house's windows mirror the sky, and its pale ridge tiles pass
+    # for cloud: sky_tight hands them back to the roof)
+    "kyoto-crossing-lowangle": dict(mode="colour", near=0.3, near_blue=0.7, blue_lum=0.3, th=[0.5], wire_plane=None, sky_lum=0.3, sky_tight=0.035),
     # fumikiri, poles and catenary, houses and greenery under cyan sky
     "crossing-summer": dict(mode="colour", near=0.14, blue_lum=0.3, th=[0.3, 0.55], wire_plane=None, sky_lum=0.3),
 }
@@ -284,6 +286,54 @@ for k in range(K - 2, 0, -1):
     crumb = np.zeros(n, bool)
     crumb[1:] = touch[1:] & (stats[1:, cv2.CC_STAT_AREA] < 160)
     lab[(lab == k) & crumb[cc]] = k + 1
+# Sky inside a building: a window that mirrors the sky, a ridge of pale
+# tiles, a gap the tiles leave. By colour it is sky; but the depth map puts
+# it at the roof's depth, well behind the open sky near it, it is darker
+# than that sky (a mirror and a grey tile both are; a cloud is not), and it
+# sits among the building. Left on the sky plane it is a hole in the roof
+# that shows the sky plane through the tiles, graded cobalt and sliding
+# against the roof. With `sky_tight` (the depth margin) it goes back to the
+# building, to the plane of the nearest solid pixel; so does every small
+# pocket of sky that is, on the whole, all three. Sky beside a pole that
+# the depth halo lifted stays sky: it is the open sky's own colour.
+if cfg.get("sky_tight"):
+    tight = cfg["sky_tight"]
+    for it in range(2):
+        skym = lab == 0
+        n, cc, stats, _ = cv2.connectedComponentsWithStats(skym.astype(np.uint8), 4)
+        area = stats[:, cv2.CC_STAT_AREA]
+        big = np.zeros(n, bool)
+        big[1:] = area[1:] >= 0.01 * W * H
+        open_ = skym & big[cc]
+        # the open sky's depth near each pixel: the low end of it (the halo
+        # only ever lifts it), carried under the buildings
+        r_ = int(0.02 * LONG)
+        lo = cv2.erode(np.where(open_, dep, 1.0).astype(np.float32), disk(r_))
+        refd = pushpull(np.repeat(lo[..., None], 3, 2), (open_ & (lo < 1)).astype(np.float32))[..., 0]
+        refd = cv2.GaussianBlur(refd, (0, 0), r_)
+        # and its light, away from every rim
+        clear_ = open_ & ~dilate(lab > 0, 6)
+        skyl = pushpull(np.repeat(lum[..., None], 3, 2), clear_.astype(np.float32))[..., 0]
+        skyl = cv2.GaussianBlur(skyl, (0, 0), r_)
+        dd = dep - refd
+        dark = lum < 0.93 * skyl
+        among = box(((lab > 0) & ~wires).astype(np.float32), int(0.015 * LONG)) > 0.3
+        back = skym & (dd > tight) & dark & among
+        md = np.bincount(cc.ravel(), dd.ravel(), n) / np.maximum(area, 1)
+        mdark = np.bincount(cc.ravel(), dark.ravel().astype(np.float64), n) / np.maximum(area, 1)
+        pocket = np.zeros(n, bool)
+        pocket[1:] = ~big[1:] & (area[1:] < 0.002 * W * H) & (md[1:] > tight) & (mdark[1:] > 0.5)
+        back |= skym & pocket[cc]
+        if not back.any():
+            break
+        solid_ = (lab > 0) & ~wires & ~back
+        _, idx = cv2.distanceTransformWithLabels((~solid_).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+        oy, ox = np.nonzero(solid_)
+        lut = np.zeros(idx.max() + 1, np.uint8)
+        lut[idx[oy, ox]] = lab[oy, ox]
+        lab[back] = lut[idx][back]
+        print("sky_tight: gave", int(back.sum()), "px of mirrored sky back to the buildings")
+
 # Droppers and hangers: short upright members between the wires, which the
 # long-stroke pass cannot see (wires.hangers). They go with the structure
 # they hang from, at the plane of the nearest labelled pixel.

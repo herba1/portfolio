@@ -5,15 +5,18 @@
 Reads <workdir>/labels.npz from labels.py. Adapted from the crossing bake
 (tools/depth/bakes/crossing), with two differences that the swipe asks for:
 
-  * The sky plane is complete. During a swipe the sky lags the nearer
-    planes by up to ~8% of the frame, so whatever stood in front of it is
-    uncovered: the sky behind every pole, wire and box is filled in two
-    bands (skyfill.py: the sky's broad light as a smooth membrane in linear
-    light, cloud texture by PatchMatch from the clear sky nearby, the
-    photo's grain on top), never sharper than the photo and with no
-    direction to smear along. The photo is shown only where the sky is seen
-    clear of every rim (and of droppers, wires.hangers), so no wire leaves
-    a ghost.
+  * The sky plane is filled where a move can uncover it. During a swipe
+    the sky lags the nearer planes by up to ~8% of the frame, and a tilt
+    orbits them past it: the band that opens beside every pole, wire and
+    box (skyfill.disocclusion_band, sized from the viewer's ORBIT and LAG
+    and the depth of what is in front) is filled in two bands (skyfill.py:
+    the sky's broad light as a smooth membrane in linear light, cloud
+    texture by PatchMatch from the clear sky nearby, the photo's grain on
+    top), never sharper than the photo and with no direction to smear
+    along. The photo is shown where the sky is seen clear of every rim (and
+    of droppers, wires.hangers), so no wire leaves a ghost, and everywhere
+    past the band: real cloud stays real, and deep in a roof the sky plane
+    holds the roof.
   * Wires carry on behind the posts in front of them as straight runs
     (wires.py), never as fans or dashes.
   * Every plane carries its own smooth depth map (depth.png, one plane per
@@ -56,7 +59,7 @@ from PIL import Image
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from common import guided, dilate, erode, pushpull, smoothstep  # noqa: E402
 from shiftfill import shiftfill  # noqa: E402
-from skyfill import skyfill, local_mean  # noqa: E402
+from skyfill import skyfill, local_mean, disocclusion_band  # noqa: E402
 from wires import bridge_wires, one_plane_wires  # noqa: E402
 from edges import refine_edges, bleed  # noqa: E402
 
@@ -246,7 +249,12 @@ for k in range(K):
             # pole instead of blending across it
             fill = lama_fill(img, need, method="lama", lama=Lama(threads=3), log=lambda *a: None)
         else:
-            fill = skyfill(img, pure, seed=7, log=print)
+            # only the band a tilt or a swipe can uncover is synthesised;
+            # the rest of the sky plane is the photo (deep inside a roof,
+            # the roof: what a tile matte lets through is then roof)
+            band = disocclusion_band(seen0, dep, L, W)
+            print("sky band", round(float(band.mean()), 3), "of the frame, unseen", round(float((~seen0).mean()), 3))
+            fill = skyfill(img, pure, seed=7, log=print, region=band)
     else:
         fill = shiftfill(img, pure, need, base, seed=k, T=128, q=4, cands=500, R=int(0.06 * L))
         if k == 1 and K > 2:

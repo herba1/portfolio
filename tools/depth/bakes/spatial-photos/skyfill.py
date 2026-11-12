@@ -1,17 +1,27 @@
-"""Inpaint the sky behind poles, wires and towers, in two bands.
+"""Inpaint the sky behind poles, wires and towers, in two bands, and only
+where a move can uncover it.
 
 What a swipe or an orbit uncovers is a band beside each silhouette, and the
-eye reads it as the same sky seen a little further on. Two things give a
-fill away there: a smear (a value dragged along a direction, which reads as
-rubber-band streaks the moment the wire in front moves off it) and a flat,
-toothless patch (a membrane is smooth where the photo has cloud texture and
+eye reads it as the same sky seen a little further on. Only that band is
+synthesised (disocclusion_band: the seen sky grown into the nearer planes by
+the most the viewer ever slides them past it). Everything else on the sky
+plane stays the photo: every cloud the camera saw, at full strength, and
+deep inside a roof or a wall the roof or the wall itself, so a matte that
+lets a little of the sky plane through a tile roof lets roof through, not a
+synthetic sky.
+
+Two things give a fill away there: a smear (a value dragged along a
+direction, which reads as rubber-band streaks the moment the wire in front
+moves off it) and a flat, toothless patch (a membrane is smooth where the photo has cloud texture and
 grain). So the sky is filled as two bands that are each easy to get right:
 
   low    the sky's broad light: the known sky blurred (a Gaussian of
          normalised convolution, in linear light) and carried into the hole
          as a harmonic membrane. Smooth by construction, no direction, so
          nothing streaks; a cloud's brightness goes on behind a pole and
-         meets the blue the way light mixes.
+         meets the blue the way light mixes. Past the rim it is the clear
+         sky's or the cloud's own light, by how much of the rim is cloud,
+         never a pale mix of the two (a fake cloud).
   high   the cloud's texture: what the known sky has above its own low
          band, synthesised into the hole from nearby clear sky patches by
          PatchMatch (multi-scale, expectation-maximisation voting, Wexler
@@ -94,7 +104,7 @@ class _Field:
     pixel whose patch touches the hole) the centre of a source patch that
     lies wholly in the known sky."""
 
-    def __init__(self, K, r, rng, scale_L):
+    def __init__(self, K, r, rng, scale_L, hole=None):
         self.H, self.W = K.shape
         self.r = r
         self.rng = rng
@@ -106,7 +116,9 @@ class _Field:
         valid[:, :r] = False
         valid[:, W - r:] = False
         self.valid = valid
-        self.hole = ~K
+        # what is synthesised: the band a move can uncover (default: all of
+        # the unknown)
+        self.hole = ~K if hole is None else (hole & ~K)
         T = cv2.dilate(self.hole.astype(np.uint8), ker) > 0
         self.ty, self.tx = np.nonzero(T)
         self.tid = np.full((H, W), -1, np.int32)
@@ -233,26 +245,33 @@ class _Field:
         return oy, ox, self.H, self.W
 
 
-def patch_synth(srgb, known, low_srgb, hi, seed=0, levels=4, log=None):
-    """Fill the hole (~known) of `hi` (HxWxC, the high band) by multi-scale
-    PatchMatch matched on the picture itself (srgb, with the low band in the
-    hole as the first guess). Returns hi with the hole filled."""
+def patch_synth(srgb, known, low_srgb, hi, region=None, seed=0, levels=4, log=None):
+    """Fill `region` (default ~known) of `hi` (HxWxC, the high band) by
+    multi-scale PatchMatch matched on the picture itself (srgb, with the low
+    band in the hole as the first guess), copying only from the known sky.
+    Pixels neither known nor in the region (deep inside a wall) take no part:
+    they read as the low band, never as the wall. Returns hi with the region
+    filled."""
     rng = np.random.default_rng(seed)
     H, W = known.shape
-    pyr = [(srgb, known, low_srgb)]
+    if region is None:
+        region = ~known
+    region = region & ~known
+    pyr = [(srgb, known, low_srgb, region)]
     for _ in range(levels - 1):
-        s, k, lo = pyr[-1]
+        s, k, lo, rg = pyr[-1]
         sz = (s.shape[1] // 2, s.shape[0] // 2)
         kf = cv2.resize(k.astype(np.float32), sz, interpolation=cv2.INTER_AREA)
-        pyr.append((cv2.resize(s * k[..., None], sz, interpolation=cv2.INTER_AREA) / np.maximum(kf, 1e-6)[..., None], kf > 0.999, cv2.resize(lo, sz, interpolation=cv2.INTER_AREA)))
+        rf = cv2.resize(rg.astype(np.float32), sz, interpolation=cv2.INTER_AREA)
+        pyr.append((cv2.resize(s * k[..., None], sz, interpolation=cv2.INTER_AREA) / np.maximum(kf, 1e-6)[..., None], kf > 0.999, cv2.resize(lo, sz, interpolation=cv2.INTER_AREA), rf > 0))
     prev = None
     E = None
     # (EM iterations, PatchMatch passes per iteration) per level, coarse first
     sched = {levels - 1: (6, 3), levels - 2: (4, 2), levels - 3: (2, 2)}
     for li in range(levels - 1, -1, -1):
-        s, k, lo = pyr[li]
+        s, k, lo, rg = pyr[li]
         r = 3 if li > 0 else 2
-        f = _Field(k, r, rng, max(s.shape[:2]))
+        f = _Field(k, r, rng, max(s.shape[:2]), hole=rg)
         if E is None:
             E = np.where(k[..., None], s, lo).astype(np.float32)
         else:
@@ -278,8 +297,46 @@ def patch_synth(srgb, known, low_srgb, hi, seed=0, levels=4, log=None):
         prev = f.offsets()
 
 
-def skyfill(img, known, seed=0, log=None):
-    """img HxWx3 0..1 (sRGB); known HxW bool, the sky the fill learns from."""
+# How far the viewer (src/app/lab/spatial-photos/spatialPhotosEngine.js)
+# ever slides a plane at depth d past the sky plane (which it draws at depth
+# 0), in px of the baked photo:
+#   orbit  ORBIT x long side x d on each axis at full tilt (ORBIT 0.024)
+#   swipe  LAG x what has crossed the screen edge x frame width x d, sideways
+#          only (LAG 0.14); past three quarters crossed only a sliver of the
+#          page is left on screen, so the band is sized for that
+ORBIT = 0.024
+LAG = 0.14
+CROSSED = 0.75
+
+
+def disocclusion_band(seen, dep, L, W, margin=None):
+    """The part of the sky plane a move can uncover: the seen sky grown into
+    whatever stands in front of it by the most that thing slides past it,
+    nearer things further (by the depth map round them), sideways further
+    than up and down (the swipe lag is horizontal). seen HxW bool, dep HxW
+    0..1 (near = 1). Returns HxW bool."""
+    H = seen.shape[0]
+    if margin is None:
+        margin = 0.005 * L
+    ry1 = ORBIT * L * 1.42  # diagonal full tilt, per unit depth
+    rx1 = ry1 + LAG * CROSSED * W
+    q = ry1 / rx1
+    # the occluder's depth: the nearest thing within reach, smoothed
+    k = max(3, int(0.012 * L) | 1)
+    d = cv2.GaussianBlur(cv2.dilate(dep.astype(np.float32), np.ones((k, k), np.uint8)), (0, 0), 0.006 * L)
+    # anisotropic distance: squeeze the frame sideways by q, so a sideways
+    # step costs q of a vertical one, and measure there
+    ws = max(8, int(round(W * q)))
+    sm = cv2.resize(seen.astype(np.float32), (ws, H), interpolation=cv2.INTER_AREA) > 0.02
+    dist = cv2.distanceTransform((~sm).astype(np.uint8), cv2.DIST_L2, 5)
+    dist = cv2.resize(dist, (W, H), interpolation=cv2.INTER_LINEAR)
+    return (dist < ry1 * np.clip(d, 0.05, 1) + margin) & ~seen
+
+
+def skyfill(img, known, seed=0, log=None, region=None):
+    """img HxWx3 0..1 (sRGB); known HxW bool, the sky the fill learns from;
+    region HxW bool, what may be synthesised (default: all that is not
+    known). Outside the region and the known sky the photo is kept as it is."""
     H, W = known.shape
     L = max(H, W)
     seen = known
@@ -302,18 +359,45 @@ def skyfill(img, known, seed=0, log=None):
     den_ = cv2.GaussianBlur(img * kf[..., None], (0, 0), 2.0) / np.maximum(cv2.GaussianBlur(kf, (0, 0), 2.0), 1e-4)[..., None]
     lin = np.power(np.clip(np.where(known[..., None], den_, img), 0, 1), GAMMA).astype(np.float32)
 
+    if region is None:
+        region = ~seen
+    region = region & ~seen
+
     # ---- low band: the sky's broad light, a smooth membrane over the hole
     # (blurred first, so what the membrane holds at the rim is the light
     # there, not one pixel's grain or the very edge of a cloud puff)
     s_low = 0.008 * L
     low = membrane(norm_blur(lin, known, s_low), known)
+    # In linear light a cloud is many times the light of the blue round it,
+    # so a membrane over a wide hole (a signal hood with a cumulus top just
+    # under its rim, blue on every other side) comes out as a pale wash of
+    # cloud light: a fake cloud, airbrushed. Past the rim, the fill is
+    # instead either the clear sky or the cloud, by how much of the rim
+    # round it is cloud (a membrane of cloudiness, a share, not light):
+    # a pole in a cloud bank stays cloud, a hood against the blue goes blue.
+    if region.any():
+        Lk = np.power(np.clip(den_, 0, 1), GAMMA)
+        e = Lk[..., 2] - Lk[..., 0]  # blue excess: largest for clear sky
+        k_ = max(3, int(0.025 * L) | 1)
+        emax = cv2.GaussianBlur(cv2.dilate(np.where(known, e, 0).astype(np.float32), np.ones((k_, k_), np.uint8)), (0, 0), 0.02 * L)
+        cl = np.where(known, 1 - np.clip(e / np.maximum(emax, 1e-4), 0, 1), 0).astype(np.float32)
+        cm = membrane(np.repeat(cl[..., None], 3, 2), known)[..., 0]
+        clear = known & (cl < 0.35)
+        cloud = known & (cl > 0.65)
+        rim = cv2.distanceTransform((~known).astype(np.uint8), cv2.DIST_L2, 5)
+        t = smoothstep(0.0, 0.006 * L, rim)
+        if clear.sum() > 200:
+            Bc = membrane(norm_blur(lin, clear, s_low), clear)
+            Bk = membrane(norm_blur(lin, cloud, s_low), cloud) if cloud.sum() > 200 else Bc
+            wcl = smoothstep(0.35, 0.75, cm)[..., None]
+            low = low * (1 - t[..., None]) + (Bc * (1 - wcl) + Bk * wcl) * t[..., None]
     low = np.maximum(low, 1e-5).astype(np.float32)
     # ---- high band: the photo over its low band, in linear light, as a
     # ratio: a copy of a blue gap in a bright cloud laid where the low band
     # is blue darkens it by the same share, never to black
     hi = np.where(known[..., None], np.power(np.clip(img, 0, 1), GAMMA) / low, 1).astype(np.float32)
     low_srgb = np.power(low, 1 / GAMMA).astype(np.float32)
-    hi = patch_synth(img.astype(np.float32), known, low_srgb, hi, seed=seed, log=log)
+    hi = patch_synth(img.astype(np.float32), known, low_srgb, hi, region=region & ~known, seed=seed, log=log)
     fill = low * hi
     # ---- the seam: the photo's light right at the rim (a wire's soft halo
     # darkens the sky a few px past what the labels cut) against the fill's
@@ -356,5 +440,7 @@ def skyfill(img, known, seed=0, log=None):
         s_fill = local_mean(np.minimum(hf * hf, clip), hole, 0.004 * L)
         amp = np.sqrt(np.maximum(amp * amp + s_photo - s_fill, 0))
     out = out + (nz * amp * g)[..., None]
-    out = np.where(seen[..., None], img, out)
+    # the photo wherever the sky is seen, and wherever no move can uncover
+    # the sky plane (deep in a wall): only the band is synthesised
+    out = np.where((seen | ~region)[..., None], img, out)
     return np.clip(out, 0, 1).astype(np.float32)
