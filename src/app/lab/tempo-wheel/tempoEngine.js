@@ -16,6 +16,13 @@ const banded = (x) => (x < MIN ? MIN - rubber(MIN - x) : x > MAX ? MAX + rubber(
 
 const SPINE = 12; // the ruler's top line, in canvas px (on the 4px grid)
 const MAJOR = 24; // a major tick's length below the spine
+// The ticks' own strip, spine included: the needle's housing. On the beat
+// it swings to the housing's floor and no further.
+const HOUSING = 48;
+// The scale's figures: one under every major tick, cap top one grid step
+// below the housing's floor, so the needle's swing never reaches a figure,
+// even at the peak of the beat with the needle standing on a major tick.
+const FIGURE_TOP = HOUSING + 4;
 // The needle is the metronome's pallet. At rest it hangs from the spine to
 // a major tick's length, twice a tick's stroke and in the piece's second
 // ink; on the beat it kicks to the ruler's full height and a heavier stroke,
@@ -54,7 +61,7 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
   let lastWheel = 0;
   let unit = 10; // px per bpm on the ruler
   let w = 1;
-  let rh = 48;
+  let rh = 64;
   let dpr = 1;
   let leadW = 0; // the hundreds slot, in px
   let track = 0; // the tracking after it, in px
@@ -68,6 +75,12 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
   // outermost figures, whatever they are and wherever they roll.
   let edgeL = 0;
   let edgeR = 1;
+  // The figures under the major ticks: the caption step of the type scale,
+  // read back from the tokens, with tracking by the law at that size.
+  let figFont = "520 11px sans-serif";
+  let figTrack = 0.043;
+  let figSlot = 6; // a tabular figure's advance, in px
+  let figCap = 8; // cap height, in px
   let drawnV = NaN;
   let drawnL = NaN;
   let drawnR = NaN;
@@ -94,7 +107,7 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     // The numeral's size is fluid CSS (see --text-tempo); the ruler is
     // stretched to the numeral's measure, so read both back from layout.
     w = Math.max(1, Math.round(ruler.getBoundingClientRect().width));
-    rh = Math.round(ruler.getBoundingClientRect().height) || 48;
+    rh = Math.round(ruler.getBoundingClientRect().height) || 64;
     dpr = Math.min(2, window.devicePixelRatio || 1);
     ruler.width = Math.round(w * dpr);
     ruler.height = Math.round(rh * dpr);
@@ -102,6 +115,16 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     const tokens = getComputedStyle(root);
     bone = inkOf(ctx, tokens.getPropertyValue("--tempo-tick"), bone);
     signal = inkOf(ctx, tokens.getPropertyValue("--tempo-signal"), signal);
+    const figSize = parseFloat(tokens.getPropertyValue("--tempo-figure-size")) || 11;
+    const figWeight = parseFloat(tokens.getPropertyValue("--tempo-figure-weight")) || 520;
+    figTrack = -0.043 * (figSize - 12);
+    figFont = `${figWeight} ${figSize}px ${getComputedStyle(root).fontFamily}`;
+    ctx.font = figFont;
+    // Canvas has no font-variant-numeric, so tabular figures are set by
+    // hand: every figure centred in a slot as wide as the 0, the width
+    // Geist's tabular figures share.
+    figSlot = ctx.measureText("0").width;
+    figCap = ctx.measureText("H").actualBoundingBoxAscent || figSize * 0.727;
     const lead = strips[0].parentElement;
     em = parseFloat(getComputedStyle(number).fontSize) || 16;
     leadW = lead.getBoundingClientRect().width;
@@ -170,6 +193,29 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
       ctx.globalAlpha = a;
       ctx.fillRect(x, top, lw, len);
     }
+    // The scale's figures, in the same pass and under the same knife as the
+    // ticks: each centred on its tick, so they stream past the needle with
+    // the same momentum and drop into the same detents. Full-strength bone;
+    // a figure crossing the numeral's edge is cut there, like the counter.
+    ctx.globalAlpha = 1;
+    ctx.font = figFont;
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "center";
+    const base = Math.round((FIGURE_TOP + figCap) * dpr) / dpr;
+    const reach = Math.ceil((2 * figSlot + figTrack * 2) / unit);
+    const lo = Math.max(MIN, first - reach);
+    const hi = Math.min(MAX, last + reach);
+    for (let i = Math.ceil(lo / 10) * 10; i <= hi; i += 10) {
+      const x = Math.round(cx + (i - v) * unit) + lw / 2;
+      const text = String(i);
+      const n = text.length;
+      const pitch = figSlot + figTrack;
+      const x0 = x - (n * figSlot + (n - 1) * figTrack) / 2;
+      if (x0 + n * pitch < L || x0 > R) continue;
+      for (let k = 0; k < n; k += 1) {
+        ctx.fillText(text[k], x0 + k * pitch + figSlot / 2, base);
+      }
+    }
     ctx.restore();
     // The spine: one full-strength hairline from edge to edge, so the
     // underline has a measure even where the ticks fall between pixels.
@@ -185,7 +231,7 @@ export function createTempo(root, { embedded, number, strips, ruler }) {
     const nw = snap(NEEDLE.rest + (NEEDLE.beat - NEEDLE.rest) * P);
     const x0 = snap(cx - nw / 2);
     const y0 = snap(top * (1 - P));
-    const y1 = snap(top + MAJOR + (rh - top - MAJOR) * P);
+    const y1 = snap(top + MAJOR + (HOUSING - top - MAJOR) * P);
     ctx.fillStyle = signal;
     ctx.fillRect(x0, y0, nw, y1 - y0);
   };

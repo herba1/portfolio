@@ -16,6 +16,9 @@
      -0.043 x (size - 12px), written in em so it scales with the type. */
   --text-tempo--letter-spacing: calc(0.516px - 0.043em);
   --tempo-size: var(--text-tempo);
+  /* The ruler's figures: the caption step, the scale's second tier. */
+  --tempo-figure-size: var(--text-ui-xs);
+  --tempo-figure-weight: var(--text-ui-xs--font-weight);
   --tempo-weight: var(--text-tempo--font-weight);
   position: absolute;
   inset: 0;
@@ -139,7 +142,9 @@
      the outer figures. */
   width: 0;
   min-width: 100%;
-  height: 48px;
+  /* The tick strip (48px), one grid step, then the figures: cap height
+     and overshoot, snapped up to the grid. */
+  height: 64px;
   /* Measured in the numeral's own font, so 1cap and the window resolve the
      same here as on the figures. */
   font-size: var(--tempo-size);

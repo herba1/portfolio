@@ -1,6 +1,6 @@
 {
   "title": "Tempo",
-  "description": "A metronome reduced to its dial: one large number on black and a ruler of fine ticks beneath it. Scroll, swipe or drag and the ruler streams past a fixed centre mark with real momentum, settling into a detent on every whole beat per minute while the digits roll over like a mechanical counter. The centre mark is the only thing printed in a second ink, a vermilion, and it is the metronome's pallet: on every beat it kicks to the ruler's full height and a heavier stroke, then sinks back to a tick's length, and after the first touch a soft synthesized click keeps time with it. Tap to silence it.",
+  "description": "A metronome reduced to its dial: one large number on black and, beneath it, a calibrated ruler of fine ticks with a small figure under every tenth. Scroll, swipe or drag and the ruler streams past a fixed centre mark with real momentum, settling into a detent on every whole beat per minute while the digits roll over like a mechanical counter. The centre mark is the only thing printed in a second ink, a vermilion, and it is the metronome's pallet: on every beat it kicks to the ruler's full height and a heavier stroke, then sinks back to a tick's length, and after the first touch a soft synthesized click keeps time with it. Tap to silence it.",
   "tags": ["Input", "Motion", "Sound"],
   "status": "draft",
   "createdAt": "2026-11-06T14:20:00.000Z",
