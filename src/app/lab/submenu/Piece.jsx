@@ -15,10 +15,15 @@ const GAP = 4;
 const EDGE = 16;
 const WIDTHS = [232, 224, 216];
 const TRACK_H = 40;
-const HEAD_H = 72;
+const HEAD_H = 64; // album head and its margin: the context row sits 144px under the list top, one stair step
 const LIST_W = 360;
-const ANCHOR_X = LIST_W - 28; // the row's more button, where the default menu drops from
 const CONTEXT_TRACK = 2; // Here Comes the Sun
+// The deepest cascade the piece opens to. The stage is composed around it:
+// the track list plus these three panels are one box, centred in the frame.
+// The menu puts Add to Playlist and Seasons at the same offset in their
+// panels (148, under a rule at 144), so with the list, the panels climb
+// down one staircase of equal 144px steps, each top on its parent's rule.
+const DEEP = "playlist.seasons";
 
 // Intent prediction.
 const MIN_SPEED = 0.12; // px per ms; slower than this reads as deliberate
@@ -55,6 +60,13 @@ function rowsOf(items) {
     return r;
   });
   return { rows, h: y + PAD };
+}
+
+// Where a row's more button opens its menu: beside the row, one GAP past its
+// end and level with its top, growing out of the button. The menu is the
+// first step of the same staircase its submenus continue.
+function anchorFor(listX, rowTop, listW) {
+  return { x: listX + listW + GAP, y: rowTop, ox: listX + listW - 16, oy: rowTop + TRACK_H / 2 };
 }
 
 const selectable = (items) => items.map((it, i) => (it.sep ? -1 : i)).filter((i) => i >= 0);
@@ -363,14 +375,24 @@ export default function Piece() {
     return () => ro.disconnect();
   }, []);
 
-  // The album side, placed so the full cascade (three panels) is centred.
+  // The album side, placed so the track list and the deepest cascade, laid
+  // out for real, make one box centred in the frame: the same margin above
+  // and below, on the 4px grid.
   const listGeo = useMemo(() => {
     const { W, H } = box;
-    const span = ANCHOR_X + WIDTHS[0] + GAP + WIDTHS[1] + GAP + WIDTHS[2];
-    const x = W >= span + 2 * EDGE ? Math.round((W - span) / 2) : Math.max(EDGE, Math.round((W - LIST_W) / 2));
     const listH = HEAD_H + TRACKS.length * TRACK_H;
-    const cascade = HEAD_H + (CONTEXT_TRACK + 1) * TRACK_H + 4 + 392;
-    const y = Math.max(EDGE, Math.round((H - Math.max(listH, cascade)) / 8) * 4);
+    const items = menuFor(TRACKS[CONTEXT_TRACK]);
+    const a = anchorFor(0, HEAD_H + CONTEXT_TRACK * TRACK_H, LIST_W);
+    const ps = layoutFor({ menu: { key: "measure", ...a, items }, path: parseOpen(items, DEEP).path }, Infinity, Infinity);
+    let [l, t, r, b] = [0, 0, LIST_W, listH];
+    for (const p of ps) {
+      l = Math.min(l, p.x);
+      t = Math.min(t, p.y);
+      r = Math.max(r, p.x + p.w);
+      b = Math.max(b, p.y + p.h);
+    }
+    const x = W >= r - l + 2 * EDGE ? Math.round((W - (r - l)) / 2) - l : Math.max(EDGE, Math.round((W - LIST_W) / 2));
+    const y = H >= b - t + 2 * EDGE ? Math.floor((H - (b - t)) / 8) * 4 - t : EDGE;
     return { x, y, w: Math.min(LIST_W, W - 2 * EDGE) };
   }, [box]);
 
@@ -408,13 +430,9 @@ export default function Piece() {
     booted.current = true;
     const q = new URLSearchParams(window.location.search);
     setDebug(q.get("debug") === "1");
-    // As if the row's more button was pressed: the menu drops below it and
-    // grows out of the button.
-    const rowTop = listGeo.y + HEAD_H + CONTEXT_TRACK * TRACK_H;
-    const ax = listGeo.x + ANCHOR_X;
-    const ay = rowTop + TRACK_H + 4;
-    const ox = ax + 12;
-    const oy = rowTop + 32;
+    // As if the row's more button was pressed: the menu opens beside the
+    // row and grows out of the button.
+    const { x: ax, y: ay, ox, oy } = anchorFor(listGeo.x, listGeo.y + HEAD_H + CONTEXT_TRACK * TRACK_H, listGeo.w);
     const spec = q.get("open");
     if (spec) {
       const items = menuFor(TRACKS[CONTEXT_TRACK]);
@@ -809,15 +827,13 @@ export default function Piece() {
     const b = root.getBoundingClientRect();
     const k = root.offsetWidth ? b.width / root.offsetWidth : 1;
     const cx = (r.left + r.width / 2 - b.left) / k;
-    const bottom = (r.bottom - b.top) / k;
-    const left = (r.left - b.left) / k;
+    const cy = (r.top + r.height / 2 - b.top) / k;
     const rowEl = el.closest("[data-track]").getBoundingClientRect();
-    const rowBottom = (rowEl.bottom - b.top) / k;
     if (stRef.current.menu?.track === idx) {
       close();
       return;
     }
-    openAt(idx, left, rowBottom + 4, cx, bottom);
+    openAt(idx, (rowEl.right - b.left) / k + GAP, (rowEl.top - b.top) / k, cx, cy);
     wantFocus.current = true;
   };
 

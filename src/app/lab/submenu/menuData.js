@@ -65,6 +65,9 @@ export function menuFor(track) {
     { id: "play-next", label: "Play Next", icon: ICONS.next },
     { id: "play-last", label: "Play Last", icon: ICONS.queue },
     SEP,
+    { id: "love", label: "Love", icon: ICONS.heart, kbd: ["cmd", "L"] },
+    { id: "info", label: "Get Info", icon: ICONS.info, kbd: ["cmd", "I"] },
+    SEP,
     {
       id: "playlist",
       label: "Add to Playlist",
@@ -139,9 +142,6 @@ export function menuFor(track) {
         { id: "radio", label: "Song Radio", icon: ICONS.radio },
       ],
     },
-    SEP,
-    { id: "love", label: "Love", icon: ICONS.heart, kbd: ["cmd", "L"] },
-    { id: "info", label: "Get Info", icon: ICONS.info, kbd: ["cmd", "I"] },
     SEP,
     { id: "remove", label: "Remove from Library", icon: ICONS.trash, kbd: ["cmd", "del"] },
   ];
