@@ -19,13 +19,15 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 // sun, paler and bluer with distance; where a blade crosses the sun, a thin
 // halation ring.
 //
-// The sky behind (sky.webp) is laid out for that lens
-// (tools/depth/bakes/kaze/sky_tower.py, from the HDRI print of
-// sky_hdri.py): deepest cobalt round the zenith at the top centre, paler
-// cyan toward the frame's bottom corners, and a real cauliflower cumulus,
-// cut from an HDRI, stood up as a tower rising diagonally into frame from
-// the lower right corner toward the zenith, warm white on its sunlit domes
-// and pale skylight blue in its shade. The sun is a tight warm white bloom in
+// The sky behind (sky.webp) is rendered through that same lens
+// (tools/depth/bakes/kaze/sky_cumulus.py): deepest cobalt round the zenith
+// at the top centre, paler cyan toward the frame's bottom corners, and a
+// field of towering cumulus built in the world and rendered as a volume, so
+// it takes part in the worm's-eye convergence: each mass's flat blue-grey
+// base lies low near the frame's edge and its cauliflower domes climb toward
+// the zenith like the stalks, the sunlit tops warm white, the flanks turned
+// from the sun in skylight blue, silver on the edges toward the sun. The
+// sun is a tight warm white bloom in
 // the frame's top left corner with the cobalt running saturated nearly up to
 // it. The sky drifts with a two-phase flow map (Vlachos 2010), faster toward
 // the zenith, and the clouds lean after your gusts.
@@ -37,7 +39,7 @@ import { buildGrass, camera, GRASS_VERT, GRASS_FRAG, STRIDE } from "./grass";
 const SKY = "/lab/kaze/sky.webp";
 const ASPECT = 1.5;
 // The sky's frame, in the image uv it and the wind grid share: the plate is
-// laid out for the lens (sky_tower.py), a 16:10 box showing all of it inside
+// laid out for the lens (sky_tower.py, sky_cumulus.py), a 16:10 box showing all of it inside
 // a margin. OVER is the margin kept all round for the drifting sky to be
 // pulled in from; the crop window is cover-fitted to the box, held to its
 // top edge (the zenith side) and, on a tall screen, placed across it at ax.
@@ -90,9 +92,11 @@ void main() {
   // stands alone for most of its cycle: the two offset copies of a cumulus
   // only meet in a short crossfade, where they would otherwise lie doubled
   // over every lit edge as a pale ghost a few pixels off.
+  // (A quarter cycle in, so a still held a few seconds in, ?t=3, lands on
+  // one phase alone and the billows print sharp, not doubled.)
   const float CP = 12.0;
-  float c0 = fract(uCloudT / CP);
-  float c1 = fract(uCloudT / CP + 0.5);
+  float c0 = fract(uCloudT / CP + 0.25);
+  float c1 = fract(uCloudT / CP + 0.75);
   vec3 a0 = textureLod(uSky, uv - v * (c0 * CP), uSkyLod.x).rgb;
   vec3 a1 = textureLod(uSky, uv - v * (c1 * CP), uSkyLod.x).rgb;
   float cw = smoothstep(0.3, 0.7, 1.0 - abs(1.0 - 2.0 * c0));
@@ -121,9 +125,10 @@ void main() {
   // brightest tops off the blue the film adds.
   float lit = smoothstep(0.45, 0.85, Y) * (1.0 - blue);
   sky = mix(sky, Y * vec3(1.03, 1.0, 0.93), 0.25 * lit);
-  // Midtone saturation, about a quarter more: the blue and the grey-blue of
-  // the cloud shadows; the lit cloud tops above stay pale.
-  float mid = smoothstep(0.015, 0.08, Y) * (1.0 - smoothstep(0.3, 0.65, Y));
+  // Midtone saturation, about a quarter more, on the open blue only: the
+  // cumulus (sky_cumulus.py) carries its own skylight in its shade, and more
+  // saturation there prints it as a flat pale-blue cut-out.
+  float mid = smoothstep(0.015, 0.08, Y) * (1.0 - smoothstep(0.3, 0.65, Y)) * blue;
   sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.25 * mid), vec3(0.0));
   // The shaded cloud: the underside and flanks of the cumulus, lit only by
   // the sky. They read as a slate grey unless they carry the skylight's own
@@ -136,9 +141,11 @@ void main() {
   float cb = (sky.b - sky.r) / max(sky.b, 1e-4);
   float shade = (1.0 - blue) * smoothstep(0.08, 0.2, Y) * (1.0 - smoothstep(0.4, 0.6, Y));
   shade *= 1.0 - smoothstep(0.72, 0.84, cb);
-  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.6 * shade), vec3(0.0));
-  const vec3 SKYSH = vec3(0.80, 0.95, 1.18);
-  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.5 * shade);
+  // (light: the bake's volume already lights the shade with skylight, so
+  // this only keeps it from going slate under the film)
+  sky = max(vec3(Y) + (sky - vec3(Y)) * (1.0 + 0.15 * shade), vec3(0.0));
+  const vec3 SKYSH = vec3(0.86, 0.97, 1.12);
+  sky = mix(sky, sky * SKYSH * Y / max(dot(sky * SKYSH, vec3(0.2126, 0.7152, 0.0722)), 1e-4), 0.3 * shade);
   // The zenith: straight up the sky is deepest. The HDRI already falls off
   // toward it; this only leans the top of the frame a little further, toward
   // a clean film blue rather than slate. Multiplied, so the sky's own

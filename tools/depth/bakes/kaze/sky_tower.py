@@ -1,5 +1,10 @@
 """Kaze sky, looking straight up: the HDRI's cumulus stood up as a tower.
 
+(Superseded for the cloud: sky_cumulus.py now writes public/lab/kaze/sky.webp,
+a towering cumulus field rendered as a volume through the lens, over this
+script's open sky and sun bloom, open_sky() below. This script still runs on
+its own and lays the print out as described here.)
+
 sky_hdri.py prints the Skidpan cumulus as a pinhole camera saw it, pitched
 just above the horizon: a wide bank of cloud lying across the lower half of
 the frame, and over it the sky deepening toward the top. That is the view
@@ -102,6 +107,33 @@ def theta_of(u, v):
     return np.degrees(2 * np.arctan(r / 2))
 
 
+def open_sky(U, V):
+    """The open sky (linear), by each pixel's angle from the zenith through
+    the lens, with the sun's bloom laid in by distance from it."""
+    th = theta_of(U, V)
+    g = 1 - smooth(0.0, THETA_LO, th)  # 1 overhead, 0 at the bottom corners
+    g = g ** 0.85
+    hue = HUE_LO + (HUE_HI - HUE_LO) * g
+    sa = SAT_LO + (SAT_HI - SAT_LO) * g
+    va = VAL_LO + (VAL_HI - VAL_LO) * g
+    # the sun's bloom, by distance from it (px): value up ahead of
+    # saturation's fall, so it rolls from cobalt through light blue to warm
+    # white with no grey ring
+    d = np.hypot((U - SUN[0]) * W, (V - SUN[1]) * H)
+    bloom = np.exp(-d / BLOOM)
+    bv = bloom ** 0.8
+    bs = bloom ** 1.44
+    sa = sa * (1 - bs) + 0.06 * bs
+    va = va * (1 - bv) + 0.97 * bv
+    hsv = np.stack([hue, sa, va], -1).astype(np.float32)
+    sky = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
+    wb = (bs * 0.85)[..., None]
+    warm = np.clip(enc(dec(sky @ LUM)[..., None] * WARM_DOME), 0, 1)
+    sky = sky * (1 - wb) + warm * wb
+    skyl = dec(sky)
+    return skyl
+
+
 def place(pc, F, a, U, V, pw, ph):
     """One flank of the tower: the print's cloud round pc["foot"] (print
     uv), turned by pc["turn"] deg (counter-clockwise on screen), scaled by
@@ -159,27 +191,7 @@ def main():
     layers = [place(pc, F, a, U, V, pw, ph) for pc in PIECES]
 
     # ---- the open sky, by angle from the zenith ----
-    th = theta_of(U, V)
-    g = 1 - smooth(0.0, THETA_LO, th)  # 1 overhead, 0 at the bottom corners
-    g = g ** 0.85
-    hue = HUE_LO + (HUE_HI - HUE_LO) * g
-    sa = SAT_LO + (SAT_HI - SAT_LO) * g
-    va = VAL_LO + (VAL_HI - VAL_LO) * g
-    # the sun's bloom, by distance from it (px): value up ahead of
-    # saturation's fall, so it rolls from cobalt through light blue to warm
-    # white with no grey ring
-    d = np.hypot((U - SUN[0]) * W, (V - SUN[1]) * H)
-    bloom = np.exp(-d / BLOOM)
-    bv = bloom ** 0.8
-    bs = bloom ** 1.44
-    sa = sa * (1 - bs) + 0.06 * bs
-    va = va * (1 - bv) + 0.97 * bv
-    hsv = np.stack([hue, sa, va], -1).astype(np.float32)
-    sky = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-    wb = (bs * 0.85)[..., None]
-    warm = np.clip(enc(dec(sky @ LUM)[..., None] * WARM_DOME), 0, 1)
-    sky = sky * (1 - wb) + warm * wb
-    skyl = dec(sky)
+    skyl = open_sky(U, V)
 
     # the cloud over it, the far (high) turrets first and the near ones in
     # front of them
