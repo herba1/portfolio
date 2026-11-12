@@ -124,17 +124,21 @@ export async function createChromeLines(host, { embedded = false } = {}) {
 
   const q = new URLSearchParams(location.search);
   const num = (k, d) => (q.has(k) && q.get(k) !== "" && Number.isFinite(+q.get(k)) ? +q.get(k) : d);
-  const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", 5.25)];
+  // The screen's pitch (sp, css px): a fine engraved screen, about five
+  // device px a line on a retina screen, so a bunched ridge beats into true
+  // moire instead of a few dozen fat stripes. At 1x it opens a little, to
+  // keep a hairline in the lights.
+  const K = [num("gmin", 0.4), num("kr", 4.2), num("kl", 0.5), num("sp", stage.dpr >= 1.5 ? 2.6 : 3.2)];
   const SH = [num("rel", 0.05), num("H", 0.035), num("a", 0.1), num("thr", 0.3)];
   // The knuckle swells (the per-ball undulation and the slow relief) are
   // kept well below the broad body (reach and height), which carries the
   // form, so the pool reads as one heavy liquid with a few large sweeping
   // reflections and calm between them, not a scatter of islands.
   const K2 = [num("H2", 0.015), num("Hr", 0.015), num("bw", 0.42), num("Hb", 0.12)];
-  // (unused), the ripples' slope, how far the reflected ray turns the
-  // screen, and the ripples' scale. The screen's pitch (sp, css px) is
-  // coarse enough to hold a hairline in the lights at 1x.
-  const E = [0, num("rip", 0.05), num("kx", 7), num("rk", 56)];
+  // How far the colour plates sit out of register with the key (a fraction
+  // of the pitch), the ripples' slope, how far the reflected ray turns the
+  // screen, and the ripples' scale.
+  const E = [num("mis", 0.2), num("rip", 0.05), num("kx", 7), num("rk", 56)];
   // The studio: how far every normal leans out from the pool's middle (one
   // dome under the whole body), the horizon's tilt (radians) and offset,
   // and the width of every edge in it: a step, not a falloff.
