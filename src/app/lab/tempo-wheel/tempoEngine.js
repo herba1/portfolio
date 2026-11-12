@@ -1,4 +1,4 @@
-import { MAX, MIN, START, bearingAt, wheelPositions } from "./tempoMath";
+import { MAX, MIN, START, bearingAt, leadAt, wheelPositions } from "./tempoMath";
 import { createAudio } from "./tempoAudio";
 
 // One value, v, in beats per minute, drives everything: the ruler, the
@@ -15,11 +15,17 @@ const rubber = (over) => BAND * (1 - 1 / (over / BAND + 1));
 const banded = (x) => (x < MIN ? MIN - rubber(MIN - x) : x > MAX ? MAX + rubber(x - MAX) : x);
 
 const SPINE = 12; // the ruler's top line, in canvas px (on the 4px grid)
+const MAJOR = 24; // a major tick's length below the spine
+// The needle is the metronome's pallet. At rest it hangs from the spine to
+// a major tick's length; on the beat it kicks to the ruler's full height
+// and a heavier stroke, then bleeds back with the same decay as the click.
+const NEEDLE = { rest: 2, beat: 3 };
+const DECAY = 9; // per second
 const FRICTION = 2.4; // per second, as a fling coasts
 const STIFF = 260;
 const DAMP = 2 * Math.sqrt(STIFF);
 
-export function createTempo(root, { embedded, number, strips, ruler, dot }) {
+export function createTempo(root, { embedded, number, strips, ruler }) {
   const box = root.closest(".piece-box") || root;
   const ctx = ruler.getContext("2d");
   const audio = createAudio();
@@ -37,7 +43,8 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   let w = 1;
   let rh = 48;
   let dpr = 1;
-  let colW = 0;
+  let leadW = 0; // the hundreds slot, in px
+  let track = 0; // the tracking after it, in px
   let slots = [0, 0, 0, 1]; // left of each figure slot, and right of the last, in ruler px
   let dx = 0;
   let em = 16;
@@ -48,6 +55,8 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   let drawnV = NaN;
   let drawnL = NaN;
   let drawnR = NaN;
+  let pulse = 0; // 1 on the beat, decaying to 0
+  let drawnPulse = NaN;
   let lastDetent = Math.round(v);
   let phase = 0;
   let scheduled = -1;
@@ -74,9 +83,10 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     ruler.width = Math.round(w * dpr);
     ruler.height = Math.round(rh * dpr);
     unit = clamp(Math.round(w / 110), 8, 12);
-    const wheel = strips[2].parentElement;
+    const lead = strips[0].parentElement;
     em = parseFloat(getComputedStyle(number).fontSize) || 16;
-    colW = wheel.getBoundingClientRect().width + parseFloat(getComputedStyle(wheel.previousElementSibling).marginRight || "0");
+    leadW = lead.getBoundingClientRect().width;
+    track = parseFloat(getComputedStyle(lead).marginRight || "0");
     const x0 = ruler.getBoundingClientRect().left + dx;
     const rects = strips.map((s) => s.parentElement.getBoundingClientRect());
     slots = [...rects.map((r) => r.left - x0), rects[2].right - x0];
@@ -92,11 +102,14 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     strips[0].style.setProperty("--tempo-roll", String(p.h));
     strips[1].style.setProperty("--tempo-roll", String(p.t));
     strips[2].style.setProperty("--tempo-roll", String(p.o));
-    dx = (-p.shift * colW) / 2;
+    // The number slides by half the lead slot's spare width, so the figures
+    // stay centred whether it holds a 1, a wider 2 or 3, or nothing.
+    const lead = leadAt(p.h, em, leadW, track);
+    dx = -lead.spare / 2;
     number.style.transform = `translate3d(${dx}px, 0, 0)`;
     // Left edge: the hundreds figure, handing over to the tens figure as
     // the hundreds slot empties and the number slides to centre.
-    const hl = slots[0] + bearingAt(p.h, (k) => [1, 1, 2, 3, 3][clamp(k, 0, 4)]) * em;
+    const hl = slots[0] + lead.ink;
     const tl = slots[1] + bearingAt(p.t, (k) => k % 10) * em;
     edgeL = hl + (tl - hl) * p.shift + dx;
     edgeR = slots[3] - bearingAt(p.o, (k) => k % 10) * em + dx;
@@ -107,7 +120,9 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     // the first and last figure, with no fade of its own.
     const L = Math.round(edgeL);
     const R = Math.round(edgeR);
-    if (v === drawnV && L === drawnL && R === drawnR) return;
+    const P = Math.round(pulse * 256) / 256;
+    if (v === drawnV && L === drawnL && R === drawnR && P === drawnPulse) return;
+    drawnPulse = P;
     drawnV = v;
     drawnL = L;
     drawnR = R;
@@ -128,7 +143,7 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
       if (x < L || x >= R) continue;
       const major = i % 10 === 0;
       const mid = !major && i % 5 === 0;
-      const len = major ? 24 : mid ? 16 : 12;
+      const len = major ? MAJOR : mid ? 16 : 12;
       // Ticks right under the mark lift a little, like a loupe.
       const near = Math.exp(-Math.pow((x - cx) / (unit * 2.5), 2));
       const a = Math.min(1, (major ? 0.7 : mid ? 0.46 : 0.3) + near * 0.22);
@@ -140,8 +155,17 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     // underline has a measure even where the ticks fall between pixels.
     ctx.fillStyle = "rgb(242, 240, 235)";
     ctx.fillRect(L, top, R - L, 1);
-    // The centre mark: fixed, full strength, longer than any tick.
-    ctx.fillRect(cx - 1, 0, 2, 48);
+    // The centre mark, which is also the beat. It never leaves the ruler:
+    // at rest it hangs from the spine like a heavy major tick; on the beat
+    // it spans the whole strip, above the spine and below the ticks.
+    // Snapped to device pixels, so the stroke stays a hard bar of ink
+    // instead of a grey fringe while it thins back down.
+    const snap = (x) => Math.round(x * dpr) / dpr;
+    const nw = snap(NEEDLE.rest + (NEEDLE.beat - NEEDLE.rest) * P);
+    const x0 = snap(cx - nw / 2);
+    const y0 = snap(top * (1 - P));
+    const y1 = snap(top + MAJOR + (rh - top - MAJOR) * P);
+    ctx.fillRect(x0, y0, nw, y1 - y0);
   };
 
   // ---------- input ----------
@@ -315,16 +339,13 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
   // ---------- metronome ----------
   const beatTick = (dt) => {
     if (frozenBeat != null) {
-      const glow = Math.exp(-frozenBeat * 9);
-      dot.style.opacity = String(0.18 + 0.82 * glow);
-      dot.style.transform = `scale(${1 + 0.25 * glow})`;
+      pulse = Math.exp(-frozenBeat * DECAY);
       return;
     }
     const bpm = clamp(Math.round(v), MIN, MAX);
     const rate = bpm / 60;
     if (!running) {
-      dot.style.opacity = "0.18";
-      dot.style.transform = "scale(1)";
+      pulse = 0;
       phase = 0.92;
       scheduled = Math.floor(phase);
       return;
@@ -338,9 +359,7 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
       audio.beat(until);
     }
     const since = (phase - idx) / rate;
-    const glow = Math.exp(-since * 9);
-    dot.style.opacity = String(0.18 + 0.82 * glow);
-    dot.style.transform = `scale(${1 + 0.25 * glow})`;
+    pulse = Math.exp(-since * DECAY);
   };
 
   // ---------- loop ----------
@@ -352,8 +371,8 @@ export function createTempo(root, { embedded, number, strips, ruler, dot }) {
     lastT = t;
     step(dt);
     renderNumber();
-    renderRuler();
     beatTick(dt);
+    renderRuler();
     raf = requestAnimationFrame(frame);
   };
   function wake() {

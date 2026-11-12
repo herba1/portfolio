@@ -31,3 +31,38 @@ export function bearingAt(p, digits) {
   const at = (k) => BEARING[digits(k)];
   return at(i) + (at(i + 1) - at(i)) * f;
 }
+
+// The lead (hundreds) wheel sets proportional figures pushed to the right
+// edge of their slot, so each face is described from that edge instead:
+// `box` is how much of the slot it fills and `ink` how far in from the
+// right edge its ink begins, both in em. Measured from the rendered figures
+// (Geist, proportional, weight 460: advance and left side bearing, read off
+// the pixels, since canvas text metrics ignore the weight axis and report
+// the default instance's outlines). The 1 is pulled 0.06em
+// towards the tens figure by tempo.css, which shortens both.
+const KERN_1 = 0.06;
+export const LEAD = {
+  1: { box: 0.397 - KERN_1, ink: 0.397 - 0.04 - KERN_1 },
+  2: { box: 0.626, ink: 0.626 - 0.06 },
+  3: { box: 0.62, ink: 0.62 - 0.049 },
+};
+
+// The lead wheel's faces in order: blank, 1, 2, 3, blank.
+const LEAD_FACES = [0, 1, 2, 3, 0];
+
+// What the lead wheel adds to the numeral at roll `h`, in px, for a slot
+// `slot` px wide followed by `track` px of tracking: the spare width the
+// number slides over to stay centred, and where the lead figure's ink
+// starts. A blank face gives up the whole slot and its tracking.
+export function leadAt(h, em, slot, track) {
+  const i = Math.floor(h);
+  const f = h - i;
+  const at = (k) => {
+    const d = LEAD_FACES[Math.min(4, Math.max(0, k))];
+    const m = LEAD[d || (k <= 0 ? 1 : 3)];
+    return { spare: d ? slot - m.box * em : slot + track, ink: slot - m.ink * em };
+  };
+  const a = at(i);
+  const b = at(i + 1);
+  return { spare: a.spare + (b.spare - a.spare) * f, ink: a.ink + (b.ink - a.ink) * f };
+}

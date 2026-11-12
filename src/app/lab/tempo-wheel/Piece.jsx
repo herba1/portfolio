@@ -6,17 +6,19 @@ import { START, wheelPositions } from "./tempoMath";
 import "./tempo.css";
 
 const ONES = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
-// The blank faces are empty. A figure space falls back to a wider glyph in
-// this face and would widen the hundreds slot past the other two, so the
-// three figures would no longer share one measure.
+// The lead wheel only ever shows 1 to 3, so it sets proportional figures:
+// Geist's plain 1 is a bare stem with a flag, where the tabular 1 grows a
+// slab foot to fill its slot. Its faces are pushed to the right edge of the
+// slot, and the empty part is taken back out by the engine. The blank faces
+// are empty; a figure space would fall back to a wider glyph.
 const HUNDREDS = ["", "1", "2", "3", ""];
 
-function Wheel({ faces, pos, stripRef }) {
+function Wheel({ faces, pos, stripRef, lead = false }) {
   return (
-    <span className="tempo-wheel" aria-hidden="true">
+    <span className={lead ? "tempo-wheel tempo-wheel--lead" : "tempo-wheel"} aria-hidden="true">
       <span ref={stripRef} className="tempo-strip" style={{ "--tempo-roll": pos }}>
         {faces.map((f, i) => (
-          <span key={i} className="tempo-face">
+          <span key={i} className="tempo-face" data-face={f || undefined}>
             {f}
           </span>
         ))}
@@ -32,7 +34,6 @@ export default function Piece({ embedded = false }) {
   const tRef = useRef(null);
   const oRef = useRef(null);
   const rulerRef = useRef(null);
-  const dotRef = useRef(null);
   const [ready, setReady] = useState(false);
   const init = wheelPositions(START);
 
@@ -49,7 +50,6 @@ export default function Piece({ embedded = false }) {
         number: numberRef.current,
         strips: [hRef.current, tRef.current, oRef.current],
         ruler: rulerRef.current,
-        dot: dotRef.current,
       });
       setReady(true);
     };
@@ -85,12 +85,11 @@ export default function Piece({ embedded = false }) {
     >
       <div className="tempo-stack">
         <div ref={numberRef} className="tempo-number" style={{ "--tempo-shift": init.shift }}>
-          <Wheel faces={HUNDREDS} pos={init.h} stripRef={hRef} />
+          <Wheel faces={HUNDREDS} pos={init.h} stripRef={hRef} lead />
           <Wheel faces={ONES} pos={init.t} stripRef={tRef} />
           <Wheel faces={ONES} pos={init.o} stripRef={oRef} />
         </div>
         <canvas ref={rulerRef} className="tempo-ruler" aria-hidden="true" />
-        <span ref={dotRef} className="tempo-dot" aria-hidden="true" />
       </div>
     </Root>
   );

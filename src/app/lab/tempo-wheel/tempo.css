@@ -51,18 +51,6 @@
   opacity: 1;
 }
 
-.tempo-dot {
-  display: block;
-  align-self: center;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--tempo-ink);
-  opacity: 0.18;
-  margin-top: 16px;
-  will-change: opacity, transform;
-}
-
 .tempo-number {
   display: flex;
   font-size: var(--tempo-size);
@@ -92,6 +80,27 @@
   height: var(--tempo-window);
   overflow: hidden;
   margin-inline-end: var(--tempo-track);
+}
+
+/* The lead wheel sets Geist's proportional figures: its 1 is a bare stem,
+   not the slab-footed tabular 1, and it only ever shows 1 to 3, so the
+   width change between them is absorbed by the engine sliding the number
+   (as it already does when the slot empties below 100). Faces sit against
+   the tens figure; the slot's spare width is on the outside. */
+.tempo-wheel--lead {
+  font-variant-numeric: proportional-nums;
+  font-feature-settings: "pnum" 1;
+}
+
+.tempo-wheel--lead .tempo-face {
+  text-align: end;
+}
+
+/* The flag of the 1 leaves a wide right bearing that the font's own kerning
+   would close in running text. Across two wheels there is no kerning, so
+   the stem is pulled in by hand (kept in step with LEAD in tempoMath). */
+.tempo-wheel--lead .tempo-face[data-face="1"] {
+  translate: 0.06em 0;
 }
 
 .tempo-wheel:last-child {
