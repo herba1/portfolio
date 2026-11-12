@@ -8,6 +8,15 @@ import { createOramicsSound } from "./oramicsSound";
 // photocell would see) is the level. Everything is in film coordinates
 // (u along the loop, 0..1 per lap; v across the drawable band, 0 at the
 // top), so the drawings survive any resize.
+//
+// The reader also prints what it hears. Downstream of the light, between the
+// picture and the lower perforations, the film carries a bilateral
+// variable-area soundtrack: the summed voices, computed with the same model
+// the oscillators play (sine plus a little detuned triangle, the same gains
+// and glides), sampled once per device pixel of film travel and exposed as a
+// clear slit in black, mirrored about its centre. The loop keeps its print,
+// so the strip upstream of the reader shows the last lap's track until the
+// reader writes over it.
 
 const GROUND = "#f2f0eb";
 const BASE = "#e5e6e0";
@@ -16,6 +25,8 @@ const PERF_EDGE = "#b1afa7";
 const PRINT = "#97928a";
 const INK = "#1b1916";
 const READER = "#6d6961";
+const TRACK = "#1e1b17"; // the printed black of the soundtrack
+const CLEAR = "#f4f3ee"; // its clear, modulated area
 
 const VOICES = 6;
 const SPAN = 26; // semitones from the bottom of the band to the top
@@ -23,6 +34,8 @@ const ROOT = 130.81; // C3 at the bottom
 const SCALE = [0, 2, 4, 7, 9]; // major pentatonic
 const W_MIN = 0.006; // brush width, fraction of strip height
 const W_MAX = 0.058;
+const TRACK_MM = 3; // soundtrack width
+const SYNTH_NORM = 0.34; // one full voice (sine + 0.3 triangle at full level) fills the track
 
 const frac = (x) => x - Math.floor(x);
 const smooth = (t) => t * t * (3 - 2 * t);
@@ -65,6 +78,8 @@ export function createOramics(host) {
   let y0 = 0;
   let bandTop = 0;
   let bandH = 1;
+  let trackTop = 0;
+  let trackH = 1;
   let L = 1; // one lap of the loop, in px (the box width, so it wraps off screen)
   let perfs = 8;
   let rx = 0; // the reader
@@ -79,7 +94,7 @@ export function createOramics(host) {
   let drawing = null;
   let brush = W_MIN;
 
-  const voices = Array.from({ length: VOICES }, () => ({ on: false, y: 0, span: 0, sid: -1, lv: 0, amp: 0, fresh: false }));
+  const voices = Array.from({ length: VOICES }, () => ({ on: false, y: 0, span: 0, sid: -1, lv: 0, amp: 0, fresh: false, snap: false }));
 
   const layout = (w, hh, d) => {
     W = w;
@@ -88,9 +103,12 @@ export function createOramics(host) {
     h = Math.round(clamp(Math.min(H * 0.34, W * (W < 640 ? 0.42 : 0.24)), 96, 288));
     mm = h / 35;
     y0 = Math.round(H * 0.5 - h / 2);
-    const inset = 2.01 * mm + 2.79 * mm + 1.5 * mm;
-    bandTop = y0 + inset;
-    bandH = h - inset * 2;
+    const perfIn = 2.01 * mm + 2.79 * mm;
+    bandTop = y0 + perfIn + 1.5 * mm;
+    // The soundtrack sits between the picture and the lower perforations.
+    trackH = TRACK_MM * mm;
+    trackTop = y0 + h - perfIn - 0.45 * mm - trackH;
+    bandH = trackTop - 0.45 * mm - bandTop;
     L = W;
     perfs = Math.max(8, Math.round(L / (4.75 * mm)));
     rx = (Math.round(W * 0.36 * dpr) + 0.5) / dpr;
@@ -100,6 +118,11 @@ export function createOramics(host) {
       seeded = true;
       seed();
     }
+    resizePrint(Math.max(64, Math.round(L * dpr)));
+    // The reader's place is kept in laps; a new size moves it on screen, so
+    // pick the reading up from wherever it now is rather than print the jump.
+    readAt = null;
+    if (held !== null) replay = true;
   };
   stage.onResize(layout);
 
@@ -337,8 +360,8 @@ export function createOramics(host) {
 
   // --- reading -----------------------------------------------------------
 
-  const read = () => {
-    const R = frac(phase + rx / L);
+  const read = (at) => {
+    const R = frac(at);
     const hits = [];
     for (const s of strokes) {
       if (s.dying || !s.du || s.du.length < 2) continue;
@@ -410,7 +433,10 @@ export function createOramics(host) {
             i = k;
           }
         });
-        if (i >= 0) voices[i].fresh = true;
+        if (i >= 0) {
+          voices[i].fresh = true;
+          voices[i].snap = true;
+        }
       }
       if (i >= 0) {
         used[i] = true;
@@ -429,6 +455,137 @@ export function createOramics(host) {
       v.sid = r.sid;
       v.amp = Math.pow(clamp((r.span / h - 0.004) / 0.07, 0, 1), 0.85);
     });
+  };
+
+  // One listen at film position `at` (laps, the reader's place on the
+  // loop): find the runs, hand them to voices, and set each voice's pitch
+  // and level exactly as the oscillators will be asked to play them.
+  const listen = (at, dt) => {
+    assign(read(at));
+    let active = 0;
+    for (const v of voices) if (v.on) active += 1;
+    const share = 1 / (1 + 0.3 * Math.max(0, active - 1));
+    for (const v of voices) {
+      const target = v.on ? 0.55 + 0.45 * v.amp : 0;
+      v.lv = damp(v.lv, target, target > v.lv ? 30 : 9, dt);
+      const vv = clamp((v.y - bandTop) / bandH, 0, 1);
+      v.hz = semisToHz((1 - vv) * SPAN);
+      v.level = v.on ? 0.24 * (0.12 + 0.88 * v.amp) * share : 0;
+      v.pan = (0.5 - vv) * 0.3;
+    }
+  };
+
+  // --- the print ---------------------------------------------------------
+
+  // One column per device pixel of the lap; each holds the clear half-width
+  // (0..1 of the track) the reader exposed there.
+  let N = 0;
+  let print = new Float32Array(0);
+  let printed = new Uint8Array(0);
+  let readAt = null; // the reader's film position at the last listen, in laps (unwrapped)
+  let replay = false;
+  let clock = 0;
+  let bias = 0;
+  let head = 0; // the clear half-width being exposed right now
+  const synth = voices.map((_, i) => ({ f: 220, g: 0, a: 0, b: 0, cents: 3 + i * 0.7 }));
+
+  const resizePrint = (n) => {
+    if (n === N) return;
+    const old = print;
+    const oldOn = printed;
+    const M = N;
+    print = new Float32Array(n);
+    printed = new Uint8Array(n);
+    if (M) {
+      for (let c = 0; c < n; c += 1) {
+        const k = Math.floor((c * M) / n);
+        print[c] = old[k];
+        printed[c] = oldOn[k];
+      }
+    }
+    N = n;
+  };
+
+  const TAU = Math.PI * 2;
+  // The oscillator bank, in JS: per voice a sine and a triangle a few cents
+  // sharp (its first three partials; the lowpass takes the rest), under the
+  // same shared vibrato and drift, through gains that move with the same
+  // time constants the audio graph uses. Returns the clear half-width.
+  const synthStep = (dt) => {
+    clock += dt;
+    const wob = 4 * Math.sin(TAU * 4.7 * clock) + 3 * Math.sin(TAU * 0.17 * clock);
+    let y = 0;
+    let env = 0;
+    voices.forEach((v, i) => {
+      const o = synth[i];
+      if (v.snap) {
+        o.f = v.hz;
+        v.snap = false;
+      } else if (v.hz) o.f += (v.hz - o.f) * (1 - Math.exp(-dt / 0.03));
+      const lvl = v.level || 0;
+      o.g += (lvl - o.g) * (1 - Math.exp(-dt / (lvl > o.g ? 0.018 : 0.07)));
+      const f = o.f * Math.pow(2, wob / 1200);
+      o.a = frac(o.a + f * dt);
+      o.b = frac(o.b + f * Math.pow(2, o.cents / 1200) * dt);
+      const x = TAU * o.b;
+      const tri = (8 / (Math.PI * Math.PI)) * (Math.sin(x) - Math.sin(3 * x) / 9 + Math.sin(5 * x) / 25);
+      y += o.g * (Math.sin(TAU * o.a) + 0.3 * tri);
+      env += o.g * 1.3;
+    });
+    // Noise reduction, as on a real track: the opening rides the envelope,
+    // so silence prints as a hairline of clear and a loud note fills the
+    // track edge to edge. Past full modulation it clips open.
+    // The bias rides a little under the true peak (independent partials
+    // rarely all crest together), so the troughs bite to the centre line.
+    const want = Math.min(1, (0.8 * env) / SYNTH_NORM);
+    bias += (want - bias) * (1 - Math.exp(-dt / (want > bias ? 0.01 : 0.08)));
+    const yn = clamp(y / (SYNTH_NORM * 0.7), -1, 1);
+    return 0.035 + 0.965 * clamp((bias + yn) / 2, 0, 1);
+  };
+
+  // Move the reader along the film to `to`, listening once per device pixel
+  // crossed and printing each sample at the film column it was heard from.
+  const advance = (to, dt) => {
+    const from = readAt === null ? to : readAt;
+    readAt = to;
+    const c0 = Math.floor(from * N);
+    const c1 = Math.floor(to * N);
+    const n = Math.min(c1 - c0, N * 2);
+    if (n <= 0) {
+      listen(to, dt);
+      head = synthStep(dt);
+      return;
+    }
+    const ds = dt / n;
+    for (let k = c1 - n + 1; k <= c1; k += 1) {
+      listen(k / N, ds);
+      head = synthStep(ds);
+      const c = ((k % N) + N) % N;
+      print[c] = head;
+      printed[c] = 1;
+    }
+  };
+
+  // A still (?t=…) is the loop as it would be after t seconds of running:
+  // replay the whole run from a blank print.
+  const replayTo = (t) => {
+    for (const s of strokes) if (s.dirty) densify(s);
+    for (const v of voices) Object.assign(v, { on: false, lv: 0, amp: 0, level: 0, sid: -1, fresh: false, snap: false });
+    for (const o of synth) Object.assign(o, { g: 0, a: 0, b: 0 });
+    print.fill(0);
+    printed.fill(0);
+    clock = 0;
+    bias = 0;
+    readAt = rx / L;
+    const step = 1 / (N * speed);
+    let at = rx / L;
+    const end = t * speed + rx / L;
+    while (at + 1 / N <= end) {
+      at += 1 / N;
+      advance(at, step);
+    }
+    phase = t * speed;
+    advance(end, 0);
   };
 
   // --- drawing -----------------------------------------------------------
@@ -511,6 +668,56 @@ export function createOramics(host) {
     g.globalAlpha = 1;
   };
 
+  // The printed soundtrack: black where printed, opened by the signal in a
+  // clear slit mirrored about the track's centre line.
+  const drawTrack = () => {
+    const mid = trackTop + trackH / 2;
+    const half = (trackH / 2) * 0.94;
+    const base = phase * N;
+    const cFirst = Math.floor(base) - 1;
+    const cLast = Math.ceil(base + W * dpr) + 1;
+    const X = (c) => (c + 0.5 - base) / dpr;
+    let c = cFirst;
+    while (c <= cLast) {
+      const at = (k) => ((k % N) + N) % N;
+      if (!printed[at(c)]) {
+        c += 1;
+        continue;
+      }
+      let e = c;
+      while (e + 1 <= cLast && printed[at(e + 1)]) e += 1;
+      const x0 = (c - base) / dpr;
+      const x1 = (e + 1 - base) / dpr;
+      g.fillStyle = TRACK;
+      g.fillRect(x0, trackTop, x1 - x0, trackH);
+      g.beginPath();
+      g.moveTo(x0, mid - print[at(c)] * half);
+      for (let k = c; k <= e; k += 1) g.lineTo(X(k), mid - print[at(k)] * half);
+      g.lineTo(x1, mid - print[at(e)] * half);
+      g.lineTo(x1, mid + print[at(e)] * half);
+      for (let k = e; k >= c; k -= 1) g.lineTo(X(k), mid + print[at(k)] * half);
+      g.lineTo(x0, mid + print[at(c)] * half);
+      g.closePath();
+      g.fillStyle = CLEAR;
+      g.fill();
+      c = e + 1;
+    }
+  };
+
+  // A lit segment of the slit: a hot core over a short warm bloom.
+  const slit = (top, span, a, reach) => {
+    g.globalCompositeOperation = "screen";
+    const glow = g.createLinearGradient(rx - reach, 0, rx + reach, 0);
+    glow.addColorStop(0, "rgba(255, 170, 90, 0)");
+    glow.addColorStop(0.5, `rgba(255, 186, 110, ${0.62 * a})`);
+    glow.addColorStop(1, "rgba(255, 170, 90, 0)");
+    g.fillStyle = glow;
+    g.fillRect(rx - reach, top - 1, reach * 2, span + 2);
+    g.globalCompositeOperation = "source-over";
+    g.fillStyle = `rgba(255, 245, 222, ${a})`;
+    g.fillRect(rx - 1, top, 2, span);
+  };
+
   const drawReader = () => {
     const ext = Math.round(h * 0.28);
     const line = 1 / dpr;
@@ -520,21 +727,23 @@ export function createOramics(host) {
     g.fillRect(rx - tick / 2, y0 - ext, tick, line);
     g.fillRect(rx - tick / 2, y0 + h + ext - line, tick, line);
 
-    // Light through the slit, where the ink is crossing it.
+    // Light through the slit, where the ink is crossing it: each run lit
+    // at full strength over exactly the span the cell sees.
     for (const v of voices) {
       if (v.lv < 0.01) continue;
-      const half = v.span / 2 + 1;
-      const R = Math.max(h * 0.12, v.span * 1.9);
-      g.globalCompositeOperation = "screen";
-      const glow = g.createRadialGradient(rx, v.y, 0, rx, v.y, R);
-      glow.addColorStop(0, `rgba(255, 196, 120, ${0.56 * v.lv})`);
-      glow.addColorStop(0.35, `rgba(255, 176, 96, ${0.2 * v.lv})`);
-      glow.addColorStop(1, "rgba(255, 170, 90, 0)");
-      g.fillStyle = glow;
-      g.fillRect(rx - R, v.y - R, R * 2, R * 2);
-      g.globalCompositeOperation = "source-over";
-      g.fillStyle = `rgba(255, 236, 196, ${v.lv})`;
-      g.fillRect(rx - 0.75, v.y - half, 1.5, half * 2);
+      slit(v.y - v.span / 2, v.span, clamp(v.lv / 0.55, 0, 1), 1.6 * mm);
+    }
+    // And the print head, exposing the track at this instant.
+    if (readAt !== null && printed[((Math.floor(readAt * N) % N) + N) % N]) {
+      const open = Math.max(1, head * (trackH / 2) * 0.94);
+      const mid = trackTop + trackH / 2;
+      // The lamp's spill on the film around the head, so it reads on clear base too.
+      const spill = g.createRadialGradient(rx, mid, 0, rx, mid, trackH * 0.9);
+      spill.addColorStop(0, "rgba(232, 150, 70, 0.34)");
+      spill.addColorStop(1, "rgba(232, 150, 70, 0)");
+      g.fillStyle = spill;
+      g.fillRect(rx - trackH, mid - trackH, trackH * 2, trackH * 2);
+      slit(mid - open, open * 2, 1, 1.1 * mm);
     }
   };
 
@@ -544,6 +753,7 @@ export function createOramics(host) {
     g.fillRect(0, 0, W, H);
     drawFilm();
     drawInk();
+    drawTrack();
     g.fillStyle = EDGE;
     const line = 1 / dpr;
     g.fillRect(0, y0, W, line);
@@ -558,6 +768,10 @@ export function createOramics(host) {
     lastFrame = performance.now();
     if (!started) started = t;
     if (held !== null) {
+      if (replay) {
+        replay = false;
+        replayTo(held);
+      }
       phase = held * speed;
     } else {
       // The transport comes up to speed the way a motor does.
@@ -574,20 +788,14 @@ export function createOramics(host) {
     }
 
     for (const s of strokes) if (s.dirty) densify(s);
-    assign(read());
+    advance(phase + rx / L, dt);
 
-    let active = 0;
-    for (const v of voices) if (v.on) active += 1;
-    const share = 1 / (1 + 0.3 * Math.max(0, active - 1));
-    voices.forEach((v, i) => {
-      const target = v.on ? 0.55 + 0.45 * v.amp : 0;
-      v.lv = held !== null ? target : damp(v.lv, target, target > v.lv ? 30 : 9, dt);
-      if (!sound) return;
-      const vv = clamp((v.y - bandTop) / bandH, 0, 1);
-      const level = v.on ? 0.24 * (0.12 + 0.88 * v.amp) * share : 0;
-      sound.voice(i, semisToHz((1 - vv) * SPAN), level, (0.5 - vv) * 0.3, v.fresh);
-      v.fresh = false;
-    });
+    if (sound) {
+      voices.forEach((v, i) => {
+        sound.voice(i, v.hz || 220, v.level || 0, v.pan || 0, v.fresh);
+        v.fresh = false;
+      });
+    }
     draw();
   });
 
