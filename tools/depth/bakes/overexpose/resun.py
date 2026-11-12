@@ -6,6 +6,8 @@
 # light is re-centred around a new sun direction about 2 deg inside that crown's
 # lower edge, in the camera's own (2x supersampled) frame:
 #
+#  0. the old sun's leftover glow is replaced, on open sky 10-48 deg from the new
+#     sun, by the fitted gradient with matched grain (see step 0b);
 #  1. sky share t per pixel, against the sky actually behind it;
 #  2. the frame's open sky is fitted as elevation + a radial term around the old
 #     sun; only the radial term moves to the new sun, plus the measured
@@ -119,6 +121,73 @@ sk = lambda x, a, b: (lambda u: u * u * (3 - 2 * u))(np.clip((x - a) / (b - a), 
 def mblur(a, m, s):
     return ndi.gaussian_filter(a * m, s) / np.maximum(ndi.gaussian_filter(m, s), 1e-6)
 
+# 0. The sky's own field. On open blue sky (cloud fringes eroded away) log radiance
+#    is fitted per channel as a smooth function of elevation plus a radial
+#    function of distance from the old sun (step 2 moves the radial part).
+blue = (pix[..., 2] > pix[..., 0] * 1.3) & (L > 0.12)
+cloud = (L > 0.3) & (pix[..., 2] < pix[..., 0] * 1.3)
+fitm = ndi.binary_erosion(blue & ~cloud, iterations=10 * SS)
+sub = (slice(None, None, 4), slice(None, None, 4))
+B_el = lambda e: np.stack([np.ones_like(e), e / 90, (e / 90) ** 2, (e / 90) ** 3], -1)
+B_r = lambda g: np.stack([np.exp(-g / 6), np.exp(-g / 15), np.exp(-g / 35)], -1)
+m4 = fitm[sub]
+A = np.concatenate([B_el(elev[sub][m4]), B_r(g_old[sub][m4])], -1)
+coefs = [np.linalg.lstsq(A, np.log(np.maximum(pix[..., c][sub][m4], 1e-6)), rcond=None)[0] for c in range(3)]
+del A, fitm
+
+# 0b. The old sun's ghost. desun.py's painted dome is not the fit's shape, so the
+#     sky around where the old sun stood keeps a pale blob (and faint ray stubs)
+#     the radial term cannot divide out; relit, it reads as a smudged wash under
+#     the crown. In a soft band 10-48 deg from the new sun (down to the lower
+#     crowns; stopping at 35 left a pale ring at the edge), on open sky only, the
+#     sky is replaced by the fit itself with the old sun's radial term left out
+#     (step 2 then adds the new sun's), and the photograph's grain is re-added,
+#     matched in amplitude, grain size and channel correlation from open sky far
+#     from both suns. Mixed pixels at needle and cloud edges take the same
+#     low-frequency correction as a ratio, so no halo is drawn around them.
+GB_IN, GB_OUT = (float(v) for v in os.environ.get('GHOST_BAND', '10,48').split(','))
+band_w = sk(g_new, GB_IN - 5, GB_IN + 1) * (1 - sk(g_new, GB_OUT - 2, GB_OUT + 8))
+el_fit = np.stack([B_el(elev) @ coefs[c][:4] for c in range(3)], -1)
+lp0 = np.log(np.maximum(pix, 1e-6))
+res = lp0 - el_fit - np.stack([B_r(g_old) @ coefs[c][4:] for c in range(3)], -1)   # the old sun's ghost, and the photo's grain
+# thin cloud reads as blue sky by hue alone but is far whiter than the fit says the
+# sky is there: kept out of the fill, so wisps survive it
+white_x = ndi.gaussian_filter((res[..., 0] - res[..., 2]), 1.0 * SS)
+wisp = ndi.maximum_filter(sk(white_x, 0.16, 0.30), size=2 * SS + 1)
+print('chroma residual R-B on blue sky p50/p95/p99.5', np.round(np.percentile(white_x[blue], [50, 95, 99.5]), 3))
+clean = (ndi.binary_erosion(blue & ~cloud, iterations=2 * SS) & (wisp < 0.5)).astype(np.float64)
+# grain reference: open sky at least 40 deg from both suns
+ref = ndi.binary_erosion(clean > 0, iterations=8 * SS) & (g_old > 40) & (g_new > 40)
+hp = lambda a: a - ndi.gaussian_filter(a, (3.0 * SS, 3.0 * SS, 0))
+hres = hp(res)
+tgt_std = hres[ref].std(0)
+tgt_cor = np.corrcoef(hres[ref].T)
+# grain size: the share of the high-pass the photo keeps after a 1-px blur
+keep = lambda a, m: ndi.gaussian_filter(a, (1.0 * SS, 1.0 * SS, 0))[m].std(0).mean() / a[m].std(0).mean()
+k_ref = keep(hres, ref)
+rng = np.random.default_rng(11)
+white = rng.standard_normal(pix.shape) @ np.linalg.cholesky(tgt_cor).T
+best = None
+allm = np.ones((512, 512), bool)
+for sg in np.arange(0.3, 3.01, 0.1) * SS / 2:   # noise is stationary: a 512 px tile is enough
+    kk = keep(hp(ndi.gaussian_filter(white[:512, :512], (sg, sg, 0))), allm)
+    if best is None or abs(kk - k_ref) < best[0]: best = (abs(kk - k_ref), sg, kk)
+grain = hp(ndi.gaussian_filter(white, (best[1], best[1], 0)))
+grain *= tgt_std / grain[ref].std(0)
+del white
+print('grain: std', np.round(tgt_std, 4), 'blur %.2f ss px, keep %.3f vs photo %.3f' % (best[1], best[2], k_ref))
+# low-frequency ghost, from open sky only, carried into edge pixels as a ratio
+r_low = np.stack([mblur(res[..., c], clean, 5.0 * SS) for c in range(3)], -1)
+r_low = np.where(ndi.gaussian_filter(clean, 5.0 * SS)[..., None] > 0.02, r_low, 0)
+pure = (ndi.gaussian_filter(clean, 1.0 * SS) * (1 - wisp) * band_w)[..., None]
+lp = (1 - pure) * (lp0 - band_w[..., None] * r_low) + pure * (lp0 - res + grain)   # pure sky: the fit + grain
+print('ghost: band sky px %d, |r_low| p50/p99 in band %s' % (int((pure[..., 0] > 0.5).sum()),
+      np.round(np.percentile(np.abs(r_low[pure[..., 0] > 0.5]), [50, 99], 0), 3).tolist()))
+np.save(os.path.join(wlib.SC, 'ghost_res.npy'), np.stack([res[::4, ::4] @ LUMA, pure[::4, ::4, 0], band_w[::4, ::4]], -1).astype(np.float32))
+pix = np.exp(lp)
+del lp, lp0, res, hres, wisp, white_x, grain, r_low, el_fit, pure, clean
+L = pix @ LUMA
+
 # 1. Sky share. Confident sky is blue sky or bright neutral cloud, confident needle
 #    is dark; in between, t is the pixel's linear share of the sky actually behind
 #    it (a masked blur of the confident sky around it).
@@ -130,25 +199,16 @@ S_loc = np.where(ndi.gaussian_filter(conf, 12.0 * SS)[..., None] > 0.02, S_loc, 
 LN = 0.035                                                 # the needles' own luminance
 t = np.clip((L - LN) / np.maximum(S_loc @ LUMA - LN, 1e-3), 0, 1)
 
-# 2. The sky's own field. On open blue sky (cloud fringes eroded away) log radiance
-#    is fitted per channel as a smooth function of elevation plus a radial
-#    function of distance from the old sun. Only the radial part belongs to the
-#    sun, so only it moves: divided out around the old sun, multiplied in around
-#    the new one, plus the measured circumsolar excess (P_sun - P_desun, the
+# 2. The sun moves. Of the field fitted in step 0 only the radial part belongs to
+#    the sun, so only it moves: divided out around the old sun, multiplied in
+#    around the new one, plus the measured circumsolar excess (P_sun - P_desun, the
 #    disc and aureole desun.py took out). The sphere-wide ring median used before
 #    underestimated the painted dome in this view and left a pale streak from the
 #    crown towards the old sun; the in-frame fit leaves one gradient.
-fitm = ndi.binary_erosion(blue & ~cloud, iterations=10 * SS)
-sub = (slice(None, None, 4), slice(None, None, 4))
-B_el = lambda e: np.stack([np.ones_like(e), e / 90, (e / 90) ** 2, (e / 90) ** 3], -1)
-B_r = lambda g: np.stack([np.exp(-g / 6), np.exp(-g / 15), np.exp(-g / 35)], -1)
-m4 = fitm[sub]
-A = np.concatenate([B_el(elev[sub][m4]), B_r(g_old[sub][m4])], -1)
 radial = np.zeros(pix.shape)
 for c in range(3):
-    coef = np.linalg.lstsq(A, np.log(np.maximum(pix[..., c][sub][m4], 1e-6)), rcond=None)[0]
-    radial[..., c] = B_r(g_new) @ coef[4:] - B_r(g_old) @ coef[4:]
-    print('ch %d sun term at 2,10,20,35,60 deg:' % c, np.round(B_r(np.array([2., 10, 20, 35, 60])) @ coef[4:], 3))
+    radial[..., c] = B_r(g_new) @ coefs[c][4:] - B_r(g_old) @ coefs[c][4:]
+    print('ch %d sun term at 2,10,20,35,60 deg:' % c, np.round(B_r(np.array([2., 10, 20, 35, 60])) @ coefs[c][4:], 3))
 excess = np.maximum(at(P_sun, g_new) - at(P_dsn, g_new), 0)
 gain = np.exp(radial + excess)
 del radial, excess
