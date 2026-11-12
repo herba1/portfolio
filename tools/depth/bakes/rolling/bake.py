@@ -82,22 +82,26 @@ centre of the guard whose slots show the green blade roots turning behind it.
 
 photo_front.py then replaces front.webp's wires with wires cut from the photo's
 own luminance (variable width, the steel's own shading, no drawn strokes);
-texture.py then replaces rotor.webp's flat body with the photo's own blade
-pixels (veins, gloss, shading) at a higher opacity; run it after a bake or a
---rebuild.
+texture.py then writes the photo's own blade pixels (grain, dust, the light
+through the sheet, the real specular) at full detail, with how far each one
+can be trusted (wires, sticker, edge and badge are not); run it after a bake
+or a --rebuild.
 
---acrylic SRC OUT is the last step (acrylic.py), on texture.py's output: it
-rebuilds the rotor as moulded acrylic. The rolling shutter shears each row of
-a turning blade by a different angle, so every burr on the outline above
-became a frayed stroke end and the photo's fine texture inside it became
-horizontal striations. Each blade's outline is refitted in the disc's own
-plane as a low-order Fourier curve (notches closed first), so it is one
-smooth edge with one continuous tip arc, and the body becomes a field in
-blade coordinates (radius, chord) that is smooth along every row: the photo's
-hub-to-tip and chordwise light as a low-order polynomial, two crisp broad
-gloss bands, and a denser, darker moulded lip. rotor-shape's G then holds
-only the gloss: the engine draws the bright edge itself, lit by the lamp
-through the outline's normal at each sub-sample's angle.
+--acrylic SRC OUT is the last step (acrylic.py), on texture.py's output.
+The rolling shutter shears each row of a turning blade by a different angle,
+so every burr on the outline becomes a frayed stroke end: each blade's
+outline is refitted in the disc's own plane as a low-order Fourier curve
+(notches closed first), one smooth edge with one continuous tip arc, kept as
+a signed distance (rotor-shape R) only to cut and anti-alias the edge. The
+body is the photo itself: its blade pixels are unwrapped into each blade's
+(radius, chord) frame, one atlas panel per blade (rotor.webp), wire and
+sticker holes filled with the other two blades' detail at the same (radius,
+chord) over the blade's own broad light, and meta.json gets the frame (each
+blade's mid angle and its leading and trailing angle per radius). The engine
+reads the atlas at every sub-sample's turned point, so the readout shears the
+photo's real texture into striations along the rows and tears it into
+photographic fragments. The engine draws the bright edge itself, lit by the
+lamp through the outline's normal at each sub-sample's angle.
 
 --rebuild SRC OUT re-runs only the reveal on a published print (the photo
 is not needed), so the reveal can be tuned without re-fetching it.

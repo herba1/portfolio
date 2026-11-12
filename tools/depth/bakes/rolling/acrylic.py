@@ -1,17 +1,11 @@
-"""Rolling: the blades as moulded acrylic, not photo strokes.
+"""Rolling: the blades as the photo's own acrylic, unwrapped into blade coordinates.
 
     python3 -I tools/depth/bakes/rolling/bake.py --acrylic SRC/ OUT/
 
 (bake.py's last step, after photo_front.py and texture.py.) SRC holds the
-print with texture.py's rotor.webp (the photo's own blade, wire notches
-filled) and bake.py's rotor-shape.webp; rotor.webp and rotor-shape.webp are
-rewritten in OUT, everything else is left alone.
-
-The readout shears every row of a turning blade by a different angle, so any
-irregularity of its outline is drawn out along the rows: a notch or a burr on
-the edge becomes a frayed, streaky stroke end, and the photo's fine texture
-inside it (sampled once per row) becomes horizontal striations. So the
-acrylic is rebuilt from two smooth things:
+print with texture.py's rotor.webp (the photo's own blade pixels, and in A
+how far each can be trusted) and bake.py's rotor-shape.webp; rotor.webp,
+rotor-shape.webp and meta.json are written to OUT.
 
   outline  each blade separately, in the disc's own plane (the guard rim's
            ellipse undone, so the three blades are alike): the old outline
@@ -20,19 +14,29 @@ acrylic is rebuilt from two smooth things:
            Fourier series (OUTLINE_SIG: a Gaussian taper over the harmonics,
            so nothing shorter than a few tens of px survives and the tip is
            one continuous arc), then mapped back to the picture, joined to a
-           round hub under the badge and turned into an exact signed distance.
-  shading  a field in blade coordinates (rho, the disc radius, and the
-           chord, 0 at the leading edge, 1 at the trailing), smooth along
-           every row: the photo's hub-to-tip and leading-to-trailing light
-           fitted as a low-order polynomial over the three blades, the
-           blades' one mean green, and two broad gloss bands (a long
-           highlight running out along the blade near its leading edge, and
-           a shorter one across it at mid radius), carried as specular.
-  lip      the moulded edge is thicker: within LIP px of the outline the
-           sheet is denser (more opaque, a deeper green), so each piece is
-           framed by a dark glassy band. The engine draws the bright edge on
-           it, lit by the lamp according to the outline's normal at each
-           sub-sample's angle.
+           round hub under the badge and turned into an exact signed
+           distance (rotor-shape.webp R). It is used only to cut and
+           anti-alias the outline: the readout drags any burr on it out into
+           a frayed stroke end.
+  frame    each blade's own coordinates: rho, the disc radius, and the
+           chord, 0 at its leading edge and 1 at its trailing at that radius
+           (the blade's angular extent at each radius, smoothed along the
+           radius). The extent is written to meta.json ("frame": the three
+           blades' mid angles and, on FRAME_N radii, each one's leading and
+           trailing angle against its mid), and the engine computes the same
+           chord for every sub-sample's turned point.
+  atlas    rotor.webp: the photo's blade pixels unwrapped into that frame,
+           one panel per blade (rho down, chord across, ATLAS_RHO x
+           ATLAS_CHORD), at about one photo px per texel and full detail: the
+           grain and dust, the rear guard and room seen through the sheet,
+           the real specular. The readout is meant to shear exactly this
+           texture into striations along the rows. Where a blade's own photo
+           is not trusted (a front wire crossing it, the sticker, the edge,
+           the badge) the texel takes the other two blades' detail at the
+           same (rho, chord), over its own broad light (normalised
+           convolution at BROAD px); where no blade is trusted, its broad
+           light alone. A is the sheet's opacity (A_SHEET): the plate shows
+           through the rest, tinted by the texel's hue.
 """
 import json, os
 import numpy as np, cv2
@@ -43,11 +47,15 @@ HUB_CUT = 0.17     # disc radius: the blades are cut off the hub here and fitted
 HUB_R = 0.19       # the round hub they are joined back to (under the badge)
 DISC_PX = 800      # disc-plane px per rim radius
 SS = 4             # supersampling of the filled outline
-A_SHEET, A_LIP = 0.42, 0.8   # the sheet's opacity, and at the moulded lip
-LIP, LIP_DARK = 4.0, 0.5     # px the lip runs in from the outline; the body's gain there
-CHROMA = 1.0      # the body's chroma against the blades' mean
-GLOSS_LEAD = (0.22, 0.07, 0.26)   # chord, half width, strength: the long highlight near the leading edge
-GLOSS_MID = (0.6, 0.035, 0.16)    # rho, half width, strength: the band across the blade
+A_SHEET = 0.74     # the sheet's opacity: the plate (the dim room, the rear guard) shows through the rest, tinted
+GAIN = 1.0         # the body's gain over the photo's linear light (the room behind it is graded down)
+CHROMA = 0.9       # the body's chroma against the photo's (linear): acrylic in a dim room, not a lit sticker
+FRAME_N = 256      # radii the blade frame is tabulated on, over rho 0..1
+ATLAS_RHO = (0.0, 0.9)        # the atlas's radius span (the engine draws nothing turning past 0.9)
+ATLAS_CHORD = (-0.12, 1.12)   # ...and chord span, a margin either side of the outline
+ATLAS_N = (704, 1024)         # texels per panel: radius, chord (about one photo px each at the tip)
+ATLAS_PAD = 8                 # texel rows between panels, so mip levels do not bleed
+BROAD = 10         # atlas texels: the broad light each blade keeps as its own under borrowed detail
 LUM = np.array([0.0722, 0.7152, 0.2126], np.float32)  # BGR
 
 
@@ -137,54 +145,103 @@ def outline_sdf(outlines, D, h, w):
     return cv2.resize(sdf4, (w, h), interpolation=cv2.INTER_AREA).astype(np.float32)
 
 
-def chord_field(outlines, D):
-    """Each pixel's blade coordinates: the nearest blade's chord position
-    (0 at its leading edge, 1 at its trailing; the rotor turns toward
-    decreasing phi) at the pixel's radius. The blade's angular extent at each
-    radius is smoothed along the radius, so the field is smooth."""
-    NR, NP = 400, 2048
-    rr = (np.arange(NR) + 0.5) / NR
-    best = np.full(D.rho.shape, np.inf, np.float32)
-    chord = np.zeros(D.rho.shape, np.float32)
+def frame(outlines):
+    """Each blade's mid angle and, on FRAME_N radii (rho = (i + 0.5) / FRAME_N),
+    its leading and trailing angle against the mid: the angular extent of
+    its outline at that radius, smoothed along the radius."""
+    NP = 4096
+    rr = (np.arange(FRAME_N) + 0.5) / FRAME_N
+    mids, los, his = [], [], []
     for q in outlines:
         ph = np.arctan2(q[:, 1], q[:, 0])
-        mid = np.arctan2(np.sin(ph).mean(), np.cos(ph).mean())
-        img = np.zeros((NR, NP), np.uint8)
-        qr = np.hypot(q[:, 0], q[:, 1]) * NR
+        mid = float(np.arctan2(np.sin(ph).mean(), np.cos(ph).mean()))
+        img = np.zeros((FRAME_N, NP), np.uint8)
+        qr = np.hypot(q[:, 0], q[:, 1]) * FRAME_N
         qp = (np.angle(np.exp(1j * (ph - mid))) + np.pi) / (2 * np.pi) * NP
         cv2.fillPoly(img, [np.round(np.stack([qp, qr], 1) * 16).astype(np.int32)], 1, shift=4)
-        lo, hi, ok = np.zeros(NR), np.zeros(NR), np.zeros(NR, bool)
-        for r in range(NR):
+        lo, hi, ok = np.zeros(FRAME_N), np.zeros(FRAME_N), np.zeros(FRAME_N, bool)
+        for r in range(FRAME_N):
             nz = np.nonzero(img[r])[0]
             if len(nz) > 4:
-                lo[r], hi[r], ok[r] = nz[0], nz[-1], True
+                lo[r], hi[r], ok[r] = nz[0], nz[-1] + 1, True
         idx = np.nonzero(ok)[0]
-        lo = np.interp(np.arange(NR), idx, lo[idx])
-        hi = np.interp(np.arange(NR), idx, hi[idx])
-        lo = cv2.GaussianBlur(lo[:, None], (1, 0), 6)[:, 0]
-        hi = cv2.GaussianBlur(hi[:, None], (1, 0), 6)[:, 0]
-        lo = lo / NP * 2 * np.pi - np.pi
-        hi = hi / NP * 2 * np.pi - np.pi
-        L = np.interp(D.rho, rr, lo)
-        Hh = np.interp(D.rho, rr, hi)
-        p = np.angle(np.exp(1j * (D.phi - mid)))
+        lo = np.interp(np.arange(FRAME_N), idx, lo[idx])
+        hi = np.interp(np.arange(FRAME_N), idx, hi[idx])
+        lo = cv2.GaussianBlur(lo[:, None], (1, 0), 4)[:, 0]
+        hi = cv2.GaussianBlur(hi[:, None], (1, 0), 4)[:, 0]
+        mids.append(mid)
+        los.append(lo / NP * 2 * np.pi - np.pi)
+        his.append(hi / NP * 2 * np.pi - np.pi)
+    return rr, mids, los, his
+
+
+def chord_of(rho, phi, fr):
+    """(blade, chord) at disc polar (rho, phi): the blade whose chord is
+    nearest its middle, as the engine picks it."""
+    rr, mids, los, his = fr
+    best = np.full(rho.shape, np.inf, np.float32)
+    chord = np.zeros(rho.shape, np.float32)
+    lab = np.zeros(rho.shape, np.int32)
+    for k, (mid, lo, hi) in enumerate(zip(mids, los, his)):
+        L = np.interp(rho, rr, lo)
+        Hh = np.interp(rho, rr, hi)
+        p = np.angle(np.exp(1j * (phi - mid)))
         c = (p - L) / np.maximum(Hh - L, 1e-3)
         dist = np.abs(c - 0.5)
         take = dist < best
         best[take] = dist[take]
         chord[take] = c[take]
-    return np.clip(chord, -0.3, 1.3)
+        lab[take] = k
+    return lab, chord
 
 
-def _sm(x, a, b):
-    t = np.clip((x - a) / (b - a), 0, 1)
-    return t * t * (3 - 2 * t)
+def _nconv(img, wgt, sigmas):
+    """Normalised convolution, smallest scale first."""
+    out = np.zeros_like(img)
+    have = np.zeros(wgt.shape, bool)
+    for sig in sigmas:
+        num = cv2.GaussianBlur(img * wgt[..., None], (0, 0), sig)
+        den = cv2.GaussianBlur(wgt, (0, 0), sig)
+        take = ~have & (den > 0.05)
+        out[take] = num[take] / den[take][:, None]
+        have |= take
+    out[~have] = (img * wgt[..., None]).sum((0, 1)) / max(float(wgt.sum()), 1e-6)
+    return out
 
 
-def _basis(rho, c):
-    r = (rho - 0.5) / 0.3
-    cc = c - 0.5
-    return np.stack([np.ones_like(r), r, r * r, cc, cc * cc, r * cc], -1)
+def atlas(lin, trust, D, fr):
+    """The blades' photo pixels in their own (rho, chord) frame, one panel
+    each, wire and sticker holes filled with the other blades' detail."""
+    rr, mids, los, his = fr
+    NR, NC = ATLAS_N
+    rho = ATLAS_RHO[0] + (np.arange(NR) + 0.5) / NR * (ATLAS_RHO[1] - ATLAS_RHO[0])
+    ch = ATLAS_CHORD[0] + (np.arange(NC) + 0.5) / NC * (ATLAS_CHORD[1] - ATLAS_CHORD[0])
+    lab_img, _ = chord_of(D.rho, D.phi, fr)
+    bodies, ws, broads = [], [], []
+    for k, (mid, lo, hi) in enumerate(zip(mids, los, his)):
+        L = np.interp(rho, rr, lo)[:, None]
+        Hh = np.interp(rho, rr, hi)[:, None]
+        ang = mid + L + ch[None, :] * (Hh - L)
+        x, y = D.to_img(rho[:, None] * np.cos(ang), rho[:, None] * np.sin(ang))
+        x, y = x.astype(np.float32), y.astype(np.float32)
+        b = cv2.remap(lin, x, y, cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+        w = cv2.remap(trust * (lab_img == k), x, y, cv2.INTER_LINEAR, borderValue=0)
+        bodies.append(b)
+        ws.append(w)
+        broads.append(_nconv(b, w, (BROAD, 2 * BROAD, 4 * BROAD, 8 * BROAD, 16 * BROAD, 48 * BROAD)))
+    panels = []
+    for k in range(len(bodies)):
+        num = np.zeros_like(bodies[k])
+        den = np.zeros(ws[k].shape, np.float32)
+        for j in range(len(bodies)):
+            if j != k:
+                num += ws[j][..., None] * (bodies[j] - broads[j])
+                den += ws[j]
+        lent = np.where(den[..., None] > 1e-3, num / np.maximum(den, 1e-3)[..., None], 0) * np.clip(den / 0.3, 0, 1)[..., None]
+        w = ws[k][..., None]
+        panels.append(w * bodies[k] + (1 - w) * (broads[k] + lent))
+        print("acrylic: blade", k, "own", round(float(ws[k].mean()), 3), "lent", round(float(np.clip(den, 0, 1).mean()), 3))
+    return panels
 
 
 def build(src, out):
@@ -196,57 +253,33 @@ def build(src, out):
     sdf_old = (shp[..., 2] - 128) / meta["sdf"]
     outlines = blades(sdf_old > 0, D)
     sdf = outline_sdf(outlines, D, h, w)
-    chord = chord_field(outlines, D)
-    rho = D.rho
-
-    # --- the photo's light over the blade, fitted smooth: where the old body
-    # is the photo's own blade (clear of the badge, the sticker's patch and
-    # the outline), a low-order polynomial in (rho, chord) of its luminance
+    fr = frame(outlines)
     lin = rot[..., :3] ** 2.2
-    bx, by, br = meta["badge"]
-    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
-    rb = np.hypot(xx - bx, yy - by)
-    fit = (sdf > 8) & (sdf_old > 8) & (rb > br + 40) & (rho < 0.8)
-    Y = lin @ LUM
-    mean = (lin[fit]).mean(0)
-    B = _basis(rho[fit], chord[fit])
-    coef, *_ = np.linalg.lstsq(B, Y[fit] / float(mean @ LUM), rcond=None)
-    shade = np.clip(_basis(np.clip(rho, 0.2, 0.85), np.clip(chord, 0, 1)) @ coef, 0.6, 1.5)
-    # the hub, where the blades run together under the badge, is one sheet:
-    # no blade coordinates there, the roots' mean light
-    root = (rho > 0.3) & (rho < 0.36) & (sdf > 4)
-    shade = shade + (float(shade[root].mean()) - shade) * (1 - _sm(rho, 0.24, 0.34))
-    print("acrylic: shading", np.round(coef, 3), "range", round(float(shade[fit].min()), 2), round(float(shade[fit].max()), 2))
-    mY = float(mean @ LUM)
-    col = mY + CHROMA * (mean - mY)
-    body = col[None, None] * shade[..., None]
+    trust = rot[..., 3].copy()
+    panels = atlas(lin, trust, D, fr)
+    NR, NC = ATLAS_N
+    sheet = np.zeros((3 * NR + 2 * ATLAS_PAD, NC, 3), np.float32)
+    for k, pnl in enumerate(panels):
+        body = np.clip(pnl * GAIN, 0, None)
+        Y = body @ LUM
+        body = Y[..., None] + CHROMA * (body - Y[..., None])
+        r0 = k * (NR + ATLAS_PAD)
+        sheet[r0:r0 + NR] = body
+        if k:  # the padding repeats the panels' edge rows
+            sheet[r0 - ATLAS_PAD:r0 - ATLAS_PAD // 2] = sheet[r0 - ATLAS_PAD - 1]
+            sheet[r0 - ATLAS_PAD // 2:r0] = body[:1]
+    rr, mids, los, his = fr
+    meta["frame"] = {"n": FRAME_N, "mid": [round(m, 6) for m in mids],
+                     "lo": [[round(float(v), 5) for v in lo] for lo in los],
+                     "hi": [[round(float(v), 5) for v in hi] for hi in his]}
+    meta["atlas"] = {"rho": list(ATLAS_RHO), "chord": list(ATLAS_CHORD), "n": list(ATLAS_N), "pad": ATLAS_PAD}
 
-    # --- the lip: the moulded edge is thicker, denser and a deeper green
-    lip = np.exp(-np.maximum(sdf, 0) / LIP)
-    body *= (1 - (1 - LIP_DARK) * lip)[..., None]
-    opac = A_SHEET + (A_LIP - A_SHEET) * lip
-
-    # --- the gloss: two broad bands in blade coordinates, specular
-    c0, cw, cs = GLOSS_LEAD
-    r0, rw, rs = GLOSS_MID
-    # a moulded sheet's highlights are crisp: plateaus with short ramps, not
-    # haze (they are smooth along every row, so the readout keeps them crisp)
-    def band(x, x0, half, ramp):
-        return _sm(x, x0 - half - ramp, x0 - half + ramp) * (1 - _sm(x, x0 + half - ramp, x0 + half + ramp))
-    g_lead = cs * band(chord, c0, cw, 0.035) * _sm(rho, 0.3, 0.45) * (1 - _sm(rho, 0.7, 0.8))
-    g_mid = rs * band(rho, r0, rw, 0.02) * _sm(chord, 0.3, 0.45) * (1 - _sm(chord, 0.75, 0.9))
-    gloss = (g_lead + g_mid) * _sm(sdf, 3, 9) * _sm(rho, 0.26, 0.34)
-    rim = gloss
-
-    sdf_scale, rim_max = meta["sdf"], meta["rim"]
     os.makedirs(out, exist_ok=True)
-    enc = np.clip(np.clip(body, 0, 1) ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
-    cv2.imwrite(f"{out}/rotor.webp", np.dstack([enc, np.clip(opac * 255 + 0.5, 0, 255).astype(np.uint8)]),
-                [cv2.IMWRITE_WEBP_QUALITY, 96])
-    shape = np.dstack([np.zeros((h, w), np.uint8),
-                       np.clip(rim / rim_max * 255 + 0.5, 0, 255).astype(np.uint8),
-                       np.clip(128 + sdf * sdf_scale + 0.5, 0, 255).astype(np.uint8)])  # BGR
+    enc = np.clip(np.clip(sheet, 0, 1) ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
+    alpha = np.full(sheet.shape[:2], int(round(A_SHEET * 255)), np.uint8)
+    cv2.imwrite(f"{out}/rotor.webp", np.dstack([enc, alpha]), [cv2.IMWRITE_WEBP_QUALITY, 90])
+    shape = np.dstack([np.zeros((h, w), np.uint8), np.zeros((h, w), np.uint8),
+                       np.clip(128 + sdf * meta["sdf"] + 0.5, 0, 255).astype(np.uint8)])  # BGR
     cv2.imwrite(f"{out}/rotor-shape.webp", shape, [cv2.IMWRITE_WEBP_QUALITY, 101])
-    if os.path.abspath(src) != os.path.abspath(out):
-        json.dump(meta, open(f"{out}/meta.json", "w"))
-    return sdf, chord, body, opac, rim
+    json.dump(meta, open(f"{out}/meta.json", "w"), separators=(",", ":"))
+    return sdf, fr, sheet

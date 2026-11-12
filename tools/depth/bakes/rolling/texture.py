@@ -1,50 +1,34 @@
-"""Rolling: give the rotor the photo's own blade, not a flat body colour.
+"""Rolling: the photo's own blade pixels, and how far each one can be trusted.
 
-    python3 -I tools/depth/bakes/rolling/texture.py photo-3840.jpg ORIG/ public/lab/rolling/
+    python3 -I tools/depth/bakes/rolling/texture.py photo-3840.jpg ORIG/ TEXTURED/
 
-ORIG holds the published print as bake.py wrote it (rotor.webp,
-rotor-shape.webp, front.webp, meta.json); only rotor.webp is rewritten, in
-OUT (ORIG's rotor.webp only colours what no blade pixel reaches, so ORIG may
-be OUT). The photo is the same Commons rendition bake.py starts from: it is
-area-resampled to 2560 px and cut to the same crop and PRINT, so it lands on
-the print pixel for pixel.
+ORIG holds the print as bake.py and photo_front.py wrote it (rotor.webp,
+rotor-shape.webp, front.webp, meta.json); rotor.webp is written to TEXTURED,
+and bake.py --acrylic TEXTURED/ public/lab/rolling/ then unwraps it into the
+blade atlas the engine samples. The photo is the same Commons rendition
+bake.py starts from: it is area-resampled to 2560 px and cut to the same crop
+and PRINT, so it lands on the print pixel for pixel.
 
-  body    the photo's own linear pixels inside each blade's outline: the
-          veins and the gloss of the moulding, the darker hub end and the
-          lighter tip (the moulded edge's highlight stays in rotor-shape's
-          rim). A pixel counts as blade as far as its greenness holds up
-          against the blade's local best, so a wire's halo, its reflection in
-          the acrylic and the badge's chrome do not. Where a front wire crosses
-          the blade (front.webp's alpha, grown 2 px), where the paper sticker
-          sits, within EDGE px of the outline (the room bleeds in there) and
-          under the badge, the photo is not the blade's: those pixels are
-          filled by normalised convolution from the blade around them,
-          smallest scale first, so a wire's notch takes the texture beside
-          it and the hub end carries the root's colour in.
-          Only DETAIL of the fine texture is kept over the broad shading
-          (the readout stretches fine texture into streaks along the rows),
-          and the chroma is pulled to CHROMA of the photo's: acrylic in a
-          dim room, not a lit green sticker.
-  opacity A_TEX: the plate (the dim room, the rear guard) shows through at
-          1 - A_TEX, tinted by the body's hue.
-
-Everything else bake.py made (outline, rim, plate, front) is kept.
-
-Its output is not published as it is: bake.py --acrylic reads it (the photo's
-blade, wires filled) and fits the smooth shading field the engine draws, so
-no fine texture turns with the blade (the readout stretches it into
-striations).
+  RGB   the photo's own linear pixels inside each blade's outline, at full
+        detail: the grain, the dust, the rear guard and the room seen through
+        the acrylic, and the moulding's real specular. Nothing is smoothed:
+        the readout is meant to shear this texture into striations along the
+        rows. Where the photo is not the blade's (a front wire crossing it,
+        front.webp's alpha grown 3 px; the paper sticker; within EDGE px of
+        the outline, where the room bleeds in; under the badge) it is filled
+        by normalised convolution from the blade around it, smallest scale
+        first, only so the file is a whole picture: acrylic.py refills those
+        pixels from the other two blades.
+  A     the trust: a pixel counts as blade as far as its greenness holds up
+        against the blade's local best (so a wire's halo, its reflection in
+        the acrylic and the badge's chrome do not), and not at all where the
+        photo is not the blade's.
 """
 import sys, os, json
 import numpy as np, cv2
 
-A_TEX = 0.6      # the blade's opacity: the plate behind shows through it, tinted
-GAIN = 0.92      # the body's gain over the photo's linear light
-CHROMA = 0.8     # the body's chroma against the photo's (linear): the acrylic's own green, not a lit sticker
-DETAIL, DETAIL_SIG = 0.4, 3.0  # the share of the photo's fine texture kept over its broad shading (px): at speed
-                               # the readout stretches fine texture along the rows into streaks
 EDGE = 3.0       # px inside the outline the photo still carries the room
-WIRE_GROW = 2    # px the front wire matte is grown before it is cut out
+WIRE_GROW = 3    # px the front wire matte is grown before it is cut out
 PURE_LO, PURE_HI = 0.7, 0.92  # greenness against the blade's local best: distrusted .. trusted
 BADGE_GAP = 18   # px past the badge's ring its chrome still reflects
 STICKER0 = (538, 432, 27)   # bake.py's, 1280 px crop units
@@ -106,17 +90,12 @@ oldlin = (old[..., :3].astype(np.float32) / 255) ** 2.2
 fill[have < 0.5] = oldlin[have < 0.5]
 fill = cv2.GaussianBlur(fill, (0, 0), 0.8)
 body = lin * w[..., None] + fill * (1 - w[..., None])
-# the moulding's broad shading (hub end darker, tip lighter, the gloss) in
-# full, its fine texture (veins, the camera's noise) in part
-broad = cv2.GaussianBlur(body, (0, 0), DETAIL_SIG * k)
-body = broad + DETAIL * (body - broad)
-Y = body @ np.array([0.0722, 0.7152, 0.2126], np.float32)
-body = Y[..., None] + CHROMA * (body - Y[..., None])
-body = np.clip(body * GAIN, 0, 1)
 body[~inside] = oldlin[~inside]
+w[~inside] = 0
 
-enc = np.clip(body ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
-alpha = np.full((H, W), int(round(A_TEX * 255)), np.uint8)
+enc = np.clip(np.clip(body, 0, 1) ** (1 / 2.2) * 255 + 0.5, 0, 255).astype(np.uint8)
+alpha = np.clip(w * 255 + 0.5, 0, 255).astype(np.uint8)
 os.makedirs(out, exist_ok=True)
-cv2.imwrite(os.path.join(out, "rotor.webp"), np.dstack([enc, alpha]), [cv2.IMWRITE_WEBP_QUALITY, 94])
-print("rotor.webp", "trusted", round(float(w.sum() / max(inside.sum(), 1)), 3), "A", A_TEX)
+# lossless: acrylic.py reads it, it is not published
+cv2.imwrite(os.path.join(out, "rotor.webp"), np.dstack([enc, alpha]), [cv2.IMWRITE_WEBP_QUALITY, 101])
+print("rotor.webp", "trusted", round(float(w.sum() / max(inside.sum(), 1)), 3))

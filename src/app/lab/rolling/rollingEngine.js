@@ -7,14 +7,15 @@ import { createStage, clamp } from "../_kit/stage";
 // the whole disc the rotor sweeps it is redrawn, the room continuing through
 // and the rear guard's spokes and rings as soft lines in the disc plane over
 // the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as
-// moulded acrylic: a signed distance to one outline per blade, a low-order
-// Fourier fit with one continuous tip arc, cut hard, since the readout drags
-// any burr on it out into a frayed stroke end; a body that is a smooth field
-// in blade coordinates, the photo's hub-to-tip and chordwise light, two crisp
-// gloss bands and a denser, darker moulded lip, with no photo grain for the
-// rows to stretch into striations; the plate shows through it, tinted; and a
-// bright edge drawn here, lit by the lamp as far as the outline faces it at
-// each sub-sample's angle), and the front (the guard's
+// the photo's own acrylic: its pixels, grain, dust, the light through the
+// sheet and the real specular, unwrapped into each blade's (radius, chord)
+// frame and read back at every sub-sample's turned point, so the readout
+// shears the photo's own texture into striations along the rows and tears
+// it into photographic fragments; a signed distance to one smooth outline
+// per blade only cuts and anti-aliases the edge, since the readout drags any
+// burr on it out into a frayed stroke end; the plate shows through the
+// sheet, tinted; and a bright edge drawn here, lit by the lamp as far as the
+// outline faces it at each sub-sample's angle), and the front (the guard's
 // wires and centre badge: each wire cut from the photo's own luminance, as
 // wide as the photo shows it and keeping the steel's shading and highlights,
 // running out to the guard's rim, where the plate keeps the same wires).
@@ -36,12 +37,11 @@ import { createStage, clamp } from "../_kit/stage";
 // The room is lit by a ring fluorescent on the same 60 Hz mains that drives
 // the motor, so its light pulses at 120 Hz, and every row integrates it over
 // its own exposure window too. Four lamp cycles fit the 1/30 s readout, so the
-// frame carries four bands: broad cool crests and short warm, dim gaps, the
-// readout itself drawn in the picture's own light. They lie along the
+// frame carries four bands: broad cool crests and short warm, dimmer gaps,
+// the readout itself drawn in the picture's own light. They lie along the
 // sensor's rows (they turn when the phone turns) and they light everything
-// through the same linear composite: a crest blows out a row of the guard's
-// chrome and the blade islands under it, the gap beside it drops them almost
-// to silhouette. At 29.97 fps the 120 Hz lamp gains
+// through the same linear composite: a crest brightens a row of the guard's
+// chrome and the blade islands under it, the gap beside it dims them warm. At 29.97 fps the 120 Hz lamp gains
 // 0.004 of a cycle a frame, so they creep up the frame while the torn
 // blades creep backwards.
 //
@@ -78,19 +78,21 @@ const SUB = 16; // exposure sub-samples, so the smear and the lamp are integrate
 // gaps. Each phosphor holds the light for its own decay time, a first-order
 // lag (each harmonic k scaled by 1 / (1 + i k w tau)), so each channel keeps
 // its own share of the gap and lags by its own angle; blue decays fastest
-// and drops nearly to nothing in the gap, red holds on, so the crests run
+// and drops furthest in the gap, red holds on, so the crests run
 // cool and the gaps warm, as real flicker bands do. STEADY is each channel's
-// light that does not flicker (long afterglow, the daylight at the shoji).
-// The result is carried as LAMP_K harmonics, so a row's exposure integrates
-// it exactly. Behind a phone's sensor this is the deep banding real footage
-// under mains tubes shows: about four bands down a 1/30 s readout, the
-// crests near half again the mean light, the gaps under a fifth of it.
+// light that does not flicker: the phosphors' long afterglow and the
+// daylight through the shoji, nearly half the room's light. The result is
+// carried as LAMP_K harmonics, so a row's exposure integrates it exactly.
+// Behind a phone's sensor that is about four bands down a 1/30 s readout,
+// the crests about 1.4 times the mean light, the gaps about half
+// of it: deep enough to see the readout in, never deep enough to drown the
+// guard's chrome or the hub.
 const MAINS = 60;
 const LAMP = 2 * MAINS; // Hz
 const STRIKE = 0.55;
 const ARC = 0.35;
 const DECAY = [0.0016, 0.0011, 0.0004]; // phosphor decay, s (r, g, b)
-const STEADY = [0.04, 0.03, 0.06];
+const STEADY = [0.45, 0.44, 0.47];
 const LAMP_K = 10;
 
 // The lamp's light as a function of phase (cycles), mean 1 per channel:
@@ -144,7 +146,7 @@ const AA = 0.6; // the blade outline's anti-aliasing width, device px: a moulded
 // outline, EDGE_W wide (sigma), as bright as EDGE where the edge faces the
 // ceiling lamp (LAMP_DIR, picture space, y down) and EDGE_BACK of that where
 // it faces away, so the glint runs round each torn piece as it turns.
-const EDGE = 0.7;
+const EDGE = 0.5;
 const EDGE_AT = 0.8;
 const EDGE_W = 0.5;
 const EDGE_BACK = 0.12;
@@ -179,8 +181,12 @@ uniform float uRows;
 uniform vec3 uPaper;
 uniform float uPx;
 uniform float uSdf;
-uniform float uRim;
-uniform float uTint;
+uniform highp sampler2D uFrame; // the blades' leading and trailing angles against their mids, per radius
+uniform float uFrameN;
+uniform vec3 uMid;
+uniform vec4 uAtlas; // rho0, rho1, chord0, chord1
+uniform vec3 uPanel; // texel rows per panel, pad rows, atlas rows
+uniform float uLod;
 uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
 uniform vec3 uLampC[${LAMP_K}];
 uniform vec3 uLampS[${LAMP_K}];
@@ -226,6 +232,34 @@ vec3 lampOver(float tau){
   return max(l, 0.0);
 }
 
+// The blade frame at radius rho: row 0 holds blades 0 and 1 (lo, hi), row 1
+// blade 2, every angle against the blade's mid, linear between FRAME radii.
+vec4 frameAt(int row, float rho){
+  float f = clamp(rho * uFrameN - 0.5, 0.0, uFrameN - 1.0);
+  int i = int(floor(f));
+  int j = min(i + 1, int(uFrameN) - 1);
+  return mix(texelFetch(uFrame, ivec2(i, row), 0), texelFetch(uFrame, ivec2(j, row), 0), f - float(i));
+}
+float wrapA(float a){ return a - 6.2831853 * floor((a + 3.14159265) / 6.2831853); }
+
+// The photo's own blade at a point of the rotor's frame, given as its radius
+// rho (which the turn leaves alone), its angle phi, and the three blades'
+// extents lo, hi at that radius: which blade it falls on (the one whose
+// chord is nearest its middle) and where on it, (rho, chord), read from that
+// blade's panel of the unwrapped atlas.
+vec4 bladeAt(float rho, float phi, vec3 lo, vec3 hi){
+  vec3 c = (vec3(wrapA(phi - uMid.x), wrapA(phi - uMid.y), wrapA(phi - uMid.z)) - lo) / max(hi - lo, vec3(1e-3));
+  vec3 m = abs(c - 0.5);
+  float k = 0.0;
+  float ch = c.x;
+  if (m.y < m.x) { k = 1.0; ch = c.y; }
+  if (m.z < min(m.x, m.y)) { k = 2.0; ch = c.z; }
+  float u = clamp((ch - uAtlas.z) / (uAtlas.w - uAtlas.z), 0.0, 1.0);
+  float v = clamp((rho - uAtlas.x) / (uAtlas.y - uAtlas.x) * uPanel.x, 0.5, uPanel.x - 0.5);
+  v = (k * (uPanel.x + uPanel.y) + v) / uPanel.z;
+  return textureLod(uRotor, vec2(u, v), uLod);
+}
+
 // The front: the photo's own guard wires, cut from its luminance with their
 // shading and highlights (tools/depth/bakes/rolling/photo_front.py), and the
 // badge's chrome. Straight alpha over everything behind.
@@ -252,23 +286,33 @@ void main(){
   // Beyond the blade tips (0.83 of the rim) nothing turns.
   if (dot(d, d) > 0.81) { o = vec4(enc(mix(plate, f.rgb, f.a) * lit), 1.0); return; }
   // The rotor is acrylic: per sub-sample, coverage c from the signed
-  // distance to the blade's outline (anti-aliased over AA device px),
-  // the plate passed through it tinted, T = 1 - c + c (1 - A) tint, and
-  // what it sends back, E = c (A body + rim). Linear light throughout, and
+  // distance to the blade's outline (anti-aliased over AA device px), the
+  // photo's blade at this point of the blade (the atlas), the plate passed
+  // through it tinted, T = 1 - c + c (1 - A) tint, and what it sends back,
+  // E = c A body + edge. Linear light throughout, and
   // each sub-sample lit by the lamp at that instant.
   vec3 accT = vec3(0.0);
   vec3 accE = vec3(0.0);
+  // The turn keeps this point's radius and only moves its angle, so the
+  // blades' extents at its radius are read once for every sub-sample.
+  float rho = length(d);
+  float phi0 = atan(d.y, d.x);
+  vec4 f01 = frameAt(0, rho);
+  vec2 f2 = frameAt(1, rho).xy;
+  vec3 lo = vec3(f01.x, f01.z, f2.x);
+  vec3 hi = vec3(f01.y, f01.w, f2.y);
   for (int k = 0; k < ${SUB}; k++) {
     float tau = s * uReadout + uExpo * (float(k) + 0.5) / float(${SUB});
     float a = uDir * angAt(tau);
     float c = cos(a), sn = sin(a);
-    vec2 r = (uFromDisc * vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y) + uHub) / uImg;
-    vec2 sh = texture(uShape, r).rg;
-    float sd = (sh.r * 255.0 - 128.0) / uSdf * uPx; // device px, + inside
+    vec2 e = vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y); // this point in the rotor's own frame
+    vec2 r = (uFromDisc * e + uHub) / uImg;
+    float sd = (texture(uShape, r).r * 255.0 - 128.0) / uSdf * uPx; // device px, + inside
     float cov = clamp(sd / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
-    vec4 t = texture(uRotor, r);
+    if (sd < -2.5) { accT += lampAt(tau); continue; }
+    vec4 t = bladeAt(rho, phi0 - a, lo, hi);
     vec3 L = lampAt(tau);
-    vec3 tint = pow(t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4), vec3(uTint));
+    vec3 tint = t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4);
     // The moulded edge: a line ${EDGE_AT} device px inside the outline, lit
     // by the lamp as far as the edge faces it. The outline's normal is the
     // signed distance's gradient, carried from the rotor's own frame to the
@@ -283,7 +327,7 @@ void main(){
       edge = exp(-0.5 * pow((sd - ${EDGE_AT.toFixed(2)}) / ${EDGE_W.toFixed(2)}, 2.0)) * glint;
     }
     accT += L * (1.0 - cov + cov * (1.0 - t.a) * tint);
-    accE += L * (cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint)) + edge * ${EDGE.toFixed(2)} * (0.45 + 0.55 * tint));
+    accE += L * (cov * t.a * t.rgb + edge * ${EDGE.toFixed(2)} * (0.45 + 0.55 * tint));
   }
   vec3 col = (plate * accT + accE) / float(${SUB});
   col = mix(col, f.rgb * lit, f.a);
@@ -357,7 +401,7 @@ export async function createRolling(host, { embedded = false } = {}) {
   gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
   gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-  // Colour is sRGB; the rotor's shape (signed distance and rim) is data.
+  // Colour is sRGB (the plate, the front and the blade atlas); the rotor's signed distance is data.
   const texFrom = (bm, srgb = true) => {
     const t = gl.createTexture();
     gl.bindTexture(gl.TEXTURE_2D, t);
@@ -374,6 +418,21 @@ export async function createRolling(host, { embedded = false } = {}) {
   const rotorTex = texFrom(rotorBm);
   const shapeTex = texFrom(shapeBm, false);
   const frontTex = texFrom(frontBm);
+  // The blade frame (meta.frame): per radius, each blade's leading and
+  // trailing angle against its mid, read exactly (texelFetch, lerped).
+  const FN = meta.frame.n;
+  const frameData = new Float32Array(FN * 2 * 4);
+  for (let i = 0; i < FN; i++) {
+    frameData.set([meta.frame.lo[0][i], meta.frame.hi[0][i], meta.frame.lo[1][i], meta.frame.hi[1][i]], i * 4);
+    frameData.set([meta.frame.lo[2][i], meta.frame.hi[2][i], 0, 0], (FN + i) * 4);
+  }
+  const frameTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, frameTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, FN, 2, 0, gl.RGBA, gl.FLOAT, frameData);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  const atlas = meta.atlas;
+  const atlasRows = 3 * atlas.n[0] + 2 * atlas.pad;
 
   const prog = program(gl, VS, FS);
   const vao = gl.createVertexArray();
@@ -479,8 +538,17 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1i(u.uShape, 3);
     gl.uniform1f(u.uPx, rect[2] / IW);
     gl.uniform1f(u.uSdf, meta.sdf);
-    gl.uniform1f(u.uRim, meta.rim);
-    gl.uniform1f(u.uTint, meta.tint);
+    gl.activeTexture(gl.TEXTURE4);
+    gl.bindTexture(gl.TEXTURE_2D, frameTex);
+    gl.uniform1i(u.uFrame, 4);
+    gl.uniform1f(u.uFrameN, FN);
+    gl.uniform3f(u.uMid, meta.frame.mid[0], meta.frame.mid[1], meta.frame.mid[2]);
+    gl.uniform4f(u.uAtlas, atlas.rho[0], atlas.rho[1], atlas.chord[0], atlas.chord[1]);
+    gl.uniform3f(u.uPanel, atlas.n[0], atlas.pad, atlasRows);
+    // The atlas holds about one photo px per texel, so its level of detail
+    // is the print's own scale (the turned point's footprint is the same
+    // whatever the angle).
+    gl.uniform1f(u.uLod, Math.max(0, Math.log2(IW / rect[2])));
     gl.uniform2f(u.uView, cw, ch);
     gl.uniform4f(u.uRect, rect[0], rect[1], rect[2], rect[3]);
     gl.uniform2f(u.uImg, IW, IH);
