@@ -1,16 +1,20 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 
-// Kagerou: heat haze on an abandoned highway at noon, seen from 30 cm off
-// the concrete.
+// Kagerou: heat haze on an empty desert road at noon, seen from 30 cm off
+// the tarmac.
 //
-// The plate is Poly Haven's derelict_highway_midday (South Africa, unclipped
-// 16k HDR), looked at down the road with a ~22° lens and the camera lowered
-// from the tripod's ~2 m to ~0.3 m: the road plane is resampled exactly (a
-// lower camera squeezes the ground toward the horizon by h/h'), and the
-// cutting's banks, the bridge and the far terrain move by their Depth
-// Anything distance, with occlusion. `aux.png` carries, per pixel, that
-// distance (log2 metres / 14, sky = far), the road, and the clear sky.
+// The plate is Poly Haven's nowhere_road (the Karoo, South Africa, unclipped
+// 16k HDR): a ruler-straight two-lane road through scrub, mountains at its
+// end and a bright bank of fair-weather cloud over it. It is looked at down
+// the road with the camera lowered from the tripod's ~1.26 m to ~0.3 m: the
+// road plane is resampled exactly (a lower camera squeezes the ground toward
+// the horizon by h/h'), and the shoulder bushes, fence posts and poles rise
+// whole by the distance of their foot (Depth Anything), with occlusion, so
+// from down here they stand up past the horizon. The camera is tipped up a
+// few degrees, so the sky and its cloud fill the top of the print and the
+// posts lean in. `aux.png` carries, per pixel, that distance (log2 metres /
+// 14, sky = far), the road, and the sky.
 //
 // Holding the pointer down heats the road. Two pieces of real optics follow:
 //
@@ -27,10 +31,11 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 //    and rays bend upward. A ray that leaves the eye below a critical
 //    depression α_c = √(2δ) (δ the index drop, ∝ the temperature excess)
 //    turns before reaching the road and comes back up at the angle it went
-//    down, so for the sky the road is an exact mirror: the far road shows the
-//    sky flipped about the horizon. α_c is under a degree; that thin band is
-//    the "wet road". The turbulence moves α_c from place to place, so the
-//    band's lower edge breaks up and wobbles.
+//    down, so for anything far off the road is a mirror: the far road shows
+//    the veld, the poles and the road itself flipped about the horizon,
+//    squeezed thin toward the vanishing line at α_c. α_c is a degree or two;
+//    that band is the "wet road". The turbulence moves α_c from place to
+//    place, so the band's lower edge breaks into shards and wobbles.
 //
 // Query: ?heat=0..1 holds the heat; ?t=seconds freezes the shimmer clock;
 // ?still=1 skips the reveal.
@@ -39,22 +44,29 @@ const PLATE = "/lab/kagerou/plate.webp";
 const AUX = "/lab/kagerou/aux.png";
 
 // Plate geometry, image-plane units (tan of the angle), pitch 0, y up.
-const PX = 0.208; // half width
-const PB = -0.112; // bottom
-const PT = 0.166; // top
+const PX = 0.28; // half width
+const PB = -0.13; // bottom
+const PT = 0.3; // top
+const PLATE_W = 2900; // px across
 // Log2 radiance encoding of the plate.
 const LO = -6.5;
 const HI = -0.5;
 // Camera height above the road (m), the heated layer's top (m).
 const CAM_H = 0.3;
 const LAYER = 1.4;
-// Critical depression at full heat (radians): ~0.9°. A road 30-40 K above the
-// air gives ~0.5°; this is about twice that so the band reads at print size.
-const ALPHA_MAX = 0.016;
+// Critical depression at full heat (radians): ~1.6°. A road 30-40 K above the
+// air gives ~0.5°; this is about three times that, so at print size the pool
+// reaches past the far veld (which stands ~0.8° above the horizon) into the
+// sky in the saddle between the mountains, the way it does on a real Karoo
+// road where the veld drops away.
+const ALPHA_MAX = 0.028;
 const AMBIENT = 0.1;
-// Visible height of the print in image-plane units (the lens).
-const VIEW_H = 0.2587;
-const HORIZON = 0.6; // from the top
+// The lens: visible height of the print in its own image plane (~20° tall,
+// ~30° across a 3:2 print), tipped up PITCH radians; the horizon sits
+// HORIZON of the way down.
+const VIEW_H = 0.36;
+const PITCH = (5 * Math.PI) / 180;
+const HORIZON = 0.72; // from the top
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -70,7 +82,8 @@ in vec2 vUv;
 out vec4 outColor;
 uniform sampler2D uPlate;
 uniform sampler2D uAux;
-uniform vec4 uView;     // image plane: x0, y0 (bottom left), w, h
+uniform vec4 uView;     // the lens's image plane: x0, y0 (bottom left), w, h
+uniform vec2 uPitch;    // cos, sin of the camera's tilt up
 uniform float uTime;
 uniform float uHeat;    // 0..1
 uniform float uAlphaC;  // critical depression, radians
@@ -122,7 +135,10 @@ vec2 bend(vec2 q, float t) {
 }
 
 void main() {
-  vec2 p = uView.xy + vUv * uView.zw;
+  // The lens is tipped up: its ray, on the level plate's image plane.
+  vec2 v = uView.xy + vUv * uView.zw;
+  vec3 r = vec3(v.x, v.y * uPitch.x + uPitch.y, uPitch.x - v.y * uPitch.y);
+  vec2 p = r.xy / r.z;
   vec4 aux = texture(uAux, plateUv(p));
   float Z = exp2(aux.r * 14.0);          // metres; sky ~16 km
   float road = aux.g;
@@ -142,18 +158,27 @@ void main() {
   // Fine shimmer also averages the far detail out a little.
   float lod = uLodBias + uHeat * w * 1.4;
 
-  // The clear sky is a smooth gradient: read it from a coarse mip so the
-  // plate's 8-bit steps melt into a ramp (film grain textures it later).
-  vec3 col = radiance(p + d, mix(lod, 4.5, sky));
+  // The sky is read a touch softer so the plate's 8-bit dither melts into
+  // the gradient (film grain textures it later); the cloud keeps its drawing.
+  vec3 col = radiance(p + d, lod + 0.6 * sky);
 
   // Inferior mirage on the far road.
   if (elev < 0.0 && road > 0.001 && uAlphaC > 0.0) {
     float alpha = -elev;
-    float n = gnoise(vec3(p.x * 55.0, uTime * 0.45, 3.0)) + 0.45 * gnoise(vec3(p.x * 150.0 + uTime * 0.2, uTime * 0.9, 9.0));
-    float ac = uAlphaC * (1.0 + 0.3 * n);
-    float m = smoothstep(ac, ac * 0.7, alpha + d.y * 0.6) * road;
+    // The critical line wanders with the plumes (broad, slow) and frays where
+    // single cells cross it (fine, fast), so the pool's lower edge is crisp
+    // but broken into shards, never a soft straight ramp.
+    float n = gnoise(vec3(p.x * 55.0, uTime * 0.45, 3.0)) + 0.45 * gnoise(vec3(p.x * 150.0 + uTime * 0.2, uTime * 0.9, 9.0))
+            + 0.2 * gnoise(vec3(p.x * 420.0, uTime * 1.7, 5.0));
+    float ac = uAlphaC * (1.0 + 0.2 * n);
+    float m = smoothstep(ac, ac * 0.88, alpha + d.y * 0.6) * road;
+    // Near the vanishing line the inverted image is squeezed: the rays that
+    // dip closest to α_c all turn in the same thin skin of hot air, so the
+    // mirrored veld and poles thin down into the edge instead of running on.
+    float u = clamp(alpha / ac, 0.0, 1.0);
+    float squeeze = 1.0 - 0.5 * smoothstep(0.4, 1.0, u);
     // The returning ray spends twice as long in the layer: double shimmer.
-    vec2 pm = vec2(p.x, -p.y) + d * 2.0;
+    vec2 pm = vec2(p.x, -p.y * squeeze) + d * 2.0;
     vec3 refl = radiance(pm, lod + 0.25) * 0.94;
     col = mix(col, refl, m);
   }
@@ -371,17 +396,19 @@ export async function createKagerou(host, { embedded = false } = {}) {
     gl.disable(gl.BLEND);
     gl.disable(gl.SCISSOR_TEST);
 
-    // The lens: a fixed field, horizon 60% down the print. A slow breathing
-    // drift of a few arc-minutes (the camera is hand-held on the asphalt).
+    // The lens: a fixed field, tipped up, horizon 72% down the print. A slow
+    // breathing drift of a few arc-minutes (the camera is hand-held on the
+    // asphalt).
     const aspect = L.pw / L.ph;
     let vh = VIEW_H;
     let vw = vh * aspect;
-    if (vw > PX * 2 * 0.96) {
-      vw = PX * 2 * 0.96;
+    if (vw > PX * 2 * 0.9) {
+      vw = PX * 2 * 0.9;
       vh = vw / aspect;
     }
     const br = reduce || still ? [0, 0] : [Math.sin((time * 2 * Math.PI) / 11) * 0.0006, Math.sin((time * 2 * Math.PI) / 13.7 + 1.1) * 0.0004];
-    const top = vh * HORIZON;
+    // The horizon is the line y = -tan(pitch) on the tipped image plane.
+    const top = vh * HORIZON - Math.tan(PITCH);
     const x0 = -vw / 2 + br[0];
     const y0 = top - vh + br[1];
 
@@ -394,14 +421,15 @@ export async function createKagerou(host, { embedded = false } = {}) {
     gl.bindTexture(gl.TEXTURE_2D, aux);
     gl.uniform1i(u.uAux, 1);
     gl.uniform4f(u.uView, x0, y0, vw, vh);
+    gl.uniform2f(u.uPitch, Math.cos(PITCH), Math.sin(PITCH));
     gl.uniform1f(u.uTime, time);
     gl.uniform1f(u.uHeat, heat);
     const a = clamp((air - 0.16) / 0.84, 0, 1);
     gl.uniform1f(u.uAlphaC, ALPHA_MAX * Math.sqrt(a));
     gl.uniform1f(u.uExpo, 1.5 * 2 ** expoStops);
     gl.uniform1f(u.uPol, 0.62);
-    // The plate is ~2600 px across the field; match its mip to the print.
-    gl.uniform1f(u.uLodBias, Math.max(0, Math.log2((2600 * (vw / (PX * 2))) / L.rw)));
+    // Match the plate's mip to the print.
+    gl.uniform1f(u.uLodBias, Math.max(0, Math.log2((PLATE_W * (vw / (PX * 2))) / L.rw)));
     gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

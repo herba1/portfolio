@@ -1,6 +1,6 @@
 {
   "title": "Kagerou",
-  "description": "An abandoned highway at noon, seen from thirty centimetres off the concrete. Hold the pointer down and the sun works on the road: the air over it starts to shimmer, finest and fastest toward the horizon where the rays graze hundreds of metres of hot air, and the far road turns to water, an inferior mirage that is the bridge and the sky bent back up off a layer of thin, hot air. Let go and it cools off over a few seconds.",
+  "description": "An empty desert road at noon, seen from thirty centimetres off the tarmac, under a bright bank of summer cloud. Hold the pointer down and the sun works on the road: the air over it starts to shimmer, finest and fastest toward the horizon where the rays graze hundreds of metres of hot air, and the far road turns to water, an inferior mirage that is the poles, the veld and the road itself bent back up off a layer of thin, hot air. Let go and it cools off over a few seconds.",
   "tags": [
     "WebGL",
     "Optics",
@@ -47,7 +47,7 @@
     }
   ],
   "sources": [
-    "HDRI: Derelict Highway (Midday), Poly Haven, photographed by Dimitrios Savva, processed by Jarod Guest, CC0. https://polyhaven.com/a/derelict_highway_midday (16k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/derelict_highway_midday_16k.hdr). Rectilinear view down the road (yaw -74.84 deg from the panorama centre, pitch 0, ~22 deg lens), the camera lowered from ~2 m to ~0.3 m: road plane resampled exactly, banks, bridge and terrain moved by their Depth Anything V2 distance (tools/depth/depth_hr.py) with occlusion. Shipped as log2 radiance -6.5..-0.5 in 8 bits with TPDF dither (plate.webp, clear sky denoised); aux.png holds log2 distance, the road mask and the sky mask.",
+    "HDRI: Nowhere Road, Poly Haven, photographed by Dario Barresi, CC0. https://polyhaven.com/a/nowhere_road (16k .hdr: https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/16k%2B/nowhere_road_16k.hdr). Rectilinear view down the road (yaw 104 deg from the panorama centre), the camera lowered from ~1.26 m to ~0.3 m: road plane resampled exactly, bushes, fence posts and poles lifted whole by the Depth Anything V2 distance of their foot (tools/depth/depth_hr.py) with occlusion (tools/depth/bakes/kagerou/render_nowhere.py, warp_nowhere2.py, encode_nowhere.py). The lens is ~30 deg across and tipped up 5 deg. Shipped as log2 radiance -6.5..-0.5 in 8 bits with TPDF dither (plate.webp); aux.png holds log2 distance, the road mask and the sky mask.",
     "https://en.wikipedia.org/wiki/Mirage#Inferior_mirage",
     "https://en.wikipedia.org/wiki/Heat_haze"
   ]
