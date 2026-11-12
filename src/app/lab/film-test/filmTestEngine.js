@@ -1,5 +1,5 @@
 import { createStage, clamp } from "../_kit/stage";
-import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "../_kit/film";
+import { createFilm, FILM_DEFAULTS, FILM_PRESETS } from "./film";
 
 // Film test: one photograph, raw on the left of the split, developed through
 // the shared film kit on the right. Drag to move the split.
