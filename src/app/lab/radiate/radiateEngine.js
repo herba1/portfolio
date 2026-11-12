@@ -12,10 +12,13 @@ import { GLYPHS, ADVANCE } from "./radiateGlyphs";
 // each pixel's footprint, so they stay exact at any density and grey out
 // instead of aliasing where they crowd.
 //
-// The pointer is a magnet: the field is pinched toward it, so the lines
-// bunch where it sits and spread on its far side. A click sends one
-// compression wave out through the lines; where it leaves the field it
-// carries a ring on with it.
+// The field runs wall to wall: the word sits inside its own echoes out to
+// every edge of the frame. The pointer is a magnet that changes the line
+// period: inside its bell new offset curves open between the old ones, up
+// to three to a period. Under it lies a second level set, circles around
+// the hand at a period just off the field's, and the two multiply, so the
+// hand raises true moire fringes against the type's offset curves. A click
+// sends a dense band out through the lines.
 
 const DIST_VS = `#version 300 es
 layout(location=0) in vec2 aPos;
@@ -129,11 +132,13 @@ uniform highp sampler2D uDist;
 uniform vec2 uRes;        // css px
 uniform float uDpr;
 uniform float uH;
-uniform float uP;         // line period, css px
-uniform float uN;         // rings in the field
+uniform float uP;         // line period at rest, css px
+uniform float uN;         // rings in the field: enough to reach every edge
 uniform vec3 uMag;        // magnet x, y (css px), strength
 uniform float uSigma;
-uniform vec4 uPulse[4];   // radius, amplitude, ring visibility, -
+uniform float uM;         // how many extra lines per period the magnet packs in
+uniform float uBeat;      // the circles' period over the field's, at the pointer
+uniform vec4 uPulse[4];   // radius, amplitude, -, -
 out vec4 o;
 
 float field(vec2 css){
@@ -147,51 +152,74 @@ float field(vec2 css){
   return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
 }
 
-// Integral of ink along x (in periods): solid below 0, then gap/line halves,
-// up to N rings. Differencing it across the pixel is an exact box filter.
-float ink(float x){
+// Integral of ink along x (in periods): solid below 0, then gap and line,
+// the line taking 'duty' of each period. Differencing it across the pixel
+// is an exact box filter.
+float ink(float x, float duty){
   if (x < 0.0) return x;
   float xc = min(x, uN);
-  return floor(xc) * 0.5 + max(0.0, fract(xc) - 0.5);
+  return floor(xc) * duty + max(0.0, fract(xc) - (1.0 - duty));
+}
+// erf to about 1e-4 (Winitzki), plenty for a phase.
+float erf(float x){
+  float x2 = x * x;
+  float a = 0.147;
+  return sign(x) * sqrt(1.0 - exp(-x2 * (1.27324 + a * x2) / (1.0 + a * x2)));
+}
+float cover(float x, float duty){
+  float h = max(length(vec2(dFdx(x), dFdy(x))), 1e-4);
+  return clamp((ink(x + h * 0.5, duty) - ink(x - h * 0.5, duty)) / h, 0.0, 1.0);
 }
 
 void main(){
   vec2 css = vec2(gl_FragCoord.x, uH - gl_FragCoord.y) / uDpr;
-  float d0 = field(css);
+  float d = field(css);
 
-  // The magnet works along the lines' own normal. The distance is remapped
-  // by f(d) = d + c·k·(tanh((d - dm)/k) + tanh(dm/k)·exp(-d/k)): f(0) = 0,
-  // so the letters never move, and with c < 1 f stays increasing, so no
-  // line ever crosses another. Around the level dm that runs through the
-  // pointer the lines close in from both sides; nearer the letters they
-  // open out to make room.
+  // The magnet changes the period, not the distance. It is a Gaussian
+  // bell on the pointer, split into its run along the field's normal
+  // (u = d - dm, dm the distance under the pointer) and across it (t), and
+  // the line density along the normal is raised to 1 + m·bell. Integrating
+  // that along u gives the phase:
+  //   F = d + m·exp(-t²/σ²)·σ·(√π/2)·(erf(u/σ) + erf(dm/σ))
+  // F(0) = 0, so the letters never move; dF/dd >= 1, so no line folds or
+  // runs back into them; and inside the bell up to m new lines open
+  // between every pair, so the period drops to a half, a third.
   vec2 v = css - uMag.xy;
-  float c = min(uMag.z, 0.92) * exp(-dot(v, v) / (uSigma * uSigma));
+  float g = exp(-dot(v, v) / (uSigma * uSigma));
+  float m = uMag.z * uM;
   float dm = max(field(uMag.xy), 0.0);
-  float k = uSigma * 0.4;
-  float d = d0 > 0.0 ? d0 + c * k * (tanh((d0 - dm) / k) + tanh(dm / k) * exp(-d0 / k)) : d0;
+  float u = max(d, 0.0) - dm;
+  float t2 = max(dot(v, v) - u * u, 0.0);
+  float F = d + m * exp(-t2 / (uSigma * uSigma)) * uSigma * 0.886227 * (erf(u / uSigma) + erf(dm / uSigma));
 
-  // Click waves: a compression travelling outward along the distance.
-  float de = d;
-  float ring = 0.0;
-  float hd = length(vec2(dFdx(d), dFdy(d)));
+  // Click waves: a band travelling out along the distance. Its phase term
+  // A·w·z·exp(-z²) adds no net lines, so the field behind it is untouched,
+  // but it packs the band 1 + A times denser and stretches its flanks
+  // into fat crests.
   for (int k = 0; k < 4; k++) {
     vec4 q = uPulse[k];
-    if (q.y <= 0.0 && q.z <= 0.0) continue;
-    float w = uP * 1.6;
+    if (q.y <= 0.0) continue;
+    float w = uP * 2.4;
     float z = (d - q.x) / w;
-    de -= q.y * w * 0.6 * exp(-z * z);
-    float lo = q.x - uP * 0.25, hi = q.x + uP * 0.25;
-    ring = max(ring, q.z * clamp((min(d + hd * 0.5, hi) - max(d - hd * 0.5, lo)) / max(hd, 1e-4), 0.0, 1.0));
+    F += q.y * w * z * exp(-z * z);
   }
 
-  float x = de / uP;
-  float h = max(length(vec2(dFdx(x), dFdy(x))), 1e-4);
-  float cov = clamp((ink(x + h * 0.5) - ink(x - h * 0.5)) / h, 0.0, 1.0);
-  // The ring lives only outside the field, so it peels off the last line.
-  float out_ = clamp((x - uN) / h + 0.5, 0.0, 1.0);
-  cov = max(cov, ring * out_);
-  o = vec4(vec3(1.0 - cov), 1.0);
+  float cov = cover(d > 0.0 ? F / uP : d / uP, 0.5);
+
+  // A second level set under the hand: circles around the pointer, packed
+  // by the same bell (density 1 + m·g along the radius, integrated the
+  // same way) at a period just off the field's. Where the two gratings
+  // agree the white survives, where they drift half a period apart it
+  // closes up, so their product raises moire fringes, the beat of the
+  // type's offset curves against the hand, one every 1 / (beat - 1) lines
+  // where they run parallel. The circles thin out toward the bell's edge.
+  float r = length(v);
+  float phase2 = (r + m * uSigma * 0.886227 * erf(r / uSigma)) / (uP * uBeat);
+  float duty = 0.5 * smoothstep(0.06, 0.45, g) * clamp(uMag.z * 2.0, 0.0, 1.0);
+  float cov2 = duty > 0.002 ? cover(phase2 + 0.25, duty) : 0.0;
+
+  float paper = (1.0 - cov) * (1.0 - cov2);
+  o = vec4(vec3(paper), 1.0);
 }`;
 
 function compile(gl, type, src) {
@@ -239,7 +267,7 @@ export async function createRadiate(host) {
   const drawProg = program(gl, DIST_VS, DRAW_FS);
   const uD = uniforms(gl, distProg, ["uSegs", "uGlyphs", "uOrigin", "uFont", "uDpr", "uH"]);
   const uRange = gl.getUniformLocation(distProg, "uRange");
-  const uR = uniforms(gl, drawProg, ["uDist", "uRes", "uDpr", "uH", "uP", "uN", "uMag", "uSigma"]);
+  const uR = uniforms(gl, drawProg, ["uDist", "uRes", "uDpr", "uH", "uP", "uN", "uMag", "uSigma", "uM", "uBeat"]);
   const uPulse = gl.getUniformLocation(drawProg, "uPulse");
 
   const vao = gl.createVertexArray();
@@ -261,6 +289,12 @@ export async function createRadiate(host) {
     return t;
   };
 
+  // The magnet packs up to MAG_M + 1 lines into each period; its circles
+  // run BEAT times the field's period, so the moire beats every
+  // 1 / (BEAT - 1) lines.
+  const MAG_M = 2;
+  const BEAT = 1.14;
+
   let segTex = null;
   let distTex = null;
   let fbo = null;
@@ -276,9 +310,11 @@ export async function createRadiate(host) {
     L.font = font;
     // Lines a little finer than the stems, as in Wyman's logotype.
     L.period = Math.max(6, Math.round(font * 0.06));
-    L.rings = 11;
     L.sigma = Math.min(W, H) * 0.24;
     L.reach = Math.hypot(W, H);
+    // The whole frame is the field: enough rings to reach the far corner,
+    // even where the magnet packs them MAG_M + 1 times as dense.
+    L.rings = Math.ceil((L.reach * (1 + MAG_M)) / L.period) + 4;
     L.cx = W / 2;
     L.cy = H / 2;
 
@@ -342,6 +378,8 @@ export async function createRadiate(host) {
   const PULL = 0.9;
   const pulses = [];
   const WAVE_S = 4;
+  // At its peak a wave packs the band WAVE_A + 1 times as dense.
+  const WAVE_A = 1.6;
   stage.on("down", (p) => {
     if (pulses.length >= 4) pulses.shift();
     pulses.push({ age: 0 });
@@ -398,8 +436,7 @@ export async function createRadiate(host) {
       const r = L.reach * (1 - Math.pow(1 - u, 1.4)) - L.period;
       const amp = Math.pow(1 - u, 1.5) * clamp(u * 30, 0, 1);
       pulseData[i * 4] = r;
-      pulseData[i * 4 + 1] = amp;
-      pulseData[i * 4 + 2] = 1;
+      pulseData[i * 4 + 1] = amp * WAVE_A;
     });
 
     // Nothing moved: keep the last frame.
@@ -419,6 +456,8 @@ export async function createRadiate(host) {
     gl.uniform1f(uR.uN, L.rings);
     gl.uniform3f(uR.uMag, mag.x, mag.y, mag.k);
     gl.uniform1f(uR.uSigma, L.sigma);
+    gl.uniform1f(uR.uM, MAG_M);
+    gl.uniform1f(uR.uBeat, BEAT);
     gl.uniform4fv(uPulse, pulseData);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   });

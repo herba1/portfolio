@@ -1,6 +1,6 @@
 {
   "title": "Radiate",
-  "description": "A short word in heavy Geist on white, its outline echoed outward in evenly spaced black lines, after Lance Wyman's Mexico 68 logotype. The lines are true offset curves of the letters, solved exactly from the glyph outlines, so the echoes of neighbouring letters meet in clean creases. The pointer is a magnet that pinches the field toward it, bunching the lines into op-art moiré on one side and spreading them on the other. A click sends one wave out through the lines, and where it leaves the field it carries a ring away with it.",
+  "description": "A short word in heavy Geist on white, its outline echoed outward in evenly spaced black lines to every edge of the frame, after Lance Wyman's Mexico 68 logotype. The lines are true offset curves of the letters, solved exactly from the glyph outlines, so the echoes of neighbouring letters meet in clean creases. The pointer packs new lines in between the old ones, down to a third of the period, and lays its own rings over them at a period just off the field's, so the two gratings beat into op-art moiré fringes that swim as the hand moves. A click sends a dense band out through the lines.",
   "tags": ["WebGL", "Type", "Op art"],
   "status": "draft",
   "createdAt": "2026-11-06T12:00:00.000Z",
