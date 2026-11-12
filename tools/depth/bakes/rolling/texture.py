@@ -29,6 +29,11 @@ the print pixel for pixel.
           1 - A_TEX, tinted by the body's hue.
 
 Everything else bake.py made (outline, rim, plate, front) is kept.
+
+Its output is not published as it is: bake.py --acrylic reads it (the photo's
+blade, wires filled) and fits the smooth shading field the engine draws, so
+no fine texture turns with the blade (the readout stretches it into
+striations).
 """
 import sys, os, json
 import numpy as np, cv2

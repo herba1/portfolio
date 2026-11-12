@@ -7,11 +7,14 @@ import { createStage, clamp } from "../_kit/stage";
 // the whole disc the rotor sweeps it is redrawn, the room continuing through
 // and the rear guard's spokes and rings as soft lines in the disc plane over
 // the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as
-// acrylic: a signed distance to one smooth outline per blade, cut hard; the
-// photo's own blade pixels, its gloss and hub-to-tip shading with only part
-// of its fine texture, the wires that crossed it filled from the blade beside
-// them, a little less saturated and at 0.6 opacity, so the plate shows
-// through the acrylic; a thin specular rim), and the front (the guard's
+// moulded acrylic: a signed distance to one outline per blade, a low-order
+// Fourier fit with one continuous tip arc, cut hard, since the readout drags
+// any burr on it out into a frayed stroke end; a body that is a smooth field
+// in blade coordinates, the photo's hub-to-tip and chordwise light, two crisp
+// gloss bands and a denser, darker moulded lip, with no photo grain for the
+// rows to stretch into striations; the plate shows through it, tinted; and a
+// bright edge drawn here, lit by the lamp as far as the outline faces it at
+// each sub-sample's angle), and the front (the guard's
 // wires and centre badge: each wire cut from the photo's own luminance, as
 // wide as the photo shows it and keeping the steel's shading and highlights,
 // running out to the guard's rim, where the plate keeps the same wires).
@@ -90,6 +93,15 @@ const TORQUE = 260; // motor torque cap
 const PX_PER_RPM = 0.15; // drag distance (CSS px) per rpm of set speed
 
 const AA = 0.6; // the blade outline's anti-aliasing width, device px: a moulded edge, caught hard
+// The blade's moulded edge: a bright line EDGE_AT device px inside the
+// outline, EDGE_W wide (sigma), as bright as EDGE where the edge faces the
+// ceiling lamp (LAMP_DIR, picture space, y down) and EDGE_BACK of that where
+// it faces away, so the glint runs round each torn piece as it turns.
+const EDGE = 0.7;
+const EDGE_AT = 0.8;
+const EDGE_W = 0.5;
+const EDGE_BACK = 0.12;
+const LAMP_DIR = [-0.29, -0.96];
 const PAPER = [0.949, 0.941, 0.922]; // #f2f0eb
 
 const VS = `#version 300 es
@@ -125,6 +137,7 @@ uniform float uTint;
 uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
 uniform vec3 uLampDepth;
 uniform vec3 uLampLag;
+uniform vec2 uLampDir;
 out vec4 o;
 
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -186,12 +199,26 @@ void main(){
     float c = cos(a), sn = sin(a);
     vec2 r = (uFromDisc * vec2(c * d.x + sn * d.y, -sn * d.x + c * d.y) + uHub) / uImg;
     vec2 sh = texture(uShape, r).rg;
-    float cov = clamp((sh.r * 255.0 - 128.0) / uSdf * uPx / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
+    float sd = (sh.r * 255.0 - 128.0) / uSdf * uPx; // device px, + inside
+    float cov = clamp(sd / ${AA.toFixed(2)} + 0.5, 0.0, 1.0);
     vec4 t = texture(uRotor, r);
     vec3 L = lampAt(tau);
     vec3 tint = pow(t.rgb / max(max(t.r, max(t.g, t.b)), 1e-4), vec3(uTint));
+    // The moulded edge: a line ${EDGE_AT} device px inside the outline, lit
+    // by the lamp as far as the edge faces it. The outline's normal is the
+    // signed distance's gradient, carried from the rotor's own frame to the
+    // picture through this sub-sample's turn (J = fromDisc R toDisc, n = J^T g).
+    float edge = 0.0;
+    if (abs(sd) < 3.0) {
+      vec2 ex = vec2(1.5 / uImg.x, 0.0), ey = vec2(0.0, 1.5 / uImg.y);
+      vec2 g = vec2(texture(uShape, r + ex).r - texture(uShape, r - ex).r, texture(uShape, r + ey).r - texture(uShape, r - ey).r);
+      vec2 n = -(transpose(uFromDisc * mat2(c, -sn, sn, c) * uToDisc) * g);
+      float face = dot(n, uLampDir) / max(length(n), 1e-6);
+      float glint = mix(${EDGE_BACK.toFixed(2)}, 1.0, pow(max(face, 0.0), 1.5));
+      edge = exp(-0.5 * pow((sd - ${EDGE_AT.toFixed(2)}) / ${EDGE_W.toFixed(2)}, 2.0)) * glint;
+    }
     accT += L * (1.0 - cov + cov * (1.0 - t.a) * tint);
-    accE += L * cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint));
+    accE += L * (cov * (t.a * t.rgb + sh.g * uRim * (0.5 + 0.5 * tint)) + edge * ${EDGE.toFixed(2)} * (0.45 + 0.55 * tint));
   }
   vec3 col = (plate * accT + accE) / float(${SUB});
   col = mix(col, f.rgb * lit, f.a);
@@ -405,6 +432,7 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1f(u.uLamp0, lastFrame.lamp);
     gl.uniform3f(u.uLampDepth, ...lampDepth);
     gl.uniform3f(u.uLampLag, ...lampLag);
+    gl.uniform2f(u.uLampDir, LAMP_DIR[0], LAMP_DIR[1]);
     // Readout direction: rows run along (cos, sin) of the scan angle's
     // perpendicular; s grows down the frame at scan = 0.
     const a = lastFrame.scan;

@@ -2,6 +2,7 @@
 
     python3 -I tools/depth/bakes/rolling/bake.py photo.png work/ public/lab/rolling/ [--fill telea|lama]
     python3 -I tools/depth/bakes/rolling/bake.py --rebuild public/lab/rolling/ public/lab/rolling/
+    python3 -I tools/depth/bakes/rolling/bake.py --acrylic TEXTURED/ public/lab/rolling/
 
 The photo is Wikimedia Commons' 3840 px rendition (CC0; the 2560 px size is
 not served), area-resampled to 2560 px wide before the bake:
@@ -85,6 +86,19 @@ texture.py then replaces rotor.webp's flat body with the photo's own blade
 pixels (veins, gloss, shading) at a higher opacity; run it after a bake or a
 --rebuild.
 
+--acrylic SRC OUT is the last step (acrylic.py), on texture.py's output: it
+rebuilds the rotor as moulded acrylic. The rolling shutter shears each row of
+a turning blade by a different angle, so every burr on the outline above
+became a frayed stroke end and the photo's fine texture inside it became
+horizontal striations. Each blade's outline is refitted in the disc's own
+plane as a low-order Fourier curve (notches closed first), so it is one
+smooth edge with one continuous tip arc, and the body becomes a field in
+blade coordinates (radius, chord) that is smooth along every row: the photo's
+hub-to-tip and chordwise light as a low-order polynomial, two crisp broad
+gloss bands, and a denser, darker moulded lip. rotor-shape's G then holds
+only the gloss: the engine draws the bright edge itself, lit by the lamp
+through the outline's normal at each sub-sample's angle.
+
 --rebuild SRC OUT re-runs only the reveal on a published print (the photo
 is not needed), so the reveal can be tuned without re-fetching it.
 
@@ -118,7 +132,14 @@ ap.add_argument("photo", nargs="?"); ap.add_argument("work", nargs="?"); ap.add_
 ap.add_argument("--fill", default="telea")
 ap.add_argument("--rebuild", nargs=2, metavar=("SRC", "OUT"),
                 help="re-run only the reveal (reveal.py) on a published print")
+ap.add_argument("--acrylic", nargs=2, metavar=("SRC", "OUT"),
+                help="rebuild the rotor as moulded acrylic (acrylic.py) from texture.py's output")
 a = ap.parse_args()
+if a.acrylic:
+    import acrylic  # noqa: E402
+    acrylic.build(*a.acrylic)
+    print("acrylic", a.acrylic[1])
+    sys.exit(0)
 if a.rebuild:
     meta, _ = reveal.rebuild_assets(a.rebuild[0], a.rebuild[1], dict(
         RIM_C=RIM_C0, RIM_AX=np.array(RIM_AX0), E1=E1, E2=E2, PRINT=PRINT, STICKER=STICKER0, AXIS_T=AXIS_T))
