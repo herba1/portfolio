@@ -1064,6 +1064,9 @@ out vec4 outColor;
 uniform sampler2D uTex;    // developed with the object
 uniform sampler2D uPhotoT; // the photograph developed alone
 uniform sampler2D uCov;    // scene pass: alpha carries the object's coverage
+uniform sampler2D uRing;   // the halation ring (MIST_RING)
+uniform float uHal;        // its strength on the print
+uniform vec3 uHalC;        // its tint
 uniform float uFade;
 uniform vec3 uPaper;
 float cover(vec2 uv) {
@@ -1077,7 +1080,158 @@ void main() {
     for (int i = -1; i <= 1; i++) w = max(w, cover(vUv + vec2(i, j) * px));
   w = smoothstep(0.0, 0.2, w);
   vec3 c = mix(texture(uPhotoT, vUv).rgb, texture(uTex, vUv).rgb, w);
+  // the red layer's bleed, screened on: the grain under it still shows
+  c = 1.0 - (1.0 - c) * (1.0 - uHalC * (uHal * texture(uRing, vUv).r));
   outColor = vec4(mix(uPaper, c, uFade), 1.0);
+}`;
+
+// The diffusion. A Black Pro-Mist in front of the lens, over the photograph
+// and the mirror alike: one optic, so the glass and the plate it stands in
+// share one softness and the mirror stops reading as a sharp inset. Only the
+// top 15% of the frame's luminance scatters (MIST_K), taken down to a quarter
+// of the frame, spread wide and low (a quarter-res and a sixteenth-res
+// Gaussian), and screened back over everything at about a quarter, under a
+// ceiling that develops just short of white, so the clouds glow and roll off
+// into the sky instead of standing cut out, without one more pixel clipping.
+// All of it in scene light, before development, so the film's grain lands on
+// top of the glow, as it would on the negative. Then the emulsion's
+// halation: the red layer's own highlights, spread a couple of device px and
+// kept only where they fall outward onto something whose red is darker, a
+// thin warm ring, so the sky at a cloud's edge, a wire or an eave across it
+// picks up a soft orange bleed. That one is laid on the developed print
+// (BLIT), screened, because the film's dye-cloud bleed would spread a ring
+// this thin to nothing; the grain under it still shows.
+const MIST_COMMON = `#version 300 es
+precision highp float;
+in vec2 vUv;
+out vec4 outColor;
+uniform float uSRGB;   // the scene targets store sRGB (no float targets)
+uniform vec2 uKey;     // scene luminance: the knee's foot and shoulder
+uniform vec2 uRed;     // red-channel scene value: the same for the red layer
+const vec3 LUMA = vec3(0.2126, 0.7152, 0.0722);
+vec3 dec(vec3 c) {
+  if (uSRGB < 0.5) return max(c, 0.0);
+  c = clamp(c, 0.0, 1.0);
+  return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c));
+}
+vec3 enc(vec3 c) {
+  if (uSRGB < 0.5) return c;
+  c = clamp(c, 0.0, 1.0);
+  return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c));
+}
+// the red layer's highlights: bright in red, and bright (a cloud, a lit wall,
+// the yellow board), not merely red (the paint)
+float redMask(vec3 c) {
+  return smoothstep(uRed.x, uRed.y, c.r) * smoothstep(uKey.x * 0.8, uKey.y, dot(c, LUMA));
+}
+`;
+
+// full res -> 1/4: the light that scatters, keyed on luminance
+const MIST_KEY = `${MIST_COMMON}
+uniform sampler2D uIn;
+void main() {
+  vec2 t = 1.0 / vec2(textureSize(uIn, 0));
+  vec3 s = vec3(0.0);
+  for (int j = 0; j < 2; j++)
+    for (int i = 0; i < 2; i++) {
+      vec3 c = dec(texture(uIn, vUv + (vec2(i, j) - 0.5) * 2.0 * t).rgb);
+      s += c * smoothstep(uKey.x, uKey.y, dot(c, LUMA));
+    }
+  outColor = vec4(s * 0.25, 1.0);
+}`;
+
+// 1/4 -> 1/16, a 4x4 box from four bilinear taps
+const MIST_DOWN = `${MIST_COMMON}
+uniform sampler2D uIn;
+void main() {
+  vec2 t = 1.0 / vec2(textureSize(uIn, 0));
+  vec3 s = vec3(0.0);
+  for (int j = 0; j < 2; j++)
+    for (int i = 0; i < 2; i++) s += texture(uIn, vUv + (vec2(i, j) - 0.5) * 2.0 * t).rgb;
+  outColor = vec4(s * 0.25, 1.0);
+}`;
+
+// one axis of a Gaussian, sigma in the target's px
+const MIST_BLUR = `${MIST_COMMON}
+uniform sampler2D uIn;
+uniform vec2 uDir;
+uniform float uSigma;
+void main() {
+  vec2 t = uDir / vec2(textureSize(uIn, 0));
+  float k = 0.5 / (uSigma * uSigma);
+  int R = int(ceil(3.0 * uSigma));
+  vec3 s = texture(uIn, vUv).rgb;
+  float ws = 1.0;
+  for (int i = 1; i <= 40; i++) {
+    if (i > R) break;
+    float w = exp(-float(i * i) * k);
+    s += w * (texture(uIn, vUv + float(i) * t).rgb + texture(uIn, vUv - float(i) * t).rgb);
+    ws += 2.0 * w;
+  }
+  outColor = vec4(s / ws, 1.0);
+}`;
+
+// full res, horizontal: the red layer's highlight mask, spread along x
+const MIST_RED = `${MIST_COMMON}
+uniform sampler2D uIn;
+uniform float uSigma;
+float m(ivec2 p, ivec2 hi) { return redMask(dec(texelFetch(uIn, clamp(p, ivec2(0), hi), 0).rgb)); }
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  ivec2 hi = textureSize(uIn, 0) - 1;
+  float k = 0.5 / (uSigma * uSigma);
+  float s = m(ip, hi), ws = 1.0;
+  for (int i = 1; i <= 8; i++) {
+    float w = exp(-float(i * i) * k);
+    s += w * (m(ip + ivec2(i, 0), hi) + m(ip - ivec2(i, 0), hi));
+    ws += 2.0 * w;
+  }
+  outColor = vec4(s / ws, 0.0, 0.0, 1.0);
+}`;
+
+// full res: the frame through the filter and onto the emulsion
+const MIST = `${MIST_COMMON}
+uniform sampler2D uIn;     // the frame to diffuse (the composite, or the photograph alone)
+uniform sampler2D uNear;   // the glow, 1/4 res
+uniform sampler2D uFar;    // the glow, 1/16 res
+uniform float uFarW;
+uniform float uGain;       // screen strength
+uniform float uCeil;       // scene value the screen rolls toward
+void main() {
+  vec4 c0 = texelFetch(uIn, ivec2(gl_FragCoord.xy), 0);
+  vec3 c = dec(c0.rgb);
+  // the glow, screened under the ceiling: it lifts the dark round a highlight
+  // and cannot carry anything past what develops just short of white
+  vec3 B = mix(texture(uNear, vUv).rgb, texture(uFar, vUv).rgb, uFarW);
+  vec3 a = clamp(c / uCeil, 0.0, 1.0);
+  vec3 b = clamp(uGain * B / uCeil, 0.0, 1.0);
+  vec3 o = c + uCeil * b * (1.0 - a);
+  outColor = vec4(enc(o), c0.a);
+}`;
+
+// full res, vertical: the halation ring. The spread red mask, kept only on
+// what is darker than the light it came from, so it lies outward from the
+// highlight's edge, a few px wide.
+const MIST_RING = `${MIST_COMMON}
+uniform sampler2D uIn;     // the composite
+uniform sampler2D uRedH;   // the red mask, spread along x
+uniform float uSigma;
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  ivec2 hi = textureSize(uIn, 0) - 1;
+  float k = 0.5 / (uSigma * uSigma);
+  float s = texelFetch(uRedH, ip, 0).r, ws = 1.0;
+  for (int j = 1; j <= 8; j++) {
+    float w = exp(-float(j * j) * k);
+    s += w * (texelFetch(uRedH, clamp(ip + ivec2(0, j), ivec2(0), hi), 0).r + texelFetch(uRedH, clamp(ip - ivec2(0, j), ivec2(0), hi), 0).r);
+    ws += 2.0 * w;
+  }
+  vec3 c = dec(texelFetch(uIn, ip, 0).rgb);
+  // a pixel whose red layer sits well below the highlight's: the blue sky
+  // round a cloud, a wire across it, an eave under a lit wall; the highlight
+  // itself (already in its red shoulder) and the orange paint take none
+  float dark = 1.0 - smoothstep(0.2, 0.7, c.r / uRed.y);
+  outColor = vec4(s / ws * dark, 0.0, 0.0, 1.0);
 }`;
 
 function loadImage(src) {
@@ -1207,6 +1361,12 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   const geoP = program(gl, VERT, SCENE.replace("precision highp float;", "#define GEO\nprecision highp float;"));
   const opticsP = program(gl, VERT, OPTICS);
   const blit = program(gl, VERT, BLIT);
+  const mistKeyP = program(gl, VERT, MIST_KEY);
+  const mistDownP = program(gl, VERT, MIST_DOWN);
+  const mistBlurP = program(gl, VERT, MIST_BLUR);
+  const mistRedP = program(gl, VERT, MIST_RED);
+  const mistP = program(gl, VERT, MIST);
+  const mistRingP = program(gl, VERT, MIST_RING);
   const film = createFilm(gl, { width: 2, height: 2 });
   const filmP = createFilm(gl, { width: 2, height: 2 });
   const LOOK = {
@@ -1242,6 +1402,27 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     return lo;
   };
   const TONE = [sceneFor(0.8) * 1.07, sceneFor(0.97) * 1.07, LOOK.whitePoint * 4];
+  // The diffusion, in scene light. The key: the top 15% of the frame's
+  // luminance scatters, a soft knee across the 85th percentile (measured on
+  // the scene target: 0.44, what develops to about 0.68), so the cumulus,
+  // the lit plaster and the yellow board glow and the sky does not. The red
+  // layer's highlights, which halate, are keyed the same way from their own
+  // channel (the clouds' red sits near 0.41, the sky's near 0.09). The glow
+  // is screened at 0.35 toward a ceiling that develops to 0.975, two spreads
+  // of it: 0.5% of the frame's width (about 5 css px, the roll-off at a
+  // cloud's edge) and 3% (the veil), 65/35. The halation ring is a css px
+  // (sigma) of reach, 2-4 device px, screened onto the print at 0.5, amber.
+  const MIST_K = {
+    key: [sceneFor(0.62), sceneFor(0.74)],
+    red: [sceneFor(0.5), sceneFor(0.66)],
+    ceil: sceneFor(0.975),
+    gain: 0.35,
+    near: 0.005,
+    far: 0.03,
+    farW: 0.35,
+    hal: 0.5,
+    halC: [1.0, 0.55, 0.18],
+  };
   // the warm-neutral the roll-off should develop to, in scene units: each
   // channel taken back through the curve and the highlight tint, scaled so
   // its brightest channel, as the film sees it, is 1
@@ -1310,6 +1491,12 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
   let filmT = null;
   let photoT = null;
   let filmPT = null;
+  let diffT = null;
+  let diffPT = null;
+  let redT = null;
+  let ringT = null;
+  let mq = [null, null];
+  let ms = [null, null];
   let linear = false;
   let scale = 1;
   let lastBox = null;
@@ -1353,7 +1540,7 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     L.ph = Math.max(2, Math.round(L.h * dpr));
     L.rw = Math.max(2, Math.round(L.pw * scale));
     L.rh = Math.max(2, Math.round(L.ph * scale));
-    for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT]) freeTarget(gl, t);
+    for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
     geoT = target(gl, L.rw, L.rh, false);
     sceneT = target(gl, L.rw, L.rh, floatOk);
     linear = floatOk && sceneT.ok;
@@ -1370,6 +1557,14 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     opticsT = target(gl, L.rw, L.rh, linear);
     filmT = target(gl, L.rw, L.rh, false);
     filmPT = target(gl, L.rw, L.rh, false);
+    diffT = target(gl, L.rw, L.rh, linear);
+    diffPT = target(gl, L.rw, L.rh, linear);
+    redT = target(gl, L.rw, L.rh, false);
+    ringT = target(gl, L.rw, L.rh, false);
+    const qw = Math.max(2, Math.ceil(L.rw / 4));
+    const qh = Math.max(2, Math.ceil(L.rh / 4));
+    mq = [target(gl, qw, qh, linear), target(gl, qw, qh, linear)];
+    ms = [target(gl, Math.max(2, Math.ceil(qw / 4)), Math.max(2, Math.ceil(qh / 4)), linear), target(gl, Math.max(2, Math.ceil(qw / 4)), Math.max(2, Math.ceil(qh / 4)), linear)];
     film.resize(L.rw, L.rh);
     filmP.resize(L.rw, L.rh);
     dirty = true;
@@ -1544,6 +1739,75 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     gl.bindFramebuffer(gl.FRAMEBUFFER, opticsT.fbo);
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
+    mist();
+  };
+
+  // the Pro-Mist and the halation (MIST): the composite's light, keyed and
+  // spread, laid over the composite and over the photograph developed alone
+  const pass = (P) => {
+    gl.useProgram(P.p);
+    gl.uniform1f(P.u.uSRGB, linear ? 0 : 1);
+    return P.u;
+  };
+  const run = (T) => {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, T.fbo);
+    gl.viewport(0, 0, T.w, T.h);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  };
+  const blur = (pair, sigma) => {
+    for (const [from, to, dir] of [
+      [pair[0], pair[1], [1, 0]],
+      [pair[1], pair[0], [0, 1]],
+    ]) {
+      const u = pass(mistBlurP);
+      bindTex(0, from.tex, u.uIn);
+      gl.uniform2fv(u.uDir, dir);
+      gl.uniform1f(u.uSigma, sigma);
+      run(to);
+    }
+  };
+  const mist = () => {
+    const ceil = linear ? MIST_K.ceil : Math.min(MIST_K.ceil, 1);
+    const fw = L.rw;
+    let u = pass(mistKeyP);
+    bindTex(0, opticsT.tex, u.uIn);
+    gl.uniform2fv(u.uKey, MIST_K.key);
+    run(mq[0]);
+    u = pass(mistDownP);
+    bindTex(0, mq[0].tex, u.uIn);
+    run(ms[0]);
+    // the two spreads (sigma) as shares of the frame's width
+    blur(mq, (MIST_K.near * fw) / 4);
+    blur(ms, (MIST_K.far * fw) / 16);
+    // the halation's reach: about a css px (sigma), 2-4 device px of ring
+    const kc = L.rw / L.w;
+    const sig = Math.max(0.7, 0.9 * kc);
+    u = pass(mistRedP);
+    bindTex(0, opticsT.tex, u.uIn);
+    gl.uniform2fv(u.uRed, MIST_K.red);
+    gl.uniform2fv(u.uKey, MIST_K.key);
+    gl.uniform1f(u.uSigma, sig);
+    run(redT);
+    u = pass(mistRingP);
+    bindTex(0, opticsT.tex, u.uIn);
+    bindTex(1, redT.tex, u.uRedH);
+    gl.uniform2fv(u.uRed, MIST_K.red);
+    gl.uniform2fv(u.uKey, MIST_K.key);
+    gl.uniform1f(u.uSigma, sig);
+    run(ringT);
+    for (const [src, dst] of [
+      [opticsT, diffT],
+      [photoT, diffPT],
+    ]) {
+      u = pass(mistP);
+      bindTex(0, src.tex, u.uIn);
+      bindTex(1, mq[0].tex, u.uNear);
+      bindTex(2, ms[0].tex, u.uFar);
+      gl.uniform1f(u.uFarW, MIST_K.farW);
+      gl.uniform1f(u.uGain, MIST_K.gain);
+      gl.uniform1f(u.uCeil, ceil);
+      run(dst);
+    }
   };
 
   let grainSeed = 0;
@@ -1554,8 +1818,8 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       headroom: linear ? 0.6 : 1.4,
       grainSeed,
     };
-    film.render(opticsT.tex, look, filmT.fbo);
-    filmP.render(photoT.tex, look, filmPT.fbo);
+    film.render(diffT.tex, look, filmT.fbo);
+    filmP.render(diffPT.tex, look, filmPT.fbo);
     gl.bindVertexArray(vao);
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, stage.canvas.width, stage.canvas.height);
@@ -1569,6 +1833,9 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
     bindTex(0, filmT.tex, blit.u.uTex);
     bindTex(1, filmPT.tex, blit.u.uPhotoT);
     bindTex(2, sceneT.tex, blit.u.uCov);
+    bindTex(3, ringT.tex, blit.u.uRing);
+    gl.uniform1f(blit.u.uHal, MIST_K.hal);
+    gl.uniform3fv(blit.u.uHalC, MIST_K.halC);
     gl.uniform1f(blit.u.uFade, fade);
     gl.uniform3fv(blit.u.uPaper, PAPER);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -1668,9 +1935,9 @@ export async function createCurveMirror(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       filmP.destroy();
-      for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT]) freeTarget(gl, t);
+      for (const t of [geoT, sceneT, opticsT, filmT, photoT, filmPT, diffT, diffPT, redT, ringT, ...mq, ...ms]) freeTarget(gl, t);
       for (const t of [photo, envT, envD, aux]) gl.deleteTexture(t);
-      for (const pr of [sceneP, geoP, opticsP, blit]) gl.deleteProgram(pr.p);
+      for (const pr of [sceneP, geoP, opticsP, blit, mistKeyP, mistDownP, mistBlurP, mistRedP, mistP, mistRingP]) gl.deleteProgram(pr.p);
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
       stage.destroy();
