@@ -3,8 +3,8 @@ import { createDetents } from "./detent";
 
 // A row of number drums with an album title printed around them. Each letter
 // is its own wheel: a real cylinder seen through a window, so a letter's
-// height on screen is R·sin(angle) and it foreshortens and falls out of the
-// light as it rolls over the top or under the bottom. The fragment shader
+// height on screen is R·sin(angle) and it foreshortens, harder and harder, as
+// it rolls over the top or under the bottom. The fragment shader
 // works backwards from every pixel: screen y → angle on the cylinder → arc
 // position on the wheel → which title's letter is printed there.
 
@@ -71,22 +71,10 @@ void main(){
       vec2 gy = vec2(0.0, dth / (2.0 * uAlpha) * (1.0 - 2.0 * uInset.y) / uAtlas.y);
       ink = textureGrad(uTex, uv, gx, gy).r;
     }
-    // Matte print on a matte drum under a broad, soft light a little above
-    // the eye: Lambertian, part direct and part fill. The window shows ±72°
-    // of the drum, so that one term is the cylinder: the front is all but
-    // even, and the surface darkens smoothly, faster and faster, as it turns
-    // edge-on toward each lip, a little deeper below than above. No contact
-    // shadow and no bar at the lip; the form does it. Ink is printed on that
-    // same surface, so it takes the same light; there is no separate
-    // darkening of the type.
-    const float LIGHT = -0.12; // radians above the axis
-    float lam = cos(th - LIGHT) / cos(LIGHT);
-    float shade = 1.0 + 0.26 * (lam - 1.0);
-    vec3 paper = uPaper * shade;
-    // Where one wheel meets the next: a hairline gap, not a groove.
-    float px = min(lx, 1.0 - lx) * uFrame.z;
-    paper *= 1.0 - 0.06 * (1.0 - smoothstep(0.0, 1.4, px));
-    c = mix(paper, uInk * shade, ink);
+    // Printed flat, like a letterpress proof of the drum: no light, no
+    // plate, no seams. Paper is paper and ink is ink; the cylinder is carried
+    // entirely by how the letters foreshorten as they turn toward each lip.
+    c = mix(uPaper, uInk, ink);
   }
   o = vec4(c, 1.0);
 }`;
@@ -301,17 +289,18 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   TITLES.forEach((t, i) => [...t].forEach((ch, w) => (glyphOf[i * K + w] = letters.indexOf(ch))));
 
   // Geometry, rebuilt on resize.
-  // The window opens wide, ±72° of each drum, so a letter visibly curves
-  // away over the top: by the lip the surface is two-thirds edge-on and a
-  // rolling letter squashes to a sliver. A letter covers ±66° of its wheel,
-  // which at rest fills all but the last few degrees of the window. The
-  // titles are printed tight round the drum, so the next word follows close
-  // behind the last instead of after a stretch of bare paper, but just far
+  // The window opens to ±85° of each drum, all but edge-on at the lips, so the
+  // projection R·sin(angle) does visible work: the middle third of the band
+  // shows the letter all but flat, and over the outer third the surface turns
+  // away and a letter compresses hard and progressively, its bars and bowls
+  // stacking closer and closer until they meet at the lip. A letter covers
+  // ±78° of its wheel, so at rest it fills the band top to bottom with its
+  // own top and foot already a little foreshortened. The titles are printed
+  // tight round the drum, the next word close behind the last, but just far
   // enough apart that at rest every neighbour sits wholly past the lip: a
-  // still shows one title and clean paper at both lips, on every wheel, and
-  // the next title shows only once a wheel starts to turn.
-  const THETA = 1.25;
-  const ALPHA = 1.15;
+  // still shows one title and clean paper at both lips, on every wheel.
+  const THETA = 1.48;
+  const ALPHA = 1.36;
   const SLOT = ALPHA + THETA + 0.035;
   let geo = null;
 
@@ -322,6 +311,8 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
   const capRatio = fitted.capRatio;
 
   const build = (W, H, dpr) => {
+    // Full-bleed: the bands run to the top and bottom of the box, with no
+    // plate around them; only the sides keep a margin.
     const pad = Math.round(Math.min(W, H) * 0.035);
     const gapY = Math.round(Math.min(W, H) * 0.03);
     // Rows of wheels: pick the split whose letters come closest to Druk's
@@ -330,7 +321,7 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     for (const r of [1, 2, 3]) {
       const c = K / r;
       const cellW = (W - 2 * pad) / c;
-      const bandH = (H - 2 * pad - (r - 1) * gapY) / r;
+      const bandH = (H - (r - 1) * gapY) / r;
       const R = bandH / 2 / Math.sin(THETA);
       const cap = 2 * ALPHA * R * 0.98;
       const s = (cellW * (1 - 2 * SIDE)) / (cap * T);
@@ -388,7 +379,7 @@ export async function createDrum(host, { embedded = false, family = "sans-serif"
     // filtering keeps its stems sharp there instead of blurring them sideways.
     if (aniso) gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT, Math.min(16, gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT)));
     const x0 = (W - c * cellW) / 2;
-    const y0 = (H - r * bandH - (r - 1) * gapY) / 2;
+    const y0 = 0;
     geo = { r, c, cellW, bandH, R, gapY, x0, y0, ac, ar, insetU: inset / cw, insetV: inset / ch, dpr };
   };
   stage.onResize(build);
