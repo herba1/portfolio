@@ -18,6 +18,8 @@
 #                     live grade multiplies it by whatever still stands in front
 #                  G  how far up the sky this is: elevation above the horizon,
 #                     30 -> 0 .. 85 deg -> 1, from the camera (below)
+#                  B  the towering cumulus's coverage: 0 here, written by cloud.py
+#                     (run it after this; it also writes cloud.webp)
 # elements.json    every element with its geometry and its year
 #
 # The camera. MoGe-2 (normals.py) gives the focal length; gravity comes from the

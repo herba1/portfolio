@@ -39,6 +39,14 @@ import { createFilm, FILM_PRESETS } from "../_kit/film";
 // up the sky each pixel looks, from the camera), with skylight-blue shade and
 // warm sunlit tops on the cloud; the film then adds only its optics.
 //
+// Behind the pole, rising from the lower right behind the shaft, stands a
+// real towering cumulus (cloud.py: Poly Haven's Skidpan HDRI, CC0, placed
+// under this camera so its verticals converge with the pole's), laid into the
+// same regrade through the same matte (sky.png B its coverage, cloud.webp its
+// colour): its sunlit tops warm-neutral and rolled off below white, its shade
+// the skylight's blue, deepening up the sky with the cobalt. Each removal
+// uncovers more of it; at the end it is the subject of the clean sky.
+//
 // Query: ?year=0..1 holds the years (elements caught mid-motion, as a still);
 // ?film=0 shows the plates before the film.
 
@@ -83,7 +91,8 @@ uniform sampler2D uP2;
 uniform sampler2D uP3;
 uniform highp sampler2D uIds;
 uniform sampler2D uAlpha;
-uniform sampler2D uSky;           // r: the sky with everything overhead gone (1 = sky); g: elevation
+uniform sampler2D uSky;           // r: the sky with everything overhead gone (1 = sky); g: elevation; b: the cumulus
+uniform sampler2D uCloud;         // the cumulus's own colour (cloud.py)
 uniform highp sampler2D uState;   // x: id, row 0 wires / 1 hardware / 2 poles: 1 = in place
 uniform vec2 uPlate;
 uniform int uNW;
@@ -151,6 +160,20 @@ vec3 skyGrade(vec3 c, float zen) {
   vec3 cloud = mix(shadeC, sunC, top);
   return mix(cloud, sky, blue);
 }
+// The towering cumulus (cloud.py: a photographed tower, unclipped, placed
+// under this camera) graded into the same light: its shade sides take the
+// skylight's blue, deeper and more saturated the higher up the sky they are
+// (the cobalt ramp, zen), its sunlit tops go warm-neutral and roll off below
+// white; in between it stays near neutral.
+vec3 cloudGrade(vec3 c, float zen) {
+  float v = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float top = smoothstep(0.83, 0.95, v);
+  float shade = 1.0 - smoothstep(0.58, 0.86, v);
+  float val = v * mix(1.0, mix(0.97, 0.9, zen), shade);
+  vec3 shadeC = hsv2rgb(vec3((211.0 + 4.0 * zen) / 360.0, 0.07 + shade * mix(0.17, 0.25, zen), val));
+  vec3 sunC = hsv2rgb(vec3(38.0 / 360.0, 0.075, min(val, 0.955)));
+  return mix(shadeC, sunC, top);
+}
 // A wire's matte at a plate point, filtered bilinearly over its own texels
 // only, so a wire moved by a fraction of a pixel keeps its sub-pixel width
 // instead of snapping to the grid. best: its densest texel there (for colour).
@@ -202,11 +225,15 @@ void main() {
   // (photo = a x object + (1 - a) x sky), so only the sky's share is moved,
   // by the grade of the sky behind everything (p3). Grading the mixed rim
   // pixel itself leaves the teal in it: a green outline round every shaft.
-  vec2 sk = texture(uSky, pp / uPlate).rg;
+  // The cumulus stands in that same sky, behind everything: wherever the sky
+  // shows, the cloud is laid over the regraded sky at its own coverage (b).
+  vec3 sk = texture(uSky, pp / uPlate).rgb;
   float skyA = sk.r * (1.0 - cov);
   if (skyA > 0.002) {
     vec3 behind = plate(3, pp, rk);
-    col = clamp(col + skyA * (skyGrade(behind, sk.g) - behind), 0.0, 1.0);
+    vec3 graded = skyGrade(behind, sk.g);
+    if (sk.b > 0.002) graded = mix(graded, cloudGrade(texture(uCloud, pp / uPlate).rgb, sk.g), sk.b);
+    col = clamp(col + skyA * (graded - behind), 0.0, 1.0);
   }
 
   // poles going down their own axes, into the ground
@@ -557,12 +584,15 @@ export async function createDenchuka(host, { embedded = false } = {}) {
 
   const [els, ...imgs] = await Promise.all([
     fetch(BASE + "elements.json").then((r) => r.json()),
-    ...["p0.webp", "p1.webp", "p2.webp", "p3.webp", "ids.png", "alpha.png", "sky.png"].map((f) => loadImage(BASE + f)),
+    ...["p0.webp", "p1.webp", "p2.webp", "p3.webp", "ids.png", "alpha.png", "sky.png", "cloud.webp"].map((f) =>
+      loadImage(BASE + f),
+    ),
   ]);
   const plates = imgs.slice(0, 4).map((im) => imageTexture(gl, im));
   const idsTex = imageTexture(gl, imgs[4], true);
   const alphaTex = imageTexture(gl, imgs[5], true);
   const skyTex = imageTexture(gl, imgs[6]);
+  const cloudTex = imageTexture(gl, imgs[7]);
 
   // Element table.
   // a is the element's progress here, so the span's start is kept as from
@@ -762,6 +792,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
     bindTex(5, alphaTex, u.uAlpha);
     bindTex(6, stateTex, u.uState);
     bindTex(7, skyTex, u.uSky);
+    bindTex(8, cloudTex, u.uCloud);
     gl.uniform2f(u.uPlate, PW, PH);
     gl.uniform1i(u.uNW, nw);
     gl.uniform4fv(u.uW, uW);
@@ -896,7 +927,7 @@ export async function createDenchuka(host, { embedded = false } = {}) {
       host.removeEventListener("keydown", onKey);
       film.destroy();
       Object.values(T).forEach((t) => freeTarget(gl, t));
-      [...plates, idsTex, alphaTex, skyTex, stateTex].forEach((t) => gl.deleteTexture(t));
+      [...plates, idsTex, alphaTex, skyTex, cloudTex, stateTex].forEach((t) => gl.deleteTexture(t));
       Object.values(P).forEach((p) => gl.deleteProgram(p.p));
       gl.deleteBuffer(quad);
       gl.deleteVertexArray(vao);
