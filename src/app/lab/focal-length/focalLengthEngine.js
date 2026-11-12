@@ -8,7 +8,8 @@ import { createFilm } from "../_kit/film";
 // summer cumulus sky (Poly Haven, CC0) set in behind the towers, graded
 // offline and stored as a zenith cap: an azimuthal equidistant map, theta
 // from the zenith out to 95 degrees, plus a native-resolution inset of the
-// centre for the long end. Every pixel is a ray through one radial family,
+// centre 47.5 degrees, which holds the whole frame from 20 mm to 50 mm and
+// the middle of it below that. Every pixel is a ray through one radial family,
 //
 //   r = f k tan(theta / k)
 //
@@ -25,7 +26,7 @@ import { createFilm } from "../_kit/film";
 
 const ASSET = "/lab/focal-length/";
 const TM = 95; // degrees from the zenith covered by the outer cap
-const RI = 0.25; // the inner inset covers rho <= 0.25 (23.75 degrees)
+const RI = 0.5; // the inner inset covers rho <= 0.5 (47.5 degrees: the whole frame at 20 mm)
 const ENC = 2.0; // the caps store scene light / 2, sRGB-encoded
 const HALF_DIAG = 21.633; // mm, full frame
 
