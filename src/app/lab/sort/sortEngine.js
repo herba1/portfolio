@@ -37,13 +37,13 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_LIFT, F_GLINT, F_BLOWN, d
 // bands are sorted in place and are the root; every band row above them is a
 // layer of the stack, cut into its own rows (mostly hairlines, now and then a
 // chunky block, sortCore's ROWS). Each row is an opaque, hard-edged strip
-// from the stack's inner edge, stepped right by a smooth function of its
-// height (sortCore's stackLeft), tiled end to end from the sorted runs of
+// from the stack's inner edge, both ends stepped right as the square of its
+// height (sortCore's stackLeft and stackRight), tiled end to end from the sorted runs of
 // several verge bands: a woven sheet, no sky between rows. No outline is
 // drawn; a row ends where its last whole run ends, so the outer edge is
 // ragged and the sort's own. The stack leans over as it climbs, the crest's
-// rows run on and hang down as the lip, welded to the face, and only its tip
-// hangs free. Poles and signs stand in front of it (a holdout from the depth
+// rows run on over the top, and below them the lip hangs free, curling back
+// in over a hollow of open sky. Poles and signs stand in front of it (a holdout from the depth
 // map and the photo).
 //
 // Each row is one luminance ramp, inner edge to outer edge, lit by the sort
@@ -202,6 +202,9 @@ void main() {
       vec3 ramp = mix(vec3(0.05, 0.13, 0.04), vec3(0.33, 0.52, 0.11), smoothstep(0.02, 0.42, y));
       ramp = mix(ramp, vec3(0.80, 0.84, 0.40), smoothstep(0.42, 0.85, y));
       col = mix(col, ramp, (1.0 - gr) * 0.85);
+      // Turned away from the light (under the lean, inside the hollow, the
+      // lip turning under) the sheet falls into shade: a dark band.
+      col *= mix(0.4, 1.0, smoothstep(0.0, 0.42, f));
       // Turned to the sky at the crest, the run's brightest tail blooms
       // white-gold; a glint is that pixel broken off.
       vec3 gold = mix(vec3(0.98, 0.80, 0.36), vec3(1.0, 0.96, 0.80), smoothstep(0.3, 0.75, y));
@@ -214,7 +217,7 @@ void main() {
       // A row's end block: the tail gone over whole, gold at the edge of the
       // light and blown to white where the row faces the sky full on.
       if (blow > 0.0) {
-        vec3 hot = mix(vec3(0.99, 0.84, 0.42), vec3(1.0, 0.985, 0.93), clamp(smoothstep(0.25, 0.7, y) * 0.6 + 0.6 * blow - 0.2, 0.0, 1.0));
+        vec3 hot = mix(vec3(1.0, 0.80, 0.34), vec3(1.0, 0.97, 0.84), clamp(smoothstep(0.3, 0.8, y) * 0.55 + 0.35 * blow - 0.1, 0.0, 1.0));
         col = mix(col, hot, 0.35 + 0.65 * blow);
       }
       if (glint) col = mix(vec3(1.0, 0.8, 0.32), vec3(1.0, 0.97, 0.86), 0.25 + 0.35 * smoothstep(0.3, 0.8, y));

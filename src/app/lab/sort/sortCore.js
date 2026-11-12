@@ -103,8 +103,8 @@ export const DH = BANDS.n;
 // its own row, never bent. The rise comes only from stacking. Bands of the
 // verge (rows VERGE_TOP..VERGE_BOT) are sorted in place and are the root;
 // above them every band row is a layer of the stack, and each layer shows a
-// verge band's run lifted up to it and stepped right by a smooth function of
-// its height, so the stack leans over as it climbs. Over the top the crest
+// verge band's run lifted up to it, both its ends stepped right as the
+// square of its height, so the stack leans over as it climbs. Over the top the crest
 // runs on to the right and a lip of shorter strips hangs down from its end,
 // so the staircase reads as a blade of grass peeling up and curling over.
 // The crossing (the road and the rails, right of centre) stays clear.
@@ -112,43 +112,53 @@ export const VERGE_TOP = 1236; // grid rows below this are the verge, sorted in 
 export const VERGE_BOT = 1470; // ...down to here (the rails start below)
 export const CREST = 392; // the stack's top row
 export const ROOT_X1 = 1160; // the root zone runs from the print's left edge to here
-export const X_ROOT = 210; // a strip's left end at the foot of the stack...
-export const LEAN = 820; // ...and how far right it has stepped at the crest
-export const LEAN_POW = 2.1;
-export const LEN0 = 420; // a strip's length at the foot, before the brush scales it
-export const LEN1 = 260; // ...and what the crest adds
+// Both edges of the stack step right as the square of its height, so the
+// lower half rises nearly straight and the upper third leans well out past
+// the face below it: the back rounds over, and the face goes concave.
+export const X_ROOT = 150; // a strip's left end at the foot of the stack...
+export const LEAN = 760; // ...and how far right it has stepped at the crest
+export const FACE0 = 820; // a strip's reach at the foot, at full mask...
+export const FACE1 = 760; // ...and how far the face has leant out at the crest
+export const LEAN_POW = 2;
 // The lip: how far the crest's rows may reach as they run on over the top
 // and hang down. It is a reach, not an outline; each row still ends where
 // its last whole run ends.
-export const LIP_H = 420; // the lip hangs this far below the crest
-export const WELD = 0.7; // down to here (share of LIP_H) the lip is the face's own rows; below, its tip hangs free
-export const LIP_X = 1720; // its reach at its widest
-export const LIP_W = 400; // its width at the crest, tapering to a point
-export const LIP_TOP = 160; // the reach rounds in by this over the shoulder...
-export const LIP_IN = 380; // ...and curls back in by this to the tip
+export const LIP_H = 390; // the lip hangs this far below the crest
+export const WELD = 0.26; // down to here (share of LIP_H) the lip is the crest's own rows; below, it hangs free over the hollow
+export const LIP_X = 1800; // its reach at its widest
+export const LIP_W = 560; // its width at the crest, tapering to a point
+export const LIP_TOP = 170; // the reach rounds in by this over the shoulder...
+export const LIP_IN = 470; // ...and curls back in by this to the tip
 export const stackT = (y) => (VERGE_TOP - y) / (VERGE_TOP - CREST);
-export const stackLeft = (t) => X_ROOT + LEAN * Math.max(0, t) ** LEAN_POW;
+export const stackLeft = (t) => X_ROOT + LEAN * clamp(t, 0, 1) ** LEAN_POW;
+export const stackRight = (t) => FACE0 + FACE1 * clamp(t, 0, 1) ** LEAN_POW;
 // The lip's reach on row y: it rounds over the shoulder and curls back in
 // towards the face as it hangs, so the rows' ragged ends turn a hook. Down
-// to WELD the crest's rows run on into it unbroken; below that only its tip
-// hangs, tapering, curling in over a hollow that opens downward.
-const LIP_SH = 0.22; // where the outer edge is furthest out, as a share of LIP_H
+// to WELD the crest's rows run on into it unbroken; below that it hangs
+// free, tapering, its inner edge well clear of the face, so a hollow of
+// open sky shows between them and opens downward.
+const LIP_SH = 0.2; // where the outer edge is furthest out, as a share of LIP_H
 export function lipSpan(y) {
   const s = (y - CREST) / LIP_H;
   if (s < 0 || s > 1) return null;
   const u = s < LIP_SH ? (LIP_SH - s) / LIP_SH : (s - LIP_SH) / (1 - LIP_SH);
   const xb = LIP_X - (s < LIP_SH ? LIP_TOP : LIP_IN) * (1 - Math.sqrt(Math.max(0, 1 - u * u)));
-  return [xb - (LIP_W * (1 - s) ** 1.15 + 36), xb, s];
+  return [xb - (LIP_W * (1 - s) ** 1.45 + 40), xb, s];
 }
 // Mask level a layer at height t needs before it lifts: the stack climbs as
-// the brush works.
-export const liftAt = (t) => WAVE_ON + (0.97 - WAVE_ON) * clamp(t, 0, 1);
+// the brush works. A full mask clears the crest with room to spare, so the
+// top rows run their whole reach; the lip wants a little more still.
+const LIFT_TOP = 0.86;
+export const liftAt = (t) => WAVE_ON + (LIFT_TOP - WAVE_ON) * clamp(t, 0, 1);
+export const LIP_ON = 0.94;
 
 // The stack's rows. The stack is not cut on the sort's bands: from the crest
-// down to the verge it is cut into its own rows, mostly thin (3-11 grid px,
-// 2-9 device px at DPR 2) with an occasional thick one (14-29 grid px, up to
-// 24 device px), each height from a hash, so the sheet mixes hairlines with
+// down through the verge it is cut into its own rows, mostly thin (3-10 grid
+// px, 2-8 device px at DPR 2) broken by thick ones (12-29 grid px, up to 24
+// device px), each height from a hash, so the sheet mixes hairlines with
 // chunky blocks the way reference 2 does. Rows abut: no sky between them.
+// Below VERGE_TOP the rows are the verge's own combing, laid from the
+// print's left edge, so the grass turns into the stack without a seam.
 export const ROW_MIN = 3;
 export const ROW_MAX = 29;
 export const ROWS = (() => {
@@ -156,17 +166,17 @@ export const ROWS = (() => {
   const h = [];
   let y = CREST;
   let thickLast = false;
-  for (let j = 0; y < VERGE_TOP; j++) {
+  for (let j = 0; y < VERGE_BOT; j++) {
     const u = hash(j, 173);
     // The upper third, where the light reads into the tails, is where the
     // chunky blocks gather: tall rows (20-29 grid px, 16-24 device px) whose
     // blown ends stack into the crest's glowing spine.
-    const up = stackT(y) > 0.55;
-    const thick = !thickLast && hash(j, 179) < (up ? 0.3 : 0.13);
-    const t0 = up ? 20 : 14;
-    let hh = thick ? t0 + Math.floor(u * (ROW_MAX - t0 + 1)) : ROW_MIN + Math.floor(u ** 2.2 * 9);
+    const up = stackT(y) > 0.7;
+    const thick = !thickLast && hash(j, 179) < (up ? 0.62 : 0.2);
+    const t0 = up ? 20 : 12;
+    let hh = thick ? t0 + Math.floor(u * (ROW_MAX - t0 + 1)) : ROW_MIN + Math.floor(u ** 1.6 * 8);
     // No sliver at the foot: the last row takes what is left.
-    if (VERGE_TOP - y - hh < ROW_MIN) hh = VERGE_TOP - y;
+    if (VERGE_BOT - y - hh < ROW_MIN) hh = VERGE_BOT - y;
     y0.push(y);
     h.push(hh);
     y += hh;
@@ -493,8 +503,10 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // its brightest tail. There is no drawn outline: a row is given only a reach
 // (how far the brush lets it run), and it ends where its last whole run
 // ends, so the outer edge is ragged row by row and is the sort's own. Over
-// the top the crest's rows run on out and hang down as the lip, welded to the
-// face: one sheet curling over, no sky inside it.
+// the top the crest's rows run on out to the lip's reach, and below them the
+// lip hangs free, its own short rows curling back in over a hollow of open
+// sky; the face under it stops well short. The verge is combed over by rows
+// laid from the print's left edge, so the sheet is opaque from the root up.
 //
 // The stack is lit by its own sort order: each row carries a facing (0
 // tucked low under the lean, 1 at the crest turned to the sky), and the
@@ -516,7 +528,7 @@ const SRC_X1 = ROOT_X1 + 240;
 // run x 65535), and (row x0, row x1, tile ramp depth x 65535, blow-out x
 // 65535) for the whole row the tile is part of. The first tile that holds a pixel draws it,
 // so glints and end blocks are written first.
-export const PARTS = 12;
+export const PARTS = 16;
 export const F_LIFT = 1; // a lifted strip: held out behind poles, lit by its facing
 export const F_GLINT = 2; // a glint tile: the run's brightest pixel, white-gold
 export const F_BLOWN = 4; // a row's end block: its run's tail, gone over to white-gold
@@ -548,17 +560,21 @@ export function liftPlan(mask8) {
   for (let r = ROWS.n - 1; r >= 0; r--) {
     const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const t = stackT(c);
-    const xl = stackLeft(t) + (hash(r, 31) - 0.5) * 20;
-    const reach = LEN0 + LEN1 * t;
-    const m = Math.max(root, maskAt(mask8, xl + 0.35 * reach, c));
+    // Below the stack's foot a row is the verge's combing, from the print's
+    // left edge out towards the crossing; above it, a strip of the stack
+    // from its back edge to its face.
+    const vg = t < 0;
+    const xl = vg ? hash(r, 31) * 36 : stackLeft(t) + (hash(r, 31) - 0.5) * 20;
+    const xr = vg ? ROOT_X1 - 60 + (hash(r, 37) - 0.5) * 140 : stackRight(t);
+    const m = Math.max(root, maskAt(mask8, xl + 0.35 * (xr - xl), c));
     // Bottom to top the rows walk the verge in a scrambled order, so no two
     // neighbours start on the same band.
     const src = (i * 7 + Math.floor(i / nv)) % nv;
-    const L = { r, t, xl, m, on: m >= liftAt(t), src, lip: null };
+    const L = { r, t, xl, xr, m, on: m >= liftAt(t), src, lip: null };
     const lip = lipSpan(c);
     if (lip) {
       const ml = Math.max(root, maskAt(mask8, lip[0], c));
-      if (ml >= liftAt(1)) L.lip = { xa: lip[0], xb: lip[1], s: lip[2], m: ml, src: (i * 11 + 5) % nv };
+      if (ml >= LIP_ON) L.lip = { xa: lip[0], xb: lip[1], s: lip[2], m: ml, src: (i * 11 + 5) % nv };
     }
     layers.push(L);
     i++;
@@ -691,20 +707,27 @@ export function geometry(mask8, base, link, plan, out = {}) {
   // tile is a hard-edged block reading a stretch of its run (depth w) riding
   // on the row's one ramp, so the row still goes dark to bright, and its last
   // tile reads on into the run's tail.
-  const TILE_MAX = 8;
+  const TILE_MAX = 9;
   const tile = (r, xa, reach, vi, salt, f, list) => {
     const out = [];
+    // The row's end: its reach, set ragged by a little noise that drifts
+    // from row to row, so the ends step like the ends of sorted runs rather
+    // than dithering, and stay clear of the hollow.
+    const J = 34 + 46 * hash(r, salt + 3);
+    const end = reach + ((vnoise(ROWS.y0[r] / 30, salt * 0.37) - 0.5) * 1.5 + (hash(r, salt + 5) - 0.5) * 0.7) * J;
     let x = xa;
-    for (let k = 0; k < TILE_MAX && x < reach; k++) {
+    for (let k = 0; k < TILE_MAX && x < end - 6; k++) {
       const run = pick((vi + k * 5) % nv, salt + k);
       if (!run) break;
       const len = run.x1 - run.x0;
-      let tl = clamp(len * (0.5 + 0.75 * hash(r * 13 + k, salt)), 48, 520);
-      // The first tile of a row that has only just lifted may be cut down,
-      // so a stack that has not reached its crest still tapers.
-      if (k === 0) tl = Math.min(tl, Math.max(40, (reach - xa) * (0.7 + 0.9 * hash(r, salt + 29))));
-      // Stop short rather than overshoot by more than the gap left.
-      else if (x + tl - reach > reach - x) break;
+      let tl = clamp(len * (0.4 + 0.6 * hash(r * 13 + k, salt)), 48, 420);
+      if (x + tl > end) tl = end - x;
+      // No stub at the end: the tile before it runs on to the end instead.
+      if (tl < 28 && out.length) {
+        out[out.length - 1][1] = end;
+        x = end;
+        break;
+      }
       out.push([x, x + tl, run]);
       x += tl;
     }
@@ -715,6 +738,14 @@ export function geometry(mask8, base, link, plan, out = {}) {
     }
     return { tiles: out, xb: x };
   };
+  // A row's end block, from about x0 (a smooth line down the rows, so the
+  // blocks stack into a column) to the row's end.
+  const endBlock = (r, tt, x0, f, xa, blow) => {
+    if (!tt.tiles.length) return;
+    const [, , run] = tt.tiles[tt.tiles.length - 1];
+    const a = Math.min(x0 + (hash(r, 71) - 0.5) * 40, tt.xb - 48);
+    ends.push([r, a, tt.xb, F_LIFT | F_BLOWN, run, f, xa, tt.xb, 0, blow]);
+  };
 
   // The tiles, collected first so glints and end blocks can be written
   // ahead of the face they sit on.
@@ -723,58 +754,66 @@ export function geometry(mask8, base, link, plan, out = {}) {
   const tails = [];
   for (const L of plan.layers) {
     const { r, t } = L;
-    const c = ROWS.y0[r] + ROWS.h[r] / 2;
     const lip = L.lip;
     if (!L.on && !lip) continue;
+    const h = ROWS.h[r];
+    const thick = h >= 20;
+    // Facing: the verge and the stack's foot catch some light; the face
+    // under the lean is turned away (the dark band); across the top the
+    // rows turn to the sky.
+    let f = t < 0 ? 0.5 : Math.max(0.48 * (1 - smooth(0.04, 0.4, t)), smooth(0.64, 0.97, t) ** 1.1);
+    f = clamp(f + (hash(r, 47) - 0.5) * 0.08, 0, 1);
     // The row's reach: how far the brush lets it run. The topmost rows the
     // mask has only just lifted reach less, so a stack short of its crest
-    // tapers. Over the top the crest's rows run on out to the lip's reach and
-    // hang down as it: the lip is the face's own rows, one sheet.
+    // tapers.
     const xa = L.xl;
     let reach = 0;
-    let f = clamp(smooth(0.06, 0.8, t) ** 1.1 + (hash(r, 47) - 0.5) * 0.12, 0, 1);
     if (L.on) {
-      const grow = 0.25 + 0.75 * smooth(0, 0.16, L.m - liftAt(t));
-      reach = L.xl + (LEN0 + LEN1 * t) * (0.55 + 0.45 * L.m) * grow;
+      const grow = 0.25 + 0.75 * smooth(0, 0.12, L.m - liftAt(t));
+      reach = xa + (L.xr - xa) * (0.55 + 0.45 * L.m) * grow;
     }
-    const tip = lip && lip.s > WELD;
-    if (lip && !tip) {
+    const weld = lip && lip.s <= WELD;
+    const hang = lip && lip.s > WELD;
+    if (weld) {
+      // Over the top the crest's rows run on out to the lip's reach: the
+      // shoulder is the crest's own rows, turned full to the sky.
       reach = Math.max(reach, lip.xb);
-      // The shoulder is turned fully to the sky; the lip darkens as it
-      // hangs and turns under.
-      f = Math.max(f * (1 - 0.35 * smooth(0.4, 1, lip.s)), 1 - 0.62 * lip.s ** 1.2);
-    } else if (tip && L.on) {
-      // Under the weld the face falls away from the tip as a rounded vault,
-      // so the hollow opens downward out of the sheet, not across it.
-      const u = (lip.s - WELD) / (1 - WELD);
-      reach = Math.max(reach, lip.xa + (reach - lip.xa) * u ** 0.75);
+      f = Math.max(f, 0.9 + 0.1 * hash(r, 49));
+    } else if (hang) {
+      // Under the weld the face lies inside the hollow, under the lean,
+      // turned away from the light, and it stops well short of the lip.
+      f *= 0.45;
+      reach = Math.min(reach, lip.xa - 70 - 140 * smooth(WELD, WELD + 0.3, lip.s));
     }
-    // The tip, hanging free under the welded sheet: its own short row,
-    // turned under and darkening, ragged at both ends.
-    if (tip) {
-      const ft = 1 - 0.62 * lip.s ** 1.2;
-      const ta = lip.xa + (hash(r, 59) - 0.5) * 24;
+    // The lip, hanging free over the hollow: its own short row, turned under
+    // and darkening as it falls, ragged at both ends.
+    if (hang) {
+      const ft = clamp(0.95 - 0.8 * smooth(WELD, 1, lip.s) + (hash(r, 57) - 0.5) * 0.06, 0, 1);
+      const ta = lip.xa + (hash(r, 59) - 0.5) * 30;
       const tt = tile(r, ta, lip.xb, lip.src, 53, ft, face);
-      if (tt.tiles.length) {
-        const [, , trun] = tt.tiles[tt.tiles.length - 1];
-        const bl = clamp((tt.xb - ta) * (0.15 + 0.2 * hash(r, 73)), 10, 60);
-        ends.push([r, tt.xb - bl, tt.xb, F_LIFT | F_BLOWN, trun, ft, ta, tt.xb, 0, smooth(0.38, 0.85, ft) * 0.6]);
-      }
+      // Down the lip's shoulder the spine runs on, fading as it turns under.
+      const bl = smooth(0.78, WELD + 0.05, lip.s);
+      if (bl > 0.05) endBlock(r, tt, lip.xb - (thick ? 210 : 150) * (1 - 0.4 * smooth(WELD, 0.7, lip.s)), ft, ta, bl);
+      if (ft > 0.6) tails.push({ r, x1: tt.xb, run: tt.tiles.length ? tt.tiles[tt.tiles.length - 1][2] : null, f: ft, y: ROWS.y0[r], xa: ta, xb: tt.xb });
     }
     if (!L.on || reach - xa < 24) continue;
-    const { tiles, xb } = tile(r, xa, reach, L.src, 41, f, face);
-    if (!tiles.length) continue;
-    const [lx0, , run] = tiles[tiles.length - 1];
-    const h = ROWS.h[r];
-    // The run's tail lands at the row's end as a block gone over to
-    // white-gold, more of it the more the row faces the sky. The tall rows
-    // of the upper third blow out whole: the spine.
-    const blow = smooth(0.38, 0.85, f);
-    if (blow > 0.04) {
-      const spine = h >= 20 && f > 0.55;
-      const share = spine ? 0.4 + 0.3 * hash(r, 71) : 0.12 + 0.22 * hash(r, 71) * blow;
-      const bl = clamp((xb - lx0) * share, spine ? 64 : 14, spine ? 220 : 120);
-      ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0, spine ? 1 : blow]);
+    const tt = tile(r, xa, reach, L.src, 41, f, face);
+    if (!tt.tiles.length) continue;
+    const { xb } = tt;
+    const [lx0, , run] = tt.tiles[tt.tiles.length - 1];
+    if (weld) {
+      // The spine: every crest row blows out at its end, all from about one
+      // line, so the blocks stack into a solid white-gold column; the tall
+      // rows go over hardest.
+      endBlock(r, tt, reach - (thick ? 240 : 170) - 30 * hash(r, 75), f, xa, thick ? 1 : 0.62);
+    } else {
+      // Elsewhere the run's tail lands at the row's end as a block gone over
+      // to white-gold, more of it the more the row faces the sky.
+      const blow = t > 0.5 ? smooth(0.45, 0.9, f) : 0;
+      if (blow > 0.04) {
+        const bl = clamp((xb - lx0) * (0.12 + 0.22 * hash(r, 71) * blow), 14, 120);
+        ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0, blow]);
+      }
     }
     if (f > 0.6) tails.push({ r, x1: xb, run, f, y: ROWS.y0[r], xa, xb });
   }
@@ -786,6 +825,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
   tails.sort((p, q) => q.f - p.f + (hash(q.r, 61) - hash(p.r, 61)) * 0.3);
   for (const g of tails) {
     if (glint.length >= GLINTS) break;
+    if (!g.run) continue;
     if (peakOf(g.run) < GLINT_PEAK) continue;
     if (glint.some((o) => Math.abs(o.x - g.x1) < 60 && Math.abs(o.y - g.y) < 16)) continue;
     const gap = 4 + Math.round(hash(g.r, 63) * 10);
