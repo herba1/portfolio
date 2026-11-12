@@ -21,16 +21,23 @@ the print pixel for pixel.
           filled by normalised convolution from the blade around them,
           smallest scale first, so a wire's notch takes the texture beside
           it and the hub end carries the root's colour in.
-  opacity A_TEX, so the blade is the acrylic you see, not a wash over the
-          dim room; the plate still shows through at 1 - A_TEX, tinted.
+          Only DETAIL of the fine texture is kept over the broad shading
+          (the readout stretches fine texture into streaks along the rows),
+          and the chroma is pulled to CHROMA of the photo's: acrylic in a
+          dim room, not a lit green sticker.
+  opacity A_TEX: the plate (the dim room, the rear guard) shows through at
+          1 - A_TEX, tinted by the body's hue.
 
 Everything else bake.py made (outline, rim, plate, front) is kept.
 """
 import sys, os, json
 import numpy as np, cv2
 
-A_TEX = 0.82     # the blade's opacity
+A_TEX = 0.6      # the blade's opacity: the plate behind shows through it, tinted
 GAIN = 0.92      # the body's gain over the photo's linear light
+CHROMA = 0.8     # the body's chroma against the photo's (linear): the acrylic's own green, not a lit sticker
+DETAIL, DETAIL_SIG = 0.4, 3.0  # the share of the photo's fine texture kept over its broad shading (px): at speed
+                               # the readout stretches fine texture along the rows into streaks
 EDGE = 3.0       # px inside the outline the photo still carries the room
 WIRE_GROW = 2    # px the front wire matte is grown before it is cut out
 PURE_LO, PURE_HI = 0.7, 0.92  # greenness against the blade's local best: distrusted .. trusted
@@ -63,7 +70,7 @@ old = cv2.imread(os.path.join(src, "rotor.webp"), cv2.IMREAD_UNCHANGED)
 yy, xx = np.mgrid[0:H, 0:W].astype(np.float32)
 bx, by, br = meta["badge"]
 sx, sy, sr = STICKER0[0] * k - px0, STICKER0[1] * k - py0, STICKER0[2] * k
-wire = cv2.dilate((fa > 0.03).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * WIRE_GROW + 1,) * 2))
+wire = cv2.dilate((fa > 0.12).astype(np.uint8), cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * WIRE_GROW + 1,) * 2))
 # The blade is the greenest thing in the disc; a wire's soft edge, its
 # reflection in the acrylic and the badge's chrome are not. A pixel is
 # trusted as far as its greenness holds up against the blade's local best
@@ -94,6 +101,12 @@ oldlin = (old[..., :3].astype(np.float32) / 255) ** 2.2
 fill[have < 0.5] = oldlin[have < 0.5]
 fill = cv2.GaussianBlur(fill, (0, 0), 0.8)
 body = lin * w[..., None] + fill * (1 - w[..., None])
+# the moulding's broad shading (hub end darker, tip lighter, the gloss) in
+# full, its fine texture (veins, the camera's noise) in part
+broad = cv2.GaussianBlur(body, (0, 0), DETAIL_SIG * k)
+body = broad + DETAIL * (body - broad)
+Y = body @ np.array([0.0722, 0.7152, 0.2126], np.float32)
+body = Y[..., None] + CHROMA * (body - Y[..., None])
 body = np.clip(body * GAIN, 0, 1)
 body[~inside] = oldlin[~inside]
 

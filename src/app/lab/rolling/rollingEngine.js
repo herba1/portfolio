@@ -8,11 +8,13 @@ import { createStage, clamp } from "../_kit/stage";
 // and the rear guard's spokes and rings as soft lines in the disc plane over
 // the motor housing, so no shadow of the photographed blades stays), the rotor (the three blades as
 // acrylic: a signed distance to one smooth outline per blade, cut hard; the
-// photo's own blade pixels, its veins, gloss and hub-to-tip shading, with the
-// wires that crossed it filled from the blade beside them, at 0.82 opacity;
-// a thin specular rim), and the front (the guard's wires and centre badge
-// that cross in front of the blades, drawn dark, thin and a touch out of focus
-// so the torn blades are the sharpest thing in the frame).
+// photo's own blade pixels, its gloss and hub-to-tip shading with only part
+// of its fine texture, the wires that crossed it filled from the blade beside
+// them, a little less saturated and at 0.6 opacity, so the plate shows
+// through the acrylic; a thin specular rim), and the front (the guard's
+// wires and centre badge: each wire cut from the photo's own luminance, as
+// wide as the photo shows it and keeping the steel's shading and highlights,
+// running out to the guard's rim, where the plate keeps the same wires).
 // The head is turned, so the rotor turns in its own tilted plane: the guard
 // rim's ellipse maps picture to disc and back (tools/depth/bakes/rolling).
 //
@@ -88,14 +90,6 @@ const TORQUE = 260; // motor torque cap
 const PX_PER_RPM = 0.15; // drag distance (CSS px) per rpm of set speed
 
 const AA = 0.6; // the blade outline's anti-aliasing width, device px: a moulded edge, caught hard
-// The guard sits a hand's width in front of the blades and the phone focuses
-// on the blades, so the wires are a touch soft (FRONT_DOF image px of blur),
-// thinned (their matte's soft skirt is cut away) and dark: bare steel in a
-// dim room, not lit mint lines.
-const FRONT_DOF = 1.1;
-const FRONT_INK = 0.22; // the wires' brightness against the photo's
-const FRONT_THIN = [0.3, 0.95]; // the matte's ramp, cut to this window
-
 const PAPER = [0.949, 0.941, 0.922]; // #f2f0eb
 
 const VS = `#version 300 es
@@ -131,7 +125,6 @@ uniform float uTint;
 uniform float uLamp0; // the lamp's phase (cycles) at the frame's first row
 uniform vec3 uLampDepth;
 uniform vec3 uLampLag;
-uniform vec3 uBadge; // the badge's centre and radius, image px
 out vec4 o;
 
 vec3 enc(vec3 c){ c = clamp(c, 0.0, 1.0); return mix(c * 12.92, 1.055 * pow(c, vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
@@ -155,25 +148,11 @@ vec3 lampOver(float tau){
   return 1.0 - uLampDepth * (sin(a + w * uExpo) - sin(a)) / (w * uExpo);
 }
 
-// The front, a little out of focus: a 5-tap disc over FRONT_DOF image px,
-// premultiplied, the matte thinned and the steel darkened and greyed (the
-// blade's green the matte caught at the wire's edge goes with it).
-vec4 frontAt(vec2 q, vec2 p){
-  // The badge is chrome on the guard's centre, in focus and lit: as photographed.
-  float wires = smoothstep(uBadge.z + 2.0, uBadge.z + 10.0, length(p - uBadge.xy));
-  if (wires <= 0.0) return texture(uFront, q);
-  vec2 o1 = vec2(${FRONT_DOF.toFixed(2)}) / uImg;
-  vec4 acc = vec4(0.0);
-  vec2 offs[5] = vec2[5](vec2(0.0), vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0));
-  for (int i = 0; i < 5; i++) {
-    vec4 t = texture(uFront, q + offs[i] * o1);
-    acc += vec4(t.rgb * t.a, t.a) * (i == 0 ? 0.4 : 0.15);
-  }
-  vec3 rgb = acc.rgb / max(acc.a, 1e-4);
-  float y = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
-  rgb = mix(vec3(y), rgb, 0.35) * ${FRONT_INK.toFixed(2)};
-  float a = smoothstep(${FRONT_THIN[0].toFixed(2)}, ${FRONT_THIN[1].toFixed(2)}, acc.a);
-  return mix(texture(uFront, q), vec4(rgb, a), wires);
+// The front: the photo's own guard wires, cut from its luminance with their
+// shading and highlights (tools/depth/bakes/rolling/photo_front.py), and the
+// badge's chrome. Straight alpha over everything behind.
+vec4 frontAt(vec2 q){
+  return texture(uFront, q);
 }
 
 void main(){
@@ -188,7 +167,7 @@ void main(){
   // The fan head is turned: the blades turn in the disc's own plane, which
   // the picture sees as the guard rim's ellipse.
   vec2 d = uToDisc * (p - uHub);
-  vec4 f = frontAt(q, p);
+  vec4 f = frontAt(q);
   // Everything in the room is lit by the lamp, so every row sees it at the
   // brightness of its own exposure window: the readout drawn as bands.
   vec3 lit = lampOver(s * uReadout);
@@ -426,7 +405,6 @@ export async function createRolling(host, { embedded = false } = {}) {
     gl.uniform1f(u.uLamp0, lastFrame.lamp);
     gl.uniform3f(u.uLampDepth, ...lampDepth);
     gl.uniform3f(u.uLampLag, ...lampLag);
-    gl.uniform3f(u.uBadge, ...meta.badge);
     // Readout direction: rows run along (cos, sin) of the scan angle's
     // perpendicular; s grows down the frame at scan = 0.
     const a = lastFrame.scan;

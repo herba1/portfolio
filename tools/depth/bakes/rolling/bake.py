@@ -79,6 +79,8 @@ centre of the guard whose slots show the green blade roots turning behind it.
           own direction (the rear guard's cross them well off it), traced
           as whole wires through the crossings and drawn into the front.
 
+photo_front.py then replaces front.webp's wires with wires cut from the photo's
+own luminance (variable width, the steel's own shading, no drawn strokes);
 texture.py then replaces rotor.webp's flat body with the photo's own blade
 pixels (veins, gloss, shading) at a higher opacity; run it after a bake or a
 --rebuild.
