@@ -17,17 +17,19 @@
   720
  ],
  "blockSize": [
-  640,
-  360
+  960,
+  540
  ],
  "atlas": [
-  5,
-  5
+  4,
+  7
  ],
  "atlases": [
   "blocks-0.webp",
   "blocks-1.webp"
  ],
+ "encoding": "oklab-l12",
+ "ab": 0.15,
  "stabilised": true,
  "maxShift": 2.888
 }

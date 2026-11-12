@@ -3,6 +3,7 @@ viewfinder video, a time pyramid of block means for the long exposure, and a
 sharp still plate with a stillness matte.
 
     python3 -I tools/depth/bakes/shutter/bake.py <plate.mp4> <out_dir> [--work dir] [--drift drift.npy]
+        [--block-size 960x540] [--blocks-from <work>/blocks-lin.npy]
     sh tools/depth/bakes/shutter/encode.sh <work>/plate-master.mp4 public/lab/shutter
     python3 -I tools/depth/bakes/shutter/sky.py public/lab/shutter   (after encode: reads plate.mp4)
 
@@ -31,7 +32,8 @@ Steps
    - plate-master.mp4 (work dir, near-lossless x264 4:4:4, 1280x720): the
      viewfinder before encode.sh makes plate.webm / plate.mp4 from it.
    - blocks-<k>.webp: the time pyramid. The linear mean of every BLOCK frames
-     at 640x360, sRGB with TPDF dither, 5x5 per atlas. The tower is filled
+     at 960x540, lossless, in OKLab with L at 12 bits (see "The pyramid's
+     encoding"), as many per atlas as fit in 4096 px. The tower is filled
      out of every block (push-pull from that block's own sky, inside the
      matte grown by 6 px): a long exposure is a picture of the sky alone, and
      the still plate supplies the tower, so no low-resolution tower light
@@ -62,7 +64,7 @@ from PIL import Image
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", ".."))
-from grade import grade, lin2srgb, srgb2lin  # noqa: E402
+from grade import grade, lin2oklab, lin2srgb, srgb2lin  # noqa: E402
 from kit import guided, pushpull  # noqa: E402
 
 # The crown: the open strut lattice above the tower's top floor slab (1080p
@@ -81,6 +83,8 @@ ap.add_argument("--fade", type=int, default=24)
 ap.add_argument("--block", type=int, default=8)
 ap.add_argument("--work", default=HERE, help="dir for the master and debug images")
 ap.add_argument("--drift", default=None, help="reuse a drift.npy from an earlier run of the same range")
+ap.add_argument("--block-size", default="960x540", help="time pyramid block size (at most the video size)")
+ap.add_argument("--blocks-from", default=None, help="reuse a blocks-lin.npy from an earlier run (skips the viewfinder pass: no new master)")
 args = ap.parse_args()
 
 os.makedirs(args.out, exist_ok=True)
@@ -89,7 +93,8 @@ N, K, B, S = args.frames, args.fade, args.block, args.start
 assert N % B == 0, "frames must be a multiple of block"
 CW, CH = 1920, 1080
 VW, VH = 1280, 720
-BW, BH = 640, 360
+BW, BH = (int(v) for v in args.block_size.split("x"))
+assert BW <= VW and BH <= VH
 NB = N // B
 rng = np.random.default_rng(7)
 
@@ -334,41 +339,55 @@ def shutter(a, b):
     return acc / M * (1 - tmask) + a * tmask
 
 
-master = os.path.join(args.work, "plate-master.mp4")
-enc = subprocess.Popen([
-    "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{VW}x{VH}", "-r", f"{round(fps)}",
-    "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "8", "-pix_fmt", "yuv444p", master,
-], stdin=subprocess.PIPE)
+def viewfinder():
+    """The looped, shuttered plate: writes the master, returns the block means at VWxVH."""
+    master = os.path.join(args.work, "plate-master.mp4")
+    enc = subprocess.Popen([
+        "ffmpeg", "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{VW}x{VH}", "-r", f"{round(fps)}",
+        "-i", "-", "-c:v", "libx264", "-preset", "slow", "-crf", "8", "-pix_fmt", "yuv444p", master,
+    ], stdin=subprocess.PIPE)
+    pre = []  # blurred pre-roll: the loop's cross-fade partner
+    blk_acc = np.zeros((VH, VW, 3), np.float64)
+    out = []
+    prev = None
+    for i, f in frames(S - K, S + N + 1):
+        full = prep(f, i)
+        cur = cv2.resize(full, (VW, VH), interpolation=cv2.INTER_AREA)
+        if prev is not None:
+            pi, pa = prev
+            mb = shutter(pa, cur)
+            if pi < S:
+                pre.append(mb.astype(np.float16))
+            else:
+                j = pi - S
+                if j >= N - K:
+                    q = j - (N - K)
+                    w = (q + 1) / (K + 1)
+                    mb = mb * (1 - w) + pre[q].astype(np.float32) * w
+                enc.stdin.write(to8(mb).tobytes())
+                blk_acc += mb
+                if (j + 1) % B == 0:
+                    out.append((blk_acc / B).astype(np.float32))
+                    blk_acc[:] = 0
+                if j % 40 == 0:
+                    print("frame", j, flush=True)
+        prev = (i, cur)
+    enc.stdin.close()
+    enc.wait()
+    return np.stack(out)
 
-pre = []  # blurred pre-roll: the loop's cross-fade partner
-blk_acc = np.zeros((BH, BW, 3), np.float64)
-blocks = []
-prev = None
-for i, f in frames(S - K, S + N + 1):
-    full = prep(f, i)
-    cur = cv2.resize(full, (VW, VH), interpolation=cv2.INTER_AREA)
-    if prev is not None:
-        pi, pa = prev
-        mb = shutter(pa, cur)
-        if pi < S:
-            pre.append(mb.astype(np.float16))
-        else:
-            j = pi - S
-            if j >= N - K:
-                q = j - (N - K)
-                w = (q + 1) / (K + 1)
-                mb = mb * (1 - w) + pre[q].astype(np.float32) * w
-            enc.stdin.write(to8(mb).tobytes())
-            blk_acc += cv2.resize(mb, (BW, BH), interpolation=cv2.INTER_AREA)
-            if (j + 1) % B == 0:
-                blocks.append((blk_acc / B).astype(np.float32))
-                blk_acc[:] = 0
-            if j % 40 == 0:
-                print("frame", j, flush=True)
-    prev = (i, cur)
-enc.stdin.close()
-enc.wait()
+
+# The block means are kept in float at the viewfinder's own size, so a later
+# run can re-pack the pyramid (--blocks-from) without the hour of flow.
+if args.blocks_from:
+    blocks_lin = np.load(args.blocks_from)
+    assert blocks_lin.shape == (NB, VH, VW, 3), blocks_lin.shape
+else:
+    blocks_lin = viewfinder()
+    np.save(os.path.join(args.work, "blocks-lin.npy"), blocks_lin)
 cap.release()
+blocks = [b if (BW, BH) == (VW, VH) else cv2.resize(b, (BW, BH), interpolation=cv2.INTER_AREA) for b in blocks_lin]
+del blocks_lin
 print("blocks", len(blocks))
 
 # The still plate (the crown's struts unmixed), the stillness matte in its
@@ -392,29 +411,65 @@ keep = 1.0 - hole.astype(np.float32)
 filled = []
 for b in blocks:
     fill = pushpull(b, keep)
-    filled.append(to8(b * keep[..., None] + fill * (1 - keep[..., None])))
-cv2.imwrite(os.path.join(args.work, "debug-block0.jpg"), cv2.cvtColor(filled[0], cv2.COLOR_RGB2BGR))
+    filled.append(np.clip(b * keep[..., None] + fill * (1 - keep[..., None]), 0, 1).astype(np.float32))
+cv2.imwrite(os.path.join(args.work, "debug-block0.jpg"), cv2.cvtColor(to8(filled[0]), cv2.COLOR_RGB2BGR))
 
-per = 25
+
+# The pyramid's encoding. The long exposure prints the integral's lightness
+# back up (keepSky stretches the streaks about their local mean, the crests
+# are dodged toward white): any step in the blocks' lightness is multiplied
+# several times over before it reaches the print, so 8-bit sRGB, let alone a
+# lossy codec's blocks, comes out as mottled mush. Each block is stored in
+# OKLab instead, lossless (WebP), in one RGBA texel: lightness at 12 bits,
+# split over two bytes (G its top 8, A its low 4 in the high nibble), and a,
+# b at 8 bits (R, B, centred on 128, +-AB). L carries TPDF dither at its
+# 12-bit step. 12 bits, not 16: the engine sums the blocks into a half-float
+# target, which resolves about that in L, and the plate's own noise in a
+# block is already ~2.5 steps of 12 bits, so a 16-bit L's low nibble is noise
+# that only costs bytes. a and b are not dithered: their step (~0.001) is far
+# below any visible chroma change, the print takes the gaps' chroma from the
+# clear sky anyway, and dither there would cost a third more file.
+# At 640x360 in lossy WebP (~8 KB a block), upscaled 4x to the display and
+# printed up, the codec's blocks were the silk's texture; at 960x540 lossless
+# the silk keeps the striations of the real integral (~0.45 MB a block).
+AB = 0.15
+
+
+def pack(lin):
+    lab = lin2oklab(lin)
+    t = lambda: rng.random(lab.shape[:2], np.float32) + rng.random(lab.shape[:2], np.float32) - 1  # noqa: E731
+    L12 = np.clip(np.round(lab[..., 0] * 4095 + t()), 0, 4095).astype(np.uint16)
+    ab = [np.clip(np.round(128 + lab[..., c] / AB * 127), 1, 255).astype(np.uint8) for c in (1, 2)]
+    return np.dstack([ab[0], (L12 >> 4).astype(np.uint8), ab[1], ((L12 & 15) << 4).astype(np.uint8)])
+
+
+ext = np.stack([lin2oklab(f[::8, ::8]) for f in filled])
+print("blocks OKLab: L %.3f..%.3f  a %.3f..%.3f  b %.3f..%.3f" % (
+    ext[..., 0].min(), ext[..., 0].max(), ext[..., 1].min(), ext[..., 1].max(), ext[..., 2].min(), ext[..., 2].max()))
+assert np.abs(ext[..., 1:]).max() < AB
+# Atlases kept within 4096 px a side (the common WebGL2 texture limit).
+GX, GY = max(1, 4096 // BW), max(1, 4096 // BH)
+per = GX * GY
 atl = []
 for a in range((NB + per - 1) // per):
-    canvas = np.zeros((BH * 5, BW * 5, 3), np.uint8)
-    for q in range(per):
-        idx = a * per + q
-        if idx >= NB:
-            break
-        cx, cy = q % 5, q // 5
-        canvas[cy * BH:(cy + 1) * BH, cx * BW:(cx + 1) * BW] = filled[idx]
+    canvas = np.zeros((BH * GY, BW * GX, 4), np.uint8)
+    n = min(per, NB - a * per)
+    for q in range(n):
+        cx, cy = q % GX, q // GX
+        canvas[cy * BH:(cy + 1) * BH, cx * BW:(cx + 1) * BW] = pack(filled[a * per + q])
+    canvas = canvas[:BH * ((n + GX - 1) // GX)]  # the last atlas only as tall as its rows
     name = f"blocks-{a}.webp"
-    cv2.imwrite(os.path.join(args.out, name), canvas[:, :, ::-1], [cv2.IMWRITE_WEBP_QUALITY, 88])
+    Image.fromarray(canvas, "RGBA").save(os.path.join(args.out, name), "WEBP", lossless=True, exact=True, quality=100, method=6)
     atl.append(name)
+    print(name, canvas.shape, os.path.getsize(os.path.join(args.out, name)), "bytes")
 
 meta = {
     "source": "Pexels 5124202, 84LENS (@84lens)",
     "start": S, "frames": N, "fade": K, "block": B, "blocks": NB, "fps": round(fps, 6),
     "crop": [0, 0, CW, CH],
     "video": [VW, VH],  # encode.sh keeps the master's size
-    "blockSize": [BW, BH], "atlas": [5, 5], "atlases": atl,
+    "blockSize": [BW, BH], "atlas": [GX, GY], "atlases": atl,
+    "encoding": "oklab-l12", "ab": AB,
     "stabilised": bool(stabilise), "maxShift": round(maxd, 3),
 }
 with open(os.path.join(args.out, "bake.json"), "w") as fh:

@@ -12,8 +12,10 @@ import { takes } from "./shutterTakes";
 //
 // The integral is real. Offline (tools/depth/bakes/shutter/bake.py) the
 // graded, looped plate is cut into blocks of 8 frames and each block's
-// linear-light mean is baked (a time pyramid at block resolution), with the
-// tower filled out of it from its own sky. Any open
+// linear-light mean is baked (a time pyramid at block resolution, 960x540,
+// lossless, OKLab with a 12-bit lightness: the print stretches the silk's
+// lightness several times over, so the blocks must be smooth before it
+// does), with the tower filled out of it from its own sky. Any open
 // interval [a, a + T] is then a weighted sum of the blocks it covers, with
 // partial weights at its ends: a prefix-sum query, done here in one pass at
 // block resolution into a half-float target. The opening of an exposure is
@@ -158,6 +160,11 @@ vec3 fromLab(vec3 c){
 `;
 
 // The open interval as a weighted sum of baked block means (linear light).
+// Each block texel is OKLab, losslessly stored: L at 12 bits over two bytes
+// (G its top 8, A its low 4 in the high nibble), a and b in R and B. The
+// bytes are read exactly (texelFetch: a filtered high byte would carry a
+// wrong low byte with it), decoded to linear light and summed, at block
+// resolution, one texel per texel.
 const EXPOSE_FS = `#version 300 es
 precision highp float;
 uniform sampler2D uA0;
@@ -165,20 +172,23 @@ uniform sampler2D uA1;
 uniform sampler2D uA2;
 uniform vec4 uBlk[64];   // atlas, column, row, weight
 uniform int uCount;
-uniform vec2 uSize;      // block size in px
-uniform vec2 uGrid;      // atlas columns, rows
+uniform ivec2 uSize;     // block size in px
+uniform float uAB;       // a, b range: byte 128 +- 127 is +- uAB
 out vec4 o;
 ${COMMON}
 void main(){
-  vec2 p = gl_FragCoord.xy / uSize;
-  p.y = 1.0 - p.y; // atlases are uploaded top row first
+  ivec2 p = ivec2(gl_FragCoord.xy);
+  p.y = uSize.y - 1 - p.y; // atlases are uploaded top row first
   vec3 acc = vec3(0.0);
   for (int i = 0; i < 64; i++) {
     if (i >= uCount) break;
     vec4 b = uBlk[i];
-    vec2 uv = (b.yz + p) / uGrid;
-    vec3 c = b.x < 0.5 ? texture(uA0, uv).rgb : (b.x < 1.5 ? texture(uA1, uv).rgb : texture(uA2, uv).rgb);
-    acc += lin(c) * b.w;
+    ivec2 t = ivec2(b.yz) * uSize + p;
+    vec4 c = b.x < 0.5 ? texelFetch(uA0, t, 0) : (b.x < 1.5 ? texelFetch(uA1, t, 0) : texelFetch(uA2, t, 0));
+    vec4 q = floor(c * 255.0 + 0.5);
+    float L = (q.g * 16.0 + floor(q.a / 16.0)) / 4095.0;
+    vec2 ab = (q.rb - 128.0) / 127.0 * uAB;
+    acc += max(fromLab(vec3(L, ab)), 0.0) * b.w;
   }
   o = vec4(acc, 1.0);
 }`;
@@ -742,8 +752,8 @@ export async function createShutter(host, { embedded = false } = {}) {
       gl.uniform1i(u.uA2, Math.min(2, atlasTex.length - 1));
       gl.uniform4fv(u.uBlk, blockList);
       gl.uniform1i(u.uCount, blockCount);
-      gl.uniform2f(u.uSize, BW, BH);
-      gl.uniform2f(u.uGrid, GX, GY);
+      gl.uniform2i(u.uSize, BW, BH);
+      gl.uniform1f(u.uAB, meta.ab);
       gl.bindFramebuffer(gl.FRAMEBUFFER, exp.fbo);
       gl.viewport(0, 0, BW, BH);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
@@ -779,7 +789,7 @@ export async function createShutter(host, { embedded = false } = {}) {
     gl.uniform1f(u.uDeep, DEEP * keep);
     gl.uniform1f(u.uCrest, CREST * keep);
     gl.uniform2f(u.uSun, SUN[0] * SUN_TAP, SUN[1] * SUN_TAP * (SW / SH));
-    gl.uniform2f(u.uLodT, 3, 2);
+    gl.uniform2f(u.uLodT, 3, 3 + Math.log2(BW / VW)); // both ~160 px across
     gl.uniform4f(u.uTone, TONE.k, TONE.hue, TONE.warm, TONE.shade);
     // The integral's edges are softer the longer it runs; the crests and
     // gaps are printed apart (keepSky), so its edges are read finer.
