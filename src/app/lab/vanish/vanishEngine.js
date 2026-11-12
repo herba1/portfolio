@@ -2,10 +2,14 @@
 //
 // On submit the text is re-rendered off screen with the input's exact font,
 // tracking and position at (at least) DPR 2, and every inked device pixel
-// becomes one particle sitting exactly where it was. A front sweeps left to
-// right; behind it each pixel lets go and is carried up and right on a slow
-// curl of air. Unreleased pixels are drawn at home, so the first frame is the
-// input's own text, pixel for pixel.
+// becomes one particle sitting exactly where it was. A slow front sweeps left
+// to right; behind it each letter lets go as a whole and is carried up and to
+// the right as a sheared ghost of itself. The wind ramps from nothing and
+// grows with height above the baseline, so ascenders lean off first and the
+// feet follow last: the letter stretches into an italic smear that still
+// reads as its own shape before a larger curl of air and a late scatter break
+// it into specks. Unreleased pixels are drawn at home, so the first frame is
+// the input's own text, pixel for pixel.
 //
 // Released specks never fade. Each is one device pixel of full-strength ink,
 // snapped to the device grid, and the cloud thins by losing specks rather
@@ -30,24 +34,44 @@ function mulberry32(seed) {
 const easeOutQuad = (t) => 1 - (1 - t) * (1 - t);
 const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
-// A divergence-free field: the curl of a smooth, slowly moving potential.
-// Returns velocity in px/s. Wavelengths and amplitudes are sized for display
-// type: eddies about a word wide, so the curl reads at the distance the
-// specks travel.
-function curl(x, y, t, out) {
-  const k1 = 0.045;
-  const k2 = 0.055;
-  const k3 = 0.012;
-  const A = 84 / k1;
-  const B = 40 / k3;
-  const a = x * k1 + t * 1.3;
-  const b = y * k2 - t * 0.9;
-  const c = (x * 0.7 + y) * k3 + t * 0.5;
-  const cc = Math.cos(c) * k3 * B;
-  const dpdx = A * Math.cos(a) * Math.cos(b) * k1 + cc * 0.7;
-  const dpdy = -A * Math.sin(a) * Math.sin(b) * k2 + cc;
+const smoothstep = (a, b, v) => {
+  const t = clamp((v - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
+
+// Divergence-free fields: the curl of a smooth, slowly moving potential.
+// Both return velocity in px/s.
+//
+// `swirl` is the large air: eddies a few words wide that bend a whole
+// ghost as it travels, so the trail curves and shears instead of sliding.
+function swirl(x, y, t, out) {
+  const k1 = 0.017;
+  const k2 = 0.023;
+  const A = 64;
+  const a = x * k1 + t * 0.9;
+  const b = y * k2 - t * 0.6;
+  // Potential A/k * sin(a) * cos(b), with a slow travelling band on top
+  // that shears the cloud along a diagonal.
+  const k3 = 0.008;
+  const c = (x * 0.6 + y) * k3 + t * 0.4;
+  const B = 30;
+  const dpdx = A * Math.cos(a) * Math.cos(b) + B * Math.cos(c) * 0.6;
+  const dpdy = -A * Math.sin(a) * Math.sin(b) * (k2 / k1) + B * Math.cos(c);
   out[0] = dpdy;
   out[1] = -dpdx;
+  return out;
+}
+
+// `eddy` is the fine air: word-sized curls that only come in once a ghost
+// has stretched, and take it apart into specks.
+function eddy(x, y, t, out) {
+  const k1 = 0.05;
+  const k2 = 0.06;
+  const A = 70;
+  const a = x * k1 + t * 1.6;
+  const b = y * k2 - t * 1.1;
+  out[0] += -A * Math.sin(a) * Math.sin(b) * (k2 / k1);
+  out[1] -= A * Math.cos(a) * Math.cos(b);
   return out;
 }
 
@@ -157,13 +181,23 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
     sctx.fillText(text, left - scrollLeft - ox, baseline - oy);
     sctx.restore();
 
+    // Where each character's advance begins, so every pixel knows which
+    // letter it belongs to and can leave with it.
+    const edges = new Float32Array(text.length + 1);
+    for (let i = 0; i <= text.length; i++) {
+      edges[i] = left - scrollLeft + (i ? sctx.measureText(text.slice(0, i)).width : 0);
+    }
+
     const data = sctx.getImageData(0, 0, w, h).data;
     const xs = [];
     const ys = [];
     const as = [];
+    const gs = [];
     let minX = Infinity;
     let maxX = -Infinity;
     for (let j = 0; j < h; j++) {
+      // x only grows along a row, so the letter index only steps forward.
+      let g = 0;
       for (let i = 0; i < w; i++) {
         const a = data[(j * w + i) * 4 + 3];
         if (a < 6) continue;
@@ -171,11 +205,13 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
         xs.push(x);
         ys.push(oy + j / S);
         as.push(a / 255);
+        while (g < text.length - 1 && edges[g + 1] <= x) g++;
+        gs.push(g);
         if (x < minX) minX = x;
         if (x > maxX) maxX = x;
       }
     }
-    return { xs, ys, as, minX, maxX, top, baseline, lineHeight, S, color: cs.color };
+    return { xs, ys, as, gs, glyphs: text.length, minX, maxX, top, baseline, lineHeight, S, color: cs.color };
   }
 
   function makeBurst(text, scrollLeft) {
@@ -184,8 +220,10 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
     if (!n) return null;
     const rand = mulberry32(0x9e3779b1 ^ (seedCounter++ * 2654435761));
     const span = Math.max(1, cap.maxX - cap.minX);
-    // The sweep takes longer for a longer line, within a narrow band.
-    const sweep = clamp(0.3 + span * 0.0008, 0.36, 0.7);
+    // A slow front: the edge between letter and ghost is the part worth
+    // watching, so it travels for most of the timeline. Longer lines take a
+    // little longer, within a band.
+    const sweep = clamp(0.75 + span * 0.0012, 0.9, 1.4);
     const x = new Float32Array(cap.xs);
     const y = new Float32Array(cap.ys);
     const a0 = new Float32Array(cap.as);
@@ -195,30 +233,61 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
     const life = new Float32Array(n);
     const keep = new Float32Array(n);
     const wind = new Float32Array(n * 2);
+    const shear = new Float32Array(n);
+    const scatter = new Float32Array(n * 2);
     // The glyphs' optical middle: halfway between baseline and x-height-ish.
     const mid = cap.baseline - cap.lineHeight * 0.32;
+
+    // One gust per letter: each leaves on its own heading and strength, and
+    // one drift for the whole letter, so its pixels go together.
+    const G = Math.max(1, cap.glyphs);
+    const gust = new Float32Array(G * 4);
+    for (let g = 0; g < G; g++) {
+      const heading = -0.5 + (rand() - 0.5) * 0.3;
+      const strength = 230 * (0.85 + rand() * 0.3);
+      gust[g * 4] = Math.cos(heading) * strength;
+      gust[g * 4 + 1] = Math.sin(heading) * strength;
+      // Launch: a soft push, nearly the same for every pixel of the letter.
+      const launch = -0.62 + (rand() - 0.5) * 0.12;
+      gust[g * 4 + 2] = launch;
+      gust[g * 4 + 3] = 20 + rand() * 20;
+    }
+
     let end = 0;
     for (let p = 0; p < n; p++) {
       const u = (x[p] - cap.minX) / span;
-      // A clean front with a soft, slow wave along the glyph height, so the
-      // edge between letter and dust stays legible as it travels.
-      const wobble = Math.sin((y[p] - mid) * 0.16 + u * 7) * 0.014;
-      release[p] = sweep * (0.55 * easeOutQuad(u) + 0.45 * u) + wobble + rand() * 0.022;
-      if (release[p] < 0) release[p] = rand() * 0.012;
-      life[p] = 1.05 + rand() * 0.5;
-      // Thin by sparsity: each speck lives at full ink until its own moment,
-      // drawn so the surviving share follows (1 - u)^1.15. Antialiased edge
-      // pixels are dithered: kept with a chance equal to their coverage.
-      keep[p] = rand() < a0[p] ? 1 - Math.pow(rand(), 1 / 1.15) : 0;
-      // Each pixel leaves up and to the right, the top of a glyph a little
-      // more upward than its foot, so the cloud fans open as it rises.
+      const g = cap.gs[p] < G ? cap.gs[p] : G - 1;
+      // Height above the optical middle, in lines: about +0.34 at the top
+      // of an ascender, -0.32 on the baseline.
       const lift = (mid - y[p]) / cap.lineHeight;
-      const speed = 150 + rand() * 150;
-      const ang = -0.62 - lift * 0.55 + (rand() - 0.5) * 0.6;
+      // A clean front with a soft, slow wave along the glyph height, leaning
+      // forward at the top: ascenders let go a beat before their feet.
+      const wobble = Math.sin((y[p] - mid) * 0.16 + u * 7) * 0.012;
+      release[p] = sweep * (0.3 * easeOutQuad(u) + 0.7 * u) + wobble - lift * 0.09 + rand() * 0.014;
+      if (release[p] < 0) release[p] = rand() * 0.012;
+      life[p] = 1.0 + rand() * 0.45;
+      // Thin by sparsity: each speck lives at full ink until its own moment.
+      // Survival follows 1 - u^1.6, so the ghost keeps nearly all its ink
+      // while it still reads as a letter and loses it as it breaks up.
+      // Antialiased edge pixels are dithered: kept with a chance equal to
+      // their coverage.
+      keep[p] = rand() < a0[p] ? Math.pow(rand(), 1 / 1.6) : 0;
+      // The launch: 20-40 px/s, within 0.1 rad, shared by the letter.
+      const ang = gust[g * 4 + 2] + (rand() - 0.5) * 0.04;
+      const speed = gust[g * 4 + 3] * (0.95 + rand() * 0.1);
       vx[p] = Math.cos(ang) * speed;
       vy[p] = Math.sin(ang) * speed;
-      wind[p * 2] = 150 + rand() * 44;
-      wind[p * 2 + 1] = -(112 + rand() * 44);
+      // The letter's gust, sheared by height: full at the ascender, a
+      // whisper at the foot. The baseline holds the bottom of the letter.
+      shear[p] = clamp(0.25 + lift * 2.2, 0.05, 1.2);
+      wind[p * 2] = gust[g * 4] * shear[p];
+      wind[p * 2 + 1] = gust[g * 4 + 1] * shear[p];
+      // A late, per-speck scatter that only arrives once the ghost has had
+      // its moment.
+      const sa = rand() * Math.PI * 2;
+      const sr = 18 + rand() * 30;
+      scatter[p * 2] = Math.cos(sa) * sr;
+      scatter[p * 2 + 1] = Math.sin(sa) * sr;
       end = Math.max(end, release[p] + life[p] * keep[p]);
     }
     return {
@@ -232,6 +301,8 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
       life,
       keep,
       wind,
+      shear,
+      scatter,
       age: 0,
       end,
       rgb: parseColor(cap.color),
@@ -240,25 +311,42 @@ export function createVanish({ root, input, canvas }, { onSettle, onEmpty } = {}
     };
   }
 
+  // Each pixel's velocity is a function of its age and where it is:
+  // its launch, plus a wind that ramps up from zero (so displacement grows
+  // with age and the letter stretches rather than jumps), plus the large
+  // swirl and, later, the fine eddies and scatter that turn it to specks.
+  const WIND_RAMP = 0.75;
   function stepBurst(b, dt) {
     b.age += dt;
     if (b.reduced) return;
     const t = b.age;
-    const { n, x, y, vx, vy, release, life, keep, wind } = b;
-    const k = 2.1 * dt;
+    const { n, x, y, vx, vy, release, life, keep, wind, shear, scatter } = b;
     for (let p = 0; p < n; p++) {
       const age = t - release[p];
       if (age <= 0 || age > life[p] * keep[p]) continue;
-      curl(x[p], y[p], t, flow);
-      const fx = wind[p * 2] + flow[0];
-      const fy = wind[p * 2 + 1] + flow[1];
-      vx[p] += (fx - vx[p]) * k;
-      vy[p] += (fy - vy[p]) * k;
+      const ramp = age < WIND_RAMP ? age / WIND_RAMP : 1;
+      const air = smoothstep(0.12, 1.0, age);
+      const breakup = smoothstep(0.32, 0.9, age);
+      // Once the ghost has gone, the feet catch the same air as the tops.
+      const level = smoothstep(0.3, 1.0, age);
+      swirl(x[p], y[p], t, flow);
+      flow[0] *= air;
+      flow[1] *= air;
+      if (breakup > 0) {
+        const fx = flow[0];
+        const fy = flow[1];
+        flow[0] = 0;
+        flow[1] = 0;
+        eddy(x[p], y[p], t, flow);
+        flow[0] = fx + flow[0] * breakup + scatter[p * 2] * breakup;
+        flow[1] = fy + flow[1] * breakup + scatter[p * 2 + 1] * breakup;
+      }
       // Ease in over the first few frames, so a pixel peels off its letter
       // rather than being shot out of it.
       const peel = age < 0.07 ? (age / 0.07) * (age / 0.07) : 1;
-      x[p] += vx[p] * dt * peel;
-      y[p] += vy[p] * dt * peel;
+      const w = ramp * (1 - level + level * (0.85 / shear[p]));
+      x[p] += (vx[p] + wind[p * 2] * w + flow[0]) * dt * peel;
+      y[p] += (vy[p] + wind[p * 2 + 1] * w + flow[1]) * dt * peel;
     }
   }
 
