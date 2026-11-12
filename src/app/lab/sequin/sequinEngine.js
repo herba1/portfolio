@@ -11,16 +11,21 @@ import { albumById, loadCover } from "../_kit/covers";
 // throws back of a box is the box times its own tint, so a pale disc flares
 // hot and white, a sky-blue one flares cyan, and a black one only glows a
 // dim, deep version of itself. The glitter is the picture's own highlights.
+// The cloth itself is draped, not flat: every sequin leans with the fold it
+// lies on, so the light forms bands that follow the cloth, and the hand
+// presses a dent into it that springs back once it passes.
 
 const VS = `#version 300 es
 layout(location=0) in vec2 aLocal;
 layout(location=1) in vec4 aPos;    // x, y, z, seed
-layout(location=2) in vec2 aTilt;   // rest tilt: the way and how far its normal leans
+layout(location=2) in vec2 aTilt;   // rest lean: the drape's slope at its centre, plus its own small wobble
 layout(location=3) in vec3 aColor;  // linear cover colour
 layout(location=4) in vec3 aFlip;   // phi, axis.x, axis.y
 layout(location=5) in vec2 aShape;  // the press: which way the cup is deeper, and by how much
 uniform vec2 uRes; uniform float uR; uniform float uCup; uniform float uZ;
 uniform vec4 uRip[4];               // x, y, age, amplitude
+// The hand's dent in the drape: a height grid over the swatch, in px.
+uniform sampler2D uDent; uniform vec4 uRect; uniform vec2 uDentCell;
 out vec3 vW; out vec3 vC; out vec2 vL; out vec2 vCenter; out float vFace; out float vLift;
 flat out mat3 vB; flat out vec2 vShape;
 
@@ -45,8 +50,16 @@ void main(){
   float phi = aFlip.x;
   p = rot(p, k, phi); bx = rot(bx, k, phi); by = rot(by, k, phi); f = rot(f, k, phi);
 
-  // Rest tilt plus any ripple passing through.
-  vec2 slope = aTilt;
+  // The drape's lean, the hand's dent, and any ripple passing through.
+  // Neighbours share the fabric's slope, so they turn to the light together.
+  vec2 duv = (aPos.xy - uRect.xy) / (uRect.zw - uRect.xy);
+  vec2 te = 1.0 / vec2(textureSize(uDent, 0));
+  float dh = textureLod(uDent, duv, 0.0).r;
+  vec2 dg = vec2(
+    textureLod(uDent, duv + vec2(te.x, 0.0), 0.0).r - textureLod(uDent, duv - vec2(te.x, 0.0), 0.0).r,
+    textureLod(uDent, duv + vec2(0.0, te.y), 0.0).r - textureLod(uDent, duv - vec2(0.0, te.y), 0.0).r
+  ) / (2.0 * uDentCell);
+  vec2 slope = aTilt - dg;
   float rl = 0.0;
   for (int i = 0; i < 4; i++) {
     vec4 r = uRip[i];
@@ -66,7 +79,7 @@ void main(){
   }
 
   float lift = abs(sin(phi)) * uR * 0.95 + rl * uR * 0.5;
-  vec3 w = aPos.xyz + p + vec3(0.0, 0.0, lift);
+  vec3 w = aPos.xyz + p + vec3(0.0, 0.0, lift + dh);
   vW = w; vC = aColor; vL = l; vCenter = aPos.xy; vFace = f.z;
   vB = mat3(bx, by, f); vShape = aShape;
   vLift = clamp(lift / (uR * 0.4), 0.0, 1.0);
@@ -95,9 +108,36 @@ float panel(vec3 d, float az, float el, vec2 hs, float soft){
   float da = abs(mod(atan(d.y, d.x) - radians(az) + 3.14159265, 6.2831853) - 3.14159265) * sin(e);
   return smoothstep(hs.x + soft, hs.x - soft, da) * smoothstep(hs.y + soft, hs.y - soft, abs(e - el));
 }
+// The big diffused panels high over the table. A settled mirror leans with
+// the cloth under it, so neighbours see the same part of a panel together
+// and the light rolls over the swatch in broad bands that follow the folds.
+// widen > 1 is the same light as a matte surface sees it: the same place in
+// the sky, blurred.
+float strip(vec3 d, float az, float el, vec2 hs, float rot, float widen){
+  vec3 c = boxDir(az, el);
+  float a = dot(d, c);
+  if (a <= 0.0) return 0.0;
+  vec3 t1 = normalize(cross(c, vec3(0.0, 1.0, 0.0)));
+  vec3 t2 = cross(t1, c);
+  vec2 q = vec2(dot(d, t1), dot(d, t2)) / a;
+  float cr = cos(rot), sr = sin(rot);
+  q = vec2(cr * q.x + sr * q.y, -sr * q.x + cr * q.y) / (hs * widen);
+  // A diffuser's soft falloff, gaussian both ways.
+  return exp(-0.5 * dot(q, q));
+}
+// A big warm panel up and to the left, past where a flat swatch would see
+// it, so it is the folds that find it: every flank turned toward it lights
+// in a broad band and every flank turned away falls dark. A smaller cool
+// panel opposite catches the other flanks more faintly. Over it all, the
+// ceiling's wide glow, so a disc in a fold's shadow still shows its colour.
+vec3 overhead(vec3 d, float widen){
+  return vec3(1.0, 0.97, 0.93) * 0.22 * strip(d, 250.0, 0.05, vec2(0.5, 0.45), 0.0, 1.0)
+       + vec3(1.0, 0.96, 0.9) * 1.2 * strip(d, 243.0, 0.32, vec2(0.14, 0.085), 0.8, widen)
+       + vec3(0.85, 0.93, 1.0) * 0.4 * strip(d, 43.0, 0.4, vec2(0.13, 0.09), 0.5, widen);
+}
 vec3 sky(vec3 d){
   float up = d.z;
-  return vec3(0.93, 0.9, 0.85) * (0.012 + 0.2 * smoothstep(0.35, 1.0, up) * smoothstep(1.0, 0.9, up));
+  return vec3(0.93, 0.9, 0.85) * (0.022 + 0.07 * smoothstep(0.35, 1.0, up) * smoothstep(1.0, 0.9, up));
 }
 vec3 boxes(vec3 d){
   float dr = sin(uTime * 0.21) * 0.02;
@@ -154,7 +194,7 @@ const FS = `#version 300 es
 precision highp float;
 in vec3 vW; in vec3 vC; in vec2 vL; in vec2 vCenter; in float vFace; in float vLift;
 flat in mat3 vB; flat in vec2 vShape;
-uniform vec3 uEye; uniform float uR; uniform float uCup; uniform vec2 uNb0; uniform vec2 uNb1; uniform float uExposure; uniform float uHdr;
+uniform vec3 uEye; uniform float uR; uniform float uCup; uniform vec2 uNb0; uniform vec2 uNb1; uniform float uExposure; uniform float uHdr; uniform float uSheen;
 out vec4 o;
 ${ENV}
 ${TONE}
@@ -175,18 +215,22 @@ void main(){
   vec3 key = normalize(vec3(-0.5, -0.55, 0.67));
   vec3 col;
   if (front) {
-    // Matte charcoal: a little diffuse from the room, a faint satin sheen,
-    // and the boxes only as a dull smear, never a glint.
+    // Matte charcoal: diffuse from the raking key, which leans harder on the
+    // folds than a mirror does, and a satin sheen that is the overhead panels
+    // blurred, so the same bands that roll over the mirrors roll over the
+    // grey too. The boxes are only a dull smear, never a glint.
     vec3 alb = vec3(0.03, 0.029, 0.028);
-    float irr = 0.35 + 0.3 * N.z + 0.9 * max(dot(N, key), 0.0);
-    float sheen = pow(max(dot(R, key), 0.0), 5.0) * 0.5 + pow(max(dot(R, normalize(vec3(-0.17, -0.2, 0.965))), 0.0), 24.0) * 0.4;
-    col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.035 + boxes(R) * 0.0008;
+    float kd = max(dot(N, key), 0.0);
+    float irr = 0.2 + 0.25 * N.z + 1.6 * kd * kd;
+    float sheen = pow(max(dot(R, key), 0.0), 5.0) * 0.3;
+    col = alb * irr + vec3(0.95, 0.93, 0.9) * sheen * (0.2 + 0.8 * fr) * 0.035
+        + overhead(R, 1.6) * uSheen * 0.09 + boxes(R) * 0.0008;
   } else {
     // Coloured metal: F0 is the cover's tint, and everything it reflects,
     // the dim room and the hot boxes alike, comes back multiplied by it.
     // Only at true grazing does Schlick lift it toward white.
     vec3 F = vC + (1.0 - vC) * fr;
-    col = (sky(R) * 2.2 + boxes(R) * ${LIGHT}) * F + vC * 0.012;
+    col = (sky(R) * 2.2 + overhead(R, 1.0) * uSheen + boxes(R) * ${LIGHT}) * F + vC * 0.012;
   }
   // The pressed rim and the punched hole catch a little less light.
   col *= mix(1.0, 0.72, smoothstep(0.84, 1.0, vRho));
@@ -330,6 +374,34 @@ const PI = Math.PI;
 // Brush right or down to show the mirrors; left or up to wipe them.
 const NAP = [0.86, 0.51];
 
+// The swatch doesn't lie flat. It is a scrap of cloth dropped on the table:
+// a long soft fold across it, a smaller one in the lower corner, a bulge
+// where it rucked up, a shallow trough, and the whole thing sagging toward
+// the bottom left where it hangs a little off the edge. Height as a fraction
+// of the swatch's width at (u, v), its fractions across and down.
+const gauss = (x, w) => Math.exp((-x * x) / (2 * w * w));
+const ridge = (u, v, cx, cy, ang, w, len, bow) => {
+  const c = Math.cos(ang), s = Math.sin(ang);
+  const t = (u - cx) * c + (v - cy) * s;
+  const n = -(u - cx) * s + (v - cy) * c + bow * t * t;
+  return gauss(n, w) * gauss(t, len);
+};
+function drape(u, v) {
+  let h = 0;
+  h += 0.022 * ridge(u, v, 0.42, 0.44, 0.62, 0.075, 0.45, 0.9);
+  h += 0.018 * ridge(u, v, 0.72, 0.76, -1.05, 0.065, 0.24, -1.2);
+  h += 0.018 * gauss(Math.hypot(u - 0.8, v - 0.18), 0.09);
+  h -= 0.01 * ridge(u, v, 0.2, 0.78, 0.3, 0.08, 0.3, 0);
+  const sx = 1 - u, sy = v;
+  h -= 0.03 * (sx * sy) * (sx * sy);
+  return h;
+}
+
+// The hand's dent: a coarse grid of heights over the swatch, each a damped
+// spring pulled down under the fingertip and let go behind it.
+const DENT_N = 64;
+const DENT_K = 240, DENT_C = 11;
+
 export async function createSequin(host, { embedded = false } = {}) {
   const stage = createStage(host, { webgl: true, dpr: 2 });
   const gl = stage.ctx;
@@ -377,7 +449,19 @@ export async function createSequin(host, { embedded = false } = {}) {
   };
 
   const prog = program(gl, VS, FS);
-  const U = uniforms(gl, prog, ["uRes", "uR", "uCup", "uZ", "uRip", "uEye", "uNb0", "uNb1", "uExposure", "uTime", "uHdr"]);
+  const U = uniforms(gl, prog, ["uRes", "uR", "uCup", "uZ", "uRip", "uEye", "uNb0", "uNb1", "uExposure", "uTime", "uHdr", "uDent", "uRect", "uDentCell", "uSheen"]);
+
+  const dentH = new Float32Array(DENT_N * DENT_N);
+  const dentV = new Float32Array(DENT_N * DENT_N);
+  const dentTex = gl.createTexture();
+  gl.bindTexture(gl.TEXTURE_2D, dentTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.R16F, DENT_N, DENT_N, 0, gl.RED, gl.FLOAT, dentH);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+  let dentLive = false, dentDirty = true;
   const bgProg = program(gl, BG_VS, BG_FS);
   const UB = uniforms(gl, bgProg, ["uRes", "uRect", "uDpr", "uHdr"]);
 
@@ -539,6 +623,9 @@ export async function createSequin(host, { embedded = false } = {}) {
     gl.bindVertexArray(null);
   };
   const EXPOSURE = 1.0;
+  // The overhead panels, against the hot boxes: bright enough that a band
+  // reads as the picture lit, dim enough that only pale discs bloom in it.
+  const SHEEN = 1.35;
 
   // Layout and per-sequin state.
   let N = 0;
@@ -562,6 +649,7 @@ export async function createSequin(host, { embedded = false } = {}) {
     const pad = D * 0.14;
     rect = [x0 - pad, y0 - pad, x0 + fw + pad, y0 + fh + pad];
     brushR = Math.max(D * 2.2, side * 0.065);
+    dentH.fill(0); dentV.fill(0); dentLive = false; dentDirty = true;
 
     const list = [];
     for (let r = 0; r < rows; r++) {
@@ -584,15 +672,20 @@ export async function createSequin(host, { embedded = false } = {}) {
       // Shingled: higher rows lie over lower ones, and lean down onto them.
       // Rows step up by enough that a tilted disc never cuts the one over it.
       const z = (rows - r) * D * 0.32;
-      // Real sequins never lie flat: each sits on its thread at its own
-      // lean, up to half a radian, more often along the thread than across.
+      // Each lies on the cloth, so its lean is the drape's: the heightfield's
+      // slope at its centre, which it shares with its neighbours. On top of
+      // that, only a small wobble of its own on the thread, more along it
+      // than across, and a hair of lean down onto the row below.
+      const u = (x - x0) / fw, v = (y - y0) / fh, e = 0.004;
+      const gx = (drape(u + e, v) - drape(u - e, v)) / (2 * e);
+      const gy = ((drape(u, v + e) - drape(u, v - e)) / (2 * e)) * (fw / fh);
       const a = rand() * PI * 2;
-      const m = 0.06 + Math.pow(rand(), 0.85) * 0.4;
-      const along = 1, across = 0.55 + 0.45 * rand();
-      const ux = Math.cos(a) * m, uy = Math.sin(a) * m;
-      const tx = ux * across, ty = uy * along + 0.05;
-      const [cr, cg, cb] = sampleCover((x - x0) / fw, (y - y0) / fh, (D * 0.45) / fw);
-      data.set([x, y, z, s, tx, ty, cr, cg, cb, rand() * PI, (rand() * 2 - 1) * 0.4], i * 11);
+      const m = 0.08 * (0.25 + 0.75 * rand());
+      const across = 0.6 + 0.4 * rand();
+      const tx = -gx + Math.cos(a) * m * across, ty = -gy + Math.sin(a) * m + 0.03;
+      const zz = z + drape(u, v) * fw;
+      const [cr, cg, cb] = sampleCover(u, v, (D * 0.45) / fw);
+      data.set([x, y, zz, s, tx, ty, cr, cg, cb, rand() * PI, (rand() * 2 - 1) * 0.4], i * 11);
       ax[i] = 1; ay[i] = 0;
       flips[i * 3 + 1] = 1;
     }
@@ -649,6 +742,40 @@ export async function createSequin(host, { embedded = false } = {}) {
     }
   };
 
+  // Press the cloth at (hx, hy) by `press` (0 lets it go) and let the
+  // springs run for dt. The dent spreads about one and a half brush radii.
+  const stepDent = (dt, hx, hy, press, R = brushR) => {
+    if (!press && !dentLive) return;
+    const [l, t, r, b] = rect;
+    const cw = (r - l) / DENT_N, ch = (b - t) / DENT_N;
+    const sig = R * 0.75;
+    const depth = sig * 0.5 * press;
+    const reach = sig * 3.2;
+    let live = false, moved = 0;
+    for (let j = 0; j < DENT_N; j++) {
+      const y = t + (j + 0.5) * ch;
+      const dy = y - hy;
+      for (let i = 0; i < DENT_N; i++) {
+        const k = j * DENT_N + i;
+        let tgt = 0;
+        if (press) {
+          const dx = l + (i + 0.5) * cw - hx;
+          if (Math.abs(dx) < reach && Math.abs(dy) < reach) tgt = -depth * Math.exp(-(dx * dx + dy * dy) / (2 * sig * sig));
+        }
+        const hk = dentH[k];
+        if (!tgt && hk === 0 && dentV[k] === 0) continue;
+        dentV[k] += (DENT_K * (tgt - hk) - DENT_C * dentV[k]) * dt;
+        dentH[k] = hk + dentV[k] * dt;
+        moved = Math.max(moved, Math.abs(dentV[k] * dt));
+        if (Math.abs(dentH[k]) < 0.01 && Math.abs(dentV[k]) < 0.05 && !tgt) { dentH[k] = 0; dentV[k] = 0; }
+        else live = true;
+      }
+    }
+    dentLive = live;
+    // A fingertip resting still leaves nothing to redraw once the cloth settles.
+    if (moved > 1e-3 || !live) dentDirty = true;
+  };
+
   const K = 420, C = 24;
   const step = (dt) => {
     if (!active.size) return;
@@ -703,14 +830,19 @@ export async function createSequin(host, { embedded = false } = {}) {
       while (s < go) {
         const s1 = Math.min(go, s + speed * dt);
         const a = s / L, b = s1 / L;
-        brush(g[0] + (g[2] - g[0]) * a, g[1] + (g[3] - g[1]) * a, g[0] + (g[2] - g[0]) * b, g[1] + (g[3] - g[1]) * b);
+        const hx = g[0] + (g[2] - g[0]) * b, hy = g[1] + (g[3] - g[1]) * b;
+        brush(g[0] + (g[2] - g[0]) * a, g[1] + (g[3] - g[1]) * a, hx, hy);
         step(dt);
+        stepDent(dt, hx, hy, 1, saved);
         s = s1;
       }
       left -= go;
       if (left <= 0) break;
       // Lift the hand and let everything settle before the next stroke.
-      for (let k = 0; k < 120; k++) step(dt);
+      for (let k = 0; k < 120; k++) {
+        step(dt);
+        stepDent(dt, 0, 0, 0, saved);
+      }
     }
     brushR = saved;
     frozen = true;
@@ -746,7 +878,12 @@ export async function createSequin(host, { embedded = false } = {}) {
         last = [p.x, p.y];
       } else last = null;
       const sub = 3;
-      for (let k = 0; k < sub; k++) step(dt / sub);
+      // Hovering rests a fingertip on the cloth; dragging leans on it.
+      const press = p.down ? 1 : p.inside ? 0.7 : 0;
+      for (let k = 0; k < sub; k++) {
+        step(dt / sub);
+        stepDent(dt / sub, p.x, p.y, press);
+      }
       for (const r of ripples) r.age += dt;
       while (ripples.length && ripples[0].age > 3) ripples.shift();
     }
@@ -758,7 +895,7 @@ export async function createSequin(host, { embedded = false } = {}) {
     }
     // At rest only the room's slow drift moves; ten frames a second is plenty
     // for that, and spares the bloom chain the other fifty.
-    const idle = !frozen && !dirty && !active.size && !ripples.length;
+    const idle = !frozen && !dirty && !dentDirty && !active.size && !ripples.length;
     if (idle && time - lastDraw < 0.1 && W === stillW && H === stillH) return;
     lastDraw = time;
     if (!frozen) { stillW = W; stillH = H; }
@@ -769,6 +906,12 @@ export async function createSequin(host, { embedded = false } = {}) {
       gl.bindBuffer(gl.ARRAY_BUFFER, flipBuf);
       gl.bufferSubData(gl.ARRAY_BUFFER, 0, flips);
       dirty = false;
+    }
+    if (dentDirty) {
+      gl.bindTexture(gl.TEXTURE_2D, dentTex);
+      gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, DENT_N, DENT_N, gl.RED, gl.FLOAT, dentH);
+      gl.bindTexture(gl.TEXTURE_2D, null);
+      dentDirty = false;
     }
 
     const cw = stage.canvas.width, ch = stage.canvas.height;
@@ -805,6 +948,12 @@ export async function createSequin(host, { embedded = false } = {}) {
     gl.uniform2f(U.uNb1, D / 2, -SY);
     gl.uniform1f(U.uExposure, EXPOSURE);
     gl.uniform1f(U.uTime, frozen ? 0 : time);
+    gl.uniform1f(U.uSheen, SHEEN);
+    gl.uniform4f(U.uRect, ...rect);
+    gl.uniform2f(U.uDentCell, (rect[2] - rect[0]) / DENT_N, (rect[3] - rect[1]) / DENT_N);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, dentTex);
+    gl.uniform1i(U.uDent, 0);
     gl.drawArraysInstanced(gl.TRIANGLES, 0, mesh.length / 2, N);
     gl.bindVertexArray(null);
 
@@ -822,6 +971,7 @@ export async function createSequin(host, { embedded = false } = {}) {
   return {
     destroy: () => {
       if (post) freePost();
+      gl.deleteTexture(dentTex);
       stage.destroy();
     },
   };
