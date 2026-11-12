@@ -16,7 +16,12 @@ const K_ANCHOR = 700;
 const C_ANCHOR = 4;
 const DRAG = 2.5;
 const GRAB_PULL = 0.35;
-const K_GRIP = 4200; // the table's grip on the far side of a pulled letter
+// Friction with the table. A pulled letter's rubber behind the finger sticks
+// where it lies: each point holds a stick position and is tied to it by a
+// stiff spring that can only carry so much before the point slips (Coulomb,
+// as a distance). So a pull stretches the letter instead of carrying it off.
+const K_FRIC = 52000;
+const SLIP_EM = 0.045; // how far a stuck point is dragged before it slides
 const SUBSTEPS = 24;
 
 export function createSim({ em }) {
@@ -155,15 +160,26 @@ export function createSim({ em }) {
       Fx[i2] += h * (py[i3] - py[i1]); Fy[i2] += h * (px[i1] - px[i3]);
       Fx[i3] += h * (py[i0] - py[i2]); Fy[i3] += h * (px[i2] - px[i0]);
     }
-    // Pulling: the part of the letter away from the finger grips the table,
-    // so the rubber between them stretches instead of the letter sliding.
+    // Pulling: the rubber behind the finger is stuck to the table by
+    // friction, so what lies between them stretches. Past the slip distance a
+    // stuck point slides along, still holding back.
     if (grab && grab.pull > 0) {
-      const { gi, gw } = grab;
-      const k = K_GRIP * grab.pull;
+      const { gi, gw, sx, sy } = grab;
+      const k = K_FRIC * grab.pull;
+      const slip = SLIP_EM * em;
       for (let q = 0; q < gi.length; q++) {
+        const w = gw[q];
+        if (w < 0.01) continue;
         const i = gi[q];
-        Fx[i] += k * gw[q] * (rx[i] - px[i]);
-        Fy[i] += k * gw[q] * (ry[i] - py[i]);
+        let ex = sx[q] - px[i], ey = sy[q] - py[i];
+        const el = Math.hypot(ex, ey);
+        if (el > slip) {
+          const m = (el - slip) / el;
+          sx[q] -= ex * m; sy[q] -= ey * m;
+          ex = sx[q] - px[i]; ey = sy[q] - py[i];
+        }
+        Fx[i] += k * w * ex - 6 * w * vx[i] * grab.pull;
+        Fy[i] += k * w * ey - 6 * w * vy[i] * grab.pull;
       }
     }
     for (let i = 0; i < n; i++) {
@@ -238,19 +254,39 @@ export function createSim({ em }) {
         const cx = (rx[sp[0]] + rx[sp[1]]) * 0.5, cy = (ry[sp[0]] + ry[sp[1]]) * 0.5;
         sp[4] = owner[sp[0]] === li ? Math.exp(-((cx - gx) ** 2 + (cy - gy) ** 2) / (spread * spread)) : 0;
       }
-      const gi = [], gw = [];
+      // Every point of the letter can stick to the table; how firmly is set
+      // per pull direction in setGrab. The finger's own patch never sticks.
+      const gi = [], gd = [], gu = [], gv = [];
       for (let i = L.start; i < L.start + L.count; i++) {
         const d2 = (rx[i] - gx) ** 2 + (ry[i] - gy) ** 2;
         gi.push(i);
-        gw.push(1 - Math.exp(-d2 / (0.42 * em) ** 2));
+        gd.push(1 - Math.exp(-d2 / (0.16 * em) ** 2));
+        gu.push(rx[i] - gx); gv.push(ry[i] - gy);
       }
-      grab = { li, gi, gw, pull: 0, idx, w, ox, oy, bx: new Float32Array(idx.length), by: new Float32Array(idx.length), dx: 0, dy: 0 };
+      const sx = new Float32Array(gi.length), sy = new Float32Array(gi.length);
+      gi.forEach((i, q) => { sx[q] = px[i]; sy[q] = py[i]; });
+      grab = {
+        li, gi, gd, gu, gv, gw: new Float32Array(gi.length), sx, sy, pull: 0,
+        idx, w, ox, oy, bx: new Float32Array(idx.length), by: new Float32Array(idx.length), dx: 0, dy: 0,
+      };
       return grab;
     },
     setGrab(dx, dy, p) {
       if (grab) {
         grab.dx = dx; grab.dy = dy;
-        grab.pull = Math.min(1, Math.hypot(dx, dy) / (0.2 * em));
+        const len = Math.hypot(dx, dy);
+        grab.pull = Math.min(1, len / (0.06 * em));
+        // Rubber behind the finger (against the pull) grips; rubber ahead of
+        // it is free to be led along, so nothing is shoved into a fold.
+        if (len > 1e-3) {
+          const ux = dx / len, uy = dy / len;
+          const a = -0.02 * em, b = 0.1 * em;
+          for (let q = 0; q < grab.gi.length; q++) {
+            const ahead = grab.gu[q] * ux + grab.gv[q] * uy;
+            const t = Math.min(1, Math.max(0, (ahead - a) / (b - a)));
+            grab.gw[q] = grab.gd[q] * (1 - t * t * (3 - 2 * t));
+          }
+        }
       }
       press = p;
     },

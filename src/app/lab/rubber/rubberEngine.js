@@ -13,7 +13,7 @@ import { glyphField, sampleField, GLYPH_PX } from "./rubberGlyphs";
 const TITLE = "Hello";
 const WEIGHT = 800;
 const SUB = 3; // render vertices per lattice cell edge
-const R_EM = 0.065; // width of the rolled edge, em
+const R_EM = 0.02; // width of the moulded edge radius, em: a die-cut slab, not a pillow
 const SLAB_EM = 0.12; // thickness of the rubber, em
 const GAP = 0.03; // em between the nearest inks: set close enough to lean on each other
 const ALBEDO = [1.0, 0.33, 0.07]; // sRGB, an orange rubber
@@ -35,17 +35,21 @@ const HEIGHT = `
 uniform sampler2D uSdf; uniform vec2 uTexel; uniform float uEm; uniform float uR; uniform float uSlab;
 uniform vec4 uFinger; // x, y (css px), radius (css px), depth (0..1 of the slab)
 in vec2 vPos;
-// The fingertip's own dimple: thickness factor and its screen gradient.
+// The fingertip's own dimple: thickness factor and its screen gradient. The
+// rubber it presses out of the pit is not lost: the profile integrates to
+// zero, so it stands up as a shoulder ring around the fingertip.
 vec3 dimple(){
   vec2 q = vPos - uFinger.xy;
   float r2 = dot(q, q) / (uFinger.z * uFinger.z);
-  float g = exp(-r2 * 1.6);
-  float f = 1.0 - uFinger.w * g;
-  vec2 df = uFinger.w * g * 3.2 * q / (uFinger.z * uFinger.z);
+  const float b = 1.6;
+  float g = exp(-r2 * b);
+  float f = 1.0 - uFinger.w * (1.0 - b * r2) * g;
+  vec2 df = uFinger.w * b * g * (2.0 - b * r2) * 2.0 * q / (uFinger.z * uFinger.z);
   return vec3(f, df);
 }
 float sd(vec2 uv){ return texture(uSdf, uv).r; }
-// A slab uSlab thick whose edge rolls over on a quarter ellipse uR wide.
+// A flat slab uSlab thick, its edge turned over on a tight radius uR: the
+// top face is dead flat, so only thickness changes can shade it.
 float prof(float d){ float t = clamp(d / uR, 0.0, 1.0); return uSlab * sqrt(max(0.0, 1.0 - (1.0 - t) * (1.0 - t))); }
 `;
 
@@ -78,7 +82,7 @@ void main(){
   float d = sd(vUv);
   float a = clamp(d / max(fwidth(d), 1e-5) + 0.5, 0.0, 1.0);
   if (a <= 0.0) discard;
-  vec2 e = uTexel * 2.0;
+  vec2 e = uTexel;
   float hx = (prof(sd(vUv + vec2(e.x, 0.0))) - prof(sd(vUv - vec2(e.x, 0.0)))) / (2.0 * e.x);
   float hy = (prof(sd(vUv + vec2(0.0, e.y))) - prof(sd(vUv - vec2(0.0, e.y)))) / (2.0 * e.y);
   // uv slope to screen slope (both css px), through the lattice's own Jacobian.
@@ -87,19 +91,30 @@ void main(){
   vec3 dm = dimple();
   float T = vT.x * dm.x;
   vec2 gT = vT.yz * dm.x + vT.x * dm.yz;
-  vec2 g = gP * T + P * uEm * gT;
-  // Faint satin grain of moulded rubber.
-  vec2 sp = gl_FragCoord.xy / uView * vec2(uView.x / uView.y, 1.0) * 900.0;
-  g += (vec2(vnoise(sp), vnoise(sp + 31.7)) - 0.5) * 0.035;
+  // The thickness slope is drawn a touch steeper than life, so a squash
+  // reads in a still: a pit with a lit far wall, a proud shoulder.
+  vec2 g = gP * T + P * uEm * gT * 1.5;
+  // Fine matte bead-blast of moulded rubber: a tooth, not a sheen.
+  vec2 sp = gl_FragCoord.xy / uView * vec2(uView.x / uView.y, 1.0) * 1400.0;
+  g += (vec2(vnoise(sp), vnoise(sp + 31.7)) - 0.5) * 0.02;
   vec3 n = normalize(vec3(-g, 1.0));
 
-  // A big softbox up and to the left, and the white room around it.
+  // One big softbox up and to the left. Matte: wrapped diffuse and a broad
+  // falloff of the box across the table, no hot spot.
   vec3 L = normalize(vec3(-0.42, -0.58, 0.70));
-  float diff = clamp((dot(n, L) + 0.25) / 1.25, 0.0, 1.0);
-  float sky = 0.55 + 0.45 * n.z;
+  float diff = clamp((dot(n, L) + 0.3) / 1.3, 0.0, 1.0);
+  float sky = 0.6 + 0.4 * n.z;
   vec3 H = normalize(L + vec3(0.0, 0.0, 1.0));
-  float spec = pow(max(dot(n, H), 0.0), 9.0) * 0.075 + pow(max(dot(n, H), 0.0), 40.0) * 0.035;
+  vec2 sc = gl_FragCoord.xy / uView;
+  float box = smoothstep(1.6, 0.0, length((sc - vec2(0.05, 1.05)) * vec2(uView.x / uView.y, 1.0) * 0.9));
+  float spec = pow(max(dot(n, H), 0.0), 3.0) * 0.05 * (0.4 + 0.6 * box);
   float rim = pow(1.0 - n.z, 2.5);
+  // Thickness as tone: where the finger thins the rubber it sits lower and
+  // darker, where it piles up at the shoulders it stands proud and catches
+  // more of the box. On the flat face this is all the shading there is.
+  float th = T * P / uSlab;
+  float tone = th < 1.0 ? mix(0.56, 1.0, smoothstep(0.0, 1.0, th)) : 1.0 + 0.7 * min(th - 1.0, 0.3);
+  tone = mix(1.0, tone, smoothstep(0.6, 1.0, P / uSlab));
 
   vec2 uv = gl_FragCoord.xy / uView;
   vec4 s = texture(uSmall, uv);
@@ -113,8 +128,8 @@ void main(){
   float shadowed = clamp(otherL * 1.2, 0.0, 1.0) * 0.35 * (0.4 + 0.6 * low);
 
   vec3 alb = uAlbedo;
-  vec3 col = alb * (0.62 * diff + 0.48 * sky) * (1.0 - occ) * (1.0 - shadowed);
-  col += alb * rim * 0.12 * (1.0 - occ);
+  vec3 col = alb * (0.62 * diff + 0.44 * sky) * tone * (0.94 + 0.08 * box) * (1.0 - occ) * (1.0 - shadowed);
+  col += alb * rim * 0.06 * (1.0 - occ);
   col += vec3(1.0, 0.97, 0.93) * spec * (1.0 - occ * 0.8);
   col = pow(col, vec3(1.0 / 2.2));
   col += (hash(gl_FragCoord.xy) - 0.5) / 255.0;
@@ -372,22 +387,41 @@ export async function createRubber(host, { embedded = false, family = "sans-seri
 
   function updateMesh(m) {
     const { L, RX, RY, wx, wy, P, data } = m;
-    const px = sim.px, py = sim.py;
     const nx = m.nx, ny = m.ny;
+    // The lattice padded by one ring of phantom points continued linearly,
+    // so Catmull-Rom stays exactly linear in the border cells too (clamping
+    // there bends them, and the silhouette ripples at the lattice period).
+    const NX = nx + 2, NY = ny + 2;
+    const G = m.G || (m.G = new Float32Array(NX * NY * 3));
+    for (let r = 0; r < ny; r++)
+      for (let c = 0; c < nx; c++) {
+        const id = L.start + r * nx + c, o = ((r + 1) * NX + c + 1) * 3;
+        G[o] = sim.px[id]; G[o + 1] = sim.py[id]; G[o + 2] = thick[id];
+      }
+    for (let r = 1; r <= ny; r++)
+      for (let k = 0; k < 3; k++) {
+        const o = r * NX * 3;
+        G[o + k] = 2 * G[o + 3 + k] - G[o + 6 + k];
+        G[o + (NX - 1) * 3 + k] = 2 * G[o + (NX - 2) * 3 + k] - G[o + (NX - 3) * 3 + k];
+      }
+    for (let c = 0; c < NX; c++)
+      for (let k = 0; k < 3; k++) {
+        G[c * 3 + k] = 2 * G[(NX + c) * 3 + k] - G[(2 * NX + c) * 3 + k];
+        const t = (NY - 1) * NX + c;
+        G[t * 3 + k] = 2 * G[(t - NX) * 3 + k] - G[(t - 2 * NX) * 3 + k];
+      }
     for (let j = 0; j < RY; j++) {
       const { r, w: wv } = wy[j];
       for (let k = 0; k < RX; k++) {
         const { c, w: wu } = wx[k];
         let x = 0, y = 0, t = 0;
         for (let b = 0; b < 4; b++) {
-          const rr = Math.min(ny - 1, Math.max(0, r - 1 + b));
           const wb = wv[b];
-          const row = L.start + rr * nx;
+          const row = (r + b) * NX;
           for (let a = 0; a < 4; a++) {
-            const cc = Math.min(nx - 1, Math.max(0, c - 1 + a));
             const ww = wu[a] * wb;
-            const id = row + cc;
-            x += px[id] * ww; y += py[id] * ww; t += thick[id] * ww;
+            const id = (row + c + a) * 3;
+            x += G[id] * ww; y += G[id + 1] * ww; t += G[id + 2] * ww;
           }
         }
         const o = (j * RX + k) * 3;
@@ -502,15 +536,41 @@ export async function createRubber(host, { embedded = false, family = "sans-seri
       const w = L.inkR[r] - L.inkL[r];
       if (L.inkL[r] >= 0 && w > bestW && r > L.ny * 0.3 && r < L.ny * 0.75) { bestW = w; bestR = r; }
     }
-    const i = L.start + bestR * L.nx + Math.round(L.nx / 2);
+    // A finger lands on rubber, never in a counter. Pressing, it takes the
+    // ink nearest that middle; pulling, it pinches the ink edge it pulls from.
+    const ink = (c, r) => sampleField(m.g, m.lx0 + c * m.cxA, m.ly0 + r * m.cyA) > 0.035;
+    const mid = L.start + bestR * L.nx + Math.round(L.nx / 2);
+    const hl = Math.hypot(holdDx, holdDy);
+    let i = mid, best = -Infinity;
+    for (let r = Math.floor(L.ny * 0.25); r < L.ny * 0.8; r++)
+      for (let c = 0; c < L.nx; c++) {
+        if (!ink(c, r)) continue;
+        const j = L.start + r * L.nx + c;
+        const ox = sim.rx[j] - sim.rx[mid], oy = sim.ry[j] - sim.ry[mid];
+        const score = hl > 0 ? (ox * holdDx + oy * holdDy) / hl - 0.15 * Math.abs(r - bestR) * L.cy : -Math.hypot(ox, oy);
+        if (score > best) { best = score; i = j; }
+      }
     grabAt(m.i, sim.rx[i], sim.ry[i], sim.px[i], sim.py[i]);
     down = null; // held by the URL, not the pointer
     press = hold;
     pressTarget = hold;
     for (let k = 0; k < 90; k++) {
-      sim.setGrab(holdDx * em, holdDy * em, press * 0.7);
+      const [dx, dy, p] = holdPose(Math.min(1, k / 45));
+      sim.setGrab(dx, dy, p);
       sim.step(1 / 60);
     }
+  }
+  // The URL's pull, given as by hand: rubber gives less the further it goes,
+  // and a pulling finger presses less.
+  function holdPose(f = 1) {
+    let dx = holdDx * em * f, dy = holdDy * em * f;
+    const len = Math.hypot(dx, dy);
+    const lim = 0.42 * em;
+    if (len > 0) {
+      const k = (lim * Math.tanh(len / lim)) / len;
+      dx *= k; dy *= k;
+    }
+    return [dx, dy, hold * 0.7 * Math.exp(-len / (0.16 * em))];
   }
 
   // ---- frame ----
@@ -548,7 +608,7 @@ export async function createRubber(host, { embedded = false, family = "sans-seri
     gl.uniform1f(prog.u.uSlab, SLAB_EM);
     gl.uniform1f(prog.u.uParity, m.i % 2);
     const f = finger.li === m.i ? finger : null;
-    gl.uniform4f(prog.u.uFinger, f ? f.x : -1e4, f ? f.y : -1e4, 0.17 * em, f ? f.depth : 0);
+    gl.uniform4f(prog.u.uFinger, f ? f.x : -1e4, f ? f.y : -1e4, 0.145 * em, f ? f.depth : 0);
   };
 
   stage.onFrame((dt) => {
@@ -567,7 +627,7 @@ export async function createRubber(host, { embedded = false, family = "sans-seri
       const p2 = press * 0.7 * Math.exp(-len / (0.16 * em));
       sim.setGrab(dx, dy, p2);
     } else if (hold != null && sim.grabbing) {
-      sim.setGrab(holdDx * em, holdDy * em, hold * 0.7);
+      sim.setGrab(...holdPose());
     }
     // The simulation sleeps once everything is still; drawing does not, as
     // the stage may clear the canvas on any resize.

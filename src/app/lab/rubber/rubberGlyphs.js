@@ -6,6 +6,11 @@
 export const GLYPH_PX = 256;
 const PAD = 0.12; // em of field kept around the ink
 const INF = 1e20;
+// The raster is drawn and transformed at this many times the atlas scale,
+// then averaged down: coverage seeding is least exact where a curve runs
+// tangent to the pixel grid, and at 1x that leaves a nick at every extreme
+// of a bowl.
+const SS = 3;
 
 function edt1d(f, d, v, z, n) {
   v[0] = 0;
@@ -59,28 +64,21 @@ export function glyphField(ch, family, weight) {
   const pad = Math.ceil(PAD * S);
   const w = left + right + pad * 2;
   const h = asc + desc + pad * 2;
+  const W = w * SS, H = h * SS;
   const cv = document.createElement("canvas");
-  cv.width = w;
-  cv.height = h;
+  cv.width = W;
+  cv.height = H;
   const ctx = cv.getContext("2d", { willReadFrequently: true });
-  ctx.font = probe.font;
+  ctx.font = `${weight} ${S * SS}px ${family}`;
   ctx.fillStyle = "#000";
   ctx.textBaseline = "alphabetic";
   const ox = pad + left, oy = pad + asc;
-  ctx.fillText(ch, ox, oy);
-  const img = ctx.getImageData(0, 0, w, h).data;
+  ctx.fillText(ch, ox * SS, oy * SS);
+  const img = ctx.getImageData(0, 0, W, H).data;
 
-  const outer = new Float64Array(w * h), inner = new Float64Array(w * h);
-  let x0 = w, x1 = 0, y0 = h, y1 = 0;
-  for (let i = 0; i < w * h; i++) {
+  const outer = new Float64Array(W * H), inner = new Float64Array(W * H);
+  for (let i = 0; i < W * H; i++) {
     const a = img[i * 4 + 3] / 255;
-    if (a > 0.5) {
-      const x = i % w, y = (i / w) | 0;
-      if (x < x0) x0 = x;
-      if (x > x1) x1 = x;
-      if (y < y0) y0 = y;
-      if (y > y1) y1 = y;
-    }
     if (a >= 1) { outer[i] = 0; inner[i] = INF; }
     else if (a <= 0) { outer[i] = INF; inner[i] = 0; }
     else {
@@ -89,10 +87,29 @@ export function glyphField(ch, family, weight) {
       inner[i] = d < 0 ? d * d : 0;
     }
   }
-  edt(outer, w, h);
-  edt(inner, w, h);
+  edt(outer, W, H);
+  edt(inner, W, H);
+  // Down to atlas scale, each texel the mean of its SS x SS block.
   const field = new Float32Array(w * h);
-  for (let i = 0; i < w * h; i++) field[i] = (Math.sqrt(inner[i]) - Math.sqrt(outer[i])) / S;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++) {
+      let acc = 0;
+      for (let j = 0; j < SS; j++)
+        for (let k = 0; k < SS; k++) {
+          const i = (y * SS + j) * W + x * SS + k;
+          acc += Math.sqrt(inner[i]) - Math.sqrt(outer[i]);
+        }
+      field[y * w + x] = acc / (SS * SS * S * SS);
+    }
+  let x0 = w, x1 = 0, y0 = h, y1 = 0;
+  for (let y = 0; y < h; y++)
+    for (let x = 0; x < w; x++)
+      if (field[y * w + x] > 0) {
+        if (x < x0) x0 = x;
+        if (x > x1) x1 = x;
+        if (y < y0) y0 = y;
+        if (y > y1) y1 = y;
+      }
   // A raster EDT is faintly stepped; shading takes its slope, so smooth it.
   const tmp = new Float32Array(w * h);
   const K = [1, 4, 6, 4, 1].map((v) => v / 16);
