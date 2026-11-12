@@ -98,7 +98,7 @@ const DRESS_T = 0.3; // the share of the sun the sheer dress lets through to the
 const ADAPT = 0.7; // stops the exposure gives back with the disc in clear view
 const RIM = { 3: 0.9, 4: 1.0 }; // the dress and the black-and-white top catch the sun at the edge
 const EDGE_GLOW = 1; // every garment's clean edge, lit warm from the sun behind it
-const VS = 7; // floats per cloth vertex
+const VS = 10; // floats per cloth vertex
 const MU_MIN = 0.15; // the view cosine's floor: edge-on is dense, not opaque
 // The dress's belt tie, in photograph px: a strip cut square at its end, so
 // its matte is rounded there, or a flipped tie reads as a paper tab.
@@ -215,14 +215,17 @@ const CLOTH_V = `#version 300 es
 in vec2 aPos;
 in vec2 aRest;
 in vec3 aShade;
+in vec3 aStrain;
 uniform vec2 uSize;
 out vec2 vRest;
 out vec2 vPos;
 out vec3 vShade;
+out vec3 vStrain;
 void main() {
   vRest = aRest;
   vPos = aPos;
   vShade = aShade;
+  vStrain = aStrain;
   gl_Position = vec4(aPos.x / uSize.x * 2.0 - 1.0, 1.0 - aPos.y / uSize.y * 2.0, 0.0, 1.0);
 }`;
 
@@ -231,6 +234,7 @@ precision highp float;
 in vec2 vRest;
 in vec2 vPos;
 in vec3 vShade; // light, how far from rest, view cosine against the photograph's
+in vec3 vStrain; // J^T J of the photograph-to-frame map: xx, xy, yy (1, 0, 1 at rest)
 out vec4 o;
 uniform sampler2D uLayers;
 uniform sampler2D uIds;
@@ -261,6 +265,47 @@ vec3 fabric(vec3 f, vec3 B, vec3 dye, float k) {
   vec3 W = vec3(0.2126, 0.7152, 0.0722);
   vec3 fh = mix(f, dye * dot(f, W) / max(dot(dye, W), 1e-4), 1.0 - 1.0 / th);
   return (fh * pow(dye, vec3(0.8 * (th - 1.0))) + t * B) * (1.0 - 0.4 * (1.0 - 1.0 / th)) + 0.35 * (uTau - t) * B;
+}
+// Folds, per pixel. The cloth grid is coarse (a cell is 30 px of the
+// photograph), and its own normals light it smoothly across a cell: a skirt
+// gathered by the wind would read as its print squeezed. So the gradient of
+// the drawn displacement (J = I + dD/drest, smoothed per vertex, as its
+// metric J^T J) says where the cloth is drawn in, along which axis, and by
+// how much; the length it has lost there has gone into folds across that
+// axis, at the scale of fabric (FOLD px of the photograph), and their slope
+// is what shades them. They meander along their length, and they are only
+// there where the cloth has moved. Returns the folds' slope (signed), its
+// amplitude, how deep in a trough this pixel is, and the slope's lean
+// toward the sun (sd, the frame's direction to it).
+const float FOLD = 34.0;
+float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float vnoise(vec2 p) {
+  vec2 i = floor(p), f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(hash(i), hash(i + vec2(1, 0)), f.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), f.x), f.y);
+}
+vec4 folds(vec2 r, vec2 sd) {
+  float a = vStrain.x, b = vStrain.y, c = vStrain.z;
+  float h = 0.5 * (a + c), q = sqrt(max(0.25 * (a - c) * (a - c) + b * b, 0.0));
+  float lmin = max(h - q, 1e-4);
+  // the axis it is drawn in along, in the photograph, with a fixed sign;
+  // drawn in about evenly, the axis means nothing, and the folds hang
+  // (across X) as cloth's do
+  vec2 e = abs(b) > 1e-5 ? normalize(vec2(b, lmin - a)) : (a < c ? vec2(1.0, 0.0) : vec2(0.0, 1.0));
+  if (e.x + 0.4 * e.y < 0.0) e = -e;
+  e = normalize(mix(vec2(1.0, 0.0), e, smoothstep(0.06, 0.3, q / max(h, 1e-4))));
+  // turning edge-on to the lens draws the cloth in too, without folding it:
+  // the view cosine (against the photograph's) accounts for that much
+  float s = sqrt(lmin) / clamp(vShade.z, 0.3, 1.0);
+  float amt = smoothstep(0.97, 0.75, s) * vShade.y;
+  if (amt < 0.002) return vec4(0.0);
+  vec2 along = vec2(-e.y, e.x);
+  float wob = vnoise(vec2(dot(r, along) / 110.0, dot(r, e) / 140.0)) + 0.35 * vnoise(vec2(dot(r, along) / 55.0, dot(r, e) / 80.0) + 7.3);
+  float ph = 6.2832 * (dot(r, e) / FOLD + 0.55 * wob);
+  // the slope a sinusoid needs to take up 1/s of length in 1
+  float m = min(2.2 * sqrt(max(1.0 / s - 1.0, 0.0)), 1.5) * amt;
+  float g = m * cos(ph);
+  return vec4(g, m, 0.5 - 0.5 * sin(ph), g * dot(e, sd));
 }
 // The matte's mean over a disc; cut at a half, its corners are rounded. A
 // straight edge stays where it is; a corner, where less than half the disc
@@ -320,9 +365,16 @@ void main() {
   // single layer has in the photograph and dimmed a little, and a share of
   // the sky it no longer lets straight through comes out diffused. A billow
   // turned edge-on goes denser, darker and a deeper rose, not paler.
-  float k = 1.0 / max(vShade.z * edge, ${MU_MIN.toFixed(2)});
+  // a fold's flanks are seen at a slant, and turn to the sun or from it
+  vec4 fd = folds(s, normalize(uSun - vPos + vec2(1e-3)));
+  float lean = fd.w;
+  float k = sqrt(1.0 + fd.x * fd.x) / max(vShade.z * edge, ${MU_MIN.toFixed(2)});
   bool sheer = uTau.b > 0.0;
-  vec3 f = L.rgb * vShade.x;
+  // opaque cloth: the flank toward the sun lit through, the trough shaded;
+  // sheer cloth mostly thickens on the flanks (above), and dims a little in
+  // the trough
+  float shade = sheer ? 1.0 - 0.22 * fd.y * fd.z + 0.12 * lean : 1.0 - 0.34 * fd.y * fd.z + 0.22 * lean;
+  vec3 f = L.rgb * vShade.x * max(shade, 0.4);
   vec3 dye = vec3(1.0);
   if (sheer) {
     L.a = 1.0 - pow(1.0 - L.a, max(k, 1.0));
@@ -504,12 +556,26 @@ export async function createSentaku(host, { embedded = false } = {}) {
   };
   cloth.settle(2.5);
   const { N, rest, x, x0, nrm, nrm0, mu, mu0, gid, garments } = cloth;
+  // each vertex's grid neighbours (left, right, up, down; itself where the
+  // cloth ends), for the drawn map's gradient
+  const nbr = new Int32Array(N * 4);
+  for (const gm of garments) {
+    const { nx, ny, vid } = gm.plan;
+    const at = (i, j) => (i < 0 || j < 0 || i > nx || j > ny ? -1 : vid[j * (nx + 1) + i]);
+    for (let j = 0; j <= ny; j++)
+      for (let i = 0; i <= nx; i++) {
+        const k = at(i, j);
+        if (k < 0) continue;
+        const n4 = [at(i - 1, j), at(i + 1, j), at(i, j - 1), at(i, j + 1)];
+        for (let m = 0; m < 4; m++) nbr[k * 4 + m] = n4[m] < 0 ? k : n4[m];
+      }
+  }
   const ropeY = (u) => meta.rope.poly[0] * u * u + meta.rope.poly[1] * u + meta.rope.poly[2];
 
   // ---- GL
   const plateP = compile(gl, VERT_FULL, PLATE_F, ["aPos"]);
   const blitP = compile(gl, VERT_FULL, BLIT_F, ["aPos"]);
-  const clothP = compile(gl, CLOTH_V, CLOTH_F, ["aPos", "aRest", "aShade"]);
+  const clothP = compile(gl, CLOTH_V, CLOTH_F, ["aPos", "aRest", "aShade", "aStrain"]);
   const quad = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quad);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
@@ -531,6 +597,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
     vdata[k * VS + 4] = 1;
     vdata[k * VS + 5] = 0;
     vdata[k * VS + 6] = 1;
+    vdata[k * VS + 7] = 1;
+    vdata[k * VS + 9] = 1;
   }
   const ropeRest = [];
   for (let i = 0; i < ropeN; i++) {
@@ -546,6 +614,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
       vdata[k * VS + 4] = 1;
       vdata[k * VS + 5] = 0;
       vdata[k * VS + 6] = 1;
+      vdata[k * VS + 7] = 1;
+      vdata[k * VS + 9] = 1;
       ropeRest.push(u);
     }
   }
@@ -579,6 +649,8 @@ export async function createSentaku(host, { embedded = false } = {}) {
     gl.enableVertexAttribArray(i);
     gl.vertexAttribPointer(i, i < 2 ? 2 : 3, gl.FLOAT, false, VS * 4, i * 8);
   }
+  gl.enableVertexAttribArray(3);
+  gl.vertexAttribPointer(3, 3, gl.FLOAT, false, VS * 4, 7 * 4);
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ibuf);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint32Array(idx), gl.STATIC_DRAW);
   gl.bindVertexArray(null);
@@ -740,6 +812,23 @@ export async function createSentaku(host, { embedded = false } = {}) {
       // how far it has moved from the photograph, 0 at rest and 1 by 6 cm
       vdata[k * VS + 5] = Math.min(1, Math.hypot(x[i] - x0[i], x[i + 1] - x0[i + 1], x[i + 2] - x0[i + 2]) / 0.06);
       vdata[k * VS + 6] = Math.min(1.18, 1 / Math.max(0.05, mu0[k]), mu[k] / Math.max(0.05, mu0[k]));
+    }
+    // the gradient of the drawn map at each vertex, as its metric J^T J
+    for (let k = 0; k < N; k++) {
+      const [l, r, u, d] = [nbr[k * 4], nbr[k * 4 + 1], nbr[k * 4 + 2], nbr[k * 4 + 3]];
+      const du = rest[r * 2] - rest[l * 2], dv = rest[d * 2 + 1] - rest[u * 2 + 1];
+      let jx0 = 1, jx1 = 0, jy0 = 0, jy1 = 1;
+      if (du > 0) {
+        jx0 = (vdata[r * VS] - vdata[l * VS]) / du;
+        jx1 = (vdata[r * VS + 1] - vdata[l * VS + 1]) / du;
+      }
+      if (dv > 0) {
+        jy0 = (vdata[d * VS] - vdata[u * VS]) / dv;
+        jy1 = (vdata[d * VS + 1] - vdata[u * VS + 1]) / dv;
+      }
+      vdata[k * VS + 7] = jx0 * jx0 + jx1 * jx1;
+      vdata[k * VS + 8] = jx0 * jy0 + jx1 * jy1;
+      vdata[k * VS + 9] = jy0 * jy0 + jy1 * jy1;
     }
     for (let i = 0; i < ropeN * 2; i++) {
       const k = N + i;

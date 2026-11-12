@@ -50,8 +50,18 @@ const BEND4 = 4e-4; // and across four
 const STIFF = { bw: 0.08 };
 // How far a garment may yaw (turn about the vertical, edge-on to the lens)
 // before its own width resists: past this the projection pulls it back. The
-// narrow top, pegged at one corner, would otherwise spin edge-on to a sliver.
-const YAW_MAX = { bw: 0.45, other: 0.75 }; // rad
+// narrow top, pegged at one corner, would otherwise spin edge-on to a sliver,
+// and a gust turning the whole dress past this wrings it into a tube.
+const YAW_MAX = { bw: 0.45, dress: 0.32, other: 0.42 }; // rad
+// Across. A garment is cloth with air in it, not a printed sheet twisted
+// about its long axis: seen from the lens, each row can open out (billow)
+// but never draws in below ACROSS of its width in the photograph. One-sided
+// links along every row, between neighbours and across two cells, push a
+// pair back apart, along the line the lens sees between them, wherever its
+// projected length (perspective and the slant of the view included) would
+// close past that. A row may still swing round in the frame; it may not be
+// wrung edge-on.
+const ACROSS = 0.86;
 // Billow. A skirt is not a flat sheet: the photograph shows it gathered into
 // folds, a cone pressed flat. A gust fills it, and filled it opens. Each
 // garment's lower part (from about its waist to its hem, not its narrow ties)
@@ -64,10 +74,34 @@ const YAW_MAX = { bw: 0.45, other: 0.75 }; // rad
 // so the cloth between them has to arc out of the plane to fit.
 // The air caught inside pushes the middle of the skirt out more than its
 // edges (BELLY, in g at the hem), so it bellies and its sides curl back.
+// And it holds the skirt open as the gust carries it away from the lens:
+// the opening grows with the skirt's mean distance (A.far, against the
+// photograph's), so a filled skirt carried off does not shrink into a tube
+// in perspective while it swings toward square-on and lengthens.
 const BILLOW = { dress: 1, red: 0.3, floral: 0.4, bw: 0.4 }; // how full each garment is
-const FLARE = 0.3;
-const EXCESS = 1.7;
-const BELLY = 0.9;
+const FLARE = 0.25;
+const EXCESS = 1.3;
+const BELLY = 0.45;
+// The air caught in a skirt is a pressure, not a push: it acts along each
+// triangle's normal, out toward the lens, in proportion to how much air the
+// garment holds and how deep into its skirt the triangle is (its belly most,
+// its fill some). Flat, it bellies the middle out; once curved, the normals
+// at the sides turn outward and the same pressure spreads it across, so a
+// filled skirt widens as it streams downwind instead of being wrung narrow.
+// PRESS is in g on the cloth's own weight at full fill.
+const PRESS = 3;
+const SPREAD = 0.6; // and a share pushed downwind along the skirt's width
+// The free side edge downwind is the least held part of a garment, and the
+// air peeling off it sheds eddies down it: it flutters and curls while the
+// rest leans. A travelling wave of pressure along the edge's normal, with a
+// bias that rolls it toward the lens, strongest at the hem's corner and
+// with the air across it, rolling it in. Across its two outermost cells the
+// row may close further (EDGE_ACROSS), as a rolled edge does.
+const FLUTTER = 6; // in g, at the hem's corner in a full gust
+const FLUTTER_L = 0.26; // m, the wave's length down the edge
+const FLUTTER_F = 1.7; // Hz
+const EDGE_ACROSS = 0.6;
+const EDGE_SOFT = 10;
 const WAIST = { dress: 0.36, other: 0.22 }; // share of the hang above where it opens
 const FILL = [0.3, 0.9]; // s for the air to fill a skirt, and to leave it
 
@@ -81,6 +115,8 @@ export function project(u0, v0, dx, dy, dz, cu, cv, out, o) {
   out[o] = cu + (u1 - cu) * k;
   out[o + 1] = cv + (v1 - cv) * k;
 }
+
+const LENS = [0, -LOOK[0], -LOOK[1]]; // from the cloth toward the lens
 
 export function createCloth(meta, { density = 0.32 } = {}) {
   const { cell: CELL, rope } = meta;
@@ -140,6 +176,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   const nrm0 = new Float32Array(N * 3);
   const gid = new Uint8Array(N);
   const cons = []; // [a, b, rest, compliance]
+  const across = []; // [a, b]: b right of a on the same row
   const tris = []; // [a, b, c, area * coverage]
 
   for (const pl of plans) {
@@ -200,6 +237,11 @@ export function createCloth(meta, { density = 0.32 } = {}) {
         if (cellOn(i, j) && cellOn(i, j + 1)) add(at(i, j), at(i, j + 2), bend);
         if (stiff < 1 && cellOn(i, j) && cellOn(i + 1, j + 1)) add(at(i, j), at(i + 2, j + 2), bend);
         if (stiff < 1 && cellOn(i + 1, j) && cellOn(i, j + 1)) add(at(i + 2, j), at(i, j + 2), bend);
+        // across: one-sided, along the row, to the next vertex and across two
+        if (!pom && (cellOn(i, j) || cellOn(i, j - 1))) {
+          if (at(i, j) >= 0 && at(i + 1, j) >= 0) across.push(at(i, j), at(i + 1, j));
+          if ((cellOn(i + 1, j) || cellOn(i + 1, j - 1)) && at(i, j) >= 0 && at(i + 2, j) >= 0) across.push(at(i, j), at(i + 2, j));
+        }
         // and across four, so folds come at the scale of fabric, not of the grid
         if (cellOn(i, j) && cellOn(i + 1, j) && cellOn(i + 2, j) && cellOn(i + 3, j)) add(at(i, j), at(i + 4, j), bend4);
         if (cellOn(i, j) && cellOn(i, j + 1) && cellOn(i, j + 2) && cellOn(i, j + 3)) add(at(i, j), at(i, j + 4), bend4);
@@ -322,6 +364,74 @@ export function createCloth(meta, { density = 0.32 } = {}) {
     }
   };
 
+  // the side edges: each row's three outermost free vertices on either side
+  // (fully, 0.6, 0.3), which side, and how far down the garment they are
+  const edgeW = new Float32Array(N);
+  const edgeS = new Int8Array(N);
+  const edgeO = new Uint8Array(N); // the outermost
+  for (const gm of garments) {
+    if (gm.name === "pom") continue;
+    const rows = new Map();
+    for (let k = 0; k < N; k++) {
+      if (gid[k] !== gm.id) continue;
+      const r = Math.round(rest[k * 2 + 1]);
+      if (!rows.has(r)) rows.set(r, []);
+      rows.get(r).push(k);
+    }
+    const ys = [...rows.keys()];
+    const top = Math.min(...ys), bot = Math.max(...ys);
+    for (const [r, ks] of rows) {
+      if (ks.length < 6) continue;
+      // nothing at the pegs, all of it from about two thirds of the way down
+      const dn = Math.min(1, Math.max(0, ((r - top) / Math.max(1, bot - top) - 0.15) / 0.5));
+      const down = dn * dn * (3 - 2 * dn);
+      ks.sort((a, b) => xr[a * 3] - xr[b * 3]);
+      for (const [k, wgt, side] of [[ks[0], 1, -1], [ks[1], 0.6, -1], [ks[2], 0.3, -1], [ks.at(-1), 1, 1], [ks.at(-2), 0.6, 1], [ks.at(-3), 0.3, 1]]) {
+        if (w[k] === 0) continue;
+        edgeW[k] = wgt * down;
+        edgeS[k] = side;
+        edgeO[k] = wgt > 0.5 ? 1 : 0;
+      }
+    }
+  }
+  // and the edge bends easily: its bending links (not its stretch or shear)
+  // are let go EDGE_SOFT times, so it can roll rather than flap as a board
+  for (let c = 0; c < cons.length; c++) {
+    const a = C[c * 4] | 0, b = C[c * 4 + 1] | 0;
+    if (C[c * 4 + 3] >= 1e-5 && (edgeO[a] || edgeO[b]) && edgeW[a] + edgeW[b] > 0) C[c * 4 + 3] *= EDGE_SOFT;
+  }
+  const AC = Int32Array.from(across);
+  // rest length along the row, image px, for each across pair
+  const ACr = Float32Array.from({ length: AC.length / 2 }, (_, n) => Math.abs(rest[AC[2 * n + 1] * 2] - rest[AC[2 * n] * 2]));
+  const SY = SZ / PX;
+  const openRows = () => {
+    for (let n = 0; n < AC.length; n += 2) {
+      const a = AC[n], b = AC[n + 1];
+      const wa = w[a], wb = w[b];
+      if (wa + wb === 0) continue;
+      const ia = a * 3, ib = b * 3;
+      // the pair as the lens sees it now: X across, and Y and Z both read
+      // as down the frame; the photograph's offsets are the rest
+      const depth = 0.5 * (CZ * (p[ia + 2] - x0[ia + 2] + p[ib + 2] - x0[ib + 2]) + CY * (p[ia + 1] - x0[ia + 1] + p[ib + 1] - x0[ib + 1]));
+      const kp = DIST / (DIST + Math.max(-0.3 * DIST, depth));
+      const sx = kp * (rest[b * 2] - rest[a * 2] + PX * (p[ib] - x0[ib] - p[ia] + x0[ia]));
+      const sy = kp * (rest[b * 2 + 1] - rest[a * 2 + 1] + PX * (-(p[ib + 1] - x0[ib + 1] - p[ia + 1] + x0[ia + 1]) + SY * (p[ib + 2] - x0[ib + 2] - p[ia + 2] + x0[ia + 2])));
+      const d = Math.hypot(sx, sy);
+      // the two outermost columns of either side may roll in further
+      const rolled = (edgeO[a] && edgeS[a] < 0) || (edgeO[b] && edgeS[b] > 0);
+      const need = (rolled ? EDGE_ACROSS : ACROSS) * ACr[n >> 1];
+      if (d >= need) continue;
+      // push b from a along the seen direction (or straight across if the
+      // pair has closed to a point), in world units
+      const ux = d > 1e-3 ? sx / d : 1, uy = d > 1e-3 ? sy / d : 0;
+      const gx = kp * PX * ux, gy = -kp * PX * uy, gz = kp * PX * SY * uy;
+      const g2 = gx * gx + gy * gy + gz * gz;
+      const c = (need - d) / ((wa + wb) * g2);
+      p[ia] -= c * wa * gx; p[ia + 1] -= c * wa * gy; p[ia + 2] -= c * wa * gz;
+      p[ib] += c * wb * gx; p[ib + 1] += c * wb * gy; p[ib + 2] += c * wb * gz;
+    }
+  };
+
   // ---- billow: per garment, how far down each vertex is into its skirt
   // (0 above the waist, 1 at the hem), its place across it (-1..1), and the
   // middle it opens about
@@ -329,7 +439,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   const belly = new Float32Array(N); // the same, most in the middle across
   const mid = new Float32Array(N); // the garment's middle, world X
   const gIndex = new Uint8Array(N);
-  const air = garments.map(() => ({ now: 0, dir: [0, 0, 1] }));
+  const air = garments.map(() => ({ now: 0, dir: [0, 0, 1], far: 1 }));
   garments.forEach((gm, gi) => {
     const amt = BILLOW[gm.name] ?? 0;
     const ks = [];
@@ -383,6 +493,16 @@ export function createCloth(meta, { density = 0.32 } = {}) {
     loose.push(c, dx, dy, f * ex);
   }
   const L = Float32Array.from(loose);
+  // each triangle's share of the skirt's pressure, and which side of the
+  // garment's middle it hangs (for the downwind spread)
+  const triP = new Float32Array(nT);
+  const triSide = new Float32Array(nT);
+  for (let t = 0; t < nT; t++) {
+    const a = T[t * 4] | 0, b = T[t * 4 + 1] | 0, c = T[t * 4 + 2] | 0;
+    triP[t] = (0.7 * (belly[a] + belly[b] + belly[c]) + 0.3 * (fill[a] + fill[b] + fill[c])) / 3;
+    const cx = (xr[a * 3] + xr[b * 3] + xr[c * 3]) / 3;
+    triSide[t] = triP[t] ? cx - mid[a] : 0;
+  }
   // the air in each garment rises with the wind on it and leaves more slowly
   const fillAir = (dt) => {
     const sum = garments.map(() => [0, 0, 0, 0]);
@@ -408,10 +528,25 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       const dl = Math.hypot(...A.dir);
       A.dir = A.dir.map((q) => q / dl);
     });
+    // how far the filled skirt has been carried from the lens: in
+    // perspective that would shrink it, though it is opening
+    const dep = garments.map(() => [0, 0]);
+    for (let k = 0; k < N; k++) {
+      if (!fill[k]) continue;
+      const i = k * 3;
+      const d = dep[gIndex[k]];
+      d[0] += fill[k] * (CZ * (x[i + 2] - x0[i + 2]) + CY * (x[i + 1] - x0[i + 1]));
+      d[1] += fill[k];
+    }
+    air.forEach((A, gi) => {
+      const [sd, sw] = dep[gi];
+      A.far = sw ? Math.min(1.35, (DIST + Math.max(0, sd / sw)) / DIST) : 1;
+    });
     for (let n = 0; n < L.length; n += 4) {
       const c = L[n] | 0;
-      const g = air[gIndex[C[c * 4] | 0]].now;
-      C[c * 4 + 2] = Math.hypot(L[n + 1] * (1 + FLARE * g * L[n + 3]), L[n + 2]);
+      const A = air[gIndex[C[c * 4] | 0]];
+      const f = L[n + 3];
+      C[c * 4 + 2] = Math.hypot(L[n + 1] * (1 + FLARE * A.now * f) * (1 + (A.far - 1) * A.now * Math.min(1, f)), L[n + 2]);
     }
   };
 
@@ -421,7 +556,8 @@ export function createCloth(meta, { density = 0.32 } = {}) {
   const followLine = () => {
     for (let k = 0; k < N; k++) {
       ropeDisp(nearS[k], tmp);
-      const open = fill[k] ? 1 + FLARE * air[gIndex[k]].now * fill[k] : 1;
+      const A = air[gIndex[k]];
+      const open = fill[k] ? (1 + FLARE * A.now * fill[k]) * (1 + (A.far - 1) * A.now * fill[k]) : 1;
       xt[k * 3] = mid[k] + (xr[k * 3] - mid[k]) * open + tmp[0];
       xt[k * 3 + 1] = xr[k * 3 + 1] + tmp[1];
       xt[k * 3 + 2] = xr[k * 3 + 2] + tmp[2];
@@ -430,7 +566,9 @@ export function createCloth(meta, { density = 0.32 } = {}) {
 
   // ---- one substep
   const lambdaFree = true;
+  let clock = 0;
   const substep = (dt, windAt) => {
+    clock += dt;
     // forces: gravity + wind pressure on triangles
     const fx = p; // reuse p as force accumulator before prediction
     fx.fill(0);
@@ -452,14 +590,29 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       const tx = rx - vn * nx, ty = ry - vn * ny, tz = rz - vn * nz;
       const tl = Math.hypot(tx, ty, tz);
       const ft = q * CT * tl;
-      const Fx = (fn * nx + ft * tx) / 3, Fy = (fn * ny + ft * ty) / 3, Fz = (fn * nz + ft * tz) / 3;
+      let Fx = (fn * nx + ft * tx) / 3, Fy = (fn * ny + ft * ty) / 3, Fz = (fn * nz + ft * tz) / 3;
+      // the wind's load reaches the line; the air inside pushes on the
+      // cloth all round and does not
+      FZ += 3 * Fz;
+      FY += 3 * Fy;
+      const s = (ax * PX - ROPE.left) / (ROPE.right - ROPE.left);
+      FZ2 += 3 * Fz * Math.sin(2 * Math.PI * s);
+      if (triP[t]) {
+        // the air inside: a pressure along the normal, out toward the lens
+        const A = air[gIndex[a]];
+        const P = (PRESS * G * density * area * triP[t] * A.now) / 3;
+        const sgn = ny * LENS[1] + nz * LENS[2] < 0 ? -P : P;
+        // the skirt streams downwind and fills on that side: its downwind
+        // half is pushed out that way, its upwind half follows it, half as
+        // hard, so it widens downwind rather than out over both sides
+        const dw = SPREAD * A.dir[0] * P * (A.dir[0] * triSide[t] > 0 ? 1 : 0.5);
+        Fx += sgn * nx + dw;
+        Fy += sgn * ny;
+        Fz += sgn * nz;
+      }
       fx[a * 3] += Fx; fx[a * 3 + 1] += Fy; fx[a * 3 + 2] += Fz;
       fx[b * 3] += Fx; fx[b * 3 + 1] += Fy; fx[b * 3 + 2] += Fz;
       fx[c * 3] += Fx; fx[c * 3 + 1] += Fy; fx[c * 3 + 2] += Fz;
-      FZ += 3 * Fz;
-      FY += 3 * Fy;
-      const s = ((ax * PX - ROPE.left) / (ROPE.right - ROPE.left));
-      FZ2 += 3 * Fz * Math.sin(2 * Math.PI * s);
     }
     line.fz = FZ; line.fz2 = FZ2; line.fy = FY;
     // the line: a damped pendulum about its chord, toward atan(load)
@@ -483,10 +636,23 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       const kk = K[k];
       // the air caught in the skirt, pushing its middle out along the wind
       let bx = 0, by = 0, bz = 0;
+      if (edgeW[k]) {
+        // the downwind edge's flutter, along its normal and in and out
+        const A = air[gIndex[k]];
+        const across = edgeS[k] * A.dir[0];
+        if (across > 0.05) {
+          const amp = FLUTTER * G * edgeW[k] * Math.min(1, across * 1.6) * (0.25 + 0.75 * A.now);
+          const ph = 2 * Math.PI * (-xr[i + 1] / FLUTTER_L - FLUTTER_F * clock);
+          const sn = Math.sin(ph) + 0.45;
+          bx += amp * (sn * nrm[i] + edgeS[k] * (0.7 * Math.cos(ph) - 0.45));
+          by += amp * sn * nrm[i + 1];
+          bz += amp * sn * nrm[i + 2];
+        }
+      }
       if (belly[k]) {
         const A = air[gIndex[k]];
         const bg = BELLY * G * belly[k] * A.now;
-        bx = bg * A.dir[0]; by = bg * A.dir[1]; bz = bg * A.dir[2];
+        bx += bg * A.dir[0]; by += bg * A.dir[1]; bz += bg * A.dir[2];
       }
       v[i] = (v[i] + (fx[i] * w[k] + bx + kk * (xt[i] - x[i])) * dt) * damp;
       v[i + 1] = (v[i + 1] + (fx[i + 1] * w[k] + by + kk * (xt[i + 1] - x[i + 1])) * dt) * damp;
@@ -512,6 +678,7 @@ export function createCloth(meta, { density = 0.32 } = {}) {
       p[ib] -= gx * wb; p[ib + 1] -= gy * wb; p[ib + 2] -= gz * wb;
     }
     limitYaw();
+    openRows();
     const idt = 1 / dt;
     for (let k = 0; k < N * 3; k++) {
       v[k] = (p[k] - x[k]) * idt;
