@@ -38,20 +38,21 @@ import { GW, GH, CELL, MW, MH, DW, DH, BANDS, PARTS, F_LIFT, F_GLINT, F_BLOWN, d
 // layer of the stack, cut into its own rows (mostly hairlines, now and then a
 // chunky block, sortCore's ROWS). Each row is an opaque, hard-edged strip
 // from the stack's inner edge, both ends stepped right as the square of its
-// height (sortCore's stackLeft and stackRight), tiled end to end from the sorted runs of
-// several verge bands: a woven sheet, no sky between rows. No outline is
+// height (sortCore's stackLeft and stackRight), carrying one long sorted run
+// of a single verge band stretched to its whole length: a woven sheet, no
+// sky between rows. No outline is
 // drawn; a row ends where its last whole run ends, so the outer edge is
 // ragged and the sort's own. The stack leans over as it climbs, the crest's
 // rows run on over the top, and below them the lip hangs free, curling back
 // in over a hollow of open sky. Poles and signs stand in front of it (a holdout from the depth
 // map and the photo).
 //
-// Each row is one luminance ramp, inner edge to outer edge, lit by the sort
-// order: its facing (low under the lean, high at the crest) picks the
-// stretch of the runs it reads, and each tile rides that ramp with a short
-// ramp of its own, so its seams stay hard. Low rows read only the dark
-// green heads; across the upper third the rows read on into the tails, and
-// each row's tail lands at its end as a white-gold block (the tall rows
+// Each row is one unbroken luminance ramp, inner edge to outer edge, lit by
+// the sort order: its facing (low under the lean, high at the crest) picks the
+// stretch of its run it reads, and its own hashed offset slides that stretch
+// darker or brighter, so a dark row often lies against a bright one. Low rows
+// read mostly the dark green heads; across the upper third the rows read on
+// into the tails, and each row's tail lands at its end as a white-gold block (the tall rows
 // there blow out whole, the spine). Glint tiles break off the crest's ends. A run's few grey, beige
 // or blue pixels (road, wall, sky) are graded onto the green ramp by their
 // luminance, so the sheet stays one green. The stack climbs as the mask over
@@ -124,7 +125,7 @@ precision highp int;
 precision highp usampler2D;
 uniform usampler2D uState;
 uniform usampler2D uGeo;    // in place, per (x, band): source x + 1 (0 = not sorted here), source band
-uniform usampler2D uStripe; // per grid row, per tile: (x0, x1, source band + 1, flags), (run x0, run x1, facing, vegetation share), (row x0, row x1, tile ramp depth, 0)
+uniform usampler2D uStripe; // per grid row, per tile: (x0, x1, source band + 1, flags), (run x0, run x1, facing, vegetation share), (row x0, row x1, row offset into the sort order, blow-out)
 uniform usampler2D uBand;   // row 0: band of each grid row; row 1: centre row of each band
 uniform usampler2D uHold;   // 255 where a pole or a sign stands in front of the stack
 uniform sampler2D uFilm;    // the developed print, print-sized, GL orientation
@@ -151,6 +152,7 @@ void main() {
   float blow = 0.0;
   float f = 0.0;
   float pr = 0.0;
+  float sh = 0.0;
   int band = int(texelFetch(uBand, ivec2(g.y, 0), 0).r);
   bool held = texelFetch(uHold, g, 0).r > 0u;
   for (int k = 0; k < ${PARTS}; k++) {
@@ -166,17 +168,20 @@ void main() {
     float vf = clamp(float(b.a) / 65535.0, 0.35, 1.0);
     glint = (fl & ${F_GLINT}u) != 0u;
     blow = (fl & ${F_BLOWN}u) != 0u ? float(c.a) / 65535.0 : 0.0;
-    // The row is one ramp, inner edge to outer edge, tiled from several
-    // runs end to end. Its facing picks the stretch it reads: low and tucked,
-    // the dark green heads; at the crest, on out past the grass into the
-    // brightest tails. Each tile rides that ramp with a short ramp of its
-    // own (depth w), so it reads as its own sorted block with a hard seam.
+    // The row is one span: a single long sorted run stretched over the row
+    // from its inner edge to its outer end, one unbroken ramp. Its facing
+    // picks the stretch it reads: low and tucked, the dark green heads; at
+    // the crest, on out past the grass into the brightest tails. The row's
+    // own offset (sh) slides that stretch along the sort order, darker or
+    // brighter, so neighbouring rows differ.
     float sr = (float(g.x - int(c.r)) + 0.5) / float(c.g - c.r);
     float st = (float(g.x - int(a.r)) + 0.5) / float(a.g - a.r);
-    float w = float(c.b) / 65535.0;
+    sh = float(c.b) / 65535.0 * 2.0 - 1.0;
     float lo = 0.42 * pow(f, 1.6) * vf;
     float hi = mix(0.62 * vf, vf, smoothstep(0.0, 0.55, f)) + (1.0 - vf) * smoothstep(0.4, 0.85, f);
-    pr = glint ? 0.985 + 0.015 * st : mix(lo, hi, sr) * (1.0 - w * (1.0 - st));
+    lo = clamp(lo + 0.42 * sh, 0.0, 0.8);
+    hi = clamp(hi + 0.36 * sh, lo + 0.22, 1.0);
+    pr = glint ? 0.985 + 0.015 * st : mix(lo, hi, sr);
     // An end block reads the very tail of its run, brightest pixels last.
     if (blow > 0.0) pr = mix(0.86, 1.0, st);
     float len = float(b.g - b.r);
@@ -204,7 +209,8 @@ void main() {
       col = mix(col, ramp, (1.0 - gr) * 0.85);
       // Turned away from the light (under the lean, inside the hollow, the
       // lip turning under) the sheet falls into shade: a dark band.
-      col *= mix(0.4, 1.0, smoothstep(0.0, 0.42, f));
+      // Each row is turned a little its own way: its offset tips it too.
+      col *= mix(0.4, 1.0, smoothstep(0.0, 0.42, f + 0.24 * sh));
       // Turned to the sky at the crest, the run's brightest tail blooms
       // white-gold; a glint is that pixel broken off.
       vec3 gold = mix(vec3(0.98, 0.80, 0.36), vec3(1.0, 0.96, 0.80), smoothstep(0.3, 0.75, y));

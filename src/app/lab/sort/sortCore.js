@@ -498,9 +498,9 @@ export function restSort(base, link, state = new Uint16Array(DW * DH)) {
 // The verge's bands are sorted in place (each long run slid a hashed way to
 // the right where it has been lifted, so the photo shows where its pixels
 // left). Above the verge the stack is cut into ROWS, and a lifted row is an
-// opaque straight strip from stackLeft(t), tiled end to end from the sorted
-// runs of several verge bands, each read from its dark green head towards
-// its brightest tail. There is no drawn outline: a row is given only a reach
+// opaque straight strip from stackLeft(t), one long sorted run of a single
+// verge band stretched over its whole length, read from its dark green head
+// towards its brightest tail, each row at its own offset into the sort order. There is no drawn outline: a row is given only a reach
 // (how far the brush lets it run), and it ends where its last whole run
 // ends, so the outer edge is ragged row by row and is the sort's own. Over
 // the top the crest's rows run on out to the lip's reach, and below them the
@@ -525,7 +525,7 @@ const SRC_X1 = ROOT_X1 + 240;
 // Each grid row holds up to PARTS tiles, three RGBA16UI texels each, in a
 // texture GH wide and 3 x PARTS tall: (x0, x1, source band + 1, flags) for
 // the tile's span, (run x0, run x1, facing x 65535, vegetation share of the
-// run x 65535), and (row x0, row x1, tile ramp depth x 65535, blow-out x
+// run x 65535), and (row x0, row x1, the row's offset into the sort order x 65535, blow-out x
 // 65535) for the whole row the tile is part of. The first tile that holds a pixel draws it,
 // so glints and end blocks are written first.
 export const PARTS = 16;
@@ -537,6 +537,19 @@ export const F_BLOWN = 4; // a row's end block: its run's tail, gone over to whi
 const SLIDE = 0.3;
 // A run must be this much grass to be lifted.
 const VEG_MIN = 0.5;
+// A row's span is a verge band's longest run, at least this share of the
+// longest of them.
+const LONG = 0.5;
+// Each row's offset into the sort order, 0..1 (0.5 reads the stretch its
+// facing picks; 0 a darker stretch, 1 a brighter one). Mostly far from the
+// middle, by hash, so a dark row often lies against a bright one, with a
+// slow drift down the stack so the sheet has broad swells as well.
+export function rowShift(r, salt) {
+  const u = 2 * hash(r, salt + 7) - 1;
+  const v = Math.sign(u) * Math.abs(u) ** 0.6;
+  const drift = (vnoise(r / 9, salt * 0.13) - 0.5) * 0.7;
+  return clamp(0.5 + 0.5 * clamp(0.8 * v + drift, -1, 1), 0, 1);
+}
 
 // Which layers lift, and from where, for this mask. The stack's foot is the
 // verge: the mask over the root zone (its upper quartile, so a few strokes
@@ -583,7 +596,7 @@ export function liftPlan(mask8) {
 }
 
 // The mask read once per band texel, as bandMask, raised on every verge band
-// once any row lifts: a row is tiled from runs of several verge bands, so the
+// once any row lifts: a row reads the longest run of some verge band, so the
 // sort runs on all of them whether or not the brush has touched the verge
 // itself. (Sorting a band shows nothing in place unless the mask is there.)
 export function liftMask(mask8, plan, out = new Uint8Array(DW * DH)) {
@@ -648,19 +661,26 @@ export function geometry(mask8, base, link, plan, out = {}) {
     }
     return pool.get(d);
   };
-  // A run for a tile: one of a verge band's two longest (by hash), or the
-  // next verge band's when it has none.
+  // The long spans a row may read: every verge band's longest run, kept
+  // only if it is long (within reach of the longest of them), so a row is
+  // never stitched from stubs. A row takes one of them whole and resamples it
+  // to its own length.
   const verge = plan.verge;
-  const nv = verge.length;
-  const pick = (vi, salt) => {
-    for (let k = 0; k < nv; k++) {
-      const dd = verge[(vi + k) % nv];
-      const c = runsOf(dd);
-      if (!c.length) continue;
-      const [x0, x1] = c[c.length > 1 && hash(dd, salt) > 0.62 ? 1 : 0];
-      return { d: dd, x0, x1, vf: vegOf(dd, x0, x1) };
-    }
-    return null;
+  const long = [];
+  for (const dd of verge) {
+    const c = runsOf(dd);
+    if (c.length) long.push({ d: dd, x0: c[0][0], x1: c[0][1], vf: vegOf(dd, c[0][0], c[0][1]) });
+  }
+  long.sort((p, q) => q.x1 - q.x0 - (p.x1 - p.x0));
+  const top = long.length ? long[0].x1 - long[0].x0 : 0;
+  const spans = long.filter((p) => p.x1 - p.x0 >= Math.max(RUN_MIN, LONG * top));
+  // A span for row r, by hash; never the one the row below it read, so no
+  // two neighbouring rows carry the same grain.
+  const pick = (r, salt, prev) => {
+    if (!spans.length) return null;
+    let i = Math.floor(hash(r, salt) * spans.length);
+    if (spans.length > 1 && spans[i] === prev) i = (i + 1 + Math.floor(hash(r, salt + 1) * (spans.length - 1))) % spans.length;
+    return spans[i];
   };
   const lum = base.lum16;
   const peakOf = (run) => {
@@ -698,45 +718,22 @@ export function geometry(mask8, base, link, plan, out = {}) {
     }
   };
 
-  // Tiling: a row of the sheet starts at its inner edge xa and is laid end to
-  // end with sorted runs from verge bands further and further round the
-  // scrambled walk, each tile as long as its run makes it (a hashed share of
-  // the run's length). The row has no drawn outer edge: it ends where its
-  // last whole tile ends, whichever run end lies nearest the reach it was
-  // given, so row by row the ends are ragged by the runs' own lengths. Each
-  // tile is a hard-edged block reading a stretch of its run (depth w) riding
-  // on the row's one ramp, so the row still goes dark to bright, and its last
-  // tile reads on into the run's tail.
-  const TILE_MAX = 9;
-  const tile = (r, xa, reach, vi, salt, f, list) => {
-    const out = [];
-    // The row's end: its reach, set ragged by a little noise that drifts
-    // from row to row, so the ends step like the ends of sorted runs rather
-    // than dithering, and stay clear of the hollow.
+  // A row of the sheet is one span: a single long verge run, read from its
+  // dark green head at the row's inner edge xa to its tail at the outer end
+  // and stretched to the row's whole length, so the row is one unbroken
+  // luminance ramp carrying the run's own sorted grain. The row has no drawn
+  // outer edge: it ends near the reach it was given, set ragged by noise that
+  // drifts from row to row. Each row reads its own stretch of the sort order
+  // (its offset, shift), so dark rows lie beside bright ones.
+  const prevRun = {};
+  const tile = (r, xa, reach, salt, f, list) => {
     const J = 34 + 46 * hash(r, salt + 3);
     const end = reach + ((vnoise(ROWS.y0[r] / 30, salt * 0.37) - 0.5) * 1.5 + (hash(r, salt + 5) - 0.5) * 0.7) * J;
-    let x = xa;
-    for (let k = 0; k < TILE_MAX && x < end - 6; k++) {
-      const run = pick((vi + k * 5) % nv, salt + k);
-      if (!run) break;
-      const len = run.x1 - run.x0;
-      let tl = clamp(len * (0.4 + 0.6 * hash(r * 13 + k, salt)), 48, 420);
-      if (x + tl > end) tl = end - x;
-      // No stub at the end: the tile before it runs on to the end instead.
-      if (tl < 28 && out.length) {
-        out[out.length - 1][1] = end;
-        x = end;
-        break;
-      }
-      out.push([x, x + tl, run]);
-      x += tl;
-    }
-    for (const [x0, x1, run] of out) {
-      const last = x1 === x;
-      const w = last ? 0.85 : clamp((0.55 * (x1 - x0)) / Math.max(1, run.x1 - run.x0), 0.14, 0.5);
-      list.push([r, x0, x1, F_LIFT, run, f, xa, x, w]);
-    }
-    return { tiles: out, xb: x };
+    const run = end - xa >= 24 ? pick(r, salt, prevRun[salt]) : null;
+    if (!run) return { tiles: [], xb: xa };
+    prevRun[salt] = run;
+    list.push([r, xa, end, F_LIFT, run, f, xa, end, rowShift(r, salt)]);
+    return { tiles: [[xa, end, run]], xb: end };
   };
   // A row's end block, from about x0 (a smooth line down the rows, so the
   // blocks stack into a column) to the row's end.
@@ -744,7 +741,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
     if (!tt.tiles.length) return;
     const [, , run] = tt.tiles[tt.tiles.length - 1];
     const a = Math.min(x0 + (hash(r, 71) - 0.5) * 40, tt.xb - 48);
-    ends.push([r, a, tt.xb, F_LIFT | F_BLOWN, run, f, xa, tt.xb, 0, blow]);
+    ends.push([r, a, tt.xb, F_LIFT | F_BLOWN, run, f, xa, tt.xb, 0.5, blow]);
   };
 
   // The tiles, collected first so glints and end blocks can be written
@@ -790,14 +787,14 @@ export function geometry(mask8, base, link, plan, out = {}) {
     if (hang) {
       const ft = clamp(0.95 - 0.8 * smooth(WELD, 1, lip.s) + (hash(r, 57) - 0.5) * 0.06, 0, 1);
       const ta = lip.xa + (hash(r, 59) - 0.5) * 30;
-      const tt = tile(r, ta, lip.xb, lip.src, 53, ft, face);
+      const tt = tile(r, ta, lip.xb, 53, ft, face);
       // Down the lip's shoulder the spine runs on, fading as it turns under.
       const bl = smooth(0.78, WELD + 0.05, lip.s);
       if (bl > 0.05) endBlock(r, tt, lip.xb - (thick ? 210 : 150) * (1 - 0.4 * smooth(WELD, 0.7, lip.s)), ft, ta, bl);
       if (ft > 0.6) tails.push({ r, x1: tt.xb, run: tt.tiles.length ? tt.tiles[tt.tiles.length - 1][2] : null, f: ft, y: ROWS.y0[r], xa: ta, xb: tt.xb });
     }
     if (!L.on || reach - xa < 24) continue;
-    const tt = tile(r, xa, reach, L.src, 41, f, face);
+    const tt = tile(r, xa, reach, 41, f, face);
     if (!tt.tiles.length) continue;
     const { xb } = tt;
     const [lx0, , run] = tt.tiles[tt.tiles.length - 1];
@@ -812,7 +809,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
       const blow = t > 0.5 ? smooth(0.45, 0.9, f) : 0;
       if (blow > 0.04) {
         const bl = clamp((xb - lx0) * (0.12 + 0.22 * hash(r, 71) * blow), 14, 120);
-        ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0, blow]);
+        ends.push([r, xb - bl, xb, F_LIFT | F_BLOWN, run, f, xa, xb, 0.5, blow]);
       }
     }
     if (f > 0.6) tails.push({ r, x1: xb, run, f, y: ROWS.y0[r], xa, xb });
@@ -831,7 +828,7 @@ export function geometry(mask8, base, link, plan, out = {}) {
     const gap = 4 + Math.round(hash(g.r, 63) * 10);
     const w = 12 + Math.round(hash(g.r, 65) * 30);
     glint.push({ x: g.x1, y: g.y });
-    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0, 1);
+    put(g.r, g.x1 + gap, g.x1 + gap + w, F_LIFT | F_GLINT, g.run, 1, g.xa, g.xb, 0.5, 1);
   }
   for (const p of ends) put(...p);
   for (const p of face) put(...p);
