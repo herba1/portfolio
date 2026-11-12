@@ -1,6 +1,7 @@
 import { createStage, clamp } from "../_kit/stage";
 import { createFilm, FILM_PRESETS } from "../_kit/film";
 import { createModal } from "./modal";
+import { orientation, strokes as layStrokes, P } from "./engrave";
 
 // Poke: a still frame of a tree against a summer sky that you can pull.
 //
@@ -24,12 +25,15 @@ import { createModal } from "./modal";
 // rigidly, so leaves translate instead of smearing and a branch that swings
 // away uncovers sky.
 //
-// The modes are also the image. Over the photograph, a halftone of comets
-// draws the displacement field itself: each one's dot is where that bit of
-// tree is now, and its hairline trail runs back to where it sat in the still
-// frame. Each comet is tinted by where that point is in its swing relative
-// to the pull (with it, leading, against, lagging), so even a frozen frame
-// shows the measured vibration structure of the real tree. The frame is
+// The modes are also the image. Inside the matte the photograph is not drawn:
+// the crown is a line engraving on a cobalt-shadow ground, its lines cut
+// along the contours of the leaves' light (engrave.js) and each as wide as
+// the light under it. Every point of a line is carried by the modal field,
+// so a pull bends the lines and draws them out along the way the tree moves,
+// and each is tinted by where that point is in its swing relative to the
+// pull (with it, leading, against, lagging), on a continuous hue wheel whose
+// saturation rises with the amplitude. So even a frozen frame shows the
+// measured vibration structure of the real tree. The frame is
 // developed with the shared film kit (summer).
 //
 // Query: ?poke=x,y,amp[,deg] holds a pull at print uv (x, y) by amp (a
@@ -49,9 +53,12 @@ const TILT = 2; // modal mass tilt toward the slow, crown-wide modes (see modal.
 const BREEZE = 0.45; // idle forcing, in units of each mode's static response
 const CELL = 34; // plate px: spacing of the rigid patches the tree is cut into
 const PATCH_BLUR = 80; // plate px: radius each patch's motion is averaged over
-const STEP = 14; // target px at DPR 2: spacing of the strokes
-const INK = 0.72;
-const STROKE_GAIN = 0.4; // stroke length per unit displacement, before the cap // how far the photograph steps back under the strokes
+const LINE = 6.5; // target px at DPR 2: separation of the engraving's lines
+const WIDTH = 0.42; // widest stroke half-width, as a share of the separation
+const TRAIL = 0.6; // share of the displacement a stroke's trailing end lags by
+const TRAIL_CAP = 5; // longest lag, in line separations
+const LUM = [0.04, 0.5]; // leaf light (sRGB luma) that starts and fills a stroke
+const GROUND = [0.03, 0.055, 0.12]; // cobalt shadow: the crown's ground
 const REVEAL = 1.8;
 const SHUTTER = 1 / 30; // s, for motion blur
 
@@ -80,7 +87,7 @@ uniform vec2 uQ[${K}];            // modal coordinates times each layer's scale
 uniform vec4 uView;               // print window in plate uv
 uniform vec2 uPlate;
 uniform float uExpo;
-uniform float uInk;               // how far the photograph steps back under the strokes
+uniform vec3 uGround;             // the crown's ground
 
 vec2 field(vec2 uv) {
   vec2 d = vec2(0.0);
@@ -153,131 +160,188 @@ void main() {
     vec4 f = textureGrad(uTree, (s0 / uPlate), gx, gy);
     tree = tree * cv + vec4(f.rgb * f.a, f.a) * (1.0 - cv);
   }
-  vec3 tc = tree.a > 1e-4 ? tree.rgb / tree.a : vec3(0.0);
-  // the photograph steps back into a ground for the strokes: darker, less
-  // saturated, the full ink kept for the strokes drawn over it
-  float l = dot(tc, vec3(0.2126, 0.7152, 0.0722));
-  vec3 ground = mix(tc, vec3(l) * vec3(0.78, 0.92, 0.86), 0.45) * 0.5;
-  tc = mix(tc, ground, uInk);
+  // Inside the matte the photograph is not drawn: the crown is a ground of
+  // cobalt shadow for the engraving's strokes, its edge kept firm so the
+  // silhouette reads crisp at any scale.
+  float a = smoothstep(0.08, 0.7, tree.a);
   vec3 sky = texture(uSky, uv).rgb;
-  vec3 col = mix(sky, tc, tree.a);
+  vec3 col = mix(sky, uGround, a);
   outColor = vec4(col * uExpo, 1.0);
 }`;
 
-// The mode-visualising pass. A halftone laid on the photograph at rest: one
-// comet per cell, its dot where that bit of tree is now and a hairline trail
-// back to where it sat in the still frame, so the strokes are the
-// displacement field itself (at a fraction of true scale, eased into a cap).
-// Its tint is the phase of that point's swing along the hand's pull: the
-// analytic signal sum_i phi_i (q_i - i v_i / omega_i), whose real part is the
-// displacement. Warm white swings with the hand, violet against it, and the
-// vermilion and cyan between are the parts that lead and lag it. At rest the
-// comets shrink to dots, sized by the leaves' own light.
-const strokeVert = (K) => `#version 300 es
+// The engraving. Inside the matte the photograph is not drawn at all: the
+// crown is only these strokes, cut along the contours of the leaves' light
+// (engrave.js) on a cobalt-shadow ground. Each stroke is a ribbon through P
+// spine points whose width at each point is the leaves' light there, tapered
+// at its ends, so at rest the tree reads as a line engraving. Every spine
+// point is carried by the modal field at its own rest position, so a pull
+// bends the strokes where the crown shears, and each stroke is drawn out
+// along its displacement: its leading end goes the whole way, its trailing
+// end lags by a share of it (eased into a cap), so a stroke lengthens and
+// turns into the direction the tree is moving. Its tint is the phase of the
+// analytic signal sum_i phi_i (q_i - i v_i / omega_i) read in the frame of
+// the pull, on a continuous hue wheel: gold swings with the hand, violet
+// against it, teal leads it and rose lags it (or each swings off to one side of
+// it), with the saturation set by how hard the point is swinging. At rest the
+// ink is a warm paper white.
+const strokeVert = (K, P, SPR, fieldTex) => `#version 300 es
 precision highp float;
 precision highp sampler2DArray;
-in vec2 aPos;
-uniform sampler2DArray uModes;
+${fieldTex ? "#define FIELD_TEX" : ""}
+#define P ${P}
+#define SPR ${SPR}
+uniform highp sampler2D uSpine;  // per stroke: P spine points, plate px
 uniform sampler2D uTree;
+#ifdef FIELD_TEX
+uniform highp sampler2D uField;  // zr, zi (plate px), evaluated this frame
+#else
+uniform sampler2DArray uModes;
 uniform vec2 uQ[${K}];
-uniform vec2 uW[${K}];  // velocities over omega, times each layer's scale
+uniform vec2 uW[${K}];
+#endif
 uniform vec4 uView;
 uniform vec2 uPlate;
 uniform vec2 uRes;      // target px
-uniform float uStep;    // stroke spacing, target px
-uniform int uCols;
 uniform vec2 uRef;      // reference direction for the phase
-uniform float uRadius;  // largest dot radius, target px
+uniform float uHalf;    // widest half-width, target px
 uniform float uLod;
-uniform float uGain;    // stroke length per unit displacement
-uniform float uCap;     // longest stroke, target px
-out vec2 vLocal;
-out float vLen;
-out float vR;
-out vec4 vCol;
-uniform float uHair;    // trail half-width, target px
+uniform float uTrail;   // share of the displacement the trailing end lags by
+uniform float uCap;     // longest lag, plate px
+uniform vec2 uLum;      // luminance that starts and fills a stroke
+out float vAcross;
+out float vHalf;
+out vec3 vCol;
 
-vec3 phaseInk(float th) {
-  // in phase with the hand: warm white; leading: vermilion; anti-phase:
-  // violet; lagging: cyan
-  vec3 c0 = vec3(1.0, 0.93, 0.74);
-  vec3 c1 = vec3(1.0, 0.36, 0.2);
-  vec3 c2 = vec3(0.7, 0.48, 1.0);
-  vec3 c3 = vec3(0.3, 0.92, 1.0);
-  float t = mod(th / 6.2831853 + 1.0, 1.0) * 4.0;
-  float f = smoothstep(0.0, 1.0, fract(t));
-  int k = int(floor(t));
-  if (k == 0) return mix(c0, c1, f);
-  if (k == 1) return mix(c1, c2, f);
-  if (k == 2) return mix(c2, c3, f);
-  return mix(c3, c0, f);
-}
-
-void main() {
-  int id = gl_InstanceID;
-  int iy = id / uCols;
-  int ix = id - iy * uCols;
-  vec2 cell = (vec2(float(ix) + ((iy & 1) == 1 ? 0.0 : 0.5), float(iy) * 0.866 + 0.5)) * uStep;
-  vec2 pv = cell / uRes;
-  vec2 uv = uView.xy + pv * uView.zw;
-  vec4 t = textureLod(uTree, uv, uLod);
+vec4 fieldAt(vec2 p) {
+#ifdef FIELD_TEX
+  return texture(uField, p / uPlate);
+#else
+  vec2 uv = p / uPlate;
   vec2 zr = vec2(0.0);
   vec2 zi = vec2(0.0);
   for (int i = 0; i < ${K}; i++) {
     vec4 m = texture(uModes, vec3(uv, float(i))) * 2.0 - 1.0;
-    // the displacement, and the quarter-cycle on from it (each oscillator's
-    // velocity over its own omega): together the analytic signal of the
-    // point's motion, whose angle is where in its swing the point is
     zr += m.xy * uQ[i].x - m.zw * uQ[i].y;
     zi -= m.xy * uW[i].x - m.zw * uW[i].y;
   }
-  float k = uRes.x / (uView.z * uPlate.x);  // plate px -> target px
-  vec2 D = zr * k;
-  // length: a third of true scale, eased into at most uCap so a hard pull
-  // still reads as a field of separate strokes
-  float len0 = length(D) * uGain;
-  float len = uCap * (1.0 - exp(-len0 / uCap));
-  float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722));
-  float cov = smoothstep(0.35, 0.8, t.a);
-  float r = uRadius * clamp(sqrt(lum * 2.2), 0.3, 1.0) * cov;
-  if (r < 0.15) {
-    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);
-    return;
-  }
-  vec2 dir = len0 > 1e-3 ? normalize(D) : vec2(1.0, 0.0);
-  vec2 nrm = vec2(-dir.y, dir.x);
-  float e = max(r, uHair) + 1.0;
-  vec2 a = vec2(aPos.x > 0.0 ? len + e : -e, aPos.y * e);
-  vec2 px = cell + dir * a.x + nrm * a.y;
+  return vec4(zr, zi);
+#endif
+}
+
+vec2 spine(int id, int j) {
+  int row = id / SPR;
+  vec4 t = texelFetch(uSpine, ivec2((id - row * SPR) * ${P / 2} + (j >> 1), row), 0);
+  return (j & 1) == 0 ? t.xy : t.zw;
+}
+
+vec3 oklch(float L, float C, float h) {
+  float a = C * cos(h);
+  float b = C * sin(h);
+  float l = L + 0.3963377774 * a + 0.2158037573 * b;
+  float m = L - 0.1055613458 * a - 0.0638541728 * b;
+  float s = L - 0.0894841775 * a - 1.2914855480 * b;
+  l = l * l * l;
+  m = m * m * m;
+  s = s * s * s;
+  vec3 rgb = vec3(
+    4.0767416621 * l - 3.3077115913 * m + 0.2309699292 * s,
+    -1.2684380046 * l + 2.6097574011 * m - 0.3413193965 * s,
+    -0.0041960863 * l - 0.7034186147 * m + 1.7076147010 * s);
+  return pow(clamp(rgb, 0.0, 1.0), vec3(1.0 / 2.2));
+}
+
+float lam;    // the trailing end's lag, as a share of the displacement
+float along;  // -1..1: which end leads, eased through the perpendicular
+
+vec2 placed(int id, int j, out vec4 F, out vec2 b) {
+  b = spine(id, j);
+  F = fieldAt(b);
+  float t = 0.5 + 0.5 * along * (float(j) / float(P - 1) * 2.0 - 1.0);
+  return b + F.xy * (1.0 - lam * (1.0 - t));
+}
+
+vec2 toTarget(vec2 p) {
+  return (p / uPlate - uView.xy) / uView.zw * uRes;
+}
+
+void main() {
+  int id = gl_InstanceID;
+  int j = gl_VertexID >> 1;
+  float side = (gl_VertexID & 1) == 0 ? -1.0 : 1.0;
+  vec2 b0 = spine(id, 0);
+  vec2 b1 = spine(id, P - 1);
+  vec4 Fm = fieldAt(0.5 * (spine(id, P / 2 - 1) + spine(id, P / 2)));
+  float dm = length(Fm.xy);
+  float tl = uCap * (1.0 - exp(-dm * uTrail / uCap));
+  lam = dm > 1e-3 ? tl / dm : 0.0;
+  along = dm > 1e-3 ? clamp(dot(normalize(b1 - b0), Fm.xy / dm) * 4.0, -1.0, 1.0) : 1.0;
+
+  vec4 F;
+  vec2 b;
+  vec4 Fx;
+  vec2 bx;
+  vec2 p = toTarget(placed(id, j, F, b));
+  vec2 pa = toTarget(placed(id, max(j - 1, 0), Fx, bx));
+  vec2 pb = toTarget(placed(id, min(j + 1, P - 1), Fx, bx));
+  vec2 tg = pb - pa;
+  tg = dot(tg, tg) > 1e-8 ? normalize(tg) : vec2(1.0, 0.0);
+  vec2 nrm = vec2(-tg.y, tg.x);
+
+  // width: the leaves' own light at this spine point's rest position
+  vec4 t = textureLod(uTree, b / uPlate, uLod);
+  float lum = dot(t.rgb, vec3(0.2126, 0.7152, 0.0722)) * smoothstep(0.25, 0.7, t.a);
+  float w = pow(clamp((lum - uLum.x) / (uLum.y - uLum.x), 0.0, 1.0), 0.6);
+  float tp = float(j) / float(P - 1);
+  float taper = pow(clamp(min(tp, 1.0 - tp) * 7.0, 0.0, 1.0), 0.6);
+  float hw = uHalf * w * taper;
+  float e = hw + 1.0;
+  vec2 px = p + nrm * side * e;
   gl_Position = vec4(px.x / uRes.x * 2.0 - 1.0, 1.0 - px.y / uRes.y * 2.0, 0.0, 1.0);
-  vLocal = a;
-  vLen = len;
-  vR = r;
-  float th = atan(dot(zi, uRef), dot(zr, uRef));
-  // how hard the point is swinging: the analytic amplitude, so a point
-  // passing fast through its rest pose is still lit by its phase
-  float live = smoothstep(2.0, 40.0, length(vec4(zr, zi)));
-  vec3 ink = mix(vec3(0.93, 0.95, 0.88), phaseInk(th), live);
-  vCol = vec4(ink, mix(0.55, 0.9, live));
+  vAcross = side * e;
+  vHalf = hw;
+
+  // tint: the phase in the frame of the pull
+  vec2 perp = vec2(-uRef.y, uRef.x);
+  vec2 zr = F.xy;
+  vec2 zi = F.zw;
+  float th = atan(dot(zi, uRef) + dot(zr, perp), dot(zr, uRef));
+  // saturation keeps climbing with the swing's amplitude, so how hard each
+  // part of the crown answers reads as a gradient, not a threshold
+  float sat = 1.0 - exp(-length(F) / 26.0);
+  vCol = oklch(mix(0.95, 0.82, sat), mix(0.02, 0.19, sat), 1.66 + th);
 }`;
 
 const STROKE_FRAG = `#version 300 es
 precision highp float;
-in vec2 vLocal;
-in float vLen;
-in float vR;
-in vec4 vCol;
+in float vAcross;
+in float vHalf;
+in vec3 vCol;
 out vec4 outColor;
-uniform float uHair;
 void main() {
-  // a comet: the halftone dot where the leaf is now, and a hairline trail
-  // back to where it sat in the still frame
-  float ax = max(0.0, max(-vLocal.x, vLocal.x - vLen));
-  float trail = length(vec2(ax, vLocal.y)) - uHair * smoothstep(0.0, 4.0, vLen);
-  float head = length(vLocal - vec2(vLen, 0.0)) - vR;
-  float dist = min(trail, head);
-  float a = clamp(0.5 - dist, 0.0, 1.0) * vCol.a;
-  outColor = vec4(vCol.rgb * a, a);
+  // an engraved line: hard-edged, its coverage antialiased across the width
+  float a = clamp(vHalf + 0.5 - abs(vAcross), 0.0, 1.0) * clamp(vHalf * 2.0, 0.0, 1.0);
+  outColor = vec4(vCol * a, a);
+}`;
+
+// the modal field (displacement and its quarter-cycle on), once per frame on
+// the mode grid, for the strokes to read
+const fieldFrag = (K) => `#version 300 es
+precision highp float;
+precision highp sampler2DArray;
+in vec2 vUv;
+out vec4 outColor;
+uniform sampler2DArray uModes;
+uniform vec2 uQ[${K}];
+uniform vec2 uW[${K}];
+void main() {
+  vec2 zr = vec2(0.0);
+  vec2 zi = vec2(0.0);
+  for (int i = 0; i < ${K}; i++) {
+    vec4 m = texture(uModes, vec3(vUv, float(i))) * 2.0 - 1.0;
+    zr += m.xy * uQ[i].x - m.zw * uQ[i].y;
+    zi -= m.xy * uW[i].x - m.zw * uW[i].y;
+  }
+  outColor = vec4(zr, zi);
 }`;
 
 const BLIT = `#version 300 es
@@ -422,6 +486,8 @@ export async function createPoke(host, { embedded = false } = {}) {
   const [gw, gh] = meta.grid;
   const [PW, PH] = meta.plate;
   const tex = { tree: imageTexture(gl, treeBmp), sky: imageTexture(gl, skyBmp) };
+  // the contour field of the leaves' light, which the engraving's lines follow
+  const orient = orientation(treeBmp, PW, PH);
   const ma = modeArray(gl, modesBmp, gw, gh, K);
   tex.modes = ma.tex;
   treeBmp.close?.();
@@ -532,14 +598,47 @@ export async function createPoke(host, { embedded = false } = {}) {
   gl.enableVertexAttribArray(0);
   gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
   const scene = program(gl, VERT, sceneFrag(K));
-  const strokes = program(gl, strokeVert(K), STROKE_FRAG);
-  const corner = gl.createBuffer();
-  gl.bindBuffer(gl.ARRAY_BUFFER, corner);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-  const strokeVao = gl.createVertexArray();
-  gl.bindVertexArray(strokeVao);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  // the modal field, evaluated once a frame on the mode grid, if the GPU can
+  // render to half floats; otherwise the strokes evaluate it themselves
+  let fieldT = null;
+  if (gl.getExtension("EXT_color_buffer_float")) {
+    const t = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA16F, gw, gh, 0, gl.RGBA, gl.HALF_FLOAT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    const fbo = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, t, 0);
+    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    if (ok) fieldT = { tex: t, fbo, w: gw, h: gh };
+    else {
+      gl.deleteTexture(t);
+      gl.deleteFramebuffer(fbo);
+    }
+  }
+  const fieldP = fieldT ? program(gl, VERT, fieldFrag(K)) : null;
+  const SPR = 170; // strokes per row of the spine texture
+  const strokes = program(gl, strokeVert(K, P, SPR, !!fieldT), STROKE_FRAG);
+  const strokeVao = gl.createVertexArray(); // no attributes: all from gl_VertexID
+  tex.spine = gl.createTexture();
+  let lines = { count: 0, sep: 0 };
+  // lay the lines out for this size: their separation is fixed on the print
+  const layLines = (sep) => {
+    if (lines.sep && Math.abs(sep / lines.sep - 1) < 0.08) return;
+    const { data, count } = layStrokes(orient, sep, mulberry(23), { lumLo: LUM[0] });
+    const rows = Math.max(1, Math.ceil(count / SPR));
+    const texels = new Float32Array(SPR * (P / 2) * rows * 4);
+    texels.set(data);
+    gl.bindTexture(gl.TEXTURE_2D, tex.spine);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, SPR * (P / 2), rows, 0, gl.RGBA, gl.FLOAT, texels);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    lines = { count, sep };
+  };
   const blit = program(gl, VERT, BLIT);
   const film = createFilm(gl, { width: 2, height: 2 });
 
@@ -588,6 +687,7 @@ export async function createPoke(host, { embedded = false } = {}) {
     sceneT = target(gl, L.rw, L.rh);
     filmT = target(gl, L.rw, L.rh);
     film.resize(L.rw, L.rh);
+    layLines(LINE * (stage.dpr / 2) * (L.rw / Math.max(1, L.pw)) / (L.rw / (L.view[2] * PW)));
     dirty = true;
   };
   stage.onResize((w, h, dpr) => layout(w, h, dpr));
@@ -705,7 +805,7 @@ export async function createPoke(host, { embedded = false } = {}) {
     gl.uniform1i(u.uOwner, 5);
     gl.uniform2i(u.uSites, SX, SY);
     gl.uniform1f(u.uCell, CELL);
-    gl.uniform1f(u.uInk, INK);
+    gl.uniform3fv(u.uGround, GROUND);
     for (let i = 0; i < K; i++) {
       uQ[i * 2] = modal.q[i * 2] * modal.scale[i];
       uQ[i * 2 + 1] = modal.q[i * 2 + 1] * modal.scale[i];
@@ -718,49 +818,68 @@ export async function createPoke(host, { embedded = false } = {}) {
     gl.viewport(0, 0, L.rw, L.rh);
     gl.drawArrays(gl.TRIANGLES, 0, 3);
 
-    // the strokes, over the photograph, before the film
-    const stepPx = STEP * (L.rw / Math.max(1, L.pw)) * (stage.dpr / 2);
-    const cols = Math.ceil(L.rw / stepPx) + 1;
-    const rows = Math.ceil(L.rh / (stepPx * 0.866)) + 1;
+    // the engraving, over its ground, before the film
+    for (let i = 0; i < K; i++) {
+      uW[i * 2] = (modal.v[i * 2] * modal.scale[i]) / modal.omega[i];
+      uW[i * 2 + 1] = (modal.v[i * 2 + 1] * modal.scale[i]) / modal.omega[i];
+    }
+    if (fieldT) {
+      gl.useProgram(fieldP.p);
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
+      gl.uniform1i(fieldP.u.uModes, 2);
+      gl.uniform2fv(fieldP.u.uQ, uQ);
+      gl.uniform2fv(fieldP.u.uW, uW);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, fieldT.fbo);
+      gl.viewport(0, 0, fieldT.w, fieldT.h);
+      gl.drawArrays(gl.TRIANGLES, 0, 3);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, sceneT.fbo);
+      gl.viewport(0, 0, L.rw, L.rh);
+    }
+    const sep = LINE * (stage.dpr / 2) * (L.rw / Math.max(1, L.pw)); // target px
+    const k = L.rw / (L.view[2] * PW); // plate px -> target px
     const su = strokes.u;
     gl.useProgram(strokes.p);
     gl.bindVertexArray(strokeVao);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, tex.tree);
     gl.uniform1i(su.uTree, 0);
-    gl.activeTexture(gl.TEXTURE2);
-    gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
-    gl.uniform1i(su.uModes, 2);
-    for (let i = 0; i < K; i++) {
-      uW[i * 2] = (modal.v[i * 2] * modal.scale[i]) / modal.omega[i];
-      uW[i * 2 + 1] = (modal.v[i * 2 + 1] * modal.scale[i]) / modal.omega[i];
+    gl.activeTexture(gl.TEXTURE6);
+    gl.bindTexture(gl.TEXTURE_2D, tex.spine);
+    gl.uniform1i(su.uSpine, 6);
+    if (fieldT) {
+      gl.activeTexture(gl.TEXTURE7);
+      gl.bindTexture(gl.TEXTURE_2D, fieldT.tex);
+      gl.uniform1i(su.uField, 7);
+    } else {
+      gl.activeTexture(gl.TEXTURE2);
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, tex.modes);
+      gl.uniform1i(su.uModes, 2);
+      gl.uniform2fv(su.uQ, uQ);
+      gl.uniform2fv(su.uW, uW);
     }
-    gl.uniform2fv(su.uQ, uQ);
-    gl.uniform2fv(su.uW, uW);
     gl.uniform4f(su.uView, ...L.view);
     gl.uniform2f(su.uPlate, PW, PH);
     gl.uniform2f(su.uRes, L.rw, L.rh);
-    gl.uniform1f(su.uStep, stepPx);
-    gl.uniform1i(su.uCols, cols);
     gl.uniform2f(su.uRef, ref[0], ref[1]);
-    gl.uniform1f(su.uRadius, stepPx * 0.3);
-    gl.uniform1f(su.uHair, Math.max(0.6, stepPx * 0.06));
-    gl.uniform1f(su.uGain, STROKE_GAIN);
-    gl.uniform1f(su.uCap, stepPx * 2.6);
-    gl.uniform1f(su.uLod, Math.log2(Math.max(1, (stepPx * L.view[2] * PW) / L.rw)));
+    gl.uniform1f(su.uHalf, sep * WIDTH);
+    gl.uniform1f(su.uLod, Math.log2(Math.max(1, (sep / k) * 0.35)));
+    gl.uniform1f(su.uTrail, TRAIL);
+    gl.uniform1f(su.uCap, (sep / k) * TRAIL_CAP);
+    gl.uniform2f(su.uLum, LUM[0], LUM[1]);
     gl.enable(gl.BLEND);
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, 4, cols * rows);
+    gl.drawArraysInstanced(gl.TRIANGLE_STRIP, 0, P * 2, lines.count);
     gl.disable(gl.BLEND);
 
     film.render(
       sceneT.tex,
       {
         ...FILM_PRESETS.summer,
-        halation: 0.3,
+        halation: 0.12,
         halationThreshold: 0.85,
-        bloom: 0.22,
-        softness: 0.5,
+        bloom: 0.1,
+        softness: 0.12,
         contrast: 1.14,
         whitePoint: 1.25,
         toe: 0.06,
@@ -859,8 +978,11 @@ export async function createPoke(host, { embedded = false } = {}) {
       gl.deleteProgram(scene.p);
       gl.deleteProgram(blit.p);
       gl.deleteProgram(strokes.p);
+      if (fieldT) {
+        gl.deleteProgram(fieldP.p);
+        freeTarget(gl, fieldT);
+      }
       gl.deleteBuffer(quad);
-      gl.deleteBuffer(corner);
       gl.deleteVertexArray(vao);
       gl.deleteVertexArray(strokeVao);
       stage.destroy();
